@@ -9,6 +9,9 @@
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\VulkanRenderer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -21,5 +24,8 @@
     <ClInclude Include="Source\Library\EnTT\entt.hpp" />
     <ClInclude Include="Source\Engine\Components\Transform.h" />
     <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\VulkanRenderer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
   </ItemGroup>
 </Project>

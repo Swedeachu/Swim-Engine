@@ -1,6 +1,6 @@
 #pragma once
 
-// OS | TODO: Linux support since we are using Vulkan
+// OS | TODO: Linux support since we are using Vulkan (this makes GLFW very, very tempting)
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 // undefine min and max from windows.h because that collides with std::min std::max
@@ -19,13 +19,18 @@
 // Swim Engine
 #include "Engine\Machine.h"
 #include "Engine\Systems\Scene\Scene.h"
-// #include "Engine\Systems\Scene\SceneBase.h"
 #include "Engine\Systems\Scene\SceneSystem.h"
 #include "Engine\Systems\IO\InputManager.h"
+#include "Engine\Systems\Renderer\CameraSystem.h"
 
 // glm math
 #include "Library/glm/glm.hpp"
 
 // entt
 #include "Library/EnTT/entt.hpp"
+
+// vulkan
+#define K_USE_PLATFORM_WIN32_KHR
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_win32.h>
 

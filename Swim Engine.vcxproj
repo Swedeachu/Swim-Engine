@@ -105,13 +105,15 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -123,7 +125,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
     </ClCompile>
@@ -132,11 +134,16 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
@@ -152,6 +159,9 @@
     <ClInclude Include="Source\Engine\SwimEngine.h" />
     <ClInclude Include="Source\Engine\Components\Transform.h" />
     <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
     <ClInclude Include="Source\Engine\Systems\SystemManager.h" />

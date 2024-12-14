@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "SwimEngine.h"
 #include <chrono>
+#include "Engine/Systems/Renderer/VulkanRenderer.h"
 
 namespace Engine
 {
@@ -81,6 +82,10 @@ namespace Engine
 			return false;
 		}
 
+		// Show and update the window
+		ShowWindow(engineWindowHandle, SW_SHOW);
+		UpdateWindow(engineWindowHandle);
+
 		return true;
 	}
 
@@ -111,11 +116,10 @@ namespace Engine
 		*/
 
 		// we must have input system and renderer set up to accept messages
-		if (this == nullptr || inputManager.get() == nullptr /*|| renderer == nullptr*/)
+		if (this == nullptr || inputManager.get() == nullptr || renderer.get() == nullptr)
 		{
 			return DefWindowProc(hwnd, uMsg, wParam, lParam);;
 		}
-
 
 		switch (uMsg)
 		{
@@ -166,6 +170,8 @@ namespace Engine
 		// Add systems to the SystemManager
 		inputManager = systemManager->AddSystem<InputManager>("InputManager");
 		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
+		renderer = systemManager->AddSystem<VulkanRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
 
 		// Call Awake and Init on all systems
 		if (systemManager->Awake() != 0)
@@ -183,10 +189,6 @@ namespace Engine
 
 	int SwimEngine::Run()
 	{
-		// Show and update the window
-		ShowWindow(engineWindowHandle, SW_SHOW);
-		UpdateWindow(engineWindowHandle);
-
 		return HeartBeat();
 	}
 

@@ -5,6 +5,8 @@
 namespace Engine
 {
 
+	class VulkanRenderer; // forward decalre
+
 	// std::enable_shared_from_this<SwimEngine> so we can get a pointer to ourselves
 	class SwimEngine : public Machine, public std::enable_shared_from_this<SwimEngine>
 	{
@@ -43,6 +45,7 @@ namespace Engine
 
 		std::shared_ptr<InputManager> GetInputManager() const { return inputManager; }
 		std::shared_ptr<SceneSystem> GetSceneSystem() const { return sceneSystem; }
+		std::shared_ptr<CameraSystem> GetCameraSystem() const { return cameraSystem; }
 
 	private:
 
@@ -82,6 +85,8 @@ namespace Engine
 		std::unique_ptr<SystemManager> systemManager;
 		std::shared_ptr<InputManager> inputManager;
 		std::shared_ptr<SceneSystem> sceneSystem;
+		std::shared_ptr<VulkanRenderer> renderer;
+		std::shared_ptr<CameraSystem> cameraSystem;
 
 	};
 
