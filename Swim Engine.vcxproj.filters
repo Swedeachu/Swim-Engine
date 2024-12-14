@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="Source\main.cpp" />
+    <ClCompile Include="Source\Engine\SwimEngine.cpp" />
+    <ClCompile Include="Source\Engine\Utility\PCH.cpp" />
+    <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
+    <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Engine\SwimEngine.h" />
+    <ClInclude Include="Source\Engine\Machine.h" />
+    <ClInclude Include="Source\Engine\Utility\PCH.h" />
+    <ClInclude Include="Source\Engine\Systems\SystemManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
+    <ClInclude Include="Source\Game\Scenes\SandBox.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SceneBase.h" />
+  </ItemGroup>
+</Project>
