@@ -155,6 +155,7 @@
     <ClInclude Include="Source\Engine\Systems\SystemManager.h" />
     <ClInclude Include="Source\Engine\Utility\PCH.h" />
     <ClInclude Include="Source\Game\Scenes\SandBox.h" />
+    <ClInclude Include="Source\Library\EnTT\entt.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -23,17 +23,20 @@ namespace Engine
 		}
 		factory.clear(); // do we want to clear?
 
+		int err = 0;
+
 		// Awake all registered scenes
 		for (auto& [name, scene] : scenes)
 		{
-			if (scene->Awake() != 0)
+			int terr = scene->Awake();
+			if (terr != 0)
 			{
 				std::cerr << "Scene '" << name << "' failed to Awake.\n";
-				return -1;
+				if (err == 0) err = terr;
 			}
 		}
 
-		return 0;
+		return err;
 	}
 
 	int SceneSystem::Init()
@@ -64,15 +67,19 @@ namespace Engine
 
 	int SceneSystem::Exit()
 	{
+		int err = 0;
+
 		for (auto& [name, scene] : scenes)
 		{
-			if (scene->Exit() != 0)
+			int terr = scene->Exit();
+			if (terr != 0)
 			{
 				std::cerr << "Scene '" << name << "' failed to Exit.\n";
-				return -1;
+				if (err == 0) err = terr;
 			}
 		}
-		return 0;
+
+		return err;
 	}
 
 	void SceneSystem::SetScene(const std::string& name, bool exitCurrent)

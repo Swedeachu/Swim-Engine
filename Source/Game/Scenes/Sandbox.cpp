@@ -7,6 +7,7 @@ namespace Game
 	int SandBox::Awake()
 	{
 		std::cout << name << " Awoke" << std::endl;
+	
 		return 0;
 	}
 

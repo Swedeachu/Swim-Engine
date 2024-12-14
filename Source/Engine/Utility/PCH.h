@@ -19,5 +19,12 @@
 // Swim Engine
 #include "Engine\Machine.h"
 #include "Engine\Systems\Scene\Scene.h"
-#include "Engine\Systems\Scene\SceneBase.h"
+// #include "Engine\Systems\Scene\SceneBase.h"
 #include "Engine\Systems\Scene\SceneSystem.h"
+
+// glm math
+#include "Library/glm/glm.hpp"
+
+// entt
+#include "Library/EnTT/entt.hpp"
+

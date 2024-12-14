@@ -18,5 +18,6 @@
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
     <ClInclude Include="Source\Game\Scenes\SandBox.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneBase.h" />
+    <ClInclude Include="Source\Library\EnTT\entt.hpp" />
   </ItemGroup>
 </Project>
