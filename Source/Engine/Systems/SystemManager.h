@@ -20,15 +20,18 @@ namespace Engine
 
 		int Exit() override;
 
+		// Creates the system and stores it in the map and then returns it
 		template <typename T, typename... Args>
-		void AddSystem(const std::string& name, Args&&... args)
+		std::shared_ptr<T> AddSystem(const std::string& name, Args&&... args)
 		{
-			systems[name] = std::make_unique<T>(std::forward<Args>(args)...);
+			auto system = std::make_shared<T>(std::forward<Args>(args)...);
+			systems[name] = system; 
+			return system;          
 		}
 
 	private:
 
-		std::map<std::string, std::unique_ptr<Machine>> systems;
+		std::map<std::string, std::shared_ptr<Machine>> systems;
 
 		int SmartIterate(std::function<int(Machine*)> method);
 

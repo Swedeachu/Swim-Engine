@@ -5,7 +5,7 @@
 namespace Engine
 {
 
-	class SceneSystem : public Machine
+	class SceneSystem : public Machine, public std::enable_shared_from_this<SceneSystem>
 	{
 
 	public:
@@ -29,7 +29,7 @@ namespace Engine
 		}
 
 		// Sets the active scene by name, optionally exiting the current one
-		void SetScene(const std::string& name, bool exitCurrent = true);
+		void SetScene(const std::string& name, bool exitCurrent = true, bool initNew = true, bool awakeNew = false);
 
 	private:
 

@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "SceneSystem.h"
+#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
@@ -19,9 +20,11 @@ namespace Engine
 			if (scene)
 			{
 				scenes[scene->GetName()] = scene;
+				scene->SetSceneSystem(shared_from_this());
+				scene->SetInputManager(SwimEngine::GetInstance()->GetInputManager());
 			}
 		}
-		factory.clear(); // do we want to clear?
+		factory.clear(); // then do we want to clear?
 
 		int err = 0;
 
@@ -82,7 +85,7 @@ namespace Engine
 		return err;
 	}
 
-	void SceneSystem::SetScene(const std::string& name, bool exitCurrent)
+	void SceneSystem::SetScene(const std::string& name, bool exitCurrent, bool initNew, bool awakeNew)
 	{
 		// Check if the scene exists in the map
 		auto it = scenes.find(name);
@@ -104,13 +107,20 @@ namespace Engine
 		activeScene = it->second;
 		if (activeScene)
 		{
-			if (activeScene->Awake() != 0)
+			if (awakeNew)
 			{
-				std::cerr << "Failed to Awake the new scene '" << name << "'.\n";
+				if (activeScene->Awake() != 0)
+				{
+					std::cerr << "Failed to Awake the new scene '" << name << "'.\n";
+				}
 			}
-			if (activeScene->Init() != 0)
+
+			if (initNew)
 			{
-				std::cerr << "Failed to Init the new scene '" << name << "'.\n";
+				if (activeScene->Init() != 0)
+				{
+					std::cerr << "Failed to Init the new scene '" << name << "'.\n";
+				}
 			}
 		}
 	}

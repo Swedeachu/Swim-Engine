@@ -39,6 +39,11 @@ namespace Engine
 
 		static std::shared_ptr<SwimEngine> GetInstance();
 
+		HWND GetWindowHandle() const { return engineWindowHandle; }
+
+		std::shared_ptr<InputManager> GetInputManager() const { return inputManager; }
+		std::shared_ptr<SceneSystem> GetSceneSystem() const { return sceneSystem; }
+
 	private:
 
 		// calls Update when it is time
@@ -75,6 +80,8 @@ namespace Engine
 		void UpdateWindowSize();
 
 		std::unique_ptr<SystemManager> systemManager;
+		std::shared_ptr<InputManager> inputManager;
+		std::shared_ptr<SceneSystem> sceneSystem;
 
 	};
 

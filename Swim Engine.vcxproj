@@ -136,6 +136,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
+    <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
@@ -149,8 +150,9 @@
   <ItemGroup>
     <ClInclude Include="Source\Engine\Machine.h" />
     <ClInclude Include="Source\Engine\SwimEngine.h" />
+    <ClInclude Include="Source\Engine\Components\Transform.h" />
+    <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
-    <ClInclude Include="Source\Engine\Systems\Scene\SceneBase.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
     <ClInclude Include="Source\Engine\Systems\SystemManager.h" />
     <ClInclude Include="Source\Engine\Utility\PCH.h" />

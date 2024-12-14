@@ -8,6 +8,7 @@
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+    <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -17,7 +18,8 @@
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
     <ClInclude Include="Source\Game\Scenes\SandBox.h" />
-    <ClInclude Include="Source\Engine\Systems\Scene\SceneBase.h" />
     <ClInclude Include="Source\Library\EnTT\entt.hpp" />
+    <ClInclude Include="Source\Engine\Components\Transform.h" />
+    <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
   </ItemGroup>
 </Project>

@@ -108,13 +108,14 @@ namespace Engine
 		{
 			return true;
 		}
+		*/
 
 		// we must have input system and renderer set up to accept messages
-		if (this == nullptr || inputSystem == nullptr || renderer == nullptr)
+		if (this == nullptr || inputManager.get() == nullptr /*|| renderer == nullptr*/)
 		{
 			return DefWindowProc(hwnd, uMsg, wParam, lParam);;
 		}
-		*/
+
 
 		switch (uMsg)
 		{
@@ -123,11 +124,12 @@ namespace Engine
 				// running = false; // make sure to tell that we are not running anymore
 				PostQuitMessage(0);
 				return 0;
+
 				// move handling ----------------------------------------------------------------
 			case WM_MOVE:
 				InvalidateRect(engineWindowHandle, NULL, FALSE); // force a redraw
 				break;
-				break;
+
 				// size handling ----------------------------------------------------------------
 			case WM_SIZE:
 				// reset renderer window size on size changing
@@ -141,6 +143,7 @@ namespace Engine
 				}
 				UpdateWindowSize();
 				break;
+
 			case WM_EXITSIZEMOVE:
 				if (resizing)
 				{
@@ -149,58 +152,10 @@ namespace Engine
 				}
 				resizing = false;
 				break;
-				// Input handling from here ------------------------------------------------------
-				/*
-			case WM_KEYDOWN:
-				inputSystem->keySetState((unsigned char)wParam, true);
-				if (wParam == VK_SHIFT || wParam == VK_LSHIFT || wParam == VK_RSHIFT ||
-					wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
-				{
-					return 0; // do not pass these specific key releases to the default window handler
-				}
-				break;
-			case WM_KEYUP:
-				inputSystem->keySetState((unsigned char)wParam, false);
-				if (wParam == VK_SHIFT || wParam == VK_LSHIFT || wParam == VK_RSHIFT ||
-					wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
-				{
-					return 0; // do not pass these specific key releases to the default window handler
-				}
-				break;
-			case WM_SYSKEYDOWN:
-				if (wParam == VK_F10)
-				{
-					inputSystem->keySetState(VK_F10, true);
-				}
-				break;
-			case WM_SYSKEYUP:
-				if (wParam == VK_F10)
-				{
-					inputSystem->keySetState(VK_F10, false);
-				}
-				break;
-			case WM_MOUSEWHEEL:
-				inputSystem->setMouseScrollDelta(GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA);
-				break;
-			case WM_LBUTTONDOWN:
-				inputSystem->keySetState(VK_LBUTTON, true);
-				break;
-			case WM_LBUTTONUP:
-				inputSystem->keySetState(VK_LBUTTON, false);
-				break;
-			case WM_RBUTTONDOWN:
-				inputSystem->keySetState(VK_RBUTTON, true);
-				break;
-			case WM_RBUTTONUP:
-				inputSystem->keySetState(VK_RBUTTON, false);
-				break;
-			case WM_MBUTTONDOWN:
-				inputSystem->keySetState(VK_MBUTTON, true);
-				break;
-			case WM_MBUTTONUP:
-				inputSystem->keySetState(VK_MBUTTON, false);
-				break;
-				*/
+
+				// other wise it was an input message
+			default:
+				inputManager->InputMessage(uMsg, wParam);
 		}
 
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -209,7 +164,8 @@ namespace Engine
 	int SwimEngine::Init()
 	{
 		// Add systems to the SystemManager
-		systemManager->AddSystem<SceneSystem>("SceneSystem");
+		inputManager = systemManager->AddSystem<InputManager>("InputManager");
+		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
 
 		// Call Awake and Init on all systems
 		if (systemManager->Awake() != 0)
@@ -248,6 +204,10 @@ namespace Engine
 		auto previousTime = std::chrono::high_resolution_clock::now();
 		double accumulatedTime = 0.0;
 		double fixedTimeStep = 1.0 / tickRate; // e.g., 20 ticks per second
+		unsigned int tickCounter = 1;          // Start tick counter at 1
+
+		// Maximum allowable delta time (e.g., 5x the fixed time step)
+		const double maxDeltaTime = 5.0 * fixedTimeStep;
 
 		while (running)
 		{
@@ -270,13 +230,31 @@ namespace Engine
 			previousTime = currentTime;
 
 			double delta = elapsed.count();
+
+			// Safety check: If delta time exceeds maxDeltaTime, log and skip the frame
+			// This is most often caused when dragging around the window or doing something of that nature to suspend the process temporarily
+			// Detatched multi threading would make that not happen for most cases though.
+			if (delta > maxDeltaTime)
+			{
+				std::cerr << "Frame skipped due to excessive delta time: " << delta << " seconds.\n";
+				accumulatedTime = 0.0; // Reset accumulated time to avoid cascading lag effects
+				continue;
+			}
+
 			accumulatedTime += delta;
 
 			// Perform fixed updates as needed
 			while (accumulatedTime >= fixedTimeStep)
 			{
-				FixedUpdate(totalFrames % tickRate); // Pass the tick index within the second
+				FixedUpdate(tickCounter); // Pass the current tick index
 				accumulatedTime -= fixedTimeStep;
+
+				// Increment the tick counter, resetting to 1 after tickRate
+				tickCounter++;
+				if (tickCounter > tickRate)
+				{
+					tickCounter = 1; // Reset to 1 for the next second
+				}
 			}
 
 			// Perform frame updates
