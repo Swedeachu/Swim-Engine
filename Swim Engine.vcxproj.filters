@@ -28,4 +28,8 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Source\Shaders\vertex.hlsl" />
+    <FxCompile Include="Source\Shaders\fragment.hlsl" />
+  </ItemGroup>
 </Project>

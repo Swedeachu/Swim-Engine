@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Initial unchanged sections of the project file -->
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -53,10 +54,8 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
-  <ImportGroup Label="Shared">
-  </ImportGroup>
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -70,6 +69,65 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+
+<!-- Define Shader Files -->
+  <ItemGroup>
+    <!-- Vertex Shaders (vs_6_0) -->
+    <ShaderFiles Include="Source\Shaders\VertexShaders\**\*.hlsl">
+      <ShaderType>vs_6_0</ShaderType>
+    </ShaderFiles>
+    <!-- Fragment Shaders (ps_6_0) -->
+    <ShaderFiles Include="Source\Shaders\FragmentShaders\**\*.hlsl">
+      <ShaderType>ps_6_0</ShaderType>
+    </ShaderFiles>
+  </ItemGroup>
+
+  <!-- Show Paths and Shaders Detected -->
+  <Target Name="ShowBuildInfo" AfterTargets="PrepareForBuild">
+    <Message Text="=== SHOW BUILD INFO ===" Importance="High" />
+    <Message Text="OutDir: $(OutDir)" Importance="High" />
+    <Message Text="ProjectDir: $(ProjectDir)" Importance="High" />
+    <Message Text="VULKAN_SDK: $(VULKAN_SDK)" Importance="High" />
+    <Message Text="Listing Shader Files:" Importance="High" />
+    <Message Text="  %(ShaderFiles.FullPath) Type=%(ShaderFiles.ShaderType) Filename=%(ShaderFiles.Filename)" Importance="High" Condition=" '@(ShaderFiles)' != '' " />
+    <Message Text="No Shader files found!" Importance="High" Condition=" '@(ShaderFiles)' == '' " />
+  </Target>
+
+  <!-- Ensure base $(OutDir)Shaders directory -->
+  <Target Name="EnsureBaseShadersDir" AfterTargets="ShowBuildInfo">
+    <Message Text="Ensuring base Shaders directory: $(OutDir)Shaders" Importance="High" />
+    <MakeDir Directories="$(OutDir)Shaders" />
+  </Target>
+
+  <!-- Create fixed directories for Vertex and Fragment -->
+  <Target Name="CreateShaderDirectories" AfterTargets="EnsureBaseShadersDir" BeforeTargets="ClCompile">
+    <Message Text="Creating fixed shader directories: $(OutDir)Shaders\VertexShaders and $(OutDir)Shaders\FragmentShaders" Importance="High" />
+    <MakeDir Directories="$(OutDir)Shaders\VertexShaders" />
+    <MakeDir Directories="$(OutDir)Shaders\FragmentShaders" />
+  </Target>
+
+  <!-- Compile Shaders: Run before ClCompile so they are ready early in the build -->
+  <Target Name="CompileShaders" AfterTargets="CreateShaderDirectories" BeforeTargets="ClCompile">
+    <Message Text="=== COMPILING SHADERS ===" Importance="High" />
+
+    <!-- Compile Vertex Shaders -->
+    <Message Text="Compiling Vertex Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
+    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+          Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
+    <Message Text="Vertex Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)"
+             Importance="High" Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
+
+    <!-- Compile Fragment Shaders -->
+    <Message Text="Compiling Fragment Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
+    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -Fo &quot;$(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+          Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
+    <Message Text="Fragment Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)"
+             Importance="High" Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
+
+    <Message Text="=== SHADER COMPILATION COMPLETE ===" Importance="High" />
+  </Target>
+
+  <!-- Normal compilation setup for the project -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>

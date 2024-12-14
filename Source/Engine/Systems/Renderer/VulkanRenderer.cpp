@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
 
 // Validation layers for debugging
 #ifdef _DEBUG
@@ -22,20 +24,40 @@ namespace Engine
 			"VK_LAYER_KHRONOS_validation"
 	};
 
-	// A helper function to load a binary file (for reading SPIR-V shaders)
+	std::string GetExecutableDirectory()
+	{
+		char path[MAX_PATH];
+		HMODULE hModule = GetModuleHandleA(NULL);
+		if (hModule == NULL)
+		{
+			throw std::runtime_error("Failed to get module handle.");
+		}
+		GetModuleFileNameA(hModule, path, (sizeof(path)));
+		std::string fullPath(path);
+		size_t pos = fullPath.find_last_of("\\/");
+		return (std::string::npos == pos) ? "" : fullPath.substr(0, pos);
+	}
+
 	std::vector<char> VulkanRenderer::ReadFile(const std::string& filename)
 	{
-		std::ifstream file(filename, std::ios::ate | std::ios::binary);
+		std::string exeDir = GetExecutableDirectory();
+		std::string fullPath = exeDir + "\\" + filename;
+
+		std::cout << "Attempting to open shader file at: " << fullPath << std::endl;
+
+		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to open file: " + filename);
+			throw std::runtime_error("Failed to open file: " + fullPath);
 		}
 
-		size_t fileSize = (size_t)file.tellg();
+		size_t fileSize = static_cast<size_t>(file.tellg());
 		std::vector<char> buffer(fileSize);
+
 		file.seekg(0);
 		file.read(buffer.data(), fileSize);
 		file.close();
+
 		return buffer;
 	}
 
@@ -531,8 +553,8 @@ namespace Engine
 
 	void VulkanRenderer::CreateGraphicsPipeline()
 	{
-		auto vertShaderCode = ReadFile("shaders/vertex.spv");
-		auto fragShaderCode = ReadFile("shaders/fragment.spv");
+		auto vertShaderCode = ReadFile("Shaders\\VertexShaders\\vertex.spv");
+		auto fragShaderCode = ReadFile("Shaders\\FragmentShaders\\fragment.spv");
 
 		VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
 		VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
