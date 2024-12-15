@@ -338,6 +338,7 @@ namespace Engine
 		}
 	}
 
+	// TODO: make sure this actually uses the best GPU available
 	void VulkanRenderer::PickPhysicalDevice()
 	{
 		uint32_t deviceCount = 0;
@@ -621,8 +622,8 @@ namespace Engine
 		rasterizer.lineWidth = 1.0f;
 		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; 
 		// rasterizer.cullMode = VK_CULL_MODE_NONE; // this would disable culling
-		// rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // did this just so we could see our first mesh
+		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		// rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // I guess if we feel like it's opposite day
 		rasterizer.depthBiasEnable = VK_FALSE;
 
 		// Multisampling
@@ -913,8 +914,7 @@ namespace Engine
 		CameraUBO ubo{};
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
-		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) *
-			glm::scale(glm::mat4(1.0f), transform.scale);
+		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) *glm::scale(glm::mat4(1.0f), transform.scale);
 
 		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
 	}
