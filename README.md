@@ -36,6 +36,8 @@ high quality model meshes
 <br>
 sky sphere/sky box environment tricks to make stuff look not chopped
 <br>
+Skeletal animation system and rag dolls/boned physics bound meshes
+<br>
 Multi thread certain aspects when needed? 
 <br>
 Make one single beatiful scene with some cool per object and full screen shader effects with physics bound scripted objects
