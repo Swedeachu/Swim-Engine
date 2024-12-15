@@ -9,6 +9,10 @@
 #include <fstream>
 #include <filesystem>
 
+#include "Engine/Systems/Renderer/Buffer/Vertex.h"
+
+#include "Library/glm/gtc/matrix_transform.hpp"
+
 // Validation layers for debugging
 #ifdef _DEBUG
 const bool enableValidationLayers = true;
@@ -64,23 +68,28 @@ namespace Engine
 	// Called by engine when system awakes
 	int VulkanRenderer::Awake()
 	{
-		// Create Vulkan instance, surface, device here
-		CreateInstance();
-		SetupDebugMessenger();
-		CreateSurface();
-		PickPhysicalDevice();
-		CreateLogicalDevice();
-		CreateSwapChain();
-		CreateImageViews();
-		CreateRenderPass();
-		CreateGraphicsPipeline();
-		CreateFramebuffers();
-		CreateCommandPool();
-		CreateBuffers();                  
-		CreateDescriptorSetLayout();      
-		CreateDescriptorSet();            
-		CreateCommandBuffers();
-		CreateSyncObjects();
+		CreateInstance();                // Creates Vulkan instance
+		SetupDebugMessenger();           // Sets up debug messenger if enabled
+		CreateSurface();                 // Creates the window surface
+		PickPhysicalDevice();            // Selects a suitable GPU
+		CreateLogicalDevice();           // Creates logical device and queues
+		CreateSwapChain();               // Swap chain and images
+		CreateImageViews();              // Image views for swap chain images
+		CreateRenderPass();              // Render pass setup
+
+		// Important: Descriptor set layout must be created before the pipeline
+		CreateDescriptorSetLayout();     // Creates the descriptor set layout
+
+		// Now create the pipeline that relies on descriptorSetLayout
+		CreateGraphicsPipeline();        // Uses descriptorSetLayout in pipeline layout creation
+
+		CreateFramebuffers();            // Create framebuffers from image views
+		CreateCommandPool();             // Command pool for command buffers
+		CreateDescriptorSet();           // Allocate descriptor sets
+		CreateSyncObjects();             // Synchronization objects
+
+		// Record command buffers now that pipeline and framebuffers are set up
+		RecordCommandBuffers();          // Final step before rendering can start
 
 		return 0;
 	}
@@ -97,14 +106,6 @@ namespace Engine
 	// Called every frame
 	void VulkanRenderer::Update(double dt)
 	{
-		// Retrieve camera matrices from the camera system
-		CameraUBO ubo = {};
-		ubo.view = cameraSystem->GetViewMatrix();
-		ubo.proj = cameraSystem->GetProjectionMatrix();
-
-		// Update uniform buffer with camera data
-		UpdateUniformBuffer(ubo);
-
 		// Render the frame
 		DrawFrame();
 	}
@@ -618,8 +619,10 @@ namespace Engine
 		rasterizer.rasterizerDiscardEnable = VK_FALSE;
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizer.lineWidth = 1.0f;
-		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; 
+		// rasterizer.cullMode = VK_CULL_MODE_NONE; // this would disable culling
+		// rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // did this just so we could see our first mesh
 		rasterizer.depthBiasEnable = VK_FALSE;
 
 		// Multisampling
@@ -799,50 +802,32 @@ namespace Engine
 		}
 	}
 
-	void VulkanRenderer::CreateBuffers()
+	void VulkanRenderer::CreateBuffers(const Mesh& mesh)
 	{
-		// Vertex data
-		struct Vertex
-		{
-			glm::vec2 pos;
-			glm::vec3 color;
-		};
+		auto vertexSize = sizeof(Vertex) * mesh.vertices.size();
+		auto indexSize = sizeof(uint16_t) * mesh.indices.size();
 
-		std::vector<Vertex> vertices = {
-				{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-				{{0.5f, -0.5f},  {0.0f, 1.0f, 0.0f}},
-				{{0.5f,  0.5f},  {0.0f, 0.0f, 1.0f}},
-				{{-0.5f, 0.5f},  {1.0f, 1.0f, 1.0f}}
-		};
-
+		// Create vertex buffer
 		vertexBuffer = std::make_unique<VulkanBuffer>(device, physicalDevice,
-			sizeof(Vertex) * vertices.size(),
+			vertexSize,
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		vertexBuffer->CopyData(vertices.data(), sizeof(Vertex) * vertices.size());
+		vertexBuffer->CopyData(mesh.vertices.data(), vertexSize);
 
-		// Index data
-		std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
-
+		// Create index buffer
 		indexBuffer = std::make_unique<VulkanBuffer>(device, physicalDevice,
-			sizeof(uint16_t) * indices.size(),
+			indexSize,
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		indexBuffer->CopyData(indices.data(), sizeof(uint16_t) * indices.size());
-
-		// Uniform buffer
-		uniformBuffer = std::make_unique<VulkanBuffer>(device, physicalDevice,
-			sizeof(CameraUBO),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		indexBuffer->CopyData(mesh.indices.data(), indexSize);
 	}
 
 	void VulkanRenderer::CreateDescriptorSetLayout()
 	{
 		VkDescriptorSetLayoutBinding uboLayoutBinding{};
-		uboLayoutBinding.binding = 0;
+		uboLayoutBinding.binding = 0; // Matches shader's layout(binding = 0)
 		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboLayoutBinding.descriptorCount = 1;
+		uboLayoutBinding.descriptorCount = 1; // One UBO per set
 		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -850,7 +835,8 @@ namespace Engine
 		layoutInfo.bindingCount = 1;
 		layoutInfo.pBindings = &uboLayoutBinding;
 
-		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
+		VkResult result = vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout);
+		if (result != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create descriptor set layout!");
 		}
@@ -858,52 +844,79 @@ namespace Engine
 
 	void VulkanRenderer::CreateDescriptorSet()
 	{
+		if (renderables.empty())
+		{
+			// std::cerr << "No renderables available; skipping descriptor set creation." << std::endl;
+			return;
+		}
+
+		if (!uniformBuffer)
+		{
+			uniformBuffer = std::make_unique<VulkanBuffer>(
+				device, physicalDevice,
+				sizeof(CameraUBO),
+				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+		}
+
 		VkDescriptorPoolSize poolSize{};
 		poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		poolSize.descriptorCount = 1;
+		poolSize.descriptorCount = static_cast<uint32_t>(renderables.size());
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = 1;
 		poolInfo.pPoolSizes = &poolSize;
-		poolInfo.maxSets = 1;
+		poolInfo.maxSets = static_cast<uint32_t>(renderables.size());
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create descriptor pool!");
 		}
 
+		std::vector<VkDescriptorSetLayout> layouts(renderables.size(), descriptorSetLayout);
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &descriptorSetLayout;
+		allocInfo.descriptorSetCount = static_cast<uint32_t>(renderables.size());
+		allocInfo.pSetLayouts = layouts.data();
 
-		if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS)
+		descriptorSets.resize(renderables.size());
+		if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS)
 		{
-			throw std::runtime_error("Failed to allocate descriptor set!");
+			throw std::runtime_error("Failed to allocate descriptor sets!");
 		}
 
-		VkDescriptorBufferInfo bufferInfo{};
-		bufferInfo.buffer = uniformBuffer->GetBuffer();
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(CameraUBO);
+		for (size_t i = 0; i < renderables.size(); ++i)
+		{
+			VkDescriptorBufferInfo bufferInfo{};
+			bufferInfo.buffer = uniformBuffer->GetBuffer();
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(CameraUBO);
 
-		VkWriteDescriptorSet descriptorWrite{};
-		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrite.dstSet = descriptorSet;
-		descriptorWrite.dstBinding = 0;
-		descriptorWrite.dstArrayElement = 0;
-		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descriptorWrite.descriptorCount = 1;
-		descriptorWrite.pBufferInfo = &bufferInfo;
+			VkWriteDescriptorSet descriptorWrite{};
+			descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrite.dstSet = descriptorSets[i];
+			descriptorWrite.dstBinding = 0;
+			descriptorWrite.dstArrayElement = 0;
+			descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptorWrite.descriptorCount = 1;
+			descriptorWrite.pBufferInfo = &bufferInfo;
 
-		vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+			vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+		}
 	}
 
-	void VulkanRenderer::UpdateUniformBuffer(const CameraUBO& uboData)
+	void VulkanRenderer::UpdateUniformBuffer(const Transform& transform)
 	{
-		uniformBuffer->CopyData(&uboData, sizeof(CameraUBO));
+		CameraUBO ubo{};
+		ubo.view = cameraSystem->GetViewMatrix();
+		ubo.proj = cameraSystem->GetProjectionMatrix();
+		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) *
+			glm::scale(glm::mat4(1.0f), transform.scale);
+
+		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
 	}
 
 	// --------------------------------------------------------------------------------------
@@ -1098,6 +1111,100 @@ namespace Engine
 		}
 
 		return shaderModule;
+	}
+
+	void VulkanRenderer::SubmitMesh(const Transform& transform, const Mesh& mesh)
+	{
+		for (auto& renderable : renderables)
+		{
+			if (&renderable.mesh == &mesh)
+			{
+				renderable.transform = transform;
+				return; // Update only the transform for an existing mesh
+			}
+		}
+
+		// Add the new renderable to the list
+		renderables.push_back({ transform, mesh });
+
+		// Create vertex and index buffers for the new renderable
+		CreateBuffers(mesh);
+
+		// Recreate descriptor sets to include the new renderable
+		CreateDescriptorSet();
+
+		// Command buffers are re-recorded after all meshes are submitted
+		// RecordCommandBuffers(); // we dont need to do this every single submission
+	}
+
+	void VulkanRenderer::RecordCommandBuffers()
+	{
+		if (commandBuffers.size() != swapChainFramebuffers.size())
+		{
+			commandBuffers.resize(swapChainFramebuffers.size());
+		}
+
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool = commandPool;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
+
+		if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to allocate command buffers!");
+		}
+
+		for (size_t i = 0; i < commandBuffers.size(); ++i)
+		{
+			VkCommandBufferBeginInfo beginInfo{};
+			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to begin recording command buffer!");
+			}
+
+			VkRenderPassBeginInfo renderPassInfo{};
+			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			renderPassInfo.renderPass = renderPass;
+			renderPassInfo.framebuffer = swapChainFramebuffers[i];
+			renderPassInfo.renderArea.offset = { 0, 0 };
+			renderPassInfo.renderArea.extent = swapChainExtent;
+
+			VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+			renderPassInfo.clearValueCount = 1;
+			renderPassInfo.pClearValues = &clearColor;
+
+			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+			for (size_t j = 0; j < renderables.size(); ++j)
+			{
+				// Update the uniform buffer with the renderable's transform
+				UpdateUniformBuffer(renderables[j].transform);
+
+				// Bind vertex and index buffers
+				VkBuffer vertexBuffers[] = { vertexBuffer->GetBuffer() };
+				VkDeviceSize offsets[] = { 0 };
+				vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+				// Bind the descriptor set
+				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+					pipelineLayout, 0, 1, &descriptorSets[j], 0, nullptr);
+
+				// Issue draw command
+				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(renderables[j].mesh.indices.size()), 1, 0, 0, 0);
+			}
+
+			vkCmdEndRenderPass(commandBuffers[i]);
+
+			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to record command buffer!");
+			}
+		}
 	}
 
 }

@@ -21,7 +21,10 @@ namespace Engine
 			{
 				scenes[scene->GetName()] = scene;
 				scene->SetSceneSystem(shared_from_this());
-				scene->SetInputManager(SwimEngine::GetInstance()->GetInputManager());
+				auto instance = SwimEngine::GetInstance();
+				scene->SetInputManager(instance->GetInputManager());
+				scene->SetCameraSystem(instance->GetCameraSystem());
+				scene->SetRenderer(instance->GetRenderer());
 			}
 		}
 		factory.clear(); // then do we want to clear?
@@ -57,6 +60,7 @@ namespace Engine
 		if (activeScene)
 		{
 			activeScene->Update(dt);
+			activeScene->SubmitMeshesToRenderer();
 		}
 	}
 

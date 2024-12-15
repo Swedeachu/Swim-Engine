@@ -46,6 +46,10 @@ namespace Engine
 		std::shared_ptr<InputManager> GetInputManager() const { return inputManager; }
 		std::shared_ptr<SceneSystem> GetSceneSystem() const { return sceneSystem; }
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return cameraSystem; }
+		std::shared_ptr<VulkanRenderer> GetRenderer() const { return renderer; }
+
+		unsigned int GetWindowWidth() const { return windowWidth; }
+		unsigned int GetWindowHeight() const { return windowHeight; }
 
 	private:
 

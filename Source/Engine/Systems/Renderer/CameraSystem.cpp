@@ -1,11 +1,26 @@
 #include "PCH.h"
 #include "CameraSystem.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
+#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
 
 	CameraSystem::CameraSystem() : camera{} {}
+
+	int CameraSystem::Init()
+	{
+		camera.position = glm::vec3(0.0f, 0.0f, 0.0f);
+		camera.fov = 45.0f;
+
+		auto instance = SwimEngine::GetInstance();
+
+		camera.aspect = (float)instance->GetWindowWidth() / (float)instance->GetWindowHeight();
+		camera.nearClip = 0.1f;
+		camera.farClip = 100.0f;
+
+		return 0;
+	}
 
 	void CameraSystem::Update(double dt)
 	{

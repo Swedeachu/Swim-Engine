@@ -6,6 +6,9 @@
 #include <fstream>
 #include "Buffer/VulkanBuffer.h"
 
+#include "Engine/Components/Transform.h"
+#include "Engine/Components/Mesh.h"
+
 // Forward declare
 struct GLFWwindow; // if you use GLFW in the future for windowing
 // For now, we use Win32. We'll just rely on HWND from the engine.
@@ -13,11 +16,11 @@ struct GLFWwindow; // if you use GLFW in the future for windowing
 namespace Engine
 {
 
-  // We might want to put this somewhere else later
   struct CameraUBO
   {
     glm::mat4 view;
     glm::mat4 proj;
+    glm::mat4 model;
   };
 
   // A struct to hold indices into queues we use
@@ -38,42 +41,6 @@ namespace Engine
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
     std::vector<VkPresentModeKHR> presentModes;
-  };
-
-  struct Vertex
-  {
-    glm::vec3 position; // Corresponds to the "position" in your vertex shader
-    glm::vec3 color;    // Corresponds to the "color" in your vertex shader
-
-    // Get binding description for this vertex layout
-    static VkVertexInputBindingDescription GetBindingDescription()
-    {
-      VkVertexInputBindingDescription bindingDescription{};
-      bindingDescription.binding = 0; // Index of the binding in the shader
-      bindingDescription.stride = sizeof(Vertex); // Size of one vertex
-      bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX; // Per-vertex data
-      return bindingDescription;
-    }
-
-    // Get attribute descriptions for position and color
-    static std::array<VkVertexInputAttributeDescription, 2> GetAttributeDescriptions()
-    {
-      std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-
-      // Position (location 0 in vertex shader)
-      attributeDescriptions[0].binding = 0;
-      attributeDescriptions[0].location = 0;
-      attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT; // vec3
-      attributeDescriptions[0].offset = offsetof(Vertex, position);
-
-      // Color (location 1 in vertex shader)
-      attributeDescriptions[1].binding = 0;
-      attributeDescriptions[1].location = 1;
-      attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT; // vec3
-      attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-      return attributeDescriptions;
-    }
   };
 
   class VulkanRenderer : public Machine
@@ -101,11 +68,13 @@ namespace Engine
 
     // Draw frame each update
     void DrawFrame();
+    void SubmitMesh(const Transform& transform, const Mesh& mesh);
+    void RecordCommandBuffers();
 
     // Call when window resized if needed:
     void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
 
-    void UpdateUniformBuffer(const CameraUBO& uboData);
+    // void UpdateUniformBuffer(const CameraUBO& uboData);
 
   private:
 
@@ -164,9 +133,20 @@ namespace Engine
     void CreateCommandPool();
     void CreateCommandBuffers();
     void CreateSyncObjects();
-    void CreateBuffers();
+    void CreateBuffers(const Mesh& mesh);
     void CreateDescriptorSetLayout();
     void CreateDescriptorSet();
+
+    struct Renderable
+    {
+      Transform transform;
+      Mesh mesh;
+    };
+
+    std::vector<Renderable> renderables; // Store entities with meshes
+    std::vector<VkDescriptorSet> descriptorSets; // Store descriptor sets for each renderable
+
+    void UpdateUniformBuffer(const Transform& transform);
 
     // Helpers
     bool CheckValidationLayerSupport();

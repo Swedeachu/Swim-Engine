@@ -20,6 +20,8 @@ namespace Engine
 
     CameraSystem();
 
+    int Init() override;
+
     void Update(double dt) override;
 
     glm::mat4 GetViewMatrix() const;

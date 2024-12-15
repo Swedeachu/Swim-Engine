@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "SandBox.h"
 #include "Engine\Components\Transform.h"
+#include "Engine\Components\Mesh.h"
 
 namespace Game
 {
@@ -16,20 +17,74 @@ namespace Game
 	{
 		std::cout << name << " Init" << std::endl;
 
-		// Create an entity
 		auto entity = CreateEntity();
 
-		// Add a Transform component with default values
-		GetRegistry().emplace<Transform>(entity, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 1.0f));
+		// Add Transform component
+		GetRegistry().emplace<Engine::Transform>(entity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f, 1.0f, 1.0f));
+
+		// Add Mesh component
+		std::vector<Engine::Vertex> vertices = {
+				{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+				{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+				{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+				{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+		};
+		std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
+
+		GetRegistry().emplace<Engine::Mesh>(entity, vertices, indices);
 
 		return 0;
 	}
 
 	void SandBox::Update(double dt)
 	{
-		if (GetInputManager()->IsKeyTriggered(VK_SPACE))
+		auto input = GetInputManager();
+		auto camera = GetCameraSystem();
+
+		const float moveSpeed = 5.0f; // Speed of movement
+		glm::vec3 moveDirection{ 0.0f, 0.0f, 0.0f };
+
+		// Handle input for WASD keys
+		if (input->IsKeyDown('W'))
 		{
-			std::cout << "Hit space" << std::endl;
+			moveDirection += glm::vec3(0.0f, 0.0f, -1.0f); // Forward
+		}
+		if (input->IsKeyDown('S'))
+		{
+			moveDirection += glm::vec3(0.0f, 0.0f, 1.0f); // Backward
+		}
+		if (input->IsKeyDown('A'))
+		{
+			moveDirection += glm::vec3(-1.0f, 0.0f, 0.0f); // Left
+		}
+		if (input->IsKeyDown('D'))
+		{
+			moveDirection += glm::vec3(1.0f, 0.0f, 0.0f); // Right
+		}
+
+		// Normalize direction to ensure consistent speed and apply delta time
+		if (glm::length(moveDirection) > 0.0f)
+		{
+			moveDirection = glm::normalize(moveDirection);
+
+			auto view = GetRegistry().view<Engine::Transform>();
+			entt::entity et;
+			bool found = false;
+			for (auto entity : view)
+			{
+				et = entity;
+				found = true;
+				break;
+			}
+
+			if (found)
+			{
+				auto& transform = view.get<Engine::Transform>(et);
+				transform.position += moveDirection * moveSpeed * static_cast<float>(dt);
+			}
+
+			// camera->camera.position += moveDirection * moveSpeed * static_cast<float>(dt);
+			// std::cout << camera->camera.position.x << ", " << camera->camera.position.y << ", " << camera->camera.position.z << std::endl;
 		}
 	}
 
