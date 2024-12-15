@@ -112,15 +112,17 @@
 
     <!-- Compile Vertex Shaders -->
     <Message Text="Compiling Vertex Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
-    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
-          Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
+    <Exec IgnoreExitCode="false" 
+      Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+      Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
     <Message Text="Vertex Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)"
              Importance="High" Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
 
     <!-- Compile Fragment Shaders -->
     <Message Text="Compiling Fragment Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
-    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -Fo &quot;$(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
-          Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
+    <Exec IgnoreExitCode="false" 
+      Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+      Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
     <Message Text="Fragment Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)"
              Importance="High" Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
 

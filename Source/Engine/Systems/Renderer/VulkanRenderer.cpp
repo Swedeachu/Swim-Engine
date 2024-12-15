@@ -43,12 +43,10 @@ namespace Engine
 		std::string exeDir = GetExecutableDirectory();
 		std::string fullPath = exeDir + "\\" + filename;
 
-		std::cout << "Attempting to open shader file at: " << fullPath << std::endl;
-
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to open file: " + fullPath);
+			throw std::runtime_error("Failed to load shader: " + fullPath);
 		}
 
 		size_t fileSize = static_cast<size_t>(file.tellg());
@@ -57,6 +55,8 @@ namespace Engine
 		file.seekg(0);
 		file.read(buffer.data(), fileSize);
 		file.close();
+
+		std::cout << "Successfully loaded shader: " << fullPath << std::endl;
 
 		return buffer;
 	}
@@ -559,14 +559,13 @@ namespace Engine
 		VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
 		VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
 
-		// Vertex stage
+		// Shader stages
 		VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
 		vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
 		vertShaderStageInfo.module = vertShaderModule;
 		vertShaderStageInfo.pName = "main";
 
-		// Fragment stage
 		VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
 		fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -575,16 +574,24 @@ namespace Engine
 
 		VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
-		// We have no vertex input for now (hardcoded triangle in shader or later we will add vertex buffers)
+		// Vertex input state
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		// no vertex binding or attribute descriptions yet
+		auto bindingDescription = Vertex::GetBindingDescription();
+		auto attributeDescriptions = Vertex::GetAttributeDescriptions();
 
+		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vertexInputInfo.vertexBindingDescriptionCount = 1;
+		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
+		// Input assembly
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+		// Viewport and scissor
 		VkViewport viewport{};
 		viewport.x = 0.0f;
 		viewport.y = 0.0f;
@@ -594,7 +601,7 @@ namespace Engine
 		viewport.maxDepth = 1.0f;
 
 		VkRect2D scissor{};
-		scissor.offset = { 0,0 };
+		scissor.offset = { 0, 0 };
 		scissor.extent = swapChainExtent;
 
 		VkPipelineViewportStateCreateInfo viewportState{};
@@ -604,6 +611,7 @@ namespace Engine
 		viewportState.scissorCount = 1;
 		viewportState.pScissors = &scissor;
 
+		// Rasterizer
 		VkPipelineRasterizationStateCreateInfo rasterizer{};
 		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		rasterizer.depthClampEnable = VK_FALSE;
@@ -614,11 +622,13 @@ namespace Engine
 		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		rasterizer.depthBiasEnable = VK_FALSE;
 
+		// Multisampling
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.sampleShadingEnable = VK_FALSE;
 		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+		// Color blending
 		VkPipelineColorBlendAttachmentState colorBlendAttachment{};
 		colorBlendAttachment.colorWriteMask =
 			VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -631,17 +641,18 @@ namespace Engine
 		colorBlending.attachmentCount = 1;
 		colorBlending.pAttachments = &colorBlendAttachment;
 
+		// Pipeline layout
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		// We have no descriptor sets yet
-		// pipelineLayoutInfo.setLayoutCount = ...
-		// pipelineLayoutInfo.pushConstantRangeCount = ...
+		pipelineLayoutInfo.setLayoutCount = 1;
+		pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
 
 		if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to create pipeline layout!");
+			throw std::runtime_error("Failed to create pipeline layout!");
 		}
 
+		// Graphics pipeline creation
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipelineInfo.stageCount = 2;
@@ -659,10 +670,10 @@ namespace Engine
 
 		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to create graphics pipeline!");
+			throw std::runtime_error("Failed to create graphics pipeline!");
 		}
 
-		// cleanup shader modules
+		// Cleanup shader modules
 		vkDestroyShaderModule(device, vertShaderModule, nullptr);
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
 	}
