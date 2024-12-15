@@ -24,8 +24,8 @@ namespace Engine
       throw std::runtime_error("Renderer not available");
     }
 
-    // Indicate we're starting to specify what to draw this frame
-    renderer->BeginFrameRenderables();
+    // Reset for the frame on a clean state
+    renderer->ClearFrameRenderables();
 
     auto view = registry.view<Transform, Mesh>();
     for (auto entity : view)
@@ -36,9 +36,6 @@ namespace Engine
       // Add each mesh + transform to the renderer for this frame
       renderer->AddRenderable(transform, mesh);
     }
-
-    // Done specifying renderables for this frame
-    // renderer->EndFrameRenderables(); // deprecated, dont need to call this anymore
   }
 
 }

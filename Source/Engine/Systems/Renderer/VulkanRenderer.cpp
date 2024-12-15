@@ -95,7 +95,7 @@ namespace Engine
 
 		CreateSyncObjects();             // Synchronization objects
 
-		RecordCommandBuffers(); // Initial recording to avoid an error with vkQueueSubmit on frame 0 before anything is rendered
+		// RecordCommandBuffers(); // Initial recording to avoid an error with vkQueueSubmit on frame 0 before anything is rendered
 
 		return 0;
 	}
@@ -274,7 +274,7 @@ namespace Engine
 		// TODO: swap chain recreation
 	}
 
-	void VulkanRenderer::BeginFrameRenderables()
+	void VulkanRenderer::ClearFrameRenderables()
 	{
 		// Clear previous frame's data
 		renderablesForFrame.clear();
@@ -289,18 +289,13 @@ namespace Engine
 		renderablesForFrame.push_back({ transform, &meshData });
 	}
 
-	// THIS IS DEPRECATED, DONT CALL THIS
-	void VulkanRenderer::EndFrameRenderables()
-	{
-		// After adding all renderables for this frame, record command buffers
-		RecordCommandBuffers();
-	}
-
 	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const Mesh& mesh)
 	{
 		// Assume Mesh has a unique name or identifier
 		// If not, you can hash the vertex data or store a pointer
-		// TODO: Mesh pool later where a mesh component only tells which mesh to use
+		// TODO: Hyper optimized Mesh pool later where a mesh component only tells which mesh to use from the mesh pool, maybe with a modern pointer to the intended mesh
+		// This also is not even a secure hash because meshes can be of the same vertices and indices in size and the mesh_ is completely pointless
+		// HOWEVER, the mesh cache is still an essential idea as it holds MeshBufferData, not the meshes themselves, which is extremely useful and crucial for performance
 		std::string meshKey = "mesh_" + std::to_string(mesh.vertices.size()) + "_" + std::to_string(mesh.indices.size());
 
 		auto it = meshCache.find(meshKey);
@@ -825,8 +820,6 @@ namespace Engine
 		{
 			throw std::runtime_error("Failed to allocate command buffers!");
 		}
-
-		// Note: Command buffers are recorded each frame in RecordCommandBuffers()
 	}
 
 	void VulkanRenderer::CreateSyncObjects()
@@ -1186,63 +1179,6 @@ namespace Engine
 		if (vkEndCommandBuffer(commandBuffers[imageIndex]) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to record command buffer!");
-		}
-	}
-
-	void VulkanRenderer::RecordCommandBuffers()
-	{
-		for (size_t i = 0; i < commandBuffers.size(); ++i)
-		{
-			VkCommandBufferBeginInfo beginInfo{};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			beginInfo.flags = 0; // Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
-			beginInfo.pInheritanceInfo = nullptr; // Only relevant for secondary command buffers
-
-			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) // problem!
-			{
-				throw std::runtime_error("Failed to begin recording command buffer!");
-			}
-
-			VkRenderPassBeginInfo renderPassInfo{};
-			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-			renderPassInfo.renderPass = renderPass;
-			renderPassInfo.framebuffer = swapChainFramebuffers[i];
-			renderPassInfo.renderArea.offset = { 0, 0 };
-			renderPassInfo.renderArea.extent = swapChainExtent;
-
-			VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-			renderPassInfo.clearValueCount = 1;
-			renderPassInfo.pClearValues = &clearColor;
-
-			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-			// Iterate over all renderables for this frame
-			for (auto& rend : renderablesForFrame)
-			{
-				// Update uniform buffer with this renderable's transform
-				UpdateUniformBuffer(rend.transform);
-
-				// Bind the descriptor set (assuming one descriptor set)
-				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
-					pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-
-				// Bind vertex and index buffers
-				VkBuffer vertexBuffers[] = { rend.meshData->vertexBuffer->GetBuffer() };
-				VkDeviceSize offsets[] = { 0 };
-				vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(commandBuffers[i], rend.meshData->indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-				// Draw indexed geometry
-				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(rend.meshData->indexCount), 1, 0, 0, 0);
-			}
-
-			vkCmdEndRenderPass(commandBuffers[i]);
-
-			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
-			{
-				throw std::runtime_error("Failed to record command buffer!");
-			}
 		}
 	}
 

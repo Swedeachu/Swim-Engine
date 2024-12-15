@@ -83,9 +83,8 @@ namespace Engine
     int Exit() override;
 
     // Methods to manage renderables each frame
-    void BeginFrameRenderables();
+    void ClearFrameRenderables();
     void AddRenderable(const Transform& transform, const Mesh& mesh);
-    void EndFrameRenderables();
 
     // Call when window resized if needed:
     void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
@@ -155,7 +154,6 @@ namespace Engine
     void DrawFrame();
 
     // Command buffer recording
-    void RecordCommandBuffers();
     void RecordCommandBuffer(uint32_t imageIndex);
 
     // Methods
