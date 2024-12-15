@@ -19,6 +19,7 @@ struct GLFWwindow; // if you use GLFW in the future for windowing
 
 namespace Engine
 {
+
   struct CameraUBO
   {
     glm::mat4 view;
@@ -81,16 +82,10 @@ namespace Engine
     void FixedUpdate(unsigned int tickThisSecond) override;
     int Exit() override;
 
-    // Draw frame each update
-    void DrawFrame();
-
     // Methods to manage renderables each frame
     void BeginFrameRenderables();
     void AddRenderable(const Transform& transform, const Mesh& mesh);
     void EndFrameRenderables();
-
-    // Command buffer recording
-    void RecordCommandBuffers();
 
     // Call when window resized if needed:
     void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
@@ -124,10 +119,15 @@ namespace Engine
     VkCommandPool commandPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> commandBuffers;
 
-    VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-    VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
-    VkFence inFlightFence = VK_NULL_HANDLE;
+    // Synchronization
+    static const int MAX_FRAMES_IN_FLIGHT = 2;
+    size_t currentFrame = 0;
 
+    std::vector<VkSemaphore> imageAvailableSemaphores;
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkFence> inFlightFences;
+
+    // Uniform buffer
     std::unique_ptr<VulkanBuffer> uniformBuffer;
 
     VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
@@ -151,6 +151,13 @@ namespace Engine
 
     static std::vector<const char*> validationLayers;
 
+    // Draw frame each update
+    void DrawFrame();
+
+    // Command buffer recording
+    void RecordCommandBuffers();
+    void RecordCommandBuffer(uint32_t imageIndex);
+
     // Methods
     void CreateInstance();
     void SetupDebugMessenger();
@@ -163,7 +170,7 @@ namespace Engine
     void CreateGraphicsPipeline();
     void CreateFramebuffers();
     void CreateCommandPool();
-    void AllocateCommandBuffers(); 
+    void AllocateCommandBuffers();
     void CreateSyncObjects();
     void CreateDescriptorSetLayout();
     void CreateDescriptorSet();

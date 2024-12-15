@@ -38,7 +38,7 @@ namespace Engine
     }
 
     // Done specifying renderables for this frame
-    renderer->EndFrameRenderables();
+    // renderer->EndFrameRenderables(); // deprecated, dont need to call this anymore
   }
 
 }

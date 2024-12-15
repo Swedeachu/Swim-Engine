@@ -81,7 +81,6 @@ namespace Engine
 		CreateFramebuffers();            // Create framebuffers from image views
 		CreateCommandPool();             // Command pool for command buffers
 
-		// Allocate command buffers (no recording here)
 		AllocateCommandBuffers();
 
 		// Create a single uniform buffer
@@ -95,6 +94,8 @@ namespace Engine
 		CreateDescriptorSet();           // Create descriptor set once
 
 		CreateSyncObjects();             // Synchronization objects
+
+		RecordCommandBuffers(); // Initial recording to avoid an error with vkQueueSubmit on frame 0 before anything is rendered
 
 		return 0;
 	}
@@ -121,15 +122,18 @@ namespace Engine
 		// For physics related fixed steps, probably not going to be used here for a long time unless we have some complex gpu driven particle systems
 	}
 
-	// Exit: Clean up Vulkan resources
+	// Clean up Vulkan resources
 	int VulkanRenderer::Exit()
 	{
 		vkDeviceWaitIdle(device);
 
 		// Destroy synchronization objects
-		vkDestroyFence(device, inFlightFence, nullptr);
-		vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-		vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+			vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+			vkDestroyFence(device, inFlightFences[i], nullptr);
+		}
 
 		// Destroy framebuffers
 		for (auto framebuffer : swapChainFramebuffers)
@@ -182,39 +186,41 @@ namespace Engine
 
 	void VulkanRenderer::DrawFrame()
 	{
-		// Wait on fence from previous frame and reset it
-		if (vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+		// Wait for the current frame's fence to ensure the previous frame has finished
+		if (vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to wait for fence!");
+			throw std::runtime_error("Failed to wait for in-flight fence!");
 		}
-		if (vkResetFences(device, 1, &inFlightFence) != VK_SUCCESS)
+
+		// Reset the fence to the unsignaled state for the current frame
+		if (vkResetFences(device, 1, &inFlightFences[currentFrame]) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to reset fence!");
+			throw std::runtime_error("Failed to reset in-flight fence!");
 		}
 
 		// Acquire an image from the swap chain
 		uint32_t imageIndex;
-		VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+		VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-		// Handle swapchain recreation if out-of-date
-		if (result == VK_ERROR_OUT_OF_DATE_KHR)
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
+			framebufferResized = false;
 			// TODO: RecreateSwapChain();
 			return;
 		}
 		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
 		{
-			throw std::runtime_error("failed to acquire swap chain image!");
+			throw std::runtime_error("Failed to acquire swap chain image!");
 		}
 
-		// Ensure the command buffer for the acquired image has been recorded
-		// This should have been handled in EndFrameRenderables() -> RecordCommandBuffers()
+		// Record command buffer for the current image
+		RecordCommandBuffer(imageIndex);
 
-		// Submit command buffer
+		// Submit the command buffer for the acquired image
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+		VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
 		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = waitSemaphores;
@@ -223,16 +229,16 @@ namespace Engine
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
 
-		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+		VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame] };
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = signalSemaphores;
 
-		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS)
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to submit draw command buffer!");
+			throw std::runtime_error("Failed to submit draw command buffer!");
 		}
 
-		// Present the image
+		// Present the rendered image
 		VkPresentInfoKHR presentInfo{};
 		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
@@ -245,17 +251,19 @@ namespace Engine
 		presentInfo.pImageIndices = &imageIndex;
 
 		result = vkQueuePresentKHR(presentQueue, &presentInfo);
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
+			framebufferResized = false;
 			// TODO: RecreateSwapChain();
 		}
 		else if (result != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to present swap chain image!");
+			throw std::runtime_error("Failed to present swap chain image!");
 		}
 
-		// Optional: Reset the renderables after presenting
-		BeginFrameRenderables();
+		// Advance to the next frame
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
 	void VulkanRenderer::OnWindowResize(uint32_t newWidth, uint32_t newHeight)
@@ -281,6 +289,7 @@ namespace Engine
 		renderablesForFrame.push_back({ transform, &meshData });
 	}
 
+	// THIS IS DEPRECATED, DONT CALL THIS
 	void VulkanRenderer::EndFrameRenderables()
 	{
 		// After adding all renderables for this frame, record command buffers
@@ -827,13 +836,24 @@ namespace Engine
 
 		VkFenceCreateInfo fenceInfo{};
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // so we don't block on first frame
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // Ensures that the first frame can be rendered immediately
 
-		if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-			vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
-			vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS)
+		imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			throw std::runtime_error("failed to create synchronization objects!");
+			if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+				vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create semaphores!");
+			}
+
+			if (vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create fences!");
+			}
 		}
 	}
 
@@ -1115,24 +1135,70 @@ namespace Engine
 		return shaderModule;
 	}
 
+	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)
+	{
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = 0; // Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
+		beginInfo.pInheritanceInfo = nullptr; // Only relevant for secondary command buffers
+
+		if (vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to begin recording command buffer!");
+		}
+
+		VkRenderPassBeginInfo renderPassInfo{};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassInfo.renderPass = renderPass;
+		renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
+		renderPassInfo.renderArea.offset = { 0, 0 };
+		renderPassInfo.renderArea.extent = swapChainExtent;
+
+		VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+		// Iterate over all renderables for this frame
+		for (auto& rend : renderablesForFrame)
+		{
+			// Update uniform buffer with this renderable's transform
+			UpdateUniformBuffer(rend.transform);
+
+			// Bind the descriptor set (assuming one descriptor set)
+			vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+				pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+			// Bind vertex and index buffers
+			VkBuffer vertexBuffers[] = { rend.meshData->vertexBuffer->GetBuffer() };
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(commandBuffers[imageIndex], rend.meshData->indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+			// Draw indexed geometry
+			vkCmdDrawIndexed(commandBuffers[imageIndex], static_cast<uint32_t>(rend.meshData->indexCount), 1, 0, 0, 0);
+		}
+
+		vkCmdEndRenderPass(commandBuffers[imageIndex]);
+
+		if (vkEndCommandBuffer(commandBuffers[imageIndex]) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to record command buffer!");
+		}
+	}
+
 	void VulkanRenderer::RecordCommandBuffers()
 	{
 		for (size_t i = 0; i < commandBuffers.size(); ++i)
 		{
-			// Reset the command buffer to the initial state
-			VkCommandBufferResetFlags resetFlags = 0; // No specific flags
-			if (vkResetCommandBuffer(commandBuffers[i], resetFlags) != VK_SUCCESS)
-			{
-				throw std::runtime_error("Failed to reset command buffer!");
-			}
-
 			VkCommandBufferBeginInfo beginInfo{};
 			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			// Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
-			beginInfo.flags = 0;
+			beginInfo.flags = 0; // Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
 			beginInfo.pInheritanceInfo = nullptr; // Only relevant for secondary command buffers
 
-			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
+			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) // problem!
 			{
 				throw std::runtime_error("Failed to begin recording command buffer!");
 			}
