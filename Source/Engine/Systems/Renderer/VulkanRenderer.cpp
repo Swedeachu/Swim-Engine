@@ -65,7 +65,7 @@ namespace Engine
 		return buffer;
 	}
 
-	// Called by engine when system awakes
+	// Awake: Initialize Vulkan components
 	int VulkanRenderer::Awake()
 	{
 		CreateInstance();                // Creates Vulkan instance
@@ -76,20 +76,25 @@ namespace Engine
 		CreateSwapChain();               // Swap chain and images
 		CreateImageViews();              // Image views for swap chain images
 		CreateRenderPass();              // Render pass setup
-
-		// Important: Descriptor set layout must be created before the pipeline
 		CreateDescriptorSetLayout();     // Creates the descriptor set layout
-
-		// Now create the pipeline that relies on descriptorSetLayout
 		CreateGraphicsPipeline();        // Uses descriptorSetLayout in pipeline layout creation
-
 		CreateFramebuffers();            // Create framebuffers from image views
 		CreateCommandPool();             // Command pool for command buffers
-		CreateDescriptorSet();           // Allocate descriptor sets
-		CreateSyncObjects();             // Synchronization objects
 
-		// Record command buffers now that pipeline and framebuffers are set up
-		RecordCommandBuffers();          // Final step before rendering can start
+		// Allocate command buffers (no recording here)
+		AllocateCommandBuffers();
+
+		// Create a single uniform buffer
+		uniformBuffer = std::make_unique<VulkanBuffer>(
+			device, physicalDevice,
+			sizeof(CameraUBO),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		CreateDescriptorSet();           // Create descriptor set once
+
+		CreateSyncObjects();             // Synchronization objects
 
 		return 0;
 	}
@@ -116,7 +121,7 @@ namespace Engine
 		// For physics related fixed steps, probably not going to be used here for a long time unless we have some complex gpu driven particle systems
 	}
 
-	// Called when system exits
+	// Exit: Clean up Vulkan resources
 	int VulkanRenderer::Exit()
 	{
 		vkDeviceWaitIdle(device);
@@ -150,10 +155,11 @@ namespace Engine
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
-		// Destroy buffers
+		// Destroy uniform buffer
 		uniformBuffer.reset();
-		indexBuffer.reset();
-		vertexBuffer.reset();
+
+		// Destroy mesh buffers (handled by unique_ptr in meshCache)
+		meshCache.clear();
 
 		// Destroy command pool and device
 		vkDestroyCommandPool(device, commandPool, nullptr);
@@ -177,14 +183,20 @@ namespace Engine
 	void VulkanRenderer::DrawFrame()
 	{
 		// Wait on fence from previous frame and reset it
-		vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-		vkResetFences(device, 1, &inFlightFence);
+		if (vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to wait for fence!");
+		}
+		if (vkResetFences(device, 1, &inFlightFence) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to reset fence!");
+		}
 
 		// Acquire an image from the swap chain
 		uint32_t imageIndex;
 		VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 
-		// We could handle swapchain recreation if out-of-date
+		// Handle swapchain recreation if out-of-date
 		if (result == VK_ERROR_OUT_OF_DATE_KHR)
 		{
 			// TODO: RecreateSwapChain();
@@ -194,6 +206,9 @@ namespace Engine
 		{
 			throw std::runtime_error("failed to acquire swap chain image!");
 		}
+
+		// Ensure the command buffer for the acquired image has been recorded
+		// This should have been handled in EndFrameRenderables() -> RecordCommandBuffers()
 
 		// Submit command buffer
 		VkSubmitInfo submitInfo{};
@@ -239,8 +254,8 @@ namespace Engine
 			throw std::runtime_error("failed to present swap chain image!");
 		}
 
-		// Idle not strictly needed every frame, but for simplicity:
-		vkQueueWaitIdle(presentQueue);
+		// Optional: Reset the renderables after presenting
+		BeginFrameRenderables();
 	}
 
 	void VulkanRenderer::OnWindowResize(uint32_t newWidth, uint32_t newHeight)
@@ -248,6 +263,68 @@ namespace Engine
 		windowWidth = newWidth;
 		windowHeight = newHeight;
 		framebufferResized = true;
+		// TODO: swap chain recreation
+	}
+
+	void VulkanRenderer::BeginFrameRenderables()
+	{
+		// Clear previous frame's data
+		renderablesForFrame.clear();
+	}
+
+	void VulkanRenderer::AddRenderable(const Transform& transform, const Mesh& mesh)
+	{
+		// Get or create buffers for this mesh
+		MeshBufferData& meshData = GetOrCreateMeshBuffers(mesh);
+
+		// Add to frame renderables
+		renderablesForFrame.push_back({ transform, &meshData });
+	}
+
+	void VulkanRenderer::EndFrameRenderables()
+	{
+		// After adding all renderables for this frame, record command buffers
+		RecordCommandBuffers();
+	}
+
+	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const Mesh& mesh)
+	{
+		// Assume Mesh has a unique name or identifier
+		// If not, you can hash the vertex data or store a pointer
+		// TODO: Mesh pool later where a mesh component only tells which mesh to use
+		std::string meshKey = "mesh_" + std::to_string(mesh.vertices.size()) + "_" + std::to_string(mesh.indices.size());
+
+		auto it = meshCache.find(meshKey);
+		if (it != meshCache.end())
+		{
+			return it->second;
+		}
+
+		// Create buffers once
+		MeshBufferData data{};
+		size_t vertexSize = sizeof(Vertex) * mesh.vertices.size();
+		size_t indexSize = sizeof(uint16_t) * mesh.indices.size();
+
+		data.vertexBuffer = std::make_unique<VulkanBuffer>(
+			device, physicalDevice,
+			vertexSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		data.vertexBuffer->CopyData(mesh.vertices.data(), vertexSize);
+
+		data.indexBuffer = std::make_unique<VulkanBuffer>(
+			device, physicalDevice,
+			indexSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		data.indexBuffer->CopyData(mesh.indices.data(), indexSize);
+
+		data.indexCount = mesh.indices.size();
+
+		meshCache[meshKey] = std::move(data);
+		return meshCache[meshKey];
 	}
 
 	// --------------------------------------------------------------------------------------
@@ -389,17 +466,17 @@ namespace Engine
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 
-		createInfo.queueCreateInfoCount = (uint32_t)queueCreateInfos.size();
+		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 		createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
 		createInfo.pEnabledFeatures = &deviceFeatures;
 
-		createInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
+		createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
 		if (enableValidationLayers)
 		{
-			createInfo.enabledLayerCount = (uint32_t)validationLayers.size();
+			createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
 			createInfo.ppEnabledLayerNames = validationLayers.data();
 		}
 		else
@@ -597,8 +674,8 @@ namespace Engine
 		VkViewport viewport{};
 		viewport.x = 0.0f;
 		viewport.y = 0.0f;
-		viewport.width = (float)swapChainExtent.width;
-		viewport.height = (float)swapChainExtent.height;
+		viewport.width = static_cast<float>(swapChainExtent.width);
+		viewport.height = static_cast<float>(swapChainExtent.height);
 		viewport.minDepth = 0.0f;
 		viewport.maxDepth = 1.0f;
 
@@ -620,7 +697,7 @@ namespace Engine
 		rasterizer.rasterizerDiscardEnable = VK_FALSE;
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizer.lineWidth = 1.0f;
-		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT; 
+		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
 		// rasterizer.cullMode = VK_CULL_MODE_NONE; // this would disable culling
 		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		// rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // I guess if we feel like it's opposite day
@@ -715,7 +792,8 @@ namespace Engine
 		VkCommandPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
-		poolInfo.flags = 0;
+		// Enable the reset flag to allow individual command buffer resets
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
 		if (vkCreateCommandPool(device, &poolInfo, nullptr, &commandPool) != VK_SUCCESS)
 		{
@@ -723,7 +801,8 @@ namespace Engine
 		}
 	}
 
-	void VulkanRenderer::CreateCommandBuffers()
+	// Allocate command buffers (separated from creation)
+	void VulkanRenderer::AllocateCommandBuffers()
 	{
 		commandBuffers.resize(swapChainFramebuffers.size());
 
@@ -738,52 +817,7 @@ namespace Engine
 			throw std::runtime_error("Failed to allocate command buffers!");
 		}
 
-		for (size_t i = 0; i < commandBuffers.size(); i++)
-		{
-			VkCommandBufferBeginInfo beginInfo{};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
-			{
-				throw std::runtime_error("Failed to begin recording command buffer!");
-			}
-
-			VkRenderPassBeginInfo renderPassInfo{};
-			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-			renderPassInfo.renderPass = renderPass;
-			renderPassInfo.framebuffer = swapChainFramebuffers[i];
-			renderPassInfo.renderArea.offset = { 0, 0 };
-			renderPassInfo.renderArea.extent = swapChainExtent;
-
-			VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-			renderPassInfo.clearValueCount = 1;
-			renderPassInfo.pClearValues = &clearColor;
-
-			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-			// Create a local variable for the vertex buffer
-			VkBuffer vertexBuffers[] = { vertexBuffer->GetBuffer() };
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
-
-			vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-			// Bind descriptor set
-			vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
-				pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-
-			// Draw indexed geometry
-			vkCmdDrawIndexed(commandBuffers[i], 6, 1, 0, 0, 0);
-
-			vkCmdEndRenderPass(commandBuffers[i]);
-
-			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS)
-			{
-				throw std::runtime_error("Failed to record command buffer!");
-			}
-		}
+		// Note: Command buffers are recorded each frame in RecordCommandBuffers()
 	}
 
 	void VulkanRenderer::CreateSyncObjects()
@@ -801,26 +835,6 @@ namespace Engine
 		{
 			throw std::runtime_error("failed to create synchronization objects!");
 		}
-	}
-
-	void VulkanRenderer::CreateBuffers(const Mesh& mesh)
-	{
-		auto vertexSize = sizeof(Vertex) * mesh.vertices.size();
-		auto indexSize = sizeof(uint16_t) * mesh.indices.size();
-
-		// Create vertex buffer
-		vertexBuffer = std::make_unique<VulkanBuffer>(device, physicalDevice,
-			vertexSize,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		vertexBuffer->CopyData(mesh.vertices.data(), vertexSize);
-
-		// Create index buffer
-		indexBuffer = std::make_unique<VulkanBuffer>(device, physicalDevice,
-			indexSize,
-			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-		indexBuffer->CopyData(mesh.indices.data(), indexSize);
 	}
 
 	void VulkanRenderer::CreateDescriptorSetLayout()
@@ -845,68 +859,51 @@ namespace Engine
 
 	void VulkanRenderer::CreateDescriptorSet()
 	{
-		if (renderables.empty())
-		{
-			// std::cerr << "No renderables available; skipping descriptor set creation." << std::endl;
-			return;
-		}
-
-		if (!uniformBuffer)
-		{
-			uniformBuffer = std::make_unique<VulkanBuffer>(
-				device, physicalDevice,
-				sizeof(CameraUBO),
-				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-			);
-		}
-
+		// Create descriptor pool for 1 descriptor set
 		VkDescriptorPoolSize poolSize{};
 		poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		poolSize.descriptorCount = static_cast<uint32_t>(renderables.size());
+		poolSize.descriptorCount = 1;
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = 1;
 		poolInfo.pPoolSizes = &poolSize;
-		poolInfo.maxSets = static_cast<uint32_t>(renderables.size());
+		poolInfo.maxSets = 1;
 
 		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create descriptor pool!");
 		}
 
-		std::vector<VkDescriptorSetLayout> layouts(renderables.size(), descriptorSetLayout);
+		// Allocate one descriptor set
+		VkDescriptorSetLayout layouts[] = { descriptorSetLayout };
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = static_cast<uint32_t>(renderables.size());
-		allocInfo.pSetLayouts = layouts.data();
+		allocInfo.descriptorSetCount = 1;
+		allocInfo.pSetLayouts = layouts;
 
-		descriptorSets.resize(renderables.size());
-		if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS)
+		if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS)
 		{
-			throw std::runtime_error("Failed to allocate descriptor sets!");
+			throw std::runtime_error("Failed to allocate descriptor set!");
 		}
 
-		for (size_t i = 0; i < renderables.size(); ++i)
-		{
-			VkDescriptorBufferInfo bufferInfo{};
-			bufferInfo.buffer = uniformBuffer->GetBuffer();
-			bufferInfo.offset = 0;
-			bufferInfo.range = sizeof(CameraUBO);
+		// Update it with our uniform buffer
+		VkDescriptorBufferInfo bufferInfo{};
+		bufferInfo.buffer = uniformBuffer->GetBuffer();
+		bufferInfo.offset = 0;
+		bufferInfo.range = sizeof(CameraUBO);
 
-			VkWriteDescriptorSet descriptorWrite{};
-			descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			descriptorWrite.dstSet = descriptorSets[i];
-			descriptorWrite.dstBinding = 0;
-			descriptorWrite.dstArrayElement = 0;
-			descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			descriptorWrite.descriptorCount = 1;
-			descriptorWrite.pBufferInfo = &bufferInfo;
+		VkWriteDescriptorSet descriptorWrite{};
+		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrite.dstSet = descriptorSet;
+		descriptorWrite.dstBinding = 0;
+		descriptorWrite.dstArrayElement = 0;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrite.descriptorCount = 1;
+		descriptorWrite.pBufferInfo = &bufferInfo;
 
-			vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
-		}
+		vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
 	}
 
 	void VulkanRenderer::UpdateUniformBuffer(const Transform& transform)
@@ -914,7 +911,7 @@ namespace Engine
 		CameraUBO ubo{};
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
-		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) *glm::scale(glm::mat4(1.0f), transform.scale);
+		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) * glm::scale(glm::mat4(1.0f), transform.scale);
 
 		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
 	}
@@ -1102,6 +1099,11 @@ namespace Engine
 		VkShaderModuleCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		createInfo.codeSize = code.size();
+		// Ensure that code.size() is a multiple of 4
+		if (code.size() % 4 != 0)
+		{
+			throw std::runtime_error("Shader code size is not a multiple of 4!");
+		}
 		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
 		VkShaderModule shaderModule;
@@ -1113,52 +1115,22 @@ namespace Engine
 		return shaderModule;
 	}
 
-	void VulkanRenderer::SubmitMesh(const Transform& transform, const Mesh& mesh)
-	{
-		for (auto& renderable : renderables)
-		{
-			if (&renderable.mesh == &mesh)
-			{
-				renderable.transform = transform;
-				return; // Update only the transform for an existing mesh
-			}
-		}
-
-		// Add the new renderable to the list
-		renderables.push_back({ transform, mesh });
-
-		// Create vertex and index buffers for the new renderable
-		CreateBuffers(mesh);
-
-		// Recreate descriptor sets to include the new renderable
-		CreateDescriptorSet();
-
-		// Command buffers are re-recorded after all meshes are submitted
-		// RecordCommandBuffers(); // we dont need to do this every single submission
-	}
-
 	void VulkanRenderer::RecordCommandBuffers()
 	{
-		if (commandBuffers.size() != swapChainFramebuffers.size())
-		{
-			commandBuffers.resize(swapChainFramebuffers.size());
-		}
-
-		VkCommandBufferAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		allocInfo.commandPool = commandPool;
-		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
-
-		if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to allocate command buffers!");
-		}
-
 		for (size_t i = 0; i < commandBuffers.size(); ++i)
 		{
+			// Reset the command buffer to the initial state
+			VkCommandBufferResetFlags resetFlags = 0; // No specific flags
+			if (vkResetCommandBuffer(commandBuffers[i], resetFlags) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to reset command buffer!");
+			}
+
 			VkCommandBufferBeginInfo beginInfo{};
 			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			// Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
+			beginInfo.flags = 0;
+			beginInfo.pInheritanceInfo = nullptr; // Only relevant for secondary command buffers
 
 			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS)
 			{
@@ -1179,23 +1151,24 @@ namespace Engine
 			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-			for (size_t j = 0; j < renderables.size(); ++j)
+			// Iterate over all renderables for this frame
+			for (auto& rend : renderablesForFrame)
 			{
-				// Update the uniform buffer with the renderable's transform
-				UpdateUniformBuffer(renderables[j].transform);
+				// Update uniform buffer with this renderable's transform
+				UpdateUniformBuffer(rend.transform);
+
+				// Bind the descriptor set (assuming one descriptor set)
+				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
+					pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
 				// Bind vertex and index buffers
-				VkBuffer vertexBuffers[] = { vertexBuffer->GetBuffer() };
+				VkBuffer vertexBuffers[] = { rend.meshData->vertexBuffer->GetBuffer() };
 				VkDeviceSize offsets[] = { 0 };
 				vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+				vkCmdBindIndexBuffer(commandBuffers[i], rend.meshData->indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
-				// Bind the descriptor set
-				vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS,
-					pipelineLayout, 0, 1, &descriptorSets[j], 0, nullptr);
-
-				// Issue draw command
-				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(renderables[j].mesh.indices.size()), 1, 0, 0, 0);
+				// Draw indexed geometry
+				vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(rend.meshData->indexCount), 1, 0, 0, 0);
 			}
 
 			vkCmdEndRenderPass(commandBuffers[i]);

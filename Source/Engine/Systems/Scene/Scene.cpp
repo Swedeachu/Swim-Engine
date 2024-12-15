@@ -24,16 +24,21 @@ namespace Engine
       throw std::runtime_error("Renderer not available");
     }
 
+    // Indicate we're starting to specify what to draw this frame
+    renderer->BeginFrameRenderables();
+
     auto view = registry.view<Transform, Mesh>();
     for (auto entity : view)
     {
       const auto& transform = view.get<Transform>(entity);
       const auto& mesh = view.get<Mesh>(entity);
-      renderer->SubmitMesh(transform, mesh);
+
+      // Add each mesh + transform to the renderer for this frame
+      renderer->AddRenderable(transform, mesh);
     }
 
-    // Record command buffers after submission
-    renderer->RecordCommandBuffers();
+    // Done specifying renderables for this frame
+    renderer->EndFrameRenderables();
   }
 
 }

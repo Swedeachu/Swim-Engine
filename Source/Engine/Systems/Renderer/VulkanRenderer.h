@@ -1,11 +1,15 @@
+// VulkanRenderer.h
+
 #pragma once
 
 #include <optional>
 #include <stdexcept>
 #include <functional>
 #include <fstream>
+#include <unordered_map>
+#include <memory>
+#include <vector>
 #include "Buffer/VulkanBuffer.h"
-
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Mesh.h"
 
@@ -15,7 +19,6 @@ struct GLFWwindow; // if you use GLFW in the future for windowing
 
 namespace Engine
 {
-
   struct CameraUBO
   {
     glm::mat4 view;
@@ -43,16 +46,28 @@ namespace Engine
     std::vector<VkPresentModeKHR> presentModes;
   };
 
+  // Data stored once per unique mesh
+  struct MeshBufferData
+  {
+    std::unique_ptr<VulkanBuffer> vertexBuffer;
+    std::unique_ptr<VulkanBuffer> indexBuffer;
+    size_t indexCount;
+  };
+
+  struct RenderableInstance
+  {
+    Transform transform;
+    MeshBufferData* meshData;
+  };
+
   class VulkanRenderer : public Machine
   {
 
   public:
 
-    // the only point of these default params is to provide a default ctor
     VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
       : windowHandle(hwnd), windowWidth(width), windowHeight(height)
     {
-      // Ensure hwnd is valid
       if (!windowHandle)
       {
         throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
@@ -68,13 +83,17 @@ namespace Engine
 
     // Draw frame each update
     void DrawFrame();
-    void SubmitMesh(const Transform& transform, const Mesh& mesh);
+
+    // Methods to manage renderables each frame
+    void BeginFrameRenderables();
+    void AddRenderable(const Transform& transform, const Mesh& mesh);
+    void EndFrameRenderables();
+
+    // Command buffer recording
     void RecordCommandBuffers();
 
     // Call when window resized if needed:
     void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
-
-    // void UpdateUniformBuffer(const CameraUBO& uboData);
 
   private:
 
@@ -109,17 +128,30 @@ namespace Engine
     VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
     VkFence inFlightFence = VK_NULL_HANDLE;
 
-    std::unique_ptr<VulkanBuffer> vertexBuffer;
-    std::unique_ptr<VulkanBuffer> indexBuffer;
     std::unique_ptr<VulkanBuffer> uniformBuffer;
 
-    VkDescriptorSetLayout descriptorSetLayout;
-    VkDescriptorSet descriptorSet;
-    VkDescriptorPool descriptorPool;
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
     bool framebufferResized = false;
 
-    // Internal setup methods
+    // Store each unique mesh's buffers once
+    // TODO: make our own mesh pool class for this
+    std::unordered_map<std::string, MeshBufferData> meshCache;
+
+    // Renderables for this frame
+    std::vector<RenderableInstance> renderablesForFrame;
+
+    std::shared_ptr<CameraSystem> cameraSystem;
+
+    std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+
+    static std::vector<const char*> validationLayers;
+
+    // Methods
     void CreateInstance();
     void SetupDebugMessenger();
     void CreateSurface();
@@ -131,20 +163,12 @@ namespace Engine
     void CreateGraphicsPipeline();
     void CreateFramebuffers();
     void CreateCommandPool();
-    void CreateCommandBuffers();
+    void AllocateCommandBuffers(); 
     void CreateSyncObjects();
-    void CreateBuffers(const Mesh& mesh);
     void CreateDescriptorSetLayout();
     void CreateDescriptorSet();
 
-    struct Renderable
-    {
-      Transform transform;
-      Mesh mesh;
-    };
-
-    std::vector<Renderable> renderables; // Store entities with meshes
-    std::vector<VkDescriptorSet> descriptorSets; // Store descriptor sets for each renderable
+    MeshBufferData& GetOrCreateMeshBuffers(const Mesh& mesh);
 
     void UpdateUniformBuffer(const Transform& transform);
 
@@ -156,17 +180,8 @@ namespace Engine
     VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
     VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
     bool IsDeviceSuitable(VkPhysicalDevice device);
+    std::vector<const char*> GetRequiredExtensions();
 
-    static std::vector<const char*> GetRequiredExtensions();
-    static std::vector<const char*> validationLayers;
-
-    std::shared_ptr<CameraSystem> cameraSystem;
-
-    std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
-
-    // Shader loading helper
     static std::vector<char> ReadFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
