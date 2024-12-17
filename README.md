@@ -5,10 +5,6 @@ Using EnTT, my own Scene System and engine + windows messaging framework, and Vu
 
 Resize handling for camera and swap chain 
 <br>
-mesh pool | the mesh component is really just telling which mesh in the mesh pool to use for that entity with its transform
-<br>
-rotation for transforms and 3D primatives like spheres and cubes
-<br>
 texture rendering 
 <br>
 tinyobj loading 
