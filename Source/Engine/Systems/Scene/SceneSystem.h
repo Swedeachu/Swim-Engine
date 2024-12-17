@@ -31,6 +31,8 @@ namespace Engine
 		// Sets the active scene by name, optionally exiting the current one
 		void SetScene(const std::string& name, bool exitCurrent = true, bool initNew = true, bool awakeNew = false);
 
+		std::shared_ptr<Scene>& GetActiveScene() { return activeScene; }
+
 	private:
 
 		// Map of scenes by name

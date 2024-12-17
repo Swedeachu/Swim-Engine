@@ -30,6 +30,9 @@ namespace Engine
     // Removes a mesh by name. Returns true if successful.
     bool RemoveMesh(const std::string& name);
 
+    // Frees everything
+    void Flush();
+
   private:
 
     // Private constructor for Singleton pattern

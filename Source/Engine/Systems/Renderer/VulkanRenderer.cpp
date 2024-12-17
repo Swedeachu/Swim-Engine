@@ -10,6 +10,8 @@
 #include <filesystem>
 
 #include "Meshes/Vertex.h"
+#include "Meshes/MeshPool.h"
+#include "Engine/Components/Material.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -96,8 +98,6 @@ namespace Engine
 
 		CreateSyncObjects();             // Synchronization objects
 
-		// RecordCommandBuffers(); // Initial recording to avoid an error with vkQueueSubmit on frame 0 before anything is rendered
-
 		return 0;
 	}
 
@@ -128,7 +128,10 @@ namespace Engine
 	{
 		vkDeviceWaitIdle(device);
 
-		// Destroy synchronization objects
+		// Free all mesh buffers
+		MeshPool::GetInstance().Flush();
+
+		// Destroy semaphores
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -136,41 +139,33 @@ namespace Engine
 			vkDestroyFence(device, inFlightFences[i], nullptr);
 		}
 
-		// Destroy framebuffers
+		// Destroy frame buffers
 		for (auto framebuffer : swapChainFramebuffers)
 		{
 			vkDestroyFramebuffer(device, framebuffer, nullptr);
 		}
 
-		// Destroy graphics pipeline and layout
+		// Destroy pipelines
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-
-		// Destroy render pass
 		vkDestroyRenderPass(device, renderPass, nullptr);
 
-		// Destroy image views and swap chain
+		// Destroy image and swapchain stuff and set things to null
 		for (auto imageView : swapChainImageViews)
 		{
 			vkDestroyImageView(device, imageView, nullptr);
 		}
 		vkDestroySwapchainKHR(device, swapChain, nullptr);
 
-		// Destroy descriptor set layout and pool
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
-		// Destroy uniform buffer
 		uniformBuffer.reset();
 
-		// Destroy mesh buffers (handled by unique_ptr in meshCache)
-		meshBufferCache.clear();
-
-		// Destroy command pool and device
 		vkDestroyCommandPool(device, commandPool, nullptr);
 		vkDestroyDevice(device, nullptr);
 
-		// Destroy Vulkan instance and surface
+		// detatch debugger too
 		if (enableValidationLayers)
 		{
 			auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
@@ -179,6 +174,7 @@ namespace Engine
 				func(instance, debugMessenger, nullptr);
 			}
 		}
+
 		vkDestroySurfaceKHR(instance, surface, nullptr);
 		vkDestroyInstance(instance, nullptr);
 
@@ -273,60 +269,6 @@ namespace Engine
 		windowHeight = newHeight;
 		framebufferResized = true;
 		// TODO: swap chain recreation
-	}
-
-	void VulkanRenderer::ClearFrameRenderables()
-	{
-		// Clear previous frame's data
-		renderablesForFrame.clear();
-	}
-
-	void VulkanRenderer::AddRenderable(Transform* transform, const std::shared_ptr<Mesh>& mesh)
-	{
-		// Get or create buffers for this mesh
-		MeshBufferData& meshData = GetOrCreateMeshBuffers(mesh);
-
-		// Add to frame renderables
-		renderablesForFrame.emplace_back(transform, &meshData);
-	}
-
-	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
-	{
-		// Check if the MeshBufferData already exists in the cache
-		auto it = meshBufferCache.find(mesh);
-		if (it != meshBufferCache.end())
-		{
-			return it->second;
-		}
-
-		// Create buffers for the mesh
-		MeshBufferData data{};
-		size_t vertexSize = sizeof(Vertex) * mesh->vertices.size();
-		size_t indexSize = sizeof(uint16_t) * mesh->indices.size();
-
-		// Create vertex buffer
-		data.vertexBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice,
-			vertexSize,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-		data.vertexBuffer->CopyData(mesh->vertices.data(), vertexSize);
-
-		// Create index buffer
-		data.indexBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice,
-			indexSize,
-			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-		data.indexBuffer->CopyData(mesh->indices.data(), indexSize);
-
-		data.indexCount = mesh->indices.size();
-
-		// Insert the new MeshBufferData into the cache
-		auto emplaceResult = meshBufferCache.emplace(mesh, std::move(data));
-		return emplaceResult.first->second;
 	}
 
 	// --------------------------------------------------------------------------------------
@@ -745,7 +687,7 @@ namespace Engine
 		colorBlending.attachmentCount = 1;
 		colorBlending.pAttachments = &colorBlendAttachment;
 
-		// Pipeline layout is already created by CreatePipelineLayout()
+		// Pipeline layout is already created by CreatePipelineLayout() before this
 		// Graphics pipeline creation
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -928,12 +870,11 @@ namespace Engine
 		vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
 	}
 
-	void VulkanRenderer::UpdateUniformBuffer(const Transform& transform)
+	void VulkanRenderer::UpdateUniformBuffer()
 	{
 		CameraUBO ubo{};
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
-		// ubo.model = transform.GetModelMatrix(); 
 
 		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
 	}
@@ -1137,6 +1078,46 @@ namespace Engine
 		return shaderModule;
 	}
 
+	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
+	{
+		// Check if the Mesh already has its MeshBufferData initialized
+		if (mesh->meshBufferData)
+		{
+			return *mesh->meshBufferData;
+		}
+
+		// Create a new MeshBufferData instance
+		auto data = std::make_shared<MeshBufferData>();
+
+		size_t vertexSize = sizeof(Vertex) * mesh->vertices.size();
+		size_t indexSize = sizeof(uint16_t) * mesh->indices.size();
+
+		// Create and initialize the vertex buffer
+		data->vertexBuffer = std::make_unique<VulkanBuffer>(
+			device, physicalDevice,
+			vertexSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		data->vertexBuffer->CopyData(mesh->vertices.data(), vertexSize);
+
+		// Create and initialize the index buffer
+		data->indexBuffer = std::make_unique<VulkanBuffer>(
+			device, physicalDevice,
+			indexSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		data->indexBuffer->CopyData(mesh->indices.data(), indexSize);
+
+		data->indexCount = static_cast<uint32_t>(mesh->indices.size());
+
+		// Store the newly created MeshBufferData in the Mesh
+		mesh->meshBufferData = data;
+
+		return *data;
+	}
+
 	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)
 	{
 		VkCommandBufferBeginInfo beginInfo{};
@@ -1163,28 +1144,53 @@ namespace Engine
 		vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 		vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-		// Iterate over all renderables for this frame
-		for (auto& rend : renderablesForFrame)
+		// Update uniform buffer with view and projection matrices
+		UpdateUniformBuffer();
+
+		// Access the active scene (this is really scuffed to do it like this from here, this should probably change in the future)
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		if (scene)
 		{
-			// Update uniform buffer with view and proj matrices
-			UpdateUniformBuffer(*rend.transform); // Now only updates view and proj
+			auto& registry = scene->GetRegistry();
+			auto view = registry.view<Transform, Material>();
 
-			// Bind the descriptor set
-			vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-				pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+			for (auto entity : view)
+			{
+				auto& transform = view.get<Transform>(entity);
+				const auto& mat = view.get<Material>(entity);
 
-			// Push the model matrix as push constants
-			glm::mat4 modelMatrix = rend.transform->GetModelMatrix();
-			vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &modelMatrix);
+				// Ensure the mesh has its buffer data
+				auto& meshData = GetOrCreateMeshBuffers(mat.mesh);
 
-			// Bind vertex and index buffers
-			VkBuffer vertexBuffers[] = { rend.meshData->vertexBuffer->GetBuffer() };
-			VkDeviceSize offsets[] = { 0 };
-			vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
-			vkCmdBindIndexBuffer(commandBuffers[imageIndex], rend.meshData->indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+				// Bind the descriptor set
+				vkCmdBindDescriptorSets(
+					commandBuffers[imageIndex],
+					VK_PIPELINE_BIND_POINT_GRAPHICS,
+					pipelineLayout,
+					0, 1, &descriptorSet,
+					0, nullptr
+				);
 
-			// Draw indexed geometry
-			vkCmdDrawIndexed(commandBuffers[imageIndex], static_cast<uint32_t>(rend.meshData->indexCount), 1, 0, 0, 0);
+				// Push the model matrix as push constants
+				glm::mat4 modelMatrix = transform.GetModelMatrix();
+				vkCmdPushConstants(
+					commandBuffers[imageIndex],
+					pipelineLayout,
+					VK_SHADER_STAGE_VERTEX_BIT,
+					0,
+					sizeof(glm::mat4),
+					&modelMatrix
+				);
+
+				// Bind vertex and index buffers
+				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer() };
+				VkDeviceSize offsets[] = { 0 };
+				vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(commandBuffers[imageIndex], meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+				// Draw indexed geometry
+				vkCmdDrawIndexed(commandBuffers[imageIndex], meshData.indexCount, 1, 0, 0, 0);
+			}
 		}
 
 		vkCmdEndRenderPass(commandBuffers[imageIndex]);

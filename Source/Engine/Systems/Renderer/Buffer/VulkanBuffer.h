@@ -21,6 +21,8 @@ namespace Engine
 
 		~VulkanBuffer();
 
+		void Free();
+
 		void CopyData(const void* data, size_t size);
 
 		VkBuffer GetBuffer() const { return buffer; }

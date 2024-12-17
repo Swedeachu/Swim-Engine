@@ -47,4 +47,21 @@ namespace Engine
     return meshes.erase(name) > 0;
   }
 
+  void MeshPool::Flush()
+  {
+    std::lock_guard<std::mutex> lock(poolMutex);
+
+    for (auto& [name, mesh] : meshes)
+    {
+      if (mesh && mesh->meshBufferData)
+      {
+        mesh->meshBufferData->Free();
+        mesh->meshBufferData.reset();
+      }
+    }
+
+    // Clear all meshes from the pool too
+    meshes.clear();
+  }
+
 }

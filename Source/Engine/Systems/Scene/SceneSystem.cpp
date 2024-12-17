@@ -60,7 +60,6 @@ namespace Engine
 		if (activeScene)
 		{
 			activeScene->Update(dt);
-			activeScene->SubmitMeshesToRenderer();
 		}
 	}
 

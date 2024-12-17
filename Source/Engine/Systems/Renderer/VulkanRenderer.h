@@ -48,28 +48,6 @@ namespace Engine
 		std::vector<VkPresentModeKHR> presentModes;
 	};
 
-	// Data stored once per unique mesh
-	struct MeshBufferData
-	{
-		std::unique_ptr<VulkanBuffer> vertexBuffer;
-		std::unique_ptr<VulkanBuffer> indexBuffer;
-		size_t indexCount;
-	};
-
-	struct SharedPtrMeshHasher
-	{
-		std::size_t operator()(const std::shared_ptr<Engine::Mesh>& meshPtr) const
-		{
-			return std::hash<Engine::Mesh*>()(meshPtr.get());
-		}
-	};
-
-	struct RenderableInstance
-	{
-		Transform* transform;
-		MeshBufferData* meshData;
-	};
-
 	class VulkanRenderer : public Machine
 	{
 
@@ -90,10 +68,6 @@ namespace Engine
 		void Update(double dt) override;
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
-
-		// Methods to manage renderables each frame
-		void ClearFrameRenderables();
-		void AddRenderable(Transform* transform, const std::shared_ptr<Mesh>& mesh);
 
 		// Call when window resized if needed:
 		void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
@@ -144,11 +118,6 @@ namespace Engine
 
 		bool framebufferResized = false;
 
-		// Hash map to cache MeshBufferData based on shared_ptr<Mesh>
-		std::unordered_map<std::shared_ptr<Engine::Mesh>, MeshBufferData, SharedPtrMeshHasher> meshBufferCache;
-
-		std::vector<RenderableInstance> renderablesForFrame;
-
 		std::shared_ptr<CameraSystem> cameraSystem;
 
 		std::vector<const char*> deviceExtensions = {
@@ -183,7 +152,7 @@ namespace Engine
 
 		MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
-		void UpdateUniformBuffer(const Transform& transform);
+		void UpdateUniformBuffer();
 
 		// Helpers
 		bool CheckValidationLayerSupport();

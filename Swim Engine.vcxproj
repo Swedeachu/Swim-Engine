@@ -207,6 +207,7 @@
     <ClInclude Include="Source\Engine\SwimEngine.h" />
     <ClInclude Include="Source\Engine\Components\Transform.h" />
     <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshBufferData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Vertex.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />

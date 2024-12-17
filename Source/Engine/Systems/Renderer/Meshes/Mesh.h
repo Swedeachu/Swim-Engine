@@ -1,14 +1,17 @@
 #pragma once
 
 #include "Vertex.h"
+#include "MeshBufferData.h"
 
 namespace Engine
 {
 
   struct Mesh
   {
-    std::vector<Vertex> vertices;  // Vertices of the mesh
-    std::vector<uint16_t> indices; // Indices for drawing
+    std::vector<Vertex> vertices; 
+    std::vector<uint16_t> indices; 
+
+    std::shared_ptr<MeshBufferData> meshBufferData;
 
     Mesh() = default;
 
@@ -17,4 +20,4 @@ namespace Engine
     {}
   };
 
-} // namespace Engine
+} 

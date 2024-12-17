@@ -32,5 +32,6 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Vertex.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
     <ClInclude Include="Source\Engine\Components\Material.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshBufferData.h" />
   </ItemGroup>
 </Project>

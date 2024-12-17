@@ -164,8 +164,7 @@ namespace Game
 	int SandBox::Exit()
 	{
 		std::cout << name << " Exiting" << std::endl;
-
-		return 0;
+		return Scene::Exit();
 	}
 
 }

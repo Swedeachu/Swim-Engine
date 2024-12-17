@@ -46,13 +46,27 @@ namespace Engine
 
 	VulkanBuffer::~VulkanBuffer()
 	{
+		Free();
+	}
+
+	void VulkanBuffer::Free()
+	{
+		// Check if the buffer and memory are already freed
+		if (buffer == VK_NULL_HANDLE && memory == VK_NULL_HANDLE)
+		{
+			return; // Already freed, do nothing
+		}
+
 		if (memory != VK_NULL_HANDLE)
 		{
 			vkFreeMemory(device, memory, nullptr);
+			memory = VK_NULL_HANDLE; // Mark as freed
 		}
+
 		if (buffer != VK_NULL_HANDLE)
 		{
 			vkDestroyBuffer(device, buffer, nullptr);
+			buffer = VK_NULL_HANDLE; // Mark as freed
 		}
 	}
 

@@ -32,11 +32,13 @@ namespace Engine
 
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
-		int Exit() override { return 0; };
+		int Exit() override { DestroyAllEntities(); return 0; };
 
 		entt::entity CreateEntity();
 
 		void DestroyEntity(entt::entity entity);
+
+		void DestroyAllEntities();
 
 		const std::string& GetName() const { return name; }
 
@@ -47,9 +49,6 @@ namespace Engine
 		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
 		void SetCameraSystem(const std::shared_ptr<CameraSystem>& system) { cameraSystem = system; }
 		void SetRenderer(const std::shared_ptr<VulkanRenderer>& system) { renderer = system; }
-
-		// Pass meshes and transforms to the renderer, called on the active scene by the SceneSystem
-		void SubmitMeshesToRenderer();
 
 	protected:
 
