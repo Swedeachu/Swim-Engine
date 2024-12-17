@@ -51,6 +51,8 @@ namespace Engine
 		unsigned int GetWindowWidth() const { return windowWidth; }
 		unsigned int GetWindowHeight() const { return windowHeight; }
 
+		unsigned int GetTotalFrames() const { return totalFrames; }
+
 	private:
 
 		// calls Update when it is time

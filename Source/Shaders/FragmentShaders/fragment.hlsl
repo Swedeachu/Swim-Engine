@@ -1,10 +1,18 @@
+
 struct PSInput
 {
-    float4 position : SV_Position; // Maps to location 0 in Vulkan
-    float3 color : COLOR; // Maps to location 1 in Vulkan
+    float4 position : SV_Position; // Transformed position (not used)
+    float3 color : COLOR;           // Vertex color
 };
 
-float4 main(PSInput input) : SV_Target
+struct PSOutput
 {
-    return float4(input.color, 1.0);
+    float4 outColor : SV_Target;    // Final pixel color
+};
+
+PSOutput main(PSInput input)
+{
+    PSOutput output;
+    output.outColor = float4(input.color, 1.0);
+    return output;
 }

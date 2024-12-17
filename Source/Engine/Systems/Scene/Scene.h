@@ -79,10 +79,10 @@ namespace Engine
 
 	private:
 
-		std::weak_ptr<SceneSystem> sceneSystem; 
-		std::weak_ptr<InputManager> inputManager; 
-		std::weak_ptr<CameraSystem> cameraSystem; 
-		std::weak_ptr<VulkanRenderer> renderer; 
+		std::weak_ptr<SceneSystem> sceneSystem;
+		std::weak_ptr<InputManager> inputManager;
+		std::weak_ptr<CameraSystem> cameraSystem;
+		std::weak_ptr<VulkanRenderer> renderer;
 
 	};
 

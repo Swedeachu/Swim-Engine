@@ -1,7 +1,8 @@
 #include "PCH.h"
 #include "SandBox.h"
+#include "Engine\Systems\Renderer\Meshes\MeshPool.h"
 #include "Engine\Components\Transform.h"
-#include "Engine\Components\Mesh.h"
+#include "Engine\Components\Material.h"
 
 namespace Game
 {
@@ -13,79 +14,130 @@ namespace Game
 		return 0;
 	}
 
+	entt::entity controllableEntity;
+
 	int SandBox::Init()
 	{
 		std::cout << name << " Init" << std::endl;
 
-		auto entity = CreateEntity();
+		// Get the MeshPool instance
+		auto& meshPool = Engine::MeshPool::GetInstance();
 
-		// Add Transform component
-		GetRegistry().emplace<Engine::Transform>(entity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f, 1.0f, 1.0f));
-
-		// Add Mesh component
-		std::vector<Engine::Vertex> vertices = {
-				{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-				{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-				{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-				{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+		// Define vertices and indices for two quads
+		std::vector<Engine::Vertex> quadVertices1 = {
+				{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}}, // Red
+				{{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}}, // Green
+				{{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}, // Blue
+				{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}  // White
 		};
+
+		std::vector<Engine::Vertex> quadVertices2 = {
+				{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 1.0f}}, // Cyan
+				{{ 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 1.0f}}, // Magenta
+				{{ 0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 0.0f}}, // Yellow
+				{{-0.5f,  0.5f, 0.0f}, {0.5f, 0.5f, 0.5f}}  // Gray
+		};
+
 		std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
 
-		GetRegistry().emplace<Engine::Mesh>(entity, vertices, indices);
+		// Register both meshes
+		auto mesh1 = meshPool.RegisterMesh("RainbowQuad1", quadVertices1, indices);
+		auto mesh2 = meshPool.RegisterMesh("RainbowQuad2", quadVertices2, indices);
+
+		// Create and set up two entities
+		auto& registry = GetRegistry();
+
+		// Entity 1: Controlled by WASD
+		controllableEntity = CreateEntity();
+		registry.emplace<Engine::Transform>(controllableEntity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f));
+		registry.emplace<Engine::Material>(controllableEntity, mesh1);
+
+		// Entity 2: Static entity
+		auto staticEntity = CreateEntity();
+		registry.emplace<Engine::Transform>(staticEntity, glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f));
+		registry.emplace<Engine::Material>(staticEntity, mesh2);
 
 		return 0;
 	}
 
+	// this is just quickly thrown together demo code, behavior components coming soon
 	void SandBox::Update(double dt)
 	{
 		auto input = GetInputManager();
-		auto camera = GetCameraSystem();
+		auto cameraSystem = GetCameraSystem();
+		auto& registry = GetRegistry();
 
-		const float moveSpeed = 5.0f; // Speed of movement
-		glm::vec3 moveDirection{ 0.0f, 0.0f, 0.0f };
+		// ====== Entity Movement (WASD) =======
+		const float moveSpeed = 5.0f;
+		glm::vec3 moveDirection{ 0.0f };
 
-		// Handle input for WASD keys
-		if (input->IsKeyDown('W'))
-		{
-			moveDirection += glm::vec3(0.0f, 0.0f, -1.0f); // Forward
-		}
-		if (input->IsKeyDown('S'))
-		{
-			moveDirection += glm::vec3(0.0f, 0.0f, 1.0f); // Backward
-		}
-		if (input->IsKeyDown('A'))
-		{
-			moveDirection += glm::vec3(-1.0f, 0.0f, 0.0f); // Left
-		}
-		if (input->IsKeyDown('D'))
-		{
-			moveDirection += glm::vec3(1.0f, 0.0f, 0.0f); // Right
-		}
+		if (input->IsKeyDown('W')) { moveDirection += glm::vec3(0.0f, 0.0f, -1.0f); }
+		if (input->IsKeyDown('S')) { moveDirection += glm::vec3(0.0f, 0.0f, 1.0f); }
+		if (input->IsKeyDown('A')) { moveDirection += glm::vec3(-1.0f, 0.0f, 0.0f); }
+		if (input->IsKeyDown('D')) { moveDirection += glm::vec3(1.0f, 0.0f, 0.0f); }
 
-		// Normalize direction to ensure consistent speed and apply delta time
 		if (glm::length(moveDirection) > 0.0f)
 		{
-			moveDirection = glm::normalize(moveDirection);
-
-			auto view = GetRegistry().view<Engine::Transform>();
-			entt::entity et;
-			bool found = false;
-			for (auto entity : view)
-			{
-				et = entity;
-				found = true;
-				break;
-			}
-
-			if (found)
-			{
-				auto& transform = view.get<Engine::Transform>(et);
-				transform.position += moveDirection * moveSpeed * static_cast<float>(dt);
-			}
-
-			// camera->camera.position += moveDirection * moveSpeed * static_cast<float>(dt);
-			// std::cout << camera->camera.position.x << ", " << camera->camera.position.y << ", " << camera->camera.position.z << std::endl;
+			moveDirection = glm::normalize(moveDirection) * moveSpeed * static_cast<float>(dt);
+			auto& transform = registry.get<Engine::Transform>(controllableEntity);
+			transform.GetPositionRef() += moveDirection;
 		}
+
+		// ====== Camera Movement (Arrow Keys + Q/E, Z/X) =======
+		const float cameraMoveSpeed = 5.0f;
+		const float rotationSpeed = 45.0f;
+
+		// Camera position movement
+		glm::vec3 cameraMove{ 0.0f };
+
+		if (input->IsKeyDown(VK_UP)) { cameraMove += glm::vec3(0.0f, 0.0f, -1.0f); }
+		if (input->IsKeyDown(VK_DOWN)) { cameraMove += glm::vec3(0.0f, 0.0f, 1.0f); }
+		if (input->IsKeyDown(VK_LEFT)) { cameraMove += glm::vec3(-1.0f, 0.0f, 0.0f); }
+		if (input->IsKeyDown(VK_RIGHT)) { cameraMove += glm::vec3(1.0f, 0.0f, 0.0f); }
+
+		if (glm::length(cameraMove) > 0.0f)
+		{
+			cameraMove = glm::normalize(cameraMove) * cameraMoveSpeed * static_cast<float>(dt);
+			cameraSystem->GetCamera().SetPosition(cameraSystem->GetCamera().GetPosition() + cameraMove);
+		}
+
+		// Camera pitch (Q/E) and yaw (Z/X)
+		if (input->IsKeyDown('Q'))
+		{
+			cameraSystem->GetCamera().SetRotationEuler(
+				cameraSystem->GetCamera().GetRotationEuler().x + rotationSpeed * static_cast<float>(dt),
+				cameraSystem->GetCamera().GetRotationEuler().y,
+				0.0f
+			);
+		}
+
+		if (input->IsKeyDown('E'))
+		{
+			cameraSystem->GetCamera().SetRotationEuler(
+				cameraSystem->GetCamera().GetRotationEuler().x - rotationSpeed * static_cast<float>(dt),
+				cameraSystem->GetCamera().GetRotationEuler().y,
+				0.0f
+			);
+		}
+
+		if (input->IsKeyDown('Z'))
+		{
+			cameraSystem->GetCamera().SetRotationEuler(
+				cameraSystem->GetCamera().GetRotationEuler().x,
+				cameraSystem->GetCamera().GetRotationEuler().y - rotationSpeed * static_cast<float>(dt),
+				0.0f
+			);
+		}
+
+		if (input->IsKeyDown('X'))
+		{
+			cameraSystem->GetCamera().SetRotationEuler(
+				cameraSystem->GetCamera().GetRotationEuler().x,
+				cameraSystem->GetCamera().GetRotationEuler().y + rotationSpeed * static_cast<float>(dt),
+				0.0f
+			);
+		}
+
 	}
 
 	void SandBox::FixedUpdate(unsigned int tickThisSecond)

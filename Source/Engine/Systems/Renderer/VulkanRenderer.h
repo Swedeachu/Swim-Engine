@@ -11,185 +11,193 @@
 #include <vector>
 #include "Buffer/VulkanBuffer.h"
 #include "Engine/Components/Transform.h"
-#include "Engine/Components/Mesh.h"
+#include "Meshes/Vertex.h"
+#include "Meshes/Mesh.h"
 
 // Forward declare
-struct GLFWwindow; // if you use GLFW in the future for windowing
+struct GLFWwindow; // if we use GLFW in the future for windowing
 // For now, we use Win32. We'll just rely on HWND from the engine.
 
 namespace Engine
 {
 
-  struct CameraUBO
-  {
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::mat4 model;
-  };
+	struct CameraUBO
+	{
+		glm::mat4 view;
+		glm::mat4 proj;
+		// glm::mat4 model;
+	};
 
-  // A struct to hold indices into queues we use
-  struct QueueFamilyIndices
-  {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
+	// A struct to hold indices into queues we use
+	struct QueueFamilyIndices
+	{
+		std::optional<uint32_t> graphicsFamily;
+		std::optional<uint32_t> presentFamily;
 
-    bool isComplete()
-    {
-      return graphicsFamily.has_value() && presentFamily.has_value();
-    }
-  };
+		bool isComplete()
+		{
+			return graphicsFamily.has_value() && presentFamily.has_value();
+		}
+	};
 
-  // Swapchain support details
-  struct SwapChainSupportDetails
-  {
-    VkSurfaceCapabilitiesKHR capabilities;
-    std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
-  };
+	// Swapchain support details
+	struct SwapChainSupportDetails
+	{
+		VkSurfaceCapabilitiesKHR capabilities;
+		std::vector<VkSurfaceFormatKHR> formats;
+		std::vector<VkPresentModeKHR> presentModes;
+	};
 
-  // Data stored once per unique mesh
-  struct MeshBufferData
-  {
-    std::unique_ptr<VulkanBuffer> vertexBuffer;
-    std::unique_ptr<VulkanBuffer> indexBuffer;
-    size_t indexCount;
-  };
+	// Data stored once per unique mesh
+	struct MeshBufferData
+	{
+		std::unique_ptr<VulkanBuffer> vertexBuffer;
+		std::unique_ptr<VulkanBuffer> indexBuffer;
+		size_t indexCount;
+	};
 
-  struct RenderableInstance
-  {
-    Transform transform;
-    MeshBufferData* meshData;
-  };
+	struct SharedPtrMeshHasher
+	{
+		std::size_t operator()(const std::shared_ptr<Engine::Mesh>& meshPtr) const
+		{
+			return std::hash<Engine::Mesh*>()(meshPtr.get());
+		}
+	};
 
-  class VulkanRenderer : public Machine
-  {
+	struct RenderableInstance
+	{
+		Transform* transform;
+		MeshBufferData* meshData;
+	};
 
-  public:
+	class VulkanRenderer : public Machine
+	{
 
-    VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
-      : windowHandle(hwnd), windowWidth(width), windowHeight(height)
-    {
-      if (!windowHandle)
-      {
-        throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
-      }
-    }
+	public:
 
-    // Machine overrides
-    int Awake() override;
-    int Init() override;
-    void Update(double dt) override;
-    void FixedUpdate(unsigned int tickThisSecond) override;
-    int Exit() override;
+		VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
+			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
+		{
+			if (!windowHandle)
+			{
+				throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
+			}
+		}
 
-    // Methods to manage renderables each frame
-    void ClearFrameRenderables();
-    void AddRenderable(const Transform& transform, const Mesh& mesh);
+		// Machine overrides
+		int Awake() override;
+		int Init() override;
+		void Update(double dt) override;
+		void FixedUpdate(unsigned int tickThisSecond) override;
+		int Exit() override;
 
-    // Call when window resized if needed:
-    void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
+		// Methods to manage renderables each frame
+		void ClearFrameRenderables();
+		void AddRenderable(Transform* transform, const std::shared_ptr<Mesh>& mesh);
 
-  private:
+		// Call when window resized if needed:
+		void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
 
-    // Window management
-    HWND windowHandle;
-    uint32_t windowWidth;
-    uint32_t windowHeight;
+	private:
 
-    // Vulkan core objects
-    VkInstance instance = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    VkQueue graphicsQueue = VK_NULL_HANDLE;
-    VkQueue presentQueue = VK_NULL_HANDLE;
+		// Window management
+		HWND windowHandle;
+		uint32_t windowWidth;
+		uint32_t windowHeight;
 
-    VkSwapchainKHR swapChain = VK_NULL_HANDLE;
-    std::vector<VkImage> swapChainImages;
-    VkFormat swapChainImageFormat;
-    VkExtent2D swapChainExtent;
-    std::vector<VkImageView> swapChainImageViews;
-    VkRenderPass renderPass = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline graphicsPipeline = VK_NULL_HANDLE;
-    std::vector<VkFramebuffer> swapChainFramebuffers;
+		// Vulkan core objects
+		VkInstance instance = VK_NULL_HANDLE;
+		VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
+		VkSurfaceKHR surface = VK_NULL_HANDLE;
+		VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+		VkDevice device = VK_NULL_HANDLE;
+		VkQueue graphicsQueue = VK_NULL_HANDLE;
+		VkQueue presentQueue = VK_NULL_HANDLE;
 
-    VkCommandPool commandPool = VK_NULL_HANDLE;
-    std::vector<VkCommandBuffer> commandBuffers;
+		VkSwapchainKHR swapChain = VK_NULL_HANDLE;
+		std::vector<VkImage> swapChainImages;
+		VkFormat swapChainImageFormat;
+		VkExtent2D swapChainExtent;
+		std::vector<VkImageView> swapChainImageViews;
+		VkRenderPass renderPass = VK_NULL_HANDLE;
+		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+		std::vector<VkFramebuffer> swapChainFramebuffers;
 
-    // Synchronization
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
-    size_t currentFrame = 0;
+		VkCommandPool commandPool = VK_NULL_HANDLE;
+		std::vector<VkCommandBuffer> commandBuffers;
 
-    std::vector<VkSemaphore> imageAvailableSemaphores;
-    std::vector<VkSemaphore> renderFinishedSemaphores;
-    std::vector<VkFence> inFlightFences;
+		// Synchronization
+		static const int MAX_FRAMES_IN_FLIGHT = 2;
+		size_t currentFrame = 0;
 
-    // Uniform buffer
-    std::unique_ptr<VulkanBuffer> uniformBuffer;
+		std::vector<VkSemaphore> imageAvailableSemaphores;
+		std::vector<VkSemaphore> renderFinishedSemaphores;
+		std::vector<VkFence> inFlightFences;
 
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+		// Uniform buffer
+		std::unique_ptr<VulkanBuffer> uniformBuffer;
 
-    bool framebufferResized = false;
+		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+		VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
 
-    // Store each unique mesh's buffers once
-    // TODO: make our own mesh pool class for this
-    std::unordered_map<std::string, MeshBufferData> meshCache;
+		bool framebufferResized = false;
 
-    // Renderables for this frame
-    std::vector<RenderableInstance> renderablesForFrame;
+		// Hash map to cache MeshBufferData based on shared_ptr<Mesh>
+		std::unordered_map<std::shared_ptr<Engine::Mesh>, MeshBufferData, SharedPtrMeshHasher> meshBufferCache;
 
-    std::shared_ptr<CameraSystem> cameraSystem;
+		std::vector<RenderableInstance> renderablesForFrame;
 
-    std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
+		std::shared_ptr<CameraSystem> cameraSystem;
 
-    static std::vector<const char*> validationLayers;
+		std::vector<const char*> deviceExtensions = {
+				VK_KHR_SWAPCHAIN_EXTENSION_NAME
+		};
 
-    // Draw frame each update
-    void DrawFrame();
+		static std::vector<const char*> validationLayers;
 
-    // Command buffer recording
-    void RecordCommandBuffer(uint32_t imageIndex);
+		// Draw frame each update
+		void DrawFrame();
 
-    // Methods
-    void CreateInstance();
-    void SetupDebugMessenger();
-    void CreateSurface();
-    void PickPhysicalDevice();
-    void CreateLogicalDevice();
-    void CreateSwapChain();
-    void CreateImageViews();
-    void CreateRenderPass();
-    void CreateGraphicsPipeline();
-    void CreateFramebuffers();
-    void CreateCommandPool();
-    void AllocateCommandBuffers();
-    void CreateSyncObjects();
-    void CreateDescriptorSetLayout();
-    void CreateDescriptorSet();
+		// Command buffer recording
+		void RecordCommandBuffer(uint32_t imageIndex);
 
-    MeshBufferData& GetOrCreateMeshBuffers(const Mesh& mesh);
+		// Methods
+		void CreateInstance();
+		void SetupDebugMessenger();
+		void CreateSurface();
+		void PickPhysicalDevice();
+		void CreateLogicalDevice();
+		void CreateSwapChain();
+		void CreateImageViews();
+		void CreateRenderPass();
+		void CreateGraphicsPipeline();
+		void CreateFramebuffers();
+		void CreateCommandPool();
+		void AllocateCommandBuffers();
+		void CreateSyncObjects();
+		void CreateDescriptorSetLayout();
+		void CreateDescriptorSet();
+		void CreatePipelineLayout();
 
-    void UpdateUniformBuffer(const Transform& transform);
+		MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
-    // Helpers
-    bool CheckValidationLayerSupport();
-    QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
-    SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device);
-    VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
-    VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
-    VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
-    bool IsDeviceSuitable(VkPhysicalDevice device);
-    std::vector<const char*> GetRequiredExtensions();
+		void UpdateUniformBuffer(const Transform& transform);
 
-    static std::vector<char> ReadFile(const std::string& filename);
-    VkShaderModule CreateShaderModule(const std::vector<char>& code);
+		// Helpers
+		bool CheckValidationLayerSupport();
+		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
+		SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device);
+		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
+		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+		bool IsDeviceSuitable(VkPhysicalDevice device);
+		std::vector<const char*> GetRequiredExtensions();
 
-  };
+		static std::vector<char> ReadFile(const std::string& filename);
+		VkShaderModule CreateShaderModule(const std::vector<char>& code);
+
+	};
 
 }

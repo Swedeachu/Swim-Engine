@@ -188,6 +188,7 @@
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
@@ -200,14 +201,16 @@
     <ClCompile Include="Source\main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\Engine\Components\Mesh.h" />
+    <ClInclude Include="Source\Engine\Components\Material.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Mesh.h" />
     <ClInclude Include="Source\Engine\Machine.h" />
     <ClInclude Include="Source\Engine\SwimEngine.h" />
     <ClInclude Include="Source\Engine\Components\Transform.h" />
     <ClInclude Include="Source\Engine\Systems\IO\InputManager.h" />
-    <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\Vertex.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Vertex.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />

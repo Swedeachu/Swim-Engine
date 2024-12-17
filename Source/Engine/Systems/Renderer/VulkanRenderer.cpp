@@ -9,7 +9,7 @@
 #include <fstream>
 #include <filesystem>
 
-#include "Engine/Systems/Renderer/Buffer/Vertex.h"
+#include "Meshes/Vertex.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -77,6 +77,7 @@ namespace Engine
 		CreateImageViews();              // Image views for swap chain images
 		CreateRenderPass();              // Render pass setup
 		CreateDescriptorSetLayout();     // Creates the descriptor set layout
+		CreatePipelineLayout();          // Set up layout with push constants
 		CreateGraphicsPipeline();        // Uses descriptorSetLayout in pipeline layout creation
 		CreateFramebuffers();            // Create framebuffers from image views
 		CreateCommandPool();             // Command pool for command buffers
@@ -163,7 +164,7 @@ namespace Engine
 		uniformBuffer.reset();
 
 		// Destroy mesh buffers (handled by unique_ptr in meshCache)
-		meshCache.clear();
+		meshBufferCache.clear();
 
 		// Destroy command pool and device
 		vkDestroyCommandPool(device, commandPool, nullptr);
@@ -280,55 +281,52 @@ namespace Engine
 		renderablesForFrame.clear();
 	}
 
-	void VulkanRenderer::AddRenderable(const Transform& transform, const Mesh& mesh)
+	void VulkanRenderer::AddRenderable(Transform* transform, const std::shared_ptr<Mesh>& mesh)
 	{
 		// Get or create buffers for this mesh
 		MeshBufferData& meshData = GetOrCreateMeshBuffers(mesh);
 
 		// Add to frame renderables
-		renderablesForFrame.push_back({ transform, &meshData });
+		renderablesForFrame.emplace_back(transform, &meshData);
 	}
 
-	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const Mesh& mesh)
+	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
 	{
-		// Assume Mesh has a unique name or identifier
-		// If not, you can hash the vertex data or store a pointer
-		// TODO: Hyper optimized Mesh pool later where a mesh component only tells which mesh to use from the mesh pool, maybe with a modern pointer to the intended mesh
-		// This also is not even a secure hash because meshes can be of the same vertices and indices in size and the mesh_ is completely pointless
-		// HOWEVER, the mesh cache is still an essential idea as it holds MeshBufferData, not the meshes themselves, which is extremely useful and crucial for performance
-		std::string meshKey = "mesh_" + std::to_string(mesh.vertices.size()) + "_" + std::to_string(mesh.indices.size());
-
-		auto it = meshCache.find(meshKey);
-		if (it != meshCache.end())
+		// Check if the MeshBufferData already exists in the cache
+		auto it = meshBufferCache.find(mesh);
+		if (it != meshBufferCache.end())
 		{
 			return it->second;
 		}
 
-		// Create buffers once
+		// Create buffers for the mesh
 		MeshBufferData data{};
-		size_t vertexSize = sizeof(Vertex) * mesh.vertices.size();
-		size_t indexSize = sizeof(uint16_t) * mesh.indices.size();
+		size_t vertexSize = sizeof(Vertex) * mesh->vertices.size();
+		size_t indexSize = sizeof(uint16_t) * mesh->indices.size();
 
+		// Create vertex buffer
 		data.vertexBuffer = std::make_unique<VulkanBuffer>(
 			device, physicalDevice,
 			vertexSize,
 			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 		);
-		data.vertexBuffer->CopyData(mesh.vertices.data(), vertexSize);
+		data.vertexBuffer->CopyData(mesh->vertices.data(), vertexSize);
 
+		// Create index buffer
 		data.indexBuffer = std::make_unique<VulkanBuffer>(
 			device, physicalDevice,
 			indexSize,
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 		);
-		data.indexBuffer->CopyData(mesh.indices.data(), indexSize);
+		data.indexBuffer->CopyData(mesh->indices.data(), indexSize);
 
-		data.indexCount = mesh.indices.size();
+		data.indexCount = mesh->indices.size();
 
-		meshCache[meshKey] = std::move(data);
-		return meshCache[meshKey];
+		// Insert the new MeshBufferData into the cache
+		auto emplaceResult = meshBufferCache.emplace(mesh, std::move(data));
+		return emplaceResult.first->second;
 	}
 
 	// --------------------------------------------------------------------------------------
@@ -634,8 +632,31 @@ namespace Engine
 		}
 	}
 
+	void VulkanRenderer::CreatePipelineLayout()
+	{
+		// Define push constant range for the model matrix
+		VkPushConstantRange pushConstantRange{};
+		pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		pushConstantRange.offset = 0;
+		pushConstantRange.size = sizeof(glm::mat4); // Size of the model matrix
+
+		// Create pipeline layout with descriptor set layout and push constant range
+		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pipelineLayoutInfo.setLayoutCount = 1; // Assuming one descriptor set
+		pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+		pipelineLayoutInfo.pushConstantRangeCount = 1;
+		pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+		if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create pipeline layout!");
+		}
+	}
+
 	void VulkanRenderer::CreateGraphicsPipeline()
 	{
+		// Load shader code
 		auto vertShaderCode = ReadFile("Shaders\\VertexShaders\\vertex.spv");
 		auto fragShaderCode = ReadFile("Shaders\\FragmentShaders\\fragment.spv");
 
@@ -702,9 +723,7 @@ namespace Engine
 		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
 		rasterizer.lineWidth = 1.0f;
 		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-		// rasterizer.cullMode = VK_CULL_MODE_NONE; // this would disable culling
 		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		// rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // I guess if we feel like it's opposite day
 		rasterizer.depthBiasEnable = VK_FALSE;
 
 		// Multisampling
@@ -726,17 +745,7 @@ namespace Engine
 		colorBlending.attachmentCount = 1;
 		colorBlending.pAttachments = &colorBlendAttachment;
 
-		// Pipeline layout
-		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 1;
-		pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
-
-		if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to create pipeline layout!");
-		}
-
+		// Pipeline layout is already created by CreatePipelineLayout()
 		// Graphics pipeline creation
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -748,7 +757,7 @@ namespace Engine
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
 		pipelineInfo.pColorBlendState = &colorBlending;
-		pipelineInfo.layout = pipelineLayout;
+		pipelineInfo.layout = pipelineLayout; // Use the updated pipeline layout
 		pipelineInfo.renderPass = renderPass;
 		pipelineInfo.subpass = 0;
 		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
@@ -924,7 +933,7 @@ namespace Engine
 		CameraUBO ubo{};
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
-		ubo.model = glm::translate(glm::mat4(1.0f), transform.position) * glm::scale(glm::mat4(1.0f), transform.scale);
+		// ubo.model = transform.GetModelMatrix(); 
 
 		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
 	}
@@ -1132,8 +1141,8 @@ namespace Engine
 	{
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = 0; // Optional: Use VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT if needed
-		beginInfo.pInheritanceInfo = nullptr; // Only relevant for secondary command buffers
+		beginInfo.flags = 0; // Optional
+		beginInfo.pInheritanceInfo = nullptr; // Optional
 
 		if (vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo) != VK_SUCCESS)
 		{
@@ -1157,12 +1166,16 @@ namespace Engine
 		// Iterate over all renderables for this frame
 		for (auto& rend : renderablesForFrame)
 		{
-			// Update uniform buffer with this renderable's transform
-			UpdateUniformBuffer(rend.transform);
+			// Update uniform buffer with view and proj matrices
+			UpdateUniformBuffer(*rend.transform); // Now only updates view and proj
 
-			// Bind the descriptor set (assuming one descriptor set)
+			// Bind the descriptor set
 			vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
 				pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+			// Push the model matrix as push constants
+			glm::mat4 modelMatrix = rend.transform->GetModelMatrix();
+			vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &modelMatrix);
 
 			// Bind vertex and index buffers
 			VkBuffer vertexBuffers[] = { rend.meshData->vertexBuffer->GetBuffer() };

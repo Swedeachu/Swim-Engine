@@ -12,6 +12,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -27,9 +28,9 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="Source\Shaders\vertex.hlsl" />
-    <FxCompile Include="Source\Shaders\fragment.hlsl" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Mesh.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Vertex.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
+    <ClInclude Include="Source\Engine\Components\Material.h" />
   </ItemGroup>
 </Project>

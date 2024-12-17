@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "Scene.h"
 #include "Engine/Systems/Renderer/VulkanRenderer.h"
+#include "Engine/Components/Material.h"
 
 namespace Engine
 {
@@ -27,14 +28,14 @@ namespace Engine
     // Reset for the frame on a clean state
     renderer->ClearFrameRenderables();
 
-    auto view = registry.view<Transform, Mesh>();
+    auto view = registry.view<Transform, Material>();
     for (auto entity : view)
     {
-      const auto& transform = view.get<Transform>(entity);
-      const auto& mesh = view.get<Mesh>(entity);
+      auto& transform = view.get<Transform>(entity);
+      const auto& mat = view.get<Material>(entity);
 
       // Add each mesh + transform to the renderer for this frame
-      renderer->AddRenderable(transform, mesh);
+      renderer->AddRenderable(&transform, mat.mesh);
     }
   }
 
