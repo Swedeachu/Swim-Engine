@@ -3,8 +3,6 @@ Using EnTT, my own Scene System and engine + windows messaging framework, and Vu
 <br>
 # TODO
 
-Resize handling for camera and swap chain 
-<br>
 texture rendering 
 <br>
 tinyobj loading 
