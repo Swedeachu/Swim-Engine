@@ -113,6 +113,25 @@ namespace Engine
 	// Called every frame
 	void VulkanRenderer::Update(double dt)
 	{
+		// If minimized, do NOT call DrawFrame or we will be deadlocked on a null sized surface
+		if (windowWidth == 0 || windowHeight == 0)
+		{
+			// later on we might still want to do some logic for GPU compute things even with the window minimized. We might even want our own system for that.
+			return;
+		}
+
+		// Check if we need to resize and recreate stuff. If we do, then afterwards skip drawing this frame to avoid potential synchronization weirdness
+		if (framebufferResized && cameraSystem.get() != nullptr)
+		{
+			framebufferResized = false;
+			RecreateSwapChain();
+
+			// Then refresh the camera systems aspect ratio to the new windows size
+			// This should be the main engine classes job to call this on window resize finish, but it just works best here
+			cameraSystem->RefreshAspect();
+			return;
+		}
+
 		// Render the frame
 		DrawFrame();
 	}
@@ -201,8 +220,7 @@ namespace Engine
 
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
-			framebufferResized = false;
-			// TODO: RecreateSwapChain();
+			framebufferResized = false; // flags a refresh next frame
 			return;
 		}
 		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
@@ -251,8 +269,7 @@ namespace Engine
 
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
-			framebufferResized = false;
-			// TODO: RecreateSwapChain();
+			framebufferResized = false; // flags a refresh next frame
 		}
 		else if (result != VK_SUCCESS)
 		{
@@ -263,12 +280,83 @@ namespace Engine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
-	void VulkanRenderer::OnWindowResize(uint32_t newWidth, uint32_t newHeight)
+	void VulkanRenderer::SetSurfaceSize(uint32_t newWidth, uint32_t newHeight)
 	{
 		windowWidth = newWidth;
 		windowHeight = newHeight;
-		framebufferResized = true;
-		// TODO: swap chain recreation
+	}
+
+	// TODO: investigate most of this method, as right now our swap chain recreation literally recreates everything, including the shaders from disk
+	// This will get insanely expensive and noticable later
+	void VulkanRenderer::RecreateSwapChain()
+	{
+		// Wait for all operations on the device to finish
+		vkDeviceWaitIdle(device);
+
+		// Destroy all resources that depend on the old swapchain
+		CleanupSwapChain();
+
+		// Recreate the core swapchain and the subsequent resources
+		CreateSwapChain();
+		CreateImageViews();
+		CreateRenderPass();
+		CreatePipelineLayout();
+		CreateGraphicsPipeline();
+		CreateFramebuffers();
+
+		// Reallocate or record our command buffers again
+		AllocateCommandBuffers();
+	}
+
+	void VulkanRenderer::CleanupSwapChain()
+	{
+		// Destroy the framebuffers
+		for (auto framebuffer : swapChainFramebuffers)
+		{
+			vkDestroyFramebuffer(device, framebuffer, nullptr);
+		}
+		swapChainFramebuffers.clear();
+
+		// Free the command buffers bound to our command pool
+		if (!commandBuffers.empty())
+		{
+			vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+			commandBuffers.clear();
+		}
+
+		// Destroy pipeline and its layout
+		if (graphicsPipeline)
+		{
+			vkDestroyPipeline(device, graphicsPipeline, nullptr);
+			graphicsPipeline = VK_NULL_HANDLE;
+		}
+
+		if (pipelineLayout)
+		{
+			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+			pipelineLayout = VK_NULL_HANDLE;
+		}
+
+		// Destroy render pass
+		if (renderPass)
+		{
+			vkDestroyRenderPass(device, renderPass, nullptr);
+			renderPass = VK_NULL_HANDLE;
+		}
+
+		// Destroy the image views associated with the old swapchain
+		for (auto imageView : swapChainImageViews)
+		{
+			vkDestroyImageView(device, imageView, nullptr);
+		}
+		swapChainImageViews.clear();
+
+		// Finally, destroy the swapchain itself
+		if (swapChain)
+		{
+			vkDestroySwapchainKHR(device, swapChain, nullptr);
+			swapChain = VK_NULL_HANDLE;
+		}
 	}
 
 	// --------------------------------------------------------------------------------------

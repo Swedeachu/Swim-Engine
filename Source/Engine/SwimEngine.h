@@ -51,6 +51,8 @@ namespace Engine
 		unsigned int GetWindowWidth() const { return windowWidth; }
 		unsigned int GetWindowHeight() const { return windowHeight; }
 
+		bool IsMinimized() const { return minimized; }
+
 		unsigned int GetTotalFrames() const { return totalFrames; }
 
 	private:
@@ -68,8 +70,10 @@ namespace Engine
 		double frameTime{ 0.0 };
 		double delta{ 0.0 };
 		bool running{ false };
+		bool needResize{ false };
 		bool resizing{ false };
 		bool fullscreen{ false };
+		bool minimized{ false };
 		bool cursorVisible{ true };
 		bool debugging{ false };
 

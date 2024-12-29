@@ -9,15 +9,20 @@ namespace Engine
 
   int CameraSystem::Init()
   {
-    auto instance = SwimEngine::GetInstance();
+    RefreshAspect();
 
     camera.SetPosition(glm::vec3(0.0f, 0.0f, 0.0f));
     camera.SetFOV(45.0f);
-    float aspect = static_cast<float>(instance->GetWindowWidth()) / static_cast<float>(instance->GetWindowHeight());
-    camera.SetAspect(aspect);
     camera.SetClipPlanes(0.1f, 100.0f);
 
     return 0;
+  }
+
+  void CameraSystem::RefreshAspect()
+  {
+    auto instance = SwimEngine::GetInstance();
+    float aspect = static_cast<float>(instance->GetWindowWidth()) / static_cast<float>(instance->GetWindowHeight());
+    camera.SetAspect(aspect);
   }
 
   void CameraSystem::Update(double dt)

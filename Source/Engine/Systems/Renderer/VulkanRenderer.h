@@ -25,7 +25,6 @@ namespace Engine
 	{
 		glm::mat4 view;
 		glm::mat4 proj;
-		// glm::mat4 model;
 	};
 
 	// A struct to hold indices into queues we use
@@ -69,8 +68,14 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
-		// Call when window resized if needed:
-		void OnWindowResize(uint32_t newWidth, uint32_t newHeight);
+		// Needs to be called when the window changes size
+		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
+
+		// Will flag the renderer to reload everything for the adjusted surface, called by the engine when finished resizing the window
+		void SetFramebufferResized()
+		{
+			framebufferResized = true;
+		}
 
 	private:
 
@@ -149,6 +154,12 @@ namespace Engine
 		void CreateDescriptorSetLayout();
 		void CreateDescriptorSet();
 		void CreatePipelineLayout();
+
+		// Cleans up old swapchain objects
+		void CleanupSwapChain();
+
+		// Recreates the swapchain and dependent objects
+		void RecreateSwapChain();
 
 		MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 

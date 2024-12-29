@@ -111,55 +111,87 @@ namespace Engine
 		/*
 		if (ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam))
 		{
-			return true;
+				return true;
 		}
 		*/
 
-		// we must have input system and renderer set up to accept messages
+		// We must have input system and renderer set up to accept messages
+		// I don't remember why we check if our self isn't null, but if we don't then everything breaks
 		if (this == nullptr || inputManager.get() == nullptr || renderer.get() == nullptr)
 		{
-			return DefWindowProc(hwnd, uMsg, wParam, lParam);;
+			return DefWindowProc(hwnd, uMsg, wParam, lParam);
 		}
 
 		switch (uMsg)
 		{
-			// destroy handling ---------------------------------------------------------------
+			// closed the window or process from a high user level
 			case WM_DESTROY:
-				// running = false; // make sure to tell that we are not running anymore
+			{
+				running = false;
 				PostQuitMessage(0);
 				return 0;
+			}
 
-				// move handling ----------------------------------------------------------------
+			// dragging the window around
 			case WM_MOVE:
-				InvalidateRect(engineWindowHandle, NULL, FALSE); // force a redraw
+			{
+				InvalidateRect(engineWindowHandle, NULL, FALSE); // forces a redraw in traditional Microsoft applications, idk about Vulkan
 				break;
+			}
 
-				// size handling ----------------------------------------------------------------
-			case WM_SIZE:
-				// reset renderer window size on size changing
-				if (wParam == SIZE_MAXIMIZED)
-				{
-					//	renderer->GetCamera()->resetWindowSize();
-				}
-				if (wParam == SIZE_RESTORED && !resizing)
-				{
-					//	renderer->GetCamera()->resetWindowSize();
-				}
-				UpdateWindowSize();
+			// dragging or resizing windows weirdness
+			case WM_ENTERSIZEMOVE:
+			{
+				resizing = true;
 				break;
+			}
+
+			case WM_SIZE:
+			{
+				// Always update the window size fields first
+				UpdateWindowSize();
+
+				// If minimized, mark it. If restored/maximized, unmark it.
+				if (wParam == SIZE_MINIMIZED)
+				{
+					minimized = true;
+				}
+				else if (wParam == SIZE_RESTORED || wParam == SIZE_MAXIMIZED)
+				{
+					minimized = false;
+				}
+
+				// If the window dimensions are valid and we are not resizing, flag the need for a resize
+				if (windowWidth > 0 && windowHeight > 0 && !resizing)
+				{
+					needResize = true;
+				}
+
+				break;
+			}
 
 			case WM_EXITSIZEMOVE:
-				if (resizing)
-				{
-					UpdateWindowSize();
-					// renderer->GetCamera()->resetWindowSize();
-				}
+			{
+				// The user just finished dragging the window
 				resizing = false;
-				break;
 
-				// other wise it was an input message
+				// Update the final window dimension after drag
+				UpdateWindowSize();
+
+				if (windowWidth > 0 && windowHeight > 0)
+				{
+					// Mark that we need a resize
+					needResize = true;
+				}
+
+				break;
+			}
+
 			default:
+			{
+				// Otherwise pass any input to the input manager (we assume any other unhandled message is input)
 				inputManager->InputMessage(uMsg, wParam);
+			}
 		}
 
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -271,6 +303,14 @@ namespace Engine
 
 	void SwimEngine::Update(double dt)
 	{
+		// First sync any updates that happened to the window to the renderer
+		// But we only do this if we are not a minimized window
+		if (!minimized && needResize && renderer)
+		{
+			renderer->SetFramebufferResized();
+			needResize = false;
+		}
+
 		systemManager->Update(dt);
 	}
 
@@ -290,6 +330,7 @@ namespace Engine
 		GetClientRect(engineWindowHandle, &rect);
 		windowWidth = rect.right - rect.left;
 		windowHeight = rect.bottom - rect.top;
+		renderer->SetSurfaceSize(windowHeight, windowHeight);
 	}
 
 }
