@@ -286,26 +286,26 @@ namespace Engine
 		windowHeight = newHeight;
 	}
 
-	// TODO: investigate most of this method, as right now our swap chain recreation literally recreates everything, including the shaders from disk
-	// This will get insanely expensive and noticable later
 	void VulkanRenderer::RecreateSwapChain()
 	{
-		// Wait for all operations on the device to finish
 		vkDeviceWaitIdle(device);
 
-		// Destroy all resources that depend on the old swapchain
+		// Only clean up resources directly tied to the swapchain
 		CleanupSwapChain();
 
-		// Recreate the core swapchain and the subsequent resources
+		// Recreate swapchain and associated image views
 		CreateSwapChain();
 		CreateImageViews();
-		CreateRenderPass();
-		CreatePipelineLayout();
-		CreateGraphicsPipeline();
+
+		// Recreate framebuffers (depends on swapchain images)
 		CreateFramebuffers();
 
-		// Reallocate or record our command buffers again
-		AllocateCommandBuffers();
+		// Update command buffers for the new framebuffers
+		for (size_t i = 0; i < commandBuffers.size(); ++i)
+		{
+			vkResetCommandBuffer(commandBuffers[i], 0);
+			RecordCommandBuffer(i);
+		}
 	}
 
 	void VulkanRenderer::CleanupSwapChain()
@@ -317,47 +317,21 @@ namespace Engine
 		}
 		swapChainFramebuffers.clear();
 
-		// Free the command buffers bound to our command pool
-		if (!commandBuffers.empty())
-		{
-			vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
-			commandBuffers.clear();
-		}
-
-		// Destroy pipeline and its layout
-		if (graphicsPipeline)
-		{
-			vkDestroyPipeline(device, graphicsPipeline, nullptr);
-			graphicsPipeline = VK_NULL_HANDLE;
-		}
-
-		if (pipelineLayout)
-		{
-			vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-			pipelineLayout = VK_NULL_HANDLE;
-		}
-
-		// Destroy render pass
-		if (renderPass)
-		{
-			vkDestroyRenderPass(device, renderPass, nullptr);
-			renderPass = VK_NULL_HANDLE;
-		}
-
-		// Destroy the image views associated with the old swapchain
+		// Destroy the image views associated with the swapchain
 		for (auto imageView : swapChainImageViews)
 		{
 			vkDestroyImageView(device, imageView, nullptr);
 		}
 		swapChainImageViews.clear();
 
-		// Finally, destroy the swapchain itself
+		// Destroy the swapchain itself
 		if (swapChain)
 		{
 			vkDestroySwapchainKHR(device, swapChain, nullptr);
 			swapChain = VK_NULL_HANDLE;
 		}
 	}
+
 
 	// --------------------------------------------------------------------------------------
 	// Vulkan setup functions
@@ -725,25 +699,17 @@ namespace Engine
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-		// Viewport and scissor
-		VkViewport viewport{};
-		viewport.x = 0.0f;
-		viewport.y = 0.0f;
-		viewport.width = static_cast<float>(swapChainExtent.width);
-		viewport.height = static_cast<float>(swapChainExtent.height);
-		viewport.minDepth = 0.0f;
-		viewport.maxDepth = 1.0f;
-
-		VkRect2D scissor{};
-		scissor.offset = { 0, 0 };
-		scissor.extent = swapChainExtent;
-
+		// Viewport and scissor are set dynamically 
 		VkPipelineViewportStateCreateInfo viewportState{};
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
-		viewportState.pViewports = &viewport;
 		viewportState.scissorCount = 1;
-		viewportState.pScissors = &scissor;
+
+		VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dynamicState{};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates = dynamicStates;
 
 		// Rasterizer
 		VkPipelineRasterizationStateCreateInfo rasterizer{};
@@ -775,7 +741,6 @@ namespace Engine
 		colorBlending.attachmentCount = 1;
 		colorBlending.pAttachments = &colorBlendAttachment;
 
-		// Pipeline layout is already created by CreatePipelineLayout() before this
 		// Graphics pipeline creation
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -787,10 +752,10 @@ namespace Engine
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
 		pipelineInfo.pColorBlendState = &colorBlending;
-		pipelineInfo.layout = pipelineLayout; // Use the updated pipeline layout
+		pipelineInfo.pDynamicState = &dynamicState;
+		pipelineInfo.layout = pipelineLayout;
 		pipelineInfo.renderPass = renderPass;
 		pipelineInfo.subpass = 0;
-		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
 		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
 		{
@@ -1230,12 +1195,29 @@ namespace Engine
 		renderPassInfo.pClearValues = &clearColor;
 
 		vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// Set dynamic viewport
+		VkViewport viewport{};
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = static_cast<float>(swapChainExtent.width);
+		viewport.height = static_cast<float>(swapChainExtent.height);
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(commandBuffers[imageIndex], 0, 1, &viewport);
+
+		// Set dynamic scissor
+		VkRect2D scissor{};
+		scissor.offset = { 0, 0 };
+		scissor.extent = swapChainExtent;
+		vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
+
 		vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
 		// Update uniform buffer with view and projection matrices
 		UpdateUniformBuffer();
 
-		// Access the active scene (this is really scuffed to do it like this from here, this should probably change in the future)
+		// Access the active scene
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (scene)
 		{
@@ -1260,7 +1242,7 @@ namespace Engine
 				);
 
 				// Push the model matrix as push constants
-				glm::mat4 modelMatrix = transform.GetModelMatrix();
+				auto& modelMatrix = transform.GetModelMatrix();
 				vkCmdPushConstants(
 					commandBuffers[imageIndex],
 					pipelineLayout,
