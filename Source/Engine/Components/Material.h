@@ -2,6 +2,7 @@
 
 #include <memory>
 #include "Engine/Systems/Renderer/Meshes/Mesh.h"
+#include "Engine/Systems/Renderer/Textures/Texture2D.h"
 
 namespace Engine
 {
@@ -10,6 +11,9 @@ namespace Engine
 	{
 
 		std::shared_ptr<Mesh> mesh;
+		std::shared_ptr<Texture2D> albedoMap; // this is the raw texture
+		// std::shared_ptr<Texture2D> normalMap; // for light
+		// std::shared_ptr<Texture2D> roughnessMap; // height map technically
 
 		Material() = default;
 

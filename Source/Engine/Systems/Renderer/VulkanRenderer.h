@@ -40,7 +40,7 @@ namespace Engine
 	// Swapchain support details
 	struct SwapChainSupportDetails
 	{
-		VkSurfaceCapabilitiesKHR capabilities;
+		VkSurfaceCapabilitiesKHR capabilities{ NULL };
 		std::vector<VkSurfaceFormatKHR> formats;
 		std::vector<VkPresentModeKHR> presentModes;
 	};
@@ -51,7 +51,7 @@ namespace Engine
 	public:
 
 		VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
-			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
+			: windowHandle(hwnd), windowWidth(width), windowHeight(height), swapChainExtent({ 0, 0 }), swapChainImageFormat(VK_FORMAT_UNDEFINED)
 		{
 			if (!windowHandle)
 			{
@@ -66,6 +66,8 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
+		VkDevice& GetDevice() { return device; }
+
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 
@@ -74,6 +76,59 @@ namespace Engine
 		{
 			framebufferResized = true;
 		}
+
+		// Begin/End single-time commands (used for short-lived ops like layout transitions, copies, etc.)
+		VkCommandBuffer BeginSingleTimeCommands();
+		void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
+
+		// Creates a buffer and allocates memory for it
+		void CreateBuffer(
+			VkDeviceSize size,
+			VkBufferUsageFlags usage,
+			VkMemoryPropertyFlags properties,
+			VkBuffer& buffer,
+			VkDeviceMemory& bufferMemory
+		);
+
+		// Copies data from one buffer to another
+		void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
+		// Find suitable memory type index
+		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+
+		// Creates a 2D image on the GPU
+		void CreateImage(
+			uint32_t width,
+			uint32_t height,
+			VkFormat format,
+			VkImageTiling tiling,
+			VkImageUsageFlags usage,
+			VkMemoryPropertyFlags properties,
+			VkImage& outImage,
+			VkDeviceMemory& outImageMemory
+		);
+
+		// Transition image layout (e.g. Undefined -> TransferDst -> ShaderReadOnly)
+		void TransitionImageLayout(
+			VkImage image,
+			VkFormat format,
+			VkImageLayout oldLayout,
+			VkImageLayout newLayout
+		);
+
+		// Copy from a buffer into an image
+		void CopyBufferToImage(
+			VkBuffer buffer,
+			VkImage image,
+			uint32_t width,
+			uint32_t height
+		);
+
+		// Create a standard 2D image view
+		VkImageView CreateImageView(
+			VkImage image,
+			VkFormat format
+		);
 
 	private:
 
@@ -93,8 +148,8 @@ namespace Engine
 
 		VkSwapchainKHR swapChain = VK_NULL_HANDLE;
 		std::vector<VkImage> swapChainImages;
-		VkFormat swapChainImageFormat;
-		VkExtent2D swapChainExtent;
+		VkFormat swapChainImageFormat = VK_FORMAT_UNDEFINED;
+		VkExtent2D swapChainExtent = { 0, 0 };
 		std::vector<VkImageView> swapChainImageViews;
 		VkRenderPass renderPass = VK_NULL_HANDLE;
 		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
@@ -158,6 +213,7 @@ namespace Engine
 		void CreateDescriptorSetLayout();
 		void CreateDescriptorSet();
 		void CreatePipelineLayout();
+		VkSampler CreateSampler();
 
 		// Cleans up old swapchain objects
 		void CleanupSwapChain();
@@ -165,7 +221,7 @@ namespace Engine
 		// Recreates the swapchain and dependent objects
 		void RecreateSwapChain();
 
-		MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
+		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
 
@@ -185,6 +241,10 @@ namespace Engine
 
 		static std::vector<char> ReadFile(const std::string& filename);
 		VkShaderModule CreateShaderModule(const std::vector<char>& code);
+
+		// TODO: sampler and blend mode maps
+		VkSampler defaultSampler = VK_NULL_HANDLE; // assigned from CreateSampler during Init
+		// VkSampler activeSampler;
 
 	};
 

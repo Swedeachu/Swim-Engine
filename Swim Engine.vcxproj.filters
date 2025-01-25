@@ -13,6 +13,8 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Textures\Texture2D.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Textures\TexturePool.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -33,5 +35,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
     <ClInclude Include="Source\Engine\Components\Material.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshBufferData.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Textures\Texture2D.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Textures\TexturePool.h" />
   </ItemGroup>
 </Project>

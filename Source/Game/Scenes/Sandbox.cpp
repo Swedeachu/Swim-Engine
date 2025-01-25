@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "SandBox.h"
 #include "Engine\Systems\Renderer\Meshes\MeshPool.h"
+#include "Engine\Systems\Renderer\Textures\TexturePool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
 
@@ -136,6 +137,8 @@ namespace Game
 		auto staticEntity = CreateEntity();
 		registry.emplace<Engine::Transform>(staticEntity, glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f));
 		registry.emplace<Engine::Material>(staticEntity, mesh2);
+		auto staticEntitysMaterial = registry.get<Engine::Material>(staticEntity); // lets get the material as we want to set its albedo texture
+		staticEntitysMaterial.albedoMap = Engine::TexturePool::GetInstance().GetTexture2DLazy("mart");
 
 		return 0;
 	}

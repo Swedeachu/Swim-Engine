@@ -160,6 +160,13 @@
       <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copy over assets to build directory</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -182,6 +189,13 @@
       <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
+</Command>
+    </PostBuildEvent>
+    <PostBuildEvent>
+      <Message>Copy over assets to build directory</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
@@ -189,6 +203,8 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Textures\Texture2D.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Textures\TexturePool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
@@ -212,6 +228,8 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Textures\Texture2D.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Textures\TexturePool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />

@@ -37,10 +37,10 @@ namespace Engine
 		void SetMouseScrollDelta(int delta) { mouseWheelDelta = delta; }
 
 		// the window handle of the window getting inputs from
-		HWND windowHandle;
+		HWND windowHandle{ NULL };
 
 		// amount of valid keys to accept
-		unsigned int keyCount;
+		unsigned int keyCount{ 0 };
 
 		// 256 size array of all keys with a pair of booleans, 
 		// first boolean holds the state of the key for the current frame
@@ -52,9 +52,9 @@ namespace Engine
 		std::array<std::pair<char, std::pair<bool, bool>>, 256> deferredState;
 
 		// delta stuff needed
-		int mouseWheelDelta;
-		glm::vec2 mousePos;
-		glm::vec2 mouseDelta;
+		int mouseWheelDelta{0};
+		glm::vec2 mousePos{ 0, 0};
+		glm::vec2 mouseDelta{ 0, 0 };
 
 	};
 

@@ -11,7 +11,7 @@ namespace Engine
 
 		std::unique_ptr<VulkanBuffer> vertexBuffer;
 		std::unique_ptr<VulkanBuffer> indexBuffer;
-		size_t indexCount;
+		uint32_t indexCount = 0;
 
 		// Free all Vulkan buffers
 		void Free()
