@@ -204,6 +204,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\PBR\DescriptorPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Textures\Texture2D.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Textures\TexturePool.cpp" />
@@ -220,6 +221,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\Components\Material.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Mesh.h" />
     <ClInclude Include="Source\Engine\Machine.h" />
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -231,6 +233,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\CameraSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\PBR\DescriptorPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Textures\Texture2D.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Textures\TexturePool.h" />

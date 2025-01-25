@@ -10,27 +10,39 @@ namespace Engine
 		return instance;
 	}
 
-	std::shared_ptr<MaterialDescriptor> MaterialPool::GetMaterialDescriptor(VulkanRenderer& renderer, const std::shared_ptr<Texture2D>& texture)
+	std::shared_ptr<MaterialData> MaterialPool::GetMaterialData(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		// Check if a descriptor already exists for this texture
-		auto it = descriptors.find(texture);
-		if (it != descriptors.end())
+		auto it = materials.find(name);
+		if (it != materials.end())
 		{
 			return it->second;
 		}
 
-		// Create a new MaterialDescriptor
-		auto descriptor = std::make_shared<MaterialDescriptor>(renderer, texture);
-		descriptors.emplace(texture, descriptor);
-		return descriptor;
+		return nullptr;
+	}
+
+	std::shared_ptr<MaterialData> MaterialPool::RegisterMaterialData(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+
+		auto it = materials.find(name);
+		if (it != materials.end())
+		{
+			return it->second;
+		}
+
+		auto data = std::make_shared<MaterialData>(mesh, albedoMap);
+		materials.emplace(name, data);
+
+		return data;
 	}
 
 	void MaterialPool::Flush()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-		descriptors.clear();
+		materials.clear();
 	}
 
 }

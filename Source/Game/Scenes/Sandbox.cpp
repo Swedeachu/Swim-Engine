@@ -2,6 +2,7 @@
 #include "SandBox.h"
 #include "Engine\Systems\Renderer\Meshes\MeshPool.h"
 #include "Engine\Systems\Renderer\Textures\TexturePool.h"
+#include "Engine\Systems\Renderer\PBR\MaterialPool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
 
@@ -109,6 +110,8 @@ namespace Game
 
 		// Get the MeshPool instance
 		auto& meshPool = Engine::MeshPool::GetInstance();
+		auto& materialPool = Engine::MaterialPool::GetInstance();
+		auto& texturePool = Engine::TexturePool::GetInstance();
 
 		// Define vertices and indices for a quad mesh
 		std::vector<Engine::Vertex> quadVertices = {
@@ -128,22 +131,27 @@ namespace Game
 		auto mesh1 = meshPool.RegisterMesh("RainbowCube", cubeData.first, cubeData.second);
 		auto mesh2 = meshPool.RegisterMesh("RainbowQuad", quadVertices, quadIndices);
 
+		// Register both material data
+		auto materialData1 = materialPool.RegisterMaterialData(
+			"alien material", mesh1, texturePool.GetTexture2DLazy("alien")
+		);
+
+		auto materialData2 = materialPool.RegisterMaterialData(
+			"mart material", mesh2, texturePool.GetTexture2DLazy("mart")
+		);
+
 		// Create and set up two entities
 		auto& registry = GetRegistry();
 
 		// Entity 1: Controlled by WASD
 		controllableEntity = CreateEntity();
 		registry.emplace<Engine::Transform>(controllableEntity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f));
-		registry.emplace<Engine::Material>(controllableEntity, mesh1);
-		auto& controllableEntitysMaterial = registry.get<Engine::Material>(controllableEntity); // lets get the material as we want to set its albedo texture
-		controllableEntitysMaterial.albedoMap = Engine::TexturePool::GetInstance().GetTexture2DLazy("alien");
+		registry.emplace<Engine::Material>(controllableEntity, materialData1);
 
 		// Entity 2: Static entity
 		auto staticEntity = CreateEntity();
 		registry.emplace<Engine::Transform>(staticEntity, glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f));
-		registry.emplace<Engine::Material>(staticEntity, mesh2);
-		auto& staticEntitysMaterial = registry.get<Engine::Material>(staticEntity); // lets get the material as we want to set its albedo texture
-		staticEntitysMaterial.albedoMap = Engine::TexturePool::GetInstance().GetTexture2DLazy("mart");
+		registry.emplace<Engine::Material>(staticEntity, materialData2);
 
 		return 0;
 	}

@@ -10,7 +10,7 @@ namespace Engine
   {
     glm::vec3 position; // Location 0 in the shader
     glm::vec3 color;    // Location 1 in the shader
-    glm::vec2 uv;       // Location 2 in the shader (new)
+    glm::vec2 uv;       // Location 2 in the shader 
 
     static VkVertexInputBindingDescription GetBindingDescription()
     {

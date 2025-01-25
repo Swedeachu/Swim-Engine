@@ -7,8 +7,6 @@ namespace Engine
 
   MaterialDescriptor::MaterialDescriptor(VulkanRenderer& renderer, const std::shared_ptr<Texture2D>& texture)
   {
-    auto engine = SwimEngine::GetInstance();
-    // Assuming GetRenderer() returns a reference or pointer to VulkanRenderer
     descriptorSet = renderer.CreateMaterialDescriptorSet(texture);
   }
 

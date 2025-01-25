@@ -13,6 +13,7 @@
 #include "Meshes/MeshPool.h"
 #include "Textures/TexturePool.h"
 #include "PBR/MaterialPool.h"
+#include "PBR/DescriptorPool.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -298,6 +299,7 @@ namespace Engine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
+	// TODO: look into binding for roughness and normal maps as well
 	VkDescriptorSet VulkanRenderer::CreateMaterialDescriptorSet(const std::shared_ptr<Texture2D>& texture)
 	{
 		VkDescriptorSetLayout layouts[] = { descriptorSetLayout };
@@ -1850,7 +1852,7 @@ namespace Engine
 	void VulkanRenderer::UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat)
 	{
 		// If there's no texture, skip or bind a dummy
-		if (!mat.albedoMap)
+		if (!mat.data->albedoMap)
 		{
 			return; // no texture to bind
 		}
@@ -1858,7 +1860,7 @@ namespace Engine
 		// Prepare the descriptor image info
 		VkDescriptorImageInfo imageInfo{};
 		imageInfo.sampler = defaultSampler; // we have a single default sampler
-		imageInfo.imageView = mat.albedoMap->GetImageView();
+		imageInfo.imageView = mat.data->albedoMap->GetImageView();
 		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 		// Write to binding=1 of the descriptor set
@@ -1909,7 +1911,7 @@ namespace Engine
 
 		// 2) binding=1 -> combined image sampler
 		//   If mat.texture is null, use missingTexture
-		auto textureToUse = mat.albedoMap ? mat.albedoMap : missingTexture;
+		auto textureToUse = mat.data->albedoMap ? mat.data->albedoMap : missingTexture;
 
 		VkDescriptorImageInfo imageInfo{};
 		imageInfo.sampler = defaultSampler;
@@ -2032,21 +2034,21 @@ namespace Engine
 			for (auto entity : view)
 			{
 				auto& transform = view.get<Transform>(entity);
-				auto& mat = view.get<Material>(entity);
+				auto& mat = view.get<Material>(entity).data;
 
 				// Ensure GPU buffers for mesh
-				auto& meshData = GetOrCreateMeshBuffers(mat.mesh);
+				auto& meshData = GetOrCreateMeshBuffers(mat->mesh);
 
 				// 1) Ensure MaterialDescriptor is initialized
-				if (!mat.materialDescriptor)
+				if (!mat->materialDescriptor)
 				{
-					mat.materialDescriptor = MaterialPool::GetInstance().GetMaterialDescriptor(*this, mat.albedoMap);
+					mat->materialDescriptor = DescriptorPool::GetInstance().GetMaterialDescriptor(*this, mat->albedoMap);
 				}
 
 				// 2) Push constants (model matrix + hasTexture)
 				PushConstantData pcData{};
 				pcData.model = transform.GetModelMatrix();
-				pcData.hasTexture = (mat.albedoMap ? 1.0f : 0.0f);
+				pcData.hasTexture = (mat->albedoMap ? 1.0f : 0.0f);
 				pcData.padA = pcData.padB = pcData.padC = 0.0f;
 
 				vkCmdPushConstants(commandBuffers[imageIndex],
@@ -2061,7 +2063,7 @@ namespace Engine
 					commandBuffers[imageIndex],
 					VK_PIPELINE_BIND_POINT_GRAPHICS,
 					pipelineLayout,
-					0, 1, &mat.materialDescriptor->descriptorSet,
+					0, 1, &mat->materialDescriptor->descriptorSet,
 					0, nullptr
 				);
 
