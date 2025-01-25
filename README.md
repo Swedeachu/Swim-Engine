@@ -3,8 +3,6 @@ Using EnTT, my own Scene System and engine + windows messaging framework, and Vu
 <br>
 # TODO
 
-texture rendering 
-<br>
 tinyobj loading 
 <br>
 refactor anything that isnt dynamic or a bad practice that would hurt performance in the long run 
