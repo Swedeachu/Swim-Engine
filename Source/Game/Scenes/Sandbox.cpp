@@ -15,9 +15,10 @@ namespace Game
 		return 0;
 	}
 
+	// TODO: the faces of the cube are not UV mapped
 	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeCube()
 	{
-		// 8 unique corners
+		// 8 unique corners of the cube
 		std::array<glm::vec3, 8> corners = {
 				glm::vec3{-0.5f, -0.5f, -0.5f}, // 0
 				glm::vec3{ 0.5f, -0.5f, -0.5f}, // 1
@@ -29,43 +30,42 @@ namespace Game
 				glm::vec3{-0.5f,  0.5f,  0.5f}, // 7
 		};
 
-		// Face definitions, each face has 4 corners in *CCW* order from outside
+		// Face definitions with CCW order and associated color
 		struct FaceDefinition
 		{
 			std::array<int, 4> c;
 			glm::vec3 color;
 		};
 
-		// 
-		// IMPORTANT: We reorder the corners so they’re CCW as viewed from *outside*:
-		//
 		std::array<FaceDefinition, 6> faces = {
-			// FRONT (z=+0.5): corners 4->5->6->7 is CCW looking down +Z
+			// FRONT (+Z)
 			FaceDefinition{{ {4, 5, 6, 7} }, glm::vec3(1.0f, 0.0f, 0.0f)}, // Red
 
-			// BACK (z=-0.5): corners 1->0->3->2 is CCW looking down -Z
-			//   or equivalently (0->1->2->3) can be clockwise if viewed from outside
-			//   So we swap to 1->0->3->2
+			// BACK (-Z)
 			FaceDefinition{{ {1, 0, 3, 2} }, glm::vec3(0.0f, 1.0f, 0.0f)}, // Green
 
-			// LEFT (x=-0.5): corners 0->4->7->3 is CCW looking from outside (negative X)
+			// LEFT (-X)
 			FaceDefinition{{ {0, 4, 7, 3} }, glm::vec3(0.0f, 0.0f, 1.0f)}, // Blue
 
-			// RIGHT (x=+0.5): corners 5->1->2->6 is CCW looking from outside (positive X)
-			//   old code had (1,5,6,2) but that might be out-of-order
-			//   we reorder to (5,1,2,6) for consistent CCW from outside
+			// RIGHT (+X)
 			FaceDefinition{{ {5, 1, 2, 6} }, glm::vec3(1.0f, 1.0f, 0.0f)}, // Yellow
 
-			// TOP (y=+0.5): corners 3->7->6->2 is CCW looking down +Y
+			// TOP (+Y)
 			FaceDefinition{{ {3, 7, 6, 2} }, glm::vec3(1.0f, 0.0f, 1.0f)}, // Magenta
 
-			// BOTTOM (y=-0.5): corners 4->0->1->5 is CCW looking down -Y
-			//   old code had (0,4,5,1) which might be reversed 
-			//   reorder to (4,0,1,5)
+			// BOTTOM (-Y)
 			FaceDefinition{{ {4, 0, 1, 5} }, glm::vec3(0.0f, 1.0f, 1.0f)}, // Cyan
 		};
 
-		// Build the 24 vertices
+		// Define UV coordinates for each vertex of a face
+		std::array<glm::vec2, 4> faceUVs = {
+				glm::vec2(0.0f, 1.0f), // Bottom-left
+				glm::vec2(1.0f, 1.0f), // Bottom-right
+				glm::vec2(1.0f, 0.0f), // Top-right
+				glm::vec2(0.0f, 0.0f)  // Top-left
+		};
+
+		// Build the 24 vertices (4 vertices per face)
 		std::vector<Engine::Vertex> vertices;
 		vertices.reserve(24);
 
@@ -76,22 +76,23 @@ namespace Game
 				Engine::Vertex v{};
 				v.position = corners[face.c[i]];
 				v.color = face.color;
+				v.uv = faceUVs[i]; // Assign proper UVs
 				vertices.push_back(v);
 			}
 		}
 
-		// Build the 36 indices (6 faces * 6)
+		// Build the 36 indices (6 faces * 6 indices per face)
 		std::vector<uint16_t> indices;
 		indices.reserve(36);
 		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
 		{
 			uint16_t base = faceIdx * 4;
-			// Tri 1: (0,1,2)
+			// First triangle of the face
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
 			indices.push_back(base + 2);
 
-			// Tri 2: (2,3,0)
+			// Second triangle of the face
 			indices.push_back(base + 2);
 			indices.push_back(base + 3);
 			indices.push_back(base + 0);
@@ -111,11 +112,13 @@ namespace Game
 
 		// Define vertices and indices for a quad mesh
 		std::vector<Engine::Vertex> quadVertices = {
-				{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}}, // Red
-				{{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}}, // Green
-				{{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}}, // Blue
-				{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}  // White
+			//  position          color               uv
+			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // bottom-left  => uv(0,1)
+			{{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},  // bottom-right => uv(1,1)
+			{{ 0.5f,  0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},  // top-right    => uv(1,0)
+			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 		};
+
 		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		// Made a helper since anything 3D is phat
@@ -132,12 +135,14 @@ namespace Game
 		controllableEntity = CreateEntity();
 		registry.emplace<Engine::Transform>(controllableEntity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f));
 		registry.emplace<Engine::Material>(controllableEntity, mesh1);
+		auto& controllableEntitysMaterial = registry.get<Engine::Material>(controllableEntity); // lets get the material as we want to set its albedo texture
+		controllableEntitysMaterial.albedoMap = Engine::TexturePool::GetInstance().GetTexture2DLazy("alien");
 
 		// Entity 2: Static entity
 		auto staticEntity = CreateEntity();
 		registry.emplace<Engine::Transform>(staticEntity, glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f));
 		registry.emplace<Engine::Material>(staticEntity, mesh2);
-		auto staticEntitysMaterial = registry.get<Engine::Material>(staticEntity); // lets get the material as we want to set its albedo texture
+		auto& staticEntitysMaterial = registry.get<Engine::Material>(staticEntity); // lets get the material as we want to set its albedo texture
 		staticEntitysMaterial.albedoMap = Engine::TexturePool::GetInstance().GetTexture2DLazy("mart");
 
 		return 0;

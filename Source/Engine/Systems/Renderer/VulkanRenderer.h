@@ -9,6 +9,7 @@
 #include <vector>
 #include "Buffer/VulkanBuffer.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/Material.h"
 #include "Meshes/Vertex.h"
 #include "Meshes/Mesh.h"
 
@@ -23,6 +24,16 @@ namespace Engine
 	{
 		glm::mat4 view;
 		glm::mat4 proj;
+	};
+
+	struct PushConstantData
+	{
+		glm::mat4 model;     // The model transform
+		float hasTexture;    // 1.0 = use albedoMap, 0.0 = use vertex color
+		// We pad to 16 bytes; push constants must align to 4-byte boundaries.
+		float padA;
+		float padB;
+		float padC;
 	};
 
 	// A struct to hold indices into queues we use
@@ -67,6 +78,8 @@ namespace Engine
 		int Exit() override;
 
 		VkDevice& GetDevice() { return device; }
+
+		VkDescriptorSet CreateMaterialDescriptorSet(const std::shared_ptr<Texture2D>& texture);
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -213,6 +226,7 @@ namespace Engine
 		void CreateDescriptorSetLayout();
 		void CreateDescriptorSet();
 		void CreatePipelineLayout();
+		void CreateDescriptorPool();
 		VkSampler CreateSampler();
 
 		// Cleans up old swapchain objects
@@ -242,9 +256,16 @@ namespace Engine
 		static std::vector<char> ReadFile(const std::string& filename);
 		VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
+		// A helper method to create a single descriptor set for a material
+		VkDescriptorSet CreateMaterialDescriptorSet(const Material& mat);
+
+		void UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat);
+
 		// TODO: sampler and blend mode maps
 		VkSampler defaultSampler = VK_NULL_HANDLE; // assigned from CreateSampler during Init
 		// VkSampler activeSampler;
+
+		std::shared_ptr<Texture2D> missingTexture;
 
 	};
 

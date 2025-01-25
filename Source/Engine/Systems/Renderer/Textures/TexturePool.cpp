@@ -92,7 +92,13 @@ namespace Engine
 	void TexturePool::Flush()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-		textures.clear();
+
+		for (auto& texture : textures)
+		{
+			texture.second.get()->Free(); 
+		}
+
+		textures.clear(); 
 	}
 
 	std::string TexturePool::FormatKey(const std::string& filePath, const std::string& rootPath) const

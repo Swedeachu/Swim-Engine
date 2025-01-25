@@ -13,6 +13,8 @@ namespace Engine
     Texture2D(const std::string& filePath);
     ~Texture2D();
 
+    void Free();
+
     VkImage GetImage() const { return image; }
     VkImageView GetImageView() const { return imageView; }
     // VkSampler GetSampler() const { return sampler; }

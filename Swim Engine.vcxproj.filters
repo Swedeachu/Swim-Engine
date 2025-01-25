@@ -15,6 +15,8 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Textures\Texture2D.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Textures\TexturePool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -37,5 +39,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\MeshBufferData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Textures\Texture2D.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Textures\TexturePool.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.h" />
   </ItemGroup>
 </Project>

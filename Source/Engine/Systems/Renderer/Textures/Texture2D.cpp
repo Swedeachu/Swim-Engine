@@ -17,25 +17,33 @@ namespace Engine
 
   Texture2D::~Texture2D()
   {
+    Free();
+  }
+
+  void Texture2D::Free()
+  {
     // Clean up
     // We'll get the VulkanRenderer to do it since it has the device handle
     auto engine = SwimEngine::GetInstance();
     auto renderer = engine.get()->GetRenderer();
     if (!renderer) { return; }
 
+    auto device = renderer->GetDevice();
+    if (!device) { return; }
+
     if (imageView)
     {
-      vkDestroyImageView(renderer->GetDevice(), imageView, nullptr);
+      vkDestroyImageView(device, imageView, nullptr); // we crash here on exiting the engine
       imageView = VK_NULL_HANDLE;
     }
     if (image)
     {
-      vkDestroyImage(renderer->GetDevice(), image, nullptr);
+      vkDestroyImage(device, image, nullptr);
       image = VK_NULL_HANDLE;
     }
     if (memory)
     {
-      vkFreeMemory(renderer->GetDevice(), memory, nullptr);
+      vkFreeMemory(device, memory, nullptr);
       memory = VK_NULL_HANDLE;
     }
   }
