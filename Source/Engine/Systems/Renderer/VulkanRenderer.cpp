@@ -81,6 +81,7 @@ namespace Engine
 		CreateDescriptorSetLayout();     // Creates the descriptor set layout
 		CreatePipelineLayout();          // Set up layout with push constants
 		CreateGraphicsPipeline();        // Uses descriptorSetLayout in pipeline layout creation
+		CreateDepthResources();					 // Creates image views for each buffer for the frames (g and z buffers)
 		CreateFramebuffers();            // Create framebuffers from image views
 		CreateCommandPool();             // Command pool for command buffers
 
@@ -145,12 +146,18 @@ namespace Engine
 	// Clean up Vulkan resources
 	int VulkanRenderer::Exit()
 	{
+		// Wait until the device isn't doing any work
 		vkDeviceWaitIdle(device);
+
+		// FIRST, clean up the swapchain and depth resources
+		CleanupSwapChain();
+
+		// Now continue with the rest of the teardown:
 
 		// Free all mesh buffers
 		MeshPool::GetInstance().Flush();
 
-		// Destroy semaphores
+		// Destroy semaphores and fences
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -158,42 +165,36 @@ namespace Engine
 			vkDestroyFence(device, inFlightFences[i], nullptr);
 		}
 
-		// Destroy frame buffers
-		for (auto framebuffer : swapChainFramebuffers)
-		{
-			vkDestroyFramebuffer(device, framebuffer, nullptr);
-		}
-
-		// Destroy pipelines
+		// Destroy pipeline, pipeline layout, and render pass
 		vkDestroyPipeline(device, graphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyRenderPass(device, renderPass, nullptr);
 
-		// Destroy image and swapchain stuff and set things to null
-		for (auto imageView : swapChainImageViews)
-		{
-			vkDestroyImageView(device, imageView, nullptr);
-		}
-		vkDestroySwapchainKHR(device, swapChain, nullptr);
-
+		// Destroy descriptor set layout and pool
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 		vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
+		// Release the uniform buffer
 		uniformBuffer.reset();
 
+		// Destroy command pool
 		vkDestroyCommandPool(device, commandPool, nullptr);
+
+		// Finally, destroy the logical device
 		vkDestroyDevice(device, nullptr);
 
-		// detatch debugger too
+		// If validation layers are active, detach the debug messenger
 		if (enableValidationLayers)
 		{
-			auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+			auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)
+				vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
 			if (func != nullptr)
 			{
 				func(instance, debugMessenger, nullptr);
 			}
 		}
 
+		// Destroy the surface and instance
 		vkDestroySurfaceKHR(instance, surface, nullptr);
 		vkDestroyInstance(instance, nullptr);
 
@@ -290,17 +291,20 @@ namespace Engine
 	{
 		vkDeviceWaitIdle(device);
 
-		// Only clean up resources directly tied to the swapchain
+		// Cleanup old swap chain and associated objects (including depth resources).
 		CleanupSwapChain();
 
-		// Recreate swapchain and associated image views
+		// Recreate swapchain
 		CreateSwapChain();
 		CreateImageViews();
 
-		// Recreate framebuffers (depends on swapchain images)
+		// Create new depth images
+		CreateDepthResources();
+
+		// Create new framebuffers that include our new depth attachments
 		CreateFramebuffers();
 
-		// Update command buffers for the new framebuffers
+		// Re-record command buffers for the new attachments
 		for (size_t i = 0; i < commandBuffers.size(); ++i)
 		{
 			vkResetCommandBuffer(commandBuffers[i], 0);
@@ -310,28 +314,44 @@ namespace Engine
 
 	void VulkanRenderer::CleanupSwapChain()
 	{
-		// Destroy the framebuffers
+		// Destroy framebuffers
 		for (auto framebuffer : swapChainFramebuffers)
 		{
 			vkDestroyFramebuffer(device, framebuffer, nullptr);
 		}
 		swapChainFramebuffers.clear();
 
-		// Destroy the image views associated with the swapchain
+		// Destroy depth image views, images, and free memory
+		for (size_t i = 0; i < depthImageViews.size(); i++)
+		{
+			vkDestroyImageView(device, depthImageViews[i], nullptr);
+		}
+		for (size_t i = 0; i < depthImages.size(); i++)
+		{
+			vkDestroyImage(device, depthImages[i], nullptr);
+		}
+		for (size_t i = 0; i < depthImageMemories.size(); i++)
+		{
+			vkFreeMemory(device, depthImageMemories[i], nullptr);
+		}
+		depthImageViews.clear();
+		depthImages.clear();
+		depthImageMemories.clear();
+
+		// Destroy swap chain image views
 		for (auto imageView : swapChainImageViews)
 		{
 			vkDestroyImageView(device, imageView, nullptr);
 		}
 		swapChainImageViews.clear();
 
-		// Destroy the swapchain itself
+		// Destroy swapchain
 		if (swapChain)
 		{
 			vkDestroySwapchainKHR(device, swapChain, nullptr);
 			swapChain = VK_NULL_HANDLE;
 		}
 	}
-
 
 	// --------------------------------------------------------------------------------------
 	// Vulkan setup functions
@@ -421,32 +441,91 @@ namespace Engine
 		}
 	}
 
-	// TODO: make sure this actually uses the best GPU available
 	void VulkanRenderer::PickPhysicalDevice()
 	{
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 		if (deviceCount == 0)
 		{
-			throw std::runtime_error("failed to find GPUs with Vulkan support!");
+			throw std::runtime_error("Failed to find GPUs with Vulkan support!");
 		}
 
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
-		for (const auto& dev : devices)
+		// Structure to hold devices with scores
+		struct DeviceScore
 		{
-			if (IsDeviceSuitable(dev))
+			VkPhysicalDevice device;
+			int score;
+		};
+
+		std::vector<DeviceScore> scoredDevices;
+
+		// Evaluate each device for suitability and score
+		for (const auto& device : devices)
+		{
+			if (IsDeviceSuitable(device))
 			{
-				physicalDevice = dev;
-				break;
+				scoredDevices.push_back({ device, RateDeviceSuitability(device) });
 			}
 		}
 
+		if (scoredDevices.empty())
+		{
+			throw std::runtime_error("Failed to find a suitable GPU!");
+		}
+
+		// Sort devices by their scores in descending order
+		std::sort(scoredDevices.begin(), scoredDevices.end(),
+			[](const DeviceScore& a, const DeviceScore& b) { return a.score > b.score; });
+
+		// Pick the best-scoring device
+		physicalDevice = scoredDevices.front().device;
+
 		if (physicalDevice == VK_NULL_HANDLE)
 		{
-			throw std::runtime_error("failed to find a suitable GPU!");
+			throw std::runtime_error("Failed to find a suitable GPU!");
 		}
+
+		// Print the name of the selected GPU
+		VkPhysicalDeviceProperties properties;
+		vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+		std::cout << "Selected GPU: " << properties.deviceName << std::endl;
+	}
+
+	int VulkanRenderer::RateDeviceSuitability(VkPhysicalDevice device)
+	{
+		VkPhysicalDeviceProperties deviceProperties;
+		VkPhysicalDeviceFeatures deviceFeatures;
+
+		vkGetPhysicalDeviceProperties(device, &deviceProperties);
+		vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+
+		int score = 0;
+
+		// Prefer discrete GPUs for better performance
+		if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+		{
+			score += 1000;
+		}
+		else if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+		{
+			score += 500; // Integrated GPUs are less performant but still usable
+		}
+
+		// Favor higher maximum image dimensions for better resolution support
+		score += deviceProperties.limits.maxImageDimension2D;
+
+		// Check specific features
+		if (!deviceFeatures.geometryShader)
+		{
+			// Cannot use the GPU if geometry shaders are not supported
+			return 0;
+		}
+
+		// There could be more considerations to be made but this is probably fine for now
+		return score;
 	}
 
 	void VulkanRenderer::CreateLogicalDevice()
@@ -594,9 +673,10 @@ namespace Engine
 
 	void VulkanRenderer::CreateRenderPass()
 	{
+		// --- Color attachment ---
 		VkAttachmentDescription colorAttachment{};
 		colorAttachment.format = swapChainImageFormat;
-		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // no MSAA yet
+		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -608,23 +688,45 @@ namespace Engine
 		colorAttachmentRef.attachment = 0;
 		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+		// --- Depth attachment ---
+		VkAttachmentDescription depthAttachment{};
+		depthAttachment.format = FindDepthFormat();
+		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		VkAttachmentReference depthAttachmentRef{};
+		depthAttachmentRef.attachment = 1;
+		depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+		// Subpass references
 		VkSubpassDescription subpass{};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
+		// We add the depth attachment here
+		subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
+		// For proper synchronization between the subpass and external usage
 		VkSubpassDependency dependency{};
 		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependency.dstSubpass = 0;
-		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 		dependency.srcAccessMask = 0;
-		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		// Our 2 attatchments are color and depth
+		std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
 
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		renderPassInfo.attachmentCount = 1;
-		renderPassInfo.pAttachments = &colorAttachment;
+		renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		renderPassInfo.pAttachments = attachments.data();
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpass;
 		renderPassInfo.dependencyCount = 1;
@@ -632,7 +734,7 @@ namespace Engine
 
 		if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS)
 		{
-			throw std::runtime_error("failed to create render pass!");
+			throw std::runtime_error("Failed to create render pass!");
 		}
 	}
 
@@ -660,14 +762,14 @@ namespace Engine
 
 	void VulkanRenderer::CreateGraphicsPipeline()
 	{
-		// Load shader code
+		// Load compiled SPIR-V code for vertex and fragment shaders
 		auto vertShaderCode = ReadFile("Shaders\\VertexShaders\\vertex.spv");
 		auto fragShaderCode = ReadFile("Shaders\\FragmentShaders\\fragment.spv");
 
 		VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
 		VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
 
-		// Shader stages
+		// Prepare the pipeline stages
 		VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
 		vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -683,10 +785,10 @@ namespace Engine
 		VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
 
 		// Vertex input state
-		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		auto bindingDescription = Vertex::GetBindingDescription();
 		auto attributeDescriptions = Vertex::GetAttributeDescriptions();
 
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vertexInputInfo.vertexBindingDescriptionCount = 1;
 		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
@@ -699,12 +801,13 @@ namespace Engine
 		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-		// Viewport and scissor are set dynamically 
+		// Viewport/scissor are set dynamically
 		VkPipelineViewportStateCreateInfo viewportState{};
 		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 		viewportState.viewportCount = 1;
 		viewportState.scissorCount = 1;
 
+		// Dynamic states
 		VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 		VkPipelineDynamicStateCreateInfo dynamicState{};
 		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -722,11 +825,21 @@ namespace Engine
 		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		rasterizer.depthBiasEnable = VK_FALSE;
 
-		// Multisampling
+		// Multisampling (not used here, just pass defaults)
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.sampleShadingEnable = VK_FALSE;
 		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+		// Depth-stencil state
+		// We enable depth testing so that fragments are properly depth-tested.
+		VkPipelineDepthStencilStateCreateInfo depthStencil{};
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = VK_TRUE;
+		depthStencil.depthWriteEnable = VK_TRUE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+		depthStencil.depthBoundsTestEnable = VK_FALSE;
+		depthStencil.stencilTestEnable = VK_FALSE;
 
 		// Color blending
 		VkPipelineColorBlendAttachmentState colorBlendAttachment{};
@@ -741,7 +854,7 @@ namespace Engine
 		colorBlending.attachmentCount = 1;
 		colorBlending.pAttachments = &colorBlendAttachment;
 
-		// Graphics pipeline creation
+		// Build the pipeline with our layout (which includes descriptor sets and push constants)
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		pipelineInfo.stageCount = 2;
@@ -751,12 +864,14 @@ namespace Engine
 		pipelineInfo.pViewportState = &viewportState;
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = &depthStencil; 
 		pipelineInfo.pColorBlendState = &colorBlending;
 		pipelineInfo.pDynamicState = &dynamicState;
 		pipelineInfo.layout = pipelineLayout;
 		pipelineInfo.renderPass = renderPass;
 		pipelineInfo.subpass = 0;
 
+		// Create the graphics pipeline
 		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create graphics pipeline!");
@@ -767,28 +882,125 @@ namespace Engine
 		vkDestroyShaderModule(device, fragShaderModule, nullptr);
 	}
 
+	// Creates depth images, their memory, and the associated image views for each swapchain image.
+	void VulkanRenderer::CreateDepthResources()
+	{
+		// Choose a suitable depth format (e.g., VK_FORMAT_D32_SFLOAT).
+		VkFormat depthFormat = FindDepthFormat();
+
+		// For each swapchain image, create a matching depth image and its view.
+		depthImages.resize(swapChainImages.size());
+		depthImageMemories.resize(swapChainImages.size());
+		depthImageViews.resize(swapChainImages.size());
+
+		for (size_t i = 0; i < swapChainImages.size(); i++)
+		{
+			// 1. Create the VkImage for depth data.
+			VkImageCreateInfo imageInfo{};
+			imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+			imageInfo.imageType = VK_IMAGE_TYPE_2D;
+			imageInfo.extent.width = swapChainExtent.width;
+			imageInfo.extent.height = swapChainExtent.height;
+			imageInfo.extent.depth = 1;
+			imageInfo.mipLevels = 1;
+			imageInfo.arrayLayers = 1;
+			imageInfo.format = depthFormat;
+			imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+			imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+			imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+			if (vkCreateImage(device, &imageInfo, nullptr, &depthImages[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create depth image!");
+			}
+
+			// 2. Allocate memory for the depth image.
+			VkMemoryRequirements memRequirements;
+			vkGetImageMemoryRequirements(device, depthImages[i], &memRequirements);
+
+			VkMemoryAllocateInfo allocInfo{};
+			allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+			allocInfo.allocationSize = memRequirements.size;
+
+			// Find a suitable memory type index. This is effectively 
+			// "VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT" for depth images.
+			bool foundMemoryType = false;
+			uint32_t memoryTypeIndex = 0;
+			VkPhysicalDeviceMemoryProperties memProps;
+			vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProps);
+
+			for (uint32_t j = 0; j < memProps.memoryTypeCount; j++)
+			{
+				if ((memRequirements.memoryTypeBits & (1 << j)) &&
+					(memProps.memoryTypes[j].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+				{
+					memoryTypeIndex = j;
+					foundMemoryType = true;
+					break;
+				}
+			}
+
+			if (!foundMemoryType)
+			{
+				throw std::runtime_error("Failed to find suitable memory type for depth image!");
+			}
+
+			allocInfo.memoryTypeIndex = memoryTypeIndex;
+
+			if (vkAllocateMemory(device, &allocInfo, nullptr, &depthImageMemories[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to allocate depth image memory!");
+			}
+
+			// 3. Bind the memory to the image.
+			vkBindImageMemory(device, depthImages[i], depthImageMemories[i], 0);
+
+			// 4. Create an image view for that depth image.
+			VkImageViewCreateInfo viewInfo{};
+			viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			viewInfo.image = depthImages[i];
+			viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			viewInfo.format = depthFormat;
+			viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			viewInfo.subresourceRange.baseMipLevel = 0;
+			viewInfo.subresourceRange.levelCount = 1;
+			viewInfo.subresourceRange.baseArrayLayer = 0;
+			viewInfo.subresourceRange.layerCount = 1;
+
+			if (vkCreateImageView(device, &viewInfo, nullptr, &depthImageViews[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create depth image view!");
+			}
+		}
+	}
+
 	void VulkanRenderer::CreateFramebuffers()
 	{
 		swapChainFramebuffers.resize(swapChainImageViews.size());
 
 		for (size_t i = 0; i < swapChainImageViews.size(); i++)
 		{
-			VkImageView attachments[] = {
-					swapChainImageViews[i]
+			// Each framebuffer has two attachments: color image + depth image
+			std::array<VkImageView, 2> attachments =
+			{
+					swapChainImageViews[i],
+					depthImageViews[i]
 			};
 
 			VkFramebufferCreateInfo framebufferInfo{};
 			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 			framebufferInfo.renderPass = renderPass;
-			framebufferInfo.attachmentCount = 1;
-			framebufferInfo.pAttachments = attachments;
+			framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+			framebufferInfo.pAttachments = attachments.data();
 			framebufferInfo.width = swapChainExtent.width;
 			framebufferInfo.height = swapChainExtent.height;
 			framebufferInfo.layers = 1;
 
 			if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS)
 			{
-				throw std::runtime_error("failed to create framebuffer!");
+				throw std::runtime_error("Failed to create framebuffer!");
 			}
 		}
 	}
@@ -1131,6 +1343,51 @@ namespace Engine
 		return shaderModule;
 	}
 
+	// Finds a supported format from a list of candidates, looking for the desired tiling and features.
+	VkFormat VulkanRenderer::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features)
+	{
+		// Iterate over each candidate format, query its support, and return the first that meets requirements.
+		for (VkFormat format : candidates)
+		{
+			VkFormatProperties props;
+			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+
+			if (tiling == VK_IMAGE_TILING_LINEAR)
+			{
+				if ((props.linearTilingFeatures & features) == features)
+				{
+					return format;
+				}
+			}
+			else if (tiling == VK_IMAGE_TILING_OPTIMAL)
+			{
+				if ((props.optimalTilingFeatures & features) == features)
+				{
+					return format;
+				}
+			}
+		}
+
+		// If none are supported, we failed at life. 
+		throw std::runtime_error("Failed to find a supported format!");
+	}
+
+	// Finds a suitable depth format by checking common depth/stencil formats in a preferred order.
+	VkFormat VulkanRenderer::FindDepthFormat()
+	{
+		// Typical recommended depth formats in descending order of preference. 
+		// VK_FORMAT_D32_SFLOAT is common and widely supported, but we can consider a D24 format if needed. 
+		return FindSupportedFormat(
+			{
+					VK_FORMAT_D32_SFLOAT,
+					VK_FORMAT_D24_UNORM_S8_UINT,
+					VK_FORMAT_D32_SFLOAT_S8_UINT
+			},
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+		);
+	}
+
 	MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
 	{
 		// Check if the Mesh already has its MeshBufferData initialized
@@ -1175,13 +1432,18 @@ namespace Engine
 	{
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = 0; // Optional
-		beginInfo.pInheritanceInfo = nullptr; // Optional
+		beginInfo.flags = 0;
+		beginInfo.pInheritanceInfo = nullptr;
 
 		if (vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
+
+		// We clear both color and depth. So we use an array of 2 clear values:
+		std::array<VkClearValue, 2> clearValues{};
+		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };  // Clear color
+		clearValues[1].depthStencil = { 1.0f, 0 };            // Clear depth (1.0 is the farthest depth, 0 for stencil)
 
 		VkRenderPassBeginInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1189,10 +1451,8 @@ namespace Engine
 		renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
 		renderPassInfo.renderArea.offset = { 0, 0 };
 		renderPassInfo.renderArea.extent = swapChainExtent;
-
-		VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;
+		renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+		renderPassInfo.pClearValues = clearValues.data();
 
 		vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1212,12 +1472,13 @@ namespace Engine
 		scissor.extent = swapChainExtent;
 		vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
 
+		// Bind pipeline
 		vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-		// Update uniform buffer with view and projection matrices
+		// Update our uniform buffer
 		UpdateUniformBuffer();
 
-		// Access the active scene
+		// Get active scene to draw
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (scene)
 		{
@@ -1229,10 +1490,10 @@ namespace Engine
 				auto& transform = view.get<Transform>(entity);
 				const auto& mat = view.get<Material>(entity);
 
-				// Ensure the mesh has its buffer data
+				// Create or get existing buffer data for the mesh
 				auto& meshData = GetOrCreateMeshBuffers(mat.mesh);
 
-				// Bind the descriptor set
+				// Bind descriptor set
 				vkCmdBindDescriptorSets(
 					commandBuffers[imageIndex],
 					VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1241,7 +1502,7 @@ namespace Engine
 					0, nullptr
 				);
 
-				// Push the model matrix as push constants
+				// Push model transform matrix as push constant
 				auto& modelMatrix = transform.GetModelMatrix();
 				vkCmdPushConstants(
 					commandBuffers[imageIndex],
@@ -1258,7 +1519,7 @@ namespace Engine
 				vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
 				vkCmdBindIndexBuffer(commandBuffers[imageIndex], meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
-				// Draw indexed geometry
+				// Draw
 				vkCmdDrawIndexed(commandBuffers[imageIndex], meshData.indexCount, 1, 0, 0, 0);
 			}
 		}

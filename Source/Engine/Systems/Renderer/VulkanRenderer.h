@@ -1,5 +1,3 @@
-// VulkanRenderer.h
-
 #pragma once
 
 #include <optional>
@@ -103,6 +101,11 @@ namespace Engine
 		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 		std::vector<VkFramebuffer> swapChainFramebuffers;
 
+		// Depth resources for the swapchain
+		std::vector<VkImage> depthImages;          // Holds depth images for each swapchain image
+		std::vector<VkDeviceMemory> depthImageMemories; // Holds memory allocations for depth images
+		std::vector<VkImageView> depthImageViews;  // Holds image views for the depth images
+
 		VkCommandPool commandPool = VK_NULL_HANDLE;
 		std::vector<VkCommandBuffer> commandBuffers;
 
@@ -147,6 +150,7 @@ namespace Engine
 		void CreateImageViews();
 		void CreateRenderPass();
 		void CreateGraphicsPipeline();
+		void CreateDepthResources();
 		void CreateFramebuffers();
 		void CreateCommandPool();
 		void AllocateCommandBuffers();
@@ -166,6 +170,7 @@ namespace Engine
 		void UpdateUniformBuffer();
 
 		// Helpers
+		int RateDeviceSuitability(VkPhysicalDevice device);
 		bool CheckValidationLayerSupport();
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device);
@@ -174,6 +179,9 @@ namespace Engine
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
 		bool IsDeviceSuitable(VkPhysicalDevice device);
 		std::vector<const char*> GetRequiredExtensions();
+
+		VkFormat FindDepthFormat();
+		VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
 
 		static std::vector<char> ReadFile(const std::string& filename);
 		VkShaderModule CreateShaderModule(const std::vector<char>& code);
