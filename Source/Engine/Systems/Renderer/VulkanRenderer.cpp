@@ -31,23 +31,9 @@ namespace Engine
 			"VK_LAYER_KHRONOS_validation"
 	};
 
-	std::string GetExecutableDirectory()
-	{
-		char path[MAX_PATH];
-		HMODULE hModule = GetModuleHandleA(NULL);
-		if (hModule == NULL)
-		{
-			throw std::runtime_error("Failed to get module handle.");
-		}
-		GetModuleFileNameA(hModule, path, (sizeof(path)));
-		std::string fullPath(path);
-		size_t pos = fullPath.find_last_of("\\/");
-		return (std::string::npos == pos) ? "" : fullPath.substr(0, pos);
-	}
-
 	std::vector<char> VulkanRenderer::ReadFile(const std::string& filename)
 	{
-		std::string exeDir = GetExecutableDirectory();
+		std::string exeDir = SwimEngine::GetExecutableDirectory();
 		std::string fullPath = exeDir + "\\" + filename;
 
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
@@ -160,7 +146,7 @@ namespace Engine
 
 		// Now continue with the rest of the teardown:
 
-		// Destroy references in the renderer
+		// Destroy references in the vulkanRenderer
 		missingTexture.reset();
 
 		// Free all mesh and texture buffers
@@ -1939,37 +1925,18 @@ namespace Engine
 
 	inline MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
 	{
-		// Check if the Mesh already has its MeshBufferData initialized
+		// Check if the Mesh already has its MeshBufferData initialized, it pretty much always should due to MeshPool::RegisterMesh()
 		if (mesh->meshBufferData)
 		{
 			return *mesh->meshBufferData;
 		}
+		// Below is back up code:
 
 		// Create a new MeshBufferData instance
 		auto data = std::make_shared<MeshBufferData>();
 
-		size_t vertexSize = sizeof(Vertex) * mesh->vertices.size();
-		size_t indexSize = sizeof(uint16_t) * mesh->indices.size();
-
-		// Create and initialize the vertex buffer
-		data->vertexBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice,
-			vertexSize,
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-		data->vertexBuffer->CopyData(mesh->vertices.data(), vertexSize);
-
-		// Create and initialize the index buffer
-		data->indexBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice,
-			indexSize,
-			VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-		data->indexBuffer->CopyData(mesh->indices.data(), indexSize);
-
-		data->indexCount = static_cast<uint32_t>(mesh->indices.size());
+		// Generate GPU buffers (Vulkan version requires device + physicalDevice)
+		data->GenerateBuffers(mesh->vertices, mesh->indices, device, physicalDevice);
 
 		// Store the newly created MeshBufferData in the Mesh
 		mesh->meshBufferData = data;

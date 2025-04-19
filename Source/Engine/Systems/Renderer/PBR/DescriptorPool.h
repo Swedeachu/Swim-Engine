@@ -23,7 +23,7 @@ namespace Engine
     DescriptorPool& operator=(DescriptorPool&&) = delete;
 
     // Retrieves or creates a MaterialDescriptor
-    std::shared_ptr<MaterialDescriptor> GetMaterialDescriptor(VulkanRenderer& renderer, const std::shared_ptr<Texture2D>& albedoMap);
+    std::shared_ptr<MaterialDescriptor> GetMaterialDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& albedoMap);
 
     // Frees all MaterialDescriptors
     void Flush();

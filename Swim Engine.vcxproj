@@ -72,11 +72,11 @@
   <!-- Define Shader Files -->
   <ItemGroup>
     <!-- Vertex Shaders (vs_6_0) -->
-    <ShaderFiles Include="Source\Shaders\VertexShaders\**\*.hlsl">
+    <ShaderFiles Include="Source\Shaders\Vulkan\VertexShaders\**\*.hlsl">
       <ShaderType>vs_6_0</ShaderType>
     </ShaderFiles>
     <!-- Fragment Shaders (ps_6_0) -->
-    <ShaderFiles Include="Source\Shaders\FragmentShaders\**\*.hlsl">
+    <ShaderFiles Include="Source\Shaders\Vulkan\FragmentShaders\**\*.hlsl">
       <ShaderType>ps_6_0</ShaderType>
     </ShaderFiles>
   </ItemGroup>
@@ -150,7 +150,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
     </ClCompile>
@@ -158,11 +158,12 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib
+;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
-</Command>
+xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy over assets to build directory</Message>
@@ -177,7 +178,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
     </ClCompile>
@@ -187,11 +188,12 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib
+;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
-</Command>
+xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy over assets to build directory</Message>
@@ -200,9 +202,11 @@
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\OpenGLBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Meshes\MeshPool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\OpenGLRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\DescriptorPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.cpp" />
@@ -217,10 +221,20 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+    <ClCompile Include="Source\Library\glad\src\gl.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="Source\Library\glad\src\wgl.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Source\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\Components\Material.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\OpenGLBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\OpenGLRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Meshes\Mesh.h" />
     <ClInclude Include="Source\Engine\Machine.h" />
@@ -244,6 +258,17 @@
     <ClInclude Include="Source\Engine\Utility\PCH.h" />
     <ClInclude Include="Source\Game\Scenes\SandBox.h" />
     <ClInclude Include="Source\Library\EnTT\entt.hpp" />
+    <ClInclude Include="Source\Library\glad\include\glad\gl.h" />
+    <ClInclude Include="Source\Library\glad\include\glad\wgl.h" />
+    <ClInclude Include="Source\Library\glad\include\KHR\khrplatform.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Shaders\OpenGL\vertex.glsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Shaders\OpenGL\fragment.glsl">
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

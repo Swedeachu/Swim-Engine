@@ -1,6 +1,6 @@
 #pragma once
 
-// OS | TODO: Linux support since we are using Vulkan (this makes GLFW very, very tempting)
+// OS | TODO: Linux support since we are using Vulkan and OpenGL (this makes GLFW very, very tempting)
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 // undefine min and max from windows.h because that collides with std::min std::max
@@ -34,3 +34,6 @@
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_win32.h>
 
+// OpenGL glad
+#include <glad/gl.h>
+#include <glad/wgl.h>

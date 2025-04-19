@@ -18,6 +18,10 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\DescriptorPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialDescriptor.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Buffer\OpenGLBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\OpenGLRenderer.cpp" />
+    <ClCompile Include="Source\Library\glad\src\gl.c" />
+    <ClCompile Include="Source\Library\glad\src\wgl.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -44,5 +48,10 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\PBR\DescriptorPool.h" />
     <ClInclude Include="Source\Engine\Components\Material.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\PBR\MaterialPool.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Buffer\OpenGLBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\OpenGLRenderer.h" />
+    <ClInclude Include="Source\Library\glad\include\glad\gl.h" />
+    <ClInclude Include="Source\Library\glad\include\glad\wgl.h" />
+    <ClInclude Include="Source\Library\glad\include\KHR\khrplatform.h" />
   </ItemGroup>
 </Project>

@@ -20,12 +20,6 @@ struct GLFWwindow; // if we use GLFW in the future for windowing
 namespace Engine
 {
 
-	struct CameraUBO
-	{
-		glm::mat4 view;
-		glm::mat4 proj;
-	};
-
 	struct PushConstantData
 	{
 		glm::mat4 model;     // The model transform
@@ -78,13 +72,14 @@ namespace Engine
 		int Exit() override;
 
 		VkDevice& GetDevice() { return device; }
+		VkPhysicalDevice& GetPhysicalDevice() { return physicalDevice; }
 
 		VkDescriptorSet CreateMaterialDescriptorSet(const std::shared_ptr<Texture2D>& texture);
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 
-		// Will flag the renderer to reload everything for the adjusted surface, called by the engine when finished resizing the window
+		// Will flag the vulkanRenderer to reload everything for the adjusted surface, called by the engine when finished resizing the window
 		void SetFramebufferResized()
 		{
 			framebufferResized = true;

@@ -5,13 +5,25 @@
 namespace Engine
 {
 
-	class VulkanRenderer; // forward decalre
+	// forward declare
+	class VulkanRenderer;
+	class OpenGLRenderer;
 
 	// std::enable_shared_from_this<SwimEngine> so we can get a pointer to ourselves
 	class SwimEngine : public Machine, public std::enable_shared_from_this<SwimEngine>
 	{
 
 	public:
+
+		enum RenderContext
+		{
+			Vulkan, OpenGL /*, DirectX11, DirectX12, Metal */ // everything commented out is not implemented yet/doesn't need to be implemented
+		};
+
+		// The render context we are using, this should be changed before compliation before building for the target platform.
+		// In a fancier world this value would be auto changed via build script steps when doing a batch build for all platforms.
+		// This is constexpr so branching logic based on API specific code is instant (Mesh, Texture, etc). 
+		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
 
 		SwimEngine();
 
@@ -40,13 +52,17 @@ namespace Engine
 		void Stop();
 
 		static std::shared_ptr<SwimEngine> GetInstance();
+		static std::shared_ptr<SwimEngine>& GetInstanceRef();
+
+		static std::string GetExecutableDirectory();
 
 		HWND GetWindowHandle() const { return engineWindowHandle; }
 
 		std::shared_ptr<InputManager> GetInputManager() const { return inputManager; }
 		std::shared_ptr<SceneSystem> GetSceneSystem() const { return sceneSystem; }
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return cameraSystem; }
-		std::shared_ptr<VulkanRenderer> GetRenderer() const { return renderer; }
+		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return vulkanRenderer; }
+		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return openglRenderer; }
 
 		unsigned int GetWindowWidth() const { return windowWidth; }
 		unsigned int GetWindowHeight() const { return windowHeight; }
@@ -95,7 +111,8 @@ namespace Engine
 		std::unique_ptr<SystemManager> systemManager;
 		std::shared_ptr<InputManager> inputManager;
 		std::shared_ptr<SceneSystem> sceneSystem;
-		std::shared_ptr<VulkanRenderer> renderer;
+		std::shared_ptr<VulkanRenderer> vulkanRenderer;
+		std::shared_ptr<OpenGLRenderer> openglRenderer;
 		std::shared_ptr<CameraSystem> cameraSystem;
 
 	};

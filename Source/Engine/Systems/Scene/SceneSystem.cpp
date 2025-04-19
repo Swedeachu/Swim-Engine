@@ -24,7 +24,7 @@ namespace Engine
 				auto instance = SwimEngine::GetInstance();
 				scene->SetInputManager(instance->GetInputManager());
 				scene->SetCameraSystem(instance->GetCameraSystem());
-				scene->SetRenderer(instance->GetRenderer());
+				scene->SetRenderer(instance->GetVulkanRenderer());
 			}
 		}
 		factory.clear(); // then do we want to clear?

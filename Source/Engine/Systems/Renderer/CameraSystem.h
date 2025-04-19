@@ -2,9 +2,16 @@
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
 #include "Library/glm/gtc/matrix_transform.hpp"
+#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
+
+	struct CameraUBO
+	{
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
 
 	// this code was thrown together very quickly, but honestly a camera should just be using the premade transform component 
 	// maybe camera deserves its own file
@@ -79,7 +86,7 @@ namespace Engine
 			if (projDirty)
 			{
 				projMatrix = glm::perspective(glm::radians(fov), aspect, nearClip, farClip);
-				projMatrix[1][1] *= -1; // Vulkan clip space correction
+				if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan) projMatrix[1][1] *= -1; // Vulkan clip space correction
 				projDirty = false;
 			}
 			return projMatrix;
