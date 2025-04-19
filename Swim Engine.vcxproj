@@ -72,11 +72,11 @@
   <!-- Define Shader Files -->
   <ItemGroup>
     <!-- Vertex Shaders (vs_6_0) -->
-    <ShaderFiles Include="Source\Shaders\VertexShaders\**\*.hlsl">
+    <ShaderFiles Include="Source\Shaders\Vulkan\VertexShaders\**\*.hlsl">
       <ShaderType>vs_6_0</ShaderType>
     </ShaderFiles>
     <!-- Fragment Shaders (ps_6_0) -->
-    <ShaderFiles Include="Source\Shaders\FragmentShaders\**\*.hlsl">
+    <ShaderFiles Include="Source\Shaders\Vulkan\FragmentShaders\**\*.hlsl">
       <ShaderType>ps_6_0</ShaderType>
     </ShaderFiles>
   </ItemGroup>
@@ -163,7 +163,7 @@
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
-</Command>
+xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy over assets to build directory</Message>
@@ -193,7 +193,7 @@
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
-</Command>
+xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy over assets to build directory</Message>
@@ -261,6 +261,14 @@
     <ClInclude Include="Source\Library\glad\include\glad\gl.h" />
     <ClInclude Include="Source\Library\glad\include\glad\wgl.h" />
     <ClInclude Include="Source\Library\glad\include\KHR\khrplatform.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Shaders\OpenGL\vertex.glsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Source\Shaders\OpenGL\fragment.glsl">
+      <FileType>Document</FileType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -39,7 +39,6 @@ namespace Engine
 		HDC deviceContext = nullptr;
 		HGLRC glContext = nullptr;
 
-
 		HWND windowHandle;
 		uint32_t windowWidth;
 		uint32_t windowHeight;
@@ -50,6 +49,13 @@ namespace Engine
 
 		std::shared_ptr<Texture2D> missingTexture;
 		std::shared_ptr<CameraSystem> cameraSystem;
+
+		// Shader Cached uniform locations (kinda gross)
+		GLint loc_model = -1;
+		GLint loc_view = -1;
+		GLint loc_proj = -1;
+		GLint loc_hasTexture = -1;
+		GLint loc_albedoTex = -1;
 
 	};
 

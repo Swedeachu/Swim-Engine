@@ -9,43 +9,11 @@
 #include "Engine/Components/Material.h"
 
 #include <fstream>
+#include <sstream>
 #include <iostream>
 
 namespace Engine
 {
-
-  const char* vertexSrc = R"(
-#version 460 core
-layout (location = 0) in vec3 position;
-layout (location = 1) in vec3 color;
-layout (location = 2) in vec2 uv;
-
-uniform mat4 view;
-uniform mat4 proj;
-uniform mat4 model;
-
-out vec3 fragColor;
-out vec2 fragUV;
-
-void main() {
-    fragColor = color;
-    fragUV = uv;
-    gl_Position = proj * view * model * vec4(position, 1.0);
-}
-)";
-
-  const char* fragmentSrc = R"(
-#version 460 core
-in vec3 fragColor;
-in vec2 fragUV;
-
-out vec4 FragColor;
-
-void main() {
-    FragColor = vec4(1.0, 0.0, 0.0, 1.0); // DEBUG: force red
-}
-)";
-
 
   OpenGLRenderer::OpenGLRenderer(HWND hwnd, uint32_t width, uint32_t height)
     : windowHandle(hwnd), windowWidth(width), windowHeight(height)
@@ -61,6 +29,10 @@ void main() {
     }
   }
 
+  // I hate this, it's a literal hack. Having to do this weird shit is exactly why OpenGL got kicked to the curb in favor of Vulkan.
+  // The only reason I even have OpenGL supported is for me to practice a multi context renderer, 
+  // and because my graphics programming courses require OpenGL knowledge. I guess it could be argued sometimes its quicker to prototype in OpenGL than vulkan.
+  // Basically the OpenGL renderer is going to be full of hacks and quick and dirty things for the purpose of prototyping and proof of concept.
   static void* GetGLProcAddress(const char* name)
   {
     void* p = (void*)wglGetProcAddress(name);
@@ -148,8 +120,8 @@ void main() {
       return false;
     }
 
-    // glEnable(GL_DEPTH_TEST);
-    // glDisable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST); // 3D depth buffer (we probably need to set up a stencil though)
+    // glDisable(GL_CULL_FACE); // why did we disable this?
 
     std::cout << "OpenGL Initialized: " << glGetString(GL_VERSION) << std::endl;
     return true;
@@ -177,15 +149,36 @@ void main() {
     return true;
   }
 
+  std::string LoadTextFile(const std::string& relativePath)
+  {
+    std::string fullPath = SwimEngine::GetExecutableDirectory() + "\\" + relativePath;
+
+    std::ifstream file(fullPath);
+    if (!file.is_open())
+    {
+      throw std::runtime_error("Failed to load shader: " + fullPath);
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+  }
+
   int OpenGLRenderer::Awake()
   {
-    // GLuint vert = LoadSPIRVShaderStage("Shaders\\VertexShaders\\vertex.spv", GL_VERTEX_SHADER);
-    // GLuint frag = LoadSPIRVShaderStage("Shaders\\FragmentShaders\\fragment.spv", GL_FRAGMENT_SHADER);
+    std::string vertSource = LoadTextFile("Shaders/OpenGL/vertex.glsl");
+    std::string fragSource = LoadTextFile("Shaders/OpenGL/fragment.glsl");
 
-    GLuint vert = CompileGLSLShader(GL_VERTEX_SHADER, vertexSrc);
-    GLuint frag = CompileGLSLShader(GL_FRAGMENT_SHADER, fragmentSrc);
-
+    GLuint vert = CompileGLSLShader(GL_VERTEX_SHADER, vertSource.c_str());
+    GLuint frag = CompileGLSLShader(GL_FRAGMENT_SHADER, fragSource.c_str());
     shaderProgram = LinkShaderProgram({ vert, frag });
+
+    // Cache uniform locations once
+    loc_model = glGetUniformLocation(shaderProgram, "model");
+    loc_view = glGetUniformLocation(shaderProgram, "view");
+    loc_proj = glGetUniformLocation(shaderProgram, "proj");
+    loc_hasTexture = glGetUniformLocation(shaderProgram, "hasTexture");
+    loc_albedoTex = glGetUniformLocation(shaderProgram, "albedoTex");
 
     glGenBuffers(1, &ubo);
     glBindBuffer(GL_UNIFORM_BUFFER, ubo);
@@ -251,7 +244,7 @@ void main() {
 
   void OpenGLRenderer::FixedUpdate(unsigned int tickThisSecond)
   {
-    // Optional fixed timestep logic
+    // nop
   }
 
   void OpenGLRenderer::RenderFrame()
@@ -260,7 +253,13 @@ void main() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     glUseProgram(shaderProgram);
+
     UpdateUniformBuffer();
+
+    glm::mat4 viewMat = cameraSystem->GetViewMatrix();
+    glm::mat4 projMat = cameraSystem->GetProjectionMatrix();
+    glUniformMatrix4fv(loc_view, 1, GL_FALSE, &viewMat[0][0]);
+    glUniformMatrix4fv(loc_proj, 1, GL_FALSE, &projMat[0][0]);
 
     auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
     if (!scene) return;
@@ -270,19 +269,23 @@ void main() {
 
     for (auto entity : view)
     {
-      auto& transform = view.get<Transform>(entity);
-      auto& mat = view.get<Material>(entity).data;
-      auto& meshData = *mat->mesh->meshBufferData;
+      const auto& transform = view.get<Transform>(entity);
+      const auto& mat = view.get<Material>(entity).data;
+      const auto& meshData = *mat->mesh->meshBufferData;
 
       glm::mat4 model = transform.GetModelMatrix();
-      glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, &model[0][0]);
+      glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
 
-      GLuint texID = (mat->albedoMap ? mat->albedoMap : missingTexture)->GetTextureID();
+      bool usesTexture = mat->albedoMap != nullptr;
+      glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
+
+      GLuint texID = (usesTexture ? mat->albedoMap : missingTexture)->GetTextureID();
+      glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, texID);
+      glUniform1i(loc_albedoTex, 0);
 
       meshData.glBuffer->Bind();
-
-      glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr); 
+      glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
     }
 
     SwapBuffers(deviceContext);
@@ -291,15 +294,11 @@ void main() {
   void OpenGLRenderer::UpdateUniformBuffer()
   {
     CameraUBO uboData{};
-    uboData.view = cameraSystem->GetViewMatrix();
+    uboData.view = cameraSystem->GetViewMatrix();    
     uboData.proj = cameraSystem->GetProjectionMatrix();
 
-    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &uboData.view[0][0]);
-    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "proj"), 1, GL_FALSE, &uboData.proj[0][0]);
-
-    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &uboData);
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    glUniformMatrix4fv(loc_view, 1, GL_FALSE, &uboData.view[0][0]);
+    glUniformMatrix4fv(loc_proj, 1, GL_FALSE, &uboData.proj[0][0]);
   }
 
   int OpenGLRenderer::Exit()
@@ -311,6 +310,7 @@ void main() {
     return 0;
   }
 
+  // Unused
   GLuint OpenGLRenderer::LoadSPIRVShaderStage(const std::string& path, GLenum shaderStage)
   {
     std::string fullPath = SwimEngine::GetExecutableDirectory() + "\\" + path;
