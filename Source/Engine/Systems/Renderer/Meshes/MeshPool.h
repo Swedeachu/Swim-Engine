@@ -41,6 +41,11 @@ namespace Engine
     mutable std::mutex poolMutex; // Protects the mesh map
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;
 
+    // Vulkan context cache
+    bool vulkanDevicesCached = false;
+    VkDevice cachedDevice = VK_NULL_HANDLE;
+    VkPhysicalDevice cachedPhysicalDevice = VK_NULL_HANDLE;
+
   };
 
 }

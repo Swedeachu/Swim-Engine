@@ -16,7 +16,7 @@ namespace Engine
 
     VkDescriptorSet descriptorSet;
 
-    MaterialDescriptor(VulkanRenderer& renderer, const std::shared_ptr<Texture2D>& texture);
+    MaterialDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& texture);
 
     ~MaterialDescriptor();
 

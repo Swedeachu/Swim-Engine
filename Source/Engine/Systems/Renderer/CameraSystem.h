@@ -6,6 +6,12 @@
 namespace Engine
 {
 
+	struct CameraUBO
+	{
+		glm::mat4 view;
+		glm::mat4 proj;
+	};
+
 	// this code was thrown together very quickly, but honestly a camera should just be using the premade transform component 
 	// maybe camera deserves its own file
 	// later on it should be a component which can be used for making different render targets/layers to send draw calls to with its own specific world spaces

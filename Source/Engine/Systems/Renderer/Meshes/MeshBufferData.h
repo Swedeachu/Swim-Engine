@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Buffer/VulkanBuffer.h"
+#include "Engine/Systems/Renderer/Buffer/OpenGLBuffer.h"
 
 namespace Engine
 {
@@ -9,22 +11,69 @@ namespace Engine
 	struct MeshBufferData
 	{
 
+		// Vulkan buffers
 		std::unique_ptr<VulkanBuffer> vertexBuffer;
 		std::unique_ptr<VulkanBuffer> indexBuffer;
+
+		// OpenGL buffer
+		std::unique_ptr<OpenGLBuffer> glBuffer;
+
+		// Count of indices for rendering
 		uint32_t indexCount = 0;
 
-		// Free all Vulkan buffers
+		// GPU buffer generation, you don't need to pass devices if you are not in a vulkan context
+		void GenerateBuffers(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, VkDevice vkDevice = {}, VkPhysicalDevice vkPhysicalDevice = {})
+		{
+			indexCount = static_cast<uint32_t>(indices.size());
+
+			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+			{
+				vertexBuffer = std::make_unique<VulkanBuffer>(
+					vkDevice, vkPhysicalDevice,
+					vertices.size() * sizeof(Vertex),
+					VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+				);
+				vertexBuffer->CopyData(vertices.data(), vertices.size() * sizeof(Vertex));
+
+				indexBuffer = std::make_unique<VulkanBuffer>(
+					vkDevice, vkPhysicalDevice,
+					indices.size() * sizeof(uint16_t),
+					VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+				);
+				indexBuffer->CopyData(indices.data(), indices.size() * sizeof(uint16_t));
+			}
+			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+			{
+				glBuffer = std::make_unique<OpenGLBuffer>();
+				glBuffer->Create(vertices.data(), vertices.size() * sizeof(Vertex), indices.data(), indices.size() * sizeof(uint16_t));
+			}
+		}
+
+		// Free buffers based on render context being used
 		void Free()
 		{
-			if (vertexBuffer)
+			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 			{
-				vertexBuffer->Free();
-				vertexBuffer.reset();
+				if (vertexBuffer)
+				{
+					vertexBuffer->Free();
+					vertexBuffer.reset();
+				}
+				if (indexBuffer)
+				{
+					indexBuffer->Free();
+					indexBuffer.reset();
+				}
 			}
-			if (indexBuffer)
+			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 			{
-				indexBuffer->Free();
-				indexBuffer.reset();
+				if (glBuffer)
+				{
+					glBuffer->Free();
+					glBuffer.reset();
+				}
 			}
 		}
 

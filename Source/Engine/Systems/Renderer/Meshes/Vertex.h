@@ -1,13 +1,13 @@
 #pragma once
 
 #include "Library/glm/glm.hpp"
-#include <vulkan/vulkan.hpp>
 
 namespace Engine
 {
 
   struct Vertex
   {
+
     glm::vec3 position; // Location 0 in the shader
     glm::vec3 color;    // Location 1 in the shader
     glm::vec2 uv;       // Location 2 in the shader 
@@ -44,6 +44,22 @@ namespace Engine
       attributeDescriptions[2].offset = offsetof(Vertex, uv);
 
       return attributeDescriptions;
+    }
+
+    // OpenGL attribute setup (to be called after VAO/VBO bind)
+    static void SetupOpenGLAttributes()
+    {
+      // Position attribute (location = 0)
+      glEnableVertexAttribArray(0);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+
+      // Color attribute (location = 1)
+      glEnableVertexAttribArray(1);
+      glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+
+      // UV attribute (location = 2)
+      glEnableVertexAttribArray(2);
+      glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, uv));
     }
 
   };

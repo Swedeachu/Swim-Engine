@@ -2,6 +2,7 @@
 #include "SwimEngine.h"
 #include <chrono>
 #include "Engine/Systems/Renderer/VulkanRenderer.h"
+#include "Engine/Systems/Renderer/OpenGLRenderer.h"
 
 namespace Engine
 {
@@ -19,6 +20,25 @@ namespace Engine
 	std::shared_ptr<SwimEngine> SwimEngine::GetInstance()
 	{
 		return EngineInstance;
+	}
+
+	std::shared_ptr<SwimEngine>& SwimEngine::GetInstanceRef()
+	{
+		return EngineInstance;
+	}
+
+	std::string SwimEngine::GetExecutableDirectory()
+	{
+		char path[MAX_PATH];
+		HMODULE hModule = GetModuleHandleA(NULL);
+		if (hModule == NULL)
+		{
+			throw std::runtime_error("Failed to get module handle.");
+		}
+		GetModuleFileNameA(hModule, path, sizeof(path));
+		std::string fullPath(path);
+		size_t pos = fullPath.find_last_of("\\/");
+		return (pos == std::string::npos) ? "" : fullPath.substr(0, pos);
 	}
 
 	bool SwimEngine::Start()
@@ -115,9 +135,9 @@ namespace Engine
 		}
 		*/
 
-		// We must have input system and renderer set up to accept messages
+		// We must have input system and vulkanRenderer set up to accept messages
 		// I don't remember why we check if our self isn't null, but if we don't then everything breaks
-		if (this == nullptr || inputManager.get() == nullptr || renderer.get() == nullptr)
+		if (this == nullptr || inputManager.get() == nullptr || vulkanRenderer.get() == nullptr)
 		{
 			return DefWindowProc(hwnd, uMsg, wParam, lParam);
 		}
@@ -202,7 +222,16 @@ namespace Engine
 		// Add systems to the SystemManager
 		inputManager = systemManager->AddSystem<InputManager>("InputManager");
 		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
-		renderer = systemManager->AddSystem<VulkanRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+
+		if constexpr (CONTEXT == RenderContext::Vulkan)
+		{
+			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+		}
+		else if constexpr (CONTEXT == RenderContext::OpenGL)
+		{
+			openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+		}
+
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
 
 		// Call Awake and Init on all systems
@@ -305,9 +334,17 @@ namespace Engine
 	{
 		// First sync any updates that happened to the window to the renderer
 		// But we only do this if we are not a minimized window
-		if (!minimized && needResize && renderer)
+		if (!minimized && needResize)
 		{
-			renderer->SetFramebufferResized();
+			if constexpr (CONTEXT == RenderContext::Vulkan)
+			{
+				if (vulkanRenderer) { vulkanRenderer->SetFramebufferResized(); }
+			}
+			else if constexpr (CONTEXT == RenderContext::OpenGL)
+			{
+				if (openglRenderer) { openglRenderer->SetFramebufferResized(); }
+			}
+
 			needResize = false;
 		}
 
@@ -330,7 +367,21 @@ namespace Engine
 		GetClientRect(engineWindowHandle, &rect);
 		windowWidth = rect.right - rect.left;
 		windowHeight = rect.bottom - rect.top;
-		renderer->SetSurfaceSize(windowHeight, windowHeight);
+
+		if constexpr (CONTEXT == RenderContext::Vulkan)
+		{
+			if (vulkanRenderer)
+			{
+				vulkanRenderer->SetSurfaceSize(windowWidth, windowHeight);
+			}
+		}
+		else if constexpr (CONTEXT == RenderContext::OpenGL)
+		{
+			if (openglRenderer)
+			{
+				openglRenderer->SetSurfaceSize(windowWidth, windowHeight);
+			}
+		}
 	}
 
 }

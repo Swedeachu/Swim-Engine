@@ -1,6 +1,8 @@
-#pragma once 
+#pragma once
 
-#include <vulkan/vulkan.hpp>
+#include <string>
+#include <vulkan/vulkan.h>
+#include <glad/gl.h>
 
 namespace Engine
 {
@@ -15,24 +17,29 @@ namespace Engine
 
     void Free();
 
+    // Vulkan accessors
     VkImage GetImage() const { return image; }
     VkImageView GetImageView() const { return imageView; }
-    // VkSampler GetSampler() const { return sampler; }
+
+    // OpenGL accessor
+    GLuint GetTextureID() const { return textureID; }
 
   private:
 
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    // Vulkan
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE;
-    // VkSampler sampler = VK_NULL_HANDLE;
 
-    uint32_t width = 0;
-    uint32_t height = 0;
-    // ... maybe format, channels, etc.
+    // OpenGL
+    GLuint textureID = 0;
 
-    void LoadFromFile(const std::string& filePath);
-    // void CreateImageResources();
-    void CreateImageView();
+    void LoadVulkanTexture(const std::string& filePath);
+    void CreateImageView(); // Vulkan-only
+    void LoadOpenGLTexture(const std::string& filePath); // OpenGL-only
 
   };
 
