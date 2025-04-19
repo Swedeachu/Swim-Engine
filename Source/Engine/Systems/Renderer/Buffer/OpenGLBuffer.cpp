@@ -43,21 +43,9 @@ namespace Engine
 
 	void OpenGLBuffer::Free()
 	{
-		if (ebo != 0)
-		{
-			glDeleteBuffers(1, &ebo);
-			ebo = 0;
-		}
-		if (vbo != 0)
-		{
-			glDeleteBuffers(1, &vbo);
-			vbo = 0;
-		}
-		if (vao != 0)
-		{
-			glDeleteVertexArrays(1, &vao);
-			vao = 0;
-		}
+		if (ebo) { glDeleteBuffers(1, &ebo); ebo = 0; }
+		if (vbo) { glDeleteBuffers(1, &vbo); vbo = 0; }
+		if (vao) { glDeleteVertexArrays(1, &vao); vao = 0; }
 	}
 
 }

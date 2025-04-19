@@ -21,6 +21,7 @@ namespace Engine
 
 		// Getters for VAO and index count
 		inline GLuint GetVAO() const { return vao; }
+		inline GLuint GetEBO() const { return ebo; }
 		inline GLuint GetIndexCount() const { return indexCount; }
 
 	private:

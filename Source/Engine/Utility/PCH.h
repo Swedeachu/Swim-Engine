@@ -35,5 +35,5 @@
 #include <vulkan/vulkan_win32.h>
 
 // OpenGL glad
-#include <glad/wgl.h>
 #include <glad/gl.h>
+#include <glad/wgl.h>

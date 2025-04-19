@@ -21,6 +21,14 @@ namespace Engine
 		// Count of indices for rendering
 		uint32_t indexCount = 0;
 
+		GLuint GetGLVAO() const
+		{
+			if (glBuffer) { return glBuffer->GetVAO(); }
+			return 0;
+		}
+
+		GLuint GetIndexCount() const { return indexCount; }
+
 		// GPU buffer generation, you don't need to pass devices if you are not in a vulkan context
 		void GenerateBuffers(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, VkDevice vkDevice = {}, VkPhysicalDevice vkPhysicalDevice = {})
 		{
@@ -48,6 +56,7 @@ namespace Engine
 			{
 				glBuffer = std::make_unique<OpenGLBuffer>();
 				glBuffer->Create(vertices.data(), vertices.size() * sizeof(Vertex), indices.data(), indices.size() * sizeof(uint16_t));
+				indexCount = glBuffer->GetIndexCount(); // sync afterwards
 			}
 		}
 

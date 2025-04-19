@@ -2,6 +2,7 @@
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
 #include "Library/glm/gtc/matrix_transform.hpp"
+#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
@@ -85,7 +86,7 @@ namespace Engine
 			if (projDirty)
 			{
 				projMatrix = glm::perspective(glm::radians(fov), aspect, nearClip, farClip);
-				projMatrix[1][1] *= -1; // Vulkan clip space correction
+				if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan) projMatrix[1][1] *= -1; // Vulkan clip space correction
 				projDirty = false;
 			}
 			return projMatrix;

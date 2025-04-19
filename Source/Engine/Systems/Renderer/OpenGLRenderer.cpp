@@ -14,6 +14,39 @@
 namespace Engine
 {
 
+  const char* vertexSrc = R"(
+#version 460 core
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec3 color;
+layout (location = 2) in vec2 uv;
+
+uniform mat4 view;
+uniform mat4 proj;
+uniform mat4 model;
+
+out vec3 fragColor;
+out vec2 fragUV;
+
+void main() {
+    fragColor = color;
+    fragUV = uv;
+    gl_Position = proj * view * model * vec4(position, 1.0);
+}
+)";
+
+  const char* fragmentSrc = R"(
+#version 460 core
+in vec3 fragColor;
+in vec2 fragUV;
+
+out vec4 FragColor;
+
+void main() {
+    FragColor = vec4(1.0, 0.0, 0.0, 1.0); // DEBUG: force red
+}
+)";
+
+
   OpenGLRenderer::OpenGLRenderer(HWND hwnd, uint32_t width, uint32_t height)
     : windowHandle(hwnd), windowWidth(width), windowHeight(height)
   {
@@ -26,6 +59,19 @@ namespace Engine
     {
       throw std::runtime_error("Failed to initialize OpenGL context.");
     }
+  }
+
+  static void* GetGLProcAddress(const char* name)
+  {
+    void* p = (void*)wglGetProcAddress(name);
+    if (p == 0 ||
+      p == (void*)0x1 || p == (void*)0x2 || p == (void*)0x3 ||
+      p == (void*)-1)
+    {
+      HMODULE module = LoadLibraryA("opengl32.dll");
+      p = (void*)GetProcAddress(module, name);
+    }
+    return p;
   }
 
   bool OpenGLRenderer::InitOpenGLContext()
@@ -96,11 +142,14 @@ namespace Engine
     }
 
     // Load OpenGL functions using glad
-    if (!gladLoadGL((GLADloadfunc)wglGetProcAddress))
+    if (!gladLoadGL((GLADloadfunc)GetGLProcAddress))
     {
       std::cerr << "Failed to load OpenGL functions with gladLoadGL." << std::endl;
       return false;
     }
+
+    // glEnable(GL_DEPTH_TEST);
+    // glDisable(GL_CULL_FACE);
 
     std::cout << "OpenGL Initialized: " << glGetString(GL_VERSION) << std::endl;
     return true;
@@ -130,8 +179,12 @@ namespace Engine
 
   int OpenGLRenderer::Awake()
   {
-    GLuint vert = LoadSPIRVShaderStage("Shaders\\VertexShaders\\vertex.spv", GL_VERTEX_SHADER);
-    GLuint frag = LoadSPIRVShaderStage("Shaders\\FragmentShaders\\fragment.spv", GL_FRAGMENT_SHADER);
+    // GLuint vert = LoadSPIRVShaderStage("Shaders\\VertexShaders\\vertex.spv", GL_VERTEX_SHADER);
+    // GLuint frag = LoadSPIRVShaderStage("Shaders\\FragmentShaders\\fragment.spv", GL_FRAGMENT_SHADER);
+
+    GLuint vert = CompileGLSLShader(GL_VERTEX_SHADER, vertexSrc);
+    GLuint frag = CompileGLSLShader(GL_FRAGMENT_SHADER, fragmentSrc);
+
     shaderProgram = LinkShaderProgram({ vert, frag });
 
     glGenBuffers(1, &ubo);
@@ -144,6 +197,25 @@ namespace Engine
     missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
 
     return 0;
+  }
+
+  GLuint OpenGLRenderer::CompileGLSLShader(GLenum stage, const char* source)
+  {
+    GLuint shader = glCreateShader(stage);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+
+    GLint success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+      char infoLog[512];
+      glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+      std::string errorStage = (stage == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
+      throw std::runtime_error("GLSL " + errorStage + " shader compile failed: " + std::string(infoLog));
+    }
+
+    return shader;
   }
 
   int OpenGLRenderer::Init()
@@ -209,8 +281,11 @@ namespace Engine
       glBindTexture(GL_TEXTURE_2D, texID);
 
       meshData.glBuffer->Bind();
-      glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
+
+      glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr); 
     }
+
+    SwapBuffers(deviceContext);
   }
 
   void OpenGLRenderer::UpdateUniformBuffer()
@@ -218,6 +293,9 @@ namespace Engine
     CameraUBO uboData{};
     uboData.view = cameraSystem->GetViewMatrix();
     uboData.proj = cameraSystem->GetProjectionMatrix();
+
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &uboData.view[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "proj"), 1, GL_FALSE, &uboData.proj[0][0]);
 
     glBindBuffer(GL_UNIFORM_BUFFER, ubo);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &uboData);

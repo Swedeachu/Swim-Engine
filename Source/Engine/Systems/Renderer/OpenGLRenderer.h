@@ -30,6 +30,7 @@ namespace Engine
 		// Initing
 		bool InitOpenGLContext();
 		bool SetPixelFormatForHDC(HDC hdc);
+		GLuint CompileGLSLShader(GLenum stage, const char* source);
 
 		// Rendering
 		void RenderFrame();
