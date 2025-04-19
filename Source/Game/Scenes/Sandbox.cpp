@@ -198,6 +198,7 @@ namespace Game
 		{
 			cameraMoveDir += rightXZ;
 		}
+
 		// Vertical camera movement
 		if (input->IsKeyDown(VK_SPACE))
 		{

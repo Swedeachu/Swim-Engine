@@ -10,10 +10,24 @@ namespace Engine
 	// Global engine instance
 	std::shared_ptr<SwimEngine> EngineInstance = nullptr;
 
+	std::wstring getDefaultWindowTitle()
+	{
+		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		{
+			return L"Swim Engine [Vulkan]";
+		}
+		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+		{
+			return L"Swim Engine [OpenGL]";
+		}
+
+		return L"Swim Engine Demo";
+	}
+
 	SwimEngine::SwimEngine()
 	{
 		windowClassName = L"SwimEngine";
-		windowTitle = L"Demo";
+		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
 	}
 
@@ -135,9 +149,27 @@ namespace Engine
 		}
 		*/
 
-		// We must have input system and vulkanRenderer set up to accept messages
-		// I don't remember why we check if our self isn't null, but if we don't then everything breaks
-		if (this == nullptr || inputManager.get() == nullptr || vulkanRenderer.get() == nullptr)
+		// SwimEngine class + input manager must be initialized first to accept messages
+		if (this == nullptr || inputManager.get() == nullptr)
+		{
+			return DefWindowProc(hwnd, uMsg, wParam, lParam);
+		}
+
+		// We do the same check for the renderer we are using
+
+		bool renderer = false;
+
+		if constexpr (CONTEXT == RenderContext::Vulkan)
+		{
+			if (vulkanRenderer) renderer = vulkanRenderer.get() != nullptr;
+		}
+		else if constexpr (CONTEXT == RenderContext::OpenGL)
+		{
+			if (openglRenderer) renderer = openglRenderer.get() != nullptr;
+		}
+
+		// If not set up, don't accept the message
+		if (!renderer)
 		{
 			return DefWindowProc(hwnd, uMsg, wParam, lParam);
 		}
@@ -332,8 +364,11 @@ namespace Engine
 
 	void SwimEngine::Update(double dt)
 	{
-		// First sync any updates that happened to the window to the renderer
-		// But we only do this if we are not a minimized window
+		static double timeAccumulator = 0.0;
+		static int frameCounter = 0;
+		static double fps = 0.0;
+
+		// First sync any updates that happened to the window to the renderer (if not minimized or needing a resize)
 		if (!minimized && needResize)
 		{
 			if constexpr (CONTEXT == RenderContext::Vulkan)
@@ -349,6 +384,26 @@ namespace Engine
 		}
 
 		systemManager->Update(dt);
+
+		// --- FPS Update Logic on Window Title ---
+		timeAccumulator += dt;
+		frameCounter++;
+
+		if (timeAccumulator >= 1.0)
+		{
+			fps = static_cast<double>(frameCounter) / timeAccumulator;
+
+			// Format new title: "Swim Engine [Vulkan] | 240 FPS"
+			std::wstring baseTitle = getDefaultWindowTitle(); // game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
+			std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(static_cast<int>(fps)) + L" FPS";
+
+			// Set the updated title
+			SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+
+			// Reset for the next second
+			timeAccumulator = 0.0;
+			frameCounter = 0;
+		}
 	}
 
 	void SwimEngine::FixedUpdate(unsigned int tickThisSecond)

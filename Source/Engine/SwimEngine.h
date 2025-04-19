@@ -23,7 +23,7 @@ namespace Engine
 		// The render context we are using, this should be changed before compliation before building for the target platform.
 		// In a fancier world this value would be auto changed via build script steps when doing a batch build for all platforms.
 		// This is constexpr so branching logic based on API specific code is instant (Mesh, Texture, etc). 
-		static constexpr RenderContext CONTEXT = RenderContext::OpenGL;
+		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
 
 		SwimEngine();
 
