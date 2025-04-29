@@ -1,8 +1,8 @@
 #include "PCH.h"
 #include "SwimEngine.h"
 #include <chrono>
-#include "Engine/Systems/Renderer/VulkanRenderer.h"
-#include "Engine/Systems/Renderer/OpenGLRenderer.h"
+#include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
+#include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
 
 namespace Engine
 {

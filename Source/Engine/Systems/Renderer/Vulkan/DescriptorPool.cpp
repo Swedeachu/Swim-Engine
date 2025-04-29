@@ -10,7 +10,7 @@ namespace Engine
 		return instance;
 	}
 
-	std::shared_ptr<MaterialDescriptor> DescriptorPool::GetMaterialDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& texture)
+	std::shared_ptr<VulkanDescriptor> DescriptorPool::GetDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& texture)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
@@ -21,8 +21,8 @@ namespace Engine
 			return it->second;
 		}
 
-		// Create a new MaterialDescriptor
-		auto descriptor = std::make_shared<MaterialDescriptor>(vulkanRenderer, texture);
+		// Create a new VulkanDescriptor
+		auto descriptor = std::make_shared<VulkanDescriptor>(vulkanRenderer, texture);
 		descriptors.emplace(texture, descriptor);
 		return descriptor;
 	}

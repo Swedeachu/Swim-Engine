@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "OpenGLBuffer.h"
-#include "Engine/Systems/Renderer/Meshes/Vertex.h"
+#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
 
 namespace Engine
 {

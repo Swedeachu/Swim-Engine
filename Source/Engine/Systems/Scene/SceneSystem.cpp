@@ -24,9 +24,18 @@ namespace Engine
 				auto instance = SwimEngine::GetInstance();
 				scene->SetInputManager(instance->GetInputManager());
 				scene->SetCameraSystem(instance->GetCameraSystem());
-				scene->SetRenderer(instance->GetVulkanRenderer());
+
+				if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+				{
+					scene->SetVulkanRenderer(instance->GetVulkanRenderer());
+				}
+				else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+				{
+					scene->SetOpenGLRenderer(instance->GetOpenGLRenderer());
+				}
 			}
 		}
+
 		factory.clear(); // then do we want to clear?
 
 		int err = 0;

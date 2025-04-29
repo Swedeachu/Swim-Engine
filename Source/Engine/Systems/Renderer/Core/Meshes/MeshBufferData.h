@@ -2,8 +2,8 @@
 
 #include <memory>
 #include "Engine/SwimEngine.h"
-#include "Engine/Systems/Renderer/Buffer/VulkanBuffer.h"
-#include "Engine/Systems/Renderer/Buffer/OpenGLBuffer.h"
+#include "Engine/Systems/Renderer/Vulkan/VulkanBuffer.h"
+#include "Engine/Systems/Renderer/OpenGL/OpenGLBuffer.h"
 
 namespace Engine
 {

@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "Scene.h"
-#include "Engine/Systems/Renderer/VulkanRenderer.h"
+#include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 
 namespace Engine
 {

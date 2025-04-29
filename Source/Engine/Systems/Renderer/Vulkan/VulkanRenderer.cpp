@@ -9,11 +9,12 @@
 #include <fstream>
 #include <filesystem>
 
-#include "Meshes/Vertex.h"
-#include "Meshes/MeshPool.h"
-#include "Textures/TexturePool.h"
-#include "PBR/MaterialPool.h"
-#include "PBR/DescriptorPool.h"
+#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
+#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
+#include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
+#include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
+#include "DescriptorPool.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -285,8 +286,7 @@ namespace Engine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
-	// TODO: look into binding for roughness and normal maps as well
-	VkDescriptorSet VulkanRenderer::CreateMaterialDescriptorSet(const std::shared_ptr<Texture2D>& texture)
+	VkDescriptorSet VulkanRenderer::CreateDescriptorSet(const std::shared_ptr<Texture2D>& texture) const
 	{
 		VkDescriptorSetLayout layouts[] = { descriptorSetLayout };
 
@@ -345,7 +345,7 @@ namespace Engine
 		windowHeight = newHeight;
 	}
 
-	VkCommandBuffer VulkanRenderer::BeginSingleTimeCommands()
+	VkCommandBuffer VulkanRenderer::BeginSingleTimeCommands() const
 	{
 		// Allocate a temporary command buffer from commandPool
 		VkCommandBufferAllocateInfo allocInfo{};
@@ -370,7 +370,7 @@ namespace Engine
 		return commandBuffer;
 	}
 
-	void VulkanRenderer::EndSingleTimeCommands(VkCommandBuffer commandBuffer)
+	void VulkanRenderer::EndSingleTimeCommands(VkCommandBuffer commandBuffer) const
 	{
 		vkEndCommandBuffer(commandBuffer);
 
@@ -396,7 +396,7 @@ namespace Engine
 		VkMemoryPropertyFlags properties,
 		VkBuffer& buffer,
 		VkDeviceMemory& bufferMemory
-	)
+	) const
 	{
 		VkBufferCreateInfo bufferInfo{};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -427,7 +427,7 @@ namespace Engine
 		vkBindBufferMemory(device, buffer, bufferMemory, 0);
 	}
 
-	void VulkanRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+	void VulkanRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const
 	{
 		VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
 
@@ -440,7 +440,7 @@ namespace Engine
 		EndSingleTimeCommands(commandBuffer);
 	}
 
-	uint32_t VulkanRenderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+	uint32_t VulkanRenderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
 	{
 		VkPhysicalDeviceMemoryProperties memProperties;
 		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
@@ -875,7 +875,7 @@ namespace Engine
 		std::cout << "Selected GPU: " << properties.deviceName << std::endl;
 	}
 
-	int VulkanRenderer::RateDeviceSuitability(VkPhysicalDevice device)
+	int VulkanRenderer::RateDeviceSuitability(VkPhysicalDevice device) const
 	{
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
@@ -1271,7 +1271,7 @@ namespace Engine
 		pipelineInfo.pViewportState = &viewportState;
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
-		pipelineInfo.pDepthStencilState = &depthStencil; 
+		pipelineInfo.pDepthStencilState = &depthStencil;
 		pipelineInfo.pColorBlendState = &colorBlending;
 		pipelineInfo.pDynamicState = &dynamicState;
 		pipelineInfo.layout = pipelineLayout;
@@ -1561,7 +1561,7 @@ namespace Engine
 		uboWrite.pBufferInfo = &bufferInfo;
 
 		VkDescriptorImageInfo dummyImageInfo{};
-		dummyImageInfo.sampler = defaultSampler; 
+		dummyImageInfo.sampler = defaultSampler;
 		dummyImageInfo.imageView = missingTexture->GetImageView();
 		dummyImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -1595,7 +1595,7 @@ namespace Engine
 	// Helper methods
 	// --------------------------------------------------------------------------------------
 
-	bool VulkanRenderer::CheckValidationLayerSupport()
+	bool VulkanRenderer::CheckValidationLayerSupport() const
 	{
 		uint32_t layerCount;
 		vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -1618,7 +1618,7 @@ namespace Engine
 		return true;
 	}
 
-	QueueFamilyIndices VulkanRenderer::FindQueueFamilies(VkPhysicalDevice dev)
+	QueueFamilyIndices VulkanRenderer::FindQueueFamilies(VkPhysicalDevice dev)  const
 	{
 		QueueFamilyIndices indices;
 
@@ -1655,7 +1655,7 @@ namespace Engine
 		return indices;
 	}
 
-	SwapChainSupportDetails VulkanRenderer::QuerySwapChainSupport(VkPhysicalDevice dev)
+	SwapChainSupportDetails VulkanRenderer::QuerySwapChainSupport(VkPhysicalDevice dev) const
 	{
 		SwapChainSupportDetails details;
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev, surface, &details.capabilities);
@@ -1681,7 +1681,7 @@ namespace Engine
 		return details;
 	}
 
-	VkSurfaceFormatKHR VulkanRenderer::ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+	VkSurfaceFormatKHR VulkanRenderer::ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const
 	{
 		for (const auto& availableFormat : availableFormats)
 		{
@@ -1694,7 +1694,7 @@ namespace Engine
 		return availableFormats[0];
 	}
 
-	VkPresentModeKHR VulkanRenderer::ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
+	VkPresentModeKHR VulkanRenderer::ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const
 	{
 		for (const auto& presentMode : availablePresentModes)
 		{
@@ -1706,7 +1706,7 @@ namespace Engine
 		return VK_PRESENT_MODE_FIFO_KHR; // guaranteed to be available
 	}
 
-	VkExtent2D VulkanRenderer::ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities)
+	VkExtent2D VulkanRenderer::ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const
 	{
 		if (capabilities.currentExtent.width != UINT32_MAX)
 		{
@@ -1715,15 +1715,16 @@ namespace Engine
 		else
 		{
 			VkExtent2D actualExtent = { windowWidth, windowHeight };
-			actualExtent.width = std::max(capabilities.minImageExtent.width,
-				std::min(capabilities.maxImageExtent.width, actualExtent.width));
-			actualExtent.height = std::max(capabilities.minImageExtent.height,
-				std::min(capabilities.maxImageExtent.height, actualExtent.height));
+
+			actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
+
+			actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
+
 			return actualExtent;
 		}
 	}
 
-	bool VulkanRenderer::IsDeviceSuitable(VkPhysicalDevice dev)
+	bool VulkanRenderer::IsDeviceSuitable(VkPhysicalDevice dev) const
 	{
 		QueueFamilyIndices indices = FindQueueFamilies(dev);
 
@@ -1754,7 +1755,7 @@ namespace Engine
 		return indices.isComplete() && extensionsSupported && swapChainAdequate;
 	}
 
-	std::vector<const char*> VulkanRenderer::GetRequiredExtensions()
+	std::vector<const char*> VulkanRenderer::GetRequiredExtensions() const
 	{
 		// On Windows + no GLFW: 
 		std::vector<const char*> extensions = {
@@ -1769,7 +1770,7 @@ namespace Engine
 		return extensions;
 	}
 
-	VkShaderModule VulkanRenderer::CreateShaderModule(const std::vector<char>& code)
+	VkShaderModule VulkanRenderer::CreateShaderModule(const std::vector<char>& code) const
 	{
 		VkShaderModuleCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -1791,7 +1792,7 @@ namespace Engine
 	}
 
 	// Finds a supported format from a list of candidates, looking for the desired tiling and features.
-	VkFormat VulkanRenderer::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features)
+	VkFormat VulkanRenderer::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const
 	{
 		// Iterate over each candidate format, query its support, and return the first that meets requirements.
 		for (VkFormat format : candidates)
@@ -1820,7 +1821,7 @@ namespace Engine
 	}
 
 	// Finds a suitable depth format by checking common depth/stencil formats in a preferred order.
-	VkFormat VulkanRenderer::FindDepthFormat()
+	VkFormat VulkanRenderer::FindDepthFormat() const
 	{
 		// Typical recommended depth formats in descending order of preference. 
 		// VK_FORMAT_D32_SFLOAT is common and widely supported, but we can consider a D24 format if needed. 
@@ -1835,7 +1836,7 @@ namespace Engine
 		);
 	}
 
-	void VulkanRenderer::UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat)
+	void VulkanRenderer::UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat) const
 	{
 		// If there's no texture, skip or bind a dummy
 		if (!mat.data->albedoMap)
@@ -1861,66 +1862,6 @@ namespace Engine
 
 		// Perform the update
 		vkUpdateDescriptorSets(device, 1, &samplerWrite, 0, nullptr);
-	}
-
-	VkDescriptorSet VulkanRenderer::CreateMaterialDescriptorSet(const Material& mat)
-	{
-		// Allocate 1 descriptor set from the pool
-		VkDescriptorSetLayout layouts[] = { descriptorSetLayout };
-
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = layouts;
-
-		VkDescriptorSet newSet;
-		if (vkAllocateDescriptorSets(device, &allocInfo, &newSet) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to allocate descriptor set for material!");
-		}
-
-		// 1) binding=0 -> UBO
-		VkDescriptorBufferInfo bufferInfo{};
-		bufferInfo.buffer = uniformBuffer->GetBuffer(); // The global camera UBO
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(CameraUBO);
-
-		VkWriteDescriptorSet uboWrite{};
-		uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		uboWrite.dstSet = newSet;
-		uboWrite.dstBinding = 0;
-		uboWrite.dstArrayElement = 0;
-		uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboWrite.descriptorCount = 1;
-		uboWrite.pBufferInfo = &bufferInfo;
-
-		// 2) binding=1 -> combined image sampler
-		//   If mat.texture is null, use missingTexture
-		auto textureToUse = mat.data->albedoMap ? mat.data->albedoMap : missingTexture;
-
-		VkDescriptorImageInfo imageInfo{};
-		imageInfo.sampler = defaultSampler;
-		imageInfo.imageView = textureToUse->GetImageView();
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		VkWriteDescriptorSet samplerWrite{};
-		samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		samplerWrite.dstSet = newSet;
-		samplerWrite.dstBinding = 1;
-		samplerWrite.dstArrayElement = 0;
-		samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		samplerWrite.descriptorCount = 1;
-		samplerWrite.pImageInfo = &imageInfo;
-
-		std::array<VkWriteDescriptorSet, 2> writes = { uboWrite, samplerWrite };
-
-		vkUpdateDescriptorSets(device,
-			static_cast<uint32_t>(writes.size()),
-			writes.data(),
-			0, nullptr);
-
-		return newSet;
 	}
 
 	inline MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
@@ -2006,10 +1947,10 @@ namespace Engine
 				// Ensure GPU buffers for mesh
 				auto& meshData = GetOrCreateMeshBuffers(mat->mesh);
 
-				// 1) Ensure MaterialDescriptor is initialized
-				if (!mat->materialDescriptor)
+				// 1) Ensure VulkanDescriptor is initialized
+				if (!mat->vulkanDescriptor)
 				{
-					mat->materialDescriptor = DescriptorPool::GetInstance().GetMaterialDescriptor(*this, mat->albedoMap);
+					mat->vulkanDescriptor = DescriptorPool::GetInstance().GetDescriptor(*this, mat->albedoMap);
 				}
 
 				// 2) Push constants (model matrix + hasTexture)
@@ -2030,7 +1971,7 @@ namespace Engine
 					commandBuffers[imageIndex],
 					VK_PIPELINE_BIND_POINT_GRAPHICS,
 					pipelineLayout,
-					0, 1, &mat->materialDescriptor->descriptorSet,
+					0, 1, &mat->vulkanDescriptor->descriptorSet,
 					0, nullptr
 				);
 

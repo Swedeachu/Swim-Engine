@@ -92,8 +92,7 @@ namespace Engine
 			return projMatrix;
 		}
 	};
-
-	// TODO: resize handling
+	
 	class CameraSystem : public Machine
 	{
 

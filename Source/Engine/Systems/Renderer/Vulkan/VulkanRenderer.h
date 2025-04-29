@@ -7,11 +7,11 @@
 #include <unordered_map>
 #include <memory>
 #include <vector>
-#include "Buffer/VulkanBuffer.h"
+#include "VulkanBuffer.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
-#include "Meshes/Vertex.h"
-#include "Meshes/Mesh.h"
+#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
+#include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -74,7 +74,7 @@ namespace Engine
 		VkDevice& GetDevice() { return device; }
 		VkPhysicalDevice& GetPhysicalDevice() { return physicalDevice; }
 
-		VkDescriptorSet CreateMaterialDescriptorSet(const std::shared_ptr<Texture2D>& texture);
+		VkDescriptorSet CreateDescriptorSet(const std::shared_ptr<Texture2D>& texture) const;
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -86,8 +86,8 @@ namespace Engine
 		}
 
 		// Begin/End single-time commands (used for short-lived ops like layout transitions, copies, etc.)
-		VkCommandBuffer BeginSingleTimeCommands();
-		void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
+		VkCommandBuffer BeginSingleTimeCommands() const;
+		void EndSingleTimeCommands(VkCommandBuffer commandBuffer) const;
 
 		// Creates a buffer and allocates memory for it
 		void CreateBuffer(
@@ -96,13 +96,13 @@ namespace Engine
 			VkMemoryPropertyFlags properties,
 			VkBuffer& buffer,
 			VkDeviceMemory& bufferMemory
-		);
+		) const;
 
 		// Copies data from one buffer to another
-		void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+		void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
 
 		// Find suitable memory type index
-		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
 		// Creates a 2D image on the GPU
 		void CreateImage(
@@ -235,26 +235,23 @@ namespace Engine
 		void UpdateUniformBuffer();
 
 		// Helpers
-		int RateDeviceSuitability(VkPhysicalDevice device);
-		bool CheckValidationLayerSupport();
-		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
-		SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device);
-		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
-		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
-		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
-		bool IsDeviceSuitable(VkPhysicalDevice device);
-		std::vector<const char*> GetRequiredExtensions();
+		int RateDeviceSuitability(VkPhysicalDevice device) const;
+		bool CheckValidationLayerSupport() const;
+		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
+		SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device) const;
+		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const;
+		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const;
+		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
+		bool IsDeviceSuitable(VkPhysicalDevice device) const;
+		std::vector<const char*> GetRequiredExtensions() const;
 
-		VkFormat FindDepthFormat();
-		VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+		VkFormat FindDepthFormat() const;
+		VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const;
 
 		static std::vector<char> ReadFile(const std::string& filename);
-		VkShaderModule CreateShaderModule(const std::vector<char>& code);
+		VkShaderModule CreateShaderModule(const std::vector<char>& code) const;
 
-		// A helper method to create a single descriptor set for a material
-		VkDescriptorSet CreateMaterialDescriptorSet(const Material& mat);
-
-		void UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat);
+		void UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat) const;
 
 		// TODO: sampler and blend mode maps
 		VkSampler defaultSampler = VK_NULL_HANDLE; // assigned from CreateSampler during Init

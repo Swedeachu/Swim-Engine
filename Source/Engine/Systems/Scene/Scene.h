@@ -10,6 +10,7 @@ namespace Engine
 	class InputManager;
 	class CameraSystem;
 	class VulkanRenderer;
+	class OpenGLRenderer;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
 	class Scene : public Machine
@@ -48,7 +49,8 @@ namespace Engine
 		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
 		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
 		void SetCameraSystem(const std::shared_ptr<CameraSystem>& system) { cameraSystem = system; }
-		void SetRenderer(const std::shared_ptr<VulkanRenderer>& system) { vulkanRenderer = system; }
+		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system) { vulkanRenderer = system; }
+		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system) { openGLRenderer = system; }
 
 	protected:
 
@@ -62,6 +64,7 @@ namespace Engine
 		std::shared_ptr<InputManager> GetInputManager() const { return GetSystem<InputManager>(inputManager); }
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return GetSystem<CameraSystem>(cameraSystem); }
 		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
+		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
 
 		template <typename T>
 		std::shared_ptr<T> GetSystem(const std::weak_ptr<T>& weakPtr) const
@@ -82,6 +85,7 @@ namespace Engine
 		std::weak_ptr<InputManager> inputManager;
 		std::weak_ptr<CameraSystem> cameraSystem;
 		std::weak_ptr<VulkanRenderer> vulkanRenderer;
+		std::weak_ptr<OpenGLRenderer> openGLRenderer;
 
 	};
 

@@ -1,8 +1,8 @@
 #include "PCH.h"
 #include "SandBox.h"
-#include "Engine\Systems\Renderer\Meshes\MeshPool.h"
-#include "Engine\Systems\Renderer\Textures\TexturePool.h"
-#include "Engine\Systems\Renderer\PBR\MaterialPool.h"
+#include "Engine\Systems\Renderer\Core\Meshes\MeshPool.h"
+#include "Engine\Systems\Renderer\Core\Textures\TexturePool.h"
+#include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
 

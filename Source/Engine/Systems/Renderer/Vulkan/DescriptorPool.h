@@ -3,7 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
-#include "MaterialDescriptor.h"
+#include "VulkanDescriptor.h"
 
 namespace Engine
 {
@@ -22,8 +22,8 @@ namespace Engine
     DescriptorPool(DescriptorPool&&) = delete;
     DescriptorPool& operator=(DescriptorPool&&) = delete;
 
-    // Retrieves or creates a MaterialDescriptor
-    std::shared_ptr<MaterialDescriptor> GetMaterialDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& albedoMap);
+    // Retrieves or creates a VulkanDescriptor
+    std::shared_ptr<VulkanDescriptor> GetDescriptor(VulkanRenderer& vulkanRenderer, const std::shared_ptr<Texture2D>& albedoMap);
 
     // Frees all MaterialDescriptors
     void Flush();
@@ -33,7 +33,7 @@ namespace Engine
     DescriptorPool() = default;
 
     mutable std::mutex poolMutex;
-    std::unordered_map<std::shared_ptr<Texture2D>, std::shared_ptr<MaterialDescriptor>> descriptors;
+    std::unordered_map<std::shared_ptr<Texture2D>, std::shared_ptr<VulkanDescriptor>> descriptors;
 
   };
 

@@ -21,7 +21,7 @@
 #include "Engine\Systems\Scene\Scene.h"
 #include "Engine\Systems\Scene\SceneSystem.h"
 #include "Engine\Systems\IO\InputManager.h"
-#include "Engine\Systems\Renderer\CameraSystem.h"
+#include "Engine\Systems\Renderer\Core\Camera\CameraSystem.h"
 
 // glm math
 #include "Library/glm/glm.hpp"

@@ -2,11 +2,12 @@
 #include "OpenGLRenderer.h"
 #include "Engine/SwimEngine.h"
 
-#include "Textures/TexturePool.h"
-#include "Meshes/MeshPool.h"
+#include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 
 #include <fstream>
 #include <sstream>
@@ -29,10 +30,7 @@ namespace Engine
 		}
 	}
 
-	// I hate this, it's a literal hack. Having to do this weird shit is exactly why OpenGL got kicked to the curb in favor of Vulkan.
-	// The only reason I even have OpenGL supported is for me to practice a multi context renderer, 
-	// and because my graphics programming courses require OpenGL knowledge. I guess it could be argued sometimes its quicker to prototype in OpenGL than vulkan.
-	// Basically the OpenGL renderer is going to be full of hacks and quick and dirty things for the purpose of prototyping and proof of concept.
+	// cool thanks this is a hack and stupid
 	static void* GetGLProcAddress(const char* name)
 	{
 		void* p = (void*)wglGetProcAddress(name);
@@ -120,6 +118,17 @@ namespace Engine
 			return false;
 		}
 
+		// Set VSync OFF (0 = disable vsync, 1 = enable vsync)
+		typedef BOOL(APIENTRY* PFNWGLSWAPINTERVALEXTPROC)(int);
+		PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = nullptr;
+
+		wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+
+		if (wglSwapIntervalEXT)
+		{
+			wglSwapIntervalEXT(0); // 0 to disable VSync
+		}
+
 		glEnable(GL_DEPTH_TEST);   // 3D depth buffer 
 		glEnable(GL_DEPTH_CLAMP);  // clamped culling
 		glEnable(GL_CULL_FACE);    // back face culling
@@ -127,6 +136,7 @@ namespace Engine
 		glEnable(GL_STENCIL_TEST); // will be needed for outline stuff later on
 
 		std::cout << "OpenGL Initialized: " << glGetString(GL_VERSION) << std::endl;
+
 		return true;
 	}
 

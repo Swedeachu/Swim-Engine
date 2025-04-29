@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include "Engine/Systems/Renderer/PBR/MaterialData.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
 
 namespace Engine
 {

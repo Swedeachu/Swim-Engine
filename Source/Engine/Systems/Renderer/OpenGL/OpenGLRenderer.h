@@ -3,6 +3,7 @@
 namespace Engine
 {
 	
+	// Forward decalre
 	class Texture2D;
 
 	class OpenGLRenderer : public Machine
