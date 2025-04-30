@@ -11,7 +11,6 @@ namespace Engine
   // Forward declaration of VulkanRenderer
   class VulkanRenderer;
 
-  // TODO this struct/file needs to be renamed completely as this is a purely vulkan specific type required for textures
   struct VulkanDescriptor
   {
 

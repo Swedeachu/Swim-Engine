@@ -12,6 +12,8 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
+#include "VulkanDeviceManager.h"
+#include "VulkanSwapChain.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -30,33 +32,13 @@ namespace Engine
 		float padC;
 	};
 
-	// A struct to hold indices into queues we use
-	struct QueueFamilyIndices
-	{
-		std::optional<uint32_t> graphicsFamily;
-		std::optional<uint32_t> presentFamily;
-
-		bool isComplete()
-		{
-			return graphicsFamily.has_value() && presentFamily.has_value();
-		}
-	};
-
-	// Swapchain support details
-	struct SwapChainSupportDetails
-	{
-		VkSurfaceCapabilitiesKHR capabilities{ NULL };
-		std::vector<VkSurfaceFormatKHR> formats;
-		std::vector<VkPresentModeKHR> presentModes;
-	};
-
 	class VulkanRenderer : public Machine
 	{
 
 	public:
 
 		VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
-			: windowHandle(hwnd), windowWidth(width), windowHeight(height), swapChainExtent({ 0, 0 }), swapChainImageFormat(VK_FORMAT_UNDEFINED)
+			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
 		{
 			if (!windowHandle)
 			{
@@ -71,8 +53,9 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
-		VkDevice& GetDevice() { return device; }
-		VkPhysicalDevice& GetPhysicalDevice() { return physicalDevice; }
+		// this should shortcut from VulkanDeviceManager
+		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
+		const VkPhysicalDevice& GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
 
 		VkDescriptorSet CreateDescriptorSet(const std::shared_ptr<Texture2D>& texture) const;
 
@@ -100,9 +83,6 @@ namespace Engine
 
 		// Copies data from one buffer to another
 		void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
-
-		// Find suitable memory type index
-		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
 		// Creates a 2D image on the GPU
 		void CreateImage(
@@ -145,29 +125,12 @@ namespace Engine
 		uint32_t windowWidth;
 		uint32_t windowHeight;
 
-		// Vulkan core objects
-		VkInstance instance = VK_NULL_HANDLE;
-		VkDebugUtilsMessengerEXT debugMessenger = VK_NULL_HANDLE;
-		VkSurfaceKHR surface = VK_NULL_HANDLE;
-		VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-		VkDevice device = VK_NULL_HANDLE;
-		VkQueue graphicsQueue = VK_NULL_HANDLE;
-		VkQueue presentQueue = VK_NULL_HANDLE;
+		std::shared_ptr<VulkanDeviceManager> deviceManager;
+		std::shared_ptr<VulkanSwapChain> swapChainManager;
 
-		VkSwapchainKHR swapChain = VK_NULL_HANDLE;
-		std::vector<VkImage> swapChainImages;
-		VkFormat swapChainImageFormat = VK_FORMAT_UNDEFINED;
-		VkExtent2D swapChainExtent = { 0, 0 };
-		std::vector<VkImageView> swapChainImageViews;
 		VkRenderPass renderPass = VK_NULL_HANDLE;
 		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
-		std::vector<VkFramebuffer> swapChainFramebuffers;
-
-		// Depth resources for the swapchain
-		std::vector<VkImage> depthImages;          // Holds depth images for each swapchain image
-		std::vector<VkDeviceMemory> depthImageMemories; // Holds memory allocations for depth images
-		std::vector<VkImageView> depthImageViews;  // Holds image views for the depth images
 
 		VkCommandPool commandPool = VK_NULL_HANDLE;
 		std::vector<VkCommandBuffer> commandBuffers;
@@ -203,50 +166,21 @@ namespace Engine
 		// Command buffer recording
 		void RecordCommandBuffer(uint32_t imageIndex);
 
-		// Methods
-		void CreateInstance();
-		void SetupDebugMessenger();
-		void CreateSurface();
-		void PickPhysicalDevice();
-		void CreateLogicalDevice();
-		void CreateSwapChain();
-		void CreateImageViews();
 		void CreateRenderPass();
 		void CreateGraphicsPipeline();
-		void CreateDepthResources();
-		void CreateFramebuffers();
 		void CreateCommandPool();
 		void AllocateCommandBuffers();
 		void CreateSyncObjects();
 		void CreateDescriptorSetLayout();
-		void CreateDescriptorSet();
 		void CreatePipelineLayout();
 		void CreateDescriptorPool();
 		VkSampler CreateSampler();
-
-		// Cleans up old swapchain objects
-		void CleanupSwapChain();
-
-		// Recreates the swapchain and dependent objects
-		void RecreateSwapChain();
 
 		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
 
-		// Helpers
-		int RateDeviceSuitability(VkPhysicalDevice device) const;
-		bool CheckValidationLayerSupport() const;
-		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
-		SwapChainSupportDetails QuerySwapChainSupport(VkPhysicalDevice device) const;
-		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) const;
-		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) const;
-		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
-		bool IsDeviceSuitable(VkPhysicalDevice device) const;
 		std::vector<const char*> GetRequiredExtensions() const;
-
-		VkFormat FindDepthFormat() const;
-		VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) const;
 
 		static std::vector<char> ReadFile(const std::string& filename);
 		VkShaderModule CreateShaderModule(const std::vector<char>& code) const;
