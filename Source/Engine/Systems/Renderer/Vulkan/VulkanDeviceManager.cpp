@@ -12,17 +12,14 @@ namespace Engine
 	(
 		HWND hwnd,
 		uint32_t width,
-		uint32_t height,
-		const std::vector<const char*>& layers,
-		const std::vector<const char*>& extensions
+		uint32_t height
 	)
 		: windowHandle(hwnd),
 		windowWidth(width),
-		windowHeight(height),
-		validationLayers(layers),
-		deviceExtensions(extensions),
-		enableValidationLayers(!layers.empty())
+		windowHeight(height)
 	{
+		enableValidationLayers = !validationLayers.empty();
+
 		CreateInstance();
 		CreateSurface();
 		PickPhysicalDevice();
@@ -89,12 +86,13 @@ namespace Engine
 		appInfo.apiVersion = VK_API_VERSION_1_2;
 
 		std::vector<const char*> extensions = {
-			"VK_KHR_surface",
-			"VK_KHR_win32_surface"
+			VK_KHR_SURFACE_EXTENSION_NAME,
+			"VK_KHR_win32_surface" // couldn't find a define for this one in vulkan_core.h
 		};
+
 		if (enableValidationLayers)
 		{
-			extensions.push_back("VK_EXT_debug_utils");
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		}
 
 		VkInstanceCreateInfo createInfo{};
@@ -285,6 +283,11 @@ namespace Engine
 		vkGetPhysicalDeviceProperties(device, &props);
 		vkGetPhysicalDeviceFeatures(device, &features);
 
+		if (!features.geometryShader)
+		{
+			return 0;
+		}
+
 		int score = 0;
 
 		if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
@@ -297,11 +300,6 @@ namespace Engine
 		}
 
 		score += props.limits.maxImageDimension2D;
-
-		if (!features.geometryShader)
-		{
-			return 0;
-		}
 
 		return score;
 	}

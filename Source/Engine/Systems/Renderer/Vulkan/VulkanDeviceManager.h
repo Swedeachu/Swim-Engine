@@ -30,9 +30,7 @@ namespace Engine
 		(
 			HWND hwnd,
 			uint32_t windowWidth,
-			uint32_t windowHeight,
-			const std::vector<const char*>& validationLayers,
-			const std::vector<const char*>& deviceExtensions
+			uint32_t windowHeight
 		);
 
 		~VulkanDeviceManager();
@@ -82,8 +80,15 @@ namespace Engine
 		VkQueue graphicsQueue = VK_NULL_HANDLE;
 		VkQueue presentQueue = VK_NULL_HANDLE;
 
-		std::vector<const char*> deviceExtensions;
-		std::vector<const char*> validationLayers;
+		std::vector<const char*> deviceExtensions = {
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME
+		};
+
+		// I feel like this should probably use vulkan defines
+		std::vector<const char*> validationLayers = {
+			"VK_LAYER_KHRONOS_validation",
+		};
+
 		bool enableValidationLayers = false;
 
 		QueueFamilyIndices queueIndices;

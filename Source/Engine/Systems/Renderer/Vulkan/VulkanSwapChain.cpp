@@ -21,7 +21,7 @@ namespace Engine
 		windowHeight(windowHeight)
 	{
 		// we let VulkanRenderer call Create(rp) for us once it makes the render pass
-		// but we do call InitFormats here
+		// but we do call InitFormats here since the renderpas needs image formats from us
 		InitFormats();
 	}
 

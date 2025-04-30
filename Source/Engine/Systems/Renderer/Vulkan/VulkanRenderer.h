@@ -14,6 +14,10 @@
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSwapChain.h"
+#include "VulkanCommandManager.h"
+#include "VulkanSyncManager.h"
+#include "VulkanPipelineManager.h"
+#include "VulkanDescriptorManager.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -68,10 +72,6 @@ namespace Engine
 			framebufferResized = true;
 		}
 
-		// Begin/End single-time commands (used for short-lived ops like layout transitions, copies, etc.)
-		VkCommandBuffer BeginSingleTimeCommands() const;
-		void EndSingleTimeCommands(VkCommandBuffer commandBuffer) const;
-
 		// Creates a buffer and allocates memory for it
 		void CreateBuffer(
 			VkDeviceSize size,
@@ -82,7 +82,11 @@ namespace Engine
 		) const;
 
 		// Copies data from one buffer to another
-		void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) const;
+		void CopyBuffer(
+			VkBuffer srcBuffer, 
+			VkBuffer dstBuffer, 
+			VkDeviceSize size
+		) const;
 
 		// Creates a 2D image on the GPU
 		void CreateImage(
@@ -125,65 +129,34 @@ namespace Engine
 		uint32_t windowWidth;
 		uint32_t windowHeight;
 
-		std::shared_ptr<VulkanDeviceManager> deviceManager;
-		std::shared_ptr<VulkanSwapChain> swapChainManager;
+		std::unique_ptr<VulkanDeviceManager> deviceManager;
+		std::unique_ptr<VulkanSwapChain> swapChainManager;
+		std::unique_ptr<VulkanPipelineManager> pipelineManager;
+		std::unique_ptr<VulkanCommandManager> commandManager;
 
-		VkRenderPass renderPass = VK_NULL_HANDLE;
-		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+		// Synchronization values for SyncManager to use
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2; 
+		size_t currentFrame = 0; 
 
-		VkCommandPool commandPool = VK_NULL_HANDLE;
-		std::vector<VkCommandBuffer> commandBuffers;
+		std::unique_ptr<VulkanSyncManager> syncManager;
 
-		// Synchronization
-		static const int MAX_FRAMES_IN_FLIGHT = 2;
-		size_t currentFrame = 0;
-
-		std::vector<VkSemaphore> imageAvailableSemaphores;
-		std::vector<VkSemaphore> renderFinishedSemaphores;
-		std::vector<VkFence> inFlightFences;
-
-		// Uniform buffer
 		std::unique_ptr<VulkanBuffer> uniformBuffer;
 
-		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-		VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+		std::unique_ptr<VulkanDescriptorManager> descriptorManager;
 
 		bool framebufferResized = false;
 
 		std::shared_ptr<CameraSystem> cameraSystem;
 
-		std::vector<const char*> deviceExtensions = {
-				VK_KHR_SWAPCHAIN_EXTENSION_NAME
-		};
-
-		static std::vector<const char*> validationLayers;
-
-		// Draw frame each update
 		void DrawFrame();
 
-		// Command buffer recording
 		void RecordCommandBuffer(uint32_t imageIndex);
 
-		void CreateRenderPass();
-		void CreateGraphicsPipeline();
-		void CreateCommandPool();
-		void AllocateCommandBuffers();
-		void CreateSyncObjects();
-		void CreateDescriptorSetLayout();
-		void CreatePipelineLayout();
-		void CreateDescriptorPool();
 		VkSampler CreateSampler();
 
 		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
-
-		std::vector<const char*> GetRequiredExtensions() const;
-
-		static std::vector<char> ReadFile(const std::string& filename);
-		VkShaderModule CreateShaderModule(const std::vector<char>& code) const;
 
 		void UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat) const;
 
