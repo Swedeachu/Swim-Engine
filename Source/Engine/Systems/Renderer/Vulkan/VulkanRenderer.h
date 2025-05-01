@@ -28,12 +28,12 @@ namespace Engine
 
 	struct PushConstantData
 	{
-		glm::mat4 model;     // The model transform
-		float hasTexture;    // 1.0 = use albedoMap, 0.0 = use vertex color
-		// We pad to 16 bytes; push constants must align to 4-byte boundaries.
+		glm::mat4 model;
+		uint32_t textureIndex; // index into bindless texture array
+		float hasTexture; // kinda scuffed flag, might be used for transparency later beyond just a "use texture" flag
+		// Pad to 16 bytes
 		float padA;
 		float padB;
-		float padC;
 	};
 
 	class VulkanRenderer : public Machine
@@ -61,7 +61,8 @@ namespace Engine
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
 		const VkPhysicalDevice& GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
 
-		VkDescriptorSet CreateDescriptorSet(const std::shared_ptr<Texture2D>& texture) const;
+		const std::unique_ptr<VulkanDescriptorManager>& GetDescriptorManager() const { return descriptorManager; }
+		const VkSampler& GetDefaultSampler() const { return defaultSampler; }
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -83,8 +84,8 @@ namespace Engine
 
 		// Copies data from one buffer to another
 		void CopyBuffer(
-			VkBuffer srcBuffer, 
-			VkBuffer dstBuffer, 
+			VkBuffer srcBuffer,
+			VkBuffer dstBuffer,
 			VkDeviceSize size
 		) const;
 
@@ -135,8 +136,8 @@ namespace Engine
 		std::unique_ptr<VulkanCommandManager> commandManager;
 
 		// Synchronization values for SyncManager to use
-		static constexpr int MAX_FRAMES_IN_FLIGHT = 2; 
-		size_t currentFrame = 0; 
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+		size_t currentFrame = 0;
 
 		std::unique_ptr<VulkanSyncManager> syncManager;
 
@@ -157,8 +158,6 @@ namespace Engine
 		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
-
-		void UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat) const;
 
 		// TODO: sampler and blend mode maps
 		VkSampler defaultSampler = VK_NULL_HANDLE; // assigned from CreateSampler during Init

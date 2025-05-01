@@ -20,7 +20,8 @@ namespace Engine
 		void CreateGraphicsPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
-			VkDescriptorSetLayout descriptorSetLayout,
+			VkDescriptorSetLayout uboLayout, // Set 0
+			VkDescriptorSetLayout bindlessTextureLayout, // Set 1
 			const VkVertexInputBindingDescription& bindingDescription,
 			const std::vector<VkVertexInputAttributeDescription>& attributeDescriptions,
 			uint32_t pushConstantSize

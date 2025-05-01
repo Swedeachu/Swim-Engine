@@ -9,16 +9,19 @@
 namespace Engine
 {
 
-  Texture2D::Texture2D(const std::string& filePath)
+  static uint32_t vulkanTextureID = 0;
+
+  Texture2D::Texture2D(const std::string& filePath) : filePath(filePath)
   {
     if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
     {
-      LoadVulkanTexture(filePath);
+      LoadVulkanTexture();
       CreateImageView();
+      GoBindless();
     }
     else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
     {
-      LoadOpenGLTexture(filePath);
+      LoadOpenGLTexture();
     }
   }
 
@@ -64,7 +67,7 @@ namespace Engine
     }
   }
 
-  void Texture2D::LoadVulkanTexture(const std::string& filePath)
+  void Texture2D::LoadVulkanTexture()
   {
     int texWidth, texHeight, texChannels;
     stbi_uc* pixels = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -135,10 +138,6 @@ namespace Engine
 
     vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
     vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
-
-  #ifdef _DEBUG
-    std::cout << "Loaded Texture2D (Vulkan): " << filePath << std::endl;
-  #endif
   }
 
   void Texture2D::CreateImageView()
@@ -156,7 +155,29 @@ namespace Engine
     );
   }
 
-  void Texture2D::LoadOpenGLTexture(const std::string& filePath)
+  void Texture2D::GoBindless()
+  {
+    auto engine = SwimEngine::GetInstance();
+    auto vulkanRenderer = engine.get()->GetVulkanRenderer();
+
+    // Register this texture in the bindless descriptor set
+    bindlessIndex = vulkanTextureID;
+    const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = vulkanRenderer->GetDescriptorManager();
+    if (descriptorManager && bindlessIndex != UINT32_MAX)
+    {
+      descriptorManager->UpdateBindlessTexture(bindlessIndex, imageView, vulkanRenderer->GetDefaultSampler());
+    }
+
+    // Increment count for the next one 
+    vulkanTextureID++;
+
+  #ifdef _DEBUG
+    // Loading the texture is now fully finished here for Vulkan
+    std::cout << "Loaded Texture2D (Vulkan): " << filePath << " (Bindless Index = " << bindlessIndex << ")" << std::endl;
+  #endif
+  }
+
+  void Texture2D::LoadOpenGLTexture()
   {
     int texWidth, texHeight, texChannels;
     stbi_uc* pixels = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);

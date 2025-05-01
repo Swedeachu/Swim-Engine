@@ -7,40 +7,58 @@
 namespace Engine
 {
 
-  class Texture2D
-  {
+	class Texture2D
+	{
 
-  public:
+	public:
 
-    Texture2D(const std::string& filePath);
-    ~Texture2D();
+		Texture2D(const std::string& filePath);
+		~Texture2D();
 
-    void Free();
+		void Free();
 
-    // Vulkan accessors
-    VkImage GetImage() const { return image; }
-    VkImageView GetImageView() const { return imageView; }
+		// Getters from original file from disk (do not confuse file width and height with transform scales)
+		uint32_t GetWidth() const { return width; }
+		uint32_t GetHeight() const { return height; }
+		const std::string& GetFilePath()  const { return filePath; }
 
-    // OpenGL accessor
-    GLuint GetTextureID() const { return textureID; }
+		// Vulkan accessors
+		VkImage GetImage() const { return image; }
+		VkImageView GetImageView() const { return imageView; }
 
-  private:
+		// Bindless texture index
+		uint32_t GetBindlessIndex() const { return bindlessIndex; }
+		void SetBindlessIndex(uint32_t index) { bindlessIndex = index; }
 
-    uint32_t width = 0;
-    uint32_t height = 0;
+		// OpenGL accessor
+		GLuint GetTextureID() const { return textureID; }
 
-    // Vulkan
-    VkImage image = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkImageView imageView = VK_NULL_HANDLE;
+	private:
 
-    // OpenGL
-    GLuint textureID = 0;
+		uint32_t width = 0;
+		uint32_t height = 0;
 
-    void LoadVulkanTexture(const std::string& filePath);
-    void CreateImageView(); // Vulkan-only
-    void LoadOpenGLTexture(const std::string& filePath); // OpenGL-only
+		const std::string filePath;
 
-  };
+		// Vulkan
+		VkImage image = VK_NULL_HANDLE;
+		VkDeviceMemory memory = VK_NULL_HANDLE;
+		VkImageView imageView = VK_NULL_HANDLE;
+
+		// Bindless
+		uint32_t bindlessIndex = UINT32_MAX; // Invalid/default until assigned
+
+		// OpenGL
+		GLuint textureID = 0;
+
+		// Vulkan-only
+		void LoadVulkanTexture();
+		void CreateImageView();
+		void GoBindless();
+
+		// OpenGL-only
+		void LoadOpenGLTexture();
+
+	};
 
 }

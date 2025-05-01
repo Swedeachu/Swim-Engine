@@ -209,10 +209,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Textures\TexturePool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.cpp" />
-    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\DescriptorPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.cpp" />
-    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptor.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.cpp" />
@@ -254,10 +252,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Textures\TexturePool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.h" />
-    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\DescriptorPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.h" />
-    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptor.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.h" />

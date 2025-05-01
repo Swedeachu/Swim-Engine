@@ -16,7 +16,6 @@ namespace Game
 		return 0;
 	}
 
-	// TODO: the faces of the cube are not UV mapped
 	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeCube()
 	{
 		// 8 unique corners of the cube

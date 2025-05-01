@@ -198,14 +198,34 @@ namespace Engine
 			queueInfos.push_back(queueInfo);
 		}
 
-		VkPhysicalDeviceFeatures features{};
-		features.samplerAnisotropy = VK_TRUE;
+		// --- Enable standard device features ---
+		VkPhysicalDeviceFeatures deviceFeatures{};
+		deviceFeatures.samplerAnisotropy = VK_TRUE;
+
+		// --- Enable descriptor indexing features for bindless ---
+		VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
+		indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+		indexingFeatures.runtimeDescriptorArray = VK_TRUE;
+		indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+		indexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+
+		// --- Use VkPhysicalDeviceFeatures2 chain to pass both ---
+		VkPhysicalDeviceFeatures2 features2{};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.features = deviceFeatures;
+		features2.pNext = &indexingFeatures;
+
+		// Add VK_EXT_descriptor_indexing to device extensions if not already present
+		if (std::find(deviceExtensions.begin(), deviceExtensions.end(), VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == deviceExtensions.end())
+		{
+			deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+		}
 
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueInfos.size());
 		createInfo.pQueueCreateInfos = queueInfos.data();
-		createInfo.pEnabledFeatures = &features;
+		createInfo.pNext = &features2;
 		createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 

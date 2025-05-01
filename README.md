@@ -3,9 +3,9 @@ Using EnTT, my own Scene System and engine + windows messaging framework, and Vu
 <br>
 # TODO
 
-tinyobj loading 
+obj/glb loading 
 <br>
-refactor anything that isnt dynamic or a bad practice that would hurt performance in the long run 
+meshlets / mega mesh (make the whole renderer as gpu driven to cut down draw calls)
 <br>
 set up the sandbox to do entity creation and spawning en mass to performance profile, then hook it up to PhysX or Jolt
 <br>
@@ -18,7 +18,11 @@ probably get imgui set up at some point
 # SUPER TODO ONCE MAIN TODO IS DONE
 Ray tracer 
 <br>
-Baked lighting too
+Baked lighting
+<br>
+Dynamic environment ligthing
+<br>
+Shadows (baked and dynamic)
 <br>
 GPU driven particle system
 <br>

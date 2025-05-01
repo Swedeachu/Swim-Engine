@@ -3,7 +3,6 @@
 #include <memory>
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Textures/Texture2D.h"
-#include "Engine/Systems/Renderer/Vulkan/VulkanDescriptor.h"
 
 namespace Engine
 {
@@ -15,8 +14,6 @@ namespace Engine
 		std::shared_ptr<Texture2D> albedoMap; // this is the raw texture
 		// std::shared_ptr<Texture2D> normalMap; // for light
 		// std::shared_ptr<Texture2D> roughnessMap; // height map technically
-
-		std::shared_ptr<VulkanDescriptor> vulkanDescriptor; // specifically for Vulkan,
 
 		MaterialData() = default;
 

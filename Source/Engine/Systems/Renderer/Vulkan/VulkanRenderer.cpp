@@ -14,7 +14,6 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
-#include "DescriptorPool.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -63,12 +62,35 @@ namespace Engine
 		// Make the descriptor manager, its ctor creates the layout and pool
 		descriptorManager = std::make_unique<VulkanDescriptorManager>(
 			device,
-			1024 // max sets
+			1024, // max sets
+			4096 // max bindless textures
 		);
 
-		VkDescriptorSetLayout descriptorSetLayout = descriptorManager->GetLayout();
+		// Create bindless descriptor layout and set
+		descriptorManager->CreateBindlessLayout();
+		descriptorManager->CreateBindlessPool(); 
+		descriptorManager->AllocateBindlessSet();
+
+		// make the default sampler for the fragment shader to use
+		defaultSampler = CreateSampler();
+
+		descriptorManager->SetBindlessSampler(defaultSampler);
+
+		// Set up buffer and UBO for camera
+		uniformBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			sizeof(CameraUBO),
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		descriptorManager->CreateUBODescriptorSet(uniformBuffer->GetBuffer());
 
 		// Now we can make our pipeline with the default shaders
+
+		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
+		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout();
 
 		auto attribs = Vertex::GetAttributeDescriptions();
 
@@ -76,7 +98,8 @@ namespace Engine
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex.spv",
 			"Shaders\\FragmentShaders\\fragment.spv",
-			descriptorSetLayout,
+			layout,
+			bindlessLayout,
 			Vertex::GetBindingDescription(),
 			std::vector<VkVertexInputAttributeDescription>(attribs.begin(), attribs.end()), // convert std array to vector
 			sizeof(PushConstantData)
@@ -94,24 +117,14 @@ namespace Engine
 
 		// Sync manager is for fencing between frames with the swap chain
 		syncManager = std::make_unique<VulkanSyncManager>(
-			device, 
+			device,
 			MAX_FRAMES_IN_FLIGHT
 		);
 
-		// Don't forget the buffer
-		uniformBuffer = std::make_unique<VulkanBuffer>(
-			device,
-			physicalDevice,
-			sizeof(CameraUBO),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-
 		// Finally load textures and set a default missing texture.
-		// We are in big trouble if the missing texture is null, we should probably procedurally generate it in code.
+		// We are in big trouble if the missing texture is null, we should probably procedurally generate a missing texture in code.
 		TexturePool::GetInstance().LoadAllRecursively();
 		missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
-		defaultSampler = CreateSampler();
 
 		return 0;
 	}
@@ -351,6 +364,26 @@ namespace Engine
 		// Update camera UBO
 		UpdateUniformBuffer();
 
+		VkPipelineLayout pipelineLayout = pipelineManager->GetPipelineLayout();
+		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
+		VkDescriptorSet uboDescriptorSet = descriptorManager->GetDescriptorSetUBO();
+
+		// Bind descriptor sets:
+		std::array<VkDescriptorSet, 2> sets = {
+			uboDescriptorSet, // Set 0: UBO
+			bindlessSet			  // Set 1: Bindless texture set
+		};
+
+		// Bind global bindless descriptor set 
+		vkCmdBindDescriptorSets(
+			commandBuffers[imageIndex],
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipelineLayout,
+			0, static_cast<uint32_t>(sets.size()),
+			sets.data(),
+			0, nullptr
+		);
+
 		// We iterate all entitys in the current scene to render them
 		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (scene)
@@ -366,19 +399,12 @@ namespace Engine
 				// Ensure GPU buffers for mesh
 				MeshBufferData& meshData = GetOrCreateMeshBuffers(mat->mesh);
 
-				// 1) Ensure VulkanDescriptor is initialized
-				if (!mat->vulkanDescriptor)
-				{
-					mat->vulkanDescriptor = DescriptorPool::GetInstance().GetDescriptor(*this, mat->albedoMap);
-				}
-
-				// 2) Push constants (model matrix + hasTexture)
+				// 1) Push constants (model matrix + hasTexture)
 				PushConstantData pcData{};
 				pcData.model = transform.GetModelMatrix();
-				pcData.hasTexture = (mat->albedoMap ? 1.0f : 0.0f);
-				pcData.padA = pcData.padB = pcData.padC = 0.0f;
-
-				VkPipelineLayout pipelineLayout = pipelineManager->GetPipelineLayout();
+				pcData.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX; // if we have a texture, get its bindless index, otherwise use max default value
+				pcData.hasTexture = mat->albedoMap ? 1.0f : 0.0f; // if we have a texture set the flag for the shader
+				pcData.padA = pcData.padB = 0.0f; // set rest of padding to zeroes
 
 				vkCmdPushConstants(
 					commandBuffers[imageIndex],
@@ -389,23 +415,14 @@ namespace Engine
 					&pcData
 				);
 
-				// 3) Bind the Material's descriptor set
-				vkCmdBindDescriptorSets(
-					commandBuffers[imageIndex],
-					VK_PIPELINE_BIND_POINT_GRAPHICS,
-					pipelineLayout,
-					0, 1, &mat->vulkanDescriptor->descriptorSet,
-					0, nullptr
-				);
-
-				// 4) Bind vertex + index buffers
+				// 2) Bind vertex + index buffers
 				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer() };
 				VkDeviceSize offsets[] = { 0 };
 				vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
 				vkCmdBindIndexBuffer(commandBuffers[imageIndex], meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
-				// 5) Draw
-				vkCmdDrawIndexed(commandBuffers[imageIndex], meshData.indexCount, 1, 0, 0, 0);
+				// 3) Draw
+				vkCmdDrawIndexed(commandBuffers[imageIndex], meshData.indexCount, 1, 0, 0, 0); 
 			}
 		}
 
@@ -425,91 +442,6 @@ namespace Engine
 	{
 		windowWidth = newWidth;
 		windowHeight = newHeight;
-	}
-
-	VkDescriptorSet VulkanRenderer::CreateDescriptorSet(const std::shared_ptr<Texture2D>& texture) const
-	{
-		VkDescriptorSetLayout descriptorSetLayout = descriptorManager->GetLayout();
-		VkDescriptorPool descriptorPool = descriptorManager->GetPool();
-
-		VkDescriptorSetLayout layouts[] = { descriptorSetLayout };
-
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = layouts;
-
-		VkDescriptorSet descriptorSet;
-		if (vkAllocateDescriptorSets(deviceManager->GetDevice(), &allocInfo, &descriptorSet) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to allocate descriptor set for material!");
-		}
-
-		// Bind UBO (binding 0)
-		VkDescriptorBufferInfo bufferInfo{};
-		bufferInfo.buffer = uniformBuffer->GetBuffer();
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(CameraUBO);
-
-		VkWriteDescriptorSet uboWrite{};
-		uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		uboWrite.dstSet = descriptorSet;
-		uboWrite.dstBinding = 0;
-		uboWrite.dstArrayElement = 0;
-		uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboWrite.descriptorCount = 1;
-		uboWrite.pBufferInfo = &bufferInfo;
-
-		// Bind texture sampler (binding 1)
-		VkDescriptorImageInfo imageInfo{};
-		imageInfo.sampler = defaultSampler;
-		imageInfo.imageView = texture ? texture->GetImageView() : missingTexture->GetImageView();
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		VkWriteDescriptorSet samplerWrite{};
-		samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		samplerWrite.dstSet = descriptorSet;
-		samplerWrite.dstBinding = 1;
-		samplerWrite.dstArrayElement = 0;
-		samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		samplerWrite.descriptorCount = 1;
-		samplerWrite.pImageInfo = &imageInfo;
-
-		std::array<VkWriteDescriptorSet, 2> writes = { uboWrite, samplerWrite };
-
-		vkUpdateDescriptorSets(deviceManager->GetDevice(), static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
-		return descriptorSet;
-	}
-
-	// not called anywhere
-	void VulkanRenderer::UpdateMaterialDescriptorSet(VkDescriptorSet dstSet, const Material& mat) const
-	{
-		// If there's no texture, skip or bind a dummy
-		if (!mat.data->albedoMap)
-		{
-			return; // no texture to bind
-		}
-
-		// Prepare the descriptor image info
-		VkDescriptorImageInfo imageInfo{};
-		imageInfo.sampler = defaultSampler; // we have a single default sampler
-		imageInfo.imageView = mat.data->albedoMap->GetImageView();
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		// Write to binding=1 of the descriptor set
-		VkWriteDescriptorSet samplerWrite{};
-		samplerWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		samplerWrite.dstSet = dstSet;
-		samplerWrite.dstBinding = 1;
-		samplerWrite.dstArrayElement = 0;
-		samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		samplerWrite.descriptorCount = 1;
-		samplerWrite.pImageInfo = &imageInfo;
-
-		// Perform the update
-		vkUpdateDescriptorSets(deviceManager->GetDevice(), 1, &samplerWrite, 0, nullptr);
 	}
 
 	void VulkanRenderer::CreateBuffer(
@@ -552,8 +484,8 @@ namespace Engine
 	}
 
 	void VulkanRenderer::CopyBuffer(
-		VkBuffer srcBuffer, 
-		VkBuffer dstBuffer, 
+		VkBuffer srcBuffer,
+		VkBuffer dstBuffer,
 		VkDeviceSize size
 	) const
 	{

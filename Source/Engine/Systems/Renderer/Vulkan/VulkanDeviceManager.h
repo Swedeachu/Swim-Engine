@@ -81,7 +81,8 @@ namespace Engine
 		VkQueue presentQueue = VK_NULL_HANDLE;
 
 		std::vector<const char*> deviceExtensions = {
-			VK_KHR_SWAPCHAIN_EXTENSION_NAME
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+			VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME // bindless texture support
 		};
 
 		// I feel like this should probably use vulkan defines

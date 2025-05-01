@@ -25,8 +25,8 @@ namespace Engine
 
 		void CopyData(const void* data, size_t size);
 
-		VkBuffer GetBuffer() const { return buffer; }
-		VkDeviceMemory GetMemory() const { return memory; }
+		VkBuffer GetBuffer() { return buffer; }
+		VkDeviceMemory GetMemory() { return memory; }
 
 	private:
 
