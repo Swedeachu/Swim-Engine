@@ -162,7 +162,7 @@ namespace Engine
 		return true;
 	}
 
-	std::string LoadTextFile(const std::string& relativePath)
+	std::string OpenGLRenderer::LoadTextFile(const std::string& relativePath)
 	{
 		std::string fullPath = SwimEngine::GetExecutableDirectory() + "\\" + relativePath;
 

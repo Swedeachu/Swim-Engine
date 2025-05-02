@@ -41,7 +41,7 @@ namespace Engine
 
 	public:
 
-		VulkanRenderer(HWND hwnd = nullptr, uint32_t width = 1920, uint32_t height = 1080)
+		VulkanRenderer(HWND hwnd, uint32_t width, uint32_t height)
 			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
 		{
 			if (!windowHandle)

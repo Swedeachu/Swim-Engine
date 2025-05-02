@@ -4,10 +4,13 @@ namespace Engine
 {
 	
 	// Forward decalre
-	class Texture2D;
+	class Texture2D; // do we need to?
 
 	class OpenGLRenderer : public Machine
 	{
+
+		// yea this is ugly and stupid and dumb but this makes it easy on us to hack together our derived shader toy renderer
+		friend class ShaderToyRendererGL;
 
 	public:
 
@@ -27,6 +30,7 @@ namespace Engine
 		// Shader system
 		GLuint LoadSPIRVShaderStage(const std::string& path, GLenum shaderStage);
 		GLuint LinkShaderProgram(const std::vector<GLuint>& shaderStages);
+		static std::string LoadTextFile(const std::string& relativePath);
 
 		// Initing
 		bool InitOpenGLContext();

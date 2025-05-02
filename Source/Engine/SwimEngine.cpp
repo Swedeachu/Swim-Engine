@@ -3,6 +3,7 @@
 #include <chrono>
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
+#include "Engine/Systems/Renderer/OpenGL/ShaderToyRendererGL.h"
 
 namespace Engine
 {
@@ -18,6 +19,10 @@ namespace Engine
 		}
 		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 		{
+			if constexpr (SwimEngine::useShaderToyIfOpenGL)
+			{
+				return L"Swim Engine [OpenGL ShaderToy]";
+			}
 			return L"Swim Engine [OpenGL]";
 		}
 
@@ -261,7 +266,16 @@ namespace Engine
 		}
 		else if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
-			openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+			// determine which open gl renderer we are using (gross)
+			if constexpr (useShaderToyIfOpenGL)
+			{
+				openglRenderer = systemManager->AddSystem<ShaderToyRendererGL>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+			}
+			else
+			{
+				openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+			}
+
 		}
 
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
