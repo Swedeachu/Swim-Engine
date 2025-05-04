@@ -65,84 +65,67 @@ namespace Engine
 		}
 	}
 
-	void VulkanDescriptorManager::CreateUBODescriptorSet(VkBuffer buffer) 
+	// Create one UBO and descriptor set per frame
+	void VulkanDescriptorManager::CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount)
 	{
-		VkDescriptorSetLayout uboLayout = GetLayout();
-		VkDescriptorPool descriptorPool = GetPool();
+		perFrameUBOs.resize(frameCount);
+		perFrameDescriptorSets.resize(frameCount);
 
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &uboLayout;
-
-		// VkDescriptorSet descriptorSet;
-		if (vkAllocateDescriptorSets(device, &allocInfo, &uboDescriptorSet) != VK_SUCCESS)
+		for (uint32_t i = 0; i < frameCount; ++i)
 		{
-			throw std::runtime_error("Failed to allocate UBO descriptor set!");
+			perFrameUBOs[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				sizeof(CameraUBO),
+				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			// Allocate a descriptor set for this UBO
+			VkDescriptorSetAllocateInfo allocInfo{};
+			allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			allocInfo.descriptorPool = descriptorPool;
+			allocInfo.descriptorSetCount = 1;
+			allocInfo.pSetLayouts = &descriptorSetLayout;
+
+			if (vkAllocateDescriptorSets(device, &allocInfo, &perFrameDescriptorSets[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to allocate per-frame UBO descriptor set!");
+			}
+
+			VkDescriptorBufferInfo bufferInfo{};
+			bufferInfo.buffer = perFrameUBOs[i]->GetBuffer();
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(CameraUBO);
+
+			VkWriteDescriptorSet write{};
+			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			write.dstSet = perFrameDescriptorSets[i];
+			write.dstBinding = 0;
+			write.dstArrayElement = 0;
+			write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			write.descriptorCount = 1;
+			write.pBufferInfo = &bufferInfo;
+
+			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 		}
-
-		// Bind camera UBO at binding 0
-		VkDescriptorBufferInfo bufferInfo{};
-		bufferInfo.buffer = buffer;
-		bufferInfo.offset = 0;
-		bufferInfo.range = sizeof(CameraUBO);
-
-		VkWriteDescriptorSet uboWrite{};
-		uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		uboWrite.dstSet = uboDescriptorSet;
-		uboWrite.dstBinding = 0;
-		uboWrite.dstArrayElement = 0;
-		uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboWrite.descriptorCount = 1;
-		uboWrite.pBufferInfo = &bufferInfo;
-
-		vkUpdateDescriptorSets(device, 1, &uboWrite, 0, nullptr);
 	}
 
-	VkDescriptorSet VulkanDescriptorManager::AllocateSet(VkBuffer uniformBuffer, VkDeviceSize bufferSize, VkSampler sampler, VkImageView imageView)
+	// Update the UBO for a given frame with the latest camera matrix data
+	void VulkanDescriptorManager::UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo)
 	{
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = descriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &descriptorSetLayout;
-
-		VkDescriptorSet descriptorSet;
-		if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS)
+		if (frameIndex >= perFrameUBOs.size())
 		{
-			throw std::runtime_error("Failed to allocate descriptor set!");
+			throw std::runtime_error("Invalid frame index for UBO update");
 		}
 
-		VkDescriptorBufferInfo bufferInfo{};
-		bufferInfo.buffer = uniformBuffer;
-		bufferInfo.offset = 0;
-		bufferInfo.range = bufferSize;
+		perFrameUBOs[frameIndex]->CopyData(&ubo, sizeof(CameraUBO));
+	}
 
-		VkDescriptorImageInfo imageInfo{};
-		imageInfo.sampler = sampler;
-		imageInfo.imageView = imageView;
-		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
-
-		descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrites[0].dstSet = descriptorSet;
-		descriptorWrites[0].dstBinding = 0;
-		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		descriptorWrites[0].descriptorCount = 1;
-		descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-		descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descriptorWrites[1].dstSet = descriptorSet;
-		descriptorWrites[1].dstBinding = 1;
-		descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		descriptorWrites[1].descriptorCount = 1;
-		descriptorWrites[1].pImageInfo = &imageInfo;
-
-		vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
-
-		return descriptorSet;
+	// Get descriptor set for the active frame
+	VkDescriptorSet VulkanDescriptorManager::GetPerFrameDescriptorSet(uint32_t frameIndex) const
+	{
+		return perFrameDescriptorSets.at(frameIndex);
 	}
 
 	void VulkanDescriptorManager::CreateBindlessLayout()
@@ -235,7 +218,7 @@ namespace Engine
 		}
 	}
 
-	void VulkanDescriptorManager::UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler)
+	void VulkanDescriptorManager::UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler) const
 	{
 		if (imageView == VK_NULL_HANDLE)
 		{
@@ -259,7 +242,7 @@ namespace Engine
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr); 
 	}
 
-	void VulkanDescriptorManager::SetBindlessSampler(VkSampler sampler)
+	void VulkanDescriptorManager::SetBindlessSampler(VkSampler sampler) const
 	{
 		VkDescriptorImageInfo samplerInfo{};
 		samplerInfo.sampler = sampler;
@@ -278,21 +261,37 @@ namespace Engine
 
 	void VulkanDescriptorManager::Cleanup()
 	{
+		// Free per-frame uniform buffers
+		for (auto& buffer : perFrameUBOs)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+				buffer.reset();
+			}
+		}
+
+		perFrameUBOs.clear(); 
+		perFrameDescriptorSets.clear(); 
+
 		if (descriptorPool != VK_NULL_HANDLE)
 		{
 			vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 			descriptorPool = VK_NULL_HANDLE;
 		}
+
 		if (descriptorSetLayout != VK_NULL_HANDLE)
 		{
 			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 			descriptorSetLayout = VK_NULL_HANDLE;
 		}
+
 		if (bindlessDescriptorPool != VK_NULL_HANDLE)
 		{
 			vkDestroyDescriptorPool(device, bindlessDescriptorPool, nullptr);
 			bindlessDescriptorPool = VK_NULL_HANDLE;
 		}
+
 		if (bindlessSetLayout != VK_NULL_HANDLE)
 		{
 			vkDestroyDescriptorSetLayout(device, bindlessSetLayout, nullptr);

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <vulkan/vulkan.h>
 #include <stdexcept>
+#include <cstdint>
 
 namespace Engine
 {
@@ -12,10 +14,10 @@ namespace Engine
 
 		VulkanBuffer
 		(
-			VkDevice device, 
+			VkDevice device,
 			VkPhysicalDevice physicalDevice,
 			VkDeviceSize size,
-			VkBufferUsageFlags usage, 
+			VkBufferUsageFlags usage,
 			VkMemoryPropertyFlags properties
 		);
 
@@ -23,10 +25,14 @@ namespace Engine
 
 		void Free();
 
-		void CopyData(const void* data, size_t size);
+		// Writes data to the mapped memory (must be within range)
+		void CopyData(const void* data, size_t size, size_t offset = 0);
 
-		VkBuffer GetBuffer() { return buffer; }
-		VkDeviceMemory GetMemory() { return memory; }
+		VkBuffer GetBuffer() const { return buffer; }
+		VkDeviceMemory GetMemory() const { return memory; }
+
+		// Optionally expose mapped pointer for manual writes
+		void* GetMappedPointer() const { return mappedPtr; }
 
 	private:
 
@@ -35,7 +41,10 @@ namespace Engine
 		VkBuffer buffer;
 		VkDeviceMemory memory;
 
-		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+		// Persistent pointer to mapped memory
+		void* mappedPtr = nullptr;  
+
+		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
 	};
 

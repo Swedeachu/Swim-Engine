@@ -39,6 +39,23 @@ namespace Engine
 		}
 	}
 
+	// scuffed copy and paste job to call before LoadAllRecursively() so we can get an idea of how much space to allocate in our bindless texture array
+	void TexturePool::FetchTextureCount()
+	{
+		const std::string textureRoot = "Assets\\Textures";
+		for (auto& p : std::filesystem::recursive_directory_iterator(textureRoot))
+		{
+			if (p.is_regular_file())
+			{
+				auto ext = p.path().extension().string();
+				if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") // Supported image formats
+				{
+					textureCount++;
+				}
+			}
+		}
+	}
+
 	std::shared_ptr<Texture2D> TexturePool::LoadTexture(const std::string& fileName)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);

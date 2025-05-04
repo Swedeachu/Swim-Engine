@@ -27,6 +27,26 @@ const bool enableValidationLayers = false;
 namespace Engine
 {
 
+	static constexpr unsigned int RoundUpToNextPowerOfTwo(unsigned int x)
+	{
+		if (x == 0) { return 1; }
+
+		// If already a power of two, return as-is
+		if ((x & (x - 1)) == 0)
+		{
+			return x;
+		}
+
+		// Round up to next power of two
+		--x;
+		x |= x >> 1;
+		x |= x >> 2;
+		x |= x >> 4;
+		x |= x >> 8;
+		x |= x >> 16;
+		return x + 1;
+	}
+
 	// Create Vulkan components
 	int VulkanRenderer::Awake()
 	{
@@ -59,11 +79,20 @@ namespace Engine
 
 		swapChainManager->Create(renderPass); // phase 2 of swapchain creation
 
+		// We need the texture pool for getting how many textures we will need in our bindless textures array.
+		// After all this Vulkan initing, we can then load all textures.
+		Engine::TexturePool& texturePool = TexturePool::GetInstance();
+
+		texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
+		unsigned int texCount = texturePool.GetTextureCount(); // Then get the value we counted.
+		// we now need to allign to the closest greater value (if 100 textures than sets it to 128, 200 then set it to 256, etc)
+		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount);
+
 		// Make the descriptor manager, its ctor creates the layout and pool
 		descriptorManager = std::make_unique<VulkanDescriptorManager>(
 			device,
-			1024, // max sets
-			4096 // max bindless textures
+			1024, // max sets (not sure what a good number for this is, or if it matters much yet)
+			maxBindlessTextureCount // max bindless textures (this value greatly impacts performance due to the binding we do each frame) 
 		);
 
 		// Create bindless descriptor layout and set
@@ -71,21 +100,13 @@ namespace Engine
 		descriptorManager->CreateBindlessPool(); 
 		descriptorManager->AllocateBindlessSet();
 
-		// make the default sampler for the fragment shader to use
+		// Make the default sampler for the fragment shader to use
 		defaultSampler = CreateSampler();
-
+		// Shader needs the sampler too for the textures
 		descriptorManager->SetBindlessSampler(defaultSampler);
 
-		// Set up buffer and UBO for camera
-		uniformBuffer = std::make_unique<VulkanBuffer>(
-			device,
-			physicalDevice,
-			sizeof(CameraUBO),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
-
-		descriptorManager->CreateUBODescriptorSet(uniformBuffer->GetBuffer());
+		// Set up buffer and UBO for camera with double buffering
+		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
 		// Now we can make our pipeline with the default shaders
 
@@ -123,8 +144,8 @@ namespace Engine
 
 		// Finally load textures and set a default missing texture.
 		// We are in big trouble if the missing texture is null, we should probably procedurally generate a missing texture in code.
-		TexturePool::GetInstance().LoadAllRecursively();
-		missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
+		texturePool.LoadAllRecursively();
+		missingTexture = texturePool.GetTexture2DLazy("mart");
 
 		return 0;
 	}
@@ -197,8 +218,6 @@ namespace Engine
 
 		descriptorManager->Cleanup();
 		descriptorManager.reset();
-
-		uniformBuffer.reset();
 
 		commandManager->Cleanup();
 		commandManager.reset();
@@ -287,7 +306,7 @@ namespace Engine
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
 
-		uniformBuffer->CopyData(&ubo, sizeof(CameraUBO));
+		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
 
 	inline MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
@@ -366,7 +385,7 @@ namespace Engine
 
 		VkPipelineLayout pipelineLayout = pipelineManager->GetPipelineLayout();
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
-		VkDescriptorSet uboDescriptorSet = descriptorManager->GetDescriptorSetUBO();
+		VkDescriptorSet uboDescriptorSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 
 		// Bind descriptor sets:
 		std::array<VkDescriptorSet, 2> sets = {

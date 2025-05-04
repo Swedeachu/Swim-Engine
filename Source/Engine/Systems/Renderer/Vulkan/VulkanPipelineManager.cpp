@@ -60,7 +60,7 @@ namespace Engine
 		return buffer;
 	}
 
-	VkShaderModule VulkanPipelineManager::CreateShaderModule(const std::vector<char>& code)
+	VkShaderModule VulkanPipelineManager::CreateShaderModule(const std::vector<char>& code) const
 	{
 		VkShaderModuleCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;

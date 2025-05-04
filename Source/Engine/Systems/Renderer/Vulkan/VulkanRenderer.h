@@ -135,14 +135,13 @@ namespace Engine
 		std::unique_ptr<VulkanPipelineManager> pipelineManager;
 		std::unique_ptr<VulkanCommandManager> commandManager;
 
-		// Synchronization values for SyncManager to use
-		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+		// Synchronization values for SyncManager and DescriptorManager to use for double buffering.
+		// Maybe MAX_FRAMES_IN_FLIGHT should be an engine wide constant? 
+		// So far the only other classes that use this number is the sync manager (cached in ctor) and a method call in descriptor manager.
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2; 
 		size_t currentFrame = 0;
 
 		std::unique_ptr<VulkanSyncManager> syncManager;
-
-		std::unique_ptr<VulkanBuffer> uniformBuffer;
-
 		std::unique_ptr<VulkanDescriptorManager> descriptorManager;
 
 		bool framebufferResized = false;

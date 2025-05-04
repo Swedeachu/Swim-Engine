@@ -341,8 +341,7 @@ namespace Engine
 
 		for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
 		{
-			if ((typeFilter & (1 << i)) &&
-				(memProps.memoryTypes[i].propertyFlags & properties) == properties)
+			if ((typeFilter & (1 << i)) && (memProps.memoryTypes[i].propertyFlags & properties) == properties)
 			{
 				return i;
 			}
@@ -351,7 +350,7 @@ namespace Engine
 		throw std::runtime_error("Failed to find suitable memory type!");
 	}
 
-	VkResult VulkanSwapChain::AcquireNextImage(VkSemaphore imageAvailable, uint32_t* imageIndex)
+	VkResult VulkanSwapChain::AcquireNextImage(VkSemaphore imageAvailable, uint32_t* imageIndex) const
 	{
 		return vkAcquireNextImageKHR(
 			device,

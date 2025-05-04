@@ -46,7 +46,7 @@ namespace Engine
 
 		uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 
-		VkResult AcquireNextImage(VkSemaphore imageAvailable, uint32_t* imageIndex);
+		VkResult AcquireNextImage(VkSemaphore imageAvailable, uint32_t* imageIndex) const;
 		VkResult Present(VkQueue presentQueue, VkSemaphore* waitSemaphores, uint32_t imageIndex);
 
 	private:

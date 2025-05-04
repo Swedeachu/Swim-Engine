@@ -25,7 +25,7 @@ namespace Engine
 		// This is constexpr so branching logic based on API specific code is instant (Mesh, Texture, etc). 
 		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
-		static constexpr bool useShaderToyIfOpenGL = true; 
+		static constexpr bool useShaderToyIfOpenGL = false; 
 
 		SwimEngine();
 

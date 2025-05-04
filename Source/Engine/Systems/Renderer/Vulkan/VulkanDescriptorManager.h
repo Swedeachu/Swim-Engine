@@ -5,6 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include <unordered_map>
+#include "VulkanBuffer.h"
 
 namespace Engine
 {
@@ -20,24 +21,23 @@ namespace Engine
 		void CreateLayout();
 		void CreatePool();
 
-		void CreateUBODescriptorSet(VkBuffer buffer);
+		// Create per-frame UBOs and descriptor sets
+		void CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount);
+		void UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo);
+		VkDescriptorSet GetPerFrameDescriptorSet(uint32_t frameIndex) const;
 
 		// Bindless setup
 		void CreateBindlessLayout();
 		void CreateBindlessPool();
 		void AllocateBindlessSet();
-		void UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler);
-		void SetBindlessSampler(VkSampler sampler);
+		void UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler) const;
+		void SetBindlessSampler(VkSampler sampler) const;
 
 		VkDescriptorSetLayout GetLayout() const { return descriptorSetLayout; }
 		VkDescriptorPool GetPool() const { return descriptorPool; }
-		VkDescriptorSet GetDescriptorSetUBO() const { return uboDescriptorSet; }
 
 		VkDescriptorSet GetBindlessSet() const { return bindlessDescriptorSet; }
 		VkDescriptorSetLayout GetBindlessLayout() const { return bindlessSetLayout; }
-
-		// Allocates and writes a descriptor set using the UBO and image sampler
-		VkDescriptorSet AllocateSet(VkBuffer uniformBuffer, VkDeviceSize bufferSize, VkSampler sampler, VkImageView imageView);
 
 		void Cleanup();
 
@@ -50,12 +50,15 @@ namespace Engine
 		// Standard (UBO + Texture) set
 		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
 		VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-		VkDescriptorSet uboDescriptorSet = VK_NULL_HANDLE;
 
 		// Bindless global texture set
 		VkDescriptorSetLayout bindlessSetLayout = VK_NULL_HANDLE;
 		VkDescriptorPool bindlessDescriptorPool = VK_NULL_HANDLE;
 		VkDescriptorSet bindlessDescriptorSet = VK_NULL_HANDLE;
+
+		// Per-frame uniform buffers and descriptor sets
+		std::vector<std::unique_ptr<VulkanBuffer>> perFrameUBOs;
+		std::vector<VkDescriptorSet> perFrameDescriptorSets;
 
 	};
 

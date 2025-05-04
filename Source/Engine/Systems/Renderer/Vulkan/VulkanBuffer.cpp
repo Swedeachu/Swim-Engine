@@ -11,12 +11,14 @@ namespace Engine
 		VkDeviceSize size,
 		VkBufferUsageFlags usage,
 		VkMemoryPropertyFlags properties
-	) :
-		device(device),
+	)
+		: device(device),
 		physicalDevice(physicalDevice),
 		buffer(VK_NULL_HANDLE),
-		memory(VK_NULL_HANDLE)
+		memory(VK_NULL_HANDLE),
+		mappedPtr(nullptr)
 	{
+		// 1. Create buffer
 		VkBufferCreateInfo bufferInfo{};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 		bufferInfo.size = size;
@@ -28,9 +30,11 @@ namespace Engine
 			throw std::runtime_error("Failed to create buffer!");
 		}
 
+		// 2. Get memory requirements
 		VkMemoryRequirements memRequirements;
 		vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
 
+		// 3. Allocate memory
 		VkMemoryAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		allocInfo.allocationSize = memRequirements.size;
@@ -41,7 +45,20 @@ namespace Engine
 			throw std::runtime_error("Failed to allocate buffer memory!");
 		}
 
-		vkBindBufferMemory(device, buffer, memory, 0);
+		// 4. Bind memory to buffer
+		if (vkBindBufferMemory(device, buffer, memory, 0) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to bind buffer memory!");
+		}
+
+		// 5. If host visible, map it persistently
+		if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+		{
+			if (vkMapMemory(device, memory, 0, size, 0, &mappedPtr) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to map buffer memory!");
+			}
+		}
 	}
 
 	VulkanBuffer::~VulkanBuffer()
@@ -51,34 +68,40 @@ namespace Engine
 
 	void VulkanBuffer::Free()
 	{
-		// Check if the buffer and memory are already freed
-		if (buffer == VK_NULL_HANDLE && memory == VK_NULL_HANDLE)
+		if (mappedPtr)
 		{
-			return; // Already freed, do nothing
+			vkUnmapMemory(device, memory);
+			mappedPtr = nullptr;
 		}
 
 		if (memory != VK_NULL_HANDLE)
 		{
 			vkFreeMemory(device, memory, nullptr);
-			memory = VK_NULL_HANDLE; // Mark as freed
+			memory = VK_NULL_HANDLE;
 		}
 
 		if (buffer != VK_NULL_HANDLE)
 		{
 			vkDestroyBuffer(device, buffer, nullptr);
-			buffer = VK_NULL_HANDLE; // Mark as freed
+			buffer = VK_NULL_HANDLE;
 		}
 	}
 
-	void VulkanBuffer::CopyData(const void* data, size_t size)
+	void VulkanBuffer::CopyData(const void* data, size_t size, size_t offset)
 	{
-		void* mappedData;
-		vkMapMemory(device, memory, 0, size, 0, &mappedData);
-		memcpy(mappedData, data, size);
-		vkUnmapMemory(device, memory);
+		if (!mappedPtr)
+		{
+			throw std::runtime_error("Buffer memory is not mapped!");
+		}
+
+		// hey 50 year old C code happens to be faster than the **** we can write ourselves! So let's use good old memcpy...
+		memcpy(static_cast<char*>(mappedPtr) + offset, data, size);
+
+		// Optional: flush if not HOST_COHERENT (not required with HOST_COHERENT_BIT set)
+		// Use vkFlushMappedMemoryRanges() if needed in future
 	}
 
-	uint32_t VulkanBuffer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+	uint32_t VulkanBuffer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
 	{
 		VkPhysicalDeviceMemoryProperties memProperties;
 		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);

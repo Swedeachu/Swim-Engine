@@ -35,7 +35,7 @@ namespace Engine
 
 	private:
 
-		VkShaderModule CreateShaderModule(const std::vector<char>& code);
+		VkShaderModule CreateShaderModule(const std::vector<char>& code) const;
 		std::vector<char> ReadFile(const std::string& filename);
 
 		VkDevice device;
