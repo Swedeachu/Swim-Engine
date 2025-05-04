@@ -265,7 +265,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
     <ClInclude Include="Source\Engine\Systems\SystemManager.h" />
+    <ClInclude Include="Source\Engine\Utility\ColorConstants.h" />
     <ClInclude Include="Source\Engine\Utility\PCH.h" />
+    <ClInclude Include="Source\Engine\Utility\RandomUtils.h" />
     <ClInclude Include="Source\Game\Scenes\SandBox.h" />
     <ClInclude Include="Source\Library\EnTT\entt.hpp" />
     <ClInclude Include="Source\Library\glad\include\glad\gl.h" />
