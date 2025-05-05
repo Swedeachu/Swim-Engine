@@ -14,6 +14,7 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
+#include "Buffers/VulkanGpuInstanceData.h"
 
 #include "Library/glm/gtc/matrix_transform.hpp"
 
@@ -88,11 +89,15 @@ namespace Engine
 		// we now need to allign to the closest greater value (if 100 textures than sets it to 128, 200 then set it to 256, etc)
 		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount);
 
+		constexpr uint32_t MAX_SETS = 1024; // Not sure what a good number for this is, or if it matters much yet.
+		constexpr uint64_t SSBO_SIZE = 10240; // Not sure what this number should be other than something big.
+
 		// Make the descriptor manager, its ctor creates the layout and pool
 		descriptorManager = std::make_unique<VulkanDescriptorManager>(
 			device,
-			1024, // max sets (not sure what a good number for this is, or if it matters much yet)
-			maxBindlessTextureCount // max bindless textures (this value greatly impacts performance due to the binding we do each frame) 
+			MAX_SETS, 
+			maxBindlessTextureCount, // This value greatly impacts performance due to the binding we do each frame.
+			SSBO_SIZE // How much memory we have in our SSBOs for indexed drawing and other things of that nature.
 		);
 
 		// Create bindless descriptor layout and set
@@ -108,19 +113,18 @@ namespace Engine
 		// Set up buffer and UBO for camera with double buffering
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
-		// TODO: move somewhere else in say an Instance Manager class
-		constexpr int MAX_EXPECTED_INSTANCES = 10000; // should this be an alligned number?
-		// NEW: Create instancing buffer (one per frame)
-		instanceBuffer = std::make_unique<Engine::VulkanInstanceBuffer>(
+		constexpr int MAX_EXPECTED_INSTANCES = 10240; // Probably will need a bigger number
+		
+		// Create the index draw object which stores out instanced buffers and does our indexed drawing logic and caching
+		indexDraw = std::make_unique<VulkanIndexDraw>(
 			device,
 			physicalDevice,
-			sizeof(GpuInstanceData),
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
 
-		// NEW: Update descriptor layout to include instance SSBO
-		descriptorManager->CreateInstanceBufferDescriptorSets(instanceBuffer->GetPerFrameBuffers());
+		// Update descriptor layout to include instance SSBO
+		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
 
 		// Now we can make our pipeline with the default shaders
 
@@ -241,11 +245,8 @@ namespace Engine
 			vkDestroySampler(device, defaultSampler, nullptr);
 		}
 
-		if (instanceBuffer)
-		{
-			instanceBuffer->Cleanup();
-			instanceBuffer.reset();
-		}
+		indexDraw->CleanUp();
+		indexDraw.reset();
 
 		pipelineManager->Cleanup();
 		pipelineManager.reset();
@@ -343,69 +344,6 @@ namespace Engine
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
 
-	// THIS IS INSANELY UNPERFORMANT AND AWFUL AND NOT CACHE COHHERENT IN ANY WAY
-	void VulkanRenderer::UpdateInstanceBuffer()
-	{
-		cpuInstanceData.clear();
-		meshToInstanceOffsets.clear(); // Reset per frame
-
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
-
-		uint32_t instanceIndex = 0;
-		for (auto entity : view)
-		{
-			const auto& transform = view.get<Transform>(entity);
-			const auto& mat = view.get<Material>(entity).data;
-			const auto& mesh = mat->mesh;
-
-			GpuInstanceData instance{};
-			instance.model = transform.GetModelMatrix();
-			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-			instance.padA = instance.padB = 0.0f;
-
-			cpuInstanceData.push_back(instance);
-
-			// First time seeing this mesh, store starting index
-			if (meshToInstanceOffsets.find(mesh) == meshToInstanceOffsets.end())
-			{
-				meshToInstanceOffsets[mesh].firstInstance = instanceIndex;
-			}
-
-			// Always increment count
-			meshToInstanceOffsets[mesh].count++;
-
-			instanceIndex++;
-		}
-
-		// Upload all instance data to GPU for current frame
-		void* dst = instanceBuffer->BeginFrame(currentFrame);
-		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
-	}
-
-	inline MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
-	{
-		// Check if the Mesh already has its MeshBufferData initialized, it pretty much always should due to MeshPool::RegisterMesh()
-		if (mesh->meshBufferData)
-		{
-			return *mesh->meshBufferData;
-		}
-		// Below is back up code:
-
-		// Create a new MeshBufferData instance
-		auto data = std::make_shared<MeshBufferData>();
-
-		// Generate GPU buffers (Vulkan version requires device + physicalDevice)
-		data->GenerateBuffers(mesh->vertices, mesh->indices, deviceManager->GetDevice(), deviceManager->GetPhysicalDevice());
-
-		// Store the newly created MeshBufferData in the Mesh
-		mesh->meshBufferData = data;
-
-		return *data;
-	}
-
 	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)
 	{
 		VkCommandBufferBeginInfo beginInfo{};
@@ -446,8 +384,9 @@ namespace Engine
 		// Bind pipeline
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
 
+		// Update the buffers (UBO + SSBO for indexed drawing)
 		UpdateUniformBuffer();
-		UpdateInstanceBuffer();
+		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		// Bind descriptor sets
 		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
@@ -468,37 +407,8 @@ namespace Engine
 			nullptr
 		);
 
-		// Bind instance buffer at binding 1
-		VkBuffer instanceBuf = instanceBuffer->GetBuffer(currentFrame);
-		VkDeviceSize instanceOffset = 0;
-
-		// Group entities by mesh to minimize pipeline bindings
-		std::unordered_map<std::shared_ptr<Mesh>, std::vector<uint32_t>> meshToInstanceIndices;
-
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
-
-		uint32_t instanceIndex = 0;
-		for (auto entity : view)
-		{
-			const auto& mat = view.get<Material>(entity).data;
-			meshToInstanceIndices[mat->mesh].push_back(instanceIndex++);
-		}
-
-		// For each unique mesh, bind once and draw all its instances
-		for (const auto& [meshPtr, range] : meshToInstanceOffsets)
-		{
-			auto& meshData = GetOrCreateMeshBuffers(meshPtr);
-
-			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
-			VkDeviceSize offsets[] = { 0, 0 };
-
-			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-			vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
-		}
+		// Draw it all indexed now finally
+		indexDraw->DrawIndexed(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 

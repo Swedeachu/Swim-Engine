@@ -5,7 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include <unordered_map>
-#include "VulkanBuffer.h"
+#include "Buffers/VulkanBuffer.h"
 
 namespace Engine
 {
@@ -15,7 +15,7 @@ namespace Engine
 
 	public:
 
-		VulkanDescriptorManager(VkDevice device, uint32_t maxSets = 1024, uint32_t maxBindlessTextures = 4096);
+		VulkanDescriptorManager(VkDevice device, uint32_t maxSets = 1024, uint32_t maxBindlessTextures = 4096, uint64_t ssbosSize = 10240);
 		~VulkanDescriptorManager();
 
 		void CreateLayout();
@@ -26,7 +26,7 @@ namespace Engine
 		void UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo);
 		VkDescriptorSet GetPerFrameDescriptorSet(uint32_t frameIndex) const;
 		void UpdatePerFrameInstanceBuffer(uint32_t frameIndex, const void* data, size_t size);
-		// NEW: Adds SSBO (instance buffer) binding to per-frame descriptor sets
+		// Adds SSBO (instance buffer) binding to per-frame descriptor sets
 		void CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers);
 
 		// Bindless setup
@@ -54,6 +54,7 @@ namespace Engine
 		VkDevice device;
 		uint32_t maxSets;
 		uint32_t maxBindlessTextures;
+		uint64_t ssboSize;
 
 		// Standard (UBO + Texture) set
 		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
@@ -68,10 +69,10 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameUBOs;
 		std::vector<VkDescriptorSet> perFrameDescriptorSets;
 
-		// NEW: Per-frame instance SSBOs
+		// Per-frame instance SSBOs
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameInstanceBuffers;
 
-		// NEW: For tracking instance SSBO descriptor sets per frame (optional)
+		// For tracking instance SSBO descriptor sets per frame (optional)
 		std::vector<VkDescriptorSet> perFrameDescriptorSets_InstanceBuffer;
 
 	};

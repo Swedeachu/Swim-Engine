@@ -1,5 +1,5 @@
 SamplerState texSampler : register(s0, space1);
-Texture2D     textures[] : register(t1, space1); // Bindless texture array
+Texture2D    textures[] : register(t1, space1); // Bindless texture array
 
 struct FSInput
 {

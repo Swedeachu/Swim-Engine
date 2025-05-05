@@ -4,8 +4,8 @@
 namespace Engine
 {
 
-	VulkanDescriptorManager::VulkanDescriptorManager(VkDevice device, uint32_t maxSets, uint32_t maxBindlessTextures)
-		: device(device), maxSets(maxSets), maxBindlessTextures(maxBindlessTextures)
+	VulkanDescriptorManager::VulkanDescriptorManager(VkDevice device, uint32_t maxSets, uint32_t maxBindlessTextures, uint64_t ssbosSize)
+		: device(device), maxSets(maxSets), maxBindlessTextures(maxBindlessTextures), ssboSize(ssbosSize)
 	{
 		CreateLayout();
 		CreatePool();
@@ -74,7 +74,7 @@ namespace Engine
 	void VulkanDescriptorManager::CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount)
 	{
 		perFrameUBOs.resize(frameCount);
-		perFrameInstanceBuffers.resize(frameCount); // NEW
+		perFrameInstanceBuffers.resize(frameCount);
 		perFrameDescriptorSets.resize(frameCount);
 
 		for (uint32_t i = 0; i < frameCount; ++i)
@@ -88,8 +88,7 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// NEW: SSBO (start with 1KB, caller can resize later or pad)
-			const VkDeviceSize ssboSize = 1024 * 10; // We'll resize later if needed WE PROBABLY WILL 100% NEED TO CHANGE THIS VALUE
+			// SSBO
 			perFrameInstanceBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
@@ -158,7 +157,7 @@ namespace Engine
 			VkWriteDescriptorSet write{};
 			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			write.dstSet = perFrameDescriptorSets[i]; // Reuse the existing descriptor sets created in CreatePerFrameUBOs
-			write.dstBinding = 1;                      // Binding 1 = instance SSBO
+			write.dstBinding = 1;                     // Binding 1 = instance SSBO
 			write.dstArrayElement = 0;
 			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			write.descriptorCount = 1;
