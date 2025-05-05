@@ -167,10 +167,18 @@ namespace Engine
 		std::shared_ptr<Texture2D> missingTexture;
 
 		// TODO: put this somewhere else more logical (probably an instance manager class)
-		// NEW: Instance buffer manager
+		// Instance buffer manager
 		std::unique_ptr<Engine::VulkanInstanceBuffer> instanceBuffer;
-		// NEW: Stores GPU instance data to upload
+		// Stores GPU instance data to upload
 		std::vector<GpuInstanceData> cpuInstanceData;
+
+		struct MeshInstanceRange
+		{
+			uint32_t firstInstance = 0;
+			uint32_t count = 0;
+		};
+
+		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> meshToInstanceOffsets;
 
 	};
 

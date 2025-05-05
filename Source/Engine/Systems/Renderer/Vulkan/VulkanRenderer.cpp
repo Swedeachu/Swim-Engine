@@ -347,15 +347,18 @@ namespace Engine
 	void VulkanRenderer::UpdateInstanceBuffer()
 	{
 		cpuInstanceData.clear();
+		meshToInstanceOffsets.clear(); // Reset per frame
 
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		auto& registry = scene->GetRegistry();
 		auto view = registry.view<Transform, Material>();
 
+		uint32_t instanceIndex = 0;
 		for (auto entity : view)
 		{
 			const auto& transform = view.get<Transform>(entity);
 			const auto& mat = view.get<Material>(entity).data;
+			const auto& mesh = mat->mesh;
 
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
@@ -364,9 +367,20 @@ namespace Engine
 			instance.padA = instance.padB = 0.0f;
 
 			cpuInstanceData.push_back(instance);
+
+			// First time seeing this mesh, store starting index
+			if (meshToInstanceOffsets.find(mesh) == meshToInstanceOffsets.end())
+			{
+				meshToInstanceOffsets[mesh].firstInstance = instanceIndex;
+			}
+
+			// Always increment count
+			meshToInstanceOffsets[mesh].count++;
+
+			instanceIndex++;
 		}
 
-		// Upload to GPU
+		// Upload all instance data to GPU for current frame
 		void* dst = instanceBuffer->BeginFrame(currentFrame);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 	}
@@ -473,16 +487,17 @@ namespace Engine
 		}
 
 		// For each unique mesh, bind once and draw all its instances
-		for (const auto& [meshPtr, indices] : meshToInstanceIndices)
+		for (const auto& [meshPtr, range] : meshToInstanceOffsets)
 		{
 			auto& meshData = GetOrCreateMeshBuffers(meshPtr);
 
 			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets); // error 1
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-			vkCmdDrawIndexed(cmd, meshData.indexCount, static_cast<uint32_t>(indices.size()), 0, 0, 0);
+
+			vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
 		}
 
 		vkCmdEndRenderPass(cmd);
