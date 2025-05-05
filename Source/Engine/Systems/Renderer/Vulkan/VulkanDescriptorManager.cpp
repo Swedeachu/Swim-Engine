@@ -18,20 +18,25 @@ namespace Engine
 
 	void VulkanDescriptorManager::CreateLayout()
 	{
-		// Regular per-material layout: UBO (binding 0) + texture sampler (binding 1)
+		// Set 0: used in vertex shader for CameraUBO, instanceModels, instanceData
 		VkDescriptorSetLayoutBinding uboBinding{};
 		uboBinding.binding = 0;
 		uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		uboBinding.descriptorCount = 1;
 		uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		uboBinding.pImmutableSamplers = nullptr;
 
-		VkDescriptorSetLayoutBinding samplerBinding{};
-		samplerBinding.binding = 1;
-		samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		samplerBinding.descriptorCount = 1;
-		samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		VkDescriptorSetLayoutBinding instanceModelsBinding{};
+		instanceModelsBinding.binding = 1;
+		instanceModelsBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		instanceModelsBinding.descriptorCount = 1;
+		instanceModelsBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		instanceModelsBinding.pImmutableSamplers = nullptr;
 
-		std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboBinding, samplerBinding };
+		std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
+				uboBinding,
+				instanceModelsBinding
+		};
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -69,10 +74,12 @@ namespace Engine
 	void VulkanDescriptorManager::CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount)
 	{
 		perFrameUBOs.resize(frameCount);
+		perFrameInstanceBuffers.resize(frameCount); // NEW
 		perFrameDescriptorSets.resize(frameCount);
 
 		for (uint32_t i = 0; i < frameCount; ++i)
 		{
+			// UBO
 			perFrameUBOs[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
@@ -81,7 +88,17 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// Allocate a descriptor set for this UBO
+			// NEW: SSBO (start with 1KB, caller can resize later or pad)
+			const VkDeviceSize ssboSize = 1024 * 10; // We'll resize later if needed WE PROBABLY WILL 100% NEED TO CHANGE THIS VALUE
+			perFrameInstanceBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				ssboSize,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			// Allocate descriptor set
 			VkDescriptorSetAllocateInfo allocInfo{};
 			allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 			allocInfo.descriptorPool = descriptorPool;
@@ -90,25 +107,75 @@ namespace Engine
 
 			if (vkAllocateDescriptorSets(device, &allocInfo, &perFrameDescriptorSets[i]) != VK_SUCCESS)
 			{
-				throw std::runtime_error("Failed to allocate per-frame UBO descriptor set!");
+				throw std::runtime_error("Failed to allocate per-frame descriptor set!");
 			}
 
+			// === Write UBO (binding 0) ===
+			VkDescriptorBufferInfo uboInfo{};
+			uboInfo.buffer = perFrameUBOs[i]->GetBuffer();
+			uboInfo.offset = 0;
+			uboInfo.range = sizeof(CameraUBO);
+
+			VkWriteDescriptorSet uboWrite{};
+			uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			uboWrite.dstSet = perFrameDescriptorSets[i];
+			uboWrite.dstBinding = 0;
+			uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			uboWrite.descriptorCount = 1;
+			uboWrite.pBufferInfo = &uboInfo;
+
+			// === Write SSBO (binding 1) ===
+			VkDescriptorBufferInfo ssboInfo{};
+			ssboInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
+			ssboInfo.offset = 0;
+			ssboInfo.range = ssboSize;
+
+			VkWriteDescriptorSet ssboWrite{};
+			ssboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			ssboWrite.dstSet = perFrameDescriptorSets[i];
+			ssboWrite.dstBinding = 1;
+			ssboWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			ssboWrite.descriptorCount = 1;
+			ssboWrite.pBufferInfo = &ssboInfo;
+
+			std::array<VkWriteDescriptorSet, 2> writes = { uboWrite, ssboWrite };
+			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+		}
+	}
+
+	void VulkanDescriptorManager::CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers)
+	{
+		const uint32_t frameCount = static_cast<uint32_t>(perFrameInstanceBuffers.size());
+		perFrameDescriptorSets_InstanceBuffer.resize(frameCount);
+
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
 			VkDescriptorBufferInfo bufferInfo{};
-			bufferInfo.buffer = perFrameUBOs[i]->GetBuffer();
+			bufferInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
 			bufferInfo.offset = 0;
-			bufferInfo.range = sizeof(CameraUBO);
+			bufferInfo.range = VK_WHOLE_SIZE;
 
 			VkWriteDescriptorSet write{};
 			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			write.dstSet = perFrameDescriptorSets[i];
-			write.dstBinding = 0;
+			write.dstSet = perFrameDescriptorSets[i]; // Reuse the existing descriptor sets created in CreatePerFrameUBOs
+			write.dstBinding = 1;                      // Binding 1 = instance SSBO
 			write.dstArrayElement = 0;
-			write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			write.descriptorCount = 1;
 			write.pBufferInfo = &bufferInfo;
 
 			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 		}
+	}
+
+	void VulkanDescriptorManager::UpdatePerFrameInstanceBuffer(uint32_t frameIndex, const void* data, size_t size)
+	{
+		if (frameIndex >= perFrameInstanceBuffers.size())
+		{
+			throw std::runtime_error("Invalid frame index for SSBO update");
+		}
+
+		perFrameInstanceBuffers[frameIndex]->CopyData(data, size);
 	}
 
 	// Update the UBO for a given frame with the latest camera matrix data
@@ -130,25 +197,27 @@ namespace Engine
 
 	void VulkanDescriptorManager::CreateBindlessLayout()
 	{
-		// Binding 0: Immutable sampler (non-variable)
+		// Set 1: Used in FRAGMENT shader (also possibly vertex if needed in future)
+
+		// Binding 0: Immutable sampler
 		VkDescriptorSetLayoutBinding samplerBinding{};
 		samplerBinding.binding = 0;
 		samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 		samplerBinding.descriptorCount = 1;
-		samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; 
 		samplerBinding.pImmutableSamplers = nullptr;
 
-		// Binding 1: Bindless texture array (must be the highest binding index!)
+		// Binding 1: Bindless image array
 		VkDescriptorSetLayoutBinding textureBinding{};
 		textureBinding.binding = 1;
 		textureBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		textureBinding.descriptorCount = maxBindlessTextures;
-		textureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		textureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; 
 		textureBinding.pImmutableSamplers = nullptr;
 
 		std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-				samplerBinding,    // binding = 0
-				textureBinding     // binding = 1
+				samplerBinding,
+				textureBinding
 		};
 
 		std::array<VkDescriptorBindingFlags, 2> bindingFlags{};
@@ -273,6 +342,16 @@ namespace Engine
 
 		perFrameUBOs.clear(); 
 		perFrameDescriptorSets.clear(); 
+
+		for (auto& buffer : perFrameInstanceBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+				buffer.reset();
+			}
+		}
+		perFrameInstanceBuffers.clear();
 
 		if (descriptorPool != VK_NULL_HANDLE)
 		{

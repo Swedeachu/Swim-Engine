@@ -214,6 +214,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanInstanceBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
@@ -258,6 +259,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanInstanceBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.h" />

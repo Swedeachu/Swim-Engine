@@ -97,7 +97,7 @@ namespace Engine
 
 		// Create bindless descriptor layout and set
 		descriptorManager->CreateBindlessLayout();
-		descriptorManager->CreateBindlessPool(); 
+		descriptorManager->CreateBindlessPool();
 		descriptorManager->AllocateBindlessSet();
 
 		// Make the default sampler for the fragment shader to use
@@ -108,22 +108,50 @@ namespace Engine
 		// Set up buffer and UBO for camera with double buffering
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
+		// TODO: move somewhere else in say an Instance Manager class
+		constexpr int MAX_EXPECTED_INSTANCES = 10000; // should this be an alligned number?
+		// NEW: Create instancing buffer (one per frame)
+		instanceBuffer = std::make_unique<Engine::VulkanInstanceBuffer>(
+			device,
+			physicalDevice,
+			sizeof(GpuInstanceData),
+			MAX_EXPECTED_INSTANCES,
+			MAX_FRAMES_IN_FLIGHT
+		);
+
+		// NEW: Update descriptor layout to include instance SSBO
+		descriptorManager->CreateInstanceBufferDescriptorSets(instanceBuffer->GetPerFrameBuffers());
+
 		// Now we can make our pipeline with the default shaders
 
 		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
 		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout();
 
-		auto attribs = Vertex::GetAttributeDescriptions();
+		// === Vertex and instance input setup ===
+		auto vertexAttribs = Vertex::GetAttributeDescriptions();
+		auto instanceAttribs = Vertex::GetInstanceAttributeDescriptions();
+
+		// Merge both into one array
+		std::vector<VkVertexInputAttributeDescription> allAttribs;
+		allAttribs.insert(allAttribs.end(), vertexAttribs.begin(), vertexAttribs.end());
+		allAttribs.insert(allAttribs.end(), instanceAttribs.begin(), instanceAttribs.end());
+
+		// Hardcoded for now: only two bindings (vertex and instance)
+		std::array<VkVertexInputBindingDescription, 2> bindings{};
+		bindings[0] = Vertex::GetBindingDescription(); // binding = 0 for vertex data
+		bindings[1].binding = 1;                       // binding = 1 for instance data
+		bindings[1].stride = sizeof(GpuInstanceData);
+		bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
 		// This is REALLY messy and hardcoded and later on we will have a much better pipeline for which shaders to use on per object and full screen VFX.
 		pipelineManager->CreateGraphicsPipeline(
-			"Shaders\\VertexShaders\\vertex.spv",
-			"Shaders\\FragmentShaders\\fragment.spv",
+			"Shaders\\VertexShaders\\vertex_instanced.spv",
+			"Shaders\\FragmentShaders\\fragment_instanced.spv",
 			layout,
 			bindlessLayout,
-			Vertex::GetBindingDescription(),
-			std::vector<VkVertexInputAttributeDescription>(attribs.begin(), attribs.end()), // convert std array to vector
-			sizeof(PushConstantData)
+			std::vector<VkVertexInputBindingDescription>{ bindings.begin(), bindings.end() }, // convert array to vector
+			allAttribs,
+			sizeof(GpuInstanceData)
 		);
 
 		// Initialize command manager with correct graphics queue family index from the device manager
@@ -211,6 +239,12 @@ namespace Engine
 		if (defaultSampler)
 		{
 			vkDestroySampler(device, defaultSampler, nullptr);
+		}
+
+		if (instanceBuffer)
+		{
+			instanceBuffer->Cleanup();
+			instanceBuffer.reset();
 		}
 
 		pipelineManager->Cleanup();
@@ -309,6 +343,34 @@ namespace Engine
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
 
+	// THIS IS INSANELY UNPERFORMANT AND AWFUL AND NOT CACHE COHHERENT IN ANY WAY
+	void VulkanRenderer::UpdateInstanceBuffer()
+	{
+		cpuInstanceData.clear();
+
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& registry = scene->GetRegistry();
+		auto view = registry.view<Transform, Material>();
+
+		for (auto entity : view)
+		{
+			const auto& transform = view.get<Transform>(entity);
+			const auto& mat = view.get<Material>(entity).data;
+
+			GpuInstanceData instance{};
+			instance.model = transform.GetModelMatrix();
+			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
+			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+			instance.padA = instance.padB = 0.0f;
+
+			cpuInstanceData.push_back(instance);
+		}
+
+		// Upload to GPU
+		void* dst = instanceBuffer->BeginFrame(currentFrame);
+		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+	}
+
 	inline MeshBufferData& VulkanRenderer::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
 	{
 		// Check if the Mesh already has its MeshBufferData initialized, it pretty much always should due to MeshPool::RegisterMesh()
@@ -335,9 +397,10 @@ namespace Engine
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
+		const auto& commandBuffers = commandManager->GetCommandBuffers();
+		VkCommandBuffer cmd = commandBuffers[imageIndex];
 
-		if (vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo) != VK_SUCCESS)
+		if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
@@ -347,107 +410,84 @@ namespace Engine
 		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 		clearValues[1].depthStencil = { 1.0f, 0 };
 
-		const std::vector<VkFramebuffer>& swapChainFramebuffers = swapChainManager->GetFramebuffers();
-		VkExtent2D swapChainExtent = swapChainManager->GetExtent();
+		const auto& framebuffers = swapChainManager->GetFramebuffers();
+		VkExtent2D extent = swapChainManager->GetExtent();
 
 		VkRenderPassBeginInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 		renderPassInfo.renderPass = pipelineManager->GetRenderPass();
-		renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
-		renderPassInfo.renderArea.offset = { 0, 0 };
-		renderPassInfo.renderArea.extent = swapChainExtent;
+		renderPassInfo.framebuffer = framebuffers[imageIndex];
+		renderPassInfo.renderArea = { {0, 0}, extent };
 		renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 		renderPassInfo.pClearValues = clearValues.data();
 
-		vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// Set dynamic viewport
-		VkViewport viewport{};
-		viewport.x = 0.0f;
-		viewport.y = 0.0f;
-		viewport.width = static_cast<float>(swapChainExtent.width);
-		viewport.height = static_cast<float>(swapChainExtent.height);
-		viewport.minDepth = 0.0f;
-		viewport.maxDepth = 1.0f;
-		vkCmdSetViewport(commandBuffers[imageIndex], 0, 1, &viewport);
-
-		// Set dynamic scissor
-		VkRect2D scissor{};
-		scissor.offset = { 0, 0 };
-		scissor.extent = swapChainExtent;
-		vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
+		// Dynamic state
+		VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
+		VkRect2D scissor{ {0, 0}, extent };
+		vkCmdSetViewport(cmd, 0, 1, &viewport);
+		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
 		// Bind pipeline
-		vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
 
-		// Update camera UBO
 		UpdateUniformBuffer();
+		UpdateInstanceBuffer();
 
-		VkPipelineLayout pipelineLayout = pipelineManager->GetPipelineLayout();
+		// Bind descriptor sets
+		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
-		VkDescriptorSet uboDescriptorSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 
-		// Bind descriptor sets:
 		std::array<VkDescriptorSet, 2> sets = {
-			uboDescriptorSet, // Set 0: UBO
-			bindlessSet			  // Set 1: Bindless texture set
+			globalSet, bindlessSet
 		};
 
-		// Bind global bindless descriptor set 
 		vkCmdBindDescriptorSets(
-			commandBuffers[imageIndex],
+			cmd,
 			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipelineLayout,
-			0, static_cast<uint32_t>(sets.size()),
+			pipelineManager->GetPipelineLayout(),
+			0,
+			static_cast<uint32_t>(sets.size()),
 			sets.data(),
-			0, nullptr
+			0,
+			nullptr
 		);
 
-		// We iterate all entitys in the current scene to render them
-		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		if (scene)
+		// Bind instance buffer at binding 1
+		VkBuffer instanceBuf = instanceBuffer->GetBuffer(currentFrame);
+		VkDeviceSize instanceOffset = 0;
+
+		// Group entities by mesh to minimize pipeline bindings
+		std::unordered_map<std::shared_ptr<Mesh>, std::vector<uint32_t>> meshToInstanceIndices;
+
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& registry = scene->GetRegistry();
+		auto view = registry.view<Transform, Material>();
+
+		uint32_t instanceIndex = 0;
+		for (auto entity : view)
 		{
-			entt::registry& registry = scene->GetRegistry();
-			entt::basic_view view = registry.view<Transform, Material>();
-
-			for (entt::entity entity : view)
-			{
-				Transform& transform = view.get<Transform>(entity);
-				std::shared_ptr<MaterialData>& mat = view.get<Material>(entity).data;
-
-				// Ensure GPU buffers for mesh
-				MeshBufferData& meshData = GetOrCreateMeshBuffers(mat->mesh);
-
-				// 1) Push constants (model matrix + hasTexture)
-				PushConstantData pcData{};
-				pcData.model = transform.GetModelMatrix();
-				pcData.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX; // if we have a texture, get its bindless index, otherwise use max default value
-				pcData.hasTexture = mat->albedoMap ? 1.0f : 0.0f; // if we have a texture set the flag for the shader
-				pcData.padA = pcData.padB = 0.0f; // set rest of padding to zeroes
-
-				vkCmdPushConstants(
-					commandBuffers[imageIndex],
-					pipelineLayout,
-					VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-					0,
-					sizeof(PushConstantData),
-					&pcData
-				);
-
-				// 2) Bind vertex + index buffers
-				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer() };
-				VkDeviceSize offsets[] = { 0 };
-				vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(commandBuffers[imageIndex], meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-				// 3) Draw
-				vkCmdDrawIndexed(commandBuffers[imageIndex], meshData.indexCount, 1, 0, 0, 0); 
-			}
+			const auto& mat = view.get<Material>(entity).data;
+			meshToInstanceIndices[mat->mesh].push_back(instanceIndex++);
 		}
 
-		vkCmdEndRenderPass(commandBuffers[imageIndex]);
+		// For each unique mesh, bind once and draw all its instances
+		for (const auto& [meshPtr, indices] : meshToInstanceIndices)
+		{
+			auto& meshData = GetOrCreateMeshBuffers(meshPtr);
 
-		if (vkEndCommandBuffer(commandBuffers[imageIndex]) != VK_SUCCESS)
+			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
+			VkDeviceSize offsets[] = { 0, 0 };
+
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets); // error 1
+			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+			vkCmdDrawIndexed(cmd, meshData.indexCount, static_cast<uint32_t>(indices.size()), 0, 0, 0);
+		}
+
+		vkCmdEndRenderPass(cmd);
+
+		if (vkEndCommandBuffer(cmd) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to record command buffer!");
 		}

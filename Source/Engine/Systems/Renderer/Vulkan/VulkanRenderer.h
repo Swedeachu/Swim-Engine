@@ -18,6 +18,7 @@
 #include "VulkanSyncManager.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanDescriptorManager.h"
+#include "VulkanInstanceBuffer.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -26,7 +27,7 @@ struct GLFWwindow; // if we use GLFW in the future for windowing
 namespace Engine
 {
 
-	struct PushConstantData
+	struct GpuInstanceData
 	{
 		glm::mat4 model;
 		uint32_t textureIndex; // index into bindless texture array
@@ -157,12 +158,19 @@ namespace Engine
 		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
+		void UpdateInstanceBuffer();
 
 		// TODO: sampler and blend mode maps
 		VkSampler defaultSampler = VK_NULL_HANDLE; // assigned from CreateSampler during Init
 		// VkSampler activeSampler;
 
 		std::shared_ptr<Texture2D> missingTexture;
+
+		// TODO: put this somewhere else more logical (probably an instance manager class)
+		// NEW: Instance buffer manager
+		std::unique_ptr<Engine::VulkanInstanceBuffer> instanceBuffer;
+		// NEW: Stores GPU instance data to upload
+		std::vector<GpuInstanceData> cpuInstanceData;
 
 	};
 

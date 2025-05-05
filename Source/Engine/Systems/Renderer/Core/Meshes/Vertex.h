@@ -22,6 +22,7 @@ namespace Engine
       return bindingDescription;
     }
 
+    // Regular Vulkan drawing
     static std::array<VkVertexInputAttributeDescription, 3> GetAttributeDescriptions()
     {
       std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
@@ -45,6 +46,41 @@ namespace Engine
       attributeDescriptions[2].offset = offsetof(Vertex, uv);
 
       return attributeDescriptions;
+    }
+
+    // For Vulkan indexed drawing
+    static std::vector<VkVertexInputAttributeDescription> GetInstanceAttributeDescriptions()
+    {
+      std::vector<VkVertexInputAttributeDescription> instanceAttribs;
+
+      // mat4 model -> 4 vec4s -> locations 3,4,5,6
+      for (uint32_t i = 0; i < 4; ++i)
+      {
+        VkVertexInputAttributeDescription attrib{};
+        attrib.binding = 1;
+        attrib.location = 3 + i;
+        attrib.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attrib.offset = sizeof(glm::vec4) * i;
+        instanceAttribs.push_back(attrib);
+      }
+
+      // textureIndex (uint) -> location 7
+      VkVertexInputAttributeDescription texIndex{};
+      texIndex.binding = 1;
+      texIndex.location = 7;
+      texIndex.format = VK_FORMAT_R32_UINT;
+      texIndex.offset = sizeof(glm::vec4) * 4;
+      instanceAttribs.push_back(texIndex);
+
+      // hasTexture (float) -> location 8
+      VkVertexInputAttributeDescription hasTex{};
+      hasTex.binding = 1;
+      hasTex.location = 8;
+      hasTex.format = VK_FORMAT_R32_SFLOAT;
+      hasTex.offset = sizeof(glm::vec4) * 4 + sizeof(uint32_t);
+      instanceAttribs.push_back(hasTex);
+
+      return instanceAttribs;
     }
 
     // OpenGL attribute setup (to be called after VAO/VBO bind)

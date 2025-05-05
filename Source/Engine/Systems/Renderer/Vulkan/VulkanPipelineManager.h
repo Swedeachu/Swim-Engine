@@ -22,7 +22,7 @@ namespace Engine
 			const std::string& fragShaderPath,
 			VkDescriptorSetLayout uboLayout, // Set 0
 			VkDescriptorSetLayout bindlessTextureLayout, // Set 1
-			const VkVertexInputBindingDescription& bindingDescription,
+			const std::vector<VkVertexInputBindingDescription>& bindingDescriptions, 
 			const std::vector<VkVertexInputAttributeDescription>& attributeDescriptions,
 			uint32_t pushConstantSize
 		);

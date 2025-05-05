@@ -18,8 +18,8 @@ namespace Game
 	// I can gurantee once I correctly implement these optimizations for the Vulkan renderer, things will speed up a ton far beyond out of the box OpenGL.
 	// When that happens, we have deserved the right to remove this copium comment.
 
-	constexpr static bool doStressTest = true;
-	constexpr static bool fullyUniqueCubeMeshes = false; // will definitely need to test with this as true once we have indirect drawing and culling
+	constexpr static bool doStressTest = false; // works well with Vulkan, 144 FPS, small bugs though, like the player cube doesn't render for some reason
+	constexpr static bool fullyUniqueCubeMeshes = false; // breaks the Vulkan renderer entirely, nothing draws, 14 FPS lmao
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just cube meshes (pyramids and spheres)
 

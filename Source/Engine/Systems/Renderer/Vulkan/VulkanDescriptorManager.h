@@ -25,6 +25,9 @@ namespace Engine
 		void CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount);
 		void UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo);
 		VkDescriptorSet GetPerFrameDescriptorSet(uint32_t frameIndex) const;
+		void UpdatePerFrameInstanceBuffer(uint32_t frameIndex, const void* data, size_t size);
+		// NEW: Adds SSBO (instance buffer) binding to per-frame descriptor sets
+		void CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers);
 
 		// Bindless setup
 		void CreateBindlessLayout();
@@ -38,6 +41,11 @@ namespace Engine
 
 		VkDescriptorSet GetBindlessSet() const { return bindlessDescriptorSet; }
 		VkDescriptorSetLayout GetBindlessLayout() const { return bindlessSetLayout; }
+
+		VulkanBuffer* GetInstanceBufferForFrame(uint32_t frameIndex) const
+		{
+			return perFrameInstanceBuffers.at(frameIndex).get();
+		}
 
 		void Cleanup();
 
@@ -59,6 +67,12 @@ namespace Engine
 		// Per-frame uniform buffers and descriptor sets
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameUBOs;
 		std::vector<VkDescriptorSet> perFrameDescriptorSets;
+
+		// NEW: Per-frame instance SSBOs
+		std::vector<std::unique_ptr<VulkanBuffer>> perFrameInstanceBuffers;
+
+		// NEW: For tracking instance SSBO descriptor sets per frame (optional)
+		std::vector<VkDescriptorSet> perFrameDescriptorSets_InstanceBuffer;
 
 	};
 

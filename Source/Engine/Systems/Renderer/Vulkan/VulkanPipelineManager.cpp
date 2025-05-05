@@ -136,7 +136,7 @@ namespace Engine
     const std::string& fragShaderPath,
     VkDescriptorSetLayout uboLayout, // Set 0
     VkDescriptorSetLayout bindlessTextureLayout, // Set 1
-    const VkVertexInputBindingDescription& bindingDescription,
+    const std::vector<VkVertexInputBindingDescription>& bindingDescriptions, // updated from single binding
     const std::vector<VkVertexInputAttributeDescription>& attributeDescriptions,
     uint32_t pushConstantSize
   )
@@ -164,8 +164,8 @@ namespace Engine
     // Vertex Input
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
@@ -182,8 +182,8 @@ namespace Engine
     viewportState.scissorCount = 1;
 
     VkDynamicState dynamicStates[] = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
+      VK_DYNAMIC_STATE_VIEWPORT,
+      VK_DYNAMIC_STATE_SCISSOR
     };
 
     VkPipelineDynamicStateCreateInfo dynamicState{};
@@ -233,8 +233,8 @@ namespace Engine
 
     // Combined descriptor sets: set 0 = UBO, set 1 = bindless textures
     std::array<VkDescriptorSetLayout, 2> layouts = {
-        uboLayout,
-        bindlessTextureLayout
+      uboLayout,
+      bindlessTextureLayout
     };
 
     // Pipeline Layout
