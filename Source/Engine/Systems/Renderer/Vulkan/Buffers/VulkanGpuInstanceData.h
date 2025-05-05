@@ -18,4 +18,12 @@ namespace Engine
 		float padE;              //  4 -> Total = 96 bytes
 	};
 
+	struct InstanceMeta
+	{
+		uint32_t instanceCount;
+		uint32_t padA;
+		uint32_t padB;
+		uint32_t padC;
+	};
+
 }

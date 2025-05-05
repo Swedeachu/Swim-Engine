@@ -156,7 +156,7 @@ namespace Engine
 		);
 
 		// Enable culled rendering
-		indexDraw->SetUseCulledDraw(false); 
+		// indexDraw->SetUseCulledDraw(true); 
 
 		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
@@ -369,7 +369,7 @@ namespace Engine
 		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		uint32_t totalInstances = indexDraw->GetInstanceCount();
-		uint32_t groupCount = (totalInstances + 63) / 64; // this is pure magic (I guess to align stuff?)
+		uint32_t groupCount = (totalInstances + 63) / 64; // I guess to align stuff
 
 		uint32_t zero = 0;
 		vkCmdUpdateBuffer(
@@ -381,10 +381,10 @@ namespace Engine
 		);
 
 		// --- Barrier to ensure buffer update is visible to compute shader ---
-		VkMemoryBarrier preComputeBarrier{};                         // NEW
-		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;  // NEW
-		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;  // NEW
-		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;  // NEW
+		VkMemoryBarrier preComputeBarrier{};                         
+		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;  
+		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;  
+		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;  
 
 		vkCmdPipelineBarrier(
 			cmd,
@@ -396,10 +396,8 @@ namespace Engine
 			0, nullptr
 		);
 
-
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineManager->GetComputePipeline());
 
-		// fine, cry about it and just take it as a ref, as it would not let me inline the function call like I did with GetComputePipelineLayout()
 		VkDescriptorSet computeSet = descriptorManager->GetComputeDescriptorSet();
 
 		vkCmdBindDescriptorSets(
@@ -414,8 +412,7 @@ namespace Engine
 		vkCmdDispatch(cmd, groupCount, 1, 1);
 
 		// --- Barrier to ensure compute writes visible to graphics pipeline ---
-		
-		VkMemoryBarrier postComputeBarrier{};                        // MODIFIED
+		VkMemoryBarrier postComputeBarrier{};                        
 		postComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 		postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		postComputeBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;

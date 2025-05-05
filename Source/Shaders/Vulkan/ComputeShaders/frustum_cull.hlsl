@@ -54,35 +54,35 @@ bool IsVisible(float3 centerVS)
   float zNear = camParams.z;
   float zFar = camParams.w;
 
-  // Frustum test assumes camera looks down -Z (right-handed NDC)
-  if (centerVS.z <= 0.0f) { return false; }
+  // Right-handed: camera looks down -Z
+  float z = -centerVS.z; // Flip to make depth positive
+
+  if (z < zNear || z > zFar) { return false; }
 
   float halfTanX = tan(fovX * 0.5f);
   float halfTanY = tan(fovY * 0.5f);
 
-  if (abs(centerVS.x) > centerVS.z * halfTanX) { return false; }
-  if (abs(centerVS.y) > centerVS.z * halfTanY) { return false; }
+  if (abs(centerVS.x) > z * halfTanX) { return false; }
+  if (abs(centerVS.y) > z * halfTanY) { return false; }
 
-  return centerVS.z >= zNear && centerVS.z <= zFar;
+  return true;
 }
 
 // === Entry Point ===
 [numthreads(64, 1, 1)]
 void main(uint3 DTid : SV_DispatchThreadID)
 {
-  // Debug write: force index 0 to be nonzero
-  // drawCount.Store(0, asuint(69420));
-
   uint index = DTid.x;
   if (index >= instanceCount) { return; }
 
   GpuInstanceData data = instanceBuffer[index];
 
   // Compute world-space center, then view-space
+  // This is hard coded and suspicous
   float4 centerWS = mul(data.model, float4(0, 0, 0, 1));
   float4 centerVS = mul(view, centerWS);
 
-  if (!IsVisible(centerVS.xyz)) { return; }
+  // if (!IsVisible(centerVS.xyz)) { return; } // literally nothing renders with this uncommented
 
   uint visibleIndex;
   drawCount.InterlockedAdd(0, 1, visibleIndex);

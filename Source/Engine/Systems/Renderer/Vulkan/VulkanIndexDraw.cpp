@@ -66,7 +66,7 @@ namespace Engine
 
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
-		// Resize to zero keeps memory and capacity intact
+		// Clear CPU-side collections but preserve capacity
 		cpuInstanceData.resize(0);
 		instanceBatches.resize(0);
 
@@ -92,10 +92,11 @@ namespace Engine
 			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 			instance.padA = instance.padB = 0.0f;
+			instance.meshIndex = mesh->meshBufferData->GetMeshID();
+			instance.padC = instance.padD = 0.0f;
 
 			cpuInstanceData.push_back(instance);
 
-			// Fast path: track instance range per mesh with single lookup
 			auto& range = rangeMap[mesh];
 			if (range.count == 0)
 			{
@@ -106,16 +107,30 @@ namespace Engine
 			instanceIndex++;
 		}
 
-		// === Flatten into a linear batch array for fast drawing ===
+		// === Flatten into linear draw batch for fast draw ===
 		instanceBatches.reserve(rangeMap.size());
 		for (auto& [mesh, range] : rangeMap)
 		{
 			instanceBatches.emplace_back(mesh, range);
 		}
 
-		// === Upload CPU instance buffer to GPU ===
+		// === Upload per-instance data to GPU for rendering === 
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+
+		// === Upload instance count for compute shader (if culling is used) ===
+		if (!useCulledDraw) return;
+
+		InstanceMeta meta{};
+		meta.instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
+
+		void* mappedPtr = instanceMetaBuffer->GetMappedPointer();
+		if (mappedPtr == nullptr)
+		{
+			throw std::runtime_error("Instance meta buffer is not mapped.");
+		}
+
+		memcpy(mappedPtr, &meta, sizeof(InstanceMeta));
 	}
 
 	inline MeshBufferData& VulkanIndexDraw::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
