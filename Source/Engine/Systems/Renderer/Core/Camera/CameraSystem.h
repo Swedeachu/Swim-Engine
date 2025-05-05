@@ -9,8 +9,9 @@ namespace Engine
 
 	struct CameraUBO
 	{
-		glm::mat4 view;
-		glm::mat4 proj;
+		glm::mat4 view;   // 64 bytes
+		glm::mat4 proj;   // 64 bytes
+		glm::vec4 camParams; // 16 bytes: (fovX, fovY, zNear, zFar)
 	};
 
 	// this code was thrown together very quickly, but honestly a camera should just be using the premade transform component 

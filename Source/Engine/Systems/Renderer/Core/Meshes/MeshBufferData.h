@@ -21,11 +21,16 @@ namespace Engine
 		// Count of indices for rendering
 		uint32_t indexCount = 0;
 
+		// ID of the mesh used in the GPU
+		uint32_t meshID = UINT32_MAX;
+
 		GLuint GetGLVAO() const
 		{
 			if (glBuffer) { return glBuffer->GetVAO(); }
 			return 0;
 		}
+
+		uint32_t GetMeshID() const { return meshID; }
 
 		GLuint GetIndexCount() const { return indexCount; }
 

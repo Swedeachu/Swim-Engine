@@ -34,6 +34,18 @@ namespace Engine
 		// Optionally expose mapped pointer for manual writes
 		void* GetMappedPointer() const { return mappedPtr; }
 
+		bool IsValid() const { return buffer != VK_NULL_HANDLE && memory != VK_NULL_HANDLE; }
+
+		template<typename T>
+		void ReadData(T* dst, size_t count = 1, size_t offsetBytes = 0) const
+		{
+			if (!mappedPtr)
+			{
+				throw std::runtime_error("Buffer is not mapped!");
+			}
+			memcpy(dst, static_cast<const char*>(mappedPtr) + offsetBytes, count * sizeof(T));
+		}
+
 	private:
 
 		VkDevice device;

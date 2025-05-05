@@ -1,21 +1,26 @@
-// Register set 0, binding 0
+[[vk::binding(0, 0)]]
 cbuffer CameraUBO : register(b0, space0)
 {
   float4x4 view;
   float4x4 proj;
+  float4 camParams; // (fovX, fovY, zNear, zFar)
 };
 
-// Single SSBO for all per-instance data
 struct GpuInstanceData
 {
   float4x4 model;
-  uint textureIndex;
-  float hasTexture;
-  float padA;
-  float padB;
+  uint     textureIndex;
+  float    hasTexture;
+  float    padA;
+  float    padB;
+  uint     meshIndex;
+  float    padC;
+  float    padD;
+  float    padE;
 };
 
-StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0); // Set 0, Binding 1
+[[vk::binding(1, 0)]]
+StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);
 
 struct VSInput
 {

@@ -7,12 +7,15 @@ namespace Engine
 
 	struct GpuInstanceData
 	{
-		glm::mat4 model;
-		uint32_t textureIndex; // index into bindless texture array
-		float hasTexture; // kinda scuffed flag, might be used for transparency later beyond just a "use texture" flag
-		// Pad to 16 bytes
-		float padA;
-		float padB;
+		glm::mat4 model;         // 64 bytes
+		uint32_t textureIndex;   //  4
+		float hasTexture;        //  4
+		float padA;              //  4
+		float padB;              //  4
+		uint32_t meshIndex;      //  4
+		float padC;              //  4
+		float padD;              //  4
+		float padE;              //  4 -> Total = 96 bytes
 	};
 
 }

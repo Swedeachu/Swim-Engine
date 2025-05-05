@@ -27,6 +27,9 @@ namespace Engine
     // Retrieves a mesh by name
     std::shared_ptr<Mesh> GetMesh(const std::string& name) const;
 
+    uint32_t GetMeshID(const std::shared_ptr<Mesh>& mesh) const;
+    std::shared_ptr<Mesh> GetMeshByID(uint32_t id) const;
+
     // Removes a mesh by name. Returns true if successful.
     bool RemoveMesh(const std::string& name);
 
@@ -45,6 +48,11 @@ namespace Engine
     bool vulkanDevicesCached = false;
     VkDevice cachedDevice = VK_NULL_HANDLE;
     VkPhysicalDevice cachedPhysicalDevice = VK_NULL_HANDLE;
+
+    // Maps for mesh indexing
+    std::unordered_map<std::shared_ptr<Mesh>, uint32_t> meshToID;
+    std::unordered_map<uint32_t, std::shared_ptr<Mesh>> idToMesh;
+    uint32_t nextMeshID = 0; 
 
   };
 

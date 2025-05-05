@@ -35,6 +35,11 @@ namespace Engine
 			return perFrameBuffers;
 		}
 
+		VulkanBuffer* GetBufferRaw(uint32_t frameIndex) const
+		{
+			return perFrameBuffers[frameIndex].get();
+		}
+
 		void Cleanup();
 
 	private:

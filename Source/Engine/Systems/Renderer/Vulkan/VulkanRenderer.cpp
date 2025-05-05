@@ -71,19 +71,18 @@ namespace Engine
 		Engine::TexturePool& texturePool = TexturePool::GetInstance();
 
 		texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
-		unsigned int texCount = texturePool.GetTextureCount(); // Then get the value we counted.
-		// we now need to allign to the closest greater value (if 100 textures than sets it to 128, 200 then set it to 256, etc)
+		unsigned int texCount = texturePool.GetTextureCount();
 		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount);
 
-		constexpr uint32_t MAX_SETS = 1024; // Not sure what a good number for this is, or if it matters much yet.
-		constexpr uint64_t SSBO_SIZE = 10240; // Not sure what this number should be other than something big.
+		constexpr uint32_t MAX_SETS = 1024;
+		constexpr uint64_t SSBO_SIZE = 10240;
 
 		// Make the descriptor manager, its ctor creates the layout and pool
 		descriptorManager = std::make_unique<VulkanDescriptorManager>(
 			device,
-			MAX_SETS, 
-			maxBindlessTextureCount, // This value greatly impacts performance due to the binding we do each frame.
-			SSBO_SIZE // How much memory we have in our SSBOs for indexed drawing and other things of that nature.
+			MAX_SETS,
+			maxBindlessTextureCount,
+			SSBO_SIZE
 		);
 
 		// Create bindless descriptor layout and set
@@ -93,75 +92,88 @@ namespace Engine
 
 		// Make the default sampler for the fragment shader to use
 		defaultSampler = CreateSampler();
-		// Shader needs the sampler too for the textures
 		descriptorManager->SetBindlessSampler(defaultSampler);
 
 		// Set up buffer and UBO for camera with double buffering
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
-		constexpr int MAX_EXPECTED_INSTANCES = 10240; // Probably will need a bigger number
-		
-		// Create the index draw object which stores out instanced buffers and does our indexed drawing logic and caching
+		constexpr int MAX_EXPECTED_INSTANCES = 10240;
+
+		// Create the index draw object which stores our instanced buffers and does our indexed drawing logic and caching
 		indexDraw = std::make_unique<VulkanIndexDraw>(
 			device,
 			physicalDevice,
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
+		indexDraw->CreateCullOutputBuffers(MAX_EXPECTED_INSTANCES);
 
-		// Update descriptor layout to include instance SSBO
+		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
 
-		// Now we can make our pipeline with the default shaders
-
+		// === Graphics pipeline creation ===
 		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
 		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout();
 
-		// === Vertex and instance input setup ===
 		auto vertexAttribs = Vertex::GetAttributeDescriptions();
 		auto instanceAttribs = Vertex::GetInstanceAttributeDescriptions();
 
-		// Merge both into one array
 		std::vector<VkVertexInputAttributeDescription> allAttribs;
 		allAttribs.insert(allAttribs.end(), vertexAttribs.begin(), vertexAttribs.end());
 		allAttribs.insert(allAttribs.end(), instanceAttribs.begin(), instanceAttribs.end());
 
-		// Hardcoded for now: only two bindings (vertex and instance)
 		std::array<VkVertexInputBindingDescription, 2> bindings{};
-		bindings[0] = Vertex::GetBindingDescription(); // binding = 0 for vertex data
-		bindings[1].binding = 1;                       // binding = 1 for instance data
+		bindings[0] = Vertex::GetBindingDescription();
+		bindings[1].binding = 1;
 		bindings[1].stride = sizeof(GpuInstanceData);
 		bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-		// This is REALLY messy and hardcoded and later on we will have a much better pipeline for which shaders to use on per object and full screen VFX.
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex_instanced.spv",
 			"Shaders\\FragmentShaders\\fragment_instanced.spv",
 			layout,
 			bindlessLayout,
-			std::vector<VkVertexInputBindingDescription>{ bindings.begin(), bindings.end() }, // convert array to vector
+			std::vector<VkVertexInputBindingDescription>{ bindings.begin(), bindings.end() },
 			allAttribs,
 			sizeof(GpuInstanceData)
 		);
 
-		// Initialize command manager with correct graphics queue family index from the device manager
+		// === Compute pipeline ===
+
+		// Set up compute descriptor bindings
+		descriptorManager->CreateFrustumCullComputeDescriptorSet(
+			*descriptorManager->GetPerFrameUBO(0),                          // b0: Camera UBO
+			*indexDraw->GetInstanceMetaBuffer(),                            // b1: InstanceMeta UBO 
+			*indexDraw->GetInstanceBuffer()->GetPerFrameBuffers()[0].get(), // t0: Instance SSBO
+			*indexDraw->GetVisibleModelBuffer(),                            // u0
+			*indexDraw->GetVisibleDataBuffer(),                             // u1
+			*indexDraw->GetDrawCountBuffer()                                // u2
+		);
+
+		pipelineManager->CreateComputePipeline(
+			"Shaders\\ComputeShaders\\frustum_cull.spv",
+			descriptorManager->GetComputeSetLayout()
+		);
+
+		// Enable culled rendering
+		indexDraw->SetUseCulledDraw(false); 
+
+		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
 		commandManager = std::make_unique<VulkanCommandManager>(
 			device,
 			graphicsQueueFamilyIndex
 		);
 
-		// Allocate the command buffers now that we have the framebuffer count
 		commandManager->AllocateCommandBuffers(static_cast<uint32_t>(swapChainManager->GetFramebuffers().size()));
 
-		// Sync manager is for fencing between frames with the swap chain
+		// Fencing and sync
 		syncManager = std::make_unique<VulkanSyncManager>(
 			device,
 			MAX_FRAMES_IN_FLIGHT
 		);
 
-		// Finally load textures and set a default missing texture.
-		// We are in big trouble if the missing texture is null, we should probably procedurally generate a missing texture in code.
+		// Load all textures and set a fallback missing texture
 		texturePool.LoadAllRecursively();
 		missingTexture = texturePool.GetTexture2DLazy("mart");
 
@@ -327,6 +339,15 @@ namespace Engine
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();
 
+		// Compute horizontal/vertical FOV from projection matrix
+		float fovY = 2.0f * atanf(1.0f / ubo.proj[1][1]); // from perspective projection matrix
+		float aspect = ubo.proj[1][1] / ubo.proj[0][0];
+		float fovX = 2.0f * atanf(tanf(fovY * 0.5f) * aspect);
+
+		auto& camera = cameraSystem->GetCamera();
+
+		ubo.camParams = glm::vec4(fovX, fovY, camera.GetNearClip(), camera.GetFarClip());
+
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
 
@@ -335,7 +356,7 @@ namespace Engine
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-		const auto& commandBuffers = commandManager->GetCommandBuffers();
+		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
 		VkCommandBuffer cmd = commandBuffers[imageIndex];
 
 		if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS)
@@ -343,12 +364,81 @@ namespace Engine
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
 
-		// Clear color + depth
+		// === Dispatch Compute Shader for Frustum Culling ===
+		UpdateUniformBuffer();
+		indexDraw->UpdateInstanceBuffer(currentFrame);
+
+		uint32_t totalInstances = indexDraw->GetInstanceCount();
+		uint32_t groupCount = (totalInstances + 63) / 64; // this is pure magic (I guess to align stuff?)
+
+		uint32_t zero = 0;
+		vkCmdUpdateBuffer(
+			cmd,
+			indexDraw->GetDrawCountBuffer()->GetBuffer(),
+			0,
+			sizeof(uint32_t),
+			&zero
+		);
+
+		// --- Barrier to ensure buffer update is visible to compute shader ---
+		VkMemoryBarrier preComputeBarrier{};                         // NEW
+		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;  // NEW
+		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;  // NEW
+		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;  // NEW
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			1, &preComputeBarrier,
+			0, nullptr,
+			0, nullptr
+		);
+
+
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineManager->GetComputePipeline());
+
+		// fine, cry about it and just take it as a ref, as it would not let me inline the function call like I did with GetComputePipelineLayout()
+		VkDescriptorSet computeSet = descriptorManager->GetComputeDescriptorSet();
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_COMPUTE,
+			pipelineManager->GetComputePipelineLayout(),
+			0, 1,
+			&computeSet,
+			0, nullptr
+		);
+
+		vkCmdDispatch(cmd, groupCount, 1, 1);
+
+		// --- Barrier to ensure compute writes visible to graphics pipeline ---
+		
+		VkMemoryBarrier postComputeBarrier{};                        // MODIFIED
+		postComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		postComputeBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+			0,
+			1, &postComputeBarrier,
+			0, nullptr,
+			0, nullptr
+		);
+
+		// === Read back culled instance data from GPU ===
+		indexDraw->ReadbackCulledInstanceData();
+
+		// === Begin Render Pass ===
 		std::array<VkClearValue, 2> clearValues{};
 		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 		clearValues[1].depthStencil = { 1.0f, 0 };
 
-		const auto& framebuffers = swapChainManager->GetFramebuffers();
+		const std::vector<VkFramebuffer>& framebuffers = swapChainManager->GetFramebuffers();
 		VkExtent2D extent = swapChainManager->GetExtent();
 
 		VkRenderPassBeginInfo renderPassInfo{};
@@ -361,26 +451,20 @@ namespace Engine
 
 		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// Dynamic state
+		// Dynamic viewport + scissor
 		VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
 		VkRect2D scissor{ {0, 0}, extent };
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		// Bind pipeline
+		// Bind graphics pipeline
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
 
-		// Update the buffers (UBO + SSBO for indexed drawing)
-		UpdateUniformBuffer();
-		indexDraw->UpdateInstanceBuffer(currentFrame);
-
-		// Bind descriptor sets
+		// Descriptor sets for graphics
 		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
 
-		std::array<VkDescriptorSet, 2> sets = {
-			globalSet, bindlessSet
-		};
+		std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
 
 		vkCmdBindDescriptorSets(
 			cmd,
@@ -393,7 +477,7 @@ namespace Engine
 			nullptr
 		);
 
-		// Draw it all indexed now finally
+		// === Draw everything ===
 		indexDraw->DrawIndexed(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
