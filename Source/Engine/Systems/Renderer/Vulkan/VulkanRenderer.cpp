@@ -1,22 +1,8 @@
 #include "PCH.h"
 #include "VulkanRenderer.h"
 #include "Engine/SwimEngine.h"
-
-#include <set>
-#include <cstdint>
-#include <limits>
-#include <algorithm>
-#include <fstream>
-#include <filesystem>
-
-#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
-#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
-#include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
-#include "Buffers/VulkanGpuInstanceData.h"
-
-#include "Library/glm/gtc/matrix_transform.hpp"
 
 // Validation layers for debugging
 #ifdef _DEBUG

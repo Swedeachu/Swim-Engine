@@ -16,24 +16,34 @@ namespace Engine
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
+
+		cpuInstanceData.reserve(MAX_EXPECTED_INSTANCES);
+		instanceBatches.reserve(64); // reasonable default for most scenes
 	}
 
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
-		cpuInstanceData.clear();
-		meshToInstanceOffsets.clear(); // Reset per frame
+		// Resize to zero keeps memory and capacity intact
+		cpuInstanceData.resize(0);
+		instanceBatches.resize(0);
 
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		auto& registry = scene->GetRegistry();
 		auto view = registry.view<Transform, Material>();
 
+		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
+		rangeMap.reserve(64); // avoid rehashing during population
+
 		uint32_t instanceIndex = 0;
+
+		// === Populate instance data and group by mesh ===
 		for (auto entity : view)
 		{
 			const auto& transform = view.get<Transform>(entity);
 			const auto& mat = view.get<Material>(entity).data;
 			const auto& mesh = mat->mesh;
 
+			// Build the GPU-side instance data struct
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
 			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
@@ -42,19 +52,25 @@ namespace Engine
 
 			cpuInstanceData.push_back(instance);
 
-			// First time seeing this mesh, store starting index
-			if (meshToInstanceOffsets.find(mesh) == meshToInstanceOffsets.end())
+			// Fast path: track instance range per mesh with single lookup
+			auto& range = rangeMap[mesh];
+			if (range.count == 0)
 			{
-				meshToInstanceOffsets[mesh].firstInstance = instanceIndex;
+				range.firstInstance = instanceIndex;
 			}
-
-			// Always increment count
-			meshToInstanceOffsets[mesh].count++;
+			range.count++;
 
 			instanceIndex++;
 		}
 
-		// Upload all instance data to GPU for current frame
+		// === Flatten into a linear batch array for fast drawing ===
+		instanceBatches.reserve(rangeMap.size());
+		for (auto& [mesh, range] : rangeMap)
+		{
+			instanceBatches.emplace_back(mesh, range);
+		}
+
+		// === Upload CPU instance buffer to GPU ===
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 	}
@@ -82,35 +98,18 @@ namespace Engine
 
 	void VulkanIndexDraw::DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		// Bind instance buffer at binding 1
 		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
-		VkDeviceSize instanceOffset = 0;
+		VkDeviceSize offsets[] = { 0, 0 };
 
-		// Group entities by mesh to minimize pipeline bindings
-		std::unordered_map<std::shared_ptr<Mesh>, std::vector<uint32_t>> meshToInstanceIndices;
-
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
-
-		uint32_t instanceIndex = 0;
-		for (auto entity : view)
+		// Iterate through batches and draw each mesh with instancing
+		for (const auto& [mesh, range] : instanceBatches)
 		{
-			const auto& mat = view.get<Material>(entity).data;
-			meshToInstanceIndices[mat->mesh].push_back(instanceIndex++);
-		}
-
-		// For each unique mesh, bind once and draw all its instances
-		for (const auto& [meshPtr, range] : meshToInstanceOffsets)
-		{
-			auto& meshData = GetOrCreateMeshBuffers(meshPtr);
+			auto& meshData = GetOrCreateMeshBuffers(mesh);
 
 			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
-			VkDeviceSize offsets[] = { 0, 0 };
 
 			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
 			vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
 		}
 	}
@@ -125,7 +124,7 @@ namespace Engine
 
 		// I guess empty this stuff out too
 		cpuInstanceData.clear();
-		meshToInstanceOffsets.clear();
+		instanceBatches.clear();
 	}
 
 }

@@ -40,7 +40,8 @@ namespace Engine
 			uint32_t count = 0;
 		};
 
-		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> meshToInstanceOffsets;
+		// Sorted per-frame instance draw batches
+		std::vector<std::pair<std::shared_ptr<Mesh>, MeshInstanceRange>> instanceBatches;
 
 	};
 

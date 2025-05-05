@@ -1,25 +1,15 @@
 #pragma once
 
-#include <optional>
-#include <stdexcept>
-#include <functional>
-#include <fstream>
-#include <unordered_map>
-#include <memory>
-#include <vector>
-#include "Buffers/VulkanBuffer.h"
-#include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
-#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
-#include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSwapChain.h"
 #include "VulkanCommandManager.h"
 #include "VulkanSyncManager.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanDescriptorManager.h"
-#include "Buffers/VulkanInstanceBuffer.h"
 #include "VulkanIndexDraw.h"
+#include "Buffers/VulkanBuffer.h"
+#include "Buffers/VulkanInstanceBuffer.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
