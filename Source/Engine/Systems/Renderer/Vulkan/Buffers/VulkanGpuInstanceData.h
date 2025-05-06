@@ -5,18 +5,20 @@
 namespace Engine
 {
 
-	struct GpuInstanceData
-	{
-		glm::mat4 model;         // 64 bytes
-		uint32_t textureIndex;   //  4
-		float hasTexture;        //  4
-		float padA;              //  4
-		float padB;              //  4
-		uint32_t meshIndex;      //  4
-		float padC;              //  4
-		float padD;              //  4
-		float padE;              //  4 -> Total = 96 bytes
-	};
+  struct alignas(16) GpuInstanceData
+  {
+    glm::mat4 model;      ///< 64 B – world matrix
+
+    /* Local-space bounding box ------------------------------------------ */
+    glm::vec4 aabbMin;    ///< 16 B – xyz = min, w unused
+    glm::vec4 aabbMax;    ///< 16 B – xyz = max, w unused
+
+    /* Rendering miscellany --------------------------------------------- */
+    uint32_t  textureIndex; ///< bindless index or UINT32_MAX
+    float     hasTexture;   ///< 1 = yes, 0 = no (can be alpha value later)     
+    uint32_t  meshIndex;    ///< ID -> MeshPool
+    uint32_t  pad;          ///< keeps struct multiple-of-16
+  };
 
 	struct InstanceMeta
 	{

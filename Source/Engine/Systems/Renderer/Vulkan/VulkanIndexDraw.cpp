@@ -89,11 +89,14 @@ namespace Engine
 			// Build the GPU-side instance data struct
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
+
+			instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
+			instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
+
 			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-			instance.padA = instance.padB = 0.0f;
 			instance.meshIndex = mesh->meshBufferData->GetMeshID();
-			instance.padC = instance.padD = 0.0f;
+			instance.pad = 0u;
 
 			cpuInstanceData.push_back(instance);
 
