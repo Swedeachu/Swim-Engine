@@ -336,17 +336,33 @@ namespace Engine
 	void VulkanRenderer::UpdateUniformBuffer()
 	{
 		CameraUBO ubo{};
+
+		/* 1)  View & projection matrices  */
 		ubo.view = cameraSystem->GetViewMatrix();
-		ubo.proj = cameraSystem->GetProjectionMatrix();
+		ubo.proj = cameraSystem->GetProjectionMatrix();  // already has the Vulkan Y-flip
 
-		// Compute horizontal/vertical FOV from projection matrix
-		float fovY = 2.0f * atanf(1.0f / ubo.proj[1][1]); // from perspective projection matrix
-		float aspect = ubo.proj[1][1] / ubo.proj[0][0];
-		float fovX = 2.0f * atanf(tanf(fovY * 0.5f) * aspect);
+		/* 2)  tan(FOV / 2) comes straight from the perspective matrix.
+						proj[0][0] = 1 / tan(FOVx/2)
+						proj[1][1] = 1 / tan(FOVy/2)   (negative after the Y-flip) 
+		*/
+		const float tanHalfFovX = 1.0f / ubo.proj[0][0];
+		const float tanHalfFovY = 1.0f / std::abs(ubo.proj[1][1]); // keep it positive
 
-		auto& camera = cameraSystem->GetCamera();
+		/* 3)  Clip planes  */
+		const auto& camera = cameraSystem->GetCamera();
 
-		ubo.camParams = glm::vec4(fovX, fovY, camera.GetNearClip(), camera.GetFarClip());
+		/* 4)  Pack everything into camParams
+						x : tan(FOVx / 2)
+						y : tan(FOVy / 2)
+						z : z-near
+						w : z-far   
+		*/
+		ubo.camParams = glm::vec4(
+			tanHalfFovX,
+			tanHalfFovY,
+			camera.GetNearClip(),
+			camera.GetFarClip()
+		);
 
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
@@ -369,8 +385,9 @@ namespace Engine
 		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		uint32_t totalInstances = indexDraw->GetInstanceCount();
-		uint32_t groupCount = (totalInstances + 63) / 64; // I guess to align stuff
+		uint32_t groupCount = (totalInstances + 63) / 64; // GPU "threads"
 
+		// === Zero the draw count buffer on GPU ===
 		uint32_t zero = 0;
 		vkCmdUpdateBuffer(
 			cmd,
@@ -380,11 +397,11 @@ namespace Engine
 			&zero
 		);
 
-		// --- Barrier to ensure buffer update is visible to compute shader ---
-		VkMemoryBarrier preComputeBarrier{};                         
-		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;  
-		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;  
-		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;  
+		// --- Barrier to ensure drawCount write is visible to compute shader ---
+		VkMemoryBarrier preComputeBarrier{};
+		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
 		vkCmdPipelineBarrier(
 			cmd,
@@ -412,7 +429,7 @@ namespace Engine
 		vkCmdDispatch(cmd, groupCount, 1, 1);
 
 		// --- Barrier to ensure compute writes visible to graphics pipeline ---
-		VkMemoryBarrier postComputeBarrier{};                        
+		VkMemoryBarrier postComputeBarrier{};
 		postComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 		postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		postComputeBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;

@@ -24,6 +24,8 @@ namespace Engine
 
 		void ReadbackCulledInstanceData();
 
+		void ZeroDrawCount();
+
 		void CleanUp();
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }

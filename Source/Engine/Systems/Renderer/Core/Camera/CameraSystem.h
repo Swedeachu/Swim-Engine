@@ -54,7 +54,7 @@ namespace Engine
 		glm::vec3 GetRotationEuler() const
 		{
 			glm::vec3 euler = glm::degrees(glm::eulerAngles(rotation));
-			return euler; 
+			return euler;
 		}
 
 		void SetFOV(float f) { fov = f; MarkProjDirty(); }
@@ -93,7 +93,7 @@ namespace Engine
 			return projMatrix;
 		}
 	};
-	
+
 	class CameraSystem : public Machine
 	{
 
@@ -105,8 +105,9 @@ namespace Engine
 		void Update(double dt) override;
 		void RefreshAspect();
 
-		const glm::mat4& GetViewMatrix() const;
-		const glm::mat4& GetProjectionMatrix() const;
+		const glm::mat4& GetViewMatrix() const { return camera.GetViewMatrix(); }
+
+		const glm::mat4& GetProjectionMatrix() const { return camera.GetProjectionMatrix(); }
 
 		// By reference so you can't set the camera to null or any craziness
 		Camera& GetCamera() { return camera; }

@@ -17,7 +17,7 @@ struct GpuInstanceData
   float    hasTexture;   // 4
   uint     meshIndex;    // 4
   uint     pad;          // 4
-};                         // = 128
+};                       // = 128
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);

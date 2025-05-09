@@ -249,7 +249,10 @@ namespace Engine
 		}
 		instanceCountCulled = *drawCountPtr;
 
-		if (instanceCountCulled == 0) { return; } 
+		if (instanceCountCulled == 0)
+		{
+			return;
+		}
 
 		// === Read visibleDataBuffer — each entry is a uvec4 (16 bytes) ===
 		const glm::uvec4* rawData = static_cast<const glm::uvec4*>(visibleDataBuffer->GetMappedPointer());
@@ -259,7 +262,18 @@ namespace Engine
 		}
 
 		culledVisibleData.resize(instanceCountCulled);
-		memcpy(culledVisibleData.data(), rawData, instanceCountCulled * sizeof(glm::uvec4));
+		memcpy(culledVisibleData.data(), rawData, instanceCountCulled * sizeof(glm::uvec4)); 
+	}
+
+	// This is unused because a naive vollatile write to this on a gpu buffer requires way more fencing and is not worth it for something lazy like this, better to use barriers
+	void VulkanIndexDraw::ZeroDrawCount()
+	{
+		uint32_t* ptr = static_cast<uint32_t*>(drawCountBuffer->GetMappedPointer());
+		if (!ptr)
+		{
+			throw std::runtime_error("drawCountBuffer not mapped");
+		}
+		*ptr = 0;
 	}
 
 	void VulkanIndexDraw::CleanUp()
