@@ -23,6 +23,22 @@ namespace Engine
 		instanceBatches.reserve(64); // reasonable default for most scenes
 	}
 
+	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
+	{
+		indirectCommandBuffers.resize(framesInFlight);
+
+		for (uint32_t i = 0; i < framesInFlight; ++i)
+		{
+			indirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+		}
+	}
+
 	void VulkanIndexDraw::CreateCullOutputBuffers(uint32_t maxInstances)
 	{
 		constexpr VkBufferUsageFlags storageAndVertex =
@@ -65,6 +81,7 @@ namespace Engine
 		);
 	}
 
+	// This actually does CPU culling logic here if that mode is activated
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		// Clear CPU-side collections but preserve capacity
@@ -155,6 +172,38 @@ namespace Engine
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
+		// Indirect drawing stuff now
+		if (useIndirectDrawing)
+		{
+			// Build indirect commands
+			std::vector<VkDrawIndexedIndirectCommand> commands;
+			commands.reserve(instanceBatches.size());
+
+			for (const auto& [mesh, range] : instanceBatches)
+			{
+				auto& meshData = GetOrCreateMeshBuffers(mesh);
+
+				VkDrawIndexedIndirectCommand cmd{};
+				cmd.indexCount = meshData.indexCount;
+				cmd.instanceCount = range.count;
+				cmd.firstIndex = 0;
+				cmd.vertexOffset = 0;
+				cmd.firstInstance = range.firstInstance;
+
+				commands.push_back(cmd);
+			}
+
+			// Write to indirect command buffer
+			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+			indirectBuf.CopyData(commands.data(), commands.size() * sizeof(VkDrawIndexedIndirectCommand));
+
+			currentDrawCount = static_cast<uint32_t>(commands.size());
+		}
+
+		// Below is probably way outdated by now since we are now doing indirect indexed drawing, 
+		// which in that case if we were doing GPU compute culling we would have to write to an SSBO for the commands to use.
+		// Once we get GPU culling we would have to refactor this now very messy class entirely.
+
 		// === Upload instance count for compute shader (only used for GPU culling) ===
 		if (cullMode != CullMode::GPU)
 		{
@@ -202,22 +251,56 @@ namespace Engine
 			return;
 		}
 
-		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
-		VkDeviceSize offsets[] = { 0, 0 };
-
-		// Iterate through batches and draw each mesh with instancing
-		for (const auto& [mesh, range] : instanceBatches)
+		if (useIndirectDrawing)
 		{
-			auto& meshData = GetOrCreateMeshBuffers(mesh);
+			if (currentDrawCount == 0)
+			{
+				return;
+			}
+
+			// Build commands to send all at once for drawing everything with
+			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
+			VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
+			VkDeviceSize offsets[] = { 0, 0 };
+
+			// We use the first mesh in batch to bind vertex/index buffers THIS IS BAD!!!!
+			// Instead of this we should be making batches for each collection of meshes and then drawing indexed indirect with each one
+			const auto& [firstMesh, _] = instanceBatches.front();
+			auto& meshData = GetOrCreateMeshBuffers(firstMesh);
 
 			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
 
 			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-			vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
+
+			vkCmdDrawIndexedIndirect(
+				cmd,
+				indirectBuf,
+				0,
+				currentDrawCount,
+				sizeof(VkDrawIndexedIndirectCommand)
+			);
+		}
+		else
+		{
+			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
+			VkDeviceSize offsets[] = { 0, 0 };
+
+			// Iterate through batches and draw each mesh with instancing
+			for (const auto& [mesh, range] : instanceBatches)
+			{
+				auto& meshData = GetOrCreateMeshBuffers(mesh);
+
+				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
+
+				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+				vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
+			}
 		}
 	}
 
+	// TODO: after fixing gpu culling make this use indirect as well
 	void VulkanIndexDraw::DrawCulledIndexed(uint32_t /*frameIndex*/, VkCommandBuffer cmd)
 	{
 		// Early out if there's nothing to draw

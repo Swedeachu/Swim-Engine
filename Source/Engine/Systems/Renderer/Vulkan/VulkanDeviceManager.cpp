@@ -201,6 +201,7 @@ namespace Engine
 		// --- Enable standard device features ---
 		VkPhysicalDeviceFeatures deviceFeatures{};
 		deviceFeatures.samplerAnisotropy = VK_TRUE;
+		deviceFeatures.multiDrawIndirect = VK_TRUE;
 
 		// --- Enable descriptor indexing features for bindless ---
 		VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};

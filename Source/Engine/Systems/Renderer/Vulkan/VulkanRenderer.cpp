@@ -107,6 +107,14 @@ namespace Engine
 			MAX_FRAMES_IN_FLIGHT
 		);
 		indexDraw->CreateCullOutputBuffers(MAX_EXPECTED_INSTANCES);
+		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
+
+		// Configure culled rendering mode
+		// Debug mode CPU culling: 100 FPS 
+		// Release mode CPU culling: 2000+ FPS
+		// GPU compute shader culling is sadly broken and can't be used yet
+		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
+		indexDraw->SetUseIndirectDrawing(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
@@ -154,12 +162,6 @@ namespace Engine
 			"Shaders\\ComputeShaders\\frustum_cull.spv",
 			descriptorManager->GetComputeSetLayout()
 		);
-
-		// Configure culled rendering mode
-		// Debug mode CPU culling: 100 FPS 
-		// Release mode CPU culling: 2000+ FPS
-		// GPU compute shader culling is sadly broken and can't be used yet
-		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
 
 		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
