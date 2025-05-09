@@ -58,6 +58,7 @@ namespace Engine
 	{
 		if (activeScene)
 		{
+			activeScene->InternalSceneInit();
 			activeScene->Init();
 		}
 
@@ -68,6 +69,7 @@ namespace Engine
 	{
 		if (activeScene)
 		{
+			activeScene->InternalSceneUpdate(dt);
 			activeScene->Update(dt);
 		}
 	}

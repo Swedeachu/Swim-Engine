@@ -6,7 +6,7 @@ cbuffer CameraUBO : register(b0, space0)
 {
   float4x4 view;        // world -> view matrix
   float4x4 proj;        // view -> clip matrix (with Vulkan Y-flip already applied)
-  float4   camParams;   // x = tan(FOVx/2), y = tan(FOVy/2), z = near, w = far
+  float4   camParams;   // (tanHalfFovX, tanHalfFovY, nearClip, farClip)
 };
 
 // === [b1] Instance Meta UBO ===
@@ -56,32 +56,113 @@ RWStructuredBuffer<uint4> visibleData : register(u1, space0);
 [[vk::binding(5, 0)]]
 RWByteAddressBuffer drawCount : register(u2, space0);
 
-// === Simple Frustum Culling Function ===
-// View-cone approximation using AABB center in view space
-bool IsVisible(float4x4 model, float3 aabbMin, float3 aabbMax, float4x4 view, float2 tanFov)
+// === Extract camera position from view matrix ===
+float3 ExtractCameraPositionFromViewMatrix(float4x4 viewMatrix)
 {
-  // Compute AABB center in local space
-  float3 localCenter = 0.5 * (aabbMin + aabbMax);
+  // The inverse of the rotation part of the view matrix
+  float3x3 rotInv = float3x3(
+    viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
+    viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
+    viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
+  );
+
+  // The camera position is -transpose(rotationPart) * translation
+  float3 camPos = -mul(rotInv, float3(viewMatrix[3][0], viewMatrix[3][1], viewMatrix[3][2]));
+  return camPos;
+}
+
+// Debug version - very simple and permissive culling for testing
+bool IsVisibleSimple(float4 localMin, float4 localMax, float4x4 model)
+{
+  // Calculate center point in local space
+  float3 localCenter = (localMin.xyz + localMax.xyz) * 0.5f;
 
   // Transform to world space
-  float4 worldCenter = mul(model, float4(localCenter, 1.0));
+  float3 worldCenter = mul(model, float4(localCenter, 1.0f)).xyz;
 
-  // Transform to view space (camera space)
-  float4 viewPos = mul(view, worldCenter);
+  // Very large radius - almost no culling, just to test pipeline
+  float radius = 1000.0f;
 
-  // Flip Z for Vulkan's convention (forward = negative Z)
-  float zView = -viewPos.z;
+  // Simple distance test
+  float3 camPos = ExtractCameraPositionFromViewMatrix(view);
+  float dist = length(worldCenter - camPos);
 
-  // Cull if behind near plane
-  if (zView < camParams.z) { return false; }
+  // Only cull things very far away
+  return (dist < radius);
+}
 
-  // Frustum cone check: X and Y within angular bounds
-  float maxX = zView * tanFov.x;
-  float maxY = zView * tanFov.y;
+// For debugging - mark everything as visible
+bool IsVisibleAll()
+{
+  return true;
+}
 
-  if (abs(viewPos.x) > maxX) { return false; }
-  if (abs(viewPos.y) > maxY) { return false; }
+// Sphere-based frustum culling that handles camera position and rotation
+bool IsVisibleSphere(float4 localMin, float4 localMax, float4x4 model, float4x4 viewMatrix,
+  float tanHalfFovX, float tanHalfFovY, float nearClip, float farClip)
+{
+  // Calculate the center and radius of a bounding sphere around the AABB
+  float3 localCenter = (localMin.xyz + localMax.xyz) * 0.5f;
+  float3 localExtent = localMax.xyz - localMin.xyz;
+  float localRadius = length(localExtent) * 0.5f;
 
+  // Transform center to world space
+  float3 worldCenter = mul(model, float4(localCenter, 1.0f)).xyz;
+
+  // Get scale factor from model matrix (approximate)
+  float3 scaleX = float3(model[0][0], model[0][1], model[0][2]);
+  float3 scaleY = float3(model[1][0], model[1][1], model[1][2]);
+  float3 scaleZ = float3(model[2][0], model[2][1], model[2][2]);
+
+  float maxScale = max(length(scaleX), max(length(scaleY), length(scaleZ)));
+  float worldRadius = localRadius * maxScale;
+
+  // Transform center to view space
+  float3 viewCenter = mul(viewMatrix, float4(worldCenter, 1.0f)).xyz;
+
+  // Check if behind near plane accounting for radius
+  if (viewCenter.z - worldRadius > nearClip)
+  {
+    return false;
+  }
+
+  // Check if beyond far plane accounting for radius
+  if (viewCenter.z + worldRadius < -farClip)
+  {
+    return false;
+  }
+
+  // For objects intersecting the near plane, we need special handling
+  // since projection math gets wonky there - be conservative and include them
+  if (viewCenter.z > 0.0f)
+  {
+    // Sphere center is behind camera, check if it intersects the near plane
+    if (viewCenter.z - worldRadius < 0.0f)
+    {
+      // Conservative approach - accept it
+      return true;
+    }
+    return false; // Entirely behind camera
+  }
+
+  // At this point we know the sphere center is in front of the camera (negative Z)
+  // Check against the side planes
+
+  // Left and right planes - check if sphere is completely outside
+  if (viewCenter.x - worldRadius > -viewCenter.z * tanHalfFovX ||
+    viewCenter.x + worldRadius < viewCenter.z * tanHalfFovX)
+  {
+    return false;
+  }
+
+  // Top and bottom planes - check if sphere is completely outside
+  if (viewCenter.y - worldRadius > -viewCenter.z * tanHalfFovY ||
+    viewCenter.y + worldRadius < viewCenter.z * tanHalfFovY)
+  {
+    return false;
+  }
+
+  // All tests passed, should be visible
   return true;
 }
 
@@ -93,10 +174,22 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
   GpuInstanceData data = instanceBuffer[index];
 
-  // Simple culling test using AABB center in view space
-  float2 tanFov = float2(camParams.x, camParams.y);
+  // Extract parameters for frustum culling
+  float tanHalfFovX = camParams.x;
+  float tanHalfFovY = camParams.y;
+  float nearClip = camParams.z;
+  float farClip = camParams.w;
 
-  if (!IsVisible(data.model, data.aabbMin.xyz, data.aabbMax.xyz, view, tanFov))
+  // Start with the simplest test first for debugging (still weird flashing everywhere happening)
+  // bool visible = IsVisibleAll();
+
+  // Try simple distance-based culling next (broken)
+  bool visible = IsVisibleSimple(data.aabbMin, data.aabbMax, data.model);
+
+  // Then move to sphere-based frustum test (same kind of broken)
+  // bool visible = IsVisibleSphere(data.aabbMin, data.aabbMax, data.model, view, tanHalfFovX, tanHalfFovY, nearClip, farClip);
+
+  if (!visible)
   {
     return; // culled — not visible
   }

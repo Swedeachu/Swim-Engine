@@ -3,6 +3,7 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
+#include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
 namespace Engine
 {
@@ -75,9 +76,18 @@ namespace Engine
 		auto view = registry.view<Transform, Material>();
 
 		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
-		rangeMap.reserve(64); // avoid rehashing during population
+		rangeMap.reserve(64); // avoid rehashing
 
 		uint32_t instanceIndex = 0;
+
+		// Frustum pointer (set if CPU culling is enabled)
+		const Frustum* frustum = nullptr;
+		if (cullMode == CullMode::CPU)
+		{
+			auto camera = scene->GetCameraSystem();
+			Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
+			frustum = &Frustum::Get();
+		}
 
 		// === Populate instance data and group by mesh ===
 		for (auto entity : view)
@@ -86,13 +96,38 @@ namespace Engine
 			const auto& mat = view.get<Material>(entity).data;
 			const auto& mesh = mat->mesh;
 
+			// CPU culling check
+			if (frustum != nullptr)
+			{
+				const glm::vec3& min = mesh->meshBufferData->aabbMin;
+				const glm::vec3& max = mesh->meshBufferData->aabbMax;
+
+				if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
+				{
+					continue;
+				}
+
+				/* the is visible lazy method is actually on par and simpler than using a cached frustum component (for now)
+				if (!registry.all_of<FrustumCullCache>(entity))
+				{
+					continue; // Skip if missing cache — optional debug log
+				}
+
+				auto& cache = registry.get<FrustumCullCache>(entity);
+				cache.Update(min, max, transform.GetModelMatrix());
+
+				if (!frustum->IsVisibleCached(cache))
+				{
+					continue; // Skip this instance
+				}
+				*/
+			}
+
 			// Build the GPU-side instance data struct
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
-
 			instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
 			instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
-
 			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 			instance.meshIndex = mesh->meshBufferData->GetMeshID();
@@ -106,7 +141,6 @@ namespace Engine
 				range.firstInstance = instanceIndex;
 			}
 			range.count++;
-
 			instanceIndex++;
 		}
 
@@ -117,12 +151,15 @@ namespace Engine
 			instanceBatches.emplace_back(mesh, range);
 		}
 
-		// === Upload per-instance data to GPU for rendering === 
+		// === Upload per-instance data to GPU for rendering ===
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
-		// === Upload instance count for compute shader (if culling is used) ===
-		if (!useCulledDraw) return;
+		// === Upload instance count for compute shader (only used for GPU culling) ===
+		if (cullMode != CullMode::GPU)
+		{
+			return;
+		}
 
 		InstanceMeta meta{};
 		meta.instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
@@ -159,7 +196,7 @@ namespace Engine
 
 	void VulkanIndexDraw::DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		if (useCulledDraw)
+		if (cullMode == CullMode::GPU)
 		{
 			DrawCulledIndexed(frameIndex, cmd);
 			return;
@@ -239,7 +276,7 @@ namespace Engine
 
 	void VulkanIndexDraw::ReadbackCulledInstanceData()
 	{
-		if (!useCulledDraw) return;
+		if (cullMode != CullMode::GPU) return;
 
 		// === Read draw count ===
 		const uint32_t* drawCountPtr = static_cast<const uint32_t*>(drawCountBuffer->GetMappedPointer());

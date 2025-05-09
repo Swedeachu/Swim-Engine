@@ -220,6 +220,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
+    <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanGpuInstanceData.h" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.cpp" />

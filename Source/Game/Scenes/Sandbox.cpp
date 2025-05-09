@@ -19,7 +19,7 @@ namespace Game
 	// When that happens, we have deserved the right to remove this copium comment.
 
 	constexpr static bool doStressTest = true; // works well with Vulkan, 144 FPS, small bugs though, like the player cube doesn't render for some reason
-	constexpr static bool fullyUniqueCubeMeshes = false; // breaks the Vulkan renderer entirely, nothing draws, 14 FPS lmao
+	constexpr static bool fullyUniqueCubeMeshes = false; // can take the Vulkan renderer to a crawl if we aren't running any culling
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just cube meshes (pyramids and spheres)
 

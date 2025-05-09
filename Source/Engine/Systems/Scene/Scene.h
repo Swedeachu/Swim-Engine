@@ -31,6 +31,11 @@ namespace Engine
 
 		void Update(double dt) override {};
 
+		// All scenes have a base init and update for doing internal engine things first 
+		void InternalSceneInit();
+
+		void InternalSceneUpdate(double dt);
+
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
 		int Exit() override { DestroyAllEntities(); return 0; };
@@ -52,12 +57,6 @@ namespace Engine
 		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system) { vulkanRenderer = system; }
 		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system) { openGLRenderer = system; }
 
-	protected:
-
-		std::string name;
-
-		entt::registry registry;
-
 		// so much boiler plate for memory safety
 
 		std::shared_ptr<SceneSystem> GetSceneSystem() const { return GetSystem<SceneSystem>(sceneSystem); }
@@ -65,6 +64,12 @@ namespace Engine
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return GetSystem<CameraSystem>(cameraSystem); }
 		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
 		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
+
+	protected:
+
+		std::string name;
+
+		entt::registry registry;
 
 		template <typename T>
 		std::shared_ptr<T> GetSystem(const std::weak_ptr<T>& weakPtr) const
@@ -86,6 +91,11 @@ namespace Engine
 		std::weak_ptr<CameraSystem> cameraSystem;
 		std::weak_ptr<VulkanRenderer> vulkanRenderer;
 		std::weak_ptr<OpenGLRenderer> openGLRenderer;
+
+		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
+
+		// Internals:
+		entt::observer frustumCacheObserver;
 
 	};
 

@@ -155,8 +155,11 @@ namespace Engine
 			descriptorManager->GetComputeSetLayout()
 		);
 
-		// Enable culled rendering
-		// indexDraw->SetUseCulledDraw(true); 
+		// Configure culled rendering mode
+		// Debug mode CPU culling: 100 FPS 
+		// Release mode CPU culling: 2000+ FPS
+		// GPU compute shader culling is sadly broken and can't be used yet
+		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
 
 		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
@@ -337,26 +340,15 @@ namespace Engine
 	{
 		CameraUBO ubo{};
 
-		/* 1)  View & projection matrices  */
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();  // already has the Vulkan Y-flip
 
-		/* 2)  tan(FOV / 2) comes straight from the perspective matrix.
-						proj[0][0] = 1 / tan(FOVx/2)
-						proj[1][1] = 1 / tan(FOVy/2)   (negative after the Y-flip) 
-		*/
-		const float tanHalfFovX = 1.0f / ubo.proj[0][0];
-		const float tanHalfFovY = 1.0f / std::abs(ubo.proj[1][1]); // keep it positive
-
-		/* 3)  Clip planes  */
 		const auto& camera = cameraSystem->GetCamera();
 
-		/* 4)  Pack everything into camParams
-						x : tan(FOVx / 2)
-						y : tan(FOVy / 2)
-						z : z-near
-						w : z-far   
-		*/
+		// Calculate half FOV tangents - make sure signs are correct
+		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
+		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
+
 		ubo.camParams = glm::vec4(
 			tanHalfFovX,
 			tanHalfFovY,

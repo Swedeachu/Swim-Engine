@@ -3,7 +3,7 @@ cbuffer CameraUBO : register(b0, space0)
 {
   float4x4 view;
   float4x4 proj;
-  float4 camParams; // (fovX, fovY, zNear, zFar)
+  float4 camParams; 
 };
 
 struct GpuInstanceData

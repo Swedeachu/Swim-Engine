@@ -12,6 +12,19 @@ namespace Engine
 
 	public:
 
+		/*
+		 NONE: Fastest for batch drawing in simple scenes with thousands of the same meshes.
+		 CPU: Solid balanced stratedgy and a geniunely good solution for complex scenes with thousands of unique meshes.
+		 GPU: Best solution on paper but our implementation is super broken and glitchy for more reasons than one.
+
+		 CPU_DYNAMIC: 
+		  Scene analysis to see when doing the culling calculation is worth it or not for the current frame.
+			This could literally save 1000+ fps each frame even if we are using CPU or GPU culling only.
+			I think a good way to do this is by analysing the active meshes in the scene and seeing how many of them are different and the amount of them.
+			For example, a scene with 10K unique meshes being used must be culled, but a scene with 10K shared meshes can just be batched instantly.
+		*/
+		enum CullMode { NONE, CPU, GPU };
+
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
 
 		void CreateCullOutputBuffers(uint32_t maxInstances);
@@ -35,7 +48,7 @@ namespace Engine
 		VulkanBuffer* GetDrawCountBuffer() const { return drawCountBuffer.get(); }
 		VulkanBuffer* GetInstanceMetaBuffer() const { return instanceMetaBuffer.get(); }
 
-		void SetUseCulledDraw(bool enabled) { useCulledDraw = enabled; }
+		void SetCulledMode(CullMode mode) { cullMode = mode; }
 
 		uint32_t GetInstanceCount() const { return static_cast<uint32_t>(cpuInstanceData.size()); }
 
@@ -56,6 +69,8 @@ namespace Engine
 			uint32_t count = 0;
 		};
 
+		CullMode cullMode{ CullMode::NONE };
+
 		std::vector<std::pair<std::shared_ptr<Mesh>, MeshInstanceRange>> instanceBatches;
 
 		// Buffers for visibility culling (compute shader output)
@@ -66,8 +81,6 @@ namespace Engine
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
-
-		bool useCulledDraw{ false };
 
 	};
 
