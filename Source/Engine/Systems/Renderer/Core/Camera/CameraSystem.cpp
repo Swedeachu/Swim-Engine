@@ -29,14 +29,4 @@ namespace Engine
     // nop for now
   }
 
-  const glm::mat4& CameraSystem::GetViewMatrix() const
-  {
-    return camera.GetViewMatrix();
-  }
-
-  const glm::mat4& CameraSystem::GetProjectionMatrix() const
-  {
-    return camera.GetProjectionMatrix();
-  }
-
 }

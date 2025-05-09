@@ -332,9 +332,16 @@ namespace Engine
 		camData.view = cameraSystem->GetViewMatrix();
 		camData.proj = cameraSystem->GetProjectionMatrix();
 
-		// 2) Send them to the GPU UBO at binding 0
+		// Extract fov from projection matrix (OpenGL version, no Y flip)
+		float fovY = 2.0f * atanf(1.0f / camData.proj[1][1]);
+		float aspect = camData.proj[1][1] / camData.proj[0][0];
+		float fovX = 2.0f * atanf(tanf(fovY * 0.5f) * aspect);
+
+		auto& camera = cameraSystem->GetCamera();
+		camData.camParams = glm::vec4(fovX, fovY, camera.GetNearClip(), camera.GetFarClip());
+
+		// 2) Send them to the GPU UBO at binding 0
 		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-		// replace entire contents from offset 0
 		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &camData);
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	}

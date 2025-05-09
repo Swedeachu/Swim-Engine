@@ -5,7 +5,7 @@
 #include <vector>
 #include <stdexcept>
 #include <unordered_map>
-#include "VulkanBuffer.h"
+#include "Buffers/VulkanBuffer.h"
 
 namespace Engine
 {
@@ -15,16 +15,23 @@ namespace Engine
 
 	public:
 
-		VulkanDescriptorManager(VkDevice device, uint32_t maxSets = 1024, uint32_t maxBindlessTextures = 4096);
+		VulkanDescriptorManager(VkDevice device, uint32_t maxSets = 1024, uint32_t maxBindlessTextures = 4096, uint64_t ssbosSize = 10240);
 		~VulkanDescriptorManager();
 
 		void CreateLayout();
 		void CreatePool();
+		void CreateComputePool();
 
 		// Create per-frame UBOs and descriptor sets
 		void CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount);
 		void UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo);
+
 		VkDescriptorSet GetPerFrameDescriptorSet(uint32_t frameIndex) const;
+
+		void UpdatePerFrameInstanceBuffer(uint32_t frameIndex, const void* data, size_t size);
+
+		// Adds SSBO (instance buffer) binding to per-frame descriptor sets
+		void CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers);
 
 		// Bindless setup
 		void CreateBindlessLayout();
@@ -33,11 +40,37 @@ namespace Engine
 		void UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler) const;
 		void SetBindlessSampler(VkSampler sampler) const;
 
+		void CreateFrustumCullComputeDescriptorSet(
+			VulkanBuffer& uboBuffer,
+			VulkanBuffer& instanceMetaBuffer,      
+			VulkanBuffer& instanceBuffer,
+			VulkanBuffer& visibleModelBuffer,
+			VulkanBuffer& visibleDataBuffer,
+			VulkanBuffer& drawCountBuffer
+		);
+
 		VkDescriptorSetLayout GetLayout() const { return descriptorSetLayout; }
 		VkDescriptorPool GetPool() const { return descriptorPool; }
 
 		VkDescriptorSet GetBindlessSet() const { return bindlessDescriptorSet; }
 		VkDescriptorSetLayout GetBindlessLayout() const { return bindlessSetLayout; }
+
+		VkDescriptorSetLayout GetComputeSetLayout() const { return computeSetLayout; }
+		VkDescriptorSet GetComputeDescriptorSet() const { return computeDescriptorSet; }
+
+		VulkanBuffer* GetPerFrameUBO(uint32_t frameIndex) const
+		{
+			if (frameIndex >= perFrameUBOs.size())
+			{
+				throw std::runtime_error("Invalid frame index for UBO");
+			}
+			return perFrameUBOs[frameIndex].get();
+		}
+
+		VulkanBuffer* GetInstanceBufferForFrame(uint32_t frameIndex) const
+		{
+			return perFrameInstanceBuffers.at(frameIndex).get();
+		}
 
 		void Cleanup();
 
@@ -46,6 +79,7 @@ namespace Engine
 		VkDevice device;
 		uint32_t maxSets;
 		uint32_t maxBindlessTextures;
+		uint64_t ssboSize;
 
 		// Standard (UBO + Texture) set
 		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
@@ -59,6 +93,19 @@ namespace Engine
 		// Per-frame uniform buffers and descriptor sets
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameUBOs;
 		std::vector<VkDescriptorSet> perFrameDescriptorSets;
+
+		// Per-frame instance SSBOs
+		std::vector<std::unique_ptr<VulkanBuffer>> perFrameInstanceBuffers;
+
+		// For tracking instance SSBO descriptor sets per frame (optional)
+		std::vector<VkDescriptorSet> perFrameDescriptorSets_InstanceBuffer;
+
+		// Compute shader layout and set
+		VkDescriptorSetLayout computeSetLayout = VK_NULL_HANDLE;
+		VkDescriptorSet computeDescriptorSet = VK_NULL_HANDLE;
+
+		// Dedicated pool for compute descriptors (storage buffers & UBOs)
+		VkDescriptorPool computeDescriptorPool = VK_NULL_HANDLE;
 
 	};
 

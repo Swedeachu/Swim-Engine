@@ -1,23 +1,15 @@
 #pragma once
 
-#include <optional>
-#include <stdexcept>
-#include <functional>
-#include <fstream>
-#include <unordered_map>
-#include <memory>
-#include <vector>
-#include "VulkanBuffer.h"
-#include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
-#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
-#include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSwapChain.h"
 #include "VulkanCommandManager.h"
 #include "VulkanSyncManager.h"
 #include "VulkanPipelineManager.h"
 #include "VulkanDescriptorManager.h"
+#include "VulkanIndexDraw.h"
+#include "Buffers/VulkanBuffer.h"
+#include "Buffers/VulkanInstanceBuffer.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -25,16 +17,6 @@ struct GLFWwindow; // if we use GLFW in the future for windowing
 
 namespace Engine
 {
-
-	struct PushConstantData
-	{
-		glm::mat4 model;
-		uint32_t textureIndex; // index into bindless texture array
-		float hasTexture; // kinda scuffed flag, might be used for transparency later beyond just a "use texture" flag
-		// Pad to 16 bytes
-		float padA;
-		float padB;
-	};
 
 	class VulkanRenderer : public Machine
 	{
@@ -143,6 +125,7 @@ namespace Engine
 
 		std::unique_ptr<VulkanSyncManager> syncManager;
 		std::unique_ptr<VulkanDescriptorManager> descriptorManager;
+		std::unique_ptr<VulkanIndexDraw> indexDraw;
 
 		bool framebufferResized = false;
 
@@ -153,8 +136,6 @@ namespace Engine
 		void RecordCommandBuffer(uint32_t imageIndex);
 
 		VkSampler CreateSampler();
-
-		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		void UpdateUniformBuffer();
 

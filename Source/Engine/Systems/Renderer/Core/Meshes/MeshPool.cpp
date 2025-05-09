@@ -27,6 +27,14 @@ namespace Engine
 		auto mesh = std::make_shared<Mesh>(vertices, indices);
 		mesh->meshBufferData = std::make_shared<MeshBufferData>();
 
+		// Assign a unique mesh ID
+		uint32_t meshID = nextMeshID++;
+		mesh->meshBufferData->meshID = meshID;
+
+		// Cache ID <-> Mesh mapping
+		meshToID[mesh] = meshID;
+		idToMesh[meshID] = mesh;
+
 		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 		{
 			// Lazily cache the Vulkan device + physical device
@@ -63,6 +71,30 @@ namespace Engine
 		return nullptr; // Mesh not found
 	}
 
+	// kinda pointless because mesh has mesh buffer data which stores the id it was registered to
+	uint32_t MeshPool::GetMeshID(const std::shared_ptr<Mesh>& mesh) const
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		auto it = meshToID.find(mesh);
+		if (it != meshToID.end())
+		{
+			return it->second;
+		}
+		return UINT32_MAX; // Invalid
+	}
+
+	std::shared_ptr<Mesh> MeshPool::GetMeshByID(uint32_t id) const
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		auto it = idToMesh.find(id);
+		if (it != idToMesh.end())
+		{
+			return it->second;
+		}
+		return nullptr;
+	}
+
+
 	bool MeshPool::RemoveMesh(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
@@ -84,6 +116,9 @@ namespace Engine
 
 		// Clear all meshes from the pool too
 		meshes.clear();
+		meshToID.clear();
+		idToMesh.clear();
+		nextMeshID = 0;
 	}
 
 }

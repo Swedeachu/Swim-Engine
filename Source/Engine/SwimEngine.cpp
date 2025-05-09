@@ -13,20 +13,28 @@ namespace Engine
 
 	std::wstring getDefaultWindowTitle()
 	{
+		std::wstring suffix;
+
+	#if defined(_DEBUG) || !defined(NDEBUG)
+		suffix = L" (Debug)";
+	#else
+		suffix = L" (Release)";
+	#endif
+
 		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 		{
-			return L"Swim Engine [Vulkan]";
+			return L"Swim Engine [Vulkan]" + suffix;
 		}
 		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 		{
 			if constexpr (SwimEngine::useShaderToyIfOpenGL)
 			{
-				return L"Swim Engine [OpenGL ShaderToy]";
+				return L"Swim Engine [OpenGL ShaderToy]" + suffix;
 			}
-			return L"Swim Engine [OpenGL]";
+			return L"Swim Engine [OpenGL]" + suffix;
 		}
 
-		return L"Swim Engine Demo";
+		return L"Swim Engine Demo" + suffix;
 	}
 
 	SwimEngine::SwimEngine()

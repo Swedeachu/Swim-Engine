@@ -2,7 +2,7 @@
 
 #include <memory>
 #include "Engine/SwimEngine.h"
-#include "Engine/Systems/Renderer/Vulkan/VulkanBuffer.h"
+#include "Engine/Systems/Renderer/Vulkan/Buffers/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLBuffer.h"
 
 namespace Engine
@@ -15,17 +15,26 @@ namespace Engine
 		std::unique_ptr<VulkanBuffer> vertexBuffer;
 		std::unique_ptr<VulkanBuffer> indexBuffer;
 
+		// For compute shader AABB culling
+		glm::vec3 aabbMin;
+		glm::vec3 aabbMax;
+
 		// OpenGL buffer
 		std::unique_ptr<OpenGLBuffer> glBuffer;
 
 		// Count of indices for rendering
 		uint32_t indexCount = 0;
 
+		// ID of the mesh used in the GPU
+		uint32_t meshID = UINT32_MAX;
+
 		GLuint GetGLVAO() const
 		{
 			if (glBuffer) { return glBuffer->GetVAO(); }
 			return 0;
 		}
+
+		uint32_t GetMeshID() const { return meshID; }
 
 		GLuint GetIndexCount() const { return indexCount; }
 
@@ -57,6 +66,16 @@ namespace Engine
 				glBuffer = std::make_unique<OpenGLBuffer>();
 				glBuffer->Create(vertices.data(), vertices.size() * sizeof(Vertex), indices.data(), indices.size() * sizeof(uint16_t));
 				indexCount = glBuffer->GetIndexCount(); // sync afterwards
+			}
+
+			// Calculate the meshes AABB
+			aabbMin = glm::vec3(std::numeric_limits<float>::max());
+			aabbMax = glm::vec3(std::numeric_limits<float>::lowest());
+
+			for (const auto& v : vertices)
+			{
+				aabbMin = glm::min(aabbMin, v.position);
+				aabbMax = glm::max(aabbMax, v.position);
 			}
 		}
 

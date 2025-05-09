@@ -9,8 +9,9 @@ namespace Engine
 
 	struct CameraUBO
 	{
-		glm::mat4 view;
-		glm::mat4 proj;
+		glm::mat4 view;   // 64 bytes
+		glm::mat4 proj;   // 64 bytes
+		glm::vec4 camParams; // 16 bytes: (fovX, fovY, zNear, zFar)
 	};
 
 	// this code was thrown together very quickly, but honestly a camera should just be using the premade transform component 
@@ -53,7 +54,7 @@ namespace Engine
 		glm::vec3 GetRotationEuler() const
 		{
 			glm::vec3 euler = glm::degrees(glm::eulerAngles(rotation));
-			return euler; 
+			return euler;
 		}
 
 		void SetFOV(float f) { fov = f; MarkProjDirty(); }
@@ -92,7 +93,7 @@ namespace Engine
 			return projMatrix;
 		}
 	};
-	
+
 	class CameraSystem : public Machine
 	{
 
@@ -104,8 +105,9 @@ namespace Engine
 		void Update(double dt) override;
 		void RefreshAspect();
 
-		const glm::mat4& GetViewMatrix() const;
-		const glm::mat4& GetProjectionMatrix() const;
+		const glm::mat4& GetViewMatrix() const { return camera.GetViewMatrix(); }
+
+		const glm::mat4& GetProjectionMatrix() const { return camera.GetProjectionMatrix(); }
 
 		// By reference so you can't set the camera to null or any craziness
 		Camera& GetCamera() { return camera; }

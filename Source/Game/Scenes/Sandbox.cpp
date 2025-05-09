@@ -10,16 +10,8 @@
 namespace Game
 {
 
-	// TO ANYONE READING THIS SCENE AND WONDERING WHY THIS SCENE'S PERFORMANCE IS AWFUL IN VULKAN COMPARED TO OPENGL:
-	// This is the difference between being hand held and actually having to make things.
-	// OpenGL abstracts and does so much stuff for you, while Vulkan does exactly and only exactly what you write.
-	// We currently have zero indirect drawing or culling implemented (except driver enabled back face culling), so Vulkan lags hard here in this stress test.
-	// 5/4/2025: OpenGL gets 80 FPS and Vulkan gets 22 FPS. 
-	// I can gurantee once I correctly implement these optimizations for the Vulkan renderer, things will speed up a ton far beyond out of the box OpenGL.
-	// When that happens, we have deserved the right to remove this copium comment.
-
-	constexpr static bool doStressTest = true;
-	constexpr static bool fullyUniqueCubeMeshes = false; // will definitely need to test with this as true once we have indirect drawing and culling
+	constexpr static bool doStressTest = true; 
+	constexpr static bool fullyUniqueCubeMeshes = true; // can take the Vulkan renderer to a crawl if we aren't running any culling
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just cube meshes (pyramids and spheres)
 

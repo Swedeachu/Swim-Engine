@@ -79,6 +79,10 @@
     <ShaderFiles Include="Source\Shaders\Vulkan\FragmentShaders\**\*.hlsl">
       <ShaderType>ps_6_0</ShaderType>
     </ShaderFiles>
+    <!-- Compute Shaders (cs_6_0) -->
+    <ShaderFiles Include="Source\Shaders\Vulkan\ComputeShaders\**\*.hlsl">
+      <ShaderType>cs_6_0</ShaderType>
+    </ShaderFiles>
   </ItemGroup>
   <!-- Show Paths and Shaders Detected -->
   <Target Name="ShowBuildInfo" AfterTargets="PrepareForBuild">
@@ -97,13 +101,18 @@
   </Target>
   <!-- Create fixed directories for Vertex and Fragment -->
   <Target Name="CreateShaderDirectories" AfterTargets="EnsureBaseShadersDir" BeforeTargets="ClCompile">
-    <Message Text="Creating fixed shader directories: $(OutDir)Shaders\VertexShaders and $(OutDir)Shaders\FragmentShaders" Importance="High" />
+    <Message Text="Creating fixed shader directories: $(OutDir)Shaders\VertexShaders and $(OutDir)Shaders\FragmentShaders and $(OutDir)Shaders\ComputeShaders" Importance="High" />
     <MakeDir Directories="$(OutDir)Shaders\VertexShaders" />
     <MakeDir Directories="$(OutDir)Shaders\FragmentShaders" />
+    <MakeDir Directories="$(OutDir)Shaders\ComputeShaders" />
   </Target>
   <!-- Compile Shaders: Run before ClCompile so they are ready early in the build -->
   <Target Name="CompileShaders" AfterTargets="CreateShaderDirectories" BeforeTargets="ClCompile">
     <Message Text="=== COMPILING SHADERS ===" Importance="High" />
+    <!-- Compile Compute Shaders -->
+    <Message Text="Compiling Compute Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
+    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;" Condition="%(ShaderFiles.ShaderType) == 'cs_6_0'" />
+    <Message Text="Compute Shader Command: ..." Condition="%(ShaderFiles.ShaderType) == 'cs_6_0'" />
     <!-- Compile Vertex Shaders -->
     <Message Text="Compiling Vertex Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
     <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;" Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
@@ -210,10 +219,15 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLBuffer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.cpp" />
-    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
+    <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanGpuInstanceData.h" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanInstanceBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanIndexDraw.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
@@ -254,10 +268,12 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.h" />
-    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanInstanceBuffer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanIndexDraw.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanPipelineManager.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.h" />
