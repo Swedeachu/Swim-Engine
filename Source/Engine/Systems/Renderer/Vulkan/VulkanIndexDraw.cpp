@@ -26,6 +26,7 @@ namespace Engine
 	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
 	{
 		indirectCommandBuffers.resize(framesInFlight);
+		drawBatchesPerFrame.resize(framesInFlight);
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
@@ -36,6 +37,8 @@ namespace Engine
 				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
+
+			drawBatchesPerFrame[i].clear();
 		}
 	}
 
@@ -85,8 +88,9 @@ namespace Engine
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		// Clear CPU-side collections but preserve capacity
-		cpuInstanceData.resize(0);
-		instanceBatches.resize(0);
+		cpuInstanceData.resize(0); // resize because object reuse is expected
+		instanceBatches.clear(); 
+		drawBatchesPerFrame[frameIndex].clear(); // Reset indirect batch data for this frame
 
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		auto& registry = scene->GetRegistry();
@@ -175,9 +179,8 @@ namespace Engine
 		// Indirect drawing stuff now
 		if (useIndirectDrawing)
 		{
-			// Build indirect commands
-			std::vector<VkDrawIndexedIndirectCommand> commands;
-			commands.reserve(instanceBatches.size());
+			std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
+			frameBatches.reserve(instanceBatches.size());
 
 			for (const auto& [mesh, range] : instanceBatches)
 			{
@@ -190,14 +193,23 @@ namespace Engine
 				cmd.vertexOffset = 0;
 				cmd.firstInstance = range.firstInstance;
 
-				commands.push_back(cmd);
+				// Each mesh gets its own indirect batch
+				MeshIndirectDrawBatch batch{};
+				batch.mesh = mesh;
+				batch.commands.push_back(cmd);
+
+				frameBatches.push_back(std::move(batch));
 			}
 
-			// Write to indirect command buffer
-			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
-			indirectBuf.CopyData(commands.data(), commands.size() * sizeof(VkDrawIndexedIndirectCommand));
+			// Flatten all commands to the buffer for safety/debug (optional if not used directly)
+			std::vector<VkDrawIndexedIndirectCommand> allCommands;
+			for (const auto& batch : frameBatches)
+			{
+				allCommands.insert(allCommands.end(), batch.commands.begin(), batch.commands.end());
+			}
 
-			currentDrawCount = static_cast<uint32_t>(commands.size());
+			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+			indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 		}
 
 		// Below is probably way outdated by now since we are now doing indirect indexed drawing, 
@@ -253,33 +265,35 @@ namespace Engine
 
 		if (useIndirectDrawing)
 		{
-			if (currentDrawCount == 0)
-			{
-				return;
-			}
-
-			// Build commands to send all at once for drawing everything with
 			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 			VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			// We use the first mesh in batch to bind vertex/index buffers THIS IS BAD!!!!
-			// Instead of this we should be making batches for each collection of meshes and then drawing indexed indirect with each one
-			const auto& [firstMesh, _] = instanceBatches.front();
-			auto& meshData = GetOrCreateMeshBuffers(firstMesh);
+			const auto& frameBatches = drawBatchesPerFrame[frameIndex];
+			uint32_t offset = 0;
 
-			VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
+			for (const auto& batch : frameBatches)
+			{
+				auto& meshData = GetOrCreateMeshBuffers(batch.mesh);
 
-			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+				VkBuffer vertexBuffers[] = {
+					meshData.vertexBuffer->GetBuffer(),
+					instanceBuf
+				};
 
-			vkCmdDrawIndexedIndirect(
-				cmd,
-				indirectBuf,
-				0,
-				currentDrawCount,
-				sizeof(VkDrawIndexedIndirectCommand)
-			);
+				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+				vkCmdDrawIndexedIndirect(
+					cmd,
+					indirectBuf,
+					offset,
+					static_cast<uint32_t>(batch.commands.size()),
+					sizeof(VkDrawIndexedIndirectCommand)
+				);
+
+				offset += static_cast<uint32_t>(batch.commands.size()) * sizeof(VkDrawIndexedIndirectCommand);
+			}
 		}
 		else
 		{
@@ -382,7 +396,7 @@ namespace Engine
 		}
 
 		culledVisibleData.resize(instanceCountCulled);
-		memcpy(culledVisibleData.data(), rawData, instanceCountCulled * sizeof(glm::uvec4)); 
+		memcpy(culledVisibleData.data(), rawData, instanceCountCulled * sizeof(glm::uvec4));
 	}
 
 	// This is unused because a naive vollatile write to this on a gpu buffer requires way more fencing and is not worth it for something lazy like this, better to use barriers
