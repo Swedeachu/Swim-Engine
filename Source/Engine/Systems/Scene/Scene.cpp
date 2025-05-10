@@ -8,6 +8,12 @@
 namespace Engine
 {
 
+#ifdef _DEBUG
+	constexpr static bool handleDebugDraw = true;
+#else
+	constexpr static bool handleDebugDraw = false;
+#endif
+
 	entt::entity Scene::CreateEntity()
 	{
 		auto entity = registry.create();
@@ -47,6 +53,8 @@ namespace Engine
 		// Initialize the debug drawer
 		sceneDebugDraw = std::make_unique<SceneDebugDraw>();
 		sceneDebugDraw->Init();
+
+		sceneBVH->SetDebugDrawer(sceneDebugDraw.get());
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -82,17 +90,16 @@ namespace Engine
 	void Scene::InternalScenePostUpdate(double dt)
 	{
 		Transform::ClearGlobalDirtyFlag();
+
+		if constexpr (handleDebugDraw)
+		{
+			sceneBVH->DebugRender();
+		}
 	}
 
 	void Scene::InternalSceneUpdate(double dt)
 	{
 		// Was doing bvh update here but its more performant to do it in the fixed update.
-
-	#ifdef _DEBUG
-		constexpr bool handleDebugDraw = true;
-	#else
-		constexpr bool handleDebugDraw = false;
-	#endif
 
 		if constexpr (handleDebugDraw)
 		{
@@ -111,7 +118,7 @@ namespace Engine
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)
 	{
-		// nothing to do here yet
+		// nothing to do here
 	}
 
 }

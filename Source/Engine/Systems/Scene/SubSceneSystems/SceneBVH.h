@@ -2,6 +2,7 @@
 
 #include "Library/glm/glm.hpp"
 #include "Library/EnTT/entt.hpp"
+#include "SceneDebugDraw.h"
 
 namespace Engine
 {
@@ -26,9 +27,15 @@ namespace Engine
 
     void Init();
     void Update();
+    void DebugRender();
     void UpdateIfNeeded(entt::observer& frustumObserver);
     void QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
     void RemoveEntity(entt::entity entity);
+
+    void SetDebugDrawer(SceneDebugDraw* drawer)
+    {
+      debugDrawer = drawer;
+    }
 
   private:
 
@@ -50,6 +57,8 @@ namespace Engine
 
     bool IsAABBVisible(const Frustum& frustum, const AABB& aabb) const;
     SceneBVH::AABB CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform);
+
+    SceneDebugDraw* debugDrawer = nullptr;
 
   };
 
