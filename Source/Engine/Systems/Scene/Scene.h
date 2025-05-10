@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Library/EnTT/entt.hpp"
+#include "SubSceneSystems/SceneBVH.h"
 
 namespace Engine
 {
@@ -65,6 +66,8 @@ namespace Engine
 		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
 		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
 
+		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
+
 	protected:
 
 		std::string name;
@@ -92,10 +95,13 @@ namespace Engine
 		std::weak_ptr<VulkanRenderer> vulkanRenderer;
 		std::weak_ptr<OpenGLRenderer> openGLRenderer;
 
-		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
-
 		// Internals:
 		entt::observer frustumCacheObserver;
+
+		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
+
+		// High-performance grid BVH
+		std::unique_ptr<SceneBVH> sceneBVH;
 
 	};
 

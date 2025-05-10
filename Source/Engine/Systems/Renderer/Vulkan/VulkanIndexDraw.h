@@ -88,6 +88,8 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; // [frameCount]
 		std::vector<std::vector<MeshIndirectDrawBatch>> drawBatchesPerFrame; // [frameCount][meshBatch]
 
+		std::vector<entt::entity> bvhVisibleEntities;
+
 		bool useIndirectDrawing{ false };
 
 	};

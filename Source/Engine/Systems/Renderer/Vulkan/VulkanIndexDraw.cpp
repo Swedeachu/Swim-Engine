@@ -87,21 +87,18 @@ namespace Engine
 	// This actually does CPU culling logic here if that mode is activated
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
-		// Clear CPU-side collections but preserve capacity
-		cpuInstanceData.resize(0); // resize because object reuse is expected
-		instanceBatches.clear(); 
-		drawBatchesPerFrame[frameIndex].clear(); // Reset indirect batch data for this frame
+		cpuInstanceData.resize(0);
+		instanceBatches.clear();
+		drawBatchesPerFrame[frameIndex].clear();
 
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
 
 		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
-		rangeMap.reserve(64); // avoid rehashing
+		rangeMap.reserve(64);
 
 		uint32_t instanceIndex = 0;
 
-		// Frustum pointer (set if CPU culling is enabled)
 		const Frustum* frustum = nullptr;
 		if (cullMode == CullMode::CPU)
 		{
@@ -110,14 +107,40 @@ namespace Engine
 			frustum = &Frustum::Get();
 		}
 
-		// === Populate instance data and group by mesh ===
-		for (auto entity : view)
+		// === Use persistent vector + std::span for candidates ===
+		bvhVisibleEntities.clear();
+
+		if (cullMode == CullMode::CPU && frustum != nullptr)
 		{
-			const auto& transform = view.get<Transform>(entity);
-			const auto& mat = view.get<Material>(entity).data;
+			scene->GetSceneBVH()->QueryFrustum(*frustum, bvhVisibleEntities);
+		}
+		else
+		{
+			// fallback: no culling -> get all entities with mesh data
+			auto view = registry.view<Transform, Material>();
+			bvhVisibleEntities.reserve(view.size_hint());
+			for (auto entity : view)
+			{
+				bvhVisibleEntities.push_back(entity);
+			}
+		}
+
+		std::span candidates(bvhVisibleEntities);
+
+		// === Populate instance data from candidates ===
+		for (auto entity : candidates)
+		{
+			if (!registry.valid(entity) || !registry.all_of<Transform, Material>(entity))
+			{
+				continue;
+			}
+
+			const auto& transform = registry.get<Transform>(entity);
+			const auto& mat = registry.get<Material>(entity).data;
 			const auto& mesh = mat->mesh;
 
-			// CPU culling check
+			// Optional extra fine culling (not needed)
+			/*
 			if (frustum != nullptr)
 			{
 				const glm::vec3& min = mesh->meshBufferData->aabbMin;
@@ -127,24 +150,10 @@ namespace Engine
 				{
 					continue;
 				}
-
-				/* the is visible lazy method is actually on par and simpler than using a cached frustum component (for now)
-				if (!registry.all_of<FrustumCullCache>(entity))
-				{
-					continue; // Skip if missing cache — optional debug log
-				}
-
-				auto& cache = registry.get<FrustumCullCache>(entity);
-				cache.Update(min, max, transform.GetModelMatrix());
-
-				if (!frustum->IsVisibleCached(cache))
-				{
-					continue; // Skip this instance
-				}
-				*/
 			}
+			*/
 
-			// Build the GPU-side instance data struct
+			// Build GPU instance struct
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
 			instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
@@ -161,22 +170,23 @@ namespace Engine
 			{
 				range.firstInstance = instanceIndex;
 			}
+
 			range.count++;
 			instanceIndex++;
 		}
 
-		// === Flatten into linear draw batch for fast draw ===
+		// === Flatten into instance batch ===
 		instanceBatches.reserve(rangeMap.size());
 		for (auto& [mesh, range] : rangeMap)
 		{
 			instanceBatches.emplace_back(mesh, range);
 		}
 
-		// === Upload per-instance data to GPU for rendering ===
+		// === Upload CPU instance data to GPU ===
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
-		// Indirect drawing stuff now
+		// === Indirect drawing setup ===
 		if (useIndirectDrawing)
 		{
 			std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
@@ -193,7 +203,6 @@ namespace Engine
 				cmd.vertexOffset = 0;
 				cmd.firstInstance = range.firstInstance;
 
-				// Each mesh gets its own indirect batch
 				MeshIndirectDrawBatch batch{};
 				batch.mesh = mesh;
 				batch.commands.push_back(cmd);
@@ -201,7 +210,6 @@ namespace Engine
 				frameBatches.push_back(std::move(batch));
 			}
 
-			// Flatten all commands to the buffer for safety/debug (optional if not used directly)
 			std::vector<VkDrawIndexedIndirectCommand> allCommands;
 			for (const auto& batch : frameBatches)
 			{
@@ -212,11 +220,7 @@ namespace Engine
 			indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 		}
 
-		// Below is probably way outdated by now since we are now doing indirect indexed drawing, 
-		// which in that case if we were doing GPU compute culling we would have to write to an SSBO for the commands to use.
-		// Once we get GPU culling we would have to refactor this now very messy class entirely.
-
-		// === Upload instance count for compute shader (only used for GPU culling) ===
+		// === GPU culling (populate meta buffer) ===
 		if (cullMode != CullMode::GPU)
 		{
 			return;
