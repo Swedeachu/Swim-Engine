@@ -60,6 +60,7 @@ namespace Engine
 		{
 			activeScene->InternalSceneInit();
 			activeScene->Init();
+			// no internal post init yet required yet, might need that sooner or later
 		}
 
 		return 0;
@@ -71,6 +72,7 @@ namespace Engine
 		{
 			activeScene->InternalSceneUpdate(dt);
 			activeScene->Update(dt);
+			activeScene->InternalScenePostUpdate(dt);
 		}
 	}
 
@@ -80,6 +82,7 @@ namespace Engine
 		{
 			activeScene->InternalFixedUpdate(tickThisSecond);
 			activeScene->FixedUpdate(tickThisSecond);
+			activeScene->InternalFixedPostUpdate(tickThisSecond);
 		}
 	}
 

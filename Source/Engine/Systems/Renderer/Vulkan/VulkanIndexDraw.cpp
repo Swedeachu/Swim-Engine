@@ -115,6 +115,11 @@ namespace Engine
 			GatherCandidatesView(registry, frustum);
 		}
 
+	#ifdef _DEBUG
+		// if we are in debug mode, add our wire frame boxes to draw if the system is enabled
+		DebugWireframeDraw();
+	#endif 
+
 		UploadAndBatchInstances(frameIndex);
 
 		// Broken!
@@ -325,6 +330,65 @@ namespace Engine
 				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
 				vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
 			}
+		}
+	}
+
+	void VulkanIndexDraw::DebugWireframeDraw()
+	{
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
+
+		if (!debugDraw || !debugDraw->IsEnabled())
+		{
+			return;
+		}
+
+		auto& debugRegistry = debugDraw->GetRegistry();
+		auto& wireframeMesh = debugDraw->GetWireframeCubeMesh();
+
+		if (!wireframeMesh || !wireframeMesh->meshBufferData)
+		{
+			return;
+		}
+
+		// Get mesh ID once
+		uint32_t meshID = wireframeMesh->meshBufferData->GetMeshID();
+
+		// No textures for debug
+		uint32_t textureIndex = UINT32_MAX;
+		float hasTexture = 0.0f;
+
+		// Append debug wireframe boxes into instance buffer
+		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
+
+		for (auto entity : view)
+		{
+			const auto& transform = view.get<Transform>(entity);
+			const auto& box = view.get<DebugWireBoxData>(entity);
+
+			GpuInstanceData instance{};
+			instance.model = transform.GetModelMatrix();
+			instance.aabbMin = glm::vec4(-0.5f, -0.5f, -0.5f, 0.0f); // unit cube
+			instance.aabbMax = glm::vec4(0.5f, 0.5f, 0.5f, 0.0f);
+			instance.textureIndex = textureIndex;
+			instance.hasTexture = hasTexture;
+			instance.meshIndex = meshID;
+			instance.pad = 0u;
+
+			// === NOTE: optionally you can store wireframe color in a custom instance field.
+			// Your shader does not support this yet, so it will use vertex color only.
+			// If you want per-instance wireframe color, add it to GpuInstanceData + shader.
+
+			// Add instance
+			cpuInstanceData.push_back(instance);
+
+			// Add to batching
+			auto& range = rangeMap[wireframeMesh];
+			if (range.count == 0)
+			{
+				range.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1);
+			}
+			range.count++;
 		}
 	}
 

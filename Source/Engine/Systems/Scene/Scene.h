@@ -2,6 +2,7 @@
 
 #include "Library/EnTT/entt.hpp"
 #include "SubSceneSystems/SceneBVH.h"
+#include "SubSceneSystems/SceneDebugDraw.h"
 
 namespace Engine
 {
@@ -35,11 +36,19 @@ namespace Engine
 		// All scenes have a base init and update for doing internal engine things first 
 		void InternalSceneInit();
 
+		// Called before Scene::Update
 		void InternalSceneUpdate(double dt);
+
+		// Called after Scene::Update
+		void InternalScenePostUpdate(double dt);
 
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
+		// Called before Scene::FixedUpdate
 		void InternalFixedUpdate(unsigned int tickThisSecond);
+
+		// Called after Scene::FixedUpdate
+		void InternalFixedPostUpdate(unsigned int tickThisSecond);
 
 		int Exit() override { DestroyAllEntities(); return 0; };
 
@@ -69,6 +78,7 @@ namespace Engine
 		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
+		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
 
 	protected:
 
@@ -101,6 +111,7 @@ namespace Engine
 		entt::observer frustumCacheObserver;
 
 		std::unique_ptr<SceneBVH> sceneBVH;
+		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 

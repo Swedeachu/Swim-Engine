@@ -66,6 +66,8 @@ namespace Engine
 		void AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 
+		void DebugWireframeDraw();
+
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
 

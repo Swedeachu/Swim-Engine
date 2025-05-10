@@ -10,12 +10,12 @@
 namespace Game
 {
 
-	constexpr static bool doStressTest = true; 
+	constexpr static bool doStressTest = true;
 	constexpr static bool fullyUniqueCubeMeshes = false; // can take the Vulkan renderer to a crawl if we aren't running any culling
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
-	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
+	constexpr static const int GRID_HALF_SIZE = 1; // for example 10 makes a 20x20x20 cube of cubes
 	constexpr static const float SPACING = 2.5f;
 
 	int SandBox::Awake()
@@ -276,7 +276,7 @@ namespace Game
 					else
 					{
 						// Otherwise just use default ctor parameter which is the identity quaternion 
-						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f)); 
+						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f));
 					}
 
 					registry.emplace<Engine::Material>(entity, material);
@@ -342,9 +342,18 @@ namespace Game
 		return 0;
 	}
 
+	// Just draws a wire frame box at the center of the world
+	static void WireframeTest(Engine::Scene* scene)
+	{
+		auto* drawer = scene->GetSceneDebugDraw();
+		drawer->SubmitWireframeBox(glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.0f));
+	}
+
 	// this is just quickly thrown together demo code, behavior components coming soon
 	void SandBox::Update(double dt)
 	{
+		// WireframeTest(this);
+
 		auto input = GetInputManager();
 		auto cameraSystem = GetCameraSystem();
 		auto& registry = GetRegistry();
@@ -456,23 +465,7 @@ namespace Game
 
 	void SandBox::FixedUpdate(unsigned int tickThisSecond)
 	{
-		// std::cout << name << " Fixed Update: " << tickThisSecond << std::endl;
 
-		// example for how to iterate all of our entities transforms
-		/*
-		auto view = GetRegistry().view<Transform>();
-		for (auto entity : view)
-		{
-			const auto& transform = view.get<Transform>(entity);
-			std::cout << "Entity Transform - Position: ("
-				<< transform.position.x << ", "
-				<< transform.position.y << ", "
-				<< transform.position.z << "), Scale: ("
-				<< transform.scale.x << ", "
-				<< transform.scale.y << ", "
-				<< transform.scale.z << ")" << std::endl;
-		}
-		*/
 	}
 
 	int SandBox::Exit()

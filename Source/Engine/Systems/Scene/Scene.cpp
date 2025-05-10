@@ -43,6 +43,10 @@ namespace Engine
 		// Initialize SceneBVH grid
 		sceneBVH = std::make_unique<SceneBVH>(registry);
 		sceneBVH->Init();
+
+		// Initialize the debug drawer
+		sceneDebugDraw = std::make_unique<SceneDebugDraw>();
+		sceneDebugDraw->Init();
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -70,15 +74,44 @@ namespace Engine
 		if (sceneBVH)
 		{
 			sceneBVH->UpdateIfNeeded(frustumCacheObserver);
-			Transform::ClearGlobalDirtyFlag(); // right now doing this here in internal update before Scene::Update prevents gameplay code from leveraging this flag.
 		}
 
 		frustumCacheObserver.clear();
 	}
 
+	void Scene::InternalScenePostUpdate(double dt)
+	{
+		Transform::ClearGlobalDirtyFlag();
+	}
+
 	void Scene::InternalSceneUpdate(double dt)
 	{
+		// Was doing bvh update here but its more performant to do it in the fixed update.
 
+	#ifdef _DEBUG
+		constexpr bool handleDebugDraw = true;
+	#else
+		constexpr bool handleDebugDraw = false;
+	#endif
+
+		if constexpr (handleDebugDraw)
+		{
+			// control toggle with input G key
+			if (GetInputManager()->IsKeyTriggered('G'))
+			{
+				sceneDebugDraw->SetEnabled(!sceneDebugDraw->IsEnabled());
+				std::string abled = sceneDebugDraw->IsEnabled() ? "Enabled" : "Disabled";
+				std::cout << "Debug wireframe draw " << abled << "\n";
+			}
+
+			// We do clear the previous frames debug draw data though. This opens up an opportunity for caching commonly drawn wireframes.
+			sceneDebugDraw->Clear();
+		}
+	}
+
+	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)
+	{
+		// nothing to do here yet
 	}
 
 }
