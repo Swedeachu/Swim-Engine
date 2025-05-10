@@ -111,10 +111,11 @@ namespace Engine
 
 		// Configure culled rendering mode
 		// Debug mode CPU culling: 100 FPS 
-		// Release mode CPU culling: 2000+ FPS
+		// Release mode CPU culling: 2500+ FPS
 		// GPU compute shader culling is sadly broken and can't be used yet
 		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
-		indexDraw->SetUseIndirectDrawing(true);
+		indexDraw->SetUseIndirectDrawing(true); // will have a more meaningfull impact once we have mega mesh stuff made
+		indexDraw->SetUseQueriedFrustumSceneBVH(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());

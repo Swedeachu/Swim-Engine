@@ -21,7 +21,7 @@ namespace Engine
 		static void SetCameraMatrices(const glm::mat4& view, const glm::mat4& proj)
 		{
 			glm::mat4 newVP = proj * view;
-
+			// Psuedo dirty flag to check if we even need to recompute by checking if the matrices memory bounds are equal
 			if (!MatricesEqual(newVP, lastVP))
 			{
 				lastVP = newVP;

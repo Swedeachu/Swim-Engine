@@ -53,7 +53,9 @@ namespace Engine
 		}
 	}
 
-	void Scene::InternalSceneUpdate(double dt)
+	// Stuff we don't need to happen thousands of times a second, or needs to be timed, such as physics scene updates.
+	// It might make sense to have sub scene systems be in a data structure that iterates with update inside of here and init and update etc.
+	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
 		// Add new frustum cache components if needed
 		for (auto entity : frustumCacheObserver)
@@ -68,10 +70,15 @@ namespace Engine
 		if (sceneBVH)
 		{
 			sceneBVH->UpdateIfNeeded(frustumCacheObserver);
-			Transform::ClearGlobalDirtyFlag();
+			Transform::ClearGlobalDirtyFlag(); // right now doing this here in internal update before Scene::Update prevents gameplay code from leveraging this flag.
 		}
 
 		frustumCacheObserver.clear();
+	}
+
+	void Scene::InternalSceneUpdate(double dt)
+	{
+
 	}
 
 }

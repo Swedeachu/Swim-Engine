@@ -39,6 +39,8 @@ namespace Engine
 
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
+		void InternalFixedUpdate(unsigned int tickThisSecond);
+
 		int Exit() override { DestroyAllEntities(); return 0; };
 
 		entt::entity CreateEntity();
@@ -98,10 +100,9 @@ namespace Engine
 		// Internals:
 		entt::observer frustumCacheObserver;
 
-		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
-
-		// High-performance grid BVH
 		std::unique_ptr<SceneBVH> sceneBVH;
+
+		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
 	};
 
