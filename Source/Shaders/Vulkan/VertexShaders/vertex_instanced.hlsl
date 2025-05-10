@@ -8,16 +8,16 @@ cbuffer CameraUBO : register(b0, space0)
 
 struct GpuInstanceData
 {
-  float4x4 model;        // 64
+  float4x4 model;
 
-  float4   aabbMin;      // 16
-  float4   aabbMax;      // 16
+  float4 aabbMin;
+  float4 aabbMax;
 
-  uint     textureIndex; // 4
-  float    hasTexture;   // 4
-  uint     meshIndex;    // 4
-  uint     pad;          // 4
-};                       // = 128
+  uint textureIndex;
+  float hasTexture;
+  uint meshInfoIndex;
+  uint materialIndex;
+};
 
 [[vk::binding(1, 0)]]
 StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);

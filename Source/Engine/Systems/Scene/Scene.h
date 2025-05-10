@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Library/EnTT/entt.hpp"
+#include "SubSceneSystems/SceneBVH.h"
 
 namespace Engine
 {
@@ -38,6 +39,8 @@ namespace Engine
 
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
+		void InternalFixedUpdate(unsigned int tickThisSecond);
+
 		int Exit() override { DestroyAllEntities(); return 0; };
 
 		entt::entity CreateEntity();
@@ -64,6 +67,8 @@ namespace Engine
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return GetSystem<CameraSystem>(cameraSystem); }
 		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
 		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
+
+		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 
 	protected:
 
@@ -92,10 +97,12 @@ namespace Engine
 		std::weak_ptr<VulkanRenderer> vulkanRenderer;
 		std::weak_ptr<OpenGLRenderer> openGLRenderer;
 
-		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
-
 		// Internals:
 		entt::observer frustumCacheObserver;
+
+		std::unique_ptr<SceneBVH> sceneBVH;
+
+		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
 	};
 

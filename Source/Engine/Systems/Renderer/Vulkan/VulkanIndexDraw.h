@@ -3,6 +3,7 @@
 #include "Buffers/VulkanInstanceBuffer.h"
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
 
 namespace Engine
 {
@@ -43,14 +44,27 @@ namespace Engine
 		VulkanBuffer* GetDrawCountBuffer() const { return drawCountBuffer.get(); }
 		VulkanBuffer* GetInstanceMetaBuffer() const { return instanceMetaBuffer.get(); }
 
+		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
+
+		// No reason to not use this, fundamental GPU optimization for batch draw calls.
 		void SetUseIndirectDrawing(bool value) { useIndirectDrawing = value; }
+
+		// it's a great performance boost but MAYBE has edge case issues in SceneBVH logic with over culling.
+		// So far seems to work fine actually so I have it enabled in VulkanRenderer::Awake().
+		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
 
 		uint32_t GetInstanceCount() const { return static_cast<uint32_t>(cpuInstanceData.size()); }
 
 	private:
 
 		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
+
+		// Helpers for instance buffer update
+		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
+		void GatherCandidatesView(const entt::registry& registry, const Frustum* frustum);
+		void AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
+		void UploadAndBatchInstances(uint32_t frameIndex);
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
@@ -67,6 +81,7 @@ namespace Engine
 
 		CullMode cullMode{ CullMode::NONE };
 
+		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
 		std::vector<std::pair<std::shared_ptr<Mesh>, MeshInstanceRange>> instanceBatches;
 
 		// Buffers for visibility culling (compute shader output)
@@ -88,7 +103,10 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; // [frameCount]
 		std::vector<std::vector<MeshIndirectDrawBatch>> drawBatchesPerFrame; // [frameCount][meshBatch]
 
+		std::vector<entt::entity> bvhVisibleEntities;
+
 		bool useIndirectDrawing{ false };
+		bool useQueriedFrustumSceneBVH{ false };
 
 	};
 

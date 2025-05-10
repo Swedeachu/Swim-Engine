@@ -78,6 +78,7 @@ namespace Engine
 	{
 		if (activeScene)
 		{
+			activeScene->InternalFixedUpdate(tickThisSecond);
 			activeScene->FixedUpdate(tickThisSecond);
 		}
 	}

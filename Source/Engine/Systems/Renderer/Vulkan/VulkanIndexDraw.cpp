@@ -87,21 +87,15 @@ namespace Engine
 	// This actually does CPU culling logic here if that mode is activated
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
-		// Clear CPU-side collections but preserve capacity
-		cpuInstanceData.resize(0); // resize because object reuse is expected
-		instanceBatches.clear(); 
-		drawBatchesPerFrame[frameIndex].clear(); // Reset indirect batch data for this frame
+		cpuInstanceData.resize(0);
+		instanceBatches.clear();
+		rangeMap.clear();
+		drawBatchesPerFrame[frameIndex].clear();
 
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
 
-		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
-		rangeMap.reserve(64); // avoid rehashing
-
-		uint32_t instanceIndex = 0;
-
-		// Frustum pointer (set if CPU culling is enabled)
+		// If we are doing CPU culling then we need to get the frustum
 		const Frustum* frustum = nullptr;
 		if (cullMode == CullMode::CPU)
 		{
@@ -110,128 +104,147 @@ namespace Engine
 			frustum = &Frustum::Get();
 		}
 
-		// === Populate instance data and group by mesh ===
-		for (auto entity : view)
+		// CPU culling can leverage the scenes BVH spacial partitions
+		if (cullMode == CullMode::CPU && frustum != nullptr && useQueriedFrustumSceneBVH)
 		{
-			const auto& transform = view.get<Transform>(entity);
-			const auto& mat = view.get<Material>(entity).data;
-			const auto& mesh = mat->mesh;
-
-			// CPU culling check
-			if (frustum != nullptr)
-			{
-				const glm::vec3& min = mesh->meshBufferData->aabbMin;
-				const glm::vec3& max = mesh->meshBufferData->aabbMax;
-
-				if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
-				{
-					continue;
-				}
-
-				/* the is visible lazy method is actually on par and simpler than using a cached frustum component (for now)
-				if (!registry.all_of<FrustumCullCache>(entity))
-				{
-					continue; // Skip if missing cache — optional debug log
-				}
-
-				auto& cache = registry.get<FrustumCullCache>(entity);
-				cache.Update(min, max, transform.GetModelMatrix());
-
-				if (!frustum->IsVisibleCached(cache))
-				{
-					continue; // Skip this instance
-				}
-				*/
-			}
-
-			// Build the GPU-side instance data struct
-			GpuInstanceData instance{};
-			instance.model = transform.GetModelMatrix();
-			instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
-			instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
-			instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-			instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-			instance.meshIndex = mesh->meshBufferData->GetMeshID();
-			instance.pad = 0u;
-
-			cpuInstanceData.push_back(instance);
-
-			auto& range = rangeMap[mesh];
-			if (range.count == 0)
-			{
-				range.firstInstance = instanceIndex;
-			}
-			range.count++;
-			instanceIndex++;
+			GatherCandidatesBVH(*scene, *frustum);
+		}
+		else
+		{
+			// frustum being passed here might be nullptr if CPU culling is off or not
+			GatherCandidatesView(registry, frustum);
 		}
 
-		// === Flatten into linear draw batch for fast draw ===
+		UploadAndBatchInstances(frameIndex);
+
+		// Broken!
+		if (cullMode == CullMode::GPU)
+		{
+			InstanceMeta meta{};
+			meta.instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
+
+			void* mappedPtr = instanceMetaBuffer->GetMappedPointer();
+			if (!mappedPtr)
+			{
+				throw std::runtime_error("Instance meta buffer is not mapped.");
+			}
+
+			memcpy(mappedPtr, &meta, sizeof(InstanceMeta));
+		}
+	}
+
+	// Fires off the frustum query in the scene's bounding volume hierarchy 
+	void VulkanIndexDraw::GatherCandidatesBVH(Scene& scene, const Frustum& frustum)
+	{
+		bvhVisibleEntities.clear();
+		// Pass visible entities vector by reference to be filled up by entities we will then add as instances.
+		scene.GetSceneBVH()->QueryFrustum(frustum, bvhVisibleEntities); 
+
+		auto& registry = scene.GetRegistry();
+		for (auto entity : bvhVisibleEntities)
+		{
+			/* We don't need this safety
+			if (!registry.valid(entity) || !registry.all_of<Transform, Material>(entity))
+			{
+				continue;
+			}
+			*/
+
+			// In theorey we shouldn't have to call the frustum check here since QueryFrustum did the work for us by now, so instead we pass a nullptr to avoid the IsVisibleLazy call.
+			// AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, &frustum);
+			AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
+		}
+	}
+
+	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const Frustum* frustum)
+	{
+		auto view = registry.view<Transform, Material>();
+
+		for (auto entity : view)
+		{
+			AddInstance(view.get<Transform>(entity), view.get<Material>(entity).data, frustum);
+		}
+	}
+
+	void VulkanIndexDraw::AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
+	{
+		const auto& mesh = mat->mesh;
+
+		if (frustum)
+		{
+			const glm::vec3& min = mesh->meshBufferData->aabbMin;
+			const glm::vec3& max = mesh->meshBufferData->aabbMax;
+
+			if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
+			{
+				return;
+			}
+		}
+
+		GpuInstanceData instance{};
+		instance.model = transform.GetModelMatrix();
+		instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
+		instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
+		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
+		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+		instance.meshIndex = mesh->meshBufferData->GetMeshID();
+		instance.pad = 0u;
+
+		cpuInstanceData.push_back(instance);
+
+		auto& range = rangeMap[mesh];
+		if (range.count == 0)
+		{
+			range.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1);
+		}
+		range.count++;
+	}
+
+	void VulkanIndexDraw::UploadAndBatchInstances(uint32_t frameIndex)
+	{
 		instanceBatches.reserve(rangeMap.size());
 		for (auto& [mesh, range] : rangeMap)
 		{
 			instanceBatches.emplace_back(mesh, range);
 		}
 
-		// === Upload per-instance data to GPU for rendering ===
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
-		// Indirect drawing stuff now
-		if (useIndirectDrawing)
-		{
-			std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
-			frameBatches.reserve(instanceBatches.size());
-
-			for (const auto& [mesh, range] : instanceBatches)
-			{
-				auto& meshData = GetOrCreateMeshBuffers(mesh);
-
-				VkDrawIndexedIndirectCommand cmd{};
-				cmd.indexCount = meshData.indexCount;
-				cmd.instanceCount = range.count;
-				cmd.firstIndex = 0;
-				cmd.vertexOffset = 0;
-				cmd.firstInstance = range.firstInstance;
-
-				// Each mesh gets its own indirect batch
-				MeshIndirectDrawBatch batch{};
-				batch.mesh = mesh;
-				batch.commands.push_back(cmd);
-
-				frameBatches.push_back(std::move(batch));
-			}
-
-			// Flatten all commands to the buffer for safety/debug (optional if not used directly)
-			std::vector<VkDrawIndexedIndirectCommand> allCommands;
-			for (const auto& batch : frameBatches)
-			{
-				allCommands.insert(allCommands.end(), batch.commands.begin(), batch.commands.end());
-			}
-
-			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
-			indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
-		}
-
-		// Below is probably way outdated by now since we are now doing indirect indexed drawing, 
-		// which in that case if we were doing GPU compute culling we would have to write to an SSBO for the commands to use.
-		// Once we get GPU culling we would have to refactor this now very messy class entirely.
-
-		// === Upload instance count for compute shader (only used for GPU culling) ===
-		if (cullMode != CullMode::GPU)
+		if (!useIndirectDrawing)
 		{
 			return;
 		}
 
-		InstanceMeta meta{};
-		meta.instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
+		auto& frameBatches = drawBatchesPerFrame[frameIndex];
+		frameBatches.reserve(instanceBatches.size());
 
-		void* mappedPtr = instanceMetaBuffer->GetMappedPointer();
-		if (mappedPtr == nullptr)
+		for (const auto& [mesh, range] : instanceBatches)
 		{
-			throw std::runtime_error("Instance meta buffer is not mapped.");
+			auto& meshData = GetOrCreateMeshBuffers(mesh);
+
+			VkDrawIndexedIndirectCommand cmd{};
+			cmd.indexCount = meshData.indexCount;
+			cmd.instanceCount = range.count;
+			cmd.firstIndex = 0;
+			cmd.vertexOffset = 0;
+			cmd.firstInstance = range.firstInstance;
+
+			MeshIndirectDrawBatch batch{};
+			batch.mesh = mesh;
+			batch.commands.push_back(cmd);
+
+			frameBatches.push_back(std::move(batch));
 		}
 
-		memcpy(mappedPtr, &meta, sizeof(InstanceMeta));
+		std::vector<VkDrawIndexedIndirectCommand> allCommands;
+		for (const auto& batch : frameBatches)
+		{
+			allCommands.insert(allCommands.end(), batch.commands.begin(), batch.commands.end());
+		}
+
+		VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 	}
 
 	inline MeshBufferData& VulkanIndexDraw::GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh)
@@ -272,6 +285,7 @@ namespace Engine
 			const auto& frameBatches = drawBatchesPerFrame[frameIndex];
 			uint32_t offset = 0;
 
+			// TODO: mega mesh buffer to truly have this be one draw call
 			for (const auto& batch : frameBatches)
 			{
 				auto& meshData = GetOrCreateMeshBuffers(batch.mesh);

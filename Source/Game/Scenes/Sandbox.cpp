@@ -11,9 +11,9 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = true; 
-	constexpr static bool fullyUniqueCubeMeshes = true; // can take the Vulkan renderer to a crawl if we aren't running any culling
+	constexpr static bool fullyUniqueCubeMeshes = false; // can take the Vulkan renderer to a crawl if we aren't running any culling
 	constexpr static bool randomizeCubeRotations = true;
-	// TODO: make more than just cube meshes (pyramids and spheres)
+	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
 	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
 	constexpr static const float SPACING = 2.5f;

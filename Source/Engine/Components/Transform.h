@@ -21,8 +21,16 @@ namespace Engine
     mutable bool dirty = true; // Marks if the transform has changed and if we need to recompute the model matrix next time GetModelMatrix() is called
     mutable glm::mat4 modelMatrix{ 1.0f };
 
-    // Helper to mark as dirty (yes its a one liner but this future proofs the design more so)
-    void MarkDirty() { dirty = true; }
+    // Global value for if any of the transforms were marked dirty this frame
+    // We better make sure to set this back to false at the end of each frame!
+    inline static bool TransformsDirty = false; // I don't think this is thread safe yet
+
+    // Helper to mark as dirty 
+    void MarkDirty()
+    {
+      dirty = true;
+      TransformsDirty = true;
+    }
 
   public:
 
@@ -36,6 +44,18 @@ namespace Engine
     const glm::vec3& GetPosition() const { return position; }
     const glm::vec3& GetScale() const { return scale; }
     const glm::quat& GetRotation() const { return rotation; }
+    const bool IsDirty() const { return dirty; }
+
+    // Static access for scene systems 
+    static bool AreAnyTransformsDirty()
+    {
+      return TransformsDirty;
+    }
+
+    static void ClearGlobalDirtyFlag()
+    {
+      TransformsDirty = false;
+    }
 
     // Public setters that mark the transform as dirty
 

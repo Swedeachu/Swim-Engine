@@ -234,6 +234,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.cpp" />
     <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
     <ClCompile Include="Source\Engine\Utility\PCH.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
@@ -280,6 +281,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\Scene.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SceneSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.h" />
     <ClInclude Include="Source\Engine\Systems\SystemManager.h" />
     <ClInclude Include="Source\Engine\Utility\ColorConstants.h" />
     <ClInclude Include="Source\Engine\Utility\PCH.h" />

@@ -27,6 +27,7 @@ namespace Engine
 	// Right now the interal scene base init and update are for caching mesh stuff for the frustum culling.
 	// Sooner or later we will have more code here for full on spacial partioning of the scene, 
 	// which will be essential for physics and AI and rendering/generic updates of active chunks.
+	// We are already doing that now with SceneBVH.
 
 	void Scene::InternalSceneInit()
 	{
@@ -38,6 +39,10 @@ namespace Engine
 		// Auto-remove FrustumCullCache when prerequisites are destroyed
 		registry.on_destroy<Engine::Transform>().connect<&Scene::RemoveFrustumCache>(*this);
 		registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
+
+		// Initialize SceneBVH grid
+		sceneBVH = std::make_unique<SceneBVH>(registry);
+		sceneBVH->Init();
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -48,9 +53,11 @@ namespace Engine
 		}
 	}
 
-	void Scene::InternalSceneUpdate(double dt)
+	// Stuff we don't need to happen thousands of times a second, or needs to be timed, such as physics scene updates.
+	// It might make sense to have sub scene systems be in a data structure that iterates with update inside of here and init and update etc.
+	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
-		// if we need to register any new frustum cull caches
+		// Add new frustum cache components if needed
 		for (auto entity : frustumCacheObserver)
 		{
 			if (!registry.any_of<Engine::FrustumCullCache>(entity))
@@ -59,7 +66,19 @@ namespace Engine
 			}
 		}
 
-		frustumCacheObserver.clear(); // clear it once processed
+		// Let BVH manage itself
+		if (sceneBVH)
+		{
+			sceneBVH->UpdateIfNeeded(frustumCacheObserver);
+			Transform::ClearGlobalDirtyFlag(); // right now doing this here in internal update before Scene::Update prevents gameplay code from leveraging this flag.
+		}
+
+		frustumCacheObserver.clear();
+	}
+
+	void Scene::InternalSceneUpdate(double dt)
+	{
+
 	}
 
 }
