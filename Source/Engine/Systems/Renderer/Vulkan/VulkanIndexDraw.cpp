@@ -344,15 +344,6 @@ namespace Engine
 		}
 
 		auto& debugRegistry = debugDraw->GetRegistry();
-		auto& wireframeMesh = debugDraw->GetWireframeCubeMesh();
-
-		if (!wireframeMesh || !wireframeMesh->meshBufferData)
-		{
-			return;
-		}
-
-		// Get mesh ID once
-		uint32_t meshID = wireframeMesh->meshBufferData->GetMeshID();
 
 		// No textures for debug
 		uint32_t textureIndex = UINT32_MAX;
@@ -363,8 +354,9 @@ namespace Engine
 
 		for (auto entity : view)
 		{
-			const auto& transform = view.get<Transform>(entity);
-			const auto& box = view.get<DebugWireBoxData>(entity);
+			const Transform& transform = view.get<Transform>(entity);
+			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
+			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
 
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
@@ -372,18 +364,14 @@ namespace Engine
 			instance.aabbMax = glm::vec4(0.5f, 0.5f, 0.5f, 0.0f);
 			instance.textureIndex = textureIndex;
 			instance.hasTexture = hasTexture;
-			instance.meshIndex = meshID;
+			instance.meshIndex = mesh->meshBufferData->GetMeshID();
 			instance.pad = 0u;
-
-			// === NOTE: optionally you can store wireframe color in a custom instance field.
-			// Your shader does not support this yet, so it will use vertex color only.
-			// If you want per-instance wireframe color, add it to GpuInstanceData + shader.
 
 			// Add instance
 			cpuInstanceData.push_back(instance);
 
 			// Add to batching
-			auto& range = rangeMap[wireframeMesh];
+			auto& range = rangeMap[mesh];
 			if (range.count == 0)
 			{
 				range.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1);

@@ -1,34 +1,57 @@
 #pragma once
 
-// Primary Colors
-#define COLOR_RED        glm::vec3(1.0f, 0.0f, 0.0f)
-#define COLOR_GREEN      glm::vec3(0.0f, 1.0f, 0.0f)
-#define COLOR_BLUE       glm::vec3(0.0f, 0.0f, 1.0f)
+#include "Library/glm/glm.hpp"
+#include <array>
 
-// Secondary Colors
-#define COLOR_CYAN       glm::vec3(0.0f, 1.0f, 1.0f)
-#define COLOR_MAGENTA    glm::vec3(1.0f, 0.0f, 1.0f)
-#define COLOR_YELLOW     glm::vec3(1.0f, 1.0f, 0.0f)
+namespace Engine
+{
 
-// Grayscale
-#define COLOR_BLACK      glm::vec3(0.0f, 0.0f, 0.0f)
-#define COLOR_WHITE      glm::vec3(1.0f, 1.0f, 1.0f)
-#define COLOR_GRAY       glm::vec3(0.5f, 0.5f, 0.5f)
-#define COLOR_DARK_GRAY  glm::vec3(0.25f, 0.25f, 0.25f)
-#define COLOR_LIGHT_GRAY glm::vec3(0.75f, 0.75f, 0.75f)
+  // Central color list
+#define DEBUG_COLOR_LIST \
+    X(Red,        glm::vec3(1.0f, 0.0f, 0.0f)) \
+    X(Green,      glm::vec3(0.0f, 1.0f, 0.0f)) \
+    X(Blue,       glm::vec3(0.0f, 0.0f, 1.0f)) \
+    X(Cyan,       glm::vec3(0.0f, 1.0f, 1.0f)) \
+    X(Magenta,    glm::vec3(1.0f, 0.0f, 1.0f)) \
+    X(Yellow,     glm::vec3(1.0f, 1.0f, 0.0f)) \
+    X(Black,      glm::vec3(0.0f, 0.0f, 0.0f)) \
+    X(White,      glm::vec3(1.0f, 1.0f, 1.0f)) \
+    X(Gray,       glm::vec3(0.5f, 0.5f, 0.5f)) \
+    X(DarkGray,   glm::vec3(0.25f, 0.25f, 0.25f)) \
+    X(LightGray,  glm::vec3(0.75f, 0.75f, 0.75f)) \
+    X(Orange,     glm::vec3(1.0f, 0.5f, 0.0f)) \
+    X(Pink,       glm::vec3(1.0f, 0.4f, 0.7f)) \
+    X(Purple,     glm::vec3(0.5f, 0.0f, 0.5f)) \
+    X(Lime,       glm::vec3(0.7f, 1.0f, 0.0f)) \
+    X(Brown,      glm::vec3(0.6f, 0.3f, 0.0f)) \
+    X(Turquoise,  glm::vec3(0.25f, 0.88f, 0.82f)) \
+    X(SkyBlue,    glm::vec3(0.53f, 0.81f, 0.92f)) \
+    X(Gold,       glm::vec3(1.0f, 0.84f, 0.0f)) \
+    X(Silver,     glm::vec3(0.75f, 0.75f, 0.75f)) \
+    X(Mint,       glm::vec3(0.6f, 1.0f, 0.6f)) \
+    X(Navy,       glm::vec3(0.0f, 0.0f, 0.5f)) \
+    X(Beige,      glm::vec3(0.96f, 0.96f, 0.86f))
 
-// Additional Tones
-#define COLOR_ORANGE     glm::vec3(1.0f, 0.5f, 0.0f)
-#define COLOR_PINK       glm::vec3(1.0f, 0.4f, 0.7f)
-#define COLOR_PURPLE     glm::vec3(0.5f, 0.0f, 0.5f)
-#define COLOR_LIME       glm::vec3(0.7f, 1.0f, 0.0f)
-#define COLOR_BROWN      glm::vec3(0.6f, 0.3f, 0.0f)
-#define COLOR_TURQUOISE  glm::vec3(0.25f, 0.88f, 0.82f)
-#define COLOR_SKY_BLUE   glm::vec3(0.53f, 0.81f, 0.92f)
-#define COLOR_GOLD       glm::vec3(1.0f, 0.84f, 0.0f)
-#define COLOR_SILVER     glm::vec3(0.75f, 0.75f, 0.75f)
+  // Generate enum
+  enum class DebugColor
+  {
+  #define X(name, value) name,
+    DEBUG_COLOR_LIST
+  #undef X
+    Count // always last for safe iteration
+  };
 
-// Fun ones
-#define COLOR_MINT       glm::vec3(0.6f, 1.0f, 0.6f)
-#define COLOR_NAVY       glm::vec3(0.0f, 0.0f, 0.5f)
-#define COLOR_BEIGE      glm::vec3(0.96f, 0.96f, 0.86f)
+  // Generate constexpr array of values
+  inline constexpr std::array<glm::vec3, static_cast<size_t>(DebugColor::Count)> DebugColorValues = { {
+      #define X(name, value) value,
+      DEBUG_COLOR_LIST
+      #undef X
+  } };
+
+  // Accessor function
+  inline constexpr glm::vec3 GetDebugColorValue(DebugColor color)
+  {
+    return DebugColorValues[static_cast<size_t>(color)];
+  }
+
+} // namespace Engine

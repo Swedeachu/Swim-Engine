@@ -6,31 +6,34 @@
 namespace Engine
 {
 
-  // This is 100% immediate mode, all submitted wireframe boxes are cleared at the end of each frame via Clear()
-  // We should however do a reverse double buffer type approach where we save all the transforms for the next frame 
-  // before clearing everything to avoid recreating the same entity.
-  // For example if SubmitWireframeBox is called two frames in a row with the same args, it can just use that previous frames created entity.
-
-  // This is cursed and technically very inefficent, its still normal vertices and indices composing triangles to make a bevelled 3D cuboid mesh.
-  // While a fine hack for now that doesn't matter much for debug mode stuff, it won't scale at all the second we want true wireframe drawing of all our other unique meshes.
   void SceneDebugDraw::Init()
+  {
+  #define X(NAME, VALUE) \
+        wireframeCubeMesh##NAME = CreateAndRegisterWireframeBoxMesh(DebugColor::NAME, #NAME "Wireframe");
+
+    DEBUG_COLOR_LIST
+
+    #undef X
+  }
+
+  std::shared_ptr<Mesh> SceneDebugDraw::CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName)
   {
     std::vector<Vertex> vertices;
     std::vector<uint16_t> indices;
 
-    // 8 corners of unit cube
+    glm::vec3 wireColor = GetDebugColorValue(color);
+
     glm::vec3 corners[8] = {
         {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f},
-        {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f},
+        {0.5f, 0.5f, -0.5f},  {-0.5f, 0.5f, -0.5f},
         {-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f},
-        {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}
+        {0.5f, 0.5f, 0.5f},   {-0.5f, 0.5f, 0.5f}
     };
 
-    // 12 edges of a cube (pairs of corner indices)
     int edges[12][2] = {
-        {0,1}, {1,2}, {2,3}, {3,0}, // bottom
-        {4,5}, {5,6}, {6,7}, {7,4}, // top
-        {0,4}, {1,5}, {2,6}, {3,7}  // sides
+        {0,1}, {1,2}, {2,3}, {3,0},
+        {4,5}, {5,6}, {6,7}, {7,4},
+        {0,4}, {1,5}, {2,6}, {3,7}
     };
 
     float thickness = 0.02f;
@@ -61,20 +64,20 @@ namespace Engine
       };
 
       uint16_t boxIndices[36] = {
-          0,1,2, 2,3,0, // bottom
-          4,5,6, 6,7,4, // top
-          0,1,5, 5,4,0, // front
-          2,3,7, 7,6,2, // back
-          1,2,6, 6,5,1, // right
-          3,0,4, 4,7,3  // left
+          0,1,2, 2,3,0,
+          4,5,6, 6,7,4,
+          0,1,5, 5,4,0,
+          2,3,7, 7,6,2,
+          1,2,6, 6,5,1,
+          3,0,4, 4,7,3
       };
 
       for (int j = 0; j < 8; j++)
       {
         Vertex v{};
         v.position = boxCorners[j];
-        v.color = glm::vec3(1.0f, 0.0f, 0.0f); // hard-coded red
-        v.uv = glm::vec2(0.0f); // not used
+        v.color = wireColor;
+        v.uv = glm::vec2(0.0f);
         vertices.push_back(v);
       }
 
@@ -86,7 +89,7 @@ namespace Engine
       indexOffset += 8;
     }
 
-    wireframeCubeMesh = MeshPool::GetInstance().RegisterMesh("DebugWireframeCubeBevelledRed", vertices, indices);
+    return MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
   }
 
   void SceneDebugDraw::Clear()
@@ -96,55 +99,35 @@ namespace Engine
 
   void SceneDebugDraw::SubmitWireframeBoxAABB
   (
-    const glm::vec3& min, 
+    const glm::vec3& min,
     const glm::vec3& max,
-    const glm::vec3& color
+    DebugColor color
   )
   {
-    // Compute center and size for Transform
     glm::vec3 center = (min + max) * 0.5f;
     glm::vec3 size = (max - min);
 
     entt::entity entity = debugRegistry.create();
-
-    // Add Transform component
     debugRegistry.emplace<Transform>(entity, center, size);
-
-    // Add DebugWireBoxData component
     debugRegistry.emplace<DebugWireBoxData>(entity, DebugWireBoxData{ color });
   }
 
   void SceneDebugDraw::SubmitWireframeBox
   (
-    const glm::vec3& position, 
+    const glm::vec3& position,
     const glm::vec3& scale,
-    float pitchDegrees, 
-    float yawDegrees, 
+    float pitchDegrees,
+    float yawDegrees,
     float rollDegrees,
-    const glm::vec3& color
+    DebugColor color
   )
   {
-    // Build quaternion from Euler angles
     glm::vec3 eulerRadians = glm::radians(glm::vec3(pitchDegrees, yawDegrees, rollDegrees));
     glm::quat rotationQuat = glm::quat(eulerRadians);
 
     entt::entity entity = debugRegistry.create();
-
-    // Add Transform component
     debugRegistry.emplace<Transform>(entity, position, scale, rotationQuat);
-
-    // Add DebugWireBoxData component
     debugRegistry.emplace<DebugWireBoxData>(entity, DebugWireBoxData{ color });
-  }
-
-  entt::registry& SceneDebugDraw::GetRegistry()
-  {
-    return debugRegistry;
-  }
-
-  const std::shared_ptr<Mesh>& SceneDebugDraw::GetWireframeCubeMesh() const
-  {
-    return wireframeCubeMesh;
   }
 
 }

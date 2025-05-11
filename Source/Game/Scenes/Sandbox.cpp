@@ -342,101 +342,128 @@ namespace Game
 		return 0;
 	}
 
-	// Just draws a wire frame box at the center of the world
+	// Draws a wire frame box at the center of the world
 	static void WireframeTest(Engine::Scene* scene)
 	{
 		auto* drawer = scene->GetSceneDebugDraw();
 		drawer->SubmitWireframeBox(glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.0f));
 	}
 
+
+	// Forward declarations
+	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager> input, std::shared_ptr<Engine::CameraSystem> cameraSystem);
+	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager> input, entt::registry& registry, entt::entity controllableEntity);
+
 	// this is just quickly thrown together demo code, behavior components coming soon
 	void SandBox::Update(double dt)
 	{
-		// WireframeTest(this);
-
-		auto input = GetInputManager();
-		auto cameraSystem = GetCameraSystem();
+		std::shared_ptr<Engine::InputManager> input = GetInputManager();
+		std::shared_ptr<Engine::CameraSystem> cameraSystem = GetCameraSystem();
 		auto& registry = GetRegistry();
 
-		// ====== Camera Movement (WASD with camera direction) =======
+		HandleCameraControls(dt, input, cameraSystem);
+		HandleEntityControls(dt, input, registry, controllableEntity);
+	}
+
+	// =================== CAMERA CONTROL ===================
+
+	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager> input, std::shared_ptr<Engine::CameraSystem> cameraSystem)
+	{
+		// Movement speed constants
 		const float cameraMoveSpeed = 5.0f;
-		glm::vec3 cameraMoveDir{ 0.0f };
+		const float boostMultiplier = 3.0f;
+		const float mouseSensitivity = 0.1f;
 
-		// 1. Get the camera's yaw (Y in Euler angles). We'll ignore pitch for movement on XZ plane.
-		auto camEuler = cameraSystem->GetCamera().GetRotationEuler();
-		float yawRadians = glm::radians(camEuler.y);
+		// Get the active camera
+		auto& camera = cameraSystem->GetCamera();
+		glm::vec3 position = camera.GetPosition();
 
-		// 2. Build a forward vector pointing where the camera looks in XZ.
-		glm::vec3 forwardXZ(
-			sin(yawRadians),
-			0.0f,
-			-cos(yawRadians)
-		);
+		// these will be stores in the camera controller component 
+		static float yaw = 0.0f;    // rotation around world Y axis
+		static float pitch = 0.0f;  // rotation around local X axis
 
-		// 3. Build a right vector perpendicular to forward
-		glm::vec3 rightXZ = glm::normalize(glm::cross(forwardXZ, glm::vec3(0, 1, 0)));
+		// ----- Mouse Look -----
+		if (input->IsKeyDown(VK_RBUTTON))
+		{
+			glm::vec2 mouseDelta = input->GetMousePositionDelta();
 
-		// 4. Check WASD for camera movement
+			// Update yaw (horizontal) and pitch (vertical)
+			yaw += mouseDelta.x * mouseSensitivity;
+			pitch -= mouseDelta.y * mouseSensitivity;
+
+			// Clamp pitch to prevent flipping
+			pitch = glm::clamp(pitch, -89.9f, 89.9f);
+
+			// Yaw is around global Y
+			glm::quat qYaw = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+
+			// Pitch is around camera's local X
+			glm::quat qPitch = glm::angleAxis(glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
+
+			// Combined rotation: yaw first, then pitch
+			glm::quat rotation = qYaw * qPitch;
+
+			camera.SetRotation(rotation);
+		}
+
+		glm::quat rotation = camera.GetRotation(); // Get updated rotation
+
+		// ----- Movement -----
+		glm::mat4 rotationMatrix = glm::mat4_cast(rotation);
+		glm::vec3 forward = glm::normalize(rotationMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+		glm::vec3 right = glm::normalize(rotationMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f));
+		glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // World up
+
+		glm::vec3 movement(0.0f);
+
 		if (input->IsKeyDown('W'))
 		{
-			cameraMoveDir += forwardXZ;
+			movement += forward;
 		}
 		if (input->IsKeyDown('S'))
 		{
-			cameraMoveDir -= forwardXZ;
+			movement -= forward;
 		}
 		if (input->IsKeyDown('A'))
 		{
-			cameraMoveDir -= rightXZ;
+			movement -= right;
 		}
 		if (input->IsKeyDown('D'))
 		{
-			cameraMoveDir += rightXZ;
+			movement += right;
 		}
-
-		// Vertical camera movement
 		if (input->IsKeyDown(VK_SPACE))
 		{
-			cameraMoveDir += glm::vec3(0, 1, 0);
+			movement += up;
 		}
 		if (input->IsKeyDown(VK_SHIFT))
 		{
-			cameraMoveDir -= glm::vec3(0, 1, 0);
+			movement -= up;
 		}
 
-		// 5. Apply camera movement
-		if (glm::length(cameraMoveDir) > 0.0f)
+		if (glm::length(movement) > 0.0f)
 		{
-			glm::vec3 cameraMoveDelta = glm::normalize(cameraMoveDir) * cameraMoveSpeed * static_cast<float>(dt);
-			cameraSystem->GetCamera().SetPosition(cameraSystem->GetCamera().GetPosition() + cameraMoveDelta);
+			movement = glm::normalize(movement);
 		}
 
-		// ====== Camera Rotation (mouse-based when right-click is down) =======
-		if (input->IsKeyDown(VK_RBUTTON))
+		float speed = cameraMoveSpeed;
+		if (input->IsKeyDown(VK_CONTROL))
 		{
-			float mouseSensitivity = 0.1f;
-			auto mouseDelta = input->GetMousePositionDelta();
-
-			auto currentEuler = cameraSystem->GetCamera().GetRotationEuler();
-			currentEuler.x += mouseDelta.y * mouseSensitivity;
-			currentEuler.y += mouseDelta.x * mouseSensitivity;
-
-			// Clamp pitch, no roll
-			if (currentEuler.x > 89.0f)  currentEuler.x = 89.0f;
-			if (currentEuler.x < -89.0f) currentEuler.x = -89.0f;
-
-			cameraSystem->GetCamera().SetRotationEuler(
-				currentEuler.x,
-				currentEuler.y,
-				0.0f
-			);
+			speed *= boostMultiplier;
 		}
 
-		// ====== Controllable Entity Movement (Arrow Keys) =======
+		position += movement * speed * dt;
+		camera.SetPosition(position);
+	}
+
+	// =================== ENTITY CONTROL ===================
+
+	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager> input, entt::registry& registry, entt::entity controllableEntity)
+	{
 		const float entityMoveSpeed = 5.0f;
 		glm::vec3 entityMoveDir{ 0.0f };
 
-		// Arrow keys for entity movement
+		// Arrow keys + Z/X for entity movement.
 		if (input->IsKeyDown(VK_UP))
 		{
 			entityMoveDir += glm::vec3(0.0f, 0.0f, -1.0f); // Forward
@@ -453,8 +480,16 @@ namespace Game
 		{
 			entityMoveDir += glm::vec3(1.0f, 0.0f, 0.0f); // Right
 		}
+		if (input->IsKeyDown(VK_PRIOR)) // page up
+		{
+			entityMoveDir += glm::vec3(0.0f, 1.0f, 0.0f); // Up
+		}
+		if (input->IsKeyDown(VK_NEXT)) // page down
+		{
+			entityMoveDir += glm::vec3(0.0f, -1.0f, 0.0f); // Down
+		}
 
-		// Apply movement to the controllable entity
+		// Apply entity movement if any
 		if (glm::length(entityMoveDir) > 0.0f)
 		{
 			entityMoveDir = glm::normalize(entityMoveDir) * entityMoveSpeed * static_cast<float>(dt);
