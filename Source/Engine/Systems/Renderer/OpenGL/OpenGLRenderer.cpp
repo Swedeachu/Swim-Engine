@@ -8,6 +8,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
+#include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
 #include <fstream>
 #include <sstream>
@@ -283,46 +284,111 @@ namespace Engine
 		UpdateUniformBuffer();
 		glUseProgram(shaderProgram);
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (!scene)
 		{
 			SwapBuffers(deviceContext);
 			return;
 		}
 
-		auto& registry = scene->GetRegistry();
-		auto view = registry.view<Transform, Material>();
+		// Setup camera + frustum
+		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
+		Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
+		const Frustum& frustum = Frustum::Get();
 
-		for (auto entity : view)
+		entt::registry& registry = scene->GetRegistry();
+
+		// Draw everything within the frustum
+		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			const auto& transform = view.get<Transform>(entity);
-			const auto& mat = view.get<Material>(entity).data;
-			const auto& meshData = *mat->mesh->meshBufferData;
+			DrawEntity(entity, registry);
+		});
 
-			// 1) model matrix
+	#ifdef _DEBUG
+		RenderWireframeDebug(scene);
+	#endif
+
+		SwapBuffers(deviceContext);
+	}
+
+	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry)
+	{
+		const Transform& transform = registry.get<Transform>(entity);
+		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
+		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+
+		// Model matrix
+		glm::mat4 model = transform.GetModelMatrix();
+		glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
+
+		// Texture bind
+		bool usesTexture = (mat->albedoMap != nullptr);
+		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
+
+		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texID);
+		glUniform1i(loc_albedoTex, 0);
+
+		// Draw
+		glBindVertexArray(meshData.GetGLVAO());
+		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
+		glBindVertexArray(0);
+	}
+
+	void OpenGLRenderer::RenderWireframeDebug(std::shared_ptr<Scene>& scene)
+	{
+		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
+		constexpr bool cullWireframe = true;
+
+		if (!debugDraw || !debugDraw->IsEnabled())
+		{
+			return;
+		}
+
+		auto& debugRegistry = debugDraw->GetRegistry();
+		const Frustum& frustum = Frustum::Get();
+
+		// No textures for debug
+		uint32_t textureIndex = UINT32_MAX;
+		float hasTexture = 0.0f;
+
+		// Append debug wireframe boxes into instance buffer
+		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
+
+		for (auto& entity : view)
+		{
+			const Transform& transform = view.get<Transform>(entity);
+			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
+			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
+
+			if constexpr (cullWireframe)
+			{
+				const glm::vec3& min = mesh->meshBufferData->aabbMin;
+				const glm::vec3& max = mesh->meshBufferData->aabbMax;
+
+				if (!frustum.IsVisibleLazy(min, max, transform.GetModelMatrix()))
+				{
+					continue;
+				}
+			}
+
+			// attatch model
 			glm::mat4 model = transform.GetModelMatrix();
-			glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]); // Vulkan does this with a push constant
-
-			// 2) texture on/off + bind
-			bool usesTexture = (mat->albedoMap != nullptr);
-			glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
-
-			GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
-
+			glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
+			// wireframes don't use textures
+			glUniform1f(loc_hasTexture, 0.0f);
 			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, texID);
+			glBindTexture(GL_TEXTURE_2D, 0);
 			glUniform1i(loc_albedoTex, 0);
-
+			// bind mesh data and draw it
+			const MeshBufferData& meshData = *mesh->meshBufferData;
 			glBindVertexArray(meshData.GetGLVAO());
-
-			// 3) draw!
 			glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
 
 			// (optionally) unbind so we don’t accidentally reuse it somehow
 			glBindVertexArray(0);
 		}
-
-		SwapBuffers(deviceContext);
 	}
 
 	void OpenGLRenderer::UpdateUniformBuffer()

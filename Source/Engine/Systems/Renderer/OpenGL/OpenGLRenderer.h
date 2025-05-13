@@ -4,7 +4,7 @@ namespace Engine
 {
 	
 	// Forward decalre
-	class Texture2D; // do we need to?
+	class Texture2D; 
 
 	class OpenGLRenderer : public Machine
 	{
@@ -40,6 +40,9 @@ namespace Engine
 		// Rendering
 		void RenderFrame();
 		void UpdateUniformBuffer();
+		void DrawEntity(entt::entity entity, entt::registry& registry);
+
+		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
 
 		HDC deviceContext = nullptr;
 		HGLRC glContext = nullptr;

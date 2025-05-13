@@ -11,12 +11,12 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = true;
-	constexpr static bool fullyUniqueCubeMeshes = false; // can take the Vulkan renderer to a crawl if we aren't running any culling
+	constexpr static bool fullyUniqueCubeMeshes = false; // can take things to a crawl because we aren't doing the mega mesh buffer yet
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
-	constexpr static const int GRID_HALF_SIZE = 2; // for example 10 makes a 20x20x20 cube of cubes
-	constexpr static const float SPACING = 2.5f;
+	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
+	constexpr static const float SPACING = 3.5f; // 2.5f
 
 	int SandBox::Awake()
 	{
