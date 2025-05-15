@@ -4,6 +4,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "VulkanRenderer.h"
 
 namespace Engine
 {
@@ -40,6 +41,97 @@ namespace Engine
 
 			drawBatchesPerFrame[i].clear();
 		}
+	}
+
+	void VulkanIndexDraw::CreateMegaMeshBuffers(VkDeviceSize totalVertexBufferSize, VkDeviceSize totalIndexBufferSize)
+	{
+		// Free previous buffers if they exist
+		if (megaVertexBuffer)
+		{
+			megaVertexBuffer->Free();
+			megaVertexBuffer.reset();
+		}
+
+		if (megaIndexBuffer)
+		{
+			megaIndexBuffer->Free();
+			megaIndexBuffer.reset();
+		}
+
+		// Store sizes
+		megaVertexBufferSize = totalVertexBufferSize;
+		megaIndexBufferSize = totalIndexBufferSize;
+
+		// === Create mega vertex buffer ===
+		megaVertexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			totalVertexBufferSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		// === Create mega index buffer ===
+		megaIndexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			totalIndexBufferSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+	}
+
+	void VulkanIndexDraw::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	{
+		VkDeviceSize vertexSize = vertices.size() * sizeof(Vertex);
+		VkDeviceSize indexSize = indices.size() * sizeof(uint16_t);
+
+		if (!HasSpaceForMesh(vertexSize, indexSize))
+		{
+			GrowMegaBuffers(vertexSize, indexSize);
+		}
+
+		VkDeviceSize vertexOffset = currentVertexBufferOffset;
+		VkDeviceSize indexOffset = currentIndexBufferOffset;
+
+		VulkanBuffer stagingVertexBuffer(
+			device,
+			physicalDevice,
+			vertexSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		stagingVertexBuffer.CopyData(vertices.data(), static_cast<size_t>(vertexSize));
+
+		VulkanBuffer stagingIndexBuffer(
+			device,
+			physicalDevice,
+			indexSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		stagingIndexBuffer.CopyData(indices.data(), static_cast<size_t>(indexSize));
+
+		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			stagingVertexBuffer.GetBuffer(),
+			megaVertexBuffer->GetBuffer(),
+			vertexSize,
+			vertexOffset
+		);
+
+		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			stagingIndexBuffer.GetBuffer(),
+			megaIndexBuffer->GetBuffer(),
+			indexSize,
+			indexOffset
+		);
+
+		meshData.vertexOffsetInMegaBuffer = vertexOffset;
+		meshData.indexOffsetInMegaBuffer = indexOffset;
+		meshData.indexCount = static_cast<uint32_t>(indices.size());
+
+		currentVertexBufferOffset += vertexSize;
+		currentIndexBufferOffset += indexSize;
 	}
 
 	// This actually does CPU culling logic here if that mode is activated
@@ -178,8 +270,8 @@ namespace Engine
 			VkDrawIndexedIndirectCommand cmd{};
 			cmd.indexCount = meshData.indexCount;
 			cmd.instanceCount = range.count;
-			cmd.firstIndex = 0;
-			cmd.vertexOffset = 0;
+			cmd.firstIndex = static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t));
+			cmd.vertexOffset = static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex));
 			cmd.firstInstance = range.firstInstance;
 
 			MeshIndirectDrawBatch batch{};
@@ -228,21 +320,30 @@ namespace Engine
 			VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			const std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
+			std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
 			uint32_t offset = 0;
 
-			// TODO: mega mesh buffer to truly have this be one draw call
-			for (const auto& batch : frameBatches)
+			// Mega mesh buffer version
+			VkBuffer vertexBuffers[] = {
+					megaVertexBuffer->GetBuffer(), // Bind mega vertex buffer
+					instanceBuf                    // Instance buffer
+			};
+
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+			for (auto& batch : frameBatches)
 			{
-				MeshBufferData& meshData = GetOrCreateMeshBuffers(batch.mesh);
+				// Each batch corresponds to a single mesh type
+				MeshBufferData& meshData = *batch.mesh->meshBufferData;
 
-				VkBuffer vertexBuffers[] = {
-					meshData.vertexBuffer->GetBuffer(),
-					instanceBuf
-				};
-
-				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+				// Indirect commands already have firstInstance + instanceCount
+				// We just override firstIndex and vertexOffset to point into mega buffer
+				for (VkDrawIndexedIndirectCommand& cmdData : batch.commands)
+				{
+					cmdData.firstIndex = static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t));
+					cmdData.vertexOffset = static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex));
+				}
 
 				vkCmdDrawIndexedIndirect(
 					cmd,
@@ -257,19 +358,30 @@ namespace Engine
 		}
 		else
 		{
+			// Legacy path with normal instancing (still works)
 			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			// Iterate through batches and draw each mesh with instancing
+			VkBuffer vertexBuffers[] = {
+					megaVertexBuffer->GetBuffer(),
+					instanceBuf
+			};
+
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
 			for (const auto& [mesh, range] : instanceBatches)
 			{
-				MeshBufferData& meshData = GetOrCreateMeshBuffers(mesh);
+				MeshBufferData& meshData = *mesh->meshBufferData;
 
-				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
-
-				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-				vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
+				vkCmdDrawIndexed(
+					cmd,
+					meshData.indexCount,
+					range.count,
+					static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t)),
+					static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex)),
+					range.firstInstance
+				);
 			}
 		}
 	}
@@ -309,6 +421,65 @@ namespace Engine
 			instance.materialIndex = 0u;
 
 			cpuInstanceData.push_back(instance);
+		}
+	}
+
+	void VulkanIndexDraw::GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize)
+	{
+		VkDeviceSize newVertexSize = megaVertexBufferSize + std::max(additionalVertexSize, MESH_BUFFER_GROWTH_SIZE);
+		VkDeviceSize newIndexSize = megaIndexBufferSize + std::max(additionalIndexSize, MESH_BUFFER_GROWTH_SIZE);
+
+		std::unique_ptr<VulkanBuffer> newVertexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			newVertexSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		std::unique_ptr<VulkanBuffer> newIndexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			newIndexSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		if (megaVertexBuffer && currentVertexBufferOffset > 0)
+		{
+			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+				megaVertexBuffer->GetBuffer(),
+				newVertexBuffer->GetBuffer(),
+				currentVertexBufferOffset
+			);
+		}
+
+		if (megaIndexBuffer && currentIndexBufferOffset > 0)
+		{
+			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+				megaIndexBuffer->GetBuffer(),
+				newIndexBuffer->GetBuffer(),
+				currentIndexBufferOffset
+			);
+		}
+
+		megaVertexBuffer = std::move(newVertexBuffer);
+		megaIndexBuffer = std::move(newIndexBuffer);
+
+		megaVertexBufferSize = newVertexSize;
+		megaIndexBufferSize = newIndexSize;
+	}
+
+	bool VulkanIndexDraw::HasSpaceForMesh(VkDeviceSize vertexSize, VkDeviceSize indexSize) const
+	{
+		if ((currentVertexBufferOffset + vertexSize <= megaVertexBufferSize) &&
+			(currentIndexBufferOffset + indexSize <= megaIndexBufferSize))
+		{
+			return true;
+		}
+		else
+		{
+			return false;
 		}
 	}
 

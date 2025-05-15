@@ -25,6 +25,10 @@ namespace Engine
 		// Count of indices for rendering
 		uint32_t indexCount = 0;
 
+		// The offsets to use in the mega mesh buffer on the gpu
+		VkDeviceSize vertexOffsetInMegaBuffer = 0;
+		VkDeviceSize indexOffsetInMegaBuffer = 0;
+
 		// ID of the mesh used in the GPU
 		uint32_t meshID = UINT32_MAX;
 

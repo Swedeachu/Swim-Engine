@@ -45,6 +45,7 @@ namespace Engine
 
 		const std::unique_ptr<VulkanDescriptorManager>& GetDescriptorManager() const { return descriptorManager; }
 		const VkSampler& GetDefaultSampler() const { return defaultSampler; }
+		const std::unique_ptr<VulkanIndexDraw>& GetIndexDraw() const { return indexDraw; }
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -69,6 +70,14 @@ namespace Engine
 			VkBuffer srcBuffer,
 			VkBuffer dstBuffer,
 			VkDeviceSize size
+		) const;
+
+		// Copies data from one buffer to another with an offset
+		void CopyBuffer(
+			VkBuffer srcBuffer,
+			VkBuffer dstBuffer,
+			VkDeviceSize size,
+			VkDeviceSize dstOffset
 		) const;
 
 		// Creates a 2D image on the GPU

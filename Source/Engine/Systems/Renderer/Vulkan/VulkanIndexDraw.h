@@ -23,6 +23,10 @@ namespace Engine
 
 		void CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight);
 
+		void CreateMegaMeshBuffers(VkDeviceSize totalVertexBufferSize, VkDeviceSize totalIndexBufferSize);
+
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData);
+
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
 		void DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd);
@@ -52,6 +56,10 @@ namespace Engine
 		void GatherCandidatesView(const entt::registry& registry, const Frustum* frustum);
 		void AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
+
+		void GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize);
+
+		bool HasSpaceForMesh(VkDeviceSize vertexSize, VkDeviceSize indexSize) const;
 
 		void DebugWireframeDraw();
 
@@ -85,6 +93,21 @@ namespace Engine
 
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; // [frameCount]
 		std::vector<std::vector<MeshIndirectDrawBatch>> drawBatchesPerFrame; // [frameCount][meshBatch]
+
+		// Mega mesh buffers
+		std::unique_ptr<VulkanBuffer> megaVertexBuffer;
+		std::unique_ptr<VulkanBuffer> megaIndexBuffer;
+
+		// Track how large the mega buffers are 
+		VkDeviceSize megaVertexBufferSize = 0;
+		VkDeviceSize megaIndexBufferSize = 0;
+
+		// Tracking offsets
+		VkDeviceSize currentVertexBufferOffset = 0;
+		VkDeviceSize currentIndexBufferOffset = 0;
+
+		// How big to grow each time we run out
+		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
 		bool useIndirectDrawing{ false };
 		bool useQueriedFrustumSceneBVH{ false };

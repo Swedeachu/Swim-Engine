@@ -48,6 +48,11 @@ namespace Engine
 			}
 
 			mesh->meshBufferData->GenerateBuffers(vertices, indices, cachedDevice, cachedPhysicalDevice);
+			SwimEngine::GetInstance()->GetVulkanRenderer()->GetIndexDraw()->UploadMeshToMegaBuffer(
+				vertices,
+				indices,
+				*mesh->meshBufferData
+			);
 		}
 		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 		{

@@ -108,6 +108,12 @@ namespace Engine
 		);
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
+		// We have a huge buffer on the GPU now to store all of our meshes so we never have to change vertice and indice bindings
+		constexpr VkDeviceSize initialVertexSize = 16 * 1024 * 1024; // 16 MB
+		constexpr VkDeviceSize initialIndexSize = 4 * 1024 * 1024;  // 4 MB
+
+		indexDraw->CreateMegaMeshBuffers(initialVertexSize, initialIndexSize);
+
 		// Configure culled rendering mode
 		// Debug mode CPU culling: 100 FPS 
 		// Release mode CPU culling: 2500+ FPS
@@ -481,6 +487,25 @@ namespace Engine
 
 		auto graphicsQueue = deviceManager->GetGraphicsQueue();
 
+		commandManager->EndSingleTimeCommands(commandBuffer, graphicsQueue);
+	}
+
+	void VulkanRenderer::CopyBuffer(
+		VkBuffer srcBuffer,
+		VkBuffer dstBuffer,
+		VkDeviceSize size,
+		VkDeviceSize dstOffset
+	) const
+	{
+		VkCommandBuffer commandBuffer = commandManager->BeginSingleTimeCommands();
+
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0;
+		copyRegion.dstOffset = dstOffset;
+		copyRegion.size = size;
+		vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+		auto graphicsQueue = deviceManager->GetGraphicsQueue();
 		commandManager->EndSingleTimeCommands(commandBuffer, graphicsQueue);
 	}
 
