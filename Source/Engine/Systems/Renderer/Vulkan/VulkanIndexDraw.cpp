@@ -4,6 +4,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "VulkanRenderer.h"
 
 namespace Engine
 {
@@ -42,46 +43,96 @@ namespace Engine
 		}
 	}
 
-	void VulkanIndexDraw::CreateCullOutputBuffers(uint32_t maxInstances)
+	void VulkanIndexDraw::CreateMegaMeshBuffers(VkDeviceSize totalVertexBufferSize, VkDeviceSize totalIndexBufferSize)
 	{
-		constexpr VkBufferUsageFlags storageAndVertex =
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-			VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		// Free previous buffers if they exist
+		if (megaVertexBuffer)
+		{
+			megaVertexBuffer->Free();
+			megaVertexBuffer.reset();
+		}
 
-		VkDeviceSize matrixSize = sizeof(glm::mat4) * maxInstances;
-		VkDeviceSize instanceDataSize = sizeof(uint32_t) * 4 * maxInstances; // match uint4 layout
-		VkDeviceSize drawCountSize = sizeof(uint32_t);
+		if (megaIndexBuffer)
+		{
+			megaIndexBuffer->Free();
+			megaIndexBuffer.reset();
+		}
 
-		visibleModelBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice, matrixSize,
-			storageAndVertex,
+		// Store sizes
+		megaVertexBufferSize = totalVertexBufferSize;
+		megaIndexBufferSize = totalIndexBufferSize;
+
+		// === Create mega vertex buffer ===
+		megaVertexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			totalVertexBufferSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 		);
 
-		drawCountBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice, drawCountSize,
-			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-			VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | // critical for raw access
-			VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-			VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		// === Create mega index buffer ===
+		megaIndexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			totalIndexBufferSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+	}
+
+	// This makes 2 temporary index and vertex buffers and then copies them into our mega buffers. Also supports auto growth. This also sets the offsets in mesh data.
+	void VulkanIndexDraw::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	{
+		VkDeviceSize vertexSize = vertices.size() * sizeof(Vertex);
+		VkDeviceSize indexSize = indices.size() * sizeof(uint16_t);
+
+		if (!HasSpaceForMesh(vertexSize, indexSize))
+		{
+			GrowMegaBuffers(vertexSize, indexSize);
+		}
+
+		VkDeviceSize vertexOffset = currentVertexBufferOffset;
+		VkDeviceSize indexOffset = currentIndexBufferOffset;
+
+		VulkanBuffer stagingVertexBuffer(
+			device,
+			physicalDevice,
+			vertexSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		stagingVertexBuffer.CopyData(vertices.data(), static_cast<size_t>(vertexSize));
+
+		VulkanBuffer stagingIndexBuffer(
+			device,
+			physicalDevice,
+			indexSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+		stagingIndexBuffer.CopyData(indices.data(), static_cast<size_t>(indexSize));
+
+		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			stagingVertexBuffer.GetBuffer(),
+			megaVertexBuffer->GetBuffer(),
+			vertexSize,
+			vertexOffset
 		);
 
-		visibleDataBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice, instanceDataSize,
-			storageAndVertex,
-			// Same here to allow CPU readback
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			stagingIndexBuffer.GetBuffer(),
+			megaIndexBuffer->GetBuffer(),
+			indexSize,
+			indexOffset
 		);
 
-		instanceMetaBuffer = std::make_unique<VulkanBuffer>(
-			device, physicalDevice,
-			sizeof(uint32_t),
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-		);
+		meshData.vertexOffsetInMegaBuffer = vertexOffset;
+		meshData.indexOffsetInMegaBuffer = indexOffset;
+		meshData.indexCount = static_cast<uint32_t>(indices.size());
+
+		currentVertexBufferOffset += vertexSize;
+		currentIndexBufferOffset += indexSize;
 	}
 
 	// This actually does CPU culling logic here if that mode is activated
@@ -145,15 +196,6 @@ namespace Engine
 		}
 
 		UploadAndBatchInstances(frameIndex);
-
-		if (cullMode == CullMode::GPU)
-		{
-			InstanceMeta meta{};
-			meta.instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
-			void* ptr = instanceMetaBuffer->GetMappedPointer();
-			if (!ptr) { throw std::runtime_error("Instance meta buffer not mapped."); }
-			memcpy(ptr, &meta, sizeof(InstanceMeta));
-		}
 	}
 
 	// Fires off the frustum query in the scene's bounding volume hierarchy using immediate callback
@@ -229,8 +271,8 @@ namespace Engine
 			VkDrawIndexedIndirectCommand cmd{};
 			cmd.indexCount = meshData.indexCount;
 			cmd.instanceCount = range.count;
-			cmd.firstIndex = 0;
-			cmd.vertexOffset = 0;
+			cmd.firstIndex = static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t));
+			cmd.vertexOffset = static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex));
 			cmd.firstInstance = range.firstInstance;
 
 			MeshIndirectDrawBatch batch{};
@@ -268,65 +310,75 @@ namespace Engine
 		// Store the newly created MeshBufferData in the Mesh
 		mesh->meshBufferData = data;
 
+		// Upload into the mega buffer now
+		UploadMeshToMegaBuffer(mesh->vertices, mesh->indices, *mesh->meshBufferData);
+
 		return *data;
 	}
 
 	void VulkanIndexDraw::DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		if (cullMode == CullMode::GPU)
-		{
-			DrawCulledIndexed(frameIndex, cmd);
-			return;
-		}
-
 		if (useIndirectDrawing)
 		{
 			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 			VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			const std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
-			uint32_t offset = 0;
+			// Use the mega mesh buffer to do the scene in one single draw call
+			VkBuffer vertexBuffers[] = {
+					megaVertexBuffer->GetBuffer(), // All vertex data lives here
+					instanceBuf                    // Instance buffer (per-instance data)
+			};
 
-			// TODO: mega mesh buffer to truly have this be one draw call
-			for (const auto& batch : frameBatches)
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+			// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
+			// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
+
+			size_t totalCommands = 0;
+			for (const auto& batch : drawBatchesPerFrame[frameIndex])
 			{
-				MeshBufferData& meshData = GetOrCreateMeshBuffers(batch.mesh);
+				totalCommands += batch.commands.size();
+			}
 
-				VkBuffer vertexBuffers[] = {
-					meshData.vertexBuffer->GetBuffer(),
-					instanceBuf
-				};
-
-				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
+			if (totalCommands > 0)
+			{
 				vkCmdDrawIndexedIndirect(
 					cmd,
 					indirectBuf,
-					offset,
-					static_cast<uint32_t>(batch.commands.size()),
+					0, // offset
+					static_cast<uint32_t>(totalCommands),
 					sizeof(VkDrawIndexedIndirectCommand)
 				);
-
-				offset += static_cast<uint32_t>(batch.commands.size()) * sizeof(VkDrawIndexedIndirectCommand);
 			}
 		}
 		else
 		{
+			// Legacy path with normal instancing 
 			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			// Iterate through batches and draw each mesh with instancing
+			VkBuffer vertexBuffers[] = {
+					megaVertexBuffer->GetBuffer(),
+					instanceBuf
+			};
+
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
 			for (const auto& [mesh, range] : instanceBatches)
 			{
-				MeshBufferData& meshData = GetOrCreateMeshBuffers(mesh);
+				MeshBufferData& meshData = *mesh->meshBufferData;
 
-				VkBuffer vertexBuffers[] = { meshData.vertexBuffer->GetBuffer(), instanceBuf };
-
-				vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-				vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-				vkCmdDrawIndexed(cmd, meshData.indexCount, range.count, 0, 0, range.firstInstance);
+				vkCmdDrawIndexed(
+					cmd,
+					meshData.indexCount,
+					range.count,
+					static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t)),
+					static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex)),
+					range.firstInstance
+				);
 			}
 		}
 	}
@@ -369,100 +421,63 @@ namespace Engine
 		}
 	}
 
-	// TODO: after fixing gpu culling make this use indirect as well
-	void VulkanIndexDraw::DrawCulledIndexed(uint32_t /*frameIndex*/, VkCommandBuffer cmd)
+	void VulkanIndexDraw::GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize)
 	{
-		// Early out if there's nothing to draw
-		if (instanceCountCulled == 0)
+		VkDeviceSize newVertexSize = megaVertexBufferSize + std::max(additionalVertexSize, MESH_BUFFER_GROWTH_SIZE);
+		VkDeviceSize newIndexSize = megaIndexBufferSize + std::max(additionalIndexSize, MESH_BUFFER_GROWTH_SIZE);
+
+		std::unique_ptr<VulkanBuffer> newVertexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			newVertexSize,
+			VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		std::unique_ptr<VulkanBuffer> newIndexBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			newIndexSize,
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		if (megaVertexBuffer && currentVertexBufferOffset > 0)
 		{
-			return;
+			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+				megaVertexBuffer->GetBuffer(),
+				newVertexBuffer->GetBuffer(),
+				currentVertexBufferOffset
+			);
 		}
 
-		// This buffer holds interleaved instance metadata written by the compute shader
-		VkBuffer instanceDataGPU = visibleDataBuffer->GetBuffer();
-
-		// Vertex buffers: first is mesh vertex buffer (dynamic), second is instance data
-		VkBuffer vertexBuffers[] = { nullptr, instanceDataGPU };
-		VkDeviceSize offsets[] = { 0, 0 };
-
-		// === Map draw calls by mesh ID ===
-		MeshPool& meshPool = MeshPool::GetInstance();
-
-		// Group visible instances by meshID
-		std::unordered_map<uint32_t, std::vector<uint32_t>> meshToInstances;
-
-		for (uint32_t i = 0; i < instanceCountCulled; ++i)
+		if (megaIndexBuffer && currentIndexBufferOffset > 0)
 		{
-			const glm::uvec4& data = culledVisibleData[i]; // textureIndex, hasTexture, padA, meshID
-			uint32_t meshID = data.w; // stored in padB (renamed to meshID)
-
-			meshToInstances[meshID].push_back(i); // group by mesh
+			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+				megaIndexBuffer->GetBuffer(),
+				newIndexBuffer->GetBuffer(),
+				currentIndexBufferOffset
+			);
 		}
 
-		// For each mesh, draw all its instances
-		for (const auto& [meshID, instanceIndices] : meshToInstances)
-		{
-			// Lookup mesh from ID
-			std::shared_ptr<Mesh> mesh = meshPool.GetMeshByID(meshID);
-			if (!mesh || !mesh->meshBufferData)
-			{
-				continue; // skip if mesh is missing
-			}
+		megaVertexBuffer = std::move(newVertexBuffer);
+		megaIndexBuffer = std::move(newIndexBuffer);
 
-			MeshBufferData& meshData = *mesh->meshBufferData;
-
-			// Bind this mesh's vertex + instance buffer
-			vertexBuffers[0] = meshData.vertexBuffer->GetBuffer();
-			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-
-			// Bind index buffer
-			vkCmdBindIndexBuffer(cmd, meshData.indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-			// Draw each instance individually (we'll replace this with indirect drawing later)
-			for (uint32_t instanceOffset : instanceIndices)
-			{
-				vkCmdDrawIndexed(cmd, meshData.indexCount, 1, 0, 0, instanceOffset);
-			}
-		}
+		megaVertexBufferSize = newVertexSize;
+		megaIndexBufferSize = newIndexSize;
 	}
 
-	void VulkanIndexDraw::ReadbackCulledInstanceData()
+	bool VulkanIndexDraw::HasSpaceForMesh(VkDeviceSize vertexSize, VkDeviceSize indexSize) const
 	{
-		if (cullMode != CullMode::GPU) return;
-
-		// === Read draw count ===
-		const uint32_t* drawCountPtr = static_cast<const uint32_t*>(drawCountBuffer->GetMappedPointer());
-		if (drawCountPtr == nullptr)
+		if ((currentVertexBufferOffset + vertexSize <= megaVertexBufferSize) &&
+			(currentIndexBufferOffset + indexSize <= megaIndexBufferSize))
 		{
-			throw std::runtime_error("Draw count buffer is not mapped.");
+			return true;
 		}
-		instanceCountCulled = *drawCountPtr;
-
-		if (instanceCountCulled == 0)
+		else
 		{
-			return;
+			return false;
 		}
-
-		// === Read visibleDataBuffer — each entry is a uvec4 (16 bytes) ===
-		const glm::uvec4* rawData = static_cast<const glm::uvec4*>(visibleDataBuffer->GetMappedPointer());
-		if (rawData == nullptr)
-		{
-			throw std::runtime_error("Visible data buffer is not mapped.");
-		}
-
-		culledVisibleData.resize(instanceCountCulled);
-		memcpy(culledVisibleData.data(), rawData, instanceCountCulled * sizeof(glm::uvec4));
-	}
-
-	// This is unused because a naive vollatile write to this on a gpu buffer requires way more fencing and is not worth it for something lazy like this, better to use barriers
-	void VulkanIndexDraw::ZeroDrawCount()
-	{
-		uint32_t* ptr = static_cast<uint32_t*>(drawCountBuffer->GetMappedPointer());
-		if (!ptr)
-		{
-			throw std::runtime_error("drawCountBuffer not mapped");
-		}
-		*ptr = 0;
 	}
 
 	void VulkanIndexDraw::CleanUp()
@@ -472,11 +487,6 @@ namespace Engine
 			instanceBuffer->Cleanup();
 			instanceBuffer.reset();
 		}
-
-		if (visibleModelBuffer) { visibleModelBuffer->Free(); visibleModelBuffer.reset(); }
-		if (visibleDataBuffer) { visibleDataBuffer->Free(); visibleDataBuffer.reset(); }
-		if (drawCountBuffer) { drawCountBuffer->Free();   drawCountBuffer.reset(); }
-		if (instanceMetaBuffer) { instanceMetaBuffer->Free(); instanceMetaBuffer.reset(); }
 
 		cpuInstanceData.clear();
 		instanceBatches.clear();

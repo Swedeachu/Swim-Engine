@@ -3,37 +3,33 @@ Using EnTT, my own Scene System and engine + windows messaging framework, and Vu
 <br>
 # TODO
 
-obj/glb loading 
+obj/glb loading + mesh optimizer
 <br>
-meshlets / mega mesh (make the whole renderer as gpu driven to cut down draw calls)
+Scene editor
 <br>
-set up the sandbox to do entity creation and spawning en mass to performance profile, then hook it up to PhysX or Jolt
+Cubemaps for sky box
 <br>
-behavior components with EnTT called in line with the scene system 
+Behavior components with EnTT called in line with the scene system 
 <br>
-probably get imgui set up at some point
+Hook up PhysX/Jolt
+<br>
+Compute culling
+<br>
+Imgui Integration
 <br>
 2D UI layer that has screen space transforms (always rendered on the angeled plane the camera faces)
 
 # SUPER TODO ONCE MAIN TODO IS DONE
-Ray tracer 
+PBR 
 <br>
-Baked lighting
-<br>
-Dynamic environment ligthing
+Refactor to Clustered Forward+ for global illumination
 <br>
 Shadows (baked and dynamic)
 <br>
 GPU driven particle system
 <br>
-PBR and normal maps 
-<br>
-high quality model meshes 
-<br>
-sky sphere/sky box environment tricks to make stuff look not chopped
-<br>
 Skeletal animation system and rag dolls/boned physics bound meshes
 <br>
-Multi thread certain aspects when needed? 
+MiniAudio integration
 <br>
-Make one single beatiful scene with some cool per object and full screen shader effects with physics bound scripted objects
+Thread workers for FileIO and async Scene loading

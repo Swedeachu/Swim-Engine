@@ -35,18 +35,6 @@ namespace Engine
 			vkDestroyRenderPass(device, renderPass, nullptr);
 			renderPass = VK_NULL_HANDLE;
 		}
-
-    if (computePipeline != VK_NULL_HANDLE)
-    {
-      vkDestroyPipeline(device, computePipeline, nullptr);
-      computePipeline = VK_NULL_HANDLE;
-    }
-
-    if (computePipelineLayout != VK_NULL_HANDLE)
-    {
-      vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
-      computePipelineLayout = VK_NULL_HANDLE;
-    }
 	}
 
 	std::vector<char> VulkanPipelineManager::ReadFile(const std::string& filename)
@@ -286,41 +274,6 @@ namespace Engine
 
     vkDestroyShaderModule(device, vertModule, nullptr);
     vkDestroyShaderModule(device, fragModule, nullptr);
-  }
-
-  void VulkanPipelineManager::CreateComputePipeline(const std::string& computeShaderPath, VkDescriptorSetLayout descriptorLayout)
-  {
-    auto code = ReadFile(computeShaderPath);
-    VkShaderModule computeShader = CreateShaderModule(code);
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = computeShader;
-    stageInfo.pName = "main";
-
-    // Pipeline layout using compute descriptor set
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &descriptorLayout;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) 
-    {
-      throw std::runtime_error("Failed to create compute pipeline layout!");
-    }
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = computePipelineLayout;
-
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &computePipeline) != VK_SUCCESS) 
-    {
-      throw std::runtime_error("Failed to create compute pipeline!");
-    }
-
-    vkDestroyShaderModule(device, computeShader, nullptr);
   }
 
 }
