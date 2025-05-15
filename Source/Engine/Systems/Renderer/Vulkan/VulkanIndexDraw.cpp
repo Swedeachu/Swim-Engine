@@ -81,6 +81,7 @@ namespace Engine
 		);
 	}
 
+	// This makes 2 temporary index and vertex buffers and then copies them into our mega buffers. Also supports auto growth. This also sets the offsets in mesh data.
 	void VulkanIndexDraw::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
 	{
 		VkDeviceSize vertexSize = vertices.size() * sizeof(Vertex);
@@ -309,6 +310,9 @@ namespace Engine
 		// Store the newly created MeshBufferData in the Mesh
 		mesh->meshBufferData = data;
 
+		// Upload into the mega buffer now
+		UploadMeshToMegaBuffer(mesh->vertices, mesh->indices, *mesh->meshBufferData);
+
 		return *data;
 	}
 
@@ -320,45 +324,38 @@ namespace Engine
 			VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 			VkDeviceSize offsets[] = { 0, 0 };
 
-			std::vector<MeshIndirectDrawBatch>& frameBatches = drawBatchesPerFrame[frameIndex];
-			uint32_t offset = 0;
-
-			// Mega mesh buffer version
+			// Use the mega mesh buffer to do the scene in one single draw call
 			VkBuffer vertexBuffers[] = {
-					megaVertexBuffer->GetBuffer(), // Bind mega vertex buffer
-					instanceBuf                    // Instance buffer
+					megaVertexBuffer->GetBuffer(), // All vertex data lives here
+					instanceBuf                    // Instance buffer (per-instance data)
 			};
 
 			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
 			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
 
-			for (auto& batch : frameBatches)
+			// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
+			// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
+
+			size_t totalCommands = 0;
+			for (const auto& batch : drawBatchesPerFrame[frameIndex])
 			{
-				// Each batch corresponds to a single mesh type
-				MeshBufferData& meshData = *batch.mesh->meshBufferData;
+				totalCommands += batch.commands.size();
+			}
 
-				// Indirect commands already have firstInstance + instanceCount
-				// We just override firstIndex and vertexOffset to point into mega buffer
-				for (VkDrawIndexedIndirectCommand& cmdData : batch.commands)
-				{
-					cmdData.firstIndex = static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint16_t));
-					cmdData.vertexOffset = static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex));
-				}
-
+			if (totalCommands > 0)
+			{
 				vkCmdDrawIndexedIndirect(
 					cmd,
 					indirectBuf,
-					offset,
-					static_cast<uint32_t>(batch.commands.size()),
+					0, // offset
+					static_cast<uint32_t>(totalCommands),
 					sizeof(VkDrawIndexedIndirectCommand)
 				);
-
-				offset += static_cast<uint32_t>(batch.commands.size()) * sizeof(VkDrawIndexedIndirectCommand);
 			}
 		}
 		else
 		{
-			// Legacy path with normal instancing (still works)
+			// Legacy path with normal instancing 
 			VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 			VkDeviceSize offsets[] = { 0, 0 };
 

@@ -26,6 +26,7 @@ namespace Engine
 		uint32_t indexCount = 0;
 
 		// The offsets to use in the mega mesh buffer on the gpu
+		// These are set in VulkanIndexDraw::UploadMeshToMegaBuffer()
 		VkDeviceSize vertexOffsetInMegaBuffer = 0;
 		VkDeviceSize indexOffsetInMegaBuffer = 0;
 
