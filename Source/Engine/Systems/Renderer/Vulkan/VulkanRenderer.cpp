@@ -119,7 +119,6 @@ namespace Engine
 		// Release mode CPU culling: 2500+ FPS
 		// GPU compute shader culling is not implemented
 		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
-		indexDraw->SetUseIndirectDrawing(true); 
 		indexDraw->SetUseQueriedFrustumSceneBVH(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets

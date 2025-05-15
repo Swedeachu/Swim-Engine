@@ -17,6 +17,12 @@ struct GpuInstanceData
   float hasTexture;
   uint meshInfoIndex;
   uint materialIndex;
+
+  uint indexCount;
+  uint pad0;                           // match padding
+
+  uint2 vertexOffsetInMegaBuffer;      // emulate uint64_t
+  uint2 indexOffsetInMegaBuffer;       // emulate uint64_t
 };
 
 [[vk::binding(1, 0)]]

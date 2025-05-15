@@ -38,18 +38,12 @@ namespace Engine
 		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
 
-		// No reason to not use this, fundamental GPU optimization for batch draw calls.
-		void SetUseIndirectDrawing(bool value) { useIndirectDrawing = value; }
-
-		// it's a great performance boost but MAYBE has edge case issues in SceneBVH logic with over culling.
-		// So far seems to work fine actually so I have it enabled in VulkanRenderer::Awake().
+		// Major performance booster
 		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
 
 		uint32_t GetInstanceCount() const { return static_cast<uint32_t>(cpuInstanceData.size()); }
 
 	private:
-
-		inline MeshBufferData& GetOrCreateMeshBuffers(const std::shared_ptr<Mesh>& mesh);
 
 		// Helpers for instance buffer update
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
@@ -74,12 +68,14 @@ namespace Engine
 		{
 			uint32_t firstInstance = 0;
 			uint32_t count = 0;
+			uint32_t indexCount = 0;
+			VkDeviceSize vertexOffsetInMegaBuffer = 0;
+			VkDeviceSize indexOffsetInMegaBuffer = 0;
 		};
 
 		CullMode cullMode{ CullMode::NONE };
 
-		std::unordered_map<std::shared_ptr<Mesh>, MeshInstanceRange> rangeMap;
-		std::vector<std::pair<std::shared_ptr<Mesh>, MeshInstanceRange>> instanceBatches;
+		std::unordered_map<uint32_t, MeshInstanceRange> rangeMap;
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
@@ -92,7 +88,6 @@ namespace Engine
 		};
 
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; // [frameCount]
-		std::vector<std::vector<MeshIndirectDrawBatch>> drawBatchesPerFrame; // [frameCount][meshBatch]
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;
@@ -109,7 +104,6 @@ namespace Engine
 		// How big to grow each time we run out
 		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
-		bool useIndirectDrawing{ false };
 		bool useQueriedFrustumSceneBVH{ false };
 
 	};
