@@ -106,15 +106,14 @@ namespace Engine
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
-		indexDraw->CreateCullOutputBuffers(MAX_EXPECTED_INSTANCES);
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
 		// Configure culled rendering mode
 		// Debug mode CPU culling: 100 FPS 
 		// Release mode CPU culling: 2500+ FPS
-		// GPU compute shader culling is sadly broken and can't be used yet
+		// GPU compute shader culling is not implemented
 		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
-		indexDraw->SetUseIndirectDrawing(true); // will have a more meaningfull impact once we have mega mesh stuff made
+		indexDraw->SetUseIndirectDrawing(true); 
 		indexDraw->SetUseQueriedFrustumSceneBVH(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
@@ -145,23 +144,6 @@ namespace Engine
 			std::vector<VkVertexInputBindingDescription>{ bindings.begin(), bindings.end() },
 			allAttribs,
 			sizeof(GpuInstanceData)
-		);
-
-		// === Compute pipeline ===
-
-		// Set up compute descriptor bindings
-		descriptorManager->CreateFrustumCullComputeDescriptorSet(
-			*descriptorManager->GetPerFrameUBO(0),                          // b0: Camera UBO
-			*indexDraw->GetInstanceMetaBuffer(),                            // b1: InstanceMeta UBO 
-			*indexDraw->GetInstanceBuffer()->GetPerFrameBuffers()[0].get(), // t0: Instance SSBO
-			*indexDraw->GetVisibleModelBuffer(),                            // u0
-			*indexDraw->GetVisibleDataBuffer(),                             // u1
-			*indexDraw->GetDrawCountBuffer()                                // u2
-		);
-
-		pipelineManager->CreateComputePipeline(
-			"Shaders\\ComputeShaders\\frustum_cull.spv",
-			descriptorManager->GetComputeSetLayout()
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -375,74 +357,11 @@ namespace Engine
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
 
-		// === Dispatch Compute Shader for Frustum Culling ===
+		// Update camera and cull
 		UpdateUniformBuffer();
 		indexDraw->UpdateInstanceBuffer(currentFrame);
 
-		uint32_t totalInstances = indexDraw->GetInstanceCount();
-		uint32_t groupCount = (totalInstances + 63) / 64; // GPU "threads"
-
-		// === Zero the draw count buffer on GPU ===
-		uint32_t zero = 0;
-		vkCmdUpdateBuffer(
-			cmd,
-			indexDraw->GetDrawCountBuffer()->GetBuffer(),
-			0,
-			sizeof(uint32_t),
-			&zero
-		);
-
-		// --- Barrier to ensure drawCount write is visible to compute shader ---
-		VkMemoryBarrier preComputeBarrier{};
-		preComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		preComputeBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		preComputeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-		vkCmdPipelineBarrier(
-			cmd,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0,
-			1, &preComputeBarrier,
-			0, nullptr,
-			0, nullptr
-		);
-
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineManager->GetComputePipeline());
-
-		VkDescriptorSet computeSet = descriptorManager->GetComputeDescriptorSet();
-
-		vkCmdBindDescriptorSets(
-			cmd,
-			VK_PIPELINE_BIND_POINT_COMPUTE,
-			pipelineManager->GetComputePipelineLayout(),
-			0, 1,
-			&computeSet,
-			0, nullptr
-		);
-
-		vkCmdDispatch(cmd, groupCount, 1, 1);
-
-		// --- Barrier to ensure compute writes visible to graphics pipeline ---
-		VkMemoryBarrier postComputeBarrier{};
-		postComputeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		postComputeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		postComputeBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-
-		vkCmdPipelineBarrier(
-			cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-			0,
-			1, &postComputeBarrier,
-			0, nullptr,
-			0, nullptr
-		);
-
-		// === Read back culled instance data from GPU ===
-		indexDraw->ReadbackCulledInstanceData();
-
-		// === Begin Render Pass ===
+		// Begin Render Pass 
 		std::array<VkClearValue, 2> clearValues{};
 		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 		clearValues[1].depthStencil = { 1.0f, 0 };

@@ -9,7 +9,6 @@ namespace Engine
 	{
 		CreateLayout();
 		CreatePool();
-		CreateComputePool();
 	}
 
 	VulkanDescriptorManager::~VulkanDescriptorManager()
@@ -72,24 +71,6 @@ namespace Engine
 		}
 	}
 
-	void VulkanDescriptorManager::CreateComputePool()
-	{
-		VkDescriptorPoolSize poolSizes[] = {
-			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5 }
-		};
-
-		VkDescriptorPoolCreateInfo poolInfo{};
-		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		poolInfo.poolSizeCount = static_cast<uint32_t>(std::size(poolSizes));
-		poolInfo.pPoolSizes = poolSizes;
-		poolInfo.maxSets = 1;
-
-		if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &computeDescriptorPool) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to create compute descriptor pool!");
-		}
-	}
 
 	// Create one UBO and descriptor set per frame
 	void VulkanDescriptorManager::CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount)
@@ -344,132 +325,6 @@ namespace Engine
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 	}
 
-	void VulkanDescriptorManager::CreateFrustumCullComputeDescriptorSet(
-		VulkanBuffer& uboBuffer,             // b0 - Camera UBO
-		VulkanBuffer& instanceMetaBuffer,    // b1 - InstanceMeta UBO
-		VulkanBuffer& instanceBuffer,        // t0 - instance data
-		VulkanBuffer& visibleModelBuffer,    // u0 - output: visible models
-		VulkanBuffer& visibleDataBuffer,     // u1 - output: extra per-instance info
-		VulkanBuffer& drawCountBuffer        // u2 - output: draw count
-	)
-	{
-		// === Descriptor Bindings ===
-		std::vector<VkDescriptorSetLayoutBinding> bindings;
-
-		// b0 - Camera UBO
-		bindings.push_back({
-			0,
-			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// b1 - InstanceMeta UBO
-		bindings.push_back({
-			1,
-			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// t0 - instanceBuffer (StructuredBuffer<GpuInstanceData>)
-		bindings.push_back({
-			2,
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// u0 - visibleModels (RWStructuredBuffer<float4x4>)
-		bindings.push_back({
-			3,
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// u1 - visibleData (RWStructuredBuffer<uint4>)
-		bindings.push_back({
-			4,
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// u2 - drawCount (RWByteAddressBuffer)
-		bindings.push_back({
-			5,
-			VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-			1,
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			nullptr
-			});
-
-		// === Create Descriptor Set Layout ===
-		VkDescriptorSetLayoutCreateInfo layoutInfo{};
-		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-		layoutInfo.pBindings = bindings.data();
-
-		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeSetLayout) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to create compute descriptor set layout!");
-		}
-
-		// === Allocate Descriptor Set ===
-		VkDescriptorSetAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = computeDescriptorPool;
-		allocInfo.descriptorSetCount = 1;
-		allocInfo.pSetLayouts = &computeSetLayout;
-
-		if (vkAllocateDescriptorSets(device, &allocInfo, &computeDescriptorSet) != VK_SUCCESS)
-		{
-			throw std::runtime_error("Failed to allocate compute descriptor set!");
-		}
-
-		// === Write Descriptor Set Bindings ===
-		std::vector<VkDescriptorBufferInfo> bufferInfos;
-		bufferInfos.reserve(6);
-
-		std::vector<VkWriteDescriptorSet> writes;
-		writes.reserve(6);
-
-		auto AddWrite = [&](uint32_t binding, VulkanBuffer& buffer, VkDescriptorType type, VkDeviceSize size)
-		{
-			VkDescriptorBufferInfo info{};
-			info.buffer = buffer.GetBuffer();
-			info.offset = 0;
-			info.range = size;
-
-			bufferInfos.push_back(info); // Store in vector to keep alive
-
-			VkWriteDescriptorSet write{};
-			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			write.dstSet = computeDescriptorSet;
-			write.dstBinding = binding;
-			write.descriptorType = type;
-			write.descriptorCount = 1;
-			write.pBufferInfo = &bufferInfos.back();
-
-			writes.push_back(write);
-		};
-
-		AddWrite(0, uboBuffer, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(CameraUBO));
-		AddWrite(1, instanceMetaBuffer, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sizeof(uint32_t)); // If you change this struct, update size
-		AddWrite(2, instanceBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_WHOLE_SIZE);
-		AddWrite(3, visibleModelBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_WHOLE_SIZE);
-		AddWrite(4, visibleDataBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_WHOLE_SIZE);
-		AddWrite(5, drawCountBuffer, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_WHOLE_SIZE);
-
-		vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-	}
-
 	void VulkanDescriptorManager::Cleanup()
 	{
 		for (auto& buffer : perFrameUBOs)
@@ -518,17 +373,6 @@ namespace Engine
 			bindlessSetLayout = VK_NULL_HANDLE;
 		}
 
-		if (computeDescriptorPool != VK_NULL_HANDLE)
-		{
-			vkDestroyDescriptorPool(device, computeDescriptorPool, nullptr);
-			computeDescriptorPool = VK_NULL_HANDLE;
-		}
-
-		if (computeSetLayout != VK_NULL_HANDLE)
-		{
-			vkDestroyDescriptorSetLayout(device, computeSetLayout, nullptr);
-			computeSetLayout = VK_NULL_HANDLE;
-		}
 	}
 
 }
