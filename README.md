@@ -20,7 +20,6 @@ Imgui Integration
 2D UI layer that has screen space transforms (always rendered on the angeled plane the camera faces)
 
 # SUPER TODO ONCE MAIN TODO IS DONE
-<br>
 PBR 
 <br>
 Refactor to Clustered Forward+ for global illumination
