@@ -29,6 +29,8 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -72,6 +74,8 @@
     <ClInclude Include="Source\Engine\Utility\RandomUtils.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

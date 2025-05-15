@@ -163,7 +163,6 @@ namespace Engine
 	void VulkanDescriptorManager::CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers)
 	{
 		const uint32_t frameCount = static_cast<uint32_t>(perFrameInstanceBuffers.size());
-		perFrameDescriptorSets_InstanceBuffer.resize(frameCount);
 
 		for (uint32_t i = 0; i < frameCount; ++i)
 		{

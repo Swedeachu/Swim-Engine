@@ -39,6 +39,7 @@ namespace Engine
 		glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 		glm::vec3 worldMax = worldMin;
 
+		// EXPAND_CORNER(localMin.x, localMin.y, localMin.z);
 		EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
 		EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
 		EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
@@ -225,8 +226,6 @@ namespace Engine
 		}
 	}
 
-	// TODO: write another version of this that takes a callback function and runs the code immediately on the entity if it is not culled, 
-	// instead of needing to populate a vector to then do stuff with.
 	void SceneBVH::QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const
 	{
 		outVisible.clear();
@@ -334,7 +333,40 @@ namespace Engine
 		forceUpdate = true;
 	}
 
-#define TEST_CORNER(plane, x, y, z) \
+	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
+	{
+		// Test against all 6 frustum planes
+		for (int i = 0; i < 6; ++i)
+		{
+			const glm::vec4& plane = frustum.planes[i];
+
+			// Assume box is completely outside this plane
+			bool allOutside = true;
+
+			// Test all 8 corners; if any corner is inside, box is not fully outside
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.min.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.min.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.max.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.max.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.min.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.min.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.max.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
+			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.max.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
+
+			// If all corners are outside any plane, box is outside frustum
+			if (allOutside)
+			{
+				return false;
+			}
+		}
+
+		// Box is inside or intersects frustum
+		return true;
+	}
+
+	/* I have more versions of this function, and I have no idea which one is fastest
+	
+	#define TEST_CORNER(plane, x, y, z) \
     (glm::dot(glm::vec3(plane), glm::vec3(x, y, z)) + (plane).w < 0.0f ? 1 : 0)
 
 	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
@@ -361,5 +393,51 @@ namespace Engine
 		return true;
 	}
 #undef TEST_CORNER
+
+	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
+	{
+		// For each plane of the frustum
+		for (int i = 0; i < 6; ++i)
+		{
+			const glm::vec4& plane = frustum.planes[i];
+
+			// Test if all 8 corners are outside this plane
+			bool allOutside = true;
+
+			// Corners of AABB
+			const float x[2] = { aabb.min.x, aabb.max.x };
+			const float y[2] = { aabb.min.y, aabb.max.y };
+			const float z[2] = { aabb.min.z, aabb.max.z };
+
+			// Check all combinations (2x2x2 = 8 corners)
+			for (int ix = 0; ix < 2; ++ix)
+			{
+				for (int iy = 0; iy < 2; ++iy)
+				{
+					for (int iz = 0; iz < 2; ++iz)
+					{
+						glm::vec3 corner(x[ix], y[iy], z[iz]);
+						float distance = glm::dot(glm::vec3(plane), corner) + plane.w;
+
+						if (distance >= 0.0f)
+						{
+							allOutside = false;
+							goto NextPlane; // Early-exit to next plane
+						}
+					}
+				}
+			}
+
+			// If all corners are outside this plane, box is not visible
+			return false;
+
+NextPlane:;
+		}
+
+		// Box is at least partially inside frustum
+		return true;
+	}
+	
+	*/
 
 }

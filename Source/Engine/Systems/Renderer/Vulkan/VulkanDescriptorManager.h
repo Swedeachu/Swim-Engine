@@ -97,9 +97,6 @@ namespace Engine
 		// Per-frame instance SSBOs
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameInstanceBuffers;
 
-		// For tracking instance SSBO descriptor sets per frame (optional)
-		std::vector<VkDescriptorSet> perFrameDescriptorSets_InstanceBuffer;
-
 		// Compute shader layout and set
 		VkDescriptorSetLayout computeSetLayout = VK_NULL_HANDLE;
 		VkDescriptorSet computeDescriptorSet = VK_NULL_HANDLE;
