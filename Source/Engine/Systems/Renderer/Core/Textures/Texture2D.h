@@ -33,6 +33,9 @@ namespace Engine
 		// OpenGL accessor
 		GLuint GetTextureID() const { return textureID; }
 
+		// Get raw pixel data
+		unsigned char* GetData() const { return pixelData; }
+
 	private:
 
 		uint32_t width = 0;
@@ -50,6 +53,9 @@ namespace Engine
 
 		// OpenGL
 		GLuint textureID = 0;
+
+		// Raw CPU-side pixel data // TODO: make vulkan save to this field as well
+		unsigned char* pixelData = nullptr;
 
 		// Vulkan-only
 		void LoadVulkanTexture();

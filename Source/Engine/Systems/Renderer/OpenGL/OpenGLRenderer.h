@@ -1,5 +1,7 @@
 #pragma once
 
+#include "OpenGLCubeMap.h"
+
 namespace Engine
 {
 	
@@ -25,17 +27,18 @@ namespace Engine
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();
 
+		static std::string LoadTextFile(const std::string& relativePath);
+		GLuint CompileGLSLShader(GLenum stage, const char* source);
+		GLuint LinkShaderProgram(const std::vector<GLuint>& shaderStages);
+
 	private:
 
-		// Shader system
+		// Unused
 		GLuint LoadSPIRVShaderStage(const std::string& path, GLenum shaderStage);
-		GLuint LinkShaderProgram(const std::vector<GLuint>& shaderStages);
-		static std::string LoadTextFile(const std::string& relativePath);
 
 		// Initing
 		bool InitOpenGLContext();
 		bool SetPixelFormatForHDC(HDC hdc);
-		GLuint CompileGLSLShader(GLenum stage, const char* source);
 
 		// Rendering
 		void RenderFrame();
@@ -57,6 +60,8 @@ namespace Engine
 
 		std::shared_ptr<Texture2D> missingTexture;
 		std::shared_ptr<CameraSystem> cameraSystem;
+
+		std::unique_ptr<OpenGLCubeMap> cubemap;
 
 		// Shader Cached uniform locations (kinda gross)
 		GLint loc_model = -1;

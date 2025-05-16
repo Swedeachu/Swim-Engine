@@ -65,6 +65,12 @@ namespace Engine
         textureID = 0;
       }
     }
+
+    if (pixelData)
+    {
+      stbi_image_free(pixelData);
+      pixelData = nullptr;
+    }
   }
 
   void Texture2D::LoadVulkanTexture()
@@ -180,8 +186,8 @@ namespace Engine
   void Texture2D::LoadOpenGLTexture()
   {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    if (!pixels)
+    pixelData = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    if (!pixelData)
     {
       throw std::runtime_error("Failed to load image: " + filePath);
     }
@@ -206,13 +212,11 @@ namespace Engine
       0,
       GL_RGBA,
       GL_UNSIGNED_BYTE,
-      pixels
+      pixelData
     );
 
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
-
-    stbi_image_free(pixels);
 
   #ifdef _DEBUG
     std::cout << "Loaded Texture2D (OpenGL): " << filePath << " -> ID " << textureID << std::endl;

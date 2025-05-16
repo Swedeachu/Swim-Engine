@@ -1,7 +1,6 @@
 #include "PCH.h"
 #include "OpenGLRenderer.h"
 #include "Engine/SwimEngine.h"
-
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
@@ -215,8 +214,29 @@ namespace Engine
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 		// load textures, etc.
-		TexturePool::GetInstance().LoadAllRecursively();
-		missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
+		TexturePool& pool = TexturePool::GetInstance();
+		pool.LoadAllRecursively();
+		missingTexture = pool.GetTexture2DLazy("mart");
+
+		// Now set up the cubemap, we are hard coding this for now
+		// TODO: generic Cubemap core interface that is renderer agnostic, we need a version to work on Vulkan
+
+		std::array<std::shared_ptr<Texture2D>, 6> cubemapFaces;
+		const std::string basePath = "Cubemaps/Test/cubemap_";
+		// const std::array<const char*, 6> suffixes = { "0", "1", "2", "3", "4", "5" };
+		// Super hack to fit minecraft bedrock style, which is where I am sourcing the cubemap style from
+		const std::array<const char*, 6> suffixes = { "3", "1", "4", "5", "2", "0" }; 
+
+		for (size_t i = 0; i < 6; ++i)
+		{
+			cubemapFaces[i] = pool.GetTexture2D(basePath + suffixes[i]);
+		}
+
+		cubemap = std::make_unique<OpenGLCubeMap>(
+			cubemapFaces,
+			"Shaders/OpenGL/skybox_vert.glsl",
+			"Shaders/OpenGL/skybox_frag.glsl"
+		);
 
 		return 0;
 	}
@@ -293,7 +313,10 @@ namespace Engine
 
 		// Setup camera + frustum
 		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
-		Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
+		auto& view = camera->GetViewMatrix();
+		auto& proj = camera->GetProjectionMatrix();
+
+		Frustum::SetCameraMatrices(view, proj);
 		const Frustum& frustum = Frustum::Get();
 
 		entt::registry& registry = scene->GetRegistry();
@@ -307,6 +330,9 @@ namespace Engine
 	#ifdef _DEBUG
 		RenderWireframeDebug(scene);
 	#endif
+
+		// Draw the cubemap last
+		if (cubemap) cubemap->Render(view, proj);
 
 		SwapBuffers(deviceContext);
 	}

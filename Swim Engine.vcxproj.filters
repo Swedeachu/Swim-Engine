@@ -31,6 +31,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -76,11 +77,15 @@
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.h" />
+    <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />
     <None Include="Source\Shaders\OpenGL\nuremberg.glsl" />
     <None Include="Source\Shaders\OpenGL\vertex.glsl" />
     <None Include="Source\Shaders\OpenGL\fragment.glsl" />
+    <None Include="Source\Shaders\OpenGL\skybox_vert.glsl" />
+    <None Include="Source\Shaders\OpenGL\skybox_frag.glsl" />
   </ItemGroup>
 </Project>
