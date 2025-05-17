@@ -13,6 +13,7 @@ namespace Engine
 	class CameraSystem;
 	class VulkanRenderer;
 	class OpenGLRenderer;
+	class Renderer;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
 	class Scene : public Machine
@@ -66,8 +67,10 @@ namespace Engine
 		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
 		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
 		void SetCameraSystem(const std::shared_ptr<CameraSystem>& system) { cameraSystem = system; }
-		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system) { vulkanRenderer = system; }
-		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system) { openGLRenderer = system; }
+		
+		// Defined in C++ since it does some extra stuff for the ambiguous renderer
+		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system);
+		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system);
 
 		// so much boiler plate for memory safety
 
@@ -76,6 +79,7 @@ namespace Engine
 		std::shared_ptr<CameraSystem> GetCameraSystem() const { return GetSystem<CameraSystem>(cameraSystem); }
 		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
 		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
+		std::shared_ptr<Renderer> GetRenderer() const; // ambiguous version
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
@@ -106,6 +110,7 @@ namespace Engine
 		std::weak_ptr<CameraSystem> cameraSystem;
 		std::weak_ptr<VulkanRenderer> vulkanRenderer;
 		std::weak_ptr<OpenGLRenderer> openGLRenderer;
+		std::weak_ptr<Renderer> renderer;
 
 		// Internals:
 		entt::observer frustumCacheObserver;

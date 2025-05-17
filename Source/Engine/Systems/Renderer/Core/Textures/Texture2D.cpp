@@ -76,8 +76,8 @@ namespace Engine
   void Texture2D::LoadVulkanTexture()
   {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    if (!pixels)
+    pixelData = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    if (!pixelData)
     {
       throw std::runtime_error("Failed to load image: " + filePath);
     }
@@ -90,7 +90,6 @@ namespace Engine
     auto vulkanRenderer = engine.get()->GetVulkanRenderer();
     if (!vulkanRenderer)
     {
-      stbi_image_free(pixels);
       throw std::runtime_error("Texture2D::LoadFromFile: VulkanRenderer not found!");
     }
 
@@ -106,10 +105,8 @@ namespace Engine
 
     void* data;
     vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    memcpy(data, pixelData, static_cast<size_t>(imageSize));
     vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
-
-    stbi_image_free(pixels);
 
     vulkanRenderer->CreateImage(
       width, height,

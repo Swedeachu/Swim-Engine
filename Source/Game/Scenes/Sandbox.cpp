@@ -351,23 +351,38 @@ namespace Game
 
 
 	// Forward declarations
-	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager> input, std::shared_ptr<Engine::CameraSystem> cameraSystem);
-	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager> input, entt::registry& registry, entt::entity controllableEntity);
+	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::CameraSystem>& cameraSystem);
+	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager>& input, entt::registry& registry, entt::entity controllableEntity);
+	void HandleCubeMapControls(std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::Renderer>& renderer);
 
 	// this is just quickly thrown together demo code, behavior components coming soon
 	void SandBox::Update(double dt)
 	{
 		std::shared_ptr<Engine::InputManager> input = GetInputManager();
 		std::shared_ptr<Engine::CameraSystem> cameraSystem = GetCameraSystem();
+		std::shared_ptr<Engine::Renderer> renderer = GetRenderer();
+
 		auto& registry = GetRegistry();
 
 		HandleCameraControls(dt, input, cameraSystem);
 		HandleEntityControls(dt, input, registry, controllableEntity);
+		HandleCubeMapControls(input, renderer);
+	}
+
+	void HandleCubeMapControls(std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::Renderer>& renderer)
+	{
+		// Toggle on the sky with C key
+		// TODO: controls and ability to mess with horizon level
+		if (input->IsKeyTriggered('C'))
+		{
+			std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
+			cubemapController->SetEnabled(!cubemapController->IsEnabled());
+		}
 	}
 
 	// =================== CAMERA CONTROL ===================
 
-	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager> input, std::shared_ptr<Engine::CameraSystem> cameraSystem)
+	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::CameraSystem>& cameraSystem)
 	{
 		// Movement speed constants
 		const float cameraMoveSpeed = 5.0f;
@@ -458,7 +473,7 @@ namespace Game
 
 	// =================== ENTITY CONTROL ===================
 
-	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager> input, entt::registry& registry, entt::entity controllableEntity)
+	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager>& input, entt::registry& registry, entt::entity controllableEntity)
 	{
 		const float entityMoveSpeed = 5.0f;
 		glm::vec3 entityMoveDir{ 0.0f };

@@ -16,9 +16,12 @@
 namespace Engine
 {
 
-	OpenGLRenderer::OpenGLRenderer(HWND hwnd, uint32_t width, uint32_t height)
-		: windowHandle(hwnd), windowWidth(width), windowHeight(height)
+	void OpenGLRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
 	{
+		windowWidth = width;
+		windowHeight = height;
+		windowHandle = hwnd;
+
 		if (!windowHandle)
 		{
 			throw std::runtime_error("Invalid HWND passed to OpenGLRenderer.");
@@ -218,22 +221,9 @@ namespace Engine
 		pool.LoadAllRecursively();
 		missingTexture = pool.GetTexture2DLazy("mart");
 
-		// Now set up the cubemap, we are hard coding this for now
-		// TODO: generic Cubemap core interface that is renderer agnostic, we need a version to work on Vulkan
-
-		std::array<std::shared_ptr<Texture2D>, 6> cubemapFaces;
-		const std::string basePath = "Cubemaps/Test/cubemap_";
-		// const std::array<const char*, 6> suffixes = { "0", "1", "2", "3", "4", "5" };
-		// Super hack to fit minecraft bedrock style, which is where I am sourcing the cubemap style from
-		const std::array<const char*, 6> suffixes = { "3", "1", "4", "5", "2", "0" }; 
-
-		for (size_t i = 0; i < 6; ++i)
-		{
-			cubemapFaces[i] = pool.GetTexture2D(basePath + suffixes[i]);
-		}
-
-		cubemap = std::make_unique<OpenGLCubeMap>(
-			cubemapFaces,
+		// Now set up the cubemap
+		cubemapController = std::make_unique<CubeMapController>(
+			"Cubemaps/Test/cubemap_",
 			"Shaders/OpenGL/skybox_vert.glsl",
 			"Shaders/OpenGL/skybox_frag.glsl"
 		);
@@ -332,7 +322,7 @@ namespace Engine
 	#endif
 
 		// Draw the cubemap last
-		if (cubemap) cubemap->Render(view, proj);
+		if (cubemapController) cubemapController->Render(view, proj);
 
 		SwapBuffers(deviceContext);
 	}
@@ -365,7 +355,7 @@ namespace Engine
 	void OpenGLRenderer::RenderWireframeDebug(std::shared_ptr<Scene>& scene)
 	{
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
-		constexpr bool cullWireframe = true;
+		constexpr bool cullWireframe = false;
 
 		if (!debugDraw || !debugDraw->IsEnabled())
 		{

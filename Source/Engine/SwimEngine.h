@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Systems/SystemManager.h"
+#include "Systems/Renderer/Renderer.h"
 
 namespace Engine
 {
@@ -60,11 +61,13 @@ namespace Engine
 
 		HWND GetWindowHandle() const { return engineWindowHandle; }
 
-		std::shared_ptr<InputManager> GetInputManager() const { return inputManager; }
-		std::shared_ptr<SceneSystem> GetSceneSystem() const { return sceneSystem; }
-		std::shared_ptr<CameraSystem> GetCameraSystem() const { return cameraSystem; }
-		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return vulkanRenderer; }
-		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return openglRenderer; }
+		std::shared_ptr<InputManager>& GetInputManager() { return inputManager; }
+		std::shared_ptr<SceneSystem>& GetSceneSystem() { return sceneSystem; }
+		std::shared_ptr<CameraSystem>& GetCameraSystem() { return cameraSystem; }
+		std::shared_ptr<VulkanRenderer>& GetVulkanRenderer() { return vulkanRenderer; }
+		std::shared_ptr<OpenGLRenderer>& GetOpenGLRenderer() { return openglRenderer; }
+
+		Renderer& GetRenderer();
 
 		unsigned int GetWindowWidth() const { return windowWidth; }
 		unsigned int GetWindowHeight() const { return windowHeight; }

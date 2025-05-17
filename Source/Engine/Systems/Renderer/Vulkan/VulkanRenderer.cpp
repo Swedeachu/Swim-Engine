@@ -34,6 +34,18 @@ namespace Engine
 		return x + 1;
 	}
 
+	void VulkanRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
+	{
+		windowWidth = width;
+		windowHeight = height;
+		windowHandle = hwnd;
+
+		if (!windowHandle)
+		{
+			throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
+		}
+	}
+
 	// Create Vulkan components
 	int VulkanRenderer::Awake()
 	{

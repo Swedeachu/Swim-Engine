@@ -11,10 +11,6 @@
 namespace Engine
 {
 
-  ShaderToyRendererGL::ShaderToyRendererGL(HWND hwnd, uint32_t width, uint32_t height)
-    : OpenGLRenderer(hwnd, width, height)
-  {}
-
   int ShaderToyRendererGL::Awake()
   {
     // === Compile and link shaders ===

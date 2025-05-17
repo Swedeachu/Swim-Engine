@@ -1,15 +1,11 @@
 #pragma once
 
-#include <array>
-#include <string>
-#include <memory>
-#include "Library/glm/glm.hpp"
-#include "Engine/Systems/Renderer/Core/Textures/Texture2D.h"
+#include "Engine/Systems/Renderer/Core/Environment/CubeMap.h"
 
 namespace Engine
 {
 
-	class OpenGLCubeMap
+	class OpenGLCubeMap : public CubeMap
 	{
 
 	public:
@@ -23,7 +19,11 @@ namespace Engine
 		
 		~OpenGLCubeMap();
 
-		void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) override;
+
+		void FromEquirectangularProjection(const std::shared_ptr<Texture2D>& texture) override;
+
+		void SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& faces) override;
 
 	private:
 
@@ -36,9 +36,9 @@ namespace Engine
 		std::string vertShader;
 		std::string fragShader;
 
-		GLuint LoadCubemap(const std::array<std::shared_ptr<Texture2D>, 6>& faces);
 		void LoadSkyboxMesh();
 		GLuint LoadSkyboxShader();
+		GLuint LoadCubemap(const std::array<std::shared_ptr<Texture2D>, 6>& faces);
 
 	};
 

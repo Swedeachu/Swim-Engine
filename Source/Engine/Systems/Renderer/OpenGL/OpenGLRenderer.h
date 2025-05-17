@@ -1,6 +1,6 @@
 #pragma once
 
-#include "OpenGLCubeMap.h"
+#include "Engine/Systems/Renderer/Renderer.h"
 
 namespace Engine
 {
@@ -8,7 +8,7 @@ namespace Engine
 	// Forward decalre
 	class Texture2D; 
 
-	class OpenGLRenderer : public Machine
+	class OpenGLRenderer : public Renderer
 	{
 
 		// yea this is ugly and stupid and dumb but this makes it easy on us to hack together our derived shader toy renderer
@@ -16,7 +16,7 @@ namespace Engine
 
 	public:
 
-		OpenGLRenderer(HWND hwnd, uint32_t width, uint32_t height);
+		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
 
 		int Awake() override;
 		int Init() override;
@@ -30,6 +30,8 @@ namespace Engine
 		static std::string LoadTextFile(const std::string& relativePath);
 		GLuint CompileGLSLShader(GLenum stage, const char* source);
 		GLuint LinkShaderProgram(const std::vector<GLuint>& shaderStages);
+
+		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
 
 	private:
 
@@ -61,7 +63,7 @@ namespace Engine
 		std::shared_ptr<Texture2D> missingTexture;
 		std::shared_ptr<CameraSystem> cameraSystem;
 
-		std::unique_ptr<OpenGLCubeMap> cubemap;
+		std::unique_ptr<CubeMapController> cubemapController;
 
 		// Shader Cached uniform locations (kinda gross)
 		GLint loc_model = -1;

@@ -2,9 +2,6 @@
 #include "OpenGLCubeMap.h"
 #include "Engine/SwimEngine.h"
 #include "OpenGLRenderer.h"
-#include <vector>
-#include <fstream>
-#include <sstream>
 
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "Library/stb/stb_image_resize2.h"
@@ -220,6 +217,16 @@ namespace Engine
 		GLuint fs = renderer->CompileGLSLShader(GL_FRAGMENT_SHADER, fsSrc.c_str());
 
 		return renderer->LinkShaderProgram({ vs, fs });
+	}
+
+	void OpenGLCubeMap::FromEquirectangularProjection(const std::shared_ptr<Texture2D>& texture)
+	{
+		// TODO (will take code from swim pack porter sky convert for this, we will probably have this be a base method in CubeMap actually to be consistent in logic)
+	}
+
+	void OpenGLCubeMap::SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& faces)
+	{
+		// TODO
 	}
 
 }

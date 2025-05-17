@@ -12,8 +12,6 @@ namespace Engine
 
   public:
 
-    ShaderToyRendererGL(HWND hwnd, uint32_t width, uint32_t height);
-
     int Awake() override;
     int Init() override;
     void Update(double dt) override;

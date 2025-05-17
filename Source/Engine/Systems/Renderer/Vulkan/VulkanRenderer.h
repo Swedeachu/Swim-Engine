@@ -10,6 +10,8 @@
 #include "VulkanIndexDraw.h"
 #include "Buffers/VulkanBuffer.h"
 #include "Buffers/VulkanInstanceBuffer.h"
+#include "Engine/Systems/Renderer/Renderer.h"
+#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -18,19 +20,14 @@ struct GLFWwindow; // if we use GLFW in the future for windowing
 namespace Engine
 {
 
-	class VulkanRenderer : public Machine
+	class VulkanRenderer : public Renderer
 	{
 
 	public:
 
-		VulkanRenderer(HWND hwnd, uint32_t width, uint32_t height)
-			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
-		{
-			if (!windowHandle)
-			{
-				throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
-			}
-		}
+		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
+
+		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
 
 		// Machine overrides
 		int Awake() override;
@@ -153,6 +150,8 @@ namespace Engine
 		// VkSampler activeSampler;
 
 		std::shared_ptr<Texture2D> missingTexture;
+
+		std::unique_ptr<CubeMapController> cubemapController;
 
 	};
 
