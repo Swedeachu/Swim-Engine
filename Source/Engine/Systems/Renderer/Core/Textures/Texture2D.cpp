@@ -28,25 +28,24 @@ namespace Engine
   Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData)
     : width(width), height(height), filePath("<generated>"), isPixelDataSTB(false)
   {
+    size_t dataSize = width * height * 4;
+
+    if (dataSize == 0)
+    {
+      throw std::runtime_error("Texture2D(memory): data size is null!");
+    }
+
+    pixelData = static_cast<unsigned char*>(malloc(dataSize));
+
+    if (!pixelData)
+    {
+      throw std::runtime_error("Texture2D(memory): pixel data malloc failed!");
+    }
+
+    memcpy(pixelData, rgbaData, dataSize);
+
     if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
     {
-      // Allocate and copy pixel data
-      size_t dataSize = width * height * 4;
-
-      if (dataSize == 0)
-      {
-        throw std::runtime_error("Texture2D(memory): data size is null!");
-      }
-
-      pixelData = static_cast<unsigned char*>(malloc(dataSize));
-
-      if (!pixelData || pixelData == 0)
-      {
-        throw std::runtime_error("Texture2D(memory): pixel data malloc failed!");
-      }
-
-      memcpy(pixelData, rgbaData, dataSize);
-
       // Upload to GPU as OpenGL texture
       glGenTextures(1, &textureID);
       glBindTexture(GL_TEXTURE_2D, textureID);
@@ -70,9 +69,68 @@ namespace Engine
       glGenerateMipmap(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, 0);
     }
+    else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+    {
+      auto engine = SwimEngine::GetInstance();
+      auto vulkanRenderer = engine->GetVulkanRenderer();
+      if (!vulkanRenderer)
+      {
+        throw std::runtime_error("Texture2D(memory): VulkanRenderer not found!");
+      }
+
+      VkDeviceSize imageSize = dataSize;
+
+      // Create staging buffer
+      VkBuffer stagingBuffer;
+      VkDeviceMemory stagingBufferMemory;
+
+      vulkanRenderer->CreateBuffer(
+        imageSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        stagingBuffer,
+        stagingBufferMemory
+      );
+
+      void* data = nullptr;
+      vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
+      memcpy(data, pixelData, imageSize);
+      vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
+
+      // Create image
+      vulkanRenderer->CreateImage(
+        width,
+        height,
+        VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        image,
+        memory
+      );
+
+      // Transition + copy
+      vulkanRenderer->TransitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+      vulkanRenderer->CopyBufferToImage(stagingBuffer, image, width, height);
+
+      vulkanRenderer->TransitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+      vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
+      vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
+
+      CreateImageView();
+      GoBindless();
+
+    #ifdef _DEBUG
+      std::cout << "Created Texture2D from memory (Vulkan): " << width << "x" << height << std::endl;
+    #endif
+    }
     else
     {
-      throw std::runtime_error("Texture2D(memory): only supported in OpenGL context.");
+      throw std::runtime_error("Texture2D(memory): unsupported graphics context.");
     }
   }
 

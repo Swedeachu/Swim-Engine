@@ -2,9 +2,7 @@
 #include "OpenGLCubeMap.h"
 #include "Engine/SwimEngine.h"
 #include "OpenGLRenderer.h"
-
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
-#include "Library/stb/stb_image_resize2.h"
+#include "Library/stb/stb_image_resize2_wrapper.h"
 
 namespace Engine
 {

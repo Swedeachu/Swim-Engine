@@ -40,9 +40,14 @@ namespace Engine
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
 		const VkPhysicalDevice& GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
 
+		const std::unique_ptr<VulkanDeviceManager>& GetDeviceManager() { return deviceManager; }
 		const std::unique_ptr<VulkanDescriptorManager>& GetDescriptorManager() const { return descriptorManager; }
 		const VkSampler& GetDefaultSampler() const { return defaultSampler; }
 		const std::unique_ptr<VulkanIndexDraw>& GetIndexDraw() const { return indexDraw; }
+		const std::unique_ptr<VulkanCommandManager>& GetCommandManager() const { return commandManager; }
+		const std::unique_ptr<VulkanPipelineManager>& GetPipelineManager() const { return pipelineManager; }
+
+		const size_t GetCurrentFrameIndex() const { return currentFrame; }
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -126,7 +131,7 @@ namespace Engine
 		// Synchronization values for SyncManager and DescriptorManager to use for double buffering.
 		// Maybe MAX_FRAMES_IN_FLIGHT should be an engine wide constant? 
 		// So far the only other classes that use this number is the sync manager (cached in ctor) and a method call in descriptor manager.
-		static constexpr int MAX_FRAMES_IN_FLIGHT = 2; 
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
 
 		std::unique_ptr<VulkanSyncManager> syncManager;

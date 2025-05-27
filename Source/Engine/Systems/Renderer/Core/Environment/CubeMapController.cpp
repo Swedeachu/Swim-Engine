@@ -2,6 +2,7 @@
 #include "CubeMapController.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLCubeMap.h"
+#include "Engine/Systems/Renderer/Vulkan/VulkanCubeMap.h"
 
 namespace Engine
 {
@@ -13,6 +14,13 @@ namespace Engine
 		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 		{
 			cubemap = std::make_unique<OpenGLCubeMap>(
+				vertPath,
+				fragPath
+			);
+		}
+		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		{
+			cubemap = std::make_unique<VulkanCubeMap>(
 				vertPath,
 				fragPath
 			);

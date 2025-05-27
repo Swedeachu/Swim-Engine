@@ -35,6 +35,8 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.cpp" />
+    <ClCompile Include="Source\Library\stb\stb_image_resize2.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -85,6 +87,8 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Renderer.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

@@ -41,6 +41,11 @@ namespace Engine
 		// Get raw pixel data
 		unsigned char* GetData() const { return pixelData; }
 
+		size_t GetDataSize() const
+		{
+			return width * height * 4; // not sure how correct this is
+		}
+
 	private:
 
 		uint32_t width = 0;

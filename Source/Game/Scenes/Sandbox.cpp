@@ -15,7 +15,7 @@ namespace Game
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
-	constexpr static const int GRID_HALF_SIZE = 3; // for example 10 makes a 20x20x20 cube of cubes
+	constexpr static const int GRID_HALF_SIZE = 2; // for example 10 makes a 20x20x20 cube of cubes
 	constexpr static const float SPACING = 3.5f; // 2.5f
 
 	int SandBox::Awake()

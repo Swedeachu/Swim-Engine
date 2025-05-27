@@ -8,6 +8,7 @@ namespace Engine
 {
 
 	// Cube vertices for skybox (size doesn't matter, we scale it in shader/view matrix)
+	// OpenGL uses this one
 	static constexpr float skyboxVertices[] = {
 			-1.0f,  1.0f, -1.0f,  -1.0f, -1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
 			 1.0f, -1.0f, -1.0f,   1.0f,  1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
@@ -28,6 +29,34 @@ namespace Engine
 			 1.0f, -1.0f, -1.0f,  -1.0f, -1.0f,  1.0f,   1.0f, -1.0f,  1.0f
 	};
 
+	// Hack to avoid back face culling by just forcing all the faces to be inwards
+	static constexpr float skyboxVerticesInward[] = {
+		// Back face
+		 1.0f, -1.0f, -1.0f,  -1.0f, -1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
+		-1.0f,  1.0f, -1.0f,   1.0f,  1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
+
+		// Left face
+		-1.0f, -1.0f, -1.0f,  -1.0f, -1.0f,  1.0f,  -1.0f,  1.0f,  1.0f,
+		-1.0f,  1.0f,  1.0f,  -1.0f,  1.0f, -1.0f,  -1.0f, -1.0f, -1.0f,
+
+		// Right face
+		1.0f, -1.0f,  1.0f,   1.0f, -1.0f, -1.0f,   1.0f,  1.0f, -1.0f,
+		1.0f,  1.0f, -1.0f,   1.0f,  1.0f,  1.0f,   1.0f, -1.0f,  1.0f,
+
+		// Front face
+		-1.0f, -1.0f,  1.0f,   1.0f, -1.0f,  1.0f,   1.0f,  1.0f,  1.0f,
+		1.0f,  1.0f,  1.0f,  -1.0f,  1.0f,  1.0f,  -1.0f, -1.0f,  1.0f,
+
+		// Top face
+		-1.0f,  1.0f, -1.0f,  -1.0f,  1.0f,  1.0f,   1.0f,  1.0f,  1.0f,
+		1.0f,  1.0f,  1.0f,   1.0f,  1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
+
+		// Bottom face
+		-1.0f, -1.0f,  1.0f,  -1.0f, -1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
+		1.0f, -1.0f, -1.0f,   1.0f, -1.0f,  1.0f,  -1.0f, -1.0f,  1.0f
+	};
+
+
 	class CubeMap
 	{
 
@@ -40,6 +69,8 @@ namespace Engine
 		)
 			: vertShader(vertShader), fragShader(fragShader)
 		{}
+
+		virtual ~CubeMap() = default;
 
 		// Draw the cubemap for this frame, should be called as the last object to draw
 		virtual void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) = 0;

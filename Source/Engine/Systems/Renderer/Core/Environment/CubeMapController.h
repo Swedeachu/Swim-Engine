@@ -28,6 +28,8 @@ namespace Engine
 		const bool IsEnabled() const { return enabled; }
 		void SetEnabled(bool value) { enabled = value; }
 
+		CubeMap* GetCubeMap() const { return cubemap.get(); }
+
 	private:
 
 		std::unique_ptr<CubeMap> cubemap;
