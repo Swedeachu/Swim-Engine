@@ -12,7 +12,12 @@ namespace Engine
 
 	public:
 
+		// Loads from disk
 		Texture2D(const std::string& filePath);
+
+		// Constructs a Texture2D from raw RGBA memory data 
+		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData);
+
 		~Texture2D();
 
 		void Free();
@@ -54,8 +59,10 @@ namespace Engine
 		// OpenGL
 		GLuint textureID = 0;
 
-		// Raw CPU-side pixel data // TODO: make vulkan save to this field as well
+		// Raw CPU-side pixel data 
 		unsigned char* pixelData = nullptr;
+
+		bool isPixelDataSTB = true; // Determines if pixelData was loaded via stbi (true) or malloc (false)
 
 		// Vulkan-only
 		void LoadVulkanTexture();

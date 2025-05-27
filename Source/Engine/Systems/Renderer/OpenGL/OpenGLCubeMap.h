@@ -12,7 +12,6 @@ namespace Engine
 
 		OpenGLCubeMap
 		(
-			const std::array<std::shared_ptr<Texture2D>, 6>& faces,
 			const std::string& vertShader, 
 			const std::string& fragShader
 		);
@@ -24,6 +23,8 @@ namespace Engine
 		void FromEquirectangularProjection(const std::shared_ptr<Texture2D>& texture) override;
 
 		void SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& faces) override;
+
+		void SetOrdering(const std::array<int, 6>& order) override;
 
 	private:
 
@@ -38,7 +39,10 @@ namespace Engine
 
 		void LoadSkyboxMesh();
 		GLuint LoadSkyboxShader();
-		GLuint LoadCubemap(const std::array<std::shared_ptr<Texture2D>, 6>& faces);
+		GLuint CreateCubemap(const std::array<std::shared_ptr<Texture2D>, 6>& faces);
+
+		std::array<int, 6> faceOrder = { 0, 1, 2, 3, 4, 5 };
+		std::array<std::shared_ptr<Texture2D>, 6> faces;
 
 	};
 

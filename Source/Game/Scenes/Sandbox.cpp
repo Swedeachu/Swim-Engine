@@ -339,6 +339,15 @@ namespace Game
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities();
 
+		// Turn on the sky
+		std::unique_ptr<Engine::CubeMapController>& cubemapController = GetRenderer()->GetCubeMapController();
+		cubemapController->SetEnabled(true);
+
+		// Get an array of the 6 faces of the cubemap and supply it to the cubemap controller
+		auto faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
+		// cubemapController->SetOrdering({ 3, 1, 4, 5, 2, 0 }); // internally this is the default face ordering already
+		cubemapController->SetFaces(faces);
+
 		return 0;
 	}
 
@@ -369,14 +378,49 @@ namespace Game
 		HandleCubeMapControls(input, renderer);
 	}
 
+	static bool flip = false;
+	static bool styleToggle = false; // false = using 6 faces supplied, true = generate with equirectangular projection from a singular image
+
 	void HandleCubeMapControls(std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::Renderer>& renderer)
 	{
+		// TODO: ability to mess with horizon level
+
+		std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
+
 		// Toggle on the sky with C key
-		// TODO: controls and ability to mess with horizon level
 		if (input->IsKeyTriggered('C'))
 		{
-			std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
 			cubemapController->SetEnabled(!cubemapController->IsEnabled());
+		}
+
+		// Flip around the face ordering
+		if (input->IsKeyTriggered('V'))
+		{
+			using Faces = std::array<int, 6>;
+			flip = !flip;
+			Faces order = flip ? Faces{ 0, 1, 2, 3, 4, 5 } : Faces{ 3, 1, 4, 5, 2, 0 };
+			cubemapController->SetOrdering(order);
+		}
+
+		// Toggle the cubemap style
+		if (input->IsKeyTriggered('X'))
+		{
+			Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
+
+			styleToggle = !styleToggle;
+
+			if (styleToggle)
+			{
+				// Convert one image to a cubemap with equirectangular projection
+				std::shared_ptr<Engine::Texture2D> tex = texturePool.GetTexture2D("Sky/rect_sky");
+				cubemapController->FromEquirectangularProjection(tex);
+			}
+			else
+			{
+				// Get 6 seperate cubemap texture faces to supply
+				std::array<std::shared_ptr<Engine::Texture2D>, 6> faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
+				cubemapController->SetFaces(faces);
+			}
 		}
 	}
 

@@ -223,10 +223,10 @@ namespace Engine
 
 		// Now set up the cubemap
 		cubemapController = std::make_unique<CubeMapController>(
-			"Cubemaps/Test/cubemap_",
 			"Shaders/OpenGL/skybox_vert.glsl",
 			"Shaders/OpenGL/skybox_frag.glsl"
 		);
+		cubemapController->SetEnabled(false);
 
 		return 0;
 	}

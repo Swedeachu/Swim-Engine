@@ -25,6 +25,57 @@ namespace Engine
     }
   }
 
+  Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData)
+    : width(width), height(height), filePath("<generated>"), isPixelDataSTB(false)
+  {
+    if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+    {
+      // Allocate and copy pixel data
+      size_t dataSize = width * height * 4;
+
+      if (dataSize == 0)
+      {
+        throw std::runtime_error("Texture2D(memory): data size is null!");
+      }
+
+      pixelData = static_cast<unsigned char*>(malloc(dataSize));
+
+      if (!pixelData || pixelData == 0)
+      {
+        throw std::runtime_error("Texture2D(memory): pixel data malloc failed!");
+      }
+
+      memcpy(pixelData, rgbaData, dataSize);
+
+      // Upload to GPU as OpenGL texture
+      glGenTextures(1, &textureID);
+      glBindTexture(GL_TEXTURE_2D, textureID);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+      glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGBA,
+        width,
+        height,
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        pixelData
+      );
+
+      glGenerateMipmap(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    else
+    {
+      throw std::runtime_error("Texture2D(memory): only supported in OpenGL context.");
+    }
+  }
+
   Texture2D::~Texture2D()
   {
     Free();
@@ -68,7 +119,14 @@ namespace Engine
 
     if (pixelData)
     {
-      stbi_image_free(pixelData);
+      if (isPixelDataSTB)
+      {
+        stbi_image_free(pixelData);
+      }
+      else
+      {
+        free(pixelData);
+      }
       pixelData = nullptr;
     }
   }
