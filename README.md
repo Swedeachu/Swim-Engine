@@ -7,8 +7,6 @@ obj/glb loading + mesh optimizer
 <br>
 Scene editor
 <br>
-Cubemaps for sky box
-<br>
 Behavior components with EnTT called in line with the scene system 
 <br>
 Hook up PhysX/Jolt
