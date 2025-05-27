@@ -262,6 +262,18 @@ namespace Engine
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
+	Renderer& SwimEngine::GetRenderer()
+	{
+		if constexpr (CONTEXT == RenderContext::OpenGL)
+		{
+			return *openglRenderer;   
+		}
+		else if constexpr (CONTEXT == RenderContext::Vulkan)
+		{
+			return *vulkanRenderer;  
+		}
+	}
+
 	int SwimEngine::Init()
 	{
 		// Add systems to the SystemManager
@@ -270,20 +282,22 @@ namespace Engine
 
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
-			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer");
+			vulkanRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
 		}
 		else if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
 			// determine which open gl renderer we are using (gross)
 			if constexpr (useShaderToyIfOpenGL)
 			{
-				openglRenderer = systemManager->AddSystem<ShaderToyRendererGL>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+				openglRenderer = systemManager->AddSystem<ShaderToyRendererGL>("Renderer");
+				openglRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
 			}
 			else
 			{
-				openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer", engineWindowHandle, windowWidth, windowHeight);
+				openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer");
+				openglRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
 			}
-
 		}
 
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");

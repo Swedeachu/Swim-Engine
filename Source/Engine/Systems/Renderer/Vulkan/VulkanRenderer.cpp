@@ -3,6 +3,7 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "VulkanCubeMap.h"
 
 // Validation layers for debugging
 #ifdef _DEBUG
@@ -32,6 +33,18 @@ namespace Engine
 		x |= x >> 8;
 		x |= x >> 16;
 		return x + 1;
+	}
+
+	void VulkanRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
+	{
+		windowWidth = width;
+		windowHeight = height;
+		windowHandle = hwnd;
+
+		if (!windowHandle)
+		{
+			throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
+		}
 	}
 
 	// Create Vulkan components
@@ -72,7 +85,7 @@ namespace Engine
 
 		texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
 		unsigned int texCount = texturePool.GetTextureCount();
-		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount);
+		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount) * 2; // double in expected size for dynamic texture and engine stuff that could happen
 
 		constexpr uint32_t MAX_SETS = 1024;
 		constexpr uint64_t SSBO_SIZE = 10240;
@@ -170,6 +183,13 @@ namespace Engine
 		texturePool.LoadAllRecursively();
 		missingTexture = texturePool.GetTexture2DLazy("mart");
 
+		// Now set up the cubemap
+		cubemapController = std::make_unique<CubeMapController>(
+			"Shaders\\VertexShaders\\vertex_cubemap.spv",
+			"Shaders\\FragmentShaders\\fragment_cubemap.spv"
+		);
+		cubemapController->SetEnabled(false);
+
 		return 0;
 	}
 
@@ -220,6 +240,11 @@ namespace Engine
 		auto device = deviceManager->GetDevice();
 
 		vkDeviceWaitIdle(device);
+
+		if (cubemapController)
+		{
+			cubemapController.reset(); 
+		}
 
 		swapChainManager->Cleanup();
 		swapChainManager.reset();
@@ -362,11 +387,11 @@ namespace Engine
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
 
-		// Update camera and cull
+		// Update camera UBO and instance buffer
 		UpdateUniformBuffer();
 		indexDraw->UpdateInstanceBuffer(currentFrame);
 
-		// Begin Render Pass 
+		// Begin render pass
 		std::array<VkClearValue, 2> clearValues{};
 		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
 		clearValues[1].depthStencil = { 1.0f, 0 };
@@ -384,16 +409,26 @@ namespace Engine
 
 		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// Dynamic viewport + scissor
+		// Dynamic viewport and scissor
 		VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
 		VkRect2D scissor{ {0, 0}, extent };
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		// Bind graphics pipeline
+		// === SKYBOX: Draw first using skybox pipeline ===
+		if (cubemapController && cubemapController->IsEnabled())
+		{
+			CubeMap* map = cubemapController->GetCubeMap();
+			VulkanCubeMap* vkMap = static_cast<VulkanCubeMap*>(map);
+			if (vkMap)
+			{
+				vkMap->Render(cmd, cameraSystem->GetViewMatrix(), cameraSystem->GetProjectionMatrix());
+			}
+		}
+
+		// === Rebind original scene pipeline and descriptor sets ===
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
 
-		// Descriptor sets for graphics
 		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
 
@@ -410,7 +445,7 @@ namespace Engine
 			nullptr
 		);
 
-		// === Draw everything ===
+		// === Scene: Draw all indexed meshes ===
 		indexDraw->DrawIndexed(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);

@@ -1,7 +1,6 @@
 #include "PCH.h"
 #include "OpenGLRenderer.h"
 #include "Engine/SwimEngine.h"
-
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
@@ -17,9 +16,12 @@
 namespace Engine
 {
 
-	OpenGLRenderer::OpenGLRenderer(HWND hwnd, uint32_t width, uint32_t height)
-		: windowHandle(hwnd), windowWidth(width), windowHeight(height)
+	void OpenGLRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
 	{
+		windowWidth = width;
+		windowHeight = height;
+		windowHandle = hwnd;
+
 		if (!windowHandle)
 		{
 			throw std::runtime_error("Invalid HWND passed to OpenGLRenderer.");
@@ -215,8 +217,16 @@ namespace Engine
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
 		// load textures, etc.
-		TexturePool::GetInstance().LoadAllRecursively();
-		missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
+		TexturePool& pool = TexturePool::GetInstance();
+		pool.LoadAllRecursively();
+		missingTexture = pool.GetTexture2DLazy("mart");
+
+		// Now set up the cubemap
+		cubemapController = std::make_unique<CubeMapController>(
+			"Shaders/OpenGL/skybox_vert.glsl",
+			"Shaders/OpenGL/skybox_frag.glsl"
+		);
+		cubemapController->SetEnabled(false);
 
 		return 0;
 	}
@@ -293,7 +303,10 @@ namespace Engine
 
 		// Setup camera + frustum
 		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
-		Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
+		auto& view = camera->GetViewMatrix();
+		auto& proj = camera->GetProjectionMatrix();
+
+		Frustum::SetCameraMatrices(view, proj);
 		const Frustum& frustum = Frustum::Get();
 
 		entt::registry& registry = scene->GetRegistry();
@@ -307,6 +320,9 @@ namespace Engine
 	#ifdef _DEBUG
 		RenderWireframeDebug(scene);
 	#endif
+
+		// Draw the cubemap last
+		if (cubemapController) cubemapController->Render(view, proj);
 
 		SwapBuffers(deviceContext);
 	}
@@ -339,7 +355,7 @@ namespace Engine
 	void OpenGLRenderer::RenderWireframeDebug(std::shared_ptr<Scene>& scene)
 	{
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
-		constexpr bool cullWireframe = true;
+		constexpr bool cullWireframe = false;
 
 		if (!debugDraw || !debugDraw->IsEnabled())
 		{

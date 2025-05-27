@@ -39,6 +39,50 @@ namespace Engine
 		// Frees everything
 		void Flush();
 
+		// Get a fixed size array of textures that have a certain string in their name.
+		// For example if you want to get exactly 10 textures with the name "sword" in it.
+		// This is a fixed size since most internal engine functions use fixed arrays of data, such as cubemap face lists.
+		// If needed we can implement a vector returning version of this.
+		// This also returns the textures sorted by name based on trailing digits (if any) from least to greatest.
+		// For example: cubemap0, cubemap1, cubemap2, etc
+		template <size_t N>
+		std::array<std::shared_ptr<Texture2D>, N> GetTexturesContainingString(const std::string& substring)
+		{
+			std::vector<std::pair<int, std::shared_ptr<Texture2D>>> sortedTextures;
+
+			{ // lock this part of execution
+				std::lock_guard<std::mutex> lock(poolMutex);
+
+				for (const auto& [key, texture] : textures)
+				{
+					if (key.find(substring) != std::string::npos)
+					{
+						int index = ExtractTrailingNumber(key);
+
+						if (index >= 0)
+						{
+							sortedTextures.emplace_back(index, texture);
+						}
+					}
+				}
+			}
+
+			std::sort(sortedTextures.begin(), sortedTextures.end(),
+				[](const auto& a, const auto& b)
+			{
+				return a.first < b.first;
+			});
+
+			std::array<std::shared_ptr<Texture2D>, N> result{};
+
+			for (size_t i = 0; i < std::min(N, sortedTextures.size()); ++i)
+			{
+				result[i] = sortedTextures[i].second;
+			}
+
+			return result;
+		}
+
 	private:
 
 		// Private constructor for Singleton pattern
@@ -48,6 +92,34 @@ namespace Engine
 		std::unordered_map<std::string, std::shared_ptr<Texture2D>> textures;
 
 		unsigned int textureCount{ 0 };
+
+		int ExtractTrailingNumber(const std::string& str)
+		{
+			// Start from the end and go backwards until we hit a non-digit
+			auto it = str.rbegin();
+			std::string numberStr;
+
+			while (it != str.rend() && std::isdigit(*it))
+			{
+				numberStr.insert(numberStr.begin(), *it);
+				++it;
+			}
+
+			if (!numberStr.empty())
+			{
+				try
+				{
+					return std::stoi(numberStr);
+				}
+				catch (...)
+				{
+					// overflow or invalid, ignore
+				}
+			}
+
+			// Return -1 to indicate no trailing number (or use INT_MAX to sort last)
+			return -1;
+		}
 
 	};
 

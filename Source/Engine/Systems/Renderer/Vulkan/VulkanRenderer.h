@@ -10,6 +10,8 @@
 #include "VulkanIndexDraw.h"
 #include "Buffers/VulkanBuffer.h"
 #include "Buffers/VulkanInstanceBuffer.h"
+#include "Engine/Systems/Renderer/Renderer.h"
+#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 
 // Forward declare
 struct GLFWwindow; // if we use GLFW in the future for windowing
@@ -18,19 +20,14 @@ struct GLFWwindow; // if we use GLFW in the future for windowing
 namespace Engine
 {
 
-	class VulkanRenderer : public Machine
+	class VulkanRenderer : public Renderer
 	{
 
 	public:
 
-		VulkanRenderer(HWND hwnd, uint32_t width, uint32_t height)
-			: windowHandle(hwnd), windowWidth(width), windowHeight(height)
-		{
-			if (!windowHandle)
-			{
-				throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
-			}
-		}
+		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
+
+		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
 
 		// Machine overrides
 		int Awake() override;
@@ -43,9 +40,14 @@ namespace Engine
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
 		const VkPhysicalDevice& GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
 
+		const std::unique_ptr<VulkanDeviceManager>& GetDeviceManager() { return deviceManager; }
 		const std::unique_ptr<VulkanDescriptorManager>& GetDescriptorManager() const { return descriptorManager; }
 		const VkSampler& GetDefaultSampler() const { return defaultSampler; }
 		const std::unique_ptr<VulkanIndexDraw>& GetIndexDraw() const { return indexDraw; }
+		const std::unique_ptr<VulkanCommandManager>& GetCommandManager() const { return commandManager; }
+		const std::unique_ptr<VulkanPipelineManager>& GetPipelineManager() const { return pipelineManager; }
+
+		const size_t GetCurrentFrameIndex() const { return currentFrame; }
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
@@ -129,7 +131,7 @@ namespace Engine
 		// Synchronization values for SyncManager and DescriptorManager to use for double buffering.
 		// Maybe MAX_FRAMES_IN_FLIGHT should be an engine wide constant? 
 		// So far the only other classes that use this number is the sync manager (cached in ctor) and a method call in descriptor manager.
-		static constexpr int MAX_FRAMES_IN_FLIGHT = 2; 
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
 
 		std::unique_ptr<VulkanSyncManager> syncManager;
@@ -153,6 +155,8 @@ namespace Engine
 		// VkSampler activeSampler;
 
 		std::shared_ptr<Texture2D> missingTexture;
+
+		std::unique_ptr<CubeMapController> cubemapController;
 
 	};
 

@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "Scene.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
+#include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
@@ -28,6 +29,23 @@ namespace Engine
 	void Scene::DestroyAllEntities()
 	{
 		registry.clear();
+	}
+
+	void Scene::SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system)
+	{
+		vulkanRenderer = system;
+		renderer = std::static_pointer_cast<Renderer>(system);
+	}
+
+	void Scene::SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system)
+	{
+		openGLRenderer = system;
+		renderer = std::static_pointer_cast<Renderer>(system);
+	}
+
+	std::shared_ptr<Renderer> Scene::GetRenderer() const
+	{
+		return GetSystem<Renderer>(renderer);
 	}
 
 	// Right now the interal scene base init and update are for caching mesh stuff for the frustum culling.

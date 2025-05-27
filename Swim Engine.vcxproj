@@ -212,18 +212,27 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Material\MaterialPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Textures\Texture2D.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Textures\TexturePool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLBuffer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Renderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanGpuInstanceData.h" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCommandManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDescriptorManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanDeviceManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanInstanceBuffer.cpp" />
@@ -250,7 +259,14 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Source\Library\stb\stb_image_resize2.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Source\main.cpp" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
+    <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\Components\Material.h" />
@@ -302,6 +318,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       </ExcludedFromBuild>
     </None>
     <None Include="Source\Shaders\OpenGL\nuremberg.glsl" />
+    <None Include="Source\Shaders\OpenGL\skybox_frag.glsl" />
+    <None Include="Source\Shaders\OpenGL\skybox_vert.glsl" />
     <None Include="Source\Shaders\OpenGL\vertex.glsl" />
   </ItemGroup>
   <ItemGroup>
