@@ -34,6 +34,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />

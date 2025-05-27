@@ -10,12 +10,12 @@
 namespace Game
 {
 
-	constexpr static bool doStressTest = false;
-	constexpr static bool fullyUniqueCubeMeshes = false; // can take things to a crawl because we aren't doing the mega mesh buffer yet
+	constexpr static bool doStressTest = true;
+	constexpr static bool fullyUniqueCubeMeshes = false; 
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
-	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
+	constexpr static const int GRID_HALF_SIZE = 3; // for example 10 makes a 20x20x20 cube of cubes
 	constexpr static const float SPACING = 3.5f; // 2.5f
 
 	int SandBox::Awake()
@@ -341,12 +341,26 @@ namespace Game
 
 		// Turn on the sky
 		std::unique_ptr<Engine::CubeMapController>& cubemapController = GetRenderer()->GetCubeMapController();
+		if (!cubemapController) return 0;
+
 		cubemapController->SetEnabled(true);
 
-		// Get an array of the 6 faces of the cubemap and supply it to the cubemap controller
-		auto faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
+		constexpr bool style = false;
+
+		if constexpr (style)
+		{
+			// Convert one image to a cubemap with equirectangular projection
+			std::shared_ptr<Engine::Texture2D> tex = texturePool.GetTexture2D("Sky/rect_sky");
+			cubemapController->FromEquirectangularProjection(tex);
+		}
+		else
+		{
+			// Get 6 seperate cubemap texture faces to supply
+			std::array<std::shared_ptr<Engine::Texture2D>, 6> faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
+			cubemapController->SetFaces(faces);
+		}
+
 		// cubemapController->SetOrdering({ 3, 1, 4, 5, 2, 0 }); // internally this is the default face ordering already
-		cubemapController->SetFaces(faces);
 
 		return 0;
 	}

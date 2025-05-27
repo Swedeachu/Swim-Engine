@@ -212,6 +212,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Material\MaterialPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshPool.cpp" />

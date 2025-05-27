@@ -313,7 +313,7 @@ namespace Engine
 
 		entt::registry& debugRegistry = debugDraw->GetRegistry();
 		const Frustum& frustum = Frustum::Get();
-		constexpr bool cullWireframe = true;
+		constexpr bool cullWireframe = false;
 
 		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
 
@@ -338,6 +338,9 @@ namespace Engine
 			instance.hasTexture = 0.0f;
 			instance.meshInfoIndex = mesh->meshBufferData->GetMeshID();
 			instance.materialIndex = 0u;
+			instance.indexCount = mesh->meshBufferData->indexCount;
+			instance.indexOffsetInMegaBuffer = mesh->meshBufferData->indexOffsetInMegaBuffer;
+			instance.vertexOffsetInMegaBuffer = mesh->meshBufferData->vertexOffsetInMegaBuffer;
 
 			cpuInstanceData.push_back(instance);
 		}

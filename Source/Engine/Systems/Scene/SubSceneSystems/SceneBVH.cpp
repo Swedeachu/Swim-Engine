@@ -185,18 +185,37 @@ namespace Engine
 
 	void SceneBVH::FullRebuild()
 	{
-		// Gather all leaf indices (they live at the front of nodes[])
+		// Step 1: Gather all entities and clear current data
+		std::vector<std::pair<entt::entity, int>> oldLeaves(entityToLeaf.begin(), entityToLeaf.end());
+
+		// Step 2: Clear all nodes and reset entity map
+		nodes.clear();
+		entityToLeaf.clear();
+
+		// Step 3: Rebuild leaves and update map
 		std::vector<int> leafIndices;
-		leafIndices.reserve(entityToLeaf.size());
-		for (auto [e, idx] : entityToLeaf)
+		leafIndices.reserve(oldLeaves.size());
+
+		for (auto& [entity, _] : oldLeaves)
 		{
+			auto& tf = registry.get<Transform>(entity);
+			auto& mat = registry.get<Material>(entity);
+			const auto& mesh = mat.data->mesh;
+
+			BVHNode leaf;
+			leaf.entity = entity;
+			leaf.aabb = CalculateWorldAABB(mesh, tf);
+
+			int idx = static_cast<int>(nodes.size());
+			nodes.emplace_back(std::move(leaf));
+			entityToLeaf[entity] = idx;
 			leafIndices.push_back(idx);
 		}
 
-		// Re-order leaves contiguously for cache coherence
+		// Step 4: Re-order leaf indices for cache coherence (technically optional)
 		std::sort(leafIndices.begin(), leafIndices.end());
 
-		// Start building: we append internal nodes at the back
+		// Step 5: Recursively build BVH tree from leaves
 		root = BuildRecursive(leafIndices, 0, static_cast<int>(leafIndices.size()));
 	}
 

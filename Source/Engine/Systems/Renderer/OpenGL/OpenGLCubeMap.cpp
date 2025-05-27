@@ -6,32 +6,8 @@
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "Library/stb/stb_image_resize2.h"
 
-#define _USE_MATH_DEFINES
-#include "math.h"
-
 namespace Engine
 {
-
-	// Cube vertices for skybox (size doesn't matter, we scale it in shader/view matrix)
-	static constexpr float skyboxVertices[] = {
-			-1.0f,  1.0f, -1.0f,  -1.0f, -1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
-			 1.0f, -1.0f, -1.0f,   1.0f,  1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
-
-			-1.0f, -1.0f,  1.0f,  -1.0f, -1.0f, -1.0f,  -1.0f,  1.0f, -1.0f,
-			-1.0f,  1.0f, -1.0f,  -1.0f,  1.0f,  1.0f,  -1.0f, -1.0f,  1.0f,
-
-			 1.0f, -1.0f, -1.0f,   1.0f, -1.0f,  1.0f,   1.0f,  1.0f,  1.0f,
-			 1.0f,  1.0f,  1.0f,   1.0f,  1.0f, -1.0f,   1.0f, -1.0f, -1.0f,
-
-			-1.0f, -1.0f,  1.0f,  -1.0f,  1.0f,  1.0f,   1.0f,  1.0f,  1.0f,
-			 1.0f,  1.0f,  1.0f,   1.0f, -1.0f,  1.0f,  -1.0f, -1.0f,  1.0f,
-
-			-1.0f,  1.0f, -1.0f,   1.0f,  1.0f, -1.0f,   1.0f,  1.0f,  1.0f,
-			 1.0f,  1.0f,  1.0f,  -1.0f,  1.0f,  1.0f,  -1.0f,  1.0f, -1.0f,
-
-			-1.0f, -1.0f, -1.0f,  -1.0f, -1.0f,  1.0f,   1.0f, -1.0f, -1.0f,
-			 1.0f, -1.0f, -1.0f,  -1.0f, -1.0f,  1.0f,   1.0f, -1.0f,  1.0f
-	};
 
 	// On construction just sets up the shaders and mesh, SetFaces is to be called by the gameplay scene code as needed
 	OpenGLCubeMap::OpenGLCubeMap
@@ -39,7 +15,7 @@ namespace Engine
 		const std::string& vertShader,
 		const std::string& fragShader
 	)
-		: vertShader(vertShader), fragShader(fragShader)
+		: CubeMap(vertShader, fragShader)
 	{
 		LoadSkyboxMesh();
 		shaderProgram = LoadSkyboxShader();
@@ -68,54 +44,6 @@ namespace Engine
 		glDrawArrays(GL_TRIANGLES, 0, 36);
 		glBindVertexArray(0);
 		glDepthFunc(GL_LESS); // Restore default
-	}
-
-	static void RotateImage180(unsigned char* data, int width, int height)
-	{
-		const int channels = 4; // RGBA
-		const int rowSize = width * channels;
-
-		std::vector<unsigned char> temp(rowSize); // temp buffer for swapping
-
-		for (int y = 0; y < height / 2; ++y)
-		{
-			unsigned char* rowTop = data + y * rowSize;
-			unsigned char* rowBottom = data + (height - 1 - y) * rowSize;
-
-			// Copy top row to temp
-			std::memcpy(temp.data(), rowTop, rowSize);
-
-			// Copy flipped bottom row to top
-			for (int x = 0; x < width; ++x)
-			{
-				for (int c = 0; c < channels; ++c)
-				{
-					rowTop[x * channels + c] = rowBottom[(width - 1 - x) * channels + c];
-				}
-			}
-
-			// Copy flipped temp to bottom
-			for (int x = 0; x < width; ++x)
-			{
-				for (int c = 0; c < channels; ++c)
-				{
-					rowBottom[x * channels + c] = temp[(width - 1 - x) * channels + c];
-				}
-			}
-		}
-
-		// If height is odd, also flip the center row horizontally
-		if (height % 2 == 1)
-		{
-			unsigned char* centerRow = data + (height / 2) * rowSize;
-			for (int x = 0; x < width / 2; ++x)
-			{
-				for (int c = 0; c < channels; ++c)
-				{
-					std::swap(centerRow[x * channels + c], centerRow[(width - 1 - x) * channels + c]);
-				}
-			}
-		}
 	}
 
 	GLuint OpenGLCubeMap::CreateCubemap(const std::array<std::shared_ptr<Texture2D>, 6>& faces)
@@ -221,123 +149,6 @@ namespace Engine
 		return renderer->LinkShaderProgram({ vs, fs });
 	}
 
-	// This does not really work properly
-	void OpenGLCubeMap::FromEquirectangularProjection(const std::shared_ptr<Texture2D>& texture)
-	{
-		if (!texture || !texture->GetData())
-		{
-			throw std::runtime_error("Invalid equirectangular texture provided");
-		}
-
-		const int srcWidth = static_cast<int>(texture->GetWidth());
-		const int srcHeight = static_cast<int>(texture->GetHeight());
-		const unsigned char* srcData = texture->GetData();
-
-		// Determine face size - use a reasonable fraction of source height for good quality
-		const int faceSize = std::max(256, srcHeight / 4);
-
-		std::cout << "[CubeMap] Converting equirectangular " << srcWidth << "x" << srcHeight
-			<< " to cubemap faces of size " << faceSize << "x" << faceSize << std::endl;
-
-		// Create 6 face textures in memory
-		std::array<std::shared_ptr<Texture2D>, 6> cubeFaces;
-
-		// Face directions and up vectors for each cube face
-		// Order: +X, -X, +Y, -Y, +Z, -Z
-		const glm::vec3 faceDirections[6] = {
-				glm::vec3(1.0f, 0.0f, 0.0f),   // +X (Right)
-				glm::vec3(-1.0f, 0.0f, 0.0f),  // -X (Left)
-				glm::vec3(0.0f, 1.0f, 0.0f),   // +Y (Top)
-				glm::vec3(0.0f, -1.0f, 0.0f),  // -Y (Bottom)
-				glm::vec3(0.0f, 0.0f, 1.0f),   // +Z (Front)
-				glm::vec3(0.0f, 0.0f, -1.0f)   // -Z (Back)
-		};
-
-		const glm::vec3 faceUps[6] = {
-				glm::vec3(0.0f, -1.0f, 0.0f),  // +X up
-				glm::vec3(0.0f, -1.0f, 0.0f),  // -X up
-				glm::vec3(0.0f, 0.0f, 1.0f),   // +Y up
-				glm::vec3(0.0f, 0.0f, -1.0f),  // -Y up
-				glm::vec3(0.0f, -1.0f, 0.0f),  // +Z up
-				glm::vec3(0.0f, -1.0f, 0.0f)   // -Z up
-		};
-
-		// Generate each face
-		for (int face = 0; face < 6; ++face)
-		{
-			std::vector<unsigned char> faceData(faceSize * faceSize * 4);
-
-			const glm::vec3& forward = faceDirections[face];
-			const glm::vec3& up = faceUps[face];
-			const glm::vec3 right = glm::cross(forward, up);
-
-			for (int y = 0; y < faceSize; ++y)
-			{
-				for (int x = 0; x < faceSize; ++x)
-				{
-					// Convert face pixel to normalized coordinates [-1, 1]
-					const float u = (2.0f * x / (faceSize - 1)) - 1.0f;
-					const float v = (2.0f * y / (faceSize - 1)) - 1.0f;
-
-					// Calculate 3D direction vector for this pixel
-					glm::vec3 direction = glm::normalize(forward + u * right + v * up);
-
-					// Convert 3D direction to spherical coordinates
-					const float theta = atan2f(direction.z, direction.x); // Azimuth
-					const float phi = asinf(direction.y);                 // Elevation
-
-					// Convert spherical to equirectangular UV coordinates
-					const float equiU = (theta + M_PI) / (2.0f * M_PI);
-					const float equiV = (phi + M_PI * 0.5f) / M_PI;
-
-					// Clamp to valid range
-					const float clampedU = std::max(0.0f, std::min(1.0f, equiU));
-					const float clampedV = std::max(0.0f, std::min(1.0f, equiV));
-
-					// Sample from equirectangular texture using bilinear interpolation
-					const float srcX = clampedU * (srcWidth - 1);
-					const float srcY = clampedV * (srcHeight - 1);
-
-					const int x0 = static_cast<int>(floorf(srcX));
-					const int y0 = static_cast<int>(floorf(srcY));
-					const int x1 = std::min(x0 + 1, srcWidth - 1);
-					const int y1 = std::min(y0 + 1, srcHeight - 1);
-
-					const float fx = srcX - x0;
-					const float fy = srcY - y0;
-
-					// Get four neighboring pixels
-					const int idx00 = (y0 * srcWidth + x0) * 4;
-					const int idx01 = (y0 * srcWidth + x1) * 4;
-					const int idx10 = (y1 * srcWidth + x0) * 4;
-					const int idx11 = (y1 * srcWidth + x1) * 4;
-
-					// Bilinear interpolation for each channel
-					const int dstIdx = (y * faceSize + x) * 4;
-					for (int c = 0; c < 4; ++c)
-					{
-						const float p00 = srcData[idx00 + c];
-						const float p01 = srcData[idx01 + c];
-						const float p10 = srcData[idx10 + c];
-						const float p11 = srcData[idx11 + c];
-
-						const float lerp1 = p00 * (1.0f - fx) + p01 * fx;
-						const float lerp2 = p10 * (1.0f - fx) + p11 * fx;
-						const float final = lerp1 * (1.0f - fy) + lerp2 * fy;
-
-						faceData[dstIdx + c] = static_cast<unsigned char>(std::round(final));
-					}
-				}
-			}
-
-			// Create texture from face data
-			cubeFaces[face] = std::make_shared<Texture2D>(faceSize, faceSize, faceData.data());
-		}
-
-		// Use existing SetFaces method to apply the generated faces with proper ordering
-		SetFaces(cubeFaces);
-	}
-
 	void OpenGLCubeMap::SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& newFaces)
 	{
 		// Cache original faces
@@ -357,18 +168,6 @@ namespace Engine
 		}
 
 		cubemapTexture = CreateCubemap(orderedFaces);
-	}
-
-	void OpenGLCubeMap::SetOrdering(const std::array<int, 6>& order)
-	{
-		// Cache the new order
-		faceOrder = order;
-
-		// If a cubemap is already set, reapply with new order
-		if (faces[0])
-		{
-			SetFaces(faces);
-		}
 	}
 
 }
