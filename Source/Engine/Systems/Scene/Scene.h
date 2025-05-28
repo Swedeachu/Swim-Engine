@@ -3,6 +3,7 @@
 #include "Library/EnTT/entt.hpp"
 #include "SubSceneSystems/SceneBVH.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
+#include "Engine/Systems/Entity/BehaviorComponents.h"
 
 namespace Engine
 {
@@ -34,7 +35,10 @@ namespace Engine
 
 		void Update(double dt) override {};
 
-		// All scenes have a base init and update for doing internal engine things first 
+		// Called before Scene::Awake
+		void InternalSceneAwake();
+
+		// Called before Scene::Init
 		void InternalSceneInit();
 
 		// Called before Scene::Update
@@ -42,6 +46,9 @@ namespace Engine
 
 		// Called after Scene::Update
 		void InternalScenePostUpdate(double dt);
+
+		// Called before Scene::Exit
+		void InternalSceneExit();
 
 		void FixedUpdate(unsigned int tickThisSecond) override {};
 
@@ -55,9 +62,9 @@ namespace Engine
 
 		entt::entity CreateEntity();
 
-		void DestroyEntity(entt::entity entity);
+		void DestroyEntity(entt::entity entity, bool callExit = true);
 
-		void DestroyAllEntities();
+		void DestroyAllEntities(bool callExit = true);
 
 		const std::string& GetName() const { return name; }
 
@@ -67,7 +74,7 @@ namespace Engine
 		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
 		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
 		void SetCameraSystem(const std::shared_ptr<CameraSystem>& system) { cameraSystem = system; }
-		
+
 		// Defined in C++ since it does some extra stuff for the ambiguous renderer
 		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system);
 		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system);
@@ -83,6 +90,97 @@ namespace Engine
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
+
+		template<typename T, typename... Args>
+		void AddBehavior(entt::entity entity, Args&&... args)
+		{
+			static_assert(std::is_base_of_v<Behavior, T>, "AddBehavior<T> requires T to derive from Behavior");
+
+			std::unique_ptr<Behavior> behavior = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
+
+			// Scuffed and probably temproary until its more clear how we want to do the pipeline, most likely have Init be deferred elsewhere for the next frame.
+			behavior->Awake();
+			behavior->Init();
+
+			if (registry.any_of<BehaviorComponents>(entity))
+			{
+				auto& bc = registry.get<BehaviorComponents>(entity);
+				bc.Add(std::move(behavior));
+			}
+			else
+			{
+				BehaviorComponents bc;
+				bc.Add(std::move(behavior));
+				registry.emplace<BehaviorComponents>(entity, std::move(bc));
+			}
+		}
+
+		template<typename T>
+		void RemoveBehavior(entt::entity entity, bool callExit = true)
+		{
+			static_assert(std::is_base_of_v<Behavior, T>, "RemoveBehavior<T> requires T to derive from Behavior");
+
+			if (!registry.any_of<BehaviorComponents>(entity))
+			{
+				return;
+			}
+
+			auto& bc = registry.get<BehaviorComponents>(entity);
+			auto& vec = bc.behaviors;
+
+			// Remove behavior of type T
+			vec.erase(std::remove_if(vec.begin(), vec.end(),
+				[&](std::unique_ptr<Behavior>& b)
+			{
+				if (b && typeid(*b) == typeid(T))
+				{
+					if (callExit)
+					{
+						b->Exit();
+					}
+					return true;
+				}
+				return false;
+			}), vec.end());
+
+			// Remove component entirely if empty
+			if (vec.empty())
+			{
+				registry.remove<BehaviorComponents>(entity);
+			}
+		}
+
+		template<typename Func, typename... Args>
+		void ForEachBehavior(Func method, Args&&... args)
+		{
+			registry.view<BehaviorComponents>().each(
+				[&](auto entity, BehaviorComponents& bc)
+			{
+				for (auto& behavior : bc.behaviors)
+				{
+					if (behavior)
+					{
+						(behavior.get()->*method)(std::forward<Args>(args)...);
+					}
+				}
+			});
+		}
+
+		template<typename Func, typename... Args>
+		void ForEachBehaviorOfEntity(entt::entity entity, Func method, Args&&... args)
+		{
+			if (registry.valid(entity) && registry.any_of<BehaviorComponents>(entity))
+			{
+				auto& bc = registry.get<BehaviorComponents>(entity);
+				for (auto& behavior : bc.behaviors)
+				{
+					if (behavior)
+					{
+						(behavior.get()->*method)(std::forward<Args>(args)...);
+					}
+				}
+			}
+		}
 
 	protected:
 

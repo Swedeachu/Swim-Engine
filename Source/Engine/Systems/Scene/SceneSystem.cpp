@@ -43,6 +43,7 @@ namespace Engine
 		// Awake all registered scenes
 		for (auto& [name, scene] : scenes)
 		{
+			scene->InternalSceneAwake();
 			int terr = scene->Awake();
 			if (terr != 0)
 			{
@@ -92,6 +93,7 @@ namespace Engine
 
 		for (auto& [name, scene] : scenes)
 		{
+			scene->InternalSceneExit();
 			int terr = scene->Exit();
 			if (terr != 0)
 			{
@@ -115,6 +117,7 @@ namespace Engine
 		// Exit the current scene if requested
 		if (exitCurrent && activeScene)
 		{
+			activeScene->InternalSceneExit();
 			if (activeScene->Exit() != 0)
 			{
 				std::cerr << "Failed to exit the current scene.\n";
@@ -127,6 +130,7 @@ namespace Engine
 		{
 			if (awakeNew)
 			{
+				activeScene->InternalSceneAwake();
 				if (activeScene->Awake() != 0)
 				{
 					std::cerr << "Failed to Awake the new scene '" << name << "'.\n";
@@ -135,6 +139,7 @@ namespace Engine
 
 			if (initNew)
 			{
+				activeScene->InternalSceneInit();
 				if (activeScene->Init() != 0)
 				{
 					std::cerr << "Failed to Init the new scene '" << name << "'.\n";

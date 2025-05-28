@@ -210,6 +210,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
@@ -225,6 +227,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
@@ -250,6 +255,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Library\glad\src\gl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
@@ -265,6 +273,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\main.cpp" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
   </ItemGroup>

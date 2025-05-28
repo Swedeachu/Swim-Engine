@@ -6,6 +6,10 @@
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
 #include "RandomUtils.h"
+#include "Engine\Systems\Entity\EntityFactory.h"
+#include "Game\Behaviors\CameraControl\EditorCamera.h"
+#include "Game\Behaviors\Demo\SimpleMovement.h"
+#include "Game\Behaviors\Demo\CubeMapControlTest.h"
 
 namespace Game
 {
@@ -285,8 +289,6 @@ namespace Game
 		}
 	}
 
-	entt::entity controllableEntity;
-
 	int SandBox::Init()
 	{
 		std::cout << name << " Init" << std::endl;
@@ -323,44 +325,29 @@ namespace Game
 			"mart material", mesh2, texturePool.GetTexture2DLazy("mart")
 		);
 
-		// Create and set up two entities
-		auto& registry = GetRegistry();
+		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
+		Engine::EntityFactory& entityFactory = Engine::EntityFactory::GetInstance();
 
-		// Entity 1: Controlled by WASD
-		controllableEntity = CreateEntity();
-		registry.emplace<Engine::Transform>(controllableEntity, glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f));
-		registry.emplace<Engine::Material>(controllableEntity, materialData1);
+		// Make a static quad entity this way (these methods queue everything for creation to spawn next frame update)
+		entityFactory.CreateWithTransformAndMaterial(
+			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)), 
+			Engine::Material(materialData2)
+		);
 
-		// Entity 2: Static entity
-		auto staticEntity = CreateEntity();
-		registry.emplace<Engine::Transform>(staticEntity, glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f));
-		registry.emplace<Engine::Material>(staticEntity, materialData2);
+		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
+		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(
+			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
+			Engine::Material(materialData1)
+		);
+
+		// We can load scene scripts this way as a cool hack/trick
+		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
+
+		// Traditonally we would have to do CreateEntity(), registry.emplace() of the transform and material, and then AddBehavior<T>(entt) for everything manually
+		// These entity factory methods help short cut all of that automatically.
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities();
-
-		// Turn on the sky
-		std::unique_ptr<Engine::CubeMapController>& cubemapController = GetRenderer()->GetCubeMapController();
-		if (!cubemapController) return 0;
-
-		cubemapController->SetEnabled(true);
-
-		constexpr bool style = false;
-
-		if constexpr (style)
-		{
-			// Convert one image to a cubemap with equirectangular projection
-			std::shared_ptr<Engine::Texture2D> tex = texturePool.GetTexture2D("Sky/rect_sky");
-			cubemapController->FromEquirectangularProjection(tex);
-		}
-		else
-		{
-			// Get 6 seperate cubemap texture faces to supply
-			std::array<std::shared_ptr<Engine::Texture2D>, 6> faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
-			cubemapController->SetFaces(faces);
-		}
-
-		// cubemapController->SetOrdering({ 3, 1, 4, 5, 2, 0 }); // internally this is the default face ordering already
 
 		return 0;
 	}
@@ -372,203 +359,9 @@ namespace Game
 		drawer->SubmitWireframeBox(glm::vec3(0.f, 0.f, 0.f), glm::vec3(1.0f));
 	}
 
-
-	// Forward declarations
-	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::CameraSystem>& cameraSystem);
-	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager>& input, entt::registry& registry, entt::entity controllableEntity);
-	void HandleCubeMapControls(std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::Renderer>& renderer);
-
-	// this is just quickly thrown together demo code, behavior components coming soon
 	void SandBox::Update(double dt)
 	{
-		std::shared_ptr<Engine::InputManager> input = GetInputManager();
-		std::shared_ptr<Engine::CameraSystem> cameraSystem = GetCameraSystem();
-		std::shared_ptr<Engine::Renderer> renderer = GetRenderer();
-
-		auto& registry = GetRegistry();
-
-		HandleCameraControls(dt, input, cameraSystem);
-		HandleEntityControls(dt, input, registry, controllableEntity);
-		HandleCubeMapControls(input, renderer);
-	}
-
-	static bool flip = false;
-	static bool styleToggle = false; // false = using 6 faces supplied, true = generate with equirectangular projection from a singular image
-
-	void HandleCubeMapControls(std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::Renderer>& renderer)
-	{
-		// TODO: ability to mess with horizon level
-
-		std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
-
-		// Toggle on the sky with C key
-		if (input->IsKeyTriggered('C'))
-		{
-			cubemapController->SetEnabled(!cubemapController->IsEnabled());
-		}
-
-		// Flip around the face ordering
-		if (input->IsKeyTriggered('V'))
-		{
-			using Faces = std::array<int, 6>;
-			flip = !flip;
-			Faces order = flip ? Faces{ 0, 1, 2, 3, 4, 5 } : Faces{ 3, 1, 4, 5, 2, 0 };
-			cubemapController->SetOrdering(order);
-		}
-
-		// Toggle the cubemap style
-		if (input->IsKeyTriggered('X'))
-		{
-			Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
-
-			styleToggle = !styleToggle;
-
-			if (styleToggle)
-			{
-				// Convert one image to a cubemap with equirectangular projection
-				std::shared_ptr<Engine::Texture2D> tex = texturePool.GetTexture2D("Sky/rect_sky");
-				cubemapController->FromEquirectangularProjection(tex);
-			}
-			else
-			{
-				// Get 6 seperate cubemap texture faces to supply
-				std::array<std::shared_ptr<Engine::Texture2D>, 6> faces = texturePool.GetTexturesContainingString<6>("Cubemaps/Test/cubemap");
-				cubemapController->SetFaces(faces);
-			}
-		}
-	}
-
-	// =================== CAMERA CONTROL ===================
-
-	void HandleCameraControls(float dt, std::shared_ptr<Engine::InputManager>& input, std::shared_ptr<Engine::CameraSystem>& cameraSystem)
-	{
-		// Movement speed constants
-		const float cameraMoveSpeed = 5.0f;
-		const float boostMultiplier = 3.0f;
-		const float mouseSensitivity = 0.1f;
-
-		// Get the active camera
-		auto& camera = cameraSystem->GetCamera();
-		glm::vec3 position = camera.GetPosition();
-
-		// these will be stores in the camera controller component 
-		static float yaw = 0.0f;    // rotation around world Y axis
-		static float pitch = 0.0f;  // rotation around local X axis
-
-		// ----- Mouse Look -----
-		if (input->IsKeyDown(VK_RBUTTON))
-		{
-			glm::vec2 mouseDelta = input->GetMousePositionDelta();
-
-			// Update yaw (horizontal) and pitch (vertical)
-			yaw += mouseDelta.x * mouseSensitivity;
-			pitch -= mouseDelta.y * mouseSensitivity;
-
-			// Clamp pitch to prevent flipping
-			pitch = glm::clamp(pitch, -89.9f, 89.9f);
-
-			// Yaw is around global Y
-			glm::quat qYaw = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
-
-			// Pitch is around camera's local X
-			glm::quat qPitch = glm::angleAxis(glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
-
-			// Combined rotation: yaw first, then pitch
-			glm::quat rotation = qYaw * qPitch;
-
-			camera.SetRotation(rotation);
-		}
-
-		glm::quat rotation = camera.GetRotation(); // Get updated rotation
-
-		// ----- Movement -----
-		glm::mat4 rotationMatrix = glm::mat4_cast(rotation);
-		glm::vec3 forward = glm::normalize(rotationMatrix * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
-		glm::vec3 right = glm::normalize(rotationMatrix * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f));
-		glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f); // World up
-
-		glm::vec3 movement(0.0f);
-
-		if (input->IsKeyDown('W'))
-		{
-			movement += forward;
-		}
-		if (input->IsKeyDown('S'))
-		{
-			movement -= forward;
-		}
-		if (input->IsKeyDown('A'))
-		{
-			movement -= right;
-		}
-		if (input->IsKeyDown('D'))
-		{
-			movement += right;
-		}
-		if (input->IsKeyDown(VK_SPACE))
-		{
-			movement += up;
-		}
-		if (input->IsKeyDown(VK_SHIFT))
-		{
-			movement -= up;
-		}
-
-		if (glm::length(movement) > 0.0f)
-		{
-			movement = glm::normalize(movement);
-		}
-
-		float speed = cameraMoveSpeed;
-		if (input->IsKeyDown(VK_CONTROL))
-		{
-			speed *= boostMultiplier;
-		}
-
-		position += movement * speed * dt;
-		camera.SetPosition(position);
-	}
-
-	// =================== ENTITY CONTROL ===================
-
-	void HandleEntityControls(float dt, std::shared_ptr<Engine::InputManager>& input, entt::registry& registry, entt::entity controllableEntity)
-	{
-		const float entityMoveSpeed = 5.0f;
-		glm::vec3 entityMoveDir{ 0.0f };
-
-		// Arrow keys + Z/X for entity movement.
-		if (input->IsKeyDown(VK_UP))
-		{
-			entityMoveDir += glm::vec3(0.0f, 0.0f, -1.0f); // Forward
-		}
-		if (input->IsKeyDown(VK_DOWN))
-		{
-			entityMoveDir += glm::vec3(0.0f, 0.0f, 1.0f); // Backward
-		}
-		if (input->IsKeyDown(VK_LEFT))
-		{
-			entityMoveDir += glm::vec3(-1.0f, 0.0f, 0.0f); // Left
-		}
-		if (input->IsKeyDown(VK_RIGHT))
-		{
-			entityMoveDir += glm::vec3(1.0f, 0.0f, 0.0f); // Right
-		}
-		if (input->IsKeyDown(VK_PRIOR)) // page up
-		{
-			entityMoveDir += glm::vec3(0.0f, 1.0f, 0.0f); // Up
-		}
-		if (input->IsKeyDown(VK_NEXT)) // page down
-		{
-			entityMoveDir += glm::vec3(0.0f, -1.0f, 0.0f); // Down
-		}
-
-		// Apply entity movement if any
-		if (glm::length(entityMoveDir) > 0.0f)
-		{
-			entityMoveDir = glm::normalize(entityMoveDir) * entityMoveSpeed * static_cast<float>(dt);
-			auto& transform = registry.get<Engine::Transform>(controllableEntity);
-			transform.GetPositionRef() += entityMoveDir;
-		}
+		// WireframeTest(this);
 	}
 
 	void SandBox::FixedUpdate(unsigned int tickThisSecond)

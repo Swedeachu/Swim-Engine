@@ -28,6 +28,9 @@ namespace Engine
 		// returns an int for success code
 		virtual int Exit() { return 0;  };
 
+		// Virtual destructor to gurantee destruction chain happens as intended
+		virtual ~Machine() = default;
+
 	};
 
 }

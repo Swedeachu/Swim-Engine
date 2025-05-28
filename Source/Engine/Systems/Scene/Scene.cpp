@@ -5,6 +5,7 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
+#include "Engine/Systems/Entity/EntityFactory.h"
 
 namespace Engine
 {
@@ -17,17 +18,26 @@ namespace Engine
 
 	entt::entity Scene::CreateEntity()
 	{
-		auto entity = registry.create();
-		return entity;
+		return registry.create();
 	}
 
-	void Scene::DestroyEntity(entt::entity entity)
+	void Scene::DestroyEntity(entt::entity entity, bool callExit)
 	{
+		if (callExit)
+		{
+			ForEachBehaviorOfEntity(entity, &Behavior::Exit);
+		}
+
 		registry.destroy(entity);
 	}
 
-	void Scene::DestroyAllEntities()
+	void Scene::DestroyAllEntities(bool callExit)
 	{
+		if (callExit)
+		{
+			ForEachBehavior(&Behavior::Exit);
+		}
+
 		registry.clear();
 	}
 
@@ -53,6 +63,11 @@ namespace Engine
 	// which will be essential for physics and AI and rendering/generic updates of active chunks.
 	// We are already doing that now with SceneBVH.
 
+	void Scene::InternalSceneAwake()
+	{
+		ForEachBehavior(&Behavior::Awake); // we might not want to do this actually and let behaviors do this themselves
+	}
+
 	void Scene::InternalSceneInit()
 	{
 		// Watch for updates (construction or modification) of Transform or Material
@@ -73,6 +88,8 @@ namespace Engine
 		sceneDebugDraw->Init();
 
 		sceneBVH->SetDebugDrawer(sceneDebugDraw.get());
+
+		ForEachBehavior(&Behavior::Init); // we might not want to do this actually and let behaviors do this themselves
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -87,6 +104,9 @@ namespace Engine
 	// It might make sense to have sub scene systems be in a data structure that iterates with update inside of here and init and update etc.
 	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
+		// Call fixed update on all our behaviors
+		ForEachBehavior(&Behavior::FixedUpdate, tickThisSecond);
+
 		// Add new frustum cache components if needed
 		for (auto entity : frustumCacheObserver)
 		{
@@ -115,13 +135,25 @@ namespace Engine
 		}
 	}
 
+	void Scene::InternalSceneExit()
+	{
+		// TODO: don't destroy on load/persist entities 
+		ForEachBehavior(&Behavior::Exit);
+	}
+
 	void Scene::InternalSceneUpdate(double dt)
 	{
+		EntityFactory& entityFactory = EntityFactory::GetInstance();
+		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
+
+		// Call Update(dt) on all Behavior components
+		ForEachBehavior(&Behavior::Update, dt);
+
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
 		if constexpr (handleDebugDraw)
 		{
-			// control toggle with input G key
+			// control toggle with input G key (this should be a hotkey combination not just a single key and only in editor mode scenes)
 			if (GetInputManager()->IsKeyTriggered('G'))
 			{
 				sceneDebugDraw->SetEnabled(!sceneDebugDraw->IsEnabled());
