@@ -509,16 +509,26 @@ namespace Engine
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 		vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
+		// Remove camera translation
 		glm::mat4 viewNoTrans = glm::mat4(glm::mat3(viewMatrix));
 
+		// === Compute skybox rotation matrix ===
+		glm::vec3 rotationRadians = glm::radians(rotation);
+		glm::quat rotQuat = glm::quat(rotationRadians);
+		glm::mat3 rotMatrix3 = glm::mat3_cast(rotQuat);
+		glm::mat4 rotMatrix4 = glm::mat4(rotMatrix3); // push as mat4x4 for alignment
+
+		// === Push constant struct (aligned) ===
 		struct PushData
 		{
 			glm::mat4 view;
 			glm::mat4 proj;
+			glm::mat4 rotation; // Stored as mat4 due to alignment; mat3x3 is not portable
 		} push;
 
 		push.view = viewNoTrans;
 		push.proj = projectionMatrix;
+		push.rotation = rotMatrix4;
 
 		vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushData), &push);
 
@@ -652,7 +662,7 @@ namespace Engine
 		VkPushConstantRange pushRange{};
 		pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 		pushRange.offset = 0;
-		pushRange.size = sizeof(glm::mat4) * 2;
+		pushRange.size = sizeof(glm::mat4) * 3; // view, proj, rotation to match VulkanCubeMap::Render()::PushData
 
 		VkPipelineLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

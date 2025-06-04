@@ -190,6 +190,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -258,6 +260,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Library\glad\src\gl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
@@ -276,6 +279,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
   </ItemGroup>

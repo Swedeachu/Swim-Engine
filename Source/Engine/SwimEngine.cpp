@@ -360,7 +360,7 @@ namespace Engine
 			std::chrono::duration<double> elapsed = currentTime - previousTime;
 			previousTime = currentTime;
 
-			double delta = elapsed.count();
+			delta = elapsed.count();
 
 			// Safety check: If delta time exceeds maxDeltaTime, log and skip the frame
 			// This is most often caused when dragging around the window or doing something of that nature to suspend the process temporarily

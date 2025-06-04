@@ -84,9 +84,16 @@ namespace Engine
 		// Set the order of the currently loaded faces, will rearrange them in real time, should cache the ordering as well if a cubemap hasn't been set yet
 		void SetOrdering(const std::array<int, 6>& order);
 
+		// In degrees for pitch yaw roll
+		void SetRotation(const glm::vec3& rotation) { this->rotation = rotation; }
+		const glm::vec3& GetRotation() const { return rotation; }
+
 	protected:
 
 		static void RotateImage180(unsigned char* data, int width, int height);
+
+		// In degrees
+		glm::vec3 rotation = { 0, 0, 0 };
 
 		std::array<int, 6> faceOrder = { 0, 1, 2, 3, 4, 5 };
 		std::array<std::shared_ptr<Texture2D>, 6> faces;

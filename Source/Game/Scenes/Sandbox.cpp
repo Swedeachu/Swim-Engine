@@ -10,16 +10,17 @@
 #include "Game\Behaviors\CameraControl\EditorCamera.h"
 #include "Game\Behaviors\Demo\SimpleMovement.h"
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
+#include "Game\Behaviors\Demo\Spin.h"
 
 namespace Game
 {
 
-	constexpr static bool doStressTest = true;
+	constexpr static bool doStressTest = false;
 	constexpr static bool fullyUniqueCubeMeshes = false; 
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
 
-	constexpr static const int GRID_HALF_SIZE = 2; // for example 10 makes a 20x20x20 cube of cubes
+	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
 	constexpr static const float SPACING = 3.5f; // 2.5f
 
 	int SandBox::Awake()
@@ -333,6 +334,12 @@ namespace Game
 			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)), 
 			Engine::Material(materialData2)
 		);
+
+		// Make another entity but the old fashioned way just to show how its done
+		auto spinEntity = CreateEntity();
+		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+		AddComponent<Engine::Material>(spinEntity, Engine::Material(materialData1));
+		AddBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
 		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(

@@ -33,8 +33,17 @@ namespace Engine
 		glUseProgram(shaderProgram);
 
 		glm::mat4 viewNoTranslation = glm::mat4(glm::mat3(viewMatrix));
+
+		// Convert Euler degrees (X=pitch, Y=yaw, Z=roll) to radians
+		glm::vec3 rotationRadians = glm::radians(rotation); // rotation = (pitch, yaw, roll)
+
+		// Match Transform behavior exactly
+		glm::quat rotationQuat = glm::quat(rotationRadians); // GLM applies ZYX internally
+		glm::mat3 rotationMatrix = glm::mat3_cast(rotationQuat);
+
 		glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, &viewNoTranslation[0][0]);
 		glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, &projectionMatrix[0][0]);
+		glUniformMatrix3fv(glGetUniformLocation(shaderProgram, "rotation"), 1, GL_FALSE, &rotationMatrix[0][0]);
 
 		glBindVertexArray(skyboxVAO);
 		glActiveTexture(GL_TEXTURE0);

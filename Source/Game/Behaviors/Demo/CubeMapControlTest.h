@@ -27,6 +27,12 @@ namespace Game
 		bool flip = false;
 		bool styleToggle = false;
 
+		void UpdateRotation(double dt, std::unique_ptr<Engine::CubeMapController>& cubemapController);
+
+		float rotationSpeed = 0.5f;
+
+		glm::vec3 rotationDirection = glm::vec3(0.0f, 1.0f, 0.0f); // Rotate around Y axis by default
+
 	};
 
 }

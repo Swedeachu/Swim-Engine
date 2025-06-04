@@ -42,6 +42,8 @@ namespace Game
 
 		std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
 
+		UpdateRotation(dt, cubemapController);
+
 		// Toggle on the sky with C key
 		if (input->IsKeyTriggered('C'))
 		{
@@ -77,6 +79,53 @@ namespace Game
 				cubemapController->SetFaces(faces);
 			}
 		}
+	}
+
+	void CubeMapControlTest::UpdateRotation(double dt, std::unique_ptr<Engine::CubeMapController>& cubemapController)
+	{
+		if (!cubemapController)
+		{
+			return;
+		}
+
+		Engine::CubeMap* cubemap = cubemapController->GetCubeMap();
+		if (!cubemap)
+		{
+			return;
+		}
+
+		// Adjust rotation speed with F, G, H
+		if (input->IsKeyDown('F'))
+			rotationSpeed += 0.01f;
+		else if (input->IsKeyDown('G'))
+			rotationSpeed -= 0.01f;
+		else if (input->IsKeyTriggered('H'))
+			rotationSpeed = 0.5f;
+
+		// Get the current rotation from the cubemap
+		glm::vec3 currentRotation = cubemap->GetRotation();
+
+		// Calculate new rotation increment
+		glm::vec3 deltaRotation = rotationDirection * rotationSpeed * static_cast<float>(dt);
+
+		// Apply rotation
+		glm::vec3 newRotation = currentRotation + deltaRotation;
+
+		// Wrap each component to keep it in [0, 360)
+		for (int i = 0; i < 3; ++i)
+		{
+			if (newRotation[i] >= 360.0f)
+			{
+				newRotation[i] -= 360.0f;
+			}
+			else if (newRotation[i] < 0.0f)
+			{
+				newRotation[i] += 360.0f;
+			}
+		}
+
+		// Set the updated rotation back
+		cubemap->SetRotation(newRotation);
 	}
 
 }

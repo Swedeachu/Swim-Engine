@@ -76,6 +76,9 @@ namespace Engine
 
 		unsigned int GetTotalFrames() const { return totalFrames; }
 
+		// Returns the amount of time between the previous frame
+		double GetDeltaTime() const { return delta; }
+
 	private:
 
 		// calls Update when it is time

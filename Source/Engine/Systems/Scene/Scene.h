@@ -91,6 +91,16 @@ namespace Engine
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
 
+		// Yes it is probably slower to take in a premade component instead of std::forward of args but this is for the sake of readability as we are just literally wrapping registry.emplace
+		template<typename T>
+		T& AddComponent(entt::entity entity, T component)
+		{
+			static_assert(!std::is_reference_v<T>, "AddComponent should not take a reference type");
+			static_assert(!std::is_pointer_v<T>, "AddComponent should not take a pointer type");
+
+			return registry.emplace<T>(entity, std::move(component));
+		}
+
 		template<typename T, typename... Args>
 		void AddBehavior(entt::entity entity, Args&&... args)
 		{

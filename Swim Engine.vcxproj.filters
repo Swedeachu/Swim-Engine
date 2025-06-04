@@ -42,6 +42,7 @@
     <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -100,6 +101,7 @@
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

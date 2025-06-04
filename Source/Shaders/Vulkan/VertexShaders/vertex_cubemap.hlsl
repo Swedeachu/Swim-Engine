@@ -1,7 +1,8 @@
 struct PushConstants
 {
-  float4x4 view;
-  float4x4 proj;
+	float4x4 view;
+	float4x4 proj;
+	float3x3 rotation;
 };
 
 [[vk::push_constant]]
@@ -9,26 +10,26 @@ PushConstants pc;
 
 struct VSInput
 {
-  float3 position : POSITION;
+	float3 position : POSITION;
 };
 
 struct VSOutput
 {
-  float4 position : SV_Position;
-  float3 texDir : TEXCOORD0;
+	float4 position : SV_Position;
+	float3 texDir : TEXCOORD0;
 };
 
 VSOutput main(VSInput input)
 {
-  VSOutput output;
+	VSOutput output;
 
-  // Sample direction
-  output.texDir = input.position;
+	// Apply rotation to skybox direction vector
+	float3 rotatedDir = mul(pc.rotation, input.position);
+	output.texDir = rotatedDir;
 
-  float4 clipPos = mul(pc.proj, mul(pc.view, float4(input.position, 1.0f)));
+	// Project into clip space (w trick keeps box infinitely far)
+	float4 clipPos = mul(pc.proj, mul(pc.view, float4(input.position, 1.0f)));
+	output.position = clipPos.xyww;
 
-  // Keep skybox at far depth
-  output.position = clipPos.xyww;
-
-  return output;
+	return output;
 }
