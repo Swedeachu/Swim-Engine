@@ -358,4 +358,24 @@ namespace Engine
 		return indices;
 	}
 
+	VkSampleCountFlagBits VulkanDeviceManager::GetMaxUsableSampleCount() const
+	{
+		VkPhysicalDeviceProperties props;
+		vkGetPhysicalDeviceProperties(physicalDevice, &props);
+
+		VkSampleCountFlags colorSamples = props.limits.framebufferColorSampleCounts;
+		VkSampleCountFlags depthSamples = props.limits.framebufferDepthSampleCounts;
+		VkSampleCountFlags counts = colorSamples & depthSamples;
+
+		if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+		if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+		if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+		if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+		if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+		if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+		return VK_SAMPLE_COUNT_1_BIT;
+	}
+
+
 }

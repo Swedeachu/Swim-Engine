@@ -21,6 +21,7 @@ namespace Engine
 		~Texture2D();
 
 		void Free();
+		void FreeCPU();
 
 		// Getters from original file from disk (do not confuse file width and height with transform scales)
 		uint32_t GetWidth() const { return width; }

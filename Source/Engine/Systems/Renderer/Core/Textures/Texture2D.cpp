@@ -175,6 +175,11 @@ namespace Engine
       }
     }
 
+    FreeCPU();
+  }
+
+  void Texture2D::FreeCPU()
+  {
     if (pixelData)
     {
       if (isPixelDataSTB)

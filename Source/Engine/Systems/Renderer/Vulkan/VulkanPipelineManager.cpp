@@ -75,21 +75,29 @@ namespace Engine
 		return shaderModule;
 	}
 
-	void VulkanPipelineManager::CreateRenderPass(VkFormat colorFormat, VkFormat depthFormat)
+	void VulkanPipelineManager::CreateRenderPass(
+		VkFormat colorFormat,
+		VkFormat depthFormat,
+		VkSampleCountFlagBits sampleCount 
+	)
 	{
+		msaaSamples = sampleCount; // Store it for pipeline use
+
+		// Multisampled color attachment (offscreen target)
 		VkAttachmentDescription colorAttachment{};
 		colorAttachment.format = colorFormat;
-		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		colorAttachment.samples = sampleCount; // Enable MSAA
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // resolved, so discard
 		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+		// Depth attachment (MSAA if enabled)
 		VkAttachmentDescription depthAttachment{};
 		depthAttachment.format = depthFormat;
-		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		depthAttachment.samples = sampleCount; // Match MSAA
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -97,15 +105,31 @@ namespace Engine
 		depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-		VkAttachmentReference colorAttachmentRef{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
-		VkAttachmentReference depthAttachmentRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+		// Resolve attachment (final image for presentation)
+		VkAttachmentDescription resolveAttachment{};
+		resolveAttachment.format = colorFormat;
+		resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		resolveAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		resolveAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		resolveAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
+		// References for subpass
+		VkAttachmentReference colorRef{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+		VkAttachmentReference depthRef{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+		VkAttachmentReference resolveRef{ 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+
+		// One subpass with multisample + resolve
 		VkSubpassDescription subpass{};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
-		subpass.pColorAttachments = &colorAttachmentRef;
-		subpass.pDepthStencilAttachment = &depthAttachmentRef;
+		subpass.pColorAttachments = &colorRef;
+		subpass.pDepthStencilAttachment = &depthRef;
+		subpass.pResolveAttachments = &resolveRef;
 
+		// Standard dependency
 		VkSubpassDependency dependency{};
 		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependency.dstSubpass = 0;
@@ -113,7 +137,9 @@ namespace Engine
 		dependency.dstStageMask = dependency.srcStageMask;
 		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-		std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+		std::array<VkAttachmentDescription, 3> attachments = {
+			colorAttachment, depthAttachment, resolveAttachment
+		};
 
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -199,10 +225,12 @@ namespace Engine
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.lineWidth = 1.0f;
 
-    // Multisampling
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		// Multisampling
+		VkPipelineMultisampleStateCreateInfo multisampling{};
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = msaaSamples; // Set sample count from stored value for MSAA
+		multisampling.sampleShadingEnable = VK_FALSE;     // Optional: enable for per-sample shading
+		multisampling.minSampleShading = 1.0f;            // Optional: adjust for quality/perf
 
     // Depth & Stencil
     VkPipelineDepthStencilStateCreateInfo depthStencil{};

@@ -36,6 +36,9 @@ namespace Engine
 		std::shared_ptr<Texture2D> GetTexture2DLazy(const std::string& name);
 		std::string FormatKey(const std::string& filePath, const std::string& rootPath) const;
 
+		// Will call FreeCPU on all textures in the map that don't contain any of the strings in keep
+		void CleanCPU(const std::vector<std::string>& keep = {});
+
 		// Frees everything
 		void Flush();
 

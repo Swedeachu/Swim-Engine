@@ -59,6 +59,11 @@ namespace Engine
 
 		VkDevice device = deviceManager->GetDevice();
 		VkPhysicalDevice physicalDevice = deviceManager->GetPhysicalDevice();
+		msaaSamples = deviceManager->GetMaxUsableSampleCount(); 
+		if (msaaSamples > VK_SAMPLE_COUNT_4_BIT)
+		{
+			msaaSamples = VK_SAMPLE_COUNT_4_BIT; // 4x msaa is fine as max for now
+		}
 
 		// Ctor inits phase 1 for some image formats needed for the render pass
 		swapChainManager = std::make_unique<VulkanSwapChain>(
@@ -74,10 +79,10 @@ namespace Engine
 			device
 		);
 
-		pipelineManager->CreateRenderPass(swapChainManager->GetPendingImageFormat(), swapChainManager->GetPendingDepthFormat());
+		pipelineManager->CreateRenderPass(swapChainManager->GetPendingImageFormat(), swapChainManager->GetPendingDepthFormat(), msaaSamples);
 		VkRenderPass renderPass = pipelineManager->GetRenderPass();
 
-		swapChainManager->Create(renderPass); // phase 2 of swapchain creation
+		swapChainManager->Create(renderPass, msaaSamples); // phase 2 of swapchain creation
 
 		// We need the texture pool for getting how many textures we will need in our bindless textures array.
 		// After all this Vulkan initing, we can then load all textures.
@@ -216,7 +221,7 @@ namespace Engine
 		if (framebufferResized && cameraSystem.get() != nullptr)
 		{
 			framebufferResized = false;
-			swapChainManager->Recreate(windowWidth, windowHeight, pipelineManager->GetRenderPass());
+			swapChainManager->Recreate(windowWidth, windowHeight, pipelineManager->GetRenderPass(), msaaSamples);
 
 			// Then refresh the camera systems aspect ratio to the new windows size
 			// This should be the main engine classes job to call this on window resize finish, but it just works best here

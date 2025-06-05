@@ -52,6 +52,9 @@ namespace Engine
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 
+		// For MSAA
+		const VkSampleCountFlagBits GetSampleCountFlagBits() const { return msaaSamples; }
+
 		// Will flag the vulkanRenderer to reload everything for the adjusted surface, called by the engine when finished resizing the window
 		void SetFramebufferResized()
 		{
@@ -133,6 +136,9 @@ namespace Engine
 		// So far the only other classes that use this number is the sync manager (cached in ctor) and a method call in descriptor manager.
 		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
+
+		// Ideally x4, set from VulkanDeviceManager::GetMaxUsableSampleCount()
+		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 
 		std::unique_ptr<VulkanSyncManager> syncManager;
 		std::unique_ptr<VulkanDescriptorManager> descriptorManager;

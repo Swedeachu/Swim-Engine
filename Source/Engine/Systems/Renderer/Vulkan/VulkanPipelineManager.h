@@ -15,7 +15,7 @@ namespace Engine
 		VulkanPipelineManager(VkDevice device);
 		~VulkanPipelineManager();
 
-		void CreateRenderPass(VkFormat colorFormat, VkFormat depthFormat);
+		void CreateRenderPass(VkFormat colorFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount);
 
 		void CreateGraphicsPipeline(
 			const std::string& vertShaderPath,
@@ -43,6 +43,8 @@ namespace Engine
 		VkRenderPass renderPass = VK_NULL_HANDLE;
 		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
 		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+
+		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 
 	};
 

@@ -39,34 +39,58 @@ namespace Engine
 		Cleanup();
 	}
 
-	void VulkanSwapChain::Create(VkRenderPass renderPass)
+	void VulkanSwapChain::Create(VkRenderPass renderPass, VkSampleCountFlagBits sampleCount)
 	{
 		renderPassRef = renderPass;
+		msaaSamples = sampleCount;
+
 		CreateSwapChain();
 		CreateImageViews();
 		CreateDepthResources();
+		CreateColorResources();
 		CreateFramebuffers();
 	}
 
-	void VulkanSwapChain::Recreate(uint32_t newWidth, uint32_t newHeight, VkRenderPass renderPass)
+	void VulkanSwapChain::Recreate(uint32_t newWidth, uint32_t newHeight, VkRenderPass renderPass, VkSampleCountFlagBits sampleCount)
 	{
 		vkDeviceWaitIdle(device);
 
 		windowWidth = newWidth;
 		windowHeight = newHeight;
 		renderPassRef = renderPass;
+		msaaSamples = sampleCount;
+
 		Cleanup();
-		Create(renderPass);
+		Create(renderPass, msaaSamples);
 	}
 
 	void VulkanSwapChain::Cleanup()
 	{
+		// Destroy framebuffers
 		for (auto fb : swapChainFramebuffers)
 		{
 			vkDestroyFramebuffer(device, fb, nullptr);
 		}
 		swapChainFramebuffers.clear();
 
+		// Destroy MSAA color attachments
+		for (auto view : msaaColorImageViews)
+		{
+			vkDestroyImageView(device, view, nullptr);
+		}
+		for (auto image : msaaColorImages)
+		{
+			vkDestroyImage(device, image, nullptr);
+		}
+		for (auto mem : msaaColorImageMemories)
+		{
+			vkFreeMemory(device, mem, nullptr);
+		}
+		msaaColorImageViews.clear();
+		msaaColorImages.clear();
+		msaaColorImageMemories.clear();
+
+		// Depth resources
 		for (auto view : depthImageViews)
 		{
 			vkDestroyImageView(device, view, nullptr);
@@ -83,6 +107,7 @@ namespace Engine
 		depthImageMemories.clear();
 		depthImageViews.clear();
 
+		// Swapchain image views
 		for (auto view : swapChainImageViews)
 		{
 			vkDestroyImageView(device, view, nullptr);
@@ -184,7 +209,7 @@ namespace Engine
 			imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
 			imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 			imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-			imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+			imageInfo.samples = msaaSamples;
 			imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 			if (vkCreateImage(device, &imageInfo, nullptr, &depthImages[i]) != VK_SUCCESS)
@@ -225,15 +250,82 @@ namespace Engine
 		}
 	}
 
+	void VulkanSwapChain::CreateColorResources()
+	{
+		VkFormat colorFormat = swapChainImageFormat;
+
+		msaaColorImages.resize(swapChainImages.size());
+		msaaColorImageMemories.resize(swapChainImages.size());
+		msaaColorImageViews.resize(swapChainImages.size());
+
+		for (size_t i = 0; i < swapChainImages.size(); ++i)
+		{
+			// Create image
+			VkImageCreateInfo imageInfo{};
+			imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+			imageInfo.imageType = VK_IMAGE_TYPE_2D;
+			imageInfo.extent.width = swapChainExtent.width;
+			imageInfo.extent.height = swapChainExtent.height;
+			imageInfo.extent.depth = 1;
+			imageInfo.mipLevels = 1;
+			imageInfo.arrayLayers = 1;
+			imageInfo.format = colorFormat;
+			imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+			imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageInfo.usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			imageInfo.samples = msaaSamples;
+			imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+			if (vkCreateImage(device, &imageInfo, nullptr, &msaaColorImages[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create MSAA color image!");
+			}
+
+			VkMemoryRequirements memReq;
+			vkGetImageMemoryRequirements(device, msaaColorImages[i], &memReq);
+
+			VkMemoryAllocateInfo allocInfo{};
+			allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+			allocInfo.allocationSize = memReq.size;
+			allocInfo.memoryTypeIndex = FindMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+			if (vkAllocateMemory(device, &allocInfo, nullptr, &msaaColorImageMemories[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to allocate MSAA color memory!");
+			}
+
+			vkBindImageMemory(device, msaaColorImages[i], msaaColorImageMemories[i], 0);
+
+			// Create image view
+			VkImageViewCreateInfo viewInfo{};
+			viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			viewInfo.image = msaaColorImages[i];
+			viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			viewInfo.format = colorFormat;
+			viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			viewInfo.subresourceRange.baseMipLevel = 0;
+			viewInfo.subresourceRange.levelCount = 1;
+			viewInfo.subresourceRange.baseArrayLayer = 0;
+			viewInfo.subresourceRange.layerCount = 1;
+
+			if (vkCreateImageView(device, &viewInfo, nullptr, &msaaColorImageViews[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to create MSAA color image view!");
+			}
+		}
+	}
+
 	void VulkanSwapChain::CreateFramebuffers()
 	{
 		swapChainFramebuffers.resize(swapChainImageViews.size());
 
 		for (size_t i = 0; i < swapChainImageViews.size(); i++)
 		{
-			std::array<VkImageView, 2> attachments = {
-				swapChainImageViews[i],
-				depthImageViews[i]
+			// Attachments: [MSAA color, depth, resolve target]
+			std::array<VkImageView, 3> attachments = {
+				msaaColorImageViews[i],  // MSAA color attachment
+				depthImageViews[i],      // Depth attachment (can be MSAA too)
+				swapChainImageViews[i]   // Resolve to this
 			};
 
 			VkFramebufferCreateInfo fbInfo{};

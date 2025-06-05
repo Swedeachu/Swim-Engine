@@ -31,9 +31,9 @@ namespace Engine
 
 		~VulkanSwapChain();
 
-		void Create(VkRenderPass renderPass);
+		void Create(VkRenderPass renderPass, VkSampleCountFlagBits sampleCount);
 		void Cleanup();
-		void Recreate(uint32_t newWidth, uint32_t newHeight, VkRenderPass renderPass);
+		void Recreate(uint32_t newWidth, uint32_t newHeight, VkRenderPass renderPass, VkSampleCountFlagBits sampleCount);
 
 		// Accessors
 		VkSwapchainKHR GetSwapchain() const { return swapChain; }
@@ -79,11 +79,18 @@ namespace Engine
 		// Last render pass used
 		VkRenderPass renderPassRef = VK_NULL_HANDLE;
 
+		// MSAA
+		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+		std::vector<VkImage> msaaColorImages;
+		std::vector<VkDeviceMemory> msaaColorImageMemories;
+		std::vector<VkImageView> msaaColorImageViews;
+
 		// Core creation steps
 		void InitFormats(); 
 		void CreateSwapChain();
 		void CreateImageViews();
 		void CreateDepthResources();
+		void CreateColorResources();
 		void CreateFramebuffers();
 
 		// Helpers

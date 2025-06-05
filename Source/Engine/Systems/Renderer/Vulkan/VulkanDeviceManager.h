@@ -44,6 +44,9 @@ namespace Engine
 		// Used when creating the command pool 
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
 
+		// MSAA info helper
+		VkSampleCountFlagBits GetMaxUsableSampleCount() const;
+
 		// Getters
 		VkDevice GetDevice() const { return device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return physicalDevice; }

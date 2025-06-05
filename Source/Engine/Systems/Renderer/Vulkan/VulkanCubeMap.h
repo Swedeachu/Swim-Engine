@@ -45,6 +45,8 @@ namespace Engine
 		std::string vertShaderPath;
 		std::string fragShaderPath;
 
+		VkSampleCountFlagBits samples;
+
 		void CreateVertexBuffer();
 		void CreateCubemapImageFromTextures(const std::array<std::shared_ptr<Texture2D>, 6>& textures);
 		void CreateDescriptorSetLayout();

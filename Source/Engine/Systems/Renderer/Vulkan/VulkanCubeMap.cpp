@@ -17,6 +17,10 @@ namespace Engine
 		device = renderer->GetDevice();
 		physicalDevice = renderer->GetPhysicalDevice();
 
+		// This is for CreatePipelineForSkybox()::multisample.rasterizationSamples
+		// All other sampling of cubemaps will always be x1
+		samples = renderer->GetSampleCountFlagBits(); 
+
 		CreateVertexBuffer();
 		CreateDescriptorSetLayout();
 		CreateDescriptorPool();
@@ -641,7 +645,7 @@ namespace Engine
 
 		VkPipelineMultisampleStateCreateInfo multisample{};
 		multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		multisample.rasterizationSamples = samples;
 
 		VkPipelineDepthStencilStateCreateInfo depth{};
 		depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

@@ -37,6 +37,9 @@ namespace Engine
 				}
 			}
 		}
+
+		// Free all images on the CPU side of things that are not a cubemap since we need cubemap textures for cpu side image processing
+		CleanCPU({ "Cubemap" });
 	}
 
 	// scuffed copy and paste job to call before LoadAllRecursively() so we can get an idea of how much space to allocate in our bindless texture array
@@ -104,6 +107,31 @@ namespace Engine
 		}
 
 		throw std::runtime_error("Texture not found for lazy lookup: " + name);
+	}
+
+	void TexturePool::CleanCPU(const std::vector<std::string>& keep)
+	{
+		for (auto& texture : textures)
+		{
+			Texture2D* data = texture.second.get();
+			const std::string& fp = data->GetFilePath();
+
+			bool shouldKeep = false;
+
+			for (const auto& str : keep)
+			{
+				if (fp.find(str) != std::string::npos)
+				{
+					shouldKeep = true;
+					break;
+				}
+			}
+
+			if (!shouldKeep)
+			{
+				data->FreeCPU();
+			}
+		}
 	}
 
 	void TexturePool::Flush()
