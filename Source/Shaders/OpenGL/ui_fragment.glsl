@@ -13,96 +13,61 @@ uniform int roundCorners;
 uniform vec2 resolution;
 uniform vec2 quadSize;
 
-const int perceptualAA = 1;
-const vec2 ssOffsets[8] = vec2[](
-  vec2(-0.375, -0.125),
-  vec2(-0.125, -0.375),
-  vec2(0.125, -0.375),
-  vec2(0.375, -0.125),
-  vec2(0.375, 0.125),
-  vec2(0.125, 0.375),
-  vec2(-0.125, 0.375),
-  vec2(-0.375, 0.125)
-  );
+// Signed distance function for a rounded rectangle
+float roundedRectSDF(vec2 pos, vec2 size, float radius)
+{
+    vec2 d = abs(pos) - size + radius;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
+}
 
-float sdRoundRectImproved(vec2 p, vec2 halfSize, vec2 rad)
+// Signed distance for a box (non-rounded)
+float boxSDF(vec2 pos, vec2 size)
 {
-  rad = min(rad, min(halfSize.x, halfSize.y));
-  vec2 q = abs(p) - halfSize + rad;
-  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rad.x;
+    vec2 d = abs(pos) - size;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
 }
-float aaSmooth(float dist, float aa, int perceptual)
-{
-  float alpha = clamp(0.5 - dist / aa, 0.0, 1.0);
-  if (perceptual != 0)
-  {
-    alpha = pow(alpha, 0.7);
-  }
-  return alpha;
-}
+
 void main()
 {
-  vec4 finalColor = vec4(0.0);
-  vec2 pixelSizeInUV = 1.0 / quadSize;
-  // Better anti-aliasing width calculation
-  // Use the maximum component to handle non-square quads properly
-  float aaWidth = max(pixelSizeInUV.x, pixelSizeInUV.y) * 0.5;
+    // Convert UV (0-1) to centered space (-0.5 to 0.5)
+    vec2 uv = fragUV - 0.5;
 
-  // Determine effective stroke width (zero when stroke is disabled)
-  vec2 effectiveStrokeWidth = (enableStroke != 0) ? strokeWidth : vec2(0.0);
+    // Transform into pixel space
+    vec2 pos = uv * quadSize;
 
-  for (int i = 0; i < 8; ++i)
-  {
-    vec2 offset = ssOffsets[i] * pixelSizeInUV;
-    vec2 sampleUV = fragUV + offset;
-    vec2 p = sampleUV - 0.5;
-    vec2 halfSize = vec2(0.5);
-    vec4 sampleColor = vec4(0.0);
+    // Compute half-extents
+    vec2 halfSize = quadSize * 0.5;
 
-    if (enableStroke != 0)
-    {
-      // Calculate outer edge distance (shape boundary)
-      float outerDist = (roundCorners != 0)
-        ? sdRoundRectImproved(p, halfSize, cornerRadius)
-        : max(abs(p.x) - halfSize.x, abs(p.y) - halfSize.y);
-      // Calculate inner edge distance (stroke inner boundary)
-      vec2 innerHalfSize = halfSize - strokeWidth;
-      vec2 innerRadius = max(cornerRadius - strokeWidth, vec2(0.0));
-      float innerDist = (roundCorners != 0)
-        ? sdRoundRectImproved(p, innerHalfSize, innerRadius)
-        : max(abs(p.x) - innerHalfSize.x, abs(p.y) - innerHalfSize.y);
-      // Properly blend both edges
-      float outerAlpha = aaSmooth(outerDist, aaWidth, perceptualAA);
-      float innerAlpha = 1.0 - aaSmooth(innerDist, aaWidth, perceptualAA);
-      // Stroke alpha is the intersection of being inside outer edge and outside inner edge
-      float strokeAlpha = outerAlpha * innerAlpha;
-      sampleColor = strokeColor * strokeAlpha;
-    }
+    // Determine corner radius
+    float radius = (roundCorners == 1) ? max(cornerRadius.x, cornerRadius.y) : 0.0;
+    float maxRadius = min(halfSize.x, halfSize.y);
+    radius = min(radius, maxRadius);
 
-    if (enableFill != 0)
-    {
-      // Use effective stroke width (zero when stroke disabled)
-      vec2 fillHalfSize = halfSize - effectiveStrokeWidth;
-      vec2 fillRadius = max(cornerRadius - effectiveStrokeWidth, vec2(0.0));
+    // Calculate stroke-related bounds
+    vec2 innerHalfSize = halfSize - strokeWidth;
+    innerHalfSize = max(innerHalfSize, vec2(0.0));
+    float innerRadius = max(radius - max(strokeWidth.x, strokeWidth.y), 0.0);
 
-      float fillDist = (roundCorners != 0)
-        ? sdRoundRectImproved(p, fillHalfSize, fillRadius)
-        : max(abs(p.x) - fillHalfSize.x, abs(p.y) - fillHalfSize.y);
+    // Distance to outer edge
+    float distOuter = (radius > 0.0) ? roundedRectSDF(pos, halfSize, radius) : boxSDF(pos, halfSize);
 
-      float fillAlpha = aaSmooth(fillDist, aaWidth, perceptualAA);
-      // Blend fill over stroke
-      sampleColor = mix(sampleColor, fillColor, fillAlpha * fillColor.a);
-    }
+    // Distance to inner edge
+    float distInner = (radius > 0.0) ? roundedRectSDF(pos, innerHalfSize, innerRadius) : boxSDF(pos, innerHalfSize);
 
-    finalColor += sampleColor;
-  }
+    // Antialiased blend thresholds
+    float aaWidth = 1.0;
 
-  finalColor /= 8.0;
+    // Smooth alpha for outer and inner edges
+    float outerAlpha = 1.0 - smoothstep(-aaWidth, aaWidth, distOuter);
+    float innerAlpha = 1.0 - smoothstep(-aaWidth, aaWidth, distInner);
 
-  if (finalColor.a < 0.000001)
-  {
-    discard;
-  }
+    // Compute stroke and fill alphas with toggles
+    float strokeAlpha = (enableStroke == 1) ? clamp(outerAlpha - innerAlpha, 0.0, 1.0) : 0.0;
+    float fillAlpha = (enableFill == 1) ? innerAlpha : 0.0;
 
-  FragColor = finalColor;
+    // Combine fill and stroke colors based on alpha weights
+    vec3 finalColor = mix(fillColor.rgb, strokeColor.rgb, strokeAlpha);
+    float finalAlpha = mix(fillColor.a * fillAlpha, strokeColor.a, strokeAlpha);
+
+    FragColor = vec4(finalColor, finalAlpha);
 }

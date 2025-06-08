@@ -165,6 +165,9 @@ namespace Engine
 		glEnable(GL_MULTISAMPLE);
 		glEnable(GL_STENCIL_TEST);
 
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
 		std::cout << "[INFO] OpenGL Initialized: " << glGetString(GL_VERSION) << "\n";
 
 		GLint samples = 0;
@@ -173,8 +176,6 @@ namespace Engine
 
 		return true;
 	}
-
-
 
 	bool OpenGLRenderer::SetPixelFormatForHDC(HDC hdc)
 	{
@@ -362,12 +363,14 @@ namespace Engine
 
 	void OpenGLRenderer::RenderFrame()
 	{
+		// --- Step 1: Clear color and depth buffers ---
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		UpdateUniformBuffer(); 
-		glUseProgram(shaderProgram);
+		// --- Step 2: Update camera UBO before rendering anything ---
+		UpdateUniformBuffer();
 
+		// --- Step 3: Fetch scene and camera ---
 		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (!scene)
 		{
@@ -382,19 +385,26 @@ namespace Engine
 
 		entt::registry& registry = scene->GetRegistry();
 
-		RenderWorldSpace(scene, registry, view, proj);
-
-		RenderScreenSpace(registry);
-
-	#ifdef _DEBUG
-		RenderWireframeDebug(scene);
-	#endif
-
+		// --- Step 4: Render cubemap skybox BEFORE everything else ---
 		if (cubemapController)
 		{
 			cubemapController->Render(view, proj);
 		}
 
+		// --- Step 5: Use main shader for world rendering ---
+		glUseProgram(shaderProgram);
+
+		RenderWorldSpace(scene, registry, view, proj);
+
+		// --- Step 6: Render screen-space UI ---
+		RenderScreenSpace(registry);
+
+	#ifdef _DEBUG
+		// --- Step 7: Optional wireframe debug render ---
+		RenderWireframeDebug(scene);
+	#endif
+
+		// --- Step 8: Swap display buffers ---
 		SwapBuffers(deviceContext);
 	}
 
@@ -466,7 +476,6 @@ namespace Engine
 
 			// Calculate model matrix and MVP
 			glm::mat4 model = transform.GetModelMatrix();
-			// glm::mat4 mvp = orthoProj * (model * resolutionScale);
 			glm::mat4 mvp = orthoProj * model;
 
 			// Upload MVP matrix
@@ -476,32 +485,37 @@ namespace Engine
 			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
 			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
 
-			// Convert pixel space to UV scale for stroke and radius
-			glm::vec2 pixelSize = transform.GetScale();
-			glm::vec2 strokeUV = deco.strokeWidth / pixelSize;
-			glm::vec2 radiusUV = deco.cornerRadius / pixelSize;
-
-			// Clamp to [0, 0.5] to avoid degeneracies
-			strokeUV = glm::min(strokeUV, glm::vec2(0.5f));
-			radiusUV = glm::min(radiusUV, glm::vec2(0.5f));
-
-			// Upload stroke, radius, and toggle flags
-			glUniform2fv(loc_ui_strokeWidth, 1, &strokeUV.x);
-			glUniform2fv(loc_ui_cornerRadius, 1, &radiusUV.x);
-
-			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
-			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
-			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
-
-			// Send actual screen resolution to aid anti-aliasing
-			glUniform2f(loc_ui_resolution, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
-
-			// Calculate quad size in real pixels for accurate derivatives
+			// Compute scale factor from virtual canvas units to real screen pixels
 			glm::vec2 screenScale = glm::vec2(
 				static_cast<float>(windowWidth) / VirtualCanvasWidth,
 				static_cast<float>(windowHeight) / VirtualCanvasHeight
 			);
+
+			// Compute quad size in pixels
+			glm::vec2 pixelSize = transform.GetScale(); // scale in virtual units
 			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
+
+			// Convert corner radius and stroke width to pixel space
+			glm::vec2 radiusPx = deco.cornerRadius * screenScale;
+			glm::vec2 strokePx = deco.strokeWidth * screenScale;
+
+			// Clamp values to avoid degenerate geometry
+			radiusPx = glm::min(radiusPx, quadSizeInPixels * 0.5f);
+			strokePx = glm::min(strokePx, quadSizeInPixels * 0.5f);
+
+			// Upload stroke width and corner radius in pixels
+			glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx.x);
+			glUniform2fv(loc_ui_strokeWidth, 1, &strokePx.x);
+
+			// Upload feature flags
+			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
+			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
+			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
+
+			// Upload actual framebuffer resolution (needed for AA or resolution scaling)
+			glUniform2f(loc_ui_resolution, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
+
+			// Upload quad size in pixels to fragment shader
 			glUniform2f(loc_ui_quadSize, quadSizeInPixels.x, quadSizeInPixels.y);
 
 			// Draw decorator quad

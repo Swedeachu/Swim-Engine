@@ -486,16 +486,10 @@ namespace Game
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y
 			glm::vec2(32.0f, 32.0f),              // corner radius X/Y
 			glm::vec2(4.0f),                      // padding
-			true, true, true                      // rounded, stroke, fill
+			true, true, true                      // to enable: rounded, stroke, fill
 		);
 
 		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
-
-		// For size comparison
-		// auto secondEntity = scene->CreateEntity();
-		// scene->AddComponent<Engine::Transform>(secondEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
-		// scene->AddComponent<Engine::Material>(secondEntity, Engine::Material(whiteMaterial));
-		// scene->AddBehavior<MouseInputDemoBehavior>(secondEntity);
 	}
 
 	int SandBox::Init()
