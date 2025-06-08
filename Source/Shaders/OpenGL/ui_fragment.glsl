@@ -5,8 +5,8 @@ out vec4 FragColor;
 
 uniform vec4 fillColor;
 uniform vec4 strokeColor;
-uniform vec2 strokeWidth;   // in UV units
-uniform vec2 cornerRadius;  // in UV units
+uniform vec2 strokeWidth;
+uniform vec2 cornerRadius;
 uniform int enableFill;
 uniform int enableStroke;
 uniform int roundCorners;
@@ -22,13 +22,8 @@ void main()
   vec2 p = fragUV - 0.5;
   vec2 halfSize = vec2(0.5);
 
-  // Stretch correction
-  float aspect = halfSize.x / halfSize.y;
-  p.x *= aspect;
-
-  vec2 clampedRadius = min(cornerRadius, halfSize);
   float dist = roundCorners != 0
-    ? sdRoundRect(p, halfSize, clampedRadius)
+    ? sdRoundRect(p, halfSize, cornerRadius)
     : max(abs(p.x) - halfSize.x, abs(p.y) - halfSize.y);
 
   float aa = fwidth(dist);
@@ -37,14 +32,25 @@ void main()
 
   if (enableFill != 0)
   {
-    float fillAlpha = 1.0 - smoothstep(0.0, aa, dist);
+    vec2 fillHalfSize = halfSize - strokeWidth;
+    vec2 fillRadius = max(cornerRadius - strokeWidth, vec2(0.0));
+    float fillDist = sdRoundRect(p, fillHalfSize, fillRadius);
+
+    float fillAlpha = 1.0 - smoothstep(-aa, aa, fillDist);
     result = fillColor * fillAlpha;
   }
 
   if (enableStroke != 0)
   {
-    float outerDist = dist - max(strokeWidth.x, strokeWidth.y) * 0.5;
-    float strokeAlpha = smoothstep(aa, 0.0, outerDist) * smoothstep(0.0, aa, dist);
+    float outerAlpha = 1.0 - smoothstep(-aa, aa, dist);
+
+    vec2 innerHalfSize = halfSize - strokeWidth;
+    vec2 innerRadius = max(cornerRadius - strokeWidth, vec2(0.0));
+    float innerDist = sdRoundRect(p, innerHalfSize, innerRadius);
+
+    float innerAlpha = 1.0 - smoothstep(-aa, aa, innerDist);
+    float strokeAlpha = outerAlpha - innerAlpha;
+
     result = mix(result, strokeColor, strokeAlpha * strokeColor.a);
   }
 
