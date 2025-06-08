@@ -228,6 +228,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
+    <ClInclude Include="Source\Engine\Components\DecoratorUI.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
@@ -328,6 +329,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Library\glad\include\KHR\khrplatform.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Source\Shaders\OpenGL\ui_vertex.glsl" />
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
@@ -338,6 +340,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <None Include="Source\Shaders\OpenGL\skybox_frag.glsl" />
     <None Include="Source\Shaders\OpenGL\skybox_vert.glsl" />
     <None Include="Source\Shaders\OpenGL\vertex.glsl" />
+    <None Include="Source\Shaders\OpenGL\ui_fragment.glsl" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fragment.glsl">

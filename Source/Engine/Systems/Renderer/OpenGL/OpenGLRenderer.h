@@ -77,6 +77,19 @@ namespace Engine
 		GLint loc_hasTexture = -1;
 		GLint loc_albedoTex = -1;
 
+		// --- Decorator UI shader program ---
+		GLuint uiDecoratorShader = 0;
+
+		// Uniform locations for UI-specific uniforms
+		GLint loc_ui_mvp = -1;
+		GLint loc_ui_fillColor = -1;
+		GLint loc_ui_strokeColor = -1;
+		GLint loc_ui_strokeWidth = -1;
+		GLint loc_ui_cornerRadius = -1;
+		GLint loc_ui_enableStroke = -1;
+		GLint loc_ui_enableFill = -1;
+		GLint loc_ui_roundCorners = -1;
+
 	};
 
 }

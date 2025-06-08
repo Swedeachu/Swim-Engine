@@ -6,6 +6,7 @@
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/DecoratorUI.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
@@ -182,46 +183,55 @@ namespace Engine
 
 	int OpenGLRenderer::Awake()
 	{
-		// --- 1) Compile & link ---
+		// --- 1) Compile and link main shader ---
 		std::string vertSource = LoadTextFile("Shaders/OpenGL/vertex.glsl");
 		std::string fragSource = LoadTextFile("Shaders/OpenGL/fragment.glsl");
 		GLuint vert = CompileGLSLShader(GL_VERTEX_SHADER, vertSource.c_str());
 		GLuint frag = CompileGLSLShader(GL_FRAGMENT_SHADER, fragSource.c_str());
 		shaderProgram = LinkShaderProgram({ vert, frag });
 
-		// --- 2) Bind the Camera UBO block to binding point 0 ---
-		//    This tells the shader's "layout(binding=0) uniform Camera" to read from our buffer.
+		// --- 2) Camera block and uniforms ---
 		GLuint cameraBlockIndex = glGetUniformBlockIndex(shaderProgram, "Camera");
-		if (cameraBlockIndex == GL_INVALID_INDEX)
-		{
-			std::cerr << "Warning: 'Camera' UBO not found in shader\n";
-		}
-		else
+		if (cameraBlockIndex != GL_INVALID_INDEX)
 		{
 			glUniformBlockBinding(shaderProgram, cameraBlockIndex, 0);
 		}
-
-		// --- 3) Cache all the *other* uniforms we still use each frame ---
 		loc_mvp = glGetUniformLocation(shaderProgram, "mvp");
 		loc_hasTexture = glGetUniformLocation(shaderProgram, "hasTexture");
 		loc_albedoTex = glGetUniformLocation(shaderProgram, "albedoTex");
 
-		// --- 4) Create and allocate the GPU buffer for our CameraUBO struct ---
+		// --- 3) Camera UBO setup ---
 		glGenBuffers(1, &ubo);
 		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-		// allocate enough space but don't fill yet
 		glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraUBO), nullptr, GL_DYNAMIC_DRAW);
-		// bind to slot 0
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
-		// unbind
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-		// load textures, etc.
+		// --- 4) Load and compile Decorator UI Shader ---
+		std::string uiVertSrc = LoadTextFile("Shaders/OpenGL/ui_vertex.glsl");
+		std::string uiFragSrc = LoadTextFile("Shaders/OpenGL/ui_fragment.glsl");
+
+		GLuint uiVert = CompileGLSLShader(GL_VERTEX_SHADER, uiVertSrc.c_str());
+		GLuint uiFrag = CompileGLSLShader(GL_FRAGMENT_SHADER, uiFragSrc.c_str());
+
+		uiDecoratorShader = LinkShaderProgram({ uiVert, uiFrag });
+
+		// Cache uniform locations for UI shader
+		loc_ui_mvp = glGetUniformLocation(uiDecoratorShader, "mvp");
+		loc_ui_fillColor = glGetUniformLocation(uiDecoratorShader, "fillColor");
+		loc_ui_strokeColor = glGetUniformLocation(uiDecoratorShader, "strokeColor");
+		loc_ui_strokeWidth = glGetUniformLocation(uiDecoratorShader, "strokeWidth");
+		loc_ui_cornerRadius = glGetUniformLocation(uiDecoratorShader, "cornerRadius");
+		loc_ui_enableStroke = glGetUniformLocation(uiDecoratorShader, "enableStroke");
+		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
+		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
+
+		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
 		pool.LoadAllRecursively();
 		missingTexture = pool.GetTexture2DLazy("mart");
 
-		// Now set up the cubemap
+		// --- 6) Cubemap setup ---
 		cubemapController = std::make_unique<CubeMapController>(
 			"Shaders/OpenGL/skybox_vert.glsl",
 			"Shaders/OpenGL/skybox_frag.glsl"
@@ -340,7 +350,6 @@ namespace Engine
 
 	void OpenGLRenderer::RenderScreenSpace(entt::registry& registry)
 	{
-		// Orthographic projection for virtual canvas
 		glm::mat4 orthoProj = glm::ortho(
 			0.0f, VirtualCanvasWidth,
 			0.0f, VirtualCanvasHeight,
@@ -349,7 +358,6 @@ namespace Engine
 
 		glm::mat4 identityView = glm::mat4(1.0f);
 
-		// Scale that converts virtual-space units to real pixels
 		glm::mat4 resolutionScale = glm::scale(
 			glm::mat4(1.0f),
 			glm::vec3(
@@ -359,15 +367,58 @@ namespace Engine
 		)
 		);
 
-		// Render all screen-space UI
-		registry.view<Transform>().each([&](entt::entity entity, Transform& transform)
+		// Bind normal shader
+		glUseProgram(shaderProgram);
+
+		// First pass: regular screen-space elements
+		registry.view<Transform>(entt::exclude<Engine::DecoratorUI>).each([&](entt::entity entity, Transform& transform)
 		{
 			if (transform.GetTransformSpace() == TransformSpace::Screen)
 			{
-				const glm::mat4& model = transform.GetModelMatrix();
+				glm::mat4 model = transform.GetModelMatrix();
 				glm::mat4 mvp = orthoProj * (model * resolutionScale);
 				DrawEntityWithMVP(entity, registry, mvp);
 			}
+		});
+
+		// Second pass: decorator UI elements
+		glUseProgram(uiDecoratorShader); // bind decorator-specific shader
+
+		registry.view<Transform, Engine::DecoratorUI>().each(
+			[&](entt::entity entity, Transform& transform, Engine::DecoratorUI& deco)
+		{
+			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
+
+			glm::mat4 model = transform.GetModelMatrix();
+			glm::mat4 mvp = orthoProj * (model * resolutionScale);
+
+			// Upload MVP
+			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+			// Upload decorator properties
+			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
+			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
+
+			glm::vec2 pixelSize = transform.GetScale();
+
+			// 1. full-width stroke in UV units  
+			glm::vec2 strokeUV = deco.strokeWidth / pixelSize; 
+			// 2. radius in UV units
+			glm::vec2 radiusUV = deco.cornerRadius / pixelSize;
+
+			glUniform2fv(loc_ui_strokeWidth, 1, &strokeUV.x);
+			glUniform2fv(loc_ui_cornerRadius, 1, &radiusUV.x);
+
+			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
+			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
+			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
+
+			const auto& mat = registry.get<Material>(entity).data;
+			const auto& mesh = *mat->mesh->meshBufferData;
+
+			glBindVertexArray(mesh.GetGLVAO());
+			glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_SHORT, nullptr);
+			glBindVertexArray(0);
 		});
 	}
 
@@ -428,6 +479,8 @@ namespace Engine
 		{
 			return;
 		}
+
+		glUseProgram(shaderProgram);
 
 		auto& debugRegistry = debugDraw->GetRegistry();
 		const Frustum& frustum = Frustum::Get();
@@ -498,6 +551,7 @@ namespace Engine
 	int OpenGLRenderer::Exit()
 	{
 		glDeleteProgram(shaderProgram);
+		glDeleteProgram(uiDecoratorShader);
 		glDeleteBuffers(1, &ubo);
 		MeshPool::GetInstance().Flush();
 		TexturePool::GetInstance().Flush();

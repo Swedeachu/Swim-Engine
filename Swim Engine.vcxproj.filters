@@ -104,6 +104,7 @@
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
+    <ClInclude Include="Source\Engine\Components\DecoratorUI.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />
@@ -112,5 +113,7 @@
     <None Include="Source\Shaders\OpenGL\fragment.glsl" />
     <None Include="Source\Shaders\OpenGL\skybox_vert.glsl" />
     <None Include="Source\Shaders\OpenGL\skybox_frag.glsl" />
+    <None Include="Source\Shaders\OpenGL\ui_vertex.glsl" />
+    <None Include="Source\Shaders\OpenGL\ui_fragment.glsl" />
   </ItemGroup>
 </Project>

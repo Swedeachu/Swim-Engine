@@ -5,6 +5,8 @@
 #include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
+#include "Engine\Components\DecoratorUI.h"
+#include "Library/glm/vec4.hpp"
 #include "RandomUtils.h"
 #include "Engine\Systems\Entity\EntityFactory.h"
 #include "Game\Behaviors\CameraControl\EditorCamera.h"
@@ -18,12 +20,12 @@ namespace Game
 
 	constexpr static bool doStressTest = false;
 	constexpr static bool doUI = true;
-	constexpr static bool fullyUniqueMeshes = false; 
+	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
 
 	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
-	constexpr static const float SPACING = 3.5f; 
+	constexpr static const float SPACING = 3.5f;
 
 	int SandBox::Awake()
 	{
@@ -477,6 +479,17 @@ namespace Game
 		scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
 		scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
 		scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
+
+		Engine::DecoratorUI decorator = Engine::DecoratorUI(
+			glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
+			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
+			32.0f,                                 // stroke width
+			32.0f,                                 // corner radius
+			glm::vec2(4.0f),                      // padding (optional)
+			true, true, true                      // enable rounded, stroke, fill
+		);
+
+		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
 	}
 
 	int SandBox::Init()
@@ -531,7 +544,7 @@ namespace Game
 
 		// Make a static quad entity this way (these methods queue everything for creation to spawn next frame update)
 		entityFactory.CreateWithTransformAndMaterial(
-			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)), 
+			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
 			Engine::Material(materialData2)
 		);
 
