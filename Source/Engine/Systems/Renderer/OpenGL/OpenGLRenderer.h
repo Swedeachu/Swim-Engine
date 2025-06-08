@@ -92,6 +92,7 @@ namespace Engine
 		GLint loc_ui_enableFill = -1;
 		GLint loc_ui_roundCorners = -1;
 		GLint loc_ui_resolution = -1;
+		GLint loc_ui_quadSize = -1;
 
 	};
 

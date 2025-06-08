@@ -3,7 +3,6 @@
 in vec2 fragUV;
 out vec4 FragColor;
 
-// === Uniforms ===
 uniform vec4 fillColor;
 uniform vec4 strokeColor;
 uniform vec2 strokeWidth;
@@ -11,99 +10,96 @@ uniform vec2 cornerRadius;
 uniform int enableFill;
 uniform int enableStroke;
 uniform int roundCorners;
-uniform vec2 resolution; // Screen resolution (e.g., 800x600)
+uniform vec2 resolution;
+uniform vec2 quadSize;
 
-// === Constants ===
-const int perceptualAA = 1; // Always enable perceptual smoothing
-
-// Supersample grid offsets (4x SSAA in pixel units)
-const vec2 ssOffsets[4] = vec2[](
-  vec2(-0.25, -0.25),
-  vec2(0.25, -0.25),
-  vec2(-0.25, 0.25),
-  vec2(0.25, 0.25)
+const int perceptualAA = 1;
+const vec2 ssOffsets[8] = vec2[](
+  vec2(-0.375, -0.125),
+  vec2(-0.125, -0.375),
+  vec2(0.125, -0.375),
+  vec2(0.375, -0.125),
+  vec2(0.375, 0.125),
+  vec2(0.125, 0.375),
+  vec2(-0.125, 0.375),
+  vec2(-0.375, 0.125)
   );
 
-// === Distance function: Signed distance to a rounded rectangle ===
-float sdRoundRect(vec2 p, vec2 halfSize, vec2 rad)
+float sdRoundRectImproved(vec2 p, vec2 halfSize, vec2 rad)
 {
+  rad = min(rad, min(halfSize.x, halfSize.y));
   vec2 q = abs(p) - halfSize + rad;
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - min(rad.x, rad.y);
+  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rad.x;
 }
-
-// === Smooth AA falloff with optional perceptual correction ===
 float aaSmooth(float dist, float aa, int perceptual)
 {
-  float alpha = 1.0 - smoothstep(-aa, aa, dist);
+  float alpha = clamp(0.5 - dist / aa, 0.0, 1.0);
   if (perceptual != 0)
   {
-    // Approximate perceptual smoothing (gamma ~2.2)
     alpha = pow(alpha, 0.7);
   }
   return alpha;
 }
-
-// === Main Fragment Shader Entry Point ===
 void main()
 {
   vec4 finalColor = vec4(0.0);
+  vec2 pixelSizeInUV = 1.0 / quadSize;
+  // Better anti-aliasing width calculation
+  // Use the maximum component to handle non-square quads properly
+  float aaWidth = max(pixelSizeInUV.x, pixelSizeInUV.y) * 0.5;
 
-  // Loop over 4 sub-pixel samples (manual 4x SSAA)
-  for (int i = 0; i < 4; ++i)
+  // Determine effective stroke width (zero when stroke is disabled)
+  vec2 effectiveStrokeWidth = (enableStroke != 0) ? strokeWidth : vec2(0.0);
+
+  for (int i = 0; i < 8; ++i)
   {
-    // Convert offset to UV space
-    vec2 offset = ssOffsets[i] / resolution;
+    vec2 offset = ssOffsets[i] * pixelSizeInUV;
     vec2 sampleUV = fragUV + offset;
-    vec2 p = sampleUV - 0.5; // Center at (0,0)
+    vec2 p = sampleUV - 0.5;
     vec2 halfSize = vec2(0.5);
-
-    // Outer border distance
-    float outerDist = (roundCorners != 0)
-      ? sdRoundRect(p, halfSize, cornerRadius)
-      : max(abs(p.x) - halfSize.x, abs(p.y) - halfSize.y);
-
-    float aa = fwidth(outerDist) * 1.2; // Expand AA range slightly
-
     vec4 sampleColor = vec4(0.0);
 
-    // === Fill pass ===
-    if (enableFill != 0)
-    {
-      vec2 fillHalfSize = halfSize - strokeWidth;
-      vec2 fillRadius = max(cornerRadius - strokeWidth, vec2(0.0));
-      float fillDist = (roundCorners != 0)
-        ? sdRoundRect(p, fillHalfSize, fillRadius)
-        : max(abs(p.x) - fillHalfSize.x, abs(p.y) - fillHalfSize.y);
-
-      float fillAlpha = aaSmooth(fillDist, aa, perceptualAA);
-      sampleColor = fillColor * fillAlpha;
-    }
-
-    // === Stroke pass ===
     if (enableStroke != 0)
     {
-      float outerAlpha = aaSmooth(outerDist, aa, perceptualAA);
-
+      // Calculate outer edge distance (shape boundary)
+      float outerDist = (roundCorners != 0)
+        ? sdRoundRectImproved(p, halfSize, cornerRadius)
+        : max(abs(p.x) - halfSize.x, abs(p.y) - halfSize.y);
+      // Calculate inner edge distance (stroke inner boundary)
       vec2 innerHalfSize = halfSize - strokeWidth;
       vec2 innerRadius = max(cornerRadius - strokeWidth, vec2(0.0));
       float innerDist = (roundCorners != 0)
-        ? sdRoundRect(p, innerHalfSize, innerRadius)
+        ? sdRoundRectImproved(p, innerHalfSize, innerRadius)
         : max(abs(p.x) - innerHalfSize.x, abs(p.y) - innerHalfSize.y);
+      // Properly blend both edges
+      float outerAlpha = aaSmooth(outerDist, aaWidth, perceptualAA);
+      float innerAlpha = 1.0 - aaSmooth(innerDist, aaWidth, perceptualAA);
+      // Stroke alpha is the intersection of being inside outer edge and outside inner edge
+      float strokeAlpha = outerAlpha * innerAlpha;
+      sampleColor = strokeColor * strokeAlpha;
+    }
 
-      float innerAlpha = aaSmooth(innerDist, aa, perceptualAA);
-      float strokeAlpha = clamp(outerAlpha - innerAlpha, 0.0, 1.0);
+    if (enableFill != 0)
+    {
+      // Use effective stroke width (zero when stroke disabled)
+      vec2 fillHalfSize = halfSize - effectiveStrokeWidth;
+      vec2 fillRadius = max(cornerRadius - effectiveStrokeWidth, vec2(0.0));
 
-      sampleColor = mix(sampleColor, strokeColor, strokeAlpha * strokeColor.a);
+      float fillDist = (roundCorners != 0)
+        ? sdRoundRectImproved(p, fillHalfSize, fillRadius)
+        : max(abs(p.x) - fillHalfSize.x, abs(p.y) - fillHalfSize.y);
+
+      float fillAlpha = aaSmooth(fillDist, aaWidth, perceptualAA);
+      // Blend fill over stroke
+      sampleColor = mix(sampleColor, fillColor, fillAlpha * fillColor.a);
     }
 
     finalColor += sampleColor;
   }
 
-  // Average the 4 supersampled results
-  finalColor /= 4.0;
+  finalColor /= 8.0;
 
-  // Discard transparent fragments to avoid fringe artifacts
-  if (finalColor.a < 0.001)
+  if (finalColor.a < 0.000001)
   {
     discard;
   }

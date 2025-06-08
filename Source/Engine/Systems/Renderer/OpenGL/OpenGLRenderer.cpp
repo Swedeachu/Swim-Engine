@@ -283,6 +283,7 @@ namespace Engine
 		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
 		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
 		loc_ui_resolution = glGetUniformLocation(uiDecoratorShader, "resolution");
+		loc_ui_quadSize = glGetUniformLocation(uiDecoratorShader, "quadSize");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -413,14 +414,17 @@ namespace Engine
 
 	void OpenGLRenderer::RenderScreenSpace(entt::registry& registry)
 	{
+		// Set up orthographic projection for virtual canvas space
 		glm::mat4 orthoProj = glm::ortho(
 			0.0f, VirtualCanvasWidth,
 			0.0f, VirtualCanvasHeight,
 			-1.0f, 1.0f
 		);
 
+		// Identity view matrix, since this is screen space
 		glm::mat4 identityView = glm::mat4(1.0f);
 
+		// Resolution scale: maps virtual canvas to actual screen pixels
 		glm::mat4 resolutionScale = glm::scale(
 			glm::mat4(1.0f),
 			glm::vec3(
@@ -430,11 +434,13 @@ namespace Engine
 		)
 		);
 
-		// Bind normal shader
+		// -----------------------------
+		// First pass: normal UI elements
+		// -----------------------------
 		glUseProgram(shaderProgram);
 
-		// First pass: regular screen-space elements
-		registry.view<Transform>(entt::exclude<Engine::DecoratorUI>).each([&](entt::entity entity, Transform& transform)
+		registry.view<Transform>(entt::exclude<Engine::DecoratorUI>).each(
+			[&](entt::entity entity, Transform& transform)
 		{
 			if (transform.GetTransformSpace() == TransformSpace::Screen)
 			{
@@ -444,8 +450,10 @@ namespace Engine
 			}
 		});
 
-		// Second pass: decorator UI elements
-		glUseProgram(uiDecoratorShader); // bind decorator-specific shader
+		// -----------------------------
+		// Second pass: decorator UI
+		// -----------------------------
+		glUseProgram(uiDecoratorShader);
 
 		registry.view<Transform, Engine::DecoratorUI>().each(
 			[&](entt::entity entity, Transform& transform, Engine::DecoratorUI& deco)
@@ -455,26 +463,27 @@ namespace Engine
 				return;
 			}
 
-			// Compose MVP in proper order: scale THEN model
+			// Calculate model matrix and MVP
 			glm::mat4 model = transform.GetModelMatrix();
 			glm::mat4 mvp = orthoProj * (model * resolutionScale);
 
-			// Upload MVP
+			// Upload MVP matrix
 			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
 
-			// Upload colors
+			// Upload visual decorator colors
 			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
 			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
 
-			glm::vec2 pixelSize = transform.GetScale(); // size in screen pixels
+			// Convert pixel space to UV scale for stroke and radius
+			glm::vec2 pixelSize = transform.GetScale();
+			glm::vec2 strokeUV = deco.strokeWidth / pixelSize;
+			glm::vec2 radiusUV = deco.cornerRadius / pixelSize;
 
-			// Prevent stroke/radius from exceeding size
-			glm::vec2 clampedRadius = glm::min(deco.cornerRadius, pixelSize * 0.5f);
-			glm::vec2 clampedStroke = glm::min(deco.strokeWidth, pixelSize);
+			// Clamp to [0, 0.5] to avoid degeneracies
+			strokeUV = glm::min(strokeUV, glm::vec2(0.5f));
+			radiusUV = glm::min(radiusUV, glm::vec2(0.5f));
 
-			glm::vec2 strokeUV = clampedStroke / pixelSize;
-			glm::vec2 radiusUV = clampedRadius / pixelSize;
-
+			// Upload stroke, radius, and toggle flags
 			glUniform2fv(loc_ui_strokeWidth, 1, &strokeUV.x);
 			glUniform2fv(loc_ui_cornerRadius, 1, &radiusUV.x);
 
@@ -482,16 +491,18 @@ namespace Engine
 			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
 			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
 
-			glm::vec2 boxSizeUV = glm::vec2(1.0f); // unit quad in shader space
+			// Send actual screen resolution to aid anti-aliasing
+			glUniform2f(loc_ui_resolution, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
 
-			// Our quad is scaled by resolutionScale (pixels per virtual unit)
-			boxSizeUV.x = pixelSize.x / windowWidth;
-			boxSizeUV.y = pixelSize.y / windowHeight;
+			// Calculate quad size in real pixels for accurate derivatives
+			glm::vec2 screenScale = glm::vec2(
+				static_cast<float>(windowWidth) / VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / VirtualCanvasHeight
+			);
+			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
+			glUniform2f(loc_ui_quadSize, quadSizeInPixels.x, quadSizeInPixels.y);
 
-			glUniform2f(loc_ui_resolution, windowWidth, windowHeight);
-
-
-			// Draw the mesh
+			// Draw decorator quad
 			const auto& mat = registry.get<Material>(entity).data;
 			const auto& mesh = *mat->mesh->meshBufferData;
 

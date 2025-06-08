@@ -495,6 +495,7 @@ namespace Game
 		// auto secondEntity = scene->CreateEntity();
 		// scene->AddComponent<Engine::Transform>(secondEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
 		// scene->AddComponent<Engine::Material>(secondEntity, Engine::Material(whiteMaterial));
+		// scene->AddBehavior<MouseInputDemoBehavior>(secondEntity);
 	}
 
 	int SandBox::Init()
