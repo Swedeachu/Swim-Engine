@@ -11,6 +11,7 @@
 #include "Game\Behaviors\Demo\SimpleMovement.h"
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
 #include "Game\Behaviors\Demo\Spin.h"
+#include "Game\Behaviors\Demo\MouseInputDemoBehavior.h"
 
 namespace Game
 {
@@ -315,16 +316,15 @@ namespace Game
 
 		auto whiteEntity = scene->CreateEntity();
 
-		// Place it in the center of the screen
-		auto windowWidth = engine->GetWindowWidth();
-		auto windowHeight = engine->GetWindowHeight();
-		glm::vec3 whiteEntityScreenPos = glm::vec3(windowWidth / 2.0f, windowHeight / 2.0f, 0.0f);
+		// Place it in the screen
+		glm::vec3 whiteEntityScreenPos = glm::vec3(200, 1000, 0.0f);
 
 		// Pixel size
 		glm::vec3 whiteEntitySize = glm::vec3(300.0f, 150.0f, 1.0f);
 
 		scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
 		scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
+		scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
 	}
 
 	int SandBox::Init()

@@ -148,6 +148,7 @@ namespace Engine
 
 		// Call Update(dt) on all Behavior components
 		ForEachBehavior(&Behavior::Update, dt);
+		UpdateUIBehaviors();
 
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
@@ -164,6 +165,94 @@ namespace Engine
 			// We do clear the previous frames debug draw data though. This opens up an opportunity for caching commonly drawn wireframes.
 			sceneDebugDraw->Clear();
 		}
+	}
+
+	// Converts the mouse position from window-pixel space -> virtual-canvas space
+	// Tests that virtual point against each screen-space entity’s AABB
+	// Dispatches OnMouseEnter / Exit / Hover / Click events
+	// ----------------------------------------------------------------------------
+	void Scene::UpdateUIBehaviors()
+	{
+		// 1. Get raw mouse position in *window* pixels
+		std::shared_ptr<InputManager> inputMgr = GetInputManager();
+		glm::vec2 mouseWin = inputMgr->GetMousePosition();// (0,0) = window TL
+
+		// 2. Convert that to virtual canvas units (same space as Transform)
+		auto engine = Engine::SwimEngine::GetInstance();
+
+		float windowW = static_cast<float>(engine->GetWindowWidth());
+		float windowH = static_cast<float>(engine->GetWindowHeight());
+
+		constexpr float virtW = Engine::Renderer::VirtualCanvasWidth;
+		constexpr float virtH = Engine::Renderer::VirtualCanvasHeight;
+
+		float scaleX = windowW / virtW;
+		float scaleY = windowH / virtH;
+
+		glm::vec2 mouseVirt;
+		mouseVirt.x = mouseWin.x / scaleX; // undo X scale
+		mouseVirt.y = mouseWin.y / scaleY; // undo Y scale
+		mouseVirt.y = virtH - mouseVirt.y; // flip origin TL -> BL
+
+		// 3. Iterate over UI entities and run hit-testing in the same space
+		auto& registry = GetRegistry();
+
+		registry.view<Transform, Material, BehaviorComponents>().each(
+			[&](entt::entity entity,
+			Transform& transform,
+			Material&, BehaviorComponents& bc)
+		{
+			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			{
+				return; // ignore world-space stuff here
+			}
+
+			// Position / size are already in virtual-canvas units
+			glm::vec3 pos = transform.GetPosition(); // center of quad
+			glm::vec3 size = transform.GetScale(); // full width / height
+
+			glm::vec2 halfSize{ size.x * 0.5f, size.y * 0.5f };
+
+			glm::vec2 minRect{ pos.x - halfSize.x, pos.y - halfSize.y };
+			glm::vec2 maxRect{ pos.x + halfSize.x, pos.y + halfSize.y };
+
+			bool inside = (mouseVirt.x >= minRect.x && mouseVirt.x <= maxRect.x && mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
+
+			// 4. Let each attached behaviour react
+			for (auto& behavior : bc.behaviors)
+			{
+				if (!behavior || !behavior->RunMouseCallBacks())
+				{
+					continue;
+				}
+
+				bool wasFocused = behavior->FocusedByMouse();
+
+				if (inside && !wasFocused)
+				{
+					behavior->SetFocusedByMouse(true);
+					behavior->OnMouseEnter();
+				}
+				else if (!inside && wasFocused)
+				{
+					behavior->SetFocusedByMouse(false);
+					behavior->OnMouseExit();
+				}
+				else if (inside) // hover
+				{
+					behavior->OnMouseHover();
+
+					if (inputMgr->IsKeyDown(VK_LBUTTON)) { behavior->OnLeftClickDown(); }
+					if (inputMgr->IsKeyDown(VK_RBUTTON)) { behavior->OnRightClickDown(); }
+
+					if (inputMgr->IsKeyReleased(VK_LBUTTON)) { behavior->OnLeftClickUp(); }
+					if (inputMgr->IsKeyReleased(VK_RBUTTON)) { behavior->OnRightClickUp(); }
+
+					if (inputMgr->IsKeyTriggered(VK_LBUTTON)) { behavior->OnLeftClicked(); }
+					if (inputMgr->IsKeyTriggered(VK_RBUTTON)) { behavior->OnRightClicked(); }
+				}
+			}
+		});
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

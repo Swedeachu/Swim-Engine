@@ -111,6 +111,8 @@ namespace Engine
 
 		const glm::mat4& GetProjectionMatrix() const { return camera.GetProjectionMatrix(); }
 
+		glm::vec2 ScreenToWorld(const glm::vec2& screenPos, const glm::vec2& viewportSize) const;
+
 		// By reference so you can't set the camera to null or any craziness
 		Camera& GetCamera() { return camera; }
 

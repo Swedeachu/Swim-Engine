@@ -17,6 +17,11 @@ namespace Engine
 
 		virtual std::unique_ptr<CubeMapController>& GetCubeMapController() = 0;
 
+		// For consistent UI scaling across the whole engine:
+
+		constexpr static float VirtualCanvasWidth = 1920.0f;
+		constexpr static float VirtualCanvasHeight = 1080.0f;
+
 	};
 
 }

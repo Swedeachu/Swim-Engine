@@ -376,18 +376,13 @@ namespace Engine
 			camera.GetFarClip()
 		);
 
-		// Virtual resolution values
-		constexpr float virtualWidth = 1920.0f;
-		constexpr float virtualHeight = 1080.0f;
-
 		ubo.screenView = glm::mat4(1.0f); // Identity
 
 		ubo.screenProj = glm::ortho(
-			0.0f, virtualWidth,
-			virtualHeight, 0.0f, // Flip Y for Vulkan
+			0.0f, VirtualCanvasWidth,
+			VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
 			-1.0f, 1.0f
 		);
-
 
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}

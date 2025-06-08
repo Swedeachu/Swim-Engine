@@ -222,9 +222,10 @@ namespace Engine
 		for (auto& entity : view)
 		{
 			const Transform& tf = view.get<Transform>(entity);
-			if (space == TransformSpace::Ambiguous ||  tf.GetTransformSpace() == space)
+			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
-				AddInstance(tf, view.get<Material>(entity).data, frustum);
+				const auto& mat = view.get<Material>(entity).data;
+				AddInstance(tf, mat, frustum);
 			}
 		}
 	}
@@ -253,13 +254,13 @@ namespace Engine
 			unsigned int windowWidth = engine->GetWindowWidth();
 			unsigned int windowHeight = engine->GetWindowHeight();
 
-			constexpr float virtualWidth = 1920.0f;
-			constexpr float virtualHeight = 1080.0f;
-			float scaleX = static_cast<float>(windowWidth) / virtualWidth;
-			float scaleY = static_cast<float>(windowHeight) / virtualHeight;
+			float scaleX = static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth;
+			float scaleY = static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight;
 
+			// Converts geometry from virtual units -> pixels
 			glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
-			instance.model = resolutionScale * transform.GetModelMatrix();
+
+			instance.model = transform.GetModelMatrix() * resolutionScale;
 			instance.space = 1u;
 		}
 		else // otherwise regular world space

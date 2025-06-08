@@ -138,7 +138,6 @@ namespace Engine
 			return rotation;
 		}
 
-
 		TransformSpace GetTransformSpace() const { return space; }
 
 		void SetTransformSpace(TransformSpace ts)

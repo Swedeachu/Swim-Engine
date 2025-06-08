@@ -340,24 +340,24 @@ namespace Engine
 
 	void OpenGLRenderer::RenderScreenSpace(entt::registry& registry)
 	{
-		// We use this virtual canvas approach as values to offset things as to stay consistent-ish on most aspect ratios
-		constexpr float virtualWidth = 1920.0f;
-		constexpr float virtualHeight = 1080.0f;
-
 		// Orthographic projection for virtual canvas
 		glm::mat4 orthoProj = glm::ortho(
-			0.0f, virtualWidth,
-			0.0f, virtualHeight,
+			0.0f, VirtualCanvasWidth,
+			0.0f, VirtualCanvasHeight,
 			-1.0f, 1.0f
 		);
 
-		// Compute scale from actual window size
-		float scaleX = static_cast<float>(windowWidth) / virtualWidth;
-		float scaleY = static_cast<float>(windowHeight) / virtualHeight;
-
-		// Apply scale matrix so all UI is resolution-independent
-		glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
 		glm::mat4 identityView = glm::mat4(1.0f);
+
+		// Scale that converts virtual-space units to real pixels
+		glm::mat4 resolutionScale = glm::scale(
+			glm::mat4(1.0f),
+			glm::vec3(
+			static_cast<float>(windowWidth) / VirtualCanvasWidth,
+			static_cast<float>(windowHeight) / VirtualCanvasHeight,
+			1.0f
+		)
+		);
 
 		// Render all screen-space UI
 		registry.view<Transform>().each([&](entt::entity entity, Transform& transform)
@@ -365,8 +365,7 @@ namespace Engine
 			if (transform.GetTransformSpace() == TransformSpace::Screen)
 			{
 				const glm::mat4& model = transform.GetModelMatrix();
-				glm::mat4 scaledModel = resolutionScale * model;
-				glm::mat4 mvp = orthoProj * identityView * scaledModel;
+				glm::mat4 mvp = orthoProj * (model * resolutionScale);
 				DrawEntityWithMVP(entity, registry, mvp);
 			}
 		});

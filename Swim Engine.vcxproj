@@ -259,6 +259,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
@@ -278,6 +279,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
