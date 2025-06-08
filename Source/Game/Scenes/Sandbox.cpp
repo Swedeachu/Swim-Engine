@@ -18,12 +18,12 @@ namespace Game
 
 	constexpr static bool doStressTest = false;
 	constexpr static bool doUI = true;
-	constexpr static bool fullyUniqueCubeMeshes = false; 
+	constexpr static bool fullyUniqueMeshes = false; 
 	constexpr static bool randomizeCubeRotations = true;
-	// TODO: make more than just different colored cube meshes (pyramids and spheres)
+	constexpr static bool doRandomBehaviors = true;
 
 	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 cube of cubes
-	constexpr static const float SPACING = 3.5f; // 2.5f
+	constexpr static const float SPACING = 3.5f; 
 
 	int SandBox::Awake()
 	{
@@ -181,6 +181,91 @@ namespace Game
 		return { vertices, indices };
 	}
 
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeSphere(
+		int latitudeSegments,
+		int longitudeSegments,
+		glm::vec3 colorTop,
+		glm::vec3 colorMid,
+		glm::vec3 colorBottom)
+	{
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint16_t> indices;
+
+		// Clamp to minimum sensible values
+		latitudeSegments = std::max(3, latitudeSegments);
+		longitudeSegments = std::max(3, longitudeSegments);
+
+		// Generate all vertices
+		for (int lat = 0; lat <= latitudeSegments; ++lat)
+		{
+			float v = static_cast<float>(lat) / latitudeSegments; // [0,1]
+			float theta = glm::pi<float>() * v;                        // [0, pi]
+
+			float sinTheta = std::sin(theta);
+			float cosTheta = std::cos(theta);
+
+			for (int lon = 0; lon <= longitudeSegments; ++lon)
+			{
+				float u = static_cast<float>(lon) / longitudeSegments; // [0,1]
+				float phi = glm::two_pi<float>() * u;                    // [0, 2pi]
+
+				float sinPhi = std::sin(phi);
+				float cosPhi = std::cos(phi);
+
+				glm::vec3 pos;
+				pos.x = sinTheta * cosPhi;
+				pos.y = cosTheta;
+				pos.z = sinTheta * sinPhi;
+
+				glm::vec3 color;
+
+				// Interpolate top -> mid -> bottom along v (Y)
+				if (v < 0.5f)
+				{
+					float t = v * 2.0f;
+					color = glm::mix(colorTop, colorMid, t);
+				}
+				else
+				{
+					float t = (v - 0.5f) * 2.0f;
+					color = glm::mix(colorMid, colorBottom, t);
+				}
+
+				// glm::vec2 uv = glm::vec2(u, 1.0f - v);
+				glm::vec2 uv = glm::vec2(u, v);
+
+				Engine::Vertex vert;
+				vert.position = pos * 0.5f; // Unit sphere scaled to [-0.5, 0.5]
+				vert.color = color;
+				vert.uv = uv;
+
+				vertices.push_back(vert);
+			}
+		}
+
+		// Generate indices (CCW winding)
+		for (int lat = 0; lat < latitudeSegments; ++lat)
+		{
+			for (int lon = 0; lon < longitudeSegments; ++lon)
+			{
+				int current = lat * (longitudeSegments + 1) + lon;
+				int next = current + longitudeSegments + 1;
+
+				// Triangle 1 (CCW)
+				indices.push_back(static_cast<uint16_t>(current));
+				indices.push_back(static_cast<uint16_t>(current + 1));
+				indices.push_back(static_cast<uint16_t>(next));
+
+				// Triangle 2 (CCW)
+				indices.push_back(static_cast<uint16_t>(current + 1));
+				indices.push_back(static_cast<uint16_t>(next + 1));
+				indices.push_back(static_cast<uint16_t>(next));
+			}
+		}
+
+		return { vertices, indices };
+	}
+
 	std::shared_ptr<Engine::MaterialData> RegisterRandomMaterial(
 		const std::shared_ptr<Engine::Mesh>& mesh,
 		int index)
@@ -206,7 +291,7 @@ namespace Game
 		return materialPool.RegisterMaterialData(matName, mesh, tex);
 	}
 
-	void MakeTonsOfRandomPositionedEntities()
+	void MakeTonsOfRandomPositionedEntities(Engine::Scene* scene)
 	{
 		auto& registry = Engine::SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene()->GetRegistry();
 		auto& meshPool = Engine::MeshPool::GetInstance();
@@ -215,18 +300,32 @@ namespace Game
 
 		const int total = (GRID_HALF_SIZE * 2 + 1);
 
-		if constexpr (!fullyUniqueCubeMeshes)
+		if constexpr (!fullyUniqueMeshes)
 		{
-			// If we aren't randomizing every cube's mesh to be unique then we will just have some regular ones to choose from
+			// === Shared Cube ===
 			auto cubeData = MakeCube();
-			auto sharedMesh = meshPool.RegisterMesh("SharedCube", cubeData.first, cubeData.second);
+			auto sharedCube = meshPool.RegisterMesh("SharedCube", cubeData.first, cubeData.second);
 
-			materialPool.RegisterMaterialData("RegularCube", sharedMesh); // this one has no texture (colored mesh)
-			materialPool.RegisterMaterialData("MartCube", sharedMesh, texturePool.GetTexture2DLazy("mart"));
-			materialPool.RegisterMaterialData("AlienCube", sharedMesh, texturePool.GetTexture2DLazy("alien"));
+			materialPool.RegisterMaterialData("RegularCube", sharedCube);
+			materialPool.RegisterMaterialData("MartCube", sharedCube, texturePool.GetTexture2DLazy("mart"));
+			materialPool.RegisterMaterialData("AlienCube", sharedCube, texturePool.GetTexture2DLazy("alien"));
+
+			// === Shared Sphere ===
+			auto sphereData = MakeSphere(
+				16, 32,                            // reasonable default detail
+				glm::vec3(1.0f, 0.0f, 0.0f),       // red top
+				glm::vec3(1.0f, 1.0f, 0.0f),       // yellow middle
+				glm::vec3(0.0f, 0.0f, 1.0f)        // blue bottom
+			);
+
+			auto sharedSphere = meshPool.RegisterMesh("SharedSphere", sphereData.first, sphereData.second);
+
+			materialPool.RegisterMaterialData("RegularSphere", sharedSphere);
+			materialPool.RegisterMaterialData("MartSphere", sharedSphere, texturePool.GetTexture2DLazy("mart"));
+			materialPool.RegisterMaterialData("AlienSphere", sharedSphere, texturePool.GetTexture2DLazy("alien"));
 		}
 
-		// === Generate entities ===
+		// === Generate grid of random entities ===
 		for (int x = -GRID_HALF_SIZE; x <= GRID_HALF_SIZE; ++x)
 		{
 			for (int y = -GRID_HALF_SIZE; y <= GRID_HALF_SIZE; ++y)
@@ -235,35 +334,82 @@ namespace Game
 				{
 					std::shared_ptr<Engine::Mesh> mesh;
 					std::shared_ptr<Engine::MaterialData> material;
+					std::string meshName;
 
-					if constexpr (fullyUniqueCubeMeshes)
+					bool isSphere = (Engine::randInt(0, 1) == 0); // 50/50 sphere or cube
+
+					if constexpr (fullyUniqueMeshes)
 					{
-						// This literally makes every mesh unique for all cubes (super cancer but meant to be a stress test)
-						auto cubeData = MakeRandomColoredCube();
-						std::string meshName = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
-						mesh = meshPool.RegisterMesh(meshName, cubeData.first, cubeData.second);
+						if (isSphere)
+						{
+							// Random detail + gradient
+							int latSegments = Engine::randInt(8, 24);
+							int longSegments = Engine::randInt(16, 48);
 
-						int seed = Engine::randInt(0, 999999);
-						material = RegisterRandomMaterial(mesh, seed);
+							glm::vec3 top = Engine::randVec3(0.2f, 1.0f);
+							glm::vec3 mid = Engine::randVec3(0.2f, 1.0f);
+							glm::vec3 bottom = Engine::randVec3(0.2f, 1.0f);
+
+							auto sphereData = MakeSphere(latSegments, longSegments, top, mid, bottom);
+
+							meshName = "sphere_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
+							mesh = meshPool.RegisterMesh(meshName, sphereData.first, sphereData.second);
+
+							int seed = Engine::randInt(0, 999999);
+							material = RegisterRandomMaterial(mesh, seed);
+						}
+						else
+						{
+							auto cubeData = MakeRandomColoredCube();
+
+							meshName = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
+							mesh = meshPool.RegisterMesh(meshName, cubeData.first, cubeData.second);
+
+							int seed = Engine::randInt(0, 999999);
+							material = RegisterRandomMaterial(mesh, seed);
+						}
 					}
 					else
 					{
-						// Pick material to use randomly but not create a million new random ones (33% mart, 33% alien, 33% no texture)
-						int matID = Engine::randInt(0, 2);
-						if (matID == 0)
+						if (isSphere)
 						{
-							material = materialPool.GetMaterialData("RegularCube");
+							mesh = meshPool.GetMesh("SharedSphere");
+
+							int matID = Engine::randInt(0, 2);
+							if (matID == 0)
+							{
+								material = materialPool.GetMaterialData("RegularSphere");
+							}
+							else if (matID == 1)
+							{
+								material = materialPool.GetMaterialData("MartSphere");
+							}
+							else
+							{
+								material = materialPool.GetMaterialData("AlienSphere");
+							}
 						}
-						else if (matID == 1)
+						else
 						{
-							material = materialPool.GetMaterialData("MartCube");
-						}
-						else if (matID == 2)
-						{
-							material = materialPool.GetMaterialData("AlienCube");
+							mesh = meshPool.GetMesh("SharedCube");
+
+							int matID = Engine::randInt(0, 2);
+							if (matID == 0)
+							{
+								material = materialPool.GetMaterialData("RegularCube");
+							}
+							else if (matID == 1)
+							{
+								material = materialPool.GetMaterialData("MartCube");
+							}
+							else
+							{
+								material = materialPool.GetMaterialData("AlienCube");
+							}
 						}
 					}
 
+					// Create entity
 					entt::entity entity = registry.create();
 
 					glm::vec3 pos = glm::vec3(
@@ -274,19 +420,25 @@ namespace Game
 
 					if constexpr (randomizeCubeRotations)
 					{
-						float pitch = Engine::randFloat(0.0f, 360.0f); // X
-						float yaw = Engine::randFloat(0.0f, 360.0f); // Y
-						float roll = Engine::randFloat(0.0f, 360.0f); // Z
-						glm::quat rotation = glm::quat(glm::radians(glm::vec3(pitch, yaw, roll)));
-						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f), rotation);
+						glm::vec3 euler = Engine::randVec3(0.0f, 360.0f);
+						glm::quat rot = glm::quat(glm::radians(euler));
+						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f), rot);
 					}
 					else
 					{
-						// Otherwise just use default ctor parameter which is the identity quaternion 
 						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f));
 					}
 
 					registry.emplace<Engine::Material>(entity, material);
+
+					// 50% chance of adding Spin behavior
+					if constexpr (doRandomBehaviors)
+					{
+						if (Engine::randInt(0, 1) == 0)
+						{
+							scene->AddBehavior<Game::Spin>(entity, Engine::randFloat(25.0f, 90.0f));
+						}
+					}
 				}
 			}
 		}
@@ -363,6 +515,17 @@ namespace Game
 			"mart material", mesh2, texturePool.GetTexture2DLazy("mart")
 		);
 
+		auto sphereData = MakeSphere(
+			24, 48,
+			glm::vec3(1, 0, 0),   // top: red
+			glm::vec3(1, 1, 0),   // mid: yellow
+			glm::vec3(0, 0, 1)    // bottom: blue
+		);
+
+		auto sphereMesh = meshPool.RegisterMesh("Sphere", sphereData.first, sphereData.second);
+
+		auto sphereDataMaterial = materialPool.RegisterMaterialData("sphere material", sphereMesh);
+
 		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
 		Engine::EntityFactory& entityFactory = Engine::EntityFactory::GetInstance();
 
@@ -370,6 +533,12 @@ namespace Game
 		entityFactory.CreateWithTransformAndMaterial(
 			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)), 
 			Engine::Material(materialData2)
+		);
+
+		// Make sphere entity
+		entityFactory.CreateWithTransformAndMaterial(
+			Engine::Transform(glm::vec3(-2.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
+			Engine::Material(sphereDataMaterial)
 		);
 
 		// Make another entity but the old fashioned way just to show how its done
@@ -387,11 +556,8 @@ namespace Game
 		// We can load scene scripts this way as a cool hack/trick
 		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
 
-		// Traditonally we would have to do CreateEntity(), registry.emplace() of the transform and material, and then AddBehavior<T>(entt) for everything manually
-		// These entity factory methods help short cut all of that automatically.
-
 		// The real stress test
-		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities();
+		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);
 
 		if constexpr (doUI) MakeUI(this);
 

@@ -170,12 +170,11 @@ namespace Engine
 	// Converts the mouse position from window-pixel space -> virtual-canvas space
 	// Tests that virtual point against each screen-space entity’s AABB
 	// Dispatches OnMouseEnter / Exit / Hover / Click events
-	// ----------------------------------------------------------------------------
 	void Scene::UpdateUIBehaviors()
 	{
 		// 1. Get raw mouse position in *window* pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseWin = inputMgr->GetMousePosition();// (0,0) = window TL
+		glm::vec2 mouseWin = inputMgr->GetMousePosition(); // (0,0) = window TL
 
 		// 2. Convert that to virtual canvas units (same space as Transform)
 		auto engine = Engine::SwimEngine::GetInstance();
@@ -189,10 +188,17 @@ namespace Engine
 		float scaleX = windowW / virtW;
 		float scaleY = windowH / virtH;
 
+		// window top border hack fix
+		float offset = 30;
+		if (scaleY > 0.9f)
+		{
+			offset = 0.f;
+		}
+
 		glm::vec2 mouseVirt;
 		mouseVirt.x = mouseWin.x / scaleX; // undo X scale
 		mouseVirt.y = mouseWin.y / scaleY; // undo Y scale
-		mouseVirt.y = virtH - mouseVirt.y; // flip origin TL -> BL
+		mouseVirt.y = virtH - mouseVirt.y - offset; // flip origin TL -> BL
 
 		// 3. Iterate over UI entities and run hit-testing in the same space
 		auto& registry = GetRegistry();
