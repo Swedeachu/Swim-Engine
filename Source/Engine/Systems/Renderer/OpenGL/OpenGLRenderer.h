@@ -45,7 +45,12 @@ namespace Engine
 		// Rendering
 		void RenderFrame();
 		void UpdateUniformBuffer();
-		void DrawEntity(entt::entity entity, entt::registry& registry);
+
+		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void RenderScreenSpace(entt::registry& registry);
+
+		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projMatrix);
+		void DrawEntityWithMVP(entt::entity entity, entt::registry& registry, const glm::mat4& mvp);
 
 		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
 
@@ -66,7 +71,7 @@ namespace Engine
 		std::unique_ptr<CubeMapController> cubemapController;
 
 		// Shader Cached uniform locations (kinda gross)
-		GLint loc_model = -1;
+		GLint loc_mvp = -1;
 		GLint loc_view = -1;
 		GLint loc_proj = -1;
 		GLint loc_hasTexture = -1;

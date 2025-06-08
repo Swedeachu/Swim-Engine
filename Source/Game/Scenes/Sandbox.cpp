@@ -16,6 +16,7 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = false;
+	constexpr static bool doUI = true;
 	constexpr static bool fullyUniqueCubeMeshes = false; 
 	constexpr static bool randomizeCubeRotations = true;
 	// TODO: make more than just different colored cube meshes (pyramids and spheres)
@@ -290,6 +291,42 @@ namespace Game
 		}
 	}
 
+	void MakeUI(Engine::Scene* scene)
+	{
+		// Get the MeshPool instance
+		auto& meshPool = Engine::MeshPool::GetInstance();
+		auto& materialPool = Engine::MaterialPool::GetInstance();
+		auto& texturePool = Engine::TexturePool::GetInstance();
+		auto engine = Engine::SwimEngine::GetInstance();
+
+		// Define vertices and indices for a white quad mesh
+		std::vector<Engine::Vertex> quadVertices = {
+			//  position          color               uv
+			{{-0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},  // bottom-left  => uv(0,1)
+			{{ 0.5f, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},  // bottom-right => uv(1,1)
+			{{ 0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},  // top-right    => uv(1,0)
+			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
+		};
+
+		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+
+		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadVertices, quadIndices);
+		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad);
+
+		auto whiteEntity = scene->CreateEntity();
+
+		// Place it in the center of the screen
+		auto windowWidth = engine->GetWindowWidth();
+		auto windowHeight = engine->GetWindowHeight();
+		glm::vec3 whiteEntityScreenPos = glm::vec3(windowWidth / 2.0f, windowHeight / 2.0f, 0.0f);
+
+		// Pixel size
+		glm::vec3 whiteEntitySize = glm::vec3(300.0f, 150.0f, 1.0f);
+
+		scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+		scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
+	}
+
 	int SandBox::Init()
 	{
 		std::cout << name << " Init" << std::endl;
@@ -355,6 +392,8 @@ namespace Game
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities();
+
+		if constexpr (doUI) MakeUI(this);
 
 		return 0;
 	}

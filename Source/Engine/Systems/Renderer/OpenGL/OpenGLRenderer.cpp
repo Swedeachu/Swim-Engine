@@ -202,7 +202,7 @@ namespace Engine
 		}
 
 		// --- 3) Cache all the *other* uniforms we still use each frame ---
-		loc_model = glGetUniformLocation(shaderProgram, "model");
+		loc_mvp = glGetUniformLocation(shaderProgram, "mvp");
 		loc_hasTexture = glGetUniformLocation(shaderProgram, "hasTexture");
 		loc_albedoTex = glGetUniformLocation(shaderProgram, "albedoTex");
 
@@ -291,7 +291,7 @@ namespace Engine
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		UpdateUniformBuffer();
+		UpdateUniformBuffer(); 
 		glUseProgram(shaderProgram);
 
 		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
@@ -301,43 +301,91 @@ namespace Engine
 			return;
 		}
 
-		// Setup camera + frustum
 		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
-		auto& view = camera->GetViewMatrix();
-		auto& proj = camera->GetProjectionMatrix();
-
+		const glm::mat4& view = camera->GetViewMatrix();
+		const glm::mat4& proj = camera->GetProjectionMatrix();
 		Frustum::SetCameraMatrices(view, proj);
-		const Frustum& frustum = Frustum::Get();
 
 		entt::registry& registry = scene->GetRegistry();
 
-		// Draw everything within the frustum
-		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
-		{
-			DrawEntity(entity, registry);
-		});
+		RenderWorldSpace(scene, registry, view, proj);
+
+		RenderScreenSpace(registry);
 
 	#ifdef _DEBUG
 		RenderWireframeDebug(scene);
 	#endif
 
-		// Draw the cubemap last
-		if (cubemapController) cubemapController->Render(view, proj);
+		if (cubemapController)
+		{
+			cubemapController->Render(view, proj);
+		}
 
 		SwapBuffers(deviceContext);
 	}
 
-	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry)
+	void OpenGLRenderer::RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		const Frustum& frustum = Frustum::Get();
+
+		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
+		{
+			const Transform& transform = registry.get<Transform>(entity);
+			if (transform.GetTransformSpace() == TransformSpace::World)
+			{
+				DrawEntity(entity, registry, viewMatrix, projectionMatrix);
+			}
+		});
+	}
+
+	void OpenGLRenderer::RenderScreenSpace(entt::registry& registry)
+	{
+		// We use this virtual canvas approach as values to offset things as to stay consistent-ish on most aspect ratios
+		constexpr float virtualWidth = 1920.0f;
+		constexpr float virtualHeight = 1080.0f;
+
+		// Orthographic projection for virtual canvas
+		glm::mat4 orthoProj = glm::ortho(
+			0.0f, virtualWidth,
+			0.0f, virtualHeight,
+			-1.0f, 1.0f
+		);
+
+		// Compute scale from actual window size
+		float scaleX = static_cast<float>(windowWidth) / virtualWidth;
+		float scaleY = static_cast<float>(windowHeight) / virtualHeight;
+
+		// Apply scale matrix so all UI is resolution-independent
+		glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
+		glm::mat4 identityView = glm::mat4(1.0f);
+
+		// Render all screen-space UI
+		registry.view<Transform>().each([&](entt::entity entity, Transform& transform)
+		{
+			if (transform.GetTransformSpace() == TransformSpace::Screen)
+			{
+				const glm::mat4& model = transform.GetModelMatrix();
+				glm::mat4 scaledModel = resolutionScale * model;
+				glm::mat4 mvp = orthoProj * identityView * scaledModel;
+				DrawEntityWithMVP(entity, registry, mvp);
+			}
+		});
+	}
+
+	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projMatrix)
 	{
 		const Transform& transform = registry.get<Transform>(entity);
 		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
 		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
 
-		// Model matrix
-		glm::mat4 model = transform.GetModelMatrix();
-		glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
+		// Compute model matrix and full MVP
+		const glm::mat4& model = transform.GetModelMatrix();
+		const glm::mat4 mvp = projMatrix * viewMatrix * model;
 
-		// Texture bind
+		// Upload matrix to shader
+		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+		// Bind texture if available
 		bool usesTexture = (mat->albedoMap != nullptr);
 		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
 
@@ -347,6 +395,26 @@ namespace Engine
 		glUniform1i(loc_albedoTex, 0);
 
 		// Draw
+		glBindVertexArray(meshData.GetGLVAO());
+		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
+		glBindVertexArray(0);
+	}
+
+	void OpenGLRenderer::DrawEntityWithMVP(entt::entity entity, entt::registry& registry, const glm::mat4& mvp)
+	{
+		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
+		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+
+		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+		bool usesTexture = (mat->albedoMap != nullptr);
+		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
+
+		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texID);
+		glUniform1i(loc_albedoTex, 0);
+
 		glBindVertexArray(meshData.GetGLVAO());
 		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
 		glBindVertexArray(0);
@@ -365,17 +433,16 @@ namespace Engine
 		auto& debugRegistry = debugDraw->GetRegistry();
 		const Frustum& frustum = Frustum::Get();
 
-		// No textures for debug
-		uint32_t textureIndex = UINT32_MAX;
-		float hasTexture = 0.0f;
+		// Wireframe uses camera view and projection
+		const glm::mat4& view = scene->GetCameraSystem()->GetViewMatrix();
+		const glm::mat4& proj = scene->GetCameraSystem()->GetProjectionMatrix();
 
-		// Append debug wireframe boxes into instance buffer
-		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
+		auto viewEntities = debugRegistry.view<Transform, DebugWireBoxData>();
 
-		for (auto& entity : view)
+		for (auto entity : viewEntities)
 		{
-			const Transform& transform = view.get<Transform>(entity);
-			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
+			const Transform& transform = viewEntities.get<Transform>(entity);
+			const DebugWireBoxData& box = viewEntities.get<DebugWireBoxData>(entity);
 			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
 
 			if constexpr (cullWireframe)
@@ -389,20 +456,21 @@ namespace Engine
 				}
 			}
 
-			// attatch model
+			// Compute and set MVP
 			glm::mat4 model = transform.GetModelMatrix();
-			glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
-			// wireframes don't use textures
+			glm::mat4 mvp = proj * view * model;
+			glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+			// No texture for debug wireframes
 			glUniform1f(loc_hasTexture, 0.0f);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, 0);
 			glUniform1i(loc_albedoTex, 0);
-			// bind mesh data and draw it
+
+			// Draw mesh
 			const MeshBufferData& meshData = *mesh->meshBufferData;
 			glBindVertexArray(meshData.GetGLVAO());
 			glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
-
-			// (optionally) unbind so we don’t accidentally reuse it somehow
 			glBindVertexArray(0);
 		}
 	}
