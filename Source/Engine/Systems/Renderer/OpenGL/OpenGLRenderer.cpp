@@ -17,6 +17,8 @@
 namespace Engine
 {
 
+	PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB = nullptr;
+
 	void OpenGLRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
 	{
 		windowWidth = width;
@@ -48,46 +50,83 @@ namespace Engine
 		return p;
 	}
 
+	HWND CreateDummyWindow(HINSTANCE hInstance)
+	{
+		WNDCLASSA wc = {};
+		wc.style = CS_OWNDC;
+		wc.lpfnWndProc = DefWindowProcA;
+		wc.hInstance = hInstance;
+		wc.lpszClassName = "DummyWGLWindow";
+
+		RegisterClassA(&wc);
+
+		return CreateWindowA(
+			"DummyWGLWindow", "Dummy", WS_OVERLAPPEDWINDOW,
+			0, 0, 1, 1, nullptr, nullptr, hInstance, nullptr
+		);
+	}
+
 	bool OpenGLRenderer::InitOpenGLContext()
 	{
+		// --- Step 1: Create dummy window/context to load WGL extensions ---
+		HINSTANCE hInstance = GetModuleHandle(nullptr);
+		HWND dummyHwnd = CreateDummyWindow(hInstance);
+		HDC dummyDC = GetDC(dummyHwnd);
+
+		PIXELFORMATDESCRIPTOR dummyPFD = {};
+		dummyPFD.nSize = sizeof(dummyPFD);
+		dummyPFD.nVersion = 1;
+		dummyPFD.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+		dummyPFD.iPixelType = PFD_TYPE_RGBA;
+		dummyPFD.cColorBits = 32;
+		dummyPFD.cDepthBits = 24;
+		dummyPFD.cStencilBits = 8;
+		dummyPFD.iLayerType = PFD_MAIN_PLANE;
+
+		int dummyFormat = ChoosePixelFormat(dummyDC, &dummyPFD);
+		SetPixelFormat(dummyDC, dummyFormat, &dummyPFD);
+
+		HGLRC dummyContext = wglCreateContext(dummyDC);
+		wglMakeCurrent(dummyDC, dummyContext);
+
+		// --- Step 2: Load WGL extensions ---
+		if (!gladLoadWGL(dummyDC, (GLADloadfunc)wglGetProcAddress))
+		{
+			std::cerr << "Failed to load WGL extensions.\n";
+			return false;
+		}
+
+		// Load wglChoosePixelFormatARB now that dummy context is current ---
+		g_wglChoosePixelFormatARB = (PFNWGLCHOOSEPIXELFORMATARBPROC)wglGetProcAddress("wglChoosePixelFormatARB");
+
+		if (!g_wglChoosePixelFormatARB)
+		{
+			std::cerr << "[FATAL] wglChoosePixelFormatARB is NULL despite extension being reported.\n";
+			return false;
+		}
+
+		// --- Step 3: Clean up dummy context ---
+		wglMakeCurrent(nullptr, nullptr);
+		wglDeleteContext(dummyContext);
+		ReleaseDC(dummyHwnd, dummyDC);
+		DestroyWindow(dummyHwnd);
+
+		// --- Step 4: Get actual device context ---
 		deviceContext = GetDC(windowHandle);
 		if (!deviceContext)
 		{
-			std::cerr << "Failed to get device context from HWND." << std::endl;
+			std::cerr << "Failed to get device context from window.\n";
 			return false;
 		}
 
 		if (!SetPixelFormatForHDC(deviceContext))
 		{
-			std::cerr << "Failed to set pixel format." << std::endl;
+			std::cerr << "Failed to set pixel format (MSAA).\n";
 			return false;
 		}
 
-		// Create dummy OpenGL context to load WGL extensions
-		HGLRC dummyContext = wglCreateContext(deviceContext);
-		if (!dummyContext)
-		{
-			std::cerr << "Failed to create dummy OpenGL context." << std::endl;
-			return false;
-		}
-
-		if (!wglMakeCurrent(deviceContext, dummyContext))
-		{
-			std::cerr << "Failed to activate dummy OpenGL context." << std::endl;
-			wglDeleteContext(dummyContext);
-			return false;
-		}
-
-		// Load WGL functions using glad
-		if (!gladLoadWGL(deviceContext, (GLADloadfunc)wglGetProcAddress))
-		{
-			std::cerr << "Failed to load WGL functions with gladLoadWGL." << std::endl;
-			wglDeleteContext(dummyContext);
-			return false;
-		}
-
-		// Attributes for the real OpenGL 4.6 core profile context
-		int attribs[] = {
+		// --- Step 5: Create real context ---
+		int contextAttribs[] = {
 			WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
 			WGL_CONTEXT_MINOR_VERSION_ARB, 6,
 			WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
@@ -97,72 +136,90 @@ namespace Engine
 			0
 		};
 
-		glContext = wglCreateContextAttribsARB(deviceContext, nullptr, attribs);
+		glContext = wglCreateContextAttribsARB(deviceContext, nullptr, contextAttribs);
 		if (!glContext)
 		{
-			std::cerr << "Failed to create OpenGL 4.6 context." << std::endl;
-			wglDeleteContext(dummyContext);
+			std::cerr << "Failed to create OpenGL 4.6 context.\n";
 			return false;
 		}
-
-		// Cleanup dummy context
-		wglMakeCurrent(nullptr, nullptr);
-		wglDeleteContext(dummyContext);
 
 		if (!wglMakeCurrent(deviceContext, glContext))
 		{
-			std::cerr << "Failed to activate real OpenGL context." << std::endl;
+			std::cerr << "Failed to make OpenGL context current.\n";
 			return false;
 		}
 
-		// Load OpenGL functions using glad
 		if (!gladLoadGL((GLADloadfunc)GetGLProcAddress))
 		{
-			std::cerr << "Failed to load OpenGL functions with gladLoadGL." << std::endl;
+			std::cerr << "Failed to load OpenGL functions via glad.\n";
 			return false;
 		}
 
-		// Set VSync OFF (0 = disable vsync, 1 = enable vsync)
-		typedef BOOL(APIENTRY* PFNWGLSWAPINTERVALEXTPROC)(int);
-		PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = nullptr;
+		// --- Step 6: Runtime GL settings ---
+		auto wglSwapIntervalEXT = (BOOL(APIENTRY*)(int))wglGetProcAddress("wglSwapIntervalEXT");
+		if (wglSwapIntervalEXT) { wglSwapIntervalEXT(0); }
 
-		wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_DEPTH_CLAMP);
+		glEnable(GL_CULL_FACE);
+		glEnable(GL_MULTISAMPLE);
+		glEnable(GL_STENCIL_TEST);
 
-		if (wglSwapIntervalEXT)
-		{
-			wglSwapIntervalEXT(0); // 0 to disable VSync
-		}
+		std::cout << "[INFO] OpenGL Initialized: " << glGetString(GL_VERSION) << "\n";
 
-		glEnable(GL_DEPTH_TEST);   // 3D depth buffer 
-		glEnable(GL_DEPTH_CLAMP);  // clamped culling
-		glEnable(GL_CULL_FACE);    // back face culling
-		glEnable(GL_MULTISAMPLE);  // MSAA
-		glEnable(GL_STENCIL_TEST); // will be needed for outline stuff later on
-
-		std::cout << "OpenGL Initialized: " << glGetString(GL_VERSION) << std::endl;
+		GLint samples = 0;
+		glGetIntegerv(GL_SAMPLES, &samples);
+		std::cout << "[INFO] MSAA samples: " << samples << "\n";
 
 		return true;
 	}
 
+
+
 	bool OpenGLRenderer::SetPixelFormatForHDC(HDC hdc)
 	{
-		PIXELFORMATDESCRIPTOR pfd = {};
-		pfd.nSize = sizeof(pfd);
-		pfd.nVersion = 1;
-		pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-		pfd.iPixelType = PFD_TYPE_RGBA;
-		pfd.cColorBits = 32;
-		pfd.cDepthBits = 24;
-		pfd.cStencilBits = 8;
-		pfd.iLayerType = PFD_MAIN_PLANE;
-
-		int pixelFormat = ChoosePixelFormat(hdc, &pfd);
-		if (pixelFormat == 0 || !SetPixelFormat(hdc, pixelFormat, &pfd))
+		if (!g_wglChoosePixelFormatARB)
 		{
-			std::cerr << "Failed to set pixel format." << std::endl;
+			std::cerr << "g_wglChoosePixelFormatARB is not set.\n";
 			return false;
 		}
 
+		const int pixelAttribs[] = {
+			WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+			WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+			WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+			WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+			WGL_COLOR_BITS_ARB, 32,
+			WGL_DEPTH_BITS_ARB, 24,
+			WGL_STENCIL_BITS_ARB, 8,
+			WGL_SAMPLE_BUFFERS_ARB, 1,   // Enable MSAA
+			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA
+			0
+		};
+
+		int pixelFormat = 0;
+		UINT numFormats = 0;
+
+		if (!g_wglChoosePixelFormatARB(hdc, pixelAttribs, nullptr, 1, &pixelFormat, &numFormats) || numFormats == 0)
+		{
+			std::cerr << "wglChoosePixelFormatARB failed.\n";
+			return false;
+		}
+
+		PIXELFORMATDESCRIPTOR pfd = {};
+		if (!DescribePixelFormat(hdc, pixelFormat, sizeof(pfd), &pfd))
+		{
+			std::cerr << "DescribePixelFormat failed.\n";
+			return false;
+		}
+
+		if (!SetPixelFormat(hdc, pixelFormat, &pfd))
+		{
+			std::cerr << "SetPixelFormat failed for multisample format.\n";
+			return false;
+		}
+
+		std::cout << "[INFO] MSAA-capable pixel format set successfully.\n";
 		return true;
 	}
 
@@ -225,7 +282,7 @@ namespace Engine
 		loc_ui_enableStroke = glGetUniformLocation(uiDecoratorShader, "enableStroke");
 		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
 		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
-		loc_ui_boxSizeUV = glGetUniformLocation(uiDecoratorShader, "boxSizeUV");
+		loc_ui_resolution = glGetUniformLocation(uiDecoratorShader, "resolution");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -238,6 +295,10 @@ namespace Engine
 			"Shaders/OpenGL/skybox_frag.glsl"
 		);
 		cubemapController->SetEnabled(false);
+
+		GLint samples = 0;
+		glGetIntegerv(GL_SAMPLES, &samples);
+		std::cout << "MSAA Samples: " << samples << std::endl;
 
 		return 0;
 	}
@@ -255,6 +316,7 @@ namespace Engine
 			char infoLog[512];
 			glGetShaderInfoLog(shader, 512, nullptr, infoLog);
 			std::string errorStage = (stage == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
+			std::cout << "GLSL " + errorStage + " shader compile failed: " + std::string(infoLog) << std::endl;
 			throw std::runtime_error("GLSL " + errorStage + " shader compile failed: " + std::string(infoLog));
 		}
 
@@ -426,7 +488,8 @@ namespace Engine
 			boxSizeUV.x = pixelSize.x / windowWidth;
 			boxSizeUV.y = pixelSize.y / windowHeight;
 
-			glUniform2fv(loc_ui_boxSizeUV, 1, &boxSizeUV.x);
+			glUniform2f(loc_ui_resolution, windowWidth, windowHeight);
+
 
 			// Draw the mesh
 			const auto& mat = registry.get<Material>(entity).data;

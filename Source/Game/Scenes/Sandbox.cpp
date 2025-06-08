@@ -483,13 +483,18 @@ namespace Game
 		Engine::DecoratorUI decorator = Engine::DecoratorUI(
 			glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
 			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
-			glm::vec2(32.0f, 32.0f),              // stroke width X/Y
+			glm::vec2(16.0f, 16.0f),              // stroke width X/Y
 			glm::vec2(32.0f, 32.0f),              // corner radius X/Y
 			glm::vec2(4.0f),                      // padding
 			true, true, true                      // rounded, stroke, fill
 		);
 
 		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
+
+		// For size comparison
+		// auto secondEntity = scene->CreateEntity();
+		// scene->AddComponent<Engine::Transform>(secondEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+		// scene->AddComponent<Engine::Material>(secondEntity, Engine::Material(whiteMaterial));
 	}
 
 	int SandBox::Init()

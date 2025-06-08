@@ -4,9 +4,11 @@
 
 namespace Engine
 {
-	
+
+	extern PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB;
+
 	// Forward decalre
-	class Texture2D; 
+	class Texture2D;
 
 	class OpenGLRenderer : public Renderer
 	{
@@ -89,7 +91,7 @@ namespace Engine
 		GLint loc_ui_enableStroke = -1;
 		GLint loc_ui_enableFill = -1;
 		GLint loc_ui_roundCorners = -1;
-		GLint loc_ui_boxSizeUV = -1;
+		GLint loc_ui_resolution = -1;
 
 	};
 
