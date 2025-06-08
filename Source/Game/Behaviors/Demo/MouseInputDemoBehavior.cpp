@@ -1,10 +1,22 @@
 #include "PCH.h"
 #include "MouseInputDemoBehavior.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/DecoratorUI.h"
 #include "Engine/Systems/Renderer/Renderer.h"
 
 namespace Game
 {
+
+	glm::vec4 toFour(const glm::vec3& vec, float z = 1.0f)
+	{
+		return glm::vec4(vec.x, vec.y, vec.z, z);
+	}
+
+	void MouseInputDemoBehavior::SetColor(Engine::DebugColor color)
+	{
+		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		decorator.fillColor = toFour(Engine::GetDebugColorValue(color));
+	}
 
 	int MouseInputDemoBehavior::Awake()
 	{
@@ -41,6 +53,10 @@ namespace Game
 	void MouseInputDemoBehavior::OnMouseEnter()
 	{
 		std::cout << "MouseInputDemoBehavior: Mouse Entered\n";
+		if (!input->IsKeyDown(VK_LBUTTON))
+		{
+			SetColor(Engine::DebugColor::Yellow);
+		}
 	}
 
 	void MouseInputDemoBehavior::OnMouseHover()
@@ -51,6 +67,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnMouseExit()
 	{
 		std::cout << "MouseInputDemoBehavior: Mouse Exited\n";
+		SetColor(Engine::DebugColor::White);
 	}
 
 	void MouseInputDemoBehavior::OnLeftClicked()
@@ -66,6 +83,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnLeftClickDown()
 	{
 		// std::cout << "MouseInputDemoBehavior: Left Button Down\n"; // commented out just to avoid spam 
+		SetColor(Engine::DebugColor::Green);
 	}
 
 	void MouseInputDemoBehavior::OnRightClickDown()
@@ -76,6 +94,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnLeftClickUp()
 	{
 		std::cout << "MouseInputDemoBehavior: Left Button Up\n";
+		SetColor(Engine::DebugColor::White);
 	}
 
 	void MouseInputDemoBehavior::OnRightClickUp()

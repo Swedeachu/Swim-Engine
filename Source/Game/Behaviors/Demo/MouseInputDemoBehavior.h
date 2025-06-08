@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Entity/Behavior.h"
+#include "Engine/Utility/ColorConstants.h"
 #include <iostream>
 
 namespace Game
@@ -31,6 +32,10 @@ namespace Game
 
 		void OnLeftClickUp() override;
 		void OnRightClickUp() override;
+
+	private:
+
+		void SetColor(Engine::DebugColor color);
 
 	};
 
