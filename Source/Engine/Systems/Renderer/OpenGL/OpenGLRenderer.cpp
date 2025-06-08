@@ -225,6 +225,7 @@ namespace Engine
 		loc_ui_enableStroke = glGetUniformLocation(uiDecoratorShader, "enableStroke");
 		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
 		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
+		loc_ui_boxSizeUV = glGetUniformLocation(uiDecoratorShader, "boxSizeUV");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -387,24 +388,30 @@ namespace Engine
 		registry.view<Transform, Engine::DecoratorUI>().each(
 			[&](entt::entity entity, Transform& transform, Engine::DecoratorUI& deco)
 		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
+			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			{
+				return;
+			}
 
+			// Compose MVP in proper order: scale THEN model
 			glm::mat4 model = transform.GetModelMatrix();
 			glm::mat4 mvp = orthoProj * (model * resolutionScale);
 
 			// Upload MVP
 			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
 
-			// Upload decorator properties
+			// Upload colors
 			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
 			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
 
-			glm::vec2 pixelSize = transform.GetScale();
+			glm::vec2 pixelSize = transform.GetScale(); // size in screen pixels
 
-			// 1. full-width stroke in UV units  
-			glm::vec2 strokeUV = deco.strokeWidth / pixelSize; 
-			// 2. radius in UV units
-			glm::vec2 radiusUV = deco.cornerRadius / pixelSize;
+			// Prevent stroke/radius from exceeding size
+			glm::vec2 clampedRadius = glm::min(deco.cornerRadius, pixelSize * 0.5f);
+			glm::vec2 clampedStroke = glm::min(deco.strokeWidth, pixelSize);
+
+			glm::vec2 strokeUV = clampedStroke / pixelSize;
+			glm::vec2 radiusUV = clampedRadius / pixelSize;
 
 			glUniform2fv(loc_ui_strokeWidth, 1, &strokeUV.x);
 			glUniform2fv(loc_ui_cornerRadius, 1, &radiusUV.x);
@@ -413,6 +420,15 @@ namespace Engine
 			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
 			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
 
+			glm::vec2 boxSizeUV = glm::vec2(1.0f); // unit quad in shader space
+
+			// Our quad is scaled by resolutionScale (pixels per virtual unit)
+			boxSizeUV.x = pixelSize.x / windowWidth;
+			boxSizeUV.y = pixelSize.y / windowHeight;
+
+			glUniform2fv(loc_ui_boxSizeUV, 1, &boxSizeUV.x);
+
+			// Draw the mesh
 			const auto& mat = registry.get<Material>(entity).data;
 			const auto& mesh = *mat->mesh->meshBufferData;
 

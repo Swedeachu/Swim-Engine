@@ -1,18 +1,16 @@
 #version 460 core
 
-in  vec2 fragUV;     // assumed in [0,1] UV space
+in vec2 fragUV;
 out vec4 FragColor;
 
-/* Uniforms */
 uniform vec4 fillColor;
 uniform vec4 strokeColor;
-uniform vec2 strokeWidth;   // in UV units (full width)
+uniform vec2 strokeWidth;   // in UV units
 uniform vec2 cornerRadius;  // in UV units
-uniform int  enableFill;
-uniform int  enableStroke;
-uniform int  roundCorners;
+uniform int enableFill;
+uniform int enableStroke;
+uniform int roundCorners;
 
-/* Signed distance function for rounded rectangle */
 float sdRoundRect(vec2 p, vec2 halfSize, vec2 rad)
 {
   vec2 q = abs(p) - halfSize + rad;
@@ -21,38 +19,39 @@ float sdRoundRect(vec2 p, vec2 halfSize, vec2 rad)
 
 void main()
 {
-  // Convert fragUV [0,1] to [-0.5, 0.5], centered around 0
   vec2 p = fragUV - 0.5;
-
-  // Always (0.5, 0.5) for normalized quad
   vec2 halfSize = vec2(0.5);
 
-  // Compute SDF distance
+  // Stretch correction
+  float aspect = halfSize.x / halfSize.y;
+  p.x *= aspect;
+
+  vec2 clampedRadius = min(cornerRadius, halfSize);
   float dist = roundCorners != 0
-    ? sdRoundRect(p, halfSize, cornerRadius)
+    ? sdRoundRect(p, halfSize, clampedRadius)
     : max(abs(p.x) - halfSize.x, abs(p.y) - halfSize.y);
 
-  // Antialias width based on screen-space derivatives
   float aa = fwidth(dist);
 
-  // FILL
+  vec4 result = vec4(0.0);
+
   if (enableFill != 0)
   {
     float fillAlpha = 1.0 - smoothstep(0.0, aa, dist);
-    FragColor = vec4(fillColor.rgb, fillColor.a * fillAlpha);
+    result = fillColor * fillAlpha;
   }
 
-  // STROKE
   if (enableStroke != 0)
   {
-    float strokeOuter = dist - max(strokeWidth.x, strokeWidth.y);
-    float strokeAlpha = smoothstep(aa, 0.0, strokeOuter) * smoothstep(0.0, aa, dist);
-    FragColor = mix(FragColor, strokeColor, strokeAlpha * strokeColor.a);
+    float outerDist = dist - max(strokeWidth.x, strokeWidth.y) * 0.5;
+    float strokeAlpha = smoothstep(aa, 0.0, outerDist) * smoothstep(0.0, aa, dist);
+    result = mix(result, strokeColor, strokeAlpha * strokeColor.a);
   }
 
-  // Fully discard transparent pixels
-  if (FragColor.a <= 0.001)
+  if (result.a <= 0.001)
   {
     discard;
   }
+
+  FragColor = result;
 }

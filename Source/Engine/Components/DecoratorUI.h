@@ -1,11 +1,12 @@
 #pragma once
 
+#include "Library/glm/vec2.hpp"
 #include "Library/glm/vec4.hpp"
 
 namespace Engine
 {
 
-	// Optional enum if we later want per-corner rounding
+	// Optional enum for future per-corner rounding (not yet used)
 	enum class Corner
 	{
 		TopLeft,
@@ -16,33 +17,49 @@ namespace Engine
 
 	struct DecoratorUI
 	{
-		glm::vec4 fillColor = glm::vec4(1.0f);       // Default: solid white
-		glm::vec4 strokeColor = glm::vec4(0.0f);     // Default: no stroke
-		float     strokeWidth = 0.0f;                // 0 = no stroke
-		float     cornerRadius = 0.0f;               // uniform rounded corners
-		glm::vec2 padding = glm::vec2(0.0f);         // padding (for future layout)
+		glm::vec4 fillColor = glm::vec4(1.0f);   // Default: solid white
+		glm::vec4 strokeColor = glm::vec4(0.0f);   // Default: no stroke
+		glm::vec2 strokeWidth = glm::vec2(0.0f);   // in pixels, width/height
+		glm::vec2 cornerRadius = glm::vec2(0.0f);   // in pixels, X/Y radius
+		glm::vec2 padding = glm::vec2(0.0f);   // optional layout padding
 
-		// Optional: Future support for per-corner radius
-		// glm::vec4 cornerRadii = glm::vec4(0.0f); // TL, TR, BR, BL
-
-		// Flags for rendering hints (optional, future use)
-		bool roundCorners = false;                  // use cornerRadius
+		bool roundCorners = false;
 		bool enableStroke = false;
 		bool enableFill = true;
 
-		// Debug/utility functions
+		// Convenient initialization
+		DecoratorUI(
+			glm::vec4 fill = glm::vec4(1.0f),
+			glm::vec4 stroke = glm::vec4(0.0f),
+			glm::vec2 strokeW = glm::vec2(0.0f),
+			glm::vec2 cornerR = glm::vec2(0.0f),
+			glm::vec2 pad = glm::vec2(0.0f),
+			bool rounded = false,
+			bool strokeEnabled = false,
+			bool fillEnabled = true
+		)
+			: fillColor(fill),
+			strokeColor(stroke),
+			strokeWidth(strokeW),
+			cornerRadius(cornerR),
+			padding(pad),
+			roundCorners(rounded),
+			enableStroke(strokeEnabled),
+			enableFill(fillEnabled)
+		{}
+
 		void SetColors(glm::vec4 fill, glm::vec4 stroke = glm::vec4(0.0f))
 		{
 			fillColor = fill;
 			strokeColor = stroke;
 			enableFill = fill.a > 0.0f;
-			enableStroke = stroke.a > 0.0f && strokeWidth > 0.0f;
+			enableStroke = stroke.a > 0.0f && (strokeWidth.x > 0.0f || strokeWidth.y > 0.0f);
 		}
 
-		void SetCornerRadius(float radius)
+		void SetCornerRadius(glm::vec2 radius)
 		{
 			cornerRadius = radius;
-			roundCorners = (radius > 0.0f);
+			roundCorners = (radius.x > 0.0f || radius.y > 0.0f);
 		}
 
 	};
