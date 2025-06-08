@@ -471,7 +471,7 @@ namespace Game
 		auto whiteEntity = scene->CreateEntity();
 
 		// Place it in the screen
-		glm::vec3 whiteEntityScreenPos = glm::vec3(200, 1000, 0.0f);
+		glm::vec3 whiteEntityScreenPos = glm::vec3(300, 900, 0.0f);
 
 		// Pixel size
 		glm::vec3 whiteEntitySize = glm::vec3(300.0f, 150.0f, 1.0f);

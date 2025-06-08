@@ -172,7 +172,7 @@ namespace Engine
 	// Dispatches OnMouseEnter / Exit / Hover / Click events
 	void Scene::UpdateUIBehaviors()
 	{
-		// 1. Get raw mouse position in *window* pixels
+		// 1. Get raw mouse position in window pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
 		glm::vec2 mouseWin = inputMgr->GetMousePosition(); // (0,0) = window TL
 
@@ -189,7 +189,7 @@ namespace Engine
 		float scaleY = windowH / virtH;
 
 		// window top border hack fix
-		float offset = 30;
+		float offset = 14; // was 28
 		if (scaleY > 0.9f)
 		{
 			offset = 0.f;

@@ -250,6 +250,7 @@ namespace Engine
 		// --- Screen space transform scaling ---
 		if (transform.GetTransformSpace() == TransformSpace::Screen)
 		{
+			/*
 			std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 			unsigned int windowWidth = engine->GetWindowWidth();
 			unsigned int windowHeight = engine->GetWindowHeight();
@@ -259,8 +260,9 @@ namespace Engine
 
 			// Converts geometry from virtual units -> pixels
 			glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
+			*/
 
-			instance.model = transform.GetModelMatrix() * resolutionScale;
+			instance.model = transform.GetModelMatrix(); //* resolutionScale;
 			instance.space = 1u;
 		}
 		else // otherwise regular world space

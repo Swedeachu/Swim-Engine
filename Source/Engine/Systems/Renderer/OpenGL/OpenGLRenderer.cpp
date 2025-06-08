@@ -445,7 +445,8 @@ namespace Engine
 			if (transform.GetTransformSpace() == TransformSpace::Screen)
 			{
 				glm::mat4 model = transform.GetModelMatrix();
-				glm::mat4 mvp = orthoProj * (model * resolutionScale);
+				// glm::mat4 mvp = orthoProj * (model * resolutionScale);
+				glm::mat4 mvp = orthoProj * model;
 				DrawEntityWithMVP(entity, registry, mvp);
 			}
 		});
@@ -465,7 +466,8 @@ namespace Engine
 
 			// Calculate model matrix and MVP
 			glm::mat4 model = transform.GetModelMatrix();
-			glm::mat4 mvp = orthoProj * (model * resolutionScale);
+			// glm::mat4 mvp = orthoProj * (model * resolutionScale);
+			glm::mat4 mvp = orthoProj * model;
 
 			// Upload MVP matrix
 			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
