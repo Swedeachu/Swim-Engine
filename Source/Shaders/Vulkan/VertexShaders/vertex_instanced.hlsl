@@ -1,8 +1,11 @@
 [[vk::binding(0, 0)]]
 cbuffer CameraUBO : register(b0, space0)
 {
-  float4x4 view;
-  float4x4 proj;
+  float4x4 worldView;
+  float4x4 worldProj;
+  float4x4 screenView;
+  float4x4 screenProj;
+
   float4 camParams; 
 };
 
@@ -19,7 +22,7 @@ struct GpuInstanceData
   uint materialIndex;
 
   uint indexCount;
-  uint pad0;                           // match padding
+  uint space;                          // 0 = world, 1 = screen
 
   uint2 vertexOffsetInMegaBuffer;      // emulate uint64_t
   uint2 indexOffsetInMegaBuffer;       // emulate uint64_t
@@ -51,9 +54,13 @@ VSOutput main(VSInput input)
 
   GpuInstanceData instance = instanceBuffer[input.instanceID];
 
+  // Pick view/proj depending on transform space
+  float4x4 viewMatrix = (instance.space == 1) ? screenView : worldView;
+  float4x4 projMatrix = (instance.space == 1) ? screenProj : worldProj;
+
   float4 worldPos = mul(instance.model, float4(input.position, 1.0f));
-  float4 viewPos = mul(view, worldPos);
-  float4 projPos = mul(proj, viewPos);
+  float4 viewPos = mul(viewMatrix, worldPos);
+  float4 projPos = mul(projMatrix, viewPos);
 
   output.position = projPos;
   output.color = input.color;

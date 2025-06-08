@@ -11,6 +11,8 @@ namespace Engine
 	{
 		glm::mat4 view;   // 64 bytes
 		glm::mat4 proj;   // 64 bytes
+		glm::mat4 screenView; // 64 bytes
+		glm::mat4 screenProj; // 64 bytes
 		glm::vec4 camParams; // 16 bytes: (fovX, fovY, zNear, zFar)
 	};
 

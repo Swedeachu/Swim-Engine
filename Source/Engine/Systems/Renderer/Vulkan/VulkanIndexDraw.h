@@ -8,6 +8,9 @@
 namespace Engine
 {
 
+	// Forward declare
+	enum class TransformSpace;
+
 	class VulkanIndexDraw
 	{
 
@@ -47,7 +50,7 @@ namespace Engine
 
 		// Helpers for instance buffer update
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
-		void GatherCandidatesView(const entt::registry& registry, const Frustum* frustum);
+		void GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum);
 		void AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 

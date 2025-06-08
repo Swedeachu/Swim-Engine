@@ -152,10 +152,15 @@ namespace Engine
 		if (cullMode == CullMode::CPU && frustum && useQueriedFrustumSceneBVH)
 		{
 			GatherCandidatesBVH(*scene, *frustum);
+
+			// We also need to render screen space entities, as BVH only accounts for world space entities since it is for culling.
+			// We don't cull screen space entities, just draw them regularly with the view method.
+			GatherCandidatesView(registry, TransformSpace::Screen, frustum);
 		}
 		else
 		{
-			GatherCandidatesView(registry, frustum);
+			// Render everything in world and screen space with the registry view
+			GatherCandidatesView(registry, TransformSpace::Ambiguous, frustum);
 		}
 
 	#ifdef _DEBUG
@@ -209,20 +214,27 @@ namespace Engine
 		});
 	}
 
-	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const Frustum* frustum)
+	// Passing space as TransformSpace::Ambiguous will just render all entities
+	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
 		auto view = registry.view<Transform, Material>();
 
 		for (auto& entity : view)
 		{
-			AddInstance(view.get<Transform>(entity), view.get<Material>(entity).data, frustum);
+			const Transform& tf = view.get<Transform>(entity);
+			if (space == TransformSpace::Ambiguous ||  tf.GetTransformSpace() == space)
+			{
+				AddInstance(tf, view.get<Material>(entity).data, frustum);
+			}
 		}
 	}
 
 	void VulkanIndexDraw::AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
 		const std::shared_ptr<Mesh>& mesh = mat->mesh;
-		if (frustum)
+
+		// Frustum culling if world-space
+		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
 			const glm::vec3& min = mesh->meshBufferData->aabbMin;
 			const glm::vec3& max = mesh->meshBufferData->aabbMax;
@@ -233,7 +245,29 @@ namespace Engine
 		}
 
 		GpuInstanceData instance{};
-		instance.model = transform.GetModelMatrix();
+
+		// --- Screen space transform scaling ---
+		if (transform.GetTransformSpace() == TransformSpace::Screen)
+		{
+			std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
+			unsigned int windowWidth = engine->GetWindowWidth();
+			unsigned int windowHeight = engine->GetWindowHeight();
+
+			constexpr float virtualWidth = 1920.0f;
+			constexpr float virtualHeight = 1080.0f;
+			float scaleX = static_cast<float>(windowWidth) / virtualWidth;
+			float scaleY = static_cast<float>(windowHeight) / virtualHeight;
+
+			glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
+			instance.model = resolutionScale * transform.GetModelMatrix();
+			instance.space = 1u;
+		}
+		else // otherwise regular world space
+		{
+			instance.model = transform.GetModelMatrix();
+			instance.space = 0u;
+		}
+
 		instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
 		instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;

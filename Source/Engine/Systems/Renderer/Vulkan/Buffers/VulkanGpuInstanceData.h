@@ -13,12 +13,12 @@ namespace Engine
     glm::vec4 aabbMax;        // 16 bytes
 
     uint32_t textureIndex;    // 4 bytes
-    float hasTexture;         // 4 bytes
+    float hasTexture;         // 4 bytes (maybe should be a uint for consistency)
     uint32_t meshInfoIndex;   // 4 bytes  
     uint32_t materialIndex;   // 4 bytes  
 
     uint32_t indexCount;      // 4 bytes
-    uint32_t pad0;            // 4 bytes padding to maintain alignment
+    uint32_t space;           // 4 bytes (0 = world, 1 = screen)
     VkDeviceSize vertexOffsetInMegaBuffer; // 8 bytes
     VkDeviceSize indexOffsetInMegaBuffer;  // 8 bytes
   };
