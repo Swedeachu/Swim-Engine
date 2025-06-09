@@ -32,9 +32,9 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
-		void DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedWorldSpace(uint32_t frameIndex, VkCommandBuffer cmd);
 
-		void DrawUI(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedScreenSpaceUI(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void CleanUp();
 
@@ -65,9 +65,12 @@ namespace Engine
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
 
+		// Draw data instance buffer per frame
 		std::unique_ptr<VulkanInstanceBuffer> instanceBuffer;
 
+		// Draw data instances to feed the buffers per frame
 		std::vector<GpuInstanceData> cpuInstanceData;
+		std::vector<UIParams> uiParamData;
 
 		struct MeshInstanceRange
 		{
@@ -80,6 +83,7 @@ namespace Engine
 
 		CullMode cullMode{ CullMode::NONE };
 
+		// The world space meshes we put into a contiguous buffer to batch draw with
 		std::unordered_map<uint32_t, MeshInstanceRange> rangeMap;
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
@@ -92,7 +96,9 @@ namespace Engine
 			std::vector<VkDrawIndexedIndirectCommand> commands;
 		};
 
-		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; // [frameCount]
+		// Command buffers per frame
+		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; 
+		std::vector<std::unique_ptr<VulkanBuffer>> uiIndirectCommandBuffers; 
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;

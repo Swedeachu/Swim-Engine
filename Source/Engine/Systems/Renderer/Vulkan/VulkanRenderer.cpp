@@ -172,8 +172,8 @@ namespace Engine
 		pipelineManager->CreateUIPipeline(
 			"Shaders\\VertexShaders\\vertex_ui.spv",
 			"Shaders\\FragmentShaders\\fragment_ui.spv",
-			descriptorManager->GetLayout(),
-			descriptorManager->GetBindlessLayout(),
+			layout,
+			bindlessLayout,
 			{ bindings.begin(), bindings.end() },
 			allAttribs,
 			sizeof(UIParams)
@@ -469,8 +469,8 @@ namespace Engine
 		);
 
 		// === Scene: Draw all indexed meshes ===
-		indexDraw->DrawIndexed(currentFrame, cmd);
-		indexDraw->DrawUI(currentFrame, cmd);
+		indexDraw->DrawIndexedWorldSpace(currentFrame, cmd);
+		indexDraw->DrawIndexedScreenSpaceUI(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 

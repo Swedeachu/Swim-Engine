@@ -318,11 +318,11 @@ namespace Engine
 	void VulkanPipelineManager::CreateUIPipeline(
 		const std::string& vertShaderPath,
 		const std::string& fragShaderPath,
-		VkDescriptorSetLayout uboLayout,
-		VkDescriptorSetLayout bindlessLayout,
+		VkDescriptorSetLayout uboLayout,        // Set 0: UBO + instance SSBO + UI SSBO
+		VkDescriptorSetLayout bindlessLayout,   // Set 1: bindless textures
 		const std::vector<VkVertexInputBindingDescription>& bindings,
 		const std::vector<VkVertexInputAttributeDescription>& attribs,
-		uint32_t pushConstantSize
+		uint32_t pushConstantSize                // Optional: set to 0 if unused
 	)
 	{
 		auto vertCode = ReadFile(vertShaderPath);
@@ -376,12 +376,13 @@ namespace Engine
 
 		VkPipelineDepthStencilStateCreateInfo depthStencil{};
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencil.depthTestEnable = VK_TRUE; // maybe should be false?
-		depthStencil.depthWriteEnable = VK_FALSE; // UI is overlaid
-		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+		depthStencil.depthTestEnable = VK_FALSE;        // UI should not be depth tested
+		depthStencil.depthWriteEnable = VK_FALSE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
 
 		VkPipelineColorBlendAttachmentState blendAttachment{};
-		blendAttachment.colorWriteMask = 0xF;
+		blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 		blendAttachment.blendEnable = VK_TRUE;
 		blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
 		blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -400,14 +401,17 @@ namespace Engine
 		pushConstantRange.offset = 0;
 		pushConstantRange.size = pushConstantSize;
 
-		std::array<VkDescriptorSetLayout, 2> layouts = { uboLayout, bindlessLayout };
+		std::array<VkDescriptorSetLayout, 2> layouts = {
+			uboLayout,
+			bindlessLayout
+		};
 
 		VkPipelineLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		layoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
 		layoutInfo.pSetLayouts = layouts.data();
-		layoutInfo.pushConstantRangeCount = 1;
-		layoutInfo.pPushConstantRanges = &pushConstantRange;
+		layoutInfo.pushConstantRangeCount = (pushConstantSize > 0) ? 1 : 0;
+		layoutInfo.pPushConstantRanges = (pushConstantSize > 0) ? &pushConstantRange : nullptr;
 
 		if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &uiPipelineLayout) != VK_SUCCESS)
 		{
@@ -430,7 +434,7 @@ namespace Engine
 		pipelineInfo.renderPass = renderPass;
 		pipelineInfo.subpass = 0;
 
-		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &uiPipeline) != VK_SUCCESS) // error here
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &uiPipeline) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create UI graphics pipeline");
 		}

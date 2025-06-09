@@ -36,6 +36,7 @@ namespace Game
 	private:
 
 		void SetColor(Engine::DebugColor color);
+		void SetStrokeColor(Engine::DebugColor color);
 
 	};
 

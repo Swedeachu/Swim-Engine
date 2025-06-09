@@ -27,10 +27,19 @@ namespace Engine
 	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
 	{
 		indirectCommandBuffers.resize(framesInFlight);
+		uiIndirectCommandBuffers.resize(framesInFlight);
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
 			indirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			uiIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>( 
 				device,
 				physicalDevice,
 				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
@@ -136,6 +145,7 @@ namespace Engine
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		cpuInstanceData.clear(); // was resize(0)
+		uiParamData.clear();
 		rangeMap.clear();
 
 		const std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
@@ -294,7 +304,7 @@ namespace Engine
 		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 	}
 
-	void VulkanIndexDraw::DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd)
+	void VulkanIndexDraw::DrawIndexedWorldSpace(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
@@ -326,10 +336,7 @@ namespace Engine
 		}
 	}
 
-	// Uses normal forward rendering draw calls for each UI object after binding the UI pipeline. 
-	// This is no where near as efficent as the 3D world space indirect indexed batch drawn objects, but its fine for what we are doing here since its just 2D UI.
-	// This still gets to leverage the mega mesh buffer and bindless textures.
-	void VulkanIndexDraw::DrawUI(uint32_t frameIndex, VkCommandBuffer cmd)
+	void VulkanIndexDraw::DrawIndexedScreenSpaceUI(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 
@@ -343,39 +350,27 @@ namespace Engine
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
 		const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = renderer->GetDescriptorManager();
 
-		// === Bind UI pipeline ===
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetUIPipeline());
+		const uint32_t baseUIInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
+		uint32_t uiInstanceCount = 0;
 
-		std::array<VkDescriptorSet, 2> descriptorSets = {
-			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
-			descriptorManager->GetBindlessSet()
-		};
-
-		vkCmdBindDescriptorSets(
-			cmd,
-			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipelineManager->GetUIPipelineLayout(),
-			0,
-			static_cast<uint32_t>(descriptorSets.size()),
-			descriptorSets.data(),
-			0,
-			nullptr
-		);
-
-		// === Append to the current instance buffer after scene instances ===
+		// === Gather screen-space UI instances ===
 		const size_t baseInstanceID = cpuInstanceData.size();
 
-		std::vector<GpuInstanceData> uiInstances;
+		std::vector<VkDrawIndexedIndirectCommand> drawCommands;
+		uiParamData.clear(); // clear previous frame's UI params
 
-		// Collect instances from all screen-space objects
 		registry.view<Transform, Material>().each(
-			[&](entt::entity entity, Transform& transform, Material& material)
+			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
+			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			{
+				return;
+			}
 
-			const std::shared_ptr<MaterialData>& mat = material.data;
+			const std::shared_ptr<MaterialData>& mat = matComp.data;
 			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
 
+			// === GpuInstanceData ===
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
 			instance.space = 1;
@@ -383,6 +378,9 @@ namespace Engine
 			instance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
 			instance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
 			instance.meshInfoIndex = mesh.GetMeshID();
+
+			// The vertex shader then sets this on output.instanceID, which the fragment shader then uses for UIParams ui = uiParamBuffer[uiParamIndex]
+			instance.materialIndex = uiInstanceCount;
 
 			if (registry.any_of<DecoratorUI>(entity))
 			{
@@ -396,47 +394,13 @@ namespace Engine
 				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
 			}
 
-			uiInstances.push_back(instance);
-		});
+			cpuInstanceData.push_back(instance);
 
-		if (uiInstances.empty()) { return; }
-
-		// Upload the UI instances to memory AFTER scene instances
-		{
-			void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer(); // already mapped on BeginFrame()
-			std::memcpy(
-				static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
-				uiInstances.data(),
-				uiInstances.size() * sizeof(GpuInstanceData)
-			);
-		}
-
-		// === Bind vertex + instance + index buffers ===
-		VkBuffer vertexBuffers[] = {
-			megaVertexBuffer->GetBuffer(),
-			instanceBuffer->GetBuffer(frameIndex)
-		};
-		VkDeviceSize offsets[] = { 0, 0 };
-
-		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-		// === Draw each screen-space UI object ===
-		uint32_t instanceID = static_cast<uint32_t>(baseInstanceID);
-
-		registry.view<Transform, Material>().each(
-			[&](entt::entity entity, Transform& transform, Material& matComp)
-		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
-
-			const std::shared_ptr<MaterialData>& mat = matComp.data;
-			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
-
+			// === UIParams ===
 			glm::vec2 screenScale = glm::vec2(
 				static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
 				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 			);
-
 			glm::vec2 pixelSize = transform.GetScale();
 			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
 
@@ -473,24 +437,83 @@ namespace Engine
 			ui.resolution = glm::vec2(windowWidth, windowHeight);
 			ui.quadSize = quadSizeInPixels;
 
-			vkCmdPushConstants(
-				cmd,
-				pipelineManager->GetUIPipelineLayout(),
-				VK_SHADER_STAGE_FRAGMENT_BIT,
-				0,
-				sizeof(UIParams),
-				&ui
-			);
+			uiParamData.push_back(ui);
 
-			vkCmdDrawIndexed(
-				cmd,
-				mesh.indexCount,
-				1,
-				static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint16_t)), 
-				static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex)),   
-				instanceID++
-			);
+			// === Draw command ===
+			VkDrawIndexedIndirectCommand cmd{};
+			cmd.indexCount = mesh.indexCount;
+			cmd.instanceCount = 1;
+			cmd.firstIndex = static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint16_t));
+			cmd.vertexOffset = static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
+			cmd.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1); // latest one
+			drawCommands.push_back(cmd);
+
+			uiInstanceCount++;
 		});
+
+		if (drawCommands.empty())
+		{
+			return;
+		}
+
+		// === Upload UIParams via descriptorManager ===
+		descriptorManager->UpdatePerFrameUIParams(
+			frameIndex,
+			uiParamData.data(),
+			uiParamData.size() * sizeof(UIParams)
+		);
+
+		// === Upload new instance data for UI section ===
+		void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer();
+		std::memcpy(
+			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
+			cpuInstanceData.data() + baseInstanceID,
+			uiParamData.size() * sizeof(GpuInstanceData)
+		);
+
+		// === Upload indirect draw commands ===
+		uiIndirectCommandBuffers[frameIndex]->CopyData(
+			drawCommands.data(),
+			drawCommands.size() * sizeof(VkDrawIndexedIndirectCommand)
+		);
+
+		// === Bind pipeline and descriptors ===
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetUIPipeline());
+
+		std::array<VkDescriptorSet, 2> descriptorSets = {
+			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
+			descriptorManager->GetBindlessSet()
+		};
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipelineManager->GetUIPipelineLayout(),
+			0,
+			static_cast<uint32_t>(descriptorSets.size()),
+			descriptorSets.data(),
+			0,
+			nullptr
+		);
+
+		// === Bind buffers ===
+		VkBuffer vertexBuffers[] = {
+			megaVertexBuffer->GetBuffer(),
+			instanceBuffer->GetBuffer(frameIndex)
+		};
+		VkDeviceSize offsets[] = { 0, 0 };
+
+		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+		// === Issue indirect draw ===
+		vkCmdDrawIndexedIndirect(
+			cmd,
+			uiIndirectCommandBuffers[frameIndex]->GetBuffer(),
+			0,
+			static_cast<uint32_t>(drawCommands.size()),
+			sizeof(VkDrawIndexedIndirectCommand)
+		);
 	}
 
 	void VulkanIndexDraw::DebugWireframeDraw()
@@ -602,6 +625,7 @@ namespace Engine
 		}
 
 		cpuInstanceData.clear();
+		uiParamData.clear();
 		culledVisibleData.clear();
 	}
 

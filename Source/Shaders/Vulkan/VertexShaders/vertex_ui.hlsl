@@ -45,6 +45,7 @@ struct VSOutput
   float2 uv : TEXCOORD0;
   uint   textureIndex : TEXCOORD1;
   float  hasTexture : TEXCOORD2;
+  uint instanceID : TEXCOORD3;
 };
 
 VSOutput main(VSInput input)
@@ -68,6 +69,7 @@ VSOutput main(VSInput input)
   output.uv = input.uv;
   output.textureIndex = instance.textureIndex;
   output.hasTexture = instance.hasTexture;
+  output.instanceID = instance.materialIndex;
 
   return output;
 }

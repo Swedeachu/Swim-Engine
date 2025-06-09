@@ -18,6 +18,12 @@ namespace Game
 		decorator.fillColor = toFour(Engine::GetDebugColorValue(color));
 	}
 
+	void MouseInputDemoBehavior::SetStrokeColor(Engine::DebugColor color)
+	{
+		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		decorator.strokeColor = toFour(Engine::GetDebugColorValue(color));
+	}
+
 	int MouseInputDemoBehavior::Awake()
 	{
 		std::cout << "MouseInputDemoBehavior: Awake\n";
@@ -53,15 +59,15 @@ namespace Game
 	void MouseInputDemoBehavior::OnMouseEnter()
 	{
 		std::cout << "MouseInputDemoBehavior: Mouse Entered\n";
-		if (!input->IsKeyDown(VK_LBUTTON))
-		{
-			SetColor(Engine::DebugColor::Yellow);
-		}
 	}
 
 	void MouseInputDemoBehavior::OnMouseHover()
 	{
 		// std::cout << "MouseInputDemoBehavior: Mouse Hover\n"; // commented out just to avoid spam 
+		if (!input->IsKeyDown(VK_LBUTTON))
+		{
+			SetColor(Engine::DebugColor::Yellow);
+		}
 	}
 
 	void MouseInputDemoBehavior::OnMouseExit()
@@ -91,6 +97,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnRightClickDown()
 	{
 		// std::cout << "MouseInputDemoBehavior: Right Button Down\n"; // commented out just to avoid spam 
+		SetStrokeColor(Engine::DebugColor::Gold);
 	}
 
 	void MouseInputDemoBehavior::OnLeftClickUp()
@@ -102,6 +109,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnRightClickUp()
 	{
 		std::cout << "MouseInputDemoBehavior: Right Button Up\n";
+		SetStrokeColor(Engine::DebugColor::Black);
 	}
 
 }

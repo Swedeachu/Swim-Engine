@@ -18,8 +18,8 @@ struct UIParams
   float2 quadSize;
 };
 
-[[vk::push_constant]]
-UIParams ui;
+[[vk::binding(2, 0)]]
+StructuredBuffer<UIParams> uiParamBuffer : register(t2, space0);
 
 struct FSInput
 {
@@ -27,6 +27,7 @@ struct FSInput
   float2 uv : TEXCOORD0;
   uint   textureIndex : TEXCOORD1;
   float  hasTexture : TEXCOORD2;
+  uint instanceID : TEXCOORD3; // Pass through from vertex shader
 };
 
 float RoundedRectSDF(float2 pos, float2 size, float radius)
@@ -43,6 +44,9 @@ float BoxSDF(float2 pos, float2 size)
 
 float4 main(FSInput input) : SV_Target
 {
+    uint uiParamIndex = input.instanceID; 
+    UIParams ui = uiParamBuffer[uiParamIndex];
+
     float2 uv = input.uv - 0.5f;
     float2 pos = uv * ui.quadSize;
     float2 halfSize = ui.quadSize * 0.5f;

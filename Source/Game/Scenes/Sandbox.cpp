@@ -490,6 +490,41 @@ namespace Game
 		);
 
 		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
+
+		// Create the red entity just to prove we can do multiple UI at a time like any entity
+		/*
+		auto redEntity = scene->CreateEntity();
+
+		// Position it below the white entity
+		// Since the whiteEntity is at Y = 900 with a height of 150,
+		// we move the redEntity down by a bit more than 150 to avoid overlap
+		glm::vec3 redEntityScreenPos = glm::vec3(300, 700, 0.0f);
+
+		// Give it a different size
+		glm::vec3 redEntitySize = glm::vec3(250.0f, 100.0f, 1.0f);
+
+		// Add transform component to position and size the red entity on screen
+		scene->AddComponent<Engine::Transform>(
+			redEntity,
+			Engine::Transform(redEntityScreenPos, redEntitySize, glm::quat(), Engine::TransformSpace::Screen)
+		);
+
+		// Use the same material as whiteEntity
+		scene->AddComponent<Engine::Material>(redEntity, Engine::Material(whiteMaterial));
+
+		// Decorator with red stroke instead of black
+		Engine::DecoratorUI redDecorator = Engine::DecoratorUI(
+			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
+			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
+			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
+			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
+			glm::vec2(4.0f),                      // padding
+			true, true, true, false               // rounded, stroke, fill, material texture
+		);
+
+		// Apply the decorator to the red entity
+		scene->AddComponent<Engine::DecoratorUI>(redEntity, redDecorator);
+		*/
 	}
 
 	int SandBox::Init()
