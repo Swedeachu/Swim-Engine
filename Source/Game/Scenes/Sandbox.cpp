@@ -466,7 +466,7 @@ namespace Game
 		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadVertices, quadIndices);
-		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad);
+		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
 
 		auto whiteEntity = scene->CreateEntity();
 
@@ -486,7 +486,7 @@ namespace Game
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y
 			glm::vec2(32.0f, 32.0f),              // corner radius X/Y
 			glm::vec2(4.0f),                      // padding
-			true, true, true                      // to enable: rounded, stroke, fill
+			true, true, true, true                // to enable: rounded, stroke, fill, material texture
 		);
 
 		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);

@@ -285,6 +285,8 @@ namespace Engine
 		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
 		loc_ui_resolution = glGetUniformLocation(uiDecoratorShader, "resolution");
 		loc_ui_quadSize = glGetUniformLocation(uiDecoratorShader, "quadSize");
+		loc_ui_useTexture = glGetUniformLocation(uiDecoratorShader, "useTexture");
+		loc_ui_albedoTex = glGetUniformLocation(uiDecoratorShader, "albedoTex");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -521,6 +523,20 @@ namespace Engine
 			// Draw decorator quad
 			const auto& mat = registry.get<Material>(entity).data;
 			const auto& mesh = *mat->mesh->meshBufferData;
+
+			// If we are using the material texture then bind it for the shader to use
+			if (deco.useMaterialTexture && mat->albedoMap.get() != nullptr)
+			{
+				glUniform1i(loc_ui_useTexture, 1); // enable it in shader
+				GLuint texID = mat->albedoMap->GetTextureID();
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, texID);
+				glUniform1i(loc_ui_albedoTex, 0); 
+			}
+			else
+			{
+				glUniform1i(loc_ui_useTexture, 0); // disabled in shader
+			}
 
 			glBindVertexArray(mesh.GetGLVAO());
 			glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_SHORT, nullptr);

@@ -26,6 +26,7 @@ namespace Engine
 		bool roundCorners = false;
 		bool enableStroke = false;
 		bool enableFill = true;
+		bool useMaterialTexture = false; // if enabled, will use the material texture instead of fill color
 
 		// Convenient initialization
 		DecoratorUI(
@@ -36,7 +37,8 @@ namespace Engine
 			glm::vec2 pad = glm::vec2(0.0f),
 			bool rounded = false,
 			bool strokeEnabled = false,
-			bool fillEnabled = true
+			bool fillEnabled = true,
+			bool useTexture = false
 		)
 			: fillColor(fill),
 			strokeColor(stroke),
@@ -45,7 +47,8 @@ namespace Engine
 			padding(pad),
 			roundCorners(rounded),
 			enableStroke(strokeEnabled),
-			enableFill(fillEnabled)
+			enableFill(fillEnabled),
+			useMaterialTexture(useTexture)
 		{}
 
 		void SetColors(glm::vec4 fill, glm::vec4 stroke = glm::vec4(0.0f))

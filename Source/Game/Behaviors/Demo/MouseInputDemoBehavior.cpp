@@ -73,6 +73,8 @@ namespace Game
 	void MouseInputDemoBehavior::OnLeftClicked()
 	{
 		std::cout << "MouseInputDemoBehavior: Left Clicked\n";
+		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		decorator.useMaterialTexture = !decorator.useMaterialTexture;
 	}
 
 	void MouseInputDemoBehavior::OnRightClicked()
