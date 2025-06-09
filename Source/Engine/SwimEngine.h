@@ -24,7 +24,7 @@ namespace Engine
 		// The render context we are using, this should be changed before compliation before building for the target platform.
 		// In a fancier world this value would be auto changed via build script steps when doing a batch build for all platforms.
 		// This is constexpr so branching logic based on API specific code is instant (Mesh, Texture, etc). 
-		static constexpr RenderContext CONTEXT = RenderContext::OpenGL;
+		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
 		static constexpr bool useShaderToyIfOpenGL = false; 
 

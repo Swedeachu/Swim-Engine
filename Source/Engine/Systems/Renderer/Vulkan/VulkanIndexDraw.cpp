@@ -2,6 +2,7 @@
 #include "VulkanIndexDraw.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/DecoratorUI.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "VulkanRenderer.h"
@@ -152,15 +153,11 @@ namespace Engine
 		if (cullMode == CullMode::CPU && frustum && useQueriedFrustumSceneBVH)
 		{
 			GatherCandidatesBVH(*scene, *frustum);
-
-			// We also need to render screen space entities, as BVH only accounts for world space entities since it is for culling.
-			// We don't cull screen space entities, just draw them regularly with the view method.
-			GatherCandidatesView(registry, TransformSpace::Screen, frustum);
 		}
 		else
 		{
-			// Render everything in world and screen space with the registry view
-			GatherCandidatesView(registry, TransformSpace::Ambiguous, frustum);
+			// Render everything in world space with regular frustum culling (this is still CPU culling just not using the BVH)
+			GatherCandidatesView(registry, TransformSpace::World, frustum);
 		}
 
 	#ifdef _DEBUG
@@ -247,30 +244,17 @@ namespace Engine
 
 		GpuInstanceData instance{};
 
-		// --- Screen space transform scaling ---
+		// --- Screen space transform flag ---
 		if (transform.GetTransformSpace() == TransformSpace::Screen)
 		{
-			/*
-			std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
-			unsigned int windowWidth = engine->GetWindowWidth();
-			unsigned int windowHeight = engine->GetWindowHeight();
-
-			float scaleX = static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth;
-			float scaleY = static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight;
-
-			// Converts geometry from virtual units -> pixels
-			glm::mat4 resolutionScale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, 1.0f));
-			*/
-
-			instance.model = transform.GetModelMatrix(); //* resolutionScale;
 			instance.space = 1u;
 		}
 		else // otherwise regular world space
 		{
-			instance.model = transform.GetModelMatrix();
 			instance.space = 0u;
 		}
 
+		instance.model = transform.GetModelMatrix();
 		instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
 		instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
@@ -340,6 +324,173 @@ namespace Engine
 				sizeof(VkDrawIndexedIndirectCommand)
 			);
 		}
+	}
+
+	// Uses normal forward rendering draw calls for each UI object after binding the UI pipeline. 
+	// This is no where near as efficent as the 3D world space indirect indexed batch drawn objects, but its fine for what we are doing here since its just 2D UI.
+	// This still gets to leverage the mega mesh buffer and bindless textures.
+	void VulkanIndexDraw::DrawUI(uint32_t frameIndex, VkCommandBuffer cmd)
+	{
+		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
+
+		unsigned int windowWidth = engine->GetWindowWidth();
+		unsigned int windowHeight = engine->GetWindowHeight();
+
+		const std::shared_ptr<Scene>& scene = engine->GetSceneSystem()->GetActiveScene();
+		entt::registry& registry = scene->GetRegistry();
+
+		std::shared_ptr<VulkanRenderer> renderer = engine->GetVulkanRenderer();
+		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
+		const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = renderer->GetDescriptorManager();
+
+		// === Bind UI pipeline ===
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetUIPipeline());
+
+		std::array<VkDescriptorSet, 2> descriptorSets = {
+			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
+			descriptorManager->GetBindlessSet()
+		};
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipelineManager->GetUIPipelineLayout(),
+			0,
+			static_cast<uint32_t>(descriptorSets.size()),
+			descriptorSets.data(),
+			0,
+			nullptr
+		);
+
+		// === Append to the current instance buffer after scene instances ===
+		const size_t baseInstanceID = cpuInstanceData.size();
+
+		std::vector<GpuInstanceData> uiInstances;
+
+		// Collect instances from all screen-space objects
+		registry.view<Transform, Material>().each(
+			[&](entt::entity entity, Transform& transform, Material& material)
+		{
+			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
+
+			const std::shared_ptr<MaterialData>& mat = material.data;
+			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+
+			GpuInstanceData instance{};
+			instance.model = transform.GetModelMatrix();
+			instance.space = 1;
+			instance.indexCount = mesh.indexCount;
+			instance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
+			instance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
+			instance.meshInfoIndex = mesh.GetMeshID();
+
+			if (registry.any_of<DecoratorUI>(entity))
+			{
+				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				instance.hasTexture = (deco.useMaterialTexture && mat->albedoMap) ? 1.0f : 0.0f;
+				instance.textureIndex = (deco.useMaterialTexture && mat->albedoMap) ? mat->albedoMap->GetBindlessIndex() : 0;
+			}
+			else
+			{
+				instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
+			}
+
+			uiInstances.push_back(instance);
+		});
+
+		if (uiInstances.empty()) { return; }
+
+		// Upload the UI instances to memory AFTER scene instances
+		{
+			void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer(); // already mapped on BeginFrame()
+			std::memcpy(
+				static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
+				uiInstances.data(),
+				uiInstances.size() * sizeof(GpuInstanceData)
+			);
+		}
+
+		// === Bind vertex + instance + index buffers ===
+		VkBuffer vertexBuffers[] = {
+			megaVertexBuffer->GetBuffer(),
+			instanceBuffer->GetBuffer(frameIndex)
+		};
+		VkDeviceSize offsets[] = { 0, 0 };
+
+		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+		// === Draw each screen-space UI object ===
+		uint32_t instanceID = static_cast<uint32_t>(baseInstanceID);
+
+		registry.view<Transform, Material>().each(
+			[&](entt::entity entity, Transform& transform, Material& matComp)
+		{
+			if (transform.GetTransformSpace() != TransformSpace::Screen) { return; }
+
+			const std::shared_ptr<MaterialData>& mat = matComp.data;
+			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+
+			glm::vec2 screenScale = glm::vec2(
+				static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
+			);
+
+			glm::vec2 pixelSize = transform.GetScale();
+			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
+
+			UIParams ui{};
+
+			if (registry.any_of<DecoratorUI>(entity))
+			{
+				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+
+				glm::vec2 radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
+				glm::vec2 strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
+
+				ui.fillColor = deco.fillColor;
+				ui.strokeColor = deco.strokeColor;
+				ui.strokeWidth = strokePx;
+				ui.cornerRadius = radiusPx;
+				ui.enableFill = deco.enableFill ? 1 : 0;
+				ui.enableStroke = deco.enableStroke ? 1 : 0;
+				ui.roundCorners = deco.roundCorners ? 1 : 0;
+				ui.useTexture = (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0;
+			}
+			else
+			{
+				ui.fillColor = glm::vec4(1.0f);
+				ui.strokeColor = glm::vec4(0.0f);
+				ui.strokeWidth = glm::vec2(0.0f);
+				ui.cornerRadius = glm::vec2(0.0f);
+				ui.enableFill = 1;
+				ui.enableStroke = 0;
+				ui.roundCorners = 0;
+				ui.useTexture = mat->albedoMap ? 1 : 0;
+			}
+
+			ui.resolution = glm::vec2(windowWidth, windowHeight);
+			ui.quadSize = quadSizeInPixels;
+
+			vkCmdPushConstants(
+				cmd,
+				pipelineManager->GetUIPipelineLayout(),
+				VK_SHADER_STAGE_FRAGMENT_BIT,
+				0,
+				sizeof(UIParams),
+				&ui
+			);
+
+			vkCmdDrawIndexed(
+				cmd,
+				mesh.indexCount,
+				1,
+				static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint16_t)), 
+				static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex)),   
+				instanceID++
+			);
+		});
 	}
 
 	void VulkanIndexDraw::DebugWireframeDraw()

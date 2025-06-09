@@ -1,5 +1,8 @@
+[[vk::binding(0, 1)]]
 SamplerState texSampler : register(s0, space1);
-Texture2D    textures[] : register(t1, space1); // Bindless texture array
+
+[[vk::binding(1, 1)]]
+Texture2D textures[] : register(t1, space1);
 
 struct FSInput
 {

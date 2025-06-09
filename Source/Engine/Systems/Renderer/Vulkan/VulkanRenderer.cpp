@@ -169,6 +169,16 @@ namespace Engine
 			sizeof(GpuInstanceData)
 		);
 
+		pipelineManager->CreateUIPipeline(
+			"Shaders\\VertexShaders\\vertex_ui.spv",
+			"Shaders\\FragmentShaders\\fragment_ui.spv",
+			descriptorManager->GetLayout(),
+			descriptorManager->GetBindlessLayout(),
+			{ bindings.begin(), bindings.end() },
+			allAttribs,
+			sizeof(UIParams)
+		);
+
 		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
 		commandManager = std::make_unique<VulkanCommandManager>(
@@ -460,6 +470,7 @@ namespace Engine
 
 		// === Scene: Draw all indexed meshes ===
 		indexDraw->DrawIndexed(currentFrame, cmd);
+		indexDraw->DrawUI(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 

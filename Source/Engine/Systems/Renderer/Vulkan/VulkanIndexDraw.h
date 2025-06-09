@@ -34,6 +34,8 @@ namespace Engine
 
 		void DrawIndexed(uint32_t frameIndex, VkCommandBuffer cmd);
 
+		void DrawUI(uint32_t frameIndex, VkCommandBuffer cmd);
+
 		void CleanUp();
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }

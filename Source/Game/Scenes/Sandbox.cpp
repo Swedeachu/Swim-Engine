@@ -18,7 +18,7 @@
 namespace Game
 {
 
-	constexpr static bool doStressTest = false;
+	constexpr static bool doStressTest = true;
 	constexpr static bool doUI = true;
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;

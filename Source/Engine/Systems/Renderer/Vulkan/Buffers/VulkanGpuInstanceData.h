@@ -23,6 +23,20 @@ namespace Engine
     VkDeviceSize indexOffsetInMegaBuffer;  // 8 bytes
   };
 
+	struct alignas(16) UIParams
+	{
+		glm::vec4 fillColor;
+		glm::vec4 strokeColor;
+		glm::vec2 strokeWidth;
+		glm::vec2 cornerRadius;
+		int enableFill;
+		int enableStroke;
+		int roundCorners;
+		int useTexture;
+		glm::vec2 resolution;
+		glm::vec2 quadSize;
+	};
+
 	struct InstanceMeta
 	{
 		uint32_t instanceCount;
