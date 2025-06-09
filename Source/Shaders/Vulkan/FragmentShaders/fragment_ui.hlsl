@@ -23,11 +23,12 @@ StructuredBuffer<UIParams> uiParamBuffer : register(t2, space0);
 
 struct FSInput
 {
-  float4 position : SV_Position;
-  float2 uv : TEXCOORD0;
-  uint   textureIndex : TEXCOORD1;
-  float  hasTexture : TEXCOORD2;
-  uint instanceID : TEXCOORD3; // Pass through from vertex shader
+  float4 position : SV_Position;                 
+  float2 uv : TEXCOORD0;                        
+  nointerpolation uint textureIndex : TEXCOORD1; 
+  float hasTexture : TEXCOORD2;                  
+  nointerpolation uint instanceID : TEXCOORD3;   // for indexing into the ui params buffer
+  float3 color : TEXCOORD4;                     
 };
 
 float RoundedRectSDF(float2 pos, float2 size, float radius)
@@ -44,7 +45,7 @@ float BoxSDF(float2 pos, float2 size)
 
 float4 main(FSInput input) : SV_Target
 {
-    uint uiParamIndex = input.instanceID; 
+    uint uiParamIndex = input.instanceID;
     UIParams ui = uiParamBuffer[uiParamIndex];
 
     float2 uv = input.uv - 0.5f;
@@ -74,7 +75,22 @@ float4 main(FSInput input) : SV_Target
         texSample = textures[input.textureIndex].Sample(texSampler, input.uv);
     }
 
-    float4 fillSrc = (ui.useTexture != 0 && input.hasTexture > 0.5f) ? texSample : ui.fillColor;
+    // Use vertex color fallback if fillColor is -1 (all channels)
+    bool useVertexColor = all(ui.fillColor.rgb < 0.0f);
+    float4 fillSrc = float4(1.0f, 1.0f, 1.0f, 1.0f);
+
+    if (ui.useTexture != 0 && input.hasTexture > 0.5f)
+    {
+        fillSrc = texSample;
+    }
+    else if (useVertexColor)
+    {
+        fillSrc = float4(input.color, 1.0f);
+    }
+    else
+    {
+        fillSrc = ui.fillColor;
+    }
 
     float3 finalColor = lerp(fillSrc.rgb, ui.strokeColor.rgb, strokeAlpha);
     float finalAlpha = lerp(fillSrc.a * fillAlpha, ui.strokeColor.a, strokeAlpha);

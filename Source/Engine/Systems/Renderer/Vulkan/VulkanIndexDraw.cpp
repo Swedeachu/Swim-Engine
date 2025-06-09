@@ -424,7 +424,10 @@ namespace Engine
 			}
 			else
 			{
-				ui.fillColor = glm::vec4(1.0f);
+				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of UI Decorator.
+				// So we mark fill color as -1.0 as a flag to the shader to use mesh color sample instead.
+				ui.fillColor = glm::vec4(-1.0f);
+				// Everything else is zero'd out or default
 				ui.strokeColor = glm::vec4(0.0f);
 				ui.strokeWidth = glm::vec2(0.0f);
 				ui.cornerRadius = glm::vec2(0.0f);

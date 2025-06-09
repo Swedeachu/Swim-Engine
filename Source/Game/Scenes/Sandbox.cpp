@@ -15,10 +15,14 @@
 #include "Game\Behaviors\Demo\Spin.h"
 #include "Game\Behaviors\Demo\MouseInputDemoBehavior.h"
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 namespace Game
 {
 
-	constexpr static bool doStressTest = true;
+	constexpr static bool doStressTest = false;
 	constexpr static bool doUI = true;
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
@@ -268,6 +272,52 @@ namespace Game
 		return { vertices, indices };
 	}
 
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> GenerateCircleMesh(
+		float radius = 0.5f, 
+		uint32_t segmentCount = 64,
+		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
+	)
+	{
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint16_t> indices;
+
+		// Add center vertex of triangle fan
+		vertices.push_back({
+				{0.0f, 0.0f, 0.0f}, // Center position
+				color,              // Uniform color
+				{0.5f, 0.5f}        // Center UV
+			});
+
+		// Add outer circle vertices
+		for (uint32_t i = 0; i <= segmentCount; ++i)
+		{
+			float angle = (float)i / (float)segmentCount * 2.0f * M_PI;
+
+			float x = radius * cosf(angle);
+			float y = radius * sinf(angle);
+
+			// UV mapped from [-radius, radius] => [0,1]
+			float u = 0.5f + (x / (radius * 2.0f));
+			float v = 0.5f - (y / (radius * 2.0f));  // Flip Y for typical UVs
+
+			vertices.push_back({
+					{x, y, 0.0f},
+					color,
+					{u, v}
+				});
+		}
+
+		// Generate indices for triangle fan
+		for (uint16_t i = 1; i <= segmentCount; ++i)
+		{
+			indices.push_back(0);        // Center
+			indices.push_back(i);        // Current vertex
+			indices.push_back(i + 1);    // Next vertex (wraps around)
+		}
+
+		return { vertices, indices };
+	}
+
 	std::shared_ptr<Engine::MaterialData> RegisterRandomMaterial(
 		const std::shared_ptr<Engine::Mesh>& mesh,
 		int index)
@@ -491,13 +541,15 @@ namespace Game
 
 		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
 
+		// Below here is a bunch of bools for messing with making a second UI entity to test stuff out with
+
+		constexpr bool makeSecondEntity = true;
+		if constexpr (!makeSecondEntity) return;
+
 		// Create the red entity just to prove we can do multiple UI at a time like any entity
-		/*
 		auto redEntity = scene->CreateEntity();
 
 		// Position it below the white entity
-		// Since the whiteEntity is at Y = 900 with a height of 150,
-		// we move the redEntity down by a bit more than 150 to avoid overlap
 		glm::vec3 redEntityScreenPos = glm::vec3(300, 700, 0.0f);
 
 		// Give it a different size
@@ -509,8 +561,39 @@ namespace Game
 			Engine::Transform(redEntityScreenPos, redEntitySize, glm::quat(), Engine::TransformSpace::Screen)
 		);
 
-		// Use the same material as whiteEntity
-		scene->AddComponent<Engine::Material>(redEntity, Engine::Material(whiteMaterial));
+		constexpr bool useDifferentMaterial = true;
+
+		if constexpr (useDifferentMaterial)
+		{
+			std::shared_ptr<Engine::Mesh> secondMesh = nullptr;
+			constexpr bool isCircle = false;
+			if constexpr (isCircle)
+			{
+				auto [circleVertices, circleIndices] = GenerateCircleMesh(1.0f, 128, { 1.0f, 0.0f, 0.0f });
+				secondMesh = meshPool.RegisterMesh("SecondTestMeshUI", circleVertices, circleIndices);
+			}
+			else
+			{
+				std::vector<Engine::Vertex> redQuadVertices = {
+					//  position          color               uv
+					{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // bottom-left  => uv(0,1)
+					{{ 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},  // bottom-right => uv(1,1)
+					{{ 0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},  // top-right    => uv(1,0)
+					{{-0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
+				};
+				secondMesh = meshPool.RegisterMesh("SecondTestMeshUI", redQuadVertices, quadIndices);
+			}
+
+			constexpr bool useTex = true;
+			auto tex = (useTex) ? texturePool.GetTexture2DLazy("alien") : nullptr;
+			auto secondMaterial = materialPool.RegisterMaterialData("SecondMaterial", secondMesh, tex);
+			scene->AddComponent<Engine::Material>(redEntity, Engine::Material(secondMaterial));
+		}
+		else
+		{
+			// Use the same material as whiteEntity
+			scene->AddComponent<Engine::Material>(redEntity, Engine::Material(whiteMaterial));
+		}
 
 		// Decorator with red stroke instead of black
 		Engine::DecoratorUI redDecorator = Engine::DecoratorUI(
@@ -519,12 +602,11 @@ namespace Game
 			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
-			true, true, true, false               // rounded, stroke, fill, material texture
+			true, true, true, true                // rounded, stroke, fill, material texture
 		);
 
 		// Apply the decorator to the red entity
 		scene->AddComponent<Engine::DecoratorUI>(redEntity, redDecorator);
-		*/
 	}
 
 	int SandBox::Init()
