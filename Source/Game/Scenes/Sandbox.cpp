@@ -597,13 +597,15 @@ namespace Game
 
 		// Decorator with red stroke instead of black
 		Engine::DecoratorUI redDecorator = Engine::DecoratorUI(
-			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
-			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
+			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill
+			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke
 			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
-			true, true, true, true                // rounded, stroke, fill, material texture
+			true, true, true, false               // rounded, stroke, fill, material texture
 		);
+
+		redDecorator.SetUseMeshMaterialColor(true);
 
 		// Apply the decorator to the red entity
 		scene->AddComponent<Engine::DecoratorUI>(redEntity, redDecorator);
@@ -659,11 +661,22 @@ namespace Game
 		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
 		Engine::EntityFactory& entityFactory = Engine::EntityFactory::GetInstance();
 
-		// Make a static quad entity this way (these methods queue everything for creation to spawn next frame update)
-		entityFactory.CreateWithTransformAndMaterial(
-			Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
-			Engine::Material(materialData2)
+		// Make a static quad entity in world space but with UI decorator on it, essentially a bill board (TODO: billboard behavior to always face the camera via rotation)
+		auto billboard = CreateEntity();
+		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+		AddComponent<Engine::Material>(billboard, materialData2);
+
+		/* World space UI just doesn't really work since the shader doesn't do stroke properly and it doesn't get rendered at the proper stage where the depth test is active.
+		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
+			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
+			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
+			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
+			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
+			glm::vec2(4.0f),                      // padding
+			true, true, true, true                // rounded, stroke, fill, material texture
 		);
+		AddComponent<Engine::DecoratorUI>(billboard, billboardDecorator);
+		//*/
 
 		// Make sphere entity
 		entityFactory.CreateWithTransformAndMaterial(

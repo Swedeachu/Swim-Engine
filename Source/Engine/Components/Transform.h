@@ -11,8 +11,8 @@ namespace Engine
 
 	enum class TransformSpace
 	{
-		World,
-		Screen,
+		World, // 0
+		Screen, // 1
 		Ambiguous // for very special cases, this is intended for higher level geometry or for passing to transform related functions that need spacial filters.
 	};
 

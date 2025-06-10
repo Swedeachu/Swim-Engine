@@ -7,7 +7,7 @@ obj/glb loading + mesh optimizer
 <br>
 Scene editor
 <br>
-Behavior components with EnTT called in line with the scene system 
+Behavior components archetypes and prefabs for scene serialization
 <br>
 Hook up PhysX/Jolt
 <br>
@@ -15,7 +15,9 @@ Compute culling
 <br>
 Imgui Integration
 <br>
-2D UI layer that has screen space transforms (always rendered on the angeled plane the camera faces)
+MSDF atlas text and font rendering (UI Decorators + text component)
+<br>
+Recursive propagating parent child hierarchy for UI entities.
 
 # SUPER TODO ONCE MAIN TODO IS DONE
 PBR 

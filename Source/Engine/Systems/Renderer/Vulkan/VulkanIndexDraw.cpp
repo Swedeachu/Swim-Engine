@@ -39,7 +39,7 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			uiIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>( 
+			uiIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
 				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
@@ -211,13 +211,15 @@ namespace Engine
 	}
 
 	// Fires off the frustum query in the scene's bounding volume hierarchy using immediate callback
+	// This only does world space entities as the BVH only takes world space objects into account.
 	void VulkanIndexDraw::GatherCandidatesBVH(Scene& scene, const Frustum& frustum)
 	{
 		entt::registry& registry = scene.GetRegistry();
 
 		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
+			if (!registry.any_of<DecoratorUI>(entity)) // we don't want to do decorators in this pass
+				AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
 		});
 	}
 
@@ -254,16 +256,7 @@ namespace Engine
 
 		GpuInstanceData instance{};
 
-		// --- Screen space transform flag ---
-		if (transform.GetTransformSpace() == TransformSpace::Screen)
-		{
-			instance.space = 1u;
-		}
-		else // otherwise regular world space
-		{
-			instance.space = 0u;
-		}
-
+		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
 		instance.model = transform.GetModelMatrix();
 		instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
 		instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
@@ -304,7 +297,8 @@ namespace Engine
 		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 	}
 
-	void VulkanIndexDraw::DrawIndexedWorldSpace(uint32_t frameIndex, VkCommandBuffer cmd)
+	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
+	void VulkanIndexDraw::DrawIndexedWorld(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
@@ -336,7 +330,9 @@ namespace Engine
 		}
 	}
 
-	void VulkanIndexDraw::DrawIndexedScreenSpaceUI(uint32_t frameIndex, VkCommandBuffer cmd)
+	// Draws everything that is in screen space or has a decorator UI on it, meaning this can render UI billboards in world space (assuming the shader operates correctly on the mesh in world space)
+	// Currently things do not work correctly for drawing DecoratorUI in world space, works fine in screen space though.
+	void VulkanIndexDraw::DrawIndexedScreenAndDecoratorUI(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 
@@ -362,7 +358,15 @@ namespace Engine
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			bool hasDecorator = registry.any_of<DecoratorUI>(entity); // hopefully not too expensive
+			TransformSpace space = transform.GetTransformSpace();
+
+			// We can render UI in world space if it has a decorator on it.
+			// Otherwise, this object will just have already been rendered.
+			// TODO: currently in world space our shader doesn't draw stroke or curve properly at all even when it is a quad.
+			// Other problem is UI render pipeline is not depth tested so world space UI billboards screw things up.
+			// In screen space everything works fine.
+			if (space != TransformSpace::Screen && !hasDecorator)
 			{
 				return;
 			}
@@ -373,7 +377,7 @@ namespace Engine
 			// === GpuInstanceData ===
 			GpuInstanceData instance{};
 			instance.model = transform.GetModelMatrix();
-			instance.space = 1;
+			instance.space = static_cast<uint32_t>(space);
 			instance.indexCount = mesh.indexCount;
 			instance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
 			instance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
@@ -381,20 +385,6 @@ namespace Engine
 
 			// The vertex shader then sets this on output.instanceID, which the fragment shader then uses for UIParams ui = uiParamBuffer[uiParamIndex]
 			instance.materialIndex = uiInstanceCount;
-
-			if (registry.any_of<DecoratorUI>(entity))
-			{
-				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
-				instance.hasTexture = (deco.useMaterialTexture && mat->albedoMap) ? 1.0f : 0.0f;
-				instance.textureIndex = (deco.useMaterialTexture && mat->albedoMap) ? mat->albedoMap->GetBindlessIndex() : 0;
-			}
-			else
-			{
-				instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
-			}
-
-			cpuInstanceData.push_back(instance);
 
 			// === UIParams ===
 			glm::vec2 screenScale = glm::vec2(
@@ -406,9 +396,15 @@ namespace Engine
 
 			UIParams ui{};
 
-			if (registry.any_of<DecoratorUI>(entity))
+			if (hasDecorator)
 			{
-				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				deco.Resync();
+
+				bool useTex = deco.useMaterialTexture && mat->albedoMap;
+
+				instance.hasTexture = useTex ? 1.0f : 0.0f;
+				instance.textureIndex = useTex ? mat->albedoMap->GetBindlessIndex() : 0;
 
 				glm::vec2 radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
 				glm::vec2 strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
@@ -420,10 +416,14 @@ namespace Engine
 				ui.enableFill = deco.enableFill ? 1 : 0;
 				ui.enableStroke = deco.enableStroke ? 1 : 0;
 				ui.roundCorners = deco.roundCorners ? 1 : 0;
-				ui.useTexture = (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0;
+				ui.useTexture = useTex ? 1 : 0;
 			}
 			else
 			{
+				// If we have no decorator to determine special texture handling, then set it the regular way.
+				instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
+
 				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of UI Decorator.
 				// So we mark fill color as -1.0 as a flag to the shader to use mesh color sample instead.
 				ui.fillColor = glm::vec4(-1.0f);
@@ -440,7 +440,9 @@ namespace Engine
 			ui.resolution = glm::vec2(windowWidth, windowHeight);
 			ui.quadSize = quadSizeInPixels;
 
+			// Finally add
 			uiParamData.push_back(ui);
+			cpuInstanceData.push_back(instance);
 
 			// === Draw command ===
 			VkDrawIndexedIndirectCommand cmd{};

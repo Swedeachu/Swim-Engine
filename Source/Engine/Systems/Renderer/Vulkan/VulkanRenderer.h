@@ -126,6 +126,8 @@ namespace Engine
 		uint32_t windowWidth;
 		uint32_t windowHeight;
 
+		CameraUBO ubo{};
+
 		std::unique_ptr<VulkanDeviceManager> deviceManager;
 		std::unique_ptr<VulkanSwapChain> swapChainManager;
 		std::unique_ptr<VulkanPipelineManager> pipelineManager;

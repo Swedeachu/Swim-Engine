@@ -374,11 +374,13 @@ namespace Engine
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = msaaSamples;
 
+		// Normally you would not want UI to be depth tested, but we have it as true since we have billboard UI in world space
+		// This could also maybe make layering a bit easier for us, despite screen space being an orthographic projection in something like [-1,1]
 		VkPipelineDepthStencilStateCreateInfo depthStencil{};
 		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencil.depthTestEnable = VK_FALSE;        // UI should not be depth tested
-		depthStencil.depthWriteEnable = VK_FALSE;
-		depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+		depthStencil.depthTestEnable = VK_TRUE;        
+		depthStencil.depthWriteEnable = VK_TRUE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; // was always when depth test was set to false
 
 		VkPipelineColorBlendAttachmentState blendAttachment{};
 		blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |

@@ -32,9 +32,9 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
-		void DrawIndexedWorldSpace(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedWorld(uint32_t frameIndex, VkCommandBuffer cmd);
 
-		void DrawIndexedScreenSpaceUI(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedScreenAndDecoratorUI(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void CleanUp();
 

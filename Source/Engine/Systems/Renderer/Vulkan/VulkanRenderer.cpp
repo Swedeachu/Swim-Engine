@@ -366,10 +366,10 @@ namespace Engine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
+	static bool hasUploadedOrtho = false;
+
 	void VulkanRenderer::UpdateUniformBuffer()
 	{
-		CameraUBO ubo{};
-
 		ubo.view = cameraSystem->GetViewMatrix();
 		ubo.proj = cameraSystem->GetProjectionMatrix();  // already has the Vulkan Y-flip
 
@@ -379,20 +379,24 @@ namespace Engine
 		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
 		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
 
-		ubo.camParams = glm::vec4(
-			tanHalfFovX,
-			tanHalfFovY,
-			camera.GetNearClip(),
-			camera.GetFarClip()
-		);
+		ubo.camParams.x = tanHalfFovX;
+		ubo.camParams.y = tanHalfFovY;
+		ubo.camParams.z = camera.GetNearClip();
+		ubo.camParams.w = camera.GetFarClip();
 
-		ubo.screenView = glm::mat4(1.0f); // Identity
+		// Since this projection is always the exact same values, we only have to do it once 
+		if (!hasUploadedOrtho)
+		{
+			ubo.screenView = glm::mat4(1.0f); // Identity
 
-		ubo.screenProj = glm::ortho(
-			0.0f, VirtualCanvasWidth,
-			VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
-			-1.0f, 1.0f
-		);
+			ubo.screenProj = glm::ortho(
+				0.0f, VirtualCanvasWidth,
+				VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
+				-1.0f, 1.0f
+			);
+
+			hasUploadedOrtho = true;
+		}
 
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
@@ -469,8 +473,8 @@ namespace Engine
 		);
 
 		// === Scene: Draw all indexed meshes ===
-		indexDraw->DrawIndexedWorldSpace(currentFrame, cmd);
-		indexDraw->DrawIndexedScreenSpaceUI(currentFrame, cmd);
+		indexDraw->DrawIndexedWorld(currentFrame, cmd);
+		indexDraw->DrawIndexedScreenAndDecoratorUI(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 
