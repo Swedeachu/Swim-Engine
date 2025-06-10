@@ -54,16 +54,15 @@ float4 main(FSInput input) : SV_Target
 
     float radius = (ui.roundCorners != 0) ? max(ui.cornerRadius.x, ui.cornerRadius.y) : 0.0f;
     float maxRadius = min(halfSize.x, halfSize.y);
-
     radius = min(radius, maxRadius);
 
     float2 innerHalfSize = max(halfSize - ui.strokeWidth, float2(0.0f, 0.0f));
-    float innerRadius = max(radius - min(ui.strokeWidth.x, ui.strokeWidth.y), 0.0f);
+    float innerRadius = max(radius - max(ui.strokeWidth.x, ui.strokeWidth.y), 0.0f);
 
-    float distOuter = (radius > 0.0f) ? RoundedRectSDF(pos, halfSize, radius) : BoxSDF(pos, halfSize);
+    float distOuter = (radius > 0.0f) ? RoundedRectSDF(pos, halfSize,      radius) : BoxSDF(pos, halfSize);
     float distInner = (radius > 0.0f) ? RoundedRectSDF(pos, innerHalfSize, innerRadius) : BoxSDF(pos, innerHalfSize);
 
-    float aaWidth = 0.5f;
+    float aaWidth = 1.0f;
     float outerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distOuter);
     float innerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distInner);
 
@@ -79,6 +78,7 @@ float4 main(FSInput input) : SV_Target
     // Use vertex color fallback if fillColor is -1 (all channels)
     bool useVertexColor = all(ui.fillColor.rgb < 0.0f);
     float4 fillSrc = float4(1.0f, 1.0f, 1.0f, 1.0f);
+
     if (ui.useTexture != 0 && input.hasTexture > 0.5f)
     {
         fillSrc = texSample;
@@ -92,8 +92,14 @@ float4 main(FSInput input) : SV_Target
         fillSrc = ui.fillColor;
     }
 
-    float3 finalColor = lerp(fillSrc.rgb, ui.strokeColor.rgb, strokeAlpha);
-    float finalAlpha = lerp(fillSrc.a * fillAlpha, ui.strokeColor.a, strokeAlpha);
+    // Remove the 1-pixel transparent seam between fill & stroke
+    float combinedAlpha = saturate(fillAlpha + strokeAlpha);
 
-    return float4(finalColor, finalAlpha);
+    // Pre-multiply each colour by its own coverage, then renormalise so we stay in un-premultiplied (straight-alpha) space
+    float3 combinedColor = (combinedAlpha > 0.0f)
+        ? (fillSrc.rgb * fillAlpha +
+           ui.strokeColor.rgb * strokeAlpha) / combinedAlpha
+        : float3(0.0f, 0.0f, 0.0f);
+
+    return float4(combinedColor, combinedAlpha);
 }
