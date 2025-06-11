@@ -330,8 +330,7 @@ namespace Engine
 		}
 	}
 
-	// Draws everything that is in screen space or has a decorator UI on it, meaning this can render UI billboards in world space (assuming the shader operates correctly on the mesh in world space)
-	// Currently things do not work correctly for drawing DecoratorUI in world space, works fine in screen space though.
+	// Draws everything that is in screen space or has a decorator UI on it, meaning this can render UI billboards in world space.
 	void VulkanIndexDraw::DrawIndexedScreenAndDecoratorUI(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
@@ -345,6 +344,9 @@ namespace Engine
 		std::shared_ptr<VulkanRenderer> renderer = engine->GetVulkanRenderer();
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
 		const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = renderer->GetDescriptorManager();
+
+		const CameraUBO& cameraUBO = renderer->GetCameraUBO();
+		const glm::mat4& worldView = engine->GetCameraSystem()->GetViewMatrix();
 
 		const uint32_t baseUIInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
 		uint32_t uiInstanceCount = 0;
@@ -362,9 +364,6 @@ namespace Engine
 			TransformSpace space = transform.GetTransformSpace();
 
 			// We can render UI in world space if it has a decorator on it.
-			// Otherwise, this object will just have already been rendered.
-			// TODO: currently in world space our shader doesn't draw properly at all it seems.
-			// In screen space everything works fine.
 			if (space != TransformSpace::Screen && !hasDecorator)
 			{
 				return;
@@ -391,7 +390,40 @@ namespace Engine
 				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 			);
 			glm::vec2 pixelSize = transform.GetScale();
-			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
+			glm::vec2 quadSizeInPixels;
+
+			if (space == TransformSpace::Screen)
+			{
+				// In screen space, just scale pixels directly
+				quadSizeInPixels = pixelSize * screenScale;
+			}
+			else
+			{
+				// In world space, convert world scale to screen-space pixel size using perspective
+
+				const glm::vec3& worldScale = transform.GetScale(); // size in world units
+				const glm::vec3& worldPos = transform.GetPosition(); // object center in world
+
+				// Transform center into view space
+				glm::vec4 viewPos = worldView * glm::vec4(worldPos, 1.0f);
+				float absZ = std::abs(viewPos.z);
+
+				// Avoid division by zero near camera
+				if (absZ < 0.0001f)
+				{
+					absZ = 0.0001f;
+				}
+
+				// camParams.x = tan(fovX * 0.5)
+				// camParams.y = tan(fovY * 0.5)
+				const float worldPerPixelX = (2.0f * absZ * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
+				const float worldPerPixelY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
+
+				quadSizeInPixels = glm::vec2(
+					worldScale.x / worldPerPixelX,
+					worldScale.y / worldPerPixelY
+				);
+			}
 
 			UIParams ui{};
 

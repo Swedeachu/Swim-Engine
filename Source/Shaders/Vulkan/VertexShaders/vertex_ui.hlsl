@@ -75,69 +75,50 @@ VSOutput main(VSInput vin)
 {
   VSOutput vout;
 
+  // Grab instance and decorator data
   GpuInstanceData inst = instanceBuffer[vin.instanceID];
   UIParams ui = uiParamBuffer[inst.materialIndex];
 
+  // Determine transform space
   const bool isScreen = (inst.space == 1);
 
+  // Select appropriate view/projection matrix
   float4x4 view = isScreen ? screenView : worldView;
   float4x4 proj = isScreen ? screenProj : worldProj;
 
   float3 worldPos;
-  float2 halfSizePx;
 
   if (isScreen)
   {
-    // Screen-space: model matrix gives pixel position directly
+    // In screen-space, model matrix directly gives pixel position
     float4 local = float4(vin.position, 1.0f);
     worldPos = mul(inst.model, local).xyz;
-
-    // Half-size in pixels comes directly from UIParams
-    halfSizePx = ui.quadSize * 0.5f;
   }
   else
   {
-    // World-space: use full model transform
+    // In world-space, apply full model transform
     worldPos = mul(inst.model, float4(vin.position, 1.0f)).xyz;
-
-    // Compute projected pixel size for correct SDF rendering
-    float3 centreWS = inst.model[3].xyz;
-    float3 centreVS = mul(worldView, float4(centreWS, 1.0f)).xyz;
-    float absZ = abs(centreVS.z);
-
-    // Convert world units to pixels based on depth and camera FOV
-    float worldPerPxX = (2.0f * absZ * camParams.x) / viewportSize.x;
-    float worldPerPxY = (2.0f * absZ * camParams.y) / viewportSize.y;
-
-    // Compute local half-extents in world units from model scale
-    float halfWorldX = length(inst.model[0].xyz) * 0.5f;
-    float halfWorldY = length(inst.model[1].xyz) * 0.5f;
-
-    // Get screen-space half-size in pixels
-    halfSizePx = float2(
-      halfWorldX / worldPerPxX,
-      halfWorldY / worldPerPxY
-    );
   }
 
-  // Output position in clip space
+  // Final clip space position
   float4 clipPos = mul(proj, mul(view, float4(worldPos, 1.0f)));
   vout.position = clipPos;
 
-  // Pass-through
+  // Pass-through values
   vout.uv = vin.uv;
   vout.textureIndex = inst.textureIndex;
   vout.hasTexture = inst.hasTexture;
   vout.instanceID = inst.materialIndex;
   vout.color = vin.color;
 
-  // Used for SDF computation in pixel space in fragment shader
-  vout.quadSizePx = halfSizePx;
+  // Pass half-size in screen-space pixels (calculated on CPU!)
+  vout.quadSizePx = ui.quadSize * 0.5f;
 
-  // The pixel center of the quad in screen-space
+  // Compute center of quad in screen-space for SDF math
   float4 clipCentre = mul(proj, mul(view, float4(inst.model[3].xyz, 1.0f)));
   float2 ndcCentre = clipCentre.xy / clipCentre.w;
   vout.centerPx = (ndcCentre * 0.5f + 0.5f) * viewportSize;
 
   return vout;
 }
+

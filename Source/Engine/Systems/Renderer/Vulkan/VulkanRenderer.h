@@ -61,6 +61,8 @@ namespace Engine
 			framebufferResized = true;
 		}
 
+		const CameraUBO& GetCameraUBO() const { return ubo; }
+
 		// Creates a buffer and allocates memory for it
 		void CreateBuffer(
 			VkDeviceSize size,

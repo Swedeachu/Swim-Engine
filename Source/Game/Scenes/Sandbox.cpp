@@ -670,11 +670,12 @@ namespace Game
 		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
 			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
-			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
+			glm::vec2(16.0f, 16.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
-			true, true, true, true                // rounded, stroke, fill, material texture
+			false, true, true, false              // rounded, stroke, fill, material texture
 		);
+		billboardDecorator.SetUseMeshMaterialColor(true);
 		AddComponent<Engine::DecoratorUI>(billboard, billboardDecorator);
 		//*/
 

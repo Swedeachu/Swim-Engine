@@ -89,7 +89,6 @@ namespace Engine
 
 		void Resync()
 		{
-			// enableFill = fillColor.a > 0.0f;
 			enableStroke = strokeColor.a > 0.0f && (strokeWidth.x > 0.0f || strokeWidth.y > 0.0f);
 			roundCorners = (cornerRadius.x > 0.0f || cornerRadius.y > 0.0f);
 		}
