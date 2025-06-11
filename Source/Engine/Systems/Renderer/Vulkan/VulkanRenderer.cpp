@@ -370,26 +370,26 @@ namespace Engine
 
 	void VulkanRenderer::UpdateUniformBuffer()
 	{
-		ubo.view = cameraSystem->GetViewMatrix();
-		ubo.proj = cameraSystem->GetProjectionMatrix();  // already has the Vulkan Y-flip
+		cameraUBO.view = cameraSystem->GetViewMatrix();
+		cameraUBO.proj = cameraSystem->GetProjectionMatrix(); 
 
-		const auto& camera = cameraSystem->GetCamera();
+		const Camera& camera = cameraSystem->GetCamera();
 
 		// Calculate half FOV tangents - make sure signs are correct
 		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
 		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
 
-		ubo.camParams.x = tanHalfFovX;
-		ubo.camParams.y = tanHalfFovY;
-		ubo.camParams.z = camera.GetNearClip();
-		ubo.camParams.w = camera.GetFarClip();
+		cameraUBO.camParams.x = tanHalfFovX;
+		cameraUBO.camParams.y = tanHalfFovY;
+		cameraUBO.camParams.z = camera.GetNearClip();
+		cameraUBO.camParams.w = camera.GetFarClip();
 
 		// Since this projection is always the exact same values, we only have to do it once 
 		if (!hasUploadedOrtho)
 		{
-			ubo.screenView = glm::mat4(1.0f); // Identity
+			cameraUBO.screenView = glm::mat4(1.0f); // Identity
 
-			ubo.screenProj = glm::ortho(
+			cameraUBO.screenProj = glm::ortho(
 				0.0f, VirtualCanvasWidth,
 				VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
 				-1.0f, 1.0f
@@ -398,9 +398,9 @@ namespace Engine
 			hasUploadedOrtho = true;
 		}
 
-		ubo.viewportSize = glm::vec2(windowWidth, windowHeight);
+		cameraUBO.viewportSize = glm::vec2(windowWidth, windowHeight);
 
-		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
+		descriptorManager->UpdatePerFrameUBO(currentFrame, cameraUBO);
 	}
 
 	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)

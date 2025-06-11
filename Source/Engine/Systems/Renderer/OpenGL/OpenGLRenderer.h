@@ -49,12 +49,13 @@ namespace Engine
 		void UpdateUniformBuffer();
 
 		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
-		void RenderScreenSpace(entt::registry& registry);
+		void RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
-		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projMatrix);
-		void DrawEntityWithMVP(entt::entity entity, entt::registry& registry, const glm::mat4& mvp);
+		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
 		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
+
+		CameraUBO cameraUBO{};
 
 		HDC deviceContext = nullptr;
 		HGLRC glContext = nullptr;
@@ -95,6 +96,7 @@ namespace Engine
 		GLint loc_ui_quadSize = -1;
 		GLint loc_ui_useTexture = -1;
 		GLint loc_ui_albedoTex = -1;
+		GLint loc_ui_isWorldSpace = -1;
 
 	};
 

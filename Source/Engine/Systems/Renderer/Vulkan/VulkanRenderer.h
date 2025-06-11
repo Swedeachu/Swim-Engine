@@ -61,7 +61,7 @@ namespace Engine
 			framebufferResized = true;
 		}
 
-		const CameraUBO& GetCameraUBO() const { return ubo; }
+		const CameraUBO& GetCameraUBO() const { return cameraUBO; }
 
 		// Creates a buffer and allocates memory for it
 		void CreateBuffer(
@@ -128,7 +128,7 @@ namespace Engine
 		uint32_t windowWidth;
 		uint32_t windowHeight;
 
-		CameraUBO ubo{};
+		CameraUBO cameraUBO{};
 
 		std::unique_ptr<VulkanDeviceManager> deviceManager;
 		std::unique_ptr<VulkanSwapChain> swapChainManager;

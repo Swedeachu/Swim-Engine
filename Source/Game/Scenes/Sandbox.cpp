@@ -665,6 +665,8 @@ namespace Game
 		auto billboard = CreateEntity();
 		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		AddComponent<Engine::Material>(billboard, materialData2);
+		// AddComponent<Engine::Material>(billboard, sphereDataMaterial); // extreme trollage
+		// AddComponent<Engine::Material>(billboard, materialData1); // cube 3D mesh with UI decorators on it
 
 		///* World space UI 
 		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(

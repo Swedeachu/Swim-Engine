@@ -373,7 +373,10 @@ namespace Engine
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = msaaSamples;
+		// When true this solves the issue of UI objects not alpha blending into the other ui objects below them in transparent parts like corners, 
+		// but introduces very slight jaggedness on screen space corners. We essentially have to sacrifice screen space corner quality to avoid this bug for now.
 		multisampling.alphaToCoverageEnable = VK_TRUE;
+		multisampling.minSampleShading = 1.0f;
 
 		// Normally you would not want UI to be depth tested, but we have it as true since we have billboard UI in world space
 		// This could also maybe make layering a bit easier for us, despite screen space being an orthographic projection in something like [-1,1]

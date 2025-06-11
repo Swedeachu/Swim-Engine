@@ -218,7 +218,8 @@ namespace Engine
 
 		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			if (!registry.any_of<DecoratorUI>(entity)) // we don't want to do decorators in this pass
+			// we don't want to do decorators in this pass since they require the UI shader pass, hopefully this is not an expensive check
+			if (!registry.any_of<DecoratorUI>(entity)) 
 				AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
 		});
 	}
@@ -351,6 +352,9 @@ namespace Engine
 		const uint32_t baseUIInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
 		uint32_t uiInstanceCount = 0;
 
+		// We still want to do some simple per object culling
+		const Frustum& frustum = Frustum::Get();
+
 		// === Gather screen-space UI instances ===
 		const size_t baseInstanceID = cpuInstanceData.size();
 
@@ -364,17 +368,57 @@ namespace Engine
 			TransformSpace space = transform.GetTransformSpace();
 
 			// We can render UI in world space if it has a decorator on it.
-			if (space != TransformSpace::Screen && !hasDecorator)
+			if (!hasDecorator && space != TransformSpace::Screen)
 			{
 				return;
 			}
 
+			glm::vec2 screenScale = glm::vec2(
+				static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
+			);
+
+			const glm::vec3& pos = transform.GetPosition(); // In virtual canvas units
+			const glm::vec3& scale = transform.GetScale();  // Width & height in virtual canvas units
+
 			const std::shared_ptr<MaterialData>& mat = matComp.data;
 			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+			const glm::mat4& model = transform.GetModelMatrix();
+
+			// First do a simple cull check 
+			if (space == TransformSpace::World)
+			{
+				if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+				{
+					return;
+				}
+			}
+			else
+			{
+				// Sceen space 2D check using window width and height
+
+				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+				glm::vec2 center = glm::vec2(pos) * screenScale;
+				glm::vec2 halfSizePx = halfSize * screenScale;
+
+				glm::vec2 minPx = center - halfSizePx;
+				glm::vec2 maxPx = center + halfSizePx;
+
+				// Clamp against the actual framebuffer
+				if (maxPx.x < 0.0f || maxPx.y < 0.0f)
+				{
+					return; // off left or bottom
+				}
+
+				if (minPx.x > windowWidth || minPx.y > windowHeight)
+				{
+					return; // off right or top
+				}
+			}
 
 			// === GpuInstanceData ===
 			GpuInstanceData instance{};
-			instance.model = transform.GetModelMatrix();
+			instance.model = model;
 			instance.space = static_cast<uint32_t>(space);
 			instance.indexCount = mesh.indexCount;
 			instance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
@@ -385,11 +429,7 @@ namespace Engine
 			instance.materialIndex = uiInstanceCount;
 
 			// === UIParams ===
-			glm::vec2 screenScale = glm::vec2(
-				static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
-				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
-			);
-			glm::vec2 pixelSize = transform.GetScale();
+			glm::vec2 pixelSize = glm::vec2(scale);
 			glm::vec2 quadSizeInPixels;
 
 			if (space == TransformSpace::Screen)
@@ -401,11 +441,8 @@ namespace Engine
 			{
 				// In world space, convert world scale to screen-space pixel size using perspective
 
-				const glm::vec3& worldScale = transform.GetScale(); // size in world units
-				const glm::vec3& worldPos = transform.GetPosition(); // object center in world
-
 				// Transform center into view space
-				glm::vec4 viewPos = worldView * glm::vec4(worldPos, 1.0f);
+				glm::vec4 viewPos = worldView * glm::vec4(pos, 1.0f);
 				float absZ = std::abs(viewPos.z);
 
 				// Avoid division by zero near camera
@@ -420,8 +457,8 @@ namespace Engine
 				const float worldPerPixelY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
 
 				quadSizeInPixels = glm::vec2(
-					worldScale.x / worldPerPixelX,
-					worldScale.y / worldPerPixelY
+					scale.x / worldPerPixelX,
+					scale.y / worldPerPixelY
 				);
 			}
 
@@ -447,9 +484,8 @@ namespace Engine
 				else
 				{
 					// Convert decorator values (specified in world units) to pixels so they scale with the quad
-					const glm::vec3& worldPos2 = transform.GetPosition();
-					glm::vec4 viewPos2 = worldView * glm::vec4(worldPos2, 1.0f);
-					float absZ2 = std::abs(viewPos2.z);
+					glm::vec4 viewPos = worldView * glm::vec4(pos, 1.0f);
+					float absZ2 = std::abs(viewPos.z);
 
 					if (absZ2 < 0.0001f)
 					{

@@ -287,6 +287,7 @@ namespace Engine
 		loc_ui_quadSize = glGetUniformLocation(uiDecoratorShader, "quadSize");
 		loc_ui_useTexture = glGetUniformLocation(uiDecoratorShader, "useTexture");
 		loc_ui_albedoTex = glGetUniformLocation(uiDecoratorShader, "albedoTex");
+		loc_ui_isWorldSpace = glGetUniformLocation(uiDecoratorShader, "isWorldSpace");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -365,186 +366,261 @@ namespace Engine
 
 	void OpenGLRenderer::RenderFrame()
 	{
-		// --- Step 1: Clear color and depth buffers ---
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		// --- Step 2: Update camera UBO before rendering anything ---
 		UpdateUniformBuffer();
 
-		// --- Step 3: Fetch scene and camera ---
-		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (!scene)
 		{
 			SwapBuffers(deviceContext);
 			return;
 		}
 
-		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
-		const glm::mat4& view = camera->GetViewMatrix();
-		const glm::mat4& proj = camera->GetProjectionMatrix();
+		const glm::mat4& view = cameraSystem->GetViewMatrix();
+		const glm::mat4& proj = cameraSystem->GetProjectionMatrix();
 		Frustum::SetCameraMatrices(view, proj);
 
-		entt::registry& registry = scene->GetRegistry();
+		auto& registry = scene->GetRegistry();
 
-		// --- Step 4: Render cubemap skybox BEFORE everything else ---
 		if (cubemapController)
 		{
 			cubemapController->Render(view, proj);
 		}
 
-		// --- Step 5: Use main shader for world rendering ---
-		glUseProgram(shaderProgram);
-
 		RenderWorldSpace(scene, registry, view, proj);
-
-		// --- Step 6: Render screen-space UI ---
-		RenderScreenSpace(registry);
+		RenderScreenAndDecoratorUI(registry, view, proj);
 
 	#ifdef _DEBUG
-		// --- Step 7: Optional wireframe debug render ---
 		RenderWireframeDebug(scene);
 	#endif
 
-		// --- Step 8: Swap display buffers ---
 		SwapBuffers(deviceContext);
 	}
 
+	static bool hasUploadedOrtho = false;
+
+	void OpenGLRenderer::UpdateUniformBuffer()
+	{
+		cameraUBO.view = cameraSystem->GetViewMatrix();
+		cameraUBO.proj = cameraSystem->GetProjectionMatrix();
+
+		const Camera& camera = cameraSystem->GetCamera();
+
+		// Calculate half FOV tangents - make sure signs are correct
+		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
+		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
+
+		cameraUBO.camParams.x = tanHalfFovX;
+		cameraUBO.camParams.y = tanHalfFovY;
+		cameraUBO.camParams.z = camera.GetNearClip();
+		cameraUBO.camParams.w = camera.GetFarClip();
+
+		// Since this projection is always the exact same values, we only have to do it once 
+		if (!hasUploadedOrtho)
+		{
+			cameraUBO.screenView = glm::mat4(1.0f); // Identity
+
+			cameraUBO.screenProj = glm::ortho(
+				0.0f, VirtualCanvasWidth,
+				0.0f, VirtualCanvasHeight,
+				-1.0f, 1.0f
+			);
+
+			hasUploadedOrtho = true;
+		}
+
+		cameraUBO.viewportSize = glm::vec2(windowWidth, windowHeight);
+
+		// Send them to the GPU UBO at binding 0
+		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &cameraUBO);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
+
+	// Draws all non decorated world space objects
 	void OpenGLRenderer::RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
 		const Frustum& frustum = Frustum::Get();
 
+		glUseProgram(shaderProgram); // main shader 
+		glEnable(GL_CULL_FACE);
+
 		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			const Transform& transform = registry.get<Transform>(entity);
-			if (transform.GetTransformSpace() == TransformSpace::World)
-			{
-				DrawEntity(entity, registry, viewMatrix, projectionMatrix);
-			}
-		});
-	}
-
-	void OpenGLRenderer::RenderScreenSpace(entt::registry& registry)
-	{
-		// Set up orthographic projection for virtual canvas space
-		glm::mat4 orthoProj = glm::ortho(
-			0.0f, VirtualCanvasWidth,
-			0.0f, VirtualCanvasHeight,
-			-1.0f, 1.0f
-		);
-
-		// Identity view matrix, since this is screen space
-		glm::mat4 identityView = glm::mat4(1.0f);
-
-		// Resolution scale: maps virtual canvas to actual screen pixels
-		glm::mat4 resolutionScale = glm::scale(
-			glm::mat4(1.0f),
-			glm::vec3(
-			static_cast<float>(windowWidth) / VirtualCanvasWidth,
-			static_cast<float>(windowHeight) / VirtualCanvasHeight,
-			1.0f
-		)
-		);
-
-		// -----------------------------
-		// First pass: normal UI elements
-		// -----------------------------
-		glUseProgram(shaderProgram);
-
-		registry.view<Transform>(entt::exclude<Engine::DecoratorUI>).each(
-			[&](entt::entity entity, Transform& transform)
-		{
-			if (transform.GetTransformSpace() == TransformSpace::Screen)
-			{
-				glm::mat4 model = transform.GetModelMatrix();
-				// glm::mat4 mvp = orthoProj * (model * resolutionScale);
-				glm::mat4 mvp = orthoProj * model;
-				DrawEntityWithMVP(entity, registry, mvp);
-			}
-		});
-
-		// -----------------------------
-		// Second pass: decorator UI
-		// -----------------------------
-		glUseProgram(uiDecoratorShader);
-
-		registry.view<Transform, Engine::DecoratorUI>().each(
-			[&](entt::entity entity, Transform& transform, Engine::DecoratorUI& deco)
-		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			const Transform& tf = registry.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
 				return;
 			}
 
-			// Calculate model matrix and MVP
-			glm::mat4 model = transform.GetModelMatrix();
-			glm::mat4 mvp = orthoProj * model;
-
-			// Upload MVP matrix
-			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
-
-			// Upload visual decorator colors
-			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
-			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
-
-			// Compute scale factor from virtual canvas units to real screen pixels
-			glm::vec2 screenScale = glm::vec2(
-				static_cast<float>(windowWidth) / VirtualCanvasWidth,
-				static_cast<float>(windowHeight) / VirtualCanvasHeight
-			);
-
-			// Compute quad size in pixels
-			glm::vec2 pixelSize = transform.GetScale(); // scale in virtual units
-			glm::vec2 quadSizeInPixels = pixelSize * screenScale;
-
-			// Convert corner radius and stroke width to pixel space
-			glm::vec2 radiusPx = deco.cornerRadius * screenScale;
-			glm::vec2 strokePx = deco.strokeWidth * screenScale;
-
-			// Clamp values to avoid degenerate geometry
-			radiusPx = glm::min(radiusPx, quadSizeInPixels * 0.5f);
-			strokePx = glm::min(strokePx, quadSizeInPixels * 0.5f);
-
-			// Upload stroke width and corner radius in pixels
-			glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx.x);
-			glUniform2fv(loc_ui_strokeWidth, 1, &strokePx.x);
-
-			// Upload feature flags
-			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
-			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
-			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
-
-			// Upload actual framebuffer resolution (needed for AA or resolution scaling)
-			glUniform2f(loc_ui_resolution, static_cast<float>(windowWidth), static_cast<float>(windowHeight));
-
-			// Upload quad size in pixels to fragment shader
-			glUniform2f(loc_ui_quadSize, quadSizeInPixels.x, quadSizeInPixels.y);
-
-			// Draw decorator quad
-			const auto& mat = registry.get<Material>(entity).data;
-			const auto& mesh = *mat->mesh->meshBufferData;
-
-			// If we are using the material texture then bind it for the shader to use
-			if (deco.useMaterialTexture && mat->albedoMap.get() != nullptr)
+			// Skip decorator UI elements — they go in separate pass
+			if (registry.any_of<DecoratorUI>(entity))
 			{
-				glUniform1i(loc_ui_useTexture, 1); // enable it in shader
-				GLuint texID = mat->albedoMap->GetTextureID();
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, texID);
-				glUniform1i(loc_ui_albedoTex, 0); 
+				return;
+			}
+
+			DrawEntity(entity, registry, viewMatrix, projectionMatrix);
+		});
+	}
+
+	// Draws all screen space objects (typically UI) and also regular transforms that happen to be in screen space
+	void OpenGLRenderer::RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		// We still want to do some simple per object culling
+		const Frustum& frustum = Frustum::Get();
+
+		glUseProgram(uiDecoratorShader);
+		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); // proper blending in transparent spots with other UI objects behind each other
+		glDisable(GL_CULL_FACE); // for vulkan parity, since the vulkan UI pipeline currently does not have back face culling enabled
+
+		glm::vec2 screenScale = glm::vec2(
+			static_cast<float>(windowWidth) / VirtualCanvasWidth,
+			static_cast<float>(windowHeight) / VirtualCanvasHeight
+		);
+
+		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
+		{
+			const std::shared_ptr<MaterialData>& mat = matComp.data;
+			bool hasDecorator = registry.any_of<DecoratorUI>(entity);
+			TransformSpace space = tf.GetTransformSpace();
+
+			if (!hasDecorator && space != TransformSpace::Screen)
+			{
+				return; // Not UI, not decorated, so was either already rendered or culled
+			}
+
+			const glm::vec3& pos = tf.GetPosition();
+			const glm::vec3& scale = tf.GetScale();
+
+			bool isWorld = (space == TransformSpace::World);
+
+			const glm::mat4& model = tf.GetModelMatrix();
+
+			// First do a simple cull check
+			if (isWorld)
+			{
+				if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+				{
+					return;
+				}
 			}
 			else
 			{
-				glUniform1i(loc_ui_useTexture, 0); // disabled in shader
+				// Sceen space 2D check using window width and height
+				
+				// Convert quad AABB to pixel-space (by scaling virtual units up)
+				glm::vec2 screenScale = glm::vec2(
+					static_cast<float>(windowWidth) / VirtualCanvasWidth,
+					static_cast<float>(windowHeight) / VirtualCanvasHeight
+				);
+
+				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+				glm::vec2 center = glm::vec2(pos) * screenScale;
+				glm::vec2 halfSizePx = halfSize * screenScale;
+
+				glm::vec2 minPx = center - halfSizePx;
+				glm::vec2 maxPx = center + halfSizePx;
+
+				// Clamp against the actual framebuffer
+				if (maxPx.x < 0.0f || maxPx.y < 0.0f)
+				{
+					return; // off left or bottom
+				}
+
+				if (minPx.x > windowWidth || minPx.y > windowHeight)
+				{
+					return; // off right or top
+				}
 			}
 
+			glm::mat4 mvp;
+			glm::vec2 quadSizeInPixels;
+			glm::vec2 radiusPx, strokePx;
+
+			if (isWorld)
+			{
+				// World-space projection scaling
+				glm::vec4 viewPos = viewMatrix * glm::vec4(pos, 1.0f);
+				float absZ = std::max(std::abs(viewPos.z), 0.0001f);
+
+				float wppX = (2.0f * absZ * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
+				float wppY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
+
+				quadSizeInPixels = glm::vec2(scale.x / wppX, scale.y / wppY);
+
+				glm::vec2 scaler = glm::vec2(250.0f);
+				if (hasDecorator)
+				{
+					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+					radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
+					strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
+				}
+
+				mvp = projectionMatrix * viewMatrix * model;
+			}
+			else
+			{
+				quadSizeInPixels = glm::vec2(scale) * screenScale;
+
+				if (hasDecorator)
+				{
+					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+					radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
+					strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
+				}
+
+				mvp = cameraUBO.screenProj * model;
+			}
+
+			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
+			glUniform2fv(loc_ui_resolution, 1, &cameraUBO.viewportSize[0]);
+			glUniform2fv(loc_ui_quadSize, 1, &quadSizeInPixels[0]);
+			glUniform1i(loc_ui_isWorldSpace, isWorld ? 1 : 0);
+
+			if (hasDecorator)
+			{
+				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+
+				glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
+				glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
+				glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx[0]);
+				glUniform2fv(loc_ui_strokeWidth, 1, &strokePx[0]);
+				glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
+				glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
+				glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
+				glUniform1i(loc_ui_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			}
+			else
+			{
+				// No decorator -> use vertex color
+				glUniform4f(loc_ui_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
+				glUniform1i(loc_ui_enableFill, 1);
+				glUniform1i(loc_ui_enableStroke, 0);
+				glUniform1i(loc_ui_roundCorners, 0);
+				glUniform1i(loc_ui_useTexture, mat->albedoMap ? 1 : 0);
+				glUniform2fv(loc_ui_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
+				glUniform2fv(loc_ui_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
+				glUniform4f(loc_ui_strokeColor, 0, 0, 0, 1);
+			}
+
+			// Bind albedo texture
+			GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, texID);
+			glUniform1i(loc_ui_albedoTex, 0);
+
+			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
 			glBindVertexArray(mesh.GetGLVAO());
 			glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_SHORT, nullptr);
 			glBindVertexArray(0);
 		});
+
+		glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE); // turn back off
 	}
 
-	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projMatrix)
+	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
 		const Transform& transform = registry.get<Transform>(entity);
 		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
@@ -552,7 +628,7 @@ namespace Engine
 
 		// Compute model matrix and full MVP
 		const glm::mat4& model = transform.GetModelMatrix();
-		const glm::mat4 mvp = projMatrix * viewMatrix * model;
+		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
 
 		// Upload matrix to shader
 		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
@@ -567,26 +643,6 @@ namespace Engine
 		glUniform1i(loc_albedoTex, 0);
 
 		// Draw
-		glBindVertexArray(meshData.GetGLVAO());
-		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
-		glBindVertexArray(0);
-	}
-
-	void OpenGLRenderer::DrawEntityWithMVP(entt::entity entity, entt::registry& registry, const glm::mat4& mvp)
-	{
-		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
-
-		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
-
-		bool usesTexture = (mat->albedoMap != nullptr);
-		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
-
-		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texID);
-		glUniform1i(loc_albedoTex, 0);
-
 		glBindVertexArray(meshData.GetGLVAO());
 		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
 		glBindVertexArray(0);
@@ -647,27 +703,6 @@ namespace Engine
 			glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
 			glBindVertexArray(0);
 		}
-	}
-
-	void OpenGLRenderer::UpdateUniformBuffer()
-	{
-		// 1) Gather the latest camera matrices into our CPU side struct
-		CameraUBO camData{};
-		camData.view = cameraSystem->GetViewMatrix();
-		camData.proj = cameraSystem->GetProjectionMatrix();
-
-		// Extract fov from projection matrix (OpenGL version, no Y flip)
-		float fovY = 2.0f * atanf(1.0f / camData.proj[1][1]);
-		float aspect = camData.proj[1][1] / camData.proj[0][0];
-		float fovX = 2.0f * atanf(tanf(fovY * 0.5f) * aspect);
-
-		auto& camera = cameraSystem->GetCamera();
-		camData.camParams = glm::vec4(fovX, fovY, camera.GetNearClip(), camera.GetFarClip());
-
-		// 2) Send them to the GPU UBO at binding 0
-		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &camData);
-		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	}
 
 	int OpenGLRenderer::Exit()
