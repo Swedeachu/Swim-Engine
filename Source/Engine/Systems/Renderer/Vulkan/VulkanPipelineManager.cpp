@@ -373,6 +373,7 @@ namespace Engine
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 		multisampling.rasterizationSamples = msaaSamples;
+		multisampling.alphaToCoverageEnable = VK_TRUE;
 
 		// Normally you would not want UI to be depth tested, but we have it as true since we have billboard UI in world space
 		// This could also maybe make layering a bit easier for us, despite screen space being an orthographic projection in something like [-1,1]

@@ -673,10 +673,11 @@ namespace Game
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
-			true, true, true, true               // rounded, stroke, fill, use material texture
+			true, true, true, false               // rounded, stroke, fill, use material texture
 		);
-		billboardDecorator.SetUseMeshMaterialColor(true);
+		// billboardDecorator.SetUseMeshMaterialColor(true);
 		AddComponent<Engine::DecoratorUI>(billboard, billboardDecorator);
+		AddBehavior<Spin>(billboard);
 		//*/
 
 		// Make sphere entity
