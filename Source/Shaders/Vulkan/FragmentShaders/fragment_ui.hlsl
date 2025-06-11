@@ -51,40 +51,58 @@ float4 main(FSInput input) : SV_Target
     UIParams ui = uiParamBuffer[uiParamIndex];
 
     float2 halfSize = input.quadSizePx;
-    float2 posPx = (input.uv - 0.5f) * halfSize * 2.0f;
-    float2 uvLocal = input.uv - 0.5f;
 
+    // Position in local quad space centered around (0,0)
+    float2 posPx = (input.uv - 0.5f) * halfSize * 2.0f;
+
+    // Compute screen-space-correct radius
     float radius = (ui.roundCorners != 0)
         ? min(max(ui.cornerRadius.x, ui.cornerRadius.y), min(halfSize.x, halfSize.y))
         : 0.0f;
 
-    // Inner rect (fill area) – shrink by stroke width but clamp at zero
-    float2 innerHalf = max(halfSize - ui.strokeWidth, float2(0.0f, 0.0f));
-    float innerRad = max(radius - max(ui.strokeWidth.x, ui.strokeWidth.y), 0.0f);
+    // Convert pixel stroke width to local-space units (0..halfSize)
+    float2 strokeUV = ui.strokeWidth / (halfSize * 2.0f);
 
-    // SDFs
+    // Fill area and radius
+    float2 innerHalf = halfSize;
+    float innerRad = radius;
+
+    if (ui.enableStroke != 0)
+    {
+        // Adjust inner shape only if stroke is enabled
+        innerHalf = max(halfSize - strokeUV * halfSize * 2.0f, float2(0.0f, 0.0f));
+        innerRad = max(radius - max(strokeUV.x * halfSize.x * 2.0f, strokeUV.y * halfSize.y * 2.0f), 0.0f);
+    }
+
+    // Compute distance to outer shape
     float distOuter = (radius > 0.0f)
         ? RoundedRectSDF(posPx, halfSize, radius)
         : BoxSDF(posPx, halfSize);
 
+    // Compute distance to inner fill shape
     float distInner = (radius > 0.0f)
         ? RoundedRectSDF(posPx, innerHalf, innerRad)
         : BoxSDF(posPx, innerHalf);
 
-    float aaWidth = 1.0f;
+    // Screen-space correct anti-aliasing width (based on avg pixel size)
+    float aaWidthPx = 1.0f;
+    float aaWidth = aaWidthPx / ((halfSize.x + halfSize.y)); // average px size to local
+
     float outerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distOuter);
     float innerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distInner);
 
+    // Stroke alpha is the shell between outer and inner SDFs
     float strokeAlpha = (ui.enableStroke != 0) ? clamp(outerAlpha - innerAlpha, 0.0f, 1.0f) : 0.0f;
     float fillAlpha = (ui.enableFill != 0) ? innerAlpha : 0.0f;
 
+    // Sample texture if used
     float4 texSample = float4(1.0f, 1.0f, 1.0f, 1.0f);
     if (input.hasTexture > 0.5f && ui.useTexture != 0)
     {
         texSample = textures[input.textureIndex].Sample(texSampler, input.uv);
     }
 
-    // Use vertex color fallback if fillColor is -1 (all channels)
+    // Determine source fill color
     bool useVertexColor = all(ui.fillColor.rgb < 0.0f);
     float4 fillSrc = float4(1.0f, 1.0f, 1.0f, 1.0f);
 
@@ -101,8 +119,8 @@ float4 main(FSInput input) : SV_Target
         fillSrc = ui.fillColor;
     }
 
+    // Combine fill and stroke with premultiplied alpha
     float combinedAlpha = saturate(fillAlpha + strokeAlpha);
-
     float3 combinedColor = (combinedAlpha > 0.0f)
         ? (fillSrc.rgb * fillAlpha + ui.strokeColor.rgb * strokeAlpha) / combinedAlpha
         : float3(0.0f, 0.0f, 0.0f);

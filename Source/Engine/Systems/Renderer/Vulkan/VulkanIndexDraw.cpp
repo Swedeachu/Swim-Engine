@@ -430,7 +430,6 @@ namespace Engine
 			if (hasDecorator)
 			{
 				DecoratorUI& deco = registry.get<DecoratorUI>(entity);
-				deco.Resync();
 
 				bool useTex = deco.useMaterialTexture && mat->albedoMap;
 

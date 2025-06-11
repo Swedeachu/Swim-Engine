@@ -18,9 +18,6 @@ namespace Engine
 	2. If use material texture is enabled and the material has a texture, the shader will use the texture for drawing instead of fill color.
 		 This will happen as long as enableFill is true.
 
-	3. Resync() will be called at render time to make sure values are logical before being sent to the shader.
-		 This method will also be called when using SetColors() and SetCornerRadius().
-
 	3. These properties will effect text rendering the exact same.
 	*/
 	struct DecoratorUI
@@ -65,13 +62,11 @@ namespace Engine
 			fillColor = fill;
 			strokeColor = stroke;
 			cachedFill = fill;
-			Resync();
 		}
 
 		void SetCornerRadius(glm::vec2 radius)
 		{
 			cornerRadius = radius;
-			Resync();
 		}
 
 		void SetUseMeshMaterialColor(bool value)
@@ -85,12 +80,6 @@ namespace Engine
 			{
 				fillColor = cachedFill;
 			}
-		}
-
-		void Resync()
-		{
-			enableStroke = strokeColor.a > 0.0f && (strokeWidth.x > 0.0f || strokeWidth.y > 0.0f);
-			roundCorners = (cornerRadius.x > 0.0f || cornerRadius.y > 0.0f);
 		}
 
 	private:

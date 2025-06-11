@@ -666,14 +666,14 @@ namespace Game
 		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		AddComponent<Engine::Material>(billboard, materialData2);
 
-		///* World space UI not working yet
+		///* World space UI 
 		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
 			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
-			false, true, true, false              // rounded, stroke, fill, material texture
+			true, true, true, true               // rounded, stroke, fill, use material texture
 		);
 		billboardDecorator.SetUseMeshMaterialColor(true);
 		AddComponent<Engine::DecoratorUI>(billboard, billboardDecorator);
