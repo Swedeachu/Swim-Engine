@@ -7,6 +7,8 @@ cbuffer CameraUBO : register(b0, space0)
   float4x4 screenProj;
 
   float4 camParams; 
+  float2 viewportSize;    
+  float2 _padViewportSize; 
 };
 
 struct GpuInstanceData

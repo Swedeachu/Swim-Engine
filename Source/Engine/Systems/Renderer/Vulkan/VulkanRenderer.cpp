@@ -398,6 +398,8 @@ namespace Engine
 			hasUploadedOrtho = true;
 		}
 
+		ubo.viewportSize = glm::vec2(windowWidth, windowHeight);
+
 		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
 	}
 

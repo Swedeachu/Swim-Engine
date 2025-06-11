@@ -363,8 +363,7 @@ namespace Engine
 
 			// We can render UI in world space if it has a decorator on it.
 			// Otherwise, this object will just have already been rendered.
-			// TODO: currently in world space our shader doesn't draw stroke or curve properly at all even when it is a quad.
-			// Other problem is UI render pipeline is not depth tested so world space UI billboards screw things up.
+			// TODO: currently in world space our shader doesn't draw properly at all it seems.
 			// In screen space everything works fine.
 			if (space != TransformSpace::Screen && !hasDecorator)
 			{

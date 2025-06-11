@@ -666,7 +666,7 @@ namespace Game
 		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		AddComponent<Engine::Material>(billboard, materialData2);
 
-		///* World space UI just doesn't really work since the shader doesn't do stroke properly and it doesn't get rendered at the proper stage where the depth test is active.
+		///* World space UI not working yet
 		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
 			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red

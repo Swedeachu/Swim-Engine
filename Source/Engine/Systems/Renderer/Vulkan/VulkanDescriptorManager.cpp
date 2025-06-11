@@ -36,7 +36,7 @@ namespace Engine
 		uiParamBufferBinding.binding = 2;
 		uiParamBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		uiParamBufferBinding.descriptorCount = 1;
-		uiParamBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		uiParamBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		uiParamBufferBinding.pImmutableSamplers = nullptr;
 
 		std::array<VkDescriptorSetLayoutBinding, 3> bindings = {

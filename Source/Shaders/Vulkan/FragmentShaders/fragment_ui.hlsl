@@ -27,8 +27,10 @@ struct FSInput
   float2 uv : TEXCOORD0;                        
   nointerpolation uint textureIndex : TEXCOORD1; 
   float hasTexture : TEXCOORD2;                  
-  nointerpolation uint instanceID : TEXCOORD3;   // for indexing into the ui params buffer
-  float3 color : TEXCOORD4;                     
+  nointerpolation uint instanceID : TEXCOORD3; // for indexing into the ui params buffer
+  float3 color : TEXCOORD4;   
+  float2 quadSizePx : TEXCOORD5; // half-width / half-height in pixels
+  float2 centerPx : TEXCOORD6;   // pixel centre of the quad
 };
 
 float RoundedRectSDF(float2 pos, float2 size, float radius)
@@ -48,19 +50,26 @@ float4 main(FSInput input) : SV_Target
     uint uiParamIndex = input.instanceID;
     UIParams ui = uiParamBuffer[uiParamIndex];
 
-    float2 uv = input.uv - 0.5f;
-    float2 pos = uv * ui.quadSize;
-    float2 halfSize = ui.quadSize * 0.5f;
+    float2 halfSize = input.quadSizePx;
+    float2 posPx = (input.uv - 0.5f) * halfSize * 2.0f;
+    float2 uvLocal = input.uv - 0.5f;
 
-    float radius = (ui.roundCorners != 0) ? max(ui.cornerRadius.x, ui.cornerRadius.y) : 0.0f;
-    float maxRadius = min(halfSize.x, halfSize.y);
-    radius = min(radius, maxRadius);
+    float radius = (ui.roundCorners != 0)
+        ? min(max(ui.cornerRadius.x, ui.cornerRadius.y), min(halfSize.x, halfSize.y))
+        : 0.0f;
 
-    float2 innerHalfSize = max(halfSize - ui.strokeWidth, float2(0.0f, 0.0f));
-    float innerRadius = max(radius - max(ui.strokeWidth.x, ui.strokeWidth.y), 0.0f);
+    // Inner rect (fill area) – shrink by stroke width but clamp at zero
+    float2 innerHalf = max(halfSize - ui.strokeWidth, float2(0.0f, 0.0f));
+    float innerRad = max(radius - max(ui.strokeWidth.x, ui.strokeWidth.y), 0.0f);
 
-    float distOuter = (radius > 0.0f) ? RoundedRectSDF(pos, halfSize,      radius) : BoxSDF(pos, halfSize);
-    float distInner = (radius > 0.0f) ? RoundedRectSDF(pos, innerHalfSize, innerRadius) : BoxSDF(pos, innerHalfSize);
+    // SDFs
+    float distOuter = (radius > 0.0f)
+        ? RoundedRectSDF(posPx, halfSize, radius)
+        : BoxSDF(posPx, halfSize);
+
+    float distInner = (radius > 0.0f)
+        ? RoundedRectSDF(posPx, innerHalf, innerRad)
+        : BoxSDF(posPx, innerHalf);
 
     float aaWidth = 1.0f;
     float outerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distOuter);
@@ -92,13 +101,10 @@ float4 main(FSInput input) : SV_Target
         fillSrc = ui.fillColor;
     }
 
-    // Remove the 1-pixel transparent seam between fill & stroke
     float combinedAlpha = saturate(fillAlpha + strokeAlpha);
 
-    // Pre-multiply each colour by its own coverage, then renormalise so we stay in un-premultiplied (straight-alpha) space
     float3 combinedColor = (combinedAlpha > 0.0f)
-        ? (fillSrc.rgb * fillAlpha +
-           ui.strokeColor.rgb * strokeAlpha) / combinedAlpha
+        ? (fillSrc.rgb * fillAlpha + ui.strokeColor.rgb * strokeAlpha) / combinedAlpha
         : float3(0.0f, 0.0f, 0.0f);
 
     return float4(combinedColor, combinedAlpha);
