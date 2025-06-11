@@ -30,6 +30,18 @@ namespace Engine
 			pipelineLayout = VK_NULL_HANDLE;
 		}
 
+		if (uiPipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device, uiPipeline, nullptr);
+			uiPipeline = VK_NULL_HANDLE;
+		}
+
+		if (uiPipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device, uiPipelineLayout, nullptr);
+			uiPipelineLayout = VK_NULL_HANDLE;
+		}
+
 		if (renderPass != VK_NULL_HANDLE)
 		{
 			vkDestroyRenderPass(device, renderPass, nullptr);
@@ -156,7 +168,6 @@ namespace Engine
 		}
 	}
 
-	// our pipeline is very static currently and just fixed to always use these 2 default vertex and fragment shaders we pass in originally in VulkanRenderer during awake
   void VulkanPipelineManager::CreateGraphicsPipeline(
     const std::string& vertShaderPath,
     const std::string& fragShaderPath,
@@ -303,5 +314,139 @@ namespace Engine
     vkDestroyShaderModule(device, vertModule, nullptr);
     vkDestroyShaderModule(device, fragModule, nullptr);
   }
+
+	void VulkanPipelineManager::CreateUIPipeline(
+		const std::string& vertShaderPath,
+		const std::string& fragShaderPath,
+		VkDescriptorSetLayout uboLayout,        // Set 0: UBO + instance SSBO + UI SSBO
+		VkDescriptorSetLayout bindlessLayout,   // Set 1: bindless textures
+		const std::vector<VkVertexInputBindingDescription>& bindings,
+		const std::vector<VkVertexInputAttributeDescription>& attribs,
+		uint32_t pushConstantSize                // Optional: set to 0 if unused
+	)
+	{
+		auto vertCode = ReadFile(vertShaderPath);
+		auto fragCode = ReadFile(fragShaderPath);
+
+		VkShaderModule vertModule = CreateShaderModule(vertCode);
+		VkShaderModule fragModule = CreateShaderModule(fragCode);
+
+		VkPipelineShaderStageCreateInfo shaderStages[] = {
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT,   vertModule, "main", nullptr },
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragModule, "main", nullptr },
+		};
+
+		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
+		vertexInputInfo.pVertexBindingDescriptions = bindings.data();
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribs.size());
+		vertexInputInfo.pVertexAttributeDescriptions = attribs.data();
+
+		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+		VkPipelineViewportStateCreateInfo viewportState{};
+		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		viewportState.viewportCount = 1;
+		viewportState.scissorCount = 1;
+
+		VkDynamicState dynamicStates[] = {
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR
+		};
+
+		VkPipelineDynamicStateCreateInfo dynamicState{};
+		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dynamicState.dynamicStateCount = 2;
+		dynamicState.pDynamicStates = dynamicStates;
+
+		VkPipelineRasterizationStateCreateInfo rasterizer{};
+		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+		rasterizer.cullMode = VK_CULL_MODE_NONE;
+		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizer.lineWidth = 1.0f;
+
+		VkPipelineMultisampleStateCreateInfo multisampling{};
+		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		multisampling.rasterizationSamples = msaaSamples;
+		// When true this solves the issue of UI objects not alpha blending into the other ui objects below them in transparent parts like corners, 
+		// but introduces very slight jaggedness on screen space corners. We essentially have to sacrifice screen space corner quality to avoid this bug for now.
+		multisampling.alphaToCoverageEnable = VK_TRUE;
+		multisampling.minSampleShading = 1.0f;
+
+		// Normally you would not want UI to be depth tested, but we have it as true since we have billboard UI in world space
+		// This could also maybe make layering a bit easier for us, despite screen space being an orthographic projection in something like [-1,1]
+		VkPipelineDepthStencilStateCreateInfo depthStencil{};
+		depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		depthStencil.depthTestEnable = VK_TRUE;        
+		depthStencil.depthWriteEnable = VK_TRUE;
+		depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; // was always when depth test was set to false
+
+		VkPipelineColorBlendAttachmentState blendAttachment{};
+		blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		blendAttachment.blendEnable = VK_TRUE;
+		blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+		blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+		VkPipelineColorBlendStateCreateInfo blendState{};
+		blendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		blendState.attachmentCount = 1;
+		blendState.pAttachments = &blendAttachment;
+
+		VkPushConstantRange pushConstantRange{};
+		pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		pushConstantRange.offset = 0;
+		pushConstantRange.size = pushConstantSize;
+
+		std::array<VkDescriptorSetLayout, 2> layouts = {
+			uboLayout,
+			bindlessLayout
+		};
+
+		VkPipelineLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		layoutInfo.setLayoutCount = static_cast<uint32_t>(layouts.size());
+		layoutInfo.pSetLayouts = layouts.data();
+		layoutInfo.pushConstantRangeCount = (pushConstantSize > 0) ? 1 : 0;
+		layoutInfo.pPushConstantRanges = (pushConstantSize > 0) ? &pushConstantRange : nullptr;
+
+		if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &uiPipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create UI pipeline layout");
+		}
+
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = shaderStages;
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = &depthStencil;
+		pipelineInfo.pColorBlendState = &blendState;
+		pipelineInfo.pDynamicState = &dynamicState;
+		pipelineInfo.layout = uiPipelineLayout;
+		pipelineInfo.renderPass = renderPass;
+		pipelineInfo.subpass = 0;
+
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &uiPipeline) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create UI graphics pipeline");
+		}
+
+		vkDestroyShaderModule(device, vertModule, nullptr);
+		vkDestroyShaderModule(device, fragModule, nullptr);
+	}
 
 }

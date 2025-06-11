@@ -6,6 +6,7 @@
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/DecoratorUI.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
@@ -15,6 +16,8 @@
 
 namespace Engine
 {
+
+	PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB = nullptr;
 
 	void OpenGLRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
 	{
@@ -47,46 +50,83 @@ namespace Engine
 		return p;
 	}
 
+	HWND CreateDummyWindow(HINSTANCE hInstance)
+	{
+		WNDCLASSA wc = {};
+		wc.style = CS_OWNDC;
+		wc.lpfnWndProc = DefWindowProcA;
+		wc.hInstance = hInstance;
+		wc.lpszClassName = "DummyWGLWindow";
+
+		RegisterClassA(&wc);
+
+		return CreateWindowA(
+			"DummyWGLWindow", "Dummy", WS_OVERLAPPEDWINDOW,
+			0, 0, 1, 1, nullptr, nullptr, hInstance, nullptr
+		);
+	}
+
 	bool OpenGLRenderer::InitOpenGLContext()
 	{
+		// --- Step 1: Create dummy window/context to load WGL extensions ---
+		HINSTANCE hInstance = GetModuleHandle(nullptr);
+		HWND dummyHwnd = CreateDummyWindow(hInstance);
+		HDC dummyDC = GetDC(dummyHwnd);
+
+		PIXELFORMATDESCRIPTOR dummyPFD = {};
+		dummyPFD.nSize = sizeof(dummyPFD);
+		dummyPFD.nVersion = 1;
+		dummyPFD.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+		dummyPFD.iPixelType = PFD_TYPE_RGBA;
+		dummyPFD.cColorBits = 32;
+		dummyPFD.cDepthBits = 24;
+		dummyPFD.cStencilBits = 8;
+		dummyPFD.iLayerType = PFD_MAIN_PLANE;
+
+		int dummyFormat = ChoosePixelFormat(dummyDC, &dummyPFD);
+		SetPixelFormat(dummyDC, dummyFormat, &dummyPFD);
+
+		HGLRC dummyContext = wglCreateContext(dummyDC);
+		wglMakeCurrent(dummyDC, dummyContext);
+
+		// --- Step 2: Load WGL extensions ---
+		if (!gladLoadWGL(dummyDC, (GLADloadfunc)wglGetProcAddress))
+		{
+			std::cerr << "Failed to load WGL extensions.\n";
+			return false;
+		}
+
+		// Load wglChoosePixelFormatARB now that dummy context is current ---
+		g_wglChoosePixelFormatARB = (PFNWGLCHOOSEPIXELFORMATARBPROC)wglGetProcAddress("wglChoosePixelFormatARB");
+
+		if (!g_wglChoosePixelFormatARB)
+		{
+			std::cerr << "[FATAL] wglChoosePixelFormatARB is NULL despite extension being reported.\n";
+			return false;
+		}
+
+		// --- Step 3: Clean up dummy context ---
+		wglMakeCurrent(nullptr, nullptr);
+		wglDeleteContext(dummyContext);
+		ReleaseDC(dummyHwnd, dummyDC);
+		DestroyWindow(dummyHwnd);
+
+		// --- Step 4: Get actual device context ---
 		deviceContext = GetDC(windowHandle);
 		if (!deviceContext)
 		{
-			std::cerr << "Failed to get device context from HWND." << std::endl;
+			std::cerr << "Failed to get device context from window.\n";
 			return false;
 		}
 
 		if (!SetPixelFormatForHDC(deviceContext))
 		{
-			std::cerr << "Failed to set pixel format." << std::endl;
+			std::cerr << "Failed to set pixel format (MSAA).\n";
 			return false;
 		}
 
-		// Create dummy OpenGL context to load WGL extensions
-		HGLRC dummyContext = wglCreateContext(deviceContext);
-		if (!dummyContext)
-		{
-			std::cerr << "Failed to create dummy OpenGL context." << std::endl;
-			return false;
-		}
-
-		if (!wglMakeCurrent(deviceContext, dummyContext))
-		{
-			std::cerr << "Failed to activate dummy OpenGL context." << std::endl;
-			wglDeleteContext(dummyContext);
-			return false;
-		}
-
-		// Load WGL functions using glad
-		if (!gladLoadWGL(deviceContext, (GLADloadfunc)wglGetProcAddress))
-		{
-			std::cerr << "Failed to load WGL functions with gladLoadWGL." << std::endl;
-			wglDeleteContext(dummyContext);
-			return false;
-		}
-
-		// Attributes for the real OpenGL 4.6 core profile context
-		int attribs[] = {
+		// --- Step 5: Create real context ---
+		int contextAttribs[] = {
 			WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
 			WGL_CONTEXT_MINOR_VERSION_ARB, 6,
 			WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
@@ -96,72 +136,91 @@ namespace Engine
 			0
 		};
 
-		glContext = wglCreateContextAttribsARB(deviceContext, nullptr, attribs);
+		glContext = wglCreateContextAttribsARB(deviceContext, nullptr, contextAttribs);
 		if (!glContext)
 		{
-			std::cerr << "Failed to create OpenGL 4.6 context." << std::endl;
-			wglDeleteContext(dummyContext);
+			std::cerr << "Failed to create OpenGL 4.6 context.\n";
 			return false;
 		}
-
-		// Cleanup dummy context
-		wglMakeCurrent(nullptr, nullptr);
-		wglDeleteContext(dummyContext);
 
 		if (!wglMakeCurrent(deviceContext, glContext))
 		{
-			std::cerr << "Failed to activate real OpenGL context." << std::endl;
+			std::cerr << "Failed to make OpenGL context current.\n";
 			return false;
 		}
 
-		// Load OpenGL functions using glad
 		if (!gladLoadGL((GLADloadfunc)GetGLProcAddress))
 		{
-			std::cerr << "Failed to load OpenGL functions with gladLoadGL." << std::endl;
+			std::cerr << "Failed to load OpenGL functions via glad.\n";
 			return false;
 		}
 
-		// Set VSync OFF (0 = disable vsync, 1 = enable vsync)
-		typedef BOOL(APIENTRY* PFNWGLSWAPINTERVALEXTPROC)(int);
-		PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = nullptr;
+		// --- Step 6: Runtime GL settings ---
+		auto wglSwapIntervalEXT = (BOOL(APIENTRY*)(int))wglGetProcAddress("wglSwapIntervalEXT");
+		if (wglSwapIntervalEXT) { wglSwapIntervalEXT(0); }
 
-		wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_DEPTH_CLAMP);
+		glEnable(GL_CULL_FACE);
+		glEnable(GL_MULTISAMPLE);
+		glEnable(GL_STENCIL_TEST);
 
-		if (wglSwapIntervalEXT)
-		{
-			wglSwapIntervalEXT(0); // 0 to disable VSync
-		}
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-		glEnable(GL_DEPTH_TEST);   // 3D depth buffer 
-		glEnable(GL_DEPTH_CLAMP);  // clamped culling
-		glEnable(GL_CULL_FACE);    // back face culling
-		glEnable(GL_MULTISAMPLE);  // MSAA
-		glEnable(GL_STENCIL_TEST); // will be needed for outline stuff later on
+		std::cout << "[INFO] OpenGL Initialized: " << glGetString(GL_VERSION) << "\n";
 
-		std::cout << "OpenGL Initialized: " << glGetString(GL_VERSION) << std::endl;
+		GLint samples = 0;
+		glGetIntegerv(GL_SAMPLES, &samples);
+		std::cout << "[INFO] MSAA samples: " << samples << "\n";
 
 		return true;
 	}
 
 	bool OpenGLRenderer::SetPixelFormatForHDC(HDC hdc)
 	{
-		PIXELFORMATDESCRIPTOR pfd = {};
-		pfd.nSize = sizeof(pfd);
-		pfd.nVersion = 1;
-		pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-		pfd.iPixelType = PFD_TYPE_RGBA;
-		pfd.cColorBits = 32;
-		pfd.cDepthBits = 24;
-		pfd.cStencilBits = 8;
-		pfd.iLayerType = PFD_MAIN_PLANE;
-
-		int pixelFormat = ChoosePixelFormat(hdc, &pfd);
-		if (pixelFormat == 0 || !SetPixelFormat(hdc, pixelFormat, &pfd))
+		if (!g_wglChoosePixelFormatARB)
 		{
-			std::cerr << "Failed to set pixel format." << std::endl;
+			std::cerr << "g_wglChoosePixelFormatARB is not set.\n";
 			return false;
 		}
 
+		const int pixelAttribs[] = {
+			WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+			WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+			WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+			WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+			WGL_COLOR_BITS_ARB, 32,
+			WGL_DEPTH_BITS_ARB, 24,
+			WGL_STENCIL_BITS_ARB, 8,
+			WGL_SAMPLE_BUFFERS_ARB, 1,   // Enable MSAA
+			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA
+			0
+		};
+
+		int pixelFormat = 0;
+		UINT numFormats = 0;
+
+		if (!g_wglChoosePixelFormatARB(hdc, pixelAttribs, nullptr, 1, &pixelFormat, &numFormats) || numFormats == 0)
+		{
+			std::cerr << "wglChoosePixelFormatARB failed.\n";
+			return false;
+		}
+
+		PIXELFORMATDESCRIPTOR pfd = {};
+		if (!DescribePixelFormat(hdc, pixelFormat, sizeof(pfd), &pfd))
+		{
+			std::cerr << "DescribePixelFormat failed.\n";
+			return false;
+		}
+
+		if (!SetPixelFormat(hdc, pixelFormat, &pfd))
+		{
+			std::cerr << "SetPixelFormat failed for multisample format.\n";
+			return false;
+		}
+
+		std::cout << "[INFO] MSAA-capable pixel format set successfully.\n";
 		return true;
 	}
 
@@ -182,51 +241,69 @@ namespace Engine
 
 	int OpenGLRenderer::Awake()
 	{
-		// --- 1) Compile & link ---
+		// --- 1) Compile and link main shader ---
 		std::string vertSource = LoadTextFile("Shaders/OpenGL/vertex.glsl");
 		std::string fragSource = LoadTextFile("Shaders/OpenGL/fragment.glsl");
 		GLuint vert = CompileGLSLShader(GL_VERTEX_SHADER, vertSource.c_str());
 		GLuint frag = CompileGLSLShader(GL_FRAGMENT_SHADER, fragSource.c_str());
 		shaderProgram = LinkShaderProgram({ vert, frag });
 
-		// --- 2) Bind the Camera UBO block to binding point 0 ---
-		//    This tells the shader's "layout(binding=0) uniform Camera" to read from our buffer.
+		// --- 2) Camera block and uniforms ---
 		GLuint cameraBlockIndex = glGetUniformBlockIndex(shaderProgram, "Camera");
-		if (cameraBlockIndex == GL_INVALID_INDEX)
-		{
-			std::cerr << "Warning: 'Camera' UBO not found in shader\n";
-		}
-		else
+		if (cameraBlockIndex != GL_INVALID_INDEX)
 		{
 			glUniformBlockBinding(shaderProgram, cameraBlockIndex, 0);
 		}
-
-		// --- 3) Cache all the *other* uniforms we still use each frame ---
-		loc_model = glGetUniformLocation(shaderProgram, "model");
+		loc_mvp = glGetUniformLocation(shaderProgram, "mvp");
 		loc_hasTexture = glGetUniformLocation(shaderProgram, "hasTexture");
 		loc_albedoTex = glGetUniformLocation(shaderProgram, "albedoTex");
 
-		// --- 4) Create and allocate the GPU buffer for our CameraUBO struct ---
+		// --- 3) Camera UBO setup ---
 		glGenBuffers(1, &ubo);
 		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-		// allocate enough space but don't fill yet
 		glBufferData(GL_UNIFORM_BUFFER, sizeof(CameraUBO), nullptr, GL_DYNAMIC_DRAW);
-		// bind to slot 0
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
-		// unbind
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-		// load textures, etc.
+		// --- 4) Load and compile Decorator UI Shader ---
+		std::string uiVertSrc = LoadTextFile("Shaders/OpenGL/ui_vertex.glsl");
+		std::string uiFragSrc = LoadTextFile("Shaders/OpenGL/ui_fragment.glsl");
+
+		GLuint uiVert = CompileGLSLShader(GL_VERTEX_SHADER, uiVertSrc.c_str());
+		GLuint uiFrag = CompileGLSLShader(GL_FRAGMENT_SHADER, uiFragSrc.c_str());
+
+		uiDecoratorShader = LinkShaderProgram({ uiVert, uiFrag });
+
+		// Cache uniform locations for UI shader
+		loc_ui_mvp = glGetUniformLocation(uiDecoratorShader, "mvp");
+		loc_ui_fillColor = glGetUniformLocation(uiDecoratorShader, "fillColor");
+		loc_ui_strokeColor = glGetUniformLocation(uiDecoratorShader, "strokeColor");
+		loc_ui_strokeWidth = glGetUniformLocation(uiDecoratorShader, "strokeWidth");
+		loc_ui_cornerRadius = glGetUniformLocation(uiDecoratorShader, "cornerRadius");
+		loc_ui_enableStroke = glGetUniformLocation(uiDecoratorShader, "enableStroke");
+		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
+		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
+		loc_ui_resolution = glGetUniformLocation(uiDecoratorShader, "resolution");
+		loc_ui_quadSize = glGetUniformLocation(uiDecoratorShader, "quadSize");
+		loc_ui_useTexture = glGetUniformLocation(uiDecoratorShader, "useTexture");
+		loc_ui_albedoTex = glGetUniformLocation(uiDecoratorShader, "albedoTex");
+		loc_ui_isWorldSpace = glGetUniformLocation(uiDecoratorShader, "isWorldSpace");
+
+		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
 		pool.LoadAllRecursively();
 		missingTexture = pool.GetTexture2DLazy("mart");
 
-		// Now set up the cubemap
+		// --- 6) Cubemap setup ---
 		cubemapController = std::make_unique<CubeMapController>(
 			"Shaders/OpenGL/skybox_vert.glsl",
 			"Shaders/OpenGL/skybox_frag.glsl"
 		);
 		cubemapController->SetEnabled(false);
+
+		GLint samples = 0;
+		glGetIntegerv(GL_SAMPLES, &samples);
+		std::cout << "MSAA Samples: " << samples << std::endl;
 
 		return 0;
 	}
@@ -244,6 +321,7 @@ namespace Engine
 			char infoLog[512];
 			glGetShaderInfoLog(shader, 512, nullptr, infoLog);
 			std::string errorStage = (stage == GL_VERTEX_SHADER) ? "VERTEX" : "FRAGMENT";
+			std::cout << "GLSL " + errorStage + " shader compile failed: " + std::string(infoLog) << std::endl;
 			throw std::runtime_error("GLSL " + errorStage + " shader compile failed: " + std::string(infoLog));
 		}
 
@@ -292,52 +370,270 @@ namespace Engine
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		UpdateUniformBuffer();
-		glUseProgram(shaderProgram);
 
-		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (!scene)
 		{
 			SwapBuffers(deviceContext);
 			return;
 		}
 
-		// Setup camera + frustum
-		std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
-		auto& view = camera->GetViewMatrix();
-		auto& proj = camera->GetProjectionMatrix();
-
+		const glm::mat4& view = cameraSystem->GetViewMatrix();
+		const glm::mat4& proj = cameraSystem->GetProjectionMatrix();
 		Frustum::SetCameraMatrices(view, proj);
-		const Frustum& frustum = Frustum::Get();
 
-		entt::registry& registry = scene->GetRegistry();
+		auto& registry = scene->GetRegistry();
 
-		// Draw everything within the frustum
-		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
+		if (cubemapController)
 		{
-			DrawEntity(entity, registry);
-		});
+			cubemapController->Render(view, proj);
+		}
+
+		RenderWorldSpace(scene, registry, view, proj);
+		RenderScreenAndDecoratorUI(registry, view, proj);
 
 	#ifdef _DEBUG
 		RenderWireframeDebug(scene);
 	#endif
 
-		// Draw the cubemap last
-		if (cubemapController) cubemapController->Render(view, proj);
-
 		SwapBuffers(deviceContext);
 	}
 
-	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry)
+	static bool hasUploadedOrtho = false;
+
+	void OpenGLRenderer::UpdateUniformBuffer()
+	{
+		cameraUBO.view = cameraSystem->GetViewMatrix();
+		cameraUBO.proj = cameraSystem->GetProjectionMatrix();
+
+		const Camera& camera = cameraSystem->GetCamera();
+
+		// Calculate half FOV tangents - make sure signs are correct
+		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
+		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
+
+		cameraUBO.camParams.x = tanHalfFovX;
+		cameraUBO.camParams.y = tanHalfFovY;
+		cameraUBO.camParams.z = camera.GetNearClip();
+		cameraUBO.camParams.w = camera.GetFarClip();
+
+		// Since this projection is always the exact same values, we only have to do it once 
+		if (!hasUploadedOrtho)
+		{
+			cameraUBO.screenView = glm::mat4(1.0f); // Identity
+
+			cameraUBO.screenProj = glm::ortho(
+				0.0f, VirtualCanvasWidth,
+				0.0f, VirtualCanvasHeight,
+				-1.0f, 1.0f
+			);
+
+			hasUploadedOrtho = true;
+		}
+
+		cameraUBO.viewportSize = glm::vec2(windowWidth, windowHeight);
+
+		// Send them to the GPU UBO at binding 0
+		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &cameraUBO);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
+
+	// Draws all non decorated world space objects
+	void OpenGLRenderer::RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		const Frustum& frustum = Frustum::Get();
+
+		glUseProgram(shaderProgram); // main shader 
+		glEnable(GL_CULL_FACE);
+
+		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
+		{
+			const Transform& tf = registry.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				return;
+			}
+
+			// Skip decorator UI elements — they go in separate pass
+			if (registry.any_of<DecoratorUI>(entity))
+			{
+				return;
+			}
+
+			DrawEntity(entity, registry, viewMatrix, projectionMatrix);
+		});
+	}
+
+	// Draws all screen space objects (typically UI) and also regular transforms that happen to be in screen space
+	void OpenGLRenderer::RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		// We still want to do some simple per object culling
+		const Frustum& frustum = Frustum::Get();
+
+		glUseProgram(uiDecoratorShader);
+		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); // proper blending in transparent spots with other UI objects behind each other
+		glDisable(GL_CULL_FACE); // for vulkan parity, since the vulkan UI pipeline currently does not have back face culling enabled
+
+		glm::vec2 screenScale = glm::vec2(
+			static_cast<float>(windowWidth) / VirtualCanvasWidth,
+			static_cast<float>(windowHeight) / VirtualCanvasHeight
+		);
+
+		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
+		{
+			const std::shared_ptr<MaterialData>& mat = matComp.data;
+			bool hasDecorator = registry.any_of<DecoratorUI>(entity);
+			TransformSpace space = tf.GetTransformSpace();
+
+			if (!hasDecorator && space != TransformSpace::Screen)
+			{
+				return; // Not UI, not decorated, so was either already rendered or culled
+			}
+
+			const glm::vec3& pos = tf.GetPosition();
+			const glm::vec3& scale = tf.GetScale();
+
+			bool isWorld = (space == TransformSpace::World);
+
+			const glm::mat4& model = tf.GetModelMatrix();
+
+			// First do a simple cull check
+			if (isWorld)
+			{
+				if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+				{
+					return;
+				}
+			}
+			else
+			{
+				// Sceen space 2D check using window width and height
+				
+				// Convert quad AABB to pixel-space (by scaling virtual units up)
+				glm::vec2 screenScale = glm::vec2(
+					static_cast<float>(windowWidth) / VirtualCanvasWidth,
+					static_cast<float>(windowHeight) / VirtualCanvasHeight
+				);
+
+				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+				glm::vec2 center = glm::vec2(pos) * screenScale;
+				glm::vec2 halfSizePx = halfSize * screenScale;
+
+				glm::vec2 minPx = center - halfSizePx;
+				glm::vec2 maxPx = center + halfSizePx;
+
+				// Clamp against the actual framebuffer
+				if (maxPx.x < 0.0f || maxPx.y < 0.0f)
+				{
+					return; // off left or bottom
+				}
+
+				if (minPx.x > windowWidth || minPx.y > windowHeight)
+				{
+					return; // off right or top
+				}
+			}
+
+			glm::mat4 mvp;
+			glm::vec2 quadSizeInPixels;
+			glm::vec2 radiusPx, strokePx;
+
+			if (isWorld)
+			{
+				// World-space projection scaling
+				glm::vec4 viewPos = viewMatrix * glm::vec4(pos, 1.0f);
+				float absZ = std::max(std::abs(viewPos.z), 0.0001f);
+
+				float wppX = (2.0f * absZ * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
+				float wppY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
+
+				quadSizeInPixels = glm::vec2(scale.x / wppX, scale.y / wppY);
+
+				glm::vec2 scaler = glm::vec2(250.0f);
+				if (hasDecorator)
+				{
+					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+					radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
+					strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
+				}
+
+				mvp = projectionMatrix * viewMatrix * model;
+			}
+			else
+			{
+				quadSizeInPixels = glm::vec2(scale) * screenScale;
+
+				if (hasDecorator)
+				{
+					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+					radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
+					strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
+				}
+
+				mvp = cameraUBO.screenProj * model;
+			}
+
+			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
+			glUniform2fv(loc_ui_resolution, 1, &cameraUBO.viewportSize[0]);
+			glUniform2fv(loc_ui_quadSize, 1, &quadSizeInPixels[0]);
+			glUniform1i(loc_ui_isWorldSpace, isWorld ? 1 : 0);
+
+			if (hasDecorator)
+			{
+				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+
+				glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
+				glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
+				glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx[0]);
+				glUniform2fv(loc_ui_strokeWidth, 1, &strokePx[0]);
+				glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
+				glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
+				glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
+				glUniform1i(loc_ui_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			}
+			else
+			{
+				// No decorator -> use vertex color
+				glUniform4f(loc_ui_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
+				glUniform1i(loc_ui_enableFill, 1);
+				glUniform1i(loc_ui_enableStroke, 0);
+				glUniform1i(loc_ui_roundCorners, 0);
+				glUniform1i(loc_ui_useTexture, mat->albedoMap ? 1 : 0);
+				glUniform2fv(loc_ui_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
+				glUniform2fv(loc_ui_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
+				glUniform4f(loc_ui_strokeColor, 0, 0, 0, 1);
+			}
+
+			// Bind albedo texture
+			GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, texID);
+			glUniform1i(loc_ui_albedoTex, 0);
+
+			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+			glBindVertexArray(mesh.GetGLVAO());
+			glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_SHORT, nullptr);
+			glBindVertexArray(0);
+		});
+
+		glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE); // turn back off
+	}
+
+	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
 		const Transform& transform = registry.get<Transform>(entity);
 		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
 		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
 
-		// Model matrix
-		glm::mat4 model = transform.GetModelMatrix();
-		glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
+		// Compute model matrix and full MVP
+		const glm::mat4& model = transform.GetModelMatrix();
+		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
 
-		// Texture bind
+		// Upload matrix to shader
+		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+		// Bind texture if available
 		bool usesTexture = (mat->albedoMap != nullptr);
 		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
 
@@ -362,20 +658,21 @@ namespace Engine
 			return;
 		}
 
+		glUseProgram(shaderProgram);
+
 		auto& debugRegistry = debugDraw->GetRegistry();
 		const Frustum& frustum = Frustum::Get();
 
-		// No textures for debug
-		uint32_t textureIndex = UINT32_MAX;
-		float hasTexture = 0.0f;
+		// Wireframe uses camera view and projection
+		const glm::mat4& view = scene->GetCameraSystem()->GetViewMatrix();
+		const glm::mat4& proj = scene->GetCameraSystem()->GetProjectionMatrix();
 
-		// Append debug wireframe boxes into instance buffer
-		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
+		auto viewEntities = debugRegistry.view<Transform, DebugWireBoxData>();
 
-		for (auto& entity : view)
+		for (auto entity : viewEntities)
 		{
-			const Transform& transform = view.get<Transform>(entity);
-			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
+			const Transform& transform = viewEntities.get<Transform>(entity);
+			const DebugWireBoxData& box = viewEntities.get<DebugWireBoxData>(entity);
 			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
 
 			if constexpr (cullWireframe)
@@ -389,48 +686,29 @@ namespace Engine
 				}
 			}
 
-			// attatch model
+			// Compute and set MVP
 			glm::mat4 model = transform.GetModelMatrix();
-			glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
-			// wireframes don't use textures
+			glm::mat4 mvp = proj * view * model;
+			glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+			// No texture for debug wireframes
 			glUniform1f(loc_hasTexture, 0.0f);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, 0);
 			glUniform1i(loc_albedoTex, 0);
-			// bind mesh data and draw it
+
+			// Draw mesh
 			const MeshBufferData& meshData = *mesh->meshBufferData;
 			glBindVertexArray(meshData.GetGLVAO());
 			glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
-
-			// (optionally) unbind so we don’t accidentally reuse it somehow
 			glBindVertexArray(0);
 		}
-	}
-
-	void OpenGLRenderer::UpdateUniformBuffer()
-	{
-		// 1) Gather the latest camera matrices into our CPU side struct
-		CameraUBO camData{};
-		camData.view = cameraSystem->GetViewMatrix();
-		camData.proj = cameraSystem->GetProjectionMatrix();
-
-		// Extract fov from projection matrix (OpenGL version, no Y flip)
-		float fovY = 2.0f * atanf(1.0f / camData.proj[1][1]);
-		float aspect = camData.proj[1][1] / camData.proj[0][0];
-		float fovX = 2.0f * atanf(tanf(fovY * 0.5f) * aspect);
-
-		auto& camera = cameraSystem->GetCamera();
-		camData.camParams = glm::vec4(fovX, fovY, camera.GetNearClip(), camera.GetFarClip());
-
-		// 2) Send them to the GPU UBO at binding 0
-		glBindBuffer(GL_UNIFORM_BUFFER, ubo);
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(CameraUBO), &camData);
-		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 	}
 
 	int OpenGLRenderer::Exit()
 	{
 		glDeleteProgram(shaderProgram);
+		glDeleteProgram(uiDecoratorShader);
 		glDeleteBuffers(1, &ubo);
 		MeshPool::GetInstance().Flush();
 		TexturePool::GetInstance().Flush();

@@ -30,4 +30,23 @@ namespace Engine
 		return distribution(generator);
 	}
 
+	// Random glm::vec2 with each component in [min, max]
+	inline glm::vec2 randVec2(float min, float max)
+	{
+		return glm::vec2(
+			randFloat(min, max),
+			randFloat(min, max)
+		);
+	}
+
+	// Random glm::vec3 with each component in [min, max]
+	inline glm::vec3 randVec3(float min, float max)
+	{
+		return glm::vec3(
+			randFloat(min, max),
+			randFloat(min, max),
+			randFloat(min, max)
+		);
+	}
+
 }

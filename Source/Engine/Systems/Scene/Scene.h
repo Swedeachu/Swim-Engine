@@ -228,6 +228,8 @@ namespace Engine
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
+		void UpdateUIBehaviors();
+
 	};
 
 }

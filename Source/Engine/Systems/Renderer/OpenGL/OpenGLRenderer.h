@@ -4,9 +4,11 @@
 
 namespace Engine
 {
-	
+
+	extern PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB;
+
 	// Forward decalre
-	class Texture2D; 
+	class Texture2D;
 
 	class OpenGLRenderer : public Renderer
 	{
@@ -45,9 +47,15 @@ namespace Engine
 		// Rendering
 		void RenderFrame();
 		void UpdateUniformBuffer();
-		void DrawEntity(entt::entity entity, entt::registry& registry);
+
+		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+
+		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
 		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
+
+		CameraUBO cameraUBO{};
 
 		HDC deviceContext = nullptr;
 		HGLRC glContext = nullptr;
@@ -66,11 +74,29 @@ namespace Engine
 		std::unique_ptr<CubeMapController> cubemapController;
 
 		// Shader Cached uniform locations (kinda gross)
-		GLint loc_model = -1;
+		GLint loc_mvp = -1;
 		GLint loc_view = -1;
 		GLint loc_proj = -1;
 		GLint loc_hasTexture = -1;
 		GLint loc_albedoTex = -1;
+
+		// --- Decorator UI shader program ---
+		GLuint uiDecoratorShader = 0;
+
+		// Uniform locations for UI-specific uniforms
+		GLint loc_ui_mvp = -1;
+		GLint loc_ui_fillColor = -1;
+		GLint loc_ui_strokeColor = -1;
+		GLint loc_ui_strokeWidth = -1;
+		GLint loc_ui_cornerRadius = -1;
+		GLint loc_ui_enableStroke = -1;
+		GLint loc_ui_enableFill = -1;
+		GLint loc_ui_roundCorners = -1;
+		GLint loc_ui_resolution = -1;
+		GLint loc_ui_quadSize = -1;
+		GLint loc_ui_useTexture = -1;
+		GLint loc_ui_albedoTex = -1;
+		GLint loc_ui_isWorldSpace = -1;
 
 	};
 

@@ -94,10 +94,10 @@ namespace Game
 			return;
 		}
 
-		// Adjust rotation speed with F, G, H
+		// Adjust rotation speed with F, T, H
 		if (input->IsKeyDown('F'))
 			rotationSpeed += 0.01f;
-		else if (input->IsKeyDown('G'))
+		else if (input->IsKeyDown('T'))
 			rotationSpeed -= 0.01f;
 		else if (input->IsKeyTriggered('H'))
 			rotationSpeed = 0.5f;

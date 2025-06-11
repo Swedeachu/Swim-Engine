@@ -169,6 +169,16 @@ namespace Engine
 			sizeof(GpuInstanceData)
 		);
 
+		pipelineManager->CreateUIPipeline(
+			"Shaders\\VertexShaders\\vertex_ui.spv",
+			"Shaders\\FragmentShaders\\fragment_ui.spv",
+			layout,
+			bindlessLayout,
+			{ bindings.begin(), bindings.end() },
+			allAttribs,
+			sizeof(UIParams)
+		);
+
 		// Initialize command manager with correct graphics queue family index
 		uint32_t graphicsQueueFamilyIndex = deviceManager->FindQueueFamilies(physicalDevice).graphicsFamily.value();
 		commandManager = std::make_unique<VulkanCommandManager>(
@@ -356,27 +366,41 @@ namespace Engine
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
+	static bool hasUploadedOrtho = false;
+
 	void VulkanRenderer::UpdateUniformBuffer()
 	{
-		CameraUBO ubo{};
+		cameraUBO.view = cameraSystem->GetViewMatrix();
+		cameraUBO.proj = cameraSystem->GetProjectionMatrix(); 
 
-		ubo.view = cameraSystem->GetViewMatrix();
-		ubo.proj = cameraSystem->GetProjectionMatrix();  // already has the Vulkan Y-flip
-
-		const auto& camera = cameraSystem->GetCamera();
+		const Camera& camera = cameraSystem->GetCamera();
 
 		// Calculate half FOV tangents - make sure signs are correct
 		float tanHalfFovY = tan(glm::radians(camera.GetFOV() * 0.5f));
 		float tanHalfFovX = tanHalfFovY * camera.GetAspect();
 
-		ubo.camParams = glm::vec4(
-			tanHalfFovX,
-			tanHalfFovY,
-			camera.GetNearClip(),
-			camera.GetFarClip()
-		);
+		cameraUBO.camParams.x = tanHalfFovX;
+		cameraUBO.camParams.y = tanHalfFovY;
+		cameraUBO.camParams.z = camera.GetNearClip();
+		cameraUBO.camParams.w = camera.GetFarClip();
 
-		descriptorManager->UpdatePerFrameUBO(currentFrame, ubo);
+		// Since this projection is always the exact same values, we only have to do it once 
+		if (!hasUploadedOrtho)
+		{
+			cameraUBO.screenView = glm::mat4(1.0f); // Identity
+
+			cameraUBO.screenProj = glm::ortho(
+				0.0f, VirtualCanvasWidth,
+				VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
+				-1.0f, 1.0f
+			);
+
+			hasUploadedOrtho = true;
+		}
+
+		cameraUBO.viewportSize = glm::vec2(windowWidth, windowHeight);
+
+		descriptorManager->UpdatePerFrameUBO(currentFrame, cameraUBO);
 	}
 
 	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)
@@ -451,7 +475,8 @@ namespace Engine
 		);
 
 		// === Scene: Draw all indexed meshes ===
-		indexDraw->DrawIndexed(currentFrame, cmd);
+		indexDraw->DrawIndexedWorld(currentFrame, cmd);
+		indexDraw->DrawIndexedScreenAndDecoratorUI(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 

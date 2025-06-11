@@ -59,6 +59,13 @@ namespace Engine
 		for (entt::entity e : view)
 		{
 			const Transform& tf = view.get<Transform>(e);
+
+			// Ignore stuff not in the world
+			if (tf.GetTransformSpace() == TransformSpace::Screen)
+			{
+				continue;
+			}
+
 			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
 			const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
@@ -199,6 +206,13 @@ namespace Engine
 		for (auto& [entity, _] : oldLeaves)
 		{
 			auto& tf = registry.get<Transform>(entity);
+
+			// Ignore stuff not in the world
+			if (tf.GetTransformSpace() == TransformSpace::Screen)
+			{
+				continue;
+			}
+
 			auto& mat = registry.get<Material>(entity);
 			const auto& mesh = mat.data->mesh;
 
