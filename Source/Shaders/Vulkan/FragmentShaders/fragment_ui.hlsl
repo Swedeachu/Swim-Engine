@@ -69,10 +69,10 @@ float4 main(FSInput input) : SV_Target
 
     if (ui.enableStroke != 0)
     {
-        // Adjust inner shape only if stroke is enabled
-        innerHalf = max(halfSize - strokeUV * halfSize * 2.0f, float2(0.0f, 0.0f));
-        innerRad = max(radius - max(strokeUV.x * halfSize.x * 2.0f, strokeUV.y * halfSize.y * 2.0f), 0.0f);
-    }
+      // Adjust inner shape only if stroke is enabled
+      innerHalf = max(halfSize - strokeUV * halfSize * 2.0f, float2(0.0f, 0.0f));
+      innerRad = max(radius - max(strokeUV.x * halfSize.x * 2.0f, strokeUV.y * halfSize.y * 2.0f), 0.0f);
+  }
 
     // Compute distance to outer shape
     float distOuter = (radius > 0.0f)
@@ -84,12 +84,12 @@ float4 main(FSInput input) : SV_Target
         ? RoundedRectSDF(posPx, innerHalf, innerRad)
         : BoxSDF(posPx, innerHalf);
 
-    // Screen-space correct anti-aliasing width (based on avg pixel size)
-    float aaWidthPx = 1.0f;
-    float aaWidth = aaWidthPx / ((halfSize.x + halfSize.y)); // average px size to local
+    // Screen-space correct anti-aliasing width (based on per-fragment gradient)
+    float aaWidthOuter = fwidth(distOuter);
+    float aaWidthInner = fwidth(distInner);
 
-    float outerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distOuter);
-    float innerAlpha = 1.0f - smoothstep(-aaWidth, aaWidth, distInner);
+    float outerAlpha = 1.0f - smoothstep(-aaWidthOuter, aaWidthOuter, distOuter);
+    float innerAlpha = 1.0f - smoothstep(-aaWidthInner, aaWidthInner, distInner);
 
     // Stroke alpha is the shell between outer and inner SDFs
     float strokeAlpha = (ui.enableStroke != 0) ? clamp(outerAlpha - innerAlpha, 0.0f, 1.0f) : 0.0f;

@@ -436,8 +436,34 @@ namespace Engine
 				instance.hasTexture = useTex ? 1.0f : 0.0f;
 				instance.textureIndex = useTex ? mat->albedoMap->GetBindlessIndex() : 0;
 
-				glm::vec2 radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
-				glm::vec2 strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
+				glm::vec2 radiusPx;
+				glm::vec2 strokePx;
+
+				if (space == TransformSpace::Screen)
+				{
+					radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
+					strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
+				}
+				else
+				{
+					// Convert decorator values (specified in world units) to pixels so they scale with the quad
+					const glm::vec3& worldPos2 = transform.GetPosition();
+					glm::vec4 viewPos2 = worldView * glm::vec4(worldPos2, 1.0f);
+					float absZ2 = std::abs(viewPos2.z);
+
+					if (absZ2 < 0.0001f)
+					{
+						absZ2 = 0.0001f;
+					}
+
+					const float worldPerPixelX2 = (2.0f * absZ2 * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
+					const float worldPerPixelY2 = (2.0f * absZ2 * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
+
+					glm::vec2 scaler = { 250, 250 }; // BS number that just works well
+
+					radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(worldPerPixelX2, worldPerPixelY2), quadSizeInPixels * 0.5f);
+					strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(worldPerPixelX2, worldPerPixelY2), quadSizeInPixels * 0.5f);
+				}
 
 				ui.fillColor = deco.fillColor;
 				ui.strokeColor = deco.strokeColor;
@@ -455,7 +481,7 @@ namespace Engine
 				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
 
 				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of UI Decorator.
-				// So we mark fill color as -1.0 as a flag to the shader to use mesh color sample instead.
+				// So we mark fill color as -1.0f as a flag to the shader to use mesh color sample instead.
 				ui.fillColor = glm::vec4(-1.0f);
 				// Everything else is zero'd out or default
 				ui.strokeColor = glm::vec4(0.0f);
