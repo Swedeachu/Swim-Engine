@@ -578,8 +578,8 @@ namespace Game
 					//  position          color               uv
 					{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}},  // bottom-left  => uv(0,1)
 					{{ 0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}},  // bottom-right => uv(1,1)
-					{{ 0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},  // top-right    => uv(1,0)
-					{{-0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
+					{{ 0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},  // top-right    => uv(1,0)
+					{{-0.5f,  0.5f, 0.0f}, {1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 				};
 				secondMesh = meshPool.RegisterMesh("SecondTestMeshUI", redQuadVertices, quadIndices);
 			}
@@ -598,7 +598,7 @@ namespace Game
 		// Decorator with red stroke instead of black
 		Engine::DecoratorUI redDecorator = Engine::DecoratorUI(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill
-			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke
+			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
 			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
 			glm::vec2(16.0f, 16.0f),              // corner radius X/Y (smaller rounding)
 			glm::vec2(4.0f),                      // padding
@@ -666,7 +666,7 @@ namespace Game
 		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		AddComponent<Engine::Material>(billboard, materialData2);
 
-		/* World space UI just doesn't really work since the shader doesn't do stroke properly and it doesn't get rendered at the proper stage where the depth test is active.
+		///* World space UI just doesn't really work since the shader doesn't do stroke properly and it doesn't get rendered at the proper stage where the depth test is active.
 		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
 			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red

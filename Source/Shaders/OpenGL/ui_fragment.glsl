@@ -1,6 +1,8 @@
 #version 460 core
 
 in vec2 fragUV;
+in vec3 fragColor;
+
 out vec4 FragColor;
 
 uniform vec4 fillColor;
@@ -82,15 +84,33 @@ void main()
   // Sample from texture if texture is enabled
   vec4 texSample = texture(albedoTex, fragUV);
 
-  // Use texture color or fallback to fillColor
-  vec4 fillSrc = (useTexture == 1) ? texSample : fillColor;
+  //fillSrc selection (texture ->  vertex colour ->  uniform)
+  bool useVertexColor = all(lessThan(fillColor.rgb, vec3(0.0)));
+  vec4 fillSrc = vec4(1.0);
 
-  // Mix fill and stroke colors by stroke alpha
-  vec3 finalColor = mix(fillSrc.rgb, strokeColor.rgb, strokeAlpha);
+  if (useTexture == 1)
+  {
+    fillSrc = texSample;
+  }
+  else if (useVertexColor)
+  {
+    fillSrc = vec4(fragColor, 1.0);
+  }
+  else
+  {
+    fillSrc = fillColor;
+  }
 
-  // Mix alpha between fill and stroke contributions
-  float finalAlpha = mix(fillSrc.a * fillAlpha, strokeColor.a, strokeAlpha);
+  // Remove the 1-pixel transparent seam between fill & stroke
+  float combinedAlpha = clamp(fillAlpha + strokeAlpha, 0.0, 1.0);
+
+  vec3 combinedColor = vec3(0.0);
+  if (combinedAlpha > 0.0)
+  {
+    combinedColor = (fillSrc.rgb * fillAlpha +
+      strokeColor.rgb * strokeAlpha) / combinedAlpha;
+  }
 
   // Final pixel output
-  FragColor = vec4(finalColor, finalAlpha);
+  FragColor = vec4(combinedColor, combinedAlpha);
 }
