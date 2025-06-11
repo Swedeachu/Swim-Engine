@@ -84,47 +84,60 @@ VSOutput main(VSInput vin)
   float4x4 proj = isScreen ? screenProj : worldProj;
 
   float3 worldPos;
+  float2 halfSizePx;
 
   if (isScreen)
   {
+    // Screen-space: model matrix gives pixel position directly
     float4 local = float4(vin.position, 1.0f);
     worldPos = mul(inst.model, local).xyz;
+
+    // Half-size in pixels comes directly from UIParams
+    halfSizePx = ui.quadSize * 0.5f;
   }
   else
   {
-    // regular model-space -> world-space transform 
+    // World-space: use full model transform
     worldPos = mul(inst.model, float4(vin.position, 1.0f)).xyz;
 
-    // we still need the quad’s projected half-size in pixels for the SDF
+    // Compute projected pixel size for correct SDF rendering
     float3 centreWS = inst.model[3].xyz;
     float3 centreVS = mul(worldView, float4(centreWS, 1.0f)).xyz;
-    float  absZ = abs(centreVS.z);
+    float absZ = abs(centreVS.z);
 
+    // Convert world units to pixels based on depth and camera FOV
     float worldPerPxX = (2.0f * absZ * camParams.x) / viewportSize.x;
     float worldPerPxY = (2.0f * absZ * camParams.y) / viewportSize.y;
 
-    // local half-size in world units (scale is |column| * 0.5)
+    // Compute local half-extents in world units from model scale
     float halfWorldX = length(inst.model[0].xyz) * 0.5f;
     float halfWorldY = length(inst.model[1].xyz) * 0.5f;
 
-    vout.quadSizePx = float2(
+    // Get screen-space half-size in pixels
+    halfSizePx = float2(
       halfWorldX / worldPerPxX,
       halfWorldY / worldPerPxY
     );
   }
 
+  // Output position in clip space
   float4 clipPos = mul(proj, mul(view, float4(worldPos, 1.0f)));
   vout.position = clipPos;
+
+  // Pass-through
   vout.uv = vin.uv;
   vout.textureIndex = inst.textureIndex;
   vout.hasTexture = inst.hasTexture;
   vout.instanceID = inst.materialIndex;
   vout.color = vin.color;
 
-  vout.quadSizePx = ui.quadSize * 0.5f;
+  // Used for SDF computation in pixel space in fragment shader
+  vout.quadSizePx = halfSizePx;
 
-  float2 ndc = clipPos.xy / clipPos.w;
-  vout.centerPx = (ndc * 0.5f + 0.5f) * viewportSize;
+  // The pixel center of the quad in screen-space
+  float4 clipCentre = mul(proj, mul(view, float4(inst.model[3].xyz, 1.0f)));
+  float2 ndcCentre = clipCentre.xy / clipCentre.w;
+  vout.centerPx = (ndcCentre * 0.5f + 0.5f) * viewportSize;
 
   return vout;
 }
