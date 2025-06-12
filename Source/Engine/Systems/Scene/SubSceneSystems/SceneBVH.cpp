@@ -59,13 +59,7 @@ namespace Engine
 		for (entt::entity e : view)
 		{
 			const Transform& tf = view.get<Transform>(e);
-
-			// Ignore stuff not in the world
-			if (tf.GetTransformSpace() == TransformSpace::Screen)
-			{
-				continue;
-			}
-
+			if (tf.GetTransformSpace() != TransformSpace::World) continue; // ignore stuff not in the world
 			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
 			const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
@@ -206,13 +200,6 @@ namespace Engine
 		for (auto& [entity, _] : oldLeaves)
 		{
 			auto& tf = registry.get<Transform>(entity);
-
-			// Ignore stuff not in the world
-			if (tf.GetTransformSpace() == TransformSpace::Screen)
-			{
-				continue;
-			}
-
 			auto& mat = registry.get<Material>(entity);
 			const auto& mesh = mat.data->mesh;
 
@@ -366,6 +353,9 @@ namespace Engine
 		forceUpdate = true;
 	}
 
+	// I have more versions of IsAABBVisible, and I have no idea which one is fastest
+
+	/* classic
 	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
 	{
 		// Test against all 6 frustum planes
@@ -396,37 +386,9 @@ namespace Engine
 		// Box is inside or intersects frustum
 		return true;
 	}
+	*/
 
-	/* I have more versions of this function, and I have no idea which one is fastest
-	
-	#define TEST_CORNER(plane, x, y, z) \
-    (glm::dot(glm::vec3(plane), glm::vec3(x, y, z)) + (plane).w < 0.0f ? 1 : 0)
-
-	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
-	{
-		for (int i = 0; i < 6; ++i)
-		{
-			const glm::vec4& plane = frustum.planes[i];
-			int outside = 0;
-
-			outside += TEST_CORNER(plane, aabb.min.x, aabb.min.y, aabb.min.z);
-			outside += TEST_CORNER(plane, aabb.max.x, aabb.min.y, aabb.min.z);
-			outside += TEST_CORNER(plane, aabb.min.x, aabb.max.y, aabb.min.z);
-			outside += TEST_CORNER(plane, aabb.max.x, aabb.max.y, aabb.min.z);
-			outside += TEST_CORNER(plane, aabb.min.x, aabb.min.y, aabb.max.z);
-			outside += TEST_CORNER(plane, aabb.max.x, aabb.min.y, aabb.max.z);
-			outside += TEST_CORNER(plane, aabb.min.x, aabb.max.y, aabb.max.z);
-			outside += TEST_CORNER(plane, aabb.max.x, aabb.max.y, aabb.max.z);
-
-			if (outside == 8)
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-#undef TEST_CORNER
-
+	/*
 	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
 	{
 		// For each plane of the frustum
@@ -470,7 +432,31 @@ NextPlane:;
 		// Box is at least partially inside frustum
 		return true;
 	}
-	
-	*/
+	//*/
+
+	//* manual slab method seems fastest right now
+	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
+	{
+		for (int i = 0; i < 6; ++i)
+		{
+			const glm::vec4& plane = frustum.planes[i];
+
+			// Compute dot product manually (the ternarys might hurt branch prediction, not sure)
+			if (
+				(
+				plane.x * ((plane.x >= 0.0f) ? aabb.max.x : aabb.min.x)
+				+ plane.y * ((plane.y >= 0.0f) ? aabb.max.y : aabb.min.y)
+				+ plane.z * ((plane.z >= 0.0f) ? aabb.max.z : aabb.min.z)
+				)
+				+ plane.w < 0.0f
+				)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+	//*/
 
 }

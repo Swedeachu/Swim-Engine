@@ -44,6 +44,7 @@
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshBufferData.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />

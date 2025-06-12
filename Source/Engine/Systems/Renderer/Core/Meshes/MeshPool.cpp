@@ -1,7 +1,6 @@
 #include "PCH.h"
 #include "MeshPool.h"
 #include "Engine/SwimEngine.h"
-#include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 
 namespace Engine
 {
@@ -35,31 +34,10 @@ namespace Engine
 		meshToID[mesh] = meshID;
 		idToMesh[meshID] = mesh;
 
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-		{
-			// Lazily cache the Vulkan device + physical device
-			if (!vulkanDevicesCached)
-			{
-				std::shared_ptr<SwimEngine>& engine = SwimEngine::GetInstanceRef();
-				std::shared_ptr<VulkanRenderer> renderer = engine->GetVulkanRenderer();
-				cachedDevice = renderer->GetDevice();
-				cachedPhysicalDevice = renderer->GetPhysicalDevice();
-				vulkanDevicesCached = true;
-			}
-
-			mesh->meshBufferData->GenerateBuffers(vertices, indices, cachedDevice, cachedPhysicalDevice);
-			SwimEngine::GetInstance()->GetVulkanRenderer()->GetIndexDraw()->UploadMeshToMegaBuffer(
-				vertices,
-				indices,
-				*mesh->meshBufferData
-			);
-		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-		{
-			mesh->meshBufferData->GenerateBuffers(vertices, indices); // No Vulkan args
-		}
-
+		// Generate mesh buffers and its AABB and then place in the map
+		mesh->meshBufferData->GenerateBuffersAndAABB(vertices, indices);
 		meshes.emplace(name, mesh);
+
 		return mesh;
 	}
 
@@ -114,7 +92,6 @@ namespace Engine
 		{
 			if (mesh && mesh->meshBufferData)
 			{
-				mesh->meshBufferData->Free();
 				mesh->meshBufferData.reset();
 			}
 		}

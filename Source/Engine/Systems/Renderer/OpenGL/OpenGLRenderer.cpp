@@ -305,6 +305,8 @@ namespace Engine
 		glGetIntegerv(GL_SAMPLES, &samples);
 		std::cout << "MSAA Samples: " << samples << std::endl;
 
+		CreateMegaMeshBuffer();
+
 		return 0;
 	}
 
@@ -332,6 +334,88 @@ namespace Engine
 	{
 		cameraSystem = SwimEngine::GetInstance()->GetCameraSystem();
 		return 0;
+	}
+
+	void OpenGLRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	{
+		size_t vertexSize = vertices.size() * sizeof(Vertex);
+		size_t indexSize = indices.size() * sizeof(uint16_t);
+
+		// Check buffer capacity
+		if (currentVertexOffset + vertexSize > megaVertexBufferSize || currentIndexOffset + indexSize > megaIndexBufferSize)
+		{
+			GrowMegaBuffers(vertexSize, indexSize);
+		}
+
+		// Upload vertex data
+		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
+		glBufferSubData(GL_ARRAY_BUFFER, currentVertexOffset, vertexSize, vertices.data());
+
+		// Upload index data
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, currentIndexOffset, indexSize, indices.data());
+
+		// Save offsets in meshData for later use
+		meshData.vertexOffsetInMegaBuffer = currentVertexOffset;
+		meshData.indexOffsetInMegaBuffer = currentIndexOffset;
+		meshData.indexCount = static_cast<GLsizei>(indices.size());
+
+		// Advance buffer pointers
+		currentVertexOffset += vertexSize;
+		currentIndexOffset += indexSize;
+	}
+
+	void OpenGLRenderer::GrowMegaBuffers(size_t requiredVertex, size_t requiredIndex)
+	{
+		size_t newVertexSize = megaVertexBufferSize + std::max(requiredVertex, MESH_BUFFER_GROWTH_SIZE);
+		size_t newIndexSize = megaIndexBufferSize + std::max(requiredIndex, MESH_BUFFER_GROWTH_SIZE);
+
+		// Backup existing buffer contents
+		std::vector<uint8_t> vertexBackup(megaVertexBufferSize);
+		std::vector<uint8_t> indexBackup(megaIndexBufferSize);
+
+		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
+		glGetBufferSubData(GL_ARRAY_BUFFER, 0, megaVertexBufferSize, vertexBackup.data());
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+		glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, megaIndexBufferSize, indexBackup.data());
+
+		// Resize vertex buffer
+		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
+		glBufferData(GL_ARRAY_BUFFER, newVertexSize, nullptr, GL_DYNAMIC_DRAW);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, megaVertexBufferSize, vertexBackup.data());
+
+		// Resize index buffer
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, newIndexSize, nullptr, GL_DYNAMIC_DRAW);
+		glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, megaIndexBufferSize, indexBackup.data());
+
+		// Update sizes
+		megaVertexBufferSize = newVertexSize;
+		megaIndexBufferSize = newIndexSize;
+	}
+
+
+	void OpenGLRenderer::CreateMegaMeshBuffer()
+	{
+		glGenVertexArrays(1, &globalVAO);
+		glBindVertexArray(globalVAO);
+
+		// Mega vertex buffer
+		glGenBuffers(1, &megaVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
+		glBufferData(GL_ARRAY_BUFFER, MESH_BUFFER_INITIAL_SIZE, nullptr, GL_DYNAMIC_DRAW);
+		megaVertexBufferSize = MESH_BUFFER_INITIAL_SIZE;
+
+		// Mega index buffer
+		glGenBuffers(1, &megaEBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, MESH_BUFFER_INITIAL_SIZE, nullptr, GL_DYNAMIC_DRAW);
+		megaIndexBufferSize = MESH_BUFFER_INITIAL_SIZE;
+
+		Vertex::SetupOpenGLAttributes(); // assumes this is bound to VAO already
+
+		glBindVertexArray(0);
 	}
 
 	void OpenGLRenderer::SetSurfaceSize(uint32_t newWidth, uint32_t newHeight)
@@ -390,11 +474,12 @@ namespace Engine
 		}
 
 		RenderWorldSpace(scene, registry, view, proj);
-		RenderScreenAndDecoratorUI(registry, view, proj);
 
 	#ifdef _DEBUG
 		RenderWireframeDebug(scene);
 	#endif
+
+		RenderScreenAndDecoratorUI(registry, view, proj);
 
 		SwapBuffers(deviceContext);
 	}
@@ -468,156 +553,192 @@ namespace Engine
 	// Draws all screen space objects (typically UI) and also regular transforms that happen to be in screen space
 	void OpenGLRenderer::RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
-		// We still want to do some simple per object culling
 		const Frustum& frustum = Frustum::Get();
 
 		glUseProgram(uiDecoratorShader);
-		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); // proper blending in transparent spots with other UI objects behind each other
-		glDisable(GL_CULL_FACE); // for vulkan parity, since the vulkan UI pipeline currently does not have back face culling enabled
+		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+		glDisable(GL_CULL_FACE);
 
-		glm::vec2 screenScale = glm::vec2(
-			static_cast<float>(windowWidth) / VirtualCanvasWidth,
-			static_cast<float>(windowHeight) / VirtualCanvasHeight
-		);
+		// Render world-space UI first
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
-			const std::shared_ptr<MaterialData>& mat = matComp.data;
-			bool hasDecorator = registry.any_of<DecoratorUI>(entity);
-			TransformSpace space = tf.GetTransformSpace();
-
-			if (!hasDecorator && space != TransformSpace::Screen)
+			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
-				return; // Not UI, not decorated, so was either already rendered or culled
+				return;
 			}
 
-			const glm::vec3& pos = tf.GetPosition();
-			const glm::vec3& scale = tf.GetScale();
-
-			bool isWorld = (space == TransformSpace::World);
-
-			const glm::mat4& model = tf.GetModelMatrix();
-
-			// First do a simple cull check
-			if (isWorld)
+			if (!registry.any_of<DecoratorUI>(entity))
 			{
-				if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
-				{
-					return;
-				}
-			}
-			else
-			{
-				// Sceen space 2D check using window width and height
-				
-				// Convert quad AABB to pixel-space (by scaling virtual units up)
-				glm::vec2 screenScale = glm::vec2(
-					static_cast<float>(windowWidth) / VirtualCanvasWidth,
-					static_cast<float>(windowHeight) / VirtualCanvasHeight
-				);
-
-				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-				glm::vec2 center = glm::vec2(pos) * screenScale;
-				glm::vec2 halfSizePx = halfSize * screenScale;
-
-				glm::vec2 minPx = center - halfSizePx;
-				glm::vec2 maxPx = center + halfSizePx;
-
-				// Clamp against the actual framebuffer
-				if (maxPx.x < 0.0f || maxPx.y < 0.0f)
-				{
-					return; // off left or bottom
-				}
-
-				if (minPx.x > windowWidth || minPx.y > windowHeight)
-				{
-					return; // off right or top
-				}
+				return;
 			}
 
-			glm::mat4 mvp;
-			glm::vec2 quadSizeInPixels;
-			glm::vec2 radiusPx, strokePx;
+			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix);
+		});
 
-			if (isWorld)
+		// Render screen-space UI last (no depth test)
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+
+		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
+		{
+			if (tf.GetTransformSpace() != TransformSpace::Screen)
 			{
-				// World-space projection scaling
-				glm::vec4 viewPos = viewMatrix * glm::vec4(pos, 1.0f);
-				float absZ = std::max(std::abs(viewPos.z), 0.0001f);
-
-				float wppX = (2.0f * absZ * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
-				float wppY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
-
-				quadSizeInPixels = glm::vec2(scale.x / wppX, scale.y / wppY);
-
-				glm::vec2 scaler = glm::vec2(250.0f);
-				if (hasDecorator)
-				{
-					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
-					radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
-					strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
-				}
-
-				mvp = projectionMatrix * viewMatrix * model;
-			}
-			else
-			{
-				quadSizeInPixels = glm::vec2(scale) * screenScale;
-
-				if (hasDecorator)
-				{
-					const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
-					radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
-					strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
-				}
-
-				mvp = cameraUBO.screenProj * model;
+				return;
 			}
 
-			glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
-			glUniform2fv(loc_ui_resolution, 1, &cameraUBO.viewportSize[0]);
-			glUniform2fv(loc_ui_quadSize, 1, &quadSizeInPixels[0]);
-			glUniform1i(loc_ui_isWorldSpace, isWorld ? 1 : 0);
+			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix);
+		});
+
+		// Restore states
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_TRUE);
+		glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+		glEnable(GL_CULL_FACE);
+	}
+
+	void OpenGLRenderer::DrawUIEntity
+	(
+		entt::entity entity,
+		const Transform& tf,
+		const Material& matComp,
+		entt::registry& registry,
+		const Frustum& frustum,
+		const glm::mat4& viewMatrix,
+		const glm::mat4& projectionMatrix
+	)
+	{
+		const std::shared_ptr<MaterialData>& mat = matComp.data;
+		bool hasDecorator = registry.any_of<DecoratorUI>(entity);
+		TransformSpace space = tf.GetTransformSpace();
+		const glm::vec3& pos = tf.GetPosition();
+		const glm::vec3& scale = tf.GetScale();
+		const glm::mat4& model = tf.GetModelMatrix();
+
+		bool isWorld = (space == TransformSpace::World);
+
+		// Frustum or screen clip culling
+		if (isWorld)
+		{
+			if (!frustum.IsVisibleLazy(mat->mesh->meshBufferData->aabbMin, mat->mesh->meshBufferData->aabbMax, model))
+			{
+				return;
+			}
+		}
+		else
+		{
+			glm::vec2 screenScale = glm::vec2(
+				static_cast<float>(windowWidth) / VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / VirtualCanvasHeight
+			);
+
+			glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+			glm::vec2 center = glm::vec2(pos) * screenScale;
+			glm::vec2 halfSizePx = halfSize * screenScale;
+			glm::vec2 minPx = center - halfSizePx;
+			glm::vec2 maxPx = center + halfSizePx;
+
+			if (maxPx.x < 0.0f || maxPx.y < 0.0f || minPx.x > windowWidth || minPx.y > windowHeight)
+			{
+				return;
+			}
+		}
+
+		glm::mat4 mvp;
+		glm::vec2 quadSizeInPixels;
+		glm::vec2 radiusPx(0.0f), strokePx(0.0f);
+
+		if (isWorld)
+		{
+			glm::vec4 viewPos = viewMatrix * glm::vec4(pos, 1.0f);
+			float absZ = std::max(std::abs(viewPos.z), 0.0001f);
+
+			float wppX = (2.0f * absZ * cameraUBO.camParams.x) / static_cast<float>(windowWidth);
+			float wppY = (2.0f * absZ * cameraUBO.camParams.y) / static_cast<float>(windowHeight);
+
+			quadSizeInPixels = glm::vec2(scale.x / wppX, scale.y / wppY);
 
 			if (hasDecorator)
 			{
 				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
-
-				glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
-				glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
-				glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx[0]);
-				glUniform2fv(loc_ui_strokeWidth, 1, &strokePx[0]);
-				glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
-				glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
-				glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
-				glUniform1i(loc_ui_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+				glm::vec2 scaler = glm::vec2(250.0f);
+				radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
+				strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
 			}
-			else
+
+			mvp = projectionMatrix * viewMatrix * model;
+		}
+		else
+		{
+			glm::vec2 screenScale = glm::vec2(
+				static_cast<float>(windowWidth) / VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / VirtualCanvasHeight
+			);
+
+			quadSizeInPixels = glm::vec2(scale) * screenScale;
+
+			if (hasDecorator)
 			{
-				// No decorator -> use vertex color
-				glUniform4f(loc_ui_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
-				glUniform1i(loc_ui_enableFill, 1);
-				glUniform1i(loc_ui_enableStroke, 0);
-				glUniform1i(loc_ui_roundCorners, 0);
-				glUniform1i(loc_ui_useTexture, mat->albedoMap ? 1 : 0);
-				glUniform2fv(loc_ui_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
-				glUniform2fv(loc_ui_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
-				glUniform4f(loc_ui_strokeColor, 0, 0, 0, 1);
+				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
+				strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
 			}
 
-			// Bind albedo texture
-			GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, texID);
-			glUniform1i(loc_ui_albedoTex, 0);
+			mvp = cameraUBO.screenProj * model;
+		}
 
-			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
-			glBindVertexArray(mesh.GetGLVAO());
-			glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_SHORT, nullptr);
-			glBindVertexArray(0);
-		});
+		// Upload core uniforms
+		glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
+		glUniform2fv(loc_ui_resolution, 1, &cameraUBO.viewportSize[0]);
+		glUniform2fv(loc_ui_quadSize, 1, &quadSizeInPixels[0]);
+		glUniform1i(loc_ui_isWorldSpace, isWorld ? 1 : 0);
 
-		glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE); // turn back off
+		if (hasDecorator)
+		{
+			const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+
+			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
+			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
+			glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx[0]);
+			glUniform2fv(loc_ui_strokeWidth, 1, &strokePx[0]);
+			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
+			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
+			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
+			glUniform1i(loc_ui_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+		}
+		else
+		{
+			glUniform4f(loc_ui_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
+			glUniform1i(loc_ui_enableFill, 1);
+			glUniform1i(loc_ui_enableStroke, 0);
+			glUniform1i(loc_ui_roundCorners, 0);
+			glUniform1i(loc_ui_useTexture, mat->albedoMap ? 1 : 0);
+			glUniform2fv(loc_ui_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
+			glUniform2fv(loc_ui_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
+			glUniform4f(loc_ui_strokeColor, 0, 0, 0, 1);
+		}
+
+		GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texID);
+		glUniform1i(loc_ui_albedoTex, 0);
+
+		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+
+		glBindVertexArray(globalVAO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+
+		glDrawElementsBaseVertex(
+			GL_TRIANGLES,
+			mesh.indexCount,
+			GL_UNSIGNED_SHORT,
+			reinterpret_cast<void*>(mesh.indexOffsetInMegaBuffer),
+			static_cast<GLint>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex))
+		);
+
+		glBindVertexArray(0);
 	}
 
 	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
@@ -626,11 +747,9 @@ namespace Engine
 		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
 		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
 
-		// Compute model matrix and full MVP
 		const glm::mat4& model = transform.GetModelMatrix();
 		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
 
-		// Upload matrix to shader
 		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
 
 		// Bind texture if available
@@ -642,9 +761,17 @@ namespace Engine
 		glBindTexture(GL_TEXTURE_2D, texID);
 		glUniform1i(loc_albedoTex, 0);
 
-		// Draw
-		glBindVertexArray(meshData.GetGLVAO());
-		glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
+		glBindVertexArray(globalVAO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+
+		glDrawElementsBaseVertex(
+			GL_TRIANGLES,
+			meshData.indexCount,
+			GL_UNSIGNED_SHORT,
+			reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
+			static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
+		);
+
 		glBindVertexArray(0);
 	}
 
@@ -658,8 +785,6 @@ namespace Engine
 			return;
 		}
 
-		glUseProgram(shaderProgram);
-
 		auto& debugRegistry = debugDraw->GetRegistry();
 		const Frustum& frustum = Frustum::Get();
 
@@ -669,16 +794,21 @@ namespace Engine
 
 		auto viewEntities = debugRegistry.view<Transform, DebugWireBoxData>();
 
+		glBindVertexArray(globalVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+
 		for (auto entity : viewEntities)
 		{
 			const Transform& transform = viewEntities.get<Transform>(entity);
 			const DebugWireBoxData& box = viewEntities.get<DebugWireBoxData>(entity);
 			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
+			const MeshBufferData& meshData = *mesh->meshBufferData;
 
 			if constexpr (cullWireframe)
 			{
-				const glm::vec3& min = mesh->meshBufferData->aabbMin;
-				const glm::vec3& max = mesh->meshBufferData->aabbMax;
+				const glm::vec4& min = meshData.aabbMin;
+				const glm::vec4& max = meshData.aabbMax;
 
 				if (!frustum.IsVisibleLazy(min, max, transform.GetModelMatrix()))
 				{
@@ -686,32 +816,46 @@ namespace Engine
 				}
 			}
 
-			// Compute and set MVP
+			// Compute and set MVP matrix
 			glm::mat4 model = transform.GetModelMatrix();
 			glm::mat4 mvp = proj * view * model;
 			glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
 
-			// No texture for debug wireframes
+			// Disable texture sampling
 			glUniform1f(loc_hasTexture, 0.0f);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, 0);
 			glUniform1i(loc_albedoTex, 0);
 
-			// Draw mesh
-			const MeshBufferData& meshData = *mesh->meshBufferData;
-			glBindVertexArray(meshData.GetGLVAO());
-			glDrawElements(GL_TRIANGLES, meshData.indexCount, GL_UNSIGNED_SHORT, nullptr);
-			glBindVertexArray(0);
+			// Draw from mega buffer
+			glDrawElementsBaseVertex(
+				GL_TRIANGLES,
+				meshData.indexCount,
+				GL_UNSIGNED_SHORT,
+				reinterpret_cast<void*>(static_cast<uintptr_t>(meshData.indexOffsetInMegaBuffer)),
+				static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
+			);
 		}
+
+		glBindVertexArray(0);
 	}
 
 	int OpenGLRenderer::Exit()
 	{
+		if (megaVBO) { glDeleteBuffers(1, &megaVBO); megaVBO = 0; }
+		if (megaEBO) { glDeleteBuffers(1, &megaEBO); megaEBO = 0; }
+		if (globalVAO) { glDeleteVertexArrays(1, &globalVAO); globalVAO = 0; }
+
+		megaVertexBufferSize = megaIndexBufferSize = 0;
+		currentVertexOffset = currentIndexOffset = 0;
+
 		glDeleteProgram(shaderProgram);
 		glDeleteProgram(uiDecoratorShader);
 		glDeleteBuffers(1, &ubo);
+
 		MeshPool::GetInstance().Flush();
 		TexturePool::GetInstance().Flush();
+
 		return 0;
 	}
 

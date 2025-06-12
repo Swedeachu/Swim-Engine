@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/Renderer.h"
+#include "Engine/Systems/Renderer/Core/Meshes/MeshBufferData.h"
+#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
 
 namespace Engine
 {
@@ -26,6 +28,8 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData);
+
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();
 
@@ -44,6 +48,9 @@ namespace Engine
 		bool InitOpenGLContext();
 		bool SetPixelFormatForHDC(HDC hdc);
 
+		void GrowMegaBuffers(size_t requiredVertex, size_t requiredIndex);
+		void CreateMegaMeshBuffer();
+
 		// Rendering
 		void RenderFrame();
 		void UpdateUniformBuffer();
@@ -52,6 +59,16 @@ namespace Engine
 		void RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
 		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+
+		void DrawUIEntity(
+			entt::entity entity,
+			const Transform& tf,
+			const Material& matComp,
+			entt::registry& registry,
+			const Frustum& frustum,
+			const glm::mat4& viewMatrix,
+			const glm::mat4& projectionMatrix
+		);
 
 		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
 
@@ -80,7 +97,7 @@ namespace Engine
 		GLint loc_hasTexture = -1;
 		GLint loc_albedoTex = -1;
 
-		// --- Decorator UI shader program ---
+		// Decorator UI shader program
 		GLuint uiDecoratorShader = 0;
 
 		// Uniform locations for UI-specific uniforms
@@ -97,6 +114,18 @@ namespace Engine
 		GLint loc_ui_useTexture = -1;
 		GLint loc_ui_albedoTex = -1;
 		GLint loc_ui_isWorldSpace = -1;
+
+		GLuint megaVBO = 0;          // Mega vertex buffer object
+		GLuint megaEBO = 0;          // Mega element (index) buffer object
+		GLuint globalVAO = 0;        // VAO used to bind VBO + instance attributes
+
+		size_t megaVertexBufferSize = 0;
+		size_t megaIndexBufferSize = 0;
+		size_t currentVertexOffset = 0;
+		size_t currentIndexOffset = 0;
+
+		constexpr static size_t MESH_BUFFER_INITIAL_SIZE = 2 * 1024 * 1024; // 2MB per buffer
+		constexpr static size_t MESH_BUFFER_GROWTH_SIZE = 1 * 1024 * 1024;  // Grow by 1MB
 
 	};
 

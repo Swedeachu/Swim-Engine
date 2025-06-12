@@ -244,11 +244,12 @@ namespace Engine
 	{
 		const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
+		const glm::vec4& min = mesh->meshBufferData->aabbMin;
+		const glm::vec4& max = mesh->meshBufferData->aabbMax;
+
 		// Frustum culling if world-space
 		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
-			const glm::vec3& min = mesh->meshBufferData->aabbMin;
-			const glm::vec3& max = mesh->meshBufferData->aabbMax;
 			if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
 			{
 				return;
@@ -259,8 +260,8 @@ namespace Engine
 
 		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
 		instance.model = transform.GetModelMatrix();
-		instance.aabbMin = glm::vec4(mesh->meshBufferData->aabbMin, 0.0f);
-		instance.aabbMax = glm::vec4(mesh->meshBufferData->aabbMax, 0.0f);
+		instance.aabbMin = min;
+		instance.aabbMax = max;
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 		instance.meshInfoIndex = mesh->meshBufferData->GetMeshID();
@@ -629,12 +630,12 @@ namespace Engine
 		{
 			const Transform& transform = view.get<Transform>(entity);
 			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
-			const auto& mesh = debugDraw->GetWireframeCubeMesh(box.color);
+			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
 
 			if constexpr (cullWireframe)
 			{
-				const glm::vec3& min = mesh->meshBufferData->aabbMin;
-				const glm::vec3& max = mesh->meshBufferData->aabbMax;
+				const glm::vec4& min = mesh->meshBufferData->aabbMin;
+				const glm::vec4& max = mesh->meshBufferData->aabbMax;
 				if (!frustum.IsVisibleLazy(min, max, transform.GetModelMatrix())) { continue; }
 			}
 

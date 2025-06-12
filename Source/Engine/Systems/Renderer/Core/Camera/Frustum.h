@@ -64,12 +64,12 @@ namespace Engine
 		}
 
 		// This is actually the best method to use right now
-		bool IsVisibleLazy(const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& model) const
+		bool IsVisibleLazy(const glm::vec4& aabbMin, const glm::vec4& aabbMax, const glm::mat4& model) const
 		{
 			constexpr float threeHalves = 1.5f;
 
-			glm::vec3 worldMin = glm::vec3(model * glm::vec4(aabbMin, 1.0f));
-			glm::vec3 worldMax = glm::vec3(model * glm::vec4(aabbMax, 1.0f));
+			glm::vec3 worldMin = glm::vec3(model * aabbMin);
+			glm::vec3 worldMax = glm::vec3(model * aabbMax);
 
 			for (int i = 0; i < 6; ++i)
 			{
