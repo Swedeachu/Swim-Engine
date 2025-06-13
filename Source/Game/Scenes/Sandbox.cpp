@@ -5,7 +5,7 @@
 #include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
-#include "Engine\Components\DecoratorUI.h"
+#include "Engine/Components/MeshDecorator.h"
 #include "Library/glm/vec4.hpp"
 #include "RandomUtils.h"
 #include "Engine\Systems\Entity\EntityFactory.h"
@@ -530,7 +530,7 @@ namespace Game
 		scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
 		scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
 
-		Engine::DecoratorUI decorator = Engine::DecoratorUI(
+		Engine::MeshDecorator decorator = Engine::MeshDecorator(
 			glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
 			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y
@@ -539,7 +539,7 @@ namespace Game
 			true, true, true, true                // to enable: rounded, stroke, fill, material texture
 		);
 
-		scene->AddComponent<Engine::DecoratorUI>(whiteEntity, decorator);
+		scene->AddComponent<Engine::MeshDecorator>(whiteEntity, decorator);
 
 		// Below here is a bunch of bools for messing with making a second UI entity to test stuff out with
 
@@ -596,7 +596,7 @@ namespace Game
 		}
 
 		// Decorator with red stroke instead of black
-		Engine::DecoratorUI redDecorator = Engine::DecoratorUI(
+		Engine::MeshDecorator redDecorator = Engine::MeshDecorator(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill
 			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
 			glm::vec2(12.0f, 12.0f),              // stroke width X/Y (slightly thinner)
@@ -608,7 +608,7 @@ namespace Game
 		redDecorator.SetUseMeshMaterialColor(true);
 
 		// Apply the decorator to the red entity
-		scene->AddComponent<Engine::DecoratorUI>(redEntity, redDecorator);
+		scene->AddComponent<Engine::MeshDecorator>(redEntity, redDecorator);
 	}
 
 	int SandBox::Init()
@@ -669,7 +669,7 @@ namespace Game
 		// AddComponent<Engine::Material>(billboard, materialData1); // cube 3D mesh with UI decorators on it
 
 		///* World space UI 
-		Engine::DecoratorUI billboardDecorator = Engine::DecoratorUI(
+		Engine::MeshDecorator billboardDecorator = Engine::MeshDecorator(
 			glm::vec4(0.0f, 1.0f, 0.0f, 1.0f),    // fill: green
 			glm::vec4(1.0f, 0.0f, 0.0f, 1.0f),    // stroke: red
 			glm::vec2(16.0f, 16.0f),              // stroke width X/Y (slightly thinner)
@@ -678,7 +678,7 @@ namespace Game
 			true, true, true, false               // rounded, stroke, fill, use material texture
 		);
 		// billboardDecorator.SetUseMeshMaterialColor(true);
-		AddComponent<Engine::DecoratorUI>(billboard, billboardDecorator);
+		AddComponent<Engine::MeshDecorator>(billboard, billboardDecorator);
 		AddBehavior<Spin>(billboard);
 		//*/
 

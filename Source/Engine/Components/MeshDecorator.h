@@ -20,7 +20,7 @@ namespace Engine
 
 	3. These properties will effect text rendering the exact same.
 	*/
-	struct DecoratorUI
+	struct MeshDecorator
 	{
 		glm::vec4 fillColor = glm::vec4(1.0f);    // Default: solid white
 		glm::vec4 strokeColor = glm::vec4(0.0f);  // Default: no stroke
@@ -34,7 +34,7 @@ namespace Engine
 		bool useMaterialTexture = false; // if enabled, will use the material texture instead of fill color
 
 		// Convenient initialization
-		DecoratorUI(
+		MeshDecorator(
 			glm::vec4 fill = glm::vec4(1.0f),
 			glm::vec4 stroke = glm::vec4(0.0f),
 			glm::vec2 strokeW = glm::vec2(0.0f),

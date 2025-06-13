@@ -301,7 +301,15 @@ namespace Engine
 		for (size_t i = start; i < nodes.size(); ++i)
 		{
 			const AABB& a = nodes[i].aabb;
-			debugDrawer->SubmitWireframeBoxAABB(a.min, a.max);
+			debugDrawer->SubmitWireframeBoxAABB(a.min, a.max,
+				{ 1.0f, 0.0f, 0.0f, 1.0f }, // stroke color of wireframe lines
+				false, // no fill
+				{ 0.0f, 0.0f, 0.0f, 1.0f }, // no fill color
+				glm::vec2(10.0f), // wireframe line width
+				glm::vec2(0.0f), // corner radius of 0 (none)
+				0, // world space bit
+				SceneDebugDraw::MeshBoxType::BevelledCube // use bevelled mesh
+			);
 		}
 	}
 

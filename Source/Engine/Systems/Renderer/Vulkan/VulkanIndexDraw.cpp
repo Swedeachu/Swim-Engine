@@ -2,7 +2,7 @@
 #include "VulkanIndexDraw.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
-#include "Engine/Components/DecoratorUI.h"
+#include "Engine/Components/MeshDecorator.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "VulkanRenderer.h"
@@ -145,7 +145,7 @@ namespace Engine
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		cpuInstanceData.clear(); // was resize(0)
-		uiParamData.clear();
+		decoratorParamData.clear();
 		rangeMap.clear();
 
 		const std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
@@ -169,10 +169,6 @@ namespace Engine
 			// Render everything in world space with regular frustum culling (this is still CPU culling just not using the BVH)
 			GatherCandidatesView(registry, TransformSpace::World, frustum);
 		}
-
-	#ifdef _DEBUG
-		DebugWireframeDraw();
-	#endif
 
 		// Enforce mesh-contiguity in cpuInstanceData.
 		// Indirect batch draw calls obviously need to be contiguous blocks of the same meshes so we sort them together.
@@ -218,8 +214,8 @@ namespace Engine
 
 		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			// we don't want to do decorators in this pass since they require the UI shader pass, hopefully this is not an expensive check
-			if (!registry.any_of<DecoratorUI>(entity)) 
+			// we don't want to do decorators in this pass since they require the decorator shader pass, hopefully this is not an expensive check
+			if (!registry.any_of<MeshDecorator>(entity)) 
 				AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
 		});
 	}
@@ -300,7 +296,7 @@ namespace Engine
 	}
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
-	void VulkanIndexDraw::DrawIndexedWorld(uint32_t frameIndex, VkCommandBuffer cmd)
+	void VulkanIndexDraw::DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
@@ -332,8 +328,8 @@ namespace Engine
 		}
 	}
 
-	// Draws everything that is in screen space or has a decorator UI on it, meaning this can render UI billboards in world space.
-	void VulkanIndexDraw::DrawIndexedScreenAndDecoratorUI(uint32_t frameIndex, VkCommandBuffer cmd)
+	// Draws everything that is in screen space or has a decorator on it, meaning this can render billboards in world space.
+	void VulkanIndexDraw::DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 
@@ -350,22 +346,129 @@ namespace Engine
 		const CameraUBO& cameraUBO = renderer->GetCameraUBO();
 		const glm::mat4& worldView = engine->GetCameraSystem()->GetViewMatrix();
 
-		const uint32_t baseUIInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
-		uint32_t uiInstanceCount = 0;
-
-		// We still want to do some simple per object culling
 		const Frustum& frustum = Frustum::Get();
 
-		// === Gather screen-space UI instances ===
+		// Gather instances info before we send anymore new draws since we need to add to the current buffer
+		const uint32_t baseDecoratorInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
 		const size_t baseInstanceID = cpuInstanceData.size();
+		uint32_t instanceCount = 0;
 
 		std::vector<VkDrawIndexedIndirectCommand> drawCommands;
-		uiParamData.clear(); // clear previous frame's UI params
+		decoratorParamData.clear(); // clear previous frame's params
 
+		DrawDecoratorsAndScreenSpaceEntitiesInRegistry(
+			registry,
+			cameraUBO,
+			worldView,
+			windowHeight,
+			windowHeight,
+			frustum,
+			instanceCount,
+			drawCommands,
+			true // run culling
+		);
+
+		// Complete hack to inject in the decorator wireframe meshes
+	#ifdef _DEBUG
+		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
+		if (debugDraw && debugDraw->IsEnabled())
+		{
+			DrawDecoratorsAndScreenSpaceEntitiesInRegistry(
+				debugDraw->GetRegistry(),
+				cameraUBO,
+				worldView,
+				windowHeight,
+				windowHeight,
+				frustum,
+				instanceCount,
+				drawCommands,
+				false // no culling
+			);
+		}
+	#endif
+
+		if (drawCommands.empty())
+		{
+			return;
+		}
+
+		// === Upload MeshDecoratorGpuInstanceData via descriptorManager ===
+		descriptorManager->UpdatePerFrameMeshDecoratorBuffer(
+			frameIndex,
+			decoratorParamData.data(),
+			decoratorParamData.size() * sizeof(MeshDecoratorGpuInstanceData)
+		);
+
+		// === Upload new instance data for section ===
+		void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer();
+		std::memcpy(
+			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
+			cpuInstanceData.data() + baseInstanceID,
+			decoratorParamData.size() * sizeof(GpuInstanceData)
+		);
+
+		// === Upload indirect draw commands ===
+		uiIndirectCommandBuffers[frameIndex]->CopyData(
+			drawCommands.data(),
+			drawCommands.size() * sizeof(VkDrawIndexedIndirectCommand)
+		);
+
+		// === Bind pipeline and descriptors ===
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetDecoratorPipeline());
+
+		std::array<VkDescriptorSet, 2> descriptorSets = {
+			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
+			descriptorManager->GetBindlessSet()
+		};
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipelineManager->GetDecoratorPipelineLayout(),
+			0,
+			static_cast<uint32_t>(descriptorSets.size()),
+			descriptorSets.data(),
+			0,
+			nullptr
+		);
+
+		// === Bind buffers ===
+		VkBuffer vertexBuffers[] = {
+			megaVertexBuffer->GetBuffer(),
+			instanceBuffer->GetBuffer(frameIndex)
+		};
+		VkDeviceSize offsets[] = { 0, 0 };
+
+		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+
+		// === Issue indirect draw ===
+		vkCmdDrawIndexedIndirect(
+			cmd,
+			uiIndirectCommandBuffers[frameIndex]->GetBuffer(),
+			0,
+			static_cast<uint32_t>(drawCommands.size()),
+			sizeof(VkDrawIndexedIndirectCommand)
+		);
+	}
+
+	void VulkanIndexDraw::DrawDecoratorsAndScreenSpaceEntitiesInRegistry
+	(
+		entt::registry& registry, 
+		const CameraUBO& cameraUBO,
+		const glm::mat4& worldView,
+		unsigned int windowWidth,
+		unsigned int windowHeight,
+		const Frustum& frustum,
+		uint32_t& instanceCount,
+		std::vector<VkDrawIndexedIndirectCommand>& drawCommands,
+		bool cull
+	)
+	{
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
-			bool hasDecorator = registry.any_of<DecoratorUI>(entity); // hopefully not too expensive
+			bool hasDecorator = registry.any_of<MeshDecorator>(entity); // hopefully not too expensive
 			TransformSpace space = transform.GetTransformSpace();
 
 			// We can render UI in world space if it has a decorator on it.
@@ -387,33 +490,36 @@ namespace Engine
 			const glm::mat4& model = transform.GetModelMatrix();
 
 			// First do a simple cull check 
-			if (space == TransformSpace::World)
+			if (cull)
 			{
-				if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+				if (space == TransformSpace::World)
 				{
-					return;
+					if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+					{
+						return;
+					}
 				}
-			}
-			else
-			{
-				// Sceen space 2D check using window width and height
-
-				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-				glm::vec2 center = glm::vec2(pos) * screenScale;
-				glm::vec2 halfSizePx = halfSize * screenScale;
-
-				glm::vec2 minPx = center - halfSizePx;
-				glm::vec2 maxPx = center + halfSizePx;
-
-				// Clamp against the actual framebuffer
-				if (maxPx.x < 0.0f || maxPx.y < 0.0f)
+				else
 				{
-					return; // off left or bottom
-				}
+					// Sceen space 2D check using window width and height
 
-				if (minPx.x > windowWidth || minPx.y > windowHeight)
-				{
-					return; // off right or top
+					glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+					glm::vec2 center = glm::vec2(pos) * screenScale;
+					glm::vec2 halfSizePx = halfSize * screenScale;
+
+					glm::vec2 minPx = center - halfSizePx;
+					glm::vec2 maxPx = center + halfSizePx;
+
+					// Clamp against the actual framebuffer
+					if (maxPx.x < 0.0f || maxPx.y < 0.0f)
+					{
+						return; // off left or bottom
+					}
+
+					if (minPx.x > windowWidth || minPx.y > windowHeight)
+					{
+						return; // off right or top
+					}
 				}
 			}
 
@@ -426,10 +532,10 @@ namespace Engine
 			instance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
 			instance.meshInfoIndex = mesh.GetMeshID();
 
-			// The vertex shader then sets this on output.instanceID, which the fragment shader then uses for UIParams ui = uiParamBuffer[uiParamIndex]
-			instance.materialIndex = uiInstanceCount;
+			// The vertex shader then sets this on output.instanceID, which the fragment shader then uses for MeshDecoratorGpuInstanceData data = decoratorBuffer[paramIndex]
+			instance.materialIndex = instanceCount;
 
-			// === UIParams ===
+			// === MeshDecoratorGpuInstanceData ===
 			glm::vec2 pixelSize = glm::vec2(scale);
 			glm::vec2 quadSizeInPixels;
 
@@ -463,11 +569,11 @@ namespace Engine
 				);
 			}
 
-			UIParams ui{};
+			MeshDecoratorGpuInstanceData data{};
 
 			if (hasDecorator)
 			{
-				DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				MeshDecorator& deco = registry.get<MeshDecorator>(entity);
 
 				bool useTex = deco.useMaterialTexture && mat->albedoMap;
 
@@ -502,14 +608,14 @@ namespace Engine
 					strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(worldPerPixelX2, worldPerPixelY2), quadSizeInPixels * 0.5f);
 				}
 
-				ui.fillColor = deco.fillColor;
-				ui.strokeColor = deco.strokeColor;
-				ui.strokeWidth = strokePx;
-				ui.cornerRadius = radiusPx;
-				ui.enableFill = deco.enableFill ? 1 : 0;
-				ui.enableStroke = deco.enableStroke ? 1 : 0;
-				ui.roundCorners = deco.roundCorners ? 1 : 0;
-				ui.useTexture = useTex ? 1 : 0;
+				data.fillColor = deco.fillColor;
+				data.strokeColor = deco.strokeColor;
+				data.strokeWidth = strokePx;
+				data.cornerRadius = radiusPx;
+				data.enableFill = deco.enableFill ? 1 : 0;
+				data.enableStroke = deco.enableStroke ? 1 : 0;
+				data.roundCorners = deco.roundCorners ? 1 : 0;
+				data.useTexture = useTex ? 1 : 0;
 			}
 			else
 			{
@@ -517,24 +623,24 @@ namespace Engine
 				instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
 
-				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of UI Decorator.
+				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of Decorator.
 				// So we mark fill color as -1.0f as a flag to the shader to use mesh color sample instead.
-				ui.fillColor = glm::vec4(-1.0f);
+				data.fillColor = glm::vec4(-1.0f);
 				// Everything else is zero'd out or default
-				ui.strokeColor = glm::vec4(0.0f);
-				ui.strokeWidth = glm::vec2(0.0f);
-				ui.cornerRadius = glm::vec2(0.0f);
-				ui.enableFill = 1;
-				ui.enableStroke = 0;
-				ui.roundCorners = 0;
-				ui.useTexture = mat->albedoMap ? 1 : 0;
+				data.strokeColor = glm::vec4(0.0f);
+				data.strokeWidth = glm::vec2(0.0f);
+				data.cornerRadius = glm::vec2(0.0f);
+				data.enableFill = 1;
+				data.enableStroke = 0;
+				data.roundCorners = 0;
+				data.useTexture = mat->albedoMap ? 1 : 0;
 			}
 
-			ui.resolution = glm::vec2(windowWidth, windowHeight);
-			ui.quadSize = quadSizeInPixels;
+			data.resolution = glm::vec2(windowWidth, windowHeight);
+			data.quadSize = quadSizeInPixels;
 
 			// Finally add
-			uiParamData.push_back(ui);
+			decoratorParamData.push_back(data);
 			cpuInstanceData.push_back(instance);
 
 			// === Draw command ===
@@ -546,113 +652,8 @@ namespace Engine
 			cmd.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1); // latest one
 			drawCommands.push_back(cmd);
 
-			uiInstanceCount++;
+			instanceCount++;
 		});
-
-		if (drawCommands.empty())
-		{
-			return;
-		}
-
-		// === Upload UIParams via descriptorManager ===
-		descriptorManager->UpdatePerFrameUIParams(
-			frameIndex,
-			uiParamData.data(),
-			uiParamData.size() * sizeof(UIParams)
-		);
-
-		// === Upload new instance data for UI section ===
-		void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer();
-		std::memcpy(
-			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
-			cpuInstanceData.data() + baseInstanceID,
-			uiParamData.size() * sizeof(GpuInstanceData)
-		);
-
-		// === Upload indirect draw commands ===
-		uiIndirectCommandBuffers[frameIndex]->CopyData(
-			drawCommands.data(),
-			drawCommands.size() * sizeof(VkDrawIndexedIndirectCommand)
-		);
-
-		// === Bind pipeline and descriptors ===
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetUIPipeline());
-
-		std::array<VkDescriptorSet, 2> descriptorSets = {
-			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
-			descriptorManager->GetBindlessSet()
-		};
-
-		vkCmdBindDescriptorSets(
-			cmd,
-			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipelineManager->GetUIPipelineLayout(),
-			0,
-			static_cast<uint32_t>(descriptorSets.size()),
-			descriptorSets.data(),
-			0,
-			nullptr
-		);
-
-		// === Bind buffers ===
-		VkBuffer vertexBuffers[] = {
-			megaVertexBuffer->GetBuffer(),
-			instanceBuffer->GetBuffer(frameIndex)
-		};
-		VkDeviceSize offsets[] = { 0, 0 };
-
-		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
-
-		// === Issue indirect draw ===
-		vkCmdDrawIndexedIndirect(
-			cmd,
-			uiIndirectCommandBuffers[frameIndex]->GetBuffer(),
-			0,
-			static_cast<uint32_t>(drawCommands.size()),
-			sizeof(VkDrawIndexedIndirectCommand)
-		);
-	}
-
-	void VulkanIndexDraw::DebugWireframeDraw()
-	{
-		std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
-		if (!debugDraw || !debugDraw->IsEnabled()) { return; }
-
-		entt::registry& debugRegistry = debugDraw->GetRegistry();
-		const Frustum& frustum = Frustum::Get();
-		constexpr bool cullWireframe = false;
-
-		auto view = debugRegistry.view<Transform, DebugWireBoxData>();
-
-		for (auto entity : view)
-		{
-			const Transform& transform = view.get<Transform>(entity);
-			const DebugWireBoxData& box = view.get<DebugWireBoxData>(entity);
-			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
-
-			if constexpr (cullWireframe)
-			{
-				const glm::vec4& min = mesh->meshBufferData->aabbMin;
-				const glm::vec4& max = mesh->meshBufferData->aabbMax;
-				if (!frustum.IsVisibleLazy(min, max, transform.GetModelMatrix())) { continue; }
-			}
-
-			GpuInstanceData instance{};
-			instance.model = transform.GetModelMatrix();
-			instance.aabbMin = glm::vec4(-0.5f, -0.5f, -0.5f, 0.0f);
-			instance.aabbMax = glm::vec4(0.5f, 0.5f, 0.5f, 0.0f);
-			instance.textureIndex = UINT32_MAX;
-			instance.hasTexture = 0.0f;
-			instance.meshInfoIndex = mesh->meshBufferData->GetMeshID();
-			instance.materialIndex = 0u;
-			instance.indexCount = mesh->meshBufferData->indexCount;
-			instance.indexOffsetInMegaBuffer = mesh->meshBufferData->indexOffsetInMegaBuffer;
-			instance.vertexOffsetInMegaBuffer = mesh->meshBufferData->vertexOffsetInMegaBuffer;
-
-			cpuInstanceData.push_back(instance);
-		}
 	}
 
 	void VulkanIndexDraw::GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize)
@@ -723,7 +724,7 @@ namespace Engine
 		}
 
 		cpuInstanceData.clear();
-		uiParamData.clear();
+		decoratorParamData.clear();
 		culledVisibleData.clear();
 	}
 

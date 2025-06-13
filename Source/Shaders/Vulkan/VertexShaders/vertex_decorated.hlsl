@@ -33,7 +33,7 @@ struct GpuInstanceData
 [[vk::binding(1, 0)]]
 StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);
 
-struct UIParams
+struct MeshDecoratorGpuInstanceData
 {
   float4 fillColor;
   float4 strokeColor;
@@ -48,7 +48,7 @@ struct UIParams
 };
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<UIParams> uiParamBuffer : register(t2, space0);
+StructuredBuffer<MeshDecoratorGpuInstanceData> decoratorBuffer : register(t2, space0);
 
 struct VSInput
 {
@@ -65,7 +65,7 @@ struct VSOutput
   float2 uv : TEXCOORD0;                         
   nointerpolation uint textureIndex : TEXCOORD1; 
   float hasTexture : TEXCOORD2;                  
-  nointerpolation uint instanceID : TEXCOORD3;   // indexing UIParams
+  nointerpolation uint instanceID : TEXCOORD3;   // indexing decorator buffer
   float3 color : TEXCOORD4;                      // vertex color fallback
   float2 quadSizePx : TEXCOORD5;    // (half-width, half-height) in pixels
   float2 centerPx : TEXCOORD6;    // screen-space centre of the quad
@@ -77,7 +77,7 @@ VSOutput main(VSInput vin)
 
   // Grab instance and decorator data
   GpuInstanceData inst = instanceBuffer[vin.instanceID];
-  UIParams ui = uiParamBuffer[inst.materialIndex];
+  MeshDecoratorGpuInstanceData deco = decoratorBuffer[inst.materialIndex];
 
   // Determine transform space
   const bool isScreen = (inst.space == 1);
@@ -112,7 +112,7 @@ VSOutput main(VSInput vin)
   vout.color = vin.color;
 
   // Pass half-size in screen-space pixels (calculated on CPU!)
-  vout.quadSizePx = ui.quadSize * 0.5f;
+  vout.quadSizePx = deco.quadSize * 0.5f;
 
   // Compute center of quad in screen-space for SDF math
   float4 clipCentre = mul(proj, mul(view, float4(inst.model[3].xyz, 1.0f)));

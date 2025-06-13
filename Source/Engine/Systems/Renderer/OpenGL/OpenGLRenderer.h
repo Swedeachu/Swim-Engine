@@ -1,8 +1,6 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/Renderer.h"
-#include "Engine/Systems/Renderer/Core/Meshes/MeshBufferData.h"
-#include "Engine/Systems/Renderer/Core/Meshes/Vertex.h"
 
 namespace Engine
 {
@@ -28,7 +26,7 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
-		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData);
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData) override;
 
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();
@@ -56,7 +54,7 @@ namespace Engine
 		void UpdateUniformBuffer();
 
 		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
-		void RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void RenderScreenSpaceAndDecoratedMeshes(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, bool cull);
 
 		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
@@ -67,10 +65,9 @@ namespace Engine
 			entt::registry& registry,
 			const Frustum& frustum,
 			const glm::mat4& viewMatrix,
-			const glm::mat4& projectionMatrix
+			const glm::mat4& projectionMatrix,
+			bool cull
 		);
-
-		void RenderWireframeDebug(std::shared_ptr<Scene>& scene);
 
 		CameraUBO cameraUBO{};
 
@@ -98,22 +95,22 @@ namespace Engine
 		GLint loc_albedoTex = -1;
 
 		// Decorator UI shader program
-		GLuint uiDecoratorShader = 0;
+		GLuint decoratorShader = 0;
 
 		// Uniform locations for UI-specific uniforms
-		GLint loc_ui_mvp = -1;
-		GLint loc_ui_fillColor = -1;
-		GLint loc_ui_strokeColor = -1;
-		GLint loc_ui_strokeWidth = -1;
-		GLint loc_ui_cornerRadius = -1;
-		GLint loc_ui_enableStroke = -1;
-		GLint loc_ui_enableFill = -1;
-		GLint loc_ui_roundCorners = -1;
-		GLint loc_ui_resolution = -1;
-		GLint loc_ui_quadSize = -1;
-		GLint loc_ui_useTexture = -1;
-		GLint loc_ui_albedoTex = -1;
-		GLint loc_ui_isWorldSpace = -1;
+		GLint loc_dec_mvp = -1;
+		GLint loc_dec_fillColor = -1;
+		GLint loc_dec_strokeColor = -1;
+		GLint loc_dec_strokeWidth = -1;
+		GLint loc_dec_cornerRadius = -1;
+		GLint loc_dec_enableStroke = -1;
+		GLint loc_dec_enableFill = -1;
+		GLint loc_dec_roundCorners = -1;
+		GLint loc_dec_resolution = -1;
+		GLint loc_dec_quadSize = -1;
+		GLint loc_dec_useTexture = -1;
+		GLint loc_dec_albedoTex = -1;
+		GLint loc_dec_isWorldSpace = -1;
 
 		GLuint megaVBO = 0;          // Mega vertex buffer object
 		GLuint megaEBO = 0;          // Mega element (index) buffer object

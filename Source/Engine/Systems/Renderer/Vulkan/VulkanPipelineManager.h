@@ -27,7 +27,7 @@ namespace Engine
 			uint32_t pushConstantSize
 		);
 
-		void CreateUIPipeline(
+		void CreateDecoratedMeshPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
 			VkDescriptorSetLayout uboLayout,
@@ -41,8 +41,8 @@ namespace Engine
 		VkPipelineLayout GetPipelineLayout() const { return pipelineLayout; }
 		VkPipeline GetGraphicsPipeline() const { return graphicsPipeline; }
 
-		VkPipeline GetUIPipeline() const { return uiPipeline; }
-		VkPipelineLayout GetUIPipelineLayout() const { return uiPipelineLayout; }
+		VkPipeline GetDecoratorPipeline() const { return decoratorPipeline; }
+		VkPipelineLayout GetDecoratorPipelineLayout() const { return decoratorPipelineLayout; }
 
 		void Cleanup();
 
@@ -59,8 +59,8 @@ namespace Engine
 
 		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
 
-		VkPipeline uiPipeline = VK_NULL_HANDLE;
-		VkPipelineLayout uiPipelineLayout = VK_NULL_HANDLE;
+		VkPipeline decoratorPipeline = VK_NULL_HANDLE;
+		VkPipelineLayout decoratorPipelineLayout = VK_NULL_HANDLE;
 
 	};
 

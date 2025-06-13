@@ -23,7 +23,7 @@ namespace Engine
     VkDeviceSize indexOffsetInMegaBuffer;  // 8 bytes
   };
 
-	struct alignas(16) UIParams
+	struct alignas(16) MeshDecoratorGpuInstanceData
 	{
 		glm::vec4 fillColor;
 		glm::vec4 strokeColor;

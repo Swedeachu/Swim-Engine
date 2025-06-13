@@ -10,22 +10,12 @@ namespace Engine
 	{
 		indexCount = static_cast<uint32_t>(indices.size());
 
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-		{
-			SwimEngine::GetInstance()->GetVulkanRenderer()->GetIndexDraw()->UploadMeshToMegaBuffer(
-				vertices,
-				indices,
-				*this
-			);
-		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-		{
-			SwimEngine::GetInstance()->GetOpenGLRenderer()->UploadMeshToMegaBuffer(
-				vertices,
-				indices,
-				*this
-			);
-		}
+		// Send to the mega mesh buffer
+		SwimEngine::GetInstance()->GetRenderer().UploadMeshToMegaBuffer(
+			vertices,
+			indices,
+			*this
+		);
 
 		// Calculate the meshes AABB
 		aabbMin = glm::vec4(std::numeric_limits<float>::max());

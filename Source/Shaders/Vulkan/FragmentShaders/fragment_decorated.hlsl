@@ -4,7 +4,7 @@ SamplerState texSampler : register(s0, space1);
 [[vk::binding(1, 1)]]
 Texture2D textures[] : register(t1, space1);
 
-struct UIParams
+struct MeshDecoratorGpuInstanceData
 {
   float4 fillColor;
   float4 strokeColor;
@@ -19,7 +19,7 @@ struct UIParams
 };
 
 [[vk::binding(2, 0)]]
-StructuredBuffer<UIParams> uiParamBuffer : register(t2, space0);
+StructuredBuffer<MeshDecoratorGpuInstanceData> decoratorBuffer : register(t2, space0);
 
 struct FSInput
 {
@@ -27,7 +27,7 @@ struct FSInput
   float2 uv : TEXCOORD0;                        
   nointerpolation uint textureIndex : TEXCOORD1; 
   float hasTexture : TEXCOORD2;                  
-  nointerpolation uint instanceID : TEXCOORD3; // for indexing into the ui params buffer
+  nointerpolation uint instanceID : TEXCOORD3; // for indexing into the decorator buffer
   float3 color : TEXCOORD4;   
   float2 quadSizePx : TEXCOORD5; // half-width / half-height in pixels
   float2 centerPx : TEXCOORD6;   // pixel centre of the quad
@@ -47,23 +47,23 @@ float BoxSDF(float2 pos, float2 size)
 
 float4 main(FSInput input) : SV_Target
 {
-    uint uiParamIndex = input.instanceID;
-    UIParams ui = uiParamBuffer[uiParamIndex];
+    uint paramIndex = input.instanceID;
+    MeshDecoratorGpuInstanceData md = decoratorBuffer[paramIndex];
 
     float2 halfSize = input.quadSizePx;
 
     float2 posPx = (input.uv - 0.5f) * halfSize * 2.0f;
 
-    float radius = (ui.roundCorners != 0)
-        ? min(max(ui.cornerRadius.x, ui.cornerRadius.y), min(halfSize.x, halfSize.y))
+    float radius = (md.roundCorners != 0)
+        ? min(max(md.cornerRadius.x, md.cornerRadius.y), min(halfSize.x, halfSize.y))
         : 0.0f;
 
-    float2 strokeUV = ui.strokeWidth / (halfSize * 2.0f);
+    float2 strokeUV = md.strokeWidth / (halfSize * 2.0f);
 
     float2 innerHalf = halfSize;
     float innerRad = radius;
 
-    if (ui.enableStroke != 0)
+    if (md.enableStroke != 0)
     {
         innerHalf = max(halfSize - strokeUV * halfSize * 2.0f, float2(0.0f, 0.0f));
         innerRad = max(radius - max(strokeUV.x * halfSize.x * 2.0f, strokeUV.y * halfSize.y * 2.0f), 0.0f);
@@ -89,19 +89,19 @@ float4 main(FSInput input) : SV_Target
     outerAlpha = (outerAlpha < 0.2f) ? 0.0f : outerAlpha;
     innerAlpha = (innerAlpha < 0.2f) ? 0.0f : innerAlpha;
 
-    float strokeAlpha = (ui.enableStroke != 0) ? clamp(outerAlpha - innerAlpha, 0.0f, 1.0f) : 0.0f;
-    float fillAlpha = (ui.enableFill != 0) ? innerAlpha : 0.0f;
+    float strokeAlpha = (md.enableStroke != 0) ? clamp(outerAlpha - innerAlpha, 0.0f, 1.0f) : 0.0f;
+    float fillAlpha = (md.enableFill != 0) ? innerAlpha : 0.0f;
 
     float4 texSample = float4(1.0f, 1.0f, 1.0f, 1.0f);
-    if (input.hasTexture > 0.5f && ui.useTexture != 0)
+    if (input.hasTexture > 0.5f && md.useTexture != 0)
     {
         texSample = textures[input.textureIndex].Sample(texSampler, input.uv);
     }
 
-    bool useVertexColor = all(ui.fillColor.rgb < 0.0f);
+    bool useVertexColor = all(md.fillColor.rgb < 0.0f);
     float4 fillSrc = float4(1.0f, 1.0f, 1.0f, 1.0f);
 
-    if (ui.useTexture != 0 && input.hasTexture > 0.5f)
+    if (md.useTexture != 0 && input.hasTexture > 0.5f)
     {
         fillSrc = texSample;
     }
@@ -111,12 +111,12 @@ float4 main(FSInput input) : SV_Target
     }
     else
     {
-        fillSrc = ui.fillColor;
+        fillSrc = md.fillColor;
     }
 
     float combinedAlpha = saturate(fillAlpha + strokeAlpha);
     float3 combinedColor = (combinedAlpha > 0.0f)
-        ? (fillSrc.rgb * fillAlpha + ui.strokeColor.rgb * strokeAlpha) / combinedAlpha
+        ? (fillSrc.rgb * fillAlpha + md.strokeColor.rgb * strokeAlpha) / combinedAlpha
         : float3(0.0f, 0.0f, 0.0f);
 
     return float4(combinedColor, combinedAlpha);

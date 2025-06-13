@@ -6,7 +6,7 @@
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
-#include "Engine/Components/DecoratorUI.h"
+#include "Engine/Components/MeshDecorator.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
@@ -265,29 +265,29 @@ namespace Engine
 		glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
 		glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-		// --- 4) Load and compile Decorator UI Shader ---
-		std::string uiVertSrc = LoadTextFile("Shaders/OpenGL/ui_vertex.glsl");
-		std::string uiFragSrc = LoadTextFile("Shaders/OpenGL/ui_fragment.glsl");
+		// --- 4) Load and compile Decorator Shader ---
+		std::string uiVertSrc = LoadTextFile("Shaders/OpenGL/decorator_vertex.glsl");
+		std::string uiFragSrc = LoadTextFile("Shaders/OpenGL/decorator_fragment.glsl");
 
 		GLuint uiVert = CompileGLSLShader(GL_VERTEX_SHADER, uiVertSrc.c_str());
 		GLuint uiFrag = CompileGLSLShader(GL_FRAGMENT_SHADER, uiFragSrc.c_str());
 
-		uiDecoratorShader = LinkShaderProgram({ uiVert, uiFrag });
+		decoratorShader = LinkShaderProgram({ uiVert, uiFrag });
 
-		// Cache uniform locations for UI shader
-		loc_ui_mvp = glGetUniformLocation(uiDecoratorShader, "mvp");
-		loc_ui_fillColor = glGetUniformLocation(uiDecoratorShader, "fillColor");
-		loc_ui_strokeColor = glGetUniformLocation(uiDecoratorShader, "strokeColor");
-		loc_ui_strokeWidth = glGetUniformLocation(uiDecoratorShader, "strokeWidth");
-		loc_ui_cornerRadius = glGetUniformLocation(uiDecoratorShader, "cornerRadius");
-		loc_ui_enableStroke = glGetUniformLocation(uiDecoratorShader, "enableStroke");
-		loc_ui_enableFill = glGetUniformLocation(uiDecoratorShader, "enableFill");
-		loc_ui_roundCorners = glGetUniformLocation(uiDecoratorShader, "roundCorners");
-		loc_ui_resolution = glGetUniformLocation(uiDecoratorShader, "resolution");
-		loc_ui_quadSize = glGetUniformLocation(uiDecoratorShader, "quadSize");
-		loc_ui_useTexture = glGetUniformLocation(uiDecoratorShader, "useTexture");
-		loc_ui_albedoTex = glGetUniformLocation(uiDecoratorShader, "albedoTex");
-		loc_ui_isWorldSpace = glGetUniformLocation(uiDecoratorShader, "isWorldSpace");
+		// Cache uniform locations for decorator shader
+		loc_dec_mvp = glGetUniformLocation(decoratorShader, "mvp");
+		loc_dec_fillColor = glGetUniformLocation(decoratorShader, "fillColor");
+		loc_dec_strokeColor = glGetUniformLocation(decoratorShader, "strokeColor");
+		loc_dec_strokeWidth = glGetUniformLocation(decoratorShader, "strokeWidth");
+		loc_dec_cornerRadius = glGetUniformLocation(decoratorShader, "cornerRadius");
+		loc_dec_enableStroke = glGetUniformLocation(decoratorShader, "enableStroke");
+		loc_dec_enableFill = glGetUniformLocation(decoratorShader, "enableFill");
+		loc_dec_roundCorners = glGetUniformLocation(decoratorShader, "roundCorners");
+		loc_dec_resolution = glGetUniformLocation(decoratorShader, "resolution");
+		loc_dec_quadSize = glGetUniformLocation(decoratorShader, "quadSize");
+		loc_dec_useTexture = glGetUniformLocation(decoratorShader, "useTexture");
+		loc_dec_albedoTex = glGetUniformLocation(decoratorShader, "albedoTex");
+		loc_dec_isWorldSpace = glGetUniformLocation(decoratorShader, "isWorldSpace");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -475,11 +475,15 @@ namespace Engine
 
 		RenderWorldSpace(scene, registry, view, proj);
 
-	#ifdef _DEBUG
-		RenderWireframeDebug(scene);
-	#endif
+		RenderScreenSpaceAndDecoratedMeshes(registry, view, proj, true);
 
-		RenderScreenAndDecoratorUI(registry, view, proj);
+	#ifdef _DEBUG
+		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
+		if (debugDraw && debugDraw->IsEnabled())
+		{
+			RenderScreenSpaceAndDecoratedMeshes(debugDraw->GetRegistry(), view, proj, false);
+		}
+	#endif
 
 		SwapBuffers(deviceContext);
 	}
@@ -540,8 +544,8 @@ namespace Engine
 				return;
 			}
 
-			// Skip decorator UI elements — they go in separate pass
-			if (registry.any_of<DecoratorUI>(entity))
+			// Skip decorator elements — they go in separate pass
+			if (registry.any_of<MeshDecorator>(entity))
 			{
 				return;
 			}
@@ -551,15 +555,15 @@ namespace Engine
 	}
 
 	// Draws all screen space objects (typically UI) and also regular transforms that happen to be in screen space
-	void OpenGLRenderer::RenderScreenAndDecoratorUI(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	void OpenGLRenderer::RenderScreenSpaceAndDecoratedMeshes(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, bool cull)
 	{
 		const Frustum& frustum = Frustum::Get();
 
-		glUseProgram(uiDecoratorShader);
+		glUseProgram(decoratorShader);
 		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 		glDisable(GL_CULL_FACE);
 
-		// Render world-space UI first
+		// Render world-space decorators first
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 
@@ -570,12 +574,12 @@ namespace Engine
 				return;
 			}
 
-			if (!registry.any_of<DecoratorUI>(entity))
+			if (!registry.any_of<MeshDecorator>(entity))
 			{
 				return;
 			}
 
-			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix);
+			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix, cull);
 		});
 
 		// Render screen-space UI last (no depth test)
@@ -589,7 +593,7 @@ namespace Engine
 				return;
 			}
 
-			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix);
+			DrawUIEntity(entity, tf, matComp, registry, frustum, viewMatrix, projectionMatrix, cull);
 		});
 
 		// Restore states
@@ -607,11 +611,12 @@ namespace Engine
 		entt::registry& registry,
 		const Frustum& frustum,
 		const glm::mat4& viewMatrix,
-		const glm::mat4& projectionMatrix
+		const glm::mat4& projectionMatrix,
+		bool cull
 	)
 	{
 		const std::shared_ptr<MaterialData>& mat = matComp.data;
-		bool hasDecorator = registry.any_of<DecoratorUI>(entity);
+		bool hasDecorator = registry.any_of<MeshDecorator>(entity);
 		TransformSpace space = tf.GetTransformSpace();
 		const glm::vec3& pos = tf.GetPosition();
 		const glm::vec3& scale = tf.GetScale();
@@ -620,29 +625,32 @@ namespace Engine
 		bool isWorld = (space == TransformSpace::World);
 
 		// Frustum or screen clip culling
-		if (isWorld)
+		if (cull)
 		{
-			if (!frustum.IsVisibleLazy(mat->mesh->meshBufferData->aabbMin, mat->mesh->meshBufferData->aabbMax, model))
+			if (isWorld)
 			{
-				return;
+				if (!frustum.IsVisibleLazy(mat->mesh->meshBufferData->aabbMin, mat->mesh->meshBufferData->aabbMax, model))
+				{
+					return;
+				}
 			}
-		}
-		else
-		{
-			glm::vec2 screenScale = glm::vec2(
-				static_cast<float>(windowWidth) / VirtualCanvasWidth,
-				static_cast<float>(windowHeight) / VirtualCanvasHeight
-			);
-
-			glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-			glm::vec2 center = glm::vec2(pos) * screenScale;
-			glm::vec2 halfSizePx = halfSize * screenScale;
-			glm::vec2 minPx = center - halfSizePx;
-			glm::vec2 maxPx = center + halfSizePx;
-
-			if (maxPx.x < 0.0f || maxPx.y < 0.0f || minPx.x > windowWidth || minPx.y > windowHeight)
+			else
 			{
-				return;
+				glm::vec2 screenScale = glm::vec2(
+					static_cast<float>(windowWidth) / VirtualCanvasWidth,
+					static_cast<float>(windowHeight) / VirtualCanvasHeight
+				);
+
+				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
+				glm::vec2 center = glm::vec2(pos) * screenScale;
+				glm::vec2 halfSizePx = halfSize * screenScale;
+				glm::vec2 minPx = center - halfSizePx;
+				glm::vec2 maxPx = center + halfSizePx;
+
+				if (maxPx.x < 0.0f || maxPx.y < 0.0f || minPx.x > windowWidth || minPx.y > windowHeight)
+				{
+					return;
+				}
 			}
 		}
 
@@ -662,7 +670,7 @@ namespace Engine
 
 			if (hasDecorator)
 			{
-				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				const MeshDecorator& deco = registry.get<MeshDecorator>(entity);
 				glm::vec2 scaler = glm::vec2(250.0f);
 				radiusPx = glm::min((deco.cornerRadius / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
 				strokePx = glm::min((deco.strokeWidth / scaler) / glm::vec2(wppX, wppY), quadSizeInPixels * 0.5f);
@@ -681,7 +689,7 @@ namespace Engine
 
 			if (hasDecorator)
 			{
-				const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+				const MeshDecorator& deco = registry.get<MeshDecorator>(entity);
 				radiusPx = glm::min(deco.cornerRadius * screenScale, quadSizeInPixels * 0.5f);
 				strokePx = glm::min(deco.strokeWidth * screenScale, quadSizeInPixels * 0.5f);
 			}
@@ -690,40 +698,40 @@ namespace Engine
 		}
 
 		// Upload core uniforms
-		glUniformMatrix4fv(loc_ui_mvp, 1, GL_FALSE, &mvp[0][0]);
-		glUniform2fv(loc_ui_resolution, 1, &cameraUBO.viewportSize[0]);
-		glUniform2fv(loc_ui_quadSize, 1, &quadSizeInPixels[0]);
-		glUniform1i(loc_ui_isWorldSpace, isWorld ? 1 : 0);
+		glUniformMatrix4fv(loc_dec_mvp, 1, GL_FALSE, &mvp[0][0]);
+		glUniform2fv(loc_dec_resolution, 1, &cameraUBO.viewportSize[0]);
+		glUniform2fv(loc_dec_quadSize, 1, &quadSizeInPixels[0]);
+		glUniform1i(loc_dec_isWorldSpace, isWorld ? 1 : 0);
 
 		if (hasDecorator)
 		{
-			const DecoratorUI& deco = registry.get<DecoratorUI>(entity);
+			const MeshDecorator& deco = registry.get<MeshDecorator>(entity);
 
-			glUniform4fv(loc_ui_fillColor, 1, &deco.fillColor[0]);
-			glUniform4fv(loc_ui_strokeColor, 1, &deco.strokeColor[0]);
-			glUniform2fv(loc_ui_cornerRadius, 1, &radiusPx[0]);
-			glUniform2fv(loc_ui_strokeWidth, 1, &strokePx[0]);
-			glUniform1i(loc_ui_enableStroke, deco.enableStroke ? 1 : 0);
-			glUniform1i(loc_ui_enableFill, deco.enableFill ? 1 : 0);
-			glUniform1i(loc_ui_roundCorners, deco.roundCorners ? 1 : 0);
-			glUniform1i(loc_ui_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			glUniform4fv(loc_dec_fillColor, 1, &deco.fillColor[0]);
+			glUniform4fv(loc_dec_strokeColor, 1, &deco.strokeColor[0]);
+			glUniform2fv(loc_dec_cornerRadius, 1, &radiusPx[0]);
+			glUniform2fv(loc_dec_strokeWidth, 1, &strokePx[0]);
+			glUniform1i(loc_dec_enableStroke, deco.enableStroke ? 1 : 0);
+			glUniform1i(loc_dec_enableFill, deco.enableFill ? 1 : 0);
+			glUniform1i(loc_dec_roundCorners, deco.roundCorners ? 1 : 0);
+			glUniform1i(loc_dec_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
 		}
 		else
 		{
-			glUniform4f(loc_ui_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
-			glUniform1i(loc_ui_enableFill, 1);
-			glUniform1i(loc_ui_enableStroke, 0);
-			glUniform1i(loc_ui_roundCorners, 0);
-			glUniform1i(loc_ui_useTexture, mat->albedoMap ? 1 : 0);
-			glUniform2fv(loc_ui_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
-			glUniform2fv(loc_ui_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
-			glUniform4f(loc_ui_strokeColor, 0, 0, 0, 1);
+			glUniform4f(loc_dec_fillColor, -1.0f, -1.0f, -1.0f, 1.0f);
+			glUniform1i(loc_dec_enableFill, 1);
+			glUniform1i(loc_dec_enableStroke, 0);
+			glUniform1i(loc_dec_roundCorners, 0);
+			glUniform1i(loc_dec_useTexture, mat->albedoMap ? 1 : 0);
+			glUniform2fv(loc_dec_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
+			glUniform2fv(loc_dec_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
+			glUniform4f(loc_dec_strokeColor, 0, 0, 0, 1);
 		}
 
 		GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, texID);
-		glUniform1i(loc_ui_albedoTex, 0);
+		glUniform1i(loc_dec_albedoTex, 0);
 
 		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
 
@@ -775,71 +783,6 @@ namespace Engine
 		glBindVertexArray(0);
 	}
 
-	void OpenGLRenderer::RenderWireframeDebug(std::shared_ptr<Scene>& scene)
-	{
-		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
-		constexpr bool cullWireframe = false;
-
-		if (!debugDraw || !debugDraw->IsEnabled())
-		{
-			return;
-		}
-
-		auto& debugRegistry = debugDraw->GetRegistry();
-		const Frustum& frustum = Frustum::Get();
-
-		// Wireframe uses camera view and projection
-		const glm::mat4& view = scene->GetCameraSystem()->GetViewMatrix();
-		const glm::mat4& proj = scene->GetCameraSystem()->GetProjectionMatrix();
-
-		auto viewEntities = debugRegistry.view<Transform, DebugWireBoxData>();
-
-		glBindVertexArray(globalVAO);
-		glBindBuffer(GL_ARRAY_BUFFER, megaVBO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
-
-		for (auto entity : viewEntities)
-		{
-			const Transform& transform = viewEntities.get<Transform>(entity);
-			const DebugWireBoxData& box = viewEntities.get<DebugWireBoxData>(entity);
-			const std::shared_ptr<Mesh>& mesh = debugDraw->GetWireframeCubeMesh(box.color);
-			const MeshBufferData& meshData = *mesh->meshBufferData;
-
-			if constexpr (cullWireframe)
-			{
-				const glm::vec4& min = meshData.aabbMin;
-				const glm::vec4& max = meshData.aabbMax;
-
-				if (!frustum.IsVisibleLazy(min, max, transform.GetModelMatrix()))
-				{
-					continue;
-				}
-			}
-
-			// Compute and set MVP matrix
-			glm::mat4 model = transform.GetModelMatrix();
-			glm::mat4 mvp = proj * view * model;
-			glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
-
-			// Disable texture sampling
-			glUniform1f(loc_hasTexture, 0.0f);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, 0);
-			glUniform1i(loc_albedoTex, 0);
-
-			// Draw from mega buffer
-			glDrawElementsBaseVertex(
-				GL_TRIANGLES,
-				meshData.indexCount,
-				GL_UNSIGNED_SHORT,
-				reinterpret_cast<void*>(static_cast<uintptr_t>(meshData.indexOffsetInMegaBuffer)),
-				static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
-			);
-		}
-
-		glBindVertexArray(0);
-	}
-
 	int OpenGLRenderer::Exit()
 	{
 		if (megaVBO) { glDeleteBuffers(1, &megaVBO); megaVBO = 0; }
@@ -850,7 +793,7 @@ namespace Engine
 		currentVertexOffset = currentIndexOffset = 0;
 
 		glDeleteProgram(shaderProgram);
-		glDeleteProgram(uiDecoratorShader);
+		glDeleteProgram(decoratorShader);
 		glDeleteBuffers(1, &ubo);
 
 		MeshPool::GetInstance().Flush();

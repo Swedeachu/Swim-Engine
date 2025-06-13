@@ -30,16 +30,16 @@ namespace Engine
 			pipelineLayout = VK_NULL_HANDLE;
 		}
 
-		if (uiPipeline != VK_NULL_HANDLE)
+		if (decoratorPipeline != VK_NULL_HANDLE)
 		{
-			vkDestroyPipeline(device, uiPipeline, nullptr);
-			uiPipeline = VK_NULL_HANDLE;
+			vkDestroyPipeline(device, decoratorPipeline, nullptr);
+			decoratorPipeline = VK_NULL_HANDLE;
 		}
 
-		if (uiPipelineLayout != VK_NULL_HANDLE)
+		if (decoratorPipelineLayout != VK_NULL_HANDLE)
 		{
-			vkDestroyPipelineLayout(device, uiPipelineLayout, nullptr);
-			uiPipelineLayout = VK_NULL_HANDLE;
+			vkDestroyPipelineLayout(device, decoratorPipelineLayout, nullptr);
+			decoratorPipelineLayout = VK_NULL_HANDLE;
 		}
 
 		if (renderPass != VK_NULL_HANDLE)
@@ -315,10 +315,10 @@ namespace Engine
     vkDestroyShaderModule(device, fragModule, nullptr);
   }
 
-	void VulkanPipelineManager::CreateUIPipeline(
+	void VulkanPipelineManager::CreateDecoratedMeshPipeline(
 		const std::string& vertShaderPath,
 		const std::string& fragShaderPath,
-		VkDescriptorSetLayout uboLayout,        // Set 0: UBO + instance SSBO + UI SSBO
+		VkDescriptorSetLayout uboLayout,        // Set 0: UBO + instance SSBO + Decorator SSBO
 		VkDescriptorSetLayout bindlessLayout,   // Set 1: bindless textures
 		const std::vector<VkVertexInputBindingDescription>& bindings,
 		const std::vector<VkVertexInputAttributeDescription>& attribs,
@@ -419,7 +419,7 @@ namespace Engine
 		layoutInfo.pushConstantRangeCount = (pushConstantSize > 0) ? 1 : 0;
 		layoutInfo.pPushConstantRanges = (pushConstantSize > 0) ? &pushConstantRange : nullptr;
 
-		if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &uiPipelineLayout) != VK_SUCCESS)
+		if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &decoratorPipelineLayout) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create UI pipeline layout");
 		}
@@ -436,11 +436,11 @@ namespace Engine
 		pipelineInfo.pDepthStencilState = &depthStencil;
 		pipelineInfo.pColorBlendState = &blendState;
 		pipelineInfo.pDynamicState = &dynamicState;
-		pipelineInfo.layout = uiPipelineLayout;
+		pipelineInfo.layout = decoratorPipelineLayout;
 		pipelineInfo.renderPass = renderPass;
 		pipelineInfo.subpass = 0;
 
-		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &uiPipeline) != VK_SUCCESS)
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &decoratorPipeline) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create UI graphics pipeline");
 		}

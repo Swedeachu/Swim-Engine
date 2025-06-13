@@ -32,9 +32,9 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
-		void DrawIndexedWorld(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
-		void DrawIndexedScreenAndDecoratorUI(uint32_t frameIndex, VkCommandBuffer cmd);
+		void DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void CleanUp();
 
@@ -60,7 +60,18 @@ namespace Engine
 
 		bool HasSpaceForMesh(VkDeviceSize vertexSize, VkDeviceSize indexSize) const;
 
-		void DebugWireframeDraw();
+		void DrawDecoratorsAndScreenSpaceEntitiesInRegistry
+		(
+			entt::registry& registry,
+			const CameraUBO& cameraUBO,
+			const glm::mat4& worldView,
+			unsigned int windowWidth,
+			unsigned int windowHeight,
+			const Frustum& frustum,
+			uint32_t& instanceCount,
+			std::vector<VkDrawIndexedIndirectCommand>& drawCommands,
+			bool cull
+		);
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
@@ -70,7 +81,7 @@ namespace Engine
 
 		// Draw data instances to feed the buffers per frame
 		std::vector<GpuInstanceData> cpuInstanceData;
-		std::vector<UIParams> uiParamData;
+		std::vector<MeshDecoratorGpuInstanceData> decoratorParamData;
 
 		struct MeshInstanceRange
 		{

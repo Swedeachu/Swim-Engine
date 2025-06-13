@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "MouseInputDemoBehavior.h"
 #include "Engine/Components/Transform.h"
-#include "Engine/Components/DecoratorUI.h"
+#include "Engine/Components/MeshDecorator.h"
 #include "Engine/Systems/Renderer/Renderer.h"
 
 namespace Game
@@ -14,13 +14,13 @@ namespace Game
 
 	void MouseInputDemoBehavior::SetColor(Engine::DebugColor color)
 	{
-		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		Engine::MeshDecorator& decorator = scene->GetRegistry().get<Engine::MeshDecorator>(entity);
 		decorator.fillColor = toFour(Engine::GetDebugColorValue(color));
 	}
 
 	void MouseInputDemoBehavior::SetStrokeColor(Engine::DebugColor color)
 	{
-		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		Engine::MeshDecorator& decorator = scene->GetRegistry().get<Engine::MeshDecorator>(entity);
 		decorator.strokeColor = toFour(Engine::GetDebugColorValue(color));
 	}
 
@@ -79,7 +79,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnLeftClicked()
 	{
 		std::cout << "MouseInputDemoBehavior: Left Clicked\n";
-		Engine::DecoratorUI& decorator = scene->GetRegistry().get<Engine::DecoratorUI>(entity);
+		Engine::MeshDecorator& decorator = scene->GetRegistry().get<Engine::MeshDecorator>(entity);
 		decorator.useMaterialTexture = !decorator.useMaterialTexture;
 	}
 

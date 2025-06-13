@@ -87,7 +87,7 @@ namespace Engine
 	{
 		perFrameUBOs.resize(frameCount);
 		perFrameInstanceBuffers.resize(frameCount);
-		perFrameUIParamBuffers.resize(frameCount);
+		perFrameMeshDecoratorBuffers.resize(frameCount);
 		perFrameDescriptorSets.resize(frameCount);
 
 		for (uint32_t i = 0; i < frameCount; ++i)
@@ -110,8 +110,8 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// UIParams SSBO
-			perFrameUIParamBuffers[i] = std::make_unique<VulkanBuffer>(
+			// MeshDecoratorGpuInstanceData SSBO
+			perFrameMeshDecoratorBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
 				ssboSize,
@@ -159,9 +159,9 @@ namespace Engine
 			instanceWrite.descriptorCount = 1;
 			instanceWrite.pBufferInfo = &instanceInfo;
 
-			// === UIParams SSBO ===
+			// === MeshDecoratorGpuInstanceData SSBO ===
 			VkDescriptorBufferInfo uiInfo{};
-			uiInfo.buffer = perFrameUIParamBuffers[i]->GetBuffer();
+			uiInfo.buffer = perFrameMeshDecoratorBuffers[i]->GetBuffer();
 			uiInfo.offset = 0;
 			uiInfo.range = ssboSize;
 
@@ -229,19 +229,19 @@ namespace Engine
 		return perFrameDescriptorSets.at(frameIndex);
 	}
 
-	void VulkanDescriptorManager::UpdatePerFrameUIParams(uint32_t frameIndex, const void* data, size_t size)
+	void VulkanDescriptorManager::UpdatePerFrameMeshDecoratorBuffer(uint32_t frameIndex, const void* data, size_t size)
 	{
-		if (frameIndex >= perFrameUIParamBuffers.size())
+		if (frameIndex >= perFrameMeshDecoratorBuffers.size())
 		{
 			throw std::runtime_error("Invalid frame index for UIParam SSBO update");
 		}
 
-		perFrameUIParamBuffers[frameIndex]->CopyData(data, size);
+		perFrameMeshDecoratorBuffers[frameIndex]->CopyData(data, size);
 	}
 
-	VulkanBuffer* VulkanDescriptorManager::GetUIParamBufferForFrame(uint32_t frameIndex) const
+	VulkanBuffer* VulkanDescriptorManager::GetMeshDecoratorBufferForFrame(uint32_t frameIndex) const
 	{
-		return perFrameUIParamBuffers.at(frameIndex).get();
+		return perFrameMeshDecoratorBuffers.at(frameIndex).get();
 	}
 
 	VulkanBuffer* VulkanDescriptorManager::GetPerFrameUBO(uint32_t frameIndex) const
@@ -405,7 +405,7 @@ namespace Engine
 		perFrameUBOs.clear(); 
 		perFrameDescriptorSets.clear(); 
 
-		for (auto& buffer : perFrameUIParamBuffers)
+		for (auto& buffer : perFrameMeshDecoratorBuffers)
 		{
 			if (buffer)
 			{
@@ -413,7 +413,7 @@ namespace Engine
 				buffer.reset();
 			}
 		}
-		perFrameUIParamBuffers.clear();
+		perFrameMeshDecoratorBuffers.clear();
 
 		for (auto& buffer : perFrameInstanceBuffers)
 		{

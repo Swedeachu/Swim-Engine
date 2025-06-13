@@ -27,14 +27,16 @@ namespace Engine
 
 		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
 
-		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
-
 		// Machine overrides
 		int Awake() override;
 		int Init() override;
 		void Update(double dt) override;
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
+
+		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
+
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData) override;
 
 		// this should shortcut from VulkanDeviceManager
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }

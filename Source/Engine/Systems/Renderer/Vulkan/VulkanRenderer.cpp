@@ -59,7 +59,7 @@ namespace Engine
 
 		VkDevice device = deviceManager->GetDevice();
 		VkPhysicalDevice physicalDevice = deviceManager->GetPhysicalDevice();
-		msaaSamples = deviceManager->GetMaxUsableSampleCount(); 
+		msaaSamples = deviceManager->GetMaxUsableSampleCount();
 		if (msaaSamples > VK_SAMPLE_COUNT_4_BIT)
 		{
 			msaaSamples = VK_SAMPLE_COUNT_4_BIT; // 4x msaa is fine as max for now
@@ -169,14 +169,14 @@ namespace Engine
 			sizeof(GpuInstanceData)
 		);
 
-		pipelineManager->CreateUIPipeline(
-			"Shaders\\VertexShaders\\vertex_ui.spv",
-			"Shaders\\FragmentShaders\\fragment_ui.spv",
+		pipelineManager->CreateDecoratedMeshPipeline(
+			"Shaders\\VertexShaders\\vertex_decorated.spv",
+			"Shaders\\FragmentShaders\\fragment_decorated.spv",
 			layout,
 			bindlessLayout,
 			{ bindings.begin(), bindings.end() },
 			allAttribs,
-			sizeof(UIParams)
+			sizeof(MeshDecoratorGpuInstanceData)
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -258,7 +258,7 @@ namespace Engine
 
 		if (cubemapController)
 		{
-			cubemapController.reset(); 
+			cubemapController.reset();
 		}
 
 		swapChainManager->Cleanup();
@@ -294,6 +294,11 @@ namespace Engine
 		// deviceManager.reset();
 
 		return 0;
+	}
+
+	void VulkanRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	{
+		if (indexDraw) indexDraw->UploadMeshToMegaBuffer(vertices, indices, meshData);
 	}
 
 	void VulkanRenderer::DrawFrame()
@@ -371,7 +376,7 @@ namespace Engine
 	void VulkanRenderer::UpdateUniformBuffer()
 	{
 		cameraUBO.view = cameraSystem->GetViewMatrix();
-		cameraUBO.proj = cameraSystem->GetProjectionMatrix(); 
+		cameraUBO.proj = cameraSystem->GetProjectionMatrix();
 
 		const Camera& camera = cameraSystem->GetCamera();
 
@@ -418,7 +423,6 @@ namespace Engine
 
 		// Update camera UBO and instance buffer
 		UpdateUniformBuffer();
-		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		// Begin render pass
 		std::array<VkClearValue, 2> clearValues{};
@@ -475,8 +479,9 @@ namespace Engine
 		);
 
 		// === Scene: Draw all indexed meshes ===
-		indexDraw->DrawIndexedWorld(currentFrame, cmd);
-		indexDraw->DrawIndexedScreenAndDecoratorUI(currentFrame, cmd);
+		indexDraw->UpdateInstanceBuffer(currentFrame);
+		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);
+		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd);
 
 		vkCmdEndRenderPass(cmd);
 
