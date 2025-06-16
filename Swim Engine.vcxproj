@@ -229,6 +229,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\OpenGL\ShaderToyRendererGL.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanBuffer.cpp" />
+    <ClInclude Include="Source\Engine\Components\CompositeMaterial.h" />
     <ClInclude Include="Source\Engine\Components\MeshDecorator.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
@@ -273,7 +274,11 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Source\Library\stb\stb_image_resize2.cpp">
+    <ClCompile Include="Source\Library\stb\stb_image_resize2_wrapper.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -286,6 +291,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
+    <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf.h" />
+    <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\Components\Material.h" />

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <memory>
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Textures/Texture2D.h"
 

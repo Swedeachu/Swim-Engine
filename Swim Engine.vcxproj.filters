@@ -36,7 +36,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Renderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.cpp" />
-    <ClCompile Include="Source\Library\stb\stb_image_resize2.cpp" />
+    <ClCompile Include="Source\Library\stb\stb_image_resize2_wrapper.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
     <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
@@ -45,6 +45,7 @@
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshBufferData.cpp" />
+    <ClCompile Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -106,6 +107,9 @@
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Engine\Components\MeshDecorator.h" />
+    <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf.h" />
+    <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.h" />
+    <ClInclude Include="Source\Engine\Components\CompositeMaterial.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

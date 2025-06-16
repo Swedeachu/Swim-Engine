@@ -5,6 +5,7 @@
 #include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
+#include "Engine\Components\CompositeMaterial.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Library/glm/vec4.hpp"
 #include "RandomUtils.h"
@@ -702,6 +703,15 @@ namespace Game
 
 		// We can load scene scripts this way as a cool hack/trick
 		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
+
+		// Sponza 3D model test
+		// std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData = meshPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // screws up so we just a barrel for today
+		std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+		Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+
+		auto sponza = CreateEntity();
+		AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -6.0f), glm::vec3(1.0f)));
+		AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);

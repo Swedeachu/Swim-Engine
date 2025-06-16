@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "VulkanIndexDraw.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
@@ -27,7 +28,7 @@ namespace Engine
 	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
 	{
 		indirectCommandBuffers.resize(framesInFlight);
-		uiIndirectCommandBuffers.resize(framesInFlight);
+		meshDecoratorIndirectCommandBuffers.resize(framesInFlight);
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
@@ -39,7 +40,7 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			uiIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
+			meshDecoratorIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
 				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
@@ -214,24 +215,55 @@ namespace Engine
 
 		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
-			// we don't want to do decorators in this pass since they require the decorator shader pass, hopefully this is not an expensive check
-			if (!registry.any_of<MeshDecorator>(entity)) 
-				AddInstance(registry.get<Transform>(entity), registry.get<Material>(entity).data, nullptr);
+			// Skip decorators
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				return;
+			}
+
+			const Transform& tf = registry.get<Transform>(entity);
+
+			if (registry.all_of<Material>(entity))
+			{
+				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
+				AddInstance(tf, mat, nullptr);
+			}
+			else if (registry.all_of<CompositeMaterial>(entity))
+			{
+				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
+				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
+				{
+					AddInstance(tf, mat, nullptr);
+				}
+			}
 		});
 	}
 
 	// Passing space as TransformSpace::Ambiguous will just render all entities
 	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
-		auto view = registry.view<Transform, Material>();
-
-		for (auto& entity : view)
+		auto regularView = registry.view<Transform, Material>();
+		for (auto entity : regularView)
 		{
-			const Transform& tf = view.get<Transform>(entity);
+			const Transform& tf = regularView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
-				const auto& mat = view.get<Material>(entity).data;
+				const auto& mat = regularView.get<Material>(entity).data;
 				AddInstance(tf, mat, frustum);
+			}
+		}
+
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		for (auto entity : compositeView)
+		{
+			const Transform& tf = compositeView.get<Transform>(entity);
+			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
+			{
+				const auto& composite = compositeView.get<CompositeMaterial>(entity);
+				for (const auto& mat : composite.subMaterials)
+				{
+					AddInstance(tf, mat, frustum);
+				}
 			}
 		}
 	}
@@ -408,7 +440,7 @@ namespace Engine
 		);
 
 		// === Upload indirect draw commands ===
-		uiIndirectCommandBuffers[frameIndex]->CopyData(
+		meshDecoratorIndirectCommandBuffers[frameIndex]->CopyData(
 			drawCommands.data(),
 			drawCommands.size() * sizeof(VkDrawIndexedIndirectCommand)
 		);
@@ -445,7 +477,7 @@ namespace Engine
 		// === Issue indirect draw ===
 		vkCmdDrawIndexedIndirect(
 			cmd,
-			uiIndirectCommandBuffers[frameIndex]->GetBuffer(),
+			meshDecoratorIndirectCommandBuffers[frameIndex]->GetBuffer(),
 			0,
 			static_cast<uint32_t>(drawCommands.size()),
 			sizeof(VkDrawIndexedIndirectCommand)
@@ -465,6 +497,12 @@ namespace Engine
 		bool cull
 	)
 	{
+		// First cache screen scale
+		glm::vec2 screenScale = glm::vec2(
+			static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
+			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
+		);
+
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
@@ -476,11 +514,6 @@ namespace Engine
 			{
 				return;
 			}
-
-			glm::vec2 screenScale = glm::vec2(
-				static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
-				static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
-			);
 
 			const glm::vec3& pos = transform.GetPosition(); // In virtual canvas units
 			const glm::vec3& scale = transform.GetScale();  // Width & height in virtual canvas units

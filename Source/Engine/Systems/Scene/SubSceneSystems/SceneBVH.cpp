@@ -1,6 +1,7 @@
 #include "PCH.h"
 #include "SceneBVH.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
@@ -50,16 +51,16 @@ namespace Engine
 
 		return { worldMin, worldMax };
 	}
-#undef EXPAND_CORNER
 
 	void SceneBVH::Update()
 	{
-		// Refresh or create new leafs
+		// === Handle regular Material entities ===
 		auto view = registry.view<Transform, Material>();
 		for (entt::entity e : view)
 		{
 			const Transform& tf = view.get<Transform>(e);
-			if (tf.GetTransformSpace() != TransformSpace::World) continue; // ignore stuff not in the world
+			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+
 			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
 			const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
@@ -75,7 +76,6 @@ namespace Engine
 			}
 			else
 			{
-				// Brand new leaf
 				BVHNode leaf;
 				leaf.entity = e;
 				leaf.aabb = CalculateWorldAABB(mesh, tf);
@@ -85,6 +85,69 @@ namespace Engine
 			}
 		}
 
+		// === Handle CompositeMaterial entities ===
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		for (entt::entity e : compositeView)
+		{
+			const Transform& tf = compositeView.get<Transform>(e);
+			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+
+			const CompositeMaterial& comp = compositeView.get<CompositeMaterial>(e);
+			if (comp.subMaterials.empty()) { continue; }
+
+			// Compute combined local AABB
+			glm::vec3 localMin(FLT_MAX);
+			glm::vec3 localMax(-FLT_MAX);
+
+			for (const auto& mat : comp.subMaterials)
+			{
+				if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
+
+				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
+				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+
+				localMin = glm::min(localMin, min);
+				localMax = glm::max(localMax, max);
+			}
+
+			// Transform to world space
+			glm::mat4 model = tf.GetModelMatrix();
+
+			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
+			glm::vec3 worldMax = worldMin;
+
+			EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
+			EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
+			EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
+			EXPAND_CORNER(localMin.x, localMin.y, localMax.z);
+			EXPAND_CORNER(localMax.x, localMin.y, localMax.z);
+			EXPAND_CORNER(localMin.x, localMax.y, localMax.z);
+			EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
+
+			AABB worldAABB = { worldMin, worldMax };
+
+			const bool isDirty = tf.IsDirty();
+
+			auto it = entityToLeaf.find(e);
+			if (it != entityToLeaf.end())
+			{
+				if (isDirty)
+				{
+					nodes[it->second].aabb = worldAABB;
+				}
+			}
+			else
+			{
+				BVHNode leaf;
+				leaf.entity = e;
+				leaf.aabb = worldAABB;
+				int newIdx = static_cast<int>(nodes.size());
+				nodes.emplace_back(std::move(leaf));
+				entityToLeaf[e] = newIdx;
+			}
+		}
+
+		// === Rebuild check ===
 		static constexpr float kRebuildThreshold = 0.15f;
 
 		if (root == -1 || observer.size() > 0)
@@ -93,12 +156,10 @@ namespace Engine
 		}
 		else
 		{
-			// Store old AABB
 			AABB preAABB = nodes[root].aabb;
 
 			Refit(root);
 
-			// Calculate size change using surface area for more accuracy
 			glm::vec3 preSize = preAABB.max - preAABB.min;
 			glm::vec3 postSize = nodes[root].aabb.max - nodes[root].aabb.min;
 
@@ -108,7 +169,6 @@ namespace Engine
 			if (preArea > 0.0f)
 			{
 				float expansion = postArea / preArea;
-
 				if (expansion > 1.0f + kRebuildThreshold)
 				{
 					FullRebuild();
@@ -186,37 +246,85 @@ namespace Engine
 
 	void SceneBVH::FullRebuild()
 	{
-		// Step 1: Gather all entities and clear current data
 		std::vector<std::pair<entt::entity, int>> oldLeaves(entityToLeaf.begin(), entityToLeaf.end());
 
-		// Step 2: Clear all nodes and reset entity map
 		nodes.clear();
 		entityToLeaf.clear();
 
-		// Step 3: Rebuild leaves and update map
 		std::vector<int> leafIndices;
 		leafIndices.reserve(oldLeaves.size());
 
-		for (auto& [entity, _] : oldLeaves)
+		// === Rebuild for Material entities ===
+		auto view = registry.view<Transform, Material>();
+		for (entt::entity e : view)
 		{
-			auto& tf = registry.get<Transform>(entity);
-			auto& mat = registry.get<Material>(entity);
-			const auto& mesh = mat.data->mesh;
+			const auto& tf = view.get<Transform>(e);
+			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+
+			const auto& mat = view.get<Material>(e).data;
+			const auto& mesh = mat->mesh;
 
 			BVHNode leaf;
-			leaf.entity = entity;
+			leaf.entity = e;
 			leaf.aabb = CalculateWorldAABB(mesh, tf);
 
 			int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
-			entityToLeaf[entity] = idx;
+			entityToLeaf[e] = idx;
 			leafIndices.push_back(idx);
 		}
 
-		// Step 4: Re-order leaf indices for cache coherence (technically optional)
+		// === Rebuild for CompositeMaterial entities ===
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		for (entt::entity e : compositeView)
+		{
+			const auto& tf = compositeView.get<Transform>(e);
+			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+
+			const auto& comp = compositeView.get<CompositeMaterial>(e);
+			if (comp.subMaterials.empty()) { continue; }
+
+			glm::vec3 localMin(FLT_MAX);
+			glm::vec3 localMax(-FLT_MAX);
+
+			for (const auto& mat : comp.subMaterials)
+			{
+				if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
+
+				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
+				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+
+				localMin = glm::min(localMin, min);
+				localMax = glm::max(localMax, max);
+			}
+
+			glm::mat4 model = tf.GetModelMatrix();
+			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
+			glm::vec3 worldMax = worldMin;
+
+			EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
+			EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
+			EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
+			EXPAND_CORNER(localMin.x, localMin.y, localMax.z);
+			EXPAND_CORNER(localMax.x, localMin.y, localMax.z);
+			EXPAND_CORNER(localMin.x, localMax.y, localMax.z);
+			EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
+
+			AABB worldAABB = { worldMin, worldMax };
+
+			BVHNode leaf;
+			leaf.entity = e;
+			leaf.aabb = worldAABB;
+
+			int idx = static_cast<int>(nodes.size());
+			nodes.emplace_back(std::move(leaf));
+			entityToLeaf[e] = idx;
+			leafIndices.push_back(idx);
+		}
+
+		// Optional: sort for spatial locality
 		std::sort(leafIndices.begin(), leafIndices.end());
 
-		// Step 5: Recursively build BVH tree from leaves
 		root = BuildRecursive(leafIndices, 0, static_cast<int>(leafIndices.size()));
 	}
 
@@ -290,19 +398,61 @@ namespace Engine
 
 	void SceneBVH::DebugRender()
 	{
-		bool drawInternal = false;
-
 		if (debugDrawer == nullptr || !debugDrawer->IsEnabled())
 		{
 			return;
 		}
 
-		const size_t start = drawInternal ? 0 : entityToLeaf.size();
-		for (size_t i = start; i < nodes.size(); ++i)
+		constexpr bool drawInternalNodes = true;
+		constexpr bool drawCompositeSubmeshes = true;
+
+		// === Internal BVH nodes (non-leaf) ===
+		if constexpr (drawInternalNodes)
 		{
-			const AABB& a = nodes[i].aabb;
+			for (size_t i = 0; i < nodes.size(); ++i)
+			{
+				const BVHNode& node = nodes[i];
+				if (node.IsLeaf())
+				{
+					continue;
+				}
+
+				const AABB& a = node.aabb;
+				debugDrawer->SubmitWireframeBoxAABB(a.min, a.max,
+					{ 1.0f, 0.0f, 0.0f, 1.0f }, // red
+					false, // no fill
+					{ 0.0f, 0.0f, 0.0f, 1.0f }, // no fill color
+					glm::vec2(10.0f), // wireframe line width
+					glm::vec2(0.0f), // corner radius of 0 (none)
+					0, // world space bit
+					SceneDebugDraw::MeshBoxType::BevelledCube // use bevelled mesh
+				);
+			}
+		}
+
+		// === Entity AABBs (leaf nodes) ===
+		for (const auto& [entity, leafIndex] : entityToLeaf)
+		{
+			const BVHNode& leaf = nodes[leafIndex];
+			const AABB& a = leaf.aabb;
+
+			glm::vec4 color;
+
+			if (registry.all_of<Material>(entity))
+			{
+				color = { 0.2f, 1.0f, 0.2f, 1.0f }; // green
+			}
+			else if (registry.all_of<CompositeMaterial>(entity))
+			{
+				color = { 0.2f, 0.6f, 1.0f, 1.0f }; // blue
+			}
+			else
+			{
+				color = { 1.0f, 1.0f, 0.0f, 1.0f }; // yellow
+			}
+
 			debugDrawer->SubmitWireframeBoxAABB(a.min, a.max,
-				{ 1.0f, 0.0f, 0.0f, 1.0f }, // stroke color of wireframe lines
+				color,
 				false, // no fill
 				{ 0.0f, 0.0f, 0.0f, 1.0f }, // no fill color
 				glm::vec2(10.0f), // wireframe line width
@@ -310,6 +460,51 @@ namespace Engine
 				0, // world space bit
 				SceneDebugDraw::MeshBoxType::BevelledCube // use bevelled mesh
 			);
+
+			// === Optional: draw individual submesh AABBs of composites ===
+			if constexpr (drawCompositeSubmeshes)
+			{
+				if (registry.all_of<Transform, CompositeMaterial>(entity))
+				{
+					const auto& tf = registry.get<Transform>(entity);
+					const auto& comp = registry.get<CompositeMaterial>(entity);
+
+					const glm::mat4 model = tf.GetModelMatrix();
+
+					for (const auto& mat : comp.subMaterials)
+					{
+						if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+						{
+							continue;
+						}
+
+						const glm::vec3 min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
+						const glm::vec3 max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+
+						// Transform AABB to world space (same 8 corner expansion used in your CalculateWorldAABB)
+						glm::vec3 worldMin = glm::vec3(model * glm::vec4(min, 1.0f));
+						glm::vec3 worldMax = worldMin;
+
+						EXPAND_CORNER(max.x, min.y, min.z);
+						EXPAND_CORNER(min.x, max.y, min.z);
+						EXPAND_CORNER(max.x, max.y, min.z);
+						EXPAND_CORNER(min.x, min.y, max.z);
+						EXPAND_CORNER(max.x, min.y, max.z);
+						EXPAND_CORNER(min.x, max.y, max.z);
+						EXPAND_CORNER(max.x, max.y, max.z);
+
+						debugDrawer->SubmitWireframeBoxAABB(worldMin, worldMax,
+							{ 1.0f, 0.5f, 1.0f, 1.0f },
+							false, // no fill
+							{ 0.0f, 0.0f, 0.0f, 1.0f }, // no fill color
+							glm::vec2(10.0f), // wireframe line width
+							glm::vec2(0.0f), // corner radius of 0 (none)
+							0, // world space bit
+							SceneDebugDraw::MeshBoxType::BevelledCube // use bevelled mesh
+						);
+					}
+				}
+			}
 		}
 	}
 

@@ -3,6 +3,7 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "VulkanCubeMap.h"
 
 // Validation layers for debugging
@@ -266,6 +267,7 @@ namespace Engine
 
 		MeshPool::GetInstance().Flush();
 		TexturePool::GetInstance().Flush();
+		MaterialPool::GetInstance().Flush();
 		missingTexture.reset();
 
 		syncManager->Cleanup();

@@ -109,7 +109,7 @@ namespace Engine
 
 		// Command buffers per frame
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; 
-		std::vector<std::unique_ptr<VulkanBuffer>> uiIndirectCommandBuffers; 
+		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers; 
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;
@@ -126,7 +126,7 @@ namespace Engine
 		// How big to grow each time we run out
 		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
-		bool useQueriedFrustumSceneBVH{ false };
+		bool useQueriedFrustumSceneBVH{ true };
 
 	};
 

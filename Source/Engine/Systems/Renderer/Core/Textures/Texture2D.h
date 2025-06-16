@@ -47,6 +47,8 @@ namespace Engine
 			return width * height * 4; // not sure how correct this is
 		}
 
+		bool isPixelDataSTB = true; // Determines if pixelData was loaded via stbi (true) or malloc (false)
+
 	private:
 
 		uint32_t width = 0;
@@ -67,8 +69,6 @@ namespace Engine
 
 		// Raw CPU-side pixel data 
 		unsigned char* pixelData = nullptr;
-
-		bool isPixelDataSTB = true; // Determines if pixelData was loaded via stbi (true) or malloc (false)
 
 		// Vulkan-only
 		void LoadVulkanTexture();

@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
@@ -301,10 +302,6 @@ namespace Engine
 		);
 		cubemapController->SetEnabled(false);
 
-		GLint samples = 0;
-		glGetIntegerv(GL_SAMPLES, &samples);
-		std::cout << "MSAA Samples: " << samples << std::endl;
-
 		CreateMegaMeshBuffer();
 
 		return 0;
@@ -394,7 +391,6 @@ namespace Engine
 		megaVertexBufferSize = newVertexSize;
 		megaIndexBufferSize = newIndexSize;
 	}
-
 
 	void OpenGLRenderer::CreateMegaMeshBuffer()
 	{
@@ -552,6 +548,71 @@ namespace Engine
 
 			DrawEntity(entity, registry, viewMatrix, projectionMatrix);
 		});
+	}
+
+	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		const Transform& transform = registry.get<Transform>(entity);
+		const glm::mat4& model = transform.GetModelMatrix();
+		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
+
+		// === CompositeMaterial handling ===
+		if (registry.any_of<CompositeMaterial>(entity))
+		{
+			const auto& composite = registry.get<CompositeMaterial>(entity);
+			for (const auto& mat : composite.subMaterials)
+			{
+				const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+
+				glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+				bool usesTexture = (mat->albedoMap != nullptr);
+				glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
+
+				GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, texID);
+				glUniform1i(loc_albedoTex, 0);
+
+				glBindVertexArray(globalVAO);
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+
+				glDrawElementsBaseVertex(
+					GL_TRIANGLES,
+					meshData.indexCount,
+					GL_UNSIGNED_SHORT,
+					reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
+					static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
+				);
+			}
+
+			return;
+		}
+
+		// === Regular Material handling ===
+		const auto& mat = registry.get<Material>(entity).data;
+		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+
+		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
+
+		bool usesTexture = (mat->albedoMap != nullptr);
+		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
+
+		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, texID);
+		glUniform1i(loc_albedoTex, 0);
+
+		glBindVertexArray(globalVAO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
+
+		glDrawElementsBaseVertex(
+			GL_TRIANGLES,
+			meshData.indexCount,
+			GL_UNSIGNED_SHORT,
+			reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
+			static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
+		);
 	}
 
 	// Draws all screen space objects (typically UI) and also regular transforms that happen to be in screen space
@@ -744,40 +805,6 @@ namespace Engine
 			GL_UNSIGNED_SHORT,
 			reinterpret_cast<void*>(mesh.indexOffsetInMegaBuffer),
 			static_cast<GLint>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex))
-		);
-
-		glBindVertexArray(0);
-	}
-
-	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
-	{
-		const Transform& transform = registry.get<Transform>(entity);
-		const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
-
-		const glm::mat4& model = transform.GetModelMatrix();
-		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
-
-		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
-
-		// Bind texture if available
-		bool usesTexture = (mat->albedoMap != nullptr);
-		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
-
-		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texID);
-		glUniform1i(loc_albedoTex, 0);
-
-		glBindVertexArray(globalVAO);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);
-
-		glDrawElementsBaseVertex(
-			GL_TRIANGLES,
-			meshData.indexCount,
-			GL_UNSIGNED_SHORT,
-			reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
-			static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
 		);
 
 		glBindVertexArray(0);

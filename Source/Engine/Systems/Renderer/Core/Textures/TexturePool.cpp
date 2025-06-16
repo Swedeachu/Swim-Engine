@@ -78,6 +78,12 @@ namespace Engine
 		return tex;
 	}
 
+	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		textures[name] = texture;
+	}
+
 	std::shared_ptr<Texture2D> TexturePool::GetTexture2D(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);

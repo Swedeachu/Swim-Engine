@@ -32,6 +32,8 @@ namespace Engine
 		// Loads a texture if not already loaded, returns shared_ptr
 		std::shared_ptr<Texture2D> LoadTexture(const std::string& fileName);
 
+		void StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name);
+
 		std::shared_ptr<Texture2D> GetTexture2D(const std::string& name);
 		std::shared_ptr<Texture2D> GetTexture2DLazy(const std::string& name);
 		std::string FormatKey(const std::string& filePath, const std::string& rootPath) const;

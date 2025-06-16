@@ -3,7 +3,7 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 
-#define STB_IMAGE_IMPLEMENTATION
+// #define STB_IMAGE_IMPLEMENTATION // we don't have to do this anymore because this define is done by tiny_gltf
 #include "Library/stb/stb_image.h"
 
 namespace Engine
