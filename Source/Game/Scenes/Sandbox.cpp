@@ -677,9 +677,10 @@ namespace Game
 
 		// Sponza 3D model test
 		std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
-		sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // some mesh data is just missing though in our loading
-		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // idk the difference but this crashes in a vector subscript
-		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // fopen error because are actually intended to treat the Raw dir as the GLB unpacked
+		std::cout << "Sponza load time\n";
+		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // some mesh data is just missing though in our loading
+		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // this fails to load anything, idk what is even different in this one either
+		sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // actually works (unpacked raw version that is much easier to parse)
 		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/sofa.glb"); // this sofa model has webps as its textures instead of png or ktx
 
 		glm::vec3 sponzaScale = glm::vec3(1.0f);

@@ -172,13 +172,17 @@ namespace Engine
 		std::vector<std::shared_ptr<MaterialData>>& loadedMaterials)
 	{
 		const tinygltf::Node& node = model.nodes[nodeIndex];
+		std::string nodeName = node.name.empty() ? "Node_" + std::to_string(nodeIndex) : node.name;
 
 		glm::mat4 localTransform(1.0f);
 		if (!node.matrix.empty())
 		{
-			for (int i = 0; i < 16; ++i)
+			for (int col = 0; col < 4; ++col)
 			{
-				localTransform[i % 4][i / 4] = static_cast<float>(node.matrix[i]);
+				for (int row = 0; row < 4; ++row)
+				{
+					localTransform[col][row] = static_cast<float>(node.matrix[col * 4 + row]);
+				}
 			}
 		}
 		else
@@ -209,15 +213,28 @@ namespace Engine
 		if (node.mesh >= 0)
 		{
 			const tinygltf::Mesh& gltfMesh = model.meshes[node.mesh];
+			std::string meshName = gltfMesh.name.empty() ? "UnnamedMesh" : gltfMesh.name;
 
 			for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx)
 			{
 				const tinygltf::Primitive& primitive = gltfMesh.primitives[primIdx];
-				if (primitive.mode != TINYGLTF_MODE_TRIANGLES) { continue; }
-				if (!primitive.attributes.contains("POSITION")) { continue; }
+
+				if (!primitive.attributes.contains("POSITION"))
+				{
+					continue;
+				}
 
 				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
-				if (posAccessor.count == 0 || posAccessor.bufferView < 0) { continue; }
+
+				if (posAccessor.count == 0)
+				{
+					continue;
+				}
+
+				if (posAccessor.bufferView < 0)
+				{
+					continue;
+				}
 
 				const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
 				const tinygltf::Buffer& posBuffer = model.buffers[posView.buffer];
@@ -243,7 +260,7 @@ namespace Engine
 					}
 					else
 					{
-						hasUV = false; // disable broken
+						hasUV = false;
 					}
 				}
 
@@ -263,7 +280,7 @@ namespace Engine
 					}
 					else
 					{
-						hasColor = false; // disable broken
+						hasColor = false;
 					}
 				}
 
@@ -275,7 +292,8 @@ namespace Engine
 					Vertex v;
 
 					const float* posPtr = reinterpret_cast<const float*>(posBase + i * posStride);
-					v.position = glm::vec3(worldTransform * glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f));
+					glm::vec4 rawPos = glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f);
+					v.position = glm::vec3(worldTransform * rawPos);
 
 					if (hasUV)
 					{
@@ -294,106 +312,147 @@ namespace Engine
 							const uint16_t* uvPtr = reinterpret_cast<const uint16_t*>(uvRawBase + i * uvStride);
 							v.uv = glm::vec2(uvPtr[0], uvPtr[1]) / 65535.0f;
 						}
+						else
+						{
+							v.uv = glm::vec2(0.0f);
+						}
 					}
-					else { v.uv = glm::vec2(0.0f); }
+					else
+					{
+						v.uv = glm::vec2(0.0f);
+					}
 
 					if (hasColor)
 					{
 						if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
 						{
-							const float* c = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(c[0], c[1], c[2]);
+							const float* colorPtr = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]);
 						}
 						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
 						{
-							const uint8_t* c = reinterpret_cast<const uint8_t*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(c[0], c[1], c[2]) / 255.0f;
+							const uint8_t* colorPtr = reinterpret_cast<const uint8_t*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]) / 255.0f;
 						}
 						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
 						{
-							const uint16_t* c = reinterpret_cast<const uint16_t*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(c[0], c[1], c[2]) / 65535.0f;
+							const uint16_t* colorPtr = reinterpret_cast<const uint16_t*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]) / 65535.0f;
 						}
-						else { v.color = glm::vec3(1.0f); }
+						else
+						{
+							v.color = glm::vec3(1.0f);
+						}
 					}
-					else { v.color = glm::vec3(1.0f); }
+					else
+					{
+						v.color = glm::vec3(1.0f);
+					}
 
 					vertices.push_back(v);
 				}
 
 				std::vector<uint32_t> indices;
-				if (primitive.indices >= 0)
+				bool hasIndices = (primitive.indices >= 0);
+
+				if (hasIndices)
 				{
 					const tinygltf::Accessor& idxAccessor = model.accessors[primitive.indices];
 					const tinygltf::BufferView& idxView = model.bufferViews[idxAccessor.bufferView];
 					const tinygltf::Buffer& idxBuffer = model.buffers[idxView.buffer];
 					const unsigned char* idxBase = idxBuffer.data.data() + idxView.byteOffset + idxAccessor.byteOffset;
 
+					indices.reserve(idxAccessor.count);
+
 					for (size_t i = 0; i < idxAccessor.count; ++i)
 					{
 						uint32_t index = 0;
+
 						switch (idxAccessor.componentType)
 						{
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							index = reinterpret_cast<const uint8_t*>(idxBase)[i];
+							{
+								index = reinterpret_cast<const uint8_t*>(idxBase)[i];
+							}
 							break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							index = reinterpret_cast<const uint16_t*>(idxBase)[i];
+							{
+								index = reinterpret_cast<const uint16_t*>(idxBase)[i];
+							}
 							break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							index = reinterpret_cast<const uint32_t*>(idxBase)[i];
+							{
+								index = reinterpret_cast<const uint32_t*>(idxBase)[i];
+							}
 							break;
 							default:
-							throw std::runtime_error("Unsupported index type");
+							{
+								std::cout << "[ERROR] Unsupported index component type: " << idxAccessor.componentType << std::endl;
+								throw std::runtime_error("Unsupported index type in GLB");
+							}
 						}
+
 						indices.push_back(index);
 					}
 				}
+				else
+				{
+					indices.reserve(vertices.size());
+					for (uint32_t i = 0; i < vertices.size(); ++i)
+					{
+						indices.push_back(i);
+					}
+				}
 
-				// Material / texture (unchanged)
+				std::string finalMeshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
+				finalMeshName += "_prim" + std::to_string(primIdx);
+
 				std::shared_ptr<Texture2D> texture = nullptr;
 				if (primitive.material >= 0 && primitive.material < model.materials.size())
 				{
-					const auto& material = model.materials[primitive.material];
-					const auto& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
+					const tinygltf::Material& material = model.materials[primitive.material];
+					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
 
 					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
 					{
-						const auto& textureDef = model.textures[baseColorTex.index];
+						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
 						int imageSource = -1;
 
 						if (textureDef.extensions.contains("KHR_texture_basisu"))
 						{
-							const auto& ext = textureDef.extensions.at("KHR_texture_basisu");
-							if (ext.Has("source")) { imageSource = ext.Get("source").Get<int>(); }
+							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
+							if (ext.Has("source"))
+							{
+								imageSource = ext.Get("source").Get<int>();
+							}
 						}
 						else if (textureDef.source >= 0 && textureDef.source < model.images.size())
 						{
 							imageSource = textureDef.source;
 						}
 
-						if (imageSource >= 0)
+						if (imageSource >= 0 && imageSource < model.images.size())
 						{
-							const auto& img = model.images[imageSource];
+							const tinygltf::Image& img = model.images[imageSource];
 							TexturePool& texturePool = TexturePool::GetInstance();
 							texture = texturePool.CreateTextureFromImage(img, path + "_" + std::to_string(nodeIndex));
 						}
 					}
 				}
 
-				std::string meshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
-				meshName += "_prim" + std::to_string(primIdx);
-				std::shared_ptr<Mesh> mesh = MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
+				MeshPool& meshPool = MeshPool::GetInstance();
+				std::shared_ptr<Mesh> mesh = meshPool.RegisterMesh(finalMeshName, vertices, indices);
 
-				std::string matName = meshName + "_material";
+				std::string matName = finalMeshName + "_material";
 				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
 				loadedMaterials.push_back(matData);
 			}
 		}
 
-		for (int child : node.children)
+		for (size_t i = 0; i < node.children.size(); ++i)
 		{
-			LoadNodeRecursive(model, child, worldTransform, path, loadedMaterials);
+			int childIndex = node.children[i];
+			LoadNodeRecursive(model, childIndex, worldTransform, path, loadedMaterials);
 		}
 	}
 
@@ -409,6 +468,8 @@ namespace Engine
 		tinygltf::TinyGLTF loader;
 		std::string err, warn;
 		ImageCollector imageCollector;
+
+		std::cout << "[DEBUG] Loading GLB file: " << path << std::endl;
 
 		// Image loader with KTX2 support
 		tinygltf::LoadImageDataFunction CustomImageLoader = [](
@@ -489,6 +550,15 @@ namespace Engine
 			model.images[index] = img;
 		}
 
+		// Print model stats
+		std::cout << "[DEBUG] Model loaded successfully:" << std::endl;
+		std::cout << "  - Nodes: " << model.nodes.size() << std::endl;
+		std::cout << "  - Meshes: " << model.meshes.size() << std::endl;
+		std::cout << "  - Materials: " << model.materials.size() << std::endl;
+		std::cout << "  - Textures: " << model.textures.size() << std::endl;
+		std::cout << "  - Images: " << model.images.size() << std::endl;
+		std::cout << "  - Scenes: " << model.scenes.size() << std::endl;
+
 		// Recursive scene walker
 		if (model.scenes.empty())
 		{
@@ -498,11 +568,47 @@ namespace Engine
 		int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
 		const tinygltf::Scene& scene = model.scenes[sceneIndex];
 
+		std::cout << "[DEBUG] Processing scene " << sceneIndex << " with " << scene.nodes.size() << " root nodes" << std::endl;
+
+		std::unordered_set<int> visitedNodes;
+
+		auto TrackedLoad = [&](int rootIndex)
+		{
+			LoadNodeRecursive(model, rootIndex, glm::mat4(1.0f), path, loadedMaterials);
+			visitedNodes.insert(rootIndex);
+		};
+
+		// Replace LoadNodeRecursive call with TrackedLoad
+		for (int rootNode : scene.nodes)
+		{
+			TrackedLoad(rootNode);
+		}
+
+		// Afterwards, detect orphan nodes
+		for (int i = 0; i < model.nodes.size(); ++i)
+		{
+			if (visitedNodes.find(i) == visitedNodes.end())
+			{
+				std::cout << "[WARNING] Node " << i << " (" << model.nodes[i].name << ") was not visited!" << std::endl;
+			}
+		}
+
 		for (size_t i = 0; i < scene.nodes.size(); ++i)
 		{
 			const int rootNodeIndex = scene.nodes[i];
 			LoadNodeRecursive(model, rootNodeIndex, glm::mat4(1.0f), path, loadedMaterials);
 		}
+
+		for (int i = 0; i < model.nodes.size(); ++i)
+		{
+			if (!visitedNodes.contains(i))
+			{
+				std::cout << "[DEBUG] Forcing load of orphaned node: " << i << std::endl;
+				LoadNodeRecursive(model, i, glm::mat4(1.0f), path, loadedMaterials);
+			}
+		}
+
+		std::cout << "[DEBUG] Total materials loaded: " << loadedMaterials.size() << std::endl;
 
 		compositeMaterials.emplace(path, loadedMaterials);
 		return loadedMaterials;
