@@ -266,6 +266,10 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+    <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Source\Library\glad\src\gl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
@@ -282,6 +286,10 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Source\Library\zstd\zstd.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Source\main.cpp" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
@@ -289,10 +297,20 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
+    <ClInclude Include="Source\Library\basis\basisu.h" />
+    <ClInclude Include="Source\Library\basis\basisu_astc_hdr_core.h" />
+    <ClInclude Include="Source\Library\basis\basisu_astc_helpers.h" />
+    <ClInclude Include="Source\Library\basis\basisu_containers.h" />
+    <ClInclude Include="Source\Library\basis\basisu_containers_impl.h" />
+    <ClInclude Include="Source\Library\basis\basisu_file_headers.h" />
+    <ClInclude Include="Source\Library\basis\basisu_transcoder.h" />
+    <ClInclude Include="Source\Library\basis\basisu_transcoder_internal.h" />
+    <ClInclude Include="Source\Library\basis\basisu_transcoder_uastc.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2.h" />
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
     <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf.h" />
     <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.h" />
+    <ClInclude Include="Source\Library\zstd\zstd.h" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\Components\Material.h" />
@@ -337,6 +355,16 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Library\glad\include\KHR\khrplatform.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Source\Library\basis\basisu_transcoder_tables_astc.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_astc_0_255.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_atc_55.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_atc_56.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_bc7_m5_alpha.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_bc7_m5_color.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_dxt1_5.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_dxt1_6.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_pvrtc2_45.inc" />
+    <None Include="Source\Library\basis\basisu_transcoder_tables_pvrtc2_alpha_33.inc" />
     <None Include="Source\Shaders\OpenGL\decorator_vertex.glsl" />
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

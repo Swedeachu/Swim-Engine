@@ -89,9 +89,10 @@ namespace Engine
 		// After all this Vulkan initing, we can then load all textures.
 		Engine::TexturePool& texturePool = TexturePool::GetInstance();
 
-		texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
-		unsigned int texCount = texturePool.GetTextureCount();
-		unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount) * 2; // double in expected size for dynamic texture and engine stuff that could happen
+		// texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
+		// unsigned int texCount = texturePool.GetTextureCount();
+		// unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount) * 2; // double in expected size for dynamic texture and engine stuff that could happen
+		unsigned int maxBindlessTextureCount = 4096; // we need this big since we make a lot of textures on the fly from memory
 
 		constexpr uint32_t MAX_SETS = 1024;
 		constexpr uint64_t SSBO_SIZE = 10240;

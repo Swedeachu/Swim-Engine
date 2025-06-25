@@ -78,6 +78,39 @@ namespace Engine
 		return tex;
 	}
 
+	std::shared_ptr<Texture2D> TexturePool::CreateTextureFromImage(const tinygltf::Image& image, const std::string& debugName)
+	{
+		// Validate image dimensions and data
+		if (image.width <= 0 || image.height <= 0 || image.image.empty())
+		{
+			std::cerr << "[TexturePool] Invalid image: " << debugName << " (width/height or data missing)\n";
+			return nullptr;
+		}
+
+		// Only support 4-channel RGBA 8-bit textures (as expected by your KTX2 loader)
+		if (image.component != 4 || image.bits != 8)
+		{
+			std::cerr << "[TexturePool] Unsupported image format in: " << debugName
+				<< " (components: " << image.component << ", bits: " << image.bits << ")\n";
+			return nullptr;
+		}
+
+		// Upload texture to GPU (or staging structure)
+		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
+			image.width,
+			image.height,
+			image.image.data()
+		);
+
+		// Tag if the data came from STB or not 
+		texture->isPixelDataSTB = false;
+
+		// Store it by name to reuse later
+		this->StoreTextureManually(texture, debugName);
+
+		return texture;
+	}
+
 	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
