@@ -39,7 +39,7 @@ namespace Game
 		return 0;
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeCube()
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeCube()
 	{
 		// 8 unique corners of the cube
 		std::array<glm::vec3, 8> corners = {
@@ -105,11 +105,11 @@ namespace Game
 		}
 
 		// Build the 36 indices (6 faces * 6 indices per face)
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 		indices.reserve(36);
 		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
 		{
-			uint16_t base = faceIdx * 4;
+			uint32_t base = faceIdx * 4;
 			// First triangle of the face
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
@@ -124,7 +124,7 @@ namespace Game
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeRandomColoredCube()
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeRandomColoredCube()
 	{
 		std::array<glm::vec3, 8> corners = {
 			glm::vec3{-0.5f, -0.5f, -0.5f},
@@ -154,7 +154,7 @@ namespace Game
 		};
 
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		vertices.reserve(24);
 		indices.reserve(36);
@@ -176,7 +176,7 @@ namespace Game
 				vertices.push_back(v);
 			}
 
-			uint16_t base = face * 4;
+			uint32_t base = face * 4;
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
 			indices.push_back(base + 2);
@@ -188,7 +188,7 @@ namespace Game
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeSphere(
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeSphere(
 		int latitudeSegments,
 		int longitudeSegments,
 		glm::vec3 colorTop,
@@ -196,7 +196,7 @@ namespace Game
 		glm::vec3 colorBottom)
 	{
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		// Clamp to minimum sensible values
 		latitudeSegments = std::max(3, latitudeSegments);
@@ -259,28 +259,28 @@ namespace Game
 				int next = current + longitudeSegments + 1;
 
 				// Triangle 1 (CCW)
-				indices.push_back(static_cast<uint16_t>(current));
-				indices.push_back(static_cast<uint16_t>(current + 1));
-				indices.push_back(static_cast<uint16_t>(next));
+				indices.push_back(static_cast<uint32_t>(current));
+				indices.push_back(static_cast<uint32_t>(current + 1));
+				indices.push_back(static_cast<uint32_t>(next));
 
 				// Triangle 2 (CCW)
-				indices.push_back(static_cast<uint16_t>(current + 1));
-				indices.push_back(static_cast<uint16_t>(next + 1));
-				indices.push_back(static_cast<uint16_t>(next));
+				indices.push_back(static_cast<uint32_t>(current + 1));
+				indices.push_back(static_cast<uint32_t>(next + 1));
+				indices.push_back(static_cast<uint32_t>(next));
 			}
 		}
 
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> GenerateCircleMesh(
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> GenerateCircleMesh(
 		float radius = 0.5f,
 		uint32_t segmentCount = 64,
 		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
 	)
 	{
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		// Add center vertex of triangle fan
 		vertices.push_back({
@@ -309,7 +309,7 @@ namespace Game
 		}
 
 		// Generate indices for triangle fan
-		for (uint16_t i = 1; i <= segmentCount; ++i)
+		for (uint32_t i = 1; i <= segmentCount; ++i)
 		{
 			indices.push_back(0);        // Center
 			indices.push_back(i);        // Current vertex
@@ -481,7 +481,7 @@ namespace Game
 			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 		};
 
-		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadVertices, quadIndices);
 		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
@@ -597,7 +597,7 @@ namespace Game
 			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 		};
 
-		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		// Made a helper since anything 3D is phat
 		auto cubeData = MakeCube();

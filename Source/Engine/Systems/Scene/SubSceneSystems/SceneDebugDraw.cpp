@@ -10,7 +10,7 @@
 namespace Engine
 {
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeCube()
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeCube()
 	{
 		// 8 unique corners of the cube
 		std::array<glm::vec3, 8> corners = {
@@ -76,11 +76,11 @@ namespace Engine
 		}
 
 		// Build the 36 indices (6 faces * 6 indices per face)
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 		indices.reserve(36);
 		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
 		{
-			uint16_t base = faceIdx * 4;
+			uint32_t base = faceIdx * 4;
 			// First triangle of the face
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
@@ -108,7 +108,7 @@ namespace Engine
 	std::shared_ptr<Mesh> SceneDebugDraw::CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName)
 	{
 		std::vector<Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		glm::vec3 wireColor = GetDebugColorValue(color);
 
@@ -126,7 +126,7 @@ namespace Engine
 		};
 
 		float thickness = 0.02f;
-		uint16_t indexOffset = 0;
+		uint32_t indexOffset = 0;
 
 		for (int i = 0; i < 12; i++)
 		{
@@ -152,7 +152,7 @@ namespace Engine
 					{max.x, max.y, max.z}, {min.x, max.y, max.z}
 			};
 
-			uint16_t boxIndices[36] = {
+			uint32_t boxIndices[36] = {
 					0,1,2, 2,3,0,
 					4,5,6, 6,7,4,
 					0,1,5, 5,4,0,

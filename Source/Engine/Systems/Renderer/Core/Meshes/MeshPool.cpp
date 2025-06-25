@@ -11,7 +11,7 @@ namespace Engine
 		return instance;
 	}
 
-	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices)
+	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 

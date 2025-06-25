@@ -89,10 +89,10 @@ namespace Engine
 	}
 
 	// This makes 2 temporary index and vertex buffers and then copies them into our mega buffers. Also supports auto growth. This also sets the offsets in mesh data.
-	void VulkanIndexDraw::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	void VulkanIndexDraw::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData)
 	{
 		VkDeviceSize vertexSize = vertices.size() * sizeof(Vertex);
-		VkDeviceSize indexSize = indices.size() * sizeof(uint16_t);
+		VkDeviceSize indexSize = indices.size() * sizeof(uint32_t);
 
 		if (!HasSpaceForMesh(vertexSize, indexSize))
 		{
@@ -316,7 +316,7 @@ namespace Engine
 			VkDrawIndexedIndirectCommand cmd{};
 			cmd.indexCount = range.indexCount;
 			cmd.instanceCount = range.count;
-			cmd.firstIndex = static_cast<uint32_t>(range.indexOffsetInMegaBuffer / sizeof(uint16_t));
+			cmd.firstIndex = static_cast<uint32_t>(range.indexOffsetInMegaBuffer / sizeof(uint32_t));
 			cmd.vertexOffset = static_cast<int32_t>(range.vertexOffsetInMegaBuffer / sizeof(Vertex));
 			cmd.firstInstance = range.firstInstance;
 
@@ -341,7 +341,7 @@ namespace Engine
 		};
 
 		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
 		// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
 		// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
@@ -472,7 +472,7 @@ namespace Engine
 		VkDeviceSize offsets[] = { 0, 0 };
 
 		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT16);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
 		// === Issue indirect draw ===
 		vkCmdDrawIndexedIndirect(
@@ -680,7 +680,7 @@ namespace Engine
 			VkDrawIndexedIndirectCommand cmd{};
 			cmd.indexCount = mesh.indexCount;
 			cmd.instanceCount = 1;
-			cmd.firstIndex = static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint16_t));
+			cmd.firstIndex = static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint32_t));
 			cmd.vertexOffset = static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
 			cmd.firstInstance = static_cast<uint32_t>(cpuInstanceData.size() - 1); // latest one
 			drawCommands.push_back(cmd);

@@ -333,10 +333,10 @@ namespace Engine
 		return 0;
 	}
 
-	void OpenGLRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	void OpenGLRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData)
 	{
 		size_t vertexSize = vertices.size() * sizeof(Vertex);
-		size_t indexSize = indices.size() * sizeof(uint16_t);
+		size_t indexSize = indices.size() * sizeof(uint32_t);
 
 		// Check buffer capacity
 		if (currentVertexOffset + vertexSize > megaVertexBufferSize || currentIndexOffset + indexSize > megaIndexBufferSize)
@@ -580,7 +580,7 @@ namespace Engine
 				glDrawElementsBaseVertex(
 					GL_TRIANGLES,
 					meshData.indexCount,
-					GL_UNSIGNED_SHORT,
+					GL_UNSIGNED_INT,
 					reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
 					static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
 				);
@@ -609,7 +609,7 @@ namespace Engine
 		glDrawElementsBaseVertex(
 			GL_TRIANGLES,
 			meshData.indexCount,
-			GL_UNSIGNED_SHORT,
+			GL_UNSIGNED_INT,
 			reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
 			static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
 		);
@@ -802,7 +802,7 @@ namespace Engine
 		glDrawElementsBaseVertex(
 			GL_TRIANGLES,
 			mesh.indexCount,
-			GL_UNSIGNED_SHORT,
+			GL_UNSIGNED_INT,
 			reinterpret_cast<void*>(mesh.indexOffsetInMegaBuffer),
 			static_cast<GLint>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex))
 		);

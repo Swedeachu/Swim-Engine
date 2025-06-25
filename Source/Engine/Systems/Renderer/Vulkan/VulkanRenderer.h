@@ -36,7 +36,7 @@ namespace Engine
 
 		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
 
-		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData) override;
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) override;
 
 		// this should shortcut from VulkanDeviceManager
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }

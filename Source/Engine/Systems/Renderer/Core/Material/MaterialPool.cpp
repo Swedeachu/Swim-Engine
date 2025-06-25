@@ -173,7 +173,6 @@ namespace Engine
 	{
 		const tinygltf::Node& node = model.nodes[nodeIndex];
 
-		// Compute local transform
 		glm::mat4 localTransform(1.0f);
 		if (!node.matrix.empty())
 		{
@@ -207,117 +206,122 @@ namespace Engine
 
 		glm::mat4 worldTransform = parentTransform * localTransform;
 
-		// Process mesh
-		if (node.mesh >= 0 && node.mesh < model.meshes.size())
+		if (node.mesh >= 0)
 		{
 			const tinygltf::Mesh& gltfMesh = model.meshes[node.mesh];
 
 			for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx)
 			{
 				const tinygltf::Primitive& primitive = gltfMesh.primitives[primIdx];
-				if (primitive.mode != TINYGLTF_MODE_TRIANGLES)
-				{
-					std::cout << "[GLTF] Skipping non-triangle primitive: mode = " << primitive.mode << std::endl;
-					continue;
-				}
+				if (primitive.mode != TINYGLTF_MODE_TRIANGLES) { continue; }
+				if (!primitive.attributes.contains("POSITION")) { continue; }
 
-				if (!primitive.attributes.contains("POSITION"))
-				{
-					std::cout << "[GLTF] Skipping primitive " << primIdx << " due to missing POSITION attribute." << std::endl;
-					continue;
-				}
-
-				const int posAccessorIndex = primitive.attributes.at("POSITION");
-				const tinygltf::Accessor& posAccessor = model.accessors[posAccessorIndex];
-
-				if (posAccessor.count == 0 || posAccessor.bufferView < 0)
-				{
-					std::cout << "[GLTF] Skipping primitive " << primIdx << " due to invalid POSITION accessor." << std::endl;
-					continue;
-				}
+				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
+				if (posAccessor.count == 0 || posAccessor.bufferView < 0) { continue; }
 
 				const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
 				const tinygltf::Buffer& posBuffer = model.buffers[posView.buffer];
-
 				const unsigned char* posBase = posBuffer.data.data() + posView.byteOffset + posAccessor.byteOffset;
 				const size_t posStride = posView.byteStride > 0 ? posView.byteStride : sizeof(float) * 3;
-
-				std::vector<Vertex> vertices;
-				std::vector<uint16_t> indices;
 
 				bool hasUV = primitive.attributes.contains("TEXCOORD_0");
 				bool hasColor = primitive.attributes.contains("COLOR_0");
 
 				const unsigned char* uvRawBase = nullptr;
-				const unsigned char* colorRawBase = nullptr;
 				size_t uvStride = 0;
-				size_t colorStride = 0;
+				const tinygltf::Accessor* uvAccessor = nullptr;
 
 				if (hasUV)
 				{
-					const int uvAccessorIndex = primitive.attributes.at("TEXCOORD_0");
-					const tinygltf::Accessor& uvAccessor = model.accessors[uvAccessorIndex];
-					if (uvAccessor.bufferView >= 0)
+					uvAccessor = &model.accessors[primitive.attributes.at("TEXCOORD_0")];
+					if (uvAccessor->count > 0 && uvAccessor->bufferView >= 0)
 					{
-						const tinygltf::BufferView& uvView = model.bufferViews[uvAccessor.bufferView];
-						const tinygltf::Buffer& uvBuffer = model.buffers[uvView.buffer];
-						uvRawBase = uvBuffer.data.data() + uvView.byteOffset + uvAccessor.byteOffset;
+						const auto& uvView = model.bufferViews[uvAccessor->bufferView];
+						const auto& uvBuffer = model.buffers[uvView.buffer];
+						uvRawBase = uvBuffer.data.data() + uvView.byteOffset + uvAccessor->byteOffset;
 						uvStride = uvView.byteStride > 0 ? uvView.byteStride : sizeof(float) * 2;
 					}
 					else
 					{
-						hasUV = false;
+						hasUV = false; // disable broken
 					}
 				}
 
+				const unsigned char* colorRawBase = nullptr;
+				size_t colorStride = 0;
+				const tinygltf::Accessor* colorAccessor = nullptr;
+
 				if (hasColor)
 				{
-					const int colorAccessorIndex = primitive.attributes.at("COLOR_0");
-					const tinygltf::Accessor& colorAccessor = model.accessors[colorAccessorIndex];
-					if (colorAccessor.bufferView >= 0)
+					colorAccessor = &model.accessors[primitive.attributes.at("COLOR_0")];
+					if (colorAccessor->count > 0 && colorAccessor->bufferView >= 0)
 					{
-						const tinygltf::BufferView& colorView = model.bufferViews[colorAccessor.bufferView];
-						const tinygltf::Buffer& colorBuffer = model.buffers[colorView.buffer];
-						colorRawBase = colorBuffer.data.data() + colorView.byteOffset + colorAccessor.byteOffset;
+						const auto& colorView = model.bufferViews[colorAccessor->bufferView];
+						const auto& colorBuffer = model.buffers[colorView.buffer];
+						colorRawBase = colorBuffer.data.data() + colorView.byteOffset + colorAccessor->byteOffset;
 						colorStride = colorView.byteStride > 0 ? colorView.byteStride : sizeof(float) * 3;
 					}
 					else
 					{
-						hasColor = false;
+						hasColor = false; // disable broken
 					}
 				}
+
+				std::vector<Vertex> vertices;
+				vertices.reserve(posAccessor.count);
 
 				for (size_t i = 0; i < posAccessor.count; ++i)
 				{
 					Vertex v;
 
 					const float* posPtr = reinterpret_cast<const float*>(posBase + i * posStride);
-					glm::vec4 rawPos = glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f);
-					v.position = glm::vec3(worldTransform * rawPos);
+					v.position = glm::vec3(worldTransform * glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f));
 
 					if (hasUV)
 					{
-						const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
-						v.uv = glm::vec2(uvPtr[0], uvPtr[1]);
+						if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+						{
+							const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
+							v.uv = glm::vec2(uvPtr[0], uvPtr[1]);
+						}
+						else if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+						{
+							const uint8_t* uvPtr = reinterpret_cast<const uint8_t*>(uvRawBase + i * uvStride);
+							v.uv = glm::vec2(uvPtr[0], uvPtr[1]) / 255.0f;
+						}
+						else if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+						{
+							const uint16_t* uvPtr = reinterpret_cast<const uint16_t*>(uvRawBase + i * uvStride);
+							v.uv = glm::vec2(uvPtr[0], uvPtr[1]) / 65535.0f;
+						}
 					}
-					else
-					{
-						v.uv = glm::vec2(0.0f);
-					}
+					else { v.uv = glm::vec2(0.0f); }
 
 					if (hasColor)
 					{
-						const float* colorPtr = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
-						v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]);
+						if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+						{
+							const float* c = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(c[0], c[1], c[2]);
+						}
+						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+						{
+							const uint8_t* c = reinterpret_cast<const uint8_t*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(c[0], c[1], c[2]) / 255.0f;
+						}
+						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+						{
+							const uint16_t* c = reinterpret_cast<const uint16_t*>(colorRawBase + i * colorStride);
+							v.color = glm::vec3(c[0], c[1], c[2]) / 65535.0f;
+						}
+						else { v.color = glm::vec3(1.0f); }
 					}
-					else
-					{
-						v.color = glm::vec3(1.0f);
-					}
+					else { v.color = glm::vec3(1.0f); }
 
 					vertices.push_back(v);
 				}
 
+				std::vector<uint32_t> indices;
 				if (primitive.indices >= 0)
 				{
 					const tinygltf::Accessor& idxAccessor = model.accessors[primitive.indices];
@@ -327,68 +331,59 @@ namespace Engine
 
 					for (size_t i = 0; i < idxAccessor.count; ++i)
 					{
-						uint16_t index = 0;
+						uint32_t index = 0;
 						switch (idxAccessor.componentType)
 						{
+							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+							index = reinterpret_cast<const uint8_t*>(idxBase)[i];
+							break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
 							index = reinterpret_cast<const uint16_t*>(idxBase)[i];
 							break;
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							index = static_cast<uint16_t>(reinterpret_cast<const uint8_t*>(idxBase)[i]);
-							break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							index = static_cast<uint16_t>(reinterpret_cast<const uint32_t*>(idxBase)[i]);
+							index = reinterpret_cast<const uint32_t*>(idxBase)[i];
 							break;
 							default:
-							std::cerr << "[GLTF] Unsupported index type for primitive " << primIdx << std::endl;
-							continue;
+							throw std::runtime_error("Unsupported index type");
 						}
-
 						indices.push_back(index);
 					}
 				}
-				else
-				{
-					std::cout << "[GLTF] No indices provided for primitive " << primIdx << ", skipping." << std::endl;
-					continue;
-				}
 
-				std::string meshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
-				meshName += "_prim" + std::to_string(primIdx);
-
-				std::shared_ptr<Mesh> mesh = MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
-
+				// Material / texture (unchanged)
 				std::shared_ptr<Texture2D> texture = nullptr;
 				if (primitive.material >= 0 && primitive.material < model.materials.size())
 				{
-					const tinygltf::Material& material = model.materials[primitive.material];
-					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
+					const auto& material = model.materials[primitive.material];
+					const auto& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
 
 					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
 					{
-						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
+						const auto& textureDef = model.textures[baseColorTex.index];
 						int imageSource = -1;
 
 						if (textureDef.extensions.contains("KHR_texture_basisu"))
 						{
-							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
-							if (ext.Has("source"))
-							{
-								imageSource = ext.Get("source").Get<int>();
-							}
+							const auto& ext = textureDef.extensions.at("KHR_texture_basisu");
+							if (ext.Has("source")) { imageSource = ext.Get("source").Get<int>(); }
 						}
-						else if (textureDef.source >= 0)
+						else if (textureDef.source >= 0 && textureDef.source < model.images.size())
 						{
 							imageSource = textureDef.source;
 						}
 
-						if (imageSource >= 0 && imageSource < model.images.size())
+						if (imageSource >= 0)
 						{
-							const tinygltf::Image& img = model.images[imageSource];
-							texture = TexturePool::GetInstance().CreateTextureFromImage(img, path + "_" + std::to_string(nodeIndex));
+							const auto& img = model.images[imageSource];
+							TexturePool& texturePool = TexturePool::GetInstance();
+							texture = texturePool.CreateTextureFromImage(img, path + "_" + std::to_string(nodeIndex));
 						}
 					}
 				}
+
+				std::string meshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
+				meshName += "_prim" + std::to_string(primIdx);
+				std::shared_ptr<Mesh> mesh = MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
 
 				std::string matName = meshName + "_material";
 				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
@@ -396,10 +391,9 @@ namespace Engine
 			}
 		}
 
-		// Recurse into children
-		for (int childIndex : node.children)
+		for (int child : node.children)
 		{
-			LoadNodeRecursive(model, childIndex, worldTransform, path, loadedMaterials);
+			LoadNodeRecursive(model, child, worldTransform, path, loadedMaterials);
 		}
 	}
 

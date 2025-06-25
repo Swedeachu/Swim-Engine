@@ -22,7 +22,7 @@ namespace Engine
     MeshPool& operator=(MeshPool&&) = delete;
 
     // Registers a mesh with a unique name. Returns the existing mesh if it already exists.
-    std::shared_ptr<Mesh> RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices);
+    std::shared_ptr<Mesh> RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
     // Retrieves a mesh by name
     std::shared_ptr<Mesh> GetMesh(const std::string& name) const;
