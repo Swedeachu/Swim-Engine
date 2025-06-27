@@ -31,7 +31,9 @@ namespace Engine
     // Load a GLB file from disk, this will be used for making a composite material (vector of materials)
     std::vector<std::shared_ptr<MaterialData>> LoadAndRegisterCompositeMaterialFromGLB(const std::string& path);
     std::vector<std::shared_ptr<MaterialData>> GetCompositeMaterialData(const std::string& name);
+    std::vector<std::shared_ptr<MaterialData>> LazyLoadAndGetCompositeMaterial(const std::string& path);
     bool CompositeMaterialExists(const std::string& name);
+    
 
     // Frees all 
     void Flush();

@@ -660,11 +660,16 @@ namespace Game
 		auto spinEntity = CreateEntity();
 		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 
-		auto barrelModel = materialPool.CompositeMaterialExists("Assets/Models/barrel.glb") ? 
-			materialPool.GetCompositeMaterialData("Assets/Models/barrel.glb") : materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
 
 		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel));
 		AddBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
+
+		// Couch time
+		auto couch = CreateEntity();
+		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
+		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
 		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(

@@ -15,6 +15,8 @@
 
 #include "Library/basis/basisu_transcoder.h"
 
+#include "Library/webp/include/webp/decode.h"
+
 namespace Engine
 {
 
@@ -75,6 +77,13 @@ namespace Engine
 		}
 
 		throw std::runtime_error("Failed to find composite material data: " + name);
+	}
+
+	// Will return the composite material data instantly if it already has been loaded.
+	// This is honestly the best safe way to load our 3D models without having to think much.
+	std::vector<std::shared_ptr<MaterialData>> MaterialPool::LazyLoadAndGetCompositeMaterial(const std::string& path)
+	{
+		return CompositeMaterialExists(path) ? GetCompositeMaterialData(path) : LoadAndRegisterCompositeMaterialFromGLB(path);
 	}
 
 	bool MaterialPool::CompositeMaterialExists(const std::string& name)
@@ -418,7 +427,12 @@ namespace Engine
 						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
 						int imageSource = -1;
 
-						if (textureDef.extensions.contains("KHR_texture_basisu"))
+						// First check if this is a regular png with no extensions (cheap to do and often is the case, so we check this first)
+						if (textureDef.extensions.empty() && textureDef.source >= 0 && textureDef.source < model.images.size())
+						{
+							imageSource = textureDef.source;
+						}
+						else if (textureDef.extensions.contains("KHR_texture_basisu"))
 						{
 							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
 							if (ext.Has("source"))
@@ -426,16 +440,17 @@ namespace Engine
 								imageSource = ext.Get("source").Get<int>();
 							}
 						}
-						else if (textureDef.source >= 0 && textureDef.source < model.images.size())
+						else if (textureDef.extensions.contains("EXT_texture_webp")) 
 						{
-							imageSource = textureDef.source;
+							const auto& ext = textureDef.extensions.at("EXT_texture_webp");
+							if (ext.Has("source")) { imageSource = ext.Get("source").Get<int>(); }
 						}
 
 						if (imageSource >= 0 && imageSource < model.images.size())
 						{
 							const tinygltf::Image& img = model.images[imageSource];
 							TexturePool& texturePool = TexturePool::GetInstance();
-							texture = texturePool.CreateTextureFromImage(img, path + "_" + std::to_string(nodeIndex));
+							texture = texturePool.CreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
 						}
 					}
 				}
@@ -495,6 +510,42 @@ namespace Engine
 					}
 					return false;
 				}
+			}
+			else if (image->mimeType == "image/webp" || (size >= 12 && std::memcmp(bytes, "RIFF", 4) == 0 && std::memcmp(bytes + 8, "WEBP", 4) == 0))
+			{
+				std::cout << "[DEBUG] Decoding WebP image at index " << image_idx << std::endl;
+
+				int width = 0;
+				int height = 0;
+
+				if (!WebPGetInfo(bytes, size, &width, &height))
+				{
+					if (err != nullptr)
+					{
+						*err += "[GLTF Loader] WebPGetInfo failed (corrupt?) at index " + std::to_string(image_idx) + '\n';
+					}
+					return false;
+				}
+
+				// Allocate once, decode directly into final buffer
+				std::vector<uint8_t> rgba(width * height * 4);
+
+				if (!WebPDecodeRGBAInto(bytes, size, rgba.data(), static_cast<int>(rgba.size()), width * 4))
+				{
+					if (err != nullptr)
+					{
+						*err += "[GLTF Loader] WebPDecodeRGBAInto failed at index " + std::to_string(image_idx) + '\n';
+					}
+					return false;
+				}
+
+				// Fill tinygltf::Image with raw pixels
+				image->width = width;
+				image->height = height;
+				image->component = 4;   // RGBA
+				image->bits = 8;   // 8-bit per channel
+				image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+				image->image = std::move(rgba);
 			}
 			else
 			{

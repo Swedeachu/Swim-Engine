@@ -78,7 +78,7 @@ namespace Engine
 		return tex;
 	}
 
-	std::shared_ptr<Texture2D> TexturePool::CreateTextureFromImage(const tinygltf::Image& image, const std::string& debugName)
+	std::shared_ptr<Texture2D> TexturePool::CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName)
 	{
 		// Validate image dimensions and data
 		if (image.width <= 0 || image.height <= 0 || image.image.empty())

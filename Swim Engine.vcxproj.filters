@@ -122,6 +122,12 @@
     <ClInclude Include="Source\Library\basis\basisu_transcoder_internal.h" />
     <ClInclude Include="Source\Library\basis\basisu_transcoder_uastc.h" />
     <ClInclude Include="Source\Library\zstd\zstd.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\decode.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\demux.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\encode.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\mux.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\mux_types.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\types.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

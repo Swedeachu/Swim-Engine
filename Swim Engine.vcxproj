@@ -156,7 +156,8 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
+;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include</AdditionalIncludeDirectories>
@@ -166,8 +167,10 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
+libwebpdemux.lib;
+libwebpmux.lib
 ;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
@@ -184,7 +187,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
+;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include</AdditionalIncludeDirectories>
@@ -198,8 +202,10 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
+libwebpdemux.lib;
+libwebpmux.lib
 ;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
@@ -310,6 +316,12 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
     <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf.h" />
     <ClInclude Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\decode.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\demux.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\encode.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\mux.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\mux_types.h" />
+    <ClInclude Include="Source\Library\webp\include\webp\types.h" />
     <ClInclude Include="Source\Library\zstd\zstd.h" />
   </ItemGroup>
   <ItemGroup>
