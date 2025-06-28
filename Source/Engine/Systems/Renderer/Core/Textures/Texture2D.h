@@ -12,42 +12,32 @@ namespace Engine
 
 	public:
 
-		// Loads from disk
 		Texture2D(const std::string& filePath);
-
-		// Constructs a Texture2D from raw RGBA memory data 
-		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData);
-
+		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>");
 		~Texture2D();
 
 		void Free();
-		void FreeCPU();
+		void FreeCPU(); // stb image freeing
 
-		// Getters from original file from disk (do not confuse file width and height with transform scales)
 		uint32_t GetWidth() const { return width; }
 		uint32_t GetHeight() const { return height; }
-		const std::string& GetFilePath()  const { return filePath; }
+		const std::string& GetFilePath() const { return filePath; }
 
-		// Vulkan accessors
 		VkImage GetImage() const { return image; }
 		VkImageView GetImageView() const { return imageView; }
 
-		// Bindless texture index
 		uint32_t GetBindlessIndex() const { return bindlessIndex; }
 		void SetBindlessIndex(uint32_t index) { bindlessIndex = index; }
 
-		// OpenGL accessor
 		GLuint GetTextureID() const { return textureID; }
 
-		// Get raw pixel data
 		unsigned char* GetData() const { return pixelData; }
 
-		size_t GetDataSize() const
-		{
-			return width * height * 4; // not sure how correct this is
-		}
+		size_t GetDataSize() const { return width * height * 4; }
 
-		bool isPixelDataSTB = true; // Determines if pixelData was loaded via stbi (true) or malloc (false)
+		bool isPixelDataSTB = true;
+
+		static void FlushAllTextures(); // Frees everything still hanging around
 
 	private:
 
@@ -62,22 +52,22 @@ namespace Engine
 		VkImageView imageView = VK_NULL_HANDLE;
 		uint32_t mipLevels = 1;
 
-		// Bindless
-		uint32_t bindlessIndex = UINT32_MAX; // Invalid/default until assigned
+		uint32_t bindlessIndex = UINT32_MAX;
 
-		// OpenGL
 		GLuint textureID = 0;
 
-		// Raw CPU-side pixel data 
 		unsigned char* pixelData = nullptr;
 
-		// Vulkan-only
-		void LoadVulkanTexture();
-		void CreateImageView();
+		void LoadFromSTB();
+		void Generate();
+		void UploadToVulkan();
+		void UploadToOpenGL();
 		void GoBindless();
 
-		// OpenGL-only
-		void LoadOpenGLTexture();
+		bool freed = false;
+
+		// Just a spot in memory where all textures are stored, solely for clean up on exit. Including procedural or GPU generated textures that never enter the client interfacing texture pool.
+		static std::unordered_set<Texture2D*> allTextures;
 
 	};
 

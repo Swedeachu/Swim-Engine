@@ -99,7 +99,8 @@ namespace Engine
 		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
 			image.width,
 			image.height,
-			image.image.data()
+			image.image.data(),
+			debugName
 		);
 
 		// Tag if the data came from STB or not 
@@ -114,7 +115,26 @@ namespace Engine
 	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-		textures[name] = texture;
+
+		std::string finalName = name;
+		int counter = 1;
+
+		// Incrementally search for a free name
+		while (textures.find(finalName) != textures.end())
+		{
+			finalName = name + "_" + std::to_string(counter);
+			counter++;
+		}
+
+		/* This happens a lot during glb loading
+		if (finalName != name)
+		{
+			std::cout << "Texture with name \"" << name << "\" already exists in the texture pool!\n";
+			std::cout << "Renaming to \"" << finalName << "\"\n";
+		}
+		*/
+
+		textures[finalName] = texture;
 	}
 
 	std::shared_ptr<Texture2D> TexturePool::GetTexture2D(const std::string& name)
@@ -176,13 +196,8 @@ namespace Engine
 	void TexturePool::Flush()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-
-		for (auto& texture : textures)
-		{
-			texture.second.get()->Free(); 
-		}
-
-		textures.clear(); 
+		// Will cause Texture2D destructor which calls Free() on the texture for us
+		textures.clear();
 	}
 
 	std::string TexturePool::FormatKey(const std::string& filePath, const std::string& rootPath) const
@@ -206,4 +221,4 @@ namespace Engine
 		return key;
 	}
 
-} 
+}

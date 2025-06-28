@@ -270,6 +270,7 @@ namespace Engine
 		TexturePool::GetInstance().Flush();
 		MaterialPool::GetInstance().Flush();
 		missingTexture.reset();
+		Texture2D::FlushAllTextures(); // Free the straggler textures that were procedurally generated in memory for the GPU
 
 		syncManager->Cleanup();
 		syncManager.reset();
@@ -292,9 +293,7 @@ namespace Engine
 		commandManager.reset();
 
 		deviceManager->Cleanup();
-		// Resetting the device manager causes a crash because some resources like textures still need to be released and that requires using the device.
-		// This is weird because we call Flush() on the texture pool first.
-		// deviceManager.reset();
+		deviceManager.reset();
 
 		return 0;
 	}

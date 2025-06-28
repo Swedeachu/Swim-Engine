@@ -513,8 +513,6 @@ namespace Engine
 			}
 			else if (image->mimeType == "image/webp" || (size >= 12 && std::memcmp(bytes, "RIFF", 4) == 0 && std::memcmp(bytes + 8, "WEBP", 4) == 0))
 			{
-				std::cout << "[DEBUG] Decoding WebP image at index " << image_idx << std::endl;
-
 				int width = 0;
 				int height = 0;
 
