@@ -692,9 +692,15 @@ namespace Game
 		{
 			std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
 			std::cout << "Sponza load time\n";
-			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // unpacked raw version that is much easier to parse, but not efficent + fat on disk
-			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // compressed version + using ktx for textures, efficent
-			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // super compressed draco version, very efficent and fast, perfect for release
+
+			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
+			
+			// compressed version + using ktx for textures, efficent
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // 15 MB
+
+			// super compressed draco version, very efficent and fast, perfect for release
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // 9 MB
 
 			glm::vec3 sponzaScale = glm::vec3(1.0f);
 
