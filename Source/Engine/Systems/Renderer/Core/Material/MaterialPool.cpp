@@ -229,10 +229,6 @@ namespace Engine
 			for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx)
 			{
 				const tinygltf::Primitive& primitive = gltfMesh.primitives[primIdx];
-				if (!primitive.attributes.contains("POSITION"))
-				{
-					continue;
-				}
 
 				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
 				if (posAccessor.count == 0 || posAccessor.bufferView < 0)
