@@ -7,8 +7,8 @@ namespace Engine
 
 	void OpenGLBuffer::Create(const void* vertexData, size_t vertexSize, const void* indexData, size_t indexSize)
 	{
-		// Save the number of indices (assuming 2-byte uint16_t)
-		indexCount = static_cast<GLuint>(indexSize / sizeof(uint16_t));
+		// Save the number of indices (assuming 4-byte uint32_t)
+		indexCount = static_cast<GLuint>(indexSize / sizeof(uint32_t));
 
 		glGenVertexArrays(1, &vao);
 		glGenBuffers(1, &vbo);

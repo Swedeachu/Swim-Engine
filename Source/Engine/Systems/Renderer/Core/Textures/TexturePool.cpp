@@ -78,10 +78,115 @@ namespace Engine
 		return tex;
 	}
 
+	std::shared_ptr<Texture2D> TexturePool::GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey)
+	{
+		// Deduplication: search through all textures for an identical one
+		for (const auto& [existingName, existingTex] : textures)
+		{
+			if (!existingTex)
+			{
+				continue;
+			}
+
+			// Match width, height, and pixel content
+			if (image.width == static_cast<int>(existingTex->GetWidth()) &&
+				image.height == static_cast<int>(existingTex->GetHeight()) &&
+				image.image.size() == existingTex->GetDataSize() &&
+				std::memcmp(image.image.data(), existingTex->GetData(), image.image.size()) == 0)
+			{
+				// Found duplicate: reuse it
+				// textures[imageKey] = existingTex; // not sure if making a new record for something already in the pool is a good idea, probably not so don't do it
+				// std::cout << "[INFO] Reusing existing texture \"" << existingName << "\" for new image \"" << imageKey << "\"\n";
+				return existingTex;
+			}
+		}
+
+		// If no identical texture found, create a new one
+		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
+			image.width,
+			image.height,
+			image.image.data(),
+			imageKey // StoreTextureManually() could end up making the key in the texture pool map be something different, doesn't matter much for now
+		);
+
+		texture->isPixelDataSTB = false;
+
+		// Store texture even if the name is reused — StoreTextureManually handles that
+		this->StoreTextureManually(texture, imageKey);
+
+		return texture;
+	}
+
+	std::shared_ptr<Texture2D> TexturePool::CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName)
+	{
+		// Validate image dimensions and data
+		if (image.width <= 0 || image.height <= 0 || image.image.empty())
+		{
+			std::cerr << "[TexturePool] Invalid image: " << debugName << " (width/height or data missing)\n";
+			return nullptr;
+		}
+
+		// Only support 4-channel RGBA 8-bit textures (as expected by your KTX2 loader)
+		if (image.component != 4 || image.bits != 8)
+		{
+			std::cerr << "[TexturePool] Unsupported image format in: " << debugName
+				<< " (components: " << image.component << ", bits: " << image.bits << ")\n";
+			return nullptr;
+		}
+
+		// Upload texture to GPU (or staging structure)
+		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
+			image.width,
+			image.height,
+			image.image.data(),
+			debugName
+		);
+
+		// Tag if the data came from STB or not 
+		texture->isPixelDataSTB = false;
+
+		// Store it by name to reuse later
+		this->StoreTextureManually(texture, debugName);
+
+		return texture;
+	}
+
 	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-		textures[name] = texture;
+
+		std::string finalName = name;
+		int counter = 1;
+
+		// Incrementally search for a free name, we have to do this a lot because GLB textures are often nameless and duplicated/messed up in the binary for the name field
+		while (textures.find(finalName) != textures.end())
+		{
+			finalName = name + "_" + std::to_string(counter);
+			counter++;
+		}
+
+		// Temp debug code to just tell us if this ever happens
+	#ifdef _DEBUG 
+		constexpr bool run = false; // just quick flag if we even want to bother running this code while in debug mode
+		if constexpr (run) 
+		{
+			for (const auto& [existingName, existingTex] : textures)
+			{
+				if (existingTex && *existingTex == *texture)
+				{
+					std::cout << "[INFO] \"" << name << "\" is identical to already-stored \"" << existingName << "\"\n";
+				}
+			}
+
+			if (finalName != name)
+			{
+				std::cout << "Texture with name \"" << name << "\" already exists in the texture pool!\n";
+				std::cout << "Renaming to \"" << finalName << "\"\n";
+			}
+		}
+	#endif // _DEBUG
+
+		textures[finalName] = texture;
 	}
 
 	std::shared_ptr<Texture2D> TexturePool::GetTexture2D(const std::string& name)
@@ -143,13 +248,8 @@ namespace Engine
 	void TexturePool::Flush()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-
-		for (auto& texture : textures)
-		{
-			texture.second.get()->Free(); 
-		}
-
-		textures.clear(); 
+		// Will cause Texture2D destructor which calls Free() on the texture for us
+		textures.clear();
 	}
 
 	std::string TexturePool::FormatKey(const std::string& filePath, const std::string& rootPath) const
@@ -173,4 +273,4 @@ namespace Engine
 		return key;
 	}
 
-} 
+}

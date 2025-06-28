@@ -26,7 +26,7 @@ namespace Engine
 		void FixedUpdate(unsigned int tickThisSecond) override;
 		int Exit() override;
 
-		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData) override;
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) override;
 
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();

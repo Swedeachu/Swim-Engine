@@ -166,7 +166,7 @@ namespace Engine
 		glEnable(GL_MULTISAMPLE);
 		glEnable(GL_STENCIL_TEST);
 
-		glEnable(GL_BLEND);
+		// glEnable(GL_BLEND); // will be enabled for decorator pass
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 		std::cout << "[INFO] OpenGL Initialized: " << glGetString(GL_VERSION) << "\n";
@@ -333,10 +333,10 @@ namespace Engine
 		return 0;
 	}
 
-	void OpenGLRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData)
+	void OpenGLRenderer::UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData)
 	{
 		size_t vertexSize = vertices.size() * sizeof(Vertex);
-		size_t indexSize = indices.size() * sizeof(uint16_t);
+		size_t indexSize = indices.size() * sizeof(uint32_t);
 
 		// Check buffer capacity
 		if (currentVertexOffset + vertexSize > megaVertexBufferSize || currentIndexOffset + indexSize > megaIndexBufferSize)
@@ -580,7 +580,7 @@ namespace Engine
 				glDrawElementsBaseVertex(
 					GL_TRIANGLES,
 					meshData.indexCount,
-					GL_UNSIGNED_SHORT,
+					GL_UNSIGNED_INT,
 					reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
 					static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
 				);
@@ -609,7 +609,7 @@ namespace Engine
 		glDrawElementsBaseVertex(
 			GL_TRIANGLES,
 			meshData.indexCount,
-			GL_UNSIGNED_SHORT,
+			GL_UNSIGNED_INT,
 			reinterpret_cast<void*>(meshData.indexOffsetInMegaBuffer),
 			static_cast<GLint>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex))
 		);
@@ -622,6 +622,7 @@ namespace Engine
 
 		glUseProgram(decoratorShader);
 		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+		glEnable(GL_BLEND);
 		glDisable(GL_CULL_FACE);
 
 		// Render world-space decorators first
@@ -661,6 +662,7 @@ namespace Engine
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 		glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+		glDisable(GL_BLEND);
 		glEnable(GL_CULL_FACE);
 	}
 
@@ -802,7 +804,7 @@ namespace Engine
 		glDrawElementsBaseVertex(
 			GL_TRIANGLES,
 			mesh.indexCount,
-			GL_UNSIGNED_SHORT,
+			GL_UNSIGNED_INT,
 			reinterpret_cast<void*>(mesh.indexOffsetInMegaBuffer),
 			static_cast<GLint>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex))
 		);

@@ -3,6 +3,7 @@
 #include "Texture2D.h"
 #include <mutex>
 #include <unordered_map>
+#include "Library/tiny_gltf/tiny_gltf.h"
 
 namespace Engine
 {
@@ -31,6 +32,9 @@ namespace Engine
 
 		// Loads a texture if not already loaded, returns shared_ptr
 		std::shared_ptr<Texture2D> LoadTexture(const std::string& fileName);
+
+		std::shared_ptr<Texture2D> GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey);
+		std::shared_ptr<Texture2D> CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName);
 
 		void StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name);
 

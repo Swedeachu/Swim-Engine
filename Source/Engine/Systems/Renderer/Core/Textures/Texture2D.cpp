@@ -2,343 +2,299 @@
 #include "Texture2D.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
-
-// #define STB_IMAGE_IMPLEMENTATION // we don't have to do this anymore because this define is done by tiny_gltf
 #include "Library/stb/stb_image.h"
 
 namespace Engine
 {
 
-  static uint32_t vulkanTextureID = 0;
+	static uint32_t vulkanTextureID = 0;
 
-  Texture2D::Texture2D(const std::string& filePath) : filePath(filePath)
-  {
-    if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-    {
-      LoadVulkanTexture();
-      CreateImageView();
-      GoBindless();
-    }
-    else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-    {
-      LoadOpenGLTexture();
-    }
-  }
+	std::unordered_set<Texture2D*> Texture2D::allTextures; // declare this for static init (defined in header)
 
-  Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData)
-    : width(width), height(height), filePath("<generated>"), isPixelDataSTB(false)
-  {
-    size_t dataSize = width * height * 4;
+	uint32_t GetMipLevels(float width, float height)
+	{
+		return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+	}
 
-    if (dataSize == 0)
-    {
-      throw std::runtime_error("Texture2D(memory): data size is null!");
-    }
+	bool operator==(const Texture2D& lhs, const Texture2D& rhs)
+	{
+		// Fast-path: if they are the same instance
+		if (&lhs == &rhs)
+		{
+			return true;
+		}
 
-    pixelData = static_cast<unsigned char*>(malloc(dataSize));
+		// Compare dimensions
+		if (lhs.GetWidth() != rhs.GetWidth() || lhs.GetHeight() != rhs.GetHeight())
+		{
+			return false;
+		}
 
-    if (!pixelData)
-    {
-      throw std::runtime_error("Texture2D(memory): pixel data malloc failed!");
-    }
+		// Compare pixel data size
+		size_t size = lhs.GetDataSize();
+		if (size != rhs.GetDataSize())
+		{
+			return false;
+		}
 
-    memcpy(pixelData, rgbaData, dataSize);
+		// Compare pixel data bytes
+		const unsigned char* dataA = lhs.GetData();
+		const unsigned char* dataB = rhs.GetData();
 
-    if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-    {
-      // Upload to GPU as OpenGL texture
-      glGenTextures(1, &textureID);
-      glBindTexture(GL_TEXTURE_2D, textureID);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		if (dataA == nullptr || dataB == nullptr)
+		{
+			// Fail-safe: consider null data as unequal
+			return false;
+		}
 
-      glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        GL_RGBA,
-        width,
-        height,
-        0,
-        GL_RGBA,
-        GL_UNSIGNED_BYTE,
-        pixelData
-      );
+		return std::memcmp(dataA, dataB, size) == 0;
+	}
 
-      glGenerateMipmap(GL_TEXTURE_2D);
-      glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-    {
-      auto engine = SwimEngine::GetInstance();
-      auto vulkanRenderer = engine->GetVulkanRenderer();
-      if (!vulkanRenderer)
-      {
-        throw std::runtime_error("Texture2D(memory): VulkanRenderer not found!");
-      }
+	Texture2D::Texture2D(const std::string& filePath)
+		: filePath(filePath)
+	{
+		LoadFromSTB();
+		Generate();
+	}
 
-      VkDeviceSize imageSize = dataSize;
+	// Last param name is optional
+	Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name)
+		: width(width), height(height), filePath(name), isPixelDataSTB(false)
+	{
+		size_t dataSize = GetDataSize();
 
-      // Create staging buffer
-      VkBuffer stagingBuffer;
-      VkDeviceMemory stagingBufferMemory;
+		if (dataSize == 0)
+		{
+			throw std::runtime_error("Texture2D(memory): data size is null!");
+		}
 
-      vulkanRenderer->CreateBuffer(
-        imageSize,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-        stagingBuffer,
-        stagingBufferMemory
-      );
+		pixelData = static_cast<unsigned char*>(malloc(dataSize));
 
-      void* data = nullptr;
-      vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
-      memcpy(data, pixelData, imageSize);
-      vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
+		if (!pixelData)
+		{
+			throw std::runtime_error("Texture2D(memory): pixel data malloc failed!");
+		}
 
-      // Create image
-      vulkanRenderer->CreateImage(
-        width,
-        height,
-        VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_TILING_OPTIMAL,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-        image,
-        memory
-      );
+		memcpy(pixelData, rgbaData, dataSize);
 
-      // Transition + copy
-      vulkanRenderer->TransitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		Generate();
+	}
 
-      vulkanRenderer->CopyBufferToImage(stagingBuffer, image, width, height);
+	void Texture2D::Generate()
+	{
+		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		{
+			UploadToVulkan();
+			GoBindless();
+		}
+		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+		{
+			UploadToOpenGL();
+		}
 
-      vulkanRenderer->TransitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB,
-        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		allTextures.insert(this);
+	}
 
-      vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
-      vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
+	Texture2D::~Texture2D()
+	{
+		Free();
+		allTextures.erase(this);
+	}
 
-      CreateImageView();
-      GoBindless();
+	void Texture2D::Free()
+	{
+		// First do this hack fix to avoid any accidental double frees.
+		// This is stupid but just the easiest defensive fix.
+		if (freed)
+		{
+			// std::cout << "Blocking double free on Texture: " << filePath << "\n";
+			return;
+		}
+		freed = true;
 
-    #ifdef _DEBUG
-      std::cout << "Created Texture2D from memory (Vulkan): " << width << "x" << height << std::endl;
-    #endif
-    }
-    else
-    {
-      throw std::runtime_error("Texture2D(memory): unsupported graphics context.");
-    }
-  }
+		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		{
+			auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
+			if (!vulkanRenderer) { return; }
 
-  Texture2D::~Texture2D()
-  {
-    Free();
-  }
+			auto device = vulkanRenderer->GetDevice();
+			if (!device) { return; }
 
-  void Texture2D::Free()
-  {
-    if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-    {
-      auto engine = SwimEngine::GetInstance();
-      auto vulkanRenderer = engine.get()->GetVulkanRenderer();
-      if (!vulkanRenderer) { return; }
+			if (imageView) { vkDestroyImageView(device, imageView, nullptr); imageView = VK_NULL_HANDLE; }
+			if (image) { vkDestroyImage(device, image, nullptr); image = VK_NULL_HANDLE; }
+			if (memory) { vkFreeMemory(device, memory, nullptr); memory = VK_NULL_HANDLE; }
+		}
+		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+		{
+			if (textureID != 0)
+			{
+				glDeleteTextures(1, &textureID);
+				textureID = 0;
+			}
+		}
 
-      auto device = vulkanRenderer->GetDevice();
-      if (!device) { return; }
+		FreeCPU();
+	}
 
-      if (imageView)
-      {
-        vkDestroyImageView(device, imageView, nullptr);
-        imageView = VK_NULL_HANDLE;
-      }
-      if (image)
-      {
-        vkDestroyImage(device, image, nullptr);
-        image = VK_NULL_HANDLE;
-      }
-      if (memory)
-      {
-        vkFreeMemory(device, memory, nullptr);
-        memory = VK_NULL_HANDLE;
-      }
-    }
-    else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-    {
-      if (textureID != 0)
-      {
-        glDeleteTextures(1, &textureID);
-        textureID = 0;
-      }
-    }
+	void Texture2D::FreeCPU()
+	{
+		if (pixelData)
+		{
+			if (isPixelDataSTB)
+			{
+				stbi_image_free(pixelData);
+			}
+			else
+			{
+				free(pixelData);
+			}
+			pixelData = nullptr;
+		}
+	}
 
-    FreeCPU();
-  }
+	void Texture2D::FlushAllTextures()
+	{
+		for (Texture2D* tex : allTextures)
+		{
+			if (tex)
+			{
+				tex->Free();
+			}
+		}
+		allTextures.clear();
+	}
 
-  void Texture2D::FreeCPU()
-  {
-    if (pixelData)
-    {
-      if (isPixelDataSTB)
-      {
-        stbi_image_free(pixelData);
-      }
-      else
-      {
-        free(pixelData);
-      }
-      pixelData = nullptr;
-    }
-  }
+	int Texture2D::GetTextureCountOnGPU()
+	{
+		return allTextures.size();
+	}
 
-  void Texture2D::LoadVulkanTexture()
-  {
-    int texWidth, texHeight, texChannels;
-    pixelData = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    if (!pixelData)
-    {
-      throw std::runtime_error("Failed to load image: " + filePath);
-    }
+	void Texture2D::LoadFromSTB()
+	{
+		int texWidth, texHeight, texChannels;
+		pixelData = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		if (!pixelData)
+		{
+			throw std::runtime_error("Failed to load image: " + filePath);
+		}
+		width = static_cast<uint32_t>(texWidth);
+		height = static_cast<uint32_t>(texHeight);
+		isPixelDataSTB = true;
+	}
 
-    width = static_cast<uint32_t>(texWidth);
-    height = static_cast<uint32_t>(texHeight);
-    VkDeviceSize imageSize = width * height * 4;
+	void Texture2D::UploadToVulkan()
+	{
+		auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
+		if (!vulkanRenderer)
+		{
+			throw std::runtime_error("Texture2D::UploadToVulkan: VulkanRenderer not found!");
+		}
 
-    auto engine = SwimEngine::GetInstance();
-    auto vulkanRenderer = engine.get()->GetVulkanRenderer();
-    if (!vulkanRenderer)
-    {
-      throw std::runtime_error("Texture2D::LoadFromFile: VulkanRenderer not found!");
-    }
+		mipLevels = GetMipLevels(width, height);
+		VkDeviceSize imageSize = GetDataSize();
 
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    vulkanRenderer->CreateBuffer(
-      imageSize,
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-      stagingBuffer,
-      stagingBufferMemory
-    );
+		// Make the buffer for our texture memory
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		vulkanRenderer->CreateBuffer(
+			imageSize,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer,
+			stagingBufferMemory
+		);
 
-    void* data;
-    vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
-    memcpy(data, pixelData, static_cast<size_t>(imageSize));
-    vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
+		// Map it in the device
+		void* data = nullptr;
+		vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
+		memcpy(data, pixelData, imageSize);
+		vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
 
-    vulkanRenderer->CreateImage(
-      width, height,
-      VK_FORMAT_R8G8B8A8_SRGB,
-      VK_IMAGE_TILING_OPTIMAL,
-      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-      image,
-      memory
-    );
+		// Create the image with proper flags for mip map support the sampler can use for selecting lods
+		vulkanRenderer->CreateImage(
+			width, height, mipLevels,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+			image,
+			memory
+		);
 
-    vulkanRenderer->TransitionImageLayout(
-      image,
-      VK_FORMAT_R8G8B8A8_SRGB,
-      VK_IMAGE_LAYOUT_UNDEFINED,
-      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    );
+		// Get it ready for shader
+		vulkanRenderer->TransitionImageLayoutAllMipLevels(
+			image,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			mipLevels,
+			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+		);
 
-    vulkanRenderer->CopyBufferToImage(
-      stagingBuffer,
-      image,
-      width,
-      height
-    );
+		// Place the buffer in the image and then generate mip maps for the whole chain of lods
+		vulkanRenderer->CopyBufferToImage(stagingBuffer, image, width, height);
+		vulkanRenderer->GenerateMipmaps(
+			image,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			static_cast<int32_t>(width),
+			static_cast<int32_t>(height),
+			mipLevels
+		);
 
-    vulkanRenderer->TransitionImageLayout(
-      image,
-      VK_FORMAT_R8G8B8A8_SRGB,
-      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-    );
+		vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
+		vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
 
-    vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
-    vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
-  }
+		// Also one last thing to register the image view for the mip map chain
+		imageView = vulkanRenderer->CreateImageView(
+			image,
+			VK_FORMAT_R8G8B8A8_SRGB,
+			mipLevels
+		);
+	}
 
-  void Texture2D::CreateImageView()
-  {
-    auto engine = SwimEngine::GetInstance();
-    auto vulkanRenderer = engine.get()->GetVulkanRenderer();
-    if (!vulkanRenderer)
-    {
-      throw std::runtime_error("Texture2D::CreateImageView: VulkanRenderer not found!");
-    }
+	void Texture2D::UploadToOpenGL()
+	{
+		glGenTextures(1, &textureID);
+		glBindTexture(GL_TEXTURE_2D, textureID);
 
-    imageView = vulkanRenderer->CreateImageView(
-      image,
-      VK_FORMAT_R8G8B8A8_SRGB
-    );
-  }
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  void Texture2D::GoBindless()
-  {
-    auto engine = SwimEngine::GetInstance();
-    auto vulkanRenderer = engine.get()->GetVulkanRenderer();
+		GLfloat maxAniso = 0.0f;
+		glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAniso);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 0.0f);
 
-    // Register this texture in the bindless descriptor set
-    bindlessIndex = vulkanTextureID;
-    const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = vulkanRenderer->GetDescriptorManager();
-    if (descriptorManager && bindlessIndex != UINT32_MAX)
-    {
-      descriptorManager->UpdateBindlessTexture(bindlessIndex, imageView, vulkanRenderer->GetDefaultSampler());
-    }
+		glTexImage2D(
+			GL_TEXTURE_2D,
+			0,
+			GL_RGBA,
+			width,
+			height,
+			0,
+			GL_RGBA,
+			GL_UNSIGNED_BYTE,
+			pixelData
+		);
 
-    // Increment count for the next one 
-    vulkanTextureID++;
+		glGenerateMipmap(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
 
-  #ifdef _DEBUG
-    // Loading the texture is now fully finished here for Vulkan
-    std::cout << "Loaded Texture2D (Vulkan): " << filePath << " (Bindless Index = " << bindlessIndex << ")" << std::endl;
-  #endif
-  }
+	void Texture2D::GoBindless()
+	{
+		auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 
-  void Texture2D::LoadOpenGLTexture()
-  {
-    int texWidth, texHeight, texChannels;
-    pixelData = stbi_load(filePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    if (!pixelData)
-    {
-      throw std::runtime_error("Failed to load image: " + filePath);
-    }
+		bindlessIndex = vulkanTextureID;
+		const auto& descriptorManager = vulkanRenderer->GetDescriptorManager();
 
-    width = static_cast<uint32_t>(texWidth);
-    height = static_cast<uint32_t>(texHeight);
+		if (descriptorManager && bindlessIndex != UINT32_MAX)
+		{
+			descriptorManager->UpdateBindlessTexture(bindlessIndex, imageView, vulkanRenderer->GetDefaultSampler());
+		}
 
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glTexImage2D(
-      GL_TEXTURE_2D,
-      0,
-      GL_RGBA,
-      width,
-      height,
-      0,
-      GL_RGBA,
-      GL_UNSIGNED_BYTE,
-      pixelData
-    );
-
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-  #ifdef _DEBUG
-    std::cout << "Loaded Texture2D (OpenGL): " << filePath << " -> ID " << textureID << std::endl;
-  #endif
-  }
+		vulkanTextureID++;
+	}
 
 }

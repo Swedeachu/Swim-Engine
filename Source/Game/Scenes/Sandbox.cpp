@@ -24,7 +24,9 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = false;
-	constexpr static bool doUI = true;
+	constexpr static bool doUI = false;
+	constexpr static bool doSponza = true;
+
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
@@ -39,7 +41,7 @@ namespace Game
 		return 0;
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeCube()
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeCube()
 	{
 		// 8 unique corners of the cube
 		std::array<glm::vec3, 8> corners = {
@@ -105,11 +107,11 @@ namespace Game
 		}
 
 		// Build the 36 indices (6 faces * 6 indices per face)
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 		indices.reserve(36);
 		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
 		{
-			uint16_t base = faceIdx * 4;
+			uint32_t base = faceIdx * 4;
 			// First triangle of the face
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
@@ -124,7 +126,7 @@ namespace Game
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeRandomColoredCube()
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeRandomColoredCube()
 	{
 		std::array<glm::vec3, 8> corners = {
 			glm::vec3{-0.5f, -0.5f, -0.5f},
@@ -154,7 +156,7 @@ namespace Game
 		};
 
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		vertices.reserve(24);
 		indices.reserve(36);
@@ -176,7 +178,7 @@ namespace Game
 				vertices.push_back(v);
 			}
 
-			uint16_t base = face * 4;
+			uint32_t base = face * 4;
 			indices.push_back(base + 0);
 			indices.push_back(base + 1);
 			indices.push_back(base + 2);
@@ -188,7 +190,7 @@ namespace Game
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> MakeSphere(
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeSphere(
 		int latitudeSegments,
 		int longitudeSegments,
 		glm::vec3 colorTop,
@@ -196,7 +198,7 @@ namespace Game
 		glm::vec3 colorBottom)
 	{
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		// Clamp to minimum sensible values
 		latitudeSegments = std::max(3, latitudeSegments);
@@ -259,28 +261,28 @@ namespace Game
 				int next = current + longitudeSegments + 1;
 
 				// Triangle 1 (CCW)
-				indices.push_back(static_cast<uint16_t>(current));
-				indices.push_back(static_cast<uint16_t>(current + 1));
-				indices.push_back(static_cast<uint16_t>(next));
+				indices.push_back(static_cast<uint32_t>(current));
+				indices.push_back(static_cast<uint32_t>(current + 1));
+				indices.push_back(static_cast<uint32_t>(next));
 
 				// Triangle 2 (CCW)
-				indices.push_back(static_cast<uint16_t>(current + 1));
-				indices.push_back(static_cast<uint16_t>(next + 1));
-				indices.push_back(static_cast<uint16_t>(next));
+				indices.push_back(static_cast<uint32_t>(current + 1));
+				indices.push_back(static_cast<uint32_t>(next + 1));
+				indices.push_back(static_cast<uint32_t>(next));
 			}
 		}
 
 		return { vertices, indices };
 	}
 
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint16_t>> GenerateCircleMesh(
-		float radius = 0.5f, 
+	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> GenerateCircleMesh(
+		float radius = 0.5f,
 		uint32_t segmentCount = 64,
 		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
 	)
 	{
 		std::vector<Engine::Vertex> vertices;
-		std::vector<uint16_t> indices;
+		std::vector<uint32_t> indices;
 
 		// Add center vertex of triangle fan
 		vertices.push_back({
@@ -309,7 +311,7 @@ namespace Game
 		}
 
 		// Generate indices for triangle fan
-		for (uint16_t i = 1; i <= segmentCount; ++i)
+		for (uint32_t i = 1; i <= segmentCount; ++i)
 		{
 			indices.push_back(0);        // Center
 			indices.push_back(i);        // Current vertex
@@ -353,123 +355,38 @@ namespace Game
 
 		const int total = (GRID_HALF_SIZE * 2 + 1);
 
+		// === Shared Assets Setup ===
+		std::vector<std::shared_ptr<Engine::MaterialData>> sharedBarrelMaterials;
+
 		if constexpr (!fullyUniqueMeshes)
 		{
-			// === Shared Cube ===
+			// Shared Cube
 			auto cubeData = MakeCube();
 			auto sharedCube = meshPool.RegisterMesh("SharedCube", cubeData.first, cubeData.second);
-
 			materialPool.RegisterMaterialData("RegularCube", sharedCube);
 			materialPool.RegisterMaterialData("MartCube", sharedCube, texturePool.GetTexture2DLazy("mart"));
 			materialPool.RegisterMaterialData("AlienCube", sharedCube, texturePool.GetTexture2DLazy("alien"));
 
-			// === Shared Sphere ===
-			auto sphereData = MakeSphere(
-				16, 32,                            // reasonable default detail
-				glm::vec3(1.0f, 0.0f, 0.0f),       // red top
-				glm::vec3(1.0f, 1.0f, 0.0f),       // yellow middle
-				glm::vec3(0.0f, 0.0f, 1.0f)        // blue bottom
-			);
-
+			// Shared Sphere
+			auto sphereData = MakeSphere(16, 32, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 			auto sharedSphere = meshPool.RegisterMesh("SharedSphere", sphereData.first, sphereData.second);
-
 			materialPool.RegisterMaterialData("RegularSphere", sharedSphere);
 			materialPool.RegisterMaterialData("MartSphere", sharedSphere, texturePool.GetTexture2DLazy("mart"));
 			materialPool.RegisterMaterialData("AlienSphere", sharedSphere, texturePool.GetTexture2DLazy("alien"));
+
+			// Shared Barrel (composite)
+			sharedBarrelMaterials = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
 		}
 
-		// === Generate grid of random entities ===
 		for (int x = -GRID_HALF_SIZE; x <= GRID_HALF_SIZE; ++x)
 		{
 			for (int y = -GRID_HALF_SIZE; y <= GRID_HALF_SIZE; ++y)
 			{
 				for (int z = -GRID_HALF_SIZE; z <= GRID_HALF_SIZE; ++z)
 				{
-					std::shared_ptr<Engine::Mesh> mesh;
-					std::shared_ptr<Engine::MaterialData> material;
-					std::string meshName;
-
-					bool isSphere = (Engine::randInt(0, 1) == 0); // 50/50 sphere or cube
-
-					if constexpr (fullyUniqueMeshes)
-					{
-						if (isSphere)
-						{
-							// Random detail + gradient
-							int latSegments = Engine::randInt(8, 24);
-							int longSegments = Engine::randInt(16, 48);
-
-							glm::vec3 top = Engine::randVec3(0.2f, 1.0f);
-							glm::vec3 mid = Engine::randVec3(0.2f, 1.0f);
-							glm::vec3 bottom = Engine::randVec3(0.2f, 1.0f);
-
-							auto sphereData = MakeSphere(latSegments, longSegments, top, mid, bottom);
-
-							meshName = "sphere_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
-							mesh = meshPool.RegisterMesh(meshName, sphereData.first, sphereData.second);
-
-							int seed = Engine::randInt(0, 999999);
-							material = RegisterRandomMaterial(mesh, seed);
-						}
-						else
-						{
-							auto cubeData = MakeRandomColoredCube();
-
-							meshName = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
-							mesh = meshPool.RegisterMesh(meshName, cubeData.first, cubeData.second);
-
-							int seed = Engine::randInt(0, 999999);
-							material = RegisterRandomMaterial(mesh, seed);
-						}
-					}
-					else
-					{
-						if (isSphere)
-						{
-							mesh = meshPool.GetMesh("SharedSphere");
-
-							int matID = Engine::randInt(0, 2);
-							if (matID == 0)
-							{
-								material = materialPool.GetMaterialData("RegularSphere");
-							}
-							else if (matID == 1)
-							{
-								material = materialPool.GetMaterialData("MartSphere");
-							}
-							else
-							{
-								material = materialPool.GetMaterialData("AlienSphere");
-							}
-						}
-						else
-						{
-							mesh = meshPool.GetMesh("SharedCube");
-
-							int matID = Engine::randInt(0, 2);
-							if (matID == 0)
-							{
-								material = materialPool.GetMaterialData("RegularCube");
-							}
-							else if (matID == 1)
-							{
-								material = materialPool.GetMaterialData("MartCube");
-							}
-							else
-							{
-								material = materialPool.GetMaterialData("AlienCube");
-							}
-						}
-					}
-
-					// Create entity
 					entt::entity entity = registry.create();
 
-					glm::vec3 pos = glm::vec3(
-						x * SPACING,
-						y * SPACING,
-						z * SPACING
-					);
+					glm::vec3 pos = glm::vec3(x * SPACING, y * SPACING, z * SPACING);
 
 					if constexpr (randomizeCubeRotations)
 					{
@@ -482,9 +399,61 @@ namespace Game
 						registry.emplace<Engine::Transform>(entity, pos, glm::vec3(1.0f));
 					}
 
-					registry.emplace<Engine::Material>(entity, material);
+					// === Random Mesh Type: 0 = Sphere, 1 = Cube, 2 = Barrel ===
+					int choice = Engine::randInt(0, 2);
 
-					// 50% chance of adding Spin behavior
+					if (choice == 0) // Sphere
+					{
+						if constexpr (fullyUniqueMeshes)
+						{
+							int latSegments = Engine::randInt(8, 24);
+							int longSegments = Engine::randInt(16, 48);
+							glm::vec3 top = Engine::randVec3(0.2f, 1.0f);
+							glm::vec3 mid = Engine::randVec3(0.2f, 1.0f);
+							glm::vec3 bot = Engine::randVec3(0.2f, 1.0f);
+
+							auto sphereData = MakeSphere(latSegments, longSegments, top, mid, bot);
+							std::string name = "sphere_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
+							auto mesh = meshPool.RegisterMesh(name, sphereData.first, sphereData.second);
+							auto material = RegisterRandomMaterial(mesh, Engine::randInt(0, 999999));
+							registry.emplace<Engine::Material>(entity, material);
+						}
+						else
+						{
+							auto mesh = meshPool.GetMesh("SharedSphere");
+							int matID = Engine::randInt(0, 2);
+							std::string matName = (matID == 0) ? "RegularSphere" : (matID == 1) ? "MartSphere" : "AlienSphere";
+							auto material = materialPool.GetMaterialData(matName);
+							registry.emplace<Engine::Material>(entity, material);
+						}
+					}
+					else if (choice == 1) // Cube
+					{
+						if constexpr (fullyUniqueMeshes)
+						{
+							auto cubeData = MakeRandomColoredCube();
+							std::string name = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
+							auto mesh = meshPool.RegisterMesh(name, cubeData.first, cubeData.second);
+							auto material = RegisterRandomMaterial(mesh, Engine::randInt(0, 999999));
+							registry.emplace<Engine::Material>(entity, material);
+						}
+						else
+						{
+							auto mesh = meshPool.GetMesh("SharedCube");
+							int matID = Engine::randInt(0, 2);
+							std::string matName = (matID == 0) ? "RegularCube" : (matID == 1) ? "MartCube" : "AlienCube";
+							auto material = materialPool.GetMaterialData(matName);
+							registry.emplace<Engine::Material>(entity, material);
+						}
+					}
+					else // Barrel (always shared)
+					{
+						registry.emplace<Engine::CompositeMaterial>(entity, Engine::CompositeMaterial(sharedBarrelMaterials));
+						Engine::Transform& trans = registry.get<Engine::Transform>(entity);
+						trans.SetScale(glm::vec3(0.2f));
+					}
+
+					// Optional spin behavior
 					if constexpr (doRandomBehaviors)
 					{
 						if (Engine::randInt(0, 1) == 0)
@@ -514,7 +483,7 @@ namespace Game
 			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 		};
 
-		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadVertices, quadIndices);
 		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
@@ -630,7 +599,7 @@ namespace Game
 			{{-0.5f,  0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}}   // top-left     => uv(0,0)
 		};
 
-		std::vector<uint16_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		// Made a helper since anything 3D is phat
 		auto cubeData = MakeCube();
@@ -689,10 +658,15 @@ namespace Game
 			Engine::Material(sphereDataMaterial)
 		);
 
-		// Make another entity but the old fashioned way just to show how its done
+		int textureCountBefore = Engine::Texture2D::GetTextureCountOnGPU();
+
+		// Make a barrel entity that spins
 		auto spinEntity = CreateEntity();
 		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
-		AddComponent<Engine::Material>(spinEntity, Engine::Material(materialData1));
+
+		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
+
+		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel));
 		AddBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
@@ -704,14 +678,51 @@ namespace Game
 		// We can load scene scripts this way as a cool hack/trick
 		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
 
-		// Sponza 3D model test
-		// std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData = meshPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // screws up so we just a barrel for today
-		std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
-		Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+		constexpr bool glbTests = true;
+		if constexpr (!glbTests) return 0;
 
-		auto sponza = CreateEntity();
-		AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -6.0f), glm::vec3(1.0f)));
-		AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
+		// Couch time
+		auto couch = CreateEntity();
+		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
+		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
+
+		// Sponza 3D model test
+		if constexpr (doSponza)
+		{
+			std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
+			std::cout << "Sponza load time\n";
+
+			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
+			
+			// compressed version + using ktx for textures, efficent
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // 15 MB
+
+			// super compressed draco version, very efficent and fast, perfect for release
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // 9 MB
+
+			glm::vec3 sponzaScale = glm::vec3(1.0f);
+
+			if (materialPool.CompositeMaterialExists("Assets/Models/barrel.glb") && sponzaData.empty()) // if barrel exists and sponza wasn't loaded, set the data to the barrel
+			{
+				sponzaData = materialPool.GetCompositeMaterialData("Assets/Models/barrel.glb");
+			}
+			else if (sponzaData.empty()) // if barrel doesn't exist and sponza wasnt loaded, load and set the data to the barrel
+			{
+				sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+			}
+
+			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+
+			auto sponza = CreateEntity();
+			AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -12.0f), sponzaScale));
+			AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
+		}
+
+		int textureCountAfter = Engine::Texture2D::GetTextureCountOnGPU();
+
+		std::cout << "[Scene] Textures before GLB load: " << textureCountBefore << " | After: " << textureCountAfter << std::endl;
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);

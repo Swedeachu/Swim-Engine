@@ -118,7 +118,8 @@ namespace Engine
 			cubeFaces[i] = std::make_shared<Texture2D>(
 				static_cast<uint32_t>(faceSize),
 				static_cast<uint32_t>(faceSize),
-				facePixels[i].data()
+				facePixels[i].data(),
+				"cubeface" // compiler was crying when I don't provide a texture name despite this being an optional parameter
 			);
 		}
 

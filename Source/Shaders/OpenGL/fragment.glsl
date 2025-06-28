@@ -10,12 +10,18 @@ uniform sampler2D albedoTex;   // bound to texture unit 0
 
 void main()
 {
-    if (hasTexture > 0.5)
-    {
-        FragColor = texture(albedoTex, fragUV);
-    }
-    else
-    {
-        FragColor = vec4(fragColor, 1.0);
-    }
+	if (hasTexture > 0.5)
+	{
+		FragColor = texture(albedoTex, fragUV);
+	}
+	else
+	{
+		FragColor = vec4(fragColor, 1.0);
+	}
+
+	// Discard fragments that are barely opaque to work as cookie cut outs for like 2D foilage and cheap windows etc
+	if (FragColor.a < 0.5)
+	{
+		discard;
+	}
 }

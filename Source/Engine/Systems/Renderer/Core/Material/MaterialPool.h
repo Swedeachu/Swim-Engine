@@ -4,6 +4,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "MaterialData.h"
+#include "Library/tiny_gltf/tiny_gltf.h"
 
 namespace Engine
 {
@@ -25,10 +26,14 @@ namespace Engine
     // Retrieves or creates a MaterialData
     std::shared_ptr<MaterialData> GetMaterialData(const std::string& name);
     std::shared_ptr<MaterialData> RegisterMaterialData(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap = nullptr);
+    bool MaterialExists(const std::string& name);
 
     // Load a GLB file from disk, this will be used for making a composite material (vector of materials)
     std::vector<std::shared_ptr<MaterialData>> LoadAndRegisterCompositeMaterialFromGLB(const std::string& path);
     std::vector<std::shared_ptr<MaterialData>> GetCompositeMaterialData(const std::string& name);
+    std::vector<std::shared_ptr<MaterialData>> LazyLoadAndGetCompositeMaterial(const std::string& path);
+    bool CompositeMaterialExists(const std::string& name);
+    
 
     // Frees all 
     void Flush();
@@ -36,6 +41,15 @@ namespace Engine
   private:
 
     MaterialPool() = default;
+
+    void LoadNodeRecursive
+    (
+      const tinygltf::Model& model,
+      int nodeIndex,
+      const glm::mat4& parentTransform,
+      const std::string& path,
+      std::vector<std::shared_ptr<MaterialData>>& loadedMaterials
+    );
 
     mutable std::mutex poolMutex;
     std::unordered_map<std::string, std::shared_ptr<MaterialData>> materials;

@@ -36,7 +36,7 @@ namespace Engine
 
 		std::unique_ptr<CubeMapController>& GetCubeMapController() override { return cubemapController; }
 
-		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint16_t>& indices, MeshBufferData& meshData) override;
+		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) override;
 
 		// this should shortcut from VulkanDeviceManager
 		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
@@ -93,6 +93,7 @@ namespace Engine
 		void CreateImage(
 			uint32_t width,
 			uint32_t height,
+			uint32_t mipLevels,
 			VkFormat format,
 			VkImageTiling tiling,
 			VkImageUsageFlags usage,
@@ -101,10 +102,11 @@ namespace Engine
 			VkDeviceMemory& outImageMemory
 		);
 
-		// Transition image layout (e.g. Undefined -> TransferDst -> ShaderReadOnly)
-		void TransitionImageLayout(
+		// Transition image layout + mips (e.g. Undefined -> TransferDst -> ShaderReadOnly)
+		void TransitionImageLayoutAllMipLevels(
 			VkImage image,
 			VkFormat format,
+			uint32_t mipLevels,
 			VkImageLayout oldLayout,
 			VkImageLayout newLayout
 		);
@@ -120,7 +122,17 @@ namespace Engine
 		// Create a standard 2D image view
 		VkImageView CreateImageView(
 			VkImage image,
-			VkFormat format
+			VkFormat format,
+			uint32_t mipLevels
+		);
+
+		// Uses vkCmdBlitImage() to make the chain of mip maps for a texture
+		void GenerateMipmaps(
+			VkImage image,
+			VkFormat imageFormat,
+			int32_t texWidth,
+			int32_t texHeight,
+			uint32_t mipLevels
 		);
 
 	private:
