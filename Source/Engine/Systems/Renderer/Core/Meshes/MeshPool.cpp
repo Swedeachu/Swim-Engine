@@ -41,6 +41,77 @@ namespace Engine
 		return mesh;
 	}
 
+	std::shared_ptr<Mesh> MeshPool::GetOrCreateAndRegisterMesh(const std::string& desiredName, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+
+		// First: check if a mesh with identical vertex/index data already exists
+		for (const auto& [existingName, existingMesh] : meshes)
+		{
+			if (!existingMesh)
+			{
+				continue;
+			}
+
+			const auto& existingVertices = existingMesh->vertices;
+			const auto& existingIndices = existingMesh->indices;
+
+			// Quick size test
+			if (existingVertices.size() != vertices.size() || existingIndices.size() != indices.size())
+			{
+				continue;
+			}
+
+			// Compare raw memory contents, hopefully this isn't too abysmally slow (it kinda is man so really only call this function if you have to)
+			if (std::memcmp(vertices.data(), existingVertices.data(), vertices.size() * sizeof(Vertex)) == 0 &&
+				std::memcmp(indices.data(), existingIndices.data(), indices.size() * sizeof(uint32_t)) == 0)
+			{
+				// Match found, reuse
+				std::cout << "[MeshPool] Reusing mesh \"" << existingName << "\" for requested name \"" << desiredName << "\"\n";
+				return existingMesh;
+			}
+		}
+
+		// No matching mesh found, create new one
+		auto mesh = std::make_shared<Mesh>(vertices, indices);
+		mesh->meshBufferData = std::make_shared<MeshBufferData>();
+
+		// Assign unique ID
+		uint32_t meshID = nextMeshID++;
+		mesh->meshBufferData->meshID = meshID;
+
+		// Register in ID maps
+		meshToID[mesh] = meshID;
+		idToMesh[meshID] = mesh;
+
+		// Upload to GPU, compute AABB
+		mesh->meshBufferData->GenerateBuffersAndAABB(vertices, indices);
+
+		// Name deduplication like TexturePool: append _1, _2, etc.
+		std::string finalName = desiredName;
+		int counter = 1;
+		while (meshes.find(finalName) != meshes.end())
+		{
+			finalName = desiredName + "_" + std::to_string(counter);
+			counter++;
+		}
+
+	#ifdef _DEBUG
+		constexpr bool run = true;
+		if constexpr (run)
+		{
+			if (finalName != desiredName)
+			{
+				std::cout << "[MeshPool] Mesh name \"" << desiredName << "\" already exists, registering as \"" << finalName << "\"\n";
+			}
+		}
+	#endif // _DEBUG
+
+		// Store mesh
+		meshes[finalName] = mesh;
+		return mesh;
+	}
+
 	std::shared_ptr<Mesh> MeshPool::GetMesh(const std::string& name) const
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);

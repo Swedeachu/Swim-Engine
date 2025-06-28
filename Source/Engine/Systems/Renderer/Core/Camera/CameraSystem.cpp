@@ -12,7 +12,7 @@ namespace Engine
 
     camera.SetPosition(glm::vec3(0.0f, 0.0f, 0.0f));
     camera.SetFOV(45.0f);
-    camera.SetClipPlanes(0.1f, 100.0f);
+    camera.SetClipPlanes(0.1f, 1000.0f); // the 1000 is basically the render distance
 
     return 0;
   }

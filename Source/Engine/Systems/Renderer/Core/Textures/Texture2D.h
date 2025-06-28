@@ -39,6 +39,8 @@ namespace Engine
 
 		static void FlushAllTextures(); // Frees everything still hanging around
 
+		static int GetTextureCountOnGPU();
+
 	private:
 
 		uint32_t width = 0;
@@ -70,5 +72,7 @@ namespace Engine
 		static std::unordered_set<Texture2D*> allTextures;
 
 	};
+
+	bool operator==(const Texture2D& lhs, const Texture2D& rhs);
 
 }

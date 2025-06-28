@@ -16,6 +16,40 @@ namespace Engine
 		return static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 	}
 
+	bool operator==(const Texture2D& lhs, const Texture2D& rhs)
+	{
+		// Fast-path: if they are the same instance
+		if (&lhs == &rhs)
+		{
+			return true;
+		}
+
+		// Compare dimensions
+		if (lhs.GetWidth() != rhs.GetWidth() || lhs.GetHeight() != rhs.GetHeight())
+		{
+			return false;
+		}
+
+		// Compare pixel data size
+		size_t size = lhs.GetDataSize();
+		if (size != rhs.GetDataSize())
+		{
+			return false;
+		}
+
+		// Compare pixel data bytes
+		const unsigned char* dataA = lhs.GetData();
+		const unsigned char* dataB = rhs.GetData();
+
+		if (dataA == nullptr || dataB == nullptr)
+		{
+			// Fail-safe: consider null data as unequal
+			return false;
+		}
+
+		return std::memcmp(dataA, dataB, size) == 0;
+	}
+
 	Texture2D::Texture2D(const std::string& filePath)
 		: filePath(filePath)
 	{
@@ -128,6 +162,11 @@ namespace Engine
 			}
 		}
 		allTextures.clear();
+	}
+
+	int Texture2D::GetTextureCountOnGPU()
+	{
+		return allTextures.size();
 	}
 
 	void Texture2D::LoadFromSTB()

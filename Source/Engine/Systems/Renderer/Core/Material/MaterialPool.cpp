@@ -183,6 +183,7 @@ namespace Engine
 		const tinygltf::Node& node = model.nodes[nodeIndex];
 		std::string nodeName = node.name.empty() ? "Node_" + std::to_string(nodeIndex) : node.name;
 
+		// Compute local transform from TRS or matrix
 		glm::mat4 localTransform(1.0f);
 		if (!node.matrix.empty())
 		{
@@ -234,13 +235,7 @@ namespace Engine
 				}
 
 				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
-
-				if (posAccessor.count == 0)
-				{
-					continue;
-				}
-
-				if (posAccessor.bufferView < 0)
+				if (posAccessor.count == 0 || posAccessor.bufferView < 0)
 				{
 					continue;
 				}
@@ -296,6 +291,74 @@ namespace Engine
 				std::vector<Vertex> vertices;
 				vertices.reserve(posAccessor.count);
 
+				// Setup texture and UV transform
+				std::shared_ptr<Texture2D> texture = nullptr;
+				glm::vec2 uvOffset(0.0f);
+				glm::vec2 uvScale(1.0f);
+				float uvRotation = 0.0f;
+
+				if (primitive.material >= 0 && primitive.material < model.materials.size())
+				{
+					const tinygltf::Material& material = model.materials[primitive.material];
+					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
+
+					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
+					{
+						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
+						int imageSource = -1;
+
+						if (textureDef.extensions.empty() && textureDef.source >= 0 && textureDef.source < model.images.size())
+						{
+							imageSource = textureDef.source;
+						}
+						else if (textureDef.extensions.contains("KHR_texture_basisu"))
+						{
+							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
+							if (ext.Has("source"))
+							{
+								imageSource = ext.Get("source").Get<int>();
+							}
+						}
+						else if (textureDef.extensions.contains("EXT_texture_webp"))
+						{
+							const auto& ext = textureDef.extensions.at("EXT_texture_webp");
+							if (ext.Has("source"))
+							{
+								imageSource = ext.Get("source").Get<int>();
+							}
+						}
+
+						// Handle KHR_texture_transform
+						if (baseColorTex.extensions.contains("KHR_texture_transform"))
+						{
+							const auto& transform = baseColorTex.extensions.at("KHR_texture_transform");
+
+							if (transform.Has("offset"))
+							{
+								const auto& o = transform.Get("offset").Get<tinygltf::Value::Array>();
+								uvOffset = glm::vec2(static_cast<float>(o[0].Get<double>()), static_cast<float>(o[1].Get<double>()));
+							}
+							if (transform.Has("scale"))
+							{
+								const auto& s = transform.Get("scale").Get<tinygltf::Value::Array>();
+								uvScale = glm::vec2(static_cast<float>(s[0].Get<double>()), static_cast<float>(s[1].Get<double>()));
+							}
+							if (transform.Has("rotation"))
+							{
+								uvRotation = static_cast<float>(transform.Get("rotation").Get<double>());
+							}
+						}
+
+						if (imageSource >= 0 && imageSource < model.images.size())
+						{
+							const tinygltf::Image& img = model.images[imageSource];
+							TexturePool& texturePool = TexturePool::GetInstance();
+							texture = texturePool.GetOrCreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
+						}
+					}
+				}
+
+				// Build vertex buffer
 				for (size_t i = 0; i < posAccessor.count; ++i)
 				{
 					Vertex v;
@@ -306,25 +369,18 @@ namespace Engine
 
 					if (hasUV)
 					{
-						if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
-						{
-							const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
-							v.uv = glm::vec2(uvPtr[0], uvPtr[1]);
-						}
-						else if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
-						{
-							const uint8_t* uvPtr = reinterpret_cast<const uint8_t*>(uvRawBase + i * uvStride);
-							v.uv = glm::vec2(uvPtr[0], uvPtr[1]) / 255.0f;
-						}
-						else if (uvAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
-						{
-							const uint16_t* uvPtr = reinterpret_cast<const uint16_t*>(uvRawBase + i * uvStride);
-							v.uv = glm::vec2(uvPtr[0], uvPtr[1]) / 65535.0f;
-						}
-						else
-						{
-							v.uv = glm::vec2(0.0f);
-						}
+						const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
+						glm::vec2 uv = glm::vec2(uvPtr[0], uvPtr[1]);
+
+						// Apply KHR_texture_transform (scale, rotation, offset)
+						uv -= 0.5f;
+						float cosR = std::cos(uvRotation);
+						float sinR = std::sin(uvRotation);
+						uv = glm::mat2(cosR, -sinR, sinR, cosR) * uv;
+						uv += 0.5f;
+						uv = uv * uvScale + uvOffset;
+
+						v.uv = uv;
 					}
 					else
 					{
@@ -333,25 +389,8 @@ namespace Engine
 
 					if (hasColor)
 					{
-						if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
-						{
-							const float* colorPtr = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]);
-						}
-						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
-						{
-							const uint8_t* colorPtr = reinterpret_cast<const uint8_t*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]) / 255.0f;
-						}
-						else if (colorAccessor->componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
-						{
-							const uint16_t* colorPtr = reinterpret_cast<const uint16_t*>(colorRawBase + i * colorStride);
-							v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]) / 65535.0f;
-						}
-						else
-						{
-							v.color = glm::vec3(1.0f);
-						}
+						const float* colorPtr = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
+						v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]);
 					}
 					else
 					{
@@ -372,7 +411,6 @@ namespace Engine
 					const unsigned char* idxBase = idxBuffer.data.data() + idxView.byteOffset + idxAccessor.byteOffset;
 
 					indices.reserve(idxAccessor.count);
-
 					for (size_t i = 0; i < idxAccessor.count; ++i)
 					{
 						uint32_t index = 0;
@@ -380,25 +418,14 @@ namespace Engine
 						switch (idxAccessor.componentType)
 						{
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-							{
-								index = reinterpret_cast<const uint8_t*>(idxBase)[i];
-							}
-							break;
+								index = reinterpret_cast<const uint8_t*>(idxBase)[i]; break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-							{
-								index = reinterpret_cast<const uint16_t*>(idxBase)[i];
-							}
-							break;
+								index = reinterpret_cast<const uint16_t*>(idxBase)[i]; break;
 							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-							{
-								index = reinterpret_cast<const uint32_t*>(idxBase)[i];
-							}
-							break;
+								index = reinterpret_cast<const uint32_t*>(idxBase)[i]; break;
 							default:
-							{
-								std::cout << "[ERROR] Unsupported index component type: " << idxAccessor.componentType << std::endl;
-								throw std::runtime_error("Unsupported index type in GLB");
-							}
+								std::cerr << "[ERROR] Unsupported index type: " << idxAccessor.componentType << std::endl;
+								throw std::runtime_error("Unsupported index type");
 						}
 
 						indices.push_back(index);
@@ -416,47 +443,8 @@ namespace Engine
 				std::string finalMeshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
 				finalMeshName += "_prim" + std::to_string(primIdx);
 
-				std::shared_ptr<Texture2D> texture = nullptr;
-				if (primitive.material >= 0 && primitive.material < model.materials.size())
-				{
-					const tinygltf::Material& material = model.materials[primitive.material];
-					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
-
-					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
-					{
-						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
-						int imageSource = -1;
-
-						// First check if this is a regular png with no extensions (cheap to do and often is the case, so we check this first)
-						if (textureDef.extensions.empty() && textureDef.source >= 0 && textureDef.source < model.images.size())
-						{
-							imageSource = textureDef.source;
-						}
-						else if (textureDef.extensions.contains("KHR_texture_basisu"))
-						{
-							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
-							if (ext.Has("source"))
-							{
-								imageSource = ext.Get("source").Get<int>();
-							}
-						}
-						else if (textureDef.extensions.contains("EXT_texture_webp")) 
-						{
-							const auto& ext = textureDef.extensions.at("EXT_texture_webp");
-							if (ext.Has("source")) { imageSource = ext.Get("source").Get<int>(); }
-						}
-
-						if (imageSource >= 0 && imageSource < model.images.size())
-						{
-							const tinygltf::Image& img = model.images[imageSource];
-							TexturePool& texturePool = TexturePool::GetInstance();
-							texture = texturePool.CreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
-						}
-					}
-				}
-
 				MeshPool& meshPool = MeshPool::GetInstance();
-				std::shared_ptr<Mesh> mesh = meshPool.RegisterMesh(finalMeshName, vertices, indices);
+				std::shared_ptr<Mesh> mesh = meshPool.RegisterMesh(finalMeshName, vertices, indices); // could instead use GetOrCreateAndRegisterMesh() if we are that paranoid about deduplication
 
 				std::string matName = finalMeshName + "_material";
 				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
@@ -617,8 +605,9 @@ namespace Engine
 		int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
 		const tinygltf::Scene& scene = model.scenes[sceneIndex];
 
-		std::cout << "[DEBUG] Processing scene " << sceneIndex << " with " << scene.nodes.size() << " root nodes" << std::endl;
+		// std::cout << "[DEBUG] Processing scene " << sceneIndex << " with " << scene.nodes.size() << " root nodes" << std::endl;
 
+		/*
 		std::unordered_set<int> visitedNodes;
 
 		auto TrackedLoad = [&](int rootIndex)
@@ -641,21 +630,25 @@ namespace Engine
 				std::cout << "[WARNING] Node " << i << " (" << model.nodes[i].name << ") was not visited!" << std::endl;
 			}
 		}
+		*/
 
+		// Traverse the scene nodes to load everything in the glb file
 		for (size_t i = 0; i < scene.nodes.size(); ++i)
 		{
 			const int rootNodeIndex = scene.nodes[i];
 			LoadNodeRecursive(model, rootNodeIndex, glm::mat4(1.0f), path, loadedMaterials);
 		}
 
+		/*
 		for (int i = 0; i < model.nodes.size(); ++i)
 		{
 			if (!visitedNodes.contains(i))
 			{
-				std::cout << "[DEBUG] Forcing load of orphaned node: " << i << std::endl;
+				// std::cout << "[DEBUG] Forcing load of orphaned node: " << i << std::endl;
 				LoadNodeRecursive(model, i, glm::mat4(1.0f), path, loadedMaterials);
 			}
 		}
+		*/
 
 		std::cout << "[DEBUG] Total materials loaded: " << loadedMaterials.size() << std::endl;
 

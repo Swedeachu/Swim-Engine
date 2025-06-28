@@ -24,6 +24,9 @@ namespace Engine
     // Registers a mesh with a unique name. Returns the existing mesh if it already exists.
     std::shared_ptr<Mesh> RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
+    // If you care about registering meshes super quick, don't use this. This is for safety.
+    std::shared_ptr<Mesh> GetOrCreateAndRegisterMesh(const std::string& desiredName, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+
     // Retrieves a mesh by name
     std::shared_ptr<Mesh> GetMesh(const std::string& name) const;
 

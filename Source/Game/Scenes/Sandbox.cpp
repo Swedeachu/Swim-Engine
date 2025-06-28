@@ -24,7 +24,9 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = false;
-	constexpr static bool doUI = true;
+	constexpr static bool doUI = false;
+	constexpr static bool doSponza = true;
+
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
@@ -656,6 +658,8 @@ namespace Game
 			Engine::Material(sphereDataMaterial)
 		);
 
+		int textureCountBefore = Engine::Texture2D::GetTextureCountOnGPU();
+
 		// Make a barrel entity that spins
 		auto spinEntity = CreateEntity();
 		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
@@ -684,29 +688,35 @@ namespace Game
 		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
 
 		// Sponza 3D model test
-		std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
-		std::cout << "Sponza load time\n";
-		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // some mesh data is just missing though in our loading
-		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // this fails to load anything, idk what is even different in this one either
-		sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // actually works (unpacked raw version that is much easier to parse)
-		// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/sofa.glb"); // this sofa model has webps as its textures instead of png or ktx
-
-		glm::vec3 sponzaScale = glm::vec3(1.0f);
-
-		if (materialPool.CompositeMaterialExists("Assets/Models/barrel.glb") && sponzaData.empty()) // if barrel exists and sponza wasn't loaded, set the data to the barrel
+		if constexpr (doSponza)
 		{
-			sponzaData = materialPool.GetCompositeMaterialData("Assets/Models/barrel.glb");
-		}
-		else if (sponzaData.empty()) // if barrel doesn't exist and sponza wasnt loaded, load and set the data to the barrel
-		{
-			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+			std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
+			std::cout << "Sponza load time\n";
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // a more compressed version, we need to write support for it
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // this fails to load, we need to write draco compression support
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // works (unpacked raw version that is much easier to parse)
+
+			glm::vec3 sponzaScale = glm::vec3(1.0f);
+
+			if (materialPool.CompositeMaterialExists("Assets/Models/barrel.glb") && sponzaData.empty()) // if barrel exists and sponza wasn't loaded, set the data to the barrel
+			{
+				sponzaData = materialPool.GetCompositeMaterialData("Assets/Models/barrel.glb");
+			}
+			else if (sponzaData.empty()) // if barrel doesn't exist and sponza wasnt loaded, load and set the data to the barrel
+			{
+				sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+			}
+
+			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+
+			auto sponza = CreateEntity();
+			AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -12.0f), sponzaScale));
+			AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
 		}
 
-		Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+		int textureCountAfter = Engine::Texture2D::GetTextureCountOnGPU();
 
-		auto sponza = CreateEntity();
-		AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -12.0f), sponzaScale));
-		AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
+		std::cout << "[Scene] Textures before GLB load: " << textureCountBefore << " | After: " << textureCountAfter << std::endl;
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);
