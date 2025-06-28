@@ -665,12 +665,6 @@ namespace Game
 		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel));
 		AddBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
-		// Couch time
-		auto couch = CreateEntity();
-		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
-		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
-		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
-
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
 		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(
 			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
@@ -679,6 +673,15 @@ namespace Game
 
 		// We can load scene scripts this way as a cool hack/trick
 		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
+
+		constexpr bool glbTests = true;
+		if constexpr (!glbTests) return 0;
+
+		// Couch time
+		auto couch = CreateEntity();
+		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
+		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
 
 		// Sponza 3D model test
 		std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;

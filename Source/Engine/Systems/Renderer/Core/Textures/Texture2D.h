@@ -60,6 +60,7 @@ namespace Engine
 		VkImage image = VK_NULL_HANDLE;
 		VkDeviceMemory memory = VK_NULL_HANDLE;
 		VkImageView imageView = VK_NULL_HANDLE;
+		uint32_t mipLevels = 1;
 
 		// Bindless
 		uint32_t bindlessIndex = UINT32_MAX; // Invalid/default until assigned
