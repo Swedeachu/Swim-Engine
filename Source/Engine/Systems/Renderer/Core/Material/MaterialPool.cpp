@@ -220,15 +220,15 @@ namespace Engine
 
 		glm::mat4 worldTransform = parentTransform * localTransform;
 
+		// Process mesh if one is attached to this node
 		if (node.mesh >= 0)
 		{
 			const tinygltf::Mesh& gltfMesh = model.meshes[node.mesh];
-			std::string meshName = gltfMesh.name.empty() ? "UnnamedMesh" : gltfMesh.name;
+			std::string meshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(node.mesh) : gltfMesh.name;
 
 			for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx)
 			{
 				const tinygltf::Primitive& primitive = gltfMesh.primitives[primIdx];
-
 				if (!primitive.attributes.contains("POSITION"))
 				{
 					continue;
@@ -245,6 +245,7 @@ namespace Engine
 				const unsigned char* posBase = posBuffer.data.data() + posView.byteOffset + posAccessor.byteOffset;
 				const size_t posStride = posView.byteStride > 0 ? posView.byteStride : sizeof(float) * 3;
 
+				// UV and Color handling
 				bool hasUV = primitive.attributes.contains("TEXCOORD_0");
 				bool hasColor = primitive.attributes.contains("COLOR_0");
 
@@ -288,10 +289,7 @@ namespace Engine
 					}
 				}
 
-				std::vector<Vertex> vertices;
-				vertices.reserve(posAccessor.count);
-
-				// Setup texture and UV transform
+				// Texture and UV transform setup
 				std::shared_ptr<Texture2D> texture = nullptr;
 				glm::vec2 uvOffset(0.0f);
 				glm::vec2 uvScale(1.0f);
@@ -302,18 +300,18 @@ namespace Engine
 					const tinygltf::Material& material = model.materials[primitive.material];
 					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
 
+					int imageSource = -1;
 					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
 					{
 						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
-						int imageSource = -1;
 
-						if (textureDef.extensions.empty() && textureDef.source >= 0 && textureDef.source < model.images.size())
+						if (textureDef.extensions.empty() && textureDef.source >= 0)
 						{
 							imageSource = textureDef.source;
 						}
 						else if (textureDef.extensions.contains("KHR_texture_basisu"))
 						{
-							const tinygltf::Value& ext = textureDef.extensions.at("KHR_texture_basisu");
+							const auto& ext = textureDef.extensions.at("KHR_texture_basisu");
 							if (ext.Has("source"))
 							{
 								imageSource = ext.Get("source").Get<int>();
@@ -328,7 +326,6 @@ namespace Engine
 							}
 						}
 
-						// Handle KHR_texture_transform
 						if (baseColorTex.extensions.contains("KHR_texture_transform"))
 						{
 							const auto& transform = baseColorTex.extensions.at("KHR_texture_transform");
@@ -359,10 +356,12 @@ namespace Engine
 				}
 
 				// Build vertex buffer
+				std::vector<Vertex> vertices;
+				vertices.reserve(posAccessor.count);
+
 				for (size_t i = 0; i < posAccessor.count; ++i)
 				{
 					Vertex v;
-
 					const float* posPtr = reinterpret_cast<const float*>(posBase + i * posStride);
 					glm::vec4 rawPos = glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f);
 					v.position = glm::vec3(worldTransform * rawPos);
@@ -372,7 +371,6 @@ namespace Engine
 						const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
 						glm::vec2 uv = glm::vec2(uvPtr[0], uvPtr[1]);
 
-						// Apply KHR_texture_transform (scale, rotation, offset)
 						uv -= 0.5f;
 						float cosR = std::cos(uvRotation);
 						float sinR = std::sin(uvRotation);
@@ -400,34 +398,28 @@ namespace Engine
 					vertices.push_back(v);
 				}
 
+				// Index buffer
 				std::vector<uint32_t> indices;
-				bool hasIndices = (primitive.indices >= 0);
-
-				if (hasIndices)
+				if (primitive.indices >= 0)
 				{
-					const tinygltf::Accessor& idxAccessor = model.accessors[primitive.indices];
-					const tinygltf::BufferView& idxView = model.bufferViews[idxAccessor.bufferView];
-					const tinygltf::Buffer& idxBuffer = model.buffers[idxView.buffer];
+					const auto& idxAccessor = model.accessors[primitive.indices];
+					const auto& idxView = model.bufferViews[idxAccessor.bufferView];
+					const auto& idxBuffer = model.buffers[idxView.buffer];
 					const unsigned char* idxBase = idxBuffer.data.data() + idxView.byteOffset + idxAccessor.byteOffset;
 
 					indices.reserve(idxAccessor.count);
 					for (size_t i = 0; i < idxAccessor.count; ++i)
 					{
 						uint32_t index = 0;
-
 						switch (idxAccessor.componentType)
 						{
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-								index = reinterpret_cast<const uint8_t*>(idxBase)[i]; break;
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-								index = reinterpret_cast<const uint16_t*>(idxBase)[i]; break;
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-								index = reinterpret_cast<const uint32_t*>(idxBase)[i]; break;
+							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  index = reinterpret_cast<const uint8_t*>(idxBase)[i]; break;
+							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: index = reinterpret_cast<const uint16_t*>(idxBase)[i]; break;
+							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:   index = reinterpret_cast<const uint32_t*>(idxBase)[i]; break;
 							default:
-								std::cerr << "[ERROR] Unsupported index type: " << idxAccessor.componentType << std::endl;
-								throw std::runtime_error("Unsupported index type");
+							std::cerr << "[ERROR] Unsupported index type: " << idxAccessor.componentType << std::endl;
+							throw std::runtime_error("Unsupported index type");
 						}
-
 						indices.push_back(index);
 					}
 				}
@@ -440,11 +432,9 @@ namespace Engine
 					}
 				}
 
-				std::string finalMeshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(nodeIndex) : gltfMesh.name;
-				finalMeshName += "_prim" + std::to_string(primIdx);
-
-				MeshPool& meshPool = MeshPool::GetInstance();
-				std::shared_ptr<Mesh> mesh = meshPool.RegisterMesh(finalMeshName, vertices, indices); // could instead use GetOrCreateAndRegisterMesh() if we are that paranoid about deduplication
+				// Ensure mesh and material names are unique per node+prim combo
+				std::string finalMeshName = nodeName + "_mesh" + std::to_string(node.mesh) + "_prim" + std::to_string(primIdx);
+				std::shared_ptr<Mesh> mesh = MeshPool::GetInstance().RegisterMesh(finalMeshName, vertices, indices);
 
 				std::string matName = finalMeshName + "_material";
 				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
@@ -452,9 +442,9 @@ namespace Engine
 			}
 		}
 
-		for (size_t i = 0; i < node.children.size(); ++i)
+		// Recurse into children
+		for (int childIndex : node.children)
 		{
-			int childIndex = node.children[i];
 			LoadNodeRecursive(model, childIndex, worldTransform, path, loadedMaterials);
 		}
 	}

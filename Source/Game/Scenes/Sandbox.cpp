@@ -692,8 +692,8 @@ namespace Game
 		{
 			std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
 			std::cout << "Sponza load time\n";
-			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // works (unpacked raw version that is much easier to parse)
-			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // a more compressed version, we need to write support for mesh instancing it uses
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // unpacked raw version that is much easier to parse
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // a more compressed version in the scene graph, in theorey faster to load and use
 			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // this fails to load, we need to write draco compression support
 
 			glm::vec3 sponzaScale = glm::vec3(1.0f);
