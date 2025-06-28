@@ -605,50 +605,12 @@ namespace Engine
 		int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
 		const tinygltf::Scene& scene = model.scenes[sceneIndex];
 
-		// std::cout << "[DEBUG] Processing scene " << sceneIndex << " with " << scene.nodes.size() << " root nodes" << std::endl;
-
-		/*
-		std::unordered_set<int> visitedNodes;
-
-		auto TrackedLoad = [&](int rootIndex)
-		{
-			LoadNodeRecursive(model, rootIndex, glm::mat4(1.0f), path, loadedMaterials);
-			visitedNodes.insert(rootIndex);
-		};
-
-		// Replace LoadNodeRecursive call with TrackedLoad
-		for (int rootNode : scene.nodes)
-		{
-			TrackedLoad(rootNode);
-		}
-
-		// Afterwards, detect orphan nodes
-		for (int i = 0; i < model.nodes.size(); ++i)
-		{
-			if (visitedNodes.find(i) == visitedNodes.end())
-			{
-				std::cout << "[WARNING] Node " << i << " (" << model.nodes[i].name << ") was not visited!" << std::endl;
-			}
-		}
-		*/
-
 		// Traverse the scene nodes to load everything in the glb file
 		for (size_t i = 0; i < scene.nodes.size(); ++i)
 		{
 			const int rootNodeIndex = scene.nodes[i];
 			LoadNodeRecursive(model, rootNodeIndex, glm::mat4(1.0f), path, loadedMaterials);
 		}
-
-		/*
-		for (int i = 0; i < model.nodes.size(); ++i)
-		{
-			if (!visitedNodes.contains(i))
-			{
-				// std::cout << "[DEBUG] Forcing load of orphaned node: " << i << std::endl;
-				LoadNodeRecursive(model, i, glm::mat4(1.0f), path, loadedMaterials);
-			}
-		}
-		*/
 
 		std::cout << "[DEBUG] Total materials loaded: " << loadedMaterials.size() << std::endl;
 
