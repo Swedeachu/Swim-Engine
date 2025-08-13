@@ -48,6 +48,8 @@
     <ClCompile Include="Source\Library\tiny_gltf\tiny_gltf_wrapper.cpp" />
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp" />
     <ClCompile Include="Source\Library\zstd\zstd.c" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\FpsCounter.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -329,6 +331,10 @@
     <ClInclude Include="Source\Library\draco\metadata\structural_metadata_schema.h" />
     <ClInclude Include="Source\Library\draco\point_cloud\point_cloud.h" />
     <ClInclude Include="Source\Library\draco\point_cloud\point_cloud_builder.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontData.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
+    <ClInclude Include="Source\Engine\Components\TextComponent.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\FpsCounter.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

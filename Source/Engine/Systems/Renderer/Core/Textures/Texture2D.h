@@ -12,8 +12,8 @@ namespace Engine
 
 	public:
 
-		Texture2D(const std::string& filePath);
-		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>");
+		Texture2D(const std::string& filePath, bool generateMips = true);
+		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
 		~Texture2D();
 
 		void Free();
@@ -36,6 +36,7 @@ namespace Engine
 		size_t GetDataSize() const { return width * height * 4; }
 
 		bool isPixelDataSTB = true;
+		bool generateMips = true; 
 
 		static void FlushAllTextures(); // Frees everything still hanging around
 

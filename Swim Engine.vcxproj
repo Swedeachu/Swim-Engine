@@ -224,6 +224,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Material\MaterialPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshBufferData.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\MeshPool.cpp" />
@@ -238,12 +239,15 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Components\CompositeMaterial.h" />
     <ClInclude Include="Source\Engine\Components\MeshDecorator.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Components\TextComponent.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontData.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\OpenGL\OpenGLCubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Renderer.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\Buffers\VulkanGpuInstanceData.h" />
@@ -268,6 +272,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\FpsCounter.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
@@ -300,6 +305,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\FpsCounter.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />

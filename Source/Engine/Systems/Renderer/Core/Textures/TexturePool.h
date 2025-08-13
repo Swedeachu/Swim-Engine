@@ -31,7 +31,7 @@ namespace Engine
 		const unsigned int GetTextureCount() const { return textureCount; }
 
 		// Loads a texture if not already loaded, returns shared_ptr
-		std::shared_ptr<Texture2D> LoadTexture(const std::string& fileName);
+		std::shared_ptr<Texture2D> LoadTexture(const std::string& fileName, bool generateMips);
 
 		std::shared_ptr<Texture2D> GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey);
 		std::shared_ptr<Texture2D> CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName);

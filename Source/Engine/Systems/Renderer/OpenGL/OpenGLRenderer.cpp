@@ -2,12 +2,14 @@
 #include "OpenGLRenderer.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Library/glm/gtc/matrix_transform.hpp"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/MeshDecorator.h"
+#include "Engine/Components/TextComponent.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
@@ -292,6 +294,8 @@ namespace Engine
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
+		// In the future we won't do this because the active scene file assets should determine which textures and models get loaded in, everything being loaded like this is just temporary behavior.
+		// We will have a proper asset streaming threaded service later on.
 		pool.LoadAllRecursively();
 		missingTexture = pool.GetTexture2DLazy("mart");
 
@@ -302,7 +306,48 @@ namespace Engine
 		);
 		cubemapController->SetEnabled(false);
 
-		CreateMegaMeshBuffer();
+		// --- 7) Load and compile MSDF Text Shader ---
+		std::string txtVertSrc = LoadTextFile("Shaders/OpenGL/text_vertex.glsl");
+		std::string txtFragSrc = LoadTextFile("Shaders/OpenGL/text_fragment.glsl");
+
+		GLuint tVert = CompileGLSLShader(GL_VERTEX_SHADER, txtVertSrc.c_str());
+		GLuint tFrag = CompileGLSLShader(GL_FRAGMENT_SHADER, txtFragSrc.c_str());
+		textShader = LinkShaderProgram({ tVert, tFrag });
+
+		// Cache uniform locations
+		loc_txt_mvp = glGetUniformLocation(textShader, "mvp");
+		loc_txt_pxToModel = glGetUniformLocation(textShader, "pxToModel");
+		loc_txt_emScalePx = glGetUniformLocation(textShader, "emScalePx");
+		loc_txt_isWorldSpace = glGetUniformLocation(textShader, "isWorldSpace");
+		loc_txt_msdfAtlas = glGetUniformLocation(textShader, "msdfAtlas");
+		loc_txt_atlasSize = glGetUniformLocation(textShader, "atlasSize");
+		loc_txt_pxRange = glGetUniformLocation(textShader, "pxRange");
+		loc_txt_fillColor = glGetUniformLocation(textShader, "fillColor");
+		loc_txt_strokeColor = glGetUniformLocation(textShader, "strokeColor");
+		loc_txt_strokeWidth = glGetUniformLocation(textShader, "strokeWidthPx");
+		loc_txt_distanceRange = glGetUniformLocation(textShader, "msdfPixelRange");
+
+		// --- 8) Create dynamic buffers for text quads ---
+		glGenVertexArrays(1, &textVAO);
+		glBindVertexArray(textVAO);
+		glGenBuffers(1, &textVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+		glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+		glGenBuffers(1, &textEBO);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, textEBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+		// layout(location=0) vec2 inPosEm
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), reinterpret_cast<void*>(offsetof(TextVertex, posEm)));
+		// layout(location=1) vec2 inUV
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), reinterpret_cast<void*>(offsetof(TextVertex, uv)));
+		glBindVertexArray(0);
+
+		CreateMegaMeshBuffer(); // this feels like something we should do earlier
+
+		// Load all fonts (later on will not be done here and instead be done via threaded asset streaming service on demand)
+		FontPool::GetInstance().LoadAllRecursively();
 
 		return 0;
 	}
@@ -469,9 +514,17 @@ namespace Engine
 			cubemapController->Render(view, proj);
 		}
 
+		// 1) World meshes (opaque/regular)
 		RenderWorldSpace(scene, registry, view, proj);
 
+		// 2) World text (transparent, depth test ON, depth write OFF)
+		RenderTextMSDFWorld(registry, view, proj);
+
+		// 3) UI meshes (decorators etc.)
 		RenderScreenSpaceAndDecoratedMeshes(registry, view, proj, true);
+
+		// 4) Screen-space text last 
+		RenderTextMSDFScreen(registry, view, proj);
 
 	#ifdef _DEBUG
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
@@ -810,6 +863,308 @@ namespace Engine
 		);
 
 		glBindVertexArray(0);
+	}
+
+	// ---------------------------------------------------------------
+	// World-space MSDF text
+	// - Depth test ON, depth write OFF (so world text can overlay opaque meshes
+	//   correctly but won't prevent later transparent things).
+	// - Premultiplied alpha blending to avoid halo/box artifacts.
+	// - emScale = world-units per EM (uses Transform.scale.y).
+	// - pxToModel = (1,1)  (no screen-pixel mapping in world space).
+	// ---------------------------------------------------------------
+	void OpenGLRenderer::RenderTextMSDFWorld(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	{
+		// Build a single line of glyph quads in EM space (layout-only).
+		auto buildLine = [&](const std::u32string& line, const Engine::FontInfo& fi,
+			float xStartEm, float yBaseEm,
+			std::vector<TextVertex>& V, std::vector<uint32_t>& I)
+		{
+			auto getKerning = [&](uint32_t l, uint32_t r)->float
+			{
+				auto it = fi.kerning.find(Engine::FontInfo::PackKerningKey(l, r));
+				return (it == fi.kerning.end()) ? 0.0f : it->second;
+			};
+
+			float penX = xStartEm;
+			float penY = yBaseEm;
+
+			for (size_t i = 0; i < line.size(); ++i)
+			{
+				auto itG = fi.glyphs.find(line[i]);
+				if (itG == fi.glyphs.end())
+				{
+					continue;
+				}
+				const Engine::Glyph& g = itG->second;
+
+				// Quad in EM space
+				const float l = penX + g.plane.left;
+				const float b = penY + g.plane.bottom;
+				const float r = penX + g.plane.right;
+				const float t = penY + g.plane.top;
+
+				const uint32_t base = static_cast<uint32_t>(V.size());
+				V.push_back({ {l, b}, {g.uv.left,  g.uv.bottom} });
+				V.push_back({ {r, b}, {g.uv.right, g.uv.bottom} });
+				V.push_back({ {r, t}, {g.uv.right, g.uv.top   } });
+				V.push_back({ {l, t}, {g.uv.left,  g.uv.top   } });
+
+				I.push_back(base + 0); I.push_back(base + 1); I.push_back(base + 2);
+				I.push_back(base + 2); I.push_back(base + 3); I.push_back(base + 0);
+
+				penX += g.advance;
+				if (i + 1 < line.size())
+				{
+					penX += getKerning(line[i], line[i + 1]);
+				}
+			}
+		};
+
+		glUseProgram(textShader);
+
+		// Premultiplied alpha (shader outputs premultiplied color)
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+		// We want to depth test against the world, but not write depth for translucent text.
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+
+		glDisable(GL_CULL_FACE);
+
+		registry.view<Engine::Transform, Engine::TextComponent>().each(
+			[&](entt::entity, Engine::Transform& tf, Engine::TextComponent& tc)
+		{
+			if (tf.GetTransformSpace() != Engine::TransformSpace::World)
+			{
+				return;
+			}
+			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas)
+			{
+				return;
+			}
+
+			const Engine::FontInfo& fi = *tc.GetFont();
+			const auto& lines = tc.GetLines();
+			const auto& widths = tc.GetLineWidths();
+
+			std::vector<TextVertex> V;
+			std::vector<uint32_t>  I;
+			V.reserve(tc.GetUtf32().size() * 4);
+			I.reserve(tc.GetUtf32().size() * 6);
+
+			// Lay out all lines in EM space (baseline stack)
+			for (size_t i = 0; i < lines.size(); ++i)
+			{
+				float x0 = 0.0f;
+				switch (tc.GetAlignment())
+				{
+					case Engine::TextAllignemt::Left: { x0 = 0.0f;                break; }
+					case Engine::TextAllignemt::Center: { x0 = -0.5f * widths[i];   break; }
+					case Engine::TextAllignemt::Right: { x0 = -widths[i];          break; }
+					case Engine::TextAllignemt::Justified:
+					default: { x0 = 0.0f; break; }
+				}
+
+				const float y0 = -static_cast<float>(i) * fi.lineHeight;
+				buildLine(lines[i], fi, x0, y0, V, I);
+			}
+			if (V.empty())
+			{
+				return;
+			}
+
+			// Upload dynamic glyph mesh
+			glBindVertexArray(textVAO);
+			glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+			glBufferData(GL_ARRAY_BUFFER, V.size() * sizeof(TextVertex), V.data(), GL_DYNAMIC_DRAW);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, textEBO);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, I.size() * sizeof(uint32_t), I.data(), GL_DYNAMIC_DRAW);
+
+			// Model = TR only (avoid double scaling since we scale in shader)
+			const glm::mat4 modelTR = Transform::MakeModelTR(tf);
+			const glm::mat4 mvp = projectionMatrix * viewMatrix * modelTR;
+
+			// --- World text scale model ---
+			// emScale := world-units per EM (use scale.y; choose a small default if 0)
+			const float emWorld = (tf.GetScale().y > 0.0f) ? tf.GetScale().y : 0.1f;
+
+			// No pixel mapping in world space
+			const glm::vec2 pxToModel(1.0f, 1.0f);
+
+			// Upload uniforms
+			glUniformMatrix4fv(loc_txt_mvp, 1, GL_FALSE, &mvp[0][0]);
+			glUniform2fv(loc_txt_pxToModel, 1, &pxToModel[0]);
+			glUniform1f(loc_txt_emScalePx, emWorld);
+			glUniform1i(loc_txt_isWorldSpace, 1);
+
+			glUniform4fv(loc_txt_fillColor, 1, &tc.fillColor[0]);
+			glUniform4fv(loc_txt_strokeColor, 1, &tc.strokeColor[0]);
+			glUniform1f(loc_txt_strokeWidth, tc.strokeWidth);
+			glUniform1f(loc_txt_distanceRange, fi.distanceRange);
+
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, tc.GetFont()->msdfAtlas->GetTextureID());
+			glUniform1i(loc_txt_msdfAtlas, 0);
+
+			glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(I.size()), GL_UNSIGNED_INT, nullptr);
+			glBindVertexArray(0);
+		});
+
+		// Restore depth writes; keep depth test enabled for subsequent passes.
+		glDepthMask(GL_TRUE);
+		glEnable(GL_DEPTH_TEST);
+		glDisable(GL_BLEND);
+	}
+
+	// ---------------------------------------------------------------
+	// Screen-space MSDF text
+	// - No depth test/writes (pure overlay).
+	// - Premultiplied alpha blending.
+	// - emScale = pixels per EM (scale.y in VirtualCanvas units -> convert to px).
+	// - pxToModel = 1/screenScale to map pixels into our ortho model space.
+	// ---------------------------------------------------------------
+	void OpenGLRenderer::RenderTextMSDFScreen(entt::registry& registry, const glm::mat4& /*viewMatrix*/, const glm::mat4& /*projectionMatrix*/)
+	{
+		auto buildLine = [&](const std::u32string& line, const Engine::FontInfo& fi,
+			float xStartEm, float yBaseEm,
+			std::vector<TextVertex>& V, std::vector<uint32_t>& I)
+		{
+			auto getKerning = [&](uint32_t l, uint32_t r)->float
+			{
+				auto it = fi.kerning.find(Engine::FontInfo::PackKerningKey(l, r));
+				return (it == fi.kerning.end()) ? 0.0f : it->second;
+			};
+
+			float penX = xStartEm;
+			float penY = yBaseEm;
+
+			for (size_t i = 0; i < line.size(); ++i)
+			{
+				auto itG = fi.glyphs.find(line[i]);
+				if (itG == fi.glyphs.end())
+				{
+					continue;
+				}
+				const Engine::Glyph& g = itG->second;
+
+				const float l = penX + g.plane.left;
+				const float b = penY + g.plane.bottom;
+				const float r = penX + g.plane.right;
+				const float t = penY + g.plane.top;
+
+				const uint32_t base = static_cast<uint32_t>(V.size());
+				V.push_back({ {l, b}, {g.uv.left,  g.uv.bottom} });
+				V.push_back({ {r, b}, {g.uv.right, g.uv.bottom} });
+				V.push_back({ {r, t}, {g.uv.right, g.uv.top   } });
+				V.push_back({ {l, t}, {g.uv.left,  g.uv.top   } });
+
+				I.push_back(base + 0); I.push_back(base + 1); I.push_back(base + 2);
+				I.push_back(base + 2); I.push_back(base + 3); I.push_back(base + 0);
+
+				penX += g.advance;
+				if (i + 1 < line.size())
+				{
+					penX += getKerning(line[i], line[i + 1]);
+				}
+			}
+		};
+
+		glUseProgram(textShader);
+
+		// Premultiplied alpha (matches shader output)
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+		// Overlay: no depth test/writes
+		glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		glDisable(GL_CULL_FACE);
+
+		registry.view<Engine::Transform, Engine::TextComponent>().each(
+			[&](entt::entity, Engine::Transform& tf, Engine::TextComponent& tc)
+		{
+			if (tf.GetTransformSpace() != Engine::TransformSpace::Screen)
+			{
+				return;
+			}
+			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas)
+			{
+				return;
+			}
+
+			const Engine::FontInfo& fi = *tc.GetFont();
+			const auto& lines = tc.GetLines();
+			const auto& widths = tc.GetLineWidths();
+
+			std::vector<TextVertex> V;
+			std::vector<uint32_t>  I;
+			V.reserve(tc.GetUtf32().size() * 4);
+			I.reserve(tc.GetUtf32().size() * 6);
+
+			for (size_t i = 0; i < lines.size(); ++i)
+			{
+				float x0 = 0.0f;
+				switch (tc.GetAlignment())
+				{
+					case Engine::TextAllignemt::Left: { x0 = 0.0f;                break; }
+					case Engine::TextAllignemt::Center: { x0 = -0.5f * widths[i];   break; }
+					case Engine::TextAllignemt::Right: { x0 = -widths[i];          break; }
+					case Engine::TextAllignemt::Justified:
+					default: { x0 = 0.0f;                break; }
+				}
+				const float y0 = -static_cast<float>(i) * fi.lineHeight;
+				buildLine(lines[i], fi, x0, y0, V, I);
+			}
+			if (V.empty())
+			{
+				return;
+			}
+
+			glBindVertexArray(textVAO);
+			glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+			glBufferData(GL_ARRAY_BUFFER, V.size() * sizeof(TextVertex), V.data(), GL_DYNAMIC_DRAW);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, textEBO);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, I.size() * sizeof(uint32_t), I.data(), GL_DYNAMIC_DRAW);
+
+			// Ortho for screen space
+			const glm::mat4 modelTR = Transform::MakeModelTR(tf);
+			const glm::mat4 mvp = cameraUBO.screenProj * modelTR;
+
+			// VirtualCanvas -> framebuffer scale; convert pixels back to our model units
+			const glm::vec2 screenScale(
+				static_cast<float>(windowWidth) / VirtualCanvasWidth,
+				static_cast<float>(windowHeight) / VirtualCanvasHeight
+			);
+			const glm::vec2 pxToModel = 1.0f / screenScale;
+
+			// Treat scale.y as EM size in VirtualCanvas units; convert to pixels
+			const float emScalePx = std::max(1.0f, tf.GetScale().y * screenScale.y);
+
+			// Uniforms
+			glUniformMatrix4fv(loc_txt_mvp, 1, GL_FALSE, &mvp[0][0]);
+			glUniform2fv(loc_txt_pxToModel, 1, &pxToModel[0]);
+			glUniform1f(loc_txt_emScalePx, emScalePx);
+			glUniform1i(loc_txt_isWorldSpace, 0);
+
+			glUniform4fv(loc_txt_fillColor, 1, &tc.fillColor[0]);
+			glUniform4fv(loc_txt_strokeColor, 1, &tc.strokeColor[0]);
+			glUniform1f(loc_txt_strokeWidth, tc.strokeWidth);
+			glUniform1f(loc_txt_distanceRange, fi.distanceRange);
+
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, tc.GetFont()->msdfAtlas->GetTextureID());
+			glUniform1i(loc_txt_msdfAtlas, 0);
+
+			glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(I.size()), GL_UNSIGNED_INT, nullptr);
+			glBindVertexArray(0);
+		});
+
+		// Restore 
+		glDepthMask(GL_TRUE);
+		glEnable(GL_DEPTH_TEST);
+		glDisable(GL_BLEND);
 	}
 
 	int OpenGLRenderer::Exit()

@@ -402,7 +402,7 @@ namespace Engine
 	{
 		static double timeAccumulator = 0.0;
 		static int frameCounter = 0;
-		static double fps = 0.0;
+		static double dfps = 0.0;
 
 		// First sync any updates that happened to the window to the renderer (if not minimized or needing a resize)
 		if (!minimized && needResize)
@@ -427,11 +427,12 @@ namespace Engine
 
 		if (timeAccumulator >= 1.0)
 		{
-			fps = static_cast<double>(frameCounter) / timeAccumulator;
+			dfps = static_cast<double>(frameCounter) / timeAccumulator;
+			fps = static_cast<int>(dfps); // save class field
 
 			// Format new title: "Swim Engine [Vulkan] | 240 FPS"
 			std::wstring baseTitle = getDefaultWindowTitle(); // game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
-			std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(static_cast<int>(fps)) + L" FPS";
+			std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
 
 			// Set the updated title
 			SetWindowTextW(engineWindowHandle, fullTitle.c_str());
@@ -440,6 +441,11 @@ namespace Engine
 			timeAccumulator = 0.0;
 			frameCounter = 0;
 		}
+	}
+
+	int SwimEngine::GetFPS() const
+	{
+		return fps;
 	}
 
 	void SwimEngine::FixedUpdate(unsigned int tickThisSecond)

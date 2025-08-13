@@ -15,6 +15,9 @@
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
 #include "Game\Behaviors\Demo\Spin.h"
 #include "Game\Behaviors\Demo\MouseInputDemoBehavior.h"
+#include "Game\Behaviors\Demo\FpsCounter.h"
+#include "Engine\Components\TextComponent.h"
+#include "Engine\Systems\Renderer\Core\Font\FontPool.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -24,8 +27,11 @@ namespace Game
 {
 
 	constexpr static bool doStressTest = false;
-	constexpr static bool doUI = false;
-	constexpr static bool doSponza = true;
+	constexpr static bool doUI = true;
+	constexpr static bool doTextUI = true;
+	constexpr static bool doButtonUI = false;
+	constexpr static bool glbTests = true;
+	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
@@ -488,33 +494,77 @@ namespace Game
 		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadVertices, quadIndices);
 		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
 
-		auto whiteEntity = scene->CreateEntity();
+		if (doButtonUI)
+		{
+			auto whiteEntity = scene->CreateEntity();
 
-		// Place it in the screen
-		glm::vec3 whiteEntityScreenPos = glm::vec3(300, 900, 0.0f);
+			// Place it in the screen
+			glm::vec3 whiteEntityScreenPos = glm::vec3(300, 900, 0.0f);
 
-		// Pixel size
-		glm::vec3 whiteEntitySize = glm::vec3(300.0f, 150.0f, 1.0f);
+			// Pixel size
+			glm::vec3 whiteEntitySize = glm::vec3(300.0f, 150.0f, 1.0f);
 
-		scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
-		scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
-		scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
+			scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+			scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
+			scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
 
-		Engine::MeshDecorator decorator = Engine::MeshDecorator(
-			glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
-			glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
-			glm::vec2(16.0f, 16.0f),              // stroke width X/Y
-			glm::vec2(32.0f, 32.0f),              // corner radius X/Y
-			glm::vec2(4.0f),                      // padding
-			true, true, true, true                // to enable: rounded, stroke, fill, material texture
-		);
+			Engine::MeshDecorator decorator = Engine::MeshDecorator(
+				glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
+				glm::vec4(0.0f, 0.0f, 0.0f, 1.0f),    // stroke
+				glm::vec2(16.0f, 16.0f),              // stroke width X/Y
+				glm::vec2(32.0f, 32.0f),              // corner radius X/Y
+				glm::vec2(4.0f),                      // padding
+				true, true, true, true                // to enable: rounded, stroke, fill, material texture
+			);
 
-		scene->AddComponent<Engine::MeshDecorator>(whiteEntity, decorator);
+			scene->AddComponent<Engine::MeshDecorator>(whiteEntity, decorator);
+		}
+
+		if (doTextUI)
+		{
+			// Text entity
+			auto textEntity = scene->CreateEntity();
+			glm::vec3 textEntityScreenPos = glm::vec3(960, 1020, 0.0f);
+			glm::vec3 textEntitySize = glm::vec3(50.0f, 50.0f, 1.0f);
+			scene->AddComponent<Engine::Transform>(textEntity, Engine::Transform(textEntityScreenPos, textEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+
+			// Get the font pool and the roboto_bold font from it 
+			Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+			std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
+
+			// Create a text component which uses the roboto_font
+			Engine::TextComponent textComponent = Engine::TextComponent();
+			textComponent.fillColor = glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+			textComponent.strokeColor = glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f };
+			textComponent.strokeWidth = 2.0f;
+			textComponent.SetAlignment(Engine::TextAllignemt::Center);
+			textComponent.SetText("Swim Engine");
+			textComponent.SetFont(roboto);
+
+			scene->AddComponent<Engine::TextComponent>(textEntity, textComponent);
+
+			// fps counter
+			auto fpsEntity = scene->CreateEntity();
+			glm::vec3 fpsEntityScreenPos = glm::vec3(1700, 1020, 0.0f);
+			glm::vec3 fpsEntitySize = glm::vec3(50.0f, 50.0f, 1.0f);
+			scene->AddComponent<Engine::Transform>(fpsEntity, Engine::Transform(fpsEntityScreenPos, fpsEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+
+			Engine::TextComponent fpsText = Engine::TextComponent();
+			fpsText.fillColor = glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+			fpsText.strokeColor = glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f };
+			fpsText.strokeWidth = 2.0f;
+			textComponent.SetAlignment(Engine::TextAllignemt::Left);
+			fpsText.SetText("FPS: ");
+			fpsText.SetFont(roboto);
+
+			scene->AddComponent<Engine::TextComponent>(fpsEntity, textComponent);
+			scene->AddBehavior<FpsCounter>(fpsEntity, true);
+		}
 
 		// Below here is a bunch of bools for messing with making a second UI entity to test stuff out with
 
 		constexpr bool makeSecondEntity = true;
-		if constexpr (!makeSecondEntity) return;
+		if constexpr (!makeSecondEntity || !doButtonUI) return;
 
 		// Create the red entity just to prove we can do multiple UI at a time like any entity
 		auto redEntity = scene->CreateEntity();
@@ -652,6 +702,26 @@ namespace Game
 		AddBehavior<Spin>(billboard);
 		//*/
 
+		// World space text entity
+		auto textEntity = CreateEntity();
+		glm::vec3 textEntityScreenPos = glm::vec3(10.0f, 0.f, 0.0f);
+		glm::vec3 textEntitySize = glm::vec3(1.0f, 1.0f, 1.0f);
+		AddComponent<Engine::Transform>(textEntity, Engine::Transform(textEntityScreenPos, textEntitySize, glm::quat(), Engine::TransformSpace::World));
+
+		// Get the font pool and the roboto_bold font from it 
+		Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+		std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
+
+		// Create a text component which uses the roboto_font
+		Engine::TextComponent textComponent = Engine::TextComponent();
+		textComponent.fillColor = glm::vec4{ 1.0f, 0.0f, 0.0f, 1.0f };
+		textComponent.strokeColor = glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f };
+		textComponent.strokeWidth = 2.0f;
+		textComponent.SetText("World Space Text");
+		textComponent.SetFont(roboto);
+
+		AddComponent<Engine::TextComponent>(textEntity, textComponent);
+
 		// Make sphere entity
 		entityFactory.CreateWithTransformAndMaterial(
 			Engine::Transform(glm::vec3(-2.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
@@ -678,7 +748,8 @@ namespace Game
 		// We can load scene scripts this way as a cool hack/trick
 		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
 
-		constexpr bool glbTests = true;
+		if constexpr (doUI) MakeUI(this);
+
 		if constexpr (!glbTests) return 0;
 
 		// Couch time
@@ -695,7 +766,7 @@ namespace Game
 
 			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)
 			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
-			
+
 			// compressed version + using ktx for textures, efficent
 			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // 15 MB
 
@@ -722,12 +793,23 @@ namespace Game
 
 		int textureCountAfter = Engine::Texture2D::GetTextureCountOnGPU();
 
+		// if we have any test model to load we can just do it here 
+		/* TODO: check if asset exists on disk
+		auto testData = Engine::CompositeMaterial(materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/test.glb"));
+		if (!testData.subMaterials.empty())
+		{
+			auto test = CreateEntity();
+			auto testTransform = AddComponent<Engine::Transform>(test, Engine::Transform(glm::vec3(6.0f, 0.0f, 0.0f), glm::vec3(1)));
+			testTransform.SetRotationEuler(0, 0, 90);
+			// AddBehavior<Game::Spin>(test, 90.0f);
+			AddComponent<Engine::CompositeMaterial>(test, Engine::CompositeMaterial(testData));
+		}
+		*/
+
 		std::cout << "[Scene] Textures before GLB load: " << textureCountBefore << " | After: " << textureCountAfter << std::endl;
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);
-
-		if constexpr (doUI) MakeUI(this);
 
 		return 0;
 	}

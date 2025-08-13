@@ -50,16 +50,16 @@ namespace Engine
 		return std::memcmp(dataA, dataB, size) == 0;
 	}
 
-	Texture2D::Texture2D(const std::string& filePath)
-		: filePath(filePath)
+	Texture2D::Texture2D(const std::string& filePath, bool generateMips)
+		: filePath(filePath), generateMips(generateMips)
 	{
 		LoadFromSTB();
 		Generate();
 	}
 
 	// Last param name is optional
-	Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name)
-		: width(width), height(height), filePath(name), isPixelDataSTB(false)
+	Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
+		: width(width), height(height), filePath(name), isPixelDataSTB(false), generateMips(generateMips)
 	{
 		size_t dataSize = GetDataSize();
 
@@ -98,7 +98,7 @@ namespace Engine
 	Texture2D::~Texture2D()
 	{
 		Free();
-		allTextures.erase(this);
+		if (!freed) allTextures.erase(this);
 	}
 
 	void Texture2D::Free()
@@ -190,12 +190,22 @@ namespace Engine
 			throw std::runtime_error("Texture2D::UploadToVulkan: VulkanRenderer not found!");
 		}
 
-		mipLevels = GetMipLevels(width, height);
-		VkDeviceSize imageSize = GetDataSize();
+		// Decide format & mip chain policy based on generateMips.
+		// For MSDF/UI/data textures, we want linear UNORM + no mips.
+		const bool useMips = generateMips;
 
-		// Make the buffer for our texture memory
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
+		mipLevels = useMips ? GetMipLevels(width, height) : 1;
+
+		const VkFormat format = useMips
+			? VK_FORMAT_R8G8B8A8_SRGB   // color textures prefer sRGB + mips
+			: VK_FORMAT_R8G8B8A8_UNORM; // MSDF/UI prefer linear (UNORM) + no mips
+
+		const VkDeviceSize imageSize = GetDataSize();
+
+		// --- 1) Staging buffer upload ----------------------------------------------------
+		VkBuffer stagingBuffer = VK_NULL_HANDLE;
+		VkDeviceMemory stagingBufferMemory = VK_NULL_HANDLE;
+
 		vulkanRenderer->CreateBuffer(
 			imageSize,
 			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -204,81 +214,149 @@ namespace Engine
 			stagingBufferMemory
 		);
 
-		// Map it in the device
-		void* data = nullptr;
-		vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
-		memcpy(data, pixelData, imageSize);
-		vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
+		{
+			void* data = nullptr;
+			vkMapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
+			{
+				// Copy the pixel payload into the staging buffer.
+				std::memcpy(data, pixelData, static_cast<size_t>(imageSize));
+			}
+			vkUnmapMemory(vulkanRenderer->GetDevice(), stagingBufferMemory);
+		}
 
-		// Create the image with proper flags for mip map support the sampler can use for selecting lods
+		// --- 2) Image creation ------------------------------------------------------------
+		// If we are going to generate mips, we must also be able to read from previous
+		// levels (blit source) -> need TRANSFER_SRC usage.
+		VkImageUsageFlags usage =
+			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+		if (useMips)
+		{
+			usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		}
+
 		vulkanRenderer->CreateImage(
 			width, height, mipLevels,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			format,
 			VK_IMAGE_TILING_OPTIMAL,
-			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+			usage,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			image,
 			memory
 		);
 
-		// Get it ready for shader
+		// --- 3) Layout transition to receive the upload ----------------------------------
 		vulkanRenderer->TransitionImageLayoutAllMipLevels(
 			image,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			format,
 			mipLevels,
 			VK_IMAGE_LAYOUT_UNDEFINED,
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 		);
 
-		// Place the buffer in the image and then generate mip maps for the whole chain of lods
+		// --- 4) Copy staging buffer -> base level of the image ----------------------------
 		vulkanRenderer->CopyBufferToImage(stagingBuffer, image, width, height);
-		vulkanRenderer->GenerateMipmaps(
-			image,
-			VK_FORMAT_R8G8B8A8_SRGB,
-			static_cast<int32_t>(width),
-			static_cast<int32_t>(height),
-			mipLevels
-		);
 
+		// --- 5) Build mip chain OR finalize single-level layout ---------------------------
+		if (useMips)
+		{
+			// Generates and uploads all levels and (commonly) leaves image in SHADER_READ_ONLY_OPTIMAL.
+			vulkanRenderer->GenerateMipmaps(
+				image,
+				format,
+				static_cast<int32_t>(width),
+				static_cast<int32_t>(height),
+				mipLevels
+			);
+		}
+		else
+		{
+			// No mips: transition the single level directly to shader-read layout.
+			vulkanRenderer->TransitionImageLayoutAllMipLevels(
+				image,
+				format,
+				/*levelCount=*/1,
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			);
+		}
+
+		// --- 6) Cleanup staging resources -------------------------------------------------
 		vkDestroyBuffer(vulkanRenderer->GetDevice(), stagingBuffer, nullptr);
 		vkFreeMemory(vulkanRenderer->GetDevice(), stagingBufferMemory, nullptr);
 
-		// Also one last thing to register the image view for the mip map chain
+		// --- 7) Image view for the full mip chain (or just level 0) ----------------------
 		imageView = vulkanRenderer->CreateImageView(
 			image,
-			VK_FORMAT_R8G8B8A8_SRGB,
+			format,
 			mipLevels
 		);
 	}
 
 	void Texture2D::UploadToOpenGL()
 	{
+		// Create and bind the GL texture object.
 		glGenTextures(1, &textureID);
 		glBindTexture(GL_TEXTURE_2D, textureID);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-		GLfloat maxAniso = 0.0f;
-		glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso);
-		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAniso);
-		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 0.0f);
+		// Upload the base level. Use a sized, linear internal format for reliability.
+		// If we need sRGB for color textures, we will need to handle that at creation time per asset type.
+		const GLenum internalFormat = GL_RGBA8; // linear; avoids MSDF errors caused by sRGB
+		const GLenum externalFormat = GL_RGBA;
+		const GLenum externalType = GL_UNSIGNED_BYTE;
 
 		glTexImage2D(
 			GL_TEXTURE_2D,
-			0,
-			GL_RGBA,
+			0,                  // level
+			internalFormat,     // internal format (sized)
 			width,
 			height,
-			0,
-			GL_RGBA,
-			GL_UNSIGNED_BYTE,
+			0,                  // border = 0
+			externalFormat,     // source format
+			externalType,       // source type
 			pixelData
 		);
 
-		glGenerateMipmap(GL_TEXTURE_2D);
+		if (generateMips)
+		{
+			// --- Mipped sampling branch (general color textures, normals, etc.) ---
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+			// Anisotropy helps *only* with mips. Query and set the max available.
+			GLfloat maxAniso = 0.0f;
+			glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &maxAniso);
+			if (maxAniso < 1.0f)
+			{
+				maxAniso = 1.0f;
+			}
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAniso);
+
+			// Optional LOD bias (keep 0 unless you’re doing special filtering tricks).
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 0.0f);
+
+			// Build the mip chain.
+			glGenerateMipmap(GL_TEXTURE_2D);
+		}
+		else
+		{
+			// --- No-mips branch (MSDF, UI masks, data textures that must not blur/average) ---
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+			// Constrain sampling to the base level (no mip chain).
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+			// Make sure anisotropy isn’t boosting a non-existent mip chain.
+			// Setting to 1 disables it cleanly.
+			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 1.0f);
+		}
+
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 

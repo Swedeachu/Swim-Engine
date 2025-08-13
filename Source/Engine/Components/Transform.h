@@ -162,6 +162,14 @@ namespace Engine
 			return modelMatrix;
 		}
 
+		// Get a transform model matrix with no scale values.
+		static glm::mat4 MakeModelTR(const Transform& tf)
+		{
+			glm::mat4 T = glm::translate(glm::mat4(1.0f), tf.GetPosition());
+			glm::mat4 R = glm::mat4_cast(tf.GetRotation());
+			return T * R;
+		}
+
 	};
 
-}
+} // Namespace Engine

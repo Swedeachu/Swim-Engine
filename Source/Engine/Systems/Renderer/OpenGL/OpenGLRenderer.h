@@ -56,6 +56,9 @@ namespace Engine
 		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 		void RenderScreenSpaceAndDecoratedMeshes(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, bool cull);
 
+		void RenderTextMSDFWorld(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void RenderTextMSDFScreen(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+
 		void DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
 		void DrawUIEntity(
@@ -111,6 +114,24 @@ namespace Engine
 		GLint loc_dec_useTexture = -1;
 		GLint loc_dec_albedoTex = -1;
 		GLint loc_dec_isWorldSpace = -1;
+
+		// MSDF text rendering state and locations
+		GLuint textShader = -1;
+		GLuint textVAO = -1;
+		GLuint textVBO = -1;
+		GLuint textEBO = -1;
+
+		GLint loc_txt_mvp = -1;
+		GLint loc_txt_pxToModel = -1;
+		GLint loc_txt_emScalePx = -1;
+		GLint loc_txt_isWorldSpace = -1;
+		GLint loc_txt_msdfAtlas = -1;
+		GLint loc_txt_atlasSize = -1;
+		GLint loc_txt_pxRange = -1;
+		GLint loc_txt_fillColor = -1;
+		GLint loc_txt_strokeColor = -1;
+		GLint loc_txt_strokeWidth = -1;
+		GLint loc_txt_distanceRange = -1;
 
 		GLuint megaVBO = 0;          // Mega vertex buffer object
 		GLuint megaEBO = 0;          // Mega element (index) buffer object

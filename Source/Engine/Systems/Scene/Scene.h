@@ -101,6 +101,7 @@ namespace Engine
 			return registry.emplace<T>(entity, std::move(component));
 		}
 
+		// Args is to contain any arguments for the dervied classes constructor that come after the explicit base class behavior constructor arguments 
 		template<typename T, typename... Args>
 		void AddBehavior(entt::entity entity, Args&&... args)
 		{

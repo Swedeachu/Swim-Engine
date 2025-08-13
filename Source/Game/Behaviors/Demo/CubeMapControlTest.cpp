@@ -60,6 +60,7 @@ namespace Game
 		}
 
 		// Toggle the cubemap style
+		/* Abandoned feature for now
 		if (input->IsKeyTriggered('X'))
 		{
 			Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
@@ -79,6 +80,7 @@ namespace Game
 				cubemapController->SetFaces(faces);
 			}
 		}
+		*/
 	}
 
 	void CubeMapControlTest::UpdateRotation(double dt, std::unique_ptr<Engine::CubeMapController>& cubemapController)

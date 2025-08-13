@@ -3,6 +3,7 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "VulkanCubeMap.h"
 
@@ -197,6 +198,8 @@ namespace Engine
 		);
 
 		// Load all textures and set a fallback missing texture
+		// In the future we won't do this because the active scene file assets should determine which textures and models get loaded in, everything being loaded like this is just temporary behavior.
+		// We will have a proper asset streaming threaded service later on.
 		texturePool.LoadAllRecursively();
 		missingTexture = texturePool.GetTexture2DLazy("mart");
 
@@ -206,6 +209,9 @@ namespace Engine
 			"Shaders\\FragmentShaders\\fragment_cubemap.spv"
 		);
 		cubemapController->SetEnabled(false);
+
+		// Load all fonts (later on will not be done here and instead be done via threaded asset streaming service on demand)
+		FontPool::GetInstance().LoadAllRecursively();
 
 		return 0;
 	}

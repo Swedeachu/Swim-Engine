@@ -59,11 +59,12 @@ namespace Engine
 		}
 	}
 
-	std::shared_ptr<Texture2D> TexturePool::LoadTexture(const std::string& fileName)
+	std::shared_ptr<Texture2D> TexturePool::LoadTexture(const std::string& fileName, bool generateMips)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		std::string key = FormatKey(fileName, fileName);
+		std::string parent = std::filesystem::path(fileName).parent_path().string();
+		std::string key = FormatKey(fileName, parent);
 
 		auto it = textures.find(key);
 		if (it != textures.end())
@@ -73,7 +74,7 @@ namespace Engine
 		}
 
 		// Not found, load now
-		auto tex = std::make_shared<Texture2D>(fileName);
+		auto tex = std::make_shared<Texture2D>(fileName, generateMips);
 		textures[key] = tex;
 		return tex;
 	}
