@@ -6,8 +6,7 @@
 #include "Engine\Components\Transform.h"
 #include "Engine\Components\Material.h"
 #include "Engine\Components\CompositeMaterial.h"
-#include "Engine/Components/MeshDecorator.h"
-#include "Library/glm/vec4.hpp"
+#include "Engine\Components\MeshDecorator.h"
 #include "RandomUtils.h"
 #include "Engine\Systems\Entity\EntityFactory.h"
 #include "Game\Behaviors\CameraControl\EditorCamera.h"
@@ -15,13 +14,11 @@
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
 #include "Game\Behaviors\Demo\Spin.h"
 #include "Game\Behaviors\Demo\MouseInputDemoBehavior.h"
-#include "Game\Behaviors\Demo\FpsCounter.h"
 #include "Engine\Components\TextComponent.h"
 #include "Engine\Systems\Renderer\Core\Font\FontPool.h"
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+#include "Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h"
+#include "Game\Behaviors\CameraControl\RayCasterCameraControl.h"
+#include "Game\Behaviors\Demo\SetTextCallBack.h"
 
 namespace Game
 {
@@ -31,7 +28,7 @@ namespace Game
 	constexpr static bool doTextUI = true;
 	constexpr static bool doButtonUI = false;
 	constexpr static bool glbTests = true;
-	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
+	constexpr static bool doSponza = false; // glbTests must be true for this to happen!
 
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
@@ -45,286 +42,6 @@ namespace Game
 		std::cout << name << " Awoke" << std::endl;
 		GetSceneSystem()->SetScene(name, true, false, false); // set ourselves to active first scene
 		return 0;
-	}
-
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeCube()
-	{
-		// 8 unique corners of the cube
-		std::array<glm::vec3, 8> corners = {
-				glm::vec3{-0.5f, -0.5f, -0.5f}, // 0
-				glm::vec3{ 0.5f, -0.5f, -0.5f}, // 1
-				glm::vec3{ 0.5f,  0.5f, -0.5f}, // 2
-				glm::vec3{-0.5f,  0.5f, -0.5f}, // 3
-				glm::vec3{-0.5f, -0.5f,  0.5f}, // 4
-				glm::vec3{ 0.5f, -0.5f,  0.5f}, // 5
-				glm::vec3{ 0.5f,  0.5f,  0.5f}, // 6
-				glm::vec3{-0.5f,  0.5f,  0.5f}, // 7
-		};
-
-		// Face definitions with CCW order and associated color
-		struct FaceDefinition
-		{
-			std::array<int, 4> c;
-			glm::vec3 color;
-		};
-
-		std::array<FaceDefinition, 6> faces = {
-			// FRONT (+Z)
-			FaceDefinition{{ {4, 5, 6, 7} }, glm::vec3(1.0f, 0.0f, 0.0f)}, // Red
-
-			// BACK (-Z)
-			FaceDefinition{{ {1, 0, 3, 2} }, glm::vec3(0.0f, 1.0f, 0.0f)}, // Green
-
-			// LEFT (-X)
-			FaceDefinition{{ {0, 4, 7, 3} }, glm::vec3(0.0f, 0.0f, 1.0f)}, // Blue
-
-			// RIGHT (+X)
-			FaceDefinition{{ {5, 1, 2, 6} }, glm::vec3(1.0f, 1.0f, 0.0f)}, // Yellow
-
-			// TOP (+Y)
-			FaceDefinition{{ {3, 7, 6, 2} }, glm::vec3(1.0f, 0.0f, 1.0f)}, // Magenta
-
-			// BOTTOM (-Y)
-			FaceDefinition{{ {4, 0, 1, 5} }, glm::vec3(0.0f, 1.0f, 1.0f)}, // Cyan
-		};
-
-		// Define UV coordinates for each vertex of a face
-		std::array<glm::vec2, 4> faceUVs = {
-				glm::vec2(0.0f, 1.0f), // Bottom-left
-				glm::vec2(1.0f, 1.0f), // Bottom-right
-				glm::vec2(1.0f, 0.0f), // Top-right
-				glm::vec2(0.0f, 0.0f)  // Top-left
-		};
-
-		// Build the 24 vertices (4 vertices per face)
-		std::vector<Engine::Vertex> vertices;
-		vertices.reserve(24);
-
-		for (const auto& face : faces)
-		{
-			for (int i = 0; i < 4; i++)
-			{
-				Engine::Vertex v{};
-				v.position = corners[face.c[i]];
-				v.color = face.color;
-				v.uv = faceUVs[i]; // Assign proper UVs
-				vertices.push_back(v);
-			}
-		}
-
-		// Build the 36 indices (6 faces * 6 indices per face)
-		std::vector<uint32_t> indices;
-		indices.reserve(36);
-		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
-		{
-			uint32_t base = faceIdx * 4;
-			// First triangle of the face
-			indices.push_back(base + 0);
-			indices.push_back(base + 1);
-			indices.push_back(base + 2);
-
-			// Second triangle of the face
-			indices.push_back(base + 2);
-			indices.push_back(base + 3);
-			indices.push_back(base + 0);
-		}
-
-		return { vertices, indices };
-	}
-
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeRandomColoredCube()
-	{
-		std::array<glm::vec3, 8> corners = {
-			glm::vec3{-0.5f, -0.5f, -0.5f},
-			glm::vec3{ 0.5f, -0.5f, -0.5f},
-			glm::vec3{ 0.5f,  0.5f, -0.5f},
-			glm::vec3{-0.5f,  0.5f, -0.5f},
-			glm::vec3{-0.5f, -0.5f,  0.5f},
-			glm::vec3{ 0.5f, -0.5f,  0.5f},
-			glm::vec3{ 0.5f,  0.5f,  0.5f},
-			glm::vec3{-0.5f,  0.5f,  0.5f},
-		};
-
-		std::array<std::array<int, 4>, 6> faceIndices = {
-			std::array<int,4>{4,5,6,7},  // Front
-			std::array<int,4>{1,0,3,2},  // Back
-			std::array<int,4>{0,4,7,3},  // Left
-			std::array<int,4>{5,1,2,6},  // Right
-			std::array<int,4>{3,7,6,2},  // Top
-			std::array<int,4>{4,0,1,5},  // Bottom
-		};
-
-		std::array<glm::vec2, 4> uvs = {
-			glm::vec2(0.0f, 1.0f),
-			glm::vec2(1.0f, 1.0f),
-			glm::vec2(1.0f, 0.0f),
-			glm::vec2(0.0f, 0.0f),
-		};
-
-		std::vector<Engine::Vertex> vertices;
-		std::vector<uint32_t> indices;
-
-		vertices.reserve(24);
-		indices.reserve(36);
-
-		for (int face = 0; face < 6; ++face)
-		{
-			glm::vec3 color = glm::vec3(
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f)
-			);
-
-			for (int i = 0; i < 4; ++i)
-			{
-				Engine::Vertex v{};
-				v.position = corners[faceIndices[face][i]];
-				v.uv = uvs[i];
-				v.color = color;
-				vertices.push_back(v);
-			}
-
-			uint32_t base = face * 4;
-			indices.push_back(base + 0);
-			indices.push_back(base + 1);
-			indices.push_back(base + 2);
-			indices.push_back(base + 2);
-			indices.push_back(base + 3);
-			indices.push_back(base + 0);
-		}
-
-		return { vertices, indices };
-	}
-
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeSphere(
-		int latitudeSegments,
-		int longitudeSegments,
-		glm::vec3 colorTop,
-		glm::vec3 colorMid,
-		glm::vec3 colorBottom)
-	{
-		std::vector<Engine::Vertex> vertices;
-		std::vector<uint32_t> indices;
-
-		// Clamp to minimum sensible values
-		latitudeSegments = std::max(3, latitudeSegments);
-		longitudeSegments = std::max(3, longitudeSegments);
-
-		// Generate all vertices
-		for (int lat = 0; lat <= latitudeSegments; ++lat)
-		{
-			float v = static_cast<float>(lat) / latitudeSegments; // [0,1]
-			float theta = glm::pi<float>() * v;                        // [0, pi]
-
-			float sinTheta = std::sin(theta);
-			float cosTheta = std::cos(theta);
-
-			for (int lon = 0; lon <= longitudeSegments; ++lon)
-			{
-				float u = static_cast<float>(lon) / longitudeSegments; // [0,1]
-				float phi = glm::two_pi<float>() * u;                    // [0, 2pi]
-
-				float sinPhi = std::sin(phi);
-				float cosPhi = std::cos(phi);
-
-				glm::vec3 pos;
-				pos.x = sinTheta * cosPhi;
-				pos.y = cosTheta;
-				pos.z = sinTheta * sinPhi;
-
-				glm::vec3 color;
-
-				// Interpolate top -> mid -> bottom along v (Y)
-				if (v < 0.5f)
-				{
-					float t = v * 2.0f;
-					color = glm::mix(colorTop, colorMid, t);
-				}
-				else
-				{
-					float t = (v - 0.5f) * 2.0f;
-					color = glm::mix(colorMid, colorBottom, t);
-				}
-
-				// glm::vec2 uv = glm::vec2(u, 1.0f - v);
-				glm::vec2 uv = glm::vec2(u, v);
-
-				Engine::Vertex vert;
-				vert.position = pos * 0.5f; // Unit sphere scaled to [-0.5, 0.5]
-				vert.color = color;
-				vert.uv = uv;
-
-				vertices.push_back(vert);
-			}
-		}
-
-		// Generate indices (CCW winding)
-		for (int lat = 0; lat < latitudeSegments; ++lat)
-		{
-			for (int lon = 0; lon < longitudeSegments; ++lon)
-			{
-				int current = lat * (longitudeSegments + 1) + lon;
-				int next = current + longitudeSegments + 1;
-
-				// Triangle 1 (CCW)
-				indices.push_back(static_cast<uint32_t>(current));
-				indices.push_back(static_cast<uint32_t>(current + 1));
-				indices.push_back(static_cast<uint32_t>(next));
-
-				// Triangle 2 (CCW)
-				indices.push_back(static_cast<uint32_t>(current + 1));
-				indices.push_back(static_cast<uint32_t>(next + 1));
-				indices.push_back(static_cast<uint32_t>(next));
-			}
-		}
-
-		return { vertices, indices };
-	}
-
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> GenerateCircleMesh(
-		float radius = 0.5f,
-		uint32_t segmentCount = 64,
-		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
-	)
-	{
-		std::vector<Engine::Vertex> vertices;
-		std::vector<uint32_t> indices;
-
-		// Add center vertex of triangle fan
-		vertices.push_back({
-				{0.0f, 0.0f, 0.0f}, // Center position
-				color,              // Uniform color
-				{0.5f, 0.5f}        // Center UV
-			});
-
-		// Add outer circle vertices
-		for (uint32_t i = 0; i <= segmentCount; ++i)
-		{
-			float angle = (float)i / (float)segmentCount * 2.0f * M_PI;
-
-			float x = radius * cosf(angle);
-			float y = radius * sinf(angle);
-
-			// UV mapped from [-radius, radius] => [0,1]
-			float u = 0.5f + (x / (radius * 2.0f));
-			float v = 0.5f - (y / (radius * 2.0f));  // Flip Y for typical UVs
-
-			vertices.push_back({
-					{x, y, 0.0f},
-					color,
-					{u, v}
-				});
-		}
-
-		// Generate indices for triangle fan
-		for (uint32_t i = 1; i <= segmentCount; ++i)
-		{
-			indices.push_back(0);        // Center
-			indices.push_back(i);        // Current vertex
-			indices.push_back(i + 1);    // Next vertex (wraps around)
-		}
-
-		return { vertices, indices };
 	}
 
 	std::shared_ptr<Engine::MaterialData> RegisterRandomMaterial(
@@ -367,14 +84,14 @@ namespace Game
 		if constexpr (!fullyUniqueMeshes)
 		{
 			// Shared Cube
-			auto cubeData = MakeCube();
+			auto cubeData = Engine::MakeCube();
 			auto sharedCube = meshPool.RegisterMesh("SharedCube", cubeData.first, cubeData.second);
 			materialPool.RegisterMaterialData("RegularCube", sharedCube);
 			materialPool.RegisterMaterialData("MartCube", sharedCube, texturePool.GetTexture2DLazy("mart"));
 			materialPool.RegisterMaterialData("AlienCube", sharedCube, texturePool.GetTexture2DLazy("alien"));
 
 			// Shared Sphere
-			auto sphereData = MakeSphere(16, 32, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+			auto sphereData = Engine::MakeSphere(16, 32, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 			auto sharedSphere = meshPool.RegisterMesh("SharedSphere", sphereData.first, sphereData.second);
 			materialPool.RegisterMaterialData("RegularSphere", sharedSphere);
 			materialPool.RegisterMaterialData("MartSphere", sharedSphere, texturePool.GetTexture2DLazy("mart"));
@@ -418,7 +135,7 @@ namespace Game
 							glm::vec3 mid = Engine::randVec3(0.2f, 1.0f);
 							glm::vec3 bot = Engine::randVec3(0.2f, 1.0f);
 
-							auto sphereData = MakeSphere(latSegments, longSegments, top, mid, bot);
+							auto sphereData = Engine::MakeSphere(latSegments, longSegments, top, mid, bot);
 							std::string name = "sphere_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
 							auto mesh = meshPool.RegisterMesh(name, sphereData.first, sphereData.second);
 							auto material = RegisterRandomMaterial(mesh, Engine::randInt(0, 999999));
@@ -437,7 +154,7 @@ namespace Game
 					{
 						if constexpr (fullyUniqueMeshes)
 						{
-							auto cubeData = MakeRandomColoredCube();
+							auto cubeData = Engine::MakeRandomColoredCube();
 							std::string name = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
 							auto mesh = meshPool.RegisterMesh(name, cubeData.first, cubeData.second);
 							auto material = RegisterRandomMaterial(mesh, Engine::randInt(0, 999999));
@@ -464,7 +181,7 @@ namespace Game
 					{
 						if (Engine::randInt(0, 1) == 0)
 						{
-							scene->AddBehavior<Game::Spin>(entity, Engine::randFloat(25.0f, 90.0f));
+							scene->EmplaceBehavior<Game::Spin>(entity, Engine::randFloat(25.0f, 90.0f));
 						}
 					}
 				}
@@ -506,7 +223,7 @@ namespace Game
 
 			scene->AddComponent<Engine::Transform>(whiteEntity, Engine::Transform(whiteEntityScreenPos, whiteEntitySize, glm::quat(), Engine::TransformSpace::Screen));
 			scene->AddComponent<Engine::Material>(whiteEntity, Engine::Material(whiteMaterial));
-			scene->AddBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
+			scene->EmplaceBehavior<MouseInputDemoBehavior>(whiteEntity); // with a behavior to demonstrate mouse input callbacks
 
 			Engine::MeshDecorator decorator = Engine::MeshDecorator(
 				glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),    // fill
@@ -558,7 +275,43 @@ namespace Game
 			fpsText.SetFont(roboto);
 
 			scene->AddComponent<Engine::TextComponent>(fpsEntity, textComponent);
-			scene->AddBehavior<FpsCounter>(fpsEntity, true);
+
+			Game::SetTextCallback* fpsBehavior = scene->EmplaceBehavior<Game::SetTextCallback>(fpsEntity, /*chroma*/ true);
+			fpsBehavior->SetCallback([engine](Engine::TextComponent& tc, entt::entity e, double)
+			{
+				int fps = engine->GetFPS();
+				const std::string s = "FPS: " + std::to_string(fps);
+				tc.SetText(s);
+			});
+
+			// camera coords
+			auto coordEntity = scene->CreateEntity();
+			glm::vec3 coordEntityScreenPos = glm::vec3(20, 1020, 0.0f);
+			glm::vec3 coordEntitySize = glm::vec3(50.0f, 50.0f, 1.0f);
+			scene->AddComponent<Engine::Transform>(coordEntity, Engine::Transform(coordEntityScreenPos, coordEntitySize, glm::quat(), Engine::TransformSpace::Screen));
+
+			Engine::TextComponent coordTextComponent = Engine::TextComponent();
+			coordTextComponent.fillColor = glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+			coordTextComponent.strokeColor = glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f };
+			coordTextComponent.strokeWidth = 2.0f;
+			coordTextComponent.SetAlignment(Engine::TextAllignemt::Left);
+			coordTextComponent.SetText("0, 0, 0");
+			coordTextComponent.SetFont(roboto);
+
+			scene->AddComponent<Engine::TextComponent>(coordEntity, coordTextComponent);
+			Game::SetTextCallback* coordBehavior = scene->EmplaceBehavior<Game::SetTextCallback>(coordEntity, /*chroma*/ true);
+			coordBehavior->SetCallback([cameraSystem = scene->GetCameraSystem()](Engine::TextComponent& tc, entt::entity e, double)
+			{
+				Engine::Camera cam = cameraSystem->GetCamera();
+				const glm::vec3 p = cam.GetPosition();
+				const glm::vec3 r = cam.GetRotationEuler();
+				const std::string newText = (
+					ChromaHelper::strf(p.x) + ", " + ChromaHelper::strf(p.y) + ", " + ChromaHelper::strf(p.z)
+					+ "\n" +
+					ChromaHelper::strf(r.x) + ", " + ChromaHelper::strf(r.y) + ", " + ChromaHelper::strf(r.z)
+					);
+				tc.SetText(newText);
+			});
 		}
 
 		// Below here is a bunch of bools for messing with making a second UI entity to test stuff out with
@@ -589,7 +342,7 @@ namespace Game
 			constexpr bool isCircle = false;
 			if constexpr (isCircle)
 			{
-				auto [circleVertices, circleIndices] = GenerateCircleMesh(1.0f, 128, { 1.0f, 0.0f, 0.0f });
+				auto [circleVertices, circleIndices] = Engine::GenerateCircleMesh(1.0f, 128, { 1.0f, 0.0f, 0.0f });
 				secondMesh = meshPool.RegisterMesh("SecondTestMeshUI", circleVertices, circleIndices);
 			}
 			else
@@ -652,7 +405,7 @@ namespace Game
 		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
 
 		// Made a helper since anything 3D is phat
-		auto cubeData = MakeCube();
+		auto cubeData = Engine::MakeCube();
 
 		// Register both meshes
 		auto mesh1 = meshPool.RegisterMesh("RainbowCube", cubeData.first, cubeData.second);
@@ -667,7 +420,7 @@ namespace Game
 			"mart material", mesh2, texturePool.GetTexture2DLazy("mart")
 		);
 
-		auto sphereData = MakeSphere(
+		auto sphereData = Engine::MakeSphere(
 			24, 48,
 			glm::vec3(1, 0, 0),   // top: red
 			glm::vec3(1, 1, 0),   // mid: yellow
@@ -699,7 +452,7 @@ namespace Game
 		);
 		// billboardDecorator.SetUseMeshMaterialColor(true);
 		AddComponent<Engine::MeshDecorator>(billboard, billboardDecorator);
-		AddBehavior<Spin>(billboard);
+		EmplaceBehavior<Spin>(billboard);
 		//*/
 
 		// World space text entity
@@ -737,7 +490,7 @@ namespace Game
 		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
 
 		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel));
-		AddBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
+		EmplaceBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
 		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(
@@ -746,7 +499,8 @@ namespace Game
 		);
 
 		// We can load scene scripts this way as a cool hack/trick
-		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(); // Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
+		// Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
+		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest, RayCasterCameraControl>();
 
 		if constexpr (doUI) MakeUI(this);
 
@@ -801,7 +555,7 @@ namespace Game
 			auto test = CreateEntity();
 			auto testTransform = AddComponent<Engine::Transform>(test, Engine::Transform(glm::vec3(6.0f, 0.0f, 0.0f), glm::vec3(1)));
 			testTransform.SetRotationEuler(0, 0, 90);
-			// AddBehavior<Game::Spin>(test, 90.0f);
+			// EmplaceBehavior<Game::Spin>(test, 90.0f);
 			AddComponent<Engine::CompositeMaterial>(test, Engine::CompositeMaterial(testData));
 		}
 		*/

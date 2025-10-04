@@ -6,94 +6,10 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/MeshDecorator.h"
+#include "Engine/Systems/Renderer/Core/Meshes/PrimitiveMeshes.h"
 
 namespace Engine
 {
-
-	std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> MakeCube()
-	{
-		// 8 unique corners of the cube
-		std::array<glm::vec3, 8> corners = {
-				glm::vec3{-0.5f, -0.5f, -0.5f}, // 0
-				glm::vec3{ 0.5f, -0.5f, -0.5f}, // 1
-				glm::vec3{ 0.5f,  0.5f, -0.5f}, // 2
-				glm::vec3{-0.5f,  0.5f, -0.5f}, // 3
-				glm::vec3{-0.5f, -0.5f,  0.5f}, // 4
-				glm::vec3{ 0.5f, -0.5f,  0.5f}, // 5
-				glm::vec3{ 0.5f,  0.5f,  0.5f}, // 6
-				glm::vec3{-0.5f,  0.5f,  0.5f}, // 7
-		};
-
-		// Face definitions with CCW order and associated color
-		struct FaceDefinition
-		{
-			std::array<int, 4> c;
-			glm::vec3 color;
-		};
-
-		std::array<FaceDefinition, 6> faces = {
-			// FRONT (+Z)
-			FaceDefinition{{ {4, 5, 6, 7} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-
-			// BACK (-Z)
-			FaceDefinition{{ {1, 0, 3, 2} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-
-			// LEFT (-X)
-			FaceDefinition{{ {0, 4, 7, 3} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-
-			// RIGHT (+X)
-			FaceDefinition{{ {5, 1, 2, 6} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-
-			// TOP (+Y)
-			FaceDefinition{{ {3, 7, 6, 2} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-
-			// BOTTOM (-Y)
-			FaceDefinition{{ {4, 0, 1, 5} }, glm::vec3(1.0f, 1.0f, 1.0f)},
-		};
-
-		// Define UV coordinates for each vertex of a face
-		std::array<glm::vec2, 4> faceUVs = {
-				glm::vec2(0.0f, 1.0f), // Bottom-left
-				glm::vec2(1.0f, 1.0f), // Bottom-right
-				glm::vec2(1.0f, 0.0f), // Top-right
-				glm::vec2(0.0f, 0.0f)  // Top-left
-		};
-
-		// Build the 24 vertices (4 vertices per face)
-		std::vector<Engine::Vertex> vertices;
-		vertices.reserve(24);
-
-		for (const auto& face : faces)
-		{
-			for (int i = 0; i < 4; i++)
-			{
-				Engine::Vertex v{};
-				v.position = corners[face.c[i]];
-				v.color = face.color;
-				v.uv = faceUVs[i]; // Assign proper UVs
-				vertices.push_back(v);
-			}
-		}
-
-		// Build the 36 indices (6 faces * 6 indices per face)
-		std::vector<uint32_t> indices;
-		indices.reserve(36);
-		for (int faceIdx = 0; faceIdx < 6; faceIdx++)
-		{
-			uint32_t base = faceIdx * 4;
-			// First triangle of the face
-			indices.push_back(base + 0);
-			indices.push_back(base + 1);
-			indices.push_back(base + 2);
-
-			// Second triangle of the face
-			indices.push_back(base + 2);
-			indices.push_back(base + 3);
-			indices.push_back(base + 0);
-		}
-
-		return { vertices, indices };
-	}
 
 	void SceneDebugDraw::Init()
 	{
@@ -270,6 +186,55 @@ namespace Engine
 			strokeWidth.x > 0.0f || strokeWidth.y > 0.0f,   // enable stroke
 			enableFill, // enable fill
 			false       // use texture 
+		);
+	}
+
+	void SceneDebugDraw::SubmitRay(const Ray& ray, const glm::vec3& color /*= red*/)
+	{
+		// Tunables
+		constexpr float kThickness = 0.01f;   // X/Y thickness of the ray line
+		constexpr float kLength = 100.0f;  // how far to draw the ray visually
+
+		// Normalize direction; if zero, bail.
+		glm::vec3 dir = ray.dir;
+		const float len = glm::length(dir);
+		if (len <= 0.0f) return;
+		dir /= len;
+
+		// Our cube mesh is unit-sized centered at origin; scaling Z stretches along local +Z.
+		// We want +Z aligned with the ray direction.
+		const glm::quat rot = FromToRotation(glm::vec3(0, 0, 1), dir);
+
+		// Center the skinny cube halfway along the ray, so it starts at ray.origin.
+		const glm::vec3 position = ray.origin + dir * (kLength * 0.5f);
+
+		// Scale: thin bar along Z
+		const glm::vec3 scale(kThickness, kThickness, kLength);
+
+		// Compose color params
+		const glm::vec4 strokeColor(color, 1.0f);
+		const glm::vec4 fillColor(color, 1.0f);
+
+		// Build the debug entity: Transform + Material + MeshDecorator
+		entt::entity e = debugRegistry.create();
+
+		// World-space transform (assuming Transform ctor: position, scale, rotation, space)
+		debugRegistry.emplace<Transform>(e, position, scale, rot, TransformSpace::World);
+
+		// Solid cube material (skinny filled bar).
+		debugRegistry.emplace<Material>(e, Material(GetMeshMaterialDataFromType(MeshBoxType::Cube)));
+
+		// MeshDecorator: enable fill, disable stroke (set stroke width = 0)
+		debugRegistry.emplace<MeshDecorator>(e,
+			fillColor,                // fill color
+			strokeColor,              // stroke color (not used if width=0)
+			glm::vec2(0.0f),          // stroke width
+			glm::vec2(0.0f),          // corner radius
+			glm::vec2(0.0f),          // padding
+			false,                    // enable rounded corners
+			false,                    // enable stroke
+			true,                     // enable fill
+			false                     // use texture
 		);
 	}
 

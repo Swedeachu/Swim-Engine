@@ -3,6 +3,7 @@
 #include "Library/glm/glm.hpp"
 #include "Library/EnTT/entt.hpp"
 #include "SceneDebugDraw.h"
+#include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
 namespace Engine
 {
@@ -15,12 +16,6 @@ namespace Engine
 	{
 
 	public:
-
-		struct AABB
-		{
-			glm::vec3 min{ std::numeric_limits<float>::max() };
-			glm::vec3 max{ -std::numeric_limits<float>::max() };
-		};
 
 		explicit SceneBVH(entt::registry& registry);
 
@@ -45,6 +40,93 @@ namespace Engine
 			}
 
 			TraverseFrustumCallback(root, frustum, callback);
+		}
+
+		// outTHit is an optional output parameter that lets you know where along the ray the closest hit occurred.
+		entt::entity RayCastClosestHit
+		(
+			const Ray& ray,
+			float tMin = 0.0f,
+			float tMax = std::numeric_limits<float>::infinity(),
+			float* outTHit = nullptr
+		) const;
+
+		// Visits all leaf AABBs hit; callback can early-out
+		template<typename Func>
+		void RayCastCallback
+		(
+			const Ray& ray,
+			Func&& callback,
+			float tMin,
+			float tMax
+		) const
+		{
+			if (root == -1) return;
+
+			// Manual stack (index + tnear). No heap, predictable.
+			static constexpr int STACK_MAX = 512;
+			struct Item { int idx; float tnear; };
+			Item stack[STACK_MAX];
+			int sp = 0;
+
+			float tRoot;
+			if (!RayIntersectsAABB(ray, nodes[root].aabb, tMin, tMax, tRoot))
+			{
+				return;
+			}
+
+			stack[sp++] = { root, tRoot };
+
+			while (sp)
+			{
+				// LIFO pop (nearer child is pushed last to pop next)
+				const Item it = stack[--sp];
+				const int idx = it.idx;
+				const auto& node = nodes[idx];
+
+				if (node.IsLeaf())
+				{
+					float tLeaf;
+					if (RayIntersectsAABB(ray, node.aabb, tMin, tMax, tLeaf))
+					{
+						// callback returns false to stop early
+						if (!callback(node.entity, tLeaf, node.aabb))
+						{
+							return;
+						}
+					}
+					continue;
+				}
+
+				// Internal: test children; push farther first so nearer is popped next
+				float tL, tR;
+				const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, tMax, tL);
+				const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, tMax, tR);
+
+				if (hitL & hitR) // single branch for both
+				{
+					// Push farther first, then nearer (stack pop gets nearer next)
+					const bool leftIsNear = (tL <= tR);
+					const int nearIdx = leftIsNear ? node.left : node.right;
+					const int farIdx = leftIsNear ? node.right : node.left;
+					const float tNear = leftIsNear ? tL : tR;
+					const float tFar = leftIsNear ? tR : tL;
+
+					if (sp + 2 <= STACK_MAX)
+					{
+						stack[sp++] = { farIdx,  tFar };
+						stack[sp++] = { nearIdx, tNear };
+					}
+				}
+				else if (hitL)
+				{
+					if (sp + 1 <= STACK_MAX) stack[sp++] = { node.left, tL };
+				}
+				else if (hitR)
+				{
+					if (sp + 1 <= STACK_MAX) stack[sp++] = { node.right, tR };
+				}
+			}
 		}
 
 	private:

@@ -71,7 +71,7 @@ namespace Engine
 				// Expand the parameter pack for behaviors
 				([](Scene* s, entt::entity entity)
 				{
-					s->AddBehavior<BehaviorTypes>(entity);
+					s->EmplaceBehavior<BehaviorTypes>(entity);
 				}(scene, e), ...);
 			},
 				transform, material
@@ -89,7 +89,7 @@ namespace Engine
 
 				([](Scene* s, entt::entity entity)
 				{
-					s->AddBehavior<BehaviorTypes>(entity);
+					s->EmplaceBehavior<BehaviorTypes>(entity);
 				}(scene, e), ...);
 			}
 			);

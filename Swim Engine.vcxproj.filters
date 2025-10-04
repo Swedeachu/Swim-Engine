@@ -49,7 +49,11 @@
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp" />
     <ClCompile Include="Source\Library\zstd\zstd.c" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\Demo\FpsCounter.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -334,7 +338,13 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
     <ClInclude Include="Source\Engine\Components\TextComponent.h" />
-    <ClInclude Include="Source\Game\Behaviors\Demo\FpsCounter.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
+    <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
+    <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

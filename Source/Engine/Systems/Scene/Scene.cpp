@@ -143,6 +143,10 @@ namespace Engine
 
 	void Scene::InternalSceneUpdate(double dt)
 	{
+		// Clear the previous frames debug draw data. 
+		// This opens up an opportunity for caching commonly drawn wireframes.
+		sceneDebugDraw->Clear();
+
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
 
@@ -161,9 +165,6 @@ namespace Engine
 				std::string abled = sceneDebugDraw->IsEnabled() ? "Enabled" : "Disabled";
 				std::cout << "Debug wireframe draw " << abled << "\n";
 			}
-
-			// We do clear the previous frames debug draw data though. This opens up an opportunity for caching commonly drawn wireframes.
-			sceneDebugDraw->Clear();
 		}
 	}
 
@@ -259,6 +260,41 @@ namespace Engine
 				}
 			}
 		});
+	}
+
+	// Point is in screen pixels, (0,0) = top-left. Need to investigate if the position is off by a tiny bit.
+	Ray Scene::ScreenPointToRay(const glm::vec2& point) const
+	{
+		Camera& cam = GetCameraSystem()->GetCamera();
+
+		// Use your actual render viewport if it differs from the window size.
+		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
+		const float width = static_cast<float>(engine->GetWindowWidth());
+		const float height = static_cast<float>(engine->GetWindowHeight());
+
+		// top-left-origin pixels -> NDC
+		float ndcX = (2.0f * point.x) / width - 1.0f;  // [-1,+1], left->right
+		float ndcY = 1.0f - (2.0f * point.y) / height;  // [-1,+1], top->bottom
+
+		// Camera params
+		const float fovY = glm::radians(cam.GetFOV());
+		const float tanHalfFovY = tanf(fovY * 0.5f);
+		float aspect = cam.GetAspect();
+		if (aspect <= 0.0f && height > 0.0f) aspect = width / height;
+		const float zNear = cam.GetNearClip();
+
+		// View-space direction (RH, forward = -Z)
+		const glm::vec3 dirVS(ndcX * tanHalfFovY * aspect, ndcY * tanHalfFovY, -1.0f);
+
+		// Point on the near plane for this screen pixel (z = -zNear in view space)
+		const glm::vec3 nearVS = dirVS * (zNear / -dirVS.z);
+
+		// Rotate into world space & build ray
+		const glm::quat q = cam.GetRotation();
+		const glm::vec3 origin = cam.GetPosition() + (q * nearVS);
+		const glm::vec3 dir = glm::normalize(q * dirVS);
+
+		return Ray(origin, dir);
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

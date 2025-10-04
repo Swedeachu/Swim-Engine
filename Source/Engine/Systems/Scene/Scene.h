@@ -4,6 +4,7 @@
 #include "SubSceneSystems/SceneBVH.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
 #include "Engine/Systems/Entity/BehaviorComponents.h"
+#include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
 namespace Engine
 {
@@ -91,7 +92,8 @@ namespace Engine
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
 
-		// Yes it is probably slower to take in a premade component instead of std::forward of args but this is for the sake of readability as we are just literally wrapping registry.emplace
+		Ray ScreenPointToRay(const glm::vec2& point) const;
+
 		template<typename T>
 		T& AddComponent(entt::entity entity, T component)
 		{
@@ -101,29 +103,56 @@ namespace Engine
 			return registry.emplace<T>(entity, std::move(component));
 		}
 
-		// Args is to contain any arguments for the dervied classes constructor that come after the explicit base class behavior constructor arguments 
 		template<typename T, typename... Args>
-		void AddBehavior(entt::entity entity, Args&&... args)
+		T& EmplaceComponent(entt::entity entity, Args&&... args)
+		{
+			static_assert(!std::is_pointer_v<T>, "EmplaceComponent should not take a pointer type");
+			static_assert(std::is_constructible_v<T, Args&&...>, "T must be constructible with the provided arguments");
+
+			return registry.emplace<T>(entity, std::forward<Args>(args)...);
+		}
+
+		// Adds an already-constructed behavior instance to an entity.
+		// The behavior's Awake() and Init() methods are called immediately.
+		// Returns a pointer to the behavior (typed as T*).
+		template<typename T>
+		T* AddBehavior(entt::entity entity, T behavior)
 		{
 			static_assert(std::is_base_of_v<Behavior, T>, "AddBehavior<T> requires T to derive from Behavior");
+			static_assert(!std::is_pointer_v<T>, "AddBehavior should not take a pointer type");
+			static_assert(!std::is_reference_v<T>, "AddBehavior should not take a reference type");
 
-			std::unique_ptr<Behavior> behavior = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
+			// Wrap the behavior instance into a unique_ptr for BehaviorComponents
+			auto uptr = std::make_unique<T>(std::move(behavior));
+			T* raw = uptr.get();
 
-			// Scuffed and probably temproary until its more clear how we want to do the pipeline, most likely have Init be deferred elsewhere for the next frame.
-			behavior->Awake();
-			behavior->Init();
+			uptr->Awake();
+			uptr->Init();
 
-			if (registry.any_of<BehaviorComponents>(entity))
-			{
-				auto& bc = registry.get<BehaviorComponents>(entity);
-				bc.Add(std::move(behavior));
-			}
-			else
-			{
-				BehaviorComponents bc;
-				bc.Add(std::move(behavior));
-				registry.emplace<BehaviorComponents>(entity, std::move(bc));
-			}
+			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.Add(std::move(uptr));
+
+			return raw;
+		}
+
+		// Args is to contain any arguments for the dervied classes constructor that come after the explicit base class behavior constructor arguments.
+		// The behavior's Awake() and Init() methods are called immediately.
+		// Returns a pointer to the behavior created.
+		template<typename T, typename... Args>
+		T* EmplaceBehavior(entt::entity entity, Args&&... args)
+		{
+			static_assert(std::is_base_of_v<Behavior, T>, "EmplaceBehavior<T> requires T to derive from Behavior");
+
+			auto uptr = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
+			T* raw = uptr.get();
+
+			uptr->Awake();
+			uptr->Init();
+
+			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.Add(std::move(uptr));
+
+			return raw;
 		}
 
 		template<typename T>

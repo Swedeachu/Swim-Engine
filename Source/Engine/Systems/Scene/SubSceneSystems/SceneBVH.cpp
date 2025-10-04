@@ -31,7 +31,7 @@ namespace Engine
     worldMax = glm::max(worldMax, c);                                     \
 }
 
-	SceneBVH::AABB SceneBVH::CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform)
+	AABB SceneBVH::CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform)
 	{
 		const glm::vec3& localMin = mesh->meshBufferData->aabbMin;
 		const glm::vec3& localMax = mesh->meshBufferData->aabbMax;
@@ -554,6 +554,105 @@ namespace Engine
 		entityToLeaf.erase(it);
 
 		forceUpdate = true;
+	}
+
+	entt::entity SceneBVH::RayCastClosestHit
+	(
+		const Ray& ray,
+		float tMin,
+		float tMax,
+		float* outTHit
+	) const
+	{
+		if (outTHit)
+		{
+			*outTHit = std::numeric_limits<float>::infinity();
+		}
+
+		if (root == -1)
+		{
+			return entt::null;
+		}
+
+		static constexpr int STACK_MAX = 512;
+		struct Item { int idx; float tnear; };
+		Item stack[STACK_MAX];
+		int sp = 0;
+
+		float tRoot;
+		if (!RayIntersectsAABB(ray, nodes[root].aabb, tMin, tMax, tRoot))
+		{
+			return entt::null;
+		}
+
+		stack[sp++] = { root, tRoot };
+
+		float bestT = std::numeric_limits<float>::infinity();
+		entt::entity bestE = entt::null;
+
+		while (sp)
+		{
+			const Item it = stack[--sp];
+
+			// Prune: if this node's near is already worse than best, skip
+			if (it.tnear > bestT) continue;
+
+			const auto& node = nodes[it.idx];
+
+			if (node.IsLeaf())
+			{
+				float tLeaf;
+				if (RayIntersectsAABB(ray, node.aabb, tMin, tMax, tLeaf))
+				{
+					if (tLeaf < bestT)
+					{
+						bestT = tLeaf;
+						bestE = node.entity;
+					}
+				}
+
+				continue;
+			}
+
+			float tL, tR;
+			const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, tMax, tL);
+			const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, tMax, tR);
+
+			// Push children that can still beat bestT (tight pruning)
+			if (hitL && (tL <= bestT))
+			{
+				if (hitR && (tR <= bestT))
+				{
+					// Push farther first so nearer is processed next
+					const bool leftIsNear = (tL <= tR);
+					const int  nearIdx = leftIsNear ? node.left : node.right;
+					const int  farIdx = leftIsNear ? node.right : node.left;
+					const float tNear = leftIsNear ? tL : tR;
+					const float tFar = leftIsNear ? tR : tL;
+
+					if (sp + 2 <= STACK_MAX)
+					{
+						stack[sp++] = { farIdx,  tFar };
+						stack[sp++] = { nearIdx, tNear };
+					}
+				}
+				else
+				{
+					if (sp + 1 <= STACK_MAX) stack[sp++] = { node.left, tL };
+				}
+			}
+			else if (hitR && (tR <= bestT))
+			{
+				if (sp + 1 <= STACK_MAX) stack[sp++] = { node.right, tR };
+			}
+		}
+
+		if (bestE != entt::null && outTHit)
+		{
+			*outTHit = bestT;
+		}
+
+		return bestE;
 	}
 
 	// I have more versions of IsAABBVisible, and I have no idea which one is fastest

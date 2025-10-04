@@ -3,6 +3,7 @@
 #include "Library/EnTT/entt.hpp"
 #include "Library/glm/glm.hpp"
 #include "Engine/Utility/ColorConstants.h"
+#include "Engine/Systems/Renderer/Core/MathTypes/Ray.h"
 
 namespace Engine
 {
@@ -59,6 +60,12 @@ namespace Engine
       const glm::vec2& cornerRadius = glm::vec2(0.0f),
       int transformSpace = 0,
       MeshBoxType boxType = MeshBoxType::Cube
+    );
+
+    void SubmitRay
+    (
+      const Ray& ray,
+      const glm::vec3& color = glm::vec3(1.0f, 0.0f, 0.0f)
     );
 
     entt::registry& GetRegistry()
