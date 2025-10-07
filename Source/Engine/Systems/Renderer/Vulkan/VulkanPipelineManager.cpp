@@ -42,6 +42,18 @@ namespace Engine
 			decoratorPipelineLayout = VK_NULL_HANDLE;
 		}
 
+		if (msdfTextPipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device, msdfTextPipeline, nullptr);
+			msdfTextPipeline = VK_NULL_HANDLE;
+		}
+
+		if (msdfTextPipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device, msdfTextPipelineLayout, nullptr);
+			msdfTextPipelineLayout = VK_NULL_HANDLE;
+		}
+
 		if (renderPass != VK_NULL_HANDLE)
 		{
 			vkDestroyRenderPass(device, renderPass, nullptr);
@@ -443,6 +455,127 @@ namespace Engine
 		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &decoratorPipeline) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to create UI graphics pipeline");
+		}
+
+		vkDestroyShaderModule(device, vertModule, nullptr);
+		vkDestroyShaderModule(device, fragModule, nullptr);
+	}
+
+	void VulkanPipelineManager::CreateMsdfTextPipeline(
+		const std::string& vertShaderPath,
+		const std::string& fragShaderPath,
+		VkDescriptorSetLayout uboLayout,      // set 0: UBO + SSBOs (instances, decorator, msdf)
+		VkDescriptorSetLayout bindlessLayout, // set 1: sampler + bindless textures
+		const std::vector<VkVertexInputBindingDescription>& bindings,
+		const std::vector<VkVertexInputAttributeDescription>& attribs,
+		uint32_t pushConstantSize // 0 if unused
+	)
+	{
+		auto vertCode = ReadFile(vertShaderPath);
+		auto fragCode = ReadFile(fragShaderPath);
+
+		VkShaderModule vertModule = CreateShaderModule(vertCode);
+		VkShaderModule fragModule = CreateShaderModule(fragCode);
+
+		VkPipelineShaderStageCreateInfo stages[] = {
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT,   vertModule, "main", nullptr },
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fragModule, "main", nullptr },
+		};
+
+		VkPipelineVertexInputStateCreateInfo vi{};
+		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+		vi.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
+		vi.pVertexBindingDescriptions = bindings.data();
+		vi.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribs.size());
+		vi.pVertexAttributeDescriptions = attribs.data();
+
+		VkPipelineInputAssemblyStateCreateInfo ia{};
+		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		VkPipelineViewportStateCreateInfo vp{};
+		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+		vp.viewportCount = 1;
+		vp.scissorCount = 1;
+
+		VkDynamicState dynStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+		VkPipelineDynamicStateCreateInfo dyn{};
+		dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+		dyn.dynamicStateCount = 2;
+		dyn.pDynamicStates = dynStates;
+
+		VkPipelineRasterizationStateCreateInfo rs{};
+		rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+		rs.polygonMode = VK_POLYGON_MODE_FILL;
+		rs.cullMode = VK_CULL_MODE_NONE;
+		rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rs.lineWidth = 1.0f;
+
+		VkPipelineMultisampleStateCreateInfo ms{};
+		ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+		ms.rasterizationSamples = msaaSamples;
+
+		// Depth test ON, writes OFF (world text overlays; screen text drawn last still fine)
+		VkPipelineDepthStencilStateCreateInfo ds{};
+		ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+		ds.depthTestEnable = VK_TRUE;
+		ds.depthWriteEnable = VK_FALSE;
+		ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+		// Premultiplied alpha blending (ONE, ONE_MINUS_SRC_ALPHA)
+		VkPipelineColorBlendAttachmentState att{};
+		att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		att.blendEnable = VK_TRUE;
+		att.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		att.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		att.colorBlendOp = VK_BLEND_OP_ADD;
+		att.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		att.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		att.alphaBlendOp = VK_BLEND_OP_ADD;
+
+		VkPipelineColorBlendStateCreateInfo cb{};
+		cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+		cb.attachmentCount = 1;
+		cb.pAttachments = &att;
+
+		std::array<VkDescriptorSetLayout, 2> setLayouts = { uboLayout, bindlessLayout };
+
+		VkPushConstantRange pcr{};
+		pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		pcr.offset = 0;
+		pcr.size = pushConstantSize;
+
+		VkPipelineLayoutCreateInfo pli{};
+		pli.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pli.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
+		pli.pSetLayouts = setLayouts.data();
+		pli.pushConstantRangeCount = (pushConstantSize > 0) ? 1u : 0u;
+		pli.pPushConstantRanges = (pushConstantSize > 0) ? &pcr : nullptr;
+
+		if (vkCreatePipelineLayout(device, &pli, nullptr, &msdfTextPipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create MSDF text pipeline layout");
+		}
+
+		VkGraphicsPipelineCreateInfo gp{};
+		gp.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gp.stageCount = 2;
+		gp.pStages = stages;
+		gp.pVertexInputState = &vi;
+		gp.pInputAssemblyState = &ia;
+		gp.pViewportState = &vp;
+		gp.pRasterizationState = &rs;
+		gp.pMultisampleState = &ms;
+		gp.pDepthStencilState = &ds;
+		gp.pColorBlendState = &cb;
+		gp.pDynamicState = &dyn;
+		gp.layout = msdfTextPipelineLayout;
+		gp.renderPass = renderPass;
+		gp.subpass = 0;
+
+		if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &gp, nullptr, &msdfTextPipeline) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create MSDF text graphics pipeline");
 		}
 
 		vkDestroyShaderModule(device, vertModule, nullptr);

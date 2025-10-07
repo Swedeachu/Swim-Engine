@@ -36,6 +36,8 @@ namespace Engine
 
 		void DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
+		void DrawIndexedMsdfText(uint32_t frameIndex, VkCommandBuffer cmd, TransformSpace space);
+
 		void CleanUp();
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
@@ -73,6 +75,29 @@ namespace Engine
 			bool cull
 		);
 
+		// Ensure the static glyph quad exists in mega buffers
+		void EnsureGlyphQuadUploaded();
+
+		// Build MSDF instances for the given space (World or Screen)
+		void BuildMsdfInstancesForSpace(
+			entt::registry& registry,
+			TransformSpace space,
+			const CameraUBO& cameraUBO,
+			const glm::mat4& view,
+			const glm::mat4& proj,
+			unsigned int windowWidth,
+			unsigned int windowHeight,
+			std::vector<MsdfTextGpuInstanceData>& outInstances
+		);
+
+		// upload + draw for a batch of glyphs
+		void UploadAndDrawMsdfBatch(
+			uint32_t frameIndex,
+			VkCommandBuffer cmd,
+			const std::vector<MsdfTextGpuInstanceData>& instances,
+			std::unique_ptr<VulkanBuffer>& outIndirectBuf
+		);
+
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
 
@@ -81,7 +106,8 @@ namespace Engine
 
 		// Draw data instances to feed the buffers per frame
 		std::vector<GpuInstanceData> cpuInstanceData;
-		std::vector<MeshDecoratorGpuInstanceData> decoratorParamData;
+		std::vector<MeshDecoratorGpuInstanceData> meshDecoratorInstanceData;
+		std::vector<MsdfTextGpuInstanceData> msdfInstancesData;
 
 		struct MeshInstanceRange
 		{
@@ -100,16 +126,14 @@ namespace Engine
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
 
-		// Grouped draw commands for indirect rendering
-		struct MeshIndirectDrawBatch
-		{
-			std::shared_ptr<Mesh> mesh;
-			std::vector<VkDrawIndexedIndirectCommand> commands;
-		};
+		// One static quad to render all glyphs with
+		bool hasUploadedGlyphQuad = false;
+		MeshBufferData glyphQuadMesh = {};
 
 		// Command buffers per frame
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; 
 		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers; 
+		std::vector<std::unique_ptr<VulkanBuffer>> msdfIndirectCommandBuffers;
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;

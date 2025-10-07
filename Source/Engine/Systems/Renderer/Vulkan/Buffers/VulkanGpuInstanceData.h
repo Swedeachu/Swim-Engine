@@ -37,6 +37,22 @@ namespace Engine
 		glm::vec2 quadSize;
 	};
 
+  struct alignas(16) MsdfTextGpuInstanceData
+  {
+    glm::mat4 modelTR;     // TR only, like GL text path
+    glm::vec4 plane;       // EM rect (l,b,r,t)
+    glm::vec4 uvRect;      // (uL, vB, uR, vT)
+    glm::vec4 fillColor;
+    glm::vec4 strokeColor;
+    float strokeWidthPx;   // in screen px
+    float msdfPixelRange;  // atlas px
+    float emScalePx;       // px/EM (screen) OR worldUnits/EM (world)
+    int space;             // 0 world, 1 screen
+    glm::vec2 pxToModel;      // (wppX,wppY) world OR (1/sx,1/sy) screen
+    uint32_t  atlasTexIndex;  // bindless index of MSDF atlas
+    uint32_t  _pad_;
+  };
+
 	struct InstanceMeta
 	{
 		uint32_t instanceCount;

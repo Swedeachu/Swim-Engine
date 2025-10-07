@@ -30,6 +30,8 @@ namespace Engine
 			throw std::runtime_error("Failed to create buffer!");
 		}
 
+		sizeBytes = size;
+
 		// 2. Get memory requirements
 		VkMemoryRequirements memRequirements;
 		vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
@@ -85,6 +87,8 @@ namespace Engine
 			vkDestroyBuffer(device, buffer, nullptr);
 			buffer = VK_NULL_HANDLE;
 		}
+
+		sizeBytes = 0;
 	}
 
 	void VulkanBuffer::CopyData(const void* data, size_t size, size_t offset)
@@ -94,7 +98,6 @@ namespace Engine
 			throw std::runtime_error("Buffer memory is not mapped!");
 		}
 
-		// hey 50 year old C code happens to be faster than the **** we can write ourselves! So let's use good old memcpy...
 		memcpy(static_cast<char*>(mappedPtr) + offset, data, size);
 
 		// Optional: flush if not HOST_COHERENT (not required with HOST_COHERENT_BIT set)

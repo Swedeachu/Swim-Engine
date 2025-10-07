@@ -17,6 +17,15 @@ namespace Engine
 		cubeMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawCube", cubeData.first, cubeData.second);
 		cubeMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawCubeMaterial", cubeMesh);
 
+		auto sphereData = MakeSphere(
+			24, 48,
+			glm::vec3(1, 1, 1),
+			glm::vec3(1, 1, 1),
+			glm::vec3(1, 1, 1)
+		);
+		sphereMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawSphere", sphereData.first, sphereData.second);
+		sphereMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawSphereMaterial", sphereMesh);
+
 		wireFrameCubeMesh = CreateAndRegisterWireframeBoxMesh(DebugColor::White, "DebugDrawCubeWireFrame");
 		wireFrameCubeMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawCubeWireFrameMaterial", wireFrameCubeMesh);
 	}
@@ -116,6 +125,30 @@ namespace Engine
 		return nullptr; // std::unreachable in 23
 	}
 
+	void SceneDebugDraw::SubmitSphere
+	(
+		const glm::vec3& pos,
+		const glm::vec3& scale,
+		const glm::vec4& color
+	)
+	{
+		entt::entity entity = debugRegistry.create();
+		debugRegistry.emplace<Transform>(entity, pos, scale);
+		debugRegistry.emplace<Material>(entity, Material(sphereMaterialData));
+		// the detailed draw data
+		debugRegistry.emplace<MeshDecorator>(entity,
+			color, // fill color
+			color, // stroke color
+			glm::vec2(0.0f), // stroke width
+			glm::vec2(0.0f), // corner radius
+			glm::vec2(0.0f), // pad
+			false, // enable rounded corners
+			false, // enable stroke
+			true, // enable fill
+			false // use texture
+		);
+	}
+
 	void SceneDebugDraw::SubmitWireframeBoxAABB
 	(
 		const glm::vec3& min,
@@ -134,7 +167,7 @@ namespace Engine
 
 		entt::entity entity = debugRegistry.create();
 		debugRegistry.emplace<Transform>(entity, center, size, glm::quat(), static_cast<TransformSpace>(transformSpace));
-		
+
 		debugRegistry.emplace<Material>(entity, Material(GetMeshMaterialDataFromType(boxType)));
 
 		// the detailed draw data

@@ -162,6 +162,8 @@ namespace Engine
 		std::unique_ptr<VulkanDescriptorManager> descriptorManager;
 		std::unique_ptr<VulkanIndexDraw> indexDraw;
 
+		std::vector<VkFence> imagesInFlight;
+
 		bool framebufferResized = false;
 
 		std::shared_ptr<CameraSystem> cameraSystem;

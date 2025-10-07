@@ -83,11 +83,11 @@ namespace Engine
 		appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
 		appInfo.pEngineName = "SwimEngine";
 		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-		appInfo.apiVersion = VK_API_VERSION_1_2;
+		appInfo.apiVersion = VK_API_VERSION_1_3;
 
 		std::vector<const char*> extensions = {
 			VK_KHR_SURFACE_EXTENSION_NAME,
-			"VK_KHR_win32_surface" // couldn't find a define for this one in vulkan_core.h
+			VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 		};
 
 		if (enableValidationLayers)

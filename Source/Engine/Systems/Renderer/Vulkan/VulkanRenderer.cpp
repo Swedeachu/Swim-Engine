@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
+#include "Engine/Components/Transform.h"
 #include "VulkanCubeMap.h"
 
 // Validation layers for debugging
@@ -146,8 +147,8 @@ namespace Engine
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
 
 		// === Graphics pipeline creation ===
-		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
-		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout();
+		VkDescriptorSetLayout layout = descriptorManager->GetLayout(); // set 0
+		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout(); // set 1
 
 		auto vertexAttribs = Vertex::GetAttributeDescriptions();
 		auto instanceAttribs = Vertex::GetInstanceAttributeDescriptions();
@@ -156,30 +157,51 @@ namespace Engine
 		allAttribs.insert(allAttribs.end(), vertexAttribs.begin(), vertexAttribs.end());
 		allAttribs.insert(allAttribs.end(), instanceAttribs.begin(), instanceAttribs.end());
 
-		std::array<VkVertexInputBindingDescription, 2> bindings{};
-		bindings[0] = Vertex::GetBindingDescription();
-		bindings[1].binding = 1;
-		bindings[1].stride = sizeof(GpuInstanceData);
-		bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+		std::array<VkVertexInputBindingDescription, 2> meshBindings{};
+		meshBindings[0] = Vertex::GetBindingDescription(); // mesh VB
+		meshBindings[1].binding = 1; // instance data
+		meshBindings[1].stride = sizeof(GpuInstanceData);
+		meshBindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
+		// ---- REGULAR MESH PIPELINE ----
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex_instanced.spv",
 			"Shaders\\FragmentShaders\\fragment_instanced.spv",
 			layout,
 			bindlessLayout,
-			std::vector<VkVertexInputBindingDescription>{ bindings.begin(), bindings.end() },
+			std::vector<VkVertexInputBindingDescription>{ meshBindings.begin(), meshBindings.end() },
 			allAttribs,
 			sizeof(GpuInstanceData)
 		);
 
+		// ---- DECORATED/UI PIPELINE ----
 		pipelineManager->CreateDecoratedMeshPipeline(
 			"Shaders\\VertexShaders\\vertex_decorated.spv",
 			"Shaders\\FragmentShaders\\fragment_decorated.spv",
 			layout,
 			bindlessLayout,
-			{ bindings.begin(), bindings.end() },
+			{ meshBindings.begin(), meshBindings.end() },
 			allAttribs,
 			sizeof(MeshDecoratorGpuInstanceData)
+		);
+
+		// ---- MSDF TEXT PIPELINE: own minimal bindings/attribs ----
+		std::vector<VkVertexInputBindingDescription> msdfBindings = {
+				{ 0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX }
+		};
+
+		std::vector<VkVertexInputAttributeDescription> msdfAttribs = {
+				{ 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, position) }
+		};
+
+		pipelineManager->CreateMsdfTextPipeline(
+			"Shaders\\VertexShaders\\vertex_msdf.spv",
+			"Shaders\\FragmentShaders\\fragment_msdf.spv",
+			layout,
+			bindlessLayout,
+			msdfBindings,
+			msdfAttribs,
+			sizeof(MsdfTextGpuInstanceData)
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -231,23 +253,23 @@ namespace Engine
 		// If minimized, do NOT call DrawFrame or we will be deadlocked on a null sized surface
 		if (windowWidth == 0 || windowHeight == 0)
 		{
-			// later on we might still want to do some logic for GPU compute things even with the window minimized. We might even want our own system for that.
 			return;
 		}
 
-		// Check if we need to resize and recreate stuff. If we do, then afterwards skip drawing this frame to avoid potential synchronization weirdness
+		// Handle resize; after recreating, skip drawing this frame
 		if (framebufferResized && cameraSystem.get() != nullptr)
 		{
 			framebufferResized = false;
 			swapChainManager->Recreate(windowWidth, windowHeight, pipelineManager->GetRenderPass(), msaaSamples);
 
-			// Then refresh the camera systems aspect ratio to the new windows size
-			// This should be the main engine classes job to call this on window resize finish, but it just works best here
+			// If swapchain images changed, reset imagesInFlight to match new count
+			const auto& fbs = swapChainManager->GetFramebuffers();
+			imagesInFlight.assign(fbs.size(), VK_NULL_HANDLE);
+
 			cameraSystem->RefreshAspect();
 			return;
 		}
 
-		// Render the frame
 		DrawFrame();
 	}
 
@@ -311,18 +333,26 @@ namespace Engine
 
 	void VulkanRenderer::DrawFrame()
 	{
-		// wait for gpu to be ready for this frame
+		// 0) Make sure imagesInFlight matches swapchain image count (covers first init and any recreate)
+		const auto& framebuffers = swapChainManager->GetFramebuffers();
+		if (imagesInFlight.size() != framebuffers.size())
+		{
+			imagesInFlight.assign(framebuffers.size(), VK_NULL_HANDLE);
+		}
+
+		// 1) Wait for this frame’s per-frame fence (double/triple buffering)
 		syncManager->WaitForFence(currentFrame);
-		syncManager->ResetFence(currentFrame);
+
 		VkSemaphore imageAvailableSemaphore = syncManager->GetImageAvailableSemaphore(currentFrame);
 
-		// get the next image from the swapchain for this frame
+		// 2) Acquire next image
 		uint32_t imageIndex;
 		VkResult result = swapChainManager->AcquireNextImage(imageAvailableSemaphore, &imageIndex);
 
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
 			framebufferResized = false;
+			// Fence remains signaled since we did not reset it; no deadlock next frame.
 			return;
 		}
 		else if (result != VK_SUCCESS)
@@ -330,11 +360,23 @@ namespace Engine
 			throw std::runtime_error("Failed to acquire swap chain image!");
 		}
 
-		// this method draws everything for the frame (recording draw commands)
+		// 3) If this swapchain image is already in-flight, wait for its fence
+		if (imagesInFlight[imageIndex] != VK_NULL_HANDLE)
+		{
+			vkWaitForFences(deviceManager->GetDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+		}
+
+		// 4) We will submit this frame; reset this frame’s fence now
+		syncManager->ResetFence(currentFrame);
+
+		// 5) (Optional but recommended) Reset the command buffer for this image before re-recording
+		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
+		vkResetCommandBuffer(commandBuffers[imageIndex], 0);
+
+		// 6) Record draw commands for this image
 		RecordCommandBuffer(imageIndex);
 
-		// get a bunch of stuff ready for submission for this frame to queue up and present everything we just recorded
-
+		// 7) Submit
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -344,38 +386,38 @@ namespace Engine
 		submitInfo.pWaitSemaphores = waitSemaphores;
 		submitInfo.pWaitDstStageMask = waitStages;
 
-		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
-
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
 
 		VkSemaphore renderFinishedSemaphore = syncManager->GetRenderFinishedSemaphore(currentFrame);
-
 		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
 		submitInfo.signalSemaphoreCount = 1;
 		submitInfo.pSignalSemaphores = signalSemaphores;
 
 		VkFence inFlightFence = syncManager->GetInFlightFence(currentFrame);
 
-		// submit and present everything
-
 		if (vkQueueSubmit(deviceManager->GetGraphicsQueue(), 1, &submitInfo, inFlightFence) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to submit draw command buffer!");
 		}
 
-		result = swapChainManager->Present(deviceManager->GetPresentQueue(), signalSemaphores, imageIndex);
+		// 8) Mark this swapchain image as now being in flight with this fence
+		imagesInFlight[imageIndex] = inFlightFence;
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
+		// 9) Present
+		VkResult presentResult = swapChainManager->Present(deviceManager->GetPresentQueue(), signalSemaphores, imageIndex);
+
+		if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || framebufferResized)
 		{
 			framebufferResized = false;
+			// next Update() will recreate and reassign imagesInFlight
 		}
-		else if (result != VK_SUCCESS)
+		else if (presentResult != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to present swap chain image!");
 		}
 
-		// cycle forward (double buffering frames in flight)
+		// 10) Advance frame-in-flight index
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
@@ -418,11 +460,12 @@ namespace Engine
 
 	void VulkanRenderer::RecordCommandBuffer(uint32_t imageIndex)
 	{
-		VkCommandBufferBeginInfo beginInfo{};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
 		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
 		VkCommandBuffer cmd = commandBuffers[imageIndex];
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // helpful for per-frame recording
 
 		if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS)
 		{
@@ -450,29 +493,25 @@ namespace Engine
 
 		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// Dynamic viewport and scissor
+		// Dynamic viewport & scissor
 		VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
 		VkRect2D scissor{ {0, 0}, extent };
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		// === SKYBOX: Draw first using skybox pipeline ===
+		// Skybox 
 		if (cubemapController && cubemapController->IsEnabled())
 		{
-			CubeMap* map = cubemapController->GetCubeMap();
-			VulkanCubeMap* vkMap = static_cast<VulkanCubeMap*>(map);
-			if (vkMap)
+			if (auto* vkMap = static_cast<VulkanCubeMap*>(cubemapController->GetCubeMap()))
 			{
 				vkMap->Render(cmd, cameraSystem->GetViewMatrix(), cameraSystem->GetProjectionMatrix());
 			}
 		}
 
-		// === Rebind original scene pipeline and descriptor sets ===
+		// Scene pipeline & sets
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
-
 		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
-
 		std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
 
 		vkCmdBindDescriptorSets(
@@ -486,10 +525,17 @@ namespace Engine
 			nullptr
 		);
 
-		// === Scene: Draw all indexed meshes ===
-		indexDraw->UpdateInstanceBuffer(currentFrame);
-		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);
-		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd);
+		// This sets up fresh data for the frame and prepares every regular mesh to be draw in world space.
+		indexDraw->UpdateInstanceBuffer(currentFrame); 
+
+		// This then draws all of them with the default shader.
+		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd); 
+
+		// This prepeares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
+		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd); 
+
+		// This prepares every screen space UI text and draws all of them with the msdf shader
+		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::Screen);
 
 		vkCmdEndRenderPass(cmd);
 

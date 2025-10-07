@@ -4,6 +4,7 @@
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshDecorator.h"
+#include "Engine/Components/TextComponent.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "VulkanRenderer.h"
@@ -29,6 +30,7 @@ namespace Engine
 	{
 		indirectCommandBuffers.resize(framesInFlight);
 		meshDecoratorIndirectCommandBuffers.resize(framesInFlight);
+		msdfIndirectCommandBuffers.resize(framesInFlight);
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
@@ -43,6 +45,13 @@ namespace Engine
 			meshDecoratorIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
+				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			msdfIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
+				device, physicalDevice,
 				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCalls,
 				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
@@ -86,6 +95,36 @@ namespace Engine
 			VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 		);
+	}
+
+	void VulkanIndexDraw::EnsureGlyphQuadUploaded()
+	{
+		if (hasUploadedGlyphQuad)
+		{
+			return;
+		}
+
+		// Simple unit quad with pos/uv (0..1). We add both windings so it faces both ways.
+		std::vector<Vertex> verts(4);
+		verts[0].position = { 0.0f, 0.0f, 0.0f }; verts[0].uv = { 0.0f, 0.0f };
+		verts[1].position = { 1.0f, 0.0f, 0.0f }; verts[1].uv = { 1.0f, 0.0f };
+		verts[2].position = { 1.0f, 1.0f, 0.0f }; verts[2].uv = { 1.0f, 1.0f };
+		verts[3].position = { 0.0f, 1.0f, 0.0f }; verts[3].uv = { 0.0f, 1.0f };
+
+		// CCW front faces + CW back faces (same UVs)
+		std::vector<uint32_t> idx = {
+			// Front (CCW)
+			0, 1, 2,
+			2, 3, 0,
+			// Back (CW = reverse winding)
+			2, 1, 0,
+			0, 3, 2
+		};
+
+		// Allocate space inside mega buffers and fill MeshBufferData
+		std::shared_ptr<Mesh> m = MeshPool::GetInstance().RegisterMesh("glyph", verts, idx);
+		glyphQuadMesh = *m->meshBufferData.get();
+		hasUploadedGlyphQuad = true;
 	}
 
 	// This makes 2 temporary index and vertex buffers and then copies them into our mega buffers. Also supports auto growth. This also sets the offsets in mesh data.
@@ -146,7 +185,8 @@ namespace Engine
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		cpuInstanceData.clear(); // was resize(0)
-		decoratorParamData.clear();
+		meshDecoratorInstanceData.clear();
+		msdfInstancesData.clear();
 		rangeMap.clear();
 
 		const std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
@@ -360,7 +400,7 @@ namespace Engine
 		}
 	}
 
-	// Draws everything that is in screen space or has a decorator on it, meaning this can render billboards in world space.
+	// Draws everything that is in screen space or has a decorator on it
 	void VulkanIndexDraw::DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
@@ -386,7 +426,7 @@ namespace Engine
 		uint32_t instanceCount = 0;
 
 		std::vector<VkDrawIndexedIndirectCommand> drawCommands;
-		decoratorParamData.clear(); // clear previous frame's params
+		meshDecoratorInstanceData.clear(); // clear previous frame's params
 
 		DrawDecoratorsAndScreenSpaceEntitiesInRegistry(
 			registry,
@@ -427,8 +467,8 @@ namespace Engine
 		// === Upload MeshDecoratorGpuInstanceData via descriptorManager ===
 		descriptorManager->UpdatePerFrameMeshDecoratorBuffer(
 			frameIndex,
-			decoratorParamData.data(),
-			decoratorParamData.size() * sizeof(MeshDecoratorGpuInstanceData)
+			meshDecoratorInstanceData.data(),
+			meshDecoratorInstanceData.size() * sizeof(MeshDecoratorGpuInstanceData)
 		);
 
 		// === Upload new instance data for section ===
@@ -436,7 +476,7 @@ namespace Engine
 		std::memcpy(
 			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
 			cpuInstanceData.data() + baseInstanceID,
-			decoratorParamData.size() * sizeof(GpuInstanceData)
+			meshDecoratorInstanceData.size() * sizeof(GpuInstanceData)
 		);
 
 		// === Upload indirect draw commands ===
@@ -486,7 +526,7 @@ namespace Engine
 
 	void VulkanIndexDraw::DrawDecoratorsAndScreenSpaceEntitiesInRegistry
 	(
-		entt::registry& registry, 
+		entt::registry& registry,
 		const CameraUBO& cameraUBO,
 		const glm::mat4& worldView,
 		unsigned int windowWidth,
@@ -673,7 +713,7 @@ namespace Engine
 			data.quadSize = quadSizeInPixels;
 
 			// Finally add
-			decoratorParamData.push_back(data);
+			meshDecoratorInstanceData.push_back(data);
 			cpuInstanceData.push_back(instance);
 
 			// === Draw command ===
@@ -687,6 +727,230 @@ namespace Engine
 
 			instanceCount++;
 		});
+	}
+
+	void VulkanIndexDraw::DrawIndexedMsdfText(uint32_t frameIndex, VkCommandBuffer cmd, TransformSpace space)
+	{
+		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
+		auto scene = engine->GetSceneSystem()->GetActiveScene();
+		if (!scene) return;
+
+		auto& registry = scene->GetRegistry();
+		const CameraUBO& ubo = engine->GetVulkanRenderer()->GetCameraUBO();
+		const glm::mat4& view = engine->GetCameraSystem()->GetViewMatrix();
+		const glm::mat4& proj = engine->GetCameraSystem()->GetProjectionMatrix();
+
+		unsigned int ww = engine->GetWindowWidth();
+		unsigned int wh = engine->GetWindowHeight();
+
+		BuildMsdfInstancesForSpace(registry, space, ubo, view, proj, ww, wh, msdfInstancesData);
+		UploadAndDrawMsdfBatch(frameIndex, cmd, msdfInstancesData, msdfIndirectCommandBuffers[frameIndex]);
+	}
+
+	void VulkanIndexDraw::BuildMsdfInstancesForSpace(
+		entt::registry& registry,
+		TransformSpace space,
+		const CameraUBO& cameraUBO,
+		const glm::mat4& view,
+		const glm::mat4& proj,
+		unsigned int windowWidth,
+		unsigned int windowHeight,
+		std::vector<MsdfTextGpuInstanceData>& outInstances
+	)
+	{
+		// VirtualCanvas -> framebuffer scale
+		const glm::vec2 screenScale(
+			static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
+			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
+		);
+		const glm::vec2 pxToModel = 1.0f / screenScale;
+
+		// Helpers to build EM-space line layout (same as GL path)
+		auto buildLine = [&](const std::u32string& line,
+			const Engine::FontInfo& fi,
+			float xStartEm,
+			float yBaseEm,
+			const glm::mat4& modelTR,
+			float emScalePx,
+			const glm::vec4& fillColor,
+			const glm::vec4& strokeColor,
+			float strokeWidthPx,
+			uint32_t atlasTexIndex,
+			int space,
+			std::vector<MsdfTextGpuInstanceData>& outV)
+		{
+			auto getKerning = [&](uint32_t l, uint32_t r)->float
+			{
+				auto it = fi.kerning.find(Engine::FontInfo::PackKerningKey(l, r));
+				return (it == fi.kerning.end()) ? 0.0f : it->second;
+			};
+
+			float penX = xStartEm;
+			float penY = yBaseEm;
+
+			for (size_t i = 0; i < line.size(); ++i)
+			{
+				auto itG = fi.glyphs.find(line[i]);
+				if (itG == fi.glyphs.end())
+				{
+					continue; // skip missing glyphs
+				}
+
+				const Engine::Glyph& g = itG->second;
+
+				// EM-space quad
+				const float l = penX + g.plane.left;
+				const float b = penY + g.plane.bottom;
+				const float r = penX + g.plane.right;
+				const float t = penY + g.plane.top;
+
+				MsdfTextGpuInstanceData inst{};
+				inst.modelTR = modelTR; // TR only (avoid double scaling; same as GL path)
+				inst.plane = glm::vec4(l, b, r, t); // EM rect
+				inst.uvRect = glm::vec4(g.uv.left, g.uv.bottom, g.uv.right, g.uv.top);
+				inst.fillColor = fillColor;
+				inst.strokeColor = strokeColor;
+				inst.strokeWidthPx = strokeWidthPx;        // already in pixels in screen path
+				inst.msdfPixelRange = fi.distanceRange;    // atlas pixel range
+				inst.emScalePx = emScalePx;                // px per EM (screen)
+				inst.space = space;                        // 0=world, 1=screen
+				inst.pxToModel = pxToModel;                // convert px back to model units in shader
+				inst.atlasTexIndex = atlasTexIndex;
+
+				outV.push_back(inst);
+
+				// Advance pen
+				penX += g.advance;
+				if (i + 1 < line.size())
+				{
+					penX += getKerning(line[i], line[i + 1]);
+				}
+			}
+		};
+
+		// Traverse text components in screen space
+		registry.view<Engine::Transform, Engine::TextComponent>().each(
+			[&](entt::entity, Engine::Transform& tf, Engine::TextComponent& tc)
+		{
+			if (tf.GetTransformSpace() != space)
+			{
+				return;
+			}
+			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas)
+			{
+				return;
+			}
+
+			const Engine::FontInfo& fi = *tc.GetFont();
+			const auto& lines = tc.GetLines();
+			const auto& widths = tc.GetLineWidths();
+
+			// Same transform convention as GL text path: TR only
+			const glm::mat4 modelTR = Transform::MakeModelTR(tf);
+
+			// Treat scale.y as EM size in VirtualCanvas units; convert to pixels
+			const float emScalePx = std::max(1.0f, tf.GetScale().y * screenScale.y);
+
+			// Colors & stroke
+			const glm::vec4 fill = tc.fillColor;
+			const glm::vec4 stroke = tc.strokeColor;
+			const float strokePx = tc.strokeWidth; // screen-space shader interprets this as pixels
+
+			// Bindless MSDF atlas index
+			const uint32_t atlasIndex = tc.GetFont()->msdfAtlas->GetBindlessIndex();
+
+			// Lay out lines in EM space with per-line alignment
+			for (size_t i = 0; i < lines.size(); ++i)
+			{
+				float x0 = 0.0f;
+				switch (tc.GetAlignment())
+				{
+					case Engine::TextAllignemt::Left: { x0 = 0.0f;               break; }
+					case Engine::TextAllignemt::Center: { x0 = -0.5f * widths[i];  break; }
+					case Engine::TextAllignemt::Right: { x0 = -widths[i];         break; }
+					case Engine::TextAllignemt::Justified:
+					default: { x0 = 0.0f;               break; }
+				}
+
+				const float y0 = -static_cast<float>(i) * fi.lineHeight;
+				int s = static_cast<int>(space);
+				buildLine(lines[i], fi, x0, y0, modelTR, emScalePx, fill, stroke, strokePx, atlasIndex, s, outInstances);
+			}
+		});
+	}
+
+	void VulkanIndexDraw::UploadAndDrawMsdfBatch(
+		uint32_t frameIndex,
+		VkCommandBuffer cmd,
+		const std::vector<MsdfTextGpuInstanceData>& instances,
+		std::unique_ptr<VulkanBuffer>& outIndirectBuf
+	)
+	{
+		if (instances.empty()) return;
+
+		auto engine = SwimEngine::GetInstance();
+		auto renderer = engine->GetVulkanRenderer();
+		auto& pm = renderer->GetPipelineManager();
+		auto& dm = renderer->GetDescriptorManager();
+
+		// 0) Ensure the unit glyph quad exists in the mega buffers
+		EnsureGlyphQuadUploaded();
+
+		// 1) Upload the MSDF instance data to the per-frame descriptor buffer
+		dm->UpdatePerFrameMsdfBuffer(
+			frameIndex,
+			instances.data(),
+			instances.size() * sizeof(MsdfTextGpuInstanceData)
+		);
+
+		// 2) Build the indirect command for the glyph quad (same mesh used for all glyphs)
+		VkDrawIndexedIndirectCommand cmdInfo{};
+		cmdInfo.indexCount = glyphQuadMesh.indexCount;
+		cmdInfo.instanceCount = static_cast<uint32_t>(instances.size());
+		cmdInfo.firstIndex = static_cast<uint32_t>(glyphQuadMesh.indexOffsetInMegaBuffer / sizeof(uint32_t));
+		cmdInfo.vertexOffset = static_cast<int32_t>(glyphQuadMesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
+		cmdInfo.firstInstance = 0;
+
+		outIndirectBuf->CopyData(&cmdInfo, sizeof(VkDrawIndexedIndirectCommand));
+
+		// 3) Bind MSDF text pipeline
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pm->GetMsdfTextPipeline());
+
+		// 4) Bind descriptor sets
+		std::array<VkDescriptorSet, 2> descriptorSets = {
+				dm->GetPerFrameDescriptorSet(frameIndex),
+				dm->GetBindlessSet()
+		};
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pm->GetMsdfTextPipelineLayout(),
+			0,
+			static_cast<uint32_t>(descriptorSets.size()),
+			descriptorSets.data(),
+			0,
+			nullptr
+		);
+
+		// 5) Bind vertex and index buffers
+		VkBuffer vertexBuffers[] = {
+				megaVertexBuffer->GetBuffer(),
+				instanceBuffer->GetBuffer(frameIndex)
+		};
+		VkDeviceSize offsets[] = { 0, 0 };
+
+		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+		// 6) Issue indirect draw
+		vkCmdDrawIndexedIndirect(
+			cmd,
+			outIndirectBuf->GetBuffer(),
+			0,
+			1,
+			sizeof(VkDrawIndexedIndirectCommand)
+		);
 	}
 
 	void VulkanIndexDraw::GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize)
@@ -757,7 +1021,8 @@ namespace Engine
 		}
 
 		cpuInstanceData.clear();
-		decoratorParamData.clear();
+		meshDecoratorInstanceData.clear();
+		msdfInstancesData.clear();
 		culledVisibleData.clear();
 	}
 

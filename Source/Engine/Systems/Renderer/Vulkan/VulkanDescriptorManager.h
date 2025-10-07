@@ -32,8 +32,14 @@ namespace Engine
 		// Upload MeshDecoratorGpuInstanceData data to the per-frame buffer
 		void UpdatePerFrameMeshDecoratorBuffer(uint32_t frameIndex, const void* data, size_t size);
 
+		// Upload MsdfTextGpuInstanceData data to the per-frame buffer
+		void UpdatePerFrameMsdfBuffer(uint32_t frameIndex, const void* data, size_t size);
+
 		// Get the UIParam SSBO buffer for the current frame
 		VulkanBuffer* GetMeshDecoratorBufferForFrame(uint32_t frameIndex) const;
+
+		// Get the MsdfParam SSBO buffer for the current frame 
+		VulkanBuffer* GetMsdfBufferForFrame(uint32_t frameIndex) const;
 
 		// Adds SSBO (instance buffer) binding to per-frame descriptor sets
 		void CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers);
@@ -80,6 +86,7 @@ namespace Engine
 		// Per-frame instance SSBOs
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameInstanceBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> perFrameMeshDecoratorBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> perFrameMsdfBuffers;
 
 	};
 

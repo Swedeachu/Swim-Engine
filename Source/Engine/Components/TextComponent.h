@@ -66,12 +66,17 @@ namespace Engine
 
 		const std::vector<std::u32string>& GetLines()
 		{
+			// Ensure UTF is current before building lines
+			if (utfDirty) { RebuildUtf(); }
 			if (linesDirty) { RebuildLines(); }
 			return lines;
 		}
 
 		const std::vector<float>& GetLineWidths()
 		{
+			// Ensure lines are current before measuring widths
+			if (utfDirty) { RebuildUtf(); }
+			if (linesDirty) { RebuildLines(); }
 			if (lineWidthsDirty) { RebuildWidths(); }
 			return lineWidths;
 		}
@@ -173,10 +178,10 @@ namespace Engine
 
 		void RebuildLines()
 		{
+			// Safety: ensure utf is fresh before splitting
+			if (utfDirty) { RebuildUtf(); }
 			lines = SplitLines(utf32Text);
 			linesDirty = false;
-
-			// New lines require width recalculation
 			lineWidthsDirty = true;
 		}
 

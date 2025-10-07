@@ -6,6 +6,7 @@ namespace Game
 {
 
 	std::vector<Engine::Ray> cachedRays;
+	std::vector<glm::vec3> hits;
 	bool shouldCache = false;
 
 	void RayCasterCameraControl::Update(double dt)
@@ -21,7 +22,8 @@ namespace Game
 		// Left click to try and click an object in the scene
 		if (leftClicked)
 		{
-			entt::entity hit = scene->GetSceneBVH()->RayCastClosestHit(ray);
+			float out = 0.0f;
+			entt::entity hit = scene->GetSceneBVH()->RayCastClosestHit(ray, 0.0f, std::numeric_limits<float>::infinity(), &out);
 
 			if (hit != entt::null)
 			{
@@ -30,6 +32,7 @@ namespace Game
 				Engine::Transform& tf = scene->GetRegistry().get<Engine::Transform>(hit); // how would this behave if no transform is found?
 				glm::vec3 pos = tf.GetPosition();
 				glm::vec3 scale = tf.GetScale();
+				if (shouldCache) hits.push_back(ray.At(out)); // save hit position we will debug draw as a green sphere
 			}
 			else
 			{
@@ -52,6 +55,7 @@ namespace Game
 		if (input->IsKeyTriggered('Q'))
 		{
 			cachedRays.clear();
+			hits.clear();
 		}
 
 		auto* db = scene->GetSceneDebugDraw();
@@ -60,6 +64,12 @@ namespace Game
 		for (Engine::Ray& r : cachedRays)
 		{
 			db->SubmitRay(r, r.debugColor);
+		}
+
+		// Draw persistent hits
+		for (glm::vec3& hit : hits)
+		{
+			db->SubmitSphere(hit, glm::vec3(0.1f), glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
 		}
 	}
 

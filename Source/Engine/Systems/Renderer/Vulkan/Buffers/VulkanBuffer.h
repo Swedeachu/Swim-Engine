@@ -46,12 +46,15 @@ namespace Engine
 			memcpy(dst, static_cast<const char*>(mappedPtr) + offsetBytes, count * sizeof(T));
 		}
 
+		VkDeviceSize GetSize() const { return sizeBytes; }
+
 	private:
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
 		VkBuffer buffer;
 		VkDeviceMemory memory;
+		VkDeviceSize sizeBytes = 0;
 
 		// Persistent pointer to mapped memory
 		void* mappedPtr = nullptr;  

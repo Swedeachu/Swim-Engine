@@ -29,6 +29,12 @@ namespace Engine
 			sign[1] = (dir.y < 0.0f);
 			sign[2] = (dir.z < 0.0f);
 		}
+
+		// Returns the world-space position along the ray at distance t.
+		inline glm::vec3 At(float t) const noexcept
+		{
+			return origin + dir * t;
+		}
 	};
 
 }

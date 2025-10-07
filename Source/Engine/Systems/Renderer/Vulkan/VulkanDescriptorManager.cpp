@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "VulkanDescriptorManager.h"
+#include "Buffers/VulkanGpuInstanceData.h"
 
 namespace Engine
 {
@@ -22,7 +23,7 @@ namespace Engine
 		uboBinding.binding = 0;
 		uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		uboBinding.descriptorCount = 1;
-		uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		uboBinding.pImmutableSamplers = nullptr;
 
 		VkDescriptorSetLayoutBinding instanceBufferBinding{};
@@ -39,10 +40,18 @@ namespace Engine
 		uiParamBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		uiParamBufferBinding.pImmutableSamplers = nullptr;
 
-		std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+		VkDescriptorSetLayoutBinding msdfBufferBinding{};
+		msdfBufferBinding.binding = 3;
+		msdfBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		msdfBufferBinding.descriptorCount = 1;
+		msdfBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		msdfBufferBinding.pImmutableSamplers = nullptr;
+
+		std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
 			uboBinding,
 			instanceBufferBinding,
-			uiParamBufferBinding
+			uiParamBufferBinding,
+			msdfBufferBinding
 		};
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -65,7 +74,7 @@ namespace Engine
 		poolSizes[0].descriptorCount = maxSets;
 
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		poolSizes[1].descriptorCount = maxSets * 2; // One for instanceBuffer, one for uiParamBuffer
+		poolSizes[1].descriptorCount = maxSets * 3; // 3 for each of our buffers
 
 		poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[2].descriptorCount = maxSets; // Only used in set 1 (bindless), but fine to include here
@@ -88,6 +97,7 @@ namespace Engine
 		perFrameUBOs.resize(frameCount);
 		perFrameInstanceBuffers.resize(frameCount);
 		perFrameMeshDecoratorBuffers.resize(frameCount);
+		perFrameMsdfBuffers.resize(frameCount);
 		perFrameDescriptorSets.resize(frameCount);
 
 		for (uint32_t i = 0; i < frameCount; ++i)
@@ -115,6 +125,17 @@ namespace Engine
 				device,
 				physicalDevice,
 				ssboSize,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			// MsdfTextGpuInstanceData SSBO
+			constexpr int MAX_GLYPHS = 4000;
+			const uint64_t msdf_ssbo_size = static_cast<uint64_t>(MAX_GLYPHS) * sizeof(MsdfTextGpuInstanceData);
+			perFrameMsdfBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				msdf_ssbo_size,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
@@ -173,7 +194,21 @@ namespace Engine
 			uiWrite.descriptorCount = 1;
 			uiWrite.pBufferInfo = &uiInfo;
 
-			std::array<VkWriteDescriptorSet, 3> writes = { uboWrite, instanceWrite, uiWrite };
+			// === MsdfTextGpuInstanceData SSBO ===
+			VkDescriptorBufferInfo msdfInfo{};
+			msdfInfo.buffer = perFrameMsdfBuffers[i]->GetBuffer();
+			msdfInfo.offset = 0;
+			msdfInfo.range = perFrameMsdfBuffers[i]->GetSize();
+
+			VkWriteDescriptorSet msdfWrite{};
+			msdfWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			msdfWrite.dstSet = perFrameDescriptorSets[i];
+			msdfWrite.dstBinding = 3;
+			msdfWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			msdfWrite.descriptorCount = 1;
+			msdfWrite.pBufferInfo = &msdfInfo;
+
+			std::array<VkWriteDescriptorSet, 4> writes = { uboWrite, instanceWrite, uiWrite, msdfWrite };
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
@@ -239,9 +274,24 @@ namespace Engine
 		perFrameMeshDecoratorBuffers[frameIndex]->CopyData(data, size);
 	}
 
+	void VulkanDescriptorManager::UpdatePerFrameMsdfBuffer(uint32_t frameIndex, const void* data, size_t size)
+	{
+		if (frameIndex >= perFrameMsdfBuffers.size())
+		{
+			throw std::runtime_error("Invalid frame index for UIParam SSBO update");
+		}
+
+		perFrameMsdfBuffers[frameIndex]->CopyData(data, size);
+	}
+
 	VulkanBuffer* VulkanDescriptorManager::GetMeshDecoratorBufferForFrame(uint32_t frameIndex) const
 	{
 		return perFrameMeshDecoratorBuffers.at(frameIndex).get();
+	}
+
+	VulkanBuffer* VulkanDescriptorManager::GetMsdfBufferForFrame(uint32_t frameIndex) const
+	{
+		return perFrameMsdfBuffers.at(frameIndex).get();
 	}
 
 	VulkanBuffer* VulkanDescriptorManager::GetPerFrameUBO(uint32_t frameIndex) const
@@ -424,6 +474,16 @@ namespace Engine
 			}
 		}
 		perFrameInstanceBuffers.clear();
+
+		for (auto& buffer : perFrameMsdfBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+				buffer.reset();
+			}
+		}
+		perFrameMsdfBuffers.clear();
 
 		if (descriptorPool != VK_NULL_HANDLE)
 		{

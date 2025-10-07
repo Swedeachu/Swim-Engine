@@ -594,54 +594,51 @@ namespace Engine
 		{
 			const Item it = stack[--sp];
 
-			// Prune: if this node's near is already worse than best, skip
-			if (it.tnear > bestT) continue;
-
-			const auto& node = nodes[it.idx];
-
-			if (node.IsLeaf())
+			// Prune entire subtree if this node is already beyond best
+			if (it.tnear > bestT)
 			{
-				float tLeaf;
-				if (RayIntersectsAABB(ray, node.aabb, tMin, tMax, tLeaf))
-				{
-					if (tLeaf < bestT)
-					{
-						bestT = tLeaf;
-						bestE = node.entity;
-					}
-				}
-
 				continue;
 			}
 
-			float tL, tR;
-			const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, tMax, tL);
-			const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, tMax, tR);
+			const BVHNode& node = nodes[it.idx];
 
-			// Push children that can still beat bestT (tight pruning)
-			if (hitL && (tL <= bestT))
+			if (node.IsLeaf())
 			{
-				if (hitR && (tR <= bestT))
+				// Use carried tnear as the leaf hit distance (no re-test)
+				const float tLeaf = it.tnear;
+				if (tLeaf >= tMin && tLeaf <= bestT)
 				{
-					// Push farther first so nearer is processed next
-					const bool leftIsNear = (tL <= tR);
-					const int  nearIdx = leftIsNear ? node.left : node.right;
-					const int  farIdx = leftIsNear ? node.right : node.left;
-					const float tNear = leftIsNear ? tL : tR;
-					const float tFar = leftIsNear ? tR : tL;
-
-					if (sp + 2 <= STACK_MAX)
-					{
-						stack[sp++] = { farIdx,  tFar };
-						stack[sp++] = { nearIdx, tNear };
-					}
+					bestT = tLeaf;
+					bestE = node.entity;
 				}
-				else
+				continue;
+			}
+
+			// Intersect children with tMax tightened to current best
+			float tL, tR;
+			const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, bestT, tL);
+			const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, bestT, tR);
+
+			if (hitL && hitR)
+			{
+				// Push farther first so nearer pops next
+				const bool leftIsNear = (tL <= tR);
+				const int  nearIdx = leftIsNear ? node.left : node.right;
+				const int  farIdx = leftIsNear ? node.right : node.left;
+				const float tNear = leftIsNear ? tL : tR;
+				const float tFar = leftIsNear ? tR : tL;
+
+				if (sp + 2 <= STACK_MAX)
 				{
-					if (sp + 1 <= STACK_MAX) stack[sp++] = { node.left, tL };
+					stack[sp++] = { farIdx,  tFar };
+					stack[sp++] = { nearIdx, tNear };
 				}
 			}
-			else if (hitR && (tR <= bestT))
+			else if (hitL)
+			{
+				if (sp + 1 <= STACK_MAX) stack[sp++] = { node.left,  tL };
+			}
+			else if (hitR)
 			{
 				if (sp + 1 <= STACK_MAX) stack[sp++] = { node.right, tR };
 			}
