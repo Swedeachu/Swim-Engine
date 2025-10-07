@@ -154,6 +154,7 @@ namespace Engine
 		// So far the only other classes that use this number is the sync manager (cached in ctor) and a method call in descriptor manager.
 		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
+		bool needsSwapchainRecreate = false;
 
 		// Ideally x4, set from VulkanDeviceManager::GetMaxUsableSampleCount()
 		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;

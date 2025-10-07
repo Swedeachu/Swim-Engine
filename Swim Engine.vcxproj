@@ -250,6 +250,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontData.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />

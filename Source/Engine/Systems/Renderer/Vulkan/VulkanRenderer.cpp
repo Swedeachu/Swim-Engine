@@ -256,10 +256,12 @@ namespace Engine
 			return;
 		}
 
-		// Handle resize; after recreating, skip drawing this frame
-		if (framebufferResized && cameraSystem.get() != nullptr)
+		// Handle requested swapchain recreate (from present SUBOPTIMAL/OUT_OF_DATE) or window resize
+		if ((framebufferResized || needsSwapchainRecreate) && cameraSystem.get() != nullptr)
 		{
 			framebufferResized = false;
+			needsSwapchainRecreate = false;
+
 			swapChainManager->Recreate(windowWidth, windowHeight, pipelineManager->GetRenderPass(), msaaSamples);
 
 			// If swapchain images changed, reset imagesInFlight to match new count
@@ -346,18 +348,65 @@ namespace Engine
 		VkSemaphore imageAvailableSemaphore = syncManager->GetImageAvailableSemaphore(currentFrame);
 
 		// 2) Acquire next image
-		uint32_t imageIndex;
-		VkResult result = swapChainManager->AcquireNextImage(imageAvailableSemaphore, &imageIndex);
+		uint32_t imageIndex = 0;
+		VkResult acquireResult = swapChainManager->AcquireNextImage(imageAvailableSemaphore, &imageIndex);
 
-		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
+		// If OUT_OF_DATE (or we know a resize happened), we must still consume the signaled binary semaphore
+		// to avoid reusing a signaled semaphore on the next frame.
+		if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || framebufferResized)
 		{
 			framebufferResized = false;
-			// Fence remains signaled since we did not reset it; no deadlock next frame.
+
+			// We will submit an empty batch that waits on imageAvailableSemaphore and signals the per-frame fence.
+			// This "consumes" the binary semaphore, keeping synchronization valid.
+			VkSubmitInfo emptySubmit{};
+			emptySubmit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+			VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+			// First usage of the acquired image would have been as color attachment; use that as the wait stage.
+			// Using COLOR_ATTACHMENT_OUTPUT here is safe as a conservative choice for this empty submit.
+			VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+
+			emptySubmit.waitSemaphoreCount = 1;
+			emptySubmit.pWaitSemaphores = waitSemaphores;
+			emptySubmit.pWaitDstStageMask = waitStages;
+
+			// No command buffers.
+			emptySubmit.commandBufferCount = 0;
+			emptySubmit.pCommandBuffers = nullptr;
+
+			// No signals needed for present; but we *do* need our fence to become unsignaled->signaled
+			// so the next frame doesn't hard-stall. Reset and hand the fence to the empty submit.
+			syncManager->ResetFence(currentFrame);
+			VkFence inFlightFence = syncManager->GetInFlightFence(currentFrame);
+
+			if (vkQueueSubmit(deviceManager->GetGraphicsQueue(), 1, &emptySubmit, inFlightFence) != VK_SUCCESS)
+			{
+				throw std::runtime_error("Failed to submit empty batch to consume acquire semaphore!");
+			}
+
+			// This swapchain image isn't presented; still track the fence associated with it to keep parity.
+			if (imageIndex < imagesInFlight.size())
+			{
+				imagesInFlight[imageIndex] = inFlightFence;
+			}
+
+			// Defer actual swapchain recreation to Update()
+			needsSwapchainRecreate = true;
+
+			// Advance frame-in-flight index so we don't stall on the same fence next time
+			currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 			return;
 		}
-		else if (result != VK_SUCCESS)
+		else if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 		{
 			throw std::runtime_error("Failed to acquire swap chain image!");
+		}
+
+		// For SUBOPTIMAL, we still render/present this frame but schedule a recreate.
+		if (acquireResult == VK_SUBOPTIMAL_KHR)
+		{
+			needsSwapchainRecreate = true;
 		}
 
 		// 3) If this swapchain image is already in-flight, wait for its fence
@@ -369,7 +418,7 @@ namespace Engine
 		// 4) We will submit this frame; reset this frame’s fence now
 		syncManager->ResetFence(currentFrame);
 
-		// 5) (Optional but recommended) Reset the command buffer for this image before re-recording
+		// 5) Reset the command buffer for this image before re-recording
 		const std::vector<VkCommandBuffer>& commandBuffers = commandManager->GetCommandBuffers();
 		vkResetCommandBuffer(commandBuffers[imageIndex], 0);
 
@@ -381,6 +430,7 @@ namespace Engine
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
 		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+		// First use of the swapchain image in this frame is as a color attachment.
 		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 		submitInfo.waitSemaphoreCount = 1;
 		submitInfo.pWaitSemaphores = waitSemaphores;
@@ -407,10 +457,14 @@ namespace Engine
 		// 9) Present
 		VkResult presentResult = swapChainManager->Present(deviceManager->GetPresentQueue(), signalSemaphores, imageIndex);
 
-		if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || framebufferResized)
+		if (presentResult == VK_ERROR_OUT_OF_DATE_KHR)
 		{
-			framebufferResized = false;
-			// next Update() will recreate and reassign imagesInFlight
+			needsSwapchainRecreate = true;
+		}
+		else if (presentResult == VK_SUBOPTIMAL_KHR)
+		{
+			// We rendered successfully, but the chain isn't ideal. Recreate soon.
+			needsSwapchainRecreate = true;
 		}
 		else if (presentResult != VK_SUCCESS)
 		{
@@ -530,6 +584,9 @@ namespace Engine
 
 		// This then draws all of them with the default shader.
 		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd); 
+
+		// We now want to draw all of our text that is in the world.
+		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::World);
 
 		// This prepeares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
 		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd); 

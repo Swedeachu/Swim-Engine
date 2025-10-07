@@ -7,6 +7,7 @@
 #include "Engine/Components/TextComponent.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
 #include "VulkanRenderer.h"
 
 namespace Engine
@@ -400,7 +401,7 @@ namespace Engine
 		}
 	}
 
-	// Draws everything that is in screen space or has a decorator on it
+	// Draws everything that is in screen space or has a decorator on it (including world space decorated meshes)
 	void VulkanIndexDraw::DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
@@ -747,7 +748,9 @@ namespace Engine
 		UploadAndDrawMsdfBatch(frameIndex, cmd, msdfInstancesData, msdfIndirectCommandBuffers[frameIndex]);
 	}
 
-	void VulkanIndexDraw::BuildMsdfInstancesForSpace(
+	// If we are in world space we should probably cull our quad against the camera frustum
+	void VulkanIndexDraw::BuildMsdfInstancesForSpace
+	(
 		entt::registry& registry,
 		TransformSpace space,
 		const CameraUBO& cameraUBO,
@@ -758,128 +761,31 @@ namespace Engine
 		std::vector<MsdfTextGpuInstanceData>& outInstances
 	)
 	{
-		// VirtualCanvas -> framebuffer scale
-		const glm::vec2 screenScale(
-			static_cast<float>(windowWidth) / Renderer::VirtualCanvasWidth,
-			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
-		);
-		const glm::vec2 pxToModel = 1.0f / screenScale;
-
-		// Helpers to build EM-space line layout (same as GL path)
-		auto buildLine = [&](const std::u32string& line,
-			const Engine::FontInfo& fi,
-			float xStartEm,
-			float yBaseEm,
-			const glm::mat4& modelTR,
-			float emScalePx,
-			const glm::vec4& fillColor,
-			const glm::vec4& strokeColor,
-			float strokeWidthPx,
-			uint32_t atlasTexIndex,
-			int space,
-			std::vector<MsdfTextGpuInstanceData>& outV)
+		registry.view<Transform, TextComponent>().each(
+			[&](entt::entity, Transform& tf, TextComponent& tc)
 		{
-			auto getKerning = [&](uint32_t l, uint32_t r)->float
-			{
-				auto it = fi.kerning.find(Engine::FontInfo::PackKerningKey(l, r));
-				return (it == fi.kerning.end()) ? 0.0f : it->second;
-			};
+			if (tf.GetTransformSpace() != space) return;
+			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
 
-			float penX = xStartEm;
-			float penY = yBaseEm;
-
-			for (size_t i = 0; i < line.size(); ++i)
-			{
-				auto itG = fi.glyphs.find(line[i]);
-				if (itG == fi.glyphs.end())
-				{
-					continue; // skip missing glyphs
-				}
-
-				const Engine::Glyph& g = itG->second;
-
-				// EM-space quad
-				const float l = penX + g.plane.left;
-				const float b = penY + g.plane.bottom;
-				const float r = penX + g.plane.right;
-				const float t = penY + g.plane.top;
-
-				MsdfTextGpuInstanceData inst{};
-				inst.modelTR = modelTR; // TR only (avoid double scaling; same as GL path)
-				inst.plane = glm::vec4(l, b, r, t); // EM rect
-				inst.uvRect = glm::vec4(g.uv.left, g.uv.bottom, g.uv.right, g.uv.top);
-				inst.fillColor = fillColor;
-				inst.strokeColor = strokeColor;
-				inst.strokeWidthPx = strokeWidthPx;        // already in pixels in screen path
-				inst.msdfPixelRange = fi.distanceRange;    // atlas pixel range
-				inst.emScalePx = emScalePx;                // px per EM (screen)
-				inst.space = space;                        // 0=world, 1=screen
-				inst.pxToModel = pxToModel;                // convert px back to model units in shader
-				inst.atlasTexIndex = atlasTexIndex;
-
-				outV.push_back(inst);
-
-				// Advance pen
-				penX += g.advance;
-				if (i + 1 < line.size())
-				{
-					penX += getKerning(line[i], line[i + 1]);
-				}
-			}
-		};
-
-		// Traverse text components in screen space
-		registry.view<Engine::Transform, Engine::TextComponent>().each(
-			[&](entt::entity, Engine::Transform& tf, Engine::TextComponent& tc)
-		{
-			if (tf.GetTransformSpace() != space)
-			{
-				return;
-			}
-			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas)
-			{
-				return;
-			}
-
-			const Engine::FontInfo& fi = *tc.GetFont();
-			const auto& lines = tc.GetLines();
-			const auto& widths = tc.GetLineWidths();
-
-			// Same transform convention as GL text path: TR only
-			const glm::mat4 modelTR = Transform::MakeModelTR(tf);
-
-			// Treat scale.y as EM size in VirtualCanvas units; convert to pixels
-			const float emScalePx = std::max(1.0f, tf.GetScale().y * screenScale.y);
-
-			// Colors & stroke
-			const glm::vec4 fill = tc.fillColor;
-			const glm::vec4 stroke = tc.strokeColor;
-			const float strokePx = tc.strokeWidth; // screen-space shader interprets this as pixels
-
-			// Bindless MSDF atlas index
+			const FontInfo& fi = *tc.GetFont();
 			const uint32_t atlasIndex = tc.GetFont()->msdfAtlas->GetBindlessIndex();
 
-			// Lay out lines in EM space with per-line alignment
-			for (size_t i = 0; i < lines.size(); ++i)
-			{
-				float x0 = 0.0f;
-				switch (tc.GetAlignment())
-				{
-					case Engine::TextAllignemt::Left: { x0 = 0.0f;               break; }
-					case Engine::TextAllignemt::Center: { x0 = -0.5f * widths[i];  break; }
-					case Engine::TextAllignemt::Right: { x0 = -widths[i];         break; }
-					case Engine::TextAllignemt::Justified:
-					default: { x0 = 0.0f;               break; }
-				}
+			MsdfTextGpuInstanceData s = (space == TransformSpace::Screen)
+				? BuildMsdfStateScreen(tf, tc, fi, windowWidth, windowHeight, Renderer::VirtualCanvasWidth, Renderer::VirtualCanvasHeight, atlasIndex)
+				: BuildMsdfStateWorld(tf, tc, fi, atlasIndex);
 
-				const float y0 = -static_cast<float>(i) * fi.lineHeight;
-				int s = static_cast<int>(space);
-				buildLine(lines[i], fi, x0, y0, modelTR, emScalePx, fill, stroke, strokePx, atlasIndex, s, outInstances);
-			}
+			EmitMsdf(tc, fi, s, [&](uint32_t /*lineIdx*/, const GlyphQuad& q, const MsdfTextGpuInstanceData& st)
+			{
+				MsdfTextGpuInstanceData inst = st;
+				inst.plane = q.plane;
+				inst.uvRect = q.uv;
+				outInstances.push_back(inst);
+			});
 		});
 	}
 
-	void VulkanIndexDraw::UploadAndDrawMsdfBatch(
+	void VulkanIndexDraw::UploadAndDrawMsdfBatch
+	(
 		uint32_t frameIndex,
 		VkCommandBuffer cmd,
 		const std::vector<MsdfTextGpuInstanceData>& instances,

@@ -345,6 +345,7 @@
     <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />
