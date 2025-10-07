@@ -2,6 +2,9 @@
 
 This engine is built using **EnTT**, a custom **Scene System**, my own **Windows messaging framework**, and fully supports both **Vulkan** and **OpenGL** rendering backends.  
 The project is my life's work, nearly all knowledge in engineering I have goes into this in one way or another.
+<br>
+<br>
+<img width="1260" height="583" alt="image" src="https://github.com/user-attachments/assets/b4a0f02d-65f6-4f38-b40c-8fc865500420" />
 
 ---
 
