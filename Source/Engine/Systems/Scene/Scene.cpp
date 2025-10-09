@@ -129,10 +129,8 @@ namespace Engine
 	{
 		Transform::ClearGlobalDirtyFlag();
 
-		if constexpr (handleDebugDraw)
-		{
-			sceneBVH->DebugRender();
-		}
+		// if constexpr (handleDebugDraw)
+		sceneBVH->DebugRender();
 	}
 
 	void Scene::InternalSceneExit()
@@ -156,10 +154,11 @@ namespace Engine
 
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
-		if constexpr (handleDebugDraw)
+		// if constexpr (handleDebugDraw)
 		{
-			// control toggle with input G key (this should be a hotkey combination not just a single key and only in editor mode scenes)
-			if (GetInputManager()->IsKeyTriggered('G'))
+			auto input = GetInputManager();
+			// control toggle with G key 
+			if (input->IsKeyDown(VK_CONTROL) && input->IsKeyTriggered('G'))
 			{
 				sceneDebugDraw->SetEnabled(!sceneDebugDraw->IsEnabled());
 				std::string abled = sceneDebugDraw->IsEnabled() ? "Enabled" : "Disabled";

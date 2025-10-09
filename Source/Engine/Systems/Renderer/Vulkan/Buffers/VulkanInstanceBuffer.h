@@ -12,7 +12,8 @@ namespace Engine
 
 	public:
 
-		VulkanInstanceBuffer(
+		VulkanInstanceBuffer
+		(
 			VkDevice device,
 			VkPhysicalDevice physicalDevice,
 			size_t instanceSize,
@@ -28,7 +29,12 @@ namespace Engine
 		// Optional single-instance write (if not writing manually)
 		void WriteInstance(uint32_t frameIndex, uint32_t instanceIndex, const void* data);
 
+		void Recreate(size_t newMaxInstances);
+
 		VkBuffer GetBuffer(uint32_t frameIndex) const;
+
+		size_t GetMaxInstances() const { return maxInstances; }
+		size_t GetAlignedInstanceSize() const { return alignedInstanceSize; }
 
 		const std::vector<std::unique_ptr<VulkanBuffer>>& GetPerFrameBuffers() const
 		{

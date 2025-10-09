@@ -527,13 +527,13 @@ namespace Engine
 		// 4) Screen-space text last 
 		RenderTextMSDFScreen(registry, view, proj);
 
-	#ifdef _DEBUG
+		// #ifdef _DEBUG
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
 		if (debugDraw && debugDraw->IsEnabled())
 		{
 			RenderScreenSpaceAndDecoratedMeshes(debugDraw->GetRegistry(), view, proj, false);
 		}
-	#endif
+		// #endif
 
 		SwapBuffers(deviceContext);
 	}

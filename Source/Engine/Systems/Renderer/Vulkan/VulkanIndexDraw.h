@@ -62,6 +62,12 @@ namespace Engine
 
 		bool HasSpaceForMesh(VkDeviceSize vertexSize, VkDeviceSize indexSize) const;
 
+		void EnsureIndirectCapacity
+		(
+			std::unique_ptr<VulkanBuffer>& buf,
+			size_t commandCount
+		);
+
 		void DrawDecoratorsAndScreenSpaceEntitiesInRegistry
 		(
 			entt::registry& registry,

@@ -97,6 +97,10 @@ namespace Engine
 		{
 			throw std::runtime_error("Buffer memory is not mapped!");
 		}
+		if (offset + size > sizeBytes)
+		{
+			throw std::runtime_error("CopyData overflow (offset + size exceeds buffer)");
+		}
 
 		memcpy(static_cast<char*>(mappedPtr) + offset, data, size);
 

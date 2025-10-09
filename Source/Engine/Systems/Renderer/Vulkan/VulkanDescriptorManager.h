@@ -15,7 +15,15 @@ namespace Engine
 
 	public:
 
-		VulkanDescriptorManager(VkDevice device, uint32_t maxSets = 1024, uint32_t maxBindlessTextures = 4096, uint64_t ssbosSize = 10240);
+		VulkanDescriptorManager
+		(
+			VkDevice device, 
+			VkPhysicalDevice physicalDevice, 
+			uint32_t maxSets = 1024, 
+			uint32_t maxBindlessTextures = 4096, 
+			uint64_t ssbosSize = 10240
+		);
+
 		~VulkanDescriptorManager();
 
 		void CreateLayout();
@@ -61,11 +69,18 @@ namespace Engine
 
 		VulkanBuffer* GetInstanceBufferForFrame(uint32_t frameIndex) const;
 
+		void EnsurePerFrameInstanceCapacity(size_t bytes);
+		void EnsurePerFrameMeshDecoratorCapacity(size_t bytes);
+		void EnsurePerFrameMsdfCapacity(size_t bytes);
+
 		void Cleanup();
 
 	private:
 
+		void EnsurePerFrameBufferCapacity(size_t bytes, std::vector<std::unique_ptr<VulkanBuffer>>& buffers);
+
 		VkDevice device;
+		VkPhysicalDevice physicalDevice;
 		uint32_t maxSets;
 		uint32_t maxBindlessTextures;
 		uint64_t ssboSize;

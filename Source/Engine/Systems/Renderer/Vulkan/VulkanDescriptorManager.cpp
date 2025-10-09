@@ -5,8 +5,15 @@
 namespace Engine
 {
 
-	VulkanDescriptorManager::VulkanDescriptorManager(VkDevice device, uint32_t maxSets, uint32_t maxBindlessTextures, uint64_t ssbosSize)
-		: device(device), maxSets(maxSets), maxBindlessTextures(maxBindlessTextures), ssboSize(ssbosSize)
+	VulkanDescriptorManager::VulkanDescriptorManager
+	(
+		VkDevice device, 
+		VkPhysicalDevice physicalDevice,
+		uint32_t maxSets, 
+		uint32_t maxBindlessTextures, 
+		uint64_t ssbosSize
+	)
+		: device(device), physicalDevice(physicalDevice), maxSets(maxSets), maxBindlessTextures(maxBindlessTextures), ssboSize(ssbosSize)
 	{
 		CreateLayout();
 		CreatePool();
@@ -439,6 +446,46 @@ namespace Engine
 		write.pImageInfo = &samplerInfo;
 
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+	}
+
+	void VulkanDescriptorManager::EnsurePerFrameInstanceCapacity(size_t bytes)
+	{
+		EnsurePerFrameBufferCapacity(bytes, perFrameInstanceBuffers);
+	}
+
+	void VulkanDescriptorManager::EnsurePerFrameMeshDecoratorCapacity(size_t bytes)
+	{
+		EnsurePerFrameBufferCapacity(bytes, perFrameMeshDecoratorBuffers);
+	}
+
+	void VulkanDescriptorManager::EnsurePerFrameMsdfCapacity(size_t bytes)
+	{
+		EnsurePerFrameBufferCapacity(bytes, perFrameMsdfBuffers);
+	}
+
+	void VulkanDescriptorManager::EnsurePerFrameBufferCapacity(size_t bytes, std::vector<std::unique_ptr<VulkanBuffer>>& buffers)
+	{
+		for (auto& buf : buffers)
+		{
+			if (buf->GetSize() < bytes)
+			{
+				std::cout << "EnsurePerFrameBufferCapacity | Need to grow buffer" << std::endl;
+				// Recreate bigger (grow strategy: next pow2 or 1.5–2x)
+				const VkDeviceSize newSize = std::max<VkDeviceSize>(bytes, buf->GetSize() * 2);
+
+				// Make a new buffer and swap it in
+				std::unique_ptr<VulkanBuffer> newBuf = std::make_unique<VulkanBuffer>(
+					device,
+					physicalDevice,
+					newSize,
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // SSBO
+					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+				);
+
+				buf->Free();
+				buf = std::move(newBuf);
+			}
+		}
 	}
 
 	void VulkanDescriptorManager::Cleanup()

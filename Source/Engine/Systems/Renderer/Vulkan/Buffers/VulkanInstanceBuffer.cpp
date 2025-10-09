@@ -4,7 +4,8 @@
 namespace Engine
 {
 
-	VulkanInstanceBuffer::VulkanInstanceBuffer(
+	VulkanInstanceBuffer::VulkanInstanceBuffer
+	(
 		VkDevice device,
 		VkPhysicalDevice physicalDevice,
 		size_t instanceSize,
@@ -50,7 +51,40 @@ namespace Engine
 	void VulkanInstanceBuffer::WriteInstance(uint32_t frameIndex, uint32_t instanceIndex, const void* data)
 	{
 		auto offset = alignedInstanceSize * instanceIndex;
+
+		if (instanceIndex >= maxInstances)
+		{
+			throw std::runtime_error("WriteInstance overflow (instanceIndex >= maxInstances)");
+		}
+
 		perFrameBuffers[frameIndex]->CopyData(data, instanceSize, offset);
+	}
+
+	void VulkanInstanceBuffer::Recreate(size_t newMaxInstances)
+	{
+		maxInstances = newMaxInstances;
+		VkDeviceSize totalSize = alignedInstanceSize * maxInstances;
+
+		// Recreate per-frame buffers
+		for (auto& buf : perFrameBuffers)
+		{
+			std::cout << "VulkanInstanceBuffer::Recreate() called" << std::endl;
+			// No need to preserve contents: we still have cpuInstanceData on CPU
+			auto newBuf = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				totalSize,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			if (buf)
+			{
+				buf->Free();
+			}
+
+			buf = std::move(newBuf);
+		}
 	}
 
 	VkBuffer VulkanInstanceBuffer::GetBuffer(uint32_t frameIndex) const

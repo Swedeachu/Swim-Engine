@@ -96,12 +96,13 @@ namespace Engine
 		// unsigned int maxBindlessTextureCount = RoundUpToNextPowerOfTwo(texCount) * 2; // double in expected size for dynamic texture and engine stuff that could happen
 		unsigned int maxBindlessTextureCount = 4096; // we need this big since we make a lot of textures on the fly from memory
 
-		constexpr uint32_t MAX_SETS = 1024;
-		constexpr uint64_t SSBO_SIZE = 10240;
+		constexpr uint32_t MAX_SETS = 1024; // will this need to be larger?
+		constexpr uint64_t SSBO_SIZE = 67108864; // 64 MB as bytes
 
 		// Make the descriptor manager, its ctor creates the layout and pool
 		descriptorManager = std::make_unique<VulkanDescriptorManager>(
 			device,
+			physicalDevice,
 			MAX_SETS,
 			maxBindlessTextureCount,
 			SSBO_SIZE
@@ -119,7 +120,7 @@ namespace Engine
 		// Set up buffer and UBO for camera with double buffering
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
-		constexpr int MAX_EXPECTED_INSTANCES = 10240;
+		constexpr int MAX_EXPECTED_INSTANCES = 128000; 
 
 		// Create the index draw object which stores our instanced buffers and does our indexed drawing logic and caching
 		indexDraw = std::make_unique<VulkanIndexDraw>(
@@ -131,6 +132,7 @@ namespace Engine
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
 		// We have a huge buffer on the GPU now to store all of our meshes so we never have to change vertice and indice bindings
+		// This will honestly probably need to be much, much, larger (GBs)
 		constexpr VkDeviceSize initialVertexSize = 16 * 1024 * 1024; // 16 MB
 		constexpr VkDeviceSize initialIndexSize = 4 * 1024 * 1024;  // 4 MB
 
@@ -591,7 +593,7 @@ namespace Engine
 		// This prepeares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
 		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd); 
 
-		// This prepares every screen space UI text and draws all of them with the msdf shader
+		// Then finally draw all of our text that is in UI screen space on top of everything.
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::Screen);
 
 		vkCmdEndRenderPass(cmd);

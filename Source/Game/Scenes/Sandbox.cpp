@@ -28,7 +28,7 @@ namespace Game
 	constexpr static bool doTextUI = true;
 	constexpr static bool doButtonUI = false;
 	constexpr static bool glbTests = true;
-	constexpr static bool doSponza = false; // glbTests must be true for this to happen!
+	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;

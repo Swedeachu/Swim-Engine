@@ -13,7 +13,21 @@
 namespace Engine
 {
 
-	VulkanIndexDraw::VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT)
+	// NOTE: all these draw methods check if the draw instances fit in the ssbo, if not it tries to resize them.
+	// The current execution flow will crash the program on trying to resize since we are reallocating device bound ssbos.
+	// We would need a decently complex system to check if we should reallocate sizes before recording draw commands.
+	// This is honestly stupid and not worth it. The fix is just allocate large ssbos once to avoid this problem entirely.
+	// However I have kept these methods in since we might want to resize ssbos at other times of program execution,
+	// as seen in VulkanDescriptorManager and the buffer classes. I also left in the method calls so exceptions can be hit
+	// to let us know if we are causing problems instead of just letting the renderer screw up visually.
+
+	VulkanIndexDraw::VulkanIndexDraw
+	(
+		VkDevice device, 
+		VkPhysicalDevice physicalDevice, 
+		const int MAX_EXPECTED_INSTANCES, 
+		const int MAX_FRAMES_IN_FLIGHT
+	)
 		: device(device), physicalDevice(physicalDevice)
 	{
 		instanceBuffer = std::make_unique<Engine::VulkanInstanceBuffer>(
@@ -25,6 +39,47 @@ namespace Engine
 		);
 
 		cpuInstanceData.reserve(MAX_EXPECTED_INSTANCES);
+	}
+
+	static void EnsureInstanceCapacity(VulkanInstanceBuffer& ib, size_t requiredInstances)
+	{
+		if (requiredInstances > ib.GetMaxInstances())
+		{
+			std::cout << "EnsureInstanceCapacity | Need to recreate buffer" << std::endl;
+			// Grow (next pow2 to reduce churn):
+			size_t newCap = 1;
+			while (newCap < requiredInstances)
+			{
+				newCap <<= 1;
+			}
+			ib.Recreate(newCap);
+		}
+	}
+
+	// Ensures an indirect buffer has enough room for 'commandCount' VkDrawIndexedIndirectCommand entries
+	void VulkanIndexDraw::EnsureIndirectCapacity
+	(
+		std::unique_ptr<VulkanBuffer>& buf,
+		size_t commandCount
+	)
+	{
+		const VkDeviceSize need = static_cast<VkDeviceSize>(commandCount * sizeof(VkDrawIndexedIndirectCommand));
+		if (buf->GetSize() < need)
+		{
+			std::cout << "EnsureIndirectCapacity | Need to grow buffer" << std::endl;
+			const VkDeviceSize newSize = std::max<VkDeviceSize>(need, buf->GetSize() * 2);
+
+			auto newBuf = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				newSize,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			buf->Free();
+			buf = std::move(newBuf);
+		}
 	}
 
 	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
@@ -344,7 +399,9 @@ namespace Engine
 
 	void VulkanIndexDraw::UploadAndBatchInstances(uint32_t frameIndex)
 	{
-		// a crash can happen here if you try to draw too much
+		// Ensure the per-frame instance buffer can hold the world instances
+		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
+
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
@@ -363,6 +420,9 @@ namespace Engine
 
 			allCommands.push_back(cmd);
 		}
+
+		// Ensure indirect buffer capacity for world draws
+		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], allCommands.size());
 
 		VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
 		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
@@ -402,6 +462,7 @@ namespace Engine
 	}
 
 	// Draws everything that is in screen space or has a decorator on it (including world space decorated meshes)
+	// This will then also do immediate mode drawing from the debug registry if that is enabled.
 	void VulkanIndexDraw::DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
@@ -427,13 +488,12 @@ namespace Engine
 		uint32_t instanceCount = 0;
 
 		std::vector<VkDrawIndexedIndirectCommand> drawCommands;
-		meshDecoratorInstanceData.clear(); // clear previous frame's params
 
 		DrawDecoratorsAndScreenSpaceEntitiesInRegistry(
 			registry,
 			cameraUBO,
 			worldView,
-			windowHeight,
+			windowWidth,
 			windowHeight,
 			frustum,
 			instanceCount,
@@ -441,8 +501,7 @@ namespace Engine
 			true // run culling
 		);
 
-		// Complete hack to inject in the decorator wireframe meshes
-	#ifdef _DEBUG
+		// Complete hack to inject in the decorator wireframe meshes because debug rendering uses the same pipeline.
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
 		if (debugDraw && debugDraw->IsEnabled())
 		{
@@ -450,7 +509,7 @@ namespace Engine
 				debugDraw->GetRegistry(),
 				cameraUBO,
 				worldView,
-				windowHeight,
+				windowWidth,
 				windowHeight,
 				frustum,
 				instanceCount,
@@ -458,27 +517,40 @@ namespace Engine
 				false // no culling
 			);
 		}
-	#endif
 
 		if (drawCommands.empty())
 		{
 			return;
 		}
 
+		// === Ensure SSBO capacity for MeshDecoratorGpuInstanceData ===
+		const size_t decoBytes = meshDecoratorInstanceData.size() * sizeof(MeshDecoratorGpuInstanceData);
+		// descriptorManager->EnsurePerFrameMeshDecoratorCapacity(decoBytes);
+
 		// === Upload MeshDecoratorGpuInstanceData via descriptorManager ===
 		descriptorManager->UpdatePerFrameMeshDecoratorBuffer(
 			frameIndex,
 			meshDecoratorInstanceData.data(),
-			meshDecoratorInstanceData.size() * sizeof(MeshDecoratorGpuInstanceData)
+			decoBytes
 		);
 
-		// === Upload new instance data for section ===
+		// === Ensure instance buffer can hold world + decorator instances ===
+		// cpuInstanceData already has both world and newly appended decorator instance structs
+		const size_t totalInstancesNeeded = cpuInstanceData.size();
+		EnsureInstanceCapacity(*instanceBuffer, totalInstancesNeeded);
+
+		// === Upload new instance data for section (append only the decorator range) ===
 		void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer();
+
+		// If we use aligned stride, replace sizeof(GpuInstanceData) with instanceBuffer->GetAlignedInstanceSize()
 		std::memcpy(
 			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
 			cpuInstanceData.data() + baseInstanceID,
 			meshDecoratorInstanceData.size() * sizeof(GpuInstanceData)
 		);
+
+		// === Ensure indirect buffer capacity for decorator draws ===
+		EnsureIndirectCapacity(meshDecoratorIndirectCommandBuffers[frameIndex], drawCommands.size());
 
 		// === Upload indirect draw commands ===
 		meshDecoratorIndirectCommandBuffers[frameIndex]->CopyData(
@@ -490,8 +562,8 @@ namespace Engine
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetDecoratorPipeline());
 
 		std::array<VkDescriptorSet, 2> descriptorSets = {
-			descriptorManager->GetPerFrameDescriptorSet(frameIndex),
-			descriptorManager->GetBindlessSet()
+				descriptorManager->GetPerFrameDescriptorSet(frameIndex),
+				descriptorManager->GetBindlessSet()
 		};
 
 		vkCmdBindDescriptorSets(
@@ -507,8 +579,8 @@ namespace Engine
 
 		// === Bind buffers ===
 		VkBuffer vertexBuffers[] = {
-			megaVertexBuffer->GetBuffer(),
-			instanceBuffer->GetBuffer(frameIndex)
+				megaVertexBuffer->GetBuffer(),
+				instanceBuffer->GetBuffer(frameIndex)
 		};
 		VkDeviceSize offsets[] = { 0, 0 };
 
@@ -802,11 +874,15 @@ namespace Engine
 		// 0) Ensure the unit glyph quad exists in the mega buffers
 		EnsureGlyphQuadUploaded();
 
+		// 0.5) Ensure per-frame MSDF SSBO capacity
+		const size_t msdfBytes = instances.size() * sizeof(MsdfTextGpuInstanceData);
+		dm->EnsurePerFrameMsdfCapacity(msdfBytes);
+
 		// 1) Upload the MSDF instance data to the per-frame descriptor buffer
 		dm->UpdatePerFrameMsdfBuffer(
 			frameIndex,
 			instances.data(),
-			instances.size() * sizeof(MsdfTextGpuInstanceData)
+			msdfBytes
 		);
 
 		// 2) Build the indirect command for the glyph quad (same mesh used for all glyphs)
@@ -817,6 +893,9 @@ namespace Engine
 		cmdInfo.vertexOffset = static_cast<int32_t>(glyphQuadMesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
 		cmdInfo.firstInstance = 0;
 
+		// Ensure indirect buffer capacity for a single command
+		EnsureIndirectCapacity(outIndirectBuf, 1);
+
 		outIndirectBuf->CopyData(&cmdInfo, sizeof(VkDrawIndexedIndirectCommand));
 
 		// 3) Bind MSDF text pipeline
@@ -824,8 +903,8 @@ namespace Engine
 
 		// 4) Bind descriptor sets
 		std::array<VkDescriptorSet, 2> descriptorSets = {
-				dm->GetPerFrameDescriptorSet(frameIndex),
-				dm->GetBindlessSet()
+						dm->GetPerFrameDescriptorSet(frameIndex),
+						dm->GetBindlessSet()
 		};
 
 		vkCmdBindDescriptorSets(
@@ -841,8 +920,8 @@ namespace Engine
 
 		// 5) Bind vertex and index buffers
 		VkBuffer vertexBuffers[] = {
-				megaVertexBuffer->GetBuffer(),
-				instanceBuffer->GetBuffer(frameIndex)
+						megaVertexBuffer->GetBuffer(),
+						instanceBuffer->GetBuffer(frameIndex)
 		};
 		VkDeviceSize offsets[] = { 0, 0 };
 
