@@ -30,6 +30,7 @@ namespace Game
 	constexpr static bool glbTests = true;
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 
+	constexpr static bool testPrimitiveMeshes = true;
 	constexpr static bool fullyUniqueMeshes = false;
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
@@ -384,6 +385,209 @@ namespace Game
 		scene->AddComponent<Engine::MeshDecorator>(redEntity, redDecorator);
 	}
 
+	void TestPrimitives(Engine::Scene* scene)
+	{
+		auto& meshPool = Engine::MeshPool::GetInstance();
+		auto& materialPool = Engine::MaterialPool::GetInstance();
+
+		// ===== Helpers =====
+		auto makeSolidSphere = [&](const std::string& name, const glm::vec3& c, int lat = 24, int lon = 48)
+		{
+			auto data = Engine::MakeSphere(lat, lon, c, c, c);
+			auto mesh = meshPool.RegisterMesh(name, data.first, data.second);
+			return materialPool.RegisterMaterialData(name + "_mat", mesh);
+		};
+
+		auto makeSolidCylinder = [&](const std::string& name, const glm::vec3& c, float r = 0.25f, float h = 1.0f, uint32_t seg = 64) // skinnier r=0.25
+		{
+			auto data = Engine::MakeCylinder(r, h, seg, c);
+			auto mesh = meshPool.RegisterMesh(name, data.first, data.second);
+			return materialPool.RegisterMaterialData(name + "_mat", mesh);
+		};
+
+		auto makeSolidCone = [&](const std::string& name, const glm::vec3& c, float r = 0.5f, float h = 1.0f, uint32_t seg = 64)
+		{
+			auto data = Engine::MakeCone(r, h, seg, c);
+			auto mesh = meshPool.RegisterMesh(name, data.first, data.second);
+			return materialPool.RegisterMaterialData(name + "_mat", mesh);
+		};
+
+		auto makeSolidTorus = [&](const std::string& name, const glm::vec3& c, float outerR, float thickness, uint32_t segU = 48, uint32_t segV = 24)
+		{
+			auto data = Engine::MakeTorus(outerR, thickness, segU, segV, c);
+			auto mesh = meshPool.RegisterMesh(name, data.first, data.second);
+			return materialPool.RegisterMaterialData(name + "_mat", mesh);
+		};
+
+		const glm::vec3 RED = { 1.0f, 0.0f, 0.0f };
+		const glm::vec3 GREEN = { 0.0f, 1.0f, 0.0f };
+		const glm::vec3 BLUE = { 0.0f, 0.0f, 1.0f };
+
+		// Left-shifted layout
+		const float startX = -20.0f; // everything off to the left
+		const float stepX = 3.0f;  // horizontal spacing
+		const float yCenter = 0.5f;
+
+		// Rows (front-to-back)
+		const float z_spheres = -9.0f;
+		const float z_cones = -3.0f;
+		const float z_cylinders = 3.0f;
+		const float z_torus_thin = 9.0f;
+		const float z_torus_medium = 12.0f;
+		const float z_torus_fat = 15.0f;
+
+		// ===== Spheres (R,G,B) =====
+		auto sphRed = makeSolidSphere("Prim_Sphere_Red", RED);
+		auto sphGreen = makeSolidSphere("Prim_Sphere_Green", GREEN);
+		auto sphBlue = makeSolidSphere("Prim_Sphere_Blue", BLUE);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_spheres), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(sphRed));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_spheres), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(sphGreen));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_spheres), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(sphBlue));
+		}
+
+		// ===== Cones (R,G,B) =====
+		auto coneRed = makeSolidCone("Prim_Cone_Red", RED);
+		auto coneGreen = makeSolidCone("Prim_Cone_Green", GREEN);
+		auto coneBlue = makeSolidCone("Prim_Cone_Blue", BLUE);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_cones), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(coneRed));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_cones), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(coneGreen));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_cones), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(coneBlue));
+		}
+
+		// ===== Cylinders (R,G,B) — skinnier radius =====
+		auto cylRed = makeSolidCylinder("Prim_Cyl_Red", RED, 0.25f);
+		auto cylGreen = makeSolidCylinder("Prim_Cyl_Green", GREEN, 0.25f);
+		auto cylBlue = makeSolidCylinder("Prim_Cyl_Blue", BLUE, 0.25f);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_cylinders), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(cylRed));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_cylinders), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(cylGreen));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_cylinders), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(cylBlue));
+		}
+
+		// ===== Toruses (Skinny, Medium, Fat) — each with R,G,B =====
+		const float torusOuter = 0.40f;           // main ring radius
+		const float torusThin = 0.05f;
+		const float torusMed = 0.12f;
+		const float torusFat = 0.20f;
+
+		// Skinny
+		auto torThinR = makeSolidTorus("Prim_Torus_Thin_R", RED, torusOuter, torusThin);
+		auto torThinG = makeSolidTorus("Prim_Torus_Thin_G", GREEN, torusOuter, torusThin);
+		auto torThinB = makeSolidTorus("Prim_Torus_Thin_B", BLUE, torusOuter, torusThin);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_torus_thin), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torThinR));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_torus_thin), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torThinG));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_torus_thin), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torThinB));
+		}
+
+		// Medium
+		auto torMedR = makeSolidTorus("Prim_Torus_Med_R", RED, torusOuter, torusMed);
+		auto torMedG = makeSolidTorus("Prim_Torus_Med_G", GREEN, torusOuter, torusMed);
+		auto torMedB = makeSolidTorus("Prim_Torus_Med_B", BLUE, torusOuter, torusMed);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_torus_medium), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torMedR));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_torus_medium), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torMedG));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_torus_medium), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torMedB));
+		}
+
+		// Fat
+		auto torFatR = makeSolidTorus("Prim_Torus_Fat_R", RED, torusOuter, torusFat);
+		auto torFatG = makeSolidTorus("Prim_Torus_Fat_G", GREEN, torusOuter, torusFat);
+		auto torFatB = makeSolidTorus("Prim_Torus_Fat_B", BLUE, torusOuter, torusFat);
+
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 0 * stepX, yCenter, z_torus_fat), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torFatR));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 1 * stepX, yCenter, z_torus_fat), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torFatG));
+		}
+		{
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(glm::vec3(startX + 2 * stepX, yCenter, z_torus_fat), glm::vec3(1.0f)));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(torFatB));
+		}
+
+		// ===== Darker gray flat plane (cube mesh squashed on Y) =====
+		{
+			auto cubeData = Engine::MakeCube();
+
+			std::vector<Engine::Vertex> darkVerts = cubeData.first;
+			const glm::vec3 DARK_GREY(0.2f, 0.2f, 0.2f);
+			for (auto& v : darkVerts) v.color = DARK_GREY;
+
+			auto planeMesh = meshPool.RegisterMesh("Prim_DarkGreyPlane", darkVerts, cubeData.second);
+			auto planeMat = materialPool.RegisterMaterialData("Prim_DarkGreyPlane_Mat", planeMesh);
+
+			const glm::vec3 planeScale(2.0f, 0.02f, 2.0f);
+			const glm::vec3 planePos(-20.0f, 0.0f, 0.0f);
+
+			auto e = scene->CreateEntity();
+			scene->AddComponent<Engine::Transform>(e, Engine::Transform(planePos, planeScale));
+			scene->AddComponent<Engine::Material>(e, Engine::Material(planeMat));
+		}
+	}
+
 	int SandBox::Init()
 	{
 		std::cout << name << " Init" << std::endl;
@@ -564,6 +768,8 @@ namespace Game
 
 		// The real stress test
 		if constexpr (doStressTest) MakeTonsOfRandomPositionedEntities(this);
+
+		if constexpr (testPrimitiveMeshes) TestPrimitives(this);
 
 		return 0;
 	}

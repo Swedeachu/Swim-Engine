@@ -44,4 +44,34 @@ namespace Engine
 		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
 	);
 
+	// Cylinder with top and bottom caps
+	VertexesIndexesPair MakeCylinder
+	(
+		float radius = 0.5f,
+		float height = 1.0f,
+		uint32_t segmentCount = 64,
+		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
+	);
+
+	// Cone with base cap
+	VertexesIndexesPair MakeCone
+	(
+		float radius = 0.5f,
+		float height = 1.0f,
+		uint32_t segmentCount = 64,
+		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
+	);
+
+	// Torus (ring / donut)
+	// outerRadius = main ring radius
+	// thickness = tube radius
+	VertexesIndexesPair MakeTorus
+	(
+		float outerRadius = 0.35f,
+		float thickness = 0.15f,
+		uint32_t majorSegments = 48,
+		uint32_t minorSegments = 24,
+		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
+	);
+
 }

@@ -132,9 +132,9 @@ namespace Engine
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
 		// We have a huge buffer on the GPU now to store all of our meshes so we never have to change vertice and indice bindings
-		// This will honestly probably need to be much, much, larger (GBs)
-		constexpr VkDeviceSize initialVertexSize = 16 * 1024 * 1024; // 16 MB
-		constexpr VkDeviceSize initialIndexSize = 4 * 1024 * 1024;  // 4 MB
+		// This will honestly probably need to be much, much, larger 
+		constexpr VkDeviceSize initialVertexSize = 64 * 1024 * 1024; // 64 MB
+		constexpr VkDeviceSize initialIndexSize = 16 * 1024 * 1024;  // 16 MB
 
 		indexDraw->CreateMegaMeshBuffers(initialVertexSize, initialIndexSize);
 
