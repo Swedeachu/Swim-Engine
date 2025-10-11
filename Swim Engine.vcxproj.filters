@@ -54,6 +54,10 @@
     <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -346,6 +350,12 @@
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitiveTest.h" />
+    <ClInclude Include="Source\Game\Testing\MeshDrawingStressTest.h" />
+    <ClInclude Include="Source\Game\Testing\TextAndUiTest.h" />
+    <ClInclude Include="Source\Engine\Components\ObjectTag.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
+    <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

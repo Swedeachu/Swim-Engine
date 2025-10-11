@@ -607,7 +607,7 @@ namespace Engine
 	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
 		const Transform& transform = registry.get<Transform>(entity);
-		const glm::mat4& model = transform.GetModelMatrix();
+		const glm::mat4& model = transform.GetWorldMatrix(registry);
 		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
 
 		// === CompositeMaterial handling ===
@@ -738,7 +738,7 @@ namespace Engine
 		TransformSpace space = tf.GetTransformSpace();
 		const glm::vec3& pos = tf.GetPosition();
 		const glm::vec3& scale = tf.GetScale();
-		const glm::mat4& model = tf.GetModelMatrix();
+		const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 		bool isWorld = (space == TransformSpace::World);
 
@@ -896,7 +896,7 @@ namespace Engine
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
 
 			const FontInfo& fi = *tc.GetFont();
-			MsdfTextGpuInstanceData s = BuildMsdfStateWorld(tf, tc, fi, 0);
+			MsdfTextGpuInstanceData s = BuildMsdfStateWorld(registry, tf, tc, fi, 0);
 
 			std::vector<TextVertex> V;
 			std::vector<uint32_t> I;
@@ -967,7 +967,7 @@ namespace Engine
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
 
 			const FontInfo& fi = *tc.GetFont();
-			MsdfTextGpuInstanceData s = BuildMsdfStateScreen(tf, tc, fi,
+			MsdfTextGpuInstanceData s = BuildMsdfStateScreen(registry, tf, tc, fi,
 				windowWidth, windowHeight, VirtualCanvasWidth, VirtualCanvasHeight, 0);
 
 			std::vector<TextVertex> V;

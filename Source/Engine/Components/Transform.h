@@ -2,9 +2,7 @@
 
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
-
-// #define GLM_ENABLE_EXPERIMENTAL
-// #include "Library/glm/gtx/quaternion.hpp"
+#include "Library/EnTT/entt.hpp" 
 
 namespace Engine
 {
@@ -13,31 +11,48 @@ namespace Engine
 	{
 		World, // 0
 		Screen, // 1
-		Ambiguous // for very special cases, this is intended for higher level geometry or for passing to transform related functions that need spacial filters.
+		Ambiguous
 	};
 
 	class Transform
 	{
 
+		// Scene is responsible to wire parenting and invalidate subtrees efficiently
+		friend class Scene;
+
 	private:
 
 		glm::vec3 position{ 0.0f, 0.0f, 0.0f };
 		glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
-		glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f }; // Identity quaternion
+		glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f }; // Identity
 
-		mutable bool dirty = true; // Marks if the transform has changed and if we need to recompute the model matrix next time GetModelMatrix() is called
-		mutable glm::mat4 modelMatrix{ 1.0f };
+		// Local dirty + cache
+		mutable bool dirty = true;
+		mutable glm::mat4 modelMatrix{ 1.0f }; // LOCAL matrix (TRS)
 
-		// Global value for if any of the transforms were marked dirty this frame
-		// We better make sure to set this back to false at the end of each frame!
-		inline static bool TransformsDirty = false; // I don't think this is thread safe yet
+		// World cache + dirty
+		mutable bool worldDirty = true;
+		mutable glm::mat4 worldMatrix{ 1.0f }; // WORLD matrix
 
+		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
 		TransformSpace space = TransformSpace::World;
 
-		// Helper to mark as dirty 
+		// Parent + children (entity handles)
+		entt::entity parent = entt::null;
+		std::vector<entt::entity> children; // Scene manages membership
+
+		// Helpers to mark dirty
 		void MarkDirty()
 		{
 			dirty = true;
+			worldDirty = true; // local change implies world change
+			TransformsDirty = true;
+		}
+
+		// Called by Scene to invalidate world cache (and optionally local if needed)
+		void MarkWorldDirtyOnly()
+		{
+			worldDirty = true;
 			TransformsDirty = true;
 		}
 
@@ -53,56 +68,36 @@ namespace Engine
 			TransformSpace ts = TransformSpace::World
 		)
 			: position(pos),
-			scale(scl), rotation(rot),
+			scale(scl),
+			rotation(rot),
 			dirty(true),
 			modelMatrix(1.0f),
+			worldDirty(true),
+			worldMatrix(1.0f),
 			space(ts)
 		{}
 
-		// Getters with public access
 		const glm::vec3& GetPosition() const { return position; }
-		const glm::vec3& GetScale() const { return scale; }
+		const glm::vec3& GetScale()    const { return scale; }
 		const glm::quat& GetRotation() const { return rotation; }
-		const bool IsDirty() const { return dirty; }
+		const bool IsDirty()           const { return dirty; }
 
-		// Static access for scene systems 
-		static bool AreAnyTransformsDirty()
-		{
-			return TransformsDirty;
-		}
-
-		static void ClearGlobalDirtyFlag()
-		{
-			TransformsDirty = false;
-		}
-
-		// Public setters that mark the transform as dirty
+		static bool AreAnyTransformsDirty() { return TransformsDirty; }
+		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }
 
 		void SetPosition(const glm::vec3& pos)
 		{
-			if (position != pos)
-			{
-				position = pos;
-				MarkDirty();
-			}
+			if (position != pos) { position = pos; MarkDirty(); }
 		}
 
 		void SetScale(const glm::vec3& scl)
 		{
-			if (scale != scl)
-			{
-				scale = scl;
-				MarkDirty();
-			}
+			if (scale != scl) { scale = scl; MarkDirty(); }
 		}
 
 		void SetRotation(const glm::quat& rot)
 		{
-			if (rotation != rot)
-			{
-				rotation = rot;
-				MarkDirty();
-			}
+			if (rotation != rot) { rotation = rot; MarkDirty(); }
 		}
 
 		void SetRotationEuler(float pitch, float yaw, float roll)
@@ -111,50 +106,28 @@ namespace Engine
 			SetRotation(newRotation);
 		}
 
-		// Returns pitch, yaw, roll in degrees
 		glm::vec3 GetRotationEuler() const
 		{
-			glm::vec3 euler = glm::degrees(glm::eulerAngles(rotation));
-			return euler;
+			return glm::degrees(glm::eulerAngles(rotation));
 		}
 
-		// Special reference getters to allow modification while marking dirty:
-
-		glm::vec3& GetPositionRef()
-		{
-			MarkDirty();
-			return position;
-		}
-
-		glm::vec3& GetScaleRef()
-		{
-			MarkDirty();
-			return scale;
-		}
-
-		glm::quat& GetRotationRef()
-		{
-			MarkDirty();
-			return rotation;
-		}
+		glm::vec3& GetPositionRef() { MarkDirty(); return position; }
+		glm::vec3& GetScaleRef() { MarkDirty(); return scale; }
+		glm::quat& GetRotationRef() { MarkDirty(); return rotation; }
 
 		TransformSpace GetTransformSpace() const { return space; }
-
 		void SetTransformSpace(TransformSpace ts)
 		{
-			if (space != ts)
-			{
-				space = ts;
-				MarkDirty();
-			}
+			if (space != ts) { space = ts; MarkDirty(); }
 		}
 
-		// Getter for model matrix using dirty flag pattern for performance
+		// LOCAL 
 		const glm::mat4& GetModelMatrix() const
 		{
 			if (dirty)
 			{
-				modelMatrix = glm::translate(glm::mat4(1.0f), position)
+				modelMatrix =
+					glm::translate(glm::mat4(1.0f), position)
 					* glm::mat4_cast(rotation)
 					* glm::scale(glm::mat4(1.0f), scale);
 				dirty = false;
@@ -162,7 +135,33 @@ namespace Engine
 			return modelMatrix;
 		}
 
-		// Get a transform model matrix with no scale values.
+		// WORLD (needs registry to walk parent chain)
+		// if parent is invalid or missing Transform, treated as no parent.
+		const glm::mat4& GetWorldMatrix(const entt::registry& registry) const
+		{
+			if (!worldDirty)
+			{
+				return worldMatrix;
+			}
+
+			// compute local first 
+			const glm::mat4& local = GetModelMatrix();
+
+			if (parent != entt::null && registry.valid(parent) && registry.any_of<Transform>(parent))
+			{
+				const auto& pTf = registry.get<Transform>(parent);
+				worldMatrix = pTf.GetWorldMatrix(registry) * local; // recursion w/ caching
+			}
+			else
+			{
+				worldMatrix = local;
+			}
+
+			worldDirty = false;
+
+			return worldMatrix;
+		}
+
 		static glm::mat4 MakeModelTR(const Transform& tf)
 		{
 			glm::mat4 T = glm::translate(glm::mat4(1.0f), tf.GetPosition());
@@ -170,6 +169,25 @@ namespace Engine
 			return T * R;
 		}
 
+		static glm::mat4 MakeWorldTR(const Transform& tf, const entt::registry& registry)
+		{
+			// Start with the local TR (no scale)
+			glm::mat4 localTR = MakeModelTR(tf);
+
+			// If there's no valid parent, this is the world TR
+			if (tf.parent == entt::null || !registry.valid(tf.parent) || !registry.any_of<Transform>(tf.parent))
+			{
+				return localTR;
+			}
+
+			// Recursively multiply by parent's world TR
+			const auto& parentTf = registry.get<Transform>(tf.parent);
+			return MakeWorldTR(parentTf, registry) * localTR;
+		}
+
+		bool HasParent() const { return parent != entt::null; }
+		entt::entity GetParent() const { return parent; }
+
 	};
 
-} // Namespace Engine
+}

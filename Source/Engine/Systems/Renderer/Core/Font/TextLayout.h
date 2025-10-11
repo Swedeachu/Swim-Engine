@@ -82,6 +82,7 @@ namespace Engine
 
 	inline MsdfTextGpuInstanceData BuildMsdfStateWorld
 	(
+		const entt::registry& registry,
 		const Transform& tf,
 		const TextComponent& tc,
 		const FontInfo& fi,
@@ -89,7 +90,7 @@ namespace Engine
 	)
 	{
 		MsdfTextGpuInstanceData s{};
-		s.modelTR = Transform::MakeModelTR(tf);
+		s.modelTR = Transform::MakeWorldTR(tf, registry);
 		s.pxToModel = glm::vec2(1.0f, 1.0f);
 		s.emScalePx = (tf.GetScale().y > 0.0f) ? tf.GetScale().y : 0.1f;
 		s.msdfPixelRange = fi.distanceRange;
@@ -103,6 +104,7 @@ namespace Engine
 
 	inline MsdfTextGpuInstanceData BuildMsdfStateScreen
 	(
+		const entt::registry& registry,
 		const Transform& tf,
 		const TextComponent& tc,
 		const FontInfo& fi,
@@ -119,7 +121,7 @@ namespace Engine
 		);
 
 		MsdfTextGpuInstanceData s{};
-		s.modelTR = Transform::MakeModelTR(tf);
+		s.modelTR = Transform::MakeWorldTR(tf, registry);
 		s.pxToModel = 1.0f / screenScale;
 		s.emScalePx = std::max(1.0f, tf.GetScale().y * screenScale.y);
 		s.msdfPixelRange = fi.distanceRange;

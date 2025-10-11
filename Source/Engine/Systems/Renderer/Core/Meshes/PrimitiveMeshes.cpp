@@ -133,9 +133,9 @@ namespace Engine
 		for (int face = 0; face < 6; ++face)
 		{
 			glm::vec3 color = glm::vec3(
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f)
+				Engine::RandFloat(0.2f, 1.0f),
+				Engine::RandFloat(0.2f, 1.0f),
+				Engine::RandFloat(0.2f, 1.0f)
 			);
 
 			for (int i = 0; i < 4; ++i)
@@ -246,7 +246,45 @@ namespace Engine
 		return { vertices, indices };
 	}
 
-	VertexesIndexesPair GenerateCircleMesh
+	VertexesIndexesPair MakeQuad
+	(
+		uint32_t tilesX,          
+		uint32_t tilesY,          
+		uint32_t tileIndexX,      
+		uint32_t tileIndexY,       
+		glm::vec3 color1,
+		glm::vec3 color2,
+		glm::vec3 color3,
+		glm::vec3 color4
+	)
+	{
+		tilesX = std::max(1u, tilesX);
+		tilesY = std::max(1u, tilesY);
+
+		// Compute UV range for this tile
+		const float uStep = 1.0f / static_cast<float>(tilesX);
+		const float vStep = 1.0f / static_cast<float>(tilesY);
+
+		const float u0 = uStep * static_cast<float>(tileIndexX);
+		const float v0 = vStep * static_cast<float>(tileIndexY);
+		const float u1 = u0 + uStep;
+		const float v1 = v0 + vStep;
+
+		// Define vertices and indices for a colored quad mesh
+		std::vector<Engine::Vertex> quadVertices = {
+			//   position           color     uv
+			{{-0.5f, -0.5f, 0.0f}, color1, {u0, v1}},  // bottom-left
+			{{ 0.5f, -0.5f, 0.0f}, color2, {u1, v1}},  // bottom-right
+			{{ 0.5f,  0.5f, 0.0f}, color3, {u1, v0}},  // top-right
+			{{-0.5f,  0.5f, 0.0f}, color4, {u0, v0}}   // top-left
+		};
+
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+
+		return { quadVertices, quadIndices };
+	}
+
+	VertexesIndexesPair MakeCircle
 	(
 		float radius,
 		uint32_t segmentCount,
@@ -532,6 +570,56 @@ namespace Engine
 				indices.push_back(i0);
 			}
 		}
+
+		return { vertices, indices };
+	}
+
+	VertexesIndexesPair MakeArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float headRadius,
+		float headLength,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	)
+	{
+		// Safety clamps
+		segmentCount = std::max<uint32_t>(3, segmentCount);
+		shaftRadius = std::max(shaftRadius, 0.0001f);
+		headRadius = std::max(headRadius, 0.0001f);
+		shaftLength = std::max(shaftLength, 0.0001f);
+		headLength = std::max(headLength, 0.0001f);
+
+		// 1) Build centered shaft ([-L/2, +L/2] in Y), then translate it up by +L/2 so it spans [0, L]
+		auto shaft = MakeCylinder(shaftRadius, shaftLength, segmentCount, color);
+		{
+			const float yOff = shaftLength * 0.5f;
+			for (auto& v : shaft.vertices) { v.position.y += yOff; }
+		}
+
+		// 2) Build centered head (base at -H/2, tip at +H/2), then translate it so base is at y=shaftLength.
+		// After translation: base => shaftLength, tip => shaftLength + headLength
+		auto head = MakeCone(headRadius, headLength, segmentCount, color);
+		{
+			const float yOff = shaftLength + headLength * 0.5f;
+			for (auto& v : head.vertices) { v.position.y += yOff; }
+		}
+
+		// 3) Merge (append head onto shaft)
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+		vertices.reserve(shaft.vertices.size() + head.vertices.size());
+		indices.reserve(shaft.indices.size() + head.vertices.size());
+
+		// Shaft
+		vertices.insert(vertices.end(), shaft.vertices.begin(), shaft.vertices.end());
+		indices.insert(indices.end(), shaft.indices.begin(), shaft.indices.end());
+
+		// Head (indices offset)
+		const uint32_t baseIndex = static_cast<uint32_t>(shaft.vertices.size());
+		for (auto idx : head.indices) { indices.push_back(baseIndex + idx); }
+		vertices.insert(vertices.end(), head.vertices.begin(), head.vertices.end());
 
 		return { vertices, indices };
 	}

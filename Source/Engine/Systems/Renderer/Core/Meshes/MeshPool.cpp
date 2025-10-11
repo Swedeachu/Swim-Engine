@@ -11,6 +11,11 @@ namespace Engine
 		return instance;
 	}
 
+	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const VertexesIndexesPair& data)
+	{
+		return RegisterMesh(name, data.vertices, data.indices);
+	}
+
 	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
@@ -41,7 +46,10 @@ namespace Engine
 		return mesh;
 	}
 
-	std::shared_ptr<Mesh> MeshPool::GetOrCreateAndRegisterMesh(const std::string& desiredName, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+	std::shared_ptr<Mesh> MeshPool::GetOrCreateAndRegisterMesh
+	(
+		const std::string& desiredName, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices
+	)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 

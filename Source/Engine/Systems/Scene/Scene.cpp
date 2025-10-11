@@ -21,24 +21,267 @@ namespace Engine
 		return registry.create();
 	}
 
-	void Scene::DestroyEntity(entt::entity entity, bool callExit)
+	void Scene::DestroyEntity(entt::entity entity, bool callExit, bool destroyChildren)
 	{
-		if (callExit)
+		if (!registry.valid(entity))
 		{
-			ForEachBehaviorOfEntity(entity, &Behavior::Exit);
+			return;
 		}
 
+		// If it has a Transform, handle children and unlink from parent
+		if (registry.any_of<Transform>(entity))
+		{
+			auto& tf = registry.get<Transform>(entity);
+
+			// Handle children
+			// Copy the list; it will be mutated
+			std::vector<entt::entity> kids = tf.children;
+
+			if (destroyChildren)
+			{
+				// Depth-first destroy of subtree
+				for (auto child : kids)
+				{
+					DestroyEntity(child, callExit, true);
+				}
+			}
+			else
+			{
+				// Detach children (null their parents)
+				for (auto child : kids)
+				{
+					if (!registry.valid(child) || !registry.any_of<Transform>(child))
+					{
+						continue;
+					}
+					auto& ctf = registry.get<Transform>(child);
+					// remove child from our list will happen after loop anyway
+					ctf.parent = entt::null;
+					ctf.MarkWorldDirtyOnly();
+				}
+
+				tf.children.clear();
+			}
+
+			// Unlink from our parent
+			if (tf.parent != entt::null && registry.valid(tf.parent) && registry.any_of<Transform>(tf.parent))
+			{
+				auto& ptf = registry.get<Transform>(tf.parent);
+				auto& vec = ptf.children;
+				vec.erase(std::remove(vec.begin(), vec.end(), entity), vec.end());
+			}
+
+			tf.parent = entt::null;
+		}
+
+		// Call Exit() on behaviors if needed
+		if (callExit && registry.any_of<BehaviorComponents>(entity))
+		{
+			auto& bc = registry.get<BehaviorComponents>(entity);
+			for (auto& b : bc.behaviors)
+			{
+				if (b) b->Exit();
+			}
+		}
+
+		// Finally destroy the entity itself
 		registry.destroy(entity);
 	}
 
 	void Scene::DestroyAllEntities(bool callExit)
 	{
-		if (callExit)
+		std::vector<entt::entity> toKill;
+
+		for (auto entity : registry.storage<entt::entity>())
 		{
-			ForEachBehavior(&Behavior::Exit);
+			toKill.push_back(entity);
 		}
 
-		registry.clear();
+		for (auto e : toKill)
+		{
+			if (!registry.valid(e))
+			{
+				continue;
+			}
+
+			bool hasTf = registry.any_of<Transform>(e);
+			bool hasParent = false;
+
+			if (hasTf)
+			{
+				hasParent = registry.get<Transform>(e).parent != entt::null;
+			}
+
+			if (!hasParent)
+			{
+				DestroyEntity(e, callExit, true);
+			}
+		}
+
+		for (auto e : toKill)
+		{
+			if (registry.valid(e))
+			{
+				DestroyEntity(e, callExit, true);
+			}
+		}
+	}
+
+	void Scene::SetParent(entt::entity child, entt::entity parent)
+	{
+		// Avoid self-parenting
+		if (child == parent)
+		{
+			return;
+		}
+
+		// Safety
+		if (!registry.valid(child) || !registry.any_of<Transform>(child))
+		{
+			return;
+		}
+
+		// Allow nulling by passing entt::null via RemoveParent instead.
+		if (!registry.valid(parent) || !registry.any_of<Transform>(parent))
+		{
+			return;
+		}
+
+		// Avoid cycles
+		if (WouldCreateCycle(registry, child, parent))
+		{
+			return;
+		}
+
+		auto& childTf = registry.get<Transform>(child);
+
+		// If already same parent, nothing to do
+		if (childTf.parent == parent)
+		{
+			return;
+		}
+
+		// Remove from old parent's children list
+		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
+		{
+			auto& oldParentTf = registry.get<Transform>(childTf.parent);
+			auto& vec = oldParentTf.children;
+			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
+		}
+
+		// Set new parent + register child
+		childTf.parent = parent;
+		auto& parentTf = registry.get<Transform>(parent);
+		parentTf.children.push_back(child);
+
+		// Invalidate child's world and all its descendants (lazy recompute on demand)
+		std::vector<entt::entity> stack;
+		stack.push_back(child);
+
+		while (!stack.empty())
+		{
+			entt::entity e = stack.back();
+			stack.pop_back();
+
+			if (!registry.valid(e) || !registry.any_of<Transform>(e))
+			{
+				continue;
+			}
+
+			auto& tf = registry.get<Transform>(e);
+			tf.MarkWorldDirtyOnly();
+
+			for (auto c : tf.children)
+			{
+				stack.push_back(c);
+			}
+		}
+	}
+
+	void Scene::RemoveParent(entt::entity child)
+	{
+		if (!registry.valid(child) || !registry.any_of<Transform>(child))
+		{
+			return;
+		}
+
+		auto& childTf = registry.get<Transform>(child);
+
+		// Remove from old parent's children list
+		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
+		{
+			auto& oldParentTf = registry.get<Transform>(childTf.parent);
+			auto& vec = oldParentTf.children;
+			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
+		}
+
+		// Clear parent
+		childTf.parent = entt::null;
+
+		// Invalidate subtree world matrices
+		std::vector<entt::entity> stack;
+		stack.push_back(child);
+
+		while (!stack.empty())
+		{
+			entt::entity e = stack.back();
+			stack.pop_back();
+
+			if (!registry.valid(e) || !registry.any_of<Transform>(e))
+			{
+				continue;
+			}
+
+			auto& tf = registry.get<Transform>(e);
+			tf.MarkWorldDirtyOnly();
+
+			for (auto c : tf.children)
+			{
+				stack.push_back(c);
+			}
+		}
+	}
+
+	std::vector<entt::entity>* Scene::GetChildren(entt::entity e)
+	{
+		if (registry.valid(e) && registry.any_of<Transform>(e))
+		{
+			Transform& tf = registry.get<Transform>(e);
+			return &tf.children;
+		}
+
+		return nullptr;
+	}
+
+	entt::entity Scene::GetParent(entt::entity e) const
+	{
+		if (registry.valid(e) && registry.any_of<Transform>(e))
+		{
+			const auto& tf = registry.get<Transform>(e);
+			return tf.parent;
+		}
+
+		return entt::null;
+	}
+
+	bool Scene::WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent)
+	{
+		// climb from newParent up to root; if we see child, that's a cycle
+		entt::entity cur = newParent;
+
+		while (cur != entt::null && reg.valid(cur) && reg.any_of<Transform>(cur))
+		{
+			if (cur == child)
+			{
+				return true;
+			}
+
+			const auto& tf = reg.get<Transform>(cur);
+
+			cur = tf.parent;
+		}
+
+		return false;
 	}
 
 	void Scene::SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system)
@@ -143,7 +386,11 @@ namespace Engine
 	{
 		// Clear the previous frames debug draw data. 
 		// This opens up an opportunity for caching commonly drawn wireframes.
-		sceneDebugDraw->Clear();
+		// sceneDebugDraw->Clear();
+		
+		// We want to keep editor mode objects such as retained gizmos, trash everything else that is immediate mode from the previous frame
+		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT };
+		sceneDebugDraw->ClearExceptTags(keep);
 
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
@@ -294,6 +541,41 @@ namespace Engine
 		const glm::vec3 dir = glm::normalize(q * dirVS);
 
 		return Ray(origin, dir);
+	}
+
+	ObjectTag* Scene::GetTag(entt::entity entity)
+	{
+		if (registry.valid(entity) && registry.any_of<ObjectTag>(entity))
+		{
+			return &registry.get<ObjectTag>(entity);
+		}
+
+		return nullptr;
+	}
+
+	void Scene::SetTag(entt::entity entity, int tag, const std::string& name)
+	{
+		if (registry.valid(entity))
+		{
+			if (registry.any_of<ObjectTag>(entity))
+			{
+				auto& t = registry.get<ObjectTag>(entity);
+				t.tag = tag;
+				t.name = name;
+			}
+			else
+			{
+				registry.emplace<ObjectTag>(entity, tag, name);
+			}
+		}
+	}
+
+	void Scene::RemoveTag(entt::entity entity)
+	{
+		if (registry.valid(entity) && registry.any_of<ObjectTag>(entity))
+		{
+			registry.remove<ObjectTag>(entity);
+		}
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

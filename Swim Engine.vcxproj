@@ -241,6 +241,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Components\CompositeMaterial.h" />
     <ClInclude Include="Source\Engine\Components\MeshDecorator.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Components\ObjectTag.h" />
     <ClInclude Include="Source\Engine\Components\TextComponent.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
@@ -281,11 +282,15 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+    <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
@@ -312,6 +317,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\main.cpp" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
@@ -320,6 +327,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
+    <ClInclude Include="Source\Game\Testing\MeshDrawingStressTest.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitiveTest.h" />
+    <ClInclude Include="Source\Game\Testing\TextAndUiTest.h" />
     <ClInclude Include="Source\Library\basis\basisu.h" />
     <ClInclude Include="Source\Library\basis\basisu_astc_hdr_core.h" />
     <ClInclude Include="Source\Library\basis\basisu_astc_helpers.h" />

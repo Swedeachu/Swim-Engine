@@ -55,7 +55,7 @@ namespace Engine
 		// Helpers for instance buffer update
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
 		void GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum);
-		void AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
+		void AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 
 		void GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize);

@@ -322,14 +322,14 @@ namespace Engine
 			if (registry.all_of<Material>(entity))
 			{
 				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-				AddInstance(tf, mat, nullptr);
+				AddInstance(registry, tf, mat, nullptr);
 			}
 			else if (registry.all_of<CompositeMaterial>(entity))
 			{
 				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
 				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
 				{
-					AddInstance(tf, mat, nullptr);
+					AddInstance(registry, tf, mat, nullptr);
 				}
 			}
 		});
@@ -345,7 +345,7 @@ namespace Engine
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
 				const auto& mat = regularView.get<Material>(entity).data;
-				AddInstance(tf, mat, frustum);
+				AddInstance(registry, tf, mat, frustum);
 			}
 		}
 
@@ -358,23 +358,21 @@ namespace Engine
 				const auto& composite = compositeView.get<CompositeMaterial>(entity);
 				for (const auto& mat : composite.subMaterials)
 				{
-					AddInstance(tf, mat, frustum);
+					AddInstance(registry, tf, mat, frustum);
 				}
 			}
 		}
 	}
 
-	void VulkanIndexDraw::AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
+	void VulkanIndexDraw::AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
-		const std::shared_ptr<Mesh>& mesh = mat->mesh;
-
-		const glm::vec4& min = mesh->meshBufferData->aabbMin;
-		const glm::vec4& max = mesh->meshBufferData->aabbMax;
+		const glm::vec4& min = mat->mesh->meshBufferData->aabbMin;
+		const glm::vec4& max = mat->mesh->meshBufferData->aabbMax;
 
 		// Frustum culling if world-space
 		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
-			if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
+			if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
 			{
 				return;
 			}
@@ -383,16 +381,16 @@ namespace Engine
 		GpuInstanceData instance{};
 
 		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
-		instance.model = transform.GetModelMatrix();
+		instance.model = transform.GetWorldMatrix(registry);
 		instance.aabbMin = min;
 		instance.aabbMax = max;
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-		instance.meshInfoIndex = mesh->meshBufferData->GetMeshID();
+		instance.meshInfoIndex = mat->mesh->meshBufferData->GetMeshID();
 		instance.materialIndex = 0u; // nothing yet
-		instance.indexCount = mesh->meshBufferData->indexCount;
-		instance.indexOffsetInMegaBuffer = mesh->meshBufferData->indexOffsetInMegaBuffer;
-		instance.vertexOffsetInMegaBuffer = mesh->meshBufferData->vertexOffsetInMegaBuffer;
+		instance.indexCount = mat->mesh->meshBufferData->indexCount;
+		instance.indexOffsetInMegaBuffer = mat->mesh->meshBufferData->indexOffsetInMegaBuffer;
+		instance.vertexOffsetInMegaBuffer = mat->mesh->meshBufferData->vertexOffsetInMegaBuffer;
 
 		cpuInstanceData.push_back(instance);
 	}
@@ -633,7 +631,7 @@ namespace Engine
 
 			const std::shared_ptr<MaterialData>& mat = matComp.data;
 			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
-			const glm::mat4& model = transform.GetModelMatrix();
+			const glm::mat4& model = transform.GetWorldMatrix(registry);
 
 			// First do a simple cull check 
 			if (cull)
@@ -843,8 +841,8 @@ namespace Engine
 			const uint32_t atlasIndex = tc.GetFont()->msdfAtlas->GetBindlessIndex();
 
 			MsdfTextGpuInstanceData s = (space == TransformSpace::Screen)
-				? BuildMsdfStateScreen(tf, tc, fi, windowWidth, windowHeight, Renderer::VirtualCanvasWidth, Renderer::VirtualCanvasHeight, atlasIndex)
-				: BuildMsdfStateWorld(tf, tc, fi, atlasIndex);
+				? BuildMsdfStateScreen(registry, tf, tc, fi, windowWidth, windowHeight, Renderer::VirtualCanvasWidth, Renderer::VirtualCanvasHeight, atlasIndex)
+				: BuildMsdfStateWorld(registry, tf, tc, fi, atlasIndex);
 
 			EmitMsdf(tc, fi, s, [&](uint32_t /*lineIdx*/, const GlyphQuad& q, const MsdfTextGpuInstanceData& st)
 			{

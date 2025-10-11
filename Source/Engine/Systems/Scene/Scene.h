@@ -5,6 +5,7 @@
 #include "SubSceneSystems/SceneDebugDraw.h"
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
+#include "Engine/Components/ObjectTag.h"
 
 namespace Engine
 {
@@ -63,9 +64,17 @@ namespace Engine
 
 		entt::entity CreateEntity();
 
-		void DestroyEntity(entt::entity entity, bool callExit = true);
+		void DestroyEntity(entt::entity entity, bool callExit = true, bool destroyChildren = true);
 
 		void DestroyAllEntities(bool callExit = true);
+
+		void SetParent(entt::entity child, entt::entity parent);
+
+		void RemoveParent(entt::entity child);
+
+		std::vector<entt::entity>* GetChildren(entt::entity e);
+
+		entt::entity GetParent(entt::entity e) const;
 
 		const std::string& GetName() const { return name; }
 
@@ -222,6 +231,12 @@ namespace Engine
 			}
 		}
 
+		ObjectTag* GetTag(entt::entity entity);
+
+		void SetTag(entt::entity entity, int tag, const std::string& name = "");
+
+		void RemoveTag(entt::entity entity);
+
 	protected:
 
 		std::string name;
@@ -259,6 +274,8 @@ namespace Engine
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
 		void UpdateUIBehaviors();
+
+		bool WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent);
 
 	};
 

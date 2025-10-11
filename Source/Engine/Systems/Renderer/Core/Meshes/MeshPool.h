@@ -3,6 +3,7 @@
 #include <mutex>
 #include "Mesh.h"
 #include "Vertex.h"
+#include "PrimitiveMeshes.h"
 
 namespace Engine
 {
@@ -22,6 +23,7 @@ namespace Engine
     MeshPool& operator=(MeshPool&&) = delete;
 
     // Registers a mesh with a unique name. Returns the existing mesh if it already exists.
+    std::shared_ptr<Mesh> RegisterMesh(const std::string& name, const VertexesIndexesPair& data);
     std::shared_ptr<Mesh> RegisterMesh(const std::string& name, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
     // If you care about registering meshes super quick, don't use this. This is for safety.
@@ -46,11 +48,6 @@ namespace Engine
 
     mutable std::mutex poolMutex; // Protects the mesh map
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;
-
-    // Vulkan context cache
-    bool vulkanDevicesCached = false;
-    VkDevice cachedDevice = VK_NULL_HANDLE;
-    VkPhysicalDevice cachedPhysicalDevice = VK_NULL_HANDLE;
 
     // Maps for mesh indexing
     std::unordered_map<std::shared_ptr<Mesh>, uint32_t> meshToID;
