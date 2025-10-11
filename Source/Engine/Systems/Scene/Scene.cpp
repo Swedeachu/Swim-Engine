@@ -387,13 +387,19 @@ namespace Engine
 		// Clear the previous frames debug draw data. 
 		// This opens up an opportunity for caching commonly drawn wireframes.
 		// sceneDebugDraw->Clear();
-		
+
 		// We want to keep editor mode objects such as retained gizmos, trash everything else that is immediate mode from the previous frame
 		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT };
 		sceneDebugDraw->ClearExceptTags(keep);
 
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
+
+		// Ensure BVH is coherent for THIS frame if any entity was removed/added or forced
+		if (sceneBVH && sceneBVH->ShouldForceUpdate())
+		{
+			sceneBVH->Update();
+		}
 
 		// Call Update(dt) on all Behavior components
 		ForEachBehavior(&Behavior::Update, dt);

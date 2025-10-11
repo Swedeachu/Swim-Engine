@@ -267,8 +267,6 @@ namespace Game
 			if (s.x <= 0.03f)
 			{
 				DestroyPlanet(p);
-				// p.dying = false;
-				// tf.SetScale(glm::vec3(1.0f));
 				return;
 			}
 		}

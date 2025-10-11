@@ -184,7 +184,11 @@ namespace Engine
 
 			if (node.IsLeaf())
 			{
-				callback(node.entity); // visible leaf so trigger callback
+				// Skip tombstones
+				if (node.entity != entt::null)
+				{
+					callback(node.entity); // visible leaf so trigger callback
+				}
 			}
 			else
 			{
