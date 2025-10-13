@@ -214,7 +214,7 @@ namespace Game
 		AddCones(scene, pools);
 		AddCylinders(scene, pools);
 		AddToruses(scene, pools);
-		AddGizmoArrows(scene, pools);
+		// AddGizmoArrows(scene, pools);
 		// AddDarkPlane(scene, pools);
 	}
 

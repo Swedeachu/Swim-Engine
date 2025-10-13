@@ -332,6 +332,12 @@ namespace Engine
 
 		sceneBVH->SetDebugDrawer(sceneDebugDraw.get());
 
+		gizmoSystem = std::make_unique<GizmoSystem>();
+		std::shared_ptr<Scene> self = shared_from_this();
+		gizmoSystem->SetScene(self);
+		gizmoSystem->Awake();
+		gizmoSystem->Init();
+
 		ForEachBehavior(&Behavior::Init); // we might not want to do this actually and let behaviors do this themselves
 	}
 
@@ -347,6 +353,11 @@ namespace Engine
 	// It might make sense to have sub scene systems be in a data structure that iterates with update inside of here and init and update etc.
 	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
+		if (gizmoSystem)
+		{
+			gizmoSystem->FixedUpdate(tickThisSecond);
+		}
+
 		// Call fixed update on all our behaviors
 		ForEachBehavior(&Behavior::FixedUpdate, tickThisSecond);
 
@@ -401,6 +412,11 @@ namespace Engine
 			sceneBVH->Update();
 		}
 
+		if (gizmoSystem)
+		{
+			gizmoSystem->Update(dt);
+		}
+
 		// Call Update(dt) on all Behavior components
 		ForEachBehavior(&Behavior::Update, dt);
 		UpdateUIBehaviors();
@@ -427,31 +443,7 @@ namespace Engine
 	{
 		// 1. Get raw mouse position in window pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseWin = inputMgr->GetMousePosition(); // (0,0) = window TL
-
-		// 2. Convert that to virtual canvas units (same space as Transform)
-		auto engine = Engine::SwimEngine::GetInstance();
-
-		float windowW = static_cast<float>(engine->GetWindowWidth());
-		float windowH = static_cast<float>(engine->GetWindowHeight());
-
-		constexpr float virtW = Engine::Renderer::VirtualCanvasWidth;
-		constexpr float virtH = Engine::Renderer::VirtualCanvasHeight;
-
-		float scaleX = windowW / virtW;
-		float scaleY = windowH / virtH;
-
-		// window top border hack fix
-		float offset = 14; // was 28
-		if (scaleY > 0.9f)
-		{
-			offset = 0.f;
-		}
-
-		glm::vec2 mouseVirt;
-		mouseVirt.x = mouseWin.x / scaleX; // undo X scale
-		mouseVirt.y = mouseWin.y / scaleY; // undo Y scale
-		mouseVirt.y = virtH - mouseVirt.y - offset; // flip origin TL -> BL
+		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true); // (0,0) = window TL
 
 		// 3. Iterate over UI entities and run hit-testing in the same space
 		auto& registry = GetRegistry();
@@ -514,12 +506,11 @@ namespace Engine
 		});
 	}
 
-	// Point is in screen pixels, (0,0) = top-left. Need to investigate if the position is off by a tiny bit.
+	// Point is in screen pixels, (0,0) = top-left.
 	Ray Scene::ScreenPointToRay(const glm::vec2& point) const
 	{
 		Camera& cam = GetCameraSystem()->GetCamera();
 
-		// Use your actual render viewport if it differs from the window size.
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 		const float width = static_cast<float>(engine->GetWindowWidth());
 		const float height = static_cast<float>(engine->GetWindowHeight());

@@ -64,12 +64,12 @@ namespace Engine
 			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
 			const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
-			const bool isDirty = tf.IsDirty();
+			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
 
 			auto it = entityToLeaf.find(e);
 			if (it != entityToLeaf.end())
 			{
-				if (isDirty)
+				if (needsAabbUpdate)
 				{
 					nodes[it->second].aabb = CalculateWorldAABB(mesh, tf);
 				}
@@ -126,12 +126,12 @@ namespace Engine
 
 			AABB worldAABB = { worldMin, worldMax };
 
-			const bool isDirty = tf.IsDirty();
+			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
 
 			auto it = entityToLeaf.find(e);
 			if (it != entityToLeaf.end())
 			{
-				if (isDirty)
+				if (needsAabbUpdate)
 				{
 					nodes[it->second].aabb = worldAABB;
 				}

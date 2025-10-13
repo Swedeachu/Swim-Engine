@@ -150,7 +150,7 @@ namespace Game
 
 		// We can load scene scripts this way as a cool hack/trick
 		// Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
-		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest, RayCasterCameraControl>();
+		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest/*, RayCasterCameraControl*/>();
 
 		if constexpr (doUI) MakeUI(this);
 

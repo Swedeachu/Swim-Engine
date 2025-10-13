@@ -760,6 +760,7 @@ namespace Engine
 				data.enableStroke = deco.enableStroke ? 1 : 0;
 				data.roundCorners = deco.roundCorners ? 1 : 0;
 				data.useTexture = useTex ? 1 : 0;
+				data.renderOnTop = deco.renderOnTop;
 			}
 			else
 			{
@@ -778,6 +779,7 @@ namespace Engine
 				data.enableStroke = 0;
 				data.roundCorners = 0;
 				data.useTexture = mat->albedoMap ? 1 : 0;
+				data.renderOnTop = 0;
 			}
 
 			data.resolution = glm::vec2(windowWidth, windowHeight);

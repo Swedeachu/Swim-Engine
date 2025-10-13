@@ -58,6 +58,7 @@
     <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
     <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -356,6 +357,8 @@
     <ClInclude Include="Source\Engine\Components\ObjectTag.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Axis.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

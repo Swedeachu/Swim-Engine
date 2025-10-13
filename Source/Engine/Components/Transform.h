@@ -45,8 +45,9 @@ namespace Engine
 		void MarkDirty()
 		{
 			dirty = true;
-			worldDirty = true; // local change implies world change
+			worldDirty = true; 
 			TransformsDirty = true;
+			MarkChildrenDirty();
 		}
 
 		// Called by Scene to invalidate world cache (and optionally local if needed)
@@ -54,6 +55,28 @@ namespace Engine
 		{
 			worldDirty = true;
 			TransformsDirty = true;
+			MarkChildrenDirty();
+		}
+
+		void MarkChildrenDirty()
+		{
+			// scuffed hack, but is the most painless for the rest of the engine
+			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+			if (!scene) return;
+
+			entt::registry& reg = scene->GetRegistry();
+
+			for (entt::entity child : children)
+			{
+				if (reg.valid(child))
+				{
+					if (reg.any_of<Transform>(child))
+					{
+						Transform& tf = reg.get<Transform>(child);
+						tf.MarkDirty();
+					}
+				}
+			}
 		}
 
 	public:
@@ -81,6 +104,7 @@ namespace Engine
 		const glm::vec3& GetScale()    const { return scale; }
 		const glm::quat& GetRotation() const { return rotation; }
 		const bool IsDirty()           const { return dirty; }
+		const bool IsWorldDirty()			 const { return worldDirty; }
 
 		static bool AreAnyTransformsDirty() { return TransformsDirty; }
 		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }

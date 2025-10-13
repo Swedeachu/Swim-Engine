@@ -1,11 +1,17 @@
 #pragma once
 
 #include "Library/EnTT/entt.hpp"
+
 #include "SubSceneSystems/SceneBVH.h"
+#include "SubSceneSystems/GizmoSystem.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
+
+#include "Engine/Components/ObjectTag.h"
+
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
-#include "Engine/Components/ObjectTag.h"
+
+#include <memory>
 
 namespace Engine
 {
@@ -19,7 +25,7 @@ namespace Engine
 	class Renderer;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
-	class Scene : public Machine
+	class Scene : public Machine, public std::enable_shared_from_this<Scene>
 	{
 
 	public:
@@ -270,6 +276,7 @@ namespace Engine
 
 		std::unique_ptr<SceneBVH> sceneBVH;
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
+		std::unique_ptr<GizmoSystem> gizmoSystem;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 

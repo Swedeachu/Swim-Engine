@@ -16,6 +16,7 @@ struct MeshDecoratorGpuInstanceData
   int useTexture;
   float2 resolution;
   float2 quadSize;
+  int renderOnTop;
 };
 
 [[vk::binding(2, 0)]]

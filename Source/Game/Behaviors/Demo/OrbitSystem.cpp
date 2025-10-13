@@ -69,7 +69,7 @@ namespace Game
 		{
 			if (reg.valid(p.entity))
 			{
-				scene->DestroyEntity(p.entity, true);
+				scene->DestroyEntity(p.entity);
 			}
 		}
 
@@ -78,7 +78,7 @@ namespace Game
 		// Destroy star
 		if (reg.valid(starEntity))
 		{
-			scene->DestroyEntity(starEntity, true);
+			scene->DestroyEntity(starEntity);
 			starEntity = entt::null;
 		}
 

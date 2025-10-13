@@ -202,4 +202,36 @@ namespace Engine
 		return false;
 	}
 
+	glm::vec2 InputManager::GetMousePosition(bool adjustForTitleBar, int amount) const
+	{
+		if (!adjustForTitleBar || amount == 0)
+		{
+			return mousePos;
+		}
+
+		auto engine = Engine::SwimEngine::GetInstance();
+
+		float windowW = static_cast<float>(engine->GetWindowWidth());
+		float windowH = static_cast<float>(engine->GetWindowHeight());
+
+		constexpr float virtW = Engine::Renderer::VirtualCanvasWidth;
+		constexpr float virtH = Engine::Renderer::VirtualCanvasHeight;
+
+		float scaleX = windowW / virtW;
+		float scaleY = windowH / virtH;
+
+		// window top border hack fix (this might differ based on screen resolution)
+		if (scaleY > 0.9f)
+		{
+			amount = 0.f;
+		}
+
+		glm::vec2 mouseVirt;
+		mouseVirt.x = mousePos.x / scaleX; // undo X scale
+		mouseVirt.y = mousePos.y / scaleY; // undo Y scale
+		mouseVirt.y = virtH - mouseVirt.y - amount; // flip origin TL -> BL
+
+		return mouseVirt;
+	}
+
 }

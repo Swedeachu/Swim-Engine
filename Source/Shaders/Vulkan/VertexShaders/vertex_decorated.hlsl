@@ -45,6 +45,7 @@ struct MeshDecoratorGpuInstanceData
   int useTexture;
   float2 resolution;
   float2 quadSize;
+  int renderOnTop; // 0 = normal depth, 1 = force in front
 };
 
 [[vk::binding(2, 0)]]
@@ -102,6 +103,13 @@ VSOutput main(VSInput vin)
 
   // Final clip space position
   float4 clipPos = mul(proj, mul(view, float4(worldPos, 1.0f)));
+
+  if (deco.renderOnTop != 0) {
+    // Put at (almost) the near plane in clip space so depth ~ 0 in NDC.
+    // Use a tiny epsilon to avoid clipping at exactly -w.
+    clipPos.z = clipPos.w * 1e-6f;
+  }
+  
   vout.position = clipPos;
 
   // Pass-through values

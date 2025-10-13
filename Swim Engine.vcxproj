@@ -253,6 +253,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Axis.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h" />
@@ -271,6 +272,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.cpp" />
     <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
@@ -317,6 +319,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\main.cpp" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />

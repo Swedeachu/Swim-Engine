@@ -39,7 +39,7 @@ namespace Game
 
 	private:
 
-		int    initialPlanetCount = 6;
+		int    initialPlanetCount = 24;
 		float  minOrbitRadius = 3.5f;
 		float  maxOrbitRadius = 12.0f;
 		float  minOrbitSpeedDeg = 10.0f;
