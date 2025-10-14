@@ -22,7 +22,7 @@ namespace Engine
 
 		int Awake() override;
 
-		int Init() override { return 0; }
+		int Init() override;
 
 		void Update(double dt) override;
 
@@ -32,6 +32,8 @@ namespace Engine
 
 		void SetScene(std::shared_ptr<Scene>& scene) { activeScene = scene; }
 
+		void SetGizmoType(GizmoType type);
+
 	private:
 
 		void NothingSelectedYetBehavior();
@@ -40,7 +42,7 @@ namespace Engine
 
 		void GizmoRootControl();
 
-		void LoseFocus();
+		void LoseFocus(bool setFocusedEntityNull = true);
 
 		entt::entity LeftClickCheck();
 
@@ -70,13 +72,19 @@ namespace Engine
 		std::shared_ptr<Mesh> arrowMesh;
 		std::shared_ptr<Mesh> ringMesh;
 		std::shared_ptr<Mesh> cubeMesh;
+		std::shared_ptr<Mesh> quadMesh;
+		std::shared_ptr<Mesh> circleMesh;
 
 		std::shared_ptr<MaterialData> sphereMatData;
 		std::shared_ptr<MaterialData> arrowMatData;
 		std::shared_ptr<MaterialData> ringMatData;
 		std::shared_ptr<MaterialData> cubeMatData;
+		std::shared_ptr<MaterialData> quadMatData;
+		std::shared_ptr<MaterialData> circleMatData;
 
 		std::shared_ptr<Scene> activeScene;
+
+		entt::entity gizmoUI = entt::null;
 
 		// Axis state
 		entt::entity axisX = entt::null;

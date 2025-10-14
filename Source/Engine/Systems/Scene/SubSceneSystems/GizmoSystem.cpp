@@ -7,7 +7,11 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/TextComponent.h"
 #include "Engine/Components/ObjectTag.h"
+#include "Engine/Systems/Entity/CommonBehaviors/DragUiBehavior.h"
+#include "Engine/Systems/Renderer/Core/Font/FontPool.h"
+#include "Engine/Systems/Scene/InternalBehaviors/ChangeGizmoTypeButtonBehavior.h"
 
 namespace Engine
 {
@@ -64,11 +68,105 @@ namespace Engine
 			return MakeCube();
 		});
 
+		quadMesh = getOrCreateMesh("GizmoQuad", [&]
+		{
+			return MakeQuad();
+		});
+
+		circleMesh = getOrCreateMesh("GizmoCircle", [&]
+		{
+			return MakeCircle(0.5f, 128, white);
+		});
+
 		// Register or fetch materials for each gizmo mesh
 		sphereMatData = getOrCreateMaterial("GizmoBallMat", sphereMesh);
 		arrowMatData = getOrCreateMaterial("GizmoArrowMat", arrowMesh);
 		ringMatData = getOrCreateMaterial("GizmoRingMat", ringMesh);
 		cubeMatData = getOrCreateMaterial("GizmoCubeMat", cubeMesh);
+		quadMatData = getOrCreateMaterial("GizmoQuadData", quadMesh);
+		circleMatData = getOrCreateMaterial("GizmoCircleData", circleMesh);
+
+		return 0;
+	}
+
+	int GizmoSystem::Init()
+	{
+		glm::vec4 gray = { 0.188f, 0.176f, 0.176f, 1.0f };
+		glm::vec4 black = { 0.0f,   0.0f,   0.0f,   1.0f };
+		glm::vec4 white = { 1.0f,   1.0f,   1.0f,   1.0f };
+
+		// Common colors for all gizmo buttons
+		glm::vec4 hoverColor = { 0.0509804f, 0.3450980f, 0.8196079f, 1.0f }; // blueish
+		glm::vec4 activeColor = { 0.0f, 0.5f, 0.0f, 1.0f }; // green
+
+		gizmoUI = activeScene->CreateEntity();
+
+		// Base container box properties of the gizmo selection UI (in px)
+		glm::vec3 position = { 100.0f, 700.0f, 0.0f };
+		glm::vec3 scale = { 100.0f, 300.0f, 1.0f };
+		glm::vec2 strokeWidth = { 6.0f, 6.0f };
+		glm::vec2 cornerRadius = { 12.0f, 12.0f };
+		glm::vec2 pad = { 0.0f, 0.0f };
+		bool rounded = true, stroke = true, fill = true, useTex = false;
+
+		activeScene->EmplaceComponent<Transform>(gizmoUI, position, scale, glm::quat(), TransformSpace::Screen);
+		activeScene->EmplaceComponent<Material>(gizmoUI, Material(quadMatData));
+		activeScene->EmplaceComponent<MeshDecorator>(gizmoUI, black, gray, strokeWidth, cornerRadius, pad, rounded, stroke, fill, useTex);
+		activeScene->EmplaceBehavior<DragUiBehavior>(gizmoUI);
+
+		// Create buttons parented to gizmoUI
+		Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+		std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
+
+		bool buttonRounded = false, buttonStroke = false, buttonFill = true, buttonUseTex = false;
+
+		glm::vec3 buttonScale = { 0.70f, 0.25f, 1.0f };
+		glm::vec2 buttonStrokeWidth = { 0.05f, 0.05f };
+		glm::vec2 buttonCornerRadius = { 0.05f, 0.05f };
+		glm::vec2 buttonPad = { 0.0f, 0.0f };
+		glm::vec4 buttonStrokeColor = white;
+		glm::vec4 buttonFillColor = gray;
+
+		auto makeButton = [&](const char* label, float textY, const glm::vec3& pos, GizmoType type)
+		{
+			entt::entity e = activeScene->CreateEntity();
+			Transform& tf = activeScene->EmplaceComponent<Transform>(e, pos, buttonScale, glm::quat(), TransformSpace::Screen);
+			activeScene->EmplaceComponent<Material>(e, Material(quadMatData));
+			activeScene->EmplaceComponent<MeshDecorator>(e, buttonFillColor, buttonStrokeColor,
+				buttonStrokeWidth, buttonCornerRadius, buttonPad, buttonRounded, buttonStroke, buttonFill, buttonUseTex);
+
+			ChangeGizmoTypeButtonBehavior* beh = activeScene->EmplaceBehavior<ChangeGizmoTypeButtonBehavior>(e);
+			beh->SetGizmoType(type);
+			beh->SetHoverColor(hoverColor);
+			beh->SetActiveColor(activeColor);
+			beh->SetRegularColor(gray);
+
+			activeScene->SetParent(e, gizmoUI);
+			tf.SetScreenSpaceLayerRelativeToParent(true);
+
+			// Text
+			entt::entity txt = activeScene->CreateEntity();
+			glm::vec3 textPos = { 0.0f, textY, 0.0f };
+			Transform& txtTf = activeScene->EmplaceComponent<Transform>(txt, textPos, buttonScale * 200.0f, glm::quat(), TransformSpace::Screen);
+
+			Engine::TextComponent tc;
+			tc.fillColor = white;
+			tc.strokeColor = black;
+			tc.strokeWidth = 2.0f;
+			tc.SetAlignment(Engine::TextAllignemt::Center);
+			tc.SetText(label);
+			tc.SetFont(roboto);
+
+			activeScene->AddComponent<Engine::TextComponent>(txt, tc);
+			activeScene->SetParent(txt, e);
+			txtTf.SetScreenSpaceLayerRelativeToParent(true);
+
+			return e;
+		};
+
+		makeButton("T", 70, { 0.0f,  0.3f, 0.0f }, GizmoType::Translate);
+		makeButton("R", -20, { 0.0f,  0.0f, 0.0f }, GizmoType::Rotate);
+		makeButton("S", -110, { 0.0f, -0.3f, 0.0f }, GizmoType::Scale); 
 
 		return 0;
 	}
@@ -78,7 +176,7 @@ namespace Engine
 		if (!activeScene) return;
 
 		// If nothing is selected, we will call the method to do mouse click ray cast checks for if we are selecting anything in the scene.
-		if (activeGizmoType == GizmoType::Inactive || rootGizmoControl == entt::null || focusedEntity == entt::null)
+		if (activeGizmoType != GizmoType::Inactive && (rootGizmoControl == entt::null || focusedEntity == entt::null))
 		{
 			NothingSelectedYetBehavior();
 			return;
@@ -86,7 +184,7 @@ namespace Engine
 
 		entt::registry& reg = activeScene->GetRegistry();
 
-		// If focused entity was destroyed, destroy the root gizmo control entity
+		// If focused entity was destroyed, destroy the root gizmo control entity (TODO: test this case!)
 		if (!reg.valid(focusedEntity))
 		{
 			LoseFocus();
@@ -96,7 +194,7 @@ namespace Engine
 		// If we have something selected, we will call the method to control the root gizmo based on gizmo type
 		if (activeGizmoType != GizmoType::Inactive && focusedEntity != entt::null && rootGizmoControl != entt::null)
 		{
-			if (activeGizmoType == GizmoType::Translate)
+			if (!activeScene->IsMouseBusyWithUI())
 			{
 				GizmoRootControl();
 			}
@@ -106,9 +204,28 @@ namespace Engine
 		}
 	}
 
-	void GizmoSystem::LoseFocus()
+	// This will delete the current root gizmo control and replaces it with the new gizmo type 
+	void GizmoSystem::SetGizmoType(GizmoType type)
 	{
-		focusedEntity = entt::null;
+		activeGizmoType = type;
+
+		LoseFocus(/*bool setFocusedEntityNull=*/ activeGizmoType == GizmoType::Inactive);
+
+		entt::registry& reg = activeScene->GetRegistry();
+
+		if (reg.valid(focusedEntity) && reg.any_of<Transform>(focusedEntity) && activeGizmoType != GizmoType::Inactive)
+		{
+			SelectedEntityToControlWithGizmo(focusedEntity);
+		}
+	}
+
+	void GizmoSystem::LoseFocus(bool setFocusedEntityNull)
+	{
+		if (setFocusedEntityNull) // true by default
+		{
+			focusedEntity = entt::null;
+		}
+
 		activeScene->DestroyEntity(rootGizmoControl, true, true);
 		rootGizmoControl = entt::null;
 
@@ -211,7 +328,7 @@ namespace Engine
 		auto input = activeScene->GetInputManager();
 		bool leftClicked = input->IsKeyTriggered(VK_LBUTTON) || input->IsKeyDown(VK_LBUTTON);
 
-		if (!leftClicked)
+		if (!leftClicked || activeScene->IsMouseBusyWithUI())
 		{
 			return entt::null;
 		}
@@ -374,9 +491,10 @@ namespace Engine
 	void GizmoSystem::SelectedEntityToControlWithGizmo(entt::entity hit)
 	{
 		focusedEntity = hit;
-		activeGizmoType = GizmoType::Translate; // will be set to whatever the current gizmo type is selected as in the editor
-		// Now we want to create the gizmo, for now is just the translate gizmo since we are hard coding to that type
-		CreateTranslationGizmo();
+		if (activeGizmoType == GizmoType::Translate)
+		{
+			CreateTranslationGizmo();
+		}
 	}
 
 	// 3 arrows for each axis from root, red for X, blue for Z, green for Y
@@ -524,7 +642,7 @@ namespace Engine
 			return Axis::None;
 		}
 
-		auto& reg = activeScene->GetRegistry();
+		entt::registry& reg = activeScene->GetRegistry();
 
 		if (!reg.valid(e) || !reg.any_of<ObjectTag>(e))
 		{
@@ -558,6 +676,8 @@ namespace Engine
 		SetAxisHighlight(Axis::None, activeAxisDrag);
 	}
 
+	// Right now this is hard coded for controlling translation only, (see [1])
+	// we need it based on activeGizmoType to switch between if we are modifying postion or scale or rotation
 	void GizmoSystem::UpdateDrag(const glm::vec3& rayOrigin, const glm::vec3& rayDirN)
 	{
 		if (activeAxisDrag == Axis::None || focusedEntity == entt::null)
@@ -565,8 +685,8 @@ namespace Engine
 			return;
 		}
 
-		auto& reg = activeScene->GetRegistry();
-		if (!reg.valid(focusedEntity))
+		entt::registry& reg = activeScene->GetRegistry();
+		if (!reg.valid(focusedEntity) || !reg.any_of<Transform>(focusedEntity))
 		{
 			return;
 		}
@@ -581,7 +701,7 @@ namespace Engine
 
 		// Apply to focused object position (world-space)
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
-		focusedTf.GetPositionRef() = dragStartObjPos + delta;
+		focusedTf.GetPositionRef() = dragStartObjPos + delta; // [1]
 
 		// Keep gizmo root on the object while dragging 
 		if (rootGizmoControl != entt::null && reg.valid(rootGizmoControl))

@@ -47,8 +47,8 @@ namespace Engine
 		const bool RunMouseCallBacks() const { return runMouseCallBacks; }
 		const bool RunCollisionCallBacks() const { return runCollisionCallBacks; }
 
-		void EnableMouseCallBacks(bool value) { runMouseCallBacks = value; }
-		void EnableCollisionCallBacks(bool value) { runCollisionCallBacks = value; }
+		void EnableMouseCallBacks(bool value = true) { runMouseCallBacks = value; }
+		void EnableCollisionCallBacks(bool value = true) { runCollisionCallBacks = value; }
 
 		const bool FocusedByMouse() const { return focusedByMouse; }
 		void SetFocusedByMouse(bool value) { focusedByMouse = value; }

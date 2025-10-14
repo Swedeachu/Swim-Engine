@@ -63,10 +63,12 @@ namespace Engine
 		VkDevice device = deviceManager->GetDevice();
 		VkPhysicalDevice physicalDevice = deviceManager->GetPhysicalDevice();
 		msaaSamples = deviceManager->GetMaxUsableSampleCount();
+		/*
 		if (msaaSamples > VK_SAMPLE_COUNT_4_BIT)
 		{
 			msaaSamples = VK_SAMPLE_COUNT_4_BIT; // 4x msaa is fine as max for now
 		}
+		*/
 
 		// Ctor inits phase 1 for some image formats needed for the render pass
 		swapChainManager = std::make_unique<VulkanSwapChain>(
@@ -120,7 +122,7 @@ namespace Engine
 		// Set up buffer and UBO for camera with double buffering
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
-		constexpr int MAX_EXPECTED_INSTANCES = 128000; 
+		constexpr int MAX_EXPECTED_INSTANCES = 128000;
 
 		// Create the index draw object which stores our instanced buffers and does our indexed drawing logic and caching
 		indexDraw = std::make_unique<VulkanIndexDraw>(
@@ -582,16 +584,16 @@ namespace Engine
 		);
 
 		// This sets up fresh data for the frame and prepares every regular mesh to be draw in world space.
-		indexDraw->UpdateInstanceBuffer(currentFrame); 
+		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		// This then draws all of them with the default shader.
-		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd); 
+		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);
 
 		// We now want to draw all of our text that is in the world.
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::World);
 
 		// This prepeares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
-		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd); 
+		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd);
 
 		// Then finally draw all of our text that is in UI screen space on top of everything.
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::Screen);
@@ -694,7 +696,7 @@ namespace Engine
 	void VulkanRenderer::CreateImage(
 		uint32_t width,
 		uint32_t height,
-		uint32_t mipLevels,                         
+		uint32_t mipLevels,
 		VkFormat format,
 		VkImageTiling tiling,
 		VkImageUsageFlags usage,
@@ -709,7 +711,7 @@ namespace Engine
 		imageInfo.extent.width = width;
 		imageInfo.extent.height = height;
 		imageInfo.extent.depth = 1;
-		imageInfo.mipLevels = mipLevels;            
+		imageInfo.mipLevels = mipLevels;
 		imageInfo.arrayLayers = 1;
 		imageInfo.format = format;
 		imageInfo.tiling = tiling;
@@ -820,7 +822,7 @@ namespace Engine
 	VkImageView VulkanRenderer::CreateImageView(
 		VkImage image,
 		VkFormat format,
-		uint32_t mipLevels                         
+		uint32_t mipLevels
 	)
 	{
 		VkImageViewCreateInfo viewInfo{};
@@ -844,10 +846,10 @@ namespace Engine
 	}
 
 	void VulkanRenderer::GenerateMipmaps(
-		VkImage image, 
-		VkFormat imageFormat, 
-		int32_t texWidth, 
-		int32_t texHeight, 
+		VkImage image,
+		VkFormat imageFormat,
+		int32_t texWidth,
+		int32_t texHeight,
 		uint32_t mipLevels
 	)
 	{

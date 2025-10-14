@@ -105,6 +105,7 @@ namespace Engine
 		std::shared_ptr<Renderer> GetRenderer() const; // ambiguous version
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
+		GizmoSystem* GetGizmoSystem() const { return gizmoSystem.get(); }
 		SceneDebugDraw* GetSceneDebugDraw() const { return sceneDebugDraw.get(); }
 
 		Ray ScreenPointToRay(const glm::vec2& point) const;
@@ -243,6 +244,8 @@ namespace Engine
 
 		void RemoveTag(entt::entity entity);
 
+		bool IsMouseBusyWithUI() const { return mouseBusyWithUI; }
+
 	protected:
 
 		std::string name;
@@ -283,6 +286,8 @@ namespace Engine
 		void UpdateUIBehaviors();
 
 		bool WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent);
+
+		bool mouseBusyWithUI{ false }; // to avoid interacting with world same time as interacting with UI above the world
 
 	};
 

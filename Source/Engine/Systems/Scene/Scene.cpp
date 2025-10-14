@@ -406,20 +406,20 @@ namespace Engine
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
 
-		// Ensure BVH is coherent for THIS frame if any entity was removed/added or forced
+		// Ensure BVH is coherent for this frame if any entity was removed/added or forced.
 		if (sceneBVH && sceneBVH->ShouldForceUpdate())
 		{
 			sceneBVH->Update();
 		}
 
+		// Call Update(dt) on all Behavior components.
+		ForEachBehavior(&Behavior::Update, dt);
+		UpdateUIBehaviors(); 
+
 		if (gizmoSystem)
 		{
 			gizmoSystem->Update(dt);
 		}
-
-		// Call Update(dt) on all Behavior components
-		ForEachBehavior(&Behavior::Update, dt);
-		UpdateUIBehaviors();
 
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
@@ -441,11 +441,13 @@ namespace Engine
 	// Dispatches OnMouseEnter / Exit / Hover / Click events
 	void Scene::UpdateUIBehaviors()
 	{
+		mouseBusyWithUI = false; // reset mouse pointer UI focus status for this frame
+
 		// 1. Get raw mouse position in window pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true); // (0,0) = window TL
+		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
 
-		// 3. Iterate over UI entities and run hit-testing in the same space
+		// 2. Iterate over UI entities and run hit-testing in the same space
 		auto& registry = GetRegistry();
 
 		registry.view<Transform, Material, BehaviorComponents>().each(
@@ -458,18 +460,31 @@ namespace Engine
 				return; // ignore world-space stuff here
 			}
 
-			// Position / size are already in virtual-canvas units
-			glm::vec3 pos = transform.GetPosition(); // center of quad
-			glm::vec3 size = transform.GetScale(); // full width / height
+			// Pull world TRS (which respects parenting).
+			// GLM is column-major; columns 0..2 are basis vectors, column 3 is translation.
+			const glm::mat4& world = transform.GetWorldMatrix(registry);
 
-			glm::vec2 halfSize{ size.x * 0.5f, size.y * 0.5f };
+			// World position (center of quad in virtual-canvas units)
+			glm::vec3 pos = glm::vec3(world[3]); // xyz from translation column
+
+			// World scale = lengths of basis vectors (handles non-uniform scale).
+			// For UI AABB we only care about X/Y; sign doesn't matter for extents.
+			glm::vec3 basisX = glm::vec3(world[0]);
+			glm::vec3 basisY = glm::vec3(world[1]);
+			glm::vec3 basisZ = glm::vec3(world[2]); // not used for 2D AABB, but extracted for completeness
+
+			glm::vec3 scl = glm::vec3(glm::length(basisX), glm::length(basisY), glm::length(basisZ));
+
+			// Position / size are now in world (screen) virtual-canvas units
+			glm::vec2 halfSize{ 0.5f * std::abs(scl.x), 0.5f * std::abs(scl.y) };
 
 			glm::vec2 minRect{ pos.x - halfSize.x, pos.y - halfSize.y };
 			glm::vec2 maxRect{ pos.x + halfSize.x, pos.y + halfSize.y };
 
-			bool inside = (mouseVirt.x >= minRect.x && mouseVirt.x <= maxRect.x && mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
+			bool inside = (mouseVirt.x >= minRect.x && mouseVirt.x <= maxRect.x
+				&& mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
 
-			// 4. Let each attached behaviour react
+			// 3. Let each attached behaviour react
 			for (auto& behavior : bc.behaviors)
 			{
 				if (!behavior || !behavior->RunMouseCallBacks())
@@ -479,18 +494,20 @@ namespace Engine
 
 				bool wasFocused = behavior->FocusedByMouse();
 
-				if (inside && !wasFocused)
+				if (inside && !wasFocused) // mouse first enter
 				{
+					mouseBusyWithUI = true;
 					behavior->SetFocusedByMouse(true);
 					behavior->OnMouseEnter();
 				}
-				else if (!inside && wasFocused)
+				else if (!inside && wasFocused) // mouse exit
 				{
 					behavior->SetFocusedByMouse(false);
 					behavior->OnMouseExit();
 				}
-				else if (inside) // hover
+				else if (inside) // mouse hover + possible focused input interactions from mouse clicking
 				{
+					mouseBusyWithUI = true;
 					behavior->OnMouseHover();
 
 					if (inputMgr->IsKeyDown(VK_LBUTTON)) { behavior->OnLeftClickDown(); }

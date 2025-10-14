@@ -23,9 +23,9 @@ namespace Engine
 
 	VulkanIndexDraw::VulkanIndexDraw
 	(
-		VkDevice device, 
-		VkPhysicalDevice physicalDevice, 
-		const int MAX_EXPECTED_INSTANCES, 
+		VkDevice device,
+		VkPhysicalDevice physicalDevice,
+		const int MAX_EXPECTED_INSTANCES,
 		const int MAX_FRAMES_IN_FLIGHT
 	)
 		: device(device), physicalDevice(physicalDevice)
@@ -645,10 +645,20 @@ namespace Engine
 				}
 				else
 				{
-					// Sceen space 2D check using window width and height
+					// Sceen space 2D check using window width and height with respect to world matrix scale and position values
 
-					glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-					glm::vec2 center = glm::vec2(pos) * screenScale;
+					// Extract translation (position) directly from the last column
+					const glm::vec3 worldPos = glm::vec3(model[3]);
+
+					// Extract per-axis scale as lengths of the basis columns
+					const glm::vec3 worldScale = glm::vec3(
+						glm::length(glm::vec3(model[0])),  // |X basis|
+						glm::length(glm::vec3(model[1])),  // |Y basis|
+						glm::length(glm::vec3(model[2]))   // |Z basis|
+					);
+
+					glm::vec2 halfSize = glm::vec2(worldScale) * 0.5f;
+					glm::vec2 center = glm::vec2(worldPos) * screenScale;
 					glm::vec2 halfSizePx = halfSize * screenScale;
 
 					glm::vec2 minPx = center - halfSizePx;

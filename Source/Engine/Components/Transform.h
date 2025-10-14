@@ -45,7 +45,7 @@ namespace Engine
 		void MarkDirty()
 		{
 			dirty = true;
-			worldDirty = true; 
+			worldDirty = true;
 			TransformsDirty = true;
 			MarkChildrenDirty();
 		}
@@ -143,6 +143,74 @@ namespace Engine
 		void SetTransformSpace(TransformSpace ts)
 		{
 			if (space != ts) { space = ts; MarkDirty(); }
+		}
+
+		// NOTE: Obviously this is only meaningful for screen-space transforms (TransformSpace::Screen).
+		// Maps an integer layer to a stable Z in [0,1] for orthographic depth sorting.
+		// Higher layer => rendered on top (smaller Z with standard Vulkan depth: LESS, near=0, far=1).
+		// kMaxLayers=4096 is a conservative choice that avoids precision issues while providing ample layers.
+		void SetScreenSpaceLayer(int layer)
+		{
+			constexpr int kMaxLayers = 4096;
+			constexpr float kEpsilon = 1e-6f;
+
+			// Clamp layer into a valid range
+			int L = layer;
+
+			if (L < 0)
+			{
+				L = 0;
+			}
+
+			if (L >= kMaxLayers)
+			{
+				L = kMaxLayers - 1;
+			}
+
+			// Reserve margins away from exact 0 and 1 to avoid clipping/precision edge cases
+			const float step = 1.0f / (kMaxLayers + 2); // spread layers evenly in (0,1)
+			const float z = 1.0f - (static_cast<float>(L) + 1) * step; // higher L -> smaller z (in front)
+
+			GetPositionRef().z = z;
+		}
+
+		// NOTE: Only meaningful for screen-space transforms (TransformSpace::Screen).
+		// Adjusts this transform's Z value slightly above or below its parent's Z layer.
+		// Does nothing if there is no valid parent.
+		void SetScreenSpaceLayerRelativeToParent(bool aboveParent)
+		{
+			if (parent == entt::null)
+			{
+				return;
+			}
+
+			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::registry& reg = scene->GetRegistry();
+
+			if (!reg.valid(parent) || !reg.any_of<Transform>(parent))
+			{
+				return;
+			}
+
+			Transform& pTf = reg.get<Transform>(parent);
+			float parentZ = pTf.GetPosition().z;
+
+			// With Vulkan's default depth (LESS test, near=0, far=1):
+			// smaller Z = in front, larger Z = behind
+			constexpr float kOffset = 1e-5f; 
+			// TODO: make sure our RHI for other supported graphics APIs will play nice with this and the method above,
+			// especially in opengl where depth comparison functions can change all the time every frame
+
+			float z = aboveParent
+				? glm::max(parentZ - kOffset, 0.0f) // move slightly closer (in front)
+				: glm::min(parentZ + kOffset, 1.0f); // move slightly farther (behind)
+
+			GetPositionRef().z = z;
 		}
 
 		// LOCAL 
