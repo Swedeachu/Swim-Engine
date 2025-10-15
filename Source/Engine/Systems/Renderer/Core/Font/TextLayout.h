@@ -90,9 +90,19 @@ namespace Engine
 	)
 	{
 		MsdfTextGpuInstanceData s{};
+
 		s.modelTR = Transform::MakeWorldTR(tf, registry);
+
+		// Extract world scale from full WORLD matrix (TRS)
+		const glm::vec3 worldScale = tf.GetWorldScale(registry);
+
 		s.pxToModel = glm::vec2(1.0f, 1.0f);
-		s.emScalePx = (tf.GetScale().y > 0.0f) ? tf.GetScale().y : 0.1f;
+
+		// Use world Y-scale to scale the EM size; clamp to a small positive.
+		const float kMinEm = 0.1f;
+		const float emY = (std::isfinite(worldScale.y) && worldScale.y > 0.0f) ? worldScale.y : kMinEm;
+		s.emScalePx = emY;
+
 		s.msdfPixelRange = fi.distanceRange;
 		s.fillColor = tc.fillColor;
 		s.strokeColor = tc.strokeColor;
@@ -116,14 +126,24 @@ namespace Engine
 	)
 	{
 		const glm::vec2 screenScale(
-			static_cast<float>(windowWidth) / virtualCanvasWidth,
-			static_cast<float>(windowHeight) / virtualCanvasHeight
+			static_cast<float>(windowWidth) / static_cast<float>(virtualCanvasWidth),
+			static_cast<float>(windowHeight) / static_cast<float>(virtualCanvasHeight)
 		);
 
 		MsdfTextGpuInstanceData s{};
+
 		s.modelTR = Transform::MakeWorldTR(tf, registry);
+
+		// Extract world scale from full WORLD matrix (TRS)
+		const glm::vec3 worldScale = tf.GetWorldScale(registry);
+
+		// Pixels->model in screen space
 		s.pxToModel = 1.0f / screenScale;
-		s.emScalePx = std::max(1.0f, tf.GetScale().y * screenScale.y);
+
+		// EM size in pixels = world Y-scale * screen Y-scale; clamp to >= 1 px
+		const float emYModel = (std::isfinite(worldScale.y) && worldScale.y > 0.0f) ? worldScale.y : 1.0f;
+		s.emScalePx = std::max(1.0f, emYModel * screenScale.y);
+
 		s.msdfPixelRange = fi.distanceRange;
 		s.fillColor = tc.fillColor;
 		s.strokeColor = tc.strokeColor;

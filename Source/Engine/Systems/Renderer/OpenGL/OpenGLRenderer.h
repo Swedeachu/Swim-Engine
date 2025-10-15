@@ -114,6 +114,7 @@ namespace Engine
 		GLint loc_dec_useTexture = -1;
 		GLint loc_dec_albedoTex = -1;
 		GLint loc_dec_isWorldSpace = -1;
+		GLint loc_dec_renderOnTop = -1;
 
 		// MSDF text rendering state and locations
 		GLuint textShader = -1;

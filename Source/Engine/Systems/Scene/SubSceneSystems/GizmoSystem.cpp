@@ -147,7 +147,7 @@ namespace Engine
 			// Text
 			entt::entity txt = activeScene->CreateEntity();
 			glm::vec3 textPos = { 0.0f, textY, 0.0f };
-			Transform& txtTf = activeScene->EmplaceComponent<Transform>(txt, textPos, buttonScale * 200.0f, glm::quat(), TransformSpace::Screen);
+			Transform& txtTf = activeScene->EmplaceComponent<Transform>(txt, textPos, buttonScale * 2.f, glm::quat(), TransformSpace::Screen);
 
 			Engine::TextComponent tc;
 			tc.fillColor = white;
@@ -164,9 +164,9 @@ namespace Engine
 			return e;
 		};
 
-		makeButton("T", 70, { 0.0f,  0.3f, 0.0f }, GizmoType::Translate);
-		makeButton("R", -20, { 0.0f,  0.0f, 0.0f }, GizmoType::Rotate);
-		makeButton("S", -110, { 0.0f, -0.3f, 0.0f }, GizmoType::Scale); 
+		makeButton("T", 75, { 0.0f,  0.3f, 0.0f }, GizmoType::Translate);
+		makeButton("R", -15, { 0.0f,  0.0f, 0.0f }, GizmoType::Rotate);
+		makeButton("S", -105, { 0.0f, -0.3f, 0.0f }, GizmoType::Scale); 
 
 		return 0;
 	}

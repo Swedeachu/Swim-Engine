@@ -198,7 +198,7 @@ namespace Engine
 			WGL_DEPTH_BITS_ARB, 24,
 			WGL_STENCIL_BITS_ARB, 8,
 			WGL_SAMPLE_BUFFERS_ARB, 1,   // Enable MSAA
-			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA
+			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA (in vulkan we do this better and use what the gpu says it can use)
 			0
 		};
 
@@ -292,6 +292,7 @@ namespace Engine
 		loc_dec_useTexture = glGetUniformLocation(decoratorShader, "useTexture");
 		loc_dec_albedoTex = glGetUniformLocation(decoratorShader, "albedoTex");
 		loc_dec_isWorldSpace = glGetUniformLocation(decoratorShader, "isWorldSpace");
+		loc_dec_renderOnTop = glGetUniformLocation(decoratorShader, "renderOnTop");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -564,7 +565,7 @@ namespace Engine
 			cameraUBO.screenProj = glm::ortho(
 				0.0f, VirtualCanvasWidth,
 				0.0f, VirtualCanvasHeight,
-				-1.0f, 1.0f
+				1.0f, -1.0f
 			);
 
 			hasUploadedOrtho = true;
@@ -700,8 +701,8 @@ namespace Engine
 		});
 
 		// Render screen-space UI last (no depth test)
-		glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
+		// glDisable(GL_DEPTH_TEST);
+		// glDepthMask(GL_FALSE);
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
@@ -755,14 +756,10 @@ namespace Engine
 			else
 			{
 				// Extract translation (position) directly from the last column
-				const glm::vec3 worldPos = glm::vec3(model[3]);
+				const glm::vec3 worldPos = tf.GetWorldPosition(registry);
 
 				// Extract per-axis scale as lengths of the basis columns
-				const glm::vec3 worldScale = glm::vec3(
-					glm::length(glm::vec3(model[0])),  // |X basis|
-					glm::length(glm::vec3(model[1])),  // |Y basis|
-					glm::length(glm::vec3(model[2]))   // |Z basis|
-				);
+				const glm::vec3 worldScale = tf.GetWorldScale(registry);
 
 				glm::vec2 screenScale = glm::vec2(
 					static_cast<float>(windowWidth) / VirtualCanvasWidth,
@@ -843,6 +840,7 @@ namespace Engine
 			glUniform1i(loc_dec_enableFill, deco.enableFill ? 1 : 0);
 			glUniform1i(loc_dec_roundCorners, deco.roundCorners ? 1 : 0);
 			glUniform1i(loc_dec_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			glUniform1i(loc_dec_renderOnTop, deco.renderOnTop);
 		}
 		else
 		{
@@ -854,6 +852,7 @@ namespace Engine
 			glUniform2fv(loc_dec_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform2fv(loc_dec_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform4f(loc_dec_strokeColor, 0, 0, 0, 1);
+			glUniform1i(loc_dec_renderOnTop, 0); // false
 		}
 
 		GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();

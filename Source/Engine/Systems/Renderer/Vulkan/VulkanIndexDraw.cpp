@@ -648,14 +648,10 @@ namespace Engine
 					// Sceen space 2D check using window width and height with respect to world matrix scale and position values
 
 					// Extract translation (position) directly from the last column
-					const glm::vec3 worldPos = glm::vec3(model[3]);
+					const glm::vec3 worldPos = transform.GetWorldPosition(registry);
 
 					// Extract per-axis scale as lengths of the basis columns
-					const glm::vec3 worldScale = glm::vec3(
-						glm::length(glm::vec3(model[0])),  // |X basis|
-						glm::length(glm::vec3(model[1])),  // |Y basis|
-						glm::length(glm::vec3(model[2]))   // |Z basis|
-					);
+					const glm::vec3 worldScale = transform.GetWorldScale(registry);
 
 					glm::vec2 halfSize = glm::vec2(worldScale) * 0.5f;
 					glm::vec2 center = glm::vec2(worldPos) * screenScale;

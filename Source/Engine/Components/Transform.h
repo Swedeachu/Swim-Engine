@@ -154,7 +154,7 @@ namespace Engine
 			constexpr int kMaxLayers = 4096;
 			constexpr float kEpsilon = 1e-6f;
 
-			// Clamp layer into a valid range
+			// Clamp layer
 			int L = layer;
 
 			if (L < 0)
@@ -167,50 +167,81 @@ namespace Engine
 				L = kMaxLayers - 1;
 			}
 
-			// Reserve margins away from exact 0 and 1 to avoid clipping/precision edge cases
-			const float step = 1.0f / (kMaxLayers + 2); // spread layers evenly in (0,1)
-			const float z = 1.0f - (static_cast<float>(L) + 1) * step; // higher L -> smaller z (in front)
+			float z = position.z;
 
-			GetPositionRef().z = z;
+			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+			{
+				// Spread evenly in (0,1) with a margin at both ends.
+				const float step = 1.0f / (kMaxLayers + 2); // margin = one step at each end
+				z = 1.0f - (static_cast<float>(L) + 1.0f) * step; // higher L -> smaller z (front)
+				// clamp for safety
+				z = glm::clamp(z, 0.0f + kEpsilon, 1.0f - kEpsilon);
+			}
+			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+			{
+				// Default OpenGL NDC is [-1, 1] with near = -1 (front), far = +1 (back).
+				// Reserve margins at both ends and distribute kMaxLayers steps across (-1, +1).
+				const float stepNdc = 2.0f / (kMaxLayers + 2);      // total span 2.0
+				// Start near +1 (back) and move toward -1 (front) as L increases.
+				z = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
+				// Tiny guard to avoid living exactly at the clip planes
+				z = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
 		}
+
+			if (z != position.z)
+			{
+				GetPositionRef().z = z;
+			}
+	}
 
 		// NOTE: Only meaningful for screen-space transforms (TransformSpace::Screen).
 		// Adjusts this transform's Z value slightly above or below its parent's Z layer.
 		// Does nothing if there is no valid parent.
 		void SetScreenSpaceLayerRelativeToParent(bool aboveParent)
 		{
-			if (parent == entt::null)
-			{
-				return;
-			}
+			if (parent == entt::null) return;
 
 			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-			if (!scene)
-			{
-				return;
-			}
+			if (!scene) return;
 
 			entt::registry& reg = scene->GetRegistry();
-
-			if (!reg.valid(parent) || !reg.any_of<Transform>(parent))
-			{
-				return;
-			}
+			if (!reg.valid(parent) || !reg.any_of<Transform>(parent)) return;
 
 			Transform& pTf = reg.get<Transform>(parent);
-			float parentZ = pTf.GetPosition().z;
+			const float parentZ = pTf.GetPosition().z;
 
-			// With Vulkan's default depth (LESS test, near=0, far=1):
-			// smaller Z = in front, larger Z = behind
-			constexpr float kOffset = 1e-5f; 
-			// TODO: make sure our RHI for other supported graphics APIs will play nice with this and the method above,
-			// especially in opengl where depth comparison functions can change all the time every frame
+			constexpr float kOffset = 1e-5f;  // tiny bias to avoid z-fighting
+			float z = position.z;
 
-			float z = aboveParent
-				? glm::max(parentZ - kOffset, 0.0f) // move slightly closer (in front)
-				: glm::min(parentZ + kOffset, 1.0f); // move slightly farther (behind)
+			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+			{
+				// Vulkan: [0,1], smaller z is in front
+				if (aboveParent)
+				{
+					z = glm::max(parentZ - kOffset, 0.0f);
+				}
+				else
+				{
+					z = glm::min(parentZ + kOffset, 1.0f);
+				}
+			}
+			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+			{
+				// Default OpenGL: [-1,1], smaller (more negative) is in front
+				if (aboveParent)
+				{
+					z = glm::max(parentZ - kOffset, -1.0f);
+				}
+				else
+				{
+					z = glm::min(parentZ + kOffset, +1.0f);
+				}
+			}
 
-			GetPositionRef().z = z;
+			if (z != position.z)
+			{
+				GetPositionRef().z = z;
+			}
 		}
 
 		// LOCAL 
@@ -227,6 +258,29 @@ namespace Engine
 			return modelMatrix;
 		}
 
+		glm::vec3 GetWorldScale(const entt::registry& registry) const
+		{
+			const glm::mat4& world = GetWorldMatrix(registry);
+
+			const glm::vec3 col0 = glm::vec3(world[0]);
+			const glm::vec3 col1 = glm::vec3(world[1]);
+			const glm::vec3 col2 = glm::vec3(world[2]);
+
+			const glm::vec3 worldScale(
+				glm::length(col0),
+				glm::length(col1),
+				glm::length(col2)
+			);
+
+			return worldScale;
+		}
+
+		glm::vec3 GetWorldPosition(const entt::registry& registry) const
+		{
+			const glm::mat4& world = GetWorldMatrix(registry);
+			return glm::vec3(world[3]);
+		}
+
 		// WORLD (needs registry to walk parent chain)
 		// if parent is invalid or missing Transform, treated as no parent.
 		const glm::mat4& GetWorldMatrix(const entt::registry& registry) const
@@ -241,7 +295,7 @@ namespace Engine
 
 			if (parent != entt::null && registry.valid(parent) && registry.any_of<Transform>(parent))
 			{
-				const auto& pTf = registry.get<Transform>(parent);
+				const Transform& pTf = registry.get<Transform>(parent);
 				worldMatrix = pTf.GetWorldMatrix(registry) * local; // recursion w/ caching
 			}
 			else
@@ -261,6 +315,7 @@ namespace Engine
 			return T * R;
 		}
 
+		// Maybe we should consider making this a method + caching model tr field and having a dirty flag for this.
 		static glm::mat4 MakeWorldTR(const Transform& tf, const entt::registry& registry)
 		{
 			// Start with the local TR (no scale)
@@ -273,13 +328,13 @@ namespace Engine
 			}
 
 			// Recursively multiply by parent's world TR
-			const auto& parentTf = registry.get<Transform>(tf.parent);
+			const Transform& parentTf = registry.get<Transform>(tf.parent);
 			return MakeWorldTR(parentTf, registry) * localTR;
 		}
 
 		bool HasParent() const { return parent != entt::null; }
 		entt::entity GetParent() const { return parent; }
 
-	};
+};
 
 }

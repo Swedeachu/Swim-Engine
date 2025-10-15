@@ -460,20 +460,12 @@ namespace Engine
 				return; // ignore world-space stuff here
 			}
 
-			// Pull world TRS (which respects parenting).
-			// GLM is column-major; columns 0..2 are basis vectors, column 3 is translation.
-			const glm::mat4& world = transform.GetWorldMatrix(registry);
-
 			// World position (center of quad in virtual-canvas units)
-			glm::vec3 pos = glm::vec3(world[3]); // xyz from translation column
+			glm::vec3 pos = transform.GetWorldPosition(registry); // xyz from translation column
 
 			// World scale = lengths of basis vectors (handles non-uniform scale).
 			// For UI AABB we only care about X/Y; sign doesn't matter for extents.
-			glm::vec3 basisX = glm::vec3(world[0]);
-			glm::vec3 basisY = glm::vec3(world[1]);
-			glm::vec3 basisZ = glm::vec3(world[2]); // not used for 2D AABB, but extracted for completeness
-
-			glm::vec3 scl = glm::vec3(glm::length(basisX), glm::length(basisY), glm::length(basisZ));
+			glm::vec3 scl = transform.GetWorldScale(registry);
 
 			// Position / size are now in world (screen) virtual-canvas units
 			glm::vec2 halfSize{ 0.5f * std::abs(scl.x), 0.5f * std::abs(scl.y) };

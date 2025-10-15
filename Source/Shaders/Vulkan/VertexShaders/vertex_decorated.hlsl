@@ -129,4 +129,3 @@ VSOutput main(VSInput vin)
 
   return vout;
 }
-

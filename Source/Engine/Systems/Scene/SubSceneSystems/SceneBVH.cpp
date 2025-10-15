@@ -35,7 +35,7 @@ namespace Engine
 	{
 		const glm::vec3& localMin = mesh->meshBufferData->aabbMin;
 		const glm::vec3& localMax = mesh->meshBufferData->aabbMax;
-		glm::mat4 model = transform.GetWorldMatrix(registry);
+		const glm::mat4& model = transform.GetWorldMatrix(registry);
 
 		glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 		glm::vec3 worldMax = worldMin;
@@ -111,7 +111,7 @@ namespace Engine
 			}
 
 			// Transform to world space
-			glm::mat4 model = tf.GetWorldMatrix(registry);
+			const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 			glm::vec3 worldMax = worldMin;
@@ -305,7 +305,7 @@ namespace Engine
 				localMax = glm::max(localMax, max);
 			}
 
-			glm::mat4 model = tf.GetWorldMatrix(registry);
+			const glm::mat4& model = tf.GetWorldMatrix(registry);
 			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 			glm::vec3 worldMax = worldMin;
 
@@ -480,7 +480,7 @@ namespace Engine
 					const auto& tf = registry.get<Transform>(entity);
 					const auto& comp = registry.get<CompositeMaterial>(entity);
 
-					const glm::mat4 model = tf.GetWorldMatrix(registry);
+					const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 					for (const auto& mat : comp.subMaterials)
 					{

@@ -46,6 +46,16 @@ float BoxSDF(float2 pos, float2 size)
   return length(max(d, 0.0f)) + min(max(d.x, d.y), 0.0f);
 }
 
+float3 SRGBToLinear(float3 c)
+{
+    // Piecewise accurate sRGB -> linear
+    float3 lo = c / 12.92f;
+    float3 hi = pow( (c + 0.055f) / 1.055f, 2.4f );
+    // HLSL step(a,b): returns 0 if b < a, else 1; we want c <= 0.04045 -> lo
+    float3 useLo = step(c, 0.04045f.xxx); // 1 where c <= 0.04045
+    return lerp(hi, lo, useLo);
+}
+
 float4 main(FSInput input) : SV_Target
 {
     uint paramIndex = input.instanceID;
@@ -120,7 +130,8 @@ float4 main(FSInput input) : SV_Target
         ? (fillSrc.rgb * fillAlpha + md.strokeColor.rgb * strokeAlpha) / combinedAlpha
         : float3(0.0f, 0.0f, 0.0f);
 
+    // Hack fix to make this match the color of our OpenGL rendered decorated UI
+    combinedColor = SRGBToLinear(combinedColor);
+
     return float4(combinedColor, combinedAlpha);
 }
-
-
