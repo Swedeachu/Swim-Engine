@@ -111,4 +111,14 @@ namespace Engine
 		const glm::vec3& color
 	);
 
+	// Composed of cylinder plus a sphere on top
+	VertexesIndexesPair MakeBallArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float ballRadius,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	);
+
 }

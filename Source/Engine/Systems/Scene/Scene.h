@@ -110,6 +110,9 @@ namespace Engine
 
 		Ray ScreenPointToRay(const glm::vec2& point) const;
 
+		bool IsTopFocusedElement(entt::entity target);
+		bool IsTopMostUiAtScreenPoint(entt::entity target, const glm::vec2& point);
+
 		template<typename T>
 		T& AddComponent(entt::entity entity, T component)
 		{

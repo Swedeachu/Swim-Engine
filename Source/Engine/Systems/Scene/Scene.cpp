@@ -414,7 +414,7 @@ namespace Engine
 
 		// Call Update(dt) on all Behavior components.
 		ForEachBehavior(&Behavior::Update, dt);
-		UpdateUIBehaviors(); 
+		UpdateUIBehaviors();
 
 		if (gizmoSystem)
 		{
@@ -448,7 +448,7 @@ namespace Engine
 		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
 
 		// 2. Iterate over UI entities and run hit-testing in the same space
-		auto& registry = GetRegistry();
+		entt::registry& registry = GetRegistry();
 
 		registry.view<Transform, Material, BehaviorComponents>().each(
 			[&](entt::entity entity,
@@ -477,7 +477,7 @@ namespace Engine
 				&& mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
 
 			// 3. Let each attached behaviour react
-			for (auto& behavior : bc.behaviors)
+			for (std::unique_ptr<Behavior>& behavior : bc.behaviors)
 			{
 				if (!behavior || !behavior->RunMouseCallBacks())
 				{
@@ -513,6 +513,81 @@ namespace Engine
 				}
 			}
 		});
+	}
+
+	bool Scene::IsTopFocusedElement(entt::entity target)
+	{
+		std::shared_ptr<InputManager> inputMgr = GetInputManager();
+		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
+		return IsTopMostUiAtScreenPoint(target, mouseVirt);
+	}
+
+	// This can get very expensive to call
+	bool Scene::IsTopMostUiAtScreenPoint(entt::entity target, const glm::vec2& point)
+	{
+		entt::registry& registry = GetRegistry();
+
+		// Basic validity checks
+		if (!registry.valid(target) || !registry.any_of<Transform>(target))
+		{
+			return false;
+		}
+
+		const Transform& myTf = registry.get<Transform>(target);
+		if (myTf.GetTransformSpace() != TransformSpace::Screen)
+		{
+			return false;
+		}
+
+		// Target AABB (same convention as UpdateUIBehaviors)
+		const glm::vec3 myPos = myTf.GetWorldPosition(registry);
+		const glm::vec3 myScale = myTf.GetWorldScale(registry);
+		const glm::vec2 myHalf{ 0.5f * std::abs(myScale.x), 0.5f * std::abs(myScale.y) };
+
+		const glm::vec2 myMin{ myPos.x - myHalf.x, myPos.y - myHalf.y };
+		const glm::vec2 myMax{ myPos.x + myHalf.x, myPos.y + myHalf.y };
+
+		// If the target doesn't actually cover the point, it's not top-most UI at that point, nor is any UI
+		if (!(point.x >= myMin.x && point.x <= myMax.x && point.y >= myMin.y && point.y <= myMax.y))
+		{
+			return false;
+		}
+
+		// const float myZ = myTf.GetPosition().z; // local Z 
+		const float myZ = myTf.readableLayer; // we use the readable layer that is agnostic of render pipeline for layering
+
+		bool coveredByFront = false;
+
+		// Iterate all screen-space transforms and see if any overlapping AABB is in front of the target
+		registry.view<Transform>().each([&](entt::entity e, Transform& tf)
+		{
+			if (coveredByFront) { return; } // early-out if already found something in front
+			if (e == target) { return; }    // skip self
+			if (tf.GetTransformSpace() != TransformSpace::Screen) { return; }
+
+			const glm::vec3 pos = tf.GetWorldPosition(registry);
+			const glm::vec3 scale = tf.GetWorldScale(registry);
+
+			const glm::vec2 half{ 0.5f * std::abs(scale.x), 0.5f * std::abs(scale.y) };
+			const glm::vec2 minRect{ pos.x - half.x, pos.y - half.y };
+			const glm::vec2 maxRect{ pos.x + half.x, pos.y + half.y };
+
+			const bool inside = (point.x >= minRect.x && point.x <= maxRect.x &&
+				point.y >= minRect.y && point.y <= maxRect.y);
+
+			if (!inside) { return; }
+
+			// Compare with local Z for direct Z layer, our render contexts do screen space NDC's differently in Z layering
+			// We instead fix this with the Transform::readableLayer float field
+
+			if (tf.readableLayer <= myZ)
+			{
+				coveredByFront = true;
+				return;
+			}
+		});
+
+		return !coveredByFront;
 	}
 
 	// Point is in screen pixels, (0,0) = top-left.

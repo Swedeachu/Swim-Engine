@@ -26,7 +26,7 @@ namespace Game
 
 	constexpr static bool doStressTest = false;
 	constexpr static bool doUI = true;
-	constexpr static bool glbTests = true;
+	constexpr static bool glbTests = false;
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 	constexpr static bool testPrimitiveMeshes = true;
 	constexpr static bool doWorldSpaceParentTesting = true; // via orbit system

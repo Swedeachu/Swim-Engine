@@ -13,6 +13,9 @@ namespace Engine
 
 	void DragUiBehavior::OnLeftClickDown()
 	{
+		// Check if we are the UI entity with focus and nothing on top of it
+		if (!scene->IsTopFocusedElement(entity)) return;
+
 		isDragging = true;
 
 		if (transform)

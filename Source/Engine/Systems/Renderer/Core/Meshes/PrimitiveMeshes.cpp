@@ -624,4 +624,71 @@ namespace Engine
 		return { vertices, indices };
 	}
 
+	VertexesIndexesPair MakeBallArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float ballRadius,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	)
+	{
+		// Safety clamps
+		segmentCount = std::max<uint32_t>(3, segmentCount);
+		shaftRadius = std::max(shaftRadius, 0.0001f);
+		ballRadius = std::max(ballRadius, 0.0001f);
+		shaftLength = std::max(shaftLength, 0.0001f);
+
+		// 1) Shaft: build centered cylinder ([-L/2, +L/2] in Y), then translate up by +L/2 -> spans [0, L]
+		auto shaft = MakeCylinder(shaftRadius, shaftLength, segmentCount, color);
+		{
+			const float yOff = shaftLength * 0.5f;
+			for (auto& v : shaft.vertices)
+				v.position.y += yOff;
+		}
+
+		// 2) Ball: build a unit sphere (your MakeSphere makes radius = 0.5), then:
+		//    - Uniformly scale to desired ballRadius (scale factor = ballRadius / 0.5 = ballRadius * 2)
+		//    - Translate so its south pole touches the shaft top:
+		//         center.y = shaftLength + ballRadius
+		auto ball = MakeSphere(
+			static_cast<int>(segmentCount),  // latitudeSegments
+			static_cast<int>(segmentCount),  // longitudeSegments
+			color, color, color              // uniform color across the sphere
+		);
+
+		{
+			const float scale = ballRadius * 2.0f;       // because MakeSphere outputs radius 0.5
+			const float yOff = shaftLength + ballRadius; // place center so bottom touches y = shaftLength
+			for (auto& v : ball.vertices)
+			{
+				v.position *= scale; // scale from 0.5 to ballRadius
+				v.position.y += yOff; // move above the shaft
+			}
+		}
+
+		// 3) Merge (append ball onto shaft)
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+		vertices.reserve(shaft.vertices.size() + ball.vertices.size());
+		indices.reserve(shaft.indices.size() + ball.indices.size());
+
+		// Shaft
+		vertices.insert(vertices.end(), shaft.vertices.begin(), shaft.vertices.end());
+		indices.insert(indices.end(), shaft.indices.begin(), shaft.indices.end());
+
+		// Ball (indices offset)
+		const uint32_t baseIndex = static_cast<uint32_t>(shaft.vertices.size());
+
+		for (auto idx : ball.indices)
+		{
+			indices.push_back(baseIndex + idx);
+		}
+
+		vertices.insert(vertices.end(), ball.vertices.begin(), ball.vertices.end());
+
+		return { vertices, indices };
+	}
+
+
 }

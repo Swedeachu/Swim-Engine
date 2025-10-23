@@ -18,4 +18,15 @@ namespace Engine
 		}
 	}
 
+	inline int AxisIndex(Axis a)
+	{
+		switch (a)
+		{
+			case Axis::X: return 0;
+			case Axis::Y: return 1;
+			case Axis::Z: return 2;
+			default:      return -1;
+		}
+	}
+
 }

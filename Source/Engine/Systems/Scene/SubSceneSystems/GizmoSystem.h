@@ -46,7 +46,7 @@ namespace Engine
 
 		entt::entity LeftClickCheck();
 
-		void CreateTranslationGizmo();
+		void CreateTranslationGizmo(bool useBallArrow);
 
 		void ScaleGizmoBasedOnCameraDistance(entt::registry& reg);
 
@@ -74,6 +74,7 @@ namespace Engine
 		std::shared_ptr<Mesh> cubeMesh;
 		std::shared_ptr<Mesh> quadMesh;
 		std::shared_ptr<Mesh> circleMesh;
+		std::shared_ptr<Mesh> ballArrowMesh;
 
 		std::shared_ptr<MaterialData> sphereMatData;
 		std::shared_ptr<MaterialData> arrowMatData;
@@ -81,6 +82,7 @@ namespace Engine
 		std::shared_ptr<MaterialData> cubeMatData;
 		std::shared_ptr<MaterialData> quadMatData;
 		std::shared_ptr<MaterialData> circleMatData;
+		std::shared_ptr<MaterialData> ballArrowMatData;
 
 		std::shared_ptr<Scene> activeScene;
 
@@ -99,6 +101,7 @@ namespace Engine
 		float dragStartT = 0.0f;
 		glm::vec3 dragAxisDir = glm::vec3(0);
 		glm::vec3 dragStartObjPos = glm::vec3(0);
+		glm::vec3 dragStartObjScale = glm::vec3(0);
 
 	};
 

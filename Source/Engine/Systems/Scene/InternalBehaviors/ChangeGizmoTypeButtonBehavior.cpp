@@ -24,6 +24,9 @@ namespace Engine
 
 	void ChangeGizmoTypeButtonBehavior::OnMouseHover()
 	{
+		// Check if we are the UI entity with focus and nothing on top of it
+		if (!scene->IsTopFocusedElement(entity)) return;
+
 		if (!active)
 		{
 			// We only want to be the hover color if we are not active
@@ -42,6 +45,9 @@ namespace Engine
 
 	void ChangeGizmoTypeButtonBehavior::OnLeftClicked()
 	{
+		// Check if we are the UI entity with focus and nothing on top of it
+		if (!scene->IsTopFocusedElement(entity)) return;
+
 		active = !active;
 		if (active)
 		{

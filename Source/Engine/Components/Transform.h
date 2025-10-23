@@ -37,6 +37,10 @@ namespace Engine
 		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
 		TransformSpace space = TransformSpace::World;
 
+		// Agnostic layer seperated from specifc rendering clip space for helping with UI layer priority logic such as mouse input.
+		// This is a complete hack.
+		float readableLayer{ 0 }; 
+
 		// Parent + children (entity handles)
 		entt::entity parent = entt::null;
 		std::vector<entt::entity> children; // Scene manages membership
@@ -169,6 +173,15 @@ namespace Engine
 
 			float z = position.z;
 
+			// Set readable layer agnostic to render context (HACK)
+			{
+				float zed = readableLayer;
+				const float stepNdc = 2.0f / (kMaxLayers + 2);
+				zed = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
+				zed = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
+				readableLayer = zed;
+			}
+
 			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 			{
 				// Spread evenly in (0,1) with a margin at both ends.
@@ -186,13 +199,13 @@ namespace Engine
 				z = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
 				// Tiny guard to avoid living exactly at the clip planes
 				z = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
-		}
+			}
 
 			if (z != position.z)
 			{
 				GetPositionRef().z = z;
 			}
-	}
+		}
 
 		// NOTE: Only meaningful for screen-space transforms (TransformSpace::Screen).
 		// Adjusts this transform's Z value slightly above or below its parent's Z layer.
@@ -208,10 +221,24 @@ namespace Engine
 			if (!reg.valid(parent) || !reg.any_of<Transform>(parent)) return;
 
 			Transform& pTf = reg.get<Transform>(parent);
-			const float parentZ = pTf.GetPosition().z;
+			// const float parentZ = pTf.GetPosition().z;
+			const float parentZ = pTf.readableLayer;
 
 			constexpr float kOffset = 1e-5f;  // tiny bias to avoid z-fighting
 			float z = position.z;
+
+			// Set readable layer agnostic to render context (HACK)
+			{
+				if (aboveParent)
+				{
+					z = glm::max(parentZ - kOffset, -1.0f);
+				}
+				else
+				{
+					z = glm::min(parentZ + kOffset, +1.0f);
+				}
+				readableLayer = z;
+			}
 
 			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 			{
@@ -335,6 +362,6 @@ namespace Engine
 		bool HasParent() const { return parent != entt::null; }
 		entt::entity GetParent() const { return parent; }
 
-};
+	};
 
 }

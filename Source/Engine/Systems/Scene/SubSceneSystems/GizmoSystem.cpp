@@ -78,6 +78,11 @@ namespace Engine
 			return MakeCircle(0.5f, 128, white);
 		});
 
+		ballArrowMesh = getOrCreateMesh("GizmoBallArrow", [&]
+		{
+			return MakeBallArrow(0.05f, 1.5f, 0.12f, 64, white);
+		});
+
 		// Register or fetch materials for each gizmo mesh
 		sphereMatData = getOrCreateMaterial("GizmoBallMat", sphereMesh);
 		arrowMatData = getOrCreateMaterial("GizmoArrowMat", arrowMesh);
@@ -85,6 +90,7 @@ namespace Engine
 		cubeMatData = getOrCreateMaterial("GizmoCubeMat", cubeMesh);
 		quadMatData = getOrCreateMaterial("GizmoQuadData", quadMesh);
 		circleMatData = getOrCreateMaterial("GizmoCircleData", circleMesh);
+		ballArrowMatData = getOrCreateMaterial("GizmoBallArrowData", ballArrowMesh);
 
 		return 0;
 	}
@@ -112,6 +118,7 @@ namespace Engine
 		activeScene->EmplaceComponent<Transform>(gizmoUI, position, scale, glm::quat(), TransformSpace::Screen);
 		activeScene->EmplaceComponent<Material>(gizmoUI, Material(quadMatData));
 		activeScene->EmplaceComponent<MeshDecorator>(gizmoUI, black, gray, strokeWidth, cornerRadius, pad, rounded, stroke, fill, useTex);
+		activeScene->EmplaceComponent<ObjectTag>(gizmoUI, TagConstants::EDITOR_MODE_UI);
 		activeScene->EmplaceBehavior<DragUiBehavior>(gizmoUI);
 
 		// Create buttons parented to gizmoUI
@@ -134,6 +141,7 @@ namespace Engine
 			activeScene->EmplaceComponent<Material>(e, Material(quadMatData));
 			activeScene->EmplaceComponent<MeshDecorator>(e, buttonFillColor, buttonStrokeColor,
 				buttonStrokeWidth, buttonCornerRadius, buttonPad, buttonRounded, buttonStroke, buttonFill, buttonUseTex);
+			activeScene->EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_UI);
 
 			ChangeGizmoTypeButtonBehavior* beh = activeScene->EmplaceBehavior<ChangeGizmoTypeButtonBehavior>(e);
 			beh->SetGizmoType(type);
@@ -148,6 +156,7 @@ namespace Engine
 			entt::entity txt = activeScene->CreateEntity();
 			glm::vec3 textPos = { 0.0f, textY, 0.0f };
 			Transform& txtTf = activeScene->EmplaceComponent<Transform>(txt, textPos, buttonScale * 2.f, glm::quat(), TransformSpace::Screen);
+			activeScene->EmplaceComponent<ObjectTag>(txt, TagConstants::EDITOR_MODE_UI);
 
 			Engine::TextComponent tc;
 			tc.fillColor = white;
@@ -184,12 +193,14 @@ namespace Engine
 
 		entt::registry& reg = activeScene->GetRegistry();
 
-		// If focused entity was destroyed, destroy the root gizmo control entity (TODO: test this case!)
-		if (!reg.valid(focusedEntity))
+		// If focused entity or their transform was destroyed, destroy the root gizmo control entity 
+		if (!reg.valid(focusedEntity) || !reg.any_of<Transform>(focusedEntity))
 		{
 			LoseFocus();
 			return;
-		} // we are kinda boned if something happens to root control entity
+		} 
+		// We are kinda boned if something happens to root control entity, we can set the engine scene policy of:
+		// DO NOT EVER destroy editor tagged objects that should not be destroyed (duh).
 
 		// If we have something selected, we will call the method to control the root gizmo based on gizmo type
 		if (activeGizmoType != GizmoType::Inactive && focusedEntity != entt::null && rootGizmoControl != entt::null)
@@ -491,14 +502,14 @@ namespace Engine
 	void GizmoSystem::SelectedEntityToControlWithGizmo(entt::entity hit)
 	{
 		focusedEntity = hit;
-		if (activeGizmoType == GizmoType::Translate)
+		if (activeGizmoType == GizmoType::Translate || activeGizmoType == GizmoType::Scale)
 		{
-			CreateTranslationGizmo();
+			CreateTranslationGizmo(/*bool useBallArrow=*/activeGizmoType == GizmoType::Scale);
 		}
 	}
 
 	// 3 arrows for each axis from root, red for X, blue for Z, green for Y
-	void GizmoSystem::CreateTranslationGizmo()
+	void GizmoSystem::CreateTranslationGizmo(bool useBallArrow)
 	{
 		entt::registry& reg = activeScene->GetRegistry();
 
@@ -561,7 +572,8 @@ namespace Engine
 			dec.renderOnTop = 1;
 
 			// Attach the material and decorator color
-			activeScene->EmplaceComponent<Material>(e, arrowMatData);
+			std::shared_ptr<MaterialData> matData = useBallArrow ? ballArrowMatData : arrowMatData;
+			activeScene->EmplaceComponent<Material>(e, matData);
 			activeScene->AddComponent<MeshDecorator>(e, dec);
 			activeScene->EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_OBJECT, "gizmo " + tagName);
 
@@ -634,7 +646,6 @@ namespace Engine
 		return result;
 	}
 
-
 	Axis GizmoSystem::AxisFromTagEntity(entt::entity e) const
 	{
 		if (e == entt::null)
@@ -668,16 +679,17 @@ namespace Engine
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
 		const glm::vec3 gizmoOrigin = focusedTf.GetPosition();
 
+		// Cache everything we need for the start of the drag to use in UpdateDrag
 		dragAxisDir = glm::normalize(AxisDirWorld(axis));
 		dragStartT = ParamOnAxisFromRay(gizmoOrigin, dragAxisDir, rayOrigin, rayDirN);
 		dragStartObjPos = gizmoOrigin;
+		dragStartObjScale = focusedTf.GetScale();
 
 		// Highlight active axis strongly; lock hover
 		SetAxisHighlight(Axis::None, activeAxisDrag);
 	}
 
-	// Right now this is hard coded for controlling translation only, (see [1])
-	// we need it based on activeGizmoType to switch between if we are modifying postion or scale or rotation
+	// Right now this is only does translation and scale
 	void GizmoSystem::UpdateDrag(const glm::vec3& rayOrigin, const glm::vec3& rayDirN)
 	{
 		if (activeAxisDrag == Axis::None || focusedEntity == entt::null)
@@ -699,9 +711,38 @@ namespace Engine
 
 		const glm::vec3 delta = dt * dragAxisDir;
 
-		// Apply to focused object position (world-space)
+		// Apply to focused object (world-space)
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
-		focusedTf.GetPositionRef() = dragStartObjPos + delta; // [1]
+
+		if (activeGizmoType == GizmoType::Translate)
+		{
+			focusedTf.GetPositionRef() = dragStartObjPos + delta;
+		}
+		else if (activeGizmoType == GizmoType::Scale)
+		{
+			// We should make this clamp to not be too small (like not under 0.1 on any axis)
+			const int axis = AxisIndex(activeAxisDrag);
+			if (axis >= 0)
+			{
+				glm::vec3 newScale = dragStartObjScale;
+
+				const float sensitivity = 1.0f;
+				float factor = 1.0f + dt * sensitivity;
+
+				const float minAxisScale = 0.1f;
+				const float minFactor = minAxisScale / std::max(0.0001f, dragStartObjScale[axis]);
+
+				factor = std::max(factor, minFactor);
+
+				newScale[axis] = dragStartObjScale[axis] * factor;
+
+				newScale.x = std::max(newScale.x, minAxisScale);
+				newScale.y = std::max(newScale.y, minAxisScale);
+				newScale.z = std::max(newScale.z, minAxisScale);
+
+				focusedTf.GetScaleRef() = newScale;
+			}
+		}
 
 		// Keep gizmo root on the object while dragging 
 		if (rootGizmoControl != entt::null && reg.valid(rootGizmoControl))
@@ -725,11 +766,16 @@ namespace Engine
 		auto setColor = [&](entt::entity e, const glm::vec4& color)
 		{
 			if (e == entt::null)
+			{
 				return;
+			}
 
 			entt::registry& reg = activeScene->GetRegistry();
+
 			if (!reg.valid(e) || !reg.any_of<MeshDecorator>(e))
+			{
 				return;
+			}
 
 			MeshDecorator& deco = reg.get<MeshDecorator>(e);
 			deco.fillColor = color;
