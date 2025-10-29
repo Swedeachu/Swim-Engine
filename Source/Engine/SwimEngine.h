@@ -28,7 +28,7 @@ namespace Engine
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
 		static constexpr bool useShaderToyIfOpenGL = false; 
 
-		SwimEngine();
+		SwimEngine(HWND parentHwnd = nullptr);
 
 		// Calls Awake and then Init
 		bool Start();
@@ -111,6 +111,7 @@ namespace Engine
 		unsigned int windowHeight{ 720 };
 		std::wstring windowTitle{ L"Demo" };
 		std::wstring windowClassName{ L"SwimEngine" };
+		bool ownsWindow{ true };
 
 		// Window message handler
 		static LRESULT CALLBACK StaticWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);

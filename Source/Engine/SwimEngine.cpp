@@ -37,8 +37,14 @@ namespace Engine
 		return L"Swim Engine Demo" + suffix;
 	}
 
-	SwimEngine::SwimEngine()
+	SwimEngine::SwimEngine(HWND parentHwnd)
 	{
+		if (parentHwnd)
+		{
+			engineWindowHandle = parentHwnd;
+			ownsWindow = false;
+		}
+
 		windowClassName = L"SwimEngine";
 		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
@@ -94,6 +100,22 @@ namespace Engine
 
 	bool SwimEngine::MakeWindow()
 	{
+		// If an engine window handle was already passed from the ctor in main's args, we can just set what we need and return.
+		if (engineWindowHandle)
+		{
+			// Read initial client size from the provided HWND
+			RECT r{};
+			if (GetClientRect(engineWindowHandle, &r))
+			{
+				windowWidth = static_cast<unsigned int>(r.right - r.left);
+				windowHeight = static_cast<unsigned int>(r.bottom - r.top);
+			}
+			minimized = false;
+			needResize = true; // trigger a first resize into renderer on Init()
+			// We might still want to set the wndproc here
+			return true;
+		}
+
 		hInstance = GetModuleHandle(nullptr);
 
 		// Construct and register window class
@@ -404,6 +426,13 @@ namespace Engine
 		static int frameCounter = 0;
 		static double dfps = 0.0;
 
+		// If embedded into an external window (editor panel), we won't receive WM_SIZE here.
+	  // So keep our cached size in sync each frame.
+		if (!ownsWindow && engineWindowHandle)
+		{
+			UpdateWindowSize();
+		}
+
 		// First sync any updates that happened to the window to the renderer (if not minimized or needing a resize)
 		if (!minimized && needResize)
 		{
@@ -430,12 +459,16 @@ namespace Engine
 			dfps = static_cast<double>(frameCounter) / timeAccumulator;
 			fps = static_cast<int>(dfps); // save class field
 
-			// Format new title: "Swim Engine [Vulkan] | 240 FPS"
-			std::wstring baseTitle = getDefaultWindowTitle(); // game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
-			std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
+			if (ownsWindow && engineWindowHandle)
+			{
+				// Format new title: "Swim Engine [Vulkan] | 240 FPS"
+				// Game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
+				std::wstring baseTitle = getDefaultWindowTitle(); 
+				std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
 
-			// Set the updated title
-			SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+				// Set the updated title
+				SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+			}
 
 			// Reset for the next second
 			timeAccumulator = 0.0;
