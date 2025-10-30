@@ -28,7 +28,7 @@ namespace Engine
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
 		static constexpr bool useShaderToyIfOpenGL = false; 
 
-		SwimEngine(HWND parentHwnd = nullptr);
+		SwimEngine(HWND parentHandle = nullptr);
 
 		// Calls Awake and then Init
 		bool Start();
@@ -106,6 +106,7 @@ namespace Engine
 
 		// Window fields
 		HWND engineWindowHandle{ nullptr };
+		HWND parentHandle{ nullptr };
 		HINSTANCE hInstance{ nullptr };
 		unsigned int windowWidth{ 1280 };
 		unsigned int windowHeight{ 720 };

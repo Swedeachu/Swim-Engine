@@ -45,8 +45,11 @@ namespace Engine
 			keyState[i].second.first = deferredState[i].second.first;
 		}
 
-		// If we aren't the active window then we don't have any keys set to true
-		if (GetActiveWindow() != windowHandle)
+		// Correct focus check for an embedded child window:
+		HWND focus = GetFocus(); // returns the window that has the KB focus in *this* thread
+		bool hasFocus = (focus == windowHandle) || (focus && IsChild(windowHandle, focus));
+
+		if (!hasFocus)
 		{
 			for (auto& key : keyState)
 			{
@@ -54,18 +57,14 @@ namespace Engine
 			}
 		}
 
-		// Update the mouse position
+		// Mouse position stays the same
 		POINT mousePoint;
 		GetCursorPos(&mousePoint);
 		ScreenToClient(windowHandle, &mousePoint);
 
-		// Save mouse delta
 		mouseDelta = { mousePoint.x - mousePos.x, mousePoint.y - mousePos.y };
-
-		// Update mouse position 
 		mousePos = { static_cast<float>(mousePoint.x), static_cast<float>(mousePoint.y) };
 
-		// Reset mouse wheel delta
 		mouseWheelDelta = 0;
 	}
 

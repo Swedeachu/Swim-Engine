@@ -37,17 +37,17 @@ namespace Engine
 		return L"Swim Engine Demo" + suffix;
 	}
 
-	SwimEngine::SwimEngine(HWND parentHwnd)
+	SwimEngine::SwimEngine(HWND parentHandle)
 	{
-		if (parentHwnd)
-		{
-			engineWindowHandle = parentHwnd;
-			ownsWindow = false;
-		}
-
 		windowClassName = L"SwimEngine";
 		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
+
+		this->parentHandle = parentHandle;
+
+		// We will create a child window (WS_CHILD) inside parentHandle if provided,
+		// otherwise we create our normal top-level window.
+		engineWindowHandle = nullptr;
 	}
 
 	std::shared_ptr<SwimEngine> SwimEngine::GetInstance()
@@ -100,28 +100,12 @@ namespace Engine
 
 	bool SwimEngine::MakeWindow()
 	{
-		// If an engine window handle was already passed from the ctor in main's args, we can just set what we need and return.
-		if (engineWindowHandle)
-		{
-			// Read initial client size from the provided HWND
-			RECT r{};
-			if (GetClientRect(engineWindowHandle, &r))
-			{
-				windowWidth = static_cast<unsigned int>(r.right - r.left);
-				windowHeight = static_cast<unsigned int>(r.bottom - r.top);
-			}
-			minimized = false;
-			needResize = true; // trigger a first resize into renderer on Init()
-			// We might still want to set the wndproc here
-			return true;
-		}
-
 		hInstance = GetModuleHandle(nullptr);
 
 		// Construct and register window class
 		WNDCLASSEX wc = {};
 		wc.cbSize = sizeof(WNDCLASSEX);
-		wc.style = CS_HREDRAW | CS_VREDRAW;
+		wc.style = CS_HREDRAW | CS_VREDRAW; // can add CS_DBLCLKS if we want double click messages: | CS_DBLCLKS
 		wc.lpfnWndProc = StaticWindowProc;
 		wc.hInstance = hInstance;
 		wc.hCursor = LoadCursor(0, IDC_ARROW);
@@ -129,7 +113,61 @@ namespace Engine
 
 		RegisterClassEx(&wc);
 
-		// Create window handle
+		// If a parent handle was provided (e.g., editor panel), create a child window inside it
+		if (parentHandle)
+		{
+			RECT r{};
+			GetClientRect(parentHandle, &r);
+			windowWidth = static_cast<unsigned int>(r.right - r.left);
+			windowHeight = static_cast<unsigned int>(r.bottom - r.top);
+
+			engineWindowHandle = CreateWindowEx(
+				0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
+				windowClassName.c_str(), // class name
+				windowTitle.c_str(), // window title
+				WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP, // child window that fills the parent panel
+				0, // initial horizontal position of the window
+				0, // initial vertical position of the window
+				windowWidth, // width
+				windowHeight, // height
+				parentHandle, // window parent (editor panel)
+				nullptr, // window child (none)
+				hInstance, // window instance handle
+				this // Set the GWLP_USERDATA to the Engine instance
+			);
+
+			// error if the window isn't made correctly
+			if (engineWindowHandle == nullptr || !&wc)
+			{
+				return false;
+			}
+
+			// Attach input queues so cross-process focus is allowed
+			DWORD parentThreadId = GetWindowThreadProcessId(parentHandle, nullptr);
+			DWORD myThreadId = GetCurrentThreadId();
+			AttachThreadInput(myThreadId, parentThreadId, TRUE);
+
+			// Also attach to the foreground window's thread (defensive; helps when focus is elsewhere)
+			HWND fg = GetForegroundWindow();
+			if (fg)
+			{
+				DWORD fgThreadId = GetWindowThreadProcessId(fg, nullptr);
+				if (fgThreadId && fgThreadId != myThreadId)
+				{
+					AttachThreadInput(myThreadId, fgThreadId, TRUE);
+				}
+			}
+
+			// bring to top and set focus (do NOT use SWP_NOACTIVATE here)
+			SetWindowPos(engineWindowHandle, HWND_TOP, 0, 0, windowWidth, windowHeight, 0);
+			SetFocus(engineWindowHandle);
+
+			minimized = false;
+			needResize = true; // trigger a first resize into renderer on Init()
+			return true;
+		}
+
+		// Create top-level window (normal standalone mode)
 		engineWindowHandle = CreateWindowEx(
 			0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
 			windowClassName.c_str(), // class name
@@ -169,6 +207,12 @@ namespace Engine
 			CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
 			enginePtr = reinterpret_cast<SwimEngine*>(createStruct->lpCreateParams);
 			SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(enginePtr));
+		}
+
+		// Guard against early messages before GWLP_USERDATA is set
+		if (enginePtr == nullptr)
+		{
+			return DefWindowProc(hwnd, uMsg, wParam, lParam);
 		}
 
 		// Call the non-static member function for window procedure
@@ -211,6 +255,52 @@ namespace Engine
 
 		switch (uMsg)
 		{
+			// Ensure we receive Tab/Arrows/Chars like a dialog wants
+			case WM_GETDLGCODE:
+			{
+				return DLGC_WANTALLKEYS | DLGC_WANTARROWS | DLGC_WANTCHARS | DLGC_WANTTAB;
+			}
+
+			// click to focus (for keyboard input)
+			case WM_LBUTTONDOWN:
+			case WM_RBUTTONDOWN:
+			case WM_MBUTTONDOWN:
+			case WM_XBUTTONDOWN:
+			{
+				SetFocus(hwnd);
+				// optional: SetCapture(hwnd); // useful for drags; uncomment if desired
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_LBUTTONUP:
+			case WM_RBUTTONUP:
+			case WM_MBUTTONUP:
+			case WM_XBUTTONUP:
+			{
+				// optional: if (GetCapture() == hwnd) ReleaseCapture();
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_MOUSEMOVE:
+			case WM_MOUSEWHEEL:
+			case WM_MOUSEHWHEEL:
+			{
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_KEYDOWN:
+			case WM_KEYUP:
+			case WM_SYSKEYDOWN:
+			case WM_SYSKEYUP:
+			case WM_CHAR:
+			{
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
 			// closed the window or process from a high user level
 			case WM_DESTROY:
 			{
@@ -273,6 +363,20 @@ namespace Engine
 
 				break;
 			}
+
+			//* do we want these 2?
+			case WM_SETFOCUS:
+			{
+				// Window gained focus
+				return 0;
+			}
+
+			case WM_KILLFOCUS:
+			{
+				// Window lost focus
+				return 0;
+			}
+			//*/
 
 			default:
 			{
