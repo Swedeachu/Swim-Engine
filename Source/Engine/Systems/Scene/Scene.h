@@ -17,6 +17,7 @@ namespace Engine
 {
 
 	// Forward declaration of systems
+	class SwimEngine;
 	class SceneSystem;
 	class InputManager;
 	class CameraSystem;
@@ -145,6 +146,7 @@ namespace Engine
 			auto uptr = std::make_unique<T>(std::move(behavior));
 			T* raw = uptr.get();
 
+			// TODO: determine if we should do this or defer these two calls to be on the first frame EngineState says we can execute
 			uptr->Awake();
 			uptr->Init();
 
@@ -165,6 +167,7 @@ namespace Engine
 			auto uptr = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
 			T* raw = uptr.get();
 
+			// TODO: determine if we should do this or defer these two calls to be on the first frame EngineState says we can execute
 			uptr->Awake();
 			uptr->Init();
 
@@ -184,6 +187,8 @@ namespace Engine
 				return;
 			}
 
+			EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
 			auto& bc = registry.get<BehaviorComponents>(entity);
 			auto& vec = bc.behaviors;
 
@@ -193,7 +198,7 @@ namespace Engine
 			{
 				if (b && typeid(*b) == typeid(T))
 				{
-					if (callExit)
+					if (callExit && b->CanExecute(state))
 					{
 						b->Exit();
 					}
@@ -212,12 +217,14 @@ namespace Engine
 		template<typename Func, typename... Args>
 		void ForEachBehavior(Func method, Args&&... args)
 		{
+			EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
 			registry.view<BehaviorComponents>().each(
 				[&](auto entity, BehaviorComponents& bc)
 			{
 				for (auto& behavior : bc.behaviors)
 				{
-					if (behavior)
+					if (behavior && behavior->CanExecute(state))
 					{
 						(behavior.get()->*method)(std::forward<Args>(args)...);
 					}
@@ -230,10 +237,11 @@ namespace Engine
 		{
 			if (registry.valid(entity) && registry.any_of<BehaviorComponents>(entity))
 			{
+				EngineState state = SwimEngine::GetInstance()->GetEngineState();
 				auto& bc = registry.get<BehaviorComponents>(entity);
 				for (auto& behavior : bc.behaviors)
 				{
-					if (behavior)
+					if (behavior && behavior->CanExecute(state))
 					{
 						(behavior.get()->*method)(std::forward<Args>(args)...);
 					}

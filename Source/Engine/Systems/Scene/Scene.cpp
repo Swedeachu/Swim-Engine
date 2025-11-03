@@ -74,13 +74,15 @@ namespace Engine
 			tf.parent = entt::null;
 		}
 
+		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
 		// Call Exit() on behaviors if needed
 		if (callExit && registry.any_of<BehaviorComponents>(entity))
 		{
 			auto& bc = registry.get<BehaviorComponents>(entity);
 			for (auto& b : bc.behaviors)
 			{
-				if (b) b->Exit();
+				if (b && b->CanExecute(state)) b->Exit();
 			}
 		}
 
@@ -450,6 +452,9 @@ namespace Engine
 		// 2. Iterate over UI entities and run hit-testing in the same space
 		entt::registry& registry = GetRegistry();
 
+		// We want the engine state for filtering which behaviors should have callbacks ran on them
+		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
 		registry.view<Transform, Material, BehaviorComponents>().each(
 			[&](entt::entity entity,
 			Transform& transform,
@@ -479,7 +484,7 @@ namespace Engine
 			// 3. Let each attached behaviour react
 			for (std::unique_ptr<Behavior>& behavior : bc.behaviors)
 			{
-				if (!behavior || !behavior->RunMouseCallBacks())
+				if (!behavior || !behavior->CanExecute(state) || !behavior->RunMouseCallBacks())
 				{
 					continue;
 				}

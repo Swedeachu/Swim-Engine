@@ -363,6 +363,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Axis.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.h" />
+    <ClInclude Include="Source\Engine\EngineState.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

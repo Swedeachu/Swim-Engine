@@ -244,6 +244,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
     <ClInclude Include="Source\Engine\Components\ObjectTag.h" />
     <ClInclude Include="Source\Engine\Components\TextComponent.h" />
+    <ClInclude Include="Source\Engine\EngineState.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />

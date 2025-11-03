@@ -2,6 +2,8 @@
 
 #include "Systems/SystemManager.h"
 #include "Systems/Renderer/Renderer.h"
+#include "EngineState.h"
+#include <format>
 
 namespace Engine
 {
@@ -26,7 +28,7 @@ namespace Engine
 		// This is constexpr so branching logic based on API specific code is instant (Mesh, Texture, etc). 
 		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
-		static constexpr bool useShaderToyIfOpenGL = false; 
+		static constexpr bool useShaderToyIfOpenGL = false;
 
 		SwimEngine(HWND parentHandle = nullptr);
 
@@ -53,6 +55,8 @@ namespace Engine
 
 		// Makes the engine break out of the heart beat loop if it is in it, and calls Exit()
 		void Stop();
+
+		void OnEditorCommand(const std::wstring& msg);
 
 		static std::shared_ptr<SwimEngine> GetInstance();
 		static std::shared_ptr<SwimEngine>& GetInstanceRef();
@@ -81,6 +85,28 @@ namespace Engine
 		// Returns the amount of time between the previous frame
 		double GetDeltaTime() const { return delta; }
 
+		// Stuff will royally screw up if you are passing a masked together value instead of just one specific state flag
+		void SetEngineState(EngineState state) { engineState = state; }
+
+		EngineState GetEngineState() const { return engineState; }
+
+		// Send a wide string back to the editor panel. Returns true if the editor handled it (nonzero LRESULT).
+		bool SendEditorMessage(const std::wstring& msg, std::uintptr_t channel = 1);
+
+		// Convenience formatter
+		template<typename... Args>
+		bool SendEditorMessageF(std::wstring_view fmt, Args&&... args)
+		{
+		#if __has_include(<format>)
+			std::wstring s = std::vformat(fmt, std::make_wformat_args(std::forward<Args>(args)...));
+			return SendEditorMessage(s);
+		#else
+			// Fallback: build manually or require fmtlib if you prefer.
+			// Simple pass-through to avoid compile errors:
+			return SendEditorMessage(std::wstring(fmt));
+		#endif
+		}
+
 	private:
 
 		// calls Update when it is time
@@ -103,6 +129,7 @@ namespace Engine
 		bool cursorVisible{ true };
 		bool debugging{ false };
 		int fps{ 0 };
+		EngineState engineState{ EngineState::Playing }; // TODO: this should be an arg in the ctor, by default playing, but editor might tell us to construct as paused
 
 		// Window fields
 		HWND engineWindowHandle{ nullptr };

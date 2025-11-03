@@ -228,6 +228,28 @@ namespace Engine
 		}
 		*/
 
+		// Handle WM_COPYDATA regardless of initialization state
+		if (uMsg == WM_COPYDATA)
+		{
+			auto cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+			if (cds && cds->lpData && cds->cbData >= 2) // at least 1 wchar + NUL
+			{
+				// Interpret payload as UTF-16 (wide). cbData is in bytes.
+				const wchar_t* wbuf = static_cast<const wchar_t*>(cds->lpData);
+				size_t wcharCount = static_cast<size_t>(cds->cbData / sizeof(wchar_t));
+
+				// Strip a trailing NUL if present
+				if (wcharCount > 0 && wbuf[wcharCount - 1] == L'\0')
+				{
+					--wcharCount;
+				}
+
+				std::wstring msg(wbuf, wcharCount);
+				OnEditorCommand(msg);
+			}
+			return 0;
+		}
+
 		// SwimEngine class + input manager must be initialized first to accept messages
 		if (this == nullptr || inputManager.get() == nullptr)
 		{
@@ -388,15 +410,41 @@ namespace Engine
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
+	void SwimEngine::OnEditorCommand(const std::wstring& msg)
+	{
+		// TODO: Parse 'msg' and act:
+
+		// Flag the editor back we recieved, just for debug right now
+		SendEditorMessage(L"[Engine ACK]" + msg);
+	}
+
+	bool SwimEngine::SendEditorMessage(const std::wstring& msg, std::uintptr_t channel)
+	{
+		if (!parentHandle)
+		{
+			return false;
+		}
+
+		COPYDATASTRUCT cds{};
+		cds.dwData = static_cast<ULONG_PTR>(channel);
+		cds.cbData = static_cast<DWORD>((msg.size() + 1) * sizeof(wchar_t)); // include NUL
+		cds.lpData = (PVOID)msg.c_str();
+
+		// Per Win32 rules, WM_COPYDATA must be SendMessage (synchronous).
+		LRESULT handled = SendMessageW(parentHandle, WM_COPYDATA, reinterpret_cast<WPARAM>(engineWindowHandle), reinterpret_cast<LPARAM>(&cds));
+
+		return handled != 0;
+	}
+
 	Renderer& SwimEngine::GetRenderer()
 	{
 		if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
-			return *openglRenderer;   
+			return *openglRenderer;
 		}
 		else if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
-			return *vulkanRenderer;  
+			return *vulkanRenderer;
 		}
 	}
 
@@ -531,7 +579,7 @@ namespace Engine
 		static double dfps = 0.0;
 
 		// If embedded into an external window (editor panel), we won't receive WM_SIZE here.
-	  // So keep our cached size in sync each frame.
+		// So keep our cached size in sync each frame.
 		if (!ownsWindow && engineWindowHandle)
 		{
 			UpdateWindowSize();
@@ -567,7 +615,7 @@ namespace Engine
 			{
 				// Format new title: "Swim Engine [Vulkan] | 240 FPS"
 				// Game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
-				std::wstring baseTitle = getDefaultWindowTitle(); 
+				std::wstring baseTitle = getDefaultWindowTitle();
 				std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
 
 				// Set the updated title
