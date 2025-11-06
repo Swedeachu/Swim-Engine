@@ -2,7 +2,9 @@
 
 #include "Systems/SystemManager.h"
 #include "Systems/Renderer/Renderer.h"
+#include "Systems/IO/CommandSystem.h"
 #include "EngineState.h"
+#include <utility>
 #include <format>
 
 namespace Engine
@@ -16,11 +18,24 @@ namespace Engine
 	class SwimEngine : public Machine, public std::enable_shared_from_this<SwimEngine>
 	{
 
+	private:
+
+		// The initial state the engine will start in if no argument is provided from main
+		static constexpr EngineState DefaultEngineState = EngineState::Playing;
+
 	public:
 
 		enum RenderContext
 		{
 			Vulkan, OpenGL /*, DirectX12, Metal */ // everything commented out is not implemented yet/doesn't need to be implemented
+		};
+
+		struct EngineArgs
+		{
+			EngineArgs(HWND h = nullptr, EngineState s = EngineState::Playing) : parentHandle(h), state(s) {}
+
+			HWND parentHandle{ nullptr };
+			EngineState state{ EngineState::Playing };
 		};
 
 		// The render context we are using, this should be changed before compliation before building for the target platform.
@@ -30,7 +45,8 @@ namespace Engine
 		// If we are using the OpenGL context, then this flag determines if we use the shader toy version of the opengl renderer 
 		static constexpr bool useShaderToyIfOpenGL = false;
 
-		SwimEngine(HWND parentHandle = nullptr);
+		SwimEngine(EngineArgs args);
+		SwimEngine(HWND parentHandle = nullptr, EngineState state = EngineState::Playing);
 
 		// Calls Awake and then Init
 		bool Start();
@@ -61,6 +77,8 @@ namespace Engine
 		static std::shared_ptr<SwimEngine> GetInstance();
 		static std::shared_ptr<SwimEngine>& GetInstanceRef();
 
+		static EngineArgs ParseStartingEngineArgs(int argc, char** argv);
+
 		static std::string GetExecutableDirectory();
 
 		int GetFPS() const;
@@ -70,6 +88,7 @@ namespace Engine
 		std::shared_ptr<InputManager>& GetInputManager() { return inputManager; }
 		std::shared_ptr<SceneSystem>& GetSceneSystem() { return sceneSystem; }
 		std::shared_ptr<CameraSystem>& GetCameraSystem() { return cameraSystem; }
+		std::shared_ptr<CommandSystem>& GetCommandSystem() { return commandSystem; }
 		std::shared_ptr<VulkanRenderer>& GetVulkanRenderer() { return vulkanRenderer; }
 		std::shared_ptr<OpenGLRenderer>& GetOpenGLRenderer() { return openglRenderer; }
 
@@ -97,17 +116,13 @@ namespace Engine
 		template<typename... Args>
 		bool SendEditorMessageF(std::wstring_view fmt, Args&&... args)
 		{
-		#if __has_include(<format>)
 			std::wstring s = std::vformat(fmt, std::make_wformat_args(std::forward<Args>(args)...));
 			return SendEditorMessage(s);
-		#else
-			// Fallback: build manually or require fmtlib if you prefer.
-			// Simple pass-through to avoid compile errors:
-			return SendEditorMessage(std::wstring(fmt));
-		#endif
 		}
 
 	private:
+
+		void Create(HWND parentHandle, EngineState state);
 
 		// calls Update when it is time
 		int HeartBeat();
@@ -129,7 +144,9 @@ namespace Engine
 		bool cursorVisible{ true };
 		bool debugging{ false };
 		int fps{ 0 };
-		EngineState engineState{ EngineState::Playing }; // TODO: this should be an arg in the ctor, by default playing, but editor might tell us to construct as paused
+
+		// This state will never be masked, only masked against. I.E will only be Playing or Stopped or Paused etc and never some combined state.
+		EngineState engineState{ EngineState::Playing };
 
 		// Window fields
 		HWND engineWindowHandle{ nullptr };
@@ -149,7 +166,9 @@ namespace Engine
 		void UpdateWindowSize();
 
 		std::unique_ptr<SystemManager> systemManager;
+		// You would think these should all be unique, but we use them a lot everywhere as fields in scenes and behaviors.
 		std::shared_ptr<InputManager> inputManager;
+		std::shared_ptr<CommandSystem> commandSystem;
 		std::shared_ptr<SceneSystem> sceneSystem;
 		std::shared_ptr<VulkanRenderer> vulkanRenderer;
 		std::shared_ptr<OpenGLRenderer> openglRenderer;

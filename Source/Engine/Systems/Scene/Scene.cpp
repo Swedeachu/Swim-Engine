@@ -80,9 +80,12 @@ namespace Engine
 		if (callExit && registry.any_of<BehaviorComponents>(entity))
 		{
 			auto& bc = registry.get<BehaviorComponents>(entity);
-			for (auto& b : bc.behaviors)
+			if (bc.CanExecute(state))
 			{
-				if (b && b->CanExecute(state)) b->Exit();
+				for (auto& b : bc.behaviors)
+				{
+					if (b) b->Exit();
+				}
 			}
 		}
 
@@ -286,6 +289,45 @@ namespace Engine
 		return false;
 	}
 
+	bool Scene::ShouldRenderBasedOnState(entt::entity e) const
+	{
+		const EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
+		if (registry.any_of<BehaviorComponents>(e))
+		{
+			const BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
+			const bool editingOnly = ShouldRenderOnlyDuringEditingBasedOnState(e); 
+
+			if (editingOnly)
+			{
+				// Bitflag-safe check (covers combined states like Editing|Paused)
+				return HasAny(state, EngineState::Editing);
+			}
+		}
+
+		// Otherwise most things will always render
+		return true;
+	}
+
+	bool Scene::ShouldRenderOnlyDuringEditingBasedOnState(entt::entity e) const
+	{
+		if (!registry.any_of<BehaviorComponents>(e))
+		{
+			return false;
+		}
+
+		const BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
+
+		// True only during editing: enabled in Editing, and NOT enabled in any other state.
+		const bool enabledEditing = bc.IsEnabledIn(EngineState::Editing);
+		const bool enabledElsewhere =
+			bc.IsEnabledIn(EngineState::Playing) ||
+			bc.IsEnabledIn(EngineState::Paused) ||
+			bc.IsEnabledIn(EngineState::Stopped);
+
+		return enabledEditing && !enabledElsewhere;
+	}
+
 	void Scene::SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system)
 	{
 		vulkanRenderer = system;
@@ -340,7 +382,7 @@ namespace Engine
 		gizmoSystem->Awake();
 		gizmoSystem->Init();
 
-		ForEachBehavior(&Behavior::Init); // we might not want to do this actually and let behaviors do this themselves
+		ForEachBehavior(&Behavior::InitIfNeeded); // we might not want to do this actually and let behaviors do this themselves
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -361,6 +403,7 @@ namespace Engine
 		}
 
 		// Call fixed update on all our behaviors
+		ForEachBehavior(&Behavior::InitIfNeeded);
 		ForEachBehavior(&Behavior::FixedUpdate, tickThisSecond);
 
 		// Add new frustum cache components if needed
@@ -415,6 +458,7 @@ namespace Engine
 		}
 
 		// Call Update(dt) on all Behavior components.
+		ForEachBehavior(&Behavior::InitIfNeeded);
 		ForEachBehavior(&Behavior::Update, dt);
 		UpdateUIBehaviors();
 
@@ -460,9 +504,9 @@ namespace Engine
 			Transform& transform,
 			Material&, BehaviorComponents& bc)
 		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			if (transform.GetTransformSpace() != TransformSpace::Screen || !bc.CanExecute(state))
 			{
-				return; // ignore world-space stuff here
+				return; // ignore world-space or non active stuff here
 			}
 
 			// World position (center of quad in virtual-canvas units)
@@ -484,7 +528,7 @@ namespace Engine
 			// 3. Let each attached behaviour react
 			for (std::unique_ptr<Behavior>& behavior : bc.behaviors)
 			{
-				if (!behavior || !behavior->CanExecute(state) || !behavior->RunMouseCallBacks())
+				if (!behavior || !behavior->RunMouseCallBacks())
 				{
 					continue;
 				}
@@ -627,6 +671,33 @@ namespace Engine
 		const glm::vec3 dir = glm::normalize(q * dirVS);
 
 		return Ray(origin, dir);
+	}
+
+	void Scene::SetEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.SetEnabledStates(states);
+		}
+	}
+
+	void Scene::AddEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.AddEnabledStates(states);
+		}
+	}
+
+	void Scene::RemoveEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.RemoveEnabledStates(states);
+		}
 	}
 
 	ObjectTag* Scene::GetTag(entt::entity entity)

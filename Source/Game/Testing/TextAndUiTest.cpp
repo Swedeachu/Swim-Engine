@@ -91,11 +91,11 @@ namespace Game
 			fpsText.fillColor = glm::vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
 			fpsText.strokeColor = glm::vec4{ 0.0f, 0.0f, 0.0f, 1.0f };
 			fpsText.strokeWidth = 2.0f;
-			textComponent.SetAlignment(Engine::TextAllignemt::Left);
-			fpsText.SetText("FPS: ");
+			fpsText.SetAlignment(Engine::TextAllignemt::Left);
+			fpsText.SetText("FPS: <...>"); // nothing to start
 			fpsText.SetFont(roboto);
 
-			scene->AddComponent<Engine::TextComponent>(fpsEntity, textComponent);
+			scene->AddComponent<Engine::TextComponent>(fpsEntity, fpsText);
 
 			Game::SetTextCallback* fpsBehavior = scene->EmplaceBehavior<Game::SetTextCallback>(fpsEntity, /*chroma*/ true);
 			fpsBehavior->SetCallback([engine](Engine::TextComponent& tc, entt::entity e, double)
@@ -104,6 +104,9 @@ namespace Game
 				const std::string s = "FPS: " + std::to_string(fps);
 				tc.SetText(s);
 			});
+
+			// Only show fps entity during playing
+			scene->SetEnabledStates(fpsEntity, Engine::EngineState::Playing);
 
 			// camera coords
 			auto coordEntity = scene->CreateEntity();
@@ -133,6 +136,9 @@ namespace Game
 					);
 				tc.SetText(newText);
 			});
+
+			// Only show camera coords while editing
+			scene->SetEnabledStates(coordEntity, Engine::EngineState::Editing);
 		}
 
 		// Below here is a bunch of bools for messing with making a second UI entity to test stuff out with

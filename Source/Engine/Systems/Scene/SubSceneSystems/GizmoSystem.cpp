@@ -106,6 +106,7 @@ namespace Engine
 		glm::vec4 activeColor = { 0.0f, 0.5f, 0.0f, 1.0f }; // green
 
 		gizmoUI = activeScene->CreateEntity();
+		activeScene->SetEnabledStates(gizmoUI, EngineState::Editing);
 
 		// Base container box properties of the gizmo selection UI (in px)
 		glm::vec3 position = { 100.0f, 700.0f, 0.0f };
@@ -137,6 +138,7 @@ namespace Engine
 		auto makeButton = [&](const char* label, float textY, const glm::vec3& pos, GizmoType type)
 		{
 			entt::entity e = activeScene->CreateEntity();
+			activeScene->SetEnabledStates(e, EngineState::Editing);
 			Transform& tf = activeScene->EmplaceComponent<Transform>(e, pos, buttonScale, glm::quat(), TransformSpace::Screen);
 			activeScene->EmplaceComponent<Material>(e, Material(quadMatData));
 			activeScene->EmplaceComponent<MeshDecorator>(e, buttonFillColor, buttonStrokeColor,
@@ -154,6 +156,7 @@ namespace Engine
 
 			// Text
 			entt::entity txt = activeScene->CreateEntity();
+			activeScene->SetEnabledStates(txt, EngineState::Editing);
 			glm::vec3 textPos = { 0.0f, textY, 0.0f };
 			Transform& txtTf = activeScene->EmplaceComponent<Transform>(txt, textPos, buttonScale * 2.f, glm::quat(), TransformSpace::Screen);
 			activeScene->EmplaceComponent<ObjectTag>(txt, TagConstants::EDITOR_MODE_UI);
@@ -182,7 +185,8 @@ namespace Engine
 
 	void GizmoSystem::Update(double dt)
 	{
-		if (!activeScene) return;
+		EngineState state = SwimEngine::GetInstance()->GetEngineState(); 
+		if (!activeScene || !HasAny(state, EngineState::Editing)) return; // only active during editing
 
 		// If nothing is selected, we will call the method to do mouse click ray cast checks for if we are selecting anything in the scene.
 		if (activeGizmoType != GizmoType::Inactive && (rootGizmoControl == entt::null || focusedEntity == entt::null))
@@ -542,6 +546,7 @@ namespace Engine
 			rootT.GetRotationRef() = glm::quat(1, 0, 0, 0);
 			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
 			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
+			activeScene->SetEnabledStates(rootGizmoControl, EngineState::Editing);
 			// Just to show the parent root gizmo control object (we know it works):
 			// auto color = GetDebugColorValue(DebugColor::Gray);
 			// activeScene->EmplaceComponent<Material>(rootGizmoControl, Material(sphereMatData));
@@ -551,6 +556,7 @@ namespace Engine
 		auto spawnAxis = [&](const glm::quat& r, const glm::vec4& color, const std::string& tagName)
 		{
 			entt::entity e = activeScene->CreateEntity();
+			activeScene->SetEnabledStates(e, EngineState::Editing);
 
 			// tweak: gap away from root so arrow ends don't touch at (0,0,0) 
 			constexpr float kGap = 0.1f;        // small world-space gap to avoid z-fighting (tweak as needed)

@@ -26,7 +26,7 @@ namespace Game
 
 	constexpr static bool doStressTest = false;
 	constexpr static bool doUI = true;
-	constexpr static bool glbTests = false;
+	constexpr static bool glbTests = true;
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 	constexpr static bool testPrimitiveMeshes = true;
 	constexpr static bool doWorldSpaceParentTesting = true; // via orbit system
@@ -143,14 +143,32 @@ namespace Game
 		EmplaceBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
-		entityFactory.CreateWithTransformMaterialAndBehaviors<SimpleMovement>(
+		entityFactory.CreateWithTransformAndMaterialAndBehaviors<SimpleMovement>(
 			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
 			Engine::Material(materialData1)
+			/*,
+			[](entt::entity e, Engine::Transform& t, Engine::Material& m, SimpleMovement* mv)
+			{
+				// and we can even have a callback if we wanted (commented out since we don't need a cb here)
+			}
+			*/
 		);
 
 		// We can load scene scripts this way as a cool hack/trick
 		// Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
-		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest/*, RayCasterCameraControl*/>();
+		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(
+			[this](entt::entity e, EditorCamera* editorCam, CubeMapControlTest* cubeMapCtrl)
+		{
+			entt::registry& reg = GetRegistry();
+			if (reg.any_of<Engine::BehaviorComponents>(e))
+			{
+				Engine::BehaviorComponents& bc = reg.get<Engine::BehaviorComponents>(e);
+				bc.SetEnabledStates(Engine::EngineState::Editing); // these scripts only execute in editing mode
+				// HACK: we do want the skybox to turn on though, so we manually init the cube map control test.
+				cubeMapCtrl->InitIfNeeded();
+			}
+		}
+		);
 
 		if constexpr (doUI) MakeUI(this);
 

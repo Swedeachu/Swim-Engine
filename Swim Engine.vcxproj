@@ -221,6 +221,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
+    <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
@@ -249,6 +250,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
+    <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />

@@ -8,19 +8,8 @@
 
 int main(int argc, char** argv)
 {
-  HWND parentHwnd = nullptr;
+  auto engine = std::make_shared<Engine::SwimEngine>(Engine::SwimEngine::ParseStartingEngineArgs(argc, argv));
+  if (engine->Start() == 0) return engine->Run(); // runs if started with zero errors
 
-  for (int i = 1; i < argc; ++i)
-  {
-    if (std::string(argv[i]) == "--parent-hwnd" && i + 1 < argc)
-    {
-      uint64_t val = std::strtoull(argv[++i], nullptr, 10);
-      parentHwnd = reinterpret_cast<HWND>(val);
-    }
-  }
-
-	auto engine = std::make_shared<Engine::SwimEngine>(parentHwnd);
-	if (engine->Start() == 0) return engine->Run();
-
-	return -1; 
+  return -1;
 }

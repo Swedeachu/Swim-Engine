@@ -22,6 +22,18 @@ namespace Engine
 
 		Behavior(Scene* scene, entt::entity owner);
 
+		bool HasInited() const { return hasInited; }
+		void SetInited() { hasInited = true; }
+
+		void InitIfNeeded()
+		{
+			if (!hasInited)
+			{
+				hasInited = true;
+				Init();
+			}
+		}
+
 		virtual ~Behavior() = default;
 
 		// These will be implemented once PhysX is integrated later on
@@ -54,38 +66,6 @@ namespace Engine
 		const bool FocusedByMouse() const { return focusedByMouse; }
 		void SetFocusedByMouse(bool value) { focusedByMouse = value; }
 
-		// Set exactly which engine states this behavior is enabled in.
-		// Default is EngineState::Playing.
-		void SetEnabledStates(EngineState states) { enabledStates = states; }
-
-		// Add one or more states to the enable mask.
-		void AddEnabledStates(EngineState states) { enabledStates |= states; }
-
-		// Remove one or more states from the enable mask.
-		void RemoveEnabledStates(EngineState states)
-		{
-			enabledStates = static_cast<EngineState>(
-				static_cast<std::underlying_type_t<EngineState>>(enabledStates) &
-				~static_cast<std::underlying_type_t<EngineState>>(states)
-				);
-		}
-
-		// Query which states are enabled for this behavior (bitmask).
-		EngineState GetEnabledStates() const { return enabledStates; }
-
-		// Convenient predicate: is this behavior enabled in a specific state?
-		bool IsEnabledIn(EngineState state) const
-		{
-			return HasAny(enabledStates, state);
-		}
-
-		// Main gate: can this behavior execute given current engine state?
-		// Typical use: if (!behavior->CanExecute(currentEngineState)) return;
-		bool CanExecute(EngineState currentEngineState) const
-		{
-			return HasAny(enabledStates, currentEngineState);
-		}
-
 	protected:
 
 		Scene* scene = nullptr;
@@ -105,9 +85,7 @@ namespace Engine
 
 		bool focusedByMouse = false;
 
-		// Which engine states this behavior is active in (bitmask)
-		// Default: active only while Playing
-		EngineState enabledStates = EngineState::Playing;
+		bool hasInited = false;
 
 	};
 

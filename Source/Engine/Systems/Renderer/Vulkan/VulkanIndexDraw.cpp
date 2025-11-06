@@ -317,6 +317,12 @@ namespace Engine
 				return;
 			}
 
+			// Skip what should not be rendered
+			if (!scene.ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const Transform& tf = registry.get<Transform>(entity);
 
 			if (registry.all_of<Material>(entity))
@@ -338,9 +344,17 @@ namespace Engine
 	// Passing space as TransformSpace::Ambiguous will just render all entities
 	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		auto regularView = registry.view<Transform, Material>();
 		for (auto entity : regularView)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				continue;
+			}
+
 			const Transform& tf = regularView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
@@ -352,6 +366,12 @@ namespace Engine
 		auto compositeView = registry.view<Transform, CompositeMaterial>();
 		for (auto entity : compositeView)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				continue;
+			}
+
 			const Transform& tf = compositeView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
@@ -614,6 +634,8 @@ namespace Engine
 			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 		);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
@@ -622,6 +644,12 @@ namespace Engine
 
 			// We can render UI in world space if it has a decorator on it.
 			if (!hasDecorator && space != TransformSpace::Screen)
+			{
+				return;
+			}
+
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
 			{
 				return;
 			}
@@ -839,11 +867,19 @@ namespace Engine
 		std::vector<MsdfTextGpuInstanceData>& outInstances
 	)
 	{
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != space) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
+
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
 
 			const FontInfo& fi = *tc.GetFont();
 			const uint32_t atlasIndex = tc.GetFont()->msdfAtlas->GetBindlessIndex();

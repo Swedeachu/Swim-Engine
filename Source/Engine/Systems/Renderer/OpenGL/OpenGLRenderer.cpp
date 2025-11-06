@@ -589,6 +589,12 @@ namespace Engine
 
 		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const Transform& tf = registry.get<Transform>(entity);
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
@@ -685,8 +691,16 @@ namespace Engine
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
 				return;
@@ -706,6 +720,12 @@ namespace Engine
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			if (tf.GetTransformSpace() != TransformSpace::Screen)
 			{
 				return;
@@ -898,11 +918,19 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != TransformSpace::World) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
+
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
 
 			const FontInfo& fi = *tc.GetFont();
 			MsdfTextGpuInstanceData s = BuildMsdfStateWorld(registry, tf, tc, fi, 0);
@@ -969,11 +997,19 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != TransformSpace::Screen) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
+
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
 
 			const FontInfo& fi = *tc.GetFont();
 			MsdfTextGpuInstanceData s = BuildMsdfStateScreen(registry, tf, tc, fi,

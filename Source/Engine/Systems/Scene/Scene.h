@@ -87,6 +87,12 @@ namespace Engine
 
 		entt::registry& GetRegistry() { return registry; }
 
+		// Check if an entity should only be rendered during editing.
+		bool ShouldRenderOnlyDuringEditingBasedOnState(entt::entity e) const;
+
+		// Check if an entity should render in general, this uses ShouldRenderOnlyDuringEditing. The renderer will call this in the render passes.
+		bool ShouldRenderBasedOnState(entt::entity e) const;
+
 		// Called by SceneSystem during Awake
 		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
 		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
@@ -133,48 +139,32 @@ namespace Engine
 		}
 
 		// Adds an already-constructed behavior instance to an entity.
-		// The behavior's Awake() and Init() methods are called immediately.
-		// Returns a pointer to the behavior (typed as T*).
+	  // The behavior’s Awake() is called AFTER ownership transfer.
+		// Init() is called immediately if CanExecute(current engine state) is true.
+		// Returns T* to the stored behavior.
 		template<typename T>
-		T* AddBehavior(entt::entity entity, T behavior)
+		T* AddBehavior(entt::entity entity, T&& behavior)
 		{
-			static_assert(std::is_base_of_v<Behavior, T>, "AddBehavior<T> requires T to derive from Behavior");
-			static_assert(!std::is_pointer_v<T>, "AddBehavior should not take a pointer type");
-			static_assert(!std::is_reference_v<T>, "AddBehavior should not take a reference type");
+			static_assert(std::is_base_of_v<Behavior, std::remove_reference_t<T>>,
+				"AddBehavior<T> requires T to derive from Behavior");
+			static_assert(!std::is_pointer_v<std::remove_reference_t<T>>,
+				"AddBehavior should not take a pointer type");
 
-			// Wrap the behavior instance into a unique_ptr for BehaviorComponents
-			auto uptr = std::make_unique<T>(std::move(behavior));
-			T* raw = uptr.get();
-
-			// TODO: determine if we should do this or defer these two calls to be on the first frame EngineState says we can execute
-			uptr->Awake();
-			uptr->Init();
-
-			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
-			bc.Add(std::move(uptr));
-
-			return raw;
+			auto uptr = std::make_unique<std::remove_reference_t<T>>(std::forward<T>(behavior));
+			return AttachAwakeInit(entity, std::move(uptr));
 		}
 
-		// Args is to contain any arguments for the dervied classes constructor that come after the explicit base class behavior constructor arguments.
-		// The behavior's Awake() and Init() methods are called immediately.
-		// Returns a pointer to the behavior created.
+		// Constructs the behavior in-place using (this, entity, args...) and adds it.
+		// Awake() happens after attach; Init() is immediate if CanExecute(...) is true.
+		// Returns T* to the stored behavior.
 		template<typename T, typename... Args>
 		T* EmplaceBehavior(entt::entity entity, Args&&... args)
 		{
-			static_assert(std::is_base_of_v<Behavior, T>, "EmplaceBehavior<T> requires T to derive from Behavior");
+			static_assert(std::is_base_of_v<Behavior, T>,
+				"EmplaceBehavior<T> requires T to derive from Behavior");
 
 			auto uptr = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
-			T* raw = uptr.get();
-
-			// TODO: determine if we should do this or defer these two calls to be on the first frame EngineState says we can execute
-			uptr->Awake();
-			uptr->Init();
-
-			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
-			bc.Add(std::move(uptr));
-
-			return raw;
+			return AttachAwakeInit(entity, std::move(uptr));
 		}
 
 		template<typename T>
@@ -198,7 +188,7 @@ namespace Engine
 			{
 				if (b && typeid(*b) == typeid(T))
 				{
-					if (callExit && b->CanExecute(state))
+					if (callExit && bc.CanExecute(state))
 					{
 						b->Exit();
 					}
@@ -222,11 +212,14 @@ namespace Engine
 			registry.view<BehaviorComponents>().each(
 				[&](auto entity, BehaviorComponents& bc)
 			{
-				for (auto& behavior : bc.behaviors)
+				if (bc.CanExecute(state))
 				{
-					if (behavior && behavior->CanExecute(state))
+					for (auto& behavior : bc.behaviors)
 					{
-						(behavior.get()->*method)(std::forward<Args>(args)...);
+						if (behavior)
+						{
+							(behavior.get()->*method)(std::forward<Args>(args)...);
+						}
 					}
 				}
 			});
@@ -239,15 +232,24 @@ namespace Engine
 			{
 				EngineState state = SwimEngine::GetInstance()->GetEngineState();
 				auto& bc = registry.get<BehaviorComponents>(entity);
-				for (auto& behavior : bc.behaviors)
+				if (bc.CanExecute(state))
 				{
-					if (behavior && behavior->CanExecute(state))
+					for (auto& behavior : bc.behaviors)
 					{
-						(behavior.get()->*method)(std::forward<Args>(args)...);
+						if (behavior)
+						{
+							(behavior.get()->*method)(std::forward<Args>(args)...);
+						}
 					}
 				}
 			}
 		}
+
+		void SetEnabledStates(entt::entity entity, EngineState states);
+
+		void AddEnabledStates(entt::entity entity, EngineState states);
+
+		void RemoveEnabledStates(entt::entity entity, EngineState states);
 
 		ObjectTag* GetTag(entt::entity entity);
 
@@ -274,6 +276,31 @@ namespace Engine
 				throw std::runtime_error("Invalid System!");
 			}
 			return system;
+		}
+
+		template<typename T>
+		T* AttachAwakeInit(entt::entity entity, std::unique_ptr<T> uptr)
+		{
+			T* raw = uptr.get();
+
+			// Add to behavior components first (so it's owned)
+			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.Add(std::move(uptr));
+
+			// Call awake
+			raw->Awake();
+
+			// Conditionally Init immediately if it can execute in the current state
+			/* We actually defer until the next frame for maximum safety.
+			const EngineState state = SwimEngine::GetInstance()->GetEngineState();
+			if (bc.CanExecute(state))
+			{
+				raw->SetInited();
+				raw->Init();
+			}
+			*/
+
+			return raw;
 		}
 
 	private:

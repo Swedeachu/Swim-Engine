@@ -37,13 +37,24 @@ namespace Engine
 		return L"Swim Engine Demo" + suffix;
 	}
 
-	SwimEngine::SwimEngine(HWND parentHandle)
+	SwimEngine::SwimEngine(EngineArgs args)
+	{
+		Create(args.parentHandle, args.state);
+	}
+
+	SwimEngine::SwimEngine(HWND parentHandle, EngineState state)
+	{
+		Create(parentHandle, state);
+	}
+
+	void SwimEngine::Create(HWND parentHandle, EngineState state)
 	{
 		windowClassName = L"SwimEngine";
 		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
 
 		this->parentHandle = parentHandle;
+		this->engineState = state;
 
 		// We will create a child window (WS_CHILD) inside parentHandle if provided,
 		// otherwise we create our normal top-level window.
@@ -58,6 +69,45 @@ namespace Engine
 	std::shared_ptr<SwimEngine>& SwimEngine::GetInstanceRef()
 	{
 		return EngineInstance;
+	}
+
+	SwimEngine::EngineArgs SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
+	{
+		// Default values
+		HWND parentHwnd = nullptr;
+		EngineState state = DefaultEngineState;
+
+		for (int i = 1; i < argc; ++i)
+		{
+			std::string arg = argv[i];
+
+			if (arg == "--parent-hwnd" && i + 1 < argc)
+			{
+				uint64_t val = std::strtoull(argv[++i], nullptr, 10);
+				parentHwnd = reinterpret_cast<HWND>(val);
+			}
+			else if (arg == "--state" && i + 1 < argc)
+			{
+				std::string value = argv[++i];
+				EngineState parsed = ParseEngineStateArg(value);
+				// If parsing yields None, keep default Playing; otherwise use parsed
+				if (parsed != EngineState::None)
+				{
+					state = parsed;
+				}
+			}
+			else if (arg.rfind("--state=", 0) == 0) // allow --state=VALUE
+			{
+				std::string value = arg.substr(std::string("--state=").size());
+				EngineState parsed = ParseEngineStateArg(value);
+				if (parsed != EngineState::None)
+				{
+					state = parsed;
+				}
+			}
+		}
+
+		return EngineArgs(parentHwnd, state);
 	}
 
 	std::string SwimEngine::GetExecutableDirectory()
@@ -386,7 +436,6 @@ namespace Engine
 				break;
 			}
 
-			//* do we want these 2?
 			case WM_SETFOCUS:
 			{
 				// Window gained focus
@@ -398,7 +447,6 @@ namespace Engine
 				// Window lost focus
 				return 0;
 			}
-			//*/
 
 			default:
 			{
@@ -410,14 +458,54 @@ namespace Engine
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	void SwimEngine::OnEditorCommand(const std::wstring& msg)
+	std::string WStringToUTF8(const std::wstring& ws)
 	{
-		// TODO: Parse 'msg' and act:
+		if (ws.empty()) return std::string();
 
-		// Flag the editor back we recieved, just for debug right now
-		SendEditorMessage(L"[Engine ACK]" + msg);
+		// Query length
+		int len = WideCharToMultiByte(
+			CP_UTF8, 0,
+			ws.data(), static_cast<int>(ws.size()),
+			nullptr, 0, nullptr, nullptr
+		);
+
+		if (len <= 0)
+		{
+			return std::string();
+		}
+
+		std::string out;
+		out.resize(static_cast<size_t>(len));
+
+		// Convert
+		int written = WideCharToMultiByte(
+			CP_UTF8, 0,
+			ws.data(), static_cast<int>(ws.size()),
+			out.data(), len, nullptr, nullptr
+		);
+
+		if (written != len)
+		{
+			// Shouldn't happen; truncate if it does
+			out.resize(static_cast<size_t>(std::max(0, written)));
+		}
+
+		return out;
 	}
 
+	void SwimEngine::OnEditorCommand(const std::wstring& msg)
+	{
+		const std::string msgUtf8 = WStringToUTF8(msg);
+
+		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
+		if (!ok)
+		{
+			// Unknown command:
+			SendEditorMessage(L"[Unknown Engine Command]: " + msg);
+		}
+	}
+
+	// Maybe make this take a regular string instead of wide
 	bool SwimEngine::SendEditorMessage(const std::wstring& msg, std::uintptr_t channel)
 	{
 		if (!parentHandle)
@@ -452,6 +540,7 @@ namespace Engine
 	{
 		// Add systems to the SystemManager
 		inputManager = systemManager->AddSystem<InputManager>("InputManager");
+		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
 		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
 
 		if constexpr (CONTEXT == RenderContext::Vulkan)

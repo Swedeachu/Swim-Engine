@@ -61,6 +61,7 @@
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
+    <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -364,6 +365,7 @@
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.h" />
     <ClInclude Include="Source\Engine\EngineState.h" />
+    <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

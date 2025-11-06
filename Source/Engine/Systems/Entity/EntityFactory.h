@@ -28,7 +28,109 @@ namespace Engine
 
 		// High-level helpers for common entity creation which do the common queue create lambdas for us
 		void CreateWithTransform(const Transform& transform);
+
+		// Transform + Material (no callback)
 		void CreateWithTransformAndMaterial(const Transform& transform, const Material& material);
+
+		// Transform + Material (templated callback)
+		// The callback receives: (entt::entity e, Transform& t, Material& m, ...args)
+		template<typename Func, typename... Args>
+		void CreateWithTransformAndMaterial(const Transform& transform, const Material& material, Func&& func, Args&&... args)
+		{
+			QueueCreate(
+				[transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+			{
+				// Create components
+				Transform& tRef = reg.emplace<Transform>(e, transform);
+				Material& mRef = reg.emplace<Material>(e, material);
+
+				// User callback: entity + created components + rest
+				fn(e, tRef, mRef, std::forward<Args>(a)...);
+			}
+			);
+		}
+
+		// Transform + Material + Behaviors (no callback) 
+		template<typename... BehaviorTypes>
+		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material)
+		{
+			QueueCreate(
+				[transform, material](entt::registry& reg, entt::entity e)
+			{
+				// Add components
+				reg.emplace<Transform>(e, transform);
+				reg.emplace<Material>(e, material);
+
+				// Add behaviors
+				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				([](Scene* s, entt::entity entity)
+				{
+					s->EmplaceBehavior<BehaviorTypes>(entity);
+				}(scene, e), ...);
+			}
+			);
+		}
+
+		// Transform + Material + Behaviors (templated callback)
+		// The callback receives: (entt::entity e, Transform& t, Material& m, BehaviorTypes*... ptrs, ...args)
+		template<typename... BehaviorTypes, typename Func, typename... Args>
+		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material, Func&& func, Args&&... args)
+		{
+			QueueCreate(
+				[transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+			{
+				// Add components
+				Transform& tRef = reg.emplace<Transform>(e, transform);
+				Material& mRef = reg.emplace<Material>(e, material);
+
+				// Add behaviors and collect pointers
+				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				auto behaviorPtrs = std::make_tuple(scene->EmplaceBehavior<BehaviorTypes>(e)...);
+
+				// Invoke user callback: entity + components + behavior ptrs + rest
+				std::apply([&](auto*... bs)
+				{
+					fn(e, tRef, mRef, bs..., std::forward<Args>(a)...);
+				}, behaviorPtrs);
+			}
+			);
+		}
+
+		// Super powerful way to just load all your scripts into the scene that aren't reliant on hierarchy of entities or physical entities (Score Manager, Game Manager, etc)
+		template<typename... BehaviorTypes>
+		void CreateWithBehaviors()
+		{
+			QueueCreate(
+				[](entt::registry& reg, entt::entity e)
+			{
+				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+
+				([](Scene* s, entt::entity entity)
+				{
+					s->EmplaceBehavior<BehaviorTypes>(entity);
+				}(scene, e), ...);
+			}
+			);
+		}
+
+		// Behaviors + callback variant: callback receives (entt::entity e, BehaviorTypes*... created, ...args)
+		template<typename... BehaviorTypes, typename Func, typename... Args>
+		void CreateWithBehaviors(Func&& func, Args&&... args)
+		{
+			QueueCreate(
+				[fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+			{
+				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+
+				auto tuplePtrs = std::make_tuple(scene->EmplaceBehavior<BehaviorTypes>(e)...);
+
+				std::apply([&](auto*... ps)
+				{
+					fn(e, ps..., std::forward<Args>(a)...);
+				}, tuplePtrs);
+			}
+			);
+		}
 
 		// High-level helper for destruction
 		void Destroy(entt::entity entity);
@@ -53,44 +155,6 @@ namespace Engine
 				[fn = std::forward<Func>(func), ...args = std::forward<Args>(args)]() mutable
 			{
 				fn(std::forward<Args>(args)...);
-			}
-			);
-		}
-
-		template<typename... BehaviorTypes>
-		void CreateWithTransformMaterialAndBehaviors(const Transform& transform, const Material& material)
-		{
-			QueueCreate(
-				[](entt::registry& reg, entt::entity e, const Transform& t, const Material& m)
-			{
-				reg.emplace<Transform>(e, t);
-				reg.emplace<Material>(e, m);
-
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
-
-				// Expand the parameter pack for behaviors
-				([](Scene* s, entt::entity entity)
-				{
-					s->EmplaceBehavior<BehaviorTypes>(entity);
-				}(scene, e), ...);
-			},
-				transform, material
-			);
-		}
-
-		// Super powerful way to just load all your scripts into the scene that aren't reliant on hierarchy of entities or physical entities (Score Manager, Game Manager, etc)
-		template<typename... BehaviorTypes>
-		void CreateWithBehaviors()
-		{
-			QueueCreate(
-				[](entt::registry& reg, entt::entity e)
-			{
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
-
-				([](Scene* s, entt::entity entity)
-				{
-					s->EmplaceBehavior<BehaviorTypes>(entity);
-				}(scene, e), ...);
 			}
 			);
 		}
