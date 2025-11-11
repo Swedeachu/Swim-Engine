@@ -54,11 +54,50 @@ namespace Engine
 			return HasAny(enabledStates, state);
 		}
 
-		// Main gate: can this behavior execute given current engine state?
-		// Typical use: if (!behavior->CanExecute(currentEngineState)) return;
-		bool CanExecute(EngineState currentEngineState) const
+		// Priority:
+		// 1) Stopped: block unless explicitly enabled in Stopped
+		// 2) Paused: ONLY run behaviors enabled for Paused OR Editing (tools still work)
+		// 3) Live (not paused/stopped):
+		//    - If Playing + Editing: run if enabled in Playing OR Editing
+		//    - If only Playing:      run if enabled in Playing (NOT Editing)
+		//    - If only Editing:      run if enabled in Editing
+		bool CanExecute(EngineState current) const
 		{
-			return HasAny(enabledStates, currentEngineState);
+			// 1) Stopped gate
+			if (HasAny(current, EngineState::Stopped))
+			{
+				return IsEnabledIn(EngineState::Stopped);
+			}
+
+			// 2) Paused gate (freeze gameplay, allow tools)
+			if (HasAny(current, EngineState::Paused))
+			{
+				return IsEnabledIn(EngineState::Paused) || IsEnabledIn(EngineState::Editing);
+			}
+
+			// 3) Live (not paused/stopped)
+			const bool isPlaying = HasAny(current, EngineState::Playing);
+			const bool isEditing = HasAny(current, EngineState::Editing);
+
+			if (isPlaying && isEditing)
+			{
+				// Coexist: gameplay + editing tools
+				return IsEnabledIn(EngineState::Playing) || IsEnabledIn(EngineState::Editing);
+			}
+
+			if (isPlaying)
+			{
+				// Pure play: NO editor-only behaviors
+				return IsEnabledIn(EngineState::Playing);
+			}
+
+			if (isEditing)
+			{
+				// Pure edit session
+				return IsEnabledIn(EngineState::Editing);
+			}
+
+			return false;
 		}
 
 		// Which engine states this behavior is active in (bitmask)

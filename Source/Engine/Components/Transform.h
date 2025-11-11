@@ -302,6 +302,8 @@ namespace Engine
 			return worldScale;
 		}
 
+		// You pretty much always want to call this method, which is kind of scuffed it needs the registry to get passed,
+		// very annoying and weird from a gameplay programmer's perspecitve. Same goes for scale and rotation.
 		glm::vec3 GetWorldPosition(const entt::registry& registry) const
 		{
 			const glm::mat4& world = GetWorldMatrix(registry);
@@ -357,6 +359,100 @@ namespace Engine
 			// Recursively multiply by parent's world TR
 			const Transform& parentTf = registry.get<Transform>(tf.parent);
 			return MakeWorldTR(parentTf, registry) * localTR;
+		}
+
+		// World -> Local: Position 
+		glm::vec3 WorldToLocalPosition(const entt::registry& registry, const glm::vec3& worldPos) const
+		{
+			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
+			{
+				return worldPos;
+			}
+
+			const Transform& pTf = registry.get<Transform>(parent);
+			const glm::mat4& parentWorld = pTf.GetWorldMatrix(registry);
+			const glm::mat4 invParentWorld = glm::inverse(parentWorld);
+
+			const glm::vec4 local = invParentWorld * glm::vec4(worldPos, 1.0f);
+			return glm::vec3(local);
+		}
+
+		// World -> Local: Scale 
+		// Assumes TRS (no shear). WorldScale = ParentWorldScale * LocalScale (component-wise),
+		// so LocalScale = WorldScale / ParentWorldScale.
+		glm::vec3 WorldToLocalScale(const entt::registry& registry, const glm::vec3& worldScale) const
+		{
+			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
+			{
+				return worldScale;
+			}
+
+			const Transform& pTf = registry.get<Transform>(parent);
+			const glm::vec3 pWorldScale = pTf.GetWorldScale(registry);
+
+			glm::vec3 localScale = worldScale;
+			const float eps = 1e-6f;
+
+			if (std::abs(pWorldScale.x) > eps) { localScale.x /= pWorldScale.x; }
+			if (std::abs(pWorldScale.y) > eps) { localScale.y /= pWorldScale.y; }
+			if (std::abs(pWorldScale.z) > eps) { localScale.z /= pWorldScale.z; }
+
+			return localScale;
+		}
+
+		// Helper: parent world rotation (TR only, no scale)
+		static inline glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry)
+		{
+			if (tf.parent == entt::null || !registry.valid(tf.parent) || !registry.any_of<Transform>(tf.parent))
+			{
+				return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+			}
+
+			const Transform& pTf = registry.get<Transform>(tf.parent);
+			const glm::mat4 parentTR = Transform::MakeWorldTR(pTf, registry);
+			const glm::mat3 parentR = glm::mat3(parentTR);
+			return glm::quat_cast(parentR);
+		}
+
+		// World -> Local: Rotation (quat) 
+		glm::quat WorldToLocalRotation(const entt::registry& registry, const glm::quat& worldRot) const
+		{
+			const glm::quat parentWorldRot = GetParentWorldRotationTR(*this, registry);
+			// local = inv(parentRot) * world
+			glm::quat localRot = glm::normalize(glm::conjugate(parentWorldRot) * worldRot);
+			return localRot;
+		}
+
+		// World -> Local: Rotation (Euler degrees) 
+		glm::quat WorldToLocalRotation(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg) const
+		{
+			const glm::vec3 eulerRad = glm::radians(glm::vec3(pitchDeg, yawDeg, rollDeg));
+			const glm::quat worldRot = glm::quat(eulerRad);
+			return WorldToLocalRotation(registry, worldRot);
+		}
+
+		void SetWorldPosition(const entt::registry& registry, const glm::vec3& worldPos)
+		{
+			const glm::vec3 localPos = WorldToLocalPosition(registry, worldPos);
+			SetPosition(localPos);
+		}
+
+		void SetWorldScale(const entt::registry& registry, const glm::vec3& worldScale)
+		{
+			const glm::vec3 localScale = WorldToLocalScale(registry, worldScale);
+			SetScale(localScale);
+		}
+
+		void SetWorldRotation(const entt::registry& registry, const glm::quat& worldRot)
+		{
+			const glm::quat localRot = WorldToLocalRotation(registry, worldRot);
+			SetRotation(localRot);
+		}
+
+		void SetWorldRotationEuler(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg)
+		{
+			const glm::quat localRot = WorldToLocalRotation(registry, pitchDeg, yawDeg, rollDeg);
+			SetRotation(localRot);
 		}
 
 		bool HasParent() const { return parent != entt::null; }

@@ -313,7 +313,7 @@ namespace Engine
 		{
 			const glm::vec3& camPos = activeScene->GetCameraSystem()->GetCamera().GetPosition();
 			Transform& tf = reg.get<Transform>(rootGizmoControl);
-			float distance = glm::distance(tf.GetPosition(), camPos);
+			float distance = glm::distance(tf.GetWorldPosition(reg), camPos);
 			float scale = std::max(1.0f, distance / 10.f);
 			tf.GetScaleRef() = glm::vec3(scale);
 		}
@@ -525,7 +525,7 @@ namespace Engine
 
 		// Focused entity transform
 		Transform& tf = reg.get<Transform>(focusedEntity);
-		const glm::vec3 pos = tf.GetPosition(); // we have crashed here before
+		const glm::vec3 pos = tf.GetWorldPosition(reg); // we have crashed here before
 
 		// World-axis rotations (arrow model points +Y) 
 		const glm::quat rotX = glm::angleAxis(-glm::half_pi<float>(), glm::vec3(0, 0, 1)); // +X
@@ -542,7 +542,7 @@ namespace Engine
 		{
 			Transform rootT;
 			rootT.GetPositionRef() = pos;
-			rootT.GetScaleRef() = tf.GetScale();
+			rootT.GetScaleRef() = tf.GetWorldScale(reg);
 			rootT.GetRotationRef() = glm::quat(1, 0, 0, 0);
 			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
 			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
@@ -683,13 +683,13 @@ namespace Engine
 
 		entt::registry& reg = activeScene->GetRegistry();
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
-		const glm::vec3 gizmoOrigin = focusedTf.GetPosition();
+		const glm::vec3 gizmoOrigin = focusedTf.GetWorldPosition(reg);
 
 		// Cache everything we need for the start of the drag to use in UpdateDrag
 		dragAxisDir = glm::normalize(AxisDirWorld(axis));
 		dragStartT = ParamOnAxisFromRay(gizmoOrigin, dragAxisDir, rayOrigin, rayDirN);
-		dragStartObjPos = gizmoOrigin;
-		dragStartObjScale = focusedTf.GetScale();
+		dragStartObjPos = gizmoOrigin; 
+		dragStartObjScale = focusedTf.GetWorldScale(reg);
 
 		// Highlight active axis strongly; lock hover
 		SetAxisHighlight(Axis::None, activeAxisDrag);
@@ -722,7 +722,8 @@ namespace Engine
 
 		if (activeGizmoType == GizmoType::Translate)
 		{
-			focusedTf.GetPositionRef() = dragStartObjPos + delta;
+			// we need to translate (dragStartObjPos + delta) into the focused transforms world space based on its parents, otherwise we teleport on dragging
+			focusedTf.SetWorldPosition(reg, dragStartObjPos + delta);
 		}
 		else if (activeGizmoType == GizmoType::Scale)
 		{
@@ -746,7 +747,8 @@ namespace Engine
 				newScale.y = std::max(newScale.y, minAxisScale);
 				newScale.z = std::max(newScale.z, minAxisScale);
 
-				focusedTf.GetScaleRef() = newScale;
+				// we need to translate newScale into the focused transforms world space based on its parents, so we can grow correctly
+				focusedTf.SetWorldScale(reg, newScale);
 			}
 		}
 
@@ -754,7 +756,7 @@ namespace Engine
 		if (rootGizmoControl != entt::null && reg.valid(rootGizmoControl))
 		{
 			Transform& gizmoTf = reg.get<Transform>(rootGizmoControl);
-			gizmoTf.GetPositionRef() = focusedTf.GetPosition();
+			gizmoTf.GetPositionRef() = focusedTf.GetWorldPosition(reg);
 		}
 	}
 

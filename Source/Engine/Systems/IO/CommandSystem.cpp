@@ -46,8 +46,8 @@ namespace Engine
 			return false;
 		}
 
-		const std::string& name = tokens[0];
-		tokens.erase(tokens.begin());
+		const std::string name = tokens[0]; /// copy
+		tokens.erase(tokens.begin()); // args only
 
 		return Dispatch(name, tokens);
 	}

@@ -124,6 +124,8 @@ namespace Engine
 
 		void Create(HWND parentHandle, EngineState state);
 
+		void RegisterVanillaEngineCommands();
+
 		// calls Update when it is time
 		int HeartBeat();
 

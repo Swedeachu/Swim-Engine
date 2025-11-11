@@ -505,7 +505,7 @@ namespace Engine
 		}
 	}
 
-	// Maybe make this take a regular string instead of wide
+	// Maybe make this take a regular string instead of wide, and then package as wide for WM_COPYDATA 
 	bool SwimEngine::SendEditorMessage(const std::wstring& msg, std::uintptr_t channel)
 	{
 		if (!parentHandle)
@@ -576,7 +576,80 @@ namespace Engine
 			return -1; // Error during system initialization
 		}
 
+		RegisterVanillaEngineCommands();
+
 		return 0;
+	}
+
+	// The editor process will call all these
+	void SwimEngine::RegisterVanillaEngineCommands()
+	{
+		// Capture a raw pointer (valid for engine lifetime) — no ref-captures to locals.
+		SwimEngine* self = this;
+
+		auto summarize = [](SwimEngine* e)
+		{
+			std::wstring s = L"[Engine] State ->";
+			if (HasAny(e->engineState, EngineState::Playing)) s += L" Playing";
+			if (HasAny(e->engineState, EngineState::Paused))  s += L" Paused";
+			if (HasAny(e->engineState, EngineState::Editing)) s += L" Editing";
+			if (HasAny(e->engineState, EngineState::Stopped)) s += L" Stopped";
+			if (!HasAny(e->engineState, EngineState::All))    s += L" None";
+			e->SendEditorMessage(s);
+		};
+
+		// play: ensure not Stopped, then set Playing
+		commandSystem->RegisterRaw("play", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Stopped;
+			self->engineState |= EngineState::Playing;
+			summarize(self);
+		});
+
+		// The flaw with pausing is our engine state will be (playing | paused)
+		// And behaviors will keep running since it is got the play mode flag, we need to somehow hack fix this.
+		// We don't want to drop the play mode flag, since we are paused while playing and we will resume to go back to playing.
+		// pause: set Paused (don't touch other flags)
+		commandSystem->RegisterRaw("pause", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState |= EngineState::Paused;
+			summarize(self);
+		});
+
+		// resume: clear Paused only
+		commandSystem->RegisterRaw("resume", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Paused;
+			summarize(self);
+		});
+
+		// stop: set Stopped, clear Playing (C# handles resume/edit next)
+		commandSystem->RegisterRaw("stop", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Playing;
+			self->engineState |= EngineState::Stopped;
+			summarize(self);
+		});
+
+		// edit: set Editing
+		commandSystem->RegisterRaw("edit", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState |= EngineState::Editing;
+			summarize(self);
+		});
+
+		// game: clear Editing (doesn't force Playing)
+		commandSystem->RegisterRaw("game", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Editing;
+			summarize(self);
+		});
+
+		// restart: stub (ignored for now)
+		commandSystem->RegisterRaw("restart", [self](const std::vector<std::string>&)
+		{
+			self->SendEditorMessage(L"[Engine] Restart requested (not implemented)");
+		});
 	}
 
 	int SwimEngine::Run()

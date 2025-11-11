@@ -296,7 +296,7 @@ namespace Engine
 		if (registry.any_of<BehaviorComponents>(e))
 		{
 			const BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
-			const bool editingOnly = ShouldRenderOnlyDuringEditingBasedOnState(e); 
+			const bool editingOnly = ShouldRenderOnlyDuringEditingBasedOnState(e);
 
 			if (editingOnly)
 			{
@@ -442,11 +442,19 @@ namespace Engine
 	{
 		// Clear the previous frames debug draw data. 
 		// This opens up an opportunity for caching commonly drawn wireframes.
-		// sceneDebugDraw->Clear();
 
 		// We want to keep editor mode objects such as retained gizmos, trash everything else that is immediate mode from the previous frame
-		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT };
+		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT }; // TODO: we might want to use a better tag like immediate mode object
 		sceneDebugDraw->ClearExceptTags(keep);
+
+		constexpr bool hardCodedLocalCommandMessageTesting = true; // this should be false for real builds
+		if constexpr (hardCodedLocalCommandMessageTesting)
+		{
+			if (StateTestControl())
+			{
+				return;
+			}
+		}
 
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
@@ -562,6 +570,81 @@ namespace Engine
 				}
 			}
 		});
+	}
+
+	// Returns if we changed state
+	bool Scene::StateTestControl()
+	{
+		auto engine = SwimEngine::GetInstance();
+		auto input = GetInputManager();
+		if (!engine || !input)
+		{
+			return false;
+		}
+
+		auto send = [&](const wchar_t* w) { engine->OnEditorCommand(w); };
+		auto state = engine->GetEngineState();
+
+		bool handled = false;
+
+		// Toggle Play / Stop (L)
+		if (!handled && input->IsKeyTriggered('L'))
+		{
+			const bool playing = HasAny(state, EngineState::Playing);
+			if (playing)
+			{
+				// GoIntoStoppedMode()
+				send(L"stop");
+				send(L"resume");
+				send(L"edit");
+			}
+			else
+			{
+				// GoIntoPlayMode()
+				send(L"resume");
+				send(L"game");
+				send(L"play");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('P')) // Toggle Pause / Resume (P)
+		{
+			if (HasAny(state, EngineState::Paused))
+			{
+				send(L"resume");
+			}
+			else
+			{
+				send(L"pause");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('E')) // Toggle Edit / Game (E)
+		{
+			if (HasAny(state, EngineState::Editing))
+			{
+				send(L"game");
+			}
+			else
+			{
+				send(L"edit");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('O')) // Hard Stop (O)
+		{
+			send(L"stop");
+			send(L"resume");
+			send(L"edit");
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('R')) // Restart stub (R)
+		{
+			send(L"restart");
+			handled = true;
+		}
+
+		return handled;
 	}
 
 	bool Scene::IsTopFocusedElement(entt::entity target)

@@ -138,8 +138,37 @@ namespace Engine
 			return registry.emplace<T>(entity, std::forward<Args>(args)...);
 		}
 
+		template<typename T>
+		bool RemoveComponent(entt::entity entity)
+		{
+			static_assert(!std::is_pointer_v<T>, "RemoveComponent should not take a pointer type");
+			static_assert(!std::is_reference_v<T>, "RemoveComponent should not take a reference type");
+
+			if (!registry.valid(entity) || !registry.any_of<T>(entity))
+			{
+				return false;
+			}
+
+			// Special handling for BehaviorComponents so we properly Exit() behaviors.
+			if constexpr (std::is_same_v<T, BehaviorComponents>)
+			{
+				EngineState state = SwimEngine::GetInstance()->GetEngineState();
+				auto& bc = registry.get<BehaviorComponents>(entity);
+				if (bc.CanExecute(state))
+				{
+					for (auto& b : bc.behaviors)
+					{
+						if (b) { b->Exit(); }
+					}
+				}
+			}
+
+			registry.remove<T>(entity);
+			return true;
+		}
+
 		// Adds an already-constructed behavior instance to an entity.
-	  // The behavior’s Awake() is called AFTER ownership transfer.
+		// The behavior’s Awake() is called AFTER ownership transfer.
 		// Init() is called immediately if CanExecute(current engine state) is true.
 		// Returns T* to the stored behavior.
 		template<typename T>
@@ -196,12 +225,6 @@ namespace Engine
 				}
 				return false;
 			}), vec.end());
-
-			// Remove component entirely if empty
-			if (vec.empty())
-			{
-				registry.remove<BehaviorComponents>(entity);
-			}
 		}
 
 		template<typename Func, typename... Args>
@@ -225,6 +248,8 @@ namespace Engine
 			});
 		}
 
+		// Only does a for each behavior callback on one specific entity, kind of useless
+		/*
 		template<typename Func, typename... Args>
 		void ForEachBehaviorOfEntity(entt::entity entity, Func method, Args&&... args)
 		{
@@ -244,12 +269,15 @@ namespace Engine
 				}
 			}
 		}
+		*/
 
 		void SetEnabledStates(entt::entity entity, EngineState states);
 
 		void AddEnabledStates(entt::entity entity, EngineState states);
 
 		void RemoveEnabledStates(entt::entity entity, EngineState states);
+
+		bool StateTestControl();
 
 		ObjectTag* GetTag(entt::entity entity);
 
