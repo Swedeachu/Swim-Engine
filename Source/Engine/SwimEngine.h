@@ -18,12 +18,10 @@ namespace Engine
 	class SwimEngine : public Machine, public std::enable_shared_from_this<SwimEngine>
 	{
 
-	private:
+	public:
 
 		// The initial state the engine will start in if no argument is provided from main
-		static constexpr EngineState DefaultEngineState = EngineState::Playing;
-
-	public:
+		static constexpr EngineState DefaultEngineState = EngineState::Editing;
 
 		enum RenderContext
 		{

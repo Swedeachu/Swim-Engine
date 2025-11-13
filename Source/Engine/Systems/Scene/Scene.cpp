@@ -447,8 +447,8 @@ namespace Engine
 		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT }; // TODO: we might want to use a better tag like immediate mode object
 		sceneDebugDraw->ClearExceptTags(keep);
 
-		constexpr bool hardCodedLocalCommandMessageTesting = true; // this should be false for real builds
-		if constexpr (hardCodedLocalCommandMessageTesting)
+		// If we started in editing mode we can do extra stuff
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
 		{
 			if (StateTestControl())
 			{
@@ -584,6 +584,10 @@ namespace Engine
 
 		auto send = [&](const wchar_t* w) { engine->OnEditorCommand(w); };
 		auto state = engine->GetEngineState();
+
+		// Must be holding shift to do these hotkeys
+		bool shifting = input->IsKeyDown(VK_SHIFT);
+		if (!shifting) return false;
 
 		bool handled = false;
 

@@ -83,6 +83,11 @@ namespace Engine
 			return MakeBallArrow(0.05f, 1.5f, 0.12f, 64, white);
 		});
 
+		halfTorusMesh = getOrCreateMesh("GizmoHalfTorus", [&]
+		{
+			return MakeTorusPercent(0.75f, 0.05f, 64, 24, white, 0.5f);
+		});
+
 		// Register or fetch materials for each gizmo mesh
 		sphereMatData = getOrCreateMaterial("GizmoBallMat", sphereMesh);
 		arrowMatData = getOrCreateMaterial("GizmoArrowMat", arrowMesh);
@@ -91,6 +96,7 @@ namespace Engine
 		quadMatData = getOrCreateMaterial("GizmoQuadData", quadMesh);
 		circleMatData = getOrCreateMaterial("GizmoCircleData", circleMesh);
 		ballArrowMatData = getOrCreateMaterial("GizmoBallArrowData", ballArrowMesh);
+		halfTorusMatData = getOrCreateMaterial("GizmoHalfTorusData", halfTorusMesh);
 
 		return 0;
 	}
@@ -178,14 +184,14 @@ namespace Engine
 
 		makeButton("T", 75, { 0.0f,  0.3f, 0.0f }, GizmoType::Translate);
 		makeButton("R", -15, { 0.0f,  0.0f, 0.0f }, GizmoType::Rotate);
-		makeButton("S", -105, { 0.0f, -0.3f, 0.0f }, GizmoType::Scale); 
+		makeButton("S", -105, { 0.0f, -0.3f, 0.0f }, GizmoType::Scale);
 
 		return 0;
 	}
 
 	void GizmoSystem::Update(double dt)
 	{
-		EngineState state = SwimEngine::GetInstance()->GetEngineState(); 
+		EngineState state = SwimEngine::GetInstance()->GetEngineState();
 		if (!activeScene || !HasAny(state, EngineState::Editing)) return; // only active during editing
 
 		// If nothing is selected, we will call the method to do mouse click ray cast checks for if we are selecting anything in the scene.
@@ -202,7 +208,7 @@ namespace Engine
 		{
 			LoseFocus();
 			return;
-		} 
+		}
 		// We are kinda boned if something happens to root control entity, we can set the engine scene policy of:
 		// DO NOT EVER destroy editor tagged objects that should not be destroyed (duh).
 
@@ -510,6 +516,10 @@ namespace Engine
 		{
 			CreateTranslationGizmo(/*bool useBallArrow=*/activeGizmoType == GizmoType::Scale);
 		}
+		else if (activeGizmoType == GizmoType::Rotate)
+		{
+			CreateRotationGizmo();
+		}
 	}
 
 	// 3 arrows for each axis from root, red for X, blue for Z, green for Y
@@ -547,13 +557,9 @@ namespace Engine
 			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
 			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
 			activeScene->SetEnabledStates(rootGizmoControl, EngineState::Editing);
-			// Just to show the parent root gizmo control object (we know it works):
-			// auto color = GetDebugColorValue(DebugColor::Gray);
-			// activeScene->EmplaceComponent<Material>(rootGizmoControl, Material(sphereMatData));
-			// activeScene->EmplaceComponent<MeshDecorator>(rootGizmoControl, glm::vec4(color, 1));
 		}
 
-		auto spawnAxis = [&](const glm::quat& r, const glm::vec4& color, const std::string& tagName)
+		auto spawnAxis = [&](const glm::quat& r, const glm::vec4& color, const std::string& tagName, int layer)
 		{
 			entt::entity e = activeScene->CreateEntity();
 			activeScene->SetEnabledStates(e, EngineState::Editing);
@@ -575,7 +581,7 @@ namespace Engine
 			// Filled mesh that always renders on top to ignore depth buffer
 			MeshDecorator dec{};
 			dec.fillColor = color;
-			dec.renderOnTop = 1;
+			dec.renderOnTop = layer;
 
 			// Attach the material and decorator color
 			std::shared_ptr<MaterialData> matData = useBallArrow ? ballArrowMatData : arrowMatData;
@@ -590,15 +596,92 @@ namespace Engine
 		};
 
 		// X (red), Y (green), Z (blue)
-		axisX = spawnAxis(rotX, RED, "x");
-		axisY = spawnAxis(rotY, GREEN, "y");
-		axisZ = spawnAxis(rotZ, BLUE, "z");
+		axisX = spawnAxis(rotX, RED, "x", 2);
+		axisY = spawnAxis(rotY, GREEN, "y", 1);
+		axisZ = spawnAxis(rotZ, BLUE, "z", 3);
 
 		hoveredAxis = Axis::None;
 		activeAxisDrag = Axis::None;
 		isDragging = false;
 
 		// Initialize highlight (none hovered/active)
+		SetAxisHighlight(Axis::None, Axis::None);
+	}
+
+	// 3 half toruses for rotation: X (red YZ plane), Y (green XZ plane), Z (blue XY plane)
+	void GizmoSystem::CreateRotationGizmo()
+	{
+		entt::registry& reg = activeScene->GetRegistry();
+		if (!reg.any_of<Transform>(focusedEntity))
+		{
+			return;
+		}
+		Transform& tf = reg.get<Transform>(focusedEntity);
+		const glm::vec3 pos = tf.GetWorldPosition(reg);
+
+		// Colors
+		const glm::vec4 RED(1.0f, 0.0f, 0.0f, 1.0f);
+		const glm::vec4 GREEN(0.0f, 1.0f, 0.0f, 1.0f);
+		const glm::vec4 BLUE(0.0f, 0.0f, 1.0f, 1.0f);
+
+		// Root control
+		rootGizmoControl = activeScene->CreateEntity();
+		{
+			Transform rootT;
+			rootT.GetPositionRef() = pos;
+			rootT.GetScaleRef() = tf.GetWorldScale(reg);
+			rootT.GetRotationRef() = glm::quat(1, 0, 0, 0);
+			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
+			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
+			activeScene->SetEnabledStates(rootGizmoControl, EngineState::Editing);
+		}
+
+		auto spawnRotationRing = [&](const glm::quat& r, const glm::vec4& color, const std::string& tagName, int layer)
+		{
+			entt::entity e = activeScene->CreateEntity();
+			activeScene->SetEnabledStates(e, EngineState::Editing);
+
+			Transform tLocal;
+			tLocal.GetPositionRef() = glm::vec3(0.0f);
+			tLocal.GetScaleRef() = glm::vec3(1.0f);
+			tLocal.GetRotationRef() = r;
+			activeScene->EmplaceComponent<Transform>(e, tLocal);
+
+			MeshDecorator dec{};
+			dec.fillColor = color;
+			dec.renderOnTop = layer;
+
+			activeScene->EmplaceComponent<Material>(e, halfTorusMatData);
+			activeScene->AddComponent<MeshDecorator>(e, dec);
+			activeScene->EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_OBJECT, "gizmo " + tagName);
+
+			activeScene->SetParent(e, rootGizmoControl);
+
+			return e;
+		};
+
+		// Half torus default orientation appears to be in XY plane
+		// We need to rotate each ring so it represents rotation around its respective axis:
+
+		// X-axis rotation (red): Should be vertical in YZ plane
+		// Rotate 90 degrees around Z axis to stand it up vertically
+		const glm::quat rotX = glm::angleAxis(glm::half_pi<float>(), glm::vec3(0, 0, 1));
+
+		// Y-axis rotation (green): Should be horizontal in XZ plane (swap with blue's behavior)
+		const glm::quat rotY = glm::quat(1, 0, 0, 0);
+
+		// Z-axis rotation (blue): Should control what green currently does
+		// Rotate 90 degrees around X axis
+		const glm::quat rotZ = glm::angleAxis(glm::half_pi<float>(), glm::vec3(1, 0, 0));
+
+		axisX = spawnRotationRing(rotX, RED, "x", 3);
+		axisY = spawnRotationRing(rotY, GREEN, "y", 2);
+		axisZ = spawnRotationRing(rotZ, BLUE, "z", 1);
+
+		hoveredAxis = Axis::None;
+		activeAxisDrag = Axis::None;
+		isDragging = false;
+
 		SetAxisHighlight(Axis::None, Axis::None);
 	}
 
@@ -680,75 +763,162 @@ namespace Engine
 	{
 		activeAxisDrag = axis;
 		isDragging = true;
-
 		entt::registry& reg = activeScene->GetRegistry();
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
 		const glm::vec3 gizmoOrigin = focusedTf.GetWorldPosition(reg);
 
-		// Cache everything we need for the start of the drag to use in UpdateDrag
+		// Cache everything we need for the start of the drag
 		dragAxisDir = glm::normalize(AxisDirWorld(axis));
 		dragStartT = ParamOnAxisFromRay(gizmoOrigin, dragAxisDir, rayOrigin, rayDirN);
-		dragStartObjPos = gizmoOrigin; 
+		dragStartObjPos = gizmoOrigin;
 		dragStartObjScale = focusedTf.GetWorldScale(reg);
+		dragStartObjRot = focusedTf.GetWorldRotation(reg);
+
+		// Cache the starting mouse position
+		auto input = activeScene->GetInputManager();
+		dragStartMousePos = input->GetMousePosition(false);
+
+		// For rotation mode, also cache the initial rotation of the gizmo ring itself
+		if (activeGizmoType == GizmoType::Rotate)
+		{
+			entt::entity axisEntity = entt::null;
+			switch (activeAxisDrag)
+			{
+				case Axis::X: axisEntity = axisX; break;
+				case Axis::Y: axisEntity = axisY; break;
+				case Axis::Z: axisEntity = axisZ; break;
+				default: break;
+			}
+
+			if (axisEntity != entt::null && reg.valid(axisEntity) && reg.any_of<Transform>(axisEntity))
+			{
+				Transform& axisTf = reg.get<Transform>(axisEntity);
+				// Store the initial local rotation of the ring
+				dragStartGizmoRingRot = axisTf.GetRotation();
+			}
+		}
 
 		// Highlight active axis strongly; lock hover
 		SetAxisHighlight(Axis::None, activeAxisDrag);
 	}
 
-	// Right now this is only does translation and scale
+	// Handles translation, scale, and rotation
 	void GizmoSystem::UpdateDrag(const glm::vec3& rayOrigin, const glm::vec3& rayDirN)
 	{
 		if (activeAxisDrag == Axis::None || focusedEntity == entt::null)
 		{
 			return;
 		}
-
 		entt::registry& reg = activeScene->GetRegistry();
 		if (!reg.valid(focusedEntity) || !reg.any_of<Transform>(focusedEntity))
 		{
 			return;
 		}
-
-		// Axis is anchored at the object position when drag started
-		const glm::vec3 axisOrigin = dragStartObjPos;
-
-		const float tNow = ParamOnAxisFromRay(axisOrigin, dragAxisDir, rayOrigin, rayDirN);
-		const float dt = tNow - dragStartT;
-
-		const glm::vec3 delta = dt * dragAxisDir;
-
-		// Apply to focused object (world-space)
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
 
 		if (activeGizmoType == GizmoType::Translate)
 		{
-			// we need to translate (dragStartObjPos + delta) into the focused transforms world space based on its parents, otherwise we teleport on dragging
+			// Axis is anchored at the object position when drag started
+			const glm::vec3 axisOrigin = dragStartObjPos;
+			const float tNow = ParamOnAxisFromRay(axisOrigin, dragAxisDir, rayOrigin, rayDirN);
+			const float dt = tNow - dragStartT;
+			const glm::vec3 delta = dt * dragAxisDir;
 			focusedTf.SetWorldPosition(reg, dragStartObjPos + delta);
 		}
 		else if (activeGizmoType == GizmoType::Scale)
 		{
-			// We should make this clamp to not be too small (like not under 0.1 on any axis)
+			const glm::vec3 axisOrigin = dragStartObjPos;
+			const float tNow = ParamOnAxisFromRay(axisOrigin, dragAxisDir, rayOrigin, rayDirN);
+			const float dt = tNow - dragStartT;
 			const int axis = AxisIndex(activeAxisDrag);
 			if (axis >= 0)
 			{
 				glm::vec3 newScale = dragStartObjScale;
-
 				const float sensitivity = 1.0f;
 				float factor = 1.0f + dt * sensitivity;
-
 				const float minAxisScale = 0.1f;
 				const float minFactor = minAxisScale / std::max(0.0001f, dragStartObjScale[axis]);
-
 				factor = std::max(factor, minFactor);
-
 				newScale[axis] = dragStartObjScale[axis] * factor;
-
 				newScale.x = std::max(newScale.x, minAxisScale);
 				newScale.y = std::max(newScale.y, minAxisScale);
 				newScale.z = std::max(newScale.z, minAxisScale);
-
-				// we need to translate newScale into the focused transforms world space based on its parents, so we can grow correctly
 				focusedTf.SetWorldScale(reg, newScale);
+			}
+		}
+		else if (activeGizmoType == GizmoType::Rotate)
+		{
+			// Get current mouse position and calculate delta from drag start
+			auto input = activeScene->GetInputManager();
+			glm::vec2 currentMousePos = input->GetMousePosition(false);
+			glm::vec2 mouseDelta = currentMousePos - dragStartMousePos;
+
+			// Calculate rotation angle based on mouse movement
+			// Use horizontal mouse movement for rotation amount
+			const float sensitivity = 0.01f; // Adjust for rotation speed
+			float rotationAngle = mouseDelta.x * sensitivity;
+
+			// Create rotation quaternion around the active axis
+			glm::quat deltaRotation;
+			switch (activeAxisDrag)
+			{
+				case Axis::X:
+				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(1, 0, 0));
+				break;
+				case Axis::Y:
+				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(0, 1, 0));
+				break;
+				case Axis::Z:
+				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(0, 0, 1));
+				break;
+				default:
+				deltaRotation = glm::quat(1, 0, 0, 0);
+				break;
+			}
+
+			// Apply rotation to the focused object: new rotation = delta * start rotation
+			glm::quat newRotation = deltaRotation * dragStartObjRot;
+			focusedTf.SetWorldRotation(reg, newRotation);
+
+			// Also rotate the gizmo ring itself to provide visual feedback
+			entt::entity axisEntity = entt::null;
+			switch (activeAxisDrag)
+			{
+				case Axis::X: axisEntity = axisX; break;
+				case Axis::Y: axisEntity = axisY; break;
+				case Axis::Z: axisEntity = axisZ; break;
+				default: break;
+			}
+
+			if (axisEntity != entt::null && reg.valid(axisEntity) && reg.any_of<Transform>(axisEntity))
+			{
+				Transform& axisTf = reg.get<Transform>(axisEntity);
+
+				// Rotate the ring around its own local axis
+				// The ring's local rotation = initial rotation + delta rotation around its axis
+				glm::quat ringDeltaRot;
+				switch (activeAxisDrag)
+				{
+					case Axis::X:
+					// Ring rotates around local X (which aligns with world X after initial setup)
+					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(1, 0, 0));
+					break;
+					case Axis::Y:
+					// Ring rotates around local Y
+					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(0, 1, 0));
+					break;
+					case Axis::Z:
+					// Ring rotates around local Z
+					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(0, 0, 1));
+					break;
+					default:
+					ringDeltaRot = glm::quat(1, 0, 0, 0);
+					break;
+				}
+
+				// Apply to the ring: new ring rotation = delta * start ring rotation
+				glm::quat newRingRot = ringDeltaRot * dragStartGizmoRingRot;
+				axisTf.SetRotation(newRingRot);
 			}
 		}
 

@@ -609,6 +609,7 @@ namespace Engine
 		// The flaw with pausing is our engine state will be (playing | paused)
 		// And behaviors will keep running since it is got the play mode flag, we need to somehow hack fix this.
 		// We don't want to drop the play mode flag, since we are paused while playing and we will resume to go back to playing.
+		// We hack fix this with a very specific flow in BehaviorComponents::CanExecute()
 		// pause: set Paused (don't touch other flags)
 		commandSystem->RegisterRaw("pause", [self, summarize](const std::vector<std::string>&)
 		{

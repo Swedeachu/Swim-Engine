@@ -3,6 +3,7 @@
 #include "Engine/Machine.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/Axis.h"
 #include "Library/EnTT/entt.hpp"
+#include "Library/glm/gtc/quaternion.hpp"
 
 namespace Engine
 {
@@ -48,6 +49,8 @@ namespace Engine
 
 		void CreateTranslationGizmo(bool useBallArrow);
 
+		void CreateRotationGizmo();
+
 		void ScaleGizmoBasedOnCameraDistance(entt::registry& reg);
 
 		entt::entity RayCastUnderMouse() const;
@@ -75,6 +78,7 @@ namespace Engine
 		std::shared_ptr<Mesh> quadMesh;
 		std::shared_ptr<Mesh> circleMesh;
 		std::shared_ptr<Mesh> ballArrowMesh;
+		std::shared_ptr<Mesh> halfTorusMesh;
 
 		std::shared_ptr<MaterialData> sphereMatData;
 		std::shared_ptr<MaterialData> arrowMatData;
@@ -83,6 +87,7 @@ namespace Engine
 		std::shared_ptr<MaterialData> quadMatData;
 		std::shared_ptr<MaterialData> circleMatData;
 		std::shared_ptr<MaterialData> ballArrowMatData;
+		std::shared_ptr<MaterialData> halfTorusMatData;
 
 		std::shared_ptr<Scene> activeScene;
 
@@ -102,6 +107,9 @@ namespace Engine
 		glm::vec3 dragAxisDir = glm::vec3(0);
 		glm::vec3 dragStartObjPos = glm::vec3(0);
 		glm::vec3 dragStartObjScale = glm::vec3(0);
+		glm::quat dragStartObjRot = glm::quat(1, 0, 0, 0);
+		glm::vec2 dragStartMousePos = glm::vec2(0);
+		glm::quat dragStartGizmoRingRot = glm::quat(1, 0, 0, 0);
 
 	};
 

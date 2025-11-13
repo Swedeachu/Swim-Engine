@@ -248,10 +248,10 @@ namespace Engine
 
 	VertexesIndexesPair MakeQuad
 	(
-		uint32_t tilesX,          
-		uint32_t tilesY,          
-		uint32_t tileIndexX,      
-		uint32_t tileIndexY,       
+		uint32_t tilesX,
+		uint32_t tilesY,
+		uint32_t tileIndexX,
+		uint32_t tileIndexY,
 		glm::vec3 color1,
 		glm::vec3 color2,
 		glm::vec3 color3,
@@ -565,6 +565,99 @@ namespace Engine
 				indices.push_back(i0);
 				indices.push_back(i1);
 				indices.push_back(i2);
+				indices.push_back(i2);
+				indices.push_back(i3);
+				indices.push_back(i0);
+			}
+		}
+
+		return { vertices, indices };
+	}
+
+	VertexesIndexesPair MakeTorusPercent
+	(
+		float outerRadius,
+		float thickness,
+		uint32_t majorSegments,
+		uint32_t minorSegments,
+		const glm::vec3& color,
+		float percent
+	)
+	{
+		// Clamp percent to [0, 1]
+		if (percent <= 0.0f)
+		{
+			return {}; // empty
+		}
+
+		if (percent >= 1.0f)
+		{
+			// Just build a full torus using the original function
+			return MakeTorus(outerRadius, thickness, majorSegments, minorSegments, color);
+		}
+
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+
+		float R = outerRadius;
+		float r = thickness;
+
+		// How many segments along the major ring we actually use
+		// Keep at least 1 so we don't divide by zero.
+		uint32_t actualMajorSegments = static_cast<uint32_t>(std::round(static_cast<float>(majorSegments) * percent));
+
+		if (actualMajorSegments < 1)
+		{
+			actualMajorSegments = 1;
+		}
+
+		float maxAngle = TWO_PI * percent;
+
+		// Generate vertices for [0, maxAngle]
+		for (uint32_t i = 0; i <= actualMajorSegments; ++i)
+		{
+			float t = static_cast<float>(i) / static_cast<float>(actualMajorSegments);
+			float u = t * maxAngle;  // angle around major circle
+
+			float cu = cosf(u);
+			float su = sinf(u);
+
+			for (uint32_t j = 0; j <= minorSegments; ++j)
+			{
+				float v = (float)j / (float)minorSegments * TWO_PI; // minor angle
+				float cv = cosf(v);
+				float sv = sinf(v);
+
+				glm::vec3 pos{
+						(R + r * cv) * cu,
+						r * sv,
+						(R + r * cv) * su
+				};
+
+				// U goes 0..1 over the visible portion
+				float uCoord = t;
+				float vCoord = (float)j / (float)minorSegments;
+
+				PushVertex(vertices, pos, color, { uCoord, vCoord });
+			}
+		}
+
+		// Build indices without wrapping around the full circle
+		for (uint32_t i = 0; i < actualMajorSegments; ++i)
+		{
+			for (uint32_t j = 0; j < minorSegments; ++j)
+			{
+				uint32_t rowStride = minorSegments + 1;
+
+				uint32_t i0 = i * rowStride + j;
+				uint32_t i1 = i * rowStride + (j + 1);
+				uint32_t i2 = (i + 1) * rowStride + (j + 1);
+				uint32_t i3 = (i + 1) * rowStride + j;
+
+				indices.push_back(i0);
+				indices.push_back(i1);
+				indices.push_back(i2);
+
 				indices.push_back(i2);
 				indices.push_back(i3);
 				indices.push_back(i0);

@@ -5,7 +5,6 @@ cbuffer CameraUBO : register(b0, space0)
   float4x4 worldProj;
   float4x4 screenView;
   float4x4 screenProj;
-
   float4 camParams;
   float2 viewportSize;
   float2 _padViewportSize;
@@ -14,18 +13,14 @@ cbuffer CameraUBO : register(b0, space0)
 struct GpuInstanceData
 {
   float4x4 model;
-
   float4 aabbMin;
   float4 aabbMax;
-
   uint textureIndex;
   float hasTexture;
   uint meshInfoIndex;
   uint materialIndex;
-
   uint indexCount;
   uint space;  // 0 = world, 1 = screen
-
   uint2 vertexOffsetInMegaBuffer;
   uint2 indexOffsetInMegaBuffer;
 };
@@ -45,7 +40,7 @@ struct MeshDecoratorGpuInstanceData
   int useTexture;
   float2 resolution;
   float2 quadSize;
-  int renderOnTop; // 0 = normal depth, 1 = force in front
+  int renderOnTop; // 0 = normal depth, positive values = force layer in front
 };
 
 [[vk::binding(2, 0)]]
@@ -75,20 +70,19 @@ struct VSOutput
 VSOutput main(VSInput vin)
 {
   VSOutput vout;
-
+  
   // Grab instance and decorator data
   GpuInstanceData inst = instanceBuffer[vin.instanceID];
   MeshDecoratorGpuInstanceData deco = decoratorBuffer[inst.materialIndex];
-
+  
   // Determine transform space
   const bool isScreen = (inst.space == 1);
-
+  
   // Select appropriate view/projection matrix
   float4x4 view = isScreen ? screenView : worldView;
   float4x4 proj = isScreen ? screenProj : worldProj;
-
+  
   float3 worldPos;
-
   if (isScreen)
   {
     // In screen-space, model matrix directly gives pixel position
@@ -100,32 +94,54 @@ VSOutput main(VSInput vin)
     // In world-space, apply full model transform
     worldPos = mul(inst.model, float4(vin.position, 1.0f)).xyz;
   }
-
+  
   // Final clip space position
   float4 clipPos = mul(proj, mul(view, float4(worldPos, 1.0f)));
-
-  if (deco.renderOnTop != 0) {
-    // Put at (almost) the near plane in clip space so depth ~ 0 in NDC.
-    // Use a tiny epsilon to avoid clipping at exactly -w.
-    clipPos.z = clipPos.w * 1e-6f;
+  
+  // Handle layered renderOnTop for depth control
+  if (deco.renderOnTop > 0)
+  {
+    // Map renderOnTop layer to depth in reverse order (higher layer = closer to camera)
+    // Layer 0 = normal depth testing (no modification)
+    // Layer 1+ = progressively closer to near plane
+    
+    // Maximum supported layers 
+    const int maxLayers = 100;
+    
+    // Clamp layer value
+    int layer = min(deco.renderOnTop, maxLayers);
+    
+    // Calculate depth step size
+    // We'll use the range [epsilon, 0.1] for all forced layers
+    // Higher layer number = smaller z value (closer to camera)
+    const float nearEpsilon = 1e-6f;
+    const float farForced = 0.1f;
+    const float depthRange = farForced - nearEpsilon;
+    
+    // Linear interpolation: layer 1 is farthest in forced range, layer maxLayers is nearest
+    float t = (float)(maxLayers - layer) / (float)maxLayers;
+    float forcedDepth = nearEpsilon + t * depthRange;
+    
+    // Set z to forced depth value (multiply by w for clip space)
+    clipPos.z = clipPos.w * forcedDepth;
   }
   
   vout.position = clipPos;
-
+  
   // Pass-through values
   vout.uv = vin.uv;
   vout.textureIndex = inst.textureIndex;
   vout.hasTexture = inst.hasTexture;
   vout.instanceID = inst.materialIndex;
   vout.color = vin.color;
-
+  
   // Pass half-size in screen-space pixels (calculated on CPU!)
   vout.quadSizePx = deco.quadSize * 0.5f;
-
+  
   // Compute center of quad in screen-space for SDF math
   float4 clipCentre = mul(proj, mul(view, float4(inst.model[3].xyz, 1.0f)));
   float2 ndcCentre = clipCentre.xy / clipCentre.w;
   vout.centerPx = (ndcCentre * 0.5f + 0.5f) * viewportSize;
-
+  
   return vout;
 }

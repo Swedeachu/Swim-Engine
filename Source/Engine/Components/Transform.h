@@ -285,6 +285,22 @@ namespace Engine
 			return modelMatrix;
 		}
 
+		glm::quat GetWorldRotation(const entt::registry& registry) const
+		{
+			// If no parent, world rotation is just local rotation
+			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
+			{
+				return rotation;
+			}
+
+			// Recursively get parent's world rotation and combine with local
+			const Transform& pTf = registry.get<Transform>(parent);
+			const glm::quat parentWorldRot = pTf.GetWorldRotation(registry);
+
+			// World rotation = parent world rotation * local rotation
+			return glm::normalize(parentWorldRot * rotation);
+		}
+
 		glm::vec3 GetWorldScale(const entt::registry& registry) const
 		{
 			const glm::mat4& world = GetWorldMatrix(registry);

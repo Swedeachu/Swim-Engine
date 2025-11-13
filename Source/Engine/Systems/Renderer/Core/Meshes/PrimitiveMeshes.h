@@ -100,6 +100,17 @@ namespace Engine
 		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
 	);
 
+	// Can do stuff like make a half torus with 0.5 percent
+	VertexesIndexesPair MakeTorusPercent
+	(
+		float outerRadius,
+		float thickness,
+		uint32_t majorSegments,
+		uint32_t minorSegments,
+		const glm::vec3& color,
+		float percent
+	);
+
 	// Composed of cone and cylinder
 	VertexesIndexesPair MakeArrow
 	(
