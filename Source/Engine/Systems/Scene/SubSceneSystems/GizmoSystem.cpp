@@ -222,6 +222,17 @@ namespace Engine
 
 			// Update size
 			ScaleGizmoBasedOnCameraDistance(reg);
+
+			// For translation / scale gizmos, keep the arrows aligned to the focused entity's local rotation
+			if ((activeGizmoType == GizmoType::Translate || activeGizmoType == GizmoType::Scale) &&
+				reg.valid(rootGizmoControl) && reg.any_of<Transform>(rootGizmoControl))
+			{
+				Transform& focusedTf = reg.get<Transform>(focusedEntity);
+				Transform& gizmoTf = reg.get<Transform>(rootGizmoControl);
+
+				// Root gizmo rotation matches the focused entity's world rotation
+				gizmoTf.GetRotationRef() = focusedTf.GetWorldRotation(reg);
+			}
 		}
 	}
 
@@ -535,7 +546,8 @@ namespace Engine
 
 		// Focused entity transform
 		Transform& tf = reg.get<Transform>(focusedEntity);
-		const glm::vec3 pos = tf.GetWorldPosition(reg); // we have crashed here before
+		const glm::vec3 pos = tf.GetWorldPosition(reg);
+		const glm::quat worldRot = tf.GetWorldRotation(reg);
 
 		// World-axis rotations (arrow model points +Y) 
 		const glm::quat rotX = glm::angleAxis(-glm::half_pi<float>(), glm::vec3(0, 0, 1)); // +X
@@ -553,7 +565,9 @@ namespace Engine
 			Transform rootT;
 			rootT.GetPositionRef() = pos;
 			rootT.GetScaleRef() = tf.GetWorldScale(reg);
-			rootT.GetRotationRef() = glm::quat(1, 0, 0, 0);
+			// Match the focused entity's world rotation so axes start out in local alignment
+			rootT.GetRotationRef() = worldRot;
+
 			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
 			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
 			activeScene->SetEnabledStates(rootGizmoControl, EngineState::Editing);
@@ -565,8 +579,8 @@ namespace Engine
 			activeScene->SetEnabledStates(e, EngineState::Editing);
 
 			// tweak: gap away from root so arrow ends don't touch at (0,0,0) 
-			constexpr float kGap = 0.1f;        // small world-space gap to avoid z-fighting (tweak as needed)
-			constexpr float kArrowHalfLen = 0.0f; // set to half the arrow length if the mesh is centered
+			constexpr float kGap = 0.1f;  // small world-space gap to avoid z-fighting (tweak as needed)
+			constexpr float kArrowHalfLen = 0.0f;  // set to half the arrow length if the mesh is centered
 
 			// Offset along the arrow's local +Y, expressed in parent (root) space
 			const glm::vec3 localOffset = r * glm::vec3(0.0f, kArrowHalfLen + kGap, 0.0f);
@@ -619,6 +633,9 @@ namespace Engine
 		Transform& tf = reg.get<Transform>(focusedEntity);
 		const glm::vec3 pos = tf.GetWorldPosition(reg);
 
+		glm::vec3 worldScale = tf.GetWorldScale(reg);
+		float gizmoScale = std::max({ worldScale.x, worldScale.y, worldScale.z }) * 1.5f;
+
 		// Colors
 		const glm::vec4 RED(1.0f, 0.0f, 0.0f, 1.0f);
 		const glm::vec4 GREEN(0.0f, 1.0f, 0.0f, 1.0f);
@@ -629,7 +646,7 @@ namespace Engine
 		{
 			Transform rootT;
 			rootT.GetPositionRef() = pos;
-			rootT.GetScaleRef() = tf.GetWorldScale(reg);
+			rootT.GetScaleRef() = glm::vec3(gizmoScale);
 			rootT.GetRotationRef() = glm::quat(1, 0, 0, 0);
 			activeScene->EmplaceComponent<Transform>(rootGizmoControl, rootT);
 			activeScene->EmplaceComponent<ObjectTag>(rootGizmoControl, TagConstants::EDITOR_MODE_OBJECT, "gizmo root");
@@ -763,40 +780,34 @@ namespace Engine
 	{
 		activeAxisDrag = axis;
 		isDragging = true;
+
 		entt::registry& reg = activeScene->GetRegistry();
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
 		const glm::vec3 gizmoOrigin = focusedTf.GetWorldPosition(reg);
 
+		// Compute drag axis in world space based on the object's local axis and rotation at drag start
+		glm::vec3 localAxis(0.0f);
+		switch (axis)
+		{
+			case Axis::X: localAxis = glm::vec3(1, 0, 0); break;
+			case Axis::Y: localAxis = glm::vec3(0, 1, 0); break;
+			case Axis::Z: localAxis = glm::vec3(0, 0, 1); break;
+			default:      localAxis = glm::vec3(0, 0, 0); break;
+		}
+
+		glm::quat worldRotAtDrag = focusedTf.GetWorldRotation(reg);
+		dragAxisDir = glm::normalize(worldRotAtDrag * localAxis);
+
 		// Cache everything we need for the start of the drag
-		dragAxisDir = glm::normalize(AxisDirWorld(axis));
 		dragStartT = ParamOnAxisFromRay(gizmoOrigin, dragAxisDir, rayOrigin, rayDirN);
 		dragStartObjPos = gizmoOrigin;
 		dragStartObjScale = focusedTf.GetWorldScale(reg);
-		dragStartObjRot = focusedTf.GetWorldRotation(reg);
+		dragStartObjRot = worldRotAtDrag; // used by translate/scale, not rotation now
 
-		// Cache the starting mouse position
+		// Cache the starting mouse position (and init previous for per-frame delta)
 		auto input = activeScene->GetInputManager();
 		dragStartMousePos = input->GetMousePosition(false);
-
-		// For rotation mode, also cache the initial rotation of the gizmo ring itself
-		if (activeGizmoType == GizmoType::Rotate)
-		{
-			entt::entity axisEntity = entt::null;
-			switch (activeAxisDrag)
-			{
-				case Axis::X: axisEntity = axisX; break;
-				case Axis::Y: axisEntity = axisY; break;
-				case Axis::Z: axisEntity = axisZ; break;
-				default: break;
-			}
-
-			if (axisEntity != entt::null && reg.valid(axisEntity) && reg.any_of<Transform>(axisEntity))
-			{
-				Transform& axisTf = reg.get<Transform>(axisEntity);
-				// Store the initial local rotation of the ring
-				dragStartGizmoRingRot = axisTf.GetRotation();
-			}
-		}
+		dragPrevMousePos = dragStartMousePos;
 
 		// Highlight active axis strongly; lock hover
 		SetAxisHighlight(Axis::None, activeAxisDrag);
@@ -809,78 +820,108 @@ namespace Engine
 		{
 			return;
 		}
+
 		entt::registry& reg = activeScene->GetRegistry();
 		if (!reg.valid(focusedEntity) || !reg.any_of<Transform>(focusedEntity))
 		{
 			return;
 		}
+
 		Transform& focusedTf = reg.get<Transform>(focusedEntity);
 
+		// --- TRANSLATE ---
 		if (activeGizmoType == GizmoType::Translate)
 		{
-			// Axis is anchored at the object position when drag started
+			// Axis is anchored at the object position when drag started,
+			// and dragAxisDir is the object's local axis projected into world space.
 			const glm::vec3 axisOrigin = dragStartObjPos;
 			const float tNow = ParamOnAxisFromRay(axisOrigin, dragAxisDir, rayOrigin, rayDirN);
 			const float dt = tNow - dragStartT;
 			const glm::vec3 delta = dt * dragAxisDir;
+
 			focusedTf.SetWorldPosition(reg, dragStartObjPos + delta);
 		}
+		// --- SCALE ---
 		else if (activeGizmoType == GizmoType::Scale)
 		{
 			const glm::vec3 axisOrigin = dragStartObjPos;
 			const float tNow = ParamOnAxisFromRay(axisOrigin, dragAxisDir, rayOrigin, rayDirN);
 			const float dt = tNow - dragStartT;
-			const int axis = AxisIndex(activeAxisDrag);
-			if (axis >= 0)
+
+			const int axisIdx = AxisIndex(activeAxisDrag);
+			if (axisIdx >= 0)
 			{
 				glm::vec3 newScale = dragStartObjScale;
+
 				const float sensitivity = 1.0f;
 				float factor = 1.0f + dt * sensitivity;
+
 				const float minAxisScale = 0.1f;
-				const float minFactor = minAxisScale / std::max(0.0001f, dragStartObjScale[axis]);
+				const float minFactor = minAxisScale / std::max(0.0001f, dragStartObjScale[axisIdx]);
 				factor = std::max(factor, minFactor);
-				newScale[axis] = dragStartObjScale[axis] * factor;
+
+				newScale[axisIdx] = dragStartObjScale[axisIdx] * factor;
+
 				newScale.x = std::max(newScale.x, minAxisScale);
 				newScale.y = std::max(newScale.y, minAxisScale);
 				newScale.z = std::max(newScale.z, minAxisScale);
+
 				focusedTf.SetWorldScale(reg, newScale);
 			}
 		}
+		// --- ROTATE ---
 		else if (activeGizmoType == GizmoType::Rotate)
 		{
-			// Get current mouse position and calculate delta from drag start
 			auto input = activeScene->GetInputManager();
+
+			// Per-frame mouse delta
 			glm::vec2 currentMousePos = input->GetMousePosition(false);
-			glm::vec2 mouseDelta = currentMousePos - dragStartMousePos;
+			glm::vec2 frameDelta = currentMousePos - dragPrevMousePos;
+			dragPrevMousePos = currentMousePos;
 
-			// Calculate rotation angle based on mouse movement
-			// Use horizontal mouse movement for rotation amount
-			const float sensitivity = 0.01f; // Adjust for rotation speed
-			float rotationAngle = mouseDelta.x * sensitivity;
-
-			// Create rotation quaternion around the active axis
-			glm::quat deltaRotation;
-			switch (activeAxisDrag)
+			// If the mouse didn't really move, don't do anything
+			if (glm::length(frameDelta) < 0.000001f)
 			{
-				case Axis::X:
-				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(1, 0, 0));
-				break;
-				case Axis::Y:
-				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(0, 1, 0));
-				break;
-				case Axis::Z:
-				deltaRotation = glm::angleAxis(rotationAngle, glm::vec3(0, 0, 1));
-				break;
-				default:
-				deltaRotation = glm::quat(1, 0, 0, 0);
-				break;
+				// Keep gizmo root synced even if we early out
+				if (rootGizmoControl != entt::null && reg.valid(rootGizmoControl))
+				{
+					Transform& gizmoTf = reg.get<Transform>(rootGizmoControl);
+					gizmoTf.GetPositionRef() = focusedTf.GetWorldPosition(reg);
+				}
+				return;
 			}
 
-			// Apply rotation to the focused object: new rotation = delta * start rotation
-			glm::quat newRotation = deltaRotation * dragStartObjRot;
+			// Use combined mouse movement (horizontal + vertical) for rotation amount
+			// This lets you drag in any direction and still get a stable, signed angle.
+			// Dominant component keeps the feel natural (up/down works nicely for Y, etc.)
+			float dominant =
+				(std::abs(frameDelta.x) > std::abs(frameDelta.y))
+				? frameDelta.x
+				: frameDelta.y;
+
+			const float sensitivity = 0.006f;
+			float rotationAngle = dominant * sensitivity;
+
+			// Rotation axis (world space)
+			glm::vec3 axisVec(0.0f);
+			switch (activeAxisDrag)
+			{
+				case Axis::X: axisVec = glm::vec3(1, 0, 0); break;
+				case Axis::Y: axisVec = glm::vec3(0, 1, 0); break;
+				case Axis::Z: axisVec = glm::vec3(0, 0, 1); break;
+				default:      return;
+			}
+
+			axisVec = glm::normalize(axisVec);
+
+			glm::quat deltaRotation = glm::angleAxis(rotationAngle, axisVec);
+
+			// Apply rotation relative to *current* world rotation
+			glm::quat currentObjRot = focusedTf.GetWorldRotation(reg);
+			glm::quat newRotation = glm::normalize(deltaRotation * currentObjRot);
 			focusedTf.SetWorldRotation(reg, newRotation);
 
-			// Also rotate the gizmo ring itself to provide visual feedback
+			// Rotate the gizmo ring for visual feedback
 			entt::entity axisEntity = entt::null;
 			switch (activeAxisDrag)
 			{
@@ -894,35 +935,14 @@ namespace Engine
 			{
 				Transform& axisTf = reg.get<Transform>(axisEntity);
 
-				// Rotate the ring around its own local axis
-				// The ring's local rotation = initial rotation + delta rotation around its axis
-				glm::quat ringDeltaRot;
-				switch (activeAxisDrag)
-				{
-					case Axis::X:
-					// Ring rotates around local X (which aligns with world X after initial setup)
-					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(1, 0, 0));
-					break;
-					case Axis::Y:
-					// Ring rotates around local Y
-					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(0, 1, 0));
-					break;
-					case Axis::Z:
-					// Ring rotates around local Z
-					ringDeltaRot = glm::angleAxis(rotationAngle, glm::vec3(0, 0, 1));
-					break;
-					default:
-					ringDeltaRot = glm::quat(1, 0, 0, 0);
-					break;
-				}
-
-				// Apply to the ring: new ring rotation = delta * start ring rotation
-				glm::quat newRingRot = ringDeltaRot * dragStartGizmoRingRot;
+				glm::quat ringDeltaRot = glm::angleAxis(rotationAngle, axisVec);
+				glm::quat currentRingRot = axisTf.GetRotation();
+				glm::quat newRingRot = glm::normalize(ringDeltaRot * currentRingRot);
 				axisTf.SetRotation(newRingRot);
 			}
 		}
 
-		// Keep gizmo root on the object while dragging 
+		// Keep gizmo root on the object while dragging
 		if (rootGizmoControl != entt::null && reg.valid(rootGizmoControl))
 		{
 			Transform& gizmoTf = reg.get<Transform>(rootGizmoControl);

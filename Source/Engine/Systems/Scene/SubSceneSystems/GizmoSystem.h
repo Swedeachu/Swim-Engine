@@ -109,7 +109,7 @@ namespace Engine
 		glm::vec3 dragStartObjScale = glm::vec3(0);
 		glm::quat dragStartObjRot = glm::quat(1, 0, 0, 0);
 		glm::vec2 dragStartMousePos = glm::vec2(0);
-		glm::quat dragStartGizmoRingRot = glm::quat(1, 0, 0, 0);
+		glm::vec2 dragPrevMousePos = glm::vec2(0);
 
 	};
 
