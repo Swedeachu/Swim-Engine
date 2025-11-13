@@ -33,6 +33,12 @@ namespace Engine
 		bool enableFill = true;
 		bool useMaterialTexture = false; // if enabled, will use the material texture instead of fill color
 
+		// This works like a force layer:
+		// If 0, uses the regular depth buffer, but at like something at 10 renders below 9 etc
+		// The prime example of this is gizmos that we want drawing above things but still in 3D world space, but avoiding Z fighting on each other,
+		// or things we need to draw through walls such as billboard indicators in the world.
+		int renderOnTop = 0; // 0 = normal depth, x >= 1 = force in front
+
 		// Convenient initialization
 		MeshDecorator(
 			glm::vec4 fill = glm::vec4(1.0f),
@@ -43,7 +49,8 @@ namespace Engine
 			bool rounded = false,
 			bool strokeEnabled = false,
 			bool fillEnabled = true,
-			bool useTexture = false
+			bool useTexture = false,
+			int renderOnTop = 0
 		)
 			: fillColor(fill),
 			strokeColor(stroke),
@@ -54,7 +61,8 @@ namespace Engine
 			enableStroke(strokeEnabled),
 			enableFill(fillEnabled),
 			useMaterialTexture(useTexture),
-			cachedFill(fill)
+			cachedFill(fill),
+			renderOnTop(renderOnTop)
 		{}
 
 		void SetColors(glm::vec4 fill, glm::vec4 stroke = glm::vec4(0.0f))

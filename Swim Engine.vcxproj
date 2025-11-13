@@ -219,7 +219,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
   <ItemGroup>
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
+    <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
@@ -241,10 +243,14 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Components\CompositeMaterial.h" />
     <ClInclude Include="Source\Engine\Components\MeshDecorator.h" />
     <ClInclude Include="Source\Engine\Components\Internal\FrustumCullCache.h" />
+    <ClInclude Include="Source\Engine\Components\ObjectTag.h" />
     <ClInclude Include="Source\Engine\Components\TextComponent.h" />
+    <ClInclude Include="Source\Engine\EngineState.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
+    <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
@@ -252,6 +258,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
+    <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Axis.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h" />
@@ -268,8 +275,10 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanRenderer.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneBVH.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.cpp" />
     <ClCompile Include="Source\Engine\Systems\SystemManager.cpp" />
@@ -281,11 +290,15 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
+    <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
@@ -312,6 +325,10 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </ClCompile>
     <ClCompile Include="Source\main.cpp" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
+    <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
+    <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
@@ -320,6 +337,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
+    <ClInclude Include="Source\Game\Testing\MeshDrawingStressTest.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitiveTest.h" />
+    <ClInclude Include="Source\Game\Testing\TextAndUiTest.h" />
     <ClInclude Include="Source\Library\basis\basisu.h" />
     <ClInclude Include="Source\Library\basis\basisu_astc_hdr_core.h" />
     <ClInclude Include="Source\Library\basis\basisu_astc_helpers.h" />

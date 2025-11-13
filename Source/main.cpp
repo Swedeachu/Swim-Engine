@@ -6,10 +6,10 @@
 #pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
 #endif
 
-int main()
+int main(int argc, char** argv)
 {
-	auto engine = std::make_shared<Engine::SwimEngine>();
-	if (engine->Start() == 0) return engine->Run();
+  auto engine = std::make_shared<Engine::SwimEngine>(Engine::SwimEngine::ParseStartingEngineArgs(argc, argv));
+  if (engine->Start() == 0) return engine->Run(); // runs if started with zero errors
 
-	return -1; 
+  return -1;
 }

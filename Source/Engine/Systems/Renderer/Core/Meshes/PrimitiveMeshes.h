@@ -22,7 +22,21 @@ namespace Engine
 
 	constexpr float EPSILON = 0.00001f;
 
-	typedef std::pair<std::vector<Engine::Vertex>, std::vector<uint32_t>> VertexesIndexesPair;
+	struct VertexesIndexesPair
+	{
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+
+		// Backward-compatible aliases that a std::pair would have
+		// std::vector<Engine::Vertex>& first = vertices;
+		// std::vector<uint32_t>& second = indices;
+
+		VertexesIndexesPair() = default;
+
+		VertexesIndexesPair(std::vector<Engine::Vertex> v, std::vector<uint32_t> i)
+			: vertices(std::move(v)), indices(std::move(i))
+		{}
+	};
 
 	VertexesIndexesPair MakeCube();
 
@@ -37,7 +51,19 @@ namespace Engine
 		glm::vec3 colorBottom
 	);
 
-	VertexesIndexesPair GenerateCircleMesh
+	VertexesIndexesPair MakeQuad
+	(
+		uint32_t tilesX = 1,          // how many tiles horizontally
+		uint32_t tilesY = 1,          // how many tiles vertically
+		uint32_t tileIndexX = 0,      // which tile X index (0-based)
+		uint32_t tileIndexY = 0,      // which tile Y index (0-based)
+		glm::vec3 color1 = { 1.0f, 1.0f, 1.0f },
+		glm::vec3 color2 = { 1.0f, 1.0f, 1.0f },
+		glm::vec3 color3 = { 1.0f, 1.0f, 1.0f },
+		glm::vec3 color4 = { 1.0f, 1.0f, 1.0f }
+	);
+
+	VertexesIndexesPair MakeCircle
 	(
 		float radius = 0.5f,
 		uint32_t segmentCount = 64,
@@ -72,6 +98,38 @@ namespace Engine
 		uint32_t majorSegments = 48,
 		uint32_t minorSegments = 24,
 		const glm::vec3& color = { 1.0f, 1.0f, 1.0f }
+	);
+
+	// Can do stuff like make a half torus with 0.5 percent
+	VertexesIndexesPair MakeTorusPercent
+	(
+		float outerRadius,
+		float thickness,
+		uint32_t majorSegments,
+		uint32_t minorSegments,
+		const glm::vec3& color,
+		float percent
+	);
+
+	// Composed of cone and cylinder
+	VertexesIndexesPair MakeArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float headRadius,
+		float headLength,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	);
+
+	// Composed of cylinder plus a sphere on top
+	VertexesIndexesPair MakeBallArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float ballRadius,
+		uint32_t segmentCount,
+		const glm::vec3& color
 	);
 
 }

@@ -28,6 +28,82 @@ namespace Engine
 		{
 			behaviors.emplace_back(std::move(behavior));
 		}
+
+		// Set exactly which engine states these behaviors are enabled in.
+		// Default is EngineState::Playing.
+		void SetEnabledStates(EngineState states) { enabledStates = states; }
+
+		// Add one or more states to the enable mask.
+		void AddEnabledStates(EngineState states) { enabledStates |= states; }
+
+		// Remove one or more states from the enable mask.
+		void RemoveEnabledStates(EngineState states)
+		{
+			enabledStates = static_cast<EngineState>(
+				static_cast<std::underlying_type_t<EngineState>>(enabledStates) &
+				~static_cast<std::underlying_type_t<EngineState>>(states)
+				);
+		}
+
+		// Query which states are enabled for this behavior (bitmask).
+		EngineState GetEnabledStates() const { return enabledStates; }
+
+		// Convenient predicate: is this behavior enabled in a specific state?
+		bool IsEnabledIn(EngineState state) const
+		{
+			return HasAny(enabledStates, state);
+		}
+
+		// Priority:
+		// 1) Stopped: block unless explicitly enabled in Stopped
+		// 2) Paused: ONLY run behaviors enabled for Paused OR Editing (tools still work)
+		// 3) Live (not paused/stopped):
+		//    - If Playing + Editing: run if enabled in Playing OR Editing
+		//    - If only Playing:      run if enabled in Playing (NOT Editing)
+		//    - If only Editing:      run if enabled in Editing
+		bool CanExecute(EngineState current) const
+		{
+			// 1) Stopped gate
+			if (HasAny(current, EngineState::Stopped))
+			{
+				return IsEnabledIn(EngineState::Stopped);
+			}
+
+			// 2) Paused gate (freeze gameplay, allow tools)
+			if (HasAny(current, EngineState::Paused))
+			{
+				return IsEnabledIn(EngineState::Paused) || IsEnabledIn(EngineState::Editing);
+			}
+
+			// 3) Live (not paused/stopped)
+			const bool isPlaying = HasAny(current, EngineState::Playing);
+			const bool isEditing = HasAny(current, EngineState::Editing);
+
+			if (isPlaying && isEditing)
+			{
+				// Coexist: gameplay + editing tools
+				return IsEnabledIn(EngineState::Playing) || IsEnabledIn(EngineState::Editing);
+			}
+
+			if (isPlaying)
+			{
+				// Pure play: NO editor-only behaviors
+				return IsEnabledIn(EngineState::Playing);
+			}
+
+			if (isEditing)
+			{
+				// Pure edit session
+				return IsEnabledIn(EngineState::Editing);
+			}
+
+			return false;
+		}
+
+		// Which engine states this behavior is active in (bitmask)
+		// Default: active only while Playing
+		EngineState enabledStates = EngineState::Playing;
+
 	};
 
 }

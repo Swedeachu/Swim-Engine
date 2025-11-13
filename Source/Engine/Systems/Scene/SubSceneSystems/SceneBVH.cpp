@@ -35,7 +35,7 @@ namespace Engine
 	{
 		const glm::vec3& localMin = mesh->meshBufferData->aabbMin;
 		const glm::vec3& localMax = mesh->meshBufferData->aabbMax;
-		glm::mat4 model = transform.GetModelMatrix();
+		const glm::mat4& model = transform.GetWorldMatrix(registry);
 
 		glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 		glm::vec3 worldMax = worldMin;
@@ -64,12 +64,12 @@ namespace Engine
 			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
 			const std::shared_ptr<Mesh>& mesh = mat->mesh;
 
-			const bool isDirty = tf.IsDirty();
+			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
 
 			auto it = entityToLeaf.find(e);
 			if (it != entityToLeaf.end())
 			{
-				if (isDirty)
+				if (needsAabbUpdate)
 				{
 					nodes[it->second].aabb = CalculateWorldAABB(mesh, tf);
 				}
@@ -111,7 +111,7 @@ namespace Engine
 			}
 
 			// Transform to world space
-			glm::mat4 model = tf.GetModelMatrix();
+			const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 			glm::vec3 worldMax = worldMin;
@@ -126,12 +126,12 @@ namespace Engine
 
 			AABB worldAABB = { worldMin, worldMax };
 
-			const bool isDirty = tf.IsDirty();
+			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
 
 			auto it = entityToLeaf.find(e);
 			if (it != entityToLeaf.end())
 			{
-				if (isDirty)
+				if (needsAabbUpdate)
 				{
 					nodes[it->second].aabb = worldAABB;
 				}
@@ -150,9 +150,13 @@ namespace Engine
 		// === Rebuild check ===
 		static constexpr float kRebuildThreshold = 0.15f;
 
-		if (root == -1 || observer.size() > 0)
+		// If topology changed (add/remove) we must rebuild; also if observer caught edits.
+		if (root == -1 || observer.size() > 0 || forceUpdate)
 		{
 			FullRebuild();
+			forceUpdate = false;
+			observer.clear();
+			return;
 		}
 		else
 		{
@@ -172,6 +176,9 @@ namespace Engine
 				if (expansion > 1.0f + kRebuildThreshold)
 				{
 					FullRebuild();
+					forceUpdate = false;
+					observer.clear();
+					return;
 				}
 			}
 		}
@@ -298,7 +305,7 @@ namespace Engine
 				localMax = glm::max(localMax, max);
 			}
 
-			glm::mat4 model = tf.GetModelMatrix();
+			const glm::mat4& model = tf.GetWorldMatrix(registry);
 			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
 			glm::vec3 worldMax = worldMin;
 
@@ -374,7 +381,11 @@ namespace Engine
 			const BVHNode& n = nodes[idx];
 			if (n.IsLeaf())
 			{
-				outVisible.push_back(n.entity);
+				// Skip tombstones
+				if (n.entity != entt::null)
+				{
+					outVisible.push_back(n.entity);
+				}
 			}
 			else
 			{
@@ -469,7 +480,7 @@ namespace Engine
 					const auto& tf = registry.get<Transform>(entity);
 					const auto& comp = registry.get<CompositeMaterial>(entity);
 
-					const glm::mat4 model = tf.GetModelMatrix();
+					const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 					for (const auto& mat : comp.subMaterials)
 					{
@@ -532,27 +543,16 @@ namespace Engine
 			return;
 		}
 
-		int idx = it->second;
-		int last = static_cast<int>(nodes.size()) - 1;
+		const int idx = it->second;
 
-		if (idx != last)
-		{
-			std::swap(nodes[idx], nodes[last]);
+		// Tombstone this leaf: keep array topology intact for this frame.
+		nodes[idx].entity = entt::null;
+		nodes[idx].aabb.min = glm::vec3(FLT_MAX);
+		nodes[idx].aabb.max = glm::vec3(-FLT_MAX);
 
-			// Update bookkeeping for the swapped leaf (could be internal or leaf)
-			if (nodes[idx].IsLeaf())
-			{
-				entityToLeaf[nodes[idx].entity] = idx;
-			}
-			else
-			{
-				// internal node swapped into leaf slot: children remain correct
-			}
-		}
-
-		nodes.pop_back();
 		entityToLeaf.erase(it);
 
+		// Ensure we rebuild/refit before anyone traverses.
 		forceUpdate = true;
 	}
 
@@ -604,13 +604,18 @@ namespace Engine
 
 			if (node.IsLeaf())
 			{
-				// Use carried tnear as the leaf hit distance (no re-test)
-				const float tLeaf = it.tnear;
-				if (tLeaf >= tMin && tLeaf <= bestT)
+				// Skip tombstones
+				if (node.entity != entt::null)
 				{
-					bestT = tLeaf;
-					bestE = node.entity;
+					// Use carried tnear as the leaf hit distance (no re-test)
+					const float tLeaf = it.tnear;
+					if (tLeaf >= tMin && tLeaf <= bestT)
+					{
+						bestT = tLeaf;
+						bestE = node.entity;
+					}
 				}
+
 				continue;
 			}
 

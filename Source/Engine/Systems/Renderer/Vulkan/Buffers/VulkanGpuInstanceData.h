@@ -35,6 +35,7 @@ namespace Engine
 		int useTexture;
 		glm::vec2 resolution;
 		glm::vec2 quadSize;
+    int renderOnTop; // 0 = normal depth, 1 = force in front
 	};
 
   struct alignas(16) MsdfTextGpuInstanceData

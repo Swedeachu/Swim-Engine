@@ -23,9 +23,9 @@ namespace Engine
 
 	VulkanIndexDraw::VulkanIndexDraw
 	(
-		VkDevice device, 
-		VkPhysicalDevice physicalDevice, 
-		const int MAX_EXPECTED_INSTANCES, 
+		VkDevice device,
+		VkPhysicalDevice physicalDevice,
+		const int MAX_EXPECTED_INSTANCES,
 		const int MAX_FRAMES_IN_FLIGHT
 	)
 		: device(device), physicalDevice(physicalDevice)
@@ -317,19 +317,25 @@ namespace Engine
 				return;
 			}
 
+			// Skip what should not be rendered
+			if (!scene.ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const Transform& tf = registry.get<Transform>(entity);
 
 			if (registry.all_of<Material>(entity))
 			{
 				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-				AddInstance(tf, mat, nullptr);
+				AddInstance(registry, tf, mat, nullptr);
 			}
 			else if (registry.all_of<CompositeMaterial>(entity))
 			{
 				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
 				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
 				{
-					AddInstance(tf, mat, nullptr);
+					AddInstance(registry, tf, mat, nullptr);
 				}
 			}
 		});
@@ -338,43 +344,55 @@ namespace Engine
 	// Passing space as TransformSpace::Ambiguous will just render all entities
 	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		auto regularView = registry.view<Transform, Material>();
 		for (auto entity : regularView)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				continue;
+			}
+
 			const Transform& tf = regularView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
 				const auto& mat = regularView.get<Material>(entity).data;
-				AddInstance(tf, mat, frustum);
+				AddInstance(registry, tf, mat, frustum);
 			}
 		}
 
 		auto compositeView = registry.view<Transform, CompositeMaterial>();
 		for (auto entity : compositeView)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				continue;
+			}
+
 			const Transform& tf = compositeView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
 				const auto& composite = compositeView.get<CompositeMaterial>(entity);
 				for (const auto& mat : composite.subMaterials)
 				{
-					AddInstance(tf, mat, frustum);
+					AddInstance(registry, tf, mat, frustum);
 				}
 			}
 		}
 	}
 
-	void VulkanIndexDraw::AddInstance(const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
+	void VulkanIndexDraw::AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
-		const std::shared_ptr<Mesh>& mesh = mat->mesh;
-
-		const glm::vec4& min = mesh->meshBufferData->aabbMin;
-		const glm::vec4& max = mesh->meshBufferData->aabbMax;
+		const glm::vec4& min = mat->mesh->meshBufferData->aabbMin;
+		const glm::vec4& max = mat->mesh->meshBufferData->aabbMax;
 
 		// Frustum culling if world-space
 		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
-			if (!frustum->IsVisibleLazy(min, max, transform.GetModelMatrix()))
+			if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
 			{
 				return;
 			}
@@ -383,16 +401,16 @@ namespace Engine
 		GpuInstanceData instance{};
 
 		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
-		instance.model = transform.GetModelMatrix();
+		instance.model = transform.GetWorldMatrix(registry);
 		instance.aabbMin = min;
 		instance.aabbMax = max;
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-		instance.meshInfoIndex = mesh->meshBufferData->GetMeshID();
+		instance.meshInfoIndex = mat->mesh->meshBufferData->GetMeshID();
 		instance.materialIndex = 0u; // nothing yet
-		instance.indexCount = mesh->meshBufferData->indexCount;
-		instance.indexOffsetInMegaBuffer = mesh->meshBufferData->indexOffsetInMegaBuffer;
-		instance.vertexOffsetInMegaBuffer = mesh->meshBufferData->vertexOffsetInMegaBuffer;
+		instance.indexCount = mat->mesh->meshBufferData->indexCount;
+		instance.indexOffsetInMegaBuffer = mat->mesh->meshBufferData->indexOffsetInMegaBuffer;
+		instance.vertexOffsetInMegaBuffer = mat->mesh->meshBufferData->vertexOffsetInMegaBuffer;
 
 		cpuInstanceData.push_back(instance);
 	}
@@ -616,6 +634,8 @@ namespace Engine
 			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 		);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
 		{
@@ -628,12 +648,18 @@ namespace Engine
 				return;
 			}
 
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const glm::vec3& pos = transform.GetPosition(); // In virtual canvas units
 			const glm::vec3& scale = transform.GetScale();  // Width & height in virtual canvas units
 
 			const std::shared_ptr<MaterialData>& mat = matComp.data;
 			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
-			const glm::mat4& model = transform.GetModelMatrix();
+			const glm::mat4& model = transform.GetWorldMatrix(registry);
 
 			// First do a simple cull check 
 			if (cull)
@@ -647,10 +673,16 @@ namespace Engine
 				}
 				else
 				{
-					// Sceen space 2D check using window width and height
+					// Sceen space 2D check using window width and height with respect to world matrix scale and position values
 
-					glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-					glm::vec2 center = glm::vec2(pos) * screenScale;
+					// Extract translation (position) directly from the last column
+					const glm::vec3 worldPos = transform.GetWorldPosition(registry);
+
+					// Extract per-axis scale as lengths of the basis columns
+					const glm::vec3 worldScale = transform.GetWorldScale(registry);
+
+					glm::vec2 halfSize = glm::vec2(worldScale) * 0.5f;
+					glm::vec2 center = glm::vec2(worldPos) * screenScale;
 					glm::vec2 halfSizePx = halfSize * screenScale;
 
 					glm::vec2 minPx = center - halfSizePx;
@@ -762,6 +794,7 @@ namespace Engine
 				data.enableStroke = deco.enableStroke ? 1 : 0;
 				data.roundCorners = deco.roundCorners ? 1 : 0;
 				data.useTexture = useTex ? 1 : 0;
+				data.renderOnTop = deco.renderOnTop;
 			}
 			else
 			{
@@ -780,6 +813,7 @@ namespace Engine
 				data.enableStroke = 0;
 				data.roundCorners = 0;
 				data.useTexture = mat->albedoMap ? 1 : 0;
+				data.renderOnTop = 0;
 			}
 
 			data.resolution = glm::vec2(windowWidth, windowHeight);
@@ -833,18 +867,26 @@ namespace Engine
 		std::vector<MsdfTextGpuInstanceData>& outInstances
 	)
 	{
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != space) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
+
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
 
 			const FontInfo& fi = *tc.GetFont();
 			const uint32_t atlasIndex = tc.GetFont()->msdfAtlas->GetBindlessIndex();
 
 			MsdfTextGpuInstanceData s = (space == TransformSpace::Screen)
-				? BuildMsdfStateScreen(tf, tc, fi, windowWidth, windowHeight, Renderer::VirtualCanvasWidth, Renderer::VirtualCanvasHeight, atlasIndex)
-				: BuildMsdfStateWorld(tf, tc, fi, atlasIndex);
+				? BuildMsdfStateScreen(registry, tf, tc, fi, windowWidth, windowHeight, Renderer::VirtualCanvasWidth, Renderer::VirtualCanvasHeight, atlasIndex)
+				: BuildMsdfStateWorld(registry, tf, tc, fi, atlasIndex);
 
 			EmitMsdf(tc, fi, s, [&](uint32_t /*lineIdx*/, const GlyphQuad& q, const MsdfTextGpuInstanceData& st)
 			{

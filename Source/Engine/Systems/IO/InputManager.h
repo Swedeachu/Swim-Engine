@@ -28,7 +28,9 @@ namespace Engine
 		bool IsKeyReleased(unsigned char key) const;
 
 		int GetMouseScrollDelta() const { return mouseWheelDelta; }
-		const glm::vec2& GetMousePosition() const { return mousePos; }
+
+		glm::vec2 GetMousePosition(bool adjustForTitleBar = false, int amount = 14) const;
+
 		const glm::vec2& GetMousePositionDelta() const { return mouseDelta; }
 
 	private:
@@ -52,8 +54,8 @@ namespace Engine
 		std::array<std::pair<char, std::pair<bool, bool>>, 256> deferredState;
 
 		// delta stuff needed
-		int mouseWheelDelta{0};
-		glm::vec2 mousePos{ 0, 0};
+		int mouseWheelDelta{ 0 };
+		glm::vec2 mousePos{ 0, 0 };
 		glm::vec2 mouseDelta{ 0, 0 };
 
 	};

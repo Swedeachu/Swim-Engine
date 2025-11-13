@@ -37,11 +37,28 @@ namespace Engine
 		return L"Swim Engine Demo" + suffix;
 	}
 
-	SwimEngine::SwimEngine()
+	SwimEngine::SwimEngine(EngineArgs args)
+	{
+		Create(args.parentHandle, args.state);
+	}
+
+	SwimEngine::SwimEngine(HWND parentHandle, EngineState state)
+	{
+		Create(parentHandle, state);
+	}
+
+	void SwimEngine::Create(HWND parentHandle, EngineState state)
 	{
 		windowClassName = L"SwimEngine";
 		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
+
+		this->parentHandle = parentHandle;
+		this->engineState = state;
+
+		// We will create a child window (WS_CHILD) inside parentHandle if provided,
+		// otherwise we create our normal top-level window.
+		engineWindowHandle = nullptr;
 	}
 
 	std::shared_ptr<SwimEngine> SwimEngine::GetInstance()
@@ -52,6 +69,45 @@ namespace Engine
 	std::shared_ptr<SwimEngine>& SwimEngine::GetInstanceRef()
 	{
 		return EngineInstance;
+	}
+
+	SwimEngine::EngineArgs SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
+	{
+		// Default values
+		HWND parentHwnd = nullptr;
+		EngineState state = DefaultEngineState;
+
+		for (int i = 1; i < argc; ++i)
+		{
+			std::string arg = argv[i];
+
+			if (arg == "--parent-hwnd" && i + 1 < argc)
+			{
+				uint64_t val = std::strtoull(argv[++i], nullptr, 10);
+				parentHwnd = reinterpret_cast<HWND>(val);
+			}
+			else if (arg == "--state" && i + 1 < argc)
+			{
+				std::string value = argv[++i];
+				EngineState parsed = ParseEngineStateArg(value);
+				// If parsing yields None, keep default Playing; otherwise use parsed
+				if (parsed != EngineState::None)
+				{
+					state = parsed;
+				}
+			}
+			else if (arg.rfind("--state=", 0) == 0) // allow --state=VALUE
+			{
+				std::string value = arg.substr(std::string("--state=").size());
+				EngineState parsed = ParseEngineStateArg(value);
+				if (parsed != EngineState::None)
+				{
+					state = parsed;
+				}
+			}
+		}
+
+		return EngineArgs(parentHwnd, state);
 	}
 
 	std::string SwimEngine::GetExecutableDirectory()
@@ -99,7 +155,7 @@ namespace Engine
 		// Construct and register window class
 		WNDCLASSEX wc = {};
 		wc.cbSize = sizeof(WNDCLASSEX);
-		wc.style = CS_HREDRAW | CS_VREDRAW;
+		wc.style = CS_HREDRAW | CS_VREDRAW; // can add CS_DBLCLKS if we want double click messages: | CS_DBLCLKS
 		wc.lpfnWndProc = StaticWindowProc;
 		wc.hInstance = hInstance;
 		wc.hCursor = LoadCursor(0, IDC_ARROW);
@@ -107,7 +163,61 @@ namespace Engine
 
 		RegisterClassEx(&wc);
 
-		// Create window handle
+		// If a parent handle was provided (e.g., editor panel), create a child window inside it
+		if (parentHandle)
+		{
+			RECT r{};
+			GetClientRect(parentHandle, &r);
+			windowWidth = static_cast<unsigned int>(r.right - r.left);
+			windowHeight = static_cast<unsigned int>(r.bottom - r.top);
+
+			engineWindowHandle = CreateWindowEx(
+				0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
+				windowClassName.c_str(), // class name
+				windowTitle.c_str(), // window title
+				WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP, // child window that fills the parent panel
+				0, // initial horizontal position of the window
+				0, // initial vertical position of the window
+				windowWidth, // width
+				windowHeight, // height
+				parentHandle, // window parent (editor panel)
+				nullptr, // window child (none)
+				hInstance, // window instance handle
+				this // Set the GWLP_USERDATA to the Engine instance
+			);
+
+			// error if the window isn't made correctly
+			if (engineWindowHandle == nullptr || !&wc)
+			{
+				return false;
+			}
+
+			// Attach input queues so cross-process focus is allowed
+			DWORD parentThreadId = GetWindowThreadProcessId(parentHandle, nullptr);
+			DWORD myThreadId = GetCurrentThreadId();
+			AttachThreadInput(myThreadId, parentThreadId, TRUE);
+
+			// Also attach to the foreground window's thread (defensive; helps when focus is elsewhere)
+			HWND fg = GetForegroundWindow();
+			if (fg)
+			{
+				DWORD fgThreadId = GetWindowThreadProcessId(fg, nullptr);
+				if (fgThreadId && fgThreadId != myThreadId)
+				{
+					AttachThreadInput(myThreadId, fgThreadId, TRUE);
+				}
+			}
+
+			// bring to top and set focus (do NOT use SWP_NOACTIVATE here)
+			SetWindowPos(engineWindowHandle, HWND_TOP, 0, 0, windowWidth, windowHeight, 0);
+			SetFocus(engineWindowHandle);
+
+			minimized = false;
+			needResize = true; // trigger a first resize into renderer on Init()
+			return true;
+		}
+
+		// Create top-level window (normal standalone mode)
 		engineWindowHandle = CreateWindowEx(
 			0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
 			windowClassName.c_str(), // class name
@@ -149,6 +259,12 @@ namespace Engine
 			SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(enginePtr));
 		}
 
+		// Guard against early messages before GWLP_USERDATA is set
+		if (enginePtr == nullptr)
+		{
+			return DefWindowProc(hwnd, uMsg, wParam, lParam);
+		}
+
 		// Call the non-static member function for window procedure
 		return enginePtr->WindowProc(hwnd, uMsg, wParam, lParam);
 	}
@@ -161,6 +277,28 @@ namespace Engine
 				return true;
 		}
 		*/
+
+		// Handle WM_COPYDATA regardless of initialization state
+		if (uMsg == WM_COPYDATA)
+		{
+			auto cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+			if (cds && cds->lpData && cds->cbData >= 2) // at least 1 wchar + NUL
+			{
+				// Interpret payload as UTF-16 (wide). cbData is in bytes.
+				const wchar_t* wbuf = static_cast<const wchar_t*>(cds->lpData);
+				size_t wcharCount = static_cast<size_t>(cds->cbData / sizeof(wchar_t));
+
+				// Strip a trailing NUL if present
+				if (wcharCount > 0 && wbuf[wcharCount - 1] == L'\0')
+				{
+					--wcharCount;
+				}
+
+				std::wstring msg(wbuf, wcharCount);
+				OnEditorCommand(msg);
+			}
+			return 0;
+		}
 
 		// SwimEngine class + input manager must be initialized first to accept messages
 		if (this == nullptr || inputManager.get() == nullptr)
@@ -189,6 +327,52 @@ namespace Engine
 
 		switch (uMsg)
 		{
+			// Ensure we receive Tab/Arrows/Chars like a dialog wants
+			case WM_GETDLGCODE:
+			{
+				return DLGC_WANTALLKEYS | DLGC_WANTARROWS | DLGC_WANTCHARS | DLGC_WANTTAB;
+			}
+
+			// click to focus (for keyboard input)
+			case WM_LBUTTONDOWN:
+			case WM_RBUTTONDOWN:
+			case WM_MBUTTONDOWN:
+			case WM_XBUTTONDOWN:
+			{
+				SetFocus(hwnd);
+				// optional: SetCapture(hwnd); // useful for drags; uncomment if desired
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_LBUTTONUP:
+			case WM_RBUTTONUP:
+			case WM_MBUTTONUP:
+			case WM_XBUTTONUP:
+			{
+				// optional: if (GetCapture() == hwnd) ReleaseCapture();
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_MOUSEMOVE:
+			case WM_MOUSEWHEEL:
+			case WM_MOUSEHWHEEL:
+			{
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
+			case WM_KEYDOWN:
+			case WM_KEYUP:
+			case WM_SYSKEYDOWN:
+			case WM_SYSKEYUP:
+			case WM_CHAR:
+			{
+				inputManager->InputMessage(uMsg, wParam);
+				return 0;
+			}
+
 			// closed the window or process from a high user level
 			case WM_DESTROY:
 			{
@@ -252,6 +436,18 @@ namespace Engine
 				break;
 			}
 
+			case WM_SETFOCUS:
+			{
+				// Window gained focus
+				return 0;
+			}
+
+			case WM_KILLFOCUS:
+			{
+				// Window lost focus
+				return 0;
+			}
+
 			default:
 			{
 				// Otherwise pass any input to the input manager (we assume any other unhandled message is input)
@@ -262,15 +458,81 @@ namespace Engine
 		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
+	std::string WStringToUTF8(const std::wstring& ws)
+	{
+		if (ws.empty()) return std::string();
+
+		// Query length
+		int len = WideCharToMultiByte(
+			CP_UTF8, 0,
+			ws.data(), static_cast<int>(ws.size()),
+			nullptr, 0, nullptr, nullptr
+		);
+
+		if (len <= 0)
+		{
+			return std::string();
+		}
+
+		std::string out;
+		out.resize(static_cast<size_t>(len));
+
+		// Convert
+		int written = WideCharToMultiByte(
+			CP_UTF8, 0,
+			ws.data(), static_cast<int>(ws.size()),
+			out.data(), len, nullptr, nullptr
+		);
+
+		if (written != len)
+		{
+			// Shouldn't happen; truncate if it does
+			out.resize(static_cast<size_t>(std::max(0, written)));
+		}
+
+		return out;
+	}
+
+	void SwimEngine::OnEditorCommand(const std::wstring& msg)
+	{
+		const std::string msgUtf8 = WStringToUTF8(msg);
+
+		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
+		if (!ok)
+		{
+			// Unknown command:
+			SendEditorMessage(L"[Unknown Engine Command]: " + msg);
+		}
+	}
+
+	// Maybe make this take a regular string instead of wide, and then package as wide for WM_COPYDATA 
+	bool SwimEngine::SendEditorMessage(const std::wstring& msg, std::uintptr_t channel)
+	{
+		if (!parentHandle)
+		{
+			return false;
+		}
+
+		COPYDATASTRUCT cds{};
+		cds.dwData = static_cast<ULONG_PTR>(channel);
+		cds.cbData = static_cast<DWORD>((msg.size() + 1) * sizeof(wchar_t)); // include NUL
+		cds.lpData = (PVOID)msg.c_str();
+
+		// Per Win32 rules, WM_COPYDATA must be SendMessage (synchronous).
+		LRESULT handled = SendMessageW(parentHandle, WM_COPYDATA, reinterpret_cast<WPARAM>(engineWindowHandle), reinterpret_cast<LPARAM>(&cds));
+
+		return handled != 0;
+	}
+
 	Renderer& SwimEngine::GetRenderer()
 	{
 		if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
-			return *openglRenderer;   
+			return *openglRenderer;
 		}
 		else if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
-			return *vulkanRenderer;  
+			return *vulkanRenderer;
 		}
 	}
 
@@ -278,6 +540,7 @@ namespace Engine
 	{
 		// Add systems to the SystemManager
 		inputManager = systemManager->AddSystem<InputManager>("InputManager");
+		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
 		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
 
 		if constexpr (CONTEXT == RenderContext::Vulkan)
@@ -313,7 +576,81 @@ namespace Engine
 			return -1; // Error during system initialization
 		}
 
+		RegisterVanillaEngineCommands();
+
 		return 0;
+	}
+
+	// The editor process will call all these
+	void SwimEngine::RegisterVanillaEngineCommands()
+	{
+		// Capture a raw pointer (valid for engine lifetime) — no ref-captures to locals.
+		SwimEngine* self = this;
+
+		auto summarize = [](SwimEngine* e)
+		{
+			std::wstring s = L"[Engine] State ->";
+			if (HasAny(e->engineState, EngineState::Playing)) s += L" Playing";
+			if (HasAny(e->engineState, EngineState::Paused))  s += L" Paused";
+			if (HasAny(e->engineState, EngineState::Editing)) s += L" Editing";
+			if (HasAny(e->engineState, EngineState::Stopped)) s += L" Stopped";
+			if (!HasAny(e->engineState, EngineState::All))    s += L" None";
+			e->SendEditorMessage(s);
+		};
+
+		// play: ensure not Stopped, then set Playing
+		commandSystem->RegisterRaw("play", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Stopped;
+			self->engineState |= EngineState::Playing;
+			summarize(self);
+		});
+
+		// The flaw with pausing is our engine state will be (playing | paused)
+		// And behaviors will keep running since it is got the play mode flag, we need to somehow hack fix this.
+		// We don't want to drop the play mode flag, since we are paused while playing and we will resume to go back to playing.
+		// We hack fix this with a very specific flow in BehaviorComponents::CanExecute()
+		// pause: set Paused (don't touch other flags)
+		commandSystem->RegisterRaw("pause", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState |= EngineState::Paused;
+			summarize(self);
+		});
+
+		// resume: clear Paused only
+		commandSystem->RegisterRaw("resume", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Paused;
+			summarize(self);
+		});
+
+		// stop: set Stopped, clear Playing (C# handles resume/edit next)
+		commandSystem->RegisterRaw("stop", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Playing;
+			self->engineState |= EngineState::Stopped;
+			summarize(self);
+		});
+
+		// edit: set Editing
+		commandSystem->RegisterRaw("edit", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState |= EngineState::Editing;
+			summarize(self);
+		});
+
+		// game: clear Editing (doesn't force Playing)
+		commandSystem->RegisterRaw("game", [self, summarize](const std::vector<std::string>&)
+		{
+			self->engineState &= ~EngineState::Editing;
+			summarize(self);
+		});
+
+		// restart: stub (ignored for now)
+		commandSystem->RegisterRaw("restart", [self](const std::vector<std::string>&)
+		{
+			self->SendEditorMessage(L"[Engine] Restart requested (not implemented)");
+		});
 	}
 
 	int SwimEngine::Run()
@@ -404,6 +741,13 @@ namespace Engine
 		static int frameCounter = 0;
 		static double dfps = 0.0;
 
+		// If embedded into an external window (editor panel), we won't receive WM_SIZE here.
+		// So keep our cached size in sync each frame.
+		if (!ownsWindow && engineWindowHandle)
+		{
+			UpdateWindowSize();
+		}
+
 		// First sync any updates that happened to the window to the renderer (if not minimized or needing a resize)
 		if (!minimized && needResize)
 		{
@@ -430,12 +774,16 @@ namespace Engine
 			dfps = static_cast<double>(frameCounter) / timeAccumulator;
 			fps = static_cast<int>(dfps); // save class field
 
-			// Format new title: "Swim Engine [Vulkan] | 240 FPS"
-			std::wstring baseTitle = getDefaultWindowTitle(); // game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
-			std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
+			if (ownsWindow && engineWindowHandle)
+			{
+				// Format new title: "Swim Engine [Vulkan] | 240 FPS"
+				// Game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
+				std::wstring baseTitle = getDefaultWindowTitle();
+				std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
 
-			// Set the updated title
-			SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+				// Set the updated title
+				SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+			}
 
 			// Reset for the next second
 			timeAccumulator = 0.0;

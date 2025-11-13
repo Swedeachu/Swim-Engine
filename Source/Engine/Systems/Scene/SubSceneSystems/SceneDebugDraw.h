@@ -4,6 +4,7 @@
 #include "Library/glm/glm.hpp"
 #include "Engine/Utility/ColorConstants.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/Ray.h"
+#include "Engine/Components/ObjectTag.h"
 
 namespace Engine
 {
@@ -26,7 +27,51 @@ namespace Engine
 		SceneDebugDraw() = default;
 
 		void Init();
-		void Clear();
+
+		// will remove everything
+		void Clear()
+		{
+			immediateModeRegistry.clear();
+		}
+
+		// Any entities with a certain tag will not be destroyed
+		template <std::size_t N>
+		inline void ClearExceptTags(const std::array<int, N>& keep) noexcept
+		{
+			if constexpr (N == 0)
+			{
+				immediateModeRegistry.clear();
+				return;
+			}
+
+			auto& storage = immediateModeRegistry.storage<entt::entity>();
+
+			std::vector<entt::entity> toDestroy;
+			toDestroy.reserve(static_cast<std::size_t>(storage.size()));
+
+			for (auto e : storage)
+			{
+				bool keepIt = false;
+
+				if (const auto* tag = immediateModeRegistry.try_get<Engine::ObjectTag>(e))
+				{
+					keepIt = ContainsEval<N>(tag->tag, keep);
+				}
+
+				if (!keepIt)
+				{
+					toDestroy.push_back(e);
+				}
+			}
+
+			for (auto e : toDestroy)
+			{
+				if (immediateModeRegistry.valid(e))
+				{
+					immediateModeRegistry.destroy(e);
+				}
+			}
+		}
 
 		void SetEnabled(bool value) { enabled = value; }
 		const bool IsEnabled() const { return enabled; }
@@ -75,19 +120,32 @@ namespace Engine
 			const glm::vec3& color = glm::vec3(1.0f, 0.0f, 0.0f)
 		);
 
+		// This registry is strictly for immediate mode objects, everything here gets rendered the frame it is created then destroyed afterwards.
 		entt::registry& GetRegistry()
 		{
-			return debugRegistry;
+			return immediateModeRegistry;
 		}
 
 	private:
+
+		template <std::size_t N, std::size_t... I>
+		static constexpr bool ContainsEvalImpl(int v, const std::array<int, N>& a, std::index_sequence<I...>) noexcept
+		{
+			return ((v == a[I]) || ...);
+		}
+
+		template <std::size_t N>
+		static constexpr bool ContainsEval(int v, const std::array<int, N>& a) noexcept
+		{
+			return ContainsEvalImpl<N>(v, a, std::make_index_sequence<N>{});
+		}
 
 		std::shared_ptr<Mesh> CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName);
 
 		std::shared_ptr<MaterialData> GetMeshMaterialDataFromType(MeshBoxType type);
 
 		bool enabled{ false };
-		entt::registry debugRegistry;
+		entt::registry immediateModeRegistry;
 
 		std::shared_ptr<Mesh> sphereMesh;
 		std::shared_ptr<Mesh> cubeMesh;

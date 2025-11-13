@@ -21,24 +21,311 @@ namespace Engine
 		return registry.create();
 	}
 
-	void Scene::DestroyEntity(entt::entity entity, bool callExit)
+	void Scene::DestroyEntity(entt::entity entity, bool callExit, bool destroyChildren)
 	{
-		if (callExit)
+		if (!registry.valid(entity))
 		{
-			ForEachBehaviorOfEntity(entity, &Behavior::Exit);
+			return;
 		}
 
+		// If it has a Transform, handle children and unlink from parent
+		if (registry.any_of<Transform>(entity))
+		{
+			auto& tf = registry.get<Transform>(entity);
+
+			// Handle children
+			// Copy the list; it will be mutated
+			std::vector<entt::entity> kids = tf.children;
+
+			if (destroyChildren)
+			{
+				// Depth-first destroy of subtree
+				for (auto child : kids)
+				{
+					DestroyEntity(child, callExit, true);
+				}
+			}
+			else
+			{
+				// Detach children (null their parents)
+				for (auto child : kids)
+				{
+					if (!registry.valid(child) || !registry.any_of<Transform>(child))
+					{
+						continue;
+					}
+					auto& ctf = registry.get<Transform>(child);
+					// remove child from our list will happen after loop anyway
+					ctf.parent = entt::null;
+					ctf.MarkWorldDirtyOnly();
+				}
+
+				tf.children.clear();
+			}
+
+			// Unlink from our parent
+			if (tf.parent != entt::null && registry.valid(tf.parent) && registry.any_of<Transform>(tf.parent))
+			{
+				auto& ptf = registry.get<Transform>(tf.parent);
+				auto& vec = ptf.children;
+				vec.erase(std::remove(vec.begin(), vec.end(), entity), vec.end());
+			}
+
+			tf.parent = entt::null;
+		}
+
+		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
+		// Call Exit() on behaviors if needed
+		if (callExit && registry.any_of<BehaviorComponents>(entity))
+		{
+			auto& bc = registry.get<BehaviorComponents>(entity);
+			if (bc.CanExecute(state))
+			{
+				for (auto& b : bc.behaviors)
+				{
+					if (b) b->Exit();
+				}
+			}
+		}
+
+		// Finally destroy the entity itself
 		registry.destroy(entity);
 	}
 
 	void Scene::DestroyAllEntities(bool callExit)
 	{
-		if (callExit)
+		std::vector<entt::entity> toKill;
+
+		for (auto entity : registry.storage<entt::entity>())
 		{
-			ForEachBehavior(&Behavior::Exit);
+			toKill.push_back(entity);
 		}
 
-		registry.clear();
+		for (auto e : toKill)
+		{
+			if (!registry.valid(e))
+			{
+				continue;
+			}
+
+			bool hasTf = registry.any_of<Transform>(e);
+			bool hasParent = false;
+
+			if (hasTf)
+			{
+				hasParent = registry.get<Transform>(e).parent != entt::null;
+			}
+
+			if (!hasParent)
+			{
+				DestroyEntity(e, callExit, true);
+			}
+		}
+
+		for (auto e : toKill)
+		{
+			if (registry.valid(e))
+			{
+				DestroyEntity(e, callExit, true);
+			}
+		}
+	}
+
+	void Scene::SetParent(entt::entity child, entt::entity parent)
+	{
+		// Avoid self-parenting
+		if (child == parent)
+		{
+			return;
+		}
+
+		// Safety
+		if (!registry.valid(child) || !registry.any_of<Transform>(child))
+		{
+			return;
+		}
+
+		// Allow nulling by passing entt::null via RemoveParent instead.
+		if (!registry.valid(parent) || !registry.any_of<Transform>(parent))
+		{
+			return;
+		}
+
+		// Avoid cycles
+		if (WouldCreateCycle(registry, child, parent))
+		{
+			return;
+		}
+
+		auto& childTf = registry.get<Transform>(child);
+
+		// If already same parent, nothing to do
+		if (childTf.parent == parent)
+		{
+			return;
+		}
+
+		// Remove from old parent's children list
+		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
+		{
+			auto& oldParentTf = registry.get<Transform>(childTf.parent);
+			auto& vec = oldParentTf.children;
+			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
+		}
+
+		// Set new parent + register child
+		childTf.parent = parent;
+		auto& parentTf = registry.get<Transform>(parent);
+		parentTf.children.push_back(child);
+
+		// Invalidate child's world and all its descendants (lazy recompute on demand)
+		std::vector<entt::entity> stack;
+		stack.push_back(child);
+
+		while (!stack.empty())
+		{
+			entt::entity e = stack.back();
+			stack.pop_back();
+
+			if (!registry.valid(e) || !registry.any_of<Transform>(e))
+			{
+				continue;
+			}
+
+			auto& tf = registry.get<Transform>(e);
+			tf.MarkWorldDirtyOnly();
+
+			for (auto c : tf.children)
+			{
+				stack.push_back(c);
+			}
+		}
+	}
+
+	void Scene::RemoveParent(entt::entity child)
+	{
+		if (!registry.valid(child) || !registry.any_of<Transform>(child))
+		{
+			return;
+		}
+
+		auto& childTf = registry.get<Transform>(child);
+
+		// Remove from old parent's children list
+		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
+		{
+			auto& oldParentTf = registry.get<Transform>(childTf.parent);
+			auto& vec = oldParentTf.children;
+			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
+		}
+
+		// Clear parent
+		childTf.parent = entt::null;
+
+		// Invalidate subtree world matrices
+		std::vector<entt::entity> stack;
+		stack.push_back(child);
+
+		while (!stack.empty())
+		{
+			entt::entity e = stack.back();
+			stack.pop_back();
+
+			if (!registry.valid(e) || !registry.any_of<Transform>(e))
+			{
+				continue;
+			}
+
+			auto& tf = registry.get<Transform>(e);
+			tf.MarkWorldDirtyOnly();
+
+			for (auto c : tf.children)
+			{
+				stack.push_back(c);
+			}
+		}
+	}
+
+	std::vector<entt::entity>* Scene::GetChildren(entt::entity e)
+	{
+		if (registry.valid(e) && registry.any_of<Transform>(e))
+		{
+			Transform& tf = registry.get<Transform>(e);
+			return &tf.children;
+		}
+
+		return nullptr;
+	}
+
+	entt::entity Scene::GetParent(entt::entity e) const
+	{
+		if (registry.valid(e) && registry.any_of<Transform>(e))
+		{
+			const auto& tf = registry.get<Transform>(e);
+			return tf.parent;
+		}
+
+		return entt::null;
+	}
+
+	bool Scene::WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent)
+	{
+		// climb from newParent up to root; if we see child, that's a cycle
+		entt::entity cur = newParent;
+
+		while (cur != entt::null && reg.valid(cur) && reg.any_of<Transform>(cur))
+		{
+			if (cur == child)
+			{
+				return true;
+			}
+
+			const auto& tf = reg.get<Transform>(cur);
+
+			cur = tf.parent;
+		}
+
+		return false;
+	}
+
+	bool Scene::ShouldRenderBasedOnState(entt::entity e) const
+	{
+		const EngineState state = SwimEngine::GetInstance()->GetEngineState();
+
+		if (registry.any_of<BehaviorComponents>(e))
+		{
+			const BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
+			const bool editingOnly = ShouldRenderOnlyDuringEditingBasedOnState(e);
+
+			if (editingOnly)
+			{
+				// Bitflag-safe check (covers combined states like Editing|Paused)
+				return HasAny(state, EngineState::Editing);
+			}
+		}
+
+		// Otherwise most things will always render
+		return true;
+	}
+
+	bool Scene::ShouldRenderOnlyDuringEditingBasedOnState(entt::entity e) const
+	{
+		if (!registry.any_of<BehaviorComponents>(e))
+		{
+			return false;
+		}
+
+		const BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
+
+		// True only during editing: enabled in Editing, and NOT enabled in any other state.
+		const bool enabledEditing = bc.IsEnabledIn(EngineState::Editing);
+		const bool enabledElsewhere =
+			bc.IsEnabledIn(EngineState::Playing) ||
+			bc.IsEnabledIn(EngineState::Paused) ||
+			bc.IsEnabledIn(EngineState::Stopped);
+
+		return enabledEditing && !enabledElsewhere;
 	}
 
 	void Scene::SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system)
@@ -89,7 +376,13 @@ namespace Engine
 
 		sceneBVH->SetDebugDrawer(sceneDebugDraw.get());
 
-		ForEachBehavior(&Behavior::Init); // we might not want to do this actually and let behaviors do this themselves
+		gizmoSystem = std::make_unique<GizmoSystem>();
+		std::shared_ptr<Scene> self = shared_from_this();
+		gizmoSystem->SetScene(self);
+		gizmoSystem->Awake();
+		gizmoSystem->Init();
+
+		ForEachBehavior(&Behavior::InitIfNeeded); // we might not want to do this actually and let behaviors do this themselves
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)
@@ -104,7 +397,13 @@ namespace Engine
 	// It might make sense to have sub scene systems be in a data structure that iterates with update inside of here and init and update etc.
 	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
+		if (gizmoSystem)
+		{
+			gizmoSystem->FixedUpdate(tickThisSecond);
+		}
+
 		// Call fixed update on all our behaviors
+		ForEachBehavior(&Behavior::InitIfNeeded);
 		ForEachBehavior(&Behavior::FixedUpdate, tickThisSecond);
 
 		// Add new frustum cache components if needed
@@ -143,14 +442,38 @@ namespace Engine
 	{
 		// Clear the previous frames debug draw data. 
 		// This opens up an opportunity for caching commonly drawn wireframes.
-		sceneDebugDraw->Clear();
+
+		// We want to keep editor mode objects such as retained gizmos, trash everything else that is immediate mode from the previous frame
+		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT }; // TODO: we might want to use a better tag like immediate mode object
+		sceneDebugDraw->ClearExceptTags(keep);
+
+		// If we started in editing mode we can do extra stuff
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			if (StateTestControl())
+			{
+				return;
+			}
+		}
 
 		EntityFactory& entityFactory = EntityFactory::GetInstance();
 		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
 
-		// Call Update(dt) on all Behavior components
+		// Ensure BVH is coherent for this frame if any entity was removed/added or forced.
+		if (sceneBVH && sceneBVH->ShouldForceUpdate())
+		{
+			sceneBVH->Update();
+		}
+
+		// Call Update(dt) on all Behavior components.
+		ForEachBehavior(&Behavior::InitIfNeeded);
 		ForEachBehavior(&Behavior::Update, dt);
 		UpdateUIBehaviors();
+
+		if (gizmoSystem)
+		{
+			gizmoSystem->Update(dt);
+		}
 
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
@@ -172,60 +495,46 @@ namespace Engine
 	// Dispatches OnMouseEnter / Exit / Hover / Click events
 	void Scene::UpdateUIBehaviors()
 	{
+		mouseBusyWithUI = false; // reset mouse pointer UI focus status for this frame
+
 		// 1. Get raw mouse position in window pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseWin = inputMgr->GetMousePosition(); // (0,0) = window TL
+		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
 
-		// 2. Convert that to virtual canvas units (same space as Transform)
-		auto engine = Engine::SwimEngine::GetInstance();
+		// 2. Iterate over UI entities and run hit-testing in the same space
+		entt::registry& registry = GetRegistry();
 
-		float windowW = static_cast<float>(engine->GetWindowWidth());
-		float windowH = static_cast<float>(engine->GetWindowHeight());
-
-		constexpr float virtW = Engine::Renderer::VirtualCanvasWidth;
-		constexpr float virtH = Engine::Renderer::VirtualCanvasHeight;
-
-		float scaleX = windowW / virtW;
-		float scaleY = windowH / virtH;
-
-		// window top border hack fix
-		float offset = 14; // was 28
-		if (scaleY > 0.9f)
-		{
-			offset = 0.f;
-		}
-
-		glm::vec2 mouseVirt;
-		mouseVirt.x = mouseWin.x / scaleX; // undo X scale
-		mouseVirt.y = mouseWin.y / scaleY; // undo Y scale
-		mouseVirt.y = virtH - mouseVirt.y - offset; // flip origin TL -> BL
-
-		// 3. Iterate over UI entities and run hit-testing in the same space
-		auto& registry = GetRegistry();
+		// We want the engine state for filtering which behaviors should have callbacks ran on them
+		EngineState state = SwimEngine::GetInstance()->GetEngineState();
 
 		registry.view<Transform, Material, BehaviorComponents>().each(
 			[&](entt::entity entity,
 			Transform& transform,
 			Material&, BehaviorComponents& bc)
 		{
-			if (transform.GetTransformSpace() != TransformSpace::Screen)
+			if (transform.GetTransformSpace() != TransformSpace::Screen || !bc.CanExecute(state))
 			{
-				return; // ignore world-space stuff here
+				return; // ignore world-space or non active stuff here
 			}
 
-			// Position / size are already in virtual-canvas units
-			glm::vec3 pos = transform.GetPosition(); // center of quad
-			glm::vec3 size = transform.GetScale(); // full width / height
+			// World position (center of quad in virtual-canvas units)
+			glm::vec3 pos = transform.GetWorldPosition(registry); // xyz from translation column
 
-			glm::vec2 halfSize{ size.x * 0.5f, size.y * 0.5f };
+			// World scale = lengths of basis vectors (handles non-uniform scale).
+			// For UI AABB we only care about X/Y; sign doesn't matter for extents.
+			glm::vec3 scl = transform.GetWorldScale(registry);
+
+			// Position / size are now in world (screen) virtual-canvas units
+			glm::vec2 halfSize{ 0.5f * std::abs(scl.x), 0.5f * std::abs(scl.y) };
 
 			glm::vec2 minRect{ pos.x - halfSize.x, pos.y - halfSize.y };
 			glm::vec2 maxRect{ pos.x + halfSize.x, pos.y + halfSize.y };
 
-			bool inside = (mouseVirt.x >= minRect.x && mouseVirt.x <= maxRect.x && mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
+			bool inside = (mouseVirt.x >= minRect.x && mouseVirt.x <= maxRect.x
+				&& mouseVirt.y >= minRect.y && mouseVirt.y <= maxRect.y);
 
-			// 4. Let each attached behaviour react
-			for (auto& behavior : bc.behaviors)
+			// 3. Let each attached behaviour react
+			for (std::unique_ptr<Behavior>& behavior : bc.behaviors)
 			{
 				if (!behavior || !behavior->RunMouseCallBacks())
 				{
@@ -234,18 +543,20 @@ namespace Engine
 
 				bool wasFocused = behavior->FocusedByMouse();
 
-				if (inside && !wasFocused)
+				if (inside && !wasFocused) // mouse first enter
 				{
+					mouseBusyWithUI = true;
 					behavior->SetFocusedByMouse(true);
 					behavior->OnMouseEnter();
 				}
-				else if (!inside && wasFocused)
+				else if (!inside && wasFocused) // mouse exit
 				{
 					behavior->SetFocusedByMouse(false);
 					behavior->OnMouseExit();
 				}
-				else if (inside) // hover
+				else if (inside) // mouse hover + possible focused input interactions from mouse clicking
 				{
+					mouseBusyWithUI = true;
 					behavior->OnMouseHover();
 
 					if (inputMgr->IsKeyDown(VK_LBUTTON)) { behavior->OnLeftClickDown(); }
@@ -261,12 +572,165 @@ namespace Engine
 		});
 	}
 
-	// Point is in screen pixels, (0,0) = top-left. Need to investigate if the position is off by a tiny bit.
+	// Returns if we changed state
+	bool Scene::StateTestControl()
+	{
+		auto engine = SwimEngine::GetInstance();
+		auto input = GetInputManager();
+		if (!engine || !input)
+		{
+			return false;
+		}
+
+		auto send = [&](const wchar_t* w) { engine->OnEditorCommand(w); };
+		auto state = engine->GetEngineState();
+
+		// Must be holding shift to do these hotkeys
+		bool shifting = input->IsKeyDown(VK_SHIFT);
+		if (!shifting) return false;
+
+		bool handled = false;
+
+		// Toggle Play / Stop (L)
+		if (!handled && input->IsKeyTriggered('L'))
+		{
+			const bool playing = HasAny(state, EngineState::Playing);
+			if (playing)
+			{
+				// GoIntoStoppedMode()
+				send(L"stop");
+				send(L"resume");
+				send(L"edit");
+			}
+			else
+			{
+				// GoIntoPlayMode()
+				send(L"resume");
+				send(L"game");
+				send(L"play");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('P')) // Toggle Pause / Resume (P)
+		{
+			if (HasAny(state, EngineState::Paused))
+			{
+				send(L"resume");
+			}
+			else
+			{
+				send(L"pause");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('E')) // Toggle Edit / Game (E)
+		{
+			if (HasAny(state, EngineState::Editing))
+			{
+				send(L"game");
+			}
+			else
+			{
+				send(L"edit");
+			}
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('O')) // Hard Stop (O)
+		{
+			send(L"stop");
+			send(L"resume");
+			send(L"edit");
+			handled = true;
+		}
+		else if (!handled && input->IsKeyTriggered('R')) // Restart stub (R)
+		{
+			send(L"restart");
+			handled = true;
+		}
+
+		return handled;
+	}
+
+	bool Scene::IsTopFocusedElement(entt::entity target)
+	{
+		std::shared_ptr<InputManager> inputMgr = GetInputManager();
+		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
+		return IsTopMostUiAtScreenPoint(target, mouseVirt);
+	}
+
+	// This can get very expensive to call
+	bool Scene::IsTopMostUiAtScreenPoint(entt::entity target, const glm::vec2& point)
+	{
+		entt::registry& registry = GetRegistry();
+
+		// Basic validity checks
+		if (!registry.valid(target) || !registry.any_of<Transform>(target))
+		{
+			return false;
+		}
+
+		const Transform& myTf = registry.get<Transform>(target);
+		if (myTf.GetTransformSpace() != TransformSpace::Screen)
+		{
+			return false;
+		}
+
+		// Target AABB (same convention as UpdateUIBehaviors)
+		const glm::vec3 myPos = myTf.GetWorldPosition(registry);
+		const glm::vec3 myScale = myTf.GetWorldScale(registry);
+		const glm::vec2 myHalf{ 0.5f * std::abs(myScale.x), 0.5f * std::abs(myScale.y) };
+
+		const glm::vec2 myMin{ myPos.x - myHalf.x, myPos.y - myHalf.y };
+		const glm::vec2 myMax{ myPos.x + myHalf.x, myPos.y + myHalf.y };
+
+		// If the target doesn't actually cover the point, it's not top-most UI at that point, nor is any UI
+		if (!(point.x >= myMin.x && point.x <= myMax.x && point.y >= myMin.y && point.y <= myMax.y))
+		{
+			return false;
+		}
+
+		// const float myZ = myTf.GetPosition().z; // local Z 
+		const float myZ = myTf.readableLayer; // we use the readable layer that is agnostic of render pipeline for layering
+
+		bool coveredByFront = false;
+
+		// Iterate all screen-space transforms and see if any overlapping AABB is in front of the target
+		registry.view<Transform>().each([&](entt::entity e, Transform& tf)
+		{
+			if (coveredByFront) { return; } // early-out if already found something in front
+			if (e == target) { return; }    // skip self
+			if (tf.GetTransformSpace() != TransformSpace::Screen) { return; }
+
+			const glm::vec3 pos = tf.GetWorldPosition(registry);
+			const glm::vec3 scale = tf.GetWorldScale(registry);
+
+			const glm::vec2 half{ 0.5f * std::abs(scale.x), 0.5f * std::abs(scale.y) };
+			const glm::vec2 minRect{ pos.x - half.x, pos.y - half.y };
+			const glm::vec2 maxRect{ pos.x + half.x, pos.y + half.y };
+
+			const bool inside = (point.x >= minRect.x && point.x <= maxRect.x &&
+				point.y >= minRect.y && point.y <= maxRect.y);
+
+			if (!inside) { return; }
+
+			// Compare with local Z for direct Z layer, our render contexts do screen space NDC's differently in Z layering
+			// We instead fix this with the Transform::readableLayer float field
+
+			if (tf.readableLayer <= myZ)
+			{
+				coveredByFront = true;
+				return;
+			}
+		});
+
+		return !coveredByFront;
+	}
+
+	// Point is in screen pixels, (0,0) = top-left.
 	Ray Scene::ScreenPointToRay(const glm::vec2& point) const
 	{
 		Camera& cam = GetCameraSystem()->GetCamera();
 
-		// Use your actual render viewport if it differs from the window size.
 		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
 		const float width = static_cast<float>(engine->GetWindowWidth());
 		const float height = static_cast<float>(engine->GetWindowHeight());
@@ -294,6 +758,68 @@ namespace Engine
 		const glm::vec3 dir = glm::normalize(q * dirVS);
 
 		return Ray(origin, dir);
+	}
+
+	void Scene::SetEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.SetEnabledStates(states);
+		}
+	}
+
+	void Scene::AddEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.AddEnabledStates(states);
+		}
+	}
+
+	void Scene::RemoveEnabledStates(entt::entity entity, EngineState states)
+	{
+		if (registry.valid(entity))
+		{
+			BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+			bc.RemoveEnabledStates(states);
+		}
+	}
+
+	ObjectTag* Scene::GetTag(entt::entity entity)
+	{
+		if (registry.valid(entity) && registry.any_of<ObjectTag>(entity))
+		{
+			return &registry.get<ObjectTag>(entity);
+		}
+
+		return nullptr;
+	}
+
+	void Scene::SetTag(entt::entity entity, int tag, const std::string& name)
+	{
+		if (registry.valid(entity))
+		{
+			if (registry.any_of<ObjectTag>(entity))
+			{
+				auto& t = registry.get<ObjectTag>(entity);
+				t.tag = tag;
+				t.name = name;
+			}
+			else
+			{
+				registry.emplace<ObjectTag>(entity, tag, name);
+			}
+		}
+	}
+
+	void Scene::RemoveTag(entt::entity entity)
+	{
+		if (registry.valid(entity) && registry.any_of<ObjectTag>(entity))
+		{
+			registry.remove<ObjectTag>(entity);
+		}
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

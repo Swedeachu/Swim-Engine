@@ -16,7 +16,7 @@ namespace Game
 		// bool leftDown = input->IsKeyDown(VK_LBUTTON);
 		// bool rightDown = input->IsKeyDown(VK_RBUTTON);
 
-		glm::vec2 mousePos = input->GetMousePosition();
+		glm::vec2 mousePos = input->GetMousePosition(false);
 		Engine::Ray ray = scene->ScreenPointToRay(mousePos);
 
 		// Left click to try and click an object in the scene

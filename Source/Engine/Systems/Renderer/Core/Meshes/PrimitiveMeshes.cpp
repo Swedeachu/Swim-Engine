@@ -133,9 +133,9 @@ namespace Engine
 		for (int face = 0; face < 6; ++face)
 		{
 			glm::vec3 color = glm::vec3(
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f),
-				Engine::randFloat(0.2f, 1.0f)
+				Engine::RandFloat(0.2f, 1.0f),
+				Engine::RandFloat(0.2f, 1.0f),
+				Engine::RandFloat(0.2f, 1.0f)
 			);
 
 			for (int i = 0; i < 4; ++i)
@@ -246,7 +246,45 @@ namespace Engine
 		return { vertices, indices };
 	}
 
-	VertexesIndexesPair GenerateCircleMesh
+	VertexesIndexesPair MakeQuad
+	(
+		uint32_t tilesX,
+		uint32_t tilesY,
+		uint32_t tileIndexX,
+		uint32_t tileIndexY,
+		glm::vec3 color1,
+		glm::vec3 color2,
+		glm::vec3 color3,
+		glm::vec3 color4
+	)
+	{
+		tilesX = std::max(1u, tilesX);
+		tilesY = std::max(1u, tilesY);
+
+		// Compute UV range for this tile
+		const float uStep = 1.0f / static_cast<float>(tilesX);
+		const float vStep = 1.0f / static_cast<float>(tilesY);
+
+		const float u0 = uStep * static_cast<float>(tileIndexX);
+		const float v0 = vStep * static_cast<float>(tileIndexY);
+		const float u1 = u0 + uStep;
+		const float v1 = v0 + vStep;
+
+		// Define vertices and indices for a colored quad mesh
+		std::vector<Engine::Vertex> quadVertices = {
+			//   position           color     uv
+			{{-0.5f, -0.5f, 0.0f}, color1, {u0, v1}},  // bottom-left
+			{{ 0.5f, -0.5f, 0.0f}, color2, {u1, v1}},  // bottom-right
+			{{ 0.5f,  0.5f, 0.0f}, color3, {u1, v0}},  // top-right
+			{{-0.5f,  0.5f, 0.0f}, color4, {u0, v0}}   // top-left
+		};
+
+		std::vector<uint32_t> quadIndices = { 0, 1, 2, 2, 3, 0 };
+
+		return { quadVertices, quadIndices };
+	}
+
+	VertexesIndexesPair MakeCircle
 	(
 		float radius,
 		uint32_t segmentCount,
@@ -535,5 +573,215 @@ namespace Engine
 
 		return { vertices, indices };
 	}
+
+	VertexesIndexesPair MakeTorusPercent
+	(
+		float outerRadius,
+		float thickness,
+		uint32_t majorSegments,
+		uint32_t minorSegments,
+		const glm::vec3& color,
+		float percent
+	)
+	{
+		// Clamp percent to [0, 1]
+		if (percent <= 0.0f)
+		{
+			return {}; // empty
+		}
+
+		if (percent >= 1.0f)
+		{
+			// Just build a full torus using the original function
+			return MakeTorus(outerRadius, thickness, majorSegments, minorSegments, color);
+		}
+
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+
+		float R = outerRadius;
+		float r = thickness;
+
+		// How many segments along the major ring we actually use
+		// Keep at least 1 so we don't divide by zero.
+		uint32_t actualMajorSegments = static_cast<uint32_t>(std::round(static_cast<float>(majorSegments) * percent));
+
+		if (actualMajorSegments < 1)
+		{
+			actualMajorSegments = 1;
+		}
+
+		float maxAngle = TWO_PI * percent;
+
+		// Generate vertices for [0, maxAngle]
+		for (uint32_t i = 0; i <= actualMajorSegments; ++i)
+		{
+			float t = static_cast<float>(i) / static_cast<float>(actualMajorSegments);
+			float u = t * maxAngle;  // angle around major circle
+
+			float cu = cosf(u);
+			float su = sinf(u);
+
+			for (uint32_t j = 0; j <= minorSegments; ++j)
+			{
+				float v = (float)j / (float)minorSegments * TWO_PI; // minor angle
+				float cv = cosf(v);
+				float sv = sinf(v);
+
+				glm::vec3 pos{
+						(R + r * cv) * cu,
+						r * sv,
+						(R + r * cv) * su
+				};
+
+				// U goes 0..1 over the visible portion
+				float uCoord = t;
+				float vCoord = (float)j / (float)minorSegments;
+
+				PushVertex(vertices, pos, color, { uCoord, vCoord });
+			}
+		}
+
+		// Build indices without wrapping around the full circle
+		for (uint32_t i = 0; i < actualMajorSegments; ++i)
+		{
+			for (uint32_t j = 0; j < minorSegments; ++j)
+			{
+				uint32_t rowStride = minorSegments + 1;
+
+				uint32_t i0 = i * rowStride + j;
+				uint32_t i1 = i * rowStride + (j + 1);
+				uint32_t i2 = (i + 1) * rowStride + (j + 1);
+				uint32_t i3 = (i + 1) * rowStride + j;
+
+				indices.push_back(i0);
+				indices.push_back(i1);
+				indices.push_back(i2);
+
+				indices.push_back(i2);
+				indices.push_back(i3);
+				indices.push_back(i0);
+			}
+		}
+
+		return { vertices, indices };
+	}
+
+	VertexesIndexesPair MakeArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float headRadius,
+		float headLength,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	)
+	{
+		// Safety clamps
+		segmentCount = std::max<uint32_t>(3, segmentCount);
+		shaftRadius = std::max(shaftRadius, 0.0001f);
+		headRadius = std::max(headRadius, 0.0001f);
+		shaftLength = std::max(shaftLength, 0.0001f);
+		headLength = std::max(headLength, 0.0001f);
+
+		// 1) Build centered shaft ([-L/2, +L/2] in Y), then translate it up by +L/2 so it spans [0, L]
+		auto shaft = MakeCylinder(shaftRadius, shaftLength, segmentCount, color);
+		{
+			const float yOff = shaftLength * 0.5f;
+			for (auto& v : shaft.vertices) { v.position.y += yOff; }
+		}
+
+		// 2) Build centered head (base at -H/2, tip at +H/2), then translate it so base is at y=shaftLength.
+		// After translation: base => shaftLength, tip => shaftLength + headLength
+		auto head = MakeCone(headRadius, headLength, segmentCount, color);
+		{
+			const float yOff = shaftLength + headLength * 0.5f;
+			for (auto& v : head.vertices) { v.position.y += yOff; }
+		}
+
+		// 3) Merge (append head onto shaft)
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+		vertices.reserve(shaft.vertices.size() + head.vertices.size());
+		indices.reserve(shaft.indices.size() + head.vertices.size());
+
+		// Shaft
+		vertices.insert(vertices.end(), shaft.vertices.begin(), shaft.vertices.end());
+		indices.insert(indices.end(), shaft.indices.begin(), shaft.indices.end());
+
+		// Head (indices offset)
+		const uint32_t baseIndex = static_cast<uint32_t>(shaft.vertices.size());
+		for (auto idx : head.indices) { indices.push_back(baseIndex + idx); }
+		vertices.insert(vertices.end(), head.vertices.begin(), head.vertices.end());
+
+		return { vertices, indices };
+	}
+
+	VertexesIndexesPair MakeBallArrow
+	(
+		float shaftRadius,
+		float shaftLength,
+		float ballRadius,
+		uint32_t segmentCount,
+		const glm::vec3& color
+	)
+	{
+		// Safety clamps
+		segmentCount = std::max<uint32_t>(3, segmentCount);
+		shaftRadius = std::max(shaftRadius, 0.0001f);
+		ballRadius = std::max(ballRadius, 0.0001f);
+		shaftLength = std::max(shaftLength, 0.0001f);
+
+		// 1) Shaft: build centered cylinder ([-L/2, +L/2] in Y), then translate up by +L/2 -> spans [0, L]
+		auto shaft = MakeCylinder(shaftRadius, shaftLength, segmentCount, color);
+		{
+			const float yOff = shaftLength * 0.5f;
+			for (auto& v : shaft.vertices)
+				v.position.y += yOff;
+		}
+
+		// 2) Ball: build a unit sphere (your MakeSphere makes radius = 0.5), then:
+		//    - Uniformly scale to desired ballRadius (scale factor = ballRadius / 0.5 = ballRadius * 2)
+		//    - Translate so its south pole touches the shaft top:
+		//         center.y = shaftLength + ballRadius
+		auto ball = MakeSphere(
+			static_cast<int>(segmentCount),  // latitudeSegments
+			static_cast<int>(segmentCount),  // longitudeSegments
+			color, color, color              // uniform color across the sphere
+		);
+
+		{
+			const float scale = ballRadius * 2.0f;       // because MakeSphere outputs radius 0.5
+			const float yOff = shaftLength + ballRadius; // place center so bottom touches y = shaftLength
+			for (auto& v : ball.vertices)
+			{
+				v.position *= scale; // scale from 0.5 to ballRadius
+				v.position.y += yOff; // move above the shaft
+			}
+		}
+
+		// 3) Merge (append ball onto shaft)
+		std::vector<Engine::Vertex> vertices;
+		std::vector<uint32_t> indices;
+		vertices.reserve(shaft.vertices.size() + ball.vertices.size());
+		indices.reserve(shaft.indices.size() + ball.indices.size());
+
+		// Shaft
+		vertices.insert(vertices.end(), shaft.vertices.begin(), shaft.vertices.end());
+		indices.insert(indices.end(), shaft.indices.begin(), shaft.indices.end());
+
+		// Ball (indices offset)
+		const uint32_t baseIndex = static_cast<uint32_t>(shaft.vertices.size());
+
+		for (auto idx : ball.indices)
+		{
+			indices.push_back(baseIndex + idx);
+		}
+
+		vertices.insert(vertices.end(), ball.vertices.begin(), ball.vertices.end());
+
+		return { vertices, indices };
+	}
+
 
 }

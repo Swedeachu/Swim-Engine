@@ -198,7 +198,7 @@ namespace Engine
 			WGL_DEPTH_BITS_ARB, 24,
 			WGL_STENCIL_BITS_ARB, 8,
 			WGL_SAMPLE_BUFFERS_ARB, 1,   // Enable MSAA
-			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA
+			WGL_SAMPLES_ARB, 4,          // Request 4x MSAA (in vulkan we do this better and use what the gpu says it can use)
 			0
 		};
 
@@ -292,6 +292,7 @@ namespace Engine
 		loc_dec_useTexture = glGetUniformLocation(decoratorShader, "useTexture");
 		loc_dec_albedoTex = glGetUniformLocation(decoratorShader, "albedoTex");
 		loc_dec_isWorldSpace = glGetUniformLocation(decoratorShader, "isWorldSpace");
+		loc_dec_renderOnTop = glGetUniformLocation(decoratorShader, "renderOnTop");
 
 		// --- 5) Load default texture ---
 		TexturePool& pool = TexturePool::GetInstance();
@@ -564,7 +565,7 @@ namespace Engine
 			cameraUBO.screenProj = glm::ortho(
 				0.0f, VirtualCanvasWidth,
 				0.0f, VirtualCanvasHeight,
-				-1.0f, 1.0f
+				1.0f, -1.0f
 			);
 
 			hasUploadedOrtho = true;
@@ -588,6 +589,12 @@ namespace Engine
 
 		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const Transform& tf = registry.get<Transform>(entity);
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
@@ -607,7 +614,7 @@ namespace Engine
 	void OpenGLRenderer::DrawEntity(entt::entity entity, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
 		const Transform& transform = registry.get<Transform>(entity);
-		const glm::mat4& model = transform.GetModelMatrix();
+		const glm::mat4& model = transform.GetWorldMatrix(registry);
 		const glm::mat4 mvp = projectionMatrix * viewMatrix * model;
 
 		// === CompositeMaterial handling ===
@@ -684,8 +691,16 @@ namespace Engine
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
 				return;
@@ -700,11 +715,17 @@ namespace Engine
 		});
 
 		// Render screen-space UI last (no depth test)
-		glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
+		// glDisable(GL_DEPTH_TEST);
+		// glDepthMask(GL_FALSE);
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			if (tf.GetTransformSpace() != TransformSpace::Screen)
 			{
 				return;
@@ -738,7 +759,7 @@ namespace Engine
 		TransformSpace space = tf.GetTransformSpace();
 		const glm::vec3& pos = tf.GetPosition();
 		const glm::vec3& scale = tf.GetScale();
-		const glm::mat4& model = tf.GetModelMatrix();
+		const glm::mat4& model = tf.GetWorldMatrix(registry);
 
 		bool isWorld = (space == TransformSpace::World);
 
@@ -754,13 +775,19 @@ namespace Engine
 			}
 			else
 			{
+				// Extract translation (position) directly from the last column
+				const glm::vec3 worldPos = tf.GetWorldPosition(registry);
+
+				// Extract per-axis scale as lengths of the basis columns
+				const glm::vec3 worldScale = tf.GetWorldScale(registry);
+
 				glm::vec2 screenScale = glm::vec2(
 					static_cast<float>(windowWidth) / VirtualCanvasWidth,
 					static_cast<float>(windowHeight) / VirtualCanvasHeight
 				);
 
-				glm::vec2 halfSize = glm::vec2(scale) * 0.5f;
-				glm::vec2 center = glm::vec2(pos) * screenScale;
+				glm::vec2 halfSize = glm::vec2(worldScale) * 0.5f;
+				glm::vec2 center = glm::vec2(worldPos) * screenScale;
 				glm::vec2 halfSizePx = halfSize * screenScale;
 				glm::vec2 minPx = center - halfSizePx;
 				glm::vec2 maxPx = center + halfSizePx;
@@ -833,6 +860,7 @@ namespace Engine
 			glUniform1i(loc_dec_enableFill, deco.enableFill ? 1 : 0);
 			glUniform1i(loc_dec_roundCorners, deco.roundCorners ? 1 : 0);
 			glUniform1i(loc_dec_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			glUniform1i(loc_dec_renderOnTop, deco.renderOnTop);
 		}
 		else
 		{
@@ -844,6 +872,7 @@ namespace Engine
 			glUniform2fv(loc_dec_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform2fv(loc_dec_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform4f(loc_dec_strokeColor, 0, 0, 0, 1);
+			glUniform1i(loc_dec_renderOnTop, 0); // false
 		}
 
 		GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
@@ -889,14 +918,22 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != TransformSpace::World) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
 
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const FontInfo& fi = *tc.GetFont();
-			MsdfTextGpuInstanceData s = BuildMsdfStateWorld(tf, tc, fi, 0);
+			MsdfTextGpuInstanceData s = BuildMsdfStateWorld(registry, tf, tc, fi, 0);
 
 			std::vector<TextVertex> V;
 			std::vector<uint32_t> I;
@@ -960,14 +997,22 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
+		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+
 		registry.view<Transform, TextComponent>().each(
-			[&](entt::entity, Transform& tf, TextComponent& tc)
+			[&](entt::entity entity, Transform& tf, TextComponent& tc)
 		{
 			if (tf.GetTransformSpace() != TransformSpace::Screen) return;
 			if (!tc.GetFont() || !tc.GetFont()->msdfAtlas) return;
 
+			// Skip what should not be rendered
+			if (!scene->ShouldRenderBasedOnState(entity))
+			{
+				return;
+			}
+
 			const FontInfo& fi = *tc.GetFont();
-			MsdfTextGpuInstanceData s = BuildMsdfStateScreen(tf, tc, fi,
+			MsdfTextGpuInstanceData s = BuildMsdfStateScreen(registry, tf, tc, fi,
 				windowWidth, windowHeight, VirtualCanvasWidth, VirtualCanvasHeight, 0);
 
 			std::vector<TextVertex> V;

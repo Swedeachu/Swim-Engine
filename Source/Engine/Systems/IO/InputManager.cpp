@@ -45,8 +45,11 @@ namespace Engine
 			keyState[i].second.first = deferredState[i].second.first;
 		}
 
-		// If we aren't the active window then we don't have any keys set to true
-		if (GetActiveWindow() != windowHandle)
+		// Correct focus check for an embedded child window:
+		HWND focus = GetFocus(); // returns the window that has the KB focus in *this* thread
+		bool hasFocus = (focus == windowHandle) || (focus && IsChild(windowHandle, focus));
+
+		if (!hasFocus)
 		{
 			for (auto& key : keyState)
 			{
@@ -54,18 +57,14 @@ namespace Engine
 			}
 		}
 
-		// Update the mouse position
+		// Mouse position stays the same
 		POINT mousePoint;
 		GetCursorPos(&mousePoint);
 		ScreenToClient(windowHandle, &mousePoint);
 
-		// Save mouse delta
 		mouseDelta = { mousePoint.x - mousePos.x, mousePoint.y - mousePos.y };
-
-		// Update mouse position 
 		mousePos = { static_cast<float>(mousePoint.x), static_cast<float>(mousePoint.y) };
 
-		// Reset mouse wheel delta
 		mouseWheelDelta = 0;
 	}
 
@@ -200,6 +199,38 @@ namespace Engine
 			return !keyState[key].second.first && keyState[key].second.second;
 		}
 		return false;
+	}
+
+	glm::vec2 InputManager::GetMousePosition(bool adjustForTitleBar, int amount) const
+	{
+		if (!adjustForTitleBar || amount == 0)
+		{
+			return mousePos;
+		}
+
+		auto engine = Engine::SwimEngine::GetInstance();
+
+		float windowW = static_cast<float>(engine->GetWindowWidth());
+		float windowH = static_cast<float>(engine->GetWindowHeight());
+
+		constexpr float virtW = Engine::Renderer::VirtualCanvasWidth;
+		constexpr float virtH = Engine::Renderer::VirtualCanvasHeight;
+
+		float scaleX = windowW / virtW;
+		float scaleY = windowH / virtH;
+
+		// window top border hack fix (this might differ based on screen resolution)
+		if (scaleY > 0.9f)
+		{
+			amount = 0.f;
+		}
+
+		glm::vec2 mouseVirt;
+		mouseVirt.x = mousePos.x / scaleX; // undo X scale
+		mouseVirt.y = mousePos.y / scaleY; // undo Y scale
+		mouseVirt.y = virtH - mouseVirt.y - amount; // flip origin TL -> BL
+
+		return mouseVirt;
 	}
 
 }

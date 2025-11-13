@@ -41,11 +41,11 @@ namespace Engine
 
 	void EntityFactory::CreateWithTransformAndMaterial(const Transform& transform, const Material& material)
 	{
-		QueueCreate([transform, material](entt::registry& reg, entt::entity e)
-		{
-			reg.emplace<Transform>(e, transform);
-			reg.emplace<Material>(e, material);
-		});
+		// Delegate to the templated overload with a no-op callback
+		CreateWithTransformAndMaterial(
+			transform, material,
+			[](entt::entity, Transform&, Material&) {}
+		);
 	}
 
 	// This destorys an entity and calls exits on all its behaviors and children, freeing them entirely from the registry and memory
@@ -53,7 +53,6 @@ namespace Engine
 	{
 		QueueDestroy([](entt::entity e)
 		{
-			// Potential problems: entity is not in the active scene
 			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 			if (scene)
 			{

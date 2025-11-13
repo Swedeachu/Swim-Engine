@@ -26,6 +26,8 @@ namespace Engine
 		void QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
 		void RemoveEntity(entt::entity entity);
 
+		bool ShouldForceUpdate() const { return forceUpdate; }
+
 		void SetDebugDrawer(SceneDebugDraw* drawer)
 		{
 			debugDrawer = drawer;
@@ -166,6 +168,12 @@ namespace Engine
 		template<typename Func>
 		void TraverseFrustumCallback(int nodeIdx, const Frustum& frustum, Func&& callback) const
 		{
+			if (nodeIdx >= nodes.size())
+			{
+				std::cout << "Node index does not exist in BVH: " << std::to_string(nodeIdx) << std::endl;
+				return;
+			}
+
 			const BVHNode& node = nodes[nodeIdx];
 
 			// Cull test for internal and leaf nodes
@@ -176,7 +184,11 @@ namespace Engine
 
 			if (node.IsLeaf())
 			{
-				callback(node.entity); // visible leaf so trigger callback
+				// Skip tombstones
+				if (node.entity != entt::null)
+				{
+					callback(node.entity); // visible leaf so trigger callback
+				}
 			}
 			else
 			{

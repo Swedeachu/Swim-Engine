@@ -14,7 +14,7 @@ namespace Engine
 	void SceneDebugDraw::Init()
 	{
 		auto cubeData = MakeCube();
-		cubeMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawCube", cubeData.first, cubeData.second);
+		cubeMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawCube", cubeData.vertices, cubeData.indices);
 		cubeMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawCubeMaterial", cubeMesh);
 
 		auto sphereData = MakeSphere(
@@ -23,7 +23,7 @@ namespace Engine
 			glm::vec3(1, 1, 1),
 			glm::vec3(1, 1, 1)
 		);
-		sphereMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawSphere", sphereData.first, sphereData.second);
+		sphereMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawSphere", sphereData.vertices, sphereData.indices);
 		sphereMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawSphereMaterial", sphereMesh);
 
 		wireFrameCubeMesh = CreateAndRegisterWireframeBoxMesh(DebugColor::White, "DebugDrawCubeWireFrame");
@@ -77,7 +77,7 @@ namespace Engine
 					{max.x, max.y, max.z}, {min.x, max.y, max.z}
 			};
 
-			uint32_t boxIndices[36] = {
+			constexpr uint32_t boxIndices[36] = {
 					0,1,2, 2,3,0,
 					4,5,6, 6,7,4,
 					0,1,5, 5,4,0,
@@ -106,11 +106,6 @@ namespace Engine
 		return MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
 	}
 
-	void SceneDebugDraw::Clear()
-	{
-		debugRegistry.clear();
-	}
-
 	std::shared_ptr<MaterialData> SceneDebugDraw::GetMeshMaterialDataFromType(MeshBoxType type)
 	{
 		if (type == MeshBoxType::BevelledCube)
@@ -132,11 +127,11 @@ namespace Engine
 		const glm::vec4& color
 	)
 	{
-		entt::entity entity = debugRegistry.create();
-		debugRegistry.emplace<Transform>(entity, pos, scale);
-		debugRegistry.emplace<Material>(entity, Material(sphereMaterialData));
+		entt::entity entity = immediateModeRegistry.create();
+		immediateModeRegistry.emplace<Transform>(entity, pos, scale);
+		immediateModeRegistry.emplace<Material>(entity, Material(sphereMaterialData));
 		// the detailed draw data
-		debugRegistry.emplace<MeshDecorator>(entity,
+		immediateModeRegistry.emplace<MeshDecorator>(entity,
 			color, // fill color
 			color, // stroke color
 			glm::vec2(0.0f), // stroke width
@@ -165,13 +160,13 @@ namespace Engine
 		glm::vec3 center = (min + max) * 0.5f;
 		glm::vec3 size = (max - min);
 
-		entt::entity entity = debugRegistry.create();
-		debugRegistry.emplace<Transform>(entity, center, size, glm::quat(), static_cast<TransformSpace>(transformSpace));
+		entt::entity entity = immediateModeRegistry.create();
+		immediateModeRegistry.emplace<Transform>(entity, center, size, glm::quat(), static_cast<TransformSpace>(transformSpace));
 
-		debugRegistry.emplace<Material>(entity, Material(GetMeshMaterialDataFromType(boxType)));
+		immediateModeRegistry.emplace<Material>(entity, Material(GetMeshMaterialDataFromType(boxType)));
 
 		// the detailed draw data
-		debugRegistry.emplace<MeshDecorator>(entity,
+		immediateModeRegistry.emplace<MeshDecorator>(entity,
 			fillColor,
 			color, // stroke color
 			strokeWidth,
@@ -203,13 +198,13 @@ namespace Engine
 		glm::vec3 eulerRadians = glm::radians(glm::vec3(pitchDegrees, yawDegrees, rollDegrees));
 		glm::quat rotationQuat = glm::quat(eulerRadians);
 
-		entt::entity entity = debugRegistry.create();
-		debugRegistry.emplace<Transform>(entity, position, scale, rotationQuat, static_cast<TransformSpace>(transformSpace));
+		entt::entity entity = immediateModeRegistry.create();
+		immediateModeRegistry.emplace<Transform>(entity, position, scale, rotationQuat, static_cast<TransformSpace>(transformSpace));
 
-		debugRegistry.emplace<Material>(entity, Material(GetMeshMaterialDataFromType(boxType)));
+		immediateModeRegistry.emplace<Material>(entity, Material(GetMeshMaterialDataFromType(boxType)));
 
 		// the detailed draw data
-		debugRegistry.emplace<MeshDecorator>(entity,
+		immediateModeRegistry.emplace<MeshDecorator>(entity,
 			fillColor, // fill color
 			color,     // stroke color
 			strokeWidth,
@@ -249,16 +244,16 @@ namespace Engine
 		const glm::vec4 fillColor(color, 1.0f);
 
 		// Build the debug entity: Transform + Material + MeshDecorator
-		entt::entity e = debugRegistry.create();
+		entt::entity e = immediateModeRegistry.create();
 
 		// World-space transform (assuming Transform ctor: position, scale, rotation, space)
-		debugRegistry.emplace<Transform>(e, position, scale, rot, TransformSpace::World);
+		immediateModeRegistry.emplace<Transform>(e, position, scale, rot, TransformSpace::World);
 
 		// Solid cube material (skinny filled bar).
-		debugRegistry.emplace<Material>(e, Material(GetMeshMaterialDataFromType(MeshBoxType::Cube)));
+		immediateModeRegistry.emplace<Material>(e, Material(GetMeshMaterialDataFromType(MeshBoxType::Cube)));
 
 		// MeshDecorator: enable fill, disable stroke (set stroke width = 0)
-		debugRegistry.emplace<MeshDecorator>(e,
+		immediateModeRegistry.emplace<MeshDecorator>(e,
 			fillColor,                // fill color
 			strokeColor,              // stroke color (not used if width=0)
 			glm::vec2(0.0f),          // stroke width
