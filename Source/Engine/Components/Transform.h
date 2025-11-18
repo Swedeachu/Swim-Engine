@@ -7,7 +7,7 @@
 namespace Engine
 {
 
-	enum class TransformSpace
+	enum class TransformSpace : int
 	{
 		World, // 0
 		Screen, // 1

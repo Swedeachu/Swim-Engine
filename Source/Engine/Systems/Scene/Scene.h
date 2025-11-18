@@ -5,6 +5,7 @@
 #include "SubSceneSystems/SceneBVH.h"
 #include "SubSceneSystems/GizmoSystem.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
+#include "SubSceneSystems/SerializedSceneManager.h"
 
 #include "Engine/Components/ObjectTag.h"
 
@@ -49,6 +50,9 @@ namespace Engine
 
 		// Called before Scene::Init
 		void InternalSceneInit();
+
+		// Called after Scene::Init
+		void InternalScenePostInit();
 
 		// Called before Scene::Update
 		void InternalSceneUpdate(double dt);
@@ -346,6 +350,7 @@ namespace Engine
 		std::unique_ptr<SceneBVH> sceneBVH;
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 		std::unique_ptr<GizmoSystem> gizmoSystem;
+		std::unique_ptr<SerializedSceneManager> serializedSceneManager;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 

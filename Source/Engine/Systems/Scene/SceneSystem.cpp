@@ -61,7 +61,7 @@ namespace Engine
 		{
 			activeScene->InternalSceneInit();
 			activeScene->Init();
-			// no internal post init yet required yet, might need that sooner or later
+			activeScene->InternalScenePostInit();
 		}
 
 		return 0;

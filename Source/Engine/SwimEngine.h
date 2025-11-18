@@ -107,7 +107,7 @@ namespace Engine
 
 		EngineState GetEngineState() const { return engineState; }
 
-		// Send a wide string back to the editor panel. Returns true if the editor handled it (nonzero LRESULT).
+		// Send a wide string back to the editor process. Returns true if the editor handled it (nonzero LRESULT).
 		bool SendEditorMessage(const std::wstring& msg, std::uintptr_t channel = 1);
 
 		// Convenience formatter

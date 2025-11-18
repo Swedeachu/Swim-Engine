@@ -149,7 +149,7 @@ namespace Game
 					}
 					else // Barrel (always shared)
 					{
-						registry.emplace<Engine::CompositeMaterial>(entity, Engine::CompositeMaterial(sharedBarrelMaterials));
+						registry.emplace<Engine::CompositeMaterial>(entity, Engine::CompositeMaterial(sharedBarrelMaterials, "Assets/Models/barrel.glb"));
 						Engine::Transform& trans = registry.get<Engine::Transform>(entity);
 						trans.SetScale(glm::vec3(0.2f));
 					}

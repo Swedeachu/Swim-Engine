@@ -382,7 +382,24 @@ namespace Engine
 		gizmoSystem->Awake();
 		gizmoSystem->Init();
 
+		// Editor only object
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
+		}
+
 		ForEachBehavior(&Behavior::InitIfNeeded); // we might not want to do this actually and let behaviors do this themselves
+	}
+
+	void Scene::InternalScenePostInit()
+	{
+		// Send our first state of the scene to the editor right away.
+		// After this, it becomes a balancing act of syncing and updating components and entities between the processes when things change (which happens a lot).
+		if (serializedSceneManager != nullptr)
+		{
+			serializedSceneManager->SaveFullJSON(); // TODO: probably not call this here, kind of just debug right now.
+			serializedSceneManager->SendFullJSON();
+		}
 	}
 
 	void Scene::RemoveFrustumCache(entt::registry& registry, entt::entity entity)

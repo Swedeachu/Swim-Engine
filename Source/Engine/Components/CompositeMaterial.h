@@ -10,10 +10,11 @@ namespace Engine
 	{
 
 		std::vector<std::shared_ptr<MaterialData>> subMaterials;
+		std::string filePath; // the path this mesh was loaded from
 
 		CompositeMaterial() = default;
-		explicit CompositeMaterial(std::vector<std::shared_ptr<MaterialData>> data)
-			: subMaterials(std::move(data))
+		explicit CompositeMaterial(std::vector<std::shared_ptr<MaterialData>> data, const std::string& filePath = "")
+			: subMaterials(std::move(data)), filePath(filePath)
 		{}
 
 	};

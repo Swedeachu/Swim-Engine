@@ -35,9 +35,9 @@ namespace Engine
 			// --- Internal / special ---
 			TAG(EDITOR_MODE_OBJECT, -1)
 			TAG(EDITOR_MODE_UI, -2)
-			TAG(SYSTEM_OBJECT, -3)
-			TAG(DEBUG_OBJECT, -4)
-			TAG(TEMPORARY_OBJECT, -5)
+			// TAG(SYSTEM_OBJECT, -3)
+			// TAG(DEBUG_OBJECT, -4)
+			// TAG(TEMPORARY_OBJECT, -5)
 
 			// --- UI subcategories ---
 			TAG(UI_CANVAS, 30)

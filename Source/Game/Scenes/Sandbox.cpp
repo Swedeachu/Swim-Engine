@@ -139,7 +139,7 @@ namespace Game
 
 		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
 
-		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel));
+		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel, "Assets/Models/barrel.glb"));
 		EmplaceBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
@@ -178,7 +178,7 @@ namespace Game
 		auto couch = CreateEntity();
 		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
-		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel));
+		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel, "Assets/Models/webp_sofa.glb"));
 
 		// Sponza 3D model test
 		if constexpr (doSponza)
@@ -206,7 +206,8 @@ namespace Game
 				sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
 			}
 
-			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData);
+			// Just hand waving it for file path arg
+			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData, "Assets/Models/Sponza/sponza-ktx-draco.glb");
 
 			auto sponza = CreateEntity();
 			AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -12.0f), sponzaScale));
