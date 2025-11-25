@@ -139,6 +139,7 @@ namespace Game
 		// Big star at origin
 		reg.emplace<Engine::Transform>(e, pos, glm::vec3(1.8f));
 		reg.emplace<Engine::Material>(e, matStar);
+		reg.emplace<Engine::ObjectTag>(e, Engine::TagConstants::WORLD, "Star");
 
 		// Give star a random bright color via mesh decorator
 		const glm::vec3 tint = Engine::RandomBrightColor();
@@ -181,6 +182,7 @@ namespace Game
 
 		reg.emplace<Engine::Transform>(e, localPos, glm::vec3(p.baseScale), localRot);
 		reg.emplace<Engine::Material>(e, mat);
+		scene->SetTag(e, Engine::TagConstants::WORLD, "Planet " + std::to_string(static_cast<uint32_t>(entt::to_integral(e))));
 
 		// Give planets a random bright color via mesh decorator
 		const glm::vec3 tint = Engine::RandomBrightColor();

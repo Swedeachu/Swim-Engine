@@ -13,6 +13,7 @@
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
 #include <memory>
+#include <unordered_set>
 
 namespace Engine
 {
@@ -87,12 +88,6 @@ namespace Engine
 
 		entt::entity GetParent(entt::entity e) const;
 
-		// Set an entitys name, with a tag optionally, this uses an ObjectTag component under the hood.
-		void SetEntityName(entt::entity e, const std::string& name, int tag = -1);
-
-		// Under the hood attempts to get the name of entity via ObjectTag. By default this usually will be "Entity 12" for example.
-		const std::string& GetEntityName(entt::entity e) const;
-
 		const std::string& GetName() const { return name; }
 
 		entt::registry& GetRegistry() { return registry; }
@@ -138,11 +133,7 @@ namespace Engine
 
 			T& result = registry.emplace<T>(entity, std::move(component));
 
-			// Notify editor that this entity’s serialized form changed (component added).
-			if (serializedSceneManager)
-			{
-				serializedSceneManager->SendEntityUpdated(entity);
-			}
+			// All serialization notifications are now driven by registry hooks.
 
 			return result;
 		}
@@ -155,11 +146,7 @@ namespace Engine
 
 			T& result = registry.emplace<T>(entity, std::forward<Args>(args)...);
 
-			// Notify editor of updated serialized state.
-			if (serializedSceneManager)
-			{
-				serializedSceneManager->SendEntityUpdated(entity);
-			}
+			// All serialization notifications are now driven by registry hooks.
 
 			return result;
 		}
@@ -191,11 +178,7 @@ namespace Engine
 
 			registry.remove<T>(entity);
 
-			// Notify editor that serialized representation changed (component removed).
-			if (serializedSceneManager)
-			{
-				serializedSceneManager->SendEntityUpdated(entity);
-			}
+			// All serialization notifications are now driven by registry hooks.
 
 			return true;
 		}
@@ -284,29 +267,6 @@ namespace Engine
 			});
 		}
 
-		// Only does a for each behavior callback on one specific entity, kind of useless
-		/*
-		template<typename Func, typename... Args>
-		void ForEachBehaviorOfEntity(entt::entity entity, Func method, Args&&... args)
-		{
-			if (registry.valid(entity) && registry.any_of<BehaviorComponents>(entity))
-			{
-				EngineState state = SwimEngine::GetInstance()->GetEngineState();
-				auto& bc = registry.get<BehaviorComponents>(entity);
-				if (bc.CanExecute(state))
-				{
-					for (auto& behavior : bc.behaviors)
-					{
-						if (behavior)
-						{
-							(behavior.get()->*method)(std::forward<Args>(args)...);
-						}
-					}
-				}
-			}
-		}
-		*/
-
 		void SetEnabledStates(entt::entity entity, EngineState states);
 
 		void AddEnabledStates(entt::entity entity, EngineState states);
@@ -315,8 +275,8 @@ namespace Engine
 
 		bool StateTestControl();
 
-		// Similar to Scene::Set/GetName() but more public facing about how ObjectTags work
 		ObjectTag* GetTag(entt::entity entity);
+		const std::string GetEntityName(entt::entity e) const;
 		void SetTag(entt::entity entity, unsigned int tag, const std::string& name = "");
 		void RemoveTag(entt::entity entity);
 
@@ -383,6 +343,9 @@ namespace Engine
 		std::unique_ptr<GizmoSystem> gizmoSystem;
 		std::unique_ptr<SerializedSceneManager> serializedSceneManager;
 
+		// Tracks which entities the editor/serializer currently knows about.
+		std::unordered_set<entt::entity> serializedEntities;
+
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
 		void UpdateUIBehaviors();
@@ -390,6 +353,17 @@ namespace Engine
 		bool WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent);
 
 		bool mouseBusyWithUI{ false }; // to avoid interacting with world same time as interacting with UI above the world
+
+		// --- Serialization bindings driven by the registry ---
+
+		template<typename T>
+		void BindSerializationHooksForComponent();
+
+		template<typename T>
+		void OnComponentConstruct(entt::registry& reg, entt::entity entity);
+
+		template<typename T>
+		void OnComponentDestroy(entt::registry& reg, entt::entity entity);
 
 	};
 

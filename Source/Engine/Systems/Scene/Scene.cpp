@@ -17,15 +17,77 @@ namespace Engine
 	constexpr static bool handleDebugDraw = false;
 #endif
 
+	template<typename T>
+	void Scene::BindSerializationHooksForComponent()
+	{
+		// Component construction -> entity changed (and possibly created)
+		registry.on_construct<T>().connect<&Scene::OnComponentConstruct<T>>(*this);
+
+		// Component destruction -> entity changed (or destroyed if Transform)
+		registry.on_destroy<T>().connect<&Scene::OnComponentDestroy<T>>(*this);
+	}
+
+	template<typename T>
+	void Scene::OnComponentConstruct(entt::registry& reg, entt::entity entity)
+	{
+		if (!serializedSceneManager)
+		{
+			return;
+		}
+
+		// If this is the first time we've seen this entity, treat it as "created" for the editor.
+		if (serializedEntities.insert(entity).second)
+		{
+			serializedSceneManager->SendEntityCreated(entity);
+		}
+		else
+		{
+			// Otherwise it's just a normal component add -> entity updated.
+			serializedSceneManager->SendEntityUpdated(entity);
+		}
+	}
+
+	template<typename T>
+	void Scene::OnComponentDestroy(entt::registry& reg, entt::entity entity)
+	{
+		if (!serializedSceneManager)
+		{
+			return;
+		}
+
+		// Removing Transform is our signal that the entity is gone from the editor's POV. (I don't like this behavior at all)
+		if constexpr (std::is_same_v<T, Transform>)
+		{
+			if (serializedEntities.erase(entity) > 0)
+			{
+				serializedSceneManager->SendEntityDestroyed(entity);
+			}
+		}
+		else
+		{
+			// For non-Transform components, if the entity is still valid, just mark it as updated.
+			if (reg.valid(entity))
+			{
+				serializedSceneManager->SendEntityUpdated(entity);
+			}
+			else
+			{
+				// If somehow this destruction happens while the entity is being torn down,
+				// treat it as a destroy event (once).
+				if (serializedEntities.erase(entity) > 0)
+				{
+					serializedSceneManager->SendEntityDestroyed(entity);
+				}
+			}
+		}
+	}
+
 	entt::entity Scene::CreateEntity()
 	{
 		entt::entity e = registry.create();
 
-		// Notify editor that a new entity exists.
-		if (serializedSceneManager)
-		{
-			serializedSceneManager->SendEntityCreated(e);
-		}
+		// All serialization notifications for this entity will be triggered by
+		// registry hooks (e.g. first Transform/ObjectTag/etc. attachment).
 
 		return e;
 	}
@@ -37,11 +99,9 @@ namespace Engine
 			return;
 		}
 
-		// Notify editor first, while all components/metadata still exist.
-		if (serializedSceneManager)
-		{
-			serializedSceneManager->SendEntityDestroyed(entity);
-		}
+		// We intentionally do NOT manually notify the serializer here.
+		// The hooks registered in InternalSceneInit() will see component destruction
+		// (especially Transform) and send destroyed/updated events as needed.
 
 		// If it has a Transform, handle children and unlink from parent
 		if (registry.any_of<Transform>(entity))
@@ -218,6 +278,7 @@ namespace Engine
 		}
 
 		// Notify editor that this entity's parent changed.
+		// Parent-child relationships are not purely registry-driven; we keep this explicit.
 		if (serializedSceneManager)
 		{
 			serializedSceneManager->SendEntityUpdated(child);
@@ -314,46 +375,6 @@ namespace Engine
 		}
 
 		return false;
-	}
-
-	// Set an entitys name, with a tag optionally, this uses an ObjectTag component under the hood.
-	void Scene::SetEntityName(entt::entity e, const std::string& name, int tag)
-	{
-		if (registry.valid(e))
-		{
-			if (registry.any_of<ObjectTag>(e))
-			{
-				ObjectTag& t = registry.get<ObjectTag>(e);
-				t.name = name;
-				if (t.tag > -1)
-				{
-					t.tag = static_cast<unsigned int>(tag);
-				}
-			}
-			else
-			{
-				if (tag < 0)
-				{
-					tag = TagConstants::WORLD; // default world object tag
-				}
-				EmplaceComponent<ObjectTag>(e, static_cast<unsigned int>(tag), name);
-			}
-		}
-	}
-
-	// Under the hood attempts to get the name of entity via ObjectTag. By default this usually will be "Entity 12" for example.
-	const std::string& Scene::GetEntityName(entt::entity e) const
-	{
-		if (registry.valid(e))
-		{
-			if (registry.any_of<ObjectTag>(e))
-			{
-				const ObjectTag& t = registry.get<ObjectTag>(e);
-				return t.name;
-			}
-		}
-
-		return "Entity " +  std::to_string(static_cast<std::uint32_t>(entt::to_integral(e)));
 	}
 
 	bool Scene::ShouldRenderBasedOnState(entt::entity e) const
@@ -453,6 +474,13 @@ namespace Engine
 		if (SwimEngine::GetInstance()->GetEngineState() == EngineState::Editing)
 		{
 			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
+
+			// Bind registry-driven serialization hooks for key components.
+			// Transform drives "entity created/destroyed" for the editor.
+			BindSerializationHooksForComponent<Transform>();
+			BindSerializationHooksForComponent<Material>();
+			BindSerializationHooksForComponent<ObjectTag>();
+			BindSerializationHooksForComponent<BehaviorComponents>();
 		}
 
 		// Give the editing only scripts, for now is just the free cam
@@ -914,6 +942,21 @@ namespace Engine
 		}
 
 		return nullptr;
+	}
+
+	// Under the hood attempts to get the name of entity via ObjectTag. By default this usually will be "Entity 12" for example.
+	const std::string Scene::GetEntityName(entt::entity e) const
+	{
+		if (registry.valid(e))
+		{
+			if (registry.any_of<ObjectTag>(e))
+			{
+				const ObjectTag& t = registry.get<ObjectTag>(e);
+				return t.name;
+			}
+		}
+
+		return "Entity " + std::to_string(static_cast<std::uint32_t>(entt::to_integral(e)));
 	}
 
 	void Scene::SetTag(entt::entity entity, unsigned int tag, const std::string& name)
