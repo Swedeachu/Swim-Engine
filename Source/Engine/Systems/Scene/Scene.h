@@ -87,6 +87,12 @@ namespace Engine
 
 		entt::entity GetParent(entt::entity e) const;
 
+		// Set an entitys name, with a tag optionally, this uses an ObjectTag component under the hood.
+		void SetEntityName(entt::entity e, const std::string& name, int tag = -1);
+
+		// Under the hood attempts to get the name of entity via ObjectTag. By default this usually will be "Entity 12" for example.
+		const std::string& GetEntityName(entt::entity e) const;
+
 		const std::string& GetName() const { return name; }
 
 		entt::registry& GetRegistry() { return registry; }
@@ -254,6 +260,9 @@ namespace Engine
 			}), vec.end());
 		}
 
+		// Calls Behavior::RefreshFieldCache() on each behavior the entity has
+		void RefreshBehaviorFieldCacheForEntity(entt::entity e);
+
 		template<typename Func, typename... Args>
 		void ForEachBehavior(Func method, Args&&... args)
 		{
@@ -306,10 +315,9 @@ namespace Engine
 
 		bool StateTestControl();
 
+		// Similar to Scene::Set/GetName() but more public facing about how ObjectTags work
 		ObjectTag* GetTag(entt::entity entity);
-
-		void SetTag(entt::entity entity, int tag, const std::string& name = "");
-
+		void SetTag(entt::entity entity, unsigned int tag, const std::string& name = "");
 		void RemoveTag(entt::entity entity);
 
 		bool IsMouseBusyWithUI() const { return mouseBusyWithUI; }

@@ -316,6 +316,46 @@ namespace Engine
 		return false;
 	}
 
+	// Set an entitys name, with a tag optionally, this uses an ObjectTag component under the hood.
+	void Scene::SetEntityName(entt::entity e, const std::string& name, int tag)
+	{
+		if (registry.valid(e))
+		{
+			if (registry.any_of<ObjectTag>(e))
+			{
+				ObjectTag& t = registry.get<ObjectTag>(e);
+				t.name = name;
+				if (t.tag > -1)
+				{
+					t.tag = static_cast<unsigned int>(tag);
+				}
+			}
+			else
+			{
+				if (tag < 0)
+				{
+					tag = TagConstants::WORLD; // default world object tag
+				}
+				EmplaceComponent<ObjectTag>(e, static_cast<unsigned int>(tag), name);
+			}
+		}
+	}
+
+	// Under the hood attempts to get the name of entity via ObjectTag. By default this usually will be "Entity 12" for example.
+	const std::string& Scene::GetEntityName(entt::entity e) const
+	{
+		if (registry.valid(e))
+		{
+			if (registry.any_of<ObjectTag>(e))
+			{
+				const ObjectTag& t = registry.get<ObjectTag>(e);
+				return t.name;
+			}
+		}
+
+		return "Entity " +  std::to_string(static_cast<std::uint32_t>(entt::to_integral(e)));
+	}
+
 	bool Scene::ShouldRenderBasedOnState(entt::entity e) const
 	{
 		const EngineState state = SwimEngine::GetInstance()->GetEngineState();
@@ -410,7 +450,7 @@ namespace Engine
 		gizmoSystem->Init();
 
 		// Editor only object
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		if (SwimEngine::GetInstance()->GetEngineState() == EngineState::Editing)
 		{
 			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
 		}
@@ -437,10 +477,10 @@ namespace Engine
 	{
 		// Send our first state of the scene to the editor right away.
 		// After this, it becomes a balancing act of syncing and updating components and entities between the processes when things change (which happens a lot).
-		if (serializedSceneManager != nullptr)
+		if (serializedSceneManager)
 		{
 			serializedSceneManager->SaveFullJSON(); // TODO: probably not call this here, kind of just debug right now.
-			serializedSceneManager->SendFullJSON();
+			// serializedSceneManager->SendFullJSON(); // we let sync management do this now
 		}
 	}
 
@@ -489,6 +529,11 @@ namespace Engine
 
 		// if constexpr (handleDebugDraw)
 		sceneBVH->DebugRender();
+
+		if (serializedSceneManager)
+		{
+			serializedSceneManager->SendSync();
+		}
 	}
 
 	void Scene::InternalSceneExit()
@@ -710,6 +755,21 @@ namespace Engine
 		return handled;
 	}
 
+	void Scene::RefreshBehaviorFieldCacheForEntity(entt::entity e)
+	{
+		if (registry.valid(e))
+		{
+			if (registry.any_of<BehaviorComponents>(e))
+			{
+				BehaviorComponents& bc = registry.get<BehaviorComponents>(e);
+				for (auto& b : bc.behaviors)
+				{
+					b->RefreshFieldCache();
+				}
+			}
+		}
+	}
+
 	bool Scene::IsTopFocusedElement(entt::entity target)
 	{
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
@@ -856,7 +916,7 @@ namespace Engine
 		return nullptr;
 	}
 
-	void Scene::SetTag(entt::entity entity, int tag, const std::string& name)
+	void Scene::SetTag(entt::entity entity, unsigned int tag, const std::string& name)
 	{
 		if (registry.valid(entity))
 		{

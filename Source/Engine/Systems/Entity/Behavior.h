@@ -34,6 +34,9 @@ namespace Engine
 			}
 		}
 
+		// Intended to regrab all the common components and systems
+		void RefreshFieldCache();
+
 		virtual ~Behavior() = default;
 
 		// These will be implemented once PhysX is integrated later on

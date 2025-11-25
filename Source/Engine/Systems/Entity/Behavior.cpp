@@ -20,6 +20,17 @@ namespace Engine
 			throw std::runtime_error("Behavior requires a valid Scene and entt::entity.");
 		}
 
+		RefreshFieldCache();
+	}
+
+	void Behavior::RefreshFieldCache()
+	{
+		if (!scene)
+		{
+			std::cout << "Behavior::RefreshFieldCache() scene is null, unable to refresh cache" << std::endl;
+			return;
+		}
+
 		// Cache commonly used systems
 		input = scene->GetInputManager();
 		sceneSystem = scene->GetSceneSystem();
