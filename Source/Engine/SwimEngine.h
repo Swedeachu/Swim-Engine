@@ -21,7 +21,7 @@ namespace Engine
 	public:
 
 		// The initial state the engine will start in if no argument is provided from main
-		static constexpr EngineState DefaultEngineState = EngineState::Editing;
+		static constexpr EngineState DefaultEngineState = EngineState::Editing; // this should be playing for release builds
 
 		enum RenderContext
 		{
@@ -109,6 +109,7 @@ namespace Engine
 
 		// Send a wide string back to the editor process. Returns true if the editor handled it (nonzero LRESULT).
 		bool SendEditorMessage(const std::wstring& msg, std::uintptr_t channel = 1);
+		bool SendEditorMessage(const std::string& msg, std::uintptr_t channel = 1); // overload which converts to wide and calls the method above
 
 		// Convenience formatter
 		template<typename... Args>

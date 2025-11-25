@@ -500,9 +500,19 @@ namespace Engine
 		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
 		if (!ok)
 		{
-			// Unknown command:
-			SendEditorMessage(L"[Unknown Engine Command]: " + msg);
+			// Unknown command or just generic message:
+			SendEditorMessage(L"(Non-Command): " + msg);
 		}
+	}
+
+	bool SwimEngine::SendEditorMessage(const std::string& msg, std::uintptr_t channel)
+	{
+		if (!parentHandle)
+		{
+			return false;
+		}
+
+		return SendEditorMessage(std::wstring(msg.begin(), msg.end()), channel);
 	}
 
 	// Maybe make this take a regular string instead of wide, and then package as wide for WM_COPYDATA 

@@ -39,7 +39,7 @@
     <ClCompile Include="Source\Library\stb\stb_image_resize2_wrapper.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
@@ -51,7 +51,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
@@ -117,7 +117,7 @@
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
@@ -351,7 +351,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />

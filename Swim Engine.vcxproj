@@ -287,8 +287,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
@@ -333,8 +333,8 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />

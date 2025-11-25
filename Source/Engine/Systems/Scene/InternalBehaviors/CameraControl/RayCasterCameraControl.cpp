@@ -2,7 +2,7 @@
 #include "RayCasterCameraControl.h"
 #include "Engine/Components/Transform.h"
 
-namespace Game
+namespace Engine
 {
 
 	std::vector<Engine::Ray> cachedRays;

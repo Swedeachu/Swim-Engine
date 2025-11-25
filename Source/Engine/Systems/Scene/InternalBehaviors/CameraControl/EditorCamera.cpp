@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "EditorCamera.h"
 
-namespace Game
+namespace Engine
 {
 
 	void EditorCamera::Update(double dt)

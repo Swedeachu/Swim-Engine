@@ -7,14 +7,14 @@
 #include "Engine\Components\Material.h"
 #include "Engine\Components\CompositeMaterial.h"
 #include "Engine\Components\MeshDecorator.h"
+#include "Engine\Components\ObjectTag.h"
 #include "Engine\Systems\Entity\EntityFactory.h"
-#include "Game\Behaviors\CameraControl\EditorCamera.h"
 #include "Game\Behaviors\Demo\SimpleMovement.h"
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
 #include "Game\Behaviors\Demo\Spin.h"
 #include "Engine\Components\TextComponent.h"
 #include "Engine\Systems\Renderer\Core\Font\FontPool.h"
-#include "Game\Behaviors\CameraControl\RayCasterCameraControl.h"
+#include "Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h"
 #include "Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h"
 #include "Game\Testing\PrimitiveTest.h"
 #include "Game\Testing\MeshDrawingStressTest.h"
@@ -154,10 +154,10 @@ namespace Game
 			*/
 		);
 
-		// We can load scene scripts this way as a cool hack/trick
+		// We can load scene scripts with a call back onto a fresh entity this way as a cool hack/trick
 		// Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
-		entityFactory.CreateWithBehaviors<EditorCamera, CubeMapControlTest>(
-			[this](entt::entity e, EditorCamera* editorCam, CubeMapControlTest* cubeMapCtrl)
+		entityFactory.CreateWithBehaviors<CubeMapControlTest>(
+			[this](entt::entity e, CubeMapControlTest* cubeMapCtrl)
 		{
 			entt::registry& reg = GetRegistry();
 			if (reg.any_of<Engine::BehaviorComponents>(e))
@@ -167,8 +167,10 @@ namespace Game
 				// HACK: we do want the skybox to turn on though, so we manually init the cube map control test.
 				cubeMapCtrl->InitIfNeeded();
 			}
-		}
-		);
+
+			// Give this entity a tag to make it as an editor mode object
+			EmplaceComponent<Engine::ObjectTag>(e, Engine::TagConstants::EDITOR_MODE_OBJECT, "Editor Cube Map Control Entity");
+		});
 
 		if constexpr (doUI) MakeUI(this);
 

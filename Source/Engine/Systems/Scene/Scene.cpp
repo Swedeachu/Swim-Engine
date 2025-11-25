@@ -6,6 +6,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Entity/EntityFactory.h"
+#include "InternalBehaviors/CameraControl/EditorCamera.h"
 
 namespace Engine
 {
@@ -387,6 +388,21 @@ namespace Engine
 		{
 			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
 		}
+
+		// Give the editing only scripts, for now is just the free cam
+		EntityFactory::GetInstance().CreateWithBehaviors<EditorCamera>(
+			[this](entt::entity e, EditorCamera* editorCam)
+		{
+			entt::registry& reg = GetRegistry();
+			if (reg.any_of<Engine::BehaviorComponents>(e))
+			{
+				Engine::BehaviorComponents& bc = reg.get<Engine::BehaviorComponents>(e);
+				bc.SetEnabledStates(Engine::EngineState::Editing); // these scripts only execute in editing mode
+			}
+
+			// Give this entity a tag to make it as an editor mode object
+			EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_OBJECT, "Editor Camera Entity");
+		});
 
 		ForEachBehavior(&Behavior::InitIfNeeded); // we might not want to do this actually and let behaviors do this themselves
 	}
