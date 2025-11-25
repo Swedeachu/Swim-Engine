@@ -19,7 +19,15 @@ namespace Engine
 
 	entt::entity Scene::CreateEntity()
 	{
-		return registry.create();
+		entt::entity e = registry.create();
+
+		// Notify editor that a new entity exists.
+		if (serializedSceneManager)
+		{
+			serializedSceneManager->SendEntityCreated(e);
+		}
+
+		return e;
 	}
 
 	void Scene::DestroyEntity(entt::entity entity, bool callExit, bool destroyChildren)
@@ -27,6 +35,12 @@ namespace Engine
 		if (!registry.valid(entity))
 		{
 			return;
+		}
+
+		// Notify editor first, while all components/metadata still exist.
+		if (serializedSceneManager)
+		{
+			serializedSceneManager->SendEntityDestroyed(entity);
 		}
 
 		// If it has a Transform, handle children and unlink from parent
@@ -202,6 +216,12 @@ namespace Engine
 				stack.push_back(c);
 			}
 		}
+
+		// Notify editor that this entity's parent changed.
+		if (serializedSceneManager)
+		{
+			serializedSceneManager->SendEntityUpdated(child);
+		}
 	}
 
 	void Scene::RemoveParent(entt::entity child)
@@ -245,6 +265,12 @@ namespace Engine
 			{
 				stack.push_back(c);
 			}
+		}
+
+		// Notify editor about parenting change.
+		if (serializedSceneManager)
+		{
+			serializedSceneManager->SendEntityUpdated(child);
 		}
 	}
 

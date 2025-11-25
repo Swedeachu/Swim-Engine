@@ -249,4 +249,111 @@ namespace Engine
 		out.close();
 	}
 
+	void SerializedSceneManager::SendEntityCreated(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		bool hasTag = false;
+
+		// Apply the same filter as BuildFullJSON: skip editor-only objects.
+		if (reg.any_of<ObjectTag>(e))
+		{
+			ObjectTag& tag = reg.get<ObjectTag>(e);
+			if (tag.tag == TagConstants::EDITOR_MODE_OBJECT || tag.tag == TagConstants::EDITOR_MODE_UI)
+			{
+				return;
+			}
+			else
+			{
+				hasTag = true;
+			}
+		}
+
+		json jEntity = BuildEntityJSON(e, hasTag);
+		const std::string utf8 = jEntity.dump();
+
+		const std::wstring wide = Utf8ToWide("scene entityCreate:" + utf8);
+
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		engine->SendEditorMessage(wide, /*channel*/ 1);
+	}
+
+	void SerializedSceneManager::SendEntityDestroyed(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		// Editor-only objects won't be serialized anyway, but we can still filter if desired.
+		if (reg.any_of<ObjectTag>(e))
+		{
+			ObjectTag& tag = reg.get<ObjectTag>(e);
+			if (tag.tag == TagConstants::EDITOR_MODE_OBJECT || tag.tag == TagConstants::EDITOR_MODE_UI)
+			{
+				return;
+			}
+		}
+
+		const std::uint32_t id = static_cast<std::uint32_t>(entt::to_integral(e));
+
+		json j = json::object();
+		j["id"] = id;
+
+		const std::string utf8 = j.dump();
+		const std::wstring wide = Utf8ToWide("scene entityDestroy:" + utf8);
+
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		engine->SendEditorMessage(wide, /*channel*/ 1);
+	}
+
+	void SerializedSceneManager::SendEntityUpdated(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		bool hasTag = false;
+
+		if (reg.any_of<ObjectTag>(e))
+		{
+			ObjectTag& tag = reg.get<ObjectTag>(e);
+			if (tag.tag == TagConstants::EDITOR_MODE_OBJECT || tag.tag == TagConstants::EDITOR_MODE_UI)
+			{
+				return;
+			}
+			else
+			{
+				hasTag = true;
+			}
+		}
+
+		json jEntity = BuildEntityJSON(e, hasTag);
+		const std::string utf8 = jEntity.dump();
+
+		const std::wstring wide = Utf8ToWide("scene entityUpdate:" + utf8);
+
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		engine->SendEditorMessage(wide, /*channel*/ 1);
+	}
+
 }

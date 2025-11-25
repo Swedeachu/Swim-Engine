@@ -130,7 +130,15 @@ namespace Engine
 			static_assert(!std::is_reference_v<T>, "AddComponent should not take a reference type");
 			static_assert(!std::is_pointer_v<T>, "AddComponent should not take a pointer type");
 
-			return registry.emplace<T>(entity, std::move(component));
+			T& result = registry.emplace<T>(entity, std::move(component));
+
+			// Notify editor that this entity’s serialized form changed (component added).
+			if (serializedSceneManager)
+			{
+				serializedSceneManager->SendEntityUpdated(entity);
+			}
+
+			return result;
 		}
 
 		template<typename T, typename... Args>
@@ -139,7 +147,15 @@ namespace Engine
 			static_assert(!std::is_pointer_v<T>, "EmplaceComponent should not take a pointer type");
 			static_assert(std::is_constructible_v<T, Args&&...>, "T must be constructible with the provided arguments");
 
-			return registry.emplace<T>(entity, std::forward<Args>(args)...);
+			T& result = registry.emplace<T>(entity, std::forward<Args>(args)...);
+
+			// Notify editor of updated serialized state.
+			if (serializedSceneManager)
+			{
+				serializedSceneManager->SendEntityUpdated(entity);
+			}
+
+			return result;
 		}
 
 		template<typename T>
@@ -168,6 +184,13 @@ namespace Engine
 			}
 
 			registry.remove<T>(entity);
+
+			// Notify editor that serialized representation changed (component removed).
+			if (serializedSceneManager)
+			{
+				serializedSceneManager->SendEntityUpdated(entity);
+			}
+
 			return true;
 		}
 

@@ -17,6 +17,10 @@ namespace Engine
 		void SendFullJSON();
 		void SaveFullJSON();
 
+		void SendEntityCreated(entt::entity e);
+		void SendEntityDestroyed(entt::entity e);
+		void SendEntityUpdated(entt::entity e);
+
 	private:
 
 		void BuildFullJSON();
