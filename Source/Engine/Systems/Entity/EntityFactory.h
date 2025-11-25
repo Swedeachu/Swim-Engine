@@ -47,7 +47,7 @@ namespace Engine
 				Material& mRef = reg.emplace<Material>(e, material);
 
 				// User callback: entity + created components + rest
-				fn(e, tRef, mRef, a...);
+				fn(e, tRef, mRef, std::move(a)...);
 			}
 			);
 		}
@@ -104,7 +104,7 @@ namespace Engine
 				// Invoke user callback: entity + components + behavior ptrs + rest
 				std::apply([&](auto*... bs)
 				{
-					fn(e, tRef, mRef, bs..., a...);
+					fn(e, tRef, mRef, bs..., std::move(a)...);
 				}, behaviorPtrs);
 
 				// Refresh behavior field cache once after all behaviors + user callback
@@ -154,7 +154,7 @@ namespace Engine
 
 				std::apply([&](auto*... ps)
 				{
-					fn(e, ps..., a...);
+					fn(e, ps..., std::move(a)...);
 				}, tuplePtrs);
 
 				// Refresh behavior field cache once after all behaviors + user callback
@@ -173,7 +173,7 @@ namespace Engine
 			createQueue.push(
 				[fn = std::forward<Func>(func), ...args = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
-				fn(reg, e, args...);
+				fn(reg, e, std::move(args)...);
 			}
 			);
 		}
@@ -185,7 +185,7 @@ namespace Engine
 			destroyQueue.push(
 				[fn = std::forward<Func>(func), ...args = std::forward<Args>(args)]() mutable
 			{
-				fn(args...);
+				fn(std::move(args)...);
 			}
 			);
 		}
