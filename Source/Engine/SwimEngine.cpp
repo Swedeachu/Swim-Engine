@@ -498,10 +498,13 @@ namespace Engine
 		const std::string msgUtf8 = WStringToUTF8(msg);
 
 		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
-		if (!ok)
+		if (ok)
 		{
-			// Unknown command or just generic message:
-			SendEditorMessage(L"(Non-Command): " + msg);
+			SendEditorMessage(L"(Recv [200]): " + msg); // ok
+		}
+		else
+		{
+			SendEditorMessage(L"(Recv [400]): " + msg); // incorrect request, either not a command or was just a hack message with no logic to execute beyond a pong
 		}
 	}
 

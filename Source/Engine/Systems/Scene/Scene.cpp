@@ -56,6 +56,7 @@ namespace Engine
 		}
 
 		// Removing Transform is our signal that the entity is gone from the editor's POV. (I don't like this behavior at all)
+		// Shouldn't an entity being removed entirely be the one and only signal?
 		if constexpr (std::is_same_v<T, Transform>)
 		{
 			if (serializedEntities.erase(entity) > 0)

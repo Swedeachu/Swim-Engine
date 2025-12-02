@@ -202,8 +202,7 @@ namespace Engine
 			return;
 		}
 
-		// Use default channel 1 for now
-		engine->SendEditorMessage(wide, /*channel*/ 1);
+		engine->SendEditorMessage(wide, /*channel*/ 2);
 	}
 
 	void SerializedSceneManager::SaveFullJSON()
@@ -432,7 +431,7 @@ namespace Engine
 			return;
 		}
 
-		engine->SendEditorMessage(wide, /*channel*/ 1);
+		engine->SendEditorMessage(wide, /*channel*/ 2);
 
 		// Clear per-frame queues
 		createdEntities.clear();

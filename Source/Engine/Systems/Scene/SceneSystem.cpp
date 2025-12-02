@@ -1,6 +1,9 @@
 #include "PCH.h"
 #include "SceneSystem.h"
 #include "Engine/SwimEngine.h"
+#include "Engine/Components/Transform.h"
+#include "Engine/Components/Material.h"
+#include "Engine/Components/ObjectTag.h"
 
 namespace Engine
 {
@@ -51,6 +54,9 @@ namespace Engine
 				if (err == 0) err = terr;
 			}
 		}
+
+		// We want to then register all our editor commands
+		RegisterEditorCommands();
 
 		return err;
 	}
@@ -146,6 +152,206 @@ namespace Engine
 				}
 			}
 		}
+	}
+
+	void SceneSystem::RegisterEditorCommands()
+	{
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		std::shared_ptr<CommandSystem> cmd = engine->GetCommandSystem();
+		if (!cmd)
+		{
+			return;
+		}
+
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
+		// (scene.entity.create parentId)
+		// parentId == 0 -> no parent (root under scene)
+		cmd->Register<unsigned int>(
+			"scene.entity.create",
+			std::function<void(unsigned int)>(
+			[self](unsigned int parentId)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = scene->CreateEntity();
+
+			// Give it a Transform so it becomes visible / parentable – this will also
+			// trigger serialization hooks for "entity created".
+			scene->EmplaceComponent<Transform>(e);
+
+			entt::registry& reg = scene->GetRegistry();
+
+			// Optional parenting
+			if (parentId != 0u)
+			{
+				entt::entity parent = static_cast<entt::entity>(parentId);
+				if (reg.valid(parent))
+				{
+					scene->SetParent(e, parent);
+				}
+			}
+
+			// Give it a default ObjectTag name ("Entity 12" etc.)
+			const std::string name = scene->GetEntityName(e);
+			scene->SetTag(e, TagConstants::WORLD, name);
+
+			// No need to manually ping SerializedSceneManager;
+			// registry hooks will send created/updated events.
+		}));
+
+		// (scene.entity.destroy entityId destroyChildren)
+		// destroyChildren: true = destroy subtree, false = keep children and detach them.
+		cmd->Register<unsigned int, bool>(
+			"scene.entity.destroy",
+			std::function<void(unsigned int, bool)>(
+			[self](unsigned int entityId, bool destroyChildren)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			entt::registry& reg = scene->GetRegistry();
+
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			// DestroyEntity already drives serialization via component hooks.
+			scene->DestroyEntity(e, true, destroyChildren);
+		}));
+
+		// Helper: add a known component by string name
+		auto addComponentByName = [](Scene& scene, entt::entity e, const std::string& componentName)
+		{
+			entt::registry& reg = scene.GetRegistry();
+
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			if (componentName == "Transform")
+			{
+				if (!reg.any_of<Transform>(e))
+				{
+					scene.EmplaceComponent<Transform>(e);
+				}
+			}
+			else if (componentName == "Material")
+			{
+				if (!reg.any_of<Material>(e))
+				{
+					scene.EmplaceComponent<Material>(e);
+				}
+			}
+			else if (componentName == "ObjectTag")
+			{
+				if (!reg.any_of<ObjectTag>(e))
+				{
+					const std::string name = scene.GetEntityName(e);
+					scene.EmplaceComponent<ObjectTag>(e, TagConstants::WORLD, name);
+				}
+			}
+			// else: could log unknown component
+		};
+
+		// Helper: remove a known component by string name
+		auto removeComponentByName = [](Scene& scene, entt::entity e, const std::string& componentName)
+		{
+			entt::registry& reg = scene.GetRegistry();
+
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			if (componentName == "Transform")
+			{
+				// Removing Transform is effectively "delete from editor's POV".
+				// You probably don't want to allow this via context menu directly;
+				// prefer scene.entity.destroy instead. Here we just do nothing.
+				return;
+			}
+			else if (componentName == "Material")
+			{
+				scene.RemoveComponent<Material>(e);
+			}
+			else if (componentName == "ObjectTag")
+			{
+				scene.RemoveTag(e);
+			}
+			// else: unknown component -> ignore
+		};
+
+		// (scene.entity.addComponent entityId "ComponentName")
+		cmd->Register<unsigned int, std::string>(
+			"scene.entity.addComponent",
+			std::function<void(unsigned int, std::string)>(
+			[self, addComponentByName](unsigned int entityId, std::string componentName)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			addComponentByName(*scene, e, componentName);
+		}));
+
+		// (scene.entity.removeComponent entityId "ComponentName")
+		cmd->Register<unsigned int, std::string>(
+			"scene.entity.removeComponent",
+			std::function<void(unsigned int, std::string)>(
+			[self, removeComponentByName](unsigned int entityId, std::string componentName)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			removeComponentByName(*scene, e, componentName);
+		}));
 	}
 
 }

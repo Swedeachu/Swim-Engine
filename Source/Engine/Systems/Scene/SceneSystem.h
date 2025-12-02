@@ -35,6 +35,8 @@ namespace Engine
 
 	private:
 
+		void RegisterEditorCommands();
+
 		// Map of scenes by name
 		std::map<std::string, std::shared_ptr<Scene>> scenes;
 
