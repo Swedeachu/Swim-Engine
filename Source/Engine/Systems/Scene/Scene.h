@@ -243,6 +243,8 @@ namespace Engine
 			}), vec.end());
 		}
 
+		Behavior* EmplaceBehaviorByName(entt::entity e, const std::string& behaviorName);
+
 		// Calls Behavior::RefreshFieldCache() on each behavior the entity has
 		void RefreshBehaviorFieldCacheForEntity(entt::entity e);
 

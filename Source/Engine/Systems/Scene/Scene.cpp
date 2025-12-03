@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Entity/EntityFactory.h"
@@ -55,30 +56,18 @@ namespace Engine
 			return;
 		}
 
-		// Removing Transform is our signal that the entity is gone from the editor's POV. (I don't like this behavior at all)
-		// Shouldn't an entity being removed entirely be the one and only signal?
-		if constexpr (std::is_same_v<T, Transform>)
+		// If the entity is still valid, just mark it as updated.
+		if (reg.valid(entity))
 		{
-			if (serializedEntities.erase(entity) > 0)
-			{
-				serializedSceneManager->SendEntityDestroyed(entity);
-			}
+			serializedSceneManager->SendEntityUpdated(entity);
 		}
 		else
 		{
-			// For non-Transform components, if the entity is still valid, just mark it as updated.
-			if (reg.valid(entity))
+			// If somehow this destruction happens while the entity is being torn down,
+			// treat it as a destroy event (once).
+			if (serializedEntities.erase(entity) > 0)
 			{
-				serializedSceneManager->SendEntityUpdated(entity);
-			}
-			else
-			{
-				// If somehow this destruction happens while the entity is being torn down,
-				// treat it as a destroy event (once).
-				if (serializedEntities.erase(entity) > 0)
-				{
-					serializedSceneManager->SendEntityDestroyed(entity);
-				}
+				serializedSceneManager->SendEntityDestroyed(entity);
 			}
 		}
 	}
@@ -98,6 +87,14 @@ namespace Engine
 		if (!registry.valid(entity))
 		{
 			return;
+		}
+
+		if (serializedSceneManager)
+		{
+			if (serializedEntities.erase(entity) > 0)
+			{
+				serializedSceneManager->SendEntityDestroyed(entity);
+			}
 		}
 
 		// We intentionally do NOT manually notify the serializer here.
@@ -480,6 +477,7 @@ namespace Engine
 			// Transform drives "entity created/destroyed" for the editor.
 			BindSerializationHooksForComponent<Transform>();
 			BindSerializationHooksForComponent<Material>();
+			BindSerializationHooksForComponent<CompositeMaterial>();
 			BindSerializationHooksForComponent<ObjectTag>();
 			BindSerializationHooksForComponent<BehaviorComponents>();
 		}
@@ -782,6 +780,37 @@ namespace Engine
 		}
 
 		return handled;
+	}
+
+	Behavior* Scene::EmplaceBehaviorByName(entt::entity e, const std::string& behaviorName)
+	{
+		if (!registry.valid(e))
+		{
+			return nullptr;
+		}
+
+		BehaviorFactory& behaviorRegistry = BehaviorFactory::GetInstance();
+
+		if (!behaviorRegistry.Exists(behaviorName))
+		{
+			std::cout << "Scene::EmplaceBehaviorByName | Unknown behavior: " << behaviorName << std::endl;
+			return nullptr;
+		}
+
+		std::unique_ptr<Behavior> behavior = behaviorRegistry.Create(behaviorName, this, e);
+		if (!behavior)
+		{
+			return nullptr;
+		}
+
+		// Attach to BehaviorComponents just like EmplaceBehavior<T>
+		BehaviorComponents& bc = registry.get_or_emplace<BehaviorComponents>(e);
+		Behavior* rawPtr = behavior.get();
+		bc.behaviors.push_back(std::move(behavior));
+
+		rawPtr->RefreshFieldCache();
+
+		return rawPtr;
 	}
 
 	void Scene::RefreshBehaviorFieldCacheForEntity(entt::entity e)

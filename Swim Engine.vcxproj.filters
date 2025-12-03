@@ -368,6 +368,8 @@
     <ClInclude Include="Source\Engine\EngineState.h" />
     <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorFactory.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorRegistrar.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

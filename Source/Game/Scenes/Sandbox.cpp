@@ -28,7 +28,7 @@ namespace Game
 	constexpr static bool doUI = true;
 	constexpr static bool glbTests = true;
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
-	constexpr static bool testPrimitiveMeshes = true;
+	constexpr static bool testPrimitiveMeshes = false;
 	constexpr static bool doWorldSpaceParentTesting = true; // via orbit system
 
 	int SandBox::Awake()
@@ -102,7 +102,9 @@ namespace Game
 		);
 		// billboardDecorator.SetUseMeshMaterialColor(true);
 		AddComponent<Engine::MeshDecorator>(billboard, billboardDecorator);
-		EmplaceBehavior<Spin>(billboard);
+		SetTag(billboard, Engine::TagConstants::WORLD, "billboard");
+		// EmplaceBehavior<Spin>(billboard);
+		EmplaceBehaviorByName(billboard, "Spin"); // Use the entity factory for this just to show this works
 		//*/
 
 		// World space text entity
@@ -110,6 +112,7 @@ namespace Game
 		glm::vec3 textEntityScreenPos = glm::vec3(10.0f, 0.f, 0.0f);
 		glm::vec3 textEntitySize = glm::vec3(1.0f, 1.0f, 1.0f);
 		AddComponent<Engine::Transform>(textEntity, Engine::Transform(textEntityScreenPos, textEntitySize, glm::quat(), Engine::TransformSpace::World));
+		SetTag(textEntity, Engine::TagConstants::WORLD, "world space text");
 
 		// Get the font pool and the roboto_bold font from it 
 		Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
@@ -135,6 +138,7 @@ namespace Game
 
 		// Make a barrel entity that spins
 		auto spinEntity = CreateEntity();
+		SetTag(spinEntity, Engine::TagConstants::WORLD, "barrel");
 		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 
 		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
@@ -142,16 +146,14 @@ namespace Game
 		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel, "Assets/Models/barrel.glb"));
 		EmplaceBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
-		// We can make the Movement entity like this (actual physical entity we can control with WASD simple controller)
+		// We can make the Movement entity like this (actual physical entity we can control with arrow keys simple controller)
 		entityFactory.CreateWithTransformAndMaterialAndBehaviors<SimpleMovement>(
 			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
-			Engine::Material(materialData1)
-			/*,
-			[](entt::entity e, Engine::Transform& t, Engine::Material& m, SimpleMovement* mv)
+			Engine::Material(materialData1),
+			[this](entt::entity e, Engine::Transform& t, Engine::Material& m, SimpleMovement* mv)
 			{
-				// and we can even have a callback if we wanted (commented out since we don't need a cb here)
+				SetTag(e, Engine::TagConstants::WORLD, "player");
 			}
-			*/
 		);
 
 		// We can load scene scripts with a call back onto a fresh entity this way as a cool hack/trick
@@ -178,6 +180,7 @@ namespace Game
 
 		// Couch time
 		auto couch = CreateEntity();
+		SetTag(couch, Engine::TagConstants::WORLD, "couch");
 		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
 		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel, "Assets/Models/webp_sofa.glb"));
@@ -212,6 +215,7 @@ namespace Game
 			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData, "Assets/Models/Sponza/sponza-ktx-draco.glb");
 
 			auto sponza = CreateEntity();
+			SetTag(sponza, Engine::TagConstants::WORLD, "sponza");
 			AddComponent<Engine::Transform>(sponza, Engine::Transform(glm::vec3(3.0f, 0.0f, -12.0f), sponzaScale));
 			AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
 		}

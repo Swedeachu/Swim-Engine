@@ -2,6 +2,7 @@
 
 #include "Engine/Machine.h"
 #include "Engine/EngineState.h"
+#include "BehaviorRegistrar.h"
 
 namespace Engine
 {

@@ -33,4 +33,7 @@ namespace Game
 
 	};
 
+	// Now that the spin behavior type is defined, we can register it to the behavior factory
+	REGISTER_BEHAVIOR(Spin)
+
 }

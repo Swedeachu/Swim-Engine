@@ -58,7 +58,11 @@ namespace Engine
 		}
 
 		// We want to then register all our editor commands
-		RegisterEditorCommands();
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			RegisterEditorCommands();
+			SendBehaviorsToEditor();
+		}
 
 		return err;
 	}
@@ -213,12 +217,23 @@ namespace Engine
 		else if (componentName == "Material")
 		{
 			scene.RemoveComponent<Material>(e);
+			scene.RemoveComponent<CompositeMaterial>(e);
 		}
 		else if (componentName == "ObjectTag")
 		{
 			scene.RemoveTag(e);
 		}
 		// else: unknown component -> ignore
+	}
+
+	void SceneSystem::SendBehaviorsToEditor()
+	{
+		auto engine = SwimEngine::GetInstance();
+		auto behaviorFactories = BehaviorFactory::GetInstance().GetFactories();
+		for (const auto factory : behaviorFactories)
+		{
+			engine->SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
+		}
 	}
 
 	// Command registration entry point
@@ -242,6 +257,8 @@ namespace Engine
 		RegisterEntityAddComponentCommand(cmd);
 		RegisterEntityRemoveComponentCommand(cmd);
 		RegisterEntitySetMaterialCommand(cmd);
+		RegisterEntityBehaviorAddCommand(cmd);
+		RegisterEntityBehaviorRemoveCommand(cmd);
 	}
 
 	// (scene.entity.create parentId)
@@ -380,15 +397,6 @@ namespace Engine
 	}
 
 	// (scene.entity.setMaterial entityId "MaterialKey")
-	//
-	// MaterialKey is either:
-	//   - A simple material name registered in MaterialPool::materials
-	//   - A composite material key/path used in MaterialPool::compositeMaterials
-	// Logic:
-	//   1) Prefer composite material (already registered).
-	//   2) Otherwise fall back to simple MaterialData.
-	//   3) As a last resort, try lazy-loading a composite by path.
-	//   4) Flip components on the entity appropriately (Material vs CompositeMaterial).
 	void SceneSystem::RegisterEntitySetMaterialCommand(std::shared_ptr<CommandSystem>& cmd)
 	{
 		std::weak_ptr<SceneSystem> self = shared_from_this();
@@ -419,7 +427,7 @@ namespace Engine
 
 			MaterialPool& materialPool = MaterialPool::GetInstance();
 
-			// Check if we this is a composite material
+			// Check if this is a composite material
 			if (materialPool.CompositeMaterialExists(materialKey))
 			{
 				try
@@ -427,19 +435,16 @@ namespace Engine
 					// Attempt to get it
 					auto data = materialPool.GetCompositeMaterialData(materialKey);
 					// Remove since we are doing a material replacement
-					if (reg.any_of<CompositeMaterial>(e))
-					{
-						reg.remove<CompositeMaterial>(e);
-					}
+					if (reg.any_of<Material>(e)) { reg.remove<Material>(e); }
+					if (reg.any_of<CompositeMaterial>(e)) { reg.remove<CompositeMaterial>(e); }
 					// Replace in new one
-					std::cout << "Applying new composite material " << materialKey << std::endl;
+					// std::cout << "Applying new composite material " << materialKey << std::endl;
 					reg.emplace<CompositeMaterial>(e, data, materialKey);
-
 					// Hack fix because bvh will not update while in editor mode sometimes
 					auto bvh = scene->GetSceneBVH();
 					if (bvh) { bvh->ForceUpdateNextFrame(); }
-
-					return; // done
+					// Done
+					return;
 				}
 				catch (std::exception e)
 				{
@@ -456,19 +461,16 @@ namespace Engine
 					// Attempt to get it
 					auto data = materialPool.GetMaterialData(materialKey);
 					// Remove since we are doing a material replacement
-					if (reg.any_of<Material>(e))
-					{
-						reg.remove<Material>(e);
-					}
+					if (reg.any_of<Material>(e)) { reg.remove<Material>(e); }
+					if (reg.any_of<CompositeMaterial>(e)) { reg.remove<CompositeMaterial>(e); }
 					// Replace in new one
-					std::cout << "Applying new material " << materialKey << std::endl;
+					// std::cout << "Applying new material " << materialKey << std::endl;
 					reg.emplace<Material>(e, data);
-
 					// Hack fix because bvh will not update while in editor mode sometimes
 					auto bvh = scene->GetSceneBVH();
 					if (bvh) { bvh->ForceUpdateNextFrame(); }
-
-					return; // done
+					// Done
+					return;
 				}
 				catch (std::exception e)
 				{
@@ -480,5 +482,89 @@ namespace Engine
 			std::cout << "Failed to apply material " << materialKey << std::endl;
 		}));
 	}
+
+	void SceneSystem::RegisterEntityBehaviorAddCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
+		cmd->Register<unsigned int, std::string>(
+			"scene.entity.addBehavior",
+			std::function<void(unsigned int, std::string)>(
+			[self](unsigned int entityId, std::string behaviorName)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			entt::registry& reg = scene->GetRegistry();
+
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			// Try to attach the behavior by name
+			Behavior* behavior = scene->EmplaceBehaviorByName(e, behaviorName);
+			if (behavior == nullptr)
+			{
+				std::cout << "SceneSystem::RegisterEntityBehaviorAddCommand | Failed to add behavior: " << behaviorName << " to entity " << entityId << std::endl;
+				return;
+			}
+		}));
+	}
+
+	void SceneSystem::RegisterEntityBehaviorRemoveCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
+		cmd->Register<unsigned int, std::string>(
+			"scene.entity.removeBehavior",
+			std::function<void(unsigned int, std::string)>(
+			[self](unsigned int entityId, std::string behaviorName)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			entt::registry& reg = scene->GetRegistry();
+
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			/* TODO: not a method yet, behavior needs a get behavior name method of some sort
+			// Try to remove the behavior by name
+			const bool removed = scene->RemoveBehaviorByName(e, behaviorName);
+			if (!removed)
+			{
+				std::cout << "SceneSystem::RegisterEntityBehaviorRemoveCommand | Failed to remove behavior: " << behaviorName << " from entity " << entityId << std::endl;
+				return;
+			}
+			*/
+
+			// Behaviors on this entity changed; refresh their caches
+			scene->RefreshBehaviorFieldCacheForEntity(e);
+		}));
+	}
+
 
 }
