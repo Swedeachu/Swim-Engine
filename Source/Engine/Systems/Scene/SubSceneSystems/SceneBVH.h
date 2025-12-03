@@ -27,6 +27,7 @@ namespace Engine
 		void RemoveEntity(entt::entity entity);
 
 		bool ShouldForceUpdate() const { return forceUpdate; }
+		void ForceUpdateNextFrame() { forceUpdate = true; }
 
 		void SetDebugDrawer(SceneDebugDraw* drawer)
 		{

@@ -53,7 +53,7 @@ namespace Engine
 			if (terr != 0)
 			{
 				std::cerr << "Scene '" << name << "' failed to Awake.\n";
-				if (err == 0) err = terr;
+				if (err == 0) { err = terr; }
 			}
 		}
 
@@ -106,7 +106,7 @@ namespace Engine
 			if (terr != 0)
 			{
 				std::cerr << "Scene '" << name << "' failed to Exit.\n";
-				if (err == 0) err = terr;
+				if (err == 0) { err = terr; }
 			}
 		}
 
@@ -156,7 +156,72 @@ namespace Engine
 		}
 	}
 
-	// This is really bad and should not be a 500 line function
+	// Small helpers used by the add/remove component commands:
+
+	void SceneSystem::AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName)
+	{
+		entt::registry& reg = scene.GetRegistry();
+		entt::entity e = static_cast<entt::entity>(entityId);
+
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		if (componentName == "Transform")
+		{
+			if (!reg.any_of<Transform>(e))
+			{
+				scene.EmplaceComponent<Transform>(e);
+			}
+		}
+		else if (componentName == "Material")
+		{
+			if (!reg.any_of<Material>(e))
+			{
+				scene.EmplaceComponent<Material>(e);
+			}
+		}
+		else if (componentName == "ObjectTag")
+		{
+			if (!reg.any_of<ObjectTag>(e))
+			{
+				const std::string name = scene.GetEntityName(e);
+				scene.EmplaceComponent<ObjectTag>(e, TagConstants::WORLD, name);
+			}
+		}
+		else
+		{
+			std::cout << "SceneSystem::AddComponentByName | Unknown component: " << componentName << std::endl;
+		}
+	}
+
+	void SceneSystem::RemoveComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName)
+	{
+		entt::registry& reg = scene.GetRegistry();
+		entt::entity e = static_cast<entt::entity>(entityId);
+
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		if (componentName == "Transform")
+		{
+			scene.RemoveComponent<Transform>(e);
+		}
+		else if (componentName == "Material")
+		{
+			scene.RemoveComponent<Material>(e);
+		}
+		else if (componentName == "ObjectTag")
+		{
+			scene.RemoveTag(e);
+		}
+		// else: unknown component -> ignore
+	}
+
+	// Command registration entry point
 	void SceneSystem::RegisterEditorCommands()
 	{
 		auto engine = SwimEngine::GetInstance();
@@ -171,10 +236,20 @@ namespace Engine
 			return;
 		}
 
+		// Each of these is now a small, focused function
+		RegisterEntityCreateCommand(cmd);
+		RegisterEntityDestroyCommand(cmd);
+		RegisterEntityAddComponentCommand(cmd);
+		RegisterEntityRemoveComponentCommand(cmd);
+		RegisterEntitySetMaterialCommand(cmd);
+	}
+
+	// (scene.entity.create parentId)
+	// parentId == 0 -> no parent (root under scene)
+	void SceneSystem::RegisterEntityCreateCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
 		std::weak_ptr<SceneSystem> self = shared_from_this();
 
-		// (scene.entity.create parentId)
-		// parentId == 0 -> no parent (root under scene)
 		cmd->Register<unsigned int>(
 			"scene.entity.create",
 			std::function<void(unsigned int)>(
@@ -213,13 +288,15 @@ namespace Engine
 			// Give it a default ObjectTag name ("Entity 12" etc.)
 			const std::string name = scene->GetEntityName(e);
 			scene->SetTag(e, TagConstants::WORLD, name);
-
-			// No need to manually ping SerializedSceneManager;
-			// registry hooks will send created/updated events.
 		}));
+	}
 
-		// (scene.entity.destroy entityId destroyChildren)
-		// destroyChildren: true = destroy subtree, false = keep children and detach them.
+	// (scene.entity.destroy entityId destroyChildren)
+	// destroyChildren: true = destroy subtree, false = keep children and detach them.
+	void SceneSystem::RegisterEntityDestroyCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
 		cmd->Register<unsigned int, bool>(
 			"scene.entity.destroy",
 			std::function<void(unsigned int, bool)>(
@@ -248,75 +325,17 @@ namespace Engine
 			// DestroyEntity already drives serialization via component hooks.
 			scene->DestroyEntity(e, true, destroyChildren);
 		}));
+	}
 
-		// Helper: add a known component by string name
-		auto addComponentByName = [](Scene& scene, entt::entity e, const std::string& componentName)
-		{
-			entt::registry& reg = scene.GetRegistry();
+	// (scene.entity.addComponent entityId "ComponentName")
+	void SceneSystem::RegisterEntityAddComponentCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
 
-			if (!reg.valid(e))
-			{
-				return;
-			}
-
-			if (componentName == "Transform")
-			{
-				if (!reg.any_of<Transform>(e))
-				{
-					scene.EmplaceComponent<Transform>(e);
-				}
-			}
-			else if (componentName == "Material")
-			{
-				if (!reg.any_of<Material>(e))
-				{
-					scene.EmplaceComponent<Material>(e);
-				}
-			}
-			else if (componentName == "ObjectTag")
-			{
-				if (!reg.any_of<ObjectTag>(e))
-				{
-					const std::string name = scene.GetEntityName(e);
-					scene.EmplaceComponent<ObjectTag>(e, TagConstants::WORLD, name);
-				}
-			}
-			// else: could log unknown component
-		};
-
-		// Helper: remove a known component by string name
-		auto removeComponentByName = [](Scene& scene, entt::entity e, const std::string& componentName)
-		{
-			entt::registry& reg = scene.GetRegistry();
-
-			if (!reg.valid(e))
-			{
-				return;
-			}
-
-			if (componentName == "Transform")
-			{
-				// Removing Transform is effectively "delete from editor's POV".
-				// You probably don't want to allow this via context menu directly;
-				// prefer scene.entity.destroy instead. Here we just do nothing.
-				return;
-			}
-			else if (componentName == "Material")
-			{
-				scene.RemoveComponent<Material>(e);
-			}
-			else if (componentName == "ObjectTag")
-			{
-				scene.RemoveTag(e);
-			}
-			// else: unknown component -> ignore
-		};
-
-		// (scene.entity.addComponent entityId "ComponentName")
 		cmd->Register<unsigned int, std::string>(
 			"scene.entity.addComponent",
 			std::function<void(unsigned int, std::string)>(
-			[self, addComponentByName](unsigned int entityId, std::string componentName)
+			[self, this](unsigned int entityId, std::string componentName)
 		{
 			auto s = self.lock();
 			if (!s)
@@ -330,15 +349,19 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			addComponentByName(*scene, e, componentName);
+			AddComponentByName(*scene, entityId, componentName);
 		}));
+	}
 
-		// (scene.entity.removeComponent entityId "ComponentName")
+	// (scene.entity.removeComponent entityId "ComponentName")
+	void SceneSystem::RegisterEntityRemoveComponentCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
 		cmd->Register<unsigned int, std::string>(
 			"scene.entity.removeComponent",
 			std::function<void(unsigned int, std::string)>(
-			[self, removeComponentByName](unsigned int entityId, std::string componentName)
+			[self, this](unsigned int entityId, std::string componentName)
 		{
 			auto s = self.lock();
 			if (!s)
@@ -352,18 +375,24 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			removeComponentByName(*scene, e, componentName);
+			RemoveComponentByName(*scene, entityId, componentName);
 		}));
+	}
 
-		// (scene.entity.setMaterial entityId "MaterialKey")
-		// MaterialKey is either:
-		//   - A simple material name registered in MaterialPool::materials
-		//   - A composite material key/path used in MaterialPool::compositeMaterials
-		// Logic:
-		//   1) Prefer composite material (existing or lazy-loaded).
-		//   2) Otherwise fall back to simple MaterialData.
-		//   3) Flip components on the entity appropriately (Material vs CompositeMaterial).
+	// (scene.entity.setMaterial entityId "MaterialKey")
+	//
+	// MaterialKey is either:
+	//   - A simple material name registered in MaterialPool::materials
+	//   - A composite material key/path used in MaterialPool::compositeMaterials
+	// Logic:
+	//   1) Prefer composite material (already registered).
+	//   2) Otherwise fall back to simple MaterialData.
+	//   3) As a last resort, try lazy-loading a composite by path.
+	//   4) Flip components on the entity appropriately (Material vs CompositeMaterial).
+	void SceneSystem::RegisterEntitySetMaterialCommand(std::shared_ptr<CommandSystem>& cmd)
+	{
+		std::weak_ptr<SceneSystem> self = shared_from_this();
+
 		cmd->Register<unsigned int, std::string>(
 			"scene.entity.setMaterial",
 			std::function<void(unsigned int, std::string)>(
@@ -390,83 +419,65 @@ namespace Engine
 
 			MaterialPool& materialPool = MaterialPool::GetInstance();
 
-			// First try composite material: prefer existing, then lazy-load.
-			std::vector<std::shared_ptr<MaterialData>> compositeData;
-			bool hasComposite = false;
-
-			try
+			// Check if we this is a composite material
+			if (materialPool.CompositeMaterialExists(materialKey))
 			{
-				if (materialPool.CompositeMaterialExists(materialKey))
+				try
 				{
-					compositeData = materialPool.GetCompositeMaterialData(materialKey);
-					hasComposite = !compositeData.empty();
+					// Attempt to get it
+					auto data = materialPool.GetCompositeMaterialData(materialKey);
+					// Remove since we are doing a material replacement
+					if (reg.any_of<CompositeMaterial>(e))
+					{
+						reg.remove<CompositeMaterial>(e);
+					}
+					// Replace in new one
+					std::cout << "Applying new composite material " << materialKey << std::endl;
+					reg.emplace<CompositeMaterial>(e, data, materialKey);
+
+					// Hack fix because bvh will not update while in editor mode sometimes
+					auto bvh = scene->GetSceneBVH();
+					if (bvh) { bvh->ForceUpdateNextFrame(); }
+
+					return; // done
 				}
-				else
+				catch (std::exception e)
 				{
-					// Lazy-load by path if it's a GLB / composite asset path.
-					compositeData = materialPool.LazyLoadAndGetCompositeMaterial(materialKey);
-					hasComposite = !compositeData.empty();
+					std::cout << e.what() << std::endl;
+					return;
 				}
 			}
-			catch (const std::exception& ex)
-			{
-				std::cerr
-					<< "[scene.entity.setMaterial] Composite load failed for '"
-					<< materialKey << "': " << ex.what() << std::endl;
-			}
 
-			if (hasComposite)
+			// Check if this is a regular single material
+			if (materialPool.MaterialExists(materialKey))
 			{
-				// Remove simple material if present
-				if (reg.any_of<Material>(e))
+				try
 				{
-					scene->RemoveComponent<Material>(e);
-				}
+					// Attempt to get it
+					auto data = materialPool.GetMaterialData(materialKey);
+					// Remove since we are doing a material replacement
+					if (reg.any_of<Material>(e))
+					{
+						reg.remove<Material>(e);
+					}
+					// Replace in new one
+					std::cout << "Applying new material " << materialKey << std::endl;
+					reg.emplace<Material>(e, data);
 
-				// Replace any existing CompositeMaterial and emplace the new one
-				if (reg.any_of<CompositeMaterial>(e))
+					// Hack fix because bvh will not update while in editor mode sometimes
+					auto bvh = scene->GetSceneBVH();
+					if (bvh) { bvh->ForceUpdateNextFrame(); }
+
+					return; // done
+				}
+				catch (std::exception e)
 				{
-					scene->RemoveComponent<CompositeMaterial>(e);
+					std::cout << e.what() << std::endl;
+					return;
 				}
-
-				CompositeMaterial cm(compositeData, materialKey);
-				scene->EmplaceComponent<CompositeMaterial>(e, cm);
-
-				return;
 			}
 
-			// No composite, fall back to simple material
-			if (!materialPool.MaterialExists(materialKey))
-			{
-				std::cerr
-					<< "[scene.entity.setMaterial] No material or composite found for key '"
-					<< materialKey << "'." << std::endl;
-				return;
-			}
-
-			std::shared_ptr<MaterialData> matData = materialPool.GetMaterialData(materialKey);
-			if (!matData)
-			{
-				std::cerr
-					<< "[scene.entity.setMaterial] MaterialData pointer was null for key '"
-					<< materialKey << "'." << std::endl;
-				return;
-			}
-
-			// Remove composite if present
-			if (reg.any_of<CompositeMaterial>(e))
-			{
-				scene->RemoveComponent<CompositeMaterial>(e);
-			}
-
-			// Replace existing Material or emplace a new one
-			if (reg.any_of<Material>(e))
-			{
-				scene->RemoveComponent<Material>(e);
-			}
-
-			Material m(matData);
-			scene->EmplaceComponent<Material>(e, m);
+			std::cout << "Failed to apply material " << materialKey << std::endl;
 		}));
 	}
 
