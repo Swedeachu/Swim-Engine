@@ -6,6 +6,7 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/ObjectTag.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 
 #include <filesystem>
 #include <fstream>
@@ -167,8 +168,14 @@ namespace Engine
 			{
 				albedoTextureAssetFilePath = mat.data->albedoMap->GetFilePath();
 			}
+
+			if (mat.data->mesh && mat.data->mesh->meshBufferData)
+			{
+				modelFilePath = MaterialPool::GetInstance().GetMaterialNameByID(mat.data->mesh->meshBufferData->GetMeshID()); 
+			}
 		}
 
+		// Composite materials are many materials combined, so no texture path is set
 		if (reg.any_of<CompositeMaterial>(e))
 		{
 			CompositeMaterial& mat = reg.get<CompositeMaterial>(e);

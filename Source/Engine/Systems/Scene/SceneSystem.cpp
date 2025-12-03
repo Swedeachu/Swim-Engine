@@ -3,7 +3,9 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
+#include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/ObjectTag.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 
 namespace Engine
 {
@@ -154,6 +156,7 @@ namespace Engine
 		}
 	}
 
+	// This is really bad and should not be a 500 line function
 	void SceneSystem::RegisterEditorCommands()
 	{
 		auto engine = SwimEngine::GetInstance();
@@ -351,6 +354,119 @@ namespace Engine
 
 			entt::entity e = static_cast<entt::entity>(entityId);
 			removeComponentByName(*scene, e, componentName);
+		}));
+
+		// (scene.entity.setMaterial entityId "MaterialKey")
+		// MaterialKey is either:
+		//   - A simple material name registered in MaterialPool::materials
+		//   - A composite material key/path used in MaterialPool::compositeMaterials
+		// Logic:
+		//   1) Prefer composite material (existing or lazy-loaded).
+		//   2) Otherwise fall back to simple MaterialData.
+		//   3) Flip components on the entity appropriately (Material vs CompositeMaterial).
+		cmd->Register<unsigned int, std::string>(
+			"scene.entity.setMaterial",
+			std::function<void(unsigned int, std::string)>(
+			[self](unsigned int entityId, std::string materialKey)
+		{
+			auto s = self.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			if (!scene)
+			{
+				return;
+			}
+
+			entt::entity e = static_cast<entt::entity>(entityId);
+			entt::registry& reg = scene->GetRegistry();
+			if (!reg.valid(e))
+			{
+				return;
+			}
+
+			MaterialPool& materialPool = MaterialPool::GetInstance();
+
+			// First try composite material: prefer existing, then lazy-load.
+			std::vector<std::shared_ptr<MaterialData>> compositeData;
+			bool hasComposite = false;
+
+			try
+			{
+				if (materialPool.CompositeMaterialExists(materialKey))
+				{
+					compositeData = materialPool.GetCompositeMaterialData(materialKey);
+					hasComposite = !compositeData.empty();
+				}
+				else
+				{
+					// Lazy-load by path if it's a GLB / composite asset path.
+					compositeData = materialPool.LazyLoadAndGetCompositeMaterial(materialKey);
+					hasComposite = !compositeData.empty();
+				}
+			}
+			catch (const std::exception& ex)
+			{
+				std::cerr
+					<< "[scene.entity.setMaterial] Composite load failed for '"
+					<< materialKey << "': " << ex.what() << std::endl;
+			}
+
+			if (hasComposite)
+			{
+				// Remove simple material if present
+				if (reg.any_of<Material>(e))
+				{
+					scene->RemoveComponent<Material>(e);
+				}
+
+				// Replace any existing CompositeMaterial and emplace the new one
+				if (reg.any_of<CompositeMaterial>(e))
+				{
+					scene->RemoveComponent<CompositeMaterial>(e);
+				}
+
+				CompositeMaterial cm(compositeData, materialKey);
+				scene->EmplaceComponent<CompositeMaterial>(e, cm);
+
+				return;
+			}
+
+			// No composite, fall back to simple material
+			if (!materialPool.MaterialExists(materialKey))
+			{
+				std::cerr
+					<< "[scene.entity.setMaterial] No material or composite found for key '"
+					<< materialKey << "'." << std::endl;
+				return;
+			}
+
+			std::shared_ptr<MaterialData> matData = materialPool.GetMaterialData(materialKey);
+			if (!matData)
+			{
+				std::cerr
+					<< "[scene.entity.setMaterial] MaterialData pointer was null for key '"
+					<< materialKey << "'." << std::endl;
+				return;
+			}
+
+			// Remove composite if present
+			if (reg.any_of<CompositeMaterial>(e))
+			{
+				scene->RemoveComponent<CompositeMaterial>(e);
+			}
+
+			// Replace existing Material or emplace a new one
+			if (reg.any_of<Material>(e))
+			{
+				scene->RemoveComponent<Material>(e);
+			}
+
+			Material m(matData);
+			scene->EmplaceComponent<Material>(e, m);
 		}));
 	}
 

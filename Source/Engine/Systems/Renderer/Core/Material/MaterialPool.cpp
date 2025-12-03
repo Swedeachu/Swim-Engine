@@ -26,6 +26,50 @@ namespace Engine
 		return instance;
 	}
 
+	std::shared_ptr<MaterialData> MaterialPool::GetMaterialDataByID(uint32_t id)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+
+		for (auto& kv : materials)
+		{
+			const std::shared_ptr<MaterialData>& data = kv.second;
+			if (!data)
+			{
+				continue;
+			}
+
+			if (data->mesh->meshBufferData->meshID == id)
+			{
+				return data;
+			}
+		}
+
+		return nullptr;
+	}
+
+	std::string MaterialPool::GetMaterialNameByID(uint32_t id)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+
+		for (auto& kv : materials)
+		{
+			const std::string& name = kv.first;
+			const std::shared_ptr<MaterialData>& data = kv.second;
+
+			if (!data)
+			{
+				continue;
+			}
+
+			if (data->mesh->meshBufferData->meshID == id)
+			{
+				return name;
+			}
+		}
+
+		return std::string();
+	}
+
 	std::shared_ptr<MaterialData> MaterialPool::GetMaterialData(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
@@ -62,6 +106,13 @@ namespace Engine
 
 		auto data = std::make_shared<MaterialData>(mesh, albedoMap);
 		materials.emplace(name, data);
+
+		// Signal the editor to add this string to its list of material assets to keep track of
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			auto engineInstance = SwimEngine::GetInstance();
+			engineInstance->SendEditorMessage("registerMaterial " + name, /*channel:*/3);
+		}
 
 		return data;
 	}
@@ -601,6 +652,14 @@ namespace Engine
 		std::cout << "[DEBUG] Total materials loaded: " << loadedMaterials.size() << std::endl;
 
 		compositeMaterials.emplace(path, loadedMaterials);
+
+		// Signal the editor to add this string to its list of material assets to keep track of
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			auto engineInstance = SwimEngine::GetInstance();
+			engineInstance->SendEditorMessage("registerMaterial " + path, /*channel:*/3);
+		}
+
 		return loadedMaterials;
 	}
 
@@ -609,6 +668,13 @@ namespace Engine
 		std::lock_guard<std::mutex> lock(poolMutex);
 		materials.clear();
 		compositeMaterials.clear();
+
+		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		{
+			// Signal the meaterials are cleared
+			auto engineInstance = SwimEngine::GetInstance();
+			engineInstance->SendEditorMessage("clearMaterials", /*channel:*/1); // important enough to be on channel 1
+		}
 	}
 
 }
