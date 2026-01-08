@@ -63,7 +63,11 @@
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.cpp" />
-    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsWorld.cpp" />
+    <ClCompile Include="Source\Engine\Components\Transform.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Phys\BallShooter.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\Rigibody.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -371,7 +375,10 @@
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorFactory.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorRegistrar.h" />
-    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsWorld.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
+    <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

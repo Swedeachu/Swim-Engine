@@ -7,6 +7,10 @@
 namespace Engine
 {
 
+	// Forward declare
+	class Scene;
+	class PhysicsWorld;
+
 	enum class TransformSpace : int
 	{
 		World, // 0
@@ -19,6 +23,8 @@ namespace Engine
 
 		// Scene is responsible to wire parenting and invalidate subtrees efficiently
 		friend class Scene;
+		// Physics world will do sync between its actors and their transforms
+		friend class PhysicsWorld;
 
 	private:
 
@@ -39,49 +45,22 @@ namespace Engine
 
 		// Agnostic layer seperated from specifc rendering clip space for helping with UI layer priority logic such as mouse input.
 		// This is a complete hack.
-		float readableLayer{ 0 }; 
+		float readableLayer{ 0 };
 
 		// Parent + children (entity handles)
 		entt::entity parent = entt::null;
 		std::vector<entt::entity> children; // Scene manages membership
 
 		// Helpers to mark dirty
-		void MarkDirty()
-		{
-			dirty = true;
-			worldDirty = true;
-			TransformsDirty = true;
-			MarkChildrenDirty();
-		}
+		void MarkDirty();
 
 		// Called by Scene to invalidate world cache (and optionally local if needed)
-		void MarkWorldDirtyOnly()
-		{
-			worldDirty = true;
-			TransformsDirty = true;
-			MarkChildrenDirty();
-		}
+		void MarkWorldDirtyOnly();
 
-		void MarkChildrenDirty()
-		{
-			// scuffed hack, but is the most painless for the rest of the engine
-			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-			if (!scene) return;
+		void MarkChildrenDirty();
 
-			entt::registry& reg = scene->GetRegistry();
-
-			for (entt::entity child : children)
-			{
-				if (reg.valid(child))
-				{
-					if (reg.any_of<Transform>(child))
-					{
-						Transform& tf = reg.get<Transform>(child);
-						tf.MarkDirty();
-					}
-				}
-			}
-		}
+		// Helper: parent world rotation (TR only, no scale)
+		static glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry);
 
 	public:
 
@@ -91,7 +70,7 @@ namespace Engine
 		(
 			const glm::vec3& pos,
 			const glm::vec3& scl,
-			const glm::quat& rot = glm::quat(),
+			const glm::quat& rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f), // must be identity
 			TransformSpace ts = TransformSpace::World
 		)
 			: position(pos),
@@ -123,10 +102,7 @@ namespace Engine
 			if (scale != scl) { scale = scl; MarkDirty(); }
 		}
 
-		void SetRotation(const glm::quat& rot)
-		{
-			if (rotation != rot) { rotation = rot; MarkDirty(); }
-		}
+		void SetRotation(const glm::quat& rot);
 
 		void SetRotationEuler(float pitch, float yaw, float roll)
 		{
@@ -144,6 +120,7 @@ namespace Engine
 		glm::quat& GetRotationRef() { MarkDirty(); return rotation; }
 
 		TransformSpace GetTransformSpace() const { return space; }
+
 		void SetTransformSpace(TransformSpace ts)
 		{
 			if (space != ts) { space = ts; MarkDirty(); }
@@ -153,323 +130,54 @@ namespace Engine
 		// Maps an integer layer to a stable Z in [0,1] for orthographic depth sorting.
 		// Higher layer => rendered on top (smaller Z with standard Vulkan depth: LESS, near=0, far=1).
 		// kMaxLayers=4096 is a conservative choice that avoids precision issues while providing ample layers.
-		void SetScreenSpaceLayer(int layer)
-		{
-			constexpr int kMaxLayers = 4096;
-			constexpr float kEpsilon = 1e-6f;
-
-			// Clamp layer
-			int L = layer;
-
-			if (L < 0)
-			{
-				L = 0;
-			}
-
-			if (L >= kMaxLayers)
-			{
-				L = kMaxLayers - 1;
-			}
-
-			float z = position.z;
-
-			// Set readable layer agnostic to render context (HACK)
-			{
-				float zed = readableLayer;
-				const float stepNdc = 2.0f / (kMaxLayers + 2);
-				zed = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
-				zed = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
-				readableLayer = zed;
-			}
-
-			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-			{
-				// Spread evenly in (0,1) with a margin at both ends.
-				const float step = 1.0f / (kMaxLayers + 2); // margin = one step at each end
-				z = 1.0f - (static_cast<float>(L) + 1.0f) * step; // higher L -> smaller z (front)
-				// clamp for safety
-				z = glm::clamp(z, 0.0f + kEpsilon, 1.0f - kEpsilon);
-			}
-			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-			{
-				// Default OpenGL NDC is [-1, 1] with near = -1 (front), far = +1 (back).
-				// Reserve margins at both ends and distribute kMaxLayers steps across (-1, +1).
-				const float stepNdc = 2.0f / (kMaxLayers + 2);      // total span 2.0
-				// Start near +1 (back) and move toward -1 (front) as L increases.
-				z = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
-				// Tiny guard to avoid living exactly at the clip planes
-				z = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
-			}
-
-			if (z != position.z)
-			{
-				GetPositionRef().z = z;
-			}
-		}
+		void SetScreenSpaceLayer(int layer);
 
 		// NOTE: Only meaningful for screen-space transforms (TransformSpace::Screen).
 		// Adjusts this transform's Z value slightly above or below its parent's Z layer.
 		// Does nothing if there is no valid parent.
-		void SetScreenSpaceLayerRelativeToParent(bool aboveParent)
-		{
-			if (parent == entt::null) return;
-
-			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-			if (!scene) return;
-
-			entt::registry& reg = scene->GetRegistry();
-			if (!reg.valid(parent) || !reg.any_of<Transform>(parent)) return;
-
-			Transform& pTf = reg.get<Transform>(parent);
-			// const float parentZ = pTf.GetPosition().z;
-			const float parentZ = pTf.readableLayer;
-
-			constexpr float kOffset = 1e-5f;  // tiny bias to avoid z-fighting
-			float z = position.z;
-
-			// Set readable layer agnostic to render context (HACK)
-			{
-				if (aboveParent)
-				{
-					z = glm::max(parentZ - kOffset, -1.0f);
-				}
-				else
-				{
-					z = glm::min(parentZ + kOffset, +1.0f);
-				}
-				readableLayer = z;
-			}
-
-			if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-			{
-				// Vulkan: [0,1], smaller z is in front
-				if (aboveParent)
-				{
-					z = glm::max(parentZ - kOffset, 0.0f);
-				}
-				else
-				{
-					z = glm::min(parentZ + kOffset, 1.0f);
-				}
-			}
-			else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-			{
-				// Default OpenGL: [-1,1], smaller (more negative) is in front
-				if (aboveParent)
-				{
-					z = glm::max(parentZ - kOffset, -1.0f);
-				}
-				else
-				{
-					z = glm::min(parentZ + kOffset, +1.0f);
-				}
-			}
-
-			if (z != position.z)
-			{
-				GetPositionRef().z = z;
-			}
-		}
+		void SetScreenSpaceLayerRelativeToParent(bool aboveParent);
 
 		// LOCAL 
-		const glm::mat4& GetModelMatrix() const
-		{
-			if (dirty)
-			{
-				modelMatrix =
-					glm::translate(glm::mat4(1.0f), position)
-					* glm::mat4_cast(rotation)
-					* glm::scale(glm::mat4(1.0f), scale);
-				dirty = false;
-			}
-			return modelMatrix;
-		}
+		const glm::mat4& GetModelMatrix() const;
 
-		glm::quat GetWorldRotation(const entt::registry& registry) const
-		{
-			// If no parent, world rotation is just local rotation
-			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
-			{
-				return rotation;
-			}
+		glm::quat GetWorldRotation(const entt::registry& registry) const;
 
-			// Recursively get parent's world rotation and combine with local
-			const Transform& pTf = registry.get<Transform>(parent);
-			const glm::quat parentWorldRot = pTf.GetWorldRotation(registry);
-
-			// World rotation = parent world rotation * local rotation
-			return glm::normalize(parentWorldRot * rotation);
-		}
-
-		glm::vec3 GetWorldScale(const entt::registry& registry) const
-		{
-			const glm::mat4& world = GetWorldMatrix(registry);
-
-			const glm::vec3 col0 = glm::vec3(world[0]);
-			const glm::vec3 col1 = glm::vec3(world[1]);
-			const glm::vec3 col2 = glm::vec3(world[2]);
-
-			const glm::vec3 worldScale(
-				glm::length(col0),
-				glm::length(col1),
-				glm::length(col2)
-			);
-
-			return worldScale;
-		}
+		glm::vec3 GetWorldScale(const entt::registry& registry) const;
 
 		// You pretty much always want to call this method, which is kind of scuffed it needs the registry to get passed,
 		// very annoying and weird from a gameplay programmer's perspecitve. Same goes for scale and rotation.
-		glm::vec3 GetWorldPosition(const entt::registry& registry) const
-		{
-			const glm::mat4& world = GetWorldMatrix(registry);
-			return glm::vec3(world[3]);
-		}
+		glm::vec3 GetWorldPosition(const entt::registry& registry) const;
 
 		// WORLD (needs registry to walk parent chain)
 		// if parent is invalid or missing Transform, treated as no parent.
-		const glm::mat4& GetWorldMatrix(const entt::registry& registry) const
-		{
-			if (!worldDirty)
-			{
-				return worldMatrix;
-			}
+		const glm::mat4& GetWorldMatrix(const entt::registry& registry) const;
 
-			// compute local first 
-			const glm::mat4& local = GetModelMatrix();
-
-			if (parent != entt::null && registry.valid(parent) && registry.any_of<Transform>(parent))
-			{
-				const Transform& pTf = registry.get<Transform>(parent);
-				worldMatrix = pTf.GetWorldMatrix(registry) * local; // recursion w/ caching
-			}
-			else
-			{
-				worldMatrix = local;
-			}
-
-			worldDirty = false;
-
-			return worldMatrix;
-		}
-
-		static glm::mat4 MakeModelTR(const Transform& tf)
-		{
-			glm::mat4 T = glm::translate(glm::mat4(1.0f), tf.GetPosition());
-			glm::mat4 R = glm::mat4_cast(tf.GetRotation());
-			return T * R;
-		}
+		static glm::mat4 MakeModelTR(const Transform& tf);
 
 		// Maybe we should consider making this a method + caching model tr field and having a dirty flag for this.
-		static glm::mat4 MakeWorldTR(const Transform& tf, const entt::registry& registry)
-		{
-			// Start with the local TR (no scale)
-			glm::mat4 localTR = MakeModelTR(tf);
-
-			// If there's no valid parent, this is the world TR
-			if (tf.parent == entt::null || !registry.valid(tf.parent) || !registry.any_of<Transform>(tf.parent))
-			{
-				return localTR;
-			}
-
-			// Recursively multiply by parent's world TR
-			const Transform& parentTf = registry.get<Transform>(tf.parent);
-			return MakeWorldTR(parentTf, registry) * localTR;
-		}
+		static glm::mat4 MakeWorldTR(const Transform& tf, const entt::registry& registry);
 
 		// World -> Local: Position 
-		glm::vec3 WorldToLocalPosition(const entt::registry& registry, const glm::vec3& worldPos) const
-		{
-			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
-			{
-				return worldPos;
-			}
-
-			const Transform& pTf = registry.get<Transform>(parent);
-			const glm::mat4& parentWorld = pTf.GetWorldMatrix(registry);
-			const glm::mat4 invParentWorld = glm::inverse(parentWorld);
-
-			const glm::vec4 local = invParentWorld * glm::vec4(worldPos, 1.0f);
-			return glm::vec3(local);
-		}
+		glm::vec3 WorldToLocalPosition(const entt::registry& registry, const glm::vec3& worldPos) const;
 
 		// World -> Local: Scale 
 		// Assumes TRS (no shear). WorldScale = ParentWorldScale * LocalScale (component-wise),
 		// so LocalScale = WorldScale / ParentWorldScale.
-		glm::vec3 WorldToLocalScale(const entt::registry& registry, const glm::vec3& worldScale) const
-		{
-			if (parent == entt::null || !registry.valid(parent) || !registry.any_of<Transform>(parent))
-			{
-				return worldScale;
-			}
-
-			const Transform& pTf = registry.get<Transform>(parent);
-			const glm::vec3 pWorldScale = pTf.GetWorldScale(registry);
-
-			glm::vec3 localScale = worldScale;
-			const float eps = 1e-6f;
-
-			if (std::abs(pWorldScale.x) > eps) { localScale.x /= pWorldScale.x; }
-			if (std::abs(pWorldScale.y) > eps) { localScale.y /= pWorldScale.y; }
-			if (std::abs(pWorldScale.z) > eps) { localScale.z /= pWorldScale.z; }
-
-			return localScale;
-		}
-
-		// Helper: parent world rotation (TR only, no scale)
-		static inline glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry)
-		{
-			if (tf.parent == entt::null || !registry.valid(tf.parent) || !registry.any_of<Transform>(tf.parent))
-			{
-				return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-			}
-
-			const Transform& pTf = registry.get<Transform>(tf.parent);
-			const glm::mat4 parentTR = Transform::MakeWorldTR(pTf, registry);
-			const glm::mat3 parentR = glm::mat3(parentTR);
-			return glm::quat_cast(parentR);
-		}
+		glm::vec3 WorldToLocalScale(const entt::registry& registry, const glm::vec3& worldScale) const;
 
 		// World -> Local: Rotation (quat) 
-		glm::quat WorldToLocalRotation(const entt::registry& registry, const glm::quat& worldRot) const
-		{
-			const glm::quat parentWorldRot = GetParentWorldRotationTR(*this, registry);
-			// local = inv(parentRot) * world
-			glm::quat localRot = glm::normalize(glm::conjugate(parentWorldRot) * worldRot);
-			return localRot;
-		}
+		glm::quat WorldToLocalRotation(const entt::registry& registry, const glm::quat& worldRot) const;
 
 		// World -> Local: Rotation (Euler degrees) 
-		glm::quat WorldToLocalRotation(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg) const
-		{
-			const glm::vec3 eulerRad = glm::radians(glm::vec3(pitchDeg, yawDeg, rollDeg));
-			const glm::quat worldRot = glm::quat(eulerRad);
-			return WorldToLocalRotation(registry, worldRot);
-		}
+		glm::quat WorldToLocalRotation(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg) const;
 
-		void SetWorldPosition(const entt::registry& registry, const glm::vec3& worldPos)
-		{
-			const glm::vec3 localPos = WorldToLocalPosition(registry, worldPos);
-			SetPosition(localPos);
-		}
+		void SetWorldPosition(const entt::registry& registry, const glm::vec3& worldPos);
 
-		void SetWorldScale(const entt::registry& registry, const glm::vec3& worldScale)
-		{
-			const glm::vec3 localScale = WorldToLocalScale(registry, worldScale);
-			SetScale(localScale);
-		}
+		void SetWorldScale(const entt::registry& registry, const glm::vec3& worldScale);
 
-		void SetWorldRotation(const entt::registry& registry, const glm::quat& worldRot)
-		{
-			const glm::quat localRot = WorldToLocalRotation(registry, worldRot);
-			SetRotation(localRot);
-		}
+		void SetWorldRotation(const entt::registry& registry, const glm::quat& worldRot);
 
-		void SetWorldRotationEuler(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg)
-		{
-			const glm::quat localRot = WorldToLocalRotation(registry, pitchDeg, yawDeg, rollDeg);
-			SetRotation(localRot);
-		}
+		void SetWorldRotationEuler(const entt::registry& registry, float pitchDeg, float yawDeg, float rollDeg);
 
 		bool HasParent() const { return parent != entt::null; }
 		entt::entity GetParent() const { return parent; }

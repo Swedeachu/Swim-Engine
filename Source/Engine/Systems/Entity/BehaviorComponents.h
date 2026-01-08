@@ -51,7 +51,7 @@ namespace Engine
 		// Convenient predicate: is this behavior enabled in a specific state?
 		bool IsEnabledIn(EngineState state) const
 		{
-			return HasAny(enabledStates, state);
+			return HasAnyEngineStates(enabledStates, state);
 		}
 
 		// Priority:
@@ -64,20 +64,20 @@ namespace Engine
 		bool CanExecute(EngineState current) const
 		{
 			// 1) Stopped gate
-			if (HasAny(current, EngineState::Stopped))
+			if (HasAnyEngineStates(current, EngineState::Stopped))
 			{
 				return IsEnabledIn(EngineState::Stopped);
 			}
 
 			// 2) Paused gate (freeze gameplay, allow tools)
-			if (HasAny(current, EngineState::Paused))
+			if (HasAnyEngineStates(current, EngineState::Paused))
 			{
 				return IsEnabledIn(EngineState::Paused) || IsEnabledIn(EngineState::Editing);
 			}
 
 			// 3) Live (not paused/stopped)
-			const bool isPlaying = HasAny(current, EngineState::Playing);
-			const bool isEditing = HasAny(current, EngineState::Editing);
+			const bool isPlaying = HasAnyEngineStates(current, EngineState::Playing);
+			const bool isEditing = HasAnyEngineStates(current, EngineState::Editing);
 
 			if (isPlaying && isEditing)
 			{

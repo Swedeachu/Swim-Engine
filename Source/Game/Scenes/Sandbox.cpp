@@ -14,12 +14,12 @@
 #include "Game\Behaviors\Demo\Spin.h"
 #include "Engine\Components\TextComponent.h"
 #include "Engine\Systems\Renderer\Core\Font\FontPool.h"
-#include "Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h"
 #include "Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.h"
 #include "Game\Testing\PrimitiveTest.h"
 #include "Game\Testing\MeshDrawingStressTest.h"
 #include "Game\Testing\TextAndUiTest.h"
 #include "Game\Behaviors\Demo\OrbitSystem.h"
+#include "Game\Behaviors\Phys\BallShooter.h"
 
 namespace Game
 {
@@ -151,9 +151,9 @@ namespace Game
 			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
 			Engine::Material(materialData1),
 			[this](entt::entity e, Engine::Transform& t, Engine::Material& m, SimpleMovement* mv)
-			{
-				SetTag(e, Engine::TagConstants::WORLD, "player");
-			}
+		{
+			SetTag(e, Engine::TagConstants::WORLD, "player");
+		}
 		);
 
 		// We can load scene scripts with a call back onto a fresh entity this way as a cool hack/trick
@@ -243,6 +243,21 @@ namespace Game
 		if constexpr (testPrimitiveMeshes) TestPrimitives(this);
 
 		if constexpr (doWorldSpaceParentTesting) TestParenting(this, glm::vec3(0, 20, 0));
+
+		// THE BALL SHOOTER
+		Engine::EntityFactory::GetInstance().CreateWithBehaviors<Game::BallShooter>(
+			[this](entt::entity e,Game::BallShooter* bs)
+		{
+			entt::registry& reg = GetRegistry();
+			if (reg.any_of<Engine::BehaviorComponents>(e))
+			{
+				Engine::BehaviorComponents& bc = reg.get<Engine::BehaviorComponents>(e);
+				bc.SetEnabledStates(Engine::EngineState::Playing); // play mode only script
+			}
+
+			// Give this entity a tag to make it recognizable
+			EmplaceComponent<Engine::ObjectTag>(e, Engine::TagConstants::WORLD, "ball shooter");
+		});
 
 		return 0;
 	}

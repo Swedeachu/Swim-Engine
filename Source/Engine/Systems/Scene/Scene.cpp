@@ -8,6 +8,7 @@
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Entity/EntityFactory.h"
 #include "InternalBehaviors/CameraControl/EditorCamera.h"
+#include "Engine/Systems/Physics/PhysicsSystem.h"
 
 namespace Engine
 {
@@ -17,6 +18,10 @@ namespace Engine
 #else
 	constexpr static bool handleDebugDraw = false;
 #endif
+
+	constexpr static bool alwaysUseEditorCamera = true;
+
+	Scene::~Scene() = default;
 
 	template<typename T>
 	void Scene::BindSerializationHooksForComponent()
@@ -387,7 +392,7 @@ namespace Engine
 			if (editingOnly)
 			{
 				// Bitflag-safe check (covers combined states like Editing|Paused)
-				return HasAny(state, EngineState::Editing);
+				return HasAnyEngineStates(state, EngineState::Editing);
 			}
 		}
 
@@ -490,7 +495,14 @@ namespace Engine
 			if (reg.any_of<Engine::BehaviorComponents>(e))
 			{
 				Engine::BehaviorComponents& bc = reg.get<Engine::BehaviorComponents>(e);
-				bc.SetEnabledStates(Engine::EngineState::Editing); // these scripts only execute in editing mode
+				if (alwaysUseEditorCamera)
+				{
+					bc.SetEnabledStates(Engine::EngineState::Editing | Engine::EngineState::Playing);
+				}
+				else
+				{
+					bc.SetEnabledStates(Engine::EngineState::Editing);
+				}
 			}
 
 			// Give this entity a tag to make it as an editor mode object
@@ -567,6 +579,17 @@ namespace Engine
 	{
 		// TODO: don't destroy on load/persist entities 
 		ForEachBehavior(&Behavior::Exit);
+
+		// Tear down our physics world during exit (not going to call this yet due to it hitting abort.cpp)
+		// DestroyPhysicsWorld();
+	}
+
+	void Scene::DestroyPhysicsWorld()
+	{
+		if (physicsWorld)
+		{
+			physicsWorld.reset(); // this hits abort.cpp on closing the program
+		}
 	}
 
 	void Scene::InternalSceneUpdate(double dt)
@@ -725,7 +748,7 @@ namespace Engine
 		// Toggle Play / Stop (L)
 		if (!handled && input->IsKeyTriggered('L'))
 		{
-			const bool playing = HasAny(state, EngineState::Playing);
+			const bool playing = HasAnyEngineStates(state, EngineState::Playing);
 			if (playing)
 			{
 				// GoIntoStoppedMode()
@@ -744,7 +767,7 @@ namespace Engine
 		}
 		else if (!handled && input->IsKeyTriggered('P')) // Toggle Pause / Resume (P)
 		{
-			if (HasAny(state, EngineState::Paused))
+			if (HasAnyEngineStates(state, EngineState::Paused))
 			{
 				send(L"resume");
 			}
@@ -756,7 +779,7 @@ namespace Engine
 		}
 		else if (!handled && input->IsKeyTriggered('E')) // Toggle Edit / Game (E)
 		{
-			if (HasAny(state, EngineState::Editing))
+			if (HasAnyEngineStates(state, EngineState::Editing))
 			{
 				send(L"game");
 			}
@@ -1012,6 +1035,27 @@ namespace Engine
 		{
 			registry.remove<ObjectTag>(entity);
 		}
+	}
+
+	PhysicsWorld& Scene::GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem)
+	{
+		if (!physicsWorld)
+		{
+			physicsWorld = std::make_unique<PhysicsWorld>(physicsSystem, registry);
+
+			if (!physicsWorld->Init())
+			{
+				physicsWorld.reset();
+				throw std::runtime_error("Scene::GetOrCreatePhysicsWorld | Failed to initialize PhysicsWorld!");
+			}
+		}
+
+		return *physicsWorld;
+	}
+
+	PhysicsWorld* Scene::GetPhysicsWorld() const
+	{
+		return physicsWorld.get();
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

@@ -12,6 +12,8 @@
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
+#include "Engine/Systems/Physics/PhysicsWorld.h"
+
 #include <memory>
 #include <unordered_set>
 
@@ -21,6 +23,7 @@ namespace Engine
 	// Forward declaration of systems
 	class SwimEngine;
 	class SceneSystem;
+	class PhysicsSystem;
 	class InputManager;
 	class CameraSystem;
 	class VulkanRenderer;
@@ -39,6 +42,8 @@ namespace Engine
 		explicit Scene(const std::string& name = "scene")
 			: name(name), registry()
 		{}
+
+		~Scene() override; // declaration only
 
 		int Awake() override { return 0; };
 
@@ -284,6 +289,12 @@ namespace Engine
 
 		bool IsMouseBusyWithUI() const { return mouseBusyWithUI; }
 
+		PhysicsWorld* GetPhysicsWorld() const;
+
+		PhysicsWorld& GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem);
+
+		void DestroyPhysicsWorld();
+
 	protected:
 
 		std::string name;
@@ -341,6 +352,7 @@ namespace Engine
 		entt::observer frustumCacheObserver;
 
 		std::unique_ptr<SceneBVH> sceneBVH;
+		std::unique_ptr<PhysicsWorld> physicsWorld;
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 		std::unique_ptr<GizmoSystem> gizmoSystem;
 		std::unique_ptr<SerializedSceneManager> serializedSceneManager;

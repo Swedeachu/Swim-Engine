@@ -175,7 +175,7 @@ PhysX_static_64.lib;
 PhysXExtensions_static_64.lib;
 PhysXCooking_static_64.lib;
 PhysXCharacterKinematic_static_64.lib;
-PhysXVehicle2_static_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+PhysXVehicle2_static_64.lib;PhysXPvdSDK_static_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
@@ -226,12 +226,16 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Source\Engine\Components\Transform.cpp" />
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsWorld.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\Rigibody.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
@@ -262,6 +266,9 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
     <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsWorld.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
@@ -287,7 +294,6 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
-    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
@@ -307,6 +313,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Phys\BallShooter.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
@@ -340,11 +347,11 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
-    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
+    <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h" />
