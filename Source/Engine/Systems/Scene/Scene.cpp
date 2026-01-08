@@ -12,7 +12,7 @@
 namespace Engine
 {
 
-#ifdef _DEBUG
+#ifdef _SWIM_DEBUG
 	constexpr static bool handleDebugDraw = true;
 #else
 	constexpr static bool handleDebugDraw = false;

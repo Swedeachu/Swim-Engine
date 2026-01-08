@@ -15,7 +15,8 @@ namespace Engine
 	{
 		std::wstring suffix;
 
-	#if defined(_DEBUG) || !defined(NDEBUG)
+	// #if defined(_DEBUG) || !defined(NDEBUG)
+	#if defined(_SWIM_DEBUG)
 		suffix = L" (Debug)";
 	#else
 		suffix = L" (Release)";

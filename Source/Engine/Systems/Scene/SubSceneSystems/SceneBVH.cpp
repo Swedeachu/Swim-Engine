@@ -394,7 +394,7 @@ namespace Engine
 			}
 		}
 
-	#ifdef _DEBUG
+	#ifdef _SWIM_DEBUG
 		constexpr bool debugPrint = false;
 		if constexpr (debugPrint)
 		{

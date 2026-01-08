@@ -63,6 +63,7 @@
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -370,6 +371,7 @@
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorFactory.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorRegistrar.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

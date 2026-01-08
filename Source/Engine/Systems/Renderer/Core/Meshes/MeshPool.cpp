@@ -104,7 +104,7 @@ namespace Engine
 			counter++;
 		}
 
-	#ifdef _DEBUG
+	#ifdef _SWIM_DEBUG
 		constexpr bool run = true;
 		if constexpr (run)
 		{

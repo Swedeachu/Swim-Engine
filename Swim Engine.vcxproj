@@ -156,22 +156,26 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
-;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_ITERATOR_DEBUG_LEVEL=0;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;PX_PHYSX_STATIC_LIB;
+_SWIM_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library;$(ProjectDir)Source\Library\physx\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
-libwebpdemux.lib;
-libwebpmux.lib
-;draco_debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco;C:\Users\camde\source\repos\Swim-Engine\Source\Library\physx\lib\checked</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;libwebpdemux.lib;libwebpmux.lib;draco_release.lib;PhysXFoundation_static_64.lib;
+PhysXCommon_static_64.lib;
+PhysX_static_64.lib;
+PhysXExtensions_static_64.lib;
+PhysXCooking_static_64.lib;
+PhysXCharacterKinematic_static_64.lib;
+PhysXVehicle2_static_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
@@ -187,26 +191,31 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;PX_PHYSX_STATIC_LIB
 ;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library;C:\Users\camde\source\repos\Swim-Engine\Source\Library\physx\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
-libwebpdemux.lib;
-libwebpmux.lib
-;draco_release.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco;$(ProjectDir)Source\Library\physx\lib\release</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;libwebpdemux.lib;libwebpmux.lib;draco_release.lib;PhysXFoundation_static_64.lib;
+PhysXCommon_static_64.lib;
+PhysX_static_64.lib;
+PhysXExtensions_static_64.lib;
+PhysXCooking_static_64.lib;
+PhysXCharacterKinematic_static_64.lib;
+PhysXVehicle2_static_64.lib
+;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
@@ -278,6 +287,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSwapChain.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Vulkan\VulkanSyncManager.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\Scene.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SceneSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.cpp" />
@@ -330,6 +340,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Renderer\Vulkan\VulkanCubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\PhysicsSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
