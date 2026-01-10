@@ -52,8 +52,13 @@ namespace Engine
 		std::unique_ptr<physx::PxPhysics, PxReleaser> physics;
 		std::unique_ptr<physx::PxDefaultCpuDispatcher, PxReleaser> dispatcher;
 
-		unsigned int dispatcherThreads = 0; // 0 => auto
-		float fixedDeltaSeconds = 1.0f / 60.0f;
+		unsigned int dispatcherThreads = 0; // 0 => automatically determined 
+
+		// Kept in sync with the engine's tick rate via SetFixedDeltaSeconds(), by default it is 60 Hz
+		float fixedDeltaSeconds = 1.0f / 60.0f; 
+
+		// Time since last fixed tick (for render interpolation alpha).
+		double timeSinceLastTick = 0.0;
 
 	};
 

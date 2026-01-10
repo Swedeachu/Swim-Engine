@@ -3,5 +3,5 @@
 
 namespace Engine
 {
-	// Component is mostly POD; nothing needed here right now.
+	// nothing needed here right now.
 }

@@ -71,6 +71,51 @@ namespace Engine
 		return glm::normalize(q);
 	}
 
+	void Transform::SetPhysicsTargetWorldPose(const entt::registry& registry, const glm::vec3& worldPos, const glm::quat& worldRot)
+	{
+		const glm::quat safeRot = SafeNormalizeQuat(worldRot);
+
+		if (physicsHasTarget)
+		{
+			physicsPrevWorldPos = physicsTargetWorldPos;
+			physicsPrevWorldRot = physicsTargetWorldRot;
+		}
+		else
+		{
+			// First time: avoid popping by snapping immediately.
+			physicsPrevWorldPos = worldPos;
+			physicsPrevWorldRot = safeRot;
+
+			SetWorldPosition(registry, worldPos);
+			SetWorldRotation(registry, safeRot);
+		}
+
+		physicsTargetWorldPos = worldPos;
+		physicsTargetWorldRot = safeRot;
+		physicsHasTarget = true;
+	}
+
+	void Transform::ApplyPhysicsInterpolation(const entt::registry& registry, float alpha)
+	{
+		if (!physicsHasTarget)
+		{
+			return;
+		}
+
+		float t = alpha;
+
+		if (t < 0.0f) { t = 0.0f; }
+		if (t > 1.0f) { t = 1.0f; }
+
+		const glm::vec3 worldPos = glm::mix(physicsPrevWorldPos, physicsTargetWorldPos, t);
+
+		glm::quat worldRot = glm::slerp(physicsPrevWorldRot, physicsTargetWorldRot, t);
+		worldRot = SafeNormalizeQuat(worldRot);
+
+		SetWorldPosition(registry, worldPos);
+		SetWorldRotation(registry, worldRot);
+	}
+
 	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent)
 	{
 		if (parent == entt::null) return;

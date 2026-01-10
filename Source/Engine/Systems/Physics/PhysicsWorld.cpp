@@ -385,7 +385,7 @@ namespace Engine
 		}
 
 		// If the actor is still in a scene, remove it from that scene.
-		if (physx::PxScene* owner = actor->getScene()) 
+		if (physx::PxScene* owner = actor->getScene())
 		{
 			owner->removeActor(*actor);
 		}
@@ -508,7 +508,8 @@ namespace Engine
 			return;
 		}
 
-		// Pull PhysX -> Transform for Dynamic bodies (authoritative from simulation).
+		// Pull PhysX -> Transform targets for Dynamic bodies (authoritative from simulation).
+		// We do NOT set the transform directly here; we set targets and let per-frame interpolation drive visuals.
 		registry.view<Transform, Rigidbody>().each([&](entt::entity e, Transform& tf, Rigidbody& rb)
 		{
 			if (!rb.actor)
@@ -531,10 +532,44 @@ namespace Engine
 			const glm::vec3 pos = ToGlm(pose.p);
 			const glm::quat rot = ToGlm(pose.q);
 
-			// TODO: maybe consider making our position and rotation get interpolated each frame instead of setting directly on a tick rate that is slower than our fps
-			tf.SetPosition(pos);
-			tf.SetRotation(rot);
-			tf.MarkWorldDirtyOnly();
+			tf.SetPhysicsTargetWorldPose(registry, pos, rot);
+
+			// IMPORTANT: notify EnTT that Transform was updated so observers / BVH / culling can react
+			registry.patch<Transform>(e, [](auto&) {});
+		});
+	}
+
+	void PhysicsWorld::Interpolate(float alpha)
+	{
+		if (!initialized)
+		{
+			return;
+		}
+
+		float t = alpha;
+
+		if (t < 0.0f) { t = 0.0f; }
+		if (t > 1.0f) { t = 1.0f; }
+
+		// Smooth render pose for Dynamic bodies only.
+		registry.view<Transform, Rigidbody>().each([&](entt::entity e, Transform& tf, Rigidbody& rb)
+		{
+			if (!rb.actor)
+			{
+				return;
+			}
+
+			if (rb.type != RigidbodyType::Dynamic)
+			{
+				return;
+			}
+
+			if (!tf.HasPhysicsTarget())
+			{
+				return;
+			}
+
+			tf.ApplyPhysicsInterpolation(registry, t);
 
 			// IMPORTANT: notify EnTT that Transform was updated so observers / BVH / culling can react
 			registry.patch<Transform>(e, [](auto&) {});

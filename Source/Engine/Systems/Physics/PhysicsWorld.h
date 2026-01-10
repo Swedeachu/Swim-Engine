@@ -32,6 +32,10 @@ namespace Engine
 		void FetchResults(bool block = true);
 		void PostSimulateSync();
 
+		// Called every frame to smoothly render dynamic bodies between fixed ticks.
+		// alpha is in [0,1] where 0 = previous tick, 1 = current tick.
+		void Interpolate(float alpha);
+
 		physx::PxScene* GetPxScene() const { return scene.get(); }
 		physx::PxMaterial* GetDefaultMaterial() const { return defaultMaterial.get(); }
 

@@ -73,7 +73,50 @@ namespace Engine
 
 	void PhysicsSystem::Update(double dt)
 	{
-		(void)dt;
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		// Interpolation only while playing (dynamic bodies).
+		if (!HasAnyEngineStates(engine->GetEngineState(), EngineState::Playing))
+		{
+			timeSinceLastTick = 0.0;
+			return;
+		}
+
+		auto& sceneSystem = engine->GetSceneSystem();
+		if (!sceneSystem)
+		{
+			return;
+		}
+
+		std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
+		if (!scene)
+		{
+			return;
+		}
+
+		PhysicsWorld* worldPtr = scene->GetPhysicsWorld();
+		if (!worldPtr)
+		{
+			return;
+		}
+
+		timeSinceLastTick += dt;
+
+		float alpha = 1.0f;
+
+		if (fixedDeltaSeconds > 0.0f)
+		{
+			alpha = static_cast<float>(timeSinceLastTick / static_cast<double>(fixedDeltaSeconds));
+		}
+
+		if (alpha < 0.0f) { alpha = 0.0f; }
+		if (alpha > 1.0f) { alpha = 1.0f; }
+
+		worldPtr->Interpolate(alpha);
 	}
 
 	// Each tick we get the active scene's physics world and tick it
@@ -90,6 +133,7 @@ namespace Engine
 		// We need to be playing
 		if (!HasAnyEngineStates(engine->GetEngineState(), EngineState::Playing))
 		{
+			timeSinceLastTick = 0.0;
 			return;
 		}
 
@@ -106,6 +150,13 @@ namespace Engine
 		}
 
 		PhysicsWorld& world = scene->GetOrCreatePhysicsWorld(*this);
+
+		// Guarantee we are fully snapped to last tick's target pose before the next tick begins.
+		// This keeps render/physics state coherent at tick boundaries.
+		world.Interpolate(1.0f);
+
+		// Reset interpolation timer for the next tick window.
+		timeSinceLastTick = 0.0;
 
 		world.PreSimulateSync(fixedDeltaSeconds);
 		world.Step(fixedDeltaSeconds);

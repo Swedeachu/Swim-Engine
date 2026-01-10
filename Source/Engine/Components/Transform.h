@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
 #include "Library/EnTT/entt.hpp" 
@@ -50,6 +52,16 @@ namespace Engine
 		// Parent + children (entity handles)
 		entt::entity parent = entt::null;
 		std::vector<entt::entity> children; // Scene manages membership
+
+		// --- Physics interpolation state (world-space targets from PhysX) ---
+
+		bool physicsHasTarget = false;
+
+		glm::vec3 physicsPrevWorldPos{ 0.0f, 0.0f, 0.0f };
+		glm::vec3 physicsTargetWorldPos{ 0.0f, 0.0f, 0.0f };
+
+		glm::quat physicsPrevWorldRot{ 1.0f, 0.0f, 0.0f, 0.0f };
+		glm::quat physicsTargetWorldRot{ 1.0f, 0.0f, 0.0f, 0.0f };
 
 		// Helpers to mark dirty
 		void MarkDirty();
@@ -181,6 +193,22 @@ namespace Engine
 
 		bool HasParent() const { return parent != entt::null; }
 		entt::entity GetParent() const { return parent; }
+
+		// --- Physics interpolation API (used by PhysicsWorld) ---
+
+		// Called once per fixed tick after PhysX finished to record the new target.
+		void SetPhysicsTargetWorldPose(const entt::registry& registry, const glm::vec3& worldPos, const glm::quat& worldRot);
+
+		// Called each frame by PhysicsWorld to smoothly render between fixed ticks.
+		// alpha is in [0,1] where 0 = prev tick pose, 1 = current tick pose.
+		void ApplyPhysicsInterpolation(const entt::registry& registry, float alpha);
+
+		void SnapPhysicsToTarget(const entt::registry& registry)
+		{
+			ApplyPhysicsInterpolation(registry, 1.0f);
+		}
+
+		bool HasPhysicsTarget() const { return physicsHasTarget; }
 
 	};
 
