@@ -93,13 +93,13 @@ namespace Engine
 			return;
 		}
 
-		auto sceneSystem = engine->GetSceneSystem();
+		auto& sceneSystem = engine->GetSceneSystem();
 		if (!sceneSystem)
 		{
 			return;
 		}
 
-		std::shared_ptr<Scene> scene = sceneSystem->GetActiveScene();
+		std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
 		if (!scene)
 		{
 			return;

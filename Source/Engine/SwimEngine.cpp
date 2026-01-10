@@ -553,11 +553,15 @@ namespace Engine
 	int SwimEngine::Init()
 	{
 		// Add systems to the SystemManager
-		inputManager = systemManager->AddSystem<InputManager>("InputManager");
-		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
-		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem"); // do we want physics before or after the scene system?
-		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
+		inputManager = systemManager->AddSystem<InputManager>("InputManager"); // Listen to input before a scene update that frame, so goes first.
+		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem"); // Hardly matters because commands aren't frame/tick based.
+		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem"); // Controls basically everything
 
+		// We have physics before the scene system for init and shut down order reasons.
+		// This is maybe a bad thing to do (or it might not matter).
+		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem"); 
+
+		// Then the renderer is the last system each frame to update to draw everything finalized for that frame.
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
 			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer");
@@ -578,6 +582,7 @@ namespace Engine
 			}
 		}
 
+		// Camera system doesn't really matter its order since it is more just a camera data holder for now that the renderer and scene owned behaviors talk to when needed.
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
 
 		// Call Awake and Init on all systems

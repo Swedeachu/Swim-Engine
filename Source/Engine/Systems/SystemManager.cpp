@@ -6,10 +6,10 @@ namespace Engine
 
   int SystemManager::SmartIterate(std::function<int(Machine*)> method)
   {
-    for (auto& pair : systems)
+    for (auto& entry : orderedSystems)
     {
-      const std::string& systemName = pair.first;
-      auto& machine = pair.second;
+      const std::string& systemName = entry.first;
+      auto& machine = entry.second;
 
       if (!machine)
       {
@@ -18,7 +18,7 @@ namespace Engine
       }
 
       // Call the passed-in method on the current machine
-      int result = method(machine.get()); // Access raw pointer from unique_ptr
+      int result = method(machine.get()); // Access raw pointer from shared_ptr
 
       // Check for errors
       if (result != 0)
@@ -64,4 +64,4 @@ namespace Engine
     return SmartIterate([](Machine* machine) { return machine->Exit(); });
   }
 
-}
+} // Namespace Engine

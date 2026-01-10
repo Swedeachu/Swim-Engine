@@ -580,15 +580,15 @@ namespace Engine
 		// TODO: don't destroy on load/persist entities 
 		ForEachBehavior(&Behavior::Exit);
 
-		// Tear down our physics world during exit (not going to call this yet due to it hitting abort.cpp)
-		// DestroyPhysicsWorld();
+		// Tear down our physics world during exit 
+		DestroyPhysicsWorld();
 	}
 
 	void Scene::DestroyPhysicsWorld()
 	{
 		if (physicsWorld)
 		{
-			physicsWorld.reset(); // this hits abort.cpp on closing the program
+			physicsWorld.reset(); 
 		}
 	}
 

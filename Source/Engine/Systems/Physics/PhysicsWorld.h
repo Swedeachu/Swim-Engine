@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "Library/EnTT/entt.hpp"
 
@@ -63,6 +64,12 @@ namespace Engine
 
 		bool initialized = false;
 
+		// If true, PhysX has a simulate() in-flight and we must not remove actors immediately.
+		bool simulating = false;
+
+		// Deferred destruction queue (actors are removed/released at a safe point).
+		std::vector<physx::PxRigidActor*> pendingDestroy;
+
 	private:
 
 		void OnRigidbodyConstruct(entt::registry& reg, entt::entity entity);
@@ -71,6 +78,8 @@ namespace Engine
 
 		void CreateOrRebuildBody(entt::entity entity, Transform& tf, Rigidbody& rb);
 		void DestroyBody(entt::entity entity, Rigidbody& rb);
+
+		void FlushPendingDestroy();
 
 		physx::PxTransform GetPoseFromTransform(entt::entity entity, Transform& tf) const;
 

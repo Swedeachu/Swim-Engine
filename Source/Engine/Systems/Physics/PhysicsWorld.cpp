@@ -18,12 +18,25 @@ namespace Engine
 		registry.on_destroy<Rigidbody>().disconnect<&PhysicsWorld::OnRigidbodyDestroy>(*this);
 		registry.on_destroy<Transform>().disconnect<&PhysicsWorld::OnTransformDestroy>(*this);
 
+		// If a sim step is in-flight, finish it so we can safely remove actors.
+		if (scene && simulating)
+		{
+			scene->fetchResults(true);
+			simulating = false;
+		}
+
+		// Flush any deferred destroys before tearing down bodies.
+		FlushPendingDestroy();
+
 		// Tear down all existing bodies
 		registry.view<Rigidbody>().each(
 			[&](entt::entity e, Rigidbody& rb)
 		{
 			DestroyBody(e, rb);
 		});
+
+		// Flush again in case anything was deferred during teardown.
+		FlushPendingDestroy();
 
 		scene.reset();
 		defaultMaterial.reset();
@@ -314,6 +327,10 @@ namespace Engine
 
 		actor->attachShape(*shape);
 
+		// We keep a raw pointer for convenience, but we must release our ref.
+		// The actor now owns a reference to the shape.
+		shape->release();
+
 		// IMPORTANT: compute mass/inertia AFTER shape is attached
 		if (rb.type == RigidbodyType::Dynamic && dyn)
 		{
@@ -354,15 +371,56 @@ namespace Engine
 			return;
 		}
 
-		if (scene)
+		physx::PxRigidActor* actor = rb.actor;
+
+		// If a sim step is in-flight, defer destruction until it is safe.
+		if (simulating)
 		{
-			scene->removeActor(*rb.actor); // we have a leak, we hit an error here everytime we close the program after playing
+			pendingDestroy.push_back(actor);
+
+			rb.actor = nullptr;
+			rb.shape = nullptr;
+			rb.dirty = true;
+			return;
 		}
 
-		rb.actor->release();
+		// If the actor is still in a scene, remove it from that scene.
+		if (physx::PxScene* owner = actor->getScene()) 
+		{
+			owner->removeActor(*actor);
+		}
+
+		actor->release();
+
 		rb.actor = nullptr;
 		rb.shape = nullptr;
 		rb.dirty = true;
+	}
+
+	void PhysicsWorld::FlushPendingDestroy()
+	{
+		if (pendingDestroy.empty())
+		{
+			return;
+		}
+
+		for (physx::PxRigidActor* actor : pendingDestroy)
+		{
+			if (!actor)
+			{
+				continue;
+			}
+
+			// If the actor is still in a scene, remove it from that scene.
+			if (physx::PxScene* owner = actor->getScene())
+			{
+				owner->removeActor(*actor);
+			}
+
+			actor->release();
+		}
+
+		pendingDestroy.clear();
 	}
 
 	void PhysicsWorld::PreSimulateSync(float dt)
@@ -373,6 +431,9 @@ namespace Engine
 		{
 			return;
 		}
+
+		// Safe point: simulation is not in-flight here.
+		FlushPendingDestroy();
 
 		// Ensure any dirty or missing bodies get built.
 		registry.view<Transform, Rigidbody>().each(
@@ -421,6 +482,7 @@ namespace Engine
 		}
 
 		scene->simulate(dt);
+		simulating = true;
 	}
 
 	void PhysicsWorld::FetchResults(bool block)
@@ -430,7 +492,13 @@ namespace Engine
 			return;
 		}
 
+		if (!simulating)
+		{
+			return;
+		}
+
 		scene->fetchResults(block);
+		simulating = false;
 	}
 
 	void PhysicsWorld::PostSimulateSync()
@@ -463,6 +531,7 @@ namespace Engine
 			const glm::vec3 pos = ToGlm(pose.p);
 			const glm::quat rot = ToGlm(pose.q);
 
+			// TODO: maybe consider making our position and rotation get interpolated each frame instead of setting directly on a tick rate that is slower than our fps
 			tf.SetPosition(pos);
 			tf.SetRotation(rot);
 			tf.MarkWorldDirtyOnly();
