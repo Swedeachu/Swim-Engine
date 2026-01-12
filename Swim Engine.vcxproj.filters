@@ -68,6 +68,7 @@
     <ClCompile Include="Source\Engine\Components\Transform.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Phys\BallShooter.cpp" />
     <ClCompile Include="Source\Engine\Systems\Physics\Rigibody.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitivePhysicsTest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -379,6 +380,7 @@
     <ClInclude Include="Source\Engine\Systems\Physics\PhysicsWorld.h" />
     <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
     <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitivePhysicsTest.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

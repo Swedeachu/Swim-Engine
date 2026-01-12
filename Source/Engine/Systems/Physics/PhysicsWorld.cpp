@@ -539,6 +539,8 @@ namespace Engine
 		});
 	}
 
+	// The problem with this is if we do things like setting a position or rotation directly from higher up gameplay code (like a teleporter),
+	// the next frame during this interpolation will just overwrite it.
 	void PhysicsWorld::Interpolate(float alpha)
 	{
 		if (!initialized)

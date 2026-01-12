@@ -2,7 +2,7 @@
 #include "Engine/SwimEngine.h"
 
 // this makes it so no console appears in a release build
-#ifndef _DEBUG
+#ifndef _SWIM_DEBUG
 #pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
 #endif
 

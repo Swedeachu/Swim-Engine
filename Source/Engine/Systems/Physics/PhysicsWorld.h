@@ -48,6 +48,7 @@ namespace Engine
 
 	private:
 
+		// This was already defined in PhysicsSystem.h, but we might need it here for the unique_ptr's defined in this file below
 		struct PxReleaser
 		{
 			template<typename T>

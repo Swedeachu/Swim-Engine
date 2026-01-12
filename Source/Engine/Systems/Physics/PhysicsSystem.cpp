@@ -59,12 +59,15 @@ namespace Engine
 		}
 
 		// We might really want to change the amount of threads to something less high as whatever hardware_concurrency returns
+		threads /= 2; // give us breathing room for now
 		physx::PxDefaultCpuDispatcher* d = physx::PxDefaultCpuDispatcherCreate(threads);
 		if (!d)
 		{
 			std::cerr << "PhysicsSystem::Init | PxDefaultCpuDispatcherCreate failed\n";
 			return 4;
 		}
+
+		std::cout << "Starting PhysX with " << threads << " threads\n";
 
 		dispatcher.reset(d);
 

@@ -317,6 +317,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitivePhysicsTest.cpp" />
     <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
     <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp">
@@ -360,6 +361,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Game\Testing\MeshDrawingStressTest.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitivePhysicsTest.h" />
     <ClInclude Include="Source\Game\Testing\PrimitiveTest.h" />
     <ClInclude Include="Source\Game\Testing\TextAndUiTest.h" />
     <ClInclude Include="Source\Library\basis\basisu.h" />

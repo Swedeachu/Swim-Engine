@@ -20,6 +20,7 @@
 #include "Game\Testing\TextAndUiTest.h"
 #include "Game\Behaviors\Demo\OrbitSystem.h"
 #include "Game\Behaviors\Phys\BallShooter.h"
+#include "Game\Testing\PrimitivePhysicsTest.h"
 
 namespace Game
 {
@@ -30,6 +31,7 @@ namespace Game
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
 	constexpr static bool testPrimitiveMeshes = false;
 	constexpr static bool doWorldSpaceParentTesting = true; // via orbit system
+	constexpr static bool physicsPrimitivesTest = true; // spawn a ton of dynamic primitives with rigidbodies over a big plane
 
 	int SandBox::Awake()
 	{
@@ -243,6 +245,8 @@ namespace Game
 		if constexpr (testPrimitiveMeshes) TestPrimitives(this);
 
 		if constexpr (doWorldSpaceParentTesting) TestParenting(this, glm::vec3(0, 20, 0));
+
+		if constexpr (physicsPrimitivesTest) TestPrimitivePhysics(this);
 
 		// THE BALL SHOOTER
 		Engine::EntityFactory::GetInstance().CreateWithBehaviors<Game::BallShooter>(
