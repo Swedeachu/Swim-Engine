@@ -8,8 +8,6 @@
 #include "VulkanPipelineManager.h"
 #include "VulkanDescriptorManager.h"
 #include "VulkanIndexDraw.h"
-#include "Buffers/VulkanBuffer.h"
-#include "Buffers/VulkanInstanceBuffer.h"
 #include "Engine/Systems/Renderer/Renderer.h"
 #include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 
@@ -64,6 +62,9 @@ namespace Engine
 		}
 
 		const CameraUBO& GetCameraUBO() const { return cameraUBO; }
+
+		VkPipeline GetCullComputePipeline() const { return pipelineManager->GetCullComputePipeline(); }
+		VkPipelineLayout GetCullComputePipelineLayout() const { return pipelineManager->GetCullComputePipelineLayout(); }
 
 		// Creates a buffer and allocates memory for it
 		void CreateBuffer(

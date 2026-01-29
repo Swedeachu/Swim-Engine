@@ -20,7 +20,7 @@ namespace Engine
 		 CPU: Solid balanced stratedgy and a geniunely good solution for complex scenes with thousands of unique meshes.
 		 GPU: Best solution on paper but our implementation is super broken and glitchy for more reasons than one.
 		*/
-		enum CullMode { NONE, CPU, GPU }; // GPU is not implemented 
+		enum CullMode { NONE, CPU, GPU };
 
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
 
@@ -32,6 +32,10 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
+		// Must call this outside the render pass.
+		// If not in GPU mode, this is a no-op.
+		void RecordGpuCulling(uint32_t frameIndex, VkCommandBuffer cmd);
+
 		void DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
@@ -42,10 +46,9 @@ namespace Engine
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
 
-		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
 
-		// Major performance booster
+		// Major performance booster for CPU side 
 		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
 
 		uint32_t GetInstanceCount() const { return static_cast<uint32_t>(cpuInstanceData.size()); }
@@ -104,6 +107,9 @@ namespace Engine
 			std::unique_ptr<VulkanBuffer>& outIndirectBuf
 		);
 
+		// GPU compute culling path (writes indirect commands + draw count).
+		void DispatchGpuCulling(uint32_t frameIndex, VkCommandBuffer cmd);
+
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
 
@@ -137,8 +143,8 @@ namespace Engine
 		MeshBufferData glyphQuadMesh = {};
 
 		// Command buffers per frame
-		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; 
-		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers; 
+		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> msdfIndirectCommandBuffers;
 
 		// Mega mesh buffers
@@ -157,6 +163,9 @@ namespace Engine
 		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
 		bool useQueriedFrustumSceneBVH{ true };
+
+		// Compute shader tuning
+		static constexpr uint32_t GPU_CULL_LOCAL_SIZE = 256;
 
 	};
 

@@ -1,215 +1,177 @@
-// === [b0] Camera UBO ===
-// Supplied via descriptorManager->UpdatePerFrameUBO()
-// Contains view & projection matrices and camera parameters
+// Writes VkDrawIndexedIndirectCommand entries for visible instances.
+// One draw per instance (instanceCount = 1), firstInstance = original instance ID.
+
+static const uint VERTEX_STRIDE_BYTES = 32;
+static const uint LOCAL_SIZE = 256;
+
 [[vk::binding(0, 0)]]
 cbuffer CameraUBO : register(b0, space0)
 {
-  float4x4 view;        // world -> view matrix
-  float4x4 proj;        // view -> clip matrix (with Vulkan Y-flip already applied)
-  float4   camParams;   // (tanHalfFovX, tanHalfFovY, nearClip, farClip)
+	float4x4 worldView;
+	float4x4 worldProj;
+	float4x4 screenView;
+	float4x4 screenProj;
+
+	float4 camParams;
+	float2 viewportSize;
+	float2 _padViewportSize;
 };
 
-// === [b1] Instance Meta UBO ===
-// Supplied via instanceMetaBuffer set to instanceCount and padding
-[[vk::binding(1, 0)]]
-cbuffer InstanceMeta : register(b1, space0)
-{
-  uint instanceCount;  // Number of instances to process
-  uint padA;
-  uint padB;
-  uint padC;
-};
-
-// === Struct that matches per-instance GPU data ===
 struct GpuInstanceData
 {
-  float4x4 model;        // world transform matrix
-  float4   aabbMin;      // AABB min in local space
-  float4   aabbMax;      // AABB max in local space
-  uint     textureIndex;
-  float    hasTexture;
-  uint     meshIndex;
-  uint     pad;
+	float4x4 model;
+
+	float4 aabbMin;
+	float4 aabbMax;
+
+	uint textureIndex;
+	float hasTexture;
+	uint meshInfoIndex;
+	uint materialIndex;
+
+	uint indexCount;
+	uint space;
+
+	uint2 vertexOffsetInMegaBuffer;
+	uint2 indexOffsetInMegaBuffer;
 };
 
-// === [t0] Instance Buffer ===
-// StructuredBuffer containing all GPU-visible instance data
-// Supplied from indexDraw->GetInstanceBuffer()->GetPerFrameBuffers()
-[[vk::binding(2, 0)]]
-StructuredBuffer<GpuInstanceData> instanceBuffer : register(t0, space0);
+struct DrawIndexedIndirectCommand
+{
+	uint indexCount;
+	uint instanceCount;
+	uint firstIndex;
+	int  vertexOffset;
+	uint firstInstance;
+};
 
-// === [u0] Visible Models Buffer ===
-// RWStructuredBuffer of float4x4s for GPU-visible model matrices (instancing)
-// Matches Vulkan buffer: VulkanIndexDraw::visibleModelBuffer
-[[vk::binding(3, 0)]]
-RWStructuredBuffer<float4x4> visibleModels : register(u0, space0);
+[[vk::binding(1, 0)]]
+StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);
 
-// === [u1] Visible Data Buffer ===
-// RWStructuredBuffer of uint4s for texture index, mesh ID, etc.
-// Matches Vulkan buffer: VulkanIndexDraw::visibleDataBuffer
+// Output: storage buffer that is ALSO used as an indirect buffer
 [[vk::binding(4, 0)]]
-RWStructuredBuffer<uint4> visibleData : register(u1, space0);
+RWStructuredBuffer<DrawIndexedIndirectCommand> outCommands : register(u4, space0);
 
-// === [u2] Draw Count Buffer ===
-// RWByteAddressBuffer for atomic counter (num visible instances)
-// Matches Vulkan buffer: VulkanIndexDraw::drawCountBuffer
+// Output: draw count (uint) for vkCmdDrawIndexedIndirectCount*
 [[vk::binding(5, 0)]]
-RWByteAddressBuffer drawCount : register(u2, space0);
+RWStructuredBuffer<uint> outDrawCount : register(u5, space0);
 
-// === Extract camera position from view matrix ===
-float3 ExtractCameraPositionFromViewMatrix(float4x4 viewMatrix)
+struct PushConstants
 {
-  // The inverse of the rotation part of the view matrix
-  float3x3 rotInv = float3x3(
-    viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
-    viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
-    viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
-  );
+	uint instanceCount;
+	uint _pad0;
+	uint _pad1;
+	uint _pad2;
+};
 
-  // The camera position is -transpose(rotationPart) * translation
-  float3 camPos = -mul(rotInv, float3(viewMatrix[3][0], viewMatrix[3][1], viewMatrix[3][2]));
-  return camPos;
+[[vk::push_constant]]
+PushConstants pc;
+
+static float3x3 Abs3x3(float3x3 m)
+{
+	float3x3 r;
+	r[0] = abs(m[0]);
+	r[1] = abs(m[1]);
+	r[2] = abs(m[2]);
+	return r;
 }
 
-// Debug version - very simple and permissive culling for testing
-bool IsVisibleSimple(float4 localMin, float4 localMax, float4x4 model)
+static bool PlaneAabbOutside(float3 n, float3 c, float3 e)
 {
-  // Calculate center point in local space
-  float3 localCenter = (localMin.xyz + localMax.xyz) * 0.5f;
+	// Plane is dot(n, p) <= 0 for inside.
+	// AABB is outside if the minimum dot(n, p) over the box is > 0.
+	
+	// min = dot(n, c) - dot(abs(n), e)
+	// outside if min > 0
 
-  // Transform to world space
-  float3 worldCenter = mul(model, float4(localCenter, 1.0f)).xyz;
+	float s = dot(n, c);
+	float r = dot(abs(n), e);
 
-  // Very large radius - almost no culling, just to test pipeline
-  float radius = 1000.0f;
-
-  // Simple distance test
-  float3 camPos = ExtractCameraPositionFromViewMatrix(view);
-  float dist = length(worldCenter - camPos);
-
-  // Only cull things very far away
-  return (dist < radius);
+	return (s - r) > 0.0f;
 }
 
-// For debugging - mark everything as visible
-bool IsVisibleAll()
+static bool FrustumAabbVisible(GpuInstanceData inst)
 {
-  return true;
+	// Screen-space instances: keep visible for now
+	if (inst.space == 1)
+	{
+		return true;
+	}
+
+	float3 localMin = inst.aabbMin.xyz;
+	float3 localMax = inst.aabbMax.xyz;
+
+	float3 centerL = (localMin + localMax) * 0.5f;
+	float3 extentL = (localMax - localMin) * 0.5f;
+
+	// Center in world then view
+	float4 centerW4 = mul(inst.model, float4(centerL, 1.0f));
+	float4 centerV4 = mul(worldView, centerW4);
+	float3 centerV = centerV4.xyz;
+
+	// Extents into view space using abs(V*M)
+	float3x3 VM = mul((float3x3)worldView, (float3x3)inst.model);
+	float3x3 absVM = Abs3x3(VM);
+	float3 extentV = mul(absVM, extentL);
+
+	// View forward distance
+	float z = -centerV.z;
+	float nearZ = camParams.z;
+	float farZ = camParams.w;
+
+	// Near/Far test
+	if (z + extentV.z < nearZ) { return false; }
+	if (z - extentV.z > farZ)  { return false; }
+
+	// Frustum side planes in view space (camera looks down -Z)
+	// Inside conditions:
+	//   x <= (-z) * tanHalfFovX  => x + z*tX <= 0
+	//  -x <= (-z) * tanHalfFovX  => -x + z*tX <= 0
+	//   y <= (-z) * tanHalfFovY  => y + z*tY <= 0
+	//  -y <= (-z) * tanHalfFovY  => -y + z*tY <= 0
+	//
+	// centerV.z is negative in front of camera, which is what we want here.
+	float tX = camParams.x;
+	float tY = camParams.y;
+
+	// Right plane
+	if (PlaneAabbOutside(float3( 1.0f, 0.0f,  tX), centerV, extentV)) { return false; }
+	// Left plane
+	if (PlaneAabbOutside(float3(-1.0f, 0.0f,  tX), centerV, extentV)) { return false; }
+	// Top plane
+	if (PlaneAabbOutside(float3( 0.0f, 1.0f,  tY), centerV, extentV)) { return false; }
+	// Bottom plane
+	if (PlaneAabbOutside(float3( 0.0f,-1.0f,  tY), centerV, extentV)) { return false; }
+
+	return true;
 }
 
-// Sphere-based frustum culling that handles camera position and rotation
-bool IsVisibleSphere(float4 localMin, float4 localMax, float4x4 model, float4x4 viewMatrix,
-  float tanHalfFovX, float tanHalfFovY, float nearClip, float farClip)
+[numthreads(LOCAL_SIZE, 1, 1)]
+void main(uint3 dtid : SV_DispatchThreadID)
 {
-  // Calculate the center and radius of a bounding sphere around the AABB
-  float3 localCenter = (localMin.xyz + localMax.xyz) * 0.5f;
-  float3 localExtent = localMax.xyz - localMin.xyz;
-  float localRadius = length(localExtent) * 0.5f;
+	uint instanceID = dtid.x;
 
-  // Transform center to world space
-  float3 worldCenter = mul(model, float4(localCenter, 1.0f)).xyz;
+	if (instanceID >= pc.instanceCount)
+	{
+		return;
+	}
 
-  // Get scale factor from model matrix (approximate)
-  float3 scaleX = float3(model[0][0], model[0][1], model[0][2]);
-  float3 scaleY = float3(model[1][0], model[1][1], model[1][2]);
-  float3 scaleZ = float3(model[2][0], model[2][1], model[2][2]);
+	GpuInstanceData inst = instanceBuffer[instanceID];
 
-  float maxScale = max(length(scaleX), max(length(scaleY), length(scaleZ)));
-  float worldRadius = localRadius * maxScale;
+	if (!FrustumAabbVisible(inst))
+	{
+		return;
+	}
 
-  // Transform center to view space
-  float3 viewCenter = mul(viewMatrix, float4(worldCenter, 1.0f)).xyz;
+	uint writeIndex;
+	InterlockedAdd(outDrawCount[0], 1, writeIndex);
 
-  // Check if behind near plane accounting for radius
-  if (viewCenter.z - worldRadius > nearClip)
-  {
-    return false;
-  }
+	DrawIndexedIndirectCommand cmd;
+	cmd.indexCount = inst.indexCount;
+	cmd.instanceCount = 1;
+	cmd.firstIndex = inst.indexOffsetInMegaBuffer.x / 4;
+	cmd.vertexOffset = (int)(inst.vertexOffsetInMegaBuffer.x / VERTEX_STRIDE_BYTES);
+	cmd.firstInstance = instanceID;
 
-  // Check if beyond far plane accounting for radius
-  if (viewCenter.z + worldRadius < -farClip)
-  {
-    return false;
-  }
-
-  // For objects intersecting the near plane, we need special handling
-  // since projection math gets wonky there - be conservative and include them
-  if (viewCenter.z > 0.0f)
-  {
-    // Sphere center is behind camera, check if it intersects the near plane
-    if (viewCenter.z - worldRadius < 0.0f)
-    {
-      // Conservative approach - accept it
-      return true;
-    }
-    return false; // Entirely behind camera
-  }
-
-  // At this point we know the sphere center is in front of the camera (negative Z)
-  // Check against the side planes
-
-  // Left and right planes - check if sphere is completely outside
-  if (viewCenter.x - worldRadius > -viewCenter.z * tanHalfFovX ||
-    viewCenter.x + worldRadius < viewCenter.z * tanHalfFovX)
-  {
-    return false;
-  }
-
-  // Top and bottom planes - check if sphere is completely outside
-  if (viewCenter.y - worldRadius > -viewCenter.z * tanHalfFovY ||
-    viewCenter.y + worldRadius < viewCenter.z * tanHalfFovY)
-  {
-    return false;
-  }
-
-  // All tests passed, should be visible
-  return true;
-}
-
-[numthreads(64, 1, 1)]
-void main(uint3 DTid : SV_DispatchThreadID)
-{
-  uint index = DTid.x;
-  if (index >= instanceCount) { return; }
-
-  GpuInstanceData data = instanceBuffer[index];
-
-  // Extract parameters for frustum culling
-  float tanHalfFovX = camParams.x;
-  float tanHalfFovY = camParams.y;
-  float nearClip = camParams.z;
-  float farClip = camParams.w;
-
-  // Start with the simplest test first for debugging (still weird flashing everywhere happening)
-  // bool visible = IsVisibleAll();
-
-  // Try simple distance-based culling next (broken)
-  bool visible = IsVisibleSimple(data.aabbMin, data.aabbMax, data.model);
-
-  // Then move to sphere-based frustum test (same kind of broken)
-  // bool visible = IsVisibleSphere(data.aabbMin, data.aabbMax, data.model, view, tanHalfFovX, tanHalfFovY, nearClip, farClip);
-
-  if (!visible)
-  {
-    return; // culled not visible
-  }
-
-  // Append visible instance
-  uint visibleIndex;
-  drawCount.InterlockedAdd(0, 1, visibleIndex);
-
-  // Bounds check to prevent out-of-bounds write
-  if (visibleIndex >= 10240)
-  {
-    return;
-  }
-
-  visibleModels[visibleIndex] = data.model;
-
-  visibleData[visibleIndex] = uint4(
-    data.textureIndex,
-    asuint(data.hasTexture),
-    0u,
-    data.meshIndex
-  );
+	outCommands[writeIndex] = cmd;
 }

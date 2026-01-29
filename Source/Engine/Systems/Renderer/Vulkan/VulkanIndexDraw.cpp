@@ -263,45 +263,47 @@ namespace Engine
 		}
 		else
 		{
-			// Render everything in world space with regular frustum culling (this is still CPU culling just not using the BVH)
+			// GPU mode uses frustum = nullptr here, since compute does the cull.
 			GatherCandidatesView(registry, TransformSpace::World, frustum);
 		}
 
-		// Enforce mesh-contiguity in cpuInstanceData.
-		// Indirect batch draw calls obviously need to be contiguous blocks of the same meshes so we sort them together.
-		if (!cpuInstanceData.empty())
+		// In GPU mode, do NOT sort.
+		// The compute shader uses instanceID as firstInstance, so keeping a stable natural order
+		// avoids any unexpected mismatch between per-instance data and firstInstance assumptions.
+		if (cullMode != CullMode::GPU)
 		{
-			std::sort(cpuInstanceData.begin(),
-				cpuInstanceData.end(),
-				[](const GpuInstanceData& a, const GpuInstanceData& b)
+			if (!cpuInstanceData.empty())
 			{
-				return a.meshInfoIndex < b.meshInfoIndex;
-			});
-		}
-
-		MeshPool& pool = MeshPool::GetInstance();
-
-		// Build rangeMap (mesh -> {firstInstance, count}) 
-		for (uint32_t i = 0; i < cpuInstanceData.size(); ++i)
-		{
-			const GpuInstanceData& instance = cpuInstanceData[i];
-
-			MeshInstanceRange& range = rangeMap[instance.meshInfoIndex];
-			if (range.count == 0u)
-			{
-				range.firstInstance = i;  // first element of the now contiguous block
+				std::sort(cpuInstanceData.begin(),
+					cpuInstanceData.end(),
+					[](const GpuInstanceData& a, const GpuInstanceData& b)
+				{
+					return a.meshInfoIndex < b.meshInfoIndex;
+				});
 			}
 
-			// Update data for this mesh instance
-			range.indexCount = instance.indexCount;
-			range.indexOffsetInMegaBuffer = instance.indexOffsetInMegaBuffer;
-			range.vertexOffsetInMegaBuffer = instance.vertexOffsetInMegaBuffer;
+			// Build rangeMap (mesh -> {firstInstance, count}) only for CPU/NONE batching path
+			for (uint32_t i = 0; i < cpuInstanceData.size(); ++i)
+			{
+				const GpuInstanceData& instance = cpuInstanceData[i];
 
-			range.count++; // increment for every occurrence
+				MeshInstanceRange& range = rangeMap[instance.meshInfoIndex];
+				if (range.count == 0u)
+				{
+					range.firstInstance = i;  // first element of the now contiguous block
+				}
+
+				range.indexCount = instance.indexCount;
+				range.indexOffsetInMegaBuffer = instance.indexOffsetInMegaBuffer;
+				range.vertexOffsetInMegaBuffer = instance.vertexOffsetInMegaBuffer;
+
+				range.count++;
+			}
 		}
 
 		UploadAndBatchInstances(frameIndex);
 	}
+
 
 	// Fires off the frustum query in the scene's bounding volume hierarchy using immediate callback
 	// This only does world space entities as the BVH only takes world space objects into account.
@@ -389,7 +391,7 @@ namespace Engine
 		const glm::vec4& min = mat->mesh->meshBufferData->aabbMin;
 		const glm::vec4& max = mat->mesh->meshBufferData->aabbMax;
 
-		// Frustum culling if world-space
+		// Frustum culling if world-space (CPU path only)
 		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
 			if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
@@ -423,9 +425,15 @@ namespace Engine
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
 		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 
+		// GPU path does NOT build CPU indirect batches (compute writes them)
+		if (cullMode == CullMode::GPU)
+		{
+			return;
+		}
+
 		// Build indirect command buffer
 		std::vector<VkDrawIndexedIndirectCommand> allCommands;
-		allCommands.reserve(rangeMap.size()); // reserve enough space based on unique meshes
+		allCommands.reserve(rangeMap.size());
 
 		for (const auto& [mesh, range] : rangeMap)
 		{
@@ -439,18 +447,182 @@ namespace Engine
 			allCommands.push_back(cmd);
 		}
 
-		// Ensure indirect buffer capacity for world draws
 		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], allCommands.size());
 
 		VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
 		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
 	}
 
+	struct CullPushConstants
+	{
+		uint32_t instanceCount;
+		uint32_t pad0;
+		uint32_t pad1;
+		uint32_t pad2;
+	};
+
+	static PFN_vkCmdDrawIndexedIndirectCountKHR g_vkCmdDrawIndexedIndirectCountKHR = nullptr;
+
+	static PFN_vkCmdDrawIndexedIndirectCountKHR GetDrawIndexedIndirectCountFn(VkDevice device)
+	{
+		if (!g_vkCmdDrawIndexedIndirectCountKHR)
+		{
+			// Try KHR name first
+			g_vkCmdDrawIndexedIndirectCountKHR = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCountKHR>(
+				vkGetDeviceProcAddr(device, "vkCmdDrawIndexedIndirectCountKHR")
+				);
+
+			// Try core name as fallback (Vulkan 1.2+)
+			if (!g_vkCmdDrawIndexedIndirectCountKHR)
+			{
+				g_vkCmdDrawIndexedIndirectCountKHR = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCountKHR>(
+					vkGetDeviceProcAddr(device, "vkCmdDrawIndexedIndirectCount")
+					);
+			}
+		}
+
+		return g_vkCmdDrawIndexedIndirectCountKHR;
+	}
+
+	// Called by VulkanRenderer before vkCmdBeginRenderPass.
+	void VulkanIndexDraw::RecordGpuCulling(uint32_t frameIndex, VkCommandBuffer cmd)
+	{
+		if (cullMode != CullMode::GPU)
+		{
+			return;
+		}
+
+		DispatchGpuCulling(frameIndex, cmd);
+	}
+
+	void VulkanIndexDraw::DispatchGpuCulling(uint32_t frameIndex, VkCommandBuffer cmd)
+	{
+		auto engine = SwimEngine::GetInstance();
+		auto renderer = engine->GetVulkanRenderer();
+		auto& pm = renderer->GetPipelineManager();
+		auto& dm = renderer->GetDescriptorManager();
+
+		const uint32_t instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
+		if (instanceCount == 0)
+		{
+			return;
+		}
+
+		VkBuffer cmdBuf = dm->GetPerFrameCullCommandBuffer(frameIndex);
+		VkBuffer countBuf = dm->GetPerFrameCullCountBuffer(frameIndex);
+
+		// 0) Reset count to 0 (MUST be outside render pass)
+		vkCmdFillBuffer(cmd, countBuf, 0, sizeof(uint32_t), 0);
+
+		// Barrier: transfer write -> compute shader read/write
+		VkBufferMemoryBarrier b0{};
+		b0.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b0.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b0.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		b0.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0.buffer = countBuf;
+		b0.offset = 0;
+		b0.size = sizeof(uint32_t);
+
+		VkBufferMemoryBarrier b1{};
+		b1.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b1.srcAccessMask = 0;
+		b1.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		b1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b1.buffer = cmdBuf;
+		b1.offset = 0;
+		b1.size = VK_WHOLE_SIZE;
+
+		std::array<VkBufferMemoryBarrier, 2> preBarriers = { b0, b1 };
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			0, nullptr,
+			static_cast<uint32_t>(preBarriers.size()), preBarriers.data(),
+			0, nullptr
+		);
+
+		// 1) Bind compute pipeline + descriptor set 0
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm->GetCullComputePipeline());
+
+		VkDescriptorSet set0 = dm->GetPerFrameDescriptorSet(frameIndex);
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_COMPUTE,
+			pm->GetCullComputePipelineLayout(),
+			0,
+			1,
+			&set0,
+			0,
+			nullptr
+		);
+
+		// 2) Push constants (instanceCount)
+		CullPushConstants pc{};
+		pc.instanceCount = instanceCount;
+
+		vkCmdPushConstants(
+			cmd,
+			pm->GetCullComputePipelineLayout(),
+			VK_SHADER_STAGE_COMPUTE_BIT,
+			0,
+			sizeof(CullPushConstants),
+			&pc
+		);
+
+		// 3) Dispatch (MUST be outside render pass)
+		const uint32_t groupCount = (instanceCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
+		vkCmdDispatch(cmd, groupCount, 1, 1);
+
+		// 4) Barrier: compute writes -> indirect read
+		VkBufferMemoryBarrier b2{};
+		b2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b2.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		b2.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+		b2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b2.buffer = cmdBuf;
+		b2.offset = 0;
+		b2.size = VK_WHOLE_SIZE;
+
+		VkBufferMemoryBarrier b3{};
+		b3.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b3.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		b3.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+		b3.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b3.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b3.buffer = countBuf;
+		b3.offset = 0;
+		b3.size = sizeof(uint32_t);
+
+		std::array<VkBufferMemoryBarrier, 2> postBarriers = { b2, b3 };
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+			0,
+			0, nullptr,
+			static_cast<uint32_t>(postBarriers.size()), postBarriers.data(),
+			0, nullptr
+		);
+	}
+
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
 	void VulkanIndexDraw::DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
+		auto engine = SwimEngine::GetInstance();
+		auto renderer = engine->GetVulkanRenderer();
+		auto& pm = renderer->GetPipelineManager();
+		auto& dm = renderer->GetDescriptorManager();
+
 		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
-		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 		VkDeviceSize offsets[] = { 0, 0 };
 
 		// Use the mega mesh buffer to do the scene in one single draw call
@@ -462,9 +634,60 @@ namespace Engine
 		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
 		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
+		// GPU compute culling path
+		if (cullMode == CullMode::GPU)
+		{
+			// IMPORTANT:
+			// Compute must have already been recorded OUTSIDE the render pass via RecordGpuCulling().
+			// This function runs inside render pass and only consumes the compute results.
+
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pm->GetGraphicsPipeline());
+
+			VkDescriptorSet globalSet = dm->GetPerFrameDescriptorSet(frameIndex);
+			VkDescriptorSet bindlessSet = dm->GetBindlessSet();
+			std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
+
+			vkCmdBindDescriptorSets(
+				cmd,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				pm->GetPipelineLayout(),
+				0,
+				static_cast<uint32_t>(sets.size()),
+				sets.data(),
+				0,
+				nullptr
+			);
+
+			VkBuffer cmdBuf = dm->GetPerFrameCullCommandBuffer(frameIndex);
+			VkBuffer countBuf = dm->GetPerFrameCullCountBuffer(frameIndex);
+
+			PFN_vkCmdDrawIndexedIndirectCountKHR fn = GetDrawIndexedIndirectCountFn(device);
+			if (!fn)
+			{
+				// If the extension isn't available, don't crash the engine yet.
+				// We'll just do nothing for now.
+				return;
+			}
+
+			// Max draw count is the number of instances we dispatched over.
+			const uint32_t maxDrawCount = static_cast<uint32_t>(cpuInstanceData.size());
+
+			fn(
+				cmd,
+				cmdBuf,
+				0,
+				countBuf,
+				0,
+				maxDrawCount,
+				sizeof(VkDrawIndexedIndirectCommand)
+			);
+
+			return;
+		}
+
 		// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
 		// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
-
+		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 		size_t totalCommands = rangeMap.size();
 
 		if (totalCommands > 0)

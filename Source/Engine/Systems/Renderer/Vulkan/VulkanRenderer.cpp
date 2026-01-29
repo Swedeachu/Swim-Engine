@@ -120,9 +120,10 @@ namespace Engine
 		descriptorManager->SetBindlessSampler(defaultSampler);
 
 		// Set up buffer and UBO for camera with double buffering
-		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
-
+		// NOTE: cull buffers are created before so binding 4/5 can be written now.
 		constexpr int MAX_EXPECTED_INSTANCES = 128000;
+		descriptorManager->CreatePerFrameCullBuffers(MAX_FRAMES_IN_FLIGHT, MAX_EXPECTED_INSTANCES);
+		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
 
 		// Create the index draw object which stores our instanced buffers and does our indexed drawing logic and caching
 		indexDraw = std::make_unique<VulkanIndexDraw>(
@@ -141,10 +142,8 @@ namespace Engine
 		indexDraw->CreateMegaMeshBuffers(initialVertexSize, initialIndexSize);
 
 		// Configure culled rendering mode
-		// Debug mode CPU culling: 100 FPS 
-		// Release mode CPU culling: 2500+ FPS
-		// GPU compute shader culling is not implemented
-		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
+		// TODO: check if device can use compute shaders, by default we just assume you can use the GPU compute
+		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::GPU);
 		indexDraw->SetUseQueriedFrustumSceneBVH(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
@@ -206,6 +205,12 @@ namespace Engine
 			msdfBindings,
 			msdfAttribs,
 			sizeof(MsdfTextGpuInstanceData)
+		);
+
+		// ---- COMPUTE CULL PIPELINE ----
+		pipelineManager->CreateCullComputePipeline(
+			"Shaders\\ComputeShaders\\frustum_cull.spv",
+			layout
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -533,6 +538,14 @@ namespace Engine
 		// Update camera UBO and instance buffer
 		UpdateUniformBuffer();
 
+		// This sets up fresh data for the frame and prepares every regular mesh to be drawn in world space.
+		// NOTE: Must happen BEFORE GPU culling dispatch so cpuInstanceData is ready.
+		indexDraw->UpdateInstanceBuffer(currentFrame);
+
+		// IMPORTANT: GPU culling must be recorded OUTSIDE the render pass.
+		// This no-ops if we are not in GPU cull mode.
+		indexDraw->RecordGpuCulling(currentFrame, cmd);
+
 		// Begin render pass
 		std::array<VkClearValue, 2> clearValues{};
 		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
@@ -583,16 +596,13 @@ namespace Engine
 			nullptr
 		);
 
-		// This sets up fresh data for the frame and prepares every regular mesh to be draw in world space.
-		indexDraw->UpdateInstanceBuffer(currentFrame);
-
 		// This then draws all of them with the default shader.
 		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);
 
 		// We now want to draw all of our text that is in the world.
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::World);
 
-		// This prepeares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
+		// This prepares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
 		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd);
 
 		// Then finally draw all of our text that is in UI screen space on top of everything.

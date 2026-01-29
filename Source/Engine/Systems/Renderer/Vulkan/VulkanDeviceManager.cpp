@@ -203,6 +203,13 @@ namespace Engine
 		deviceFeatures.samplerAnisotropy = VK_TRUE;
 		deviceFeatures.multiDrawIndirect = VK_TRUE;
 
+		// vkCmdDrawIndexedIndirectCountKHR requires VK_KHR_draw_indirect_count to be enabled.
+		// We use it for GPU culling so we MUST enable it here.
+		if (std::find(deviceExtensions.begin(), deviceExtensions.end(), VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME) == deviceExtensions.end())
+		{
+			deviceExtensions.push_back(VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME);
+		}
+
 		// --- Enable descriptor indexing features for bindless ---
 		VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
 		indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
