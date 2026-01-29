@@ -1,6 +1,9 @@
 // Writes VkDrawIndexedIndirectCommand entries for visible instances.
 // One draw per instance (instanceCount = 1), firstInstance = original instance ID.
 
+// 0 = AABB, 1 = Sphere
+static const uint USE_SPHERE_CULLING = 1;
+
 static const uint VERTEX_STRIDE_BYTES = 32;
 static const uint LOCAL_SIZE = 256;
 
@@ -12,7 +15,7 @@ cbuffer CameraUBO : register(b0, space0)
 	float4x4 screenView;
 	float4x4 screenProj;
 
-	float4 camParams;
+	float4 camParams;      // x=tanHalfFovX, y=tanHalfFovY, z=near, w=far
 	float2 viewportSize;
 	float2 _padViewportSize;
 };
@@ -90,6 +93,68 @@ static bool PlaneAabbOutside(float3 n, float3 c, float3 e)
 	return (s - r) > 0.0f;
 }
 
+static bool PlaneSphereOutside(float3 n, float3 c, float r)
+{
+	// Plane is dot(n, p) <= 0 for inside, where plane passes through origin.
+	// If n is NOT unit length, radius must be scaled by |n|.
+
+	// outside if dot(n, c) > r * |n|
+	float s = dot(n, c);
+	float rn = r * length(n);
+	return s > rn;
+}
+
+static bool FrustumSphereVisible(GpuInstanceData inst)
+{
+	// Screen-space instances: keep visible for now
+	if (inst.space == 1)
+	{
+		return true;
+	}
+
+	float3 localMin = inst.aabbMin.xyz;
+	float3 localMax = inst.aabbMax.xyz;
+
+	float3 centerL = (localMin + localMax) * 0.5f;
+	float3 extentL = (localMax - localMin) * 0.5f;
+
+	// Center in world then view
+	float4 centerW4 = mul(inst.model, float4(centerL, 1.0f));
+	float4 centerV4 = mul(worldView, centerW4);
+	float3 centerV = centerV4.xyz;
+
+	// Extents into view space using abs(V*M)
+	float3x3 VM = mul((float3x3)worldView, (float3x3)inst.model);
+	float3x3 absVM = Abs3x3(VM);
+	float3 extentV = mul(absVM, extentL);
+
+	// Conservative bounding sphere radius that encloses the box
+	float radius = length(extentV);
+
+	// Near/Far in your convention (camera forward is -Z)
+	float z = -centerV.z;
+	float nearZ = camParams.z;
+	float farZ = camParams.w;
+
+	if (z + radius < nearZ) { return false; }
+	if (z - radius > farZ)  { return false; }
+
+	float tX = camParams.x;
+	float tY = camParams.y;
+
+	// Same plane forms as your AABB code:
+	// right:  x + z*tX <= 0
+	// left:  -x + z*tX <= 0
+	// top:    y + z*tY <= 0
+	// bottom: -y + z*tY <= 0
+	if (PlaneSphereOutside(float3( 1.0f, 0.0f, tX), centerV, radius)) { return false; }
+	if (PlaneSphereOutside(float3(-1.0f, 0.0f, tX), centerV, radius)) { return false; }
+	if (PlaneSphereOutside(float3( 0.0f, 1.0f, tY), centerV, radius)) { return false; }
+	if (PlaneSphereOutside(float3( 0.0f,-1.0f, tY), centerV, radius)) { return false; }
+
+	return true;
+}
+
 static bool FrustumAabbVisible(GpuInstanceData inst)
 {
 	// Screen-space instances: keep visible for now
@@ -129,7 +194,6 @@ static bool FrustumAabbVisible(GpuInstanceData inst)
 	//  -x <= (-z) * tanHalfFovX  => -x + z*tX <= 0
 	//   y <= (-z) * tanHalfFovY  => y + z*tY <= 0
 	//  -y <= (-z) * tanHalfFovY  => -y + z*tY <= 0
-	//
 	// centerV.z is negative in front of camera, which is what we want here.
 	float tX = camParams.x;
 	float tY = camParams.y;
@@ -146,6 +210,16 @@ static bool FrustumAabbVisible(GpuInstanceData inst)
 	return true;
 }
 
+static bool FrustumVisible(GpuInstanceData inst)
+{
+	if (USE_SPHERE_CULLING == 1)
+	{
+		return FrustumSphereVisible(inst);
+	}
+
+	return FrustumAabbVisible(inst);
+}
+
 [numthreads(LOCAL_SIZE, 1, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
 {
@@ -158,7 +232,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
 	GpuInstanceData inst = instanceBuffer[instanceID];
 
-	if (!FrustumAabbVisible(inst))
+	if (!FrustumVisible(inst))
 	{
 		return;
 	}
