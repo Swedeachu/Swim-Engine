@@ -5,9 +5,9 @@ namespace Engine
 {
 
 	// Convenience macro for declaring static constexpr int tags
-#define TAG(name, value) static constexpr int name = value;
+#define TAG(name, value) static constexpr unsigned int name = value;
 
-	// Public facing contants for consistency 
+	// Public facing contants for consistency (CAN NOT BE NEGATIVES!)
 	namespace TagConstants
 	{
 		// --- Core world objects ---
@@ -33,11 +33,11 @@ namespace Engine
 			TAG(EFFECT, 23)
 
 			// --- Internal / special ---
-			TAG(EDITOR_MODE_OBJECT, -1)
-			TAG(EDITOR_MODE_UI, -2)
-			// TAG(SYSTEM_OBJECT, -3)
-			// TAG(DEBUG_OBJECT, -4)
-			// TAG(TEMPORARY_OBJECT, -5)
+			TAG(EDITOR_MODE_OBJECT, 24)
+			TAG(EDITOR_MODE_UI, 25)
+			// TAG(SYSTEM_OBJECT, 26)
+			// TAG(DEBUG_OBJECT, 27)
+			// TAG(TEMPORARY_OBJECT, 28)
 
 			// --- UI subcategories ---
 			TAG(UI_CANVAS, 30)
@@ -55,11 +55,11 @@ namespace Engine
 	struct ObjectTag
 	{
 
-		int tag = 0;
+		unsigned int tag = 0;
 		std::string name;
 
 		ObjectTag() = default;
-		ObjectTag(int t, const std::string& n = "")
+		ObjectTag(unsigned int t, const std::string& n = "")
 			: tag(t), name(n)
 		{}
 

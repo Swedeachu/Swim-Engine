@@ -134,7 +134,7 @@ namespace Engine
 			WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
 			WGL_CONTEXT_MINOR_VERSION_ARB, 6,
 			WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-		#ifdef _DEBUG
+		#ifdef _SWIM_DEBUG
 			WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_DEBUG_BIT_ARB,
 		#endif
 			0
@@ -528,7 +528,7 @@ namespace Engine
 		// 4) Screen-space text last 
 		RenderTextMSDFScreen(registry, view, proj);
 
-		// #ifdef _DEBUG
+		// #ifdef _SWIM_DEBUG
 		SceneDebugDraw* debugDraw = scene->GetSceneDebugDraw();
 		if (debugDraw && debugDraw->IsEnabled())
 		{

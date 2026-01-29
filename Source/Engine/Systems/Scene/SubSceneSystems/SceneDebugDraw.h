@@ -129,13 +129,13 @@ namespace Engine
 	private:
 
 		template <std::size_t N, std::size_t... I>
-		static constexpr bool ContainsEvalImpl(int v, const std::array<int, N>& a, std::index_sequence<I...>) noexcept
+		static constexpr bool ContainsEvalImpl(unsigned int v, const std::array<int, N>& a, std::index_sequence<I...>) noexcept
 		{
 			return ((v == a[I]) || ...);
 		}
 
 		template <std::size_t N>
-		static constexpr bool ContainsEval(int v, const std::array<int, N>& a) noexcept
+		static constexpr bool ContainsEval(unsigned int v, const std::array<int, N>& a) noexcept
 		{
 			return ContainsEvalImpl<N>(v, a, std::make_index_sequence<N>{});
 		}

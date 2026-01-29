@@ -25,6 +25,8 @@ namespace Engine
 
     // Retrieves or creates a MaterialData
     std::shared_ptr<MaterialData> GetMaterialData(const std::string& name);
+    std::shared_ptr<MaterialData> GetMaterialDataByID(uint32_t id);
+    std::string GetMaterialNameByID(uint32_t id);
     std::shared_ptr<MaterialData> RegisterMaterialData(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap = nullptr);
     bool MaterialExists(const std::string& name);
 

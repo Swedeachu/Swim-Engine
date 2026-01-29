@@ -5,9 +5,12 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
+#include "Engine/Components/ObjectTag.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 
 using nlohmann::json;
 
@@ -47,28 +50,17 @@ namespace Engine
 				continue;
 			}
 
-			bool hasTag = false;
-
-			// First check if we have a tag and if this should be excluded from being serialized due to being an editor mode object
-			if (reg.any_of<ObjectTag>(e))
+			if (!ShouldSerialize(e))
 			{
-				ObjectTag& tag = reg.get<ObjectTag>(e);
-				if (tag.tag == TagConstants::EDITOR_MODE_OBJECT || tag.tag == TagConstants::EDITOR_MODE_UI)
-				{
-					continue;
-				}
-				else
-				{
-					hasTag = true;
-				}
+				continue;
 			}
 
-			json jEntity = BuildEntityJSON(e, hasTag);
+			json jEntity = BuildEntityJSON(e);
 			entitiesArray.push_back(std::move(jEntity));
 		}
 	}
 
-	json SerializedSceneManager::BuildEntityJSON(entt::entity e, bool hasTag)
+	json SerializedSceneManager::BuildEntityJSON(entt::entity e)
 	{
 		json jEntity = json::object();
 
@@ -81,11 +73,8 @@ namespace Engine
 
 		// Per-component serialization (easy to extend)
 		SerializeTransform(e, jEntity);
-		if (hasTag)
-		{
-			SerializeTag(e, jEntity);
-		}
 		SerializeMaterial(e, jEntity);
+		SerializeTag(e, jEntity);
 		// TODO: behaviors, mesh decorators, text components
 
 		return jEntity;
@@ -93,11 +82,14 @@ namespace Engine
 
 	void SerializedSceneManager::SerializeTag(entt::entity e, json& jEntity)
 	{
-		ObjectTag& tag = reg.get<ObjectTag>(e);
-		json jTag = json::object();
-		jTag["name"] = tag.name;
-		jTag["tag"] = tag.tag;
-		jEntity["objectTag"] = std::move(jTag);
+		if (reg.any_of<ObjectTag>(e))
+		{
+			ObjectTag& tag = reg.get<ObjectTag>(e);
+			json jTag = json::object();
+			jTag["name"] = tag.name;
+			jTag["tag"] = tag.tag;
+			jEntity["objectTag"] = std::move(jTag);
+		}
 	}
 
 	void SerializedSceneManager::SerializeTransform(entt::entity e, json& jEntity)
@@ -176,8 +168,14 @@ namespace Engine
 			{
 				albedoTextureAssetFilePath = mat.data->albedoMap->GetFilePath();
 			}
+
+			if (mat.data->mesh && mat.data->mesh->meshBufferData)
+			{
+				modelFilePath = MaterialPool::GetInstance().GetMaterialNameByID(mat.data->mesh->meshBufferData->GetMeshID()); 
+			}
 		}
 
+		// Composite materials are many materials combined, so no texture path is set
 		if (reg.any_of<CompositeMaterial>(e))
 		{
 			CompositeMaterial& mat = reg.get<CompositeMaterial>(e);
@@ -211,8 +209,7 @@ namespace Engine
 			return;
 		}
 
-		// Use default channel 1 for now
-		engine->SendEditorMessage(wide, /*channel*/ 1);
+		engine->SendEditorMessage(wide, /*channel*/ 2);
 	}
 
 	void SerializedSceneManager::SaveFullJSON()
@@ -247,6 +244,221 @@ namespace Engine
 
 		out << utf8;
 		out.close();
+	}
+
+	void SerializedSceneManager::EnqueueCreated(entt::entity e)
+	{
+		// If it was previously marked destroyed this frame, undo that.
+		auto itD = std::find(destroyedEntities.begin(), destroyedEntities.end(), e);
+		if (itD != destroyedEntities.end())
+		{
+			destroyedEntities.erase(itD);
+		}
+
+		// Newly created entity's full JSON covers all state; no need to track as updated.
+		auto itU = std::find(updatedEntities.begin(), updatedEntities.end(), e);
+		if (itU != updatedEntities.end())
+		{
+			updatedEntities.erase(itU);
+		}
+
+		// Avoid duplicate entries.
+		auto itC = std::find(createdEntities.begin(), createdEntities.end(), e);
+		if (itC == createdEntities.end())
+		{
+			createdEntities.push_back(e);
+		}
+	}
+
+	void SerializedSceneManager::EnqueueUpdated(entt::entity e)
+	{
+		// If the entity was created this frame, the create JSON will already contain latest state.
+		auto itC = std::find(createdEntities.begin(), createdEntities.end(), e);
+		if (itC != createdEntities.end())
+		{
+			return;
+		}
+
+		// If it's destroyed this frame, do not bother tracking updates.
+		auto itD = std::find(destroyedEntities.begin(), destroyedEntities.end(), e);
+		if (itD != destroyedEntities.end())
+		{
+			return;
+		}
+
+		// Avoid duplicate entries.
+		auto itU = std::find(updatedEntities.begin(), updatedEntities.end(), e);
+		if (itU == updatedEntities.end())
+		{
+			updatedEntities.push_back(e);
+		}
+	}
+
+	void SerializedSceneManager::EnqueueDestroyed(entt::entity e)
+	{
+		// If it was created this frame, then created+destroyed cancels out.
+		// Net effect: the editor never needs to know about this entity at all.
+		auto itC = std::find(createdEntities.begin(), createdEntities.end(), e);
+		if (itC != createdEntities.end())
+		{
+			createdEntities.erase(itC);
+			return; // do NOT add to destroyedEntities
+		}
+
+		// Any pending updates are irrelevant if it is destroyed.
+		auto itU = std::find(updatedEntities.begin(), updatedEntities.end(), e);
+		if (itU != updatedEntities.end())
+		{
+			updatedEntities.erase(itU);
+		}
+
+		// Avoid duplicate entries.
+		auto itD = std::find(destroyedEntities.begin(), destroyedEntities.end(), e);
+		if (itD == destroyedEntities.end())
+		{
+			destroyedEntities.push_back(e);
+		}
+	}
+
+	void SerializedSceneManager::SendEntityCreated(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		if (!ShouldSerialize(e))
+		{
+			return;
+		}
+
+		EnqueueCreated(e);
+	}
+
+	void SerializedSceneManager::SendEntityDestroyed(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		if (!ShouldSerialize(e))
+		{
+			return;
+		}
+
+		EnqueueDestroyed(e);
+	}
+
+	void SerializedSceneManager::SendEntityUpdated(entt::entity e)
+	{
+		if (!reg.valid(e))
+		{
+			return;
+		}
+
+		if (!ShouldSerialize(e))
+		{
+			return;
+		}
+
+		EnqueueUpdated(e);
+	}
+
+	void SerializedSceneManager::SendSync()
+	{
+		// Nothing changed this frame.
+		if (createdEntities.empty() && updatedEntities.empty() && destroyedEntities.empty())
+		{
+			return;
+		}
+
+		json syncRoot = json::object();
+		syncRoot["scene"] = sceneName;
+		syncRoot["created"] = json::array();
+		syncRoot["updated"] = json::array();
+		syncRoot["destroyed"] = json::array();
+
+		auto& createdArray = syncRoot["created"];
+		auto& updatedArray = syncRoot["updated"];
+		auto& destroyedArray = syncRoot["destroyed"];
+
+		// Serialize created entities
+		for (entt::entity e : createdEntities)
+		{
+			if (!reg.valid(e))
+			{
+				continue;
+			}
+
+			if (!ShouldSerialize(e))
+			{
+				continue;
+			}
+
+			json jEntity = BuildEntityJSON(e);
+			createdArray.push_back(std::move(jEntity));
+		}
+
+		// Serialize updated entities
+		for (entt::entity e : updatedEntities)
+		{
+			if (!reg.valid(e))
+			{
+				continue;
+			}
+
+			if (!ShouldSerialize(e))
+			{
+				continue;
+			}
+
+			json jEntity = BuildEntityJSON(e);
+			updatedArray.push_back(std::move(jEntity));
+		}
+
+		// Serialize destroyed entities (IDs only; entity may no longer be valid in registry).
+		for (entt::entity e : destroyedEntities)
+		{
+			const std::uint32_t id = static_cast<std::uint32_t>(entt::to_integral(e));
+			json j = json::object();
+			j["id"] = id;
+			destroyedArray.push_back(std::move(j));
+		}
+
+		// Dump as compact UTF-8 JSON string
+		const std::string utf8 = syncRoot.dump();
+
+		// Convert to wide string for WM_COPYDATA
+		const std::wstring wide = Utf8ToWide("scene sync:" + utf8);
+
+		auto engine = SwimEngine::GetInstance();
+		if (!engine)
+		{
+			return;
+		}
+
+		engine->SendEditorMessage(wide, /*channel*/ 2);
+
+		// Clear per-frame queues
+		createdEntities.clear();
+		updatedEntities.clear();
+		destroyedEntities.clear();
+	}
+
+	// Skip editor tagged objects that should not appear in the scene hierarchy view
+	const bool SerializedSceneManager::ShouldSerialize(entt::entity e) const
+	{
+		if (reg.any_of<ObjectTag>(e))
+		{
+			ObjectTag& tag = reg.get<ObjectTag>(e);
+			if (tag.tag == TagConstants::EDITOR_MODE_OBJECT || tag.tag == TagConstants::EDITOR_MODE_UI)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 }

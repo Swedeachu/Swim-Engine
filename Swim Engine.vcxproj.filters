@@ -39,7 +39,7 @@
     <ClCompile Include="Source\Library\stb\stb_image_resize2_wrapper.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
@@ -51,7 +51,7 @@
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Font\FontPool.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Meshes\PrimitiveMeshes.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
@@ -63,6 +63,12 @@
     <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\ChangeGizmoTypeButtonBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsWorld.cpp" />
+    <ClCompile Include="Source\Engine\Components\Transform.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Phys\BallShooter.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\Rigibody.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitivePhysicsTest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Engine\SwimEngine.h" />
@@ -117,7 +123,7 @@
     <ClInclude Include="Source\Library\stb\stb_image_resize2_wrapper.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
@@ -351,7 +357,7 @@
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\AABB.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\Ray.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\MathTypes\MathAlgorithms.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Font\TextLayout.h" />
@@ -368,6 +374,13 @@
     <ClInclude Include="Source\Engine\EngineState.h" />
     <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorFactory.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorRegistrar.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsWorld.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
+    <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitivePhysicsTest.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

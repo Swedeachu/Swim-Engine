@@ -12,7 +12,10 @@
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
+#include "Engine/Systems/Physics/PhysicsWorld.h"
+
 #include <memory>
+#include <unordered_set>
 
 namespace Engine
 {
@@ -20,6 +23,7 @@ namespace Engine
 	// Forward declaration of systems
 	class SwimEngine;
 	class SceneSystem;
+	class PhysicsSystem;
 	class InputManager;
 	class CameraSystem;
 	class VulkanRenderer;
@@ -38,6 +42,8 @@ namespace Engine
 		explicit Scene(const std::string& name = "scene")
 			: name(name), registry()
 		{}
+
+		~Scene() override; // declaration only
 
 		int Awake() override { return 0; };
 
@@ -130,7 +136,11 @@ namespace Engine
 			static_assert(!std::is_reference_v<T>, "AddComponent should not take a reference type");
 			static_assert(!std::is_pointer_v<T>, "AddComponent should not take a pointer type");
 
-			return registry.emplace<T>(entity, std::move(component));
+			T& result = registry.emplace<T>(entity, std::move(component));
+
+			// All serialization notifications are now driven by registry hooks.
+
+			return result;
 		}
 
 		template<typename T, typename... Args>
@@ -139,7 +149,11 @@ namespace Engine
 			static_assert(!std::is_pointer_v<T>, "EmplaceComponent should not take a pointer type");
 			static_assert(std::is_constructible_v<T, Args&&...>, "T must be constructible with the provided arguments");
 
-			return registry.emplace<T>(entity, std::forward<Args>(args)...);
+			T& result = registry.emplace<T>(entity, std::forward<Args>(args)...);
+
+			// All serialization notifications are now driven by registry hooks.
+
+			return result;
 		}
 
 		template<typename T>
@@ -168,6 +182,9 @@ namespace Engine
 			}
 
 			registry.remove<T>(entity);
+
+			// All serialization notifications are now driven by registry hooks.
+
 			return true;
 		}
 
@@ -231,6 +248,11 @@ namespace Engine
 			}), vec.end());
 		}
 
+		Behavior* EmplaceBehaviorByName(entt::entity e, const std::string& behaviorName);
+
+		// Calls Behavior::RefreshFieldCache() on each behavior the entity has
+		void RefreshBehaviorFieldCacheForEntity(entt::entity e);
+
 		template<typename Func, typename... Args>
 		void ForEachBehavior(Func method, Args&&... args)
 		{
@@ -252,29 +274,6 @@ namespace Engine
 			});
 		}
 
-		// Only does a for each behavior callback on one specific entity, kind of useless
-		/*
-		template<typename Func, typename... Args>
-		void ForEachBehaviorOfEntity(entt::entity entity, Func method, Args&&... args)
-		{
-			if (registry.valid(entity) && registry.any_of<BehaviorComponents>(entity))
-			{
-				EngineState state = SwimEngine::GetInstance()->GetEngineState();
-				auto& bc = registry.get<BehaviorComponents>(entity);
-				if (bc.CanExecute(state))
-				{
-					for (auto& behavior : bc.behaviors)
-					{
-						if (behavior)
-						{
-							(behavior.get()->*method)(std::forward<Args>(args)...);
-						}
-					}
-				}
-			}
-		}
-		*/
-
 		void SetEnabledStates(entt::entity entity, EngineState states);
 
 		void AddEnabledStates(entt::entity entity, EngineState states);
@@ -284,12 +283,17 @@ namespace Engine
 		bool StateTestControl();
 
 		ObjectTag* GetTag(entt::entity entity);
-
-		void SetTag(entt::entity entity, int tag, const std::string& name = "");
-
+		const std::string GetEntityName(entt::entity e) const;
+		void SetTag(entt::entity entity, unsigned int tag, const std::string& name = "");
 		void RemoveTag(entt::entity entity);
 
 		bool IsMouseBusyWithUI() const { return mouseBusyWithUI; }
+
+		PhysicsWorld* GetPhysicsWorld() const;
+
+		PhysicsWorld& GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem);
+
+		void DestroyPhysicsWorld();
 
 	protected:
 
@@ -348,9 +352,13 @@ namespace Engine
 		entt::observer frustumCacheObserver;
 
 		std::unique_ptr<SceneBVH> sceneBVH;
+		std::unique_ptr<PhysicsWorld> physicsWorld;
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 		std::unique_ptr<GizmoSystem> gizmoSystem;
 		std::unique_ptr<SerializedSceneManager> serializedSceneManager;
+
+		// Tracks which entities the editor/serializer currently knows about.
+		std::unordered_set<entt::entity> serializedEntities;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
@@ -359,6 +367,17 @@ namespace Engine
 		bool WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent);
 
 		bool mouseBusyWithUI{ false }; // to avoid interacting with world same time as interacting with UI above the world
+
+		// --- Serialization bindings driven by the registry ---
+
+		template<typename T>
+		void BindSerializationHooksForComponent();
+
+		template<typename T>
+		void OnComponentConstruct(entt::registry& reg, entt::entity entity);
+
+		template<typename T>
+		void OnComponentDestroy(entt::registry& reg, entt::entity entity);
 
 	};
 

@@ -3,6 +3,8 @@
 #include <queue>
 #include <functional>
 #include <utility>
+#include <tuple>
+
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
@@ -45,7 +47,7 @@ namespace Engine
 				Material& mRef = reg.emplace<Material>(e, material);
 
 				// User callback: entity + created components + rest
-				fn(e, tRef, mRef, std::forward<Args>(a)...);
+				fn(e, tRef, mRef, std::move(a)...);
 			}
 			);
 		}
@@ -63,16 +65,23 @@ namespace Engine
 
 				// Add behaviors
 				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
-				([](Scene* s, entt::entity entity)
+				if (!scene)
 				{
-					s->EmplaceBehavior<BehaviorTypes>(entity);
-				}(scene, e), ...);
+					return;
+				}
+
+				// Emplace all behaviors first
+				((void)scene->EmplaceBehavior<BehaviorTypes>(e), ...);
+
+				// Now that all behaviors are attached, refresh the field cache once
+				scene->RefreshBehaviorFieldCacheForEntity(e);
 			}
 			);
 		}
 
 		// Transform + Material + Behaviors (templated callback)
 		// The callback receives: (entt::entity e, Transform& t, Material& m, BehaviorTypes*... ptrs, ...args)
+		// This assumes all behaviors use the same default (scene*, entity) constructor 
 		template<typename... BehaviorTypes, typename Func, typename... Args>
 		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material, Func&& func, Args&&... args)
 		{
@@ -83,19 +92,28 @@ namespace Engine
 				Transform& tRef = reg.emplace<Transform>(e, transform);
 				Material& mRef = reg.emplace<Material>(e, material);
 
-				// Add behaviors and collect pointers
 				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				if (!scene)
+				{
+					return;
+				}
+
+				// Add behaviors and collect pointers
 				auto behaviorPtrs = std::make_tuple(scene->EmplaceBehavior<BehaviorTypes>(e)...);
 
 				// Invoke user callback: entity + components + behavior ptrs + rest
 				std::apply([&](auto*... bs)
 				{
-					fn(e, tRef, mRef, bs..., std::forward<Args>(a)...);
+					fn(e, tRef, mRef, bs..., std::move(a)...);
 				}, behaviorPtrs);
+
+				// Refresh behavior field cache once after all behaviors + user callback
+				scene->RefreshBehaviorFieldCacheForEntity(e);
 			}
 			);
 		}
 
+		// This assumes all behaviors use the same default (scene*, entity) constructor 
 		// Super powerful way to just load all your scripts into the scene that aren't reliant on hierarchy of entities or physical entities (Score Manager, Game Manager, etc)
 		template<typename... BehaviorTypes>
 		void CreateWithBehaviors()
@@ -104,15 +122,21 @@ namespace Engine
 				[](entt::registry& reg, entt::entity e)
 			{
 				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
-
-				([](Scene* s, entt::entity entity)
+				if (!scene)
 				{
-					s->EmplaceBehavior<BehaviorTypes>(entity);
-				}(scene, e), ...);
+					return;
+				}
+
+				// Emplace all behaviors
+				((void)scene->EmplaceBehavior<BehaviorTypes>(e), ...);
+
+				// Refresh field cache once after all behaviors are attached
+				scene->RefreshBehaviorFieldCacheForEntity(e);
 			}
 			);
 		}
 
+		// This assumes all behaviors use the same default (scene*, entity) constructor 
 		// Behaviors + callback variant: callback receives (entt::entity e, BehaviorTypes*... created, ...args)
 		template<typename... BehaviorTypes, typename Func, typename... Args>
 		void CreateWithBehaviors(Func&& func, Args&&... args)
@@ -121,13 +145,20 @@ namespace Engine
 				[fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
 				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				if (!scene)
+				{
+					return;
+				}
 
 				auto tuplePtrs = std::make_tuple(scene->EmplaceBehavior<BehaviorTypes>(e)...);
 
 				std::apply([&](auto*... ps)
 				{
-					fn(e, ps..., std::forward<Args>(a)...);
+					fn(e, ps..., std::move(a)...);
 				}, tuplePtrs);
+
+				// Refresh behavior field cache once after all behaviors + user callback
+				scene->RefreshBehaviorFieldCacheForEntity(e);
 			}
 			);
 		}
@@ -142,7 +173,7 @@ namespace Engine
 			createQueue.push(
 				[fn = std::forward<Func>(func), ...args = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
-				fn(reg, e, std::forward<Args>(args)...);
+				fn(reg, e, std::move(args)...);
 			}
 			);
 		}
@@ -154,7 +185,7 @@ namespace Engine
 			destroyQueue.push(
 				[fn = std::forward<Func>(func), ...args = std::forward<Args>(args)]() mutable
 			{
-				fn(std::forward<Args>(args)...);
+				fn(std::move(args)...);
 			}
 			);
 		}

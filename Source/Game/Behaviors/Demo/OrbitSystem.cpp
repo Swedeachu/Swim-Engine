@@ -17,18 +17,20 @@
 #include "Library/glm/gtc/quaternion.hpp"
 #include "Library/glm/gtc/matrix_transform.hpp"
 
+#include "Engine/Systems/Entity/EntityFactory.h"
+
 namespace Game
 {
 
-	// Public entry: create a manager and attach the OrbitSystem behavior
 	void TestParenting(Engine::Scene* scene, const glm::vec3& pos)
 	{
-		auto e = scene->CreateEntity();
-		// Manager transform (world origin)
-		scene->AddComponent<Engine::Transform>(e, Engine::Transform(pos, glm::vec3(1.0f)));
-
-		// Attach behavior
-		scene->EmplaceBehavior<Game::OrbitSystem>(e);
+		// Creates an entity with the orbit system behavior and a callback to assign a transform and object tag
+		Engine::EntityFactory::GetInstance().CreateWithBehaviors<OrbitSystem>(
+			[scene, pos](entt::entity e, OrbitSystem* s)
+		{
+			scene->EmplaceComponent<Engine::Transform>(e, pos, glm::vec3(1.0f));
+			scene->SetTag(e, Engine::TagConstants::WORLD, "Orbit System");
+		});
 	}
 
 	int OrbitSystem::Awake()
@@ -137,6 +139,7 @@ namespace Game
 		// Big star at origin
 		reg.emplace<Engine::Transform>(e, pos, glm::vec3(1.8f));
 		reg.emplace<Engine::Material>(e, matStar);
+		reg.emplace<Engine::ObjectTag>(e, Engine::TagConstants::WORLD, "Star");
 
 		// Give star a random bright color via mesh decorator
 		const glm::vec3 tint = Engine::RandomBrightColor();
@@ -179,6 +182,7 @@ namespace Game
 
 		reg.emplace<Engine::Transform>(e, localPos, glm::vec3(p.baseScale), localRot);
 		reg.emplace<Engine::Material>(e, mat);
+		scene->SetTag(e, Engine::TagConstants::WORLD, "Planet " + std::to_string(static_cast<uint32_t>(entt::to_integral(e))));
 
 		// Give planets a random bright color via mesh decorator
 		const glm::vec3 tint = Engine::RandomBrightColor();

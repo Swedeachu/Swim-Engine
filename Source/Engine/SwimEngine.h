@@ -3,6 +3,7 @@
 #include "Systems/SystemManager.h"
 #include "Systems/Renderer/Renderer.h"
 #include "Systems/IO/CommandSystem.h"
+#include "Systems/Physics/PhysicsSystem.h"
 #include "EngineState.h"
 #include <utility>
 #include <format>
@@ -21,7 +22,7 @@ namespace Engine
 	public:
 
 		// The initial state the engine will start in if no argument is provided from main
-		static constexpr EngineState DefaultEngineState = EngineState::Editing;
+		static constexpr EngineState DefaultEngineState = EngineState::Editing; // this should be playing for release builds
 
 		enum RenderContext
 		{
@@ -61,7 +62,7 @@ namespace Engine
 		// Called when it is time
 		void Update(double dt) override;
 
-		// Called at a fixed rate N times a second (20 by default)
+		// Called at a fixed rate N times a second (60 by default)
 		void FixedUpdate(unsigned int tickThisSecond) override;
 
 		// Called when the engine is closed (release file locks, write final logs, etc)
@@ -84,6 +85,7 @@ namespace Engine
 		HWND GetWindowHandle() const { return engineWindowHandle; }
 
 		std::shared_ptr<InputManager>& GetInputManager() { return inputManager; }
+		std::shared_ptr<PhysicsSystem>& GetPhysicsSystem() { return physicsSystem; }
 		std::shared_ptr<SceneSystem>& GetSceneSystem() { return sceneSystem; }
 		std::shared_ptr<CameraSystem>& GetCameraSystem() { return cameraSystem; }
 		std::shared_ptr<CommandSystem>& GetCommandSystem() { return commandSystem; }
@@ -109,6 +111,7 @@ namespace Engine
 
 		// Send a wide string back to the editor process. Returns true if the editor handled it (nonzero LRESULT).
 		bool SendEditorMessage(const std::wstring& msg, std::uintptr_t channel = 1);
+		bool SendEditorMessage(const std::string& msg, std::uintptr_t channel = 1); // overload which converts to wide and calls the method above
 
 		// Convenience formatter
 		template<typename... Args>
@@ -133,7 +136,7 @@ namespace Engine
 		bool uncappedFPS{ true };
 		unsigned int targetFPS{ 60 };
 		unsigned int totalFrames{ 0 };
-		unsigned int tickRate{ 20 };
+		unsigned int tickRate{ 60 }; // was 20, but we are a client with physics so we need to be 60 at minimum
 		double frameTime{ 0.0 };
 		double delta{ 0.0 };
 		bool running{ false };
@@ -173,6 +176,7 @@ namespace Engine
 		std::shared_ptr<VulkanRenderer> vulkanRenderer;
 		std::shared_ptr<OpenGLRenderer> openglRenderer;
 		std::shared_ptr<CameraSystem> cameraSystem;
+		std::shared_ptr<PhysicsSystem> physicsSystem;
 
 	};
 

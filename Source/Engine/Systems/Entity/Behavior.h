@@ -2,6 +2,7 @@
 
 #include "Engine/Machine.h"
 #include "Engine/EngineState.h"
+#include "BehaviorRegistrar.h"
 
 namespace Engine
 {
@@ -33,6 +34,9 @@ namespace Engine
 				Init();
 			}
 		}
+
+		// Intended to regrab all the common components and systems
+		void RefreshFieldCache();
 
 		virtual ~Behavior() = default;
 

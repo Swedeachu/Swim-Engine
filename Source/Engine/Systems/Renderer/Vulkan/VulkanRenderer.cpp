@@ -9,7 +9,7 @@
 #include "VulkanCubeMap.h"
 
 // Validation layers for debugging
-#ifdef _DEBUG
+#ifdef _SWIM_DEBUG
 const bool enableValidationLayers = true;
 #else
 const bool enableValidationLayers = false;

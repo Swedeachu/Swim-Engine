@@ -107,7 +107,8 @@ namespace Engine
       {
         std::tuple<std::decay_t<Args>...> tup;
 
-        if (!(ConvertArg<std::tuple_element_t<I, decltype(tup)>>(args[I], std::get<I>(tup)) && ...))
+        // Let overload resolution choose the proper ConvertArg overload:
+        if (!(ConvertArg(args[I], std::get<I>(tup)) && ...))
         {
           return false;
         }

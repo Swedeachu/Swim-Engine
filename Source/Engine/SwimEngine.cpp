@@ -15,7 +15,8 @@ namespace Engine
 	{
 		std::wstring suffix;
 
-	#if defined(_DEBUG) || !defined(NDEBUG)
+		// #if defined(_DEBUG) || !defined(NDEBUG)
+	#if defined(_SWIM_DEBUG)
 		suffix = L" (Debug)";
 	#else
 		suffix = L" (Release)";
@@ -498,11 +499,24 @@ namespace Engine
 		const std::string msgUtf8 = WStringToUTF8(msg);
 
 		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
-		if (!ok)
+		if (ok)
 		{
-			// Unknown command:
-			SendEditorMessage(L"[Unknown Engine Command]: " + msg);
+			SendEditorMessage(L"(Recv [200]): " + msg); // ok
 		}
+		else
+		{
+			SendEditorMessage(L"(Recv [400]): " + msg); // incorrect request, either not a command or was just a hack message with no logic to execute beyond a pong
+		}
+	}
+
+	bool SwimEngine::SendEditorMessage(const std::string& msg, std::uintptr_t channel)
+	{
+		if (!parentHandle)
+		{
+			return false;
+		}
+
+		return SendEditorMessage(std::wstring(msg.begin(), msg.end()), channel);
 	}
 
 	// Maybe make this take a regular string instead of wide, and then package as wide for WM_COPYDATA 
@@ -539,10 +553,15 @@ namespace Engine
 	int SwimEngine::Init()
 	{
 		// Add systems to the SystemManager
-		inputManager = systemManager->AddSystem<InputManager>("InputManager");
-		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
-		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
+		inputManager = systemManager->AddSystem<InputManager>("InputManager"); // Listen to input before a scene update that frame, so goes first.
+		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem"); // Hardly matters because commands aren't frame/tick based.
+		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem"); // Controls basically everything
 
+		// We have physics before the scene system for init and shut down order reasons.
+		// This is maybe a bad thing to do (or it might not matter).
+		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem"); 
+
+		// Then the renderer is the last system each frame to update to draw everything finalized for that frame.
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
 			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer");
@@ -563,6 +582,7 @@ namespace Engine
 			}
 		}
 
+		// Camera system doesn't really matter its order since it is more just a camera data holder for now that the renderer and scene owned behaviors talk to when needed.
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
 
 		// Call Awake and Init on all systems
@@ -590,11 +610,11 @@ namespace Engine
 		auto summarize = [](SwimEngine* e)
 		{
 			std::wstring s = L"[Engine] State ->";
-			if (HasAny(e->engineState, EngineState::Playing)) s += L" Playing";
-			if (HasAny(e->engineState, EngineState::Paused))  s += L" Paused";
-			if (HasAny(e->engineState, EngineState::Editing)) s += L" Editing";
-			if (HasAny(e->engineState, EngineState::Stopped)) s += L" Stopped";
-			if (!HasAny(e->engineState, EngineState::All))    s += L" None";
+			if (HasAnyEngineStates(e->engineState, EngineState::Playing)) s += L" Playing";
+			if (HasAnyEngineStates(e->engineState, EngineState::Paused))  s += L" Paused";
+			if (HasAnyEngineStates(e->engineState, EngineState::Editing)) s += L" Editing";
+			if (HasAnyEngineStates(e->engineState, EngineState::Stopped)) s += L" Stopped";
+			if (!HasAnyEngineStates(e->engineState, EngineState::All))    s += L" None";
 			e->SendEditorMessage(s);
 		};
 
@@ -671,7 +691,7 @@ namespace Engine
 		// Timing variables
 		auto previousTime = std::chrono::high_resolution_clock::now();
 		double accumulatedTime = 0.0;
-		double fixedTimeStep = 1.0 / tickRate; // e.g., 20 ticks per second
+		double fixedTimeStep = 1.0 / tickRate; // e.g., 60 ticks per second
 		unsigned int tickCounter = 1;          // Start tick counter at 1
 
 		// Maximum allowable delta time (e.g., 5x the fixed time step)
@@ -798,6 +818,13 @@ namespace Engine
 
 	void SwimEngine::FixedUpdate(unsigned int tickThisSecond)
 	{
+		// Make sure physics system is always in line with our tick rate timing
+		float time = 1.0f / tickRate;
+		if (physicsSystem)
+		{
+			physicsSystem->SetFixedDeltaSeconds(time);
+		}
+
 		systemManager->FixedUpdate(tickThisSecond);
 	}
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Scene.h"
+#include "Engine/Systems/IO/CommandSystem.h"
 
 namespace Engine
 {
@@ -34,6 +35,22 @@ namespace Engine
 		std::shared_ptr<Scene>& GetActiveScene() { return activeScene; }
 
 	private:
+
+		void RegisterEditorCommands();
+		void SendBehaviorsToEditor();
+
+		// Per-command registration functions
+		void RegisterEntityCreateCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntityDestroyCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntityAddComponentCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntityRemoveComponentCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntitySetMaterialCommand(std::shared_ptr<CommandSystem>& cmd);		
+		void RegisterEntityBehaviorAddCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntityBehaviorRemoveCommand(std::shared_ptr<CommandSystem>& cmd);
+
+		// Small helpers used by the add/remove component commands
+		void AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
+		void RemoveComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
 
 		// Map of scenes by name
 		std::map<std::string, std::shared_ptr<Scene>> scenes;

@@ -65,12 +65,12 @@ namespace Engine
 		All = (Playing | Paused | Editing | Stopped)
 	};
 
-	inline constexpr bool HasAny(EngineState mask, EngineState flags)
+	inline constexpr bool HasAnyEngineStates(EngineState mask, EngineState flags)
 	{
 		return (mask & flags) != EngineState::None;
 	}
 
-	inline constexpr bool HasAll(EngineState mask, EngineState flags)
+	inline constexpr bool HasAllEngineStates(EngineState mask, EngineState flags)
 	{
 		return (mask & flags) == flags;
 	}

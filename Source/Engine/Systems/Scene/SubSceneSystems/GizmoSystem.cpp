@@ -192,7 +192,7 @@ namespace Engine
 	void GizmoSystem::Update(double dt)
 	{
 		EngineState state = SwimEngine::GetInstance()->GetEngineState();
-		if (!activeScene || !HasAny(state, EngineState::Editing)) return; // only active during editing
+		if (!activeScene || !HasAnyEngineStates(state, EngineState::Editing)) return; // only active during editing
 
 		// If nothing is selected, we will call the method to do mouse click ray cast checks for if we are selecting anything in the scene.
 		if (activeGizmoType != GizmoType::Inactive && (rootGizmoControl == entt::null || focusedEntity == entt::null))

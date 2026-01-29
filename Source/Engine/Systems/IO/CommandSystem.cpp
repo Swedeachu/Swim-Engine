@@ -67,8 +67,25 @@ namespace Engine
 	bool CommandSystem::SplitTokens(const std::string& line, std::vector<std::string>& outTokens)
 	{
 		outTokens.clear();
-		const char* s = line.c_str();
-		size_t n = line.size();
+
+		// Treat '(' and ')' as whitespace / separators
+		std::string cleaned;
+		cleaned.reserve(line.size());
+
+		for (char c : line)
+		{
+			if (c == '(' || c == ')')
+			{
+				cleaned.push_back(' ');
+			}
+			else
+			{
+				cleaned.push_back(c);
+			}
+		}
+
+		const char* s = cleaned.c_str();
+		size_t n = cleaned.size();
 
 		size_t i = 0;
 		while (i < n)
@@ -96,7 +113,8 @@ namespace Engine
 						// handle simple escapes for quote and backslash
 						if (next == '"' || next == '\\')
 						{
-							tok.push_back(next); i += 2;
+							tok.push_back(next);
+							i += 2;
 							continue;
 						}
 					}

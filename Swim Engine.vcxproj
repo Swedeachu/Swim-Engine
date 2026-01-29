@@ -156,22 +156,26 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
-;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_ITERATOR_DEBUG_LEVEL=0;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;PX_PHYSX_STATIC_LIB;
+_SWIM_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library;$(ProjectDir)Source\Library\physx\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
-libwebpdemux.lib;
-libwebpmux.lib
-;draco_debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco;C:\Users\camde\source\repos\Swim-Engine\Source\Library\physx\lib\checked</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;libwebpdemux.lib;libwebpmux.lib;draco_release.lib;PhysXFoundation_static_64.lib;
+PhysXCommon_static_64.lib;
+PhysX_static_64.lib;
+PhysXExtensions_static_64.lib;
+PhysXCooking_static_64.lib;
+PhysXCharacterKinematic_static_64.lib;
+PhysXVehicle2_static_64.lib;PhysXPvdSDK_static_64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
@@ -187,26 +191,31 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;PX_PHYSX_STATIC_LIB
 ;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)Source;$(ProjectDir)Source\Engine\Utility;$(VULKAN_SDK)\Include;$(ProjectDir)Source\Library\glad\include;$(ProjectDir)Source\Library;C:\Users\camde\source\repos\Swim-Engine\Source\Library\physx\include</AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>PCH.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;
-libwebpdemux.lib;
-libwebpmux.lib
-;draco_release.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)Source\Library\webp\lib;$(ProjectDir)Source\Library\draco;$(ProjectDir)Source\Library\physx\lib\release</AdditionalLibraryDirectories>
+      <AdditionalDependencies>vulkan-1.lib;opengl32.lib;libwebp.lib;libwebpdemux.lib;libwebpmux.lib;draco_release.lib;PhysXFoundation_static_64.lib;
+PhysXCommon_static_64.lib;
+PhysX_static_64.lib;
+PhysXExtensions_static_64.lib;
+PhysXCooking_static_64.lib;
+PhysXCharacterKinematic_static_64.lib;
+PhysXVehicle2_static_64.lib
+;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)Assets" "$(TargetDir)Assets" /E /I /Y
@@ -217,12 +226,16 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Source\Engine\Components\Transform.cpp" />
     <ClCompile Include="Source\Engine\SwimEngine.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\Behavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.cpp" />
     <ClCompile Include="Source\Engine\Systems\Entity\EntityFactory.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\CommandSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\IO\InputManager.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsSystem.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\PhysicsWorld.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Physics\Rigibody.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Camera\CameraSystem.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.cpp" />
     <ClCompile Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.cpp" />
@@ -248,9 +261,14 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\EngineState.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\Behavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\BehaviorComponents.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorRegistrar.h" />
+    <ClInclude Include="Source\Engine\Systems\Entity\BehaviorFactory.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\CommonBehaviors\DragUiBehavior.h" />
     <ClInclude Include="Source\Engine\Systems\Entity\EntityFactory.h" />
     <ClInclude Include="Source\Engine\Systems\IO\CommandSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsSystem.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\PhysicsWorld.h" />
+    <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Camera\Frustum.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMap.h" />
     <ClInclude Include="Source\Engine\Systems\Renderer\Core\Environment\CubeMapController.h" />
@@ -287,17 +305,19 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\EditorCamera.cpp" />
-    <ClCompile Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.cpp" />
+    <ClCompile Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\CubeMapControlTest.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\OrbitSystem.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SetTextCallBack.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\SimpleMovement.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Demo\Spin.cpp" />
+    <ClCompile Include="Source\Game\Behaviors\Phys\BallShooter.cpp" />
     <ClCompile Include="Source\Game\Behaviors\Util\ChromaHelper.cpp" />
     <ClCompile Include="Source\Game\Scenes\Sandbox.cpp" />
     <ClCompile Include="Source\Game\Testing\MeshDrawingStressTest.cpp" />
+    <ClCompile Include="Source\Game\Testing\PrimitivePhysicsTest.cpp" />
     <ClCompile Include="Source\Game\Testing\PrimitiveTest.cpp" />
     <ClCompile Include="Source\Game\Testing\TextAndUiTest.cpp" />
     <ClCompile Include="Source\Library\basis\basisu_transcoder.cpp">
@@ -332,14 +352,16 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
+    <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
     <ClInclude Include="Source\Game\Behaviors\Util\ChromaHelper.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\EditorCamera.h" />
-    <ClInclude Include="Source\Game\Behaviors\CameraControl\RayCasterCameraControl.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\EditorCamera.h" />
+    <ClInclude Include="Source\Engine\Systems\Scene\InternalBehaviors\CameraControl\RayCasterCameraControl.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\CubeMapControlTest.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\MouseInputDemoBehavior.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SimpleMovement.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\Spin.h" />
     <ClInclude Include="Source\Game\Testing\MeshDrawingStressTest.h" />
+    <ClInclude Include="Source\Game\Testing\PrimitivePhysicsTest.h" />
     <ClInclude Include="Source\Game\Testing\PrimitiveTest.h" />
     <ClInclude Include="Source\Game\Testing\TextAndUiTest.h" />
     <ClInclude Include="Source\Library\basis\basisu.h" />

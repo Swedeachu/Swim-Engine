@@ -43,7 +43,7 @@ namespace Engine
 			ParseFontDirectory(dir);
 		}
 
-	#ifdef _DEBUG
+	#ifdef _SWIM_DEBUG
 		// 3) Print summary (takes its own lock)
 		PrintMapDebug();
 	#endif
