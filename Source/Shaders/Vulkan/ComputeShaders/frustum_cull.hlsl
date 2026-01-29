@@ -10,7 +10,7 @@ cbuffer CameraUBO : register(b0, space0)
 };
 
 // === [b1] Instance Meta UBO ===
-// Supplied via instanceMetaBuffer — set to instanceCount and padding
+// Supplied via instanceMetaBuffer set to instanceCount and padding
 [[vk::binding(1, 0)]]
 cbuffer InstanceMeta : register(b1, space0)
 {
@@ -191,7 +191,7 @@ void main(uint3 DTid : SV_DispatchThreadID)
 
   if (!visible)
   {
-    return; // culled — not visible
+    return; // culled not visible
   }
 
   // Append visible instance
