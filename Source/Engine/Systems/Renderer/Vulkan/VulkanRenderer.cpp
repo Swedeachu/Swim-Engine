@@ -115,12 +115,15 @@ namespace Engine
 		descriptorManager->CreateBindlessPool();
 		descriptorManager->AllocateBindlessSet();
 
+		// true-batch compute needs its own set layout (set 0) before we create pipelines.
+		descriptorManager->CreateTrueBatchCullLayout();
+
 		// Make the default sampler for the fragment shader to use
 		defaultSampler = CreateSampler();
 		descriptorManager->SetBindlessSampler(defaultSampler);
 
 		// Set up buffer and UBO for camera with double buffering
-		// NOTE: cull buffers are created before so binding 4/5 can be written now.
+		// cull buffers are created before so binding 4/5 can be written now.
 		constexpr int MAX_EXPECTED_INSTANCES = 128000;
 		descriptorManager->CreatePerFrameCullBuffers(MAX_FRAMES_IN_FLIGHT, MAX_EXPECTED_INSTANCES);
 		descriptorManager->CreatePerFrameUBOs(physicalDevice, MAX_FRAMES_IN_FLIGHT);
@@ -144,7 +147,7 @@ namespace Engine
 		// Configure culled rendering mode
 		// TODO: check if device can use compute shaders, by default we just assume you can use the GPU compute
 		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::GPU);
-		indexDraw->SetUseQueriedFrustumSceneBVH(true);
+		indexDraw->SetUseQueriedFrustumSceneBVH(true); // probably useless if we are in GPU mode though
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
@@ -208,9 +211,22 @@ namespace Engine
 		);
 
 		// ---- COMPUTE CULL PIPELINE ----
-		pipelineManager->CreateCullComputePipeline(
-			"Shaders\\ComputeShaders\\frustum_cull.spv",
-			layout
+
+		// True-batched cull: 6 SPVs sharing the exact same descriptor set layout (set 0) + push constants.
+		pipelineManager->CreateCullTrueBatchComputePipelines(
+			"Shaders\\ComputeShaders\\frustum_cull_count.spv",
+			"main_count",
+			"Shaders\\ComputeShaders\\frustum_cull_scan512.spv",
+			"main_scan512",
+			"Shaders\\ComputeShaders\\frustum_cull_scanGroups.spv",
+			"main_scanGroups",
+			"Shaders\\ComputeShaders\\frustum_cull_fixup.spv",
+			"main_fixup",
+			"Shaders\\ComputeShaders\\frustum_cull_scatter.spv",
+			"main_scatter",
+			"Shaders\\ComputeShaders\\frustum_cull_build.spv",
+			"main_build",
+			descriptorManager->GetTrueBatchCullLayout()
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -279,6 +295,21 @@ namespace Engine
 
 			cameraSystem->RefreshAspect();
 			return;
+		}
+
+		// Pure debug, pressing zero key changes the cull mode
+		if (SwimEngine::GetInstance()->GetInputManager()->IsKeyTriggered('0'))
+		{
+			if (indexDraw->GetCulledMode() == VulkanIndexDraw::CullMode::CPU)
+			{
+				indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::GPU);
+				std::cout << "VulkanRenderer : Changing to GPU compute culling" << std::endl;
+			}
+			else
+			{
+				indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
+				std::cout << "VulkanRenderer : Changing to CPU BVH culling" << std::endl;
+			}
 		}
 
 		DrawFrame();
@@ -528,7 +559,7 @@ namespace Engine
 
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // helpful for per-frame recording
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
 		if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS)
 		{
@@ -538,12 +569,10 @@ namespace Engine
 		// Update camera UBO and instance buffer
 		UpdateUniformBuffer();
 
-		// This sets up fresh data for the frame and prepares every regular mesh to be drawn in world space.
-		// NOTE: Must happen BEFORE GPU culling dispatch so cpuInstanceData is ready.
+		// Build per-frame instance lists and CPU indirect (CPU/NONE) or SSBO source (GPU)
 		indexDraw->UpdateInstanceBuffer(currentFrame);
 
-		// IMPORTANT: GPU culling must be recorded OUTSIDE the render pass.
-		// This no-ops if we are not in GPU cull mode.
+		// GPU culling must happen OUTSIDE the render pass (no-ops if not in GPU mode)
 		indexDraw->RecordGpuCulling(currentFrame, cmd);
 
 		// Begin render pass
@@ -570,7 +599,7 @@ namespace Engine
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-		// Skybox 
+		// Skybox
 		if (cubemapController && cubemapController->IsEnabled())
 		{
 			if (auto* vkMap = static_cast<VulkanCubeMap*>(cubemapController->GetCubeMap()))
@@ -579,33 +608,18 @@ namespace Engine
 			}
 		}
 
-		// Scene pipeline & sets
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
-		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
-		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
-		std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
-
-		vkCmdBindDescriptorSets(
-			cmd,
-			VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipelineManager->GetPipelineLayout(),
-			0,
-			static_cast<uint32_t>(sets.size()),
-			sets.data(),
-			0,
-			nullptr
-		);
-
-		// This then draws all of them with the default shader.
+		// VulkanIndexDraw::DrawIndexedWorldMeshes() will bind the correct per-frame set depending on cull mode:
+		// - CPU/NONE => perFrameDescriptorSet (instanceBuffer)
+		// - GPU      => perFrameCulledWorldDescriptorSet (visibleInstanceBuffer)
 		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);
 
-		// We now want to draw all of our text that is in the world.
+		// World text
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::World);
 
-		// This prepares every screen space and UI decorated mesh, and draws all of them with the decorator shader.
+		// Decorators + screen space
 		indexDraw->DrawIndexedScreenSpaceAndDecoratedMeshes(currentFrame, cmd);
 
-		// Then finally draw all of our text that is in UI screen space on top of everything.
+		// UI text on top
 		indexDraw->DrawIndexedMsdfText(currentFrame, cmd, TransformSpace::Screen);
 
 		vkCmdEndRenderPass(cmd);

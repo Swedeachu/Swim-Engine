@@ -47,6 +47,7 @@ namespace Engine
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
 
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
+		CullMode GetCulledMode() const { return cullMode; }
 
 		// Major performance booster for CPU side 
 		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
@@ -109,6 +110,9 @@ namespace Engine
 
 		// GPU compute culling path (writes indirect commands + draw count).
 		void DispatchGpuCulling(uint32_t frameIndex, VkCommandBuffer cmd);
+
+		// Helper for binding the standard world mesh graphics pipeline + descriptor sets
+		void BindWorldMeshPipeline(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;

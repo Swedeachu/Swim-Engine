@@ -5,23 +5,23 @@
 namespace Engine
 {
 
-  struct alignas(16) GpuInstanceData
-  {
-    glm::mat4 model;          // 64 bytes
+	struct alignas(16) GpuInstanceData
+	{
+		glm::mat4 model;          // 64 bytes
 
-    glm::vec4 aabbMin;        // 16 bytes
-    glm::vec4 aabbMax;        // 16 bytes
+		glm::vec4 aabbMin;        // 16 bytes
+		glm::vec4 aabbMax;        // 16 bytes
 
-    uint32_t textureIndex;    // 4 bytes
-    float hasTexture;         // 4 bytes (maybe should be a uint for consistency)
-    uint32_t meshInfoIndex;   // 4 bytes  
-    uint32_t materialIndex;   // 4 bytes  
+		uint32_t textureIndex;    // 4 bytes
+		float hasTexture;         // 4 bytes (maybe should be a uint for consistency)
+		uint32_t meshInfoIndex;   // 4 bytes  
+		uint32_t materialIndex;   // 4 bytes  
 
-    uint32_t indexCount;      // 4 bytes
-    uint32_t space;           // 4 bytes (0 = world, 1 = screen)
-    VkDeviceSize vertexOffsetInMegaBuffer; // 8 bytes
-    VkDeviceSize indexOffsetInMegaBuffer;  // 8 bytes
-  };
+		uint32_t indexCount;      // 4 bytes
+		uint32_t space;           // 4 bytes (0 = world, 1 = screen)
+		uint64_t vertexOffsetInMegaBuffer; // 8 bytes
+		uint64_t indexOffsetInMegaBuffer;  // 8 bytes
+	};
 
 	struct alignas(16) MeshDecoratorGpuInstanceData
 	{
@@ -35,31 +35,47 @@ namespace Engine
 		int useTexture;
 		glm::vec2 resolution;
 		glm::vec2 quadSize;
-    int renderOnTop; // 0 = normal depth, 1 = force in front
+		int renderOnTop; // 0 = normal depth, 1 = force in front
 	};
 
-  struct alignas(16) MsdfTextGpuInstanceData
-  {
-    glm::mat4 modelTR;     // TR only, like GL text path
-    glm::vec4 plane;       // EM rect (l,b,r,t)
-    glm::vec4 uvRect;      // (uL, vB, uR, vT)
-    glm::vec4 fillColor;
-    glm::vec4 strokeColor;
-    float strokeWidthPx;   // in screen px
-    float msdfPixelRange;  // atlas px
-    float emScalePx;       // px/EM (screen) OR worldUnits/EM (world)
-    int space;             // 0 world, 1 screen
-    glm::vec2 pxToModel;      // (wppX,wppY) world OR (1/sx,1/sy) screen
-    uint32_t  atlasTexIndex;  // bindless index of MSDF atlas
-    uint32_t  _pad_;
-  };
+	struct alignas(16) MsdfTextGpuInstanceData
+	{
+		glm::mat4 modelTR;     // TR only, like GL text path
+		glm::vec4 plane;       // EM rect (l,b,r,t)
+		glm::vec4 uvRect;      // (uL, vB, uR, vT)
+		glm::vec4 fillColor;
+		glm::vec4 strokeColor;
+		float strokeWidthPx;   // in screen px
+		float msdfPixelRange;  // atlas px
+		float emScalePx;       // px/EM (screen) OR worldUnits/EM (world)
+		int space;             // 0 world, 1 screen
+		glm::vec2 pxToModel;      // (wppX,wppY) world OR (1/sx,1/sy) screen
+		uint32_t  atlasTexIndex;  // bindless index of MSDF atlas
+		uint32_t  _pad_;
+	};
 
-	struct InstanceMeta
+	struct alignas(16) InstanceMeta
 	{
 		uint32_t instanceCount;
 		uint32_t padA;
 		uint32_t padB;
 		uint32_t padC;
+	};
+
+	struct alignas(16) GpuMeshInfo
+	{
+		uint32_t indexCount;
+		uint32_t firstIndex;
+		int32_t vertexOffset; // why does get to be signed?
+		uint32_t _pad0;
+	};
+
+	struct alignas(16) CullPC
+	{
+		uint32_t instanceCount;
+		uint32_t meshCount;
+		uint32_t meshGroupCount;
+		uint32_t pad0;
 	};
 
 }

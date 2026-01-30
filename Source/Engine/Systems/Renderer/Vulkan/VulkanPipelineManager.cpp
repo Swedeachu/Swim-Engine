@@ -15,6 +15,16 @@ namespace Engine
 		return s;
 	}
 
+	static VkPipelineShaderStageCreateInfo MakeComputeStage(VkShaderModule mod, const char* entry)
+	{
+		VkPipelineShaderStageCreateInfo s{};
+		s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		s.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		s.module = mod;
+		s.pName = entry;
+		return s;
+	}
+
 	static void DestroyPipelinePair(VkDevice device, VkPipeline& p, VkPipelineLayout& l)
 	{
 		if (p)
@@ -26,6 +36,15 @@ namespace Engine
 		{
 			vkDestroyPipelineLayout(device, l, nullptr);
 			l = VK_NULL_HANDLE;
+		}
+	}
+
+	static void DestroyPipelineOnly(VkDevice device, VkPipeline& p)
+	{
+		if (p)
+		{
+			vkDestroyPipeline(device, p, nullptr);
+			p = VK_NULL_HANDLE;
 		}
 	}
 
@@ -587,6 +606,81 @@ namespace Engine
 		vkDestroyShaderModule(device, compMod, nullptr);
 	}
 
+	void VulkanPipelineManager::CreateCullTrueBatchComputePipelines(
+		const std::string& countPath,
+		const char* countEntry,
+		const std::string& scan512Path,
+		const char* scan512Entry,
+		const std::string& scanGroupsPath,
+		const char* scanGroupsEntry,
+		const std::string& fixupPath,
+		const char* fixupEntry,
+		const std::string& scatterPath,
+		const char* scatterEntry,
+		const std::string& buildPath,
+		const char* buildEntry,
+		VkDescriptorSetLayout set0Layout
+	)
+	{
+		DestroyPipelineOnly(device, cullTrueBatchCountPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScan512Pipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScanGroupsPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchFixupPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScatterPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchBuildPipeline);
+
+		if (cullTrueBatchPipelineLayout)
+		{
+			vkDestroyPipelineLayout(device, cullTrueBatchPipelineLayout, nullptr);
+			cullTrueBatchPipelineLayout = VK_NULL_HANDLE;
+		}
+
+		VkPushConstantRange pc{};
+		pc.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		pc.offset = 0;
+		pc.size = sizeof(uint32_t) * 4;
+
+		VkPipelineLayoutCreateInfo pl{};
+		pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		pl.setLayoutCount = 1;
+		pl.pSetLayouts = &set0Layout;
+		pl.pushConstantRangeCount = 1;
+		pl.pPushConstantRanges = &pc;
+
+		if (vkCreatePipelineLayout(device, &pl, nullptr, &cullTrueBatchPipelineLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create true-batch compute pipeline layout!");
+		}
+
+		auto MakeComputePipeline = [&](const std::string& spvPath, const char* entry, VkPipeline& outPipe)
+		{
+			auto compCode = ReadFile(spvPath);
+			VkShaderModule compMod = CreateShaderModule(compCode);
+
+			VkPipelineShaderStageCreateInfo stage = MakeComputeStage(compMod, entry);
+
+			VkComputePipelineCreateInfo cp{};
+			cp.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+			cp.stage = stage;
+			cp.layout = cullTrueBatchPipelineLayout;
+
+			if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &cp, nullptr, &outPipe) != VK_SUCCESS)
+			{
+				vkDestroyShaderModule(device, compMod, nullptr);
+				throw std::runtime_error("Failed to create true-batch compute pipeline: " + spvPath);
+			}
+
+			vkDestroyShaderModule(device, compMod, nullptr);
+		};
+
+		MakeComputePipeline(countPath, countEntry, cullTrueBatchCountPipeline);
+		MakeComputePipeline(scan512Path, scan512Entry, cullTrueBatchScan512Pipeline);
+		MakeComputePipeline(scanGroupsPath, scanGroupsEntry, cullTrueBatchScanGroupsPipeline);
+		MakeComputePipeline(fixupPath, fixupEntry, cullTrueBatchFixupPipeline);
+		MakeComputePipeline(scatterPath, scatterEntry, cullTrueBatchScatterPipeline);
+		MakeComputePipeline(buildPath, buildEntry, cullTrueBatchBuildPipeline);
+	}
+
 	void VulkanPipelineManager::Cleanup()
 	{
 		if (renderPass)
@@ -599,6 +693,19 @@ namespace Engine
 		DestroyPipelinePair(device, decoratorPipeline, decoratorPipelineLayout);
 		DestroyPipelinePair(device, msdfTextPipeline, msdfTextPipelineLayout);
 		DestroyPipelinePair(device, cullComputePipeline, cullComputePipelineLayout);
+
+		DestroyPipelineOnly(device, cullTrueBatchCountPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScan512Pipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScanGroupsPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchFixupPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchScatterPipeline);
+		DestroyPipelineOnly(device, cullTrueBatchBuildPipeline);
+
+		if (cullTrueBatchPipelineLayout)
+		{
+			vkDestroyPipelineLayout(device, cullTrueBatchPipelineLayout, nullptr);
+			cullTrueBatchPipelineLayout = VK_NULL_HANDLE;
+		}
 	}
 
 }

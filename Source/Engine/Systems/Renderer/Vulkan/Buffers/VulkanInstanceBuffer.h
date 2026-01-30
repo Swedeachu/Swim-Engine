@@ -29,6 +29,9 @@ namespace Engine
 		// Optional single-instance write (if not writing manually)
 		void WriteInstance(uint32_t frameIndex, uint32_t instanceIndex, const void* data);
 
+		// Bulk write with correct stride (alignedInstanceSize)
+		void WriteInstances(uint32_t frameIndex, const void* data, size_t instanceCount, size_t dstFirstInstance = 0);
+
 		void Recreate(size_t newMaxInstances);
 
 		VkBuffer GetBuffer(uint32_t frameIndex) const;
@@ -49,6 +52,8 @@ namespace Engine
 		void Cleanup();
 
 	private:
+
+		void ValidateFrameIndex(uint32_t frameIndex) const;
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;

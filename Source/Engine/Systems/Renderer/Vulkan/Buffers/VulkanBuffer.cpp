@@ -56,7 +56,7 @@ namespace Engine
 		// 5. If host visible, map it persistently
 		if (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
 		{
-			if (vkMapMemory(device, memory, 0, size, 0, &mappedPtr) != VK_SUCCESS)
+			if (vkMapMemory(device, memory, 0, VK_WHOLE_SIZE, 0, &mappedPtr) != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed to map buffer memory!");
 			}

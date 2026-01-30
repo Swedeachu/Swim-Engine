@@ -73,7 +73,7 @@ namespace Engine
 				device,
 				physicalDevice,
 				newSize,
-				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
@@ -232,6 +232,25 @@ namespace Engine
 		meshData.vertexOffsetInMegaBuffer = vertexOffset;
 		meshData.indexOffsetInMegaBuffer = indexOffset;
 		meshData.indexCount = static_cast<uint32_t>(indices.size());
+
+		// === Write MeshInfo table entry for GPU culling ===
+		{
+			auto renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
+			auto& dm = renderer->GetDescriptorManager();
+
+			const uint32_t meshID = meshData.meshID;
+
+			// Shader wants indices/vertices offsets, not bytes
+			const uint32_t firstIndex = static_cast<uint32_t>(meshData.indexOffsetInMegaBuffer / sizeof(uint32_t));
+			const int32_t vertexOffsetInVerts = static_cast<int32_t>(meshData.vertexOffsetInMegaBuffer / sizeof(Vertex));
+
+			dm->UpdateMeshInfo(
+				meshID,
+				meshData.indexCount,
+				firstIndex,
+				vertexOffsetInVerts
+			);
+		}
 
 		currentVertexBufferOffset += vertexSize;
 		currentIndexBufferOffset += indexSize;
@@ -422,8 +441,13 @@ namespace Engine
 		// Ensure the per-frame instance buffer can hold the world instances
 		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
 
-		void* dst = instanceBuffer->BeginFrame(frameIndex);
-		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+		// Write instances with correct stride (alignedInstanceSize)
+		instanceBuffer->WriteInstances(
+			frameIndex,
+			cpuInstanceData.data(),
+			cpuInstanceData.size(),
+			0
+		);
 
 		// GPU path does NOT build CPU indirect batches (compute writes them)
 		if (cullMode == CullMode::GPU)
@@ -451,6 +475,41 @@ namespace Engine
 
 		VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
 		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+	}
+
+	void VulkanIndexDraw::BindWorldMeshPipeline(uint32_t frameIndex, VkCommandBuffer cmd)
+	{
+		auto engine = SwimEngine::GetInstance();
+		auto renderer = engine->GetVulkanRenderer();
+		auto& pm = renderer->GetPipelineManager();
+		auto& dm = renderer->GetDescriptorManager();
+
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pm->GetGraphicsPipeline());
+
+		VkDescriptorSet globalSet = VK_NULL_HANDLE;
+
+		if (cullMode == CullMode::GPU)
+		{
+			globalSet = dm->GetPerFrameCulledWorldDescriptorSet(frameIndex);
+		}
+		else
+		{
+			globalSet = dm->GetPerFrameDescriptorSet(frameIndex);
+		}
+
+		VkDescriptorSet bindlessSet = dm->GetBindlessSet();
+		std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
+
+		vkCmdBindDescriptorSets(
+			cmd,
+			VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pm->GetPipelineLayout(),
+			0,
+			static_cast<uint32_t>(sets.size()),
+			sets.data(),
+			0,
+			nullptr
+		);
 	}
 
 	struct CullPushConstants
@@ -503,39 +562,80 @@ namespace Engine
 		auto& dm = renderer->GetDescriptorManager();
 
 		const uint32_t instanceCount = static_cast<uint32_t>(cpuInstanceData.size());
+
+		// mesh ids are dense [0..meshCount-1]
+		const uint32_t meshCount = dm->GetMeshInfoCount();
+		if (meshCount == 0)
+		{
+			return;
+		}
+
+		const uint32_t meshGroupCount = (meshCount + 511u) / 512u;
+
+		// Hard-support up to 512 scan groups in-shader (meshCount <= 262144)
+		if (meshGroupCount > 512u)
+		{
+			return;
+		}
+
+		// If there is no work, don't dispatch compute.
+		// NOTE: DrawIndexedWorldMeshes() will early-out too, so we won't try to bind/draw with null buffers.
 		if (instanceCount == 0)
 		{
 			return;
 		}
 
+		// Make sure all per-frame cull buffers are large enough
+		dm->EnsurePerFrameTrueBatchCullCapacity(frameIndex, instanceCount, meshCount, meshGroupCount);
+
+		// IMPORTANT:
+		// True-batch compute must read the SAME instance buffer we just wrote (cpuInstanceData -> instanceBuffer).
+		auto& perFrame = instanceBuffer->GetPerFrameBuffers();
+		dm->RewriteTrueBatchInstanceBinding(frameIndex, *perFrame[frameIndex]);
+
+		VkBuffer meshCountsBuf = dm->GetPerFrameCullMeshCountsBuffer(frameIndex);
+		VkBuffer meshOffsetsBuf = dm->GetPerFrameCullMeshOffsetsBuffer(frameIndex);
+		VkBuffer meshCursorBuf = dm->GetPerFrameCullMeshWriteCursorBuffer(frameIndex);
+		VkBuffer groupSumsBuf = dm->GetPerFrameCullGroupSumsBuffer(frameIndex);
+		VkBuffer groupOffsetsBuf = dm->GetPerFrameCullGroupOffsetsBuffer(frameIndex);
+
+		VkBuffer visibleInstBuf = dm->GetPerFrameCullVisibleInstanceBuffer(frameIndex);
+
 		VkBuffer cmdBuf = dm->GetPerFrameCullCommandBuffer(frameIndex);
-		VkBuffer countBuf = dm->GetPerFrameCullCountBuffer(frameIndex);
+		VkBuffer drawCountBuf = dm->GetPerFrameCullCountBuffer(frameIndex);
 
-		// 0) Reset count to 0 (MUST be outside render pass)
-		vkCmdFillBuffer(cmd, countBuf, 0, sizeof(uint32_t), 0);
+		// Sanity: if any of these are null, we cannot safely proceed
+		if (!meshCountsBuf || !meshOffsetsBuf || !meshCursorBuf || !groupSumsBuf || !groupOffsetsBuf ||
+			!visibleInstBuf || !cmdBuf || !drawCountBuf)
+		{
+			return;
+		}
 
-		// Barrier: transfer write -> compute shader read/write
-		VkBufferMemoryBarrier b0{};
-		b0.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		b0.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		b0.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-		b0.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b0.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b0.buffer = countBuf;
-		b0.offset = 0;
-		b0.size = sizeof(uint32_t);
+		// 0) reset meshCounts + drawCount
+		// meshWriteCursor is reset in main_fixup
+		vkCmdFillBuffer(cmd, meshCountsBuf, 0, static_cast<VkDeviceSize>(meshCount * sizeof(uint32_t)), 0);
+		vkCmdFillBuffer(cmd, drawCountBuf, 0, sizeof(uint32_t), 0);
 
-		VkBufferMemoryBarrier b1{};
-		b1.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		b1.srcAccessMask = 0;
-		b1.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		b1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b1.buffer = cmdBuf;
-		b1.offset = 0;
-		b1.size = VK_WHOLE_SIZE;
+		// barrier: transfer writes -> compute reads/writes
+		std::array<VkBufferMemoryBarrier, 2> b0 = {};
 
-		std::array<VkBufferMemoryBarrier, 2> preBarriers = { b0, b1 };
+		b0[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b0[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b0[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		b0[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0[0].buffer = meshCountsBuf;
+		b0[0].offset = 0;
+		b0[0].size = static_cast<VkDeviceSize>(meshCount * sizeof(uint32_t));
+
+		b0[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		b0[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b0[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		b0[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b0[1].buffer = drawCountBuf;
+		b0[1].offset = 0;
+		b0[1].size = sizeof(uint32_t);
 
 		vkCmdPipelineBarrier(
 			cmd,
@@ -543,75 +643,153 @@ namespace Engine
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			0,
 			0, nullptr,
-			static_cast<uint32_t>(preBarriers.size()), preBarriers.data(),
+			static_cast<uint32_t>(b0.size()), b0.data(),
 			0, nullptr
 		);
 
-		// 1) Bind compute pipeline + descriptor set 0
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pm->GetCullComputePipeline());
+		VkDescriptorSet set0 = dm->GetPerFrameTrueBatchCullDescriptorSet(frameIndex);
+		if (!set0)
+		{
+			return;
+		}
 
-		VkDescriptorSet set0 = dm->GetPerFrameDescriptorSet(frameIndex);
-
-		vkCmdBindDescriptorSets(
-			cmd,
-			VK_PIPELINE_BIND_POINT_COMPUTE,
-			pm->GetCullComputePipelineLayout(),
-			0,
-			1,
-			&set0,
-			0,
-			nullptr
-		);
-
-		// 2) Push constants (instanceCount)
-		CullPushConstants pc{};
+		CullPC pc;
 		pc.instanceCount = instanceCount;
+		pc.meshCount = meshCount;
+		pc.meshGroupCount = meshGroupCount;
+		pc.pad0 = 0;
 
-		vkCmdPushConstants(
-			cmd,
-			pm->GetCullComputePipelineLayout(),
-			VK_SHADER_STAGE_COMPUTE_BIT,
-			0,
-			sizeof(CullPushConstants),
-			&pc
-		);
+		auto BindAndPush = [&](VkPipeline pipe, VkPipelineLayout layout)
+		{
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
 
-		// 3) Dispatch (MUST be outside render pass)
-		const uint32_t groupCount = (instanceCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
-		vkCmdDispatch(cmd, groupCount, 1, 1);
+			vkCmdBindDescriptorSets(
+				cmd,
+				VK_PIPELINE_BIND_POINT_COMPUTE,
+				layout,
+				0,
+				1,
+				&set0,
+				0,
+				nullptr
+			);
 
-		// 4) Barrier: compute writes -> indirect read
-		VkBufferMemoryBarrier b2{};
-		b2.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		b2.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		b2.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-		b2.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b2.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b2.buffer = cmdBuf;
-		b2.offset = 0;
-		b2.size = VK_WHOLE_SIZE;
+			vkCmdPushConstants(
+				cmd,
+				layout,
+				VK_SHADER_STAGE_COMPUTE_BIT,
+				0,
+				sizeof(CullPC),
+				&pc
+			);
+		};
 
-		VkBufferMemoryBarrier b3{};
-		b3.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		b3.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		b3.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-		b3.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b3.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		b3.buffer = countBuf;
-		b3.offset = 0;
-		b3.size = sizeof(uint32_t);
+		auto ComputeToComputeBarrier = [&]()
+		{
+			// Strongly advised to use a global memory barrier between dependent compute passes.
+			// This avoids having to enumerate buffers and accidentally missing one.
+			VkMemoryBarrier mb{};
+			mb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
-		std::array<VkBufferMemoryBarrier, 2> postBarriers = { b2, b3 };
+			vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				0,
+				1, &mb,
+				0, nullptr,
+				0, nullptr
+			);
+		};
 
-		vkCmdPipelineBarrier(
-			cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-			0,
-			0, nullptr,
-			static_cast<uint32_t>(postBarriers.size()), postBarriers.data(),
-			0, nullptr
-		);
+		// (a) count
+		BindAndPush(pm->GetCullTrueBatchCountPipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			const uint32_t groupsX = (instanceCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
+			vkCmdDispatch(cmd, groupsX, 1, 1);
+		}
+		ComputeToComputeBarrier();
+
+		// (b) scan512
+		BindAndPush(pm->GetCullTrueBatchScan512Pipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			vkCmdDispatch(cmd, meshGroupCount, 1, 1);
+		}
+		ComputeToComputeBarrier();
+
+		// (c) scanGroups
+		BindAndPush(pm->GetCullTrueBatchScanGroupsPipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			vkCmdDispatch(cmd, 1, 1, 1);
+		}
+		ComputeToComputeBarrier();
+
+		// (d) fixup
+		BindAndPush(pm->GetCullTrueBatchFixupPipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			const uint32_t groupsX = (meshCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
+			vkCmdDispatch(cmd, groupsX, 1, 1);
+		}
+		ComputeToComputeBarrier();
+
+		// (e) scatter
+		BindAndPush(pm->GetCullTrueBatchScatterPipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			const uint32_t groupsX = (instanceCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
+			vkCmdDispatch(cmd, groupsX, 1, 1);
+		}
+		ComputeToComputeBarrier();
+
+		// (f) build
+		BindAndPush(pm->GetCullTrueBatchBuildPipeline(), pm->GetCullTrueBatchPipelineLayout());
+		{
+			const uint32_t groupsX = (meshCount + (GPU_CULL_LOCAL_SIZE - 1)) / GPU_CULL_LOCAL_SIZE;
+			vkCmdDispatch(cmd, groupsX, 1, 1);
+		}
+
+		// compute -> draw barriers (indirect + vertex fetch/reads)
+		{
+			std::array<VkBufferMemoryBarrier, 3> post = {};
+
+			post[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			post[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			post[0].dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+			post[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[0].buffer = cmdBuf;
+			post[0].offset = 0;
+			post[0].size = VK_WHOLE_SIZE;
+
+			post[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			post[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			post[1].dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+			post[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[1].buffer = drawCountBuf;
+			post[1].offset = 0;
+			post[1].size = sizeof(uint32_t);
+
+			post[2].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			post[2].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			post[2].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+			post[2].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[2].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			post[2].buffer = visibleInstBuf;
+			post[2].offset = 0;
+			post[2].size = VK_WHOLE_SIZE;
+
+			vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+				0,
+				0, nullptr,
+				static_cast<uint32_t>(post.size()), post.data(),
+				0, nullptr
+			);
+		}
 	}
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
@@ -619,58 +797,65 @@ namespace Engine
 	{
 		auto engine = SwimEngine::GetInstance();
 		auto renderer = engine->GetVulkanRenderer();
-		auto& pm = renderer->GetPipelineManager();
 		auto& dm = renderer->GetDescriptorManager();
 
-		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
+		if (!megaVertexBuffer || !megaIndexBuffer)
+		{
+			return;
+		}
+
+		// Early-out: no CPU/NONE commands, and GPU uses indirect-count that will be 0 if there are no instances.
+		if (cullMode != CullMode::GPU)
+		{
+			if (rangeMap.empty())
+			{
+				return;
+			}
+		}
+		else
+		{
+			if (cpuInstanceData.empty())
+			{
+				return;
+			}
+		}
+
 		VkDeviceSize offsets[] = { 0, 0 };
-
-		// Use the mega mesh buffer to do the scene in one single draw call
-		VkBuffer vertexBuffers[] = {
-				megaVertexBuffer->GetBuffer(), // All vertex data lives here
-				instanceBuf                    // Instance buffer (per-instance data)
-		};
-
-		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
 		// GPU compute culling path
 		if (cullMode == CullMode::GPU)
 		{
-			// IMPORTANT:
-			// Compute must have already been recorded OUTSIDE the render pass via RecordGpuCulling().
-			// This function runs inside render pass and only consumes the compute results.
-
-			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pm->GetGraphicsPipeline());
-
-			VkDescriptorSet globalSet = dm->GetPerFrameDescriptorSet(frameIndex);
-			VkDescriptorSet bindlessSet = dm->GetBindlessSet();
-			std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
-
-			vkCmdBindDescriptorSets(
-				cmd,
-				VK_PIPELINE_BIND_POINT_GRAPHICS,
-				pm->GetPipelineLayout(),
-				0,
-				static_cast<uint32_t>(sets.size()),
-				sets.data(),
-				0,
-				nullptr
-			);
-
+			VkBuffer visibleInstanceBuf = dm->GetPerFrameCullVisibleInstanceBuffer(frameIndex);
 			VkBuffer cmdBuf = dm->GetPerFrameCullCommandBuffer(frameIndex);
 			VkBuffer countBuf = dm->GetPerFrameCullCountBuffer(frameIndex);
+
+			// If compute never ran / buffers not created, do not bind VK_NULL_HANDLE into binding 1.
+			if (!visibleInstanceBuf || !cmdBuf || !countBuf)
+			{
+				return;
+			}
+
+			VkBuffer vertexBuffers[] = {
+				megaVertexBuffer->GetBuffer(),
+				visibleInstanceBuf
+			};
+
+			vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+			vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+			BindWorldMeshPipeline(frameIndex, cmd);
 
 			PFN_vkCmdDrawIndexedIndirectCountKHR fn = GetDrawIndexedIndirectCountFn(device);
 			if (!fn)
 			{
-				// If the extension isn't available, don't crash the engine yet.
-				// We'll just do nothing for now.
 				return;
 			}
 
-			// Max draw count is the number of instances we dispatched over.
-			const uint32_t maxDrawCount = static_cast<uint32_t>(cpuInstanceData.size());
+			const uint32_t maxDrawCount = dm->GetMeshInfoCount();
+			if (maxDrawCount == 0)
+			{
+				return;
+			}
 
 			fn(
 				cmd,
@@ -685,18 +870,33 @@ namespace Engine
 			return;
 		}
 
-		// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
-		// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
+		// CPU/NONE path
+		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
+		if (!instanceBuf)
+		{
+			return;
+		}
+
+		VkBuffer vertexBuffers[] = {
+			megaVertexBuffer->GetBuffer(),
+			instanceBuf
+		};
+
+		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+		BindWorldMeshPipeline(frameIndex, cmd);
+
 		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
-		size_t totalCommands = rangeMap.size();
+		const uint32_t totalCommands = static_cast<uint32_t>(rangeMap.size());
 
 		if (totalCommands > 0)
 		{
 			vkCmdDrawIndexedIndirect(
 				cmd,
 				indirectBuf,
-				0, // offset
-				static_cast<uint32_t>(totalCommands),
+				0,
+				totalCommands,
 				sizeof(VkDrawIndexedIndirectCommand)
 			);
 		}
@@ -724,7 +924,6 @@ namespace Engine
 		const Frustum& frustum = Frustum::Get();
 
 		// Gather instances info before we send anymore new draws since we need to add to the current buffer
-		const uint32_t baseDecoratorInstanceID = static_cast<uint32_t>(cpuInstanceData.size());
 		const size_t baseInstanceID = cpuInstanceData.size();
 		uint32_t instanceCount = 0;
 
@@ -764,11 +963,9 @@ namespace Engine
 			return;
 		}
 
-		// === Ensure SSBO capacity for MeshDecoratorGpuInstanceData ===
-		const size_t decoBytes = meshDecoratorInstanceData.size() * sizeof(MeshDecoratorGpuInstanceData);
-		// descriptorManager->EnsurePerFrameMeshDecoratorCapacity(decoBytes);
-
 		// === Upload MeshDecoratorGpuInstanceData via descriptorManager ===
+		const size_t decoBytes = meshDecoratorInstanceData.size() * sizeof(MeshDecoratorGpuInstanceData);
+
 		descriptorManager->UpdatePerFrameMeshDecoratorBuffer(
 			frameIndex,
 			meshDecoratorInstanceData.data(),
@@ -776,18 +973,17 @@ namespace Engine
 		);
 
 		// === Ensure instance buffer can hold world + decorator instances ===
-		// cpuInstanceData already has both world and newly appended decorator instance structs
 		const size_t totalInstancesNeeded = cpuInstanceData.size();
 		EnsureInstanceCapacity(*instanceBuffer, totalInstancesNeeded);
 
-		// === Upload new instance data for section (append only the decorator range) ===
-		void* dst = instanceBuffer->GetBufferRaw(frameIndex)->GetMappedPointer();
+		// === Upload only the appended instance range using correct stride ===
+		const size_t appendedInstanceCount = cpuInstanceData.size() - baseInstanceID;
 
-		// If we use aligned stride, replace sizeof(GpuInstanceData) with instanceBuffer->GetAlignedInstanceSize()
-		std::memcpy(
-			static_cast<uint8_t*>(dst) + baseInstanceID * sizeof(GpuInstanceData),
+		instanceBuffer->WriteInstances(
+			frameIndex,
 			cpuInstanceData.data() + baseInstanceID,
-			meshDecoratorInstanceData.size() * sizeof(GpuInstanceData)
+			appendedInstanceCount,
+			baseInstanceID
 		);
 
 		// === Ensure indirect buffer capacity for decorator draws ===
@@ -1184,13 +1380,11 @@ namespace Engine
 		);
 
 		// 5) Bind vertex and index buffers
-		VkBuffer vertexBuffers[] = {
-						megaVertexBuffer->GetBuffer(),
-						instanceBuffer->GetBuffer(frameIndex)
-		};
-		VkDeviceSize offsets[] = { 0, 0 };
+		// NOTE: MSDF pipeline input state only has binding 0 (Vertex). The per-glyph data is read from the MSDF SSBO (binding 3).
+		VkBuffer vb = megaVertexBuffer->GetBuffer();
+		VkDeviceSize off = 0;
 
-		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &off);
 		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
 		// 6) Issue indirect draw

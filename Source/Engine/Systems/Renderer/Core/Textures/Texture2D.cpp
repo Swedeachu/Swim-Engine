@@ -105,7 +105,7 @@ namespace Engine
 	{
 		// First do this hack fix to avoid any accidental double frees.
 		// This is stupid but just the easiest defensive fix.
-		if (freed)
+		if (!this || freed)
 		{
 			// std::cout << "Blocking double free on Texture: " << filePath << "\n";
 			return;

@@ -107,22 +107,97 @@
     <MakeDir Directories="$(OutDir)Shaders\ComputeShaders" />
   </Target>
   <!-- Compile Shaders: Run before ClCompile so they are ready early in the build -->
-  <Target Name="CompileShaders" AfterTargets="CreateShaderDirectories" BeforeTargets="ClCompile">
+    <Target Name="CompileShaders" AfterTargets="CreateShaderDirectories" BeforeTargets="ClCompile">
     <Message Text="=== COMPILING SHADERS ===" Importance="High" />
+
+    <!-- Multi-entry compute shader file(s) -->
+    <PropertyGroup>
+      <trueCullFile>Source\Shaders\Vulkan\ComputeShaders\true_batch_cull.hlsl</trueCullFile>
+      <trueCullFullPath>$(ProjectDir)$(trueCullFile)</trueCullFullPath>
+
+      <frustumCullFile>Source\Shaders\Vulkan\ComputeShaders\frustum_cull.hlsl</frustumCullFile>
+      <frustumCullFullPath>$(ProjectDir)$(frustumCullFile)</frustumCullFullPath>
+    </PropertyGroup>
+
     <!-- Compile Compute Shaders -->
     <Message Text="Compiling Compute Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
-    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;" Condition="%(ShaderFiles.ShaderType) == 'cs_6_0'" />
-    <Message Text="Compute Shader Command: ..." Condition="%(ShaderFiles.ShaderType) == 'cs_6_0'" />
+
+    <!-- Normal compute shaders (entry = main), EXCEPT multi-entry files -->
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+          Condition="%(ShaderFiles.ShaderType) == 'cs_6_0'
+                 AND '%(ShaderFiles.FullPath)' != '$(trueCullFullPath)'
+                 AND '%(ShaderFiles.FullPath)' != '$(frustumCullFullPath)'" />
+
+    <!-- true_batch_cull.hlsl: compile 6 entry points -->
+    <Message Text="Compiling true-batch cull entry points from: $(trueCullFullPath)" Importance="High" Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_count -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_count.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scan512 -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_scan512.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scanGroups -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_scanGroups.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_fixup -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_fixup.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scatter -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_scatter.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_build -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\true_batch_cull_build.spv&quot; &quot;$(trueCullFullPath)&quot;"
+          Condition="Exists('$(trueCullFullPath)')" />
+
+    <!-- frustum_cull.hlsl: compile 6 entry points -->
+    <Message Text="Compiling frustum-cull entry points from: $(frustumCullFullPath)" Importance="High" Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_count -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_count.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scan512 -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_scan512.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scanGroups -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_scanGroups.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_fixup -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_fixup.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_scatter -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_scatter.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T cs_6_0 -E main_build -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\ComputeShaders\frustum_cull_build.spv&quot; &quot;$(frustumCullFullPath)&quot;"
+          Condition="Exists('$(frustumCullFullPath)')" />
+
     <!-- Compile Vertex Shaders -->
     <Message Text="Compiling Vertex Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
-    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;" Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
-    <Message Text="Vertex Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)" Importance="High" Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\VertexShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+          Condition="%(ShaderFiles.ShaderType) == 'vs_6_0'" />
+
     <!-- Compile Fragment Shaders -->
     <Message Text="Compiling Fragment Shaders..." Importance="High" Condition=" '@(ShaderFiles)' != '' " />
-    <Exec IgnoreExitCode="false" Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;" Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
-    <Message Text="Fragment Shader Command: %VULKAN_SDK%\Bin\dxc.exe -T %(ShaderFiles.ShaderType) -E main -Fo $(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv %(ShaderFiles.FullPath)" Importance="High" Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
+    <Exec IgnoreExitCode="false"
+          Command="&quot;%VULKAN_SDK%\Bin\dxc.exe&quot; -T %(ShaderFiles.ShaderType) -E main -spirv -fspv-target-env=vulkan1.2 -Fo &quot;$(OutDir)Shaders\FragmentShaders\%(ShaderFiles.Filename).spv&quot; &quot;%(ShaderFiles.FullPath)&quot;"
+          Condition="%(ShaderFiles.ShaderType) == 'ps_6_0'" />
+
     <Message Text="=== SHADER COMPILATION COMPLETE ===" Importance="High" />
   </Target>
+
   <!-- Normal compilation setup for the project -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
