@@ -448,14 +448,16 @@ namespace Engine
 
 	void Scene::InternalSceneInit()
 	{
-		// Watch for updates (construction or modification) of Transform or Material
+		// Watch for updates such as construction or modification of renderable transforms
 		frustumCacheObserver.connect(registry, entt::collector
 			.group<Engine::Transform, Engine::Material>()
+			.group<Engine::Transform, Engine::CompositeMaterial>()
 		);
 
 		// Auto-remove FrustumCullCache when prerequisites are destroyed
 		registry.on_destroy<Engine::Transform>().connect<&Scene::RemoveFrustumCache>(*this);
 		registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
+		registry.on_destroy<Engine::CompositeMaterial>().connect<&Scene::RemoveFrustumCache>(*this);
 
 		// Initialize SceneBVH grid
 		sceneBVH = std::make_unique<SceneBVH>(registry);
@@ -588,7 +590,7 @@ namespace Engine
 	{
 		if (physicsWorld)
 		{
-			physicsWorld.reset(); 
+			physicsWorld.reset();
 		}
 	}
 
@@ -645,7 +647,7 @@ namespace Engine
 	}
 
 	// Converts the mouse position from window-pixel space -> virtual-canvas space
-	// Tests that virtual point against each screen-space entity’s AABB
+	// Tests that virtual point against each screen-space entity's AABB
 	// Dispatches OnMouseEnter / Exit / Hover / Click events
 	void Scene::UpdateUIBehaviors()
 	{

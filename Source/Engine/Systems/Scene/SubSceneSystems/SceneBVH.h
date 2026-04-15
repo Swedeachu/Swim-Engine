@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "Library/glm/glm.hpp"
 #include "Library/EnTT/entt.hpp"
 #include "SceneDebugDraw.h"
@@ -42,7 +44,28 @@ namespace Engine
 				return;
 			}
 
-			TraverseFrustumCallback(root, frustum, callback);
+			std::vector<int> stack;
+			stack.reserve(128);
+			PushIfVisible(root, frustum, stack);
+
+			while (!stack.empty())
+			{
+				const int idx = stack.back();
+				stack.pop_back();
+
+				const BVHNode& node = nodes[idx];
+				if (node.IsLeaf())
+				{
+					if (node.entity != entt::null)
+					{
+						callback(node.entity);
+					}
+					continue;
+				}
+
+				PushIfVisible(node.left, frustum, stack);
+				PushIfVisible(node.right, frustum, stack);
+			}
 		}
 
 		// outTHit is an optional output parameter that lets you know where along the ray the closest hit occurred.
@@ -73,7 +96,7 @@ namespace Engine
 			int sp = 0;
 
 			float tRoot;
-			if (!RayIntersectsAABB(ray, nodes[root].aabb, tMin, tMax, tRoot))
+			if (!RayIntersectsAABB(ray, GetTraversalAABB(nodes[root]), tMin, tMax, tRoot))
 			{
 				return;
 			}
@@ -89,6 +112,11 @@ namespace Engine
 
 				if (node.IsLeaf())
 				{
+					if (node.entity == entt::null)
+					{
+						continue;
+					}
+
 					float tLeaf;
 					if (RayIntersectsAABB(ray, node.aabb, tMin, tMax, tLeaf))
 					{
@@ -103,8 +131,8 @@ namespace Engine
 
 				// Internal: test children; push farther first so nearer is popped next
 				float tL, tR;
-				const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, tMax, tL);
-				const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, tMax, tR);
+				const bool hitL = RayIntersectsAABB(ray, GetTraversalAABB(nodes[node.left]), tMin, tMax, tL);
+				const bool hitR = RayIntersectsAABB(ray, GetTraversalAABB(nodes[node.right]), tMin, tMax, tR);
 
 				if (hitL & hitR) // single branch for both
 				{
@@ -136,10 +164,18 @@ namespace Engine
 
 		struct BVHNode
 		{
-			AABB aabb;             // Bounds that encloses children OR the entity
+			AABB aabb;             // Tight bounds that encloses children OR the entity
+			AABB fatAABB;          // Loose bounds used for traversal coherence and cheaper updates
 			int  left = -1;        // index of left child or -1 if leaf
 			int  right = -1;       // index of right child or -1 if leaf
 			entt::entity entity{ entt::null }; // valid only for leaves
+
+			mutable glm::vec3 lastCullAABBMin{ 0.0f, 0.0f, 0.0f };
+			mutable glm::vec3 lastCullAABBMax{ 0.0f, 0.0f, 0.0f };
+			mutable uint64_t lastFrustumRevision = 0;
+			mutable uint8_t lastRejectedPlane = 0;
+			mutable bool lastVisible = false;
+			mutable bool hasCullHistory = false;
 
 			[[nodiscard]] bool IsLeaf() const
 			{
@@ -148,6 +184,8 @@ namespace Engine
 		};
 
 		bool IsAABBVisible(const Frustum& frustum, const AABB& aabb) const;
+		bool IsNodeVisible(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const;
+		const AABB& GetTraversalAABB(const BVHNode& node) const;
 		AABB CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform);
 
 		int BuildRecursive(std::vector<int>& leafIndices, int begin, int end);
@@ -165,40 +203,6 @@ namespace Engine
 		SceneDebugDraw* debugDrawer = nullptr;
 
 		bool forceUpdate = false;
-
-		template<typename Func>
-		void TraverseFrustumCallback(int nodeIdx, const Frustum& frustum, Func&& callback) const
-		{
-			if (nodeIdx >= nodes.size())
-			{
-				std::cout << "Node index does not exist in BVH: " << std::to_string(nodeIdx) << std::endl;
-				return;
-			}
-
-			const BVHNode& node = nodes[nodeIdx];
-
-			// Cull test for internal and leaf nodes
-			if (!IsAABBVisible(frustum, node.aabb))
-			{
-				return; // skip entire branch
-			}
-
-			if (node.IsLeaf())
-			{
-				// Skip tombstones
-				if (node.entity != entt::null)
-				{
-					callback(node.entity); // visible leaf so trigger callback
-				}
-			}
-			else
-			{
-				// Traverse children
-				TraverseFrustumCallback(node.left, frustum, callback);
-				TraverseFrustumCallback(node.right, frustum, callback);
-			}
-		}
-
 	};
 
 }

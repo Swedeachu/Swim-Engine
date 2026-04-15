@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <cstdint>
 
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
@@ -41,6 +42,7 @@ namespace Engine
 		// World cache + dirty
 		mutable bool worldDirty = true;
 		mutable glm::mat4 worldMatrix{ 1.0f }; // WORLD matrix
+		uint64_t worldVersion = 1; // increments whenever this transforms world answer changes
 
 		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
 		TransformSpace space = TransformSpace::World;
@@ -100,6 +102,7 @@ namespace Engine
 		const glm::quat& GetRotation() const { return rotation; }
 		const bool IsDirty()           const { return dirty; }
 		const bool IsWorldDirty()			 const { return worldDirty; }
+		uint64_t GetWorldVersion() const { return worldVersion; }
 
 		static bool AreAnyTransformsDirty() { return TransformsDirty; }
 		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }

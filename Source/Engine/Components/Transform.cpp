@@ -9,6 +9,7 @@ namespace Engine
 	{
 		dirty = true;
 		worldDirty = true;
+		++worldVersion;
 		TransformsDirty = true;
 		MarkChildrenDirty();
 	}
@@ -16,6 +17,7 @@ namespace Engine
 	void Transform::MarkWorldDirtyOnly()
 	{
 		worldDirty = true;
+		++worldVersion;
 		TransformsDirty = true;
 		MarkChildrenDirty();
 	}

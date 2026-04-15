@@ -3,11 +3,66 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
 namespace Engine
 {
+
+	namespace
+	{
+
+		AABB MergeAABBs(const AABB& a, const AABB& b)
+		{
+			AABB merged;
+			merged.min = glm::min(a.min, b.min);
+			merged.max = glm::max(a.max, b.max);
+			return merged;
+		}
+
+		AABB MakeFatAABB(const AABB& aabb)
+		{
+			const glm::vec3 extents = glm::max(aabb.max - aabb.min, glm::vec3(0.0f));
+			const glm::vec3 padding = glm::max(extents * 0.10f, glm::vec3(0.05f));
+
+			AABB fat;
+			fat.min = aabb.min - padding;
+			fat.max = aabb.max + padding;
+			return fat;
+		}
+
+		float ComputeSurfaceArea(const AABB& aabb)
+		{
+			const glm::vec3 size = glm::max(aabb.max - aabb.min, glm::vec3(0.0f));
+			return 2.0f * (size.x * size.y + size.x * size.z + size.y * size.z);
+		}
+
+		bool HasRenderableSubMaterials(const CompositeMaterial& composite, glm::vec3& outLocalMin, glm::vec3& outLocalMax)
+		{
+			outLocalMin = glm::vec3(FLT_MAX);
+			outLocalMax = glm::vec3(-FLT_MAX);
+
+			bool foundAny = false;
+			for (const auto& mat : composite.subMaterials)
+			{
+				if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+				{
+					continue;
+				}
+
+				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
+				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+
+				outLocalMin = glm::min(outLocalMin, min);
+				outLocalMax = glm::max(outLocalMax, max);
+				foundAny = true;
+			}
+
+			return foundAny;
+		}
+
+	}
 
 	SceneBVH::SceneBVH(entt::registry& registry)
 		: registry{ registry }
@@ -17,11 +72,14 @@ namespace Engine
 	{
 		observer.connect(registry, entt::collector
 			.group<Transform, Material>()
+			.group<Transform, CompositeMaterial>()
 			.update<Transform>()
-			.update<Material>());
+			.update<Material>()
+			.update<CompositeMaterial>());
 
 		registry.on_destroy<Transform>().connect<&SceneBVH::RemoveEntity>(*this);
 		registry.on_destroy<Material>().connect<&SceneBVH::RemoveEntity>(*this);
+		registry.on_destroy<CompositeMaterial>().connect<&SceneBVH::RemoveEntity>(*this);
 	}
 
 #define EXPAND_CORNER(x, y, z)                                            \
@@ -54,6 +112,8 @@ namespace Engine
 
 	void SceneBVH::Update()
 	{
+		bool anyLeafEscapedFatBounds = false;
+
 		// === Handle regular Material entities ===
 		auto view = registry.view<Transform, Material>();
 		for (entt::entity e : view)
@@ -71,7 +131,13 @@ namespace Engine
 			{
 				if (needsAabbUpdate)
 				{
-					nodes[it->second].aabb = CalculateWorldAABB(mesh, tf);
+					BVHNode& leaf = nodes[it->second];
+					leaf.aabb = CalculateWorldAABB(mesh, tf);
+					if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
+					{
+						leaf.fatAABB = MakeFatAABB(leaf.aabb);
+						anyLeafEscapedFatBounds = true;
+					}
 				}
 			}
 			else
@@ -79,6 +145,8 @@ namespace Engine
 				BVHNode leaf;
 				leaf.entity = e;
 				leaf.aabb = CalculateWorldAABB(mesh, tf);
+				leaf.fatAABB = MakeFatAABB(leaf.aabb);
+
 				int newIdx = static_cast<int>(nodes.size());
 				nodes.emplace_back(std::move(leaf));
 				entityToLeaf[e] = newIdx;
@@ -95,19 +163,11 @@ namespace Engine
 			const CompositeMaterial& comp = compositeView.get<CompositeMaterial>(e);
 			if (comp.subMaterials.empty()) { continue; }
 
-			// Compute combined local AABB
-			glm::vec3 localMin(FLT_MAX);
-			glm::vec3 localMax(-FLT_MAX);
-
-			for (const auto& mat : comp.subMaterials)
+			glm::vec3 localMin;
+			glm::vec3 localMax;
+			if (!HasRenderableSubMaterials(comp, localMin, localMax))
 			{
-				if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
-
-				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
-				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
-
-				localMin = glm::min(localMin, min);
-				localMax = glm::max(localMax, max);
+				continue;
 			}
 
 			// Transform to world space
@@ -125,7 +185,6 @@ namespace Engine
 			EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
 
 			AABB worldAABB = { worldMin, worldMax };
-
 			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
 
 			auto it = entityToLeaf.find(e);
@@ -133,7 +192,13 @@ namespace Engine
 			{
 				if (needsAabbUpdate)
 				{
-					nodes[it->second].aabb = worldAABB;
+					BVHNode& leaf = nodes[it->second];
+					leaf.aabb = worldAABB;
+					if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
+					{
+						leaf.fatAABB = MakeFatAABB(leaf.aabb);
+						anyLeafEscapedFatBounds = true;
+					}
 				}
 			}
 			else
@@ -141,13 +206,14 @@ namespace Engine
 				BVHNode leaf;
 				leaf.entity = e;
 				leaf.aabb = worldAABB;
+				leaf.fatAABB = MakeFatAABB(leaf.aabb);
 				int newIdx = static_cast<int>(nodes.size());
 				nodes.emplace_back(std::move(leaf));
 				entityToLeaf[e] = newIdx;
 			}
 		}
 
-		// === Rebuild check ===
+		// === Rebuild / refit check ===
 		static constexpr float kRebuildThreshold = 0.15f;
 
 		// If topology changed (add/remove) we must rebuild; also if observer caught edits.
@@ -158,21 +224,18 @@ namespace Engine
 			observer.clear();
 			return;
 		}
-		else
-		{
-			AABB preAABB = nodes[root].aabb;
 
+		if (anyLeafEscapedFatBounds && root != -1)
+		{
+			const AABB preAABB = nodes[root].fatAABB;
 			Refit(root);
 
-			glm::vec3 preSize = preAABB.max - preAABB.min;
-			glm::vec3 postSize = nodes[root].aabb.max - nodes[root].aabb.min;
-
-			float preArea = 2.0f * (preSize.x * preSize.y + preSize.x * preSize.z + preSize.y * preSize.z);
-			float postArea = 2.0f * (postSize.x * postSize.y + postSize.x * postSize.z + postSize.y * postSize.z);
+			const float preArea = ComputeSurfaceArea(preAABB);
+			const float postArea = ComputeSurfaceArea(nodes[root].fatAABB);
 
 			if (preArea > 0.0f)
 			{
-				float expansion = postArea / preArea;
+				const float expansion = postArea / preArea;
 				if (expansion > 1.0f + kRebuildThreshold)
 				{
 					FullRebuild();
@@ -241,10 +304,13 @@ namespace Engine
 		internal.right = BuildRecursive(leafIndices, mid, end);
 
 		// Enclose children
-		const AABB& l = nodes[internal.left].aabb;
-		const AABB& r = nodes[internal.right].aabb;
-		internal.aabb.min = glm::min(l.min, r.min);
-		internal.aabb.max = glm::max(l.max, r.max);
+		const AABB& lTight = nodes[internal.left].aabb;
+		const AABB& rTight = nodes[internal.right].aabb;
+		internal.aabb = MergeAABBs(lTight, rTight);
+
+		const AABB& lFat = nodes[internal.left].fatAABB;
+		const AABB& rFat = nodes[internal.right].fatAABB;
+		internal.fatAABB = MergeAABBs(lFat, rFat);
 
 		int idx = static_cast<int>(nodes.size());
 		nodes.emplace_back(std::move(internal));
@@ -274,6 +340,7 @@ namespace Engine
 			BVHNode leaf;
 			leaf.entity = e;
 			leaf.aabb = CalculateWorldAABB(mesh, tf);
+			leaf.fatAABB = MakeFatAABB(leaf.aabb);
 
 			int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
@@ -291,18 +358,11 @@ namespace Engine
 			const auto& comp = compositeView.get<CompositeMaterial>(e);
 			if (comp.subMaterials.empty()) { continue; }
 
-			glm::vec3 localMin(FLT_MAX);
-			glm::vec3 localMax(-FLT_MAX);
-
-			for (const auto& mat : comp.subMaterials)
+			glm::vec3 localMin;
+			glm::vec3 localMax;
+			if (!HasRenderableSubMaterials(comp, localMin, localMax))
 			{
-				if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
-
-				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
-				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
-
-				localMin = glm::min(localMin, min);
-				localMax = glm::max(localMax, max);
+				continue;
 			}
 
 			const glm::mat4& model = tf.GetWorldMatrix(registry);
@@ -322,11 +382,18 @@ namespace Engine
 			BVHNode leaf;
 			leaf.entity = e;
 			leaf.aabb = worldAABB;
+			leaf.fatAABB = MakeFatAABB(worldAABB);
 
 			int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
 			entityToLeaf[e] = idx;
 			leafIndices.push_back(idx);
+		}
+
+		if (leafIndices.empty())
+		{
+			root = -1;
+			return;
 		}
 
 		// Optional: sort for spatial locality
@@ -347,15 +414,67 @@ namespace Engine
 		Refit(node.left);
 		Refit(node.right);
 
-		const AABB& l = nodes[node.left].aabb;
-		const AABB& r = nodes[node.right].aabb;
-		node.aabb.min = glm::min(l.min, r.min);
-		node.aabb.max = glm::max(l.max, r.max);
+		const AABB& lTight = nodes[node.left].aabb;
+		const AABB& rTight = nodes[node.right].aabb;
+		node.aabb = MergeAABBs(lTight, rTight);
+
+		const AABB& lFat = nodes[node.left].fatAABB;
+		const AABB& rFat = nodes[node.right].fatAABB;
+		node.fatAABB = MergeAABBs(lFat, rFat);
+	}
+
+	const AABB& SceneBVH::GetTraversalAABB(const BVHNode& node) const
+	{
+		return node.IsLeaf() ? node.aabb : node.fatAABB;
+	}
+
+	bool SceneBVH::IsNodeVisible(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const
+	{
+		const uint64_t frustumRevision = Frustum::GetRevision();
+		if (node.hasCullHistory
+			&& node.lastFrustumRevision == frustumRevision
+			&& node.lastCullAABBMin == aabb.min
+			&& node.lastCullAABBMax == aabb.max)
+		{
+			return node.lastVisible;
+		}
+
+		uint8_t planeHint = node.lastRejectedPlane;
+		const bool visible = frustum.IsAABBVisible(aabb, planeHint);
+
+		node.lastRejectedPlane = planeHint;
+		node.lastFrustumRevision = frustumRevision;
+		node.lastCullAABBMin = aabb.min;
+		node.lastCullAABBMax = aabb.max;
+		node.lastVisible = visible;
+		node.hasCullHistory = true;
+
+		return visible;
 	}
 
 	inline void SceneBVH::PushIfVisible(int nodeIdx, const Frustum& frustum, std::vector<int>& stack) const
 	{
-		if (IsAABBVisible(frustum, nodes[nodeIdx].aabb))
+		const BVHNode& node = nodes[nodeIdx];
+		if (node.entity == entt::null && node.IsLeaf())
+		{
+			return;
+		}
+
+		if (node.IsLeaf())
+		{
+			if (registry.valid(node.entity) && registry.any_of<Transform>(node.entity) && registry.any_of<FrustumCullCache>(node.entity))
+			{
+				const Transform& tf = registry.get<Transform>(node.entity);
+				auto& cache = registry.get<FrustumCullCache>(node.entity);
+				if (frustum.IsVisibleCached(cache, node.aabb, tf.GetWorldVersion()))
+				{
+					stack.push_back(nodeIdx);
+				}
+				return;
+			}
+		}
+
+		if (IsNodeVisible(node, frustum, GetTraversalAABB(node)))
 		{
 			stack.push_back(nodeIdx);
 		}
@@ -371,7 +490,7 @@ namespace Engine
 
 		std::vector<int> stack;
 		stack.reserve(128); // was 32
-		stack.push_back(root);
+		PushIfVisible(root, frustum, stack);
 
 		while (!stack.empty())
 		{
@@ -428,7 +547,7 @@ namespace Engine
 					continue;
 				}
 
-				const AABB& a = node.aabb;
+				const AABB& a = node.fatAABB;
 				debugDrawer->SubmitWireframeBoxAABB(a.min, a.max,
 					{ 1.0f, 0.0f, 0.0f, 1.0f }, // red
 					false, // no fill
@@ -521,7 +640,7 @@ namespace Engine
 
 	void SceneBVH::UpdateIfNeeded(entt::observer& frustumObserver)
 	{
-		bool needsUpdate = frustumObserver.empty();
+		bool needsUpdate = !frustumObserver.empty();
 
 		if (!needsUpdate && Transform::AreAnyTransformsDirty())
 		{
@@ -549,6 +668,9 @@ namespace Engine
 		nodes[idx].entity = entt::null;
 		nodes[idx].aabb.min = glm::vec3(FLT_MAX);
 		nodes[idx].aabb.max = glm::vec3(-FLT_MAX);
+		nodes[idx].fatAABB.min = glm::vec3(FLT_MAX);
+		nodes[idx].fatAABB.max = glm::vec3(-FLT_MAX);
+		nodes[idx].hasCullHistory = false;
 
 		entityToLeaf.erase(it);
 
@@ -580,7 +702,7 @@ namespace Engine
 		int sp = 0;
 
 		float tRoot;
-		if (!RayIntersectsAABB(ray, nodes[root].aabb, tMin, tMax, tRoot))
+		if (!RayIntersectsAABB(ray, GetTraversalAABB(nodes[root]), tMin, tMax, tRoot))
 		{
 			return entt::null;
 		}
@@ -621,8 +743,8 @@ namespace Engine
 
 			// Intersect children with tMax tightened to current best
 			float tL, tR;
-			const bool hitL = RayIntersectsAABB(ray, nodes[node.left].aabb, tMin, bestT, tL);
-			const bool hitR = RayIntersectsAABB(ray, nodes[node.right].aabb, tMin, bestT, tR);
+			const bool hitL = RayIntersectsAABB(ray, GetTraversalAABB(nodes[node.left]), tMin, bestT, tL);
+			const bool hitR = RayIntersectsAABB(ray, GetTraversalAABB(nodes[node.right]), tMin, bestT, tR);
 
 			if (hitL && hitR)
 			{
@@ -658,109 +780,9 @@ namespace Engine
 	}
 
 	// I have more versions of IsAABBVisible, and I have no idea which one is fastest
-
-	/* classic
 	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
 	{
-		// Test against all 6 frustum planes
-		for (int i = 0; i < 6; ++i)
-		{
-			const glm::vec4& plane = frustum.planes[i];
-
-			// Assume box is completely outside this plane
-			bool allOutside = true;
-
-			// Test all 8 corners; if any corner is inside, box is not fully outside
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.min.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.min.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.max.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.max.y, aabb.min.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.min.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.min.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.min.x, aabb.max.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
-			if ((glm::dot(glm::vec3(plane), glm::vec3(aabb.max.x, aabb.max.y, aabb.max.z)) + plane.w) >= 0.0f) { allOutside = false; }
-
-			// If all corners are outside any plane, box is outside frustum
-			if (allOutside)
-			{
-				return false;
-			}
-		}
-
-		// Box is inside or intersects frustum
-		return true;
+		return frustum.IsAABBVisible(aabb);
 	}
-	*/
-
-	/*
-	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
-	{
-		// For each plane of the frustum
-		for (int i = 0; i < 6; ++i)
-		{
-			const glm::vec4& plane = frustum.planes[i];
-
-			// Test if all 8 corners are outside this plane
-			bool allOutside = true;
-
-			// Corners of AABB
-			const float x[2] = { aabb.min.x, aabb.max.x };
-			const float y[2] = { aabb.min.y, aabb.max.y };
-			const float z[2] = { aabb.min.z, aabb.max.z };
-
-			// Check all combinations (2x2x2 = 8 corners)
-			for (int ix = 0; ix < 2; ++ix)
-			{
-				for (int iy = 0; iy < 2; ++iy)
-				{
-					for (int iz = 0; iz < 2; ++iz)
-					{
-						glm::vec3 corner(x[ix], y[iy], z[iz]);
-						float distance = glm::dot(glm::vec3(plane), corner) + plane.w;
-
-						if (distance >= 0.0f)
-						{
-							allOutside = false;
-							goto NextPlane; // Early-exit to next plane
-						}
-					}
-				}
-			}
-
-			// If all corners are outside this plane, box is not visible
-			return false;
-
-NextPlane:;
-		}
-
-		// Box is at least partially inside frustum
-		return true;
-	}
-	//*/
-
-	//* manual slab method seems fastest right now
-	bool SceneBVH::IsAABBVisible(const Frustum& frustum, const AABB& aabb) const
-	{
-		for (int i = 0; i < 6; ++i)
-		{
-			const glm::vec4& plane = frustum.planes[i];
-
-			// Compute dot product manually (the ternarys might hurt branch prediction, not sure)
-			if (
-				(
-				plane.x * ((plane.x >= 0.0f) ? aabb.max.x : aabb.min.x)
-				+ plane.y * ((plane.y >= 0.0f) ? aabb.max.y : aabb.min.y)
-				+ plane.z * ((plane.z >= 0.0f) ? aabb.max.z : aabb.min.z)
-				)
-				+ plane.w < 0.0f
-				)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-	//*/
 
 }

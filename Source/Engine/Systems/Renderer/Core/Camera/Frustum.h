@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstring>
+#include <cstdint>
+
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/type_ptr.hpp"
-// #include <cstring> // std::memcmp
 #include "Engine/Components/Internal/FrustumCullCache.h"
+#include "Engine/Systems/Renderer/Core/MathTypes/AABB.h"
 
 namespace Engine
 {
@@ -17,6 +20,11 @@ namespace Engine
 			return cachedFrustum;
 		}
 
+		inline static uint64_t GetRevision()
+		{
+			return revision;
+		}
+
 		// === Setup camera frustum from view/proj matrices (once per frame) ===
 		static void SetCameraMatrices(const glm::mat4& view, const glm::mat4& proj)
 		{
@@ -27,6 +35,12 @@ namespace Engine
 				lastVP = newVP;
 				lastView = view;
 				cachedFrustum = ComputeFromMatrix(newVP);
+				cameraMovedThisFrame = true;
+				++revision;
+			}
+			else
+			{
+				cameraMovedThisFrame = false;
 			}
 		}
 
@@ -63,47 +77,102 @@ namespace Engine
 			return true;
 		}
 
-		// This is actually the best method to use right now
-		bool IsVisibleLazy(const glm::vec4& aabbMin, const glm::vec4& aabbMax, const glm::mat4& model) const
+		bool IsAABBVisible(const AABB& aabb) const
 		{
-			constexpr float threeHalves = 1.5f;
+			uint8_t planeHint = 0;
+			return IsAABBVisible(aabb, planeHint);
+		}
 
-			glm::vec3 worldMin = glm::vec3(model * aabbMin);
-			glm::vec3 worldMax = glm::vec3(model * aabbMax);
+		bool IsAABBVisible(const AABB& aabb, uint8_t& planeHint) const
+		{
+			const uint8_t firstPlane = planeHint < 6 ? planeHint : 0;
 
-			for (int i = 0; i < 6; ++i)
+			if (IsAABBOutsidePlane(aabb, planes[firstPlane]))
 			{
-				const glm::vec3 normal = glm::vec3(planes[i]);
+				planeHint = firstPlane;
+				return false;
+			}
 
-				glm::vec3 negativeVertex = {
-					normal.x >= 0.0f ? worldMin.x : worldMax.x,
-					normal.y >= 0.0f ? worldMin.y : worldMax.y,
-					normal.z >= 0.0f ? worldMin.z : worldMax.z
-				};
-
-				if (glm::dot(normal, negativeVertex) + planes[i].w < -threeHalves)
+			for (uint8_t i = 0; i < 6; ++i)
+			{
+				if (i == firstPlane)
 				{
+					continue;
+				}
+
+				if (IsAABBOutsidePlane(aabb, planes[i]))
+				{
+					planeHint = i;
 					return false;
 				}
 			}
 
+			planeHint = firstPlane;
 			return true;
+		}
+
+		// This is actually the best method to use right now
+		bool IsVisibleLazy(const glm::vec4& aabbMin, const glm::vec4& aabbMax, const glm::mat4& model) const
+		{
+			AABB worldAABB;
+
+			glm::vec3 worldMin = glm::vec3(model * aabbMin);
+			glm::vec3 worldMax = worldMin;
+
+			const glm::vec3 localMin = glm::vec3(aabbMin);
+			const glm::vec3 localMax = glm::vec3(aabbMax);
+
+			const glm::vec3 corners[8] = {
+				glm::vec3(model * glm::vec4(localMin.x, localMin.y, localMin.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMax.x, localMin.y, localMin.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMin.x, localMax.y, localMin.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMax.x, localMax.y, localMin.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMin.x, localMin.y, localMax.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMax.x, localMin.y, localMax.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMin.x, localMax.y, localMax.z, 1.0f)),
+				glm::vec3(model * glm::vec4(localMax.x, localMax.y, localMax.z, 1.0f))
+			};
+
+			for (int i = 1; i < 8; ++i)
+			{
+				worldMin = glm::min(worldMin, corners[i]);
+				worldMax = glm::max(worldMax, corners[i]);
+			}
+
+			worldAABB.min = worldMin;
+			worldAABB.max = worldMax;
+
+			return IsAABBVisible(worldAABB);
 		}
 
 		// Uses the internal engine component every entity with a mesh and transform gets assigned silently
 		bool IsVisibleCached(const FrustumCullCache& cache) const
 		{
-			constexpr float threeHalves = 1.5f;
+			AABB worldAABB;
+			worldAABB.min = cache.lastWorldAABBMin;
+			worldAABB.max = cache.lastWorldAABBMax;
+			return IsAABBVisible(worldAABB);
+		}
 
-			for (int i = 0; i < 6; ++i)
+		bool IsVisibleCached(FrustumCullCache& cache, const AABB& worldAABB, uint64_t transformVersion) const
+		{
+			if (cache.HasReusableResult(worldAABB.min, worldAABB.max, transformVersion, revision))
 			{
-				if (glm::dot(glm::vec3(planes[i]), cache.GetNegativeVertex(i)) + planes[i].w < -threeHalves)
-				{
-					return false;
-				}
+				return cache.lastVisible;
 			}
 
-			return true;
+			uint8_t planeHint = cache.lastRejectedPlane;
+			const bool visible = IsAABBVisible(worldAABB, planeHint);
+
+			cache.lastTransformVersion = transformVersion;
+			cache.lastFrustumRevision = revision;
+			cache.lastRejectedPlane = planeHint;
+			cache.lastWorldAABBMin = worldAABB.min;
+			cache.lastWorldAABBMax = worldAABB.max;
+			cache.lastVisible = visible;
+			cache.hasVisibilityHistory = true;
+
+			return visible;
 		}
 
 	private:
@@ -131,6 +200,16 @@ namespace Engine
 			return f;
 		}
 
+		static bool IsAABBOutsidePlane(const AABB& aabb, const glm::vec4& plane)
+		{
+			return (
+				plane.x * ((plane.x >= 0.0f) ? aabb.max.x : aabb.min.x)
+				+ plane.y * ((plane.y >= 0.0f) ? aabb.max.y : aabb.min.y)
+				+ plane.z * ((plane.z >= 0.0f) ? aabb.max.z : aabb.min.z)
+				+ plane.w
+				) < 0.0f;
+		}
+
 		static bool MatricesEqual(const glm::mat4& a, const glm::mat4& b)
 		{
 			return std::memcmp(glm::value_ptr(a), glm::value_ptr(b), sizeof(glm::mat4)) == 0;
@@ -140,11 +219,15 @@ namespace Engine
 		static glm::mat4 lastVP;
 		static glm::mat4 lastView;
 		static Frustum cachedFrustum;
+		static uint64_t revision;
+		static bool cameraMovedThisFrame;
 	};
 
 	// Static member initialization
 	inline glm::mat4 Frustum::lastVP = glm::mat4(0.0f);
 	inline glm::mat4 Frustum::lastView = glm::mat4(1.0f);
 	inline Frustum Frustum::cachedFrustum = {};
+	inline uint64_t Frustum::revision = 1;
+	inline bool Frustum::cameraMovedThisFrame = true;
 
 }

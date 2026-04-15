@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+
 #include "Library/glm/glm.hpp"
 
 // Internal components are components the gameplay programmers making the game should never have to worry about, 
@@ -15,9 +17,32 @@ namespace Engine
 
 		glm::vec3 lastAABBMin = glm::vec3(0.0f);
 		glm::vec3 lastAABBMax = glm::vec3(0.0f);
+		glm::vec3 lastWorldAABBMin = glm::vec3(0.0f);
+		glm::vec3 lastWorldAABBMax = glm::vec3(0.0f);
 		glm::mat4 lastModelMatrix = glm::mat4(0.0f);
 
+		uint64_t lastTransformVersion = 0;
+		uint64_t lastFrustumRevision = 0;
+		uint8_t lastRejectedPlane = 0;
+
 		bool valid = false;
+		bool hasVisibilityHistory = false;
+		bool lastVisible = false;
+
+		void InvalidateTemporalHistory()
+		{
+			hasVisibilityHistory = false;
+			lastFrustumRevision = 0;
+		}
+
+		bool HasReusableResult(const glm::vec3& worldAABBMin, const glm::vec3& worldAABBMax, uint64_t transformVersion, uint64_t frustumRevision) const
+		{
+			return hasVisibilityHistory
+				&& lastTransformVersion == transformVersion
+				&& lastFrustumRevision == frustumRevision
+				&& lastWorldAABBMin == worldAABBMin
+				&& lastWorldAABBMax == worldAABBMax;
+		}
 
 		// Recomputes transformed corners and negative vertex indices if needed
 		void Update(const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& modelMatrix)
@@ -44,6 +69,15 @@ namespace Engine
 			worldCorners[6] = glm::vec3(modelMatrix * glm::vec4(aabbMin.x, aabbMax.y, aabbMax.z, 1.0f));
 			worldCorners[7] = glm::vec3(modelMatrix * glm::vec4(aabbMax.x, aabbMax.y, aabbMax.z, 1.0f));
 
+			lastWorldAABBMin = worldCorners[0];
+			lastWorldAABBMax = worldCorners[0];
+
+			for (int i = 1; i < 8; ++i)
+			{
+				lastWorldAABBMin = glm::min(lastWorldAABBMin, worldCorners[i]);
+				lastWorldAABBMax = glm::max(lastWorldAABBMax, worldCorners[i]);
+			}
+
 			// Precompute negative vertex indices for common frustum plane orientations
 			const glm::vec3 normals[6] = {
 				{  1,  0,  0 },  // Left
@@ -60,6 +94,7 @@ namespace Engine
 			}
 
 			valid = true;
+			InvalidateTemporalHistory();
 		}
 
 		// Inline: returns cached negative vertex for a specific frustum plane
