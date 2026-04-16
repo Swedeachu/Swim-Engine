@@ -1197,9 +1197,11 @@ namespace Engine
 			seedItems.push_back(stack[--stackSize]);
 		}
 
-		if (seedItems.size() <= 1 || seedItems.size() < workerSlots)
+		const size_t minParallelSeedCount = std::max<size_t>(workerSlots * 2, 8);
+		if (seedItems.size() < minParallelSeedCount)
 		{
-			outVisible = directlyVisible;
+			outVisible.reserve(directlyVisible.size() + seedItems.size() * 4);
+			outVisible.insert(outVisible.end(), directlyVisible.begin(), directlyVisible.end());
 			for (const WideTraversalItem& item : seedItems)
 			{
 				TraverseWideSubtree(item.wideIndex, item.fullyInside, frustum, outVisible);
@@ -1207,7 +1209,8 @@ namespace Engine
 			return;
 		}
 
-		parallelVisibleScratch[0].visible = directlyVisible;
+		parallelVisibleScratch[0].visible.clear();
+		parallelVisibleScratch[0].visible.insert(parallelVisibleScratch[0].visible.end(), directlyVisible.begin(), directlyVisible.end());
 		for (size_t slot = 1; slot < workerSlots; ++slot)
 		{
 			parallelVisibleScratch[slot].visible.clear();

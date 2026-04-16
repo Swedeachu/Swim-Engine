@@ -70,9 +70,12 @@ namespace Engine
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
 		void GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum);
 		void AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
-		bool TryBuildGatheredInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum, struct GatheredInstance& outInstance) const;
+		bool TryBuildGatheredInstance(entt::registry& registry, const struct GatherCandidate& candidate, const Frustum* frustum, struct GatheredInstance& outInstance) const;
 		void AppendGatheredInstance(const struct GatheredInstance& gathered);
+		void AppendGatheredInstances(const std::vector<struct GatheredInstance>& gatheredInstances);
 		void ProcessGatherCandidates(entt::registry& registry, const std::vector<struct GatherCandidate>& candidates, const Frustum* frustum);
+		void EnsureGatherThreadScratch(size_t workerSlots, size_t reservePerSlot);
+		void EnsureDirtyThreadScratch(size_t workerSlots, size_t reservePerSlot);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
 		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
@@ -145,8 +148,11 @@ namespace Engine
 		struct GatherCandidate
 		{
 			entt::entity entity{ entt::null };
-			const Transform* transform = nullptr;
 			std::shared_ptr<MaterialData> material;
+			glm::mat4 worldMatrix{ 1.0f };
+			uint64_t worldVersion = 0;
+			TransformSpace transformSpace = TransformSpace::World;
+			bool canUseEntityCullCache = false;
 		};
 
 		struct GatheredInstance
@@ -156,6 +162,16 @@ namespace Engine
 			VkDeviceSize vertexOffsetInMegaBuffer = 0;
 			VkDeviceSize indexOffsetInMegaBuffer = 0;
 			GpuInstanceData instance{};
+		};
+
+		struct GatherThreadScratch
+		{
+			std::vector<GatheredInstance> gathered;
+		};
+
+		struct DirtyThreadScratch
+		{
+			std::vector<uint32_t> dirtyIndices;
 		};
 
 		struct FullSceneRenderable
@@ -206,6 +222,9 @@ namespace Engine
 		std::vector<entt::entity> visibleEntityScratch;
 		std::vector<GatherCandidate> gatherCandidatesScratch;
 		std::vector<uint32_t> dirtyInstanceIndexScratch;
+		std::vector<GatherThreadScratch> gatherThreadScratch;
+		std::vector<DirtyThreadScratch> dirtyThreadScratch;
+		std::vector<uint32_t> bucketFirstInstanceScratch;
 		uint64_t fullScenePacketRenderablesRevision = 0;
 		uint64_t fullScenePacketVersion = 0;
 		bool fullScenePacketValid = false;

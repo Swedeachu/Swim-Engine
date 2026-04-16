@@ -336,8 +336,9 @@ namespace Engine
 
 
 
-	bool VulkanIndexDraw::TryBuildGatheredInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum, VulkanIndexDraw::GatheredInstance& outInstance) const
+	bool VulkanIndexDraw::TryBuildGatheredInstance(entt::registry& registry, const VulkanIndexDraw::GatherCandidate& candidate, const Frustum* frustum, VulkanIndexDraw::GatheredInstance& outInstance) const
 	{
+		const std::shared_ptr<MaterialData>& mat = candidate.material;
 		if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
 		{
 			return false;
@@ -346,23 +347,18 @@ namespace Engine
 		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
 		const glm::vec3 localMin = glm::vec3(mesh.aabbMin);
 		const glm::vec3 localMax = glm::vec3(mesh.aabbMax);
-		const glm::mat4& world = transform.GetWorldMatrix(registry);
 
-		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
+		if (frustum && candidate.transformSpace == TransformSpace::World)
 		{
-			const bool canUseEntityCullCache = registry.valid(entity)
-				&& registry.any_of<FrustumCullCache>(entity)
-				&& !registry.any_of<CompositeMaterial>(entity);
-
-			if (canUseEntityCullCache)
+			if (candidate.canUseEntityCullCache)
 			{
-				auto& cache = registry.get<FrustumCullCache>(entity);
-				if (!frustum->IsVisibleCached(cache, localMin, localMax, world, transform.GetWorldVersion()))
+				auto& cache = registry.get<FrustumCullCache>(candidate.entity);
+				if (!frustum->IsVisibleCached(cache, localMin, localMax, candidate.worldMatrix, candidate.worldVersion))
 				{
 					return false;
 				}
 			}
-			else if (!frustum->IsVisibleLazy(mesh.aabbMin, mesh.aabbMax, world))
+			else if (!frustum->IsVisibleLazy(mesh.aabbMin, mesh.aabbMax, candidate.worldMatrix))
 			{
 				return false;
 			}
@@ -372,8 +368,8 @@ namespace Engine
 		outInstance.indexCount = mesh.indexCount;
 		outInstance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
 		outInstance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
-		outInstance.instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
-		outInstance.instance.model = world;
+		outInstance.instance.space = static_cast<uint32_t>(candidate.transformSpace);
+		outInstance.instance.model = candidate.worldMatrix;
 		outInstance.instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 		outInstance.instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 		outInstance.instance.materialIndex = 0u;
@@ -399,6 +395,50 @@ namespace Engine
 		bucket.instances.push_back(gathered.instance);
 	}
 
+	void VulkanIndexDraw::AppendGatheredInstances(const std::vector<VulkanIndexDraw::GatheredInstance>& gatheredInstances)
+	{
+		for (const GatheredInstance& gathered : gatheredInstances)
+		{
+			AppendGatheredInstance(gathered);
+		}
+	}
+
+	void VulkanIndexDraw::EnsureGatherThreadScratch(size_t workerSlots, size_t reservePerSlot)
+	{
+		if (gatherThreadScratch.size() < workerSlots)
+		{
+			gatherThreadScratch.resize(workerSlots);
+		}
+
+		for (size_t slot = 0; slot < workerSlots; ++slot)
+		{
+			auto& gathered = gatherThreadScratch[slot].gathered;
+			gathered.clear();
+			if (gathered.capacity() < reservePerSlot)
+			{
+				gathered.reserve(reservePerSlot);
+			}
+		}
+	}
+
+	void VulkanIndexDraw::EnsureDirtyThreadScratch(size_t workerSlots, size_t reservePerSlot)
+	{
+		if (dirtyThreadScratch.size() < workerSlots)
+		{
+			dirtyThreadScratch.resize(workerSlots);
+		}
+
+		for (size_t slot = 0; slot < workerSlots; ++slot)
+		{
+			auto& dirty = dirtyThreadScratch[slot].dirtyIndices;
+			dirty.clear();
+			if (dirty.capacity() < reservePerSlot)
+			{
+				dirty.reserve(reservePerSlot);
+			}
+		}
+	}
+
 	void VulkanIndexDraw::ProcessGatherCandidates(entt::registry& registry, const std::vector<VulkanIndexDraw::GatherCandidate>& candidates, const Frustum* frustum)
 	{
 		if (candidates.empty())
@@ -406,18 +446,44 @@ namespace Engine
 			return;
 		}
 
-		for (const GatherCandidate& candidate : candidates)
-		{
-			if (candidate.transform == nullptr)
-			{
-				continue;
-			}
+		const bool allowParallel = (frustum == nullptr)
+			&& RenderCpuJobConfig::Enabled
+			&& candidates.size() >= RenderCpuJobConfig::MinParallelItemCount
+			&& GetRenderParallelWorkerSlots() > 1;
 
-			GatheredInstance gathered{};
-			if (TryBuildGatheredInstance(registry, candidate.entity, *candidate.transform, candidate.material, frustum, gathered))
+		if (!allowParallel)
+		{
+			for (const GatherCandidate& candidate : candidates)
 			{
-				AppendGatheredInstance(gathered);
+				GatheredInstance gathered{};
+				if (TryBuildGatheredInstance(registry, candidate, frustum, gathered))
+				{
+					AppendGatheredInstance(gathered);
+				}
 			}
+			return;
+		}
+
+		const size_t workerSlots = GetRenderParallelWorkerSlots();
+		const size_t reservePerSlot = std::max<size_t>((candidates.size() + workerSlots - 1) / workerSlots, 32);
+		EnsureGatherThreadScratch(workerSlots, reservePerSlot);
+
+		ParallelForRender(candidates.size(), RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
+		{
+			auto& localGathered = gatherThreadScratch[workerIndex].gathered;
+			for (size_t i = begin; i < end; ++i)
+			{
+				GatheredInstance gathered{};
+				if (TryBuildGatheredInstance(registry, candidates[i], nullptr, gathered))
+				{
+					localGathered.push_back(std::move(gathered));
+				}
+			}
+		});
+
+		for (size_t slot = 0; slot < workerSlots; ++slot)
+		{
+			AppendGatheredInstances(gatherThreadScratch[slot].gathered);
 		}
 	}
 
@@ -431,6 +497,7 @@ namespace Engine
 		fullSceneDirtyHistory.clear();
 
 		auto regularView = registry.view<Transform, Material>();
+		fullSceneRenderables.reserve(static_cast<size_t>(regularView.size_hint()));
 		for (auto entity : regularView)
 		{
 			if (!scene.ShouldRenderBasedOnState(entity) || registry.any_of<MeshDecorator>(entity))
@@ -454,6 +521,7 @@ namespace Engine
 			item.entity = entity;
 			item.material = mat;
 			item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
+			item.baseInstance.model = tf.GetWorldMatrix(registry);
 			item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 			item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 			item.baseInstance.materialIndex = 0u;
@@ -474,6 +542,7 @@ namespace Engine
 				continue;
 			}
 
+			const glm::mat4& world = tf.GetWorldMatrix(registry);
 			const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
 			for (const auto& mat : composite.subMaterials)
 			{
@@ -486,6 +555,7 @@ namespace Engine
 				item.entity = entity;
 				item.material = mat;
 				item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
+				item.baseInstance.model = world;
 				item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 				item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 				item.baseInstance.materialIndex = 0u;
@@ -501,14 +571,29 @@ namespace Engine
 		fullSceneDrawCommands.reserve(fullSceneRenderables.size());
 		cpuInstanceData.resize(fullSceneRenderables.size());
 
-		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+		if (!fullSceneRenderables.empty())
 		{
-			const FullSceneRenderable& item = fullSceneRenderables[i];
-			const Transform& tf = registry.get<Transform>(item.entity);
+			const bool allowParallelCopy = RenderCpuJobConfig::Enabled
+				&& fullSceneRenderables.size() >= RenderCpuJobConfig::MinParallelItemCount
+				&& GetRenderParallelWorkerSlots() > 1;
 
-			GpuInstanceData instance = item.baseInstance;
-			instance.model = tf.GetWorldMatrix(registry);
-			cpuInstanceData[i] = instance;
+			if (allowParallelCopy)
+			{
+				ParallelForRender(fullSceneRenderables.size(), RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
+				{
+					for (size_t i = begin; i < end; ++i)
+					{
+						cpuInstanceData[i] = fullSceneRenderables[i].baseInstance;
+					}
+				});
+			}
+			else
+			{
+				for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+				{
+					cpuInstanceData[i] = fullSceneRenderables[i].baseInstance;
+				}
+			}
 		}
 
 		fullSceneEntityToInstanceIndices.reserve(fullSceneRenderables.size());
@@ -561,7 +646,7 @@ namespace Engine
 
 		struct DirtyUpdateWork
 		{
-			const Transform* transform = nullptr;
+			glm::mat4 worldMatrix{ 1.0f };
 			const std::vector<uint32_t>* indices = nullptr;
 		};
 
@@ -584,7 +669,7 @@ namespace Engine
 
 			const Transform& tf = registry.get<Transform>(entity);
 			DirtyUpdateWork work{};
-			work.transform = &tf;
+			work.worldMatrix = tf.GetWorldMatrix(registry);
 			work.indices = &it->second;
 			dirtyWork.push_back(std::move(work));
 		}
@@ -597,18 +682,54 @@ namespace Engine
 		dirtyInstanceIndexScratch.clear();
 		dirtyInstanceIndexScratch.reserve(dirtyWork.size() * 2);
 
-		for (const DirtyUpdateWork& work : dirtyWork)
-		{
-			if (work.transform == nullptr || work.indices == nullptr)
-			{
-				continue;
-			}
+		const bool allowParallelUpdate = RenderCpuJobConfig::Enabled
+			&& dirtyWork.size() >= 32
+			&& GetRenderParallelWorkerSlots() > 1;
 
-			const glm::mat4& world = work.transform->GetWorldMatrix(registry);
-			for (uint32_t index : *work.indices)
+		if (allowParallelUpdate)
+		{
+			const size_t workerSlots = GetRenderParallelWorkerSlots();
+			EnsureDirtyThreadScratch(workerSlots, std::max<size_t>((dirtyWork.size() * 2 + workerSlots - 1) / workerSlots, 16));
+
+			ParallelForRender(dirtyWork.size(), 32, [&](size_t begin, size_t end, uint32_t workerIndex)
 			{
-				cpuInstanceData[index].model = world;
-				dirtyInstanceIndexScratch.push_back(index);
+				auto& localDirty = dirtyThreadScratch[workerIndex].dirtyIndices;
+				for (size_t i = begin; i < end; ++i)
+				{
+					const DirtyUpdateWork& work = dirtyWork[i];
+					if (work.indices == nullptr)
+					{
+						continue;
+					}
+
+					for (uint32_t index : *work.indices)
+					{
+						cpuInstanceData[index].model = work.worldMatrix;
+						localDirty.push_back(index);
+					}
+				}
+			});
+
+			for (size_t slot = 0; slot < workerSlots; ++slot)
+			{
+				auto& localDirty = dirtyThreadScratch[slot].dirtyIndices;
+				dirtyInstanceIndexScratch.insert(dirtyInstanceIndexScratch.end(), localDirty.begin(), localDirty.end());
+			}
+		}
+		else
+		{
+			for (const DirtyUpdateWork& work : dirtyWork)
+			{
+				if (work.indices == nullptr)
+				{
+					continue;
+				}
+
+				for (uint32_t index : *work.indices)
+				{
+					cpuInstanceData[index].model = work.worldMatrix;
+					dirtyInstanceIndexScratch.push_back(index);
+				}
 			}
 		}
 
@@ -764,7 +885,7 @@ namespace Engine
 			return;
 		}
 
-		cpuInstanceData.clear(); // was resize(0)
+		cpuInstanceData.clear();
 
 		for (uint32_t meshID : activeMeshBucketKeys)
 		{
@@ -828,12 +949,17 @@ namespace Engine
 			}
 
 			const Transform& tf = registry.get<Transform>(entity);
+			const glm::mat4& world = tf.GetWorldMatrix(registry);
+
 			if (registry.all_of<Material>(entity))
 			{
 				GatherCandidate candidate{};
 				candidate.entity = entity;
-				candidate.transform = &tf;
 				candidate.material = registry.get<Material>(entity).data;
+				candidate.worldMatrix = world;
+				candidate.worldVersion = tf.GetWorldVersion();
+				candidate.transformSpace = tf.GetTransformSpace();
+				candidate.canUseEntityCullCache = false;
 				gatherCandidatesScratch.push_back(std::move(candidate));
 			}
 			else if (registry.all_of<CompositeMaterial>(entity))
@@ -843,8 +969,11 @@ namespace Engine
 				{
 					GatherCandidate candidate{};
 					candidate.entity = entity;
-					candidate.transform = &tf;
 					candidate.material = mat;
+					candidate.worldMatrix = world;
+					candidate.worldVersion = tf.GetWorldVersion();
+					candidate.transformSpace = tf.GetTransformSpace();
+					candidate.canUseEntityCullCache = false;
 					gatherCandidatesScratch.push_back(std::move(candidate));
 				}
 			}
@@ -878,8 +1007,11 @@ namespace Engine
 			{
 				GatherCandidate candidate{};
 				candidate.entity = entity;
-				candidate.transform = &tf;
 				candidate.material = regularView.get<Material>(entity).data;
+				candidate.worldMatrix = tf.GetWorldMatrix(registry);
+				candidate.worldVersion = tf.GetWorldVersion();
+				candidate.transformSpace = tf.GetTransformSpace();
+				candidate.canUseEntityCullCache = registry.any_of<FrustumCullCache>(entity) && !registry.any_of<CompositeMaterial>(entity);
 				gatherCandidatesScratch.push_back(std::move(candidate));
 			}
 		}
@@ -900,13 +1032,17 @@ namespace Engine
 			const Transform& tf = compositeView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
+				const glm::mat4& world = tf.GetWorldMatrix(registry);
 				const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
 				for (const auto& mat : composite.subMaterials)
 				{
 					GatherCandidate candidate{};
 					candidate.entity = entity;
-					candidate.transform = &tf;
 					candidate.material = mat;
+					candidate.worldMatrix = world;
+					candidate.worldVersion = tf.GetWorldVersion();
+					candidate.transformSpace = tf.GetTransformSpace();
+					candidate.canUseEntityCullCache = false;
 					gatherCandidatesScratch.push_back(std::move(candidate));
 				}
 			}
@@ -917,8 +1053,16 @@ namespace Engine
 
 	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
+		GatherCandidate candidate{};
+		candidate.entity = entity;
+		candidate.material = mat;
+		candidate.worldMatrix = transform.GetWorldMatrix(registry);
+		candidate.worldVersion = transform.GetWorldVersion();
+		candidate.transformSpace = transform.GetTransformSpace();
+		candidate.canUseEntityCullCache = registry.any_of<FrustumCullCache>(entity) && !registry.any_of<CompositeMaterial>(entity);
+
 		GatheredInstance gathered{};
-		if (TryBuildGatheredInstance(registry, entity, transform, mat, frustum, gathered))
+		if (TryBuildGatheredInstance(registry, candidate, frustum, gathered))
 		{
 			AppendGatheredInstance(gathered);
 		}
@@ -937,19 +1081,20 @@ namespace Engine
 			totalWorldInstances += meshBuckets[meshID].instances.size();
 		}
 
-		cpuInstanceData.reserve(totalWorldInstances);
+		cpuInstanceData.resize(totalWorldInstances);
 		worldDrawCommands.reserve(activeMeshBucketKeys.size());
+		bucketFirstInstanceScratch.resize(activeMeshBucketKeys.size(), 0);
 
 		uint32_t firstInstance = 0;
-		for (uint32_t meshID : activeMeshBucketKeys)
+		for (size_t i = 0; i < activeMeshBucketKeys.size(); ++i)
 		{
-			MeshBucket& bucket = meshBuckets[meshID];
+			MeshBucket& bucket = meshBuckets[activeMeshBucketKeys[i]];
 			if (bucket.instances.empty())
 			{
 				continue;
 			}
 
-			cpuInstanceData.insert(cpuInstanceData.end(), bucket.instances.begin(), bucket.instances.end());
+			bucketFirstInstanceScratch[i] = firstInstance;
 
 			VkDrawIndexedIndirectCommand cmd{};
 			cmd.indexCount = bucket.indexCount;
@@ -960,6 +1105,49 @@ namespace Engine
 			worldDrawCommands.push_back(cmd);
 
 			firstInstance += cmd.instanceCount;
+		}
+
+		const bool allowParallelCopy = RenderCpuJobConfig::Enabled
+			&& totalWorldInstances >= RenderCpuJobConfig::MinParallelItemCount
+			&& activeMeshBucketKeys.size() >= 4
+			&& GetRenderParallelWorkerSlots() > 1;
+
+		if (allowParallelCopy)
+		{
+			ParallelForRender(activeMeshBucketKeys.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+			{
+				for (size_t i = begin; i < end; ++i)
+				{
+					const MeshBucket& bucket = meshBuckets[activeMeshBucketKeys[i]];
+					if (bucket.instances.empty())
+					{
+						continue;
+					}
+
+					std::memcpy(
+						cpuInstanceData.data() + bucketFirstInstanceScratch[i],
+						bucket.instances.data(),
+						bucket.instances.size() * sizeof(GpuInstanceData)
+					);
+				}
+			});
+		}
+		else
+		{
+			for (size_t i = 0; i < activeMeshBucketKeys.size(); ++i)
+			{
+				const MeshBucket& bucket = meshBuckets[activeMeshBucketKeys[i]];
+				if (bucket.instances.empty())
+				{
+					continue;
+				}
+
+				std::memcpy(
+					cpuInstanceData.data() + bucketFirstInstanceScratch[i],
+					bucket.instances.data(),
+					bucket.instances.size() * sizeof(GpuInstanceData)
+				);
+			}
 		}
 
 		// Ensure the per-frame instance buffer can hold the world instances

@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 // A header file only thread pool implementation intended for renderer based work on the CPU side, such as culling sections of the world from the child regions of the BVH.
 
@@ -23,6 +24,7 @@ namespace Engine
 		static constexpr uint32_t MaxWorkerThreads = 16;
 		static constexpr uint32_t ChunksPerWorker = 2;
 		static constexpr size_t DefaultMinItemsPerChunk = 128;
+		static constexpr size_t MinParallelItemCount = 512;
 	};
 
 	class RenderThreadPool
@@ -65,7 +67,7 @@ namespace Engine
 				return;
 			}
 
-			if (tIsRenderWorker)
+			if (tIsRenderWorker || tDispatchDepth > 0)
 			{
 				func(0, itemCount, tWorkerSlotIndex);
 				return;
@@ -73,8 +75,14 @@ namespace Engine
 
 			const size_t workerThreadCount = workers.size();
 			const size_t minChunk = std::max<size_t>(minItemsPerChunk, 1);
+			if (workerThreadCount == 0 || itemCount < std::max(minChunk, RenderCpuJobConfig::MinParallelItemCount))
+			{
+				func(0, itemCount, 0);
+				return;
+			}
+
 			const size_t possibleChunks = (itemCount + minChunk - 1) / minChunk;
-			if (workerThreadCount == 0 || possibleChunks <= 1)
+			if (possibleChunks <= 1)
 			{
 				func(0, itemCount, 0);
 				return;
@@ -118,10 +126,23 @@ namespace Engine
 			size_t chunkSize = 1;
 			uint32_t chunkCount = 0;
 			uint32_t activeWorkerThreads = 0;
-			uint32_t completedWorkers = 0;
+			uint32_t completedWorkerThreads = 0;
 			uint64_t generation = 0;
 			bool stop = false;
-			bool active = false;
+			bool hasWork = false;
+		};
+
+		struct DispatchScope
+		{
+			DispatchScope()
+			{
+				++tDispatchDepth;
+			}
+
+			~DispatchScope()
+			{
+				--tDispatchDepth;
+			}
 		};
 
 		RenderThreadPool()
@@ -199,33 +220,39 @@ namespace Engine
 				dispatch.chunkSize = chunkSize;
 				dispatch.chunkCount = chunkCount;
 				dispatch.activeWorkerThreads = activeWorkerThreads;
-				dispatch.completedWorkers = 0;
-				dispatch.active = true;
+				dispatch.completedWorkerThreads = 0;
+				dispatch.hasWork = true;
 				++dispatch.generation;
 			}
 
 			dispatchWakeCv.notify_all();
-			ExecuteAssignedWork(context, execute, itemCount, chunkSize, chunkCount, activeWorkerThreads, 0);
+
+			{
+				DispatchScope scope;
+				ExecuteAssignedWork(context, execute, itemCount, chunkSize, chunkCount, activeWorkerThreads, 0);
+			}
 
 			{
 				std::unique_lock<std::mutex> lock(dispatchMutex);
 				dispatchDoneCv.wait(lock, [&]()
 				{
-					return dispatch.completedWorkers >= dispatch.activeWorkerThreads;
+					return !dispatch.hasWork || dispatch.completedWorkerThreads >= dispatch.activeWorkerThreads;
 				});
-				dispatch.active = false;
+
+				dispatch.hasWork = false;
 				dispatch.context = nullptr;
 				dispatch.execute = nullptr;
 				dispatch.itemCount = 0;
 				dispatch.chunkSize = 1;
 				dispatch.chunkCount = 0;
 				dispatch.activeWorkerThreads = 0;
-				dispatch.completedWorkers = 0;
+				dispatch.completedWorkerThreads = 0;
 			}
 		}
 
 		void ExecuteAssignedWork(void* context, RangeExecuteFn execute, size_t itemCount, size_t chunkSize, uint32_t chunkCount, uint32_t activeWorkerThreads, uint32_t workerIndex)
 		{
+			DispatchScope scope;
 			const uint32_t participantCount = activeWorkerThreads + 1;
 			for (uint32_t chunkIndex = workerIndex; chunkIndex < chunkCount; chunkIndex += participantCount)
 			{
@@ -261,7 +288,7 @@ namespace Engine
 					std::unique_lock<std::mutex> lock(dispatchMutex);
 					dispatchWakeCv.wait(lock, [&]()
 					{
-						return dispatch.stop || dispatch.generation != seenGeneration;
+						return dispatch.stop || (dispatch.hasWork && dispatch.generation != seenGeneration);
 					});
 
 					if (dispatch.stop)
@@ -270,7 +297,7 @@ namespace Engine
 					}
 
 					seenGeneration = dispatch.generation;
-					if (dispatch.active && workerIndex <= dispatch.activeWorkerThreads)
+					if (dispatch.hasWork && workerIndex <= dispatch.activeWorkerThreads)
 					{
 						context = dispatch.context;
 						execute = dispatch.execute;
@@ -291,9 +318,15 @@ namespace Engine
 
 				{
 					std::lock_guard<std::mutex> lock(dispatchMutex);
-					++dispatch.completedWorkers;
+					if (dispatch.hasWork && dispatch.generation == seenGeneration)
+					{
+						++dispatch.completedWorkerThreads;
+						if (dispatch.completedWorkerThreads >= dispatch.activeWorkerThreads)
+						{
+							dispatchDoneCv.notify_one();
+						}
+					}
 				}
-				dispatchDoneCv.notify_one();
 			}
 		}
 
@@ -305,6 +338,7 @@ namespace Engine
 
 		inline static thread_local bool tIsRenderWorker = false;
 		inline static thread_local uint32_t tWorkerSlotIndex = 0;
+		inline static thread_local uint32_t tDispatchDepth = 0;
 	};
 
 	inline size_t GetRenderParallelWorkerSlots()
