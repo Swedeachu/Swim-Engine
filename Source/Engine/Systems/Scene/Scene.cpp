@@ -5,6 +5,7 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Components/MeshDecorator.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Entity/EntityFactory.h"
 #include "InternalBehaviors/CameraControl/EditorCamera.h"
@@ -36,6 +37,16 @@ namespace Engine
 	template<typename T>
 	void Scene::OnComponentConstruct(entt::registry& reg, entt::entity entity)
 	{
+		if constexpr (
+			std::is_same_v<T, Transform>
+			|| std::is_same_v<T, Material>
+			|| std::is_same_v<T, CompositeMaterial>
+			|| std::is_same_v<T, MeshDecorator>
+			)
+		{
+			++renderablesRevision;
+		}
+
 		if (!serializedSceneManager)
 		{
 			return;
@@ -56,6 +67,16 @@ namespace Engine
 	template<typename T>
 	void Scene::OnComponentDestroy(entt::registry& reg, entt::entity entity)
 	{
+		if constexpr (
+			std::is_same_v<T, Transform>
+			|| std::is_same_v<T, Material>
+			|| std::is_same_v<T, CompositeMaterial>
+			|| std::is_same_v<T, MeshDecorator>
+			)
+		{
+			++renderablesRevision;
+		}
+
 		if (!serializedSceneManager)
 		{
 			return;
@@ -459,6 +480,16 @@ namespace Engine
 		registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
 		registry.on_destroy<Engine::CompositeMaterial>().connect<&Scene::RemoveFrustumCache>(*this);
 
+		// Always track renderable composition changes, even outside editor mode
+		registry.on_construct<Transform>().connect<&Scene::OnComponentConstruct<Transform>>(*this);
+		registry.on_destroy<Transform>().connect<&Scene::OnComponentDestroy<Transform>>(*this);
+		registry.on_construct<Material>().connect<&Scene::OnComponentConstruct<Material>>(*this);
+		registry.on_destroy<Material>().connect<&Scene::OnComponentDestroy<Material>>(*this);
+		registry.on_construct<CompositeMaterial>().connect<&Scene::OnComponentConstruct<CompositeMaterial>>(*this);
+		registry.on_destroy<CompositeMaterial>().connect<&Scene::OnComponentDestroy<CompositeMaterial>>(*this);
+		registry.on_construct<MeshDecorator>().connect<&Scene::OnComponentConstruct<MeshDecorator>>(*this);
+		registry.on_destroy<MeshDecorator>().connect<&Scene::OnComponentDestroy<MeshDecorator>>(*this);
+
 		// Initialize SceneBVH grid
 		sceneBVH = std::make_unique<SceneBVH>(registry);
 		sceneBVH->Init();
@@ -481,10 +512,7 @@ namespace Engine
 			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
 
 			// Bind registry-driven serialization hooks for key components.
-			// Transform drives "entity created/destroyed" for the editor.
-			BindSerializationHooksForComponent<Transform>();
-			BindSerializationHooksForComponent<Material>();
-			BindSerializationHooksForComponent<CompositeMaterial>();
+			// Transform/material hooks are already wired above for render revision tracking.
 			BindSerializationHooksForComponent<ObjectTag>();
 			BindSerializationHooksForComponent<BehaviorComponents>();
 		}

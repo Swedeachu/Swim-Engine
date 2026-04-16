@@ -30,6 +30,7 @@ namespace Engine
 	)
 		: device(device), physicalDevice(physicalDevice)
 	{
+		uploadedWorldPacketVersions.resize(MAX_FRAMES_IN_FLIGHT, 0);
 		instanceBuffer = std::make_unique<Engine::VulkanInstanceBuffer>(
 			device,
 			physicalDevice,
@@ -237,13 +238,82 @@ namespace Engine
 		currentIndexBufferOffset += indexSize;
 	}
 
+	bool VulkanIndexDraw::CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const
+	{
+		if (!cachedWorldPacketState.valid)
+		{
+			return false;
+		}
+
+		if (cachedWorldPacketState.scene != &scene)
+		{
+			return false;
+		}
+
+		if (cachedWorldPacketState.cullMode != cullMode)
+		{
+			return false;
+		}
+
+		if (cachedWorldPacketState.usedSceneBVH != useQueriedFrustumSceneBVH)
+		{
+			return false;
+		}
+
+		if (cachedWorldPacketState.renderablesRevision != scene.GetRenderablesRevision())
+		{
+			return false;
+		}
+
+		if (Transform::AreAnyTransformsDirty()) // this is pretty much always going to be true
+		{
+			return false;
+		}
+
+		const uint64_t frustumRevision = frustum ? Frustum::GetRevision() : 0;
+		if (cachedWorldPacketState.frustumRevision != frustumRevision)
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	void VulkanIndexDraw::UploadCachedWorldPacketToFrame(uint32_t frameIndex)
+	{
+		if (frameIndex < uploadedWorldPacketVersions.size()
+			&& uploadedWorldPacketVersions[frameIndex] == cachedWorldPacketState.packetVersion)
+		{
+			return;
+		}
+
+		EnsureInstanceCapacity(*instanceBuffer, cachedWorldInstanceCount);
+
+		if (cachedWorldInstanceCount > 0)
+		{
+			void* dst = instanceBuffer->BeginFrame(frameIndex);
+			memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cachedWorldInstanceCount);
+		}
+
+		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
+
+		if (!worldDrawCommands.empty())
+		{
+			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+		}
+
+		if (frameIndex < uploadedWorldPacketVersions.size())
+		{
+			uploadedWorldPacketVersions[frameIndex] = cachedWorldPacketState.packetVersion;
+		}
+	}
+
 	// This actually does CPU culling logic here if that mode is activated
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
-		cpuInstanceData.clear(); // was resize(0)
 		meshDecoratorInstanceData.clear();
 		msdfInstancesData.clear();
-		rangeMap.clear();
 
 		const std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		entt::registry& registry = scene->GetRegistry();
@@ -256,6 +326,21 @@ namespace Engine
 			frustum = &Frustum::Get();
 		}
 
+		if (CanReuseCachedWorldPacket(*scene, frustum))
+		{
+			cpuInstanceData.resize(cachedWorldInstanceCount);
+			UploadCachedWorldPacketToFrame(frameIndex);
+			return;
+		}
+
+		cpuInstanceData.clear(); // was resize(0)
+
+		for (uint32_t meshID : activeMeshBucketKeys)
+		{
+			meshBuckets[meshID].instances.clear();
+		}
+		activeMeshBucketKeys.clear();
+
 		// CPU culling can leverage the scenes BVH spacial partitions
 		if (cullMode == CullMode::CPU && frustum && useQueriedFrustumSceneBVH)
 		{
@@ -267,40 +352,21 @@ namespace Engine
 			GatherCandidatesView(registry, TransformSpace::World, frustum);
 		}
 
-		// Enforce mesh-contiguity in cpuInstanceData.
-		// Indirect batch draw calls obviously need to be contiguous blocks of the same meshes so we sort them together.
-		if (!cpuInstanceData.empty())
-		{
-			std::sort(cpuInstanceData.begin(),
-				cpuInstanceData.end(),
-				[](const GpuInstanceData& a, const GpuInstanceData& b)
-			{
-				return a.meshInfoIndex < b.meshInfoIndex;
-			});
-		}
-
-		MeshPool& pool = MeshPool::GetInstance();
-
-		// Build rangeMap (mesh -> {firstInstance, count}) 
-		for (uint32_t i = 0; i < cpuInstanceData.size(); ++i)
-		{
-			const GpuInstanceData& instance = cpuInstanceData[i];
-
-			MeshInstanceRange& range = rangeMap[instance.meshInfoIndex];
-			if (range.count == 0u)
-			{
-				range.firstInstance = i;  // first element of the now contiguous block
-			}
-
-			// Update data for this mesh instance
-			range.indexCount = instance.indexCount;
-			range.indexOffsetInMegaBuffer = instance.indexOffsetInMegaBuffer;
-			range.vertexOffsetInMegaBuffer = instance.vertexOffsetInMegaBuffer;
-
-			range.count++; // increment for every occurrence
-		}
-
 		UploadAndBatchInstances(frameIndex);
+
+		cachedWorldInstanceCount = cpuInstanceData.size();
+		cachedWorldPacketState.scene = scene.get();
+		cachedWorldPacketState.frustumRevision = frustum ? Frustum::GetRevision() : 0;
+		cachedWorldPacketState.renderablesRevision = scene->GetRenderablesRevision();
+		cachedWorldPacketState.cullMode = cullMode;
+		cachedWorldPacketState.usedSceneBVH = useQueriedFrustumSceneBVH;
+		cachedWorldPacketState.valid = true;
+		++cachedWorldPacketState.packetVersion;
+
+		if (frameIndex < uploadedWorldPacketVersions.size())
+		{
+			uploadedWorldPacketVersions[frameIndex] = cachedWorldPacketState.packetVersion;
+		}
 	}
 
 	// Fires off the frustum query in the scene's bounding volume hierarchy using immediate callback
@@ -398,65 +464,98 @@ namespace Engine
 			}
 		}
 
-		GpuInstanceData instance{};
+		const uint32_t meshID = mat->mesh->meshBufferData->GetMeshID();
+		auto [it, inserted] = meshBuckets.try_emplace(meshID);
+		MeshBucket& bucket = it->second;
+		if (inserted)
+		{
+			bucket.indexCount = mat->mesh->meshBufferData->indexCount;
+			bucket.indexOffsetInMegaBuffer = mat->mesh->meshBufferData->indexOffsetInMegaBuffer;
+			bucket.vertexOffsetInMegaBuffer = mat->mesh->meshBufferData->vertexOffsetInMegaBuffer;
+		}
 
+		if (bucket.instances.empty())
+		{
+			activeMeshBucketKeys.push_back(meshID);
+		}
+
+		GpuInstanceData instance{};
 		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
 		instance.model = transform.GetWorldMatrix(registry);
-		instance.aabbMin = min;
-		instance.aabbMax = max;
 		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-		instance.meshInfoIndex = mat->mesh->meshBufferData->GetMeshID();
 		instance.materialIndex = 0u; // nothing yet
-		instance.indexCount = mat->mesh->meshBufferData->indexCount;
-		instance.indexOffsetInMegaBuffer = mat->mesh->meshBufferData->indexOffsetInMegaBuffer;
-		instance.vertexOffsetInMegaBuffer = mat->mesh->meshBufferData->vertexOffsetInMegaBuffer;
 
-		cpuInstanceData.push_back(instance);
+		bucket.instances.push_back(instance);
 	}
 
 	void VulkanIndexDraw::UploadAndBatchInstances(uint32_t frameIndex)
 	{
+		worldDrawCommands.clear();
+		cpuInstanceData.clear();
+
+		std::sort(activeMeshBucketKeys.begin(), activeMeshBucketKeys.end());
+
+		size_t totalWorldInstances = 0;
+		for (uint32_t meshID : activeMeshBucketKeys)
+		{
+			totalWorldInstances += meshBuckets[meshID].instances.size();
+		}
+
+		cpuInstanceData.reserve(totalWorldInstances);
+		worldDrawCommands.reserve(activeMeshBucketKeys.size());
+
+		uint32_t firstInstance = 0;
+		for (uint32_t meshID : activeMeshBucketKeys)
+		{
+			MeshBucket& bucket = meshBuckets[meshID];
+			if (bucket.instances.empty())
+			{
+				continue;
+			}
+
+			cpuInstanceData.insert(cpuInstanceData.end(), bucket.instances.begin(), bucket.instances.end());
+
+			VkDrawIndexedIndirectCommand cmd{};
+			cmd.indexCount = bucket.indexCount;
+			cmd.instanceCount = static_cast<uint32_t>(bucket.instances.size());
+			cmd.firstIndex = static_cast<uint32_t>(bucket.indexOffsetInMegaBuffer / sizeof(uint32_t));
+			cmd.vertexOffset = static_cast<int32_t>(bucket.vertexOffsetInMegaBuffer / sizeof(Vertex));
+			cmd.firstInstance = firstInstance;
+			worldDrawCommands.push_back(cmd);
+
+			firstInstance += cmd.instanceCount;
+		}
+
 		// Ensure the per-frame instance buffer can hold the world instances
 		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
 
-		void* dst = instanceBuffer->BeginFrame(frameIndex);
-		memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
-
-		// Build indirect command buffer
-		std::vector<VkDrawIndexedIndirectCommand> allCommands;
-		allCommands.reserve(rangeMap.size()); // reserve enough space based on unique meshes
-
-		for (const auto& [mesh, range] : rangeMap)
+		if (!cpuInstanceData.empty())
 		{
-			VkDrawIndexedIndirectCommand cmd{};
-			cmd.indexCount = range.indexCount;
-			cmd.instanceCount = range.count;
-			cmd.firstIndex = static_cast<uint32_t>(range.indexOffsetInMegaBuffer / sizeof(uint32_t));
-			cmd.vertexOffset = static_cast<int32_t>(range.vertexOffsetInMegaBuffer / sizeof(Vertex));
-			cmd.firstInstance = range.firstInstance;
-
-			allCommands.push_back(cmd);
+			void* dst = instanceBuffer->BeginFrame(frameIndex);
+			memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
 		}
 
 		// Ensure indirect buffer capacity for world draws
-		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], allCommands.size());
+		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
 
-		VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
-		indirectBuf.CopyData(allCommands.data(), allCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+		if (!worldDrawCommands.empty())
+		{
+			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+		}
 	}
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
 	void VulkanIndexDraw::DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		VkBuffer instanceBuf = instanceBuffer->GetBuffer(frameIndex);
 		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
 		VkDeviceSize offsets[] = { 0, 0 };
 
 		// Use the mega mesh buffer to do the scene in one single draw call
 		VkBuffer vertexBuffers[] = {
-				megaVertexBuffer->GetBuffer(), // All vertex data lives here
-				instanceBuf                    // Instance buffer (per-instance data)
+				megaVertexBuffer->GetBuffer(),      // Binding 0: packed mesh vertices
+				instanceBuffer->GetBuffer(frameIndex) // Binding 1: per-instance data / legacy shader compatibility
 		};
 
 		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
@@ -465,7 +564,7 @@ namespace Engine
 		// UploadAndBatchInstances() already flattened all commands into indirect buffer, 
 		// so we can call vkCmdDrawIndexedIndirect once over entire buffer.
 
-		size_t totalCommands = rangeMap.size();
+		size_t totalCommands = worldDrawCommands.size();
 
 		if (totalCommands > 0)
 		{
@@ -597,8 +696,8 @@ namespace Engine
 
 		// === Bind buffers ===
 		VkBuffer vertexBuffers[] = {
-				megaVertexBuffer->GetBuffer(),
-				instanceBuffer->GetBuffer(frameIndex)
+				megaVertexBuffer->GetBuffer(),      // Binding 0: packed mesh vertices
+				instanceBuffer->GetBuffer(frameIndex) // Binding 1: per-instance data / legacy shader compatibility
 		};
 		VkDeviceSize offsets[] = { 0, 0 };
 
@@ -705,10 +804,6 @@ namespace Engine
 			GpuInstanceData instance{};
 			instance.model = model;
 			instance.space = static_cast<uint32_t>(space);
-			instance.indexCount = mesh.indexCount;
-			instance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
-			instance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
-			instance.meshInfoIndex = mesh.GetMeshID();
 
 			// The vertex shader then sets this on output.instanceID, which the fragment shader then uses for MeshDecoratorGpuInstanceData data = decoratorBuffer[paramIndex]
 			instance.materialIndex = instanceCount;
@@ -962,12 +1057,11 @@ namespace Engine
 
 		// 5) Bind vertex and index buffers
 		VkBuffer vertexBuffers[] = {
-						megaVertexBuffer->GetBuffer(),
-						instanceBuffer->GetBuffer(frameIndex)
+						megaVertexBuffer->GetBuffer()
 		};
-		VkDeviceSize offsets[] = { 0, 0 };
+		VkDeviceSize offsets[] = { 0 };
 
-		vkCmdBindVertexBuffers(cmd, 0, 2, vertexBuffers, offsets);
+		vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
 		vkCmdBindIndexBuffer(cmd, megaIndexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
 		// 6) Issue indirect draw

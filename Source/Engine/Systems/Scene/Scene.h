@@ -102,6 +102,7 @@ namespace Engine
 
 		// Check if an entity should render in general, this uses ShouldRenderOnlyDuringEditing. The renderer will call this in the render passes.
 		bool ShouldRenderBasedOnState(entt::entity e) const;
+		uint64_t GetRenderablesRevision() const { return renderablesRevision; }
 
 		// Called by SceneSystem during Awake
 		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
@@ -189,7 +190,7 @@ namespace Engine
 		}
 
 		// Adds an already-constructed behavior instance to an entity.
-		// The behavior’s Awake() is called AFTER ownership transfer.
+		// The behavior's Awake() is called AFTER ownership transfer.
 		// Init() is called immediately if CanExecute(current engine state) is true.
 		// Returns T* to the stored behavior.
 		template<typename T>
@@ -340,6 +341,8 @@ namespace Engine
 		}
 
 	private:
+
+		uint64_t renderablesRevision{ 0 };
 
 		std::weak_ptr<SceneSystem> sceneSystem;
 		std::weak_ptr<InputManager> inputManager;

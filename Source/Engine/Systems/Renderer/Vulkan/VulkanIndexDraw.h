@@ -57,6 +57,8 @@ namespace Engine
 		void GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum);
 		void AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
+		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
+		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
 
 		void GrowMegaBuffers(VkDeviceSize additionalVertexSize, VkDeviceSize additionalIndexSize);
 
@@ -115,19 +117,34 @@ namespace Engine
 		std::vector<MeshDecoratorGpuInstanceData> meshDecoratorInstanceData;
 		std::vector<MsdfTextGpuInstanceData> msdfInstancesData;
 
-		struct MeshInstanceRange
+		struct MeshBucket
 		{
-			uint32_t firstInstance = 0;
-			uint32_t count = 0;
 			uint32_t indexCount = 0;
 			VkDeviceSize vertexOffsetInMegaBuffer = 0;
 			VkDeviceSize indexOffsetInMegaBuffer = 0;
+			std::vector<GpuInstanceData> instances;
 		};
 
 		CullMode cullMode{ CullMode::NONE };
 
-		// The world space meshes we put into a contiguous buffer to batch draw with
-		std::unordered_map<uint32_t, MeshInstanceRange> rangeMap;
+		struct CachedWorldPacketState
+		{
+			const Scene* scene = nullptr;
+			uint64_t frustumRevision = 0;
+			uint64_t renderablesRevision = 0;
+			uint64_t packetVersion = 0;
+			CullMode cullMode = CullMode::NONE;
+			bool usedSceneBVH = false;
+			bool valid = false;
+		};
+
+		// The world space meshes we put into contiguous buckets to avoid resorting every frame
+		std::unordered_map<uint32_t, MeshBucket> meshBuckets;
+		std::vector<uint32_t> activeMeshBucketKeys;
+		std::vector<VkDrawIndexedIndirectCommand> worldDrawCommands;
+		CachedWorldPacketState cachedWorldPacketState;
+		std::vector<uint64_t> uploadedWorldPacketVersions;
+		size_t cachedWorldInstanceCount = 0;
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
@@ -137,8 +154,8 @@ namespace Engine
 		MeshBufferData glyphQuadMesh = {};
 
 		// Command buffers per frame
-		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers; 
-		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers; 
+		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> msdfIndirectCommandBuffers;
 
 		// Mega mesh buffers

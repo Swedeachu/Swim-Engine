@@ -168,6 +168,9 @@ namespace Engine
 		meshBindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
 		// ---- REGULAR MESH PIPELINE ----
+		// Binding 1 is still declared here because some compiled shader variants may still expose the legacy
+		// per-instance vertex attributes even though the current HLSL path reads instance data from the SSBO.
+		// We bind the real per-frame instance buffer at slot 1 during drawing so both paths stay valid.
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex_instanced.spv",
 			"Shaders\\FragmentShaders\\fragment_instanced.spv",
@@ -175,7 +178,7 @@ namespace Engine
 			bindlessLayout,
 			std::vector<VkVertexInputBindingDescription>{ meshBindings.begin(), meshBindings.end() },
 			allAttribs,
-			sizeof(GpuInstanceData)
+			0
 		);
 
 		// ---- DECORATED/UI PIPELINE ----
@@ -186,7 +189,7 @@ namespace Engine
 			bindlessLayout,
 			{ meshBindings.begin(), meshBindings.end() },
 			allAttribs,
-			sizeof(MeshDecoratorGpuInstanceData)
+			0
 		);
 
 		// ---- MSDF TEXT PIPELINE: own minimal bindings/attribs ----
@@ -205,7 +208,7 @@ namespace Engine
 			bindlessLayout,
 			msdfBindings,
 			msdfAttribs,
-			sizeof(MsdfTextGpuInstanceData)
+			0
 		);
 
 		// Initialize command manager with correct graphics queue family index
@@ -346,7 +349,7 @@ namespace Engine
 			imagesInFlight.assign(framebuffers.size(), VK_NULL_HANDLE);
 		}
 
-		// 1) Wait for this frame’s per-frame fence (double/triple buffering)
+		// 1) Wait for this frame's per-frame fence (double/triple buffering)
 		syncManager->WaitForFence(currentFrame);
 
 		VkSemaphore imageAvailableSemaphore = syncManager->GetImageAvailableSemaphore(currentFrame);
@@ -419,7 +422,7 @@ namespace Engine
 			vkWaitForFences(deviceManager->GetDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
 		}
 
-		// 4) We will submit this frame; reset this frame’s fence now
+		// 4) We will submit this frame; reset this frame's fence now
 		syncManager->ResetFence(currentFrame);
 
 		// 5) Reset the command buffer for this image before re-recording

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Library/glm/glm.hpp"
+#include "Engine/Systems/Renderer/Vulkan/Buffers/VulkanGpuInstanceData.h"
 
 namespace Engine
 {
@@ -60,7 +61,7 @@ namespace Engine
         attrib.binding = 1;
         attrib.location = 3 + i;
         attrib.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        attrib.offset = sizeof(glm::vec4) * i;
+        attrib.offset = static_cast<uint32_t>(offsetof(GpuInstanceData, model) + sizeof(glm::vec4) * i);
         instanceAttribs.push_back(attrib);
       }
 
@@ -69,7 +70,7 @@ namespace Engine
       texIndex.binding = 1;
       texIndex.location = 7;
       texIndex.format = VK_FORMAT_R32_UINT;
-      texIndex.offset = sizeof(glm::vec4) * 4;
+      texIndex.offset = static_cast<uint32_t>(offsetof(GpuInstanceData, textureIndex));
       instanceAttribs.push_back(texIndex);
 
       // hasTexture (float) -> location 8
@@ -77,7 +78,7 @@ namespace Engine
       hasTex.binding = 1;
       hasTex.location = 8;
       hasTex.format = VK_FORMAT_R32_SFLOAT;
-      hasTex.offset = sizeof(glm::vec4) * 4 + sizeof(uint32_t);
+      hasTex.offset = static_cast<uint32_t>(offsetof(GpuInstanceData, hasTexture));
       instanceAttribs.push_back(hasTex);
 
       return instanceAttribs;
