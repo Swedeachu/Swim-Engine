@@ -31,6 +31,7 @@ namespace Engine
 		void DebugRender();
 		void UpdateIfNeeded(entt::observer& frustumObserver);
 		void QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
+		void QueryFrustumParallel(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
 		bool IsFullyVisible(const Frustum& frustum) const;
 		void RemoveEntity(entt::entity entity);
 
@@ -297,12 +298,20 @@ namespace Engine
 
 		static constexpr int WideTraversalStackMax = 1024;
 
+		struct ParallelVisibleScratch
+		{
+			std::vector<entt::entity> visible;
+		};
+
+		void EnsureParallelQueryScratch(size_t workerSlots, size_t seedItemHint) const;
+
 		bool IsAABBVisible(const Frustum& frustum, const AABB& aabb) const;
 		AABBFrustumClassification ClassifyNode(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const;
 		AABBFrustumClassification ClassifyWideNode(const WideNode& node, const Frustum& frustum) const;
 		uint8_t GetWideNodeVisibleMask(const WideNode& node, const Frustum& frustum, uint8_t* outFullyInsideMask) const;
 		void CollectWideTraversalOrder(const WideNode& node, uint8_t visibleMask, uint8_t fullyInsideMask, uint8_t* outOrder, uint8_t& outCount) const;
 		bool PushWideRootIfVisible(const Frustum& frustum, WideTraversalItem* stack, int& stackSize) const;
+		void TraverseWideSubtree(int wideIndex, bool fullyInside, const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
 		const AABB& GetTraversalAABB(const BVHNode& node) const;
 		AABB CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform);
 		AABB CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform);
@@ -329,6 +338,10 @@ namespace Engine
 		int wideRoot = -1;
 
 		SceneDebugDraw* debugDrawer = nullptr;
+
+		mutable std::vector<WideTraversalItem> parallelSeedItemsScratch;
+		mutable std::vector<entt::entity> parallelDirectVisibleScratch;
+		mutable std::vector<ParallelVisibleScratch> parallelVisibleScratch;
 
 		bool forceUpdate = false;
 	};

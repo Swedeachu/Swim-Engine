@@ -381,6 +381,7 @@
     <ClInclude Include="Source\Engine\Systems\Physics\RigidBody.h" />
     <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />
     <ClInclude Include="Source\Game\Testing\PrimitivePhysicsTest.h" />
+    <ClInclude Include="Source\Engine\Utility\ParallelUtils.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Source\Shaders\OpenGL\fullscreen_vert_shadertoy.glsl" />

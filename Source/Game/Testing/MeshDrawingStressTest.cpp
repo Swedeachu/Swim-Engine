@@ -16,7 +16,7 @@ namespace Game
 	constexpr static const int GRID_HALF_SIZE = 10; // for example 10 makes a 20x20x20 2D grid
 	constexpr static const float SPACING = 3.5f;
 
-	constexpr static bool fullyUniqueMeshes = false;
+	constexpr static bool fullyUniqueMeshes = true;
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
 

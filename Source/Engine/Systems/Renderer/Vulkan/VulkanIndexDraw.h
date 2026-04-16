@@ -58,6 +58,9 @@ namespace Engine
 
 	private:
 
+		struct GatherCandidate;
+		struct GatheredInstance;
+
 		// Helpers for instance buffer update
 		void BuildFullScenePacket(Scene& scene);
 		bool CanUseFullScenePacket(const Scene& scene, const Frustum* frustum) const;
@@ -67,6 +70,9 @@ namespace Engine
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
 		void GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum);
 		void AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
+		bool TryBuildGatheredInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum, struct GatheredInstance& outInstance) const;
+		void AppendGatheredInstance(const struct GatheredInstance& gathered);
+		void ProcessGatherCandidates(entt::registry& registry, const std::vector<struct GatherCandidate>& candidates, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
 		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
@@ -136,6 +142,22 @@ namespace Engine
 			std::vector<GpuInstanceData> instances;
 		};
 
+		struct GatherCandidate
+		{
+			entt::entity entity{ entt::null };
+			const Transform* transform = nullptr;
+			std::shared_ptr<MaterialData> material;
+		};
+
+		struct GatheredInstance
+		{
+			uint32_t meshID = 0;
+			uint32_t indexCount = 0;
+			VkDeviceSize vertexOffsetInMegaBuffer = 0;
+			VkDeviceSize indexOffsetInMegaBuffer = 0;
+			GpuInstanceData instance{};
+		};
+
 		struct FullSceneRenderable
 		{
 			entt::entity entity{ entt::null };
@@ -180,6 +202,10 @@ namespace Engine
 		std::vector<uint64_t> uploadedFullScenePacketVersions;
 		std::vector<uint64_t> uploadedFullSceneCommandVersions;
 		const Scene* fullScenePacketScene = nullptr;
+
+		std::vector<entt::entity> visibleEntityScratch;
+		std::vector<GatherCandidate> gatherCandidatesScratch;
+		std::vector<uint32_t> dirtyInstanceIndexScratch;
 		uint64_t fullScenePacketRenderablesRevision = 0;
 		uint64_t fullScenePacketVersion = 0;
 		bool fullScenePacketValid = false;

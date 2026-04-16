@@ -6,6 +6,7 @@
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "Engine/Utility/ParallelUtils.h"
 
 #ifndef SWIM_BVH_USE_SSE
 #define SWIM_BVH_USE_SSE 0
@@ -131,6 +132,36 @@ namespace Engine
 	SceneBVH::SceneBVH(entt::registry& registry)
 		: registry{ registry }
 	{}
+
+	void SceneBVH::EnsureParallelQueryScratch(size_t workerSlots, size_t seedItemHint) const
+	{
+		if (parallelVisibleScratch.size() < workerSlots)
+		{
+			parallelVisibleScratch.resize(workerSlots);
+		}
+
+		const size_t reservePerSlot = std::max<size_t>(seedItemHint * 4, 32);
+		for (size_t i = 0; i < workerSlots; ++i)
+		{
+			parallelVisibleScratch[i].visible.clear();
+			if (parallelVisibleScratch[i].visible.capacity() < reservePerSlot)
+			{
+				parallelVisibleScratch[i].visible.reserve(reservePerSlot);
+			}
+		}
+
+		parallelSeedItemsScratch.clear();
+		if (parallelSeedItemsScratch.capacity() < seedItemHint)
+		{
+			parallelSeedItemsScratch.reserve(seedItemHint);
+		}
+
+		parallelDirectVisibleScratch.clear();
+		if (parallelDirectVisibleScratch.capacity() < seedItemHint * 2)
+		{
+			parallelDirectVisibleScratch.reserve(seedItemHint * 2);
+		}
+	}
 
 	void SceneBVH::Init()
 	{
@@ -970,20 +1001,11 @@ namespace Engine
 		}
 	}
 
-	void SceneBVH::QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const
+	void SceneBVH::TraverseWideSubtree(int wideIndex, bool fullyInside, const Frustum& frustum, std::vector<entt::entity>& outVisible) const
 	{
-		outVisible.clear();
-		if (wideRoot == -1)
-		{
-			return;
-		}
-
 		WideTraversalItem stack[WideTraversalStackMax];
 		int stackSize = 0;
-		if (!PushWideRootIfVisible(frustum, stack, stackSize))
-		{
-			return;
-		}
+		stack[stackSize++] = { wideIndex, fullyInside };
 
 		while (stackSize > 0)
 		{
@@ -1054,6 +1076,25 @@ namespace Engine
 				}
 			}
 		}
+	}
+
+	void SceneBVH::QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const
+	{
+		outVisible.clear();
+		if (wideRoot == -1)
+		{
+			return;
+		}
+
+		WideTraversalItem stack[WideTraversalStackMax];
+		int stackSize = 0;
+		if (!PushWideRootIfVisible(frustum, stack, stackSize))
+		{
+			return;
+		}
+
+		const WideTraversalItem rootItem = stack[--stackSize];
+		TraverseWideSubtree(rootItem.wideIndex, rootItem.fullyInside, frustum, outVisible);
 
 	#ifdef _SWIM_DEBUG
 		constexpr bool debugPrint = false;
@@ -1066,6 +1107,134 @@ namespace Engine
 			std::cout << "Estimate Culled " << estimatedEntitiesCulled << " of " << totalEntitiesInScene << " entities\n";
 		}
 	#endif // _DEBUG
+	}
+
+	void SceneBVH::QueryFrustumParallel(const Frustum& frustum, std::vector<entt::entity>& outVisible) const
+	{
+		outVisible.clear();
+		if (wideRoot == -1)
+		{
+			return;
+		}
+
+		if constexpr (!RenderCpuJobConfig::Enabled)
+		{
+			QueryFrustum(frustum, outVisible);
+			return;
+		}
+
+		const size_t workerSlots = GetRenderParallelWorkerSlots();
+		if (workerSlots <= 1)
+		{
+			QueryFrustum(frustum, outVisible);
+			return;
+		}
+
+		WideTraversalItem stack[WideTraversalStackMax];
+		int stackSize = 0;
+		if (!PushWideRootIfVisible(frustum, stack, stackSize))
+		{
+			return;
+		}
+
+		const size_t targetSeedCount = std::min<size_t>(workerSlots * 2, 64);
+		EnsureParallelQueryScratch(workerSlots, targetSeedCount);
+		std::vector<WideTraversalItem>& seedItems = parallelSeedItemsScratch;
+		std::vector<entt::entity>& directlyVisible = parallelDirectVisibleScratch;
+
+		while (stackSize > 0 && seedItems.size() < targetSeedCount)
+		{
+			const WideTraversalItem item = stack[--stackSize];
+			const WideNode& node = wideNodes[item.wideIndex];
+
+			if (item.fullyInside || node.childCount <= 1)
+			{
+				seedItems.push_back(item);
+				continue;
+			}
+
+			uint8_t fullyInsideMask = 0;
+			const uint8_t visibleMask = GetWideNodeVisibleMask(node, frustum, &fullyInsideMask);
+
+			uint8_t traversalOrder[4]{ 0, 1, 2, 3 };
+			uint8_t traversalCount = 0;
+			CollectWideTraversalOrder(node, visibleMask, fullyInsideMask, traversalOrder, traversalCount);
+
+			if (traversalCount <= 1 || seedItems.size() + static_cast<size_t>(traversalCount) > targetSeedCount)
+			{
+				seedItems.push_back(item);
+				continue;
+			}
+
+			for (int orderIndex = static_cast<int>(traversalCount) - 1; orderIndex >= 0; --orderIndex)
+			{
+				const uint8_t childIndex = traversalOrder[orderIndex];
+				const uint8_t bit = static_cast<uint8_t>(1u << childIndex);
+				const int childRef = node.childRef[childIndex];
+				if (childRef == InvalidWideChild)
+				{
+					continue;
+				}
+
+				if (IsEncodedWideLeaf(childRef))
+				{
+					const int leafIndex = DecodeWideLeaf(childRef);
+					const entt::entity entity = nodes[leafIndex].entity;
+					if (entity != entt::null)
+					{
+						directlyVisible.push_back(entity);
+					}
+				}
+				else if (stackSize < WideTraversalStackMax)
+				{
+					stack[stackSize++] = { childRef, (fullyInsideMask & bit) != 0 };
+				}
+			}
+		}
+
+		while (stackSize > 0)
+		{
+			seedItems.push_back(stack[--stackSize]);
+		}
+
+		if (seedItems.size() <= 1 || seedItems.size() < workerSlots)
+		{
+			outVisible = directlyVisible;
+			for (const WideTraversalItem& item : seedItems)
+			{
+				TraverseWideSubtree(item.wideIndex, item.fullyInside, frustum, outVisible);
+			}
+			return;
+		}
+
+		parallelVisibleScratch[0].visible = directlyVisible;
+		for (size_t slot = 1; slot < workerSlots; ++slot)
+		{
+			parallelVisibleScratch[slot].visible.clear();
+		}
+
+		ParallelForRender(seedItems.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+		{
+			std::vector<entt::entity>& localVisible = parallelVisibleScratch[workerIndex].visible;
+			for (size_t i = begin; i < end; ++i)
+			{
+				const WideTraversalItem& item = seedItems[i];
+				TraverseWideSubtree(item.wideIndex, item.fullyInside, frustum, localVisible);
+			}
+		});
+
+		size_t totalVisible = 0;
+		for (size_t slot = 0; slot < workerSlots; ++slot)
+		{
+			totalVisible += parallelVisibleScratch[slot].visible.size();
+		}
+
+		outVisible.reserve(totalVisible);
+		for (size_t slot = 0; slot < workerSlots; ++slot)
+		{
+			std::vector<entt::entity>& localVisible = parallelVisibleScratch[slot].visible;
+			outVisible.insert(outVisible.end(), localVisible.begin(), localVisible.end());
+		}
 	}
 
 	bool SceneBVH::IsFullyVisible(const Frustum& frustum) const

@@ -5,9 +5,11 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Engine/Components/TextComponent.h"
+#include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
+#include "Engine/Utility/ParallelUtils.h"
 #include "VulkanRenderer.h"
 
 namespace Engine
@@ -332,6 +334,93 @@ namespace Engine
 		return sceneBVH->IsFullyVisible(*frustum);
 	}
 
+
+
+	bool VulkanIndexDraw::TryBuildGatheredInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum, VulkanIndexDraw::GatheredInstance& outInstance) const
+	{
+		if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+		{
+			return false;
+		}
+
+		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+		const glm::vec3 localMin = glm::vec3(mesh.aabbMin);
+		const glm::vec3 localMax = glm::vec3(mesh.aabbMax);
+		const glm::mat4& world = transform.GetWorldMatrix(registry);
+
+		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
+		{
+			const bool canUseEntityCullCache = registry.valid(entity)
+				&& registry.any_of<FrustumCullCache>(entity)
+				&& !registry.any_of<CompositeMaterial>(entity);
+
+			if (canUseEntityCullCache)
+			{
+				auto& cache = registry.get<FrustumCullCache>(entity);
+				if (!frustum->IsVisibleCached(cache, localMin, localMax, world, transform.GetWorldVersion()))
+				{
+					return false;
+				}
+			}
+			else if (!frustum->IsVisibleLazy(mesh.aabbMin, mesh.aabbMax, world))
+			{
+				return false;
+			}
+		}
+
+		outInstance.meshID = mesh.GetMeshID();
+		outInstance.indexCount = mesh.indexCount;
+		outInstance.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
+		outInstance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
+		outInstance.instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
+		outInstance.instance.model = world;
+		outInstance.instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
+		outInstance.instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+		outInstance.instance.materialIndex = 0u;
+		return true;
+	}
+
+	void VulkanIndexDraw::AppendGatheredInstance(const VulkanIndexDraw::GatheredInstance& gathered)
+	{
+		auto [it, inserted] = meshBuckets.try_emplace(gathered.meshID);
+		MeshBucket& bucket = it->second;
+		if (inserted)
+		{
+			bucket.indexCount = gathered.indexCount;
+			bucket.indexOffsetInMegaBuffer = gathered.indexOffsetInMegaBuffer;
+			bucket.vertexOffsetInMegaBuffer = gathered.vertexOffsetInMegaBuffer;
+		}
+
+		if (bucket.instances.empty())
+		{
+			activeMeshBucketKeys.push_back(gathered.meshID);
+		}
+
+		bucket.instances.push_back(gathered.instance);
+	}
+
+	void VulkanIndexDraw::ProcessGatherCandidates(entt::registry& registry, const std::vector<VulkanIndexDraw::GatherCandidate>& candidates, const Frustum* frustum)
+	{
+		if (candidates.empty())
+		{
+			return;
+		}
+
+		for (const GatherCandidate& candidate : candidates)
+		{
+			if (candidate.transform == nullptr)
+			{
+				continue;
+			}
+
+			GatheredInstance gathered{};
+			if (TryBuildGatheredInstance(registry, candidate.entity, *candidate.transform, candidate.material, frustum, gathered))
+			{
+				AppendGatheredInstance(gathered);
+			}
+		}
+	}
+
 	void VulkanIndexDraw::BuildFullScenePacket(Scene& scene)
 	{
 		entt::registry& registry = scene.GetRegistry();
@@ -420,6 +509,12 @@ namespace Engine
 			GpuInstanceData instance = item.baseInstance;
 			instance.model = tf.GetWorldMatrix(registry);
 			cpuInstanceData[i] = instance;
+		}
+
+		fullSceneEntityToInstanceIndices.reserve(fullSceneRenderables.size());
+		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+		{
+			const FullSceneRenderable& item = fullSceneRenderables[i];
 			fullSceneEntityToInstanceIndices[item.entity].push_back(static_cast<uint32_t>(i));
 		}
 
@@ -464,9 +559,15 @@ namespace Engine
 			return false;
 		}
 
+		struct DirtyUpdateWork
+		{
+			const Transform* transform = nullptr;
+			const std::vector<uint32_t>* indices = nullptr;
+		};
+
 		entt::registry& registry = scene.GetRegistry();
-		std::vector<uint32_t> dirtyIndices;
-		dirtyIndices.reserve(dirtyEntities.size());
+		std::vector<DirtyUpdateWork> dirtyWork;
+		dirtyWork.reserve(dirtyEntities.size());
 
 		for (entt::entity entity : dirtyEntities)
 		{
@@ -482,39 +583,59 @@ namespace Engine
 			}
 
 			const Transform& tf = registry.get<Transform>(entity);
-			const glm::mat4& world = tf.GetWorldMatrix(registry);
-
-			for (uint32_t index : it->second)
-			{
-				cpuInstanceData[index].model = world;
-				dirtyIndices.push_back(index);
-			}
+			DirtyUpdateWork work{};
+			work.transform = &tf;
+			work.indices = &it->second;
+			dirtyWork.push_back(std::move(work));
 		}
 
-		if (dirtyIndices.empty())
+		if (dirtyWork.empty())
 		{
 			return false;
 		}
 
-		std::sort(dirtyIndices.begin(), dirtyIndices.end());
-		dirtyIndices.erase(std::unique(dirtyIndices.begin(), dirtyIndices.end()), dirtyIndices.end());
+		dirtyInstanceIndexScratch.clear();
+		dirtyInstanceIndexScratch.reserve(dirtyWork.size() * 2);
+
+		for (const DirtyUpdateWork& work : dirtyWork)
+		{
+			if (work.transform == nullptr || work.indices == nullptr)
+			{
+				continue;
+			}
+
+			const glm::mat4& world = work.transform->GetWorldMatrix(registry);
+			for (uint32_t index : *work.indices)
+			{
+				cpuInstanceData[index].model = world;
+				dirtyInstanceIndexScratch.push_back(index);
+			}
+		}
+
+		if (dirtyInstanceIndexScratch.empty())
+		{
+			return false;
+		}
+
+		std::sort(dirtyInstanceIndexScratch.begin(), dirtyInstanceIndexScratch.end());
+		dirtyInstanceIndexScratch.erase(std::unique(dirtyInstanceIndexScratch.begin(), dirtyInstanceIndexScratch.end()), dirtyInstanceIndexScratch.end());
 
 		FullSceneDirtyHistoryEntry entry{};
 		++fullScenePacketVersion;
 		entry.version = fullScenePacketVersion;
 
-		uint32_t rangeStart = dirtyIndices[0];
+		uint32_t rangeStart = dirtyInstanceIndexScratch[0];
 		uint32_t rangeCount = 1;
-		for (size_t i = 1; i < dirtyIndices.size(); ++i)
+		for (size_t i = 1; i < dirtyInstanceIndexScratch.size(); ++i)
 		{
-			if (dirtyIndices[i] == dirtyIndices[i - 1] + 1)
+			if (dirtyInstanceIndexScratch[i] == dirtyInstanceIndexScratch[i - 1] + 1)
 			{
 				++rangeCount;
 			}
 			else
 			{
 				entry.ranges.emplace_back(rangeStart, rangeCount);
-				rangeStart = dirtyIndices[i];
+				rangeStart = dirtyInstanceIndexScratch[i];
 				rangeCount = 1;
 			}
 		}
@@ -679,50 +800,67 @@ namespace Engine
 		}
 	}
 
-	// Fires off the frustum query in the scene's bounding volume hierarchy using immediate callback
+	// Fires off the frustum query in the scene's bounding volume hierarchy and then builds world instances from the visible entities.
 	// This only does world space entities as the BVH only takes world space objects into account.
 	void VulkanIndexDraw::GatherCandidatesBVH(Scene& scene, const Frustum& frustum)
 	{
 		entt::registry& registry = scene.GetRegistry();
+		visibleEntityScratch.clear();
+		scene.GetSceneBVH()->QueryFrustumParallel(frustum, visibleEntityScratch);
 
-		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
+		gatherCandidatesScratch.clear();
+		gatherCandidatesScratch.reserve(visibleEntityScratch.size() * 2);
+		for (entt::entity entity : visibleEntityScratch)
 		{
-			// Skip decorators
-			if (registry.any_of<MeshDecorator>(entity))
+			if (entity == entt::null || !registry.valid(entity) || !registry.any_of<Transform>(entity))
 			{
-				return;
+				continue;
 			}
 
-			// Skip what should not be rendered
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
 			if (!scene.ShouldRenderBasedOnState(entity))
 			{
-				return;
+				continue;
 			}
 
 			const Transform& tf = registry.get<Transform>(entity);
-
 			if (registry.all_of<Material>(entity))
 			{
-				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-				AddInstance(registry, entity, tf, mat, nullptr);
+				GatherCandidate candidate{};
+				candidate.entity = entity;
+				candidate.transform = &tf;
+				candidate.material = registry.get<Material>(entity).data;
+				gatherCandidatesScratch.push_back(std::move(candidate));
 			}
 			else if (registry.all_of<CompositeMaterial>(entity))
 			{
 				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
 				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
 				{
-					AddInstance(registry, entity, tf, mat, nullptr);
+					GatherCandidate candidate{};
+					candidate.entity = entity;
+					candidate.transform = &tf;
+					candidate.material = mat;
+					gatherCandidatesScratch.push_back(std::move(candidate));
 				}
 			}
-		});
+		}
+
+		ProcessGatherCandidates(registry, gatherCandidatesScratch, nullptr);
 	}
 
 	// Passing space as TransformSpace::Ambiguous will just render all entities
 	void VulkanIndexDraw::GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		gatherCandidatesScratch.clear();
 
 		auto regularView = registry.view<Transform, Material>();
+		gatherCandidatesScratch.reserve(static_cast<size_t>(regularView.size_hint()));
 		for (auto entity : regularView)
 		{
 			if (registry.any_of<MeshDecorator>(entity))
@@ -730,7 +868,6 @@ namespace Engine
 				continue;
 			}
 
-			// Skip what should not be rendered
 			if (!scene->ShouldRenderBasedOnState(entity))
 			{
 				continue;
@@ -739,8 +876,11 @@ namespace Engine
 			const Transform& tf = regularView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
-				const auto& mat = regularView.get<Material>(entity).data;
-				AddInstance(registry, entity, tf, mat, frustum);
+				GatherCandidate candidate{};
+				candidate.entity = entity;
+				candidate.transform = &tf;
+				candidate.material = regularView.get<Material>(entity).data;
+				gatherCandidatesScratch.push_back(std::move(candidate));
 			}
 		}
 
@@ -752,7 +892,6 @@ namespace Engine
 				continue;
 			}
 
-			// Skip what should not be rendered
 			if (!scene->ShouldRenderBasedOnState(entity))
 			{
 				continue;
@@ -761,65 +900,28 @@ namespace Engine
 			const Transform& tf = compositeView.get<Transform>(entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
-				const auto& composite = compositeView.get<CompositeMaterial>(entity);
+				const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
 				for (const auto& mat : composite.subMaterials)
 				{
-					AddInstance(registry, entity, tf, mat, frustum);
+					GatherCandidate candidate{};
+					candidate.entity = entity;
+					candidate.transform = &tf;
+					candidate.material = mat;
+					gatherCandidatesScratch.push_back(std::move(candidate));
 				}
 			}
 		}
+
+		ProcessGatherCandidates(registry, gatherCandidatesScratch, frustum);
 	}
 
 	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
-		if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+		GatheredInstance gathered{};
+		if (TryBuildGatheredInstance(registry, entity, transform, mat, frustum, gathered))
 		{
-			return;
+			AppendGatheredInstance(gathered);
 		}
-
-		const glm::vec4& min = mat->mesh->meshBufferData->aabbMin;
-		const glm::vec4& max = mat->mesh->meshBufferData->aabbMax;
-
-		// Frustum culling if world-space
-		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
-		{
-			if (registry.valid(entity) && registry.any_of<FrustumCullCache>(entity))
-			{
-				auto& cache = registry.get<FrustumCullCache>(entity);
-				if (!frustum->IsVisibleCached(cache, glm::vec3(min), glm::vec3(max), transform.GetWorldMatrix(registry), transform.GetWorldVersion()))
-				{
-					return;
-				}
-			}
-			else if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
-			{
-				return;
-			}
-		}
-
-		const uint32_t meshID = mat->mesh->meshBufferData->GetMeshID();
-		auto [it, inserted] = meshBuckets.try_emplace(meshID);
-		MeshBucket& bucket = it->second;
-		if (inserted)
-		{
-			bucket.indexCount = mat->mesh->meshBufferData->indexCount;
-			bucket.indexOffsetInMegaBuffer = mat->mesh->meshBufferData->indexOffsetInMegaBuffer;
-			bucket.vertexOffsetInMegaBuffer = mat->mesh->meshBufferData->vertexOffsetInMegaBuffer;
-		}
-
-		if (bucket.instances.empty())
-		{
-			activeMeshBucketKeys.push_back(meshID);
-		}
-
-		GpuInstanceData instance{};
-		instance.space = static_cast<uint32_t>(transform.GetTransformSpace());
-		instance.model = transform.GetWorldMatrix(registry);
-		instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-		instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-		instance.materialIndex = 0u; // nothing yet
-
-		bucket.instances.push_back(instance);
 	}
 
 	void VulkanIndexDraw::UploadAndBatchInstances(uint32_t frameIndex)

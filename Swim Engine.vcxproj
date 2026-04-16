@@ -350,6 +350,7 @@ xcopy "$(ProjectDir)Source\Shaders\OpenGL" "$(TargetDir)Shaders\OpenGL" /E /I /Y
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\GizmoSystem.h" />
     <ClInclude Include="Source\Engine\Systems\Scene\SubSceneSystems\SerializedSceneManager.h" />
     <ClInclude Include="Source\Engine\Utility\BrightColorGenerator.h" />
+    <ClInclude Include="Source\Engine\Utility\ParallelUtils.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\OrbitSystem.h" />
     <ClInclude Include="Source\Game\Behaviors\Demo\SetTextCallBack.h" />
     <ClInclude Include="Source\Game\Behaviors\Phys\BallShooter.h" />

@@ -168,9 +168,9 @@ namespace Engine
 		meshBindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
 		// ---- REGULAR MESH PIPELINE ----
-		// Binding 1 is still declared here because some compiled shader variants may still expose the legacy
-		// per-instance vertex attributes even though the current HLSL path reads instance data from the SSBO.
-		// We bind the real per-frame instance buffer at slot 1 during drawing so both paths stay valid.
+		// Binding 1 remains part of the vertex input state because the instanced world shader reads the
+		// per-frame instance buffer from descriptor binding 1, and we still bind the matching instance buffer
+		// at vertex slot 1 for compatibility with the compiled pipeline layout and attribute declarations.
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex_instanced.spv",
 			"Shaders\\FragmentShaders\\fragment_instanced.spv",
