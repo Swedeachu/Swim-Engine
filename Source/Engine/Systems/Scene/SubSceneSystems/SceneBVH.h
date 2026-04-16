@@ -172,6 +172,7 @@ namespace Engine
 			AABB fatAABB;          // Loose bounds used for traversal coherence and cheaper updates
 			int  left = -1;        // index of left child or -1 if leaf
 			int  right = -1;       // index of right child or -1 if leaf
+			int  parent = -1;      // index of parent or -1 if root
 			entt::entity entity{ entt::null }; // valid only for leaves
 
 			mutable glm::vec3 lastCullAABBMin{ 0.0f, 0.0f, 0.0f };
@@ -180,6 +181,8 @@ namespace Engine
 			mutable uint8_t lastRejectedPlane = 0;
 			mutable bool lastVisible = false;
 			mutable bool hasCullHistory = false;
+
+			uint64_t lastRefitEpoch = 0;
 
 			[[nodiscard]] bool IsLeaf() const
 			{
@@ -195,6 +198,7 @@ namespace Engine
 
 		int BuildRecursive(std::vector<int>& leafIndices, int begin, int end);
 		void Refit(int nodeIndex);
+		void RefitAncestors(int leafIndex, uint64_t epoch);
 		void FullRebuild();
 		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
@@ -204,6 +208,7 @@ namespace Engine
 		std::vector<BVHNode> nodes; // breadth first array
 		std::unordered_map<entt::entity, int> entityToLeaf; // entity leaf index
 		int root = -1;
+		uint64_t refitEpoch = 1;
 
 		SceneDebugDraw* debugDrawer = nullptr;
 

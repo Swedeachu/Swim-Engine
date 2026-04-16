@@ -13,12 +13,26 @@ namespace Engine
 	namespace
 	{
 
+		AABB EmptyAABB()
+		{
+			AABB aabb;
+			aabb.min = glm::vec3(FLT_MAX);
+			aabb.max = glm::vec3(-FLT_MAX);
+			return aabb;
+		}
+
 		AABB MergeAABBs(const AABB& a, const AABB& b)
 		{
 			AABB merged;
 			merged.min = glm::min(a.min, b.min);
 			merged.max = glm::max(a.max, b.max);
 			return merged;
+		}
+
+		void ExpandAABB(AABB& dst, const AABB& src)
+		{
+			dst.min = glm::min(dst.min, src.min);
+			dst.max = glm::max(dst.max, src.max);
 		}
 
 		AABB MakeFatAABB(const AABB& aabb)
@@ -29,6 +43,20 @@ namespace Engine
 			AABB fat;
 			fat.min = aabb.min - padding;
 			fat.max = aabb.max + padding;
+			return fat;
+		}
+
+		AABB MakeFatAABB(const AABB& aabb, const AABB& previousAABB)
+		{
+			const glm::vec3 extents = glm::max(aabb.max - aabb.min, glm::vec3(0.0f));
+			const glm::vec3 padding = glm::max(extents * 0.10f, glm::vec3(0.05f));
+
+			const glm::vec3 deltaMin = aabb.min - previousAABB.min;
+			const glm::vec3 deltaMax = aabb.max - previousAABB.max;
+
+			AABB fat;
+			fat.min = aabb.min - padding + glm::min(deltaMin * 1.25f, glm::vec3(0.0f));
+			fat.max = aabb.max + padding + glm::max(deltaMax * 1.25f, glm::vec3(0.0f));
 			return fat;
 		}
 
@@ -108,6 +136,7 @@ namespace Engine
 	void SceneBVH::Update()
 	{
 		bool anyLeafEscapedFatBounds = false;
+		std::vector<int> escapedLeafIndices;
 
 		// === Rebuild / refit check ===
 		static constexpr float kRebuildThreshold = 0.15f;
@@ -126,6 +155,8 @@ namespace Engine
 			return;
 		}
 
+		escapedLeafIndices.reserve(dirtyEntities.size());
+
 		for (entt::entity e : dirtyEntities)
 		{
 			if (e == entt::null || !registry.valid(e) || !registry.any_of<Transform>(e))
@@ -136,7 +167,8 @@ namespace Engine
 			const Transform& tf = registry.get<Transform>(e);
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
-				if (entityToLeaf.find(e) != entityToLeaf.end())
+				auto existing = entityToLeaf.find(e);
+				if (existing != entityToLeaf.end())
 				{
 					RemoveEntity(e);
 				}
@@ -169,7 +201,8 @@ namespace Engine
 
 			if (!hasRenderableBounds)
 			{
-				if (entityToLeaf.find(e) != entityToLeaf.end())
+				auto existing = entityToLeaf.find(e);
+				if (existing != entityToLeaf.end())
 				{
 					RemoveEntity(e);
 				}
@@ -192,13 +225,15 @@ namespace Engine
 			}
 
 			BVHNode& leaf = nodes[it->second];
+			const AABB previousAABB = leaf.aabb;
 			leaf.aabb = worldAABB;
 			leaf.hasCullHistory = false;
 
 			if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
 			{
-				leaf.fatAABB = MakeFatAABB(leaf.aabb);
+				leaf.fatAABB = MakeFatAABB(leaf.aabb, previousAABB);
 				anyLeafEscapedFatBounds = true;
+				escapedLeafIndices.push_back(it->second);
 			}
 		}
 
@@ -213,7 +248,16 @@ namespace Engine
 		if (anyLeafEscapedFatBounds && root != -1)
 		{
 			const AABB preAABB = nodes[root].fatAABB;
-			Refit(root);
+			const uint64_t epoch = refitEpoch++;
+			if (refitEpoch == 0)
+			{
+				refitEpoch = 1;
+			}
+
+			for (int leafIndex : escapedLeafIndices)
+			{
+				RefitAncestors(leafIndex, epoch);
+			}
 
 			const float preArea = ComputeSurfaceArea(preAABB);
 			const float postArea = ComputeSurfaceArea(nodes[root].fatAABB);
@@ -245,20 +289,16 @@ namespace Engine
 			return leafIndices[begin]; // already a leaf
 		}
 
-		// 1. Compute bounding box & split axis
-		AABB centroidBox;
-		centroidBox.min = glm::vec3(FLT_MAX);
-		centroidBox.max = glm::vec3(-FLT_MAX);
-
+		AABB centroidBox = EmptyAABB();
 		for (int i = begin; i < end; ++i)
 		{
 			const AABB& aabb = nodes[leafIndices[i]].aabb;
-			glm::vec3   ctr = 0.5f * (aabb.min + aabb.max);
+			const glm::vec3 ctr = 0.5f * (aabb.min + aabb.max);
 			centroidBox.min = glm::min(centroidBox.min, ctr);
 			centroidBox.max = glm::max(centroidBox.max, ctr);
 		}
 
-		glm::vec3 extents = centroidBox.max - centroidBox.min;
+		const glm::vec3 extents = centroidBox.max - centroidBox.min;
 		int axis = 0;
 		if (extents.y > extents.x && extents.y > extents.z)
 		{
@@ -269,24 +309,164 @@ namespace Engine
 			axis = 2;
 		}
 
-		// 2. Partition around median
 		int mid = begin + count / 2;
-		std::nth_element(leafIndices.begin() + begin,
-			leafIndices.begin() + mid,
-			leafIndices.begin() + end,
-			[&](int a, int b)
-		{
-			float ca = 0.5f * (nodes[a].aabb.min[axis] + nodes[a].aabb.max[axis]);
-			float cb = 0.5f * (nodes[b].aabb.min[axis] + nodes[b].aabb.max[axis]);
-			return ca < cb;
-		});
 
-		// 3. Create internal node 
+		// We lean heavily on binned SAH rather than median splitting.
+		// We stay binary, but build a better tree than the old longest-axis median fallback.
+		static constexpr int kBinCount = 8;
+		float bestCost = FLT_MAX;
+		int bestAxis = -1;
+		int bestSplit = -1;
+
+		if (count > 2)
+		{
+			for (int testAxis = 0; testAxis < 3; ++testAxis)
+			{
+				if (extents[testAxis] <= 1e-5f)
+				{
+					continue;
+				}
+
+				struct Bin
+				{
+					AABB bounds;
+					int count = 0;
+				};
+
+				Bin bins[kBinCount];
+				for (int i = 0; i < kBinCount; ++i)
+				{
+					bins[i].bounds = EmptyAABB();
+				}
+
+				const float axisMin = centroidBox.min[testAxis];
+				const float axisScale = static_cast<float>(kBinCount) / extents[testAxis];
+
+				for (int i = begin; i < end; ++i)
+				{
+					const AABB& aabb = nodes[leafIndices[i]].aabb;
+					const float centroid = 0.5f * (aabb.min[testAxis] + aabb.max[testAxis]);
+					int binIndex = static_cast<int>((centroid - axisMin) * axisScale);
+					binIndex = std::clamp(binIndex, 0, kBinCount - 1);
+
+					Bin& bin = bins[binIndex];
+					if (bin.count == 0)
+					{
+						bin.bounds = aabb;
+					}
+					else
+					{
+						ExpandAABB(bin.bounds, aabb);
+					}
+					++bin.count;
+				}
+
+				AABB leftBounds[kBinCount - 1];
+				AABB rightBounds[kBinCount - 1];
+				int leftCounts[kBinCount - 1]{};
+				int rightCounts[kBinCount - 1]{};
+
+				AABB accumLeft = EmptyAABB();
+				int accumLeftCount = 0;
+				for (int i = 0; i < kBinCount - 1; ++i)
+				{
+					if (bins[i].count > 0)
+					{
+						if (accumLeftCount == 0)
+						{
+							accumLeft = bins[i].bounds;
+						}
+						else
+						{
+							ExpandAABB(accumLeft, bins[i].bounds);
+						}
+					}
+					accumLeftCount += bins[i].count;
+					leftBounds[i] = accumLeft;
+					leftCounts[i] = accumLeftCount;
+				}
+
+				AABB accumRight = EmptyAABB();
+				int accumRightCount = 0;
+				for (int i = kBinCount - 1; i > 0; --i)
+				{
+					if (bins[i].count > 0)
+					{
+						if (accumRightCount == 0)
+						{
+							accumRight = bins[i].bounds;
+						}
+						else
+						{
+							ExpandAABB(accumRight, bins[i].bounds);
+						}
+					}
+					accumRightCount += bins[i].count;
+					rightBounds[i - 1] = accumRight;
+					rightCounts[i - 1] = accumRightCount;
+				}
+
+				for (int split = 0; split < kBinCount - 1; ++split)
+				{
+					if (leftCounts[split] == 0 || rightCounts[split] == 0)
+					{
+						continue;
+					}
+
+					const float cost = ComputeSurfaceArea(leftBounds[split]) * static_cast<float>(leftCounts[split])
+						+ ComputeSurfaceArea(rightBounds[split]) * static_cast<float>(rightCounts[split]);
+
+					if (cost < bestCost)
+					{
+						bestCost = cost;
+						bestAxis = testAxis;
+						bestSplit = split;
+					}
+				}
+			}
+		}
+
+		if (bestAxis != -1)
+		{
+			const float axisMin = centroidBox.min[bestAxis];
+			const float axisScale = static_cast<float>(kBinCount) / glm::max(extents[bestAxis], 1e-5f);
+
+			auto pivot = std::partition(leafIndices.begin() + begin,
+				leafIndices.begin() + end,
+				[&](int leafIndex)
+			{
+				const AABB& aabb = nodes[leafIndex].aabb;
+				const float centroid = 0.5f * (aabb.min[bestAxis] + aabb.max[bestAxis]);
+				int binIndex = static_cast<int>((centroid - axisMin) * axisScale);
+				binIndex = std::clamp(binIndex, 0, kBinCount - 1);
+				return binIndex <= bestSplit;
+			});
+
+			mid = static_cast<int>(pivot - leafIndices.begin());
+			if (mid == begin || mid == end)
+			{
+				bestAxis = -1;
+				mid = begin + count / 2;
+			}
+		}
+
+		if (bestAxis == -1)
+		{
+			std::nth_element(leafIndices.begin() + begin,
+				leafIndices.begin() + mid,
+				leafIndices.begin() + end,
+				[&](int a, int b)
+			{
+				float ca = 0.5f * (nodes[a].aabb.min[axis] + nodes[a].aabb.max[axis]);
+				float cb = 0.5f * (nodes[b].aabb.min[axis] + nodes[b].aabb.max[axis]);
+				return ca < cb;
+			});
+		}
+
 		BVHNode internal;
 		internal.left = BuildRecursive(leafIndices, begin, mid);
 		internal.right = BuildRecursive(leafIndices, mid, end);
 
-		// Enclose children
 		const AABB& lTight = nodes[internal.left].aabb;
 		const AABB& rTight = nodes[internal.right].aabb;
 		internal.aabb = MergeAABBs(lTight, rTight);
@@ -297,27 +477,34 @@ namespace Engine
 
 		int idx = static_cast<int>(nodes.size());
 		nodes.emplace_back(std::move(internal));
+		nodes[internal.left].parent = idx;
+		nodes[internal.right].parent = idx;
 		return idx;
 	}
 
 	void SceneBVH::FullRebuild()
 	{
-		std::vector<std::pair<entt::entity, int>> oldLeaves(entityToLeaf.begin(), entityToLeaf.end());
-
 		nodes.clear();
 		entityToLeaf.clear();
 
+		auto materialView = registry.view<Transform, Material>();
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		const size_t estimatedLeafCount = static_cast<size_t>(materialView.size_hint()) + static_cast<size_t>(compositeView.size_hint());
+
+		nodes.reserve(estimatedLeafCount * 2 + 1);
+		entityToLeaf.reserve(estimatedLeafCount + 1);
+
 		std::vector<int> leafIndices;
-		leafIndices.reserve(oldLeaves.size());
+		leafIndices.reserve(estimatedLeafCount);
 
 		// === Rebuild for Material entities ===
-		auto view = registry.view<Transform, Material>();
-		for (entt::entity e : view)
+		for (entt::entity e : materialView)
 		{
-			const auto& tf = view.get<Transform>(e);
+			const auto& tf = materialView.get<Transform>(e);
 			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
 
-			const auto& mat = view.get<Material>(e).data;
+			const auto& mat = materialView.get<Material>(e).data;
+			if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
 			const auto& mesh = mat->mesh;
 
 			BVHNode leaf;
@@ -332,7 +519,6 @@ namespace Engine
 		}
 
 		// === Rebuild for CompositeMaterial entities ===
-		auto compositeView = registry.view<Transform, CompositeMaterial>();
 		for (entt::entity e : compositeView)
 		{
 			const auto& tf = compositeView.get<Transform>(e);
@@ -365,10 +551,8 @@ namespace Engine
 			return;
 		}
 
-		// Optional: sort for spatial locality
-		std::sort(leafIndices.begin(), leafIndices.end());
-
 		root = BuildRecursive(leafIndices, 0, static_cast<int>(leafIndices.size()));
+		nodes[root].parent = -1;
 	}
 
 	// Refit = cheap bottom-up pass that tightens boxes without changing topology
@@ -390,6 +574,35 @@ namespace Engine
 		const AABB& lFat = nodes[node.left].fatAABB;
 		const AABB& rFat = nodes[node.right].fatAABB;
 		node.fatAABB = MergeAABBs(lFat, rFat);
+		node.hasCullHistory = false;
+	}
+
+	void SceneBVH::RefitAncestors(int leafIndex, uint64_t epoch)
+	{
+		int nodeIndex = leafIndex;
+		while (nodeIndex != -1)
+		{
+			BVHNode& node = nodes[nodeIndex];
+			if (node.lastRefitEpoch == epoch)
+			{
+				break;
+			}
+
+			node.lastRefitEpoch = epoch;
+			if (!node.IsLeaf())
+			{
+				const AABB& lTight = nodes[node.left].aabb;
+				const AABB& rTight = nodes[node.right].aabb;
+				node.aabb = MergeAABBs(lTight, rTight);
+
+				const AABB& lFat = nodes[node.left].fatAABB;
+				const AABB& rFat = nodes[node.right].fatAABB;
+				node.fatAABB = MergeAABBs(lFat, rFat);
+				node.hasCullHistory = false;
+			}
+
+			nodeIndex = node.parent;
+		}
 	}
 
 	const AABB& SceneBVH::GetTraversalAABB(const BVHNode& node) const
