@@ -7,19 +7,28 @@
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
+#ifndef SWIM_BVH_USE_SSE
+#define SWIM_BVH_USE_SSE 0
+#endif
+
+#ifndef SWIM_BVH_ENABLE_INTRIN
+#define SWIM_BVH_ENABLE_INTRIN 1 // 1 to enable
+#endif
+
+#if SWIM_BVH_ENABLE_INTRIN && (defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && (_M_IX86_FP >= 2)))
+#include <immintrin.h>
+#undef SWIM_BVH_USE_SSE
+#define SWIM_BVH_USE_SSE 1
+#endif
+
 namespace Engine
 {
 
 	namespace
 	{
 
-		AABB EmptyAABB()
-		{
-			AABB aabb;
-			aabb.min = glm::vec3(FLT_MAX);
-			aabb.max = glm::vec3(-FLT_MAX);
-			return aabb;
-		}
+		constexpr int kWideNodeArity = 4;
+		constexpr int kSAHBins = 8;
 
 		AABB MergeAABBs(const AABB& a, const AABB& b)
 		{
@@ -27,12 +36,6 @@ namespace Engine
 			merged.min = glm::min(a.min, b.min);
 			merged.max = glm::max(a.max, b.max);
 			return merged;
-		}
-
-		void ExpandAABB(AABB& dst, const AABB& src)
-		{
-			dst.min = glm::min(dst.min, src.min);
-			dst.max = glm::max(dst.max, src.max);
 		}
 
 		AABB MakeFatAABB(const AABB& aabb)
@@ -46,17 +49,27 @@ namespace Engine
 			return fat;
 		}
 
-		AABB MakeFatAABB(const AABB& aabb, const AABB& previousAABB)
+		AABB MakeFatAABBMotionAware(const AABB& previousAABB, const AABB& currentAABB)
 		{
-			const glm::vec3 extents = glm::max(aabb.max - aabb.min, glm::vec3(0.0f));
-			const glm::vec3 padding = glm::max(extents * 0.10f, glm::vec3(0.05f));
+			AABB fat = MakeFatAABB(currentAABB);
 
-			const glm::vec3 deltaMin = aabb.min - previousAABB.min;
-			const glm::vec3 deltaMax = aabb.max - previousAABB.max;
+			const glm::vec3 previousCenter = 0.5f * (previousAABB.min + previousAABB.max);
+			const glm::vec3 currentCenter = 0.5f * (currentAABB.min + currentAABB.max);
+			const glm::vec3 motion = currentCenter - previousCenter;
+			const glm::vec3 motionPadding = glm::abs(motion) * 0.50f;
 
-			AABB fat;
-			fat.min = aabb.min - padding + glm::min(deltaMin * 1.25f, glm::vec3(0.0f));
-			fat.max = aabb.max + padding + glm::max(deltaMax * 1.25f, glm::vec3(0.0f));
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				if (motion[axis] > 0.0f)
+				{
+					fat.max[axis] += motionPadding[axis];
+				}
+				else if (motion[axis] < 0.0f)
+				{
+					fat.min[axis] -= motionPadding[axis];
+				}
+			}
+
 			return fat;
 		}
 
@@ -88,6 +101,11 @@ namespace Engine
 			}
 
 			return foundAny;
+		}
+
+		bool IsFiniteAABB(const AABB& aabb)
+		{
+			return aabb.min.x <= aabb.max.x && aabb.min.y <= aabb.max.y && aabb.min.z <= aabb.max.z;
 		}
 
 	}
@@ -135,11 +153,7 @@ namespace Engine
 
 	void SceneBVH::Update()
 	{
-		bool anyLeafEscapedFatBounds = false;
-		std::vector<int> escapedLeafIndices;
-
-		// === Rebuild / refit check ===
-		static constexpr float kRebuildThreshold = 0.15f;
+		static constexpr float kRebuildThreshold = 0.20f;
 
 		if (root == -1 || topologyObserver.size() > 0 || forceUpdate)
 		{
@@ -155,7 +169,8 @@ namespace Engine
 			return;
 		}
 
-		escapedLeafIndices.reserve(dirtyEntities.size());
+		const float preRootArea = (root != -1) ? ComputeSurfaceArea(nodes[root].fatAABB) : 0.0f;
+		bool anyLeafEscapedFatBounds = false;
 
 		for (entt::entity e : dirtyEntities)
 		{
@@ -167,8 +182,7 @@ namespace Engine
 			const Transform& tf = registry.get<Transform>(e);
 			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
-				auto existing = entityToLeaf.find(e);
-				if (existing != entityToLeaf.end())
+				if (entityToLeaf.find(e) != entityToLeaf.end())
 				{
 					RemoveEntity(e);
 				}
@@ -201,8 +215,7 @@ namespace Engine
 
 			if (!hasRenderableBounds)
 			{
-				auto existing = entityToLeaf.find(e);
-				if (existing != entityToLeaf.end())
+				if (entityToLeaf.find(e) != entityToLeaf.end())
 				{
 					RemoveEntity(e);
 				}
@@ -212,29 +225,24 @@ namespace Engine
 			auto it = entityToLeaf.find(e);
 			if (it == entityToLeaf.end())
 			{
-				BVHNode leaf;
-				leaf.entity = e;
-				leaf.aabb = worldAABB;
-				leaf.fatAABB = MakeFatAABB(worldAABB);
-
-				int newIdx = static_cast<int>(nodes.size());
-				nodes.emplace_back(std::move(leaf));
-				entityToLeaf[e] = newIdx;
 				forceUpdate = true;
 				continue;
 			}
 
-			BVHNode& leaf = nodes[it->second];
+			const int leafIndex = it->second;
+			BVHNode& leaf = nodes[leafIndex];
 			const AABB previousAABB = leaf.aabb;
 			leaf.aabb = worldAABB;
 			leaf.hasCullHistory = false;
 
 			if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
 			{
-				leaf.fatAABB = MakeFatAABB(leaf.aabb, previousAABB);
+				leaf.fatAABB = MakeFatAABBMotionAware(previousAABB, leaf.aabb);
 				anyLeafEscapedFatBounds = true;
-				escapedLeafIndices.push_back(it->second);
 			}
+
+			RefitBinaryAncestors(leafIndex);
+			RefitWideAncestorsFromLeaf(leafIndex);
 		}
 
 		if (forceUpdate)
@@ -245,60 +253,41 @@ namespace Engine
 			return;
 		}
 
-		if (anyLeafEscapedFatBounds && root != -1)
+		if (anyLeafEscapedFatBounds && root != -1 && preRootArea > 0.0f)
 		{
-			const AABB preAABB = nodes[root].fatAABB;
-			const uint64_t epoch = refitEpoch++;
-			if (refitEpoch == 0)
-			{
-				refitEpoch = 1;
-			}
-
-			for (int leafIndex : escapedLeafIndices)
-			{
-				RefitAncestors(leafIndex, epoch);
-			}
-
-			const float preArea = ComputeSurfaceArea(preAABB);
 			const float postArea = ComputeSurfaceArea(nodes[root].fatAABB);
-
-			if (preArea > 0.0f)
+			const float expansion = postArea / preRootArea;
+			if (expansion > 1.0f + kRebuildThreshold)
 			{
-				const float expansion = postArea / preArea;
-				if (expansion > 1.0f + kRebuildThreshold)
-				{
-					FullRebuild();
-					forceUpdate = false;
-					topologyObserver.clear();
-					return;
-				}
+				FullRebuild();
+				forceUpdate = false;
+				topologyObserver.clear();
+				return;
 			}
 		}
 	}
 
-	/**
-	 * Recursively builds a binary tree in breadth-first order.
-	 * leafIndices is permutation-stable: indices in nodes[] that refer
-	 * to existing leaves. The function returns the index of the node it creates.
-	 */
 	int SceneBVH::BuildRecursive(std::vector<int>& leafIndices, int begin, int end)
 	{
 		const int count = end - begin;
 		if (count == 1)
 		{
-			return leafIndices[begin]; // already a leaf
+			return leafIndices[begin];
 		}
 
-		AABB centroidBox = EmptyAABB();
+		AABB centroidBox;
+		centroidBox.min = glm::vec3(FLT_MAX);
+		centroidBox.max = glm::vec3(-FLT_MAX);
+
 		for (int i = begin; i < end; ++i)
 		{
 			const AABB& aabb = nodes[leafIndices[i]].aabb;
-			const glm::vec3 ctr = 0.5f * (aabb.min + aabb.max);
-			centroidBox.min = glm::min(centroidBox.min, ctr);
-			centroidBox.max = glm::max(centroidBox.max, ctr);
+			const glm::vec3 center = 0.5f * (aabb.min + aabb.max);
+			centroidBox.min = glm::min(centroidBox.min, center);
+			centroidBox.max = glm::max(centroidBox.max, center);
 		}
 
-		const glm::vec3 extents = centroidBox.max - centroidBox.min;
+		glm::vec3 extents = centroidBox.max - centroidBox.min;
 		int axis = 0;
 		if (extents.y > extents.x && extents.y > extents.z)
 		{
@@ -310,148 +299,112 @@ namespace Engine
 		}
 
 		int mid = begin + count / 2;
+		const float axisExtent = extents[axis];
 
-		// We lean heavily on binned SAH rather than median splitting.
-		// We stay binary, but build a better tree than the old longest-axis median fallback.
-		static constexpr int kBinCount = 8;
-		float bestCost = FLT_MAX;
-		int bestAxis = -1;
-		int bestSplit = -1;
-
-		if (count > 2)
+		if (axisExtent > 1e-6f && count > 2)
 		{
-			for (int testAxis = 0; testAxis < 3; ++testAxis)
+			struct Bin
 			{
-				if (extents[testAxis] <= 1e-5f)
+				AABB bounds;
+				int count = 0;
+			};
+
+			Bin bins[kSAHBins];
+			for (int i = begin; i < end; ++i)
+			{
+				const AABB& aabb = nodes[leafIndices[i]].aabb;
+				const glm::vec3 center = 0.5f * (aabb.min + aabb.max);
+				float t = (center[axis] - centroidBox.min[axis]) / axisExtent;
+				t = glm::clamp(t, 0.0f, 0.999999f);
+				const int binIndex = glm::clamp(static_cast<int>(t * static_cast<float>(kSAHBins)), 0, kSAHBins - 1);
+
+				bins[binIndex].count++;
+				if (!IsFiniteAABB(bins[binIndex].bounds))
+				{
+					bins[binIndex].bounds = aabb;
+				}
+				else
+				{
+					bins[binIndex].bounds = MergeAABBs(bins[binIndex].bounds, aabb);
+				}
+			}
+
+			AABB leftBounds[kSAHBins - 1];
+			AABB rightBounds[kSAHBins - 1];
+			int leftCounts[kSAHBins - 1]{};
+			int rightCounts[kSAHBins - 1]{};
+
+			AABB runningLeft;
+			runningLeft.min = glm::vec3(FLT_MAX);
+			runningLeft.max = glm::vec3(-FLT_MAX);
+			int runningLeftCount = 0;
+			for (int i = 0; i < kSAHBins - 1; ++i)
+			{
+				if (bins[i].count > 0)
+				{
+					runningLeft = IsFiniteAABB(runningLeft) ? MergeAABBs(runningLeft, bins[i].bounds) : bins[i].bounds;
+					runningLeftCount += bins[i].count;
+				}
+				leftBounds[i] = runningLeft;
+				leftCounts[i] = runningLeftCount;
+			}
+
+			AABB runningRight;
+			runningRight.min = glm::vec3(FLT_MAX);
+			runningRight.max = glm::vec3(-FLT_MAX);
+			int runningRightCount = 0;
+			for (int i = kSAHBins - 1; i > 0; --i)
+			{
+				if (bins[i].count > 0)
+				{
+					runningRight = IsFiniteAABB(runningRight) ? MergeAABBs(runningRight, bins[i].bounds) : bins[i].bounds;
+					runningRightCount += bins[i].count;
+				}
+				rightBounds[i - 1] = runningRight;
+				rightCounts[i - 1] = runningRightCount;
+			}
+
+			float bestCost = std::numeric_limits<float>::infinity();
+			int bestSplit = -1;
+			for (int i = 0; i < kSAHBins - 1; ++i)
+			{
+				if (leftCounts[i] == 0 || rightCounts[i] == 0)
 				{
 					continue;
 				}
 
-				struct Bin
+				const float cost = static_cast<float>(leftCounts[i]) * ComputeSurfaceArea(leftBounds[i])
+					+ static_cast<float>(rightCounts[i]) * ComputeSurfaceArea(rightBounds[i]);
+				if (cost < bestCost)
 				{
-					AABB bounds;
-					int count = 0;
-				};
-
-				Bin bins[kBinCount];
-				for (int i = 0; i < kBinCount; ++i)
-				{
-					bins[i].bounds = EmptyAABB();
+					bestCost = cost;
+					bestSplit = i;
 				}
+			}
 
-				const float axisMin = centroidBox.min[testAxis];
-				const float axisScale = static_cast<float>(kBinCount) / extents[testAxis];
-
-				for (int i = begin; i < end; ++i)
+			if (bestSplit >= 0)
+			{
+				auto midIt = std::partition(leafIndices.begin() + begin, leafIndices.begin() + end, [&](int leafIndex)
 				{
-					const AABB& aabb = nodes[leafIndices[i]].aabb;
-					const float centroid = 0.5f * (aabb.min[testAxis] + aabb.max[testAxis]);
-					int binIndex = static_cast<int>((centroid - axisMin) * axisScale);
-					binIndex = std::clamp(binIndex, 0, kBinCount - 1);
+					const AABB& aabb = nodes[leafIndex].aabb;
+					const glm::vec3 center = 0.5f * (aabb.min + aabb.max);
+					float t = (center[axis] - centroidBox.min[axis]) / axisExtent;
+					t = glm::clamp(t, 0.0f, 0.999999f);
+					const int binIndex = glm::clamp(static_cast<int>(t * static_cast<float>(kSAHBins)), 0, kSAHBins - 1);
+					return binIndex <= bestSplit;
+				});
 
-					Bin& bin = bins[binIndex];
-					if (bin.count == 0)
-					{
-						bin.bounds = aabb;
-					}
-					else
-					{
-						ExpandAABB(bin.bounds, aabb);
-					}
-					++bin.count;
-				}
-
-				AABB leftBounds[kBinCount - 1];
-				AABB rightBounds[kBinCount - 1];
-				int leftCounts[kBinCount - 1]{};
-				int rightCounts[kBinCount - 1]{};
-
-				AABB accumLeft = EmptyAABB();
-				int accumLeftCount = 0;
-				for (int i = 0; i < kBinCount - 1; ++i)
+				mid = static_cast<int>(midIt - leafIndices.begin());
+				if (mid == begin || mid == end)
 				{
-					if (bins[i].count > 0)
-					{
-						if (accumLeftCount == 0)
-						{
-							accumLeft = bins[i].bounds;
-						}
-						else
-						{
-							ExpandAABB(accumLeft, bins[i].bounds);
-						}
-					}
-					accumLeftCount += bins[i].count;
-					leftBounds[i] = accumLeft;
-					leftCounts[i] = accumLeftCount;
-				}
-
-				AABB accumRight = EmptyAABB();
-				int accumRightCount = 0;
-				for (int i = kBinCount - 1; i > 0; --i)
-				{
-					if (bins[i].count > 0)
-					{
-						if (accumRightCount == 0)
-						{
-							accumRight = bins[i].bounds;
-						}
-						else
-						{
-							ExpandAABB(accumRight, bins[i].bounds);
-						}
-					}
-					accumRightCount += bins[i].count;
-					rightBounds[i - 1] = accumRight;
-					rightCounts[i - 1] = accumRightCount;
-				}
-
-				for (int split = 0; split < kBinCount - 1; ++split)
-				{
-					if (leftCounts[split] == 0 || rightCounts[split] == 0)
-					{
-						continue;
-					}
-
-					const float cost = ComputeSurfaceArea(leftBounds[split]) * static_cast<float>(leftCounts[split])
-						+ ComputeSurfaceArea(rightBounds[split]) * static_cast<float>(rightCounts[split]);
-
-					if (cost < bestCost)
-					{
-						bestCost = cost;
-						bestAxis = testAxis;
-						bestSplit = split;
-					}
+					mid = begin + count / 2;
 				}
 			}
 		}
 
-		if (bestAxis != -1)
+		if (mid == begin || mid == end)
 		{
-			const float axisMin = centroidBox.min[bestAxis];
-			const float axisScale = static_cast<float>(kBinCount) / glm::max(extents[bestAxis], 1e-5f);
-
-			auto pivot = std::partition(leafIndices.begin() + begin,
-				leafIndices.begin() + end,
-				[&](int leafIndex)
-			{
-				const AABB& aabb = nodes[leafIndex].aabb;
-				const float centroid = 0.5f * (aabb.min[bestAxis] + aabb.max[bestAxis]);
-				int binIndex = static_cast<int>((centroid - axisMin) * axisScale);
-				binIndex = std::clamp(binIndex, 0, kBinCount - 1);
-				return binIndex <= bestSplit;
-			});
-
-			mid = static_cast<int>(pivot - leafIndices.begin());
-			if (mid == begin || mid == end)
-			{
-				bestAxis = -1;
-				mid = begin + count / 2;
-			}
-		}
-
-		if (bestAxis == -1)
-		{
+			mid = begin + count / 2;
 			std::nth_element(leafIndices.begin() + begin,
 				leafIndices.begin() + mid,
 				leafIndices.begin() + end,
@@ -463,70 +416,79 @@ namespace Engine
 			});
 		}
 
-		BVHNode internal;
-		internal.left = BuildRecursive(leafIndices, begin, mid);
-		internal.right = BuildRecursive(leafIndices, mid, end);
+		const int idx = static_cast<int>(nodes.size());
+		nodes.emplace_back();
 
-		const AABB& lTight = nodes[internal.left].aabb;
-		const AABB& rTight = nodes[internal.right].aabb;
-		internal.aabb = MergeAABBs(lTight, rTight);
+		const int left = BuildRecursive(leafIndices, begin, mid);
+		const int right = BuildRecursive(leafIndices, mid, end);
 
-		const AABB& lFat = nodes[internal.left].fatAABB;
-		const AABB& rFat = nodes[internal.right].fatAABB;
-		internal.fatAABB = MergeAABBs(lFat, rFat);
+		nodes[idx].left = left;
+		nodes[idx].right = right;
+		nodes[idx].parent = -1;
 
-		int idx = static_cast<int>(nodes.size());
-		nodes.emplace_back(std::move(internal));
-		nodes[internal.left].parent = idx;
-		nodes[internal.right].parent = idx;
+		nodes[left].parent = idx;
+		nodes[right].parent = idx;
+
+		nodes[idx].aabb = MergeAABBs(nodes[left].aabb, nodes[right].aabb);
+		nodes[idx].fatAABB = MergeAABBs(nodes[left].fatAABB, nodes[right].fatAABB);
+		nodes[idx].entity = entt::null;
+		nodes[idx].hasCullHistory = false;
+
 		return idx;
 	}
 
 	void SceneBVH::FullRebuild()
 	{
 		nodes.clear();
+		wideNodes.clear();
 		entityToLeaf.clear();
+		root = -1;
+		wideRoot = -1;
 
-		auto materialView = registry.view<Transform, Material>();
-		auto compositeView = registry.view<Transform, CompositeMaterial>();
-		const size_t estimatedLeafCount = static_cast<size_t>(materialView.size_hint()) + static_cast<size_t>(compositeView.size_hint());
-
+		size_t estimatedLeafCount = 0;
+		estimatedLeafCount += registry.view<Transform, Material>().size_hint();
+		estimatedLeafCount += registry.view<Transform, CompositeMaterial>().size_hint();
 		nodes.reserve(estimatedLeafCount * 2 + 1);
-		entityToLeaf.reserve(estimatedLeafCount + 1);
 
 		std::vector<int> leafIndices;
 		leafIndices.reserve(estimatedLeafCount);
 
-		// === Rebuild for Material entities ===
-		for (entt::entity e : materialView)
+		auto view = registry.view<Transform, Material>();
+		for (entt::entity e : view)
 		{
-			const auto& tf = materialView.get<Transform>(e);
-			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+			const auto& tf = view.get<Transform>(e);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
 
-			const auto& mat = materialView.get<Material>(e).data;
-			if (!mat || !mat->mesh || !mat->mesh->meshBufferData) { continue; }
-			const auto& mesh = mat->mesh;
+			const auto& material = view.get<Material>(e).data;
+			if (!material || !material->mesh || !material->mesh->meshBufferData)
+			{
+				continue;
+			}
 
 			BVHNode leaf;
 			leaf.entity = e;
-			leaf.aabb = CalculateWorldAABB(mesh, tf);
+			leaf.aabb = CalculateWorldAABB(e, glm::vec3(material->mesh->meshBufferData->aabbMin), glm::vec3(material->mesh->meshBufferData->aabbMax), tf);
 			leaf.fatAABB = MakeFatAABB(leaf.aabb);
 
-			int idx = static_cast<int>(nodes.size());
+			const int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
 			entityToLeaf[e] = idx;
 			leafIndices.push_back(idx);
 		}
 
-		// === Rebuild for CompositeMaterial entities ===
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
 		for (entt::entity e : compositeView)
 		{
 			const auto& tf = compositeView.get<Transform>(e);
-			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
 
 			const auto& comp = compositeView.get<CompositeMaterial>(e);
-			if (comp.subMaterials.empty()) { continue; }
-
 			glm::vec3 localMin;
 			glm::vec3 localMax;
 			if (!HasRenderableSubMaterials(comp, localMin, localMax))
@@ -539,7 +501,7 @@ namespace Engine
 			leaf.aabb = CalculateWorldAABB(e, localMin, localMax, tf);
 			leaf.fatAABB = MakeFatAABB(leaf.aabb);
 
-			int idx = static_cast<int>(nodes.size());
+			const int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
 			entityToLeaf[e] = idx;
 			leafIndices.push_back(idx);
@@ -547,61 +509,187 @@ namespace Engine
 
 		if (leafIndices.empty())
 		{
-			root = -1;
+			leafToWideParent.clear();
+			leafToWideSlot.clear();
 			return;
 		}
 
 		root = BuildRecursive(leafIndices, 0, static_cast<int>(leafIndices.size()));
-		nodes[root].parent = -1;
+		BuildWideHierarchy();
 	}
 
-	// Refit = cheap bottom-up pass that tightens boxes without changing topology
-	void SceneBVH::Refit(int nodeIndex)
-	{
-		BVHNode& node = nodes[nodeIndex];
-		if (node.IsLeaf())
-		{
-			return; // leaf already up-to-date
-		}
-
-		Refit(node.left);
-		Refit(node.right);
-
-		const AABB& lTight = nodes[node.left].aabb;
-		const AABB& rTight = nodes[node.right].aabb;
-		node.aabb = MergeAABBs(lTight, rTight);
-
-		const AABB& lFat = nodes[node.left].fatAABB;
-		const AABB& rFat = nodes[node.right].fatAABB;
-		node.fatAABB = MergeAABBs(lFat, rFat);
-		node.hasCullHistory = false;
-	}
-
-	void SceneBVH::RefitAncestors(int leafIndex, uint64_t epoch)
+	void SceneBVH::RefitBinaryAncestors(int leafIndex)
 	{
 		int nodeIndex = leafIndex;
 		while (nodeIndex != -1)
 		{
 			BVHNode& node = nodes[nodeIndex];
-			if (node.lastRefitEpoch == epoch)
+			node.hasCullHistory = false;
+
+			if (!node.IsLeaf())
+			{
+				node.aabb = MergeAABBs(nodes[node.left].aabb, nodes[node.right].aabb);
+				node.fatAABB = MergeAABBs(nodes[node.left].fatAABB, nodes[node.right].fatAABB);
+			}
+
+			nodeIndex = node.parent;
+		}
+	}
+
+	void SceneBVH::SetWideChildBounds(int wideIndex, uint8_t childSlot, const AABB& aabb)
+	{
+		WideNode& node = wideNodes[wideIndex];
+		node.minX[childSlot] = aabb.min.x;
+		node.minY[childSlot] = aabb.min.y;
+		node.minZ[childSlot] = aabb.min.z;
+		node.maxX[childSlot] = aabb.max.x;
+		node.maxY[childSlot] = aabb.max.y;
+		node.maxZ[childSlot] = aabb.max.z;
+	}
+
+	void SceneBVH::UpdateWideNodeBoundsFromChildren(int wideIndex)
+	{
+		WideNode& node = wideNodes[wideIndex];
+		node.traversalAABB.min = glm::vec3(FLT_MAX);
+		node.traversalAABB.max = glm::vec3(-FLT_MAX);
+		node.hasCullHistory = false;
+
+		for (uint8_t i = 0; i < node.childCount; ++i)
+		{
+			if (node.childRef[i] == InvalidWideChild)
+			{
+				continue;
+			}
+
+			node.traversalAABB.min.x = glm::min(node.traversalAABB.min.x, node.minX[i]);
+			node.traversalAABB.min.y = glm::min(node.traversalAABB.min.y, node.minY[i]);
+			node.traversalAABB.min.z = glm::min(node.traversalAABB.min.z, node.minZ[i]);
+			node.traversalAABB.max.x = glm::max(node.traversalAABB.max.x, node.maxX[i]);
+			node.traversalAABB.max.y = glm::max(node.traversalAABB.max.y, node.maxY[i]);
+			node.traversalAABB.max.z = glm::max(node.traversalAABB.max.z, node.maxZ[i]);
+		}
+	}
+
+	int SceneBVH::BuildWideRecursive(int binaryNodeIndex, int parentWideIndex, uint8_t parentSlot)
+	{
+		const int wideIndex = static_cast<int>(wideNodes.size());
+		wideNodes.emplace_back();
+
+		wideNodes[wideIndex].parent = parentWideIndex;
+		wideNodes[wideIndex].parentSlot = parentSlot;
+
+		std::vector<int> frontier;
+		frontier.reserve(kWideNodeArity);
+
+		const BVHNode& rootNode = nodes[binaryNodeIndex];
+		if (rootNode.IsLeaf())
+		{
+			frontier.push_back(binaryNodeIndex);
+		}
+		else
+		{
+			frontier.push_back(rootNode.left);
+			frontier.push_back(rootNode.right);
+		}
+
+		while (static_cast<int>(frontier.size()) < kWideNodeArity)
+		{
+			int expandCandidateIndex = -1;
+			float expandCandidateArea = -1.0f;
+
+			for (int i = 0; i < static_cast<int>(frontier.size()); ++i)
+			{
+				const BVHNode& candidate = nodes[frontier[i]];
+				if (candidate.IsLeaf())
+				{
+					continue;
+				}
+
+				const float candidateArea = ComputeSurfaceArea(GetTraversalAABB(candidate));
+				if (candidateArea > expandCandidateArea)
+				{
+					expandCandidateArea = candidateArea;
+					expandCandidateIndex = i;
+				}
+			}
+
+			if (expandCandidateIndex == -1)
 			{
 				break;
 			}
 
-			node.lastRefitEpoch = epoch;
-			if (!node.IsLeaf())
+			const int candidateBinaryIndex = frontier[expandCandidateIndex];
+			frontier[expandCandidateIndex] = nodes[candidateBinaryIndex].left;
+			frontier.push_back(nodes[candidateBinaryIndex].right);
+		}
+
+		wideNodes[wideIndex].childCount = static_cast<uint8_t>(frontier.size());
+		for (uint8_t i = 0; i < wideNodes[wideIndex].childCount; ++i)
+		{
+			const int childBinaryIndex = frontier[i];
+			const BVHNode& childBinaryNode = nodes[childBinaryIndex];
+			const AABB& childAABB = GetTraversalAABB(childBinaryNode);
+			SetWideChildBounds(wideIndex, i, childAABB);
+
+			if (childBinaryNode.IsLeaf())
 			{
-				const AABB& lTight = nodes[node.left].aabb;
-				const AABB& rTight = nodes[node.right].aabb;
-				node.aabb = MergeAABBs(lTight, rTight);
-
-				const AABB& lFat = nodes[node.left].fatAABB;
-				const AABB& rFat = nodes[node.right].fatAABB;
-				node.fatAABB = MergeAABBs(lFat, rFat);
-				node.hasCullHistory = false;
+				wideNodes[wideIndex].childRef[i] = EncodeWideLeaf(childBinaryIndex);
+				if (childBinaryIndex >= 0 && childBinaryIndex < static_cast<int>(leafToWideParent.size()))
+				{
+					leafToWideParent[childBinaryIndex] = wideIndex;
+					leafToWideSlot[childBinaryIndex] = i;
+				}
 			}
+			else
+			{
+				wideNodes[wideIndex].childRef[i] = BuildWideRecursive(childBinaryIndex, wideIndex, i);
+			}
+		}
 
-			nodeIndex = node.parent;
+		UpdateWideNodeBoundsFromChildren(wideIndex);
+		return wideIndex;
+	}
+
+	void SceneBVH::BuildWideHierarchy()
+	{
+		wideNodes.clear();
+		wideRoot = -1;
+		leafToWideParent.assign(nodes.size(), -1);
+		leafToWideSlot.assign(nodes.size(), 0xFF);
+
+		if (root == -1)
+		{
+			return;
+		}
+
+		wideNodes.reserve(nodes.size());
+		wideRoot = BuildWideRecursive(root, -1, 0xFF);
+	}
+
+	void SceneBVH::RefitWideAncestorsFromLeaf(int leafIndex)
+	{
+		if (leafIndex < 0 || leafIndex >= static_cast<int>(leafToWideParent.size()))
+		{
+			return;
+		}
+
+		int wideIndex = leafToWideParent[leafIndex];
+		if (wideIndex == -1)
+		{
+			return;
+		}
+
+		const uint8_t slot = leafToWideSlot[leafIndex];
+		SetWideChildBounds(wideIndex, slot, nodes[leafIndex].aabb);
+		UpdateWideNodeBoundsFromChildren(wideIndex);
+
+		while (wideNodes[wideIndex].parent != -1)
+		{
+			const int parentWide = wideNodes[wideIndex].parent;
+			const uint8_t parentSlot = wideNodes[wideIndex].parentSlot;
+			SetWideChildBounds(parentWide, parentSlot, wideNodes[wideIndex].traversalAABB);
+			UpdateWideNodeBoundsFromChildren(parentWide);
+			wideIndex = parentWide;
 		}
 	}
 
@@ -632,6 +720,124 @@ namespace Engine
 		node.hasCullHistory = true;
 
 		return visible;
+	}
+
+	bool SceneBVH::IsWideNodeVisible(const WideNode& node, const Frustum& frustum) const
+	{
+		const uint64_t frustumRevision = Frustum::GetRevision();
+		if (node.hasCullHistory
+			&& node.lastFrustumRevision == frustumRevision
+			&& node.lastCullAABBMin == node.traversalAABB.min
+			&& node.lastCullAABBMax == node.traversalAABB.max)
+		{
+			return node.lastVisible;
+		}
+
+		uint8_t planeHint = node.lastRejectedPlane;
+		const bool visible = frustum.IsAABBVisible(node.traversalAABB, planeHint);
+
+		node.lastRejectedPlane = planeHint;
+		node.lastFrustumRevision = frustumRevision;
+		node.lastCullAABBMin = node.traversalAABB.min;
+		node.lastCullAABBMax = node.traversalAABB.max;
+		node.lastVisible = visible;
+		node.hasCullHistory = true;
+		return visible;
+	}
+
+	uint8_t SceneBVH::GetWideNodeVisibleMask(const WideNode& node, const Frustum& frustum, uint8_t* outFullyInsideMask) const
+	{
+		const uint8_t activeChildMask = static_cast<uint8_t>((1u << node.childCount) - 1u);
+		uint8_t visibleMask = activeChildMask;
+		uint8_t fullyInsideMask = activeChildMask;
+
+	#if SWIM_BVH_USE_SSE
+		const __m128 zero = _mm_setzero_ps();
+		for (int planeIndex = 0; planeIndex < 6; ++planeIndex)
+		{
+			const glm::vec4& plane = frustum.planes[planeIndex];
+			const __m128 px = _mm_set1_ps(plane.x);
+			const __m128 py = _mm_set1_ps(plane.y);
+			const __m128 pz = _mm_set1_ps(plane.z);
+			const __m128 pw = _mm_set1_ps(plane.w);
+
+			const __m128 outsideX = _mm_load_ps((plane.x >= 0.0f) ? node.maxX : node.minX);
+			const __m128 outsideY = _mm_load_ps((plane.y >= 0.0f) ? node.maxY : node.minY);
+			const __m128 outsideZ = _mm_load_ps((plane.z >= 0.0f) ? node.maxZ : node.minZ);
+
+			__m128 outsideDistance = _mm_add_ps(_mm_mul_ps(px, outsideX), _mm_mul_ps(py, outsideY));
+			outsideDistance = _mm_add_ps(outsideDistance, _mm_mul_ps(pz, outsideZ));
+			outsideDistance = _mm_add_ps(outsideDistance, pw);
+
+			const uint8_t outsideMask = static_cast<uint8_t>(_mm_movemask_ps(_mm_cmplt_ps(outsideDistance, zero))) & visibleMask;
+			visibleMask = static_cast<uint8_t>(visibleMask & ~outsideMask);
+			fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & visibleMask);
+			if (visibleMask == 0)
+			{
+				break;
+			}
+
+			const __m128 insideX = _mm_load_ps((plane.x >= 0.0f) ? node.minX : node.maxX);
+			const __m128 insideY = _mm_load_ps((plane.y >= 0.0f) ? node.minY : node.maxY);
+			const __m128 insideZ = _mm_load_ps((plane.z >= 0.0f) ? node.minZ : node.maxZ);
+
+			__m128 insideDistance = _mm_add_ps(_mm_mul_ps(px, insideX), _mm_mul_ps(py, insideY));
+			insideDistance = _mm_add_ps(insideDistance, _mm_mul_ps(pz, insideZ));
+			insideDistance = _mm_add_ps(insideDistance, pw);
+
+			const uint8_t insideMask = static_cast<uint8_t>(_mm_movemask_ps(_mm_cmpge_ps(insideDistance, zero)));
+			fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & insideMask);
+		}
+	#else
+		for (uint8_t childIndex = 0; childIndex < node.childCount; ++childIndex)
+		{
+			AABB childAABB;
+			childAABB.min = glm::vec3(node.minX[childIndex], node.minY[childIndex], node.minZ[childIndex]);
+			childAABB.max = glm::vec3(node.maxX[childIndex], node.maxY[childIndex], node.maxZ[childIndex]);
+
+			if (!frustum.IsAABBVisible(childAABB))
+			{
+				visibleMask = static_cast<uint8_t>(visibleMask & ~(1u << childIndex));
+				fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & ~(1u << childIndex));
+				continue;
+			}
+
+			if (!frustum.ContainsAABB(childAABB))
+			{
+				fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & ~(1u << childIndex));
+			}
+		}
+	#endif
+
+		if (outFullyInsideMask != nullptr)
+		{
+			*outFullyInsideMask = static_cast<uint8_t>(fullyInsideMask & visibleMask);
+		}
+
+		return visibleMask;
+	}
+
+	bool SceneBVH::PushWideRootIfVisible(const Frustum& frustum, std::vector<std::pair<int, bool>>& stack) const
+	{
+		if (wideRoot == -1)
+		{
+			return false;
+		}
+
+		const WideNode& rootNode = wideNodes[wideRoot];
+		if (frustum.ContainsAABB(rootNode.traversalAABB))
+		{
+			stack.emplace_back(wideRoot, true);
+			return true;
+		}
+
+		if (IsWideNodeVisible(rootNode, frustum))
+		{
+			stack.emplace_back(wideRoot, false);
+			return true;
+		}
+
+		return false;
 	}
 
 	inline void SceneBVH::PushIfVisible(int nodeIdx, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const
@@ -678,33 +884,81 @@ namespace Engine
 	void SceneBVH::QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const
 	{
 		outVisible.clear();
-		if (root == -1)
+		if (wideRoot == -1)
 		{
 			return;
 		}
 
 		std::vector<std::pair<int, bool>> stack;
-		stack.reserve(128); // was 32
-		PushIfVisible(root, frustum, false, stack);
+		stack.reserve(64);
+		if (!PushWideRootIfVisible(frustum, stack))
+		{
+			return;
+		}
 
 		while (!stack.empty())
 		{
-			const auto [idx, fullyInside] = stack.back();
+			const auto [wideIndex, fullyInside] = stack.back();
 			stack.pop_back();
 
-			const BVHNode& n = nodes[idx];
-			if (n.IsLeaf())
+			const WideNode& node = wideNodes[wideIndex];
+			if (fullyInside)
 			{
-				// Skip tombstones
-				if (n.entity != entt::null)
+				for (uint8_t i = 0; i < node.childCount; ++i)
 				{
-					outVisible.push_back(n.entity);
+					const int childRef = node.childRef[i];
+					if (childRef == InvalidWideChild)
+					{
+						continue;
+					}
+
+					if (IsEncodedWideLeaf(childRef))
+					{
+						const int leafIndex = DecodeWideLeaf(childRef);
+						const entt::entity entity = nodes[leafIndex].entity;
+						if (entity != entt::null)
+						{
+							outVisible.push_back(entity);
+						}
+					}
+					else
+					{
+						stack.emplace_back(childRef, true);
+					}
 				}
+				continue;
 			}
-			else
+
+			uint8_t fullyInsideMask = 0;
+			const uint8_t visibleMask = GetWideNodeVisibleMask(node, frustum, &fullyInsideMask);
+
+			for (uint8_t i = 0; i < node.childCount; ++i)
 			{
-				PushIfVisible(n.left, frustum, fullyInside, stack);
-				PushIfVisible(n.right, frustum, fullyInside, stack);
+				const uint8_t bit = static_cast<uint8_t>(1u << i);
+				if ((visibleMask & bit) == 0)
+				{
+					continue;
+				}
+
+				const int childRef = node.childRef[i];
+				if (childRef == InvalidWideChild)
+				{
+					continue;
+				}
+
+				if (IsEncodedWideLeaf(childRef))
+				{
+					const int leafIndex = DecodeWideLeaf(childRef);
+					const entt::entity entity = nodes[leafIndex].entity;
+					if (entity != entt::null)
+					{
+						outVisible.push_back(entity);
+					}
+				}
+				else
+				{
+					stack.emplace_back(childRef, (fullyInsideMask & bit) != 0);
+				}
 			}
 		}
 
@@ -723,12 +977,12 @@ namespace Engine
 
 	bool SceneBVH::IsFullyVisible(const Frustum& frustum) const
 	{
-		if (root == -1)
+		if (wideRoot == -1)
 		{
 			return false;
 		}
 
-		return frustum.ContainsAABB(GetTraversalAABB(nodes[root]));
+		return frustum.ContainsAABB(wideNodes[wideRoot].traversalAABB);
 	}
 
 	void SceneBVH::DebugRender()
@@ -881,6 +1135,12 @@ namespace Engine
 		nodes[idx].fatAABB.min = glm::vec3(FLT_MAX);
 		nodes[idx].fatAABB.max = glm::vec3(-FLT_MAX);
 		nodes[idx].hasCullHistory = false;
+
+		if (idx >= 0 && idx < static_cast<int>(leafToWideParent.size()))
+		{
+			leafToWideParent[idx] = -1;
+			leafToWideSlot[idx] = 0xFF;
+		}
 
 		entityToLeaf.erase(it);
 

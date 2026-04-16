@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include <unordered_map>
+#include <limits>
 
 #include "Library/glm/glm.hpp"
 #include "Library/EnTT/entt.hpp"
@@ -43,32 +44,83 @@ namespace Engine
 		template<typename Func>
 		void QueryFrustumCallback(const Frustum& frustum, Func&& callback) const
 		{
-			if (root == -1)
+			if (wideRoot == -1)
 			{
 				return;
 			}
 
 			std::vector<std::pair<int, bool>> stack;
-			stack.reserve(128);
-			PushIfVisible(root, frustum, false, stack);
+			stack.reserve(64);
+
+			if (!PushWideRootIfVisible(frustum, stack))
+			{
+				return;
+			}
 
 			while (!stack.empty())
 			{
-				const auto [idx, fullyInside] = stack.back();
+				const auto [wideIndex, fullyInside] = stack.back();
 				stack.pop_back();
 
-				const BVHNode& node = nodes[idx];
-				if (node.IsLeaf())
+				const WideNode& node = wideNodes[wideIndex];
+				if (fullyInside)
 				{
-					if (node.entity != entt::null)
+					for (uint8_t i = 0; i < node.childCount; ++i)
 					{
-						callback(node.entity);
+						const int childRef = node.childRef[i];
+						if (childRef == InvalidWideChild)
+						{
+							continue;
+						}
+
+						if (IsEncodedWideLeaf(childRef))
+						{
+							const int leafIndex = DecodeWideLeaf(childRef);
+							const entt::entity entity = nodes[leafIndex].entity;
+							if (entity != entt::null)
+							{
+								callback(entity);
+							}
+						}
+						else
+						{
+							stack.emplace_back(childRef, true);
+						}
 					}
 					continue;
 				}
 
-				PushIfVisible(node.left, frustum, fullyInside, stack);
-				PushIfVisible(node.right, frustum, fullyInside, stack);
+				uint8_t fullyInsideMask = 0;
+				const uint8_t visibleMask = GetWideNodeVisibleMask(node, frustum, &fullyInsideMask);
+
+				for (uint8_t i = 0; i < node.childCount; ++i)
+				{
+					const uint8_t bit = static_cast<uint8_t>(1u << i);
+					if ((visibleMask & bit) == 0)
+					{
+						continue;
+					}
+
+					const int childRef = node.childRef[i];
+					if (childRef == InvalidWideChild)
+					{
+						continue;
+					}
+
+					if (IsEncodedWideLeaf(childRef))
+					{
+						const int leafIndex = DecodeWideLeaf(childRef);
+						const entt::entity entity = nodes[leafIndex].entity;
+						if (entity != entt::null)
+						{
+							callback(entity);
+						}
+					}
+					else
+					{
+						stack.emplace_back(childRef, (fullyInsideMask & bit) != 0);
+					}
+				}
 			}
 		}
 
@@ -182,33 +234,79 @@ namespace Engine
 			mutable bool lastVisible = false;
 			mutable bool hasCullHistory = false;
 
-			uint64_t lastRefitEpoch = 0;
-
 			[[nodiscard]] bool IsLeaf() const
 			{
 				return left == -1 && right == -1;
 			}
 		};
 
+		static constexpr int InvalidWideChild = INT32_MIN;
+
+		struct alignas(16) WideNode
+		{
+			alignas(16) float minX[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			alignas(16) float minY[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			alignas(16) float minZ[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			alignas(16) float maxX[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			alignas(16) float maxY[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			alignas(16) float maxZ[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
+			int childRef[4]{ InvalidWideChild, InvalidWideChild, InvalidWideChild, InvalidWideChild };
+			int parent = -1;
+			uint8_t parentSlot = 0xFF;
+			uint8_t childCount = 0;
+			mutable glm::vec3 lastCullAABBMin{ 0.0f, 0.0f, 0.0f };
+			mutable glm::vec3 lastCullAABBMax{ 0.0f, 0.0f, 0.0f };
+			mutable uint64_t lastFrustumRevision = 0;
+			mutable uint8_t lastRejectedPlane = 0;
+			mutable bool lastVisible = false;
+			mutable bool hasCullHistory = false;
+			AABB traversalAABB;
+		};
+
+		static bool IsEncodedWideLeaf(int childRef)
+		{
+			return childRef < 0 && childRef != InvalidWideChild;
+		}
+
+		static int EncodeWideLeaf(int leafIndex)
+		{
+			return -(leafIndex + 1);
+		}
+
+		static int DecodeWideLeaf(int childRef)
+		{
+			return -childRef - 1;
+		}
+
 		bool IsAABBVisible(const Frustum& frustum, const AABB& aabb) const;
 		bool IsNodeVisible(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const;
+		bool IsWideNodeVisible(const WideNode& node, const Frustum& frustum) const;
+		uint8_t GetWideNodeVisibleMask(const WideNode& node, const Frustum& frustum, uint8_t* outFullyInsideMask) const;
+		bool PushWideRootIfVisible(const Frustum& frustum, std::vector<std::pair<int, bool>>& stack) const;
 		const AABB& GetTraversalAABB(const BVHNode& node) const;
 		AABB CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform);
 		AABB CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform);
 
 		int BuildRecursive(std::vector<int>& leafIndices, int begin, int end);
-		void Refit(int nodeIndex);
-		void RefitAncestors(int leafIndex, uint64_t epoch);
+		void RefitBinaryAncestors(int leafIndex);
 		void FullRebuild();
+		int BuildWideRecursive(int binaryNodeIndex, int parentWideIndex, uint8_t parentSlot);
+		void BuildWideHierarchy();
+		void SetWideChildBounds(int wideIndex, uint8_t childSlot, const AABB& aabb);
+		void UpdateWideNodeBoundsFromChildren(int wideIndex);
+		void RefitWideAncestorsFromLeaf(int leafIndex);
 		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
 		entt::registry& registry;
 		entt::observer topologyObserver;
 
-		std::vector<BVHNode> nodes; // breadth first array
+		std::vector<BVHNode> nodes; // binary BVH kept for updates and ray casting
+		std::vector<WideNode> wideNodes; // 4-wide SoA frustum traversal layout
+		std::vector<int> leafToWideParent;
+		std::vector<uint8_t> leafToWideSlot;
 		std::unordered_map<entt::entity, int> entityToLeaf; // entity leaf index
 		int root = -1;
-		uint64_t refitEpoch = 1;
+		int wideRoot = -1;
 
 		SceneDebugDraw* debugDrawer = nullptr;
 

@@ -13,7 +13,8 @@ namespace Engine
 
 	struct FrustumCullCache
 	{
-		mutable glm::vec3 worldCorners[8];  // Transformed AABB corners in world space (computed lazily)
+		glm::vec3 worldCorners[8];          // Transformed AABB corners in world space
+		uint8_t negativeVertexIndices[6];   // Cached per-plane negative corner index
 
 		glm::vec3 lastAABBMin = glm::vec3(0.0f);
 		glm::vec3 lastAABBMax = glm::vec3(0.0f);
@@ -23,11 +24,12 @@ namespace Engine
 
 		uint64_t lastTransformVersion = 0;
 		uint64_t lastBoundsTransformVersion = 0;
+		uint64_t lastCornersTransformVersion = 0;
 		uint64_t lastFrustumRevision = 0;
 		uint8_t lastRejectedPlane = 0;
 
 		bool valid = false;
-		mutable bool cornersValid = false;
+		bool cornersValid = false;
 		bool hasVisibilityHistory = false;
 		bool lastVisible = false;
 
@@ -63,7 +65,6 @@ namespace Engine
 		}
 
 		// Recomputes world-space AABB if needed.
-		// The exact transformed corners are cached lazily so the hot culling path does not pay for 8 transforms per update.
 		void Update(const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& modelMatrix, uint64_t transformVersion)
 		{
 			if (HasCachedBounds(aabbMin, aabbMax, transformVersion))
@@ -75,6 +76,7 @@ namespace Engine
 			lastAABBMax = aabbMax;
 			lastModelMatrix = modelMatrix;
 			lastBoundsTransformVersion = transformVersion;
+			cornersValid = false;
 
 			const glm::vec3 localCenter = 0.5f * (aabbMin + aabbMax);
 			const glm::vec3 localExtents = 0.5f * glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
@@ -90,14 +92,33 @@ namespace Engine
 			lastWorldAABBMin = worldCenter - worldExtents;
 			lastWorldAABBMax = worldCenter + worldExtents;
 
+			// Precompute negative vertex indices for common frustum plane orientations.
+			const glm::vec3 normals[6] = {
+				{  1,  0,  0 },  // Left
+				{ -1,  0,  0 },  // Right
+				{  0,  1,  0 },  // Bottom
+				{  0, -1,  0 },  // Top
+				{  0,  0,  1 },  // Near
+				{  0,  0, -1 }   // Far
+			};
+
+			for (int i = 0; i < 6; ++i)
+			{
+				negativeVertexIndices[i] = ComputeNegativeVertexIndex(normals[i]);
+			}
+
 			valid = true;
-			cornersValid = false;
 			InvalidateTemporalHistory();
 		}
 
-		void EnsureWorldCorners() const
+		void EnsureWorldCorners()
 		{
-			if (cornersValid == true)
+			if (!valid)
+			{
+				return;
+			}
+
+			if (cornersValid && lastCornersTransformVersion == lastBoundsTransformVersion)
 			{
 				return;
 			}
@@ -110,19 +131,16 @@ namespace Engine
 			worldCorners[5] = glm::vec3(lastModelMatrix * glm::vec4(lastAABBMax.x, lastAABBMin.y, lastAABBMax.z, 1.0f));
 			worldCorners[6] = glm::vec3(lastModelMatrix * glm::vec4(lastAABBMin.x, lastAABBMax.y, lastAABBMax.z, 1.0f));
 			worldCorners[7] = glm::vec3(lastModelMatrix * glm::vec4(lastAABBMax.x, lastAABBMax.y, lastAABBMax.z, 1.0f));
+
+			lastCornersTransformVersion = lastBoundsTransformVersion;
 			cornersValid = true;
 		}
 
-		const glm::vec3* GetWorldCorners() const
+		// Inline: returns cached negative vertex for a specific frustum plane
+		inline glm::vec3 GetNegativeVertex(int planeIndex)
 		{
 			EnsureWorldCorners();
-			return worldCorners;
-		}
-
-		inline glm::vec3 GetNegativeVertex(const glm::vec3& normal) const
-		{
-			EnsureWorldCorners();
-			return worldCorners[ComputeNegativeVertexIndex(normal)];
+			return worldCorners[negativeVertexIndices[planeIndex]];
 		}
 
 	private:
@@ -130,10 +148,10 @@ namespace Engine
 		// Computes 3-bit corner index (0-7) based on a normal vector
 		inline uint8_t ComputeNegativeVertexIndex(const glm::vec3& normal) const
 		{
-			uint8_t x = normal.x >= 0.0f ? 0 : 1;
-			uint8_t y = normal.y >= 0.0f ? 0 : 1;
-			uint8_t z = normal.z >= 0.0f ? 0 : 1;
-			return static_cast<uint8_t>(x | (y << 1) | (z << 2));
+			const uint8_t x = normal.x >= 0.0f ? 0 : 1;
+			const uint8_t y = normal.y >= 0.0f ? 0 : 1;
+			const uint8_t z = normal.z >= 0.0f ? 0 : 1;
+			return static_cast<uint8_t>((x << 0) | (y << 1) | (z << 2));
 		}
 	};
 
