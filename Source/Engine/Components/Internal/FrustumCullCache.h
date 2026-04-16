@@ -132,7 +132,7 @@ namespace Engine
 			uint8_t x = normal.x >= 0.0f ? 0 : 1;
 			uint8_t y = normal.y >= 0.0f ? 0 : 1;
 			uint8_t z = normal.z >= 0.0f ? 0 : 1;
-			return static_cast<uint8_t>((x << 2) | (y << 1) | z);
+			return static_cast<uint8_t>(x | (y << 1) | (z << 2));
 		}
 	};
 

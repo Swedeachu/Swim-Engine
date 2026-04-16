@@ -6,6 +6,8 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
 #include "Library/EnTT/entt.hpp"
 
+#include <deque>
+
 namespace Engine
 {
 
@@ -59,6 +61,8 @@ namespace Engine
 		// Helpers for instance buffer update
 		void BuildFullScenePacket(Scene& scene);
 		bool CanUseFullScenePacket(const Scene& scene, const Frustum* frustum) const;
+		bool UpdateFullScenePacketDirtyEntities(Scene& scene);
+		bool PatchFullScenePacketFrame(uint32_t frameIndex);
 		void UploadFullScenePacket(uint32_t frameIndex, Scene& scene);
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
 		void GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum);
@@ -163,10 +167,21 @@ namespace Engine
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
 
+		struct FullSceneDirtyHistoryEntry
+		{
+			uint64_t version = 0;
+			std::vector<std::pair<uint32_t, uint32_t>> ranges;
+		};
+
 		std::vector<FullSceneRenderable> fullSceneRenderables;
 		std::vector<VkDrawIndexedIndirectCommand> fullSceneDrawCommands;
+		std::unordered_map<entt::entity, std::vector<uint32_t>> fullSceneEntityToInstanceIndices;
+		std::deque<FullSceneDirtyHistoryEntry> fullSceneDirtyHistory;
+		std::vector<uint64_t> uploadedFullScenePacketVersions;
+		std::vector<uint64_t> uploadedFullSceneCommandVersions;
 		const Scene* fullScenePacketScene = nullptr;
 		uint64_t fullScenePacketRenderablesRevision = 0;
+		uint64_t fullScenePacketVersion = 0;
 		bool fullScenePacketValid = false;
 
 		// One static quad to render all glyphs with

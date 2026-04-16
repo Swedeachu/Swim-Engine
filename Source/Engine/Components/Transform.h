@@ -47,6 +47,8 @@ namespace Engine
 
 		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
 		inline static std::vector<entt::entity> DirtyEntities{}; // coarse dirty list used by scene systems for incremental updates
+		inline static uint64_t DirtyEpoch = 1;
+		uint64_t lastQueuedDirtyEpoch = 0;
 		TransformSpace space = TransformSpace::World;
 
 		// Agnostic layer seperated from specifc rendering clip space for helping with UI layer priority logic such as mouse input.
@@ -75,6 +77,7 @@ namespace Engine
 		void MarkWorldDirtyOnly();
 
 		void MarkChildrenDirty();
+		void QueueDirtyEntity();
 
 		// Helper: parent world rotation (TR only, no scale)
 		static glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry);
@@ -109,7 +112,15 @@ namespace Engine
 
 		static bool AreAnyTransformsDirty() { return TransformsDirty; }
 		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }
-		static void ClearDirtyEntities() { DirtyEntities.clear(); }
+		static void ClearDirtyEntities()
+		{
+			DirtyEntities.clear();
+			++DirtyEpoch;
+			if (DirtyEpoch == 0)
+			{
+				DirtyEpoch = 1;
+			}
+		}
 		static const std::vector<entt::entity>& GetDirtyEntities() { return DirtyEntities; }
 
 		static void MarkEntityDirty(entt::entity entity)

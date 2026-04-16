@@ -31,6 +31,8 @@ namespace Engine
 		: device(device), physicalDevice(physicalDevice)
 	{
 		uploadedWorldPacketVersions.resize(MAX_FRAMES_IN_FLIGHT, 0);
+		uploadedFullScenePacketVersions.resize(MAX_FRAMES_IN_FLIGHT, 0);
+		uploadedFullSceneCommandVersions.resize(MAX_FRAMES_IN_FLIGHT, 0);
 		instanceBuffer = std::make_unique<Engine::VulkanInstanceBuffer>(
 			device,
 			physicalDevice,
@@ -336,6 +338,8 @@ namespace Engine
 
 		fullSceneRenderables.clear();
 		fullSceneDrawCommands.clear();
+		fullSceneEntityToInstanceIndices.clear();
+		fullSceneDirtyHistory.clear();
 
 		auto regularView = registry.view<Transform, Material>();
 		for (auto entity : regularView)
@@ -408,6 +412,17 @@ namespace Engine
 		fullSceneDrawCommands.reserve(fullSceneRenderables.size());
 		cpuInstanceData.resize(fullSceneRenderables.size());
 
+		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+		{
+			const FullSceneRenderable& item = fullSceneRenderables[i];
+			const Transform& tf = registry.get<Transform>(item.entity);
+
+			GpuInstanceData instance = item.baseInstance;
+			instance.model = tf.GetWorldMatrix(registry);
+			cpuInstanceData[i] = instance;
+			fullSceneEntityToInstanceIndices[item.entity].push_back(static_cast<uint32_t>(i));
+		}
+
 		uint32_t firstInstance = 0;
 		size_t begin = 0;
 		while (begin < fullSceneRenderables.size())
@@ -434,7 +449,130 @@ namespace Engine
 
 		fullScenePacketScene = &scene;
 		fullScenePacketRenderablesRevision = scene.GetRenderablesRevision();
+		++fullScenePacketVersion;
 		fullScenePacketValid = true;
+
+		std::fill(uploadedFullScenePacketVersions.begin(), uploadedFullScenePacketVersions.end(), 0);
+		std::fill(uploadedFullSceneCommandVersions.begin(), uploadedFullSceneCommandVersions.end(), 0);
+	}
+
+	bool VulkanIndexDraw::UpdateFullScenePacketDirtyEntities(Scene& scene)
+	{
+		const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
+		if (dirtyEntities.empty())
+		{
+			return false;
+		}
+
+		entt::registry& registry = scene.GetRegistry();
+		std::vector<uint32_t> dirtyIndices;
+		dirtyIndices.reserve(dirtyEntities.size());
+
+		for (entt::entity entity : dirtyEntities)
+		{
+			auto it = fullSceneEntityToInstanceIndices.find(entity);
+			if (it == fullSceneEntityToInstanceIndices.end())
+			{
+				continue;
+			}
+
+			if (!registry.valid(entity) || !registry.any_of<Transform>(entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = registry.get<Transform>(entity);
+			const glm::mat4& world = tf.GetWorldMatrix(registry);
+
+			for (uint32_t index : it->second)
+			{
+				cpuInstanceData[index].model = world;
+				dirtyIndices.push_back(index);
+			}
+		}
+
+		if (dirtyIndices.empty())
+		{
+			return false;
+		}
+
+		std::sort(dirtyIndices.begin(), dirtyIndices.end());
+		dirtyIndices.erase(std::unique(dirtyIndices.begin(), dirtyIndices.end()), dirtyIndices.end());
+
+		FullSceneDirtyHistoryEntry entry{};
+		++fullScenePacketVersion;
+		entry.version = fullScenePacketVersion;
+
+		uint32_t rangeStart = dirtyIndices[0];
+		uint32_t rangeCount = 1;
+		for (size_t i = 1; i < dirtyIndices.size(); ++i)
+		{
+			if (dirtyIndices[i] == dirtyIndices[i - 1] + 1)
+			{
+				++rangeCount;
+			}
+			else
+			{
+				entry.ranges.emplace_back(rangeStart, rangeCount);
+				rangeStart = dirtyIndices[i];
+				rangeCount = 1;
+			}
+		}
+		entry.ranges.emplace_back(rangeStart, rangeCount);
+
+		fullSceneDirtyHistory.push_back(std::move(entry));
+		while (fullSceneDirtyHistory.size() > 16)
+		{
+			fullSceneDirtyHistory.pop_front();
+		}
+
+		return true;
+	}
+
+	bool VulkanIndexDraw::PatchFullScenePacketFrame(uint32_t frameIndex)
+	{
+		if (frameIndex >= uploadedFullScenePacketVersions.size())
+		{
+			return false;
+		}
+
+		const uint64_t uploadedVersion = uploadedFullScenePacketVersions[frameIndex];
+		if (uploadedVersion == 0 || uploadedVersion == fullScenePacketVersion)
+		{
+			return false;
+		}
+
+		if (fullSceneDirtyHistory.empty())
+		{
+			return false;
+		}
+
+		const uint64_t oldestTrackedVersion = fullSceneDirtyHistory.front().version;
+		if (uploadedVersion + 1 < oldestTrackedVersion)
+		{
+			return false;
+		}
+
+		void* dst = instanceBuffer->BeginFrame(frameIndex);
+		for (const FullSceneDirtyHistoryEntry& entry : fullSceneDirtyHistory)
+		{
+			if (entry.version <= uploadedVersion)
+			{
+				continue;
+			}
+
+			for (const auto& range : entry.ranges)
+			{
+				std::memcpy(
+					static_cast<uint8_t*>(dst) + static_cast<size_t>(range.first) * sizeof(GpuInstanceData),
+					cpuInstanceData.data() + range.first,
+					static_cast<size_t>(range.second) * sizeof(GpuInstanceData)
+				);
+			}
+		}
+
+		uploadedFullScenePacketVersions[frameIndex] = fullScenePacketVersion;
+		return true;
 	}
 
 	void VulkanIndexDraw::UploadFullScenePacket(uint32_t frameIndex, Scene& scene)
@@ -445,16 +583,9 @@ namespace Engine
 		{
 			BuildFullScenePacket(scene);
 		}
-
-		entt::registry& registry = scene.GetRegistry();
-		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+		else
 		{
-			const FullSceneRenderable& item = fullSceneRenderables[i];
-			const Transform& tf = registry.get<Transform>(item.entity);
-
-			GpuInstanceData instance = item.baseInstance;
-			instance.model = tf.GetWorldMatrix(registry);
-			cpuInstanceData[i] = instance;
+			UpdateFullScenePacketDirtyEntities(scene);
 		}
 
 		worldDrawCommands = fullSceneDrawCommands;
@@ -463,15 +594,22 @@ namespace Engine
 		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
 		if (!cpuInstanceData.empty())
 		{
-			void* dst = instanceBuffer->BeginFrame(frameIndex);
-			memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+			if (!PatchFullScenePacketFrame(frameIndex))
+			{
+				void* dst = instanceBuffer->BeginFrame(frameIndex);
+				memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+				uploadedFullScenePacketVersions[frameIndex] = fullScenePacketVersion;
+			}
 		}
 
 		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
-		if (!worldDrawCommands.empty())
+		if (!worldDrawCommands.empty()
+			&& frameIndex < uploadedFullSceneCommandVersions.size()
+			&& uploadedFullSceneCommandVersions[frameIndex] != fullScenePacketRenderablesRevision)
 		{
 			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
 			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+			uploadedFullSceneCommandVersions[frameIndex] = fullScenePacketRenderablesRevision;
 		}
 	}
 

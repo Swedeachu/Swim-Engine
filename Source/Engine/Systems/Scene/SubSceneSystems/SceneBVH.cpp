@@ -7,8 +7,6 @@
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
-#include <unordered_set>
-
 namespace Engine
 {
 
@@ -128,12 +126,9 @@ namespace Engine
 			return;
 		}
 
-		std::unordered_set<entt::entity> visited;
-		visited.reserve(dirtyEntities.size());
-
 		for (entt::entity e : dirtyEntities)
 		{
-			if (e == entt::null || !visited.insert(e).second || !registry.valid(e) || !registry.any_of<Transform>(e))
+			if (e == entt::null || !registry.valid(e) || !registry.any_of<Transform>(e))
 			{
 				continue;
 			}

@@ -5,23 +5,51 @@
 namespace Engine
 {
 
+	void Transform::QueueDirtyEntity()
+	{
+		if (owner == entt::null)
+		{
+			return;
+		}
+
+		if (lastQueuedDirtyEpoch == DirtyEpoch)
+		{
+			return;
+		}
+
+		lastQueuedDirtyEpoch = DirtyEpoch;
+		MarkEntityDirty(owner);
+	}
+
 	void Transform::MarkDirty()
 	{
+		const bool alreadyQueuedThisFrame = (lastQueuedDirtyEpoch == DirtyEpoch);
+
 		dirty = true;
 		worldDirty = true;
-		++worldVersion;
 		TransformsDirty = true;
-		MarkEntityDirty(owner);
-		MarkChildrenDirty();
+
+		if (!alreadyQueuedThisFrame)
+		{
+			++worldVersion;
+			QueueDirtyEntity();
+			MarkChildrenDirty();
+		}
 	}
 
 	void Transform::MarkWorldDirtyOnly()
 	{
+		const bool alreadyQueuedThisFrame = (lastQueuedDirtyEpoch == DirtyEpoch);
+
 		worldDirty = true;
-		++worldVersion;
 		TransformsDirty = true;
-		MarkEntityDirty(owner);
-		MarkChildrenDirty();
+
+		if (!alreadyQueuedThisFrame)
+		{
+			++worldVersion;
+			QueueDirtyEntity();
+			MarkChildrenDirty();
+		}
 	}
 
 	void Transform::MarkChildrenDirty()
