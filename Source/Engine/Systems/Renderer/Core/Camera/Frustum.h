@@ -11,6 +11,13 @@
 namespace Engine
 {
 
+	enum class AABBFrustumClassification : uint8_t
+	{
+		Outside = 0,
+		Intersecting = 1,
+		Inside = 2
+	};
+
 	struct Frustum
 	{
 		glm::vec4 planes[6]; // ax + by + cz + d = 0
@@ -85,43 +92,47 @@ namespace Engine
 
 		bool ContainsAABB(const AABB& aabb) const
 		{
-			for (int i = 0; i < 6; ++i)
-			{
-				if (!IsAABBInsidePlane(aabb, planes[i]))
-				{
-					return false;
-				}
-			}
+			uint8_t planeHint = 0;
+			return ContainsAABB(aabb, planeHint);
+		}
 
-			return true;
+		bool ContainsAABB(const AABB& aabb, uint8_t& planeHint) const
+		{
+			return ClassifyAABB(aabb, planeHint) == AABBFrustumClassification::Inside;
 		}
 
 		bool IsAABBVisible(const AABB& aabb, uint8_t& planeHint) const
 		{
+			return ClassifyAABB(aabb, planeHint) != AABBFrustumClassification::Outside;
+		}
+
+		AABBFrustumClassification ClassifyAABB(const AABB& aabb) const
+		{
+			uint8_t planeHint = 0;
+			return ClassifyAABB(aabb, planeHint);
+		}
+
+		AABBFrustumClassification ClassifyAABB(const AABB& aabb, uint8_t& planeHint) const
+		{
 			const uint8_t firstPlane = planeHint < 6 ? planeHint : 0;
+			bool fullyInside = true;
 
-			if (IsAABBOutsidePlane(aabb, planes[firstPlane]))
+			for (uint8_t pass = 0; pass < 6; ++pass)
 			{
-				planeHint = firstPlane;
-				return false;
-			}
+				const uint8_t planeIndex = (pass == 0) ? firstPlane : static_cast<uint8_t>((pass <= firstPlane) ? (pass - 1) : pass);
+				const glm::vec4& plane = planes[planeIndex];
 
-			for (uint8_t i = 0; i < 6; ++i)
-			{
-				if (i == firstPlane)
+				if (IsAABBOutsidePlane(aabb, plane))
 				{
-					continue;
+					planeHint = planeIndex;
+					return AABBFrustumClassification::Outside;
 				}
 
-				if (IsAABBOutsidePlane(aabb, planes[i]))
-				{
-					planeHint = i;
-					return false;
-				}
+				fullyInside = fullyInside && IsAABBInsidePlane(aabb, plane);
 			}
 
 			planeHint = firstPlane;
-			return true;
+			return fullyInside ? AABBFrustumClassification::Inside : AABBFrustumClassification::Intersecting;
 		}
 
 		// This is actually the best method to use right now
@@ -153,7 +164,8 @@ namespace Engine
 			}
 
 			uint8_t planeHint = cache.lastRejectedPlane;
-			const bool visible = IsAABBVisible(worldAABB, planeHint);
+			const AABBFrustumClassification classification = ClassifyAABB(worldAABB, planeHint);
+			const bool visible = classification != AABBFrustumClassification::Outside;
 
 			cache.lastTransformVersion = transformVersion;
 			cache.lastFrustumRevision = revision;

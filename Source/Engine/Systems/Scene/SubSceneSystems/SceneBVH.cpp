@@ -29,6 +29,24 @@ namespace Engine
 
 		constexpr int kWideNodeArity = 4;
 		constexpr int kSAHBins = 8;
+		constexpr int kFrustumPlaneCount = 6;
+
+		void BuildPlaneTraversalOrder(uint8_t firstPlane, uint8_t* outOrder)
+		{
+			const uint8_t clampedFirstPlane = firstPlane < kFrustumPlaneCount ? firstPlane : 0;
+			outOrder[0] = clampedFirstPlane;
+
+			uint8_t writeIndex = 1;
+			for (uint8_t planeIndex = 0; planeIndex < kFrustumPlaneCount; ++planeIndex)
+			{
+				if (planeIndex == clampedFirstPlane)
+				{
+					continue;
+				}
+
+				outOrder[writeIndex++] = planeIndex;
+			}
+		}
 
 		AABB MergeAABBs(const AABB& a, const AABB& b)
 		{
@@ -553,6 +571,8 @@ namespace Engine
 		node.traversalAABB.min = glm::vec3(FLT_MAX);
 		node.traversalAABB.max = glm::vec3(-FLT_MAX);
 		node.hasCullHistory = false;
+		node.lastVisibleMask = 0;
+		node.lastFullyInsideMask = 0;
 
 		for (uint8_t i = 0; i < node.childCount; ++i)
 		{
@@ -624,6 +644,11 @@ namespace Engine
 		}
 
 		wideNodes[wideIndex].childCount = static_cast<uint8_t>(frontier.size());
+		for (uint8_t i = 0; i < kWideNodeArity; ++i)
+		{
+			wideNodes[wideIndex].childTraversalOrder[i] = i;
+		}
+
 		for (uint8_t i = 0; i < wideNodes[wideIndex].childCount; ++i)
 		{
 			const int childBinaryIndex = frontier[i];
@@ -698,7 +723,7 @@ namespace Engine
 		return node.IsLeaf() ? node.aabb : node.fatAABB;
 	}
 
-	bool SceneBVH::IsNodeVisible(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const
+	AABBFrustumClassification SceneBVH::ClassifyNode(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const
 	{
 		const uint64_t frustumRevision = Frustum::GetRevision();
 		if (node.hasCullHistory
@@ -706,23 +731,24 @@ namespace Engine
 			&& node.lastCullAABBMin == aabb.min
 			&& node.lastCullAABBMax == aabb.max)
 		{
-			return node.lastVisible;
+			return static_cast<AABBFrustumClassification>(node.lastClassification);
 		}
 
 		uint8_t planeHint = node.lastRejectedPlane;
-		const bool visible = frustum.IsAABBVisible(aabb, planeHint);
+		const AABBFrustumClassification classification = frustum.ClassifyAABB(aabb, planeHint);
 
 		node.lastRejectedPlane = planeHint;
 		node.lastFrustumRevision = frustumRevision;
 		node.lastCullAABBMin = aabb.min;
 		node.lastCullAABBMax = aabb.max;
-		node.lastVisible = visible;
+		node.lastClassification = static_cast<uint8_t>(classification);
+		node.lastVisible = classification != AABBFrustumClassification::Outside;
 		node.hasCullHistory = true;
 
-		return visible;
+		return classification;
 	}
 
-	bool SceneBVH::IsWideNodeVisible(const WideNode& node, const Frustum& frustum) const
+	AABBFrustumClassification SceneBVH::ClassifyWideNode(const WideNode& node, const Frustum& frustum) const
 	{
 		const uint64_t frustumRevision = Frustum::GetRevision();
 		if (node.hasCullHistory
@@ -730,19 +756,20 @@ namespace Engine
 			&& node.lastCullAABBMin == node.traversalAABB.min
 			&& node.lastCullAABBMax == node.traversalAABB.max)
 		{
-			return node.lastVisible;
+			return static_cast<AABBFrustumClassification>(node.lastClassification);
 		}
 
 		uint8_t planeHint = node.lastRejectedPlane;
-		const bool visible = frustum.IsAABBVisible(node.traversalAABB, planeHint);
+		const AABBFrustumClassification classification = frustum.ClassifyAABB(node.traversalAABB, planeHint);
 
 		node.lastRejectedPlane = planeHint;
 		node.lastFrustumRevision = frustumRevision;
 		node.lastCullAABBMin = node.traversalAABB.min;
 		node.lastCullAABBMax = node.traversalAABB.max;
-		node.lastVisible = visible;
+		node.lastClassification = static_cast<uint8_t>(classification);
+		node.lastVisible = classification != AABBFrustumClassification::Outside;
 		node.hasCullHistory = true;
-		return visible;
+		return classification;
 	}
 
 	uint8_t SceneBVH::GetWideNodeVisibleMask(const WideNode& node, const Frustum& frustum, uint8_t* outFullyInsideMask) const
@@ -750,11 +777,14 @@ namespace Engine
 		const uint8_t activeChildMask = static_cast<uint8_t>((1u << node.childCount) - 1u);
 		uint8_t visibleMask = activeChildMask;
 		uint8_t fullyInsideMask = activeChildMask;
+		uint8_t planeOrder[kFrustumPlaneCount]{ 0, 1, 2, 3, 4, 5 };
+		BuildPlaneTraversalOrder(node.lastRejectedPlane, planeOrder);
 
 	#if SWIM_BVH_USE_SSE
 		const __m128 zero = _mm_setzero_ps();
-		for (int planeIndex = 0; planeIndex < 6; ++planeIndex)
+		for (int planePass = 0; planePass < kFrustumPlaneCount; ++planePass)
 		{
+			const int planeIndex = planeOrder[planePass];
 			const glm::vec4& plane = frustum.planes[planeIndex];
 			const __m128 px = _mm_set1_ps(plane.x);
 			const __m128 py = _mm_set1_ps(plane.y);
@@ -795,29 +825,93 @@ namespace Engine
 			childAABB.min = glm::vec3(node.minX[childIndex], node.minY[childIndex], node.minZ[childIndex]);
 			childAABB.max = glm::vec3(node.maxX[childIndex], node.maxY[childIndex], node.maxZ[childIndex]);
 
-			if (!frustum.IsAABBVisible(childAABB))
+			uint8_t planeHint = node.lastRejectedPlane;
+			const AABBFrustumClassification classification = frustum.ClassifyAABB(childAABB, planeHint);
+			if (classification == AABBFrustumClassification::Outside)
 			{
 				visibleMask = static_cast<uint8_t>(visibleMask & ~(1u << childIndex));
 				fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & ~(1u << childIndex));
 				continue;
 			}
 
-			if (!frustum.ContainsAABB(childAABB))
+			if (classification != AABBFrustumClassification::Inside)
 			{
 				fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & ~(1u << childIndex));
 			}
 		}
 	#endif
 
+		fullyInsideMask = static_cast<uint8_t>(fullyInsideMask & visibleMask);
 		if (outFullyInsideMask != nullptr)
 		{
-			*outFullyInsideMask = static_cast<uint8_t>(fullyInsideMask & visibleMask);
+			*outFullyInsideMask = fullyInsideMask;
 		}
 
 		return visibleMask;
 	}
 
-	bool SceneBVH::PushWideRootIfVisible(const Frustum& frustum, std::vector<std::pair<int, bool>>& stack) const
+	void SceneBVH::CollectWideTraversalOrder(const WideNode& node, uint8_t visibleMask, uint8_t fullyInsideMask, uint8_t* outOrder, uint8_t& outCount) const
+	{
+		outCount = 0;
+
+		const uint8_t activeMask = static_cast<uint8_t>((1u << node.childCount) - 1u);
+		const uint8_t clampedVisibleMask = static_cast<uint8_t>(visibleMask & activeMask);
+		const uint8_t clampedFullyInsideMask = static_cast<uint8_t>(fullyInsideMask & clampedVisibleMask);
+		const uint8_t visibleIntersectingMask = static_cast<uint8_t>(clampedVisibleMask & ~clampedFullyInsideMask);
+		const uint8_t invisibleMask = static_cast<uint8_t>(activeMask & ~clampedVisibleMask);
+
+		uint8_t orderedAll[4]{ 0, 1, 2, 3 };
+		uint8_t orderedAllCount = 0;
+		uint8_t emittedMask = 0;
+
+		auto tryAppend = [&](uint8_t mask, bool visible)
+		{
+			auto appendIfNeeded = [&](uint8_t childIndex)
+			{
+				if (childIndex >= node.childCount)
+				{
+					return;
+				}
+
+				const uint8_t bit = static_cast<uint8_t>(1u << childIndex);
+				if ((mask & bit) == 0 || (emittedMask & bit) != 0)
+				{
+					return;
+				}
+
+				emittedMask = static_cast<uint8_t>(emittedMask | bit);
+				orderedAll[orderedAllCount++] = childIndex;
+				if (visible)
+				{
+					outOrder[outCount++] = childIndex;
+				}
+			};
+
+			for (uint8_t orderIndex = 0; orderIndex < node.childCount; ++orderIndex)
+			{
+				appendIfNeeded(node.childTraversalOrder[orderIndex]);
+			}
+
+			for (uint8_t childIndex = 0; childIndex < node.childCount; ++childIndex)
+			{
+				appendIfNeeded(childIndex);
+			}
+		};
+
+		tryAppend(clampedFullyInsideMask, true);
+		tryAppend(visibleIntersectingMask, true);
+		tryAppend(invisibleMask, false);
+
+		for (uint8_t i = 0; i < node.childCount; ++i)
+		{
+			node.childTraversalOrder[i] = orderedAll[i];
+		}
+
+		node.lastVisibleMask = clampedVisibleMask;
+		node.lastFullyInsideMask = clampedFullyInsideMask;
+	}
+
+	bool SceneBVH::PushWideRootIfVisible(const Frustum& frustum, WideTraversalItem* stack, int& stackSize) const
 	{
 		if (wideRoot == -1)
 		{
@@ -825,19 +919,19 @@ namespace Engine
 		}
 
 		const WideNode& rootNode = wideNodes[wideRoot];
-		if (frustum.ContainsAABB(rootNode.traversalAABB))
+		const AABBFrustumClassification classification = ClassifyWideNode(rootNode, frustum);
+		if (classification == AABBFrustumClassification::Outside)
 		{
-			stack.emplace_back(wideRoot, true);
-			return true;
+			return false;
 		}
 
-		if (IsWideNodeVisible(rootNode, frustum))
+		if (stackSize >= WideTraversalStackMax)
 		{
-			stack.emplace_back(wideRoot, false);
-			return true;
+			return false;
 		}
 
-		return false;
+		stack[stackSize++] = { wideRoot, classification == AABBFrustumClassification::Inside };
+		return true;
 	}
 
 	inline void SceneBVH::PushIfVisible(int nodeIdx, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const
@@ -869,15 +963,10 @@ namespace Engine
 		}
 
 		const AABB& traversalAABB = GetTraversalAABB(node);
-		if (frustum.ContainsAABB(traversalAABB))
+		const AABBFrustumClassification classification = ClassifyNode(node, frustum, traversalAABB);
+		if (classification != AABBFrustumClassification::Outside)
 		{
-			stack.emplace_back(nodeIdx, true);
-			return;
-		}
-
-		if (IsNodeVisible(node, frustum, traversalAABB))
-		{
-			stack.emplace_back(nodeIdx, false);
+			stack.emplace_back(nodeIdx, classification == AABBFrustumClassification::Inside);
 		}
 	}
 
@@ -889,24 +978,28 @@ namespace Engine
 			return;
 		}
 
-		std::vector<std::pair<int, bool>> stack;
-		stack.reserve(64);
-		if (!PushWideRootIfVisible(frustum, stack))
+		WideTraversalItem stack[WideTraversalStackMax];
+		int stackSize = 0;
+		if (!PushWideRootIfVisible(frustum, stack, stackSize))
 		{
 			return;
 		}
 
-		while (!stack.empty())
+		while (stackSize > 0)
 		{
-			const auto [wideIndex, fullyInside] = stack.back();
-			stack.pop_back();
-
-			const WideNode& node = wideNodes[wideIndex];
-			if (fullyInside)
+			const WideTraversalItem item = stack[--stackSize];
+			const WideNode& node = wideNodes[item.wideIndex];
+			if (item.fullyInside)
 			{
-				for (uint8_t i = 0; i < node.childCount; ++i)
+				for (int orderIndex = static_cast<int>(node.childCount) - 1; orderIndex >= 0; --orderIndex)
 				{
-					const int childRef = node.childRef[i];
+					const uint8_t childIndex = node.childTraversalOrder[orderIndex];
+					if (childIndex >= node.childCount)
+					{
+						continue;
+					}
+
+					const int childRef = node.childRef[childIndex];
 					if (childRef == InvalidWideChild)
 					{
 						continue;
@@ -921,9 +1014,9 @@ namespace Engine
 							outVisible.push_back(entity);
 						}
 					}
-					else
+					else if (stackSize < WideTraversalStackMax)
 					{
-						stack.emplace_back(childRef, true);
+						stack[stackSize++] = { childRef, true };
 					}
 				}
 				continue;
@@ -932,15 +1025,15 @@ namespace Engine
 			uint8_t fullyInsideMask = 0;
 			const uint8_t visibleMask = GetWideNodeVisibleMask(node, frustum, &fullyInsideMask);
 
-			for (uint8_t i = 0; i < node.childCount; ++i)
-			{
-				const uint8_t bit = static_cast<uint8_t>(1u << i);
-				if ((visibleMask & bit) == 0)
-				{
-					continue;
-				}
+			uint8_t traversalOrder[4]{ 0, 1, 2, 3 };
+			uint8_t traversalCount = 0;
+			CollectWideTraversalOrder(node, visibleMask, fullyInsideMask, traversalOrder, traversalCount);
 
-				const int childRef = node.childRef[i];
+			for (int orderIndex = static_cast<int>(traversalCount) - 1; orderIndex >= 0; --orderIndex)
+			{
+				const uint8_t childIndex = traversalOrder[orderIndex];
+				const uint8_t bit = static_cast<uint8_t>(1u << childIndex);
+				const int childRef = node.childRef[childIndex];
 				if (childRef == InvalidWideChild)
 				{
 					continue;
@@ -955,9 +1048,9 @@ namespace Engine
 						outVisible.push_back(entity);
 					}
 				}
-				else
+				else if (stackSize < WideTraversalStackMax)
 				{
-					stack.emplace_back(childRef, (fullyInsideMask & bit) != 0);
+					stack[stackSize++] = { childRef, (fullyInsideMask & bit) != 0 };
 				}
 			}
 		}
@@ -982,7 +1075,7 @@ namespace Engine
 			return false;
 		}
 
-		return frustum.ContainsAABB(wideNodes[wideRoot].traversalAABB);
+		return ClassifyWideNode(wideNodes[wideRoot], frustum) == AABBFrustumClassification::Inside;
 	}
 
 	void SceneBVH::DebugRender()
