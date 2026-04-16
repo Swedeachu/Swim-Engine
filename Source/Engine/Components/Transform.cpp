@@ -11,6 +11,7 @@ namespace Engine
 		worldDirty = true;
 		++worldVersion;
 		TransformsDirty = true;
+		MarkEntityDirty(owner);
 		MarkChildrenDirty();
 	}
 
@@ -19,6 +20,7 @@ namespace Engine
 		worldDirty = true;
 		++worldVersion;
 		TransformsDirty = true;
+		MarkEntityDirty(owner);
 		MarkChildrenDirty();
 	}
 

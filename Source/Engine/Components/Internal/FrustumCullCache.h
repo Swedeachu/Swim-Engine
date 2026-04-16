@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include "Library/glm/glm.hpp"
+#include "Engine/Systems/Renderer/Core/MathTypes/AABB.h"
 
 // Internal components are components the gameplay programmers making the game should never have to worry about, 
 // the engine makes them for its self only to do optimized things like spacial partions.
@@ -22,6 +23,7 @@ namespace Engine
 		glm::mat4 lastModelMatrix = glm::mat4(0.0f);
 
 		uint64_t lastTransformVersion = 0;
+		uint64_t lastBoundsTransformVersion = 0;
 		uint64_t lastFrustumRevision = 0;
 		uint8_t lastRejectedPlane = 0;
 
@@ -44,13 +46,26 @@ namespace Engine
 				&& lastWorldAABBMax == worldAABBMax;
 		}
 
-		// Recomputes transformed corners and negative vertex indices if needed
-		void Update(const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& modelMatrix)
+		bool HasCachedBounds(const glm::vec3& aabbMin, const glm::vec3& aabbMax, uint64_t transformVersion) const
 		{
-			if (valid &&
-				lastAABBMin == aabbMin &&
-				lastAABBMax == aabbMax &&
-				lastModelMatrix == modelMatrix)
+			return valid
+				&& lastBoundsTransformVersion == transformVersion
+				&& lastAABBMin == aabbMin
+				&& lastAABBMax == aabbMax;
+		}
+
+		AABB GetWorldAABB() const
+		{
+			AABB worldAABB;
+			worldAABB.min = lastWorldAABBMin;
+			worldAABB.max = lastWorldAABBMax;
+			return worldAABB;
+		}
+
+		// Recomputes transformed corners and world-space AABB if needed.
+		void Update(const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& modelMatrix, uint64_t transformVersion)
+		{
+			if (HasCachedBounds(aabbMin, aabbMax, transformVersion))
 			{
 				return;
 			}
@@ -58,8 +73,23 @@ namespace Engine
 			lastAABBMin = aabbMin;
 			lastAABBMax = aabbMax;
 			lastModelMatrix = modelMatrix;
+			lastBoundsTransformVersion = transformVersion;
 
-			// Recompute world-space corners
+			const glm::vec3 localCenter = 0.5f * (aabbMin + aabbMax);
+			const glm::vec3 localExtents = 0.5f * glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
+			const glm::vec3 worldCenter = glm::vec3(modelMatrix * glm::vec4(localCenter, 1.0f));
+
+			glm::mat3 absBasis(1.0f);
+			for (int column = 0; column < 3; ++column)
+			{
+				absBasis[column] = glm::abs(glm::vec3(modelMatrix[column]));
+			}
+
+			const glm::vec3 worldExtents = absBasis * localExtents;
+			lastWorldAABBMin = worldCenter - worldExtents;
+			lastWorldAABBMax = worldCenter + worldExtents;
+
+			// Keep the exact transformed corners around as cached auxiliary data.
 			worldCorners[0] = glm::vec3(modelMatrix * glm::vec4(aabbMin.x, aabbMin.y, aabbMin.z, 1.0f));
 			worldCorners[1] = glm::vec3(modelMatrix * glm::vec4(aabbMax.x, aabbMin.y, aabbMin.z, 1.0f));
 			worldCorners[2] = glm::vec3(modelMatrix * glm::vec4(aabbMin.x, aabbMax.y, aabbMin.z, 1.0f));
@@ -68,15 +98,6 @@ namespace Engine
 			worldCorners[5] = glm::vec3(modelMatrix * glm::vec4(aabbMax.x, aabbMin.y, aabbMax.z, 1.0f));
 			worldCorners[6] = glm::vec3(modelMatrix * glm::vec4(aabbMin.x, aabbMax.y, aabbMax.z, 1.0f));
 			worldCorners[7] = glm::vec3(modelMatrix * glm::vec4(aabbMax.x, aabbMax.y, aabbMax.z, 1.0f));
-
-			lastWorldAABBMin = worldCorners[0];
-			lastWorldAABBMax = worldCorners[0];
-
-			for (int i = 1; i < 8; ++i)
-			{
-				lastWorldAABBMin = glm::min(lastWorldAABBMin, worldCorners[i]);
-				lastWorldAABBMax = glm::max(lastWorldAABBMax, worldCorners[i]);
-			}
 
 			// Precompute negative vertex indices for common frustum plane orientations
 			const glm::vec3 normals[6] = {

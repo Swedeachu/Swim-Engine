@@ -37,6 +37,13 @@ namespace Engine
 	template<typename T>
 	void Scene::OnComponentConstruct(entt::registry& reg, entt::entity entity)
 	{
+		if constexpr (std::is_same_v<T, Transform>)
+		{
+			Transform& tf = reg.get<Transform>(entity);
+			tf.owner = entity;
+			Transform::MarkEntityDirty(entity);
+		}
+
 		if constexpr (
 			std::is_same_v<T, Transform>
 			|| std::is_same_v<T, Material>
@@ -595,6 +602,7 @@ namespace Engine
 	void Scene::InternalScenePostUpdate(double dt)
 	{
 		Transform::ClearGlobalDirtyFlag();
+		Transform::ClearDirtyEntities();
 
 		// if constexpr (handleDebugDraw)
 		sceneBVH->DebugRender();

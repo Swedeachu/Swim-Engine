@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
+#include <vector>
+#include <unordered_map>
 
 #include "Library/glm/glm.hpp"
 #include "Library/EnTT/entt.hpp"
@@ -26,6 +29,7 @@ namespace Engine
 		void DebugRender();
 		void UpdateIfNeeded(entt::observer& frustumObserver);
 		void QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
+		bool IsFullyVisible(const Frustum& frustum) const;
 		void RemoveEntity(entt::entity entity);
 
 		bool ShouldForceUpdate() const { return forceUpdate; }
@@ -44,13 +48,13 @@ namespace Engine
 				return;
 			}
 
-			std::vector<int> stack;
+			std::vector<std::pair<int, bool>> stack;
 			stack.reserve(128);
-			PushIfVisible(root, frustum, stack);
+			PushIfVisible(root, frustum, false, stack);
 
 			while (!stack.empty())
 			{
-				const int idx = stack.back();
+				const auto [idx, fullyInside] = stack.back();
 				stack.pop_back();
 
 				const BVHNode& node = nodes[idx];
@@ -63,8 +67,8 @@ namespace Engine
 					continue;
 				}
 
-				PushIfVisible(node.left, frustum, stack);
-				PushIfVisible(node.right, frustum, stack);
+				PushIfVisible(node.left, frustum, fullyInside, stack);
+				PushIfVisible(node.right, frustum, fullyInside, stack);
 			}
 		}
 
@@ -187,14 +191,15 @@ namespace Engine
 		bool IsNodeVisible(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const;
 		const AABB& GetTraversalAABB(const BVHNode& node) const;
 		AABB CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform);
+		AABB CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform);
 
 		int BuildRecursive(std::vector<int>& leafIndices, int begin, int end);
 		void Refit(int nodeIndex);
 		void FullRebuild();
-		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, std::vector<int>& stack) const;
+		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
 		entt::registry& registry;
-		entt::observer observer;
+		entt::observer topologyObserver;
 
 		std::vector<BVHNode> nodes; // breadth first array
 		std::unordered_map<entt::entity, int> entityToLeaf; // entity leaf index

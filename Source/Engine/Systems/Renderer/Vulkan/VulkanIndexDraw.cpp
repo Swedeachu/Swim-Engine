@@ -309,6 +309,172 @@ namespace Engine
 		}
 	}
 
+	bool VulkanIndexDraw::CanUseFullScenePacket(const Scene& scene, const Frustum* frustum) const
+	{
+		if (frustum == nullptr)
+		{
+			return false;
+		}
+
+		if (cullMode != CullMode::CPU || !useQueriedFrustumSceneBVH)
+		{
+			return false;
+		}
+
+		SceneBVH* sceneBVH = scene.GetSceneBVH();
+		if (sceneBVH == nullptr)
+		{
+			return false;
+		}
+
+		return sceneBVH->IsFullyVisible(*frustum);
+	}
+
+	void VulkanIndexDraw::BuildFullScenePacket(Scene& scene)
+	{
+		entt::registry& registry = scene.GetRegistry();
+
+		fullSceneRenderables.clear();
+		fullSceneDrawCommands.clear();
+
+		auto regularView = registry.view<Transform, Material>();
+		for (auto entity : regularView)
+		{
+			if (!scene.ShouldRenderBasedOnState(entity) || registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = regularView.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
+
+			const std::shared_ptr<MaterialData>& mat = regularView.get<Material>(entity).data;
+			if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+			{
+				continue;
+			}
+
+			FullSceneRenderable item{};
+			item.entity = entity;
+			item.material = mat;
+			item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
+			item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
+			item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+			item.baseInstance.materialIndex = 0u;
+			fullSceneRenderables.push_back(std::move(item));
+		}
+
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		for (auto entity : compositeView)
+		{
+			if (!scene.ShouldRenderBasedOnState(entity) || registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = compositeView.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
+
+			const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
+			for (const auto& mat : composite.subMaterials)
+			{
+				if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+				{
+					continue;
+				}
+
+				FullSceneRenderable item{};
+				item.entity = entity;
+				item.material = mat;
+				item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
+				item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
+				item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+				item.baseInstance.materialIndex = 0u;
+				fullSceneRenderables.push_back(std::move(item));
+			}
+		}
+
+		std::sort(fullSceneRenderables.begin(), fullSceneRenderables.end(), [](const FullSceneRenderable& a, const FullSceneRenderable& b)
+		{
+			return a.material->mesh->meshBufferData->GetMeshID() < b.material->mesh->meshBufferData->GetMeshID();
+		});
+
+		fullSceneDrawCommands.reserve(fullSceneRenderables.size());
+		cpuInstanceData.resize(fullSceneRenderables.size());
+
+		uint32_t firstInstance = 0;
+		size_t begin = 0;
+		while (begin < fullSceneRenderables.size())
+		{
+			const MeshBufferData& mesh = *fullSceneRenderables[begin].material->mesh->meshBufferData;
+			size_t end = begin + 1;
+			while (end < fullSceneRenderables.size()
+				&& fullSceneRenderables[end].material->mesh->meshBufferData->GetMeshID() == mesh.GetMeshID())
+			{
+				++end;
+			}
+
+			VkDrawIndexedIndirectCommand cmd{};
+			cmd.indexCount = mesh.indexCount;
+			cmd.instanceCount = static_cast<uint32_t>(end - begin);
+			cmd.firstIndex = static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint32_t));
+			cmd.vertexOffset = static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
+			cmd.firstInstance = firstInstance;
+			fullSceneDrawCommands.push_back(cmd);
+
+			firstInstance += cmd.instanceCount;
+			begin = end;
+		}
+
+		fullScenePacketScene = &scene;
+		fullScenePacketRenderablesRevision = scene.GetRenderablesRevision();
+		fullScenePacketValid = true;
+	}
+
+	void VulkanIndexDraw::UploadFullScenePacket(uint32_t frameIndex, Scene& scene)
+	{
+		if (!fullScenePacketValid
+			|| fullScenePacketScene != &scene
+			|| fullScenePacketRenderablesRevision != scene.GetRenderablesRevision())
+		{
+			BuildFullScenePacket(scene);
+		}
+
+		entt::registry& registry = scene.GetRegistry();
+		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
+		{
+			const FullSceneRenderable& item = fullSceneRenderables[i];
+			const Transform& tf = registry.get<Transform>(item.entity);
+
+			GpuInstanceData instance = item.baseInstance;
+			instance.model = tf.GetWorldMatrix(registry);
+			cpuInstanceData[i] = instance;
+		}
+
+		worldDrawCommands = fullSceneDrawCommands;
+		cachedWorldInstanceCount = cpuInstanceData.size();
+
+		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
+		if (!cpuInstanceData.empty())
+		{
+			void* dst = instanceBuffer->BeginFrame(frameIndex);
+			memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
+		}
+
+		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
+		if (!worldDrawCommands.empty())
+		{
+			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
+			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
+		}
+	}
+
 	// This actually does CPU culling logic here if that mode is activated
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
@@ -330,6 +496,12 @@ namespace Engine
 		{
 			cpuInstanceData.resize(cachedWorldInstanceCount);
 			UploadCachedWorldPacketToFrame(frameIndex);
+			return;
+		}
+
+		if (CanUseFullScenePacket(*scene, frustum))
+		{
+			UploadFullScenePacket(frameIndex, *scene);
 			return;
 		}
 
@@ -394,27 +566,32 @@ namespace Engine
 			if (registry.all_of<Material>(entity))
 			{
 				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(entity).data;
-				AddInstance(registry, tf, mat, nullptr);
+				AddInstance(registry, entity, tf, mat, nullptr);
 			}
 			else if (registry.all_of<CompositeMaterial>(entity))
 			{
 				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
 				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
 				{
-					AddInstance(registry, tf, mat, nullptr);
+					AddInstance(registry, entity, tf, mat, nullptr);
 				}
 			}
 		});
 	}
 
 	// Passing space as TransformSpace::Ambiguous will just render all entities
-	void VulkanIndexDraw::GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum)
+	void VulkanIndexDraw::GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 
 		auto regularView = registry.view<Transform, Material>();
 		for (auto entity : regularView)
 		{
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
 			// Skip what should not be rendered
 			if (!scene->ShouldRenderBasedOnState(entity))
 			{
@@ -425,13 +602,18 @@ namespace Engine
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
 				const auto& mat = regularView.get<Material>(entity).data;
-				AddInstance(registry, tf, mat, frustum);
+				AddInstance(registry, entity, tf, mat, frustum);
 			}
 		}
 
 		auto compositeView = registry.view<Transform, CompositeMaterial>();
 		for (auto entity : compositeView)
 		{
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
 			// Skip what should not be rendered
 			if (!scene->ShouldRenderBasedOnState(entity))
 			{
@@ -444,21 +626,34 @@ namespace Engine
 				const auto& composite = compositeView.get<CompositeMaterial>(entity);
 				for (const auto& mat : composite.subMaterials)
 				{
-					AddInstance(registry, tf, mat, frustum);
+					AddInstance(registry, entity, tf, mat, frustum);
 				}
 			}
 		}
 	}
 
-	void VulkanIndexDraw::AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
+	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
+		if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+		{
+			return;
+		}
+
 		const glm::vec4& min = mat->mesh->meshBufferData->aabbMin;
 		const glm::vec4& max = mat->mesh->meshBufferData->aabbMax;
 
 		// Frustum culling if world-space
 		if (frustum && transform.GetTransformSpace() == TransformSpace::World)
 		{
-			if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
+			if (registry.valid(entity) && registry.any_of<FrustumCullCache>(entity))
+			{
+				auto& cache = registry.get<FrustumCullCache>(entity);
+				if (!frustum->IsVisibleCached(cache, glm::vec3(min), glm::vec3(max), transform.GetWorldMatrix(registry), transform.GetWorldVersion()))
+				{
+					return;
+				}
+			}
+			else if (!frustum->IsVisibleLazy(min, max, transform.GetWorldMatrix(registry)))
 			{
 				return;
 			}
@@ -765,7 +960,15 @@ namespace Engine
 			{
 				if (space == TransformSpace::World)
 				{
-					if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+					if (registry.any_of<FrustumCullCache>(entity))
+					{
+						auto& cache = registry.get<FrustumCullCache>(entity);
+						if (!frustum.IsVisibleCached(cache, glm::vec3(matComp.data->mesh->meshBufferData->aabbMin), glm::vec3(matComp.data->mesh->meshBufferData->aabbMax), model, transform.GetWorldVersion()))
+						{
+							return;
+						}
+					}
+					else if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
 					{
 						return;
 					}

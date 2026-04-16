@@ -7,6 +7,8 @@
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
+#include <unordered_set>
+
 namespace Engine
 {
 
@@ -70,12 +72,9 @@ namespace Engine
 
 	void SceneBVH::Init()
 	{
-		observer.connect(registry, entt::collector
+		topologyObserver.connect(registry, entt::collector
 			.group<Transform, Material>()
-			.group<Transform, CompositeMaterial>()
-			.update<Transform>()
-			.update<Material>()
-			.update<CompositeMaterial>());
+			.group<Transform, CompositeMaterial>());
 
 		registry.on_destroy<Transform>().connect<&SceneBVH::RemoveEntity>(*this);
 		registry.on_destroy<Material>().connect<&SceneBVH::RemoveEntity>(*this);
@@ -91,137 +90,128 @@ namespace Engine
 
 	AABB SceneBVH::CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform)
 	{
-		const glm::vec3& localMin = mesh->meshBufferData->aabbMin;
-		const glm::vec3& localMax = mesh->meshBufferData->aabbMax;
+		return CalculateWorldAABB(entt::null, glm::vec3(mesh->meshBufferData->aabbMin), glm::vec3(mesh->meshBufferData->aabbMax), transform);
+	}
+
+	AABB SceneBVH::CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform)
+	{
 		const glm::mat4& model = transform.GetWorldMatrix(registry);
 
-		glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
-		glm::vec3 worldMax = worldMin;
+		if (entity != entt::null && registry.any_of<FrustumCullCache>(entity))
+		{
+			auto& cache = registry.get<FrustumCullCache>(entity);
+			cache.Update(localMin, localMax, model, transform.GetWorldVersion());
+			return cache.GetWorldAABB();
+		}
 
-		// EXPAND_CORNER(localMin.x, localMin.y, localMin.z);
-		EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
-		EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
-		EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
-		EXPAND_CORNER(localMin.x, localMin.y, localMax.z);
-		EXPAND_CORNER(localMax.x, localMin.y, localMax.z);
-		EXPAND_CORNER(localMin.x, localMax.y, localMax.z);
-		EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
-
-		return { worldMin, worldMax };
+		return Frustum::BuildWorldAABB(localMin, localMax, model);
 	}
 
 	void SceneBVH::Update()
 	{
 		bool anyLeafEscapedFatBounds = false;
 
-		// === Handle regular Material entities ===
-		auto view = registry.view<Transform, Material>();
-		for (entt::entity e : view)
+		// === Rebuild / refit check ===
+		static constexpr float kRebuildThreshold = 0.15f;
+
+		if (root == -1 || topologyObserver.size() > 0 || forceUpdate)
 		{
-			const Transform& tf = view.get<Transform>(e);
-			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
-
-			const std::shared_ptr<MaterialData>& mat = view.get<Material>(e).data;
-			const std::shared_ptr<Mesh>& mesh = mat->mesh;
-
-			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
-
-			auto it = entityToLeaf.find(e);
-			if (it != entityToLeaf.end())
-			{
-				if (needsAabbUpdate)
-				{
-					BVHNode& leaf = nodes[it->second];
-					leaf.aabb = CalculateWorldAABB(mesh, tf);
-					if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
-					{
-						leaf.fatAABB = MakeFatAABB(leaf.aabb);
-						anyLeafEscapedFatBounds = true;
-					}
-				}
-			}
-			else
-			{
-				BVHNode leaf;
-				leaf.entity = e;
-				leaf.aabb = CalculateWorldAABB(mesh, tf);
-				leaf.fatAABB = MakeFatAABB(leaf.aabb);
-
-				int newIdx = static_cast<int>(nodes.size());
-				nodes.emplace_back(std::move(leaf));
-				entityToLeaf[e] = newIdx;
-			}
+			FullRebuild();
+			forceUpdate = false;
+			topologyObserver.clear();
+			return;
 		}
 
-		// === Handle CompositeMaterial entities ===
-		auto compositeView = registry.view<Transform, CompositeMaterial>();
-		for (entt::entity e : compositeView)
+		const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
+		if (dirtyEntities.empty())
 		{
-			const Transform& tf = compositeView.get<Transform>(e);
-			if (tf.GetTransformSpace() != TransformSpace::World) { continue; }
+			return;
+		}
 
-			const CompositeMaterial& comp = compositeView.get<CompositeMaterial>(e);
-			if (comp.subMaterials.empty()) { continue; }
+		std::unordered_set<entt::entity> visited;
+		visited.reserve(dirtyEntities.size());
 
-			glm::vec3 localMin;
-			glm::vec3 localMax;
-			if (!HasRenderableSubMaterials(comp, localMin, localMax))
+		for (entt::entity e : dirtyEntities)
+		{
+			if (e == entt::null || !visited.insert(e).second || !registry.valid(e) || !registry.any_of<Transform>(e))
 			{
 				continue;
 			}
 
-			// Transform to world space
-			const glm::mat4& model = tf.GetWorldMatrix(registry);
-
-			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
-			glm::vec3 worldMax = worldMin;
-
-			EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
-			EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
-			EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
-			EXPAND_CORNER(localMin.x, localMin.y, localMax.z);
-			EXPAND_CORNER(localMax.x, localMin.y, localMax.z);
-			EXPAND_CORNER(localMin.x, localMax.y, localMax.z);
-			EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
-
-			AABB worldAABB = { worldMin, worldMax };
-			const bool needsAabbUpdate = tf.IsDirty() || tf.IsWorldDirty();
-
-			auto it = entityToLeaf.find(e);
-			if (it != entityToLeaf.end())
+			const Transform& tf = registry.get<Transform>(e);
+			if (tf.GetTransformSpace() != TransformSpace::World)
 			{
-				if (needsAabbUpdate)
+				if (entityToLeaf.find(e) != entityToLeaf.end())
 				{
-					BVHNode& leaf = nodes[it->second];
-					leaf.aabb = worldAABB;
-					if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
-					{
-						leaf.fatAABB = MakeFatAABB(leaf.aabb);
-						anyLeafEscapedFatBounds = true;
-					}
+					RemoveEntity(e);
+				}
+				continue;
+			}
+
+			bool hasRenderableBounds = false;
+			AABB worldAABB{};
+
+			if (registry.all_of<Material>(e))
+			{
+				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(e).data;
+				if (mat && mat->mesh && mat->mesh->meshBufferData)
+				{
+					worldAABB = CalculateWorldAABB(e, glm::vec3(mat->mesh->meshBufferData->aabbMin), glm::vec3(mat->mesh->meshBufferData->aabbMax), tf);
+					hasRenderableBounds = true;
 				}
 			}
-			else
+			else if (registry.all_of<CompositeMaterial>(e))
+			{
+				glm::vec3 localMin;
+				glm::vec3 localMax;
+				const CompositeMaterial& comp = registry.get<CompositeMaterial>(e);
+				if (HasRenderableSubMaterials(comp, localMin, localMax))
+				{
+					worldAABB = CalculateWorldAABB(e, localMin, localMax, tf);
+					hasRenderableBounds = true;
+				}
+			}
+
+			if (!hasRenderableBounds)
+			{
+				if (entityToLeaf.find(e) != entityToLeaf.end())
+				{
+					RemoveEntity(e);
+				}
+				continue;
+			}
+
+			auto it = entityToLeaf.find(e);
+			if (it == entityToLeaf.end())
 			{
 				BVHNode leaf;
 				leaf.entity = e;
 				leaf.aabb = worldAABB;
-				leaf.fatAABB = MakeFatAABB(leaf.aabb);
+				leaf.fatAABB = MakeFatAABB(worldAABB);
+
 				int newIdx = static_cast<int>(nodes.size());
 				nodes.emplace_back(std::move(leaf));
 				entityToLeaf[e] = newIdx;
+				forceUpdate = true;
+				continue;
+			}
+
+			BVHNode& leaf = nodes[it->second];
+			leaf.aabb = worldAABB;
+			leaf.hasCullHistory = false;
+
+			if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
+			{
+				leaf.fatAABB = MakeFatAABB(leaf.aabb);
+				anyLeafEscapedFatBounds = true;
 			}
 		}
 
-		// === Rebuild / refit check ===
-		static constexpr float kRebuildThreshold = 0.15f;
-
-		// If topology changed (add/remove) we must rebuild; also if observer caught edits.
-		if (root == -1 || observer.size() > 0 || forceUpdate)
+		if (forceUpdate)
 		{
 			FullRebuild();
 			forceUpdate = false;
-			observer.clear();
+			topologyObserver.clear();
 			return;
 		}
 
@@ -240,13 +230,11 @@ namespace Engine
 				{
 					FullRebuild();
 					forceUpdate = false;
-					observer.clear();
+					topologyObserver.clear();
 					return;
 				}
 			}
 		}
-
-		observer.clear();
 	}
 
 	/**
@@ -365,24 +353,10 @@ namespace Engine
 				continue;
 			}
 
-			const glm::mat4& model = tf.GetWorldMatrix(registry);
-			glm::vec3 worldMin = glm::vec3(model * glm::vec4(localMin, 1.0f));
-			glm::vec3 worldMax = worldMin;
-
-			EXPAND_CORNER(localMax.x, localMin.y, localMin.z);
-			EXPAND_CORNER(localMin.x, localMax.y, localMin.z);
-			EXPAND_CORNER(localMax.x, localMax.y, localMin.z);
-			EXPAND_CORNER(localMin.x, localMin.y, localMax.z);
-			EXPAND_CORNER(localMax.x, localMin.y, localMax.z);
-			EXPAND_CORNER(localMin.x, localMax.y, localMax.z);
-			EXPAND_CORNER(localMax.x, localMax.y, localMax.z);
-
-			AABB worldAABB = { worldMin, worldMax };
-
 			BVHNode leaf;
 			leaf.entity = e;
-			leaf.aabb = worldAABB;
-			leaf.fatAABB = MakeFatAABB(worldAABB);
+			leaf.aabb = CalculateWorldAABB(e, localMin, localMax, tf);
+			leaf.fatAABB = MakeFatAABB(leaf.aabb);
 
 			int idx = static_cast<int>(nodes.size());
 			nodes.emplace_back(std::move(leaf));
@@ -452,11 +426,17 @@ namespace Engine
 		return visible;
 	}
 
-	inline void SceneBVH::PushIfVisible(int nodeIdx, const Frustum& frustum, std::vector<int>& stack) const
+	inline void SceneBVH::PushIfVisible(int nodeIdx, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const
 	{
 		const BVHNode& node = nodes[nodeIdx];
 		if (node.entity == entt::null && node.IsLeaf())
 		{
+			return;
+		}
+
+		if (parentFullyInside)
+		{
+			stack.emplace_back(nodeIdx, true);
 			return;
 		}
 
@@ -468,15 +448,22 @@ namespace Engine
 				auto& cache = registry.get<FrustumCullCache>(node.entity);
 				if (frustum.IsVisibleCached(cache, node.aabb, tf.GetWorldVersion()))
 				{
-					stack.push_back(nodeIdx);
+					stack.emplace_back(nodeIdx, false);
 				}
 				return;
 			}
 		}
 
-		if (IsNodeVisible(node, frustum, GetTraversalAABB(node)))
+		const AABB& traversalAABB = GetTraversalAABB(node);
+		if (frustum.ContainsAABB(traversalAABB))
 		{
-			stack.push_back(nodeIdx);
+			stack.emplace_back(nodeIdx, true);
+			return;
+		}
+
+		if (IsNodeVisible(node, frustum, traversalAABB))
+		{
+			stack.emplace_back(nodeIdx, false);
 		}
 	}
 
@@ -488,13 +475,13 @@ namespace Engine
 			return;
 		}
 
-		std::vector<int> stack;
+		std::vector<std::pair<int, bool>> stack;
 		stack.reserve(128); // was 32
-		PushIfVisible(root, frustum, stack);
+		PushIfVisible(root, frustum, false, stack);
 
 		while (!stack.empty())
 		{
-			int idx = stack.back();
+			const auto [idx, fullyInside] = stack.back();
 			stack.pop_back();
 
 			const BVHNode& n = nodes[idx];
@@ -508,8 +495,8 @@ namespace Engine
 			}
 			else
 			{
-				PushIfVisible(n.left, frustum, stack);
-				PushIfVisible(n.right, frustum, stack);
+				PushIfVisible(n.left, frustum, fullyInside, stack);
+				PushIfVisible(n.right, frustum, fullyInside, stack);
 			}
 		}
 
@@ -524,6 +511,16 @@ namespace Engine
 			std::cout << "Estimate Culled " << estimatedEntitiesCulled << " of " << totalEntitiesInScene << " entities\n";
 		}
 	#endif // _DEBUG
+	}
+
+	bool SceneBVH::IsFullyVisible(const Frustum& frustum) const
+	{
+		if (root == -1)
+		{
+			return false;
+		}
+
+		return frustum.ContainsAABB(GetTraversalAABB(nodes[root]));
 	}
 
 	void SceneBVH::DebugRender()
@@ -642,7 +639,12 @@ namespace Engine
 	{
 		bool needsUpdate = !frustumObserver.empty();
 
-		if (!needsUpdate && Transform::AreAnyTransformsDirty())
+		if (!needsUpdate && !Transform::GetDirtyEntities().empty())
+		{
+			needsUpdate = true;
+		}
+
+		if (!needsUpdate && topologyObserver.size() > 0)
 		{
 			needsUpdate = true;
 		}

@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <cstdint>
+#include <algorithm>
 
 #include "Library/glm/glm.hpp"
 #include "Library/glm/gtc/quaternion.hpp"
@@ -45,6 +46,7 @@ namespace Engine
 		uint64_t worldVersion = 1; // increments whenever this transforms world answer changes
 
 		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
+		inline static std::vector<entt::entity> DirtyEntities{}; // coarse dirty list used by scene systems for incremental updates
 		TransformSpace space = TransformSpace::World;
 
 		// Agnostic layer seperated from specifc rendering clip space for helping with UI layer priority logic such as mouse input.
@@ -52,6 +54,7 @@ namespace Engine
 		float readableLayer{ 0 };
 
 		// Parent + children (entity handles)
+		entt::entity owner = entt::null;
 		entt::entity parent = entt::null;
 		std::vector<entt::entity> children; // Scene manages membership
 
@@ -106,6 +109,19 @@ namespace Engine
 
 		static bool AreAnyTransformsDirty() { return TransformsDirty; }
 		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }
+		static void ClearDirtyEntities() { DirtyEntities.clear(); }
+		static const std::vector<entt::entity>& GetDirtyEntities() { return DirtyEntities; }
+
+		static void MarkEntityDirty(entt::entity entity)
+		{
+			if (entity != entt::null)
+			{
+				DirtyEntities.push_back(entity);
+				TransformsDirty = true;
+			}
+		}
+
+		entt::entity GetOwner() const { return owner; }
 
 		void SetPosition(const glm::vec3& pos)
 		{

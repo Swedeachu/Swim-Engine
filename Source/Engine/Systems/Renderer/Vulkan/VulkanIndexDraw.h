@@ -4,12 +4,16 @@
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Library/EnTT/entt.hpp"
 
 namespace Engine
 {
 
 	// Forward declare
 	enum class TransformSpace;
+	class Scene;
+	class Transform;
+	struct Frustum;
 
 	class VulkanIndexDraw
 	{
@@ -53,9 +57,12 @@ namespace Engine
 	private:
 
 		// Helpers for instance buffer update
+		void BuildFullScenePacket(Scene& scene);
+		bool CanUseFullScenePacket(const Scene& scene, const Frustum* frustum) const;
+		void UploadFullScenePacket(uint32_t frameIndex, Scene& scene);
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
-		void GatherCandidatesView(const entt::registry& registry, const TransformSpace space, const Frustum* frustum);
-		void AddInstance(const entt::registry& registry, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
+		void GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum);
+		void AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
 		void UploadAndBatchInstances(uint32_t frameIndex);
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
 		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
@@ -125,6 +132,13 @@ namespace Engine
 			std::vector<GpuInstanceData> instances;
 		};
 
+		struct FullSceneRenderable
+		{
+			entt::entity entity{ entt::null };
+			std::shared_ptr<MaterialData> material;
+			GpuInstanceData baseInstance{};
+		};
+
 		CullMode cullMode{ CullMode::NONE };
 
 		struct CachedWorldPacketState
@@ -148,6 +162,12 @@ namespace Engine
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
+
+		std::vector<FullSceneRenderable> fullSceneRenderables;
+		std::vector<VkDrawIndexedIndirectCommand> fullSceneDrawCommands;
+		const Scene* fullScenePacketScene = nullptr;
+		uint64_t fullScenePacketRenderablesRevision = 0;
+		bool fullScenePacketValid = false;
 
 		// One static quad to render all glyphs with
 		bool hasUploadedGlyphQuad = false;

@@ -83,6 +83,19 @@ namespace Engine
 			return IsAABBVisible(aabb, planeHint);
 		}
 
+		bool ContainsAABB(const AABB& aabb) const
+		{
+			for (int i = 0; i < 6; ++i)
+			{
+				if (!IsAABBInsidePlane(aabb, planes[i]))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
 		bool IsAABBVisible(const AABB& aabb, uint8_t& planeHint) const
 		{
 			const uint8_t firstPlane = planeHint < 6 ? planeHint : 0;
@@ -114,35 +127,13 @@ namespace Engine
 		// This is actually the best method to use right now
 		bool IsVisibleLazy(const glm::vec4& aabbMin, const glm::vec4& aabbMax, const glm::mat4& model) const
 		{
-			AABB worldAABB;
+			return IsAABBVisible(BuildWorldAABB(glm::vec3(aabbMin), glm::vec3(aabbMax), model));
+		}
 
-			glm::vec3 worldMin = glm::vec3(model * aabbMin);
-			glm::vec3 worldMax = worldMin;
-
-			const glm::vec3 localMin = glm::vec3(aabbMin);
-			const glm::vec3 localMax = glm::vec3(aabbMax);
-
-			const glm::vec3 corners[8] = {
-				glm::vec3(model * glm::vec4(localMin.x, localMin.y, localMin.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMax.x, localMin.y, localMin.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMin.x, localMax.y, localMin.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMax.x, localMax.y, localMin.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMin.x, localMin.y, localMax.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMax.x, localMin.y, localMax.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMin.x, localMax.y, localMax.z, 1.0f)),
-				glm::vec3(model * glm::vec4(localMax.x, localMax.y, localMax.z, 1.0f))
-			};
-
-			for (int i = 1; i < 8; ++i)
-			{
-				worldMin = glm::min(worldMin, corners[i]);
-				worldMax = glm::max(worldMax, corners[i]);
-			}
-
-			worldAABB.min = worldMin;
-			worldAABB.max = worldMax;
-
-			return IsAABBVisible(worldAABB);
+		bool IsVisibleCached(FrustumCullCache& cache, const glm::vec3& aabbMin, const glm::vec3& aabbMax, const glm::mat4& model, uint64_t transformVersion) const
+		{
+			cache.Update(aabbMin, aabbMax, model, transformVersion);
+			return IsVisibleCached(cache, cache.GetWorldAABB(), transformVersion);
 		}
 
 		// Uses the internal engine component every entity with a mesh and transform gets assigned silently
@@ -209,6 +200,40 @@ namespace Engine
 				+ plane.w
 				) < 0.0f;
 		}
+
+		static bool IsAABBInsidePlane(const AABB& aabb, const glm::vec4& plane)
+		{
+			return (
+				plane.x * ((plane.x >= 0.0f) ? aabb.min.x : aabb.max.x)
+				+ plane.y * ((plane.y >= 0.0f) ? aabb.min.y : aabb.max.y)
+				+ plane.z * ((plane.z >= 0.0f) ? aabb.min.z : aabb.max.z)
+				+ plane.w
+				) >= 0.0f;
+		}
+
+	public:
+
+		static AABB BuildWorldAABB(const glm::vec3& localMin, const glm::vec3& localMax, const glm::mat4& model)
+		{
+			const glm::vec3 localCenter = 0.5f * (localMin + localMax);
+			const glm::vec3 localExtents = 0.5f * glm::max(localMax - localMin, glm::vec3(0.0f));
+			const glm::vec3 worldCenter = glm::vec3(model * glm::vec4(localCenter, 1.0f));
+
+			glm::mat3 absBasis(1.0f);
+			for (int column = 0; column < 3; ++column)
+			{
+				absBasis[column] = glm::abs(glm::vec3(model[column]));
+			}
+
+			const glm::vec3 worldExtents = absBasis * localExtents;
+
+			AABB worldAABB;
+			worldAABB.min = worldCenter - worldExtents;
+			worldAABB.max = worldCenter + worldExtents;
+			return worldAABB;
+		}
+
+	private:
 
 		static bool MatricesEqual(const glm::mat4& a, const glm::mat4& b)
 		{
