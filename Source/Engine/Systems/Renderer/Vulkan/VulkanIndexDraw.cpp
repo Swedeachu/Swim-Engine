@@ -87,6 +87,165 @@ namespace Engine
 		}
 	}
 
+	uint64_t VulkanIndexDraw::MakeWorldRenderableKey(entt::entity entity, uint32_t subMaterialIndex)
+	{
+		const uint32_t entityID = static_cast<uint32_t>(entt::to_integral(entity));
+		return (static_cast<uint64_t>(entityID) << 32) | static_cast<uint64_t>(subMaterialIndex);
+	}
+
+	uint32_t VulkanIndexDraw::AcquireWorldRenderableSlot()
+	{
+		if (!worldRenderableFreeSlots.empty())
+		{
+			const uint32_t slotIndex = worldRenderableFreeSlots.back();
+			worldRenderableFreeSlots.pop_back();
+			return slotIndex;
+		}
+
+		worldRenderableSlots.push_back(WorldRenderableSlot{});
+		return static_cast<uint32_t>(worldRenderableSlots.size() - 1);
+	}
+
+	void VulkanIndexDraw::FillWorldRenderableSlot
+	(
+		WorldRenderableSlot& slot,
+		entt::entity entity,
+		uint32_t subMaterialIndex,
+		const std::shared_ptr<MaterialData>& mat,
+		bool canUseEntityCullCache
+	)
+	{
+		slot.entity = entity;
+		slot.subMaterialIndex = subMaterialIndex;
+		slot.material = mat;
+		slot.transformSpace = TransformSpace::World;
+		slot.canUseEntityCullCache = canUseEntityCullCache;
+		slot.active = true;
+
+		if (mat && mat->mesh && mat->mesh->meshBufferData)
+		{
+			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+			slot.meshID = mesh.GetMeshID();
+			slot.indexCount = mesh.indexCount;
+			slot.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
+			slot.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
+		}
+		else
+		{
+			slot.meshID = 0;
+			slot.indexCount = 0;
+			slot.vertexOffsetInMegaBuffer = 0;
+			slot.indexOffsetInMegaBuffer = 0;
+		}
+	}
+
+	void VulkanIndexDraw::RebuildWorldRenderableSlots(Scene& scene)
+	{
+		entt::registry& registry = scene.GetRegistry();
+
+		const std::unordered_map<uint64_t, uint32_t> oldKeyToSlot = worldRenderableKeyToSlot;
+
+		worldRenderableKeyToSlot.clear();
+		worldEntityToSlotIndices.clear();
+
+		std::vector<uint8_t> slotTouched(worldRenderableSlots.size(), 0);
+
+		auto touchSlot =
+			[&](entt::entity entity, uint32_t subMaterialIndex, const std::shared_ptr<MaterialData>& mat, bool canUseEntityCullCache)
+		{
+			if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+			{
+				return;
+			}
+
+			const uint64_t key = MakeWorldRenderableKey(entity, subMaterialIndex);
+
+			uint32_t slotIndex = 0;
+			auto oldIt = oldKeyToSlot.find(key);
+			if (oldIt != oldKeyToSlot.end())
+			{
+				slotIndex = oldIt->second;
+			}
+			else
+			{
+				slotIndex = AcquireWorldRenderableSlot();
+				if (slotIndex >= slotTouched.size())
+				{
+					slotTouched.resize(slotIndex + 1, 0);
+				}
+			}
+
+			FillWorldRenderableSlot(worldRenderableSlots[slotIndex], entity, subMaterialIndex, mat, canUseEntityCullCache);
+
+			slotTouched[slotIndex] = 1;
+			worldRenderableKeyToSlot[key] = slotIndex;
+			worldEntityToSlotIndices[entity].push_back(slotIndex);
+		};
+
+		auto regularView = registry.view<Transform, Material>();
+		for (auto entity : regularView)
+		{
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = regularView.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
+
+			const bool canUseEntityCullCache =
+				registry.any_of<FrustumCullCache>(entity)
+				&& !registry.any_of<CompositeMaterial>(entity);
+
+			touchSlot(entity, 0, regularView.get<Material>(entity).data, canUseEntityCullCache);
+		}
+
+		auto compositeView = registry.view<Transform, CompositeMaterial>();
+		for (auto entity : compositeView)
+		{
+			if (registry.any_of<MeshDecorator>(entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = compositeView.get<Transform>(entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
+
+			const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
+			for (uint32_t i = 0; i < static_cast<uint32_t>(composite.subMaterials.size()); ++i)
+			{
+				touchSlot(entity, i, composite.subMaterials[i], false);
+			}
+		}
+
+		worldRenderableFreeSlots.clear();
+		for (uint32_t i = 0; i < static_cast<uint32_t>(worldRenderableSlots.size()); ++i)
+		{
+			if (i >= slotTouched.size() || !slotTouched[i])
+			{
+				worldRenderableSlots[i].active = false;
+				worldRenderableFreeSlots.push_back(i);
+			}
+		}
+
+		worldRenderableSlotsScene = &scene;
+		worldRenderableSlotsRevision = scene.GetRenderablesRevision();
+	}
+
+	void VulkanIndexDraw::SyncWorldRenderableSlots(Scene& scene)
+	{
+		if (worldRenderableSlotsScene != &scene || worldRenderableSlotsRevision != scene.GetRenderablesRevision())
+		{
+			RebuildWorldRenderableSlots(scene);
+		}
+	}
+
 	void VulkanIndexDraw::CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight)
 	{
 		indirectCommandBuffers.resize(framesInFlight);
@@ -244,74 +403,17 @@ namespace Engine
 
 	bool VulkanIndexDraw::CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const
 	{
-		if (!cachedWorldPacketState.valid)
-		{
-			return false;
-		}
-
-		if (cachedWorldPacketState.scene != &scene)
-		{
-			return false;
-		}
-
-		if (cachedWorldPacketState.cullMode != cullMode)
-		{
-			return false;
-		}
-
-		if (cachedWorldPacketState.usedSceneBVH != useQueriedFrustumSceneBVH)
-		{
-			return false;
-		}
-
-		if (cachedWorldPacketState.renderablesRevision != scene.GetRenderablesRevision())
-		{
-			return false;
-		}
-
-		if (cachedWorldPacketState.transformMutationVersion != Transform::GetGlobalMutationVersion())
-		{
-			return false;
-		}
-
-		const uint64_t frustumRevision = frustum ? Frustum::GetRevision() : 0;
-		if (cachedWorldPacketState.frustumRevision != frustumRevision)
-		{
-			return false;
-		}
-
-		return true;
+		(void)scene;
+		(void)frustum;
+		return false;
 	}
+
 
 	void VulkanIndexDraw::UploadCachedWorldPacketToFrame(uint32_t frameIndex)
 	{
-		if (frameIndex < uploadedWorldPacketVersions.size()
-			&& uploadedWorldPacketVersions[frameIndex] == cachedWorldPacketState.packetVersion)
-		{
-			return;
-		}
-
-		EnsureInstanceCapacity(*instanceBuffer, cachedWorldInstanceCount);
-
-		if (cachedWorldInstanceCount > 0)
-		{
-			void* dst = instanceBuffer->BeginFrame(frameIndex);
-			memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cachedWorldInstanceCount);
-		}
-
-		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
-
-		if (!worldDrawCommands.empty())
-		{
-			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
-			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
-		}
-
-		if (frameIndex < uploadedWorldPacketVersions.size())
-		{
-			uploadedWorldPacketVersions[frameIndex] = cachedWorldPacketState.packetVersion;
-		}
+		(void)frameIndex;
 	}
+
 
 	bool VulkanIndexDraw::CanUseFullScenePacket(const Scene& scene, const Frustum* frustum) const
 	{
@@ -491,342 +593,76 @@ namespace Engine
 	{
 		entt::registry& registry = scene.GetRegistry();
 
-		fullSceneRenderables.clear();
-		fullSceneDrawCommands.clear();
-		fullSceneEntityToInstanceIndices.clear();
-		fullSceneDirtyHistory.clear();
+		SyncWorldRenderableSlots(scene);
 
-		auto regularView = registry.view<Transform, Material>();
-		fullSceneRenderables.reserve(static_cast<size_t>(regularView.size_hint()));
-		for (auto entity : regularView)
+		gatherCandidatesScratch.clear();
+		gatherCandidatesScratch.reserve(worldRenderableSlots.size());
+
+		for (const WorldRenderableSlot& slot : worldRenderableSlots)
 		{
-			if (!scene.ShouldRenderBasedOnState(entity) || registry.any_of<MeshDecorator>(entity))
+			if (!slot.active)
 			{
 				continue;
 			}
 
-			const Transform& tf = regularView.get<Transform>(entity);
-			if (tf.GetTransformSpace() != TransformSpace::World)
+			if (!registry.valid(slot.entity) || !registry.any_of<Transform>(slot.entity))
 			{
 				continue;
 			}
 
-			const std::shared_ptr<MaterialData>& mat = regularView.get<Material>(entity).data;
-			if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+			if (!scene.ShouldRenderBasedOnState(slot.entity))
 			{
 				continue;
 			}
 
-			FullSceneRenderable item{};
-			item.entity = entity;
-			item.material = mat;
-			item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
-			item.baseInstance.model = tf.GetWorldMatrix(registry);
-			item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-			item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-			item.baseInstance.materialIndex = 0u;
-			item.worldVersion = tf.GetWorldVersion();
-			fullSceneRenderables.push_back(std::move(item));
+			const Transform& tf = registry.get<Transform>(slot.entity);
+
+			GatherCandidate candidate{};
+			candidate.entity = slot.entity;
+			candidate.material = slot.material;
+			candidate.worldMatrix = tf.GetWorldMatrix(registry);
+			candidate.worldVersion = tf.GetWorldVersion();
+			candidate.transformSpace = tf.GetTransformSpace();
+			candidate.canUseEntityCullCache = false;
+			gatherCandidatesScratch.push_back(std::move(candidate));
 		}
 
-		auto compositeView = registry.view<Transform, CompositeMaterial>();
-		for (auto entity : compositeView)
+		for (uint32_t meshID : activeMeshBucketKeys)
 		{
-			if (!scene.ShouldRenderBasedOnState(entity) || registry.any_of<MeshDecorator>(entity))
-			{
-				continue;
-			}
-
-			const Transform& tf = compositeView.get<Transform>(entity);
-			if (tf.GetTransformSpace() != TransformSpace::World)
-			{
-				continue;
-			}
-
-			const glm::mat4& world = tf.GetWorldMatrix(registry);
-			const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
-			for (const auto& mat : composite.subMaterials)
-			{
-				if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
-				{
-					continue;
-				}
-
-				FullSceneRenderable item{};
-				item.entity = entity;
-				item.material = mat;
-				item.baseInstance.space = static_cast<uint32_t>(TransformSpace::World);
-				item.baseInstance.model = world;
-				item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-				item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-				item.baseInstance.materialIndex = 0u;
-				item.worldVersion = tf.GetWorldVersion();
-				fullSceneRenderables.push_back(std::move(item));
-			}
+			meshBuckets[meshID].instances.clear();
 		}
+		activeMeshBucketKeys.clear();
 
-		std::sort(fullSceneRenderables.begin(), fullSceneRenderables.end(), [](const FullSceneRenderable& a, const FullSceneRenderable& b)
-		{
-			return a.material->mesh->meshBufferData->GetMeshID() < b.material->mesh->meshBufferData->GetMeshID();
-		});
-
-		fullSceneDrawCommands.reserve(fullSceneRenderables.size());
-		cpuInstanceData.resize(fullSceneRenderables.size());
-
-		if (!fullSceneRenderables.empty())
-		{
-			const bool allowParallelCopy = RenderCpuJobConfig::Enabled
-				&& fullSceneRenderables.size() >= RenderCpuJobConfig::MinParallelItemCount
-				&& GetRenderParallelWorkerSlots() > 1;
-
-			if (allowParallelCopy)
-			{
-				ParallelForRender(fullSceneRenderables.size(), RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
-				{
-					for (size_t i = begin; i < end; ++i)
-					{
-						cpuInstanceData[i] = fullSceneRenderables[i].baseInstance;
-					}
-				});
-			}
-			else
-			{
-				for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
-				{
-					cpuInstanceData[i] = fullSceneRenderables[i].baseInstance;
-				}
-			}
-		}
-
-		fullSceneEntityToInstanceIndices.reserve(fullSceneRenderables.size());
-		for (size_t i = 0; i < fullSceneRenderables.size(); ++i)
-		{
-			const FullSceneRenderable& item = fullSceneRenderables[i];
-			fullSceneEntityToInstanceIndices[item.entity].push_back(static_cast<uint32_t>(i));
-		}
-
-		uint32_t firstInstance = 0;
-		size_t begin = 0;
-		while (begin < fullSceneRenderables.size())
-		{
-			const MeshBufferData& mesh = *fullSceneRenderables[begin].material->mesh->meshBufferData;
-			size_t end = begin + 1;
-			while (end < fullSceneRenderables.size()
-				&& fullSceneRenderables[end].material->mesh->meshBufferData->GetMeshID() == mesh.GetMeshID())
-			{
-				++end;
-			}
-
-			VkDrawIndexedIndirectCommand cmd{};
-			cmd.indexCount = mesh.indexCount;
-			cmd.instanceCount = static_cast<uint32_t>(end - begin);
-			cmd.firstIndex = static_cast<uint32_t>(mesh.indexOffsetInMegaBuffer / sizeof(uint32_t));
-			cmd.vertexOffset = static_cast<int32_t>(mesh.vertexOffsetInMegaBuffer / sizeof(Vertex));
-			cmd.firstInstance = firstInstance;
-			fullSceneDrawCommands.push_back(cmd);
-
-			firstInstance += cmd.instanceCount;
-			begin = end;
-		}
+		ProcessGatherCandidates(registry, gatherCandidatesScratch, nullptr);
 
 		fullScenePacketScene = &scene;
 		fullScenePacketRenderablesRevision = scene.GetRenderablesRevision();
 		++fullScenePacketVersion;
 		fullScenePacketValid = true;
-
-		std::fill(uploadedFullScenePacketVersions.begin(), uploadedFullScenePacketVersions.end(), 0);
-		std::fill(uploadedFullSceneCommandVersions.begin(), uploadedFullSceneCommandVersions.end(), 0);
 	}
+
 
 	bool VulkanIndexDraw::UpdateFullScenePacketDirtyEntities(Scene& scene)
 	{
-		if (fullSceneRenderables.empty() || fullSceneEntityToInstanceIndices.empty())
-		{
-			return false;
-		}
-
-		entt::registry& registry = scene.GetRegistry();
-		dirtyInstanceIndexScratch.clear();
-		dirtyInstanceIndexScratch.reserve(fullSceneRenderables.size());
-
-		for (const auto& pair : fullSceneEntityToInstanceIndices)
-		{
-			const entt::entity entity = pair.first;
-			const std::vector<uint32_t>& indices = pair.second;
-			if (indices.empty())
-			{
-				continue;
-			}
-
-			if (!registry.valid(entity) || !registry.any_of<Transform>(entity))
-			{
-				continue;
-			}
-
-			const Transform& tf = registry.get<Transform>(entity);
-			const uint64_t currentWorldVersion = tf.GetWorldVersion();
-			const uint32_t firstIndex = indices[0];
-			if (firstIndex >= fullSceneRenderables.size())
-			{
-				continue;
-			}
-
-			if (fullSceneRenderables[firstIndex].worldVersion == currentWorldVersion)
-			{
-				continue;
-			}
-
-			const glm::mat4& worldMatrix = tf.GetWorldMatrix(registry);
-			for (uint32_t index : indices)
-			{
-				if (index >= fullSceneRenderables.size() || index >= cpuInstanceData.size())
-				{
-					continue;
-				}
-
-				fullSceneRenderables[index].worldVersion = currentWorldVersion;
-				fullSceneRenderables[index].baseInstance.model = worldMatrix;
-				cpuInstanceData[index].model = worldMatrix;
-				dirtyInstanceIndexScratch.push_back(index);
-			}
-		}
-
-		if (dirtyInstanceIndexScratch.empty())
-		{
-			return false;
-		}
-
-		std::sort(dirtyInstanceIndexScratch.begin(), dirtyInstanceIndexScratch.end());
-		dirtyInstanceIndexScratch.erase(std::unique(dirtyInstanceIndexScratch.begin(), dirtyInstanceIndexScratch.end()), dirtyInstanceIndexScratch.end());
-
-		FullSceneDirtyHistoryEntry entry{};
-		++fullScenePacketVersion;
-		entry.version = fullScenePacketVersion;
-
-		uint32_t rangeStart = dirtyInstanceIndexScratch[0];
-		uint32_t rangeCount = 1;
-		for (size_t i = 1; i < dirtyInstanceIndexScratch.size(); ++i)
-		{
-			if (dirtyInstanceIndexScratch[i] == dirtyInstanceIndexScratch[i - 1] + 1)
-			{
-				++rangeCount;
-			}
-			else
-			{
-				entry.ranges.emplace_back(rangeStart, rangeCount);
-				rangeStart = dirtyInstanceIndexScratch[i];
-				rangeCount = 1;
-			}
-		}
-		entry.ranges.emplace_back(rangeStart, rangeCount);
-
-		fullSceneDirtyHistory.push_back(std::move(entry));
-		while (fullSceneDirtyHistory.size() > 16)
-		{
-			fullSceneDirtyHistory.pop_front();
-		}
-
-		return true;
+		(void)scene;
+		return false;
 	}
+
 
 	bool VulkanIndexDraw::PatchFullScenePacketFrame(uint32_t frameIndex)
 	{
-		if (frameIndex >= uploadedFullScenePacketVersions.size())
-		{
-			return false;
-		}
-
-		const uint64_t uploadedVersion = uploadedFullScenePacketVersions[frameIndex];
-		if (uploadedVersion == 0 || uploadedVersion >= fullScenePacketVersion)
-		{
-			return false;
-		}
-
-		if (fullSceneDirtyHistory.empty() || cpuInstanceData.empty())
-		{
-			return false;
-		}
-
-		const uint64_t oldestTrackedVersion = fullSceneDirtyHistory.front().version;
-		if (uploadedVersion + 1 < oldestTrackedVersion)
-		{
-			return false;
-		}
-
-		void* dst = instanceBuffer->BeginFrame(frameIndex);
-		if (dst == nullptr)
-		{
-			return false;
-		}
-
-		for (const FullSceneDirtyHistoryEntry& entry : fullSceneDirtyHistory)
-		{
-			if (entry.version <= uploadedVersion)
-			{
-				continue;
-			}
-
-			for (const auto& range : entry.ranges)
-			{
-				const size_t first = static_cast<size_t>(range.first);
-				const size_t count = static_cast<size_t>(range.second);
-				if (count == 0 || first >= cpuInstanceData.size())
-				{
-					continue;
-				}
-
-				const size_t clampedCount = std::min(count, cpuInstanceData.size() - first);
-				std::memcpy(
-					static_cast<uint8_t*>(dst) + first * sizeof(GpuInstanceData),
-					cpuInstanceData.data() + first,
-					clampedCount * sizeof(GpuInstanceData)
-				);
-			}
-		}
-
-		uploadedFullScenePacketVersions[frameIndex] = fullScenePacketVersion;
-		return true;
+		(void)frameIndex;
+		return false;
 	}
+
 
 	void VulkanIndexDraw::UploadFullScenePacket(uint32_t frameIndex, Scene& scene)
 	{
-		if (!fullScenePacketValid
-			|| fullScenePacketScene != &scene
-			|| fullScenePacketRenderablesRevision != scene.GetRenderablesRevision())
-		{
-			BuildFullScenePacket(scene);
-		}
-		else
-		{
-			UpdateFullScenePacketDirtyEntities(scene);
-		}
-
-		worldDrawCommands = fullSceneDrawCommands;
-		cachedWorldInstanceCount = cpuInstanceData.size();
-
-		EnsureInstanceCapacity(*instanceBuffer, cpuInstanceData.size());
-		if (!cpuInstanceData.empty())
-		{
-			if (!PatchFullScenePacketFrame(frameIndex))
-			{
-				void* dst = instanceBuffer->BeginFrame(frameIndex);
-				memcpy(dst, cpuInstanceData.data(), sizeof(GpuInstanceData) * cpuInstanceData.size());
-				uploadedFullScenePacketVersions[frameIndex] = fullScenePacketVersion;
-			}
-		}
-
-		EnsureIndirectCapacity(indirectCommandBuffers[frameIndex], worldDrawCommands.size());
-		if (!worldDrawCommands.empty()
-			&& frameIndex < uploadedFullSceneCommandVersions.size()
-			&& uploadedFullSceneCommandVersions[frameIndex] != fullScenePacketRenderablesRevision)
-		{
-			VulkanBuffer& indirectBuf = *indirectCommandBuffers[frameIndex];
-			indirectBuf.CopyData(worldDrawCommands.data(), worldDrawCommands.size() * sizeof(VkDrawIndexedIndirectCommand));
-			uploadedFullSceneCommandVersions[frameIndex] = fullScenePacketRenderablesRevision;
-		}
+		BuildFullScenePacket(scene);
+		UploadAndBatchInstances(frameIndex);
 	}
 
-	// This actually does CPU culling logic here if that mode is activated
+
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
 		meshDecoratorInstanceData.clear();
@@ -843,12 +679,14 @@ namespace Engine
 			frustum = &Frustum::Get();
 		}
 
-		if (CanReuseCachedWorldPacket(*scene, frustum))
+		SyncWorldRenderableSlots(*scene);
+
+		for (uint32_t meshID : activeMeshBucketKeys)
 		{
-			cpuInstanceData.resize(cachedWorldInstanceCount);
-			UploadCachedWorldPacketToFrame(frameIndex);
-			return;
+			meshBuckets[meshID].instances.clear();
 		}
+		activeMeshBucketKeys.clear();
+		cpuInstanceData.clear();
 
 		if (CanUseFullScenePacket(*scene, frustum))
 		{
@@ -856,45 +694,19 @@ namespace Engine
 			return;
 		}
 
-		cpuInstanceData.clear();
-
-		for (uint32_t meshID : activeMeshBucketKeys)
-		{
-			meshBuckets[meshID].instances.clear();
-		}
-		activeMeshBucketKeys.clear();
-
-		// CPU culling can leverage the scenes BVH spacial partitions
 		if (cullMode == CullMode::CPU && frustum && useQueriedFrustumSceneBVH)
 		{
 			GatherCandidatesBVH(*scene, *frustum);
 		}
 		else
 		{
-			// Render everything in world space with regular frustum culling (this is still CPU culling just not using the BVH)
 			GatherCandidatesView(registry, TransformSpace::World, frustum);
 		}
 
 		UploadAndBatchInstances(frameIndex);
-
-		cachedWorldInstanceCount = cpuInstanceData.size();
-		cachedWorldPacketState.scene = scene.get();
-		cachedWorldPacketState.frustumRevision = frustum ? Frustum::GetRevision() : 0;
-		cachedWorldPacketState.renderablesRevision = scene->GetRenderablesRevision();
-		cachedWorldPacketState.transformMutationVersion = Transform::GetGlobalMutationVersion();
-		cachedWorldPacketState.cullMode = cullMode;
-		cachedWorldPacketState.usedSceneBVH = useQueriedFrustumSceneBVH;
-		cachedWorldPacketState.valid = true;
-		++cachedWorldPacketState.packetVersion;
-
-		if (frameIndex < uploadedWorldPacketVersions.size())
-		{
-			uploadedWorldPacketVersions[frameIndex] = cachedWorldPacketState.packetVersion;
-		}
 	}
 
-	// Fires off the frustum query in the scene's bounding volume hierarchy and then builds world instances from the visible entities.
-	// This only does world space entities as the BVH only takes world space objects into account.
+
 	void VulkanIndexDraw::GatherCandidatesBVH(Scene& scene, const Frustum& frustum)
 	{
 		entt::registry& registry = scene.GetRegistry();
@@ -905,7 +717,7 @@ namespace Engine
 		gatherCandidatesScratch.reserve(visibleEntityScratch.size() * 2);
 		for (entt::entity entity : visibleEntityScratch)
 		{
-			if (entity == entt::null || !registry.valid(entity) || !registry.any_of<Transform>(entity))
+			if (entity == entt::null || !registry.valid(entity))
 			{
 				continue;
 			}
@@ -920,108 +732,88 @@ namespace Engine
 				continue;
 			}
 
+			auto slotIt = worldEntityToSlotIndices.find(entity);
+			if (slotIt == worldEntityToSlotIndices.end())
+			{
+				continue;
+			}
+
+			if (!registry.any_of<Transform>(entity))
+			{
+				continue;
+			}
+
 			const Transform& tf = registry.get<Transform>(entity);
 			const glm::mat4& world = tf.GetWorldMatrix(registry);
 
-			if (registry.all_of<Material>(entity))
+			for (uint32_t slotIndex : slotIt->second)
 			{
+				if (slotIndex >= worldRenderableSlots.size())
+				{
+					continue;
+				}
+
+				const WorldRenderableSlot& slot = worldRenderableSlots[slotIndex];
+				if (!slot.active || !slot.material)
+				{
+					continue;
+				}
+
 				GatherCandidate candidate{};
 				candidate.entity = entity;
-				candidate.material = registry.get<Material>(entity).data;
+				candidate.material = slot.material;
 				candidate.worldMatrix = world;
 				candidate.worldVersion = tf.GetWorldVersion();
 				candidate.transformSpace = tf.GetTransformSpace();
 				candidate.canUseEntityCullCache = false;
 				gatherCandidatesScratch.push_back(std::move(candidate));
 			}
-			else if (registry.all_of<CompositeMaterial>(entity))
-			{
-				const CompositeMaterial& composite = registry.get<CompositeMaterial>(entity);
-				for (const std::shared_ptr<MaterialData>& mat : composite.subMaterials)
-				{
-					GatherCandidate candidate{};
-					candidate.entity = entity;
-					candidate.material = mat;
-					candidate.worldMatrix = world;
-					candidate.worldVersion = tf.GetWorldVersion();
-					candidate.transformSpace = tf.GetTransformSpace();
-					candidate.canUseEntityCullCache = false;
-					gatherCandidatesScratch.push_back(std::move(candidate));
-				}
-			}
 		}
 
 		ProcessGatherCandidates(registry, gatherCandidatesScratch, nullptr);
 	}
 
-	// Passing space as TransformSpace::Ambiguous will just render all entities
+
 	void VulkanIndexDraw::GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
 		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		gatherCandidatesScratch.clear();
+		gatherCandidatesScratch.reserve(worldRenderableSlots.size());
 
-		auto regularView = registry.view<Transform, Material>();
-		gatherCandidatesScratch.reserve(static_cast<size_t>(regularView.size_hint()));
-		for (auto entity : regularView)
+		for (const WorldRenderableSlot& slot : worldRenderableSlots)
 		{
-			if (registry.any_of<MeshDecorator>(entity))
+			if (!slot.active)
 			{
 				continue;
 			}
 
-			if (!scene->ShouldRenderBasedOnState(entity))
+			if (!registry.valid(slot.entity) || !registry.any_of<Transform>(slot.entity))
 			{
 				continue;
 			}
 
-			const Transform& tf = regularView.get<Transform>(entity);
+			if (!scene->ShouldRenderBasedOnState(slot.entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = registry.get<Transform>(slot.entity);
 			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
 			{
 				GatherCandidate candidate{};
-				candidate.entity = entity;
-				candidate.material = regularView.get<Material>(entity).data;
+				candidate.entity = slot.entity;
+				candidate.material = slot.material;
 				candidate.worldMatrix = tf.GetWorldMatrix(registry);
 				candidate.worldVersion = tf.GetWorldVersion();
 				candidate.transformSpace = tf.GetTransformSpace();
-				candidate.canUseEntityCullCache = registry.any_of<FrustumCullCache>(entity) && !registry.any_of<CompositeMaterial>(entity);
+				candidate.canUseEntityCullCache = slot.canUseEntityCullCache;
 				gatherCandidatesScratch.push_back(std::move(candidate));
-			}
-		}
-
-		auto compositeView = registry.view<Transform, CompositeMaterial>();
-		for (auto entity : compositeView)
-		{
-			if (registry.any_of<MeshDecorator>(entity))
-			{
-				continue;
-			}
-
-			if (!scene->ShouldRenderBasedOnState(entity))
-			{
-				continue;
-			}
-
-			const Transform& tf = compositeView.get<Transform>(entity);
-			if (space == TransformSpace::Ambiguous || tf.GetTransformSpace() == space)
-			{
-				const glm::mat4& world = tf.GetWorldMatrix(registry);
-				const CompositeMaterial& composite = compositeView.get<CompositeMaterial>(entity);
-				for (const auto& mat : composite.subMaterials)
-				{
-					GatherCandidate candidate{};
-					candidate.entity = entity;
-					candidate.material = mat;
-					candidate.worldMatrix = world;
-					candidate.worldVersion = tf.GetWorldVersion();
-					candidate.transformSpace = tf.GetTransformSpace();
-					candidate.canUseEntityCullCache = false;
-					gatherCandidatesScratch.push_back(std::move(candidate));
-				}
 			}
 		}
 
 		ProcessGatherCandidates(registry, gatherCandidatesScratch, frustum);
 	}
+
 
 	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
 	{
@@ -1749,6 +1541,10 @@ namespace Engine
 		meshDecoratorInstanceData.clear();
 		msdfInstancesData.clear();
 		culledVisibleData.clear();
+		worldRenderableSlots.clear();
+		worldRenderableFreeSlots.clear();
+		worldRenderableKeyToSlot.clear();
+		worldEntityToSlotIndices.clear();
 	}
 
 }

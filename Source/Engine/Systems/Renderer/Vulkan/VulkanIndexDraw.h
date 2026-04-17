@@ -7,6 +7,8 @@
 #include "Library/EnTT/entt.hpp"
 
 #include <deque>
+#include <unordered_map>
+#include <memory>
 
 namespace Engine
 {
@@ -60,6 +62,34 @@ namespace Engine
 
 		struct GatherCandidate;
 		struct GatheredInstance;
+
+		struct WorldRenderableSlot
+		{
+			entt::entity entity{ entt::null };
+			uint32_t subMaterialIndex = 0;
+			std::shared_ptr<MaterialData> material;
+			uint32_t meshID = 0;
+			uint32_t indexCount = 0;
+			VkDeviceSize vertexOffsetInMegaBuffer = 0;
+			VkDeviceSize indexOffsetInMegaBuffer = 0;
+			TransformSpace transformSpace = TransformSpace::World;
+			bool canUseEntityCullCache = false;
+			bool active = false;
+		};
+
+		// Helpers for stable renderable slots + immutable per-frame prep
+		static uint64_t MakeWorldRenderableKey(entt::entity entity, uint32_t subMaterialIndex);
+		uint32_t AcquireWorldRenderableSlot();
+		void FillWorldRenderableSlot
+		(
+			WorldRenderableSlot& slot,
+			entt::entity entity,
+			uint32_t subMaterialIndex,
+			const std::shared_ptr<MaterialData>& mat,
+			bool canUseEntityCullCache
+		);
+		void RebuildWorldRenderableSlots(Scene& scene);
+		void SyncWorldRenderableSlots(Scene& scene);
 
 		// Helpers for instance buffer update
 		void BuildFullScenePacket(Scene& scene);
@@ -179,7 +209,6 @@ namespace Engine
 			entt::entity entity{ entt::null };
 			std::shared_ptr<MaterialData> material;
 			GpuInstanceData baseInstance{};
-			uint64_t worldVersion = 0;
 		};
 
 		CullMode cullMode{ CullMode::NONE };
@@ -189,12 +218,19 @@ namespace Engine
 			const Scene* scene = nullptr;
 			uint64_t frustumRevision = 0;
 			uint64_t renderablesRevision = 0;
-			uint64_t transformMutationVersion = 0;
 			uint64_t packetVersion = 0;
 			CullMode cullMode = CullMode::NONE;
 			bool usedSceneBVH = false;
 			bool valid = false;
 		};
+
+		// Stable world renderable slots used to prepare immutable per-frame gather input
+		const Scene* worldRenderableSlotsScene = nullptr;
+		uint64_t worldRenderableSlotsRevision = 0;
+		std::vector<WorldRenderableSlot> worldRenderableSlots;
+		std::vector<uint32_t> worldRenderableFreeSlots;
+		std::unordered_map<uint64_t, uint32_t> worldRenderableKeyToSlot;
+		std::unordered_map<entt::entity, std::vector<uint32_t>> worldEntityToSlotIndices;
 
 		// The world space meshes we put into contiguous buckets to avoid resorting every frame
 		std::unordered_map<uint32_t, MeshBucket> meshBuckets;
