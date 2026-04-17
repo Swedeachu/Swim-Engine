@@ -168,7 +168,7 @@ namespace Engine
 				desiredWorkers = hardwareThreads - 1;
 			}
 
-			desiredWorkers = std::min<uint32_t>(desiredWorkers, RenderCpuJobConfig::MaxWorkerThreads);
+			desiredWorkers = std::min<uint32_t>(desiredWorkers, RenderCpuJobConfig::MaxWorkerThreads) / 2;
 			std::cout << "Multi-threaded Vulkan Renderer constructed with " << std::to_string(desiredWorkers) << " worker threads" << std::endl;
 			workers.reserve(desiredWorkers);
 

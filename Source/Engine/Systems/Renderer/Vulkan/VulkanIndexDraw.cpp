@@ -269,7 +269,7 @@ namespace Engine
 			return false;
 		}
 
-		if (Transform::AreAnyTransformsDirty()) // this is pretty much always going to be true
+		if (cachedWorldPacketState.transformMutationVersion != Transform::GetGlobalMutationVersion())
 		{
 			return false;
 		}
@@ -525,6 +525,7 @@ namespace Engine
 			item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 			item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 			item.baseInstance.materialIndex = 0u;
+			item.worldVersion = tf.GetWorldVersion();
 			fullSceneRenderables.push_back(std::move(item));
 		}
 
@@ -559,6 +560,7 @@ namespace Engine
 				item.baseInstance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
 				item.baseInstance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
 				item.baseInstance.materialIndex = 0u;
+				item.worldVersion = tf.GetWorldVersion();
 				fullSceneRenderables.push_back(std::move(item));
 			}
 		}
@@ -638,26 +640,20 @@ namespace Engine
 
 	bool VulkanIndexDraw::UpdateFullScenePacketDirtyEntities(Scene& scene)
 	{
-		const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
-		if (dirtyEntities.empty())
+		if (fullSceneRenderables.empty() || fullSceneEntityToInstanceIndices.empty())
 		{
 			return false;
 		}
 
-		struct DirtyUpdateWork
-		{
-			glm::mat4 worldMatrix{ 1.0f };
-			const std::vector<uint32_t>* indices = nullptr;
-		};
-
 		entt::registry& registry = scene.GetRegistry();
-		std::vector<DirtyUpdateWork> dirtyWork;
-		dirtyWork.reserve(dirtyEntities.size());
+		dirtyInstanceIndexScratch.clear();
+		dirtyInstanceIndexScratch.reserve(fullSceneRenderables.size());
 
-		for (entt::entity entity : dirtyEntities)
+		for (const auto& pair : fullSceneEntityToInstanceIndices)
 		{
-			auto it = fullSceneEntityToInstanceIndices.find(entity);
-			if (it == fullSceneEntityToInstanceIndices.end())
+			const entt::entity entity = pair.first;
+			const std::vector<uint32_t>& indices = pair.second;
+			if (indices.empty())
 			{
 				continue;
 			}
@@ -668,68 +664,30 @@ namespace Engine
 			}
 
 			const Transform& tf = registry.get<Transform>(entity);
-			DirtyUpdateWork work{};
-			work.worldMatrix = tf.GetWorldMatrix(registry);
-			work.indices = &it->second;
-			dirtyWork.push_back(std::move(work));
-		}
-
-		if (dirtyWork.empty())
-		{
-			return false;
-		}
-
-		dirtyInstanceIndexScratch.clear();
-		dirtyInstanceIndexScratch.reserve(dirtyWork.size() * 2);
-
-		const bool allowParallelUpdate = RenderCpuJobConfig::Enabled
-			&& dirtyWork.size() >= 32
-			&& GetRenderParallelWorkerSlots() > 1;
-
-		if (allowParallelUpdate)
-		{
-			const size_t workerSlots = GetRenderParallelWorkerSlots();
-			EnsureDirtyThreadScratch(workerSlots, std::max<size_t>((dirtyWork.size() * 2 + workerSlots - 1) / workerSlots, 16));
-
-			ParallelForRender(dirtyWork.size(), 32, [&](size_t begin, size_t end, uint32_t workerIndex)
+			const uint64_t currentWorldVersion = tf.GetWorldVersion();
+			const uint32_t firstIndex = indices[0];
+			if (firstIndex >= fullSceneRenderables.size())
 			{
-				auto& localDirty = dirtyThreadScratch[workerIndex].dirtyIndices;
-				for (size_t i = begin; i < end; ++i)
-				{
-					const DirtyUpdateWork& work = dirtyWork[i];
-					if (work.indices == nullptr)
-					{
-						continue;
-					}
-
-					for (uint32_t index : *work.indices)
-					{
-						cpuInstanceData[index].model = work.worldMatrix;
-						localDirty.push_back(index);
-					}
-				}
-			});
-
-			for (size_t slot = 0; slot < workerSlots; ++slot)
-			{
-				auto& localDirty = dirtyThreadScratch[slot].dirtyIndices;
-				dirtyInstanceIndexScratch.insert(dirtyInstanceIndexScratch.end(), localDirty.begin(), localDirty.end());
+				continue;
 			}
-		}
-		else
-		{
-			for (const DirtyUpdateWork& work : dirtyWork)
+
+			if (fullSceneRenderables[firstIndex].worldVersion == currentWorldVersion)
 			{
-				if (work.indices == nullptr)
+				continue;
+			}
+
+			const glm::mat4& worldMatrix = tf.GetWorldMatrix(registry);
+			for (uint32_t index : indices)
+			{
+				if (index >= fullSceneRenderables.size() || index >= cpuInstanceData.size())
 				{
 					continue;
 				}
 
-				for (uint32_t index : *work.indices)
-				{
-					cpuInstanceData[index].model = work.worldMatrix;
-					dirtyInstanceIndexScratch.push_back(index);
-				}
+				fullSceneRenderables[index].worldVersion = currentWorldVersion;
+				fullSceneRenderables[index].baseInstance.model = worldMatrix;
+				cpuInstanceData[index].model = worldMatrix;
+				dirtyInstanceIndexScratch.push_back(index);
 			}
 		}
 
@@ -779,12 +737,12 @@ namespace Engine
 		}
 
 		const uint64_t uploadedVersion = uploadedFullScenePacketVersions[frameIndex];
-		if (uploadedVersion == 0 || uploadedVersion == fullScenePacketVersion)
+		if (uploadedVersion == 0 || uploadedVersion >= fullScenePacketVersion)
 		{
 			return false;
 		}
 
-		if (fullSceneDirtyHistory.empty())
+		if (fullSceneDirtyHistory.empty() || cpuInstanceData.empty())
 		{
 			return false;
 		}
@@ -796,6 +754,11 @@ namespace Engine
 		}
 
 		void* dst = instanceBuffer->BeginFrame(frameIndex);
+		if (dst == nullptr)
+		{
+			return false;
+		}
+
 		for (const FullSceneDirtyHistoryEntry& entry : fullSceneDirtyHistory)
 		{
 			if (entry.version <= uploadedVersion)
@@ -805,10 +768,18 @@ namespace Engine
 
 			for (const auto& range : entry.ranges)
 			{
+				const size_t first = static_cast<size_t>(range.first);
+				const size_t count = static_cast<size_t>(range.second);
+				if (count == 0 || first >= cpuInstanceData.size())
+				{
+					continue;
+				}
+
+				const size_t clampedCount = std::min(count, cpuInstanceData.size() - first);
 				std::memcpy(
-					static_cast<uint8_t*>(dst) + static_cast<size_t>(range.first) * sizeof(GpuInstanceData),
-					cpuInstanceData.data() + range.first,
-					static_cast<size_t>(range.second) * sizeof(GpuInstanceData)
+					static_cast<uint8_t*>(dst) + first * sizeof(GpuInstanceData),
+					cpuInstanceData.data() + first,
+					clampedCount * sizeof(GpuInstanceData)
 				);
 			}
 		}
@@ -910,6 +881,7 @@ namespace Engine
 		cachedWorldPacketState.scene = scene.get();
 		cachedWorldPacketState.frustumRevision = frustum ? Frustum::GetRevision() : 0;
 		cachedWorldPacketState.renderablesRevision = scene->GetRenderablesRevision();
+		cachedWorldPacketState.transformMutationVersion = Transform::GetGlobalMutationVersion();
 		cachedWorldPacketState.cullMode = cullMode;
 		cachedWorldPacketState.usedSceneBVH = useQueriedFrustumSceneBVH;
 		cachedWorldPacketState.valid = true;

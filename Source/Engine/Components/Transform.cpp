@@ -32,6 +32,11 @@ namespace Engine
 		if (!alreadyQueuedThisFrame)
 		{
 			++worldVersion;
+			++GlobalMutationVersion;
+			if (GlobalMutationVersion == 0)
+			{
+				GlobalMutationVersion = 1;
+			}
 			QueueDirtyEntity();
 			MarkChildrenDirty();
 		}
@@ -47,6 +52,11 @@ namespace Engine
 		if (!alreadyQueuedThisFrame)
 		{
 			++worldVersion;
+			++GlobalMutationVersion;
+			if (GlobalMutationVersion == 0)
+			{
+				GlobalMutationVersion = 1;
+			}
 			QueueDirtyEntity();
 			MarkChildrenDirty();
 		}

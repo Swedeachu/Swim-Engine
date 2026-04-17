@@ -48,6 +48,7 @@ namespace Engine
 		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
 		inline static std::vector<entt::entity> DirtyEntities{}; // coarse dirty list used by scene systems for incremental updates
 		inline static uint64_t DirtyEpoch = 1;
+		inline static uint64_t GlobalMutationVersion = 1; // monotonic transform mutation serial for renderer-side cache validation
 		uint64_t lastQueuedDirtyEpoch = 0;
 		TransformSpace space = TransformSpace::World;
 
@@ -122,6 +123,7 @@ namespace Engine
 			}
 		}
 		static const std::vector<entt::entity>& GetDirtyEntities() { return DirtyEntities; }
+		static uint64_t GetGlobalMutationVersion() { return GlobalMutationVersion; }
 
 		static void MarkEntityDirty(entt::entity entity)
 		{

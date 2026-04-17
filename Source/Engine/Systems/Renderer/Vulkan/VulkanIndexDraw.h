@@ -179,6 +179,7 @@ namespace Engine
 			entt::entity entity{ entt::null };
 			std::shared_ptr<MaterialData> material;
 			GpuInstanceData baseInstance{};
+			uint64_t worldVersion = 0;
 		};
 
 		CullMode cullMode{ CullMode::NONE };
@@ -188,6 +189,7 @@ namespace Engine
 			const Scene* scene = nullptr;
 			uint64_t frustumRevision = 0;
 			uint64_t renderablesRevision = 0;
+			uint64_t transformMutationVersion = 0;
 			uint64_t packetVersion = 0;
 			CullMode cullMode = CullMode::NONE;
 			bool usedSceneBVH = false;
