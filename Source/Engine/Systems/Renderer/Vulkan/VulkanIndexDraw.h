@@ -28,7 +28,16 @@ namespace Engine
 		 CPU: Solid balanced stratedgy and a geniunely good solution for complex scenes with thousands of unique meshes.
 		 GPU: Best solution on paper but our implementation is super broken and glitchy for more reasons than one.
 		*/
-		enum CullMode { NONE, CPU, GPU }; // GPU is not implemented 
+		enum CullMode { NONE, CPU, GPU }; // GPU uses the compute culling path when supported 
+
+		struct GpuCullPushConstants
+		{
+			uint32_t mode = 0;
+			uint32_t instanceCount = 0;
+			uint32_t drawCommandCount = 0;
+			uint32_t pad = 0;
+			glm::vec4 frustumPlanes[6]{};
+		};
 
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
 
@@ -40,6 +49,8 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
+		void PrepareWorldDrawCommands(uint32_t frameIndex, VkCommandBuffer cmd);
+
 		void DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
@@ -49,6 +60,9 @@ namespace Engine
 		void CleanUp();
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetWorldInstanceBuffers() const { return worldInstanceBuffers; }
+		VkDescriptorSetLayout GetGpuCullDescriptorSetLayout() const { return gpuCullDescriptorSetLayout; }
+		static constexpr uint32_t GetGpuCullPushConstantSize() { return sizeof(GpuCullPushConstants); }
 
 		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
@@ -107,6 +121,11 @@ namespace Engine
 		void EnsureGatherThreadScratch(size_t workerSlots, size_t reservePerSlot);
 		void EnsureDirtyThreadScratch(size_t workerSlots, size_t reservePerSlot);
 		void UploadAndBatchInstances(uint32_t frameIndex);
+		void BuildGpuCullInputPacket(entt::registry& registry);
+		void UploadGpuCullInput(uint32_t frameIndex);
+		void DispatchGpuCull(uint32_t frameIndex, VkCommandBuffer cmd);
+		void CreateGpuCullResources(uint32_t maxDrawCalls, uint32_t framesInFlight);
+		void DestroyGpuCullResources();
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
 		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
 
@@ -158,14 +177,20 @@ namespace Engine
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
+		int maxExpectedInstances = 0;
+		int maxFramesInFlight = 0;
+		uint32_t maxIndirectDrawCount = 0;
 
 		// Draw data instance buffer per frame
 		std::unique_ptr<VulkanInstanceBuffer> instanceBuffer;
 
 		// Draw data instances to feed the buffers per frame
 		std::vector<GpuInstanceData> cpuInstanceData;
+		std::vector<GpuInstanceData> overlayInstanceData;
 		std::vector<MeshDecoratorGpuInstanceData> meshDecoratorInstanceData;
 		std::vector<MsdfTextGpuInstanceData> msdfInstancesData;
+		std::vector<GpuCullInputInstanceData> gpuCullInputData;
+		std::vector<VkDrawIndexedIndirectCommand> gpuCullCommandTemplates;
 
 		struct MeshBucket
 		{
@@ -242,6 +267,8 @@ namespace Engine
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
+		uint32_t gpuCullInputCount = 0;
+		uint32_t gpuCullDrawCommandCount = 0;
 
 		struct FullSceneDirtyHistoryEntry
 		{
@@ -275,6 +302,13 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> msdfIndirectCommandBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> worldInstanceBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullInputBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDrawCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullCommandTemplateBuffers;
+		VkDescriptorSetLayout gpuCullDescriptorSetLayout = VK_NULL_HANDLE;
+		VkDescriptorPool gpuCullDescriptorPool = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> gpuCullDescriptorSets;
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;

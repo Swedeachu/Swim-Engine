@@ -51,6 +51,7 @@ namespace Engine
 
 		// Adds SSBO (instance buffer) binding to per-frame descriptor sets
 		void CreateInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameInstanceBuffers);
+		void CreateWorldInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameWorldInstanceBuffers);
 
 		// Bindless setup
 		void CreateBindlessLayout();

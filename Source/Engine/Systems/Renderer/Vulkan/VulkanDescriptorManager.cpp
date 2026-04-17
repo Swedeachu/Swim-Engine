@@ -54,11 +54,19 @@ namespace Engine
 		msdfBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		msdfBufferBinding.pImmutableSamplers = nullptr;
 
-		std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
+		VkDescriptorSetLayoutBinding worldInstanceBufferBinding{};
+		worldInstanceBufferBinding.binding = 4;
+		worldInstanceBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		worldInstanceBufferBinding.descriptorCount = 1;
+		worldInstanceBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		worldInstanceBufferBinding.pImmutableSamplers = nullptr;
+
+		std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
 			uboBinding,
 			instanceBufferBinding,
 			uiParamBufferBinding,
-			msdfBufferBinding
+			msdfBufferBinding,
+			worldInstanceBufferBinding
 		};
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -81,7 +89,7 @@ namespace Engine
 		poolSizes[0].descriptorCount = maxSets;
 
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		poolSizes[1].descriptorCount = maxSets * 3; // 3 for each of our buffers
+		poolSizes[1].descriptorCount = maxSets * 4; // instance, decorator, msdf, world instance
 
 		poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		poolSizes[2].descriptorCount = maxSets; // Only used in set 1 (bindless), but fine to include here
@@ -215,7 +223,20 @@ namespace Engine
 			msdfWrite.descriptorCount = 1;
 			msdfWrite.pBufferInfo = &msdfInfo;
 
-			std::array<VkWriteDescriptorSet, 4> writes = { uboWrite, instanceWrite, uiWrite, msdfWrite };
+			VkDescriptorBufferInfo worldInstanceInfo{};
+			worldInstanceInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
+			worldInstanceInfo.offset = 0;
+			worldInstanceInfo.range = ssboSize;
+
+			VkWriteDescriptorSet worldInstanceWrite{};
+			worldInstanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			worldInstanceWrite.dstSet = perFrameDescriptorSets[i];
+			worldInstanceWrite.dstBinding = 4;
+			worldInstanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			worldInstanceWrite.descriptorCount = 1;
+			worldInstanceWrite.pBufferInfo = &worldInstanceInfo;
+
+			std::array<VkWriteDescriptorSet, 5> writes = { uboWrite, instanceWrite, uiWrite, msdfWrite, worldInstanceWrite };
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
@@ -235,6 +256,30 @@ namespace Engine
 			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			write.dstSet = perFrameDescriptorSets[i]; // Reuse the existing descriptor sets created in CreatePerFrameUBOs
 			write.dstBinding = 1;                     // Binding 1 = instance SSBO
+			write.dstArrayElement = 0;
+			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			write.descriptorCount = 1;
+			write.pBufferInfo = &bufferInfo;
+
+			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+		}
+	}
+
+	void VulkanDescriptorManager::CreateWorldInstanceBufferDescriptorSets(const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameWorldInstanceBuffers)
+	{
+		const uint32_t frameCount = static_cast<uint32_t>(perFrameWorldInstanceBuffers.size());
+
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			VkDescriptorBufferInfo bufferInfo{};
+			bufferInfo.buffer = perFrameWorldInstanceBuffers[i]->GetBuffer();
+			bufferInfo.offset = 0;
+			bufferInfo.range = VK_WHOLE_SIZE;
+
+			VkWriteDescriptorSet write{};
+			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			write.dstSet = perFrameDescriptorSets[i];
+			write.dstBinding = 4;
 			write.dstArrayElement = 0;
 			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			write.descriptorCount = 1;

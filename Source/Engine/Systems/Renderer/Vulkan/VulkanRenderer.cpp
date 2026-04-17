@@ -140,44 +140,36 @@ namespace Engine
 
 		indexDraw->CreateMegaMeshBuffers(initialVertexSize, initialIndexSize);
 
+		static constexpr bool useCompute = true;
+		const bool gpuCullSupported = deviceManager->SupportsGpuCullCompute();
+
 		// Configure culled rendering mode
 		// Debug mode CPU culling: 100 FPS 
 		// Release mode CPU culling: 2500+ FPS
-		// GPU compute shader culling is not implemented
-		indexDraw->SetCulledMode(VulkanIndexDraw::CullMode::CPU);
+		indexDraw->SetCulledMode((useCompute && gpuCullSupported) ? VulkanIndexDraw::CullMode::GPU : VulkanIndexDraw::CullMode::CPU);
 		indexDraw->SetUseQueriedFrustumSceneBVH(true);
 
 		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
+		descriptorManager->CreateWorldInstanceBufferDescriptorSets(indexDraw->GetWorldInstanceBuffers());
 
 		// === Graphics pipeline creation ===
-		VkDescriptorSetLayout layout = descriptorManager->GetLayout(); // set 0
-		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout(); // set 1
+		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
+		VkDescriptorSetLayout bindlessLayout = descriptorManager->GetBindlessLayout();
 
 		auto vertexAttribs = Vertex::GetAttributeDescriptions();
-		auto instanceAttribs = Vertex::GetInstanceAttributeDescriptions();
-
-		std::vector<VkVertexInputAttributeDescription> allAttribs;
-		allAttribs.insert(allAttribs.end(), vertexAttribs.begin(), vertexAttribs.end());
-		allAttribs.insert(allAttribs.end(), instanceAttribs.begin(), instanceAttribs.end());
-
-		std::array<VkVertexInputBindingDescription, 2> meshBindings{};
-		meshBindings[0] = Vertex::GetBindingDescription(); // mesh VB
-		meshBindings[1].binding = 1; // instance data
-		meshBindings[1].stride = sizeof(GpuInstanceData);
-		meshBindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+		std::array<VkVertexInputBindingDescription, 1> meshBindings = {
+			Vertex::GetBindingDescription()
+		};
 
 		// ---- REGULAR MESH PIPELINE ----
-		// Binding 1 remains part of the vertex input state because the instanced world shader reads the
-		// per-frame instance buffer from descriptor binding 1, and we still bind the matching instance buffer
-		// at vertex slot 1 for compatibility with the compiled pipeline layout and attribute declarations.
 		pipelineManager->CreateGraphicsPipeline(
 			"Shaders\\VertexShaders\\vertex_instanced.spv",
 			"Shaders\\FragmentShaders\\fragment_instanced.spv",
 			layout,
 			bindlessLayout,
-			std::vector<VkVertexInputBindingDescription>{ meshBindings.begin(), meshBindings.end() },
-			allAttribs,
+			meshBindings,
+			vertexAttribs,
 			0
 		);
 
@@ -187,10 +179,19 @@ namespace Engine
 			"Shaders\\FragmentShaders\\fragment_decorated.spv",
 			layout,
 			bindlessLayout,
-			{ meshBindings.begin(), meshBindings.end() },
-			allAttribs,
+			meshBindings,
+			vertexAttribs,
 			0
 		);
+
+		if (useCompute && gpuCullSupported)
+		{
+			pipelineManager->CreateGpuCullComputePipeline(
+				"Shaders\\ComputeShaders\\frustum_cull.spv",
+				indexDraw->GetGpuCullDescriptorSetLayout(),
+				VulkanIndexDraw::GetGpuCullPushConstantSize()
+			);
+		}
 
 		// ---- MSDF TEXT PIPELINE: own minimal bindings/attribs ----
 		std::vector<VkVertexInputBindingDescription> msdfBindings = {
@@ -533,8 +534,10 @@ namespace Engine
 			throw std::runtime_error("Failed to begin recording command buffer!");
 		}
 
-		// Update camera UBO and instance buffer
+		// Update camera UBO and prepare world draw data before the render pass.
 		UpdateUniformBuffer();
+		indexDraw->UpdateInstanceBuffer(currentFrame);
+		indexDraw->PrepareWorldDrawCommands(currentFrame, cmd);
 
 		// Begin render pass
 		std::array<VkClearValue, 2> clearValues{};
@@ -585,9 +588,6 @@ namespace Engine
 			0,
 			nullptr
 		);
-
-		// This sets up fresh data for the frame and prepares every regular mesh to be draw in world space.
-		indexDraw->UpdateInstanceBuffer(currentFrame);
 
 		// This then draws all of them with the default shader.
 		indexDraw->DrawIndexedWorldMeshes(currentFrame, cmd);

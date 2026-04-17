@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>
+#include <type_traits>
 
 namespace Engine
 {
@@ -20,31 +21,115 @@ namespace Engine
 		void CreateGraphicsPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
-			VkDescriptorSetLayout uboLayout, // Set 0
-			VkDescriptorSetLayout bindlessTextureLayout, // Set 1
-			const std::vector<VkVertexInputBindingDescription>& bindingDescriptions, 
-			const std::vector<VkVertexInputAttributeDescription>& attributeDescriptions,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessTextureLayout,
+			const VkVertexInputBindingDescription* bindingDescriptions,
+			uint32_t bindingDescriptionCount,
+			const VkVertexInputAttributeDescription* attributeDescriptions,
+			uint32_t attributeDescriptionCount,
 			uint32_t pushConstantSize
 		);
+
+		template<typename TBindings, typename TAttribs>
+		void CreateGraphicsPipeline(
+			const std::string& vertShaderPath,
+			const std::string& fragShaderPath,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessTextureLayout,
+			const TBindings& bindingDescriptions,
+			const TAttribs& attributeDescriptions,
+			uint32_t pushConstantSize
+		)
+		{
+			CreateGraphicsPipeline(
+				vertShaderPath,
+				fragShaderPath,
+				uboLayout,
+				bindlessTextureLayout,
+				bindingDescriptions.data(),
+				static_cast<uint32_t>(bindingDescriptions.size()),
+				attributeDescriptions.data(),
+				static_cast<uint32_t>(attributeDescriptions.size()),
+				pushConstantSize
+			);
+		}
 
 		void CreateDecoratedMeshPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
 			VkDescriptorSetLayout uboLayout,
 			VkDescriptorSetLayout bindlessLayout,
-			const std::vector<VkVertexInputBindingDescription>& bindings,
-			const std::vector<VkVertexInputAttributeDescription>& attribs,
+			const VkVertexInputBindingDescription* bindings,
+			uint32_t bindingCount,
+			const VkVertexInputAttributeDescription* attribs,
+			uint32_t attribCount,
 			uint32_t pushConstantSize
 		);
+
+		template<typename TBindings, typename TAttribs>
+		void CreateDecoratedMeshPipeline(
+			const std::string& vertShaderPath,
+			const std::string& fragShaderPath,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessLayout,
+			const TBindings& bindings,
+			const TAttribs& attribs,
+			uint32_t pushConstantSize
+		)
+		{
+			CreateDecoratedMeshPipeline(
+				vertShaderPath,
+				fragShaderPath,
+				uboLayout,
+				bindlessLayout,
+				bindings.data(),
+				static_cast<uint32_t>(bindings.size()),
+				attribs.data(),
+				static_cast<uint32_t>(attribs.size()),
+				pushConstantSize
+			);
+		}
 
 		void CreateMsdfTextPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
 			VkDescriptorSetLayout uboLayout,
 			VkDescriptorSetLayout bindlessLayout,
-			const std::vector<VkVertexInputBindingDescription>& bindings,
-			const std::vector<VkVertexInputAttributeDescription>& attribs,
-			uint32_t pushConstantSize // optional, can be 0
+			const VkVertexInputBindingDescription* bindings,
+			uint32_t bindingCount,
+			const VkVertexInputAttributeDescription* attribs,
+			uint32_t attribCount,
+			uint32_t pushConstantSize
+		);
+
+		template<typename TBindings, typename TAttribs>
+		void CreateMsdfTextPipeline(
+			const std::string& vertShaderPath,
+			const std::string& fragShaderPath,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessLayout,
+			const TBindings& bindings,
+			const TAttribs& attribs,
+			uint32_t pushConstantSize
+		)
+		{
+			CreateMsdfTextPipeline(
+				vertShaderPath,
+				fragShaderPath,
+				uboLayout,
+				bindlessLayout,
+				bindings.data(),
+				static_cast<uint32_t>(bindings.size()),
+				attribs.data(),
+				static_cast<uint32_t>(attribs.size()),
+				pushConstantSize
+			);
+		}
+
+		void CreateGpuCullComputePipeline(
+			const std::string& computeShaderPath,
+			VkDescriptorSetLayout descriptorSetLayout,
+			uint32_t pushConstantSize
 		);
 
 		VkRenderPass GetRenderPass() const { return renderPass; }
@@ -56,6 +141,10 @@ namespace Engine
 
 		VkPipeline GetMsdfTextPipeline() const { return msdfTextPipeline; }
 		VkPipelineLayout GetMsdfTextPipelineLayout() const { return msdfTextPipelineLayout; }
+
+		VkPipeline GetGpuCullComputePipeline() const { return gpuCullComputePipeline; }
+		VkPipelineLayout GetGpuCullComputePipelineLayout() const { return gpuCullComputePipelineLayout; }
+		bool HasGpuCullComputePipeline() const { return gpuCullComputePipeline != VK_NULL_HANDLE && gpuCullComputePipelineLayout != VK_NULL_HANDLE; }
 
 		void Cleanup();
 
@@ -77,6 +166,9 @@ namespace Engine
 
 		VkPipeline msdfTextPipeline = VK_NULL_HANDLE;
 		VkPipelineLayout msdfTextPipelineLayout = VK_NULL_HANDLE;
+
+		VkPipeline gpuCullComputePipeline = VK_NULL_HANDLE;
+		VkPipelineLayout gpuCullComputePipelineLayout = VK_NULL_HANDLE;
 
 	};
 

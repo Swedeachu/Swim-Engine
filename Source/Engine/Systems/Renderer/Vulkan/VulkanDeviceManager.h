@@ -47,6 +47,8 @@ namespace Engine
 		// MSAA info helper
 		VkSampleCountFlagBits GetMaxUsableSampleCount() const;
 
+		bool SupportsGpuCullCompute() const;
+
 		// Getters
 		VkDevice GetDevice() const { return device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return physicalDevice; }

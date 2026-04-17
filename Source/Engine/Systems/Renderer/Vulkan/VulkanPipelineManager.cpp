@@ -54,6 +54,18 @@ namespace Engine
 			msdfTextPipelineLayout = VK_NULL_HANDLE;
 		}
 
+		if (gpuCullComputePipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device, gpuCullComputePipeline, nullptr);
+			gpuCullComputePipeline = VK_NULL_HANDLE;
+		}
+
+		if (gpuCullComputePipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device, gpuCullComputePipelineLayout, nullptr);
+			gpuCullComputePipelineLayout = VK_NULL_HANDLE;
+		}
+
 		if (renderPass != VK_NULL_HANDLE)
 		{
 			vkDestroyRenderPass(device, renderPass, nullptr);
@@ -183,10 +195,12 @@ namespace Engine
 	void VulkanPipelineManager::CreateGraphicsPipeline(
 		const std::string& vertShaderPath,
 		const std::string& fragShaderPath,
-		VkDescriptorSetLayout uboLayout, // Set 0
-		VkDescriptorSetLayout bindlessTextureLayout, // Set 1
-		const std::vector<VkVertexInputBindingDescription>& bindingDescriptions, // updated from single binding
-		const std::vector<VkVertexInputAttributeDescription>& attributeDescriptions,
+		VkDescriptorSetLayout uboLayout,
+		VkDescriptorSetLayout bindlessTextureLayout,
+		const VkVertexInputBindingDescription* bindingDescriptions,
+		uint32_t bindingDescriptionCount,
+		const VkVertexInputAttributeDescription* attributeDescriptions,
+		uint32_t attributeDescriptionCount,
 		uint32_t pushConstantSize
 	)
 	{
@@ -213,10 +227,10 @@ namespace Engine
 		// Vertex Input
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
-		vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
-		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+		vertexInputInfo.vertexBindingDescriptionCount = bindingDescriptionCount;
+		vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions;
+		vertexInputInfo.vertexAttributeDescriptionCount = attributeDescriptionCount;
+		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
 
 		// Input Assembly
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -330,11 +344,13 @@ namespace Engine
 	void VulkanPipelineManager::CreateDecoratedMeshPipeline(
 		const std::string& vertShaderPath,
 		const std::string& fragShaderPath,
-		VkDescriptorSetLayout uboLayout,        // Set 0: UBO + instance SSBO + Decorator SSBO
-		VkDescriptorSetLayout bindlessLayout,   // Set 1: bindless textures
-		const std::vector<VkVertexInputBindingDescription>& bindings,
-		const std::vector<VkVertexInputAttributeDescription>& attribs,
-		uint32_t pushConstantSize                // Optional: set to 0 if unused
+		VkDescriptorSetLayout uboLayout,
+		VkDescriptorSetLayout bindlessLayout,
+		const VkVertexInputBindingDescription* bindings,
+		uint32_t bindingCount,
+		const VkVertexInputAttributeDescription* attribs,
+		uint32_t attribCount,
+		uint32_t pushConstantSize
 	)
 	{
 		auto vertCode = ReadFile(vertShaderPath);
@@ -350,10 +366,10 @@ namespace Engine
 
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
-		vertexInputInfo.pVertexBindingDescriptions = bindings.data();
-		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribs.size());
-		vertexInputInfo.pVertexAttributeDescriptions = attribs.data();
+		vertexInputInfo.vertexBindingDescriptionCount = bindingCount;
+		vertexInputInfo.pVertexBindingDescriptions = bindings;
+		vertexInputInfo.vertexAttributeDescriptionCount = attribCount;
+		vertexInputInfo.pVertexAttributeDescriptions = attribs;
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -464,11 +480,13 @@ namespace Engine
 	void VulkanPipelineManager::CreateMsdfTextPipeline(
 		const std::string& vertShaderPath,
 		const std::string& fragShaderPath,
-		VkDescriptorSetLayout uboLayout,      // set 0: UBO + SSBOs (instances, decorator, msdf)
-		VkDescriptorSetLayout bindlessLayout, // set 1: sampler + bindless textures
-		const std::vector<VkVertexInputBindingDescription>& bindings,
-		const std::vector<VkVertexInputAttributeDescription>& attribs,
-		uint32_t pushConstantSize // 0 if unused
+		VkDescriptorSetLayout uboLayout,
+		VkDescriptorSetLayout bindlessLayout,
+		const VkVertexInputBindingDescription* bindings,
+		uint32_t bindingCount,
+		const VkVertexInputAttributeDescription* attribs,
+		uint32_t attribCount,
+		uint32_t pushConstantSize
 	)
 	{
 		auto vertCode = ReadFile(vertShaderPath);
@@ -484,10 +502,10 @@ namespace Engine
 
 		VkPipelineVertexInputStateCreateInfo vi{};
 		vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vi.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
-		vi.pVertexBindingDescriptions = bindings.data();
-		vi.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribs.size());
-		vi.pVertexAttributeDescriptions = attribs.data();
+		vi.vertexBindingDescriptionCount = bindingCount;
+		vi.pVertexBindingDescriptions = bindings;
+		vi.vertexAttributeDescriptionCount = attribCount;
+		vi.pVertexAttributeDescriptions = attribs;
 
 		VkPipelineInputAssemblyStateCreateInfo ia{};
 		ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -580,6 +598,65 @@ namespace Engine
 
 		vkDestroyShaderModule(device, vertModule, nullptr);
 		vkDestroyShaderModule(device, fragModule, nullptr);
+	}
+
+	void VulkanPipelineManager::CreateGpuCullComputePipeline(
+		const std::string& computeShaderPath,
+		VkDescriptorSetLayout descriptorSetLayout,
+		uint32_t pushConstantSize
+	)
+	{
+		auto computeCode = ReadFile(computeShaderPath);
+		VkShaderModule computeModule = CreateShaderModule(computeCode);
+
+		VkPushConstantRange pushConstantRange{};
+		pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		pushConstantRange.offset = 0;
+		pushConstantRange.size = pushConstantSize;
+
+		VkPipelineLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		layoutInfo.setLayoutCount = 1;
+		layoutInfo.pSetLayouts = &descriptorSetLayout;
+		layoutInfo.pushConstantRangeCount = (pushConstantSize > 0) ? 1u : 0u;
+		layoutInfo.pPushConstantRanges = (pushConstantSize > 0) ? &pushConstantRange : nullptr;
+
+		if (gpuCullComputePipelineLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyPipelineLayout(device, gpuCullComputePipelineLayout, nullptr);
+			gpuCullComputePipelineLayout = VK_NULL_HANDLE;
+		}
+
+		if (gpuCullComputePipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(device, gpuCullComputePipeline, nullptr);
+			gpuCullComputePipeline = VK_NULL_HANDLE;
+		}
+
+		if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &gpuCullComputePipelineLayout) != VK_SUCCESS)
+		{
+			vkDestroyShaderModule(device, computeModule, nullptr);
+			throw std::runtime_error("Failed to create GPU cull compute pipeline layout!");
+		}
+
+		VkPipelineShaderStageCreateInfo stageInfo{};
+		stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		stageInfo.module = computeModule;
+		stageInfo.pName = "main";
+
+		VkComputePipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		pipelineInfo.stage = stageInfo;
+		pipelineInfo.layout = gpuCullComputePipelineLayout;
+
+		if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &gpuCullComputePipeline) != VK_SUCCESS)
+		{
+			vkDestroyShaderModule(device, computeModule, nullptr);
+			throw std::runtime_error("Failed to create GPU cull compute pipeline!");
+		}
+
+		vkDestroyShaderModule(device, computeModule, nullptr);
 	}
 
 }

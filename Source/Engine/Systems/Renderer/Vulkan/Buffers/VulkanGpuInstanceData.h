@@ -54,6 +54,15 @@ namespace Engine
     uint32_t  _pad_;
   };
 
+	struct alignas(16) GpuCullInputInstanceData
+	{
+		GpuInstanceData instance;
+		uint32_t drawCommandIndex;
+		uint32_t padA;
+		uint32_t padB;
+		uint32_t padC;
+	};
+
 	struct InstanceMeta
 	{
 		uint32_t instanceCount;

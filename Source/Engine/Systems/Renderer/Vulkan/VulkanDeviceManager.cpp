@@ -358,6 +358,35 @@ namespace Engine
 		return indices;
 	}
 
+	bool VulkanDeviceManager::SupportsGpuCullCompute() const
+	{
+		if (physicalDevice == VK_NULL_HANDLE || !queueIndices.graphicsFamily.has_value())
+		{
+			return false;
+		}
+
+		VkPhysicalDeviceFeatures features{};
+		vkGetPhysicalDeviceFeatures(physicalDevice, &features);
+		if (!features.multiDrawIndirect)
+		{
+			return false;
+		}
+
+		uint32_t queueCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, nullptr);
+		std::vector<VkQueueFamilyProperties> queues(queueCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueCount, queues.data());
+
+		const uint32_t graphicsFamilyIndex = queueIndices.graphicsFamily.value();
+		if (graphicsFamilyIndex >= queues.size())
+		{
+			return false;
+		}
+
+		return (queues[graphicsFamilyIndex].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+	}
+
+
 	VkSampleCountFlagBits VulkanDeviceManager::GetMaxUsableSampleCount() const
 	{
 		VkPhysicalDeviceProperties props;
