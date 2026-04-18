@@ -24,6 +24,26 @@ namespace Engine
 
 	public:
 
+		struct GpuWideSnapshotNode
+		{
+			glm::vec4 minX{ 0.0f };
+			glm::vec4 minY{ 0.0f };
+			glm::vec4 minZ{ 0.0f };
+			glm::vec4 maxX{ 0.0f };
+			glm::vec4 maxY{ 0.0f };
+			glm::vec4 maxZ{ 0.0f };
+			int childRef[4]{ 0, 0, 0, 0 };
+			uint32_t childCount = 0;
+			uint32_t padA = 0;
+			uint32_t padB = 0;
+			uint32_t padC = 0;
+		};
+
+		struct GpuWideSnapshotLeaf
+		{
+			entt::entity entity{ entt::null };
+		};
+
 		explicit SceneBVH(entt::registry& registry);
 
 		void Init();
@@ -32,6 +52,14 @@ namespace Engine
 		void UpdateIfNeeded(entt::observer& frustumObserver);
 		void QueryFrustum(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
 		void QueryFrustumParallel(const Frustum& frustum, std::vector<entt::entity>& outVisible) const;
+
+		void BuildGpuWideSnapshot(
+			std::vector<GpuWideSnapshotNode>& outNodes,
+			std::vector<GpuWideSnapshotLeaf>& outLeaves,
+			uint32_t* outRootIndex = nullptr,
+			uint32_t* outMaxDepth = nullptr
+		) const;
+
 		bool IsFullyVisible(const Frustum& frustum) const;
 		void RemoveEntity(entt::entity entity);
 

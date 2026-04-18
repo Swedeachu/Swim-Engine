@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
 #include "Library/EnTT/entt.hpp"
 
+#include <array>
 #include <deque>
 #include <unordered_map>
 #include <memory>
@@ -37,6 +38,10 @@ namespace Engine
 			uint32_t instanceCount = 0;
 			uint32_t drawCommandCount = 0;
 			uint32_t compactDraws = 0;
+			uint32_t inputQueueIndex = 0;
+			uint32_t gpuBvhNodeCount = 0;
+			uint32_t gpuBvhRootIndex = 0;
+			uint32_t gpuBvhMaxDepth = 0;
 			glm::vec4 frustumPlanes[6]{};
 		};
 
@@ -143,6 +148,8 @@ namespace Engine
 		void UploadGpuCullInput(uint32_t frameIndex);
 		void DispatchGpuCull(uint32_t frameIndex, VkCommandBuffer cmd);
 		void RebuildGpuWorldScenePacket(Scene& scene, entt::registry& registry);
+		void RebuildGpuWorldBvh(Scene& scene);
+		void UpdateGpuWorldBvhNodeBuffer(Scene& scene);
 		void UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex);
 		void CreateGpuCullResources(uint32_t maxDrawCalls, uint32_t framesInFlight);
 		void DestroyGpuCullResources();
@@ -333,6 +340,19 @@ namespace Engine
 		std::vector<std::vector<GpuWorldTransformCacheEntry>> gpuWorldTransformCaches;
 		std::vector<std::vector<VkBufferCopy>> gpuWorldTransformCopyRegions;
 		std::vector<bool> gpuWorldTransformFrameInitialized;
+		std::vector<GpuWorldBvhNodeData> gpuWorldBvhNodesCpuData;
+		std::vector<GpuWorldBvhLeafData> gpuWorldBvhLeavesCpuData;
+		std::vector<GpuWorldInstanceRangeData> gpuWorldBvhLeafRangesCpuData;
+		uint32_t gpuWorldBvhNodeCount = 0;
+		uint32_t gpuWorldBvhLeafCount = 0;
+		uint32_t gpuWorldBvhRangeCount = 0;
+		uint32_t gpuWorldBvhRootIndex = 0;
+		uint32_t gpuWorldBvhMaxDepth = 0;
+		uint64_t gpuWorldBvhTopologyVersion = 0;
+		uint64_t gpuWorldBvhBoundsVersion = 0;
+		bool gpuWorldBvhNodesUploadPending = false;
+		bool gpuWorldBvhLeavesUploadPending = false;
+		bool gpuWorldBvhRangesUploadPending = false;
 		std::vector<GpuCullFrameReuseStamp> gpuCullFrameReuseStamps;
 		uint32_t gpuWorldLastRenderStateMask = std::numeric_limits<uint32_t>::max();
 		GpuCullFrameStats gpuCullFrameStats{};
@@ -379,6 +399,15 @@ namespace Engine
 		std::unique_ptr<VulkanBuffer> gpuWorldStaticStagingBuffer;
 		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStaticBuffer;
 		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafRangeBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafRangeStagingBuffer;
+		std::vector<std::array<std::unique_ptr<VulkanBuffer>, 2>> gpuWorldBvhTraversalQueueBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhTraversalCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhTraversalCountStagingBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformStagingBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleIndexBuffers;

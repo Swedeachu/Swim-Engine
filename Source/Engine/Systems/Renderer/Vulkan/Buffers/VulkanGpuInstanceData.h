@@ -57,6 +57,35 @@ namespace Engine
     uint32_t padC = 0;
   };
 
+  struct alignas(16) GpuWorldBvhNodeData
+  {
+    glm::vec4 minX{ 0.0f };
+    glm::vec4 minY{ 0.0f };
+    glm::vec4 minZ{ 0.0f };
+    glm::vec4 maxX{ 0.0f };
+    glm::vec4 maxY{ 0.0f };
+    glm::vec4 maxZ{ 0.0f };
+    int32_t childRef[4]{ 0, 0, 0, 0 };
+    uint32_t childCount = 0;
+    uint32_t padA = 0;
+    uint32_t padB = 0;
+    uint32_t padC = 0;
+  };
+
+  struct alignas(16) GpuWorldBvhLeafData
+  {
+    uint32_t firstRangeIndex = 0;
+    uint32_t rangeCount = 0;
+    uint32_t padA = 0;
+    uint32_t padB = 0;
+  };
+
+  struct alignas(8) GpuWorldInstanceRangeData
+  {
+    uint32_t start = 0;
+    uint32_t count = 0;
+  };
+
 	struct alignas(16) MeshDecoratorGpuInstanceData
 	{
 		glm::vec4 fillColor;

@@ -684,7 +684,7 @@ namespace Engine
 		{
 			const int childBinaryIndex = frontier[i];
 			const BVHNode& childBinaryNode = nodes[childBinaryIndex];
-			const AABB& childAABB = GetTraversalAABB(childBinaryNode);
+			const AABB& childAABB = childBinaryNode.IsLeaf() ? childBinaryNode.fatAABB : GetTraversalAABB(childBinaryNode);
 			SetWideChildBounds(wideIndex, i, childAABB);
 
 			if (childBinaryNode.IsLeaf())
@@ -736,7 +736,7 @@ namespace Engine
 		}
 
 		const uint8_t slot = leafToWideSlot[leafIndex];
-		SetWideChildBounds(wideIndex, slot, nodes[leafIndex].aabb);
+		SetWideChildBounds(wideIndex, slot, nodes[leafIndex].fatAABB);
 		UpdateWideNodeBoundsFromChildren(wideIndex);
 
 		while (wideNodes[wideIndex].parent != -1)
@@ -1107,6 +1107,129 @@ namespace Engine
 			std::cout << "Estimate Culled " << estimatedEntitiesCulled << " of " << totalEntitiesInScene << " entities\n";
 		}
 	#endif // _DEBUG
+	}
+
+	void SceneBVH::BuildGpuWideSnapshot(
+		std::vector<GpuWideSnapshotNode>& outNodes,
+		std::vector<GpuWideSnapshotLeaf>& outLeaves,
+		uint32_t* outRootIndex,
+		uint32_t* outMaxDepth
+	) const
+	{
+		outNodes.clear();
+		outLeaves.clear();
+
+		if (outRootIndex)
+		{
+			*outRootIndex = 0;
+		}
+
+		if (outMaxDepth)
+		{
+			*outMaxDepth = 0;
+		}
+
+		if (wideRoot == -1 || wideNodes.empty())
+		{
+			return;
+		}
+
+		std::vector<int> denseLeafFromBinary(nodes.size(), -1);
+		for (const WideNode& wideNode : wideNodes)
+		{
+			for (uint8_t childIndex = 0; childIndex < wideNode.childCount; ++childIndex)
+			{
+				const int childRef = wideNode.childRef[childIndex];
+				if (!IsEncodedWideLeaf(childRef))
+				{
+					continue;
+				}
+
+				const int leafIndex = DecodeWideLeaf(childRef);
+				if (leafIndex < 0 || leafIndex >= static_cast<int>(nodes.size()))
+				{
+					continue;
+				}
+
+				if (denseLeafFromBinary[leafIndex] != -1)
+				{
+					continue;
+				}
+
+				denseLeafFromBinary[leafIndex] = static_cast<int>(outLeaves.size());
+				outLeaves.push_back(GpuWideSnapshotLeaf{ nodes[leafIndex].entity });
+			}
+		}
+
+		outNodes.resize(wideNodes.size());
+		for (size_t nodeIndex = 0; nodeIndex < wideNodes.size(); ++nodeIndex)
+		{
+			const WideNode& sourceNode = wideNodes[nodeIndex];
+			GpuWideSnapshotNode& destNode = outNodes[nodeIndex];
+
+			for (uint32_t lane = 0; lane < 4; ++lane)
+			{
+				destNode.minX[lane] = sourceNode.minX[lane];
+				destNode.minY[lane] = sourceNode.minY[lane];
+				destNode.minZ[lane] = sourceNode.minZ[lane];
+				destNode.maxX[lane] = sourceNode.maxX[lane];
+				destNode.maxY[lane] = sourceNode.maxY[lane];
+				destNode.maxZ[lane] = sourceNode.maxZ[lane];
+
+				const int childRef = sourceNode.childRef[lane];
+				if (IsEncodedWideLeaf(childRef))
+				{
+					const int leafIndex = DecodeWideLeaf(childRef);
+					const int denseLeafIndex = (leafIndex >= 0 && leafIndex < static_cast<int>(denseLeafFromBinary.size())) ? denseLeafFromBinary[leafIndex] : -1;
+					destNode.childRef[lane] = denseLeafIndex >= 0 ? EncodeWideLeaf(denseLeafIndex) : InvalidWideChild;
+				}
+				else
+				{
+					destNode.childRef[lane] = childRef;
+				}
+			}
+
+			destNode.childCount = sourceNode.childCount;
+		}
+
+		if (outRootIndex)
+		{
+			*outRootIndex = static_cast<uint32_t>(wideRoot);
+		}
+
+		if (outMaxDepth)
+		{
+			uint32_t maxDepth = 0;
+			std::vector<std::pair<int, uint32_t>> stack;
+			stack.reserve(outNodes.size());
+			stack.emplace_back(wideRoot, 1u);
+
+			while (!stack.empty())
+			{
+				auto [wideIndex, depth] = stack.back();
+				stack.pop_back();
+				maxDepth = std::max(maxDepth, depth);
+
+				if (wideIndex < 0 || wideIndex >= static_cast<int>(wideNodes.size()))
+				{
+					continue;
+				}
+
+				const WideNode& wideNode = wideNodes[wideIndex];
+				for (uint8_t childIndex = 0; childIndex < wideNode.childCount; ++childIndex)
+				{
+					const int childRef = wideNode.childRef[childIndex];
+					if (childRef == InvalidWideChild || IsEncodedWideLeaf(childRef))
+					{
+						continue;
+					}
+
+					stack.emplace_back(childRef, depth + 1u);
+				}
+			}
+
+			*outMaxDepth = maxDepth;
+		}
 	}
 
 	void SceneBVH::QueryFrustumParallel(const Frustum& frustum, std::vector<entt::entity>& outVisible) const

@@ -9,6 +9,7 @@
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
+#include "Engine/Systems/Scene/SubSceneSystems/SceneBVH.h"
 #include "Engine/Utility/ParallelUtils.h"
 #include "VulkanRenderer.h"
 
@@ -24,7 +25,7 @@ namespace Engine
 		enum class GpuCullPassMode : uint32_t
 		{
 			Reset = 0,
-			Cull = 1,
+			Traverse = 1,
 			Finalize = 2,
 			Compact = 3
 		};
@@ -350,6 +351,9 @@ namespace Engine
 		gpuCullFrameReuseStamps.assign(framesInFlight, GpuCullFrameReuseStamp{});
 		gpuWorldVisibleIndexBuffers.resize(framesInFlight);
 		gpuWorldIndirectCommandBuffers.resize(framesInFlight);
+		gpuWorldBvhTraversalQueueBuffers.resize(framesInFlight);
+		gpuWorldBvhTraversalCountBuffers.resize(framesInFlight);
+		gpuWorldBvhTraversalCountStagingBuffers.resize(framesInFlight);
 
 		const VkDeviceSize drawCountBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxDrawCalls);
 		const VkDeviceSize drawCountScalarBytes = static_cast<VkDeviceSize>(sizeof(uint32_t));
@@ -358,6 +362,11 @@ namespace Engine
 		const VkDeviceSize transformBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceTransformData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
 		const VkDeviceSize visibleIndexBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
 		const VkDeviceSize indirectBytes = static_cast<VkDeviceSize>(sizeof(VkDrawIndexedIndirectCommand)) * static_cast<VkDeviceSize>(maxDrawCalls);
+		const VkDeviceSize bvhNodeBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldBvhNodeData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize bvhLeafBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldBvhLeafData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize bvhRangeBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceRangeData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize bvhQueueBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize bvhQueueCountBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * 2ull;
 
 		gpuWorldStaticBuffer = std::make_unique<VulkanBuffer>(
 			device,
@@ -387,6 +396,54 @@ namespace Engine
 			device,
 			physicalDevice,
 			templateBytes,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		gpuWorldBvhNodeBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhNodeBytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		gpuWorldBvhNodeStagingBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhNodeBytes,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		gpuWorldBvhLeafBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhLeafBytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		gpuWorldBvhLeafStagingBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhLeafBytes,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		gpuWorldBvhLeafRangeBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhRangeBytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		gpuWorldBvhLeafRangeStagingBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			bvhRangeBytes,
 			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 		);
@@ -440,9 +497,36 @@ namespace Engine
 				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 			);
+
+			for (uint32_t queueIndex = 0; queueIndex < 2; ++queueIndex)
+			{
+				gpuWorldBvhTraversalQueueBuffers[i][queueIndex] = std::make_unique<VulkanBuffer>(
+					device,
+					physicalDevice,
+					bvhQueueBytes,
+					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+					VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+				);
+			}
+
+			gpuWorldBvhTraversalCountBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				bvhQueueCountBytes,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
+
+			gpuWorldBvhTraversalCountStagingBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				bvhQueueCountBytes,
+				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
 		}
 
-		std::array<VkDescriptorSetLayoutBinding, 7> bindings{};
+		std::array<VkDescriptorSetLayoutBinding, 13> bindings{};
 		for (uint32_t i = 0; i < static_cast<uint32_t>(bindings.size()); ++i)
 		{
 			bindings[i].binding = i;
@@ -523,7 +607,37 @@ namespace Engine
 			drawCountScalarInfo.offset = 0;
 			drawCountScalarInfo.range = VK_WHOLE_SIZE;
 
-			std::array<VkWriteDescriptorSet, 7> writes{};
+			VkDescriptorBufferInfo bvhNodeInfo{};
+			bvhNodeInfo.buffer = gpuWorldBvhNodeBuffer->GetBuffer();
+			bvhNodeInfo.offset = 0;
+			bvhNodeInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo bvhLeafInfo{};
+			bvhLeafInfo.buffer = gpuWorldBvhLeafBuffer->GetBuffer();
+			bvhLeafInfo.offset = 0;
+			bvhLeafInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo bvhLeafRangeInfo{};
+			bvhLeafRangeInfo.buffer = gpuWorldBvhLeafRangeBuffer->GetBuffer();
+			bvhLeafRangeInfo.offset = 0;
+			bvhLeafRangeInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo queueAInfo{};
+			queueAInfo.buffer = gpuWorldBvhTraversalQueueBuffers[i][0]->GetBuffer();
+			queueAInfo.offset = 0;
+			queueAInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo queueBInfo{};
+			queueBInfo.buffer = gpuWorldBvhTraversalQueueBuffers[i][1]->GetBuffer();
+			queueBInfo.offset = 0;
+			queueBInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo queueCountInfo{};
+			queueCountInfo.buffer = gpuWorldBvhTraversalCountBuffers[i]->GetBuffer();
+			queueCountInfo.offset = 0;
+			queueCountInfo.range = VK_WHOLE_SIZE;
+
+			std::array<VkWriteDescriptorSet, 13> writes{};
 			for (uint32_t writeIndex = 0; writeIndex < static_cast<uint32_t>(writes.size()); ++writeIndex)
 			{
 				writes[writeIndex].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -540,9 +654,16 @@ namespace Engine
 			writes[4].pBufferInfo = &templateInfo;
 			writes[5].pBufferInfo = &indirectInfo;
 			writes[6].pBufferInfo = &drawCountScalarInfo;
+			writes[7].pBufferInfo = &bvhNodeInfo;
+			writes[8].pBufferInfo = &bvhLeafInfo;
+			writes[9].pBufferInfo = &bvhLeafRangeInfo;
+			writes[10].pBufferInfo = &queueAInfo;
+			writes[11].pBufferInfo = &queueBInfo;
+			writes[12].pBufferInfo = &queueCountInfo;
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
+
 
 	void VulkanIndexDraw::DestroyGpuCullResources()
 	{
@@ -570,11 +691,21 @@ namespace Engine
 		gpuWorldTransformFrameInitialized.clear();
 		gpuWorldVisibleIndexBuffers.clear();
 		gpuWorldIndirectCommandBuffers.clear();
+		gpuWorldBvhTraversalQueueBuffers.clear();
+		gpuWorldBvhTraversalCountBuffers.clear();
+		gpuWorldBvhTraversalCountStagingBuffers.clear();
 		gpuWorldStaticBuffer.reset();
 		gpuWorldStaticStagingBuffer.reset();
 		gpuCullCommandTemplateStaticBuffer.reset();
 		gpuCullCommandTemplateStagingBuffer.reset();
+		gpuWorldBvhNodeBuffer.reset();
+		gpuWorldBvhNodeStagingBuffer.reset();
+		gpuWorldBvhLeafBuffer.reset();
+		gpuWorldBvhLeafStagingBuffer.reset();
+		gpuWorldBvhLeafRangeBuffer.reset();
+		gpuWorldBvhLeafRangeStagingBuffer.reset();
 	}
+
 
 	void VulkanIndexDraw::CreateMegaMeshBuffers(VkDeviceSize totalVertexBufferSize, VkDeviceSize totalIndexBufferSize)
 	{
@@ -994,11 +1125,28 @@ namespace Engine
 
 		if (cullMode == CullMode::GPU)
 		{
+			// Keep the CPU-owned SceneBVH coherent for the render frame when the GPU path consumes it.
+			// The scene currently refits BVH state during the fixed update, which is great for the CPU path,
+			// but the GPU BVH snapshot is consumed from the renderer later in the frame. If transforms moved
+			// this frame and we do not refit before building / uploading the GPU snapshot, the GPU traversal
+			// can briefly cull against stale node bounds and visible world geometry will flicker when the
+			// camera moves or when animated / rotating content crosses frustum edges.
+			if (SceneBVH* sceneBVH = scene->GetSceneBVH())
+			{
+				if (Transform::AreAnyTransformsDirty()
+					|| sceneBVH->ShouldForceUpdate()
+					|| gpuWorldBvhTopologyVersion != scene->GetRenderablesRevision())
+				{
+					sceneBVH->Update();
+				}
+			}
+
 			// The GPU cull path keeps its indirect draw templates cached across frames.
 			// Clearing them here and then reusing the cached GPU scene packet on unchanged scenes
 			// leaves gpuCullDrawCommandCount at 0 for otherwise valid frames, which shows up as
 			// alternating / flickering world rendering once the scene stops rebuilding every frame.
 			RebuildGpuWorldScenePacket(*scene, registry);
+			UpdateGpuWorldBvhNodeBuffer(*scene);
 			UpdateGpuWorldTransformPacket(*scene, registry, frameIndex);
 			return;
 		}
@@ -1425,7 +1573,169 @@ namespace Engine
 			gpuWorldTemplateUploadPending = true;
 		}
 
+		RebuildGpuWorldBvh(scene);
 		gpuWorldSceneDirty = false;
+	}
+
+	void VulkanIndexDraw::RebuildGpuWorldBvh(Scene& scene)
+	{
+		SceneBVH* sceneBVH = scene.GetSceneBVH();
+		if (sceneBVH == nullptr)
+		{
+			gpuWorldBvhNodesCpuData.clear();
+			gpuWorldBvhLeavesCpuData.clear();
+			gpuWorldBvhLeafRangesCpuData.clear();
+			gpuWorldBvhNodeCount = 0;
+			gpuWorldBvhLeafCount = 0;
+			gpuWorldBvhRangeCount = 0;
+			gpuWorldBvhRootIndex = 0;
+			gpuWorldBvhMaxDepth = 0;
+			gpuWorldBvhTopologyVersion = 0;
+			gpuWorldBvhBoundsVersion = 0;
+			gpuWorldBvhNodesUploadPending = false;
+			gpuWorldBvhLeavesUploadPending = false;
+			gpuWorldBvhRangesUploadPending = false;
+			return;
+		}
+
+		std::vector<SceneBVH::GpuWideSnapshotNode> snapshotNodes;
+		std::vector<SceneBVH::GpuWideSnapshotLeaf> snapshotLeaves;
+		uint32_t snapshotRootIndex = 0;
+		uint32_t snapshotMaxDepth = 0;
+		sceneBVH->BuildGpuWideSnapshot(snapshotNodes, snapshotLeaves, &snapshotRootIndex, &snapshotMaxDepth);
+
+		gpuWorldBvhNodesCpuData.resize(snapshotNodes.size());
+		for (size_t nodeIndex = 0; nodeIndex < snapshotNodes.size(); ++nodeIndex)
+		{
+			const SceneBVH::GpuWideSnapshotNode& sourceNode = snapshotNodes[nodeIndex];
+			GpuWorldBvhNodeData& destNode = gpuWorldBvhNodesCpuData[nodeIndex];
+			destNode.minX = sourceNode.minX;
+			destNode.minY = sourceNode.minY;
+			destNode.minZ = sourceNode.minZ;
+			destNode.maxX = sourceNode.maxX;
+			destNode.maxY = sourceNode.maxY;
+			destNode.maxZ = sourceNode.maxZ;
+			for (uint32_t childIndex = 0; childIndex < 4; ++childIndex)
+			{
+				destNode.childRef[childIndex] = sourceNode.childRef[childIndex];
+			}
+			destNode.childCount = sourceNode.childCount;
+		}
+
+		gpuWorldBvhLeavesCpuData.clear();
+		gpuWorldBvhLeafRangesCpuData.clear();
+		gpuWorldBvhLeavesCpuData.reserve(snapshotLeaves.size());
+
+		for (const SceneBVH::GpuWideSnapshotLeaf& snapshotLeaf : snapshotLeaves)
+		{
+			GpuWorldBvhLeafData leafData{};
+			leafData.firstRangeIndex = static_cast<uint32_t>(gpuWorldBvhLeafRangesCpuData.size());
+
+			auto rangeIt = gpuWorldEntityToInstanceRanges.find(snapshotLeaf.entity);
+			if (rangeIt != gpuWorldEntityToInstanceRanges.end())
+			{
+				for (const GpuWorldInstanceRange& range : rangeIt->second)
+				{
+					if (range.count == 0)
+					{
+						continue;
+					}
+
+					gpuWorldBvhLeafRangesCpuData.push_back(GpuWorldInstanceRangeData{ range.start, range.count });
+				}
+			}
+
+			leafData.rangeCount = static_cast<uint32_t>(gpuWorldBvhLeafRangesCpuData.size()) - leafData.firstRangeIndex;
+			gpuWorldBvhLeavesCpuData.push_back(leafData);
+		}
+
+		gpuWorldBvhNodeCount = static_cast<uint32_t>(gpuWorldBvhNodesCpuData.size());
+		gpuWorldBvhLeafCount = static_cast<uint32_t>(gpuWorldBvhLeavesCpuData.size());
+		gpuWorldBvhRangeCount = static_cast<uint32_t>(gpuWorldBvhLeafRangesCpuData.size());
+		if (gpuWorldBvhNodeCount > static_cast<uint32_t>(maxExpectedInstances)
+			|| gpuWorldBvhLeafCount > static_cast<uint32_t>(maxExpectedInstances)
+			|| gpuWorldBvhRangeCount > static_cast<uint32_t>(maxExpectedInstances))
+		{
+			throw std::runtime_error("GPU BVH data exceeded maxExpectedInstances capacity.");
+		}
+		gpuWorldBvhRootIndex = snapshotRootIndex;
+		gpuWorldBvhMaxDepth = std::max(1u, snapshotMaxDepth);
+		gpuWorldBvhTopologyVersion = scene.GetRenderablesRevision();
+		gpuWorldBvhBoundsVersion = Transform::GetGlobalMutationVersion();
+
+		if (gpuWorldBvhNodeCount > 0)
+		{
+			gpuWorldBvhNodeStagingBuffer->CopyData(gpuWorldBvhNodesCpuData.data(), static_cast<size_t>(gpuWorldBvhNodeCount) * sizeof(GpuWorldBvhNodeData));
+			gpuWorldBvhNodesUploadPending = true;
+		}
+		else
+		{
+			gpuWorldBvhNodesUploadPending = false;
+		}
+
+		if (gpuWorldBvhLeafCount > 0)
+		{
+			gpuWorldBvhLeafStagingBuffer->CopyData(gpuWorldBvhLeavesCpuData.data(), static_cast<size_t>(gpuWorldBvhLeafCount) * sizeof(GpuWorldBvhLeafData));
+			gpuWorldBvhLeavesUploadPending = true;
+		}
+		else
+		{
+			gpuWorldBvhLeavesUploadPending = false;
+		}
+
+		if (gpuWorldBvhRangeCount > 0)
+		{
+			gpuWorldBvhLeafRangeStagingBuffer->CopyData(gpuWorldBvhLeafRangesCpuData.data(), static_cast<size_t>(gpuWorldBvhRangeCount) * sizeof(GpuWorldInstanceRangeData));
+			gpuWorldBvhRangesUploadPending = true;
+		}
+		else
+		{
+			gpuWorldBvhRangesUploadPending = false;
+		}
+	}
+
+	void VulkanIndexDraw::UpdateGpuWorldBvhNodeBuffer(Scene& scene)
+	{
+		SceneBVH* sceneBVH = scene.GetSceneBVH();
+		if (sceneBVH == nullptr || gpuWorldBvhNodeCount == 0)
+		{
+			return;
+		}
+
+		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
+		if (gpuWorldBvhBoundsVersion == currentTransformMutationVersion && !gpuWorldBvhNodesUploadPending)
+		{
+			return;
+		}
+
+		std::vector<SceneBVH::GpuWideSnapshotNode> snapshotNodes;
+		std::vector<SceneBVH::GpuWideSnapshotLeaf> snapshotLeaves;
+		uint32_t snapshotRootIndex = 0;
+		uint32_t snapshotMaxDepth = 0;
+		sceneBVH->BuildGpuWideSnapshot(snapshotNodes, snapshotLeaves, &snapshotRootIndex, &snapshotMaxDepth);
+
+		if (snapshotNodes.size() != gpuWorldBvhNodesCpuData.size() || snapshotRootIndex != gpuWorldBvhRootIndex)
+		{
+			RebuildGpuWorldBvh(scene);
+			return;
+		}
+
+		for (size_t nodeIndex = 0; nodeIndex < snapshotNodes.size(); ++nodeIndex)
+		{
+			const SceneBVH::GpuWideSnapshotNode& sourceNode = snapshotNodes[nodeIndex];
+			GpuWorldBvhNodeData& destNode = gpuWorldBvhNodesCpuData[nodeIndex];
+			destNode.minX = sourceNode.minX;
+			destNode.minY = sourceNode.minY;
+			destNode.minZ = sourceNode.minZ;
+			destNode.maxX = sourceNode.maxX;
+			destNode.maxY = sourceNode.maxY;
+			destNode.maxZ = sourceNode.maxZ;
+		}
+
+		gpuWorldBvhMaxDepth = std::max(1u, snapshotMaxDepth);
+		gpuWorldBvhNodeStagingBuffer->CopyData(gpuWorldBvhNodesCpuData.data(), static_cast<size_t>(gpuWorldBvhNodeCount) * sizeof(GpuWorldBvhNodeData));
+		gpuWorldBvhNodesUploadPending = true;
+		gpuWorldBvhBoundsVersion = currentTransformMutationVersion;
 	}
 
 	void VulkanIndexDraw::UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex)
@@ -1781,7 +2091,11 @@ namespace Engine
 		std::shared_ptr<VulkanRenderer> renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
 		const std::unique_ptr<VulkanDeviceManager>& deviceManager = renderer->GetDeviceManager();
-		if (!pipelineManager || !pipelineManager->HasGpuCullComputePipeline() || gpuCullDrawCommandCount == 0 || gpuWorldSceneInstanceCount == 0)
+		if (!pipelineManager
+			|| !pipelineManager->HasGpuCullComputePipeline()
+			|| gpuCullDrawCommandCount == 0
+			|| gpuWorldSceneInstanceCount == 0
+			|| gpuWorldBvhNodeCount == 0)
 		{
 			return;
 		}
@@ -1795,6 +2109,9 @@ namespace Engine
 		pushConstants.instanceCount = gpuWorldSceneInstanceCount;
 		pushConstants.drawCommandCount = gpuCullDrawCommandCount;
 		pushConstants.compactDraws = useIndirectCount ? 1u : 0u;
+		pushConstants.gpuBvhNodeCount = gpuWorldBvhNodeCount;
+		pushConstants.gpuBvhRootIndex = gpuWorldBvhRootIndex;
+		pushConstants.gpuBvhMaxDepth = gpuWorldBvhMaxDepth;
 		for (int i = 0; i < 6; ++i)
 		{
 			pushConstants.frustumPlanes[i] = frustum.planes[i];
@@ -1813,15 +2130,16 @@ namespace Engine
 		);
 
 		const uint32_t drawGroupCount = DivideRoundUp(gpuCullDrawCommandCount, GpuCullThreadGroupSize);
-		const uint32_t instanceGroupCount = DivideRoundUp(gpuWorldSceneInstanceCount, GpuCullThreadGroupSize);
+		const uint32_t traversalGroupCount = DivideRoundUp(std::max(gpuWorldBvhNodeCount, 1u), GpuCullThreadGroupSize);
 
 		vkCmdFillBuffer(cmd, gpuCullDrawCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 		if (useIndirectCount)
 		{
 			vkCmdFillBuffer(cmd, gpuCullVisibleDrawCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 		}
 
-		std::array<VkBufferMemoryBarrier, 2> fillBarriers{};
+		std::array<VkBufferMemoryBarrier, 3> fillBarriers{};
 		uint32_t fillBarrierCount = 0;
 
 		fillBarriers[fillBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -1830,6 +2148,16 @@ namespace Engine
 		fillBarriers[fillBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		fillBarriers[fillBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		fillBarriers[fillBarrierCount].buffer = gpuCullDrawCountBuffers[frameIndex]->GetBuffer();
+		fillBarriers[fillBarrierCount].offset = 0;
+		fillBarriers[fillBarrierCount].size = VK_WHOLE_SIZE;
+		++fillBarrierCount;
+
+		fillBarriers[fillBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		fillBarriers[fillBarrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		fillBarriers[fillBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		fillBarriers[fillBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		fillBarriers[fillBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		fillBarriers[fillBarrierCount].buffer = gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer();
 		fillBarriers[fillBarrierCount].offset = 0;
 		fillBarriers[fillBarrierCount].size = VK_WHOLE_SIZE;
 		++fillBarrierCount;
@@ -1860,34 +2188,143 @@ namespace Engine
 			nullptr
 		);
 
-		if (instanceGroupCount > 0)
+		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Reset);
+		pushConstants.inputQueueIndex = 0;
+		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+		vkCmdDispatch(cmd, 1, 1, 1);
+
+		std::array<VkBufferMemoryBarrier, 3> resetBarriers{};
+		uint32_t resetBarrierCount = 0;
+
+		resetBarriers[resetBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		resetBarriers[resetBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		resetBarriers[resetBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		resetBarriers[resetBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		resetBarriers[resetBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		resetBarriers[resetBarrierCount].buffer = gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer();
+		resetBarriers[resetBarrierCount].offset = 0;
+		resetBarriers[resetBarrierCount].size = VK_WHOLE_SIZE;
+		++resetBarrierCount;
+
+		resetBarriers[resetBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		resetBarriers[resetBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		resetBarriers[resetBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		resetBarriers[resetBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		resetBarriers[resetBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		resetBarriers[resetBarrierCount].buffer = gpuWorldBvhTraversalQueueBuffers[frameIndex][0]->GetBuffer();
+		resetBarriers[resetBarrierCount].offset = 0;
+		resetBarriers[resetBarrierCount].size = VK_WHOLE_SIZE;
+		++resetBarrierCount;
+
+		if (useIndirectCount)
 		{
-			pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Cull);
+			resetBarriers[resetBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			resetBarriers[resetBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			resetBarriers[resetBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			resetBarriers[resetBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			resetBarriers[resetBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			resetBarriers[resetBarrierCount].buffer = gpuCullVisibleDrawCountBuffers[frameIndex]->GetBuffer();
+			resetBarriers[resetBarrierCount].offset = 0;
+			resetBarriers[resetBarrierCount].size = VK_WHOLE_SIZE;
+			++resetBarrierCount;
+		}
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			0,
+			nullptr,
+			resetBarrierCount,
+			resetBarriers.data(),
+			0,
+			nullptr
+		);
+
+		for (uint32_t depth = 0; depth < gpuWorldBvhMaxDepth; ++depth)
+		{
+			const uint32_t inputQueueIndex = depth & 1u;
+			const uint32_t outputQueueIndex = inputQueueIndex ^ 1u;
+
+			vkCmdFillBuffer(
+				cmd,
+				gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer(),
+				static_cast<VkDeviceSize>(outputQueueIndex * sizeof(uint32_t)),
+				static_cast<VkDeviceSize>(sizeof(uint32_t)),
+				0
+			);
+
+			VkBufferMemoryBarrier queueClearBarrier{};
+			queueClearBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			queueClearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			queueClearBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			queueClearBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			queueClearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			queueClearBarrier.buffer = gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer();
+			queueClearBarrier.offset = static_cast<VkDeviceSize>(outputQueueIndex * sizeof(uint32_t));
+			queueClearBarrier.size = static_cast<VkDeviceSize>(sizeof(uint32_t));
+
+			vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				0,
+				0,
+				nullptr,
+				1,
+				&queueClearBarrier,
+				0,
+				nullptr
+			);
+
+			pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Traverse);
+			pushConstants.inputQueueIndex = inputQueueIndex;
 			vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-			vkCmdDispatch(cmd, instanceGroupCount, 1, 1);
+			vkCmdDispatch(cmd, traversalGroupCount, 1, 1);
 
-			std::array<VkBufferMemoryBarrier, 2> cullBarriers{};
-			uint32_t cullBarrierCount = 0;
+			std::array<VkBufferMemoryBarrier, 4> traverseBarriers{};
+			uint32_t traverseBarrierCount = 0;
 
-			cullBarriers[cullBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-			cullBarriers[cullBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			cullBarriers[cullBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-			cullBarriers[cullBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			cullBarriers[cullBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			cullBarriers[cullBarrierCount].buffer = gpuCullDrawCountBuffers[frameIndex]->GetBuffer();
-			cullBarriers[cullBarrierCount].offset = 0;
-			cullBarriers[cullBarrierCount].size = VK_WHOLE_SIZE;
-			++cullBarrierCount;
+			traverseBarriers[traverseBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			traverseBarriers[traverseBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].buffer = gpuWorldBvhTraversalCountBuffers[frameIndex]->GetBuffer();
+			traverseBarriers[traverseBarrierCount].offset = 0;
+			traverseBarriers[traverseBarrierCount].size = VK_WHOLE_SIZE;
+			++traverseBarrierCount;
 
-			cullBarriers[cullBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-			cullBarriers[cullBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-			cullBarriers[cullBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			cullBarriers[cullBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			cullBarriers[cullBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			cullBarriers[cullBarrierCount].buffer = gpuWorldVisibleIndexBuffers[frameIndex]->GetBuffer();
-			cullBarriers[cullBarrierCount].offset = 0;
-			cullBarriers[cullBarrierCount].size = VK_WHOLE_SIZE;
-			++cullBarrierCount;
+			traverseBarriers[traverseBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			traverseBarriers[traverseBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].buffer = gpuWorldBvhTraversalQueueBuffers[frameIndex][outputQueueIndex]->GetBuffer();
+			traverseBarriers[traverseBarrierCount].offset = 0;
+			traverseBarriers[traverseBarrierCount].size = VK_WHOLE_SIZE;
+			++traverseBarrierCount;
+
+			traverseBarriers[traverseBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			traverseBarriers[traverseBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].buffer = gpuCullDrawCountBuffers[frameIndex]->GetBuffer();
+			traverseBarriers[traverseBarrierCount].offset = 0;
+			traverseBarriers[traverseBarrierCount].size = VK_WHOLE_SIZE;
+			++traverseBarrierCount;
+
+			traverseBarriers[traverseBarrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			traverseBarriers[traverseBarrierCount].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			traverseBarriers[traverseBarrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			traverseBarriers[traverseBarrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			traverseBarriers[traverseBarrierCount].buffer = gpuWorldVisibleIndexBuffers[frameIndex]->GetBuffer();
+			traverseBarriers[traverseBarrierCount].offset = 0;
+			traverseBarriers[traverseBarrierCount].size = VK_WHOLE_SIZE;
+			++traverseBarrierCount;
 
 			vkCmdPipelineBarrier(
 				cmd,
@@ -1896,8 +2333,8 @@ namespace Engine
 				0,
 				0,
 				nullptr,
-				cullBarrierCount,
-				cullBarriers.data(),
+				traverseBarrierCount,
+				traverseBarriers.data(),
 				0,
 				nullptr
 			);
@@ -1962,6 +2399,7 @@ namespace Engine
 		);
 	}
 
+
 	void VulkanIndexDraw::PrepareWorldDrawCommands(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
 		if (cullMode != CullMode::GPU)
@@ -1976,6 +2414,9 @@ namespace Engine
 
 		bool copiedStaticBuffer = false;
 		bool copiedTemplateBuffer = false;
+		bool copiedBvhNodes = false;
+		bool copiedBvhLeaves = false;
+		bool copiedBvhRanges = false;
 
 		if (gpuWorldStaticUploadPending && gpuWorldSceneInstanceCount > 0)
 		{
@@ -1999,6 +2440,39 @@ namespace Engine
 			copiedTemplateBuffer = true;
 		}
 
+		if (gpuWorldBvhNodesUploadPending && gpuWorldBvhNodeCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuWorldBvhNodeCount) * sizeof(GpuWorldBvhNodeData);
+			vkCmdCopyBuffer(cmd, gpuWorldBvhNodeStagingBuffer->GetBuffer(), gpuWorldBvhNodeBuffer->GetBuffer(), 1, &copy);
+			gpuWorldBvhNodesUploadPending = false;
+			copiedBvhNodes = true;
+		}
+
+		if (gpuWorldBvhLeavesUploadPending && gpuWorldBvhLeafCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuWorldBvhLeafCount) * sizeof(GpuWorldBvhLeafData);
+			vkCmdCopyBuffer(cmd, gpuWorldBvhLeafStagingBuffer->GetBuffer(), gpuWorldBvhLeafBuffer->GetBuffer(), 1, &copy);
+			gpuWorldBvhLeavesUploadPending = false;
+			copiedBvhLeaves = true;
+		}
+
+		if (gpuWorldBvhRangesUploadPending && gpuWorldBvhRangeCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuWorldBvhRangeCount) * sizeof(GpuWorldInstanceRangeData);
+			vkCmdCopyBuffer(cmd, gpuWorldBvhLeafRangeStagingBuffer->GetBuffer(), gpuWorldBvhLeafRangeBuffer->GetBuffer(), 1, &copy);
+			gpuWorldBvhRangesUploadPending = false;
+			copiedBvhRanges = true;
+		}
+
 		const auto& transformCopies = gpuWorldTransformCopyRegions[frameIndex];
 		if (!transformCopies.empty())
 		{
@@ -2011,7 +2485,7 @@ namespace Engine
 			);
 		}
 
-		std::array<VkBufferMemoryBarrier, 3> uploadBarriers{};
+		std::array<VkBufferMemoryBarrier, 6> uploadBarriers{};
 		uint32_t barrierCount = 0;
 
 		if (!transformCopies.empty())
@@ -2053,6 +2527,45 @@ namespace Engine
 			++barrierCount;
 		}
 
+		if (copiedBvhNodes)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuWorldBvhNodeBuffer->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
+		if (copiedBvhLeaves)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuWorldBvhLeafBuffer->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
+		if (copiedBvhRanges)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuWorldBvhLeafRangeBuffer->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
 		if (barrierCount > 0)
 		{
 			vkCmdPipelineBarrier(
@@ -2073,12 +2586,12 @@ namespace Engine
 		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
 		const uint32_t currentRenderStateMask = static_cast<uint32_t>(SwimEngine::GetInstance()->GetEngineState());
 
-		if (!transformCopies.empty())
+		if (!transformCopies.empty() || copiedBvhNodes || copiedBvhLeaves || copiedBvhRanges)
 		{
 			gpuCullFrameReuseStamps[frameIndex].valid = false;
 		}
 
-		if (!copiedStaticBuffer && !copiedTemplateBuffer && transformCopies.empty())
+		if (!copiedStaticBuffer && !copiedTemplateBuffer && !copiedBvhNodes && !copiedBvhLeaves && !copiedBvhRanges && transformCopies.empty())
 		{
 			const GpuCullFrameReuseStamp& reuseStamp = gpuCullFrameReuseStamps[frameIndex];
 			if (reuseStamp.valid
@@ -2100,6 +2613,7 @@ namespace Engine
 		gpuCullFrameReuseStamps[frameIndex].renderStateMask = currentRenderStateMask;
 		gpuCullFrameReuseStamps[frameIndex].valid = true;
 	}
+
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
 	void VulkanIndexDraw::DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
@@ -2844,6 +3358,5 @@ namespace Engine
 		worldRenderableKeyToSlot.clear();
 		worldEntityToSlotIndices.clear();
 	}
-
 
 }

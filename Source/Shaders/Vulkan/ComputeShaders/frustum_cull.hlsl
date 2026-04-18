@@ -24,6 +24,35 @@ struct GpuWorldInstanceTransformData
   uint padC;
 };
 
+struct GpuWorldBvhNodeData
+{
+  float4 minX;
+  float4 minY;
+  float4 minZ;
+  float4 maxX;
+  float4 maxY;
+  float4 maxZ;
+  int4 childRef;
+  uint childCount;
+  uint padA;
+  uint padB;
+  uint padC;
+};
+
+struct GpuWorldBvhLeafData
+{
+  uint firstRangeIndex;
+  uint rangeCount;
+  uint padA;
+  uint padB;
+};
+
+struct GpuWorldInstanceRangeData
+{
+  uint start;
+  uint count;
+};
+
 struct DrawIndexedIndirectCommand
 {
   uint indexCount;
@@ -39,6 +68,10 @@ struct PushConstants
   uint instanceCount;
   uint drawCommandCount;
   uint compactDraws;
+  uint inputQueueIndex;
+  uint gpuBvhNodeCount;
+  uint gpuBvhRootIndex;
+  uint gpuBvhMaxDepth;
   float4 frustumPlanes[6];
 };
 
@@ -66,156 +99,257 @@ RWStructuredBuffer<DrawIndexedIndirectCommand> indirectCommandBuffer : register(
 [[vk::binding(6, 0)]]
 RWStructuredBuffer<uint> drawCountScalar : register(u6, space0);
 
-static const uint MODE_CULL = 1;
+[[vk::binding(7, 0)]]
+StructuredBuffer<GpuWorldBvhNodeData> bvhNodes : register(t7, space0);
+
+[[vk::binding(8, 0)]]
+StructuredBuffer<GpuWorldBvhLeafData> bvhLeaves : register(t8, space0);
+
+[[vk::binding(9, 0)]]
+StructuredBuffer<GpuWorldInstanceRangeData> bvhLeafRanges : register(t9, space0);
+
+[[vk::binding(10, 0)]]
+RWStructuredBuffer<uint> traversalQueueA : register(u10, space0);
+
+[[vk::binding(11, 0)]]
+RWStructuredBuffer<uint> traversalQueueB : register(u11, space0);
+
+[[vk::binding(12, 0)]]
+RWStructuredBuffer<uint> traversalQueueCounts : register(u12, space0);
+
+static const uint MODE_RESET = 0;
+static const uint MODE_TRAVERSE = 1;
 static const uint MODE_FINALIZE = 2;
 static const uint MODE_COMPACT = 3;
 static const uint GROUP_SIZE = 64;
-static const uint INVALID_BUCKET_KEY = 0xffffffffu;
+static const int INVALID_CHILD_REF = -2147483648;
+static const float NODE_FRUSTUM_EPSILON_MIN = 0.02f;
+static const float NODE_FRUSTUM_EPSILON_SCALE = 0.01f;
+static const float INSTANCE_SPHERE_EPSILON_MIN = 0.02f;
+static const float INSTANCE_SPHERE_EPSILON_SCALE = 0.02f;
 
-// Workgroup-local aggregation drastically reduces the number of global atomics in the hot cull pass.
-// The scene packet is already sorted by mesh/draw key on the CPU, so consecutive lanes in a thread group
-// commonly hit the same draw bucket. We exploit that here by binning visible instances per workgroup,
-// issuing one global atomic add per bucket, and then scattering the visible IDs inside the reserved range.
-groupshared uint groupBucketKeys[GROUP_SIZE];
-groupshared uint groupBucketCounts[GROUP_SIZE];
-groupshared uint groupBucketBaseOffsets[GROUP_SIZE];
-groupshared uint groupBucketScatterOffsets[GROUP_SIZE];
-
-float3 TransformPoint(float3 localPoint, GpuWorldInstanceTransformData instanceTransform)
+bool IsEncodedLeaf(int childRef)
 {
-  return float3(
-    dot(instanceTransform.row0.xyz, localPoint) + instanceTransform.row0.w,
-    dot(instanceTransform.row1.xyz, localPoint) + instanceTransform.row1.w,
-    dot(instanceTransform.row2.xyz, localPoint) + instanceTransform.row2.w
+  return childRef < 0 && childRef != INVALID_CHILD_REF;
+}
+
+uint DecodeLeafIndex(int childRef)
+{
+  return (uint)(-childRef - 1);
+}
+
+uint PackTraversalNode(uint nodeIndex, bool fullyInside)
+{
+  return (nodeIndex & 0x7fffffffu) | (fullyInside ? 0x80000000u : 0u);
+}
+
+float GetChildComponent(float4 v, uint childIndex)
+{
+  if (childIndex == 0)
+  {
+    return v.x;
+  }
+  if (childIndex == 1)
+  {
+    return v.y;
+  }
+  if (childIndex == 2)
+  {
+    return v.z;
+  }
+  return v.w;
+}
+
+bool ClassifyChildAabb(GpuWorldBvhNodeData node, uint childIndex, out bool fullyInside)
+{
+  float3 aabbMin = float3(
+    GetChildComponent(node.minX, childIndex),
+    GetChildComponent(node.minY, childIndex),
+    GetChildComponent(node.minZ, childIndex)
   );
-}
 
-float3 LoadAxisX(GpuWorldInstanceTransformData instanceTransform)
-{
-  return float3(instanceTransform.row0.x, instanceTransform.row1.x, instanceTransform.row2.x);
-}
+  float3 aabbMax = float3(
+    GetChildComponent(node.maxX, childIndex),
+    GetChildComponent(node.maxY, childIndex),
+    GetChildComponent(node.maxZ, childIndex)
+  );
 
-float3 LoadAxisY(GpuWorldInstanceTransformData instanceTransform)
-{
-  return float3(instanceTransform.row0.y, instanceTransform.row1.y, instanceTransform.row2.y);
-}
+  float3 aabbExtent = max(aabbMax - aabbMin, float3(0.0f, 0.0f, 0.0f));
+  float frustumSlack = max(max(aabbExtent.x, max(aabbExtent.y, aabbExtent.z)) * NODE_FRUSTUM_EPSILON_SCALE, NODE_FRUSTUM_EPSILON_MIN);
 
-float3 LoadAxisZ(GpuWorldInstanceTransformData instanceTransform)
-{
-  return float3(instanceTransform.row0.z, instanceTransform.row1.z, instanceTransform.row2.z);
-}
-
-bool IsVisible(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransformData instanceTransform)
-{
-  float3 localCenter = instanceStatic.boundsCenterRadius.xyz;
-  float localRadius = instanceStatic.boundsCenterRadius.w;
-
-  float3 worldCenter = TransformPoint(localCenter, instanceTransform);
-
-  float maxScale = max(length(LoadAxisX(instanceTransform)), max(length(LoadAxisY(instanceTransform)), length(LoadAxisZ(instanceTransform))));
-  float worldRadius = localRadius * maxScale;
+  fullyInside = true;
 
   [unroll]
-  for (uint planeIndex = 0; planeIndex < 6; ++planeIndex)
-  {
-    float4 plane = pc.frustumPlanes[planeIndex];
-    float distanceToPlane = dot(plane.xyz, worldCenter) + plane.w;
-    if (distanceToPlane + worldRadius < 0.0f)
+    for (uint planeIndex = 0; planeIndex < 6; ++planeIndex)
     {
-      return false;
+      float4 plane = pc.frustumPlanes[planeIndex];
+      float3 positiveVertex = float3(
+        plane.x >= 0.0f ? aabbMax.x : aabbMin.x,
+        plane.y >= 0.0f ? aabbMax.y : aabbMin.y,
+        plane.z >= 0.0f ? aabbMax.z : aabbMin.z
+      );
+
+      if (dot(plane.xyz, positiveVertex) + plane.w < -frustumSlack)
+      {
+        fullyInside = false;
+        return false;
+      }
+
+      float3 negativeVertex = float3(
+        plane.x >= 0.0f ? aabbMin.x : aabbMax.x,
+        plane.y >= 0.0f ? aabbMin.y : aabbMax.y,
+        plane.z >= 0.0f ? aabbMin.z : aabbMax.z
+      );
+
+      if (dot(plane.xyz, negativeVertex) + plane.w < frustumSlack)
+      {
+        fullyInside = false;
+      }
     }
-  }
 
   return true;
 }
 
-uint HashDrawKey(uint drawKey)
+bool SphereInFrustumConservative(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransformData instanceTransform)
 {
-  return (drawKey * 2654435761u) & (GROUP_SIZE - 1u);
-}
+  float3 localCenter = instanceStatic.boundsCenterRadius.xyz;
+  float localRadius = instanceStatic.boundsCenterRadius.w;
 
-uint FindOrInsertBucket(uint drawKey)
-{
-  uint bucketIndex = HashDrawKey(drawKey);
+  float3 worldCenter = float3(
+    dot(instanceTransform.row0.xyz, localCenter) + instanceTransform.row0.w,
+    dot(instanceTransform.row1.xyz, localCenter) + instanceTransform.row1.w,
+    dot(instanceTransform.row2.xyz, localCenter) + instanceTransform.row2.w
+  );
+
+  float3 sx = float3(instanceTransform.row0.x, instanceTransform.row1.x, instanceTransform.row2.x);
+  float3 sy = float3(instanceTransform.row0.y, instanceTransform.row1.y, instanceTransform.row2.y);
+  float3 sz = float3(instanceTransform.row0.z, instanceTransform.row1.z, instanceTransform.row2.z);
+  float maxScale = max(length(sx), max(length(sy), length(sz)));
+  float worldRadius = localRadius * maxScale;
+  float frustumSlack = max(worldRadius * INSTANCE_SPHERE_EPSILON_SCALE, INSTANCE_SPHERE_EPSILON_MIN);
 
   [unroll]
-  for (uint probe = 0; probe < GROUP_SIZE; ++probe)
-  {
-    uint slot = (bucketIndex + probe) & (GROUP_SIZE - 1u);
-    uint existingKey = INVALID_BUCKET_KEY;
-    InterlockedCompareExchange(groupBucketKeys[slot], INVALID_BUCKET_KEY, drawKey, existingKey);
-
-    if (existingKey == INVALID_BUCKET_KEY || existingKey == drawKey)
+    for (uint planeIndex = 0; planeIndex < 6; ++planeIndex)
     {
-      return slot;
-    }
-  }
-
-  return INVALID_BUCKET_KEY;
-}
-
-[numthreads(GROUP_SIZE, 1, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID)
-{
-  uint index = dispatchThreadID.x;
-
-  if (pc.mode == MODE_CULL)
-  {
-    groupBucketKeys[groupThreadID.x] = INVALID_BUCKET_KEY;
-    groupBucketCounts[groupThreadID.x] = 0;
-    groupBucketBaseOffsets[groupThreadID.x] = 0;
-    groupBucketScatterOffsets[groupThreadID.x] = 0;
-
-    GroupMemoryBarrierWithGroupSync();
-
-    bool laneVisible = false;
-    uint bucketIndex = INVALID_BUCKET_KEY;
-    uint outputBaseInstance = 0;
-
-    if (index < pc.instanceCount)
-    {
-      GpuWorldInstanceTransformData instanceTransform = transformBuffer[index];
-      if (instanceTransform.enabled != 0)
+      float4 plane = pc.frustumPlanes[planeIndex];
+      float distanceToPlane = dot(plane.xyz, worldCenter) + plane.w;
+      if (distanceToPlane + worldRadius < -frustumSlack)
       {
-        GpuWorldInstanceStaticData instanceStatic = staticBuffer[index];
-        if (IsVisible(instanceStatic, instanceTransform))
-        {
-          laneVisible = true;
-          outputBaseInstance = instanceStatic.outputBaseInstance;
-          bucketIndex = FindOrInsertBucket(instanceStatic.drawCommandIndex);
-          if (bucketIndex != INVALID_BUCKET_KEY)
-          {
-            uint ignoredCount = 0;
-            InterlockedAdd(groupBucketCounts[bucketIndex], 1, ignoredCount);
-          }
-          else
-          {
-            laneVisible = false;
-          }
-        }
+        return false;
       }
     }
 
-    GroupMemoryBarrierWithGroupSync();
+  return true;
+}
 
-    if (groupBucketKeys[groupThreadID.x] != INVALID_BUCKET_KEY && groupBucketCounts[groupThreadID.x] > 0)
+[numthreads(GROUP_SIZE, 1, 1)]
+void main(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+  uint index = dispatchThreadID.x;
+
+  if (pc.mode == MODE_RESET)
+  {
+    if (index == 0)
     {
-      InterlockedAdd(
-        drawInstanceCounts[groupBucketKeys[groupThreadID.x]],
-        groupBucketCounts[groupThreadID.x],
-        groupBucketBaseOffsets[groupThreadID.x]
-      );
+      traversalQueueCounts[0] = pc.gpuBvhNodeCount > 0 ? 1u : 0u;
+      traversalQueueCounts[1] = 0u;
+      if (pc.gpuBvhNodeCount > 0)
+      {
+        traversalQueueA[0] = PackTraversalNode(pc.gpuBvhRootIndex, false);
+      }
+    }
+    return;
+  }
+
+  if (pc.mode == MODE_TRAVERSE)
+  {
+    uint inputQueueIndex = pc.inputQueueIndex & 1u;
+    uint outputQueueIndex = inputQueueIndex ^ 1u;
+    uint inputCount = traversalQueueCounts[inputQueueIndex];
+    if (index >= inputCount)
+    {
+      return;
     }
 
-    GroupMemoryBarrierWithGroupSync();
-
-    if (laneVisible)
+    uint packedNode = inputQueueIndex == 0 ? traversalQueueA[index] : traversalQueueB[index];
+    bool parentFullyInside = (packedNode & 0x80000000u) != 0u;
+    uint nodeIndex = packedNode & 0x7fffffffu;
+    if (nodeIndex >= pc.gpuBvhNodeCount)
     {
-      uint localOffset = 0;
-      InterlockedAdd(groupBucketScatterOffsets[bucketIndex], 1, localOffset);
-      visibleInstanceIds[outputBaseInstance + groupBucketBaseOffsets[bucketIndex] + localOffset] = index;
+      return;
     }
 
+    GpuWorldBvhNodeData node = bvhNodes[nodeIndex];
+    [unroll]
+      for (uint childIndex = 0; childIndex < 4; ++childIndex)
+      {
+        if (childIndex >= node.childCount)
+        {
+          break;
+        }
+
+        int childRef = node.childRef[childIndex];
+        if (childRef == INVALID_CHILD_REF)
+        {
+          continue;
+        }
+
+        bool childFullyInside = parentFullyInside;
+        bool childVisible = parentFullyInside;
+        if (!parentFullyInside)
+        {
+          childVisible = ClassifyChildAabb(node, childIndex, childFullyInside);
+        }
+
+        if (!childVisible)
+        {
+          continue;
+        }
+
+        if (IsEncodedLeaf(childRef))
+        {
+          uint leafIndex = DecodeLeafIndex(childRef);
+          GpuWorldBvhLeafData leaf = bvhLeaves[leafIndex];
+          for (uint rangeIndex = 0; rangeIndex < leaf.rangeCount; ++rangeIndex)
+          {
+            GpuWorldInstanceRangeData instanceRange = bvhLeafRanges[leaf.firstRangeIndex + rangeIndex];
+            uint rangeEnd = instanceRange.start + instanceRange.count;
+            for (uint instanceIndex = instanceRange.start; instanceIndex < rangeEnd; ++instanceIndex)
+            {
+              GpuWorldInstanceTransformData instanceTransform = transformBuffer[instanceIndex];
+              if (instanceTransform.enabled == 0u)
+              {
+                continue;
+              }
+
+              GpuWorldInstanceStaticData instanceStatic = staticBuffer[instanceIndex];
+              bool instanceVisible = childFullyInside || SphereInFrustumConservative(instanceStatic, instanceTransform);
+              if (!instanceVisible)
+              {
+                continue;
+              }
+
+              uint outputOffset = 0;
+              InterlockedAdd(drawInstanceCounts[instanceStatic.drawCommandIndex], 1, outputOffset);
+              visibleInstanceIds[instanceStatic.outputBaseInstance + outputOffset] = instanceIndex;
+            }
+          }
+        }
+        else
+        {
+          uint outputNodeIndex = 0;
+          InterlockedAdd(traversalQueueCounts[outputQueueIndex], 1, outputNodeIndex);
+          uint packedChild = PackTraversalNode((uint)childRef, childFullyInside);
+          if (outputQueueIndex == 0)
+          {
+            traversalQueueA[outputNodeIndex] = packedChild;
+          }
+          else
+          {
+            traversalQueueB[outputNodeIndex] = packedChild;
+          }
+        }
+      }
     return;
   }
 
