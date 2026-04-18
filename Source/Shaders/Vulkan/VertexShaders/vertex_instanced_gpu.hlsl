@@ -28,7 +28,9 @@ struct GpuWorldInstanceStaticData
 
 struct GpuWorldInstanceTransformData
 {
-  float4x4 model;
+  float4 row0;
+  float4 row1;
+  float4 row2;
   uint enabled;
   uint padA;
   uint padB;
@@ -61,6 +63,15 @@ struct VSOutput
   float hasTexture : TEXCOORD2;
 };
 
+float3 TransformPoint(float3 localPoint, GpuWorldInstanceTransformData instanceTransform)
+{
+  return float3(
+    dot(instanceTransform.row0.xyz, localPoint) + instanceTransform.row0.w,
+    dot(instanceTransform.row1.xyz, localPoint) + instanceTransform.row1.w,
+    dot(instanceTransform.row2.xyz, localPoint) + instanceTransform.row2.w
+  );
+}
+
 VSOutput main(VSInput input)
 {
   VSOutput output;
@@ -69,7 +80,8 @@ VSOutput main(VSInput input)
   GpuWorldInstanceStaticData instanceStatic = staticBuffer[sceneInstanceIndex];
   GpuWorldInstanceTransformData instanceTransform = transformBuffer[sceneInstanceIndex];
 
-  float4 worldPos = mul(instanceTransform.model, float4(input.position, 1.0f));
+  float3 worldPos3 = TransformPoint(input.position, instanceTransform);
+  float4 worldPos = float4(worldPos3, 1.0f);
   float4 viewPos = mul(worldView, worldPos);
   float4 projPos = mul(worldProj, viewPos);
 

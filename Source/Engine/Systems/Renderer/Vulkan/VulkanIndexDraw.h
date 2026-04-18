@@ -9,6 +9,7 @@
 #include <deque>
 #include <unordered_map>
 #include <memory>
+#include <limits>
 
 namespace Engine
 {
@@ -66,6 +67,19 @@ namespace Engine
 		const VulkanBuffer& GetGpuWorldStaticBuffer() const { return *gpuWorldStaticBuffer; }
 		VkDescriptorSetLayout GetGpuCullDescriptorSetLayout() const { return gpuCullDescriptorSetLayout; }
 		static constexpr uint32_t GetGpuCullPushConstantSize() { return sizeof(GpuCullPushConstants); }
+
+		struct GpuCullFrameStats
+		{
+			uint32_t totalSceneInstances = 0;
+			uint32_t drawCommandCount = 0;
+			uint32_t dirtyTransformInstanceCount = 0;
+			uint32_t transformUploadRangeCount = 0;
+			uint64_t transformUploadBytes = 0;
+			bool fullTransformUpload = false;
+			bool reusedCullResults = false;
+		};
+
+		const GpuCullFrameStats& GetGpuCullFrameStats() const { return gpuCullFrameStats; }
 
 		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
@@ -258,6 +272,21 @@ namespace Engine
 			bool valid = false;
 		};
 
+		struct GpuWorldInstanceRange
+		{
+			uint32_t start = 0;
+			uint32_t count = 0;
+		};
+
+		struct GpuCullFrameReuseStamp
+		{
+			uint64_t frustumRevision = 0;
+			uint64_t transformMutationVersion = 0;
+			uint64_t scenePacketVersion = 0;
+			uint32_t renderStateMask = 0;
+			bool valid = false;
+		};
+
 		CullMode cullMode{ CullMode::NONE };
 
 		struct CachedWorldPacketState
@@ -293,14 +322,20 @@ namespace Engine
 		uint32_t gpuCullDrawCommandCount = 0;
 		uint32_t gpuWorldSceneInstanceCount = 0;
 		uint32_t gpuWorldVisibleCapacity = 0;
+		uint64_t gpuWorldScenePacketVersion = 0;
 		bool gpuWorldSceneDirty = true;
 		bool gpuWorldStaticUploadPending = false;
 		bool gpuWorldTemplateUploadPending = false;
 		std::vector<GpuWorldSceneInstance> gpuWorldSceneInstances;
+		std::unordered_map<entt::entity, std::vector<GpuWorldInstanceRange>> gpuWorldEntityToInstanceRanges;
 		std::vector<GpuWorldInstanceStaticData> gpuWorldStaticCpuData;
 		std::vector<GpuWorldInstanceTransformData> gpuWorldTransformCpuData;
 		std::vector<std::vector<GpuWorldTransformCacheEntry>> gpuWorldTransformCaches;
 		std::vector<std::vector<VkBufferCopy>> gpuWorldTransformCopyRegions;
+		std::vector<bool> gpuWorldTransformFrameInitialized;
+		std::vector<GpuCullFrameReuseStamp> gpuCullFrameReuseStamps;
+		uint32_t gpuWorldLastRenderStateMask = std::numeric_limits<uint32_t>::max();
+		GpuCullFrameStats gpuCullFrameStats{};
 
 		struct FullSceneDirtyHistoryEntry
 		{
@@ -319,6 +354,7 @@ namespace Engine
 		std::vector<entt::entity> visibleEntityScratch;
 		std::vector<GatherCandidate> gatherCandidatesScratch;
 		std::vector<uint32_t> dirtyInstanceIndexScratch;
+		std::vector<GpuWorldInstanceRange> dirtyInstanceRangeScratch;
 		std::vector<GatherThreadScratch> gatherThreadScratch;
 		std::vector<DirtyThreadScratch> dirtyThreadScratch;
 		std::vector<uint32_t> bucketFirstInstanceScratch;

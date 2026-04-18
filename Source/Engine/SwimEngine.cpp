@@ -604,7 +604,7 @@ namespace Engine
 	// The editor process will call all these
 	void SwimEngine::RegisterVanillaEngineCommands()
 	{
-		// Capture a raw pointer (valid for engine lifetime) — no ref-captures to locals.
+		// Capture a raw pointer (valid for engine lifetime)  no ref-captures to locals.
 		SwimEngine* self = this;
 
 		auto summarize = [](SwimEngine* e)
@@ -730,6 +730,11 @@ namespace Engine
 			}
 
 			accumulatedTime += delta;
+
+			// Start a new render frame dirty epoch before any fixed or variable-step work runs.
+			// This preserves transform changes from fixed updates, scene updates, and interpolation
+			// until the renderer consumes them later in the same frame.
+			Transform::BeginFrameDirtyTracking();
 
 			// Perform fixed updates as needed
 			while (accumulatedTime >= fixedTimeStep)

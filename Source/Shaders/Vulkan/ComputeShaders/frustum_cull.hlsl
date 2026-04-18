@@ -15,7 +15,9 @@ struct GpuWorldInstanceStaticData
 
 struct GpuWorldInstanceTransformData
 {
-  float4x4 model;
+  float4 row0;
+  float4 row1;
+  float4 row2;
   uint enabled;
   uint padA;
   uint padB;
@@ -67,14 +69,40 @@ RWStructuredBuffer<uint> drawCountScalar : register(u6, space0);
 static const uint MODE_CULL = 1;
 static const uint MODE_FINALIZE = 2;
 static const uint MODE_COMPACT = 3;
+static const uint GROUP_SIZE = 64;
+static const uint INVALID_BUCKET_KEY = 0xffffffffu;
 
-float3x3 ExtractLinearPart(float4x4 m)
+// Workgroup-local aggregation drastically reduces the number of global atomics in the hot cull pass.
+// The scene packet is already sorted by mesh/draw key on the CPU, so consecutive lanes in a thread group
+// commonly hit the same draw bucket. We exploit that here by binning visible instances per workgroup,
+// issuing one global atomic add per bucket, and then scattering the visible IDs inside the reserved range.
+groupshared uint groupBucketKeys[GROUP_SIZE];
+groupshared uint groupBucketCounts[GROUP_SIZE];
+groupshared uint groupBucketBaseOffsets[GROUP_SIZE];
+groupshared uint groupBucketScatterOffsets[GROUP_SIZE];
+
+float3 TransformPoint(float3 localPoint, GpuWorldInstanceTransformData instanceTransform)
 {
-  return float3x3(
-    m[0].xyz,
-    m[1].xyz,
-    m[2].xyz
+  return float3(
+    dot(instanceTransform.row0.xyz, localPoint) + instanceTransform.row0.w,
+    dot(instanceTransform.row1.xyz, localPoint) + instanceTransform.row1.w,
+    dot(instanceTransform.row2.xyz, localPoint) + instanceTransform.row2.w
   );
+}
+
+float3 LoadAxisX(GpuWorldInstanceTransformData instanceTransform)
+{
+  return float3(instanceTransform.row0.x, instanceTransform.row1.x, instanceTransform.row2.x);
+}
+
+float3 LoadAxisY(GpuWorldInstanceTransformData instanceTransform)
+{
+  return float3(instanceTransform.row0.y, instanceTransform.row1.y, instanceTransform.row2.y);
+}
+
+float3 LoadAxisZ(GpuWorldInstanceTransformData instanceTransform)
+{
+  return float3(instanceTransform.row0.z, instanceTransform.row1.z, instanceTransform.row2.z);
 }
 
 bool IsVisible(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransformData instanceTransform)
@@ -82,10 +110,9 @@ bool IsVisible(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransf
   float3 localCenter = instanceStatic.boundsCenterRadius.xyz;
   float localRadius = instanceStatic.boundsCenterRadius.w;
 
-  float3 worldCenter = mul(instanceTransform.model, float4(localCenter, 1.0f)).xyz;
+  float3 worldCenter = TransformPoint(localCenter, instanceTransform);
 
-  float3x3 linearPart = ExtractLinearPart(instanceTransform.model);
-  float maxScale = max(length(linearPart[0]), max(length(linearPart[1]), length(linearPart[2])));
+  float maxScale = max(length(LoadAxisX(instanceTransform)), max(length(LoadAxisY(instanceTransform)), length(LoadAxisZ(instanceTransform))));
   float worldRadius = localRadius * maxScale;
 
   [unroll]
@@ -102,35 +129,93 @@ bool IsVisible(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransf
   return true;
 }
 
-[numthreads(64, 1, 1)]
-void main(uint3 dispatchThreadID : SV_DispatchThreadID)
+uint HashDrawKey(uint drawKey)
+{
+  return (drawKey * 2654435761u) & (GROUP_SIZE - 1u);
+}
+
+uint FindOrInsertBucket(uint drawKey)
+{
+  uint bucketIndex = HashDrawKey(drawKey);
+
+  [unroll]
+  for (uint probe = 0; probe < GROUP_SIZE; ++probe)
+  {
+    uint slot = (bucketIndex + probe) & (GROUP_SIZE - 1u);
+    uint existingKey = INVALID_BUCKET_KEY;
+    InterlockedCompareExchange(groupBucketKeys[slot], INVALID_BUCKET_KEY, drawKey, existingKey);
+
+    if (existingKey == INVALID_BUCKET_KEY || existingKey == drawKey)
+    {
+      return slot;
+    }
+  }
+
+  return INVALID_BUCKET_KEY;
+}
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void main(uint3 dispatchThreadID : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID)
 {
   uint index = dispatchThreadID.x;
 
   if (pc.mode == MODE_CULL)
   {
-    if (index >= pc.instanceCount)
+    groupBucketKeys[groupThreadID.x] = INVALID_BUCKET_KEY;
+    groupBucketCounts[groupThreadID.x] = 0;
+    groupBucketBaseOffsets[groupThreadID.x] = 0;
+    groupBucketScatterOffsets[groupThreadID.x] = 0;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    bool laneVisible = false;
+    uint bucketIndex = INVALID_BUCKET_KEY;
+    uint outputBaseInstance = 0;
+
+    if (index < pc.instanceCount)
     {
-      return;
+      GpuWorldInstanceTransformData instanceTransform = transformBuffer[index];
+      if (instanceTransform.enabled != 0)
+      {
+        GpuWorldInstanceStaticData instanceStatic = staticBuffer[index];
+        if (IsVisible(instanceStatic, instanceTransform))
+        {
+          laneVisible = true;
+          outputBaseInstance = instanceStatic.outputBaseInstance;
+          bucketIndex = FindOrInsertBucket(instanceStatic.drawCommandIndex);
+          if (bucketIndex != INVALID_BUCKET_KEY)
+          {
+            uint ignoredCount = 0;
+            InterlockedAdd(groupBucketCounts[bucketIndex], 1, ignoredCount);
+          }
+          else
+          {
+            laneVisible = false;
+          }
+        }
+      }
     }
 
-    GpuWorldInstanceTransformData instanceTransform = transformBuffer[index];
-    if (instanceTransform.enabled == 0)
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupBucketKeys[groupThreadID.x] != INVALID_BUCKET_KEY && groupBucketCounts[groupThreadID.x] > 0)
     {
-      return;
+      InterlockedAdd(
+        drawInstanceCounts[groupBucketKeys[groupThreadID.x]],
+        groupBucketCounts[groupThreadID.x],
+        groupBucketBaseOffsets[groupThreadID.x]
+      );
     }
 
-    GpuWorldInstanceStaticData instanceStatic = staticBuffer[index];
-    if (!IsVisible(instanceStatic, instanceTransform))
+    GroupMemoryBarrierWithGroupSync();
+
+    if (laneVisible)
     {
-      return;
+      uint localOffset = 0;
+      InterlockedAdd(groupBucketScatterOffsets[bucketIndex], 1, localOffset);
+      visibleInstanceIds[outputBaseInstance + groupBucketBaseOffsets[bucketIndex] + localOffset] = index;
     }
 
-    uint localInstanceIndex = 0;
-    InterlockedAdd(drawInstanceCounts[instanceStatic.drawCommandIndex], 1, localInstanceIndex);
-
-    DrawIndexedIndirectCommand drawTemplate = drawTemplateBuffer[instanceStatic.drawCommandIndex];
-    visibleInstanceIds[drawTemplate.firstInstance + localInstanceIndex] = index;
     return;
   }
 

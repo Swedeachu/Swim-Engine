@@ -601,8 +601,10 @@ namespace Engine
 
 	void Scene::InternalScenePostUpdate(double dt)
 	{
-		Transform::ClearGlobalDirtyFlag();
-		Transform::ClearDirtyEntities();
+		// Do not clear transform dirty state here. The renderer runs after SceneSystem::Update() in the
+		// engine system order, so clearing DirtyEntities / the global dirty flag in post-update makes
+		// renderer-side incremental GPU uploads miss the transforms that changed during this frame.
+		// That shows up as movement/rotation lag or stutter in the GPU cull path.
 
 		// if constexpr (handleDebugDraw)
 		sceneBVH->DebugRender();

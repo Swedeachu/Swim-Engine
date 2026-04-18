@@ -38,6 +38,16 @@ namespace Engine
 
 			return (value + divisor - 1) / divisor;
 		}
+
+		static GpuWorldInstanceTransformData PackGpuWorldTransformData(const glm::mat4& model, uint32_t enabled)
+		{
+			GpuWorldInstanceTransformData transformData{};
+			transformData.row0 = glm::vec4(model[0][0], model[1][0], model[2][0], model[3][0]);
+			transformData.row1 = glm::vec4(model[0][1], model[1][1], model[2][1], model[3][1]);
+			transformData.row2 = glm::vec4(model[0][2], model[1][2], model[2][2], model[3][2]);
+			transformData.enabled = enabled;
+			return transformData;
+		}
 	}
 
 	// NOTE: all these draw methods check if the draw instances fit in the ssbo, if not it tries to resize them.
@@ -336,6 +346,8 @@ namespace Engine
 		gpuWorldTransformStagingBuffers.resize(framesInFlight);
 		gpuWorldTransformCopyRegions.resize(framesInFlight);
 		gpuWorldTransformCaches.resize(framesInFlight);
+		gpuWorldTransformFrameInitialized.assign(framesInFlight, false);
+		gpuCullFrameReuseStamps.assign(framesInFlight, GpuCullFrameReuseStamp{});
 		gpuWorldVisibleIndexBuffers.resize(framesInFlight);
 		gpuWorldIndirectCommandBuffers.resize(framesInFlight);
 
@@ -555,6 +567,7 @@ namespace Engine
 		gpuWorldTransformStagingBuffers.clear();
 		gpuWorldTransformCopyRegions.clear();
 		gpuWorldTransformCaches.clear();
+		gpuWorldTransformFrameInitialized.clear();
 		gpuWorldVisibleIndexBuffers.clear();
 		gpuWorldIndirectCommandBuffers.clear();
 		gpuWorldStaticBuffer.reset();
@@ -1306,6 +1319,7 @@ namespace Engine
 		});
 
 		gpuWorldSceneInstances.clear();
+		gpuWorldEntityToInstanceRanges.clear();
 		gpuWorldStaticCpuData.clear();
 		gpuWorldTransformCpuData.clear();
 		gpuCullCommandTemplates.clear();
@@ -1343,7 +1357,27 @@ namespace Engine
 			sceneInstance.drawCommandIndex = currentBatchIndex;
 			sceneInstance.outputBaseInstance = currentBatchBaseInstance;
 			sceneInstance.canUseEntityCullCache = entry.canUseEntityCullCache;
+			const uint32_t sceneInstanceIndex = static_cast<uint32_t>(gpuWorldSceneInstances.size());
 			gpuWorldSceneInstances.push_back(sceneInstance);
+			{
+				auto& ranges = gpuWorldEntityToInstanceRanges[entry.entity];
+				if (!ranges.empty())
+				{
+					GpuWorldInstanceRange& lastRange = ranges.back();
+					if ((lastRange.start + lastRange.count) == sceneInstanceIndex)
+					{
+						++lastRange.count;
+					}
+					else
+					{
+						ranges.push_back({ sceneInstanceIndex, 1u });
+					}
+				}
+				else
+				{
+					ranges.push_back({ sceneInstanceIndex, 1u });
+				}
+			}
 
 			GpuWorldInstanceStaticData staticData{};
 			staticData.boundsCenterRadius = entry.boundsCenterRadius;
@@ -1367,10 +1401,17 @@ namespace Engine
 		gpuWorldSceneInstanceCount = static_cast<uint32_t>(gpuWorldSceneInstances.size());
 		gpuCullDrawCommandCount = static_cast<uint32_t>(gpuCullCommandTemplates.size());
 		gpuWorldVisibleCapacity = gpuWorldSceneInstanceCount;
+		++gpuWorldScenePacketVersion;
 		for (std::vector<GpuWorldTransformCacheEntry>& frameCache : gpuWorldTransformCaches)
 		{
 			frameCache.assign(gpuWorldSceneInstances.size(), GpuWorldTransformCacheEntry{});
 		}
+		std::fill(gpuWorldTransformFrameInitialized.begin(), gpuWorldTransformFrameInitialized.end(), false);
+		for (GpuCullFrameReuseStamp& reuseStamp : gpuCullFrameReuseStamps)
+		{
+			reuseStamp = GpuCullFrameReuseStamp{};
+		}
+		gpuWorldLastRenderStateMask = std::numeric_limits<uint32_t>::max();
 
 		if (gpuWorldSceneInstanceCount > 0)
 		{
@@ -1400,98 +1441,151 @@ namespace Engine
 			gpuWorldTransformCaches.resize(frameIndex + 1);
 		}
 
+		if (frameIndex >= gpuWorldTransformFrameInitialized.size())
+		{
+			gpuWorldTransformFrameInitialized.resize(frameIndex + 1, false);
+		}
+
 		std::vector<GpuWorldTransformCacheEntry>& frameCache = gpuWorldTransformCaches[frameIndex];
 		if (frameCache.size() != instanceCount)
 		{
 			frameCache.assign(instanceCount, GpuWorldTransformCacheEntry{});
+			gpuWorldTransformFrameInitialized[frameIndex] = false;
 		}
+
+		gpuCullFrameStats.totalSceneInstances = static_cast<uint32_t>(instanceCount);
+		gpuCullFrameStats.drawCommandCount = gpuCullDrawCommandCount;
+		gpuCullFrameStats.dirtyTransformInstanceCount = 0;
+		gpuCullFrameStats.transformUploadRangeCount = 0;
+		gpuCullFrameStats.transformUploadBytes = 0;
+		gpuCullFrameStats.fullTransformUpload = false;
+		gpuCullFrameStats.reusedCullResults = false;
 
 		if (instanceCount == 0)
 		{
+			gpuWorldTransformFrameInitialized[frameIndex] = false;
 			return;
 		}
 
-		const bool fullUpload = gpuWorldSceneDirty;
+		const uint32_t currentRenderStateMask = static_cast<uint32_t>(SwimEngine::GetInstance()->GetEngineState());
+		const bool renderStateChanged = gpuWorldLastRenderStateMask != currentRenderStateMask;
+		const bool fullUpload = !gpuWorldTransformFrameInitialized[frameIndex] || renderStateChanged;
 		const VkDeviceSize stride = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceTransformData));
-		const uint32_t invalidRangeStart = std::numeric_limits<uint32_t>::max();
-		uint32_t rangeStart = invalidRangeStart;
 
-		auto flushRange = [&](uint32_t endIndex)
+		dirtyInstanceRangeScratch.clear();
+		dirtyInstanceRangeScratch.reserve(fullUpload ? 1 : Transform::GetDirtyEntities().size());
+
+		if (fullUpload)
 		{
-			if (rangeStart == invalidRangeStart || endIndex <= rangeStart)
-			{
-				return;
-			}
-
-			VkBufferCopy copy{};
-			copy.srcOffset = static_cast<VkDeviceSize>(rangeStart) * stride;
-			copy.dstOffset = static_cast<VkDeviceSize>(rangeStart) * stride;
-			copy.size = static_cast<VkDeviceSize>(endIndex - rangeStart) * stride;
-			copyRegions.push_back(copy);
-			rangeStart = invalidRangeStart;
-		};
-
-		for (uint32_t i = 0; i < static_cast<uint32_t>(instanceCount); ++i)
+			dirtyInstanceRangeScratch.push_back({ 0u, static_cast<uint32_t>(instanceCount) });
+		}
+		else
 		{
-			const GpuWorldSceneInstance& sceneInstance = gpuWorldSceneInstances[i];
-			GpuWorldInstanceTransformData transformData{};
-			uint64_t worldVersion = 0;
-			uint32_t enabled = 0;
-
-			if (registry.valid(sceneInstance.entity) && registry.any_of<Transform>(sceneInstance.entity))
+			const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
+			for (entt::entity entity : dirtyEntities)
 			{
-				const Transform& tf = registry.get<Transform>(sceneInstance.entity);
-				transformData.model = tf.GetWorldMatrix(registry);
-				worldVersion = tf.GetWorldVersion();
-				enabled = scene.ShouldRenderBasedOnState(sceneInstance.entity) ? 1u : 0u;
-				transformData.enabled = enabled;
-			}
-			else
-			{
-				transformData.model = glm::mat4(1.0f);
-				transformData.enabled = 0u;
-			}
-
-			const GpuWorldTransformCacheEntry& cached = frameCache[i];
-			const bool dirty = fullUpload || !cached.valid || cached.worldVersion != worldVersion || cached.enabled != enabled;
-			if (dirty)
-			{
-				gpuWorldTransformCpuData[i] = transformData;
-				frameCache[i].worldVersion = worldVersion;
-				frameCache[i].enabled = enabled;
-				frameCache[i].valid = true;
-
-				if (rangeStart == invalidRangeStart)
+				auto it = gpuWorldEntityToInstanceRanges.find(entity);
+				if (it == gpuWorldEntityToInstanceRanges.end())
 				{
-					rangeStart = i;
+					continue;
 				}
+
+				const std::vector<GpuWorldInstanceRange>& ranges = it->second;
+				dirtyInstanceRangeScratch.insert(dirtyInstanceRangeScratch.end(), ranges.begin(), ranges.end());
 			}
-			else
+
+			if (!dirtyInstanceRangeScratch.empty())
 			{
-				flushRange(i);
+				std::sort(dirtyInstanceRangeScratch.begin(), dirtyInstanceRangeScratch.end(), [](const GpuWorldInstanceRange& a, const GpuWorldInstanceRange& b)
+				{
+					return a.start < b.start;
+				});
+
+				size_t writeIndex = 0;
+				for (size_t i = 0; i < dirtyInstanceRangeScratch.size(); ++i)
+				{
+					GpuWorldInstanceRange range = dirtyInstanceRangeScratch[i];
+					if (range.count == 0)
+					{
+						continue;
+					}
+
+					if (writeIndex == 0)
+					{
+						dirtyInstanceRangeScratch[writeIndex++] = range;
+						continue;
+					}
+
+					GpuWorldInstanceRange& previous = dirtyInstanceRangeScratch[writeIndex - 1];
+					const uint32_t previousEnd = previous.start + previous.count;
+					if (range.start <= previousEnd)
+					{
+						const uint32_t mergedEnd = std::max(previousEnd, range.start + range.count);
+						previous.count = mergedEnd - previous.start;
+					}
+					else
+					{
+						dirtyInstanceRangeScratch[writeIndex++] = range;
+					}
+				}
+				dirtyInstanceRangeScratch.resize(writeIndex);
 			}
 		}
 
-		flushRange(static_cast<uint32_t>(instanceCount));
-
-		if (copyRegions.empty())
+		if (dirtyInstanceRangeScratch.empty())
 		{
+			gpuWorldLastRenderStateMask = currentRenderStateMask;
 			return;
 		}
 
-		const VkDeviceSize totalDirtyBytes = [&]() -> VkDeviceSize
+		uint64_t dirtyInstanceCount = 0;
+		for (const GpuWorldInstanceRange& range : dirtyInstanceRangeScratch)
 		{
-			VkDeviceSize total = 0;
-			for (const VkBufferCopy& region : copyRegions)
-			{
-				total += region.size;
-			}
-			return total;
-		}();
+			dirtyInstanceCount += range.count;
+		}
 
 		const VkDeviceSize fullBytes = static_cast<VkDeviceSize>(instanceCount) * stride;
-		if (fullUpload || copyRegions.size() > 64 || totalDirtyBytes > (fullBytes / 2))
+		const VkDeviceSize totalDirtyBytes = static_cast<VkDeviceSize>(dirtyInstanceCount) * stride;
+		const bool collapseToFullUpload = fullUpload || dirtyInstanceRangeScratch.size() > 64 || totalDirtyBytes > (fullBytes / 2);
+
+		auto writeTransformRange = [&](uint32_t startIndex, uint32_t count)
 		{
+			const uint32_t endIndex = startIndex + count;
+			for (uint32_t dirtyIndex = startIndex; dirtyIndex < endIndex; ++dirtyIndex)
+			{
+				if (dirtyIndex >= instanceCount)
+				{
+					break;
+				}
+
+				const GpuWorldSceneInstance& sceneInstance = gpuWorldSceneInstances[dirtyIndex];
+				glm::mat4 worldMatrix(1.0f);
+				uint64_t worldVersion = 0;
+				uint32_t enabled = 0;
+
+				if (registry.valid(sceneInstance.entity) && registry.any_of<Transform>(sceneInstance.entity))
+				{
+					const Transform& tf = registry.get<Transform>(sceneInstance.entity);
+					worldMatrix = tf.GetWorldMatrix(registry);
+					worldVersion = tf.GetWorldVersion();
+					enabled = scene.ShouldRenderBasedOnState(sceneInstance.entity) ? 1u : 0u;
+				}
+
+				gpuWorldTransformCpuData[dirtyIndex] = PackGpuWorldTransformData(worldMatrix, enabled);
+				frameCache[dirtyIndex].worldVersion = worldVersion;
+				frameCache[dirtyIndex].enabled = enabled;
+				frameCache[dirtyIndex].valid = true;
+			}
+		};
+
+		if (collapseToFullUpload)
+		{
+			ParallelForRender(instanceCount, RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
+			{
+				(void)workerIndex;
+				writeTransformRange(static_cast<uint32_t>(begin), static_cast<uint32_t>(end - begin));
+			});
+
 			copyRegions.clear();
 			VkBufferCopy copy{};
 			copy.srcOffset = 0;
@@ -1499,19 +1593,53 @@ namespace Engine
 			copy.size = fullBytes;
 			copyRegions.push_back(copy);
 			gpuWorldTransformStagingBuffers[frameIndex]->CopyData(gpuWorldTransformCpuData.data(), static_cast<size_t>(fullBytes));
-			return;
+
+			gpuCullFrameStats.fullTransformUpload = true;
+			gpuCullFrameStats.dirtyTransformInstanceCount = static_cast<uint32_t>(instanceCount);
+			gpuCullFrameStats.transformUploadRangeCount = 1;
+			gpuCullFrameStats.transformUploadBytes = fullBytes;
+		}
+		else
+		{
+			ParallelForRender(dirtyInstanceRangeScratch.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+			{
+				(void)workerIndex;
+				for (size_t i = begin; i < end; ++i)
+				{
+					const GpuWorldInstanceRange& range = dirtyInstanceRangeScratch[i];
+					writeTransformRange(range.start, range.count);
+				}
+			});
+
+			copyRegions.reserve(dirtyInstanceRangeScratch.size());
+			for (const GpuWorldInstanceRange& range : dirtyInstanceRangeScratch)
+			{
+				if (range.count == 0)
+				{
+					continue;
+				}
+
+				VkBufferCopy copy{};
+				copy.srcOffset = static_cast<VkDeviceSize>(range.start) * stride;
+				copy.dstOffset = static_cast<VkDeviceSize>(range.start) * stride;
+				copy.size = static_cast<VkDeviceSize>(range.count) * stride;
+				copyRegions.push_back(copy);
+
+				gpuWorldTransformStagingBuffers[frameIndex]->CopyData(
+					gpuWorldTransformCpuData.data() + range.start,
+					static_cast<size_t>(range.count) * sizeof(GpuWorldInstanceTransformData),
+					static_cast<size_t>(copy.srcOffset)
+				);
+			}
+
+			gpuCullFrameStats.fullTransformUpload = false;
+			gpuCullFrameStats.dirtyTransformInstanceCount = static_cast<uint32_t>(dirtyInstanceCount);
+			gpuCullFrameStats.transformUploadRangeCount = static_cast<uint32_t>(copyRegions.size());
+			gpuCullFrameStats.transformUploadBytes = totalDirtyBytes;
 		}
 
-		for (const VkBufferCopy& region : copyRegions)
-		{
-			const size_t startIndex = static_cast<size_t>(region.srcOffset / stride);
-			const size_t count = static_cast<size_t>(region.size / stride);
-			gpuWorldTransformStagingBuffers[frameIndex]->CopyData(
-				gpuWorldTransformCpuData.data() + startIndex,
-				count * sizeof(GpuWorldInstanceTransformData),
-				static_cast<size_t>(region.srcOffset)
-			);
-		}
+		gpuWorldTransformFrameInitialized[frameIndex] = true;
+		gpuWorldLastRenderStateMask = currentRenderStateMask;
 	}
 
 	void VulkanIndexDraw::BuildGpuCullInputPacket(entt::registry& registry)
@@ -1941,7 +2069,36 @@ namespace Engine
 			);
 		}
 
+		const uint64_t currentFrustumRevision = Frustum::GetRevision();
+		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
+		const uint32_t currentRenderStateMask = static_cast<uint32_t>(SwimEngine::GetInstance()->GetEngineState());
+
+		if (!transformCopies.empty())
+		{
+			gpuCullFrameReuseStamps[frameIndex].valid = false;
+		}
+
+		if (!copiedStaticBuffer && !copiedTemplateBuffer && transformCopies.empty())
+		{
+			const GpuCullFrameReuseStamp& reuseStamp = gpuCullFrameReuseStamps[frameIndex];
+			if (reuseStamp.valid
+				&& reuseStamp.frustumRevision == currentFrustumRevision
+				&& reuseStamp.transformMutationVersion == currentTransformMutationVersion
+				&& reuseStamp.scenePacketVersion == gpuWorldScenePacketVersion
+				&& reuseStamp.renderStateMask == currentRenderStateMask)
+			{
+				gpuCullFrameStats.reusedCullResults = true;
+				return;
+			}
+		}
+
 		DispatchGpuCull(frameIndex, cmd);
+
+		gpuCullFrameReuseStamps[frameIndex].frustumRevision = currentFrustumRevision;
+		gpuCullFrameReuseStamps[frameIndex].transformMutationVersion = currentTransformMutationVersion;
+		gpuCullFrameReuseStamps[frameIndex].scenePacketVersion = gpuWorldScenePacketVersion;
+		gpuCullFrameReuseStamps[frameIndex].renderStateMask = currentRenderStateMask;
+		gpuCullFrameReuseStamps[frameIndex].valid = true;
 	}
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
@@ -2687,5 +2844,6 @@ namespace Engine
 		worldRenderableKeyToSlot.clear();
 		worldEntityToSlotIndices.clear();
 	}
+
 
 }

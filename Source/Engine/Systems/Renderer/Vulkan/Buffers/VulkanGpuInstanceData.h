@@ -48,7 +48,9 @@ namespace Engine
 
   struct alignas(16) GpuWorldInstanceTransformData
   {
-    glm::mat4 model{ 1.0f };
+    glm::vec4 row0{ 1.0f, 0.0f, 0.0f, 0.0f };
+    glm::vec4 row1{ 0.0f, 1.0f, 0.0f, 0.0f };
+    glm::vec4 row2{ 0.0f, 0.0f, 1.0f, 0.0f };
     uint32_t enabled = 1;
     uint32_t padA = 0;
     uint32_t padB = 0;
