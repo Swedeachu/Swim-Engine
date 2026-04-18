@@ -54,6 +54,42 @@ namespace Engine
 			);
 		}
 
+		void CreateGpuDrivenGraphicsPipeline(
+			const std::string& vertShaderPath,
+			const std::string& fragShaderPath,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessTextureLayout,
+			const VkVertexInputBindingDescription* bindingDescriptions,
+			uint32_t bindingDescriptionCount,
+			const VkVertexInputAttributeDescription* attributeDescriptions,
+			uint32_t attributeDescriptionCount,
+			uint32_t pushConstantSize
+		);
+
+		template<typename TBindings, typename TAttribs>
+		void CreateGpuDrivenGraphicsPipeline(
+			const std::string& vertShaderPath,
+			const std::string& fragShaderPath,
+			VkDescriptorSetLayout uboLayout,
+			VkDescriptorSetLayout bindlessTextureLayout,
+			const TBindings& bindingDescriptions,
+			const TAttribs& attributeDescriptions,
+			uint32_t pushConstantSize
+		)
+		{
+			CreateGpuDrivenGraphicsPipeline(
+				vertShaderPath,
+				fragShaderPath,
+				uboLayout,
+				bindlessTextureLayout,
+				bindingDescriptions.data(),
+				static_cast<uint32_t>(bindingDescriptions.size()),
+				attributeDescriptions.data(),
+				static_cast<uint32_t>(attributeDescriptions.size()),
+				pushConstantSize
+			);
+		}
+
 		void CreateDecoratedMeshPipeline(
 			const std::string& vertShaderPath,
 			const std::string& fragShaderPath,
@@ -135,6 +171,8 @@ namespace Engine
 		VkRenderPass GetRenderPass() const { return renderPass; }
 		VkPipelineLayout GetPipelineLayout() const { return pipelineLayout; }
 		VkPipeline GetGraphicsPipeline() const { return graphicsPipeline; }
+		VkPipeline GetGpuDrivenGraphicsPipeline() const { return gpuDrivenGraphicsPipeline; }
+		bool HasGpuDrivenGraphicsPipeline() const { return gpuDrivenGraphicsPipeline != VK_NULL_HANDLE; }
 
 		VkPipeline GetDecoratorPipeline() const { return decoratorPipeline; }
 		VkPipelineLayout GetDecoratorPipelineLayout() const { return decoratorPipelineLayout; }
@@ -157,6 +195,7 @@ namespace Engine
 
 		VkRenderPass renderPass = VK_NULL_HANDLE;
 		VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+		VkPipeline gpuDrivenGraphicsPipeline = VK_NULL_HANDLE;
 		VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 
 		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;

@@ -61,12 +61,36 @@ namespace Engine
 		worldInstanceBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 		worldInstanceBufferBinding.pImmutableSamplers = nullptr;
 
-		std::array<VkDescriptorSetLayoutBinding, 5> bindings = {
+		VkDescriptorSetLayoutBinding gpuWorldStaticBinding{};
+		gpuWorldStaticBinding.binding = 5;
+		gpuWorldStaticBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		gpuWorldStaticBinding.descriptorCount = 1;
+		gpuWorldStaticBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		gpuWorldStaticBinding.pImmutableSamplers = nullptr;
+
+		VkDescriptorSetLayoutBinding gpuWorldTransformBinding{};
+		gpuWorldTransformBinding.binding = 6;
+		gpuWorldTransformBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		gpuWorldTransformBinding.descriptorCount = 1;
+		gpuWorldTransformBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		gpuWorldTransformBinding.pImmutableSamplers = nullptr;
+
+		VkDescriptorSetLayoutBinding gpuWorldVisibleIndexBinding{};
+		gpuWorldVisibleIndexBinding.binding = 7;
+		gpuWorldVisibleIndexBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		gpuWorldVisibleIndexBinding.descriptorCount = 1;
+		gpuWorldVisibleIndexBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		gpuWorldVisibleIndexBinding.pImmutableSamplers = nullptr;
+
+		std::array<VkDescriptorSetLayoutBinding, 8> bindings = {
 			uboBinding,
 			instanceBufferBinding,
 			uiParamBufferBinding,
 			msdfBufferBinding,
-			worldInstanceBufferBinding
+			worldInstanceBufferBinding,
+			gpuWorldStaticBinding,
+			gpuWorldTransformBinding,
+			gpuWorldVisibleIndexBinding
 		};
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -82,17 +106,16 @@ namespace Engine
 
 	void VulkanDescriptorManager::CreatePool()
 	{
-		// Descriptor pool for regular per-object sets
 		std::array<VkDescriptorPoolSize, 3> poolSizes{};
 
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = maxSets;
 
 		poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		poolSizes[1].descriptorCount = maxSets * 4; // instance, decorator, msdf, world instance
+		poolSizes[1].descriptorCount = maxSets * 7;
 
 		poolSizes[2].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		poolSizes[2].descriptorCount = maxSets; // Only used in set 1 (bindless), but fine to include here
+		poolSizes[2].descriptorCount = maxSets;
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -106,7 +129,6 @@ namespace Engine
 		}
 	}
 
-	// Create one UBO and descriptor set per frame
 	void VulkanDescriptorManager::CreatePerFrameUBOs(VkPhysicalDevice physicalDevice, uint32_t frameCount)
 	{
 		perFrameUBOs.resize(frameCount);
@@ -117,7 +139,6 @@ namespace Engine
 
 		for (uint32_t i = 0; i < frameCount; ++i)
 		{
-			// UBO
 			perFrameUBOs[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
@@ -126,7 +147,6 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// Instance SSBO
 			perFrameInstanceBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
@@ -135,7 +155,6 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// MeshDecoratorGpuInstanceData SSBO
 			perFrameMeshDecoratorBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
@@ -144,7 +163,6 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// MsdfTextGpuInstanceData SSBO
 			constexpr int MAX_GLYPHS = 4000;
 			const uint64_t msdf_ssbo_size = static_cast<uint64_t>(MAX_GLYPHS) * sizeof(MsdfTextGpuInstanceData);
 			perFrameMsdfBuffers[i] = std::make_unique<VulkanBuffer>(
@@ -155,7 +173,6 @@ namespace Engine
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			// Descriptor allocation
 			VkDescriptorSetAllocateInfo allocInfo{};
 			allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 			allocInfo.descriptorPool = descriptorPool;
@@ -167,76 +184,71 @@ namespace Engine
 				throw std::runtime_error("Failed to allocate per-frame descriptor set!");
 			}
 
-			// === UBO ===
 			VkDescriptorBufferInfo uboInfo{};
 			uboInfo.buffer = perFrameUBOs[i]->GetBuffer();
 			uboInfo.offset = 0;
 			uboInfo.range = sizeof(CameraUBO);
 
-			VkWriteDescriptorSet uboWrite{};
-			uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			uboWrite.dstSet = perFrameDescriptorSets[i];
-			uboWrite.dstBinding = 0;
-			uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			uboWrite.descriptorCount = 1;
-			uboWrite.pBufferInfo = &uboInfo;
-
-			// === Instance SSBO ===
 			VkDescriptorBufferInfo instanceInfo{};
 			instanceInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
 			instanceInfo.offset = 0;
 			instanceInfo.range = ssboSize;
 
-			VkWriteDescriptorSet instanceWrite{};
-			instanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			instanceWrite.dstSet = perFrameDescriptorSets[i];
-			instanceWrite.dstBinding = 1;
-			instanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			instanceWrite.descriptorCount = 1;
-			instanceWrite.pBufferInfo = &instanceInfo;
-
-			// === MeshDecoratorGpuInstanceData SSBO ===
 			VkDescriptorBufferInfo uiInfo{};
 			uiInfo.buffer = perFrameMeshDecoratorBuffers[i]->GetBuffer();
 			uiInfo.offset = 0;
 			uiInfo.range = ssboSize;
 
-			VkWriteDescriptorSet uiWrite{};
-			uiWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			uiWrite.dstSet = perFrameDescriptorSets[i];
-			uiWrite.dstBinding = 2;
-			uiWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			uiWrite.descriptorCount = 1;
-			uiWrite.pBufferInfo = &uiInfo;
-
-			// === MsdfTextGpuInstanceData SSBO ===
 			VkDescriptorBufferInfo msdfInfo{};
 			msdfInfo.buffer = perFrameMsdfBuffers[i]->GetBuffer();
 			msdfInfo.offset = 0;
 			msdfInfo.range = perFrameMsdfBuffers[i]->GetSize();
-
-			VkWriteDescriptorSet msdfWrite{};
-			msdfWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			msdfWrite.dstSet = perFrameDescriptorSets[i];
-			msdfWrite.dstBinding = 3;
-			msdfWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			msdfWrite.descriptorCount = 1;
-			msdfWrite.pBufferInfo = &msdfInfo;
 
 			VkDescriptorBufferInfo worldInstanceInfo{};
 			worldInstanceInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
 			worldInstanceInfo.offset = 0;
 			worldInstanceInfo.range = ssboSize;
 
-			VkWriteDescriptorSet worldInstanceWrite{};
-			worldInstanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			worldInstanceWrite.dstSet = perFrameDescriptorSets[i];
-			worldInstanceWrite.dstBinding = 4;
-			worldInstanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			worldInstanceWrite.descriptorCount = 1;
-			worldInstanceWrite.pBufferInfo = &worldInstanceInfo;
+			VkDescriptorBufferInfo gpuWorldStaticInfo{};
+			gpuWorldStaticInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
+			gpuWorldStaticInfo.offset = 0;
+			gpuWorldStaticInfo.range = ssboSize;
 
-			std::array<VkWriteDescriptorSet, 5> writes = { uboWrite, instanceWrite, uiWrite, msdfWrite, worldInstanceWrite };
+			VkDescriptorBufferInfo gpuWorldTransformInfo{};
+			gpuWorldTransformInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
+			gpuWorldTransformInfo.offset = 0;
+			gpuWorldTransformInfo.range = ssboSize;
+
+			VkDescriptorBufferInfo gpuWorldVisibleIndexInfo{};
+			gpuWorldVisibleIndexInfo.buffer = perFrameInstanceBuffers[i]->GetBuffer();
+			gpuWorldVisibleIndexInfo.offset = 0;
+			gpuWorldVisibleIndexInfo.range = ssboSize;
+
+			std::array<VkWriteDescriptorSet, 8> writes{};
+			for (uint32_t writeIndex = 0; writeIndex < static_cast<uint32_t>(writes.size()); ++writeIndex)
+			{
+				writes[writeIndex].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[writeIndex].dstSet = perFrameDescriptorSets[i];
+				writes[writeIndex].dstBinding = writeIndex;
+				writes[writeIndex].descriptorCount = 1;
+			}
+
+			writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writes[0].pBufferInfo = &uboInfo;
+
+			for (uint32_t storageWrite = 1; storageWrite < static_cast<uint32_t>(writes.size()); ++storageWrite)
+			{
+				writes[storageWrite].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+			}
+
+			writes[1].pBufferInfo = &instanceInfo;
+			writes[2].pBufferInfo = &uiInfo;
+			writes[3].pBufferInfo = &msdfInfo;
+			writes[4].pBufferInfo = &worldInstanceInfo;
+			writes[5].pBufferInfo = &gpuWorldStaticInfo;
+			writes[6].pBufferInfo = &gpuWorldTransformInfo;
+			writes[7].pBufferInfo = &gpuWorldVisibleIndexInfo;
+
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
@@ -254,8 +266,8 @@ namespace Engine
 
 			VkWriteDescriptorSet write{};
 			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			write.dstSet = perFrameDescriptorSets[i]; // Reuse the existing descriptor sets created in CreatePerFrameUBOs
-			write.dstBinding = 1;                     // Binding 1 = instance SSBO
+			write.dstSet = perFrameDescriptorSets[i];
+			write.dstBinding = 1;
 			write.dstArrayElement = 0;
 			write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			write.descriptorCount = 1;
@@ -289,6 +301,50 @@ namespace Engine
 		}
 	}
 
+	void VulkanDescriptorManager::CreateGpuWorldDescriptorSets(
+		const VulkanBuffer& staticBuffer,
+		const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameTransformBuffers,
+		const std::vector<std::unique_ptr<VulkanBuffer>>& perFrameVisibleIndexBuffers
+	)
+	{
+		const uint32_t frameCount = static_cast<uint32_t>(perFrameTransformBuffers.size());
+		for (uint32_t i = 0; i < frameCount; ++i)
+		{
+			VkDescriptorBufferInfo staticInfo{};
+			staticInfo.buffer = staticBuffer.GetBuffer();
+			staticInfo.offset = 0;
+			staticInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo transformInfo{};
+			transformInfo.buffer = perFrameTransformBuffers[i]->GetBuffer();
+			transformInfo.offset = 0;
+			transformInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo visibleIndexInfo{};
+			visibleIndexInfo.buffer = perFrameVisibleIndexBuffers[i]->GetBuffer();
+			visibleIndexInfo.offset = 0;
+			visibleIndexInfo.range = VK_WHOLE_SIZE;
+
+			std::array<VkWriteDescriptorSet, 3> writes{};
+			for (uint32_t writeIndex = 0; writeIndex < static_cast<uint32_t>(writes.size()); ++writeIndex)
+			{
+				writes[writeIndex].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writes[writeIndex].dstSet = perFrameDescriptorSets[i];
+				writes[writeIndex].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				writes[writeIndex].descriptorCount = 1;
+			}
+
+			writes[0].dstBinding = 5;
+			writes[0].pBufferInfo = &staticInfo;
+			writes[1].dstBinding = 6;
+			writes[1].pBufferInfo = &transformInfo;
+			writes[2].dstBinding = 7;
+			writes[2].pBufferInfo = &visibleIndexInfo;
+
+			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+		}
+	}
+
 	void VulkanDescriptorManager::UpdatePerFrameInstanceBuffer(uint32_t frameIndex, const void* data, size_t size)
 	{
 		if (frameIndex >= perFrameInstanceBuffers.size())
@@ -299,7 +355,6 @@ namespace Engine
 		perFrameInstanceBuffers[frameIndex]->CopyData(data, size);
 	}
 
-	// Update the UBO for a given frame with the latest camera matrix data
 	void VulkanDescriptorManager::UpdatePerFrameUBO(uint32_t frameIndex, const CameraUBO& ubo)
 	{
 		if (frameIndex >= perFrameUBOs.size())
@@ -310,7 +365,6 @@ namespace Engine
 		perFrameUBOs[frameIndex]->CopyData(&ubo, sizeof(CameraUBO));
 	}
 
-	// Get descriptor set for the active frame
 	VkDescriptorSet VulkanDescriptorManager::GetPerFrameDescriptorSet(uint32_t frameIndex) const
 	{
 		return perFrameDescriptorSets.at(frameIndex);
@@ -346,49 +400,29 @@ namespace Engine
 		return perFrameMsdfBuffers.at(frameIndex).get();
 	}
 
-	VulkanBuffer* VulkanDescriptorManager::GetPerFrameUBO(uint32_t frameIndex) const
-	{
-		if (frameIndex >= perFrameUBOs.size())
-		{
-			throw std::runtime_error("Invalid frame index for UBO");
-		}
-		return perFrameUBOs[frameIndex].get();
-	}
-
-	VulkanBuffer* VulkanDescriptorManager::GetInstanceBufferForFrame(uint32_t frameIndex) const
-	{
-		return perFrameInstanceBuffers.at(frameIndex).get();
-	}
-
 	void VulkanDescriptorManager::CreateBindlessLayout()
 	{
-		// Set 1: Used in FRAGMENT shader (also possibly vertex if needed in future)
-
-		// Binding 0: Immutable sampler
 		VkDescriptorSetLayoutBinding samplerBinding{};
 		samplerBinding.binding = 0;
 		samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 		samplerBinding.descriptorCount = 1;
-		samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; 
+		samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		samplerBinding.pImmutableSamplers = nullptr;
 
-		// Binding 1: Bindless image array
-		VkDescriptorSetLayoutBinding textureBinding{};
-		textureBinding.binding = 1;
-		textureBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		textureBinding.descriptorCount = maxBindlessTextures;
-		textureBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT; 
-		textureBinding.pImmutableSamplers = nullptr;
+		VkDescriptorSetLayoutBinding textureArrayBinding{};
+		textureArrayBinding.binding = 1;
+		textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		textureArrayBinding.descriptorCount = maxBindlessTextures;
+		textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		textureArrayBinding.pImmutableSamplers = nullptr;
 
-		std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-				samplerBinding,
-				textureBinding
-		};
+		std::array<VkDescriptorSetLayoutBinding, 2> bindings = { samplerBinding, textureArrayBinding };
 
 		std::array<VkDescriptorBindingFlags, 2> bindingFlags{};
 		bindingFlags[0] = 0;
 		bindingFlags[1] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-			VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+			VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+			VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
 		VkDescriptorSetLayoutBindingFlagsCreateInfo extendedInfo{};
 		extendedInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
@@ -397,9 +431,10 @@ namespace Engine
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.pNext = &extendedInfo;
+		layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 		layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
 		layoutInfo.pBindings = bindings.data();
-		layoutInfo.pNext = &extendedInfo;
 
 		if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &bindlessSetLayout) != VK_SUCCESS)
 		{
@@ -410,15 +445,14 @@ namespace Engine
 	void VulkanDescriptorManager::CreateBindlessPool()
 	{
 		std::array<VkDescriptorPoolSize, 2> poolSizes{};
-
-		poolSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		poolSizes[0].descriptorCount = maxBindlessTextures;
-
-		poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
-		poolSizes[1].descriptorCount = 1;
+		poolSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+		poolSizes[0].descriptorCount = 1;
+		poolSizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		poolSizes[1].descriptorCount = maxBindlessTextures;
 
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
 		poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		poolInfo.pPoolSizes = poolSizes.data();
 		poolInfo.maxSets = 1;
@@ -431,20 +465,18 @@ namespace Engine
 
 	void VulkanDescriptorManager::AllocateBindlessSet()
 	{
-		// Only the first binding (binding 0: texture array) is variable-sized
-		uint32_t variableDescriptorCount = maxBindlessTextures;
-
+		uint32_t variableCount = maxBindlessTextures;
 		VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo{};
 		countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
 		countInfo.descriptorSetCount = 1;
-		countInfo.pDescriptorCounts = &variableDescriptorCount;
+		countInfo.pDescriptorCounts = &variableCount;
 
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.pNext = &countInfo;
 		allocInfo.descriptorPool = bindlessDescriptorPool;
 		allocInfo.descriptorSetCount = 1;
 		allocInfo.pSetLayouts = &bindlessSetLayout;
-		allocInfo.pNext = &countInfo;
 
 		if (vkAllocateDescriptorSets(device, &allocInfo, &bindlessDescriptorSet) != VK_SUCCESS)
 		{
@@ -454,26 +486,21 @@ namespace Engine
 
 	void VulkanDescriptorManager::UpdateBindlessTexture(uint32_t index, VkImageView imageView, VkSampler sampler) const
 	{
-		if (imageView == VK_NULL_HANDLE)
-		{
-			throw std::runtime_error("UpdateBindlessTexture: imageView is null!");
-		}
-
 		VkDescriptorImageInfo imageInfo{};
-		imageInfo.sampler = VK_NULL_HANDLE; // Required for VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-		imageInfo.imageView = imageView;
 		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imageInfo.imageView = imageView;
+		imageInfo.sampler = sampler;
 
 		VkWriteDescriptorSet write{};
 		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		write.dstSet = bindlessDescriptorSet;            
-		write.dstBinding = 1; // texture array binding
+		write.dstSet = bindlessDescriptorSet;
+		write.dstBinding = 1;
 		write.dstArrayElement = index;
 		write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		write.descriptorCount = 1;
 		write.pImageInfo = &imageInfo;
 
-		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr); 
+		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 	}
 
 	void VulkanDescriptorManager::SetBindlessSampler(VkSampler sampler) const
@@ -484,13 +511,48 @@ namespace Engine
 		VkWriteDescriptorSet write{};
 		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		write.dstSet = bindlessDescriptorSet;
-		write.dstBinding = 0; // Binding 0: the sampler
-		write.dstArrayElement = 0;
+		write.dstBinding = 0;
 		write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 		write.descriptorCount = 1;
 		write.pImageInfo = &samplerInfo;
 
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+	}
+
+	VulkanBuffer* VulkanDescriptorManager::GetPerFrameUBO(uint32_t frameIndex) const
+	{
+		return perFrameUBOs.at(frameIndex).get();
+	}
+
+	VulkanBuffer* VulkanDescriptorManager::GetInstanceBufferForFrame(uint32_t frameIndex) const
+	{
+		return perFrameInstanceBuffers.at(frameIndex).get();
+	}
+
+	void VulkanDescriptorManager::EnsurePerFrameBufferCapacity(size_t bytes, std::vector<std::unique_ptr<VulkanBuffer>>& buffers)
+	{
+		for (auto& buffer : buffers)
+		{
+			if (!buffer || buffer->GetSize() >= bytes)
+			{
+				continue;
+			}
+
+			auto newBuffer = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				bytes,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+			);
+
+			if (buffer)
+			{
+				buffer->Free();
+			}
+
+			buffer = std::move(newBuffer);
+		}
 	}
 
 	void VulkanDescriptorManager::EnsurePerFrameInstanceCapacity(size_t bytes)
@@ -508,31 +570,6 @@ namespace Engine
 		EnsurePerFrameBufferCapacity(bytes, perFrameMsdfBuffers);
 	}
 
-	void VulkanDescriptorManager::EnsurePerFrameBufferCapacity(size_t bytes, std::vector<std::unique_ptr<VulkanBuffer>>& buffers)
-	{
-		for (auto& buf : buffers)
-		{
-			if (buf->GetSize() < bytes)
-			{
-				std::cout << "EnsurePerFrameBufferCapacity | Need to grow buffer" << std::endl;
-				// Recreate bigger (grow strategy: next pow2 or 1.5–2x)
-				const VkDeviceSize newSize = std::max<VkDeviceSize>(bytes, buf->GetSize() * 2);
-
-				// Make a new buffer and swap it in
-				std::unique_ptr<VulkanBuffer> newBuf = std::make_unique<VulkanBuffer>(
-					device,
-					physicalDevice,
-					newSize,
-					VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // SSBO
-					VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-				);
-
-				buf->Free();
-				buf = std::move(newBuf);
-			}
-		}
-	}
-
 	void VulkanDescriptorManager::Cleanup()
 	{
 		for (auto& buffer : perFrameUBOs)
@@ -540,54 +577,38 @@ namespace Engine
 			if (buffer)
 			{
 				buffer->Free();
-				buffer.reset();
 			}
 		}
-
-		perFrameUBOs.clear(); 
-		perFrameDescriptorSets.clear(); 
-
-		for (auto& buffer : perFrameMeshDecoratorBuffers)
-		{
-			if (buffer)
-			{
-				buffer->Free();
-				buffer.reset();
-			}
-		}
-		perFrameMeshDecoratorBuffers.clear();
+		perFrameUBOs.clear();
 
 		for (auto& buffer : perFrameInstanceBuffers)
 		{
 			if (buffer)
 			{
 				buffer->Free();
-				buffer.reset();
 			}
 		}
 		perFrameInstanceBuffers.clear();
+
+		for (auto& buffer : perFrameMeshDecoratorBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+			}
+		}
+		perFrameMeshDecoratorBuffers.clear();
 
 		for (auto& buffer : perFrameMsdfBuffers)
 		{
 			if (buffer)
 			{
 				buffer->Free();
-				buffer.reset();
 			}
 		}
 		perFrameMsdfBuffers.clear();
 
-		if (descriptorPool != VK_NULL_HANDLE)
-		{
-			vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-			descriptorPool = VK_NULL_HANDLE;
-		}
-
-		if (descriptorSetLayout != VK_NULL_HANDLE)
-		{
-			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-			descriptorSetLayout = VK_NULL_HANDLE;
-		}
+		perFrameDescriptorSets.clear();
 
 		if (bindlessDescriptorPool != VK_NULL_HANDLE)
 		{
@@ -601,6 +622,17 @@ namespace Engine
 			bindlessSetLayout = VK_NULL_HANDLE;
 		}
 
+		if (descriptorPool != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+			descriptorPool = VK_NULL_HANDLE;
+		}
+
+		if (descriptorSetLayout != VK_NULL_HANDLE)
+		{
+			vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+			descriptorSetLayout = VK_NULL_HANDLE;
+		}
 	}
 
 }

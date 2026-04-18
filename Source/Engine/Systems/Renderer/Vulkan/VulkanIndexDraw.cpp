@@ -279,6 +279,7 @@ namespace Engine
 
 		worldRenderableSlotsScene = &scene;
 		worldRenderableSlotsRevision = scene.GetRenderablesRevision();
+		gpuWorldSceneDirty = true;
 	}
 
 	void VulkanIndexDraw::SyncWorldRenderableSlots(Scene& scene)
@@ -327,43 +328,97 @@ namespace Engine
 
 	void VulkanIndexDraw::CreateGpuCullResources(uint32_t maxDrawCalls, uint32_t framesInFlight)
 	{
-		gpuCullInputBuffers.resize(framesInFlight);
 		gpuCullDrawCountBuffers.resize(framesInFlight);
-		gpuCullCommandTemplateBuffers.resize(framesInFlight);
 		gpuCullDescriptorSets.resize(framesInFlight);
+		gpuWorldTransformBuffers.resize(framesInFlight);
+		gpuWorldTransformStagingBuffers.resize(framesInFlight);
+		gpuWorldVisibleIndexBuffers.resize(framesInFlight);
+		gpuWorldIndirectCommandBuffers.resize(framesInFlight);
 
-		const VkDeviceSize inputBytes = static_cast<VkDeviceSize>(sizeof(GpuCullInputInstanceData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
 		const VkDeviceSize drawCountBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxDrawCalls);
 		const VkDeviceSize templateBytes = static_cast<VkDeviceSize>(sizeof(VkDrawIndexedIndirectCommand)) * static_cast<VkDeviceSize>(maxDrawCalls);
+		const VkDeviceSize staticBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceStaticData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize transformBytes = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceTransformData)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize visibleIndexBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize indirectBytes = static_cast<VkDeviceSize>(sizeof(VkDrawIndexedIndirectCommand)) * static_cast<VkDeviceSize>(maxDrawCalls);
+
+		gpuWorldStaticBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			staticBytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		gpuWorldStaticStagingBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			staticBytes,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		gpuCullCommandTemplateStaticBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			templateBytes,
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		);
+
+		gpuCullCommandTemplateStagingBuffer = std::make_unique<VulkanBuffer>(
+			device,
+			physicalDevice,
+			templateBytes,
+			VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
-			gpuCullInputBuffers[i] = std::make_unique<VulkanBuffer>(
-				device,
-				physicalDevice,
-				inputBytes,
-				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-			);
-
 			gpuCullDrawCountBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
 				drawCountBytes,
-				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
+
+			gpuWorldTransformBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				transformBytes,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
+
+			gpuWorldTransformStagingBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				transformBytes,
+				VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 			);
 
-			gpuCullCommandTemplateBuffers[i] = std::make_unique<VulkanBuffer>(
+			// Retained only so the existing descriptor manager wiring still has a valid buffer for binding 7.
+			gpuWorldVisibleIndexBuffers[i] = std::make_unique<VulkanBuffer>(
 				device,
 				physicalDevice,
-				templateBytes,
+				visibleIndexBytes,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
+
+			gpuWorldIndirectCommandBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				indirectBytes,
+				VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 			);
 		}
 
-		std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
+		std::array<VkDescriptorSetLayoutBinding, 6> bindings{};
 		for (uint32_t i = 0; i < static_cast<uint32_t>(bindings.size()); ++i)
 		{
 			bindings[i].binding = i;
@@ -409,15 +464,20 @@ namespace Engine
 
 		for (uint32_t i = 0; i < framesInFlight; ++i)
 		{
-			VkDescriptorBufferInfo inputInfo{};
-			inputInfo.buffer = gpuCullInputBuffers[i]->GetBuffer();
-			inputInfo.offset = 0;
-			inputInfo.range = VK_WHOLE_SIZE;
+			VkDescriptorBufferInfo staticInfo{};
+			staticInfo.buffer = gpuWorldStaticBuffer->GetBuffer();
+			staticInfo.offset = 0;
+			staticInfo.range = VK_WHOLE_SIZE;
 
-			VkDescriptorBufferInfo visibleInfo{};
-			visibleInfo.buffer = worldInstanceBuffers[i]->GetBuffer();
-			visibleInfo.offset = 0;
-			visibleInfo.range = VK_WHOLE_SIZE;
+			VkDescriptorBufferInfo transformInfo{};
+			transformInfo.buffer = gpuWorldTransformBuffers[i]->GetBuffer();
+			transformInfo.offset = 0;
+			transformInfo.range = VK_WHOLE_SIZE;
+
+			VkDescriptorBufferInfo outputInstanceInfo{};
+			outputInstanceInfo.buffer = worldInstanceBuffers[i]->GetBuffer();
+			outputInstanceInfo.offset = 0;
+			outputInstanceInfo.range = VK_WHOLE_SIZE;
 
 			VkDescriptorBufferInfo drawCountInfo{};
 			drawCountInfo.buffer = gpuCullDrawCountBuffers[i]->GetBuffer();
@@ -425,16 +485,16 @@ namespace Engine
 			drawCountInfo.range = VK_WHOLE_SIZE;
 
 			VkDescriptorBufferInfo templateInfo{};
-			templateInfo.buffer = gpuCullCommandTemplateBuffers[i]->GetBuffer();
+			templateInfo.buffer = gpuCullCommandTemplateStaticBuffer->GetBuffer();
 			templateInfo.offset = 0;
 			templateInfo.range = VK_WHOLE_SIZE;
 
 			VkDescriptorBufferInfo indirectInfo{};
-			indirectInfo.buffer = indirectCommandBuffers[i]->GetBuffer();
+			indirectInfo.buffer = gpuWorldIndirectCommandBuffers[i]->GetBuffer();
 			indirectInfo.offset = 0;
 			indirectInfo.range = VK_WHOLE_SIZE;
 
-			std::array<VkWriteDescriptorSet, 5> writes{};
+			std::array<VkWriteDescriptorSet, 6> writes{};
 			for (uint32_t writeIndex = 0; writeIndex < static_cast<uint32_t>(writes.size()); ++writeIndex)
 			{
 				writes[writeIndex].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -444,14 +504,14 @@ namespace Engine
 				writes[writeIndex].descriptorCount = 1;
 			}
 
-			writes[0].pBufferInfo = &inputInfo;
-			writes[1].pBufferInfo = &visibleInfo;
-			writes[2].pBufferInfo = &drawCountInfo;
-			writes[3].pBufferInfo = &templateInfo;
-			writes[4].pBufferInfo = &indirectInfo;
+			writes[0].pBufferInfo = &staticInfo;
+			writes[1].pBufferInfo = &transformInfo;
+			writes[2].pBufferInfo = &outputInstanceInfo;
+			writes[3].pBufferInfo = &drawCountInfo;
+			writes[4].pBufferInfo = &templateInfo;
+			writes[5].pBufferInfo = &indirectInfo;
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
-
 	}
 
 	void VulkanIndexDraw::DestroyGpuCullResources()
@@ -471,7 +531,16 @@ namespace Engine
 		gpuCullDescriptorSets.clear();
 		gpuCullInputBuffers.clear();
 		gpuCullDrawCountBuffers.clear();
+		gpuCullVisibleDrawCountBuffers.clear();
 		gpuCullCommandTemplateBuffers.clear();
+		gpuWorldTransformBuffers.clear();
+		gpuWorldTransformStagingBuffers.clear();
+		gpuWorldVisibleIndexBuffers.clear();
+		gpuWorldIndirectCommandBuffers.clear();
+		gpuWorldStaticBuffer.reset();
+		gpuWorldStaticStagingBuffer.reset();
+		gpuCullCommandTemplateStaticBuffer.reset();
+		gpuCullCommandTemplateStagingBuffer.reset();
 	}
 
 	void VulkanIndexDraw::CreateMegaMeshBuffers(VkDeviceSize totalVertexBufferSize, VkDeviceSize totalIndexBufferSize)
@@ -888,16 +957,20 @@ namespace Engine
 		cpuInstanceData.clear();
 		worldDrawCommands.clear();
 		gpuCullInputData.clear();
-		gpuCullCommandTemplates.clear();
 		gpuCullInputCount = 0;
-		gpuCullDrawCommandCount = 0;
 
 		if (cullMode == CullMode::GPU)
 		{
-			BuildGpuCullInputPacket(registry);
-			UploadGpuCullInput(frameIndex);
+			// The GPU cull path keeps its draw-command templates and scene packet cached across frames.
+			// Clearing them here and then early-outing from RebuildGpuWorldScenePacket() when the scene is unchanged
+			// leaves gpuCullDrawCommandCount at 0 for perfectly valid frames, which manifests as alternating or missing world draws.
+			RebuildGpuWorldScenePacket(*scene, registry);
+			UpdateGpuWorldTransformPacket(*scene, registry, frameIndex);
 			return;
 		}
+
+		gpuCullCommandTemplates.clear();
+		gpuCullDrawCommandCount = 0;
 
 		if (CanUseFullScenePacket(*scene, frustum))
 		{
@@ -1141,6 +1214,186 @@ namespace Engine
 		}
 	}
 
+	void VulkanIndexDraw::RebuildGpuWorldScenePacket(Scene& scene, entt::registry& registry)
+	{
+		if (!gpuWorldSceneDirty && gpuWorldSceneInstanceCount > 0)
+		{
+			// The scene packet is persistent for the GPU path. Make sure the live counters stay in sync with the cached data
+			// even when we skip a rebuild for an unchanged scene.
+			gpuCullDrawCommandCount = static_cast<uint32_t>(gpuCullCommandTemplates.size());
+			gpuWorldVisibleCapacity = gpuWorldSceneInstanceCount;
+			return;
+		}
+
+		struct GpuWorldBuildEntry
+		{
+			entt::entity entity{ entt::null };
+			uint32_t meshID = 0;
+			uint32_t indexCount = 0;
+			VkDeviceSize vertexOffsetInMegaBuffer = 0;
+			VkDeviceSize indexOffsetInMegaBuffer = 0;
+			uint32_t textureIndex = 0;
+			uint32_t flags = 0;
+			glm::vec4 boundsCenterRadius{ 0.0f };
+			bool canUseEntityCullCache = false;
+		};
+
+		std::vector<GpuWorldBuildEntry> buildEntries;
+		buildEntries.reserve(worldRenderableSlots.size());
+
+		for (const WorldRenderableSlot& slot : worldRenderableSlots)
+		{
+			if (!slot.active || !slot.material || !slot.material->mesh || !slot.material->mesh->meshBufferData)
+			{
+				continue;
+			}
+
+			if (!registry.valid(slot.entity) || !registry.any_of<Transform>(slot.entity))
+			{
+				continue;
+			}
+
+			const Transform& tf = registry.get<Transform>(slot.entity);
+			if (tf.GetTransformSpace() != TransformSpace::World)
+			{
+				continue;
+			}
+
+			GpuWorldBuildEntry entry{};
+			entry.entity = slot.entity;
+			entry.meshID = slot.meshID;
+			entry.indexCount = slot.indexCount;
+			entry.vertexOffsetInMegaBuffer = slot.vertexOffsetInMegaBuffer;
+			entry.indexOffsetInMegaBuffer = slot.indexOffsetInMegaBuffer;
+			entry.textureIndex = slot.material->albedoMap ? slot.material->albedoMap->GetBindlessIndex() : 0u;
+			entry.flags = slot.material->albedoMap ? GpuWorldInstanceFlags::HasTexture : 0u;
+			const glm::vec3 localMin = glm::vec3(slot.material->mesh->meshBufferData->aabbMin);
+			const glm::vec3 localMax = glm::vec3(slot.material->mesh->meshBufferData->aabbMax);
+			const glm::vec3 center = (localMin + localMax) * 0.5f;
+			const float radius = glm::length(localMax - center);
+			entry.boundsCenterRadius = glm::vec4(center, radius);
+			entry.canUseEntityCullCache = slot.canUseEntityCullCache;
+			buildEntries.push_back(std::move(entry));
+		}
+
+		std::sort(buildEntries.begin(), buildEntries.end(), [](const GpuWorldBuildEntry& a, const GpuWorldBuildEntry& b)
+		{
+			if (a.meshID != b.meshID)
+			{
+				return a.meshID < b.meshID;
+			}
+			return entt::to_integral(a.entity) < entt::to_integral(b.entity);
+		});
+
+		gpuWorldSceneInstances.clear();
+		gpuWorldStaticCpuData.clear();
+		gpuWorldTransformCpuData.clear();
+		gpuCullCommandTemplates.clear();
+		gpuWorldSceneInstances.reserve(buildEntries.size());
+		gpuWorldStaticCpuData.reserve(buildEntries.size());
+		gpuWorldTransformCpuData.resize(buildEntries.size());
+		gpuCullCommandTemplates.reserve(buildEntries.size());
+
+		uint32_t currentBatchMeshID = UINT32_MAX;
+		uint32_t currentBatchIndex = 0;
+		uint32_t currentBatchBaseInstance = 0;
+		uint32_t currentBatchMaxInstances = 0;
+
+		for (const GpuWorldBuildEntry& entry : buildEntries)
+		{
+			if (entry.meshID != currentBatchMeshID)
+			{
+				currentBatchMeshID = entry.meshID;
+				currentBatchIndex = static_cast<uint32_t>(gpuCullCommandTemplates.size());
+				currentBatchBaseInstance += currentBatchMaxInstances;
+				currentBatchMaxInstances = 0;
+
+				VkDrawIndexedIndirectCommand cmd{};
+				cmd.indexCount = entry.indexCount;
+				cmd.instanceCount = 0;
+				cmd.firstIndex = static_cast<uint32_t>(entry.indexOffsetInMegaBuffer / sizeof(uint32_t));
+				cmd.vertexOffset = static_cast<int32_t>(entry.vertexOffsetInMegaBuffer / sizeof(Vertex));
+				cmd.firstInstance = currentBatchBaseInstance;
+				gpuCullCommandTemplates.push_back(cmd);
+			}
+
+			GpuWorldSceneInstance sceneInstance{};
+			sceneInstance.entity = entry.entity;
+			sceneInstance.meshID = entry.meshID;
+			sceneInstance.drawCommandIndex = currentBatchIndex;
+			sceneInstance.outputBaseInstance = currentBatchBaseInstance;
+			sceneInstance.canUseEntityCullCache = entry.canUseEntityCullCache;
+			gpuWorldSceneInstances.push_back(sceneInstance);
+
+			GpuWorldInstanceStaticData staticData{};
+			staticData.boundsCenterRadius = entry.boundsCenterRadius;
+			staticData.textureIndex = entry.textureIndex;
+			staticData.hasTexture = (entry.flags & GpuWorldInstanceFlags::HasTexture) ? 1.0f : 0.0f;
+			staticData.meshInfoIndex = entry.meshID;
+			staticData.materialIndex = 0;
+			staticData.indexCount = entry.indexCount;
+			staticData.space = static_cast<uint32_t>(TransformSpace::World);
+			staticData.vertexOffsetInMegaBufferLo = static_cast<uint32_t>(entry.vertexOffsetInMegaBuffer & 0xffffffffull);
+			staticData.vertexOffsetInMegaBufferHi = static_cast<uint32_t>((entry.vertexOffsetInMegaBuffer >> 32) & 0xffffffffull);
+			staticData.indexOffsetInMegaBufferLo = static_cast<uint32_t>(entry.indexOffsetInMegaBuffer & 0xffffffffull);
+			staticData.indexOffsetInMegaBufferHi = static_cast<uint32_t>((entry.indexOffsetInMegaBuffer >> 32) & 0xffffffffull);
+			staticData.drawCommandIndex = currentBatchIndex;
+			staticData.outputBaseInstance = currentBatchBaseInstance;
+			gpuWorldStaticCpuData.push_back(staticData);
+
+			++currentBatchMaxInstances;
+		}
+
+		gpuWorldSceneInstanceCount = static_cast<uint32_t>(gpuWorldSceneInstances.size());
+		gpuCullDrawCommandCount = static_cast<uint32_t>(gpuCullCommandTemplates.size());
+		gpuWorldVisibleCapacity = gpuWorldSceneInstanceCount;
+
+		if (gpuWorldSceneInstanceCount > 0)
+		{
+			gpuWorldStaticStagingBuffer->CopyData(gpuWorldStaticCpuData.data(), static_cast<size_t>(gpuWorldSceneInstanceCount) * sizeof(GpuWorldInstanceStaticData));
+			gpuWorldStaticUploadPending = true;
+		}
+
+		if (gpuCullDrawCommandCount > 0)
+		{
+			gpuCullCommandTemplateStagingBuffer->CopyData(gpuCullCommandTemplates.data(), static_cast<size_t>(gpuCullDrawCommandCount) * sizeof(VkDrawIndexedIndirectCommand));
+			gpuWorldTemplateUploadPending = true;
+		}
+
+		gpuWorldSceneDirty = false;
+	}
+
+	void VulkanIndexDraw::UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex)
+	{
+		gpuWorldTransformCpuData.resize(gpuWorldSceneInstances.size());
+		for (size_t i = 0; i < gpuWorldSceneInstances.size(); ++i)
+		{
+			const GpuWorldSceneInstance& sceneInstance = gpuWorldSceneInstances[i];
+			GpuWorldInstanceTransformData transformData{};
+			if (registry.valid(sceneInstance.entity) && registry.any_of<Transform>(sceneInstance.entity))
+			{
+				const Transform& tf = registry.get<Transform>(sceneInstance.entity);
+				transformData.model = tf.GetWorldMatrix(registry);
+				transformData.enabled = scene.ShouldRenderBasedOnState(sceneInstance.entity) ? 1u : 0u;
+			}
+			else
+			{
+				transformData.model = glm::mat4(1.0f);
+				transformData.enabled = 0u;
+			}
+
+			gpuWorldTransformCpuData[i] = transformData;
+		}
+
+		if (!gpuWorldTransformCpuData.empty())
+		{
+			gpuWorldTransformStagingBuffers[frameIndex]->CopyData(
+				gpuWorldTransformCpuData.data(),
+				gpuWorldTransformCpuData.size() * sizeof(GpuWorldInstanceTransformData)
+			);
+		}
+	}
+
 	void VulkanIndexDraw::BuildGpuCullInputPacket(entt::registry& registry)
 	{
 		struct MeshBatchTemplate
@@ -1279,18 +1532,19 @@ namespace Engine
 	{
 		std::shared_ptr<VulkanRenderer> renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
-		if (!pipelineManager || !pipelineManager->HasGpuCullComputePipeline() || gpuCullDrawCommandCount == 0)
+		if (!pipelineManager || !pipelineManager->HasGpuCullComputePipeline() || gpuCullDrawCommandCount == 0 || gpuWorldSceneInstanceCount == 0)
 		{
 			return;
 		}
 
 		const VkPipeline computePipeline = pipelineManager->GetGpuCullComputePipeline();
 		const VkPipelineLayout computePipelineLayout = pipelineManager->GetGpuCullComputePipelineLayout();
-
 		const Frustum& frustum = Frustum::Get();
+
 		GpuCullPushConstants pushConstants{};
-		pushConstants.instanceCount = gpuCullInputCount;
+		pushConstants.instanceCount = gpuWorldSceneInstanceCount;
 		pushConstants.drawCommandCount = gpuCullDrawCommandCount;
+		pushConstants.compactDraws = 0;
 		for (int i = 0; i < 6; ++i)
 		{
 			pushConstants.frustumPlanes[i] = frustum.planes[i];
@@ -1309,31 +1563,29 @@ namespace Engine
 		);
 
 		const uint32_t drawGroupCount = DivideRoundUp(gpuCullDrawCommandCount, GpuCullThreadGroupSize);
-		const uint32_t instanceGroupCount = DivideRoundUp(gpuCullInputCount, GpuCullThreadGroupSize);
+		const uint32_t instanceGroupCount = DivideRoundUp(gpuWorldSceneInstanceCount, GpuCullThreadGroupSize);
 
-		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Reset);
-		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-		vkCmdDispatch(cmd, drawGroupCount, 1, 1);
+		vkCmdFillBuffer(cmd, gpuCullDrawCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 
-		VkBufferMemoryBarrier resetBarrier{};
-		resetBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		resetBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-		resetBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		resetBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		resetBarrier.buffer = gpuCullDrawCountBuffers[frameIndex]->GetBuffer();
-		resetBarrier.offset = 0;
-		resetBarrier.size = VK_WHOLE_SIZE;
+		VkBufferMemoryBarrier fillBarrier{};
+		fillBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		fillBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		fillBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		fillBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		fillBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		fillBarrier.buffer = gpuCullDrawCountBuffers[frameIndex]->GetBuffer();
+		fillBarrier.offset = 0;
+		fillBarrier.size = VK_WHOLE_SIZE;
 
 		vkCmdPipelineBarrier(
 			cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 			0,
 			0,
 			nullptr,
 			1,
-			&resetBarrier,
+			&fillBarrier,
 			0,
 			nullptr
 		);
@@ -1368,17 +1620,20 @@ namespace Engine
 			);
 		}
 
-		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Finalize);
-		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-		vkCmdDispatch(cmd, drawGroupCount, 1, 1);
+		if (drawGroupCount > 0)
+		{
+			pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::Finalize);
+			vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+			vkCmdDispatch(cmd, drawGroupCount, 1, 1);
+		}
 
-		std::array<VkBufferMemoryBarrier, 2> finalBarriers{};
+		std::array<VkBufferMemoryBarrier, 3> finalBarriers{};
 		finalBarriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
 		finalBarriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		finalBarriers[0].dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
 		finalBarriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		finalBarriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		finalBarriers[0].buffer = indirectCommandBuffers[frameIndex]->GetBuffer();
+		finalBarriers[0].buffer = gpuWorldIndirectCommandBuffers[frameIndex]->GetBuffer();
 		finalBarriers[0].offset = 0;
 		finalBarriers[0].size = VK_WHOLE_SIZE;
 
@@ -1391,9 +1646,18 @@ namespace Engine
 		finalBarriers[1].offset = 0;
 		finalBarriers[1].size = VK_WHOLE_SIZE;
 
+		finalBarriers[2].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		finalBarriers[2].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		finalBarriers[2].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		finalBarriers[2].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		finalBarriers[2].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		finalBarriers[2].buffer = gpuWorldTransformBuffers[frameIndex]->GetBuffer();
+		finalBarriers[2].offset = 0;
+		finalBarriers[2].size = VK_WHOLE_SIZE;
+
 		vkCmdPipelineBarrier(
 			cmd,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
 			0,
 			0,
@@ -1407,16 +1671,115 @@ namespace Engine
 
 	void VulkanIndexDraw::PrepareWorldDrawCommands(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		if (cullMode == CullMode::GPU)
+		if (cullMode != CullMode::GPU)
 		{
-			DispatchGpuCull(frameIndex, cmd);
+			return;
 		}
+
+		std::vector<VkBufferCopy> copyRegions;
+		copyRegions.reserve(3);
+
+		if (gpuWorldStaticUploadPending && gpuWorldSceneInstanceCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuWorldSceneInstanceCount) * sizeof(GpuWorldInstanceStaticData);
+			vkCmdCopyBuffer(cmd, gpuWorldStaticStagingBuffer->GetBuffer(), gpuWorldStaticBuffer->GetBuffer(), 1, &copy);
+			gpuWorldStaticUploadPending = false;
+		}
+
+		if (gpuWorldTemplateUploadPending && gpuCullDrawCommandCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuCullDrawCommandCount) * sizeof(VkDrawIndexedIndirectCommand);
+			vkCmdCopyBuffer(cmd, gpuCullCommandTemplateStagingBuffer->GetBuffer(), gpuCullCommandTemplateStaticBuffer->GetBuffer(), 1, &copy);
+			gpuWorldTemplateUploadPending = false;
+		}
+
+		if (gpuWorldSceneInstanceCount > 0)
+		{
+			VkBufferCopy copy{};
+			copy.srcOffset = 0;
+			copy.dstOffset = 0;
+			copy.size = static_cast<VkDeviceSize>(gpuWorldSceneInstanceCount) * sizeof(GpuWorldInstanceTransformData);
+			vkCmdCopyBuffer(cmd, gpuWorldTransformStagingBuffers[frameIndex]->GetBuffer(), gpuWorldTransformBuffers[frameIndex]->GetBuffer(), 1, &copy);
+		}
+
+		std::array<VkBufferMemoryBarrier, 3> uploadBarriers{};
+		uint32_t barrierCount = 0;
+
+		if (gpuWorldSceneInstanceCount > 0)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuWorldTransformBuffers[frameIndex]->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
+		if (gpuCullDrawCommandCount > 0)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuCullCommandTemplateStaticBuffer->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
+		if (gpuWorldSceneInstanceCount > 0)
+		{
+			uploadBarriers[barrierCount].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+			uploadBarriers[barrierCount].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			uploadBarriers[barrierCount].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			uploadBarriers[barrierCount].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			uploadBarriers[barrierCount].buffer = gpuWorldStaticBuffer->GetBuffer();
+			uploadBarriers[barrierCount].offset = 0;
+			uploadBarriers[barrierCount].size = VK_WHOLE_SIZE;
+			++barrierCount;
+		}
+
+		if (barrierCount > 0)
+		{
+			vkCmdPipelineBarrier(
+				cmd,
+				VK_PIPELINE_STAGE_TRANSFER_BIT,
+				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+				0,
+				0,
+				nullptr,
+				barrierCount,
+				uploadBarriers.data(),
+				0,
+				nullptr
+			);
+		}
+
+		if (gpuCullDrawCommandCount == 0 && !gpuCullCommandTemplates.empty())
+		{
+			gpuCullDrawCommandCount = static_cast<uint32_t>(gpuCullCommandTemplates.size());
+		}
+
+		DispatchGpuCull(frameIndex, cmd);
 	}
 
 	// Draws everything in world space that isn't decorated or requiring custom shaders that was processed into the command buffers via UploadAndBatchInstances()
 	void VulkanIndexDraw::DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		VkBuffer indirectBuf = indirectCommandBuffers[frameIndex]->GetBuffer();
+		VkBuffer indirectBuf = (cullMode == CullMode::GPU)
+			? gpuWorldIndirectCommandBuffers[frameIndex]->GetBuffer()
+			: indirectCommandBuffers[frameIndex]->GetBuffer();
 		VkDeviceSize offset = 0;
 		VkBuffer vertexBuffer = megaVertexBuffer->GetBuffer();
 
@@ -2020,6 +2383,66 @@ namespace Engine
 		}
 		worldInstanceBuffers.clear();
 
+		for (auto& buffer : gpuWorldTransformBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+			}
+		}
+		gpuWorldTransformBuffers.clear();
+
+		for (auto& buffer : gpuWorldTransformStagingBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+			}
+		}
+		gpuWorldTransformStagingBuffers.clear();
+
+		for (auto& buffer : gpuWorldVisibleIndexBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+			}
+		}
+		gpuWorldVisibleIndexBuffers.clear();
+
+		for (auto& buffer : gpuWorldIndirectCommandBuffers)
+		{
+			if (buffer)
+			{
+				buffer->Free();
+			}
+		}
+		gpuWorldIndirectCommandBuffers.clear();
+
+		if (gpuWorldStaticBuffer)
+		{
+			gpuWorldStaticBuffer->Free();
+			gpuWorldStaticBuffer.reset();
+		}
+
+		if (gpuWorldStaticStagingBuffer)
+		{
+			gpuWorldStaticStagingBuffer->Free();
+			gpuWorldStaticStagingBuffer.reset();
+		}
+
+		if (gpuCullCommandTemplateStaticBuffer)
+		{
+			gpuCullCommandTemplateStaticBuffer->Free();
+			gpuCullCommandTemplateStaticBuffer.reset();
+		}
+
+		if (gpuCullCommandTemplateStagingBuffer)
+		{
+			gpuCullCommandTemplateStagingBuffer->Free();
+			gpuCullCommandTemplateStagingBuffer.reset();
+		}
+
 		for (auto& buffer : indirectCommandBuffers)
 		{
 			if (buffer)
@@ -2065,6 +2488,9 @@ namespace Engine
 		msdfInstancesData.clear();
 		gpuCullInputData.clear();
 		gpuCullCommandTemplates.clear();
+		gpuWorldSceneInstances.clear();
+		gpuWorldStaticCpuData.clear();
+		gpuWorldTransformCpuData.clear();
 		culledVisibleData.clear();
 		worldRenderableSlots.clear();
 		worldRenderableFreeSlots.clear();

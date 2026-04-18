@@ -198,29 +198,67 @@ namespace Engine
 			queueInfos.push_back(queueInfo);
 		}
 
-		// --- Enable standard device features ---
+		VkPhysicalDeviceVulkan11Features supportedVulkan11Features{};
+		supportedVulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+
+		VkPhysicalDeviceVulkan12Features supportedVulkan12Features{};
+		supportedVulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		supportedVulkan11Features.pNext = &supportedVulkan12Features;
+
+		VkPhysicalDeviceFeatures2 supportedFeatures2{};
+		supportedFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		supportedFeatures2.pNext = &supportedVulkan11Features;
+		vkGetPhysicalDeviceFeatures2(physicalDevice, &supportedFeatures2);
+
+		if (supportedFeatures2.features.samplerAnisotropy != VK_TRUE)
+		{
+			throw std::runtime_error("Selected GPU does not support sampler anisotropy.");
+		}
+
+		if (supportedFeatures2.features.multiDrawIndirect != VK_TRUE)
+		{
+			throw std::runtime_error("Selected GPU does not support multiDrawIndirect.");
+		}
+
+		if (supportedFeatures2.features.drawIndirectFirstInstance != VK_TRUE)
+		{
+			throw std::runtime_error("Selected GPU does not support drawIndirectFirstInstance.");
+		}
+
+		if (supportedVulkan12Features.descriptorIndexing != VK_TRUE ||
+			supportedVulkan12Features.runtimeDescriptorArray != VK_TRUE ||
+			supportedVulkan12Features.descriptorBindingPartiallyBound != VK_TRUE ||
+			supportedVulkan12Features.descriptorBindingVariableDescriptorCount != VK_TRUE ||
+			supportedVulkan12Features.descriptorBindingSampledImageUpdateAfterBind != VK_TRUE)
+		{
+			throw std::runtime_error("Selected GPU does not support the Vulkan 1.2 descriptor indexing features required by the bindless texture path.");
+		}
+
+		supportsDrawIndexedIndirectCount = supportedVulkan12Features.drawIndirectCount == VK_TRUE;
+
 		VkPhysicalDeviceFeatures deviceFeatures{};
 		deviceFeatures.samplerAnisotropy = VK_TRUE;
 		deviceFeatures.multiDrawIndirect = VK_TRUE;
+		deviceFeatures.drawIndirectFirstInstance = VK_TRUE;
 
-		// --- Enable descriptor indexing features for bindless ---
-		VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
-		indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-		indexingFeatures.runtimeDescriptorArray = VK_TRUE;
-		indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
-		indexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+		VkPhysicalDeviceVulkan11Features vulkan11Features{};
+		vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+		vulkan11Features.shaderDrawParameters = supportedVulkan11Features.shaderDrawParameters;
 
-		// --- Use VkPhysicalDeviceFeatures2 chain to pass both ---
+		VkPhysicalDeviceVulkan12Features vulkan12Features{};
+		vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+		vulkan12Features.descriptorIndexing = VK_TRUE;
+		vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+		vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
+		vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+		vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+		vulkan12Features.drawIndirectCount = supportsDrawIndexedIndirectCount ? VK_TRUE : VK_FALSE;
+		vulkan11Features.pNext = &vulkan12Features;
+
 		VkPhysicalDeviceFeatures2 features2{};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		features2.features = deviceFeatures;
-		features2.pNext = &indexingFeatures;
-
-		// Add VK_EXT_descriptor_indexing to device extensions if not already present
-		if (std::find(deviceExtensions.begin(), deviceExtensions.end(), VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == deviceExtensions.end())
-		{
-			deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-		}
+		features2.pNext = &vulkan11Features;
 
 		VkDeviceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -367,7 +405,7 @@ namespace Engine
 
 		VkPhysicalDeviceFeatures features{};
 		vkGetPhysicalDeviceFeatures(physicalDevice, &features);
-		if (!features.multiDrawIndirect)
+		if (!features.multiDrawIndirect || !features.drawIndirectFirstInstance)
 		{
 			return false;
 		}

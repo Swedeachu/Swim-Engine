@@ -35,7 +35,7 @@ namespace Engine
 			uint32_t mode = 0;
 			uint32_t instanceCount = 0;
 			uint32_t drawCommandCount = 0;
-			uint32_t pad = 0;
+			uint32_t compactDraws = 0;
 			glm::vec4 frustumPlanes[6]{};
 		};
 
@@ -61,11 +61,15 @@ namespace Engine
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
 		const std::vector<std::unique_ptr<VulkanBuffer>>& GetWorldInstanceBuffers() const { return worldInstanceBuffers; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetGpuWorldTransformBuffers() const { return gpuWorldTransformBuffers; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetGpuWorldVisibleIndexBuffers() const { return gpuWorldVisibleIndexBuffers; }
+		const VulkanBuffer& GetGpuWorldStaticBuffer() const { return *gpuWorldStaticBuffer; }
 		VkDescriptorSetLayout GetGpuCullDescriptorSetLayout() const { return gpuCullDescriptorSetLayout; }
 		static constexpr uint32_t GetGpuCullPushConstantSize() { return sizeof(GpuCullPushConstants); }
 
 		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
+		CullMode GetCullMode() const { return cullMode; }
 
 		// Major performance booster
 		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
@@ -124,6 +128,8 @@ namespace Engine
 		void BuildGpuCullInputPacket(entt::registry& registry);
 		void UploadGpuCullInput(uint32_t frameIndex);
 		void DispatchGpuCull(uint32_t frameIndex, VkCommandBuffer cmd);
+		void RebuildGpuWorldScenePacket(Scene& scene, entt::registry& registry);
+		void UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex);
 		void CreateGpuCullResources(uint32_t maxDrawCalls, uint32_t framesInFlight);
 		void DestroyGpuCullResources();
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
@@ -236,6 +242,15 @@ namespace Engine
 			GpuInstanceData baseInstance{};
 		};
 
+		struct GpuWorldSceneInstance
+		{
+			entt::entity entity{ entt::null };
+			uint32_t meshID = 0;
+			uint32_t drawCommandIndex = 0;
+			uint32_t outputBaseInstance = 0;
+			bool canUseEntityCullCache = false;
+		};
+
 		CullMode cullMode{ CullMode::NONE };
 
 		struct CachedWorldPacketState
@@ -269,6 +284,14 @@ namespace Engine
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
 		uint32_t gpuCullInputCount = 0;
 		uint32_t gpuCullDrawCommandCount = 0;
+		uint32_t gpuWorldSceneInstanceCount = 0;
+		uint32_t gpuWorldVisibleCapacity = 0;
+		bool gpuWorldSceneDirty = true;
+		bool gpuWorldStaticUploadPending = false;
+		bool gpuWorldTemplateUploadPending = false;
+		std::vector<GpuWorldSceneInstance> gpuWorldSceneInstances;
+		std::vector<GpuWorldInstanceStaticData> gpuWorldStaticCpuData;
+		std::vector<GpuWorldInstanceTransformData> gpuWorldTransformCpuData;
 
 		struct FullSceneDirtyHistoryEntry
 		{
@@ -305,7 +328,16 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> worldInstanceBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullInputBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDrawCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullVisibleDrawCountBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullCommandTemplateBuffers;
+		std::unique_ptr<VulkanBuffer> gpuWorldStaticBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldStaticStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStaticBuffer;
+		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStagingBuffer;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformStagingBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleIndexBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldIndirectCommandBuffers;
 		VkDescriptorSetLayout gpuCullDescriptorSetLayout = VK_NULL_HANDLE;
 		VkDescriptorPool gpuCullDescriptorPool = VK_NULL_HANDLE;
 		std::vector<VkDescriptorSet> gpuCullDescriptorSets;

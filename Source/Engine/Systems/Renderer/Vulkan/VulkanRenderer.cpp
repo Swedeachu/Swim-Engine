@@ -152,6 +152,11 @@ namespace Engine
 		// Hook the index buffer SSBO into our per-frame descriptor sets
 		descriptorManager->CreateInstanceBufferDescriptorSets(indexDraw->GetInstanceBuffer()->GetPerFrameBuffers());
 		descriptorManager->CreateWorldInstanceBufferDescriptorSets(indexDraw->GetWorldInstanceBuffers());
+		descriptorManager->CreateGpuWorldDescriptorSets(
+			indexDraw->GetGpuWorldStaticBuffer(),
+			indexDraw->GetGpuWorldTransformBuffers(),
+			indexDraw->GetGpuWorldVisibleIndexBuffers()
+		);
 
 		// === Graphics pipeline creation ===
 		VkDescriptorSetLayout layout = descriptorManager->GetLayout();
@@ -172,6 +177,19 @@ namespace Engine
 			vertexAttribs,
 			0
 		);
+
+		if (useCompute && gpuCullSupported)
+		{
+			pipelineManager->CreateGpuDrivenGraphicsPipeline(
+				"Shaders\\VertexShaders\\vertex_instanced_gpu.spv",
+				"Shaders\\FragmentShaders\\fragment_instanced.spv",
+				layout,
+				bindlessLayout,
+				meshBindings,
+				vertexAttribs,
+				0
+			);
+		}
 
 		// ---- DECORATED/UI PIPELINE ----
 		pipelineManager->CreateDecoratedMeshPipeline(
@@ -573,7 +591,12 @@ namespace Engine
 		}
 
 		// Scene pipeline & sets
-		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager->GetGraphicsPipeline());
+		VkPipeline worldPipeline = pipelineManager->GetGraphicsPipeline();
+		if (indexDraw->GetCullMode() == VulkanIndexDraw::CullMode::GPU && pipelineManager->HasGpuDrivenGraphicsPipeline())
+		{
+			worldPipeline = pipelineManager->GetGpuDrivenGraphicsPipeline();
+		}
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline);
 		VkDescriptorSet globalSet = descriptorManager->GetPerFrameDescriptorSet(currentFrame);
 		VkDescriptorSet bindlessSet = descriptorManager->GetBindlessSet();
 		std::array<VkDescriptorSet, 2> sets = { globalSet, bindlessSet };
