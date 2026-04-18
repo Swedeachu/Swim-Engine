@@ -251,6 +251,13 @@ namespace Engine
 			bool canUseEntityCullCache = false;
 		};
 
+		struct GpuWorldTransformCacheEntry
+		{
+			uint64_t worldVersion = 0;
+			uint32_t enabled = 0;
+			bool valid = false;
+		};
+
 		CullMode cullMode{ CullMode::NONE };
 
 		struct CachedWorldPacketState
@@ -292,6 +299,8 @@ namespace Engine
 		std::vector<GpuWorldSceneInstance> gpuWorldSceneInstances;
 		std::vector<GpuWorldInstanceStaticData> gpuWorldStaticCpuData;
 		std::vector<GpuWorldInstanceTransformData> gpuWorldTransformCpuData;
+		std::vector<std::vector<GpuWorldTransformCacheEntry>> gpuWorldTransformCaches;
+		std::vector<std::vector<VkBufferCopy>> gpuWorldTransformCopyRegions;
 
 		struct FullSceneDirtyHistoryEntry
 		{

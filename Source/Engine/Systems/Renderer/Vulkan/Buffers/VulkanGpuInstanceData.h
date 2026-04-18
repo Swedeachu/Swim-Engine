@@ -24,8 +24,8 @@ namespace Engine
   };
 
   // Static per-renderable data for the GPU cull path.
-  // This now carries everything needed to rebuild a compacted GpuInstanceData packet on the GPU,
-  // so the graphics path can consume the exact same instance layout as the stable CPU path.
+  // The compute pass now emits compact visible instance IDs instead of expanded GpuInstanceData packets,
+  // and the GPU-driven vertex shader reconstructs per-instance state from this static data plus the transform buffer.
   struct alignas(16) GpuWorldInstanceStaticData
   {
     glm::vec4 boundsCenterRadius;

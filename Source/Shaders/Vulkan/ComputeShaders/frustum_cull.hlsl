@@ -1,18 +1,3 @@
-struct GpuInstanceData
-{
-  float4x4 model;
-  float4 aabbMin;
-  float4 aabbMax;
-  uint textureIndex;
-  float hasTexture;
-  uint meshInfoIndex;
-  uint materialIndex;
-  uint indexCount;
-  uint space;
-  uint2 vertexOffsetInMegaBuffer;
-  uint2 indexOffsetInMegaBuffer;
-};
-
 struct GpuWorldInstanceStaticData
 {
   float4 boundsCenterRadius;
@@ -65,7 +50,7 @@ StructuredBuffer<GpuWorldInstanceStaticData> staticBuffer : register(t0, space0)
 StructuredBuffer<GpuWorldInstanceTransformData> transformBuffer : register(t1, space0);
 
 [[vk::binding(2, 0)]]
-RWStructuredBuffer<GpuInstanceData> outputInstanceBuffer : register(u2, space0);
+RWStructuredBuffer<uint> visibleInstanceIds : register(u2, space0);
 
 [[vk::binding(3, 0)]]
 RWStructuredBuffer<uint> drawInstanceCounts : register(u3, space0);
@@ -76,8 +61,12 @@ StructuredBuffer<DrawIndexedIndirectCommand> drawTemplateBuffer : register(t4, s
 [[vk::binding(5, 0)]]
 RWStructuredBuffer<DrawIndexedIndirectCommand> indirectCommandBuffer : register(u5, space0);
 
+[[vk::binding(6, 0)]]
+RWStructuredBuffer<uint> drawCountScalar : register(u6, space0);
+
 static const uint MODE_CULL = 1;
 static const uint MODE_FINALIZE = 2;
+static const uint MODE_COMPACT = 3;
 
 float3x3 ExtractLinearPart(float4x4 m)
 {
@@ -113,28 +102,6 @@ bool IsVisible(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransf
   return true;
 }
 
-GpuInstanceData BuildOutputInstance(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransformData instanceTransform)
-{
-  GpuInstanceData output;
-  output.model = instanceTransform.model;
-
-  float3 center = instanceStatic.boundsCenterRadius.xyz;
-  float radius = instanceStatic.boundsCenterRadius.w;
-  float3 extent = float3(radius, radius, radius);
-  output.aabbMin = float4(center - extent, 1.0f);
-  output.aabbMax = float4(center + extent, 1.0f);
-
-  output.textureIndex = instanceStatic.textureIndex;
-  output.hasTexture = instanceStatic.hasTexture;
-  output.meshInfoIndex = instanceStatic.meshInfoIndex;
-  output.materialIndex = instanceStatic.materialIndex;
-  output.indexCount = instanceStatic.indexCount;
-  output.space = instanceStatic.space;
-  output.vertexOffsetInMegaBuffer = instanceStatic.vertexOffsetInMegaBuffer;
-  output.indexOffsetInMegaBuffer = instanceStatic.indexOffsetInMegaBuffer;
-  return output;
-}
-
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -161,19 +128,35 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     uint localInstanceIndex = 0;
     InterlockedAdd(drawInstanceCounts[instanceStatic.drawCommandIndex], 1, localInstanceIndex);
-    outputInstanceBuffer[instanceStatic.outputBaseInstance + localInstanceIndex] = BuildOutputInstance(instanceStatic, instanceTransform);
+
+    DrawIndexedIndirectCommand drawTemplate = drawTemplateBuffer[instanceStatic.drawCommandIndex];
+    visibleInstanceIds[drawTemplate.firstInstance + localInstanceIndex] = index;
     return;
   }
 
+  if (index >= pc.drawCommandCount)
+  {
+    return;
+  }
+
+  DrawIndexedIndirectCommand drawCommand = drawTemplateBuffer[index];
+  drawCommand.instanceCount = drawInstanceCounts[index];
+
   if (pc.mode == MODE_FINALIZE)
   {
-    if (index >= pc.drawCommandCount)
+    indirectCommandBuffer[index] = drawCommand;
+    return;
+  }
+
+  if (pc.mode == MODE_COMPACT)
+  {
+    if (drawCommand.instanceCount == 0)
     {
       return;
     }
 
-    DrawIndexedIndirectCommand drawCommand = drawTemplateBuffer[index];
-    drawCommand.instanceCount = drawInstanceCounts[index];
-    indirectCommandBuffer[index] = drawCommand;
+    uint compactedIndex = 0;
+    InterlockedAdd(drawCountScalar[0], 1, compactedIndex);
+    indirectCommandBuffer[compactedIndex] = drawCommand;
   }
 }
