@@ -24,9 +24,9 @@ namespace Engine
 
 		enum class GpuCullPassMode : uint32_t
 		{
-			CullNodes = 0,
-			CullLeaves = 1,
-			BuildCommands = 2
+			CullInstances = 0,
+			BuildDrawRanges = 2,
+			ScatterVisibleIds = 3
 		};
 
 		static uint32_t DivideRoundUp(uint32_t value, uint32_t divisor)
@@ -2319,9 +2319,11 @@ namespace Engine
 			nullptr
 		);
 
-		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::CullNodes);
+		const uint32_t instanceDispatchCount = DivideRoundUp(std::max(gpuWorldSceneInstanceCount, 1u), GpuCullThreadGroupSize);
+
+		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::CullInstances);
 		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-		vkCmdDispatch(cmd, DivideRoundUp(std::max(gpuWorldSceneInstanceCount, 1u), GpuCullThreadGroupSize), 1, 1);
+		vkCmdDispatch(cmd, instanceDispatchCount, 1, 1);
 
 		VkMemoryBarrier computeBarrier{};
 		computeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -2340,10 +2342,27 @@ namespace Engine
 			nullptr
 		);
 
-		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::BuildCommands);
+		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::BuildDrawRanges);
 		pushConstants.compactDraws = useIndirectCount ? 1u : 0u;
 		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
 		vkCmdDispatch(cmd, 1, 1, 1);
+
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			1,
+			&computeBarrier,
+			0,
+			nullptr,
+			0,
+			nullptr
+		);
+
+		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::ScatterVisibleIds);
+		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+		vkCmdDispatch(cmd, instanceDispatchCount, 1, 1);
 
 		VkMemoryBarrier finalBarrier{};
 		finalBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;

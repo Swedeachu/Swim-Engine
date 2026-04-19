@@ -68,10 +68,14 @@ struct PushConstants
   uint instanceCount;
   uint drawCommandCount;
   uint compactDraws;
-  uint inputQueueIndex;
   uint gpuBvhNodeCount;
   uint gpuBvhRootIndex;
   uint gpuBvhMaxDepth;
+  uint gpuBvhDepthOffset;
+  uint gpuBvhDepthCount;
+  uint padA;
+  uint padB;
+  uint padC;
   float4 frustumPlanes[6];
 };
 
@@ -132,9 +136,10 @@ RWStructuredBuffer<uint> visibleCandidateCount : register(u16, space0);
 [[vk::binding(17, 0)]]
 RWStructuredBuffer<uint> drawOffsets : register(u17, space0);
 
-static const uint MODE_CULL_INSTANCES = 0;
-static const uint MODE_BUILD_COMMANDS = 2;
-static const uint GROUP_SIZE = 64;
+static const uint MODE_CULL_INSTANCES = 0u;
+static const uint MODE_BUILD_DRAW_RANGES = 2u;
+static const uint MODE_SCATTER_VISIBLE_IDS = 3u;
+static const uint GROUP_SIZE = 64u;
 static const float INSTANCE_SPHERE_EPSILON_MIN = 0.02f;
 static const float INSTANCE_SPHERE_EPSILON_SCALE = 0.02f;
 
@@ -158,26 +163,6 @@ uint FirstBitLowBallot(uint4 mask)
     return 64u + firstbitlow(mask.z);
   }
   return 96u + firstbitlow(mask.w);
-}
-
-bool IsLaneSetBallot(uint4 mask, uint laneIndex)
-{
-  uint component = laneIndex >> 5u;
-  uint bit = laneIndex & 31u;
-  uint laneMask = 1u << bit;
-  if (component == 0u)
-  {
-    return (mask.x & laneMask) != 0u;
-  }
-  if (component == 1u)
-  {
-    return (mask.y & laneMask) != 0u;
-  }
-  if (component == 2u)
-  {
-    return (mask.z & laneMask) != 0u;
-  }
-  return (mask.w & laneMask) != 0u;
 }
 
 uint CountBitsBeforeLane(uint4 mask, uint laneIndex)
@@ -239,15 +224,15 @@ bool SphereInFrustumConservative(GpuWorldInstanceStaticData instanceStatic, GpuW
   float frustumSlack = max(worldRadius * INSTANCE_SPHERE_EPSILON_SCALE, INSTANCE_SPHERE_EPSILON_MIN);
 
   [unroll]
-    for (uint planeIndex = 0; planeIndex < 6; ++planeIndex)
+  for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
+  {
+    float4 plane = pc.frustumPlanes[planeIndex];
+    float distanceToPlane = dot(plane.xyz, worldCenter) + plane.w;
+    if (distanceToPlane + worldRadius < -frustumSlack)
     {
-      float4 plane = pc.frustumPlanes[planeIndex];
-      float distanceToPlane = dot(plane.xyz, worldCenter) + plane.w;
-      if (distanceToPlane + worldRadius < -frustumSlack)
-      {
-        return false;
-      }
+      return false;
     }
+  }
 
   return true;
 }
@@ -266,9 +251,9 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     GpuWorldInstanceTransformData instanceTransform = transformBuffer[index];
     bool visible = false;
+    GpuWorldInstanceStaticData instanceStatic = staticBuffer[index];
     if (instanceTransform.enabled != 0u)
     {
-      GpuWorldInstanceStaticData instanceStatic = staticBuffer[index];
       visible = SphereInFrustumConservative(instanceStatic, instanceTransform);
     }
 
@@ -290,27 +275,22 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     uint localOffset = CountBitsBeforeLane(ballot, WaveGetLaneIndex());
     visibleCandidateInstanceIds[baseCandidateIndex + localOffset] = index;
+
+    uint ignored = 0u;
+    InterlockedAdd(drawInstanceCounts[instanceStatic.drawCommandIndex], 1u, ignored);
     return;
   }
 
-  if (pc.mode == MODE_BUILD_COMMANDS)
+  if (pc.mode == MODE_BUILD_DRAW_RANGES)
   {
-    if (index != 0)
+    if (index != 0u)
     {
       return;
     }
 
-    uint visibleCount = visibleCandidateCount[0];
-    for (uint candidateIndex = 0; candidateIndex < visibleCount; ++candidateIndex)
-    {
-      uint instanceIndex = visibleCandidateInstanceIds[candidateIndex];
-      uint drawKey = staticBuffer[instanceIndex].drawCommandIndex;
-      drawInstanceCounts[drawKey] = drawInstanceCounts[drawKey] + 1u;
-    }
-
-    uint runningInstanceOffset = 0;
-    uint visibleDrawCount = 0;
-    for (uint drawIndex = 0; drawIndex < pc.drawCommandCount; ++drawIndex)
+    uint runningInstanceOffset = 0u;
+    uint visibleDrawCount = 0u;
+    for (uint drawIndex = 0u; drawIndex < pc.drawCommandCount; ++drawIndex)
     {
       uint instanceCount = drawInstanceCounts[drawIndex];
       drawOffsets[drawIndex] = runningInstanceOffset;
@@ -335,15 +315,23 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
       indirectCommandBuffer[drawIndex] = drawCommand;
     }
 
-    for (uint candidateIndex = 0; candidateIndex < visibleCount; ++candidateIndex)
+    drawCountScalar[0] = (pc.compactDraws != 0u) ? visibleDrawCount : pc.drawCommandCount;
+    return;
+  }
+
+  if (pc.mode == MODE_SCATTER_VISIBLE_IDS)
+  {
+    uint visibleCount = visibleCandidateCount[0];
+    if (index >= visibleCount)
     {
-      uint instanceIndex = visibleCandidateInstanceIds[candidateIndex];
-      uint drawKey = staticBuffer[instanceIndex].drawCommandIndex;
-      uint outputIndex = drawOffsets[drawKey] + drawInstanceCounts[drawKey];
-      visibleInstanceIds[outputIndex] = instanceIndex;
-      drawInstanceCounts[drawKey] = drawInstanceCounts[drawKey] + 1u;
+      return;
     }
 
-    drawCountScalar[0] = pc.compactDraws != 0u ? visibleDrawCount : pc.drawCommandCount;
+    uint instanceIndex = visibleCandidateInstanceIds[index];
+    uint drawKey = staticBuffer[instanceIndex].drawCommandIndex;
+    uint localOffset = 0u;
+    InterlockedAdd(drawInstanceCounts[drawKey], 1u, localOffset);
+    visibleInstanceIds[drawOffsets[drawKey] + localOffset] = instanceIndex;
+    return;
   }
 }
