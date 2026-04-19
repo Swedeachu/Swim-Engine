@@ -1175,6 +1175,7 @@ namespace Engine
 				destNode.maxX[lane] = sourceNode.maxX[lane];
 				destNode.maxY[lane] = sourceNode.maxY[lane];
 				destNode.maxZ[lane] = sourceNode.maxZ[lane];
+				destNode.childTraversalOrder[lane] = sourceNode.childTraversalOrder[lane];
 
 				const int childRef = sourceNode.childRef[lane];
 				if (IsEncodedWideLeaf(childRef))

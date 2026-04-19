@@ -34,9 +34,7 @@ namespace Engine
 			glm::vec4 maxZ{ 0.0f };
 			int childRef[4]{ 0, 0, 0, 0 };
 			uint32_t childCount = 0;
-			uint32_t padA = 0;
-			uint32_t padB = 0;
-			uint32_t padC = 0;
+			uint32_t childTraversalOrder[4]{ 0, 1, 2, 3 };
 		};
 
 		struct GpuWideSnapshotLeaf

@@ -86,6 +86,14 @@ namespace Engine
     uint32_t count = 0;
   };
 
+  struct alignas(16) GpuWorldVisibleRangeData
+  {
+    uint32_t start = 0;
+    uint32_t count = 0;
+    uint32_t flags = 0;
+    uint32_t pad = 0;
+  };
+
 	struct alignas(16) MeshDecoratorGpuInstanceData
 	{
 		glm::vec4 fillColor;

@@ -25,7 +25,7 @@
 namespace Game
 {
 
-	constexpr static bool doStressTest = false;
+	constexpr static bool doStressTest = true;
 	constexpr static bool doUI = true;
 	constexpr static bool glbTests = true;
 	constexpr static bool doSponza = true; // glbTests must be true for this to happen!
