@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <limits>
 
-#include "Library/glm/glm.hpp"
-#include "Library/EnTT/entt.hpp"
+#include <glm/glm.hpp>
+#include <entt/entt.hpp>
 #include "SceneDebugDraw.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
 
@@ -15,7 +15,7 @@ namespace Engine
 {
 
 	class Transform;
-	class Mesh;
+	struct Mesh;
 	enum class AABBFrustumClassification : uint8_t;
 	struct Frustum;
 

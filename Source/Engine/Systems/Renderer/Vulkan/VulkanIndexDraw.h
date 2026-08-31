@@ -4,7 +4,7 @@
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 
 #include <array>
 #include <deque>
@@ -28,7 +28,7 @@ namespace Engine
 
 		/*
 		 CPU: Solid balanced stratedgy and a geniunely good solution for complex scenes with thousands of unique meshes.
-		 GPU: Best solution on paper but our implementation is super broken and glitchy for more reasons than one.
+		 GPU: GPU-driven path with persistent scene buffers, hierarchical BVH traversal, and indirect drawing.
 		*/
 		enum CullMode { NONE, CPU, GPU }; // GPU uses the compute culling path when supported 
 
@@ -429,6 +429,7 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleCandidateBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleCandidateCountBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDrawOffsetBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDispatchArgsBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformStagingBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleIndexBuffers;

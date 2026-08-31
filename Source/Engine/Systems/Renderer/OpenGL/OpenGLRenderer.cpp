@@ -4,7 +4,7 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
-#include "Library/glm/gtc/matrix_transform.hpp"
+#include <glm/gtc/matrix_transform.hpp>
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Material.h"
@@ -601,7 +601,7 @@ namespace Engine
 				return;
 			}
 
-			// Skip decorator elements — they go in separate pass
+			// Skip decorator elements â€” they go in separate pass
 			if (registry.any_of<MeshDecorator>(entity))
 			{
 				return;

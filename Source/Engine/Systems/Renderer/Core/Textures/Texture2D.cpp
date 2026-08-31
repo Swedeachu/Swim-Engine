@@ -2,7 +2,7 @@
 #include "Texture2D.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
-#include "Library/stb/stb_image.h"
+#include <stb_image.h>
 
 namespace Engine
 {
@@ -334,7 +334,7 @@ namespace Engine
 			}
 			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, maxAniso);
 
-			// Optional LOD bias (keep 0 unless you’re doing special filtering tricks).
+			// Optional LOD bias (keep 0 unless youâ€™re doing special filtering tricks).
 			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, 0.0f);
 
 			// Build the mip chain.
@@ -352,7 +352,7 @@ namespace Engine
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
-			// Make sure anisotropy isn’t boosting a non-existent mip chain.
+			// Make sure anisotropy isnâ€™t boosting a non-existent mip chain.
 			// Setting to 1 disables it cleanly.
 			glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 1.0f);
 		}

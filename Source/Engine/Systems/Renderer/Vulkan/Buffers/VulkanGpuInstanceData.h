@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 
 namespace Engine
 {
@@ -31,19 +31,9 @@ namespace Engine
     glm::vec4 boundsCenterRadius;
 
     uint32_t textureIndex = 0;
-    float hasTexture = 0.0f;
-    uint32_t meshInfoIndex = 0;
-    uint32_t materialIndex = 0;
-
-    uint32_t indexCount = 0;
-    uint32_t space = 0;
-    uint32_t vertexOffsetInMegaBufferLo = 0;
-    uint32_t vertexOffsetInMegaBufferHi = 0;
-
-    uint32_t indexOffsetInMegaBufferLo = 0;
-    uint32_t indexOffsetInMegaBufferHi = 0;
     uint32_t drawCommandIndex = 0;
-    uint32_t outputBaseInstance = 0;
+    uint32_t flags = 0;
+    uint32_t padA = 0;
   };
 
   struct alignas(16) GpuWorldInstanceTransformData
@@ -67,7 +57,7 @@ namespace Engine
     glm::vec4 maxZ{ 0.0f };
     int32_t childRef[4]{ 0, 0, 0, 0 };
     uint32_t childCount = 0;
-    uint32_t padA = 0;
+    uint32_t childOrderPacked = 0;
     uint32_t padB = 0;
     uint32_t padC = 0;
   };

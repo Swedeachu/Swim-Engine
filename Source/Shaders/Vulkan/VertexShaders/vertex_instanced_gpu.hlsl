@@ -15,15 +15,9 @@ struct GpuWorldInstanceStaticData
 {
   float4 boundsCenterRadius;
   uint textureIndex;
-  float hasTexture;
-  uint meshInfoIndex;
-  uint materialIndex;
-  uint indexCount;
-  uint space;
-  uint2 vertexOffsetInMegaBuffer;
-  uint2 indexOffsetInMegaBuffer;
   uint drawCommandIndex;
-  uint outputBaseInstance;
+  uint flags;
+  uint padA;
 };
 
 struct GpuWorldInstanceTransformData
@@ -89,7 +83,7 @@ VSOutput main(VSInput input)
   output.color = input.color;
   output.uv = input.uv;
   output.textureIndex = instanceStatic.textureIndex;
-  output.hasTexture = instanceStatic.hasTexture;
+  output.hasTexture = (instanceStatic.flags & 1u) != 0u ? 1.0f : 0.0f;
 
   return output;
 }

@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 #include "Engine/Systems/Renderer/Core/MathTypes/AABB.h"
 
 // Internal components are components the gameplay programmers making the game should never have to worry about, 

@@ -286,7 +286,7 @@ float map(vec3 p, out vec3 color)
         rd    : Ray direction (toward the light source).
         mint  : Minimum distance to start sampling from.
         maxt  : Maximum distance to sample up to.
-        k     : Softness factor — higher values give sharper shadows.
+        k     : Softness factor â€” higher values give sharper shadows.
     Returns:
         Shadow attenuation factor in [0, 1]. 0 = full shadow, 1 = fully lit.
 */
@@ -303,13 +303,13 @@ float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float k)
 
     if (h < 0.001)
     {
-      return 0.0; // Hit something — fully in shadow
+      return 0.0; // Hit something â€” fully in shadow
     }
 
-    // Estimate how much geometry blocks light — smaller h = more shadow
+    // Estimate how much geometry blocks light â€” smaller h = more shadow
     res = min(res, k * h / t);
 
-    // Step forward — clamp to avoid over-advancing in small/steep regions
+    // Step forward â€” clamp to avoid over-advancing in small/steep regions
     t += clamp(h, 0.01, 0.2);
 
     if (t > maxt)
@@ -346,8 +346,8 @@ vec3 getNormal(vec3 p)
     Parameters:
         ro    : Ray origin.
         rd    : Ray direction.
-        color : Output variable — the color of the hit object.
-        pHit  : Output variable — position of the hit point.
+        color : Output variable â€” the color of the hit object.
+        pHit  : Output variable â€” position of the hit point.
     Returns:
         Distance to the surface if hit, or -1.0 if no hit.
 */
@@ -370,7 +370,7 @@ float rayMarch(vec3 ro, vec3 rd, out vec3 color, out vec3 pHit)
 
     if (t > 50.0)
     {
-      break; // Max ray distance reached — consider it a miss
+      break; // Max ray distance reached â€” consider it a miss
     }
   }
 
@@ -431,7 +431,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord)
     // How much the surface faces the camera (used for rim/glow)
     float facing = clamp(dot(normal, viewDir), 0.0, 1.0);
 
-    // Soft shadow factor — attenuates diffuse lighting
+    // Soft shadow factor â€” attenuates diffuse lighting
     float shadow = softShadow(pHit + normal * 0.02, lightDir, 0.1, 10.0, 16.0);
 
     // Combine lighting components

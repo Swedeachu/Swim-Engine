@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Library/glm/vec2.hpp"
-#include "Library/glm/vec4.hpp"
+#include <glm/vec2.hpp>
+#include <glm/vec4.hpp>
 
 namespace Engine
 {

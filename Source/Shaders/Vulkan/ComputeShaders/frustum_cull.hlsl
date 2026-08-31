@@ -2,15 +2,9 @@ struct GpuWorldInstanceStaticData
 {
   float4 boundsCenterRadius;
   uint textureIndex;
-  float hasTexture;
-  uint meshInfoIndex;
-  uint materialIndex;
-  uint indexCount;
-  uint space;
-  uint2 vertexOffsetInMegaBuffer;
-  uint2 indexOffsetInMegaBuffer;
   uint drawCommandIndex;
-  uint outputBaseInstance;
+  uint flags;
+  uint padA;
 };
 
 struct GpuWorldInstanceTransformData
@@ -34,7 +28,7 @@ struct GpuWorldBvhNodeData
   float4 maxZ;
   int4 childRef;
   uint childCount;
-  uint padA;
+  uint childOrderPacked;
   uint padB;
   uint padC;
 };
@@ -136,12 +130,21 @@ RWStructuredBuffer<uint> visibleCandidateCount : register(u16, space0);
 [[vk::binding(17, 0)]]
 RWStructuredBuffer<uint> drawOffsets : register(u17, space0);
 
-static const uint MODE_CULL_INSTANCES = 0u;
+[[vk::binding(18, 0)]]
+RWStructuredBuffer<uint> dispatchArgs : register(u18, space0);
+
+static const uint MODE_TRAVERSE_BVH_DEPTH = 0u;
+static const uint MODE_EXPAND_VISIBLE_LEAVES = 1u;
 static const uint MODE_BUILD_DRAW_RANGES = 2u;
 static const uint MODE_SCATTER_VISIBLE_IDS = 3u;
+static const uint MODE_BUILD_DISPATCH_ARGS = 4u;
+static const uint MODE_CULL_INSTANCES_FLAT = 5u;
 static const uint GROUP_SIZE = 64u;
 static const float INSTANCE_SPHERE_EPSILON_MIN = 0.02f;
 static const float INSTANCE_SPHERE_EPSILON_SCALE = 0.02f;
+static const float NODE_AABB_EPSILON_MIN = 0.02f;
+static const float NODE_AABB_EPSILON_SCALE = 0.02f;
+static const int INVALID_BVH_CHILD_REF = (-2147483647 - 1);
 
 uint CountBitsBallot(uint4 mask)
 {
@@ -205,6 +208,47 @@ uint CountBitsBeforeLane(uint4 mask, uint laneIndex)
   return prefixCount;
 }
 
+uint GetPackedChildOrder(GpuWorldBvhNodeData node, uint orderIndex)
+{
+  return (node.childOrderPacked >> (orderIndex * 8u)) & 0xffu;
+}
+
+bool IsEncodedLeaf(int childRef)
+{
+  return childRef < 0 && childRef != INVALID_BVH_CHILD_REF;
+}
+
+uint DecodeLeafRef(int childRef)
+{
+  return uint((-childRef) - 1);
+}
+
+bool AabbInFrustumConservative(float3 aabbMin, float3 aabbMax)
+{
+  float3 extents = max((aabbMax - aabbMin) * 0.5f, 0.0f.xxx);
+  float halfDiagonal = length(extents);
+
+  [unroll]
+  for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
+  {
+    float4 plane = pc.frustumPlanes[planeIndex];
+    float3 support = float3(
+      plane.x >= 0.0f ? aabbMax.x : aabbMin.x,
+      plane.y >= 0.0f ? aabbMax.y : aabbMin.y,
+      plane.z >= 0.0f ? aabbMax.z : aabbMin.z
+    );
+
+    float planeLength = max(length(plane.xyz), 1.0e-6f);
+    float frustumSlack = max(halfDiagonal * NODE_AABB_EPSILON_SCALE, NODE_AABB_EPSILON_MIN) * planeLength;
+    if (dot(plane.xyz, support) + plane.w < -frustumSlack)
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool SphereInFrustumConservative(GpuWorldInstanceStaticData instanceStatic, GpuWorldInstanceTransformData instanceTransform)
 {
   float3 localCenter = instanceStatic.boundsCenterRadius.xyz;
@@ -237,12 +281,115 @@ bool SphereInFrustumConservative(GpuWorldInstanceStaticData instanceStatic, GpuW
   return true;
 }
 
+void AppendVisibleCandidate(uint instanceIndex)
+{
+  uint candidateOffset = 0u;
+  InterlockedAdd(visibleCandidateCount[0], 1u, candidateOffset);
+  visibleCandidateInstanceIds[candidateOffset] = instanceIndex;
+
+  uint ignored = 0u;
+  InterlockedAdd(drawInstanceCounts[staticBuffer[instanceIndex].drawCommandIndex], 1u, ignored);
+}
+
 [numthreads(GROUP_SIZE, 1, 1)]
 void main(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
   uint index = dispatchThreadID.x;
 
-  if (pc.mode == MODE_CULL_INSTANCES)
+  if (pc.mode == MODE_TRAVERSE_BVH_DEPTH)
+  {
+    if (pc.gpuBvhDepthOffset >= pc.gpuBvhDepthCount)
+    {
+      return;
+    }
+
+    uint depthStart = bvhDepthOffsets[pc.gpuBvhDepthOffset];
+    uint depthEnd = bvhDepthOffsets[pc.gpuBvhDepthOffset + 1u];
+    uint depthCount = depthEnd - depthStart;
+    if (index >= depthCount)
+    {
+      return;
+    }
+
+    uint nodeIndex = bvhNodeDepthIndices[depthStart + index];
+    if (pc.gpuBvhDepthOffset > 0u && bvhNodeStates[nodeIndex] == 0u)
+    {
+      return;
+    }
+
+    GpuWorldBvhNodeData node = bvhNodes[nodeIndex];
+    for (uint orderedChildIndex = 0u; orderedChildIndex < node.childCount; ++orderedChildIndex)
+    {
+      uint childSlot = GetPackedChildOrder(node, orderedChildIndex);
+      if (childSlot >= node.childCount)
+      {
+        continue;
+      }
+
+      int childRef = node.childRef[childSlot];
+      if (childRef == INVALID_BVH_CHILD_REF)
+      {
+        continue;
+      }
+
+      float3 childMin = float3(node.minX[childSlot], node.minY[childSlot], node.minZ[childSlot]);
+      float3 childMax = float3(node.maxX[childSlot], node.maxY[childSlot], node.maxZ[childSlot]);
+      if (!AabbInFrustumConservative(childMin, childMax))
+      {
+        continue;
+      }
+
+      if (IsEncodedLeaf(childRef))
+      {
+        uint leafOffset = 0u;
+        InterlockedAdd(visibleLeafCount[0], 1u, leafOffset);
+        visibleLeafIndices[leafOffset] = DecodeLeafRef(childRef);
+      }
+      else
+      {
+        bvhNodeStates[uint(childRef)] = 1u;
+      }
+    }
+
+    return;
+  }
+
+  if (pc.mode == MODE_EXPAND_VISIBLE_LEAVES)
+  {
+    uint leafCount = visibleLeafCount[0];
+    if (index >= leafCount)
+    {
+      return;
+    }
+
+    uint leafIndex = visibleLeafIndices[index];
+    GpuWorldBvhLeafData leaf = bvhLeaves[leafIndex];
+    for (uint rangeIndex = 0u; rangeIndex < leaf.rangeCount; ++rangeIndex)
+    {
+      GpuWorldInstanceRangeData range = bvhLeafRanges[leaf.firstRangeIndex + rangeIndex];
+      uint rangeEnd = range.start + range.count;
+      for (uint instanceIndex = range.start; instanceIndex < rangeEnd; ++instanceIndex)
+      {
+        GpuWorldInstanceTransformData instanceTransform = transformBuffer[instanceIndex];
+        if (instanceTransform.enabled == 0u)
+        {
+          continue;
+        }
+
+        GpuWorldInstanceStaticData instanceStatic = staticBuffer[instanceIndex];
+        if (!SphereInFrustumConservative(instanceStatic, instanceTransform))
+        {
+          continue;
+        }
+
+        AppendVisibleCandidate(instanceIndex);
+      }
+    }
+
+    return;
+  }
+
+  if (pc.mode == MODE_CULL_INSTANCES_FLAT)
   {
     if (index >= pc.instanceCount)
     {
@@ -316,6 +463,20 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     drawCountScalar[0] = (pc.compactDraws != 0u) ? visibleDrawCount : pc.drawCommandCount;
+    return;
+  }
+
+  if (pc.mode == MODE_BUILD_DISPATCH_ARGS)
+  {
+    if (index != 0u)
+    {
+      return;
+    }
+
+    uint visibleCount = visibleCandidateCount[0];
+    dispatchArgs[0] = max((visibleCount + (GROUP_SIZE - 1u)) / GROUP_SIZE, 1u);
+    dispatchArgs[1] = 1u;
+    dispatchArgs[2] = 1u;
     return;
   }
 

@@ -1,15 +1,15 @@
 #pragma once
 
 #include "Engine/Systems/Entity/Behavior.h"
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 #include <memory>
 #include <vector>
 
 namespace Engine
 {
 	class Scene;
-	class MaterialData;
-	class Mesh;
+	struct MaterialData;
+	struct Mesh;
 }
 
 namespace Game

@@ -2,8 +2,8 @@
 
 #include "Engine/Machine.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/Axis.h"
-#include "Library/EnTT/entt.hpp"
-#include "Library/glm/gtc/quaternion.hpp"
+#include <entt/entt.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine
 {

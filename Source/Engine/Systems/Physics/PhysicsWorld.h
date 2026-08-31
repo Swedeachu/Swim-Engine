@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 
 #include "PxPhysicsAPI.h"
 #include "extensions/PxRigidBodyExt.h"

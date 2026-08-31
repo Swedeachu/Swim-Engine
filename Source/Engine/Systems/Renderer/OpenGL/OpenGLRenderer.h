@@ -117,10 +117,10 @@ namespace Engine
 		GLint loc_dec_renderOnTop = -1;
 
 		// MSDF text rendering state and locations
-		GLuint textShader = -1;
-		GLuint textVAO = -1;
-		GLuint textVBO = -1;
-		GLuint textEBO = -1;
+		GLuint textShader = static_cast<GLuint>(-1);
+		GLuint textVAO = static_cast<GLuint>(-1);
+		GLuint textVBO = static_cast<GLuint>(-1);
+		GLuint textEBO = static_cast<GLuint>(-1);
 
 		GLint loc_txt_mvp = -1;
 		GLint loc_txt_pxToModel = -1;

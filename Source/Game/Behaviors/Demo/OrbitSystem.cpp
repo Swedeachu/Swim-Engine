@@ -14,8 +14,8 @@
 #include "Engine/Utility/RandomUtils.h"                 
 #include "Engine/Utility/BrightColorGenerator.h"
 
-#include "Library/glm/gtc/quaternion.hpp"
-#include "Library/glm/gtc/matrix_transform.hpp"
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "Engine/Systems/Entity/EntityFactory.h"
 

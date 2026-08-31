@@ -24,9 +24,12 @@ namespace Engine
 
 		enum class GpuCullPassMode : uint32_t
 		{
-			CullInstances = 0,
+			TraverseBvhDepth = 0,
+			ExpandVisibleLeaves = 1,
 			BuildDrawRanges = 2,
-			ScatterVisibleIds = 3
+			ScatterVisibleIds = 3,
+			BuildScatterDispatchArgs = 4,
+			CullInstancesFlat = 5
 		};
 
 		static uint32_t DivideRoundUp(uint32_t value, uint32_t divisor)
@@ -356,6 +359,7 @@ namespace Engine
 		gpuWorldVisibleCandidateBuffers.resize(framesInFlight);
 		gpuWorldVisibleCandidateCountBuffers.resize(framesInFlight);
 		gpuCullDrawOffsetBuffers.resize(framesInFlight);
+		gpuCullDispatchArgsBuffers.resize(framesInFlight);
 
 		const VkDeviceSize drawCountBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxDrawCalls);
 		const VkDeviceSize drawCountScalarBytes = static_cast<VkDeviceSize>(sizeof(uint32_t));
@@ -372,6 +376,7 @@ namespace Engine
 		const VkDeviceSize bvhNodeStateBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
 		const VkDeviceSize visibleLeafIndexBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
 		const VkDeviceSize visibleCandidateBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * static_cast<VkDeviceSize>(maxExpectedInstances);
+		const VkDeviceSize dispatchArgsBytes = static_cast<VkDeviceSize>(sizeof(uint32_t)) * 3u;
 
 		gpuWorldStaticBuffer = std::make_unique<VulkanBuffer>(
 			device,
@@ -582,9 +587,17 @@ namespace Engine
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
 			);
+
+			gpuCullDispatchArgsBuffers[i] = std::make_unique<VulkanBuffer>(
+				device,
+				physicalDevice,
+				dispatchArgsBytes,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
 		}
 
-		std::array<VkDescriptorSetLayoutBinding, 18> bindings{};
+		std::array<VkDescriptorSetLayoutBinding, 19> bindings{};
 		for (uint32_t i = 0; i < static_cast<uint32_t>(bindings.size()); ++i)
 		{
 			bindings[i].binding = i;
@@ -720,7 +733,12 @@ namespace Engine
 			drawOffsetInfo.offset = 0;
 			drawOffsetInfo.range = VK_WHOLE_SIZE;
 
-			std::array<VkWriteDescriptorSet, 18> writes{};
+			VkDescriptorBufferInfo dispatchArgsInfo{};
+			dispatchArgsInfo.buffer = gpuCullDispatchArgsBuffers[i]->GetBuffer();
+			dispatchArgsInfo.offset = 0;
+			dispatchArgsInfo.range = VK_WHOLE_SIZE;
+
+			std::array<VkWriteDescriptorSet, 19> writes{};
 			for (uint32_t writeIndex = 0; writeIndex < static_cast<uint32_t>(writes.size()); ++writeIndex)
 			{
 				writes[writeIndex].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -748,6 +766,7 @@ namespace Engine
 			writes[15].pBufferInfo = &visibleCandidateInfo;
 			writes[16].pBufferInfo = &visibleCandidateCountInfo;
 			writes[17].pBufferInfo = &drawOffsetInfo;
+			writes[18].pBufferInfo = &dispatchArgsInfo;
 			vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 		}
 	}
@@ -788,6 +807,7 @@ namespace Engine
 		gpuWorldVisibleCandidateBuffers.clear();
 		gpuWorldVisibleCandidateCountBuffers.clear();
 		gpuCullDrawOffsetBuffers.clear();
+		gpuCullDispatchArgsBuffers.clear();
 		gpuWorldStaticBuffer.reset();
 		gpuWorldStaticStagingBuffer.reset();
 		gpuCullCommandTemplateStaticBuffer.reset();
@@ -1223,16 +1243,18 @@ namespace Engine
 
 		if (cullMode == CullMode::GPU)
 		{
-			// The GPU path now treats the world scene buffers as the primary source of truth and only
-			// patches the persistent transform stream when entities move. The old path forced the CPU BVH
-			// to refit again during rendering and then rebuilt / uploaded GPU BVH bounds on top of that,
-			// which made the "GPU" path pay a very real CPU cost every frame before the compute work even
-			// started. For the sandbox stress scenes this CPU-side hierarchy maintenance was pure overhead.
-			//
-			// Keep the GPU scene packet persistent and upload only dirty transforms here. A hierarchical
-			// GPU traversal path can be layered back on once it has a proven win, but the fast baseline for
-			// now is a compact GPU-driven flat cull over persistent scene data.
+			const bool scenePacketWasDirty = gpuWorldSceneDirty;
 			RebuildGpuWorldScenePacket(*scene, registry);
+
+			if (scenePacketWasDirty || scene->GetRenderablesRevision() != gpuWorldBvhTopologyVersion)
+			{
+				RebuildGpuWorldBvh(*scene);
+			}
+			else if (Transform::GetGlobalMutationVersion() != gpuWorldBvhBoundsVersion)
+			{
+				UpdateGpuWorldBvhNodeBuffer(*scene);
+			}
+
 			UpdateGpuWorldTransformPacket(*scene, registry, frameIndex);
 			return;
 		}
@@ -1616,17 +1638,8 @@ namespace Engine
 			GpuWorldInstanceStaticData staticData{};
 			staticData.boundsCenterRadius = entry.boundsCenterRadius;
 			staticData.textureIndex = entry.textureIndex;
-			staticData.hasTexture = (entry.flags & GpuWorldInstanceFlags::HasTexture) ? 1.0f : 0.0f;
-			staticData.meshInfoIndex = entry.meshID;
-			staticData.materialIndex = 0;
-			staticData.indexCount = entry.indexCount;
-			staticData.space = static_cast<uint32_t>(TransformSpace::World);
-			staticData.vertexOffsetInMegaBufferLo = static_cast<uint32_t>(entry.vertexOffsetInMegaBuffer & 0xffffffffull);
-			staticData.vertexOffsetInMegaBufferHi = static_cast<uint32_t>((entry.vertexOffsetInMegaBuffer >> 32) & 0xffffffffull);
-			staticData.indexOffsetInMegaBufferLo = static_cast<uint32_t>(entry.indexOffsetInMegaBuffer & 0xffffffffull);
-			staticData.indexOffsetInMegaBufferHi = static_cast<uint32_t>((entry.indexOffsetInMegaBuffer >> 32) & 0xffffffffull);
 			staticData.drawCommandIndex = currentBatchIndex;
-			staticData.outputBaseInstance = currentBatchBaseInstance;
+			staticData.flags = entry.flags;
 			gpuWorldStaticCpuData.push_back(staticData);
 
 			++currentBatchMaxInstances;
@@ -1659,8 +1672,8 @@ namespace Engine
 			gpuWorldTemplateUploadPending = true;
 		}
 
-		// Do not force a CPU BVH snapshot rebuild here for the default GPU fast path.
-		// The renderer keeps the scene GPU-resident and updates only the dirty transform stream.
+		// Keep the scene packet persistent; the live frame path now updates dirty transforms and wires the
+		// uploaded BVH snapshot into the compute culler instead of rebuilding per-visible instance packets.
 		gpuWorldSceneDirty = false;
 	}
 
@@ -1707,11 +1720,14 @@ namespace Engine
 			destNode.maxX = sourceNode.maxX;
 			destNode.maxY = sourceNode.maxY;
 			destNode.maxZ = sourceNode.maxZ;
+			uint32_t childOrderPacked = 0u;
 			for (uint32_t childIndex = 0; childIndex < 4; ++childIndex)
 			{
 				destNode.childRef[childIndex] = sourceNode.childRef[childIndex];
+				childOrderPacked |= (sourceNode.childTraversalOrder[childIndex] & 0xffu) << (childIndex * 8u);
 			}
 			destNode.childCount = sourceNode.childCount;
+			destNode.childOrderPacked = childOrderPacked;
 		}
 
 		gpuWorldBvhLeavesCpuData.clear();
@@ -2280,6 +2296,10 @@ namespace Engine
 		pushConstants.instanceCount = gpuWorldSceneInstanceCount;
 		pushConstants.drawCommandCount = gpuCullDrawCommandCount;
 		pushConstants.compactDraws = useIndirectCount ? 1u : 0u;
+		pushConstants.gpuBvhNodeCount = gpuWorldBvhNodeCount;
+		pushConstants.gpuBvhRootIndex = gpuWorldBvhRootIndex;
+		pushConstants.gpuBvhMaxDepth = gpuWorldBvhMaxDepth;
+		pushConstants.gpuBvhDepthCount = gpuWorldBvhDepthCount;
 		for (int i = 0; i < 6; ++i)
 		{
 			pushConstants.frustumPlanes[i] = frustum.planes[i];
@@ -2301,6 +2321,9 @@ namespace Engine
 		vkCmdFillBuffer(cmd, gpuCullDrawOffsetBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, gpuCullVisibleDrawCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 		vkCmdFillBuffer(cmd, gpuWorldVisibleCandidateCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, gpuWorldBvhNodeStateBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, gpuWorldBvhVisibleLeafCountBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
+		vkCmdFillBuffer(cmd, gpuCullDispatchArgsBuffers[frameIndex]->GetBuffer(), 0, VK_WHOLE_SIZE, 0);
 
 		VkMemoryBarrier fillBarrier{};
 		fillBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -2320,15 +2343,58 @@ namespace Engine
 		);
 
 		const uint32_t instanceDispatchCount = DivideRoundUp(std::max(gpuWorldSceneInstanceCount, 1u), GpuCullThreadGroupSize);
-
-		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::CullInstances);
-		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-		vkCmdDispatch(cmd, instanceDispatchCount, 1, 1);
+		const bool hasHierarchicalBvh = gpuWorldBvhNodeCount > 0
+			&& gpuWorldBvhLeafCount > 0
+			&& gpuWorldBvhDepthCount > 0
+			&& gpuWorldBvhDepthOffsetsCpuData.size() >= static_cast<size_t>(gpuWorldBvhDepthCount + 1u);
+		const bool useHierarchicalBvhThisFrame = hasHierarchicalBvh && !Frustum::DidCameraMoveThisFrame();
 
 		VkMemoryBarrier computeBarrier{};
 		computeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 		computeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 		computeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+		if (useHierarchicalBvhThisFrame)
+		{
+			for (uint32_t depthIndex = 0; depthIndex < gpuWorldBvhDepthCount; ++depthIndex)
+			{
+				const uint32_t depthBegin = gpuWorldBvhDepthOffsetsCpuData[depthIndex];
+				const uint32_t depthEnd = gpuWorldBvhDepthOffsetsCpuData[depthIndex + 1u];
+				if (depthEnd <= depthBegin)
+				{
+					continue;
+				}
+
+				pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::TraverseBvhDepth);
+				pushConstants.gpuBvhDepthOffset = depthIndex;
+				vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+				vkCmdDispatch(cmd, DivideRoundUp(depthEnd - depthBegin, GpuCullThreadGroupSize), 1, 1);
+
+				vkCmdPipelineBarrier(
+					cmd,
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					0,
+					1,
+					&computeBarrier,
+					0,
+					nullptr,
+					0,
+					nullptr
+				);
+			}
+
+			pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::ExpandVisibleLeaves);
+			vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+			vkCmdDispatch(cmd, DivideRoundUp(std::max(gpuWorldBvhLeafCount, 1u), GpuCullThreadGroupSize), 1, 1);
+		}
+		else
+		{
+			pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::CullInstancesFlat);
+			vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+			vkCmdDispatch(cmd, instanceDispatchCount, 1, 1);
+		}
+
 		vkCmdPipelineBarrier(
 			cmd,
 			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -2343,7 +2409,6 @@ namespace Engine
 		);
 
 		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::BuildDrawRanges);
-		pushConstants.compactDraws = useIndirectCount ? 1u : 0u;
 		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
 		vkCmdDispatch(cmd, 1, 1, 1);
 
@@ -2360,9 +2425,30 @@ namespace Engine
 			nullptr
 		);
 
+		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::BuildScatterDispatchArgs);
+		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
+		vkCmdDispatch(cmd, 1, 1, 1);
+
+		VkMemoryBarrier dispatchBarrier{};
+		dispatchBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		dispatchBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		dispatchBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		vkCmdPipelineBarrier(
+			cmd,
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			1,
+			&dispatchBarrier,
+			0,
+			nullptr,
+			0,
+			nullptr
+		);
+
 		pushConstants.mode = static_cast<uint32_t>(GpuCullPassMode::ScatterVisibleIds);
 		vkCmdPushConstants(cmd, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GpuCullPushConstants), &pushConstants);
-		vkCmdDispatch(cmd, instanceDispatchCount, 1, 1);
+		vkCmdDispatchIndirect(cmd, gpuCullDispatchArgsBuffers[frameIndex]->GetBuffer(), 0);
 
 		VkMemoryBarrier finalBarrier{};
 		finalBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;

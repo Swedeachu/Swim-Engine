@@ -1,7 +1,7 @@
 #pragma once
-#include "Library/glm/glm.hpp"
-#include "Library/glm/gtc/quaternion.hpp"
-#include "Library/glm/gtc/matrix_transform.hpp"
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include "Engine/SwimEngine.h"
 
 namespace Engine

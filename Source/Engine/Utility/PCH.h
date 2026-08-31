@@ -24,10 +24,10 @@
 #include "Engine\Systems\Renderer\Core\Camera\CameraSystem.h"
 
 // glm math
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 
 // entt
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 
 // vulkan
 #define K_USE_PLATFORM_WIN32_KHR

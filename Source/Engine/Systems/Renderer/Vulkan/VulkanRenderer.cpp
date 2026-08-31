@@ -140,7 +140,7 @@ namespace Engine
 
 		indexDraw->CreateMegaMeshBuffers(initialVertexSize, initialIndexSize);
 
-		static constexpr bool useCompute = true;
+		static constexpr bool useCompute = false; // for now we are just going to use scene bvh on cpu side, we have a mega refactor to do anyway
 		const bool gpuCullSupported = deviceManager->SupportsGpuCullCompute();
 
 		// Configure culled rendering mode

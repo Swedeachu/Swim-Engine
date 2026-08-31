@@ -39,8 +39,8 @@ namespace Engine
 		void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) override;
 
 		// this should shortcut from VulkanDeviceManager
-		const VkDevice& GetDevice() const { return deviceManager->GetDevice(); }
-		const VkPhysicalDevice& GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
+		VkDevice GetDevice() const { return deviceManager->GetDevice(); }
+		VkPhysicalDevice GetPhysicalDevice() const { return deviceManager->GetPhysicalDevice(); }
 
 		const std::unique_ptr<VulkanDeviceManager>& GetDeviceManager() { return deviceManager; }
 		const std::unique_ptr<VulkanDescriptorManager>& GetDescriptorManager() const { return descriptorManager; }
@@ -151,8 +151,8 @@ namespace Engine
 
 		// Synchronization values for SyncManager and DescriptorManager to use for buffering.
 		// Maybe MAX_FRAMES_IN_FLIGHT should be an engine wide constant? 
-		// We keep this at 2 for the GPU cull path so camera motion and world updates do not feel a frame behind on screen.
-		static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+		// Triple buffering improves overlap for the GPU-driven path without changing the higher-level frame model.
+		static constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 		size_t currentFrame = 0;
 		bool needsSwapchainRecreate = false;
 
