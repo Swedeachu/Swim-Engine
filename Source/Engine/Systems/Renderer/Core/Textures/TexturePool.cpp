@@ -112,7 +112,7 @@ namespace Engine
 
 		texture->isPixelDataSTB = false;
 
-		// Store texture even if the name is reused — StoreTextureManually handles that
+		// Store texture even if the name is reused â€” StoreTextureManually handles that
 		this->StoreTextureManually(texture, imageKey);
 
 		return texture;

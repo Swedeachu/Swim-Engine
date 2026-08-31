@@ -4,7 +4,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "MaterialData.h"
-#include "Library/tiny_gltf/tiny_gltf.h"
+#include <tiny_gltf.h>
 
 namespace Engine
 {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 #include "Engine/Systems/Renderer/Vulkan/Buffers/VulkanGpuInstanceData.h"
 
 namespace Engine

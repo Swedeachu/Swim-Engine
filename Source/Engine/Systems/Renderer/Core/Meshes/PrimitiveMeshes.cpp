@@ -17,7 +17,7 @@ namespace Engine
 	};
 
 	// Face definitions with CCW order and associated color
-	static struct FaceDefinition
+	struct FaceDefinition
 	{
 		std::array<int, 4> c;
 		glm::vec3 color;
@@ -304,7 +304,7 @@ namespace Engine
 		// Add outer circle vertices
 		for (uint32_t i = 0; i <= segmentCount; ++i)
 		{
-			float angle = (float)i / (float)segmentCount * 2.0f * M_PI;
+			float angle = (float)i / (float)segmentCount * 2.0f * PI;
 
 			float x = radius * cosf(angle);
 			float y = radius * sinf(angle);

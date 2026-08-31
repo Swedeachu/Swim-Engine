@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
-#include "Library/stb/stb_image.h"
+#include <stb_image.h>
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include <filesystem>
@@ -13,9 +13,9 @@
 #define BASISD_SUPPORT_ETC1S 1
 #define BASISD_SUPPORT_UASTC 1
 
-#include "Library/basis/basisu_transcoder.h"
+#include <basisu_transcoder.h>
 
-#include "Library/webp/include/webp/decode.h"
+#include <webp/decode.h>
 
 namespace Engine
 {

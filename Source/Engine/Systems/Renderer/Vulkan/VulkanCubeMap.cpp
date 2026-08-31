@@ -3,7 +3,7 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "fstream"
-#include "Library/stb/stb_image_resize2_wrapper.h"
+#include <stb_image_resize2.h>
 
 namespace Engine
 {

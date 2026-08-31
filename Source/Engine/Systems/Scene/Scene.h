@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 
 #include "SubSceneSystems/SceneBVH.h"
 #include "SubSceneSystems/GizmoSystem.h"

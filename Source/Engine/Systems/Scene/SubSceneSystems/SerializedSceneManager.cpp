@@ -148,7 +148,7 @@ namespace Engine
 		}
 		else
 		{
-			// Entity has no Transform — keep it explicit and stable.
+			// Entity has no Transform â€” keep it explicit and stable.
 			jEntity["transform"] = nullptr;
 			// parent is already set to nullptr in BuildEntityJSON anyways
 		}
@@ -156,7 +156,7 @@ namespace Engine
 
 	void SerializedSceneManager::SerializeMaterial(entt::entity e, nlohmann::json& jEntity)
 	{
-		// These need to be a relative paths, for example: "Assets/Textures/image.png", NOT "C:/Users/User/source/repos/Engine/Assets/Textures/image.png"
+		// These need to be a relative paths, for example: "Assets/Textures/image.png", NOT an absolute machine-specific path
 		// I have noticed that some of these path seperators are sometimes not correct, but it might not matter: "/" vs "\\" vs "\"
 		std::string albedoTextureAssetFilePath = "";
 		std::string modelFilePath = "";

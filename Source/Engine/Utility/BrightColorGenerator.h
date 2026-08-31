@@ -1,7 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 #include "RandomUtils.h"
 
 namespace Engine

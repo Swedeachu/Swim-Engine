@@ -3,8 +3,8 @@
 #include <cstring>
 #include <cstdint>
 
-#include "Library/glm/glm.hpp"
-#include "Library/glm/gtc/type_ptr.hpp"
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/AABB.h"
 
@@ -30,6 +30,11 @@ namespace Engine
 		inline static uint64_t GetRevision()
 		{
 			return revision;
+		}
+
+		inline static bool DidCameraMoveThisFrame()
+		{
+			return cameraMovedThisFrame;
 		}
 
 		// === Setup camera frustum from view/proj matrices (once per frame) ===

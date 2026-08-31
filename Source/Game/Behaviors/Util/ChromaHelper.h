@@ -14,7 +14,7 @@ namespace Game
 
 		static float startHueFromSeed(uint32_t seed);
 
-		// Initialize chroma with optional seed hue (0–1 range)
+		// Initialize chroma with optional seed hue (0â€“1 range)
 		explicit ChromaHelper(float startHue)
 			: startHue(startHue)
 		{}

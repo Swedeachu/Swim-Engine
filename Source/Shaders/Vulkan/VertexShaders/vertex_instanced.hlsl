@@ -30,8 +30,8 @@ struct GpuInstanceData
   uint2 indexOffsetInMegaBuffer;       // emulate uint64_t
 };
 
-[[vk::binding(1, 0)]]
-StructuredBuffer<GpuInstanceData> instanceBuffer : register(t1, space0);
+[[vk::binding(4, 0)]]
+StructuredBuffer<GpuInstanceData> instanceBuffer : register(t4, space0);
 
 struct VSInput
 {

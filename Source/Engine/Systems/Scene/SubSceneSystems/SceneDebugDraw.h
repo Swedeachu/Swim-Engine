@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Library/EnTT/entt.hpp"
-#include "Library/glm/glm.hpp"
+#include <entt/entt.hpp>
+#include <glm/glm.hpp>
 #include "Engine/Utility/ColorConstants.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/Ray.h"
 #include "Engine/Components/ObjectTag.h"
@@ -10,7 +10,7 @@ namespace Engine
 {
 
 	// forward declare
-	class Mesh;
+	struct Mesh;
 	struct MaterialData;
 
 	class SceneDebugDraw

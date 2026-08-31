@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Library/glm/glm.hpp"
+#include <glm/glm.hpp>
 #include <cstdint>
 
 namespace physx

@@ -4,11 +4,13 @@
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
-#include "Library/EnTT/entt.hpp"
+#include <entt/entt.hpp>
 
+#include <array>
 #include <deque>
 #include <unordered_map>
 #include <memory>
+#include <limits>
 
 namespace Engine
 {
@@ -26,9 +28,26 @@ namespace Engine
 
 		/*
 		 CPU: Solid balanced stratedgy and a geniunely good solution for complex scenes with thousands of unique meshes.
-		 GPU: Best solution on paper but our implementation is super broken and glitchy for more reasons than one.
+		 GPU: GPU-driven path with persistent scene buffers, hierarchical BVH traversal, and indirect drawing.
 		*/
-		enum CullMode { NONE, CPU, GPU }; // GPU is not implemented 
+		enum CullMode { NONE, CPU, GPU }; // GPU uses the compute culling path when supported 
+
+		struct GpuCullPushConstants
+		{
+			uint32_t mode = 0;
+			uint32_t instanceCount = 0;
+			uint32_t drawCommandCount = 0;
+			uint32_t compactDraws = 0;
+			uint32_t gpuBvhNodeCount = 0;
+			uint32_t gpuBvhRootIndex = 0;
+			uint32_t gpuBvhMaxDepth = 0;
+			uint32_t gpuBvhDepthOffset = 0;
+			uint32_t gpuBvhDepthCount = 0;
+			uint32_t padA = 0;
+			uint32_t padB = 0;
+			uint32_t padC = 0;
+			glm::vec4 frustumPlanes[6]{};
+		};
 
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
 
@@ -40,6 +59,8 @@ namespace Engine
 
 		void UpdateInstanceBuffer(uint32_t frameIndex);
 
+		void PrepareWorldDrawCommands(uint32_t frameIndex, VkCommandBuffer cmd);
+
 		void DrawIndexedWorldMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
 
 		void DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd);
@@ -49,9 +70,29 @@ namespace Engine
 		void CleanUp();
 
 		const std::unique_ptr<VulkanInstanceBuffer>& GetInstanceBuffer() const { return instanceBuffer; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetWorldInstanceBuffers() const { return worldInstanceBuffers; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetGpuWorldTransformBuffers() const { return gpuWorldTransformBuffers; }
+		const std::vector<std::unique_ptr<VulkanBuffer>>& GetGpuWorldVisibleIndexBuffers() const { return gpuWorldVisibleIndexBuffers; }
+		const VulkanBuffer& GetGpuWorldStaticBuffer() const { return *gpuWorldStaticBuffer; }
+		VkDescriptorSetLayout GetGpuCullDescriptorSetLayout() const { return gpuCullDescriptorSetLayout; }
+		static constexpr uint32_t GetGpuCullPushConstantSize() { return sizeof(GpuCullPushConstants); }
+
+		struct GpuCullFrameStats
+		{
+			uint32_t totalSceneInstances = 0;
+			uint32_t drawCommandCount = 0;
+			uint32_t dirtyTransformInstanceCount = 0;
+			uint32_t transformUploadRangeCount = 0;
+			uint64_t transformUploadBytes = 0;
+			bool fullTransformUpload = false;
+			bool reusedCullResults = false;
+		};
+
+		const GpuCullFrameStats& GetGpuCullFrameStats() const { return gpuCullFrameStats; }
 
 		// CPU is easily the best option right now, so much so that GPU isn't worth trying to fix and get working (yet)
 		void SetCulledMode(CullMode mode) { cullMode = mode; }
+		CullMode GetCullMode() const { return cullMode; }
 
 		// Major performance booster
 		void SetUseQueriedFrustumSceneBVH(bool value) { useQueriedFrustumSceneBVH = value; }
@@ -107,6 +148,15 @@ namespace Engine
 		void EnsureGatherThreadScratch(size_t workerSlots, size_t reservePerSlot);
 		void EnsureDirtyThreadScratch(size_t workerSlots, size_t reservePerSlot);
 		void UploadAndBatchInstances(uint32_t frameIndex);
+		void BuildGpuCullInputPacket(entt::registry& registry);
+		void UploadGpuCullInput(uint32_t frameIndex);
+		void DispatchGpuCull(uint32_t frameIndex, VkCommandBuffer cmd);
+		void RebuildGpuWorldScenePacket(Scene& scene, entt::registry& registry);
+		void RebuildGpuWorldBvh(Scene& scene);
+		void UpdateGpuWorldBvhNodeBuffer(Scene& scene);
+		void UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex);
+		void CreateGpuCullResources(uint32_t maxDrawCalls, uint32_t framesInFlight);
+		void DestroyGpuCullResources();
 		bool CanReuseCachedWorldPacket(const Scene& scene, const Frustum* frustum) const;
 		void UploadCachedWorldPacketToFrame(uint32_t frameIndex);
 
@@ -158,14 +208,20 @@ namespace Engine
 
 		VkDevice device;
 		VkPhysicalDevice physicalDevice;
+		int maxExpectedInstances = 0;
+		int maxFramesInFlight = 0;
+		uint32_t maxIndirectDrawCount = 0;
 
 		// Draw data instance buffer per frame
 		std::unique_ptr<VulkanInstanceBuffer> instanceBuffer;
 
 		// Draw data instances to feed the buffers per frame
 		std::vector<GpuInstanceData> cpuInstanceData;
+		std::vector<GpuInstanceData> overlayInstanceData;
 		std::vector<MeshDecoratorGpuInstanceData> meshDecoratorInstanceData;
 		std::vector<MsdfTextGpuInstanceData> msdfInstancesData;
+		std::vector<GpuCullInputInstanceData> gpuCullInputData;
+		std::vector<VkDrawIndexedIndirectCommand> gpuCullCommandTemplates;
 
 		struct MeshBucket
 		{
@@ -211,6 +267,37 @@ namespace Engine
 			GpuInstanceData baseInstance{};
 		};
 
+		struct GpuWorldSceneInstance
+		{
+			entt::entity entity{ entt::null };
+			uint32_t meshID = 0;
+			uint32_t drawCommandIndex = 0;
+			uint32_t outputBaseInstance = 0;
+			bool canUseEntityCullCache = false;
+		};
+
+		struct GpuWorldTransformCacheEntry
+		{
+			uint64_t worldVersion = 0;
+			uint32_t enabled = 0;
+			bool valid = false;
+		};
+
+		struct GpuWorldInstanceRange
+		{
+			uint32_t start = 0;
+			uint32_t count = 0;
+		};
+
+		struct GpuCullFrameReuseStamp
+		{
+			uint64_t frustumRevision = 0;
+			uint64_t transformMutationVersion = 0;
+			uint64_t scenePacketVersion = 0;
+			uint32_t renderStateMask = 0;
+			bool valid = false;
+		};
+
 		CullMode cullMode{ CullMode::NONE };
 
 		struct CachedWorldPacketState
@@ -242,6 +329,44 @@ namespace Engine
 
 		std::vector<glm::uvec4> culledVisibleData; // GPU visible output buffer read into CPU
 		uint32_t instanceCountCulled = 0;          // Count of instances that passed culling
+		uint32_t gpuCullInputCount = 0;
+		uint32_t gpuCullDrawCommandCount = 0;
+		uint32_t gpuWorldSceneInstanceCount = 0;
+		uint32_t gpuWorldVisibleCapacity = 0;
+		uint64_t gpuWorldScenePacketVersion = 0;
+		bool gpuWorldSceneDirty = true;
+		bool gpuWorldStaticUploadPending = false;
+		bool gpuWorldTemplateUploadPending = false;
+		std::vector<GpuWorldSceneInstance> gpuWorldSceneInstances;
+		std::unordered_map<entt::entity, std::vector<GpuWorldInstanceRange>> gpuWorldEntityToInstanceRanges;
+		std::vector<GpuWorldInstanceStaticData> gpuWorldStaticCpuData;
+		std::vector<GpuWorldInstanceTransformData> gpuWorldTransformCpuData;
+		std::vector<std::vector<GpuWorldTransformCacheEntry>> gpuWorldTransformCaches;
+		std::vector<std::vector<VkBufferCopy>> gpuWorldTransformCopyRegions;
+		std::vector<bool> gpuWorldTransformFrameInitialized;
+		std::vector<GpuWorldBvhNodeData> gpuWorldBvhNodesCpuData;
+		std::vector<GpuWorldBvhLeafData> gpuWorldBvhLeavesCpuData;
+		std::vector<GpuWorldInstanceRangeData> gpuWorldBvhLeafRangesCpuData;
+		std::vector<uint32_t> gpuWorldBvhNodeDepthIndicesCpuData;
+		std::vector<uint32_t> gpuWorldBvhDepthOffsetsCpuData;
+		uint32_t gpuWorldBvhNodeCount = 0;
+		uint32_t gpuWorldBvhLeafCount = 0;
+		uint32_t gpuWorldBvhRangeCount = 0;
+		uint32_t gpuWorldBvhDepthIndexCount = 0;
+		uint32_t gpuWorldBvhDepthCount = 0;
+		uint32_t gpuWorldBvhRootIndex = 0;
+		uint32_t gpuWorldBvhMaxDepth = 0;
+		uint64_t gpuWorldBvhTopologyVersion = 0;
+		uint64_t gpuWorldBvhBoundsVersion = 0;
+		bool gpuWorldBvhNodesUploadPending = false;
+		bool gpuWorldBvhLeavesUploadPending = false;
+		bool gpuWorldBvhRangesUploadPending = false;
+		bool gpuWorldBvhDepthIndicesUploadPending = false;
+		bool gpuWorldBvhDepthOffsetsUploadPending = false;
+		bool gpuWorldBvhNodeDepthIndicesUploadPending = false;
+		std::vector<GpuCullFrameReuseStamp> gpuCullFrameReuseStamps;
+		uint32_t gpuWorldLastRenderStateMask = std::numeric_limits<uint32_t>::max();
+		GpuCullFrameStats gpuCullFrameStats{};
 
 		struct FullSceneDirtyHistoryEntry
 		{
@@ -260,6 +385,7 @@ namespace Engine
 		std::vector<entt::entity> visibleEntityScratch;
 		std::vector<GatherCandidate> gatherCandidatesScratch;
 		std::vector<uint32_t> dirtyInstanceIndexScratch;
+		std::vector<GpuWorldInstanceRange> dirtyInstanceRangeScratch;
 		std::vector<GatherThreadScratch> gatherThreadScratch;
 		std::vector<DirtyThreadScratch> dirtyThreadScratch;
 		std::vector<uint32_t> bucketFirstInstanceScratch;
@@ -275,6 +401,42 @@ namespace Engine
 		std::vector<std::unique_ptr<VulkanBuffer>> indirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> meshDecoratorIndirectCommandBuffers;
 		std::vector<std::unique_ptr<VulkanBuffer>> msdfIndirectCommandBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> worldInstanceBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullInputBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDrawCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullVisibleDrawCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullCommandTemplateBuffers;
+		std::unique_ptr<VulkanBuffer> gpuWorldStaticBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldStaticStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStaticBuffer;
+		std::unique_ptr<VulkanBuffer> gpuCullCommandTemplateStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafRangeBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhLeafRangeStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeDepthIndexBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhNodeDepthIndexStagingBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhDepthOffsetBuffer;
+		std::unique_ptr<VulkanBuffer> gpuWorldBvhDepthOffsetStagingBuffer;
+		std::vector<std::array<std::unique_ptr<VulkanBuffer>, 2>> gpuWorldBvhTraversalQueueBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhTraversalCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhTraversalCountStagingBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhNodeStateBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhVisibleLeafIndexBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldBvhVisibleLeafCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleCandidateBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleCandidateCountBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDrawOffsetBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuCullDispatchArgsBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldTransformStagingBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldVisibleIndexBuffers;
+		std::vector<std::unique_ptr<VulkanBuffer>> gpuWorldIndirectCommandBuffers;
+		VkDescriptorSetLayout gpuCullDescriptorSetLayout = VK_NULL_HANDLE;
+		VkDescriptorPool gpuCullDescriptorPool = VK_NULL_HANDLE;
+		std::vector<VkDescriptorSet> gpuCullDescriptorSets;
 
 		// Mega mesh buffers
 		std::unique_ptr<VulkanBuffer> megaVertexBuffer;

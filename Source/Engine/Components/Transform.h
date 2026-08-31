@@ -4,9 +4,9 @@
 #include <cstdint>
 #include <algorithm>
 
-#include "Library/glm/glm.hpp"
-#include "Library/glm/gtc/quaternion.hpp"
-#include "Library/EnTT/entt.hpp" 
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <entt/entt.hpp> 
 
 namespace Engine
 {
@@ -121,6 +121,12 @@ namespace Engine
 			{
 				DirtyEpoch = 1;
 			}
+		}
+
+		static void BeginFrameDirtyTracking()
+		{
+			ClearGlobalDirtyFlag();
+			ClearDirtyEntities();
 		}
 		static const std::vector<entt::entity>& GetDirtyEntities() { return DirtyEntities; }
 		static uint64_t GetGlobalMutationVersion() { return GlobalMutationVersion; }

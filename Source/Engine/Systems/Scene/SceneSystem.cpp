@@ -286,7 +286,7 @@ namespace Engine
 
 			entt::entity e = scene->CreateEntity();
 
-			// Give it a Transform so it becomes visible / parentable – this will also
+			// Give it a Transform so it becomes visible / parentable  this will also
 			// trigger serialization hooks for "entity created".
 			scene->EmplaceComponent<Transform>(e);
 
