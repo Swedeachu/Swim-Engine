@@ -465,7 +465,7 @@ namespace Engine
 				try
 				{
 					// Attempt to get it
-					auto data = materialPool.GetMaterialData(materialKey);
+					auto data = materialPool.GetMaterialBinding(materialKey);
 					// Remove since we are doing a material replacement
 					if (reg.any_of<Material>(e)) { reg.remove<Material>(e); }
 					if (reg.any_of<CompositeMaterial>(e)) { reg.remove<CompositeMaterial>(e); }

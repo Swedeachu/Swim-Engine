@@ -21,7 +21,7 @@ namespace Game
 	constexpr static bool randomizeCubeRotations = true;
 	constexpr static bool doRandomBehaviors = true;
 
-	std::shared_ptr<Engine::MaterialData> RegisterRandomMaterial
+	std::shared_ptr<Engine::LegacyRenderBinding> RegisterRandomMaterial
 	(
 		Engine::MaterialPool& materialPool,
 		Engine::TexturePool& texturePool,
@@ -44,7 +44,7 @@ namespace Game
 			tex = texturePool.GetTexture2DLazy("alien");
 		}
 
-		return materialPool.RegisterMaterialData(matName, mesh, tex);
+		return materialPool.RegisterMaterialBinding(matName, mesh, tex);
 	}
 
 	void MakeTonsOfRandomPositionedEntities(Engine::Scene* scene)
@@ -57,23 +57,23 @@ namespace Game
 		const int total = (GRID_HALF_SIZE * 2 + 1);
 
 		// === Shared Assets Setup ===
-		std::vector<std::shared_ptr<Engine::MaterialData>> sharedBarrelMaterials;
+		std::vector<std::shared_ptr<Engine::LegacyRenderBinding>> sharedBarrelMaterials;
 
 		if constexpr (!fullyUniqueMeshes)
 		{
 			// Shared Cube
 			auto cubeData = Engine::MakeCube();
 			auto sharedCube = meshPool.RegisterMesh("SharedCube", cubeData.vertices, cubeData.indices);
-			materialPool.RegisterMaterialData("RegularCube", sharedCube);
-			materialPool.RegisterMaterialData("MartCube", sharedCube, texturePool.GetTexture2DLazy("mart"));
-			materialPool.RegisterMaterialData("AlienCube", sharedCube, texturePool.GetTexture2DLazy("alien"));
+			materialPool.RegisterMaterialBinding("RegularCube", sharedCube);
+			materialPool.RegisterMaterialBinding("MartCube", sharedCube, texturePool.GetTexture2DLazy("mart"));
+			materialPool.RegisterMaterialBinding("AlienCube", sharedCube, texturePool.GetTexture2DLazy("alien"));
 
 			// Shared Sphere
 			auto sphereData = Engine::MakeSphere(16, 32, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 			auto sharedSphere = meshPool.RegisterMesh("SharedSphere", sphereData.vertices, sphereData.indices);
-			materialPool.RegisterMaterialData("RegularSphere", sharedSphere);
-			materialPool.RegisterMaterialData("MartSphere", sharedSphere, texturePool.GetTexture2DLazy("mart"));
-			materialPool.RegisterMaterialData("AlienSphere", sharedSphere, texturePool.GetTexture2DLazy("alien"));
+			materialPool.RegisterMaterialBinding("RegularSphere", sharedSphere);
+			materialPool.RegisterMaterialBinding("MartSphere", sharedSphere, texturePool.GetTexture2DLazy("mart"));
+			materialPool.RegisterMaterialBinding("AlienSphere", sharedSphere, texturePool.GetTexture2DLazy("alien"));
 
 			// Shared Barrel (composite)
 			sharedBarrelMaterials = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
@@ -124,7 +124,7 @@ namespace Game
 							auto mesh = meshPool.GetMesh("SharedSphere");
 							int matID = Engine::RandInt(0, 2);
 							std::string matName = (matID == 0) ? "RegularSphere" : (matID == 1) ? "MartSphere" : "AlienSphere";
-							auto material = materialPool.GetMaterialData(matName);
+							auto material = materialPool.GetMaterialBinding(matName);
 							registry.emplace<Engine::Material>(entity, material);
 						}
 					}
@@ -143,7 +143,7 @@ namespace Game
 							auto mesh = meshPool.GetMesh("SharedCube");
 							int matID = Engine::RandInt(0, 2);
 							std::string matName = (matID == 0) ? "RegularCube" : (matID == 1) ? "MartCube" : "AlienCube";
-							auto material = materialPool.GetMaterialData(matName);
+							auto material = materialPool.GetMaterialBinding(matName);
 							registry.emplace<Engine::Material>(entity, material);
 						}
 					}

@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "MaterialPool.h"
-#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
 #include <stb_image.h>
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
@@ -20,19 +20,19 @@
 namespace Engine
 {
 
-	std::shared_ptr<MaterialData> MaterialPool::GetMaterialDataByID(uint32_t id)
+	std::shared_ptr<LegacyRenderBinding> MaterialPool::GetMaterialBindingByID(uint32_t id)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
 		for (auto& kv : materials)
 		{
-			const std::shared_ptr<MaterialData>& data = kv.second;
+			const std::shared_ptr<LegacyRenderBinding>& data = kv.second;
 			if (!data)
 			{
 				continue;
 			}
 
-			if (data->mesh->meshBufferData->meshID == id)
+			if (data->meshBufferData->meshID == id)
 			{
 				return data;
 			}
@@ -48,14 +48,14 @@ namespace Engine
 		for (auto& kv : materials)
 		{
 			const std::string& name = kv.first;
-			const std::shared_ptr<MaterialData>& data = kv.second;
+			const std::shared_ptr<LegacyRenderBinding>& data = kv.second;
 
 			if (!data)
 			{
 				continue;
 			}
 
-			if (data->mesh->meshBufferData->meshID == id)
+			if (data->meshBufferData->meshID == id)
 			{
 				return name;
 			}
@@ -64,7 +64,7 @@ namespace Engine
 		return std::string();
 	}
 
-	std::shared_ptr<MaterialData> MaterialPool::GetMaterialData(const std::string& name)
+	std::shared_ptr<LegacyRenderBinding> MaterialPool::GetMaterialBinding(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
@@ -79,6 +79,7 @@ namespace Engine
 
 	bool MaterialPool::MaterialExists(const std::string& name)
 	{
+		std::lock_guard<std::mutex> lock(poolMutex);
 		auto it = materials.find(name);
 		if (it != materials.end())
 		{
@@ -88,7 +89,7 @@ namespace Engine
 		return false;
 	}
 
-	std::shared_ptr<MaterialData> MaterialPool::RegisterMaterialData(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap)
+	std::shared_ptr<LegacyRenderBinding> MaterialPool::RegisterMaterialBinding(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
@@ -98,7 +99,14 @@ namespace Engine
 			return it->second;
 		}
 
-		auto data = std::make_shared<MaterialData>(mesh, albedoMap);
+		auto material = std::make_shared<MaterialData>(std::move(albedoMap));
+		auto residency = meshes->GetMeshBufferData(mesh);
+		if (!residency)
+		{
+			throw std::runtime_error("Cannot register material binding for a mesh without renderer residency: " + name);
+		}
+
+		auto data = std::make_shared<LegacyRenderBinding>(std::move(mesh), std::move(residency), std::move(material));
 		materials.emplace(name, data);
 
 		if (sendEditorMessage)
@@ -109,7 +117,7 @@ namespace Engine
 		return data;
 	}
 
-	std::vector<std::shared_ptr<MaterialData>> MaterialPool::GetCompositeMaterialData(const std::string& name)
+	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::GetCompositeMaterialData(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
@@ -124,13 +132,14 @@ namespace Engine
 
 	// Will return the composite material data instantly if it already has been loaded.
 	// This is honestly the best safe way to load our 3D models without having to think much.
-	std::vector<std::shared_ptr<MaterialData>> MaterialPool::LazyLoadAndGetCompositeMaterial(const std::string& path)
+	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LazyLoadAndGetCompositeMaterial(const std::string& path)
 	{
 		return CompositeMaterialExists(path) ? GetCompositeMaterialData(path) : LoadAndRegisterCompositeMaterialFromGLB(path);
 	}
 
 	bool MaterialPool::CompositeMaterialExists(const std::string& name)
 	{
+		std::lock_guard<std::mutex> lock(poolMutex);
 		auto it = compositeMaterials.find(name);
 		if (it != compositeMaterials.end())
 		{
@@ -221,7 +230,7 @@ namespace Engine
 		int nodeIndex,
 		const glm::mat4& parentTransform,
 		const std::string& path,
-		std::vector<std::shared_ptr<MaterialData>>& loadedMaterials)
+		std::vector<std::shared_ptr<LegacyRenderBinding>>& loadedMaterials)
 	{
 		const tinygltf::Node& node = model.nodes[nodeIndex];
 		std::string nodeName = node.name.empty() ? "Node_" + std::to_string(nodeIndex) : node.name;
@@ -475,7 +484,7 @@ namespace Engine
 				std::shared_ptr<Mesh> mesh = meshes->RegisterMesh(finalMeshName, vertices, indices);
 
 				std::string matName = finalMeshName + "_material";
-				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
+				std::shared_ptr<LegacyRenderBinding> matData = RegisterMaterialBinding(matName, mesh, texture);
 				loadedMaterials.push_back(matData);
 			}
 		}
@@ -487,14 +496,14 @@ namespace Engine
 		}
 	}
 
-	std::vector<std::shared_ptr<MaterialData>> MaterialPool::LoadAndRegisterCompositeMaterialFromGLB(const std::string& path)
+	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LoadAndRegisterCompositeMaterialFromGLB(const std::string& path)
 	{
 		struct ImageCollector
 		{
 			std::unordered_map<int, tinygltf::Image> images;
 		};
 
-		std::vector<std::shared_ptr<MaterialData>> loadedMaterials;
+		std::vector<std::shared_ptr<LegacyRenderBinding>> loadedMaterials;
 		tinygltf::Model model;
 		tinygltf::TinyGLTF loader;
 		std::string err, warn;

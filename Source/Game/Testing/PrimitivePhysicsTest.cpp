@@ -81,7 +81,7 @@ namespace Game
 			}
 		}
 
-		inline std::shared_ptr<Engine::MaterialData> EnsureGradientCubeMaterial(Pools& p,
+		inline std::shared_ptr<Engine::LegacyRenderBinding> EnsureGradientCubeMaterial(Pools& p,
 			const std::string& meshName, const std::string& matName,
 			const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& axisWeights)
 		{
@@ -97,14 +97,14 @@ namespace Game
 
 			if (p.materialPool.MaterialExists(matName))
 			{
-				return p.materialPool.GetMaterialData(matName);
+				return p.materialPool.GetMaterialBinding(matName);
 			}
 
 			auto mesh = p.meshPool.GetMesh(meshName);
-			return p.materialPool.RegisterMaterialData(matName, mesh);
+			return p.materialPool.RegisterMaterialBinding(matName, mesh);
 		}
 
-		inline std::shared_ptr<Engine::MaterialData> EnsureGradientSphereMaterial(Pools& p,
+		inline std::shared_ptr<Engine::LegacyRenderBinding> EnsureGradientSphereMaterial(Pools& p,
 			const std::string& meshName, const std::string& matName,
 			const glm::vec3& cSouth, const glm::vec3& cEquator, const glm::vec3& cNorth,
 			int lat = 24, int lon = 48)
@@ -118,14 +118,14 @@ namespace Game
 
 			if (p.materialPool.MaterialExists(matName))
 			{
-				return p.materialPool.GetMaterialData(matName);
+				return p.materialPool.GetMaterialBinding(matName);
 			}
 
 			auto mesh = p.meshPool.GetMesh(meshName);
-			return p.materialPool.RegisterMaterialData(matName, mesh);
+			return p.materialPool.RegisterMaterialBinding(matName, mesh);
 		}
 
-		inline void SpawnStaticPlane(Engine::Scene* scene, const glm::vec3& pos, const glm::vec3& scl, std::shared_ptr<Engine::MaterialData> mat)
+		inline void SpawnStaticPlane(Engine::Scene* scene, const glm::vec3& pos, const glm::vec3& scl, std::shared_ptr<Engine::LegacyRenderBinding> mat)
 		{
 			entt::entity e = scene->CreateEntity();
 			scene->SetTag(e, Engine::TagConstants::WORLD, "physics plane");
@@ -155,7 +155,7 @@ namespace Game
 			scene->AddComponent<Engine::Rigidbody>(e, rb);
 		}
 
-		inline void SpawnDynamicCube(Engine::Scene* scene, const glm::vec3& pos, float uniformScale, std::shared_ptr<Engine::MaterialData> mat)
+		inline void SpawnDynamicCube(Engine::Scene* scene, const glm::vec3& pos, float uniformScale, std::shared_ptr<Engine::LegacyRenderBinding> mat)
 		{
 			entt::entity e = scene->CreateEntity();
 			scene->SetTag(e, Engine::TagConstants::WORLD, "physics cube");
@@ -185,7 +185,7 @@ namespace Game
 			scene->AddComponent<Engine::Rigidbody>(e, rb);
 		}
 
-		inline void SpawnDynamicSphere(Engine::Scene* scene, const glm::vec3& pos, float uniformScale, std::shared_ptr<Engine::MaterialData> mat)
+		inline void SpawnDynamicSphere(Engine::Scene* scene, const glm::vec3& pos, float uniformScale, std::shared_ptr<Engine::LegacyRenderBinding> mat)
 		{
 			entt::entity e = scene->CreateEntity();
 			scene->SetTag(e, Engine::TagConstants::WORLD, "physics sphere");

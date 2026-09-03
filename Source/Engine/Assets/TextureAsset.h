@@ -29,8 +29,24 @@ namespace Swim::Assets
 		HdrEnvironment
 	};
 
+	enum class TextureContainerFormat : std::uint8_t
+	{
+		NativeMipData,
+		Ktx2
+	};
+
+	enum class TextureSupercompression : std::uint8_t
+	{
+		None,
+		BasisLz,
+		Zstandard,
+		Zlib,
+		Unknown
+	};
+
 	enum class TexturePayloadFormat : std::uint8_t
 	{
+		Undefined,
 		R8UNorm,
 		RG8UNorm,
 		RGBA8UNorm,
@@ -56,11 +72,15 @@ namespace Swim::Assets
 		std::uint32_t Depth = 1;
 		std::uint64_t OffsetBytes = 0;
 		std::uint64_t SizeBytes = 0;
+		std::uint64_t UncompressedSizeBytes = 0;
 	};
 
 	struct TexturePayloadVariant
 	{
+		TextureContainerFormat Container = TextureContainerFormat::NativeMipData;
 		TexturePayloadFormat Format = TexturePayloadFormat::RGBA8UNorm;
+		TextureSupercompression Supercompression = TextureSupercompression::None;
+		std::uint32_t ContainerFormatCode = 0;
 		std::vector<TextureMipDesc> Mips;
 		std::vector<std::byte> Bytes;
 	};

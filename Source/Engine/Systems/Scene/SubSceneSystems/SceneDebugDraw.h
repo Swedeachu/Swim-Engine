@@ -18,7 +18,7 @@ namespace Engine
 
 	// forward declare
 	struct Mesh;
-	struct MaterialData;
+	struct LegacyRenderBinding;
 	class MeshPool;
 	class MaterialPool;
 
@@ -151,7 +151,7 @@ namespace Engine
 
 		std::shared_ptr<Mesh> CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName);
 
-		std::shared_ptr<MaterialData> GetMeshMaterialDataFromType(MeshBoxType type);
+		std::shared_ptr<LegacyRenderBinding> GetMeshMaterialDataFromType(MeshBoxType type);
 
 		MeshPool* meshes = nullptr;
 		MaterialPool* materials = nullptr;
@@ -162,9 +162,9 @@ namespace Engine
 		std::shared_ptr<Mesh> sphereMesh;
 		std::shared_ptr<Mesh> cubeMesh;
 		std::shared_ptr<Mesh> wireFrameCubeMesh;
-		std::shared_ptr<MaterialData> cubeMaterialData;
-		std::shared_ptr<MaterialData> wireFrameCubeMaterialData;
-		std::shared_ptr<MaterialData> sphereMaterialData;
+		std::shared_ptr<LegacyRenderBinding> cubeMaterialData;
+		std::shared_ptr<LegacyRenderBinding> wireFrameCubeMaterialData;
+		std::shared_ptr<LegacyRenderBinding> sphereMaterialData;
 
 	};
 

@@ -113,6 +113,23 @@ The Windows launchers invoke the PowerShell scripts directly. The Linux launcher
 
 `build-windows.ps1` remains as a compatibility alias for the Windows soft-build path. The Windows scripts do not require a Developer Command Prompt: they discover standalone or Visual Studio-bundled CMake, locate Visual Studio 2022/Build Tools, import the x64 MSVC environment when using Ninja, discover Visual Studio's bundled Ninja even when it is not on `PATH`, and fall back to the Visual Studio generator if Ninja is unavailable. The helper intentionally uses `DebugBuild` internally rather than PowerShell's reserved/common `Debug` parameter name, while the public scripts retain the convenient `-Debug` switch. A normal Explorer double-click is therefore sufficient once Visual Studio 2022/Build Tools with Desktop development with C++ is installed. Both Windows clean and soft launchers leave `build/windows-vs/SwimEngine.sln` synchronized with the current CMake project. Clean recreates it after a full dependency reset; soft refreshes it offline from the existing validated cache before completing the requested Debug/Release Ninja build.
 
+### Development asset cooking
+
+The Phase 4 development asset path treats loose `.gltf`/`.glb` files as authoring inputs and `.sasset` files as the runtime representation. With `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=ON` (the development default), engine startup scans the platform asset root, skips current cooked roots, and recooks missing/stale/corrupt models through fastgltf -> meshoptimizer -> the static-model `.sasset` compiler before loading the cooked dependency graph into `AssetSystem`.
+
+Cooked files mirror the source tree under `Assets/Cooked`; dependency objects are content-validated files under `Assets/Cooked/.objects`. Local external glTF dependencies such as `.bin` files are part of the source fingerprint, so editing one invalidates the matching model even when the `.gltf` file itself did not change. Source-image PNG/JPEG/WebP -> KTX2 encoding is still in progress; already-KTX2 texture payloads are supported by the current compiler boundary.
+
+The same path can be run without launching the engine:
+
+```powershell
+# After configuring/building the asset-compiler targets
+build\windows-release\SwimAssetCooker.exe Assets
+```
+
+The asset compiler introduces pinned simdjson/fastgltf/meshoptimizer dependencies. The first Windows build after adding this checkpoint must therefore use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
+
+For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf and meshoptimizer stay on the compiler side.
+
 ### Dependency policy
 
 The previous `Source/Library` copies are replaced by pinned CMake targets for SDL3, GLM, EnTT, nlohmann/json, stb, tinygltf, Draco, libwebp, zstd, Basis Universal, GLAD, and PhysX. Nothing downloaded by CMake should be committed.

@@ -1439,6 +1439,8 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
 def check_phase4_asset_architecture(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     asset_root = ROOT / "Source" / "Engine" / "Assets"
+    asset_compiler_root = ROOT / "Source" / "Tools" / "AssetCompiler"
+    asset_compiler_dependencies = ROOT / "cmake" / "AssetCompilerDependencies.cmake"
     required_paths = (
         asset_root / "AssetId.h",
         asset_root / "AssetHandle.h",
@@ -1453,9 +1455,36 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         asset_root / "TextureAsset.h",
         asset_root / "MaterialAsset.h",
         asset_root / "ModelAsset.h",
+        asset_root / "Ktx2Container.h",
+        asset_root / "Ktx2Container.cpp",
+        asset_root / "SassetFormat.h",
+        asset_root / "SassetFormat.cpp",
         ROOT / "Source" / "Tests" / "Assets" / "AssetSystemTests.cpp",
+        ROOT / "Source" / "Tests" / "Assets" / "Ktx2ContainerTests.cpp",
         ROOT / "Source" / "Tests" / "Assets" / "PublicHeaderCompile.cpp",
         ROOT / "Source" / "Examples" / "HeadlessCoreAssets.cpp",
+        asset_compiler_root / "IntermediateModel.h",
+        asset_compiler_root / "GltfImporter.h",
+        asset_compiler_root / "GltfImporter.cpp",
+        asset_compiler_root / "MeshOptimizer.h",
+        asset_compiler_root / "MeshOptimizer.cpp",
+        asset_compiler_root / "Ktx2TextureCompiler.h",
+        asset_compiler_root / "Ktx2TextureCompiler.cpp",
+        asset_compiler_root / "SassetWriter.h",
+        asset_compiler_root / "SassetWriter.cpp",
+        asset_compiler_root / "StaticModelCompiler.h",
+        asset_compiler_root / "StaticModelCompiler.cpp",
+        asset_compiler_root / "DevelopmentAssetPipeline.h",
+        asset_compiler_root / "DevelopmentAssetPipeline.cpp",
+        ROOT / "Source" / "Tools" / "AssetCooker" / "Main.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "PublicHeaderCompile.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "GltfImporterTests.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "MeshOptimizerTests.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "Ktx2TextureCompilerTests.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "SassetFormatTests.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "StaticModelCompilerTests.cpp",
+        ROOT / "Source" / "Tests" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp",
+        asset_compiler_dependencies,
     )
     if not all(path.is_file() for path in required_paths):
         fail("Phase 4 asset identity/runtime CPU asset foundation is incomplete", failures)
@@ -1467,6 +1496,10 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     mesh_header = (asset_root / "MeshAsset.h").read_text(encoding="utf-8", errors="ignore")
     material_header = (asset_root / "MaterialAsset.h").read_text(encoding="utf-8", errors="ignore")
     model_header = (asset_root / "ModelAsset.h").read_text(encoding="utf-8", errors="ignore")
+    ktx_header = (asset_root / "Ktx2Container.h").read_text(encoding="utf-8", errors="ignore")
+    ktx_source = (asset_root / "Ktx2Container.cpp").read_text(encoding="utf-8", errors="ignore")
+    sasset_header = (asset_root / "SassetFormat.h").read_text(encoding="utf-8", errors="ignore")
+    sasset_source = (asset_root / "SassetFormat.cpp").read_text(encoding="utf-8", errors="ignore")
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h").read_text(encoding="utf-8", errors="ignore")
@@ -1565,6 +1598,279 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         fail("SceneSystem services do not expose the engine-owned AssetSystem", failures)
     if "GetAssetSystem()" not in scene_header:
         fail("Scene runtime service view does not expose AssetSystem without global discovery", failures)
+
+    legacy_material = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "MaterialData.h"
+    legacy_binding = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "LegacyRenderBinding.h"
+    legacy_mesh = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "Mesh.h"
+    legacy_mesh_pool = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "MeshPool.cpp"
+    legacy_texture_pool = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "TexturePool.cpp"
+    material_component = ROOT / "Source" / "Engine" / "Components" / "Material.h"
+
+    if not all(path.is_file() for path in (legacy_material, legacy_binding, legacy_mesh, legacy_mesh_pool, legacy_texture_pool, material_component)):
+        fail("Phase 4 legacy mesh/material ownership migration seam is incomplete", failures)
+        return
+
+    legacy_material_text = legacy_material.read_text(encoding="utf-8", errors="ignore")
+    legacy_binding_text = legacy_binding.read_text(encoding="utf-8", errors="ignore")
+    legacy_mesh_text = legacy_mesh.read_text(encoding="utf-8", errors="ignore")
+    legacy_mesh_pool_text = legacy_mesh_pool.read_text(encoding="utf-8", errors="ignore")
+    legacy_texture_pool_text = legacy_texture_pool.read_text(encoding="utf-8", errors="ignore")
+    material_component_text = material_component.read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in ("MeshBufferData", "std::shared_ptr<Mesh>", "VkBuffer", "GLuint"):
+        if fragment in legacy_material_text:
+            fail(f"legacy MaterialData regained geometry/backend ownership: {fragment}", failures)
+
+    for fragment in ("std::shared_ptr<Mesh> mesh", "std::shared_ptr<MeshBufferData> meshBufferData", "std::shared_ptr<MaterialData> material"):
+        if fragment not in legacy_binding_text:
+            fail(f"legacy draw compatibility binding no longer keeps mesh/material residency separate: {fragment}", failures)
+
+    for fragment in ("MeshBufferData", "VkBuffer", "GLuint", "meshBufferData"):
+        if fragment in legacy_mesh_text:
+            fail(f"legacy CPU Mesh regained renderer residency/backend state: {fragment}", failures)
+
+    for fragment in ("GetMeshBufferData", "meshResidency", "ComputeLegacyMeshContentHash", "meshContentIndex"):
+        if fragment not in legacy_mesh_pool_text and fragment not in (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "MeshPool.h").read_text(encoding="utf-8", errors="ignore"):
+            fail(f"legacy mesh residency/content-hash migration seam is missing: {fragment}", failures)
+
+    for fragment in ("ComputeLegacyTextureContentHash", "textureContentIndex"):
+        if fragment not in legacy_texture_pool_text and fragment not in (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "TexturePool.h").read_text(encoding="utf-8", errors="ignore"):
+            fail(f"legacy texture content-hash migration seam is missing: {fragment}", failures)
+
+    if "std::memcmp" in legacy_mesh_pool_text or "std::memcmp" in legacy_texture_pool_text:
+        fail("legacy renderer pools regressed to O(N) raw-byte deduplication scans", failures)
+
+    if "std::shared_ptr<LegacyRenderBinding> binding" not in material_component_text:
+        fail("scene Material component does not use the geometry/material compatibility binding", failures)
+
+    for source_root in (ROOT / "Source" / "Game",):
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for stale_fragment in ("RegisterMaterialData", "GetMaterialData", "std::shared_ptr<Engine::MaterialData>"):
+                if stale_fragment in text:
+                    fail(f"game code still uses removed material/geometry-coupled compatibility API: {path.relative_to(ROOT)} -> {stale_fragment}", failures)
+
+            # Scene::AddComponent<T> takes an already-constructed T by value.
+            # LegacyRenderBinding -> Material is intentionally explicit, so a
+            # bare shared_ptr here compiles neither on MSVC nor standard C++.
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                stripped = line.strip()
+                if stripped.startswith("//"):
+                    continue
+                if (
+                    ("AddComponent<Engine::Material>" in stripped or "AddComponent<Material>" in stripped)
+                    and "Material(" not in stripped
+                ):
+                    fail(
+                        f"game Material AddComponent call bypasses the explicit Material wrapper: "
+                        f"{path.relative_to(ROOT)}:{line_number}",
+                        failures,
+                    )
+
+    asset_compiler_dependency_text = asset_compiler_dependencies.read_text(encoding="utf-8", errors="ignore")
+    intermediate_model_text = (asset_compiler_root / "IntermediateModel.h").read_text(encoding="utf-8", errors="ignore")
+    gltf_importer_header_text = (asset_compiler_root / "GltfImporter.h").read_text(encoding="utf-8", errors="ignore")
+    gltf_importer_source_text = (asset_compiler_root / "GltfImporter.cpp").read_text(encoding="utf-8", errors="ignore")
+
+    required_asset_compiler_cmake_fragments = (
+        'option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)',
+        "include(cmake/AssetCompilerDependencies.cmake)",
+        "add_library(SwimAssetCompiler STATIC",
+        "add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)",
+        "PRIVATE fastgltf::fastgltf meshoptimizer",
+        "add_library(SwimAssetCompilerPublicHeaders OBJECT EXCLUDE_FROM_ALL",
+        "add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL",
+        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler)",
+        "add_executable(SwimMeshOptimizerTests EXCLUDE_FROM_ALL",
+        "target_link_libraries(SwimMeshOptimizerTests PRIVATE Swim::AssetCompiler)",
+        "add_executable(SwimKtx2TextureCompilerTests EXCLUDE_FROM_ALL",
+        "add_executable(SwimSassetFormatTests EXCLUDE_FROM_ALL",
+        "add_executable(SwimStaticModelCompilerTests EXCLUDE_FROM_ALL",
+        "add_executable(SwimDevelopmentAssetPipelineTests EXCLUDE_FROM_ALL",
+        "add_executable(SwimAssetCooker Source/Tools/AssetCooker/Main.cpp)",
+        'option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)',
+        "SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>",
+        "target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)",
+    )
+    for fragment in required_asset_compiler_cmake_fragments:
+        if fragment not in cmake_text:
+            fail(f"Phase 4 asset-compiler CMake boundary is missing: {fragment}", failures)
+
+    required_asset_compiler_dependency_fragments = (
+        "GITHUB_REPOSITORY simdjson/simdjson",
+        "GIT_TAG v3.12.3",
+        "TARGET simdjson::simdjson",
+        "GITHUB_REPOSITORY spnda/fastgltf",
+        "GIT_TAG v0.9.0",
+        "TARGET fastgltf::fastgltf",
+        "GITHUB_REPOSITORY zeux/meshoptimizer",
+        "GIT_TAG v1.1",
+        "TARGET meshoptimizer",
+        "MESHOPT_BUILD_GLTFPACK OFF",
+        "MESHOPT_INSTALL OFF",
+        "function(swim_assert_asset_compiler_dependency_clean dependency_name source_dir)",
+        "status --porcelain --untracked-files=all",
+    )
+    for fragment in required_asset_compiler_dependency_fragments:
+        if fragment not in asset_compiler_dependency_text:
+            fail(f"asset-compiler dependency contract is missing: {fragment}", failures)
+
+    simdjson_target_position = asset_compiler_dependency_text.find("if(NOT TARGET simdjson::simdjson)")
+    fastgltf_package_position = asset_compiler_dependency_text.find("NAME swim_fastgltf_source")
+    if simdjson_target_position < 0 or fastgltf_package_position < 0 or simdjson_target_position > fastgltf_package_position:
+        fail("simdjson must be established before fastgltf so fastgltf cannot mutate its CPM source cache", failures)
+
+    for path, text in (
+        (asset_compiler_root / "IntermediateModel.h", intermediate_model_text),
+        (asset_compiler_root / "GltfImporter.h", gltf_importer_header_text),
+    ):
+        for fragment in ("fastgltf", "tinygltf"):
+            if fragment in text:
+                fail(f"importer library type leaked through Swim-owned asset compiler header: {path.relative_to(ROOT)} -> {fragment}", failures)
+
+    for path in asset_compiler_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if path.name != "GltfImporter.cpp" and ("#include <fastgltf" in text or "fastgltf::" in text):
+            fail(f"fastgltf escaped the GltfImporter.cpp implementation boundary: {path.relative_to(ROOT)}", failures)
+        if path.name != "MeshOptimizer.cpp" and ("#include <meshoptimizer" in text or "meshopt_" in text):
+            fail(f"meshoptimizer escaped the MeshOptimizer.cpp implementation boundary: {path.relative_to(ROOT)}", failures)
+
+    for fragment in (
+        "struct IntermediateModel",
+        "struct SourcePrimitive",
+        "struct SourceMaterial",
+        "struct SourceImage",
+        "struct SourceSampler",
+        "struct SourceTexture",
+        "struct SourceNode",
+    ):
+        if fragment not in intermediate_model_text:
+            fail(f"Swim-owned glTF intermediate model contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "fastgltf::Parser",
+        "fastgltf::MappedGltfFile::FromPath",
+        "fastgltf::Options::LoadExternalBuffers",
+        "fastgltf::Options::LoadExternalImages",
+        "fastgltf::Options::GenerateMeshIndices",
+        "ImportPrimitive",
+        "KHR_mesh_quantization",
+        "KHR_texture_basisu",
+        "EXT_texture_webp",
+        "MSFT_texture_dds",
+        "KHR_materials_unlit",
+    ):
+        if fragment not in gltf_importer_source_text:
+            fail(f"fastgltf source importer implementation is missing: {fragment}", failures)
+
+    mesh_optimizer_header_text = (asset_compiler_root / "MeshOptimizer.h").read_text(encoding="utf-8", errors="ignore")
+    mesh_optimizer_source_text = (asset_compiler_root / "MeshOptimizer.cpp").read_text(encoding="utf-8", errors="ignore")
+    if "meshoptimizer" in mesh_optimizer_header_text:
+        fail("meshoptimizer implementation types leaked through MeshOptimizer.h", failures)
+    for fragment in (
+        "struct MeshOptimizationOptions",
+        "struct MeshOptimizationStats",
+        "struct MeshOptimizationResult",
+        "class MeshOptimizer",
+    ):
+        if fragment not in mesh_optimizer_header_text:
+            fail(f"Swim-owned mesh optimization contract is missing: {fragment}", failures)
+    for fragment in (
+        "meshopt_optimizeVertexCache",
+        "meshopt_optimizeOverdraw",
+        "meshopt_optimizeVertexFetch",
+        "RecalculateBounds",
+    ):
+        if fragment not in mesh_optimizer_source_text:
+            fail(f"meshoptimizer offline pass is missing: {fragment}", failures)
+    cache_position = mesh_optimizer_source_text.find("meshopt_optimizeVertexCache")
+    overdraw_position = mesh_optimizer_source_text.find("meshopt_optimizeOverdraw")
+    fetch_position = mesh_optimizer_source_text.find("meshopt_optimizeVertexFetch")
+    if not (0 <= cache_position < overdraw_position < fetch_position):
+        fail("meshoptimizer passes must run vertex cache -> overdraw -> vertex fetch", failures)
+
+    for fragment in (
+        "struct Ktx2Metadata",
+        "TexturePayloadFormat PayloadFormat",
+        "TextureSupercompression Supercompression",
+        "std::vector<TextureMipDesc> Mips",
+        "ParseKtx2Metadata",
+    ):
+        if fragment not in ktx_header:
+            fail(f"KTX2 runtime metadata contract is missing: {fragment}", failures)
+    for fragment in (
+        "VK_FORMAT_BC7_UNORM_BLOCK",
+        "VK_FORMAT_ASTC_4x4_UNORM_BLOCK",
+        "VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK",
+        "TextureSupercompression::BasisLz",
+        "TextureSupercompression::Zstandard",
+    ):
+        if fragment not in ktx_source:
+            fail(f"KTX2 backend-neutral format/supercompression mapping is missing: {fragment}", failures)
+
+    for fragment in (
+        "SassetSchemaVersion = 1",
+        "SassetHeaderSize = 160",
+        "enum class SassetAssetType",
+        "struct SassetMetadata",
+        "CompilerProfileHash",
+        "SourceDependencies",
+        "ParseSasset",
+        "LoadSasset",
+    ):
+        if fragment not in sasset_header:
+            fail(f".sasset v1 runtime contract is missing: {fragment}", failures)
+    for fragment in (
+        "SassetMagic",
+        "HashMismatch",
+        "GetSassetChunkBytes",
+        "PublishDecoded",
+        "assets.Publish",
+    ):
+        if fragment not in sasset_source:
+            fail(f".sasset v1 runtime validation/load implementation is missing: {fragment}", failures)
+
+    static_model_source = (asset_compiler_root / "StaticModelCompiler.cpp").read_text(encoding="utf-8", errors="ignore")
+    development_pipeline_source = (asset_compiler_root / "DevelopmentAssetPipeline.cpp").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "GetStaticModelCompilerProfileHash",
+        "SerializeAssetPayload",
+        "SassetAssetType::Mesh",
+        "SassetAssetType::MaterialInstance",
+        "SassetAssetType::Model",
+    ):
+        if fragment not in static_model_source:
+            fail(f"static-model .sasset compiler contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "GltfImporter importer",
+        "MeshOptimizer optimizer",
+        "StaticModelCompiler compiler",
+        "BuildSourceDependencies",
+        "InspectCooked",
+        "ValidateCookedGraph",
+        "PublishCookedAssets",
+        "LoadSassetGraph",
+        'const std::filesystem::path cookedRoot = assetRoot / "Cooked"',
+    ):
+        if fragment not in development_pipeline_source:
+            fail(f"development source->.sasset bootstrap is missing: {fragment}", failures)
+    importer_position = development_pipeline_source.find("importer.Import(source)")
+    optimizer_position = development_pipeline_source.find("optimizer.Optimize(optimizedModel)")
+    compiler_position = development_pipeline_source.find("compiler.Compile(optimizedModel")
+    publish_position = development_pipeline_source.find("PublishCookedAssets(", compiler_position)
+    load_position = development_pipeline_source.find("LoadSassetGraph(", publish_position)
+    if not (0 <= importer_position < optimizer_position < compiler_position < publish_position < load_position):
+        fail("development asset bootstrap must run fastgltf import -> mesh optimization -> .sasset compile -> publish -> runtime load", failures)
+
+    if "RunDevelopmentAssetBootstrap(" not in engine_source:
+        fail("engine startup does not run the development asset bootstrap when enabled", failures)
+    if "platformSystem->GetFileSystem().GetAssetRoot()" not in engine_source:
+        fail("development asset bootstrap is not rooted through the platform filesystem asset root", failures)
 
 
 def check_source_files_are_utf8(failures: list[str]) -> None:

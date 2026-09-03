@@ -122,14 +122,14 @@ namespace Game
 		// Lazy-create star material (bright)
 		if (!starMat)
 		{
-			starMat = matPool.RegisterMaterialData("OrbitStarMat", sharedSphereMesh);
+			starMat = matPool.RegisterMaterialBinding("OrbitStarMat", sharedSphereMesh);
 		}
 	}
 
 	entt::entity OrbitSystem::SpawnStar()
 	{
 		auto& matPool = scene->GetMaterialPool();
-		auto  matStar = starMat ? starMat : matPool.RegisterMaterialData("OrbitStarMatFallback", sharedSphereMesh);
+		auto  matStar = starMat ? starMat : matPool.RegisterMaterialBinding("OrbitStarMatFallback", sharedSphereMesh);
 
 		auto& reg = scene->GetRegistry();
 
@@ -158,7 +158,7 @@ namespace Game
 
 		// Create a unique material name or reuse a small pool
 		const std::string matName = "OrbitPlanetMat_" + std::to_string(Engine::RandInt(0, 1'000'000));
-		auto mat = matPool.RegisterMaterialData(matName, sharedSphereMesh);
+		auto mat = matPool.RegisterMaterialBinding(matName, sharedSphereMesh);
 
 		// Entity
 		entt::entity e = reg.create();

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 #include <tiny_gltf.h>
+#include "Engine/Assets/ContentHash.h"
 
 namespace Swim::Platform
 {
@@ -123,6 +124,7 @@ namespace Engine
 
 		std::mutex poolMutex;
 		std::unordered_map<std::string, std::shared_ptr<Texture2D>> textures;
+		std::unordered_map<Swim::Assets::ContentHash, std::weak_ptr<Texture2D>> textureContentIndex;
 
 		unsigned int textureCount{ 0 };
 

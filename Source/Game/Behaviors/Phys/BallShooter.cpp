@@ -62,16 +62,16 @@ namespace Game
 			meshPool.RegisterMesh("PhysicsBall", sphereData.vertices, sphereData.indices);
 		}
 
-		std::shared_ptr<Engine::MaterialData> matData;
+		std::shared_ptr<Engine::LegacyRenderBinding> matData;
 
 		if (materialPool.MaterialExists("PhysicsBallMat"))
 		{
-			matData = materialPool.GetMaterialData("PhysicsBallMat");
+			matData = materialPool.GetMaterialBinding("PhysicsBallMat");
 		}
 		else
 		{
 			auto mesh = meshPool.GetMesh("PhysicsBall");
-			matData = materialPool.RegisterMaterialData("PhysicsBallMat", mesh);
+			matData = materialPool.RegisterMaterialBinding("PhysicsBallMat", mesh);
 		}
 
 		// Create the projectile entity.

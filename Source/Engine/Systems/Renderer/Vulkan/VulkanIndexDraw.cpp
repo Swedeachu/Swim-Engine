@@ -177,7 +177,7 @@ namespace Engine
 		WorldRenderableSlot& slot,
 		entt::entity entity,
 		uint32_t subMaterialIndex,
-		const std::shared_ptr<MaterialData>& mat,
+		const std::shared_ptr<LegacyRenderBinding>& mat,
 		bool canUseEntityCullCache
 	)
 	{
@@ -188,9 +188,9 @@ namespace Engine
 		slot.canUseEntityCullCache = canUseEntityCullCache;
 		slot.active = true;
 
-		if (mat && mat->mesh && mat->mesh->meshBufferData)
+		if (mat && mat->mesh && mat->meshBufferData)
 		{
-			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+			const MeshBufferData& mesh = *mat->meshBufferData;
 			slot.meshID = mesh.GetMeshID();
 			slot.indexCount = mesh.indexCount;
 			slot.vertexOffsetInMegaBuffer = mesh.vertexOffsetInMegaBuffer;
@@ -217,9 +217,9 @@ namespace Engine
 		std::vector<uint8_t> slotTouched(worldRenderableSlots.size(), 0);
 
 		auto touchSlot =
-			[&](entt::entity entity, uint32_t subMaterialIndex, const std::shared_ptr<MaterialData>& mat, bool canUseEntityCullCache)
+			[&](entt::entity entity, uint32_t subMaterialIndex, const std::shared_ptr<LegacyRenderBinding>& mat, bool canUseEntityCullCache)
 		{
-			if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+			if (!mat || !mat->mesh || !mat->meshBufferData)
 			{
 				return;
 			}
@@ -266,7 +266,7 @@ namespace Engine
 				registry.any_of<FrustumCullCache>(entity)
 				&& !registry.any_of<CompositeMaterial>(entity);
 
-			touchSlot(entity, 0, regularView.get<Material>(entity).data, canUseEntityCullCache);
+			touchSlot(entity, 0, regularView.get<Material>(entity).binding, canUseEntityCullCache);
 		}
 
 		auto compositeView = registry.view<Transform, CompositeMaterial>();
@@ -898,7 +898,12 @@ namespace Engine
 
 		// Allocate space inside mega buffers and fill MeshBufferData
 		std::shared_ptr<Mesh> m = renderer->GetRuntimeServices().Meshes->RegisterMesh("glyph", verts, idx);
-		glyphQuadMesh = *m->meshBufferData.get();
+		std::shared_ptr<MeshBufferData> residency = renderer->GetRuntimeServices().Meshes->GetMeshBufferData(m);
+		if (!residency)
+		{
+			throw std::runtime_error("Glyph mesh was registered without renderer residency.");
+		}
+		glyphQuadMesh = *residency;
 		hasUploadedGlyphQuad = true;
 	}
 
@@ -995,13 +1000,13 @@ namespace Engine
 
 	bool VulkanIndexDraw::TryBuildGatheredInstance(entt::registry& registry, const VulkanIndexDraw::GatherCandidate& candidate, const Frustum* frustum, VulkanIndexDraw::GatheredInstance& outInstance) const
 	{
-		const std::shared_ptr<MaterialData>& mat = candidate.material;
-		if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+		const std::shared_ptr<LegacyRenderBinding>& mat = candidate.material;
+		if (!mat || !mat->mesh || !mat->meshBufferData)
 		{
 			return false;
 		}
 
-		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+		const MeshBufferData& mesh = *mat->meshBufferData;
 		const glm::vec3 localMin = glm::vec3(mesh.aabbMin);
 		const glm::vec3 localMax = glm::vec3(mesh.aabbMax);
 
@@ -1027,8 +1032,8 @@ namespace Engine
 		outInstance.indexOffsetInMegaBuffer = mesh.indexOffsetInMegaBuffer;
 		outInstance.instance.space = static_cast<uint32_t>(candidate.transformSpace);
 		outInstance.instance.model = candidate.worldMatrix;
-		outInstance.instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : UINT32_MAX;
-		outInstance.instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
+		outInstance.instance.textureIndex = mat->GetAlbedoMap() ? mat->GetAlbedoMap()->GetBindlessIndex() : UINT32_MAX;
+		outInstance.instance.hasTexture = mat->GetAlbedoMap() ? 1.0f : 0.0f;
 		outInstance.instance.materialIndex = 0u;
 		return true;
 	}
@@ -1398,7 +1403,7 @@ namespace Engine
 	}
 
 
-	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum)
+	void VulkanIndexDraw::AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<LegacyRenderBinding>& mat, const Frustum* frustum)
 	{
 		GatherCandidate candidate{};
 		candidate.entity = entity;
@@ -1541,7 +1546,7 @@ namespace Engine
 
 		for (const WorldRenderableSlot& slot : worldRenderableSlots)
 		{
-			if (!slot.active || !slot.material || !slot.material->mesh || !slot.material->mesh->meshBufferData)
+			if (!slot.active || !slot.material || !slot.material->mesh || !slot.material->meshBufferData)
 			{
 				continue;
 			}
@@ -1563,10 +1568,10 @@ namespace Engine
 			entry.indexCount = slot.indexCount;
 			entry.vertexOffsetInMegaBuffer = slot.vertexOffsetInMegaBuffer;
 			entry.indexOffsetInMegaBuffer = slot.indexOffsetInMegaBuffer;
-			entry.textureIndex = slot.material->albedoMap ? slot.material->albedoMap->GetBindlessIndex() : 0u;
-			entry.flags = slot.material->albedoMap ? GpuWorldInstanceFlags::HasTexture : 0u;
-			const glm::vec3 localMin = glm::vec3(slot.material->mesh->meshBufferData->aabbMin);
-			const glm::vec3 localMax = glm::vec3(slot.material->mesh->meshBufferData->aabbMax);
+			entry.textureIndex = slot.material->GetAlbedoMap() ? slot.material->GetAlbedoMap()->GetBindlessIndex() : 0u;
+			entry.flags = slot.material->GetAlbedoMap() ? GpuWorldInstanceFlags::HasTexture : 0u;
+			const glm::vec3 localMin = glm::vec3(slot.material->meshBufferData->aabbMin);
+			const glm::vec3 localMax = glm::vec3(slot.material->meshBufferData->aabbMax);
 			const glm::vec3 center = (localMin + localMax) * 0.5f;
 			const float radius = glm::length(localMax - center);
 			entry.boundsCenterRadius = glm::vec4(center, radius);
@@ -2197,10 +2202,10 @@ namespace Engine
 
 			GpuCullInputInstanceData input{};
 			input.instance.model = tf.GetWorldMatrix(registry);
-			input.instance.aabbMin = slot.material->mesh->meshBufferData->aabbMin;
-			input.instance.aabbMax = slot.material->mesh->meshBufferData->aabbMax;
-			input.instance.textureIndex = slot.material->albedoMap ? slot.material->albedoMap->GetBindlessIndex() : 0;
-			input.instance.hasTexture = slot.material->albedoMap ? 1.0f : 0.0f;
+			input.instance.aabbMin = slot.material->meshBufferData->aabbMin;
+			input.instance.aabbMax = slot.material->meshBufferData->aabbMax;
+			input.instance.textureIndex = slot.material->GetAlbedoMap() ? slot.material->GetAlbedoMap()->GetBindlessIndex() : 0;
+			input.instance.hasTexture = slot.material->GetAlbedoMap() ? 1.0f : 0.0f;
 			input.instance.meshInfoIndex = slot.meshID;
 			input.instance.materialIndex = slot.subMaterialIndex;
 			input.instance.indexCount = slot.indexCount;
@@ -2963,8 +2968,8 @@ namespace Engine
 			const glm::vec3& pos = transform.GetPosition(); // In virtual canvas units
 			const glm::vec3& scale = transform.GetScale();  // Width & height in virtual canvas units
 
-			const std::shared_ptr<MaterialData>& mat = matComp.data;
-			const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+			const std::shared_ptr<LegacyRenderBinding>& mat = matComp.binding;
+			const MeshBufferData& mesh = *mat->meshBufferData;
 			const glm::mat4& model = transform.GetWorldMatrix(registry);
 
 			// First do a simple cull check 
@@ -2975,12 +2980,12 @@ namespace Engine
 					if (registry.any_of<FrustumCullCache>(entity))
 					{
 						auto& cache = registry.get<FrustumCullCache>(entity);
-						if (!frustum.IsVisibleCached(cache, glm::vec3(matComp.data->mesh->meshBufferData->aabbMin), glm::vec3(matComp.data->mesh->meshBufferData->aabbMax), model, transform.GetWorldVersion()))
+						if (!frustum.IsVisibleCached(cache, glm::vec3(matComp.binding->meshBufferData->aabbMin), glm::vec3(matComp.binding->meshBufferData->aabbMax), model, transform.GetWorldVersion()))
 						{
 							return;
 						}
 					}
-					else if (!frustum.IsVisibleLazy(matComp.data->mesh->meshBufferData->aabbMin, matComp.data->mesh->meshBufferData->aabbMax, model))
+					else if (!frustum.IsVisibleLazy(matComp.binding->meshBufferData->aabbMin, matComp.binding->meshBufferData->aabbMax, model))
 					{
 						return;
 					}
@@ -3063,10 +3068,10 @@ namespace Engine
 			{
 				MeshDecorator& deco = registry.get<MeshDecorator>(entity);
 
-				bool useTex = deco.useMaterialTexture && mat->albedoMap;
+				bool useTex = deco.useMaterialTexture && mat->GetAlbedoMap();
 
 				instance.hasTexture = useTex ? 1.0f : 0.0f;
-				instance.textureIndex = useTex ? mat->albedoMap->GetBindlessIndex() : 0;
+				instance.textureIndex = useTex ? mat->GetAlbedoMap()->GetBindlessIndex() : 0;
 
 				glm::vec2 radiusPx;
 				glm::vec2 strokePx;
@@ -3109,8 +3114,8 @@ namespace Engine
 			else
 			{
 				// If we have no decorator to determine special texture handling, then set it the regular way.
-				instance.hasTexture = mat->albedoMap ? 1.0f : 0.0f;
-				instance.textureIndex = mat->albedoMap ? mat->albedoMap->GetBindlessIndex() : 0;
+				instance.hasTexture = mat->GetAlbedoMap() ? 1.0f : 0.0f;
+				instance.textureIndex = mat->GetAlbedoMap() ? mat->GetAlbedoMap()->GetBindlessIndex() : 0;
 
 				// Meshes in screen space with no decorator need to be drawn with their meshes color, since fill color is a property of Decorator.
 				// So we mark fill color as -1.0f as a flag to the shader to use mesh color sample instead.
@@ -3122,7 +3127,7 @@ namespace Engine
 				data.enableFill = 1;
 				data.enableStroke = 0;
 				data.roundCorners = 0;
-				data.useTexture = mat->albedoMap ? 1 : 0;
+				data.useTexture = mat->GetAlbedoMap() ? 1 : 0;
 				data.renderOnTop = 0;
 			}
 

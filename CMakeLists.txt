@@ -52,6 +52,8 @@ endif()
 option(SWIM_BUILD_LEGACY_ENGINE "Build the existing renderer/game runtime while it is being migrated" ${SWIM_BUILD_LEGACY_ENGINE_DEFAULT})
 option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
 option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
+option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
+option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -187,6 +189,54 @@ else()
 	target_compile_options(SwimAssets PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# Source-format importers are tooling dependencies, not runtime asset
+# dependencies. Keep fastgltf and its parser dependency on this side of the
+# boundary so shipping/runtime targets do not inherit importer object graphs.
+if(SWIM_BUILD_ASSET_COMPILER)
+	set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+	set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler")
+	include(cmake/AssetCompilerDependencies.cmake)
+	set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+	unset(SWIM_SAVED_CMAKE_FOLDER)
+endif()
+
+add_library(SwimAssetCompilerPublicHeaders OBJECT EXCLUDE_FROM_ALL
+	Source/Tests/AssetCompiler/PublicHeaderCompile.cpp
+)
+target_include_directories(SwimAssetCompilerPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimAssetCompilerPublicHeaders PRIVATE cxx_std_20)
+swim_set_solution_folder(SwimAssetCompilerPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
+	file(GLOB_RECURSE SWIM_ASSET_COMPILER_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.h
+	)
+
+	add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES})
+	add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)
+	target_include_directories(SwimAssetCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimAssetCompiler
+		PUBLIC Swim::Assets
+		PRIVATE fastgltf::fastgltf meshoptimizer
+	)
+	target_compile_features(SwimAssetCompiler PUBLIC cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES})
+	swim_set_solution_folder(SwimAssetCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
+
+	if(MSVC)
+		target_compile_options(SwimAssetCompiler PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimAssetCompiler PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+
+	add_executable(SwimAssetCooker Source/Tools/AssetCooker/Main.cpp)
+	target_link_libraries(SwimAssetCooker PRIVATE Swim::AssetCompiler)
+	target_include_directories(SwimAssetCooker PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_features(SwimAssetCooker PRIVATE cxx_std_20)
+	swim_set_solution_folder(SwimAssetCooker "${SWIM_SOLUTION_FOLDER_TOOLS}")
+endif()
+
 file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
@@ -302,6 +352,43 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	target_include_directories(SwimAssetSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimAssetSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+	add_executable(SwimKtx2ContainerTests EXCLUDE_FROM_ALL Source/Tests/Assets/Ktx2ContainerTests.cpp)
+	target_link_libraries(SwimKtx2ContainerTests PRIVATE Swim::Assets)
+	target_include_directories(SwimKtx2ContainerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimKtx2ContainerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	if(TARGET SwimAssetCompiler)
+		add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/GltfImporterTests.cpp)
+		target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimGltfImporterTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimGltfImporterTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+		add_executable(SwimMeshOptimizerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/MeshOptimizerTests.cpp)
+		target_link_libraries(SwimMeshOptimizerTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimMeshOptimizerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimMeshOptimizerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+		add_executable(SwimKtx2TextureCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/Ktx2TextureCompilerTests.cpp)
+		target_link_libraries(SwimKtx2TextureCompilerTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimKtx2TextureCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimKtx2TextureCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+		add_executable(SwimSassetFormatTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/SassetFormatTests.cpp)
+		target_link_libraries(SwimSassetFormatTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimSassetFormatTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimSassetFormatTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+		add_executable(SwimStaticModelCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/StaticModelCompilerTests.cpp)
+		target_link_libraries(SwimStaticModelCompilerTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimStaticModelCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimStaticModelCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+		add_executable(SwimDevelopmentAssetPipelineTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/DevelopmentAssetPipelineTests.cpp)
+		target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimDevelopmentAssetPipelineTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimDevelopmentAssetPipelineTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+	endif()
+
 	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL Source/Examples/HeadlessCoreAssets.cpp)
 	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Core Swim::Jobs Swim::Assets)
 	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${CMAKE_SOURCE_DIR}/Source)
@@ -404,6 +491,11 @@ target_include_directories(SwimEngine PRIVATE
 	${CMAKE_SOURCE_DIR}/Source/Engine/Utility
 )
 
+set(SWIM_DEV_ASSET_AUTOCOOK_ENABLED OFF)
+if(SWIM_ENABLE_DEV_ASSET_AUTOCOOK AND TARGET SwimAssetCompiler)
+	set(SWIM_DEV_ASSET_AUTOCOOK_ENABLED ON)
+endif()
+
 target_compile_definitions(SwimEngine PRIVATE
 	NDEBUG
 	_CONSOLE
@@ -416,6 +508,7 @@ target_compile_definitions(SwimEngine PRIVATE
 	$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
 	$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
+	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
 )
 
 if(SWIM_ENABLE_PCH)
@@ -476,6 +569,10 @@ if(TARGET SwimPhysXBuild)
 	# Keep the external SDK build explicit so its staged .lib files exist before
 	# Swim Engine reaches the link step.
 	add_dependencies(SwimEngine SwimPhysXBuild)
+endif()
+
+if(SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
+	target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)
 endif()
 
 target_link_libraries(SwimEngine PRIVATE

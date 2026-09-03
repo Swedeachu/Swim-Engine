@@ -151,14 +151,14 @@ namespace Engine
 		if (reg.any_of<Material>(e))
 		{
 			Material& mat = reg.get<Material>(e);
-			if (mat.data->albedoMap)
+			if (mat.binding->GetAlbedoMap())
 			{
-				albedoTextureAssetFilePath = mat.data->albedoMap->GetFilePath();
+				albedoTextureAssetFilePath = mat.binding->GetAlbedoMap()->GetFilePath();
 			}
 
-			if (mat.data->mesh && mat.data->mesh->meshBufferData)
+			if (mat.binding->mesh && mat.binding->meshBufferData)
 			{
-				modelFilePath = materials->GetMaterialNameByID(mat.data->mesh->meshBufferData->GetMeshID()); 
+				modelFilePath = materials->GetMaterialNameByID(mat.binding->meshBufferData->GetMeshID()); 
 			}
 		}
 

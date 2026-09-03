@@ -8,7 +8,7 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "MaterialData.h"
+#include "LegacyRenderBinding.h"
 #include <tiny_gltf.h>
 
 namespace Engine
@@ -33,17 +33,17 @@ namespace Engine
     MaterialPool(MaterialPool&&) = delete;
     MaterialPool& operator=(MaterialPool&&) = delete;
 
-    // Retrieves or creates a MaterialData
-    std::shared_ptr<MaterialData> GetMaterialData(const std::string& name);
-    std::shared_ptr<MaterialData> GetMaterialDataByID(uint32_t id);
+    // Retrieves or creates a transitional legacy draw binding.
+    std::shared_ptr<LegacyRenderBinding> GetMaterialBinding(const std::string& name);
+    std::shared_ptr<LegacyRenderBinding> GetMaterialBindingByID(uint32_t id);
     std::string GetMaterialNameByID(uint32_t id);
-    std::shared_ptr<MaterialData> RegisterMaterialData(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap = nullptr);
+    std::shared_ptr<LegacyRenderBinding> RegisterMaterialBinding(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap = nullptr);
     bool MaterialExists(const std::string& name);
 
     // Load a GLB file from disk, this will be used for making a composite material (vector of materials)
-    std::vector<std::shared_ptr<MaterialData>> LoadAndRegisterCompositeMaterialFromGLB(const std::string& path);
-    std::vector<std::shared_ptr<MaterialData>> GetCompositeMaterialData(const std::string& name);
-    std::vector<std::shared_ptr<MaterialData>> LazyLoadAndGetCompositeMaterial(const std::string& path);
+    std::vector<std::shared_ptr<LegacyRenderBinding>> LoadAndRegisterCompositeMaterialFromGLB(const std::string& path);
+    std::vector<std::shared_ptr<LegacyRenderBinding>> GetCompositeMaterialData(const std::string& name);
+    std::vector<std::shared_ptr<LegacyRenderBinding>> LazyLoadAndGetCompositeMaterial(const std::string& path);
     bool CompositeMaterialExists(const std::string& name);
     
 
@@ -62,12 +62,12 @@ namespace Engine
       int nodeIndex,
       const glm::mat4& parentTransform,
       const std::string& path,
-      std::vector<std::shared_ptr<MaterialData>>& loadedMaterials
+      std::vector<std::shared_ptr<LegacyRenderBinding>>& loadedMaterials
     );
 
     mutable std::mutex poolMutex;
-    std::unordered_map<std::string, std::shared_ptr<MaterialData>> materials;
-    std::unordered_map<std::string, std::vector<std::shared_ptr<MaterialData>>> compositeMaterials;
+    std::unordered_map<std::string, std::shared_ptr<LegacyRenderBinding>> materials;
+    std::unordered_map<std::string, std::vector<std::shared_ptr<LegacyRenderBinding>>> compositeMaterials;
 
   };
 

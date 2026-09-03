@@ -1,23 +1,26 @@
 #pragma once
 
 #include "Vertex.h"
-#include "MeshBufferData.h"
+
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace Engine
 {
 
-  struct Mesh
-  {
-    std::vector<Vertex> vertices; 
-    std::vector<uint32_t> indices; 
+	// Transitional CPU-only mesh payload used by the legacy renderer. Backend
+	// buffer residency is owned separately by the renderer residency pool.
+	struct Mesh
+	{
+		std::vector<Vertex> vertices;
+		std::vector<uint32_t> indices;
 
-    std::shared_ptr<MeshBufferData> meshBufferData;
+		Mesh() = default;
 
-    Mesh() = default;
+		Mesh(std::vector<Vertex> v, std::vector<uint32_t> i)
+			: vertices(std::move(v)), indices(std::move(i))
+		{}
+	};
 
-    Mesh(std::vector<Vertex> v, std::vector<uint32_t> i)
-      : vertices(std::move(v)), indices(std::move(i))
-    {}
-  };
-
-} 
+}

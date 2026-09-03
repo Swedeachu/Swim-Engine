@@ -106,13 +106,13 @@ namespace Engine
 			bool foundAny = false;
 			for (const auto& mat : composite.subMaterials)
 			{
-				if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+				if (!mat || !mat->mesh || !mat->meshBufferData)
 				{
 					continue;
 				}
 
-				const glm::vec3& min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
-				const glm::vec3& max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+				const glm::vec3& min = glm::vec3(mat->meshBufferData->aabbMin);
+				const glm::vec3& max = glm::vec3(mat->meshBufferData->aabbMax);
 
 				outLocalMin = glm::min(outLocalMin, min);
 				outLocalMax = glm::max(outLocalMax, max);
@@ -183,7 +183,16 @@ namespace Engine
 
 	AABB SceneBVH::CalculateWorldAABB(const std::shared_ptr<Mesh>& mesh, const Transform& transform)
 	{
-		return CalculateWorldAABB(entt::null, glm::vec3(mesh->meshBufferData->aabbMin), glm::vec3(mesh->meshBufferData->aabbMax), transform);
+		glm::vec3 localMin(std::numeric_limits<float>::max());
+		glm::vec3 localMax(std::numeric_limits<float>::lowest());
+
+		for (const Vertex& vertex : mesh->vertices)
+		{
+			localMin = glm::min(localMin, vertex.position);
+			localMax = glm::max(localMax, vertex.position);
+		}
+
+		return CalculateWorldAABB(entt::null, localMin, localMax, transform);
 	}
 
 	AABB SceneBVH::CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform)
@@ -243,10 +252,10 @@ namespace Engine
 
 			if (registry.all_of<Material>(e))
 			{
-				const std::shared_ptr<MaterialData>& mat = registry.get<Material>(e).data;
-				if (mat && mat->mesh && mat->mesh->meshBufferData)
+				const std::shared_ptr<LegacyRenderBinding>& mat = registry.get<Material>(e).binding;
+				if (mat && mat->mesh && mat->meshBufferData)
 				{
-					worldAABB = CalculateWorldAABB(e, glm::vec3(mat->mesh->meshBufferData->aabbMin), glm::vec3(mat->mesh->meshBufferData->aabbMax), tf);
+					worldAABB = CalculateWorldAABB(e, glm::vec3(mat->meshBufferData->aabbMin), glm::vec3(mat->meshBufferData->aabbMax), tf);
 					hasRenderableBounds = true;
 				}
 			}
@@ -511,15 +520,15 @@ namespace Engine
 				continue;
 			}
 
-			const auto& material = view.get<Material>(e).data;
-			if (!material || !material->mesh || !material->mesh->meshBufferData)
+			const auto& material = view.get<Material>(e).binding;
+			if (!material || !material->mesh || !material->meshBufferData)
 			{
 				continue;
 			}
 
 			BVHNode leaf;
 			leaf.entity = e;
-			leaf.aabb = CalculateWorldAABB(e, glm::vec3(material->mesh->meshBufferData->aabbMin), glm::vec3(material->mesh->meshBufferData->aabbMax), tf);
+			leaf.aabb = CalculateWorldAABB(e, glm::vec3(material->meshBufferData->aabbMin), glm::vec3(material->meshBufferData->aabbMax), tf);
 			leaf.fatAABB = MakeFatAABB(leaf.aabb);
 
 			const int idx = static_cast<int>(nodes.size());
@@ -1451,13 +1460,13 @@ namespace Engine
 
 					for (const auto& mat : comp.subMaterials)
 					{
-						if (!mat || !mat->mesh || !mat->mesh->meshBufferData)
+						if (!mat || !mat->mesh || !mat->meshBufferData)
 						{
 							continue;
 						}
 
-						const glm::vec3 min = glm::vec3(mat->mesh->meshBufferData->aabbMin);
-						const glm::vec3 max = glm::vec3(mat->mesh->meshBufferData->aabbMax);
+						const glm::vec3 min = glm::vec3(mat->meshBufferData->aabbMin);
+						const glm::vec3 max = glm::vec3(mat->meshBufferData->aabbMax);
 
 						// Transform AABB to world space (same 8 corner expansion used in your CalculateWorldAABB)
 						glm::vec3 worldMin = glm::vec3(model * glm::vec4(min, 1.0f));

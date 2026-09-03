@@ -1,22 +1,26 @@
 #pragma once
 
-#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
+
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace Engine
 {
 
-	// A component to give each entity for which shared material datas to use at render time when using a complex model that is composed of many meshes with materials.
+	// Transitional collection of independent mesh/material draw bindings for a
+	// complex model. The final path is ModelAsset nodes + material-slot handles.
 	struct CompositeMaterial
 	{
-
-		std::vector<std::shared_ptr<MaterialData>> subMaterials;
-		std::string filePath; // the path this mesh was loaded from
+		std::vector<std::shared_ptr<LegacyRenderBinding>> subMaterials;
+		std::string filePath;
 
 		CompositeMaterial() = default;
-		explicit CompositeMaterial(std::vector<std::shared_ptr<MaterialData>> data, const std::string& filePath = "")
+		explicit CompositeMaterial(std::vector<std::shared_ptr<LegacyRenderBinding>> data, const std::string& filePath = "")
 			: subMaterials(std::move(data)), filePath(filePath)
 		{}
-
 	};
 
 }

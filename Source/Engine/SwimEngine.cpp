@@ -9,6 +9,10 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 
+#if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
+#include "Tools/AssetCompiler/DevelopmentAssetPipeline.h"
+#endif
+
 #include <filesystem>
 #include <stdexcept>
 
@@ -287,6 +291,21 @@ namespace Engine
 			std::cerr << "[Engine] Failed to initialize AssetSystem.\n";
 			return -1;
 		}
+
+#if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
+		{
+			const auto bootstrap = Swim::AssetCompiler::RunDevelopmentAssetBootstrap(
+				platformSystem->GetFileSystem().GetAssetRoot(), *assetSystem);
+			std::cout << "[Assets] Sources: " << bootstrap.Stats.SourcesDiscovered
+				<< ", current: " << bootstrap.Stats.SourcesCurrent
+				<< ", cooked: " << bootstrap.Stats.SourcesCooked
+				<< ", loaded .sasset files: " << bootstrap.Stats.SassetsLoaded << ".\n";
+			for (const auto& error : bootstrap.Errors)
+			{
+				std::cerr << "[Assets] " << error.SourcePath.string() << ": " << error.Message << '\n';
+			}
+		}
+#endif
 
 		inputManager = std::make_unique<InputManager>();
 		commandSystem = std::make_unique<CommandSystem>();

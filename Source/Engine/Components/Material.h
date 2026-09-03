@@ -1,23 +1,23 @@
 #pragma once
 
 #include <memory>
-#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include <utility>
+#include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
 
 namespace Engine
 {
 
-	// A component to give each entity for which shared material data to use at render time
-  struct Material
-  {
+	// Transitional scene render binding. Mesh and material are independent
+	// resources; the component only pairs them for the legacy renderer.
+	struct Material
+	{
+		std::shared_ptr<LegacyRenderBinding> binding;
 
-    std::shared_ptr<MaterialData> data;
+		Material() = default;
 
-    Material() = default;
-
-    Material(std::shared_ptr<MaterialData> matPtr)
-      : data(std::move(matPtr))
-    {}
-
-  };
+		explicit Material(std::shared_ptr<LegacyRenderBinding> renderBinding)
+			: binding(std::move(renderBinding))
+		{}
+	};
 
 }

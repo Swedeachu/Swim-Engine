@@ -66,11 +66,11 @@ namespace Game
 		auto mesh2 = meshPool.RegisterMesh("RainbowQuad", rainBowQuad.vertices, rainBowQuad.indices);
 
 		// Register both material data
-		auto materialData1 = materialPool.RegisterMaterialData(
+		auto materialData1 = materialPool.RegisterMaterialBinding(
 			"alien material", mesh1, texturePool.GetTexture2DLazy("alien")
 		);
 
-		auto materialData2 = materialPool.RegisterMaterialData(
+		auto materialData2 = materialPool.RegisterMaterialBinding(
 			"mart material", mesh2, texturePool.GetTexture2DLazy("mart")
 		);
 
@@ -83,7 +83,7 @@ namespace Game
 
 		auto sphereMesh = meshPool.RegisterMesh("Sphere", sphereData.vertices, sphereData.indices);
 
-		auto sphereDataMaterial = materialPool.RegisterMaterialData("sphere material", sphereMesh);
+		auto sphereDataMaterial = materialPool.RegisterMaterialBinding("sphere material", sphereMesh);
 
 		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
 		Engine::EntityFactory& entityFactory = GetEntityFactory();
@@ -91,9 +91,9 @@ namespace Game
 		// Make a static quad entity in world space but with UI decorator on it, essentially a bill board (TODO: billboard behavior to always face the camera via rotation)
 		auto billboard = CreateEntity();
 		AddComponent<Engine::Transform>(billboard, Engine::Transform(glm::vec3(3.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
-		AddComponent<Engine::Material>(billboard, materialData2);
-		// AddComponent<Engine::Material>(billboard, sphereDataMaterial); // extreme trollage
-		// AddComponent<Engine::Material>(billboard, materialData1); // cube 3D mesh with UI decorators on it
+		AddComponent<Engine::Material>(billboard, Engine::Material(materialData2));
+		// AddComponent<Engine::Material>(billboard, Engine::Material(sphereDataMaterial)); // extreme trollage
+		// AddComponent<Engine::Material>(billboard, Engine::Material(materialData1)); // cube 3D mesh with UI decorators on it
 
 		///* World space UI 
 		Engine::MeshDecorator billboardDecorator = Engine::MeshDecorator(
@@ -192,7 +192,7 @@ namespace Game
 		// Sponza 3D model test
 		if constexpr (doSponza)
 		{
-			std::vector<std::shared_ptr<Engine::MaterialData>> sponzaData;
+			std::vector<std::shared_ptr<Engine::LegacyRenderBinding>> sponzaData;
 			std::cout << "Sponza load time\n";
 
 			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)

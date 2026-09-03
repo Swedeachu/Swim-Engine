@@ -42,28 +42,28 @@ namespace Game
 		{
 			auto data = Engine::MakeSphere(lat, lon, c, c, c);
 			auto mesh = p.meshPool.RegisterMesh(name, data.vertices, data.indices);
-			return p.materialPool.RegisterMaterialData(name + "_mat", mesh);
+			return p.materialPool.RegisterMaterialBinding(name + "_mat", mesh);
 		}
 
 		inline auto MakeSolidCylinder(Pools& p, const std::string& name, const glm::vec3& c, float r = 0.25f, float h = 1.0f, uint32_t seg = 64)
 		{
 			auto data = Engine::MakeCylinder(r, h, seg, c);
 			auto mesh = p.meshPool.RegisterMesh(name, data.vertices, data.indices);
-			return p.materialPool.RegisterMaterialData(name + "_mat", mesh);
+			return p.materialPool.RegisterMaterialBinding(name + "_mat", mesh);
 		}
 
 		inline auto MakeSolidCone(Pools& p, const std::string& name, const glm::vec3& c, float r = 0.5f, float h = 1.0f, uint32_t seg = 64)
 		{
 			auto data = Engine::MakeCone(r, h, seg, c);
 			auto mesh = p.meshPool.RegisterMesh(name, data.vertices, data.indices);
-			return p.materialPool.RegisterMaterialData(name + "_mat", mesh);
+			return p.materialPool.RegisterMaterialBinding(name + "_mat", mesh);
 		}
 
 		inline auto MakeSolidTorus(Pools& p, const std::string& name, const glm::vec3& c, float outerR, float thickness, uint32_t segU = 48, uint32_t segV = 24)
 		{
 			auto data = Engine::MakeTorus(outerR, thickness, segU, segV, c);
 			auto mesh = p.meshPool.RegisterMesh(name, data.vertices, data.indices);
-			return p.materialPool.RegisterMaterialData(name + "_mat", mesh);
+			return p.materialPool.RegisterMaterialBinding(name + "_mat", mesh);
 		}
 
 		inline auto MakeSolidArrow(Pools& p, const std::string& name, const glm::vec3& c,
@@ -71,11 +71,11 @@ namespace Game
 		{
 			auto data = Engine::MakeArrow(shaftR, shaftL, headR, headL, seg, c);
 			auto mesh = p.meshPool.RegisterMesh(name, data.vertices, data.indices);
-			return p.materialPool.RegisterMaterialData(name + "_mat", mesh);
+			return p.materialPool.RegisterMaterialBinding(name + "_mat", mesh);
 		}
 
 		inline void SpawnAt(Engine::Scene* scene, const glm::vec3& pos, const glm::vec3& scl,
-			const glm::quat& rot, std::shared_ptr<Engine::MaterialData> matHandle)
+			const glm::quat& rot, std::shared_ptr<Engine::LegacyRenderBinding> matHandle)
 		{
 			auto e = scene->CreateEntity();
 			Engine::Transform t;
@@ -87,9 +87,9 @@ namespace Game
 		}
 
 		inline void SpawnTripletRow(Engine::Scene* scene, float x0, float stepX, float y, float z,
-			std::shared_ptr<Engine::MaterialData> m0,
-			std::shared_ptr<Engine::MaterialData> m1,
-			std::shared_ptr<Engine::MaterialData> m2)
+			std::shared_ptr<Engine::LegacyRenderBinding> m0,
+			std::shared_ptr<Engine::LegacyRenderBinding> m1,
+			std::shared_ptr<Engine::LegacyRenderBinding> m2)
 		{
 			SpawnAt(scene, { x0 + 0 * stepX, y, z }, { 1,1,1 }, glm::quat(1, 0, 0, 0), m0);
 			SpawnAt(scene, { x0 + 1 * stepX, y, z }, { 1,1,1 }, glm::quat(1, 0, 0, 0), m1);
@@ -193,7 +193,7 @@ namespace Game
 			for (auto& v : darkVerts) v.color = DARK_GREY;
 
 			auto planeMesh = p.meshPool.RegisterMesh("Prim_DarkGreyPlane", darkVerts, cubeData.indices);
-			auto planeMat = p.materialPool.RegisterMaterialData("Prim_DarkGreyPlane_Mat", planeMesh);
+			auto planeMat = p.materialPool.RegisterMaterialBinding("Prim_DarkGreyPlane_Mat", planeMesh);
 
 			const glm::vec3 planeScale(2.0f, 0.02f, 2.0f);
 			const glm::vec3 planePos(-20.0f, 0.0f, 0.0f);

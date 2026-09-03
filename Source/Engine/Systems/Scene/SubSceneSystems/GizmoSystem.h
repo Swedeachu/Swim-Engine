@@ -10,6 +10,8 @@ namespace Engine
 
 	// Forward declared
 	class Scene;
+	struct Mesh;
+	struct LegacyRenderBinding;
 
 	enum class GizmoType : int
 	{
@@ -80,14 +82,14 @@ namespace Engine
 		std::shared_ptr<Mesh> ballArrowMesh;
 		std::shared_ptr<Mesh> halfTorusMesh;
 
-		std::shared_ptr<MaterialData> sphereMatData;
-		std::shared_ptr<MaterialData> arrowMatData;
-		std::shared_ptr<MaterialData> ringMatData;
-		std::shared_ptr<MaterialData> cubeMatData;
-		std::shared_ptr<MaterialData> quadMatData;
-		std::shared_ptr<MaterialData> circleMatData;
-		std::shared_ptr<MaterialData> ballArrowMatData;
-		std::shared_ptr<MaterialData> halfTorusMatData;
+		std::shared_ptr<LegacyRenderBinding> sphereMatData;
+		std::shared_ptr<LegacyRenderBinding> arrowMatData;
+		std::shared_ptr<LegacyRenderBinding> ringMatData;
+		std::shared_ptr<LegacyRenderBinding> cubeMatData;
+		std::shared_ptr<LegacyRenderBinding> quadMatData;
+		std::shared_ptr<LegacyRenderBinding> circleMatData;
+		std::shared_ptr<LegacyRenderBinding> ballArrowMatData;
+		std::shared_ptr<LegacyRenderBinding> halfTorusMatData;
 
 		std::shared_ptr<Scene> activeScene;
 

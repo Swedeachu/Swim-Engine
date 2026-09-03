@@ -2,7 +2,7 @@
 #include "SceneDebugDraw.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
-#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/MeshDecorator.h"
@@ -15,7 +15,7 @@ namespace Engine
 	{
 		auto cubeData = MakeCube();
 		cubeMesh = meshes->RegisterMesh("DebugDrawCube", cubeData.vertices, cubeData.indices);
-		cubeMaterialData = materials->RegisterMaterialData("DebugDrawCubeMaterial", cubeMesh);
+		cubeMaterialData = materials->RegisterMaterialBinding("DebugDrawCubeMaterial", cubeMesh);
 
 		auto sphereData = MakeSphere(
 			24, 48,
@@ -24,10 +24,10 @@ namespace Engine
 			glm::vec3(1, 1, 1)
 		);
 		sphereMesh = meshes->RegisterMesh("DebugDrawSphere", sphereData.vertices, sphereData.indices);
-		sphereMaterialData = materials->RegisterMaterialData("DebugDrawSphereMaterial", sphereMesh);
+		sphereMaterialData = materials->RegisterMaterialBinding("DebugDrawSphereMaterial", sphereMesh);
 
 		wireFrameCubeMesh = CreateAndRegisterWireframeBoxMesh(DebugColor::White, "DebugDrawCubeWireFrame");
-		wireFrameCubeMaterialData = materials->RegisterMaterialData("DebugDrawCubeWireFrameMaterial", wireFrameCubeMesh);
+		wireFrameCubeMaterialData = materials->RegisterMaterialBinding("DebugDrawCubeWireFrameMaterial", wireFrameCubeMesh);
 	}
 
 	std::shared_ptr<Mesh> SceneDebugDraw::CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName)
@@ -106,7 +106,7 @@ namespace Engine
 		return meshes->RegisterMesh(meshName, vertices, indices);
 	}
 
-	std::shared_ptr<MaterialData> SceneDebugDraw::GetMeshMaterialDataFromType(MeshBoxType type)
+	std::shared_ptr<LegacyRenderBinding> SceneDebugDraw::GetMeshMaterialDataFromType(MeshBoxType type)
 	{
 		if (type == MeshBoxType::BevelledCube)
 		{

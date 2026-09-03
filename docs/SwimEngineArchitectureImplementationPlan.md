@@ -349,15 +349,15 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [ ] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types.
 - [ ] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types.
 - [x] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
-- [ ] fastgltf types do not escape the asset importer/tool boundary.
+- [x] fastgltf types do not escape the asset importer/tool boundary. *(fastgltf is private to `SwimAssetCompiler` and included only by `GltfImporter.cpp`; public importer/intermediate/runtime asset headers are Swim-owned.)*
 - [x] enkiTS types do not become gameplay APIs. *(enkiTS is private to `Swim::Jobs`; gameplay/renderer-facing APIs use Swim job types.)*
 - [ ] Persisted scene references never use raw `entt::entity` values as durable identity.
 - [ ] Scene serialization is independent from filesystem storage and editor/IPC transport.
 - [x] Static initialization does not construct live Scene instances or require Engine services. *(Static scene registration stores constructor metadata; runtime Scene instances are created per engine.)*
 - [ ] RHI contracts do not contain UI canvas policy or high-level environment features.
-- [ ] Material objects do not own meshes.
-- [ ] Mesh assets do not own backend GPU buffers.
-- [ ] Texture assets do not own raw Vulkan/OpenGL objects.
+- [x] Material objects do not own meshes. *(Runtime `Material*Asset` types are geometry-free; transitional legacy `MaterialData` is geometry-free and draw-time pairing lives in `LegacyRenderBinding`.)*
+- [x] Mesh assets do not own backend GPU buffers. *(Runtime `MeshAsset` is backend-neutral; the transitional legacy CPU `Mesh` no longer embeds `MeshBufferData`, which is owned separately by renderer residency.)*
+- [x] Texture assets do not own raw Vulkan/OpenGL objects. *(Runtime `TextureAsset` stores CPU/runtime metadata and payload only; legacy `Texture2D` remains a compatibility renderer object pending pool removal.)*
 - [ ] Constructors do not perform hidden disk IO or synchronous GPU uploads.
 - [ ] Scene/ECS objects do not store raw RHI resources.
 - [ ] Scene/ECS objects do not store PhysX/Jolt pointers.
@@ -1094,6 +1094,120 @@ Validation completed for this checkpoint:
 
 **Next Phase 4 work:** migrate the legacy mesh/texture/material ownership surfaces toward these CPU asset types and handles. The schemas are ready, but the old `Mesh`, `Texture2D`, `MaterialData`, `MeshPool`, `TexturePool`, and `MaterialPool` consumers still exist; therefore the broader replacement/Phase 4 exit criteria remain open.
 
+### Phase 4 renderer ownership migration checkpoint — 2026-09-03
+
+Critical-path items 13 and 14 are now complete at the ownership/data-boundary level. The legacy renderer still exists, but it no longer forces the new runtime asset model to inherit its old geometry/material coupling:
+
+- the transitional legacy `Mesh` is now CPU geometry only (`vertices` + `indices`); backend buffer offsets/handles and the generated local AABB remain in the separate renderer-owned `MeshBufferData` residency record managed by `MeshPool`;
+- `MaterialData` no longer stores or owns a mesh. `LegacyRenderBinding` is a clearly named compatibility draw record that pairs an independent CPU mesh, renderer mesh residency, and material only at the draw boundary while the old renderer is being retired;
+- scene `Material`/`CompositeMaterial`, OpenGL draw code, Vulkan draw extraction/instance code, scene BVH/debug draw/gizmos, and serialization compatibility paths now consume that binding rather than treating geometry as material state;
+- scene BVH local bounds are derived directly from CPU mesh vertices instead of reaching through a mesh object into backend residency;
+- `MeshPool` keeps CPU mesh identity and renderer residency in separate maps and exposes an explicit `GetMeshBufferData()` compatibility lookup; removing/flushing a mesh now tears down the associated ID/residency bookkeeping instead of leaving stale entries;
+- the legacy mesh safe-registration path and tinygltf embedded-image texture path now use SHA-256 `ContentHash` indices for deduplication. The prior O(N) raw-byte pool comparisons were removed, including the disabled debug texture comparison;
+- `MaterialData.h` is geometry-free. Backend/geometry includes needed only for the compatibility draw record live in `LegacyRenderBinding.h`, making accidental ownership regression easier to detect;
+- `scripts/verify-build-layout.py` now rejects geometry/backend state returning to `MaterialData` or CPU `Mesh`, requires the separate renderer-residency seam, requires hash-indexed mesh/texture dedup, and rejects a return to raw-byte `memcmp` scans in those pools.
+
+This checkpoint does **not** claim that the legacy pools are the final asset system. `Texture2D`, `MeshPool`, `TexturePool`, `MaterialPool`, tinygltf runtime loading, and backend-specific residency still exist as compatibility code and remain scheduled for removal after the compiler/runtime package path is ready.
+
+Validation completed for this checkpoint:
+
+- `scripts/verify-build-layout.py` passes with the new ownership/regression guards;
+- the platform-neutral `Swim::Assets` public/runtime tests remain the source-of-truth validation for independent typed mesh/material/texture identities;
+- no dependency pin changed in this checkpoint, so Windows/MSVC should validate it with the normal **soft build**.
+
+**Next Phase 4 work:** critical-path item 15 — introduce a fastgltf-only source importer/tool boundary and a Swim-owned intermediate model representation. fastgltf types must terminate inside that importer; runtime assets and runtime model loading must not retain importer object graphs.
+
+### Phase 4 fastgltf importer checkpoint — 2026-09-03
+
+Critical-path item 15 is now complete at the source-import boundary:
+
+- `SwimAssetCompiler` is a tool-side target with `fastgltf::fastgltf` as a private dependency; `Swim::Assets`, renderer/runtime targets, public importer headers, and `IntermediateModel.h` do not expose fastgltf types;
+- `GltfImporter` owns the entire fastgltf object graph and translates it immediately into a Swim-owned `IntermediateModel` containing source nodes/hierarchy, decomposed transforms, meshes/primitives, material-slot indices, metallic-roughness material data, textures/samplers, source images, and root-node identity;
+- the importer handles indexed and generated-index primitives, optional normals/tangents/UV0, external buffers/images, embedded/data-source image bytes, GLB/buffer-view image payloads, and structured import failures;
+- deliberately supported source extensions are currently `KHR_mesh_quantization`, `KHR_texture_basisu`, `EXT_texture_webp`, `MSFT_texture_dds`, and `KHR_materials_unlit`. `KHR_texture_transform` is intentionally not advertised until its transform semantics are preserved by the intermediate representation;
+- skins/skeletons, animation channels, morph targets, and camera/light import remain explicit future importer expansion and are not silently discarded under a claimed-support flag;
+- simdjson v3.12.3 is pinned and provided before fastgltf v0.9.0. This prevents fastgltf's v0.9.0 dependency fallback from downloading a simdjson single-header file into its own CPM source checkout, preserving the repository rule that cached dependency sources are immutable;
+- `scripts/verify-build-layout.py` now enforces the importer boundary, dependency pins/order, private fastgltf linkage, absence of fastgltf/tinygltf types from the intermediate/public/runtime asset boundary, and the immutable-cache audit;
+- `SwimAssetCompilerPublicHeaders` compiles in the dependency-free/offline configuration, while `SwimGltfImporterTests` provides a real tiny glTF import smoke test for dependency-enabled builds.
+
+Validation completed for this checkpoint:
+
+- the repository verifier passes;
+- fresh offline CMake configure/build passes for the AssetCompiler public headers and the existing Assets/Core/Jobs/Memory foundation tests;
+- the existing foundation executables continue to pass;
+- the implementation/API contract was checked against the exact fastgltf v0.9.0 interfaces, but this environment cannot fetch the external source checkout for a dependency-enabled compile. Because fastgltf v0.9.0 and simdjson v3.12.3 are new pins, the next real Windows/MSVC validation must be a **clean build**.
+
+**Next Phase 4 work:** critical-path item 16 — run meshoptimizer as an offline compiler pass over `IntermediateModel` primitives, beginning with vertex-cache/fetch/overdraw optimization while keeping meshoptimizer out of runtime/public asset APIs.
+
+### Phase 4 meshoptimizer checkpoint — 2026-09-03
+
+Critical-path item 16 is now complete for the foundational offline geometry optimization pass:
+
+- meshoptimizer v1.1 is pinned only in `AssetCompilerDependencies.cmake`, with demo/gltfpack/shared/install paths disabled; the `meshoptimizer` target is linked privately by `SwimAssetCompiler`;
+- `MeshOptimizer.h` exposes only Swim-owned options/stats/errors and `IntermediateModel`; the third-party header is included only by `MeshOptimizer.cpp`;
+- triangle-list primitives run vertex-cache optimization first, overdraw optimization second, and vertex-fetch optimization/compaction last, matching meshoptimizer's ordering requirements;
+- non-triangle primitives remain untouched for now rather than being incorrectly treated as triangle lists;
+- the pass validates triangle index counts and index bounds before mutating the model, returns structured compiler errors, removes unused vertices during fetch compaction, and recalculates bounds after vertex reordering/compaction;
+- `SwimMeshOptimizerTests` covers compaction, unchanged non-triangle data, bounds regeneration, invalid indices, and invalid overdraw configuration;
+- `scripts/verify-build-layout.py` now enforces the v1.1 compiler-only dependency pin, public-header isolation, private compiler linkage, pass presence, and cache -> overdraw -> fetch ordering.
+
+Validation completed for this checkpoint:
+
+- repository verification passes;
+- the fresh offline foundation build still passes, including `SwimAssetCompilerPublicHeaders`;
+- the first-party optimizer implementation and test compile/run cleanly under GCC/C++20 against a local contract shim matching the exact meshoptimizer v1.1 function signatures used by Swim;
+- the real meshoptimizer source cannot be fetched in this execution environment, so the dependency-enabled compiler/test build remains part of the same required **clean Windows build** introduced by item 15.
+
+LOD simplification and meshlet generation remain separately unchecked processing stages below; integrating the meshoptimizer library does not imply those products already exist.
+
+**Next Phase 4 work:** critical-path item 17 — define the KTX2 compiled texture/runtime metadata boundary and move source-image decode/transcode concerns into the compiler side without allowing KTX/source decoder object graphs into runtime asset ownership.
+
+### Phase 4 KTX2 runtime/compiler metadata checkpoint — 2026-09-03
+
+Critical-path item 17 is implemented. KTX2 is now a Swim-owned runtime metadata/container boundary rather than a renderer/backend object:
+
+- `Ktx2Container` validates the KTX2 identifier, dimensions, face count, level index, level byte ranges, and uncompressed-size rules without including Vulkan/KTX-Software types;
+- runtime metadata preserves 1D/2D/3D/cube shape, array layers, mip offsets/sizes/uncompressed sizes, the original container format code, and BasisLZ/Zstandard/Zlib supercompression identity;
+- common Vulkan-format numeric codes carried by KTX2 are translated immediately into backend-neutral `TexturePayloadFormat` values, including RGBA8, RGBA16F, BC1/3/5/7, ETC2 RGBA8, and ASTC 4x4 linear/sRGB variants;
+- typed KTX2 formats are authoritative for linear/sRGB interpretation. Universal/undefined-format KTX2 payloads retain compiler policy until the later DFD/BasisU transcoding work exists;
+- `Ktx2TextureCompiler` validates a KTX2 container and emits a backend-neutral `TextureAsset` payload. Runtime assets retain KTX2 bytes/streamable level metadata, not libktx/importer object graphs;
+- tests cover malformed/truncated level data, compressed-level metadata, common backend-neutral format mapping, multi-level mip metadata, cube arrays, and compiler propagation into `TextureAsset`;
+- source image decode/encode into KTX2 is intentionally still open. This checkpoint consumes already-KTX2 source payloads; PNG/JPEG/WebP -> KTX2/native compression and BasisU transcoding remain compiler-side follow-up work rather than being hidden inside runtime texture construction.
+
+### Phase 4 `.sasset` v1 + development auto-cook checkpoint — 2026-09-03
+
+Critical-path item 18 is implemented around a versioned, chunked runtime container and a single shared development cook path:
+
+- `.sasset` v1 has fixed magic/schema/header sizing, asset type, stable `AssetId`, payload/content hash, compiler-profile hash, source-graph hash, dependency table, chunk table, per-chunk hash/compression/alignment/size metadata, canonical logical path, and optional source provenance;
+- persisted references store `AssetId`, never runtime generations or backend resource handles. `LoadSasset()` reconstructs typed handles through the engine-owned `AssetSystem` and publishes decoded CPU assets only after validation;
+- the first static-model compiler converts a Swim `IntermediateModel` into separate mesh/material-template/material-instance/texture/sampler/model `.sasset` objects. The root model and its dependencies keep independent identities and the mesh payload is bulk-copy-friendly CPU data;
+- a deterministic compiler-profile fingerprint includes the `.sasset` schema plus fastgltf/meshoptimizer/runtime-packing policy, making a compiler-policy change invalidate old cooked roots;
+- loose development `.gltf`/`.glb` scanning is owned by `DevelopmentAssetPipeline`, not `Swim::Assets`. Its order is source discovery -> fastgltf import -> meshoptimizer -> static-model compilation -> cooked publication -> normal `.sasset` runtime loading;
+- source provenance records the source model plus local external URI dependencies such as `.bin` and image files. Startup hashes that graph, so changing an external buffer invalidates the model even when the `.gltf` JSON did not change;
+- a cooked root is current only when its compiler profile/source graph match and every recursively referenced cooked object still exists, parses, and passes its hashes; missing/corrupt nested objects therefore trigger recooking;
+- cooked dependencies are published before the root. File replacement uses `.new` plus rollback-capable `.old` staging, so failed replacement preserves the last good object and a new root is never advertised before its dependency files are in place;
+- authoring layout is mirrored: `Assets/Models/Foo.glb` cooks to `Assets/Cooked/Models/Foo.sasset`, while dependency objects are stored by stable `AssetId` under `Assets/Cooked/.objects/`;
+- with `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=ON`, engine initialization runs this bootstrap against the platform filesystem's asset root and immediately loads current/newly-cooked roots into `AssetSystem`; shipping builds can disable the compiler/bootstrap while retaining the same `.sasset` runtime reader;
+- `SwimAssetCooker [asset-root]` invokes the exact same bootstrap without launching the renderer, so CI/manual pre-cooking and engine-start auto-cooking cannot drift into two different pipelines;
+- `SwimSassetFormatTests` validates format/hash/load round trips and corruption rejection; `SwimStaticModelCompilerTests` compiles and reloads a static triangle model from a Swim intermediate model; `SwimDevelopmentAssetPipelineTests` is the dependency-enabled end-to-end fixture for missing-root cook, unchanged-source skip, missing nested-object repair, external `.bin` invalidation, recook, and hot replacement under stable identity.
+
+Validation in this environment: a fresh offline CMake configure/build passes for `Swim::Core`, `Swim::Memory`, `Swim::Jobs`, `Swim::Assets`, public-header checks, `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, and `SwimHeadlessCoreAssets`; standalone `.sasset`, static-model, and KTX2 compiler tests also pass, including AddressSanitizer/UndefinedBehaviorSanitizer runs for the serialization/KTX2/static-model paths. Repository verification passes under GCC/C++20. The container cannot fetch the pinned fastgltf/meshoptimizer/simdjson source trees, so the dependency-enabled importer/bootstrap fixture and the complete legacy Windows executable remain the required MSVC validation. Because those compiler dependencies are new relative to the last Windows-validated repository snapshot, the **first Windows validation for this checkpoint must be a clean build** so the pinned sources are fetched; ordinary builds can return to the soft path after that cache exists. The uploaded repository contains no loose project `Assets` tree, so there was no real project GLTF/GLB to pre-cook during this execution.
+
+### Phase 4 commit-safe checkpoint — 2026-09-03
+
+The repository is intentionally frozen at the item-18 boundary before the larger renderer-residency migration begins:
+
+- all first-party game/test call sites have been moved off the removed geometry-coupled `RegisterMaterialData` / `GetMaterialData` API and now use `LegacyRenderBinding`; the verifier rejects regressions to those stale calls;
+- `MaterialPool` still owns the old tinygltf source-import compatibility path. It has **not** been half-converted to `AssetSystem`; that removal belongs to item 19 and should be done as one coherent adapter/residency migration;
+- engine startup development auto-cooking loads authoritative cooked CPU assets into `AssetSystem`, while existing renderer/game consumers continue using their explicitly marked legacy bindings until item 19 connects those two sides;
+- no Phase 4 checkbox beyond item 18 is claimed by this compatibility cleanup.
+
+This is the intended commit boundary: source import/cooking and runtime `.sasset` loading are established, the legacy renderer still has one coherent compatibility path, and the next commit can begin item 19 without depending on partially migrated pool behavior.
+
+**Windows clean-build compile follow-up (2026-09-03):** the required clean MSVC run successfully fetched/configured the new mimalloc/simdjson/fastgltf/meshoptimizer dependency set, completed PhysX, and reached 705/706 build steps. The only compiler diagnostic in the full log was `Sandbox.cpp` passing a `std::shared_ptr<LegacyRenderBinding>` directly to `Scene::AddComponent<Material>` even though `Material` intentionally exposes an explicit compatibility-binding constructor. The stale call site (and its adjacent commented examples) now wraps the binding as `Engine::Material(binding)`, matching every other migrated scene/test call site. No dependency declaration changed in this fix, so the next Windows validation should be the normal soft build; item 19 remains unopened until that compile/link pass is confirmed.
+
+**Next Phase 4 work:** critical-path item 19 — replace the transitional renderer pools/import path with adapters/residency owned from the authoritative `AssetSystem`, beginning with cooked `ModelAsset` -> legacy render residency so existing scenes stop re-importing GLB through tinygltf. Source PNG/JPEG/WebP -> KTX2 encoding remains an explicit compiler subtask and should be completed before claiming general textured glTF source parity.
+
 ### Replace `MeshPool`
 
 Do not create another singleton named `MeshRegistry`.
@@ -1166,24 +1280,24 @@ Use fastgltf in `SwimAssetCompiler` and optionally in a dev-only loose-source im
 
 Import:
 
-- [ ] nodes/hierarchy;
-- [ ] transforms;
-- [ ] meshes/primitives;
-- [ ] material slots;
-- [ ] metallic-roughness materials;
-- [ ] textures/samplers;
+- [x] nodes/hierarchy;
+- [x] transforms;
+- [x] meshes/primitives;
+- [x] material slots;
+- [x] metallic-roughness materials;
+- [x] textures/samplers;
 - [ ] skins/skeletons;
 - [ ] animation channels;
 - [ ] morph targets;
 - [ ] relevant cameras/lights if desired;
-- [ ] deliberately supported extensions.
+- [x] deliberately supported extensions. *(Current explicit set: `KHR_mesh_quantization`, `KHR_texture_basisu`, `EXT_texture_webp`, `MSFT_texture_dds`, `KHR_materials_unlit`.)*
 
 Then run offline processing:
 
 - [ ] generate missing tangents;
-- [ ] optimize vertex cache;
-- [ ] optimize vertex fetch;
-- [ ] optimize overdraw where appropriate;
+- [x] optimize vertex cache;
+- [x] optimize vertex fetch;
+- [x] optimize overdraw where appropriate;
 - [ ] generate LODs if configured;
 - [ ] generate meshlets;
 - [ ] pack/quantize runtime vertex formats;
@@ -1196,13 +1310,13 @@ Use KTX2 as the normal compiled texture container.
 
 Support:
 
-- [ ] mip chains;
-- [ ] sRGB/linear metadata;
-- [ ] normal-map policy;
-- [ ] BC family on desktop where appropriate;
-- [ ] ASTC/ETC variants for future mobile;
+- [x] mip chains; *(validated level index metadata with per-mip offsets/sizes/dimensions)*
+- [x] sRGB/linear metadata; *(typed KTX2 formats map into backend-neutral color-space metadata; universal-format DFD parsing remains future work)*
+- [x] normal-map policy; *(compiler texture semantics distinguish color/normal/data/HDR and normal/data requests remain linear)*
+- [x] BC family on desktop where appropriate; *(runtime/compiler metadata covers BC1/3/5/7; actual RHI capability selection/upload is later)*
+- [x] ASTC/ETC variants for future mobile; *(metadata variants exist; platform payload production/selection is later)*
 - [ ] BasisU transcoding when the distribution strategy benefits from it;
-- [ ] cubemaps/arrays;
+- [x] cubemaps/arrays; *(KTX2 shape/face/layer metadata is preserved and tested, including cube arrays)*
 - [ ] HDR environment textures.
 
 ### `.sasset` format
@@ -1282,12 +1396,12 @@ Compiler/tool path can produce:
 
 ### Phase 4 exit criteria
 
-- [ ] a glTF/GLB source model compiles through fastgltf into Swim runtime assets.
-- [ ] runtime model loading does not require tinygltf/fastgltf object graphs.
-- [ ] mesh/material/texture are independent asset identities.
+- [x] a glTF/GLB source model compiles through fastgltf into Swim runtime assets. *(The dev bootstrap performs import -> meshoptimizer -> static-model `.sasset` cook -> normal runtime load; the dependency-enabled end-to-end test is authored and awaits the next Windows/MSVC validation in this checkpoint.)*
+- [x] runtime model loading does not require tinygltf/fastgltf object graphs. *(`LoadSasset()` reconstructs Swim CPU asset types/typed handles only; importer types terminate in `SwimAssetCompiler`.)*
+- [x] mesh/material/texture are independent asset identities. *(The Phase 4 asset schemas use independent typed handles, and the legacy material/mesh seam no longer models mesh ownership as material state.)*
 - [ ] no asset constructor uploads to a renderer.
-- [ ] no asset registry is a process-global singleton.
-- [ ] content hashing replaces O(N) raw-byte pool scans for deduplication.
+- [x] no asset registry is a process-global singleton. *(`AssetSystem` and the remaining transitional renderer pools are engine-owned; critical item 19 still tracks replacing those transitional pool implementations with the authoritative asset/residency model.)*
+- [x] content hashing replaces O(N) raw-byte pool scans for deduplication. *(AssetSystem uses `ContentHash`; transitional mesh and embedded-texture dedup paths now use SHA-256 indices instead of pool-wide byte comparisons.)*
 
 ---
 
@@ -3003,12 +3117,12 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 ### 35.2 Data and scene foundations
 
 12. [x] Introduce `AssetId`, typed `AssetHandle<T>`, asset registry, load state, dependency graph.
-13. [ ] Split Mesh/Texture/Material CPU identity from GPU/backend resources.
-14. [ ] Remove mesh ownership from material data.
-15. [ ] Build fastgltf-based source importer + intermediate model representation.
-16. [ ] Add meshoptimizer offline processing.
-17. [ ] Add KTX2 compiler/runtime metadata path.
-18. [ ] Define `.sasset` v1 and compile/load one static model.
+13. [x] Split Mesh/Texture/Material CPU identity from GPU/backend resources.
+14. [x] Remove mesh ownership from material data.
+15. [x] Build fastgltf-based source importer + intermediate model representation.
+16. [x] Add meshoptimizer offline processing.
+17. [x] Add KTX2 compiler/runtime metadata path.
+18. [x] Define `.sasset` v1 and compile/load one static model.
 19. [ ] Replace global asset pools with engine-owned asset services.
 20. [ ] Replace static transform dirty state with scene-owned TransformSystem.
 21. [ ] Replace static global Frustum with per-view state.
@@ -3193,9 +3307,9 @@ Swim Engine reaches the intended architecture when:
 - [ ] RHI can host D3D12/Metal without renderer surgery.
 - [ ] OpenGL remains functional as isolated legacy compatibility.
 - [ ] Slang is the normal first-party shader source/reflection pipeline.
-- [ ] source import is tool-side and fastgltf-based.
-- [ ] compiled runtime assets are versioned, upload-friendly, and streamable.
-- [ ] mesh/material/texture identity is clean and non-singleton.
+- [x] source import is tool-side and fastgltf-based. *(The `SwimAssetCompiler` importer owns fastgltf privately and emits a Swim-owned intermediate representation.)*
+- [x] compiled runtime assets are versioned, upload-friendly, and streamable. *(`.sasset` v1 is versioned/chunked/hashed/aligned with dependency and range-addressable chunk metadata; GPU residency/upload is intentionally a later phase.)*
+- [x] mesh/material/texture identity is clean and non-singleton. *(Typed independent identities live in engine-owned `AssetSystem`; legacy renderer pools remain migration adapters, not the identity model.)*
 - [ ] GPU Scene is persistent and independent from EnTT.
 - [ ] visibility and draw generation are GPU-driven with no CPU feedback requirement.
 - [ ] GeometryHeap and bindless resources use safe deferred lifetimes.

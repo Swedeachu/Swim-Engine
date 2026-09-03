@@ -8,7 +8,7 @@
 namespace Engine
 {
 	class Scene;
-	struct MaterialData;
+	struct LegacyRenderBinding;
 	struct Mesh;
 }
 
@@ -50,7 +50,7 @@ namespace Game
 		float  respawnDelay = 0.25f;    // seconds after destroy
 
 		std::shared_ptr<Engine::Mesh>          sharedSphereMesh{};
-		std::shared_ptr<Engine::MaterialData>  starMat{};
+		std::shared_ptr<Engine::LegacyRenderBinding> starMat{};
 
 		entt::entity starEntity{ entt::null };
 

@@ -638,14 +638,14 @@ namespace Engine
 			const auto& composite = registry.get<CompositeMaterial>(entity);
 			for (const auto& mat : composite.subMaterials)
 			{
-				const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+				const MeshBufferData& meshData = *mat->meshBufferData;
 
 				glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
 
-				bool usesTexture = (mat->albedoMap != nullptr);
+				bool usesTexture = (mat->GetAlbedoMap() != nullptr);
 				glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
 
-				GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+				GLuint texID = usesTexture ? mat->GetAlbedoMap()->GetTextureID() : missingTexture->GetTextureID();
 				glActiveTexture(GL_TEXTURE0);
 				glBindTexture(GL_TEXTURE_2D, texID);
 				glUniform1i(loc_albedoTex, 0);
@@ -666,15 +666,15 @@ namespace Engine
 		}
 
 		// === Regular Material handling ===
-		const auto& mat = registry.get<Material>(entity).data;
-		const MeshBufferData& meshData = *mat->mesh->meshBufferData;
+		const auto& mat = registry.get<Material>(entity).binding;
+		const MeshBufferData& meshData = *mat->meshBufferData;
 
 		glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, &mvp[0][0]);
 
-		bool usesTexture = (mat->albedoMap != nullptr);
+		bool usesTexture = (mat->GetAlbedoMap() != nullptr);
 		glUniform1f(loc_hasTexture, usesTexture ? 1.0f : 0.0f);
 
-		GLuint texID = usesTexture ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		GLuint texID = usesTexture ? mat->GetAlbedoMap()->GetTextureID() : missingTexture->GetTextureID();
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, texID);
 		glUniform1i(loc_albedoTex, 0);
@@ -769,7 +769,7 @@ namespace Engine
 		bool cull
 	)
 	{
-		const std::shared_ptr<MaterialData>& mat = matComp.data;
+		const std::shared_ptr<LegacyRenderBinding>& mat = matComp.binding;
 		bool hasDecorator = registry.any_of<MeshDecorator>(entity);
 		TransformSpace space = tf.GetTransformSpace();
 		const glm::vec3& pos = tf.GetPosition();
@@ -783,7 +783,7 @@ namespace Engine
 		{
 			if (isWorld)
 			{
-				if (!frustum.IsVisibleLazy(mat->mesh->meshBufferData->aabbMin, mat->mesh->meshBufferData->aabbMax, model))
+				if (!frustum.IsVisibleLazy(mat->meshBufferData->aabbMin, mat->meshBufferData->aabbMax, model))
 				{
 					return;
 				}
@@ -874,7 +874,7 @@ namespace Engine
 			glUniform1i(loc_dec_enableStroke, deco.enableStroke ? 1 : 0);
 			glUniform1i(loc_dec_enableFill, deco.enableFill ? 1 : 0);
 			glUniform1i(loc_dec_roundCorners, deco.roundCorners ? 1 : 0);
-			glUniform1i(loc_dec_useTexture, (deco.useMaterialTexture && mat->albedoMap) ? 1 : 0);
+			glUniform1i(loc_dec_useTexture, (deco.useMaterialTexture && mat->GetAlbedoMap()) ? 1 : 0);
 			glUniform1i(loc_dec_renderOnTop, deco.renderOnTop);
 		}
 		else
@@ -883,19 +883,19 @@ namespace Engine
 			glUniform1i(loc_dec_enableFill, 1);
 			glUniform1i(loc_dec_enableStroke, 0);
 			glUniform1i(loc_dec_roundCorners, 0);
-			glUniform1i(loc_dec_useTexture, mat->albedoMap ? 1 : 0);
+			glUniform1i(loc_dec_useTexture, mat->GetAlbedoMap() ? 1 : 0);
 			glUniform2fv(loc_dec_cornerRadius, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform2fv(loc_dec_strokeWidth, 1, glm::value_ptr(glm::vec2(0.0f)));
 			glUniform4f(loc_dec_strokeColor, 0, 0, 0, 1);
 			glUniform1i(loc_dec_renderOnTop, 0); // false
 		}
 
-		GLuint texID = mat->albedoMap ? mat->albedoMap->GetTextureID() : missingTexture->GetTextureID();
+		GLuint texID = mat->GetAlbedoMap() ? mat->GetAlbedoMap()->GetTextureID() : missingTexture->GetTextureID();
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, texID);
 		glUniform1i(loc_dec_albedoTex, 0);
 
-		const MeshBufferData& mesh = *mat->mesh->meshBufferData;
+		const MeshBufferData& mesh = *mat->meshBufferData;
 
 		glBindVertexArray(globalVAO);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, megaEBO);

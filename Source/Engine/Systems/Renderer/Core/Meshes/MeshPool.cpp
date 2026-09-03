@@ -1,8 +1,32 @@
 #include "PCH.h"
 #include "MeshPool.h"
 
+#include <array>
+#include <cstring>
+#include <span>
+
 namespace Engine
 {
+
+	namespace
+	{
+		Swim::Assets::ContentHash ComputeLegacyMeshContentHash(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+		{
+			const auto vertexBytes = std::as_bytes(std::span(vertices.data(), vertices.size()));
+			const auto indexBytes = std::as_bytes(std::span(indices.data(), indices.size()));
+			const Swim::Assets::ContentHash vertexHash = Swim::Assets::ComputeContentHash(vertexBytes);
+			const Swim::Assets::ContentHash indexHash = Swim::Assets::ComputeContentHash(indexBytes);
+
+			std::array<std::byte, 80> combined{};
+			const std::uint64_t vertexCount = static_cast<std::uint64_t>(vertices.size());
+			const std::uint64_t indexCount = static_cast<std::uint64_t>(indices.size());
+			std::memcpy(combined.data(), &vertexCount, sizeof(vertexCount));
+			std::memcpy(combined.data() + 8, &indexCount, sizeof(indexCount));
+			std::memcpy(combined.data() + 16, vertexHash.Bytes.data(), vertexHash.Bytes.size());
+			std::memcpy(combined.data() + 48, indexHash.Bytes.data(), indexHash.Bytes.size());
+			return Swim::Assets::ComputeContentHash(combined);
+		}
+	}
 
 	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const VertexesIndexesPair& data)
 	{
@@ -20,20 +44,22 @@ namespace Engine
 			return it->second; // Return existing mesh
 		}
 
-		// Create the mesh and its buffer data
+		// Create CPU geometry and a separate renderer residency record.
 		auto mesh = std::make_shared<Mesh>(vertices, indices);
-		mesh->meshBufferData = std::make_shared<MeshBufferData>();
+		auto residency = std::make_shared<MeshBufferData>();
 
 		// Assign a unique mesh ID
 		uint32_t meshID = nextMeshID++;
-		mesh->meshBufferData->meshID = meshID;
+		residency->meshID = meshID;
 
 		// Cache ID <-> Mesh mapping
 		meshToID[mesh] = meshID;
 		idToMesh[meshID] = mesh;
 
 		// Generate mesh buffers and its AABB and then place in the map
-		mesh->meshBufferData->GenerateBuffersAndAABB(*renderer, vertices, indices);
+		residency->GenerateBuffersAndAABB(*renderer, vertices, indices);
+		meshResidency.emplace(mesh, residency);
+		meshContentIndex[ComputeLegacyMeshContentHash(vertices, indices)] = mesh;
 		meshes.emplace(name, mesh);
 
 		return mesh;
@@ -46,49 +72,30 @@ namespace Engine
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		// First: check if a mesh with identical vertex/index data already exists
-		for (const auto& [existingName, existingMesh] : meshes)
+		const Swim::Assets::ContentHash contentHash = ComputeLegacyMeshContentHash(vertices, indices);
+		auto contentIt = meshContentIndex.find(contentHash);
+		if (contentIt != meshContentIndex.end())
 		{
-			if (!existingMesh)
+			if (std::shared_ptr<Mesh> existingMesh = contentIt->second.lock())
 			{
-				continue;
-			}
-
-			const auto& existingVertices = existingMesh->vertices;
-			const auto& existingIndices = existingMesh->indices;
-
-			// Quick size test
-			if (existingVertices.size() != vertices.size() || existingIndices.size() != indices.size())
-			{
-				continue;
-			}
-
-			// Compare raw memory contents, hopefully this isn't too abysmally slow (it kinda is man so really only call this function if you have to)
-			if (std::memcmp(vertices.data(), existingVertices.data(), vertices.size() * sizeof(Vertex)) == 0 &&
-				std::memcmp(indices.data(), existingIndices.data(), indices.size() * sizeof(uint32_t)) == 0)
-			{
-				// Match found, reuse
-				std::cout << "[MeshPool] Reusing mesh \"" << existingName << "\" for requested name \"" << desiredName << "\"\n";
 				return existingMesh;
 			}
+			meshContentIndex.erase(contentIt);
 		}
 
-		// No matching mesh found, create new one
+		// No matching content hash found: create CPU geometry and separate renderer residency.
 		auto mesh = std::make_shared<Mesh>(vertices, indices);
-		mesh->meshBufferData = std::make_shared<MeshBufferData>();
+		auto residency = std::make_shared<MeshBufferData>();
 
-		// Assign unique ID
-		uint32_t meshID = nextMeshID++;
-		mesh->meshBufferData->meshID = meshID;
-
-		// Register in ID maps
+		const uint32_t meshID = nextMeshID++;
+		residency->meshID = meshID;
 		meshToID[mesh] = meshID;
 		idToMesh[meshID] = mesh;
 
-		// Upload to GPU, compute AABB
-		mesh->meshBufferData->GenerateBuffersAndAABB(*renderer, vertices, indices);
+		residency->GenerateBuffersAndAABB(*renderer, vertices, indices);
+		meshResidency.emplace(mesh, residency);
+		meshContentIndex[contentHash] = mesh;
 
-		// Name deduplication like TexturePool: append _1, _2, etc.
 		std::string finalName = desiredName;
 		int counter = 1;
 		while (meshes.find(finalName) != meshes.end())
@@ -97,18 +104,6 @@ namespace Engine
 			counter++;
 		}
 
-	#ifdef _SWIM_DEBUG
-		constexpr bool run = true;
-		if constexpr (run)
-		{
-			if (finalName != desiredName)
-			{
-				std::cout << "[MeshPool] Mesh name \"" << desiredName << "\" already exists, registering as \"" << finalName << "\"\n";
-			}
-		}
-	#endif // _DEBUG
-
-		// Store mesh
 		meshes[finalName] = mesh;
 		return mesh;
 	}
@@ -126,7 +121,7 @@ namespace Engine
 		return nullptr; // Mesh not found
 	}
 
-	// kinda pointless because mesh has mesh buffer data which stores the id it was registered to
+	// Transitional legacy lookup while renderer draw records still use numeric mesh IDs.
 	uint32_t MeshPool::GetMeshID(const std::shared_ptr<Mesh>& mesh) const
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
@@ -149,26 +144,52 @@ namespace Engine
 		return nullptr;
 	}
 
+	std::shared_ptr<MeshBufferData> MeshPool::GetMeshBufferData(const std::shared_ptr<Mesh>& mesh) const
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		auto it = meshResidency.find(mesh);
+		if (it != meshResidency.end())
+		{
+			return it->second;
+		}
+		return nullptr;
+	}
+
 
 	bool MeshPool::RemoveMesh(const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
-		return meshes.erase(name) > 0;
+		auto it = meshes.find(name);
+		if (it == meshes.end())
+		{
+			return false;
+		}
+
+		const std::shared_ptr<Mesh> mesh = it->second;
+		const Swim::Assets::ContentHash contentHash = ComputeLegacyMeshContentHash(mesh->vertices, mesh->indices);
+		meshContentIndex.erase(contentHash);
+		meshResidency.erase(mesh);
+
+		auto idIt = meshToID.find(mesh);
+		if (idIt != meshToID.end())
+		{
+			idToMesh.erase(idIt->second);
+			meshToID.erase(idIt);
+		}
+
+		meshes.erase(it);
+		return true;
 	}
 
 	void MeshPool::Flush()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		for (auto& [name, mesh] : meshes)
-		{
-			if (mesh && mesh->meshBufferData)
-			{
-				mesh->meshBufferData.reset();
-			}
-		}
+		// Renderer residency is owned separately from CPU mesh geometry.
+		meshResidency.clear();
+		meshContentIndex.clear();
 
-		// Clear all meshes from the pool too
+		// Clear all CPU meshes from the pool too.
 		meshes.clear();
 		meshToID.clear();
 		idToMesh.clear();

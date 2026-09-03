@@ -38,12 +38,12 @@ namespace Engine
 		// Helper to get or create a material bound to a mesh.
 		auto getOrCreateMaterial = [&](const char* matName, const std::shared_ptr<Mesh>& mesh)
 		{
-			if (auto md = mtp.GetMaterialData(matName))
+			if (auto md = mtp.GetMaterialBinding(matName))
 			{
 				return md;
 			}
 			// No albedo map for gizmos; they rely on vertex colors / decorators
-			return mtp.RegisterMaterialData(matName, mesh, nullptr);
+			return mtp.RegisterMaterialBinding(matName, mesh, nullptr);
 		};
 
 		// All of these will have mesh decorators on them for fill color
@@ -598,7 +598,7 @@ namespace Engine
 			dec.renderOnTop = layer;
 
 			// Attach the material and decorator color
-			std::shared_ptr<MaterialData> matData = useBallArrow ? ballArrowMatData : arrowMatData;
+			std::shared_ptr<LegacyRenderBinding> matData = useBallArrow ? ballArrowMatData : arrowMatData;
 			activeScene->EmplaceComponent<Material>(e, matData);
 			activeScene->AddComponent<MeshDecorator>(e, dec);
 			activeScene->EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_OBJECT, "gizmo " + tagName);

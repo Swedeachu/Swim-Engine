@@ -4,9 +4,27 @@
 #include <filesystem>
 #include <algorithm>
 #include <sstream>
+#include <array>
+#include <cstring>
+#include <span>
 
 namespace Engine
 {
+
+	namespace
+	{
+		Swim::Assets::ContentHash ComputeLegacyTextureContentHash(int width, int height, std::span<const std::byte> bytes)
+		{
+			const Swim::Assets::ContentHash payloadHash = Swim::Assets::ComputeContentHash(bytes);
+			std::array<std::byte, 40> combined{};
+			const std::uint32_t widthValue = static_cast<std::uint32_t>(width);
+			const std::uint32_t heightValue = static_cast<std::uint32_t>(height);
+			std::memcpy(combined.data(), &widthValue, sizeof(widthValue));
+			std::memcpy(combined.data() + 4, &heightValue, sizeof(heightValue));
+			std::memcpy(combined.data() + 8, payloadHash.Bytes.data(), payloadHash.Bytes.size());
+			return Swim::Assets::ComputeContentHash(combined);
+		}
+	}
 
 	TexturePool::TexturePool(Swim::Platform::FileSystem& files, TextureRuntimeContext context)
 		: files(&files), runtimeContext(std::move(context))
@@ -86,41 +104,43 @@ namespace Engine
 
 	std::shared_ptr<Texture2D> TexturePool::GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey)
 	{
-		// Deduplication: search through all textures for an identical one
-		for (const auto& [existingName, existingTex] : textures)
-		{
-			if (!existingTex)
-			{
-				continue;
-			}
+		std::lock_guard<std::mutex> lock(poolMutex);
 
-			// Match width, height, and pixel content
-			if (image.width == static_cast<int>(existingTex->GetWidth()) &&
-				image.height == static_cast<int>(existingTex->GetHeight()) &&
-				image.image.size() == existingTex->GetDataSize() &&
-				std::memcmp(image.image.data(), existingTex->GetData(), image.image.size()) == 0)
-			{
-				// Found duplicate: reuse it
-				// textures[imageKey] = existingTex; // not sure if making a new record for something already in the pool is a good idea, probably not so don't do it
-				// std::cout << "[INFO] Reusing existing texture \"" << existingName << "\" for new image \"" << imageKey << "\"\n";
-				return existingTex;
-			}
+		if (image.width <= 0 || image.height <= 0 || image.image.empty())
+		{
+			return nullptr;
 		}
 
-		// If no identical texture found, create a new one
+		const auto imageBytes = std::as_bytes(std::span(image.image.data(), image.image.size()));
+		const Swim::Assets::ContentHash contentHash = ComputeLegacyTextureContentHash(image.width, image.height, imageBytes);
+		auto contentIt = textureContentIndex.find(contentHash);
+		if (contentIt != textureContentIndex.end())
+		{
+			if (std::shared_ptr<Texture2D> existingTexture = contentIt->second.lock())
+			{
+				return existingTexture;
+			}
+			textureContentIndex.erase(contentIt);
+		}
+
 		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
 			runtimeContext,
 			image.width,
 			image.height,
 			image.image.data(),
-			imageKey // StoreTextureManually() could end up making the key in the texture pool map be something different, doesn't matter much for now
+			imageKey
 		);
 
 		texture->isPixelDataSTB = false;
+		textureContentIndex[contentHash] = texture;
 
-		// Store texture even if the name is reused — StoreTextureManually handles that
-		this->StoreTextureManually(texture, imageKey);
-
+		std::string key = imageKey;
+		int counter = 1;
+		while (textures.find(key) != textures.end())
+		{
+			key = imageKey + "_" + std::to_string(counter++);
+		}
+		textures.emplace(std::move(key), texture);
 		return texture;
 	}
 
@@ -178,24 +198,11 @@ namespace Engine
 			counter++;
 		}
 
-		// Temp debug code to just tell us if this ever happens
-	#ifdef _DEBUG 
-		constexpr bool run = false; // just quick flag if we even want to bother running this code while in debug mode
-		if constexpr (run) 
+	#ifdef _DEBUG
+		if (finalName != name)
 		{
-			for (const auto& [existingName, existingTex] : textures)
-			{
-				if (existingTex && *existingTex == *texture)
-				{
-					std::cout << "[INFO] \"" << name << "\" is identical to already-stored \"" << existingName << "\"\n";
-				}
-			}
-
-			if (finalName != name)
-			{
-				std::cout << "Texture with name \"" << name << "\" already exists in the texture pool!\n";
-				std::cout << "Renaming to \"" << finalName << "\"\n";
-			}
+			std::cout << "Texture with name \"" << name << "\" already exists in the texture pool!\n";
+			std::cout << "Renaming to \"" << finalName << "\"\n";
 		}
 	#endif // _DEBUG
 
@@ -263,6 +270,7 @@ namespace Engine
 		std::lock_guard<std::mutex> lock(poolMutex);
 		// Will cause Texture2D destructor which calls Free() on the texture for us
 		textures.clear();
+		textureContentIndex.clear();
 	}
 
 	std::string TexturePool::FormatKey(const std::string& filePath, const std::string& rootPath) const

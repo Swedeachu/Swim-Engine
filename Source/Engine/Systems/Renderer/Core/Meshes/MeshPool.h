@@ -7,8 +7,10 @@
 #include <unordered_map>
 #include <vector>
 #include "Mesh.h"
+#include "MeshBufferData.h"
 #include "Vertex.h"
 #include "PrimitiveMeshes.h"
+#include "Engine/Assets/ContentHash.h"
 
 namespace Engine
 {
@@ -40,6 +42,7 @@ namespace Engine
 
     uint32_t GetMeshID(const std::shared_ptr<Mesh>& mesh) const;
     std::shared_ptr<Mesh> GetMeshByID(uint32_t id) const;
+    std::shared_ptr<MeshBufferData> GetMeshBufferData(const std::shared_ptr<Mesh>& mesh) const;
 
     // Removes a mesh by name. Returns true if successful.
     bool RemoveMesh(const std::string& name);
@@ -57,6 +60,8 @@ namespace Engine
     // Maps for mesh indexing
     std::unordered_map<std::shared_ptr<Mesh>, uint32_t> meshToID;
     std::unordered_map<uint32_t, std::shared_ptr<Mesh>> idToMesh;
+    std::unordered_map<std::shared_ptr<Mesh>, std::shared_ptr<MeshBufferData>> meshResidency;
+    std::unordered_map<Swim::Assets::ContentHash, std::weak_ptr<Mesh>> meshContentIndex;
     uint32_t nextMeshID = 0; 
 
   };

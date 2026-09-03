@@ -31,7 +31,7 @@ namespace Game
 		auto quadData = Engine::MakeQuad();
 
 		auto whiteQuad = meshPool.RegisterMesh("WhiteQuad", quadData.vertices, quadData.indices);
-		auto whiteMaterial = materialPool.RegisterMaterialData("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
+		auto whiteMaterial = materialPool.RegisterMaterialBinding("WhiteMaterial", whiteQuad, texturePool.GetTexture2DLazy("mart"));
 
 		if (doButtonUI)
 		{
@@ -188,7 +188,7 @@ namespace Game
 
 			constexpr bool useTex = true;
 			auto tex = (useTex) ? texturePool.GetTexture2DLazy("alien") : nullptr;
-			auto secondMaterial = materialPool.RegisterMaterialData("SecondMaterial", secondMesh, tex);
+			auto secondMaterial = materialPool.RegisterMaterialBinding("SecondMaterial", secondMesh, tex);
 			scene->AddComponent<Engine::Material>(redEntity, Engine::Material(secondMaterial));
 		}
 		else

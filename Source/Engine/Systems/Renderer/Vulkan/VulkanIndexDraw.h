@@ -3,7 +3,7 @@
 #include "Buffers/VulkanInstanceBuffer.h"
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
-#include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
 #include <entt/entt.hpp>
 
 #include <array>
@@ -121,7 +121,7 @@ namespace Engine
 		{
 			entt::entity entity{ entt::null };
 			uint32_t subMaterialIndex = 0;
-			std::shared_ptr<MaterialData> material;
+			std::shared_ptr<LegacyRenderBinding> material;
 			uint32_t meshID = 0;
 			uint32_t indexCount = 0;
 			VkDeviceSize vertexOffsetInMegaBuffer = 0;
@@ -139,7 +139,7 @@ namespace Engine
 			WorldRenderableSlot& slot,
 			entt::entity entity,
 			uint32_t subMaterialIndex,
-			const std::shared_ptr<MaterialData>& mat,
+			const std::shared_ptr<LegacyRenderBinding>& mat,
 			bool canUseEntityCullCache
 		);
 		void RebuildWorldRenderableSlots(Scene& scene);
@@ -153,7 +153,7 @@ namespace Engine
 		void UploadFullScenePacket(uint32_t frameIndex, Scene& scene);
 		void GatherCandidatesBVH(Scene& scene, const Frustum& frustum);
 		void GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum);
-		void AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<MaterialData>& mat, const Frustum* frustum);
+		void AddInstance(entt::registry& registry, entt::entity entity, const Transform& transform, const std::shared_ptr<LegacyRenderBinding>& mat, const Frustum* frustum);
 		bool TryBuildGatheredInstance(entt::registry& registry, const struct GatherCandidate& candidate, const Frustum* frustum, struct GatheredInstance& outInstance) const;
 		void AppendGatheredInstance(const struct GatheredInstance& gathered);
 		void AppendGatheredInstances(const std::vector<struct GatheredInstance>& gatheredInstances);
@@ -247,7 +247,7 @@ namespace Engine
 		struct GatherCandidate
 		{
 			entt::entity entity{ entt::null };
-			std::shared_ptr<MaterialData> material;
+			std::shared_ptr<LegacyRenderBinding> material;
 			glm::mat4 worldMatrix{ 1.0f };
 			uint64_t worldVersion = 0;
 			TransformSpace transformSpace = TransformSpace::World;
@@ -276,7 +276,7 @@ namespace Engine
 		struct FullSceneRenderable
 		{
 			entt::entity entity{ entt::null };
-			std::shared_ptr<MaterialData> material;
+			std::shared_ptr<LegacyRenderBinding> material;
 			GpuInstanceData baseInstance{};
 		};
 

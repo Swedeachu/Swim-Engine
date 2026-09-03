@@ -4,9 +4,11 @@
 #include "Engine/Assets/AssetState.h"
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Assets/ContentHash.h"
+#include "Engine/Assets/Ktx2Container.h"
 #include "Engine/Assets/MaterialAsset.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/ModelAsset.h"
+#include "Engine/Assets/SassetFormat.h"
 #include "Engine/Assets/TextureAsset.h"
 
 namespace
