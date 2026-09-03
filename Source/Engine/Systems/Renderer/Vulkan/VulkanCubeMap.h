@@ -1,18 +1,32 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "Engine/Systems/Renderer/Core/Environment/CubeMap.h"
 #include "Engine/Systems/Renderer/Core/Textures/Texture2D.h"
 #include "vulkan/vulkan.h"
 
+namespace Swim::Platform
+{
+	class FileSystem;
+}
+
 namespace Engine
 {
+
+	class VulkanRenderer;
+	class TexturePool;
 
 	class VulkanCubeMap : public CubeMap
 	{
 
 	public:
 
-		VulkanCubeMap(const std::string& vertShaderPath, const std::string& fragShaderPath);
+		VulkanCubeMap(VulkanRenderer& renderer, Swim::Platform::FileSystem& files, TexturePool& textures, const std::string& vertShaderPath, const std::string& fragShaderPath);
 		~VulkanCubeMap();
 
 		void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix) override;
@@ -23,6 +37,9 @@ namespace Engine
 		void SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& faces) override;
 
 	private:
+
+		VulkanRenderer* renderer = nullptr;
+		Swim::Platform::FileSystem* files = nullptr;
 
 		VkDevice device = VK_NULL_HANDLE;
 		VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;

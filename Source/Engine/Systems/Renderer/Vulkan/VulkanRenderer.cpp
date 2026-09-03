@@ -1,7 +1,8 @@
 #include "PCH.h"
 #include "VulkanRenderer.h"
 #include "Engine/Platform/Window.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
@@ -88,7 +89,8 @@ namespace Engine
 
 		// Make the pipeline which we then make the render pass with
 		pipelineManager = std::make_unique<VulkanPipelineManager>(
-			device
+			device,
+			*GetRuntimeServices().Files
 		);
 
 		pipelineManager->CreateRenderPass(swapChainManager->GetPendingImageFormat(), swapChainManager->GetPendingDepthFormat(), msaaSamples);
@@ -98,7 +100,7 @@ namespace Engine
 
 		// We need the texture pool for getting how many textures we will need in our bindless textures array.
 		// After all this Vulkan initing, we can then load all textures.
-		Engine::TexturePool& texturePool = TexturePool::GetInstance();
+		Engine::TexturePool& texturePool = *GetRuntimeServices().Textures;
 
 		// texturePool.FetchTextureCount(); // Counts image files to load in assets (caches it).
 		// unsigned int texCount = texturePool.GetTextureCount();
@@ -138,6 +140,7 @@ namespace Engine
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
+		indexDraw->SetServices(this, sceneSystem, cameraSystem, GetRuntimeServices().Jobs);
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
 		// We have a huge buffer on the GPU now to store all of our meshes so we never have to change vertice and indice bindings
@@ -260,13 +263,18 @@ namespace Engine
 
 		// Now set up the cubemap
 		cubemapController = std::make_unique<CubeMapController>(
-			"Shaders\\VertexShaders\\vertex_cubemap.spv",
-			"Shaders\\FragmentShaders\\fragment_cubemap.spv"
+			std::make_unique<VulkanCubeMap>(
+				*this,
+				*GetRuntimeServices().Files,
+				*GetRuntimeServices().Textures,
+				"Shaders\\VertexShaders\\vertex_cubemap.spv",
+				"Shaders\\FragmentShaders\\fragment_cubemap.spv"
+			)
 		);
 		cubemapController->SetEnabled(false);
 
 		// Load all fonts (later on will not be done here and instead be done via threaded asset streaming service on demand)
-		FontPool::GetInstance().LoadAllRecursively();
+		GetRuntimeServices().Fonts->LoadAllRecursively();
 
 		return 0;
 	}
@@ -274,8 +282,11 @@ namespace Engine
 	// Called when system initializes
 	int VulkanRenderer::Init()
 	{
-		// Get the camera system
-		cameraSystem = SwimEngine::GetInstance()->GetCameraSystem();
+		if (!cameraSystem || !sceneSystem)
+		{
+			std::cerr << "[VulkanRenderer] CameraSystem/SceneSystem dependencies were not injected before Init.\n";
+			return -1;
+		}
 
 		return 0;
 	}
@@ -290,7 +301,7 @@ namespace Engine
 		}
 
 		// Handle requested swapchain recreate (from present SUBOPTIMAL/OUT_OF_DATE) or window resize
-		if ((framebufferResized || needsSwapchainRecreate) && cameraSystem.get() != nullptr)
+		if ((framebufferResized || needsSwapchainRecreate) && cameraSystem != nullptr)
 		{
 			framebufferResized = false;
 			needsSwapchainRecreate = false;
@@ -329,11 +340,11 @@ namespace Engine
 		swapChainManager->Cleanup();
 		swapChainManager.reset();
 
-		MeshPool::GetInstance().Flush();
-		TexturePool::GetInstance().Flush();
-		MaterialPool::GetInstance().Flush();
+		GetRuntimeServices().Fonts->Flush();
+		GetRuntimeServices().Materials->Flush();
+		GetRuntimeServices().Meshes->Flush();
+		GetRuntimeServices().Textures->Flush();
 		missingTexture.reset();
-		Texture2D::FlushAllTextures(); // Free the straggler textures that were procedurally generated in memory for the GPU
 
 		syncManager->Cleanup();
 		syncManager.reset();

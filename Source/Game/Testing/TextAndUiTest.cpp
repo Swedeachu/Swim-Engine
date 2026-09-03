@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "TextAndUiTest.h"
+#include "Engine/Systems/Scene/Scene.h"
 #include "Engine\Systems\Renderer\Core\Meshes\MeshPool.h"
 #include "Engine\Systems\Renderer\Core\Textures\TexturePool.h"
 #include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
@@ -11,6 +12,7 @@
 #include "Engine\Systems\Renderer\Core\Font\FontPool.h"
 #include "Game\Behaviors\Demo\MouseInputDemoBehavior.h"
 #include "Game\Behaviors\Demo\SetTextCallBack.h"
+#include "Engine\Systems\Renderer\Core\Camera\CameraSystem.h"
 
 namespace Game
 {
@@ -21,10 +23,9 @@ namespace Game
 	void MakeUI(Engine::Scene* scene)
 	{
 		// Get the MeshPool instance
-		auto& meshPool = Engine::MeshPool::GetInstance();
-		auto& materialPool = Engine::MaterialPool::GetInstance();
-		auto& texturePool = Engine::TexturePool::GetInstance();
-		auto engine = Engine::SwimEngine::GetInstance();
+		auto& meshPool = scene->GetMeshPool();
+		auto& materialPool = scene->GetMaterialPool();
+		auto& texturePool = scene->GetTexturePool();
 
 		// Define vertices and indices for a white quad mesh
 		auto quadData = Engine::MakeQuad();
@@ -67,7 +68,7 @@ namespace Game
 			scene->AddComponent<Engine::Transform>(textEntity, Engine::Transform(textEntityScreenPos, textEntitySize, glm::quat(), Engine::TransformSpace::Screen));
 
 			// Get the font pool and the roboto_bold font from it 
-			Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+			Engine::FontPool& fontPool = scene->GetFontPool();
 			std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
 
 			// Create a text component which uses the roboto_font
@@ -98,9 +99,9 @@ namespace Game
 			scene->AddComponent<Engine::TextComponent>(fpsEntity, fpsText);
 
 			Game::SetTextCallback* fpsBehavior = scene->EmplaceBehavior<Game::SetTextCallback>(fpsEntity, /*chroma*/ true);
-			fpsBehavior->SetCallback([engine](Engine::TextComponent& tc, entt::entity e, double)
+			fpsBehavior->SetCallback([scene](Engine::TextComponent& tc, entt::entity e, double)
 			{
-				int fps = engine->GetFPS();
+				int fps = scene->GetFPS();
 				const std::string s = "FPS: " + std::to_string(fps);
 				tc.SetText(s);
 			});

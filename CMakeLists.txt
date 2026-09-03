@@ -8,6 +8,17 @@ if(POLICY CMP0141)
 	cmake_policy(SET CMP0141 NEW)
 endif()
 
+# Swim's supported Ninja workflows always perform an explicit CMake configure
+# immediately before compiling. Disable Ninja's automatic regeneration graph
+# entirely so third-party CPM glob-watch rules cannot trap the build in a
+# perpetual VerifyGlobs -> RERUN_CMAKE cycle. New/renamed sources are still
+# discovered by the explicit configure at the start of every
+# clean or soft build.
+if(CMAKE_GENERATOR MATCHES "^Ninja")
+	set(CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL
+		"Swim build scripts configure explicitly; suppress Ninja CMake regeneration" FORCE)
+endif()
+
 # The legacy x64 project used /MT in both Debug and Release. Set this before
 # project()/dependencies so every CMake-built static dependency shares the ABI.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
@@ -71,12 +82,24 @@ if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	include(cmake/get_cpm.cmake)
 endif()
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/enkiTS")
+include(cmake/JobDependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
+
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3")
 include(cmake/PlatformDependencies.cmake)
 set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
 unset(SWIM_SAVED_CMAKE_FOLDER)
 
-file(GLOB_RECURSE SWIM_PLATFORM_SOURCES CONFIGURE_DEPENDS
+# Build scripts always run an explicit configure before compiling. Keep source
+# discovery configure-time only instead of using CONFIGURE_DEPENDS: the latter
+# adds Ninja VerifyGlobs manifest edges, which can participate in a perpetual
+# RERUN_CMAKE cycle when the same dependency cache is also configured by the
+# Visual Studio solution tree. New files are still discovered on every normal
+# clean/soft build because both workflows configure first.
+file(GLOB_RECURSE SWIM_PLATFORM_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
 )
@@ -99,7 +122,7 @@ else()
 	target_compile_options(SwimPlatform PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-file(GLOB_RECURSE SWIM_INPUT_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE SWIM_INPUT_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.h
 )
@@ -116,6 +139,43 @@ if(MSVC)
 	target_compile_options(SwimInput PRIVATE /utf-8 /W3 /permissive-)
 else()
 	target_compile_options(SwimInput PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+
+file(GLOB_RECURSE SWIM_JOB_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
+)
+
+add_library(SwimJobs STATIC ${SWIM_JOB_SOURCES})
+add_library(Swim::Jobs ALIAS SwimJobs)
+target_include_directories(SwimJobs PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS)
+target_compile_features(SwimJobs PUBLIC cxx_std_20)
+target_compile_definitions(SwimJobs PRIVATE SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_JOB_SOURCES})
+swim_set_solution_folder(SwimJobs "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+if(MSVC)
+	target_compile_options(SwimJobs PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimJobs PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_library(SwimCore STATIC
+	Source/Engine/EngineConfig.cpp
+	Source/Engine/EngineConfig.h
+	Source/Engine/EngineState.h
+)
+add_library(Swim::Core ALIAS SwimCore)
+target_include_directories(SwimCore PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimCore PUBLIC cxx_std_20)
+swim_set_solution_folder(SwimCore "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+if(MSVC)
+	target_compile_options(SwimCore PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimCore PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
@@ -140,6 +200,16 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
 	target_include_directories(SwimInputTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimInputTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL Source/Tests/Core/EngineConfigTests.cpp)
+	target_link_libraries(SwimEngineConfigTests PRIVATE Swim::Core)
+	target_include_directories(SwimEngineConfigTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimEngineConfigTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL Source/Tests/Jobs/JobSystemTests.cpp)
+	target_link_libraries(SwimJobSystemTests PRIVATE Swim::Jobs)
+	target_include_directories(SwimJobSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimJobSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 if(NOT SWIM_BUILD_LEGACY_ENGINE)
@@ -169,21 +239,23 @@ else()
 	find_package(OpenGL REQUIRED)
 endif()
 
-file(GLOB_RECURSE SWIM_ENGINE_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.hpp
 )
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Platform/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Input/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Jobs/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
 
-file(GLOB_RECURSE SWIM_GAME_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE SWIM_GAME_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Game/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Game/*.h
 	${CMAKE_SOURCE_DIR}/Source/Game/*.hpp
 )
 
-file(GLOB_RECURSE SWIM_SHADER_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE SWIM_SHADER_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Shaders/*.hlsl
 	${CMAKE_SOURCE_DIR}/Source/Shaders/*.glsl
 )
@@ -301,6 +373,8 @@ if(TARGET SwimPhysXBuild)
 endif()
 
 target_link_libraries(SwimEngine PRIVATE
+	Swim::Core
+	Swim::Jobs
 	Swim::Platform
 	Swim::Input
 	Vulkan::Vulkan

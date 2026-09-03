@@ -1,8 +1,14 @@
 #pragma once 
 
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <vector>
+
 #include "Engine/Machine.h"
 #include "Core/Environment/CubeMapController.h"
 #include "Core/Meshes/Vertex.h"
+#include "Core/RendererRuntimeServices.h"
 
 namespace Swim::Platform
 {
@@ -27,10 +33,24 @@ namespace Engine
 
 		virtual void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) = 0;
 
+		void SetRuntimeServices(RendererRuntimeServices* value) { runtimeServices = value; }
+		RendererRuntimeServices& GetRuntimeServices() const
+		{
+			if (!runtimeServices || !runtimeServices->IsValid())
+			{
+				throw std::runtime_error("Renderer runtime services were not injected.");
+			}
+			return *runtimeServices;
+		}
+
 		// For consistent UI scaling across the whole engine:
 
 		constexpr static float VirtualCanvasWidth = 1920.0f;
 		constexpr static float VirtualCanvasHeight = 1080.0f;
+
+	protected:
+
+		RendererRuntimeServices* runtimeServices = nullptr;
 
 	};
 

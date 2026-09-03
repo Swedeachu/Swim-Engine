@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include <filesystem>
 #include "VulkanPipelineManager.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
 #include <fstream>
 #include <stdexcept>
 #include <array>
@@ -9,8 +9,8 @@
 namespace Engine
 {
 
-	VulkanPipelineManager::VulkanPipelineManager(VkDevice device)
-		: device(device)
+	VulkanPipelineManager::VulkanPipelineManager(VkDevice device, Swim::Platform::FileSystem& files)
+		: device(device), files(&files)
 	{}
 
 	VulkanPipelineManager::~VulkanPipelineManager()
@@ -83,7 +83,7 @@ namespace Engine
 
 	std::vector<char> VulkanPipelineManager::ReadFile(const std::string& filename)
 	{
-		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(filename);
+		const std::filesystem::path fullPath = files->ResolveExecutablePath(filename);
 
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())

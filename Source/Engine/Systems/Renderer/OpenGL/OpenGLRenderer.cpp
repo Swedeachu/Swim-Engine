@@ -1,10 +1,13 @@
 #include "PCH.h"
 #include <filesystem>
 #include "OpenGLRenderer.h"
+#include "OpenGLCubeMap.h"
 #include "Engine/Platform/Window.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include "Engine/Components/Transform.h"
@@ -232,9 +235,9 @@ namespace Engine
 		return true;
 	}
 
-	std::string OpenGLRenderer::LoadTextFile(const std::string& relativePath)
+	std::string OpenGLRenderer::LoadTextFile(const std::string& relativePath) const
 	{
-		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(relativePath);
+		const std::filesystem::path fullPath = GetRuntimeServices().Files->ResolveExecutablePath(relativePath);
 
 		std::ifstream file(fullPath);
 		if (!file.is_open())
@@ -299,7 +302,7 @@ namespace Engine
 		loc_dec_renderOnTop = glGetUniformLocation(decoratorShader, "renderOnTop");
 
 		// --- 5) Load default texture ---
-		TexturePool& pool = TexturePool::GetInstance();
+		TexturePool& pool = *GetRuntimeServices().Textures;
 		// In the future we won't do this because the active scene file assets should determine which textures and models get loaded in, everything being loaded like this is just temporary behavior.
 		// We will have a proper asset streaming threaded service later on.
 		pool.LoadAllRecursively();
@@ -307,8 +310,12 @@ namespace Engine
 
 		// --- 6) Cubemap setup ---
 		cubemapController = std::make_unique<CubeMapController>(
-			"Shaders/OpenGL/skybox_vert.glsl",
-			"Shaders/OpenGL/skybox_frag.glsl"
+			std::make_unique<OpenGLCubeMap>(
+				*this,
+				*GetRuntimeServices().Textures,
+				"Shaders/OpenGL/skybox_vert.glsl",
+				"Shaders/OpenGL/skybox_frag.glsl"
+			)
 		);
 		cubemapController->SetEnabled(false);
 
@@ -353,7 +360,7 @@ namespace Engine
 		CreateMegaMeshBuffer(); // this feels like something we should do earlier
 
 		// Load all fonts (later on will not be done here and instead be done via threaded asset streaming service on demand)
-		FontPool::GetInstance().LoadAllRecursively();
+		GetRuntimeServices().Fonts->LoadAllRecursively();
 
 		return 0;
 	}
@@ -380,7 +387,11 @@ namespace Engine
 
 	int OpenGLRenderer::Init()
 	{
-		cameraSystem = SwimEngine::GetInstance()->GetCameraSystem();
+		if (!cameraSystem || !sceneSystem)
+		{
+			std::cerr << "[OpenGLRenderer] CameraSystem/SceneSystem dependencies were not injected before Init.\n";
+			return -1;
+		}
 		return 0;
 	}
 
@@ -502,7 +513,7 @@ namespace Engine
 
 		UpdateUniformBuffer();
 
-		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto scene = sceneSystem->GetActiveScene();
 		if (!scene)
 		{
 			SwapBuffers(deviceContext);
@@ -695,7 +706,7 @@ namespace Engine
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
@@ -922,7 +933,7 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)
@@ -1001,7 +1012,7 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)
@@ -1067,6 +1078,8 @@ namespace Engine
 
 	int OpenGLRenderer::Exit()
 	{
+		cubemapController.reset();
+
 		if (megaVBO) { glDeleteBuffers(1, &megaVBO); megaVBO = 0; }
 		if (megaEBO) { glDeleteBuffers(1, &megaEBO); megaEBO = 0; }
 		if (globalVAO) { glDeleteVertexArrays(1, &globalVAO); globalVAO = 0; }
@@ -1078,8 +1091,10 @@ namespace Engine
 		glDeleteProgram(decoratorShader);
 		glDeleteBuffers(1, &ubo);
 
-		MeshPool::GetInstance().Flush();
-		TexturePool::GetInstance().Flush();
+		GetRuntimeServices().Fonts->Flush();
+		GetRuntimeServices().Materials->Flush();
+		GetRuntimeServices().Meshes->Flush();
+		GetRuntimeServices().Textures->Flush();
 
 		return 0;
 	}
@@ -1087,7 +1102,7 @@ namespace Engine
 	// Unused
 	GLuint OpenGLRenderer::LoadSPIRVShaderStage(const std::string& path, GLenum shaderStage)
 	{
-		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(path);
+		const std::filesystem::path fullPath = GetRuntimeServices().Files->ResolveExecutablePath(path);
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{

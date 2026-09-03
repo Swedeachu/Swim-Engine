@@ -1,6 +1,13 @@
 #include "PCH.h"
 #include "CubeMapControlTest.h"
+#include "Engine/Systems/Renderer/Renderer.h"
+#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Scene/Scene.h"
+#include "Engine/Systems/IO/InputManager.h"
+#include <array>
+#include <memory>
+#include <string>
 
 namespace Game
 {
@@ -11,12 +18,15 @@ namespace Game
 	int CubeMapControlTest::Init()
 	{
 		// Turn on the sky
-		std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
-		if (!cubemapController) return 0;
+		auto& cubemapController = renderer->GetCubeMapController();
+		if (!cubemapController)
+		{
+			return 0;
+		}
 
 		cubemapController->SetEnabled(true);
 
-		Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
+		Engine::TexturePool& texturePool = scene->GetTexturePool();
 
 		if constexpr (equirectangular)
 		{
@@ -40,9 +50,14 @@ namespace Game
 	{
 		// TODO: ability to mess with horizon level
 
-		std::unique_ptr<Engine::CubeMapController>& cubemapController = renderer->GetCubeMapController();
+		auto& cubemapController = renderer->GetCubeMapController();
 
-		UpdateRotation(dt, cubemapController);
+		if (!cubemapController)
+		{
+			return;
+		}
+
+		UpdateRotation(dt, cubemapController.get());
 
 		// Toggle on the sky with C key
 		if (input->IsKeyTriggered(Swim::Platform::KeyCode::C))
@@ -63,7 +78,7 @@ namespace Game
 		/* Abandoned feature for now
 		if (input->IsKeyTriggered(Swim::Platform::KeyCode::X))
 		{
-			Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
+			Engine::TexturePool& texturePool = scene->GetTexturePool();
 
 			styleToggle = !styleToggle;
 
@@ -83,7 +98,7 @@ namespace Game
 		*/
 	}
 
-	void CubeMapControlTest::UpdateRotation(double dt, std::unique_ptr<Engine::CubeMapController>& cubemapController)
+	void CubeMapControlTest::UpdateRotation(double dt, Engine::CubeMapController* cubemapController)
 	{
 		if (!cubemapController)
 		{
@@ -98,11 +113,17 @@ namespace Game
 
 		// Adjust rotation speed with F, T, H
 		if (input->IsKeyDown(Swim::Platform::KeyCode::F))
+		{
 			rotationSpeed += 0.01f;
+		}
 		else if (input->IsKeyDown(Swim::Platform::KeyCode::T))
+		{
 			rotationSpeed -= 0.01f;
+		}
 		else if (input->IsKeyTriggered(Swim::Platform::KeyCode::H))
+		{
 			rotationSpeed = 0.5f;
+		}
 
 		// Get the current rotation from the cubemap
 		glm::vec3 currentRotation = cubemap->GetRotation();

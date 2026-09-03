@@ -21,6 +21,8 @@
 #include "Game\Behaviors\Demo\OrbitSystem.h"
 #include "Game\Behaviors\Phys\BallShooter.h"
 #include "Game\Testing\PrimitivePhysicsTest.h"
+#include "Engine\Systems\Scene\Scene.h"
+#include "Engine\Systems\Scene\SubSceneSystems\SceneDebugDraw.h"
 
 namespace Game
 {
@@ -45,9 +47,9 @@ namespace Game
 		std::cout << name << " Init" << std::endl;
 
 		// Get the MeshPool instance
-		auto& meshPool = Engine::MeshPool::GetInstance();
-		auto& materialPool = Engine::MaterialPool::GetInstance();
-		auto& texturePool = Engine::TexturePool::GetInstance();
+		auto& meshPool = GetMeshPool();
+		auto& materialPool = GetMaterialPool();
+		auto& texturePool = GetTexturePool();
 
 		auto cubeData = Engine::MakeCube();
 		auto rainBowQuad = Engine::MakeQuad
@@ -84,7 +86,7 @@ namespace Game
 		auto sphereDataMaterial = materialPool.RegisterMaterialData("sphere material", sphereMesh);
 
 		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
-		Engine::EntityFactory& entityFactory = Engine::EntityFactory::GetInstance();
+		Engine::EntityFactory& entityFactory = GetEntityFactory();
 
 		// Make a static quad entity in world space but with UI decorator on it, essentially a bill board (TODO: billboard behavior to always face the camera via rotation)
 		auto billboard = CreateEntity();
@@ -117,7 +119,7 @@ namespace Game
 		SetTag(textEntity, Engine::TagConstants::WORLD, "world space text");
 
 		// Get the font pool and the roboto_bold font from it 
-		Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+		Engine::FontPool& fontPool = GetFontPool();
 		std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
 
 		// Create a text component which uses the roboto_font
@@ -136,7 +138,7 @@ namespace Game
 			Engine::Material(sphereDataMaterial)
 		);
 
-		int textureCountBefore = Engine::Texture2D::GetTextureCountOnGPU();
+		int textureCountBefore = texturePool.GetLiveTextureCount();
 
 		// Make a barrel entity that spins
 		auto spinEntity = CreateEntity();
@@ -222,7 +224,7 @@ namespace Game
 			AddComponent<Engine::CompositeMaterial>(sponza, sponzaCompositeMaterial);
 		}
 
-		int textureCountAfter = Engine::Texture2D::GetTextureCountOnGPU();
+		int textureCountAfter = texturePool.GetLiveTextureCount();
 
 		// if we have any test model to load we can just do it here 
 		/* TODO: check if asset exists on disk
@@ -249,7 +251,7 @@ namespace Game
 		if constexpr (physicsPrimitivesTest) TestPrimitivePhysics(this);
 
 		// THE BALL SHOOTER
-		Engine::EntityFactory::GetInstance().CreateWithBehaviors<Game::BallShooter>(
+		GetEntityFactory().CreateWithBehaviors<Game::BallShooter>(
 			[this](entt::entity e,Game::BallShooter* bs)
 		{
 			entt::registry& reg = GetRegistry();

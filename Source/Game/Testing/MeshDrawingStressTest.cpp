@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "MeshDrawingStressTest.h"
+#include "Engine/Systems/Scene/Scene.h"
 #include "Engine\Systems\Renderer\Core\Meshes\MeshPool.h"
 #include "Engine\Systems\Renderer\Core\Textures\TexturePool.h"
 #include "Engine\Systems\Renderer\Core\Material\MaterialPool.h"
@@ -22,13 +23,12 @@ namespace Game
 
 	std::shared_ptr<Engine::MaterialData> RegisterRandomMaterial
 	(
+		Engine::MaterialPool& materialPool,
+		Engine::TexturePool& texturePool,
 		const std::shared_ptr<Engine::Mesh>& mesh,
 		int index
 	)
 	{
-		auto& materialPool = Engine::MaterialPool::GetInstance();
-		auto& texturePool = Engine::TexturePool::GetInstance();
-
 		std::string matName = "mat_" + std::to_string(index);
 
 		// 33% mart, 33% alien, 33% no texture
@@ -49,10 +49,10 @@ namespace Game
 
 	void MakeTonsOfRandomPositionedEntities(Engine::Scene* scene)
 	{
-		auto& registry = Engine::SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene()->GetRegistry();
-		auto& meshPool = Engine::MeshPool::GetInstance();
-		auto& texturePool = Engine::TexturePool::GetInstance();
-		auto& materialPool = Engine::MaterialPool::GetInstance();
+		auto& registry = scene->GetRegistry();
+		auto& meshPool = scene->GetMeshPool();
+		auto& texturePool = scene->GetTexturePool();
+		auto& materialPool = scene->GetMaterialPool();
 
 		const int total = (GRID_HALF_SIZE * 2 + 1);
 
@@ -116,7 +116,7 @@ namespace Game
 							auto sphereData = Engine::MakeSphere(latSegments, longSegments, top, mid, bot);
 							std::string name = "sphere_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
 							auto mesh = meshPool.RegisterMesh(name, sphereData.vertices, sphereData.indices);
-							auto material = RegisterRandomMaterial(mesh, Engine::RandInt(0, 999999));
+							auto material = RegisterRandomMaterial(materialPool, texturePool, mesh, Engine::RandInt(0, 999999));
 							registry.emplace<Engine::Material>(entity, material);
 						}
 						else
@@ -135,7 +135,7 @@ namespace Game
 							auto cubeData = Engine::MakeRandomColoredCube();
 							std::string name = "cube_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z);
 							auto mesh = meshPool.RegisterMesh(name, cubeData.vertices, cubeData.indices);
-							auto material = RegisterRandomMaterial(mesh, Engine::RandInt(0, 999999));
+							auto material = RegisterRandomMaterial(materialPool, texturePool, mesh, Engine::RandInt(0, 999999));
 							registry.emplace<Engine::Material>(entity, material);
 						}
 						else

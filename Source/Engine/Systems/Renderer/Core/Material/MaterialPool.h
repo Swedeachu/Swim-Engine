@@ -1,21 +1,31 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <string>
+#include <utility>
+#include <vector>
 #include "MaterialData.h"
 #include <tiny_gltf.h>
 
 namespace Engine
 {
 
+  class MeshPool;
+  class TexturePool;
+
   class MaterialPool
   {
 
   public:
 
-    // Singleton accessor
-    static MaterialPool& GetInstance();
+    using EditorMessageCallback = std::function<bool(const std::string&, std::uintptr_t)>;
+
+    MaterialPool(MeshPool& meshes, TexturePool& textures, EditorMessageCallback sendEditorMessage = {})
+      : meshes(&meshes), textures(&textures), sendEditorMessage(std::move(sendEditorMessage)) {}
 
     // Delete copy and move constructors
     MaterialPool(const MaterialPool&) = delete;
@@ -42,7 +52,9 @@ namespace Engine
 
   private:
 
-    MaterialPool() = default;
+    MeshPool* meshes = nullptr;
+    TexturePool* textures = nullptr;
+    EditorMessageCallback sendEditorMessage;
 
     void LoadNodeRecursive
     (

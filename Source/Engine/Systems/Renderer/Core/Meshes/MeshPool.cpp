@@ -1,15 +1,8 @@
 #include "PCH.h"
 #include "MeshPool.h"
-#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
-
-	MeshPool& MeshPool::GetInstance()
-	{
-		static MeshPool instance;
-		return instance;
-	}
 
 	std::shared_ptr<Mesh> MeshPool::RegisterMesh(const std::string& name, const VertexesIndexesPair& data)
 	{
@@ -40,7 +33,7 @@ namespace Engine
 		idToMesh[meshID] = mesh;
 
 		// Generate mesh buffers and its AABB and then place in the map
-		mesh->meshBufferData->GenerateBuffersAndAABB(vertices, indices);
+		mesh->meshBufferData->GenerateBuffersAndAABB(*renderer, vertices, indices);
 		meshes.emplace(name, mesh);
 
 		return mesh;
@@ -93,7 +86,7 @@ namespace Engine
 		idToMesh[meshID] = mesh;
 
 		// Upload to GPU, compute AABB
-		mesh->meshBufferData->GenerateBuffersAndAABB(vertices, indices);
+		mesh->meshBufferData->GenerateBuffersAndAABB(*renderer, vertices, indices);
 
 		// Name deduplication like TexturePool: append _1, _2, etc.
 		std::string finalName = desiredName;

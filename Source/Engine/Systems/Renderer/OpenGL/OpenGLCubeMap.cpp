@@ -1,6 +1,5 @@
 #include "PCH.h"
 #include "OpenGLCubeMap.h"
-#include "Engine/SwimEngine.h"
 #include "OpenGLRenderer.h"
 #include <stb_image_resize2.h>
 
@@ -10,10 +9,12 @@ namespace Engine
 	// On construction just sets up the shaders and mesh, SetFaces is to be called by the gameplay scene code as needed
 	OpenGLCubeMap::OpenGLCubeMap
 	(
+		OpenGLRenderer& rendererRef,
+		TexturePool& textures,
 		const std::string& vertShader,
 		const std::string& fragShader
 	)
-		: CubeMap(vertShader, fragShader)
+		: CubeMap(textures, vertShader, fragShader), renderer(&rendererRef)
 	{
 		LoadSkyboxMesh();
 		shaderProgram = LoadSkyboxShader();
@@ -144,8 +145,6 @@ namespace Engine
 
 	GLuint OpenGLCubeMap::LoadSkyboxShader()
 	{
-		std::shared_ptr<OpenGLRenderer> renderer = SwimEngine::GetInstance()->GetOpenGLRenderer();
-
 		// Load basic skybox shaders
 		std::string vsSrc = renderer->LoadTextFile(vertShader);
 		std::string fsSrc = renderer->LoadTextFile(fragShader);

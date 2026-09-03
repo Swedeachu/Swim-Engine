@@ -51,13 +51,13 @@ This ordering is not cosmetic. It prevents the engine from building a modern ren
 - [x] Platform abstractions exist before the modern RHI consumes a window or surface.
 - [x] Input is platform-neutral before gameplay APIs are rewritten around it.
 - [x] File/path/IO abstractions exist before the asset pipeline is made authoritative.
-- [ ] The jobs system exists before renderer extraction, asset processing, animation, streaming, and other parallel systems are expanded.
+- [x] The jobs system exists before renderer extraction, asset processing, animation, streaming, and other parallel systems are expanded.
 - [ ] Asset identity and ownership are fixed before the new renderer starts storing mesh/material/texture references.
 - [ ] Scene ownership and transform dirty tracking are fixed before GPU Scene extraction is implemented.
 - [ ] Shader reflection contracts are defined before descriptor/pipeline layouts become entrenched in the RHI.
 - [ ] The RHI contract is defined before Vulkan implementation details spread through new renderer code.
 - [ ] Physics components contain backend-neutral handles before Jolt and PhysX coexist.
-- [ ] No new code reaches through `SwimEngine::GetInstance()` to discover dependencies.
+- [x] No new code reaches through `SwimEngine::GetInstance()` to discover dependencies.
 - [x] No new public generic header includes Win32, Vulkan, OpenGL, PhysX, Jolt, SDL implementation details, or source-importer types.
 - [ ] Source import is never the normal shipping runtime asset path.
 - [ ] OpenGL compatibility never lowers the design of the modern RHI.
@@ -341,12 +341,12 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 
 ## 3. Hard architecture boundaries
 
-- [ ] `Swim::Platform` is the only generic runtime layer allowed to include OS-native window/process APIs.
+- [x] `Swim::Platform` is the only generic runtime layer allowed to include OS-native window/process APIs. *(Native Win32 use is confined to Platform/internal or backend-specific implementation code; generic/public headers are guarded by verification.)*
 - [ ] `Swim::RhiVulkan` is the only normal layer allowed to include Vulkan implementation types.
 - [ ] `Swim::RhiD3D12` and `Swim::RhiMetal` can be added without changing high-level renderer contracts.
 - [ ] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types.
 - [ ] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types.
-- [ ] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
+- [x] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
 - [ ] fastgltf types do not escape the asset importer/tool boundary.
 - [ ] enkiTS types do not become gameplay APIs.
 - [ ] Persisted scene references never use raw `entt::entity` values as durable identity.
@@ -362,9 +362,9 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [ ] RHI objects do not know about EnTT.
 - [ ] RenderGraph does not know about EnTT.
 - [ ] GPU Scene does not require EnTT.
-- [ ] Backend selection is runtime configuration, not `constexpr` source branching.
+- [x] Backend selection is runtime configuration, not `constexpr` source branching. *(Graphics/physics selection is parsed into `EngineConfig` before backend resources are created; unsupported compiled-out choices fail explicitly.)*
 - [ ] OpenGL is isolated as a legacy compatibility renderer and does not dictate RHI concepts.
-- [ ] Editor integration is optional infrastructure layered around the runtime, not a prerequisite for engine initialization.
+- [x] Editor integration is optional infrastructure layered around the runtime, not a prerequisite for engine initialization. *(Window hosting/focus/`WM_COPYDATA` compatibility is isolated behind Platform/editor bridge code and the runtime API uses opaque/native-neutral descriptors plus UTF-8 commands.)*
 - [ ] The CMake target graph mirrors these dependency boundaries; a generic target must not gain a backend/platform dependency merely to make one implementation compile.
 
 ---
@@ -435,12 +435,21 @@ CMake is the authoritative build description and should reinforce the engine arc
 - [x] No machine-specific absolute include/library paths.
 - [ ] Third-party compiler options and warnings do not leak into first-party targets.
 - [x] Tests and examples link the same public Swim targets that real applications are expected to consume.
+- [x] Visual Studio solution organization reflects ownership without inventing duplicate source ownership: `SwimEngine` stays at the root, first-party foundation modules are under `Engine Modules`, tests/examples are separated, dependencies are grouped under `Third Party`, and generated CMake projects are grouped under `CMake`.
+- [x] Tests/examples are `EXCLUDE_FROM_ALL`, so validation/demo targets remain explicitly buildable without bloating the normal engine build.
+- [x] Windows clean and soft workflows both regenerate and validate `build/windows-vs/SwimEngine.sln`; the soft path refreshes it with dependency fetching fully disconnected while the actual iterative compile remains on the Ninja `windows-release`/`windows-debug` tree.
+- [x] `SwimPlatform` / `SwimInput` sources are excluded from the legacy `SwimEngine` source glob and linked once through their module targets rather than duplicated into the executable target.
 - [ ] Optional implementation backends are compile-time capabilities; the selected implementation is a runtime choice among the backends that were compiled in.
 
-**Build workflow checkpoint (2026-09-02, hardened 2026-09-03):** SDL3 is a pinned CPM dependency (`libsdl-org/SDL`, `release-3.4.14`) owned privately by `Swim::Platform`. CPM sources are cached under `.cache/cpm`. A clean build is now defined as a full repository-local generated-state reset rather than merely deleting the selected target: Windows clean removes `build/windows-release`, `build/windows-debug`, `build/windows-vs`, the shared `build/.px` PhysX worktree/legacy junction, and the entire `.cache` tree; Linux clean removes both Linux configuration trees, `build/.px`, and `.cache`. Both scripts verify that the generated state is actually absent before fetching. `scripts/build-windows-soft.ps1` and `scripts/build-linux-soft.sh` configure with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so iterative rebuilds are restricted to already-cached dependency sources. Windows and Linux Debug/Release Ninja presets exist for those scripts. The legacy `scripts/build-windows.ps1` now forwards to the soft-build path. Matching `.bat` launchers exist for all four Windows/Linux clean/soft workflows; the Linux launchers run the Bash scripts through WSL, and every launcher preserves the build exit code and pauses before closing so one-click builds remain readable. Windows builds are also self-bootstrapping with respect to the local toolchain environment: `scripts/windows-build-common.ps1` discovers CMake from PATH or Visual Studio, finds Visual Studio/Build Tools through `vswhere` or standard install locations, imports the x64 MSVC environment when Ninja is selected, discovers Visual Studio's bundled Ninja even when it is not on PATH, and falls back to the Visual Studio 2022 generator when Ninja is unavailable. The helper uses `DebugBuild` internally to avoid colliding with PowerShell's built-in common `Debug` parameter while the public scripts continue to accept `-Debug`. Every clean Windows run also recreates `build/windows-vs/SwimEngine.sln`; when Ninja is the primary compile generator, the solution configure is performed afterward from the freshly populated and integrity-checked dependency cache with dependency downloads disabled. Windows soft builds now perform the same Visual Studio solution configure in fully disconnected mode on every run, so `build/windows-vs/SwimEngine.sln` stays synchronized with CMake source/target changes while the actual iterative compile continues to use the faster `windows-release`/`windows-debug` Ninja tree. Git-backed dependency caches are audited as immutable inputs during configure, and PhysX now builds from a short detached Git worktree at `build/.px` rather than a junction into the CPM checkout, so NVIDIA-generated compiler/bin output can no longer dirty the cached PhysX source. This removes the previous requirement to launch builds from a Developer Command Prompt or install Ninja separately while ensuring a normal Visual Studio solution is always available and synchronized after either Windows build workflow.
+**Build workflow checkpoint (2026-09-02, hardened 2026-09-03):** SDL3 is a pinned CPM dependency (`libsdl-org/SDL`, `release-3.4.14`) owned privately by `Swim::Platform`. CPM sources are cached under `.cache/cpm`. A clean build is now defined as a full repository-local generated-state reset rather than merely deleting the selected target: Windows clean removes `build/windows-release`, `build/windows-debug`, `build/windows-vs`, the shared `build/.px` PhysX worktree/legacy junction, and the entire `.cache` tree; Linux clean removes both Linux configuration trees, `build/.px`, and `.cache`. Both scripts verify that the generated state is actually absent before fetching. `scripts/build-windows-soft.ps1` and `scripts/build-linux-soft.sh` configure with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so iterative rebuilds are restricted to already-cached dependency sources. Windows and Linux Debug/Release Ninja presets exist for those scripts. The legacy `scripts/build-windows.ps1` now forwards to the soft-build path. Matching `.bat` launchers exist for all four Windows/Linux clean/soft workflows; the Linux launchers run the Bash scripts through WSL, and every launcher preserves the build exit code and pauses before closing so one-click builds remain readable. Windows builds are also self-bootstrapping with respect to the local toolchain environment: `scripts/windows-build-common.ps1` discovers CMake from PATH or Visual Studio, finds Visual Studio/Build Tools through `vswhere` or standard install locations, imports the x64 MSVC environment when Ninja is selected, discovers Visual Studio's bundled Ninja even when it is not on PATH, and falls back to the Visual Studio 2022 generator when Ninja is unavailable. The helper uses `DebugBuild` internally to avoid colliding with PowerShell's built-in common `Debug` parameter while the public scripts continue to accept `-Debug`. Every clean Windows run also recreates `build/windows-vs/SwimEngine.sln`; when Ninja is the primary compile generator, the solution configure is performed only after the primary Ninja build completes, using the freshly populated and integrity-checked dependency cache with dependency downloads disabled. Windows soft builds follow the same build-first ordering and perform the Visual Studio solution configure in fully disconnected mode on every successful run, so `build/windows-vs/SwimEngine.sln` stays synchronized without placing a second-generator configure between Ninja configure and compilation. Git-backed dependency caches are audited as immutable inputs during configure, and PhysX now builds from a short detached Git worktree at `build/.px` rather than a junction into the CPM checkout, so NVIDIA-generated compiler/bin output can no longer dirty the cached PhysX source. This removes the previous requirement to launch builds from a Developer Command Prompt or install Ninja separately while ensuring a normal Visual Studio solution is always available and synchronized after either Windows build workflow.
 
 
-**Visual Studio solution hygiene checkpoint (2026-09-03):** The CMake target graph remains modular, but the generated solution is no longer allowed to expose that entire graph as a flat list. `USE_FOLDERS` and `PREDEFINED_TARGETS_FOLDER` are enabled centrally in `cmake/SolutionLayout.cmake`. The primary `SwimEngine` executable stays at the solution root; the reusable first-party `SwimPlatform` and `SwimInput` targets live under `Engine Modules`; validation executables/object targets live under `Tests`; smoke/demo executables live under `Examples`; generated CMake projects live under `CMake`; and dependency projects live under `Third Party`, with the large SDL3, Draco, WebP, GLAD, PhysX, zstd, and Basis graphs grouped by dependency where applicable. This is presentation-only and does not duplicate source ownership: Platform/Input sources remain excluded from the `SwimEngine` source glob and are linked exactly once through their module libraries. Tests/examples are now `EXCLUDE_FROM_ALL`, so they remain explicitly buildable from Visual Studio without participating in the normal engine build. Both Windows clean and soft scripts regenerate the Visual Studio solution and validate that the required solution folders exist before compiling the primary Ninja tree; the standalone solution-generation script uses the same toolchain discovery and validation path.
+**Visual Studio solution hygiene checkpoint (2026-09-03):** The CMake target graph remains modular, but the generated solution is no longer allowed to expose that entire graph as a flat list. `USE_FOLDERS` and `PREDEFINED_TARGETS_FOLDER` are enabled centrally in `cmake/SolutionLayout.cmake`. The primary `SwimEngine` executable stays at the solution root; the reusable first-party `SwimPlatform` and `SwimInput` targets live under `Engine Modules`; validation executables/object targets live under `Tests`; smoke/demo executables live under `Examples`; generated CMake projects live under `CMake`; and dependency projects live under `Third Party`, with the large SDL3, Draco, WebP, GLAD, PhysX, zstd, and Basis graphs grouped by dependency where applicable. This is presentation-only and does not duplicate source ownership: Platform/Input sources remain excluded from the `SwimEngine` source glob and are linked exactly once through their module libraries. Tests/examples are now `EXCLUDE_FROM_ALL`, so they remain explicitly buildable from Visual Studio without participating in the normal engine build. Both Windows clean and soft scripts compile the primary Ninja tree first, then regenerate the Visual Studio solution and validate that the required solution folders exist; the standalone solution-generation script uses the same toolchain discovery and validation path.
+
+**Ninja manifest stability checkpoint (2026-09-03):** Windows soft/clean workflows keep the primary Ninja configure and build contiguous and refresh the secondary Visual Studio solution only after a successful primary build. First-party and shader source discovery remains configure-time globbing but no longer uses `CONFIGURE_DEPENDS`. A real clean Windows run proved that removing first-party glob watching was not sufficient because a fetched third-party project can still add its own `VerifyGlobs` edge; the resulting Ninja manifest repeatedly ran CMake (`[0/2]`, `[0/4]`, `[0/6]`, ...) without ever reaching compilation. Swim's Ninja presets now set `CMAKE_SUPPRESS_REGENERATION=ON`, and the top-level project forces the same contract for every Ninja generator. This is safe because every supported clean/soft workflow explicitly configures immediately before building, so source/dependency graph changes are still discovered before compilation while dependency-owned automatic regeneration cannot trap Ninja in a manifest loop. Both Windows scripts call `Assert-SwimNinjaManifestStable` after configure and refuse to invoke Ninja if `RERUN_CMAKE`, `VerifyGlobs.cmake`, or `cmake.verify_globs` appears in `build.ninja`. Configure-time generated Basis transcoder source remains write-if-different so unchanged configuration also preserves its timestamp. `verify-build-layout.py` guards these invariants.
+
+
+**Current foundation/build status (2026-09-03):** the dependency/bootstrap problems found by real Windows clean builds are now considered resolved enough for normal iteration: clean deletion is idempotent and long-path aware, the CPM cache is integrity-checked, nlohmann/json uses a pinned verified single-header artifact, PhysX builds from the short detached `build/.px` worktree, and the solution is regenerated by both Windows workflows. The real MSVC build has progressed from Platform errors through PhysX, PCH, renderer Win32/Vulkan include issues, and into the final first-party objects; the latest known compile checkpoint reached roughly 668/676 before a stale wide-string editor command in `Scene.cpp`, which has now been corrected. **Use the soft Windows build for normal C++ iteration from here.** Return to a clean build only when dependency declarations/pins, cache layout, or generated dependency-build contracts change, or when an integrity check explicitly requires it.
 
 ```text
 Build-time availability
@@ -668,7 +677,8 @@ nlohmann/json cache-integrity follow-up:
 Validation still required before declaring Phase 1 fully exited:
 
 - Run the real SDL-backed `HelloWindow`/headless executables on both Windows and Linux. The current execution environment cannot resolve GitHub from the build container, so it cannot perform the fresh CPM/SDL pull needed for that test.
-- Re-run the complete legacy Windows engine build after this compiler-fix checkpoint and continue through any later first-party errors, including the embedded-editor compatibility path.
+- Continue the real Windows build from the current ~668/676 checkpoint through the remaining objects, final link, and launch. The stale editor-command compile path has been fixed; any next failures should now be treated as first-party C++/link/runtime issues unless the dependency-integrity checks say otherwise.
+- Explicitly build the `SwimPlatformPublicHeaders` validation target on Windows so the Windows half of the generic-public-header exit criterion is proven rather than inferred from the main engine compile.
 - The exit criterion requiring headless Core/Jobs/Assets initialization remains intentionally open because Jobs and the authoritative Assets architecture are later phases and do not exist yet.
 
 **Clean-cache hardening:** real Windows clean runs exposed two independent deletion hazards: preserving `build/.px` while removing `.cache` could leave a short PhysX alias/worktree tied to a deleted checkout, and Windows PowerShell recursive deletion could fail halfway through old dependency caches containing paths beyond `MAX_PATH`, leaving a partially removed tree that then failed differently on the next run. Clean builds now remove all repository-local cache state and the short PhysX path before fetching. Windows cleanup is explicitly idempotent: already-absent paths and broken legacy junctions count as success, directory-entry existence is checked without requiring a junction target to resolve, and recursive deletion uses Windows extended-length (`\\?\`) paths through native `rd /s /q` rather than `Remove-Item -Recurse`. The post-delete verification uses the same directory-entry test, so a broken reparse point cannot be mistaken for a successful clean. PhysX builds from a detached Git worktree at `build/.px`, keeping generated NVIDIA projects/binaries isolated from the pinned CPM checkout. Configure-time dependency integrity checks fail immediately on any dirty Git-backed cache instead of allowing dirty-source state to break much later in PCH/compiler work.
@@ -683,7 +693,7 @@ Validation still required before declaring Phase 1 fully exited:
 - [x] window resize/minimize/focus/DPI events are normalized.
 - [x] keyboard/mouse/controller APIs contain no Win32 key/message types.
 - [ ] a headless application can initialize Core/Jobs/Assets tests with no window. *(Platform headless mode exists; Core/Jobs/Assets integration waits for the later subsystem phases.)*
-- [ ] generic public headers compile on Windows and Linux without `Windows.h`. *(Linux compile is verified; Windows compile still needs a Windows checkpoint build.)*
+- [ ] generic public headers compile on Windows and Linux without `Windows.h`. *(Linux compile is verified and the real Windows engine compile now gets deep into first-party code without generic Win32 leakage, but the dedicated `SwimPlatformPublicHeaders` target still needs an explicit Windows build before this is checked off.)*
 - [x] existing editor-window embedding has a Windows compatibility path through Platform rather than `SwimEngine`.
 - [x] Platform/Input implementation targets obey the CMake boundaries: SDL/native libraries do not leak into unrelated generic targets.
 
@@ -778,11 +788,11 @@ The current `SystemManager` preserves insertion order and stores `shared_ptr<Mac
 
 For core systems:
 
-- [ ] use typed members/owners;
-- [ ] make startup order explicit;
-- [ ] make shutdown order the reverse dependency order;
-- [ ] fail startup with structured diagnostics;
-- [ ] keep a dynamic subsystem registry only for optional/plugin systems that truly need it.
+- [x] use typed members/owners;
+- [x] make startup order explicit;
+- [x] make shutdown order the reverse dependency order;
+- [x] fail startup with structured diagnostics;
+- [x] keep a dynamic subsystem registry only for optional/plugin systems that truly need it.
 
 ### Lifecycle model
 
@@ -831,13 +841,39 @@ Use:
 - raw/reference non-owning pointers only where lifetime is guaranteed and documented;
 - `shared_ptr` for genuinely shared asynchronous CPU ownership where it solves a real lifetime problem.
 
+### Phase 2 checkpoint status — 2026-09-03
+
+Implemented in this checkpoint:
+
+- Added a standalone `Swim::Core` target with `EngineConfig`, `GraphicsBackend`, and `PhysicsBackend` contracts that do not depend on the legacy renderer implementation. `Auto`, Vulkan, legacy OpenGL, D3D12, Metal, PhysX, and Jolt are represented as runtime data even when a backend implementation is not available yet.
+- Added runtime launcher parsing for `--graphics=...` and `--physics=...`, preserved `--state` and the Win32 editor-host compatibility argument, and made unsupported configured backends fail at startup with an explicit diagnostic instead of silently compiling a different backend.
+- Removed the compile-time `SwimEngine::CONTEXT` renderer selector. The legacy Vulkan/OpenGL creation, resize, texture, cubemap, scene renderer binding, camera projection compatibility, and screen-space depth paths now follow the selected runtime backend.
+- Removed core-system construction and frame iteration from `SystemManager`. `SwimEngine` now owns typed Input, Command, Scene, Physics, Renderer, and Camera slots and spells out Awake, Init, Update, FixedUpdate, and reverse-order Exit directly. The old dynamic `SystemManager` type remains available only as an unreferenced legacy/dynamic registry rather than the engine's core ownership model.
+- Removed the process-global `SwimEngine` compatibility locator entirely. `main` owns one engine directly, core services and transitional renderer caches use unique engine ownership, scenes receive non-owning injected services, and first-party runtime code no longer calls `SwimEngine::GetInstance()` or the old Mesh/Texture/Material/Font/EntityFactory singleton locators.
+- Added `SwimEngineConfigTests` covering defaults, split/equal-sign launcher syntax, backend resolution, state parsing, ShaderToy opt-in, and invalid backend diagnostics. Build-layout verification now rejects reintroducing compile-time renderer selection or stringly typed core ownership.
+- Converted the typed core owners from transitional `shared_ptr` storage to `unique_ptr`: Input, Commands, Scenes, Physics, Camera, and the selected legacy renderer now have one explicit owner in `SwimEngine`. Public compatibility getters expose non-owning pointers rather than ownership-bearing smart pointers.
+- Replaced Scene/Behavior/Physics/renderer service ownership with explicitly injected non-owning views. `SceneSystemServices` supplies the scene runtime dependencies, `PhysicsSystem` receives Scene/state views directly, and Vulkan/OpenGL receive camera plus scene-service dependencies directly. Runtime-registered scenes receive the same service injection path as preregistered scenes.
+- Removed `SwimEngine::GetInstance()` from `CameraSystem`, Scene runtime-state/window-size/hotkey paths, `VulkanIndexDraw`, and renderer active-scene discovery. Camera projection convention and aspect now come from injected backend/surface data; Scene state comes from the engine-owned state reference; scene hotkeys dispatch through the injected command service; Vulkan indexed drawing receives renderer/scene/camera views from its owner instead of rediscovering the engine.
+- Corrected lifecycle dependency order so low-level services initialize before Scene consumers, and shutdown destroys/resets Scene consumers before renderer/camera/physics dependencies. `SceneSystem::Exit()` now explicitly releases active/registered scenes while those dependencies are still alive. This is required now that those relationships are deliberately non-owning.
+
+Validation completed in the checkpoint environment:
+
+- `scripts/verify-build-layout.py` passes with the Phase 2 architecture invariants, including unique core ownership plus guards against CameraSystem, `VulkanIndexDraw`, or renderer scene access returning to global engine discovery.
+- `EngineConfig.cpp` and `EngineConfigTests.cpp` compile and run directly with GCC/C++20.
+- Offline CMake configuration succeeds with the legacy Windows engine disabled, and the `SwimCore`, `SwimEngineConfigTests`, and `SwimPlatformPublicHeaders` targets build successfully.
+- A full legacy Windows compile is still required for the changed `SwimEngine` and renderer-facing compatibility code; use the established soft Windows build for that first-party iteration rather than resetting the dependency cache.
+
+The Phase 2 runtime-ownership migration is complete for the existing engine. First-party runtime code has zero `SwimEngine::GetInstance()`, Mesh/Texture/Material/Font pool `GetInstance()`, or `EntityFactory::GetInstance()` calls. The transitional renderer caches are engine-owned until Phase 4 replaces them with the authoritative asset model, and scene preregistration stores constructor metadata rather than process-global mutable Scene instances so multiple engine instances can construct independent runtime scenes. `BehaviorFactory::GetInstance()` remains only as behavior-type registration metadata and is intentionally deferred to the Phase 5 scene/plugin registration redesign; it is not used as a runtime service owner.
+
+**Windows compile-fix checkpoint (2026-09-03):** A from-scratch Windows build now reaches normal C++ compilation with Ninja automatic regeneration suppressed, so soft builds are the default iteration path after the dependency cache exists. The first MSVC errors exposed two incomplete ownership migrations: `Transform` and `CubeMapController` still rediscovered `SwimEngine`. Transform hierarchy invalidation now uses a scene-wired non-owning registry context instead of the active-scene singleton, screen-space depth receives a generic `ClipSpaceDepthRange` selected once during engine startup, and cubemap controllers receive an already-created backend implementation from the owning renderer. Transform hooks are bound before user `Scene::Awake()` so transforms created during Awake receive their owning registry context. The verifier rejects reintroducing global engine discovery into these two paths or graphics-API branches into `Transform`.
+
 ### Phase 2 exit criteria
 
-- [ ] no new subsystem uses `SwimEngine::GetInstance()`.
-- [ ] engine can be instantiated in a test without process-global mutable runtime state.
-- [ ] graphics and physics backend are selected through configuration/launcher args.
-- [ ] startup/shutdown dependency order is explicit.
-- [ ] core systems are not looked up by magic string names.
+- [x] no first-party runtime subsystem uses `SwimEngine::GetInstance()` or the legacy pool/entity service locators.
+- [x] engine runtime ownership no longer depends on process-global mutable engine/scene instances. *(Static scene/behavior type-registration metadata remains until Phase 5, but runtime Scene instances and services are per engine.)*
+- [x] graphics and physics backend are selected through configuration/launcher args. *(Backends without implementations fail explicitly rather than falling back silently.)*
+- [x] startup/shutdown dependency order is explicit.
+- [x] core systems are not looked up by magic string names.
 
 ---
 
@@ -851,15 +887,15 @@ Use enkiTS as the recommended scheduler implementation behind `Swim::Jobs`.
 
 Expose engine concepts such as:
 
-- [ ] `JobSystem`
-- [ ] `TaskGroup`
-- [ ] `JobHandle`
-- [ ] `ParallelFor`
-- [ ] task dependencies
-- [ ] priority
-- [ ] pinned/main-thread work where required
-- [ ] external thread registration if required
-- [ ] clean shutdown/cancellation policy
+- [x] `JobSystem`
+- [x] `TaskGroup`
+- [x] `JobHandle`
+- [x] `ParallelFor`
+- [x] task dependencies
+- [x] priority
+- [x] pinned/main-thread work where required
+- [x] external thread registration if required
+- [x] clean shutdown/cancellation policy
 
 Do not expose enkiTS task classes throughout gameplay code.
 
@@ -868,6 +904,24 @@ Do not expose enkiTS task classes throughout gameplay code.
 The useful parallel-for patterns in `ParallelUtils` can be adapted to the general scheduler.
 
 The renderer should request jobs from `JobSystem`; it should not own a separate global CPU worker pool.
+
+### Phase 3 scheduler checkpoint — 2026-09-03
+
+Implemented at this safe compile boundary:
+
+- Added pinned enkiTS v1.12 behind the standalone `Swim::Jobs` target; `TaskScheduler.h` is private to `JobSystem.cpp` and no enkiTS types leak into renderer/gameplay headers.
+- Added engine-facing `JobSystem`, `JobHandle`, `TaskGroup`, priorities, dependencies, synchronous `ParallelFor`, main-thread pinned work, dedicated blocking lanes, external-thread registration, cooperative cancellation, and deterministic drain/shutdown behavior.
+- `SwimEngine` uniquely owns the scheduler, injects it into renderer/scene runtime services, pumps main-thread pinned work around the frame update, waits outstanding engine work before consumer teardown, and shuts Jobs down after scene/render/input consumers are gone.
+- Retired the renderer-only CPU worker singleton. `ParallelUtils`, `SceneBVH`, and Vulkan indexed-draw CPU work now route through the injected general scheduler.
+- The legacy engine source glob explicitly excludes `Source/Engine/Jobs` because `JobSystem.cpp` is compiled once in `SwimJobs`; verification rejects accidentally compiling it into both targets.
+- Added offline scheduler tests for dependency ordering, renderer-style parallel ranges, task groups, priorities, main-thread pinned work, cancellation, blocking-lane work, external-thread registration, and shutdown.
+- The first full Windows dependency refresh successfully pulled enkiTS v1.12 and reached the legacy engine compile. MSVC then exposed a PCH-visible incomplete-owner issue in `Scene`: because `Scene` owns `std::unique_ptr<EntityFactory>` while `EntityFactory` is forward-declared there, both `Scene` constructors and its destructor now remain out-of-line in `Scene.cpp`, where `EntityFactory` is complete.
+- The same Windows compile-readiness pass found and fixed a latent `FontPool::Flush()` declaration/definition mismatch before the next MSVC pass could reach it. Verification now guards both boundaries.
+- The next real Windows soft build passed the PCH boundary and compiled into the renderer before stopping in `OpenGLRenderer.cpp`: shutdown called `MaterialPool::Flush()` through a forward declaration without including `MaterialPool.h`. Renderer/scene runtime-service call sites now include the concrete service headers they dereference directly, and the verifier guards the affected boundaries so these MSVC-only incomplete-type regressions do not return.
+- The following Windows soft build reached 59/66 first-party build steps before `CubeMapControlTest.cpp` exposed another PCH-masked dependency boundary: the demo referenced `CubeMapController`/`CubeMap` and dereferenced `Renderer`, `Scene`, and `InputManager` without concrete declarations/includes. The demo now uses a non-owning `CubeMapController*` helper instead of leaking the renderer-owned `unique_ptr`, checks the controller before all use, and includes every concrete service it dereferences. The same direct-service include rule is enforced across `Source/Game` so this class of forward-declaration compile failure is caught before MSVC.
+- The same compile-readiness sweep removed the remaining project-local include case mismatches (`SetTextCallBack.h`, `RigidBody.h`, and the two lowercase `pch.h` uses). Windows had hidden these because its filesystem is case-insensitive; keeping the spelling aligned with the actual files avoids carrying avoidable failures into the later Linux legacy-engine migration.
+
+This checkpoint deliberately stops before the Async IO and transient-memory portions below. They are the next Phase 3 work and should be added on top of a Windows/MSVC-validated scheduler boundary rather than mixed into the same broad ownership migration.
 
 ### Async IO service
 
@@ -897,9 +951,9 @@ Do not build a giant custom general allocator unless profiling demands it.
 
 ### Phase 3 exit criteria
 
-- [ ] renderer code can use a general `ParallelFor` without knowing enkiTS.
+- [x] renderer code can use a general `ParallelFor` without knowing enkiTS.
 - [ ] asset loader has a non-blocking read primitive available.
-- [ ] no new thread-per-file or thread-per-subsystem patterns.
+- [x] no new thread-per-file or thread-per-subsystem patterns; compute and reserved blocking work share the engine-owned scheduler.
 - [ ] jobs and IO shut down deterministically.
 
 ---

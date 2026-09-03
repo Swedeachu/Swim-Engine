@@ -1,12 +1,15 @@
 #pragma once
 
-#include "Systems/SystemManager.h"
-#include "Systems/Renderer/Renderer.h"
-#include "Systems/IO/CommandSystem.h"
-#include "Systems/Physics/PhysicsSystem.h"
-#include "EngineState.h"
+#include "Engine/EngineConfig.h"
+#include "Engine/EngineState.h"
+#include "Engine/Machine.h"
 #include "Engine/Platform/EditorIpcBridge.h"
 #include "Engine/Platform/PlatformSystem.h"
+#include "Engine/Jobs/JobSystem.h"
+#include "Engine/Systems/IO/CommandSystem.h"
+#include "Engine/Systems/Physics/PhysicsSystem.h"
+#include "Engine/Systems/Renderer/Renderer.h"
+
 #include <cstdint>
 #include <format>
 #include <memory>
@@ -17,36 +20,27 @@
 namespace Engine
 {
 
-	class VulkanRenderer;
+	class CameraSystem;
+	class InputManager;
 	class OpenGLRenderer;
+	class SceneSystem;
+	class MeshPool;
+	class TexturePool;
+	class MaterialPool;
+	class FontPool;
+	class VulkanRenderer;
 
-	class SwimEngine : public Machine, public std::enable_shared_from_this<SwimEngine>
+	class SwimEngine : public Machine
 	{
 
 	public:
 
 		static constexpr EngineState DefaultEngineState = EngineState::Editing;
 
-		enum RenderContext
-		{
-			Vulkan, OpenGL
-		};
+		explicit SwimEngine(EngineConfig config = {});
+		~SwimEngine() override;
 
-		struct EngineArgs
-		{
-			EngineArgs(std::uintptr_t externalParent = 0, EngineState s = EngineState::Playing) : externalParentWindow(externalParent), state(s) {}
-
-			std::uintptr_t externalParentWindow{ 0 };
-			EngineState state{ EngineState::Playing };
-		};
-
-		static constexpr RenderContext CONTEXT = RenderContext::Vulkan;
-		static constexpr bool useShaderToyIfOpenGL = false;
-
-		SwimEngine(EngineArgs args);
-		SwimEngine(std::uintptr_t externalParentWindow = 0, EngineState state = EngineState::Playing);
-
-		bool Start();
+		int Start();
 
 		int Awake() override;
 		int Init() override;
@@ -58,26 +52,31 @@ namespace Engine
 
 		void OnEditorCommand(std::string_view msg);
 
-		static std::shared_ptr<SwimEngine> GetInstance();
-		static std::shared_ptr<SwimEngine>& GetInstanceRef();
-
-		static EngineArgs ParseStartingEngineArgs(int argc, char** argv);
-		static std::string GetExecutableDirectory();
+		static EngineConfigParseResult ParseStartingEngineArgs(int argc, char** argv);
 
 		int GetFPS() const;
+
+		const EngineConfig& GetConfig() const { return config; }
+		GraphicsBackend GetGraphicsBackend() const { return graphicsBackend; }
+		PhysicsBackend GetPhysicsBackend() const { return physicsBackend; }
 
 		Swim::Platform::PlatformSystem& GetPlatformSystem() { return *platformSystem; }
 		const Swim::Platform::PlatformSystem& GetPlatformSystem() const { return *platformSystem; }
 		Swim::Platform::Window& GetWindow() { return *engineWindow; }
 		const Swim::Platform::Window& GetWindow() const { return *engineWindow; }
 
-		std::shared_ptr<InputManager>& GetInputManager() { return inputManager; }
-		std::shared_ptr<PhysicsSystem>& GetPhysicsSystem() { return physicsSystem; }
-		std::shared_ptr<SceneSystem>& GetSceneSystem() { return sceneSystem; }
-		std::shared_ptr<CameraSystem>& GetCameraSystem() { return cameraSystem; }
-		std::shared_ptr<CommandSystem>& GetCommandSystem() { return commandSystem; }
-		std::shared_ptr<VulkanRenderer>& GetVulkanRenderer() { return vulkanRenderer; }
-		std::shared_ptr<OpenGLRenderer>& GetOpenGLRenderer() { return openglRenderer; }
+		InputManager* GetInputManager() { return inputManager.get(); }
+		PhysicsSystem* GetPhysicsSystem() { return physicsSystem.get(); }
+		SceneSystem* GetSceneSystem() { return sceneSystem.get(); }
+		CameraSystem* GetCameraSystem() { return cameraSystem.get(); }
+		CommandSystem* GetCommandSystem() { return commandSystem.get(); }
+		VulkanRenderer* GetVulkanRenderer() { return vulkanRenderer.get(); }
+		OpenGLRenderer* GetOpenGLRenderer() { return openglRenderer.get(); }
+		MeshPool* GetMeshPool() { return meshPool.get(); }
+		TexturePool* GetTexturePool() { return texturePool.get(); }
+		MaterialPool* GetMaterialPool() { return materialPool.get(); }
+		FontPool* GetFontPool() { return fontPool.get(); }
+		Swim::Jobs::JobSystem* GetJobSystem() { return jobSystem.get(); }
 
 		Renderer& GetRenderer();
 
@@ -102,12 +101,23 @@ namespace Engine
 
 	private:
 
-		void Create(std::uintptr_t externalParentWindow, EngineState state);
+		void Create();
 		void RegisterVanillaEngineCommands();
 		int HeartBeat();
 		bool MakeWindow();
+		bool ValidateBackendConfiguration() const;
+		int AwakeSystems();
+		int InitSystems();
+		int ExitSystems();
+		void UpdateSystems(double dt);
+		void FixedUpdateSystems(unsigned int tickThisSecond);
 		void HandleWindowEvent(const Swim::Platform::WindowEvent& event);
 		void UpdateWindowSize();
+		std::string GetWindowTitle() const;
+
+		EngineConfig config{};
+		GraphicsBackend graphicsBackend{ GraphicsBackend::Vulkan };
+		PhysicsBackend physicsBackend{ PhysicsBackend::PhysX };
 
 		bool uncappedFPS{ true };
 		unsigned int targetFPS{ 60 };
@@ -115,6 +125,8 @@ namespace Engine
 		unsigned int tickRate{ 60 };
 		double frameTime{ 0.0 };
 		double delta{ 0.0 };
+		double fpsTimeAccumulator{ 0.0 };
+		int fpsFrameCounter{ 0 };
 		bool running{ false };
 		bool needResize{ false };
 		bool resizing{ false };
@@ -124,26 +136,32 @@ namespace Engine
 		bool debugging{ false };
 		int fps{ 0 };
 
-		EngineState engineState{ EngineState::Playing };
+		EngineState engineState{ EngineState::Editing };
 
-		std::uintptr_t externalParentWindow{ 0 };
 		unsigned int windowWidth{ 1280 };
 		unsigned int windowHeight{ 720 };
-		std::string windowTitle{ "Demo" };
 		bool ownsWindow{ true };
 
 		std::unique_ptr<Swim::Platform::PlatformSystem> platformSystem;
 		std::unique_ptr<Swim::Platform::Window> engineWindow;
 		std::unique_ptr<Swim::Platform::EditorIpcBridge> editorIpcBridge;
+		std::unique_ptr<Swim::Jobs::JobSystem> jobSystem;
 
-		std::unique_ptr<SystemManager> systemManager;
-		std::shared_ptr<InputManager> inputManager;
-		std::shared_ptr<CommandSystem> commandSystem;
-		std::shared_ptr<SceneSystem> sceneSystem;
-		std::shared_ptr<VulkanRenderer> vulkanRenderer;
-		std::shared_ptr<OpenGLRenderer> openglRenderer;
-		std::shared_ptr<CameraSystem> cameraSystem;
-		std::shared_ptr<PhysicsSystem> physicsSystem;
+		// Core systems have unique ownership. Legacy consumers receive non-owning
+		// pointers whose lifetime is bounded by SwimEngine's explicit shutdown order.
+		std::unique_ptr<InputManager> inputManager;
+		std::unique_ptr<CommandSystem> commandSystem;
+		std::unique_ptr<SceneSystem> sceneSystem;
+		std::unique_ptr<VulkanRenderer> vulkanRenderer;
+		std::unique_ptr<OpenGLRenderer> openglRenderer;
+		std::unique_ptr<CameraSystem> cameraSystem;
+		std::unique_ptr<PhysicsSystem> physicsSystem;
+
+		std::unique_ptr<MeshPool> meshPool;
+		std::unique_ptr<TexturePool> texturePool;
+		std::unique_ptr<MaterialPool> materialPool;
+		std::unique_ptr<FontPool> fontPool;
+		RendererRuntimeServices rendererRuntimeServices{};
 
 	};
 

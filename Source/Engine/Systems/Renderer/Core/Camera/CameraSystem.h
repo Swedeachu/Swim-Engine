@@ -2,7 +2,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "Engine/SwimEngine.h"
+#include "Engine/EngineConfig.h"
+#include "Engine/Machine.h"
+
+#include <cstdint>
 
 namespace Engine
 {
@@ -34,6 +37,7 @@ namespace Engine
 		float aspect = 1.0f;
 		float nearClip = 0.1f;
 		float farClip = 100.0f;
+		GraphicsBackend graphicsBackend = GraphicsBackend::Vulkan;
 
 		mutable bool viewDirty = true;
 		mutable bool projDirty = true;
@@ -64,6 +68,7 @@ namespace Engine
 		void SetFOV(float f) { fov = f; MarkProjDirty(); }
 		void SetAspect(float a) { aspect = a; MarkProjDirty(); }
 		void SetClipPlanes(float nearC, float farC) { nearClip = nearC; farClip = farC; MarkProjDirty(); }
+		void SetGraphicsBackend(GraphicsBackend backend) { graphicsBackend = backend; MarkProjDirty(); }
 
 		const glm::vec3& GetPosition() const { return position; }
 		const glm::quat& GetRotation() const { return rotation; }
@@ -91,7 +96,10 @@ namespace Engine
 			if (projDirty)
 			{
 				projMatrix = glm::perspective(glm::radians(fov), aspect, nearClip, farClip);
-				if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan) projMatrix[1][1] *= -1; // Vulkan clip space correction
+				if (graphicsBackend == GraphicsBackend::Vulkan)
+				{
+					projMatrix[1][1] *= -1; // Vulkan clip space correction
+				}
 				projDirty = false;
 			}
 			return projMatrix;
@@ -108,6 +116,8 @@ namespace Engine
 		int Init() override;
 		void Update(double dt) override;
 		void RefreshAspect();
+		void SetGraphicsBackend(GraphicsBackend backend) { camera.SetGraphicsBackend(backend); }
+		void SetSurfaceSize(uint32_t width, uint32_t height);
 
 		const glm::mat4& GetViewMatrix() const { return camera.GetViewMatrix(); }
 
@@ -121,6 +131,8 @@ namespace Engine
 	private:
 
 		Camera camera;
+		uint32_t surfaceWidth = 1280;
+		uint32_t surfaceHeight = 720;
 
 	};
 

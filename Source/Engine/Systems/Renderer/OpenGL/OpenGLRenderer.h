@@ -2,9 +2,15 @@
 
 #include "Engine/Platform/Internal/WindowsApi.h"
 
+#include <cstdint>
 #include <glad/gl.h>
 
 #include <glad/wgl.h>
+
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "Engine/Systems/Renderer/Renderer.h"
 
@@ -13,8 +19,9 @@ namespace Engine
 
 	extern PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB;
 
-	// Forward decalre
+	// Forward declare
 	class Texture2D;
+	class SceneSystem;
 
 	class OpenGLRenderer : public Renderer
 	{
@@ -36,8 +43,10 @@ namespace Engine
 
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();
+		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
+		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
 
-		static std::string LoadTextFile(const std::string& relativePath);
+		std::string LoadTextFile(const std::string& relativePath) const;
 		GLuint CompileGLSLShader(GLenum stage, const char* source);
 		GLuint LinkShaderProgram(const std::vector<GLuint>& shaderStages);
 
@@ -92,7 +101,8 @@ namespace Engine
 		GLuint ubo = 0;
 
 		std::shared_ptr<Texture2D> missingTexture;
-		std::shared_ptr<CameraSystem> cameraSystem;
+		CameraSystem* cameraSystem = nullptr;
+		SceneSystem* sceneSystem = nullptr;
 
 		std::unique_ptr<CubeMapController> cubemapController;
 

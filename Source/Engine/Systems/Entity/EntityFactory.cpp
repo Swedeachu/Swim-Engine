@@ -6,11 +6,9 @@ namespace Engine
 
 	void EntityFactory::ProcessQueues()
 	{
-		// Pull fresh scene from the engine every time
-		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 		if (!scene)
 		{
-			throw std::runtime_error("EntityFactory: No active scene found.");
+			throw std::runtime_error("EntityFactory: owning scene is unavailable.");
 		}
 
 		entt::registry& registry = scene->GetRegistry();
@@ -51,9 +49,8 @@ namespace Engine
 	// This destorys an entity and calls exits on all its behaviors and children, freeing them entirely from the registry and memory
 	void EntityFactory::Destroy(entt::entity entity)
 	{
-		QueueDestroy([](entt::entity e)
+		QueueDestroy([this](entt::entity e)
 		{
-			auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
 			if (scene)
 			{
 				scene->DestroyEntity(e);

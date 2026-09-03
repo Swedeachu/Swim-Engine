@@ -1,5 +1,11 @@
 #pragma once
 
+#include "Engine/EngineConfig.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vulkan/vulkan.h>
 #include <glad/gl.h>
@@ -7,13 +13,28 @@
 namespace Engine
 {
 
+	class VulkanRenderer;
+
+	struct TextureLifetimeTracker
+	{
+		std::atomic<int> LiveCount{ 0 };
+		std::atomic<uint32_t> NextBindlessIndex{ 0 };
+	};
+
+	struct TextureRuntimeContext
+	{
+		GraphicsBackend Backend = GraphicsBackend::Vulkan;
+		VulkanRenderer* Vulkan = nullptr;
+		std::shared_ptr<TextureLifetimeTracker> Lifetime;
+	};
+
 	class Texture2D
 	{
 
 	public:
 
-		Texture2D(const std::string& filePath, bool generateMips = true);
-		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
+		Texture2D(TextureRuntimeContext context, const std::string& filePath, bool generateMips = true);
+		Texture2D(TextureRuntimeContext context, uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
 		~Texture2D();
 
 		void Free();
@@ -38,14 +59,13 @@ namespace Engine
 		bool isPixelDataSTB = true;
 		bool generateMips = true; 
 
-		static void FlushAllTextures(); // Frees everything still hanging around
-
-		static int GetTextureCountOnGPU();
 
 	private:
 
 		uint32_t width = 0;
 		uint32_t height = 0;
+
+		TextureRuntimeContext context{};
 
 		const std::string filePath;
 
@@ -68,9 +88,6 @@ namespace Engine
 		void GoBindless();
 
 		bool freed = false;
-
-		// Just a spot in memory where all textures are stored, solely for clean up on exit. Including procedural or GPU generated textures that never enter the client interfacing texture pool.
-		static std::unordered_set<Texture2D*> allTextures;
 
 	};
 

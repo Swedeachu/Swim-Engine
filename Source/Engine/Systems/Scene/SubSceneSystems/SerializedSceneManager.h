@@ -3,10 +3,20 @@
 #include <entt/entt.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
+
+namespace Swim::Platform
+{
+	class FileSystem;
+}
 
 namespace Engine
 {
+
+	class MaterialPool;
 
 	// Saves a scene to JSON and Binary file formats, essentially is the Kernel between editor and engine.
 	class SerializedSceneManager
@@ -14,7 +24,9 @@ namespace Engine
 
 	public:
 
-		explicit SerializedSceneManager(entt::registry& reg, const std::string& sceneName);
+		using EditorMessageCallback = std::function<bool(const std::string&, std::uintptr_t)>;
+
+		explicit SerializedSceneManager(entt::registry& reg, const std::string& sceneName, MaterialPool& materials, Swim::Platform::FileSystem& files, EditorMessageCallback sendEditorMessage = {});
 
 		void SendFullJSON();
 		void SaveFullJSON();
@@ -49,6 +61,9 @@ namespace Engine
 		const bool ShouldSerialize(entt::entity e) const;
 
 		entt::registry& reg;
+		MaterialPool* materials = nullptr;
+		Swim::Platform::FileSystem* files = nullptr;
+		EditorMessageCallback sendEditorMessage;
 
 		nlohmann::json jsonRoot;
 

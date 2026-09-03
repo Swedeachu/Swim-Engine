@@ -1,13 +1,16 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
-#include "Engine/SwimEngine.h"
+#include <vector>
 #include "Engine/Systems/Renderer/Vulkan/Buffers/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLBuffer.h"
 #include "Vertex.h"
 
 namespace Engine
 {
+
+	class Renderer;
 
 	struct MeshBufferData
 	{
@@ -31,7 +34,7 @@ namespace Engine
 
 		GLuint GetIndexCount() const { return indexCount; }
 
-		void GenerateBuffersAndAABB(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+		void GenerateBuffersAndAABB(Renderer& renderer, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
 	};
 

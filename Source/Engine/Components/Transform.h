@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <entt/entt.hpp> 
+#include "Engine/Systems/Renderer/Core/RenderConventions.h"
 
 namespace Engine
 {
@@ -60,6 +61,7 @@ namespace Engine
 		entt::entity owner = entt::null;
 		entt::entity parent = entt::null;
 		std::vector<entt::entity> children; // Scene manages membership
+		entt::registry* ownerRegistry = nullptr; // Non-owning scene registry used only for hierarchy invalidation.
 
 		// --- Physics interpolation state (world-space targets from PhysX) ---
 
@@ -180,12 +182,12 @@ namespace Engine
 		// Maps an integer layer to a stable Z in [0,1] for orthographic depth sorting.
 		// Higher layer => rendered on top (smaller Z with standard Vulkan depth: LESS, near=0, far=1).
 		// kMaxLayers=4096 is a conservative choice that avoids precision issues while providing ample layers.
-		void SetScreenSpaceLayer(int layer);
+		void SetScreenSpaceLayer(int layer, ClipSpaceDepthRange depthRange);
 
 		// NOTE: Only meaningful for screen-space transforms (TransformSpace::Screen).
 		// Adjusts this transform's Z value slightly above or below its parent's Z layer.
 		// Does nothing if there is no valid parent.
-		void SetScreenSpaceLayerRelativeToParent(bool aboveParent);
+		void SetScreenSpaceLayerRelativeToParent(bool aboveParent, ClipSpaceDepthRange depthRange);
 
 		// LOCAL 
 		const glm::mat4& GetModelMatrix() const;

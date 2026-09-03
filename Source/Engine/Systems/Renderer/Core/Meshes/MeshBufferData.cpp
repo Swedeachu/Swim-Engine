@@ -1,17 +1,16 @@
 #include "PCH.h"
 #include "MeshBufferData.h"
-#include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
-#include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
+#include "Engine/Systems/Renderer/Renderer.h"
 
 namespace Engine
 {
 
-	void MeshBufferData::GenerateBuffersAndAABB(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+	void MeshBufferData::GenerateBuffersAndAABB(Renderer& renderer, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 	{
 		indexCount = static_cast<uint32_t>(indices.size());
 
 		// Send to the mega mesh buffer
-		SwimEngine::GetInstance()->GetRenderer().UploadMeshToMegaBuffer(
+		renderer.UploadMeshToMegaBuffer(
 			vertices,
 			indices,
 			*this

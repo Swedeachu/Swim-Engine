@@ -335,6 +335,32 @@ function Get-SwimNinjaPath {
     return Get-SwimFirstExistingFile -Candidates $Candidates
 }
 
+function Assert-SwimNinjaManifestStable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BuildDirectory
+    )
+
+    $ManifestPath = Join-Path $BuildDirectory "build.ninja"
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        throw "Ninja configure completed without producing '$ManifestPath'."
+    }
+
+    # Every supported Swim Ninja workflow explicitly configures immediately
+    # before building. Therefore the primary manifest must never contain an
+    # automatic CMake regeneration edge. A third-party CONFIGURE_DEPENDS glob
+    # previously emitted VerifyGlobs/RERUN_CMAKE here and could reconfigure
+    # forever instead of compiling. Fail before invoking Ninja if that contract
+    # is ever violated again.
+    $ManifestText = [System.IO.File]::ReadAllText($ManifestPath)
+    foreach ($ForbiddenFragment in @("RERUN_CMAKE", "VerifyGlobs.cmake", "cmake.verify_globs")) {
+        if ($ManifestText.Contains($ForbiddenFragment)) {
+            throw "Ninja manifest '$ManifestPath' contains automatic CMake regeneration rule '$ForbiddenFragment'. CMAKE_SUPPRESS_REGENERATION must remain enabled for Swim Ninja builds."
+        }
+    }
+}
+
+
 function Assert-SwimVisualStudioSolutionLayout {
     param(
         [Parameter(Mandatory = $true)]

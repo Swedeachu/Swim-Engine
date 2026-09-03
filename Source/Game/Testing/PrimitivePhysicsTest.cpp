@@ -1,5 +1,6 @@
-#include "pch.h"
+#include "PCH.h"
 #include "PrimitivePhysicsTest.h"
+#include "Engine/Systems/Scene/Scene.h"
 
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
@@ -225,8 +226,8 @@ namespace Game
 		}
 
 		Pools pools{
-			Engine::MeshPool::GetInstance(),
-			Engine::MaterialPool::GetInstance()
+			scene->GetMeshPool(),
+			scene->GetMaterialPool()
 		};
 
 		// Shared gradient materials:

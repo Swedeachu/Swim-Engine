@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "FontPool.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 
 #include <fstream>
@@ -10,17 +10,11 @@
 namespace Engine
 {
 
-	FontPool& FontPool::GetInstance()
-	{
-		static FontPool instance;
-		return instance;
-	}
-
 	void FontPool::LoadAllRecursively()
 	{
 		namespace fs = std::filesystem;
 
-		const fs::path fontsRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Font");
+		const fs::path fontsRoot = files->ResolveAssetPath("Font");
 
 		if (!fs::exists(fontsRoot))
 		{
@@ -298,8 +292,7 @@ namespace Engine
 		}
 
 		// --- Texture
-		TexturePool& tp = TexturePool::GetInstance();
-		out.msdfAtlas = tp.LoadTexture(pngPath.string(), false);
+		out.msdfAtlas = textures->LoadTexture(pngPath.string(), false);
 		if (!out.msdfAtlas)
 		{
 			throw std::runtime_error("Failed to load atlas texture: " + pngPath.string());
@@ -398,6 +391,12 @@ namespace Engine
 				}
 			}
 		}
+	}
+
+	void FontPool::Flush()
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		fontPool.clear();
 	}
 
 }

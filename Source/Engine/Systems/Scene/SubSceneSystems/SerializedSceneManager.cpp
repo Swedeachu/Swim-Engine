@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "SerializedSceneManager.h"
 
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
@@ -17,8 +17,8 @@ using nlohmann::json;
 namespace Engine
 {
 
-	SerializedSceneManager::SerializedSceneManager(entt::registry& reg, const std::string& sceneName)
-		: reg(reg), sceneName(sceneName)
+	SerializedSceneManager::SerializedSceneManager(entt::registry& reg, const std::string& sceneName, MaterialPool& materials, Swim::Platform::FileSystem& files, EditorMessageCallback sendEditorMessage)
+		: reg(reg), materials(&materials), files(&files), sendEditorMessage(std::move(sendEditorMessage)), sceneName(sceneName)
 	{}
 
 	void SerializedSceneManager::BuildFullJSON()
@@ -158,7 +158,7 @@ namespace Engine
 
 			if (mat.data->mesh && mat.data->mesh->meshBufferData)
 			{
-				modelFilePath = MaterialPool::GetInstance().GetMaterialNameByID(mat.data->mesh->meshBufferData->GetMeshID()); 
+				modelFilePath = materials->GetMaterialNameByID(mat.data->mesh->meshBufferData->GetMeshID()); 
 			}
 		}
 
@@ -186,14 +186,10 @@ namespace Engine
 		// Dump as compact UTF-8 JSON string
 		const std::string utf8 = jsonRoot.dump(); // pass 2 for pretty-print: dump(2)
 
-		// Send to editor through the engine
-		auto engine = SwimEngine::GetInstance();
-		if (!engine)
+		if (sendEditorMessage)
 		{
-			return;
+			sendEditorMessage("scene load:" + utf8, 2);
 		}
-
-		engine->SendEditorMessage("scene load:" + utf8, /*channel*/ 2);
 	}
 
 	void SerializedSceneManager::SaveFullJSON()
@@ -207,8 +203,7 @@ namespace Engine
 		namespace fs = std::filesystem;
 
 		// Base directory: next to the executable, in a "Scenes" folder
-		const std::string exeDir = SwimEngine::GetExecutableDirectory();
-		fs::path scenesDir = fs::path(exeDir) / "Scenes";
+		fs::path scenesDir = files->GetExecutableDirectory() / "Scenes";
 
 		// Create the directory (and parents) if it doesn't exist
 		std::error_code ec;
@@ -413,13 +408,10 @@ namespace Engine
 		// Dump as compact UTF-8 JSON string
 		const std::string utf8 = syncRoot.dump();
 
-		auto engine = SwimEngine::GetInstance();
-		if (!engine)
+		if (sendEditorMessage)
 		{
-			return;
+			sendEditorMessage("scene sync:" + utf8, 2);
 		}
-
-		engine->SendEditorMessage("scene sync:" + utf8, /*channel*/ 2);
 
 		// Clear per-frame queues
 		createdEntities.clear();

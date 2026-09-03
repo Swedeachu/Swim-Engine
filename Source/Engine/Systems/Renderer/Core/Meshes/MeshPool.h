@@ -1,6 +1,11 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
 #include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 #include "Mesh.h"
 #include "Vertex.h"
 #include "PrimitiveMeshes.h"
@@ -8,13 +13,14 @@
 namespace Engine
 {
 
+  class Renderer;
+
   class MeshPool
   {
 
   public:
 
-    // Singleton accessor
-    static MeshPool& GetInstance();
+    explicit MeshPool(Renderer& renderer) : renderer(&renderer) {}
 
     // Delete copy and move constructors
     MeshPool(const MeshPool&) = delete;
@@ -43,8 +49,7 @@ namespace Engine
 
   private:
 
-    // Private constructor for Singleton pattern
-    MeshPool() = default;
+    Renderer* renderer = nullptr;
 
     mutable std::mutex poolMutex; // Protects the mesh map
     std::unordered_map<std::string, std::shared_ptr<Mesh>> meshes;

@@ -3,8 +3,11 @@
 #include <string_view>
 #include "Engine/Systems/Renderer/Core/Ui/UiCoordinates.h"
 #include "Scene.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
+#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
@@ -25,6 +28,14 @@ namespace Engine
 
 	constexpr static bool alwaysUseEditorCamera = true;
 
+	Scene::Scene()
+		: name("UnnamedScene"), registry()
+	{}
+
+	Scene::Scene(const std::string& name)
+		: name(name), registry()
+	{}
+
 	Scene::~Scene() = default;
 
 	template<typename T>
@@ -44,6 +55,7 @@ namespace Engine
 		{
 			Transform& tf = reg.get<Transform>(entity);
 			tf.owner = entity;
+			tf.ownerRegistry = &reg;
 			Transform::MarkEntityDirty(entity);
 		}
 
@@ -183,7 +195,7 @@ namespace Engine
 			tf.parent = entt::null;
 		}
 
-		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+		EngineState state = GetEngineState();
 
 		// Call Exit() on behaviors if needed
 		if (callExit && registry.any_of<BehaviorComponents>(entity))
@@ -413,7 +425,7 @@ namespace Engine
 
 	bool Scene::ShouldRenderBasedOnState(entt::entity e) const
 	{
-		const EngineState state = SwimEngine::GetInstance()->GetEngineState();
+		const EngineState state = GetEngineState();
 
 		if (registry.any_of<BehaviorComponents>(e))
 		{
@@ -450,21 +462,21 @@ namespace Engine
 		return enabledEditing && !enabledElsewhere;
 	}
 
-	void Scene::SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system)
+	void Scene::SetVulkanRenderer(VulkanRenderer* system)
 	{
 		vulkanRenderer = system;
-		renderer = std::static_pointer_cast<Renderer>(system);
+		renderer = system;
 	}
 
-	void Scene::SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system)
+	void Scene::SetOpenGLRenderer(OpenGLRenderer* system)
 	{
 		openGLRenderer = system;
-		renderer = std::static_pointer_cast<Renderer>(system);
+		renderer = system;
 	}
 
-	std::shared_ptr<Renderer> Scene::GetRenderer() const
+	Renderer* Scene::GetRenderer() const
 	{
-		return GetSystem<Renderer>(renderer);
+		return GetSystem(renderer);
 	}
 
 	// Right now the interal scene base init and update are for caching mesh stuff for the frustum culling.
@@ -474,6 +486,26 @@ namespace Engine
 
 	void Scene::InternalSceneAwake()
 	{
+		if (!entityFactory)
+		{
+			entityFactory = std::make_unique<EntityFactory>(*this);
+		}
+
+		// Transform ownership/hierarchy context must be wired before user Awake() can create entities.
+		if (!transformHooksBound)
+		{
+			registry.on_construct<Transform>().connect<&Scene::OnComponentConstruct<Transform>>(*this);
+			registry.on_destroy<Transform>().connect<&Scene::OnComponentDestroy<Transform>>(*this);
+			transformHooksBound = true;
+
+			registry.view<Transform>().each([&](entt::entity entity, Transform& transform)
+			{
+				transform.owner = entity;
+				transform.ownerRegistry = &registry;
+				Transform::MarkEntityDirty(entity);
+			});
+		}
+
 		ForEachBehavior(&Behavior::Awake); // we might not want to do this actually and let behaviors do this themselves
 	}
 
@@ -490,9 +522,8 @@ namespace Engine
 		registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
 		registry.on_destroy<Engine::CompositeMaterial>().connect<&Scene::RemoveFrustumCache>(*this);
 
-		// Always track renderable composition changes, even outside editor mode
-		registry.on_construct<Transform>().connect<&Scene::OnComponentConstruct<Transform>>(*this);
-		registry.on_destroy<Transform>().connect<&Scene::OnComponentDestroy<Transform>>(*this);
+		// Always track renderable composition changes, even outside editor mode.
+		// Transform hooks are connected in InternalSceneAwake so transforms created by user Awake() are wired too.
 		registry.on_construct<Material>().connect<&Scene::OnComponentConstruct<Material>>(*this);
 		registry.on_destroy<Material>().connect<&Scene::OnComponentDestroy<Material>>(*this);
 		registry.on_construct<CompositeMaterial>().connect<&Scene::OnComponentConstruct<CompositeMaterial>>(*this);
@@ -501,11 +532,11 @@ namespace Engine
 		registry.on_destroy<MeshDecorator>().connect<&Scene::OnComponentDestroy<MeshDecorator>>(*this);
 
 		// Initialize SceneBVH grid
-		sceneBVH = std::make_unique<SceneBVH>(registry);
+		sceneBVH = std::make_unique<SceneBVH>(registry, GetJobSystem());
 		sceneBVH->Init();
 
 		// Initialize the debug drawer
-		sceneDebugDraw = std::make_unique<SceneDebugDraw>();
+		sceneDebugDraw = std::make_unique<SceneDebugDraw>(GetMeshPool(), GetMaterialPool());
 		sceneDebugDraw->Init();
 
 		sceneBVH->SetDebugDrawer(sceneDebugDraw.get());
@@ -517,9 +548,18 @@ namespace Engine
 		gizmoSystem->Init();
 
 		// Editor only object
-		if (SwimEngine::GetInstance()->GetEngineState() == EngineState::Editing)
+		if (GetEngineState() == EngineState::Editing)
 		{
-			serializedSceneManager = std::make_unique<SerializedSceneManager>(registry, name);
+			serializedSceneManager = std::make_unique<SerializedSceneManager>(
+				registry,
+				name,
+				GetMaterialPool(),
+				GetFileSystem(),
+				[this](const std::string& message, std::uintptr_t channel)
+				{
+					return sceneSystem && sceneSystem->SendEditorMessage(message, channel);
+				}
+			);
 
 			// Bind registry-driven serialization hooks for key components.
 			// Transform/material hooks are already wired above for render revision tracking.
@@ -528,7 +568,7 @@ namespace Engine
 		}
 
 		// Give the editing only scripts, for now is just the free cam
-		EntityFactory::GetInstance().CreateWithBehaviors<EditorCamera>(
+		GetEntityFactory().CreateWithBehaviors<EditorCamera>(
 			[this](entt::entity e, EditorCamera* editorCam)
 		{
 			entt::registry& reg = GetRegistry();
@@ -644,17 +684,14 @@ namespace Engine
 		constexpr static std::array<int, 1> keep = { TagConstants::EDITOR_MODE_OBJECT }; // TODO: we might want to use a better tag like immediate mode object
 		sceneDebugDraw->ClearExceptTags(keep);
 
-		// If we started in editing mode we can do extra stuff
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		// Editor/game state hotkeys are runtime state controls now; they no longer
+		// depend on a compile-time SwimEngine default or global engine type.
+		if (StateTestControl())
 		{
-			if (StateTestControl())
-			{
-				return;
-			}
+			return;
 		}
 
-		EntityFactory& entityFactory = EntityFactory::GetInstance();
-		entityFactory.ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
+		GetEntityFactory().ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
 
 		// Ensure BVH is coherent for this frame if any entity was removed/added or forced.
 		if (sceneBVH && sceneBVH->ShouldForceUpdate())
@@ -695,14 +732,14 @@ namespace Engine
 		mouseBusyWithUI = false; // reset mouse pointer UI focus status for this frame
 
 		// 1. Get raw mouse position in window pixels
-		std::shared_ptr<InputManager> inputMgr = GetInputManager();
+		InputManager* inputMgr = GetInputManager();
 		glm::vec2 mouseVirt = UiCoordinates::WindowToVirtualCanvas(inputMgr->GetMousePosition(), inputMgr->GetWindowSize());
 
 		// 2. Iterate over UI entities and run hit-testing in the same space
 		entt::registry& registry = GetRegistry();
 
 		// We want the engine state for filtering which behaviors should have callbacks ran on them
-		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+		EngineState state = GetEngineState();
 
 		registry.view<Transform, Material, BehaviorComponents>().each(
 			[&](entt::entity entity,
@@ -772,19 +809,25 @@ namespace Engine
 	// Returns if we changed state
 	bool Scene::StateTestControl()
 	{
-		auto engine = SwimEngine::GetInstance();
-		auto input = GetInputManager();
-		if (!engine || !input)
+		InputManager* input = GetInputManager();
+		SceneSystem* scenes = GetSceneSystem();
+		if (!input || !scenes)
 		{
 			return false;
 		}
 
-		auto send = [&](std::string_view command) { engine->OnEditorCommand(command); };
-		auto state = engine->GetEngineState();
+		auto send = [scenes](std::string_view command)
+		{
+			scenes->DispatchCommand(command);
+		};
+		const EngineState state = GetEngineState();
 
 		// Must be holding shift to do these hotkeys
 		bool shifting = input->IsShiftDown();
-		if (!shifting) return false;
+		if (!shifting)
+		{
+			return false;
+		}
 
 		bool handled = false;
 
@@ -896,7 +939,7 @@ namespace Engine
 
 	bool Scene::IsTopFocusedElement(entt::entity target)
 	{
-		std::shared_ptr<InputManager> inputMgr = GetInputManager();
+		InputManager* inputMgr = GetInputManager();
 		glm::vec2 mouseVirt = UiCoordinates::WindowToVirtualCanvas(inputMgr->GetMousePosition(), inputMgr->GetWindowSize());
 		return IsTopMostUiAtScreenPoint(target, mouseVirt);
 	}
@@ -974,9 +1017,9 @@ namespace Engine
 	{
 		Camera& cam = GetCameraSystem()->GetCamera();
 
-		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
-		const float width = static_cast<float>(engine->GetWindowWidth());
-		const float height = static_cast<float>(engine->GetWindowHeight());
+		const Swim::Platform::Extent2D windowSize = GetInputManager()->GetWindowSize();
+		const float width = static_cast<float>(windowSize.Width);
+		const float height = static_cast<float>(windowSize.Height);
 
 		// top-left-origin pixels -> NDC
 		float ndcX = (2.0f * point.x) / width - 1.0f;  // [-1,+1], left->right

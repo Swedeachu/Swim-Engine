@@ -1,5 +1,12 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include "Engine/Utility/ColorConstants.h"
@@ -12,6 +19,8 @@ namespace Engine
 	// forward declare
 	struct Mesh;
 	struct MaterialData;
+	class MeshPool;
+	class MaterialPool;
 
 	class SceneDebugDraw
 	{
@@ -24,7 +33,7 @@ namespace Engine
 			BevelledCube, // literally has no faces, just bevelled edges to make a wireframe box
 		};
 
-		SceneDebugDraw() = default;
+		SceneDebugDraw(MeshPool& meshes, MaterialPool& materials) : meshes(&meshes), materials(&materials) {}
 
 		void Init();
 
@@ -143,6 +152,9 @@ namespace Engine
 		std::shared_ptr<Mesh> CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName);
 
 		std::shared_ptr<MaterialData> GetMeshMaterialDataFromType(MeshBoxType type);
+
+		MeshPool* meshes = nullptr;
+		MaterialPool* materials = nullptr;
 
 		bool enabled{ false };
 		entt::registry immediateModeRegistry;

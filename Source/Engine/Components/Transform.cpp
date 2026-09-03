@@ -64,21 +64,19 @@ namespace Engine
 
 	void Transform::MarkChildrenDirty()
 	{
-		// scuffed hack, but is the most painless for the rest of the engine. This is dangerous because what if this transform is not in the active scene?
-		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		if (!scene) return;
+		if (!ownerRegistry)
+		{
+			return;
+		}
 
-		entt::registry& reg = scene->GetRegistry();
+		entt::registry& reg = *ownerRegistry;
 
 		for (entt::entity child : children)
 		{
-			if (reg.valid(child))
+			if (reg.valid(child) && reg.any_of<Transform>(child))
 			{
-				if (reg.any_of<Transform>(child))
-				{
-					Transform& tf = reg.get<Transform>(child);
-					tf.MarkDirty();
-				}
+				Transform& tf = reg.get<Transform>(child);
+				tf.MarkDirty();
 			}
 		}
 	}
@@ -158,61 +156,40 @@ namespace Engine
 		SetWorldRotation(registry, worldRot);
 	}
 
-	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent)
+	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent, ClipSpaceDepthRange depthRange)
 	{
-		if (parent == entt::null) return;
-
-		// This is dangerous because what if this transform is not in the active scene?
-		auto scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
-		if (!scene) return;
-
-		entt::registry& reg = scene->GetRegistry();
-		if (!reg.valid(parent) || !reg.any_of<Transform>(parent)) return;
-
-		Transform& pTf = reg.get<Transform>(parent);
-		// const float parentZ = pTf.GetPosition().z;
-		const float parentZ = pTf.readableLayer;
-
-		constexpr float kOffset = 1e-5f;  // tiny bias to avoid z-fighting
-		float z = position.z;
-
-		// Set readable layer agnostic to render context (HACK)
+		if (parent == entt::null || !ownerRegistry)
 		{
-			if (aboveParent)
-			{
-				z = glm::max(parentZ - kOffset, -1.0f);
-			}
-			else
-			{
-				z = glm::min(parentZ + kOffset, +1.0f);
-			}
-			readableLayer = z;
+			return;
 		}
 
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		entt::registry& reg = *ownerRegistry;
+		if (!reg.valid(parent) || !reg.any_of<Transform>(parent))
 		{
-			// Vulkan: [0,1], smaller z is in front
-			if (aboveParent)
-			{
-				z = glm::max(parentZ - kOffset, 0.0f);
-			}
-			else
-			{
-				z = glm::min(parentZ + kOffset, 1.0f);
-			}
+			return;
 		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+
+		Transform& parentTransform = reg.get<Transform>(parent);
+		const float parentReadableZ = parentTransform.readableLayer;
+		const float parentClipZ = parentTransform.position.z;
+		constexpr float kOffset = 1e-5f;
+
+		float readableZ = parentReadableZ;
+		if (aboveParent)
 		{
-			// Default OpenGL: [-1,1], smaller (more negative) is in front
-			if (aboveParent)
-			{
-				z = glm::max(parentZ - kOffset, -1.0f);
-			}
-			else
-			{
-				z = glm::min(parentZ + kOffset, +1.0f);
-			}
+			readableZ = glm::max(parentReadableZ - kOffset, -1.0f);
 		}
+		else
+		{
+			readableZ = glm::min(parentReadableZ + kOffset, +1.0f);
+		}
+		readableLayer = readableZ;
+
+		const float minDepth = depthRange == ClipSpaceDepthRange::ZeroToOne ? 0.0f : -1.0f;
+		const float maxDepth = 1.0f;
+		float z = aboveParent
+			? glm::max(parentClipZ - kOffset, minDepth)
+			: glm::min(parentClipZ + kOffset, maxDepth);
 
 		if (z != position.z)
 		{
@@ -220,52 +197,32 @@ namespace Engine
 		}
 	}
 
-	void Transform::SetScreenSpaceLayer(int layer)
+	void Transform::SetScreenSpaceLayer(int layer, ClipSpaceDepthRange depthRange)
 	{
 		constexpr int kMaxLayers = 4096;
 		constexpr float kEpsilon = 1e-6f;
 
-		// Clamp layer
-		int L = layer;
-
-		if (L < 0)
+		int clampedLayer = layer;
+		if (clampedLayer < 0)
 		{
-			L = 0;
+			clampedLayer = 0;
+		}
+		if (clampedLayer >= kMaxLayers)
+		{
+			clampedLayer = kMaxLayers - 1;
 		}
 
-		if (L >= kMaxLayers)
-		{
-			L = kMaxLayers - 1;
-		}
+		const float readableStep = 2.0f / (kMaxLayers + 2);
+		float readableZ = +1.0f - (static_cast<float>(clampedLayer) + 1.0f) * readableStep;
+		readableZ = glm::clamp(readableZ, -1.0f + kEpsilon, +1.0f - kEpsilon);
+		readableLayer = readableZ;
 
-		float z = position.z;
-
-		// Set readable layer agnostic to render context (HACK)
+		float z = readableZ;
+		if (depthRange == ClipSpaceDepthRange::ZeroToOne)
 		{
-			float zed = readableLayer;
-			const float stepNdc = 2.0f / (kMaxLayers + 2);
-			zed = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
-			zed = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
-			readableLayer = zed;
-		}
-
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-		{
-			// Spread evenly in (0,1) with a margin at both ends.
-			const float step = 1.0f / (kMaxLayers + 2); // margin = one step at each end
-			z = 1.0f - (static_cast<float>(L) + 1.0f) * step; // higher L -> smaller z (front)
-			// clamp for safety
-			z = glm::clamp(z, 0.0f + kEpsilon, 1.0f - kEpsilon);
-		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-		{
-			// Default OpenGL NDC is [-1, 1] with near = -1 (front), far = +1 (back).
-			// Reserve margins at both ends and distribute kMaxLayers steps across (-1, +1).
-			const float stepNdc = 2.0f / (kMaxLayers + 2);      // total span 2.0
-			// Start near +1 (back) and move toward -1 (front) as L increases.
-			z = +1.0f - (static_cast<float>(L) + 1.0f) * stepNdc;
-			// Tiny guard to avoid living exactly at the clip planes
-			z = glm::clamp(z, -1.0f + kEpsilon, +1.0f - kEpsilon);
+			const float step = 1.0f / (kMaxLayers + 2);
+			z = 1.0f - (static_cast<float>(clampedLayer) + 1.0f) * step;
+			z = glm::clamp(z, kEpsilon, 1.0f - kEpsilon);
 		}
 
 		if (z != position.z)

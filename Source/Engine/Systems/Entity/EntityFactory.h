@@ -5,9 +5,7 @@
 #include <utility>
 #include <tuple>
 
-#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Scene/Scene.h"
-#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 
@@ -20,13 +18,7 @@ namespace Engine
 
 	public:
 
-		EntityFactory() = default;
-
-		static EntityFactory& GetInstance()
-		{
-			static EntityFactory instance;
-			return instance;
-		}
+		explicit EntityFactory(Scene& scene) : scene(&scene) {}
 
 		// High-level helpers for common entity creation which do the common queue create lambdas for us
 		void CreateWithTransform(const Transform& transform);
@@ -40,7 +32,7 @@ namespace Engine
 		void CreateWithTransformAndMaterial(const Transform& transform, const Material& material, Func&& func, Args&&... args)
 		{
 			QueueCreate(
-				[transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+				[this, transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
 				// Create components
 				Transform& tRef = reg.emplace<Transform>(e, transform);
@@ -57,14 +49,14 @@ namespace Engine
 		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material)
 		{
 			QueueCreate(
-				[transform, material](entt::registry& reg, entt::entity e)
+				[this, transform, material](entt::registry& reg, entt::entity e)
 			{
 				// Add components
 				reg.emplace<Transform>(e, transform);
 				reg.emplace<Material>(e, material);
 
 				// Add behaviors
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				Scene* scene = this->scene;
 				if (!scene)
 				{
 					return;
@@ -86,13 +78,13 @@ namespace Engine
 		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material, Func&& func, Args&&... args)
 		{
 			QueueCreate(
-				[transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+				[this, transform, material, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
 				// Add components
 				Transform& tRef = reg.emplace<Transform>(e, transform);
 				Material& mRef = reg.emplace<Material>(e, material);
 
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				Scene* scene = this->scene;
 				if (!scene)
 				{
 					return;
@@ -119,9 +111,9 @@ namespace Engine
 		void CreateWithBehaviors()
 		{
 			QueueCreate(
-				[](entt::registry& reg, entt::entity e)
+				[this](entt::registry& reg, entt::entity e)
 			{
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				Scene* scene = this->scene;
 				if (!scene)
 				{
 					return;
@@ -142,9 +134,9 @@ namespace Engine
 		void CreateWithBehaviors(Func&& func, Args&&... args)
 		{
 			QueueCreate(
-				[fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
+				[this, fn = std::forward<Func>(func), ...a = std::forward<Args>(args)](entt::registry& reg, entt::entity e) mutable
 			{
-				Scene* scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene().get();
+				Scene* scene = this->scene;
 				if (!scene)
 				{
 					return;
@@ -194,6 +186,8 @@ namespace Engine
 		void ProcessQueues();
 
 	private:
+
+		Scene* scene = nullptr;
 
 		std::queue<std::function<void(entt::registry&, entt::entity)>> createQueue;
 		std::queue<std::function<void()>> destroyQueue;

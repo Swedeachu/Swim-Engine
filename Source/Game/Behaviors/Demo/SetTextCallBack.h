@@ -2,10 +2,10 @@
 
 #include "Engine/Systems/Entity/Behavior.h"
 #include "Engine/Components/TextComponent.h"
-#include "Engine/SwimEngine.h"
 #include "Game/Behaviors/Util/ChromaHelper.h"
 #include <functional>
 #include <memory>
+#include <utility>
 
 namespace Game
 {
@@ -41,7 +41,6 @@ namespace Game
 
 		bool chromaEnabled = false;
 
-		std::shared_ptr<Engine::SwimEngine> engine;
 		Engine::TextComponent* tc = nullptr;
 		Callback callback;
 

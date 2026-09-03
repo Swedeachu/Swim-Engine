@@ -19,9 +19,20 @@ namespace Engine
 
   void CameraSystem::RefreshAspect()
   {
-    auto instance = SwimEngine::GetInstance();
-    float aspect = static_cast<float>(instance->GetWindowWidth()) / static_cast<float>(instance->GetWindowHeight());
+    if (surfaceHeight == 0)
+    {
+      return;
+    }
+
+    float aspect = static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight);
     camera.SetAspect(aspect);
+  }
+
+  void CameraSystem::SetSurfaceSize(uint32_t width, uint32_t height)
+  {
+    surfaceWidth = width;
+    surfaceHeight = height;
+    RefreshAspect();
   }
 
   void CameraSystem::Update(double dt)

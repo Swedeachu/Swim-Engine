@@ -31,7 +31,7 @@ Generate a normal Visual Studio 2022 solution with:
 cmake --preset windows-vs
 ```
 
-Then open `build/windows-vs/SwimEngine.sln`. The solution is generated from the same `CMakeLists.txt` used by every other workflow. Solution Explorer mirrors the physical `Source/...` tree inside each project, and adding/removing/renaming C/C++ or shader files under `Source/Engine`, `Source/Game`, or `Source/Shaders` is picked up automatically on the next build through `GLOB_RECURSE ... CONFIGURE_DEPENDS`.
+Then open `build/windows-vs/SwimEngine.sln`. The solution is generated from the same `CMakeLists.txt` used by every other workflow. Solution Explorer mirrors the physical `Source/...` tree inside each project, and adding/removing/renaming C/C++ or shader files under `Source/Engine`, `Source/Game`, or `Source/Shaders` is picked up by the explicit CMake configure performed at the start of every supported clean/soft build.
 
 The generated solution is intentionally organized instead of exposing every CMake target at the root:
 

@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include <filesystem>
 #include "VulkanCubeMap.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "fstream"
 #include <stb_image_resize2.h>
@@ -11,10 +11,9 @@ namespace Engine
 
 	static constexpr VkDeviceSize kVertexBufferSize = sizeof(skyboxVerticesInward);
 
-	VulkanCubeMap::VulkanCubeMap(const std::string& vertPath, const std::string& fragPath)
-		: CubeMap(vertPath, fragPath), vertShaderPath(vertPath), fragShaderPath(fragPath)
+	VulkanCubeMap::VulkanCubeMap(VulkanRenderer& rendererRef, Swim::Platform::FileSystem& filesRef, TexturePool& textures, const std::string& vertPath, const std::string& fragPath)
+		: CubeMap(textures, vertPath, fragPath), renderer(&rendererRef), files(&filesRef), vertShaderPath(vertPath), fragShaderPath(fragPath)
 	{
-		auto& renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		device = renderer->GetDevice();
 		physicalDevice = renderer->GetPhysicalDevice();
 
@@ -104,7 +103,6 @@ namespace Engine
 		vkBindBufferMemory(device, vertexBuffer, vertexMemory, 0);
 
 		// Copy via one-time command
-		auto renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		VkCommandBuffer cmd = renderer->GetCommandManager()->BeginSingleTimeCommands();
 
 		VkBufferCopy copyRegion{};
@@ -250,8 +248,8 @@ namespace Engine
 		vkBindImageMemory(device, cubemapImage, cubemapMemory, 0);
 
 		// === Step 6: Copy data to cubemap ===
-		auto cmdMgr = SwimEngine::GetInstance()->GetVulkanRenderer()->GetCommandManager().get();
-		VkQueue graphicsQueue = SwimEngine::GetInstance()->GetVulkanRenderer()->GetDeviceManager()->GetGraphicsQueue();
+		auto cmdMgr = renderer->GetCommandManager().get();
+		VkQueue graphicsQueue = renderer->GetDeviceManager()->GetGraphicsQueue();
 		VkCommandBuffer cmd = cmdMgr->BeginSingleTimeCommands();
 
 		// Transition image layout
@@ -484,7 +482,6 @@ namespace Engine
 	// We don't use this version
 	void VulkanCubeMap::Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
-		auto& renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		VkCommandBuffer cmd = renderer->GetCommandManager()->GetCommandBuffers()[renderer->GetCurrentFrameIndex()];
 
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
@@ -544,7 +541,7 @@ namespace Engine
 
 	std::vector<char> VulkanCubeMap::ReadFile(const std::string& filename)
 	{
-		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(filename);
+		const std::filesystem::path fullPath = files->ResolveExecutablePath(filename);
 
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
@@ -680,7 +677,7 @@ namespace Engine
 			throw std::runtime_error("Failed to create skybox pipeline layout!");
 		}
 
-		VkRenderPass renderPass = SwimEngine::GetInstance()->GetVulkanRenderer()->GetPipelineManager()->GetRenderPass();
+		VkRenderPass renderPass = renderer->GetPipelineManager()->GetRenderPass();
 
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

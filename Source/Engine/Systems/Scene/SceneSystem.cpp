@@ -1,6 +1,5 @@
 #include "PCH.h"
 #include "SceneSystem.h"
-#include "Engine/SwimEngine.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
@@ -10,44 +9,39 @@
 namespace Engine
 {
 
-	std::vector<std::shared_ptr<Engine::Scene>> Engine::SceneSystem::factory;
+	std::vector<Engine::SceneSystem::PreregisteredScene> Engine::SceneSystem::factory;
 
-	void SceneSystem::Preregister(std::shared_ptr<Scene> scene)
+	void SceneSystem::Preregister(std::string name, SceneFactory sceneFactory)
 	{
-		factory.push_back(scene);
+		factory.push_back({ std::move(name), std::move(sceneFactory) });
 	}
 
 	int SceneSystem::Awake()
 	{
-		// Register scenes from the factory into the map
-		for (const auto& scene : factory)
+		if (!services.IsValid())
 		{
-			if (scene)
-			{
-				scenes[scene->GetName()] = scene;
-				scene->SetSceneSystem(shared_from_this());
-				auto instance = SwimEngine::GetInstance();
-				scene->SetInputManager(instance->GetInputManager());
-				scene->SetCameraSystem(instance->GetCameraSystem());
+			std::cerr << "[SceneSystem] Required engine services were not injected before Awake.\n";
+			return -1;
+		}
 
-				if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
-				{
-					scene->SetVulkanRenderer(instance->GetVulkanRenderer());
-				}
-				else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-				{
-					scene->SetOpenGLRenderer(instance->GetOpenGLRenderer());
-				}
+		// Register fresh runtime scenes from static constructor descriptors.
+		// The descriptors intentionally remain available so a second engine instance
+		// in the same process receives the same preregistered scene types.
+		for (const auto& descriptor : factory)
+		{
+			if (descriptor.Factory)
+			{
+				scenes[descriptor.Name] = descriptor.Factory();
 			}
 		}
 
-		factory.clear(); // then do we want to clear?
-
 		int err = 0;
 
-		// Awake all registered scenes
+		// Inject services into every scene, including scenes registered explicitly
+		// before Awake(), then awaken the scene only after all dependencies exist.
 		for (auto& [name, scene] : scenes)
 		{
+			InjectServices(*scene);
 			scene->InternalSceneAwake();
 			int terr = scene->Awake();
 			if (terr != 0)
@@ -57,8 +51,8 @@ namespace Engine
 			}
 		}
 
-		// We want to then register all our editor commands
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		// Register editor-only command surfaces from the actual runtime state.
+		if (HasAnyEngineStates(*services.State, EngineState::Editing))
 		{
 			RegisterEditorCommands();
 			SendBehaviorsToEditor();
@@ -106,14 +100,19 @@ namespace Engine
 		for (auto& [name, scene] : scenes)
 		{
 			scene->InternalSceneExit();
-			int terr = scene->Exit();
-			if (terr != 0)
+			int sceneError = scene->Exit();
+			if (sceneError != 0)
 			{
 				std::cerr << "Scene '" << name << "' failed to Exit.\n";
-				if (err == 0) { err = terr; }
+				if (err == 0)
+				{
+					err = sceneError;
+				}
 			}
 		}
 
+		activeScene.reset();
+		scenes.clear();
 		return err;
 	}
 
@@ -140,6 +139,7 @@ namespace Engine
 		activeScene = it->second;
 		if (activeScene)
 		{
+			InjectServices(*activeScene);
 			if (awakeNew)
 			{
 				activeScene->InternalSceneAwake();
@@ -158,6 +158,49 @@ namespace Engine
 				}
 			}
 		}
+	}
+
+	void SceneSystem::InjectServices(Scene& scene)
+	{
+		scene.SetSceneSystem(this);
+		scene.SetInputManager(services.Input);
+		scene.SetCameraSystem(services.Camera);
+		scene.SetEngineState(services.State);
+		scene.SetClipSpaceDepthRange(services.ClipDepth);
+		scene.SetMeshPool(services.Meshes);
+		scene.SetTexturePool(services.Textures);
+		scene.SetMaterialPool(services.Materials);
+		scene.SetFontPool(services.Fonts);
+		scene.SetFileSystem(services.Files);
+		scene.SetJobSystem(services.Jobs);
+		scene.SetFPSProvider(services.GetFPS);
+
+		if (services.Vulkan)
+		{
+			scene.SetVulkanRenderer(services.Vulkan);
+		}
+		else if (services.OpenGL)
+		{
+			scene.SetOpenGLRenderer(services.OpenGL);
+		}
+	}
+
+	bool SceneSystem::DispatchCommand(std::string_view command)
+	{
+		if (!services.Commands)
+		{
+			return false;
+		}
+
+		const std::string ownedCommand(command);
+		const bool ok = services.Commands->ParseAndDispatch(ownedCommand);
+
+		if (services.SendEditorMessage)
+		{
+			services.SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + ownedCommand, 1);
+		}
+
+		return ok;
 	}
 
 	// Small helpers used by the add/remove component commands:
@@ -228,57 +271,49 @@ namespace Engine
 
 	void SceneSystem::SendBehaviorsToEditor()
 	{
-		auto engine = SwimEngine::GetInstance();
-		auto behaviorFactories = BehaviorFactory::GetInstance().GetFactories();
-		for (const auto factory : behaviorFactories)
+		if (!services.SendEditorMessage)
 		{
-			engine->SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
+			return;
+		}
+
+		auto behaviorFactories = BehaviorFactory::GetInstance().GetFactories();
+		for (const auto& factory : behaviorFactories)
+		{
+			services.SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
 		}
 	}
 
 	// Command registration entry point
 	void SceneSystem::RegisterEditorCommands()
 	{
-		auto engine = SwimEngine::GetInstance();
-		if (!engine)
-		{
-			return;
-		}
-
-		std::shared_ptr<CommandSystem> cmd = engine->GetCommandSystem();
+		CommandSystem* cmd = services.Commands;
 		if (!cmd)
 		{
 			return;
 		}
 
-		// Each of these is now a small, focused function
-		RegisterEntityCreateCommand(cmd);
-		RegisterEntityDestroyCommand(cmd);
-		RegisterEntityAddComponentCommand(cmd);
-		RegisterEntityRemoveComponentCommand(cmd);
-		RegisterEntitySetMaterialCommand(cmd);
-		RegisterEntityBehaviorAddCommand(cmd);
-		RegisterEntityBehaviorRemoveCommand(cmd);
+		// Each of these is now a small, focused function. CommandSystem outlives
+		// SceneSystem in the engine's explicit shutdown order, so these callbacks
+		// may safely keep a non-owning SceneSystem pointer.
+		RegisterEntityCreateCommand(*cmd);
+		RegisterEntityDestroyCommand(*cmd);
+		RegisterEntityAddComponentCommand(*cmd);
+		RegisterEntityRemoveComponentCommand(*cmd);
+		RegisterEntitySetMaterialCommand(*cmd);
+		RegisterEntityBehaviorAddCommand(*cmd);
+		RegisterEntityBehaviorRemoveCommand(*cmd);
 	}
 
 	// (scene.entity.create parentId)
 	// parentId == 0 -> no parent (root under scene)
-	void SceneSystem::RegisterEntityCreateCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityCreateCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int>(
+		cmd.Register<unsigned int>(
 			"scene.entity.create",
 			std::function<void(unsigned int)>(
-			[self](unsigned int parentId)
+			[this](unsigned int parentId)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -310,22 +345,14 @@ namespace Engine
 
 	// (scene.entity.destroy entityId destroyChildren)
 	// destroyChildren: true = destroy subtree, false = keep children and detach them.
-	void SceneSystem::RegisterEntityDestroyCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityDestroyCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, bool>(
+		cmd.Register<unsigned int, bool>(
 			"scene.entity.destroy",
 			std::function<void(unsigned int, bool)>(
-			[self](unsigned int entityId, bool destroyChildren)
+			[this](unsigned int entityId, bool destroyChildren)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -345,22 +372,14 @@ namespace Engine
 	}
 
 	// (scene.entity.addComponent entityId "ComponentName")
-	void SceneSystem::RegisterEntityAddComponentCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityAddComponentCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, std::string>(
+		cmd.Register<unsigned int, std::string>(
 			"scene.entity.addComponent",
 			std::function<void(unsigned int, std::string)>(
-			[self, this](unsigned int entityId, std::string componentName)
+			[this](unsigned int entityId, std::string componentName)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -371,22 +390,14 @@ namespace Engine
 	}
 
 	// (scene.entity.removeComponent entityId "ComponentName")
-	void SceneSystem::RegisterEntityRemoveComponentCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityRemoveComponentCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, std::string>(
+		cmd.Register<unsigned int, std::string>(
 			"scene.entity.removeComponent",
 			std::function<void(unsigned int, std::string)>(
-			[self, this](unsigned int entityId, std::string componentName)
+			[this](unsigned int entityId, std::string componentName)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -397,22 +408,14 @@ namespace Engine
 	}
 
 	// (scene.entity.setMaterial entityId "MaterialKey")
-	void SceneSystem::RegisterEntitySetMaterialCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntitySetMaterialCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, std::string>(
+		cmd.Register<unsigned int, std::string>(
 			"scene.entity.setMaterial",
 			std::function<void(unsigned int, std::string)>(
-			[self](unsigned int entityId, std::string materialKey)
+			[this](unsigned int entityId, std::string materialKey)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -425,7 +428,7 @@ namespace Engine
 				return;
 			}
 
-			MaterialPool& materialPool = MaterialPool::GetInstance();
+			MaterialPool& materialPool = *services.Materials;
 
 			// Check if this is a composite material
 			if (materialPool.CompositeMaterialExists(materialKey))
@@ -483,22 +486,14 @@ namespace Engine
 		}));
 	}
 
-	void SceneSystem::RegisterEntityBehaviorAddCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityBehaviorAddCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, std::string>(
+		cmd.Register<unsigned int, std::string>(
 			"scene.entity.addBehavior",
 			std::function<void(unsigned int, std::string)>(
-			[self](unsigned int entityId, std::string behaviorName)
+			[this](unsigned int entityId, std::string behaviorName)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;
@@ -522,22 +517,14 @@ namespace Engine
 		}));
 	}
 
-	void SceneSystem::RegisterEntityBehaviorRemoveCommand(std::shared_ptr<CommandSystem>& cmd)
+	void SceneSystem::RegisterEntityBehaviorRemoveCommand(CommandSystem& cmd)
 	{
-		std::weak_ptr<SceneSystem> self = shared_from_this();
-
-		cmd->Register<unsigned int, std::string>(
+		cmd.Register<unsigned int, std::string>(
 			"scene.entity.removeBehavior",
 			std::function<void(unsigned int, std::string)>(
-			[self](unsigned int entityId, std::string behaviorName)
+			[this](unsigned int entityId, std::string behaviorName)
 		{
-			auto s = self.lock();
-			if (!s)
-			{
-				return;
-			}
-
-			std::shared_ptr<Scene> scene = s->GetActiveScene();
+			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
 			{
 				return;

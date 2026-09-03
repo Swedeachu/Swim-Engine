@@ -1,9 +1,15 @@
 #pragma once
 
+#include <cstdint>
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>
 #include <type_traits>
+
+namespace Swim::Platform
+{
+	class FileSystem;
+}
 
 namespace Engine
 {
@@ -13,7 +19,7 @@ namespace Engine
 
 	public:
 
-		VulkanPipelineManager(VkDevice device);
+		VulkanPipelineManager(VkDevice device, Swim::Platform::FileSystem& files);
 		~VulkanPipelineManager();
 
 		void CreateRenderPass(VkFormat colorFormat, VkFormat depthFormat, VkSampleCountFlagBits sampleCount);
@@ -192,6 +198,7 @@ namespace Engine
 		std::vector<char> ReadFile(const std::string& filename);
 
 		VkDevice device;
+		Swim::Platform::FileSystem* files = nullptr;
 
 		VkRenderPass renderPass = VK_NULL_HANDLE;
 		VkPipeline graphicsPipeline = VK_NULL_HANDLE;

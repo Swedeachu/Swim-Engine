@@ -49,6 +49,18 @@ try {
         exit $LASTEXITCODE
     }
 
+    if ($BuildPlan.Generator -eq "Ninja") {
+        Assert-SwimNinjaManifestStable -BuildDirectory $BuildPlan.BuildDirectory
+    }
+
+    # Build the primary tree before configuring the secondary Visual Studio tree.
+    # This keeps the Ninja manifest stable while it is being consumed and avoids
+    # cross-generator dependency-cache timestamp churn triggering RERUN_CMAKE.
+    & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
     if ($BuildPlan.ConfigurePreset -ne "windows-vs") {
         Write-Host "[Swim] Generating Visual Studio 2022 solution: $VisualStudioSolution"
         Write-Host "[Swim] Reusing the freshly populated, integrity-checked dependency cache; no second dependency pull is allowed."
@@ -64,8 +76,7 @@ try {
 
     Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution
     Write-Host "[Swim] Visual Studio solution ready and organized: $VisualStudioSolution"
-    & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
-    exit $LASTEXITCODE
+    exit 0
 }
 catch {
     Write-Host "[Swim] ERROR: $($_.Exception.Message)" -ForegroundColor Red

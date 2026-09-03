@@ -2,16 +2,64 @@
 
 #include "Scene.h"
 #include "Engine/Systems/IO/CommandSystem.h"
+#include "Engine/EngineState.h"
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+#include <string_view>
+#include <utility>
+
+namespace Swim::Platform
+{
+	class FileSystem;
+}
+
+namespace Swim::Jobs
+{
+	class JobSystem;
+}
 
 namespace Engine
 {
 
-	class SceneSystem : public Machine, public std::enable_shared_from_this<SceneSystem>
+	struct SceneSystemServices
+	{
+		InputManager* Input = nullptr;
+		CommandSystem* Commands = nullptr;
+		CameraSystem* Camera = nullptr;
+		VulkanRenderer* Vulkan = nullptr;
+		OpenGLRenderer* OpenGL = nullptr;
+		MeshPool* Meshes = nullptr;
+		TexturePool* Textures = nullptr;
+		MaterialPool* Materials = nullptr;
+		FontPool* Fonts = nullptr;
+		Swim::Platform::FileSystem* Files = nullptr;
+		Swim::Jobs::JobSystem* Jobs = nullptr;
+		const EngineState* State = nullptr;
+		ClipSpaceDepthRange ClipDepth = ClipSpaceDepthRange::ZeroToOne;
+		std::function<bool(const std::string&, std::uintptr_t)> SendEditorMessage;
+		std::function<int()> GetFPS;
+
+		bool IsValid() const
+		{
+			return Input && Commands && Camera && State && Files && Jobs && Meshes && Textures && Materials && Fonts && (Vulkan || OpenGL);
+		}
+	};
+
+	class SceneSystem : public Machine
 	{
 
 	public:
 
-		static void Preregister(std::shared_ptr<Scene> scene);
+		using SceneFactory = std::function<std::shared_ptr<Scene>()>;
+
+		static void Preregister(std::string name, SceneFactory factory);
+
+		void SetServices(SceneSystemServices services) { this->services = std::move(services); }
 
 		int Awake() override;
 
@@ -26,27 +74,38 @@ namespace Engine
 		template <typename T, typename... Args>
 		void RegisterScene(const std::string& name, Args&&... args)
 		{
-			scenes[name] = std::make_shared<T>(std::forward<Args>(args)...);
+			std::shared_ptr<Scene> scene = std::make_shared<T>(std::forward<Args>(args)...);
+			if (services.IsValid())
+			{
+				InjectServices(*scene);
+			}
+			scenes[name] = std::move(scene);
 		}
 
 		// Sets the active scene by name, optionally exiting the current one
 		void SetScene(const std::string& name, bool exitCurrent = true, bool initNew = true, bool awakeNew = false);
 
 		std::shared_ptr<Scene>& GetActiveScene() { return activeScene; }
+		bool DispatchCommand(std::string_view command);
+		bool SendEditorMessage(const std::string& message, std::uintptr_t channel = 1) const
+		{
+			return services.SendEditorMessage && services.SendEditorMessage(message, channel);
+		}
 
 	private:
 
 		void RegisterEditorCommands();
 		void SendBehaviorsToEditor();
+		void InjectServices(Scene& scene);
 
 		// Per-command registration functions
-		void RegisterEntityCreateCommand(std::shared_ptr<CommandSystem>& cmd);
-		void RegisterEntityDestroyCommand(std::shared_ptr<CommandSystem>& cmd);
-		void RegisterEntityAddComponentCommand(std::shared_ptr<CommandSystem>& cmd);
-		void RegisterEntityRemoveComponentCommand(std::shared_ptr<CommandSystem>& cmd);
-		void RegisterEntitySetMaterialCommand(std::shared_ptr<CommandSystem>& cmd);		
-		void RegisterEntityBehaviorAddCommand(std::shared_ptr<CommandSystem>& cmd);
-		void RegisterEntityBehaviorRemoveCommand(std::shared_ptr<CommandSystem>& cmd);
+		void RegisterEntityCreateCommand(CommandSystem& cmd);
+		void RegisterEntityDestroyCommand(CommandSystem& cmd);
+		void RegisterEntityAddComponentCommand(CommandSystem& cmd);
+		void RegisterEntityRemoveComponentCommand(CommandSystem& cmd);
+		void RegisterEntitySetMaterialCommand(CommandSystem& cmd);		
+		void RegisterEntityBehaviorAddCommand(CommandSystem& cmd);
+		void RegisterEntityBehaviorRemoveCommand(CommandSystem& cmd);
 
 		// Small helpers used by the add/remove component commands
 		void AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
@@ -55,11 +114,19 @@ namespace Engine
 		// Map of scenes by name
 		std::map<std::string, std::shared_ptr<Scene>> scenes;
 
-		// Vector of scenes we will auto register at 
-		static std::vector<std::shared_ptr<Scene>> factory;
+		struct PreregisteredScene
+		{
+			std::string Name;
+			SceneFactory Factory;
+		};
+
+		// Static registration contains constructors only; runtime Scene instances are owned per SceneSystem.
+		static std::vector<PreregisteredScene> factory;
 
 		// Shared pointer to the currently active scene
 		std::shared_ptr<Scene> activeScene = nullptr;
+
+		SceneSystemServices services{};
 
 	};
 
@@ -75,10 +142,10 @@ namespace
 	{
 		SceneRegistrar(const std::string& name)
 		{
-			// Use base class constructor via std::make_shared<T>()
-			Engine::SceneSystem::Preregister(std::static_pointer_cast<Engine::Scene>(
-				std::make_shared<T>(name)
-			));
+			Engine::SceneSystem::Preregister(name, [name]()
+			{
+				return std::static_pointer_cast<Engine::Scene>(std::make_shared<T>(name));
+			});
 		}
 	};
 }

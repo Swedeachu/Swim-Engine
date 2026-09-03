@@ -1,13 +1,13 @@
 #include "PCH.h"
-#include "SetTextCallback.h"
+#include "SetTextCallBack.h"
 #include "Engine/Components/TextComponent.h"
+#include "Engine/Systems/Scene/Scene.h"
 
 namespace Game
 {
 
 	int SetTextCallback::Init()
 	{
-		engine = Engine::SwimEngine::GetInstance();
 		tc = &scene->GetRegistry().get<Engine::TextComponent>(entity);
 
 		if (chromaEnabled)

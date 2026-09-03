@@ -9,6 +9,9 @@
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/PrimitiveMeshes.h"
+#include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
+#include "Engine/Systems/Scene/Scene.h"
+#include "Engine/Systems/IO/InputManager.h"
 
 namespace Game
 {
@@ -43,8 +46,8 @@ namespace Game
 
 		const glm::vec3 spawnPos = camPos + forward * 1.5f;
 
-		auto& meshPool = Engine::MeshPool::GetInstance();
-		auto& materialPool = Engine::MaterialPool::GetInstance();
+		auto& meshPool = scene->GetMeshPool();
+		auto& materialPool = scene->GetMaterialPool();
 
 		// Lazy register the mesh/material used for balls.
 		if (!meshPool.GetMesh("PhysicsBall"))

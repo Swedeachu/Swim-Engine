@@ -4,11 +4,13 @@
 
 #include "PxPhysicsAPI.h"
 #include "extensions/PxDefaultCpuDispatcher.h"
+#include "Engine/EngineState.h"
 
 namespace Engine
 {
 
 	class Scene;
+	class SceneSystem;
 
 	class PhysicsSystem : public Machine
 	{
@@ -26,6 +28,12 @@ namespace Engine
 
 		// Return the base interface, but we own the concrete default dispatcher.
 		physx::PxCpuDispatcher* GetCpuDispatcher() const { return dispatcher.get(); }
+
+		void SetServices(SceneSystem* scenes, const EngineState* state)
+		{
+			sceneSystem = scenes;
+			engineState = state;
+		}
 
 		float GetFixedDeltaSeconds() const { return fixedDeltaSeconds; }
 		void SetFixedDeltaSeconds(float dt) { fixedDeltaSeconds = dt; }
@@ -56,6 +64,9 @@ namespace Engine
 
 		// Kept in sync with the engine's tick rate via SetFixedDeltaSeconds(), by default it is 60 Hz
 		float fixedDeltaSeconds = 1.0f / 60.0f; 
+
+		SceneSystem* sceneSystem = nullptr;
+		const EngineState* engineState = nullptr;
 
 		// Time since last fixed tick (for render interpolation alpha).
 		double timeSinceLastTick = 0.0;

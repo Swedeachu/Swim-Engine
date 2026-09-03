@@ -8,8 +8,21 @@
 
 int main(int argc, char** argv)
 {
-  auto engine = std::make_shared<Engine::SwimEngine>(Engine::SwimEngine::ParseStartingEngineArgs(argc, argv));
-  if (engine->Start() == 0) return engine->Run(); // runs if started with zero errors
+  auto parsedConfig = Engine::SwimEngine::ParseStartingEngineArgs(argc, argv);
+  if (!parsedConfig)
+  {
+    for (const std::string& error : parsedConfig.Errors)
+    {
+      std::cerr << "[Engine] " << error << '\n';
+    }
+    return -1;
+  }
+
+  Engine::SwimEngine engine(std::move(parsedConfig.Config));
+  if (engine.Start() == 0)
+  {
+    return engine.Run();
+  }
 
   return -1;
 }

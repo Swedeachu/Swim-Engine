@@ -25,7 +25,7 @@ namespace Game
 	void TestParenting(Engine::Scene* scene, const glm::vec3& pos)
 	{
 		// Creates an entity with the orbit system behavior and a callback to assign a transform and object tag
-		Engine::EntityFactory::GetInstance().CreateWithBehaviors<OrbitSystem>(
+		scene->GetEntityFactory().CreateWithBehaviors<OrbitSystem>(
 			[scene, pos](entt::entity e, OrbitSystem* s)
 		{
 			scene->EmplaceComponent<Engine::Transform>(e, pos, glm::vec3(1.0f));
@@ -105,8 +105,8 @@ namespace Game
 
 	void OrbitSystem::EnsureSharedSphere()
 	{
-		auto& meshPool = Engine::MeshPool::GetInstance();
-		auto& matPool = Engine::MaterialPool::GetInstance();
+		auto& meshPool = scene->GetMeshPool();
+		auto& matPool = scene->GetMaterialPool();
 
 		// Lazy-create shared sphere mesh
 		if (!sharedSphereMesh)
@@ -128,7 +128,7 @@ namespace Game
 
 	entt::entity OrbitSystem::SpawnStar()
 	{
-		auto& matPool = Engine::MaterialPool::GetInstance();
+		auto& matPool = scene->GetMaterialPool();
 		auto  matStar = starMat ? starMat : matPool.RegisterMaterialData("OrbitStarMatFallback", sharedSphereMesh);
 
 		auto& reg = scene->GetRegistry();
@@ -153,7 +153,7 @@ namespace Game
 
 	OrbitSystem::Planet OrbitSystem::SpawnPlanet()
 	{
-		auto& matPool = Engine::MaterialPool::GetInstance();
+		auto& matPool = scene->GetMaterialPool();
 		auto& reg = scene->GetRegistry();
 
 		// Create a unique material name or reuse a small pool

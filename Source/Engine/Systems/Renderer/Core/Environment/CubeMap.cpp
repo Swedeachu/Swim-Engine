@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "CubeMap.h"
+#include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 
 #define _USE_MATH_DEFINES
 #include "math.h"
@@ -115,11 +116,11 @@ namespace Engine
 		std::array<std::shared_ptr<Texture2D>, 6> cubeFaces;
 		for (int i = 0; i < 6; ++i)
 		{
-			cubeFaces[i] = std::make_shared<Texture2D>(
+			cubeFaces[i] = texturePool->CreateTransientTexture(
 				static_cast<uint32_t>(faceSize),
 				static_cast<uint32_t>(faceSize),
 				facePixels[i].data(),
-				"cubeface" // compiler was crying when I don't provide a texture name despite this being an optional parameter
+				"cubeface"
 			);
 		}
 

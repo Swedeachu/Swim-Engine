@@ -1,5 +1,10 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 #include "Engine/Components/Material.h"
 #include "VulkanDeviceManager.h"
 #include "VulkanSwapChain.h"
@@ -15,6 +20,8 @@
 
 namespace Engine
 {
+
+	class SceneSystem;
 
 	class VulkanRenderer : public Renderer
 	{
@@ -49,6 +56,10 @@ namespace Engine
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
+		uint32_t GetSurfaceWidth() const { return windowWidth; }
+		uint32_t GetSurfaceHeight() const { return windowHeight; }
+		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
+		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
 
 		// For MSAA
 		const VkSampleCountFlagBits GetSampleCountFlagBits() const { return msaaSamples; }
@@ -163,7 +174,8 @@ namespace Engine
 
 		bool framebufferResized = false;
 
-		std::shared_ptr<CameraSystem> cameraSystem;
+		CameraSystem* cameraSystem = nullptr;
+		SceneSystem* sceneSystem = nullptr;
 
 		void DrawFrame();
 

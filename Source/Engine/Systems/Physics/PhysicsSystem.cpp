@@ -1,7 +1,6 @@
 #include "PCH.h"
 #include "PhysicsSystem.h"
 
-#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "PhysicsWorld.h"
@@ -76,22 +75,15 @@ namespace Engine
 
 	void PhysicsSystem::Update(double dt)
 	{
-		auto engine = SwimEngine::GetInstance();
-		if (!engine)
+		if (!sceneSystem || !engineState)
 		{
 			return;
 		}
 
 		// Interpolation only while playing (dynamic bodies).
-		if (!HasAnyEngineStates(engine->GetEngineState(), EngineState::Playing))
+		if (!HasAnyEngineStates(*engineState, EngineState::Playing))
 		{
 			timeSinceLastTick = 0.0;
-			return;
-		}
-
-		auto& sceneSystem = engine->GetSceneSystem();
-		if (!sceneSystem)
-		{
 			return;
 		}
 
@@ -127,22 +119,15 @@ namespace Engine
 	{
 		(void)tickThisSecond;
 
-		auto engine = SwimEngine::GetInstance();
-		if (!engine)
+		if (!sceneSystem || !engineState)
 		{
 			return;
 		}
 
 		// We need to be playing
-		if (!HasAnyEngineStates(engine->GetEngineState(), EngineState::Playing))
+		if (!HasAnyEngineStates(*engineState, EngineState::Playing))
 		{
 			timeSinceLastTick = 0.0;
-			return;
-		}
-
-		auto& sceneSystem = engine->GetSceneSystem();
-		if (!sceneSystem)
-		{
 			return;
 		}
 

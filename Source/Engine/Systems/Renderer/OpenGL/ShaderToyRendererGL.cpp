@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Platform/FileSystem.h"
 #include "ShaderToyRendererGL.h"
 
 #include "Engine/Components/Transform.h"
@@ -6,7 +7,6 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
-#include "Engine/SwimEngine.h"
 
 namespace Engine
 {
@@ -49,8 +49,8 @@ namespace Engine
     glBindVertexArray(dummyVAO);
 
     // === Load engine textures so fallback can be used ===
-    TexturePool::GetInstance().LoadAllRecursively();
-    missingTexture = TexturePool::GetInstance().GetTexture2DLazy("mart");
+    GetRuntimeServices().Textures->LoadAllRecursively();
+    missingTexture = GetRuntimeServices().Textures->GetTexture2DLazy("mart");
 
     return 0;
   }

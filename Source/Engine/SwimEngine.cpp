@@ -4,137 +4,127 @@
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/ShaderToyRendererGL.h"
-#include <cstdlib>
+#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
+#include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
+#include "Engine/Systems/Renderer/Core/Font/FontPool.h"
+
 #include <filesystem>
+#include <stdexcept>
 
 namespace Engine
 {
 
-	std::shared_ptr<SwimEngine> EngineInstance = nullptr;
-
-	std::string getDefaultWindowTitle()
+	namespace
 	{
-		std::string suffix;
 
-	#if defined(_SWIM_DEBUG)
-		suffix = " (Debug)";
-	#else
-		suffix = " (Release)";
-	#endif
-
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		int ReportLifecycleFailure(std::string_view phase, std::string_view systemName, int result)
 		{
-			return "Swim Engine [Vulkan]" + suffix;
-		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
-		{
-			if constexpr (SwimEngine::useShaderToyIfOpenGL)
+			if (result != 0)
 			{
-				return "Swim Engine [OpenGL ShaderToy]" + suffix;
+				std::cerr << "[Engine] " << phase << " failed for " << systemName << " with code " << result << ".\n";
 			}
-			return "Swim Engine [OpenGL]" + suffix;
+			return result;
 		}
 
-		return "Swim Engine Demo" + suffix;
 	}
 
-	SwimEngine::SwimEngine(EngineArgs args)
+	SwimEngine::SwimEngine(EngineConfig config)
+		: config(std::move(config))
 	{
-		Create(args.externalParentWindow, args.state);
+		Create();
 	}
 
-	SwimEngine::SwimEngine(std::uintptr_t externalParentWindow, EngineState state)
-	{
-		Create(externalParentWindow, state);
-	}
+	SwimEngine::~SwimEngine() = default;
 
-	void SwimEngine::Create(std::uintptr_t externalParentWindow, EngineState state)
+	void SwimEngine::Create()
 	{
-		windowTitle = getDefaultWindowTitle();
-		systemManager = std::make_unique<SystemManager>();
+		graphicsBackend = ResolveGraphicsBackend(config.Graphics);
+		physicsBackend = ResolvePhysicsBackend(config.Physics);
 		platformSystem = std::make_unique<Swim::Platform::PlatformSystem>();
-		this->externalParentWindow = externalParentWindow;
-		this->engineState = state;
-		ownsWindow = externalParentWindow == 0;
+		engineState = config.InitialState;
+		windowWidth = config.Window.Width;
+		windowHeight = config.Window.Height;
+		ownsWindow = !config.Window.ExternalWindow.IsValid() && !config.Window.ExternalParent.IsValid();
 	}
 
-	std::shared_ptr<SwimEngine> SwimEngine::GetInstance()
+	EngineConfigParseResult SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
 	{
-		return EngineInstance;
+		return ParseEngineConfigArgs(argc, argv);
 	}
 
-	std::shared_ptr<SwimEngine>& SwimEngine::GetInstanceRef()
+	int SwimEngine::Start()
 	{
-		return EngineInstance;
-	}
-
-	SwimEngine::EngineArgs SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
-	{
-		std::uintptr_t externalParentWindow = 0;
-		EngineState state = DefaultEngineState;
-
-		for (int i = 1; i < argc; ++i)
+		if (!ValidateBackendConfiguration())
 		{
-			std::string arg = argv[i];
-
-			if (arg == "--parent-hwnd" && i + 1 < argc)
-			{
-				externalParentWindow = static_cast<std::uintptr_t>(std::strtoull(argv[++i], nullptr, 10));
-			}
-			else if (arg == "--state" && i + 1 < argc)
-			{
-				std::string value = argv[++i];
-				EngineState parsed = ParseEngineStateArg(value);
-				if (parsed != EngineState::None)
-				{
-					state = parsed;
-				}
-			}
-			else if (arg.rfind("--state=", 0) == 0)
-			{
-				std::string value = arg.substr(std::string("--state=").size());
-				EngineState parsed = ParseEngineStateArg(value);
-				if (parsed != EngineState::None)
-				{
-					state = parsed;
-				}
-			}
+			return -1;
 		}
 
-		return EngineArgs(externalParentWindow, state);
+		const int awakeResult = Awake();
+		if (awakeResult != 0)
+		{
+			Exit();
+			return awakeResult;
+		}
+
+		const int initResult = Init();
+		if (initResult != 0)
+		{
+			Exit();
+			return initResult;
+		}
+
+		return 0;
 	}
 
-	std::string SwimEngine::GetExecutableDirectory()
+	bool SwimEngine::ValidateBackendConfiguration() const
 	{
-		if (EngineInstance && EngineInstance->platformSystem && EngineInstance->platformSystem->IsInitialized())
+		if (graphicsBackend != GraphicsBackend::Vulkan && graphicsBackend != GraphicsBackend::OpenGLLegacy)
 		{
-			return EngineInstance->platformSystem->GetFileSystem().GetExecutableDirectory().string();
+			std::cerr << "[Engine] Graphics backend '" << ToString(graphicsBackend)
+				<< "' is configured but does not have an implementation yet.\n";
+			return false;
 		}
 
-		return std::filesystem::current_path().string();
-	}
-
-	bool SwimEngine::Start()
-	{
-		if (auto self = shared_from_this(); self)
+		if (physicsBackend != PhysicsBackend::PhysX)
 		{
-			EngineInstance = self;
-		}
-		else
-		{
-			throw std::runtime_error("SwimEngine must be managed by a shared_ptr.");
+			std::cerr << "[Engine] Physics backend '" << ToString(physicsBackend)
+				<< "' is configured but does not have an implementation yet.\n";
+			return false;
 		}
 
-		if (Awake() == 0) return Init();
+		if (config.UseOpenGLShaderToy && graphicsBackend != GraphicsBackend::OpenGLLegacy)
+		{
+			std::cerr << "[Engine] --opengl-shadertoy requires --graphics=opengl.\n";
+			return false;
+		}
 
-		return false;
+		return true;
 	}
 
 	int SwimEngine::Awake()
 	{
-		if (!MakeWindow()) return -1;
-
+		if (!MakeWindow())
+		{
+			return -1;
+		}
 		return 0;
+	}
+
+	std::string SwimEngine::GetWindowTitle() const
+	{
+		std::string title = config.Window.Title.empty() ? "Swim Engine" : config.Window.Title;
+		title += " [";
+		title += ToString(graphicsBackend);
+		title += "]";
+
+	#if defined(_SWIM_DEBUG)
+		title += " (Debug)";
+	#else
+		title += " (Release)";
+	#endif
+
+		return title;
 	}
 
 	bool SwimEngine::MakeWindow()
@@ -144,55 +134,53 @@ namespace Engine
 		platformDesc.ApplicationName = "Swim Engine";
 		if (!platformSystem->Initialize(platformDesc))
 		{
+			std::cerr << "[Engine] Platform initialization failed.\n";
 			return false;
 		}
 
-		Swim::Platform::WindowDesc windowDesc{};
-		windowDesc.Title = windowTitle;
-		windowDesc.Width = windowWidth;
-		windowDesc.Height = windowHeight;
-		windowDesc.Resizable = true;
-		windowDesc.HighPixelDensity = true;
+		Swim::Platform::WindowDesc windowDesc = config.Window;
+		windowDesc.Title = GetWindowTitle();
 
-		if constexpr (CONTEXT == RenderContext::Vulkan)
+		switch (graphicsBackend)
 		{
-			windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::Vulkan;
-		}
-		else if constexpr (CONTEXT == RenderContext::OpenGL)
-		{
-			windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::OpenGL;
-		}
-
-		if (externalParentWindow != 0)
-		{
-			windowDesc.ExternalParent = {
-				Swim::Platform::NativeWindowType::Win32,
-				reinterpret_cast<void*>(externalParentWindow),
-				nullptr
-			};
+			case GraphicsBackend::Vulkan:
+				windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::Vulkan;
+				break;
+			case GraphicsBackend::OpenGLLegacy:
+				windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::OpenGL;
+				break;
+			default:
+				windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::None;
+				break;
 		}
 
 		engineWindow = platformSystem->GetWindowSystem().Create(windowDesc);
 		if (!engineWindow)
 		{
+			std::cerr << "[Engine] Window creation failed.\n";
 			return false;
 		}
 
 		engineWindow->Show();
 		UpdateWindowSize();
 
-		if (externalParentWindow != 0)
+		if (config.Window.ExternalParent.IsValid())
 		{
+			if (config.Window.ExternalParent.Type != Swim::Platform::NativeWindowType::Win32)
+			{
+				std::cerr << "[Engine] Legacy editor IPC currently supports Win32 external parents only.\n";
+				return false;
+			}
+
 			editorIpcBridge = std::make_unique<Swim::Platform::EditorIpcBridge>();
-			Swim::Platform::NativeWindowHandle editorWindow{
-				Swim::Platform::NativeWindowType::Win32,
-				reinterpret_cast<void*>(externalParentWindow),
-				nullptr
-			};
-			editorIpcBridge->Initialize(*engineWindow, editorWindow, [this](std::string_view message)
+			if (!editorIpcBridge->Initialize(*engineWindow, config.Window.ExternalParent, [this](std::string_view message)
 			{
 				OnEditorCommand(message);
-			});
+			}))
+			{
+				std::cerr << "[Engine] Editor IPC bridge initialization failed.\n";
+				return false;
+			}
 		}
 
 		minimized = engineWindow->IsMinimized();
@@ -264,52 +252,135 @@ namespace Engine
 
 	Renderer& SwimEngine::GetRenderer()
 	{
-		if constexpr (CONTEXT == RenderContext::OpenGL)
+		switch (graphicsBackend)
 		{
-			return *openglRenderer;
-		}
-		else
-		{
-			return *vulkanRenderer;
+			case GraphicsBackend::Vulkan:
+				return *vulkanRenderer;
+			case GraphicsBackend::OpenGLLegacy:
+				return *openglRenderer;
+			default:
+				throw std::runtime_error("Configured graphics backend has no renderer instance.");
 		}
 	}
 
 	int SwimEngine::Init()
 	{
-		inputManager = systemManager->AddSystem<InputManager>("InputManager");
-		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
-		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
-		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem");
-
-		if constexpr (CONTEXT == RenderContext::Vulkan)
+		jobSystem = std::make_unique<Swim::Jobs::JobSystem>();
+		Swim::Jobs::JobSystemDesc jobDesc{};
+		jobDesc.BlockingThreads = 1;
+		if (!jobSystem->Initialize(jobDesc))
 		{
-			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer");
-			vulkanRenderer->Create(*engineWindow, windowWidth, windowHeight);
-		}
-		else if constexpr (CONTEXT == RenderContext::OpenGL)
-		{
-			if constexpr (useShaderToyIfOpenGL)
-			{
-				openglRenderer = systemManager->AddSystem<ShaderToyRendererGL>("Renderer");
-				openglRenderer->Create(*engineWindow, windowWidth, windowHeight);
-			}
-			else
-			{
-				openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer");
-				openglRenderer->Create(*engineWindow, windowWidth, windowHeight);
-			}
-		}
-
-		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
-
-		if (systemManager->Awake() != 0)
-		{
+			std::cerr << "[Engine] Failed to initialize JobSystem.\n";
 			return -1;
 		}
 
-		if (systemManager->Init() != 0)
+		inputManager = std::make_unique<InputManager>();
+		commandSystem = std::make_unique<CommandSystem>();
+		sceneSystem = std::make_unique<SceneSystem>();
+		physicsSystem = std::make_unique<PhysicsSystem>();
+
+		switch (graphicsBackend)
 		{
-			return -1;
+			case GraphicsBackend::Vulkan:
+				vulkanRenderer = std::make_unique<VulkanRenderer>();
+				vulkanRenderer->Create(*engineWindow, windowWidth, windowHeight);
+				break;
+
+			case GraphicsBackend::OpenGLLegacy:
+				if (config.UseOpenGLShaderToy)
+				{
+					openglRenderer = std::make_unique<ShaderToyRendererGL>();
+				}
+				else
+				{
+					openglRenderer = std::make_unique<OpenGLRenderer>();
+				}
+				openglRenderer->Create(*engineWindow, windowWidth, windowHeight);
+				break;
+
+			default:
+				return -1;
+		}
+
+		cameraSystem = std::make_unique<CameraSystem>();
+		cameraSystem->SetGraphicsBackend(graphicsBackend);
+		cameraSystem->SetSurfaceSize(windowWidth, windowHeight);
+
+		Renderer& renderer = GetRenderer();
+		meshPool = std::make_unique<MeshPool>(renderer);
+
+		TextureRuntimeContext textureContext{};
+		textureContext.Backend = graphicsBackend;
+		textureContext.Vulkan = vulkanRenderer.get();
+		textureContext.Lifetime = std::make_shared<TextureLifetimeTracker>();
+		texturePool = std::make_unique<TexturePool>(platformSystem->GetFileSystem(), std::move(textureContext));
+
+		materialPool = std::make_unique<MaterialPool>(
+			*meshPool,
+			*texturePool,
+			[this](const std::string& message, std::uintptr_t channel)
+			{
+				return SendEditorMessage(message, channel);
+			}
+		);
+		fontPool = std::make_unique<FontPool>(platformSystem->GetFileSystem(), *texturePool);
+
+		rendererRuntimeServices.Files = &platformSystem->GetFileSystem();
+		rendererRuntimeServices.Jobs = jobSystem.get();
+		rendererRuntimeServices.Meshes = meshPool.get();
+		rendererRuntimeServices.Textures = texturePool.get();
+		rendererRuntimeServices.Materials = materialPool.get();
+		rendererRuntimeServices.Fonts = fontPool.get();
+		renderer.SetRuntimeServices(&rendererRuntimeServices);
+
+		SceneSystemServices sceneServices{};
+		sceneServices.Input = inputManager.get();
+		sceneServices.Commands = commandSystem.get();
+		sceneServices.Camera = cameraSystem.get();
+		sceneServices.Vulkan = vulkanRenderer.get();
+		sceneServices.OpenGL = openglRenderer.get();
+		sceneServices.Meshes = meshPool.get();
+		sceneServices.Textures = texturePool.get();
+		sceneServices.Materials = materialPool.get();
+		sceneServices.Fonts = fontPool.get();
+		sceneServices.Files = &platformSystem->GetFileSystem();
+		sceneServices.Jobs = jobSystem.get();
+		sceneServices.State = &engineState;
+		sceneServices.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
+			? ClipSpaceDepthRange::ZeroToOne
+			: ClipSpaceDepthRange::MinusOneToOne;
+		sceneServices.SendEditorMessage = [this](const std::string& message, std::uintptr_t channel)
+		{
+			return SendEditorMessage(message, channel);
+		};
+		sceneServices.GetFPS = [this]()
+		{
+			return GetFPS();
+		};
+		sceneSystem->SetServices(std::move(sceneServices));
+		physicsSystem->SetServices(sceneSystem.get(), &engineState);
+
+		if (vulkanRenderer)
+		{
+			vulkanRenderer->SetCameraSystem(cameraSystem.get());
+			vulkanRenderer->SetSceneSystem(sceneSystem.get());
+		}
+		if (openglRenderer)
+		{
+			openglRenderer->SetCameraSystem(cameraSystem.get());
+			openglRenderer->SetSceneSystem(sceneSystem.get());
+		}
+
+		const int awakeResult = AwakeSystems();
+		if (awakeResult != 0)
+		{
+			return awakeResult;
+		}
+
+		const int initResult = InitSystems();
+		if (initResult != 0)
+		{
+			return initResult;
 		}
 
 		Swim::Platform::WindowEvent initialWindowEvent{};
@@ -326,6 +397,90 @@ namespace Engine
 		return 0;
 	}
 
+	int SwimEngine::AwakeSystems()
+	{
+		int result = inputManager->Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "InputManager", result);
+		}
+
+		result = commandSystem->Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "CommandSystem", result);
+		}
+
+		result = physicsSystem->Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "PhysicsSystem", result);
+		}
+
+		result = cameraSystem->Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "CameraSystem", result);
+		}
+
+		result = GetRenderer().Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "Renderer", result);
+		}
+
+		// Scenes are consumers of input, command, physics, camera, and renderer
+		// services, so they are deliberately the last core runtime owner awakened.
+		result = sceneSystem->Awake();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Awake", "SceneSystem", result);
+		}
+
+		return 0;
+	}
+
+	int SwimEngine::InitSystems()
+	{
+		int result = inputManager->Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "InputManager", result);
+		}
+
+		result = commandSystem->Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "CommandSystem", result);
+		}
+
+		result = physicsSystem->Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "PhysicsSystem", result);
+		}
+
+		result = cameraSystem->Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "CameraSystem", result);
+		}
+
+		result = GetRenderer().Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "Renderer", result);
+		}
+
+		result = sceneSystem->Init();
+		if (result != 0)
+		{
+			return ReportLifecycleFailure("Init", "SceneSystem", result);
+		}
+
+		return 0;
+	}
+
 	void SwimEngine::RegisterVanillaEngineCommands()
 	{
 		SwimEngine* self = this;
@@ -333,11 +488,26 @@ namespace Engine
 		auto summarize = [](SwimEngine* e)
 		{
 			std::string s = "[Engine] State ->";
-			if (HasAnyEngineStates(e->engineState, EngineState::Playing)) s += " Playing";
-			if (HasAnyEngineStates(e->engineState, EngineState::Paused))  s += " Paused";
-			if (HasAnyEngineStates(e->engineState, EngineState::Editing)) s += " Editing";
-			if (HasAnyEngineStates(e->engineState, EngineState::Stopped)) s += " Stopped";
-			if (!HasAnyEngineStates(e->engineState, EngineState::All))    s += " None";
+			if (HasAnyEngineStates(e->engineState, EngineState::Playing))
+			{
+				s += " Playing";
+			}
+			if (HasAnyEngineStates(e->engineState, EngineState::Paused))
+			{
+				s += " Paused";
+			}
+			if (HasAnyEngineStates(e->engineState, EngineState::Editing))
+			{
+				s += " Editing";
+			}
+			if (HasAnyEngineStates(e->engineState, EngineState::Stopped))
+			{
+				s += " Stopped";
+			}
+			if (!HasAnyEngineStates(e->engineState, EngineState::All))
+			{
+				s += " None";
+			}
 			e->SendEditorMessage(s);
 		};
 
@@ -461,9 +631,6 @@ namespace Engine
 
 	void SwimEngine::Update(double dt)
 	{
-		static double timeAccumulator = 0.0;
-		static int frameCounter = 0;
-
 		if (engineWindow && engineWindow->IsExternal())
 		{
 			const unsigned int previousWidth = windowWidth;
@@ -478,34 +645,79 @@ namespace Engine
 
 		if (!minimized && needResize)
 		{
-			if constexpr (CONTEXT == RenderContext::Vulkan)
+			switch (graphicsBackend)
 			{
-				if (vulkanRenderer) { vulkanRenderer->SetFramebufferResized(); }
-			}
-			else if constexpr (CONTEXT == RenderContext::OpenGL)
-			{
-				if (openglRenderer) { openglRenderer->SetFramebufferResized(); }
+				case GraphicsBackend::Vulkan:
+					if (vulkanRenderer) { vulkanRenderer->SetFramebufferResized(); }
+					break;
+				case GraphicsBackend::OpenGLLegacy:
+					if (openglRenderer) { openglRenderer->SetFramebufferResized(); }
+					break;
+				default:
+					break;
 			}
 
 			needResize = false;
 		}
 
-		systemManager->Update(dt);
-
-		timeAccumulator += dt;
-		frameCounter++;
-
-		if (timeAccumulator >= 1.0)
+		if (jobSystem && jobSystem->IsRunning())
 		{
-			fps = static_cast<int>(static_cast<double>(frameCounter) / timeAccumulator);
+			jobSystem->RunMainThreadJobs();
+		}
+
+		UpdateSystems(dt);
+
+		if (jobSystem && jobSystem->IsRunning())
+		{
+			jobSystem->RunMainThreadJobs();
+		}
+
+		fpsTimeAccumulator += dt;
+		fpsFrameCounter++;
+
+		if (fpsTimeAccumulator >= 1.0)
+		{
+			fps = static_cast<int>(static_cast<double>(fpsFrameCounter) / fpsTimeAccumulator);
 
 			if (ownsWindow && engineWindow)
 			{
-				engineWindow->SetTitle(getDefaultWindowTitle() + " | " + std::to_string(fps) + " FPS");
+				engineWindow->SetTitle(GetWindowTitle() + " | " + std::to_string(fps) + " FPS");
 			}
 
-			timeAccumulator = 0.0;
-			frameCounter = 0;
+			fpsTimeAccumulator = 0.0;
+			fpsFrameCounter = 0;
+		}
+	}
+
+	void SwimEngine::UpdateSystems(double dt)
+	{
+		if (inputManager)
+		{
+			inputManager->Update(dt);
+		}
+		if (commandSystem)
+		{
+			commandSystem->Update(dt);
+		}
+		if (sceneSystem)
+		{
+			sceneSystem->Update(dt);
+		}
+		if (physicsSystem)
+		{
+			physicsSystem->Update(dt);
+		}
+		if (vulkanRenderer)
+		{
+			vulkanRenderer->Update(dt);
+		}
+		if (openglRenderer)
+		{
+			openglRenderer->Update(dt);
+		}
+		if (cameraSystem)
+		{
+			cameraSystem->Update(dt);
 		}
 	}
 
@@ -522,22 +734,134 @@ namespace Engine
 			physicsSystem->SetFixedDeltaSeconds(time);
 		}
 
-		systemManager->FixedUpdate(tickThisSecond);
+		FixedUpdateSystems(tickThisSecond);
+	}
+
+	void SwimEngine::FixedUpdateSystems(unsigned int tickThisSecond)
+	{
+		if (inputManager)
+		{
+			inputManager->FixedUpdate(tickThisSecond);
+		}
+		if (commandSystem)
+		{
+			commandSystem->FixedUpdate(tickThisSecond);
+		}
+		if (sceneSystem)
+		{
+			sceneSystem->FixedUpdate(tickThisSecond);
+		}
+		if (physicsSystem)
+		{
+			physicsSystem->FixedUpdate(tickThisSecond);
+		}
+		if (vulkanRenderer)
+		{
+			vulkanRenderer->FixedUpdate(tickThisSecond);
+		}
+		if (openglRenderer)
+		{
+			openglRenderer->FixedUpdate(tickThisSecond);
+		}
+		if (cameraSystem)
+		{
+			cameraSystem->FixedUpdate(tickThisSecond);
+		}
+	}
+
+	int SwimEngine::ExitSystems()
+	{
+		int firstError = 0;
+
+		auto exitSystem = [&firstError](std::string_view name, Machine* system)
+		{
+			if (!system)
+			{
+				return;
+			}
+
+			const int result = system->Exit();
+			if (result != 0)
+			{
+				ReportLifecycleFailure("Exit", name, result);
+				if (firstError == 0)
+				{
+					firstError = result;
+				}
+			}
+		};
+
+		// Complete any work which may still reference scene/renderer state before
+		// those owners begin teardown. Blocking IO lanes remain alive until the
+		// final JobSystem shutdown below.
+		if (jobSystem && jobSystem->IsRunning())
+		{
+			jobSystem->RunMainThreadJobs();
+			jobSystem->WaitForAll();
+		}
+
+		// Destroy consumers before the services they reference. Reset each owner
+		// immediately after Exit so no dormant Scene/renderer object can retain a
+		// non-owning pointer into an already-destroyed dependency.
+		exitSystem("SceneSystem", sceneSystem.get());
+		sceneSystem.reset();
+
+		if (vulkanRenderer)
+		{
+			exitSystem("Renderer", vulkanRenderer.get());
+			vulkanRenderer.reset();
+		}
+		else if (openglRenderer)
+		{
+			exitSystem("Renderer", openglRenderer.get());
+			openglRenderer.reset();
+		}
+
+		fontPool.reset();
+		materialPool.reset();
+		texturePool.reset();
+		meshPool.reset();
+		rendererRuntimeServices = {};
+
+		exitSystem("CameraSystem", cameraSystem.get());
+		cameraSystem.reset();
+
+		exitSystem("PhysicsSystem", physicsSystem.get());
+		physicsSystem.reset();
+
+		exitSystem("CommandSystem", commandSystem.get());
+		commandSystem.reset();
+
+		exitSystem("InputManager", inputManager.get());
+		inputManager.reset();
+
+		if (jobSystem)
+		{
+			jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain);
+			jobSystem.reset();
+		}
+
+		return firstError;
 	}
 
 	int SwimEngine::Exit()
 	{
-		const int result = systemManager ? systemManager->Exit() : 0;
+		running = false;
+		const int result = ExitSystems();
+
 		if (editorIpcBridge)
 		{
 			editorIpcBridge->Shutdown();
 			editorIpcBridge.reset();
 		}
+
 		engineWindow.reset();
 		if (platformSystem)
 		{
 			platformSystem->Shutdown();
 		}
+
+
 		return result;
 	}
 
@@ -552,19 +876,29 @@ namespace Engine
 		windowWidth = size.Width;
 		windowHeight = size.Height;
 
-		if constexpr (CONTEXT == RenderContext::Vulkan)
+		if (cameraSystem)
 		{
-			if (vulkanRenderer)
-			{
-				vulkanRenderer->SetSurfaceSize(windowWidth, windowHeight);
-			}
+			cameraSystem->SetSurfaceSize(windowWidth, windowHeight);
 		}
-		else if constexpr (CONTEXT == RenderContext::OpenGL)
+
+		switch (graphicsBackend)
 		{
-			if (openglRenderer)
-			{
-				openglRenderer->SetSurfaceSize(windowWidth, windowHeight);
-			}
+			case GraphicsBackend::Vulkan:
+				if (vulkanRenderer)
+				{
+					vulkanRenderer->SetSurfaceSize(windowWidth, windowHeight);
+				}
+				break;
+
+			case GraphicsBackend::OpenGLLegacy:
+				if (openglRenderer)
+				{
+					openglRenderer->SetSurfaceSize(windowWidth, windowHeight);
+				}
+				break;
+
+			default:
+				break;
 		}
 	}
 

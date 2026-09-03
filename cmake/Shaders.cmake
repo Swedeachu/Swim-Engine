@@ -16,13 +16,13 @@ function(swim_configure_shaders target)
 		)
 	endif()
 
-	file(GLOB_RECURSE SWIM_VERTEX_SHADERS CONFIGURE_DEPENDS
+	file(GLOB_RECURSE SWIM_VERTEX_SHADERS
 		"${CMAKE_SOURCE_DIR}/Source/Shaders/Vulkan/VertexShaders/*.hlsl"
 	)
-	file(GLOB_RECURSE SWIM_FRAGMENT_SHADERS CONFIGURE_DEPENDS
+	file(GLOB_RECURSE SWIM_FRAGMENT_SHADERS
 		"${CMAKE_SOURCE_DIR}/Source/Shaders/Vulkan/FragmentShaders/*.hlsl"
 	)
-	file(GLOB_RECURSE SWIM_COMPUTE_SHADERS CONFIGURE_DEPENDS
+	file(GLOB_RECURSE SWIM_COMPUTE_SHADERS
 		"${CMAKE_SOURCE_DIR}/Source/Shaders/Vulkan/ComputeShaders/*.hlsl"
 	)
 

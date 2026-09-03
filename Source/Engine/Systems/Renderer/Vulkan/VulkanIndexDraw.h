@@ -7,10 +7,18 @@
 #include <entt/entt.hpp>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <unordered_map>
 #include <memory>
+#include <vector>
 #include <limits>
+
+namespace Swim::Jobs
+{
+	class JobSystem;
+}
 
 namespace Engine
 {
@@ -18,6 +26,9 @@ namespace Engine
 	// Forward declare
 	enum class TransformSpace;
 	class Scene;
+	class SceneSystem;
+	class CameraSystem;
+	class VulkanRenderer;
 	class Transform;
 	struct Frustum;
 
@@ -50,6 +61,8 @@ namespace Engine
 		};
 
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
+
+		void SetServices(VulkanRenderer* vulkanRenderer, SceneSystem* scenes, CameraSystem* camera, Swim::Jobs::JobSystem* jobs);
 
 		void CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight);
 
@@ -454,6 +467,13 @@ namespace Engine
 		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
 		bool useQueriedFrustumSceneBVH{ true };
+
+		// Non-owning runtime services. VulkanRenderer owns this object and all three
+		// services outlive it through SwimEngine's explicit shutdown order.
+		VulkanRenderer* renderer = nullptr;
+		SceneSystem* sceneSystem = nullptr;
+		CameraSystem* cameraSystem = nullptr;
+		Swim::Jobs::JobSystem* jobs = nullptr;
 
 	};
 

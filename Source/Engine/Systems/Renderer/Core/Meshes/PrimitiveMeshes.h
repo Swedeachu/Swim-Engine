@@ -1,5 +1,10 @@
 #pragma once
 
+#include "Vertex.h"
+#include <cstdint>
+#include <utility>
+#include <vector>
+
 namespace Engine
 {
 

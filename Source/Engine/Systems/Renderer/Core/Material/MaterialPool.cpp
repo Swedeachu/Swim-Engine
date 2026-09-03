@@ -20,12 +20,6 @@
 namespace Engine
 {
 
-	MaterialPool& MaterialPool::GetInstance()
-	{
-		static MaterialPool instance;
-		return instance;
-	}
-
 	std::shared_ptr<MaterialData> MaterialPool::GetMaterialDataByID(uint32_t id)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
@@ -107,11 +101,9 @@ namespace Engine
 		auto data = std::make_shared<MaterialData>(mesh, albedoMap);
 		materials.emplace(name, data);
 
-		// Signal the editor to add this string to its list of material assets to keep track of
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		if (sendEditorMessage)
 		{
-			auto engineInstance = SwimEngine::GetInstance();
-			engineInstance->SendEditorMessage("registerMaterial " + name, /*channel:*/3);
+			sendEditorMessage("registerMaterial " + name, 3);
 		}
 
 		return data;
@@ -396,8 +388,7 @@ namespace Engine
 						if (imageSource >= 0 && imageSource < model.images.size())
 						{
 							const tinygltf::Image& img = model.images[imageSource];
-							TexturePool& texturePool = TexturePool::GetInstance();
-							texture = texturePool.GetOrCreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
+							texture = textures->GetOrCreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
 						}
 					}
 				}
@@ -481,7 +472,7 @@ namespace Engine
 
 				// Ensure mesh and material names are unique per node+prim combo
 				std::string finalMeshName = nodeName + "_mesh" + std::to_string(node.mesh) + "_prim" + std::to_string(primIdx);
-				std::shared_ptr<Mesh> mesh = MeshPool::GetInstance().RegisterMesh(finalMeshName, vertices, indices);
+				std::shared_ptr<Mesh> mesh = meshes->RegisterMesh(finalMeshName, vertices, indices);
 
 				std::string matName = finalMeshName + "_material";
 				std::shared_ptr<MaterialData> matData = RegisterMaterialData(matName, mesh, texture);
@@ -653,11 +644,9 @@ namespace Engine
 
 		compositeMaterials.emplace(path, loadedMaterials);
 
-		// Signal the editor to add this string to its list of material assets to keep track of
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		if (sendEditorMessage)
 		{
-			auto engineInstance = SwimEngine::GetInstance();
-			engineInstance->SendEditorMessage("registerMaterial " + path, /*channel:*/3);
+			sendEditorMessage("registerMaterial " + path, 3);
 		}
 
 		return loadedMaterials;
@@ -669,11 +658,9 @@ namespace Engine
 		materials.clear();
 		compositeMaterials.clear();
 
-		if constexpr (SwimEngine::DefaultEngineState == EngineState::Editing)
+		if (sendEditorMessage)
 		{
-			// Signal the meaterials are cleared
-			auto engineInstance = SwimEngine::GetInstance();
-			engineInstance->SendEditorMessage("clearMaterials", /*channel:*/1); // important enough to be on channel 1
+			sendEditorMessage("clearMaterials", 1);
 		}
 	}
 

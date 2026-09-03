@@ -1,11 +1,18 @@
 #pragma once
 
+#include <array>
+#include <memory>
+#include <string>
+
 #include <glad/gl.h>
 
 #include "Engine/Systems/Renderer/Core/Environment/CubeMap.h"
 
 namespace Engine
 {
+
+	class OpenGLRenderer;
+	class TexturePool;
 
 	class OpenGLCubeMap : public CubeMap
 	{
@@ -14,6 +21,8 @@ namespace Engine
 
 		OpenGLCubeMap
 		(
+			OpenGLRenderer& renderer,
+			TexturePool& textures,
 			const std::string& vertShader, 
 			const std::string& fragShader
 		);
@@ -25,6 +34,8 @@ namespace Engine
 		void SetFaces(const std::array<std::shared_ptr<Texture2D>, 6>& faces) override;
 
 	private:
+
+		OpenGLRenderer* renderer = nullptr;
 
 		GLuint skyboxVAO = 0;
 		GLuint skyboxVBO = 0;

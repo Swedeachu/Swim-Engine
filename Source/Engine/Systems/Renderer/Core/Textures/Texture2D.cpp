@@ -1,15 +1,10 @@
 #include "PCH.h"
 #include "Texture2D.h"
-#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include <stb_image.h>
 
 namespace Engine
 {
-
-	static uint32_t vulkanTextureID = 0;
-
-	std::unordered_set<Texture2D*> Texture2D::allTextures; // declare this for static init (defined in header)
 
 	uint32_t GetMipLevels(float width, float height)
 	{
@@ -50,16 +45,16 @@ namespace Engine
 		return std::memcmp(dataA, dataB, size) == 0;
 	}
 
-	Texture2D::Texture2D(const std::string& filePath, bool generateMips)
-		: filePath(filePath), generateMips(generateMips)
+	Texture2D::Texture2D(TextureRuntimeContext context, const std::string& filePath, bool generateMips)
+		: context(std::move(context)), filePath(filePath), generateMips(generateMips)
 	{
 		LoadFromSTB();
 		Generate();
 	}
 
 	// Last param name is optional
-	Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
-		: width(width), height(height), filePath(name), isPixelDataSTB(false), generateMips(generateMips)
+	Texture2D::Texture2D(TextureRuntimeContext context, uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
+		: context(std::move(context)), width(width), height(height), filePath(name), isPixelDataSTB(false), generateMips(generateMips)
 	{
 		size_t dataSize = GetDataSize();
 
@@ -82,49 +77,58 @@ namespace Engine
 
 	void Texture2D::Generate()
 	{
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		if (context.Backend == GraphicsBackend::Vulkan)
 		{
+			if (!context.Vulkan)
+			{
+				throw std::runtime_error("Texture2D::Generate requires an injected VulkanRenderer.");
+			}
 			UploadToVulkan();
 			GoBindless();
 		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+		else if (context.Backend == GraphicsBackend::OpenGLLegacy)
 		{
 			UploadToOpenGL();
 		}
 
-		allTextures.insert(this);
+		if (context.Lifetime)
+		{
+			context.Lifetime->LiveCount.fetch_add(1, std::memory_order_relaxed);
+		}
 	}
 
 	Texture2D::~Texture2D()
 	{
 		Free();
-		if (!freed) allTextures.erase(this);
+		if (context.Lifetime)
+		{
+			context.Lifetime->LiveCount.fetch_sub(1, std::memory_order_relaxed);
+		}
 	}
 
 	void Texture2D::Free()
 	{
-		// First do this hack fix to avoid any accidental double frees.
-		// This is stupid but just the easiest defensive fix.
 		if (freed)
 		{
-			// std::cout << "Blocking double free on Texture: " << filePath << "\n";
 			return;
 		}
 		freed = true;
 
-		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
+		if (context.Backend == GraphicsBackend::Vulkan)
 		{
-			auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
-			if (!vulkanRenderer) { return; }
-
-			auto device = vulkanRenderer->GetDevice();
-			if (!device) { return; }
-
-			if (imageView) { vkDestroyImageView(device, imageView, nullptr); imageView = VK_NULL_HANDLE; }
-			if (image) { vkDestroyImage(device, image, nullptr); image = VK_NULL_HANDLE; }
-			if (memory) { vkFreeMemory(device, memory, nullptr); memory = VK_NULL_HANDLE; }
+			VulkanRenderer* vulkanRenderer = context.Vulkan;
+			if (vulkanRenderer)
+			{
+				auto device = vulkanRenderer->GetDevice();
+				if (device)
+				{
+					if (imageView) { vkDestroyImageView(device, imageView, nullptr); imageView = VK_NULL_HANDLE; }
+					if (image) { vkDestroyImage(device, image, nullptr); image = VK_NULL_HANDLE; }
+					if (memory) { vkFreeMemory(device, memory, nullptr); memory = VK_NULL_HANDLE; }
+				}
+			}
 		}
-		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
+		else if (context.Backend == GraphicsBackend::OpenGLLegacy)
 		{
 			if (textureID != 0)
 			{
@@ -152,22 +156,6 @@ namespace Engine
 		}
 	}
 
-	void Texture2D::FlushAllTextures()
-	{
-		for (Texture2D* tex : allTextures)
-		{
-			if (tex)
-			{
-				tex->Free();
-			}
-		}
-		allTextures.clear();
-	}
-
-	int Texture2D::GetTextureCountOnGPU()
-	{
-		return allTextures.size();
-	}
 
 	void Texture2D::LoadFromSTB()
 	{
@@ -184,7 +172,7 @@ namespace Engine
 
 	void Texture2D::UploadToVulkan()
 	{
-		auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
+		VulkanRenderer* vulkanRenderer = context.Vulkan;
 		if (!vulkanRenderer)
 		{
 			throw std::runtime_error("Texture2D::UploadToVulkan: VulkanRenderer not found!");
@@ -362,9 +350,9 @@ namespace Engine
 
 	void Texture2D::GoBindless()
 	{
-		auto vulkanRenderer = SwimEngine::GetInstance()->GetVulkanRenderer();
+		VulkanRenderer* vulkanRenderer = context.Vulkan;
 
-		bindlessIndex = vulkanTextureID;
+		bindlessIndex = context.Lifetime ? context.Lifetime->NextBindlessIndex.fetch_add(1, std::memory_order_relaxed) : UINT32_MAX;
 		const auto& descriptorManager = vulkanRenderer->GetDescriptorManager();
 
 		if (descriptorManager && bindlessIndex != UINT32_MAX)
@@ -372,7 +360,6 @@ namespace Engine
 			descriptorManager->UpdateBindlessTexture(bindlessIndex, imageView, vulkanRenderer->GetDefaultSampler());
 		}
 
-		vulkanTextureID++;
 	}
 
 }

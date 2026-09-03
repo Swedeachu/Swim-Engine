@@ -1,5 +1,5 @@
 #include "PCH.h"
-#include "Rigidbody.h"
+#include "RigidBody.h"
 
 namespace Engine
 {

@@ -1,11 +1,14 @@
 #pragma once 
 
-#include "array"
-#include "memory"
+#include <array>
+#include <memory>
+#include <string>
 #include "Engine/Systems/Renderer/Core/Textures/Texture2D.h"
 
 namespace Engine
 {
+
+	class TexturePool;
 
 	// Cube vertices for skybox (size doesn't matter, we scale it in shader/view matrix)
 	// OpenGL uses this one
@@ -64,10 +67,11 @@ namespace Engine
 
 		CubeMap
 		(
+			TexturePool& texturePool,
 			const std::string& vertShader,
 			const std::string& fragShader
 		)
-			: vertShader(vertShader), fragShader(fragShader)
+			: texturePool(&texturePool), vertShader(vertShader), fragShader(fragShader)
 		{}
 
 		virtual ~CubeMap() = default;
@@ -91,6 +95,8 @@ namespace Engine
 	protected:
 
 		static void RotateImage180(unsigned char* data, int width, int height);
+
+		TexturePool* texturePool = nullptr;
 
 		// In degrees
 		glm::vec3 rotation = { 0, 0, 0 };

@@ -14,8 +14,8 @@ namespace Engine
 	void SceneDebugDraw::Init()
 	{
 		auto cubeData = MakeCube();
-		cubeMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawCube", cubeData.vertices, cubeData.indices);
-		cubeMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawCubeMaterial", cubeMesh);
+		cubeMesh = meshes->RegisterMesh("DebugDrawCube", cubeData.vertices, cubeData.indices);
+		cubeMaterialData = materials->RegisterMaterialData("DebugDrawCubeMaterial", cubeMesh);
 
 		auto sphereData = MakeSphere(
 			24, 48,
@@ -23,11 +23,11 @@ namespace Engine
 			glm::vec3(1, 1, 1),
 			glm::vec3(1, 1, 1)
 		);
-		sphereMesh = MeshPool::GetInstance().RegisterMesh("DebugDrawSphere", sphereData.vertices, sphereData.indices);
-		sphereMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawSphereMaterial", sphereMesh);
+		sphereMesh = meshes->RegisterMesh("DebugDrawSphere", sphereData.vertices, sphereData.indices);
+		sphereMaterialData = materials->RegisterMaterialData("DebugDrawSphereMaterial", sphereMesh);
 
 		wireFrameCubeMesh = CreateAndRegisterWireframeBoxMesh(DebugColor::White, "DebugDrawCubeWireFrame");
-		wireFrameCubeMaterialData = MaterialPool::GetInstance().RegisterMaterialData("DebugDrawCubeWireFrameMaterial", wireFrameCubeMesh);
+		wireFrameCubeMaterialData = materials->RegisterMaterialData("DebugDrawCubeWireFrameMaterial", wireFrameCubeMesh);
 	}
 
 	std::shared_ptr<Mesh> SceneDebugDraw::CreateAndRegisterWireframeBoxMesh(DebugColor color, std::string meshName)
@@ -103,7 +103,7 @@ namespace Engine
 			indexOffset += 8;
 		}
 
-		return MeshPool::GetInstance().RegisterMesh(meshName, vertices, indices);
+		return meshes->RegisterMesh(meshName, vertices, indices);
 	}
 
 	std::shared_ptr<MaterialData> SceneDebugDraw::GetMeshMaterialDataFromType(MeshBoxType type)

@@ -129,8 +129,8 @@ namespace Engine
 
 	}
 
-	SceneBVH::SceneBVH(entt::registry& registry)
-		: registry{ registry }
+	SceneBVH::SceneBVH(entt::registry& registry, Swim::Jobs::JobSystem& jobs)
+		: registry{ registry }, jobs{ &jobs }
 	{}
 
 	void SceneBVH::EnsureParallelQueryScratch(size_t workerSlots, size_t seedItemHint) const
@@ -1247,7 +1247,7 @@ namespace Engine
 			return;
 		}
 
-		const size_t workerSlots = GetRenderParallelWorkerSlots();
+		const size_t workerSlots = GetRenderParallelWorkerSlots(*jobs);
 		if (workerSlots <= 1)
 		{
 			QueryFrustum(frustum, outVisible);
@@ -1340,7 +1340,7 @@ namespace Engine
 			parallelVisibleScratch[slot].visible.clear();
 		}
 
-		ParallelForRender(seedItems.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+		ParallelForRender(*jobs, seedItems.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
 		{
 			std::vector<entt::entity>& localVisible = parallelVisibleScratch[workerIndex].visible;
 			for (size_t i = begin; i < end; ++i)

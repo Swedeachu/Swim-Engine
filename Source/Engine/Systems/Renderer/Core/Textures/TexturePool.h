@@ -1,9 +1,23 @@
 #pragma once
 
 #include "Texture2D.h"
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <string>
+#include <utility>
+#include <vector>
 #include <tiny_gltf.h>
+
+namespace Swim::Platform
+{
+	class FileSystem;
+}
 
 namespace Engine
 {
@@ -13,7 +27,7 @@ namespace Engine
 
 	public:
 
-		static TexturePool& GetInstance();
+		TexturePool(Swim::Platform::FileSystem& files, TextureRuntimeContext context);
 
 		// Delete copy and move constructors
 		TexturePool(const TexturePool&) = delete;
@@ -37,6 +51,15 @@ namespace Engine
 		std::shared_ptr<Texture2D> CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName);
 
 		void StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name);
+
+		std::shared_ptr<Texture2D> CreateTransientTexture(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
+
+		int GetLiveTextureCount() const
+		{
+			return lifetimeTracker ? lifetimeTracker->LiveCount.load(std::memory_order_relaxed) : 0;
+		}
+
+		const TextureRuntimeContext& GetRuntimeContext() const { return runtimeContext; }
 
 		std::shared_ptr<Texture2D> GetTexture2D(const std::string& name);
 		std::shared_ptr<Texture2D> GetTexture2DLazy(const std::string& name);
@@ -94,8 +117,9 @@ namespace Engine
 
 	private:
 
-		// Private constructor for Singleton pattern
-		TexturePool() = default;
+		Swim::Platform::FileSystem* files = nullptr;
+		TextureRuntimeContext runtimeContext{};
+		std::shared_ptr<TextureLifetimeTracker> lifetimeTracker;
 
 		std::mutex poolMutex;
 		std::unordered_map<std::string, std::shared_ptr<Texture2D>> textures;

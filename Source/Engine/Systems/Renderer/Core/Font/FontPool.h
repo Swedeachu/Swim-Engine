@@ -1,22 +1,31 @@
 #pragma once
 
 #include "FontData.h"
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <mutex>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
+namespace Swim::Platform
+{
+	class FileSystem;
+}
+
 namespace Engine
 {
+
+  class TexturePool;
 
   class FontPool
   {
 
   public:
 
-    static FontPool& GetInstance();
+    FontPool(Swim::Platform::FileSystem& files, TexturePool& textures) : files(&files), textures(&textures) {}
 
-    // Delete copy/move to enforce singleton semantics.
+    // Delete copy/move because this pool has one engine owner.
     FontPool(const FontPool&) = delete;
     FontPool& operator=(const FontPool&) = delete;
     FontPool(FontPool&&) = delete;
@@ -28,9 +37,13 @@ namespace Engine
 
     std::shared_ptr<FontInfo> GetFontInfo(const std::string& name) const;
 
+    // Releases all cached font metadata and atlas references.
+    void Flush();
+
   private:
 
-    FontPool() = default;
+    Swim::Platform::FileSystem* files = nullptr;
+    TexturePool* textures = nullptr;
 
     mutable std::mutex poolMutex; // mutable so we can lock in const getters.
 

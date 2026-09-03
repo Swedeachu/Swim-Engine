@@ -8,20 +8,40 @@
 #include "SubSceneSystems/SerializedSceneManager.h"
 
 #include "Engine/Components/ObjectTag.h"
+#include "Engine/EngineState.h"
 
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
+#include "Engine/Systems/Renderer/Core/RenderConventions.h"
 
 #include "Engine/Systems/Physics/PhysicsWorld.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <typeinfo>
 #include <unordered_set>
+#include <utility>
+#include <vector>
+
+namespace Swim::Platform
+{
+	class FileSystem;
+}
+
+namespace Swim::Jobs
+{
+	class JobSystem;
+}
 
 namespace Engine
 {
 
 	// Forward declaration of systems
-	class SwimEngine;
 	class SceneSystem;
 	class PhysicsSystem;
 	class InputManager;
@@ -29,6 +49,11 @@ namespace Engine
 	class VulkanRenderer;
 	class OpenGLRenderer;
 	class Renderer;
+	class MeshPool;
+	class TexturePool;
+	class MaterialPool;
+	class FontPool;
+	class EntityFactory;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
 	class Scene : public Machine, public std::enable_shared_from_this<Scene>
@@ -36,14 +61,12 @@ namespace Engine
 
 	public:
 
-		Scene() : name("UnnamedScene"), registry() {} // Default constructor
+		Scene();
 
 		// takes name param
-		explicit Scene(const std::string& name = "scene")
-			: name(name), registry()
-		{}
+		explicit Scene(const std::string& name);
 
-		~Scene() override; // declaration only
+		~Scene() override;
 
 		int Awake() override { return 0; };
 
@@ -104,23 +127,40 @@ namespace Engine
 		bool ShouldRenderBasedOnState(entt::entity e) const;
 		uint64_t GetRenderablesRevision() const { return renderablesRevision; }
 
-		// Called by SceneSystem during Awake
-		void SetSceneSystem(const std::shared_ptr<SceneSystem>& system) { sceneSystem = system; }
-		void SetInputManager(const std::shared_ptr<InputManager>& system) { inputManager = system; }
-		void SetCameraSystem(const std::shared_ptr<CameraSystem>& system) { cameraSystem = system; }
+		// Called by SceneSystem during Awake. These are non-owning engine service views.
+		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
+		void SetInputManager(InputManager* system) { inputManager = system; }
+		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
+		void SetEngineState(const EngineState* state) { engineState = state; }
+		void SetClipSpaceDepthRange(ClipSpaceDepthRange depthRange) { clipSpaceDepthRange = depthRange; }
+		void SetMeshPool(MeshPool* value) { meshPool = value; }
+		void SetTexturePool(TexturePool* value) { texturePool = value; }
+		void SetMaterialPool(MaterialPool* value) { materialPool = value; }
+		void SetFontPool(FontPool* value) { fontPool = value; }
+		void SetFileSystem(Swim::Platform::FileSystem* value) { fileSystem = value; }
+		void SetJobSystem(Swim::Jobs::JobSystem* value) { jobSystem = value; }
+		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
 
-		// Defined in C++ since it does some extra stuff for the ambiguous renderer
-		void SetVulkanRenderer(const std::shared_ptr<VulkanRenderer>& system);
-		void SetOpenGLRenderer(const std::shared_ptr<OpenGLRenderer>& system);
+		// Defined in C++ since it also updates the ambiguous renderer pointer.
+		void SetVulkanRenderer(VulkanRenderer* system);
+		void SetOpenGLRenderer(OpenGLRenderer* system);
 
-		// so much boiler plate for memory safety
-
-		std::shared_ptr<SceneSystem> GetSceneSystem() const { return GetSystem<SceneSystem>(sceneSystem); }
-		std::shared_ptr<InputManager> GetInputManager() const { return GetSystem<InputManager>(inputManager); }
-		std::shared_ptr<CameraSystem> GetCameraSystem() const { return GetSystem<CameraSystem>(cameraSystem); }
-		std::shared_ptr<VulkanRenderer> GetVulkanRenderer() const { return GetSystem<VulkanRenderer>(vulkanRenderer); }
-		std::shared_ptr<OpenGLRenderer> GetOpenGLRenderer() const { return GetSystem<OpenGLRenderer>(openGLRenderer); }
-		std::shared_ptr<Renderer> GetRenderer() const; // ambiguous version
+		SceneSystem* GetSceneSystem() const { return GetSystem(sceneSystem); }
+		InputManager* GetInputManager() const { return GetSystem(inputManager); }
+		CameraSystem* GetCameraSystem() const { return GetSystem(cameraSystem); }
+		VulkanRenderer* GetVulkanRenderer() const { return GetSystem(vulkanRenderer); }
+		OpenGLRenderer* GetOpenGLRenderer() const { return GetSystem(openGLRenderer); }
+		Renderer* GetRenderer() const; // ambiguous version
+		EngineState GetEngineState() const { return *GetSystem(engineState); }
+		ClipSpaceDepthRange GetClipSpaceDepthRange() const { return clipSpaceDepthRange; }
+		MeshPool& GetMeshPool() const { return *GetSystem(meshPool); }
+		TexturePool& GetTexturePool() const { return *GetSystem(texturePool); }
+		MaterialPool& GetMaterialPool() const { return *GetSystem(materialPool); }
+		FontPool& GetFontPool() const { return *GetSystem(fontPool); }
+		Swim::Platform::FileSystem& GetFileSystem() const { return *GetSystem(fileSystem); }
+		Swim::Jobs::JobSystem& GetJobSystem() const { return *GetSystem(jobSystem); }
+		EntityFactory& GetEntityFactory() const { return *GetSystem(entityFactory.get()); }
+		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		GizmoSystem* GetGizmoSystem() const { return gizmoSystem.get(); }
@@ -171,7 +211,7 @@ namespace Engine
 			// Special handling for BehaviorComponents so we properly Exit() behaviors.
 			if constexpr (std::is_same_v<T, BehaviorComponents>)
 			{
-				EngineState state = SwimEngine::GetInstance()->GetEngineState();
+				EngineState state = GetEngineState();
 				auto& bc = registry.get<BehaviorComponents>(entity);
 				if (bc.CanExecute(state))
 				{
@@ -228,7 +268,7 @@ namespace Engine
 				return;
 			}
 
-			EngineState state = SwimEngine::GetInstance()->GetEngineState();
+			EngineState state = GetEngineState();
 
 			auto& bc = registry.get<BehaviorComponents>(entity);
 			auto& vec = bc.behaviors;
@@ -257,7 +297,7 @@ namespace Engine
 		template<typename Func, typename... Args>
 		void ForEachBehavior(Func method, Args&&... args)
 		{
-			EngineState state = SwimEngine::GetInstance()->GetEngineState();
+			EngineState state = GetEngineState();
 
 			registry.view<BehaviorComponents>().each(
 				[&](auto entity, BehaviorComponents& bc)
@@ -303,13 +343,10 @@ namespace Engine
 		entt::registry registry;
 
 		template <typename T>
-		std::shared_ptr<T> GetSystem(const std::weak_ptr<T>& weakPtr) const
+		T* GetSystem(T* system) const
 		{
-			auto system = weakPtr.lock();
 			if (!system)
 			{
-				// this seems like its relying heavily on RTTI
-				// throw std::runtime_error(std::string(typeid(T).name()) + " is no longer valid!");
 				throw std::runtime_error("Invalid System!");
 			}
 			return system;
@@ -329,7 +366,7 @@ namespace Engine
 
 			// Conditionally Init immediately if it can execute in the current state
 			/* We actually defer until the next frame for maximum safety.
-			const EngineState state = SwimEngine::GetInstance()->GetEngineState();
+			const EngineState state = GetEngineState();
 			if (bc.CanExecute(state))
 			{
 				raw->SetInited();
@@ -344,16 +381,27 @@ namespace Engine
 
 		uint64_t renderablesRevision{ 0 };
 
-		std::weak_ptr<SceneSystem> sceneSystem;
-		std::weak_ptr<InputManager> inputManager;
-		std::weak_ptr<CameraSystem> cameraSystem;
-		std::weak_ptr<VulkanRenderer> vulkanRenderer;
-		std::weak_ptr<OpenGLRenderer> openGLRenderer;
-		std::weak_ptr<Renderer> renderer;
+		SceneSystem* sceneSystem = nullptr;
+		InputManager* inputManager = nullptr;
+		CameraSystem* cameraSystem = nullptr;
+		VulkanRenderer* vulkanRenderer = nullptr;
+		OpenGLRenderer* openGLRenderer = nullptr;
+		Renderer* renderer = nullptr;
+		const EngineState* engineState = nullptr;
+		ClipSpaceDepthRange clipSpaceDepthRange = ClipSpaceDepthRange::ZeroToOne;
+		MeshPool* meshPool = nullptr;
+		TexturePool* texturePool = nullptr;
+		MaterialPool* materialPool = nullptr;
+		FontPool* fontPool = nullptr;
+		Swim::Platform::FileSystem* fileSystem = nullptr;
+		Swim::Jobs::JobSystem* jobSystem = nullptr;
+		std::function<int()> fpsProvider;
+		bool transformHooksBound{ false };
 
 		// Internals:
 		entt::observer frustumCacheObserver;
 
+		std::unique_ptr<EntityFactory> entityFactory;
 		std::unique_ptr<SceneBVH> sceneBVH;
 		std::unique_ptr<PhysicsWorld> physicsWorld;
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;

@@ -114,6 +114,9 @@ def check_build_workflow(failures: list[str]) -> None:
         'include(cmake/SolutionLayout.cmake)',
         'swim_set_solution_folder(SwimPlatform "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
         'swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
+        'add_library(Swim::Core ALIAS SwimCore)',
+        'swim_set_solution_folder(SwimCore "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
+        'add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL',
         'add_executable(SwimHelloWindow EXCLUDE_FROM_ALL',
         'add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL',
         'add_library(SwimPlatformPublicHeaders OBJECT EXCLUDE_FROM_ALL',
@@ -285,6 +288,71 @@ def check_build_workflow(failures: list[str]) -> None:
         ):
             if fragment not in soft_text:
                 fail(f"Windows soft build does not keep the Visual Studio solution synchronized: {fragment}", failures)
+
+        build_index = soft_text.find('--build --preset $BuildPlan.BuildPreset --parallel')
+        solution_index = soft_text.find('--preset windows-vs -DFETCHCONTENT_FULLY_DISCONNECTED=ON')
+        if build_index == -1 or solution_index == -1 or build_index > solution_index:
+            fail(
+                "Windows soft build must compile the primary Ninja tree before refreshing the secondary Visual Studio tree",
+                failures,
+            )
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    shader_cmake_text = (ROOT / "cmake" / "Shaders.cmake").read_text(encoding="utf-8", errors="ignore")
+    if "CONFIGURE_DEPENDS" in cmake_text.replace(
+        "# discovery configure-time only instead of using CONFIGURE_DEPENDS: the latter",
+        "",
+    ) or "CONFIGURE_DEPENDS" in shader_cmake_text:
+        fail(
+            "First-party CONFIGURE_DEPENDS glob verification is enabled; supported workflows already configure before build",
+            failures,
+        )
+
+    for fragment in (
+        'if(CMAKE_GENERATOR MATCHES "^Ninja")',
+        "CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL",
+    ):
+        if fragment not in cmake_text:
+            fail(
+                f"Ninja automatic CMake regeneration suppression is missing: {fragment}",
+                failures,
+            )
+
+    presets_text = (ROOT / "CMakePresets.json").read_text(encoding="utf-8", errors="ignore")
+    if '"CMAKE_SUPPRESS_REGENERATION": "ON"' not in presets_text:
+        fail(
+            "Windows Ninja preset does not pin CMAKE_SUPPRESS_REGENERATION=ON",
+            failures,
+        )
+
+    windows_common_text = (ROOT / "scripts" / "windows-build-common.ps1").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "function Assert-SwimNinjaManifestStable",
+        '"RERUN_CMAKE"',
+        '"VerifyGlobs.cmake"',
+        '"cmake.verify_globs"',
+    ):
+        if fragment not in windows_common_text:
+            fail(
+                f"Windows build manifest loop guard is missing: {fragment}",
+                failures,
+            )
+
+    for script_path in (windows_soft, windows_clean):
+        if script_path.is_file():
+            script_text = script_path.read_text(encoding="utf-8", errors="ignore")
+            if "Assert-SwimNinjaManifestStable -BuildDirectory $BuildPlan.BuildDirectory" not in script_text:
+                fail(
+                    f"{script_path.name} does not validate the Ninja manifest before building",
+                    failures,
+                )
+
+    dependencies_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    if 'file(WRITE "${SWIM_BASIS_GENERATED_DIR}/basisu_transcoder.cpp"' in dependencies_text:
+        fail(
+            "Basis generated source is rewritten unconditionally during configure instead of preserving its timestamp when content is unchanged",
+            failures,
+        )
 
     generate_solution = ROOT / "scripts" / "generate-solution.ps1"
     if generate_solution.is_file():
@@ -804,6 +872,363 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
                 fail(f"hard-coded Windows asset path remains: {path.relative_to(ROOT)}", failures)
 
 
+
+def check_phase2_engine_architecture(failures: list[str]) -> None:
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
+    config_header = (ROOT / "Source" / "Engine" / "EngineConfig.h").read_text(encoding="utf-8", errors="ignore")
+    config_source = (ROOT / "Source" / "Engine" / "EngineConfig.cpp").read_text(encoding="utf-8", errors="ignore")
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        "enum class GraphicsBackend",
+        "enum class PhysicsBackend",
+        "struct EngineConfig",
+        "GraphicsBackend Graphics",
+        "PhysicsBackend Physics",
+        "Swim::Platform::WindowDesc Window",
+    ):
+        if fragment not in config_header:
+            fail(f"Phase 2 runtime configuration contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'argument == "--graphics"',
+        'argument == "--physics"',
+        "ResolveGraphicsBackend",
+        "ResolvePhysicsBackend",
+    ):
+        if fragment not in config_source:
+            fail(f"Phase 2 command-line backend selection is missing: {fragment}", failures)
+
+    if "SystemManager" in engine_header or "systemManager" in engine_source or "AddSystem<" in engine_source:
+        fail("SwimEngine core lifecycle regressed to stringly typed SystemManager ownership", failures)
+
+    for fragment in (
+        "int SwimEngine::AwakeSystems()",
+        "int SwimEngine::InitSystems()",
+        "void SwimEngine::UpdateSystems(double dt)",
+        "void SwimEngine::FixedUpdateSystems(unsigned int tickThisSecond)",
+        "int SwimEngine::ExitSystems()",
+        "Destroy consumers before the services they reference.",
+        "switch (graphicsBackend)",
+    ):
+        if fragment not in engine_source:
+            fail(f"Phase 2 explicit lifecycle/backend contract is missing: {fragment}", failures)
+
+    if "SwimEngine::CONTEXT" in engine_source or "RenderContext" in engine_header:
+        fail("compile-time renderer selection returned to SwimEngine", failures)
+
+    for owner_type in (
+        "InputManager",
+        "CommandSystem",
+        "SceneSystem",
+        "VulkanRenderer",
+        "OpenGLRenderer",
+        "CameraSystem",
+        "PhysicsSystem",
+    ):
+        if f"std::unique_ptr<{owner_type}>" not in engine_header:
+            fail(f"Phase 2 core owner is not uniquely owned: {owner_type}", failures)
+        if f"std::shared_ptr<{owner_type}>" in engine_header:
+            fail(f"Phase 2 core owner regressed to shared ownership: {owner_type}", failures)
+
+    camera_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    camera_source = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "SwimEngine::GetInstance" in camera_header or "SwimEngine::GetInstance" in camera_source:
+        fail("CameraSystem regressed to global engine discovery instead of injected runtime configuration", failures)
+
+    vulkan_index_draw = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "SwimEngine::GetInstance" in vulkan_index_draw:
+        fail("VulkanIndexDraw regressed to global engine discovery instead of injected renderer/scene/camera services", failures)
+
+    transform_source = (
+        ROOT / "Source" / "Engine" / "Components" / "Transform.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "SwimEngine::GetInstance" in transform_source:
+        fail("Transform regressed to global active-scene discovery", failures)
+    if "GraphicsBackend::" in transform_source:
+        fail("Transform regressed to graphics-API-specific clip-space behavior", failures)
+
+    cubemap_controller_source = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Environment" / "CubeMapController.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "SwimEngine::GetInstance" in cubemap_controller_source:
+        fail("CubeMapController regressed to global engine discovery instead of renderer-owned backend injection", failures)
+
+    for renderer_name, relative_path in (
+        ("VulkanRenderer", ("Vulkan", "VulkanRenderer.cpp")),
+        ("OpenGLRenderer", ("OpenGL", "OpenGLRenderer.cpp")),
+    ):
+        renderer_source = (
+            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / relative_path[0] / relative_path[1]
+        ).read_text(encoding="utf-8", errors="ignore")
+        if "GetInstance()->GetSceneSystem()" in renderer_source:
+            fail(f"{renderer_name} regressed to global active-scene discovery", failures)
+
+    for fragment in (
+        "add_library(SwimCore STATIC",
+        "add_library(Swim::Core ALIAS SwimCore)",
+        "Source/Engine/EngineConfig.cpp",
+        "add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL",
+    ):
+        if fragment not in cmake_text:
+            fail(f"Phase 2 Core CMake/test boundary is missing: {fragment}", failures)
+
+    # Phase 2 is a whole-tree invariant now, not a handful of migrated call sites.
+    runtime_locator_patterns = (
+        "SwimEngine::GetInstance()",
+        "MeshPool::GetInstance()",
+        "TexturePool::GetInstance()",
+        "MaterialPool::GetInstance()",
+        "FontPool::GetInstance()",
+        "EntityFactory::GetInstance()",
+    )
+    source_roots = (ROOT / "Source" / "Engine", ROOT / "Source" / "Game")
+    for source_root in source_roots:
+        if not source_root.exists():
+            continue
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for locator in runtime_locator_patterns:
+                if locator in text:
+                    fail(
+                        f"Phase 2 runtime service locator returned in {path.relative_to(ROOT)}: {locator}",
+                        failures,
+                    )
+
+    for shared_engine_pattern in (
+        "std::shared_ptr<SwimEngine>",
+        "std::weak_ptr<SwimEngine>",
+        "enable_shared_from_this<SwimEngine>",
+    ):
+        if shared_engine_pattern in engine_header or shared_engine_pattern in engine_source:
+            fail(f"SwimEngine lifetime regressed to process-shared ownership: {shared_engine_pattern}", failures)
+
+    scene_system_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    scene_system_source = (
+        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "Preregister(std::shared_ptr<Scene>" in scene_system_header:
+        fail("Scene preregistration regressed to process-global mutable Scene instances", failures)
+    if "factory.clear()" in scene_system_source:
+        fail("Scene constructor metadata is cleared by the first engine instance", failures)
+
+    primitive_meshes_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "PrimitiveMeshes.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if '#include "Vertex.h"' not in primitive_meshes_header:
+        fail("PrimitiveMeshes.h must include Vertex.h directly instead of relying on PCH/transitive includes", failures)
+
+    scene_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    scene_source = (
+        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "Scene();",
+        "explicit Scene(const std::string& name);",
+        "~Scene() override;",
+    ):
+        if fragment not in scene_header:
+            fail(f"Scene incomplete-type ownership boundary is missing declaration: {fragment}", failures)
+    for fragment in (
+        "Scene::Scene()",
+        "Scene::Scene(const std::string& name)",
+        "Scene::~Scene() = default;",
+    ):
+        if fragment not in scene_source:
+            fail(f"Scene incomplete-type ownership boundary is missing out-of-line definition: {fragment}", failures)
+    if "Scene() :" in scene_header or "explicit Scene(const std::string& name =" in scene_header:
+        fail("Scene constructors must remain out-of-line while Scene owns forward-declared EntityFactory", failures)
+
+    font_pool_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Font" / "FontPool.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    font_pool_source = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Font" / "FontPool.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "void Flush();" not in font_pool_header or "void FontPool::Flush()" not in font_pool_source:
+        fail("FontPool shutdown API must declare and define Flush() consistently", failures)
+
+    direct_service_include_checks = (
+        (
+            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp",
+            '#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"',
+            "OpenGLRenderer must include MaterialPool.h directly before calling MaterialPool methods",
+        ),
+        (
+            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanRenderer.cpp",
+            '#include "Engine/Platform/FileSystem.h"',
+            "VulkanRenderer must include FileSystem.h directly before calling FileSystem methods",
+        ),
+        (
+            ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp",
+            '#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"',
+            "Scene.cpp must include MeshPool.h directly for scene-owned resource wiring",
+        ),
+        (
+            ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp",
+            '#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"',
+            "Scene.cpp must include MaterialPool.h directly for scene-owned resource wiring",
+        ),
+    )
+    for path, fragment, message in direct_service_include_checks:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if fragment not in text:
+            fail(message, failures)
+
+    # Behavior/gameplay translation units must not dereference services that Behavior only forward-declares
+    # unless they include the concrete service header themselves. This catches MSVC/PCH-only completeness failures.
+    game_service_include_rules = (
+        ("renderer->", "Engine/Systems/Renderer/Renderer.h"),
+        ("scene->", "Engine/Systems/Scene/Scene.h"),
+        ("input->", "Engine/Systems/IO/InputManager.h"),
+        ("cameraSystem->", "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"),
+        ("sceneSystem->", "Engine/Systems/Scene/SceneSystem.h"),
+    )
+    game_source_root = ROOT / "Source" / "Game"
+    for path in game_source_root.rglob("*.cpp"):
+        text = path.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
+        for expression, include_path in game_service_include_rules:
+            if expression in text and include_path not in text:
+                fail(
+                    f"gameplay source dereferences a forward-declared service without its concrete header: "
+                    f"{path.relative_to(ROOT)}: {expression} requires {include_path}",
+                    failures,
+                )
+
+    cubemap_test_header = (
+        ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "CubeMapControlTest.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    cubemap_test_source = (
+        ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "CubeMapControlTest.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    if "class CubeMapController;" not in cubemap_test_header:
+        fail("CubeMapControlTest must explicitly declare its non-owning CubeMapController dependency", failures)
+    if "std::unique_ptr<Engine::CubeMapController>&" in cubemap_test_header:
+        fail("CubeMapControlTest helper must not expose renderer ownership through unique_ptr", failures)
+    for fragment in (
+        '#include "Engine/Systems/Renderer/Renderer.h"',
+        '#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"',
+        '#include "Engine/Systems/Scene/Scene.h"',
+        '#include "Engine/Systems/IO/InputManager.h"',
+    ):
+        if fragment not in cubemap_test_source:
+            fail(f"CubeMapControlTest direct dependency include is missing: {fragment}", failures)
+
+    include_case_checks = (
+        (ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "SetTextCallBack.cpp", '#include "SetTextCallBack.h"'),
+        (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "PhysicsWorld.h", '#include "RigidBody.h"'),
+        (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "Rigibody.cpp", '#include "RigidBody.h"'),
+        (ROOT / "Source" / "Game" / "Testing" / "PrimitiveTest.cpp", '#include "PCH.h"'),
+        (ROOT / "Source" / "Game" / "Testing" / "PrimitivePhysicsTest.cpp", '#include "PCH.h"'),
+    )
+    for path, fragment in include_case_checks:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if fragment not in text:
+            fail(f"project-local include spelling/case regressed in {path.relative_to(ROOT)}: {fragment}", failures)
+
+def check_phase3_job_architecture(failures: list[str]) -> None:
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    dependency_path = ROOT / "cmake" / "JobDependencies.cmake"
+    if not dependency_path.is_file():
+        fail("Phase 3 job dependency module is missing: cmake/JobDependencies.cmake", failures)
+        return
+
+    dependency_text = dependency_path.read_text(encoding="utf-8", errors="ignore")
+    job_header = (ROOT / "Source" / "Engine" / "Jobs" / "JobSystem.h").read_text(encoding="utf-8", errors="ignore")
+    job_source = (ROOT / "Source" / "Engine" / "Jobs" / "JobSystem.cpp").read_text(encoding="utf-8", errors="ignore")
+    parallel_utils = (ROOT / "Source" / "Engine" / "Utility" / "ParallelUtils.h").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        "GITHUB_REPOSITORY dougbinks/enkiTS",
+        "GIT_TAG v1.12",
+        "UPDATE_DISCONNECTED YES",
+        "add_library(Swim::EnkiTS ALIAS enkiTS)",
+    ):
+        if fragment not in dependency_text:
+            fail(f"Phase 3 enkiTS dependency contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "add_library(SwimJobs STATIC",
+        "add_library(Swim::Jobs ALIAS SwimJobs)",
+        "target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS)",
+        "add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL",
+        "target_link_libraries(SwimEngine PRIVATE",
+        "Swim::Jobs",
+    ):
+        if fragment not in cmake_text:
+            fail(f"Phase 3 JobSystem CMake boundary is missing: {fragment}", failures)
+
+    if 'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Jobs/")' not in cmake_text:
+        fail("JobSystem.cpp can be compiled twice: legacy SwimEngine source glob must exclude /Jobs/", failures)
+
+    for fragment in (
+        "class JobSystem",
+        "class JobHandle",
+        "class TaskGroup",
+        "CreateParallelFor",
+        "AddDependency",
+        "JobPriority",
+        "CreateMainThreadJob",
+        "CreateBlockingJob",
+        "RegisterCurrentExternalThread",
+        "JobShutdownMode",
+    ):
+        if fragment not in job_header:
+            fail(f"Phase 3 public job contract is missing: {fragment}", failures)
+
+    if "TaskScheduler.h" not in job_source:
+        fail("JobSystem implementation no longer binds the scheduler backend", failures)
+
+    for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game"):
+        if not source_root.exists():
+            continue
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if "TaskScheduler.h" in text and path != ROOT / "Source" / "Engine" / "Jobs" / "JobSystem.cpp":
+                fail(f"enkiTS leaked outside Swim::Jobs: {path.relative_to(ROOT)}", failures)
+            if "RenderThreadPool" in text:
+                fail(f"renderer-only CPU worker pool returned: {path.relative_to(ROOT)}", failures)
+
+    for fragment in (
+        "Swim::Jobs::JobSystem& jobs",
+        "jobs.ParallelFor(",
+    ):
+        if fragment not in parallel_utils:
+            fail(f"renderer ParallelFor adapter is not backed by Swim::Jobs: {fragment}", failures)
+
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "std::unique_ptr<Swim::Jobs::JobSystem> jobSystem",
+        "jobSystem->Initialize(jobDesc)",
+        "rendererRuntimeServices.Jobs = jobSystem.get()",
+        "sceneServices.Jobs = jobSystem.get()",
+        "jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain)",
+    ):
+        target = engine_header if "unique_ptr" in fragment else engine_source
+        if fragment not in target:
+            fail(f"engine-owned JobSystem lifecycle/injection is missing: {fragment}", failures)
+
+    if ".ShutdownNow(" in job_source:
+        fail("JobSystem cancellation regressed to enkiTS ShutdownNow, which invalidates queued task state", failures)
+    if "Scheduler.WaitforAll();" in job_source:
+        fail("JobSystem WaitForAll regressed to scheduler-wide WaitforAll while permanent blocking lanes are alive", failures)
+
 def check_source_files_are_utf8(failures: list[str]) -> None:
     for source_root in (ROOT / "Source",):
         if not source_root.exists():
@@ -830,6 +1255,8 @@ def main() -> int:
     check_modern_cmake_dependency_compatibility(failures)
     check_windows_compile_contract_and_warning_hygiene(failures)
     check_foundation_architecture_boundaries(failures)
+    check_phase2_engine_architecture(failures)
+    check_phase3_job_architecture(failures)
     check_source_files_are_utf8(failures)
 
     if failures:

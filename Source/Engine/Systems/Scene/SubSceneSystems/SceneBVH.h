@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 #include <unordered_map>
@@ -10,6 +12,11 @@
 #include <entt/entt.hpp>
 #include "SceneDebugDraw.h"
 #include "Engine/Systems/Renderer/Core/MathTypes/MathAlgorithms.h"
+
+namespace Swim::Jobs
+{
+	class JobSystem;
+}
 
 namespace Engine
 {
@@ -42,7 +49,7 @@ namespace Engine
 			entt::entity entity{ entt::null };
 		};
 
-		explicit SceneBVH(entt::registry& registry);
+		explicit SceneBVH(entt::registry& registry, Swim::Jobs::JobSystem& jobs);
 
 		void Init();
 		void Update();
@@ -353,6 +360,7 @@ namespace Engine
 		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
 		entt::registry& registry;
+		Swim::Jobs::JobSystem* jobs = nullptr;
 		entt::observer topologyObserver;
 
 		std::vector<BVHNode> nodes; // binary BVH kept for updates and ray casting

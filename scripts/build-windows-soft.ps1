@@ -28,6 +28,20 @@ try {
         exit $LASTEXITCODE
     }
 
+    if ($BuildPlan.Generator -eq "Ninja") {
+        Assert-SwimNinjaManifestStable -BuildDirectory $BuildPlan.BuildDirectory
+    }
+
+    # Keep the primary Ninja configure/build contiguous. Configuring the separate
+    # Visual Studio tree against the same dependency cache before Ninja builds can
+    # change timestamps in CMake package inputs and leave Ninja's manifest dirty,
+    # causing RERUN_CMAKE to repeat indefinitely. Refresh the IDE solution only
+    # after the real build has reached a stable manifest.
+    & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+
     if ($BuildPlan.ConfigurePreset -ne "windows-vs") {
         Write-Host "[Swim] Refreshing Visual Studio 2022 solution: $VisualStudioSolution"
         Write-Host "[Swim] Solution refresh is fully disconnected and reuses the validated dependency cache."
@@ -43,8 +57,7 @@ try {
 
     Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution
     Write-Host "[Swim] Visual Studio solution synchronized and organized: $VisualStudioSolution"
-    & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
-    exit $LASTEXITCODE
+    exit 0
 }
 catch {
     Write-Host "[Swim] ERROR: $($_.Exception.Message)" -ForegroundColor Red

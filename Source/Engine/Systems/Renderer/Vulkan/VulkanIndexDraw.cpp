@@ -10,6 +10,7 @@
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
 #include "Engine/Systems/Scene/SubSceneSystems/SceneBVH.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Utility/ParallelUtils.h"
 #include "VulkanRenderer.h"
 
@@ -101,6 +102,14 @@ namespace Engine
 		overlayInstanceData.reserve(MAX_EXPECTED_INSTANCES);
 		gpuCullInputData.reserve(MAX_EXPECTED_INSTANCES);
 		gpuCullCommandTemplates.reserve(MAX_EXPECTED_INSTANCES);
+	}
+
+	void VulkanIndexDraw::SetServices(VulkanRenderer* vulkanRenderer, SceneSystem* scenes, CameraSystem* camera, Swim::Jobs::JobSystem* jobs)
+	{
+		renderer = vulkanRenderer;
+		sceneSystem = scenes;
+		cameraSystem = camera;
+		this->jobs = jobs;
 	}
 
 	static void EnsureInstanceCapacity(VulkanInstanceBuffer& ib, size_t requiredInstances)
@@ -888,7 +897,7 @@ namespace Engine
 		};
 
 		// Allocate space inside mega buffers and fill MeshBufferData
-		std::shared_ptr<Mesh> m = MeshPool::GetInstance().RegisterMesh("glyph", verts, idx);
+		std::shared_ptr<Mesh> m = renderer->GetRuntimeServices().Meshes->RegisterMesh("glyph", verts, idx);
 		glyphQuadMesh = *m->meshBufferData.get();
 		hasUploadedGlyphQuad = true;
 	}
@@ -925,14 +934,14 @@ namespace Engine
 		);
 		stagingIndexBuffer.CopyData(indices.data(), static_cast<size_t>(indexSize));
 
-		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+		renderer->CopyBuffer(
 			stagingVertexBuffer.GetBuffer(),
 			megaVertexBuffer->GetBuffer(),
 			vertexSize,
 			vertexOffset
 		);
 
-		SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+		renderer->CopyBuffer(
 			stagingIndexBuffer.GetBuffer(),
 			megaIndexBuffer->GetBuffer(),
 			indexSize,
@@ -1097,7 +1106,7 @@ namespace Engine
 		const bool allowParallel = (frustum == nullptr)
 			&& RenderCpuJobConfig::Enabled
 			&& candidates.size() >= RenderCpuJobConfig::MinParallelItemCount
-			&& GetRenderParallelWorkerSlots() > 1;
+			&& GetRenderParallelWorkerSlots(*jobs) > 1;
 
 		if (!allowParallel)
 		{
@@ -1112,11 +1121,11 @@ namespace Engine
 			return;
 		}
 
-		const size_t workerSlots = GetRenderParallelWorkerSlots();
+		const size_t workerSlots = GetRenderParallelWorkerSlots(*jobs);
 		const size_t reservePerSlot = std::max<size_t>((candidates.size() + workerSlots - 1) / workerSlots, 32);
 		EnsureGatherThreadScratch(workerSlots, reservePerSlot);
 
-		ParallelForRender(candidates.size(), RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
+		ParallelForRender(*jobs, candidates.size(), RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
 		{
 			auto& localGathered = gatherThreadScratch[workerIndex].gathered;
 			for (size_t i = begin; i < end; ++i)
@@ -1215,13 +1224,13 @@ namespace Engine
 		msdfInstancesData.clear();
 		overlayInstanceData.clear();
 
-		const std::shared_ptr<Scene>& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		const std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
 		entt::registry& registry = scene->GetRegistry();
 
 		const Frustum* frustum = nullptr;
 		if (cullMode == CullMode::CPU || cullMode == CullMode::GPU)
 		{
-			std::shared_ptr<CameraSystem> camera = scene->GetCameraSystem();
+			CameraSystem* camera = scene->GetCameraSystem();
 			Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
 			if (cullMode == CullMode::CPU)
 			{
@@ -1350,7 +1359,7 @@ namespace Engine
 
 	void VulkanIndexDraw::GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 		gatherCandidatesScratch.clear();
 		gatherCandidatesScratch.reserve(worldRenderableSlots.size());
 
@@ -1448,11 +1457,11 @@ namespace Engine
 		const bool allowParallelCopy = RenderCpuJobConfig::Enabled
 			&& totalWorldInstances >= RenderCpuJobConfig::MinParallelItemCount
 			&& activeMeshBucketKeys.size() >= 4
-			&& GetRenderParallelWorkerSlots() > 1;
+			&& GetRenderParallelWorkerSlots(*jobs) > 1;
 
 		if (allowParallelCopy)
 		{
-			ParallelForRender(activeMeshBucketKeys.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+			ParallelForRender(*jobs, activeMeshBucketKeys.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
 			{
 				for (size_t i = begin; i < end; ++i)
 				{
@@ -1965,7 +1974,7 @@ namespace Engine
 			return;
 		}
 
-		const uint32_t currentRenderStateMask = static_cast<uint32_t>(SwimEngine::GetInstance()->GetEngineState());
+		const uint32_t currentRenderStateMask = static_cast<uint32_t>(scene.GetEngineState());
 		const bool renderStateChanged = gpuWorldLastRenderStateMask != currentRenderStateMask;
 		const bool fullUpload = !gpuWorldTransformFrameInitialized[frameIndex] || renderStateChanged;
 		const VkDeviceSize stride = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceTransformData));
@@ -2078,7 +2087,7 @@ namespace Engine
 
 		if (collapseToFullUpload)
 		{
-			ParallelForRender(instanceCount, RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
+			ParallelForRender(*jobs, instanceCount, RenderCpuJobConfig::DefaultMinItemsPerChunk, [&](size_t begin, size_t end, uint32_t workerIndex)
 			{
 				(void)workerIndex;
 				writeTransformRange(static_cast<uint32_t>(begin), static_cast<uint32_t>(end - begin));
@@ -2099,7 +2108,7 @@ namespace Engine
 		}
 		else
 		{
-			ParallelForRender(dirtyInstanceRangeScratch.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
+			ParallelForRender(*jobs, dirtyInstanceRangeScratch.size(), 1, [&](size_t begin, size_t end, uint32_t workerIndex)
 			{
 				(void)workerIndex;
 				for (size_t i = begin; i < end; ++i)
@@ -2151,7 +2160,7 @@ namespace Engine
 			uint32_t maxInstances = 0;
 		};
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 		std::unordered_map<uint32_t, MeshBatchTemplate> meshTemplates;
 		std::vector<uint32_t> uniqueMeshIDs;
 		uniqueMeshIDs.reserve(worldRenderableSlots.size());
@@ -2276,7 +2285,6 @@ namespace Engine
 
 	void VulkanIndexDraw::DispatchGpuCull(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		std::shared_ptr<VulkanRenderer> renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
 		const std::unique_ptr<VulkanDeviceManager>& deviceManager = renderer->GetDeviceManager();
 		if (!pipelineManager
@@ -2703,7 +2711,8 @@ namespace Engine
 
 		const uint64_t currentFrustumRevision = Frustum::GetRevision();
 		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
-		const uint32_t currentRenderStateMask = static_cast<uint32_t>(SwimEngine::GetInstance()->GetEngineState());
+		const std::shared_ptr<Scene>& activeScene = sceneSystem->GetActiveScene();
+		const uint32_t currentRenderStateMask = static_cast<uint32_t>(activeScene->GetEngineState());
 
 		if (!transformCopies.empty() || copiedBvhNodes || copiedBvhLeaves || copiedBvhRanges || copiedBvhNodeDepthIndices || copiedBvhDepthOffsets)
 		{
@@ -2757,7 +2766,6 @@ namespace Engine
 
 		if (cullMode == CullMode::GPU)
 		{
-			std::shared_ptr<VulkanRenderer> renderer = SwimEngine::GetInstance()->GetVulkanRenderer();
 			const std::unique_ptr<VulkanDeviceManager>& deviceManager = renderer->GetDeviceManager();
 			if (deviceManager && deviceManager->SupportsDrawIndexedIndirectCount())
 			{
@@ -2787,20 +2795,17 @@ namespace Engine
 	// This will then also do immediate mode drawing from the debug registry if that is enabled.
 	void VulkanIndexDraw::DrawIndexedScreenSpaceAndDecoratedMeshes(uint32_t frameIndex, VkCommandBuffer cmd)
 	{
-		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
+		unsigned int windowWidth = renderer->GetSurfaceWidth();
+		unsigned int windowHeight = renderer->GetSurfaceHeight();
 
-		unsigned int windowWidth = engine->GetWindowWidth();
-		unsigned int windowHeight = engine->GetWindowHeight();
-
-		const std::shared_ptr<Scene>& scene = engine->GetSceneSystem()->GetActiveScene();
+		const std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
 		entt::registry& registry = scene->GetRegistry();
 
-		std::shared_ptr<VulkanRenderer> renderer = engine->GetVulkanRenderer();
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
 		const std::unique_ptr<VulkanDescriptorManager>& descriptorManager = renderer->GetDescriptorManager();
 
 		const CameraUBO& cameraUBO = renderer->GetCameraUBO();
-		const glm::mat4& worldView = engine->GetCameraSystem()->GetViewMatrix();
+		const glm::mat4& worldView = cameraSystem->GetViewMatrix();
 
 		const Frustum& frustum = Frustum::Get();
 
@@ -2935,7 +2940,7 @@ namespace Engine
 			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 		);
 
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
@@ -3143,17 +3148,19 @@ namespace Engine
 
 	void VulkanIndexDraw::DrawIndexedMsdfText(uint32_t frameIndex, VkCommandBuffer cmd, TransformSpace space)
 	{
-		std::shared_ptr<SwimEngine> engine = SwimEngine::GetInstance();
-		auto scene = engine->GetSceneSystem()->GetActiveScene();
-		if (!scene) return;
+		auto scene = sceneSystem->GetActiveScene();
+		if (!scene)
+		{
+			return;
+		}
 
 		auto& registry = scene->GetRegistry();
-		const CameraUBO& ubo = engine->GetVulkanRenderer()->GetCameraUBO();
-		const glm::mat4& view = engine->GetCameraSystem()->GetViewMatrix();
-		const glm::mat4& proj = engine->GetCameraSystem()->GetProjectionMatrix();
+		const CameraUBO& ubo = renderer->GetCameraUBO();
+		const glm::mat4& view = cameraSystem->GetViewMatrix();
+		const glm::mat4& proj = cameraSystem->GetProjectionMatrix();
 
-		unsigned int ww = engine->GetWindowWidth();
-		unsigned int wh = engine->GetWindowHeight();
+		unsigned int ww = renderer->GetSurfaceWidth();
+		unsigned int wh = renderer->GetSurfaceHeight();
 
 		BuildMsdfInstancesForSpace(registry, space, ubo, view, proj, ww, wh, msdfInstancesData);
 		UploadAndDrawMsdfBatch(frameIndex, cmd, msdfInstancesData, msdfIndirectCommandBuffers[frameIndex]);
@@ -3172,7 +3179,7 @@ namespace Engine
 		std::vector<MsdfTextGpuInstanceData>& outInstances
 	)
 	{
-		auto& scene = SwimEngine::GetInstance()->GetSceneSystem()->GetActiveScene();
+		auto& scene = sceneSystem->GetActiveScene();
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)
@@ -3213,8 +3220,6 @@ namespace Engine
 	{
 		if (instances.empty()) return;
 
-		auto engine = SwimEngine::GetInstance();
-		auto renderer = engine->GetVulkanRenderer();
 		auto& pm = renderer->GetPipelineManager();
 		auto& dm = renderer->GetDescriptorManager();
 
@@ -3308,7 +3313,7 @@ namespace Engine
 
 		if (megaVertexBuffer && currentVertexBufferOffset > 0)
 		{
-			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			renderer->CopyBuffer(
 				megaVertexBuffer->GetBuffer(),
 				newVertexBuffer->GetBuffer(),
 				currentVertexBufferOffset
@@ -3317,7 +3322,7 @@ namespace Engine
 
 		if (megaIndexBuffer && currentIndexBufferOffset > 0)
 		{
-			SwimEngine::GetInstance()->GetVulkanRenderer()->CopyBuffer(
+			renderer->CopyBuffer(
 				megaIndexBuffer->GetBuffer(),
 				newIndexBuffer->GetBuffer(),
 				currentIndexBufferOffset

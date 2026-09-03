@@ -1,6 +1,6 @@
 #include "PCH.h"
 #include "TexturePool.h"
-#include "Engine/SwimEngine.h"
+#include "Engine/Platform/FileSystem.h"
 #include <filesystem>
 #include <algorithm>
 #include <sstream>
@@ -8,17 +8,21 @@
 namespace Engine
 {
 
-	TexturePool& TexturePool::GetInstance()
+	TexturePool::TexturePool(Swim::Platform::FileSystem& files, TextureRuntimeContext context)
+		: files(&files), runtimeContext(std::move(context))
 	{
-		static TexturePool instance;
-		return instance;
+		if (!runtimeContext.Lifetime)
+		{
+			runtimeContext.Lifetime = std::make_shared<TextureLifetimeTracker>();
+		}
+		lifetimeTracker = runtimeContext.Lifetime;
 	}
 
 	void TexturePool::LoadAllRecursively()
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		const std::filesystem::path textureRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Textures");
+		const std::filesystem::path textureRoot = files->ResolveAssetPath("Textures");
 		for (auto& p : std::filesystem::recursive_directory_iterator(textureRoot))
 		{
 			if (p.is_regular_file())
@@ -33,7 +37,7 @@ namespace Engine
 
 					if (textures.find(key) == textures.end())
 					{
-						textures[key] = std::make_shared<Texture2D>(fullPath);
+						textures[key] = std::make_shared<Texture2D>(runtimeContext, fullPath);
 					}
 				}
 			}
@@ -46,7 +50,7 @@ namespace Engine
 	// scuffed copy and paste job to call before LoadAllRecursively() so we can get an idea of how much space to allocate in our bindless texture array
 	void TexturePool::FetchTextureCount()
 	{
-		const std::filesystem::path textureRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Textures");
+		const std::filesystem::path textureRoot = files->ResolveAssetPath("Textures");
 		for (auto& p : std::filesystem::recursive_directory_iterator(textureRoot))
 		{
 			if (p.is_regular_file())
@@ -75,7 +79,7 @@ namespace Engine
 		}
 
 		// Not found, load now
-		auto tex = std::make_shared<Texture2D>(fileName, generateMips);
+		auto tex = std::make_shared<Texture2D>(runtimeContext, fileName, generateMips);
 		textures[key] = tex;
 		return tex;
 	}
@@ -105,6 +109,7 @@ namespace Engine
 
 		// If no identical texture found, create a new one
 		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
+			runtimeContext,
 			image.width,
 			image.height,
 			image.image.data(),
@@ -138,6 +143,7 @@ namespace Engine
 
 		// Upload texture to GPU (or staging structure)
 		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
+			runtimeContext,
 			image.width,
 			image.height,
 			image.image.data(),
@@ -151,6 +157,11 @@ namespace Engine
 		this->StoreTextureManually(texture, debugName);
 
 		return texture;
+	}
+
+	std::shared_ptr<Texture2D> TexturePool::CreateTransientTexture(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
+	{
+		return std::make_shared<Texture2D>(runtimeContext, width, height, rgbaData, name, generateMips);
 	}
 
 	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)

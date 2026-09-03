@@ -9,7 +9,7 @@
 #include "extensions/PxRigidBodyExt.h"
 
 #include "Engine/Components/Transform.h"
-#include "Rigidbody.h"
+#include "RigidBody.h"
 
 namespace Engine
 {

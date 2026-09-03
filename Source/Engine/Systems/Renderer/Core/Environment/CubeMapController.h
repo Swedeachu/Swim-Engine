@@ -10,7 +10,7 @@ namespace Engine
 
 	public:
 
-		CubeMapController(const std::string& vertPath, const std::string& fragPath);
+		explicit CubeMapController(std::unique_ptr<CubeMap> cubemap);
 
 		// Draw the cubemap for this frame, should be called as the last object to draw
 		void Render(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);

@@ -19,8 +19,8 @@ namespace Engine
 	// On initial awake we will create all the meshes we use to render gizmos with
 	int GizmoSystem::Awake()
 	{
-		MeshPool& mp = MeshPool::GetInstance();
-		MaterialPool& mtp = MaterialPool::GetInstance();
+		MeshPool& mp = activeScene->GetMeshPool();
+		MaterialPool& mtp = activeScene->GetMaterialPool();
 
 		glm::vec3 white = GetDebugColorValue(DebugColor::White);
 
@@ -129,7 +129,7 @@ namespace Engine
 		activeScene->EmplaceBehavior<DragUiBehavior>(gizmoUI);
 
 		// Create buttons parented to gizmoUI
-		Engine::FontPool& fontPool = Engine::FontPool::GetInstance();
+		Engine::FontPool& fontPool = activeScene->GetFontPool();
 		std::shared_ptr<Engine::FontInfo> roboto = fontPool.GetFontInfo("roboto_bold");
 
 		bool buttonRounded = false, buttonStroke = false, buttonFill = true, buttonUseTex = false;
@@ -158,7 +158,7 @@ namespace Engine
 			beh->SetRegularColor(gray);
 
 			activeScene->SetParent(e, gizmoUI);
-			tf.SetScreenSpaceLayerRelativeToParent(true);
+			tf.SetScreenSpaceLayerRelativeToParent(true, activeScene->GetClipSpaceDepthRange());
 
 			// Text
 			entt::entity txt = activeScene->CreateEntity();
@@ -177,7 +177,7 @@ namespace Engine
 
 			activeScene->AddComponent<Engine::TextComponent>(txt, tc);
 			activeScene->SetParent(txt, e);
-			txtTf.SetScreenSpaceLayerRelativeToParent(true);
+			txtTf.SetScreenSpaceLayerRelativeToParent(true, activeScene->GetClipSpaceDepthRange());
 
 			return e;
 		};
@@ -191,7 +191,7 @@ namespace Engine
 
 	void GizmoSystem::Update(double dt)
 	{
-		EngineState state = SwimEngine::GetInstance()->GetEngineState();
+		EngineState state = activeScene ? activeScene->GetEngineState() : EngineState::None;
 		if (!activeScene || !HasAnyEngineStates(state, EngineState::Editing)) return; // only active during editing
 
 		// If nothing is selected, we will call the method to do mouse click ray cast checks for if we are selecting anything in the scene.

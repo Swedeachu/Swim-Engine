@@ -1,5 +1,6 @@
-#include "pch.h"
+#include "PCH.h"
 #include "PrimitiveTest.h"
+#include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
@@ -74,7 +75,7 @@ namespace Game
 		}
 
 		inline void SpawnAt(Engine::Scene* scene, const glm::vec3& pos, const glm::vec3& scl,
-			const glm::quat& rot, decltype(Engine::MaterialPool::GetInstance().RegisterMaterialData("", 0)) matHandle)
+			const glm::quat& rot, std::shared_ptr<Engine::MaterialData> matHandle)
 		{
 			auto e = scene->CreateEntity();
 			Engine::Transform t;
@@ -86,9 +87,9 @@ namespace Game
 		}
 
 		inline void SpawnTripletRow(Engine::Scene* scene, float x0, float stepX, float y, float z,
-			decltype(Engine::MaterialPool::GetInstance().RegisterMaterialData("", 0)) m0,
-			decltype(Engine::MaterialPool::GetInstance().RegisterMaterialData("", 0)) m1,
-			decltype(Engine::MaterialPool::GetInstance().RegisterMaterialData("", 0)) m2)
+			std::shared_ptr<Engine::MaterialData> m0,
+			std::shared_ptr<Engine::MaterialData> m1,
+			std::shared_ptr<Engine::MaterialData> m2)
 		{
 			SpawnAt(scene, { x0 + 0 * stepX, y, z }, { 1,1,1 }, glm::quat(1, 0, 0, 0), m0);
 			SpawnAt(scene, { x0 + 1 * stepX, y, z }, { 1,1,1 }, glm::quat(1, 0, 0, 0), m1);
@@ -206,8 +207,8 @@ namespace Game
 	void TestPrimitives(Engine::Scene* scene)
 	{
 		Pools pools{
-			Engine::MeshPool::GetInstance(),
-			Engine::MaterialPool::GetInstance()
+			scene->GetMeshPool(),
+			scene->GetMaterialPool()
 		};
 
 		AddSpheres(scene, pools);
