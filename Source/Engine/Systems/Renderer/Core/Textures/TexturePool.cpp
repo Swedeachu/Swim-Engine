@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "TexturePool.h"
+#include "Engine/SwimEngine.h"
 #include <filesystem>
 #include <algorithm>
 #include <sstream>
@@ -17,7 +18,7 @@ namespace Engine
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
-		const std::string textureRoot = "Assets\\Textures";
+		const std::filesystem::path textureRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Textures");
 		for (auto& p : std::filesystem::recursive_directory_iterator(textureRoot))
 		{
 			if (p.is_regular_file())
@@ -28,7 +29,7 @@ namespace Engine
 					std::string fullPath = p.path().string();
 
 					// Create the formatted key
-					std::string key = FormatKey(fullPath, textureRoot);
+					std::string key = FormatKey(fullPath, textureRoot.string());
 
 					if (textures.find(key) == textures.end())
 					{
@@ -45,7 +46,7 @@ namespace Engine
 	// scuffed copy and paste job to call before LoadAllRecursively() so we can get an idea of how much space to allocate in our bindless texture array
 	void TexturePool::FetchTextureCount()
 	{
-		const std::string textureRoot = "Assets\\Textures";
+		const std::filesystem::path textureRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Textures");
 		for (auto& p : std::filesystem::recursive_directory_iterator(textureRoot))
 		{
 			if (p.is_regular_file())

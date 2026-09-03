@@ -13,10 +13,6 @@
 #include "Engine/Systems/Renderer/Renderer.h"
 #include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 
-// Forward declare
-struct GLFWwindow; // if we use GLFW in the future for windowing
-// For now, we use Win32. We'll just rely on HWND from the engine.
-
 namespace Engine
 {
 
@@ -25,7 +21,7 @@ namespace Engine
 
 	public:
 
-		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
+		void Create(Swim::Platform::Window& window, uint32_t width, uint32_t height) override;
 
 		// Machine overrides
 		int Awake() override;
@@ -138,7 +134,7 @@ namespace Engine
 	private:
 
 		// Window management
-		HWND windowHandle;
+		Swim::Platform::Window* window = nullptr;
 		uint32_t windowWidth;
 		uint32_t windowHeight;
 

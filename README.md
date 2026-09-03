@@ -1,6 +1,6 @@
 # Swim Engine
 
-This engine is built using **EnTT**, a custom **Scene System**, my own **Windows messaging framework**, and fully supports both **Vulkan** and **OpenGL** rendering backends.  
+This engine is built using **EnTT**, a custom **Scene System**, a first-party cross-platform **Platform/Input foundation**, and currently retains both **Vulkan** and **OpenGL** rendering backends while the renderer is being modernized.
 The project is my life's work, nearly all knowledge in engineering I have goes into this in one way or another.
 <br>
 <br>
@@ -10,17 +10,18 @@ The project is my life's work, nearly all knowledge in engineering I have goes i
 
 ## Building
 
-CMake is the only build-system source of truth. The repository does not commit generated Visual Studio projects or third-party source/binary trees. Dependencies are pinned and resolved into `build/_deps` with CPM.cmake on first configure.
+CMake is the only build-system source of truth. The repository does not commit generated Visual Studio projects or third-party source/binary trees. Dependencies are pinned and resolved with CPM.cmake. Downloaded dependency sources are shared across presets in `.cache/cpm`, while per-configuration build state remains under `build/<preset>`.
 
 ### Prerequisites
 
 - CMake 3.25 or newer.
-- Visual Studio 2022 with the Desktop development with C++ workload.
+- Visual Studio 2022 with the Desktop development with C++ workload for the full Windows runtime.
 - Git and Python 3. Python is used by GLAD and by PhysX's upstream project bootstrap.
-- Ninja for the terminal presets.
-- A Vulkan SDK that provides Vulkan headers/libraries and `dxc.exe` for the existing HLSL-to-SPIR-V shader build.
+- Ninja is optional on Windows: the build scripts discover Ninja from PATH or the Visual Studio CMake tools install and fall back to the Visual Studio generator when necessary.
+- A Vulkan SDK that provides Vulkan headers/libraries and `dxc.exe` for the existing Windows HLSL-to-SPIR-V shader build.
+- On Linux, a C++20 compiler plus Ninja is sufficient for the current Platform/Input foundation build; the legacy renderer/game executable remains Windows-only until the later renderer/RHI phases are completed.
 
-The current `compute-v2` code still contains Win32 platform/input/window APIs, so this CMake migration intentionally preserves Windows x64 as the supported runtime build. Linux support belongs to the platform refactor rather than being faked by build files alone.
+SDL3 is fetched and built by CMake as a pinned CPM dependency; no system-installed SDL3 is required. `Swim::Platform` owns SDL3 privately so SDL headers do not become public engine API.
 
 ### Visual Studio solution
 
@@ -42,20 +43,54 @@ cmake --build --preset windows-vs-debug
 
 The generated executable keeps the historical name `Swim Engine.exe`.
 
-### Ninja + MSVC
+### Clean and soft terminal builds
+
+A **clean build** is a full repository-local generated-state reset. It removes both Windows (or both Linux) configuration trees, the shared `build/.px` PhysX worktree/legacy junction, and the complete `.cache` dependency cache before configuring with dependency fetching enabled. The scripts verify those paths are actually gone before the first dependency is pulled. On Windows a clean build also regenerates `build/windows-vs/SwimEngine.sln` every time, even when Ninja is used for the actual compile. Use a clean build when bootstrapping a checkout, intentionally refreshing every pinned dependency, recovering from dependency/build corruption, or refreshing the Visual Studio solution.
 
 ```powershell
-scripts\build-windows.ps1 -Debug
-scripts\build-windows.ps1
+# Windows Release / Debug
+scripts\build-windows-clean.ps1
+scripts\build-windows-clean.ps1 -Debug
 ```
 
-These use the `windows-debug` and `windows-release` presets respectively.
+```bash
+# Linux Release / Debug foundation builds
+./scripts/build-linux-clean.sh
+./scripts/build-linux-clean.sh --debug
+```
+
+A **soft build** reconfigures with `FETCHCONTENT_FULLY_DISCONNECTED=ON` and reuses the existing `.cache/cpm` dependency sources. On Windows it also refreshes `build/windows-vs/SwimEngine.sln` from the same disconnected cache before running the fast Ninja/MSVC build, so Visual Studio stays synchronized with CMake source/target changes during normal iteration. It will fail rather than downloading a missing dependency, which keeps normal iteration deterministic and fast.
+
+```powershell
+# Windows Release / Debug
+scripts\build-windows-soft.ps1
+scripts\build-windows-soft.ps1 -Debug
+```
+
+```bash
+# Linux Release / Debug foundation builds
+./scripts/build-linux-soft.sh
+./scripts/build-linux-soft.sh --debug
+```
+
+For one-click use from Windows Explorer, matching `.bat` launchers are provided for all four workflows:
+
+```text
+scripts\build-windows-clean.bat
+scripts\build-windows-soft.bat
+scripts\build-linux-clean.bat
+scripts\build-linux-soft.bat
+```
+
+The Windows launchers invoke the PowerShell scripts directly. The Linux launchers invoke the Bash scripts through WSL. All four preserve the underlying build exit code and always pause before closing so success or failure output remains visible. Any normal script arguments can still be appended when launching from a terminal, such as `build-windows-clean.bat -Debug` or `build-linux-clean.bat --debug`.
+
+`build-windows.ps1` remains as a compatibility alias for the Windows soft-build path. The Windows scripts do not require a Developer Command Prompt: they discover standalone or Visual Studio-bundled CMake, locate Visual Studio 2022/Build Tools, import the x64 MSVC environment when using Ninja, discover Visual Studio's bundled Ninja even when it is not on `PATH`, and fall back to the Visual Studio generator if Ninja is unavailable. The helper intentionally uses `DebugBuild` internally rather than PowerShell's reserved/common `Debug` parameter name, while the public scripts retain the convenient `-Debug` switch. A normal Explorer double-click is therefore sufficient once Visual Studio 2022/Build Tools with Desktop development with C++ is installed. Both Windows clean and soft launchers leave `build/windows-vs/SwimEngine.sln` synchronized with the current CMake project. Clean recreates it after a full dependency reset; soft refreshes it offline from the existing validated cache before completing the requested Debug/Release Ninja build.
 
 ### Dependency policy
 
-The previous `Source/Library` copies are replaced by pinned CMake targets for GLM, EnTT, nlohmann/json, stb, tinygltf, Draco, libwebp, zstd, Basis Universal, GLAD, and PhysX. Nothing downloaded by CMake should be committed.
+The previous `Source/Library` copies are replaced by pinned CMake targets for SDL3, GLM, EnTT, nlohmann/json, stb, tinygltf, Draco, libwebp, zstd, Basis Universal, GLAD, and PhysX. Nothing downloaded by CMake should be committed.
 
-PhysX is kept deliberately isolated because its configuration model does not match the application's Debug/Release model. The pinned PhysX 5.6.1 source is bootstrapped as a separate build under `build/_deps`; Swim Engine Debug links the **Checked** static PhysX libraries, while Swim Engine Release links **Release** PhysX. Both are built with the static non-debug MSVC runtime, matching the previous x64 project configuration (`/MT`, `PX_PHYSX_STATIC_LIB`, Debug `_ITERATOR_DEBUG_LEVEL=0`). The CPU-only VS2022 preset is used, so CUDA is not required.
+PhysX is kept deliberately isolated because its configuration model does not match the application's Debug/Release model. The pinned PhysX 5.6.1 checkout in CPM is treated as immutable. At build time Swim creates a short detached Git worktree at `build/.px`; NVIDIA's generated `compiler/` and `bin/` trees live there, keeping both MSBuild paths short and the CPM source cache clean for later soft builds. Swim Engine Debug links the **Checked** static PhysX libraries, while Swim Engine Release links **Release** PhysX. Both are built with the static non-debug MSVC runtime, matching the previous x64 project configuration (`/MT`, `PX_PHYSX_STATIC_LIB`, Debug `_ITERATOR_DEBUG_LEVEL=0`). The CPU-only VS2022 preset is used, so CUDA is not required. CMake audits every Git-backed cached dependency at configure time and fails immediately if a dependency source checkout is dirty instead of allowing that state to surface as a later compile failure.
 
 The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and compute shaders are compiled with DXC to SPIR-V under the executable's `Shaders` directory, and OpenGL shaders plus `Assets` are copied beside the executable after the build.
 
@@ -71,7 +106,7 @@ The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and c
 - **GPU-Driven Rendering:** Vulkan bindless indexed indirect draw system for high-performance instancing.  
 - **Text & SDF Rendering:** MSDF-based text rendering and stylized SDF effects (outline, color, softness).  
 - **Debug Rendering:** Immediate-mode 3D debug mesh rendering.  
-- **Input System:** Keyboard and mouse input handled through Windows message hooks.
+- **Input System:** Platform-neutral keyboard, mouse, text/IME, and gamepad events/state with action-map support; SDL3/native translation is isolated in the Platform implementation.
 
 ---
 

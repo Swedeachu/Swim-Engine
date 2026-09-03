@@ -1,5 +1,15 @@
 #pragma once
 
+#include <array>
+
+#include <cstddef>
+
+#include <vector>
+
+#include <glad/gl.h>
+
+#include <vulkan/vulkan.h>
+
 #include <glm/glm.hpp>
 #include "Engine/Systems/Renderer/Vulkan/Buffers/VulkanGpuInstanceData.h"
 

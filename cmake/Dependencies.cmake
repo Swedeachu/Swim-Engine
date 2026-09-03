@@ -36,6 +36,45 @@ endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+
+# ---------------------------------------------------------------------------
+# Dependency source integrity
+#
+# CPM's source cache is immutable input. Generated code/build output belongs in
+# CMake build trees, never inside a cached Git checkout. A dirty cache is not a
+# harmless warning: it can hide incomplete clones, stale generated files, or a
+# dependency build that modified its own source and then breaks a later soft
+# build. Audit every Git-backed dependency at the end of configure and fail
+# immediately with the exact dirty paths.
+# ---------------------------------------------------------------------------
+function(swim_assert_cached_git_dependency_clean dependency_name source_dir)
+	if(NOT EXISTS "${source_dir}/.git")
+		return()
+	endif()
+
+	find_package(Git REQUIRED)
+	execute_process(
+		COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" status --porcelain --untracked-files=all
+		RESULT_VARIABLE SWIM_DEPENDENCY_STATUS_RESULT
+		OUTPUT_VARIABLE SWIM_DEPENDENCY_STATUS
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		ERROR_VARIABLE SWIM_DEPENDENCY_STATUS_ERROR
+	)
+	if(NOT SWIM_DEPENDENCY_STATUS_RESULT EQUAL 0)
+		message(FATAL_ERROR
+			"Could not verify cached dependency '${dependency_name}': ${SWIM_DEPENDENCY_STATUS_ERROR}"
+		)
+	endif()
+
+	if(NOT SWIM_DEPENDENCY_STATUS STREQUAL "")
+		message(FATAL_ERROR
+			"Cached dependency '${dependency_name}' is dirty. Swim dependency sources are immutable; "
+			"generated files must live in the build tree. Run the clean build to repopulate the cache.\n"
+			"${SWIM_DEPENDENCY_STATUS}"
+		)
+	endif()
+endfunction()
+
 # ---------------------------------------------------------------------------
 # GLM 1.0.0 - matches the previously committed headers.
 # Header-only: do not execute the dependency's own CMake project. This avoids
@@ -76,22 +115,84 @@ add_library(EnTT::EnTT ALIAS SwimEnTT)
 # ---------------------------------------------------------------------------
 # nlohmann/json 3.10.4 - matches the previous Source/Library/json copy.
 #
-# This release's own top-level CMakeLists.txt requests compatibility with CMake
-# versions that modern CMake has dropped. We only consume json.hpp, so fetch
-# the source without adding it as a subproject and provide the normal namespaced
-# header-only target ourselves. This keeps the exact header version while
-# avoiding any dependency on nlohmann/json's obsolete build-system policies.
+# Do not clone the full nlohmann/json repository on Windows. The v3.10.4 repo
+# contains historical benchmark/report paths that can exceed Win32 path limits
+# and leave CPM with a dirty/incomplete checkout even when Git long-path support
+# is enabled. Swim Engine only includes <nlohmann/json.hpp>, so cache the
+# official release single-header artifact instead. The release publishes this
+# exact SHA-256 for json.hpp. This is smaller, deterministic, and makes a
+# corrupted cache fail during configure instead of much later while compiling
+# the engine PCH.
 # ---------------------------------------------------------------------------
-CPMAddPackage(
-	NAME nlohmann_json_source
-	GITHUB_REPOSITORY nlohmann/json
-	GIT_TAG v3.10.4
-	DOWNLOAD_ONLY YES
-	UPDATE_DISCONNECTED YES
+set(SWIM_NLOHMANN_JSON_VERSION "3.10.4")
+set(SWIM_NLOHMANN_JSON_SHA256
+	"c9ac7589260f36ea7016d4d51a6c95809803298c7caec9f55830a0214c5f9140"
 )
+set(SWIM_NLOHMANN_JSON_INCLUDE_ROOT
+	"${CPM_SOURCE_CACHE}/nlohmann_json_source/${SWIM_NLOHMANN_JSON_VERSION}/include"
+)
+set(SWIM_NLOHMANN_JSON_HEADER
+	"${SWIM_NLOHMANN_JSON_INCLUDE_ROOT}/nlohmann/json.hpp"
+)
+
+function(swim_validate_nlohmann_json_header out_valid)
+	set(SWIM_JSON_VALID FALSE)
+	if(EXISTS "${SWIM_NLOHMANN_JSON_HEADER}")
+		file(SHA256 "${SWIM_NLOHMANN_JSON_HEADER}" SWIM_JSON_ACTUAL_SHA256)
+		if("${SWIM_JSON_ACTUAL_SHA256}" STREQUAL "${SWIM_NLOHMANN_JSON_SHA256}")
+			set(SWIM_JSON_VALID TRUE)
+		endif()
+	endif()
+	set(${out_valid} "${SWIM_JSON_VALID}" PARENT_SCOPE)
+endfunction()
+
+swim_validate_nlohmann_json_header(SWIM_NLOHMANN_JSON_VALID)
+if(NOT SWIM_NLOHMANN_JSON_VALID)
+	if(FETCHCONTENT_FULLY_DISCONNECTED)
+		message(FATAL_ERROR
+			"nlohmann/json ${SWIM_NLOHMANN_JSON_VERSION} is not present in the dependency cache or failed its SHA-256 check. "
+			"The soft build is intentionally offline; run the clean build once to populate/repair the cache."
+		)
+	endif()
+
+	file(REMOVE "${SWIM_NLOHMANN_JSON_HEADER}")
+	file(MAKE_DIRECTORY "${SWIM_NLOHMANN_JSON_INCLUDE_ROOT}/nlohmann")
+	set(SWIM_NLOHMANN_JSON_URL
+		"https://github.com/nlohmann/json/releases/download/v${SWIM_NLOHMANN_JSON_VERSION}/json.hpp"
+	)
+	message(STATUS
+		"Downloading nlohmann/json ${SWIM_NLOHMANN_JSON_VERSION} single header to ${SWIM_NLOHMANN_JSON_HEADER}"
+	)
+	file(DOWNLOAD
+		"${SWIM_NLOHMANN_JSON_URL}"
+		"${SWIM_NLOHMANN_JSON_HEADER}"
+		EXPECTED_HASH "SHA256=${SWIM_NLOHMANN_JSON_SHA256}"
+		STATUS SWIM_NLOHMANN_JSON_DOWNLOAD_STATUS
+		TLS_VERIFY ON
+		SHOW_PROGRESS
+	)
+
+	list(GET SWIM_NLOHMANN_JSON_DOWNLOAD_STATUS 0 SWIM_NLOHMANN_JSON_DOWNLOAD_CODE)
+	if(NOT SWIM_NLOHMANN_JSON_DOWNLOAD_CODE EQUAL 0)
+		list(GET SWIM_NLOHMANN_JSON_DOWNLOAD_STATUS 1 SWIM_NLOHMANN_JSON_DOWNLOAD_MESSAGE)
+		file(REMOVE "${SWIM_NLOHMANN_JSON_HEADER}")
+		message(FATAL_ERROR
+			"Failed to download nlohmann/json ${SWIM_NLOHMANN_JSON_VERSION}: ${SWIM_NLOHMANN_JSON_DOWNLOAD_MESSAGE}"
+		)
+	endif()
+
+	swim_validate_nlohmann_json_header(SWIM_NLOHMANN_JSON_VALID)
+	if(NOT SWIM_NLOHMANN_JSON_VALID)
+		file(REMOVE "${SWIM_NLOHMANN_JSON_HEADER}")
+		message(FATAL_ERROR
+			"nlohmann/json ${SWIM_NLOHMANN_JSON_VERSION} download completed but the cached json.hpp failed its SHA-256 check"
+		)
+	endif()
+endif()
+
 add_library(SwimJson INTERFACE)
 target_include_directories(SwimJson SYSTEM INTERFACE
-	"${nlohmann_json_source_SOURCE_DIR}/include"
+	"${SWIM_NLOHMANN_JSON_INCLUDE_ROOT}"
 )
 add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)
 
@@ -409,3 +510,25 @@ glad_add_library(SwimGlad STATIC REPRODUCIBLE LOADER DEBUG
 add_library(glad::glad ALIAS SwimGlad)
 
 include(cmake/PhysX.cmake)
+
+foreach(SWIM_CACHED_GIT_DEPENDENCY IN ITEMS
+	sdl3_source
+	glm_source
+	entt_source
+	stb_source
+	draco_source
+	webp_source
+	zstd_source
+	tinygltf_source
+	basis_source
+	glad_source
+	swim_physx_source
+)
+	set(SWIM_CACHED_GIT_SOURCE_VARIABLE "${SWIM_CACHED_GIT_DEPENDENCY}_SOURCE_DIR")
+	if(DEFINED ${SWIM_CACHED_GIT_SOURCE_VARIABLE})
+		swim_assert_cached_git_dependency_clean(
+			"${SWIM_CACHED_GIT_DEPENDENCY}"
+			"${${SWIM_CACHED_GIT_SOURCE_VARIABLE}}"
+		)
+	endif()
+endforeach()

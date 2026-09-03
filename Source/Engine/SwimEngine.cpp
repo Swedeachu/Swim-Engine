@@ -1,65 +1,61 @@
 #include "PCH.h"
 #include "SwimEngine.h"
-#include <chrono>
+#include "Engine/Platform/MonotonicClock.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/ShaderToyRendererGL.h"
+#include <cstdlib>
+#include <filesystem>
 
 namespace Engine
 {
 
-	// Global engine instance
 	std::shared_ptr<SwimEngine> EngineInstance = nullptr;
 
-	std::wstring getDefaultWindowTitle()
+	std::string getDefaultWindowTitle()
 	{
-		std::wstring suffix;
+		std::string suffix;
 
-		// #if defined(_DEBUG) || !defined(NDEBUG)
 	#if defined(_SWIM_DEBUG)
-		suffix = L" (Debug)";
+		suffix = " (Debug)";
 	#else
-		suffix = L" (Release)";
+		suffix = " (Release)";
 	#endif
 
 		if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::Vulkan)
 		{
-			return L"Swim Engine [Vulkan]" + suffix;
+			return "Swim Engine [Vulkan]" + suffix;
 		}
 		else if constexpr (SwimEngine::CONTEXT == SwimEngine::RenderContext::OpenGL)
 		{
 			if constexpr (SwimEngine::useShaderToyIfOpenGL)
 			{
-				return L"Swim Engine [OpenGL ShaderToy]" + suffix;
+				return "Swim Engine [OpenGL ShaderToy]" + suffix;
 			}
-			return L"Swim Engine [OpenGL]" + suffix;
+			return "Swim Engine [OpenGL]" + suffix;
 		}
 
-		return L"Swim Engine Demo" + suffix;
+		return "Swim Engine Demo" + suffix;
 	}
 
 	SwimEngine::SwimEngine(EngineArgs args)
 	{
-		Create(args.parentHandle, args.state);
+		Create(args.externalParentWindow, args.state);
 	}
 
-	SwimEngine::SwimEngine(HWND parentHandle, EngineState state)
+	SwimEngine::SwimEngine(std::uintptr_t externalParentWindow, EngineState state)
 	{
-		Create(parentHandle, state);
+		Create(externalParentWindow, state);
 	}
 
-	void SwimEngine::Create(HWND parentHandle, EngineState state)
+	void SwimEngine::Create(std::uintptr_t externalParentWindow, EngineState state)
 	{
-		windowClassName = L"SwimEngine";
 		windowTitle = getDefaultWindowTitle();
 		systemManager = std::make_unique<SystemManager>();
-
-		this->parentHandle = parentHandle;
+		platformSystem = std::make_unique<Swim::Platform::PlatformSystem>();
+		this->externalParentWindow = externalParentWindow;
 		this->engineState = state;
-
-		// We will create a child window (WS_CHILD) inside parentHandle if provided,
-		// otherwise we create our normal top-level window.
-		engineWindowHandle = nullptr;
+		ownsWindow = externalParentWindow == 0;
 	}
 
 	std::shared_ptr<SwimEngine> SwimEngine::GetInstance()
@@ -74,8 +70,7 @@ namespace Engine
 
 	SwimEngine::EngineArgs SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
 	{
-		// Default values
-		HWND parentHwnd = nullptr;
+		std::uintptr_t externalParentWindow = 0;
 		EngineState state = DefaultEngineState;
 
 		for (int i = 1; i < argc; ++i)
@@ -84,20 +79,18 @@ namespace Engine
 
 			if (arg == "--parent-hwnd" && i + 1 < argc)
 			{
-				uint64_t val = std::strtoull(argv[++i], nullptr, 10);
-				parentHwnd = reinterpret_cast<HWND>(val);
+				externalParentWindow = static_cast<std::uintptr_t>(std::strtoull(argv[++i], nullptr, 10));
 			}
 			else if (arg == "--state" && i + 1 < argc)
 			{
 				std::string value = argv[++i];
 				EngineState parsed = ParseEngineStateArg(value);
-				// If parsing yields None, keep default Playing; otherwise use parsed
 				if (parsed != EngineState::None)
 				{
 					state = parsed;
 				}
 			}
-			else if (arg.rfind("--state=", 0) == 0) // allow --state=VALUE
+			else if (arg.rfind("--state=", 0) == 0)
 			{
 				std::string value = arg.substr(std::string("--state=").size());
 				EngineState parsed = ParseEngineStateArg(value);
@@ -108,26 +101,21 @@ namespace Engine
 			}
 		}
 
-		return EngineArgs(parentHwnd, state);
+		return EngineArgs(externalParentWindow, state);
 	}
 
 	std::string SwimEngine::GetExecutableDirectory()
 	{
-		char path[MAX_PATH];
-		HMODULE hModule = GetModuleHandleA(NULL);
-		if (hModule == NULL)
+		if (EngineInstance && EngineInstance->platformSystem && EngineInstance->platformSystem->IsInitialized())
 		{
-			throw std::runtime_error("Failed to get module handle.");
+			return EngineInstance->platformSystem->GetFileSystem().GetExecutableDirectory().string();
 		}
-		GetModuleFileNameA(hModule, path, sizeof(path));
-		std::string fullPath(path);
-		size_t pos = fullPath.find_last_of("\\/");
-		return (pos == std::string::npos) ? "" : fullPath.substr(0, pos);
+
+		return std::filesystem::current_path().string();
 	}
 
 	bool SwimEngine::Start()
 	{
-		// Ensure this is being managed by a shared_ptr
 		if (auto self = shared_from_this(); self)
 		{
 			EngineInstance = self;
@@ -137,7 +125,7 @@ namespace Engine
 			throw std::runtime_error("SwimEngine must be managed by a shared_ptr.");
 		}
 
-		if (Awake() == 0) return Init(); // init if zero errors happened
+		if (Awake() == 0) return Init();
 
 		return false;
 	}
@@ -151,391 +139,127 @@ namespace Engine
 
 	bool SwimEngine::MakeWindow()
 	{
-		hInstance = GetModuleHandle(nullptr);
-
-		// Construct and register window class
-		WNDCLASSEX wc = {};
-		wc.cbSize = sizeof(WNDCLASSEX);
-		wc.style = CS_HREDRAW | CS_VREDRAW; // can add CS_DBLCLKS if we want double click messages: | CS_DBLCLKS
-		wc.lpfnWndProc = StaticWindowProc;
-		wc.hInstance = hInstance;
-		wc.hCursor = LoadCursor(0, IDC_ARROW);
-		wc.lpszClassName = windowClassName.c_str();
-
-		RegisterClassEx(&wc);
-
-		// If a parent handle was provided (e.g., editor panel), create a child window inside it
-		if (parentHandle)
-		{
-			RECT r{};
-			GetClientRect(parentHandle, &r);
-			windowWidth = static_cast<unsigned int>(r.right - r.left);
-			windowHeight = static_cast<unsigned int>(r.bottom - r.top);
-
-			engineWindowHandle = CreateWindowEx(
-				0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
-				windowClassName.c_str(), // class name
-				windowTitle.c_str(), // window title
-				WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_TABSTOP, // child window that fills the parent panel
-				0, // initial horizontal position of the window
-				0, // initial vertical position of the window
-				windowWidth, // width
-				windowHeight, // height
-				parentHandle, // window parent (editor panel)
-				nullptr, // window child (none)
-				hInstance, // window instance handle
-				this // Set the GWLP_USERDATA to the Engine instance
-			);
-
-			// error if the window isn't made correctly
-			if (engineWindowHandle == nullptr || !&wc)
-			{
-				return false;
-			}
-
-			// Attach input queues so cross-process focus is allowed
-			DWORD parentThreadId = GetWindowThreadProcessId(parentHandle, nullptr);
-			DWORD myThreadId = GetCurrentThreadId();
-			AttachThreadInput(myThreadId, parentThreadId, TRUE);
-
-			// Also attach to the foreground window's thread (defensive; helps when focus is elsewhere)
-			HWND fg = GetForegroundWindow();
-			if (fg)
-			{
-				DWORD fgThreadId = GetWindowThreadProcessId(fg, nullptr);
-				if (fgThreadId && fgThreadId != myThreadId)
-				{
-					AttachThreadInput(myThreadId, fgThreadId, TRUE);
-				}
-			}
-
-			// bring to top and set focus (do NOT use SWP_NOACTIVATE here)
-			SetWindowPos(engineWindowHandle, HWND_TOP, 0, 0, windowWidth, windowHeight, 0);
-			SetFocus(engineWindowHandle);
-
-			minimized = false;
-			needResize = true; // trigger a first resize into renderer on Init()
-			return true;
-		}
-
-		// Create top-level window (normal standalone mode)
-		engineWindowHandle = CreateWindowEx(
-			0, // window style dword enum (no idea what this is for, I assume for setting if the window has minimize and expand options?)
-			windowClassName.c_str(), // class name
-			windowTitle.c_str(), // window title
-			WS_OVERLAPPEDWINDOW, // window style (will be important for full screen and tabbed)
-			CW_USEDEFAULT, // initial horizontal position of the window
-			CW_USEDEFAULT, // initial vertical position of the window
-			windowWidth, // width
-			windowHeight, // height
-			nullptr, // window parent (none)
-			nullptr, // window child (none)
-			hInstance, // window instance handle
-			this // Set the GWLP_USERDATA to the Engine instance
-		);
-
-		// error if the window isn't made correctly
-		if (engineWindowHandle == nullptr || !&wc)
+		Swim::Platform::PlatformDesc platformDesc{};
+		platformDesc.OrganizationName = "Swim Services";
+		platformDesc.ApplicationName = "Swim Engine";
+		if (!platformSystem->Initialize(platformDesc))
 		{
 			return false;
 		}
 
-		// Show and update the window
-		ShowWindow(engineWindowHandle, SW_SHOW);
-		UpdateWindow(engineWindowHandle);
-
-		return true;
-	}
-
-	LRESULT CALLBACK SwimEngine::StaticWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-	{
-		// Retrieve the pointer to the Engine instance
-		SwimEngine* enginePtr = reinterpret_cast<SwimEngine*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
-
-		if (uMsg == WM_CREATE)
-		{
-			// Set the GWLP_USERDATA value to the SwimEngine instance when the window is created
-			CREATESTRUCT* createStruct = reinterpret_cast<CREATESTRUCT*>(lParam);
-			enginePtr = reinterpret_cast<SwimEngine*>(createStruct->lpCreateParams);
-			SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(enginePtr));
-		}
-
-		// Guard against early messages before GWLP_USERDATA is set
-		if (enginePtr == nullptr)
-		{
-			return DefWindowProc(hwnd, uMsg, wParam, lParam);
-		}
-
-		// Call the non-static member function for window procedure
-		return enginePtr->WindowProc(hwnd, uMsg, wParam, lParam);
-	}
-
-	LRESULT CALLBACK SwimEngine::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-	{
-		/*
-		if (ImGui_ImplWin32_WndProcHandler(hwnd, uMsg, wParam, lParam))
-		{
-				return true;
-		}
-		*/
-
-		// Handle WM_COPYDATA regardless of initialization state
-		if (uMsg == WM_COPYDATA)
-		{
-			auto cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
-			if (cds && cds->lpData && cds->cbData >= 2) // at least 1 wchar + NUL
-			{
-				// Interpret payload as UTF-16 (wide). cbData is in bytes.
-				const wchar_t* wbuf = static_cast<const wchar_t*>(cds->lpData);
-				size_t wcharCount = static_cast<size_t>(cds->cbData / sizeof(wchar_t));
-
-				// Strip a trailing NUL if present
-				if (wcharCount > 0 && wbuf[wcharCount - 1] == L'\0')
-				{
-					--wcharCount;
-				}
-
-				std::wstring msg(wbuf, wcharCount);
-				OnEditorCommand(msg);
-			}
-			return 0;
-		}
-
-		// SwimEngine class + input manager must be initialized first to accept messages
-		if (this == nullptr || inputManager.get() == nullptr)
-		{
-			return DefWindowProc(hwnd, uMsg, wParam, lParam);
-		}
-
-		// We do the same check for the renderer we are using
-
-		bool renderer = false;
+		Swim::Platform::WindowDesc windowDesc{};
+		windowDesc.Title = windowTitle;
+		windowDesc.Width = windowWidth;
+		windowDesc.Height = windowHeight;
+		windowDesc.Resizable = true;
+		windowDesc.HighPixelDensity = true;
 
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
-			if (vulkanRenderer) renderer = vulkanRenderer.get() != nullptr;
+			windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::Vulkan;
 		}
 		else if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
-			if (openglRenderer) renderer = openglRenderer.get() != nullptr;
+			windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::OpenGL;
 		}
 
-		// If not set up, don't accept the message
-		if (!renderer)
+		if (externalParentWindow != 0)
 		{
-			return DefWindowProc(hwnd, uMsg, wParam, lParam);
+			windowDesc.ExternalParent = {
+				Swim::Platform::NativeWindowType::Win32,
+				reinterpret_cast<void*>(externalParentWindow),
+				nullptr
+			};
 		}
 
-		switch (uMsg)
+		engineWindow = platformSystem->GetWindowSystem().Create(windowDesc);
+		if (!engineWindow)
 		{
-			// Ensure we receive Tab/Arrows/Chars like a dialog wants
-			case WM_GETDLGCODE:
-			{
-				return DLGC_WANTALLKEYS | DLGC_WANTARROWS | DLGC_WANTCHARS | DLGC_WANTTAB;
-			}
+			return false;
+		}
 
-			// click to focus (for keyboard input)
-			case WM_LBUTTONDOWN:
-			case WM_RBUTTONDOWN:
-			case WM_MBUTTONDOWN:
-			case WM_XBUTTONDOWN:
-			{
-				SetFocus(hwnd);
-				// optional: SetCapture(hwnd); // useful for drags; uncomment if desired
-				inputManager->InputMessage(uMsg, wParam);
-				return 0;
-			}
+		engineWindow->Show();
+		UpdateWindowSize();
 
-			case WM_LBUTTONUP:
-			case WM_RBUTTONUP:
-			case WM_MBUTTONUP:
-			case WM_XBUTTONUP:
+		if (externalParentWindow != 0)
+		{
+			editorIpcBridge = std::make_unique<Swim::Platform::EditorIpcBridge>();
+			Swim::Platform::NativeWindowHandle editorWindow{
+				Swim::Platform::NativeWindowType::Win32,
+				reinterpret_cast<void*>(externalParentWindow),
+				nullptr
+			};
+			editorIpcBridge->Initialize(*engineWindow, editorWindow, [this](std::string_view message)
 			{
-				// optional: if (GetCapture() == hwnd) ReleaseCapture();
-				inputManager->InputMessage(uMsg, wParam);
-				return 0;
-			}
+				OnEditorCommand(message);
+			});
+		}
 
-			case WM_MOUSEMOVE:
-			case WM_MOUSEWHEEL:
-			case WM_MOUSEHWHEEL:
-			{
-				inputManager->InputMessage(uMsg, wParam);
-				return 0;
-			}
+		minimized = engineWindow->IsMinimized();
+		needResize = true;
+		return true;
+	}
 
-			case WM_KEYDOWN:
-			case WM_KEYUP:
-			case WM_SYSKEYDOWN:
-			case WM_SYSKEYUP:
-			case WM_CHAR:
-			{
-				inputManager->InputMessage(uMsg, wParam);
-				return 0;
-			}
+	void SwimEngine::HandleWindowEvent(const Swim::Platform::WindowEvent& event)
+	{
+		if (engineWindow && event.Window != 0 && event.Window != engineWindow->GetId())
+		{
+			return;
+		}
 
-			// closed the window or process from a high user level
-			case WM_DESTROY:
-			{
+		if (inputManager)
+		{
+			inputManager->ProcessWindowEvent(event);
+		}
+
+		using Swim::Platform::WindowEventType;
+		switch (event.Type)
+		{
+			case WindowEventType::CloseRequested:
 				running = false;
-				PostQuitMessage(0);
-				return 0;
-			}
-
-			// dragging the window around
-			case WM_MOVE:
-			{
-				InvalidateRect(engineWindowHandle, NULL, FALSE); // forces a redraw in traditional Microsoft applications, idk about Vulkan
 				break;
-			}
 
-			// dragging or resizing windows weirdness
-			case WM_ENTERSIZEMOVE:
-			{
-				resizing = true;
+			case WindowEventType::Minimized:
+				minimized = true;
 				break;
-			}
 
-			case WM_SIZE:
-			{
-				// Always update the window size fields first
+			case WindowEventType::Restored:
+			case WindowEventType::Maximized:
+				minimized = false;
 				UpdateWindowSize();
-
-				// If minimized, mark it. If restored/maximized, unmark it.
-				if (wParam == SIZE_MINIMIZED)
-				{
-					minimized = true;
-				}
-				else if (wParam == SIZE_RESTORED || wParam == SIZE_MAXIMIZED)
-				{
-					minimized = false;
-				}
-
-				// If the window dimensions are valid and we are not resizing, flag the need for a resize
-				if (windowWidth > 0 && windowHeight > 0 && !resizing)
-				{
-					needResize = true;
-				}
-
+				needResize = true;
 				break;
-			}
 
-			case WM_EXITSIZEMOVE:
-			{
-				// The user just finished dragging the window
-				resizing = false;
-
-				// Update the final window dimension after drag
+			case WindowEventType::Resized:
+			case WindowEventType::PixelSizeChanged:
+			case WindowEventType::DpiScaleChanged:
 				UpdateWindowSize();
-
 				if (windowWidth > 0 && windowHeight > 0)
 				{
-					// Mark that we need a resize
 					needResize = true;
 				}
-
 				break;
-			}
-
-			case WM_SETFOCUS:
-			{
-				// Window gained focus
-				return 0;
-			}
-
-			case WM_KILLFOCUS:
-			{
-				// Window lost focus
-				return 0;
-			}
 
 			default:
-			{
-				// Otherwise pass any input to the input manager (we assume any other unhandled message is input)
-				inputManager->InputMessage(uMsg, wParam);
-			}
+				break;
 		}
-
-		return DefWindowProc(hwnd, uMsg, wParam, lParam);
 	}
 
-	std::string WStringToUTF8(const std::wstring& ws)
+	void SwimEngine::OnEditorCommand(std::string_view msg)
 	{
-		if (ws.empty()) return std::string();
-
-		// Query length
-		int len = WideCharToMultiByte(
-			CP_UTF8, 0,
-			ws.data(), static_cast<int>(ws.size()),
-			nullptr, 0, nullptr, nullptr
-		);
-
-		if (len <= 0)
+		if (!commandSystem)
 		{
-			return std::string();
+			return;
 		}
 
-		std::string out;
-		out.resize(static_cast<size_t>(len));
-
-		// Convert
-		int written = WideCharToMultiByte(
-			CP_UTF8, 0,
-			ws.data(), static_cast<int>(ws.size()),
-			out.data(), len, nullptr, nullptr
-		);
-
-		if (written != len)
-		{
-			// Shouldn't happen; truncate if it does
-			out.resize(static_cast<size_t>(std::max(0, written)));
-		}
-
-		return out;
-	}
-
-	void SwimEngine::OnEditorCommand(const std::wstring& msg)
-	{
-		const std::string msgUtf8 = WStringToUTF8(msg);
-
-		const bool ok = commandSystem->ParseAndDispatch(msgUtf8);
-		if (ok)
-		{
-			SendEditorMessage(L"(Recv [200]): " + msg); // ok
-		}
-		else
-		{
-			SendEditorMessage(L"(Recv [400]): " + msg); // incorrect request, either not a command or was just a hack message with no logic to execute beyond a pong
-		}
+		const std::string command(msg);
+		const bool ok = commandSystem->ParseAndDispatch(command);
+		SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + command);
 	}
 
 	bool SwimEngine::SendEditorMessage(const std::string& msg, std::uintptr_t channel)
 	{
-		if (!parentHandle)
-		{
-			return false;
-		}
-
-		return SendEditorMessage(std::wstring(msg.begin(), msg.end()), channel);
-	}
-
-	// Maybe make this take a regular string instead of wide, and then package as wide for WM_COPYDATA 
-	bool SwimEngine::SendEditorMessage(const std::wstring& msg, std::uintptr_t channel)
-	{
-		if (!parentHandle)
-		{
-			return false;
-		}
-
-		COPYDATASTRUCT cds{};
-		cds.dwData = static_cast<ULONG_PTR>(channel);
-		cds.cbData = static_cast<DWORD>((msg.size() + 1) * sizeof(wchar_t)); // include NUL
-		cds.lpData = (PVOID)msg.c_str();
-
-		// Per Win32 rules, WM_COPYDATA must be SendMessage (synchronous).
-		LRESULT handled = SendMessageW(parentHandle, WM_COPYDATA, reinterpret_cast<WPARAM>(engineWindowHandle), reinterpret_cast<LPARAM>(&cds));
-
-		return handled != 0;
+		return editorIpcBridge && editorIpcBridge->Send(msg, channel);
 	}
 
 	Renderer& SwimEngine::GetRenderer()
@@ -544,7 +268,7 @@ namespace Engine
 		{
 			return *openglRenderer;
 		}
-		else if constexpr (CONTEXT == RenderContext::Vulkan)
+		else
 		{
 			return *vulkanRenderer;
 		}
@@ -552,73 +276,71 @@ namespace Engine
 
 	int SwimEngine::Init()
 	{
-		// Add systems to the SystemManager
-		inputManager = systemManager->AddSystem<InputManager>("InputManager"); // Listen to input before a scene update that frame, so goes first.
-		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem"); // Hardly matters because commands aren't frame/tick based.
-		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem"); // Controls basically everything
+		inputManager = systemManager->AddSystem<InputManager>("InputManager");
+		commandSystem = systemManager->AddSystem<CommandSystem>("CommandSystem");
+		sceneSystem = systemManager->AddSystem<SceneSystem>("SceneSystem");
+		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem");
 
-		// We have physics before the scene system for init and shut down order reasons.
-		// This is maybe a bad thing to do (or it might not matter).
-		physicsSystem = systemManager->AddSystem<PhysicsSystem>("PhysicsSystem"); 
-
-		// Then the renderer is the last system each frame to update to draw everything finalized for that frame.
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{
 			vulkanRenderer = systemManager->AddSystem<VulkanRenderer>("Renderer");
-			vulkanRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
+			vulkanRenderer->Create(*engineWindow, windowWidth, windowHeight);
 		}
 		else if constexpr (CONTEXT == RenderContext::OpenGL)
 		{
-			// determine which open gl renderer we are using (gross)
 			if constexpr (useShaderToyIfOpenGL)
 			{
 				openglRenderer = systemManager->AddSystem<ShaderToyRendererGL>("Renderer");
-				openglRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
+				openglRenderer->Create(*engineWindow, windowWidth, windowHeight);
 			}
 			else
 			{
 				openglRenderer = systemManager->AddSystem<OpenGLRenderer>("Renderer");
-				openglRenderer->Create(engineWindowHandle, windowWidth, windowHeight);
+				openglRenderer->Create(*engineWindow, windowWidth, windowHeight);
 			}
 		}
 
-		// Camera system doesn't really matter its order since it is more just a camera data holder for now that the renderer and scene owned behaviors talk to when needed.
 		cameraSystem = systemManager->AddSystem<CameraSystem>("CameraSystem");
 
-		// Call Awake and Init on all systems
 		if (systemManager->Awake() != 0)
 		{
-			return -1; // Error during system initialization
+			return -1;
 		}
 
 		if (systemManager->Init() != 0)
 		{
-			return -1; // Error during system initialization
+			return -1;
 		}
 
-		RegisterVanillaEngineCommands();
+		Swim::Platform::WindowEvent initialWindowEvent{};
+		initialWindowEvent.Window = engineWindow->GetId();
+		initialWindowEvent.LogicalSize = engineWindow->GetLogicalSize();
+		initialWindowEvent.PixelSize = engineWindow->GetPixelSize();
+		initialWindowEvent.DpiScale = engineWindow->GetDpiScale();
+		initialWindowEvent.Type = engineWindow->IsFocused()
+			? Swim::Platform::WindowEventType::FocusGained
+			: Swim::Platform::WindowEventType::FocusLost;
+		inputManager->ProcessWindowEvent(initialWindowEvent);
 
+		RegisterVanillaEngineCommands();
 		return 0;
 	}
 
-	// The editor process will call all these
 	void SwimEngine::RegisterVanillaEngineCommands()
 	{
-		// Capture a raw pointer (valid for engine lifetime)  no ref-captures to locals.
 		SwimEngine* self = this;
 
 		auto summarize = [](SwimEngine* e)
 		{
-			std::wstring s = L"[Engine] State ->";
-			if (HasAnyEngineStates(e->engineState, EngineState::Playing)) s += L" Playing";
-			if (HasAnyEngineStates(e->engineState, EngineState::Paused))  s += L" Paused";
-			if (HasAnyEngineStates(e->engineState, EngineState::Editing)) s += L" Editing";
-			if (HasAnyEngineStates(e->engineState, EngineState::Stopped)) s += L" Stopped";
-			if (!HasAnyEngineStates(e->engineState, EngineState::All))    s += L" None";
+			std::string s = "[Engine] State ->";
+			if (HasAnyEngineStates(e->engineState, EngineState::Playing)) s += " Playing";
+			if (HasAnyEngineStates(e->engineState, EngineState::Paused))  s += " Paused";
+			if (HasAnyEngineStates(e->engineState, EngineState::Editing)) s += " Editing";
+			if (HasAnyEngineStates(e->engineState, EngineState::Stopped)) s += " Stopped";
+			if (!HasAnyEngineStates(e->engineState, EngineState::All))    s += " None";
 			e->SendEditorMessage(s);
 		};
 
-		// play: ensure not Stopped, then set Playing
 		commandSystem->RegisterRaw("play", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Stopped;
@@ -626,25 +348,18 @@ namespace Engine
 			summarize(self);
 		});
 
-		// The flaw with pausing is our engine state will be (playing | paused)
-		// And behaviors will keep running since it is got the play mode flag, we need to somehow hack fix this.
-		// We don't want to drop the play mode flag, since we are paused while playing and we will resume to go back to playing.
-		// We hack fix this with a very specific flow in BehaviorComponents::CanExecute()
-		// pause: set Paused (don't touch other flags)
 		commandSystem->RegisterRaw("pause", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState |= EngineState::Paused;
 			summarize(self);
 		});
 
-		// resume: clear Paused only
 		commandSystem->RegisterRaw("resume", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Paused;
 			summarize(self);
 		});
 
-		// stop: set Stopped, clear Playing (C# handles resume/edit next)
 		commandSystem->RegisterRaw("stop", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Playing;
@@ -652,24 +367,21 @@ namespace Engine
 			summarize(self);
 		});
 
-		// edit: set Editing
 		commandSystem->RegisterRaw("edit", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState |= EngineState::Editing;
 			summarize(self);
 		});
 
-		// game: clear Editing (doesn't force Playing)
 		commandSystem->RegisterRaw("game", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Editing;
 			summarize(self);
 		});
 
-		// restart: stub (ignored for now)
 		commandSystem->RegisterRaw("restart", [self](const std::vector<std::string>&)
 		{
-			self->SendEditorMessage(L"[Engine] Restart requested (not implemented)");
+			self->SendEditorMessage("[Engine] Restart requested (not implemented)");
 		});
 	}
 
@@ -685,75 +397,62 @@ namespace Engine
 
 	int SwimEngine::HeartBeat()
 	{
-		MSG msg = {};
 		running = true;
 
-		// Timing variables
-		auto previousTime = std::chrono::high_resolution_clock::now();
+		auto previousTime = Swim::Platform::MonotonicClock::Now();
 		double accumulatedTime = 0.0;
-		double fixedTimeStep = 1.0 / tickRate; // e.g., 60 ticks per second
-		unsigned int tickCounter = 1;          // Start tick counter at 1
-
-		// Maximum allowable delta time (e.g., 5x the fixed time step)
+		double fixedTimeStep = 1.0 / tickRate;
+		unsigned int tickCounter = 1;
 		const double maxDeltaTime = 5.0 * fixedTimeStep;
 
 		while (running)
 		{
-			// Handle window messages
-			while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-			{
-				TranslateMessage(&msg);
-				DispatchMessage(&msg);
-
-				if (msg.message == WM_QUIT)
+			platformSystem->PumpEvents(
+				[this](const Swim::Platform::WindowEvent& event)
 				{
-					running = false;
-					break;
+					HandleWindowEvent(event);
+				},
+				[this](const Swim::Platform::InputEvent& event)
+				{
+					if (!inputManager || !engineWindow || (event.Window != 0 && event.Window != engineWindow->GetId()))
+					{
+						return;
+					}
+					inputManager->ProcessInputEvent(event);
 				}
+			);
+
+			if (!running)
+			{
+				break;
 			}
 
-			// Calculate delta time
-			auto currentTime = std::chrono::high_resolution_clock::now();
-			std::chrono::duration<double> elapsed = currentTime - previousTime;
+			auto currentTime = Swim::Platform::MonotonicClock::Now();
+			delta = Swim::Platform::MonotonicClock::SecondsBetween(previousTime, currentTime);
 			previousTime = currentTime;
 
-			delta = elapsed.count();
-
-			// Safety check: If delta time exceeds maxDeltaTime, log and skip the frame
-			// This is most often caused when dragging around the window or doing something of that nature to suspend the process temporarily
-			// Detatched multi threading would make that not happen for most cases though.
 			if (delta > maxDeltaTime)
 			{
 				std::cerr << "Frame skipped due to excessive delta time: " << delta << " seconds.\n";
-				accumulatedTime = 0.0; // Reset accumulated time to avoid cascading lag effects
+				accumulatedTime = 0.0;
 				continue;
 			}
 
 			accumulatedTime += delta;
-
-			// Start a new render frame dirty epoch before any fixed or variable-step work runs.
-			// This preserves transform changes from fixed updates, scene updates, and interpolation
-			// until the renderer consumes them later in the same frame.
 			Transform::BeginFrameDirtyTracking();
 
-			// Perform fixed updates as needed
 			while (accumulatedTime >= fixedTimeStep)
 			{
-				FixedUpdate(tickCounter); // Pass the current tick index
+				FixedUpdate(tickCounter);
 				accumulatedTime -= fixedTimeStep;
-
-				// Increment the tick counter, resetting to 1 after tickRate
 				tickCounter++;
 				if (tickCounter > tickRate)
 				{
-					tickCounter = 1; // Reset to 1 for the next second
+					tickCounter = 1;
 				}
 			}
 
-			// Perform frame updates
 			Update(delta);
-
-			// Frame counting
 			++totalFrames;
 		}
 
@@ -764,16 +463,19 @@ namespace Engine
 	{
 		static double timeAccumulator = 0.0;
 		static int frameCounter = 0;
-		static double dfps = 0.0;
 
-		// If embedded into an external window (editor panel), we won't receive WM_SIZE here.
-		// So keep our cached size in sync each frame.
-		if (!ownsWindow && engineWindowHandle)
+		if (engineWindow && engineWindow->IsExternal())
 		{
+			const unsigned int previousWidth = windowWidth;
+			const unsigned int previousHeight = windowHeight;
+			engineWindow->SyncExternalParentSize();
 			UpdateWindowSize();
+			if (previousWidth != windowWidth || previousHeight != windowHeight)
+			{
+				needResize = true;
+			}
 		}
 
-		// First sync any updates that happened to the window to the renderer (if not minimized or needing a resize)
 		if (!minimized && needResize)
 		{
 			if constexpr (CONTEXT == RenderContext::Vulkan)
@@ -790,27 +492,18 @@ namespace Engine
 
 		systemManager->Update(dt);
 
-		// --- FPS Update Logic on Window Title ---
 		timeAccumulator += dt;
 		frameCounter++;
 
 		if (timeAccumulator >= 1.0)
 		{
-			dfps = static_cast<double>(frameCounter) / timeAccumulator;
-			fps = static_cast<int>(dfps); // save class field
+			fps = static_cast<int>(static_cast<double>(frameCounter) / timeAccumulator);
 
-			if (ownsWindow && engineWindowHandle)
+			if (ownsWindow && engineWindow)
 			{
-				// Format new title: "Swim Engine [Vulkan] | 240 FPS"
-				// Game developer might want the text to be different instead of saying Swim Engine, we can make this possible later
-				std::wstring baseTitle = getDefaultWindowTitle();
-				std::wstring fullTitle = baseTitle + L" | " + std::to_wstring(fps) + L" FPS";
-
-				// Set the updated title
-				SetWindowTextW(engineWindowHandle, fullTitle.c_str());
+				engineWindow->SetTitle(getDefaultWindowTitle() + " | " + std::to_string(fps) + " FPS");
 			}
 
-			// Reset for the next second
 			timeAccumulator = 0.0;
 			frameCounter = 0;
 		}
@@ -823,7 +516,6 @@ namespace Engine
 
 	void SwimEngine::FixedUpdate(unsigned int tickThisSecond)
 	{
-		// Make sure physics system is always in line with our tick rate timing
 		float time = 1.0f / tickRate;
 		if (physicsSystem)
 		{
@@ -835,15 +527,30 @@ namespace Engine
 
 	int SwimEngine::Exit()
 	{
-		return systemManager->Exit();
+		const int result = systemManager ? systemManager->Exit() : 0;
+		if (editorIpcBridge)
+		{
+			editorIpcBridge->Shutdown();
+			editorIpcBridge.reset();
+		}
+		engineWindow.reset();
+		if (platformSystem)
+		{
+			platformSystem->Shutdown();
+		}
+		return result;
 	}
 
 	void SwimEngine::UpdateWindowSize()
 	{
-		RECT rect;
-		GetClientRect(engineWindowHandle, &rect);
-		windowWidth = rect.right - rect.left;
-		windowHeight = rect.bottom - rect.top;
+		if (!engineWindow)
+		{
+			return;
+		}
+
+		const Swim::Platform::Extent2D size = engineWindow->GetPixelSize();
+		windowWidth = size.Width;
+		windowHeight = size.Height;
 
 		if constexpr (CONTEXT == RenderContext::Vulkan)
 		{

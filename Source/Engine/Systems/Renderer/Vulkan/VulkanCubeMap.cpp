@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include <filesystem>
 #include "VulkanCubeMap.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
@@ -543,13 +544,12 @@ namespace Engine
 
 	std::vector<char> VulkanCubeMap::ReadFile(const std::string& filename)
 	{
-		std::string exeDir = SwimEngine::GetExecutableDirectory();
-		std::string fullPath = exeDir + "\\" + filename;
+		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(filename);
 
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to load shader: " + fullPath);
+			throw std::runtime_error("Failed to load shader: " + fullPath.string());
 		}
 
 		size_t fileSize = static_cast<size_t>(file.tellg());

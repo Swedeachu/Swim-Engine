@@ -1,11 +1,17 @@
 #pragma once
 
+#if defined(_WIN32)
+	#ifndef VK_USE_PLATFORM_WIN32_KHR
+		#define VK_USE_PLATFORM_WIN32_KHR
+	#endif
+	#include "Engine/Platform/Internal/WindowsApi.h"
+#endif
+
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <set>
 #include <string>
 #include <optional>
-#include <windows.h>
 
 namespace Engine
 {

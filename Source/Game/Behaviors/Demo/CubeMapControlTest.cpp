@@ -45,13 +45,13 @@ namespace Game
 		UpdateRotation(dt, cubemapController);
 
 		// Toggle on the sky with C key
-		if (input->IsKeyTriggered('C'))
+		if (input->IsKeyTriggered(Swim::Platform::KeyCode::C))
 		{
 			cubemapController->SetEnabled(!cubemapController->IsEnabled());
 		}
 
 		// Flip around the face ordering
-		if (input->IsKeyTriggered('V'))
+		if (input->IsKeyTriggered(Swim::Platform::KeyCode::V))
 		{
 			using Faces = std::array<int, 6>;
 			flip = !flip;
@@ -61,7 +61,7 @@ namespace Game
 
 		// Toggle the cubemap style
 		/* Abandoned feature for now
-		if (input->IsKeyTriggered('X'))
+		if (input->IsKeyTriggered(Swim::Platform::KeyCode::X))
 		{
 			Engine::TexturePool& texturePool = Engine::TexturePool::GetInstance();
 
@@ -97,11 +97,11 @@ namespace Game
 		}
 
 		// Adjust rotation speed with F, T, H
-		if (input->IsKeyDown('F'))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::F))
 			rotationSpeed += 0.01f;
-		else if (input->IsKeyDown('T'))
+		else if (input->IsKeyDown(Swim::Platform::KeyCode::T))
 			rotationSpeed -= 0.01f;
-		else if (input->IsKeyTriggered('H'))
+		else if (input->IsKeyTriggered(Swim::Platform::KeyCode::H))
 			rotationSpeed = 0.5f;
 
 		// Get the current rotation from the cubemap

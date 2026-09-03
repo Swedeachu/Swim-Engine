@@ -2,13 +2,7 @@ param(
     [switch]$Debug
 )
 
-$ErrorActionPreference = "Stop"
-$Preset = if ($Debug) { "windows-debug" } else { "windows-release" }
-
-cmake --preset $Preset
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
-}
-
-cmake --build --preset $Preset
+# Backward-compatible entry point. Normal iterative builds are soft builds;
+# use build-windows-clean.ps1 when dependencies/build state must be repulled.
+& (Join-Path $PSScriptRoot "build-windows-soft.ps1") -Debug:$Debug
 exit $LASTEXITCODE

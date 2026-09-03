@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+
+#include <glad/gl.h>
+
 namespace Engine
 {
 

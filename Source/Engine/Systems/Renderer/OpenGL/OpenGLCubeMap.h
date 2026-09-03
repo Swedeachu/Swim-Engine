@@ -1,5 +1,7 @@
 #pragma once
 
+#include <glad/gl.h>
+
 #include "Engine/Systems/Renderer/Core/Environment/CubeMap.h"
 
 namespace Engine

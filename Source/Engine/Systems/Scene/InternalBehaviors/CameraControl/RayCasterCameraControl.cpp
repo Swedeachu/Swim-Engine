@@ -11,12 +11,12 @@ namespace Engine
 
 	void RayCasterCameraControl::Update(double dt)
 	{
-		bool leftClicked = input->IsKeyTriggered(VK_LBUTTON);
-		// bool rightClicked = input->IsKeyTriggered(VK_RBUTTON);
-		// bool leftDown = input->IsKeyDown(VK_LBUTTON);
-		// bool rightDown = input->IsKeyDown(VK_RBUTTON);
+		bool leftClicked = input->IsMouseButtonTriggered(Swim::Platform::MouseButton::Left);
+		// bool rightClicked = input->IsMouseButtonTriggered(Swim::Platform::MouseButton::Right);
+		// bool leftDown = input->IsMouseButtonDown(Swim::Platform::MouseButton::Left);
+		// bool rightDown = input->IsMouseButtonDown(Swim::Platform::MouseButton::Right);
 
-		glm::vec2 mousePos = input->GetMousePosition(false);
+		glm::vec2 mousePos = input->GetMousePosition();
 		Engine::Ray ray = scene->ScreenPointToRay(mousePos);
 
 		// Left click to try and click an object in the scene
@@ -46,13 +46,13 @@ namespace Engine
 		}
 
 		// R to toggle ray caching for debug view
-		if (input->IsKeyTriggered('R'))
+		if (input->IsKeyTriggered(Swim::Platform::KeyCode::R))
 		{
 			shouldCache = !shouldCache;
 		}
 
 		// Q to clear cached rays
-		if (input->IsKeyTriggered('Q'))
+		if (input->IsKeyTriggered(Swim::Platform::KeyCode::Q))
 		{
 			cachedRays.clear();
 			hits.clear();

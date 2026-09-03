@@ -36,7 +36,20 @@ REQUIRED_CMAKE_FILES = (
     "CMakePresets.json",
     "cmake/get_cpm.cmake",
     "cmake/Dependencies.cmake",
+    "cmake/PlatformDependencies.cmake",
     "cmake/PhysX.cmake",
+)
+
+REQUIRED_BUILD_SCRIPTS = (
+    "scripts/build-windows-clean.ps1",
+    "scripts/build-windows-soft.ps1",
+    "scripts/build-linux-clean.sh",
+    "scripts/build-linux-soft.sh",
+    "scripts/build-windows-clean.bat",
+    "scripts/build-windows-soft.bat",
+    "scripts/build-linux-clean.bat",
+    "scripts/build-linux-soft.bat",
+    "scripts/windows-build-common.ps1",
 )
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inl"}
@@ -70,6 +83,182 @@ def check_required_cmake_files(failures: list[str]) -> None:
     for relative_path in REQUIRED_CMAKE_FILES:
         if not (ROOT / relative_path).is_file():
             fail(f"required build file is missing: {relative_path}", failures)
+
+
+def check_build_workflow(failures: list[str]) -> None:
+    for relative_path in REQUIRED_BUILD_SCRIPTS:
+        if not (ROOT / relative_path).is_file():
+            fail(f"required clean/soft build entry point is missing: {relative_path}", failures)
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    platform_dependency_text = (ROOT / "cmake" / "PlatformDependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+
+    required_cache_fragments = (
+        'set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cache/cpm"',
+        'set(CPM_USE_NAMED_CACHE_DIRECTORIES ON',
+    )
+    for fragment in required_cache_fragments:
+        if fragment not in cmake_text:
+            fail(f"repository-local CPM cache contract is missing: {fragment}", failures)
+
+    cpm_bootstrap_text = (ROOT / "cmake" / "get_cpm.cmake").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "STATUS SWIM_CPM_DOWNLOAD_STATUS",
+        "TLS_VERIFY ON",
+        "file(REMOVE ${CPM_DOWNLOAD_LOCATION})",
+        "if(FETCHCONTENT_FULLY_DISCONNECTED)",
+        "Soft builds never download dependencies",
+    ):
+        if fragment not in cpm_bootstrap_text:
+            fail(f"CPM bootstrap does not fail cleanly on download errors: {fragment}", failures)
+
+    required_sdl_fragments = (
+        'GITHUB_REPOSITORY libsdl-org/SDL',
+        'GIT_TAG release-3.4.14',
+        'UPDATE_DISCONNECTED YES',
+        'set(SDL_AUDIO OFF',
+        'set(SDL_CAMERA OFF',
+        'set(SDL_GPU OFF',
+        'set(SDL_RENDER OFF',
+        'set(SDL_SENSOR OFF',
+        'set(SDL_DIALOG OFF',
+        'set(SDL_TRAY OFF',
+    )
+    for fragment in required_sdl_fragments:
+        if fragment not in platform_dependency_text:
+            fail(f"SDL3 CMake dependency contract is missing: {fragment}", failures)
+
+    clean_scripts = (
+        ROOT / "scripts" / "build-windows-clean.ps1",
+        ROOT / "scripts" / "build-linux-clean.sh",
+    )
+    for path in clean_scripts:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if ".cache" not in text:
+            fail(f"clean build does not clear the complete repository dependency cache: {path.relative_to(ROOT)}", failures)
+        if "build/.px" not in text:
+            fail(f"clean build does not clear shared PhysX generated state before dependency reset: {path.relative_to(ROOT)}", failures)
+        if "Clean state verified" not in text:
+            fail(f"clean build does not verify that generated state was actually removed: {path.relative_to(ROOT)}", failures)
+        if "FETCHCONTENT_FULLY_DISCONNECTED=OFF" not in text:
+            fail(f"clean build does not explicitly allow a fresh dependency pull: {path.relative_to(ROOT)}", failures)
+
+    batch_launchers = (
+        ROOT / "scripts" / "build-windows-clean.bat",
+        ROOT / "scripts" / "build-windows-soft.bat",
+        ROOT / "scripts" / "build-linux-clean.bat",
+        ROOT / "scripts" / "build-linux-soft.bat",
+    )
+    for path in batch_launchers:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore").lower()
+        if "pause" not in text:
+            fail(f"one-click batch launcher does not keep the console open: {path.relative_to(ROOT)}", failures)
+        if "build_exit_code" not in text or "exit /b %build_exit_code%" not in text:
+            fail(f"one-click batch launcher does not preserve the underlying build exit code: {path.relative_to(ROOT)}", failures)
+
+    windows_toolchain_helper = ROOT / "scripts" / "windows-build-common.ps1"
+    if windows_toolchain_helper.is_file():
+        helper_text = windows_toolchain_helper.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "VsDevCmd.bat",
+            "Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe",
+            "Get-SwimNinjaPath",
+            "Enable-SwimGitLongPaths",
+            "core.longpaths",
+            "ConvertTo-SwimExtendedWindowsPath",
+            "Test-SwimPathEntryExists",
+            "Invoke-SwimWindowsDirectoryRemove",
+            "System.Diagnostics.ProcessStartInfo",
+            "rd /s /q",
+            "Remove-SwimGeneratedDirectory",
+            "MayBeDirectoryLink",
+            "Ninja was not found; using the Visual Studio generator fallback",
+            "[switch]$DebugBuild",
+        ):
+            if fragment not in helper_text:
+                fail(f"Windows build toolchain auto-discovery is missing: {fragment}", failures)
+
+        if re.search(r"\[switch\]\$Debug(?:\s|$)", helper_text):
+            fail("Windows build helper redeclares PowerShell's built-in Debug common parameter", failures)
+
+        if "Remove-Item -LiteralPath $Path -Recurse" in helper_text:
+            fail(
+                "Windows clean helper regressed to PowerShell recursive deletion; use the idempotent extended-length native remover for dependency/build trees",
+                failures,
+            )
+
+        if "\\\\?\\" not in helper_text:
+            fail("Windows clean helper no longer uses the extended-length path prefix for MAX_PATH-safe deletion", failures)
+
+    for path in (
+        ROOT / "scripts" / "build-windows-clean.ps1",
+        ROOT / "scripts" / "build-windows-soft.ps1",
+    ):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("windows-build-common.ps1", "Get-SwimWindowsBuildPlan", "BuildPlan.CMakePath", "-DebugBuild:$Debug"):
+            if fragment not in text:
+                fail(f"Windows build script bypasses toolchain auto-discovery: {path.relative_to(ROOT)}: {fragment}", failures)
+
+    windows_clean = ROOT / "scripts" / "build-windows-clean.ps1"
+    if windows_clean.is_file():
+        clean_text = windows_clean.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            'build/windows-release',
+            'build/windows-debug',
+            'build/windows-vs',
+            'build/.px',
+            'Join-Path $Root ".cache"',
+            'Remove-SwimGeneratedDirectory -Path $PhysXShortWorktree -MayBeDirectoryLink',
+            'Test-SwimPathEntryExists -Path $RemovedPath',
+            'SwimEngine.sln',
+            '--preset windows-vs',
+            'FETCHCONTENT_FULLY_DISCONNECTED=ON',
+            'Visual Studio solution ready',
+        ):
+            if fragment not in clean_text:
+                fail(f"Windows clean build does not guarantee Visual Studio solution generation: {fragment}", failures)
+
+    windows_soft = ROOT / "scripts" / "build-windows-soft.ps1"
+    if windows_soft.is_file():
+        soft_text = windows_soft.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            'build/windows-vs',
+            'SwimEngine.sln',
+            '--preset windows-vs',
+            'FETCHCONTENT_FULLY_DISCONNECTED=ON',
+            'Visual Studio solution synchronized',
+        ):
+            if fragment not in soft_text:
+                fail(f"Windows soft build does not keep the Visual Studio solution synchronized: {fragment}", failures)
+
+    soft_scripts = (
+        ROOT / "scripts" / "build-windows-soft.ps1",
+        ROOT / "scripts" / "build-linux-soft.sh",
+    )
+    for path in soft_scripts:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "FETCHCONTENT_FULLY_DISCONNECTED=ON" not in text:
+            fail(f"soft build is not dependency-disconnected: {path.relative_to(ROOT)}", failures)
+        if "CPM_*" not in text:
+            fail(f"soft build does not require a cached CPM bootstrap: {path.relative_to(ROOT)}", failures)
+
+    preset_data = json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+    configure_presets = {preset["name"]: preset for preset in preset_data.get("configurePresets", [])}
+    build_presets = {preset["name"]: preset for preset in preset_data.get("buildPresets", [])}
+    for name in ("windows-debug", "windows-release", "linux-debug", "linux-release"):
+        if name not in configure_presets:
+            fail(f"configure preset is missing for clean/soft builds: {name}", failures)
+        if name not in build_presets:
+            fail(f"build preset is missing for clean/soft builds: {name}", failures)
 
 
 def check_machine_specific_paths(failures: list[str]) -> None:
@@ -152,6 +341,14 @@ def check_preserved_build_contract(failures: list[str]) -> None:
 
     required_physx_fragments = (
         '107.3-omni-and-physx-5.6.1',
+        'GIT_CONFIG',
+        '"filter.lfs.process="',
+        '"filter.lfs.required=false"',
+        'config --local',
+        'reset --hard HEAD',
+        'clean -ffdx',
+        'SWIM_PHYSX_SHORT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/build/.px"',
+        '-DSWIM_PHYSX_SHORT_SOURCE_DIR=${SWIM_PHYSX_SHORT_SOURCE_DIR}',
         'IMPORTED_LOCATION_DEBUG "${SWIM_PHYSX_CHECKED_DIR}',
         'IMPORTED_LOCATION_RELEASE "${SWIM_PHYSX_RELEASE_DIR}',
         '$<$<NOT:$<CONFIG:Release>>:SwimPhysXPvdSDK>',
@@ -162,6 +359,13 @@ def check_preserved_build_contract(failures: list[str]) -> None:
 
     required_physx_build_fragments = (
         'vc17win64-cpu-only',
+        'worktree add --force --detach',
+        'worktree remove --force',
+        'worktree prune',
+        'set(SWIM_PHYSX_ROOT "${SWIM_PHYSX_SHORT_SOURCE_DIR}/physx")',
+        'The CPM checkout is immutable dependency source.',
+        'status --porcelain --untracked-files=all',
+        'PhysX generation/build modified the CPM dependency checkout',
         '-DPX_GENERATE_STATIC_LIBRARIES=ON',
         '-DNV_USE_STATIC_WINCRT=ON',
         '-DNV_USE_DEBUG_WINCRT=OFF',
@@ -194,11 +398,18 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'NAME entt_source',
         'add_library(SwimEnTT INTERFACE)',
         'add_library(EnTT::EnTT ALIAS SwimEnTT)',
-        'NAME nlohmann_json_source',
-        'GIT_TAG v3.10.4',
-        'DOWNLOAD_ONLY YES',
+        'set(SWIM_NLOHMANN_JSON_VERSION "3.10.4")',
+        'c9ac7589260f36ea7016d4d51a6c95809803298c7caec9f55830a0214c5f9140',
+        'releases/download/v${SWIM_NLOHMANN_JSON_VERSION}/json.hpp',
+        'EXPECTED_HASH "SHA256=${SWIM_NLOHMANN_JSON_SHA256}"',
+        'file(SHA256 "${SWIM_NLOHMANN_JSON_HEADER}" SWIM_JSON_ACTUAL_SHA256)',
+        'if(FETCHCONTENT_FULLY_DISCONNECTED)',
         'add_library(SwimJson INTERFACE)',
         'add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)',
+        'function(swim_assert_cached_git_dependency_clean dependency_name source_dir)',
+        'status --porcelain --untracked-files=all',
+        "Cached dependency '${dependency_name}' is dirty",
+        'swim_physx_source',
         'WEBP_BUILD_LIBWEBPMUX ON',
         'webpdemux',
         'libwebpmux',
@@ -208,12 +419,21 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         if fragment not in dependency_text:
             fail(f"legacy third-party link contract is missing: {fragment}", failures)
 
+    if 'GITHUB_REPOSITORY nlohmann/json' in dependency_text:
+        fail(
+            "nlohmann/json reverted to a full Git checkout; use the pinned release single-header artifact to avoid Windows path/dirty-cache failures",
+            failures,
+        )
+
     # The PhysX generator is a batch file. Running an absolute quoted path
     # through cmd.exe caused CMake/MSBuild to preserve the escape quotes and
     # Windows attempted to execute a command literally named \"C:/...bat\".
     # Invoke the local batch name from SWIM_PHYSX_ROOT instead.
     if '\\"${SWIM_PHYSX_GENERATOR}\\"' in physx_build_text:
         fail("PhysX generator still uses the broken escaped absolute-path cmd invocation", failures)
+
+    if 'mklink /J' in physx_build_text:
+        fail("PhysX reverted to a source-cache junction; use the isolated short Git worktree so builds cannot dirty CPM source", failures)
 
     required_physx_command_fragments = (
         'COMMAND cmd.exe /d /c "call generate_projects.bat ${SWIM_PHYSX_PRESET}"',
@@ -251,7 +471,7 @@ def check_preserved_build_contract(failures: list[str]) -> None:
     pins = (
         'GIT_TAG 1.0.0',
         'GIT_TAG v3.13.2',
-        'GIT_TAG v3.10.4',
+        'set(SWIM_NLOHMANN_JSON_VERSION "3.10.4")',
         'GIT_TAG 1.5.7',
         'GIT_TAG v1.5.0',
         'GIT_TAG v1.4.9',
@@ -361,6 +581,167 @@ def check_windows_compile_contract_and_warning_hygiene(failures: list[str]) -> N
         fail("legacy third-party CMake deprecation chatter is not locally quieted", failures)
 
 
+
+def check_foundation_architecture_boundaries(failures: list[str]) -> None:
+    pch_path = ROOT / "Source" / "Engine" / "Utility" / "PCH.h"
+    pch_text = pch_path.read_text(encoding="utf-8", errors="ignore")
+    banned_pch_fragments = (
+        "Windows.h",
+        "vulkan/vulkan",
+        "vulkan_win32",
+        "glad/gl.h",
+        "glad/wgl.h",
+        "SDL3/",
+    )
+    for fragment in banned_pch_fragments:
+        if fragment in pch_text:
+            fail(f"generic PCH still injects platform/backend dependency: {fragment}", failures)
+
+    public_header_roots = (
+        ROOT / "Source" / "Engine" / "Platform",
+        ROOT / "Source" / "Engine" / "Input",
+    )
+    banned_public_fragments = (
+        "<Windows.h>",
+        "<SDL3/",
+        "<vulkan/",
+        "<glad/",
+    )
+    for root in public_header_roots:
+        for path in root.glob("*.h"):
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for fragment in banned_public_fragments:
+                if fragment in text:
+                    fail(
+                        f"public foundation header leaks an implementation dependency: {path.relative_to(ROOT)} -> {fragment}",
+                        failures,
+                    )
+
+    generic_contract_files = (
+        ROOT / "Source" / "Engine" / "SwimEngine.h",
+        ROOT / "Source" / "Engine" / "Systems" / "IO" / "InputManager.h",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Renderer.h",
+    )
+    win32_contract_tokens = re.compile(r"\b(?:HWND|HINSTANCE|WPARAM|LPARAM|LRESULT|WNDPROC)\b|\bWM_[A-Z0-9_]+\b|\bVK_[A-Z0-9_]+\b")
+    for path in generic_contract_files:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if win32_contract_tokens.search(text):
+            fail(f"generic engine contract still exposes Win32/message vocabulary: {path.relative_to(ROOT)}", failures)
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    required_foundation_fragments = (
+        "add_library(Swim::Platform ALIAS SwimPlatform)",
+        "target_link_libraries(SwimPlatform PRIVATE ${SWIM_SDL3_TARGET})",
+        "add_library(Swim::Input ALIAS SwimInput)",
+        "target_link_libraries(SwimInput PUBLIC Swim::Platform)",
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Platform/")',
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Input/")',
+    )
+    for fragment in required_foundation_fragments:
+        if fragment not in cmake_text:
+            fail(f"foundation CMake boundary is missing: {fragment}", failures)
+
+    if cmake_text.count("${SWIM_SDL3_TARGET}") != 1:
+        fail("SDL3 target must be linked directly by SwimPlatform only", failures)
+
+    window_system_header = (ROOT / "Source" / "Engine" / "Platform" / "WindowSystem.h").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    if "CreateWindow(" in window_system_header:
+        fail("WindowSystem public API uses CreateWindow, which collides with the Win32 CreateWindow macro", failures)
+
+    window_internal_header = (ROOT / "Source" / "Engine" / "Platform" / "Internal" / "WindowInternal.h").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    if '#include "Engine/Platform/Window.h"' not in window_internal_header:
+        fail("WindowInternal.h must use the include-root path so GCC/Clang can resolve Window.h", failures)
+
+    windows_api_path = ROOT / "Source" / "Engine" / "Platform" / "Internal" / "WindowsApi.h"
+    if not windows_api_path.is_file():
+        fail("centralized WindowsApi.h include boundary is missing", failures)
+    else:
+        windows_api_text = windows_api_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("WIN32_LEAN_AND_MEAN", "NOMINMAX", "#include <Windows.h>"):
+            if fragment not in windows_api_text:
+                fail(f"WindowsApi.h is missing required Win32 include guard behavior: {fragment}", failures)
+
+    raw_windows_include = re.compile(r'#\s*include\s*[<"](?:Windows|windows)\.h[>"]')
+    windows_api_resolved = windows_api_path.resolve()
+    source_engine_root = ROOT / "Source" / "Engine"
+    for path in source_engine_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        if path.resolve() == windows_api_resolved:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if raw_windows_include.search(text):
+            fail(
+                f"first-party source bypasses the NOMINMAX-safe WindowsApi.h boundary: {path.relative_to(ROOT)}",
+                failures,
+            )
+
+    vulkan_device_header = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanDeviceManager.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    vk_platform_define = vulkan_device_header.find("VK_USE_PLATFORM_WIN32_KHR")
+    vk_header_include = vulkan_device_header.find("<vulkan/vulkan.h>")
+    if vk_platform_define < 0 or vk_header_include < 0 or vk_platform_define > vk_header_include:
+        fail("VulkanDeviceManager.h must define VK_USE_PLATFORM_WIN32_KHR before including Vulkan headers", failures)
+
+    for compile_definition in ("WIN32_LEAN_AND_MEAN", "NOMINMAX", "VK_USE_PLATFORM_WIN32_KHR"):
+        if f"$<$<PLATFORM_ID:Windows>:{compile_definition}>" not in cmake_text:
+            fail(f"SwimEngine is missing Windows compile definition: {compile_definition}", failures)
+
+    scene_text = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    for stale_editor_command_fragment in ("const wchar_t*", 'send(L"'):
+        if stale_editor_command_fragment in scene_text:
+            fail(
+                "Scene editor-command hotkeys must use the UTF-8 std::string_view transport, not wide strings",
+                failures,
+            )
+
+    platform_compile_definition_block = re.search(
+        r"target_compile_definitions\(SwimPlatform PRIVATE(?P<body>.*?)\n\)",
+        cmake_text,
+        re.DOTALL,
+    )
+    if platform_compile_definition_block is None:
+        fail("SwimPlatform is missing its private Windows compile-definition block", failures)
+    else:
+        platform_definition_text = platform_compile_definition_block.group("body")
+        for compile_definition in ("WIN32_LEAN_AND_MEAN", "NOMINMAX"):
+            if f"$<$<PLATFORM_ID:Windows>:{compile_definition}>" not in platform_definition_text:
+                fail(f"SwimPlatform is missing Windows compile definition: {compile_definition}", failures)
+
+    platform_input_types = (ROOT / "Source" / "Engine" / "Platform" / "InputTypes.h").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    for high_level_input_type in ("InputAction", "InputBinding", "InputMap"):
+        if high_level_input_type in platform_input_types:
+            fail(
+                f"high-level input mapping type leaked into Swim::Platform: {high_level_input_type}",
+                failures,
+            )
+
+    public_header_compile_text = (
+        ROOT / "Source" / "Tests" / "Platform" / "PublicHeaderCompile.cpp"
+    ).read_text(encoding="utf-8", errors="ignore")
+    for public_input_header in ("Engine/Input/InputMap.h", "Engine/Input/InputSystem.h"):
+        if public_input_header not in public_header_compile_text:
+            fail(f"foundation public-header compile coverage is missing: {public_input_header}", failures)
+
+    hardcoded_asset_path = re.compile(r'Assets\\\\')
+    for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game"):
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if hardcoded_asset_path.search(text):
+                fail(f"hard-coded Windows asset path remains: {path.relative_to(ROOT)}", failures)
+
+
 def check_source_files_are_utf8(failures: list[str]) -> None:
     for source_root in (ROOT / "Source",):
         if not source_root.exists():
@@ -379,12 +760,14 @@ def main() -> int:
     check_generated_visual_studio_files(failures)
     check_vendored_dependencies(failures)
     check_required_cmake_files(failures)
+    check_build_workflow(failures)
     check_machine_specific_paths(failures)
     check_legacy_library_includes(failures)
     check_tungsten_style_cmake(failures)
     check_preserved_build_contract(failures)
     check_modern_cmake_dependency_compatibility(failures)
     check_windows_compile_contract_and_warning_hygiene(failures)
+    check_foundation_architecture_boundaries(failures)
     check_source_files_are_utf8(failures)
 
     if failures:

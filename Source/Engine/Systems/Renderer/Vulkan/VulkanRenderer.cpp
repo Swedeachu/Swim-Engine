@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "VulkanRenderer.h"
+#include "Engine/Platform/Window.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
@@ -38,15 +39,15 @@ namespace Engine
 		return x + 1;
 	}
 
-	void VulkanRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
+	void VulkanRenderer::Create(Swim::Platform::Window& window, uint32_t width, uint32_t height)
 	{
 		windowWidth = width;
 		windowHeight = height;
-		windowHandle = hwnd;
+		this->window = &window;
 
-		if (!windowHandle)
+		if (!window.GetNativeHandle().IsValid())
 		{
-			throw std::runtime_error("Invalid window handle passed to VulkanRenderer.");
+			throw std::runtime_error("Invalid native window handle passed to VulkanRenderer.");
 		}
 	}
 
@@ -54,8 +55,14 @@ namespace Engine
 	int VulkanRenderer::Awake()
 	{
 		// Ctor does full creation
+		const Swim::Platform::NativeWindowHandle nativeWindow = window->GetNativeHandle();
+		if (nativeWindow.Type != Swim::Platform::NativeWindowType::Win32)
+		{
+			throw std::runtime_error("The legacy Vulkan backend has not been migrated off its Win32 surface bridge yet.");
+		}
+
 		deviceManager = std::make_unique<VulkanDeviceManager>(
-			windowHandle,
+			static_cast<HWND>(nativeWindow.Window),
 			windowWidth,
 			windowHeight
 		);

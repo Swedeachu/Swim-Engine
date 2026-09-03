@@ -56,6 +56,36 @@
                 "lhs": "${hostSystemName}",
                 "rhs": "Windows"
             }
+        },
+        {
+            "name": "linux-base",
+            "hidden": true,
+            "inherits": "base",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "SWIM_BUILD_LEGACY_ENGINE": "OFF"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "Linux Debug (Ninja, platform/input foundation)",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "linux-release",
+            "displayName": "Linux Release (Ninja, platform/input foundation)",
+            "inherits": "linux-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
         }
     ],
     "buildPresets": [
@@ -76,6 +106,14 @@
             "name": "windows-vs-debug",
             "configurePreset": "windows-vs",
             "configuration": "Debug"
+        },
+        {
+            "name": "linux-debug",
+            "configurePreset": "linux-debug"
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release"
         }
     ]
 }

@@ -4,6 +4,11 @@
 #include "Core/Environment/CubeMapController.h"
 #include "Core/Meshes/Vertex.h"
 
+namespace Swim::Platform
+{
+	class Window;
+}
+
 namespace Engine
 {
 
@@ -16,7 +21,7 @@ namespace Engine
 
 	public:
 
-		virtual void Create(HWND hwnd, uint32_t width, uint32_t height) = 0;
+		virtual void Create(Swim::Platform::Window& window, uint32_t width, uint32_t height) = 0;
 
 		virtual std::unique_ptr<CubeMapController>& GetCubeMapController() = 0;
 

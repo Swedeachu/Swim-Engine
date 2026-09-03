@@ -366,3 +366,6 @@ FodyWeavers.xsd
 # CMake generated state
 /build/
 /CMakeUserPresets.json
+
+# Repository-local third-party source cache used by CPM.
+/.cache/

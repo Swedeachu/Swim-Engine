@@ -21,19 +21,6 @@ namespace Engine
 		: reg(reg), sceneName(sceneName)
 	{}
 
-	std::wstring SerializedSceneManager::Utf8ToWide(const std::string& utf8)
-	{
-		std::wstring wide;
-		wide.reserve(utf8.size());
-
-		for (unsigned char c : utf8)
-		{
-			wide.push_back(static_cast<wchar_t>(c));
-		}
-
-		return wide;
-	}
-
 	void SerializedSceneManager::BuildFullJSON()
 	{
 		jsonRoot = json::object();
@@ -199,9 +186,6 @@ namespace Engine
 		// Dump as compact UTF-8 JSON string
 		const std::string utf8 = jsonRoot.dump(); // pass 2 for pretty-print: dump(2)
 
-		// Convert to wide string for WM_COPYDATA
-		const std::wstring wide = Utf8ToWide("scene load:" + utf8); // scene load command for editor to parse
-
 		// Send to editor through the engine
 		auto engine = SwimEngine::GetInstance();
 		if (!engine)
@@ -209,7 +193,7 @@ namespace Engine
 			return;
 		}
 
-		engine->SendEditorMessage(wide, /*channel*/ 2);
+		engine->SendEditorMessage("scene load:" + utf8, /*channel*/ 2);
 	}
 
 	void SerializedSceneManager::SaveFullJSON()
@@ -429,16 +413,13 @@ namespace Engine
 		// Dump as compact UTF-8 JSON string
 		const std::string utf8 = syncRoot.dump();
 
-		// Convert to wide string for WM_COPYDATA
-		const std::wstring wide = Utf8ToWide("scene sync:" + utf8);
-
 		auto engine = SwimEngine::GetInstance();
 		if (!engine)
 		{
 			return;
 		}
 
-		engine->SendEditorMessage(wide, /*channel*/ 2);
+		engine->SendEditorMessage("scene sync:" + utf8, /*channel*/ 2);
 
 		// Clear per-frame queues
 		createdEntities.clear();

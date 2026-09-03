@@ -1,0 +1,16 @@
+#include "Engine/Input/InputMap.h"
+#include "Engine/Input/InputSystem.h"
+#include "Engine/Platform/DynamicLibrary.h"
+#include "Engine/Platform/EditorIpcBridge.h"
+#include "Engine/Platform/FileSystem.h"
+#include "Engine/Platform/InputTypes.h"
+#include "Engine/Platform/MappedFile.h"
+#include "Engine/Platform/MonotonicClock.h"
+#include "Engine/Platform/PlatformSystem.h"
+#include "Engine/Platform/PlatformTypes.h"
+#include "Engine/Platform/Thread.h"
+#include "Engine/Platform/Window.h"
+#include "Engine/Platform/WindowEvents.h"
+#include "Engine/Platform/WindowSystem.h"
+
+static_assert(sizeof(Swim::Platform::WindowId) == sizeof(uint32_t));

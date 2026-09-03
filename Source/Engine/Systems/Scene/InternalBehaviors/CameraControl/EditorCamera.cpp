@@ -16,7 +16,7 @@ namespace Engine
 		glm::vec3 position = camera.GetPosition();
 
 		// ----- Mouse Look -----
-		if (input->IsKeyDown(VK_RBUTTON))
+		if (input->IsMouseButtonDown(Swim::Platform::MouseButton::Right))
 		{
 			glm::vec2 mouseDelta = input->GetMousePositionDelta();
 
@@ -49,27 +49,27 @@ namespace Engine
 
 		glm::vec3 movement(0.0f);
 
-		if (input->IsKeyDown('W'))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::W))
 		{
 			movement += forward;
 		}
-		if (input->IsKeyDown('S'))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::S))
 		{
 			movement -= forward;
 		}
-		if (input->IsKeyDown('A'))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::A))
 		{
 			movement -= right;
 		}
-		if (input->IsKeyDown('D'))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::D))
 		{
 			movement += right;
 		}
-		if (input->IsKeyDown(VK_SPACE))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::Space))
 		{
 			movement += up;
 		}
-		if (input->IsKeyDown(VK_SHIFT))
+		if (input->IsShiftDown())
 		{
 			movement -= up;
 		}
@@ -80,7 +80,7 @@ namespace Engine
 		}
 
 		float speed = cameraMoveSpeed;
-		if (input->IsKeyDown(VK_CONTROL))
+		if (input->IsControlDown())
 		{
 			speed *= boostMultiplier;
 		}

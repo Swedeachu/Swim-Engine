@@ -1,5 +1,11 @@
 #pragma once
 
+#include "Engine/Platform/Internal/WindowsApi.h"
+
+#include <glad/gl.h>
+
+#include <glad/wgl.h>
+
 #include "Engine/Systems/Renderer/Renderer.h"
 
 namespace Engine
@@ -18,7 +24,7 @@ namespace Engine
 
 	public:
 
-		void Create(HWND hwnd, uint32_t width, uint32_t height) override;
+		void Create(Swim::Platform::Window& window, uint32_t width, uint32_t height) override;
 
 		int Awake() override;
 		int Init() override;

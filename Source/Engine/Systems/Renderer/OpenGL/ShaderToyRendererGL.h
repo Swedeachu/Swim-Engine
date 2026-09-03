@@ -1,6 +1,5 @@
 #pragma once
 #include "OpenGLRenderer.h"
-#include <Windows.h>
 
 namespace Engine
 {

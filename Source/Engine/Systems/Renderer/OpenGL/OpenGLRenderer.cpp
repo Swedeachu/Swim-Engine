@@ -1,5 +1,7 @@
 #include "PCH.h"
+#include <filesystem>
 #include "OpenGLRenderer.h"
+#include "Engine/Platform/Window.h"
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
@@ -23,16 +25,18 @@ namespace Engine
 
 	PFNWGLCHOOSEPIXELFORMATARBPROC g_wglChoosePixelFormatARB = nullptr;
 
-	void OpenGLRenderer::Create(HWND hwnd, uint32_t width, uint32_t height)
+	void OpenGLRenderer::Create(Swim::Platform::Window& window, uint32_t width, uint32_t height)
 	{
 		windowWidth = width;
 		windowHeight = height;
-		windowHandle = hwnd;
 
-		if (!windowHandle)
+		const Swim::Platform::NativeWindowHandle nativeWindow = window.GetNativeHandle();
+		if (nativeWindow.Type != Swim::Platform::NativeWindowType::Win32 || !nativeWindow.Window)
 		{
-			throw std::runtime_error("Invalid HWND passed to OpenGLRenderer.");
+			throw std::runtime_error("The legacy OpenGL backend requires a Win32 native window.");
 		}
+
+		windowHandle = static_cast<HWND>(nativeWindow.Window);
 
 		if (!InitOpenGLContext())
 		{
@@ -230,12 +234,12 @@ namespace Engine
 
 	std::string OpenGLRenderer::LoadTextFile(const std::string& relativePath)
 	{
-		std::string fullPath = SwimEngine::GetExecutableDirectory() + "\\" + relativePath;
+		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(relativePath);
 
 		std::ifstream file(fullPath);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to load shader: " + fullPath);
+			throw std::runtime_error("Failed to load shader: " + fullPath.string());
 		}
 
 		std::stringstream buffer;
@@ -1083,11 +1087,11 @@ namespace Engine
 	// Unused
 	GLuint OpenGLRenderer::LoadSPIRVShaderStage(const std::string& path, GLenum shaderStage)
 	{
-		std::string fullPath = SwimEngine::GetExecutableDirectory() + "\\" + path;
+		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(path);
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to load SPIR-V shader: " + fullPath);
+			throw std::runtime_error("Failed to load SPIR-V shader: " + fullPath.string());
 		}
 
 		size_t fileSize = static_cast<size_t>(file.tellg());

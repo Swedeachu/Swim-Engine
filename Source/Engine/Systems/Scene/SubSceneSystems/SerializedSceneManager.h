@@ -33,7 +33,6 @@ namespace Engine
 
 		void BuildFullJSON();
 
-		static std::wstring Utf8ToWide(const std::string& utf8);
 
 		// Builds a JSON object for a single entity, calling per-component serializers.
 		nlohmann::json BuildEntityJSON(entt::entity e);

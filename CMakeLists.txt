@@ -21,6 +21,25 @@ option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
 option(SWIM_ENABLE_PCH "Use Swim Engine's existing PCH.h" ON)
 option(SWIM_OFFLINE_DEPENDENCY_STUBS "Configure without downloading dependencies (build-layout verification only)" OFF)
 
+# Keep fetched third-party source trees outside individual build presets so a
+# soft rebuild can reuse exactly the dependency revisions already downloaded.
+# The clean-build scripts remove this directory deliberately before configuring.
+if(NOT DEFINED CPM_SOURCE_CACHE OR CPM_SOURCE_CACHE STREQUAL "")
+	set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cache/cpm" CACHE PATH
+		"Shared source cache for CPM-managed Swim Engine dependencies")
+endif()
+set(CPM_USE_NAMED_CACHE_DIRECTORIES ON CACHE BOOL
+	"Keep CPM dependency cache directories human-readable" FORCE)
+
+if(WIN32)
+	set(SWIM_BUILD_LEGACY_ENGINE_DEFAULT ON)
+else()
+	set(SWIM_BUILD_LEGACY_ENGINE_DEFAULT OFF)
+endif()
+option(SWIM_BUILD_LEGACY_ENGINE "Build the existing renderer/game runtime while it is being migrated" ${SWIM_BUILD_LEGACY_ENGINE_DEFAULT})
+option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
+option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
+
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -46,16 +65,82 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS AND NOT WIN32)
-	message(FATAL_ERROR
-		"This compute-v2 snapshot still contains Win32 platform/input/window code. "
-		"The CMake migration preserves the currently supported Windows x64 build; Linux support belongs to the platform refactor."
-	)
-endif()
-
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	include(cmake/get_cpm.cmake)
 endif()
+include(cmake/PlatformDependencies.cmake)
+
+file(GLOB_RECURSE SWIM_PLATFORM_SOURCES CONFIGURE_DEPENDS
+	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
+)
+
+add_library(SwimPlatform STATIC ${SWIM_PLATFORM_SOURCES})
+add_library(Swim::Platform ALIAS SwimPlatform)
+target_include_directories(SwimPlatform PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_link_libraries(SwimPlatform PRIVATE ${SWIM_SDL3_TARGET})
+target_compile_features(SwimPlatform PUBLIC cxx_std_20)
+target_compile_definitions(SwimPlatform PRIVATE
+	$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+	$<$<PLATFORM_ID:Windows>:NOMINMAX>
+)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PLATFORM_SOURCES})
+
+if(MSVC)
+	target_compile_options(SwimPlatform PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimPlatform PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+file(GLOB_RECURSE SWIM_INPUT_SOURCES CONFIGURE_DEPENDS
+	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.h
+)
+
+add_library(SwimInput STATIC ${SWIM_INPUT_SOURCES})
+add_library(Swim::Input ALIAS SwimInput)
+target_include_directories(SwimInput PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_link_libraries(SwimInput PUBLIC Swim::Platform)
+target_compile_features(SwimInput PUBLIC cxx_std_20)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_INPUT_SOURCES})
+
+if(MSVC)
+	target_compile_options(SwimInput PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimInput PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(SWIM_BUILD_PLATFORM_EXAMPLE)
+	add_executable(SwimHelloWindow Source/Examples/HelloWindow.cpp)
+	target_link_libraries(SwimHelloWindow PRIVATE Swim::Platform)
+	target_include_directories(SwimHelloWindow PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+
+	add_executable(SwimHeadlessPlatform Source/Examples/HeadlessPlatform.cpp)
+	target_link_libraries(SwimHeadlessPlatform PRIVATE Swim::Platform)
+	target_include_directories(SwimHeadlessPlatform PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+endif()
+
+add_library(SwimPlatformPublicHeaders OBJECT Source/Tests/Platform/PublicHeaderCompile.cpp)
+target_include_directories(SwimPlatformPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimPlatformPublicHeaders PRIVATE cxx_std_20)
+
+if(SWIM_BUILD_FOUNDATION_TESTS)
+	add_executable(SwimInputTests Source/Tests/Input/InputSystemTests.cpp)
+	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
+	target_include_directories(SwimInputTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+endif()
+
+if(NOT SWIM_BUILD_LEGACY_ENGINE)
+	return()
+endif()
+
+if(NOT WIN32)
+	message(FATAL_ERROR
+		"SWIM_BUILD_LEGACY_ENGINE is still Windows-only while the renderer backends are being migrated. "
+		"The Swim::Platform module and SwimHelloWindow are cross-platform."
+	)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
@@ -73,6 +158,8 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES CONFIGURE_DEPENDS
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.hpp
 )
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Platform/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Input/")
 
 file(GLOB_RECURSE SWIM_GAME_SOURCES CONFIGURE_DEPENDS
 	${CMAKE_SOURCE_DIR}/Source/Game/*.cpp
@@ -130,6 +217,9 @@ target_compile_definitions(SwimEngine PRIVATE
 	_UNICODE
 	_CRT_SECURE_NO_WARNINGS
 	PX_PHYSX_STATIC_LIB
+	$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+	$<$<PLATFORM_ID:Windows>:NOMINMAX>
+	$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
 	$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 )
@@ -195,6 +285,8 @@ if(TARGET SwimPhysXBuild)
 endif()
 
 target_link_libraries(SwimEngine PRIVATE
+	Swim::Platform
+	Swim::Input
 	Vulkan::Vulkan
 	OpenGL::GL
 	glm::glm
@@ -212,6 +304,7 @@ target_link_libraries(SwimEngine PRIVATE
 
 include(cmake/Shaders.cmake)
 swim_configure_shaders(SwimEngine)
+
 
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_custom_command(TARGET SwimEngine POST_BUILD

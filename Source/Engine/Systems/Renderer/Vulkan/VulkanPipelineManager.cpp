@@ -1,5 +1,7 @@
 #include "PCH.h"
+#include <filesystem>
 #include "VulkanPipelineManager.h"
+#include "Engine/SwimEngine.h"
 #include <fstream>
 #include <stdexcept>
 #include <array>
@@ -81,13 +83,12 @@ namespace Engine
 
 	std::vector<char> VulkanPipelineManager::ReadFile(const std::string& filename)
 	{
-		std::string exeDir = SwimEngine::GetExecutableDirectory();
-		std::string fullPath = exeDir + "\\" + filename;
+		const std::filesystem::path fullPath = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveExecutablePath(filename);
 
 		std::ifstream file(fullPath, std::ios::ate | std::ios::binary);
 		if (!file.is_open())
 		{
-			throw std::runtime_error("Failed to load shader: " + fullPath);
+			throw std::runtime_error("Failed to load shader: " + fullPath.string());
 		}
 
 		size_t fileSize = static_cast<size_t>(file.tellg());

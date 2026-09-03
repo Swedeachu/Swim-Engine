@@ -11,27 +11,27 @@ namespace Game
 		glm::vec3 entityMoveDir{ 0.0f };
 
 		// Arrow keys + Z/X for entity movement.
-		if (input->IsKeyDown(VK_UP))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::Up))
 		{
 			entityMoveDir += glm::vec3(0.0f, 0.0f, -1.0f); // Forward
 		}
-		if (input->IsKeyDown(VK_DOWN))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::Down))
 		{
 			entityMoveDir += glm::vec3(0.0f, 0.0f, 1.0f); // Backward
 		}
-		if (input->IsKeyDown(VK_LEFT))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::Left))
 		{
 			entityMoveDir += glm::vec3(-1.0f, 0.0f, 0.0f); // Left
 		}
-		if (input->IsKeyDown(VK_RIGHT))
+		if (input->IsKeyDown(Swim::Platform::KeyCode::Right))
 		{
 			entityMoveDir += glm::vec3(1.0f, 0.0f, 0.0f); // Right
 		}
-		if (input->IsKeyDown(VK_PRIOR)) // page up
+		if (input->IsKeyDown(Swim::Platform::KeyCode::PageUp)) // page up
 		{
 			entityMoveDir += glm::vec3(0.0f, 1.0f, 0.0f); // Up
 		}
-		if (input->IsKeyDown(VK_NEXT)) // page down
+		if (input->IsKeyDown(Swim::Platform::KeyCode::PageDown)) // page down
 		{
 			entityMoveDir += glm::vec3(0.0f, -1.0f, 0.0f); // Down
 		}

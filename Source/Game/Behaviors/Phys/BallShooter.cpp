@@ -22,7 +22,7 @@ namespace Game
 			return;
 		}
 
-		if (!input->IsKeyTriggered('1'))
+		if (!input->IsKeyTriggered(Swim::Platform::KeyCode::Num1))
 		{
 			return;
 		}

@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "FontPool.h"
+#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 
 #include <fstream>
@@ -19,7 +20,7 @@ namespace Engine
 	{
 		namespace fs = std::filesystem;
 
-		const fs::path fontsRoot{ "Assets\\Font" };
+		const fs::path fontsRoot = SwimEngine::GetInstance()->GetPlatformSystem().GetFileSystem().ResolveAssetPath("Font");
 
 		if (!fs::exists(fontsRoot))
 		{

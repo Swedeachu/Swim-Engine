@@ -1,4 +1,7 @@
 #include "PCH.h"
+
+#include <string_view>
+#include "Engine/Systems/Renderer/Core/Ui/UiCoordinates.h"
 #include "Scene.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
 #include "Engine/Systems/Renderer/OpenGL/OpenGLRenderer.h"
@@ -675,7 +678,7 @@ namespace Engine
 		{
 			auto input = GetInputManager();
 			// control toggle with G key 
-			if (input->IsKeyDown(VK_CONTROL) && input->IsKeyTriggered('G'))
+			if (input->IsControlDown() && input->IsKeyTriggered(Swim::Platform::KeyCode::G))
 			{
 				sceneDebugDraw->SetEnabled(!sceneDebugDraw->IsEnabled());
 				std::string abled = sceneDebugDraw->IsEnabled() ? "Enabled" : "Disabled";
@@ -693,7 +696,7 @@ namespace Engine
 
 		// 1. Get raw mouse position in window pixels
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
+		glm::vec2 mouseVirt = UiCoordinates::WindowToVirtualCanvas(inputMgr->GetMousePosition(), inputMgr->GetWindowSize());
 
 		// 2. Iterate over UI entities and run hit-testing in the same space
 		entt::registry& registry = GetRegistry();
@@ -753,14 +756,14 @@ namespace Engine
 					mouseBusyWithUI = true;
 					behavior->OnMouseHover();
 
-					if (inputMgr->IsKeyDown(VK_LBUTTON)) { behavior->OnLeftClickDown(); }
-					if (inputMgr->IsKeyDown(VK_RBUTTON)) { behavior->OnRightClickDown(); }
+					if (inputMgr->IsMouseButtonDown(Swim::Platform::MouseButton::Left)) { behavior->OnLeftClickDown(); }
+					if (inputMgr->IsMouseButtonDown(Swim::Platform::MouseButton::Right)) { behavior->OnRightClickDown(); }
 
-					if (inputMgr->IsKeyReleased(VK_LBUTTON)) { behavior->OnLeftClickUp(); }
-					if (inputMgr->IsKeyReleased(VK_RBUTTON)) { behavior->OnRightClickUp(); }
+					if (inputMgr->IsMouseButtonReleased(Swim::Platform::MouseButton::Left)) { behavior->OnLeftClickUp(); }
+					if (inputMgr->IsMouseButtonReleased(Swim::Platform::MouseButton::Right)) { behavior->OnRightClickUp(); }
 
-					if (inputMgr->IsKeyTriggered(VK_LBUTTON)) { behavior->OnLeftClicked(); }
-					if (inputMgr->IsKeyTriggered(VK_RBUTTON)) { behavior->OnRightClicked(); }
+					if (inputMgr->IsMouseButtonTriggered(Swim::Platform::MouseButton::Left)) { behavior->OnLeftClicked(); }
+					if (inputMgr->IsMouseButtonTriggered(Swim::Platform::MouseButton::Right)) { behavior->OnRightClicked(); }
 				}
 			}
 		});
@@ -776,69 +779,69 @@ namespace Engine
 			return false;
 		}
 
-		auto send = [&](const wchar_t* w) { engine->OnEditorCommand(w); };
+		auto send = [&](std::string_view command) { engine->OnEditorCommand(command); };
 		auto state = engine->GetEngineState();
 
 		// Must be holding shift to do these hotkeys
-		bool shifting = input->IsKeyDown(VK_SHIFT);
+		bool shifting = input->IsShiftDown();
 		if (!shifting) return false;
 
 		bool handled = false;
 
 		// Toggle Play / Stop (L)
-		if (!handled && input->IsKeyTriggered('L'))
+		if (!handled && input->IsKeyTriggered(Swim::Platform::KeyCode::L))
 		{
 			const bool playing = HasAnyEngineStates(state, EngineState::Playing);
 			if (playing)
 			{
 				// GoIntoStoppedMode()
-				send(L"stop");
-				send(L"resume");
-				send(L"edit");
+				send("stop");
+				send("resume");
+				send("edit");
 			}
 			else
 			{
 				// GoIntoPlayMode()
-				send(L"resume");
-				send(L"game");
-				send(L"play");
+				send("resume");
+				send("game");
+				send("play");
 			}
 			handled = true;
 		}
-		else if (!handled && input->IsKeyTriggered('P')) // Toggle Pause / Resume (P)
+		else if (!handled && input->IsKeyTriggered(Swim::Platform::KeyCode::P)) // Toggle Pause / Resume (P)
 		{
 			if (HasAnyEngineStates(state, EngineState::Paused))
 			{
-				send(L"resume");
+				send("resume");
 			}
 			else
 			{
-				send(L"pause");
+				send("pause");
 			}
 			handled = true;
 		}
-		else if (!handled && input->IsKeyTriggered('E')) // Toggle Edit / Game (E)
+		else if (!handled && input->IsKeyTriggered(Swim::Platform::KeyCode::E)) // Toggle Edit / Game (E)
 		{
 			if (HasAnyEngineStates(state, EngineState::Editing))
 			{
-				send(L"game");
+				send("game");
 			}
 			else
 			{
-				send(L"edit");
+				send("edit");
 			}
 			handled = true;
 		}
-		else if (!handled && input->IsKeyTriggered('O')) // Hard Stop (O)
+		else if (!handled && input->IsKeyTriggered(Swim::Platform::KeyCode::O)) // Hard Stop (O)
 		{
-			send(L"stop");
-			send(L"resume");
-			send(L"edit");
+			send("stop");
+			send("resume");
+			send("edit");
 			handled = true;
 		}
-		else if (!handled && input->IsKeyTriggered('R')) // Restart stub (R)
+		else if (!handled && input->IsKeyTriggered(Swim::Platform::KeyCode::R)) // Restart stub (R)
 		{
-			send(L"restart");
+			send("restart");
 			handled = true;
 		}
 
@@ -894,7 +897,7 @@ namespace Engine
 	bool Scene::IsTopFocusedElement(entt::entity target)
 	{
 		std::shared_ptr<InputManager> inputMgr = GetInputManager();
-		glm::vec2 mouseVirt = inputMgr->GetMousePosition(true);
+		glm::vec2 mouseVirt = UiCoordinates::WindowToVirtualCanvas(inputMgr->GetMousePosition(), inputMgr->GetWindowSize());
 		return IsTopMostUiAtScreenPoint(target, mouseVirt);
 	}
 

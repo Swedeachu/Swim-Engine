@@ -64,7 +64,7 @@ namespace Game
 	void MouseInputDemoBehavior::OnMouseHover()
 	{
 		// std::cout << "MouseInputDemoBehavior: Mouse Hover\n"; // commented out just to avoid spam 
-		if (!input->IsKeyDown(VK_LBUTTON))
+		if (!input->IsMouseButtonDown(Swim::Platform::MouseButton::Left))
 		{
 			SetColor(Engine::DebugColor::Yellow);
 		}

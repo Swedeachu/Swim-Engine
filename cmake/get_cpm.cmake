@@ -18,15 +18,39 @@ function(swim_download_cpm)
 	file(DOWNLOAD
 		https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake
 		${CPM_DOWNLOAD_LOCATION}
+		STATUS SWIM_CPM_DOWNLOAD_STATUS
+		TLS_VERIFY ON
 	)
+
+	list(GET SWIM_CPM_DOWNLOAD_STATUS 0 SWIM_CPM_DOWNLOAD_CODE)
+	list(GET SWIM_CPM_DOWNLOAD_STATUS 1 SWIM_CPM_DOWNLOAD_MESSAGE)
+	if(NOT SWIM_CPM_DOWNLOAD_CODE EQUAL 0)
+		file(REMOVE ${CPM_DOWNLOAD_LOCATION})
+		message(FATAL_ERROR
+			"Failed to download CPM.cmake v${CPM_DOWNLOAD_VERSION}: ${SWIM_CPM_DOWNLOAD_MESSAGE}. "
+			"Clean builds require network access; soft builds use the existing .cache/cpm contents only."
+		)
+	endif()
 endfunction()
 
 if(NOT EXISTS ${CPM_DOWNLOAD_LOCATION})
+	if(FETCHCONTENT_FULLY_DISCONNECTED)
+		message(FATAL_ERROR
+			"CPM.cmake is not cached at ${CPM_DOWNLOAD_LOCATION}. "
+			"Soft builds never download dependencies; run the clean-build script once with network access."
+		)
+	endif()
 	swim_download_cpm()
 else()
 	# Resume the download if it previously failed and left an empty file behind.
 	file(READ ${CPM_DOWNLOAD_LOCATION} SWIM_CPM_CHECK)
 	if("${SWIM_CPM_CHECK}" STREQUAL "")
+		if(FETCHCONTENT_FULLY_DISCONNECTED)
+			message(FATAL_ERROR
+				"Cached CPM.cmake is empty at ${CPM_DOWNLOAD_LOCATION}. "
+				"Soft builds never download dependencies; run the clean-build script once with network access."
+			)
+		endif()
 		swim_download_cpm()
 	endif()
 endif()

@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Systems/Renderer/Core/Ui/UiCoordinates.h"
 #include "DragUiBehavior.h"
 #include "Engine/Components/Transform.h"
 
@@ -20,7 +21,7 @@ namespace Engine
 
 		if (transform)
 		{
-			const glm::vec2 mouse = input->GetMousePosition(true);
+			const glm::vec2 mouse = UiCoordinates::WindowToVirtualCanvas(input->GetMousePosition(), input->GetWindowSize());
 			const glm::vec3 pos = transform->GetPosition();
 
 			// Record where we clicked and the offset between object and mouse
@@ -43,7 +44,7 @@ namespace Engine
 		const float canvasW = static_cast<float>(Renderer::VirtualCanvasWidth);
 		const float canvasH = static_cast<float>(Renderer::VirtualCanvasHeight);
 
-		const glm::vec2 mouse = input->GetMousePosition(true);
+		const glm::vec2 mouse = UiCoordinates::WindowToVirtualCanvas(input->GetMousePosition(), input->GetWindowSize());
 		const glm::vec2 target = mouse + grabOffset;
 
 		glm::vec3& tfPos = transform->GetPositionRef();
