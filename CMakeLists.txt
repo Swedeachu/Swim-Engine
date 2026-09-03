@@ -17,6 +17,8 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
 
 project(SwimEngine C CXX)
 
+include(cmake/SolutionLayout.cmake)
+
 option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
 option(SWIM_ENABLE_PCH "Use Swim Engine's existing PCH.h" ON)
 option(SWIM_OFFLINE_DEPENDENCY_STUBS "Configure without downloading dependencies (build-layout verification only)" OFF)
@@ -68,7 +70,11 @@ endif()
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	include(cmake/get_cpm.cmake)
 endif()
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3")
 include(cmake/PlatformDependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
 
 file(GLOB_RECURSE SWIM_PLATFORM_SOURCES CONFIGURE_DEPENDS
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.cpp
@@ -85,6 +91,7 @@ target_compile_definitions(SwimPlatform PRIVATE
 	$<$<PLATFORM_ID:Windows>:NOMINMAX>
 )
 source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PLATFORM_SOURCES})
+swim_set_solution_folder(SwimPlatform "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
 
 if(MSVC)
 	target_compile_options(SwimPlatform PRIVATE /utf-8 /W3 /permissive-)
@@ -103,6 +110,7 @@ target_include_directories(SwimInput PUBLIC ${CMAKE_SOURCE_DIR}/Source)
 target_link_libraries(SwimInput PUBLIC Swim::Platform)
 target_compile_features(SwimInput PUBLIC cxx_std_20)
 source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_INPUT_SOURCES})
+swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
 
 if(MSVC)
 	target_compile_options(SwimInput PRIVATE /utf-8 /W3 /permissive-)
@@ -111,23 +119,27 @@ else()
 endif()
 
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
-	add_executable(SwimHelloWindow Source/Examples/HelloWindow.cpp)
+	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp)
 	target_link_libraries(SwimHelloWindow PRIVATE Swim::Platform)
 	target_include_directories(SwimHelloWindow PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimHelloWindow "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 
-	add_executable(SwimHeadlessPlatform Source/Examples/HeadlessPlatform.cpp)
+	add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL Source/Examples/HeadlessPlatform.cpp)
 	target_link_libraries(SwimHeadlessPlatform PRIVATE Swim::Platform)
 	target_include_directories(SwimHeadlessPlatform PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimHeadlessPlatform "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
-add_library(SwimPlatformPublicHeaders OBJECT Source/Tests/Platform/PublicHeaderCompile.cpp)
+add_library(SwimPlatformPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/Platform/PublicHeaderCompile.cpp)
 target_include_directories(SwimPlatformPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 target_compile_features(SwimPlatformPublicHeaders PRIVATE cxx_std_20)
+swim_set_solution_folder(SwimPlatformPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 
 if(SWIM_BUILD_FOUNDATION_TESTS)
-	add_executable(SwimInputTests Source/Tests/Input/InputSystemTests.cpp)
+	add_executable(SwimInputTests EXCLUDE_FROM_ALL Source/Tests/Input/InputSystemTests.cpp)
 	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
 	target_include_directories(SwimInputTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimInputTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 if(NOT SWIM_BUILD_LEGACY_ENGINE)
@@ -141,7 +153,11 @@ if(NOT WIN32)
 	)
 endif()
 
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 include(cmake/Dependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
 
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(SwimVulkan INTERFACE)

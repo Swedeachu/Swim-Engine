@@ -335,6 +335,25 @@ function Get-SwimNinjaPath {
     return Get-SwimFirstExistingFile -Candidates $Candidates
 }
 
+function Assert-SwimVisualStudioSolutionLayout {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SolutionPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SolutionPath -PathType Leaf)) {
+        throw "Visual Studio solution does not exist at '$SolutionPath'."
+    }
+
+    $SolutionText = [System.IO.File]::ReadAllText($SolutionPath)
+    foreach ($FolderName in @("Engine Modules", "Tests", "Third Party", "CMake")) {
+        $FolderEntry = '= "' + $FolderName + '", "' + $FolderName + '",'
+        if (-not $SolutionText.Contains($FolderEntry)) {
+            throw "Visual Studio solution '$SolutionPath' is missing the expected '$FolderName' solution folder. Reconfigure it from the current CMake project."
+        }
+    }
+}
+
 function Get-SwimWindowsBuildPlan {
     param(
         [Parameter(Mandatory = $true)]

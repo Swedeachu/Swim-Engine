@@ -38,6 +38,7 @@ REQUIRED_CMAKE_FILES = (
     "cmake/Dependencies.cmake",
     "cmake/PlatformDependencies.cmake",
     "cmake/PhysX.cmake",
+    "cmake/SolutionLayout.cmake",
 )
 
 REQUIRED_BUILD_SCRIPTS = (
@@ -50,6 +51,7 @@ REQUIRED_BUILD_SCRIPTS = (
     "scripts/build-linux-clean.bat",
     "scripts/build-linux-soft.bat",
     "scripts/windows-build-common.ps1",
+    "scripts/generate-solution.ps1",
 )
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inl"}
@@ -92,6 +94,48 @@ def check_build_workflow(failures: list[str]) -> None:
 
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     platform_dependency_text = (ROOT / "cmake" / "PlatformDependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    dependency_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    physx_text = (ROOT / "cmake" / "PhysX.cmake").read_text(encoding="utf-8", errors="ignore")
+    solution_layout_text = (ROOT / "cmake" / "SolutionLayout.cmake").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        "USE_FOLDERS ON",
+        'PREDEFINED_TARGETS_FOLDER "CMake"',
+        'SWIM_SOLUTION_FOLDER_ENGINE_MODULES "Engine Modules"',
+        'SWIM_SOLUTION_FOLDER_TESTS "Tests"',
+        'SWIM_SOLUTION_FOLDER_EXAMPLES "Examples"',
+        'SWIM_SOLUTION_FOLDER_THIRD_PARTY "Third Party"',
+        "function(swim_set_solution_folder",
+    ):
+        if fragment not in solution_layout_text:
+            fail(f"Visual Studio solution layout contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'include(cmake/SolutionLayout.cmake)',
+        'swim_set_solution_folder(SwimPlatform "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
+        'swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
+        'add_executable(SwimHelloWindow EXCLUDE_FROM_ALL',
+        'add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL',
+        'add_library(SwimPlatformPublicHeaders OBJECT EXCLUDE_FROM_ALL',
+        'add_executable(SwimInputTests EXCLUDE_FROM_ALL',
+        '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3"',
+    ):
+        if fragment not in cmake_text:
+            fail(f"first-party/IDE target organization is missing: {fragment}", failures)
+
+    for fragment in (
+        '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Draco"',
+        '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/WebP"',
+        'EXCLUDE_FROM_ALL YES',
+        'swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")',
+        'swim_set_solution_folder(SwimBasis "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")',
+        'swim_set_solution_folder(SwimGlad "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")',
+    ):
+        if fragment not in dependency_text:
+            fail(f"third-party Visual Studio target organization is missing: {fragment}", failures)
+
+    if 'swim_set_solution_folder(SwimPhysXBuild "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/PhysX")' not in physx_text:
+        fail("PhysX build orchestration is not grouped under Third Party/PhysX", failures)
 
     required_cache_fragments = (
         'set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cache/cpm"',
@@ -177,6 +221,8 @@ def check_build_workflow(failures: list[str]) -> None:
             "rd /s /q",
             "Remove-SwimGeneratedDirectory",
             "MayBeDirectoryLink",
+            "Assert-SwimVisualStudioSolutionLayout",
+            '"Engine Modules", "Tests", "Third Party", "CMake"',
             "Ninja was not found; using the Visual Studio generator fallback",
             "[switch]$DebugBuild",
         ):
@@ -221,6 +267,7 @@ def check_build_workflow(failures: list[str]) -> None:
             '--preset windows-vs',
             'FETCHCONTENT_FULLY_DISCONNECTED=ON',
             'Visual Studio solution ready',
+            'Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution',
         ):
             if fragment not in clean_text:
                 fail(f"Windows clean build does not guarantee Visual Studio solution generation: {fragment}", failures)
@@ -234,9 +281,24 @@ def check_build_workflow(failures: list[str]) -> None:
             '--preset windows-vs',
             'FETCHCONTENT_FULLY_DISCONNECTED=ON',
             'Visual Studio solution synchronized',
+            'Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution',
         ):
             if fragment not in soft_text:
                 fail(f"Windows soft build does not keep the Visual Studio solution synchronized: {fragment}", failures)
+
+    generate_solution = ROOT / "scripts" / "generate-solution.ps1"
+    if generate_solution.is_file():
+        generate_text = generate_solution.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "windows-build-common.ps1",
+            "Get-SwimWindowsBuildPlan",
+            "--preset windows-vs",
+            "FETCHCONTENT_FULLY_DISCONNECTED=$Disconnected",
+            "Assert-SwimVisualStudioSolutionLayout",
+            "Organized Visual Studio solution ready",
+        ):
+            if fragment not in generate_text:
+                fail(f"manual Visual Studio solution generation bypasses the organized CMake workflow: {fragment}", failures)
 
     soft_scripts = (
         ROOT / "scripts" / "build-windows-soft.ps1",

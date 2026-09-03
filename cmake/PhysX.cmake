@@ -138,6 +138,7 @@ ExternalProject_Add(SwimPhysXBuild
 	BUILD_BYPRODUCTS ${SWIM_PHYSX_BYPRODUCTS}
 	USES_TERMINAL_BUILD YES
 )
+swim_set_solution_folder(SwimPhysXBuild "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/PhysX")
 
 function(swim_add_physx_import target_name library_name)
 	add_library(${target_name} STATIC IMPORTED GLOBAL)

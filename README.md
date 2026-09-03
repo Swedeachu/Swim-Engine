@@ -31,7 +31,34 @@ Generate a normal Visual Studio 2022 solution with:
 cmake --preset windows-vs
 ```
 
-Then open `build/windows-vs/SwimEngine.sln`. The solution is generated from the same `CMakeLists.txt` used by every other workflow. Solution Explorer mirrors the physical `Source/...` tree, and adding/removing/renaming C/C++ or shader files under `Source/Engine`, `Source/Game`, or `Source/Shaders` is picked up automatically on the next build through `GLOB_RECURSE ... CONFIGURE_DEPENDS`.
+Then open `build/windows-vs/SwimEngine.sln`. The solution is generated from the same `CMakeLists.txt` used by every other workflow. Solution Explorer mirrors the physical `Source/...` tree inside each project, and adding/removing/renaming C/C++ or shader files under `Source/Engine`, `Source/Game`, or `Source/Shaders` is picked up automatically on the next build through `GLOB_RECURSE ... CONFIGURE_DEPENDS`.
+
+The generated solution is intentionally organized instead of exposing every CMake target at the root:
+
+```text
+SwimEngine                 # primary executable; normal engine/game/renderer code
+Engine Modules/
+  SwimPlatform             # reusable platform boundary
+  SwimInput                # reusable input boundary
+Tests/
+  SwimPlatformPublicHeaders
+  SwimInputTests
+Examples/
+  SwimHelloWindow
+  SwimHeadlessPlatform
+Third Party/
+  SDL3/
+  Draco/
+  WebP/
+  Zstd/
+  Basis Universal/
+  GLAD/
+  PhysX/
+CMake/
+  ALL_BUILD, ZERO_CHECK, INSTALL, ...
+```
+
+`SwimPlatform` and `SwimInput` are real first-party module targets, not duplicate copies of `SwimEngine`: their source files are explicitly excluded from the `SwimEngine` source glob and linked into the executable once. Keeping those two foundational boundaries separate allows headless/tools/tests to reuse them without linking the whole renderer/game. Tests and examples stay visible for explicit validation but are `EXCLUDE_FROM_ALL`, so a normal engine build does not compile them. Third-party projects remain real dependency targets but are collapsed under `Third Party` (with large dependency graphs such as Draco and WebP nested again) rather than cluttering the solution root. CMake's predefined projects are kept under `CMake`.
 
 Build either configuration from the terminal with:
 
@@ -45,7 +72,7 @@ The generated executable keeps the historical name `Swim Engine.exe`.
 
 ### Clean and soft terminal builds
 
-A **clean build** is a full repository-local generated-state reset. It removes both Windows (or both Linux) configuration trees, the shared `build/.px` PhysX worktree/legacy junction, and the complete `.cache` dependency cache before configuring with dependency fetching enabled. The scripts verify those paths are actually gone before the first dependency is pulled. On Windows a clean build also regenerates `build/windows-vs/SwimEngine.sln` every time, even when Ninja is used for the actual compile. Use a clean build when bootstrapping a checkout, intentionally refreshing every pinned dependency, recovering from dependency/build corruption, or refreshing the Visual Studio solution.
+A **clean build** is a full repository-local generated-state reset. It removes both Windows (or both Linux) configuration trees, the shared `build/.px` PhysX worktree/legacy junction, and the complete `.cache` dependency cache before configuring with dependency fetching enabled. The scripts verify those paths are actually gone before the first dependency is pulled. On Windows a clean build also regenerates `build/windows-vs/SwimEngine.sln` every time, even when Ninja is used for the actual compile, and verifies that the expected organized solution folders were emitted. Use a clean build when bootstrapping a checkout, intentionally refreshing every pinned dependency, or recovering from dependency/build corruption; ordinary C++/CMake iteration should use the soft build.
 
 ```powershell
 # Windows Release / Debug
@@ -59,7 +86,7 @@ scripts\build-windows-clean.ps1 -Debug
 ./scripts/build-linux-clean.sh --debug
 ```
 
-A **soft build** reconfigures with `FETCHCONTENT_FULLY_DISCONNECTED=ON` and reuses the existing `.cache/cpm` dependency sources. On Windows it also refreshes `build/windows-vs/SwimEngine.sln` from the same disconnected cache before running the fast Ninja/MSVC build, so Visual Studio stays synchronized with CMake source/target changes during normal iteration. It will fail rather than downloading a missing dependency, which keeps normal iteration deterministic and fast.
+A **soft build** reconfigures with `FETCHCONTENT_FULLY_DISCONNECTED=ON` and reuses the existing `.cache/cpm` dependency sources. On Windows it also refreshes and validates the organized `build/windows-vs/SwimEngine.sln` from the same disconnected cache before running the fast Ninja/MSVC build, so Visual Studio stays synchronized with source files, target membership, and solution-folder changes during normal iteration. It will fail rather than downloading a missing dependency, which keeps normal iteration deterministic and fast.
 
 ```powershell
 # Windows Release / Debug

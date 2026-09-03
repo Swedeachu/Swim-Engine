@@ -41,7 +41,8 @@ try {
         throw "Visual Studio solution refresh completed without producing '$VisualStudioSolution'."
     }
 
-    Write-Host "[Swim] Visual Studio solution synchronized: $VisualStudioSolution"
+    Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution
+    Write-Host "[Swim] Visual Studio solution synchronized and organized: $VisualStudioSolution"
     & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
     exit $LASTEXITCODE
 }

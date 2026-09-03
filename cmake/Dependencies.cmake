@@ -236,12 +236,14 @@ if(DEFINED CMAKE_WARN_DEPRECATED)
 	set(SWIM_SAVED_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
 endif()
 set(CMAKE_WARN_DEPRECATED OFF)
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Draco")
 CPMAddPackage(
 	NAME draco_source
 	GITHUB_REPOSITORY google/draco
 	GIT_TAG 1.5.7
 	EXCLUDE_FROM_ALL YES
 )
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 if(SWIM_HAD_CMAKE_WARN_DEPRECATED)
 	set(CMAKE_WARN_DEPRECATED "${SWIM_SAVED_CMAKE_WARN_DEPRECATED}")
 else()
@@ -315,11 +317,14 @@ if(DEFINED CMAKE_WARN_DEPRECATED)
 endif()
 set(CMAKE_REQUIRED_QUIET TRUE)
 set(CMAKE_WARN_DEPRECATED OFF)
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/WebP")
 CPMAddPackage(
 	NAME webp_source
 	GITHUB_REPOSITORY webmproject/libwebp
 	GIT_TAG v1.5.0
+	EXCLUDE_FROM_ALL YES
 )
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 if(SWIM_HAD_WEBP_REQUIRED_QUIET)
 	set(CMAKE_REQUIRED_QUIET "${SWIM_SAVED_WEBP_REQUIRED_QUIET}")
 else()
@@ -417,6 +422,7 @@ target_compile_definitions(SwimZstd PRIVATE
 	_CRT_SECURE_NO_WARNINGS
 )
 add_library(zstd::zstd ALIAS SwimZstd)
+swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")
 
 # ---------------------------------------------------------------------------
 # tinygltf 2.9.x - kept header-only; one Swim-owned implementation TU defines
@@ -482,6 +488,7 @@ target_compile_definitions(SwimBasis PUBLIC
 )
 target_link_libraries(SwimBasis PUBLIC zstd::zstd)
 add_library(Swim::Basis ALIAS SwimBasis)
+swim_set_solution_folder(SwimBasis "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")
 
 # ---------------------------------------------------------------------------
 # GLAD 2.0.8 - regenerate the exact OpenGL 4.6 + WGL loader previously
@@ -494,6 +501,7 @@ CPMAddPackage(
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 )
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")
 add_subdirectory("${glad_source_SOURCE_DIR}/cmake" "${glad_source_BINARY_DIR}/cmake" EXCLUDE_FROM_ALL)
 glad_add_library(SwimGlad STATIC REPRODUCIBLE LOADER DEBUG
 	API gl:core=4.6 wgl=1.0
@@ -508,6 +516,8 @@ glad_add_library(SwimGlad STATIC REPRODUCIBLE LOADER DEBUG
 		WGL_EXT_swap_control
 )
 add_library(glad::glad ALIAS SwimGlad)
+swim_set_solution_folder(SwimGlad "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 
 include(cmake/PhysX.cmake)
 

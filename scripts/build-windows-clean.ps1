@@ -62,7 +62,8 @@ try {
         throw "Visual Studio solution generation completed without producing '$VisualStudioSolution'."
     }
 
-    Write-Host "[Swim] Visual Studio solution ready: $VisualStudioSolution"
+    Assert-SwimVisualStudioSolutionLayout -SolutionPath $VisualStudioSolution
+    Write-Host "[Swim] Visual Studio solution ready and organized: $VisualStudioSolution"
     & $BuildPlan.CMakePath --build --preset $BuildPlan.BuildPreset --parallel
     exit $LASTEXITCODE
 }
