@@ -38,6 +38,16 @@ namespace Swim::Jobs
 	class JobSystem;
 }
 
+namespace Swim::IO
+{
+	class AsyncIoService;
+}
+
+namespace Swim::Memory
+{
+	class FrameArena;
+}
+
 namespace Engine
 {
 
@@ -139,6 +149,8 @@ namespace Engine
 		void SetFontPool(FontPool* value) { fontPool = value; }
 		void SetFileSystem(Swim::Platform::FileSystem* value) { fileSystem = value; }
 		void SetJobSystem(Swim::Jobs::JobSystem* value) { jobSystem = value; }
+		void SetIoSystem(Swim::IO::AsyncIoService* value) { ioSystem = value; }
+		void SetFrameArena(Swim::Memory::FrameArena* value) { frameArena = value; }
 		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
 
 		// Defined in C++ since it also updates the ambiguous renderer pointer.
@@ -159,6 +171,8 @@ namespace Engine
 		FontPool& GetFontPool() const { return *GetSystem(fontPool); }
 		Swim::Platform::FileSystem& GetFileSystem() const { return *GetSystem(fileSystem); }
 		Swim::Jobs::JobSystem& GetJobSystem() const { return *GetSystem(jobSystem); }
+		Swim::IO::AsyncIoService& GetIoSystem() const { return *GetSystem(ioSystem); }
+		Swim::Memory::FrameArena& GetFrameArena() const { return *GetSystem(frameArena); }
 		EntityFactory& GetEntityFactory() const { return *GetSystem(entityFactory.get()); }
 		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
 
@@ -395,6 +409,8 @@ namespace Engine
 		FontPool* fontPool = nullptr;
 		Swim::Platform::FileSystem* fileSystem = nullptr;
 		Swim::Jobs::JobSystem* jobSystem = nullptr;
+		Swim::IO::AsyncIoService* ioSystem = nullptr;
+		Swim::Memory::FrameArena* frameArena = nullptr;
 		std::function<int()> fpsProvider;
 		bool transformHooksBound{ false };
 

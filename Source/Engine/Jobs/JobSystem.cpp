@@ -1,4 +1,5 @@
 #include "JobSystem.h"
+#include "Engine/Memory/ScratchArena.h"
 
 #include <algorithm>
 #include <atomic>
@@ -441,6 +442,7 @@ namespace Swim::Jobs
 			{
 				if (!locked->CancelRequested.load(std::memory_order_acquire))
 				{
+					Swim::Memory::ScratchScope scratch;
 					function(workerIndex);
 				}
 			}
@@ -451,6 +453,7 @@ namespace Swim::Jobs
 		{
 			if (!state->CancelRequested.load(std::memory_order_acquire))
 			{
+				Swim::Memory::ScratchScope scratch;
 				function(0);
 			}
 		};
@@ -497,6 +500,7 @@ namespace Swim::Jobs
 			{
 				if (!locked->CancelRequested.load(std::memory_order_acquire))
 				{
+					Swim::Memory::ScratchScope scratch;
 					function(range.start, range.end, workerIndex);
 				}
 			}
@@ -508,6 +512,7 @@ namespace Swim::Jobs
 		{
 			if (itemCount > 0 && !state->CancelRequested.load(std::memory_order_acquire))
 			{
+				Swim::Memory::ScratchScope scratch;
 				function(0, itemCount, 0);
 			}
 		};
@@ -536,6 +541,7 @@ namespace Swim::Jobs
 			{
 				if (!locked->CancelRequested.load(std::memory_order_acquire))
 				{
+					Swim::Memory::ScratchScope scratch;
 					function();
 				}
 			}
@@ -546,6 +552,7 @@ namespace Swim::Jobs
 		{
 			if (!state->CancelRequested.load(std::memory_order_acquire))
 			{
+				Swim::Memory::ScratchScope scratch;
 				function();
 			}
 		};
@@ -577,6 +584,7 @@ namespace Swim::Jobs
 			{
 				if (!locked->CancelRequested.load(std::memory_order_acquire))
 				{
+					Swim::Memory::ScratchScope scratch;
 					function();
 				}
 			}
@@ -587,6 +595,7 @@ namespace Swim::Jobs
 		{
 			if (!state->CancelRequested.load(std::memory_order_acquire))
 			{
+				Swim::Memory::ScratchScope scratch;
 				function();
 			}
 		};

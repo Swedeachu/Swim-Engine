@@ -173,6 +173,8 @@ namespace Engine
 		scene.SetFontPool(services.Fonts);
 		scene.SetFileSystem(services.Files);
 		scene.SetJobSystem(services.Jobs);
+		scene.SetIoSystem(services.IO);
+		scene.SetFrameArena(services.FrameMemory);
 		scene.SetFPSProvider(services.GetFPS);
 
 		if (services.Vulkan)

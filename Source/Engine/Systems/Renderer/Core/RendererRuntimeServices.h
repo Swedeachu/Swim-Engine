@@ -10,6 +10,16 @@ namespace Swim::Jobs
 	class JobSystem;
 }
 
+namespace Swim::IO
+{
+	class AsyncIoService;
+}
+
+namespace Swim::Memory
+{
+	class FrameArena;
+}
+
 namespace Engine
 {
 
@@ -25,6 +35,8 @@ namespace Engine
 	{
 		Swim::Platform::FileSystem* Files = nullptr;
 		Swim::Jobs::JobSystem* Jobs = nullptr;
+		Swim::IO::AsyncIoService* IO = nullptr;
+		Swim::Memory::FrameArena* FrameMemory = nullptr;
 		MeshPool* Meshes = nullptr;
 		TexturePool* Textures = nullptr;
 		MaterialPool* Materials = nullptr;
@@ -32,7 +44,7 @@ namespace Engine
 
 		bool IsValid() const
 		{
-			return Files && Jobs && Meshes && Textures && Materials && Fonts;
+			return Files && Jobs && IO && FrameMemory && Meshes && Textures && Materials && Fonts;
 		}
 	};
 

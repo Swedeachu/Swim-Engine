@@ -1,4 +1,5 @@
 #include "Engine/Jobs/JobSystem.h"
+#include "Engine/Memory/ScratchArena.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -58,14 +59,25 @@ int main()
 		Require(values[i] == static_cast<int>(i), "parallel-for result");
 	}
 
+	auto& mainScratch = Swim::Memory::GetThreadScratchArena();
+	mainScratch.Reset();
+	mainScratch.Allocate(32);
+	const std::size_t mainScratchBaseline = mainScratch.GetStats().UsedBytes;
+
 	bool mainThreadRan = false;
+	bool mainThreadScratchAvailable = false;
 	auto mainJob = jobs.ScheduleMainThread([&]()
 	{
 		mainThreadRan = true;
+		auto& scratch = Swim::Memory::GetThreadScratchArena();
+		scratch.Allocate(128);
+		mainThreadScratchAvailable = scratch.GetStats().UsedBytes > mainScratchBaseline;
 	});
 	jobs.RunMainThreadJobs();
 	jobs.Wait(mainJob);
 	Require(mainThreadRan, "main-thread pinned task");
+	Require(mainThreadScratchAvailable, "main-thread job scratch available");
+	Require(mainScratch.GetStats().UsedBytes == mainScratchBaseline, "main-thread job scratch rewound");
 
 	std::atomic<int> groupValue{ 0 };
 	Swim::Jobs::TaskGroup roots;

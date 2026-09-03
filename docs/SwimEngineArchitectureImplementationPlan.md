@@ -143,9 +143,11 @@ The key point is that `Swim::Engine` composes these systems. It is not itself th
 
 ---
 
-## 2. Current repository architecture audit
+## 2. Repository architecture audit / modernization baseline
 
 The repository already contains useful renderer, scene, BVH, text, behavior, physics, and indirect-drawing work. The modernization should preserve good algorithms and working behavior while correcting the dependency and ownership model around them.
+
+> **Status note:** this audit records the pre-refactor/problem baseline that motivated the plan. The phase checklists and dated checkpoints below are the authoritative current implementation state.
 
 ### 2.1 Platform leakage is currently foundational
 
@@ -348,10 +350,10 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [ ] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types.
 - [x] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
 - [ ] fastgltf types do not escape the asset importer/tool boundary.
-- [ ] enkiTS types do not become gameplay APIs.
+- [x] enkiTS types do not become gameplay APIs. *(enkiTS is private to `Swim::Jobs`; gameplay/renderer-facing APIs use Swim job types.)*
 - [ ] Persisted scene references never use raw `entt::entity` values as durable identity.
 - [ ] Scene serialization is independent from filesystem storage and editor/IPC transport.
-- [ ] Static initialization does not construct live Scene instances or require Engine services.
+- [x] Static initialization does not construct live Scene instances or require Engine services. *(Static scene registration stores constructor metadata; runtime Scene instances are created per engine.)*
 - [ ] RHI contracts do not contain UI canvas policy or high-level environment features.
 - [ ] Material objects do not own meshes.
 - [ ] Mesh assets do not own backend GPU buffers.
@@ -380,6 +382,7 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | GLM | vector/matrix/quaternion math | Keep as the baseline math library unless a measured limitation appears; isolate API-specific projection conventions above/below generic math rather than forking math types per renderer. |
 | nlohmann/json | human-readable scene/tool/config interchange | Keep for tooling and editable metadata where convenient; do not use JSON as the hot-path compiled asset representation. |
 | enkiTS | general task scheduler | Recommended implementation for `Swim::Jobs`; replace renderer-only global thread pool. |
+| mimalloc | general CPU heap / backing for focused transient arenas | Use as the process allocator and behind `Swim::Memory`; keep frame/scratch lifetime APIs engine-owned rather than exposing mimalloc as the gameplay allocation API. |
 | fastgltf | glTF/GLB source import | Use in asset compiler/dev importer; do not make it a shipping runtime dependency for compiled assets. |
 | meshoptimizer | vertex/index optimization, LOD, meshlets | Use offline in asset compiler. |
 | KTX-Software/libktx | KTX2 texture processing/transcoding | Use for compiled texture path. |
@@ -415,6 +418,7 @@ Examples:
 - SDL3: wrap.
 - PhysX/Jolt: wrap strongly.
 - enkiTS: expose a Swim jobs API and keep enkiTS implementation details private.
+- mimalloc: use as the process/general heap and arena backing, but expose Swim-owned lifetime concepts (`FrameArena`, scratch scopes) rather than allocator-specific APIs through gameplay/renderer contracts.
 - fastgltf: tool/import boundary, no runtime wrapper object graph needed.
 - meshoptimizer: call directly in the compiler implementation.
 - VMA: keep inside Vulkan backend, not behind an additional allocator abstraction unless required by RHI internals.
@@ -449,7 +453,7 @@ CMake is the authoritative build description and should reinforce the engine arc
 **Ninja manifest stability checkpoint (2026-09-03):** Windows soft/clean workflows keep the primary Ninja configure and build contiguous and refresh the secondary Visual Studio solution only after a successful primary build. First-party and shader source discovery remains configure-time globbing but no longer uses `CONFIGURE_DEPENDS`. A real clean Windows run proved that removing first-party glob watching was not sufficient because a fetched third-party project can still add its own `VerifyGlobs` edge; the resulting Ninja manifest repeatedly ran CMake (`[0/2]`, `[0/4]`, `[0/6]`, ...) without ever reaching compilation. Swim's Ninja presets now set `CMAKE_SUPPRESS_REGENERATION=ON`, and the top-level project forces the same contract for every Ninja generator. This is safe because every supported clean/soft workflow explicitly configures immediately before building, so source/dependency graph changes are still discovered before compilation while dependency-owned automatic regeneration cannot trap Ninja in a manifest loop. Both Windows scripts call `Assert-SwimNinjaManifestStable` after configure and refuse to invoke Ninja if `RERUN_CMAKE`, `VerifyGlobs.cmake`, or `cmake.verify_globs` appears in `build.ninja`. Configure-time generated Basis transcoder source remains write-if-different so unchanged configuration also preserves its timestamp. `verify-build-layout.py` guards these invariants.
 
 
-**Current foundation/build status (2026-09-03):** the dependency/bootstrap problems found by real Windows clean builds are now considered resolved enough for normal iteration: clean deletion is idempotent and long-path aware, the CPM cache is integrity-checked, nlohmann/json uses a pinned verified single-header artifact, PhysX builds from the short detached `build/.px` worktree, and the solution is regenerated by both Windows workflows. The real MSVC build has progressed from Platform errors through PhysX, PCH, renderer Win32/Vulkan include issues, and into the final first-party objects; the latest known compile checkpoint reached roughly 668/676 before a stale wide-string editor command in `Scene.cpp`, which has now been corrected. **Use the soft Windows build for normal C++ iteration from here.** Return to a clean build only when dependency declarations/pins, cache layout, or generated dependency-build contracts change, or when an integrity check explicitly requires it.
+**Current foundation/build status (2026-09-03):** dependency/bootstrap hardening remains in place: clean deletion is idempotent and long-path aware, the CPM cache is integrity-checked, nlohmann/json uses a pinned verified single-header artifact, PhysX builds from the short detached `build/.px` worktree, enkiTS v1.12 is pinned/cached for `Swim::Jobs`, and the solution is regenerated by both Windows workflows. A subsequent real Windows clean build reached the final `SwimEngine` link but exposed an over-broad legacy source exclusion: excluding every path containing `/IO/` also removed `Source/Engine/Systems/IO/CommandSystem.cpp` and `InputManager.cpp`, producing unresolved CommandSystem/InputManager symbols. The exclusion rules are now anchored to the exact first-party module roots (`Source/Engine/IO`, `Jobs`, `Input`, `Platform`, `Memory`) and the verifier rejects broad exclusions. Phase 3 now also pins mimalloc v3.4.5, so **the next Windows validation must be a clean build** to fetch the new dependency and prove the static allocator override plus final legacy link. After that succeeds, return to the soft Windows build for normal C++ iteration.
 
 ```text
 Build-time availability
@@ -466,7 +470,7 @@ Runtime selection
 A useful target dependency shape is shown below. `A -> B` means **A depends on B**:
 
 ```text
-Swim::Engine      -> Render, Scene, Physics, Animation, Audio, Ui, Input, Assets, Jobs, Io, Platform, Core
+Swim::Engine      -> Render, Scene, Physics, Animation, Audio, Ui, Input, Assets, Jobs, Io, Memory, Platform, Core
 Swim::Render      -> Rhi, Assets, Jobs, Core
 Swim::RhiVulkan   -> Rhi, Platform, Core, Vulkan-Headers, volk, vk-bootstrap, VMA
 Swim::Rhi         -> Core
@@ -477,7 +481,8 @@ Swim::Scene       -> Assets, Jobs, Core, EnTT
 Swim::Assets      -> Io, Jobs, Platform, Core
 Swim::Input       -> Platform, Core
 Swim::Io          -> Platform, Jobs, Core
-Swim::Jobs        -> Core, enkiTS
+Swim::Jobs        -> Memory, Core, enkiTS
+Swim::Memory      -> Core, mimalloc
 Swim::Platform    -> Core, SDL3
 ```
 
@@ -677,9 +682,9 @@ nlohmann/json cache-integrity follow-up:
 Validation still required before declaring Phase 1 fully exited:
 
 - Run the real SDL-backed `HelloWindow`/headless executables on both Windows and Linux. The current execution environment cannot resolve GitHub from the build container, so it cannot perform the fresh CPM/SDL pull needed for that test.
-- Continue the real Windows build from the current ~668/676 checkpoint through the remaining objects, final link, and launch. The stale editor-command compile path has been fixed; any next failures should now be treated as first-party C++/link/runtime issues unless the dependency-integrity checks say otherwise.
+- [x] Complete the real Windows/MSVC build through the remaining first-party objects and final link. The latest soft-build checkpoint now succeeds; runtime launch/smoke coverage remains separate from compile/link validation.
 - Explicitly build the `SwimPlatformPublicHeaders` validation target on Windows so the Windows half of the generic-public-header exit criterion is proven rather than inferred from the main engine compile.
-- The exit criterion requiring headless Core/Jobs/Assets initialization remains intentionally open because Jobs and the authoritative Assets architecture are later phases and do not exist yet.
+- The headless Core/Jobs/Assets exit criterion remains open because Core and Jobs now exist, but the authoritative Assets runtime is Phase 4 work and has not been implemented yet.
 
 **Clean-cache hardening:** real Windows clean runs exposed two independent deletion hazards: preserving `build/.px` while removing `.cache` could leave a short PhysX alias/worktree tied to a deleted checkout, and Windows PowerShell recursive deletion could fail halfway through old dependency caches containing paths beyond `MAX_PATH`, leaving a partially removed tree that then failed differently on the next run. Clean builds now remove all repository-local cache state and the short PhysX path before fetching. Windows cleanup is explicitly idempotent: already-absent paths and broken legacy junctions count as success, directory-entry existence is checked without requiring a junction target to resolve, and recursive deletion uses Windows extended-length (`\\?\`) paths through native `rd /s /q` rather than `Remove-Item -Recurse`. The post-delete verification uses the same directory-entry test, so a broken reparse point cannot be mistaken for a successful clean. PhysX builds from a detached Git worktree at `build/.px`, keeping generated NVIDIA projects/binaries isolated from the pinned CPM checkout. Configure-time dependency integrity checks fail immediately on any dirty Git-backed cache instead of allowing dirty-source state to break much later in PCH/compiler work.
 
@@ -861,7 +866,7 @@ Validation completed in the checkpoint environment:
 - `scripts/verify-build-layout.py` passes with the Phase 2 architecture invariants, including unique core ownership plus guards against CameraSystem, `VulkanIndexDraw`, or renderer scene access returning to global engine discovery.
 - `EngineConfig.cpp` and `EngineConfigTests.cpp` compile and run directly with GCC/C++20.
 - Offline CMake configuration succeeds with the legacy Windows engine disabled, and the `SwimCore`, `SwimEngineConfigTests`, and `SwimPlatformPublicHeaders` targets build successfully.
-- A full legacy Windows compile is still required for the changed `SwimEngine` and renderer-facing compatibility code; use the established soft Windows build for that first-party iteration rather than resetting the dependency cache.
+- The full legacy Windows/MSVC build now completes successfully after the Phase 2 ownership changes and Phase 3 scheduler integration; normal iteration remains on the established soft Windows build path.
 
 The Phase 2 runtime-ownership migration is complete for the existing engine. First-party runtime code has zero `SwimEngine::GetInstance()`, Mesh/Texture/Material/Font pool `GetInstance()`, or `EntityFactory::GetInstance()` calls. The transitional renderer caches are engine-owned until Phase 4 replaces them with the authoritative asset model, and scene preregistration stores constructor metadata rather than process-global mutable Scene instances so multiple engine instances can construct independent runtime scenes. `BehaviorFactory::GetInstance()` remains only as behavior-type registration metadata and is intentionally deferred to the Phase 5 scene/plugin registration redesign; it is not used as a runtime service owner.
 
@@ -920,41 +925,98 @@ Implemented at this safe compile boundary:
 - The next real Windows soft build passed the PCH boundary and compiled into the renderer before stopping in `OpenGLRenderer.cpp`: shutdown called `MaterialPool::Flush()` through a forward declaration without including `MaterialPool.h`. Renderer/scene runtime-service call sites now include the concrete service headers they dereference directly, and the verifier guards the affected boundaries so these MSVC-only incomplete-type regressions do not return.
 - The following Windows soft build reached 59/66 first-party build steps before `CubeMapControlTest.cpp` exposed another PCH-masked dependency boundary: the demo referenced `CubeMapController`/`CubeMap` and dereferenced `Renderer`, `Scene`, and `InputManager` without concrete declarations/includes. The demo now uses a non-owning `CubeMapController*` helper instead of leaking the renderer-owned `unique_ptr`, checks the controller before all use, and includes every concrete service it dereferences. The same direct-service include rule is enforced across `Source/Game` so this class of forward-declaration compile failure is caught before MSVC.
 - The same compile-readiness sweep removed the remaining project-local include case mismatches (`SetTextCallBack.h`, `RigidBody.h`, and the two lowercase `pch.h` uses). Windows had hidden these because its filesystem is case-insensitive; keeping the spelling aligned with the actual files avoids carrying avoidable failures into the later Linux legacy-engine migration.
+- The subsequent Windows soft-build cycle cleared the remaining PCH-masked concrete-type/include issues and now completes the full legacy `SwimEngine` build and final link successfully. This is the commit/checkpoint boundary for the Phase 2 ownership migration plus the Phase 3 scheduler foundation.
 
-This checkpoint deliberately stops before the Async IO and transient-memory portions below. They are the next Phase 3 work and should be added on top of a Windows/MSVC-validated scheduler boundary rather than mixed into the same broad ownership migration.
+The scheduler/ownership checkpoint is now Windows/MSVC validated through a successful full legacy engine link. **Next implementation work is the remaining Phase 3 foundation in this order: (1) Async IO service, (2) transient/per-frame and per-job scratch memory, (3) Phase 3 exit validation. Do not begin Phase 4 asset identity/residency until these are complete.**
 
 ### Async IO service
 
 Create a platform-neutral IO layer:
 
-- [ ] async full-file read;
-- [ ] async range read;
-- [ ] memory mapping;
-- [ ] priorities;
-- [ ] cancellation;
-- [ ] batch/adjacent-read opportunities;
-- [ ] completion on a known executor/thread;
-- [ ] explicit blocking API for tools/bootstrap/tests only.
+- [x] async full-file read;
+- [x] async range read;
+- [x] memory mapping;
+- [x] priorities;
+- [x] cancellation;
+- [x] batch/adjacent-read opportunities;
+- [x] completion on a known executor/thread;
+- [x] explicit blocking API for tools/bootstrap/tests only.
 
 Do not hide blocking filesystem work behind an apparently cheap asset getter.
+
+### Phase 3 Async IO checkpoint — 2026-09-03
+
+Implemented in this checkpoint:
+
+- Added the standalone `Swim::IO` module with engine-facing `AsyncIoService`, `ReadRequest`, full-file reads, exact range reads, multi-range reads, priorities, cooperative cancellation, explicit status/error reporting, and explicit blocking entrypoints for bootstrap/tools/tests. The implementation is platform-neutral C++ and uses `Swim::Jobs::ScheduleBlocking()` rather than creating IO-owned threads or `std::async` workers.
+- Async reads execute on the scheduler's reserved blocking lanes so filesystem stalls cannot consume normal compute-worker capacity. The service requires a running `JobSystem` with at least one blocking lane and rejects new work after shutdown begins.
+- Completion callbacks are never executed on an IO lane. Completed requests are queued internally and dispatched only by `AsyncIoService::PumpCompletions()` on the thread which initialized the service. `SwimEngine` initializes IO on its main thread and pumps completions before and after the normal frame update, giving future asset/streaming code a documented completion executor rather than an arbitrary worker callback.
+- Added adjacent/overlapping batch-range coalescing. `ReadRangesAsync()` preserves caller range order while sorting internally, merging overlapping/adjacent reads (plus an optional small `MaxCoalesceGapBytes`), performing fewer contiguous file reads, and scattering the requested chunks back into stable result slots. This establishes the package-streaming primitive needed by `.sasset/.spack` work without baking asset semantics into IO.
+- Memory mapping remains owned by `Swim::Platform::MappedFile`; `AsyncIoService::MapFileReadOnlyBlocking()` exposes it through the IO boundary while keeping the operation explicitly blocking. Full-file/range blocking helpers are named as blocking APIs so runtime asset getters cannot accidentally disguise synchronous disk work.
+- Cancellation is cooperative and deterministic: queued work observes cancellation before touching the filesystem; an already-running portable blocking read is allowed to finish, its data is discarded if cancellation was requested, and the request reaches `Cancelled` before its main-thread completion is dispatched. Shutdown supports drain or cancel-pending behavior.
+- `SwimEngine` uniquely owns `AsyncIoService`, injects it into transitional renderer/scene service views, exposes it to scenes without global discovery, drains IO callbacks while those consumers are still alive, and only then tears consumers down and shuts Jobs down. This preserves the Phase 2 lifetime rules.
+- Added `SwimAsyncIoTests` coverage for full reads, exact ranges, coalesced batch ranges, concurrent reads, failed IO, cancellation, owner-thread completion dispatch, memory mapping, and IO-before-Jobs shutdown. Added a public-header compile target and verifier guards for the module boundary, legacy source-glob exclusion, engine ownership/injection, main-thread pumping, and shutdown order.
+
+Validation completed in the checkpoint environment:
+
+- `scripts/verify-build-layout.py` passes with the Async IO architecture checks.
+- Offline CMake configure succeeds with the legacy engine disabled, and the standalone IO public header plus fallback `Swim::Jobs` target compile under GCC/C++20.
+- `AsyncIoService.cpp` compiles independently under GCC/C++20, and a temporary-file runtime smoke test passed full-file reads, batched/coalesced ranges, failed-read reporting, mapping, completion dispatch, and deterministic shutdown using the scheduler fallback.
+- The next real Windows clean build reached the final legacy link, which proves the Async IO translation units and their engine integration compiled under MSVC. The link failure was instead caused by the top-level legacy source filter accidentally excluding `Source/Engine/Systems/IO/CommandSystem.cpp` and `InputManager.cpp`; that filter is corrected at the following memory/build checkpoint.
+
+**Next implementation work remains Phase 3 transient memory:** add the small per-frame CPU arena and per-job/thread scratch strategy, validate their lifetime rules, then close Phase 3 before beginning Phase 4 asset identity/residency.
 
 ### Memory strategy
 
 Add simple, purposeful allocators before hot paths proliferate:
 
-- [ ] per-frame CPU arena;
-- [ ] per-job scratch arena or thread scratch;
-- [ ] temporary import/compiler arenas where useful;
-- [ ] persistent registries use stable containers/slot maps rather than frame allocation.
+- [x] per-frame CPU arena;
+- [x] per-job scratch arena or thread scratch;
+- [x] temporary import/compiler arena primitive is available through the same chunked `LinearArena`/`ScratchScope` foundation; importer/compiler adoption happens when those Phase 4/asset-compiler paths exist;
+- [x] frame/scratch allocations are explicitly transient and may not back persistent registries. Persistent asset registries must use stable containers/slot maps/handles rather than retaining arena pointers.
 
-Do not build a giant custom general allocator unless profiling demands it.
+Use mimalloc as the engine's general-purpose heap and backing allocator for these arenas, but keep lifetime-oriented arenas explicit. Do not build a giant custom general allocator unless profiling demonstrates a need beyond mimalloc plus focused frame/scratch allocation.
+
+### Phase 3 transient memory + mimalloc checkpoint — 2026-09-03
+
+Implemented in this checkpoint:
+
+- Added pinned Microsoft mimalloc v3.4.5 through `cmake/MemoryDependencies.cmake`. Swim builds the static library and upstream override object only; shared-library/redirection-DLL and dependency tests are disabled. Architecture-specific `MI_OPT_ARCH` is left off so the allocator does not silently raise the engine's baseline CPU requirement.
+- The final legacy `SwimEngine` executable consumes `mimalloc-obj`, which is the upstream static-override path and matches Swim's existing static `/MT` MSVC CRT contract. This makes ordinary process `malloc/free` and C++ allocation resolve through mimalloc without spreading allocator-specific calls throughout gameplay/renderer code. `Swim::Memory` additionally links the normal static target for explicit arena backing.
+- Added the standalone `Swim::Memory` module. `LinearArena` is a chunked bump allocator whose growth adds blocks instead of reallocating an existing block, so earlier allocations are not invalidated. Blocks are backed by `mi_malloc_aligned`/`mi_free` in real builds, retained across reset for reuse, and expose used/reserved/peak/block statistics. Markers support nested scoped rewinds, carry a reset generation so stale markers fail instead of silently rewinding a later frame, and reject fabricated forward rewinds. Allocation-size/alignment arithmetic is overflow-checked before growing a block.
+- Added engine-owned `FrameArena`. `SwimEngine` resets it once at the beginning of each accepted simulation/render frame, before fixed/update work, and injects a non-owning view into renderer runtime services and Scene services. Persistent objects must never retain pointers into this arena across `BeginFrame()`.
+- Added thread-local scratch storage plus RAII `ScratchScope`. Every JobSystem callback path (normal jobs, `ParallelFor` partitions, main-thread pinned work, blocking-lane work, and the fallback implementation) establishes a scratch scope automatically. Nested scopes rewind to their entry marker when they exit, so per-job temporary allocations are reclaimed without cross-thread synchronization while the thread retains its blocks for reuse.
+- Added `SwimMemoryTests` covering alignment, chunk growth, marker rewind, retained capacity after reset, per-frame reset/indexing, and thread scratch scope rewind.
+- Fixed the real Windows linker failure discovered immediately before this checkpoint. Legacy source exclusions are now anchored to exact `Source/Engine/<module>/` roots; the old broad `/IO/` rule had removed `Systems/IO/CommandSystem.cpp` and `Systems/IO/InputManager.cpp` from the executable. The verifier now rejects broad module-name exclusions so nested legacy directories cannot be silently dropped again.
+
+Lifetime rules established by this checkpoint:
+
+- frame memory is valid only until the next `FrameArena::BeginFrame()`;
+- scratch memory is valid only until the owning `ScratchScope` exits;
+- arena allocation does not run object destructors automatically, so use it for trivially destructible temporary data or explicitly destroy non-trivial objects before rewind/reset;
+- pointers/references from frame/scratch memory must not be stored in persistent ECS components, asset registries, renderer residency structures, async completions, or jobs that outlive the allocation scope;
+- mimalloc remains the general heap for persistent/irregular allocations; frame/scratch arenas exist to encode lifetime and reduce hot-path allocation churn, not to replace every container allocator.
+
+Validation completed in the checkpoint environment:
+
+- `scripts/verify-build-layout.py` passes, including the mimalloc pin/target contract, exact legacy source exclusions, arena ownership/injection, automatic per-job scratch scopes, and the guard against reintroducing broad `/IO/`/`/Jobs/` exclusions.
+- Offline CMake configuration succeeds with the legacy Windows engine disabled.
+- `SwimMemoryTests`, `SwimJobSystemTests`, and `SwimEngineConfigTests` compile and run successfully under GCC/C++20 using the dependency-free fallback allocator path.
+- A fully dependency-free rebuild of `SwimAsyncIoTests` is not possible because the existing offline SDL stub does not provide SDL headers needed by `SwimPlatform`; this is an existing offline-stub limitation, not a memory/mimalloc regression. The earlier real Windows clean build already compiled the Async IO integration through to the final executable link.
+- **Required next validation:** run the Windows clean build. This checkpoint changes dependency declarations by adding mimalloc, so a soft build cannot fetch the new pin. The clean run must confirm mimalloc v3.4.5 fetch/configure, static override compilation under `/MT`, and the final `Swim Engine.exe` link after the corrected source filters.
 
 ### Phase 3 exit criteria
 
 - [x] renderer code can use a general `ParallelFor` without knowing enkiTS.
-- [ ] asset loader has a non-blocking read primitive available.
+- [x] asset loader has a non-blocking read primitive available.
 - [x] no new thread-per-file or thread-per-subsystem patterns; compute and reserved blocking work share the engine-owned scheduler.
-- [ ] jobs and IO shut down deterministically.
+- [x] jobs and IO shut down deterministically.
+- [x] engine-owned per-frame transient memory has a documented one-frame lifetime and no global owner.
+- [x] JobSystem callbacks automatically receive thread-local scratch lifetime without exposing scheduler internals.
+- [x] general persistent heap allocation is routed through the pinned mimalloc integration in real builds, with explicit arena backing also using mimalloc.
+- [ ] final Windows/MSVC clean build fetches mimalloc v3.4.5 and links the legacy executable successfully with the corrected source filters and static allocator override.
+
+Do not begin Phase 4 asset identity/residency until the final Windows clean-build checkbox above is validated.
 
 ---
 
@@ -2914,7 +2976,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 8. [ ] Replace global `SwimEngine` dependency discovery with explicit Engine composition/services.
 9. [ ] Add runtime `GraphicsBackend` and `PhysicsBackend` config/launcher parsing.
 10. [ ] Introduce enkiTS-backed Jobs service and retire renderer-global worker ownership.
-11. [ ] Add async/range IO service.
+11. [x] Add async/range IO service.
 
 ### 35.2 Data and scene foundations
 

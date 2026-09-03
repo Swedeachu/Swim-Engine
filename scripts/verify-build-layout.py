@@ -36,6 +36,7 @@ REQUIRED_CMAKE_FILES = (
     "CMakePresets.json",
     "cmake/get_cpm.cmake",
     "cmake/Dependencies.cmake",
+    "cmake/MemoryDependencies.cmake",
     "cmake/PlatformDependencies.cmake",
     "cmake/PhysX.cmake",
     "cmake/SolutionLayout.cmake",
@@ -730,6 +731,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
     public_header_roots = (
         ROOT / "Source" / "Engine" / "Platform",
         ROOT / "Source" / "Engine" / "Input",
+        ROOT / "Source" / "Engine" / "IO",
     )
     banned_public_fragments = (
         "<Windows.h>",
@@ -764,8 +766,8 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
         "target_link_libraries(SwimPlatform PRIVATE ${SWIM_SDL3_TARGET})",
         "add_library(Swim::Input ALIAS SwimInput)",
         "target_link_libraries(SwimInput PUBLIC Swim::Platform)",
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Platform/")',
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Input/")',
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")',
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")',
     )
     for fragment in required_foundation_fragments:
         if fragment not in cmake_text:
@@ -1163,7 +1165,7 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
     for fragment in (
         "add_library(SwimJobs STATIC",
         "add_library(Swim::Jobs ALIAS SwimJobs)",
-        "target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS)",
+        "target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS Swim::Memory)",
         "add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL",
         "target_link_libraries(SwimEngine PRIVATE",
         "Swim::Jobs",
@@ -1171,8 +1173,8 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
         if fragment not in cmake_text:
             fail(f"Phase 3 JobSystem CMake boundary is missing: {fragment}", failures)
 
-    if 'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Jobs/")' not in cmake_text:
-        fail("JobSystem.cpp can be compiled twice: legacy SwimEngine source glob must exclude /Jobs/", failures)
+    if 'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")' not in cmake_text:
+        fail("JobSystem.cpp can be compiled twice: legacy SwimEngine source glob must exclude the module root", failures)
 
     for fragment in (
         "class JobSystem",
@@ -1229,6 +1231,209 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
     if "Scheduler.WaitforAll();" in job_source:
         fail("JobSystem WaitForAll regressed to scheduler-wide WaitforAll while permanent blocking lanes are alive", failures)
 
+
+def check_phase3_io_architecture(failures: list[str]) -> None:
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    io_header_path = ROOT / "Source" / "Engine" / "IO" / "AsyncIoService.h"
+    io_source_path = ROOT / "Source" / "Engine" / "IO" / "AsyncIoService.cpp"
+    io_test_path = ROOT / "Source" / "Tests" / "IO" / "AsyncIoServiceTests.cpp"
+    if not io_header_path.is_file() or not io_source_path.is_file() or not io_test_path.is_file():
+        fail("Phase 3 Async IO service/tests are missing", failures)
+        return
+
+    io_header = io_header_path.read_text(encoding="utf-8", errors="ignore")
+    io_source = io_source_path.read_text(encoding="utf-8", errors="ignore")
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
+    renderer_services = (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h"
+    ).read_text(encoding="utf-8", errors="ignore")
+    scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+
+    for fragment in (
+        "add_library(SwimIO STATIC",
+        "add_library(Swim::IO ALIAS SwimIO)",
+        "PUBLIC Swim::Platform",
+        "PRIVATE Swim::Jobs",
+        "add_executable(SwimAsyncIoTests EXCLUDE_FROM_ALL",
+        "target_link_libraries(SwimAsyncIoTests PRIVATE Swim::IO Swim::Jobs)",
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")',
+        "Swim::IO",
+    ):
+        if fragment not in cmake_text:
+            fail(f"Phase 3 Async IO CMake boundary is missing: {fragment}", failures)
+
+    for fragment in (
+        "class AsyncIoService",
+        "class ReadRequest",
+        "ReadFileAsync",
+        "ReadRangeAsync",
+        "ReadRangesAsync",
+        "MaxCoalesceGapBytes",
+        "PumpCompletions",
+        "ReadFileBlocking",
+        "ReadRangeBlocking",
+        "MapFileReadOnlyBlocking",
+        "IoShutdownMode",
+        "RequestCancel",
+    ):
+        if fragment not in io_header:
+            fail(f"Phase 3 Async IO public contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "ScheduleBlocking",
+        "OwnerThread",
+        "QueueCompletion",
+        "ReadRangesBlockingImpl",
+        "maxCoalesceGapBytes",
+        "IoStatus::Cancelled",
+    ):
+        if fragment not in io_source:
+            fail(f"Phase 3 Async IO implementation contract is missing: {fragment}", failures)
+
+    if "std::async" in io_source or "detach()" in io_source:
+        fail("Async IO created an unmanaged thread/future path instead of using Swim::Jobs blocking lanes", failures)
+
+    for fragment in (
+        "std::unique_ptr<Swim::IO::AsyncIoService> ioSystem",
+        "ioSystem->Initialize(platformSystem->GetFileSystem(), *jobSystem)",
+        "rendererRuntimeServices.IO = ioSystem.get()",
+        "sceneServices.IO = ioSystem.get()",
+        "ioSystem->PumpCompletions()",
+        "ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain)",
+    ):
+        target = engine_header if "unique_ptr" in fragment else engine_source
+        if fragment not in target:
+            fail(f"engine-owned Async IO lifecycle/injection is missing: {fragment}", failures)
+
+    if "Swim::IO::AsyncIoService* IO" not in renderer_services:
+        fail("legacy renderer runtime services do not expose the engine-owned Async IO service", failures)
+    if "Swim::IO::AsyncIoService* IO" not in scene_system_header:
+        fail("SceneSystem services do not expose the engine-owned Async IO service", failures)
+    if "GetIoSystem()" not in scene_header:
+        fail("Scene runtime service view does not expose Async IO without global discovery", failures)
+
+    io_shutdown_index = engine_source.find("ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain)")
+    scene_exit_index = engine_source.find('exitSystem("SceneSystem", sceneSystem.get())')
+    jobs_shutdown_index = engine_source.find("jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain)")
+    if io_shutdown_index == -1 or scene_exit_index == -1 or jobs_shutdown_index == -1:
+        fail("cannot validate Async IO shutdown ordering", failures)
+    elif not (io_shutdown_index < scene_exit_index < jobs_shutdown_index):
+        fail("Async IO must drain while consumers are alive and before JobSystem shutdown", failures)
+
+
+
+def check_phase3_memory_architecture(failures: list[str]) -> None:
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    dependency_path = ROOT / "cmake" / "MemoryDependencies.cmake"
+    arena_header_path = ROOT / "Source" / "Engine" / "Memory" / "LinearArena.h"
+    arena_source_path = ROOT / "Source" / "Engine" / "Memory" / "LinearArena.cpp"
+    frame_header_path = ROOT / "Source" / "Engine" / "Memory" / "FrameArena.h"
+    scratch_header_path = ROOT / "Source" / "Engine" / "Memory" / "ScratchArena.h"
+    scratch_source_path = ROOT / "Source" / "Engine" / "Memory" / "ScratchArena.cpp"
+    test_path = ROOT / "Source" / "Tests" / "Memory" / "MemoryArenaTests.cpp"
+
+    required_paths = (dependency_path, arena_header_path, arena_source_path, frame_header_path, scratch_header_path, scratch_source_path, test_path)
+    if not all(path.is_file() for path in required_paths):
+        fail("Phase 3 transient-memory module/tests are incomplete", failures)
+        return
+
+    dependency_text = dependency_path.read_text(encoding="utf-8", errors="ignore")
+    arena_header = arena_header_path.read_text(encoding="utf-8", errors="ignore")
+    arena_source = arena_source_path.read_text(encoding="utf-8", errors="ignore")
+    frame_header = frame_header_path.read_text(encoding="utf-8", errors="ignore")
+    scratch_header = scratch_header_path.read_text(encoding="utf-8", errors="ignore")
+    scratch_source = scratch_source_path.read_text(encoding="utf-8", errors="ignore")
+    job_source = (ROOT / "Source" / "Engine" / "Jobs" / "JobSystem.cpp").read_text(encoding="utf-8", errors="ignore")
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
+    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h").read_text(encoding="utf-8", errors="ignore")
+    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
+    scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        "GITHUB_REPOSITORY microsoft/mimalloc",
+        "GIT_TAG v3.4.5",
+        "MI_OVERRIDE ON",
+        "MI_BUILD_SHARED OFF",
+        "MI_BUILD_STATIC ON",
+        "MI_BUILD_OBJECT ON",
+        "MI_BUILD_TESTS OFF",
+        "MI_WIN_REDIRECT OFF",
+        "MI_OPT_ARCH OFF",
+        "add_library(Swim::Mimalloc ALIAS SwimMimalloc)",
+    ):
+        if fragment not in dependency_text:
+            fail(f"mimalloc dependency contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "add_library(SwimMemory STATIC",
+        "add_library(Swim::Memory ALIAS SwimMemory)",
+        "target_link_libraries(SwimMemory PRIVATE Swim::Mimalloc)",
+        "SWIM_MEMORY_USE_MIMALLOC",
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")',
+        "target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)",
+        "add_executable(SwimMemoryTests EXCLUDE_FROM_ALL",
+        "Swim::Memory",
+    ):
+        if fragment not in cmake_text:
+            fail(f"Phase 3 memory CMake boundary is missing: {fragment}", failures)
+
+    for fragment in ("class LinearArena", "ArenaMarker", "ArenaStats", "Allocate", "Rewind", "Reset"):
+        if fragment not in arena_header:
+            fail(f"LinearArena contract is missing: {fragment}", failures)
+
+    for fragment in ("mi_malloc_aligned", "mi_free", "SWIM_MEMORY_USE_MIMALLOC"):
+        if fragment not in arena_source:
+            fail(f"LinearArena does not use the mimalloc backing path: {fragment}", failures)
+
+    if "class FrameArena" not in frame_header or "BeginFrame" not in frame_header:
+        fail("per-frame arena contract is missing", failures)
+    if "class ScratchScope" not in scratch_header or "GetThreadScratchArena" not in scratch_header:
+        fail("thread scratch contract is missing", failures)
+    if "thread_local LinearArena" not in scratch_source:
+        fail("thread scratch arena is not thread-local", failures)
+    if "Swim::Memory::ScratchScope scratch" not in job_source:
+        fail("JobSystem does not establish automatic per-job scratch scopes", failures)
+
+    for fragment in (
+        "Swim::Memory::FrameArena frameArena",
+        "GetFrameArena()",
+    ):
+        if fragment not in engine_header:
+            fail(f"engine-owned frame arena is missing: {fragment}", failures)
+    for fragment in (
+        "frameArena.BeginFrame",
+        "rendererRuntimeServices.FrameMemory = &frameArena",
+        "sceneServices.FrameMemory = &frameArena",
+    ):
+        if fragment not in engine_source:
+            fail(f"frame arena lifecycle/injection is missing: {fragment}", failures)
+
+    if "Swim::Memory::FrameArena* FrameMemory" not in renderer_services:
+        fail("legacy renderer runtime services do not expose frame memory", failures)
+    if "Swim::Memory::FrameArena* FrameMemory" not in scene_system_header:
+        fail("SceneSystem services do not expose frame memory", failures)
+    if "GetFrameArena()" not in scene_header:
+        fail("Scene runtime service view does not expose frame memory", failures)
+
+    broad_filters = (
+        'EXCLUDE REGEX "/IO/"',
+        'EXCLUDE REGEX "/Jobs/"',
+        'EXCLUDE REGEX "/Input/"',
+        'EXCLUDE REGEX "/Platform/"',
+        'EXCLUDE REGEX "/Memory/"',
+    )
+    for fragment in broad_filters:
+        if fragment in cmake_text:
+            fail(f"legacy source exclusion is too broad and can remove unrelated implementation files: {fragment}", failures)
+
+
 def check_source_files_are_utf8(failures: list[str]) -> None:
     for source_root in (ROOT / "Source",):
         if not source_root.exists():
@@ -1257,6 +1462,8 @@ def main() -> int:
     check_foundation_architecture_boundaries(failures)
     check_phase2_engine_architecture(failures)
     check_phase3_job_architecture(failures)
+    check_phase3_io_architecture(failures)
+    check_phase3_memory_architecture(failures)
     check_source_files_are_utf8(failures)
 
     if failures:

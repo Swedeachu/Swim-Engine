@@ -23,6 +23,16 @@ namespace Swim::Jobs
 	class JobSystem;
 }
 
+namespace Swim::IO
+{
+	class AsyncIoService;
+}
+
+namespace Swim::Memory
+{
+	class FrameArena;
+}
+
 namespace Engine
 {
 
@@ -39,6 +49,8 @@ namespace Engine
 		FontPool* Fonts = nullptr;
 		Swim::Platform::FileSystem* Files = nullptr;
 		Swim::Jobs::JobSystem* Jobs = nullptr;
+		Swim::IO::AsyncIoService* IO = nullptr;
+		Swim::Memory::FrameArena* FrameMemory = nullptr;
 		const EngineState* State = nullptr;
 		ClipSpaceDepthRange ClipDepth = ClipSpaceDepthRange::ZeroToOne;
 		std::function<bool(const std::string&, std::uintptr_t)> SendEditorMessage;
@@ -46,7 +58,7 @@ namespace Engine
 
 		bool IsValid() const
 		{
-			return Input && Commands && Camera && State && Files && Jobs && Meshes && Textures && Materials && Fonts && (Vulkan || OpenGL);
+			return Input && Commands && Camera && State && Files && Jobs && IO && FrameMemory && Meshes && Textures && Materials && Fonts && (Vulkan || OpenGL);
 		}
 	};
 

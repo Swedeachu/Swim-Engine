@@ -6,6 +6,8 @@
 #include "Engine/Platform/EditorIpcBridge.h"
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Jobs/JobSystem.h"
+#include "Engine/IO/AsyncIoService.h"
+#include "Engine/Memory/FrameArena.h"
 #include "Engine/Systems/IO/CommandSystem.h"
 #include "Engine/Systems/Physics/PhysicsSystem.h"
 #include "Engine/Systems/Renderer/Renderer.h"
@@ -77,6 +79,8 @@ namespace Engine
 		MaterialPool* GetMaterialPool() { return materialPool.get(); }
 		FontPool* GetFontPool() { return fontPool.get(); }
 		Swim::Jobs::JobSystem* GetJobSystem() { return jobSystem.get(); }
+		Swim::IO::AsyncIoService* GetIoSystem() { return ioSystem.get(); }
+		Swim::Memory::FrameArena& GetFrameArena() { return frameArena; }
 
 		Renderer& GetRenderer();
 
@@ -146,6 +150,8 @@ namespace Engine
 		std::unique_ptr<Swim::Platform::Window> engineWindow;
 		std::unique_ptr<Swim::Platform::EditorIpcBridge> editorIpcBridge;
 		std::unique_ptr<Swim::Jobs::JobSystem> jobSystem;
+		std::unique_ptr<Swim::IO::AsyncIoService> ioSystem;
+		Swim::Memory::FrameArena frameArena;
 
 		// Core systems have unique ownership. Legacy consumers receive non-owning
 		// pointers whose lifetime is bounded by SwimEngine's explicit shutdown order.

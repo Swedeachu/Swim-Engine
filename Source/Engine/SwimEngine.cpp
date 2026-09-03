@@ -274,6 +274,13 @@ namespace Engine
 			return -1;
 		}
 
+		ioSystem = std::make_unique<Swim::IO::AsyncIoService>();
+		if (!ioSystem->Initialize(platformSystem->GetFileSystem(), *jobSystem))
+		{
+			std::cerr << "[Engine] Failed to initialize AsyncIoService.\n";
+			return -1;
+		}
+
 		inputManager = std::make_unique<InputManager>();
 		commandSystem = std::make_unique<CommandSystem>();
 		sceneSystem = std::make_unique<SceneSystem>();
@@ -327,6 +334,8 @@ namespace Engine
 
 		rendererRuntimeServices.Files = &platformSystem->GetFileSystem();
 		rendererRuntimeServices.Jobs = jobSystem.get();
+		rendererRuntimeServices.IO = ioSystem.get();
+		rendererRuntimeServices.FrameMemory = &frameArena;
 		rendererRuntimeServices.Meshes = meshPool.get();
 		rendererRuntimeServices.Textures = texturePool.get();
 		rendererRuntimeServices.Materials = materialPool.get();
@@ -345,6 +354,8 @@ namespace Engine
 		sceneServices.Fonts = fontPool.get();
 		sceneServices.Files = &platformSystem->GetFileSystem();
 		sceneServices.Jobs = jobSystem.get();
+		sceneServices.IO = ioSystem.get();
+		sceneServices.FrameMemory = &frameArena;
 		sceneServices.State = &engineState;
 		sceneServices.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
 			? ClipSpaceDepthRange::ZeroToOne
@@ -609,6 +620,7 @@ namespace Engine
 			}
 
 			accumulatedTime += delta;
+			frameArena.BeginFrame(static_cast<std::uint64_t>(totalFrames) + 1);
 			Transform::BeginFrameDirtyTracking();
 
 			while (accumulatedTime >= fixedTimeStep)
@@ -664,12 +676,20 @@ namespace Engine
 		{
 			jobSystem->RunMainThreadJobs();
 		}
+		if (ioSystem && ioSystem->IsRunning())
+		{
+			ioSystem->PumpCompletions();
+		}
 
 		UpdateSystems(dt);
 
 		if (jobSystem && jobSystem->IsRunning())
 		{
 			jobSystem->RunMainThreadJobs();
+		}
+		if (ioSystem && ioSystem->IsRunning())
+		{
+			ioSystem->PumpCompletions();
 		}
 
 		fpsTimeAccumulator += dt;
@@ -791,9 +811,16 @@ namespace Engine
 			}
 		};
 
-		// Complete any work which may still reference scene/renderer state before
-		// those owners begin teardown. Blocking IO lanes remain alive until the
-		// final JobSystem shutdown below.
+		// Drain IO first while every consumer and its completion callback target is
+		// still alive. AsyncIoService owns no threads; its blocking work runs on
+		// JobSystem lanes, so Jobs remains alive until the service is shut down.
+		if (ioSystem && ioSystem->IsRunning())
+		{
+			ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain);
+		}
+
+		// Complete any remaining compute/main-thread work which may still reference
+		// scene/renderer state before those owners begin teardown.
 		if (jobSystem && jobSystem->IsRunning())
 		{
 			jobSystem->RunMainThreadJobs();
@@ -834,6 +861,8 @@ namespace Engine
 
 		exitSystem("InputManager", inputManager.get());
 		inputManager.reset();
+
+		ioSystem.reset();
 
 		if (jobSystem)
 		{

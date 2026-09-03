@@ -529,6 +529,7 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 include(cmake/PhysX.cmake)
 
 foreach(SWIM_CACHED_GIT_DEPENDENCY IN ITEMS
+	mimalloc_source
 	sdl3_source
 	glm_source
 	entt_source

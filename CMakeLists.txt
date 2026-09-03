@@ -81,6 +81,13 @@ endif()
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	include(cmake/get_cpm.cmake)
 endif()
+
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/mimalloc")
+include(cmake/MemoryDependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
+
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/enkiTS")
 include(cmake/JobDependencies.cmake)
@@ -142,6 +149,26 @@ else()
 endif()
 
 
+file(GLOB_RECURSE SWIM_MEMORY_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.h
+)
+
+add_library(SwimMemory STATIC ${SWIM_MEMORY_SOURCES})
+add_library(Swim::Memory ALIAS SwimMemory)
+target_include_directories(SwimMemory PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_link_libraries(SwimMemory PRIVATE Swim::Mimalloc)
+target_compile_features(SwimMemory PUBLIC cxx_std_20)
+target_compile_definitions(SwimMemory PRIVATE SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_MEMORY_SOURCES})
+swim_set_solution_folder(SwimMemory "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+if(MSVC)
+	target_compile_options(SwimMemory PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimMemory PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
@@ -150,7 +177,7 @@ file(GLOB_RECURSE SWIM_JOB_SOURCES
 add_library(SwimJobs STATIC ${SWIM_JOB_SOURCES})
 add_library(Swim::Jobs ALIAS SwimJobs)
 target_include_directories(SwimJobs PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS)
+target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS Swim::Memory)
 target_compile_features(SwimJobs PUBLIC cxx_std_20)
 target_compile_definitions(SwimJobs PRIVATE SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>)
 source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_JOB_SOURCES})
@@ -160,6 +187,27 @@ if(MSVC)
 	target_compile_options(SwimJobs PRIVATE /utf-8 /W3 /permissive-)
 else()
 	target_compile_options(SwimJobs PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+file(GLOB_RECURSE SWIM_IO_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.h
+)
+
+add_library(SwimIO STATIC ${SWIM_IO_SOURCES})
+add_library(Swim::IO ALIAS SwimIO)
+target_include_directories(SwimIO PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_link_libraries(SwimIO
+	PUBLIC Swim::Platform
+	PRIVATE Swim::Jobs
+)
+target_compile_features(SwimIO PUBLIC cxx_std_20)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_IO_SOURCES})
+swim_set_solution_folder(SwimIO "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+if(MSVC)
+	target_compile_options(SwimIO PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimIO PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 add_library(SwimCore STATIC
@@ -195,6 +243,11 @@ target_include_directories(SwimPlatformPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}
 target_compile_features(SwimPlatformPublicHeaders PRIVATE cxx_std_20)
 swim_set_solution_folder(SwimPlatformPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+add_library(SwimIoPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/IO/PublicHeaderCompile.cpp)
+target_include_directories(SwimIoPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimIoPublicHeaders PRIVATE cxx_std_20)
+swim_set_solution_folder(SwimIoPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
+
 if(SWIM_BUILD_FOUNDATION_TESTS)
 	add_executable(SwimInputTests EXCLUDE_FROM_ALL Source/Tests/Input/InputSystemTests.cpp)
 	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
@@ -206,10 +259,20 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	target_include_directories(SwimEngineConfigTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimEngineConfigTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+	add_executable(SwimMemoryTests EXCLUDE_FROM_ALL Source/Tests/Memory/MemoryArenaTests.cpp)
+	target_link_libraries(SwimMemoryTests PRIVATE Swim::Memory)
+	target_include_directories(SwimMemoryTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimMemoryTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
 	add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL Source/Tests/Jobs/JobSystemTests.cpp)
 	target_link_libraries(SwimJobSystemTests PRIVATE Swim::Jobs)
 	target_include_directories(SwimJobSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimJobSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimAsyncIoTests EXCLUDE_FROM_ALL Source/Tests/IO/AsyncIoServiceTests.cpp)
+	target_link_libraries(SwimAsyncIoTests PRIVATE Swim::IO Swim::Jobs)
+	target_include_directories(SwimAsyncIoTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimAsyncIoTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 if(NOT SWIM_BUILD_LEGACY_ENGINE)
@@ -244,9 +307,11 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.hpp
 )
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Platform/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Input/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Jobs/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
 
 file(GLOB_RECURSE SWIM_GAME_SOURCES
@@ -268,6 +333,13 @@ add_executable(SwimEngine
 	${SWIM_GAME_SOURCES}
 	${SWIM_SHADER_SOURCES}
 )
+
+# The final process owns the general allocator override. On Windows Swim uses
+# the static /MT CRT, matching mimalloc's static override contract; the object
+# target is preferred over an archive so malloc/free/new/delete resolve here.
+if(SWIM_MEMORY_USE_MIMALLOC AND TARGET mimalloc-obj)
+	target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)
+endif()
 
 set_property(TARGET SwimEngine PROPERTY EXPORT_COMPILE_COMMANDS ON)
 set_target_properties(SwimEngine PROPERTIES
@@ -374,7 +446,9 @@ endif()
 
 target_link_libraries(SwimEngine PRIVATE
 	Swim::Core
+	Swim::Memory
 	Swim::Jobs
+	Swim::IO
 	Swim::Platform
 	Swim::Input
 	Vulkan::Vulkan
