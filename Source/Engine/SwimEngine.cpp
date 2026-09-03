@@ -281,6 +281,13 @@ namespace Engine
 			return -1;
 		}
 
+		assetSystem = std::make_unique<Swim::Assets::AssetSystem>();
+		if (!assetSystem->Initialize())
+		{
+			std::cerr << "[Engine] Failed to initialize AssetSystem.\n";
+			return -1;
+		}
+
 		inputManager = std::make_unique<InputManager>();
 		commandSystem = std::make_unique<CommandSystem>();
 		sceneSystem = std::make_unique<SceneSystem>();
@@ -335,6 +342,7 @@ namespace Engine
 		rendererRuntimeServices.Files = &platformSystem->GetFileSystem();
 		rendererRuntimeServices.Jobs = jobSystem.get();
 		rendererRuntimeServices.IO = ioSystem.get();
+		rendererRuntimeServices.Assets = assetSystem.get();
 		rendererRuntimeServices.FrameMemory = &frameArena;
 		rendererRuntimeServices.Meshes = meshPool.get();
 		rendererRuntimeServices.Textures = texturePool.get();
@@ -355,6 +363,7 @@ namespace Engine
 		sceneServices.Files = &platformSystem->GetFileSystem();
 		sceneServices.Jobs = jobSystem.get();
 		sceneServices.IO = ioSystem.get();
+		sceneServices.Assets = assetSystem.get();
 		sceneServices.FrameMemory = &frameArena;
 		sceneServices.State = &engineState;
 		sceneServices.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
@@ -849,6 +858,12 @@ namespace Engine
 		texturePool.reset();
 		meshPool.reset();
 		rendererRuntimeServices = {};
+
+		if (assetSystem && assetSystem->IsRunning())
+		{
+			assetSystem->Shutdown();
+		}
+		assetSystem.reset();
 
 		exitSystem("CameraSystem", cameraSystem.get());
 		cameraSystem.reset();

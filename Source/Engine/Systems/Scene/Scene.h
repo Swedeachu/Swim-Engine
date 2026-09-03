@@ -43,6 +43,11 @@ namespace Swim::IO
 	class AsyncIoService;
 }
 
+namespace Swim::Assets
+{
+	class AssetSystem;
+}
+
 namespace Swim::Memory
 {
 	class FrameArena;
@@ -150,6 +155,7 @@ namespace Engine
 		void SetFileSystem(Swim::Platform::FileSystem* value) { fileSystem = value; }
 		void SetJobSystem(Swim::Jobs::JobSystem* value) { jobSystem = value; }
 		void SetIoSystem(Swim::IO::AsyncIoService* value) { ioSystem = value; }
+		void SetAssetSystem(Swim::Assets::AssetSystem* value) { assetSystem = value; }
 		void SetFrameArena(Swim::Memory::FrameArena* value) { frameArena = value; }
 		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
 
@@ -172,6 +178,7 @@ namespace Engine
 		Swim::Platform::FileSystem& GetFileSystem() const { return *GetSystem(fileSystem); }
 		Swim::Jobs::JobSystem& GetJobSystem() const { return *GetSystem(jobSystem); }
 		Swim::IO::AsyncIoService& GetIoSystem() const { return *GetSystem(ioSystem); }
+		Swim::Assets::AssetSystem& GetAssetSystem() const { return *GetSystem(assetSystem); }
 		Swim::Memory::FrameArena& GetFrameArena() const { return *GetSystem(frameArena); }
 		EntityFactory& GetEntityFactory() const { return *GetSystem(entityFactory.get()); }
 		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
@@ -410,6 +417,7 @@ namespace Engine
 		Swim::Platform::FileSystem* fileSystem = nullptr;
 		Swim::Jobs::JobSystem* jobSystem = nullptr;
 		Swim::IO::AsyncIoService* ioSystem = nullptr;
+		Swim::Assets::AssetSystem* assetSystem = nullptr;
 		Swim::Memory::FrameArena* frameArena = nullptr;
 		std::function<int()> fpsProvider;
 		bool transformHooksBound{ false };

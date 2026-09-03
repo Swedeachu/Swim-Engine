@@ -1428,10 +1428,143 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
         'EXCLUDE REGEX "/Input/"',
         'EXCLUDE REGEX "/Platform/"',
         'EXCLUDE REGEX "/Memory/"',
+        'EXCLUDE REGEX "/Assets/"',
     )
     for fragment in broad_filters:
         if fragment in cmake_text:
             fail(f"legacy source exclusion is too broad and can remove unrelated implementation files: {fragment}", failures)
+
+
+
+def check_phase4_asset_architecture(failures: list[str]) -> None:
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    asset_root = ROOT / "Source" / "Engine" / "Assets"
+    required_paths = (
+        asset_root / "AssetId.h",
+        asset_root / "AssetHandle.h",
+        asset_root / "AssetState.h",
+        asset_root / "ContentHash.h",
+        asset_root / "ContentHash.cpp",
+        asset_root / "AssetDatabase.h",
+        asset_root / "AssetDatabase.cpp",
+        asset_root / "AssetSystem.h",
+        asset_root / "AssetSystem.cpp",
+        asset_root / "MeshAsset.h",
+        asset_root / "TextureAsset.h",
+        asset_root / "MaterialAsset.h",
+        asset_root / "ModelAsset.h",
+        ROOT / "Source" / "Tests" / "Assets" / "AssetSystemTests.cpp",
+        ROOT / "Source" / "Tests" / "Assets" / "PublicHeaderCompile.cpp",
+        ROOT / "Source" / "Examples" / "HeadlessCoreAssets.cpp",
+    )
+    if not all(path.is_file() for path in required_paths):
+        fail("Phase 4 asset identity/runtime CPU asset foundation is incomplete", failures)
+        return
+
+    asset_system_header = (asset_root / "AssetSystem.h").read_text(encoding="utf-8", errors="ignore")
+    asset_database_header = (asset_root / "AssetDatabase.h").read_text(encoding="utf-8", errors="ignore")
+    content_hash_header = (asset_root / "ContentHash.h").read_text(encoding="utf-8", errors="ignore")
+    mesh_header = (asset_root / "MeshAsset.h").read_text(encoding="utf-8", errors="ignore")
+    material_header = (asset_root / "MaterialAsset.h").read_text(encoding="utf-8", errors="ignore")
+    model_header = (asset_root / "ModelAsset.h").read_text(encoding="utf-8", errors="ignore")
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
+    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h").read_text(encoding="utf-8", errors="ignore")
+    scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
+    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        "add_library(SwimAssets STATIC",
+        "add_library(Swim::Assets ALIAS SwimAssets)",
+        "add_executable(SwimAssetSystemTests EXCLUDE_FROM_ALL",
+        "add_library(SwimAssetPublicHeaders OBJECT EXCLUDE_FROM_ALL",
+        "add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL",
+        "target_link_libraries(SwimAssetSystemTests PRIVATE Swim::Assets)",
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")',
+        "Swim::Assets",
+    ):
+        if fragment not in cmake_text:
+            fail(f"Phase 4 asset CMake boundary is missing: {fragment}", failures)
+
+    for fragment in (
+        "struct AssetId",
+        "template<typename T>",
+        "class AssetHandle",
+        "AssetLoadState",
+        "AssetErrorCode",
+        "Declare(std::string_view logicalPath)",
+        "FindByContentHash",
+        "GetDependents",
+        "SetDependencies",
+        "Publish(",
+        "Forget(",
+        "Resolve(",
+    ):
+        if fragment not in asset_system_header and fragment not in (asset_root / "AssetId.h").read_text(encoding="utf-8", errors="ignore") and fragment not in (asset_root / "AssetHandle.h").read_text(encoding="utf-8", errors="ignore") and fragment not in (asset_root / "AssetState.h").read_text(encoding="utf-8", errors="ignore"):
+            fail(f"Phase 4 asset identity/load-state contract is missing: {fragment}", failures)
+
+    for fragment in ("GetOrCreate", "Bind", "Rebind", "FindId", "FindPath", "Snapshot"):
+        if fragment not in asset_database_header:
+            fail(f"Asset path database contract is missing: {fragment}", failures)
+
+    for fragment in ("struct ContentHash", "ComputeContentHash", "ToHex", "FromHex"):
+        if fragment not in content_hash_header:
+            fail(f"content hash contract is missing: {fragment}", failures)
+
+    for fragment in ("struct MeshAsset", "VertexStreamDesc", "MeshPrimitive", "MeshLod", "MeshletDesc"):
+        if fragment not in mesh_header:
+            fail(f"backend-neutral MeshAsset CPU schema is missing: {fragment}", failures)
+    for fragment in ("struct MaterialTemplateAsset", "struct MaterialInstanceAsset", "AssetHandle<TextureAsset>"):
+        if fragment not in material_header:
+            fail(f"backend-neutral material schema is missing: {fragment}", failures)
+    for fragment in ("struct ModelAsset", "AssetHandle<MeshAsset>", "AssetHandle<MaterialInstanceAsset>"):
+        if fragment not in model_header:
+            fail(f"model mesh/material identity separation is missing: {fragment}", failures)
+
+    forbidden_fragments = (
+        "<vulkan/",
+        "<glad/",
+        "VkBuffer",
+        "VkImage",
+        "GLuint",
+        "Engine/Systems/Renderer/Core/Textures/Texture2D.h",
+        "MeshBufferData",
+        "VulkanRenderer",
+        "OpenGLRenderer",
+        "tinygltf",
+        "fastgltf",
+        "entt::",
+        "std::shared_ptr",
+    )
+    for path in asset_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                fail(f"backend/importer/ownership type leaked into runtime asset module: {path.relative_to(ROOT)}: {fragment}", failures)
+
+    for fragment in (
+        "std::unique_ptr<Swim::Assets::AssetSystem> assetSystem",
+        "GetAssetSystem()",
+    ):
+        if fragment not in engine_header:
+            fail(f"engine-owned AssetSystem declaration is missing: {fragment}", failures)
+    for fragment in (
+        "assetSystem->Initialize()",
+        "rendererRuntimeServices.Assets = assetSystem.get()",
+        "sceneServices.Assets = assetSystem.get()",
+        "assetSystem->Shutdown()",
+    ):
+        if fragment not in engine_source:
+            fail(f"engine-owned AssetSystem lifecycle/injection is missing: {fragment}", failures)
+
+    if "Swim::Assets::AssetSystem* Assets" not in renderer_services:
+        fail("legacy renderer runtime services do not expose the engine-owned AssetSystem", failures)
+    if "Swim::Assets::AssetSystem* Assets" not in scene_system_header:
+        fail("SceneSystem services do not expose the engine-owned AssetSystem", failures)
+    if "GetAssetSystem()" not in scene_header:
+        fail("Scene runtime service view does not expose AssetSystem without global discovery", failures)
 
 
 def check_source_files_are_utf8(failures: list[str]) -> None:
@@ -1464,6 +1597,7 @@ def main() -> int:
     check_phase3_job_architecture(failures)
     check_phase3_io_architecture(failures)
     check_phase3_memory_architecture(failures)
+    check_phase4_asset_architecture(failures)
     check_source_files_are_utf8(failures)
 
     if failures:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Assets/AssetSystem.h"
 #include "Engine/EngineConfig.h"
 #include "Engine/EngineState.h"
 #include "Engine/Machine.h"
@@ -80,6 +81,7 @@ namespace Engine
 		FontPool* GetFontPool() { return fontPool.get(); }
 		Swim::Jobs::JobSystem* GetJobSystem() { return jobSystem.get(); }
 		Swim::IO::AsyncIoService* GetIoSystem() { return ioSystem.get(); }
+		Swim::Assets::AssetSystem* GetAssetSystem() { return assetSystem.get(); }
 		Swim::Memory::FrameArena& GetFrameArena() { return frameArena; }
 
 		Renderer& GetRenderer();
@@ -151,6 +153,7 @@ namespace Engine
 		std::unique_ptr<Swim::Platform::EditorIpcBridge> editorIpcBridge;
 		std::unique_ptr<Swim::Jobs::JobSystem> jobSystem;
 		std::unique_ptr<Swim::IO::AsyncIoService> ioSystem;
+		std::unique_ptr<Swim::Assets::AssetSystem> assetSystem;
 		Swim::Memory::FrameArena frameArena;
 
 		// Core systems have unique ownership. Legacy consumers receive non-owning

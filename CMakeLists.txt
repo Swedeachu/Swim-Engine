@@ -169,6 +169,24 @@ else()
 	target_compile_options(SwimMemory PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+file(GLOB_RECURSE SWIM_ASSET_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.h
+)
+
+add_library(SwimAssets STATIC ${SWIM_ASSET_SOURCES})
+add_library(Swim::Assets ALIAS SwimAssets)
+target_include_directories(SwimAssets PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimAssets PUBLIC cxx_std_20)
+source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_SOURCES})
+swim_set_solution_folder(SwimAssets "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+if(MSVC)
+	target_compile_options(SwimAssets PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimAssets PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
@@ -248,6 +266,11 @@ target_include_directories(SwimIoPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Sourc
 target_compile_features(SwimIoPublicHeaders PRIVATE cxx_std_20)
 swim_set_solution_folder(SwimIoPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+add_library(SwimAssetPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/Assets/PublicHeaderCompile.cpp)
+target_include_directories(SwimAssetPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimAssetPublicHeaders PRIVATE cxx_std_20)
+swim_set_solution_folder(SwimAssetPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
+
 if(SWIM_BUILD_FOUNDATION_TESTS)
 	add_executable(SwimInputTests EXCLUDE_FROM_ALL Source/Tests/Input/InputSystemTests.cpp)
 	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
@@ -273,6 +296,16 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	target_link_libraries(SwimAsyncIoTests PRIVATE Swim::IO Swim::Jobs)
 	target_include_directories(SwimAsyncIoTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimAsyncIoTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimAssetSystemTests EXCLUDE_FROM_ALL Source/Tests/Assets/AssetSystemTests.cpp)
+	target_link_libraries(SwimAssetSystemTests PRIVATE Swim::Assets)
+	target_include_directories(SwimAssetSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimAssetSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL Source/Examples/HeadlessCoreAssets.cpp)
+	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Core Swim::Jobs Swim::Assets)
+	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	swim_set_solution_folder(SwimHeadlessCoreAssets "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
 if(NOT SWIM_BUILD_LEGACY_ENGINE)
@@ -310,6 +343,7 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
@@ -447,6 +481,7 @@ endif()
 target_link_libraries(SwimEngine PRIVATE
 	Swim::Core
 	Swim::Memory
+	Swim::Assets
 	Swim::Jobs
 	Swim::IO
 	Swim::Platform

@@ -15,6 +15,11 @@ namespace Swim::IO
 	class AsyncIoService;
 }
 
+namespace Swim::Assets
+{
+	class AssetSystem;
+}
+
 namespace Swim::Memory
 {
 	class FrameArena;
@@ -36,6 +41,7 @@ namespace Engine
 		Swim::Platform::FileSystem* Files = nullptr;
 		Swim::Jobs::JobSystem* Jobs = nullptr;
 		Swim::IO::AsyncIoService* IO = nullptr;
+		Swim::Assets::AssetSystem* Assets = nullptr;
 		Swim::Memory::FrameArena* FrameMemory = nullptr;
 		MeshPool* Meshes = nullptr;
 		TexturePool* Textures = nullptr;
@@ -44,7 +50,7 @@ namespace Engine
 
 		bool IsValid() const
 		{
-			return Files && Jobs && IO && FrameMemory && Meshes && Textures && Materials && Fonts;
+			return Files && Jobs && IO && Assets && FrameMemory && Meshes && Textures && Materials && Fonts;
 		}
 	};
 

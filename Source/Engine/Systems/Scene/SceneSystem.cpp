@@ -174,6 +174,7 @@ namespace Engine
 		scene.SetFileSystem(services.Files);
 		scene.SetJobSystem(services.Jobs);
 		scene.SetIoSystem(services.IO);
+		scene.SetAssetSystem(services.Assets);
 		scene.SetFrameArena(services.FrameMemory);
 		scene.SetFPSProvider(services.GetFPS);
 
