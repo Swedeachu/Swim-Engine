@@ -115,9 +115,9 @@ The Windows launchers invoke the PowerShell scripts directly. The Linux launcher
 
 ### Development asset cooking
 
-The Phase 4 development asset path treats loose `.gltf`/`.glb` files as authoring inputs and `.sasset` files as the runtime representation. With `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=ON` (the development default), engine startup scans the platform asset root, skips current cooked roots, and recooks missing/stale/corrupt models through fastgltf -> meshoptimizer -> the static-model `.sasset` compiler before loading the cooked dependency graph into `AssetSystem`.
+The Phase 4 development asset path treats loose `.gltf`/`.glb` files as authoring inputs and `.sasset` files as the runtime representation. With `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=ON` (the development default), engine startup scans the platform asset root, skips current cooked roots, and recooks missing/stale/corrupt models through fastgltf -> source codecs (Draco/WebP/KTX2 as required) -> meshoptimizer -> the static-model `.sasset` compiler before loading the cooked dependency graph into `AssetSystem`.
 
-Cooked files mirror the source tree under `Assets/Cooked`; dependency objects are content-validated files under `Assets/Cooked/.objects`. Local external glTF dependencies such as `.bin` files are part of the source fingerprint, so editing one invalidates the matching model even when the `.gltf` file itself did not change. Source-image PNG/JPEG/WebP -> KTX2 encoding is still in progress; already-KTX2 texture payloads are supported by the current compiler boundary.
+Cooked files mirror the source tree under `Assets/Cooked`; dependency objects are content-validated files under `Assets/Cooked/.objects`. Local external glTF dependencies such as `.bin` files are part of the source fingerprint, so editing one invalidates the matching model even when the `.gltf` file itself did not change. PNG/JPEG/WebP are decoded and mip-generated on the compiler side; already-KTX2/Basis payloads are preserved through the current compiler boundary. Final platform-native/KTX2 compression policy is still in progress.
 
 The same path can be run without launching the engine:
 
@@ -126,13 +126,13 @@ The same path can be run without launching the engine:
 build\windows-release\SwimAssetCooker.exe Assets
 ```
 
-The asset compiler introduces pinned simdjson/fastgltf/meshoptimizer dependencies. The first Windows build after adding this checkpoint must therefore use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
+The asset compiler owns pinned simdjson/fastgltf/meshoptimizer/Draco/libwebp dependencies through `Swim::AssetCompilerDependencies`. Draco 1.5.7 is wrapped by `Swim::AssetCompilerDraco`, which supplies both its `<source>/src` headers and generated `draco/draco_features.h` include root to compiler/test consumers while keeping that package-layout quirk out of first-party source. The first Windows build after adding or changing this checkpoint should use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
 
-For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf and meshoptimizer stay on the compiler side.
+For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf, Draco, libwebp, and meshoptimizer stay on the compiler side. Basis Universal is the intentional transitional exception: only `Swim::BasisTranscoder` remains runtime-facing while universal KTX2/Basis payloads are transcoded at residency time.
 
 ### Dependency policy
 
-The previous `Source/Library` copies are replaced by pinned CMake targets for SDL3, GLM, EnTT, nlohmann/json, stb, tinygltf, Draco, libwebp, zstd, Basis Universal, GLAD, and PhysX. Nothing downloaded by CMake should be committed.
+The previous `Source/Library` copies are replaced by pinned/verified CMake dependencies. Runtime ownership is SDL3, mimalloc, enkiTS, spdlog, GLM, EnTT, nlohmann/json, transitional stb compatibility, zstd, the Basis transcoder, GLAD/OpenGL, Vulkan, and PhysX. Asset-compiler-only ownership is simdjson/fastgltf, meshoptimizer, Draco, libwebp, and compiler-side stb. tinygltf is retired. Nothing downloaded by CMake should be committed, and codec support does not imply that codec belongs in the shipping runtime.
 
 PhysX is kept deliberately isolated because its configuration model does not match the application's Debug/Release model. The pinned PhysX 5.6.1 checkout in CPM is treated as immutable. At build time Swim creates a short detached Git worktree at `build/.px`; NVIDIA's generated `compiler/` and `bin/` trees live there, keeping both MSBuild paths short and the CPM source cache clean for later soft builds. Swim Engine Debug links the **Checked** static PhysX libraries, while Swim Engine Release links **Release** PhysX. Both are built with the static non-debug MSVC runtime, matching the previous x64 project configuration (`/MT`, `PX_PHYSX_STATIC_LIB`, Debug `_ITERATOR_DEBUG_LEVEL=0`). The CPU-only VS2022 preset is used, so CUDA is not required. CMake audits every Git-backed cached dependency at configure time and fails immediately if a dependency source checkout is dirty instead of allowing that state to surface as a later compile failure.
 

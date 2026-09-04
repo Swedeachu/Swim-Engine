@@ -12,6 +12,25 @@
 
 ---
 
+## Current implementation snapshot — 2026-09-03
+
+This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
+
+- **Phase 1 — Platform foundation:** the SDL3-backed `Swim::Platform`/`Swim::Input` foundation, normalized window/input types, filesystem/mapped-file/dynamic-library APIs, native-window escape hatch, headless path, editor-host bridge, and generic-PCH cleanup are implemented. The remaining Phase 1 gates are runtime smoke coverage for the same `HelloWindow` API on both Windows and Linux and explicit Windows public-header validation. The legacy `InputManager` still adapts `Swim::Input` for old gameplay code, so the final gameplay-facing input migration is not complete.
+- **Phase 2 — Engine ownership/configuration:** complete for the existing runtime. `SwimEngine::GetInstance()` is gone from first-party runtime dependency discovery, core systems have explicit typed ownership/lifecycle order, and graphics/physics backend choice is runtime configuration rather than a compile-time renderer selector.
+- **Phase 3 — Jobs/IO/memory:** complete. `Swim::Jobs`, `Swim::IO`, `Swim::Memory`, mimalloc-backed frame/scratch allocation, and deterministic async/job shutdown are established before renderer/streaming expansion.
+- **Phase 4 — Assets:** the engine-owned `Swim::Assets` identity/runtime schema, fastgltf importer, meshoptimizer path, KTX2/Basis metadata/transcode path, WebP/PNG/JPEG source-image compiler, compiler-side Draco decode, `.sasset` v1 writer/reader, development incremental cooker, and cooked-model compatibility residency path are implemented. Source codecs are owned by `SwimAssetCompiler`; they are not supposed to become shipping runtime model-import dependencies.
+- **Current Phase 4 validation gate:** the first dependency-enabled Windows build of the new Draco path exposed that Draco 1.5.7 did not propagate the include roots required by embedded consumers. The repository now owns that package quirk behind `Swim::AssetCompilerDraco`, including the generated `draco_features.h` root, and scopes the pinned dependency's CMake-4 `CMP0148` compatibility locally. **The next real Windows build still needs to confirm this adapter and then run the real importer/cooker path against the checked-in assets before this gate is called fully validated.**
+- **Phase 5 — Scene ownership/state isolation:** explicit `SceneCatalog`/`SceneId`, headless/core/presentation service separation, renderer-independent Scene/Behavior APIs, scene-owned `TransformSystem`, explicit scene traversal for physics/rendering, and per-view `Frustum` state are implemented. The next scene task remains **item 22: replace the remaining `EntityFactory` mutation queue with a scene-owned `SceneCommandBuffer`**, but do not start it until the current Windows asset-pipeline validation gate above passes.
+- **Shipping asset policy:** development auto-cook is intentionally convenient and currently enabled by default when `SwimAssetCompiler` exists. Shipping/release packaging is intended to disable `SWIM_ENABLE_DEV_ASSET_AUTOCOOK`, pre-cook with `SwimAssetCooker`, and run from compiled `.sasset`/future `.spack` data without glTF/Draco/WebP source-import code. Final packaging presets and `.spack`/memory-mapped streaming are later work, so do not confuse the current development executable with the final shipping dependency closure.
+
+Companion documentation for the current generated solution and asset pipeline:
+
+- `docs/VisualStudioProjectStructure.md` — what the projects/folders in the generated Visual Studio solution mean, how they depend on one another, and what a normal build actually compiles.
+- `docs/SassetCookPipeline.md` — the source -> import -> cook -> `.sasset` -> runtime path, including development auto-cook versus release/shipping usage.
+
+---
+
 ## 0. The implementation rule that controls this entire plan
 
 The engine must be built from the bottom of the dependency graph upward.
@@ -383,9 +402,12 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | nlohmann/json | human-readable scene/tool/config interchange | Keep for tooling and editable metadata where convenient; do not use JSON as the hot-path compiled asset representation. |
 | enkiTS | general task scheduler | Recommended implementation for `Swim::Jobs`; replace renderer-only global thread pool. |
 | mimalloc | general CPU heap / backing for focused transient arenas | Use as the process allocator and behind `Swim::Memory`; keep frame/scratch lifetime APIs engine-owned rather than exposing mimalloc as the gameplay allocation API. |
-| fastgltf | glTF/GLB source import | Use in asset compiler/dev importer; do not make it a shipping runtime dependency for compiled assets. |
+| fastgltf | glTF/GLB structure + extension metadata import | Compiler/dev-import only. It parses glTF and exposes extension metadata; it is **not** treated as the codec implementation for Draco, WebP, or Basis payloads. Never make it a shipping runtime dependency for compiled assets. |
+| Draco | `KHR_draco_mesh_compression` geometry decode | Compiler/import only. Decode compressed primitives to ordinary Swim intermediate vertex/index data, then run meshoptimizer/cooking. Draco must not be linked by the shipping runtime. |
+| libwebp | `EXT_texture_webp` image decode | Compiler/import only. Decode authoring WebP to compiler image data, then cook normal TextureAssets. WebP must not be a shipping runtime texture dependency. |
+| Basis Universal transcoder | Basis/KTX2 universal texture transcode | Runtime use is allowed only while cooked KTX2/Basis payloads are intentionally platform-neutral. Keep the dependency behind texture residency; remove it from runtime once platform-native texture variants make runtime transcoding unnecessary. Encoder/tool code stays compiler-side. |
 | meshoptimizer | vertex/index optimization, LOD, meshlets | Use offline in asset compiler. |
-| KTX-Software/libktx | KTX2 texture processing/transcoding | Use for compiled texture path. |
+| KTX-Software/libktx | KTX2 texture processing/transcoding | Add/use when compiler-side KTX2 production needs it; runtime should consume Swim TextureAsset metadata/payloads rather than expose libktx types. |
 | zstd | package/chunk compression | Keep behind asset/package code. |
 | Slang | shader language/compiler/reflection | Use for all new first-party shaders. |
 | Vulkan-Headers | Vulkan API definitions | Use in Vulkan backend only. |
@@ -423,7 +445,57 @@ Examples:
 - meshoptimizer: call directly in the compiler implementation.
 - VMA: keep inside Vulkan backend, not behind an additional allocator abstraction unless required by RHI internals.
 
-### 4.2 Build graph and CMake invariants
+### 4.2 Source codec ownership rule
+
+Compressed/encoded **authoring support must not be confused with runtime dependency ownership**. Swim should accept common source formats aggressively while normalizing them at the compiler boundary.
+
+```text
+glTF/GLB structure          fastgltf
+KHR_draco_mesh_compression  -> Draco decoder -> Swim intermediate mesh -> meshoptimizer -> MeshAsset
+EXT_texture_webp            -> libwebp       -> compiler image/mips      -> TextureAsset
+KHR_texture_basisu / KTX2   -> KTX2/Basis compiler path                  -> TextureAsset
+PNG/JPEG                    -> stb_image     -> compiler image/mips      -> TextureAsset
+```
+
+Rules:
+
+- [x] fastgltf owns glTF parsing/extension discovery only; it is not expected to replace dedicated compression/image codecs.
+- [x] Draco decoding is compiler-only and successful `KHR_draco_mesh_compression` sources produce ordinary Swim mesh data before runtime serialization. *(Pinned Draco 1.5.7 is consumed through the private `Swim::AssetCompilerDependencies` bundle; `GltfImporter.cpp` translates decoded points/faces/attributes into Swim-owned `SourcePrimitive` data before meshoptimizer/static-model cooking.)*
+- [x] WebP decoding is compiler-only; runtime assets do not remember WebP as an image-decoder requirement.
+- [x] Basis Universal is an explicit exception only for **runtime transcoding of intentionally universal KTX2/Basis payloads**. It is not a loose-source model importer dependency.
+- [ ] When platform-native cooked texture variants are authoritative, remove the Basis transcoder from the runtime target and leave Basis/KTX2 encoding/transcoding in tools only.
+- [x] Codec/parser types never escape `SwimAssetCompiler` or renderer-residency implementation boundaries into gameplay/scene/public asset schemas.
+- [x] The CMake dependency graph and the table below make every current third-party dependency's owner and runtime/compiler status obvious; no codec is linked to the normal runtime graph merely because a source asset may use its format. *(Compiler-only parser/optimizer/codecs are grouped behind `Swim::AssetCompilerDependencies`; development auto-cook is the explicit opt-in exception that links the compiler into the executable.)*
+
+#### Current dependency ownership matrix
+
+| Dependency | Pin / source | Owning target/layer | Shipping runtime? | Notes |
+| --- | --- | --- | --- | --- |
+| SDL3 | `release-3.4.14` | `Swim::Platform`, `Swim::Input` | yes | Private implementation dependency for platform/input. |
+| mimalloc | `v3.4.5` | process allocator / `Swim::Memory` | yes | Final executable owns allocator override. |
+| enkiTS | `v1.12` | `Swim::Jobs` | yes | Private scheduler implementation. |
+| simdjson | `v3.12.3` | fastgltf implementation dependency inside `Swim::AssetCompilerDependencies` | no* | Established before fastgltf so fastgltf never mutates its cached checkout with fallback downloads. |
+| fastgltf | `v0.9.0` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | glTF/GLB structure and extension metadata only. `*` Dev auto-cook may link the compiler into a development executable. |
+| Draco | `1.5.7` | `Swim::AssetCompilerDraco` -> `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Compiler-side `KHR_draco_mesh_compression` mesh decode only. The Swim adapter owns Draco 1.5.7's source/generated include-root quirk (`<source>/src` plus generated `draco_features.h`) so consumers never depend on package layout directly; glTF bitstream mode is enabled and unrelated point-cloud/tool/plugin builds are disabled. |
+| meshoptimizer | `v1.1` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Offline vertex/index optimization. |
+| libwebp | `v1.5.0` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Source `EXT_texture_webp` decode only; command-line utilities/mux/extras are disabled. |
+| stb | commit `2dfbe86` | compiler image decode; legacy loose texture/font compatibility | transitional | Compiler handles PNG/JPEG source decode. Runtime stb remains only for compatibility paths not yet moved to compiled assets. |
+| Basis Universal transcoder | `v1_60_snapshot_final` | `Swim::BasisTranscoder` in legacy/runtime texture residency | yes, intentional transitional | Only the transcoder TU is built; encoder/tools are omitted. Remove from runtime once platform-native cooked texture variants are authoritative. |
+| zstd | `v1.4.9` | runtime asset/package + `Swim::BasisTranscoder` | yes | Runtime `.sasset`/texture decompression and universal KTX2 support. |
+| spdlog | `v1.15.3` | process logging | yes | Static console + timestamped file logging. |
+| GLM | `1.0.0` | engine math | yes | Header-only target. |
+| EnTT | `v3.13.2` | scene/ECS implementation | yes | Header-only target; backend types must not leak into ECS contracts. |
+| nlohmann/json | `3.10.4` single header + SHA-256 | editable config/tool/legacy scene interchange | yes while those paths use it | Verified release header avoids Windows path/cache issues. |
+| GLAD | `v2.0.8` generated loader | legacy OpenGL backend | yes while legacy backend ships | Must eventually live only in the OpenGL implementation target. |
+| OpenGL | Windows/system API | legacy OpenGL backend | yes while legacy backend ships | No source-import responsibility. |
+| Vulkan | system Vulkan SDK | Vulkan backend | yes | Must eventually live only in `Swim::RhiVulkan`. |
+| PhysX | `107.3-omni-and-physx-5.6.1` | physics implementation | yes | External CPU-only build; must move fully behind `Swim::PhysicsPhysX`. |
+
+`no*` means the normal compiled-asset runtime does not need the dependency; a development build with in-process auto-cooking may intentionally include the asset compiler.
+
+Build/tool dependencies are separate from linked engine libraries: CMake requires `3.25+`; CPM.cmake is pinned to `0.40.8`; Git is used for immutable dependency-cache validation and PhysX worktree setup; Python 3 is required by GLAD/PhysX upstream generation; and DXC is discovered from the Vulkan SDK/`PATH` for the existing HLSL -> SPIR-V build. These tools do not become runtime library dependencies.
+
+### 4.3 Build graph and CMake invariants
 
 CMake is the authoritative build description and should reinforce the engine architecture rather than merely collect source files. It is infrastructure used throughout every phase, not a separate feature milestone.
 
@@ -1216,7 +1288,7 @@ The first critical-path item 19 residency cut is now implemented without reintro
 - mesh primitives are rebuilt from the cooked interleaved vertex/index payload and handed to the existing content-hashed `MeshPool` residency seam. Material slots resolve independently through the model's material handles rather than restoring mesh/material ownership coupling;
 - `TexturePool::GetOrCreateTextureFromAsset()` adds a temporary cooked-texture residency adapter keyed by typed asset identity, generation, and current asset content hash, with decoded-content dedup underneath it. It accepts raw RGBA8, Zstandard RGBA8, and KTX2/BasisU payloads and converts only the base level into the current `Texture2D` compatibility object;
 - the runtime target no longer contains or links `TinyGltfImplementation.cpp`, `tinygltf`, Draco, or libwebp. Those packages were removed from the legacy dependency graph rather than left configured but unused; BasisU transcoding and zstd remain because the temporary renderer residency adapter explicitly consumes those cooked runtime payloads;
-- the active Sponza compatibility sample now points at the non-Draco KTX2 source. Draco source decompression is not yet part of the fastgltf compiler path and must not be silently restored to runtime merely to support that authoring variant;
+- at this historical residency checkpoint the active Sponza compatibility sample was moved to the non-Draco KTX2 source rather than restoring Draco to runtime. Compiler-side Draco support was added in the later source-codec ownership checkpoint, preserving this runtime boundary;
 - `AssetSystem::ComputeDependencyRevisionHash()` fingerprints a model plus its declared dependency graph using stable ids, generations, load state, content hashes, and dependency edges. `MaterialPool` validates its compatibility cache against that revision, so a dev recook published under the same stable handle generation cannot return stale mesh/material/texture residency;
 - `scripts/verify-build-layout.py` now rejects reintroducing the old `LoadAndRegisterCompositeMaterialFromGLB` API, runtime tinygltf/Draco/WebP links/packages, the tinygltf implementation TU, or source-import symbols inside `MaterialPool`, while requiring the cooked model/texture residency seam.
 
@@ -1372,7 +1444,7 @@ Import:
 - [ ] animation channels;
 - [ ] morph targets;
 - [ ] relevant cameras/lights if desired;
-- [x] deliberately supported extensions. *(Current explicit set: `KHR_mesh_quantization`, `KHR_texture_basisu`, `EXT_texture_webp`, `MSFT_texture_dds`, `KHR_materials_unlit`.)*
+- [x] deliberately supported extensions. *(Current parser set includes `KHR_mesh_quantization`, `KHR_texture_basisu`, `KHR_texture_transform`, `KHR_draco_mesh_compression`, `EXT_texture_webp`, `MSFT_texture_dds`, and `KHR_materials_unlit`; accepting parser metadata is separate from implementing each extension's codec/material semantics.)*
 
 Then run offline processing:
 
@@ -1384,7 +1456,7 @@ Then run offline processing:
 - [ ] generate meshlets;
 - [ ] pack/quantize runtime vertex formats;
 - [ ] convert textures to KTX2/native compressed formats; *(PNG/JPEG/WebP now decode compiler-side into full cooked RGBA8 mip chains and KTX2 sources stay KTX2; final compressed/native payload production and platform-variant selection remain open.)*
-- [ ] decode Draco only in import/compiler path when source uses it.
+- [x] decode Draco only in import/compiler path when source uses it. *(Pinned Draco 1.5.7 is private to the asset-compiler dependency bundle. `GltfImporter` resolves extension attribute IDs, decodes mesh points/faces/attributes, and emits ordinary Swim intermediate geometry; runtime assets and renderer residency contain no Draco types or decoder dependency.)*
 
 ### KTX2 runtime texture path
 
@@ -1586,10 +1658,10 @@ Validation for this checkpoint:
 Windows runtime validation after the scene-service and asset-cooker cuts exposed two integration regressions and one logging-quality issue; all are fixed without starting the next SceneCommandBuffer task:
 
 - Renderer-owned cubemap presentation state is now late-bound **after `Renderer::Awake()` and before `SceneSystem::Awake()`**. The previous service snapshot happened before Vulkan/OpenGL created their `CubeMapController`, permanently injecting `nullptr` into scenes and silently preventing the default sky from initializing. `CubeMapControlTest` now validates all six CPU faces, explicitly loads `Cubemaps/Clean/cubemap_*` as the default preset, enables rendering only after `SetFaces()` succeeds, and logs the selected preset.
-- Development asset bootstrap now distinguishes deliberately unsupported source features from actual import failures. fastgltf is allowed to parse `KHR_draco_mesh_compression` metadata, the Swim importer classifies Draco primitives as `UnsupportedFeature` until compiler-side decompression exists, and bootstrap counts them as `SourcesSkippedUnsupported` rather than emitting a startup error. This keeps the checked-in `sponza-ktx-draco.glb` authoring variant available without treating it as a broken runtime asset; the active Sponza path remains the non-Draco `sponza-ktx.glb`.
+- Development asset bootstrap retains a distinct `SourcesSkippedUnsupported` result for genuinely unsupported future authoring features, but Draco is no longer one of them: the later source-codec ownership checkpoint adds compiler-side `KHR_draco_mesh_compression` decode. The checked-in Draco Sponza variant should now cook instead of being classified as unsupported, without adding Draco to runtime residency.
 - The spdlog bridge disables `std::cerr`'s standard `unitbuf` behavior while redirected. Without this, every chained `operator<<` insertion flushed the custom stream buffer and produced fragmented one-token error records. The original unit-buffering state is restored during logging shutdown/failure recovery.
 - Vulkan frame-in-flight indexing now uses `uint32_t` end-to-end at the renderer boundary, matching descriptor/index-draw APIs and removing the repeated MSVC `C4267` `size_t` → `uint32_t` narrowing warnings from the draw path.
-- Verifier coverage now enforces cubemap late-binding order, rejects pre-Awake controller snapshots, requires the unsupported-Draco skip contract/tests, and preserves line-oriented stderr logging.
+- Verifier coverage now enforces cubemap late-binding order, rejects pre-Awake controller snapshots, requires the compiler-side Draco fixture/decode/bootstrap-success contract, and preserves line-oriented stderr logging.
 
 This closes the current Transform/Frustum state-isolation task at a clean boundary. The next critical-path scene item is **22: replace the remaining scene-owned `EntityFactory` mutation queue with an explicit `SceneCommandBuffer`**, rather than extending this commit into persistence or render extraction.
 
@@ -1610,6 +1682,23 @@ Validation for this follow-up:
 - the dependency-free Phase 4/5 CMake test matrix remains the local validation baseline;
 - fastgltf v0.9.0 exposes `Extensions::KHR_texture_transform`, matching the pinned importer API used here;
 - the next normal Windows clean/soft build is the authoritative compile/link/runtime validation for the newly added `spdlog` dependency and the real asset set copied beside the executable.
+
+### Phase 4 source-codec ownership / Draco checkpoint — 2026-09-03
+
+Completed the source-format dependency cleanup before returning to scene work:
+
+- Added pinned Draco `1.5.7` as an **asset-compiler-only** dependency with glTF bitstream mode enabled and unrelated point-cloud/tests/plugins/install outputs disabled. fastgltf continues to own glTF structure/extension parsing; Draco owns only compressed geometry decoding.
+- Added the explicit `Swim::AssetCompilerDependencies` CMake bundle containing simdjson/fastgltf, meshoptimizer, Draco, compiler-side stb, and libwebp. `SwimAssetCompiler` consumes that bundle privately, making the tool/runtime ownership boundary visible in the target graph instead of scattering codec links across production targets. Draco is reached through the Swim-owned `Swim::AssetCompilerDraco` adapter so both compiler code and fixture tests receive the pinned package's source/generated include roots without leaking those paths into first-party targets.
+- `GltfImporter.cpp` now handles `KHR_draco_mesh_compression` by extracting the extension buffer view, decoding it with Draco, resolving the extension semantic-to-unique-ID mapping, reconstructing POSITION/NORMAL/TANGENT/TEXCOORD_0 data and triangle indices, and immediately emitting Swim-owned `SourcePrimitive` data. Draco/fastgltf types terminate in that implementation TU.
+- Added deterministic Draco importer and development-bootstrap tests that encode a one-triangle source fixture, require the extension, import/cook it, and verify the resulting cooked model is resident instead of counted as unsupported. The static-model compiler fingerprint now includes `draco=1.5.7`, invalidating roots produced before the decode policy existed.
+- WebP remains compiler-only through libwebp. Basis/KTX2 remains supported; the runtime dependency has been renamed `Swim::BasisTranscoder` to make its intentionally transitional purpose explicit. Only the Basis transcoder TU is built at runtime, not encoder/tool code.
+- Audited the current dependency graph and recorded exact ownership/pins in Section 4.2. Compiler/import codecs do not appear in `cmake/Dependencies.cmake`; runtime source files contain no fastgltf/Draco/libwebp use. Development auto-cook is the deliberate exception that can pull the compiler dependency closure into a development executable.
+
+Validation in this environment: `scripts/verify-build-layout.py` passes; a fresh offline CMake/Ninja tree builds and runs the dependency-free `SwimEngineConfigTests`, `SwimSceneCatalogTests`, `SwimMemoryTests`, `SwimJobSystemTests`, `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, and `SwimHeadlessCoreAssets`, and compiles both asset public-header targets. The deterministic Draco fixture header was independently checked against the pinned 1.5.7 API contract and its generated glTF JSON was parsed successfully.
+
+The first dependency-enabled Windows clean build then exposed a CMake integration bug before the importer could compile: `draco::draco` linked successfully but did not publish the include roots required by embedded consumers, so `GltfImporter.cpp` could not find `draco/compression/decode.h`. The fix adds `Swim::AssetCompilerDraco`, which links the package target while explicitly exporting `${draco_source_SOURCE_DIR}/src` and the top-level binary root containing generated `draco/draco_features.h`. Both production compiler code and Draco source-fixture tests now consume this adapter. The wrapper also scopes `CMP0148=OLD` only around Draco 1.5.7 so CMake 4.x can satisfy that pinned dependency's legacy `FindPythonInterp` use without a project-level developer warning. Configure-time existence checks and `verify-build-layout.py` guard this package-layout contract. A standalone CMake contract harness was also used locally to mock the pinned package target and compile a consumer including both `<draco/compression/decode.h>` and generated `<draco/draco_features.h>` through `Swim::AssetCompilerDraco`, confirming the transitive include/link seam itself is valid before the next Windows dependency-enabled build.
+
+**Current gate:** do not begin item 22 until the next dependency-enabled Windows clean/soft build confirms the `Swim::AssetCompilerDraco` adapter and then runs the real importer/cooker tests against the repository assets. This is the only unresolved validation step in the current source-codec checkpoint; it is not a design change to the `.sasset` pipeline. After that validation, the current critical-path implementation task returns to **item 22: replace the remaining scene-owned `EntityFactory` mutation queue with an explicit `SceneCommandBuffer`**.
 
 ### Scene context
 
@@ -3289,16 +3378,16 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.1 Foundation
 
-1. [ ] Create clean `Core` public include boundary and remove backend/platform dependencies from generic PCH.
-2. [ ] Add SDL3-backed `PlatformSystem` and `Window` abstraction.
-3. [ ] Move Win32 window creation/message handling out of `SwimEngine`.
-4. [ ] Implement Windows external/native-window wrapping needed by editor hosting.
-5. [ ] Add Linux window path and `HelloWindow` test.
-6. [ ] Replace `InputManager` with SDL3 normalized InputSystem + action API.
-7. [ ] Add filesystem roots/path/mapped-file/dynamic-library platform APIs.
-8. [ ] Replace global `SwimEngine` dependency discovery with explicit Engine composition/services.
-9. [ ] Add runtime `GraphicsBackend` and `PhysicsBackend` config/launcher parsing.
-10. [ ] Introduce enkiTS-backed Jobs service and retire renderer-global worker ownership.
+1. [ ] Create clean `Core` public include boundary and remove backend/platform dependencies from generic PCH. *(The generic PCH leakage is already removed, but the final `Core` public include/module boundary is not complete.)*
+2. [x] Add SDL3-backed `PlatformSystem` and `Window` abstraction.
+3. [x] Move Win32 window creation/message handling out of `SwimEngine`.
+4. [x] Implement Windows external/native-window wrapping needed by editor hosting.
+5. [ ] Add Linux window path and `HelloWindow` test. *(The cross-platform implementation/test target exists; the same real SDL-backed runtime smoke still needs to be executed on both Windows and Linux.)*
+6. [ ] Replace `InputManager` with SDL3 normalized InputSystem + action API. *(`Swim::Input` and the action/state API exist, but the legacy `InputManager` adapter is still injected into Scene/Behavior/gameplay compatibility paths.)*
+7. [x] Add filesystem roots/path/mapped-file/dynamic-library platform APIs.
+8. [x] Replace global `SwimEngine` dependency discovery with explicit Engine composition/services.
+9. [x] Add runtime `GraphicsBackend` and `PhysicsBackend` config/launcher parsing.
+10. [x] Introduce enkiTS-backed Jobs service and retire renderer-global worker ownership.
 11. [x] Add async/range IO service.
 
 ### 35.2 Data and scene foundations

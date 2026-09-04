@@ -14,10 +14,15 @@ VENDORED_DEPENDENCIES = (
     "EnTT",
     "basis",
     "draco",
+    "fastgltf",
     "glad",
     "glm",
     "json",
+    "meshoptimizer",
     "physx",
+    "simdjson",
+    "spdlog",
+    "SDL3",
     "stb",
     "tiny_gltf",
     "webp",
@@ -37,7 +42,9 @@ REQUIRED_CMAKE_FILES = (
     "cmake/get_cpm.cmake",
     "cmake/Dependencies.cmake",
     "cmake/MemoryDependencies.cmake",
+    "cmake/JobDependencies.cmake",
     "cmake/PlatformDependencies.cmake",
+    "cmake/AssetCompilerDependencies.cmake",
     "cmake/PhysX.cmake",
     "cmake/SolutionLayout.cmake",
 )
@@ -129,7 +136,7 @@ def check_build_workflow(failures: list[str]) -> None:
 
     for fragment in (
         'swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")',
-        'swim_set_solution_folder(SwimBasis "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")',
+        'swim_set_solution_folder(SwimBasisTranscoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")',
         'swim_set_solution_folder(SwimGlad "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")',
     ):
         if fragment not in dependency_text:
@@ -1698,7 +1705,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     if "PROPERTIES SKIP_PRECOMPILE_HEADERS ON" not in cmake_text:
         fail("third-party implementation TUs lost their PCH exclusion", failures)
 
-    for stale_link in ("tinygltf::tinygltf", "Swim::WebP", "draco::draco"):
+    for stale_link in ("tinygltf::tinygltf", "Swim::WebP"):
         if stale_link in cmake_text:
             fail(f"legacy runtime target still links source-import dependency: {stale_link}", failures)
 
@@ -1752,10 +1759,10 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         "include(cmake/AssetCompilerDependencies.cmake)",
         "add_library(SwimAssetCompiler STATIC",
         "add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)",
-        "PRIVATE fastgltf::fastgltf meshoptimizer",
+        "PRIVATE Swim::AssetCompilerDependencies",
         "add_library(SwimAssetCompilerPublicHeaders OBJECT EXCLUDE_FROM_ALL",
         "add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler)",
+        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)",
         "add_executable(SwimMeshOptimizerTests EXCLUDE_FROM_ALL",
         "target_link_libraries(SwimMeshOptimizerTests PRIVATE Swim::AssetCompiler)",
         "add_executable(SwimKtx2TextureCompilerTests EXCLUDE_FROM_ALL",
@@ -1785,6 +1792,26 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         "TARGET meshoptimizer",
         "GITHUB_REPOSITORY nothings/stb",
         "GIT_TAG 2dfbe86",
+        "GITHUB_REPOSITORY google/draco",
+        "GIT_TAG 1.5.7",
+        "DRACO_GLTF_BITSTREAM ON",
+        "DRACO_POINT_CLOUD_COMPRESSION OFF",
+        "SWIM_ASSET_COMPILER_DRACO_TARGET",
+        "add_library(SwimAssetCompilerDraco INTERFACE)",
+        "add_library(Swim::AssetCompilerDraco ALIAS SwimAssetCompilerDraco)",
+        "target_link_libraries(SwimAssetCompilerDraco INTERFACE ${SWIM_ASSET_COMPILER_DRACO_TARGET})",
+        'set(SWIM_ASSET_COMPILER_DRACO_SOURCE_INCLUDE_DIR "${draco_source_SOURCE_DIR}/src")',
+        'set(SWIM_ASSET_COMPILER_DRACO_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}")',
+        '"${SWIM_ASSET_COMPILER_DRACO_SOURCE_INCLUDE_DIR}/draco/compression/decode.h"',
+        '"${SWIM_ASSET_COMPILER_DRACO_GENERATED_INCLUDE_DIR}/draco/draco_features.h"',
+        "cmake_policy(SET CMP0148 OLD)",
+        "add_library(SwimAssetCompilerDependencies INTERFACE)",
+        "add_library(Swim::AssetCompilerDependencies ALIAS SwimAssetCompilerDependencies)",
+        "target_link_libraries(SwimAssetCompilerDependencies INTERFACE",
+        "fastgltf::fastgltf",
+        "meshoptimizer",
+        "Swim::AssetCompilerDraco",
+        "${SWIM_ASSET_COMPILER_WEBP_TARGET}",
         "GITHUB_REPOSITORY webmproject/libwebp",
         "GIT_TAG v1.5.0",
         "WEBP_BUILD_CWEBP OFF",
@@ -1797,6 +1824,13 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     for fragment in required_asset_compiler_dependency_fragments:
         if fragment not in asset_compiler_dependency_text:
             fail(f"asset-compiler dependency contract is missing: {fragment}", failures)
+
+    for stale_fragment in (
+        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler ${SWIM_ASSET_COMPILER_DRACO_TARGET})",
+        "target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler ${SWIM_ASSET_COMPILER_DRACO_TARGET})",
+    ):
+        if stale_fragment in cmake_text:
+            fail("Draco consumers must use the Swim-owned include/link adapter instead of the raw package target", failures)
 
     simdjson_target_position = asset_compiler_dependency_text.find("if(NOT TARGET simdjson::simdjson)")
     fastgltf_package_position = asset_compiler_dependency_text.find("NAME swim_fastgltf_source")
@@ -1819,6 +1853,8 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
             fail(f"fastgltf escaped the GltfImporter.cpp implementation boundary: {path.relative_to(ROOT)}", failures)
         if path.name != "MeshOptimizer.cpp" and ("#include <meshoptimizer" in text or "meshopt_" in text):
             fail(f"meshoptimizer escaped the MeshOptimizer.cpp implementation boundary: {path.relative_to(ROOT)}", failures)
+        if path.name != "GltfImporter.cpp" and ("#include <draco/" in text or "draco::" in text):
+            fail(f"Draco escaped the GltfImporter.cpp compiler implementation boundary: {path.relative_to(ROOT)}", failures)
         if path.name != "SourceImageTextureCompiler.cpp" and ("#include <webp/" in text or "WebPDecode" in text or "WebPGetInfo" in text):
             fail(f"libwebp escaped the SourceImageTextureCompiler.cpp implementation boundary: {path.relative_to(ROOT)}", failures)
         if path.name != "SourceImageTextureCompiler.cpp" and "STB_IMAGE_IMPLEMENTATION" in text:
@@ -1856,14 +1892,42 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
 
 
     gltf_importer_test_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "GltfImporterTests.cpp").read_text(encoding="utf-8", errors="ignore")
+    draco_fixture_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "DracoTestFixture.h").read_text(encoding="utf-8", errors="ignore")
+    development_asset_test_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp").read_text(encoding="utf-8", errors="ignore")
     if '"extensionsRequired":["KHR_texture_transform"]' not in gltf_importer_test_text:
         fail("glTF importer regression test no longer requires KHR_texture_transform", failures)
     for fragment in (
-        '"extensionsRequired":["KHR_draco_mesh_compression"]',
-        "GltfImportErrorCode::UnsupportedFeature",
+        '"extensionsRequired":["KHR_texture_basisu","EXT_texture_webp"]',
+        "SourceImageMimeType::Ktx2",
+        "SourceImageMimeType::WebP",
+        "KHR_texture_basisu source index imported",
+        "EXT_texture_webp source index imported",
     ):
         if fragment not in gltf_importer_test_text:
-            fail(f"glTF unsupported-Draco regression coverage is missing: {fragment}", failures)
+            fail(f"glTF Basis/WebP extension regression coverage is missing: {fragment}", failures)
+    for fragment in (
+        '"extensionsRequired":["KHR_draco_mesh_compression"]',
+        "draco::Encoder",
+        "SetAttributeUniqueId",
+    ):
+        if fragment not in draco_fixture_text:
+            fail(f"glTF Draco decode regression fixture is missing: {fragment}", failures)
+    for fragment in (
+        "ImportDracoPrimitive",
+        "draco::Decoder",
+        "DecodeMeshFromBuffer",
+        "GetAttributeByUniqueId",
+        "DecodeDracoAttribute<3>",
+    ):
+        if fragment not in gltf_importer_source_text:
+            fail(f"compiler-side Draco decode implementation is missing: {fragment}", failures)
+    for fragment in (
+        "Draco source is compiler-decoded and cooked",
+        "SourcesSkippedUnsupported == 0",
+        'Find<ModelAsset>("Models/Draco.model")',
+    ):
+        if fragment not in development_asset_test_text:
+            fail(f"development Draco cook regression coverage is missing: {fragment}", failures)
 
     for fragment in (
         "DetectSourceImageMimeType",

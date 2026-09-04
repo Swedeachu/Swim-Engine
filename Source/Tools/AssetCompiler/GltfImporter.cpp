@@ -4,12 +4,19 @@
 #include <fastgltf/tools.hpp>
 #include <fastgltf/types.hpp>
 
+#include <draco/compression/decode.h>
+#include <draco/core/decoder_buffer.h>
+#include <draco/mesh/mesh.h>
+
 #include <algorithm>
+#include <cstddef>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 
@@ -174,6 +181,35 @@ namespace Swim::AssetCompiler
 			return copied;
 		}
 
+
+		bool CopyBufferViewBytes(const fastgltf::Asset& asset, std::size_t bufferViewIndex, std::vector<std::byte>& bytes)
+		{
+			if (bufferViewIndex >= asset.bufferViews.size())
+			{
+				return false;
+			}
+			const fastgltf::BufferView& view = asset.bufferViews[bufferViewIndex];
+			if (view.bufferIndex >= asset.buffers.size())
+			{
+				return false;
+			}
+
+			std::vector<std::byte> bufferBytes;
+			if (!CopyDataSourceBytes(asset.buffers[view.bufferIndex].data, bufferBytes))
+			{
+				return false;
+			}
+			if (view.byteOffset > bufferBytes.size() || view.byteLength > bufferBytes.size() - view.byteOffset)
+			{
+				return false;
+			}
+			bytes.assign(
+				bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset),
+				bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset + view.byteLength)
+			);
+			return true;
+		}
+
 		fastgltf::MimeType GetDataSourceMimeType(const fastgltf::DataSource& source)
 		{
 			fastgltf::MimeType result = fastgltf::MimeType::None;
@@ -307,13 +343,152 @@ namespace Swim::AssetCompiler
 			}
 		}
 
+		std::optional<std::uint32_t> FindDracoAttributeUniqueId(
+			const fastgltf::DracoCompressedPrimitive& compression,
+			std::string_view semantic)
+		{
+			for (const fastgltf::Attribute& attribute : compression.attributes)
+			{
+				if (attribute.name == semantic)
+				{
+					return ToIndex(attribute.accessorIndex);
+				}
+			}
+			return std::nullopt;
+		}
+
+		template <std::size_t Components, typename Store>
+		void DecodeDracoAttribute(
+			const draco::Mesh& mesh,
+			const fastgltf::DracoCompressedPrimitive& compression,
+			std::string_view semantic,
+			bool required,
+			Store&& store)
+		{
+			const std::optional<std::uint32_t> uniqueId = FindDracoAttributeUniqueId(compression, semantic);
+			if (!uniqueId.has_value())
+			{
+				if (required)
+				{
+					throw std::runtime_error("Draco primitive is missing required attribute " + std::string(semantic));
+				}
+				return;
+			}
+
+			const draco::PointAttribute* attribute = mesh.GetAttributeByUniqueId(*uniqueId);
+			if (!attribute)
+			{
+				throw std::runtime_error(
+					"Draco payload does not contain glTF attribute " + std::string(semantic) +
+					" with unique id " + std::to_string(*uniqueId)
+				);
+			}
+			if (attribute->num_components() != static_cast<std::int8_t>(Components))
+			{
+				throw std::runtime_error("Draco attribute " + std::string(semantic) + " has an unexpected component count");
+			}
+
+			for (draco::PointIndex point(0); point < mesh.num_points(); ++point)
+			{
+				std::array<float, Components> value{};
+				if (!attribute->ConvertValue<float>(
+					attribute->mapped_index(point),
+					static_cast<std::int8_t>(Components),
+					value.data()))
+				{
+					throw std::runtime_error("Could not convert Draco attribute " + std::string(semantic) + " to float data");
+				}
+				store(static_cast<std::size_t>(point.value()), value);
+			}
+		}
+
+		SourcePrimitive ImportDracoPrimitive(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive)
+		{
+			const fastgltf::DracoCompressedPrimitive& compression = *primitive.dracoCompression;
+			if (primitive.type != fastgltf::PrimitiveType::Triangles)
+			{
+				throw std::runtime_error("KHR_draco_mesh_compression primitive is not TRIANGLES");
+			}
+
+			std::vector<std::byte> compressedBytes;
+			if (!CopyBufferViewBytes(asset, compression.bufferView, compressedBytes) || compressedBytes.empty())
+			{
+				throw std::runtime_error("Could not read KHR_draco_mesh_compression bufferView bytes");
+			}
+
+			draco::DecoderBuffer buffer;
+			buffer.Init(reinterpret_cast<const char*>(compressedBytes.data()), compressedBytes.size());
+			draco::Decoder decoder;
+			auto decoded = decoder.DecodeMeshFromBuffer(&buffer);
+			if (!decoded.ok() || decoded.value() == nullptr)
+			{
+				const std::string detail = decoded.ok()
+					? "decoder returned a null mesh"
+					: decoded.status().error_msg_string();
+				throw std::runtime_error("Draco mesh decode failed: " + detail);
+			}
+			std::unique_ptr<draco::Mesh> mesh = std::move(decoded).value();
+
+			const std::size_t pointCount = static_cast<std::size_t>(mesh->num_points());
+			const std::size_t faceCount = static_cast<std::size_t>(mesh->num_faces());
+			if (pointCount > std::numeric_limits<std::uint32_t>::max() ||
+				faceCount > std::numeric_limits<std::uint32_t>::max() / 3u)
+			{
+				throw std::overflow_error("Draco mesh exceeds Swim's 32-bit intermediate model limits");
+			}
+
+			SourcePrimitive result{};
+			result.Topology = SourcePrimitiveTopology::Triangles;
+			result.MaterialIndex = ToOptionalIndex(primitive.materialIndex);
+			result.Vertices.resize(pointCount);
+
+			DecodeDracoAttribute<3>(*mesh, compression, "POSITION", true,
+				[&](std::size_t index, const std::array<float, 3>& value)
+				{
+					result.Vertices[index].Position = value;
+					ExpandBounds(result.Bounds, value);
+				});
+			DecodeDracoAttribute<3>(*mesh, compression, "NORMAL", false,
+				[&](std::size_t index, const std::array<float, 3>& value)
+				{
+					result.Vertices[index].Normal = value;
+					result.Vertices[index].HasNormal = true;
+				});
+			DecodeDracoAttribute<4>(*mesh, compression, "TANGENT", false,
+				[&](std::size_t index, const std::array<float, 4>& value)
+				{
+					result.Vertices[index].Tangent = value;
+					result.Vertices[index].HasTangent = true;
+				});
+			DecodeDracoAttribute<2>(*mesh, compression, "TEXCOORD_0", false,
+				[&](std::size_t index, const std::array<float, 2>& value)
+				{
+					result.Vertices[index].TexCoord0 = value;
+					result.Vertices[index].HasTexCoord0 = true;
+				});
+
+			result.Indices.reserve(faceCount * 3u);
+			for (draco::FaceIndex faceIndex(0); faceIndex < mesh->num_faces(); ++faceIndex)
+			{
+				const draco::Mesh::Face& face = mesh->face(faceIndex);
+				for (std::size_t corner = 0; corner < 3; ++corner)
+				{
+					const std::uint32_t point = static_cast<std::uint32_t>(face[corner].value());
+					if (point >= pointCount)
+					{
+						throw std::runtime_error("Draco mesh face references an invalid point index");
+					}
+					result.Indices.push_back(point);
+				}
+			}
+			return result;
+		}
+
 		SourcePrimitive ImportPrimitive(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive)
 		{
 			if (primitive.dracoCompression)
 			{
-				throw UnsupportedSourceFeature(
-					"KHR_draco_mesh_compression is intentionally skipped until compiler-side Draco decompression is implemented"
-				);
+				return ImportDracoPrimitive(asset, primitive);
 			}
 
 			SourcePrimitive result{};

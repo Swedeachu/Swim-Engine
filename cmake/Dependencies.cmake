@@ -8,7 +8,7 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		SwimJson
 		SwimStb
 		SwimZstd
-		SwimBasis
+		SwimBasisTranscoder
 		SwimGlad
 		SwimSpdlog
 	)
@@ -20,7 +20,7 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)
 	add_library(stb::stb ALIAS SwimStb)
 	add_library(zstd::zstd ALIAS SwimZstd)
-	add_library(Swim::Basis ALIAS SwimBasis)
+	add_library(Swim::BasisTranscoder ALIAS SwimBasisTranscoder)
 	add_library(glad::glad ALIAS SwimGlad)
 	add_library(spdlog::spdlog ALIAS SwimSpdlog)
 
@@ -319,13 +319,13 @@ if(NOT SWIM_BASIS_GENERATED_SOURCE_CURRENT STREQUAL SWIM_BASIS_TRANSCODER_SOURCE
 	file(WRITE "${SWIM_BASIS_GENERATED_SOURCE}" "${SWIM_BASIS_TRANSCODER_SOURCE}")
 endif()
 
-add_library(SwimBasis STATIC
+add_library(SwimBasisTranscoder STATIC
 	"${SWIM_BASIS_GENERATED_SOURCE}"
 )
-target_include_directories(SwimBasis SYSTEM PUBLIC
+target_include_directories(SwimBasisTranscoder SYSTEM PUBLIC
 	"${basis_source_SOURCE_DIR}/transcoder"
 )
-target_compile_definitions(SwimBasis PUBLIC
+target_compile_definitions(SwimBasisTranscoder PUBLIC
 	BASISU_FORCE_DEVEL_MESSAGES=0
 	BASISD_SUPPORT_KTX2=1
 	BASISD_SUPPORT_KTX2_ZSTD=1
@@ -334,9 +334,9 @@ target_compile_definitions(SwimBasis PUBLIC
 	BASISD_SUPPORT_ETC1S=1
 	BASISD_SUPPORT_UASTC=1
 )
-target_link_libraries(SwimBasis PUBLIC zstd::zstd)
-add_library(Swim::Basis ALIAS SwimBasis)
-swim_set_solution_folder(SwimBasis "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")
+target_link_libraries(SwimBasisTranscoder PUBLIC zstd::zstd)
+add_library(Swim::BasisTranscoder ALIAS SwimBasisTranscoder)
+swim_set_solution_folder(SwimBasisTranscoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")
 
 # ---------------------------------------------------------------------------
 # GLAD 2.0.8 - regenerate the exact OpenGL 4.6 + WGL loader previously

@@ -218,7 +218,7 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	target_include_directories(SwimAssetCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
 	target_link_libraries(SwimAssetCompiler
 		PUBLIC Swim::Assets
-		PRIVATE fastgltf::fastgltf meshoptimizer SwimAssetCompilerStb ${SWIM_ASSET_COMPILER_WEBP_TARGET}
+		PRIVATE Swim::AssetCompilerDependencies
 	)
 	target_compile_features(SwimAssetCompiler PUBLIC cxx_std_20)
 	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES})
@@ -364,7 +364,7 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 
 	if(TARGET SwimAssetCompiler)
 		add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/GltfImporterTests.cpp)
-		target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler)
+		target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)
 		target_include_directories(SwimGltfImporterTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 		swim_set_solution_folder(SwimGltfImporterTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
@@ -394,7 +394,7 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 		swim_set_solution_folder(SwimStaticModelCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
 		add_executable(SwimDevelopmentAssetPipelineTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/DevelopmentAssetPipelineTests.cpp)
-		target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler)
+		target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)
 		target_include_directories(SwimDevelopmentAssetPipelineTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 		swim_set_solution_folder(SwimDevelopmentAssetPipelineTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 	endif()
@@ -625,7 +625,7 @@ target_link_libraries(SwimEngine PRIVATE
 	nlohmann_json::nlohmann_json
 	stb::stb
 	zstd::zstd
-	Swim::Basis
+	Swim::BasisTranscoder
 	glad::glad
 	Swim::PhysX
 )

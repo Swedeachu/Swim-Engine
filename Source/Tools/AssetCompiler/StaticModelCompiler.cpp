@@ -202,7 +202,7 @@ namespace Swim::AssetCompiler
 	Swim::Assets::ContentHash GetStaticModelCompilerProfileHash()
 	{
 		return Swim::Assets::ComputeContentHash(
-			"SwimStaticModelCompiler:v1;sasset=1;fastgltf=0.9.0;meshoptimizer=1.1;"
+			"SwimStaticModelCompiler:v1;sasset=1;fastgltf=0.9.0;draco=1.5.7;meshoptimizer=1.1;"
 			"mesh=float32-interleaved-v1;texture=ktx2-or-rgba8-mips-v3");
 	}
 
