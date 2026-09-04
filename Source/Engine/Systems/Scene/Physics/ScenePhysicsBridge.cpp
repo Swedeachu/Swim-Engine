@@ -365,7 +365,6 @@ namespace Engine
 				}
 
 				transform.SetPhysicsTargetWorldPose(registry, pose.Position, pose.Rotation);
-				registry.patch<Transform>(entity, [](auto&) {});
 			});
 	}
 
@@ -387,7 +386,6 @@ namespace Engine
 				}
 
 				transform.ApplyPhysicsInterpolation(registry, t);
-				registry.patch<Transform>(entity, [](auto&) {});
 			});
 	}
 

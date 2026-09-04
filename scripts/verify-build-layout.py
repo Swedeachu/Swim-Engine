@@ -899,6 +899,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
 
 def check_phase2_engine_architecture(failures: list[str]) -> None:
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     config_header = (ROOT / "Source" / "Engine" / "EngineConfig.h").read_text(encoding="utf-8", errors="ignore")
     config_source = (ROOT / "Source" / "Engine" / "EngineConfig.cpp").read_text(encoding="utf-8", errors="ignore")
@@ -2121,6 +2122,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     behavior_header = (ROOT / "Source" / "Engine" / "Systems" / "Entity" / "Behavior.h").read_text(encoding="utf-8", errors="ignore")
     behavior_source = (ROOT / "Source" / "Engine" / "Systems" / "Entity" / "Behavior.cpp").read_text(encoding="utf-8", errors="ignore")
     main_source = (ROOT / "Source" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
+    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     sandbox_header = (ROOT / "Source" / "Game" / "Scenes" / "SandBox.h").read_text(encoding="utf-8", errors="ignore")
     sandbox_source = (ROOT / "Source" / "Game" / "Scenes" / "Sandbox.cpp").read_text(encoding="utf-8", errors="ignore")
@@ -2307,12 +2309,10 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     for fragment in (
         "SetCommandDispatcher",
-        "SetEditorMessageSender",
         "DispatchCommand(std::string_view command) const",
-        "SendEditorMessage(const std::string& message",
     ):
         if fragment not in scene_header and fragment not in scene_system_source:
-            fail(f"isolated Scene tool callback seam is missing: {fragment}", failures)
+            fail(f"isolated Scene command callback seam is missing: {fragment}", failures)
 
 
     transform_header = (ROOT / "Source" / "Engine" / "Components" / "Transform.h").read_text(encoding="utf-8", errors="ignore")
@@ -2516,7 +2516,58 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             fail(f"explicit behavior registration seam is missing: {fragment}", failures)
     check_suite_is_compiled("Scene/Ecs", "BehaviorRegistryTests.cpp", failures)
 
-    # Durable entity IDs + serializer/storage/tooling split.
+    # Playing-mode performance invariants: initialization shares the behavior pass,
+    # and high-churn spatial updates batch duplicate BVH ancestor work.
+    for fragment in (
+        "void ForEachInitializedBehavior",
+        "behavior->InitIfNeeded()",
+        "ForEachInitializedBehavior(&Behavior::Update, dt)",
+        "ForEachInitializedBehavior(&Behavior::FixedUpdate, tickThisSecond)",
+    ):
+        if fragment not in scene_header and fragment not in scene_source:
+            fail(f"scene behavior update regained a duplicate initialization traversal: {fragment}", failures)
+    if "ForEachBehavior(&Behavior::InitIfNeeded);\n\t\tForEachBehavior(&Behavior::Update" in scene_source:
+        fail("Scene Update performs two full BehaviorComponents traversals instead of fusing initialization with update", failures)
+
+    scene_bvh_header_path = scene_root / "SubSceneSystems" / "SceneBVH.h"
+    scene_bvh_source_path = scene_root / "SubSceneSystems" / "SceneBVH.cpp"
+    if scene_bvh_header_path.is_file() and scene_bvh_source_path.is_file():
+        scene_bvh_perf_text = scene_bvh_header_path.read_text(encoding="utf-8", errors="ignore") + scene_bvh_source_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "MarkBinaryAncestorsForRefit",
+            "RefitMarkedBinaryAncestors",
+            "MarkWideAncestorsForRefit",
+            "RefitMarkedWideAncestors",
+            "binaryRefitMarks",
+            "wideRefitMarks",
+            "GetTopologyVersion() const",
+            "GetWideBoundsVersion() const",
+            "topologyVersion",
+            "wideBoundsVersion",
+            "++topologyVersion",
+            "++wideBoundsVersion",
+        ):
+            if fragment not in scene_bvh_perf_text:
+                fail(f"SceneBVH lost batched dirty-ancestor refitting: {fragment}", failures)
+        if "RefitBinaryAncestors(leafIndex)" in scene_bvh_source_path.read_text(encoding="utf-8", errors="ignore"):
+            fail("SceneBVH regressed to recomputing the full binary parent chain once per dirty leaf", failures)
+
+    vulkan_index_draw_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.cpp"
+    if vulkan_index_draw_path.is_file():
+        vulkan_index_draw_source = vulkan_index_draw_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "sceneBVH->GetTopologyVersion() != gpuWorldBvhTopologyVersion",
+            "sceneBVH->GetWideBoundsVersion() != gpuWorldBvhBoundsVersion",
+            "gpuWorldBvhTopologyVersion = sceneBVH->GetTopologyVersion()",
+            "gpuWorldBvhBoundsVersion = sceneBVH->GetWideBoundsVersion()",
+        ):
+            if fragment not in vulkan_index_draw_source:
+                fail(f"Vulkan GPU BVH lost SceneBVH-owned revision gating: {fragment}", failures)
+        if "scene->GetTransformSystem().GetMutationVersion() != gpuWorldBvhBoundsVersion" in vulkan_index_draw_source:
+            fail("Vulkan GPU BVH regressed to rebuilding/copying the full BVH snapshot on every Transform mutation", failures)
+
+    # Durable entity IDs remain active, while the old external-editor scene JSON/IPC
+    # experiment is intentionally retained only as dormant/reference code.
     serialization_root = scene_root / "Serialization"
     required_serialization_files = (
         "SerializedEntityId.h",
@@ -2531,17 +2582,18 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     )
     for file_name in required_serialization_files:
         if not (serialization_root / file_name).is_file():
-            fail(f"Phase 5 persistence/tooling module is missing: {file_name}", failures)
+            fail(f"dormant Phase 5 persistence/tooling reference module is missing: {file_name}", failures)
 
     legacy_serialized_manager = scene_root / "SubSceneSystems" / "SerializedSceneManager.h"
     if legacy_serialized_manager.exists() or (scene_root / "SubSceneSystems" / "SerializedSceneManager.cpp").exists():
         fail("monolithic SerializedSceneManager returned after serializer/storage/tooling split", failures)
 
+    # Keep the old experiment internally coherent even though runtime code does not use it.
     if (serialization_root / "SceneSerializer.cpp").is_file():
         serializer_source = (serialization_root / "SceneSerializer.cpp").read_text(encoding="utf-8", errors="ignore")
         for forbidden in ("WM_COPYDATA", "GetExecutableDirectory", "std::ofstream", "MaterialPool"):
             if forbidden in serializer_source:
-                fail(f"SceneSerializer regained transport/storage/legacy-pool policy: {forbidden}", failures)
+                fail(f"dormant SceneSerializer regained transport/storage/legacy-pool policy: {forbidden}", failures)
         for fragment in (
             'root["schemaVersion"] = SchemaVersion',
             'jsonEntity["id"] = id.Value',
@@ -2552,31 +2604,110 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             "registry->any_of<DoNotSerialize>(entity)",
         ):
             if fragment not in serializer_source:
-                fail(f"stable-ID/AssetId scene serialization contract is missing: {fragment}", failures)
+                fail(f"dormant stable-ID/AssetId scene serialization contract is missing: {fragment}", failures)
 
     if (serialization_root / "SceneStorage.cpp").is_file():
         storage_source = (serialization_root / "SceneStorage.cpp").read_text(encoding="utf-8", errors="ignore")
         for forbidden in ("scene sync:", "scene load:", "SendEditorMessage", "CommandSystem"):
             if forbidden in storage_source:
-                fail(f"SceneStorage regained editor/tool transport policy: {forbidden}", failures)
+                fail(f"dormant SceneStorage regained editor/tool transport policy: {forbidden}", failures)
 
     if (serialization_root / "SceneToolingBridge.h").is_file():
         tooling_header = (serialization_root / "SceneToolingBridge.h").read_text(encoding="utf-8", errors="ignore")
         for forbidden in ("SceneSerializer", "nlohmann", "filesystem", "FileSystem"):
             if forbidden in tooling_header:
-                fail(f"SceneToolingBridge owns serialization/storage policy: {forbidden}", failures)
+                fail(f"dormant SceneToolingBridge owns serialization/storage policy: {forbidden}", failures)
+
+    # This is now a hard runtime boundary: legacy external editor IPC and automatic scene
+    # JSON persistence stay in source control but are not owned, initialized, or called by
+    # the engine/scene/material runtime. Future editor work is in-process engine UI.
+    dormant_runtime_forbidden = {
+        "Scene.h": (
+            "std::unique_ptr<SceneSerializer>",
+            "std::unique_ptr<SceneStorage>",
+            "std::unique_ptr<SceneToolingBridge>",
+            "std::unique_ptr<SceneSyncTracker>",
+            "SetEditorMessageSender",
+            "SetEditorConnectionProvider",
+        ),
+        "Scene.cpp": (
+            'Serialization/SceneSerializer.h',
+            'Serialization/SceneStorage.h',
+            'Serialization/SceneSyncTracker.h',
+            'Serialization/SceneToolingBridge.h',
+            "sceneSyncTracker",
+            "sceneToolingBridge",
+            "sceneSerializer",
+            "sceneStorage",
+            "SerializeScene()",
+        ),
+        "SwimEngine.h": (
+            'Engine/Platform/EditorIpcBridge.h',
+            "editorIpcBridge",
+            "SendEditorMessage(",
+            "OnEditorCommand(",
+        ),
+        "SwimEngine.cpp": (
+            "std::make_unique<Swim::Platform::EditorIpcBridge>",
+            "editorIpcBridge->",
+            "sceneServices.Tools.SendEditorMessage =",
+            "sceneServices.Tools.IsEditorConnected =",
+        ),
+    }
+    dormant_sources = {
+        "Scene.h": scene_header,
+        "Scene.cpp": scene_source,
+        "SwimEngine.h": engine_header,
+        "SwimEngine.cpp": engine_source,
+    }
+    for label, forbidden_fragments in dormant_runtime_forbidden.items():
+        text = dormant_sources[label]
+        for fragment in forbidden_fragments:
+            if fragment in text:
+                fail(f"legacy external-editor/scene-JSON runtime wiring returned in {label}: {fragment}", failures)
+
+    material_pool_header_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "MaterialPool.h"
+    material_pool_source_path = material_pool_header_path.with_suffix(".cpp")
+    if material_pool_header_path.is_file() and material_pool_source_path.is_file():
+        material_pool_text = material_pool_header_path.read_text(encoding="utf-8", errors="ignore") + material_pool_source_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("EditorMessageCallback", "sendEditorMessage"):
+            if fragment in material_pool_text:
+                fail(f"MaterialPool regained legacy external-editor messaging: {fragment}", failures)
+
+    if "\n\t\tRegisterEditorCommands();" in scene_system_source or "\n\t\tSendBehaviorsToEditor();" in scene_system_source:
+        fail("SceneSystem actively registers the dormant external-editor command protocol", failures)
+
+    scene_system_header_text = scene_system_header
+    for forbidden in ("SendEditorMessage;", "IsEditorConnected;", "bool SendEditorMessage("):
+        if forbidden in scene_system_header_text:
+            fail(f"SceneSystem exposes active legacy external-editor tooling seam: {forbidden}", failures)
+    if "#if 0" not in scene_system_header_text or "DORMANT LEGACY EXTERNAL-EDITOR PROTOCOL" not in scene_system_source:
+        fail("legacy SceneSystem external-editor command implementation must remain explicitly compile-disabled", failures)
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        'EditorIpcBridge[.]cpp$',
+        'Scene(Serializer|Storage|SyncTracker)[.]cpp$',
+    ):
+        if fragment not in cmake_text:
+            fail(f"legacy external-editor/scene-JSON implementation is no longer excluded from active targets: {fragment}", failures)
+
+    for fragment in (
+        "ownsWindow = !config.Window.ExternalWindow.IsValid();",
+        "windowDesc.ExternalParent = {};",
+    ):
+        if fragment not in engine_source:
+            fail(f"SwimEngine no longer hard-disables legacy ExternalParent embedding: {fragment}", failures)
+    if "SyncExternalParentSize()" in engine_source:
+        fail("SwimEngine reactivated legacy ExternalParent size synchronization", failures)
 
     for fragment in (
         "EntityIdentityMap entityIdentities",
         "CreateEntityWithSerializedId(SerializedEntityId id)",
         "FindEntityBySerializedId(SerializedEntityId id) const",
-        "std::unique_ptr<SceneSerializer> sceneSerializer",
-        "std::unique_ptr<SceneStorage> sceneStorage",
-        "std::unique_ptr<SceneToolingBridge> sceneToolingBridge",
-        "std::unique_ptr<SceneSyncTracker> sceneSyncTracker",
     ):
         if fragment not in scene_header:
-            fail(f"Scene durable persistence ownership seam is missing: {fragment}", failures)
+            fail(f"Scene durable identity seam is missing: {fragment}", failures)
 
     for fragment in (
         "decltype(auto) AddComponent",
@@ -2708,6 +2839,8 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
                 fail(f"ScenePhysicsBridge is missing the scene/generic-physics boundary fragment: {fragment}", failures)
         if "to_integral" in bridge_text:
             fail("ScenePhysicsBridge must not turn recyclable EnTT identities into durable/tooling physics identity", failures)
+        if "registry.patch<Transform>" in bridge_text:
+            fail("ScenePhysicsBridge redundantly emits EnTT Transform patches after Transform setters already queue spatial dirtiness", failures)
 
     handles_path = physics_root / "PhysicsHandles.h"
     if handles_path.is_file():

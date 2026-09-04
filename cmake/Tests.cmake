@@ -111,13 +111,13 @@ function(swim_configure_tests)
 		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/TestMain.cpp
 	)
 
-	# Foundation suites depend only on modules that exist in every configuration.
+	# Foundation suites that remain fully buildable even when dependency stubs are
+	# active. Offline mode deliberately has no SDL headers, so Platform/Input/IO
+	# suites join the same single SwimTests program only in dependency-enabled builds.
 	swim_collect_test_suite_sources(SWIM_TEST_SUITE_SOURCES
 		Core
 		Memory
 		Jobs
-		IO
-		Input
 		Assets
 		Physics/Generic
 		Scene/Headless
@@ -128,14 +128,21 @@ function(swim_configure_tests)
 		Swim::Core
 		Swim::Memory
 		Swim::Jobs
-		Swim::IO
-		Swim::Platform
-		Swim::Input
 		Swim::Assets
 	)
 
 	if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
-		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::Physics)
+		swim_collect_test_suite_sources(SWIM_PLATFORM_FOUNDATION_SUITES
+			IO
+			Input
+		)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_PLATFORM_FOUNDATION_SUITES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES
+			Swim::IO
+			Swim::Platform
+			Swim::Input
+			Swim::Physics
+		)
 	endif()
 
 	find_package(Threads REQUIRED)

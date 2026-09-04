@@ -4,7 +4,6 @@
 #include "Engine/EngineConfig.h"
 #include "Engine/EngineState.h"
 #include "Engine/Machine.h"
-#include "Engine/Platform/EditorIpcBridge.h"
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/IO/AsyncIoService.h"
@@ -53,7 +52,6 @@ namespace Engine
 		int Exit() override;
 		void Stop();
 
-		void OnEditorCommand(std::string_view msg);
 
 		static EngineConfigParseResult ParseStartingEngineArgs(int argc, char** argv);
 
@@ -96,14 +94,6 @@ namespace Engine
 		void SetEngineState(EngineState state) { engineState = state; }
 		EngineState GetEngineState() const { return engineState; }
 
-		bool SendEditorMessage(const std::string& msg, std::uintptr_t channel = 1);
-
-		template<typename... Args>
-		bool SendEditorMessageF(std::string_view fmt, Args&&... args)
-		{
-			std::string s = std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...));
-			return SendEditorMessage(s);
-		}
 
 	private:
 
@@ -150,7 +140,6 @@ namespace Engine
 
 		std::unique_ptr<Swim::Platform::PlatformSystem> platformSystem;
 		std::unique_ptr<Swim::Platform::Window> engineWindow;
-		std::unique_ptr<Swim::Platform::EditorIpcBridge> editorIpcBridge;
 		std::unique_ptr<Swim::Jobs::JobSystem> jobSystem;
 		std::unique_ptr<Swim::IO::AsyncIoService> ioSystem;
 		std::unique_ptr<Swim::Assets::AssetSystem> assetSystem;

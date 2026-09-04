@@ -1,3 +1,6 @@
+// LEGACY/DORMANT: filesystem scene-JSON persistence is not runtime-wired. Kept so the
+// previous experiment remains available for reference without affecting engine execution.
+
 #pragma once
 
 #include <nlohmann/json.hpp>

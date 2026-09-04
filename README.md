@@ -198,12 +198,12 @@ The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and c
 
 - Editor gizmos and property inspectors for primitive component fields.  
 - Archetype and prefab pipeline for Behavior components.  
-- Full scene serialization and deserialization.  
+- Deliberate scene persistence format/restore path after the runtime scene model stabilizes; the old automatic JSON sync experiment is currently dormant.  
 - Jolt backend implementation and parity testing against the existing generic Physics/PhysX contract.  
 - Compute-based culling pass + occlusion.  
 - Recursive parent-child transform hierarchy for UI entities.  
 - Controller input support.  
-- DLL + C# runtime bindings for external editor integration.
+- In-process editor UI: hierarchy, inspectors, gizmos, asset/scene tooling, and debugging directly against engine state.
 
 ---
 

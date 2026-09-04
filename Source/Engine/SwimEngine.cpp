@@ -79,7 +79,7 @@ namespace Engine
 		engineState = config.InitialState;
 		windowWidth = config.Window.Width;
 		windowHeight = config.Window.Height;
-		ownsWindow = !config.Window.ExternalWindow.IsValid() && !config.Window.ExternalParent.IsValid();
+		ownsWindow = !config.Window.ExternalWindow.IsValid();
 	}
 
 	EngineConfigParseResult SwimEngine::ParseStartingEngineArgs(int argc, char** argv)
@@ -173,6 +173,11 @@ namespace Engine
 		}
 
 		Swim::Platform::WindowDesc windowDesc = config.Window;
+		if (windowDesc.ExternalParent.IsValid())
+		{
+			std::cout << "[Engine] Ignoring legacy ExternalParent window embedding; external editor integration is dormant.\n";
+			windowDesc.ExternalParent = {};
+		}
 		windowDesc.Title = GetWindowTitle();
 
 		switch (graphicsBackend)
@@ -198,24 +203,9 @@ namespace Engine
 		engineWindow->Show();
 		UpdateWindowSize();
 
-		if (config.Window.ExternalParent.IsValid())
-		{
-			if (config.Window.ExternalParent.Type != Swim::Platform::NativeWindowType::Win32)
-			{
-				std::cerr << "[Engine] Legacy editor IPC currently supports Win32 external parents only.\n";
-				return false;
-			}
-
-			editorIpcBridge = std::make_unique<Swim::Platform::EditorIpcBridge>();
-			if (!editorIpcBridge->Initialize(*engineWindow, config.Window.ExternalParent, [this](std::string_view message)
-			{
-				OnEditorCommand(message);
-			}))
-			{
-				std::cerr << "[Engine] Editor IPC bridge initialization failed.\n";
-				return false;
-			}
-		}
+		// Legacy external-editor embedding/WM_COPYDATA IPC is intentionally dormant.
+		// Future editor work lives inside the engine UI. Keep EditorIpcBridge in-tree as
+		// historical/reference code, but do not initialize or consult it at runtime.
 
 		minimized = engineWindow->IsMinimized();
 		needResize = true;
@@ -267,22 +257,6 @@ namespace Engine
 		}
 	}
 
-	void SwimEngine::OnEditorCommand(std::string_view msg)
-	{
-		if (!commandSystem)
-		{
-			return;
-		}
-
-		const std::string command(msg);
-		const bool ok = commandSystem->ParseAndDispatch(command);
-		SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + command);
-	}
-
-	bool SwimEngine::SendEditorMessage(const std::string& msg, std::uintptr_t channel)
-	{
-		return editorIpcBridge && editorIpcBridge->Send(msg, channel);
-	}
 
 	Renderer& SwimEngine::GetRenderer()
 	{
@@ -395,11 +369,7 @@ namespace Engine
 		materialPool = std::make_unique<MaterialPool>(
 			*assetSystem,
 			*meshPool,
-			*texturePool,
-			[this](const std::string& message, std::uintptr_t channel)
-			{
-				return SendEditorMessage(message, channel);
-			}
+			*texturePool
 		);
 		fontPool = std::make_unique<FontPool>(platformSystem->GetFileSystem(), *texturePool);
 
@@ -431,10 +401,6 @@ namespace Engine
 		sceneServices.Core.Assets = assetSystem.get();
 		sceneServices.Core.FrameMemory = &frameArena;
 		sceneServices.Core.State = &engineState;
-		sceneServices.Tools.SendEditorMessage = [this](const std::string& message, std::uintptr_t channel)
-		{
-			return SendEditorMessage(message, channel);
-		};
 		sceneServices.Tools.GetFPS = [this]()
 		{
 			return GetFPS();
@@ -593,7 +559,7 @@ namespace Engine
 			{
 				s += " None";
 			}
-			e->SendEditorMessage(s);
+			std::cout << s << std::endl;
 		};
 
 		commandSystem->RegisterRaw("play", [self, summarize](const std::vector<std::string>&)
@@ -636,7 +602,7 @@ namespace Engine
 
 		commandSystem->RegisterRaw("restart", [self](const std::vector<std::string>&)
 		{
-			self->SendEditorMessage("[Engine] Restart requested (not implemented)");
+			std::cout << "[Engine] Restart requested (not implemented)" << std::endl;
 		});
 	}
 
@@ -720,11 +686,13 @@ namespace Engine
 
 	void SwimEngine::Update(double dt)
 	{
-		if (engineWindow && engineWindow->IsExternal())
+		// ExternalParent embedding belonged to the retired external-editor experiment and is
+		// deliberately ignored by MakeWindow(). ExternalWindow remains a generic platform
+		// capability, but it does not participate in parent-size synchronization.
+		if (engineWindow && config.Window.ExternalWindow.IsValid())
 		{
 			const unsigned int previousWidth = windowWidth;
 			const unsigned int previousHeight = windowHeight;
-			engineWindow->SyncExternalParentSize();
 			UpdateWindowSize();
 			if (previousWidth != windowWidth || previousHeight != windowHeight)
 			{
@@ -967,11 +935,6 @@ namespace Engine
 		running = false;
 		const int result = ExitSystems();
 
-		if (editorIpcBridge)
-		{
-			editorIpcBridge->Shutdown();
-			editorIpcBridge.reset();
-		}
 
 		engineWindow.reset();
 		if (platformSystem)

@@ -71,6 +71,8 @@ namespace Engine
 
 		bool ShouldForceUpdate() const { return forceUpdate; }
 		void ForceUpdateNextFrame() { forceUpdate = true; }
+		uint64_t GetTopologyVersion() const { return topologyVersion; }
+		uint64_t GetWideBoundsVersion() const { return wideBoundsVersion; }
 
 		void SetDebugDrawer(SceneDebugDraw* drawer)
 		{
@@ -351,13 +353,16 @@ namespace Engine
 		AABB CalculateWorldAABB(entt::entity entity, const glm::vec3& localMin, const glm::vec3& localMax, const Transform& transform);
 
 		int BuildRecursive(std::vector<int>& leafIndices, int begin, int end);
-		void RefitBinaryAncestors(int leafIndex);
+		void BeginRefitBatch();
+		void MarkBinaryAncestorsForRefit(int leafIndex);
+		void RefitMarkedBinaryAncestors();
 		void FullRebuild();
 		int BuildWideRecursive(int binaryNodeIndex, int parentWideIndex, uint8_t parentSlot);
 		void BuildWideHierarchy();
 		void SetWideChildBounds(int wideIndex, uint8_t childSlot, const AABB& aabb);
 		void UpdateWideNodeBoundsFromChildren(int wideIndex);
-		void RefitWideAncestorsFromLeaf(int leafIndex);
+		void MarkWideAncestorsForRefit(int leafIndex);
+		void RefitMarkedWideAncestors();
 		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
 		entt::registry& registry;
@@ -369,6 +374,11 @@ namespace Engine
 		std::vector<WideNode> wideNodes; // 4-wide SoA frustum traversal layout
 		std::vector<int> leafToWideParent;
 		std::vector<uint8_t> leafToWideSlot;
+		std::vector<uint32_t> binaryRefitMarks;
+		std::vector<uint32_t> wideRefitMarks;
+		uint32_t refitEpoch = 0;
+		uint64_t topologyVersion = 0;
+		uint64_t wideBoundsVersion = 0;
 		std::unordered_map<entt::entity, int> entityToLeaf; // entity leaf index
 		int root = -1;
 		int wideRoot = -1;

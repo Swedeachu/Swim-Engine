@@ -1,12 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 #include "LegacyRenderBinding.h"
 #include "Engine/Assets/ContentHash.h"
@@ -28,10 +26,8 @@ namespace Engine
 
   public:
 
-    using EditorMessageCallback = std::function<bool(const std::string&, std::uintptr_t)>;
-
-    MaterialPool(Swim::Assets::AssetSystem& assets, MeshPool& meshes, TexturePool& textures, EditorMessageCallback sendEditorMessage = {})
-      : assets(&assets), meshes(&meshes), textures(&textures), sendEditorMessage(std::move(sendEditorMessage)) {}
+    MaterialPool(Swim::Assets::AssetSystem& assets, MeshPool& meshes, TexturePool& textures)
+      : assets(&assets), meshes(&meshes), textures(&textures) {}
 
     // Delete copy and move constructors
     MaterialPool(const MaterialPool&) = delete;
@@ -67,7 +63,6 @@ namespace Engine
     Swim::Assets::AssetSystem* assets = nullptr;
     MeshPool* meshes = nullptr;
     TexturePool* textures = nullptr;
-    EditorMessageCallback sendEditorMessage;
 
     mutable std::mutex poolMutex;
     std::unordered_map<std::string, std::shared_ptr<LegacyRenderBinding>> materials;

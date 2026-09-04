@@ -69,10 +69,6 @@ namespace Engine
 	class FontPool;
 	class SceneCommandBuffer;
 	class BehaviorRegistry;
-	class SceneSerializer;
-	class SceneStorage;
-	class SceneToolingBridge;
-	class SceneSyncTracker;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
 	class Scene : public Machine, public std::enable_shared_from_this<Scene>
@@ -165,7 +161,6 @@ namespace Engine
 		void SetFrameArena(Swim::Memory::FrameArena* value) { frameArena = value; }
 		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
 		void SetCommandDispatcher(std::function<bool(std::string_view)> dispatcher) { commandDispatcher = std::move(dispatcher); }
-		void SetEditorMessageSender(std::function<bool(const std::string&, std::uintptr_t)> sender) { editorMessageSender = std::move(sender); }
 
 		void SetCubeMapController(CubeMapController* value) { cubeMapController = value; }
 
@@ -186,10 +181,6 @@ namespace Engine
 		SceneCommandBuffer& GetCommandBuffer() const { return *GetSystem(sceneCommandBuffer.get()); }
 		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
 		bool DispatchCommand(std::string_view command) const { return commandDispatcher && commandDispatcher(command); }
-		bool SendEditorMessage(const std::string& message, std::uintptr_t channel = 1) const
-		{
-			return editorMessageSender && editorMessageSender(message, channel);
-		}
 		bool HasPresentationServices() const
 		{
 			return inputManager && cameraSystem && meshPool && texturePool && materialPool && fontPool;
@@ -363,6 +354,32 @@ namespace Engine
 			});
 		}
 
+		template<typename Func, typename... Args>
+		void ForEachInitializedBehavior(Func method, Args&&... args)
+		{
+			EngineState state = GetEngineState();
+
+			registry.view<BehaviorComponents>().each(
+				[&](auto entity, BehaviorComponents& bc)
+			{
+				if (!bc.CanExecute(state))
+				{
+					return;
+				}
+
+				for (auto& behavior : bc.behaviors)
+				{
+					if (!behavior)
+					{
+						continue;
+					}
+
+					behavior->InitIfNeeded();
+					(behavior.get()->*method)(std::forward<Args>(args)...);
+				}
+			});
+		}
+
 		void SetEnabledStates(entt::entity entity, EngineState states);
 
 		void AddEnabledStates(entt::entity entity, EngineState states);
@@ -451,9 +468,8 @@ namespace Engine
 		Swim::Memory::FrameArena* frameArena = nullptr;
 		std::function<int()> fpsProvider;
 		std::function<bool(std::string_view)> commandDispatcher;
-		std::function<bool(const std::string&, std::uintptr_t)> editorMessageSender;
 		bool transformHooksBound{ false };
-		bool serializationHooksBound{ false };
+		bool renderableHooksBound{ false };
 
 		// Internals:
 		entt::observer frustumCacheObserver;
@@ -464,10 +480,6 @@ namespace Engine
 		double physicsTimeSinceLastTick{ 0.0 };
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 		std::unique_ptr<GizmoSystem> gizmoSystem;
-		std::unique_ptr<SceneSerializer> sceneSerializer;
-		std::unique_ptr<SceneStorage> sceneStorage;
-		std::unique_ptr<SceneToolingBridge> sceneToolingBridge;
-		std::unique_ptr<SceneSyncTracker> sceneSyncTracker;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 
@@ -477,10 +489,7 @@ namespace Engine
 
 		bool mouseBusyWithUI{ false }; // to avoid interacting with world same time as interacting with UI above the world
 
-		// --- Serialization bindings driven by the registry ---
-
-		template<typename T>
-		void BindSerializationHooksForComponent();
+		// Renderable/transform registry hooks. Scene serialization is currently dormant.
 
 		template<typename T>
 		void OnComponentConstruct(entt::registry& reg, entt::entity entity);

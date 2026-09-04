@@ -1260,11 +1260,12 @@ namespace Engine
 			const bool scenePacketWasDirty = gpuWorldSceneDirty;
 			RebuildGpuWorldScenePacket(*scene, registry);
 
-			if (scenePacketWasDirty || scene->GetRenderablesRevision() != gpuWorldBvhTopologyVersion)
+			SceneBVH* sceneBVH = scene->GetSceneBVH();
+			if (scenePacketWasDirty || (sceneBVH && sceneBVH->GetTopologyVersion() != gpuWorldBvhTopologyVersion))
 			{
 				RebuildGpuWorldBvh(*scene);
 			}
-			else if (scene->GetTransformSystem().GetMutationVersion() != gpuWorldBvhBoundsVersion)
+			else if (sceneBVH && sceneBVH->GetWideBoundsVersion() != gpuWorldBvhBoundsVersion)
 			{
 				UpdateGpuWorldBvhNodeBuffer(*scene);
 			}
@@ -1842,8 +1843,8 @@ namespace Engine
 		}
 
 		gpuWorldBvhMaxDepth = std::max(1u, snapshotMaxDepth);
-		gpuWorldBvhTopologyVersion = scene.GetRenderablesRevision();
-		gpuWorldBvhBoundsVersion = scene.GetTransformSystem().GetMutationVersion();
+		gpuWorldBvhTopologyVersion = sceneBVH->GetTopologyVersion();
+		gpuWorldBvhBoundsVersion = sceneBVH->GetWideBoundsVersion();
 
 		if (gpuWorldBvhNodeCount > 0)
 		{
@@ -1904,8 +1905,8 @@ namespace Engine
 			return;
 		}
 
-		const uint64_t currentTransformMutationVersion = scene.GetTransformSystem().GetMutationVersion();
-		if (gpuWorldBvhBoundsVersion == currentTransformMutationVersion && !gpuWorldBvhNodesUploadPending)
+		const uint64_t currentWideBoundsVersion = sceneBVH->GetWideBoundsVersion();
+		if (gpuWorldBvhBoundsVersion == currentWideBoundsVersion && !gpuWorldBvhNodesUploadPending)
 		{
 			return;
 		}
@@ -1937,7 +1938,7 @@ namespace Engine
 		gpuWorldBvhMaxDepth = std::max(1u, snapshotMaxDepth);
 		gpuWorldBvhNodeStagingBuffer->CopyData(gpuWorldBvhNodesCpuData.data(), static_cast<size_t>(gpuWorldBvhNodeCount) * sizeof(GpuWorldBvhNodeData));
 		gpuWorldBvhNodesUploadPending = true;
-		gpuWorldBvhBoundsVersion = currentTransformMutationVersion;
+		gpuWorldBvhBoundsVersion = currentWideBoundsVersion;
 	}
 
 	void VulkanIndexDraw::UpdateGpuWorldTransformPacket(Scene& scene, entt::registry& registry, uint32_t frameIndex)

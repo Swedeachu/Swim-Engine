@@ -66,8 +66,25 @@ namespace Engine
 		tooling->Send("scene load:" + serializer->SerializeScene().dump(), 2);
 	}
 
+	void SceneSyncTracker::ResynchronizeFullScene()
+	{
+		Clear();
+		knownEntities.clear();
+		PrimeKnownEntities();
+		SendFullScene();
+	}
+
 	void SceneSyncTracker::Flush()
 	{
+		// Do not pay JSON construction/serialization costs when there is no real
+		// editor endpoint. A callback object exists in standalone runs too, so this
+		// must use SceneToolingBridge's actual connection state.
+		if (!tooling->IsConnected())
+		{
+			Clear();
+			return;
+		}
+
 		for (SerializedEntityId id : dirtyEntities)
 		{
 			if (!dirtyEntitySet.contains(id) || destroyingEntities.contains(id))

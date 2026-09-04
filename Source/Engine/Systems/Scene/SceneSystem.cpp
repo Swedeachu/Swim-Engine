@@ -87,12 +87,8 @@ namespace Engine
 			}
 		}
 
-		// Register editor-only command surfaces from the actual runtime state.
-		if (HasAnyEngineStates(*services.Core.State, EngineState::Editing) && services.Tools.Commands)
-		{
-			RegisterEditorCommands();
-			SendBehaviorsToEditor();
-		}
+		// Legacy external-editor scene commands are intentionally not registered.
+		// Future editor tooling is internal engine UI and operates on engine state directly.
 
 		return err;
 	}
@@ -247,7 +243,6 @@ namespace Engine
 
 			return commands->ParseAndDispatch(std::string(command));
 		});
-		scene.SetEditorMessageSender(services.Tools.SendEditorMessage);
 
 		scene.SetCubeMapController(services.Presentation.CubeMap);
 	}
@@ -262,14 +257,14 @@ namespace Engine
 		const std::string ownedCommand(command);
 		const bool ok = services.Tools.Commands->ParseAndDispatch(ownedCommand);
 
-		if (services.Tools.SendEditorMessage)
-		{
-			services.Tools.SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + ownedCommand, 1);
-		}
 
 		return ok;
 	}
 
+	#if 0
+	// DORMANT LEGACY EXTERNAL-EDITOR PROTOCOL
+	// This code is intentionally excluded from the runtime build but retained in-tree as
+	// historical/reference material. New editor features belong to Swim Engine's internal UI.
 	// Small helpers used by the add/remove component commands:
 
 	void SceneSystem::AddComponentByName(Scene& scene, SerializedEntityId entityId, const std::string& componentName)
@@ -618,5 +613,7 @@ namespace Engine
 		}));
 	}
 
+
+	#endif
 
 }

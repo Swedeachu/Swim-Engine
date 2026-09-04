@@ -1,3 +1,7 @@
+// LEGACY/DORMANT: external-editor WM_COPYDATA bridge retained for historical reference.
+// Swim Engine does not initialize this bridge at runtime. Future editor tooling is
+// implemented in-process using the engine's own UI and direct engine state.
+
 #pragma once
 
 #include "Window.h"

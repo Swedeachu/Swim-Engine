@@ -337,10 +337,6 @@ namespace Engine
 		);
 		materials.emplace(name, data);
 
-		if (sendEditorMessage)
-		{
-			sendEditorMessage("registerMaterial " + name, 3);
-		}
 
 		return data;
 	}
@@ -559,10 +555,6 @@ namespace Engine
 				compositeMaterialRevisions[sourcePath] = graphRevision;
 			}
 
-			if (sendEditorMessage)
-			{
-				sendEditorMessage("registerMaterial " + sourcePath, 3);
-			}
 			return loadedMaterials;
 		}
 		catch (const std::exception& error)
@@ -587,10 +579,6 @@ namespace Engine
 		compositeMaterialRevisions.clear();
 		compositeMaterialAssetIds.clear();
 
-		if (sendEditorMessage)
-		{
-			sendEditorMessage("clearMaterials", 1);
-		}
 	}
 
 }

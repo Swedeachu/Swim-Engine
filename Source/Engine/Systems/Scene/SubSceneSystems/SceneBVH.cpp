@@ -230,6 +230,7 @@ namespace Engine
 
 		const float preRootArea = (root != -1) ? ComputeSurfaceArea(nodes[root].fatAABB) : 0.0f;
 		bool anyLeafEscapedFatBounds = false;
+		BeginRefitBatch();
 
 		for (entt::entity e : dirtyEntities)
 		{
@@ -294,15 +295,26 @@ namespace Engine
 			leaf.aabb = worldAABB;
 			leaf.hasCullHistory = false;
 
-			if (!AABBInsideAABB(leaf.aabb, leaf.fatAABB))
+			const bool escapedFatBounds = !AABBInsideAABB(leaf.aabb, leaf.fatAABB);
+			if (escapedFatBounds)
 			{
 				leaf.fatAABB = MakeFatAABBMotionAware(previousAABB, leaf.aabb);
 				anyLeafEscapedFatBounds = true;
 			}
 
-			RefitBinaryAncestors(leafIndex);
-			RefitWideAncestorsFromLeaf(leafIndex);
+			// Every transform mutation can change the tight bounds used by exact leaf
+			// tests, but upper binary ancestors only need to be recomputed once after
+			// all dirty leaves have been updated. The wide traversal hierarchy stores
+			// fat bounds, so it only changes when the leaf actually escapes its fat box.
+			MarkBinaryAncestorsForRefit(leafIndex);
+			if (escapedFatBounds)
+			{
+				MarkWideAncestorsForRefit(leafIndex);
+			}
 		}
+
+		RefitMarkedBinaryAncestors();
+		RefitMarkedWideAncestors();
 
 		if (forceUpdate)
 		{
@@ -498,6 +510,9 @@ namespace Engine
 
 	void SceneBVH::FullRebuild()
 	{
+		++topologyVersion;
+		++wideBoundsVersion;
+
 		nodes.clear();
 		wideNodes.clear();
 		entityToLeaf.clear();
@@ -570,28 +585,83 @@ namespace Engine
 		{
 			leafToWideParent.clear();
 			leafToWideSlot.clear();
+			binaryRefitMarks.clear();
+			wideRefitMarks.clear();
+			refitEpoch = 0;
 			return;
 		}
 
 		root = BuildRecursive(leafIndices, 0, static_cast<int>(leafIndices.size()));
 		BuildWideHierarchy();
+		binaryRefitMarks.assign(nodes.size(), 0);
+		wideRefitMarks.assign(wideNodes.size(), 0);
+		refitEpoch = 0;
 	}
 
-	void SceneBVH::RefitBinaryAncestors(int leafIndex)
+	void SceneBVH::BeginRefitBatch()
 	{
-		int nodeIndex = leafIndex;
+		++refitEpoch;
+		if (refitEpoch != 0)
+		{
+			return;
+		}
+
+		// Epoch zero is reserved for "not marked". This practically never wraps,
+		// but clearing here keeps the scratch arrays correct for very long sessions.
+		std::fill(binaryRefitMarks.begin(), binaryRefitMarks.end(), 0);
+		std::fill(wideRefitMarks.begin(), wideRefitMarks.end(), 0);
+		refitEpoch = 1;
+	}
+
+	void SceneBVH::MarkBinaryAncestorsForRefit(int leafIndex)
+	{
+		if (leafIndex < 0 || leafIndex >= static_cast<int>(nodes.size()))
+		{
+			return;
+		}
+
+		int nodeIndex = nodes[leafIndex].parent;
 		while (nodeIndex != -1)
 		{
-			BVHNode& node = nodes[nodeIndex];
-			node.hasCullHistory = false;
-
-			if (!node.IsLeaf())
+			if (nodeIndex >= static_cast<int>(binaryRefitMarks.size()))
 			{
-				node.aabb = MergeAABBs(nodes[node.left].aabb, nodes[node.right].aabb);
-				node.fatAABB = MergeAABBs(nodes[node.left].fatAABB, nodes[node.right].fatAABB);
+				return;
 			}
 
-			nodeIndex = node.parent;
+			if (binaryRefitMarks[nodeIndex] == refitEpoch)
+			{
+				// This node and every ancestor above it were already marked by another
+				// dirty leaf, so there is no reason to walk the shared path again.
+				break;
+			}
+
+			binaryRefitMarks[nodeIndex] = refitEpoch;
+			nodeIndex = nodes[nodeIndex].parent;
+		}
+	}
+
+	void SceneBVH::RefitMarkedBinaryAncestors()
+	{
+		// BuildRecursive appends each internal parent before any internal descendants.
+		// Reverse index order is therefore children-before-parent for internal nodes.
+		// Leaves were allocated before the internal hierarchy and are never marked.
+		for (int nodeIndex = static_cast<int>(nodes.size()) - 1; nodeIndex >= 0; --nodeIndex)
+		{
+			if (nodeIndex >= static_cast<int>(binaryRefitMarks.size())
+				|| binaryRefitMarks[nodeIndex] != refitEpoch)
+			{
+				continue;
+			}
+
+			BVHNode& node = nodes[nodeIndex];
+			node.hasCullHistory = false;
+			if (node.IsLeaf())
+			{
+				continue;
+			}
+
+			node.aabb = MergeAABBs(nodes[node.left].aabb, nodes[node.right].aabb);
+			node.fatAABB = MergeAABBs(nodes[node.left].fatAABB, nodes[node.right].fatAABB);
 		}
 	}
 
@@ -732,30 +802,62 @@ namespace Engine
 		wideRoot = BuildWideRecursive(root, -1, 0xFF);
 	}
 
-	void SceneBVH::RefitWideAncestorsFromLeaf(int leafIndex)
+	void SceneBVH::MarkWideAncestorsForRefit(int leafIndex)
 	{
 		if (leafIndex < 0 || leafIndex >= static_cast<int>(leafToWideParent.size()))
 		{
 			return;
 		}
 
-		int wideIndex = leafToWideParent[leafIndex];
-		if (wideIndex == -1)
+		const int wideIndex = leafToWideParent[leafIndex];
+		if (wideIndex == -1 || wideIndex >= static_cast<int>(wideNodes.size()))
 		{
 			return;
 		}
 
 		const uint8_t slot = leafToWideSlot[leafIndex];
 		SetWideChildBounds(wideIndex, slot, nodes[leafIndex].fatAABB);
-		UpdateWideNodeBoundsFromChildren(wideIndex);
-
-		while (wideNodes[wideIndex].parent != -1)
+		if (wideIndex < static_cast<int>(wideRefitMarks.size()))
 		{
+			wideRefitMarks[wideIndex] = refitEpoch;
+		}
+	}
+
+	void SceneBVH::RefitMarkedWideAncestors()
+	{
+		bool changed = false;
+
+		// BuildWideRecursive also appends parents before descendants. Processing marked
+		// nodes in reverse order lets all changed children settle before a parent is
+		// recomputed, and each affected wide node is touched at most once per batch.
+		for (int wideIndex = static_cast<int>(wideNodes.size()) - 1; wideIndex >= 0; --wideIndex)
+		{
+			if (wideIndex >= static_cast<int>(wideRefitMarks.size())
+				|| wideRefitMarks[wideIndex] != refitEpoch)
+			{
+				continue;
+			}
+
+			UpdateWideNodeBoundsFromChildren(wideIndex);
+			changed = true;
+
 			const int parentWide = wideNodes[wideIndex].parent;
+			if (parentWide == -1)
+			{
+				continue;
+			}
+
 			const uint8_t parentSlot = wideNodes[wideIndex].parentSlot;
 			SetWideChildBounds(parentWide, parentSlot, wideNodes[wideIndex].traversalAABB);
-			UpdateWideNodeBoundsFromChildren(parentWide);
-			wideIndex = parentWide;
+			if (parentWide < static_cast<int>(wideRefitMarks.size()))
+			{
+				wideRefitMarks[parentWide] = refitEpoch;
+			}
+		}
+
+		if (changed)
+		{
+			++wideBoundsVersion;
 		}
 	}
 

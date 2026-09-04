@@ -1,3 +1,6 @@
+// LEGACY/DORMANT: JSON delta synchronization for the old external editor is disabled.
+// This implementation remains buildable for reference only and is not owned by Scene.
+
 #pragma once
 
 #include "SceneSerializer.h"
@@ -17,14 +20,13 @@ namespace Engine
 
 		SceneSyncTracker(SceneSerializer& serializer, SceneToolingBridge& tooling)
 			: serializer(&serializer), tooling(&tooling)
-		{
-			PrimeKnownEntities();
-		}
+		{}
 
 		void EntityMutated(entt::entity entity);
 		void EntityDestroyed(SerializedEntityId id);
 
 		void SendFullScene() const;
+		void ResynchronizeFullScene();
 		void Flush();
 		void Clear();
 

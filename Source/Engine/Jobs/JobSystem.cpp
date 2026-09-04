@@ -128,6 +128,9 @@ namespace Swim::Jobs
 		std::vector<std::shared_ptr<Detail::JobState>> Outstanding;
 		std::mutex OutstandingMutex;
 		std::atomic<std::uint32_t> NextBlockingLane{ 0 };
+#if !SWIM_JOBS_USE_ENKITS
+		std::atomic<std::uint32_t> FallbackExternalThreadsRegistered{ 0 };
+#endif
 
 #if SWIM_JOBS_USE_ENKITS
 		enki::TaskScheduler Scheduler;
@@ -824,7 +827,19 @@ namespace Swim::Jobs
 #if SWIM_JOBS_USE_ENKITS
 		return impl->Scheduler.RegisterExternalTaskThread();
 #else
-		return true;
+		std::uint32_t current = impl->FallbackExternalThreadsRegistered.load(std::memory_order_acquire);
+		while (current < impl->Desc.ExternalThreads)
+		{
+			if (impl->FallbackExternalThreadsRegistered.compare_exchange_weak(
+				current,
+				current + 1,
+				std::memory_order_acq_rel,
+				std::memory_order_acquire))
+			{
+				return true;
+			}
+		}
+		return false;
 #endif
 	}
 
@@ -833,6 +848,19 @@ namespace Swim::Jobs
 		impl->RequireRunning("UnregisterCurrentExternalThread");
 #if SWIM_JOBS_USE_ENKITS
 		impl->Scheduler.DeRegisterExternalTaskThread();
+#else
+		std::uint32_t current = impl->FallbackExternalThreadsRegistered.load(std::memory_order_acquire);
+		while (current > 0)
+		{
+			if (impl->FallbackExternalThreadsRegistered.compare_exchange_weak(
+				current,
+				current - 1,
+				std::memory_order_acq_rel,
+				std::memory_order_acquire))
+			{
+				break;
+			}
+		}
 #endif
 	}
 

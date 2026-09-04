@@ -1,3 +1,7 @@
+// LEGACY/DORMANT: scene JSON experiment retained as reference code. Automatic scene
+// serialization is currently disabled; future internal editor tooling should operate
+// directly on engine scene/ECS state rather than round-tripping runtime state through JSON.
+
 #pragma once
 
 #include "EntityIdentityMap.h"

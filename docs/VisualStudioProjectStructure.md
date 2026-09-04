@@ -179,7 +179,7 @@ Current responsibilities include:
 - `WindowSystem` / `Window`;
 - normalized window events;
 - native-window escape-hatch descriptors;
-- Windows editor-host compatibility;
+- legacy Windows external-editor/`WM_COPYDATA` compatibility code (retained but runtime-dormant);
 - filesystem roots/path services;
 - mapped files;
 - dynamic libraries;

@@ -133,6 +133,10 @@ file(GLOB_RECURSE SWIM_PLATFORM_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
 )
 
+# The old external-process editor bridge is retained in-tree as reference only.
+# Future editor tooling is implemented inside Swim Engine itself.
+list(FILTER SWIM_PLATFORM_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/EditorIpcBridge[.]cpp$")
+
 add_library(SwimPlatform STATIC ${SWIM_PLATFORM_SOURCES})
 add_library(Swim::Platform ALIAS SwimPlatform)
 target_include_directories(SwimPlatform PUBLIC ${CMAKE_SOURCE_DIR}/Source)
@@ -433,6 +437,9 @@ list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
+# Legacy scene JSON persistence / external-editor synchronization is intentionally dormant.
+# Keep the source/header files in-tree for reference, but do not compile the old runtime implementation.
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Scene/Serialization/Scene(Serializer|Storage|SyncTracker)[.]cpp$")
 # TinyGltfImplementation.cpp was retired when runtime GLB importing moved behind
 # the cooked AssetSystem boundary. Keep an explicit tombstone exclusion because
 # ZIP/overlay updates cannot delete an older checkout's stale source file, and
