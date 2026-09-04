@@ -1,24 +1,236 @@
 #include "PCH.h"
 #include "MaterialPool.h"
+#include "Engine/Assets/AssetSystem.h"
+#include "Engine/Assets/MaterialAsset.h"
+#include "Engine/Assets/MeshAsset.h"
+#include "Engine/Assets/ModelAsset.h"
 #include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
-#include <stb_image.h>
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstring>
 #include <filesystem>
+#include <limits>
+#include <stdexcept>
+#include <string_view>
+#include <unordered_map>
 
-#define BASISU_FORCE_DEVEL_MESSAGES 0
-#define BASISD_SUPPORT_KTX2 1
-#define BASISD_SUPPORT_BASIS 1
-#define BASISD_SUPPORT_ZSTD 1
-#define BASISD_SUPPORT_ETC1S 1
-#define BASISD_SUPPORT_UASTC 1
-
-#include <basisu_transcoder.h>
-
-#include <webp/decode.h>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine
 {
+
+	namespace
+	{
+		const char* AssetLoadStateName(Swim::Assets::AssetLoadState state)
+		{
+			switch (state)
+			{
+				case Swim::Assets::AssetLoadState::Unloaded: return "Unloaded";
+				case Swim::Assets::AssetLoadState::Queued: return "Queued";
+				case Swim::Assets::AssetLoadState::Loading: return "Loading";
+				case Swim::Assets::AssetLoadState::Resident: return "Resident";
+				case Swim::Assets::AssetLoadState::Failed: return "Failed";
+			}
+			return "Unknown";
+		}
+
+		std::string CookedModelLogicalPath(const std::string& sourcePath)
+		{
+			std::string normalized = sourcePath;
+			std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
+			std::string lower = normalized;
+			std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char value)
+			{
+				return static_cast<char>(std::tolower(value));
+			});
+
+			constexpr std::string_view AssetPrefix = "assets/";
+			constexpr std::string_view AssetSegment = "/assets/";
+			if (lower.starts_with(AssetPrefix))
+			{
+				normalized.erase(0, AssetPrefix.size());
+			}
+			else if (const std::size_t assetPosition = lower.find(AssetSegment); assetPosition != std::string::npos)
+			{
+				normalized.erase(0, assetPosition + AssetSegment.size());
+			}
+
+			std::filesystem::path logicalPath(normalized);
+			logicalPath.replace_extension(".model");
+			return Swim::Assets::NormalizeAssetPath(logicalPath.generic_string());
+		}
+
+		glm::mat4 ToMatrix(const Swim::Assets::AssetTransform& transform)
+		{
+			const glm::vec3 translation(transform.Translation[0], transform.Translation[1], transform.Translation[2]);
+			const glm::quat rotation(
+				transform.Rotation[3],
+				transform.Rotation[0],
+				transform.Rotation[1],
+				transform.Rotation[2]
+			);
+			const glm::vec3 scale(transform.Scale[0], transform.Scale[1], transform.Scale[2]);
+			return glm::translate(glm::mat4(1.0f), translation) * glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), scale);
+		}
+
+		glm::mat4 ResolveWorldTransform(
+			const Swim::Assets::ModelAsset& model,
+			std::uint32_t nodeIndex,
+			std::vector<glm::mat4>& worldTransforms,
+			std::vector<std::uint8_t>& visitState)
+		{
+			if (nodeIndex >= model.Nodes.size())
+			{
+				throw std::runtime_error("Cooked model contains a node index outside the node table.");
+			}
+			if (visitState[nodeIndex] == 2)
+			{
+				return worldTransforms[nodeIndex];
+			}
+			if (visitState[nodeIndex] == 1)
+			{
+				throw std::runtime_error("Cooked model contains a transform-parent cycle.");
+			}
+
+			visitState[nodeIndex] = 1;
+			const Swim::Assets::ModelNode& node = model.Nodes[nodeIndex];
+			const glm::mat4 local = ToMatrix(node.LocalTransform);
+			if (node.Parent == Swim::Assets::ModelNode::InvalidNode)
+			{
+				worldTransforms[nodeIndex] = local;
+			}
+			else
+			{
+				worldTransforms[nodeIndex] = ResolveWorldTransform(model, node.Parent, worldTransforms, visitState) * local;
+			}
+			visitState[nodeIndex] = 2;
+			return worldTransforms[nodeIndex];
+		}
+
+		const Swim::Assets::VertexAttributeDesc* FindAttribute(
+			const Swim::Assets::MeshAsset& mesh,
+			Swim::Assets::VertexSemantic semantic)
+		{
+			const auto attribute = std::find_if(mesh.VertexAttributes.begin(), mesh.VertexAttributes.end(), [semantic](const auto& value)
+			{
+				return value.Semantic == semantic;
+			});
+			return attribute == mesh.VertexAttributes.end() ? nullptr : &*attribute;
+		}
+
+		const std::byte* VertexAttributeAddress(
+			const Swim::Assets::MeshAsset& mesh,
+			const Swim::Assets::VertexAttributeDesc& attribute,
+			std::uint64_t vertexIndex,
+			std::size_t elementSize)
+		{
+			if (attribute.StreamIndex >= mesh.VertexStreams.size())
+			{
+				throw std::runtime_error("Cooked mesh vertex attribute references a missing stream.");
+			}
+			const Swim::Assets::VertexStreamDesc& stream = mesh.VertexStreams[attribute.StreamIndex];
+			if (stream.StrideBytes == 0)
+			{
+				throw std::runtime_error("Cooked mesh vertex stream has a zero stride.");
+			}
+
+			if (vertexIndex > (std::numeric_limits<std::uint64_t>::max() - attribute.OffsetBytes) / stream.StrideBytes)
+			{
+				throw std::runtime_error("Cooked mesh vertex offset overflows its address range.");
+			}
+			const std::uint64_t relativeOffset = vertexIndex * stream.StrideBytes + attribute.OffsetBytes;
+			if (relativeOffset > stream.DataSizeBytes || elementSize > stream.DataSizeBytes - relativeOffset)
+			{
+				throw std::runtime_error("Cooked mesh vertex attribute points outside its stream payload.");
+			}
+			if (relativeOffset > std::numeric_limits<std::uint64_t>::max() - stream.DataOffsetBytes)
+			{
+				throw std::runtime_error("Cooked mesh stream offset overflows its address range.");
+			}
+			const std::uint64_t absoluteOffset = stream.DataOffsetBytes + relativeOffset;
+			if (absoluteOffset > mesh.VertexBytes.size() || elementSize > mesh.VertexBytes.size() - absoluteOffset)
+			{
+				throw std::runtime_error("Cooked mesh vertex stream points outside the mesh payload.");
+			}
+			return mesh.VertexBytes.data() + absoluteOffset;
+		}
+
+		glm::vec3 ReadFloat3(
+			const Swim::Assets::MeshAsset& mesh,
+			const Swim::Assets::VertexAttributeDesc& attribute,
+			std::uint64_t vertexIndex)
+		{
+			if (attribute.Format != Swim::Assets::VertexElementFormat::Float32x3)
+			{
+				throw std::runtime_error("Legacy renderer residency currently requires Float32x3 position/color streams.");
+			}
+			std::array<float, 3> value{};
+			std::memcpy(value.data(), VertexAttributeAddress(mesh, attribute, vertexIndex, sizeof(value)), sizeof(value));
+			return glm::vec3(value[0], value[1], value[2]);
+		}
+
+		glm::vec2 ReadFloat2(
+			const Swim::Assets::MeshAsset& mesh,
+			const Swim::Assets::VertexAttributeDesc& attribute,
+			std::uint64_t vertexIndex)
+		{
+			if (attribute.Format != Swim::Assets::VertexElementFormat::Float32x2)
+			{
+				throw std::runtime_error("Legacy renderer residency currently requires Float32x2 UV streams.");
+			}
+			std::array<float, 2> value{};
+			std::memcpy(value.data(), VertexAttributeAddress(mesh, attribute, vertexIndex, sizeof(value)), sizeof(value));
+			return glm::vec2(value[0], value[1]);
+		}
+
+		std::uint32_t ReadIndex(const Swim::Assets::MeshAsset& mesh, std::uint64_t index)
+		{
+			const std::size_t elementSize = mesh.IndexFormat == Swim::Assets::IndexElementFormat::UInt16
+				? sizeof(std::uint16_t)
+				: sizeof(std::uint32_t);
+			if (index > std::numeric_limits<std::size_t>::max() / elementSize)
+			{
+				throw std::runtime_error("Cooked mesh index offset exceeds the host address space.");
+			}
+			const std::size_t byteOffset = static_cast<std::size_t>(index) * elementSize;
+			if (byteOffset > mesh.IndexBytes.size() || elementSize > mesh.IndexBytes.size() - byteOffset)
+			{
+				throw std::runtime_error("Cooked mesh index points outside the index payload.");
+			}
+
+			if (mesh.IndexFormat == Swim::Assets::IndexElementFormat::UInt16)
+			{
+				std::uint16_t value = 0;
+				std::memcpy(&value, mesh.IndexBytes.data() + byteOffset, sizeof(value));
+				return value;
+			}
+			std::uint32_t value = 0;
+			std::memcpy(&value, mesh.IndexBytes.data() + byteOffset, sizeof(value));
+			return value;
+		}
+
+		glm::vec3 ResolveBaseColorFactor(const Swim::Assets::MaterialInstanceAsset* material)
+		{
+			if (!material)
+			{
+				return glm::vec3(1.0f);
+			}
+			for (const Swim::Assets::MaterialParameterValue& parameter : material->Parameters)
+			{
+				if (parameter.Name == "BaseColorFactor")
+				{
+					return glm::vec3(parameter.Value[0], parameter.Value[1], parameter.Value[2]);
+				}
+			}
+			return glm::vec3(1.0f);
+		}
+	}
 
 	std::shared_ptr<LegacyRenderBinding> MaterialPool::GetMaterialBindingByID(uint32_t id)
 	{
@@ -100,11 +312,7 @@ namespace Engine
 		}
 
 		auto material = std::make_shared<MaterialData>(std::move(albedoMap));
-		auto residency = meshes->GetMeshBufferData(mesh);
-		if (!residency)
-		{
-			throw std::runtime_error("Cannot register material binding for a mesh without renderer residency: " + name);
-		}
+		auto residency = meshes->RequestMeshResidency(mesh);
 
 		auto data = std::make_shared<LegacyRenderBinding>(std::move(mesh), std::move(residency), std::move(material));
 		materials.emplace(name, data);
@@ -130,11 +338,9 @@ namespace Engine
 		throw std::runtime_error("Failed to find composite material data: " + name);
 	}
 
-	// Will return the composite material data instantly if it already has been loaded.
-	// This is honestly the best safe way to load our 3D models without having to think much.
-	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LazyLoadAndGetCompositeMaterial(const std::string& path)
+	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LazyLoadAndGetCompositeMaterial(const std::string& sourcePath)
 	{
-		return CompositeMaterialExists(path) ? GetCompositeMaterialData(path) : LoadAndRegisterCompositeMaterialFromGLB(path);
+		return LoadAndRegisterCompositeMaterial(sourcePath);
 	}
 
 	bool MaterialPool::CompositeMaterialExists(const std::string& name)
@@ -149,516 +355,185 @@ namespace Engine
 		return false;
 	}
 
-	static bool LoadKTX2Image(tinygltf::Image* image, const unsigned char* bytes, int size, std::string* err, int image_idx)
+	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LoadAndRegisterCompositeMaterial(const std::string& sourcePath)
 	{
-		// Initialize the transcoder once globally
-		static bool transcoderInitialized = false;
-		if (!transcoderInitialized)
+		auto getCachedBinding = [&]()
 		{
-			basist::basisu_transcoder_init();
-			transcoderInitialized = true;
-		}
+			std::lock_guard<std::mutex> lock(poolMutex);
+			const auto existing = compositeMaterials.find(sourcePath);
+			return existing != compositeMaterials.end()
+				? existing->second
+				: std::vector<std::shared_ptr<LegacyRenderBinding>>{};
+		};
 
-		basist::ktx2_transcoder ktx2;
-
-		// Parse the KTX2 header
-		if (!ktx2.init(bytes, size))
+		try
 		{
-			if (err)
+			if (!assets)
 			{
-				*err += "[KTX2 Loader] Failed to parse KTX2 header for image index " + std::to_string(image_idx) + "\n";
+				throw std::runtime_error("MaterialPool has no AssetSystem for cooked model residency.");
 			}
-			return false;
-		}
 
-		// Begin transcoding
-		if (!ktx2.start_transcoding())
-		{
-			if (err)
+			const std::string modelLogicalPath = CookedModelLogicalPath(sourcePath);
+			const auto modelHandle = assets->Find<Swim::Assets::ModelAsset>(modelLogicalPath);
+			if (!modelHandle)
 			{
-				*err += "[KTX2 Loader] start_transcoding() failed for image index " + std::to_string(image_idx) + "\n";
+				throw std::runtime_error(
+					"Cooked model was never registered as '" + modelLogicalPath +
+					"'. The development asset bootstrap either did not discover the source or reported a cook/load error earlier in the log."
+				);
 			}
-			return false;
-		}
 
-		// Use RGBA32 uncompressed format
-		basist::transcoder_texture_format format = basist::transcoder_texture_format::cTFRGBA32;
-
-		uint32_t mipLevel = 0;
-		uint32_t layerIndex = 0;
-		uint32_t faceIndex = 0;
-
-		// I guess we don't worry about mip map levels?
-		uint32_t width = ktx2.get_width();
-		uint32_t height = ktx2.get_height();
-
-		uint32_t bytesPerPixel = basist::basis_get_uncompressed_bytes_per_pixel(format);
-		uint32_t totalPixels = width * height;
-		uint32_t outputSize = totalPixels * bytesPerPixel;
-
-		std::vector<uint8_t> decodedData(outputSize);
-
-		// Transcode the image level (base mip, layer 0, face 0)
-		if (!ktx2.transcode_image_level(
-			mipLevel,
-			layerIndex,
-			faceIndex,
-			decodedData.data(),
-			totalPixels,
-			format))
-		{
-			if (err)
+			const Swim::Assets::ModelAsset* model = assets->Resolve(modelHandle);
+			if (!model)
 			{
-				*err += "[KTX2 Loader] Failed to transcode image for index " + std::to_string(image_idx) + "\n";
-			}
-			return false;
-		}
-
-		// Fill out tinygltf::Image
-		image->width = static_cast<int>(width);
-		image->height = static_cast<int>(height);
-		image->component = 4;
-		image->bits = 8;
-		image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-		image->image = std::move(decodedData);
-
-		return true;
-	}
-
-	void MaterialPool::LoadNodeRecursive(
-		const tinygltf::Model& model,
-		int nodeIndex,
-		const glm::mat4& parentTransform,
-		const std::string& path,
-		std::vector<std::shared_ptr<LegacyRenderBinding>>& loadedMaterials)
-	{
-		const tinygltf::Node& node = model.nodes[nodeIndex];
-		std::string nodeName = node.name.empty() ? "Node_" + std::to_string(nodeIndex) : node.name;
-
-		// Compute local transform from TRS or matrix
-		glm::mat4 localTransform(1.0f);
-		if (!node.matrix.empty())
-		{
-			for (int col = 0; col < 4; ++col)
-			{
-				for (int row = 0; row < 4; ++row)
+				const Swim::Assets::AssetStatus status = assets->GetStatus(modelHandle);
+				std::string message =
+					"Cooked model '" + modelLogicalPath + "' is not resident (state " + AssetLoadStateName(status.State) + ")";
+				if (status.Error.HasError() && !status.Error.Message.empty())
 				{
-					localTransform[col][row] = static_cast<float>(node.matrix[col * 4 + row]);
+					message += ": " + status.Error.Message;
+				}
+				throw std::runtime_error(std::move(message));
+			}
+
+			const Swim::Assets::ContentHash graphRevision = assets->ComputeDependencyRevisionHash(modelHandle.GetId());
+			if (graphRevision.IsZero())
+			{
+				throw std::runtime_error("Cooked model dependency graph is incomplete: " + modelLogicalPath);
+			}
+			{
+				std::lock_guard<std::mutex> lock(poolMutex);
+				const auto existing = compositeMaterials.find(sourcePath);
+				const auto existingRevision = compositeMaterialRevisions.find(sourcePath);
+				if (existing != compositeMaterials.end() && existingRevision != compositeMaterialRevisions.end() && existingRevision->second == graphRevision)
+				{
+					return existing->second;
 				}
 			}
-		}
-		else
-		{
-			glm::vec3 translation = node.translation.empty() ? glm::vec3(0.0f) : glm::vec3(
-				static_cast<float>(node.translation[0]),
-				static_cast<float>(node.translation[1]),
-				static_cast<float>(node.translation[2]));
 
-			glm::quat rotation = node.rotation.empty() ? glm::quat(1.0f, 0.0f, 0.0f, 0.0f) : glm::quat(
-				static_cast<float>(node.rotation[3]),
-				static_cast<float>(node.rotation[0]),
-				static_cast<float>(node.rotation[1]),
-				static_cast<float>(node.rotation[2]));
+			const std::string revisionName = graphRevision.ToHex();
+			std::vector<std::shared_ptr<LegacyRenderBinding>> loadedMaterials;
+			std::vector<glm::mat4> worldTransforms(model->Nodes.size(), glm::mat4(1.0f));
+			std::vector<std::uint8_t> visitState(model->Nodes.size(), 0);
 
-			glm::vec3 scale = node.scale.empty() ? glm::vec3(1.0f) : glm::vec3(
-				static_cast<float>(node.scale[0]),
-				static_cast<float>(node.scale[1]),
-				static_cast<float>(node.scale[2]));
-
-			localTransform = glm::translate(glm::mat4(1.0f), translation)
-				* glm::mat4_cast(rotation)
-				* glm::scale(glm::mat4(1.0f), scale);
-		}
-
-		glm::mat4 worldTransform = parentTransform * localTransform;
-
-		// Process mesh if one is attached to this node
-		if (node.mesh >= 0)
-		{
-			const tinygltf::Mesh& gltfMesh = model.meshes[node.mesh];
-			std::string meshName = gltfMesh.name.empty() ? "mesh_" + std::to_string(node.mesh) : gltfMesh.name;
-
-			for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx)
+			for (std::uint32_t nodeIndex = 0; nodeIndex < model->Nodes.size(); ++nodeIndex)
 			{
-				const tinygltf::Primitive& primitive = gltfMesh.primitives[primIdx];
-
-				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
-				if (posAccessor.count == 0 || posAccessor.bufferView < 0)
+				const Swim::Assets::ModelNode& node = model->Nodes[nodeIndex];
+				if (!node.Mesh)
 				{
 					continue;
 				}
 
-				const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
-				const tinygltf::Buffer& posBuffer = model.buffers[posView.buffer];
-				const unsigned char* posBase = posBuffer.data.data() + posView.byteOffset + posAccessor.byteOffset;
-				const size_t posStride = posView.byteStride > 0 ? posView.byteStride : sizeof(float) * 3;
-
-				// UV and Color handling
-				bool hasUV = primitive.attributes.contains("TEXCOORD_0");
-				bool hasColor = primitive.attributes.contains("COLOR_0");
-
-				const unsigned char* uvRawBase = nullptr;
-				size_t uvStride = 0;
-				const tinygltf::Accessor* uvAccessor = nullptr;
-
-				if (hasUV)
+				const Swim::Assets::MeshAsset* meshAsset = assets->Resolve(node.Mesh);
+				if (!meshAsset)
 				{
-					uvAccessor = &model.accessors[primitive.attributes.at("TEXCOORD_0")];
-					if (uvAccessor->count > 0 && uvAccessor->bufferView >= 0)
-					{
-						const auto& uvView = model.bufferViews[uvAccessor->bufferView];
-						const auto& uvBuffer = model.buffers[uvView.buffer];
-						uvRawBase = uvBuffer.data.data() + uvView.byteOffset + uvAccessor->byteOffset;
-						uvStride = uvView.byteStride > 0 ? uvView.byteStride : sizeof(float) * 2;
-					}
-					else
-					{
-						hasUV = false;
-					}
+					throw std::runtime_error("Cooked model references a mesh that is not resident: " + modelLogicalPath);
 				}
-
-				const unsigned char* colorRawBase = nullptr;
-				size_t colorStride = 0;
-				const tinygltf::Accessor* colorAccessor = nullptr;
-
-				if (hasColor)
+				const Swim::Assets::VertexAttributeDesc* positionAttribute = FindAttribute(*meshAsset, Swim::Assets::VertexSemantic::Position);
+				if (!positionAttribute)
 				{
-					colorAccessor = &model.accessors[primitive.attributes.at("COLOR_0")];
-					if (colorAccessor->count > 0 && colorAccessor->bufferView >= 0)
-					{
-						const auto& colorView = model.bufferViews[colorAccessor->bufferView];
-						const auto& colorBuffer = model.buffers[colorView.buffer];
-						colorRawBase = colorBuffer.data.data() + colorView.byteOffset + colorAccessor->byteOffset;
-						colorStride = colorView.byteStride > 0 ? colorView.byteStride : sizeof(float) * 3;
-					}
-					else
-					{
-						hasColor = false;
-					}
+					throw std::runtime_error("Cooked mesh does not contain a position stream: " + modelLogicalPath);
 				}
+				const Swim::Assets::VertexAttributeDesc* uvAttribute = FindAttribute(*meshAsset, Swim::Assets::VertexSemantic::TexCoord0);
+				const Swim::Assets::VertexAttributeDesc* colorAttribute = FindAttribute(*meshAsset, Swim::Assets::VertexSemantic::Color0);
+				const glm::mat4 worldTransform = ResolveWorldTransform(*model, nodeIndex, worldTransforms, visitState);
 
-				// Texture and UV transform setup
-				std::shared_ptr<Texture2D> texture = nullptr;
-				glm::vec2 uvOffset(0.0f);
-				glm::vec2 uvScale(1.0f);
-				float uvRotation = 0.0f;
-
-				if (primitive.material >= 0 && primitive.material < model.materials.size())
+				for (std::size_t primitiveIndex = 0; primitiveIndex < meshAsset->Primitives.size(); ++primitiveIndex)
 				{
-					const tinygltf::Material& material = model.materials[primitive.material];
-					const tinygltf::TextureInfo& baseColorTex = material.pbrMetallicRoughness.baseColorTexture;
-
-					int imageSource = -1;
-					if (baseColorTex.index >= 0 && baseColorTex.index < model.textures.size())
+					const Swim::Assets::MeshPrimitive& primitive = meshAsset->Primitives[primitiveIndex];
+					const Swim::Assets::MaterialInstanceAsset* materialAsset = nullptr;
+					std::shared_ptr<Texture2D> albedoMap;
+					if (primitive.MaterialSlot < node.Materials.size() && node.Materials[primitive.MaterialSlot])
 					{
-						const tinygltf::Texture& textureDef = model.textures[baseColorTex.index];
-
-						if (textureDef.extensions.empty() && textureDef.source >= 0)
+						materialAsset = assets->Resolve(node.Materials[primitive.MaterialSlot]);
+						if (!materialAsset)
 						{
-							imageSource = textureDef.source;
+							throw std::runtime_error("Cooked model references a material that is not resident: " + modelLogicalPath);
 						}
-						else if (textureDef.extensions.contains("KHR_texture_basisu"))
+						for (const Swim::Assets::MaterialTextureBinding& textureBinding : materialAsset->Textures)
 						{
-							const auto& ext = textureDef.extensions.at("KHR_texture_basisu");
-							if (ext.Has("source"))
+							if (textureBinding.Name == "BaseColorTexture" && textureBinding.Texture)
 							{
-								imageSource = ext.Get("source").Get<int>();
+								const std::string textureName = modelLogicalPath + "@" + revisionName + "#node/" + std::to_string(nodeIndex) + "/primitive/" + std::to_string(primitiveIndex) + "/base-color";
+								albedoMap = textures->GetOrCreateTextureFromAsset(*assets, textureBinding.Texture, textureName);
+								break;
 							}
 						}
-						else if (textureDef.extensions.contains("EXT_texture_webp"))
+					}
+
+					const glm::vec3 baseColorFactor = ResolveBaseColorFactor(materialAsset);
+					std::vector<Vertex> vertices;
+					std::vector<std::uint32_t> indices;
+					vertices.reserve(primitive.IndexCount);
+					indices.reserve(primitive.IndexCount);
+					std::unordered_map<std::uint64_t, std::uint32_t> vertexRemap;
+					vertexRemap.reserve(primitive.IndexCount);
+
+					for (std::uint32_t indexOffset = 0; indexOffset < primitive.IndexCount; ++indexOffset)
+					{
+						const std::uint32_t localSourceIndex = ReadIndex(*meshAsset, static_cast<std::uint64_t>(primitive.FirstIndex) + indexOffset);
+						const std::int64_t globalSourceIndex = static_cast<std::int64_t>(primitive.VertexOffset) + localSourceIndex;
+						if (globalSourceIndex < 0)
 						{
-							const auto& ext = textureDef.extensions.at("EXT_texture_webp");
-							if (ext.Has("source"))
-							{
-								imageSource = ext.Get("source").Get<int>();
-							}
+							throw std::runtime_error("Cooked mesh primitive references a negative vertex index.");
+						}
+						const std::uint64_t sourceVertex = static_cast<std::uint64_t>(globalSourceIndex);
+
+						auto existing = vertexRemap.find(sourceVertex);
+						if (existing != vertexRemap.end())
+						{
+							indices.push_back(existing->second);
+							continue;
 						}
 
-						if (baseColorTex.extensions.contains("KHR_texture_transform"))
-						{
-							const auto& transform = baseColorTex.extensions.at("KHR_texture_transform");
+						Vertex vertex{};
+						const glm::vec3 position = ReadFloat3(*meshAsset, *positionAttribute, sourceVertex);
+						vertex.position = glm::vec3(worldTransform * glm::vec4(position, 1.0f));
+						vertex.uv = uvAttribute ? ReadFloat2(*meshAsset, *uvAttribute, sourceVertex) : glm::vec2(0.0f);
+						vertex.color = (colorAttribute ? ReadFloat3(*meshAsset, *colorAttribute, sourceVertex) : glm::vec3(1.0f)) * baseColorFactor;
 
-							if (transform.Has("offset"))
-							{
-								const auto& o = transform.Get("offset").Get<tinygltf::Value::Array>();
-								uvOffset = glm::vec2(static_cast<float>(o[0].Get<double>()), static_cast<float>(o[1].Get<double>()));
-							}
-							if (transform.Has("scale"))
-							{
-								const auto& s = transform.Get("scale").Get<tinygltf::Value::Array>();
-								uvScale = glm::vec2(static_cast<float>(s[0].Get<double>()), static_cast<float>(s[1].Get<double>()));
-							}
-							if (transform.Has("rotation"))
-							{
-								uvRotation = static_cast<float>(transform.Get("rotation").Get<double>());
-							}
-						}
-
-						if (imageSource >= 0 && imageSource < model.images.size())
-						{
-							const tinygltf::Image& img = model.images[imageSource];
-							texture = textures->GetOrCreateTextureFromTinyGltfImage(img, path + "_" + std::to_string(nodeIndex));
-						}
+						const std::uint32_t legacyIndex = static_cast<std::uint32_t>(vertices.size());
+						vertices.push_back(vertex);
+						vertexRemap.emplace(sourceVertex, legacyIndex);
+						indices.push_back(legacyIndex);
 					}
+
+					const std::string bindingName = modelLogicalPath + "@" + revisionName + "#node/" + std::to_string(nodeIndex) + "/primitive/" + std::to_string(primitiveIndex);
+					const std::shared_ptr<Mesh> mesh = meshes->GetOrCreateAndRegisterMesh(bindingName, vertices, indices);
+					loadedMaterials.push_back(RegisterMaterialBinding(bindingName + "/material", mesh, std::move(albedoMap)));
 				}
-
-				// Build vertex buffer
-				std::vector<Vertex> vertices;
-				vertices.reserve(posAccessor.count);
-
-				for (size_t i = 0; i < posAccessor.count; ++i)
-				{
-					Vertex v;
-					const float* posPtr = reinterpret_cast<const float*>(posBase + i * posStride);
-					glm::vec4 rawPos = glm::vec4(posPtr[0], posPtr[1], posPtr[2], 1.0f);
-					v.position = glm::vec3(worldTransform * rawPos);
-
-					if (hasUV)
-					{
-						const float* uvPtr = reinterpret_cast<const float*>(uvRawBase + i * uvStride);
-						glm::vec2 uv = glm::vec2(uvPtr[0], uvPtr[1]);
-
-						uv -= 0.5f;
-						float cosR = std::cos(uvRotation);
-						float sinR = std::sin(uvRotation);
-						uv = glm::mat2(cosR, -sinR, sinR, cosR) * uv;
-						uv += 0.5f;
-						uv = uv * uvScale + uvOffset;
-
-						v.uv = uv;
-					}
-					else
-					{
-						v.uv = glm::vec2(0.0f);
-					}
-
-					if (hasColor)
-					{
-						const float* colorPtr = reinterpret_cast<const float*>(colorRawBase + i * colorStride);
-						v.color = glm::vec3(colorPtr[0], colorPtr[1], colorPtr[2]);
-					}
-					else
-					{
-						v.color = glm::vec3(1.0f);
-					}
-
-					vertices.push_back(v);
-				}
-
-				// Index buffer
-				std::vector<uint32_t> indices;
-				if (primitive.indices >= 0)
-				{
-					const auto& idxAccessor = model.accessors[primitive.indices];
-					const auto& idxView = model.bufferViews[idxAccessor.bufferView];
-					const auto& idxBuffer = model.buffers[idxView.buffer];
-					const unsigned char* idxBase = idxBuffer.data.data() + idxView.byteOffset + idxAccessor.byteOffset;
-
-					indices.reserve(idxAccessor.count);
-					for (size_t i = 0; i < idxAccessor.count; ++i)
-					{
-						uint32_t index = 0;
-						switch (idxAccessor.componentType)
-						{
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:  index = reinterpret_cast<const uint8_t*>(idxBase)[i]; break;
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: index = reinterpret_cast<const uint16_t*>(idxBase)[i]; break;
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:   index = reinterpret_cast<const uint32_t*>(idxBase)[i]; break;
-							default:
-							std::cerr << "[ERROR] Unsupported index type: " << idxAccessor.componentType << std::endl;
-							throw std::runtime_error("Unsupported index type");
-						}
-						indices.push_back(index);
-					}
-				}
-				else
-				{
-					indices.reserve(vertices.size());
-					for (uint32_t i = 0; i < vertices.size(); ++i)
-					{
-						indices.push_back(i);
-					}
-				}
-
-				// Ensure mesh and material names are unique per node+prim combo
-				std::string finalMeshName = nodeName + "_mesh" + std::to_string(node.mesh) + "_prim" + std::to_string(primIdx);
-				std::shared_ptr<Mesh> mesh = meshes->RegisterMesh(finalMeshName, vertices, indices);
-
-				std::string matName = finalMeshName + "_material";
-				std::shared_ptr<LegacyRenderBinding> matData = RegisterMaterialBinding(matName, mesh, texture);
-				loadedMaterials.push_back(matData);
 			}
-		}
 
-		// Recurse into children
-		for (int childIndex : node.children)
-		{
-			LoadNodeRecursive(model, childIndex, worldTransform, path, loadedMaterials);
-		}
-	}
-
-	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LoadAndRegisterCompositeMaterialFromGLB(const std::string& path)
-	{
-		struct ImageCollector
-		{
-			std::unordered_map<int, tinygltf::Image> images;
-		};
-
-		std::vector<std::shared_ptr<LegacyRenderBinding>> loadedMaterials;
-		tinygltf::Model model;
-		tinygltf::TinyGLTF loader;
-		std::string err, warn;
-		ImageCollector imageCollector;
-
-		std::cout << "[DEBUG] Loading GLB file: " << path << std::endl;
-
-		// Image loader with KTX2 support
-		tinygltf::LoadImageDataFunction CustomImageLoader = [](
-			tinygltf::Image* image,
-			const int image_idx,
-			std::string* err,
-			std::string* warn,
-			int req_width,
-			int req_height,
-			const unsigned char* bytes,
-			int size,
-			void* user_data) -> bool
-		{
-			ImageCollector* collector = reinterpret_cast<ImageCollector*>(user_data);
-
-			if (image->mimeType == "image/ktx2" || (size >= 12 && std::memcmp(bytes, "\xABKTX 20\xBB\r\n\x1A\n", 12) == 0))
 			{
-				if (!LoadKTX2Image(image, bytes, size, err, image_idx))
+				std::lock_guard<std::mutex> lock(poolMutex);
+				const auto existing = compositeMaterials.find(sourcePath);
+				const auto existingRevision = compositeMaterialRevisions.find(sourcePath);
+				if (existing != compositeMaterials.end() && existingRevision != compositeMaterialRevisions.end() && existingRevision->second == graphRevision)
 				{
-					if (err != nullptr)
-					{
-						*err += "[GLTF Loader] Failed to load KTX2 image at index " + std::to_string(image_idx) + "\n";
-					}
-					return false;
+					return existing->second;
 				}
+				compositeMaterials[sourcePath] = loadedMaterials;
+				compositeMaterialRevisions[sourcePath] = graphRevision;
 			}
-			else if (image->mimeType == "image/webp" || (size >= 12 && std::memcmp(bytes, "RIFF", 4) == 0 && std::memcmp(bytes + 8, "WEBP", 4) == 0))
+
+			if (sendEditorMessage)
 			{
-				int width = 0;
-				int height = 0;
-
-				if (!WebPGetInfo(bytes, size, &width, &height))
-				{
-					if (err != nullptr)
-					{
-						*err += "[GLTF Loader] WebPGetInfo failed (corrupt?) at index " + std::to_string(image_idx) + '\n';
-					}
-					return false;
-				}
-
-				// Allocate once, decode directly into final buffer
-				std::vector<uint8_t> rgba(width * height * 4);
-
-				if (!WebPDecodeRGBAInto(bytes, size, rgba.data(), static_cast<int>(rgba.size()), width * 4))
-				{
-					if (err != nullptr)
-					{
-						*err += "[GLTF Loader] WebPDecodeRGBAInto failed at index " + std::to_string(image_idx) + '\n';
-					}
-					return false;
-				}
-
-				// Fill tinygltf::Image with raw pixels
-				image->width = width;
-				image->height = height;
-				image->component = 4;   // RGBA
-				image->bits = 8;   // 8-bit per channel
-				image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-				image->image = std::move(rgba);
+				sendEditorMessage("registerMaterial " + sourcePath, 3);
 			}
-			else
+			return loadedMaterials;
+		}
+		catch (const std::exception& error)
+		{
+			const auto cached = getCachedBinding();
+			std::cerr << "[MaterialPool] Failed to resolve cooked model for '" << sourcePath
+				<< "': " << error.what();
+			if (!cached.empty())
 			{
-				int width = 0;
-				int height = 0;
-				int channels = 0;
-				stbi_uc* decoded = stbi_load_from_memory(bytes, size, &width, &height, &channels, STBI_rgb_alpha);
-				if (!decoded)
-				{
-					if (err != nullptr)
-					{
-						*err += "[GLTF Loader] stb_image failed: " + std::string(stbi_failure_reason()) + "\n";
-					}
-					return false;
-				}
-
-				image->width = width;
-				image->height = height;
-				image->component = 4;
-				image->bits = 8;
-				image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
-				image->image.resize(width * height * 4);
-				std::memcpy(image->image.data(), decoded, image->image.size());
-				stbi_image_free(decoded);
+				std::cerr << " Using the previous resident compatibility binding.";
 			}
-
-			collector->images[image_idx] = *image;
-			return true;
-		};
-
-		loader.SetImageLoader(CustomImageLoader, &imageCollector);
-
-		// Load GLB binary
-		if (!loader.LoadBinaryFromFile(&model, &err, &warn, path))
-		{
-			std::cerr << "GLTF Error: " << err << std::endl;
-			throw std::runtime_error("Failed to load GLB file: " + path);
+			std::cerr << '\n';
+			return cached;
 		}
-		if (!warn.empty())
-		{
-			std::cerr << "GLTF Warning: " << warn << std::endl;
-		}
-
-		// Inject custom-loaded images into the GLTF model
-		for (std::pair<const int, tinygltf::Image>& entry : imageCollector.images)
-		{
-			int index = entry.first;
-			const tinygltf::Image& img = entry.second;
-			if (index >= model.images.size())
-			{
-				model.images.resize(index + 1);
-			}
-			model.images[index] = img;
-		}
-
-		// Print model stats
-		std::cout << "[DEBUG] Model loaded successfully:" << std::endl;
-		std::cout << "  - Nodes: " << model.nodes.size() << std::endl;
-		std::cout << "  - Meshes: " << model.meshes.size() << std::endl;
-		std::cout << "  - Materials: " << model.materials.size() << std::endl;
-		std::cout << "  - Textures: " << model.textures.size() << std::endl;
-		std::cout << "  - Images: " << model.images.size() << std::endl;
-		std::cout << "  - Scenes: " << model.scenes.size() << std::endl;
-
-		// Recursive scene walker
-		if (model.scenes.empty())
-		{
-			throw std::runtime_error("GLTF file contains no scenes.");
-		}
-
-		int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
-		const tinygltf::Scene& scene = model.scenes[sceneIndex];
-
-		// Traverse the scene nodes to load everything in the glb file
-		for (size_t i = 0; i < scene.nodes.size(); ++i)
-		{
-			const int rootNodeIndex = scene.nodes[i];
-			LoadNodeRecursive(model, rootNodeIndex, glm::mat4(1.0f), path, loadedMaterials);
-		}
-
-		std::cout << "[DEBUG] Total materials loaded: " << loadedMaterials.size() << std::endl;
-
-		compositeMaterials.emplace(path, loadedMaterials);
-
-		if (sendEditorMessage)
-		{
-			sendEditorMessage("registerMaterial " + path, 3);
-		}
-
-		return loadedMaterials;
 	}
 
 	void MaterialPool::Flush()
@@ -666,6 +541,7 @@ namespace Engine
 		std::lock_guard<std::mutex> lock(poolMutex);
 		materials.clear();
 		compositeMaterials.clear();
+		compositeMaterialRevisions.clear();
 
 		if (sendEditorMessage)
 		{

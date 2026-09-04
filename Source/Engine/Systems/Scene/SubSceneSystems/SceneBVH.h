@@ -22,6 +22,7 @@ namespace Engine
 {
 
 	class Transform;
+	class TransformSystem;
 	struct Mesh;
 	enum class AABBFrustumClassification : uint8_t;
 	struct Frustum;
@@ -49,7 +50,7 @@ namespace Engine
 			entt::entity entity{ entt::null };
 		};
 
-		explicit SceneBVH(entt::registry& registry, Swim::Jobs::JobSystem& jobs);
+		explicit SceneBVH(entt::registry& registry, TransformSystem& transforms, Swim::Jobs::JobSystem& jobs);
 
 		void Init();
 		void Update();
@@ -360,6 +361,7 @@ namespace Engine
 		inline void PushIfVisible(int nodeIndex, const Frustum& frustum, bool parentFullyInside, std::vector<std::pair<int, bool>>& stack) const;
 
 		entt::registry& registry;
+		TransformSystem& transforms;
 		Swim::Jobs::JobSystem* jobs = nullptr;
 		entt::observer topologyObserver;
 

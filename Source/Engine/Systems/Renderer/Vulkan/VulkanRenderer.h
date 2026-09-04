@@ -21,8 +21,6 @@
 namespace Engine
 {
 
-	class SceneSystem;
-
 	class VulkanRenderer : public Renderer
 	{
 
@@ -52,14 +50,21 @@ namespace Engine
 		const std::unique_ptr<VulkanCommandManager>& GetCommandManager() const { return commandManager; }
 		const std::unique_ptr<VulkanPipelineManager>& GetPipelineManager() const { return pipelineManager; }
 
-		const size_t GetCurrentFrameIndex() const { return currentFrame; }
+		const uint32_t GetCurrentFrameIndex() const { return currentFrame; }
 
 		// Needs to be called when the window changes size
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		uint32_t GetSurfaceWidth() const { return windowWidth; }
 		uint32_t GetSurfaceHeight() const { return windowHeight; }
 		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
-		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
+		void SetRenderScene(Scene* scene) override
+		{
+			Renderer::SetRenderScene(scene);
+			if (indexDraw)
+			{
+				indexDraw->SetScene(scene);
+			}
+		}
 
 		// For MSAA
 		const VkSampleCountFlagBits GetSampleCountFlagBits() const { return msaaSamples; }
@@ -160,7 +165,7 @@ namespace Engine
 		// Maybe MAX_FRAMES_IN_FLIGHT should be an engine wide constant? 
 		// Triple buffering improves overlap for the GPU-driven path without changing the higher-level frame model.
 		static constexpr int MAX_FRAMES_IN_FLIGHT = 3;
-		size_t currentFrame = 0;
+		uint32_t currentFrame = 0;
 		bool needsSwapchainRecreate = false;
 
 		// Ideally x4, set from VulkanDeviceManager::GetMaxUsableSampleCount()
@@ -175,7 +180,6 @@ namespace Engine
 		bool framebufferResized = false;
 
 		CameraSystem* cameraSystem = nullptr;
-		SceneSystem* sceneSystem = nullptr;
 
 		void DrawFrame();
 

@@ -44,21 +44,8 @@ namespace Engine
 			return it->second; // Return existing mesh
 		}
 
-		// Create CPU geometry and a separate renderer residency record.
+		// Registration only creates CPU geometry. Renderer residency is requested explicitly by consumers.
 		auto mesh = std::make_shared<Mesh>(vertices, indices);
-		auto residency = std::make_shared<MeshBufferData>();
-
-		// Assign a unique mesh ID
-		uint32_t meshID = nextMeshID++;
-		residency->meshID = meshID;
-
-		// Cache ID <-> Mesh mapping
-		meshToID[mesh] = meshID;
-		idToMesh[meshID] = mesh;
-
-		// Generate mesh buffers and its AABB and then place in the map
-		residency->GenerateBuffersAndAABB(*renderer, vertices, indices);
-		meshResidency.emplace(mesh, residency);
 		meshContentIndex[ComputeLegacyMeshContentHash(vertices, indices)] = mesh;
 		meshes.emplace(name, mesh);
 
@@ -83,17 +70,8 @@ namespace Engine
 			meshContentIndex.erase(contentIt);
 		}
 
-		// No matching content hash found: create CPU geometry and separate renderer residency.
+		// No matching content hash found: create CPU geometry only.
 		auto mesh = std::make_shared<Mesh>(vertices, indices);
-		auto residency = std::make_shared<MeshBufferData>();
-
-		const uint32_t meshID = nextMeshID++;
-		residency->meshID = meshID;
-		meshToID[mesh] = meshID;
-		idToMesh[meshID] = mesh;
-
-		residency->GenerateBuffersAndAABB(*renderer, vertices, indices);
-		meshResidency.emplace(mesh, residency);
 		meshContentIndex[contentHash] = mesh;
 
 		std::string finalName = desiredName;
@@ -153,6 +131,30 @@ namespace Engine
 			return it->second;
 		}
 		return nullptr;
+	}
+
+	std::shared_ptr<MeshBufferData> MeshPool::RequestMeshResidency(const std::shared_ptr<Mesh>& mesh)
+	{
+		if (!mesh)
+		{
+			throw std::runtime_error("Cannot request renderer residency for a null Mesh.");
+		}
+
+		std::lock_guard<std::mutex> lock(poolMutex);
+		auto existing = meshResidency.find(mesh);
+		if (existing != meshResidency.end())
+		{
+			return existing->second;
+		}
+
+		auto residency = std::make_shared<MeshBufferData>();
+		residency->meshID = nextMeshID++;
+		residency->GenerateBuffersAndAABB(*renderer, mesh->vertices, mesh->indices);
+
+		meshToID[mesh] = residency->meshID;
+		idToMesh[residency->meshID] = mesh;
+		meshResidency.emplace(mesh, residency);
+		return residency;
 	}
 
 

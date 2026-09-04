@@ -4,6 +4,7 @@
 #include "Buffers/VulkanGpuInstanceData.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
+#include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include <entt/entt.hpp>
 
 #include <array>
@@ -26,11 +27,9 @@ namespace Engine
 	// Forward declare
 	enum class TransformSpace;
 	class Scene;
-	class SceneSystem;
 	class CameraSystem;
 	class VulkanRenderer;
 	class Transform;
-	struct Frustum;
 
 	class VulkanIndexDraw
 	{
@@ -62,7 +61,8 @@ namespace Engine
 
 		VulkanIndexDraw(VkDevice device, VkPhysicalDevice physicalDevice, const int MAX_EXPECTED_INSTANCES, const int MAX_FRAMES_IN_FLIGHT);
 
-		void SetServices(VulkanRenderer* vulkanRenderer, SceneSystem* scenes, CameraSystem* camera, Swim::Jobs::JobSystem* jobs);
+		void SetServices(VulkanRenderer* vulkanRenderer, CameraSystem* camera, Swim::Jobs::JobSystem* jobs);
+		void SetScene(Scene* scene) { renderScene = scene; }
 
 		void CreateIndirectBuffers(uint32_t maxDrawCalls, uint32_t framesInFlight);
 
@@ -467,11 +467,13 @@ namespace Engine
 		static constexpr VkDeviceSize MESH_BUFFER_GROWTH_SIZE = 8 * 1024 * 1024; // 8 MB blocks
 
 		bool useQueriedFrustumSceneBVH{ true };
+		Frustum viewFrustum{};
 
-		// Non-owning runtime services. VulkanRenderer owns this object and all three
-		// services outlive it through SwimEngine's explicit shutdown order.
+		// Non-owning runtime services. VulkanRenderer owns this object and the services
+		// outlive it through SwimEngine's explicit shutdown order. The presentation
+		// scene is supplied explicitly by the application frame orchestrator.
 		VulkanRenderer* renderer = nullptr;
-		SceneSystem* sceneSystem = nullptr;
+		Scene* renderScene = nullptr;
 		CameraSystem* cameraSystem = nullptr;
 		Swim::Jobs::JobSystem* jobs = nullptr;
 

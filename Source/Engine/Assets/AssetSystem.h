@@ -267,6 +267,7 @@ namespace Swim::Assets
 		}
 
 		AssetId FindByContentHash(const ContentHash& contentHash) const;
+		ContentHash ComputeDependencyRevisionHash(AssetId root) const;
 		std::vector<AssetId> GetDependents(AssetId dependency) const;
 		std::size_t GetDeclaredCount() const;
 

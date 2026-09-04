@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Engine/Systems/Renderer/Renderer.h"
+#include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 
 namespace Engine
 {
@@ -21,7 +22,8 @@ namespace Engine
 
 	// Forward declare
 	class Texture2D;
-	class SceneSystem;
+	class Scene;
+	class CameraSystem;
 
 	class OpenGLRenderer : public Renderer
 	{
@@ -44,7 +46,6 @@ namespace Engine
 		void SetSurfaceSize(uint32_t newWidth, uint32_t newHeight);
 		void SetFramebufferResized();
 		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
-		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
 
 		std::string LoadTextFile(const std::string& relativePath) const;
 		GLuint CompileGLSLShader(GLenum stage, const char* source);
@@ -68,7 +69,7 @@ namespace Engine
 		void RenderFrame();
 		void UpdateUniformBuffer();
 
-		void RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+		void RenderWorldSpace(Scene& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 		void RenderScreenSpaceAndDecoratedMeshes(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, bool cull);
 
 		void RenderTextMSDFWorld(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
@@ -88,6 +89,7 @@ namespace Engine
 		);
 
 		CameraUBO cameraUBO{};
+		Frustum viewFrustum{};
 
 		HDC deviceContext = nullptr;
 		HGLRC glContext = nullptr;
@@ -102,7 +104,6 @@ namespace Engine
 
 		std::shared_ptr<Texture2D> missingTexture;
 		CameraSystem* cameraSystem = nullptr;
-		SceneSystem* sceneSystem = nullptr;
 
 		std::unique_ptr<CubeMapController> cubemapController;
 

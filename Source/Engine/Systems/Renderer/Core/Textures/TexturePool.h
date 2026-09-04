@@ -1,19 +1,28 @@
 #pragma once
 
 #include "Texture2D.h"
+#include "Engine/Assets/AssetHandle.h"
+#include "Engine/Assets/AssetId.h"
+#include "Engine/Assets/ContentHash.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <tiny_gltf.h>
-#include "Engine/Assets/ContentHash.h"
+
+namespace Swim::Assets
+{
+	class AssetSystem;
+	struct TextureAsset;
+}
 
 namespace Swim::Platform
 {
@@ -48,8 +57,15 @@ namespace Engine
 		// Loads a texture if not already loaded, returns shared_ptr
 		std::shared_ptr<Texture2D> LoadTexture(const std::string& fileName, bool generateMips);
 
-		std::shared_ptr<Texture2D> GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey);
-		std::shared_ptr<Texture2D> CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName);
+		// Transitional renderer residency adapter for authoritative runtime texture assets.
+		std::shared_ptr<Texture2D> GetOrCreateTextureFromAsset(
+			Swim::Assets::AssetSystem& assets,
+			Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> handle,
+			const std::string& debugName
+		);
+
+		// Explicit compatibility residency request. Texture2D construction is CPU-only.
+		void RequestTextureResidency(const std::shared_ptr<Texture2D>& texture);
 
 		void StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name);
 
@@ -118,6 +134,26 @@ namespace Engine
 
 	private:
 
+		struct AssetTextureKey
+		{
+			Swim::Assets::AssetId Id{};
+			std::uint32_t Generation = 0;
+			Swim::Assets::ContentHash Hash{};
+
+			bool operator==(const AssetTextureKey&) const = default;
+		};
+
+		struct AssetTextureKeyHash
+		{
+			std::size_t operator()(const AssetTextureKey& key) const noexcept
+			{
+				std::size_t value = std::hash<std::uint64_t>{}(key.Id.Value);
+				value ^= std::hash<std::uint32_t>{}(key.Generation) << 1;
+				value ^= std::hash<Swim::Assets::ContentHash>{}(key.Hash) << 2;
+				return value;
+			}
+		};
+
 		Swim::Platform::FileSystem* files = nullptr;
 		TextureRuntimeContext runtimeContext{};
 		std::shared_ptr<TextureLifetimeTracker> lifetimeTracker;
@@ -125,8 +161,11 @@ namespace Engine
 		std::mutex poolMutex;
 		std::unordered_map<std::string, std::shared_ptr<Texture2D>> textures;
 		std::unordered_map<Swim::Assets::ContentHash, std::weak_ptr<Texture2D>> textureContentIndex;
+		std::unordered_map<AssetTextureKey, std::weak_ptr<Texture2D>, AssetTextureKeyHash> assetTextureIndex;
 
 		unsigned int textureCount{ 0 };
+
+		void RequestTextureResidencyLocked(const std::shared_ptr<Texture2D>& texture);
 
 		int ExtractTrailingNumber(const std::string& str)
 		{

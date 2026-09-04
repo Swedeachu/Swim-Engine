@@ -64,6 +64,32 @@ namespace
 		file.write(reinterpret_cast<const char*>(positions.data()), sizeof(positions));
 		file.write(reinterpret_cast<const char*>(indices.data()), sizeof(indices));
 	}
+
+	void WriteUnsupportedDracoFixture(const std::filesystem::path& root)
+	{
+		std::filesystem::create_directories(root / "Models");
+		static constexpr std::string_view Gltf = R"json({
+			"asset":{"version":"2.0"},
+			"extensionsUsed":["KHR_draco_mesh_compression"],
+			"extensionsRequired":["KHR_draco_mesh_compression"],
+			"scene":0,
+			"scenes":[{"nodes":[0]}],
+			"nodes":[{"mesh":0}],
+			"meshes":[{"primitives":[{
+				"attributes":{"POSITION":0},
+				"indices":1,
+				"extensions":{"KHR_draco_mesh_compression":{"bufferView":0,"attributes":{"POSITION":0}}}
+			}]}],
+			"buffers":[{"byteLength":4,"uri":"data:application/octet-stream;base64,AAAAAA=="}],
+			"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4}],
+			"accessors":[
+				{"componentType":5126,"count":3,"type":"VEC3"},
+				{"componentType":5123,"count":3,"type":"SCALAR"}
+			]
+		})json";
+		std::ofstream file(root / "Models" / "Draco.gltf", std::ios::binary | std::ios::trunc);
+		file.write(Gltf.data(), static_cast<std::streamsize>(Gltf.size()));
+	}
 }
 
 int main()
@@ -113,5 +139,18 @@ int main()
 
 	assets.Shutdown();
 	std::filesystem::remove_all(root, ignored);
+
+	const std::filesystem::path unsupportedRoot = std::filesystem::temp_directory_path() / "swim-dev-asset-bootstrap-unsupported-test";
+	std::filesystem::remove_all(unsupportedRoot, ignored);
+	WriteUnsupportedDracoFixture(unsupportedRoot);
+	AssetSystem unsupportedAssets;
+	Require(unsupportedAssets.Initialize(), "unsupported AssetSystem initialized");
+	const DevelopmentAssetBootstrapResult unsupported = RunDevelopmentAssetBootstrap(unsupportedRoot, unsupportedAssets);
+	Require(unsupported.Succeeded(), "unsupported source is a deliberate skip, not a bootstrap error");
+	Require(unsupported.Stats.SourcesDiscovered == 1, "unsupported source is still discovered");
+	Require(unsupported.Stats.SourcesSkippedUnsupported == 1, "unsupported Draco source is counted as skipped");
+	Require(unsupported.Stats.SourcesCooked == 0, "unsupported Draco source is not cooked");
+	unsupportedAssets.Shutdown();
+	std::filesystem::remove_all(unsupportedRoot, ignored);
 	return 0;
 }

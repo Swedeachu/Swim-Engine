@@ -453,6 +453,11 @@ namespace Swim::AssetCompiler
 			const GltfImportResult imported = importer.Import(source);
 			if (!imported)
 			{
+				if (imported.Error.Code == GltfImportErrorCode::UnsupportedFeature)
+				{
+					++result.Stats.SourcesSkippedUnsupported;
+					continue;
+				}
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Import, source, imported.Error.Message });
 				continue;
 			}

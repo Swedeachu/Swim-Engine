@@ -15,6 +15,7 @@ namespace Engine
 	// Forward declare
 	class Scene;
 	class PhysicsWorld;
+	class TransformSystem;
 
 	enum class TransformSpace : int
 	{
@@ -46,11 +47,8 @@ namespace Engine
 		mutable glm::mat4 worldMatrix{ 1.0f }; // WORLD matrix
 		uint64_t worldVersion = 1; // increments whenever this transforms world answer changes
 
-		inline static bool TransformsDirty = false; // frame flag for stuff like BVH to rebuild
-		inline static std::vector<entt::entity> DirtyEntities{}; // coarse dirty list used by scene systems for incremental updates
-		inline static uint64_t DirtyEpoch = 1;
-		inline static uint64_t GlobalMutationVersion = 1; // monotonic transform mutation serial for renderer-side cache validation
-		uint64_t lastQueuedDirtyEpoch = 0;
+		std::uint64_t lastQueuedDirtyEpoch = 0;
+		TransformSystem* transformSystem = nullptr; // Non-owning scene-owned mutation tracker.
 		TransformSpace space = TransformSpace::World;
 
 		// Agnostic layer seperated from specifc rendering clip space for helping with UI layer priority logic such as mouse input.
@@ -80,7 +78,7 @@ namespace Engine
 		void MarkWorldDirtyOnly();
 
 		void MarkChildrenDirty();
-		void QueueDirtyEntity();
+		bool QueueDirtyEntity();
 
 		// Helper: parent world rotation (TR only, no scale)
 		static glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry);
@@ -112,35 +110,6 @@ namespace Engine
 		const bool IsDirty()           const { return dirty; }
 		const bool IsWorldDirty()			 const { return worldDirty; }
 		uint64_t GetWorldVersion() const { return worldVersion; }
-
-		static bool AreAnyTransformsDirty() { return TransformsDirty; }
-		static void ClearGlobalDirtyFlag() { TransformsDirty = false; }
-		static void ClearDirtyEntities()
-		{
-			DirtyEntities.clear();
-			++DirtyEpoch;
-			if (DirtyEpoch == 0)
-			{
-				DirtyEpoch = 1;
-			}
-		}
-
-		static void BeginFrameDirtyTracking()
-		{
-			ClearGlobalDirtyFlag();
-			ClearDirtyEntities();
-		}
-		static const std::vector<entt::entity>& GetDirtyEntities() { return DirtyEntities; }
-		static uint64_t GetGlobalMutationVersion() { return GlobalMutationVersion; }
-
-		static void MarkEntityDirty(entt::entity entity)
-		{
-			if (entity != entt::null)
-			{
-				DirtyEntities.push_back(entity);
-				TransformsDirty = true;
-			}
-		}
 
 		entt::entity GetOwner() const { return owner; }
 

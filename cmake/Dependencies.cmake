@@ -7,13 +7,10 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		SwimEnTT
 		SwimJson
 		SwimStb
-		SwimTinyGltf
-		SwimWebP
-		SwimWebPBundle
-		SwimDraco
 		SwimZstd
 		SwimBasis
 		SwimGlad
+		SwimSpdlog
 	)
 		add_library(${SWIM_STUB_TARGET} INTERFACE)
 	endforeach()
@@ -22,19 +19,41 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(EnTT::EnTT ALIAS SwimEnTT)
 	add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)
 	add_library(stb::stb ALIAS SwimStb)
-	add_library(tinygltf::tinygltf ALIAS SwimTinyGltf)
-	add_library(WebP::webp ALIAS SwimWebP)
-	add_library(Swim::WebP ALIAS SwimWebPBundle)
-	add_library(draco::draco ALIAS SwimDraco)
 	add_library(zstd::zstd ALIAS SwimZstd)
 	add_library(Swim::Basis ALIAS SwimBasis)
 	add_library(glad::glad ALIAS SwimGlad)
+	add_library(spdlog::spdlog ALIAS SwimSpdlog)
 
 	include(cmake/PhysX.cmake)
 	return()
 endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+# ---------------------------------------------------------------------------
+# spdlog 1.15.3 - mirrors Tungsten's console + file logging surface.
+# Keep the compiled static target so all runtime code shares one default logger
+# and one set of sinks.
+# ---------------------------------------------------------------------------
+set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+CPMAddPackage(
+	NAME spdlog_source
+	GITHUB_REPOSITORY gabime/spdlog
+	GIT_TAG v1.15.3
+	EXCLUDE_FROM_ALL YES
+	UPDATE_DISCONNECTED YES
+)
+if(NOT TARGET spdlog::spdlog)
+	message(FATAL_ERROR "spdlog v1.15.3 did not provide spdlog::spdlog")
+endif()
+swim_set_solution_folder(spdlog "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/spdlog")
 
 
 # ---------------------------------------------------------------------------
@@ -200,171 +219,18 @@ add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)
 # stb - headers only. This pin keeps stb_image 2.30 and the resize2 API used
 # by the branch without compiling a second image implementation.
 # ---------------------------------------------------------------------------
-CPMAddPackage(
-	NAME stb_source
-	GITHUB_REPOSITORY nothings/stb
-	GIT_TAG 2dfbe86
-	DOWNLOAD_ONLY YES
-	UPDATE_DISCONNECTED YES
-)
+if(NOT DEFINED stb_source_SOURCE_DIR OR NOT EXISTS "${stb_source_SOURCE_DIR}/stb_image.h")
+	CPMAddPackage(
+		NAME stb_source
+		GITHUB_REPOSITORY nothings/stb
+		GIT_TAG 2dfbe86
+		DOWNLOAD_ONLY YES
+		UPDATE_DISCONNECTED YES
+	)
+endif()
 add_library(SwimStb INTERFACE)
 target_include_directories(SwimStb SYSTEM INTERFACE "${stb_source_SOURCE_DIR}")
 add_library(stb::stb ALIAS SwimStb)
-
-# ---------------------------------------------------------------------------
-# Draco 1.5.7 - tinygltf's compressed-mesh decoder dependency.
-# ---------------------------------------------------------------------------
-set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
-set(DRACO_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
-set(DRACO_UNITY_PLUGIN OFF CACHE BOOL "" FORCE)
-set(DRACO_MAYA_PLUGIN OFF CACHE BOOL "" FORCE)
-set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
-# Draco 1.5.7 still calls the removed FindPythonInterp module. Its own
-# cmake_minimum_required() resets policy state, so a parent cmake_policy(PUSH)
-# does not suppress CMP0148 on modern CMake. Set the subproject policy default
-# only while adding Draco, then restore the caller's value.
-set(SWIM_HAD_CMP0148_DEFAULT FALSE)
-if(DEFINED CMAKE_POLICY_DEFAULT_CMP0148)
-	set(SWIM_HAD_CMP0148_DEFAULT TRUE)
-	set(SWIM_SAVED_CMP0148_DEFAULT "${CMAKE_POLICY_DEFAULT_CMP0148}")
-endif()
-set(CMAKE_POLICY_DEFAULT_CMP0148 OLD)
-set(SWIM_HAD_CMAKE_WARN_DEPRECATED FALSE)
-if(DEFINED CMAKE_WARN_DEPRECATED)
-	set(SWIM_HAD_CMAKE_WARN_DEPRECATED TRUE)
-	set(SWIM_SAVED_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
-endif()
-set(CMAKE_WARN_DEPRECATED OFF)
-set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Draco")
-CPMAddPackage(
-	NAME draco_source
-	GITHUB_REPOSITORY google/draco
-	GIT_TAG 1.5.7
-	EXCLUDE_FROM_ALL YES
-)
-set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
-if(SWIM_HAD_CMAKE_WARN_DEPRECATED)
-	set(CMAKE_WARN_DEPRECATED "${SWIM_SAVED_CMAKE_WARN_DEPRECATED}")
-else()
-	unset(CMAKE_WARN_DEPRECATED)
-endif()
-unset(SWIM_HAD_CMAKE_WARN_DEPRECATED)
-unset(SWIM_SAVED_CMAKE_WARN_DEPRECATED)
-if(SWIM_HAD_CMP0148_DEFAULT)
-	set(CMAKE_POLICY_DEFAULT_CMP0148 "${SWIM_SAVED_CMP0148_DEFAULT}")
-else()
-	unset(CMAKE_POLICY_DEFAULT_CMP0148)
-endif()
-unset(SWIM_HAD_CMP0148_DEFAULT)
-unset(SWIM_SAVED_CMP0148_DEFAULT)
-
-if(TARGET draco::draco)
-	set(SWIM_DRACO_TARGET draco::draco)
-elseif(TARGET draco_static)
-	set(SWIM_DRACO_TARGET draco_static)
-	add_library(draco::draco ALIAS draco_static)
-elseif(TARGET draco)
-	set(SWIM_DRACO_TARGET draco)
-	add_library(draco::draco ALIAS draco)
-else()
-	message(FATAL_ERROR "Draco 1.5.7 did not provide its expected static target")
-endif()
-
-# The old Debug project explicitly linked draco_release.lib. Keep that
-# optimized/release-style Draco behavior while retaining CMake's Debug symbols.
-# draco::draco may be an ALIAS, and CMake intentionally rejects mutating alias
-# targets. Resolve it to the real build target before applying compile options.
-get_target_property(SWIM_DRACO_REAL_TARGET "${SWIM_DRACO_TARGET}" ALIASED_TARGET)
-if(NOT SWIM_DRACO_REAL_TARGET)
-	set(SWIM_DRACO_REAL_TARGET "${SWIM_DRACO_TARGET}")
-endif()
-
-if(MSVC AND TARGET ${SWIM_DRACO_REAL_TARGET})
-	target_compile_options(${SWIM_DRACO_REAL_TARGET} PRIVATE
-		"$<$<CONFIG:Debug>:/O2>"
-		"$<$<CONFIG:Debug>:/Ob2>"
-	)
-endif()
-
-# ---------------------------------------------------------------------------
-# WebP 1.5.0 - runtime WebP decoding used by MaterialPool.
-# ---------------------------------------------------------------------------
-set(WEBP_BUILD_ANIM_UTILS OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_CWEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_DWEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_GIF2WEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_IMG2WEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_VWEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_WEBPINFO OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_WEBPMUX OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_LIBWEBPMUX ON CACHE BOOL "" FORCE)
-set(WEBP_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
-
-# libwebp 1.5.0 probes SIMD/OS capabilities at configure time. Unsupported
-# architectures intentionally report failed tests; keep those checks but do not
-# spam normal Swim Engine configure output with their expected probe results or
-# the dependency's old cmake_minimum_required() deprecation notice.
-set(SWIM_HAD_WEBP_REQUIRED_QUIET FALSE)
-if(DEFINED CMAKE_REQUIRED_QUIET)
-	set(SWIM_HAD_WEBP_REQUIRED_QUIET TRUE)
-	set(SWIM_SAVED_WEBP_REQUIRED_QUIET "${CMAKE_REQUIRED_QUIET}")
-endif()
-set(SWIM_HAD_WEBP_WARN_DEPRECATED FALSE)
-if(DEFINED CMAKE_WARN_DEPRECATED)
-	set(SWIM_HAD_WEBP_WARN_DEPRECATED TRUE)
-	set(SWIM_SAVED_WEBP_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
-endif()
-set(CMAKE_REQUIRED_QUIET TRUE)
-set(CMAKE_WARN_DEPRECATED OFF)
-set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/WebP")
-CPMAddPackage(
-	NAME webp_source
-	GITHUB_REPOSITORY webmproject/libwebp
-	GIT_TAG v1.5.0
-	EXCLUDE_FROM_ALL YES
-)
-set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
-if(SWIM_HAD_WEBP_REQUIRED_QUIET)
-	set(CMAKE_REQUIRED_QUIET "${SWIM_SAVED_WEBP_REQUIRED_QUIET}")
-else()
-	unset(CMAKE_REQUIRED_QUIET)
-endif()
-if(SWIM_HAD_WEBP_WARN_DEPRECATED)
-	set(CMAKE_WARN_DEPRECATED "${SWIM_SAVED_WEBP_WARN_DEPRECATED}")
-else()
-	unset(CMAKE_WARN_DEPRECATED)
-endif()
-unset(SWIM_HAD_WEBP_REQUIRED_QUIET)
-unset(SWIM_SAVED_WEBP_REQUIRED_QUIET)
-unset(SWIM_HAD_WEBP_WARN_DEPRECATED)
-unset(SWIM_SAVED_WEBP_WARN_DEPRECATED)
-
-if(TARGET WebP::webp)
-	set(SWIM_WEBP_CORE_TARGET WebP::webp)
-elseif(TARGET webp)
-	set(SWIM_WEBP_CORE_TARGET webp)
-	add_library(WebP::webp ALIAS webp)
-else()
-	message(FATAL_ERROR "libwebp v1.5.0 did not provide target 'webp'")
-endif()
-
-if(NOT TARGET webpdemux)
-	message(FATAL_ERROR "libwebp v1.5.0 did not provide target 'webpdemux'")
-endif()
-if(NOT TARGET libwebpmux)
-	message(FATAL_ERROR "libwebp v1.5.0 did not provide target 'libwebpmux'")
-endif()
-
-# The legacy project linked all three WebP libraries. Keep the same link
-# contract even though the current runtime path primarily calls the decoder.
-add_library(SwimWebPBundle INTERFACE)
-target_link_libraries(SwimWebPBundle INTERFACE
-	${SWIM_WEBP_CORE_TARGET}
-	webpdemux
-	libwebpmux
-)
-add_library(Swim::WebP ALIAS SwimWebPBundle)
 
 # ---------------------------------------------------------------------------
 # Zstandard 1.4.9 - matches the previously committed zstd.c/zstd.h version.
@@ -425,37 +291,7 @@ add_library(zstd::zstd ALIAS SwimZstd)
 swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")
 
 # ---------------------------------------------------------------------------
-# tinygltf 2.9.x - kept header-only; one Swim-owned implementation TU defines
-# the implementation/STB/Draco feature macros exactly once.
-# ---------------------------------------------------------------------------
-CPMAddPackage(
-	NAME tinygltf_source
-	GITHUB_REPOSITORY syoyo/tinygltf
-	GIT_TAG v2.9.3
-	DOWNLOAD_ONLY YES
-	UPDATE_DISCONNECTED YES
-)
-add_library(SwimTinyGltf INTERFACE)
-# tiny_gltf.h directly includes <draco/...> when TINYGLTF_ENABLE_DRACO is
-# enabled in our implementation TU. Draco splits its public header contract:
-# checked-in headers live under <checkout>/src/draco, while draco_features.h
-# is generated at configure time as <top-level-build>/draco/draco_features.h.
-# Export both roots here so engine source never needs to know about _deps or
-# generated dependency paths.
-target_include_directories(SwimTinyGltf SYSTEM INTERFACE
-	"${tinygltf_source_SOURCE_DIR}"
-	"${draco_source_SOURCE_DIR}/src"
-	"${CMAKE_BINARY_DIR}"
-)
-target_link_libraries(SwimTinyGltf INTERFACE
-	nlohmann_json::nlohmann_json
-	stb::stb
-	draco::draco
-)
-add_library(tinygltf::tinygltf ALIAS SwimTinyGltf)
-
-# ---------------------------------------------------------------------------
-# Basis Universal 1.60 - KTX2 transcoder path used by MaterialPool. Only the
+# Basis Universal 1.60 - KTX2 transcoder path used by legacy TexturePool residency. Only the
 # transcoder TU is built; the encoder/tools are intentionally omitted.
 # ---------------------------------------------------------------------------
 CPMAddPackage(
@@ -490,8 +326,13 @@ target_include_directories(SwimBasis SYSTEM PUBLIC
 	"${basis_source_SOURCE_DIR}/transcoder"
 )
 target_compile_definitions(SwimBasis PUBLIC
+	BASISU_FORCE_DEVEL_MESSAGES=0
 	BASISD_SUPPORT_KTX2=1
 	BASISD_SUPPORT_KTX2_ZSTD=1
+	BASISD_SUPPORT_BASIS=1
+	BASISD_SUPPORT_ZSTD=1
+	BASISD_SUPPORT_ETC1S=1
+	BASISD_SUPPORT_UASTC=1
 )
 target_link_libraries(SwimBasis PUBLIC zstd::zstd)
 add_library(Swim::Basis ALIAS SwimBasis)
@@ -534,12 +375,10 @@ foreach(SWIM_CACHED_GIT_DEPENDENCY IN ITEMS
 	glm_source
 	entt_source
 	stb_source
-	draco_source
-	webp_source
 	zstd_source
-	tinygltf_source
 	basis_source
 	glad_source
+	spdlog_source
 	swim_physx_source
 )
 	set(SWIM_CACHED_GIT_SOURCE_VARIABLE "${SWIM_CACHED_GIT_DEPENDENCY}_SOURCE_DIR")

@@ -37,6 +37,7 @@ namespace Swim::AssetCompiler
 		std::size_t SourcesDiscovered = 0;
 		std::size_t SourcesCurrent = 0;
 		std::size_t SourcesCooked = 0;
+		std::size_t SourcesSkippedUnsupported = 0;
 		std::size_t RootModelsLoaded = 0;
 		std::size_t SassetsLoaded = 0;
 	};

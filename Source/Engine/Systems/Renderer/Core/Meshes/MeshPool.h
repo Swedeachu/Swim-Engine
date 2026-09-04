@@ -44,6 +44,9 @@ namespace Engine
     std::shared_ptr<Mesh> GetMeshByID(uint32_t id) const;
     std::shared_ptr<MeshBufferData> GetMeshBufferData(const std::shared_ptr<Mesh>& mesh) const;
 
+    // Explicit compatibility residency request. RegisterMesh() only creates CPU geometry.
+    std::shared_ptr<MeshBufferData> RequestMeshResidency(const std::shared_ptr<Mesh>& mesh);
+
     // Removes a mesh by name. Returns true if successful.
     bool RemoveMesh(const std::string& name);
 

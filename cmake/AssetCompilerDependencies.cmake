@@ -67,6 +67,79 @@ if(NOT TARGET meshoptimizer)
 endif()
 swim_set_solution_folder(meshoptimizer "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/meshoptimizer")
 
+# PNG/JPEG decode is compiler-only here. Reuse the same stb revision as the
+# legacy runtime dependency without exporting stb_image through compiler APIs.
+if(NOT DEFINED stb_source_SOURCE_DIR OR NOT EXISTS "${stb_source_SOURCE_DIR}/stb_image.h")
+	CPMAddPackage(
+		NAME stb_source
+		GITHUB_REPOSITORY nothings/stb
+		GIT_TAG 2dfbe86
+		DOWNLOAD_ONLY YES
+		UPDATE_DISCONNECTED YES
+	)
+endif()
+add_library(SwimAssetCompilerStb INTERFACE)
+target_include_directories(SwimAssetCompilerStb SYSTEM INTERFACE "${stb_source_SOURCE_DIR}")
+
+# WebP decode is an authoring/compiler concern. Only the core decoder library is
+# built; runtime MaterialPool/TexturePool never receives libwebp.
+set(WEBP_BUILD_ANIM_UTILS OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_CWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_DWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_GIF2WEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_IMG2WEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_VWEBP OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_WEBPINFO OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_WEBPMUX OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_LIBWEBPMUX OFF CACHE BOOL "" FORCE)
+set(WEBP_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
+
+set(SWIM_HAD_WEBP_REQUIRED_QUIET FALSE)
+if(DEFINED CMAKE_REQUIRED_QUIET)
+	set(SWIM_HAD_WEBP_REQUIRED_QUIET TRUE)
+	set(SWIM_SAVED_WEBP_REQUIRED_QUIET "${CMAKE_REQUIRED_QUIET}")
+endif()
+set(SWIM_HAD_WEBP_WARN_DEPRECATED FALSE)
+if(DEFINED CMAKE_WARN_DEPRECATED)
+	set(SWIM_HAD_WEBP_WARN_DEPRECATED TRUE)
+	set(SWIM_SAVED_WEBP_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
+endif()
+set(CMAKE_REQUIRED_QUIET TRUE)
+set(CMAKE_WARN_DEPRECATED OFF)
+set(SWIM_SAVED_ASSET_COMPILER_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/WebP")
+CPMAddPackage(
+	NAME webp_source
+	GITHUB_REPOSITORY webmproject/libwebp
+	GIT_TAG v1.5.0
+	EXCLUDE_FROM_ALL YES
+	UPDATE_DISCONNECTED YES
+)
+set(CMAKE_FOLDER "${SWIM_SAVED_ASSET_COMPILER_FOLDER}")
+unset(SWIM_SAVED_ASSET_COMPILER_FOLDER)
+if(SWIM_HAD_WEBP_REQUIRED_QUIET)
+	set(CMAKE_REQUIRED_QUIET "${SWIM_SAVED_WEBP_REQUIRED_QUIET}")
+else()
+	unset(CMAKE_REQUIRED_QUIET)
+endif()
+if(SWIM_HAD_WEBP_WARN_DEPRECATED)
+	set(CMAKE_WARN_DEPRECATED "${SWIM_SAVED_WEBP_WARN_DEPRECATED}")
+else()
+	unset(CMAKE_WARN_DEPRECATED)
+endif()
+unset(SWIM_HAD_WEBP_REQUIRED_QUIET)
+unset(SWIM_SAVED_WEBP_REQUIRED_QUIET)
+unset(SWIM_HAD_WEBP_WARN_DEPRECATED)
+unset(SWIM_SAVED_WEBP_WARN_DEPRECATED)
+
+if(TARGET WebP::webp)
+	set(SWIM_ASSET_COMPILER_WEBP_TARGET WebP::webp)
+elseif(TARGET webp)
+	set(SWIM_ASSET_COMPILER_WEBP_TARGET webp)
+else()
+	message(FATAL_ERROR "libwebp v1.5.0 did not provide a WebP decoder target")
+endif()
+
 # CPM cache entries are immutable input. The explicit simdjson target above is
 # important because fastgltf v0.9.0 otherwise file(DOWNLOAD)s simdjson into its
 # source tree during configure.
@@ -99,5 +172,7 @@ endfunction()
 swim_assert_asset_compiler_dependency_clean("simdjson" "${swim_simdjson_source_SOURCE_DIR}")
 swim_assert_asset_compiler_dependency_clean("fastgltf" "${swim_fastgltf_source_SOURCE_DIR}")
 swim_assert_asset_compiler_dependency_clean("meshoptimizer" "${swim_meshoptimizer_source_SOURCE_DIR}")
+swim_assert_asset_compiler_dependency_clean("stb" "${stb_source_SOURCE_DIR}")
+swim_assert_asset_compiler_dependency_clean("webp" "${webp_source_SOURCE_DIR}")
 
 set(SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE ON)

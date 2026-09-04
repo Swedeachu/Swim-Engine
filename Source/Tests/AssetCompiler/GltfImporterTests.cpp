@@ -22,6 +22,8 @@ int main()
 {
 	static constexpr std::string_view Source = R"json({
 		"asset":{"version":"2.0"},
+		"extensionsUsed":["KHR_texture_transform"],
+		"extensionsRequired":["KHR_texture_transform"],
 		"scene":0,
 		"scenes":[{"nodes":[0]}],
 		"nodes":[{"name":"TriangleNode","mesh":0}],
@@ -59,5 +61,39 @@ int main()
 	Require(result.Model.Nodes.size() == 1, "one node imported");
 	Require(result.Model.Nodes[0].MeshIndex == std::optional<std::uint32_t>(0), "node mesh index imported");
 	Require(result.Model.Roots.size() == 1 && result.Model.Roots[0] == 0, "default scene root imported");
+
+	static constexpr std::string_view DracoSource = R"json({
+		"asset":{"version":"2.0"},
+		"extensionsUsed":["KHR_draco_mesh_compression"],
+		"extensionsRequired":["KHR_draco_mesh_compression"],
+		"scene":0,
+		"scenes":[{"nodes":[0]}],
+		"nodes":[{"mesh":0}],
+		"meshes":[{"primitives":[{
+			"attributes":{"POSITION":0},
+			"indices":1,
+			"extensions":{"KHR_draco_mesh_compression":{"bufferView":0,"attributes":{"POSITION":0}}}
+		}]}],
+		"buffers":[{"byteLength":4,"uri":"data:application/octet-stream;base64,AAAAAA=="}],
+		"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4}],
+		"accessors":[
+			{"componentType":5126,"count":3,"type":"VEC3"},
+			{"componentType":5123,"count":3,"type":"SCALAR"}
+		]
+	})json";
+
+	const std::filesystem::path dracoPath = std::filesystem::temp_directory_path() / "swim-fastgltf-draco-skip-test.gltf";
+	{
+		std::ofstream file(dracoPath, std::ios::binary | std::ios::trunc);
+		file.write(DracoSource.data(), static_cast<std::streamsize>(DracoSource.size()));
+	}
+
+	const Swim::AssetCompiler::GltfImportResult dracoResult = importer.Import(dracoPath);
+	std::filesystem::remove(dracoPath, ignored);
+	Require(!dracoResult, "Draco source is not imported without compiler-side decompression");
+	Require(
+		dracoResult.Error.Code == Swim::AssetCompiler::GltfImportErrorCode::UnsupportedFeature,
+		"Draco source is classified as a deliberate unsupported feature"
+	);
 	return 0;
 }

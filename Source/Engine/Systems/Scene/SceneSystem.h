@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Scene.h"
+#include "SceneId.h"
+#include "SceneCatalog.h"
 #include "Engine/Systems/IO/CommandSystem.h"
 #include "Engine/EngineState.h"
 
@@ -9,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <stdexcept>
 #include <vector>
 #include <string_view>
 #include <utility>
@@ -41,31 +44,53 @@ namespace Swim::Memory
 namespace Engine
 {
 
-	struct SceneSystemServices
+	struct SceneCoreServices
 	{
-		InputManager* Input = nullptr;
-		CommandSystem* Commands = nullptr;
-		CameraSystem* Camera = nullptr;
-		VulkanRenderer* Vulkan = nullptr;
-		OpenGLRenderer* OpenGL = nullptr;
-		MeshPool* Meshes = nullptr;
-		TexturePool* Textures = nullptr;
-		MaterialPool* Materials = nullptr;
-		FontPool* Fonts = nullptr;
 		Swim::Platform::FileSystem* Files = nullptr;
 		Swim::Jobs::JobSystem* Jobs = nullptr;
 		Swim::IO::AsyncIoService* IO = nullptr;
 		Swim::Assets::AssetSystem* Assets = nullptr;
 		Swim::Memory::FrameArena* FrameMemory = nullptr;
 		const EngineState* State = nullptr;
-		ClipSpaceDepthRange ClipDepth = ClipSpaceDepthRange::ZeroToOne;
-		std::function<bool(const std::string&, std::uintptr_t)> SendEditorMessage;
-		std::function<int()> GetFPS;
 
 		bool IsValid() const
 		{
-			return Input && Commands && Camera && State && Files && Jobs && IO && Assets && FrameMemory && Meshes && Textures && Materials && Fonts && (Vulkan || OpenGL);
+			return Files && Jobs && IO && Assets && FrameMemory && State;
 		}
+	};
+
+	struct ScenePresentationServices
+	{
+		InputManager* Input = nullptr;
+		CameraSystem* Camera = nullptr;
+		CubeMapController* CubeMap = nullptr;
+		MeshPool* Meshes = nullptr;
+		TexturePool* Textures = nullptr;
+		MaterialPool* Materials = nullptr;
+		FontPool* Fonts = nullptr;
+		ClipSpaceDepthRange ClipDepth = ClipSpaceDepthRange::ZeroToOne;
+
+		bool IsAvailable() const
+		{
+			return Input && Camera && Meshes && Textures && Materials && Fonts;
+		}
+	};
+
+	struct SceneToolServices
+	{
+		CommandSystem* Commands = nullptr;
+		std::function<bool(const std::string&, std::uintptr_t)> SendEditorMessage;
+		std::function<int()> GetFPS;
+	};
+
+	struct SceneSystemServices
+	{
+		SceneCoreServices Core{};
+		ScenePresentationServices Presentation{};
+		SceneToolServices Tools{};
+
+		bool IsValid() const { return Core.IsValid(); }
+		bool HasPresentation() const { return Presentation.IsAvailable(); }
 	};
 
 	class SceneSystem : public Machine
@@ -73,15 +98,28 @@ namespace Engine
 
 	public:
 
-		using SceneFactory = std::function<std::shared_ptr<Scene>()>;
-
-		static void Preregister(std::string name, SceneFactory factory);
+		using SceneFactory = SceneCatalog::Factory;
 
 		void SetServices(SceneSystemServices services) { this->services = std::move(services); }
+		void SetCubeMapController(CubeMapController* cubeMap) { services.Presentation.CubeMap = cubeMap; }
+
+		template <typename T>
+		void RegisterSceneType(const std::string& name)
+		{
+			RegisterSceneType(name, [](const std::string& instanceName)
+			{
+				return std::static_pointer_cast<Scene>(std::make_shared<T>(instanceName));
+			});
+		}
+
+		void RegisterSceneType(std::string name, SceneFactory factory);
+		void SetStartupScene(std::string name) { startupSceneName = std::move(name); }
 
 		int Awake() override;
 
 		int Init() override;
+
+		void BeginFrame();
 
 		void Update(double dt) override;
 
@@ -92,22 +130,31 @@ namespace Engine
 		template <typename T, typename... Args>
 		void RegisterScene(const std::string& name, Args&&... args)
 		{
+			if (scenes.contains(name))
+			{
+				throw std::runtime_error("Scene instance with name '" + name + "' is already registered.");
+			}
+
 			std::shared_ptr<Scene> scene = std::make_shared<T>(std::forward<Args>(args)...);
 			if (services.IsValid())
 			{
 				InjectServices(*scene);
 			}
-			scenes[name] = std::move(scene);
+			SceneId id(nextSceneId++);
+			scenes.emplace(name, LoadedScene{ id, std::move(scene) });
 		}
 
 		// Sets the active scene by name, optionally exiting the current one
 		void SetScene(const std::string& name, bool exitCurrent = true, bool initNew = true, bool awakeNew = false);
 
 		std::shared_ptr<Scene>& GetActiveScene() { return activeScene; }
+		const std::shared_ptr<Scene>& GetActiveScene() const { return activeScene; }
+		SceneId GetActiveSceneId() const { return activeSceneId; }
+		SceneId FindSceneId(std::string_view name) const;
 		bool DispatchCommand(std::string_view command);
 		bool SendEditorMessage(const std::string& message, std::uintptr_t channel = 1) const
 		{
-			return services.SendEditorMessage && services.SendEditorMessage(message, channel);
+			return services.Tools.SendEditorMessage && services.Tools.SendEditorMessage(message, channel);
 		}
 
 	private:
@@ -129,64 +176,27 @@ namespace Engine
 		void AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
 		void RemoveComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
 
-		// Map of scenes by name
-		std::map<std::string, std::shared_ptr<Scene>> scenes;
-
-		struct PreregisteredScene
+		struct LoadedScene
 		{
-			std::string Name;
-			SceneFactory Factory;
+			SceneId Id;
+			std::shared_ptr<Scene> Instance;
 		};
 
-		// Static registration contains constructors only; runtime Scene instances are owned per SceneSystem.
-		static std::vector<PreregisteredScene> factory;
+		// Loaded scene instances are owned by this SceneSystem and receive a runtime SceneId.
+		std::map<std::string, LoadedScene> scenes;
 
-		// Shared pointer to the currently active scene
+		// Scene type construction metadata is owned by this SceneSystem instance.
+		// Game/application code registers descriptors explicitly before Awake().
+		SceneCatalog sceneCatalog;
+		std::string startupSceneName;
+
+		// Shared pointer to the application-designated active scene.
 		std::shared_ptr<Scene> activeScene = nullptr;
+		SceneId activeSceneId{};
+		std::uint64_t nextSceneId = 1;
 
 		SceneSystemServices services{};
 
 	};
 
 }
-
-// A template registrar struct that, when constructed, preregisters the scene.
-// Each unique scene type T creates a unique instantiation.
-// SceneRegistrar assumes T has a default constructor or inherits the base constructor
-namespace
-{
-	template<typename T>
-	struct SceneRegistrar
-	{
-		SceneRegistrar(const std::string& name)
-		{
-			Engine::SceneSystem::Preregister(name, [name]()
-			{
-				return std::static_pointer_cast<Engine::Scene>(std::make_shared<T>(name));
-			});
-		}
-	};
-}
-
-// Macro to register a scene using templates. 
-#define REGISTER_SCENE(SceneType) \
-    namespace { \
-        /* Inline variable ensures each TU gets its own instance without ODR issues */ \
-        inline SceneRegistrar<SceneType> scene_registrar_instance_##SceneType(#SceneType); \
-    }
-
-// Macro to automatically derive and override all the methods in a scene for a header file, and then auto register it
-// This macro is amazing, until we need to add more methods to a scene
-#define DEFINE_SCENE(SceneType)                                  \
-    class SceneType : public Engine::Scene                       \
-    {                                                            \
-    public:                                                      \
-        using Engine::Scene::Scene; /* Inherit base constructors */ \
-        int Awake() override;                                    \
-        int Init() override;                                     \
-        void Update(double dt) override;                         \
-        void FixedUpdate(unsigned int tickThisSecond) override;  \
-        int Exit() override;                                     \
-    };                                                           \
-    REGISTER_SCENE(SceneType); // then auto register it all in one big macro
-

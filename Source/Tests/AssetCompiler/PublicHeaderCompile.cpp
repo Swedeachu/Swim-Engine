@@ -4,6 +4,7 @@
 #include "Tools/AssetCompiler/Ktx2TextureCompiler.h"
 #include "Tools/AssetCompiler/MeshOptimizer.h"
 #include "Tools/AssetCompiler/SassetWriter.h"
+#include "Tools/AssetCompiler/SourceImageTextureCompiler.h"
 #include "Tools/AssetCompiler/StaticModelCompiler.h"
 
 namespace

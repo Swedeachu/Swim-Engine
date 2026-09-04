@@ -218,7 +218,7 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	target_include_directories(SwimAssetCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
 	target_link_libraries(SwimAssetCompiler
 		PUBLIC Swim::Assets
-		PRIVATE fastgltf::fastgltf meshoptimizer
+		PRIVATE fastgltf::fastgltf meshoptimizer SwimAssetCompilerStb ${SWIM_ASSET_COMPILER_WEBP_TARGET}
 	)
 	target_compile_features(SwimAssetCompiler PUBLIC cxx_std_20)
 	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES})
@@ -332,6 +332,11 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	target_include_directories(SwimEngineConfigTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	swim_set_solution_folder(SwimEngineConfigTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+	add_executable(SwimSceneCatalogTests EXCLUDE_FROM_ALL Source/Tests/Scene/SceneCatalogTests.cpp)
+	target_include_directories(SwimSceneCatalogTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_features(SwimSceneCatalogTests PRIVATE cxx_std_20)
+	swim_set_solution_folder(SwimSceneCatalogTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
 	add_executable(SwimMemoryTests EXCLUDE_FROM_ALL Source/Tests/Memory/MemoryArenaTests.cpp)
 	target_link_libraries(SwimMemoryTests PRIVATE Swim::Memory)
 	target_include_directories(SwimMemoryTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
@@ -373,6 +378,11 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 		target_include_directories(SwimKtx2TextureCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 		swim_set_solution_folder(SwimKtx2TextureCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
+		add_executable(SwimSourceImageTextureCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/SourceImageTextureCompilerTests.cpp)
+		target_link_libraries(SwimSourceImageTextureCompilerTests PRIVATE Swim::AssetCompiler)
+		target_include_directories(SwimSourceImageTextureCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+		swim_set_solution_folder(SwimSourceImageTextureCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
 		add_executable(SwimSassetFormatTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/SassetFormatTests.cpp)
 		target_link_libraries(SwimSassetFormatTests PRIVATE Swim::AssetCompiler)
 		target_include_directories(SwimSassetFormatTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
@@ -412,6 +422,24 @@ include(cmake/Dependencies.cmake)
 set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
 unset(SWIM_SAVED_CMAKE_FOLDER)
 
+# Scene/ECS tests consume legacy third-party headers (EnTT/GLM), so define
+# them only after the full runtime dependency surface is available. Keeping
+# these targets here also prevents non-legacy Linux foundation configure from
+# referencing EnTT before that dependency exists.
+if(SWIM_BUILD_FOUNDATION_TESTS)
+	add_executable(SwimTransformSystemTests EXCLUDE_FROM_ALL Source/Tests/Scene/TransformSystemTests.cpp)
+	target_link_libraries(SwimTransformSystemTests PRIVATE EnTT::EnTT)
+	target_include_directories(SwimTransformSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_features(SwimTransformSystemTests PRIVATE cxx_std_20)
+	swim_set_solution_folder(SwimTransformSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+
+	add_executable(SwimFrustumTests EXCLUDE_FROM_ALL Source/Tests/Scene/FrustumTests.cpp)
+	target_link_libraries(SwimFrustumTests PRIVATE glm::glm)
+	target_include_directories(SwimFrustumTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_features(SwimFrustumTests PRIVATE cxx_std_20)
+	swim_set_solution_folder(SwimFrustumTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+endif()
+
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(SwimVulkan INTERFACE)
 	add_library(Vulkan::Vulkan ALIAS SwimVulkan)
@@ -433,6 +461,11 @@ list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
+# TinyGltfImplementation.cpp was retired when runtime GLB importing moved behind
+# the cooked AssetSystem boundary. Keep an explicit tombstone exclusion because
+# ZIP/overlay updates cannot delete an older checkout's stale source file, and
+# the recursive glob would otherwise silently compile it again.
+list(REMOVE_ITEM SWIM_ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/Source/Engine/ThirdParty/TinyGltfImplementation.cpp")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
 
 file(GLOB_RECURSE SWIM_GAME_SOURCES
@@ -520,7 +553,7 @@ endif()
 # These implementation TUs own third-party implementation macros and must not
 # inherit PCH definitions that can instantiate the same headers prematurely.
 set_source_files_properties(
-	Source/Engine/ThirdParty/TinyGltfImplementation.cpp
+	Source/Engine/ThirdParty/StbImageImplementation.cpp
 	Source/Engine/ThirdParty/StbImageResizeImplementation.cpp
 	PROPERTIES SKIP_PRECOMPILE_HEADERS ON
 )
@@ -549,6 +582,7 @@ if(MSVC)
 	endif()
 
 	target_link_options(SwimEngine PRIVATE
+		/SUBSYSTEM:CONSOLE
 		"$<$<CONFIG:Release>:/DEBUG:FULL>"
 		"$<$<CONFIG:Release>:/OPT:REF>"
 		"$<$<CONFIG:Release>:/OPT:ICF>"
@@ -583,15 +617,13 @@ target_link_libraries(SwimEngine PRIVATE
 	Swim::IO
 	Swim::Platform
 	Swim::Input
+	spdlog::spdlog
 	Vulkan::Vulkan
 	OpenGL::GL
 	glm::glm
 	EnTT::EnTT
 	nlohmann_json::nlohmann_json
 	stb::stb
-	tinygltf::tinygltf
-	Swim::WebP
-	draco::draco
 	zstd::zstd
 	Swim::Basis
 	glad::glad

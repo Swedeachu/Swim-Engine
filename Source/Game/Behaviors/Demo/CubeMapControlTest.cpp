@@ -1,6 +1,5 @@
 #include "PCH.h"
 #include "CubeMapControlTest.h"
-#include "Engine/Systems/Renderer/Renderer.h"
 #include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Scene/Scene.h"
@@ -17,14 +16,12 @@ namespace Game
 
 	int CubeMapControlTest::Init()
 	{
-		// Turn on the sky
-		auto& cubemapController = renderer->GetCubeMapController();
+		// Turn on the sky when this scene has presentation services.
+		Engine::CubeMapController* cubemapController = scene->GetCubeMapController();
 		if (!cubemapController)
 		{
 			return 0;
 		}
-
-		cubemapController->SetEnabled(true);
 
 		Engine::TexturePool& texturePool = scene->GetTexturePool();
 
@@ -36,10 +33,24 @@ namespace Game
 		}
 		else
 		{
-			// Get 6 seperate cubemap texture faces to supply
+			// Clean is the default six-face cubemap preset. Keep the CPU pixels until
+			// SetFaces() has built the backend cubemap image.
 			std::array<std::shared_ptr<Engine::Texture2D>, 6> faces = texturePool.GetTexturesContainingString<6>(facesPath);
+			for (std::size_t index = 0; index < faces.size(); ++index)
+			{
+				if (!faces[index] || !faces[index]->GetData())
+				{
+					std::cerr << "[CubeMap] Clean preset is missing CPU face " << index
+						<< " for lookup '" << facesPath << "'.\n";
+					cubemapController->SetEnabled(false);
+					return -1;
+				}
+			}
 			cubemapController->SetFaces(faces);
+			std::cout << "[CubeMap] Default preset: Clean (6 faces).\n";
 		}
+
+		cubemapController->SetEnabled(true);
 
 		// cubemapController->SetOrdering({ 3, 1, 4, 5, 2, 0 }); // internally this is the default face ordering already
 
@@ -50,14 +61,14 @@ namespace Game
 	{
 		// TODO: ability to mess with horizon level
 
-		auto& cubemapController = renderer->GetCubeMapController();
+		Engine::CubeMapController* cubemapController = scene->GetCubeMapController();
 
 		if (!cubemapController)
 		{
 			return;
 		}
 
-		UpdateRotation(dt, cubemapController.get());
+		UpdateRotation(dt, cubemapController);
 
 		// Toggle on the sky with C key
 		if (input->IsKeyTriggered(Swim::Platform::KeyCode::C))

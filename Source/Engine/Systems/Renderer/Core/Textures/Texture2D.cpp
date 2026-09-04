@@ -45,17 +45,21 @@ namespace Engine
 		return std::memcmp(dataA, dataB, size) == 0;
 	}
 
-	Texture2D::Texture2D(TextureRuntimeContext context, const std::string& filePath, bool generateMips)
-		: context(std::move(context)), filePath(filePath), generateMips(generateMips)
+	Texture2D::Texture2D(const std::string& filePath, bool generateMips)
+		: generateMips(generateMips), filePath(filePath)
 	{
 		LoadFromSTB();
-		Generate();
 	}
 
 	// Last param name is optional
-	Texture2D::Texture2D(TextureRuntimeContext context, uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
-		: context(std::move(context)), width(width), height(height), filePath(name), isPixelDataSTB(false), generateMips(generateMips)
+	Texture2D::Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
+		: isPixelDataSTB(false), generateMips(generateMips), width(width), height(height), filePath(name)
 	{
+		if (!rgbaData)
+		{
+			throw std::runtime_error("Texture2D(memory): rgba data is null!");
+		}
+
 		size_t dataSize = GetDataSize();
 
 		if (dataSize == 0)
@@ -71,38 +75,55 @@ namespace Engine
 		}
 
 		memcpy(pixelData, rgbaData, dataSize);
-
-		Generate();
 	}
 
-	void Texture2D::Generate()
+	void Texture2D::MakeResident(TextureRuntimeContext residencyContext)
 	{
-		if (context.Backend == GraphicsBackend::Vulkan)
+		if (resident)
 		{
+			return;
+		}
+
+		if (freed || !pixelData)
+		{
+			throw std::runtime_error("Texture2D::MakeResident requires live CPU texture data.");
+		}
+
+		context = std::move(residencyContext);
+
+		switch (context.Backend)
+		{
+		case GraphicsBackend::Vulkan:
 			if (!context.Vulkan)
 			{
-				throw std::runtime_error("Texture2D::Generate requires an injected VulkanRenderer.");
+				throw std::runtime_error("Texture2D::MakeResident requires an injected VulkanRenderer.");
 			}
 			UploadToVulkan();
 			GoBindless();
-		}
-		else if (context.Backend == GraphicsBackend::OpenGLLegacy)
-		{
+			break;
+		case GraphicsBackend::OpenGLLegacy:
 			UploadToOpenGL();
+			break;
+		default:
+			throw std::runtime_error("Texture2D::MakeResident received an unsupported graphics backend.");
 		}
+
+		resident = true;
 
 		if (context.Lifetime)
 		{
 			context.Lifetime->LiveCount.fetch_add(1, std::memory_order_relaxed);
+			lifetimeCounted = true;
 		}
 	}
 
 	Texture2D::~Texture2D()
 	{
 		Free();
-		if (context.Lifetime)
+		if (lifetimeCounted && context.Lifetime)
 		{
 			context.Lifetime->LiveCount.fetch_sub(1, std::memory_order_relaxed);
+			lifetimeCounted = false;
 		}
 	}
 
@@ -137,6 +158,7 @@ namespace Engine
 			}
 		}
 
+		resident = false;
 		FreeCPU();
 	}
 

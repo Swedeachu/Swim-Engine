@@ -87,6 +87,17 @@ int main()
 	Require(assets.FindByContentHash(meshHash) == mesh.GetId(), "content hash index");
 	Require(assets.GetDependents(texture.GetId()).size() == 1, "reverse dependency graph");
 
+	const ContentHash textureHashA = ComputeContentHash("texture-a");
+	const ContentHash textureHashB = ComputeContentHash("texture-b");
+	Require(assets.Publish(texture, TestTextureAsset{ 64 }, textureHashA), "publish dependency content");
+	const ContentHash dependencyRevisionA = assets.ComputeDependencyRevisionHash(mesh.GetId());
+	const std::uint32_t textureGeneration = texture.GetGeneration();
+	Require(assets.Publish(texture, TestTextureAsset{ 128 }, textureHashB), "replace dependency content under stable identity");
+	const ContentHash dependencyRevisionB = assets.ComputeDependencyRevisionHash(mesh.GetId());
+	Require(texture.GetGeneration() == textureGeneration, "content replacement preserves stable handle generation");
+	Require(dependencyRevisionA != dependencyRevisionB, "dependency revision tracks stable-handle content replacement");
+	Require(!dependencyRevisionA.IsZero() && !dependencyRevisionB.IsZero(), "declared dependency graph has a revision hash");
+
 	auto sameMesh = assets.Declare<TestMeshAsset>("Meshes/Crate.sasset");
 	Require(sameMesh == mesh, "redeclare returns current typed generation");
 

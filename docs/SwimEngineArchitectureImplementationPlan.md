@@ -432,7 +432,7 @@ CMake is the authoritative build description and should reinforce the engine arc
 - [ ] `Swim::Rhi` does not link Vulkan; `Swim::RhiVulkan` owns Vulkan-Headers, volk, vk-bootstrap, and VMA.
 - [ ] `Swim::Physics` does not link PhysX or Jolt directly; `Swim::PhysicsPhysX` and `Swim::PhysicsJolt` own those dependencies.
 - [x] `Swim::Platform` / `Swim::Input` own SDL3 integration rather than making SDL3 an engine-wide dependency.
-- [ ] fastgltf, meshoptimizer, Draco, source-image decoders, and similar importer dependencies live in asset compiler/import targets unless runtime use is explicitly required.
+- [x] fastgltf, meshoptimizer, Draco, source-image decoders, and similar importer dependencies live in asset compiler/import targets unless runtime use is explicitly required. *(fastgltf/meshoptimizer and libwebp source-image decoding are compiler-only; the obsolete runtime tinygltf/Draco/WebP source-import chain has been removed. `stb` is compiler-only for PNG/JPEG authoring decode and remains an explicit legacy-runtime dependency only for still-loose texture/font compatibility paths.)*
 - [ ] Slang shader compilation/reflection is integrated through dedicated build/tool rules with correct source/include dependency tracking.
 - [ ] Generated shader artifacts and compiled asset outputs have deterministic build dependencies and are not maintained by ad-hoc post-build shell scripts.
 - [ ] Platform-specific source files and libraries are selected inside the appropriate implementation targets; generic code does not accumulate broad `#ifdef _WIN32` / Linux branches.
@@ -1193,20 +1193,102 @@ Critical-path item 18 is implemented around a versioned, chunked runtime contain
 
 Validation in this environment: a fresh offline CMake configure/build passes for `Swim::Core`, `Swim::Memory`, `Swim::Jobs`, `Swim::Assets`, public-header checks, `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, and `SwimHeadlessCoreAssets`; standalone `.sasset`, static-model, and KTX2 compiler tests also pass, including AddressSanitizer/UndefinedBehaviorSanitizer runs for the serialization/KTX2/static-model paths. Repository verification passes under GCC/C++20. The container cannot fetch the pinned fastgltf/meshoptimizer/simdjson source trees, so the dependency-enabled importer/bootstrap fixture and the complete legacy Windows executable remain the required MSVC validation. Because those compiler dependencies are new relative to the last Windows-validated repository snapshot, the **first Windows validation for this checkpoint must be a clean build** so the pinned sources are fetched; ordinary builds can return to the soft path after that cache exists. The uploaded repository contains no loose project `Assets` tree, so there was no real project GLTF/GLB to pre-cook during this execution.
 
-### Phase 4 commit-safe checkpoint — 2026-09-03
+### Phase 4 item-18 commit-safe checkpoint — 2026-09-03 *(historical boundary)*
 
-The repository is intentionally frozen at the item-18 boundary before the larger renderer-residency migration begins:
+At this checkpoint, the repository was intentionally frozen at the item-18 boundary before the larger renderer-residency migration began:
 
 - all first-party game/test call sites have been moved off the removed geometry-coupled `RegisterMaterialData` / `GetMaterialData` API and now use `LegacyRenderBinding`; the verifier rejects regressions to those stale calls;
-- `MaterialPool` still owns the old tinygltf source-import compatibility path. It has **not** been half-converted to `AssetSystem`; that removal belongs to item 19 and should be done as one coherent adapter/residency migration;
-- engine startup development auto-cooking loads authoritative cooked CPU assets into `AssetSystem`, while existing renderer/game consumers continue using their explicitly marked legacy bindings until item 19 connects those two sides;
+- `MaterialPool` still owned the old tinygltf source-import compatibility path. It had **not** been half-converted to `AssetSystem`; that removal was reserved for item 19 as one coherent adapter/residency migration;
+- engine startup development auto-cooking loaded authoritative cooked CPU assets into `AssetSystem`, while existing renderer/game consumers continued using their explicitly marked legacy bindings until item 19 connected those two sides;
 - no Phase 4 checkbox beyond item 18 is claimed by this compatibility cleanup.
 
-This is the intended commit boundary: source import/cooking and runtime `.sasset` loading are established, the legacy renderer still has one coherent compatibility path, and the next commit can begin item 19 without depending on partially migrated pool behavior.
+This was the intended commit boundary: source import/cooking and runtime `.sasset` loading were established while the legacy renderer still had one coherent compatibility path. The cooked-residency checkpoint below supersedes that temporary boundary.
 
-**Windows clean-build compile follow-up (2026-09-03):** the required clean MSVC run successfully fetched/configured the new mimalloc/simdjson/fastgltf/meshoptimizer dependency set, completed PhysX, and reached 705/706 build steps. The only compiler diagnostic in the full log was `Sandbox.cpp` passing a `std::shared_ptr<LegacyRenderBinding>` directly to `Scene::AddComponent<Material>` even though `Material` intentionally exposes an explicit compatibility-binding constructor. The stale call site (and its adjacent commented examples) now wraps the binding as `Engine::Material(binding)`, matching every other migrated scene/test call site. No dependency declaration changed in this fix, so the next Windows validation should be the normal soft build; item 19 remains unopened until that compile/link pass is confirmed.
+**Windows clean-build compile follow-up (2026-09-03):** the required clean MSVC run successfully fetched/configured the new mimalloc/simdjson/fastgltf/meshoptimizer dependency set, completed PhysX, and reached 705/706 build steps. The only compiler diagnostic in the full log was `Sandbox.cpp` passing a `std::shared_ptr<LegacyRenderBinding>` directly to `Scene::AddComponent<Material>` even though `Material` intentionally exposes an explicit compatibility-binding constructor. The stale call site (and its adjacent commented examples) now wraps the binding as `Engine::Material(binding)`, matching every other migrated scene/test call site. No dependency declaration changed in that fix, so the next Windows validation remained the normal soft build. The item-19 residency work below is the subsequent implementation step; it still requires that normal Windows soft-build validation for the Windows-only legacy renderer.
 
-**Next Phase 4 work:** critical-path item 19 — replace the transitional renderer pools/import path with adapters/residency owned from the authoritative `AssetSystem`, beginning with cooked `ModelAsset` -> legacy render residency so existing scenes stop re-importing GLB through tinygltf. Source PNG/JPEG/WebP -> KTX2 encoding remains an explicit compiler subtask and should be completed before claiming general textured glTF source parity.
+### Phase 4 cooked model -> legacy renderer residency checkpoint — 2026-09-03
+
+The first critical-path item 19 residency cut is now implemented without reintroducing a second asset registry:
+
+- `MaterialPool` is still a temporary renderer compatibility surface, but it now receives the engine-owned `AssetSystem` explicitly and resolves the authoritative cooked `ModelAsset`, `MeshAsset`, `MaterialInstanceAsset`, and `TextureAsset` handles instead of parsing source GLB data itself;
+- source model paths used by existing scene code are reduced to authoring lookup keys (`Assets/Models/Foo.glb` -> logical `Models/Foo.model`). No tinygltf object graph, source buffer/image view, or Draco decoder survives in `MaterialPool`;
+- model node hierarchy transforms are reconstructed from the cooked `ModelAsset`, then baked into the temporary legacy vertex payload so existing scene/entity transform behavior stays compatible while the renderer still uses `LegacyRenderBinding`;
+- mesh primitives are rebuilt from the cooked interleaved vertex/index payload and handed to the existing content-hashed `MeshPool` residency seam. Material slots resolve independently through the model's material handles rather than restoring mesh/material ownership coupling;
+- `TexturePool::GetOrCreateTextureFromAsset()` adds a temporary cooked-texture residency adapter keyed by typed asset identity, generation, and current asset content hash, with decoded-content dedup underneath it. It accepts raw RGBA8, Zstandard RGBA8, and KTX2/BasisU payloads and converts only the base level into the current `Texture2D` compatibility object;
+- the runtime target no longer contains or links `TinyGltfImplementation.cpp`, `tinygltf`, Draco, or libwebp. Those packages were removed from the legacy dependency graph rather than left configured but unused; BasisU transcoding and zstd remain because the temporary renderer residency adapter explicitly consumes those cooked runtime payloads;
+- the active Sponza compatibility sample now points at the non-Draco KTX2 source. Draco source decompression is not yet part of the fastgltf compiler path and must not be silently restored to runtime merely to support that authoring variant;
+- `AssetSystem::ComputeDependencyRevisionHash()` fingerprints a model plus its declared dependency graph using stable ids, generations, load state, content hashes, and dependency edges. `MaterialPool` validates its compatibility cache against that revision, so a dev recook published under the same stable handle generation cannot return stale mesh/material/texture residency;
+- `scripts/verify-build-layout.py` now rejects reintroducing the old `LoadAndRegisterCompositeMaterialFromGLB` API, runtime tinygltf/Draco/WebP links/packages, the tinygltf implementation TU, or source-import symbols inside `MaterialPool`, while requiring the cooked model/texture residency seam.
+
+Validation for this cut:
+
+- repository build-layout verification passes;
+- a fresh offline CMake configure succeeds with the Windows-only legacy engine disabled;
+- `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, `SwimAssetPublicHeaders`, and `SwimAssetCompilerPublicHeaders` build successfully, and the two runnable asset tests pass; the asset-system test also verifies that republishing a dependency changes the graph revision without changing its stable handle generation;
+- the legacy renderer itself remains Windows-only, so the next Windows validation is the normal **soft build** against the existing dependency cache. A clean dependency rebuild is no longer required by this change because no new third-party revision was introduced; in fact three obsolete runtime source-import dependencies were removed.
+
+This does **not** close the broader Phase 4 renderer-residency migration. `MeshPool`, `TexturePool`, `MaterialPool`, `LegacyRenderBinding`, and `Texture2D` still exist as compatibility surfaces, and `Texture2D` still performs renderer upload work during construction, so the corresponding exit criterion remains open.
+
+### Phase 4 ordinary source-image compiler checkpoint — 2026-09-03
+
+The ordinary glTF source-image path now crosses the same compiler/runtime boundary as KTX2 instead of depending on renderer-side source decoders:
+
+- `SourceImageTextureCompiler` owns PNG/JPEG/WebP authoring decode. PNG/JPEG use a compiler-private stb implementation and WebP uses pinned libwebp; neither decoder type leaks through a first-party compiler API;
+- `StaticModelCompiler` detects source image MIME from declared metadata or file magic. KTX2 continues through `Ktx2TextureCompiler`, while PNG/JPEG/WebP are decoded into a backend-neutral cooked `TextureAsset`; unsupported DDS/unknown formats fail as unsupported source data instead of silently reaching runtime;
+- ordinary source images currently emit one base-level `NativeMipData` RGBA8 payload, preserving requested texture semantic and sRGB/linear color-space metadata. This closes source-image runtime parity without pretending final compression/mip policy is complete;
+- libwebp is now owned by `AssetCompilerDependencies.cmake` only. The runtime target does not link it. The shared pinned stb source is used privately by the compiler for PNG/JPEG and separately by the legacy runtime only for still-loose compatibility textures/fonts;
+- the compiler-side stb implementation has TU-local linkage because the development compiler may be linked into the legacy executable. The runtime stb implementation is explicit in `StbImageImplementation.cpp`; it no longer arrives accidentally as a side effect of the removed tinygltf implementation TU;
+- both runtime stb implementation TUs are explicitly excluded from the legacy PCH, preventing implementation macros from being instantiated through precompiled-header inclusion order;
+- the static-model compiler profile hash is bumped to `texture=ktx2-or-rgba8-source-v2`, so previously cooked roots cannot be mistaken for outputs from this source-image policy;
+- `SwimSourceImageTextureCompilerTests` covers PNG/WebP decode, JPEG/MIME recognition, cooked dimensions/format/color-space, and unsupported DDS behavior. The repository verifier requires the compiler-only WebP boundary and rejects libwebp use outside the source-image compiler implementation.
+
+Validation for this cut:
+
+- fresh offline CMake configure plus `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, `SwimAssetPublicHeaders`, and `SwimAssetCompilerPublicHeaders` remain green;
+- `SourceImageTextureCompiler.cpp` passes a standalone C++20 syntax compile against the platform libwebp headers;
+- the real pinned dependency-enabled `SwimSourceImageTextureCompilerTests` target and the Windows-only legacy executable still require the next Windows soft build against the existing dependency cache. No dependency revision changed: stb and libwebp use the same pinned revisions already present in the repository's prior runtime dependency graph.
+
+This checkpoint deliberately leaves **`convert textures to KTX2/native compressed formats` unchecked**. PNG/JPEG/WebP now become cooked assets before runtime, but they are currently uncompressed RGBA8 base-level payloads; mip generation plus final KTX2/native compressed distribution policy is still future Phase 4 work. It also does not close **`no asset constructor uploads to renderer`** because the compatibility `Texture2D` path still uploads during construction.
+
+**Next Phase 4 work:** move the temporary legacy mesh/texture compatibility uploads behind explicit renderer residency requests so CPU asset construction has no renderer side effects. After that, finish production texture payload policy (mip generation, KTX2/native compression/transcoding selection) without reopening source decoding in runtime.
+
+### Phase 4 explicit compatibility residency checkpoint — 2026-09-03
+
+The remaining constructor/registration upload side effects are now separated from CPU object creation:
+
+- `Texture2D` constructors no longer receive `TextureRuntimeContext` and do not call Vulkan/OpenGL upload code. File-backed construction performs only the still-legacy loose-source stb decode, while memory-backed construction only owns a CPU RGBA copy;
+- renderer state is attached only through the private `Texture2D::MakeResident(TextureRuntimeContext)` compatibility operation. `TexturePool` is the owning residency surface and exposes `RequestTextureResidency()`; recursive loading, lazy/source loading, cooked `TextureAsset` adaptation, transient cubemap textures, and manual storage all request residency explicitly after CPU construction and before CPU pixels may be released;
+- `MeshPool::RegisterMesh()` and `GetOrCreateAndRegisterMesh()` now create/deduplicate CPU `Mesh` geometry only. They no longer allocate `MeshBufferData`, assign renderer mesh IDs, or call `UploadMeshToMegaBuffer()` as a registration side effect;
+- `MeshPool::RequestMeshResidency()` is the only compatibility path in the pool that allocates `MeshBufferData`, assigns the legacy renderer mesh ID, calculates residency AABB data, and uploads into the selected renderer's mega buffer;
+- `MaterialPool::RegisterMaterialBinding()` explicitly requests mesh residency when a CPU mesh becomes part of a legacy draw binding. Vulkan's standalone glyph-quad path does the same rather than assuming registration uploaded it;
+- the architecture verifier now rejects renderer-context `Texture2D` constructors, implicit texture generation calls, mesh uploads occurring before `RequestMeshResidency()`, renderer-coupled texture construction, or compatibility draw paths that stop issuing explicit residency requests.
+
+This closes the Phase 4 exit criterion **`no asset constructor uploads to a renderer`**. It does **not** claim that `Texture2D`, `MeshPool`, `TexturePool`, `MaterialPool`, or `LegacyRenderBinding` are final residency architecture; they remain engine-owned compatibility surfaces until the RHI/GPU-resource system replaces them.
+
+Validation for this checkpoint:
+
+- `scripts/verify-build-layout.py` passes with the new constructor/registration residency guards;
+- a fresh dependency-free CMake tree builds `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, `SwimAssetPublicHeaders`, `SwimAssetCompilerPublicHeaders`, and `SwimHeadlessCoreAssets`, and all runnable targets pass;
+- the legacy renderer remains Windows-only, so compile/link validation for the changed `Texture2D`/`TexturePool`/`MeshPool`/`MaterialPool`/Vulkan compatibility code remains the next normal Windows **soft build**. No dependency pin changed in this checkpoint.
+
+### Phase 4 ordinary source-image mip checkpoint — 2026-09-03
+
+Compiler-side PNG/JPEG/WebP cooking now produces runtime-ready mip metadata instead of one base level:
+
+- `SourceImageTextureCompiler` emits a complete `NativeMipData` chain from the decoded base image down to 1x1, with each level represented by an explicit `TextureMipDesc` and packed into one deterministic payload;
+- sRGB color textures are converted to linear RGB before filtering and converted back to sRGB after filtering, avoiding the dark/incorrect mip averages produced by averaging encoded sRGB bytes directly. Alpha remains linearly averaged;
+- normal-map mips average decoded `[-1, +1]` vectors and renormalize RGB before re-encoding, while data/linear textures use ordinary linear channel filtering;
+- the source-image compiler test now checks full-chain dimensions/storage, the known red+green sRGB linear-space average, alpha averaging, normal-vector renormalization, WebP mip generation, and the existing unsupported DDS behavior;
+- the static-model compiler profile fingerprint is bumped to `texture=ktx2-or-rgba8-mips-v3`, forcing existing base-level-only cooked source images to recook under the new policy;
+- the architecture verifier now requires the mip-chain, sRGB-filtering, normal-map-filtering, and new profile-fingerprint policy.
+
+Validation for this checkpoint:
+
+- the normal offline CMake asset/foundation validation remains green;
+- `SourceImageTextureCompiler.cpp` plus `SwimSourceImageTextureCompilerTests` compile and run under GCC/C++20 in this environment using a tiny test-only stb decode shim for the known PNG fixture and the system libwebp decoder for the real WebP fixture. This directly exercises the new mip-generation/filtering code without changing repository dependencies;
+- the pinned real stb/libwebp dependency build remains part of the next Windows soft-build validation.
+
+This still leaves **`convert textures to KTX2/native compressed formats` unchecked**. Ordinary source images now have production-shaped mip chains, but the payload is still uncompressed RGBA8. The next texture compiler step is to choose and emit actual distribution/runtime variants (for example BC5 normals plus BC7/appropriate color/data formats on desktop and/or BasisU KTX2 where cross-platform distribution wins) rather than compressing blindly.
 
 ### Replace `MeshPool`
 
@@ -1301,7 +1383,7 @@ Then run offline processing:
 - [ ] generate LODs if configured;
 - [ ] generate meshlets;
 - [ ] pack/quantize runtime vertex formats;
-- [ ] convert textures to KTX2/native compressed formats;
+- [ ] convert textures to KTX2/native compressed formats; *(PNG/JPEG/WebP now decode compiler-side into full cooked RGBA8 mip chains and KTX2 sources stay KTX2; final compressed/native payload production and platform-variant selection remain open.)*
 - [ ] decode Draco only in import/compiler path when source uses it.
 
 ### KTX2 runtime texture path
@@ -1399,8 +1481,8 @@ Compiler/tool path can produce:
 - [x] a glTF/GLB source model compiles through fastgltf into Swim runtime assets. *(The dev bootstrap performs import -> meshoptimizer -> static-model `.sasset` cook -> normal runtime load; the dependency-enabled end-to-end test is authored and awaits the next Windows/MSVC validation in this checkpoint.)*
 - [x] runtime model loading does not require tinygltf/fastgltf object graphs. *(`LoadSasset()` reconstructs Swim CPU asset types/typed handles only; importer types terminate in `SwimAssetCompiler`.)*
 - [x] mesh/material/texture are independent asset identities. *(The Phase 4 asset schemas use independent typed handles, and the legacy material/mesh seam no longer models mesh ownership as material state.)*
-- [ ] no asset constructor uploads to a renderer.
-- [x] no asset registry is a process-global singleton. *(`AssetSystem` and the remaining transitional renderer pools are engine-owned; critical item 19 still tracks replacing those transitional pool implementations with the authoritative asset/residency model.)*
+- [x] no asset constructor uploads to a renderer. *(`Texture2D` CPU construction is renderer-free and mesh registration is CPU-only; the legacy pools issue explicit renderer residency requests only when a compatibility draw/resource actually needs GPU residency.)*
+- [x] no asset registry is a process-global singleton. *(`AssetSystem` is engine-owned and authoritative; the remaining renderer pools are engine-owned compatibility residency surfaces that now consume it rather than importing/registering a second source asset graph.)*
 - [x] content hashing replaces O(N) raw-byte pool scans for deduplication. *(AssetSystem uses `ContentHash`; transitional mesh and embedded-texture dedup paths now use SHA-256 indices instead of pool-wide byte comparisons.)*
 
 ---
@@ -1417,12 +1499,117 @@ The work is around ownership and component boundaries.
 
 ### Scene ownership
 
-- [ ] `SceneManager` owns scenes explicitly.
-- [ ] scenes are not globally preregistered through a static factory.
-- [ ] an active scene is an application concept, not a dependency used by low-level components.
-- [ ] scene identity is explicit.
-- [ ] multiple loaded scenes are supported.
-- [ ] headless scenes work.
+- [x] `SceneManager` owns scenes explicitly. *(The engine-owned `SceneSystem` is the current scene-manager implementation: it owns the catalog, loaded scene instances, runtime `SceneId`s, startup selection, and scene lifecycle.)*
+- [x] scenes are not globally preregistered through a static factory. *(The first-party game registers `SandBox` explicitly on the engine-owned `SceneSystem` before startup; static `DEFINE_SCENE`/registrar metadata is removed.)*
+- [x] an active scene is an application concept, not a dependency used by low-level components. *(`SwimEngine` selects the active scene during frame orchestration and passes an explicit `Scene*` into Physics and renderer traversal; Physics/OpenGL/Vulkan/VulkanIndexDraw no longer own `SceneSystem*` or call `GetActiveScene()`.)*
+- [x] scene identity is explicit. *(Each loaded scene instance receives a monotonic runtime `SceneId`; the application-designated active scene carries both its pointer and ID.)*
+- [x] multiple loaded scenes are supported. *(The instance-owned catalog can construct multiple named scene instances in one `SceneSystem`; only the application-designated startup/active scene receives the active update/init path.)*
+- [x] headless scenes work. *(`SceneCoreServices` is independently valid without input/camera/render pools/tools; presentation/editor facilities initialize only when the optional presentation profile is present.)*
+
+### Phase 5 explicit scene catalog/identity checkpoint — 2026-09-03
+
+The first scene-ownership cut removes static construction and makes application intent explicit without pretending the renderer-facing boundary is finished:
+
+- Added `SceneCatalog`, an instance-owned descriptor catalog with deterministic insertion order and structured rejection of empty, missing-factory, and duplicate scene registrations. It contains construction metadata only; no live scene is created by static initialization.
+- Removed `SceneSystem::Preregister`, the mutable static scene descriptor vector, `SceneRegistrar`, `REGISTER_SCENE`, and `DEFINE_SCENE`. `SandBox` is now an ordinary scene type.
+- `main` explicitly registers the game scene type and designates the startup scene before `SwimEngine::Start()`. `SandBox::Awake()` no longer reaches back into `SceneSystem` to make itself active.
+- Startup lifetime is explicit: `SwimEngine::Create()` constructs the engine-owned `SceneSystem` before application configuration runs, while `SwimEngine::Init()` only injects runtime services and never recreates it. This preserves all pre-`Start()` `SceneCatalog` registrations and makes the documented startup sequence valid.
+- Added `SceneId` as an explicit runtime identity for loaded scene instances. `SceneSystem` assigns a monotonic ID as each live scene is inserted and exposes active/name-to-ID lookup while existing compatibility consumers still use the scene pointer.
+- `SceneSystem` can own multiple catalog-created/live scenes concurrently. Startup/active selection is separate from registration/ownership.
+- Added `SwimSceneCatalogTests` and Phase 5 verifier guards so static scene registration macros/vectors, scene self-selection, or loss of the explicit application startup registration are caught.
+
+Validation for this checkpoint:
+
+- `SwimSceneCatalogTests` compiles and runs directly under GCC/C++20;
+- `scripts/verify-build-layout.py` passes with the new Phase 5 invariants.
+
+That first checkpoint deliberately stopped before the renderer-independent context cut. The immediately following checkpoint completes that ownership seam while keeping the compatibility `SceneSystem` type name until a later naming/API cleanup.
+
+### Phase 5 renderer-independent/headless scene context checkpoint — 2026-09-03
+
+Implemented in the next scene-ownership cut:
+
+- Split `SceneSystemServices` into `SceneCoreServices`, `ScenePresentationServices`, and `SceneToolServices`. Core validity now requires only filesystem, jobs, async IO, assets, frame memory, and engine state; input/camera/cubemap/legacy renderer pools plus command/editor/FPS tooling are optional profiles.
+- Made the base Scene lifecycle presentation-optional. CPU scene ownership, entity/behavior lifecycle, transform hooks, BVH state, jobs, assets, and physics can initialize without renderer/input/font/material services; debug draw, gizmos, editor camera, UI handling, and serializer presentation hooks are gated behind available presentation/tool services.
+- Removed Vulkan/OpenGL/generic renderer pointers from `Scene` and removed the cached renderer from `Behavior`. The one cubemap demo dependency now receives the backend-neutral optional `CubeMapController` presentation service.
+- Removed `SceneSystem*` from Physics. `SwimEngine` chooses the active application scene and passes it directly to `PhysicsSystem::UpdateScene()` / `FixedUpdateScene()`.
+- Removed `SceneSystem*` and `GetActiveScene()` discovery from both legacy renderers and `VulkanIndexDraw`. `Renderer::SetRenderScene(Scene*)` is the transitional explicit presentation input until Phase 7 render extraction replaces direct ECS traversal entirely.
+- Removed `SceneSystem*` from `Scene` and `Behavior`. Scene hotkeys/editor sync use optional command/message callbacks supplied by the tool profile instead of reaching back into the scene manager.
+- Extended `scripts/verify-build-layout.py` so a renderer/Physics `SceneSystem*`, renderer/Physics `GetActiveScene()`, flat mandatory scene-presentation services, or renderer pointers in Scene/Behavior are architecture failures.
+
+Validation for this checkpoint:
+
+- `scripts/verify-build-layout.py` passes with the explicit scene-input and headless-context invariants;
+- the fresh offline CMake regression continues to pass `SwimSceneCatalogTests`, `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, public asset/compiler header targets, and `SwimHeadlessCoreAssets`.
+
+The remaining Phase 5 scene work is no longer about who owns/selects a scene. It is now the deeper ECS/render-data cleanup: per-scene Transform dirty state, per-view Frustum state, stable persistence IDs, asset-handle-only renderable components, and eventually replacing direct renderer ECS traversal with render extraction.
+
+**Next Phase 5 work:** move Transform dirty queues/versioning out of static component state into a scene-owned Transform system, then replace the static Frustum cache with explicit per-view data.
+
+### Phase 5 scene-owned Transform tracking checkpoint — 2026-09-03
+
+Completed immediately after the scene-context cut:
+
+- Added scene-owned `TransformSystem` mutation tracking with a per-scene dirty queue, frame epoch, dirty flag, and monotonic mutation version.
+- Removed the process-global `Transform::DirtyEntities`, `DirtyEpoch`, `TransformsDirty`, and `GlobalMutationVersion` state and the static BeginFrame/query APIs built around them.
+- Scene Transform construction/binding now wires both the owning registry and owning `TransformSystem`; hierarchy invalidation continues through that explicit scene-local context.
+- `SceneBVH` receives the owning `TransformSystem` directly, so one scene's Transform mutations cannot force/refit another scene's BVH.
+- Vulkan scene packet/BVH/transform upload caching now reads the explicit render Scene's transform mutation version and dirty entities instead of one process-global serial/vector.
+- `SceneSystem::BeginFrame()` advances every loaded scene's tracker; the engine frame loop no longer clears a process-global Transform dirty list.
+- Added `SwimTransformSystemTests` covering per-frame deduplication, independent entity queueing, mutation-version advancement, null rejection, and frame reset behavior. The architecture verifier now rejects any return of the old static Transform dirty state.
+
+This closes the **per-scene Transform dirty state** requirement, but does not yet claim that Transform is a pure local-data component: it still owns world-matrix caches/hierarchy links and the current generic physics interpolation fields, and hierarchy propagation is still recursive rather than a dedicated batch system.
+
+**Next Phase 5 work:** replace the static/global `Frustum` cache with explicit per-view frustum data and pass that view state into renderer/BVH traversal.
+
+### Phase 5 per-view Frustum checkpoint — 2026-09-03
+
+Completed as the next bounded scene/render-data cleanup:
+
+- Removed `Frustum::Get()`, `Frustum::SetCameraMatrices()`, and all process-global cached camera/frustum matrices, revision counters, and movement flags. `Frustum` is now an ordinary independently instantiated view-state object.
+- Each Frustum instance owns its previous view-projection matrix, content-derived revision, movement flag, and six normalized planes. The content-derived revision is intentional: shared entity/BVH visibility caches can distinguish two different views even if both view objects have advanced the same number of times.
+- OpenGL owns and updates its presentation `viewFrustum`; Vulkan indexed traversal owns and updates its own `viewFrustum`. Neither renderer asks a global Frustum singleton for state.
+- `SceneBVH` classification/cache reuse consumes the explicitly supplied `Frustum` and that instance's revision. This keeps BVH state compatible with multiple independent views rather than one process-wide camera.
+- Added `SwimFrustumTests` covering independent view revisions/history, unchanged-view reuse, and mutation of one view without altering the other. The test target is defined after legacy EnTT/GLM dependencies are available, alongside `SwimTransformSystemTests`, so non-legacy Linux foundation configure does not reference undeclared legacy dependency targets.
+- Extended `scripts/verify-build-layout.py` to reject static/global Frustum APIs/state and require explicit OpenGL/Vulkan Frustum ownership/update plus supplied-Frustum BVH revision consumption.
+- During compile-oriented review of the Vulkan conversion, fixed a real use-before-declaration in the GPU-cull reuse stamp path and made the no-render-scene path invalidate reuse safely before returning. The final header-hygiene sweep also made OpenGL's concrete Frustum dependency explicit in `OpenGLRenderer.h`, so PCH/transitive include order cannot hide that contract.
+
+Validation for this checkpoint:
+
+- `scripts/verify-build-layout.py` passes with the per-view Frustum invariants;
+- `SwimFrustumTests` compiles and runs under GCC/C++20 against a local GLM API-contract stub in this validation environment;
+- a fresh offline CMake tree compiles and runs `SwimAssetSystemTests`, `SwimKtx2ContainerTests`, `SwimSceneCatalogTests`, `SwimMemoryTests`, `SwimJobSystemTests`, `SwimEngineConfigTests`, and `SwimHeadlessCoreAssets`, and compiles the asset/compiler public-header targets;
+- the broader offline Platform/IO target is intentionally not used as a compile signal here because `SWIM_OFFLINE_DEPENDENCY_STUBS` does not provide SDL3 headers, so that target stops at `SDL3/SDL_loadso.h` in the unchanged platform implementation. The full legacy renderer remains a Windows/dependency-enabled build target and should receive the normal Windows soft-build validation on a dependency-populated checkout.
+
+### Phase 5 runtime regression hardening checkpoint — 2026-09-03
+
+Windows runtime validation after the scene-service and asset-cooker cuts exposed two integration regressions and one logging-quality issue; all are fixed without starting the next SceneCommandBuffer task:
+
+- Renderer-owned cubemap presentation state is now late-bound **after `Renderer::Awake()` and before `SceneSystem::Awake()`**. The previous service snapshot happened before Vulkan/OpenGL created their `CubeMapController`, permanently injecting `nullptr` into scenes and silently preventing the default sky from initializing. `CubeMapControlTest` now validates all six CPU faces, explicitly loads `Cubemaps/Clean/cubemap_*` as the default preset, enables rendering only after `SetFaces()` succeeds, and logs the selected preset.
+- Development asset bootstrap now distinguishes deliberately unsupported source features from actual import failures. fastgltf is allowed to parse `KHR_draco_mesh_compression` metadata, the Swim importer classifies Draco primitives as `UnsupportedFeature` until compiler-side decompression exists, and bootstrap counts them as `SourcesSkippedUnsupported` rather than emitting a startup error. This keeps the checked-in `sponza-ktx-draco.glb` authoring variant available without treating it as a broken runtime asset; the active Sponza path remains the non-Draco `sponza-ktx.glb`.
+- The spdlog bridge disables `std::cerr`'s standard `unitbuf` behavior while redirected. Without this, every chained `operator<<` insertion flushed the custom stream buffer and produced fragmented one-token error records. The original unit-buffering state is restored during logging shutdown/failure recovery.
+- Vulkan frame-in-flight indexing now uses `uint32_t` end-to-end at the renderer boundary, matching descriptor/index-draw APIs and removing the repeated MSVC `C4267` `size_t` → `uint32_t` narrowing warnings from the draw path.
+- Verifier coverage now enforces cubemap late-binding order, rejects pre-Awake controller snapshots, requires the unsupported-Draco skip contract/tests, and preserves line-oriented stderr logging.
+
+This closes the current Transform/Frustum state-isolation task at a clean boundary. The next critical-path scene item is **22: replace the remaining scene-owned `EntityFactory` mutation queue with an explicit `SceneCommandBuffer`**, rather than extending this commit into persistence or render extraction.
+
+### Windows runtime-validation hardening checkpoint — 2026-09-03
+
+The first dependency-enabled Windows runs after the Phase 4/5 boundary work exposed startup-path assumptions that Linux foundation tests could not exercise. These are treated as validation fixes, not a new architecture phase:
+
+- The process now initializes `spdlog` before engine startup with both a colored console sink and a timestamped basic file sink under `Logs/` beside the executable. Existing `std::cout`/`std::cerr` diagnostics are bridged into the logger so legacy diagnostics are captured without a disruptive all-at-once logging rewrite. File-sink failure degrades to console-only logging.
+- The Windows legacy executable explicitly links as `/SUBSYSTEM:CONSOLE` in every configuration; Release no longer uses a linker pragma that suppresses the console. Top-level startup/runtime exceptions are logged before returning an error code.
+- Development asset bootstrap diagnostics now include the resolved asset root, root-model load count, error stage, source path, and message. This makes import/cook/load failures visible in Release and in persistent logs.
+- `MaterialPool` compatibility residency no longer throws a failed authoring-asset cook through scene initialization. A failed recook keeps an already resident binding when available; an initial failure returns an empty binding and the demo scene skips that render component. This is deliberately a compatibility-layer policy: the compiler error remains loud in diagnostics instead of being hidden.
+- The `webp_sofa.glb` startup failure was traced to the Khronos Sheen Wood Leather Sofa sample requiring `KHR_texture_transform` in addition to `EXT_texture_webp`. The fastgltf supported-extension mask now accepts `KHR_texture_transform`, and the importer regression fixture declares that extension as required so this exact cook rejection cannot return. The current legacy material bridge still does not claim full shader-semantic coverage for sheen/specular or every texture-transform use; those remain renderer/material-system work rather than source-import blockers.
+- Build-layout verification now guards the logging dependency/sinks, Release console subsystem, process logging lifetime, non-fatal cooked-model compatibility fallback, and required `KHR_texture_transform` importer capability.
+
+Validation for this follow-up:
+
+- `scripts/verify-build-layout.py` passes with the new startup/logging/importer invariants;
+- the dependency-free Phase 4/5 CMake test matrix remains the local validation baseline;
+- fastgltf v0.9.0 exposes `Extensions::KHR_texture_transform`, matching the pinned importer API used here;
+- the next normal Windows clean/soft build is the authoritative compile/link/runtime validation for the newly added `spdlog` dependency and the real asset set copied beside the executable.
 
 ### Scene context
 
@@ -1453,11 +1640,11 @@ Move scene-global responsibilities out of each `Transform` instance's static sta
 Target:
 
 - [ ] Transform component stores local transform/hierarchy data only.
-- [ ] `TransformSystem` is scene-owned.
-- [ ] dirty queue/versioning is scene-owned.
+- [x] `TransformSystem` is scene-owned. *(Each `Scene` owns its own mutation tracker and wires each Transform to that tracker when the component is attached.)*
+- [x] dirty queue/versioning is scene-owned. *(Dirty entity queues, frame epochs, and mutation versions live in `TransformSystem`; CPU BVH and Vulkan incremental uploads consume the owning Scene tracker.)*
 - [ ] hierarchy propagation is explicit and batchable.
-- [ ] no transform method discovers the active scene globally.
-- [ ] no graphics API branch exists in Transform.
+- [x] no transform method discovers the active scene globally. *(Transform hierarchy invalidation is wired to its owning registry by Scene; no Transform code resolves an engine or active scene.)*
+- [x] no graphics API branch exists in Transform. *(Clip-depth convention is passed as generic `ClipSpaceDepthRange`; Transform has no Vulkan/OpenGL backend lookup.)*
 - [ ] physics interpolation state is either a separate component/system or a clearly generic transform interpolation facility.
 
 ### Canonical coordinate and clip-space convention
@@ -1482,7 +1669,7 @@ Create:
 
 - [ ] `CameraComponent` or reusable Camera data;
 - [ ] `RenderView`/`ViewDesc`;
-- [ ] per-view frustum;
+- [x] per-view frustum; *(OpenGL and Vulkan traversal own independent Frustum instances; BVH queries consume the supplied instance/revision.)*
 - [ ] current/previous view-projection;
 - [ ] viewport/scissor;
 - [ ] jitter;
@@ -1514,9 +1701,9 @@ Change:
 
 - [ ] `BehaviorRegistry` is owned by runtime/tool context rather than a mutable process-global singleton.
 - [ ] behavior factory registration remains data-driven.
-- [ ] behaviors receive explicit scene/service context.
-- [ ] behaviors do not cache shared ownership of core services by default.
-- [ ] behavior execution is a gameplay/scene phase, never renderer traversal.
+- [x] behaviors receive explicit scene/service context. *(Behavior construction receives its owning `Scene*`; commonly used optional input/camera services are refreshed from that scene and no SceneSystem/renderer locator is cached.)*
+- [x] behaviors do not cache shared ownership of core services by default. *(Behavior caches are non-owning raw pointers to the owning scene/components/optional presentation services.)*
+- [x] behavior execution is a gameplay/scene phase, never renderer traversal. *(Scene lifecycle owns behavior Awake/Init/Update/FixedUpdate/Exit; renderer traversal only observes renderable data.)*
 
 ### Scene catalog and construction
 
@@ -1534,11 +1721,11 @@ Catalog.Register("Sandbox", [] (SceneCreateContext& Context)
 
 Requirements:
 
-- [ ] no mutable static vector of live scenes;
-- [ ] no scene constructor depends on a global Engine;
-- [ ] scene type registration is deterministic and testable;
-- [ ] a `SceneId`/`SceneHandle` identifies loaded scene instances;
-- [ ] multiple loaded scenes are legal even if an application designates one as the primary gameplay scene;
+- [x] no mutable static vector of live scenes; *(scene descriptors now live in an instance-owned `SceneCatalog`; the old static preregistration vector/macros are gone.)*
+- [x] no scene constructor depends on a global Engine; *(preserved from the Phase 2 service-injection migration; scene construction receives no global engine locator.)*
+- [x] scene type registration is deterministic and testable; *(`SceneCatalog` preserves explicit registration order and rejects empty/duplicate descriptors; `SwimSceneCatalogTests` covers the contract.)*
+- [x] a `SceneId`/`SceneHandle` identifies loaded scene instances; *(`SceneId` is assigned when a live scene is inserted and is exposed for active/name lookup.)*
+- [x] multiple loaded scenes are legal even if an application designates one as the primary gameplay scene; *(`main` explicitly selects `SandBox` as startup while `SceneSystem` ownership is not restricted to one loaded instance.)*
 - [ ] tools may create isolated scene instances with their own service/context scope.
 
 ### Scene persistence and tooling separation
@@ -1594,13 +1781,13 @@ It is **not** the required source of the final GPU visible list.
 
 ### Phase 5 exit criteria
 
-- [ ] Transform dirty state is per scene.
-- [ ] Frustum/view state is per view.
-- [ ] Scene has no Vulkan/OpenGL renderer pointer.
-- [ ] components do not discover the active scene through a global engine.
+- [x] Transform dirty state is per scene. *(`Transform` no longer contains static dirty queue/epoch/mutation state; `Scene::TransformSystem` owns and resets it per loaded scene.)*
+- [x] Frustum/view state is per view. *(The static Frustum cache/API is removed; renderer traversal owns explicit Frustum instances with independent view history/revisions.)*
+- [x] Scene has no Vulkan/OpenGL renderer pointer. *(Scene stores no renderer/backend pointer; optional presentation needs are backend-neutral services such as `CubeMapController`.)*
+- [x] components do not discover the active scene through a global engine. *(First-party component/behavior code contains no active-scene/global-engine discovery; application scene selection is centralized in `SwimEngine`/`SceneSystem`.)*
 - [ ] renderable components contain asset/render handles, not GPU objects.
-- [ ] multiple scenes can exist without shared transform/frustum globals.
-- [ ] scene types register without constructing live scenes during static initialization.
+- [x] multiple scenes can exist without shared transform/frustum globals. *(Transform mutation state is owned by each Scene and Frustum state is owned by each render view/traversal.)*
+- [x] scene types register without constructing live scenes during static initialization. *(Scene types are registered explicitly into the instance-owned `SceneCatalog`; static scene registrar macros are removed.)*
 - [ ] persisted entity references use stable serialization IDs rather than raw EnTT values.
 - [ ] scene asset references use `AssetId`.
 - [ ] scene serialization, storage, and editor transport are independent modules.
@@ -3123,13 +3310,13 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 16. [x] Add meshoptimizer offline processing.
 17. [x] Add KTX2 compiler/runtime metadata path.
 18. [x] Define `.sasset` v1 and compile/load one static model.
-19. [ ] Replace global asset pools with engine-owned asset services.
-20. [ ] Replace static transform dirty state with scene-owned TransformSystem.
-21. [ ] Replace static global Frustum with per-view state.
+19. [x] Replace global asset pools with engine-owned asset services. *(The engine-owned `AssetSystem` is authoritative; legacy mesh/texture/material pools remain only as engine-owned renderer residency compatibility surfaces.)*
+20. [x] Replace static transform dirty state with scene-owned TransformSystem.
+21. [x] Replace static global Frustum with per-view state.
 22. [ ] Replace global EntityFactory queue with scene command buffer.
-23. [ ] Replace static live-scene preregistration with explicit SceneCatalog factories and loaded `SceneHandle` identity.
+23. [x] Replace static live-scene preregistration with explicit SceneCatalog factories and loaded `SceneHandle` identity. *(Implemented with runtime `SceneId` identity.)*
 24. [ ] Split scene serialization/storage/tooling transport; add durable entity IDs and `AssetId` scene references.
-25. [ ] Remove renderer backend pointers from Scene/Behavior APIs.
+25. [x] Remove renderer backend pointers from Scene/Behavior APIs.
 26. [ ] Establish canonical coordinate/clip-space convention.
 27. [ ] Build generic physics handles/contracts.
 28. [ ] Move current PhysX implementation behind generic backend.

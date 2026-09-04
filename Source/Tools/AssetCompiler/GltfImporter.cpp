@@ -18,6 +18,14 @@ namespace Swim::AssetCompiler
 
 	namespace
 	{
+		class UnsupportedSourceFeature final : public std::runtime_error
+		{
+		public:
+			explicit UnsupportedSourceFeature(const std::string& message)
+				: std::runtime_error(message)
+			{}
+		};
+
 		std::uint32_t ToIndex(std::size_t value)
 		{
 			if (value > std::numeric_limits<std::uint32_t>::max())
@@ -301,6 +309,13 @@ namespace Swim::AssetCompiler
 
 		SourcePrimitive ImportPrimitive(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive)
 		{
+			if (primitive.dracoCompression)
+			{
+				throw UnsupportedSourceFeature(
+					"KHR_draco_mesh_compression is intentionally skipped until compiler-side Draco decompression is implemented"
+				);
+			}
+
 			SourcePrimitive result{};
 			result.Topology = ConvertTopology(primitive.type);
 			result.MaterialIndex = ToOptionalIndex(primitive.materialIndex);
@@ -386,6 +401,8 @@ namespace Swim::AssetCompiler
 			static constexpr auto SupportedExtensions =
 				fastgltf::Extensions::KHR_mesh_quantization |
 				fastgltf::Extensions::KHR_texture_basisu |
+				fastgltf::Extensions::KHR_texture_transform |
+				fastgltf::Extensions::KHR_draco_mesh_compression |
 				fastgltf::Extensions::EXT_texture_webp |
 				fastgltf::Extensions::MSFT_texture_dds |
 				fastgltf::Extensions::KHR_materials_unlit;
@@ -564,6 +581,11 @@ namespace Swim::AssetCompiler
 					}
 				}
 			}
+		}
+		catch (const UnsupportedSourceFeature& error)
+		{
+			result.Model = {};
+			result.Error = { GltfImportErrorCode::UnsupportedFeature, error.what() };
 		}
 		catch (const std::overflow_error& error)
 		{

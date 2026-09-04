@@ -4,7 +4,7 @@
 #include "OpenGLCubeMap.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Platform/FileSystem.h"
-#include "Engine/Systems/Scene/SceneSystem.h"
+#include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
@@ -387,9 +387,9 @@ namespace Engine
 
 	int OpenGLRenderer::Init()
 	{
-		if (!cameraSystem || !sceneSystem)
+		if (!cameraSystem)
 		{
-			std::cerr << "[OpenGLRenderer] CameraSystem/SceneSystem dependencies were not injected before Init.\n";
+			std::cerr << "[OpenGLRenderer] CameraSystem dependency was not injected before Init.\n";
 			return -1;
 		}
 		return 0;
@@ -513,7 +513,7 @@ namespace Engine
 
 		UpdateUniformBuffer();
 
-		auto scene = sceneSystem->GetActiveScene();
+		Scene* scene = GetRenderScene();
 		if (!scene)
 		{
 			SwapBuffers(deviceContext);
@@ -522,7 +522,7 @@ namespace Engine
 
 		const glm::mat4& view = cameraSystem->GetViewMatrix();
 		const glm::mat4& proj = cameraSystem->GetProjectionMatrix();
-		Frustum::SetCameraMatrices(view, proj);
+		viewFrustum.Update(view, proj);
 
 		auto& registry = scene->GetRegistry();
 
@@ -532,7 +532,7 @@ namespace Engine
 		}
 
 		// 1) World meshes (opaque/regular)
-		RenderWorldSpace(scene, registry, view, proj);
+		RenderWorldSpace(*scene, registry, view, proj);
 
 		// 2) World text (transparent, depth test ON, depth write OFF)
 		RenderTextMSDFWorld(registry, view, proj);
@@ -595,17 +595,17 @@ namespace Engine
 	}
 
 	// Draws all non decorated world space objects
-	void OpenGLRenderer::RenderWorldSpace(std::shared_ptr<Scene>& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
+	void OpenGLRenderer::RenderWorldSpace(Scene& scene, entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	{
-		const Frustum& frustum = Frustum::Get();
+		const Frustum& frustum = viewFrustum;
 
 		glUseProgram(shaderProgram); // main shader 
 		glEnable(GL_CULL_FACE);
 
-		scene->GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
+		scene.GetSceneBVH()->QueryFrustumCallback(frustum, [&](entt::entity entity)
 		{
 			// Skip what should not be rendered
-			if (!scene->ShouldRenderBasedOnState(entity))
+			if (!scene.ShouldRenderBasedOnState(entity))
 			{
 				return;
 			}
@@ -695,7 +695,7 @@ namespace Engine
 	// Also draws all world space objects with mesh decorators.
 	void OpenGLRenderer::RenderScreenSpaceAndDecoratedMeshes(entt::registry& registry, const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, bool cull)
 	{
-		const Frustum& frustum = Frustum::Get();
+		const Frustum& frustum = viewFrustum;
 
 		glUseProgram(decoratorShader);
 		glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
@@ -706,7 +706,7 @@ namespace Engine
 		glEnable(GL_DEPTH_TEST);
 		glDepthMask(GL_TRUE);
 
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = GetRenderScene();
 
 		registry.view<Transform, Material>().each([&](entt::entity entity, Transform& tf, Material& matComp)
 		{
@@ -933,7 +933,7 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = GetRenderScene();
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)
@@ -1012,7 +1012,7 @@ namespace Engine
 		glDepthMask(GL_FALSE);
 		glDisable(GL_CULL_FACE);
 
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = GetRenderScene();
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)

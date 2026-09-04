@@ -10,7 +10,6 @@ namespace Engine
 {
 
 	class Scene;
-	class SceneSystem;
 
 	class PhysicsSystem : public Machine
 	{
@@ -19,8 +18,10 @@ namespace Engine
 
 		int Awake() override;
 		int Init() override;
-		void Update(double dt) override;
-		void FixedUpdate(unsigned int tickThisSecond) override;
+		// Physics traversal is scene-explicit. The legacy Machine frame hooks are intentionally
+		// not used so PhysicsSystem never discovers an application-designated active scene.
+		void UpdateScene(Scene& scene, double dt);
+		void FixedUpdateScene(Scene& scene, unsigned int tickThisSecond);
 		int Exit() override;
 
 		physx::PxFoundation* GetFoundation() const { return foundation.get(); }
@@ -29,9 +30,8 @@ namespace Engine
 		// Return the base interface, but we own the concrete default dispatcher.
 		physx::PxCpuDispatcher* GetCpuDispatcher() const { return dispatcher.get(); }
 
-		void SetServices(SceneSystem* scenes, const EngineState* state)
+		void SetServices(const EngineState* state)
 		{
-			sceneSystem = scenes;
 			engineState = state;
 		}
 
@@ -65,7 +65,6 @@ namespace Engine
 		// Kept in sync with the engine's tick rate via SetFixedDeltaSeconds(), by default it is 60 Hz
 		float fixedDeltaSeconds = 1.0f / 60.0f; 
 
-		SceneSystem* sceneSystem = nullptr;
 		const EngineState* engineState = nullptr;
 
 		// Time since last fixed tick (for render interpolation alpha).

@@ -1,28 +1,192 @@
 #include "PCH.h"
 #include "TexturePool.h"
+#include "Engine/Assets/AssetSystem.h"
+#include "Engine/Assets/TextureAsset.h"
 #include "Engine/Platform/FileSystem.h"
-#include <filesystem>
+
+#include <basisu_transcoder.h>
+#include <zstd.h>
+
 #include <algorithm>
-#include <sstream>
 #include <array>
 #include <cstring>
+#include <filesystem>
+#include <limits>
+#include <mutex>
 #include <span>
+#include <sstream>
+#include <stdexcept>
 
 namespace Engine
 {
 
 	namespace
 	{
-		Swim::Assets::ContentHash ComputeLegacyTextureContentHash(int width, int height, std::span<const std::byte> bytes)
+		Swim::Assets::ContentHash ComputeLegacyTextureContentHash(std::uint32_t width, std::uint32_t height, std::span<const std::byte> bytes)
 		{
 			const Swim::Assets::ContentHash payloadHash = Swim::Assets::ComputeContentHash(bytes);
 			std::array<std::byte, 40> combined{};
-			const std::uint32_t widthValue = static_cast<std::uint32_t>(width);
-			const std::uint32_t heightValue = static_cast<std::uint32_t>(height);
-			std::memcpy(combined.data(), &widthValue, sizeof(widthValue));
-			std::memcpy(combined.data() + 4, &heightValue, sizeof(heightValue));
+			std::memcpy(combined.data(), &width, sizeof(width));
+			std::memcpy(combined.data() + 4, &height, sizeof(height));
 			std::memcpy(combined.data() + 8, payloadHash.Bytes.data(), payloadHash.Bytes.size());
 			return Swim::Assets::ComputeContentHash(combined);
+		}
+
+		bool IsRgba8(Swim::Assets::TexturePayloadFormat format)
+		{
+			return format == Swim::Assets::TexturePayloadFormat::RGBA8UNorm || format == Swim::Assets::TexturePayloadFormat::RGBA8SRgb;
+		}
+
+		bool TryGetRgba8ByteCount(std::uint32_t width, std::uint32_t height, std::uint64_t& size)
+		{
+			if (width == 0 || height == 0)
+			{
+				return false;
+			}
+			const std::uint64_t pixelCount = static_cast<std::uint64_t>(width) * height;
+			if (pixelCount > std::numeric_limits<std::uint64_t>::max() / 4u)
+			{
+				return false;
+			}
+			size = pixelCount * 4u;
+			return size <= std::numeric_limits<std::size_t>::max();
+		}
+
+		bool CopyRawRgbaMip(
+			const Swim::Assets::TexturePayloadVariant& payload,
+			std::vector<unsigned char>& rgba)
+		{
+			if (!IsRgba8(payload.Format) || payload.Mips.empty())
+			{
+				return false;
+			}
+			const Swim::Assets::TextureMipDesc& mip = payload.Mips.front();
+			std::uint64_t expectedSize = 0;
+			if (!TryGetRgba8ByteCount(mip.Width, mip.Height, expectedSize) || mip.SizeBytes != expectedSize ||
+				mip.OffsetBytes > payload.Bytes.size() || mip.SizeBytes > payload.Bytes.size() - mip.OffsetBytes)
+			{
+				return false;
+			}
+			const std::byte* source = payload.Bytes.data() + mip.OffsetBytes;
+			rgba.resize(static_cast<std::size_t>(mip.SizeBytes));
+			std::memcpy(rgba.data(), source, rgba.size());
+			return true;
+		}
+
+		bool DecompressZstdRgbaMip(
+			const Swim::Assets::TexturePayloadVariant& payload,
+			std::vector<unsigned char>& rgba)
+		{
+			if (!IsRgba8(payload.Format) || payload.Mips.empty())
+			{
+				return false;
+			}
+			const Swim::Assets::TextureMipDesc& mip = payload.Mips.front();
+			std::uint64_t expectedSize = 0;
+			if (!TryGetRgba8ByteCount(mip.Width, mip.Height, expectedSize) || mip.UncompressedSizeBytes != expectedSize ||
+				mip.OffsetBytes > payload.Bytes.size() || mip.SizeBytes > payload.Bytes.size() - mip.OffsetBytes)
+			{
+				return false;
+			}
+			rgba.resize(static_cast<std::size_t>(expectedSize));
+			const std::size_t result = ZSTD_decompress(
+				rgba.data(),
+				rgba.size(),
+				payload.Bytes.data() + mip.OffsetBytes,
+				static_cast<std::size_t>(mip.SizeBytes)
+			);
+			return !ZSTD_isError(result) && result == rgba.size();
+		}
+
+		bool TranscodeBasisKtx2(
+			const Swim::Assets::TexturePayloadVariant& payload,
+			std::vector<unsigned char>& rgba,
+			std::uint32_t& width,
+			std::uint32_t& height)
+		{
+			if (payload.Container != Swim::Assets::TextureContainerFormat::Ktx2 || payload.Bytes.empty())
+			{
+				return false;
+			}
+
+			static std::once_flag initializeTranscoder;
+			std::call_once(initializeTranscoder, []()
+			{
+				basist::basisu_transcoder_init();
+			});
+
+			if (payload.Bytes.size() > std::numeric_limits<std::uint32_t>::max())
+			{
+				return false;
+			}
+
+			basist::ktx2_transcoder transcoder;
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.Bytes.data());
+			if (!transcoder.init(bytes, static_cast<std::uint32_t>(payload.Bytes.size())) || !transcoder.start_transcoding())
+			{
+				return false;
+			}
+
+			width = transcoder.get_width();
+			height = transcoder.get_height();
+			if (width == 0 || height == 0)
+			{
+				return false;
+			}
+			const std::uint64_t pixelCount64 = static_cast<std::uint64_t>(width) * height;
+			if (pixelCount64 > std::numeric_limits<std::uint32_t>::max())
+			{
+				return false;
+			}
+			const std::uint32_t pixelCount = static_cast<std::uint32_t>(pixelCount64);
+			rgba.resize(static_cast<std::size_t>(pixelCount) * 4u);
+			return transcoder.transcode_image_level(
+				0,
+				0,
+				0,
+				rgba.data(),
+				pixelCount,
+				basist::transcoder_texture_format::cTFRGBA32
+			);
+		}
+
+		bool DecodeTextureAsset(
+			const Swim::Assets::TextureAsset& asset,
+			std::vector<unsigned char>& rgba,
+			std::uint32_t& width,
+			std::uint32_t& height)
+		{
+			if (asset.Dimension != Swim::Assets::TextureDimension::Texture2D || asset.ArrayLayers != 1 || asset.Depth != 1)
+			{
+				return false;
+			}
+
+			width = asset.Width;
+			height = asset.Height;
+			for (const Swim::Assets::TexturePayloadVariant& payload : asset.Payloads)
+			{
+				if (!payload.Mips.empty() && payload.Mips.front().Width == asset.Width && payload.Mips.front().Height == asset.Height)
+				{
+					if (payload.Supercompression == Swim::Assets::TextureSupercompression::None && CopyRawRgbaMip(payload, rgba))
+					{
+						return true;
+					}
+					if (payload.Supercompression == Swim::Assets::TextureSupercompression::Zstandard && DecompressZstdRgbaMip(payload, rgba))
+					{
+						return true;
+					}
+				}
+				std::uint32_t transcodedWidth = 0;
+				std::uint32_t transcodedHeight = 0;
+				if (TranscodeBasisKtx2(payload, rgba, transcodedWidth, transcodedHeight) &&
+					transcodedWidth == asset.Width && transcodedHeight == asset.Height)
+				{
+					width = transcodedWidth;
+					height = transcodedHeight;
+					return true;
+				}
+			}
+			return false;
 		}
 	}
 
@@ -34,6 +198,22 @@ namespace Engine
 			runtimeContext.Lifetime = std::make_shared<TextureLifetimeTracker>();
 		}
 		lifetimeTracker = runtimeContext.Lifetime;
+	}
+
+	void TexturePool::RequestTextureResidency(const std::shared_ptr<Texture2D>& texture)
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		RequestTextureResidencyLocked(texture);
+	}
+
+	void TexturePool::RequestTextureResidencyLocked(const std::shared_ptr<Texture2D>& texture)
+	{
+		if (!texture)
+		{
+			throw std::runtime_error("Cannot request renderer residency for a null Texture2D.");
+		}
+
+		texture->MakeResident(runtimeContext);
 	}
 
 	void TexturePool::LoadAllRecursively()
@@ -55,7 +235,9 @@ namespace Engine
 
 					if (textures.find(key) == textures.end())
 					{
-						textures[key] = std::make_shared<Texture2D>(runtimeContext, fullPath);
+						auto texture = std::make_shared<Texture2D>(fullPath);
+						RequestTextureResidencyLocked(texture);
+						textures[key] = std::move(texture);
 					}
 				}
 			}
@@ -97,101 +279,112 @@ namespace Engine
 		}
 
 		// Not found, load now
-		auto tex = std::make_shared<Texture2D>(runtimeContext, fileName, generateMips);
+		auto tex = std::make_shared<Texture2D>(fileName, generateMips);
+		RequestTextureResidencyLocked(tex);
 		textures[key] = tex;
 		return tex;
 	}
 
-	std::shared_ptr<Texture2D> TexturePool::GetOrCreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& imageKey)
+	std::shared_ptr<Texture2D> TexturePool::GetOrCreateTextureFromAsset(
+		Swim::Assets::AssetSystem& assets,
+		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> handle,
+		const std::string& debugName)
 	{
-		std::lock_guard<std::mutex> lock(poolMutex);
-
-		if (image.width <= 0 || image.height <= 0 || image.image.empty())
+		if (!handle)
 		{
 			return nullptr;
 		}
 
-		const auto imageBytes = std::as_bytes(std::span(image.image.data(), image.image.size()));
-		const Swim::Assets::ContentHash contentHash = ComputeLegacyTextureContentHash(image.width, image.height, imageBytes);
-		auto contentIt = textureContentIndex.find(contentHash);
-		if (contentIt != textureContentIndex.end())
+		const Swim::Assets::AssetStatus status = assets.GetStatus(handle);
+		AssetTextureKey assetKey{ handle.GetId(), handle.GetGeneration(), status.Hash };
+		if (!assetKey.Hash.IsZero())
 		{
-			if (std::shared_ptr<Texture2D> existingTexture = contentIt->second.lock())
+			std::lock_guard<std::mutex> lock(poolMutex);
+			auto existing = assetTextureIndex.find(assetKey);
+			if (existing != assetTextureIndex.end())
 			{
-				return existingTexture;
+				if (std::shared_ptr<Texture2D> texture = existing->second.lock())
+				{
+					return texture;
+				}
+				assetTextureIndex.erase(existing);
 			}
-			textureContentIndex.erase(contentIt);
 		}
 
-		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
-			runtimeContext,
-			image.width,
-			image.height,
-			image.image.data(),
-			imageKey
-		);
+		const Swim::Assets::TextureAsset* asset = assets.Resolve(handle);
+		if (!asset)
+		{
+			throw std::runtime_error("Cannot create renderer texture residency for a non-resident TextureAsset: " + debugName);
+		}
 
+		std::vector<unsigned char> rgba;
+		std::uint32_t width = 0;
+		std::uint32_t height = 0;
+		if (!DecodeTextureAsset(*asset, rgba, width, height) || rgba.empty())
+		{
+			throw std::runtime_error("Legacy renderer cannot decode the cooked texture payload: " + debugName);
+		}
+
+		const auto rgbaBytes = std::as_bytes(std::span(rgba.data(), rgba.size()));
+		const Swim::Assets::ContentHash contentHash = ComputeLegacyTextureContentHash(width, height, rgbaBytes);
+		if (assetKey.Hash.IsZero())
+		{
+			assetKey.Hash = contentHash;
+		}
+
+		std::lock_guard<std::mutex> lock(poolMutex);
+		auto existingAsset = assetTextureIndex.find(assetKey);
+		if (existingAsset != assetTextureIndex.end())
+		{
+			if (std::shared_ptr<Texture2D> texture = existingAsset->second.lock())
+			{
+				return texture;
+			}
+			assetTextureIndex.erase(existingAsset);
+		}
+
+		auto content = textureContentIndex.find(contentHash);
+		if (content != textureContentIndex.end())
+		{
+			if (std::shared_ptr<Texture2D> texture = content->second.lock())
+			{
+				assetTextureIndex[assetKey] = texture;
+				return texture;
+			}
+			textureContentIndex.erase(content);
+		}
+
+		auto texture = std::make_shared<Texture2D>(width, height, rgba.data(), debugName, true);
+		RequestTextureResidencyLocked(texture);
 		texture->isPixelDataSTB = false;
 		textureContentIndex[contentHash] = texture;
+		assetTextureIndex[assetKey] = texture;
 
-		std::string key = imageKey;
+		std::string key = debugName;
 		int counter = 1;
 		while (textures.find(key) != textures.end())
 		{
-			key = imageKey + "_" + std::to_string(counter++);
+			key = debugName + "_" + std::to_string(counter++);
 		}
 		textures.emplace(std::move(key), texture);
 		return texture;
 	}
 
-	std::shared_ptr<Texture2D> TexturePool::CreateTextureFromTinyGltfImage(const tinygltf::Image& image, const std::string& debugName)
-	{
-		// Validate image dimensions and data
-		if (image.width <= 0 || image.height <= 0 || image.image.empty())
-		{
-			std::cerr << "[TexturePool] Invalid image: " << debugName << " (width/height or data missing)\n";
-			return nullptr;
-		}
-
-		// Only support 4-channel RGBA 8-bit textures (as expected by your KTX2 loader)
-		if (image.component != 4 || image.bits != 8)
-		{
-			std::cerr << "[TexturePool] Unsupported image format in: " << debugName
-				<< " (components: " << image.component << ", bits: " << image.bits << ")\n";
-			return nullptr;
-		}
-
-		// Upload texture to GPU (or staging structure)
-		std::shared_ptr<Texture2D> texture = std::make_shared<Texture2D>(
-			runtimeContext,
-			image.width,
-			image.height,
-			image.image.data(),
-			debugName
-		);
-
-		// Tag if the data came from STB or not 
-		texture->isPixelDataSTB = false;
-
-		// Store it by name to reuse later
-		this->StoreTextureManually(texture, debugName);
-
-		return texture;
-	}
-
 	std::shared_ptr<Texture2D> TexturePool::CreateTransientTexture(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name, bool generateMips)
 	{
-		return std::make_shared<Texture2D>(runtimeContext, width, height, rgbaData, name, generateMips);
+		auto texture = std::make_shared<Texture2D>(width, height, rgbaData, name, generateMips);
+		RequestTextureResidency(texture);
+		return texture;
 	}
 
 	void TexturePool::StoreTextureManually(const std::shared_ptr<Texture2D>& texture, const std::string& name)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
+		RequestTextureResidencyLocked(texture);
 
 		std::string finalName = name;
 		int counter = 1;
 
-		// Incrementally search for a free name, we have to do this a lot because GLB textures are often nameless and duplicated/messed up in the binary for the name field
 		while (textures.find(finalName) != textures.end())
 		{
 			finalName = name + "_" + std::to_string(counter);
@@ -271,6 +464,7 @@ namespace Engine
 		// Will cause Texture2D destructor which calls Free() on the texture for us
 		textures.clear();
 		textureContentIndex.clear();
+		assetTextureIndex.clear();
 	}
 
 	std::string TexturePool::FormatKey(const std::string& filePath, const std::string& rootPath) const
@@ -289,7 +483,7 @@ namespace Engine
 			key = key.substr(0, lastDot);
 		}
 
-		// Convert to consistent path separator 
+		// Convert to consistent path separator
 		std::replace(key.begin(), key.end(), '\\', '/');
 		return key;
 	}

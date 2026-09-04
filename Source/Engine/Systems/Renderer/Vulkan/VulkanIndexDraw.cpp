@@ -10,7 +10,7 @@
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
 #include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
 #include "Engine/Systems/Scene/SubSceneSystems/SceneBVH.h"
-#include "Engine/Systems/Scene/SceneSystem.h"
+#include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Utility/ParallelUtils.h"
 #include "VulkanRenderer.h"
 
@@ -104,10 +104,9 @@ namespace Engine
 		gpuCullCommandTemplates.reserve(MAX_EXPECTED_INSTANCES);
 	}
 
-	void VulkanIndexDraw::SetServices(VulkanRenderer* vulkanRenderer, SceneSystem* scenes, CameraSystem* camera, Swim::Jobs::JobSystem* jobs)
+	void VulkanIndexDraw::SetServices(VulkanRenderer* vulkanRenderer, CameraSystem* camera, Swim::Jobs::JobSystem* jobs)
 	{
 		renderer = vulkanRenderer;
-		sceneSystem = scenes;
 		cameraSystem = camera;
 		this->jobs = jobs;
 	}
@@ -898,11 +897,7 @@ namespace Engine
 
 		// Allocate space inside mega buffers and fill MeshBufferData
 		std::shared_ptr<Mesh> m = renderer->GetRuntimeServices().Meshes->RegisterMesh("glyph", verts, idx);
-		std::shared_ptr<MeshBufferData> residency = renderer->GetRuntimeServices().Meshes->GetMeshBufferData(m);
-		if (!residency)
-		{
-			throw std::runtime_error("Glyph mesh was registered without renderer residency.");
-		}
+		std::shared_ptr<MeshBufferData> residency = renderer->GetRuntimeServices().Meshes->RequestMeshResidency(m);
 		glyphQuadMesh = *residency;
 		hasUploadedGlyphQuad = true;
 	}
@@ -1225,21 +1220,26 @@ namespace Engine
 
 	void VulkanIndexDraw::UpdateInstanceBuffer(uint32_t frameIndex)
 	{
+		if (!renderScene)
+		{
+			return;
+		}
+
 		meshDecoratorInstanceData.clear();
 		msdfInstancesData.clear();
 		overlayInstanceData.clear();
 
-		const std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 		entt::registry& registry = scene->GetRegistry();
 
 		const Frustum* frustum = nullptr;
 		if (cullMode == CullMode::CPU || cullMode == CullMode::GPU)
 		{
 			CameraSystem* camera = scene->GetCameraSystem();
-			Frustum::SetCameraMatrices(camera->GetViewMatrix(), camera->GetProjectionMatrix());
+			viewFrustum.Update(camera->GetViewMatrix(), camera->GetProjectionMatrix());
 			if (cullMode == CullMode::CPU)
 			{
-				frustum = &Frustum::Get();
+				frustum = &viewFrustum;
 			}
 		}
 
@@ -1264,7 +1264,7 @@ namespace Engine
 			{
 				RebuildGpuWorldBvh(*scene);
 			}
-			else if (Transform::GetGlobalMutationVersion() != gpuWorldBvhBoundsVersion)
+			else if (scene->GetTransformSystem().GetMutationVersion() != gpuWorldBvhBoundsVersion)
 			{
 				UpdateGpuWorldBvhNodeBuffer(*scene);
 			}
@@ -1364,7 +1364,7 @@ namespace Engine
 
 	void VulkanIndexDraw::GatherCandidatesView(entt::registry& registry, const TransformSpace space, const Frustum* frustum)
 	{
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 		gatherCandidatesScratch.clear();
 		gatherCandidatesScratch.reserve(worldRenderableSlots.size());
 
@@ -1843,7 +1843,7 @@ namespace Engine
 
 		gpuWorldBvhMaxDepth = std::max(1u, snapshotMaxDepth);
 		gpuWorldBvhTopologyVersion = scene.GetRenderablesRevision();
-		gpuWorldBvhBoundsVersion = Transform::GetGlobalMutationVersion();
+		gpuWorldBvhBoundsVersion = scene.GetTransformSystem().GetMutationVersion();
 
 		if (gpuWorldBvhNodeCount > 0)
 		{
@@ -1904,7 +1904,7 @@ namespace Engine
 			return;
 		}
 
-		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
+		const uint64_t currentTransformMutationVersion = scene.GetTransformSystem().GetMutationVersion();
 		if (gpuWorldBvhBoundsVersion == currentTransformMutationVersion && !gpuWorldBvhNodesUploadPending)
 		{
 			return;
@@ -1985,7 +1985,7 @@ namespace Engine
 		const VkDeviceSize stride = static_cast<VkDeviceSize>(sizeof(GpuWorldInstanceTransformData));
 
 		dirtyInstanceRangeScratch.clear();
-		dirtyInstanceRangeScratch.reserve(fullUpload ? 1 : Transform::GetDirtyEntities().size());
+		dirtyInstanceRangeScratch.reserve(fullUpload ? 1 : scene.GetTransformSystem().GetDirtyEntities().size());
 
 		if (fullUpload)
 		{
@@ -1993,7 +1993,7 @@ namespace Engine
 		}
 		else
 		{
-			const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
+			const std::vector<entt::entity>& dirtyEntities = scene.GetTransformSystem().GetDirtyEntities();
 			for (entt::entity entity : dirtyEntities)
 			{
 				auto it = gpuWorldEntityToInstanceRanges.find(entity);
@@ -2165,7 +2165,7 @@ namespace Engine
 			uint32_t maxInstances = 0;
 		};
 
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 		std::unordered_map<uint32_t, MeshBatchTemplate> meshTemplates;
 		std::vector<uint32_t> uniqueMeshIDs;
 		uniqueMeshIDs.reserve(worldRenderableSlots.size());
@@ -2303,7 +2303,7 @@ namespace Engine
 		const bool useIndirectCount = deviceManager && deviceManager->SupportsDrawIndexedIndirectCount();
 		const VkPipeline computePipeline = pipelineManager->GetGpuCullComputePipeline();
 		const VkPipelineLayout computePipelineLayout = pipelineManager->GetGpuCullComputePipelineLayout();
-		const Frustum& frustum = Frustum::Get();
+		const Frustum& frustum = viewFrustum;
 
 		GpuCullPushConstants pushConstants{};
 		pushConstants.instanceCount = gpuWorldSceneInstanceCount;
@@ -2360,7 +2360,7 @@ namespace Engine
 			&& gpuWorldBvhLeafCount > 0
 			&& gpuWorldBvhDepthCount > 0
 			&& gpuWorldBvhDepthOffsetsCpuData.size() >= static_cast<size_t>(gpuWorldBvhDepthCount + 1u);
-		const bool useHierarchicalBvhThisFrame = hasHierarchicalBvh && !Frustum::DidCameraMoveThisFrame();
+		const bool useHierarchicalBvhThisFrame = hasHierarchicalBvh && !viewFrustum.DidCameraMoveThisFrame();
 
 		VkMemoryBarrier computeBarrier{};
 		computeBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
@@ -2714,9 +2714,15 @@ namespace Engine
 			);
 		}
 
-		const uint64_t currentFrustumRevision = Frustum::GetRevision();
-		const uint64_t currentTransformMutationVersion = Transform::GetGlobalMutationVersion();
-		const std::shared_ptr<Scene>& activeScene = sceneSystem->GetActiveScene();
+		Scene* activeScene = renderScene;
+		if (!activeScene)
+		{
+			gpuCullFrameReuseStamps[frameIndex].valid = false;
+			return;
+		}
+
+		const uint64_t currentFrustumRevision = viewFrustum.GetRevision();
+		const uint64_t currentTransformMutationVersion = activeScene->GetTransformSystem().GetMutationVersion();
 		const uint32_t currentRenderStateMask = static_cast<uint32_t>(activeScene->GetEngineState());
 
 		if (!transformCopies.empty() || copiedBvhNodes || copiedBvhLeaves || copiedBvhRanges || copiedBvhNodeDepthIndices || copiedBvhDepthOffsets)
@@ -2803,7 +2809,7 @@ namespace Engine
 		unsigned int windowWidth = renderer->GetSurfaceWidth();
 		unsigned int windowHeight = renderer->GetSurfaceHeight();
 
-		const std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 		entt::registry& registry = scene->GetRegistry();
 
 		const std::unique_ptr<VulkanPipelineManager>& pipelineManager = renderer->GetPipelineManager();
@@ -2812,7 +2818,7 @@ namespace Engine
 		const CameraUBO& cameraUBO = renderer->GetCameraUBO();
 		const glm::mat4& worldView = cameraSystem->GetViewMatrix();
 
-		const Frustum& frustum = Frustum::Get();
+		const Frustum& frustum = viewFrustum;
 
 		// Gather instances info before we send anymore new draws since we need to add to the current buffer
 		const uint32_t baseDecoratorInstanceID = static_cast<uint32_t>(overlayInstanceData.size());
@@ -2945,7 +2951,7 @@ namespace Engine
 			static_cast<float>(windowHeight) / Renderer::VirtualCanvasHeight
 		);
 
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 
 		registry.view<Transform, Material>().each(
 			[&](entt::entity entity, Transform& transform, Material& matComp)
@@ -3153,7 +3159,7 @@ namespace Engine
 
 	void VulkanIndexDraw::DrawIndexedMsdfText(uint32_t frameIndex, VkCommandBuffer cmd, TransformSpace space)
 	{
-		auto scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 		if (!scene)
 		{
 			return;
@@ -3184,7 +3190,7 @@ namespace Engine
 		std::vector<MsdfTextGpuInstanceData>& outInstances
 	)
 	{
-		auto& scene = sceneSystem->GetActiveScene();
+		Scene* scene = renderScene;
 
 		registry.view<Transform, TextComponent>().each(
 			[&](entt::entity entity, Transform& tf, TextComponent& tc)

@@ -14,6 +14,7 @@ namespace Engine
 {
 
 	class VulkanRenderer;
+	class TexturePool;
 
 	struct TextureLifetimeTracker
 	{
@@ -33,8 +34,8 @@ namespace Engine
 
 	public:
 
-		Texture2D(TextureRuntimeContext context, const std::string& filePath, bool generateMips = true);
-		Texture2D(TextureRuntimeContext context, uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
+		Texture2D(const std::string& filePath, bool generateMips = true);
+		Texture2D(uint32_t width, uint32_t height, const unsigned char* rgbaData, const std::string& name = "<generated>", bool generateMips = true);
 		~Texture2D();
 
 		void Free();
@@ -54,13 +55,15 @@ namespace Engine
 
 		unsigned char* GetData() const { return pixelData; }
 
-		size_t GetDataSize() const { return width * height * 4; }
+		size_t GetDataSize() const { return static_cast<size_t>(width) * static_cast<size_t>(height) * 4u; }
+		bool IsResident() const { return resident; }
 
 		bool isPixelDataSTB = true;
 		bool generateMips = true; 
 
 
 	private:
+		friend class TexturePool;
 
 		uint32_t width = 0;
 		uint32_t height = 0;
@@ -82,11 +85,13 @@ namespace Engine
 		unsigned char* pixelData = nullptr;
 
 		void LoadFromSTB();
-		void Generate();
+		void MakeResident(TextureRuntimeContext residencyContext);
 		void UploadToVulkan();
 		void UploadToOpenGL();
 		void GoBindless();
 
+		bool resident = false;
+		bool lifetimeCounted = false;
 		bool freed = false;
 
 	};

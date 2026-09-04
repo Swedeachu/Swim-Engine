@@ -9,10 +9,8 @@ namespace Engine
 
 	// Forward declare
 	class Scene;
-	class SceneSystem;
 	class InputManager;
 	class CameraSystem;
-	class Renderer;
 	struct Transform;
 	struct Material;
 
@@ -76,9 +74,7 @@ namespace Engine
 		entt::entity entity = entt::null;
 
 		InputManager* input = nullptr;
-		SceneSystem* sceneSystem = nullptr;
 		CameraSystem* cameraSystem = nullptr;
-		Renderer* renderer = nullptr;
 
 		// These may be nullptr if the entity does not have the components but since they are so common we attempt to cache them on construction
 		Transform* transform = nullptr;

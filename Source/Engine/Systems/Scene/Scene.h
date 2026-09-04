@@ -6,6 +6,7 @@
 #include "SubSceneSystems/GizmoSystem.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
 #include "SubSceneSystems/SerializedSceneManager.h"
+#include "TransformSystem.h"
 
 #include "Engine/Components/ObjectTag.h"
 #include "Engine/EngineState.h"
@@ -22,6 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <typeinfo>
 #include <unordered_set>
@@ -57,13 +59,10 @@ namespace Engine
 {
 
 	// Forward declaration of systems
-	class SceneSystem;
 	class PhysicsSystem;
 	class InputManager;
 	class CameraSystem;
-	class VulkanRenderer;
-	class OpenGLRenderer;
-	class Renderer;
+	class CubeMapController;
 	class MeshPool;
 	class TexturePool;
 	class MaterialPool;
@@ -142,8 +141,7 @@ namespace Engine
 		bool ShouldRenderBasedOnState(entt::entity e) const;
 		uint64_t GetRenderablesRevision() const { return renderablesRevision; }
 
-		// Called by SceneSystem during Awake. These are non-owning engine service views.
-		void SetSceneSystem(SceneSystem* system) { sceneSystem = system; }
+		// Called by the scene owner during Awake. These are non-owning engine service views.
 		void SetInputManager(InputManager* system) { inputManager = system; }
 		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
 		void SetEngineState(const EngineState* state) { engineState = state; }
@@ -158,17 +156,14 @@ namespace Engine
 		void SetAssetSystem(Swim::Assets::AssetSystem* value) { assetSystem = value; }
 		void SetFrameArena(Swim::Memory::FrameArena* value) { frameArena = value; }
 		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
+		void SetCommandDispatcher(std::function<bool(std::string_view)> dispatcher) { commandDispatcher = std::move(dispatcher); }
+		void SetEditorMessageSender(std::function<bool(const std::string&, std::uintptr_t)> sender) { editorMessageSender = std::move(sender); }
 
-		// Defined in C++ since it also updates the ambiguous renderer pointer.
-		void SetVulkanRenderer(VulkanRenderer* system);
-		void SetOpenGLRenderer(OpenGLRenderer* system);
+		void SetCubeMapController(CubeMapController* value) { cubeMapController = value; }
 
-		SceneSystem* GetSceneSystem() const { return GetSystem(sceneSystem); }
-		InputManager* GetInputManager() const { return GetSystem(inputManager); }
-		CameraSystem* GetCameraSystem() const { return GetSystem(cameraSystem); }
-		VulkanRenderer* GetVulkanRenderer() const { return GetSystem(vulkanRenderer); }
-		OpenGLRenderer* GetOpenGLRenderer() const { return GetSystem(openGLRenderer); }
-		Renderer* GetRenderer() const; // ambiguous version
+		InputManager* GetInputManager() const { return inputManager; }
+		CameraSystem* GetCameraSystem() const { return cameraSystem; }
+		CubeMapController* GetCubeMapController() const { return cubeMapController; }
 		EngineState GetEngineState() const { return *GetSystem(engineState); }
 		ClipSpaceDepthRange GetClipSpaceDepthRange() const { return clipSpaceDepthRange; }
 		MeshPool& GetMeshPool() const { return *GetSystem(meshPool); }
@@ -182,6 +177,19 @@ namespace Engine
 		Swim::Memory::FrameArena& GetFrameArena() const { return *GetSystem(frameArena); }
 		EntityFactory& GetEntityFactory() const { return *GetSystem(entityFactory.get()); }
 		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
+		bool DispatchCommand(std::string_view command) const { return commandDispatcher && commandDispatcher(command); }
+		bool SendEditorMessage(const std::string& message, std::uintptr_t channel = 1) const
+		{
+			return editorMessageSender && editorMessageSender(message, channel);
+		}
+		bool HasPresentationServices() const
+		{
+			return inputManager && cameraSystem && meshPool && texturePool && materialPool && fontPool;
+		}
+
+		TransformSystem& GetTransformSystem() { return transformSystem; }
+		const TransformSystem& GetTransformSystem() const { return transformSystem; }
+		void BeginFrameTransformTracking() { transformSystem.BeginFrame(); }
 
 		SceneBVH* GetSceneBVH() const { return sceneBVH.get(); }
 		GizmoSystem* GetGizmoSystem() const { return gizmoSystem.get(); }
@@ -401,13 +409,11 @@ namespace Engine
 	private:
 
 		uint64_t renderablesRevision{ 0 };
+		TransformSystem transformSystem;
 
-		SceneSystem* sceneSystem = nullptr;
 		InputManager* inputManager = nullptr;
 		CameraSystem* cameraSystem = nullptr;
-		VulkanRenderer* vulkanRenderer = nullptr;
-		OpenGLRenderer* openGLRenderer = nullptr;
-		Renderer* renderer = nullptr;
+		CubeMapController* cubeMapController = nullptr;
 		const EngineState* engineState = nullptr;
 		ClipSpaceDepthRange clipSpaceDepthRange = ClipSpaceDepthRange::ZeroToOne;
 		MeshPool* meshPool = nullptr;
@@ -420,6 +426,8 @@ namespace Engine
 		Swim::Assets::AssetSystem* assetSystem = nullptr;
 		Swim::Memory::FrameArena* frameArena = nullptr;
 		std::function<int()> fpsProvider;
+		std::function<bool(std::string_view)> commandDispatcher;
+		std::function<bool(const std::string&, std::uintptr_t)> editorMessageSender;
 		bool transformHooksBound{ false };
 
 		// Internals:

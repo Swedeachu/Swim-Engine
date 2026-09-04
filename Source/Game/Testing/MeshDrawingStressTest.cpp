@@ -76,7 +76,7 @@ namespace Game
 			materialPool.RegisterMaterialBinding("AlienSphere", sharedSphere, texturePool.GetTexture2DLazy("alien"));
 
 			// Shared Barrel (composite)
-			sharedBarrelMaterials = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+			sharedBarrelMaterials = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/barrel.glb");
 		}
 
 		for (int x = -GRID_HALF_SIZE; x <= GRID_HALF_SIZE; ++x)

@@ -1,7 +1,6 @@
 #include "PCH.h"
 #include "PhysicsSystem.h"
 
-#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "PhysicsWorld.h"
 
@@ -73,9 +72,9 @@ namespace Engine
 		return 0;
 	}
 
-	void PhysicsSystem::Update(double dt)
+	void PhysicsSystem::UpdateScene(Scene& scene, double dt)
 	{
-		if (!sceneSystem || !engineState)
+		if (!engineState)
 		{
 			return;
 		}
@@ -87,13 +86,7 @@ namespace Engine
 			return;
 		}
 
-		std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
-		if (!scene)
-		{
-			return;
-		}
-
-		PhysicsWorld* worldPtr = scene->GetPhysicsWorld();
+		PhysicsWorld* worldPtr = scene.GetPhysicsWorld();
 		if (!worldPtr)
 		{
 			return;
@@ -115,11 +108,11 @@ namespace Engine
 	}
 
 	// Each tick we get the active scene's physics world and tick it
-	void PhysicsSystem::FixedUpdate(unsigned int tickThisSecond)
+	void PhysicsSystem::FixedUpdateScene(Scene& scene, unsigned int tickThisSecond)
 	{
 		(void)tickThisSecond;
 
-		if (!sceneSystem || !engineState)
+		if (!engineState)
 		{
 			return;
 		}
@@ -131,13 +124,7 @@ namespace Engine
 			return;
 		}
 
-		std::shared_ptr<Scene>& scene = sceneSystem->GetActiveScene();
-		if (!scene)
-		{
-			return;
-		}
-
-		PhysicsWorld& world = scene->GetOrCreatePhysicsWorld(*this);
+		PhysicsWorld& world = scene.GetOrCreatePhysicsWorld(*this);
 
 		// Guarantee we are fully snapped to last tick's target pose before the next tick begins.
 		// This keeps render/physics state coherent at tick boundaries.

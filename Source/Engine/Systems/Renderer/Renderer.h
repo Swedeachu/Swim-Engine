@@ -18,6 +18,7 @@ namespace Swim::Platform
 namespace Engine
 {
 
+	class Scene;
 	struct MeshBufferData;
 
 	// The point of this class is to force all other renderers to have the same feature set getters and public interface, such as the cubemap controller.
@@ -32,6 +33,11 @@ namespace Engine
 		virtual std::unique_ptr<CubeMapController>& GetCubeMapController() = 0;
 
 		virtual void UploadMeshToMegaBuffer(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, MeshBufferData& meshData) = 0;
+
+		// The application frame orchestrator selects which scene is presented. Renderers
+		// receive that scene explicitly rather than discovering SceneSystem::GetActiveScene().
+		virtual void SetRenderScene(Scene* scene) { renderScene = scene; }
+		Scene* GetRenderScene() const { return renderScene; }
 
 		void SetRuntimeServices(RendererRuntimeServices* value) { runtimeServices = value; }
 		RendererRuntimeServices& GetRuntimeServices() const
@@ -51,6 +57,7 @@ namespace Engine
 	protected:
 
 		RendererRuntimeServices* runtimeServices = nullptr;
+		Scene* renderScene = nullptr;
 
 	};
 

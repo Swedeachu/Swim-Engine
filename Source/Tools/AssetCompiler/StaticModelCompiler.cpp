@@ -8,6 +8,7 @@
 #include "Engine/Assets/TextureAsset.h"
 #include "Tools/AssetCompiler/Ktx2TextureCompiler.h"
 #include "Tools/AssetCompiler/SassetWriter.h"
+#include "Tools/AssetCompiler/SourceImageTextureCompiler.h"
 
 #include <algorithm>
 #include <array>
@@ -202,7 +203,7 @@ namespace Swim::AssetCompiler
 	{
 		return Swim::Assets::ComputeContentHash(
 			"SwimStaticModelCompiler:v1;sasset=1;fastgltf=0.9.0;meshoptimizer=1.1;"
-			"mesh=float32-interleaved-v1;texture=ktx2-only-v1");
+			"mesh=float32-interleaved-v1;texture=ktx2-or-rgba8-mips-v3");
 	}
 
 	StaticModelCompileResult StaticModelCompiler::Compile(
@@ -285,19 +286,38 @@ namespace Swim::AssetCompiler
 					throw std::runtime_error("glTF texture has no valid source image");
 				}
 				const SourceImage& image = model.Images[*texture.ImageIndex];
-				if (image.MimeType != SourceImageMimeType::Ktx2 || image.EncodedBytes.empty())
+				if (image.EncodedBytes.empty())
 				{
-					throw std::runtime_error("static-model cooker currently requires referenced source textures to be KTX2; PNG/JPEG/WebP -> KTX2 encoding is the next compiler texture step");
+					throw std::runtime_error("source texture has no encoded image bytes");
 				}
-				const Ktx2TextureCompileResult compiled = CompileKtx2Texture(image.EncodedBytes, colorSpace, semantic);
-				if (!compiled)
+				const SourceImageMimeType mimeType = DetectSourceImageMimeType(image.EncodedBytes, image.MimeType);
+				Swim::Assets::TextureAsset textureAsset;
+				if (mimeType == SourceImageMimeType::Ktx2)
 				{
-					throw std::runtime_error("KTX2 texture compile failed: " + compiled.Error.Message);
+					const Ktx2TextureCompileResult compiled = CompileKtx2Texture(image.EncodedBytes, colorSpace, semantic);
+					if (!compiled)
+					{
+						throw std::runtime_error("KTX2 texture compile failed: " + compiled.Error.Message);
+					}
+					textureAsset = compiled.Asset;
+				}
+				else
+				{
+					const SourceImageTextureCompileResult compiled = CompileSourceImageTexture(
+						image.EncodedBytes, mimeType, colorSpace, semantic);
+					if (!compiled)
+					{
+						const std::string prefix = compiled.Error.Code == SourceImageTextureCompileErrorCode::UnsupportedSource
+							? "unsupported source texture: "
+							: "source image texture compile failed: ";
+						throw std::runtime_error(prefix + compiled.Error.Message);
+					}
+					textureAsset = compiled.Asset;
 				}
 
 				const std::string path = ChildPath(result.RootLogicalPath, "texture", textureHandles.size());
 				const auto handle = ids.Declare<Swim::Assets::TextureAsset>(path);
-				emit(Swim::Assets::SassetAssetType::Texture, handle.GetId(), path, {}, SerializeAssetPayload(compiled.Asset), false);
+				emit(Swim::Assets::SassetAssetType::Texture, handle.GetId(), path, {}, SerializeAssetPayload(textureAsset), false);
 				textureHandles.emplace(key, handle);
 				++result.Stats.Textures;
 				return handle;
@@ -483,9 +503,17 @@ namespace Swim::AssetCompiler
 		catch (const std::exception& error)
 		{
 			const std::string message = error.what();
-			if (message.find("requires referenced source textures to be KTX2") != std::string::npos)
+			if (message.find("unsupported source texture:") != std::string::npos)
 			{
 				return MakeError(StaticModelCompileErrorCode::UnsupportedTextureSource, message);
+			}
+			if (message.find("KTX2 texture compile failed:") != std::string::npos)
+			{
+				return MakeError(StaticModelCompileErrorCode::Ktx2CompileFailed, message);
+			}
+			if (message.find("source image texture compile failed:") != std::string::npos)
+			{
+				return MakeError(StaticModelCompileErrorCode::InvalidSourceData, message);
 			}
 			return MakeError(StaticModelCompileErrorCode::SassetBuildFailed, message);
 		}

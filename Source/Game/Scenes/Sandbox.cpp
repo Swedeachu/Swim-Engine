@@ -38,7 +38,6 @@ namespace Game
 	int SandBox::Awake()
 	{
 		std::cout << name << " Awoke" << std::endl;
-		GetSceneSystem()->SetScene(name, true, false, false); // set ourselves to active first scene
 		return 0;
 	}
 
@@ -183,11 +182,18 @@ namespace Game
 		if constexpr (!glbTests) return 0;
 
 		// Couch time
-		auto couch = CreateEntity();
-		SetTag(couch, Engine::TagConstants::WORLD, "couch");
-		AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
-		AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel, "Assets/Models/webp_sofa.glb"));
+		if (!sofaModel.empty())
+		{
+			auto couch = CreateEntity();
+			SetTag(couch, Engine::TagConstants::WORLD, "couch");
+			AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
+			AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel, "Assets/Models/webp_sofa.glb"));
+		}
+		else
+		{
+			std::cerr << "[Scene] Skipping couch because webp_sofa.glb did not produce a cooked model.\n";
+		}
 
 		// Sponza 3D model test
 		if constexpr (doSponza)
@@ -196,13 +202,12 @@ namespace Game
 			std::cout << "Sponza load time\n";
 
 			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)
-			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
+			// sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
 
-			// compressed version + using ktx for textures, efficent
-			// sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx.glb"); // 15 MB
+			// KTX2 source path supported by the current fastgltf cooker.
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/Sponza/sponza-ktx.glb");
 
-			// super compressed draco version, very efficent and fast, perfect for release
-			sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/Sponza/sponza-ktx-draco.glb"); // 9 MB
+			// Keep the Draco authoring variant disabled until compiler-side Draco decompression exists.
 
 			glm::vec3 sponzaScale = glm::vec3(1.0f);
 
@@ -212,11 +217,11 @@ namespace Game
 			}
 			else if (sponzaData.empty()) // if barrel doesn't exist and sponza wasnt loaded, load and set the data to the barrel
 			{
-				sponzaData = materialPool.LoadAndRegisterCompositeMaterialFromGLB("Assets/Models/barrel.glb");
+				sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/barrel.glb");
 			}
 
 			// Just hand waving it for file path arg
-			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData, "Assets/Models/Sponza/sponza-ktx-draco.glb");
+			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData, "Assets/Models/Sponza/sponza-ktx.glb");
 
 			auto sponza = CreateEntity();
 			SetTag(sponza, Engine::TagConstants::WORLD, "sponza");

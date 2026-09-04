@@ -2,7 +2,6 @@
 #include "VulkanRenderer.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Platform/FileSystem.h"
-#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
@@ -140,7 +139,8 @@ namespace Engine
 			MAX_EXPECTED_INSTANCES,
 			MAX_FRAMES_IN_FLIGHT
 		);
-		indexDraw->SetServices(this, sceneSystem, cameraSystem, GetRuntimeServices().Jobs);
+		indexDraw->SetServices(this, cameraSystem, GetRuntimeServices().Jobs);
+		indexDraw->SetScene(GetRenderScene());
 		indexDraw->CreateIndirectBuffers(MAX_EXPECTED_INSTANCES, MAX_FRAMES_IN_FLIGHT);
 
 		// We have a huge buffer on the GPU now to store all of our meshes so we never have to change vertice and indice bindings
@@ -282,9 +282,9 @@ namespace Engine
 	// Called when system initializes
 	int VulkanRenderer::Init()
 	{
-		if (!cameraSystem || !sceneSystem)
+		if (!cameraSystem)
 		{
-			std::cerr << "[VulkanRenderer] CameraSystem/SceneSystem dependencies were not injected before Init.\n";
+			std::cerr << "[VulkanRenderer] CameraSystem dependency was not injected before Init.\n";
 			return -1;
 		}
 
@@ -294,6 +294,11 @@ namespace Engine
 	// Called every frame
 	void VulkanRenderer::Update(double dt)
 	{
+		if (!GetRenderScene())
+		{
+			return;
+		}
+
 		// If minimized, do NOT call DrawFrame or we will be deadlocked on a null sized surface
 		if (windowWidth == 0 || windowHeight == 0)
 		{

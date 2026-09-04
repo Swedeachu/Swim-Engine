@@ -1,63 +1,50 @@
 #include "PCH.h"
 #include "Transform.h"
 #include "Engine/Systems/Scene/Scene.h"
+#include "Engine/Systems/Scene/TransformSystem.h"
 
 namespace Engine
 {
 
-	void Transform::QueueDirtyEntity()
+	bool Transform::QueueDirtyEntity()
 	{
-		if (owner == entt::null)
+		if (!transformSystem || owner == entt::null)
 		{
-			return;
+			return false;
 		}
 
-		if (lastQueuedDirtyEpoch == DirtyEpoch)
-		{
-			return;
-		}
-
-		lastQueuedDirtyEpoch = DirtyEpoch;
-		MarkEntityDirty(owner);
+		return transformSystem->QueueDirty(owner, lastQueuedDirtyEpoch);
 	}
 
 	void Transform::MarkDirty()
 	{
-		const bool alreadyQueuedThisFrame = (lastQueuedDirtyEpoch == DirtyEpoch);
-
 		dirty = true;
 		worldDirty = true;
-		TransformsDirty = true;
 
-		if (!alreadyQueuedThisFrame)
+		// Before a Transform is attached to a Scene there is no scene-level consumer to
+		// notify. Once bound, QueueDirtyEntity() deduplicates this mutation per frame.
+		if (!transformSystem || QueueDirtyEntity())
 		{
 			++worldVersion;
-			++GlobalMutationVersion;
-			if (GlobalMutationVersion == 0)
+			if (worldVersion == 0)
 			{
-				GlobalMutationVersion = 1;
+				worldVersion = 1;
 			}
-			QueueDirtyEntity();
 			MarkChildrenDirty();
 		}
 	}
 
 	void Transform::MarkWorldDirtyOnly()
 	{
-		const bool alreadyQueuedThisFrame = (lastQueuedDirtyEpoch == DirtyEpoch);
-
 		worldDirty = true;
-		TransformsDirty = true;
 
-		if (!alreadyQueuedThisFrame)
+		if (!transformSystem || QueueDirtyEntity())
 		{
 			++worldVersion;
-			++GlobalMutationVersion;
-			if (GlobalMutationVersion == 0)
+			if (worldVersion == 0)
 			{
-				GlobalMutationVersion = 1;
+				worldVersion = 1;
 			}
-			QueueDirtyEntity();
 			MarkChildrenDirty();
 		}
 	}

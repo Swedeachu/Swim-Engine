@@ -9,11 +9,9 @@
 namespace Engine
 {
 
-	std::vector<Engine::SceneSystem::PreregisteredScene> Engine::SceneSystem::factory;
-
-	void SceneSystem::Preregister(std::string name, SceneFactory sceneFactory)
+	void SceneSystem::RegisterSceneType(std::string name, SceneFactory sceneFactory)
 	{
-		factory.push_back({ std::move(name), std::move(sceneFactory) });
+		sceneCatalog.Register(std::move(name), std::move(sceneFactory));
 	}
 
 	int SceneSystem::Awake()
@@ -24,23 +22,42 @@ namespace Engine
 			return -1;
 		}
 
-		// Register fresh runtime scenes from static constructor descriptors.
-		// The descriptors intentionally remain available so a second engine instance
-		// in the same process receives the same preregistered scene types.
-		for (const auto& descriptor : factory)
-		{
-			if (descriptor.Factory)
-			{
-				scenes[descriptor.Name] = descriptor.Factory();
-			}
-		}
-
 		int err = 0;
+
+		// Construct runtime instances from this SceneSystem's explicit catalog.
+		// There is no process-global scene registration or static initialization path.
+		for (const SceneCatalog::Descriptor& descriptor : sceneCatalog.GetDescriptors())
+		{
+			if (scenes.contains(descriptor.Name))
+			{
+				std::cerr << "Scene instance '" << descriptor.Name << "' is already loaded.\n";
+				if (err == 0)
+				{
+					err = -1;
+				}
+				continue;
+			}
+
+			std::shared_ptr<Scene> scene = descriptor.Create(descriptor.Name);
+			if (!scene)
+			{
+				std::cerr << "Scene factory '" << descriptor.Name << "' returned null.\n";
+				if (err == 0)
+				{
+					err = -1;
+				}
+				continue;
+			}
+
+			SceneId id(nextSceneId++);
+			scenes.emplace(descriptor.Name, LoadedScene{ id, std::move(scene) });
+		}
 
 		// Inject services into every scene, including scenes registered explicitly
 		// before Awake(), then awaken the scene only after all dependencies exist.
-		for (auto& [name, scene] : scenes)
+		for (auto& [name, loadedScene] : scenes)
 		{
+			std::shared_ptr<Scene>& scene = loadedScene.Instance;
 			InjectServices(*scene);
 			scene->InternalSceneAwake();
 			int terr = scene->Awake();
@@ -51,8 +68,26 @@ namespace Engine
 			}
 		}
 
+		if (!startupSceneName.empty())
+		{
+			auto startup = scenes.find(startupSceneName);
+			if (startup == scenes.end())
+			{
+				std::cerr << "Startup scene '" << startupSceneName << "' is not registered.\n";
+				if (err == 0)
+				{
+					err = -1;
+				}
+			}
+			else
+			{
+				activeScene = startup->second.Instance;
+				activeSceneId = startup->second.Id;
+			}
+		}
+
 		// Register editor-only command surfaces from the actual runtime state.
-		if (HasAnyEngineStates(*services.State, EngineState::Editing))
+		if (HasAnyEngineStates(*services.Core.State, EngineState::Editing) && services.Tools.Commands)
 		{
 			RegisterEditorCommands();
 			SendBehaviorsToEditor();
@@ -71,6 +106,18 @@ namespace Engine
 		}
 
 		return 0;
+	}
+
+	void SceneSystem::BeginFrame()
+	{
+		for (auto& [name, loaded] : scenes)
+		{
+			(void)name;
+			if (loaded.Instance)
+			{
+				loaded.Instance->BeginFrameTransformTracking();
+			}
+		}
 	}
 
 	void SceneSystem::Update(double dt)
@@ -97,8 +144,9 @@ namespace Engine
 	{
 		int err = 0;
 
-		for (auto& [name, scene] : scenes)
+		for (auto& [name, loadedScene] : scenes)
 		{
+			std::shared_ptr<Scene>& scene = loadedScene.Instance;
 			scene->InternalSceneExit();
 			int sceneError = scene->Exit();
 			if (sceneError != 0)
@@ -112,8 +160,20 @@ namespace Engine
 		}
 
 		activeScene.reset();
+		activeSceneId = {};
 		scenes.clear();
 		return err;
+	}
+
+	SceneId SceneSystem::FindSceneId(std::string_view name) const
+	{
+		auto it = scenes.find(std::string(name));
+		if (it == scenes.end())
+		{
+			return {};
+		}
+
+		return it->second.Id;
 	}
 
 	void SceneSystem::SetScene(const std::string& name, bool exitCurrent, bool initNew, bool awakeNew)
@@ -136,7 +196,8 @@ namespace Engine
 		}
 
 		// Set the new active scene
-		activeScene = it->second;
+		activeScene = it->second.Instance;
+		activeSceneId = it->second.Id;
 		if (activeScene)
 		{
 			InjectServices(*activeScene);
@@ -162,45 +223,47 @@ namespace Engine
 
 	void SceneSystem::InjectServices(Scene& scene)
 	{
-		scene.SetSceneSystem(this);
-		scene.SetInputManager(services.Input);
-		scene.SetCameraSystem(services.Camera);
-		scene.SetEngineState(services.State);
-		scene.SetClipSpaceDepthRange(services.ClipDepth);
-		scene.SetMeshPool(services.Meshes);
-		scene.SetTexturePool(services.Textures);
-		scene.SetMaterialPool(services.Materials);
-		scene.SetFontPool(services.Fonts);
-		scene.SetFileSystem(services.Files);
-		scene.SetJobSystem(services.Jobs);
-		scene.SetIoSystem(services.IO);
-		scene.SetAssetSystem(services.Assets);
-		scene.SetFrameArena(services.FrameMemory);
-		scene.SetFPSProvider(services.GetFPS);
+		scene.SetInputManager(services.Presentation.Input);
+		scene.SetCameraSystem(services.Presentation.Camera);
+		scene.SetEngineState(services.Core.State);
+		scene.SetClipSpaceDepthRange(services.Presentation.ClipDepth);
+		scene.SetMeshPool(services.Presentation.Meshes);
+		scene.SetTexturePool(services.Presentation.Textures);
+		scene.SetMaterialPool(services.Presentation.Materials);
+		scene.SetFontPool(services.Presentation.Fonts);
+		scene.SetFileSystem(services.Core.Files);
+		scene.SetJobSystem(services.Core.Jobs);
+		scene.SetIoSystem(services.Core.IO);
+		scene.SetAssetSystem(services.Core.Assets);
+		scene.SetFrameArena(services.Core.FrameMemory);
+		scene.SetFPSProvider(services.Tools.GetFPS);
+		scene.SetCommandDispatcher([commands = services.Tools.Commands](std::string_view command)
+		{
+			if (!commands)
+			{
+				return false;
+			}
 
-		if (services.Vulkan)
-		{
-			scene.SetVulkanRenderer(services.Vulkan);
-		}
-		else if (services.OpenGL)
-		{
-			scene.SetOpenGLRenderer(services.OpenGL);
-		}
+			return commands->ParseAndDispatch(std::string(command));
+		});
+		scene.SetEditorMessageSender(services.Tools.SendEditorMessage);
+
+		scene.SetCubeMapController(services.Presentation.CubeMap);
 	}
 
 	bool SceneSystem::DispatchCommand(std::string_view command)
 	{
-		if (!services.Commands)
+		if (!services.Tools.Commands)
 		{
 			return false;
 		}
 
 		const std::string ownedCommand(command);
-		const bool ok = services.Commands->ParseAndDispatch(ownedCommand);
+		const bool ok = services.Tools.Commands->ParseAndDispatch(ownedCommand);
 
-		if (services.SendEditorMessage)
+		if (services.Tools.SendEditorMessage)
 		{
-			services.SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + ownedCommand, 1);
+			services.Tools.SendEditorMessage(std::string(ok ? "(Recv [200]): " : "(Recv [400]): ") + ownedCommand, 1);
 		}
 
 		return ok;
@@ -274,7 +337,7 @@ namespace Engine
 
 	void SceneSystem::SendBehaviorsToEditor()
 	{
-		if (!services.SendEditorMessage)
+		if (!services.Tools.SendEditorMessage)
 		{
 			return;
 		}
@@ -282,14 +345,14 @@ namespace Engine
 		auto behaviorFactories = BehaviorFactory::GetInstance().GetFactories();
 		for (const auto& factory : behaviorFactories)
 		{
-			services.SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
+			services.Tools.SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
 		}
 	}
 
 	// Command registration entry point
 	void SceneSystem::RegisterEditorCommands()
 	{
-		CommandSystem* cmd = services.Commands;
+		CommandSystem* cmd = services.Tools.Commands;
 		if (!cmd)
 		{
 			return;
@@ -431,7 +494,12 @@ namespace Engine
 				return;
 			}
 
-			MaterialPool& materialPool = *services.Materials;
+			if (!services.Presentation.Materials)
+			{
+				return;
+			}
+
+			MaterialPool& materialPool = *services.Presentation.Materials;
 
 			// Check if this is a composite material
 			if (materialPool.CompositeMaterialExists(materialKey))

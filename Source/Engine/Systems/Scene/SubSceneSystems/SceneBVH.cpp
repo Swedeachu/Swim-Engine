@@ -3,6 +3,7 @@
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Systems/Scene/TransformSystem.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
@@ -129,8 +130,8 @@ namespace Engine
 
 	}
 
-	SceneBVH::SceneBVH(entt::registry& registry, Swim::Jobs::JobSystem& jobs)
-		: registry{ registry }, jobs{ &jobs }
+	SceneBVH::SceneBVH(entt::registry& registry, TransformSystem& transforms, Swim::Jobs::JobSystem& jobs)
+		: registry{ registry }, transforms{ transforms }, jobs{ &jobs }
 	{}
 
 	void SceneBVH::EnsureParallelQueryScratch(size_t workerSlots, size_t seedItemHint) const
@@ -221,7 +222,7 @@ namespace Engine
 			return;
 		}
 
-		const std::vector<entt::entity>& dirtyEntities = Transform::GetDirtyEntities();
+		const std::vector<entt::entity>& dirtyEntities = transforms.GetDirtyEntities();
 		if (dirtyEntities.empty())
 		{
 			return;
@@ -765,7 +766,7 @@ namespace Engine
 
 	AABBFrustumClassification SceneBVH::ClassifyNode(const BVHNode& node, const Frustum& frustum, const AABB& aabb) const
 	{
-		const uint64_t frustumRevision = Frustum::GetRevision();
+		const uint64_t frustumRevision = frustum.GetRevision();
 		if (node.hasCullHistory
 			&& node.lastFrustumRevision == frustumRevision
 			&& node.lastCullAABBMin == aabb.min
@@ -790,7 +791,7 @@ namespace Engine
 
 	AABBFrustumClassification SceneBVH::ClassifyWideNode(const WideNode& node, const Frustum& frustum) const
 	{
-		const uint64_t frustumRevision = Frustum::GetRevision();
+		const uint64_t frustumRevision = frustum.GetRevision();
 		if (node.hasCullHistory
 			&& node.lastFrustumRevision == frustumRevision
 			&& node.lastCullAABBMin == node.traversalAABB.min
@@ -1499,7 +1500,7 @@ namespace Engine
 	{
 		bool needsUpdate = !frustumObserver.empty();
 
-		if (!needsUpdate && !Transform::GetDirtyEntities().empty())
+		if (!needsUpdate && !transforms.GetDirtyEntities().empty())
 		{
 			needsUpdate = true;
 		}

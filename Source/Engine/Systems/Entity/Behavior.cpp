@@ -2,10 +2,8 @@
 #include "Behavior.h"
 
 #include "Engine/Systems/Scene/Scene.h"
-#include "Engine/Systems/Scene/SceneSystem.h"
 #include "Engine/Systems/IO/InputManager.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
-#include "Engine/Systems/Renderer/Renderer.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 
@@ -33,9 +31,7 @@ namespace Engine
 
 		// Cache commonly used systems
 		input = scene->GetInputManager();
-		sceneSystem = scene->GetSceneSystem();
 		cameraSystem = scene->GetCameraSystem();
-		renderer = scene->GetRenderer();
 
 		// Cache common crucial components if they exist
 		auto& registry = scene->GetRegistry();

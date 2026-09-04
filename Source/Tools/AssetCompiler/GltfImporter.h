@@ -13,6 +13,7 @@ namespace Swim::AssetCompiler
 		None,
 		FileOpenFailed,
 		ParseFailed,
+		UnsupportedFeature,
 		InvalidData,
 		IndexOverflow
 	};

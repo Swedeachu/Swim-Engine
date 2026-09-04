@@ -61,6 +61,70 @@ namespace Swim::Assets
 		});
 	}
 
+	ContentHash AssetSystem::ComputeDependencyRevisionHash(AssetId root) const
+	{
+		RequireOwnerThread();
+		if (!root.IsValid())
+		{
+			return {};
+		}
+
+		std::vector<AssetId> pending{ root };
+		std::unordered_set<AssetId> visited;
+		std::vector<const Record*> graph;
+		while (!pending.empty())
+		{
+			const AssetId id = pending.back();
+			pending.pop_back();
+			if (!visited.insert(id).second)
+			{
+				continue;
+			}
+
+			const auto record = records.find(id);
+			if (record == records.end() || !record->second.Declared)
+			{
+				return {};
+			}
+			graph.push_back(&record->second);
+			pending.insert(pending.end(), record->second.Dependencies.begin(), record->second.Dependencies.end());
+		}
+
+		std::sort(graph.begin(), graph.end(), [](const Record* left, const Record* right)
+		{
+			return left->Id.Value < right->Id.Value;
+		});
+
+		std::vector<std::byte> bytes;
+		auto append = [&bytes](const void* data, std::size_t size)
+		{
+			const std::byte* begin = static_cast<const std::byte*>(data);
+			bytes.insert(bytes.end(), begin, begin + size);
+		};
+
+		for (const Record* record : graph)
+		{
+			append(&record->Id.Value, sizeof(record->Id.Value));
+			append(&record->Generation, sizeof(record->Generation));
+			const std::uint8_t state = static_cast<std::uint8_t>(record->State);
+			append(&state, sizeof(state));
+			append(record->Hash.Bytes.data(), record->Hash.Bytes.size());
+
+			std::vector<AssetId> dependencies = record->Dependencies;
+			std::sort(dependencies.begin(), dependencies.end(), [](AssetId left, AssetId right)
+			{
+				return left.Value < right.Value;
+			});
+			const std::uint64_t dependencyCount = static_cast<std::uint64_t>(dependencies.size());
+			append(&dependencyCount, sizeof(dependencyCount));
+			for (const AssetId dependency : dependencies)
+			{
+				append(&dependency.Value, sizeof(dependency.Value));
+			}
+		}
+		return ComputeContentHash(bytes);
+	}
+
 	std::vector<AssetId> AssetSystem::GetDependents(AssetId dependency) const
 	{
 		RequireOwnerThread();

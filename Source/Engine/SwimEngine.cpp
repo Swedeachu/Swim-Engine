@@ -8,6 +8,7 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
 
 #if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
 #include "Tools/AssetCompiler/DevelopmentAssetPipeline.h"
@@ -31,6 +32,28 @@ namespace Engine
 			return result;
 		}
 
+#if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
+		const char* DevelopmentAssetErrorStageName(Swim::AssetCompiler::DevelopmentAssetErrorStage stage)
+		{
+			switch (stage)
+			{
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Inspect:
+					return "inspect";
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Import:
+					return "import";
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Optimize:
+					return "optimize";
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Compile:
+					return "compile";
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Publish:
+					return "publish";
+				case Swim::AssetCompiler::DevelopmentAssetErrorStage::Load:
+					return "load";
+			}
+			return "unknown";
+		}
+#endif
+
 	}
 
 	SwimEngine::SwimEngine(EngineConfig config)
@@ -46,6 +69,12 @@ namespace Engine
 		graphicsBackend = ResolveGraphicsBackend(config.Graphics);
 		physicsBackend = ResolvePhysicsBackend(config.Physics);
 		platformSystem = std::make_unique<Swim::Platform::PlatformSystem>();
+
+		// Scene type registration is an application configuration step that happens
+		// before Start(). Keep the SceneSystem alive for the full SwimEngine lifetime
+		// so pre-start registrations are retained until runtime services are injected.
+		sceneSystem = std::make_unique<SceneSystem>();
+
 		engineState = config.InitialState;
 		windowWidth = config.Window.Width;
 		windowHeight = config.Window.Height;
@@ -294,22 +323,30 @@ namespace Engine
 
 #if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
 		{
-			const auto bootstrap = Swim::AssetCompiler::RunDevelopmentAssetBootstrap(
-				platformSystem->GetFileSystem().GetAssetRoot(), *assetSystem);
+			const std::filesystem::path assetRoot = platformSystem->GetFileSystem().GetAssetRoot();
+			std::cout << "[Assets] Development asset root: " << assetRoot.string() << '\n';
+			const auto bootstrap = Swim::AssetCompiler::RunDevelopmentAssetBootstrap(assetRoot, *assetSystem);
 			std::cout << "[Assets] Sources: " << bootstrap.Stats.SourcesDiscovered
 				<< ", current: " << bootstrap.Stats.SourcesCurrent
 				<< ", cooked: " << bootstrap.Stats.SourcesCooked
+				<< ", skipped unsupported: " << bootstrap.Stats.SourcesSkippedUnsupported
+				<< ", root models loaded: " << bootstrap.Stats.RootModelsLoaded
 				<< ", loaded .sasset files: " << bootstrap.Stats.SassetsLoaded << ".\n";
 			for (const auto& error : bootstrap.Errors)
 			{
-				std::cerr << "[Assets] " << error.SourcePath.string() << ": " << error.Message << '\n';
+				std::cerr << "[Assets] [" << DevelopmentAssetErrorStageName(error.Stage) << "] "
+					<< error.SourcePath.string() << ": " << error.Message << '\n';
+			}
+			if (!bootstrap.Errors.empty())
+			{
+				std::cerr << "[Assets] Development bootstrap completed with " << bootstrap.Errors.size()
+					<< " error(s). Failed authoring assets will be skipped instead of terminating scene startup.\n";
 			}
 		}
 #endif
 
 		inputManager = std::make_unique<InputManager>();
 		commandSystem = std::make_unique<CommandSystem>();
-		sceneSystem = std::make_unique<SceneSystem>();
 		physicsSystem = std::make_unique<PhysicsSystem>();
 
 		switch (graphicsBackend)
@@ -349,6 +386,7 @@ namespace Engine
 		texturePool = std::make_unique<TexturePool>(platformSystem->GetFileSystem(), std::move(textureContext));
 
 		materialPool = std::make_unique<MaterialPool>(
+			*assetSystem,
 			*meshPool,
 			*texturePool,
 			[this](const std::string& message, std::uintptr_t channel)
@@ -370,44 +408,43 @@ namespace Engine
 		renderer.SetRuntimeServices(&rendererRuntimeServices);
 
 		SceneSystemServices sceneServices{};
-		sceneServices.Input = inputManager.get();
-		sceneServices.Commands = commandSystem.get();
-		sceneServices.Camera = cameraSystem.get();
-		sceneServices.Vulkan = vulkanRenderer.get();
-		sceneServices.OpenGL = openglRenderer.get();
-		sceneServices.Meshes = meshPool.get();
-		sceneServices.Textures = texturePool.get();
-		sceneServices.Materials = materialPool.get();
-		sceneServices.Fonts = fontPool.get();
-		sceneServices.Files = &platformSystem->GetFileSystem();
-		sceneServices.Jobs = jobSystem.get();
-		sceneServices.IO = ioSystem.get();
-		sceneServices.Assets = assetSystem.get();
-		sceneServices.FrameMemory = &frameArena;
-		sceneServices.State = &engineState;
-		sceneServices.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
+		sceneServices.Presentation.Input = inputManager.get();
+		sceneServices.Tools.Commands = commandSystem.get();
+		sceneServices.Presentation.Camera = cameraSystem.get();
+		// Renderer-owned environment services are created during Renderer::Awake().
+		// Bind the cubemap controller after renderer Awake instead of snapshotting nullptr here.
+		sceneServices.Presentation.CubeMap = nullptr;
+		sceneServices.Presentation.Meshes = meshPool.get();
+		sceneServices.Presentation.Textures = texturePool.get();
+		sceneServices.Presentation.Materials = materialPool.get();
+		sceneServices.Presentation.Fonts = fontPool.get();
+		sceneServices.Core.Files = &platformSystem->GetFileSystem();
+		sceneServices.Core.Jobs = jobSystem.get();
+		sceneServices.Core.IO = ioSystem.get();
+		sceneServices.Core.Assets = assetSystem.get();
+		sceneServices.Core.FrameMemory = &frameArena;
+		sceneServices.Core.State = &engineState;
+		sceneServices.Presentation.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
 			? ClipSpaceDepthRange::ZeroToOne
 			: ClipSpaceDepthRange::MinusOneToOne;
-		sceneServices.SendEditorMessage = [this](const std::string& message, std::uintptr_t channel)
+		sceneServices.Tools.SendEditorMessage = [this](const std::string& message, std::uintptr_t channel)
 		{
 			return SendEditorMessage(message, channel);
 		};
-		sceneServices.GetFPS = [this]()
+		sceneServices.Tools.GetFPS = [this]()
 		{
 			return GetFPS();
 		};
 		sceneSystem->SetServices(std::move(sceneServices));
-		physicsSystem->SetServices(sceneSystem.get(), &engineState);
+		physicsSystem->SetServices(&engineState);
 
 		if (vulkanRenderer)
 		{
 			vulkanRenderer->SetCameraSystem(cameraSystem.get());
-			vulkanRenderer->SetSceneSystem(sceneSystem.get());
 		}
 		if (openglRenderer)
 		{
 			openglRenderer->SetCameraSystem(cameraSystem.get());
-			openglRenderer->SetSceneSystem(sceneSystem.get());
 		}
 
 		const int awakeResult = AwakeSystems();
@@ -468,6 +505,10 @@ namespace Engine
 			return ReportLifecycleFailure("Awake", "Renderer", result);
 		}
 
+		// The renderer creates its backend-neutral cubemap controller during Awake().
+		// Scene services must receive that live controller before any Scene::Awake/Init runs.
+		sceneSystem->SetCubeMapController(GetRenderer().GetCubeMapController().get());
+
 		// Scenes are consumers of input, command, physics, camera, and renderer
 		// services, so they are deliberately the last core runtime owner awakened.
 		result = sceneSystem->Awake();
@@ -475,6 +516,8 @@ namespace Engine
 		{
 			return ReportLifecycleFailure("Awake", "SceneSystem", result);
 		}
+
+		GetRenderer().SetRenderScene(sceneSystem->GetActiveScene().get());
 
 		return 0;
 	}
@@ -649,7 +692,10 @@ namespace Engine
 
 			accumulatedTime += delta;
 			frameArena.BeginFrame(static_cast<std::uint64_t>(totalFrames) + 1);
-			Transform::BeginFrameDirtyTracking();
+			if (sceneSystem)
+			{
+				sceneSystem->BeginFrame();
+			}
 
 			while (accumulatedTime >= fixedTimeStep)
 			{
@@ -747,14 +793,18 @@ namespace Engine
 		{
 			commandSystem->Update(dt);
 		}
+		Scene* activeScene = nullptr;
 		if (sceneSystem)
 		{
 			sceneSystem->Update(dt);
+			activeScene = sceneSystem->GetActiveScene().get();
 		}
-		if (physicsSystem)
+		if (physicsSystem && activeScene)
 		{
-			physicsSystem->Update(dt);
+			physicsSystem->UpdateScene(*activeScene, dt);
 		}
+
+		GetRenderer().SetRenderScene(activeScene);
 		if (vulkanRenderer)
 		{
 			vulkanRenderer->Update(dt);
@@ -795,13 +845,15 @@ namespace Engine
 		{
 			commandSystem->FixedUpdate(tickThisSecond);
 		}
+		Scene* activeScene = nullptr;
 		if (sceneSystem)
 		{
 			sceneSystem->FixedUpdate(tickThisSecond);
+			activeScene = sceneSystem->GetActiveScene().get();
 		}
-		if (physicsSystem)
+		if (physicsSystem && activeScene)
 		{
-			physicsSystem->FixedUpdate(tickThisSecond);
+			physicsSystem->FixedUpdateScene(*activeScene, tickThisSecond);
 		}
 		if (vulkanRenderer)
 		{

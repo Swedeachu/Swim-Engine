@@ -20,35 +20,26 @@ namespace Engine
 
 	struct Frustum
 	{
-		glm::vec4 planes[6]; // ax + by + cz + d = 0
+		glm::vec4 planes[6]{}; // ax + by + cz + d = 0
 
-		inline static const Frustum& Get()
-		{
-			return cachedFrustum;
-		}
+		std::uint64_t GetRevision() const { return revision; }
+		bool DidCameraMoveThisFrame() const { return cameraMovedThisFrame; }
 
-		inline static uint64_t GetRevision()
+		// Updates this specific view's frustum state. No process-global camera/frustum
+		// cache exists, so multiple views can maintain independent revisions/history.
+		void Update(const glm::mat4& view, const glm::mat4& proj)
 		{
-			return revision;
-		}
-
-		inline static bool DidCameraMoveThisFrame()
-		{
-			return cameraMovedThisFrame;
-		}
-
-		// === Setup camera frustum from view/proj matrices (once per frame) ===
-		static void SetCameraMatrices(const glm::mat4& view, const glm::mat4& proj)
-		{
-			glm::mat4 newVP = proj * view;
-			// Psuedo dirty flag to check if we even need to recompute by checking if the matrices memory bounds are equal
+			const glm::mat4 newVP = proj * view;
 			if (!MatricesEqual(newVP, lastVP))
 			{
 				lastVP = newVP;
-				lastView = view;
-				cachedFrustum = ComputeFromMatrix(newVP);
+				ComputeFromMatrix(newVP);
+				revision = HashMatrix(newVP);
+				if (revision == 0)
+				{
+					revision = 1;
+				}
 				cameraMovedThisFrame = true;
-				++revision;
 			}
 			else
 			{
@@ -185,27 +176,23 @@ namespace Engine
 
 	private:
 
-		static Frustum ComputeFromMatrix(const glm::mat4& vp)
+		void ComputeFromMatrix(const glm::mat4& vp)
 		{
-			Frustum f;
-
-			f.planes[0] = glm::vec4(vp[0][3] + vp[0][0], vp[1][3] + vp[1][0], vp[2][3] + vp[2][0], vp[3][3] + vp[3][0]); // Left
-			f.planes[1] = glm::vec4(vp[0][3] - vp[0][0], vp[1][3] - vp[1][0], vp[2][3] - vp[2][0], vp[3][3] - vp[3][0]); // Right
-			f.planes[2] = glm::vec4(vp[0][3] + vp[0][1], vp[1][3] + vp[1][1], vp[2][3] + vp[2][1], vp[3][3] + vp[3][1]); // Bottom
-			f.planes[3] = glm::vec4(vp[0][3] - vp[0][1], vp[1][3] - vp[1][1], vp[2][3] - vp[2][1], vp[3][3] - vp[3][1]); // Top
-			f.planes[4] = glm::vec4(vp[0][3] + vp[0][2], vp[1][3] + vp[1][2], vp[2][3] + vp[2][2], vp[3][3] + vp[3][2]); // Near
-			f.planes[5] = glm::vec4(vp[0][3] - vp[0][2], vp[1][3] - vp[1][2], vp[2][3] - vp[2][2], vp[3][3] - vp[3][2]); // Far
+			planes[0] = glm::vec4(vp[0][3] + vp[0][0], vp[1][3] + vp[1][0], vp[2][3] + vp[2][0], vp[3][3] + vp[3][0]); // Left
+			planes[1] = glm::vec4(vp[0][3] - vp[0][0], vp[1][3] - vp[1][0], vp[2][3] - vp[2][0], vp[3][3] - vp[3][0]); // Right
+			planes[2] = glm::vec4(vp[0][3] + vp[0][1], vp[1][3] + vp[1][1], vp[2][3] + vp[2][1], vp[3][3] + vp[3][1]); // Bottom
+			planes[3] = glm::vec4(vp[0][3] - vp[0][1], vp[1][3] - vp[1][1], vp[2][3] - vp[2][1], vp[3][3] - vp[3][1]); // Top
+			planes[4] = glm::vec4(vp[0][3] + vp[0][2], vp[1][3] + vp[1][2], vp[2][3] + vp[2][2], vp[3][3] + vp[3][2]); // Near
+			planes[5] = glm::vec4(vp[0][3] - vp[0][2], vp[1][3] - vp[1][2], vp[2][3] - vp[2][2], vp[3][3] - vp[3][2]); // Far
 
 			for (int i = 0; i < 6; ++i)
 			{
-				float len = glm::length(glm::vec3(f.planes[i]));
+				const float len = glm::length(glm::vec3(planes[i]));
 				if (len > 0.0f)
 				{
-					f.planes[i] /= len;
+					planes[i] /= len;
 				}
 			}
-
-			return f;
 		}
 
 		static bool IsAABBOutsidePlane(const AABB& aabb, const glm::vec4& plane)
@@ -257,19 +244,21 @@ namespace Engine
 			return std::memcmp(glm::value_ptr(a), glm::value_ptr(b), sizeof(glm::mat4)) == 0;
 		}
 
-		// Static cached state
-		static glm::mat4 lastVP;
-		static glm::mat4 lastView;
-		static Frustum cachedFrustum;
-		static uint64_t revision;
-		static bool cameraMovedThisFrame;
-	};
+		static std::uint64_t HashMatrix(const glm::mat4& matrix)
+		{
+			const auto* bytes = reinterpret_cast<const std::uint8_t*>(glm::value_ptr(matrix));
+			std::uint64_t hash = 1469598103934665603ull;
+			for (std::size_t i = 0; i < sizeof(glm::mat4); ++i)
+			{
+				hash ^= static_cast<std::uint64_t>(bytes[i]);
+				hash *= 1099511628211ull;
+			}
+			return hash;
+		}
 
-	// Static member initialization
-	inline glm::mat4 Frustum::lastVP = glm::mat4(0.0f);
-	inline glm::mat4 Frustum::lastView = glm::mat4(1.0f);
-	inline Frustum Frustum::cachedFrustum = {};
-	inline uint64_t Frustum::revision = 1;
-	inline bool Frustum::cameraMovedThisFrame = true;
+		glm::mat4 lastVP{ 0.0f };
+		std::uint64_t revision = 1;
+		bool cameraMovedThisFrame = true;
+	};
 
 }
