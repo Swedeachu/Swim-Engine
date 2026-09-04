@@ -41,8 +41,11 @@ Engine Modules/
   SwimPlatform             # reusable platform boundary
   SwimInput                # reusable input boundary
 Tests/
-  SwimPlatformPublicHeaders
-  SwimInputTests
+  SwimTests                # the entire runnable test corpus, one program
+  Header Boundary/         # per-module public-header compile gates
+Tools/
+  SwimAssetCompiler        # asset compiler module library
+  SwimAssetCooker          # the same module's command-line front end
 Examples/
   SwimHelloWindow
   SwimHeadlessPlatform
@@ -58,7 +61,7 @@ CMake/
   ALL_BUILD, ZERO_CHECK, INSTALL, ...
 ```
 
-`SwimPlatform` and `SwimInput` are real first-party module targets, not duplicate copies of `SwimEngine`: their source files are explicitly excluded from the `SwimEngine` source glob and linked into the executable once. Keeping those two foundational boundaries separate allows headless/tools/tests to reuse them without linking the whole renderer/game. Tests and examples stay visible for explicit validation but are `EXCLUDE_FROM_ALL`, so a normal engine build does not compile them. Third-party projects remain real dependency targets but are collapsed under `Third Party` (with large dependency graphs such as Draco and WebP nested again) rather than cluttering the solution root. CMake's predefined projects are kept under `CMake`.
+`SwimPlatform` and `SwimInput` are real first-party module targets, not duplicate copies of `SwimEngine`: their source files are explicitly excluded from the `SwimEngine` source glob and linked into the executable once. Keeping those two foundational boundaries separate allows headless/tools/tests to reuse them without linking the whole renderer/game. Tests and examples stay visible for explicit validation but are `EXCLUDE_FROM_ALL`, so a normal engine build does not compile them. All runnable tests live in one `SwimTests` program (see Testing below). Third-party projects remain real dependency targets but are collapsed under `Third Party` (with large dependency graphs such as Draco and WebP nested again) rather than cluttering the solution root. CMake's predefined projects are kept under `CMake`.
 
 Build either configuration from the terminal with:
 
@@ -113,11 +116,47 @@ The Windows launchers invoke the PowerShell scripts directly. The Linux launcher
 
 `build-windows.ps1` remains as a compatibility alias for the Windows soft-build path. The Windows scripts do not require a Developer Command Prompt: they discover standalone or Visual Studio-bundled CMake, locate Visual Studio 2022/Build Tools, import the x64 MSVC environment when using Ninja, discover Visual Studio's bundled Ninja even when it is not on `PATH`, and fall back to the Visual Studio generator if Ninja is unavailable. The helper intentionally uses `DebugBuild` internally rather than PowerShell's reserved/common `Debug` parameter name, while the public scripts retain the convenient `-Debug` switch. A normal Explorer double-click is therefore sufficient once Visual Studio 2022/Build Tools with Desktop development with C++ is installed. Both Windows clean and soft launchers leave `build/windows-vs/SwimEngine.sln` synchronized with the current CMake project. Clean recreates it after a full dependency reset; soft refreshes it offline from the existing validated cache before completing the requested Debug/Release Ninja build.
 
+### Testing
+
+Every runnable test in the engine is compiled into a single program, `SwimTests`, and both the Windows and Linux clean/soft build scripts build and run the whole suite. There are no per-module test binaries to remember.
+
+```powershell
+build\windows-release\SwimTests.exe                  # run everything
+build\windows-release\SwimTests.exe --list           # list case identifiers
+build\windows-release\SwimTests.exe --filter=Physics # run one area
+build\windows-release\SwimTests.exe --help           # every option
+```
+
+Cases are identified as `<suite>.<name>`, for example `Assets.AssetSystem.UnloadFailAndForgetTransitions`. Filters accept `*`/`?` globs, and a filter without wildcards also matches by dotted prefix, so `--filter=AssetCompiler` selects every case under every `AssetCompiler.*` suite. Other options include `--exclude`, `--list-suites`, `--repeat`, `--shuffle[=seed]`, `--stop-on-failure`, `--verbose`, and `--report=<path>` for JUnit XML. The process exits non-zero if any selected case fails, or if the filter selected nothing.
+
+Adding coverage does not touch the build system. Test cases self-register, so a new `.cpp` under `Source/Tests/Suites/<group>/` is picked up by the next configure:
+
+```cpp
+#include "Engine/Assets/AssetSystem.h"
+#include "Tests/Framework/Test.h"
+
+SWIM_TEST("Assets.AssetSystem", "UnloadKeepsIdentity")
+{
+    Swim::Assets::AssetSystem assets;
+    SWIM_REQUIRE(assets.Initialize());
+    // SWIM_CHECK / SWIM_CHECK_EQUAL / SWIM_CHECK_NEAR / SWIM_CHECK_THROWS ...
+    assets.Shutdown();
+}
+```
+
+The group directory decides which configurations compile the suite: `Core`, `Memory`, `Jobs`, `IO`, `Input`, `Assets`, `Physics/Generic`, and `Scene/Headless` build everywhere, while `AssetCompiler`, `Scene/Ecs`, and `Physics/PhysX` build only where those dependency targets exist. A Linux foundation build therefore runs the portable suites and omits the renderer/PhysX ones.
+
+Note that Swim defines `NDEBUG` in every configuration, including Debug, so `assert()` is a no-op throughout the project. Test code must use the `SWIM_CHECK*`/`SWIM_REQUIRE*` macros, which always evaluate and always report.
+
+A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution folder stay separate from `SwimTests` on purpose: each links exactly one module, which is how they prove that module's public headers are self-contained. `SwimTests` links everything and cannot prove that.
+
 ### Development asset cooking
 
 The Phase 4 development asset path treats loose `.gltf`/`.glb` files as authoring inputs and `.sasset` files as the runtime representation. With `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=ON` (the development default), engine startup scans the platform asset root, skips current cooked roots, and recooks missing/stale/corrupt models through fastgltf -> source codecs (Draco/WebP/KTX2 as required) -> meshoptimizer -> the static-model `.sasset` compiler before loading the cooked dependency graph into `AssetSystem`.
 
-Cooked files mirror the source tree under `Assets/Cooked`; dependency objects are content-validated files under `Assets/Cooked/.objects`. Local external glTF dependencies such as `.bin` files are part of the source fingerprint, so editing one invalidates the matching model even when the `.gltf` file itself did not change. PNG/JPEG/WebP are decoded and mip-generated on the compiler side; already-KTX2/Basis payloads are preserved through the current compiler boundary. Final platform-native/KTX2 compression policy is still in progress.
+Cooked files mirror the source tree under `Assets/Cooked`; dependency objects are content-validated files under `Assets/Cooked/.objects`. `Assets/Cooked/` is generated build output rather than authoring content, so it is Git-ignored: only the source tree under `Assets/` is committed, and any checkout regenerates the cooked graph on first run or with `SwimAssetCooker`. Local external glTF dependencies such as `.bin` files are part of the source fingerprint, so editing one invalidates the matching model even when the `.gltf` file itself did not change. PNG/JPEG/WebP are decoded and mip-generated on the compiler side; already-KTX2/Basis payloads are preserved through the current compiler boundary. Final platform-native/KTX2 compression policy is still in progress.
+
+The asset compiler and the cooker are one module with two build outputs: `SwimAssetCompiler` is the library, and `SwimAssetCooker` is its command-line front end at `Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp`. The separate CMake target exists only because a static library cannot own a `main()`; there is one cook implementation, shared by the tool and by engine-start auto-cook.
 
 The same path can be run without launching the engine:
 
@@ -150,6 +189,7 @@ The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and c
 - **GPU-Driven Rendering:** Vulkan bindless indexed indirect draw system for high-performance instancing.  
 - **Text & SDF Rendering:** MSDF-based text rendering and stylized SDF effects (outline, color, softness).  
 - **Debug Rendering:** Immediate-mode 3D debug mesh rendering.  
+- **Physics Boundary:** Backend-neutral generational handles, descriptors, queries, collision/trigger events, and scene synchronization with the current PhysX implementation isolated behind `SwimPhysicsPhysX`.  
 - **Input System:** Platform-neutral keyboard, mouse, text/IME, and gamepad events/state with action-map support; SDL3/native translation is isolated in the Platform implementation.
 
 ---
@@ -159,7 +199,7 @@ The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and c
 - Editor gizmos and property inspectors for primitive component fields.  
 - Archetype and prefab pipeline for Behavior components.  
 - Full scene serialization and deserialization.  
-- Physics integration with library abstraction (PhysX and Jolt).  
+- Jolt backend implementation and parity testing against the existing generic Physics/PhysX contract.  
 - Compute-based culling pass + occlusion.  
 - Recursive parent-child transform hierarchy for UI entities.  
 - Controller input support.  

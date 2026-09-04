@@ -161,6 +161,16 @@ Longer term, platform-specific native texture variants can move that transcoding
 
 ---
 
+# Windows validation gate
+
+The supported Windows clean/soft build scripts validate the dependency-enabled asset compiler automatically after the main engine target builds. `Invoke-SwimWindowsTestSuite` builds and runs `SwimTests`, whose `AssetCompiler.*` suites cover glTF/Draco import, source-image/WebP compilation, KTX2 compilation, `.sasset` build/parse/load, static model compilation, and the development import/cook/load path.
+
+`Invoke-SwimWindowsAssetCookValidation` then builds `SwimAssetCooker`. If the checkout has loose `.gltf` or `.glb` files below the repository `Assets/` directory, it runs `SwimAssetCooker` against that real asset root. If no loose repository model sources are present, the script says so explicitly and only the deterministic fixture suite is considered covered. This distinction matters: a successful fixture suite proves the compiler dependency path and `.sasset` cook/load mechanics, but it cannot prove compatibility with asset files that were not included in the checkout.
+
+A failure in any of these validation executables fails the Windows clean/soft build. This keeps the Draco/WebP/source-import dependency boundary continuously exercised while development auto-cook remains enabled.
+
+---
+
 # 4. What the development asset bootstrap does
 
 `RunDevelopmentAssetBootstrap(assetRoot, assets)` is currently the shared development/manual-cooker pipeline.
@@ -183,6 +193,8 @@ The pipeline recursively scans the asset root for:
 ```
 
 Anything already under an `Assets/Cooked/...` directory is ignored during source discovery.
+
+`Assets/Cooked/` is generated build output, not authoring content: it is reproducible from the sources beside it by either development auto-cook or `SwimAssetCooker`, so the repository `.gitignore` excludes it. Only the authoring tree under `Assets/` is committed.
 
 ## Step 2 — Check whether the existing cook is current
 
@@ -504,7 +516,7 @@ The important rule is that **even development auto-cook should transition back o
 
 # 10. Standalone/CI cook workflow
 
-The standalone tool runs the same bootstrap implementation:
+The standalone tool runs the same bootstrap implementation. It is not a separate project: `SwimAssetCooker` is the command-line front end of the asset-compiler module, and its `main()` lives beside the library it drives at `Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp`.
 
 ```text
 SwimAssetCooker.exe Assets
@@ -667,34 +679,26 @@ The future RHI/GeometryHeap/texture-residency work will replace the compatibilit
 
 ---
 
-# 14. Current validation gate
+# 14. Current validation status
 
-The source/cook design is implemented, including compiler-side Draco support, but the newest Draco integration still has one real-platform gate to close.
+The source/cook architecture gate that previously blocked Scene/Physics work is no longer an open design checkpoint. The repository now contains the real authoring asset set used by development validation, including normal Sponza/barrel paths, Draco/KTX Sponza variants, and the WebP sofa/couch source set. `Swim::AssetCompilerDraco` remains the only first-party adapter responsible for Draco's source/generated include-root details.
 
-A dependency-enabled Windows build exposed that Draco 1.5.7's CMake target did not publish the include roots required by embedded consumers. The current repository fixes that behind:
+Windows clean and soft builds make the validation mechanical:
 
-```text
-Swim::AssetCompilerDraco
+1. `Invoke-SwimWindowsTestSuite` builds `SwimTests` plus the public-header boundary gates;
+2. it runs the whole suite, which includes every `AssetCompiler.*` suite;
+3. `Invoke-SwimWindowsAssetCookValidation` builds `SwimAssetCooker`;
+4. when the repository `Assets` root contains loose `.gltf`/`.glb` authoring sources, it runs the cooker against that real asset root and fails the build on a cooking error.
+
+To run only the asset-pipeline coverage during iteration:
+
+```powershell
+build\windows-release\SwimTests.exe --filter=AssetCompiler
 ```
 
-which owns:
+This means the architecture guide no longer depends on a human remembering the old Draco/WebP checklist before moving to later phases. A dependency-enabled Windows build is the authoritative compiler/runtime-codec validation environment, while the dependency-stub Linux path remains useful for runtime-format/identity tests that do not require the Windows legacy renderer or source-codec dependencies.
 
-- the pinned Draco target;
-- the `<draco/...>` source include root;
-- the generated `draco/draco_features.h` include root;
-- the pinned dependency's local CMake compatibility policy.
-
-Before moving the architecture critical path forward, the next Windows build should confirm:
-
-1. `SwimAssetCompiler` compiles through the adapter;
-2. the Draco importer tests compile/run;
-3. `sponza-ktx-draco.glb` cooks rather than being skipped/rejected;
-4. the WebP couch cooks successfully;
-5. normal Sponza/barrel GLB paths still cook;
-6. a second unchanged startup reports those sources as **current** rather than recooking them;
-7. the resulting root/dependency `.sasset` files load into `AssetSystem` and render through the compatibility residency path.
-
-Once that passes, the asset-source-codec checkpoint is closed and the architecture guide returns to the next Scene task (`SceneCommandBuffer`).
+The remaining asset work is later-phase optimization rather than reopening source parsing in runtime code: shipping `.spack` layout, platform-native texture variants, direct mapped views, streaming/budgets, GPU residency integration, and compiled collision payloads for physics backends.
 
 ---
 

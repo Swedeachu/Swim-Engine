@@ -7,12 +7,18 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Components/Material.h"
 #include "Engine/Components/CompositeMaterial.h"
+#include "Engine/Components/DoNotSerialize.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshDecorator.h"
 #include "Engine/Components/Internal/FrustumCullCache.h"
-#include "Engine/Systems/Entity/EntityFactory.h"
+#include "SceneCommandBuffer.h"
 #include "InternalBehaviors/CameraControl/EditorCamera.h"
 #include "Engine/Systems/Physics/PhysicsSystem.h"
+#include "Engine/Systems/Entity/BehaviorRegistry.h"
+#include "Serialization/SceneSerializer.h"
+#include "Serialization/SceneStorage.h"
+#include "Serialization/SceneSyncTracker.h"
+#include "Serialization/SceneToolingBridge.h"
 
 namespace Engine
 {
@@ -26,11 +32,11 @@ namespace Engine
 	constexpr static bool alwaysUseEditorCamera = true;
 
 	Scene::Scene()
-		: name("UnnamedScene"), registry()
+		: name("UnnamedScene"), registry(), sceneCommandBuffer(std::make_unique<SceneCommandBuffer>(*this))
 	{}
 
 	Scene::Scene(const std::string& name)
-		: name(name), registry()
+		: name(name), registry(), sceneCommandBuffer(std::make_unique<SceneCommandBuffer>(*this))
 	{}
 
 	Scene::~Scene() = default;
@@ -68,20 +74,9 @@ namespace Engine
 			++renderablesRevision;
 		}
 
-		if (!serializedSceneManager)
+		if (sceneSyncTracker)
 		{
-			return;
-		}
-
-		// If this is the first time we've seen this entity, treat it as "created" for the editor.
-		if (serializedEntities.insert(entity).second)
-		{
-			serializedSceneManager->SendEntityCreated(entity);
-		}
-		else
-		{
-			// Otherwise it's just a normal component add -> entity updated.
-			serializedSceneManager->SendEntityUpdated(entity);
+			sceneSyncTracker->EntityMutated(entity);
 		}
 	}
 
@@ -98,35 +93,55 @@ namespace Engine
 			++renderablesRevision;
 		}
 
-		if (!serializedSceneManager)
+		if (sceneSyncTracker && reg.valid(entity))
 		{
-			return;
-		}
-
-		// If the entity is still valid, just mark it as updated.
-		if (reg.valid(entity))
-		{
-			serializedSceneManager->SendEntityUpdated(entity);
-		}
-		else
-		{
-			// If somehow this destruction happens while the entity is being torn down,
-			// treat it as a destroy event (once).
-			if (serializedEntities.erase(entity) > 0)
-			{
-				serializedSceneManager->SendEntityDestroyed(entity);
-			}
+			// EnTT on_destroy is emitted before component removal. Record the stable ID
+			// as dirty and let SceneSyncTracker serialize the post-mutation state later.
+			sceneSyncTracker->EntityMutated(entity);
 		}
 	}
 
 	entt::entity Scene::CreateEntity()
 	{
 		entt::entity e = registry.create();
+		entityIdentities.Assign(e);
 
 		// All serialization notifications for this entity will be triggered by
 		// registry hooks (e.g. first Transform/ObjectTag/etc. attachment).
 
 		return e;
+	}
+
+	entt::entity Scene::CreateEntityWithSerializedId(SerializedEntityId id)
+	{
+		if (!id)
+		{
+			throw std::invalid_argument("Scene::CreateEntityWithSerializedId requires a nonzero persistent ID.");
+		}
+
+		entt::entity entity = registry.create();
+		if (!entityIdentities.Bind(entity, id))
+		{
+			registry.destroy(entity);
+			throw std::runtime_error("Scene::CreateEntityWithSerializedId received a duplicate persistent ID.");
+		}
+		return entity;
+	}
+
+	SerializedEntityId Scene::GetSerializedEntityId(entt::entity entity) const
+	{
+		const auto id = entityIdentities.FindId(entity);
+		return id ? *id : SerializedEntityId{};
+	}
+
+	entt::entity Scene::FindEntityBySerializedId(SerializedEntityId id) const
+	{
+		const auto entity = entityIdentities.FindEntity(id);
+		if (!entity || !registry.valid(*entity))
+		{
+			return entt::null;
+		}
+		return *entity;
 	}
 
 	void Scene::DestroyEntity(entt::entity entity, bool callExit, bool destroyChildren)
@@ -136,17 +151,11 @@ namespace Engine
 			return;
 		}
 
-		if (serializedSceneManager)
+		const SerializedEntityId serializedId = GetSerializedEntityId(entity);
+		if (sceneSyncTracker)
 		{
-			if (serializedEntities.erase(entity) > 0)
-			{
-				serializedSceneManager->SendEntityDestroyed(entity);
-			}
+			sceneSyncTracker->EntityDestroyed(serializedId);
 		}
-
-		// We intentionally do NOT manually notify the serializer here.
-		// The hooks registered in InternalSceneInit() will see component destruction
-		// (especially Transform) and send destroyed/updated events as needed.
 
 		// If it has a Transform, handle children and unlink from parent
 		if (registry.any_of<Transform>(entity))
@@ -178,6 +187,11 @@ namespace Engine
 					// remove child from our list will happen after loop anyway
 					ctf.parent = entt::null;
 					ctf.MarkWorldDirtyOnly();
+
+					if (sceneSyncTracker)
+					{
+						sceneSyncTracker->EntityMutated(child);
+					}
 				}
 
 				tf.children.clear();
@@ -209,8 +223,9 @@ namespace Engine
 			}
 		}
 
-		// Finally destroy the entity itself
+		// Finally destroy the entity itself and release its runtime-to-persistent mapping.
 		registry.destroy(entity);
+		entityIdentities.Forget(entity);
 	}
 
 	void Scene::DestroyAllEntities(bool callExit)
@@ -324,9 +339,9 @@ namespace Engine
 
 		// Notify editor that this entity's parent changed.
 		// Parent-child relationships are not purely registry-driven; we keep this explicit.
-		if (serializedSceneManager)
+		if (sceneSyncTracker)
 		{
-			serializedSceneManager->SendEntityUpdated(child);
+			sceneSyncTracker->EntityMutated(child);
 		}
 	}
 
@@ -374,9 +389,9 @@ namespace Engine
 		}
 
 		// Notify editor about parenting change.
-		if (serializedSceneManager)
+		if (sceneSyncTracker)
 		{
-			serializedSceneManager->SendEntityUpdated(child);
+			sceneSyncTracker->EntityMutated(child);
 		}
 	}
 
@@ -468,11 +483,6 @@ namespace Engine
 
 	void Scene::InternalSceneAwake()
 	{
-		if (!entityFactory)
-		{
-			entityFactory = std::make_unique<EntityFactory>(*this);
-		}
-
 		// Transform ownership/hierarchy context must be wired before user Awake() can create entities.
 		if (!transformHooksBound)
 		{
@@ -501,23 +511,51 @@ namespace Engine
 			.group<Engine::Transform, Engine::CompositeMaterial>()
 		);
 
-		// Auto-remove FrustumCullCache when prerequisites are destroyed
-		registry.on_destroy<Engine::Transform>().connect<&Scene::RemoveFrustumCache>(*this);
-		registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
-		registry.on_destroy<Engine::CompositeMaterial>().connect<&Scene::RemoveFrustumCache>(*this);
+		if (!serializationHooksBound)
+		{
+			// Auto-remove FrustumCullCache when prerequisites are destroyed.
+			registry.on_destroy<Engine::Transform>().connect<&Scene::RemoveFrustumCache>(*this);
+			registry.on_destroy<Engine::Material>().connect<&Scene::RemoveFrustumCache>(*this);
+			registry.on_destroy<Engine::CompositeMaterial>().connect<&Scene::RemoveFrustumCache>(*this);
 
-		// Always track renderable composition changes, even outside editor mode.
-		// Transform hooks are connected in InternalSceneAwake so transforms created by user Awake() are wired too.
-		registry.on_construct<Material>().connect<&Scene::OnComponentConstruct<Material>>(*this);
-		registry.on_destroy<Material>().connect<&Scene::OnComponentDestroy<Material>>(*this);
-		registry.on_construct<CompositeMaterial>().connect<&Scene::OnComponentConstruct<CompositeMaterial>>(*this);
-		registry.on_destroy<CompositeMaterial>().connect<&Scene::OnComponentDestroy<CompositeMaterial>>(*this);
-		registry.on_construct<MeshDecorator>().connect<&Scene::OnComponentConstruct<MeshDecorator>>(*this);
-		registry.on_destroy<MeshDecorator>().connect<&Scene::OnComponentDestroy<MeshDecorator>>(*this);
+			// Always track renderable composition changes, even outside editor mode.
+			// Transform hooks are connected in InternalSceneAwake so transforms created by user Awake() are wired too.
+			registry.on_construct<Material>().connect<&Scene::OnComponentConstruct<Material>>(*this);
+			registry.on_destroy<Material>().connect<&Scene::OnComponentDestroy<Material>>(*this);
+			registry.on_construct<CompositeMaterial>().connect<&Scene::OnComponentConstruct<CompositeMaterial>>(*this);
+			registry.on_destroy<CompositeMaterial>().connect<&Scene::OnComponentDestroy<CompositeMaterial>>(*this);
+			registry.on_construct<MeshDecorator>().connect<&Scene::OnComponentConstruct<MeshDecorator>>(*this);
+			registry.on_destroy<MeshDecorator>().connect<&Scene::OnComponentDestroy<MeshDecorator>>(*this);
+
+			// Persistence/tool sync hooks are cheap while tooling is inactive and make
+			// switching scene modes safe without reconnecting duplicate EnTT callbacks.
+			BindSerializationHooksForComponent<ObjectTag>();
+			BindSerializationHooksForComponent<BehaviorComponents>();
+			BindSerializationHooksForComponent<DoNotSerialize>();
+			serializationHooksBound = true;
+		}
 
 		// Initialize SceneBVH grid
 		sceneBVH = std::make_unique<SceneBVH>(registry, transformSystem, GetJobSystem());
 		sceneBVH->Init();
+
+		if (GetEngineState() == EngineState::Editing)
+		{
+			// Serialization, storage, and tooling transport are independent modules.
+			// None of them requires renderer/presentation resources.
+			sceneSerializer = std::make_unique<SceneSerializer>(registry, entityIdentities, name);
+			sceneStorage = std::make_unique<SceneStorage>(GetFileSystem());
+			SceneToolingBridge::SendCallback toolingSender;
+			if (editorMessageSender)
+			{
+				toolingSender = [this](const std::string& message, std::uintptr_t channel)
+				{
+					return SendEditorMessage(message, channel);
+				};
+			}
+			sceneToolingBridge = std::make_unique<SceneToolingBridge>(std::move(toolingSender));
+			sceneSyncTracker = std::make_unique<SceneSyncTracker>(*sceneSerializer, *sceneToolingBridge);
+		}
 
 		if (HasPresentationServices())
 		{
@@ -532,28 +570,8 @@ namespace Engine
 			gizmoSystem->Awake();
 			gizmoSystem->Init();
 
-			// Editor-only serialization/tooling requires presentation resources.
-			if (GetEngineState() == EngineState::Editing)
-			{
-				serializedSceneManager = std::make_unique<SerializedSceneManager>(
-					registry,
-					name,
-					GetMaterialPool(),
-					GetFileSystem(),
-					[this](const std::string& message, std::uintptr_t channel)
-					{
-						return SendEditorMessage(message, channel);
-					}
-				);
-
-				// Bind registry-driven serialization hooks for key components.
-				// Transform/material hooks are already wired above for render revision tracking.
-				BindSerializationHooksForComponent<ObjectTag>();
-				BindSerializationHooksForComponent<BehaviorComponents>();
-			}
-
 			// Give the editing only scripts, for now is just the free cam.
-			GetEntityFactory().CreateWithBehaviors<EditorCamera>(
+			GetCommandBuffer().CreateWithBehaviors<EditorCamera>(
 				[this](entt::entity e, EditorCamera* editorCam)
 			{
 				entt::registry& reg = GetRegistry();
@@ -572,6 +590,7 @@ namespace Engine
 
 				// Give this entity a tag to make it as an editor mode object.
 				EmplaceComponent<ObjectTag>(e, TagConstants::EDITOR_MODE_OBJECT, "Editor Camera Entity");
+				EmplaceComponent<DoNotSerialize>(e);
 			});
 		}
 
@@ -582,10 +601,18 @@ namespace Engine
 	{
 		// Send our first state of the scene to the editor right away.
 		// After this, it becomes a balancing act of syncing and updating components and entities between the processes when things change (which happens a lot).
-		if (serializedSceneManager)
+		if (sceneSerializer && sceneStorage)
 		{
-			serializedSceneManager->SaveFullJSON(); // TODO: probably not call this here, kind of just debug right now.
-			// serializedSceneManager->SendFullJSON(); // we let sync management do this now
+			const SceneStorageResult result = sceneStorage->Save(name, sceneSerializer->SerializeScene());
+			if (!result.Success)
+			{
+				std::cerr << "Failed to save scene '" << name << "': " << result.Message << std::endl;
+			}
+		}
+
+		if (sceneSyncTracker)
+		{
+			sceneSyncTracker->SendFullScene();
 		}
 	}
 
@@ -638,9 +665,16 @@ namespace Engine
 		// if constexpr (handleDebugDraw)
 		sceneBVH->DebugRender();
 
-		if (serializedSceneManager)
+		if (sceneSyncTracker)
 		{
-			serializedSceneManager->SendSync();
+			// Transform edits happen in-place and therefore do not generate EnTT
+			// construct/destroy signals. Feed the scene-owned dirty set into the same
+			// stable-ID sync boundary before serializing this frame's deltas.
+			for (entt::entity entity : transformSystem.GetDirtyEntities())
+			{
+				sceneSyncTracker->EntityMutated(entity);
+			}
+			sceneSyncTracker->Flush();
 		}
 	}
 
@@ -648,6 +682,14 @@ namespace Engine
 	{
 		// TODO: don't destroy on load/persist entities 
 		ForEachBehavior(&Behavior::Exit);
+		GetCommandBuffer().Clear();
+
+		// Tooling/persistence state is lifecycle-local. Reset it before Scene::Exit()
+		// destroys runtime entities so an unloaded scene cannot emit stale deltas.
+		sceneSyncTracker.reset();
+		sceneToolingBridge.reset();
+		sceneStorage.reset();
+		sceneSerializer.reset();
 
 		// Tear down our physics world during exit 
 		DestroyPhysicsWorld();
@@ -655,10 +697,8 @@ namespace Engine
 
 	void Scene::DestroyPhysicsWorld()
 	{
-		if (physicsWorld)
-		{
-			physicsWorld.reset();
-		}
+		physicsBridge.reset();
+		physicsTimeSinceLastTick = 0.0;
 	}
 
 	void Scene::InternalSceneUpdate(double dt)
@@ -673,14 +713,14 @@ namespace Engine
 			sceneDebugDraw->ClearExceptTags(keep);
 		}
 
+		GetCommandBuffer().Flush(); // Apply the previous frame's deferred scene mutations in one deterministic FIFO batch.
+
 		// Editor/game state hotkeys are runtime state controls now; they no longer
 		// depend on a compile-time SwimEngine default or global engine type.
 		if (StateTestControl())
 		{
 			return;
 		}
-
-		GetEntityFactory().ProcessQueues(); // Start of a new frame, handle all the new created and deleted entities from the previous frame here.
 
 		// Ensure BVH is coherent for this frame if any entity was removed/added or forced.
 		if (sceneBVH && sceneBVH->ShouldForceUpdate())
@@ -895,15 +935,13 @@ namespace Engine
 			return nullptr;
 		}
 
-		BehaviorFactory& behaviorRegistry = BehaviorFactory::GetInstance();
-
-		if (!behaviorRegistry.Exists(behaviorName))
+		if (!behaviorRegistry || !behaviorRegistry->Contains(behaviorName))
 		{
 			std::cout << "Scene::EmplaceBehaviorByName | Unknown behavior: " << behaviorName << std::endl;
 			return nullptr;
 		}
 
-		std::unique_ptr<Behavior> behavior = behaviorRegistry.Create(behaviorName, this, e);
+		std::unique_ptr<Behavior> behavior = behaviorRegistry->Create(behaviorName, this, e);
 		if (!behavior)
 		{
 			return nullptr;
@@ -917,6 +955,36 @@ namespace Engine
 		rawPtr->RefreshFieldCache();
 
 		return rawPtr;
+	}
+
+	bool Scene::RemoveBehaviorByName(entt::entity e, const std::string& behaviorName, bool callExit)
+	{
+		if (!registry.valid(e) || !behaviorRegistry || !registry.any_of<BehaviorComponents>(e))
+		{
+			return false;
+		}
+
+		BehaviorComponents& components = registry.get<BehaviorComponents>(e);
+		EngineState state = GetEngineState();
+		auto& behaviors = components.behaviors;
+		const auto oldSize = behaviors.size();
+
+		behaviors.erase(std::remove_if(behaviors.begin(), behaviors.end(),
+			[&](std::unique_ptr<Behavior>& behavior)
+		{
+			if (!behavior || !behaviorRegistry->Matches(behaviorName, *behavior))
+			{
+				return false;
+			}
+
+			if (callExit && components.CanExecute(state))
+			{
+				behavior->Exit();
+			}
+			return true;
+		}), behaviors.end());
+
+		return behaviors.size() != oldSize;
 	}
 
 	void Scene::RefreshBehaviorFieldCacheForEntity(entt::entity e)
@@ -1104,7 +1172,8 @@ namespace Engine
 			}
 		}
 
-		return "Entity " + std::to_string(static_cast<std::uint32_t>(entt::to_integral(e)));
+		const SerializedEntityId id = GetSerializedEntityId(e);
+		return id ? "Entity " + std::to_string(id.Value) : "Entity Untracked";
 	}
 
 	void Scene::SetTag(entt::entity entity, unsigned int tag, const std::string& name)
@@ -1116,6 +1185,10 @@ namespace Engine
 				auto& t = registry.get<ObjectTag>(entity);
 				t.tag = tag;
 				t.name = name;
+				if (sceneSyncTracker)
+				{
+					sceneSyncTracker->EntityMutated(entity);
+				}
 			}
 			else
 			{
@@ -1134,23 +1207,68 @@ namespace Engine
 
 	PhysicsWorld& Scene::GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem)
 	{
-		if (!physicsWorld)
+		if (!physicsBridge)
 		{
-			physicsWorld = std::make_unique<PhysicsWorld>(physicsSystem, registry);
+			physicsBridge = std::make_unique<ScenePhysicsBridge>(physicsSystem, registry);
 
-			if (!physicsWorld->Init())
+			if (!physicsBridge->Init())
 			{
-				physicsWorld.reset();
+				physicsBridge.reset();
 				throw std::runtime_error("Scene::GetOrCreatePhysicsWorld | Failed to initialize PhysicsWorld!");
 			}
 		}
 
-		return *physicsWorld;
+		return physicsBridge->GetWorld();
 	}
 
 	PhysicsWorld* Scene::GetPhysicsWorld() const
 	{
-		return physicsWorld.get();
+		return physicsBridge ? &physicsBridge->GetWorld() : nullptr;
+	}
+
+	void Scene::UpdatePhysics(PhysicsSystem& physicsSystem, double dt)
+	{
+		if (!HasAnyEngineStates(GetEngineState(), EngineState::Playing))
+		{
+			physicsTimeSinceLastTick = 0.0;
+			return;
+		}
+
+		if (!physicsBridge)
+		{
+			return;
+		}
+
+		physicsTimeSinceLastTick += dt;
+
+		float alpha = 1.0f;
+		const float fixedDeltaSeconds = physicsSystem.GetFixedDeltaSeconds();
+		if (fixedDeltaSeconds > 0.0f)
+		{
+			alpha = static_cast<float>(physicsTimeSinceLastTick / static_cast<double>(fixedDeltaSeconds));
+		}
+
+		physicsBridge->Interpolate(std::clamp(alpha, 0.0f, 1.0f));
+	}
+
+	void Scene::FixedUpdatePhysics(PhysicsSystem& physicsSystem)
+	{
+		if (!HasAnyEngineStates(GetEngineState(), EngineState::Playing))
+		{
+			physicsTimeSinceLastTick = 0.0;
+			return;
+		}
+
+		GetOrCreatePhysicsWorld(physicsSystem);
+
+		physicsBridge->Interpolate(1.0f);
+		physicsTimeSinceLastTick = 0.0;
+
+		const float fixedDeltaSeconds = physicsSystem.GetFixedDeltaSeconds();
+		physicsBridge->PreSimulateSync(fixedDeltaSeconds);
+		physicsBridge->Step(fixedDeltaSeconds);
+		physicsBridge->FetchResults(true);
+		physicsBridge->PostSimulateSync();
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)

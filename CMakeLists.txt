@@ -29,6 +29,7 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
 project(SwimEngine C CXX)
 
 include(cmake/SolutionLayout.cmake)
+include(cmake/Tests.cmake)
 
 option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
 option(SWIM_ENABLE_PCH "Use Swim Engine's existing PCH.h" ON)
@@ -50,10 +51,23 @@ else()
 	set(SWIM_BUILD_LEGACY_ENGINE_DEFAULT OFF)
 endif()
 option(SWIM_BUILD_LEGACY_ENGINE "Build the existing renderer/game runtime while it is being migrated" ${SWIM_BUILD_LEGACY_ENGINE_DEFAULT})
+if(WIN32 AND MSVC)
+	set(SWIM_ENABLE_PHYSX_BACKEND_DEFAULT ON)
+else()
+	set(SWIM_ENABLE_PHYSX_BACKEND_DEFAULT OFF)
+endif()
+option(SWIM_ENABLE_PHYSX_BACKEND "Compile the PhysX physics backend" ${SWIM_ENABLE_PHYSX_BACKEND_DEFAULT})
 option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
 option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
 option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
+
+if(SWIM_BUILD_LEGACY_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND)
+	message(FATAL_ERROR
+		"The current legacy SwimEngine executable requires a compiled physics backend. "
+		"Enable SWIM_ENABLE_PHYSX_BACKEND until the Jolt backend/runtime factory is available."
+	)
+endif()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -83,6 +97,12 @@ endif()
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	include(cmake/get_cpm.cmake)
 endif()
+
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLM")
+include(cmake/MathDependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
 
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/mimalloc")
@@ -200,18 +220,17 @@ if(SWIM_BUILD_ASSET_COMPILER)
 	unset(SWIM_SAVED_CMAKE_FOLDER)
 endif()
 
-add_library(SwimAssetCompilerPublicHeaders OBJECT EXCLUDE_FROM_ALL
-	Source/Tests/AssetCompiler/PublicHeaderCompile.cpp
-)
-target_include_directories(SwimAssetCompilerPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimAssetCompilerPublicHeaders PRIVATE cxx_std_20)
-swim_set_solution_folder(SwimAssetCompilerPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
-
 if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	file(GLOB_RECURSE SWIM_ASSET_COMPILER_SOURCES
 		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.h
 	)
+
+	# The asset compiler is one module with two build outputs: a library every
+	# consumer links, and the thin standalone cooker front end under Cli/. Only
+	# the front end owns a main(), so it must stay out of the library archive.
+	set(SWIM_ASSET_COOKER_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp)
+	list(FILTER SWIM_ASSET_COMPILER_SOURCES EXCLUDE REGEX "/Source/Tools/AssetCompiler/Cli/")
 
 	add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES})
 	add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)
@@ -230,10 +249,11 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 		target_compile_options(SwimAssetCompiler PRIVATE -Wall -Wextra -Wpedantic)
 	endif()
 
-	add_executable(SwimAssetCooker Source/Tools/AssetCooker/Main.cpp)
+	add_executable(SwimAssetCooker ${SWIM_ASSET_COOKER_SOURCES})
 	target_link_libraries(SwimAssetCooker PRIVATE Swim::AssetCompiler)
 	target_include_directories(SwimAssetCooker PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	target_compile_features(SwimAssetCooker PRIVATE cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COOKER_SOURCES})
 	swim_set_solution_folder(SwimAssetCooker "${SWIM_SOLUTION_FOLDER_TOOLS}")
 endif()
 
@@ -294,6 +314,36 @@ else()
 	target_compile_options(SwimCore PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+# Generic physics is part of the cross-platform foundation. Keep the concrete
+# PhysX implementation behind the legacy/runtime gate, but compile this API and
+# its shared backend contract on Linux too so portable C++ errors are caught
+# before an expensive Windows dependency build.
+if(SWIM_OFFLINE_DEPENDENCY_STUBS)
+	add_library(SwimPhysics INTERFACE)
+	target_include_directories(SwimPhysics INTERFACE ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimPhysics INTERFACE glm::glm)
+else()
+	file(GLOB_RECURSE SWIM_PHYSICS_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.h
+	)
+	list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")
+
+	add_library(SwimPhysics STATIC ${SWIM_PHYSICS_SOURCES})
+	target_include_directories(SwimPhysics PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimPhysics PUBLIC glm::glm)
+	target_compile_features(SwimPhysics PUBLIC cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PHYSICS_SOURCES})
+	swim_set_solution_folder(SwimPhysics "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+	if(MSVC)
+		target_compile_options(SwimPhysics PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimPhysics PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+endif()
+add_library(Swim::Physics ALIAS SwimPhysics)
+
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
 	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp)
 	target_link_libraries(SwimHelloWindow PRIVATE Swim::Platform)
@@ -306,99 +356,7 @@ if(SWIM_BUILD_PLATFORM_EXAMPLE)
 	swim_set_solution_folder(SwimHeadlessPlatform "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
-add_library(SwimPlatformPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/Platform/PublicHeaderCompile.cpp)
-target_include_directories(SwimPlatformPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimPlatformPublicHeaders PRIVATE cxx_std_20)
-swim_set_solution_folder(SwimPlatformPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-add_library(SwimIoPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/IO/PublicHeaderCompile.cpp)
-target_include_directories(SwimIoPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimIoPublicHeaders PRIVATE cxx_std_20)
-swim_set_solution_folder(SwimIoPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-add_library(SwimAssetPublicHeaders OBJECT EXCLUDE_FROM_ALL Source/Tests/Assets/PublicHeaderCompile.cpp)
-target_include_directories(SwimAssetPublicHeaders PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimAssetPublicHeaders PRIVATE cxx_std_20)
-swim_set_solution_folder(SwimAssetPublicHeaders "${SWIM_SOLUTION_FOLDER_TESTS}")
-
 if(SWIM_BUILD_FOUNDATION_TESTS)
-	add_executable(SwimInputTests EXCLUDE_FROM_ALL Source/Tests/Input/InputSystemTests.cpp)
-	target_link_libraries(SwimInputTests PRIVATE Swim::Input)
-	target_include_directories(SwimInputTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimInputTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL Source/Tests/Core/EngineConfigTests.cpp)
-	target_link_libraries(SwimEngineConfigTests PRIVATE Swim::Core)
-	target_include_directories(SwimEngineConfigTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimEngineConfigTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimSceneCatalogTests EXCLUDE_FROM_ALL Source/Tests/Scene/SceneCatalogTests.cpp)
-	target_include_directories(SwimSceneCatalogTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	target_compile_features(SwimSceneCatalogTests PRIVATE cxx_std_20)
-	swim_set_solution_folder(SwimSceneCatalogTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimMemoryTests EXCLUDE_FROM_ALL Source/Tests/Memory/MemoryArenaTests.cpp)
-	target_link_libraries(SwimMemoryTests PRIVATE Swim::Memory)
-	target_include_directories(SwimMemoryTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimMemoryTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL Source/Tests/Jobs/JobSystemTests.cpp)
-	target_link_libraries(SwimJobSystemTests PRIVATE Swim::Jobs)
-	target_include_directories(SwimJobSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimJobSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimAsyncIoTests EXCLUDE_FROM_ALL Source/Tests/IO/AsyncIoServiceTests.cpp)
-	target_link_libraries(SwimAsyncIoTests PRIVATE Swim::IO Swim::Jobs)
-	target_include_directories(SwimAsyncIoTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimAsyncIoTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimAssetSystemTests EXCLUDE_FROM_ALL Source/Tests/Assets/AssetSystemTests.cpp)
-	target_link_libraries(SwimAssetSystemTests PRIVATE Swim::Assets)
-	target_include_directories(SwimAssetSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimAssetSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	add_executable(SwimKtx2ContainerTests EXCLUDE_FROM_ALL Source/Tests/Assets/Ktx2ContainerTests.cpp)
-	target_link_libraries(SwimKtx2ContainerTests PRIVATE Swim::Assets)
-	target_include_directories(SwimKtx2ContainerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	swim_set_solution_folder(SwimKtx2ContainerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-	if(TARGET SwimAssetCompiler)
-		add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/GltfImporterTests.cpp)
-		target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)
-		target_include_directories(SwimGltfImporterTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimGltfImporterTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimMeshOptimizerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/MeshOptimizerTests.cpp)
-		target_link_libraries(SwimMeshOptimizerTests PRIVATE Swim::AssetCompiler)
-		target_include_directories(SwimMeshOptimizerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimMeshOptimizerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimKtx2TextureCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/Ktx2TextureCompilerTests.cpp)
-		target_link_libraries(SwimKtx2TextureCompilerTests PRIVATE Swim::AssetCompiler)
-		target_include_directories(SwimKtx2TextureCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimKtx2TextureCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimSourceImageTextureCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/SourceImageTextureCompilerTests.cpp)
-		target_link_libraries(SwimSourceImageTextureCompilerTests PRIVATE Swim::AssetCompiler)
-		target_include_directories(SwimSourceImageTextureCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimSourceImageTextureCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimSassetFormatTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/SassetFormatTests.cpp)
-		target_link_libraries(SwimSassetFormatTests PRIVATE Swim::AssetCompiler)
-		target_include_directories(SwimSassetFormatTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimSassetFormatTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimStaticModelCompilerTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/StaticModelCompilerTests.cpp)
-		target_link_libraries(SwimStaticModelCompilerTests PRIVATE Swim::AssetCompiler)
-		target_include_directories(SwimStaticModelCompilerTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimStaticModelCompilerTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-
-		add_executable(SwimDevelopmentAssetPipelineTests EXCLUDE_FROM_ALL Source/Tests/AssetCompiler/DevelopmentAssetPipelineTests.cpp)
-		target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)
-		target_include_directories(SwimDevelopmentAssetPipelineTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-		swim_set_solution_folder(SwimDevelopmentAssetPipelineTests "${SWIM_SOLUTION_FOLDER_TESTS}")
-	endif()
-
 	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL Source/Examples/HeadlessCoreAssets.cpp)
 	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Core Swim::Jobs Swim::Assets)
 	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${CMAKE_SOURCE_DIR}/Source)
@@ -406,6 +364,11 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 endif()
 
 if(NOT SWIM_BUILD_LEGACY_ENGINE)
+	# Foundation-only configure: define the test program now, with whatever
+	# module targets this configuration actually has.
+	if(SWIM_BUILD_FOUNDATION_TESTS)
+		swim_configure_tests()
+	endif()
 	return()
 endif()
 
@@ -422,22 +385,30 @@ include(cmake/Dependencies.cmake)
 set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
 unset(SWIM_SAVED_CMAKE_FOLDER)
 
-# Scene/ECS tests consume legacy third-party headers (EnTT/GLM), so define
-# them only after the full runtime dependency surface is available. Keeping
-# these targets here also prevents non-legacy Linux foundation configure from
-# referencing EnTT before that dependency exists.
-if(SWIM_BUILD_FOUNDATION_TESTS)
-	add_executable(SwimTransformSystemTests EXCLUDE_FROM_ALL Source/Tests/Scene/TransformSystemTests.cpp)
-	target_link_libraries(SwimTransformSystemTests PRIVATE EnTT::EnTT)
-	target_include_directories(SwimTransformSystemTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	target_compile_features(SwimTransformSystemTests PRIVATE cxx_std_20)
-	swim_set_solution_folder(SwimTransformSystemTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+if(SWIM_ENABLE_PHYSX_BACKEND)
+	file(GLOB_RECURSE SWIM_PHYSX_BACKEND_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.h
+	)
 
-	add_executable(SwimFrustumTests EXCLUDE_FROM_ALL Source/Tests/Scene/FrustumTests.cpp)
-	target_link_libraries(SwimFrustumTests PRIVATE glm::glm)
-	target_include_directories(SwimFrustumTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
-	target_compile_features(SwimFrustumTests PRIVATE cxx_std_20)
-	swim_set_solution_folder(SwimFrustumTests "${SWIM_SOLUTION_FOLDER_TESTS}")
+	add_library(SwimPhysicsPhysX STATIC ${SWIM_PHYSX_BACKEND_SOURCES})
+	add_library(Swim::PhysicsPhysX ALIAS SwimPhysicsPhysX)
+	target_include_directories(SwimPhysicsPhysX PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimPhysicsPhysX PUBLIC Swim::Physics PRIVATE Swim::PhysX)
+	target_compile_features(SwimPhysicsPhysX PUBLIC cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PHYSX_BACKEND_SOURCES})
+	swim_set_solution_folder(SwimPhysicsPhysX "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/Physics Backends")
+
+	if(MSVC)
+		target_compile_options(SwimPhysicsPhysX PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimPhysicsPhysX PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+
+	if(TARGET SwimPhysXBuild)
+		add_dependencies(SwimPhysicsPhysX SwimPhysXBuild)
+	endif()
+
 endif()
 
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
@@ -461,6 +432,7 @@ list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 # TinyGltfImplementation.cpp was retired when runtime GLB importing moved behind
 # the cooked AssetSystem boundary. Keep an explicit tombstone exclusion because
 # ZIP/overlay updates cannot delete an older checkout's stale source file, and
@@ -535,7 +507,6 @@ target_compile_definitions(SwimEngine PRIVATE
 	UNICODE
 	_UNICODE
 	_CRT_SECURE_NO_WARNINGS
-	PX_PHYSX_STATIC_LIB
 	$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
 	$<$<PLATFORM_ID:Windows>:NOMINMAX>
 	$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
@@ -598,13 +569,6 @@ else()
 	endif()
 endif()
 
-if(TARGET SwimPhysXBuild)
-	# Interface-target dependencies are not handled uniformly by every generator.
-	# Keep the external SDK build explicit so its staged .lib files exist before
-	# Swim Engine reaches the link step.
-	add_dependencies(SwimEngine SwimPhysXBuild)
-endif()
-
 if(SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
 	target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)
 endif()
@@ -627,7 +591,8 @@ target_link_libraries(SwimEngine PRIVATE
 	zstd::zstd
 	Swim::BasisTranscoder
 	glad::glad
-	Swim::PhysX
+	Swim::Physics
+	Swim::PhysicsPhysX
 )
 
 include(cmake/Shaders.cmake)
@@ -644,4 +609,11 @@ if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 			"$<TARGET_FILE_DIR:SwimEngine>/Shaders/OpenGL"
 		VERBATIM
 	)
+endif()
+
+# The full Windows/legacy configure has the widest dependency surface (EnTT,
+# GLM, and the PhysX backend), so the single test program is defined last and
+# picks up every suite group this configuration can build.
+if(SWIM_BUILD_FOUNDATION_TESTS)
+	swim_configure_tests()
 endif()

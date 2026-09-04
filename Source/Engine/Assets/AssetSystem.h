@@ -233,6 +233,9 @@ namespace Swim::Assets
 		}
 
 		template<typename T>
+		// The returned pointer is a transient view of the current residency. Keep the
+		// AssetHandle as persistent identity and Resolve() it again after any operation
+		// that may republish, unload, fail, forget, or otherwise replace this asset.
 		T* Resolve(AssetHandle<T> handle)
 		{
 			RequireOwnerThread();
@@ -245,6 +248,8 @@ namespace Swim::Assets
 		}
 
 		template<typename T>
+		// Const resolution has the same lifetime contract as the mutable overload:
+		// the pointer is only valid until the referenced residency is replaced.
 		const T* Resolve(AssetHandle<T> handle) const
 		{
 			RequireOwnerThread();

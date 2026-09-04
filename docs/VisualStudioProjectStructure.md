@@ -22,14 +22,20 @@ SwimEngine.sln
 |   |-- SwimPlatform
 |   |-- SwimInput
 |   |-- SwimIO
-|   `-- SwimAssets
+|   |-- SwimAssets
+|   |-- SwimPhysics
+|   `-- Physics Backends/
+|       `-- SwimPhysicsPhysX
 |
 |-- Tools/
-|   |-- SwimAssetCompiler
-|   `-- SwimAssetCooker
+|   |-- SwimAssetCompiler        asset compiler module library
+|   `-- SwimAssetCooker          the same module's command-line front end
 |
 |-- Examples/
 |-- Tests/
+|   |-- SwimTests                the entire runnable test corpus, one program
+|   `-- Header Boundary/         per-module public-header compile gates
+|
 |-- Third Party/
 `-- CMake/
 ```
@@ -54,7 +60,7 @@ It currently compiles:
 - shader source files as IDE-visible/header-only source entries;
 - the reusable modules below through normal target linking rather than recompiling their source files.
 
-The module roots already extracted into separate targets are explicitly excluded from the `SwimEngine` recursive source list. For example, `Source/Engine/Platform`, `Input`, `Memory`, `Assets`, `Jobs`, and `IO` are compiled by their module projects exactly once and linked into `SwimEngine`.
+The module roots already extracted into separate targets are explicitly excluded from the `SwimEngine` recursive source list. For example, `Source/Engine/Platform`, `Input`, `Memory`, `Assets`, `Jobs`, `IO`, and the generic `Systems/Physics` implementation are compiled by their module projects exactly once and linked into `SwimEngine`. The PhysX implementation is compiled separately by `SwimPhysicsPhysX`.
 
 ### Current direct module dependencies
 
@@ -67,9 +73,11 @@ SwimEngine
   -> SwimIO
   -> SwimPlatform
   -> SwimInput
+  -> SwimPhysics
+  -> SwimPhysicsPhysX
 ```
 
-The current legacy executable also directly owns transitional runtime dependencies such as Vulkan/OpenGL, GLM, EnTT, zstd, Basis transcoding, GLAD, PhysX, spdlog, and some remaining stb compatibility use. Those are expected to become narrower implementation-module dependencies as the renderer/physics migration continues.
+The current legacy executable still directly owns transitional runtime dependencies such as Vulkan/OpenGL, GLM, EnTT, zstd, Basis transcoding, GLAD, spdlog, and some remaining stb compatibility use. PhysX is no longer one of those raw executable dependencies: it is private to `SwimPhysicsPhysX`. The remaining renderer/scene dependencies are expected to become narrower implementation-module dependencies as migration continues.
 
 ### Development asset auto-cook exception
 
@@ -270,6 +278,63 @@ SwimAssets
 runtime systems / renderer residency
 ```
 
+
+## 3.8 `SwimPhysics`
+
+**Target type:** static library  
+**Owns:** the backend-neutral physics API and lifetime model.
+
+Current responsibilities include:
+
+- generational `BodyHandle`, `ShapeHandle`, `PhysicsMaterialHandle`, `ConstraintHandle`, and `CharacterHandle`;
+- backend-neutral world/body/shape/material descriptors;
+- collision layer/mask data;
+- raycast/sweep/overlap hit types;
+- collision/trigger events;
+- `IPhysicsBackend` / `IPhysicsWorldBackend`;
+- the generic `PhysicsSystem` factory/owner;
+- the generic `PhysicsWorld` facade;
+- the `Rigidbody` gameplay component with no native backend pointer.
+
+Dependency direction:
+
+```text
+SwimPhysics
+  -> glm                 public math contract
+  -> no PhysX/Jolt implementation
+  -> no EnTT/Scene dependency
+```
+
+Scene/ECS synchronization is intentionally **not** part of this target. `ScenePhysicsBridge` remains in the Scene runtime layer and consumes `SwimPhysics`, keeping EnTT out of the generic physics API.
+
+## 3.9 `SwimPhysicsPhysX`
+
+**Target type:** static library  
+**Solution folder:** `Engine Modules/Physics Backends`  
+**Owns:** the current PhysX 5.6.1 implementation of the Swim physics contracts.
+
+Current responsibilities include:
+
+- PhysX foundation/physics/dispatcher lifetime;
+- native material/shape/body tables behind generational Swim handles;
+- static/dynamic/kinematic body translation;
+- primitive box/sphere/capsule shapes;
+- forces, impulses, velocity, gravity, mass, and damping;
+- collision layer filtering;
+- raycast, sweep, and overlap translation;
+- collision/trigger callback translation;
+- simulation-safe deferred native actor destruction.
+
+Dependency direction:
+
+```text
+SwimPhysicsPhysX
+  -> SwimPhysics         public
+  -> Swim::PhysX         private
+```
+
+No caller should include PhysX implementation types merely to use physics. The future `SwimPhysicsJolt` target is expected to implement the same generic contract and reuse the same backend contract test suite.
+
 ---
 
 # 4. Tools
@@ -310,6 +375,18 @@ The compiler's public API should expose Swim-owned data, not parser/codec object
 **Target type:** executable  
 **Role:** run the asset cook pipeline without launching the renderer/game.
 
+The compiler and the cooker are deliberately **one module with two build outputs**, not two projects. The cooker owns no pipeline logic of its own: it is roughly forty lines that parse an asset-root argument, initialize `AssetSystem`, call `RunDevelopmentAssetBootstrap()`, and print statistics. Keeping it a separate *target* is unavoidable (a static library cannot own a `main()`), but keeping it a separate *module* would invite the cooker to grow its own copy of cook policy.
+
+So both outputs are produced from one source tree:
+
+```text
+Source/Tools/AssetCompiler/
+  *.cpp, *.h            -> SwimAssetCompiler (static library)
+  Cli/AssetCookerMain.cpp -> SwimAssetCooker (executable)
+```
+
+The library glob explicitly excludes `Cli/` so the front end's `main()` never lands in the archive. If a second asset tool is ever needed, it belongs beside `AssetCookerMain.cpp` under the same module rather than in a new `Source/Tools/<Something>` directory.
+
 It links only through the compiler abstraction:
 
 ```text
@@ -333,34 +410,112 @@ For shipping, this tool is expected to run **before packaging**, while the shipp
 
 # 5. `Tests` solution folder
 
-The tests are separate CMake targets and are generally marked:
+## 5.1 One program for the whole runnable corpus
+
+Every runnable test in the engine lives in a single executable:
 
 ```text
-EXCLUDE_FROM_ALL
+SwimTests
 ```
 
-That means they appear in Visual Studio and can be built/run explicitly, but they do not automatically make a normal `SwimEngine` build slower.
+There is no per-module test project. A `SwimEngineConfigTests`, `SwimJobSystemTests`, `SwimAssetSystemTests`, and so on used to exist as roughly twenty separate targets; each one needed its own `add_executable`, its own link list, its own `main()`, and its own line in the build scripts. That made the cost of adding coverage a CMake edit, and it made "run the tests" mean "run twenty binaries you have to remember".
 
-Examples include tests for:
+The current shape is:
 
-- EngineConfig;
-- Platform/Input;
-- Memory;
-- Jobs;
-- Async IO;
-- AssetSystem/KTX2;
-- fastgltf importer;
-- Draco import fixtures;
-- meshoptimizer;
-- source image/WebP compilation;
-- `.sasset` format;
-- static model compilation;
-- development asset pipeline;
-- SceneCatalog;
-- TransformSystem;
-- Frustum.
+```text
+Source/Tests/
+  Framework/        the test framework and the single main()
+  Suites/           the test cases, grouped by dependency
+  Fixtures/         shared multi-suite helpers (header-only)
+  HeaderBoundary/   per-module public-header compile gates
+```
 
-The test projects are architecture enforcement as much as correctness testing: many exist specifically to prove that a module can compile against only its intended public dependencies.
+`SwimTests` is `EXCLUDE_FROM_ALL`, so a normal engine build does not compile it.
+
+## 5.2 Adding a test
+
+Test cases self-register through static initializers, so adding coverage never touches CMake:
+
+1. create or open a `.cpp` under `Source/Tests/Suites/<group>/`;
+2. write a case.
+
+```cpp
+#include "Engine/Assets/AssetSystem.h"
+#include "Tests/Framework/Test.h"
+
+SWIM_TEST("Assets.AssetSystem", "UnloadKeepsIdentity")
+{
+    Swim::Assets::AssetSystem assets;
+    SWIM_REQUIRE(assets.Initialize());
+    // ...
+    assets.Shutdown();
+}
+```
+
+The next configure globs the new file into `SwimTests`. The available checks are `SWIM_CHECK`, `SWIM_CHECK_MESSAGE`, `SWIM_CHECK_EQUAL`, `SWIM_CHECK_NEAR`, `SWIM_CHECK_THROWS`, `SWIM_FAIL`, and the aborting `SWIM_REQUIRE`/`SWIM_REQUIRE_MESSAGE`/`SWIM_REQUIRE_EQUAL` forms. `SWIM_CHECK*` records a failure and continues so one run reports every broken expectation; `SWIM_REQUIRE*` abandons the case when continuing would crash or produce meaningless follow-on failures.
+
+**These checks are not `assert()`.** Swim defines `NDEBUG` in every configuration, including Debug, so `assert()` compiles to nothing everywhere. Test code must never use it.
+
+## 5.3 Suite groups are dependency groups
+
+The directory a suite lives in decides which configurations compile it:
+
+| Group directory | Compiled when | Links |
+| --- | --- | --- |
+| `Suites/Core`, `Memory`, `Jobs`, `IO`, `Input`, `Assets` | always | the foundation modules |
+| `Suites/Physics/Generic` | always | `Swim::Physics` |
+| `Suites/Scene/Headless` | always | nothing renderer-facing |
+| `Suites/AssetCompiler` | `SwimAssetCompiler` exists | `Swim::AssetCompiler`, Draco |
+| `Suites/Scene/Ecs` | `EnTT::EnTT` exists | EnTT, GLM |
+| `Suites/Physics/PhysX` | `SwimPhysicsPhysX` exists | `Swim::PhysicsPhysX` |
+
+A Linux foundation configure therefore builds the portable suites and silently omits the renderer/PhysX ones, while a full Windows build gets everything. Put a new suite in the group whose dependencies it actually needs; do not widen a group to make an include resolve.
+
+## 5.4 Running tests
+
+```powershell
+build\windows-release\SwimTests.exe                     # everything
+build\windows-release\SwimTests.exe --list              # what exists
+build\windows-release\SwimTests.exe --filter=Physics    # one area
+build\windows-release\SwimTests.exe "Assets.Ktx2*"      # glob, positional
+build\windows-release\SwimTests.exe --verbose --stop-on-failure
+build\windows-release\SwimTests.exe --report=results.xml
+```
+
+Cases are identified as `<suite>.<name>`. A filter without wildcards also matches by dotted prefix, so `--filter=AssetCompiler` selects every case in every `AssetCompiler.*` suite. Other options are `--exclude`, `--list-suites`, `--repeat`, `--shuffle[=seed]`, and `--help`. The process exits `0` only when every selected case passes, and an empty selection is an error rather than a pass, so a mistyped filter in a script cannot masquerade as success.
+
+The Windows clean/soft build scripts build and run the whole suite on every build.
+
+## 5.5 Header-boundary gates stay separate, on purpose
+
+The `Tests/Header Boundary` folder holds small `OBJECT` libraries, one per module:
+
+```text
+SwimPlatformPublicHeaders
+SwimIoPublicHeaders
+SwimAssetPublicHeaders
+SwimAssetCompilerPublicHeaders
+SwimPhysicsPublicHeaders
+SwimPhysicsBackendContractCompile
+```
+
+These are not test programs, and they were deliberately **not** folded into `SwimTests`. Their entire value is that each one links only its own module: `SwimPhysicsPublicHeaders` proves the generic physics headers compile and link against `Swim::Physics` with no backend present. `SwimTests` links everything, so moving these into it would silently destroy the guarantee they exist to provide.
+
+`SwimPhysicsBackendContractCompile` is the one gate that builds by default rather than being `EXCLUDE_FROM_ALL`: it is the cheapest possible guard against a physics backend leaking into the shared backend contract, which is the fixture a future `SwimPhysicsJolt` will reuse unchanged.
+
+New gates are declared with one call:
+
+```cmake
+swim_add_header_boundary(SwimMyModulePublicHeaders
+    SOURCE Source/Tests/HeaderBoundary/MyModulePublicHeaders.cpp
+    LINK Swim::MyModule)
+```
+
+## 5.6 What the tests currently cover
+
+`SwimTests` currently runs a little over one hundred cases across suites for EngineConfig, memory arenas, the job system, async IO, input, the asset system and KTX2 container, the glTF/Draco importer, meshoptimizer, KTX2 and source-image compilation, the `.sasset` format, static model compilation, the development asset pipeline, scene catalog and identity, the deferred command buffer, the behavior registry, transform tracking, per-view frustums, render conventions, generic physics handles, and the PhysX backend contract.
+
+The suites are architecture enforcement as much as correctness testing: several exist specifically to prove a module behaves correctly through only its intended public surface.
 
 ---
 
@@ -454,7 +609,7 @@ Because `SwimAssetCooker` is a normal tool target rather than an excluded exampl
 
 ## 9.3 Building a test or example
 
-Selecting one test/example project builds only that target and the dependencies it requires. This is useful for validating a narrow architectural layer without rebuilding the complete engine.
+Selecting one test/example project builds only that target and the dependencies it requires. Building `SwimTests` compiles the whole test corpus and the modules it links; use `--filter` at run time to narrow what actually executes. A header-boundary gate builds only its own module, which is the cheapest way to check that a module's public surface is still self-contained.
 
 ## 9.4 `SWIM_BUILD_LEGACY_ENGINE=OFF`
 
@@ -464,7 +619,7 @@ This is important for Linux and headless/foundation validation while the old ren
 
 ## 9.5 `SWIM_BUILD_ASSET_COMPILER=OFF`
 
-The source importer/compiler and standalone cooker are not created. `SwimAssets` remains available because runtime asset loading is a separate module.
+The source importer/compiler and standalone cooker are not created. `SwimAssets` remains available because runtime asset loading is a separate module. `SwimTests` still builds; its `AssetCompiler.*` suites are simply not compiled into it.
 
 This is part of the intended eventual shipping configuration.
 
@@ -527,16 +682,26 @@ The first-party projects currently form this practical graph:
 | SwimAssetCompiler  | ----> fastgltf / simdjson / meshoptimizer
 +------+-------------+ ----> Draco / stb / libwebp
        |
-       +----> SwimAssetCooker
+       +----> SwimAssetCooker  (same module; Cli/ front end)
        |
        `----> SwimEngine only when dev auto-cook is enabled
 
++-------------+
+| SwimPhysics | ----> GLM
++------+------+
+       ^
+       |
++------+------------+
+| SwimPhysicsPhysX  | ----> PhysX (private)
++-------------------+
+
 SwimEngine
   -> Core + Memory + Jobs + IO + Platform + Input + Assets
-  -> remaining legacy renderer/physics/game implementation targets/dependencies
+  -> SwimPhysics + SwimPhysicsPhysX
+  -> remaining legacy renderer/scene/game implementation targets/dependencies
 ```
 
-This is not yet the final engine graph. Future work will extract Scene, Physics API/backends, RHI, Vulkan RHI, Render, UI, Audio, etc. into similarly explicit targets. The current project layout is the foundation for doing that without turning the root executable into a dependency dumping ground.
+This is not yet the final engine graph. Future work will add the Jolt physics backend and extract Scene, RHI, Vulkan RHI, Render, UI, Audio, etc. into similarly explicit targets. The generic Physics API and current PhysX backend are already separate targets, so future backend parity should not require putting native physics types back into the root executable.
 
 ---
 
@@ -548,5 +713,7 @@ This is not yet the final engine graph. Future work will extract Scene, Physics 
 4. Do not add a dependency directly to `SwimEngine` just because that is the easiest way to fix an include/link error.
 5. Do not compile the same first-party `.cpp` file into both a module and `SwimEngine`.
 6. Tests/examples should normally be `EXCLUDE_FROM_ALL` unless they are intentionally part of normal production build output.
-7. Source import/codec libraries belong to tooling targets; runtime-format readers belong to `SwimAssets`.
-8. The generated Visual Studio solution should make the ownership graph easier to read, but CMake remains the source of truth.
+7. Do not create a new test target. Runnable coverage goes into a suite file under `Source/Tests/Suites/<group>/`; a new target is only justified when the point of the check is a narrower link surface than `SwimTests` has, which means a header-boundary gate.
+8. A tool that owns a `main()` belongs in its module's `Cli/` directory, not in a new module. The extra target is a link-time necessity, not a second owner of the logic.
+9. Source import/codec libraries belong to tooling targets; runtime-format readers belong to `SwimAssets`.
+10. The generated Visual Studio solution should make the ownership graph easier to read, but CMake remains the source of truth.

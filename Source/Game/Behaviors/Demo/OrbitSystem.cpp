@@ -17,7 +17,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "Engine/Systems/Entity/EntityFactory.h"
+#include "Engine/Systems/Scene/SceneCommandBuffer.h"
 
 namespace Game
 {
@@ -25,7 +25,7 @@ namespace Game
 	void TestParenting(Engine::Scene* scene, const glm::vec3& pos)
 	{
 		// Creates an entity with the orbit system behavior and a callback to assign a transform and object tag
-		scene->GetEntityFactory().CreateWithBehaviors<OrbitSystem>(
+		scene->GetCommandBuffer().CreateWithBehaviors<OrbitSystem>(
 			[scene, pos](entt::entity e, OrbitSystem* s)
 		{
 			scene->EmplaceComponent<Engine::Transform>(e, pos, glm::vec3(1.0f));
@@ -135,7 +135,7 @@ namespace Game
 
 		glm::vec3 pos = transform->GetPosition();
 
-		entt::entity e = reg.create();
+		entt::entity e = scene->CreateEntity();
 		// Big star at origin
 		reg.emplace<Engine::Transform>(e, pos, glm::vec3(1.8f));
 		reg.emplace<Engine::Material>(e, matStar);
@@ -161,7 +161,7 @@ namespace Game
 		auto mat = matPool.RegisterMaterialBinding(matName, sharedSphereMesh);
 
 		// Entity
-		entt::entity e = reg.create();
+		entt::entity e = scene->CreateEntity();
 
 		// Random orbit params
 		Planet p;

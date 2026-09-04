@@ -61,6 +61,9 @@ try {
         exit $LASTEXITCODE
     }
 
+    Invoke-SwimWindowsTestSuite -BuildPlan $BuildPlan
+    Invoke-SwimWindowsAssetCookValidation -Root $Root -BuildPlan $BuildPlan
+
     if ($BuildPlan.ConfigurePreset -ne "windows-vs") {
         Write-Host "[Swim] Generating Visual Studio 2022 solution: $VisualStudioSolution"
         Write-Host "[Swim] Reusing the freshly populated, integrity-checked dependency cache; no second dependency pull is allowed."

@@ -369,3 +369,8 @@ FodyWeavers.xsd
 
 # Repository-local third-party source cache used by CPM.
 /.cache/
+
+# Cooked asset output. `Assets/` holds authoring sources; everything under
+# `Assets/Cooked/` is regenerated from them by the development auto-cook path or
+# by SwimAssetCooker, so it is build output and must never be committed.
+/Assets/Cooked/

@@ -1,30 +1,15 @@
 #pragma once
 
+#include "PhysicsTypes.h"
+
 #include <glm/glm.hpp>
 #include <cstdint>
-
-namespace physx
-{
-	class PxRigidActor;
-	class PxShape;
-}
 
 namespace Engine
 {
 
-	enum class RigidbodyType : std::uint8_t
-	{
-		Static = 0,
-		Dynamic,
-		Kinematic
-	};
-
-	enum class ColliderType : std::uint8_t
-	{
-		Box = 0,
-		Sphere,
-		Capsule
-	};
+	using RigidbodyType = MotionType;
+	using ColliderType = ShapeType;
 
 	struct BoxCollider
 	{
@@ -68,17 +53,17 @@ namespace Engine
 		float angularDamping = 0.05f;
 
 		Collider collider;
+		CollisionLayer collision{};
 
-		// Backend-owned handles (created/owned by PhysicsWorld).
-		// Forward declared so gameplay can include Rigidbody without PhysX headers.
-		physx::PxRigidActor* actor = nullptr;
-		physx::PxShape* shape = nullptr;
+		// Runtime physics identity is backend-neutral. The selected backend owns all
+		// PhysX/Jolt objects behind this generational handle.
+		BodyHandle body{};
 
-		// If true, PhysicsWorld will rebuild this actor/shape on next sync.
+		// If true, the scene physics bridge rebuilds the generic body/shape/material
+		// binding at the next synchronization point.
 		bool dirty = true;
 
-		// Optional initial velocities to apply once actor exists.
-		// (Needed because SetLinearVelocity() early-outs if actor isn't created yet.)
+		// Optional initial velocities to apply once the body exists.
 		bool hasInitialLinearVelocity = false;
 		bool hasInitialAngularVelocity = false;
 

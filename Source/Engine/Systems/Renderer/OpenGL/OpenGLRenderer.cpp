@@ -17,6 +17,7 @@
 #include "Engine/Components/TextComponent.h"
 #include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "Engine/Systems/Renderer/Core/RenderConventions.h"
 #include "Engine/Systems/Renderer/Core/Font/TextLayout.h"
 
 #include <fstream>
@@ -175,6 +176,7 @@ namespace Engine
 		glEnable(GL_CULL_FACE);
 		glEnable(GL_MULTISAMPLE);
 		glEnable(GL_STENCIL_TEST);
+		glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 
 		// glEnable(GL_BLEND); // will be enabled for decorator pass
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -577,11 +579,7 @@ namespace Engine
 		{
 			cameraUBO.screenView = glm::mat4(1.0f); // Identity
 
-			cameraUBO.screenProj = glm::ortho(
-				0.0f, VirtualCanvasWidth,
-				0.0f, VirtualCanvasHeight,
-				1.0f, -1.0f
-			);
+			cameraUBO.screenProj = BuildCanonicalScreenProjection(VirtualCanvasWidth, VirtualCanvasHeight);
 
 			hasUploadedOrtho = true;
 		}

@@ -158,7 +158,7 @@ namespace Engine
 			beh->SetRegularColor(gray);
 
 			activeScene->SetParent(e, gizmoUI);
-			tf.SetScreenSpaceLayerRelativeToParent(true, activeScene->GetClipSpaceDepthRange());
+			tf.SetScreenSpaceLayerRelativeToParent(true);
 
 			// Text
 			entt::entity txt = activeScene->CreateEntity();
@@ -177,7 +177,7 @@ namespace Engine
 
 			activeScene->AddComponent<Engine::TextComponent>(txt, tc);
 			activeScene->SetParent(txt, e);
-			txtTf.SetScreenSpaceLayerRelativeToParent(true, activeScene->GetClipSpaceDepthRange());
+			txtTf.SetScreenSpaceLayerRelativeToParent(true);
 
 			return e;
 		};

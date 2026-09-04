@@ -2,7 +2,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "Engine/EngineConfig.h"
+#include <glm/ext/matrix_clip_space.hpp>
 #include "Engine/Machine.h"
 
 #include <cstdint>
@@ -37,8 +37,6 @@ namespace Engine
 		float aspect = 1.0f;
 		float nearClip = 0.1f;
 		float farClip = 100.0f;
-		GraphicsBackend graphicsBackend = GraphicsBackend::Vulkan;
-
 		mutable bool viewDirty = true;
 		mutable bool projDirty = true;
 		mutable glm::mat4 viewMatrix{ 1.0f };
@@ -68,8 +66,6 @@ namespace Engine
 		void SetFOV(float f) { fov = f; MarkProjDirty(); }
 		void SetAspect(float a) { aspect = a; MarkProjDirty(); }
 		void SetClipPlanes(float nearC, float farC) { nearClip = nearC; farClip = farC; MarkProjDirty(); }
-		void SetGraphicsBackend(GraphicsBackend backend) { graphicsBackend = backend; MarkProjDirty(); }
-
 		const glm::vec3& GetPosition() const { return position; }
 		const glm::quat& GetRotation() const { return rotation; }
 		float GetFOV() const { return fov; }
@@ -95,11 +91,9 @@ namespace Engine
 		{
 			if (projDirty)
 			{
-				projMatrix = glm::perspective(glm::radians(fov), aspect, nearClip, farClip);
-				if (graphicsBackend == GraphicsBackend::Vulkan)
-				{
-					projMatrix[1][1] *= -1; // Vulkan clip space correction
-				}
+				// Engine camera space is always right-handed with 0..1 clip depth.
+				// Backends adapt framebuffer orientation at their presentation boundary.
+				projMatrix = glm::perspectiveRH_ZO(glm::radians(fov), aspect, nearClip, farClip);
 				projDirty = false;
 			}
 			return projMatrix;
@@ -116,7 +110,6 @@ namespace Engine
 		int Init() override;
 		void Update(double dt) override;
 		void RefreshAspect();
-		void SetGraphicsBackend(GraphicsBackend backend) { camera.SetGraphicsBackend(backend); }
 		void SetSurfaceSize(uint32_t width, uint32_t height);
 
 		const glm::mat4& GetViewMatrix() const { return camera.GetViewMatrix(); }

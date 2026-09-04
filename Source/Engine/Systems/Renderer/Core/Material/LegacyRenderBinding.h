@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/Core/Material/MaterialData.h"
+#include "Engine/Assets/AssetId.h"
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Meshes/MeshBufferData.h"
 
@@ -19,11 +20,22 @@ namespace Engine
 		std::shared_ptr<Mesh> mesh;
 		std::shared_ptr<MeshBufferData> meshBufferData;
 		std::shared_ptr<MaterialData> material;
+		Swim::Assets::AssetId MeshAssetId{};
+		Swim::Assets::AssetId MaterialAssetId{};
 
 		LegacyRenderBinding() = default;
 
-		LegacyRenderBinding(std::shared_ptr<Mesh> mesh, std::shared_ptr<MeshBufferData> meshBufferData, std::shared_ptr<MaterialData> material)
-			: mesh(std::move(mesh)), meshBufferData(std::move(meshBufferData)), material(std::move(material))
+		LegacyRenderBinding(
+			std::shared_ptr<Mesh> mesh,
+			std::shared_ptr<MeshBufferData> meshBufferData,
+			std::shared_ptr<MaterialData> material,
+			Swim::Assets::AssetId meshAssetId = {},
+			Swim::Assets::AssetId materialAssetId = {})
+			: mesh(std::move(mesh)),
+			  meshBufferData(std::move(meshBufferData)),
+			  material(std::move(material)),
+			  MeshAssetId(meshAssetId),
+			  MaterialAssetId(materialAssetId)
 		{}
 
 		std::shared_ptr<Texture2D> GetAlbedoMap() const

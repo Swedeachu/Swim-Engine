@@ -42,6 +42,9 @@ try {
         exit $LASTEXITCODE
     }
 
+    Invoke-SwimWindowsTestSuite -BuildPlan $BuildPlan
+    Invoke-SwimWindowsAssetCookValidation -Root $Root -BuildPlan $BuildPlan
+
     if ($BuildPlan.ConfigurePreset -ne "windows-vs") {
         Write-Host "[Swim] Refreshing Visual Studio 2022 solution: $VisualStudioSolution"
         Write-Host "[Swim] Solution refresh is fully disconnected and reuses the validated dependency cache."

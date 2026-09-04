@@ -3,7 +3,6 @@
 
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	foreach(SWIM_STUB_TARGET IN ITEMS
-		SwimGlm
 		SwimEnTT
 		SwimJson
 		SwimStb
@@ -15,7 +14,9 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		add_library(${SWIM_STUB_TARGET} INTERFACE)
 	endforeach()
 
-	add_library(glm::glm ALIAS SwimGlm)
+	if(NOT TARGET glm::glm)
+		message(FATAL_ERROR "glm::glm must be provided by cmake/MathDependencies.cmake before legacy dependencies")
+	endif()
 	add_library(EnTT::EnTT ALIAS SwimEnTT)
 	add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)
 	add_library(stb::stb ALIAS SwimStb)
@@ -24,7 +25,9 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(glad::glad ALIAS SwimGlad)
 	add_library(spdlog::spdlog ALIAS SwimSpdlog)
 
-	include(cmake/PhysX.cmake)
+	if(SWIM_ENABLE_PHYSX_BACKEND)
+		include(cmake/PhysX.cmake)
+	endif()
 	return()
 endif()
 
@@ -95,23 +98,12 @@ function(swim_assert_cached_git_dependency_clean dependency_name source_dir)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# GLM 1.0.0 - matches the previously committed headers.
-# Header-only: do not execute the dependency's own CMake project. This avoids
-# old-policy warnings/errors on newer CMake releases and keeps configuration
-# limited to the files Swim Engine actually consumes.
+# GLM is a cross-platform foundation dependency and is created earlier by
+# cmake/MathDependencies.cmake so generic physics also compiles on Linux.
 # ---------------------------------------------------------------------------
-CPMAddPackage(
-	NAME glm_source
-	GITHUB_REPOSITORY g-truc/glm
-	GIT_TAG 1.0.0
-	DOWNLOAD_ONLY YES
-	UPDATE_DISCONNECTED YES
-)
-add_library(SwimGlm INTERFACE)
-target_include_directories(SwimGlm SYSTEM INTERFACE
-	"${glm_source_SOURCE_DIR}"
-)
-add_library(glm::glm ALIAS SwimGlm)
+if(NOT TARGET glm::glm)
+	message(FATAL_ERROR "glm::glm foundation dependency was not initialized")
+endif()
 
 # ---------------------------------------------------------------------------
 # EnTT 3.13.2 - matches the previously committed headers.
@@ -367,7 +359,9 @@ add_library(glad::glad ALIAS SwimGlad)
 swim_set_solution_folder(SwimGlad "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 
-include(cmake/PhysX.cmake)
+if(SWIM_ENABLE_PHYSX_BACKEND)
+	include(cmake/PhysX.cmake)
+endif()
 
 foreach(SWIM_CACHED_GIT_DEPENDENCY IN ITEMS
 	mimalloc_source

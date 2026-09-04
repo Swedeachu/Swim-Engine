@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
+#include "Engine/Systems/Renderer/Core/RenderConventions.h"
 #include "Engine/Components/Transform.h"
 #include "VulkanCubeMap.h"
 
@@ -547,11 +548,7 @@ namespace Engine
 		{
 			cameraUBO.screenView = glm::mat4(1.0f); // Identity
 
-			cameraUBO.screenProj = glm::ortho(
-				0.0f, VirtualCanvasWidth,
-				VirtualCanvasHeight, 0.0f, // Flip Y for Vulkan
-				-1.0f, 1.0f
-			);
+			cameraUBO.screenProj = BuildCanonicalScreenProjection(VirtualCanvasWidth, VirtualCanvasHeight);
 
 			hasUploadedOrtho = true;
 		}
@@ -599,7 +596,9 @@ namespace Engine
 		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		// Dynamic viewport & scissor
-		VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
+		// Camera/NDC Y is canonical +up. Vulkan presentation uses a negative viewport
+		// height so backend orientation is handled here rather than in Camera math.
+		VkViewport viewport{ 0.0f, (float)extent.height, (float)extent.width, -(float)extent.height, 0.0f, 1.0f };
 		VkRect2D scissor{ {0, 0}, extent };
 		vkCmdSetViewport(cmd, 0, 1, &viewport);
 		vkCmdSetScissor(cmd, 0, 1, &scissor);

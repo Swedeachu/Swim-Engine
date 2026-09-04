@@ -3,6 +3,9 @@
 #include "Engine/SwimEngine.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
 #include "Game/Scenes/SandBox.h"
+#include "Game/Behaviors/Demo/Spin.h"
+#include "Game/Behaviors/Demo/SimpleMovement.h"
+#include "Game/Behaviors/Phys/BallShooter.h"
 
 namespace
 {
@@ -39,6 +42,9 @@ int main(int argc, char** argv)
 
 		Engine::SwimEngine engine(std::move(parsedConfig.Config));
 		Engine::SceneSystem* scenes = engine.GetSceneSystem();
+		scenes->RegisterBehaviorType<Game::Spin>("Spin");
+		scenes->RegisterBehaviorType<Game::SimpleMovement>("SimpleMovement");
+		scenes->RegisterBehaviorType<Game::BallShooter>("BallShooter");
 		scenes->RegisterSceneType<Game::SandBox>("SandBox");
 		scenes->SetStartupScene("SandBox");
 

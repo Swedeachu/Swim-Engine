@@ -29,6 +29,5 @@ namespace Game
 
 	};
 
-	REGISTER_BEHAVIOR(BallShooter)
 
 }

@@ -24,3 +24,15 @@ echo "[Swim] Dependency downloads are disabled; cached CPM sources will be reuse
 
 cmake --preset "$PRESET" -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset "$PRESET" --parallel
+
+# The Linux foundation configure builds every test suite whose dependencies it
+# has (the legacy renderer/PhysX suites are simply not compiled there), so the
+# same single test program validates this build too.
+echo "[Swim] Building and running the Swim test suite."
+cmake --build --preset "$PRESET" --target SwimTests --parallel
+TEST_BINARY="$ROOT/build/$PRESET/SwimTests"
+if [[ ! -x "$TEST_BINARY" ]]; then
+    echo "[Swim] ERROR: SwimTests built but '$TEST_BINARY' is missing." >&2
+    exit 1
+fi
+"$TEST_BINARY"

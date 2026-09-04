@@ -1,39 +1,30 @@
 #pragma once
 
-#include <memory>
+#include "Engine/Machine.h"
+#include "IPhysicsBackend.h"
+#include "PhysicsWorld.h"
 
-#include "PxPhysicsAPI.h"
-#include "extensions/PxDefaultCpuDispatcher.h"
-#include "Engine/EngineState.h"
+#include <memory>
 
 namespace Engine
 {
-
-	class Scene;
 
 	class PhysicsSystem : public Machine
 	{
 
 	public:
 
+		explicit PhysicsSystem(std::unique_ptr<IPhysicsBackend> backend);
+		~PhysicsSystem() override;
+
 		int Awake() override;
 		int Init() override;
-		// Physics traversal is scene-explicit. The legacy Machine frame hooks are intentionally
-		// not used so PhysicsSystem never discovers an application-designated active scene.
-		void UpdateScene(Scene& scene, double dt);
-		void FixedUpdateScene(Scene& scene, unsigned int tickThisSecond);
 		int Exit() override;
 
-		physx::PxFoundation* GetFoundation() const { return foundation.get(); }
-		physx::PxPhysics* GetPxPhysics() const { return physics.get(); }
+		std::unique_ptr<PhysicsWorld> CreateWorld(const PhysicsWorldDesc& desc = {});
 
-		// Return the base interface, but we own the concrete default dispatcher.
-		physx::PxCpuDispatcher* GetCpuDispatcher() const { return dispatcher.get(); }
+		const char* GetBackendName() const;
 
-		void SetServices(const EngineState* state)
-		{
-			engineState = state;
-		}
 
 		float GetFixedDeltaSeconds() const { return fixedDeltaSeconds; }
 		void SetFixedDeltaSeconds(float dt) { fixedDeltaSeconds = dt; }
@@ -41,34 +32,13 @@ namespace Engine
 
 	private:
 
-		struct PxReleaser
-		{
-			template<typename T>
-			void operator()(T* ptr) const
-			{
-				if (ptr)
-				{
-					ptr->release();
-				}
-			}
-		};
+		std::unique_ptr<IPhysicsBackend> backend;
+		unsigned int dispatcherThreads = 0; // 0 => automatically determined
 
-		physx::PxDefaultAllocator allocator;
-		physx::PxDefaultErrorCallback errorCallback;
+		// Kept in sync with the engine's tick rate via SetFixedDeltaSeconds(), by default it is 60 Hz.
+		float fixedDeltaSeconds = 1.0f / 60.0f;
 
-		std::unique_ptr<physx::PxFoundation, PxReleaser> foundation;
-		std::unique_ptr<physx::PxPhysics, PxReleaser> physics;
-		std::unique_ptr<physx::PxDefaultCpuDispatcher, PxReleaser> dispatcher;
-
-		unsigned int dispatcherThreads = 0; // 0 => automatically determined 
-
-		// Kept in sync with the engine's tick rate via SetFixedDeltaSeconds(), by default it is 60 Hz
-		float fixedDeltaSeconds = 1.0f / 60.0f; 
-
-		const EngineState* engineState = nullptr;
-
-		// Time since last fixed tick (for render interpolation alpha).
-		double timeSinceLastTick = 0.0;
+		bool initialized = false;
 
 	};
 

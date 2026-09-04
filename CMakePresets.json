@@ -74,7 +74,7 @@
         },
         {
             "name": "linux-debug",
-            "displayName": "Linux Debug (Ninja, platform/input foundation)",
+            "displayName": "Linux Debug (Ninja, cross-platform foundation)",
             "inherits": "linux-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -82,7 +82,7 @@
         },
         {
             "name": "linux-release",
-            "displayName": "Linux Release (Ninja, platform/input foundation)",
+            "displayName": "Linux Release (Ninja, cross-platform foundation)",
             "inherits": "linux-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"

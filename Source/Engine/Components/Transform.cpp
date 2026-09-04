@@ -143,7 +143,7 @@ namespace Engine
 		SetWorldRotation(registry, worldRot);
 	}
 
-	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent, ClipSpaceDepthRange depthRange)
+	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent)
 	{
 		if (parent == entt::null || !ownerRegistry)
 		{
@@ -172,7 +172,7 @@ namespace Engine
 		}
 		readableLayer = readableZ;
 
-		const float minDepth = depthRange == ClipSpaceDepthRange::ZeroToOne ? 0.0f : -1.0f;
+		const float minDepth = 0.0f;
 		const float maxDepth = 1.0f;
 		float z = aboveParent
 			? glm::max(parentClipZ - kOffset, minDepth)
@@ -184,7 +184,7 @@ namespace Engine
 		}
 	}
 
-	void Transform::SetScreenSpaceLayer(int layer, ClipSpaceDepthRange depthRange)
+	void Transform::SetScreenSpaceLayer(int layer)
 	{
 		constexpr int kMaxLayers = 4096;
 		constexpr float kEpsilon = 1e-6f;
@@ -204,13 +204,9 @@ namespace Engine
 		readableZ = glm::clamp(readableZ, -1.0f + kEpsilon, +1.0f - kEpsilon);
 		readableLayer = readableZ;
 
-		float z = readableZ;
-		if (depthRange == ClipSpaceDepthRange::ZeroToOne)
-		{
-			const float step = 1.0f / (kMaxLayers + 2);
-			z = 1.0f - (static_cast<float>(clampedLayer) + 1.0f) * step;
-			z = glm::clamp(z, kEpsilon, 1.0f - kEpsilon);
-		}
+		const float step = 1.0f / (kMaxLayers + 2);
+		float z = 1.0f - (static_cast<float>(clampedLayer) + 1.0f) * step;
+		z = glm::clamp(z, kEpsilon, 1.0f - kEpsilon);
 
 		if (z != position.z)
 		{

@@ -301,7 +301,12 @@ namespace Engine
 		return false;
 	}
 
-	std::shared_ptr<LegacyRenderBinding> MaterialPool::RegisterMaterialBinding(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap)
+	std::shared_ptr<LegacyRenderBinding> MaterialPool::RegisterMaterialBinding(
+		const std::string& name,
+		std::shared_ptr<Mesh> mesh,
+		std::shared_ptr<Texture2D> albedoMap,
+		Swim::Assets::AssetId materialAssetId,
+		Swim::Assets::AssetId meshAssetId)
 	{
 		std::lock_guard<std::mutex> lock(poolMutex);
 
@@ -311,10 +316,25 @@ namespace Engine
 			return it->second;
 		}
 
+		if (assets && !materialAssetId)
+		{
+			materialAssetId = assets->GetDatabase().GetOrCreate("Legacy/Materials/" + name);
+		}
+		if (assets && !meshAssetId)
+		{
+			meshAssetId = assets->GetDatabase().GetOrCreate("Legacy/Meshes/" + name);
+		}
+
 		auto material = std::make_shared<MaterialData>(std::move(albedoMap));
 		auto residency = meshes->RequestMeshResidency(mesh);
 
-		auto data = std::make_shared<LegacyRenderBinding>(std::move(mesh), std::move(residency), std::move(material));
+		auto data = std::make_shared<LegacyRenderBinding>(
+			std::move(mesh),
+			std::move(residency),
+			std::move(material),
+			meshAssetId,
+			materialAssetId
+		);
 		materials.emplace(name, data);
 
 		if (sendEditorMessage)
@@ -355,6 +375,13 @@ namespace Engine
 		return false;
 	}
 
+	Swim::Assets::AssetId MaterialPool::GetCompositeMaterialAssetId(const std::string& sourcePath) const
+	{
+		std::lock_guard<std::mutex> lock(poolMutex);
+		const auto existing = compositeMaterialAssetIds.find(sourcePath);
+		return existing != compositeMaterialAssetIds.end() ? existing->second : Swim::Assets::AssetId{};
+	}
+
 	std::vector<std::shared_ptr<LegacyRenderBinding>> MaterialPool::LoadAndRegisterCompositeMaterial(const std::string& sourcePath)
 	{
 		auto getCachedBinding = [&]()
@@ -381,6 +408,11 @@ namespace Engine
 					"Cooked model was never registered as '" + modelLogicalPath +
 					"'. The development asset bootstrap either did not discover the source or reported a cook/load error earlier in the log."
 				);
+			}
+
+			{
+				std::lock_guard<std::mutex> lock(poolMutex);
+				compositeMaterialAssetIds[sourcePath] = modelHandle.GetId();
 			}
 
 			const Swim::Assets::ModelAsset* model = assets->Resolve(modelHandle);
@@ -500,7 +532,18 @@ namespace Engine
 
 					const std::string bindingName = modelLogicalPath + "@" + revisionName + "#node/" + std::to_string(nodeIndex) + "/primitive/" + std::to_string(primitiveIndex);
 					const std::shared_ptr<Mesh> mesh = meshes->GetOrCreateAndRegisterMesh(bindingName, vertices, indices);
-					loadedMaterials.push_back(RegisterMaterialBinding(bindingName + "/material", mesh, std::move(albedoMap)));
+					Swim::Assets::AssetId materialAssetId{};
+					if (primitive.MaterialSlot < node.Materials.size() && node.Materials[primitive.MaterialSlot])
+					{
+						materialAssetId = node.Materials[primitive.MaterialSlot].GetId();
+					}
+					loadedMaterials.push_back(RegisterMaterialBinding(
+						bindingName + "/material",
+						mesh,
+						std::move(albedoMap),
+						materialAssetId,
+						node.Mesh.GetId()
+					));
 				}
 			}
 
@@ -542,6 +585,7 @@ namespace Engine
 		materials.clear();
 		compositeMaterials.clear();
 		compositeMaterialRevisions.clear();
+		compositeMaterialAssetIds.clear();
 
 		if (sendEditorMessage)
 		{

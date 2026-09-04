@@ -5,8 +5,8 @@
 #include "SubSceneSystems/SceneBVH.h"
 #include "SubSceneSystems/GizmoSystem.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
-#include "SubSceneSystems/SerializedSceneManager.h"
 #include "TransformSystem.h"
+#include "Serialization/EntityIdentityMap.h"
 
 #include "Engine/Components/ObjectTag.h"
 #include "Engine/EngineState.h"
@@ -16,6 +16,7 @@
 #include "Engine/Systems/Renderer/Core/RenderConventions.h"
 
 #include "Engine/Systems/Physics/PhysicsWorld.h"
+#include "Physics/ScenePhysicsBridge.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -26,7 +27,6 @@
 #include <string_view>
 #include <type_traits>
 #include <typeinfo>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -67,7 +67,12 @@ namespace Engine
 	class TexturePool;
 	class MaterialPool;
 	class FontPool;
-	class EntityFactory;
+	class SceneCommandBuffer;
+	class BehaviorRegistry;
+	class SceneSerializer;
+	class SceneStorage;
+	class SceneToolingBridge;
+	class SceneSyncTracker;
 
 	// A scene contains a list (registry) of entities to store and update all their components each frame
 	class Scene : public Machine, public std::enable_shared_from_this<Scene>
@@ -117,6 +122,9 @@ namespace Engine
 		int Exit() override { DestroyAllEntities(); return 0; };
 
 		entt::entity CreateEntity();
+		entt::entity CreateEntityWithSerializedId(SerializedEntityId id);
+		SerializedEntityId GetSerializedEntityId(entt::entity entity) const;
+		entt::entity FindEntityBySerializedId(SerializedEntityId id) const;
 
 		void DestroyEntity(entt::entity entity, bool callExit = true, bool destroyChildren = true);
 
@@ -145,7 +153,6 @@ namespace Engine
 		void SetInputManager(InputManager* system) { inputManager = system; }
 		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
 		void SetEngineState(const EngineState* state) { engineState = state; }
-		void SetClipSpaceDepthRange(ClipSpaceDepthRange depthRange) { clipSpaceDepthRange = depthRange; }
 		void SetMeshPool(MeshPool* value) { meshPool = value; }
 		void SetTexturePool(TexturePool* value) { texturePool = value; }
 		void SetMaterialPool(MaterialPool* value) { materialPool = value; }
@@ -154,6 +161,7 @@ namespace Engine
 		void SetJobSystem(Swim::Jobs::JobSystem* value) { jobSystem = value; }
 		void SetIoSystem(Swim::IO::AsyncIoService* value) { ioSystem = value; }
 		void SetAssetSystem(Swim::Assets::AssetSystem* value) { assetSystem = value; }
+		void SetBehaviorRegistry(BehaviorRegistry* value) { behaviorRegistry = value; }
 		void SetFrameArena(Swim::Memory::FrameArena* value) { frameArena = value; }
 		void SetFPSProvider(std::function<int()> provider) { fpsProvider = std::move(provider); }
 		void SetCommandDispatcher(std::function<bool(std::string_view)> dispatcher) { commandDispatcher = std::move(dispatcher); }
@@ -165,7 +173,6 @@ namespace Engine
 		CameraSystem* GetCameraSystem() const { return cameraSystem; }
 		CubeMapController* GetCubeMapController() const { return cubeMapController; }
 		EngineState GetEngineState() const { return *GetSystem(engineState); }
-		ClipSpaceDepthRange GetClipSpaceDepthRange() const { return clipSpaceDepthRange; }
 		MeshPool& GetMeshPool() const { return *GetSystem(meshPool); }
 		TexturePool& GetTexturePool() const { return *GetSystem(texturePool); }
 		MaterialPool& GetMaterialPool() const { return *GetSystem(materialPool); }
@@ -174,8 +181,9 @@ namespace Engine
 		Swim::Jobs::JobSystem& GetJobSystem() const { return *GetSystem(jobSystem); }
 		Swim::IO::AsyncIoService& GetIoSystem() const { return *GetSystem(ioSystem); }
 		Swim::Assets::AssetSystem& GetAssetSystem() const { return *GetSystem(assetSystem); }
+		BehaviorRegistry& GetBehaviorRegistry() const { return *GetSystem(behaviorRegistry); }
 		Swim::Memory::FrameArena& GetFrameArena() const { return *GetSystem(frameArena); }
-		EntityFactory& GetEntityFactory() const { return *GetSystem(entityFactory.get()); }
+		SceneCommandBuffer& GetCommandBuffer() const { return *GetSystem(sceneCommandBuffer.get()); }
 		int GetFPS() const { return fpsProvider ? fpsProvider() : 0; }
 		bool DispatchCommand(std::string_view command) const { return commandDispatcher && commandDispatcher(command); }
 		bool SendEditorMessage(const std::string& message, std::uintptr_t channel = 1) const
@@ -201,29 +209,39 @@ namespace Engine
 		bool IsTopMostUiAtScreenPoint(entt::entity target, const glm::vec2& point);
 
 		template<typename T>
-		T& AddComponent(entt::entity entity, T component)
+		decltype(auto) AddComponent(entt::entity entity, T component)
 		{
 			static_assert(!std::is_reference_v<T>, "AddComponent should not take a reference type");
 			static_assert(!std::is_pointer_v<T>, "AddComponent should not take a pointer type");
 
-			T& result = registry.emplace<T>(entity, std::move(component));
-
-			// All serialization notifications are now driven by registry hooks.
-
-			return result;
+			using EmplaceResult = decltype(registry.emplace<T>(entity, std::move(component)));
+			if constexpr (std::is_void_v<EmplaceResult>)
+			{
+				registry.emplace<T>(entity, std::move(component));
+				return;
+			}
+			else
+			{
+				return registry.emplace<T>(entity, std::move(component));
+			}
 		}
 
 		template<typename T, typename... Args>
-		T& EmplaceComponent(entt::entity entity, Args&&... args)
+		decltype(auto) EmplaceComponent(entt::entity entity, Args&&... args)
 		{
 			static_assert(!std::is_pointer_v<T>, "EmplaceComponent should not take a pointer type");
 			static_assert(std::is_constructible_v<T, Args&&...>, "T must be constructible with the provided arguments");
 
-			T& result = registry.emplace<T>(entity, std::forward<Args>(args)...);
-
-			// All serialization notifications are now driven by registry hooks.
-
-			return result;
+			using EmplaceResult = decltype(registry.emplace<T>(entity, std::forward<Args>(args)...));
+			if constexpr (std::is_void_v<EmplaceResult>)
+			{
+				registry.emplace<T>(entity, std::forward<Args>(args)...);
+				return;
+			}
+			else
+			{
+				return registry.emplace<T>(entity, std::forward<Args>(args)...);
+			}
 		}
 
 		template<typename T>
@@ -319,6 +337,7 @@ namespace Engine
 		}
 
 		Behavior* EmplaceBehaviorByName(entt::entity e, const std::string& behaviorName);
+		bool RemoveBehaviorByName(entt::entity e, const std::string& behaviorName, bool callExit = true);
 
 		// Calls Behavior::RefreshFieldCache() on each behavior the entity has
 		void RefreshBehaviorFieldCacheForEntity(entt::entity e);
@@ -362,6 +381,10 @@ namespace Engine
 		PhysicsWorld* GetPhysicsWorld() const;
 
 		PhysicsWorld& GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem);
+
+		void UpdatePhysics(PhysicsSystem& physicsSystem, double dt);
+
+		void FixedUpdatePhysics(PhysicsSystem& physicsSystem);
 
 		void DestroyPhysicsWorld();
 
@@ -410,12 +433,12 @@ namespace Engine
 
 		uint64_t renderablesRevision{ 0 };
 		TransformSystem transformSystem;
+		EntityIdentityMap entityIdentities;
 
 		InputManager* inputManager = nullptr;
 		CameraSystem* cameraSystem = nullptr;
 		CubeMapController* cubeMapController = nullptr;
 		const EngineState* engineState = nullptr;
-		ClipSpaceDepthRange clipSpaceDepthRange = ClipSpaceDepthRange::ZeroToOne;
 		MeshPool* meshPool = nullptr;
 		TexturePool* texturePool = nullptr;
 		MaterialPool* materialPool = nullptr;
@@ -424,24 +447,27 @@ namespace Engine
 		Swim::Jobs::JobSystem* jobSystem = nullptr;
 		Swim::IO::AsyncIoService* ioSystem = nullptr;
 		Swim::Assets::AssetSystem* assetSystem = nullptr;
+		BehaviorRegistry* behaviorRegistry = nullptr;
 		Swim::Memory::FrameArena* frameArena = nullptr;
 		std::function<int()> fpsProvider;
 		std::function<bool(std::string_view)> commandDispatcher;
 		std::function<bool(const std::string&, std::uintptr_t)> editorMessageSender;
 		bool transformHooksBound{ false };
+		bool serializationHooksBound{ false };
 
 		// Internals:
 		entt::observer frustumCacheObserver;
 
-		std::unique_ptr<EntityFactory> entityFactory;
+		std::unique_ptr<SceneCommandBuffer> sceneCommandBuffer;
 		std::unique_ptr<SceneBVH> sceneBVH;
-		std::unique_ptr<PhysicsWorld> physicsWorld;
+		std::unique_ptr<ScenePhysicsBridge> physicsBridge;
+		double physicsTimeSinceLastTick{ 0.0 };
 		std::unique_ptr<SceneDebugDraw> sceneDebugDraw;
 		std::unique_ptr<GizmoSystem> gizmoSystem;
-		std::unique_ptr<SerializedSceneManager> serializedSceneManager;
-
-		// Tracks which entities the editor/serializer currently knows about.
-		std::unordered_set<entt::entity> serializedEntities;
+		std::unique_ptr<SceneSerializer> sceneSerializer;
+		std::unique_ptr<SceneStorage> sceneStorage;
+		std::unique_ptr<SceneToolingBridge> sceneToolingBridge;
+		std::unique_ptr<SceneSyncTracker> sceneSyncTracker;
 
 		void RemoveFrustumCache(entt::registry& registry, entt::entity entity);
 

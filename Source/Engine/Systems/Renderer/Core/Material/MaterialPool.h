@@ -10,6 +10,7 @@
 #include <vector>
 #include "LegacyRenderBinding.h"
 #include "Engine/Assets/ContentHash.h"
+#include "Engine/Assets/AssetId.h"
 
 namespace Swim::Assets
 {
@@ -42,7 +43,12 @@ namespace Engine
     std::shared_ptr<LegacyRenderBinding> GetMaterialBinding(const std::string& name);
     std::shared_ptr<LegacyRenderBinding> GetMaterialBindingByID(uint32_t id);
     std::string GetMaterialNameByID(uint32_t id);
-    std::shared_ptr<LegacyRenderBinding> RegisterMaterialBinding(const std::string& name, std::shared_ptr<Mesh> mesh, std::shared_ptr<Texture2D> albedoMap = nullptr);
+    std::shared_ptr<LegacyRenderBinding> RegisterMaterialBinding(
+      const std::string& name,
+      std::shared_ptr<Mesh> mesh,
+      std::shared_ptr<Texture2D> albedoMap = nullptr,
+      Swim::Assets::AssetId materialAssetId = {},
+      Swim::Assets::AssetId meshAssetId = {});
     bool MaterialExists(const std::string& name);
 
     // Builds legacy renderer residency from the authoritative cooked ModelAsset.
@@ -51,6 +57,7 @@ namespace Engine
     std::vector<std::shared_ptr<LegacyRenderBinding>> GetCompositeMaterialData(const std::string& name);
     std::vector<std::shared_ptr<LegacyRenderBinding>> LazyLoadAndGetCompositeMaterial(const std::string& sourcePath);
     bool CompositeMaterialExists(const std::string& name);
+    Swim::Assets::AssetId GetCompositeMaterialAssetId(const std::string& sourcePath) const;
 
     // Frees all
     void Flush();
@@ -66,6 +73,7 @@ namespace Engine
     std::unordered_map<std::string, std::shared_ptr<LegacyRenderBinding>> materials;
     std::unordered_map<std::string, std::vector<std::shared_ptr<LegacyRenderBinding>>> compositeMaterials;
     std::unordered_map<std::string, Swim::Assets::ContentHash> compositeMaterialRevisions;
+    std::unordered_map<std::string, Swim::Assets::AssetId> compositeMaterialAssetIds;
 
   };
 

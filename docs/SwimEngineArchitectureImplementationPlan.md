@@ -12,7 +12,7 @@
 
 ---
 
-## Current implementation snapshot — 2026-09-03
+## Current implementation snapshot — 2026-09-04
 
 This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
 
@@ -20,8 +20,9 @@ This section is the short authoritative status summary for the current repositor
 - **Phase 2 — Engine ownership/configuration:** complete for the existing runtime. `SwimEngine::GetInstance()` is gone from first-party runtime dependency discovery, core systems have explicit typed ownership/lifecycle order, and graphics/physics backend choice is runtime configuration rather than a compile-time renderer selector.
 - **Phase 3 — Jobs/IO/memory:** complete. `Swim::Jobs`, `Swim::IO`, `Swim::Memory`, mimalloc-backed frame/scratch allocation, and deterministic async/job shutdown are established before renderer/streaming expansion.
 - **Phase 4 — Assets:** the engine-owned `Swim::Assets` identity/runtime schema, fastgltf importer, meshoptimizer path, KTX2/Basis metadata/transcode path, WebP/PNG/JPEG source-image compiler, compiler-side Draco decode, `.sasset` v1 writer/reader, development incremental cooker, and cooked-model compatibility residency path are implemented. Source codecs are owned by `SwimAssetCompiler`; they are not supposed to become shipping runtime model-import dependencies.
-- **Current Phase 4 validation gate:** the first dependency-enabled Windows build of the new Draco path exposed that Draco 1.5.7 did not propagate the include roots required by embedded consumers. The repository now owns that package quirk behind `Swim::AssetCompilerDraco`, including the generated `draco_features.h` root, and scopes the pinned dependency's CMake-4 `CMP0148` compatibility locally. **The next real Windows build still needs to confirm this adapter and then run the real importer/cooker path against the checked-in assets before this gate is called fully validated.**
-- **Phase 5 — Scene ownership/state isolation:** explicit `SceneCatalog`/`SceneId`, headless/core/presentation service separation, renderer-independent Scene/Behavior APIs, scene-owned `TransformSystem`, explicit scene traversal for physics/rendering, and per-view `Frustum` state are implemented. The next scene task remains **item 22: replace the remaining `EntityFactory` mutation queue with a scene-owned `SceneCommandBuffer`**, but do not start it until the current Windows asset-pipeline validation gate above passes.
+- **Phase 4 validation:** the Draco 1.5.7 embedded-consumer include-root issue remains isolated behind `Swim::AssetCompilerDraco`, and the supported Windows clean/soft builds compile/run the importer, source-image, development cook/load, and cooker validation targets automatically. The developer has confirmed the dependency-enabled Windows build path is already green, and the repository now contains the real `Assets` authoring tree supplied for this checkpoint (including the Sponza KTX/Draco variants, WebP sofa, barrel/test models, fonts, and textures). The build scripts continue to enforce that gate rather than relying on this one confirmation.
+- **Phase 5 — Scene ownership/state isolation:** the scene foundation now includes explicit `SceneCatalog`/`SceneId`, headless/core/presentation separation, scene-owned Transform and mutation state, per-view Frustum state, an instance-owned behavior registry, durable `SerializedEntityId` identity, split serializer/storage/tooling transport, `AssetId` scene references, and a canonical right-handed / 0..1-depth camera convention. Critical-path items **22, 24, and 26 are complete**. The next data/scene work is **item 27: define generic physics handles/contracts**, while the remaining Phase 5 renderable-component cleanup can continue alongside the later render-extraction/RHI migration.
+- **Testing:** the whole runnable test corpus is one program, `SwimTests`, built from self-registering suites under `Source/Tests/Suites/<group>/`. Adding coverage is a new `.cpp` in the right dependency group, never a new CMake target. The Windows clean/soft builds and the Linux builds run the complete suite, so coverage is continuously exercised instead of depending on a hand-maintained list of phase gate targets. Per-module public-header compile gates stay separate because their value is their narrow link surface. See section 32.
 - **Shipping asset policy:** development auto-cook is intentionally convenient and currently enabled by default when `SwimAssetCompiler` exists. Shipping/release packaging is intended to disable `SWIM_ENABLE_DEV_ASSET_AUTOCOOK`, pre-cook with `SwimAssetCooker`, and run from compiled `.sasset`/future `.spack` data without glTF/Draco/WebP source-import code. Final packaging presets and `.spack`/memory-mapped streaming are later work, so do not confuse the current development executable with the final shipping dependency closure.
 
 Companion documentation for the current generated solution and asset pipeline:
@@ -310,11 +311,11 @@ That conflicts with:
 
 **Target:** dirty tracking is per scene and view/frustum state is per render view.
 
-### 2.10 Physics is only partially abstracted
+### 2.10 Physics now has a generic runtime boundary; backend parity is still incomplete
 
-`Rigidbody.h` avoids including PhysX headers but still stores `PxRigidActor*` and `PxShape*`. `PhysicsSystem.h` and `PhysicsWorld.h` expose PhysX APIs directly. Scene physics creation is tied to the concrete PhysX system.
+`Rigidbody.h`, `PhysicsSystem`, and `PhysicsWorld` now expose only Swim-owned handles/descriptors/query/event contracts. The current PhysX implementation lives behind `IPhysicsBackend` / `IPhysicsWorldBackend` in `Swim::PhysicsPhysX`, while scene/EnTT synchronization lives separately in `ScenePhysicsBridge`. No PhysX object pointer is stored in the generic Rigidbody component.
 
-**Target:** `BodyHandle`, `ShapeHandle`, `PhysicsMaterialHandle`, `ConstraintHandle`, query hit types, collision events, and world operations are Swim types. Backend objects live only in backend implementation storage.
+**Remaining target:** add the Jolt implementation against the same contract, run the shared backend suite against both implementations, then finish backend-specific convex/triangle collision cooking through compiled asset payloads.
 
 ### 2.11 The current Vulkan implementation contains ideas worth keeping
 
@@ -365,13 +366,13 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [x] `Swim::Platform` is the only generic runtime layer allowed to include OS-native window/process APIs. *(Native Win32 use is confined to Platform/internal or backend-specific implementation code; generic/public headers are guarded by verification.)*
 - [ ] `Swim::RhiVulkan` is the only normal layer allowed to include Vulkan implementation types.
 - [ ] `Swim::RhiD3D12` and `Swim::RhiMetal` can be added without changing high-level renderer contracts.
-- [ ] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types.
+- [x] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types. *(Generic Physics/Rigidbody/Scene code is verifier-guarded against PhysX/Jolt implementation types.)*
 - [ ] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types.
 - [x] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
 - [x] fastgltf types do not escape the asset importer/tool boundary. *(fastgltf is private to `SwimAssetCompiler` and included only by `GltfImporter.cpp`; public importer/intermediate/runtime asset headers are Swim-owned.)*
 - [x] enkiTS types do not become gameplay APIs. *(enkiTS is private to `Swim::Jobs`; gameplay/renderer-facing APIs use Swim job types.)*
-- [ ] Persisted scene references never use raw `entt::entity` values as durable identity.
-- [ ] Scene serialization is independent from filesystem storage and editor/IPC transport.
+- [x] Persisted scene references never use raw `entt::entity` values as durable identity. *(Scene persistence/editor transport use scene-owned `SerializedEntityId` values.)*
+- [x] Scene serialization is independent from filesystem storage and editor/IPC transport. *(`SceneSerializer`, `SceneStorage`, `SceneToolingBridge`, and `SceneSyncTracker` are separate responsibilities.)*
 - [x] Static initialization does not construct live Scene instances or require Engine services. *(Static scene registration stores constructor metadata; runtime Scene instances are created per engine.)*
 - [ ] RHI contracts do not contain UI canvas policy or high-level environment features.
 - [x] Material objects do not own meshes. *(Runtime `Material*Asset` types are geometry-free; transitional legacy `MaterialData` is geometry-free and draw-time pairing lives in `LegacyRenderBinding`.)*
@@ -379,7 +380,7 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [x] Texture assets do not own raw Vulkan/OpenGL objects. *(Runtime `TextureAsset` stores CPU/runtime metadata and payload only; legacy `Texture2D` remains a compatibility renderer object pending pool removal.)*
 - [ ] Constructors do not perform hidden disk IO or synchronous GPU uploads.
 - [ ] Scene/ECS objects do not store raw RHI resources.
-- [ ] Scene/ECS objects do not store PhysX/Jolt pointers.
+- [x] Scene/ECS objects do not store PhysX/Jolt pointers. *(Rigidbody stores a generational `BodyHandle`; `ScenePhysicsBridge` talks only to generic `PhysicsWorld`.)*
 - [ ] RHI objects do not know about EnTT.
 - [ ] RenderGraph does not know about EnTT.
 - [ ] GPU Scene does not require EnTT.
@@ -502,7 +503,8 @@ CMake is the authoritative build description and should reinforce the engine arc
 - [ ] First-party subsystems have explicit targets with intentional public/private dependency edges.
 - [ ] Third-party libraries are linked only by the implementation target that owns them.
 - [ ] `Swim::Rhi` does not link Vulkan; `Swim::RhiVulkan` owns Vulkan-Headers, volk, vk-bootstrap, and VMA.
-- [ ] `Swim::Physics` does not link PhysX or Jolt directly; `Swim::PhysicsPhysX` and `Swim::PhysicsJolt` own those dependencies.
+- [x] `Swim::Physics` does not link PhysX or Jolt directly; the current `Swim::PhysicsPhysX` target owns PhysX privately.
+- [ ] `Swim::PhysicsJolt` owns Jolt privately once the Jolt backend is added.
 - [x] `Swim::Platform` / `Swim::Input` own SDL3 integration rather than making SDL3 an engine-wide dependency.
 - [x] fastgltf, meshoptimizer, Draco, source-image decoders, and similar importer dependencies live in asset compiler/import targets unless runtime use is explicitly required. *(fastgltf/meshoptimizer and libwebp source-image decoding are compiler-only; the obsolete runtime tinygltf/Draco/WebP source-import chain has been removed. `stb` is compiler-only for PNG/JPEG authoring decode and remains an explicit legacy-runtime dependency only for still-loose texture/font compatibility paths.)*
 - [ ] Slang shader compilation/reflection is integrated through dedicated build/tool rules with correct source/include dependency tracking.
@@ -532,11 +534,11 @@ Build-time availability
     Vulkan backend: enabled
     OpenGL legacy backend: enabled
     PhysX backend: enabled
-    Jolt backend: enabled
+    Jolt backend: pending Phase 6 parity work
 
 Runtime selection
     GraphicsBackend::Vulkan
-    PhysicsBackend::Jolt
+    PhysicsBackend::PhysX
 ```
 
 A useful target dependency shape is shown below. `A -> B` means **A depends on B**:
@@ -1604,7 +1606,7 @@ Implemented in the next scene-ownership cut:
 - Split `SceneSystemServices` into `SceneCoreServices`, `ScenePresentationServices`, and `SceneToolServices`. Core validity now requires only filesystem, jobs, async IO, assets, frame memory, and engine state; input/camera/cubemap/legacy renderer pools plus command/editor/FPS tooling are optional profiles.
 - Made the base Scene lifecycle presentation-optional. CPU scene ownership, entity/behavior lifecycle, transform hooks, BVH state, jobs, assets, and physics can initialize without renderer/input/font/material services; debug draw, gizmos, editor camera, UI handling, and serializer presentation hooks are gated behind available presentation/tool services.
 - Removed Vulkan/OpenGL/generic renderer pointers from `Scene` and removed the cached renderer from `Behavior`. The one cubemap demo dependency now receives the backend-neutral optional `CubeMapController` presentation service.
-- Removed `SceneSystem*` from Physics. `SwimEngine` chooses the active application scene and passes it directly to `PhysicsSystem::UpdateScene()` / `FixedUpdateScene()`.
+- Removed `SceneSystem*` from Physics. `SwimEngine` chooses the active application scene and drives its explicit `UpdatePhysics()` / `FixedUpdatePhysics()` boundary; `ScenePhysicsBridge` performs ECS synchronization against the generic `PhysicsWorld`.
 - Removed `SceneSystem*` and `GetActiveScene()` discovery from both legacy renderers and `VulkanIndexDraw`. `Renderer::SetRenderScene(Scene*)` is the transitional explicit presentation input until Phase 7 render extraction replaces direct ECS traversal entirely.
 - Removed `SceneSystem*` from `Scene` and `Behavior`. Scene hotkeys/editor sync use optional command/message callbacks supplied by the tool profile instead of reaching back into the scene manager.
 - Extended `scripts/verify-build-layout.py` so a renderer/Physics `SceneSystem*`, renderer/Physics `GetActiveScene()`, flat mandatory scene-presentation services, or renderer pointers in Scene/Behavior are architecture failures.
@@ -1698,7 +1700,19 @@ Validation in this environment: `scripts/verify-build-layout.py` passes; a fresh
 
 The first dependency-enabled Windows clean build then exposed a CMake integration bug before the importer could compile: `draco::draco` linked successfully but did not publish the include roots required by embedded consumers, so `GltfImporter.cpp` could not find `draco/compression/decode.h`. The fix adds `Swim::AssetCompilerDraco`, which links the package target while explicitly exporting `${draco_source_SOURCE_DIR}/src` and the top-level binary root containing generated `draco/draco_features.h`. Both production compiler code and Draco source-fixture tests now consume this adapter. The wrapper also scopes `CMP0148=OLD` only around Draco 1.5.7 so CMake 4.x can satisfy that pinned dependency's legacy `FindPythonInterp` use without a project-level developer warning. Configure-time existence checks and `verify-build-layout.py` guard this package-layout contract. A standalone CMake contract harness was also used locally to mock the pinned package target and compile a consumer including both `<draco/compression/decode.h>` and generated `<draco/draco_features.h>` through `Swim::AssetCompilerDraco`, confirming the transitive include/link seam itself is valid before the next Windows dependency-enabled build.
 
-**Current gate:** do not begin item 22 until the next dependency-enabled Windows clean/soft build confirms the `Swim::AssetCompilerDraco` adapter and then runs the real importer/cooker tests against the repository assets. This is the only unresolved validation step in the current source-codec checkpoint; it is not a design change to the `.sasset` pipeline. After that validation, the current critical-path implementation task returns to **item 22: replace the remaining scene-owned `EntityFactory` mutation queue with an explicit `SceneCommandBuffer`**.
+### Phase 4 Windows asset-pipeline validation automation checkpoint — 2026-09-03
+
+The unresolved Windows gate is now encoded into the supported Windows build workflows instead of relying on a developer to remember a separate test sequence:
+
+- `Invoke-SwimWindowsAssetPipelineValidation` lives in `scripts/windows-build-common.ps1` and is called by both clean and soft Windows builds after the primary engine target has compiled and before the secondary Visual Studio solution tree is generated/refreshed.
+- The gate explicitly builds `SwimGltfImporterTests`, `SwimSourceImageTextureCompilerTests`, `SwimDevelopmentAssetPipelineTests`, and `SwimAssetCooker`. This forces the dependency-enabled compiler graph—including the `Swim::AssetCompilerDraco` source/generated include adapter—to compile under the exact Windows toolchain used by the engine build.
+- The importer regression runs the deterministic Draco encode/decode fixture and the fastgltf extension fixtures; the source-image regression exercises the real compiler-side WebP decoder/mip path; the development-pipeline regression performs import -> optimize -> `.sasset` cook -> runtime load, including a Draco source. A nonzero result from any of these now fails the normal Windows build.
+- When the checkout contains an `Assets` directory with loose `.gltf`/`.glb` sources, the same gate also runs the built `SwimAssetCooker` against that real repository asset root. When no such sources are present, it prints an explicit note that only deterministic fixtures were validated; absence is never silently treated as repository-asset success.
+- `scripts/verify-build-layout.py` guards the validation helper, required test/cooker targets, and both Windows build-script calls so this gate cannot accidentally disappear during build-script cleanup.
+
+Local validation for this checkpoint: the architecture verifier passes. The dependency-enabled Linux configure cannot be completed in this isolated environment because the repository dependency cache is empty and outbound CPM downloads cannot resolve, and PowerShell/MSVC are not available here. That is exactly why the Windows run remains a gate rather than being marked complete.
+
+**Gate resolution — 2026-09-03:** the developer confirmed the dependency-enabled Windows build path is already green and supplied the repository `Assets` authoring tree used by the real cooker path. The automated Windows validation remains in place as a regression gate. With that blocker cleared, the implementation proceeded through critical-path items 22, 24, and 26 in the Phase 5 checkpoint below.
 
 ### Scene context
 
@@ -1788,8 +1802,8 @@ The behavior concept can remain.
 
 Change:
 
-- [ ] `BehaviorRegistry` is owned by runtime/tool context rather than a mutable process-global singleton.
-- [ ] behavior factory registration remains data-driven.
+- [x] `BehaviorRegistry` is owned by runtime/tool context rather than a mutable process-global singleton. *(The engine-owned `SceneSystem` owns one deterministic registry and injects it into its Scene instances; the old singleton factory/registrar path is removed.)*
+- [x] behavior factory registration remains data-driven. *(Application code explicitly registers named behavior descriptors/factories before startup; descriptor order is deterministic and duplicate/invalid registration is rejected.)*
 - [x] behaviors receive explicit scene/service context. *(Behavior construction receives its owning `Scene*`; commonly used optional input/camera services are refreshed from that scene and no SceneSystem/renderer locator is cached.)*
 - [x] behaviors do not cache shared ownership of core services by default. *(Behavior caches are non-owning raw pointers to the owning scene/components/optional presentation services.)*
 - [x] behavior execution is a gameplay/scene phase, never renderer traversal. *(Scene lifecycle owns behavior Awake/Init/Update/FixedUpdate/Exit; renderer traversal only observes renderable data.)*
@@ -1845,12 +1859,12 @@ SceneSerializer <---- component serialization registry
 
 Rules:
 
-- [ ] serializer code does not call `WM_COPYDATA`, open files, or locate executable directories;
-- [ ] storage does not know about editor commands;
-- [ ] editor transport does not own scene serialization policy;
-- [ ] parent/child references serialize stable entity IDs, not integral `entt::entity` values;
-- [ ] asset references serialize `AssetId` plus optional debug/source provenance rather than relying on fuzzy pool names;
-- [ ] runtime-only entities/components can opt out explicitly;
+- [x] serializer code does not call `WM_COPYDATA`, open files, or locate executable directories; *(`SceneSerializer` only observes ECS/identity/component data and emits JSON.)*
+- [x] storage does not know about editor commands; *(`SceneStorage` owns only filesystem persistence and structured save results.)*
+- [x] editor transport does not own scene serialization policy; *(`SceneToolingBridge` is only a message callback boundary; `SceneSyncTracker` composes it with `SceneSerializer`.)*
+- [x] parent/child references serialize stable entity IDs, not integral `entt::entity` values; *(Every Scene entity receives `SerializedEntityId`; editor commands and parent serialization resolve through the scene identity map.)*
+- [x] asset references serialize `AssetId` plus optional debug/source provenance rather than relying on fuzzy pool names; *(Composite model, mesh, and material bindings carry `AssetId`; legacy source paths remain optional debug provenance only.)*
+- [x] runtime-only entities/components can opt out explicitly; *(`DoNotSerialize` is an explicit marker in addition to the existing editor-tag compatibility filter.)*
 - [ ] unknown/newer component data fails or degrades with structured diagnostics instead of silently corrupting a scene.
 
 ### CPU BVH
@@ -1877,9 +1891,25 @@ It is **not** the required source of the final GPU visible list.
 - [ ] renderable components contain asset/render handles, not GPU objects.
 - [x] multiple scenes can exist without shared transform/frustum globals. *(Transform mutation state is owned by each Scene and Frustum state is owned by each render view/traversal.)*
 - [x] scene types register without constructing live scenes during static initialization. *(Scene types are registered explicitly into the instance-owned `SceneCatalog`; static scene registrar macros are removed.)*
-- [ ] persisted entity references use stable serialization IDs rather than raw EnTT values.
-- [ ] scene asset references use `AssetId`.
-- [ ] scene serialization, storage, and editor transport are independent modules.
+- [x] persisted entity references use stable serialization IDs rather than raw EnTT values. *(`EntityIdentityMap` provides monotonic IDs plus explicit rebinding for future document restore; editor traffic uses the same IDs.)*
+- [x] scene asset references use `AssetId`. *(Model/mesh/material persistence emits stable asset IDs, with source path only as optional provenance.)*
+- [x] scene serialization, storage, and editor transport are independent modules. *(`SceneSerializer`, `SceneStorage`, `SceneToolingBridge`, and `SceneSyncTracker` replace the monolithic `SerializedSceneManager`.)*
+
+### Phase 5 command/persistence/convention checkpoint — 2026-09-03
+
+This checkpoint deliberately closes the remaining scene-foundation items before generic physics contracts begin:
+
+- Replaced the old `EntityFactory` create/destroy queues with a scene-owned `SceneCommandBuffer` built on a thread-safe move-only `DeferredCommandBuffer<Scene>`. All commands share one FIFO stream, commands added while a flush is executing are deferred to the next flush, recursive flushes are rejected, and scene exit clears pending work. Editor scene mutations now enter this same boundary instead of mutating the registry from command callbacks.
+- Removed the process-global/static behavior factory/registrar path. `SceneSystem` owns a deterministic `BehaviorRegistry`, the application explicitly registers behavior factories, and named behavior removal now resolves through registry descriptors rather than remaining an editor TODO.
+- Added `SerializedEntityId` plus scene-owned `EntityIdentityMap`. Runtime EnTT handles no longer cross the editor/persistence boundary; create/destroy/add/remove/material/behavior editor commands consume 64-bit stable IDs, and `CreateEntityWithSerializedId()` provides the restore seam needed by a future scene loader.
+- Replaced `SerializedSceneManager` with four independent pieces: `SceneSerializer` (pure ECS -> document), `SceneStorage` (filesystem only), `SceneToolingBridge` (transport callback only), and `SceneSyncTracker` (stable-ID delta composition). Component destruction is serialized at the frame boundary rather than inside EnTT `on_destroy`, avoiding stale pre-removal state. Scene-owned Transform dirty entities are also fed into sync so in-place Transform edits produce correct deltas.
+- Added explicit `DoNotSerialize` persistence opt-out. Parent references serialize `SerializedEntityId`; model/mesh/material references serialize `AssetId`; legacy source paths are optional debug provenance rather than persistence identity.
+- Established one backend-neutral camera convention: right-handed world/view space, +Y-up NDC, and 0..1 depth. `Camera` now uses `glm::perspectiveRH_ZO` and contains no graphics-backend branch. OpenGL 4.6 adapts with `glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)`; Vulkan adapts framebuffer orientation with a negative-height viewport instead of mutating the projection matrix. The existing UI coordinate system remains explicitly bottom-left. Reverse-Z remains a later renderer-depth migration and is not implied by this checkpoint.
+- Added/extended regression targets for deferred commands, durable entity identity, behavior registration, and render conventions. `scripts/verify-build-layout.py` now rejects reintroduction of the old factories/serializer, direct gameplay Scene registry creation, raw EnTT IDs in tooling/persistence, backend-dependent Camera projection math, or loss of the serializer/storage/tooling split.
+
+Validation in this environment: `scripts/verify-build-layout.py` passes; `SwimDeferredCommandBufferTests` compiles/runs directly under GCC/C++20; the dependency-free CMake tree configures and the portable EngineConfig/SceneCatalog/DeferredCommandBuffer/Memory/Jobs/Assets/KTX2/public-header regression subset builds and runs. The known offline SDL stub limitation still prevents building Platform-dependent targets such as `SwimAsyncIoTests` without real SDL headers. The new EnTT/GLM legacy tests are represented in the normal Windows dependency-enabled build and are intentionally not claimed as executed in this Linux dependency-stub environment.
+
+**Next critical-path work:** items 27 and 28 are completed by the Phase 6 checkpoint below; item 29 is the Jolt backend baseline plus shared PhysX/Jolt parity run.
 
 ---
 
@@ -1891,22 +1921,22 @@ The physics seam should be proven before more gameplay becomes dependent on Phys
 
 Create Swim-owned types:
 
-- [ ] `PhysicsSystem`
-- [ ] `PhysicsWorld`
-- [ ] `BodyHandle`
-- [ ] `ShapeHandle`
-- [ ] `PhysicsMaterialHandle`
-- [ ] `ConstraintHandle`
-- [ ] `CharacterHandle`
-- [ ] `BodyDesc`
-- [ ] `ShapeDesc`
-- [ ] `PhysicsMaterialDesc`
-- [ ] `CollisionLayer`
-- [ ] `RaycastHit`
-- [ ] `SweepHit`
-- [ ] `OverlapHit`
-- [ ] `CollisionEvent`
-- [ ] `TriggerEvent`
+- [x] `PhysicsSystem`
+- [x] `PhysicsWorld`
+- [x] `BodyHandle`
+- [x] `ShapeHandle`
+- [x] `PhysicsMaterialHandle`
+- [x] `ConstraintHandle`
+- [x] `CharacterHandle`
+- [x] `BodyDesc`
+- [x] `ShapeDesc`
+- [x] `PhysicsMaterialDesc`
+- [x] `CollisionLayer`
+- [x] `RaycastHit`
+- [x] `SweepHit`
+- [x] `OverlapHit`
+- [x] `CollisionEvent`
+- [x] `TriggerEvent`
 
 ### Rigidbody component
 
@@ -1973,10 +2003,61 @@ Collision cooking is an asset/compiler responsibility where possible.
 
 Where practical, physics backend worker integration should use or cooperate with the engine jobs system. Do not force identical internal scheduling if a backend has a better native strategy; keep the integration seam explicit.
 
+### Phase 6 generic-physics / PhysX-backend checkpoint — 2026-09-03
+
+Implemented in this checkpoint:
+
+- Added generational Swim-owned `BodyHandle`, `ShapeHandle`, `PhysicsMaterialHandle`, `ConstraintHandle`, and `CharacterHandle` identities plus backend-neutral body/shape/material/world descriptors, motion/force enums, collision layers, query hits, collision events, and trigger events.
+- Rebuilt `PhysicsSystem` as a generic backend owner/factory and `PhysicsWorld` as a pure backend-neutral world facade. Neither layer includes EnTT or PhysX/Jolt implementation types.
+- Reduced `Rigidbody` runtime state to a generic `BodyHandle` plus serializable/gameplay-facing configuration. Collision layer/mask data is backend-neutral as well.
+- Split scene synchronization into `ScenePhysicsBridge`, which owns EnTT/Transform/Rigidbody synchronization while consuming only `PhysicsWorld`. Static bodies push Transform -> physics, kinematic bodies use targets, dynamic bodies pull poses back for interpolation, and shape/material/body resources are scene-local.
+- Moved PhysX implementation storage behind `IPhysicsBackend` / `IPhysicsWorldBackend` in `Source/Engine/Systems/Physics/Backends/PhysX` and the dedicated `Swim::PhysicsPhysX` target. `Swim::Physics` does not link PhysX; `SwimEngine` composes the backend through `CreatePhysXBackend()`.
+- Added PhysX translations for static/dynamic/kinematic bodies, box/sphere/capsule shapes, materials, gravity/mass/damping, force/impulse/velocity operations, layer/mask filtering, raycast/sweep/overlap, collision/trigger callbacks, fixed-step simulation, and safe logical body-handle invalidation while native actor destruction is deferred until simulation fetch completes. Body creation also treats `PxRigidActor::attachShape()` failure as a hard creation failure and releases the native actor before it can enter the scene or generic handle tables. Convex/triangle runtime binding remains intentionally blocked on the later compiled collision-cooking work.
+- Added a backend-independent `PhysicsBackendContract` test suite. The PhysX test instantiates the backend factory and runs the same contract that the Jolt test will use, covering body types, primitive shapes, filtering/queries, gravity, impulses, collision/trigger events, kinematic targets, and stale-handle generation after in-flight destruction.
+- Added `SwimPhysics`, `SwimPhysicsPhysX`, `SwimPhysicsPublicHeaders`, `SwimPhysicsHandleTests`, and `SwimPhysicsPhysXBackendTests` CMake targets. Windows clean and soft workflows now build the public-header/handle/backend contract targets and execute the handle + PhysX contract tests before reporting success.
+- Extended `scripts/verify-build-layout.py` so PhysX/Jolt leakage into generic physics, backend pointers in Rigidbody, EnTT dependencies in `PhysicsWorld`, raw PhysX linkage from `SwimEngine`, lost backend tests, loss of the `ScenePhysicsBridge` boundary, removal of the checked `attachShape()` unwind path, or narrowing callback actor resolution back to `PxRigidActor*` fail architecture verification.
+- The first dependency-enabled MSVC build of this checkpoint exposed that PhysX contact/trigger callback records provide `PxActor*` while `ResolveBody()` originally accepted only `PxRigidActor*`. `ResolveBody()` now accepts the PhysX base actor type, rejects null/non-rigid actors through `PxBase::is<PxRigidActor>()`, and only then performs the rigid-actor handle lookup. This keeps casts out of callback code and makes unsupported actor kinds resolve safely to an invalid `BodyHandle`.
+- The following dependency-enabled MSVC clean build progressed past the PhysX backend and exposed a renderer-header self-containment bug: `VulkanIndexDraw.h` forward-declared `TransformSpace` but used `TransformSpace::World` in default member initializers. The header now includes `Engine/Components/Transform.h` directly and no longer forward-declares `TransformSpace`; architecture verification enforces that dependency so PCH/include order cannot hide the error again.
+- The next dependency-enabled MSVC clean build progressed beyond both prior fixes and exposed a scene-storage dependency mismatch: `SceneStorage.h` included `nlohmann/json_fwd.hpp`, but Swim deliberately pins/downloads only nlohmann/json's single `json.hpp` release header. `SceneStorage.h` now includes `nlohmann/json.hpp`, matching the repository dependency contract, and architecture verification rejects any future first-party `json_fwd.hpp` include so split-header assumptions cannot reappear.
+- The following dependency-enabled MSVC clean build progressed past the JSON fix to roughly 693/716 and exposed EnTT empty-type optimization at the scene wrapper boundary: `registry.emplace<DoNotSerialize>()` returns `void` because `DoNotSerialize` is an empty tag, while `Scene::EmplaceComponent<T>()` still forced every insertion into `T&`. `Scene::AddComponent` and `Scene::EmplaceComponent` now use `decltype(auto)` and branch on the actual `decltype(registry.emplace(...))`, preserving references for ordinary components while correctly returning `void` for optimized tags. The verifier rejects restoring the unconditional `T&` assumption.
+- The next dependency-enabled MSVC clean build completed the entire engine compile/link (`716/716`) and entered the automated Phase 4 asset validation gate. `SwimGltfImporterTests` and `SwimSourceImageTextureCompilerTests` passed, but `SwimDevelopmentAssetPipelineTests` terminated with Windows access violation `0xC0000005`. The failure was in the test's lifetime assumptions, not in importer/cooker execution: it cached a raw `ModelAsset*` returned by `AssetSystem::Resolve()` across a second bootstrap, while `RunDevelopmentAssetBootstrap()` republishes the cooked graph and `AssetSystem::Publish()` replaces the owned residency under the same stable handle. The fixture now copies the stable `AssetHandle<ModelAsset>` / `AssetHandle<MeshAsset>` identities, re-resolves the model after every bootstrap/recook boundary, and verifies that dependency handles remain stable. `AssetSystem::Resolve()` now documents that its pointer is a transient residency view and must be reacquired after publish/unload/fail/forget/replacement operations; the core asset-system regression also verifies that a stable handle resolves the replacement residency after republish.
+- The following dependency-enabled MSVC clean build confirms that the asset-lifetime fix is correct: the engine again links at `716/716`, all three Phase 4 validation tests run, `SwimAssetCooker` cooks the repository `Assets` root successfully, and the complete Phase 4 gate reports passed. The build then reaches the Phase 6 backend contract and exposes a pure C++ contract-test error: `PhysicsHandle` intentionally provides an explicit `operator bool()`, so direct calls such as `RequirePhysics(triggerShape, ...)` cannot implicitly convert a `ShapeHandle`/`BodyHandle` to the helper's `bool` parameter. Every direct handle assertion now uses `.IsValid()`, preserving the explicit-handle API contract while remaining portable across MSVC/GCC/Clang.
+- Linux validation is strengthened so this class of error is no longer hidden behind the Windows-only legacy runtime gate. GLM is now initialized as a cross-platform foundation dependency, generic `Swim::Physics` is defined before the `SWIM_BUILD_LEGACY_ENGINE` early return, and `SwimPhysicsBackendContractCompile` compiles the backend-independent contract header as part of normal dependency-enabled foundation builds. The concrete PhysX backend remains Windows/MSVC-only until the Jolt/backend platform work is completed, but Linux now compiles the same generic physics API and shared backend contract instead of skipping them entirely.
+
+Validation in this environment: `scripts/verify-build-layout.py` passes with regression guards for the PhysX callback actor type, Vulkan `TransformSpace` header self-containment, single-header nlohmann/json dependency contract, EnTT empty-tag insertion, explicit physics-handle validity checks, and the new Linux/foundation placement of generic physics plus the shared backend-contract compile target. The dependency-stub CMake/Ninja tree builds and executes the portable EngineConfig, SceneCatalog, DeferredCommandBuffer, Memory, Jobs, AssetSystem, KTX2, PhysicsHandle, and HeadlessCoreAssets targets successfully. In addition, GCC/C++20 syntax-checks every generic physics `.cpp` and `PhysicsBackendContractCompile.cpp` successfully using a temporary local GLM compatibility stub solely for this isolated validation environment. A true dependency-enabled Linux configure cannot run inside this container because outbound GitHub DNS is blocked and the repository dependency cache is empty; this is an environment limitation rather than a CMake platform gate. The latest real Windows clean build now independently confirms the entire engine link and complete Phase 4 asset gate are green; the only reported blocker in that run is the Phase 6 explicit-handle test compile issue fixed above.
+
+**Checkpoint closure:** critical-path items 22 through 28 are now represented by completed guide checkboxes where their implementation is actually present. Item 29 intentionally remains unchecked: the generic seam and PhysX implementation are ready for it, but Jolt parity has not been implemented or falsely credited to this checkpoint.
+
+**Next critical-path work:** item 29 — add `Swim::PhysicsJolt`, select it through the existing runtime physics factory/configuration seam, and run `PhysicsBackendContract` unchanged against both backends before checking the parity list below.
+
+### Test-suite consolidation checkpoint — 2026-09-04
+
+The engine had accumulated roughly twenty `EXCLUDE_FROM_ALL` test executables plus six header-boundary object libraries, each with its own `add_executable`, link list, and `main()`. Adding a test meant editing `CMakeLists.txt`, and only five of those binaries were ever actually executed by a build script, so most coverage silently rotted.
+
+Implemented in this checkpoint:
+
+- Added a first-party test framework at `Source/Tests/Framework/`: a self-registering `TestRegistry`, a thread-safe per-case `TestContext`, non-eliding `SWIM_CHECK*`/`SWIM_REQUIRE*` macros, and a CLI runner with filtering, listing, exclusion, shuffling, repetition, stop-on-failure, and JUnit XML reporting.
+- Collapsed every runnable test into one `SwimTests` program. The former per-module `main()` bodies were split into named cases, so the corpus went from about twenty opaque binaries to a little over one hundred individually addressable cases.
+- Reorganized `Source/Tests/` into `Framework/`, `Suites/<dependency group>/`, `Fixtures/`, and `HeaderBoundary/`. Suite sources are globbed per group in `cmake/Tests.cmake`, so adding a test is a new file and never a CMake edit.
+- Kept the header-boundary gates as separate object libraries and gave them a one-line `swim_add_header_boundary()` declaration. Their narrow link surface is the guarantee; `SwimTests` links everything and cannot provide it.
+- Split the shared physics backend contract into four independent scenarios (`RunPhysicsWorldLifecycleContract`, `RunPhysicsSceneQueryContract`, `RunPhysicsSimulationContract`, `RunPhysicsTriggerContract`), each building its own world from a shared fixture. A Jolt backend will register four cases and reuse the fixture unchanged.
+- Replaced `Invoke-SwimWindowsAssetPipelineValidation` and `Invoke-SwimWindowsPhysicsValidation` with `Invoke-SwimWindowsTestSuite` (build and run the whole suite plus every boundary gate) and `Invoke-SwimWindowsAssetCookValidation` (cook the real repository asset root). Both Linux build scripts now build and run `SwimTests` too.
+- Merged the asset cooker into the asset-compiler module: `Source/Tools/AssetCooker/Main.cpp` moved to `Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp`, and the library glob excludes `Cli/`. The two CMake targets remain because a static library cannot own a `main()`, but there is now one module and one cook implementation.
+- Ignored `Assets/Cooked/` in Git. It is reproducible build output of the authoring tree beside it.
+
+Two latent defects surfaced immediately once everything actually ran:
+
+- Most existing tests used `assert()`, which is a no-op in this project because `NDEBUG` is defined in every configuration, including Debug. Those checks had not been verifying anything. All of them are now `SWIM_CHECK*`/`SWIM_REQUIRE*`.
+- `JobSystemTests` asserted that `RegisterCurrentExternalThread()` succeeds while configuring `JobSystemDesc::ExternalThreads = 0`, and called it from the scheduler's own owning thread. That test target was never executed by any build script. It is now two cases that register from a genuine external thread and assert both the reserved-slot success path and the no-slot rejection path.
+
+Validation in this environment: `scripts/verify-build-layout.py` reports no new findings, and a Windows Ninja/MSVC Release build of `SwimTests`, all six header-boundary gates, and `SwimAssetCooker` succeeds. `SwimTests` runs 106 cases across 28 suites with 1067 checks, all passing.
+
+**Next work in this area:** wire `SwimTests --report` into whatever CI runner is adopted, and add suites as the RHI/render phases land rather than adding targets.
+
 ### Phase 6 exit criteria
 
 - [ ] same `PhysicsSandbox` runs with `--physics=physx` and `--physics=jolt`.
-- [ ] gameplay/scene generic headers contain no PhysX/Jolt implementation types.
+- [x] gameplay/scene generic headers contain no PhysX/Jolt implementation types. *(Verifier-enforced; backend implementation types are confined to backend directories/targets.)*
 - [ ] backend switching requires no gameplay recompilation logic or `if constexpr` branching.
 
 ---
@@ -3131,6 +3212,40 @@ Build these in the same order as the engine so every phase has a proof target.
 
 ## 32. Tests and CI
 
+### 32.0 How tests are organized
+
+**One program.** The whole runnable test corpus is a single executable, `SwimTests`. Coverage below is a description of what that program must contain, not a list of binaries to create.
+
+```text
+Source/Tests/
+  Framework/        registry, checks, CLI runner, the single main()
+  Suites/           test cases, grouped by dependency
+  Fixtures/         shared multi-suite helpers (header-only)
+  HeaderBoundary/   per-module public-header compile gates
+```
+
+**Adding a test is not a build-system change.** Cases self-register through static initializers, so a new `.cpp` under `Source/Tests/Suites/<group>/` containing `SWIM_TEST("Suite", "Case") { ... }` is picked up by the next configure. There is no central list, no per-test `main()`, and no new target.
+
+**The suite group is the dependency contract.** `Suites/Core|Memory|Jobs|IO|Input|Assets`, `Suites/Physics/Generic`, and `Suites/Scene/Headless` compile in every configuration. `Suites/AssetCompiler`, `Suites/Scene/Ecs`, and `Suites/Physics/PhysX` compile only where their dependency targets exist. A Linux foundation build therefore runs the portable suites and omits the rest, which keeps the cross-platform matrix in 32.10 honest without a second test program.
+
+**Checks never compile away.** Swim defines `NDEBUG` in every configuration including Debug, so `assert()` is a no-op everywhere. Test code uses `SWIM_CHECK*` (record and continue) and `SWIM_REQUIRE*` (record and abandon the case). Never `assert()`.
+
+**The runner is the selection mechanism.** Filtering happens at run time rather than by choosing a binary:
+
+```text
+SwimTests --list
+SwimTests --filter=Physics
+SwimTests --exclude="*Draco*" --stop-on-failure
+SwimTests --shuffle --repeat=5
+SwimTests --report=results.xml
+```
+
+An empty selection exits non-zero, so a mistyped filter in a build script cannot be mistaken for a passing run. `--report` emits JUnit XML for CI consumption.
+
+**Header-boundary gates are not part of `SwimTests`.** `SwimPlatformPublicHeaders`, `SwimIoPublicHeaders`, `SwimAssetPublicHeaders`, `SwimAssetCompilerPublicHeaders`, `SwimPhysicsPublicHeaders`, and `SwimPhysicsBackendContractCompile` are small object libraries that each link exactly one module. That narrow link surface is the whole point: `SwimTests` links everything, so folding them in would destroy the guarantee. Declare new ones with `swim_add_header_boundary()`.
+
+**Build scripts run everything.** The Windows clean/soft builds and both Linux builds build and run `SwimTests` in full. Do not reintroduce per-phase target lists in the build scripts; use a `--filter` if a narrower gate is ever genuinely needed.
+
 ### 32.1 Platform
 
 - window lifecycle;
@@ -3178,7 +3293,13 @@ Build these in the same order as the engine so every phase has a proof target.
 
 ### 32.5 Physics
 
-Run the same behavioral suite against PhysX and Jolt.
+Run the same behavioral suite against PhysX and Jolt. The suite is
+`Source/Tests/Fixtures/PhysicsBackendContract.h`, which exposes
+`RunPhysicsWorldLifecycleContract`, `RunPhysicsSceneQueryContract`,
+`RunPhysicsSimulationContract`, and `RunPhysicsTriggerContract`. Each builds its
+own world from a shared fixture, so scenarios stay independent and can run in any
+order. A Jolt backend adds `Suites/Physics/Jolt/JoltBackendTests.cpp` registering
+one case per contract entry point and changes nothing else.
 
 ### 32.6 RHI
 
@@ -3242,6 +3363,10 @@ Build/dependency matrix requirements:
 - [ ] Configuration matrix covers enabled/disabled Vulkan, OpenGL legacy, PhysX, and Jolt combinations where supported.
 - [ ] Generated Slang and asset build dependencies rebuild deterministically from changed source inputs.
 - [ ] No backend/importer library becomes an unintended transitive dependency of generic targets.
+- [x] The runnable test corpus is one program; adding a test requires no CMake change.
+- [x] Every supported build script builds and runs the complete suite rather than a hand-maintained subset.
+- [x] Public-header/architecture gates keep a link surface narrower than the test program's.
+- [ ] A second physics backend reuses the shared contract fixture unchanged.
 
 ---
 
@@ -3288,6 +3413,7 @@ Source/Swim/
 
 Tools/
   SwimAssetCompiler/
+    Cli/                 command-line front ends for this module
   SwimShaderCompiler/
   SwimPack/
 
@@ -3305,9 +3431,15 @@ Examples/
   StreamingScene/
 
 Tests/
+  Framework/             registry, checks, CLI runner, single main()
+  Suites/<group>/        self-registering cases, grouped by dependency
+  Fixtures/              shared multi-suite helpers
+  HeaderBoundary/        per-module public-header compile gates
 ```
 
 Build targets should mirror these module boundaries so dependency direction is visible and enforceable.
+
+`Tests/` is the deliberate exception to "one directory, one target". Everything under `Suites/` compiles into the single `SwimTests` program, and the directory a suite sits in expresses which dependency group it belongs to rather than which target it builds. A tool that owns a `main()` lives under its module's `Cli/` directory for the same reason: the extra CMake target is a link-time necessity, not a second module.
 
 ---
 
@@ -3402,13 +3534,13 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 19. [x] Replace global asset pools with engine-owned asset services. *(The engine-owned `AssetSystem` is authoritative; legacy mesh/texture/material pools remain only as engine-owned renderer residency compatibility surfaces.)*
 20. [x] Replace static transform dirty state with scene-owned TransformSystem.
 21. [x] Replace static global Frustum with per-view state.
-22. [ ] Replace global EntityFactory queue with scene command buffer.
+22. [x] Replace global EntityFactory queue with scene command buffer.
 23. [x] Replace static live-scene preregistration with explicit SceneCatalog factories and loaded `SceneHandle` identity. *(Implemented with runtime `SceneId` identity.)*
-24. [ ] Split scene serialization/storage/tooling transport; add durable entity IDs and `AssetId` scene references.
+24. [x] Split scene serialization/storage/tooling transport; add durable entity IDs and `AssetId` scene references.
 25. [x] Remove renderer backend pointers from Scene/Behavior APIs.
-26. [ ] Establish canonical coordinate/clip-space convention.
-27. [ ] Build generic physics handles/contracts.
-28. [ ] Move current PhysX implementation behind generic backend.
+26. [x] Establish canonical coordinate/clip-space convention.
+27. [x] Build generic physics handles/contracts.
+28. [x] Move current PhysX implementation behind generic backend.
 29. [ ] Add Jolt backend baseline and shared parity tests.
 
 ### 35.3 Shader/RHI foundation
@@ -3524,7 +3656,7 @@ Before starting **Clustered Forward+**:
 
 Before expanding **physics gameplay**:
 
-- [ ] Rigidbody contains no PhysX/Jolt pointer;
+- [x] Rigidbody contains no PhysX/Jolt pointer;
 - [ ] PhysX/Jolt parity baseline runs through the same generic API.
 
 Before expanding **asset streaming**:

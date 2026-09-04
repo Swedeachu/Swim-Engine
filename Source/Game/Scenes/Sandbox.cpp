@@ -8,7 +8,7 @@
 #include "Engine\Components\CompositeMaterial.h"
 #include "Engine\Components\MeshDecorator.h"
 #include "Engine\Components\ObjectTag.h"
-#include "Engine\Systems\Entity\EntityFactory.h"
+#include "Engine/Systems/Scene/SceneCommandBuffer.h"
 #include "Game\Behaviors\Demo\SimpleMovement.h"
 #include "Game\Behaviors\Demo\CubeMapControlTest.h"
 #include "Game\Behaviors\Demo\Spin.h"
@@ -84,8 +84,8 @@ namespace Game
 
 		auto sphereDataMaterial = materialPool.RegisterMaterialBinding("sphere material", sphereMesh);
 
-		// We are going to use the entity factory now for a little bit easier physical entity creation (transform and material entities)
-		Engine::EntityFactory& entityFactory = GetEntityFactory();
+		// Use the scene-owned command buffer for deferred entity mutations.
+		Engine::SceneCommandBuffer& commandBuffer = GetCommandBuffer();
 
 		// Make a static quad entity in world space but with UI decorator on it, essentially a bill board (TODO: billboard behavior to always face the camera via rotation)
 		auto billboard = CreateEntity();
@@ -132,7 +132,7 @@ namespace Game
 		AddComponent<Engine::TextComponent>(textEntity, textComponent);
 
 		// Make sphere entity
-		entityFactory.CreateWithTransformAndMaterial(
+		commandBuffer.CreateWithTransformAndMaterial(
 			Engine::Transform(glm::vec3(-2.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
 			Engine::Material(sphereDataMaterial)
 		);
@@ -144,13 +144,18 @@ namespace Game
 		SetTag(spinEntity, Engine::TagConstants::WORLD, "barrel");
 		AddComponent<Engine::Transform>(spinEntity, Engine::Transform(glm::vec3(6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
 
-		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/barrel.glb");
+		const std::string barrelSourcePath = "Assets/Models/barrel.glb";
+		auto barrelModel = materialPool.LazyLoadAndGetCompositeMaterial(barrelSourcePath);
 
-		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(barrelModel, "Assets/Models/barrel.glb"));
+		AddComponent<Engine::CompositeMaterial>(spinEntity, Engine::CompositeMaterial(
+			barrelModel,
+			barrelSourcePath,
+			materialPool.GetCompositeMaterialAssetId(barrelSourcePath)
+		));
 		EmplaceBehavior<Game::Spin>(spinEntity, 90.0f); // 90 degrees per second
 
 		// We can make the Movement entity like this (actual physical entity we can control with arrow keys simple controller)
-		entityFactory.CreateWithTransformAndMaterialAndBehaviors<SimpleMovement>(
+		commandBuffer.CreateWithTransformAndMaterialAndBehaviors<SimpleMovement>(
 			Engine::Transform(glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(1.0f)),
 			Engine::Material(materialData1),
 			[this](entt::entity e, Engine::Transform& t, Engine::Material& m, SimpleMovement* mv)
@@ -161,7 +166,7 @@ namespace Game
 
 		// We can load scene scripts with a call back onto a fresh entity this way as a cool hack/trick
 		// Makes an empty entity in the scene with these scripts on it (we can do this with as many behaviors as we want)
-		entityFactory.CreateWithBehaviors<CubeMapControlTest>(
+		commandBuffer.CreateWithBehaviors<CubeMapControlTest>(
 			[this](entt::entity e, CubeMapControlTest* cubeMapCtrl)
 		{
 			entt::registry& reg = GetRegistry();
@@ -182,13 +187,18 @@ namespace Game
 		if constexpr (!glbTests) return 0;
 
 		// Couch time
-		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial("Assets/Models/webp_sofa.glb");
+		const std::string sofaSourcePath = "Assets/Models/webp_sofa.glb";
+		auto sofaModel = materialPool.LazyLoadAndGetCompositeMaterial(sofaSourcePath);
 		if (!sofaModel.empty())
 		{
 			auto couch = CreateEntity();
 			SetTag(couch, Engine::TagConstants::WORLD, "couch");
 			AddComponent<Engine::Transform>(couch, Engine::Transform(glm::vec3(-6.0f, 0.0f, -2.0f), glm::vec3(1.0f)));
-			AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(sofaModel, "Assets/Models/webp_sofa.glb"));
+			AddComponent<Engine::CompositeMaterial>(couch, Engine::CompositeMaterial(
+				sofaModel,
+				sofaSourcePath,
+				materialPool.GetCompositeMaterialAssetId(sofaSourcePath)
+			));
 		}
 		else
 		{
@@ -199,29 +209,35 @@ namespace Game
 		if constexpr (doSponza)
 		{
 			std::vector<std::shared_ptr<Engine::LegacyRenderBinding>> sponzaData;
+			std::string sponzaSourcePath = "Assets/Models/Sponza/sponza-ktx.glb";
 			std::cout << "Sponza load time\n";
 
 			// unpacked raw version that is much easier to parse, but not efficent + fat on disk (deleted from repo it was so fat)
 			// sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/Sponza/Raw/sponza.glb"); // 156 MB
 
 			// KTX2 source path supported by the current fastgltf cooker.
-			sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/Sponza/sponza-ktx.glb");
+			sponzaData = materialPool.LoadAndRegisterCompositeMaterial(sponzaSourcePath);
 
 			// Keep the Draco authoring variant disabled until compiler-side Draco decompression exists.
 
 			glm::vec3 sponzaScale = glm::vec3(1.0f);
 
-			if (materialPool.CompositeMaterialExists("Assets/Models/barrel.glb") && sponzaData.empty()) // if barrel exists and sponza wasn't loaded, set the data to the barrel
+			if (materialPool.CompositeMaterialExists(barrelSourcePath) && sponzaData.empty()) // if barrel exists and sponza wasn't loaded, set the data to the barrel
 			{
-				sponzaData = materialPool.GetCompositeMaterialData("Assets/Models/barrel.glb");
+				sponzaSourcePath = barrelSourcePath;
+				sponzaData = materialPool.GetCompositeMaterialData(barrelSourcePath);
 			}
 			else if (sponzaData.empty()) // if barrel doesn't exist and sponza wasnt loaded, load and set the data to the barrel
 			{
-				sponzaData = materialPool.LoadAndRegisterCompositeMaterial("Assets/Models/barrel.glb");
+				sponzaSourcePath = barrelSourcePath;
+				sponzaData = materialPool.LoadAndRegisterCompositeMaterial(barrelSourcePath);
 			}
 
-			// Just hand waving it for file path arg
-			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(sponzaData, "Assets/Models/Sponza/sponza-ktx.glb");
+			Engine::CompositeMaterial sponzaCompositeMaterial = Engine::CompositeMaterial(
+				sponzaData,
+				sponzaSourcePath,
+				materialPool.GetCompositeMaterialAssetId(sponzaSourcePath)
+			);
 
 			auto sponza = CreateEntity();
 			SetTag(sponza, Engine::TagConstants::WORLD, "sponza");
@@ -256,7 +272,7 @@ namespace Game
 		if constexpr (physicsPrimitivesTest) TestPrimitivePhysics(this);
 
 		// THE BALL SHOOTER
-		GetEntityFactory().CreateWithBehaviors<Game::BallShooter>(
+		GetCommandBuffer().CreateWithBehaviors<Game::BallShooter>(
 			[this](entt::entity e,Game::BallShooter* bs)
 		{
 			entt::registry& reg = GetRegistry();

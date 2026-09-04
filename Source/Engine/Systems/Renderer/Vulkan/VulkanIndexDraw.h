@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Core/Meshes/Mesh.h"
 #include "Engine/Systems/Renderer/Core/Material/LegacyRenderBinding.h"
 #include "Engine/Systems/Renderer/Core/Camera/Frustum.h"
+#include "Engine/Components/Transform.h"
 #include <entt/entt.hpp>
 
 #include <array>
@@ -25,11 +26,9 @@ namespace Engine
 {
 
 	// Forward declare
-	enum class TransformSpace;
 	class Scene;
 	class CameraSystem;
 	class VulkanRenderer;
-	class Transform;
 
 	class VulkanIndexDraw
 	{

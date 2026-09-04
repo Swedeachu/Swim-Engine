@@ -380,6 +380,116 @@ function Assert-SwimVisualStudioSolutionLayout {
     }
 }
 
+
+function Invoke-SwimWindowsTestSuite {
+    param(
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$BuildPlan,
+
+        [string[]]$Filters = @()
+    )
+
+    # The whole engine test corpus is one program plus a handful of tiny
+    # header-boundary compile gates, so a supported build always validates the
+    # complete suite instead of a hand-maintained list of phase targets.
+    $Targets = @(
+        "SwimTests",
+        "SwimPlatformPublicHeaders",
+        "SwimIoPublicHeaders",
+        "SwimAssetPublicHeaders",
+        "SwimAssetCompilerPublicHeaders",
+        "SwimPhysicsPublicHeaders",
+        "SwimPhysicsBackendContractCompile"
+    )
+
+    Write-Host "[Swim] Building the Swim test suite and public-header boundary gates."
+
+    $BuildArguments = @("--build", $BuildPlan.BuildDirectory, "--target") + $Targets + @("--parallel")
+    if ($BuildPlan.Generator -ne "Ninja") {
+        $BuildArguments += @("--config", $BuildPlan.Configuration)
+    }
+
+    & $BuildPlan.CMakePath @BuildArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Swim test targets failed to build (exit code $LASTEXITCODE)."
+    }
+
+    $ExecutablePath = Get-SwimFirstExistingFile -Candidates @(
+        (Join-Path $BuildPlan.BuildDirectory "SwimTests.exe"),
+        (Join-Path (Join-Path $BuildPlan.BuildDirectory $BuildPlan.Configuration) "SwimTests.exe")
+    )
+    if (-not $ExecutablePath) {
+        throw "SwimTests built but its executable could not be found under '$($BuildPlan.BuildDirectory)'."
+    }
+
+    $TestArguments = @()
+    foreach ($Filter in $Filters) {
+        $TestArguments += "--filter=$Filter"
+    }
+
+    Write-Host "[Swim] Running SwimTests."
+    & $ExecutablePath @TestArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "SwimTests reported failures (exit code $LASTEXITCODE)."
+    }
+
+    Write-Host "[Swim] Swim test suite passed."
+}
+
+function Invoke-SwimWindowsAssetCookValidation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$BuildPlan
+    )
+
+    # Fixture-based cook coverage lives in SwimTests. This step additionally
+    # proves the real repository authoring tree still cooks end to end.
+    Write-Host "[Swim] Validating repository asset cooking with SwimAssetCooker."
+
+    $BuildArguments = @("--build", $BuildPlan.BuildDirectory, "--target", "SwimAssetCooker", "--parallel")
+    if ($BuildPlan.Generator -ne "Ninja") {
+        $BuildArguments += @("--config", $BuildPlan.Configuration)
+    }
+
+    & $BuildPlan.CMakePath @BuildArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "SwimAssetCooker failed to build (exit code $LASTEXITCODE)."
+    }
+
+    $AssetRoot = Join-Path $Root "Assets"
+    $SourceAssets = @()
+    if (Test-Path -LiteralPath $AssetRoot -PathType Container) {
+        $SourceAssets = @(Get-ChildItem -LiteralPath $AssetRoot -Recurse -File -ErrorAction Stop | Where-Object {
+            $_.Extension -ieq ".gltf" -or $_.Extension -ieq ".glb"
+        })
+    }
+
+    if ($SourceAssets.Count -eq 0) {
+        Write-Host "[Swim] NOTE: no repository Assets/*.gltf or *.glb sources are present; fixture-based cook coverage in SwimTests passed, but repository-asset cooking was skipped."
+        return
+    }
+
+    $CookerPath = Get-SwimFirstExistingFile -Candidates @(
+        (Join-Path $BuildPlan.BuildDirectory "SwimAssetCooker.exe"),
+        (Join-Path (Join-Path $BuildPlan.BuildDirectory $BuildPlan.Configuration) "SwimAssetCooker.exe")
+    )
+    if (-not $CookerPath) {
+        throw "SwimAssetCooker built but its executable could not be found under '$($BuildPlan.BuildDirectory)'."
+    }
+
+    Write-Host "[Swim] Running SwimAssetCooker against repository asset root: $AssetRoot"
+    & $CookerPath $AssetRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "Repository asset cooking failed with exit code $LASTEXITCODE."
+    }
+
+    Write-Host "[Swim] Repository asset cooking passed."
+}
+
+
 function Get-SwimWindowsBuildPlan {
     param(
         [Parameter(Mandatory = $true)]
@@ -387,6 +497,8 @@ function Get-SwimWindowsBuildPlan {
 
         [switch]$DebugBuild
     )
+
+    $Configuration = if ($DebugBuild) { "Debug" } else { "Release" }
 
     Enable-SwimGitLongPaths
 
@@ -427,6 +539,7 @@ function Get-SwimWindowsBuildPlan {
             BuildDirectory = Join-Path $Root "build/$Preset"
             ConfigureArguments = @("-DCMAKE_MAKE_PROGRAM=$NinjaPath")
             Generator = "Ninja"
+            Configuration = $Configuration
         }
     }
 
@@ -446,5 +559,6 @@ function Get-SwimWindowsBuildPlan {
         BuildDirectory = Join-Path $Root "build/windows-vs"
         ConfigureArguments = @()
         Generator = "Visual Studio 17 2022"
+        Configuration = $Configuration
     }
 }

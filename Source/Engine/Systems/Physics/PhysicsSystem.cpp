@@ -1,13 +1,22 @@
-#include "PCH.h"
 #include "PhysicsSystem.h"
 
-#include "Engine/Systems/Scene/Scene.h"
-#include "PhysicsWorld.h"
+#include <utility>
 
+#include <algorithm>
+#include <iostream>
 #include <thread>
 
 namespace Engine
 {
+
+	PhysicsSystem::PhysicsSystem(std::unique_ptr<IPhysicsBackend> selectedBackend)
+		: backend(std::move(selectedBackend))
+	{}
+
+	PhysicsSystem::~PhysicsSystem()
+	{
+		Exit();
+	}
 
 	int PhysicsSystem::Awake()
 	{
@@ -16,142 +25,70 @@ namespace Engine
 
 	int PhysicsSystem::Init()
 	{
-		physx::PxFoundation* f = PxCreateFoundation(PX_PHYSICS_VERSION, allocator, errorCallback);
-		if (!f)
+		if (initialized)
 		{
-			std::cerr << "PhysicsSystem::Init | PxCreateFoundation failed\n";
+			return 0;
+		}
+
+		if (!backend)
+		{
+			std::cerr << "PhysicsSystem::Init | no physics backend was provided\n";
 			return 1;
-		}
-
-		foundation.reset(f);
-
-		physx::PxTolerancesScale scale;
-		physx::PxPhysics* p = PxCreatePhysics(PX_PHYSICS_VERSION, *foundation, scale, false, nullptr);
-		if (!p)
-		{
-			std::cerr << "PhysicsSystem::Init | PxCreatePhysics failed\n";
-			return 2;
-		}
-
-		physics.reset(p);
-
-		if (!PxInitExtensions(*physics, nullptr))
-		{
-			std::cerr << "PhysicsSystem::Init | PxInitExtensions failed\n";
-			return 3;
 		}
 
 		unsigned int threads = dispatcherThreads;
 
 		if (threads == 0)
 		{
-			unsigned int hc = std::thread::hardware_concurrency();
-			if (hc <= 2)
-			{
-				threads = 1;
-			}
-			else
-			{
-				threads = hc - 1;
-			}
+			const unsigned int hc = std::thread::hardware_concurrency();
+			threads = hc <= 2 ? 1u : std::max(1u, (hc - 1u) / 2u);
 		}
 
-		// We might really want to change the amount of threads to something less high as whatever hardware_concurrency returns
-		threads /= 2; // give us breathing room for now
-		physx::PxDefaultCpuDispatcher* d = physx::PxDefaultCpuDispatcherCreate(threads);
-		if (!d)
+		if (!backend->Initialize(threads))
 		{
-			std::cerr << "PhysicsSystem::Init | PxDefaultCpuDispatcherCreate failed\n";
-			return 4;
+			std::cerr << "PhysicsSystem::Init | failed to initialize " << backend->GetName() << " backend\n";
+			return 2;
 		}
 
-		std::cout << "Starting PhysX with " << threads << " threads\n";
-
-		dispatcher.reset(d);
-
+		std::cout << "Starting " << backend->GetName() << " physics with " << threads << " worker thread(s)\n";
+		initialized = true;
 		return 0;
 	}
 
-	void PhysicsSystem::UpdateScene(Scene& scene, double dt)
+	std::unique_ptr<PhysicsWorld> PhysicsSystem::CreateWorld(const PhysicsWorldDesc& desc)
 	{
-		if (!engineState)
+		if (!initialized || !backend)
 		{
-			return;
+			return nullptr;
 		}
 
-		// Interpolation only while playing (dynamic bodies).
-		if (!HasAnyEngineStates(*engineState, EngineState::Playing))
+		std::unique_ptr<IPhysicsWorldBackend> worldBackend = backend->CreateWorld(desc);
+		if (!worldBackend)
 		{
-			timeSinceLastTick = 0.0;
-			return;
+			return nullptr;
 		}
 
-		PhysicsWorld* worldPtr = scene.GetPhysicsWorld();
-		if (!worldPtr)
-		{
-			return;
-		}
-
-		timeSinceLastTick += dt;
-
-		float alpha = 1.0f;
-
-		if (fixedDeltaSeconds > 0.0f)
-		{
-			alpha = static_cast<float>(timeSinceLastTick / static_cast<double>(fixedDeltaSeconds));
-		}
-
-		if (alpha < 0.0f) { alpha = 0.0f; }
-		if (alpha > 1.0f) { alpha = 1.0f; }
-
-		worldPtr->Interpolate(alpha);
+		return std::make_unique<PhysicsWorld>(std::move(worldBackend));
 	}
 
-	// Each tick we get the active scene's physics world and tick it
-	void PhysicsSystem::FixedUpdateScene(Scene& scene, unsigned int tickThisSecond)
+	const char* PhysicsSystem::GetBackendName() const
 	{
-		(void)tickThisSecond;
-
-		if (!engineState)
-		{
-			return;
-		}
-
-		// We need to be playing
-		if (!HasAnyEngineStates(*engineState, EngineState::Playing))
-		{
-			timeSinceLastTick = 0.0;
-			return;
-		}
-
-		PhysicsWorld& world = scene.GetOrCreatePhysicsWorld(*this);
-
-		// Guarantee we are fully snapped to last tick's target pose before the next tick begins.
-		// This keeps render/physics state coherent at tick boundaries.
-		world.Interpolate(1.0f);
-
-		// Reset interpolation timer for the next tick window.
-		timeSinceLastTick = 0.0;
-
-		world.PreSimulateSync(fixedDeltaSeconds);
-		world.Step(fixedDeltaSeconds);
-		world.FetchResults(true);
-		world.PostSimulateSync();
+		return backend ? backend->GetName() : "None";
 	}
 
 	int PhysicsSystem::Exit()
 	{
-		// Extensions should be closed before physics is released.
-		if (physics)
+		if (!initialized)
 		{
-			PxCloseExtensions();
+			return 0;
 		}
 
-		// Owned resources.
-		dispatcher.reset();
-		physics.reset();
-		foundation.reset();
+		if (backend)
+		{
+			backend->Shutdown();
+		}
 
+		initialized = false;
 		return 0;
 	}
 

@@ -1,7 +1,6 @@
-#include "PCH.h"
 #include "RigidBody.h"
 
 namespace Engine
 {
-	// nothing needed here right now.
+	// Rigidbody is currently a data-only ECS component.
 }

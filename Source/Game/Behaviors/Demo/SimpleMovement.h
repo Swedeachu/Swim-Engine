@@ -24,6 +24,5 @@ namespace Game
 
 	};
 
-	REGISTER_BEHAVIOR(SimpleMovement)
 
 }

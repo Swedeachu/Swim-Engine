@@ -5,6 +5,7 @@
 #include "Engine/Components/CompositeMaterial.h"
 #include "Engine/Components/ObjectTag.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
+#include "SceneCommandBuffer.h"
 
 namespace Engine
 {
@@ -226,7 +227,6 @@ namespace Engine
 		scene.SetInputManager(services.Presentation.Input);
 		scene.SetCameraSystem(services.Presentation.Camera);
 		scene.SetEngineState(services.Core.State);
-		scene.SetClipSpaceDepthRange(services.Presentation.ClipDepth);
 		scene.SetMeshPool(services.Presentation.Meshes);
 		scene.SetTexturePool(services.Presentation.Textures);
 		scene.SetMaterialPool(services.Presentation.Materials);
@@ -235,6 +235,7 @@ namespace Engine
 		scene.SetJobSystem(services.Core.Jobs);
 		scene.SetIoSystem(services.Core.IO);
 		scene.SetAssetSystem(services.Core.Assets);
+		scene.SetBehaviorRegistry(&behaviorRegistry);
 		scene.SetFrameArena(services.Core.FrameMemory);
 		scene.SetFPSProvider(services.Tools.GetFPS);
 		scene.SetCommandDispatcher([commands = services.Tools.Commands](std::string_view command)
@@ -271,36 +272,36 @@ namespace Engine
 
 	// Small helpers used by the add/remove component commands:
 
-	void SceneSystem::AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName)
+	void SceneSystem::AddComponentByName(Scene& scene, SerializedEntityId entityId, const std::string& componentName)
 	{
 		entt::registry& reg = scene.GetRegistry();
-		entt::entity e = static_cast<entt::entity>(entityId);
+		const entt::entity entity = scene.FindEntityBySerializedId(entityId);
 
-		if (!reg.valid(e))
+		if (entity == entt::null || !reg.valid(entity))
 		{
 			return;
 		}
 
 		if (componentName == "Transform")
 		{
-			if (!reg.any_of<Transform>(e))
+			if (!reg.any_of<Transform>(entity))
 			{
-				scene.EmplaceComponent<Transform>(e);
+				scene.EmplaceComponent<Transform>(entity);
 			}
 		}
 		else if (componentName == "Material")
 		{
-			if (!reg.any_of<Material>(e))
+			if (!reg.any_of<Material>(entity))
 			{
-				scene.EmplaceComponent<Material>(e);
+				scene.EmplaceComponent<Material>(entity);
 			}
 		}
 		else if (componentName == "ObjectTag")
 		{
-			if (!reg.any_of<ObjectTag>(e))
+			if (!reg.any_of<ObjectTag>(entity))
 			{
-				const std::string name = scene.GetEntityName(e);
-				scene.EmplaceComponent<ObjectTag>(e, TagConstants::WORLD, name);
+				const std::string name = scene.GetEntityName(entity);
+				scene.EmplaceComponent<ObjectTag>(entity, TagConstants::WORLD, name);
 			}
 		}
 		else
@@ -309,30 +310,29 @@ namespace Engine
 		}
 	}
 
-	void SceneSystem::RemoveComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName)
+	void SceneSystem::RemoveComponentByName(Scene& scene, SerializedEntityId entityId, const std::string& componentName)
 	{
 		entt::registry& reg = scene.GetRegistry();
-		entt::entity e = static_cast<entt::entity>(entityId);
+		const entt::entity entity = scene.FindEntityBySerializedId(entityId);
 
-		if (!reg.valid(e))
+		if (entity == entt::null || !reg.valid(entity))
 		{
 			return;
 		}
 
 		if (componentName == "Transform")
 		{
-			scene.RemoveComponent<Transform>(e);
+			scene.RemoveComponent<Transform>(entity);
 		}
 		else if (componentName == "Material")
 		{
-			scene.RemoveComponent<Material>(e);
-			scene.RemoveComponent<CompositeMaterial>(e);
+			scene.RemoveComponent<Material>(entity);
+			scene.RemoveComponent<CompositeMaterial>(entity);
 		}
 		else if (componentName == "ObjectTag")
 		{
-			scene.RemoveTag(e);
+			scene.RemoveTag(entity);
 		}
-		// else: unknown component -> ignore
 	}
 
 	void SceneSystem::SendBehaviorsToEditor()
@@ -342,14 +342,12 @@ namespace Engine
 			return;
 		}
 
-		auto behaviorFactories = BehaviorFactory::GetInstance().GetFactories();
-		for (const auto& factory : behaviorFactories)
+		for (const BehaviorRegistry::Descriptor& descriptor : behaviorRegistry.GetDescriptors())
 		{
-			services.Tools.SendEditorMessage("loadBehavior " + factory.first, /*channel:*/1);
+			services.Tools.SendEditorMessage("loadBehavior " + descriptor.Name, /*channel:*/1);
 		}
 	}
 
-	// Command registration entry point
 	void SceneSystem::RegisterEditorCommands()
 	{
 		CommandSystem* cmd = services.Tools.Commands;
@@ -358,9 +356,6 @@ namespace Engine
 			return;
 		}
 
-		// Each of these is now a small, focused function. CommandSystem outlives
-		// SceneSystem in the engine's explicit shutdown order, so these callbacks
-		// may safely keep a non-owning SceneSystem pointer.
 		RegisterEntityCreateCommand(*cmd);
 		RegisterEntityDestroyCommand(*cmd);
 		RegisterEntityAddComponentCommand(*cmd);
@@ -370,14 +365,18 @@ namespace Engine
 		RegisterEntityBehaviorRemoveCommand(*cmd);
 	}
 
+	// Editor scene commands use durable SerializedEntityId values. Runtime EnTT
+	// handles never cross the tooling boundary, and all mutations enter the owning
+	// scene's command buffer before touching the registry.
+
 	// (scene.entity.create parentId)
 	// parentId == 0 -> no parent (root under scene)
 	void SceneSystem::RegisterEntityCreateCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int>(
+		cmd.Register<std::uint64_t>(
 			"scene.entity.create",
-			std::function<void(unsigned int)>(
-			[this](unsigned int parentId)
+			std::function<void(std::uint64_t)>(
+			[this](std::uint64_t parentValue)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -385,38 +384,34 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = scene->CreateEntity();
-
-			// Give it a Transform so it becomes visible / parentable  this will also
-			// trigger serialization hooks for "entity created".
-			scene->EmplaceComponent<Transform>(e);
-
-			entt::registry& reg = scene->GetRegistry();
-
-			// Optional parenting
-			if (parentId != 0u)
+			const SerializedEntityId parentId{ parentValue };
+			scene->GetCommandBuffer().Create(
+				[parentId](Scene& owningScene, entt::entity entity)
 			{
-				entt::entity parent = static_cast<entt::entity>(parentId);
-				if (reg.valid(parent))
-				{
-					scene->SetParent(e, parent);
-				}
-			}
+				owningScene.EmplaceComponent<Transform>(entity);
 
-			// Give it a default ObjectTag name ("Entity 12" etc.)
-			const std::string name = scene->GetEntityName(e);
-			scene->SetTag(e, TagConstants::WORLD, name);
+				if (parentId)
+				{
+					const entt::entity parent = owningScene.FindEntityBySerializedId(parentId);
+					if (parent != entt::null)
+					{
+						owningScene.SetParent(entity, parent);
+					}
+				}
+
+				const std::string name = owningScene.GetEntityName(entity);
+				owningScene.SetTag(entity, TagConstants::WORLD, name);
+			});
 		}));
 	}
 
 	// (scene.entity.destroy entityId destroyChildren)
-	// destroyChildren: true = destroy subtree, false = keep children and detach them.
 	void SceneSystem::RegisterEntityDestroyCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, bool>(
+		cmd.Register<std::uint64_t, bool>(
 			"scene.entity.destroy",
-			std::function<void(unsigned int, bool)>(
-			[this](unsigned int entityId, bool destroyChildren)
+			std::function<void(std::uint64_t, bool)>(
+			[this](std::uint64_t entityValue, bool destroyChildren)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -424,26 +419,26 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			entt::registry& reg = scene->GetRegistry();
-
-			if (!reg.valid(e))
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, destroyChildren](Scene& owningScene)
 			{
-				return;
-			}
-
-			// DestroyEntity already drives serialization via component hooks.
-			scene->DestroyEntity(e, true, destroyChildren);
+				const entt::entity entity = owningScene.FindEntityBySerializedId(entityId);
+				if (entity != entt::null)
+				{
+					owningScene.DestroyEntity(entity, true, destroyChildren);
+				}
+			});
 		}));
 	}
 
 	// (scene.entity.addComponent entityId "ComponentName")
 	void SceneSystem::RegisterEntityAddComponentCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, std::string>(
+		cmd.Register<std::uint64_t, std::string>(
 			"scene.entity.addComponent",
-			std::function<void(unsigned int, std::string)>(
-			[this](unsigned int entityId, std::string componentName)
+			std::function<void(std::uint64_t, std::string)>(
+			[this](std::uint64_t entityValue, std::string componentName)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -451,17 +446,22 @@ namespace Engine
 				return;
 			}
 
-			AddComponentByName(*scene, entityId, componentName);
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, componentName = std::move(componentName)](Scene& owningScene)
+			{
+				AddComponentByName(owningScene, entityId, componentName);
+			});
 		}));
 	}
 
 	// (scene.entity.removeComponent entityId "ComponentName")
 	void SceneSystem::RegisterEntityRemoveComponentCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, std::string>(
+		cmd.Register<std::uint64_t, std::string>(
 			"scene.entity.removeComponent",
-			std::function<void(unsigned int, std::string)>(
-			[this](unsigned int entityId, std::string componentName)
+			std::function<void(std::uint64_t, std::string)>(
+			[this](std::uint64_t entityValue, std::string componentName)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -469,17 +469,22 @@ namespace Engine
 				return;
 			}
 
-			RemoveComponentByName(*scene, entityId, componentName);
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, componentName = std::move(componentName)](Scene& owningScene)
+			{
+				RemoveComponentByName(owningScene, entityId, componentName);
+			});
 		}));
 	}
 
 	// (scene.entity.setMaterial entityId "MaterialKey")
 	void SceneSystem::RegisterEntitySetMaterialCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, std::string>(
+		cmd.Register<std::uint64_t, std::string>(
 			"scene.entity.setMaterial",
-			std::function<void(unsigned int, std::string)>(
-			[this](unsigned int entityId, std::string materialKey)
+			std::function<void(std::uint64_t, std::string)>(
+			[this](std::uint64_t entityValue, std::string materialKey)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -487,82 +492,75 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			entt::registry& reg = scene->GetRegistry();
-			if (!reg.valid(e))
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, materialKey = std::move(materialKey)](Scene& owningScene)
 			{
-				return;
-			}
-
-			if (!services.Presentation.Materials)
-			{
-				return;
-			}
-
-			MaterialPool& materialPool = *services.Presentation.Materials;
-
-			// Check if this is a composite material
-			if (materialPool.CompositeMaterialExists(materialKey))
-			{
-				try
+				const entt::entity entity = owningScene.FindEntityBySerializedId(entityId);
+				if (entity == entt::null || !owningScene.HasPresentationServices())
 				{
-					// Attempt to get it
-					auto data = materialPool.GetCompositeMaterialData(materialKey);
-					// Remove since we are doing a material replacement
-					if (reg.any_of<Material>(e)) { reg.remove<Material>(e); }
-					if (reg.any_of<CompositeMaterial>(e)) { reg.remove<CompositeMaterial>(e); }
-					// Replace in new one
-					// std::cout << "Applying new composite material " << materialKey << std::endl;
-					reg.emplace<CompositeMaterial>(e, data, materialKey);
-					// Hack fix because bvh will not update while in editor mode sometimes
-					auto bvh = scene->GetSceneBVH();
-					if (bvh) { bvh->ForceUpdateNextFrame(); }
-					// Done
 					return;
 				}
-				catch (std::exception e)
-				{
-					std::cout << e.what() << std::endl;
-					return;
-				}
-			}
 
-			// Check if this is a regular single material
-			if (materialPool.MaterialExists(materialKey))
-			{
-				try
-				{
-					// Attempt to get it
-					auto data = materialPool.GetMaterialBinding(materialKey);
-					// Remove since we are doing a material replacement
-					if (reg.any_of<Material>(e)) { reg.remove<Material>(e); }
-					if (reg.any_of<CompositeMaterial>(e)) { reg.remove<CompositeMaterial>(e); }
-					// Replace in new one
-					// std::cout << "Applying new material " << materialKey << std::endl;
-					reg.emplace<Material>(e, data);
-					// Hack fix because bvh will not update while in editor mode sometimes
-					auto bvh = scene->GetSceneBVH();
-					if (bvh) { bvh->ForceUpdateNextFrame(); }
-					// Done
-					return;
-				}
-				catch (std::exception e)
-				{
-					std::cout << e.what() << std::endl;
-					return;
-				}
-			}
+				MaterialPool& materialPool = owningScene.GetMaterialPool();
 
-			std::cout << "Failed to apply material " << materialKey << std::endl;
+				if (materialPool.CompositeMaterialExists(materialKey))
+				{
+					try
+					{
+						auto data = materialPool.GetCompositeMaterialData(materialKey);
+						owningScene.RemoveComponent<Material>(entity);
+						owningScene.RemoveComponent<CompositeMaterial>(entity);
+						owningScene.EmplaceComponent<CompositeMaterial>(
+							entity,
+							data,
+							materialKey,
+							materialPool.GetCompositeMaterialAssetId(materialKey));
+						if (SceneBVH* bvh = owningScene.GetSceneBVH())
+						{
+							bvh->ForceUpdateNextFrame();
+						}
+						return;
+					}
+					catch (const std::exception& exception)
+					{
+						std::cout << exception.what() << std::endl;
+						return;
+					}
+				}
+
+				if (materialPool.MaterialExists(materialKey))
+				{
+					try
+					{
+						auto data = materialPool.GetMaterialBinding(materialKey);
+						owningScene.RemoveComponent<Material>(entity);
+						owningScene.RemoveComponent<CompositeMaterial>(entity);
+						owningScene.EmplaceComponent<Material>(entity, data);
+						if (SceneBVH* bvh = owningScene.GetSceneBVH())
+						{
+							bvh->ForceUpdateNextFrame();
+						}
+						return;
+					}
+					catch (const std::exception& exception)
+					{
+						std::cout << exception.what() << std::endl;
+						return;
+					}
+				}
+
+				std::cout << "Failed to apply material " << materialKey << std::endl;
+			});
 		}));
 	}
 
 	void SceneSystem::RegisterEntityBehaviorAddCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, std::string>(
+		cmd.Register<std::uint64_t, std::string>(
 			"scene.entity.addBehavior",
-			std::function<void(unsigned int, std::string)>(
-			[this](unsigned int entityId, std::string behaviorName)
+			std::function<void(std::uint64_t, std::string)>(
+			[this](std::uint64_t entityValue, std::string behaviorName)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -570,30 +568,31 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			entt::registry& reg = scene->GetRegistry();
-
-			if (!reg.valid(e))
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, behaviorName = std::move(behaviorName)](Scene& owningScene)
 			{
-				return;
-			}
+				const entt::entity entity = owningScene.FindEntityBySerializedId(entityId);
+				if (entity == entt::null)
+				{
+					return;
+				}
 
-			// Try to attach the behavior by name
-			Behavior* behavior = scene->EmplaceBehaviorByName(e, behaviorName);
-			if (behavior == nullptr)
-			{
-				std::cout << "SceneSystem::RegisterEntityBehaviorAddCommand | Failed to add behavior: " << behaviorName << " to entity " << entityId << std::endl;
-				return;
-			}
+				Behavior* behavior = owningScene.EmplaceBehaviorByName(entity, behaviorName);
+				if (!behavior)
+				{
+					std::cout << "Failed to add behavior '" << behaviorName << "' to entity " << entityId.Value << std::endl;
+				}
+			});
 		}));
 	}
 
 	void SceneSystem::RegisterEntityBehaviorRemoveCommand(CommandSystem& cmd)
 	{
-		cmd.Register<unsigned int, std::string>(
+		cmd.Register<std::uint64_t, std::string>(
 			"scene.entity.removeBehavior",
-			std::function<void(unsigned int, std::string)>(
-			[this](unsigned int entityId, std::string behaviorName)
+			std::function<void(std::uint64_t, std::string)>(
+			[this](std::uint64_t entityValue, std::string behaviorName)
 		{
 			std::shared_ptr<Scene> scene = GetActiveScene();
 			if (!scene)
@@ -601,26 +600,21 @@ namespace Engine
 				return;
 			}
 
-			entt::entity e = static_cast<entt::entity>(entityId);
-			entt::registry& reg = scene->GetRegistry();
-
-			if (!reg.valid(e))
+			const SerializedEntityId entityId{ entityValue };
+			scene->GetCommandBuffer().Defer(
+				[entityId, behaviorName = std::move(behaviorName)](Scene& owningScene)
 			{
-				return;
-			}
+				const entt::entity entity = owningScene.FindEntityBySerializedId(entityId);
+				if (entity == entt::null)
+				{
+					return;
+				}
 
-			/* TODO: not a method yet, behavior needs a get behavior name method of some sort
-			// Try to remove the behavior by name
-			const bool removed = scene->RemoveBehaviorByName(e, behaviorName);
-			if (!removed)
-			{
-				std::cout << "SceneSystem::RegisterEntityBehaviorRemoveCommand | Failed to remove behavior: " << behaviorName << " from entity " << entityId << std::endl;
-				return;
-			}
-			*/
-
-			// Behaviors on this entity changed; refresh their caches
-			scene->RefreshBehaviorFieldCacheForEntity(e);
+				if (!owningScene.RemoveBehaviorByName(entity, behaviorName))
+				{
+					std::cout << "Failed to remove behavior '" << behaviorName << "' from entity " << entityId.Value << std::endl;
+				}
+			});
 		}));
 	}
 

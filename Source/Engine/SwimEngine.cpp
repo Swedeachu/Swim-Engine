@@ -9,6 +9,7 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
+#include "Engine/Systems/Physics/Backends/PhysX/PhysXBackendFactory.h"
 
 #if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
 #include "Tools/AssetCompiler/DevelopmentAssetPipeline.h"
@@ -347,7 +348,14 @@ namespace Engine
 
 		inputManager = std::make_unique<InputManager>();
 		commandSystem = std::make_unique<CommandSystem>();
-		physicsSystem = std::make_unique<PhysicsSystem>();
+		switch (physicsBackend)
+		{
+			case PhysicsBackend::PhysX:
+				physicsSystem = std::make_unique<PhysicsSystem>(CreatePhysXBackend());
+				break;
+			default:
+				return -1;
+		}
 
 		switch (graphicsBackend)
 		{
@@ -373,7 +381,6 @@ namespace Engine
 		}
 
 		cameraSystem = std::make_unique<CameraSystem>();
-		cameraSystem->SetGraphicsBackend(graphicsBackend);
 		cameraSystem->SetSurfaceSize(windowWidth, windowHeight);
 
 		Renderer& renderer = GetRenderer();
@@ -424,9 +431,6 @@ namespace Engine
 		sceneServices.Core.Assets = assetSystem.get();
 		sceneServices.Core.FrameMemory = &frameArena;
 		sceneServices.Core.State = &engineState;
-		sceneServices.Presentation.ClipDepth = graphicsBackend == GraphicsBackend::Vulkan
-			? ClipSpaceDepthRange::ZeroToOne
-			: ClipSpaceDepthRange::MinusOneToOne;
 		sceneServices.Tools.SendEditorMessage = [this](const std::string& message, std::uintptr_t channel)
 		{
 			return SendEditorMessage(message, channel);
@@ -436,7 +440,6 @@ namespace Engine
 			return GetFPS();
 		};
 		sceneSystem->SetServices(std::move(sceneServices));
-		physicsSystem->SetServices(&engineState);
 
 		if (vulkanRenderer)
 		{
@@ -801,7 +804,7 @@ namespace Engine
 		}
 		if (physicsSystem && activeScene)
 		{
-			physicsSystem->UpdateScene(*activeScene, dt);
+			activeScene->UpdatePhysics(*physicsSystem, dt);
 		}
 
 		GetRenderer().SetRenderScene(activeScene);
@@ -853,7 +856,7 @@ namespace Engine
 		}
 		if (physicsSystem && activeScene)
 		{
-			physicsSystem->FixedUpdateScene(*activeScene, tickThisSecond);
+			activeScene->FixedUpdatePhysics(*physicsSystem);
 		}
 		if (vulkanRenderer)
 		{

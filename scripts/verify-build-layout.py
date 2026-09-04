@@ -44,6 +44,7 @@ REQUIRED_CMAKE_FILES = (
     "cmake/MemoryDependencies.cmake",
     "cmake/JobDependencies.cmake",
     "cmake/PlatformDependencies.cmake",
+    "cmake/MathDependencies.cmake",
     "cmake/AssetCompilerDependencies.cmake",
     "cmake/PhysX.cmake",
     "cmake/SolutionLayout.cmake",
@@ -67,6 +68,31 @@ SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".inl"}
 
 def fail(message: str, failures: list[str]) -> None:
     failures.append(message)
+
+
+def read_tests_cmake() -> str:
+    tests_cmake = ROOT / "cmake" / "Tests.cmake"
+    if not tests_cmake.is_file():
+        return ""
+    return tests_cmake.read_text(encoding="utf-8", errors="ignore")
+
+
+def check_suite_is_compiled(suite_group: str, suite_file: str, failures: list[str]) -> None:
+    """The whole runnable corpus is one `SwimTests` target whose suite sources are
+    globbed per dependency group, so representation in the build means the file
+    lives in the right group directory and that group is collected."""
+    suite_path = ROOT / "Source" / "Tests" / "Suites" / Path(suite_group) / suite_file
+    if not suite_path.is_file():
+        fail(f"test suite source is missing from its dependency group: {suite_path.relative_to(ROOT)}", failures)
+
+    tests_cmake_text = read_tests_cmake()
+    if f"swim_collect_test_suite_sources" not in tests_cmake_text:
+        fail("cmake/Tests.cmake no longer collects test suite sources", failures)
+        return
+
+    group_token = suite_group.replace("\\", "/")
+    if group_token not in tests_cmake_text:
+        fail(f"cmake/Tests.cmake does not collect the '{group_token}' test suite group", failures)
 
 
 def check_generated_visual_studio_files(failures: list[str]) -> None:
@@ -124,11 +150,8 @@ def check_build_workflow(failures: list[str]) -> None:
         'swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
         'add_library(Swim::Core ALIAS SwimCore)',
         'swim_set_solution_folder(SwimCore "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
-        'add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL',
         'add_executable(SwimHelloWindow EXCLUDE_FROM_ALL',
         'add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL',
-        'add_library(SwimPlatformPublicHeaders OBJECT EXCLUDE_FROM_ALL',
-        'add_executable(SwimInputTests EXCLUDE_FROM_ALL',
         '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3"',
     ):
         if fragment not in cmake_text:
@@ -230,6 +253,19 @@ def check_build_workflow(failures: list[str]) -> None:
             "Remove-SwimGeneratedDirectory",
             "MayBeDirectoryLink",
             "Assert-SwimVisualStudioSolutionLayout",
+            "Invoke-SwimWindowsTestSuite",
+            "Invoke-SwimWindowsAssetCookValidation",
+            '"SwimTests"',
+            '"SwimPlatformPublicHeaders"',
+            '"SwimIoPublicHeaders"',
+            '"SwimAssetPublicHeaders"',
+            '"SwimAssetCompilerPublicHeaders"',
+            '"SwimPhysicsPublicHeaders"',
+            '"SwimPhysicsBackendContractCompile"',
+            '"SwimAssetCooker"',
+            'Join-Path $Root "Assets"',
+            'SwimTests reported failures',
+            'Repository asset cooking failed',
             '"Engine Modules", "Tests", "Third Party", "CMake"',
             "Ninja was not found; using the Visual Studio generator fallback",
             "[switch]$DebugBuild",
@@ -256,7 +292,14 @@ def check_build_workflow(failures: list[str]) -> None:
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
-        for fragment in ("windows-build-common.ps1", "Get-SwimWindowsBuildPlan", "BuildPlan.CMakePath", "-DebugBuild:$Debug"):
+        for fragment in (
+            "windows-build-common.ps1",
+            "Get-SwimWindowsBuildPlan",
+            "BuildPlan.CMakePath",
+            "-DebugBuild:$Debug",
+            "Invoke-SwimWindowsTestSuite -BuildPlan $BuildPlan",
+            "Invoke-SwimWindowsAssetCookValidation -Root $Root -BuildPlan $BuildPlan",
+        ):
             if fragment not in text:
                 fail(f"Windows build script bypasses toolchain auto-discovery: {path.relative_to(ROOT)}: {fragment}", failures)
 
@@ -459,6 +502,8 @@ def check_preserved_build_contract(failures: list[str]) -> None:
     physx_build_text = (ROOT / "cmake" / "BuildPhysX.cmake").read_text(encoding="utf-8", errors="ignore")
     shader_text = (ROOT / "cmake" / "Shaders.cmake").read_text(encoding="utf-8", errors="ignore")
     dependency_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    math_dependency_text = (ROOT / "cmake" / "MathDependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    dependency_contract_text = dependency_text + "\n" + math_dependency_text
 
     required_root_fragments = (
         'set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")',
@@ -466,7 +511,6 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         '$<$<CONFIG:Debug>:_SWIM_DEBUG>',
         '$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>',
         '$<$<CONFIG:Debug>:/U_DEBUG>',
-        'PX_PHYSX_STATIC_LIB',
         'target_precompile_headers(SwimEngine',
         'SKIP_PRECOMPILE_HEADERS ON',
     )
@@ -487,6 +531,7 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'IMPORTED_LOCATION_DEBUG "${SWIM_PHYSX_CHECKED_DIR}',
         'IMPORTED_LOCATION_RELEASE "${SWIM_PHYSX_RELEASE_DIR}',
         '$<$<NOT:$<CONFIG:Release>>:SwimPhysXPvdSDK>',
+        'target_compile_definitions(SwimPhysX INTERFACE PX_PHYSX_STATIC_LIB)',
     )
     for fragment in required_physx_fragments:
         if fragment not in physx_text:
@@ -547,14 +592,24 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'swim_physx_source',
     )
     for fragment in required_dependency_contract_fragments:
-        if fragment not in dependency_text:
-            fail(f"legacy third-party link contract is missing: {fragment}", failures)
+        if fragment not in dependency_contract_text:
+            fail(f"legacy/foundation third-party link contract is missing: {fragment}", failures)
 
     if 'GITHUB_REPOSITORY nlohmann/json' in dependency_text:
         fail(
             "nlohmann/json reverted to a full Git checkout; use the pinned release single-header artifact to avoid Windows path/dirty-cache failures",
             failures,
         )
+
+    for path in (ROOT / "Source").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".h", ".hpp", ".hh", ".cpp", ".cc", ".cxx"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if "nlohmann/json_fwd.hpp" in text:
+            fail(
+                f"first-party source assumes unavailable nlohmann/json split headers; the dependency contract provides only json.hpp: {path.relative_to(ROOT)}",
+                failures,
+            )
 
     # The PhysX generator is a batch file. Running an absolute quoted path
     # through cmd.exe caused CMake/MSBuild to preserve the escape quotes and
@@ -608,7 +663,7 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'GIT_TAG v2.0.8',
     )
     for fragment in pins:
-        if fragment not in dependency_text:
+        if fragment not in dependency_contract_text:
             fail(f"dependency pin is missing: {fragment}", failures)
 
 
@@ -825,7 +880,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
             )
 
     public_header_compile_text = (
-        ROOT / "Source" / "Tests" / "Platform" / "PublicHeaderCompile.cpp"
+        ROOT / "Source" / "Tests" / "HeaderBoundary" / "PlatformPublicHeaders.cpp"
     ).read_text(encoding="utf-8", errors="ignore")
     for public_input_header in ("Engine/Input/InputMap.h", "Engine/Input/InputSystem.h"):
         if public_input_header not in public_header_compile_text:
@@ -944,7 +999,6 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         "add_library(SwimCore STATIC",
         "add_library(Swim::Core ALIAS SwimCore)",
         "Source/Engine/EngineConfig.cpp",
-        "add_executable(SwimEngineConfigTests EXCLUDE_FROM_ALL",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 2 Core CMake/test boundary is missing: {fragment}", failures)
@@ -1019,7 +1073,7 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         if fragment not in scene_source:
             fail(f"Scene incomplete-type ownership boundary is missing out-of-line definition: {fragment}", failures)
     if "Scene() :" in scene_header or "explicit Scene(const std::string& name =" in scene_header:
-        fail("Scene constructors must remain out-of-line while Scene owns forward-declared EntityFactory", failures)
+        fail("Scene constructors must remain out-of-line while Scene owns forward-declared scene subsystems", failures)
 
     font_pool_header = (
         ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Font" / "FontPool.h"
@@ -1100,7 +1154,6 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
 
     include_case_checks = (
         (ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "SetTextCallBack.cpp", '#include "SetTextCallBack.h"'),
-        (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "PhysicsWorld.h", '#include "RigidBody.h"'),
         (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "Rigibody.cpp", '#include "RigidBody.h"'),
         (ROOT / "Source" / "Game" / "Testing" / "PrimitiveTest.cpp", '#include "PCH.h"'),
         (ROOT / "Source" / "Game" / "Testing" / "PrimitivePhysicsTest.cpp", '#include "PCH.h"'),
@@ -1135,7 +1188,6 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
         "add_library(SwimJobs STATIC",
         "add_library(Swim::Jobs ALIAS SwimJobs)",
         "target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS Swim::Memory)",
-        "add_executable(SwimJobSystemTests EXCLUDE_FROM_ALL",
         "target_link_libraries(SwimEngine PRIVATE",
         "Swim::Jobs",
     ):
@@ -1205,7 +1257,7 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     io_header_path = ROOT / "Source" / "Engine" / "IO" / "AsyncIoService.h"
     io_source_path = ROOT / "Source" / "Engine" / "IO" / "AsyncIoService.cpp"
-    io_test_path = ROOT / "Source" / "Tests" / "IO" / "AsyncIoServiceTests.cpp"
+    io_test_path = ROOT / "Source" / "Tests" / "Suites" / "IO" / "AsyncIoServiceTests.cpp"
     if not io_header_path.is_file() or not io_source_path.is_file() or not io_test_path.is_file():
         fail("Phase 3 Async IO service/tests are missing", failures)
         return
@@ -1229,8 +1281,6 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
         "add_library(Swim::IO ALIAS SwimIO)",
         "PUBLIC Swim::Platform",
         "PRIVATE Swim::Jobs",
-        "add_executable(SwimAsyncIoTests EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimAsyncIoTests PRIVATE Swim::IO Swim::Jobs)",
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")',
         "Swim::IO",
     ):
@@ -1305,7 +1355,7 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
     frame_header_path = ROOT / "Source" / "Engine" / "Memory" / "FrameArena.h"
     scratch_header_path = ROOT / "Source" / "Engine" / "Memory" / "ScratchArena.h"
     scratch_source_path = ROOT / "Source" / "Engine" / "Memory" / "ScratchArena.cpp"
-    test_path = ROOT / "Source" / "Tests" / "Memory" / "MemoryArenaTests.cpp"
+    test_path = ROOT / "Source" / "Tests" / "Suites" / "Memory" / "MemoryArenaTests.cpp"
 
     required_paths = (dependency_path, arena_header_path, arena_source_path, frame_header_path, scratch_header_path, scratch_source_path, test_path)
     if not all(path.is_file() for path in required_paths):
@@ -1347,7 +1397,6 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
         "SWIM_MEMORY_USE_MIMALLOC",
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")',
         "target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)",
-        "add_executable(SwimMemoryTests EXCLUDE_FROM_ALL",
         "Swim::Memory",
     ):
         if fragment not in cmake_text:
@@ -1428,9 +1477,9 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         asset_root / "Ktx2Container.cpp",
         asset_root / "SassetFormat.h",
         asset_root / "SassetFormat.cpp",
-        ROOT / "Source" / "Tests" / "Assets" / "AssetSystemTests.cpp",
-        ROOT / "Source" / "Tests" / "Assets" / "Ktx2ContainerTests.cpp",
-        ROOT / "Source" / "Tests" / "Assets" / "PublicHeaderCompile.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "Assets" / "AssetSystemTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "Assets" / "Ktx2ContainerTests.cpp",
+        ROOT / "Source" / "Tests" / "HeaderBoundary" / "AssetsPublicHeaders.cpp",
         ROOT / "Source" / "Examples" / "HeadlessCoreAssets.cpp",
         asset_compiler_root / "IntermediateModel.h",
         asset_compiler_root / "GltfImporter.h",
@@ -1447,15 +1496,15 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         asset_compiler_root / "StaticModelCompiler.cpp",
         asset_compiler_root / "DevelopmentAssetPipeline.h",
         asset_compiler_root / "DevelopmentAssetPipeline.cpp",
-        ROOT / "Source" / "Tools" / "AssetCooker" / "Main.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "PublicHeaderCompile.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "GltfImporterTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "MeshOptimizerTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "Ktx2TextureCompilerTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "SourceImageTextureCompilerTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "SassetFormatTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "StaticModelCompilerTests.cpp",
-        ROOT / "Source" / "Tests" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp",
+        ROOT / "Source" / "Tools" / "AssetCompiler" / "Cli" / "AssetCookerMain.cpp",
+        ROOT / "Source" / "Tests" / "HeaderBoundary" / "AssetCompilerPublicHeaders.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "GltfImporterTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "MeshOptimizerTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "Ktx2TextureCompilerTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "SourceImageTextureCompilerTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "SassetFormatTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "StaticModelCompilerTests.cpp",
+        ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp",
         asset_compiler_dependencies,
     )
     if not all(path.is_file() for path in required_paths):
@@ -1481,10 +1530,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     for fragment in (
         "add_library(SwimAssets STATIC",
         "add_library(Swim::Assets ALIAS SwimAssets)",
-        "add_executable(SwimAssetSystemTests EXCLUDE_FROM_ALL",
-        "add_library(SwimAssetPublicHeaders OBJECT EXCLUDE_FROM_ALL",
         "add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimAssetSystemTests PRIVATE Swim::Assets)",
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")',
         "Swim::Assets",
     ):
@@ -1760,18 +1806,8 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         "add_library(SwimAssetCompiler STATIC",
         "add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)",
         "PRIVATE Swim::AssetCompilerDependencies",
-        "add_library(SwimAssetCompilerPublicHeaders OBJECT EXCLUDE_FROM_ALL",
-        "add_executable(SwimGltfImporterTests EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler Swim::AssetCompilerDraco)",
-        "add_executable(SwimMeshOptimizerTests EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimMeshOptimizerTests PRIVATE Swim::AssetCompiler)",
-        "add_executable(SwimKtx2TextureCompilerTests EXCLUDE_FROM_ALL",
-        "add_executable(SwimSourceImageTextureCompilerTests EXCLUDE_FROM_ALL",
-        "target_link_libraries(SwimSourceImageTextureCompilerTests PRIVATE Swim::AssetCompiler)",
-        "add_executable(SwimSassetFormatTests EXCLUDE_FROM_ALL",
-        "add_executable(SwimStaticModelCompilerTests EXCLUDE_FROM_ALL",
-        "add_executable(SwimDevelopmentAssetPipelineTests EXCLUDE_FROM_ALL",
-        "add_executable(SwimAssetCooker Source/Tools/AssetCooker/Main.cpp)",
+        "add_executable(SwimAssetCooker ${SWIM_ASSET_COOKER_SOURCES})",
+        'list(FILTER SWIM_ASSET_COMPILER_SOURCES EXCLUDE REGEX "/Source/Tools/AssetCompiler/Cli/")',
         'option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)',
         "SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>",
         "target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)",
@@ -1825,12 +1861,15 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         if fragment not in asset_compiler_dependency_text:
             fail(f"asset-compiler dependency contract is missing: {fragment}", failures)
 
-    for stale_fragment in (
-        "target_link_libraries(SwimGltfImporterTests PRIVATE Swim::AssetCompiler ${SWIM_ASSET_COMPILER_DRACO_TARGET})",
-        "target_link_libraries(SwimDevelopmentAssetPipelineTests PRIVATE Swim::AssetCompiler ${SWIM_ASSET_COMPILER_DRACO_TARGET})",
-    ):
-        if stale_fragment in cmake_text:
-            fail("Draco consumers must use the Swim-owned include/link adapter instead of the raw package target", failures)
+    # The Draco-consuming suites now live in SwimTests, so the adapter contract
+    # moved with them: test code must reach Draco through Swim::AssetCompilerDraco
+    # rather than the raw package target, whose include-root layout is a quirk the
+    # adapter exists to hide.
+    tests_cmake_text = read_tests_cmake()
+    if "Swim::AssetCompilerDraco" not in tests_cmake_text:
+        fail("Draco-consuming test suites no longer link the Swim-owned Draco adapter", failures)
+    if "${SWIM_ASSET_COMPILER_DRACO_TARGET}" in tests_cmake_text:
+        fail("Draco consumers must use the Swim-owned include/link adapter instead of the raw package target", failures)
 
     simdjson_target_position = asset_compiler_dependency_text.find("if(NOT TARGET simdjson::simdjson)")
     fastgltf_package_position = asset_compiler_dependency_text.find("NAME swim_fastgltf_source")
@@ -1891,17 +1930,17 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
             fail(f"fastgltf source importer implementation is missing: {fragment}", failures)
 
 
-    gltf_importer_test_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "GltfImporterTests.cpp").read_text(encoding="utf-8", errors="ignore")
-    draco_fixture_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "DracoTestFixture.h").read_text(encoding="utf-8", errors="ignore")
-    development_asset_test_text = (ROOT / "Source" / "Tests" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp").read_text(encoding="utf-8", errors="ignore")
+    gltf_importer_test_text = (ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "GltfImporterTests.cpp").read_text(encoding="utf-8", errors="ignore")
+    draco_fixture_text = (ROOT / "Source" / "Tests" / "Fixtures" / "DracoTriangleFixture.h").read_text(encoding="utf-8", errors="ignore")
+    development_asset_test_text = (ROOT / "Source" / "Tests" / "Suites" / "AssetCompiler" / "DevelopmentAssetPipelineTests.cpp").read_text(encoding="utf-8", errors="ignore")
     if '"extensionsRequired":["KHR_texture_transform"]' not in gltf_importer_test_text:
         fail("glTF importer regression test no longer requires KHR_texture_transform", failures)
     for fragment in (
         '"extensionsRequired":["KHR_texture_basisu","EXT_texture_webp"]',
         "SourceImageMimeType::Ktx2",
         "SourceImageMimeType::WebP",
-        "KHR_texture_basisu source index imported",
-        "EXT_texture_webp source index imported",
+        "Textures[0].ImageIndex",
+        "Textures[1].ImageIndex",
     ):
         if fragment not in gltf_importer_test_text:
             fail(f"glTF Basis/WebP extension regression coverage is missing: {fragment}", failures)
@@ -1922,8 +1961,9 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         if fragment not in gltf_importer_source_text:
             fail(f"compiler-side Draco decode implementation is missing: {fragment}", failures)
     for fragment in (
-        "Draco source is compiler-decoded and cooked",
-        "SourcesSkippedUnsupported == 0",
+        "WriteDracoTriangleFixture",
+        "Stats.SourcesCooked",
+        "Stats.SourcesSkippedUnsupported",
         'Find<ModelAsset>("Models/Draco.model")',
     ):
         if fragment not in development_asset_test_text:
@@ -2154,8 +2194,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     if "GetSceneSystem()->SetScene(name" in sandbox_source:
         fail("SandBox::Awake regained self-selection as the active scene", failures)
 
-    if "add_executable(SwimSceneCatalogTests EXCLUDE_FROM_ALL" not in cmake_text:
-        fail("Phase 5 scene catalog tests are not represented in CMake", failures)
+    check_suite_is_compiled("Scene/Headless", "SceneCatalogTests.cpp", failures)
 
     for forbidden in (
         "VulkanRenderer*",
@@ -2251,8 +2290,8 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     for fragment in (
-        "physicsSystem->UpdateScene(*activeScene, dt)",
-        "physicsSystem->FixedUpdateScene(*activeScene, tickThisSecond)",
+        "activeScene->UpdatePhysics(*physicsSystem, dt)",
+        "activeScene->FixedUpdatePhysics(*physicsSystem)",
         "GetRenderer().SetRenderScene(activeScene)",
     ):
         if fragment not in engine_source:
@@ -2279,7 +2318,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     transform_header = (ROOT / "Source" / "Engine" / "Components" / "Transform.h").read_text(encoding="utf-8", errors="ignore")
     transform_source = (ROOT / "Source" / "Engine" / "Components" / "Transform.cpp").read_text(encoding="utf-8", errors="ignore")
     transform_system_path = scene_root / "TransformSystem.h"
-    transform_system_test = ROOT / "Source" / "Tests" / "Scene" / "TransformSystemTests.cpp"
+    transform_system_test = ROOT / "Source" / "Tests" / "Suites" / "Scene" / "Ecs" / "TransformSystemTests.cpp"
     if not transform_system_path.is_file() or not transform_system_test.is_file():
         fail("Phase 5 scene-owned TransformSystem/tests are missing", failures)
     else:
@@ -2321,11 +2360,10 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             fail(f"Scene does not own/expose TransformSystem correctly: {fragment}", failures)
     if "sceneSystem->BeginFrame()" not in engine_source:
         fail("engine frame orchestration does not begin per-scene transform tracking", failures)
-    if "add_executable(SwimTransformSystemTests EXCLUDE_FROM_ALL" not in cmake_text:
-        fail("Phase 5 TransformSystem tests are not represented in CMake", failures)
+    check_suite_is_compiled("Scene/Ecs", "TransformSystemTests.cpp", failures)
 
     frustum_header_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "Frustum.h"
-    frustum_test_path = ROOT / "Source" / "Tests" / "Scene" / "FrustumTests.cpp"
+    frustum_test_path = ROOT / "Source" / "Tests" / "Suites" / "Scene" / "Ecs" / "FrustumTests.cpp"
     opengl_renderer_header = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.h").read_text(encoding="utf-8", errors="ignore")
     opengl_renderer_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
     vulkan_index_header = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.h").read_text(encoding="utf-8", errors="ignore")
@@ -2364,6 +2402,10 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
         fail("OpenGL renderer does not own/update explicit per-view Frustum state", failures)
     if "Frustum viewFrustum" not in vulkan_index_header or "viewFrustum.Update(camera->GetViewMatrix(), camera->GetProjectionMatrix())" not in vulkan_index_source:
         fail("Vulkan draw traversal does not own/update explicit per-view Frustum state", failures)
+    if '#include "Engine/Components/Transform.h"' not in vulkan_index_header:
+        fail("VulkanIndexDraw uses TransformSpace enumerators/defaults without including the TransformSpace definition", failures)
+    if "enum class TransformSpace;" in vulkan_index_header:
+        fail("VulkanIndexDraw must not replace the TransformSpace definition with a forward declaration while using enum values", failures)
     if "frustum.GetRevision()" not in scene_bvh_source:
         fail("SceneBVH does not consume the supplied Frustum revision", failures)
 
@@ -2376,11 +2418,456 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             if forbidden in path_text:
                 fail(f"{label} regained static/global Frustum access: {forbidden}", failures)
 
-    if "add_executable(SwimFrustumTests EXCLUDE_FROM_ALL" not in cmake_text:
-        fail("Phase 5 Frustum tests are not represented in CMake", failures)
+    check_suite_is_compiled("Scene/Ecs", "FrustumTests.cpp", failures)
+
+    # Scene-owned mutation boundary.
+    deferred_command_path = scene_root / "DeferredCommandBuffer.h"
+    scene_command_header_path = scene_root / "SceneCommandBuffer.h"
+    scene_command_source_path = scene_root / "SceneCommandBuffer.cpp"
+    deferred_command_test_path = ROOT / "Source" / "Tests" / "Suites" / "Scene" / "Headless" / "DeferredCommandBufferTests.cpp"
+    for path in (deferred_command_path, scene_command_header_path, scene_command_source_path, deferred_command_test_path):
+        if not path.is_file():
+            fail(f"Phase 5 SceneCommandBuffer implementation/test is missing: {path.relative_to(ROOT)}", failures)
+
+    if deferred_command_path.is_file():
+        deferred_text = deferred_command_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "class DeferredCommandBuffer",
+            "void Enqueue(Func&& command)",
+            "std::size_t Flush(Context& context)",
+            "commands.swap(pendingCommands)",
+            "DeferredCommandBuffer cannot be flushed recursively.",
+        ):
+            if fragment not in deferred_text:
+                fail(f"Deferred scene command contract is missing: {fragment}", failures)
+
+    if scene_command_header_path.is_file():
+        scene_command_header = scene_command_header_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "class SceneCommandBuffer",
+            "void Defer(Func&& func, Args&&... args)",
+            "void Create(Func&& func, Args&&... args)",
+            "DeferredCommandBuffer<Scene> commands",
+        ):
+            if fragment not in scene_command_header:
+                fail(f"SceneCommandBuffer contract is missing: {fragment}", failures)
+
+    for fragment in (
+        "SceneCommandBuffer& GetCommandBuffer() const",
+        "std::unique_ptr<SceneCommandBuffer> sceneCommandBuffer",
+    ):
+        if fragment not in scene_header:
+            fail(f"Scene does not own the command buffer correctly: {fragment}", failures)
+    for fragment in ("GetCommandBuffer().Flush()", "GetCommandBuffer().Clear()"):
+        if fragment not in scene_source:
+            fail(f"Scene lifecycle does not enforce its command-buffer boundary: {fragment}", failures)
+    check_suite_is_compiled("Scene/Headless", "DeferredCommandBufferTests.cpp", failures)
+
+    old_entity_factory_paths = (
+        ROOT / "Source" / "Engine" / "Systems" / "Entity" / "EntityFactory.h",
+        ROOT / "Source" / "Engine" / "Systems" / "Entity" / "EntityFactory.cpp",
+    )
+    if any(path.exists() for path in old_entity_factory_paths):
+        fail("legacy EntityFactory files returned after the SceneCommandBuffer migration", failures)
+    for source_root in (ROOT / "Source" / "Game", scene_root):
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if source_root == scene_root and path.name == "Scene.cpp":
+                text = text.replace("registry.create()", "")
+            if source_root == scene_root and path.name == "SceneDebugDraw.cpp":
+                text = text.replace("immediateModeRegistry.create()", "")
+            if "registry.create()" in text or "reg.create()" in text:
+                fail(f"scene/game entity creation bypasses Scene ownership in {path.relative_to(ROOT)}", failures)
+
+    # Behavior registration is runtime-owned and deterministic.
+    behavior_registry_path = ROOT / "Source" / "Engine" / "Systems" / "Entity" / "BehaviorRegistry.h"
+    if not behavior_registry_path.is_file():
+        fail("Phase 5 BehaviorRegistry is missing", failures)
+    else:
+        behavior_registry_text = behavior_registry_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "class BehaviorRegistry",
+            "std::vector<Descriptor> descriptors",
+            "void Register(std::string name, Factory factory",
+            "bool Contains(std::string_view name) const",
+            "std::unique_ptr<Behavior> Create",
+        ):
+            if fragment not in behavior_registry_text:
+                fail(f"BehaviorRegistry contract is missing: {fragment}", failures)
+    for legacy_name in ("BehaviorFactory.h", "BehaviorRegistrar.h"):
+        if (ROOT / "Source" / "Engine" / "Systems" / "Entity" / legacy_name).exists():
+            fail(f"legacy global behavior registration file returned: {legacy_name}", failures)
+    for forbidden in ("BehaviorFactory::GetInstance", "REGISTER_BEHAVIOR", "DEFINE_BEHAVIOR"):
+        for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game"):
+            for path in source_root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
+                    if forbidden in path.read_text(encoding="utf-8", errors="ignore"):
+                        fail(f"behavior registration regained process-global/static state: {forbidden} in {path.relative_to(ROOT)}", failures)
+    for fragment in (
+        "BehaviorRegistry behaviorRegistry",
+        "RegisterBehaviorType(const std::string& name)",
+        'RegisterBehaviorType<Game::Spin>("Spin")',
+        'RegisterBehaviorType<Game::SimpleMovement>("SimpleMovement")',
+        'RegisterBehaviorType<Game::BallShooter>("BallShooter")',
+    ):
+        if fragment not in scene_system_header and fragment not in main_source:
+            fail(f"explicit behavior registration seam is missing: {fragment}", failures)
+    check_suite_is_compiled("Scene/Ecs", "BehaviorRegistryTests.cpp", failures)
+
+    # Durable entity IDs + serializer/storage/tooling split.
+    serialization_root = scene_root / "Serialization"
+    required_serialization_files = (
+        "SerializedEntityId.h",
+        "EntityIdentityMap.h",
+        "SceneSerializer.h",
+        "SceneSerializer.cpp",
+        "SceneStorage.h",
+        "SceneStorage.cpp",
+        "SceneToolingBridge.h",
+        "SceneSyncTracker.h",
+        "SceneSyncTracker.cpp",
+    )
+    for file_name in required_serialization_files:
+        if not (serialization_root / file_name).is_file():
+            fail(f"Phase 5 persistence/tooling module is missing: {file_name}", failures)
+
+    legacy_serialized_manager = scene_root / "SubSceneSystems" / "SerializedSceneManager.h"
+    if legacy_serialized_manager.exists() or (scene_root / "SubSceneSystems" / "SerializedSceneManager.cpp").exists():
+        fail("monolithic SerializedSceneManager returned after serializer/storage/tooling split", failures)
+
+    if (serialization_root / "SceneSerializer.cpp").is_file():
+        serializer_source = (serialization_root / "SceneSerializer.cpp").read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ("WM_COPYDATA", "GetExecutableDirectory", "std::ofstream", "MaterialPool"):
+            if forbidden in serializer_source:
+                fail(f"SceneSerializer regained transport/storage/legacy-pool policy: {forbidden}", failures)
+        for fragment in (
+            'root["schemaVersion"] = SchemaVersion',
+            'jsonEntity["id"] = id.Value',
+            'jsonEntity["parent"] = parentId.Value',
+            'material.ModelAssetId.Value',
+            'material.binding->MeshAssetId.Value',
+            'material.binding->MaterialAssetId.Value',
+            "registry->any_of<DoNotSerialize>(entity)",
+        ):
+            if fragment not in serializer_source:
+                fail(f"stable-ID/AssetId scene serialization contract is missing: {fragment}", failures)
+
+    if (serialization_root / "SceneStorage.cpp").is_file():
+        storage_source = (serialization_root / "SceneStorage.cpp").read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ("scene sync:", "scene load:", "SendEditorMessage", "CommandSystem"):
+            if forbidden in storage_source:
+                fail(f"SceneStorage regained editor/tool transport policy: {forbidden}", failures)
+
+    if (serialization_root / "SceneToolingBridge.h").is_file():
+        tooling_header = (serialization_root / "SceneToolingBridge.h").read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ("SceneSerializer", "nlohmann", "filesystem", "FileSystem"):
+            if forbidden in tooling_header:
+                fail(f"SceneToolingBridge owns serialization/storage policy: {forbidden}", failures)
+
+    for fragment in (
+        "EntityIdentityMap entityIdentities",
+        "CreateEntityWithSerializedId(SerializedEntityId id)",
+        "FindEntityBySerializedId(SerializedEntityId id) const",
+        "std::unique_ptr<SceneSerializer> sceneSerializer",
+        "std::unique_ptr<SceneStorage> sceneStorage",
+        "std::unique_ptr<SceneToolingBridge> sceneToolingBridge",
+        "std::unique_ptr<SceneSyncTracker> sceneSyncTracker",
+    ):
+        if fragment not in scene_header:
+            fail(f"Scene durable persistence ownership seam is missing: {fragment}", failures)
+
+    for fragment in (
+        "decltype(auto) AddComponent",
+        "decltype(auto) EmplaceComponent",
+        "using EmplaceResult = decltype(registry.emplace<T>",
+        "if constexpr (std::is_void_v<EmplaceResult>)",
+    ):
+        if fragment not in scene_header:
+            fail(f"Scene component insertion wrapper lost EnTT empty-tag return compatibility: {fragment}", failures)
+    if "T& result = registry.emplace<T>" in scene_header:
+        fail("Scene component insertion wrapper assumes EnTT emplace always returns T&; empty/tag components return void with ETO", failures)
+
+    if "cmd.Register<unsigned int" in scene_system_source or "static_cast<entt::entity>(entityId)" in scene_system_source:
+        fail("editor scene command transport regressed to raw/recyclable EnTT entity IDs", failures)
+    if "cmd.Register<std::uint64_t" not in scene_system_source:
+        fail("editor scene commands do not consume durable 64-bit SerializedEntityId values", failures)
+    for path in scene_root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and "to_integral" in path.read_text(encoding="utf-8", errors="ignore"):
+            fail(f"raw EnTT integral identity leaked back into scene persistence/tooling: {path.relative_to(ROOT)}", failures)
+    check_suite_is_compiled("Scene/Ecs", "EntityIdentityMapTests.cpp", failures)
+
+    # Canonical backend-neutral camera/clip-space contract.
+    render_conventions_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RenderConventions.h"
+    camera_header_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
+    if not render_conventions_path.is_file() or not camera_header_path.is_file():
+        fail("canonical render/camera convention headers are missing", failures)
+    else:
+        render_conventions = render_conventions_path.read_text(encoding="utf-8", errors="ignore")
+        camera_header_text = camera_header_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "CanonicalWorldHandedness = WorldHandedness::RightHanded",
+            "CanonicalClipSpaceDepthRange = ClipSpaceDepthRange::ZeroToOne",
+            "CanonicalClipSpaceYAxis = ClipSpaceYAxis::Up",
+            "CanonicalUiCoordinateOrigin = UiCoordinateOrigin::BottomLeft",
+        ):
+            if fragment not in render_conventions:
+                fail(f"canonical render convention is missing: {fragment}", failures)
+        if "glm::perspectiveRH_ZO" not in camera_header_text:
+            fail("Camera projection is not explicitly right-handed with 0..1 depth", failures)
+        for forbidden in ("GraphicsBackend", "projMatrix[1][1] *= -1"):
+            if forbidden in camera_header_text:
+                fail(f"Camera math regained backend-specific behavior: {forbidden}", failures)
+
+    opengl_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
+    vulkan_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
+    if "glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)" not in opengl_source:
+        fail("legacy OpenGL backend does not adapt to canonical 0..1 clip depth", failures)
+    if "-(float)extent.height" not in vulkan_source:
+        fail("Vulkan backend does not adapt canonical +Y camera space through viewport orientation", failures)
+    for forbidden in ("Presentation.ClipDepth", "SetClipSpaceDepthRange", "GetClipSpaceDepthRange", "MinusOneToOne"):
+        if forbidden in scene_header or forbidden in scene_system_header or forbidden in scene_system_source or forbidden in engine_source:
+            fail(f"scene/camera convention regained backend-dependent clip-depth policy: {forbidden}", failures)
+    check_suite_is_compiled("Scene/Ecs", "RenderConventionsTests.cpp", failures)
 
 
 
+
+def check_phase6_physics_architecture(failures: list[str]) -> None:
+    physics_root = ROOT / "Source" / "Engine" / "Systems" / "Physics"
+    physx_root = physics_root / "Backends" / "PhysX"
+    scene_bridge_root = ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Physics"
+    test_root = ROOT / "Source" / "Tests"
+
+    required_paths = (
+        physics_root / "PhysicsHandles.h",
+        physics_root / "PhysicsTypes.h",
+        physics_root / "IPhysicsBackend.h",
+        physics_root / "PhysicsSystem.h",
+        physics_root / "PhysicsSystem.cpp",
+        physics_root / "PhysicsWorld.h",
+        physics_root / "PhysicsWorld.cpp",
+        physics_root / "RigidBody.h",
+        physics_root / "Internal" / "GenerationalHandleTable.h",
+        physx_root / "PhysXBackendFactory.h",
+        physx_root / "PhysXBackendFactory.cpp",
+        physx_root / "PhysXBackend.h",
+        physx_root / "PhysXBackend.cpp",
+        physx_root / "PhysXWorldBackend.h",
+        physx_root / "PhysXWorldBackend.cpp",
+        scene_bridge_root / "ScenePhysicsBridge.h",
+        scene_bridge_root / "ScenePhysicsBridge.cpp",
+        test_root / "Suites" / "Physics" / "Generic" / "PhysicsHandleTests.cpp",
+        test_root / "Suites" / "Physics" / "PhysX" / "PhysXBackendTests.cpp",
+        test_root / "Fixtures" / "PhysicsBackendContract.h",
+        test_root / "HeaderBoundary" / "PhysicsPublicHeaders.cpp",
+        test_root / "HeaderBoundary" / "PhysicsBackendContractCompile.cpp",
+    )
+    for path in required_paths:
+        if not path.is_file():
+            fail(f"Phase 6 physics architecture file is missing: {path.relative_to(ROOT)}", failures)
+
+    generic_forbidden = ("physx::", "PxPhysicsAPI", "#include <Px", "#include \"Px", "JPH::", "Jolt/")
+    if physics_root.exists():
+        for path in physics_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            if physx_root in path.parents:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for fragment in generic_forbidden:
+                if fragment in text:
+                    fail(
+                        f"generic physics boundary leaked backend implementation type/include '{fragment}': {path.relative_to(ROOT)}",
+                        failures,
+                    )
+
+    rigidbody_path = physics_root / "RigidBody.h"
+    if rigidbody_path.is_file():
+        rigidbody_text = rigidbody_path.read_text(encoding="utf-8", errors="ignore")
+        if "BodyHandle body{};" not in rigidbody_text:
+            fail("Rigidbody runtime identity is not a backend-neutral BodyHandle", failures)
+        for fragment in ("PxRigidActor", "PxShape", "JPH::BodyID", "void* actor", "void* shape"):
+            if fragment in rigidbody_text:
+                fail(f"Rigidbody regained backend-owned runtime state: {fragment}", failures)
+
+    world_header_path = physics_root / "PhysicsWorld.h"
+    if world_header_path.is_file():
+        world_text = world_header_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("entt::", "entt/", "Transform", "Rigidbody"):
+            if fragment in world_text:
+                fail(f"generic PhysicsWorld regained Scene/ECS integration: {fragment}", failures)
+
+    bridge_header_path = scene_bridge_root / "ScenePhysicsBridge.h"
+    bridge_source_path = scene_bridge_root / "ScenePhysicsBridge.cpp"
+    if bridge_header_path.is_file() and bridge_source_path.is_file():
+        bridge_text = bridge_header_path.read_text(encoding="utf-8", errors="ignore") + bridge_source_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("entt::registry", "Rigidbody", "std::unique_ptr<PhysicsWorld>"):
+            if fragment not in bridge_text:
+                fail(f"ScenePhysicsBridge is missing the scene/generic-physics boundary fragment: {fragment}", failures)
+        if "to_integral" in bridge_text:
+            fail("ScenePhysicsBridge must not turn recyclable EnTT identities into durable/tooling physics identity", failures)
+
+    handles_path = physics_root / "PhysicsHandles.h"
+    if handles_path.is_file():
+        handles_text = handles_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("BodyHandle", "ShapeHandle", "PhysicsMaterialHandle", "ConstraintHandle", "CharacterHandle", "Generation"):
+            if fragment not in handles_text:
+                fail(f"generic physics handle contract is missing: {fragment}", failures)
+
+    types_path = physics_root / "PhysicsTypes.h"
+    if types_path.is_file():
+        types_text = types_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "MotionType", "ShapeType", "ForceMode", "CollisionLayer", "PhysicsPose",
+            "ShapeDesc", "PhysicsMaterialDesc", "BodyDesc", "PhysicsWorldDesc",
+            "RaycastHit", "SweepHit", "OverlapHit", "CollisionEvent", "TriggerEvent",
+        ):
+            if fragment not in types_text:
+                fail(f"generic physics public concept is missing: {fragment}", failures)
+
+    backend_path = physics_root / "IPhysicsBackend.h"
+    if backend_path.is_file():
+        backend_text = backend_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "class IPhysicsWorldBackend", "class IPhysicsBackend", "CreateMaterial", "CreateShape", "CreateBody",
+            "SetKinematicTarget", "AddForce", "BeginSimulation", "FetchResults", "Raycast", "Sweep", "Overlap",
+            "GetCollisionEvents", "GetTriggerEvents", "CreateWorld",
+        ):
+            if fragment not in backend_text:
+                fail(f"generic physics backend contract is missing: {fragment}", failures)
+
+    physx_world_path = physx_root / "PhysXWorldBackend.cpp"
+    if physx_world_path.is_file():
+        physx_text = physx_world_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "PxSimulationEventCallback", "SwimSimulationFilterShader", "LayerQueryFilter",
+            "PhysXWorldBackend::Raycast", "PhysXWorldBackend::Sweep", "PhysXWorldBackend::Overlap",
+            "CollisionEvent", "TriggerEvent", "pendingDestroy",
+            "if (!actor->attachShape(**shapePtr))", "ReleaseActor(actor)",
+            "ResolveBody(const physx::PxActor* actor)", "actor->is<physx::PxRigidActor>()",
+        ):
+            if fragment not in physx_text:
+                fail(f"PhysX backend parity implementation is missing: {fragment}", failures)
+
+    contract_path = test_root / "Fixtures" / "PhysicsBackendContract.h"
+    if contract_path.is_file():
+        contract_text = contract_path.read_text(encoding="utf-8", errors="ignore")
+        # The word "PhysX" may legitimately appear in the usage comment, so the
+        # backend-neutrality check targets implementation identifiers only.
+        for forbidden in ("physx::", "PxPhysicsAPI", "JPH::", "Jolt/", "CreatePhysXBackend"):
+            if forbidden in contract_text:
+                fail(f"shared physics backend contract test is backend-specific: {forbidden}", failures)
+        for fragment in (
+            "RunPhysicsWorldLifecycleContract", "RunPhysicsSceneQueryContract",
+            "RunPhysicsSimulationContract", "RunPhysicsTriggerContract",
+            "Raycast", "Sweep", "Overlap", "CollisionEvent",
+            "TriggerEvent", "SetKinematicTarget", "AddForce", "IsBodyValid",
+            "triggerShape.IsValid()", "triggerBody.IsValid()", "triggerMoverShape.IsValid()",
+            "triggerMover.IsValid()", "deferredShape.IsValid()", "staleBody.IsValid()",
+        ):
+            if fragment not in contract_text:
+                fail(f"shared physics backend contract test is missing coverage seam: {fragment}", failures)
+        # Handles expose an explicit operator bool; relying on implicit conversion
+        # inside a check macro would not compile for every backend handle type.
+        for forbidden in (
+            "SWIM_REQUIRE(triggerShape)", "SWIM_REQUIRE(triggerBody)",
+            "SWIM_REQUIRE(triggerMoverShape)", "SWIM_REQUIRE(triggerMover)",
+            "SWIM_REQUIRE(deferredShape)", "SWIM_REQUIRE(staleBody)",
+        ):
+            if forbidden in contract_text:
+                fail(f"shared physics backend contract relies on implicit conversion of an explicit handle bool: {forbidden}", failures)
+
+    cmake_path = ROOT / "CMakeLists.txt"
+    if cmake_path.is_file():
+        cmake_text = cmake_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "add_library(SwimPhysics STATIC", "add_library(Swim::Physics ALIAS SwimPhysics)",
+            "add_library(SwimPhysicsPhysX STATIC", "add_library(Swim::PhysicsPhysX ALIAS SwimPhysicsPhysX)",
+            "target_link_libraries(SwimPhysicsPhysX PUBLIC Swim::Physics PRIVATE Swim::PhysX)",
+            'list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")',
+            'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")',
+            "include(cmake/MathDependencies.cmake)",
+            "include(cmake/Tests.cmake)",
+        ):
+            if fragment not in cmake_text:
+                fail(f"Phase 6 physics target boundary is missing from CMake: {fragment}", failures)
+
+        swim_physics_link = re.search(r"target_link_libraries\(SwimPhysics\s+([^\)]*)\)", cmake_text, re.DOTALL)
+        if not swim_physics_link:
+            fail("SwimPhysics target has no explicit dependency boundary", failures)
+        else:
+            link_text = swim_physics_link.group(1)
+            for forbidden in ("Swim::PhysX", "PhysX", "Jolt", "EnTT::EnTT"):
+                if forbidden in link_text:
+                    fail(f"Swim::Physics links backend/scene implementation dependency directly: {forbidden}", failures)
+
+        engine_links = re.findall(r"target_link_libraries\(SwimEngine\s+([^\)]*)\)", cmake_text, re.DOTALL)
+        if not engine_links:
+            fail("legacy runtime has no explicit target_link_libraries dependency declaration", failures)
+        else:
+            link_text = "\n".join(engine_links)
+            for fragment in ("Swim::Physics", "Swim::PhysicsPhysX"):
+                if fragment not in link_text:
+                    fail(f"legacy runtime is missing explicit physics target dependency: {fragment}", failures)
+            if "Swim::PhysX" in link_text:
+                fail("legacy runtime bypasses Swim::PhysicsPhysX and links raw PhysX", failures)
+
+    cmake_path = ROOT / "CMakeLists.txt"
+    if cmake_path.is_file():
+        cmake_text = cmake_path.read_text(encoding="utf-8", errors="ignore")
+        legacy_return = cmake_text.find("if(NOT SWIM_BUILD_LEGACY_ENGINE)")
+        generic_physics = cmake_text.find("# Generic physics is part of the cross-platform foundation")
+        if legacy_return < 0 or generic_physics < 0 or generic_physics > legacy_return:
+            fail("generic Swim::Physics is not compiled before the non-Windows legacy-runtime return", failures)
+
+        # The foundation-only configure must still define the test targets before
+        # it returns, otherwise the shared physics backend contract and the
+        # portable suites stop being validated on Linux.
+        foundation_tests = cmake_text.find("swim_configure_tests()", legacy_return)
+        foundation_return = cmake_text.find("return()", legacy_return)
+        if legacy_return < 0 or foundation_tests < 0 or foundation_return < 0 or foundation_tests > foundation_return:
+            fail("the foundation/Linux configure no longer defines the Swim test targets before returning", failures)
+
+        tests_cmake_text = read_tests_cmake()
+        for fragment in (
+            "swim_add_header_boundary(SwimPhysicsBackendContractCompile",
+            "Source/Tests/HeaderBoundary/PhysicsBackendContractCompile.cpp",
+            "swim_add_header_boundary(SwimPhysicsPublicHeaders",
+            "Physics/PhysX",
+        ):
+            if fragment not in tests_cmake_text:
+                fail(f"Phase 6 physics test boundary is missing from cmake/Tests.cmake: {fragment}", failures)
+
+    math_dependencies_path = ROOT / "cmake" / "MathDependencies.cmake"
+    if math_dependencies_path.is_file():
+        math_text = math_dependencies_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("GITHUB_REPOSITORY g-truc/glm", "GIT_TAG 1.0.0", "add_library(glm::glm ALIAS SwimGlm)"):
+            if fragment not in math_text:
+                fail(f"cross-platform GLM foundation dependency is missing: {fragment}", failures)
+
+    dependencies_path = ROOT / "cmake" / "Dependencies.cmake"
+    if dependencies_path.is_file():
+        dependencies_text = dependencies_path.read_text(encoding="utf-8", errors="ignore")
+        if "if(SWIM_ENABLE_PHYSX_BACKEND)" not in dependencies_text or "include(cmake/PhysX.cmake)" not in dependencies_text:
+            fail("PhysX dependency acquisition is not guarded by SWIM_ENABLE_PHYSX_BACKEND", failures)
+
+    engine_source_path = ROOT / "Source" / "Engine" / "SwimEngine.cpp"
+    if engine_source_path.is_file():
+        engine_text = engine_source_path.read_text(encoding="utf-8", errors="ignore")
+        if "CreatePhysXBackend()" not in engine_text:
+            fail("runtime composition no longer selects the PhysX implementation through its backend factory", failures)
+
+    windows_helper_path = ROOT / "scripts" / "windows-build-common.ps1"
+    if windows_helper_path.is_file():
+        helper_text = windows_helper_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "Invoke-SwimWindowsTestSuite", "SwimTests",
+            "SwimPhysicsPublicHeaders", "SwimPhysicsBackendContractCompile",
+        ):
+            if fragment not in helper_text:
+                fail(f"Windows physics validation gate is missing: {fragment}", failures)
 
 def check_runtime_logging_contract(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
@@ -2481,6 +2968,7 @@ def main() -> int:
     check_phase3_memory_architecture(failures)
     check_phase4_asset_architecture(failures)
     check_phase5_scene_architecture(failures)
+    check_phase6_physics_architecture(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)
 

@@ -5,6 +5,7 @@
 #include "SceneCatalog.h"
 #include "Engine/Systems/IO/CommandSystem.h"
 #include "Engine/EngineState.h"
+#include "Engine/Systems/Entity/BehaviorRegistry.h"
 
 #include <cstdint>
 #include <functional>
@@ -68,7 +69,6 @@ namespace Engine
 		TexturePool* Textures = nullptr;
 		MaterialPool* Materials = nullptr;
 		FontPool* Fonts = nullptr;
-		ClipSpaceDepthRange ClipDepth = ClipSpaceDepthRange::ZeroToOne;
 
 		bool IsAvailable() const
 		{
@@ -113,6 +113,13 @@ namespace Engine
 		}
 
 		void RegisterSceneType(std::string name, SceneFactory factory);
+
+		template <typename T>
+		void RegisterBehaviorType(const std::string& name)
+		{
+			behaviorRegistry.Register<T>(name);
+		}
+
 		void SetStartupScene(std::string name) { startupSceneName = std::move(name); }
 
 		int Awake() override;
@@ -173,8 +180,8 @@ namespace Engine
 		void RegisterEntityBehaviorRemoveCommand(CommandSystem& cmd);
 
 		// Small helpers used by the add/remove component commands
-		void AddComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
-		void RemoveComponentByName(Scene& scene, unsigned int entityId, const std::string& componentName);
+		static void AddComponentByName(Scene& scene, SerializedEntityId entityId, const std::string& componentName);
+		static void RemoveComponentByName(Scene& scene, SerializedEntityId entityId, const std::string& componentName);
 
 		struct LoadedScene
 		{
@@ -188,6 +195,7 @@ namespace Engine
 		// Scene type construction metadata is owned by this SceneSystem instance.
 		// Game/application code registers descriptors explicitly before Awake().
 		SceneCatalog sceneCatalog;
+		BehaviorRegistry behaviorRegistry;
 		std::string startupSceneName;
 
 		// Shared pointer to the application-designated active scene.
