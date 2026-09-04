@@ -48,11 +48,11 @@ namespace Engine::Tests
 
 	public:
 
-		explicit PhysicsContractWorld(IPhysicsBackend& backend)
+		explicit PhysicsContractWorld(IPhysicsBackend& backend, PhysicsWorldDesc desc = {})
 		{
 			SWIM_REQUIRE(backend.Initialize(1));
 
-			std::unique_ptr<IPhysicsWorldBackend> worldBackend = backend.CreateWorld(PhysicsWorldDesc{});
+			std::unique_ptr<IPhysicsWorldBackend> worldBackend = backend.CreateWorld(desc);
 			SWIM_REQUIRE(worldBackend != nullptr);
 			world = std::make_unique<PhysicsWorld>(std::move(worldBackend));
 
@@ -269,6 +269,33 @@ namespace Engine::Tests
 					&& overlapHit.UserData == 202u;
 			});
 		SWIM_CHECK(foundDynamicOverlap);
+
+		// Query-shape local poses are part of the generic contract. This also
+		// catches backends that accidentally pass a body/world transform where
+		// their native overlap API expects the query shape's center-of-mass pose.
+		ShapeDesc offsetOverlapShape{};
+		offsetOverlapShape.Type = ShapeType::Sphere;
+		offsetOverlapShape.Sphere.Radius = 0.25f;
+		offsetOverlapShape.LocalPose.Position = glm::vec3(1.0f, 0.0f, 0.0f);
+		PhysicsPose offsetOverlapPose{};
+		offsetOverlapPose.Position = glm::vec3(-1.0f, 4.0f, 0.0f);
+
+		OverlapHit offsetOverlapHits[8]{};
+		const std::size_t offsetOverlapCount = world.Overlap(
+			offsetOverlapShape,
+			offsetOverlapPose,
+			offsetOverlapHits,
+			sphereOnlyQuery);
+		SWIM_REQUIRE(offsetOverlapCount > 0);
+
+		const bool foundOffsetDynamicOverlap = std::any_of(offsetOverlapHits, offsetOverlapHits + offsetOverlapCount,
+			[&](const OverlapHit& overlapHit)
+			{
+				return overlapHit.Body == fixture.Dynamic()
+					&& overlapHit.Shape == fixture.SphereShape()
+					&& overlapHit.UserData == 202u;
+			});
+		SWIM_CHECK(foundOffsetDynamicOverlap);
 	}
 
 	// Gravity integration, collision events, and velocity/force application.
@@ -377,6 +404,174 @@ namespace Engine::Tests
 		world.DestroyShape(triggerMoverShape);
 		world.DestroyBody(triggerBody);
 		world.DestroyShape(triggerShape);
+	}
+
+	// A ShapeHandle is a reusable template. Collision filtering is per-body state
+	// in the generic API, so two bodies built from one handle must be filtered
+	// independently and must not disturb each other.
+	inline void RunPhysicsSharedShapeContract(IPhysicsBackend& backend)
+	{
+		PhysicsContractWorld fixture(backend);
+		PhysicsWorld& world = fixture.Get();
+
+		ShapeDesc sharedShapeDesc{};
+		sharedShapeDesc.Type = ShapeType::Sphere;
+		sharedShapeDesc.Sphere.Radius = 0.4f;
+		const ShapeHandle sharedShape = world.CreateShape(sharedShapeDesc, fixture.Material());
+		SWIM_REQUIRE(sharedShape.IsValid());
+
+		BodyDesc leftDesc{};
+		leftDesc.Motion = MotionType::Static;
+		leftDesc.Shape = sharedShape;
+		leftDesc.Pose.Position = glm::vec3(-6.0f, 3.0f, 0.0f);
+		leftDesc.Collision.Layer = 64u;
+		leftDesc.Collision.Mask = 0xffffffffu;
+		leftDesc.UserData = 606u;
+		const BodyHandle left = world.CreateBody(leftDesc);
+		SWIM_REQUIRE(left.IsValid());
+
+		BodyDesc rightDesc = leftDesc;
+		rightDesc.Pose.Position = glm::vec3(6.0f, 3.0f, 0.0f);
+		rightDesc.Collision.Layer = 128u;
+		rightDesc.UserData = 707u;
+		const BodyHandle right = world.CreateBody(rightDesc);
+		SWIM_REQUIRE(right.IsValid());
+
+		// Both bodies must still exist and both must resolve back to the one
+		// shared shape handle.
+		SWIM_CHECK(world.IsBodyValid(left));
+		SWIM_CHECK(world.IsBodyValid(right));
+
+		CollisionLayer leftOnly{};
+		leftOnly.Layer = 1u;
+		leftOnly.Mask = 64u;
+
+		RaycastHit leftHit{};
+		SWIM_REQUIRE(world.Raycast(glm::vec3(-6.0f, 10.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 20.0f, leftHit, leftOnly));
+		SWIM_CHECK(leftHit.Body == left);
+		SWIM_CHECK(leftHit.Shape == sharedShape);
+		SWIM_CHECK_EQUAL(leftHit.UserData, 606u);
+
+		// Creating the second body must not have re-filtered the first: a query
+		// restricted to the left body's layer must still miss the right body.
+		RaycastHit strayHit{};
+		SWIM_CHECK(!world.Raycast(glm::vec3(6.0f, 10.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 20.0f, strayHit, leftOnly));
+
+		CollisionLayer rightOnly{};
+		rightOnly.Layer = 1u;
+		rightOnly.Mask = 128u;
+
+		RaycastHit rightHit{};
+		SWIM_REQUIRE(world.Raycast(glm::vec3(6.0f, 10.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 20.0f, rightHit, rightOnly));
+		SWIM_CHECK(rightHit.Body == right);
+		SWIM_CHECK(rightHit.Shape == sharedShape);
+		SWIM_CHECK_EQUAL(rightHit.UserData, 707u);
+
+		// Destroying one body must leave the other and the shared template intact.
+		world.DestroyBody(right);
+		SWIM_CHECK(!world.IsBodyValid(right));
+		SWIM_CHECK(world.IsBodyValid(left));
+		SWIM_CHECK(world.IsShapeValid(sharedShape));
+
+		RaycastHit survivingHit{};
+		SWIM_CHECK(world.Raycast(glm::vec3(-6.0f, 10.0f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 20.0f, survivingHit, leftOnly));
+
+		world.DestroyBody(left);
+		world.DestroyShape(sharedShape);
+	}
+
+	// Mutating a body while a step is in flight is invalid for every backend, so
+	// the generic API must reject it rather than letting the implementation raise
+	// its own error. A non-blocking fetch must also make progress.
+	inline void RunPhysicsInFlightWriteContract(IPhysicsBackend& backend)
+	{
+		PhysicsContractWorld fixture(backend);
+		PhysicsWorld& world = fixture.Get();
+
+		PhysicsPose beforePose{};
+		SWIM_REQUIRE(world.GetBodyPose(fixture.Dynamic(), beforePose));
+
+		world.BeginSimulation(1.0f / 60.0f);
+		SWIM_REQUIRE(world.IsSimulationInFlight());
+
+		PhysicsPose rejectedPose{};
+		rejectedPose.Position = glm::vec3(0.0f, 100.0f, 0.0f);
+		SWIM_CHECK(!world.SetBodyPose(fixture.Dynamic(), rejectedPose));
+		SWIM_CHECK(!world.SetKinematicTarget(fixture.Kinematic(), rejectedPose));
+		SWIM_CHECK(!world.AddForce(fixture.Dynamic(), glm::vec3(0.0f, 1.0f, 0.0f), ForceMode::Impulse));
+		SWIM_CHECK(!world.SetLinearVelocity(fixture.Dynamic(), glm::vec3(0.0f, 1.0f, 0.0f)));
+		SWIM_CHECK(!world.SetAngularVelocity(fixture.Dynamic(), glm::vec3(0.0f, 1.0f, 0.0f)));
+
+		BodyDesc rejectedBody{};
+		rejectedBody.Motion = MotionType::Static;
+		rejectedBody.Shape = fixture.SphereShape();
+		SWIM_CHECK(!world.CreateBody(rejectedBody));
+
+		// Reads stay legal while a step is in flight.
+		PhysicsPose duringPose{};
+		SWIM_CHECK(world.GetBodyPose(fixture.Dynamic(), duringPose));
+
+		// A non-blocking fetch must eventually complete the step rather than
+		// spinning forever, so a bounded poll loop has to terminate.
+		bool completed = false;
+		for (int attempt = 0; attempt < 4096 && !completed; ++attempt)
+		{
+			completed = world.FetchResults(false);
+		}
+		SWIM_CHECK(completed);
+		SWIM_CHECK(!world.IsSimulationInFlight());
+
+		// Once the step is done the same writes are accepted again.
+		SWIM_CHECK(world.SetLinearVelocity(fixture.Dynamic(), glm::vec3(0.0f)));
+	}
+
+	// Collision events must carry a usable contact impulse, and persisted contact
+	// reporting must be opt-in.
+	inline void RunPhysicsContactEventContract(IPhysicsBackend& backend)
+	{
+		PhysicsWorldDesc quietDesc{};
+		{
+			PhysicsContractWorld quiet(backend, quietDesc);
+			PhysicsWorld& world = quiet.Get();
+
+			bool sawPersisted = false;
+			bool sawStarted = false;
+			for (int i = 0; i < 240; ++i)
+			{
+				StepPhysics(world, 1.0f / 60.0f);
+				for (const CollisionEvent& event : world.GetCollisionEvents())
+				{
+					sawStarted = sawStarted || event.Type == CollisionEventType::Started;
+					sawPersisted = sawPersisted || event.Type == CollisionEventType::Persisted;
+				}
+			}
+
+			SWIM_CHECK(sawStarted);
+			SWIM_CHECK(!sawPersisted);
+		}
+
+		PhysicsWorldDesc verboseDesc{};
+		verboseDesc.EnablePersistedCollisionEvents = true;
+
+		PhysicsContractWorld verbose(backend, verboseDesc);
+		PhysicsWorld& world = verbose.Get();
+
+		bool sawPersisted = false;
+		float strongestImpulse = 0.0f;
+		for (int i = 0; i < 240; ++i)
+		{
+			StepPhysics(world, 1.0f / 60.0f);
+			for (const CollisionEvent& event : world.GetCollisionEvents())
+			{
+				sawPersisted = sawPersisted || event.Type == CollisionEventType::Persisted;
+				strongestImpulse = std::max(strongestImpulse, event.Impulse);
+			}
+		}
+
+		SWIM_CHECK(sawPersisted);
+
+		// A 2 kg sphere falling onto a floor cannot resolve with a zero impulse.
+		SWIM_CHECK(strongestImpulse > 0.0f);
 	}
 
 } // namespace Engine::Tests

@@ -157,9 +157,16 @@ endif()
 
 # NVIDIA's generator bootstraps the exact external packages needed by this
 # PhysX release through Packman and creates the VS2022 CPU-only build tree.
+file(TO_NATIVE_PATH "${SWIM_PHYSX_GENERATOR}" SWIM_PHYSX_GENERATOR_NATIVE)
 if(NOT EXISTS "${SWIM_PHYSX_BUILD_DIR}/CMakeCache.txt")
+	# Invoke the generator through its absolute path. cmd.exe only searches the
+	# working directory for a command when NoDefaultCurrentDirectoryInExePath is
+	# unset, and some CI/sandbox environments set it, which would otherwise fail
+	# here with a confusing "'generate_projects.bat' is not recognized" error.
+	# The working directory still matters: the script resolves its own paths
+	# relative to the PhysX root.
 	execute_process(
-		COMMAND cmd.exe /d /c "call generate_projects.bat ${SWIM_PHYSX_PRESET}"
+		COMMAND cmd.exe /d /c "${SWIM_PHYSX_GENERATOR_NATIVE}" "${SWIM_PHYSX_PRESET}"
 		WORKING_DIRECTORY "${SWIM_PHYSX_ROOT}"
 		RESULT_VARIABLE SWIM_PHYSX_GENERATE_RESULT
 		OUTPUT_VARIABLE SWIM_PHYSX_GENERATE_STDOUT

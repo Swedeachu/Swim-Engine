@@ -15,6 +15,14 @@
 namespace Engine
 {
 
+	// Constant block handed to the PhysX simulation filter shader. The shader is
+	// a plain function pointer, so per-world policy has to travel through PhysX
+	// instead of being captured.
+	struct PhysXFilterShaderConstants
+	{
+		std::uint32_t ReportPersistedContacts = 0u;
+	};
+
 	class PhysXWorldBackend final : public IPhysicsWorldBackend
 	{
 
@@ -73,20 +81,32 @@ namespace Engine
 			}
 		};
 
+		// A ShapeHandle is a reusable template, not a body-owned resource: the
+		// generic contract puts CollisionLayer on BodyDesc, so filter data can
+		// never live on a shape that several bodies share. Each body therefore
+		// gets its own exclusive PxShape instantiated from this description.
+		struct ShapeRecord
+		{
+			ShapeDesc Desc{};
+			PhysicsMaterialHandle Material{};
+		};
+
 		struct BodyRecord
 		{
 			physx::PxRigidActor* Actor = nullptr;
 			ShapeHandle Shape{};
+			physx::PxShape* InstancedShape = nullptr;
 			std::uint64_t UserData = 0;
 		};
 
 		physx::PxPhysics& physics;
 		physx::PxCpuDispatcher& dispatcher;
 		PhysicsWorldDesc worldDesc{};
+		PhysXFilterShaderConstants filterShaderConstants{};
 		std::unique_ptr<physx::PxScene, PxReleaser> scene;
 
 		GenerationalHandleTable<PhysicsMaterialHandle, physx::PxMaterial*> materials;
-		GenerationalHandleTable<ShapeHandle, physx::PxShape*> shapes;
+		GenerationalHandleTable<ShapeHandle, ShapeRecord> shapes;
 		GenerationalHandleTable<BodyHandle, BodyRecord> bodies;
 		std::unordered_map<const physx::PxRigidActor*, BodyHandle> actorHandles;
 		std::unordered_map<const physx::PxShape*, ShapeHandle> shapeHandles;
@@ -106,6 +126,7 @@ namespace Engine
 
 		BodyHandle ResolveBody(const physx::PxActor* actor) const;
 		ShapeHandle ResolveShape(const physx::PxShape* shape) const;
+		physx::PxShape* CreateInstancedShape(const ShapeRecord& record) const;
 		std::uint64_t ResolveUserData(BodyHandle body) const;
 
 		void FlushPendingDestroy();

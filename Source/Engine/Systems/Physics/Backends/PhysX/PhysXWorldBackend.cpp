@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <unordered_set>
 #include <vector>
 
 namespace Engine
@@ -61,9 +62,6 @@ namespace Engine
 			const void* constantBlock,
 			physx::PxU32 constantBlockSize)
 		{
-			(void)constantBlock;
-			(void)constantBlockSize;
-
 			if ((filterData0.word0 & filterData1.word1) == 0u || (filterData1.word0 & filterData0.word1) == 0u)
 			{
 				return physx::PxFilterFlag::eSUPPRESS;
@@ -77,9 +75,20 @@ namespace Engine
 
 			pairFlags = physx::PxPairFlag::eCONTACT_DEFAULT
 				| physx::PxPairFlag::eNOTIFY_TOUCH_FOUND
-				| physx::PxPairFlag::eNOTIFY_TOUCH_PERSISTS
 				| physx::PxPairFlag::eNOTIFY_TOUCH_LOST
 				| physx::PxPairFlag::eNOTIFY_CONTACT_POINTS;
+
+			// eNOTIFY_TOUCH_PERSISTS makes PhysX report and extract contacts for
+			// every touching pair on every step. Only ask for it when the world
+			// actually exposes persisted events.
+			const bool reportPersisted = constantBlock != nullptr
+				&& constantBlockSize >= sizeof(PhysXFilterShaderConstants)
+				&& static_cast<const PhysXFilterShaderConstants*>(constantBlock)->ReportPersistedContacts != 0u;
+			if (reportPersisted)
+			{
+				pairFlags |= physx::PxPairFlag::eNOTIFY_TOUCH_PERSISTS;
+			}
+
 			return physx::PxFilterFlag::eDEFAULT;
 		}
 
@@ -295,16 +304,8 @@ namespace Engine
 		bodies.Reset();
 		actorHandles.clear();
 
-		shapes.ForEach(
-			[&](ShapeHandle handle, physx::PxShape*& shape)
-			{
-				(void)handle;
-				if (shape)
-				{
-					shape->release();
-					shape = nullptr;
-				}
-			});
+		// Shape records are pure descriptions now; the PxShape instances they
+		// produced were owned by, and died with, their actors above.
 		shapes.Reset();
 		shapeHandles.clear();
 
@@ -335,10 +336,17 @@ namespace Engine
 
 		eventCallback = std::make_unique<SimulationEventCallback>(*this);
 
+		// PhysX copies the constant block into the scene, but it keeps pointing at
+		// the caller's memory until createScene returns, so the source has to
+		// outlive this call. Keeping it a member also documents the policy.
+		filterShaderConstants.ReportPersistedContacts = worldDesc.EnablePersistedCollisionEvents ? 1u : 0u;
+
 		physx::PxSceneDesc desc(physics.getTolerancesScale());
 		desc.gravity = ToPx(worldDesc.Gravity);
 		desc.cpuDispatcher = &dispatcher;
 		desc.filterShader = SwimSimulationFilterShader;
+		desc.filterShaderData = &filterShaderConstants;
+		desc.filterShaderDataSize = sizeof(filterShaderConstants);
 		desc.simulationEventCallback = eventCallback.get();
 		if (worldDesc.EnableContinuousCollisionDetection)
 		{
@@ -387,16 +395,19 @@ namespace Engine
 		return materials.IsValid(material);
 	}
 
-	ShapeHandle PhysXWorldBackend::CreateShape(const ShapeDesc& desc, PhysicsMaterialHandle material)
+	physx::PxShape* PhysXWorldBackend::CreateInstancedShape(const ShapeRecord& record) const
 	{
-		physx::PxMaterial* const* materialPtr = materials.Get(material);
-		if (!materialPtr || !*materialPtr || !IsValidPose(desc.LocalPose))
+		physx::PxMaterial* const* materialPtr = materials.Get(record.Material);
+		if (!materialPtr || !*materialPtr)
 		{
-			return {};
+			return nullptr;
 		}
 
+		const ShapeDesc& desc = record.Desc;
 		physx::PxShape* shape = nullptr;
 
+		// Exclusive shapes: each body owns its instance, so per-body filter data
+		// and flags can never disturb another body built from the same handle.
 		switch (desc.Type)
 		{
 			case ShapeType::Box:
@@ -404,7 +415,7 @@ namespace Engine
 				const glm::vec3 extents = desc.Box.HalfExtents;
 				if (!IsFiniteVec3(extents) || !(extents.x > 0.0f) || !(extents.y > 0.0f) || !(extents.z > 0.0f))
 				{
-					return {};
+					return nullptr;
 				}
 				shape = physics.createShape(physx::PxBoxGeometry(extents.x, extents.y, extents.z), **materialPtr, true);
 				break;
@@ -413,7 +424,7 @@ namespace Engine
 			{
 				if (!(desc.Sphere.Radius > 0.0f) || !std::isfinite(desc.Sphere.Radius))
 				{
-					return {};
+					return nullptr;
 				}
 				shape = physics.createShape(physx::PxSphereGeometry(desc.Sphere.Radius), **materialPtr, true);
 				break;
@@ -423,7 +434,7 @@ namespace Engine
 				if (!(desc.Capsule.Radius > 0.0f) || !(desc.Capsule.HalfHeight >= 0.0f)
 					|| !std::isfinite(desc.Capsule.Radius) || !std::isfinite(desc.Capsule.HalfHeight))
 				{
-					return {};
+					return nullptr;
 				}
 				shape = physics.createShape(physx::PxCapsuleGeometry(desc.Capsule.Radius, desc.Capsule.HalfHeight), **materialPtr, true);
 				break;
@@ -435,18 +446,19 @@ namespace Engine
 				// generic descriptor reserves this path; backend cooked payload binding
 				// lands with the collision-cooking checklist rather than synchronously
 				// cooking source geometry here.
-				return {};
+				return nullptr;
 			}
 		}
 
 		if (!shape)
 		{
-			return {};
+			return nullptr;
 		}
 
 		physx::PxTransform localPose = ToPx(desc.LocalPose);
 		if (desc.Type == ShapeType::Capsule)
 		{
+			// PhysX capsules are X-aligned; Swim's generic capsule is Y-up.
 			const physx::PxQuat yUp(physx::PxHalfPi, physx::PxVec3(0.0f, 0.0f, 1.0f));
 			localPose.q = localPose.q * yUp;
 		}
@@ -463,19 +475,37 @@ namespace Engine
 			shape->setFlag(physx::PxShapeFlag::eTRIGGER_SHAPE, false);
 		}
 
-		const ShapeHandle handle = shapes.Insert(shape);
-		shapeHandles.emplace(shape, handle);
-		return handle;
+		return shape;
+	}
+
+	ShapeHandle PhysXWorldBackend::CreateShape(const ShapeDesc& desc, PhysicsMaterialHandle material)
+	{
+		physx::PxMaterial* const* materialPtr = materials.Get(material);
+		if (!materialPtr || !*materialPtr || !IsValidPose(desc.LocalPose))
+		{
+			return {};
+		}
+
+		ShapeRecord record{};
+		record.Desc = desc;
+		record.Material = material;
+
+		// Validate the description now rather than at first use, so an
+		// unbuildable shape fails where the caller asked for it.
+		physx::PxShape* probe = CreateInstancedShape(record);
+		if (!probe)
+		{
+			return {};
+		}
+		probe->release();
+
+		return shapes.Insert(record);
 	}
 
 	void PhysXWorldBackend::DestroyShape(ShapeHandle shape)
 	{
-		physx::PxShape* pxShape = nullptr;
-		if (shapes.Remove(shape, pxShape) && pxShape)
-		{
-			shapeHandles.erase(pxShape);
-			pxShape->release();
-		}
+		ShapeRecord removed{};
+		shapes.Remove(shape, removed);
 	}
 
 	bool PhysXWorldBackend::IsShapeValid(ShapeHandle shape) const
@@ -485,13 +515,16 @@ namespace Engine
 
 	BodyHandle PhysXWorldBackend::CreateBody(const BodyDesc& desc)
 	{
-		if (!scene || !IsValidPose(desc.Pose))
+		// PhysX forbids touching the scene between simulate() and fetchResults().
+		// Reject the call rather than letting PhysX raise its own error, so both
+		// backends report the same in-flight write contract.
+		if (!scene || simulating || !IsValidPose(desc.Pose))
 		{
 			return {};
 		}
 
-		physx::PxShape* const* shapePtr = shapes.Get(desc.Shape);
-		if (!shapePtr || !*shapePtr)
+		const ShapeRecord* shapeRecord = shapes.Get(desc.Shape);
+		if (!shapeRecord)
 		{
 			return {};
 		}
@@ -542,17 +575,33 @@ namespace Engine
 			return {};
 		}
 
-		physx::PxFilterData filterData;
-		filterData.word0 = desc.Collision.Layer;
-		filterData.word1 = desc.Collision.Mask;
-		(*shapePtr)->setSimulationFilterData(filterData);
-		(*shapePtr)->setQueryFilterData(filterData);
-		if (!actor->attachShape(**shapePtr))
+		// Instantiate this body's own shape. Filter data is per-body state, so it
+		// must never be written onto a template that other bodies also use.
+		physx::PxShape* instancedShape = CreateInstancedShape(*shapeRecord);
+		if (!instancedShape)
 		{
-			std::cerr << "PhysXWorldBackend::CreateBody | attachShape failed\n";
 			ReleaseActor(actor);
 			return {};
 		}
+
+		physx::PxFilterData filterData;
+		filterData.word0 = desc.Collision.Layer;
+		filterData.word1 = desc.Collision.Mask;
+		instancedShape->setSimulationFilterData(filterData);
+		instancedShape->setQueryFilterData(filterData);
+
+		if (!actor->attachShape(*instancedShape))
+		{
+			std::cerr << "PhysXWorldBackend::CreateBody | attachShape failed\n";
+			instancedShape->release();
+			ReleaseActor(actor);
+			return {};
+		}
+
+		// The actor now holds the only remaining reference, so dropping the
+		// creation reference ties the shape's lifetime to its body.
+		instancedShape->release();
+		shapeHandles.emplace(instancedShape, desc.Shape);
 
 		if (desc.Motion == MotionType::Dynamic && dynamic)
 		{
@@ -588,7 +637,7 @@ namespace Engine
 			}
 		}
 
-		const BodyHandle handle = bodies.Insert(BodyRecord{ actor, desc.Shape, desc.UserData });
+		const BodyHandle handle = bodies.Insert(BodyRecord{ actor, desc.Shape, instancedShape, desc.UserData });
 		actorHandles.emplace(actor, handle);
 		return handle;
 	}
@@ -619,7 +668,7 @@ namespace Engine
 
 	bool PhysXWorldBackend::SetBodyPose(BodyHandle body, const PhysicsPose& pose, bool autowake)
 	{
-		if (!IsValidPose(pose))
+		if (simulating || !IsValidPose(pose))
 		{
 			return false;
 		}
@@ -636,7 +685,7 @@ namespace Engine
 
 	bool PhysXWorldBackend::SetKinematicTarget(BodyHandle body, const PhysicsPose& pose)
 	{
-		if (!IsValidPose(pose))
+		if (simulating || !IsValidPose(pose))
 		{
 			return false;
 		}
@@ -666,7 +715,7 @@ namespace Engine
 
 	bool PhysXWorldBackend::AddForce(BodyHandle body, const glm::vec3& force, ForceMode mode, bool autowake)
 	{
-		if (!IsFiniteVec3(force))
+		if (simulating || !IsFiniteVec3(force))
 		{
 			return false;
 		}
@@ -684,7 +733,7 @@ namespace Engine
 
 	bool PhysXWorldBackend::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake)
 	{
-		if (!IsFiniteVec3(velocity))
+		if (simulating || !IsFiniteVec3(velocity))
 		{
 			return false;
 		}
@@ -702,7 +751,7 @@ namespace Engine
 
 	bool PhysXWorldBackend::SetAngularVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake)
 	{
-		if (!IsFiniteVec3(velocity))
+		if (simulating || !IsFiniteVec3(velocity))
 		{
 			return false;
 		}
@@ -953,15 +1002,36 @@ namespace Engine
 			return 0;
 		}
 
-		const std::size_t count = std::min<std::size_t>(buffer.getNbAnyHits(), hits.size());
-		for (std::size_t i = 0; i < count; ++i)
+		// One generic OverlapHit identifies a (body, shape) pair. Collapse touches
+		// that resolve to the same pair so both backends report the same hit set.
+		std::unordered_set<std::uint64_t> emittedPairs;
+		const physx::PxU32 touchCount = buffer.getNbAnyHits();
+		std::size_t outputCount = 0;
+		for (physx::PxU32 i = 0; i < touchCount && outputCount < hits.size(); ++i)
 		{
-			const physx::PxOverlapHit& pxHit = buffer.getAnyHit(static_cast<physx::PxU32>(i));
-			hits[i].Body = ResolveBody(pxHit.actor);
-			hits[i].Shape = ResolveShape(pxHit.shape);
-			hits[i].UserData = ResolveUserData(hits[i].Body);
+			const physx::PxOverlapHit& pxHit = buffer.getAnyHit(i);
+			const BodyHandle body = ResolveBody(pxHit.actor);
+			if (!body)
+			{
+				continue;
+			}
+
+			const ShapeHandle shape = ResolveShape(pxHit.shape);
+			const std::uint64_t pairKey = (static_cast<std::uint64_t>(body.Index) << 48u)
+				^ (static_cast<std::uint64_t>(body.Generation) << 32u)
+				^ (static_cast<std::uint64_t>(shape.Index) << 16u)
+				^ static_cast<std::uint64_t>(shape.Generation);
+			if (!emittedPairs.insert(pairKey).second)
+			{
+				continue;
+			}
+
+			OverlapHit& output = hits[outputCount++];
+			output.Body = body;
+			output.Shape = shape;
+			output.UserData = ResolveUserData(body);
 		}
-		return count;
+		return outputCount;
 	}
 
 	physx::PxVec3 PhysXWorldBackend::ToPx(const glm::vec3& value)
@@ -1055,6 +1125,19 @@ namespace Engine
 		if (!actor)
 		{
 			return;
+		}
+
+		// Each body owns its shape instances, so their handle mappings die with
+		// the actor rather than lingering for the lifetime of the world.
+		const physx::PxU32 shapeCount = actor->getNbShapes();
+		if (shapeCount > 0)
+		{
+			std::vector<physx::PxShape*> attachedShapes(shapeCount, nullptr);
+			const physx::PxU32 written = actor->getShapes(attachedShapes.data(), shapeCount);
+			for (physx::PxU32 i = 0; i < written; ++i)
+			{
+				shapeHandles.erase(attachedShapes[i]);
+			}
 		}
 
 		if (physx::PxScene* owner = actor->getScene())

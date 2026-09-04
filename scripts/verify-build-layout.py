@@ -611,18 +611,30 @@ def check_preserved_build_contract(failures: list[str]) -> None:
                 failures,
             )
 
-    # The PhysX generator is a batch file. Running an absolute quoted path
-    # through cmd.exe caused CMake/MSBuild to preserve the escape quotes and
-    # Windows attempted to execute a command literally named \"C:/...bat\".
-    # Invoke the local batch name from SWIM_PHYSX_ROOT instead.
+    # The PhysX generator is a batch file, and two invocation shapes are known
+    # to be broken. Embedding an escaped quoted path inside the single cmd.exe
+    # argument makes CMake preserve the escapes, so Windows tries to run a
+    # command literally named \"C:/...bat\". Passing the bare batch name and
+    # relying on the working directory breaks wherever
+    # NoDefaultCurrentDirectoryInExePath is set (common in CI/sandboxes), which
+    # surfaces as "'generate_projects.bat' is not recognized". The supported
+    # form passes the native absolute path as its own argument.
     if '\\"${SWIM_PHYSX_GENERATOR}\\"' in physx_build_text:
         fail("PhysX generator still uses the broken escaped absolute-path cmd invocation", failures)
+
+    if 'cmd.exe /d /c "call generate_projects.bat' in physx_build_text:
+        fail(
+            "PhysX generator resolves the batch file from the working directory; that fails when "
+            "NoDefaultCurrentDirectoryInExePath is set. Pass the absolute native path instead.",
+            failures,
+        )
 
     if 'mklink /J' in physx_build_text:
         fail("PhysX reverted to a source-cache junction; use the isolated short Git worktree so builds cannot dirty CPM source", failures)
 
     required_physx_command_fragments = (
-        'COMMAND cmd.exe /d /c "call generate_projects.bat ${SWIM_PHYSX_PRESET}"',
+        'file(TO_NATIVE_PATH "${SWIM_PHYSX_GENERATOR}" SWIM_PHYSX_GENERATOR_NATIVE)',
+        'COMMAND cmd.exe /d /c "${SWIM_PHYSX_GENERATOR_NATIVE}" "${SWIM_PHYSX_PRESET}"',
         'WORKING_DIRECTORY "${SWIM_PHYSX_ROOT}"',
     )
     for fragment in required_physx_command_fragments:
@@ -2767,7 +2779,9 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
 def check_phase6_physics_architecture(failures: list[str]) -> None:
     physics_root = ROOT / "Source" / "Engine" / "Systems" / "Physics"
-    physx_root = physics_root / "Backends" / "PhysX"
+    backends_root = physics_root / "Backends"
+    physx_root = backends_root / "PhysX"
+    jolt_root = backends_root / "Jolt"
     scene_bridge_root = ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Physics"
     test_root = ROOT / "Source" / "Tests"
 
@@ -2787,10 +2801,17 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
         physx_root / "PhysXBackend.cpp",
         physx_root / "PhysXWorldBackend.h",
         physx_root / "PhysXWorldBackend.cpp",
+        jolt_root / "JoltBackendFactory.h",
+        jolt_root / "JoltBackendFactory.cpp",
+        jolt_root / "JoltBackend.h",
+        jolt_root / "JoltBackend.cpp",
+        jolt_root / "JoltWorldBackend.h",
+        jolt_root / "JoltWorldBackend.cpp",
         scene_bridge_root / "ScenePhysicsBridge.h",
         scene_bridge_root / "ScenePhysicsBridge.cpp",
         test_root / "Suites" / "Physics" / "Generic" / "PhysicsHandleTests.cpp",
         test_root / "Suites" / "Physics" / "PhysX" / "PhysXBackendTests.cpp",
+        test_root / "Suites" / "Physics" / "Jolt" / "JoltBackendTests.cpp",
         test_root / "Fixtures" / "PhysicsBackendContract.h",
         test_root / "HeaderBoundary" / "PhysicsPublicHeaders.cpp",
         test_root / "HeaderBoundary" / "PhysicsBackendContractCompile.cpp",
@@ -2804,7 +2825,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
         for path in physics_root.rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
-            if physx_root in path.parents:
+            if backends_root in path.parents:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for fragment in generic_forbidden:
@@ -2874,29 +2895,67 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
     physx_world_path = physx_root / "PhysXWorldBackend.cpp"
     if physx_world_path.is_file():
         physx_text = physx_world_path.read_text(encoding="utf-8", errors="ignore")
+        for stale in ("(*shapePtr)->setSimulationFilterData", "(*shapePtr)->setQueryFilterData"):
+            if stale in physx_text:
+                fail(
+                    "PhysX writes per-body collision filter data onto the shared ShapeHandle template; "
+                    "bodies built from one handle would re-filter each other",
+                    failures,
+                )
         for fragment in (
             "PxSimulationEventCallback", "SwimSimulationFilterShader", "LayerQueryFilter",
             "PhysXWorldBackend::Raycast", "PhysXWorldBackend::Sweep", "PhysXWorldBackend::Overlap",
             "CollisionEvent", "TriggerEvent", "pendingDestroy",
-            "if (!actor->attachShape(**shapePtr))", "ReleaseActor(actor)",
+            "if (!actor->attachShape(*instancedShape))", "ReleaseActor(actor)",
+            # Collision filtering is per-body state, so it must be written onto a
+            # body-owned shape instance and never onto the shared ShapeHandle template.
+            "CreateInstancedShape", "instancedShape->setSimulationFilterData(filterData)",
             "ResolveBody(const physx::PxActor* actor)", "actor->is<physx::PxRigidActor>()",
         ):
             if fragment not in physx_text:
                 fail(f"PhysX backend parity implementation is missing: {fragment}", failures)
+
+    jolt_world_path = jolt_root / "JoltWorldBackend.cpp"
+    if jolt_world_path.is_file():
+        jolt_text = jolt_world_path.read_text(encoding="utf-8", errors="ignore")
+        jolt_header_path = jolt_root / "JoltWorldBackend.h"
+        if jolt_header_path.is_file():
+            jolt_text += jolt_header_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "JPH::PhysicsSystem", "JPH::ContactListener", "QueryBodyFilter", "QueryObjectLayerFilter",
+            "JoltWorldBackend::Raycast", "JoltWorldBackend::Sweep", "JoltWorldBackend::Overlap",
+            "CollisionEvent", "TriggerEvent", "pendingDestroy",
+            "SetKinematicTarget", "MoveKinematic", "registeredLayerLookup", "LayersMatch",
+            "EPhysicsUpdateError", "GetPtr()", "centerOfMassTransform", "PreTranslated(nativeShape->GetCenterOfMass())",
+            "ShapeType::ConvexMesh", "ShapeType::TriangleMesh",
+        ):
+            if fragment not in jolt_text:
+                fail(f"Jolt backend parity implementation is missing: {fragment}", failures)
+
+    for path in jolt_root.glob("*") if jolt_root.exists() else ():
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ("physx::", "PxPhysicsAPI", "#include <Px", "#include \"Px"):
+            if forbidden in text:
+                fail(f"Jolt backend leaked PhysX implementation dependency: {path.relative_to(ROOT)}: {forbidden}", failures)
 
     contract_path = test_root / "Fixtures" / "PhysicsBackendContract.h"
     if contract_path.is_file():
         contract_text = contract_path.read_text(encoding="utf-8", errors="ignore")
         # The word "PhysX" may legitimately appear in the usage comment, so the
         # backend-neutrality check targets implementation identifiers only.
-        for forbidden in ("physx::", "PxPhysicsAPI", "JPH::", "Jolt/", "CreatePhysXBackend"):
+        for forbidden in ("physx::", "PxPhysicsAPI", "JPH::", "Jolt/", "CreatePhysXBackend", "CreateJoltBackend"):
             if forbidden in contract_text:
                 fail(f"shared physics backend contract test is backend-specific: {forbidden}", failures)
         for fragment in (
             "RunPhysicsWorldLifecycleContract", "RunPhysicsSceneQueryContract",
             "RunPhysicsSimulationContract", "RunPhysicsTriggerContract",
+            "RunPhysicsSharedShapeContract", "RunPhysicsInFlightWriteContract",
+            "RunPhysicsContactEventContract",
             "Raycast", "Sweep", "Overlap", "CollisionEvent",
             "TriggerEvent", "SetKinematicTarget", "AddForce", "IsBodyValid",
+            "offsetOverlapShape.LocalPose.Position", "foundOffsetDynamicOverlap",
             "triggerShape.IsValid()", "triggerBody.IsValid()", "triggerMoverShape.IsValid()",
             "triggerMover.IsValid()", "deferredShape.IsValid()", "staleBody.IsValid()",
         ):
@@ -2912,6 +2971,17 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             if forbidden in contract_text:
                 fail(f"shared physics backend contract relies on implicit conversion of an explicit handle bool: {forbidden}", failures)
 
+    jolt_test_path = test_root / "Suites" / "Physics" / "Jolt" / "JoltBackendTests.cpp"
+    if jolt_test_path.is_file():
+        jolt_test_text = jolt_test_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "MultipleBackendInstancesShareTheRuntime",
+            "second->Shutdown()",
+            "survivingWorld = first->CreateWorld",
+        ):
+            if fragment not in jolt_test_text:
+                fail(f"Jolt backend lifetime parity test is missing: {fragment}", failures)
+
     cmake_path = ROOT / "CMakeLists.txt"
     if cmake_path.is_file():
         cmake_text = cmake_path.read_text(encoding="utf-8", errors="ignore")
@@ -2919,6 +2989,9 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             "add_library(SwimPhysics STATIC", "add_library(Swim::Physics ALIAS SwimPhysics)",
             "add_library(SwimPhysicsPhysX STATIC", "add_library(Swim::PhysicsPhysX ALIAS SwimPhysicsPhysX)",
             "target_link_libraries(SwimPhysicsPhysX PUBLIC Swim::Physics PRIVATE Swim::PhysX)",
+            "add_library(SwimPhysicsJolt STATIC", "add_library(Swim::PhysicsJolt ALIAS SwimPhysicsJolt)",
+            "target_link_libraries(SwimPhysicsJolt PUBLIC Swim::Physics PRIVATE Swim::Jolt)",
+            "include(cmake/JoltDependencies.cmake)",
             'list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")',
             'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")',
             "include(cmake/MathDependencies.cmake)",
@@ -2941,11 +3014,13 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             fail("legacy runtime has no explicit target_link_libraries dependency declaration", failures)
         else:
             link_text = "\n".join(engine_links)
-            for fragment in ("Swim::Physics", "Swim::PhysicsPhysX"):
+            for fragment in ("Swim::Physics", "Swim::PhysicsPhysX", "Swim::PhysicsJolt"):
                 if fragment not in link_text:
                     fail(f"legacy runtime is missing explicit physics target dependency: {fragment}", failures)
             if "Swim::PhysX" in link_text:
                 fail("legacy runtime bypasses Swim::PhysicsPhysX and links raw PhysX", failures)
+            if "Swim::Jolt" in link_text:
+                fail("legacy runtime bypasses Swim::PhysicsJolt and links raw Jolt", failures)
 
     cmake_path = ROOT / "CMakeLists.txt"
     if cmake_path.is_file():
@@ -2969,6 +3044,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             "Source/Tests/HeaderBoundary/PhysicsBackendContractCompile.cpp",
             "swim_add_header_boundary(SwimPhysicsPublicHeaders",
             "Physics/PhysX",
+            "Physics/Jolt",
         ):
             if fragment not in tests_cmake_text:
                 fail(f"Phase 6 physics test boundary is missing from cmake/Tests.cmake: {fragment}", failures)
@@ -2979,6 +3055,21 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
         for fragment in ("GITHUB_REPOSITORY g-truc/glm", "GIT_TAG 1.0.0", "add_library(glm::glm ALIAS SwimGlm)"):
             if fragment not in math_text:
                 fail(f"cross-platform GLM foundation dependency is missing: {fragment}", failures)
+
+    jolt_dependencies_path = ROOT / "cmake" / "JoltDependencies.cmake"
+    if not jolt_dependencies_path.is_file():
+        fail("Jolt dependency boundary is missing: cmake/JoltDependencies.cmake", failures)
+    else:
+        jolt_dependency_text = jolt_dependencies_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in (
+            "GITHUB_REPOSITORY jrouwe/JoltPhysics", "GIT_TAG v5.6.0",
+            "SOURCE_SUBDIR Build", '"JPH_BUILD_SHARED_LIBS OFF"', '"DOUBLE_PRECISION OFF"',
+            '"JPH_USE_DX12 OFF"', '"JPH_USE_VK OFF"', '"JPH_USE_MTL OFF"',
+            '"JPH_USE_CPU_COMPUTE OFF"', "TARGET Jolt::Jolt",
+            "target_link_libraries(SwimJolt INTERFACE Jolt::Jolt)", "add_library(Swim::Jolt ALIAS SwimJolt)",
+        ):
+            if fragment not in jolt_dependency_text:
+                fail(f"Jolt dependency contract is missing: {fragment}", failures)
 
     dependencies_path = ROOT / "cmake" / "Dependencies.cmake"
     if dependencies_path.is_file():
@@ -2991,6 +3082,10 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
         engine_text = engine_source_path.read_text(encoding="utf-8", errors="ignore")
         if "CreatePhysXBackend()" not in engine_text:
             fail("runtime composition no longer selects the PhysX implementation through its backend factory", failures)
+        if "CreateJoltBackend()" not in engine_text:
+            fail("runtime composition does not select Jolt through its backend factory", failures)
+        if "case PhysicsBackend::Jolt:" not in engine_text:
+            fail("runtime physics backend switch does not include PhysicsBackend::Jolt", failures)
 
     windows_helper_path = ROOT / "scripts" / "windows-build-common.ps1"
     if windows_helper_path.is_file():

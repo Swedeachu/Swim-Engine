@@ -170,6 +170,13 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysicsPhysX)
 	endif()
 
+	if(TARGET SwimPhysicsJolt)
+		swim_collect_test_suite_sources(SWIM_JOLT_SUITES Physics/Jolt)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_JOLT_SUITES})
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysicsJolt)
+	endif()
+
 	list(REMOVE_DUPLICATES SWIM_TEST_FIXTURE_SOURCES)
 
 	add_executable(SwimTests EXCLUDE_FROM_ALL

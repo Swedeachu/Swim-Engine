@@ -9,7 +9,13 @@
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
 #include "Engine/Systems/Renderer/Core/Font/FontPool.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
+#if SWIM_ENABLE_PHYSX_BACKEND
 #include "Engine/Systems/Physics/Backends/PhysX/PhysXBackendFactory.h"
+#endif
+
+#if SWIM_ENABLE_JOLT_BACKEND
+#include "Engine/Systems/Physics/Backends/Jolt/JoltBackendFactory.h"
+#endif
 
 #if SWIM_ENABLE_DEV_ASSET_AUTOCOOK
 #include "Tools/AssetCompiler/DevelopmentAssetPipeline.h"
@@ -120,10 +126,29 @@ namespace Engine
 			return false;
 		}
 
-		if (physicsBackend != PhysicsBackend::PhysX)
+		bool physicsBackendAvailable = false;
+		switch (physicsBackend)
+		{
+			case PhysicsBackend::PhysX:
+#if SWIM_ENABLE_PHYSX_BACKEND
+				physicsBackendAvailable = true;
+#endif
+				break;
+
+			case PhysicsBackend::Jolt:
+#if SWIM_ENABLE_JOLT_BACKEND
+				physicsBackendAvailable = true;
+#endif
+				break;
+
+			default:
+				break;
+		}
+
+		if (!physicsBackendAvailable)
 		{
 			std::cerr << "[Engine] Physics backend '" << ToString(physicsBackend)
-				<< "' is configured but does not have an implementation yet.\n";
+				<< "' is not compiled into this build.\n";
 			return false;
 		}
 
@@ -325,8 +350,21 @@ namespace Engine
 		switch (physicsBackend)
 		{
 			case PhysicsBackend::PhysX:
+#if SWIM_ENABLE_PHYSX_BACKEND
 				physicsSystem = std::make_unique<PhysicsSystem>(CreatePhysXBackend());
 				break;
+#else
+				return -1;
+#endif
+
+			case PhysicsBackend::Jolt:
+#if SWIM_ENABLE_JOLT_BACKEND
+				physicsSystem = std::make_unique<PhysicsSystem>(CreateJoltBackend());
+				break;
+#else
+				return -1;
+#endif
+
 			default:
 				return -1;
 		}

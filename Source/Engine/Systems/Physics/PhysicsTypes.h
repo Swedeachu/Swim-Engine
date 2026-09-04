@@ -81,6 +81,10 @@ namespace Engine
 
 	struct PhysicsMaterialDesc
 	{
+		// Backends that model a single Coulomb friction coefficient (Jolt) use
+		// DynamicFriction and ignore StaticFriction. Backends that separate the
+		// two (PhysX) honour both. Author materials against DynamicFriction when
+		// cross-backend parity matters.
 		float StaticFriction = 0.5f;
 		float DynamicFriction = 0.5f;
 		float Restitution = 0.1f;
@@ -108,6 +112,12 @@ namespace Engine
 	{
 		glm::vec3 Gravity{ 0.0f, -9.81f, 0.0f };
 		bool EnableContinuousCollisionDetection = true;
+
+		// Per-step CollisionEventType::Persisted reporting costs one event per
+		// touching pair per step, plus contact-point extraction, which dominates
+		// event cost in a densely stacked scene. Started/Ended are always
+		// reported; opt in here only when gameplay needs continuous contact.
+		bool EnablePersistedCollisionEvents = false;
 	};
 
 	struct RaycastHit

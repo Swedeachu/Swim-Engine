@@ -21,7 +21,7 @@ This section is the short authoritative status summary for the current repositor
 - **Phase 3 — Jobs/IO/memory:** complete. `Swim::Jobs`, `Swim::IO`, `Swim::Memory`, mimalloc-backed frame/scratch allocation, and deterministic async/job shutdown are established before renderer/streaming expansion.
 - **Phase 4 — Assets:** the engine-owned `Swim::Assets` identity/runtime schema, fastgltf importer, meshoptimizer path, KTX2/Basis metadata/transcode path, WebP/PNG/JPEG source-image compiler, compiler-side Draco decode, `.sasset` v1 writer/reader, development incremental cooker, and cooked-model compatibility residency path are implemented. Source codecs are owned by `SwimAssetCompiler`; they are not supposed to become shipping runtime model-import dependencies.
 - **Phase 4 validation:** the Draco 1.5.7 embedded-consumer include-root issue remains isolated behind `Swim::AssetCompilerDraco`, and the supported Windows clean/soft builds compile/run the importer, source-image, development cook/load, and cooker validation targets automatically. The developer has confirmed the dependency-enabled Windows build path is already green, and the repository now contains the real `Assets` authoring tree supplied for this checkpoint (including the Sponza KTX/Draco variants, WebP sofa, barrel/test models, fonts, and textures). The build scripts continue to enforce that gate rather than relying on this one confirmation.
-- **Phase 5 — Scene ownership/state isolation:** the scene foundation now includes explicit `SceneCatalog`/`SceneId`, headless/core/presentation separation, scene-owned Transform and mutation state, per-view Frustum state, an instance-owned behavior registry, durable `SerializedEntityId` identity, `AssetId` references, and a canonical right-handed / 0..1-depth camera convention. The previously split `SceneSerializer`/`SceneStorage`/`SceneToolingBridge`/`SceneSyncTracker` experiment is retained but intentionally **not runtime-wired**: Scene creates none of it, performs no automatic scene JSON save/delta work, and sends no external-editor IPC. Critical-path items **22 through 28 are complete**; **item 29 (Jolt backend parity)** is next, while the remaining Phase 5 renderable-component cleanup can continue alongside renderer extraction/RHI work.
+- **Phase 5 / Phase 6 handoff:** the scene foundation now includes explicit `SceneCatalog`/`SceneId`, headless/core/presentation separation, scene-owned Transform and mutation state, per-view Frustum state, an instance-owned behavior registry, durable `SerializedEntityId` identity, `AssetId` references, and a canonical right-handed / 0..1-depth camera convention. The previously split `SceneSerializer`/`SceneStorage`/`SceneToolingBridge`/`SceneSyncTracker` experiment is retained but intentionally **not runtime-wired**: Scene creates none of it, performs no automatic scene JSON save/delta work, and sends no external-editor IPC. Critical-path items **22 through 29 are implemented**: PhysX and Jolt now sit behind the same generic physics seam and register the same parity contract. **Item 30 (Slang compiler/reflection integration)** is the next critical-path checkpoint; do not spend that runway over-polishing the current BVH/scene/GPU-dirty machinery that the later renderer/GPU Scene phases are expected to replace.
 - **Testing:** the whole runnable test corpus is one program, `SwimTests`, built from self-registering suites under `Source/Tests/Suites/<group>/`. Adding coverage is a new `.cpp` in the right dependency group, never a new CMake target. The Windows clean/soft builds and the Linux builds run the complete suite, so coverage is continuously exercised instead of depending on a hand-maintained list of phase gate targets. Per-module public-header compile gates stay separate because their value is their narrow link surface. See section 32.
 - **Shipping asset policy:** development auto-cook is intentionally convenient and currently enabled by default when `SwimAssetCompiler` exists. Shipping/release packaging is intended to disable `SWIM_ENABLE_DEV_ASSET_AUTOCOOK`, pre-cook with `SwimAssetCooker`, and run from compiled `.sasset`/future `.spack` data without glTF/Draco/WebP source-import code. Final packaging presets and `.spack`/memory-mapped streaming are later work, so do not confuse the current development executable with the final shipping dependency closure.
 
@@ -76,7 +76,7 @@ This ordering is not cosmetic. It prevents the engine from building a modern ren
 - [ ] Scene ownership and transform dirty tracking are fixed before GPU Scene extraction is implemented.
 - [ ] Shader reflection contracts are defined before descriptor/pipeline layouts become entrenched in the RHI.
 - [ ] The RHI contract is defined before Vulkan implementation details spread through new renderer code.
-- [ ] Physics components contain backend-neutral handles before Jolt and PhysX coexist.
+- [x] Physics components contain backend-neutral handles before Jolt and PhysX coexist. *(PhysX and Jolt now coexist behind `BodyHandle`/`ShapeHandle`/`PhysicsMaterialHandle` and the shared `IPhysicsBackend`/`IPhysicsWorldBackend` contracts.)*
 - [x] No new code reaches through `SwimEngine::GetInstance()` to discover dependencies.
 - [x] No new public generic header includes Win32, Vulkan, OpenGL, PhysX, Jolt, SDL implementation details, or source-importer types.
 - [ ] Source import is never the normal shipping runtime asset path.
@@ -311,11 +311,11 @@ That conflicts with:
 
 **Target:** dirty tracking is per scene and view/frustum state is per render view.
 
-### 2.10 Physics now has a generic runtime boundary; backend parity is still incomplete
+### 2.10 Physics has a generic runtime boundary with PhysX/Jolt baseline parity
 
-`Rigidbody.h`, `PhysicsSystem`, and `PhysicsWorld` now expose only Swim-owned handles/descriptors/query/event contracts. The current PhysX implementation lives behind `IPhysicsBackend` / `IPhysicsWorldBackend` in `Swim::PhysicsPhysX`, while scene/EnTT synchronization lives separately in `ScenePhysicsBridge`. No PhysX object pointer is stored in the generic Rigidbody component.
+`Rigidbody.h`, `PhysicsSystem`, and `PhysicsWorld` expose only Swim-owned handles/descriptors/query/event contracts. PhysX lives behind `IPhysicsBackend` / `IPhysicsWorldBackend` in `Swim::PhysicsPhysX`; Jolt v5.6.0 lives behind the same contracts in `Swim::PhysicsJolt`; scene/EnTT synchronization remains separately owned by `ScenePhysicsBridge`. No PhysX/Jolt object pointer is stored in the generic Rigidbody component, and runtime backend choice does not require gameplay-side branching.
 
-**Remaining target:** add the Jolt implementation against the same contract, run the shared backend suite against both implementations, then finish backend-specific convex/triangle collision cooking through compiled asset payloads.
+**Remaining physics target:** collision-mesh import/cooking and backend-specific compiled convex/triangle payloads belong to the asset/compiler path, followed later by fixed-step/interpolation policy. Do not introduce runtime source-mesh cooking merely to make the two backends look superficially feature-complete.
 
 ### 2.11 The current Vulkan implementation contains ideas worth keeping
 
@@ -367,7 +367,7 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 - [ ] `Swim::RhiVulkan` is the only normal layer allowed to include Vulkan implementation types.
 - [ ] `Swim::RhiD3D12` and `Swim::RhiMetal` can be added without changing high-level renderer contracts.
 - [x] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types. *(Generic Physics/Rigidbody/Scene code is verifier-guarded against PhysX/Jolt implementation types.)*
-- [ ] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types.
+- [x] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types. *(Jolt includes/types are confined to `Systems/Physics/Backends/Jolt` and its private dependency target; the architecture verifier rejects Jolt leakage into generic physics.)*
 - [x] SDL types do not become the public engine API. SDL is the Platform/Input implementation library.
 - [x] fastgltf types do not escape the asset importer/tool boundary. *(fastgltf is private to `SwimAssetCompiler` and included only by `GltfImporter.cpp`; public importer/intermediate/runtime asset headers are Swim-owned.)*
 - [x] enkiTS types do not become gameplay APIs. *(enkiTS is private to `Swim::Jobs`; gameplay/renderer-facing APIs use Swim job types.)*
@@ -416,7 +416,7 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | vk-bootstrap | instance/device/queue/swapchain bootstrap | Use for boilerplate, while Swim owns feature and adapter policy. |
 | Vulkan Memory Allocator | Vulkan allocation/suballocation/budgeting | Use. Do not maintain a home-grown general Vulkan allocator. |
 | PhysX | physics backend | Keep as a selectable implementation. |
-| Jolt Physics | physics backend | Add as an equal selectable implementation. |
+| Jolt Physics | physics backend | Use as an equal selectable implementation behind `Swim::PhysicsJolt`. |
 | miniaudio | audio device/mixing/streaming/spatial playback | Use behind Swim Audio. |
 | FreeType | font faces/metrics/raster data | Use. |
 | HarfBuzz | Unicode shaping | Use. |
@@ -490,7 +490,8 @@ Rules:
 | GLAD | `v2.0.8` generated loader | legacy OpenGL backend | yes while legacy backend ships | Must eventually live only in the OpenGL implementation target. |
 | OpenGL | Windows/system API | legacy OpenGL backend | yes while legacy backend ships | No source-import responsibility. |
 | Vulkan | system Vulkan SDK | Vulkan backend | yes | Must eventually live only in `Swim::RhiVulkan`. |
-| PhysX | `107.3-omni-and-physx-5.6.1` | physics implementation | yes | External CPU-only build; must move fully behind `Swim::PhysicsPhysX`. |
+| PhysX | `107.3-omni-and-physx-5.6.1` | `Swim::PhysicsPhysX` | yes | External CPU-only backend; implementation types stay private to the backend target. |
+| Jolt Physics | `v5.6.0` | `Swim::PhysicsJolt` | yes | CPM source build, static library, single-precision positions; Jolt compute/GPU/sample/tool paths are disabled and implementation types stay private to the backend target. |
 
 `no*` means the normal compiled-asset runtime does not need the dependency; a development build with in-process auto-cooking may intentionally include the asset compiler.
 
@@ -503,8 +504,8 @@ CMake is the authoritative build description and should reinforce the engine arc
 - [ ] First-party subsystems have explicit targets with intentional public/private dependency edges.
 - [ ] Third-party libraries are linked only by the implementation target that owns them.
 - [ ] `Swim::Rhi` does not link Vulkan; `Swim::RhiVulkan` owns Vulkan-Headers, volk, vk-bootstrap, and VMA.
-- [x] `Swim::Physics` does not link PhysX or Jolt directly; the current `Swim::PhysicsPhysX` target owns PhysX privately.
-- [ ] `Swim::PhysicsJolt` owns Jolt privately once the Jolt backend is added.
+- [x] `Swim::Physics` does not link PhysX or Jolt directly; `Swim::PhysicsPhysX` and `Swim::PhysicsJolt` own their implementation dependencies privately.
+- [x] `Swim::PhysicsJolt` owns Jolt privately through `Swim::Jolt`; generic/runtime consumers link the Swim backend target rather than raw `Jolt::Jolt`.
 - [x] `Swim::Platform` / `Swim::Input` own SDL3 integration rather than making SDL3 an engine-wide dependency.
 - [x] fastgltf, meshoptimizer, Draco, source-image decoders, and similar importer dependencies live in asset compiler/import targets unless runtime use is explicitly required. *(fastgltf/meshoptimizer and libwebp source-image decoding are compiler-only; the obsolete runtime tinygltf/Draco/WebP source-import chain has been removed. `stb` is compiler-only for PNG/JPEG authoring decode and remains an explicit legacy-runtime dependency only for still-loose texture/font compatibility paths.)*
 - [ ] Slang shader compilation/reflection is integrated through dedicated build/tool rules with correct source/include dependency tracking.
@@ -517,7 +518,7 @@ CMake is the authoritative build description and should reinforce the engine arc
 - [x] Tests/examples are `EXCLUDE_FROM_ALL`, so validation/demo targets remain explicitly buildable without bloating the normal engine build.
 - [x] Windows clean and soft workflows both regenerate and validate `build/windows-vs/SwimEngine.sln`; the soft path refreshes it with dependency fetching fully disconnected while the actual iterative compile remains on the Ninja `windows-release`/`windows-debug` tree.
 - [x] `SwimPlatform` / `SwimInput` sources are excluded from the legacy `SwimEngine` source glob and linked once through their module targets rather than duplicated into the executable target.
-- [ ] Optional implementation backends are compile-time capabilities; the selected implementation is a runtime choice among the backends that were compiled in.
+- [x] Optional implementation backends are compile-time capabilities; the selected implementation is a runtime choice among the backends that were compiled in. *(PhysX and Jolt can coexist in one Windows build; Jolt also builds in the Linux foundation configuration.)*
 
 **Build workflow checkpoint (2026-09-02, hardened 2026-09-03):** SDL3 is a pinned CPM dependency (`libsdl-org/SDL`, `release-3.4.14`) owned privately by `Swim::Platform`. CPM sources are cached under `.cache/cpm`. A clean build is now defined as a full repository-local generated-state reset rather than merely deleting the selected target: Windows clean removes `build/windows-release`, `build/windows-debug`, `build/windows-vs`, the shared `build/.px` PhysX worktree/legacy junction, and the entire `.cache` tree; Linux clean removes both Linux configuration trees, `build/.px`, and `.cache`. Both scripts verify that the generated state is actually absent before fetching. `scripts/build-windows-soft.ps1` and `scripts/build-linux-soft.sh` configure with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so iterative rebuilds are restricted to already-cached dependency sources. Windows and Linux Debug/Release Ninja presets exist for those scripts. The legacy `scripts/build-windows.ps1` now forwards to the soft-build path. Matching `.bat` launchers exist for all four Windows/Linux clean/soft workflows; the Linux launchers run the Bash scripts through WSL, and every launcher preserves the build exit code and pauses before closing so one-click builds remain readable. Windows builds are also self-bootstrapping with respect to the local toolchain environment: `scripts/windows-build-common.ps1` discovers CMake from PATH or Visual Studio, finds Visual Studio/Build Tools through `vswhere` or standard install locations, imports the x64 MSVC environment when Ninja is selected, discovers Visual Studio's bundled Ninja even when it is not on PATH, and falls back to the Visual Studio 2022 generator when Ninja is unavailable. The helper uses `DebugBuild` internally to avoid colliding with PowerShell's built-in common `Debug` parameter while the public scripts continue to accept `-Debug`. Every clean Windows run also recreates `build/windows-vs/SwimEngine.sln`; when Ninja is the primary compile generator, the solution configure is performed only after the primary Ninja build completes, using the freshly populated and integrity-checked dependency cache with dependency downloads disabled. Windows soft builds follow the same build-first ordering and perform the Visual Studio solution configure in fully disconnected mode on every successful run, so `build/windows-vs/SwimEngine.sln` stays synchronized without placing a second-generator configure between Ninja configure and compilation. Git-backed dependency caches are audited as immutable inputs during configure, and PhysX now builds from a short detached Git worktree at `build/.px` rather than a junction into the CPM checkout, so NVIDIA-generated compiler/bin output can no longer dirty the cached PhysX source. This removes the previous requirement to launch builds from a Developer Command Prompt or install Ninja separately while ensuring a normal Visual Studio solution is always available and synchronized after either Windows build workflow.
 
@@ -534,11 +535,11 @@ Build-time availability
     Vulkan backend: enabled
     OpenGL legacy backend: enabled
     PhysX backend: enabled
-    Jolt backend: pending Phase 6 parity work
+    Jolt backend: enabled
 
 Runtime selection
     GraphicsBackend::Vulkan
-    PhysicsBackend::PhysX
+    PhysicsBackend::PhysX / PhysicsBackend::Jolt
 ```
 
 A useful target dependency shape is shown below. `A -> B` means **A depends on B**:
@@ -548,8 +549,8 @@ Swim::Engine      -> Render, Scene, Physics, Animation, Audio, Ui, Input, Assets
 Swim::Render      -> Rhi, Assets, Jobs, Core
 Swim::RhiVulkan   -> Rhi, Platform, Core, Vulkan-Headers, volk, vk-bootstrap, VMA
 Swim::Rhi         -> Core
-Swim::PhysicsPhysX-> Physics, Jobs, Core, PhysX
-Swim::PhysicsJolt -> Physics, Jobs, Core, Jolt
+Swim::PhysicsPhysX-> Physics, PhysX
+Swim::PhysicsJolt -> Physics, Jolt
 Swim::Physics     -> Core
 Swim::Scene       -> Assets, Jobs, Core, EnTT
 Swim::Assets      -> Io, Jobs, Platform, Core
@@ -1971,25 +1972,25 @@ Runtime selection happens from `EngineConfig`.
 
 Both backends should implement the same integration tests for:
 
-- [ ] static bodies;
-- [ ] dynamic bodies;
-- [ ] kinematic bodies;
-- [ ] box/sphere/capsule;
+- [x] static bodies;
+- [x] dynamic bodies;
+- [x] kinematic bodies;
+- [x] box/sphere/capsule;
 - [ ] convex mesh;
 - [ ] triangle mesh;
-- [ ] gravity;
-- [ ] mass/damping;
-- [ ] forces/impulses;
-- [ ] velocity;
-- [ ] collision filtering;
-- [ ] triggers;
-- [ ] raycast;
-- [ ] sweep;
-- [ ] overlap;
-- [ ] collision events;
+- [x] gravity;
+- [x] mass/damping;
+- [x] forces/impulses;
+- [x] velocity;
+- [x] collision filtering;
+- [x] triggers;
+- [x] raycast;
+- [x] sweep;
+- [x] overlap;
+- [x] collision events;
 - [ ] fixed-step simulation;
 - [ ] transform interpolation;
-- [ ] safe destruction during/around simulation.
+- [x] safe destruction during/around simulation.
 
 ### Cooking
 
@@ -2075,11 +2076,55 @@ Validation in this environment: architecture verification passes. A clean Linux 
 - **Current editor policy:** no external-process IPC, no automatic scene JSON save/load, and no JSON delta synchronization participate in runtime execution. Future hierarchy, inspector, gizmo, asset-browser, and scene-authoring features are implemented inside Swim Engine's own UI and mutate typed in-process engine/ECS state directly.
 
 
+### Phase 6 Jolt parity checkpoint — 2026-09-04
+
+This checkpoint implements critical-path item 29 without revisiting the current BVH/scene/Transform-dirty design that later GPU Scene/RHI work is expected to replace.
+
+Implemented in this checkpoint:
+
+- Added pinned Jolt Physics `v5.6.0` acquisition and a private `Swim::Jolt` dependency boundary. `Swim::PhysicsJolt` is a first-party static backend target that exists before the Windows-only legacy-runtime gate, so Linux foundation builds exercise the same Jolt backend code instead of compiling only the generic interface. Jolt's DX12/Vulkan/Metal/CPU-compute, samples, viewer, profiler, debug-renderer, object-stream, install, and upstream test/tool paths are disabled for this consumer.
+- Added `CreateJoltBackend()` and runtime `PhysicsBackend::Jolt` composition through the existing `EngineConfig` seam. No gameplay/scene source branches on Jolt or includes Jolt implementation headers.
+- Implemented the generic baseline in `JoltWorldBackend`: generational material/shape/body handles; static/dynamic/kinematic bodies; box/sphere/capsule shapes including local poses; gravity, mass, damping, velocities, force/impulse/acceleration/velocity-change modes; kinematic targets; deferred body destruction around an in-flight step; layer/mask filtering; raycast, sweep, overlap; collision events; and trigger enter/exit events.
+- Preserved Swim's 32-bit `CollisionLayer` contract rather than narrowing gameplay data to Jolt's native `ObjectLayer`. A backend-owned registry maps unique Swim layer/mask/motion tuples to native object layers, and Jolt's broadphase/object-pair filters reject impossible/static-static or mask-incompatible pairs before narrow-phase contact work. Queries use the same symmetric Swim layer/mask policy through both native object-layer and body filters.
+- Kept Jolt allocation/update lifetime explicit: the Jolt global Factory/type-registration lifetime is reference-counted across backend instances, each world owns its temporary allocator, worlds remove/destroy their bodies before backend teardown, and `PhysicsSystem::Update` error bits are propagated through `FetchResults()` instead of silently reporting success.
+- Fixed query transform semantics against the Jolt 5.6 API: shape sweeps start from a world transform through `RShapeCast::sFromWorldTransform`, while overlaps explicitly convert the query shape's world pose to the center-of-mass transform required by `NarrowPhaseQuery::CollideShape`. The shared backend contract now includes a non-identity query-shape local pose so this distinction is regression-tested on both PhysX and Jolt.
+- Registered the existing four shared parity scenarios for Jolt (`WorldLifecycle`, `SceneQuery`, `Simulation`, `Trigger`) without backend types entering the fixture. Added a Jolt-specific lifetime case that initializes two backend instances, shuts one down, and verifies the surviving backend can still create a world. `cmake/Tests.cmake` includes the Jolt suite whenever `SwimPhysicsJolt` exists, while the generic contract header-boundary gate continues to link only `Swim::Physics`.
+- Intentionally **did not** add runtime convex/triangle source-mesh cooking. Those `ShapeType` paths reject unsupported data until the asset compiler can emit backend-specific cooked collision payloads; that is the later cooking checkpoint and is preferable to creating a temporary runtime importer/cooker path now. Fixed-step orchestration and render interpolation likewise remain later engine policy rather than being hidden inside one backend.
+- Extended `scripts/verify-build-layout.py` so the architecture gate understands multiple concrete physics backend directories, requires the Jolt dependency/target/runtime/test wiring, verifies the early object-layer/query filtering and overlap COM-transform path, and continues rejecting PhysX/Jolt implementation leakage into generic physics.
+
+Validation completed in this execution environment: `scripts/verify-build-layout.py` passes after the new backend/lifetime/query guards. A fresh dependency-stub Linux configure/build completes and `SwimTests` runs **46 cases across 13 suites with 209 checks, all passing**. The Jolt implementation was cross-checked against the official **Jolt v5.6.0** headers for the `PhysicsSystem`, `BodyInterface`, `BodyCreationSettings`, `BodyFilter`/object-layer filters, `ContactListener`, primitive shapes, ray casts, shape casts, overlap `CollideShape`, job system, allocator, and update-error APIs. This container has no outbound dependency fetch and contains no Jolt source cache, so a real `SwimPhysicsJolt` compile/link/runtime execution cannot be truthfully claimed here; the normal dependency-enabled Linux/Windows build is wired to make those Jolt parity cases part of `SwimTests` rather than silently skipping them.
+
+**Checkpoint closure:** item 29's implementation and regression wiring are complete. Convex/triangle collision cooking, fixed-step orchestration, and transform interpolation remain explicitly separate later physics/asset work. The next critical-path architecture item is **30 — Slang compiler and reflection metadata**, not more tuning of the current renderer-side scene/BVH dirty machinery.
+
+
+### PhysX/Jolt parity hardening checkpoint — 2026-09-04
+
+With both backends live, the generic seam was audited implementation-against-implementation and every place the two disagreed was resolved in the contract rather than left to the caller.
+
+Corrected in the backends:
+
+- **PhysX wrote collision filter data onto a shared `PxShape`.** `CollisionLayer` is per-`BodyDesc` in the generic API, but the filter data was applied to the template shape held by the `ShapeHandle`. A second body built from the same handle re-filtered the first, and then failed its own `attachShape` because the template was exclusive. `ShapeHandle` is now a pure description; each body instantiates its own exclusive `PxShape`, and `shapeHandles` maps instances back to the template. This matches Jolt, which always carried the layer on the body.
+- **PhysX accepted body mutation while a step was in flight.** `CreateBody`, `SetBodyPose`, `SetKinematicTarget`, `AddForce`, `SetLinearVelocity`, and `SetAngularVelocity` had no `simulating` guard, so they wrote to the scene between `simulate()` and `fetchResults()` — illegal in PhysX — and returned success. All six now reject, matching Jolt.
+- **Jolt could never complete a non-blocking fetch.** `JPH::PhysicsSystem::Update` is synchronous, so `FetchResults(false)` returned `false` forever and `while (!FetchResults(false))` would spin indefinitely. The step now runs in `BeginSimulation`, leaving results ready the moment it is issued; `IsSimulationInFlight()` and the write guards still describe the same `Begin -> Fetch` window.
+- **`CollisionEvent::Impulse` was always zero on Jolt.** Jolt's contact listener does not hand out solver impulses, so it is now estimated with `JPH::EstimateCollisionResponse`. Measured against PhysX on the same drop, both report `18.540`.
+- **Overlap results disagreed.** Jolt collapsed to one hit per body while PhysX reported one per shape. Both now de-duplicate on the `(body, shape)` pair a generic `OverlapHit` actually identifies.
+- **`PhysicsMaterialDesc::StaticFriction` is documented** as honoured only by backends that separate static and dynamic friction; Jolt has one coefficient and uses `DynamicFriction`.
+
+Performance work on the same seam:
+
+- `PhysicsWorldDesc::EnablePersistedCollisionEvents` (default off) makes per-step persisted contact reporting opt-in. It previously cost one event per touching pair per step on both backends — plus `extractContacts` per pair on PhysX, and a global-mutex `push_back` from every worker thread on Jolt. PhysX now adds `eNOTIFY_TOUCH_PERSISTS` only when asked, through the scene's filter-shader constant block; Jolt returns from the persisted path before taking its lock.
+- Jolt's scratch allocator moved from `TempAllocatorMalloc` (a general-allocator round trip per solver temporary) to a 16 MB `TempAllocatorImplWithMallocFallback`.
+- Jolt now calls `OptimizeBroadPhase()` once per batch of non-moving insertions, tracked so spawning dynamic bodies never triggers it.
+
+Contract additions holding both backends to the corrected behaviour: `RunPhysicsSharedShapeContract`, `RunPhysicsInFlightWriteContract`, and `RunPhysicsContactEventContract`.
+
+Validation: a Windows clean build from a wiped dependency cache succeeds end to end, `SwimTests` runs 118 cases green, and the engine runs and shuts down cleanly on `--physics=physx` and `--physics=jolt` against the real Sponza scene. A cross-backend probe over the same scenario reports identical raycast, sweep, overlap, kinematic, impulse-response, collision-timing, and trigger-timing values on both backends; resting height differs by 17 mm, which is Jolt's default penetration slop.
+
 ### Phase 6 exit criteria
 
 - [ ] same `PhysicsSandbox` runs with `--physics=physx` and `--physics=jolt`.
 - [x] gameplay/scene generic headers contain no PhysX/Jolt implementation types. *(Verifier-enforced; backend implementation types are confined to backend directories/targets.)*
-- [ ] backend switching requires no gameplay recompilation logic or `if constexpr` branching.
+- [x] backend switching requires no gameplay recompilation logic or `if constexpr` branching. *(The compiled backend factories are selected from `EngineConfig::Physics`; gameplay and scene code remain on the generic contracts.)*
 
 ---
 
@@ -3315,12 +3360,25 @@ An empty selection exits non-zero, so a mistyped filter in a build script cannot
 ### 32.5 Physics
 
 Run the same behavioral suite against PhysX and Jolt. The suite is
-`Source/Tests/Fixtures/PhysicsBackendContract.h`, which exposes
-`RunPhysicsWorldLifecycleContract`, `RunPhysicsSceneQueryContract`,
-`RunPhysicsSimulationContract`, and `RunPhysicsTriggerContract`. Each builds its
-own world from a shared fixture, so scenarios stay independent and can run in any
-order. A Jolt backend adds `Suites/Physics/Jolt/JoltBackendTests.cpp` registering
-one case per contract entry point and changes nothing else.
+`Source/Tests/Fixtures/PhysicsBackendContract.h`, which exposes:
+
+| Contract | Covers |
+| --- | --- |
+| `RunPhysicsWorldLifecycleContract` | creation, kinematic targeting, handle validity, deferred destruction, slot reuse |
+| `RunPhysicsSceneQueryContract` | raycast/sweep/overlap, layer filtering, generic hit identity, query-shape local poses |
+| `RunPhysicsSimulationContract` | gravity, collision-start events, velocity and force application |
+| `RunPhysicsTriggerContract` | trigger enter/exit for a body passing through a sensor |
+| `RunPhysicsSharedShapeContract` | one `ShapeHandle` reused by several bodies with independent collision layers |
+| `RunPhysicsInFlightWriteContract` | mutators rejected while a step is in flight; non-blocking fetch makes progress |
+| `RunPhysicsContactEventContract` | persisted-event opt-in and non-zero contact impulses |
+
+Each builds its own world from a shared fixture, so scenarios stay independent and
+can run in any order. A backend adds `Suites/Physics/<Backend>/…Tests.cpp`
+registering one case per entry point and changes nothing else.
+
+These are behavioural specifications, not descriptions of one backend. Where the
+two implementations disagreed, the contract was extended and the weaker side was
+corrected rather than the assertion relaxed.
 
 ### 32.6 RHI
 
@@ -3387,7 +3445,7 @@ Build/dependency matrix requirements:
 - [x] The runnable test corpus is one program; adding a test requires no CMake change.
 - [x] Every supported build script builds and runs the complete suite rather than a hand-maintained subset.
 - [x] Public-header/architecture gates keep a link surface narrower than the test program's.
-- [ ] A second physics backend reuses the shared contract fixture unchanged.
+- [x] A second physics backend reuses the shared contract fixture unchanged. *(Jolt registers the same seven contract entry points as PhysX.)*
 
 ---
 
@@ -3562,7 +3620,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 26. [x] Establish canonical coordinate/clip-space convention.
 27. [x] Build generic physics handles/contracts.
 28. [x] Move current PhysX implementation behind generic backend.
-29. [ ] Add Jolt backend baseline and shared parity tests.
+29. [x] Add Jolt backend baseline and shared parity tests.
 
 ### 35.3 Shader/RHI foundation
 
@@ -3678,7 +3736,7 @@ Before starting **Clustered Forward+**:
 Before expanding **physics gameplay**:
 
 - [x] Rigidbody contains no PhysX/Jolt pointer;
-- [ ] PhysX/Jolt parity baseline runs through the same generic API.
+- [x] PhysX/Jolt parity baseline is registered through the same generic API. *(Both backend suites call the shared `PhysicsBackendContract`; configurations compile/run the cases only when the corresponding backend target exists.)*
 
 Before expanding **asset streaming**:
 

@@ -53,3 +53,24 @@ SWIM_TEST("Physics.PhysXBackend", "TriggerContract")
 	SWIM_REQUIRE(backend != nullptr);
 	Engine::Tests::RunPhysicsTriggerContract(*backend);
 }
+
+SWIM_TEST("Physics.PhysXBackend", "SharedShapeContract")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsSharedShapeContract(*backend);
+}
+
+SWIM_TEST("Physics.PhysXBackend", "InFlightWriteContract")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsInFlightWriteContract(*backend);
+}
+
+SWIM_TEST("Physics.PhysXBackend", "ContactEventContract")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsContactEventContract(*backend);
+}

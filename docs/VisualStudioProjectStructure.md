@@ -333,7 +333,7 @@ SwimPhysicsPhysX
   -> Swim::PhysX         private
 ```
 
-No caller should include PhysX implementation types merely to use physics. The future `SwimPhysicsJolt` target is expected to implement the same generic contract and reuse the same backend contract test suite.
+No caller should include PhysX implementation types merely to use physics. `SwimPhysicsJolt` implements the same generic contract and reuses the same backend contract fixture unchanged, so both backends are held to one behavioural specification.
 
 ---
 
@@ -501,7 +501,7 @@ SwimPhysicsBackendContractCompile
 
 These are not test programs, and they were deliberately **not** folded into `SwimTests`. Their entire value is that each one links only its own module: `SwimPhysicsPublicHeaders` proves the generic physics headers compile and link against `Swim::Physics` with no backend present. `SwimTests` links everything, so moving these into it would silently destroy the guarantee they exist to provide.
 
-`SwimPhysicsBackendContractCompile` is the one gate that builds by default rather than being `EXCLUDE_FROM_ALL`: it is the cheapest possible guard against a physics backend leaking into the shared backend contract, which is the fixture a future `SwimPhysicsJolt` will reuse unchanged.
+`SwimPhysicsBackendContractCompile` is the one gate that builds by default rather than being `EXCLUDE_FROM_ALL`: it is the cheapest possible guard against a physics backend leaking into the shared backend contract, which `SwimPhysicsPhysX` and `SwimPhysicsJolt` both reuse unchanged.
 
 New gates are declared with one call:
 

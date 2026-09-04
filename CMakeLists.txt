@@ -57,15 +57,16 @@ else()
 	set(SWIM_ENABLE_PHYSX_BACKEND_DEFAULT OFF)
 endif()
 option(SWIM_ENABLE_PHYSX_BACKEND "Compile the PhysX physics backend" ${SWIM_ENABLE_PHYSX_BACKEND_DEFAULT})
+option(SWIM_ENABLE_JOLT_BACKEND "Compile the Jolt physics backend" ON)
 option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
 option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
 option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 
-if(SWIM_BUILD_LEGACY_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND)
+if(SWIM_BUILD_LEGACY_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
 	message(FATAL_ERROR
-		"The current legacy SwimEngine executable requires a compiled physics backend. "
-		"Enable SWIM_ENABLE_PHYSX_BACKEND until the Jolt backend/runtime factory is available."
+		"The SwimEngine executable requires at least one compiled physics backend. "
+		"Enable SWIM_ENABLE_PHYSX_BACKEND and/or SWIM_ENABLE_JOLT_BACKEND."
 	)
 endif()
 
@@ -348,6 +349,36 @@ else()
 endif()
 add_library(Swim::Physics ALIAS SwimPhysics)
 
+# Jolt is the first concrete cross-platform physics backend. Keep its dependency
+# and implementation before the legacy-runtime return so Linux compiles and runs
+# the same backend contract used on Windows.
+if(SWIM_ENABLE_JOLT_BACKEND AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+	set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+	set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Jolt")
+	include(cmake/JoltDependencies.cmake)
+	set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+	unset(SWIM_SAVED_CMAKE_FOLDER)
+
+	file(GLOB_RECURSE SWIM_JOLT_BACKEND_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.h
+	)
+
+	add_library(SwimPhysicsJolt STATIC ${SWIM_JOLT_BACKEND_SOURCES})
+	add_library(Swim::PhysicsJolt ALIAS SwimPhysicsJolt)
+	target_include_directories(SwimPhysicsJolt PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimPhysicsJolt PUBLIC Swim::Physics PRIVATE Swim::Jolt)
+	target_compile_features(SwimPhysicsJolt PUBLIC cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_JOLT_BACKEND_SOURCES})
+	swim_set_solution_folder(SwimPhysicsJolt "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/Physics Backends")
+
+	if(MSVC)
+		target_compile_options(SwimPhysicsJolt PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimPhysicsJolt PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+endif()
+
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
 	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp)
 	target_link_libraries(SwimHelloWindow PRIVATE Swim::Platform)
@@ -520,6 +551,8 @@ target_compile_definitions(SwimEngine PRIVATE
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
 	$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
+	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_ENABLE_PHYSX_BACKEND}>
+	SWIM_ENABLE_JOLT_BACKEND=$<TARGET_EXISTS:SwimPhysicsJolt>
 )
 
 if(SWIM_ENABLE_PCH)
@@ -599,8 +632,14 @@ target_link_libraries(SwimEngine PRIVATE
 	Swim::BasisTranscoder
 	glad::glad
 	Swim::Physics
-	Swim::PhysicsPhysX
 )
+
+if(TARGET SwimPhysicsPhysX)
+	target_link_libraries(SwimEngine PRIVATE Swim::PhysicsPhysX)
+endif()
+if(TARGET SwimPhysicsJolt)
+	target_link_libraries(SwimEngine PRIVATE Swim::PhysicsJolt)
+endif()
 
 include(cmake/Shaders.cmake)
 swim_configure_shaders(SwimEngine)
