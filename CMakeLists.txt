@@ -386,6 +386,7 @@ endif()
 add_library(SwimRhi INTERFACE
 	Source/Engine/Systems/Renderer/RHI/RhiTypes.h
 	Source/Engine/Systems/Renderer/RHI/RhiContracts.h
+	Source/Engine/Systems/Renderer/RHI/RhiFrameLifetime.h
 )
 add_library(Swim::Rhi ALIAS SwimRhi)
 target_include_directories(SwimRhi INTERFACE ${CMAKE_SOURCE_DIR}/Source)

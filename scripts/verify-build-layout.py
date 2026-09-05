@@ -3278,10 +3278,12 @@ def check_phase8_rhi_type_architecture(failures: list[str]) -> None:
     types_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiTypes.h"
     contracts_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiContracts.h"
     factory_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiFactory.h"
+    frame_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiFrameLifetime.h"
     types_test = ROOT / "Source" / "Tests" / "Suites" / "RHI" / "RhiTypesTests.cpp"
     contracts_test = ROOT / "Source" / "Tests" / "Suites" / "RHI" / "RhiContractsTests.cpp"
+    frame_test = ROOT / "Source" / "Tests" / "Suites" / "RHI" / "RhiFrameLifetimeTests.cpp"
     boundary = ROOT / "Source" / "Tests" / "HeaderBoundary" / "RhiPublicHeaders.cpp"
-    for path in (types_header, contracts_header, factory_header, types_test, contracts_test, boundary):
+    for path in (types_header, contracts_header, factory_header, frame_header, types_test, contracts_test, frame_test, boundary):
         if not path.is_file():
             fail(f"backend-neutral RHI foundation is missing: {path.relative_to(ROOT)}", failures)
     if not types_header.is_file() or not contracts_header.is_file():
@@ -3290,7 +3292,8 @@ def check_phase8_rhi_type_architecture(failures: list[str]) -> None:
     types_text = types_header.read_text(encoding="utf-8", errors="ignore")
     contracts_text = contracts_header.read_text(encoding="utf-8", errors="ignore")
     factory_text = factory_header.read_text(encoding="utf-8", errors="ignore") if factory_header.is_file() else ""
-    combined = types_text + contracts_text + factory_text
+    frame_text = frame_header.read_text(encoding="utf-8", errors="ignore") if frame_header.is_file() else ""
+    combined = types_text + contracts_text + factory_text + frame_text
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     tests_text = (ROOT / "cmake" / "Tests.cmake").read_text(encoding="utf-8", errors="ignore")
 
@@ -3358,6 +3361,23 @@ def check_phase8_rhi_type_architecture(failures: list[str]) -> None:
     for fragment in ('class GraphicsFactory', 'Register(GraphicsApi api', 'Create(GraphicsApi api) const'):
         if fragment not in factory_text:
             fail(f"RHI runtime graphics factory contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'class FrameContextRing',
+        'struct FrameContext',
+        'CompletionValue',
+        'CreateCommandPool(desc.Queue)',
+        'device.CreateTimeline(0)',
+        'timeline->Wait(context.CompletionValue)',
+        'signals.push_back({ timeline.get(), signalValue })',
+        'retiredObjects',
+        'RetireAt(std::uint64_t completionValue',
+        'GetLastSubmittedPoint()',
+    ):
+        if fragment not in frame_text:
+            fail(f"RHI item 38 frame-lifetime contract is missing: {fragment}", failures)
+    if 'WaitIdle(' in frame_text or 'vkDeviceWaitIdle' in frame_text or 'vkQueueWaitIdle' in frame_text:
+        fail("RHI frame lifetime regressed to idle-based retirement", failures)
 
     for forbidden in ('<vulkan/', 'VkFormat', 'VkImage', 'VkBuffer', 'D3D12_', 'ID3D12', 'MTL::', 'HWND'):
         if forbidden in combined:
@@ -3515,6 +3535,33 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
     ):
         if fragment not in source_text:
             fail(f"Vulkan RHI item 37 allocation contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'class VulkanTimeline final',
+        'VK_SEMAPHORE_TYPE_TIMELINE',
+        'vkGetSemaphoreCounterValue',
+        'vkWaitSemaphores',
+        'vkQueueSubmit2',
+        'VK_STRUCTURE_TYPE_SUBMIT_INFO_2',
+        'class VulkanCommandPool final',
+        'vkResetCommandPool',
+        'class VulkanCommandList final',
+        'VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT',
+        'Vulkan swapchain retirement timeline must belong to the same device',
+        'PresentationQueue',
+        'vkQueueWaitIdle(state->PresentationQueue)',
+    ):
+        if fragment not in source_text:
+            fail(f"Vulkan RHI item 38 timeline/frame-retirement contract is missing: {fragment}", failures)
+
+    swapchain_start = source_text.find('class VulkanSwapchain final')
+    device_start = source_text.find('class VulkanDevice final', swapchain_start)
+    if swapchain_start != -1 and device_start != -1:
+        swapchain_text = source_text[swapchain_start:device_start]
+        if 'vkDeviceWaitIdle' in swapchain_text:
+            fail("Vulkan swapchain resize regressed to device-wide idle waits", failures)
+        if 'vkQueueWaitIdle(state->PresentationQueue)' not in swapchain_text:
+            fail("Vulkan swapchain resize lost the WSI-only present-completion fallback", failures)
 
     wsi_header = ROOT / "Source" / "Engine" / "Platform" / "Internal" / "VulkanWsi.h"
     wsi_source = ROOT / "Source" / "Engine" / "Platform" / "Internal" / "VulkanWsi.cpp"

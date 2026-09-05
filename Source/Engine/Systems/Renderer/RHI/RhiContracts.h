@@ -453,7 +453,7 @@ namespace Swim::Rhi
 		virtual TextureView& GetImageView(std::uint32_t imageIndex) = 0;
 		virtual SwapchainAcquireResult AcquireNextImage(Semaphore& signalSemaphore, Fence* signalFence = nullptr) = 0;
 		virtual bool Present(Queue& queue, std::uint32_t imageIndex, std::span<Semaphore* const> waits) = 0;
-		virtual void Resize(Extent2D extent) = 0;
+		virtual void Resize(Extent2D extent, const TimelinePoint& safeAfter) = 0;
 	};
 
 	class Device : public RhiObject
