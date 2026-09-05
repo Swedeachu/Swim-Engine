@@ -4,7 +4,9 @@
 #include "Tests/Framework/Test.h"
 
 #include <array>
+#include <chrono>
 #include <cstdlib>
+#include <thread>
 #include <string_view>
 #include <vector>
 
@@ -128,12 +130,32 @@ namespace
 		auto& queue = device->GetQueue(Rhi::QueueType::Graphics);
 		try
 		{
-			for (std::uint32_t frame = 0; frame < 6; ++frame)
+			unsigned presented = 0;
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+			while (presented < 6 && std::chrono::steady_clock::now() < deadline)
 			{
 				platform.PumpEvents({}, {});
 				auto& context = frames->BeginFrame();
 				const auto image = swapchain->AcquireNextImage(*acquired[context.Index]);
-				SWIM_REQUIRE_MESSAGE(!image.OutOfDate, "Swapchain became out of date during the bounded clear smoke");
+				if (!image.HasImage())
+				{
+					frames->CancelFrame();
+					if (image.OutOfDate || image.Suspended)
+					{
+						const auto size = window->GetPixelSize();
+						if (swapchain->Resize({ size.Width, size.Height }, frames->GetLastSubmittedPoint()))
+						{
+							presentReady.clear();
+							for (std::uint32_t index = 0; index < swapchain->GetImageCount(); ++index)
+							{
+								presentReady.push_back(device->CreateGpuSemaphore());
+								SWIM_REQUIRE(presentReady.back());
+							}
+						}
+					}
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+					continue;
+				}
 				auto& backbuffer = swapchain->GetImageView(image.ImageIndex);
 				auto& commands = frames->CreateCommandList();
 				commands.Begin();
@@ -153,8 +175,12 @@ namespace
 				submit.WaitSemaphores = waits;
 				submit.SignalSemaphores = signals;
 				frames->SubmitCurrent(submit);
-				SWIM_REQUIRE(swapchain->Present(queue, image.ImageIndex, signals));
+				if (swapchain->Present(queue, image.ImageIndex, signals))
+				{
+					++presented;
+				}
 			}
+			SWIM_REQUIRE_MESSAGE(presented == 6, "Clear smoke failed to complete six stable presentations within ten seconds");
 			frames->Drain();
 			// Render timeline completion does not retire WSI semaphore waits.
 			queue.WaitIdle();

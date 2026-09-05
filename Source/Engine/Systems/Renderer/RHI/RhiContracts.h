@@ -469,9 +469,16 @@ namespace Swim::Rhi
 
 	struct SwapchainAcquireResult
 	{
-		std::uint32_t ImageIndex = 0;
+		std::uint32_t ImageIndex = UINT32_MAX;
 		bool OutOfDate = false;
 		bool Suboptimal = false;
+		bool Suspended = false;
+		bool NotReady = false;
+
+		bool HasImage() const
+		{
+			return ImageIndex != UINT32_MAX && !OutOfDate && !Suspended && !NotReady;
+		}
 	};
 
 	class Swapchain : public RhiObject
@@ -481,9 +488,24 @@ namespace Swim::Rhi
 		virtual Extent2D GetExtent() const = 0;
 		virtual std::uint32_t GetImageCount() const = 0;
 		virtual TextureView& GetImageView(std::uint32_t imageIndex) = 0;
+		// A result without HasImage() does not signal the supplied synchronization
+		// objects: skip submission/presentation. Pump events and retry NotReady;
+		// Resize after OutOfDate, or after a suspended window becomes drawable.
+		// Suboptimal still owns an image: consume its acquire signal and present
+		// before resizing. Acquisition waits are bounded by the backend.
 		virtual SwapchainAcquireResult AcquireNextImage(Semaphore& signalSemaphore, Fence* signalFence = nullptr) = 0;
+		// False requests a rebuild (out of date or suboptimal). The presentation
+		// attempt consumes ownership of the acquired image, including on false.
 		virtual bool Present(Queue& queue, std::uint32_t imageIndex, std::span<Semaphore* const> waits) = 0;
-		virtual void Resize(Extent2D extent, const TimelinePoint& safeAfter) = 0;
+		// Zero extent suspends acquisition without waiting or destroying images.
+		// Positive extent resumes/rebuilds, even when unchanged. All acquired images
+		// must first be presented; safeAfter covers every submission using old views.
+		// Returns false while suspended, true after replacement. True invalidates
+		// old views; recreate per-image present
+		// semaphores after retirement. A failed replacement may discard old images;
+		// retry Resize before acquiring again. Surface/device loss is fatal to this
+		// object and requires recreating the surface/device, not a Resize retry.
+		virtual bool Resize(Extent2D extent, const TimelinePoint& safeAfter) = 0;
 	};
 
 	class Device : public RhiObject

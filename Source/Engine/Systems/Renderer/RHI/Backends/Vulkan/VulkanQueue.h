@@ -39,6 +39,11 @@ namespace Swim::RhiVulkan
 				return type;
 			}
 
+			const std::shared_ptr<VulkanDeviceState>& GetState() const
+			{
+				return state;
+			}
+
 			std::uint32_t GetFamilyIndex() const
 			{
 				return familyIndex;

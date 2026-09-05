@@ -112,6 +112,19 @@ namespace Swim::Rhi
 			return context;
 		}
 
+		// Cancel only an empty frame, for example when WSI acquisition produced no
+		// image. No queue submission or timeline signal is manufactured for a skip.
+		void CancelFrame()
+		{
+			if (currentContext == nullptr || !currentContext->commandLists.empty() ||
+				!currentContext->retiredObjects.empty())
+			{
+				throw std::logic_error("Only an active empty RHI frame can be canceled");
+			}
+			nextContextIndex = currentContext->Index;
+			currentContext = nullptr;
+		}
+
 		CommandList& CreateCommandList()
 		{
 			if (currentContext == nullptr)

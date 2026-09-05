@@ -343,3 +343,52 @@ SWIM_TEST("RHI.FrameLifetime", "LastSubmittedPointTracksFrameTimeline")
 	SWIM_CHECK(submittedPoint.Semaphore == &frames->GetTimeline());
 	SWIM_CHECK_EQUAL(submittedPoint.Value, std::uint64_t(1));
 }
+
+SWIM_TEST("RHI.FrameLifetime", "SkippedAcquisitionCancelsWithoutSubmissionOrTimelineAdvance")
+{
+	MockDevice device;
+	auto frames = Swim::Rhi::FrameContextRing::Create(device, { Swim::Rhi::QueueType::Graphics, 2 });
+	SWIM_REQUIRE(frames);
+	frames->BeginFrame();
+	frames->SubmitCurrent();
+	const auto previousPoint = frames->GetLastSubmittedPoint();
+	const auto skippedIndex = frames->BeginFrame().Index;
+	for (unsigned retry = 0; retry < 4; ++retry)
+	{
+		frames->CancelFrame();
+		SWIM_CHECK(frames->GetCurrentContext() == nullptr);
+		SWIM_CHECK_EQUAL(frames->GetLastSubmittedValue(), previousPoint.Value);
+		SWIM_CHECK_EQUAL(frames->BeginFrame().Index, skippedIndex);
+	}
+	SWIM_CHECK_EQUAL(frames->SubmitCurrent(), previousPoint.Value + 1);
+}
+
+SWIM_TEST("RHI.FrameLifetime", "CancelRejectsMissingOrRecordedFrames")
+{
+	MockDevice device;
+	auto frames = Swim::Rhi::FrameContextRing::Create(device);
+	SWIM_REQUIRE(frames);
+	SWIM_CHECK_THROWS(frames->CancelFrame(), std::logic_error);
+	frames->BeginFrame();
+	auto& commands = frames->CreateCommandList();
+	commands.Begin();
+	commands.End();
+	SWIM_CHECK_THROWS(frames->CancelFrame(), std::logic_error);
+	SWIM_CHECK(frames->GetCurrentContext() != nullptr);
+	frames->SubmitCurrent();
+}
+
+SWIM_TEST("RHI.FrameLifetime", "CancelDoesNotReleaseObjectsAwaitingFrameRetirement")
+{
+	MockDevice device;
+	std::uint32_t destroyed = 0;
+	auto frames = Swim::Rhi::FrameContextRing::Create(device);
+	frames->BeginFrame();
+	frames->Retire(std::make_unique<LifetimeObject>(destroyed));
+	SWIM_CHECK_THROWS(frames->CancelFrame(), std::logic_error);
+	SWIM_CHECK_EQUAL(destroyed, 0u);
+	frames->SubmitCurrent();
+	SWIM_CHECK_EQUAL(destroyed, 0u);
+	frames->Drain();
+	SWIM_CHECK_EQUAL(destroyed, 1u);
+}

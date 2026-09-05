@@ -217,4 +217,14 @@ namespace Swim::Platform
 		}
 	}
 
+	bool Window::Minimize()
+	{
+		return impl && impl->Window && SDL_MinimizeWindow(impl->Window);
+	}
+
+	bool Window::Restore()
+	{
+		return impl && impl->Window && SDL_RestoreWindow(impl->Window);
+	}
+
 }

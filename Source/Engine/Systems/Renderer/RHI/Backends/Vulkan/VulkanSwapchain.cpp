@@ -1,10 +1,6 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanSwapchain.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanFence.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanSemaphore.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanTimeline.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanQueue.h"
 
 #include <algorithm>
 #include <mutex>
@@ -36,114 +32,62 @@ namespace Swim::RhiVulkan
 	}
 
 	Rhi::SwapchainAcquireResult VulkanSwapchain::AcquireNextImage(
-		Rhi::Semaphore& signalSemaphore,
-		Rhi::Fence* signalFence)
+		Rhi::Semaphore& signalSemaphore, Rhi::Fence* signalFence)
 	{
-		auto* semaphore = dynamic_cast<VulkanSemaphore*>(&signalSemaphore);
-		auto* fence = signalFence ? dynamic_cast<VulkanFence*>(signalFence) : nullptr;
-		if (semaphore == nullptr || semaphore->GetState().get() != state.get() ||
-			(signalFence != nullptr && (fence == nullptr || fence->GetState().get() != state.get())))
+		const auto size = window.GetPixelSize();
+		if (window.IsMinimized() || size.Width == 0 || size.Height == 0)
 		{
-			throw std::invalid_argument("Vulkan swapchain acquire requires same-device Vulkan synchronization objects");
+			session.Suspend();
 		}
-
-		Rhi::SwapchainAcquireResult result{};
-		const VkResult vkResult = state->Dispatch.vkAcquireNextImageKHR(
-			state->Device.device,
-			swapchain.swapchain,
-			UINT64_MAX,
-			semaphore->GetSemaphore(),
-			fence ? fence->GetFence() : VK_NULL_HANDLE,
-			&result.ImageIndex);
-
-		result.OutOfDate = vkResult == VK_ERROR_OUT_OF_DATE_KHR;
-		result.Suboptimal = vkResult == VK_SUBOPTIMAL_KHR;
-		if (vkResult != VK_SUCCESS && !result.OutOfDate && !result.Suboptimal)
-		{
-			throw std::runtime_error("Failed to acquire Vulkan swapchain image");
-		}
-		return result;
+		return session.Acquire(signalSemaphore, signalFence);
 	}
 
-	bool VulkanSwapchain::Present(
-		Rhi::Queue& queue,
-		std::uint32_t imageIndex,
+	bool VulkanSwapchain::Present(Rhi::Queue& queue, std::uint32_t imageIndex,
 		std::span<Rhi::Semaphore* const> waits)
 	{
-		auto* vulkanQueue = dynamic_cast<VulkanQueue*>(&queue);
-		if (!vulkanQueue || vulkanQueue->GetFamilyIndex() != state->QueueFamilies.Graphics)
-		{
-			throw std::invalid_argument("Vulkan swapchain presentation requires the device graphics/present queue");
-		}
-
-		std::vector<VkSemaphore> waitSemaphores;
-		waitSemaphores.reserve(waits.size());
-		for (Rhi::Semaphore* wait : waits)
-		{
-			auto* semaphore = dynamic_cast<VulkanSemaphore*>(wait);
-			if (semaphore == nullptr || semaphore->GetState().get() != state.get())
-			{
-				throw std::invalid_argument("Vulkan swapchain presentation requires same-device Vulkan semaphores");
-			}
-			waitSemaphores.push_back(semaphore->GetSemaphore());
-		}
-
-		VkPresentInfoKHR presentInfo{};
-		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-		presentInfo.waitSemaphoreCount = static_cast<std::uint32_t>(waitSemaphores.size());
-		presentInfo.pWaitSemaphores = waitSemaphores.data();
-		presentInfo.swapchainCount = 1;
-		presentInfo.pSwapchains = &swapchain.swapchain;
-		presentInfo.pImageIndices = &imageIndex;
-
-		std::scoped_lock lock(vulkanQueue->GetMutex());
-		const VkResult result = state->Dispatch.vkQueuePresentKHR(vulkanQueue->GetQueue(), &presentInfo);
-		if (result == VK_ERROR_OUT_OF_DATE_KHR)
-		{
-			return false;
-		}
-		if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-		{
-			throw std::runtime_error("Failed to present Vulkan swapchain image");
-		}
-		return true;
+		return session.Present(queue, imageIndex, waits);
 	}
 
-	void VulkanSwapchain::Resize(Rhi::Extent2D requestedExtent, const Rhi::TimelinePoint& safeAfter)
+	bool VulkanSwapchain::Resize(Rhi::Extent2D requestedExtent, const Rhi::TimelinePoint& safeAfter)
 	{
-		if (requestedExtent.Width == 0 || requestedExtent.Height == 0)
-		{
-			return;
-		}
 		if (!Rebuild(requestedExtent.Width, requestedExtent.Height, &safeAfter))
 		{
-			throw std::runtime_error("Failed to resize Vulkan swapchain");
+			throw std::runtime_error("Failed to resize Vulkan swapchain; retry Resize before acquiring");
 		}
+		return !session.IsSuspended();
 	}
 
 	bool VulkanSwapchain::Rebuild(std::uint32_t width, std::uint32_t height, const Rhi::TimelinePoint* safeAfter)
 	{
-		if (width == 0 || height == 0 || desc.Hdr)
+		if (desc.Hdr)
 		{
 			return false;
 		}
-
-		const bool replaceExisting = swapchain.swapchain != VK_NULL_HANDLE;
-		std::shared_ptr<VulkanTimelineState> retirementTimeline;
-		std::uint64_t retirementValue = 0;
-		if (replaceExisting)
+		const auto pixelSize = window.GetPixelSize();
+		if (width == 0 || height == 0 || window.IsMinimized() || pixelSize.Width == 0 || pixelSize.Height == 0)
 		{
-			if (safeAfter == nullptr)
-			{
-				throw std::invalid_argument("Vulkan swapchain replacement requires a GPU timeline retirement point");
-			}
-			auto* timeline = dynamic_cast<VulkanTimeline*>(safeAfter->Semaphore);
-			if (timeline == nullptr || timeline->GetState()->DeviceState.get() != state.get())
-			{
-				throw std::invalid_argument("Vulkan swapchain retirement timeline must belong to the same device");
-			}
-			retirementTimeline = timeline->GetState();
-			retirementValue = safeAfter->Value;
+			session.Suspend();
+			return true;
+		}
+		// The native surface can become zero-sized before SDL delivers its event.
+		VkSurfaceCapabilitiesKHR capabilities{};
+		if (state->Instance->Dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+			state->Device.physical_device.physical_device, surface, &capabilities) != VK_SUCCESS)
+		{
+			session.Invalidate();
+			return false;
+		}
+		if (capabilities.currentExtent.width == 0 || capabilities.currentExtent.height == 0 ||
+			capabilities.maxImageExtent.width == 0 || capabilities.maxImageExtent.height == 0)
+		{
+			session.Suspend();
+			return true;
+		}
+		session.RequireNoAcquiredImages();
+		const bool replaceExisting = swapchain.swapchain != VK_NULL_HANDLE;
+		if (replaceExisting && !WaitForRetirement(safeAfter))
+		{
+			return false;
 		}
 
 		vkb::SwapchainBuilder builder{ state->Device, surface };
@@ -175,106 +119,73 @@ namespace Swim::RhiVulkan
 				.add_fallback_present_mode(VK_PRESENT_MODE_FIFO_KHR);
 		}
 
+		session.Invalidate();
 		auto swapchainResult = builder.build();
+		// Passing oldSwapchain retires it even if native creation fails. It must
+		// never be acquired from, or passed as oldSwapchain on a later retry.
+		// Retirement was completed before build, so release it on both paths.
+		DestroySwapchain();
 		if (!swapchainResult)
 		{
 			return false;
 		}
 
-		vkb::Swapchain newSwapchain = std::move(swapchainResult).value();
-		auto imagesResult = newSwapchain.get_images();
-		auto viewsResult = newSwapchain.get_image_views();
-		if (!imagesResult || !viewsResult)
+		swapchain = std::move(swapchainResult).value();
+		try
 		{
-			vkb::destroy_swapchain(newSwapchain);
-			return false;
-		}
-
-		auto newImages = std::move(imagesResult).value();
-		auto newViews = std::move(viewsResult).value();
-		if (newImages.size() != newViews.size())
-		{
-			newSwapchain.destroy_image_views(newViews);
-			vkb::destroy_swapchain(newSwapchain);
-			return false;
-		}
-
-		if (replaceExisting)
-		{
-			std::uint64_t completedValue = 0;
-			if (retirementTimeline->DeviceState->Dispatch.vkGetSemaphoreCounterValue(
-				retirementTimeline->DeviceState->Device.device,
-				retirementTimeline->Semaphore,
-				&completedValue) != VK_SUCCESS)
+			auto imagesResult = swapchain.get_images();
+			if (!imagesResult)
 			{
-				newSwapchain.destroy_image_views(newViews);
-				vkb::destroy_swapchain(newSwapchain);
+				DestroySwapchain();
 				return false;
 			}
-			if (completedValue < retirementValue)
+			auto viewsResult = swapchain.get_image_views();
+			if (!viewsResult)
 			{
-				VkSemaphoreWaitInfo waitInfo{};
-				waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-				waitInfo.semaphoreCount = 1;
-				waitInfo.pSemaphores = &retirementTimeline->Semaphore;
-				waitInfo.pValues = &retirementValue;
-				if (retirementTimeline->DeviceState->Dispatch.vkWaitSemaphores(
-					retirementTimeline->DeviceState->Device.device, &waitInfo, UINT64_MAX) != VK_SUCCESS)
-				{
-					newSwapchain.destroy_image_views(newViews);
-					vkb::destroy_swapchain(newSwapchain);
-					return false;
-				}
-			}
-
-			// The frame timeline proves rendering is finished, but core Vulkan does not
-			// expose presentation-engine completion on that timeline. Serialize only
-			// the presentation queue here before retiring the old WSI objects; this
-			// avoids the former device-wide idle while remaining correct on drivers
-			// without swapchain-maintenance present fences.
-			std::scoped_lock lock(*state->PresentationQueueMutex);
-			if (state->Dispatch.vkQueueWaitIdle(state->PresentationQueue) != VK_SUCCESS)
-			{
-				newSwapchain.destroy_image_views(newViews);
-				vkb::destroy_swapchain(newSwapchain);
+				DestroySwapchain();
 				return false;
 			}
-		}
+			auto newImages = std::move(imagesResult).value();
+			imageViews = std::move(viewsResult).value();
+			if (newImages.empty() || newImages.size() != imageViews.size())
+			{
+				DestroySwapchain();
+				return false;
+			}
+			format = FromVkFormat(swapchain.image_format);
+			extent = { swapchain.extent.width, swapchain.extent.height };
+			textures.reserve(newImages.size());
+			views.reserve(newImages.size());
+			for (std::size_t index = 0; index < newImages.size(); ++index)
+			{
+				Rhi::TextureDesc textureDesc{};
+				textureDesc.Dimension = Rhi::TextureDimension::Texture2D;
+				textureDesc.Extent = { extent.Width, extent.Height, 1 };
+				textureDesc.PixelFormat = format;
+				textureDesc.Usage = Rhi::TextureUsage::ColorAttachment;
+				textures.push_back(std::make_unique<VulkanTexture>(state, newImages[index], textureDesc));
 
-		views.clear();
-		textures.clear();
-		if (replaceExisting)
+				Rhi::TextureViewDesc viewDesc{};
+				viewDesc.Dimension = Rhi::TextureViewDimension::Texture2D;
+				viewDesc.PixelFormat = format;
+				views.push_back(std::make_unique<VulkanTextureView>(
+					state, *textures.back(), imageViews[index], viewDesc));
+			}
+			session.SetImages(swapchain.swapchain, static_cast<std::uint32_t>(views.size()));
+			return true;
+		}
+		catch (...)
 		{
 			DestroySwapchain();
+			throw;
 		}
-
-		swapchain = std::move(newSwapchain);
-		imageViews = std::move(newViews);
-		format = FromVkFormat(swapchain.image_format);
-		extent = { swapchain.extent.width, swapchain.extent.height };
-
-		textures.reserve(newImages.size());
-		views.reserve(newImages.size());
-		for (std::size_t index = 0; index < newImages.size(); ++index)
-		{
-			Rhi::TextureDesc textureDesc{};
-			textureDesc.Dimension = Rhi::TextureDimension::Texture2D;
-			textureDesc.Extent = { extent.Width, extent.Height, 1 };
-			textureDesc.PixelFormat = format;
-			textureDesc.Usage = Rhi::TextureUsage::ColorAttachment;
-			textures.push_back(std::make_unique<VulkanTexture>(state, newImages[index], textureDesc));
-
-			Rhi::TextureViewDesc viewDesc{};
-			viewDesc.Dimension = Rhi::TextureViewDimension::Texture2D;
-			viewDesc.PixelFormat = format;
-			views.push_back(std::make_unique<VulkanTextureView>(
-				state, *textures.back(), imageViews[index], viewDesc));
-		}
-		return true;
 	}
 
 	void VulkanSwapchain::DestroySwapchain()
 	{
+		session.Invalidate();
+		extent = {};
+		format = Rhi::Format::Undefined;
 		views.clear();
 		textures.clear();
 		if (!imageViews.empty() && swapchain.swapchain != VK_NULL_HANDLE)

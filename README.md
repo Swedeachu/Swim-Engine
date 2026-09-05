@@ -21,7 +21,7 @@ CMake is the only build-system source of truth. The repository does not commit g
 - A Vulkan SDK for the legacy renderer's Vulkan headers/loader. The shader pipeline no longer needs `dxc.exe`: first-party shaders are Slang, and CMake downloads a pinned `slangc` SDK automatically. The modern RHI backend pins its own Vulkan headers, so it does not depend on the installed SDK version.
 - On Linux, a C++20 compiler plus Ninja is sufficient for the current Platform/Input foundation build; the legacy renderer/game executable remains Windows-only until the later renderer/RHI phases are completed.
 
-SDL3 is fetched and built by CMake as a pinned CPM dependency; no system-installed SDL3 is required. `Swim::Platform` owns SDL3 privately so SDL headers do not become public engine API.
+SDL3 is fetched and built by CMake as a pinned CPM dependency; no system-installed SDL3 is required. `Source/Engine/Platform` owns SDL3 usage; consuming executables link SDL3 privately, and public engine headers remain SDL-free.
 
 ### Visual Studio solution
 
@@ -40,10 +40,7 @@ So after editing any `CMakeLists.txt` or `cmake/*.cmake`, re-run a build script 
 The generated solution is intentionally organized instead of exposing every CMake target at the root:
 
 ```text
-SwimEngine                 # primary executable; normal engine/game/renderer code
-Engine Modules/
-  SwimPlatform             # reusable platform boundary
-  SwimInput                # reusable input boundary
+SwimEngine                 # engine sources, enabled backends, and game code
 Tests/
   SwimTests                # the entire runnable test corpus, one program
   Header Boundary/         # per-module public-header compile gates
@@ -65,7 +62,7 @@ CMake/
   ALL_BUILD, ZERO_CHECK, INSTALL, ...
 ```
 
-`SwimPlatform` and `SwimInput` are real first-party module targets, not duplicate copies of `SwimEngine`: their source files are explicitly excluded from the `SwimEngine` source glob and linked into the executable once. Keeping those two foundational boundaries separate allows headless/tools/tests to reuse them without linking the whole renderer/game. Tests and examples stay visible for explicit validation but are `EXCLUDE_FROM_ALL`, so a normal engine build does not compile them. All runnable tests live in one `SwimTests` program (see Testing below). Third-party projects remain real dependency targets but are collapsed under `Third Party` (with large dependency graphs such as Draco and WebP nested again) rather than cluttering the solution root. CMake's predefined projects are kept under `CMake`.
+Engine sources compile directly into `SwimEngine`; source filters mirror the directories on disk. Tests and examples compile the source lists they need and link their private SDK dependencies. Each final binary gets each source once, including the asset-compiler ownership case documented in [Visual Studio project structure](docs/VisualStudioProjectStructure.md). All runnable tests live in `SwimTests`. Tools, examples, public-header compile gates, and third-party dependencies remain separate targets grouped by purpose.
 
 Build either configuration from the terminal with:
 
@@ -152,7 +149,23 @@ The group directory decides which configurations compile the suite: `Core`, `Mem
 
 Note that Swim defines `NDEBUG` in every configuration, including Debug, so `assert()` is a no-op throughout the project. Test code must use the `SWIM_CHECK*`/`SWIM_REQUIRE*` macros, which always evaluate and always report.
 
-A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution folder stay separate from `SwimTests` on purpose: each links exactly one module, which is how they prove that module's public headers are self-contained. `SwimTests` links everything and cannot prove that.
+A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution folder stay separate from `SwimTests` on purpose: each compiles a public-header surface with only its declared include paths/dependencies, proving those headers are self-contained. The broad dependency environment of `SwimTests` cannot prove that isolation.
+
+### Vulkan RHI desktop validation
+
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to clear/transfer/presentation, triangle pixel/indexed parity, reflected texture readback, and resize/minimize/restore tests:
+
+```powershell
+$env:SWIM_RUN_RHI_SMOKE = "1"
+.\build\windows-debug\SwimTests.exe --filter=RHI.Vulkan.Smoke
+Remove-Item Env:SWIM_RUN_RHI_SMOKE
+```
+
+```bash
+SWIM_RUN_RHI_SMOKE=1 ./build/linux-debug/SwimTests --filter=RHI.Vulkan.Smoke
+```
+
+The lifecycle test needs a window manager that supports minimize/restore. Missing video/GPU support fails the opted-in cases; default tests include dispatch-capture and frame-lifecycle coverage without a GPU. Inspect validation diagnostics as well as test results. Cross-platform desktop evidence remains open in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md).
 
 ### Development asset cooking
 

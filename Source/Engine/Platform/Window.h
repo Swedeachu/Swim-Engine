@@ -54,6 +54,10 @@ namespace Swim::Platform
 		void SetSize(Extent2D size);
 		void SyncExternalParentSize();
 		void Show();
+		// Requests are asynchronous: observe IsMinimized()/window events before
+		// assuming the window manager has completed either operation.
+		bool Minimize();
+		bool Restore();
 
 	private:
 

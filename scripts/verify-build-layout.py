@@ -850,19 +850,19 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
 
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     required_foundation_fragments = (
-        "add_library(Swim::Platform ALIAS SwimPlatform)",
-        "target_link_libraries(SwimPlatform PRIVATE ${SWIM_SDL3_TARGET})",
-        "add_library(Swim::Input ALIAS SwimInput)",
-        "target_link_libraries(SwimInput PUBLIC Swim::Platform)",
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")',
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")',
+        "file(GLOB_RECURSE SWIM_PLATFORM_SOURCES",
+        "file(GLOB_RECURSE SWIM_INPUT_SOURCES",
+        "target_link_libraries(SwimEngine PRIVATE",
+        "${SWIM_SDL3_TARGET}",
     )
     for fragment in required_foundation_fragments:
         if fragment not in cmake_text:
             fail(f"foundation CMake boundary is missing: {fragment}", failures)
 
-    if cmake_text.count("${SWIM_SDL3_TARGET}") != 1:
-        fail("SDL3 target must be linked directly by SwimPlatform only", failures)
+    tests_text = read_tests_cmake()
+    for fragment in ("${SWIM_PLATFORM_SOURCES}", "${SWIM_INPUT_SOURCES}", "${SWIM_SDL3_TARGET}"):
+        if fragment not in tests_text:
+            fail(f"platform/input test source or private dependency is missing: {fragment}", failures)
 
     window_system_header = (ROOT / "Source" / "Engine" / "Platform" / "WindowSystem.h").read_text(
         encoding="utf-8", errors="ignore"
@@ -923,17 +923,17 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
             )
 
     platform_compile_definition_block = re.search(
-        r"target_compile_definitions\(SwimPlatform PRIVATE(?P<body>.*?)\n\)",
+        r"target_compile_definitions\(SwimEngine PRIVATE(?P<body>.*?)\n\)",
         cmake_text,
         re.DOTALL,
     )
     if platform_compile_definition_block is None:
-        fail("SwimPlatform is missing its private Windows compile-definition block", failures)
+        fail("SwimEngine is missing its private Windows compile-definition block", failures)
     else:
         platform_definition_text = platform_compile_definition_block.group("body")
         for compile_definition in ("WIN32_LEAN_AND_MEAN", "NOMINMAX"):
             if f"$<$<PLATFORM_ID:Windows>:{compile_definition}>" not in platform_definition_text:
-                fail(f"SwimPlatform is missing Windows compile definition: {compile_definition}", failures)
+                fail(f"SwimEngine is missing Windows compile definition: {compile_definition}", failures)
 
     platform_input_types = (ROOT / "Source" / "Engine" / "Platform" / "InputTypes.h").read_text(
         encoding="utf-8", errors="ignore"
@@ -1063,8 +1063,7 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
             fail(f"{renderer_name} regressed to global active-scene discovery", failures)
 
     for fragment in (
-        "add_library(SwimCore STATIC",
-        "add_library(Swim::Core ALIAS SwimCore)",
+        "set(SWIM_CORE_SOURCES",
         "Source/Engine/EngineConfig.cpp",
     ):
         if fragment not in cmake_text:
@@ -1252,17 +1251,16 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
             fail(f"Phase 3 enkiTS dependency contract is missing: {fragment}", failures)
 
     for fragment in (
-        "add_library(SwimJobs STATIC",
-        "add_library(Swim::Jobs ALIAS SwimJobs)",
-        "target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS Swim::Memory)",
+        "file(GLOB_RECURSE SWIM_JOB_SOURCES",
         "target_link_libraries(SwimEngine PRIVATE",
-        "Swim::Jobs",
+        "Swim::EnkiTS",
+        "SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 3 JobSystem CMake boundary is missing: {fragment}", failures)
 
-    if 'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")' not in cmake_text:
-        fail("JobSystem.cpp can be compiled twice: legacy SwimEngine source glob must exclude the module root", failures)
+    if "${SWIM_JOB_SOURCES}" not in read_tests_cmake():
+        fail("SwimTests must compile the job source list directly", failures)
 
     for fragment in (
         "class JobSystem",
@@ -1344,12 +1342,9 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
     )
 
     for fragment in (
-        "add_library(SwimIO STATIC",
-        "add_library(Swim::IO ALIAS SwimIO)",
-        "PUBLIC Swim::Platform",
-        "PRIVATE Swim::Jobs",
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")',
-        "Swim::IO",
+        "file(GLOB_RECURSE SWIM_IO_SOURCES",
+        "${SWIM_SDL3_TARGET}",
+        "Swim::EnkiTS",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 3 Async IO CMake boundary is missing: {fragment}", failures)
@@ -1458,13 +1453,10 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
             fail(f"mimalloc dependency contract is missing: {fragment}", failures)
 
     for fragment in (
-        "add_library(SwimMemory STATIC",
-        "add_library(Swim::Memory ALIAS SwimMemory)",
-        "target_link_libraries(SwimMemory PRIVATE Swim::Mimalloc)",
+        "file(GLOB_RECURSE SWIM_MEMORY_SOURCES",
+        "Swim::Mimalloc",
         "SWIM_MEMORY_USE_MIMALLOC",
-        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")',
         "target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)",
-        "Swim::Memory",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 3 memory CMake boundary is missing: {fragment}", failures)
@@ -1595,11 +1587,11 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
 
     for fragment in (
-        "add_library(SwimAssets STATIC",
-        "add_library(Swim::Assets ALIAS SwimAssets)",
+        "file(GLOB_RECURSE SWIM_ASSET_SOURCES",
+        "target_sources(SwimEngine PRIVATE ${SWIM_ASSET_SOURCES})",
         "add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL",
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")',
-        "Swim::Assets",
+        "add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 4 asset CMake boundary is missing: {fragment}", failures)
@@ -3036,11 +3028,12 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
     if cmake_path.is_file():
         cmake_text = cmake_path.read_text(encoding="utf-8", errors="ignore")
         for fragment in (
-            "add_library(SwimPhysics STATIC", "add_library(Swim::Physics ALIAS SwimPhysics)",
-            "add_library(SwimPhysicsPhysX STATIC", "add_library(Swim::PhysicsPhysX ALIAS SwimPhysicsPhysX)",
-            "target_link_libraries(SwimPhysicsPhysX PUBLIC Swim::Physics PRIVATE Swim::PhysX)",
-            "add_library(SwimPhysicsJolt STATIC", "add_library(Swim::PhysicsJolt ALIAS SwimPhysicsJolt)",
-            "target_link_libraries(SwimPhysicsJolt PUBLIC Swim::Physics PRIVATE Swim::Jolt)",
+            "file(GLOB_RECURSE SWIM_PHYSICS_SOURCES",
+            "file(GLOB_RECURSE SWIM_PHYSX_BACKEND_SOURCES",
+            "file(GLOB_RECURSE SWIM_JOLT_BACKEND_SOURCES",
+            "list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSICS_SOURCES})",
+            "list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSX_BACKEND_SOURCES})",
+            "list(APPEND SWIM_ENGINE_SOURCES ${SWIM_JOLT_BACKEND_SOURCES})",
             "include(cmake/JoltDependencies.cmake)",
             'list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")',
             'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")',
@@ -3050,27 +3043,17 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             if fragment not in cmake_text:
                 fail(f"Phase 6 physics target boundary is missing from CMake: {fragment}", failures)
 
-        swim_physics_link = re.search(r"target_link_libraries\(SwimPhysics\s+([^\)]*)\)", cmake_text, re.DOTALL)
-        if not swim_physics_link:
-            fail("SwimPhysics target has no explicit dependency boundary", failures)
-        else:
-            link_text = swim_physics_link.group(1)
-            for forbidden in ("Swim::PhysX", "PhysX", "Jolt", "EnTT::EnTT"):
-                if forbidden in link_text:
-                    fail(f"Swim::Physics links backend/scene implementation dependency directly: {forbidden}", failures)
-
+        # Concrete SDK dependencies now belong to the final consumer, while
+        # source/header checks above enforce the generic physics API boundary.
         engine_links = re.findall(r"target_link_libraries\(SwimEngine\s+([^\)]*)\)", cmake_text, re.DOTALL)
-        if not engine_links:
-            fail("legacy runtime has no explicit target_link_libraries dependency declaration", failures)
-        else:
-            link_text = "\n".join(engine_links)
-            for fragment in ("Swim::Physics", "Swim::PhysicsPhysX", "Swim::PhysicsJolt"):
-                if fragment not in link_text:
-                    fail(f"legacy runtime is missing explicit physics target dependency: {fragment}", failures)
-            if "Swim::PhysX" in link_text:
-                fail("legacy runtime bypasses Swim::PhysicsPhysX and links raw PhysX", failures)
-            if "Swim::Jolt" in link_text:
-                fail("legacy runtime bypasses Swim::PhysicsJolt and links raw Jolt", failures)
+        link_text = "\n".join(engine_links)
+        for fragment in ("Swim::PhysX", "Swim::Jolt", "glm::glm"):
+            if fragment not in link_text:
+                fail(f"runtime physics dependency is missing: {fragment}", failures)
+        tests_text = read_tests_cmake()
+        for fragment in ("${SWIM_PHYSICS_SOURCES}", "${SWIM_JOLT_BACKEND_SOURCES}", "${SWIM_PHYSX_BACKEND_SOURCES}"):
+            if fragment not in tests_text:
+                fail(f"physics test source list is missing: {fragment}", failures)
 
     cmake_path = ROOT / "CMakeLists.txt"
     if cmake_path.is_file():
@@ -3178,7 +3161,7 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
         'include(cmake/ShaderCompilerDependencies.cmake)',
         'add_library(SwimShaderCompiler STATIC',
         'add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)',
-        'target_link_libraries(SwimShaderCompiler PUBLIC Swim::Rhi PRIVATE simdjson::simdjson)',
+        'target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)',
         'swim_add_slang_program(SwimBasicRaster',
     ):
         if fragment not in cmake_text:
@@ -3412,23 +3395,8 @@ def check_phase8_rhi_type_architecture(failures: list[str]) -> None:
         if forbidden in combined:
             fail(f"generic RHI public contract leaks a backend/platform API: {forbidden}", failures)
 
-    for fragment in (
-        'add_library(SwimRhi INTERFACE',
-        'add_library(Swim::Rhi ALIAS SwimRhi)',
-        'target_include_directories(SwimRhi INTERFACE ${CMAKE_SOURCE_DIR}/Source)',
-    ):
-        if fragment not in cmake_text:
-            fail(f"Swim::Rhi target boundary is missing: {fragment}", failures)
-    generic_rhi_slice = cmake_text[
-        cmake_text.find('add_library(SwimRhi INTERFACE'):
-        cmake_text.find('# The modern Vulkan backend is a cross-platform foundation target')
-    ]
-    for forbidden in ('target_link_libraries(SwimRhi', 'Vulkan::', 'volk::', 'D3D12'):
-        if forbidden in generic_rhi_slice:
-            fail(f"Swim::Rhi target picked up a backend dependency: {forbidden}", failures)
-
-    if 'SwimRhiPublicHeaders' not in tests_text or '\n\t\tRHI\n' not in tests_text or 'Swim::Rhi' not in tests_text:
-        fail("RHI tests/header boundary are not part of the portable Swim::Rhi test graph", failures)
+    if 'SwimRhiPublicHeaders' not in tests_text or '\n\t\tRHI\n' not in tests_text:
+        fail("RHI tests/header boundary are not part of the portable test graph", failures)
 
 
 
@@ -3493,10 +3461,11 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
 
     for fragment in (
         'option(SWIM_ENABLE_VULKAN_RHI',
-        'add_library(SwimRhiVulkan STATIC',
-        'add_library(Swim::RhiVulkan ALIAS SwimRhiVulkan)',
-        'PUBLIC Swim::Rhi',
-        'PRIVATE Swim::Platform volk::volk vk-bootstrap::vk-bootstrap',
+        'file(GLOB_RECURSE SWIM_VULKAN_RHI_SOURCES',
+        'set(SWIM_VULKAN_RHI_PRIVATE_LIBS',
+        'set(SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS',
+        'target_link_libraries(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})',
+        'list(APPEND SWIM_ENGINE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})',
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")',
     ):
         if fragment not in cmake_text:
@@ -3507,7 +3476,7 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
     boundary_path = ROOT / "Source" / "Tests" / "HeaderBoundary" / "RhiVulkanPublicHeaders.cpp"
     if not test_path.is_file() or not boundary_path.is_file():
         fail("Vulkan RHI registration/public-header validation files are missing", failures)
-    for fragment in ('SwimRhiVulkanPublicHeaders', 'SWIM_VULKAN_RHI_SUITES', 'Swim::RhiVulkan'):
+    for fragment in ('SwimRhiVulkanPublicHeaders', 'SWIM_VULKAN_RHI_SUITES', '${SWIM_VULKAN_RHI_SOURCES}', '${SWIM_VULKAN_RHI_PRIVATE_LIBS}'):
         if fragment not in tests_text:
             fail(f"Vulkan RHI validation wiring is missing: {fragment}", failures)
 
@@ -3580,7 +3549,7 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         'vkResetCommandPool',
         'class VulkanCommandList final',
         'VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT',
-        'Vulkan swapchain retirement timeline must belong to the same device',
+        'timeline->GetState()->DeviceState.get() != state.get()',
         'PresentationQueue',
         'vkQueueWaitIdle(state->PresentationQueue)',
     ):
@@ -3643,11 +3612,13 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         "Descriptors/VulkanDescriptorLayout.cpp", "Descriptors/VulkanDescriptorTable.cpp",
         "Descriptors/VulkanDescriptorTableWrites.cpp", "Resources/VulkanSampler.cpp",
         "Commands/VulkanCommandListDescriptors.cpp",
+        "Internal/VulkanSwapchainSession.cpp", "VulkanSwapchainRetirement.cpp",
     ):
         if not (ROOT / "Source/Engine/Systems/Renderer/RHI/Backends/Vulkan" / relative).is_file():
             fail(f"Vulkan graphics implementation unit is missing: {relative}", failures)
     for suite_file in ("VulkanPipelineTests.cpp", "VulkanDrawTests.cpp", "VulkanTriangleSmokeTests.cpp",
-                       "VulkanDescriptorTests.cpp", "VulkanDescriptorDrawTests.cpp", "VulkanTextureSmokeTests.cpp"):
+                       "VulkanDescriptorTests.cpp", "VulkanDescriptorDrawTests.cpp", "VulkanTextureSmokeTests.cpp",
+                       "VulkanSwapchainTests.cpp", "VulkanWindowSmokeTests.cpp"):
         check_suite_is_compiled("RHIVulkan", suite_file, failures)
 
 
@@ -3745,8 +3716,8 @@ def check_retirement_boundaries(failures: list[str]) -> None:
     if engine.count("inputSystem->AdvanceFrame();") != 1 or not (0 <= pump < advance < fixed):
         fail("input snapshot must advance once after pumping events and before fixed simulation", failures)
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    for fragment in ("add_library(Swim::Commands ALIAS SwimCommands)",
-                     'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Commands/")'):
+    for fragment in ("set(SWIM_COMMANDS_SOURCES",
+                     "Source/Engine/Commands/CommandRegistry.cpp"):
         if fragment not in cmake:
             fail(f"command module ownership boundary is missing: {fragment}", failures)
     check_suite_is_compiled("Commands", "CommandRegistryTests.cpp", failures)
