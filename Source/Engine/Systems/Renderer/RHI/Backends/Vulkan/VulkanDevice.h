@@ -19,6 +19,9 @@
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanGraphicsPipeline.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanSampler.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorTable.h"
+
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
@@ -295,9 +298,9 @@ namespace Swim::RhiVulkan
 				return std::make_unique<VulkanTextureView>(state, *vulkanTexture, view, resolvedDesc, true);
 			}
 
-			std::unique_ptr<Rhi::Sampler> CreateSampler(const Rhi::SamplerDesc&) override
+			std::unique_ptr<Rhi::Sampler> CreateSampler(const Rhi::SamplerDesc& desc) override
 			{
-				return nullptr;
+				return VulkanSampler::Create(state, desc);
 			}
 
 			std::unique_ptr<Rhi::ShaderProgram> CreateShaderProgram(const Rhi::ShaderProgramDesc& desc) override
@@ -320,9 +323,9 @@ namespace Swim::RhiVulkan
 				return nullptr;
 			}
 
-			std::unique_ptr<Rhi::DescriptorTable> CreateDescriptorTable(const Rhi::DescriptorTableDesc&) override
+			std::unique_ptr<Rhi::DescriptorTable> CreateDescriptorTable(const Rhi::DescriptorTableDesc& desc) override
 			{
-				return nullptr;
+				return VulkanDescriptorTable::Create(state, desc);
 			}
 
 			std::unique_ptr<Rhi::CommandPool> CreateCommandPool(Rhi::QueueType queueType) override

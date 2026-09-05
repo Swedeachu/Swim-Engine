@@ -182,6 +182,7 @@ namespace Swim::RhiVulkan
 			info.pDynamicState = &dynamic;
 			info.layout = FromNativeHandle<VkPipelineLayout>(layout->GetNativeHandle());
 			auto result = std::make_unique<VulkanGraphicsPipeline>(state, desc);
+			result->layoutState = layout->GetLayoutState();
 			if (state->Dispatch.vkCreateGraphicsPipelines(state->Device.device, VK_NULL_HANDLE, 1, &info, nullptr, &result->pipeline) != VK_SUCCESS)
 			{
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.
@@ -203,6 +204,11 @@ namespace Swim::RhiVulkan
 	const std::shared_ptr<VulkanDeviceState>& VulkanGraphicsPipeline::GetState() const
 	{
 		return state;
+	}
+
+	const std::shared_ptr<VulkanPipelineLayoutState>& VulkanGraphicsPipeline::GetLayoutState() const
+	{
+		return layoutState;
 	}
 
 	bool VulkanGraphicsPipeline::MatchesRendering(std::span<const Rhi::Format> colors, Rhi::Format depth, Rhi::SampleCount sampleCount) const

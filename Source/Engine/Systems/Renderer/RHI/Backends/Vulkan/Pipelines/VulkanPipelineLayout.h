@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanShaderProgram.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorLayout.h"
 
 namespace Swim::RhiVulkan
 {
@@ -10,7 +11,8 @@ namespace Swim::RhiVulkan
 	{
 	public:
 		VulkanPipelineLayout(std::shared_ptr<VulkanDeviceState> state, VulkanShaderProgram& program);
-		~VulkanPipelineLayout() override;
+		~VulkanPipelineLayout() override = default;
+		const std::shared_ptr<VulkanPipelineLayoutState>& GetLayoutState() const;
 		static std::unique_ptr<VulkanPipelineLayout> Create(std::shared_ptr<VulkanDeviceState> state, const Rhi::PipelineLayoutDesc& desc);
 		std::uintptr_t GetNativeHandle() const override;
 		Rhi::ShaderProgram& GetProgram() const override;
@@ -20,8 +22,7 @@ namespace Swim::RhiVulkan
 	private:
 		std::shared_ptr<VulkanDeviceState> state;
 		VulkanShaderProgram& program;
-		Rhi::ShaderProgramInterface interface;
-		VkPipelineLayout layout = VK_NULL_HANDLE;
+		std::shared_ptr<VulkanPipelineLayoutState> layoutState;
 	};
 
 } // namespace Swim::RhiVulkan

@@ -52,6 +52,7 @@ namespace Swim::RhiVulkan
 		rendering = false;
 		recording = true;
 		graphicsPipeline = nullptr;
+		boundTables.clear();
 		availableIndices = 0;
 		viewportSet = false;
 		scissorSet = false;
@@ -73,11 +74,6 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::BindComputePipeline(Rhi::ComputePipeline&)
 	{
 		throw std::logic_error("Vulkan compute pipelines are implemented with item 39");
-	}
-
-	void VulkanCommandList::BindDescriptorTable(std::uint32_t, Rhi::DescriptorTable&)
-	{
-		throw std::logic_error("Vulkan descriptor tables are implemented with item 39");
 	}
 
 	void VulkanCommandList::BindVertexBuffer(std::uint32_t, Rhi::Buffer&, std::uint64_t)

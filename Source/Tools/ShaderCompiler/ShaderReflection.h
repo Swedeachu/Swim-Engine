@@ -35,6 +35,10 @@ namespace Swim::ShaderCompiler
 		std::string BindingKind;
 		std::string TypeKind;
 		std::string ResourceShape;
+		std::string ResourceAccess;
+		std::string ResourceScalarType;
+		bool ResourceArray = false;
+		bool ResourceMultisample = false;
 		std::uint32_t Index = 0;
 		std::uint32_t Space = 0;
 		std::uint32_t Count = 1;

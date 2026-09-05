@@ -44,7 +44,7 @@ SWIM_TEST("RHI.Vulkan.Pipelines", "ModuleAndPipelineFailuresReleasePartialNative
 	SWIM_CHECK_EQUAL(capture.ModulesDestroyed, 3u);
 }
 
-SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndUnimplementedResourceInterfaces")
+SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndUnimplementedPushConstants")
 {
 	Testing::VulkanPipelineCapture capture;
 	auto program = capture.MakeProgram();
@@ -54,15 +54,14 @@ SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndUnimplementedRe
 	SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, {}));
 	const std::array<std::uint32_t, 5> header{ 0x07230203, 0x00010500, 0, 1, 0 };
 	Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Vertex, "main", std::as_bytes(std::span(header)) };
-	Rhi::DescriptorSchemaDesc schema{};
-	schema.Bindings.push_back({ 0, Rhi::DescriptorType::SampledTexture, 1, Rhi::ShaderStageMask::Fragment });
+	Rhi::PushConstantRange range{ 0, 16, Rhi::ShaderStageMask::Vertex };
 	Rhi::ShaderProgramDesc desc{};
 	desc.Stages = { &stage, 1 };
-	desc.Interface.DescriptorSchemas = { &schema, 1 };
+	desc.Interface.PushConstants = { &range, 1 };
 	auto withBindings = RhiVulkan::VulkanShaderProgram::Create(capture.State, desc);
 	SWIM_REQUIRE(withBindings);
-	schema.Bindings.clear();
-	SWIM_CHECK_EQUAL(withBindings->GetInterface().DescriptorSchemas[0].Bindings.size(), 1u);
+	range.Size = 32;
+	SWIM_CHECK_EQUAL(withBindings->GetInterface().PushConstants[0].Size, 16u);
 	SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { withBindings.get(), {} }));
 	SWIM_CHECK_EQUAL(capture.LayoutsCreated, 0u);
 }

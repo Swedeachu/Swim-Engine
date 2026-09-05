@@ -1,3 +1,4 @@
+#include "Tools/ShaderCompiler/ShaderRhiInterface.h"
 #include "Tools/ShaderCompiler/ShaderReflection.h"
 
 namespace

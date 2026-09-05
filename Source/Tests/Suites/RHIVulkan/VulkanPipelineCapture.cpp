@@ -71,7 +71,7 @@ namespace Swim::Testing
 		};
 	}
 
-	std::unique_ptr<RhiVulkan::VulkanShaderProgram> VulkanPipelineCapture::MakeProgram()
+	std::unique_ptr<RhiVulkan::VulkanShaderProgram> VulkanPipelineCapture::MakeProgram(Rhi::ShaderProgramInterfaceDesc interface)
 	{
 		// A SPIR-V header suffices for dispatch capture; real-driver tests compile Slang.
 		const std::array<std::uint32_t, 5> header{ 0x07230203, 0x00010500, 0, 1, 0 };
@@ -80,7 +80,7 @@ namespace Swim::Testing
 			{ Rhi::ShaderStageMask::Vertex, "vertexMain", bytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", bytes }
 		}};
-		return RhiVulkan::VulkanShaderProgram::Create(State, { stages, {}, {} });
+		return RhiVulkan::VulkanShaderProgram::Create(State, { stages, interface, {} });
 	}
 
 	std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> VulkanPipelineCapture::MakePipeline(Rhi::Format format)

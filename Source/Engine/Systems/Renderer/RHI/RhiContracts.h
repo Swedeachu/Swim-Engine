@@ -389,6 +389,11 @@ namespace Swim::Rhi
 	public:
 		virtual PipelineLayout& GetLayout() const = 0;
 		virtual std::uint32_t GetSpace() const = 0;
+		// Initialize every descriptor before binding. First binding freezes this table;
+		// later resource changes use a replacement table and normal GPU retirement.
+		// Writes/first binding require external host synchronization. Keep the layout
+		// and referenced resources alive for the table's use; writes do not add barriers.
+		// BufferRange == 0 selects the remaining buffer range, subject to device limits.
 		virtual void Write(std::span<const DescriptorWrite> writes) = 0;
 	};
 

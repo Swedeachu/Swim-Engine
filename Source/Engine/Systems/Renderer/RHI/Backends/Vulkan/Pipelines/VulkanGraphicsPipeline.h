@@ -13,6 +13,7 @@ namespace Swim::RhiVulkan
 		static std::unique_ptr<VulkanGraphicsPipeline> Create(std::shared_ptr<VulkanDeviceState> state, const Rhi::GraphicsPipelineDesc& desc);
 		std::uintptr_t GetNativeHandle() const override;
 		const std::shared_ptr<VulkanDeviceState>& GetState() const;
+		const std::shared_ptr<VulkanPipelineLayoutState>& GetLayoutState() const;
 		bool MatchesRendering(std::span<const Rhi::Format> colors, Rhi::Format depth, Rhi::SampleCount samples) const;
 
 	private:
@@ -20,6 +21,7 @@ namespace Swim::RhiVulkan
 		std::vector<Rhi::Format> colorFormats;
 		Rhi::Format depthFormat;
 		Rhi::SampleCount samples;
+		std::shared_ptr<VulkanPipelineLayoutState> layoutState;
 		VkPipeline pipeline = VK_NULL_HANDLE;
 	};
 

@@ -307,7 +307,7 @@ if(SWIM_BUILD_SHADER_COMPILER AND SWIM_SHADER_COMPILER_DEPENDENCIES_AVAILABLE)
 	add_library(SwimShaderCompiler STATIC ${SWIM_SHADER_COMPILER_SOURCES})
 	add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)
 	target_include_directories(SwimShaderCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)
+	target_link_libraries(SwimShaderCompiler PUBLIC Swim::Rhi PRIVATE simdjson::simdjson)
 	target_compile_features(SwimShaderCompiler PUBLIC cxx_std_20)
 	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_SHADER_COMPILER_SOURCES})
 	swim_set_solution_folder(SwimShaderCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
@@ -342,9 +342,14 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		SOURCE Source/Shaders/Slang/RhiSmoke/Triangle.slang
 		PROFILE spirv_1_5
 	)
+	swim_add_slang_program(SwimRhiTexture
+		SOURCE Source/Shaders/Slang/RhiSmoke/Texture.slang
+		PROFILE spirv_1_5
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
-		SOURCES Source/Shaders/Slang/RhiSmoke/Triangle.slang
+			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
+		SOURCES Source/Shaders/Slang/RhiSmoke/Triangle.slang Source/Shaders/Slang/RhiSmoke/Texture.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()

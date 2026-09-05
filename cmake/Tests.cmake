@@ -192,6 +192,7 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_FIXTURE_SOURCES
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
 		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
 		# Backend dispatch-spy suites inspect native commands without a GPU.
@@ -234,7 +235,11 @@ function(swim_configure_tests)
 
 	if(TARGET SwimRhiSmokeShaders)
 		add_dependencies(SwimTests SwimRhiSmokeShaders)
-		target_compile_definitions(SwimTests PRIVATE SWIM_RHI_TRIANGLE_SPIRV_PATH="${SwimRhiTriangle_SPIRV}")
+		target_compile_definitions(SwimTests PRIVATE
+			SWIM_RHI_TRIANGLE_SPIRV_PATH="${SwimRhiTriangle_SPIRV}"
+			SWIM_RHI_TEXTURE_SPIRV_PATH="${SwimRhiTexture_SPIRV}"
+			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"
+		)
 	endif()
 
 	if(TARGET SwimSlangReflectionSample)

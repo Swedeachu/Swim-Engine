@@ -88,6 +88,33 @@ namespace Swim::ShaderCompiler
 				{
 					reflection.TypeKind = ReadString(type, "kind");
 					reflection.ResourceShape = ReadString(type, "baseShape");
+					reflection.ResourceAccess = ReadString(type, "access");
+					if (const auto array = FindField(type, "array"))
+					{
+						const auto error = array->get_bool().get(reflection.ResourceArray);
+						(void)error;
+					}
+					if (const auto multisample = FindField(type, "multisample"))
+					{
+						const auto error = multisample->get_bool().get(reflection.ResourceMultisample);
+						(void)error;
+					}
+					if (const auto result = FindField(type, "resultType"))
+					{
+						simdjson::dom::object resultType;
+						if (!result->get_object().get(resultType))
+						{
+							reflection.ResourceScalarType = ReadString(resultType, "scalarType");
+							if (const auto element = FindField(resultType, "elementType"))
+							{
+								simdjson::dom::object elementType;
+								if (!element->get_object().get(elementType))
+								{
+									reflection.ResourceScalarType = ReadString(elementType, "scalarType");
+								}
+							}
+						}
+					}
 				}
 			}
 

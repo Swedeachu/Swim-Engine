@@ -13,6 +13,7 @@ namespace Swim::RhiVulkan
 {
 
 	class VulkanGraphicsPipeline;
+	class VulkanDescriptorTable;
 
 	class VulkanCommandList final : public Rhi::CommandList
 	{
@@ -86,6 +87,8 @@ namespace Swim::RhiVulkan
 		bool viewportSet = false;
 		bool scissorSet = false;
 		void RequireDraw() const;
+		void RequireDescriptorTables() const;
+		std::vector<const VulkanDescriptorTable*> boundTables;
 
 		bool executable = false;
 		bool recording = false;

@@ -12,6 +12,7 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		RequireGraphicsQueue();
 		auto& native = RequireResource<VulkanGraphicsPipeline>(pipeline, GetState());
+		boundTables.assign(native.GetLayoutState()->Sets.size(), nullptr);
 		GetState()->Dispatch.vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			FromNativeHandle<VkPipeline>(native.GetNativeHandle()));
 		graphicsPipeline = &native;
@@ -44,6 +45,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::logic_error("Vulkan draw requires rendering, a graphics pipeline, viewport and scissor");
 		}
+		RequireDescriptorTables();
 		if (!graphicsPipeline->MatchesRendering(renderingColors, renderingDepth, renderingSamples))
 		{
 			throw std::invalid_argument("Vulkan graphics pipeline formats and samples must match the active attachments");

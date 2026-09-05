@@ -5,16 +5,15 @@ namespace Swim::RhiVulkan
 {
 
 	VulkanPipelineLayout::VulkanPipelineLayout(std::shared_ptr<VulkanDeviceState> state, VulkanShaderProgram& program)
-		: state(std::move(state)), program(program), interface(program.GetInterface())
+		: state(std::move(state)), program(program), layoutState(std::make_shared<VulkanPipelineLayoutState>())
 	{
+		layoutState->Device = this->state;
+		layoutState->Interface = program.GetInterface();
 	}
 
-	VulkanPipelineLayout::~VulkanPipelineLayout()
+	const std::shared_ptr<VulkanPipelineLayoutState>& VulkanPipelineLayout::GetLayoutState() const
 	{
-		if (layout != VK_NULL_HANDLE)
-		{
-			state->Dispatch.vkDestroyPipelineLayout(state->Device.device, layout, nullptr);
-		}
+		return layoutState;
 	}
 
 	std::unique_ptr<VulkanPipelineLayout> VulkanPipelineLayout::Create(
@@ -22,17 +21,23 @@ namespace Swim::RhiVulkan
 	{
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
 		if (program == nullptr || program->GetState() != state ||
-			!program->GetInterface().DescriptorSchemas.empty() || !program->GetInterface().PushConstants.empty())
+			!program->GetInterface().PushConstants.empty())
 		{
-			// Resource bindings land with the textured-draw checkpoint. Never discard reflection.
+			// Push-constant recording is a separate contract extension. Never discard reflection.
 			return nullptr;
 		}
 		auto result = std::make_unique<VulkanPipelineLayout>(std::move(state), *program);
+		if (!CreateDescriptorLayouts(*result->layoutState))
+		{
+			return nullptr;
+		}
 		VkPipelineLayoutCreateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		if (result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layout) != VK_SUCCESS)
+		info.setLayoutCount = static_cast<std::uint32_t>(result->layoutState->Sets.size());
+		info.pSetLayouts = result->layoutState->Sets.data();
+		if (result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layoutState->Layout) != VK_SUCCESS)
 		{
-			result->layout = VK_NULL_HANDLE;
+			result->layoutState->Layout = VK_NULL_HANDLE;
 			return nullptr;
 		}
 		return result;
@@ -40,7 +45,7 @@ namespace Swim::RhiVulkan
 
 	std::uintptr_t VulkanPipelineLayout::GetNativeHandle() const
 	{
-		return ToNativeHandle(layout);
+		return ToNativeHandle(layoutState->Layout);
 	}
 
 	Rhi::ShaderProgram& VulkanPipelineLayout::GetProgram() const
@@ -50,7 +55,7 @@ namespace Swim::RhiVulkan
 
 	const Rhi::ShaderProgramInterface& VulkanPipelineLayout::GetInterface() const
 	{
-		return interface;
+		return layoutState->Interface;
 	}
 
 	const std::shared_ptr<VulkanDeviceState>& VulkanPipelineLayout::GetState() const

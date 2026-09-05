@@ -3145,7 +3145,7 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
         'include(cmake/ShaderCompilerDependencies.cmake)',
         'add_library(SwimShaderCompiler STATIC',
         'add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)',
-        'target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)',
+        'target_link_libraries(SwimShaderCompiler PUBLIC Swim::Rhi PRIVATE simdjson::simdjson)',
         'swim_add_slang_program(SwimBasicRaster',
     ):
         if fragment not in cmake_text:
@@ -3607,10 +3607,14 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         "Pipelines/VulkanShaderProgram.cpp", "Pipelines/VulkanPipelineLayout.cpp",
         "Pipelines/VulkanGraphicsPipeline.cpp", "Commands/VulkanCommandListDraw.cpp",
         "Internal/VulkanPipelineUtils.cpp",
+        "Descriptors/VulkanDescriptorLayout.cpp", "Descriptors/VulkanDescriptorTable.cpp",
+        "Descriptors/VulkanDescriptorTableWrites.cpp", "Resources/VulkanSampler.cpp",
+        "Commands/VulkanCommandListDescriptors.cpp",
     ):
         if not (ROOT / "Source/Engine/Systems/Renderer/RHI/Backends/Vulkan" / relative).is_file():
             fail(f"Vulkan graphics implementation unit is missing: {relative}", failures)
-    for suite_file in ("VulkanPipelineTests.cpp", "VulkanDrawTests.cpp", "VulkanTriangleSmokeTests.cpp"):
+    for suite_file in ("VulkanPipelineTests.cpp", "VulkanDrawTests.cpp", "VulkanTriangleSmokeTests.cpp",
+                       "VulkanDescriptorTests.cpp", "VulkanDescriptorDrawTests.cpp", "VulkanTextureSmokeTests.cpp"):
         check_suite_is_compiled("RHIVulkan", suite_file, failures)
 
 

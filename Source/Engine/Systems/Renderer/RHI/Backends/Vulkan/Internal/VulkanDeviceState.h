@@ -11,6 +11,7 @@
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -59,6 +60,7 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<std::mutex> PresentationQueueMutex;
 		VmaVulkanFunctions AllocatorFunctions{};
 		VmaAllocator Allocator = nullptr;
+		std::atomic<std::uint32_t> SamplerCount{ 0 };
 
 		~VulkanDeviceState()
 		{
