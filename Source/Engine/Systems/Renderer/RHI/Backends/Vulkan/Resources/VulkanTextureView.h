@@ -55,6 +55,11 @@ namespace Swim::RhiVulkan
 				return desc;
 			}
 
+			const std::shared_ptr<VulkanDeviceState>& GetState() const
+			{
+				return state;
+			}
+
 		private:
 			std::shared_ptr<VulkanDeviceState> state;
 			VulkanTexture& texture;

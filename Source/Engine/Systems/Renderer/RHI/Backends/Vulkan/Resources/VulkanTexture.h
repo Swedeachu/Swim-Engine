@@ -48,6 +48,16 @@ namespace Swim::RhiVulkan
 				return desc;
 			}
 
+			const std::shared_ptr<VulkanDeviceState>& GetState() const
+			{
+				return state;
+			}
+
+			bool IsSwapchainImage() const
+			{
+				return allocation == nullptr;
+			}
+
 		private:
 			std::shared_ptr<VulkanDeviceState> state;
 			VkImage image = VK_NULL_HANDLE;

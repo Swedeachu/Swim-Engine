@@ -187,8 +187,12 @@ function(swim_configure_tests)
 
 	if(TARGET SwimRhiVulkan)
 		swim_collect_test_suite_sources(SWIM_VULKAN_RHI_SUITES RHIVulkan)
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
-		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::RhiVulkan)
+		# Backend dispatch-spy suites inspect native commands without a GPU.
+		# These dependencies remain private to the test executable.
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::RhiVulkan
+			volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator)
 	endif()
 
 	if(TARGET SwimPhysicsPhysX)

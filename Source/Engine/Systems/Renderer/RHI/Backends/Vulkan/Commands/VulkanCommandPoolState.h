@@ -15,6 +15,7 @@ namespace Swim::RhiVulkan
 			std::shared_ptr<VulkanDeviceState> DeviceState;
 			VkCommandPool Pool = VK_NULL_HANDLE;
 			std::uint32_t FamilyIndex = UINT32_MAX;
+			std::uint64_t Generation = 0;
 
 			~VulkanCommandPoolState()
 			{

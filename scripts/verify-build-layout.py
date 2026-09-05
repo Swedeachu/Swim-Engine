@@ -2915,7 +2915,13 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
 
     physx_world_path = physx_root / "PhysXWorldBackend.cpp"
     if physx_world_path.is_file():
-        physx_text = physx_world_path.read_text(encoding="utf-8", errors="ignore")
+        # Backend types now live in role subfolders; preserve the same checks
+        # across the active source tree rather than requiring a monolithic TU.
+        physx_text = "\n".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in sorted(physx_root.rglob("*"))
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
+        )
         for stale in ("(*shapePtr)->setSimulationFilterData", "(*shapePtr)->setQueryFilterData"):
             if stale in physx_text:
                 fail(
@@ -2938,10 +2944,11 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
 
     jolt_world_path = jolt_root / "JoltWorldBackend.cpp"
     if jolt_world_path.is_file():
-        jolt_text = jolt_world_path.read_text(encoding="utf-8", errors="ignore")
-        jolt_header_path = jolt_root / "JoltWorldBackend.h"
-        if jolt_header_path.is_file():
-            jolt_text += jolt_header_path.read_text(encoding="utf-8", errors="ignore")
+        jolt_text = "\n".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in sorted(jolt_root.rglob("*"))
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
+        )
         for fragment in (
             "JPH::PhysicsSystem", "JPH::ContactListener", "QueryBodyFilter", "QueryObjectLayerFilter",
             "JoltWorldBackend::Raycast", "JoltWorldBackend::Sweep", "JoltWorldBackend::Overlap",
@@ -2953,7 +2960,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             if fragment not in jolt_text:
                 fail(f"Jolt backend parity implementation is missing: {fragment}", failures)
 
-    for path in jolt_root.glob("*") if jolt_root.exists() else ():
+    for path in jolt_root.rglob("*") if jolt_root.exists() else ():
         if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -3417,7 +3424,11 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         return
 
     header_text = backend_header.read_text(encoding="utf-8", errors="ignore") if backend_header.is_file() else ""
-    source_text = backend_source.read_text(encoding="utf-8", errors="ignore")
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in sorted(backend_root.rglob("*"))
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
+    )
     dependency_text = dependency_file.read_text(encoding="utf-8", errors="ignore")
 
     for forbidden in ('<vulkan/', '<volk.h>', '<VkBootstrap.h>', 'VkInstance', 'VkDevice', 'vkb::'):
@@ -3554,10 +3565,11 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         if fragment not in source_text:
             fail(f"Vulkan RHI item 38 timeline/frame-retirement contract is missing: {fragment}", failures)
 
-    swapchain_start = source_text.find('class VulkanSwapchain final')
-    device_start = source_text.find('class VulkanDevice final', swapchain_start)
-    if swapchain_start != -1 and device_start != -1:
-        swapchain_text = source_text[swapchain_start:device_start]
+    swapchain_path = backend_root / "VulkanSwapchain.cpp"
+    if not swapchain_path.is_file():
+        fail("Vulkan swapchain implementation is missing", failures)
+    else:
+        swapchain_text = swapchain_path.read_text(encoding="utf-8", errors="ignore")
         if 'vkDeviceWaitIdle' in swapchain_text:
             fail("Vulkan swapchain resize regressed to device-wide idle waits", failures)
         if 'vkQueueWaitIdle(state->PresentationQueue)' not in swapchain_text:

@@ -235,6 +235,16 @@ namespace Swim::Rhi
 		Extent3D Extent{};
 	};
 
+	// Tightly packed, single-subresource copies. Compressed and depth/stencil
+	// buffer/image transfers need explicit block/aspect contracts in a later pass.
+	struct BufferTextureCopyRegion
+	{
+		std::uint64_t BufferOffset = 0;
+		TextureSubresource Subresource{};
+		Offset3D TextureOffset{};
+		Extent3D Extent{};
+	};
+
 	struct ClearColor
 	{
 		std::array<float, 4> Value{ 0.0f, 0.0f, 0.0f, 0.0f };
@@ -251,6 +261,7 @@ namespace Swim::Rhi
 	struct DepthStencilAttachmentDesc
 	{
 		TextureView* View = nullptr;
+		// This baseline uses the same load/store policy for both depth and stencil.
 		LoadOp DepthLoad = LoadOp::Load;
 		StoreOp DepthStore = StoreOp::Store;
 		float ClearDepth = 1.0f;
@@ -323,6 +334,12 @@ namespace Swim::Rhi
 	{
 	public:
 		virtual const BufferDesc& GetDesc() const = 0;
+
+		// CPU access does not wait for GPU work. Callers own completion and must
+		// finish writes before submission; reads require HostRead + a timeline wait.
+		// Write accepts CpuToGpu, Read accepts GpuToCpu. Both maintain CPU caches.
+		virtual void Write(std::uint64_t offset, std::span<const std::byte> data) = 0;
+		virtual void Read(std::uint64_t offset, std::span<std::byte> data) = 0;
 	};
 
 	class Texture : public RhiObject
@@ -407,6 +424,12 @@ namespace Swim::Rhi
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
 		virtual void CopyBuffer(Buffer& source, Buffer& destination, const BufferCopyRegion& region) = 0;
 		virtual void CopyTexture(Texture& source, Texture& destination, const TextureCopyRegion& region) = 0;
+		virtual void CopyBufferToTexture(Buffer& source, Texture& destination, const BufferTextureCopyRegion& region) = 0;
+		virtual void CopyTextureToBuffer(Texture& source, Buffer& destination, const BufferTextureCopyRegion& region) = 0;
+		// Transitions/copies are outside rendering. Resources remain alive until
+		// submission completion. Transitions do not transfer queue-family ownership.
+		// The Vulkan baseline uses the graphics family for barriers/image work;
+		// CopyBuffer alone may record on a transfer family. Caller supplies states.
 		virtual void BeginRendering(const RenderingDesc& desc) = 0;
 		virtual void EndRendering() = 0;
 		virtual void BindGraphicsPipeline(GraphicsPipeline& pipeline) = 0;

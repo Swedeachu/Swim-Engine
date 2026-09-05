@@ -50,6 +50,7 @@ namespace Swim::RhiVulkan
 				{
 					throw std::runtime_error("Failed to reset Vulkan command pool");
 				}
+				++state->Generation;
 			}
 
 		private:

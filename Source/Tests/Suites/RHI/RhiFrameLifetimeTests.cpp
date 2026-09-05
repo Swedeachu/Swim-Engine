@@ -48,6 +48,9 @@ namespace
 		void Transition(Swim::Rhi::Texture&, Swim::Rhi::ResourceState, Swim::Rhi::ResourceState, const Swim::Rhi::TextureSubresourceRange&) override {}
 		void CopyBuffer(Swim::Rhi::Buffer&, Swim::Rhi::Buffer&, const Swim::Rhi::BufferCopyRegion&) override {}
 		void CopyTexture(Swim::Rhi::Texture&, Swim::Rhi::Texture&, const Swim::Rhi::TextureCopyRegion&) override {}
+		void CopyBufferToTexture(Swim::Rhi::Buffer&, Swim::Rhi::Texture&, const Swim::Rhi::BufferTextureCopyRegion&) override {}
+		void CopyTextureToBuffer(Swim::Rhi::Texture&, Swim::Rhi::Buffer&, const Swim::Rhi::BufferTextureCopyRegion&) override {}
+
 		void BeginRendering(const Swim::Rhi::RenderingDesc&) override {}
 		void EndRendering() override {}
 		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline&) override {}

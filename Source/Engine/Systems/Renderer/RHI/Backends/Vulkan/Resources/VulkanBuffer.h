@@ -30,13 +30,9 @@ namespace Swim::RhiVulkan
 				this->desc.DebugName = debugName;
 			}
 
-			~VulkanBuffer() override
-			{
-				if (buffer != VK_NULL_HANDLE && allocation != nullptr)
-				{
-					vmaDestroyBuffer(state->Allocator, buffer, allocation);
-				}
-			}
+			~VulkanBuffer() override;
+			void Write(std::uint64_t offset, std::span<const std::byte> data) override;
+			void Read(std::uint64_t offset, std::span<std::byte> data) override;
 
 			std::uintptr_t GetNativeHandle() const override
 			{
@@ -46,6 +42,11 @@ namespace Swim::RhiVulkan
 			const Rhi::BufferDesc& GetDesc() const override
 			{
 				return desc;
+			}
+
+			const std::shared_ptr<VulkanDeviceState>& GetState() const
+			{
+				return state;
 			}
 
 		private:

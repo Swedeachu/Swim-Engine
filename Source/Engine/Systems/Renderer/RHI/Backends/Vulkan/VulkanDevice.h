@@ -205,7 +205,7 @@ namespace Swim::RhiVulkan
 				const Rhi::TextureViewDesc& desc) override
 			{
 				auto* vulkanTexture = dynamic_cast<VulkanTexture*>(&texture);
-				if (vulkanTexture == nullptr)
+				if (vulkanTexture == nullptr || vulkanTexture->GetState().get() != state.get())
 				{
 					return nullptr;
 				}
@@ -215,6 +215,9 @@ namespace Swim::RhiVulkan
 					? textureDesc.PixelFormat
 					: desc.PixelFormat;
 				if (viewFormat != textureDesc.PixelFormat || ToVkFormat(viewFormat) == VK_FORMAT_UNDEFINED ||
+					((desc.Dimension == Rhi::TextureViewDimension::Texture1D ||
+						desc.Dimension == Rhi::TextureViewDimension::Texture2D ||
+						desc.Dimension == Rhi::TextureViewDimension::Texture3D) && desc.ArrayLayerCount != 1) ||
 					desc.MipLevelCount == 0 || desc.ArrayLayerCount == 0 ||
 					desc.BaseMipLevel >= textureDesc.MipLevels ||
 					desc.MipLevelCount > textureDesc.MipLevels - desc.BaseMipLevel ||

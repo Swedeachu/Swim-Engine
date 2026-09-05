@@ -192,6 +192,8 @@ namespace Swim::Rhi
 		Present = 1u << 12,
 		AccelerationStructureRead = 1u << 13,
 		AccelerationStructureWrite = 1u << 14,
+		HostRead = 1u << 15,
+		HostWrite = 1u << 16,
 	};
 
 	template <typename Enum>
@@ -431,6 +433,7 @@ namespace Swim::Rhi
 		StencilFaceState Back{};
 	};
 
+	// Positive framebuffer rectangle, measured from the top-left; NDC stays +Y-up.
 	struct Viewport
 	{
 		float X = 0.0f;

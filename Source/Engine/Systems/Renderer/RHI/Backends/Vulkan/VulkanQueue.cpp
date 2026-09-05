@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanSemaphore.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanTimeline.h"
 
+#include <unordered_set>
 #include <stdexcept>
 #include <vector>
 
@@ -15,13 +16,20 @@ namespace Swim::RhiVulkan
 		{
 			std::vector<VkCommandBufferSubmitInfo> commandInfos;
 			commandInfos.reserve(desc.CommandLists.size());
+			std::unordered_set<VkCommandBuffer> submittedCommands;
+			submittedCommands.reserve(desc.CommandLists.size());
 			for (Rhi::CommandList* commandList : desc.CommandLists)
 			{
 				auto* vulkanCommandList = dynamic_cast<VulkanCommandList*>(commandList);
 				if (vulkanCommandList == nullptr || vulkanCommandList->GetState().get() != state.get() ||
-					vulkanCommandList->GetQueueFamilyIndex() != familyIndex)
+					vulkanCommandList->GetQueueFamilyIndex() != familyIndex || !vulkanCommandList->IsExecutable())
 				{
-					throw std::invalid_argument("Vulkan queue submission requires same-device command lists from the matching queue family");
+					throw std::invalid_argument("Vulkan queue submission requires executable, unsubmitted, same-device command lists from the matching queue family");
+				}
+
+				if (!submittedCommands.insert(vulkanCommandList->GetCommandBuffer()).second)
+				{
+					throw std::invalid_argument("Vulkan one-time command lists cannot occur twice in one submission");
 				}
 
 				VkCommandBufferSubmitInfo commandInfo{};
@@ -119,6 +127,10 @@ namespace Swim::RhiVulkan
 			if (state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence) != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed to submit work to Vulkan queue");
+			}
+			for (Rhi::CommandList* commandList : desc.CommandLists)
+			{
+				static_cast<VulkanCommandList*>(commandList)->MarkSubmitted();
 			}
 		}
 

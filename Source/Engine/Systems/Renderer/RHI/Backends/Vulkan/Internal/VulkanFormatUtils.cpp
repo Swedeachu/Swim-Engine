@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 
+#include <algorithm>
+
 namespace Swim::RhiVulkan
 {
 
