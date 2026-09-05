@@ -142,102 +142,54 @@ unset(SWIM_SAVED_CMAKE_FOLDER)
 # RERUN_CMAKE cycle when the same dependency cache is also configured by the
 # Visual Studio solution tree. New files are still discovered on every normal
 # clean/soft build because both workflows configure first.
+# --- Engine module source discovery -----------------------------------------
+#
+# These used to each be their own add_library(...) target, which is what made
+# every one of them a separate Visual Studio project under "Engine Modules".
+# They are still discovered here, at the same points in the configure, with
+# the same glob patterns and the same third-party dependency setup -- but the
+# .cpp/.h lists below are only ever *compiled* as part of a real final binary
+# (SwimEngine, SwimTests, an example, or a Tools target). A module's source
+# list is a build-graph concept now, not a build-graph *target*. See
+# docs/VisualStudioProjectStructure.md and architecture plan §0.2/§4.3 for the
+# full rationale and the resulting Visual Studio layout.
+#
+# Two rules keep this safe:
+#  1. Every consumer binary compiles a given module's sources at most once.
+#     Where more than one thing in the same binary would otherwise want a
+#     module (SwimTests linking both SwimAssetCompiler and needing Assets
+#     directly, for example), exactly one of them actually compiles the
+#     module and the other gets it by linking that one.
+#  2. A module's own third-party PRIVATE dependency (SDL3 for Platform,
+#     mimalloc for Memory, enkiTS for Jobs, Jolt/PhysX/volk/vk-bootstrap/VMA
+#     for their respective backends) moves onto whichever target now compiles
+#     that module's sources, exactly mirroring what the module's own
+#     target_link_libraries() used to declare.
 file(GLOB_RECURSE SWIM_PLATFORM_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
 )
 
-
-add_library(SwimPlatform STATIC ${SWIM_PLATFORM_SOURCES})
-add_library(Swim::Platform ALIAS SwimPlatform)
-target_include_directories(SwimPlatform PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimPlatform PRIVATE ${SWIM_SDL3_TARGET})
-target_compile_features(SwimPlatform PUBLIC cxx_std_20)
-target_compile_definitions(SwimPlatform PRIVATE
-	$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
-	$<$<PLATFORM_ID:Windows>:NOMINMAX>
-)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PLATFORM_SOURCES})
-swim_set_solution_folder(SwimPlatform "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimPlatform PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimPlatform PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
 # In-process commands are independent of platform input, file IO, and Machine.
-add_library(SwimCommands STATIC
-	Source/Engine/Commands/CommandRegistry.h
-	Source/Engine/Commands/CommandRegistry.cpp
+set(SWIM_COMMANDS_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.cpp
 )
-add_library(Swim::Commands ALIAS SwimCommands)
-target_include_directories(SwimCommands PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimCommands PUBLIC cxx_std_20)
-swim_set_solution_folder(SwimCommands "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-if(MSVC)
-	target_compile_options(SwimCommands PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimCommands PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 
 file(GLOB_RECURSE SWIM_INPUT_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.h
 )
 
-add_library(SwimInput STATIC ${SWIM_INPUT_SOURCES})
-add_library(Swim::Input ALIAS SwimInput)
-target_include_directories(SwimInput PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimInput PUBLIC Swim::Platform)
-target_compile_features(SwimInput PUBLIC cxx_std_20)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_INPUT_SOURCES})
-swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimInput PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimInput PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-
 file(GLOB_RECURSE SWIM_MEMORY_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.h
 )
 
-add_library(SwimMemory STATIC ${SWIM_MEMORY_SOURCES})
-add_library(Swim::Memory ALIAS SwimMemory)
-target_include_directories(SwimMemory PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimMemory PRIVATE Swim::Mimalloc)
-target_compile_features(SwimMemory PUBLIC cxx_std_20)
-target_compile_definitions(SwimMemory PRIVATE SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_MEMORY_SOURCES})
-swim_set_solution_folder(SwimMemory "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimMemory PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimMemory PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
 file(GLOB_RECURSE SWIM_ASSET_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.h
 )
-
-add_library(SwimAssets STATIC ${SWIM_ASSET_SOURCES})
-add_library(Swim::Assets ALIAS SwimAssets)
-target_include_directories(SwimAssets PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimAssets PUBLIC cxx_std_20)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_SOURCES})
-swim_set_solution_folder(SwimAssets "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimAssets PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimAssets PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 
 # Source-format importers are tooling dependencies, not runtime asset
 # dependencies. Keep fastgltf and its parser dependency on this side of the
@@ -262,15 +214,19 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	set(SWIM_ASSET_COOKER_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp)
 	list(FILTER SWIM_ASSET_COMPILER_SOURCES EXCLUDE REGEX "/Source/Tools/AssetCompiler/Cli/")
 
-	add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES})
+	# SwimAssets is no longer its own target (see "Engine module source
+	# discovery" above), so the compiler embeds the runtime asset module's
+	# sources directly: SwimAssetCompiler is the only Tools-side consumer of
+	# Assets, so this is the one place that compiles them, and every other
+	# consumer (SwimTests, SwimEngine) either gets Assets the same way or
+	# gets it by linking Swim::AssetCompiler -- never both, to avoid a
+	# duplicate-symbol link error within the same binary.
+	add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})
 	add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)
 	target_include_directories(SwimAssetCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimAssetCompiler
-		PUBLIC Swim::Assets
-		PRIVATE Swim::AssetCompilerDependencies
-	)
+	target_link_libraries(SwimAssetCompiler PRIVATE Swim::AssetCompilerDependencies)
 	target_compile_features(SwimAssetCompiler PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES})
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})
 	swim_set_solution_folder(SwimAssetCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
 
 	if(MSVC)
@@ -307,7 +263,10 @@ if(SWIM_BUILD_SHADER_COMPILER AND SWIM_SHADER_COMPILER_DEPENDENCIES_AVAILABLE)
 	add_library(SwimShaderCompiler STATIC ${SWIM_SHADER_COMPILER_SOURCES})
 	add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)
 	target_include_directories(SwimShaderCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimShaderCompiler PUBLIC Swim::Rhi PRIVATE simdjson::simdjson)
+	# Swim::Rhi was a header-only interface target providing nothing beyond the
+	# ${CMAKE_SOURCE_DIR}/Source include dir already set above, so it no longer
+	# needs to exist as its own target (see "Engine module source discovery").
+	target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)
 	target_compile_features(SwimShaderCompiler PUBLIC cxx_std_20)
 	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_SHADER_COMPILER_SOURCES})
 	swim_set_solution_folder(SwimShaderCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
@@ -359,70 +318,23 @@ file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
 )
 
-add_library(SwimJobs STATIC ${SWIM_JOB_SOURCES})
-add_library(Swim::Jobs ALIAS SwimJobs)
-target_include_directories(SwimJobs PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimJobs PRIVATE Swim::EnkiTS Swim::Memory)
-target_compile_features(SwimJobs PUBLIC cxx_std_20)
-target_compile_definitions(SwimJobs PRIVATE SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_JOB_SOURCES})
-swim_set_solution_folder(SwimJobs "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimJobs PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimJobs PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 file(GLOB_RECURSE SWIM_IO_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.h
 )
 
-add_library(SwimIO STATIC ${SWIM_IO_SOURCES})
-add_library(Swim::IO ALIAS SwimIO)
-target_include_directories(SwimIO PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_link_libraries(SwimIO
-	PUBLIC Swim::Platform
-	PRIVATE Swim::Jobs
+set(SWIM_CORE_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/EngineConfig.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/EngineConfig.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/EngineState.h
 )
-target_compile_features(SwimIO PUBLIC cxx_std_20)
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_IO_SOURCES})
-swim_set_solution_folder(SwimIO "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
 
-if(MSVC)
-	target_compile_options(SwimIO PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimIO PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-add_library(SwimCore STATIC
-	Source/Engine/EngineConfig.cpp
-	Source/Engine/EngineConfig.h
-	Source/Engine/EngineState.h
-)
-add_library(Swim::Core ALIAS SwimCore)
-target_include_directories(SwimCore PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimCore PUBLIC cxx_std_20)
-swim_set_solution_folder(SwimCore "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-if(MSVC)
-	target_compile_options(SwimCore PRIVATE /utf-8 /W3 /permissive-)
-else()
-	target_compile_options(SwimCore PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-# The modern RHI contract is backend-neutral and part of the cross-platform
-# foundation. Concrete Vulkan/D3D12/Metal implementations live in separate
-# targets and must not leak their API types or libraries through Swim::Rhi.
-add_library(SwimRhi INTERFACE
-	Source/Engine/Systems/Renderer/RHI/RhiTypes.h
-	Source/Engine/Systems/Renderer/RHI/RhiContracts.h
-	Source/Engine/Systems/Renderer/RHI/RhiFrameLifetime.h
-)
-add_library(Swim::Rhi ALIAS SwimRhi)
-target_include_directories(SwimRhi INTERFACE ${CMAKE_SOURCE_DIR}/Source)
-target_compile_features(SwimRhi INTERFACE cxx_std_20)
-swim_set_solution_folder(SwimRhi "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+# Swim::Rhi used to be a header-only INTERFACE target that existed only to
+# carry these three files' include path -- ${CMAKE_SOURCE_DIR}/Source, which
+# every consumer below already sets directly. It is not re-declared: the RHI
+# contract headers are picked up automatically wherever Source/Engine/... is
+# globbed (SwimEngine's own source list, for example), same as any other
+# engine header.
 
 # The modern Vulkan backend is a cross-platform foundation target, independent
 # from the still-Windows-only legacy renderer. Its third-party bootstrap stack
@@ -438,60 +350,41 @@ if(SWIM_ENABLE_VULKAN_RHI AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.h
 	)
+	set(SWIM_VULKAN_RHI_AVAILABLE TRUE)
 
-	add_library(SwimRhiVulkan STATIC ${SWIM_VULKAN_RHI_SOURCES})
-	add_library(Swim::RhiVulkan ALIAS SwimRhiVulkan)
-	target_include_directories(SwimRhiVulkan PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimRhiVulkan
-		PUBLIC Swim::Rhi
-		PRIVATE Swim::Platform volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator
+	# Whichever target compiles ${SWIM_VULKAN_RHI_SOURCES} needs these PRIVATE
+	# third-party bootstrap dependencies and definitions -- previously private
+	# to the now-retired SwimRhiVulkan target, now applied at each consumer.
+	set(SWIM_VULKAN_RHI_PRIVATE_LIBS
+		volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator
 	)
-	target_compile_features(SwimRhiVulkan PUBLIC cxx_std_20)
-	target_compile_definitions(SwimRhiVulkan PRIVATE
+	set(SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS
 		VMA_STATIC_VULKAN_FUNCTIONS=0
 		VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 		VMA_VULKAN_VERSION=1003000
 		$<$<CONFIG:Debug>:SWIM_VULKAN_VALIDATION=1>
 	)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_VULKAN_RHI_SOURCES})
-	swim_set_solution_folder(SwimRhiVulkan "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/RHI Backends")
-
-	if(MSVC)
-		target_compile_options(SwimRhiVulkan PRIVATE /utf-8 /W3 /permissive-)
-	else()
-		target_compile_options(SwimRhiVulkan PRIVATE -Wall -Wextra -Wpedantic)
-	endif()
 endif()
 
 # Generic physics is part of the cross-platform foundation. Keep the concrete
 # PhysX implementation behind the legacy/runtime gate, but compile this API and
 # its shared backend contract on Linux too so portable C++ errors are caught
 # before an expensive Windows dependency build.
-if(SWIM_OFFLINE_DEPENDENCY_STUBS)
-	add_library(SwimPhysics INTERFACE)
-	target_include_directories(SwimPhysics INTERFACE ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimPhysics INTERFACE glm::glm)
-else()
+# Under offline dependency stubs there is no real physics implementation to
+# compile (build-layout verification only); SWIM_PHYSICS_SOURCES stays empty
+# and consumers still get glm::glm's include path wherever they need physics
+# headers, matching the old SwimPhysics INTERFACE stub's only real content.
+set(SWIM_PHYSICS_SOURCES "")
+if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	file(GLOB_RECURSE SWIM_PHYSICS_SOURCES
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.h
 	)
 	list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")
-
-	add_library(SwimPhysics STATIC ${SWIM_PHYSICS_SOURCES})
-	target_include_directories(SwimPhysics PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimPhysics PUBLIC glm::glm)
-	target_compile_features(SwimPhysics PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PHYSICS_SOURCES})
-	swim_set_solution_folder(SwimPhysics "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
-
-	if(MSVC)
-		target_compile_options(SwimPhysics PRIVATE /utf-8 /W3 /permissive-)
-	else()
-		target_compile_options(SwimPhysics PRIVATE -Wall -Wextra -Wpedantic)
-	endif()
 endif()
-add_library(Swim::Physics ALIAS SwimPhysics)
+# Every consumer that compiles SWIM_PHYSICS_SOURCES (or just needs the
+# generic physics headers) links glm::glm PRIVATE -- this was SwimPhysics's
+# only real dependency (PUBLIC glm::glm, no PhysX/Jolt/EnTT/Scene coupling).
 
 # Jolt is the first concrete cross-platform physics backend. Keep its dependency
 # and implementation before the legacy-runtime return so Linux compiles and runs
@@ -507,38 +400,61 @@ if(SWIM_ENABLE_JOLT_BACKEND AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.h
 	)
-
-	add_library(SwimPhysicsJolt STATIC ${SWIM_JOLT_BACKEND_SOURCES})
-	add_library(Swim::PhysicsJolt ALIAS SwimPhysicsJolt)
-	target_include_directories(SwimPhysicsJolt PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimPhysicsJolt PUBLIC Swim::Physics PRIVATE Swim::Jolt)
-	target_compile_features(SwimPhysicsJolt PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_JOLT_BACKEND_SOURCES})
-	swim_set_solution_folder(SwimPhysicsJolt "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/Physics Backends")
-
-	if(MSVC)
-		target_compile_options(SwimPhysicsJolt PRIVATE /utf-8 /W3 /permissive-)
-	else()
-		target_compile_options(SwimPhysicsJolt PRIVATE -Wall -Wextra -Wpedantic)
-	endif()
+	set(SWIM_JOLT_BACKEND_AVAILABLE TRUE)
+	# Whichever target compiles ${SWIM_JOLT_BACKEND_SOURCES} links Swim::Jolt
+	# PRIVATE and also needs SWIM_PHYSICS_SOURCES compiled in somewhere in the
+	# same binary -- previously PUBLIC Swim::Physics on the retired
+	# SwimPhysicsJolt target.
 endif()
 
+# Examples are deliberately small consumers proving modules are usable
+# outside SwimEngine. They now compile the module sources they need directly
+# (see "Engine module source discovery" above) instead of linking a module
+# library -- each is its own final binary, so there is no duplicate-symbol
+# risk in doing so.
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
-	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp)
-	target_link_libraries(SwimHelloWindow PRIVATE Swim::Platform)
+	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp ${SWIM_PLATFORM_SOURCES})
+	target_link_libraries(SwimHelloWindow PRIVATE ${SWIM_SDL3_TARGET})
 	target_include_directories(SwimHelloWindow PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_definitions(SwimHelloWindow PRIVATE
+		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+		$<$<PLATFORM_ID:Windows>:NOMINMAX>
+	)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES Source/Examples/HelloWindow.cpp ${SWIM_PLATFORM_SOURCES})
 	swim_set_solution_folder(SwimHelloWindow "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 
-	add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL Source/Examples/HeadlessPlatform.cpp)
-	target_link_libraries(SwimHeadlessPlatform PRIVATE Swim::Platform)
+	add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL Source/Examples/HeadlessPlatform.cpp ${SWIM_PLATFORM_SOURCES})
+	target_link_libraries(SwimHeadlessPlatform PRIVATE ${SWIM_SDL3_TARGET})
 	target_include_directories(SwimHeadlessPlatform PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_definitions(SwimHeadlessPlatform PRIVATE
+		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+		$<$<PLATFORM_ID:Windows>:NOMINMAX>
+	)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES Source/Examples/HeadlessPlatform.cpp ${SWIM_PLATFORM_SOURCES})
 	swim_set_solution_folder(SwimHeadlessPlatform "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
 if(SWIM_BUILD_FOUNDATION_TESTS)
-	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL Source/Examples/HeadlessCoreAssets.cpp)
-	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Core Swim::Jobs Swim::Assets)
+	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL
+		Source/Examples/HeadlessCoreAssets.cpp
+		${SWIM_CORE_SOURCES}
+		${SWIM_MEMORY_SOURCES}
+		${SWIM_JOB_SOURCES}
+		${SWIM_ASSET_SOURCES}
+	)
+	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Mimalloc Swim::EnkiTS)
 	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_compile_definitions(SwimHeadlessCoreAssets PRIVATE
+		SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
+		SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
+	)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES
+		Source/Examples/HeadlessCoreAssets.cpp
+		${SWIM_CORE_SOURCES}
+		${SWIM_MEMORY_SOURCES}
+		${SWIM_JOB_SOURCES}
+		${SWIM_ASSET_SOURCES}
+	)
 	swim_set_solution_folder(SwimHeadlessCoreAssets "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
@@ -569,25 +485,12 @@ if(SWIM_ENABLE_PHYSX_BACKEND)
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.h
 	)
-
-	add_library(SwimPhysicsPhysX STATIC ${SWIM_PHYSX_BACKEND_SOURCES})
-	add_library(Swim::PhysicsPhysX ALIAS SwimPhysicsPhysX)
-	target_include_directories(SwimPhysicsPhysX PUBLIC ${CMAKE_SOURCE_DIR}/Source)
-	target_link_libraries(SwimPhysicsPhysX PUBLIC Swim::Physics PRIVATE Swim::PhysX)
-	target_compile_features(SwimPhysicsPhysX PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_PHYSX_BACKEND_SOURCES})
-	swim_set_solution_folder(SwimPhysicsPhysX "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/Physics Backends")
-
-	if(MSVC)
-		target_compile_options(SwimPhysicsPhysX PRIVATE /utf-8 /W3 /permissive-)
-	else()
-		target_compile_options(SwimPhysicsPhysX PRIVATE -Wall -Wextra -Wpedantic)
-	endif()
-
-	if(TARGET SwimPhysXBuild)
-		add_dependencies(SwimPhysicsPhysX SwimPhysXBuild)
-	endif()
-
+	set(SWIM_PHYSX_BACKEND_AVAILABLE TRUE)
+	# Whichever target compiles ${SWIM_PHYSX_BACKEND_SOURCES} links Swim::PhysX
+	# PRIVATE, needs SWIM_PHYSICS_SOURCES compiled in somewhere in the same
+	# binary (previously PUBLIC Swim::Physics on the retired
+	# SwimPhysicsPhysX target), and -- if SwimPhysXBuild exists -- must
+	# add_dependencies() on it so the external PhysX SDK build runs first.
 endif()
 
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
@@ -600,22 +503,44 @@ else()
 	find_package(OpenGL REQUIRED)
 endif()
 
+# Platform, Input, Commands, Memory, Jobs, IO, and Core (EngineConfig/
+# EngineState) all used to be excluded here because they were compiled once
+# by their own module target and linked in. They are no longer separate
+# targets, so nothing excludes them any more: this recursive glob just picks
+# them up along with the rest of Source/Engine directly. Their former
+# module-private link libraries (SDL3, mimalloc, enkiTS, ...) and compile
+# definitions are applied directly to SwimEngine below instead of coming
+# from a module's own target_link_libraries()/target_compile_definitions().
+#
+# Systems/Physics/ and Systems/Renderer/RHI/Backends/ stay excluded: those
+# subtrees are feature-gated (physics backend choice, SWIM_ENABLE_VULKAN_RHI)
+# and are appended explicitly, by availability, right below.
+#
+# Assets/ also stays excluded here: when development auto-cook is enabled,
+# SwimEngine links Swim::AssetCompiler, which now embeds Assets' sources
+# itself (see the AssetCompiler block above) -- compiling Assets/ into
+# SwimEngine too would duplicate every symbol at link time. Whether Assets
+# needs to be added directly to SwimEngine's own sources instead is decided
+# below, once we know whether AssetCompiler will actually be linked.
 file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/*.hpp
 )
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Commands/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
+list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSICS_SOURCES})
+if(SWIM_JOLT_BACKEND_AVAILABLE)
+	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_JOLT_BACKEND_SOURCES})
+endif()
+if(SWIM_PHYSX_BACKEND_AVAILABLE)
+	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSX_BACKEND_SOURCES})
+endif()
+if(SWIM_VULKAN_RHI_AVAILABLE)
+	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})
+endif()
 
 file(GLOB_RECURSE SWIM_GAME_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Game/*.cpp
@@ -677,6 +602,15 @@ if(SWIM_ENABLE_DEV_ASSET_AUTOCOOK AND TARGET SwimAssetCompiler)
 	set(SWIM_DEV_ASSET_AUTOCOOK_ENABLED ON)
 endif()
 
+# Assets was excluded from SWIM_ENGINE_SOURCES above specifically to avoid a
+# duplicate-symbol link error against Swim::AssetCompiler's embedded copy.
+# When AssetCompiler is not going to be linked, SwimEngine needs its own
+# compile of Assets instead.
+if(NOT SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
+	target_sources(SwimEngine PRIVATE ${SWIM_ASSET_SOURCES})
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_SOURCES})
+endif()
+
 target_compile_definitions(SwimEngine PRIVATE
 	NDEBUG
 	_CONSOLE
@@ -689,9 +623,17 @@ target_compile_definitions(SwimEngine PRIVATE
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
 	$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
-	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_ENABLE_PHYSX_BACKEND}>
-	SWIM_ENABLE_JOLT_BACKEND=$<TARGET_EXISTS:SwimPhysicsJolt>
+	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
+	SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
+	# Module-level compile definitions that used to be PRIVATE to the module's
+	# own now-retired target (SwimMemory, SwimJobs, SwimRhiVulkan); their
+	# sources compile as part of SwimEngine now, so the definitions move here.
+	SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
+	SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
 )
+if(SWIM_VULKAN_RHI_AVAILABLE)
+	target_compile_definitions(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
+endif()
 
 if(SWIM_ENABLE_PCH)
 	target_precompile_headers(SwimEngine PRIVATE
@@ -751,15 +693,15 @@ if(SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
 	target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)
 endif()
 
+# Third-party dependencies that used to be PRIVATE to a module's own
+# now-retired target (SDL3/Platform, mimalloc/Memory, enkiTS/Jobs) move
+# directly onto SwimEngine, since that module's sources compile as part of
+# SwimEngine's own translation units now. Swim::Core/Memory/Assets/Jobs/IO/
+# Platform/Input/Commands/Physics no longer exist as separate targets to link.
 target_link_libraries(SwimEngine PRIVATE
-	Swim::Core
-	Swim::Memory
-	Swim::Assets
-	Swim::Jobs
-	Swim::IO
-	Swim::Platform
-	Swim::Input
-	Swim::Commands
+	${SWIM_SDL3_TARGET}
+	Swim::Mimalloc
+	Swim::EnkiTS
 	spdlog::spdlog
 	Vulkan::Vulkan
 	OpenGL::GL
@@ -770,14 +712,19 @@ target_link_libraries(SwimEngine PRIVATE
 	zstd::zstd
 	Swim::BasisTranscoder
 	glad::glad
-	Swim::Physics
 )
 
-if(TARGET SwimPhysicsPhysX)
-	target_link_libraries(SwimEngine PRIVATE Swim::PhysicsPhysX)
+if(SWIM_VULKAN_RHI_AVAILABLE)
+	target_link_libraries(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
 endif()
-if(TARGET SwimPhysicsJolt)
-	target_link_libraries(SwimEngine PRIVATE Swim::PhysicsJolt)
+if(SWIM_PHYSX_BACKEND_AVAILABLE)
+	target_link_libraries(SwimEngine PRIVATE Swim::PhysX)
+	if(TARGET SwimPhysXBuild)
+		add_dependencies(SwimEngine SwimPhysXBuild)
+	endif()
+endif()
+if(SWIM_JOLT_BACKEND_AVAILABLE)
+	target_link_libraries(SwimEngine PRIVATE Swim::Jolt)
 endif()
 
 include(cmake/Shaders.cmake)

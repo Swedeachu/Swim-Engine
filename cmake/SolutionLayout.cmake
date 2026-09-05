@@ -6,7 +6,9 @@ include_guard(GLOBAL)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")
 
-set(SWIM_SOLUTION_FOLDER_ENGINE_MODULES "Engine Modules")
+# "Engine Modules" is deliberately gone: the 2026-09-05 engine module
+# collapse retired every per-module target that used to live there. See
+# docs/VisualStudioProjectStructure.md section 11.
 set(SWIM_SOLUTION_FOLDER_TOOLS "Tools")
 set(SWIM_SOLUTION_FOLDER_TESTS "Tests")
 set(SWIM_SOLUTION_FOLDER_EXAMPLES "Examples")

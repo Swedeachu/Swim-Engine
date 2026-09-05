@@ -90,27 +90,36 @@ function(swim_configure_tests)
 	swim_add_header_boundary(SwimShaderCompilerPublicHeaders
 		SOURCE Source/Tests/HeaderBoundary/ShaderCompilerPublicHeaders.cpp)
 
+	# Swim::Rhi and Swim::RhiVulkan no longer exist as targets (their sources
+	# compile directly into whichever real binary needs them -- see
+	# CMakeLists.txt's "Engine module source discovery"). Neither gate needs a
+	# LINK any more: both public headers only ever needed the default
+	# ${CMAKE_SOURCE_DIR}/Source include dir that swim_add_header_boundary()
+	# already sets, and an OBJECT library like this one never actually links,
+	# so RhiVulkanPublicHeaders.cpp taking the address of
+	# Swim::RhiVulkan::CreateGraphicsSystem only needs the declaration.
 	swim_add_header_boundary(SwimRhiPublicHeaders
-		SOURCE Source/Tests/HeaderBoundary/RhiPublicHeaders.cpp
-		LINK Swim::Rhi)
+		SOURCE Source/Tests/HeaderBoundary/RhiPublicHeaders.cpp)
 
-	if(TARGET SwimRhiVulkan)
+	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
 			SOURCE Source/Tests/HeaderBoundary/RhiVulkanPublicHeaders.cpp
-			LINK Swim::RhiVulkan
 			BUILD_BY_DEFAULT)
 	endif()
 
 	if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+		# Swim::Physics is also gone; its one real dependency was PUBLIC
+		# glm::glm (the generic physics headers use glm types directly), so
+		# that is what these gates link now instead of the module target.
 		swim_add_header_boundary(SwimPhysicsPublicHeaders
 			SOURCE Source/Tests/HeaderBoundary/PhysicsPublicHeaders.cpp
-			LINK Swim::Physics)
+			LINK glm::glm)
 
 		# The backend contract gate builds by default: it is the cheapest possible
 		# guard against a physics backend leaking back into generic test code.
 		swim_add_header_boundary(SwimPhysicsBackendContractCompile
 			SOURCE Source/Tests/HeaderBoundary/PhysicsBackendContractCompile.cpp
-			LINK Swim::Physics
+			LINK glm::glm
 			BUILD_BY_DEFAULT)
 		target_sources(SwimPhysicsBackendContractCompile PRIVATE Source/Tests/Framework/Test.cpp)
 	endif()
@@ -140,14 +149,27 @@ function(swim_configure_tests)
 	)
 
 	set(SWIM_TEST_FIXTURE_SOURCES "")
-	set(SWIM_TEST_LINK_LIBRARIES
-		Swim::Core
-		Swim::Commands
-		Swim::Memory
-		Swim::Jobs
-		Swim::Assets
-		Swim::Rhi
+	set(SWIM_TEST_LINK_LIBRARIES "")
+
+	# SwimCore/Commands/Memory/Jobs/Assets/Rhi are no longer separate targets
+	# (see CMakeLists.txt's "Engine module source discovery"), so SwimTests
+	# compiles their sources directly instead of linking module libraries.
+	# SWIM_TEST_MODULE_SOURCES is a straight union of disjoint source lists,
+	# never a target -- the one place duplication could happen is Assets,
+	# which SwimAssetCompiler also embeds: when that target exists, SwimTests
+	# gets Assets through linking it instead of compiling Assets a second time
+	# into the same binary.
+	set(SWIM_TEST_MODULE_SOURCES
+		${SWIM_CORE_SOURCES}
+		${SWIM_COMMANDS_SOURCES}
+		${SWIM_MEMORY_SOURCES}
+		${SWIM_JOB_SOURCES}
 	)
+	list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::Mimalloc Swim::EnkiTS)
+
+	if(NOT TARGET SwimAssetCompiler)
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_ASSET_SOURCES})
+	endif()
 
 	if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 		swim_collect_test_suite_sources(SWIM_PLATFORM_FOUNDATION_SUITES
@@ -155,12 +177,13 @@ function(swim_configure_tests)
 			Input
 		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_PLATFORM_FOUNDATION_SUITES})
-		list(APPEND SWIM_TEST_LINK_LIBRARIES
-			Swim::IO
-			Swim::Platform
-			Swim::Input
-			Swim::Physics
+		list(APPEND SWIM_TEST_MODULE_SOURCES
+			${SWIM_IO_SOURCES}
+			${SWIM_PLATFORM_SOURCES}
+			${SWIM_INPUT_SOURCES}
+			${SWIM_PHYSICS_SOURCES}
 		)
+		list(APPEND SWIM_TEST_LINK_LIBRARIES ${SWIM_SDL3_TARGET} glm::glm)
 	endif()
 
 	find_package(Threads REQUIRED)
@@ -187,7 +210,7 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT glm::glm)
 	endif()
 
-	if(TARGET SwimRhiVulkan)
+	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_VULKAN_RHI_SUITES RHIVulkan)
 		list(APPEND SWIM_TEST_FIXTURE_SOURCES
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
@@ -195,24 +218,29 @@ function(swim_configure_tests)
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
 		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})
 		# Backend dispatch-spy suites inspect native commands without a GPU.
 		# These dependencies remain private to the test executable.
-		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::RhiVulkan
-			volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator)
+		list(APPEND SWIM_TEST_LINK_LIBRARIES ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
 	endif()
 
-	if(TARGET SwimPhysicsPhysX)
+	if(SWIM_PHYSX_BACKEND_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_PHYSX_SUITES Physics/PhysX)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_PHYSX_SUITES})
 		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
-		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysicsPhysX)
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_PHYSX_BACKEND_SOURCES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysX)
+		if(TARGET SwimPhysXBuild)
+			list(APPEND SWIM_TEST_EXTRA_DEPENDENCIES SwimPhysXBuild)
+		endif()
 	endif()
 
-	if(TARGET SwimPhysicsJolt)
+	if(SWIM_JOLT_BACKEND_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_JOLT_SUITES Physics/Jolt)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_JOLT_SUITES})
 		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
-		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysicsJolt)
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_JOLT_BACKEND_SOURCES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::Jolt)
 	endif()
 
 	list(REMOVE_DUPLICATES SWIM_TEST_FIXTURE_SOURCES)
@@ -221,8 +249,13 @@ function(swim_configure_tests)
 		${SWIM_TEST_FRAMEWORK_SOURCES}
 		${SWIM_TEST_FIXTURE_SOURCES}
 		${SWIM_TEST_SUITE_SOURCES}
+		${SWIM_TEST_MODULE_SOURCES}
 	)
 	add_executable(Swim::Tests ALIAS SwimTests)
+
+	if(SWIM_TEST_EXTRA_DEPENDENCIES)
+		add_dependencies(SwimTests ${SWIM_TEST_EXTRA_DEPENDENCIES})
+	endif()
 
 	# Fixtures are header-only; keep them visible in the IDE without compiling.
 	if(SWIM_TEST_FIXTURE_SOURCES)
@@ -232,6 +265,19 @@ function(swim_configure_tests)
 	target_include_directories(SwimTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
+
+	# Compile definitions that used to be PRIVATE to a module's own retired
+	# target now apply directly to SwimTests, since those modules' sources
+	# compile as part of it.
+	target_compile_definitions(SwimTests PRIVATE
+		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+		$<$<PLATFORM_ID:Windows>:NOMINMAX>
+		SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
+		SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
+	)
+	if(SWIM_VULKAN_RHI_AVAILABLE)
+		target_compile_definitions(SwimTests PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
+	endif()
 
 	if(TARGET SwimRhiSmokeShaders)
 		add_dependencies(SwimTests SwimRhiSmokeShaders)
@@ -274,6 +320,7 @@ function(swim_configure_tests)
 		${SWIM_TEST_FRAMEWORK_SOURCES}
 		${SWIM_TEST_FIXTURE_SOURCES}
 		${SWIM_TEST_SUITE_SOURCES}
+		${SWIM_TEST_MODULE_SOURCES}
 	)
 	swim_set_solution_folder(SwimTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 

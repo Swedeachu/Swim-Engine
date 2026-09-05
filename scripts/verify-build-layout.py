@@ -135,7 +135,6 @@ def check_build_workflow(failures: list[str]) -> None:
     for fragment in (
         "USE_FOLDERS ON",
         'PREDEFINED_TARGETS_FOLDER "CMake"',
-        'SWIM_SOLUTION_FOLDER_ENGINE_MODULES "Engine Modules"',
         'SWIM_SOLUTION_FOLDER_TESTS "Tests"',
         'SWIM_SOLUTION_FOLDER_EXAMPLES "Examples"',
         'SWIM_SOLUTION_FOLDER_THIRD_PARTY "Third Party"',
@@ -144,18 +143,52 @@ def check_build_workflow(failures: list[str]) -> None:
         if fragment not in solution_layout_text:
             fail(f"Visual Studio solution layout contract is missing: {fragment}", failures)
 
+    # "Engine Modules" is deliberately not checked here: the 2026-09-05 engine
+    # module collapse (docs/VisualStudioProjectStructure.md section 11)
+    # retired every per-module target (SwimCore, SwimPlatform, SwimInput,
+    # etc.) that used to be placed in that solution folder. Their sources now
+    # compile directly into SwimEngine and are organized with source_group
+    # filters instead, so the contract below checks for that instead of a
+    # solution-folder placement.
+    if 'SWIM_SOLUTION_FOLDER_ENGINE_MODULES "Engine Modules"' in solution_layout_text:
+        fail(
+            "Visual Studio solution layout still defines the retired 'Engine Modules' folder variable "
+            "(cmake/SolutionLayout.cmake); the engine module collapse removed its last consumer",
+            failures,
+        )
+
     for fragment in (
         'include(cmake/SolutionLayout.cmake)',
-        'swim_set_solution_folder(SwimPlatform "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
-        'swim_set_solution_folder(SwimInput "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
-        'add_library(Swim::Core ALIAS SwimCore)',
-        'swim_set_solution_folder(SwimCore "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")',
+        "# --- Engine module source discovery",
+        "file(GLOB_RECURSE SWIM_ENGINE_SOURCES",
+        'source_group(TREE ${CMAKE_SOURCE_DIR} FILES',
         'add_executable(SwimHelloWindow EXCLUDE_FROM_ALL',
         'add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL',
         '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3"',
     ):
         if fragment not in cmake_text:
             fail(f"first-party/IDE target organization is missing: {fragment}", failures)
+
+    for retired_fragment in (
+        "add_library(SwimCore",
+        "add_library(SwimPlatform",
+        "add_library(SwimInput",
+        "add_library(SwimCommands",
+        "add_library(SwimMemory",
+        "add_library(SwimJobs",
+        "add_library(SwimIO",
+        "add_library(SwimAssets",
+        "add_library(SwimPhysics ",
+        "add_library(SwimRhi ",
+        "add_library(SwimRhiVulkan",
+        "add_library(Swim::Core ALIAS",
+    ):
+        if retired_fragment in cmake_text:
+            fail(
+                f"CMakeLists.txt still declares a retired Engine Modules target: {retired_fragment} "
+                "(the 2026-09-05 engine module collapse folded these into SwimEngine)",
+                failures,
+            )
 
     for fragment in (
         'swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")',
@@ -266,7 +299,7 @@ def check_build_workflow(failures: list[str]) -> None:
             'Join-Path $Root "Assets"',
             'SwimTests reported failures',
             'Repository asset cooking failed',
-            '"Engine Modules", "Tests", "Third Party", "CMake"',
+            '"Tests", "Third Party", "CMake"',
             "Ninja was not found; using the Visual Studio generator fallback",
             "[switch]$DebugBuild",
         ):

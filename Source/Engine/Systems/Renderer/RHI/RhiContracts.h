@@ -503,7 +503,7 @@ namespace Swim::Rhi
 		virtual std::unique_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc) = 0;
 		virtual std::unique_ptr<DescriptorTable> CreateDescriptorTable(const DescriptorTableDesc& desc) = 0;
 		virtual std::unique_ptr<CommandPool> CreateCommandPool(QueueType queueType) = 0;
-		virtual std::unique_ptr<Semaphore> CreateSemaphore() = 0;
+		virtual std::unique_ptr<Semaphore> CreateGpuSemaphore() = 0;
 		virtual std::unique_ptr<Fence> CreateFence(bool signaled = false) = 0;
 		virtual std::unique_ptr<Timeline> CreateTimeline(std::uint64_t initialValue = 0) = 0;
 		virtual std::unique_ptr<QueryPool> CreateQueryPool(const QueryPoolDesc& desc) = 0;

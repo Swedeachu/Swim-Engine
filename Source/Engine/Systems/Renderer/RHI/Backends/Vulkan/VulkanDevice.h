@@ -367,7 +367,7 @@ namespace Swim::RhiVulkan
 				return std::make_unique<VulkanCommandPool>(std::move(poolState));
 			}
 
-			std::unique_ptr<Rhi::Semaphore> CreateSemaphore() override
+			std::unique_ptr<Rhi::Semaphore> CreateGpuSemaphore() override
 			{
 				VkSemaphoreCreateInfo createInfo{};
 				createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;

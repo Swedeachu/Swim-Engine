@@ -371,8 +371,16 @@ function Assert-SwimVisualStudioSolutionLayout {
         throw "Visual Studio solution does not exist at '$SolutionPath'."
     }
 
+    # "Engine Modules" is deliberately absent from this list: the 2026-09-05
+    # engine module collapse retired every per-module target that used to live
+    # there (SwimCore, SwimMemory, SwimJobs, SwimPlatform, SwimInput,
+    # SwimCommands, SwimIO, SwimAssets, SwimPhysics, SwimPhysicsJolt,
+    # SwimPhysicsPhysX, SwimRhi, SwimRhiVulkan). Their sources now compile
+    # directly into SwimEngine and show up there as source_group filters, not
+    # as a separate solution folder. See docs/VisualStudioProjectStructure.md
+    # section 11.
     $SolutionText = [System.IO.File]::ReadAllText($SolutionPath)
-    foreach ($FolderName in @("Engine Modules", "Tests", "Third Party", "CMake")) {
+    foreach ($FolderName in @("Tests", "Third Party", "CMake")) {
         $FolderEntry = '= "' + $FolderName + '", "' + $FolderName + '",'
         if (-not $SolutionText.Contains($FolderEntry)) {
             throw "Visual Studio solution '$SolutionPath' is missing the expected '$FolderName' solution folder. Reconfigure it from the current CMake project."

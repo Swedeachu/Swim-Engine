@@ -159,7 +159,7 @@ namespace
 			return std::make_unique<MockCommandPool>();
 		}
 
-		std::unique_ptr<Swim::Rhi::Semaphore> CreateSemaphore() override { return nullptr; }
+		std::unique_ptr<Swim::Rhi::Semaphore> CreateGpuSemaphore() override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::Fence> CreateFence(bool) override { return nullptr; }
 
 		std::unique_ptr<Swim::Rhi::Timeline> CreateTimeline(std::uint64_t initialValue) override

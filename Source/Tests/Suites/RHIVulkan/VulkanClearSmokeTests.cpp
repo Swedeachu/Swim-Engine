@@ -47,12 +47,12 @@ namespace
 		std::vector<std::unique_ptr<Rhi::Semaphore>> presentReady;
 		for (auto& semaphore : acquired)
 		{
-			semaphore = device->CreateSemaphore();
+			semaphore = device->CreateGpuSemaphore();
 			SWIM_REQUIRE(semaphore);
 		}
 		for (std::uint32_t index = 0; index < swapchain->GetImageCount(); ++index)
 		{
-			presentReady.push_back(device->CreateSemaphore());
+			presentReady.push_back(device->CreateGpuSemaphore());
 			SWIM_REQUIRE(presentReady.back());
 		}
 		// Declared last so GPU work drains before resources unwind on failure.
