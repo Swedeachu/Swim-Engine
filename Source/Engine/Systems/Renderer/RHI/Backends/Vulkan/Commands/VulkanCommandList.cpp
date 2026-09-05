@@ -91,9 +91,4 @@ namespace Swim::RhiVulkan
 		throw std::logic_error("Vulkan dispatch commands are implemented with item 39");
 	}
 
-	void VulkanCommandList::WriteTimestamp(Rhi::QueryPool&, std::uint32_t)
-	{
-		throw std::logic_error("Vulkan timestamps are implemented with item 39");
-	}
-
 } // namespace Swim::RhiVulkan

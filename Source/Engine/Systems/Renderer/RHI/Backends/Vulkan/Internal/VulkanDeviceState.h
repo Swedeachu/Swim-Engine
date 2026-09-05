@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace Swim::RhiVulkan
 {
@@ -58,6 +59,7 @@ namespace Swim::RhiVulkan
 		vkb::Device Device{};
 		volk::VolkDeviceTable Dispatch{};
 		QueueFamilySelection QueueFamilies{};
+		std::vector<VkQueueFamilyProperties> QueueProperties;
 		VkQueue PresentationQueue = VK_NULL_HANDLE;
 		std::shared_ptr<std::mutex> PresentationQueueMutex;
 		VmaVulkanFunctions AllocatorFunctions{};

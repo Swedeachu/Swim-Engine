@@ -118,7 +118,16 @@ namespace Swim::RhiVulkan
 		capabilities.SubgroupSize = subgroupProperties.subgroupSize;
 		capabilities.MinUniformBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
 		capabilities.MinStorageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment;
-		if (limits.timestampComputeAndGraphics != VK_FALSE && limits.timestampPeriod > 0.0f)
+		for (const auto& family : physicalDevice.get_queue_families())
+		{
+			if (family.queueCount > 0 && family.timestampValidBits > 0 && family.timestampValidBits <= 64 &&
+				(family.queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0 &&
+				std::isfinite(limits.timestampPeriod) && limits.timestampPeriod > 0.0f)
+			{
+				capabilities.TimestampQueries = true;
+			}
+		}
+		if (capabilities.TimestampQueries)
 		{
 			capabilities.TimestampFrequency = static_cast<std::uint64_t>(
 				std::llround(1'000'000'000.0 / static_cast<double>(limits.timestampPeriod)));
@@ -131,7 +140,6 @@ namespace Swim::RhiVulkan
 		capabilities.BufferDeviceAddress = features12.bufferDeviceAddress != VK_FALSE;
 		capabilities.IndirectCount = features12.drawIndirectCount != VK_FALSE;
 		capabilities.SubgroupOperations = subgroupProperties.supportedOperations != 0;
-		capabilities.TimestampQueries = limits.timestampComputeAndGraphics != VK_FALSE;
 		capabilities.SparseResidency =
 			features.features.sparseBinding != VK_FALSE &&
 			(features.features.sparseResidencyBuffer != VK_FALSE ||

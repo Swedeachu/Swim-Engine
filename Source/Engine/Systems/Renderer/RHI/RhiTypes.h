@@ -497,6 +497,7 @@ namespace Swim::Rhi
 		std::uint32_t SubgroupSize = 0;
 		std::uint64_t MinUniformBufferOffsetAlignment = 1;
 		std::uint64_t MinStorageBufferOffsetAlignment = 1;
+		// Approximate ticks/second. Use Queue::GetTimestampInfo for support and precise conversion.
 		std::uint64_t TimestampFrequency = 0;
 
 		bool DescriptorIndexing = false;
@@ -506,7 +507,7 @@ namespace Swim::Rhi
 		bool SubgroupOperations = false;
 		bool MeshShaders = false;
 		bool TaskShaders = false;
-		bool TimestampQueries = false;
+		bool TimestampQueries = false; // At least one family supports the RHI timestamp lifecycle.
 		bool RayQuery = false;
 		bool RayTracingPipeline = false;
 		bool SparseResidency = false;

@@ -1,4 +1,5 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanQueue.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Queries/VulkanQueryPool.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandList.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Sync/VulkanFence.h"
@@ -11,6 +12,11 @@
 
 namespace Swim::RhiVulkan
 {
+
+	Rhi::TimestampInfo VulkanQueue::GetTimestampInfo() const
+	{
+		return GetVulkanTimestampInfo(*state, familyIndex);
+	}
 
 		void VulkanQueue::Submit(const Rhi::SubmitDesc& desc)
 		{

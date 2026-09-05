@@ -76,6 +76,7 @@ namespace Swim::RhiVulkan
 				deviceState->Instance = instance;
 				deviceState->Device = std::move(deviceResult).value();
 				deviceState->QueueFamilies = queueFamilies;
+				deviceState->QueueProperties = deviceState->Device.physical_device.get_queue_families();
 				volk::volkLoadDeviceTable(&deviceState->Dispatch, deviceState->Device.device);
 
 				deviceState->AllocatorFunctions.vkGetInstanceProcAddr = deviceState->Instance->Instance.fp_vkGetInstanceProcAddr;

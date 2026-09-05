@@ -63,7 +63,8 @@ namespace
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override {}
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override {}
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override {}
-		void WriteTimestamp(Swim::Rhi::QueryPool&, std::uint32_t) override {}
+		void ResetQueries(Swim::Rhi::QueryPool&, std::uint32_t, std::uint32_t) override {}
+		void WriteTimestamp(Swim::Rhi::QueryPool&, std::uint32_t, Swim::Rhi::TimestampStage) override {}
 
 		bool Recording = false;
 	};

@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiTypes.h"
+#include "Engine/Systems/Renderer/RHI/RhiTimestamps.h"
 
 #include <array>
 #include <cstddef>
@@ -309,6 +310,7 @@ namespace Swim::Rhi
 		QueryType Type = QueryType::Timestamp;
 		std::uint32_t Count = 0;
 		std::string_view DebugName;
+		QueueType Queue = QueueType::Graphics; // Pool is restricted to this queue family.
 	};
 
 	struct AdapterInfo
@@ -426,6 +428,12 @@ namespace Swim::Rhi
 	{
 	public:
 		virtual const QueryPoolDesc& GetDesc() const = 0;
+		virtual TimestampInfo GetTimestampInfo() const = 0;
+		// Nonblocking. Output is cleared on errors; unavailable entries have zero ticks.
+		// Before reading, prove the most recent GPU reset executed (normally wait
+		// for the writing submission's timeline/fence). Availability alone can be
+		// stale while a reset is queued. Never race reads with another reset/reuse.
+		virtual QueryReadStatus ReadTimestamps(std::uint32_t first, std::span<TimestampResult> results) = 0;
 	};
 
 	class CommandList : public RhiObject
@@ -461,7 +469,11 @@ namespace Swim::Rhi
 		virtual void Draw(std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
 		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0, std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
 		virtual void Dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) = 0;
-		virtual void WriteTimestamp(QueryPool& pool, std::uint32_t index) = 0;
+		// Query commands require recording outside rendering. Reset each slot before
+		// its first write and every reuse; synchronize prior GPU uses before reset.
+		// Keep the pool alive until all submissions using it complete.
+		virtual void ResetQueries(QueryPool& pool, std::uint32_t first, std::uint32_t count) = 0;
+		virtual void WriteTimestamp(QueryPool& pool, std::uint32_t index, TimestampStage stage = TimestampStage::End) = 0;
 	};
 
 	class CommandPool : public RhiObject
@@ -475,6 +487,10 @@ namespace Swim::Rhi
 	{
 	public:
 		virtual QueueType GetType() const = 0;
+		virtual TimestampInfo GetTimestampInfo() const
+		{
+			return {};
+		}
 		virtual void Submit(const SubmitDesc& desc) = 0;
 		virtual void WaitIdle() = 0;
 	};

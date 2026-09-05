@@ -1,3 +1,4 @@
+#include "Engine/Systems/Renderer/RHI/RhiTimestamps.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 #include "Engine/Systems/Renderer/RHI/RhiTypes.h"
 #include "Engine/Systems/Renderer/RHI/RhiFactory.h"

@@ -50,7 +50,8 @@ namespace Swim::RhiVulkan
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override;
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override;
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
-		void WriteTimestamp(Rhi::QueryPool&, std::uint32_t) override;
+		void ResetQueries(Rhi::QueryPool&, std::uint32_t first, std::uint32_t count) override;
+		void WriteTimestamp(Rhi::QueryPool&, std::uint32_t, Rhi::TimestampStage stage = Rhi::TimestampStage::End) override;
 
 		VkCommandBuffer GetCommandBuffer() const
 		{

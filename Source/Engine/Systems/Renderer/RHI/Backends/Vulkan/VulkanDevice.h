@@ -22,6 +22,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanSampler.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorTable.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Queries/VulkanQueryPool.h"
+
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
@@ -420,9 +422,9 @@ namespace Swim::RhiVulkan
 				return std::make_unique<VulkanTimeline>(std::move(timelineState));
 			}
 
-			std::unique_ptr<Rhi::QueryPool> CreateQueryPool(const Rhi::QueryPoolDesc&) override
+			std::unique_ptr<Rhi::QueryPool> CreateQueryPool(const Rhi::QueryPoolDesc& desc) override
 			{
-				return nullptr;
+				return VulkanQueryPool::Create(state, desc);
 			}
 
 			void WaitIdle() override

@@ -59,6 +59,7 @@ namespace Swim::RhiVulkan
 				return *submissionMutex;
 			}
 
+			Rhi::TimestampInfo GetTimestampInfo() const override;
 			void Submit(const Rhi::SubmitDesc& desc) override;
 			void WaitIdle() override;
 

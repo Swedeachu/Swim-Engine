@@ -2580,7 +2580,7 @@ Rules:
 - [x] adapter/driver info logging; *(device/API/driver strings and vendor/device/raw-driver identifiers)*
 - [ ] device-loss diagnostics;
 - [x] RenderDoc-friendly markers; *(debug-utils annotations implemented; actual GPU-tool capture remains unverified)*
-- [ ] GPU timestamps.
+- [x] GPU timestamps. *(queue-specific precision, GPU reset, begin/end writes, nonblocking availability readback and wrap-safe elapsed time; native desktop validation remains pending)*
 
 ### Vulkan RHI file organization checkpoint — 2026-09-05
 
@@ -2728,6 +2728,56 @@ This checkpoint continues Phase 9 / item **39** from `Swim-Engine(3).zip`. The n
 **Delivery:** complete clean source repository ZIP, preserving the consolidated `SwimEngine` project. Normal build/test scripts remain; no cleanup/migration scripts, retired-file ledgers, CMake tombstones, build outputs or dependency caches are added. No sources were retired during this checkpoint.
 
 Implementation references: [Khronos debug-utils guide](https://docs.vulkan.org/guide/latest/extensions/VK_EXT_debug_utils.html), [debug callback lifetime/threading rules](https://docs.vulkan.org/spec/latest/chapters/debugging.html), and [native debug-region balance rules](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdEndDebugUtilsLabelEXT.html). Swim deliberately requires regions to balance within one command list, a stricter boundary than native Vulkan's queue-level allowance.
+
+### RHI GPU timestamp implementation checkpoint — 2026-09-05
+
+This completes the next open Phase 9 diagnostics feature while critical-path item **39** remains a desktop validation gate. It does not begin RenderGraph or port any of the legacy renderer.
+
+- [x] Add backend-neutral `RhiTimestamps.h`: begin/end pipeline boundaries, per-query availability, explicit Ready/NotReady/Error readback status, and `TimestampInfo` with the native fractional nanoseconds-per-tick period and valid counter width. Duration conversion subtracts integer ticks before converting to floating point and masks wraparound, including the full 64-bit case. Invalid metadata, unavailable samples, and nonfinite results produce no duration.
+- [x] Implement owned timestamp pools in `Backends/Vulkan/Queries/VulkanQueryPool.h/.cpp`. Device creation forwards through the focused factory; pools retain device state, copy debug names, name native query objects, and destroy only successfully created handles. Zero-sized pools, unsupported query types/queue roles and unsupported timestamp families fail creation explicitly.
+- [x] Expose `Queue::GetTimestampInfo()` and pool precision. Cache physical queue-family properties in device state; validate the actual selected family's counter width and period. Adapter-wide `TimestampQueries` means at least one family can provide the RHI lifecycle; its integer `TimestampFrequency` is approximate. Always use queue metadata for creation decisions and pool metadata for accurate conversion.
+- [x] Add `VulkanCommandListQueries.cpp` for reset and timestamp recording. Validate device/family identity, overflow-safe ranges, recording generation, rendering scope and timestamp boundary before native dispatch. `Begin` uses top-of-pipe and `End` uses all-commands synchronization2 timestamps. Query reset and writes are kept outside dynamic rendering.
+- [x] Implement nonblocking 64-bit readback with 64-bit availability, without WAIT or PARTIAL flags. Preserve available samples in a NotReady batch; unavailable entries and every output on native error are cleared. Invalid read ranges fail before calling Vulkan.
+- [x] Add portable clock-conversion and Vulkan dispatch regression coverage for fractional precision, wraparound, unavailable values, failed creation, owned names, per-family capabilities, graphics/compute recording, invalid state/ranges/families/devices, rendering-scope rejection, native payload layout and failed/partial readback.
+- [x] Add strict opt-in `RHI.Vulkan.Smoke.TimestampReadbackAndReuse`. Execute a reset before polling unavailable queries; record, submit, wait and read eight reuse cycles on each supported queue role; finally execute another reset and check that old availability disappears. Graphics timestamps bracket a verified buffer copy; other supported roles exercise query markers because general transfer recording currently requires the graphics family. Report unsupported roles explicitly and fail if no role supports timestamps. Require validation and a clean post-teardown diagnostic snapshot, just like the existing smokes.
+- [ ] Run all five strict smoke cases on Windows and Linux desktops and retain the adapter/driver reports, timestamp results and clean validation totals. This environment's tests cannot establish native timestamp accuracy or desktop stability.
+
+**Lifetime and readback contract:** a pool is associated with the queue family selected by `QueryPoolDesc::Queue`; aliased roles in that same family can use it. Keep the pool alive through GPU completion. Reset a query before its first write and every later write, and synchronize prior uses before reuse. The caller owns reset/write ordering and synchronization, just as it owns resource transitions; command recording is not evidence that GPU reset has executed. Never poll a new, unreset pool. Before reading a reused pool, prove that its latest reset executed (the normal path waits for the writing submission's frame timeline/fence). Availability alone may still describe an old submission while a new reset is queued. Do not race readback with another reset. Use a pool or disjoint range per in-flight frame and read completed results before recycling that range.
+
+**Timing semantics:** compare ordered begin/end samples from one queue in one submission. Intervals must be shorter than one complete counter wrap; multiple wraps cannot be recovered. Zero elapsed ticks are valid for short intervals. These are GPU pipeline measurements; stage sampling may occur later than the requested boundary and is not calibrated CPU time, cross-queue synchronization, or a promise of isolated pass cost. Bracket complete rendering regions outside `BeginRendering`/`EndRendering`.
+
+**Queue limitation:** Vulkan timestamp writes may be supported on a dedicated transfer-only family, but `vkCmdResetQueryPool` is not. This checkpoint deliberately reports such a family as unsupported for the complete RHI lifecycle. A transfer role aliased to a graphics/compute family is supported. A later transfer-queue profiling path would need an explicit supported reset mechanism and synchronization, rather than assuming nonzero `timestampValidBits` is sufficient.
+
+Typical synchronous diagnostic use (normal frame profiling should consume completed frame slots instead of draining every frame):
+
+```cpp
+auto queries = device.CreateQueryPool({ Rhi::QueryType::Timestamp, 2, "frame timing", Rhi::QueueType::Graphics });
+// Check creation and keep queries alive longer than frames/submissions.
+auto frames = Rhi::FrameContextRing::Create(device);
+frames->BeginFrame();
+auto& commands = frames->CreateCommandList();
+commands.Begin();
+commands.ResetQueries(*queries, 0, 2);
+commands.WriteTimestamp(*queries, 0, Rhi::TimestampStage::Begin);
+// Record the measured commands, including complete rendering regions.
+commands.WriteTimestamp(*queries, 1);
+commands.End();
+frames->SubmitCurrent();
+frames->Drain();
+std::array<Rhi::TimestampResult, 2> samples{};
+if (queries->ReadTimestamps(0, samples) == Rhi::QueryReadStatus::Ready)
+{
+	const auto nanoseconds = queries->GetTimestampInfo().ElapsedNanoseconds(samples[0], samples[1]);
+}
+```
+
+**Validation:** GCC 13/C++20 Debug foundation build compiles and links the pinned SDL3/GLM/mimalloc/enkiTS/Vulkan-Headers/volk/vk-bootstrap/VMA backend and Slang `2026.16.1` artifacts. `SwimTests` passes **143 cases / 1,065 checks**, including eleven new timestamp cases. All nine available public-header/backend-contract gates compile and `scripts/verify-build-layout.py` passes, including the new focused timestamp units and suites. All five strict opt-in smokes were attempted and fail during SDL initialization (`No available video device`), before Vulkan instance creation. Their zero Vulkan-message counts are not clean-validation evidence. Asset compiler, concrete Jolt/PhysX backends and the legacy Windows executable were excluded from this foundation build; Windows/MSVC and native timestamp execution remain unverified.
+
+**Next guide task:** device-loss diagnostics is still open in Phase 9; desktop validation of item 39 remains required before starting item 40 (RenderGraph).
+
+**Scope and delivery:** compute pipelines/dispatch, occlusion/statistics queries, calibrated clocks, automatic per-pass profiler UI, device-loss diagnostics, memory-budget telemetry and RenderGraph remain separate tasks. No legacy sources were replaced or retired in this checkpoint. Preserve the consolidated build, existing normal test/build scripts and top-level `Deprecated/`; add no cleanup scripts, migration ledgers, CMake tombstones or module subprojects. Deliver the complete clean repository ZIP without build outputs or downloaded dependencies.
+
+Implementation references: [timestamp recording rules](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdWriteTimestamp2.html), [GPU query reset queue restrictions](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdResetQueryPool.html), and [result availability and stale-reset hazards](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetQueryPoolResults.html).
 
 ### Phase 9 exit criteria
 
@@ -3936,7 +3986,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 36. [x] Create Vulkan surface from Platform window through SDL3 WSI.
 37. [x] Add VMA buffer/image allocation.
 38. [x] Add timeline/frame-context/deferred-destruction model.
-39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Required validation capture, native names/labels, adapter reports and strict post-teardown smoke checks are implemented. Real Windows/Linux GPU execution remains open. See the 2026-09-05 Phase 9 checkpoints.)*
+39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Required validation capture, native names/labels, adapter reports and strict post-teardown smoke checks are implemented. GPU timestamp pools, queue precision, reset/write/readback and strict reuse smoke are implemented. Real Windows/Linux GPU execution remains open. See the 2026-09-05 Phase 9 checkpoints.)*
 
 ### 35.4 Modern renderer foundation
 
