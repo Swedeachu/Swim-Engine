@@ -8,7 +8,7 @@
 >
 > **Physics direction:** gameplay talks only to Swim physics contracts. PhysX and Jolt are selectable backend implementations.
 >
-> **Shader direction:** Slang is the source language/compiler stack for new first-party shaders. Vulkan consumes SPIR-V. Future D3D12 consumes DXIL. Metal support is added when the Slang/Metal path is sufficiently mature. Legacy OpenGL may consume Slang-generated GLSL/SPIR-V where practical.
+> **Shader direction:** Slang is the canonical source language/compiler stack for all first-party shaders. Vulkan consumes Slang-generated SPIR-V. The isolated legacy OpenGL backend consumes Slang-generated GLSL compatibility artifacts. Future D3D12 consumes DXIL. Metal support is added when the Slang/Metal path is sufficiently mature.
 
 ---
 
@@ -21,7 +21,7 @@ This section is the short authoritative status summary for the current repositor
 - **Phase 3 — Jobs/IO/memory:** complete. `Swim::Jobs`, `Swim::IO`, `Swim::Memory`, mimalloc-backed frame/scratch allocation, and deterministic async/job shutdown are established before renderer/streaming expansion.
 - **Phase 4 — Assets:** the engine-owned `Swim::Assets` identity/runtime schema, fastgltf importer, meshoptimizer path, KTX2/Basis metadata/transcode path, WebP/PNG/JPEG source-image compiler, compiler-side Draco decode, `.sasset` v1 writer/reader, development incremental cooker, and cooked-model compatibility residency path are implemented. Source codecs are owned by `SwimAssetCompiler`; they are not supposed to become shipping runtime model-import dependencies.
 - **Phase 4 validation:** the Draco 1.5.7 embedded-consumer include-root issue remains isolated behind `Swim::AssetCompilerDraco`, and the supported Windows clean/soft builds compile/run the importer, source-image, development cook/load, and cooker validation targets automatically. The developer has confirmed the dependency-enabled Windows build path is already green, and the repository now contains the real `Assets` authoring tree supplied for this checkpoint (including the Sponza KTX/Draco variants, WebP sofa, barrel/test models, fonts, and textures). The build scripts continue to enforce that gate rather than relying on this one confirmation.
-- **Phase 5 / Phase 6 handoff:** the scene foundation now includes explicit `SceneCatalog`/`SceneId`, headless/core/presentation separation, scene-owned Transform and mutation state, per-view Frustum state, an instance-owned behavior registry, durable `SerializedEntityId` identity, `AssetId` references, and a canonical right-handed / 0..1-depth camera convention. The previously split `SceneSerializer`/`SceneStorage`/`SceneToolingBridge`/`SceneSyncTracker` experiment is retained but intentionally **not runtime-wired**: Scene creates none of it, performs no automatic scene JSON save/delta work, and sends no external-editor IPC. Critical-path items **22 through 29 are implemented**: PhysX and Jolt now sit behind the same generic physics seam and register the same parity contract. **Item 30 (Slang compiler/reflection integration)** is the next critical-path checkpoint; do not spend that runway over-polishing the current BVH/scene/GPU-dirty machinery that the later renderer/GPU Scene phases are expected to replace.
+- **Phase 5 / Phase 6 handoff:** the scene foundation now includes explicit `SceneCatalog`/`SceneId`, headless/core/presentation separation, scene-owned Transform and mutation state, per-view Frustum state, an instance-owned behavior registry, durable `SerializedEntityId` identity, `AssetId` references, and a canonical right-handed / 0..1-depth camera convention. The previously split `SceneSerializer`/`SceneStorage`/`SceneToolingBridge`/`SceneSyncTracker` experiment is retained but intentionally **not runtime-wired**: Scene creates none of it, performs no automatic scene JSON save/delta work, and sends no external-editor IPC. Critical-path items **22 through 37 are implemented**: PhysX and Jolt sit behind the same generic physics seam and parity contract; Slang is now the only first-party shader source language and generates both Vulkan SPIR-V and the isolated legacy OpenGL GLSL compatibility artifacts; the backend-neutral `Swim::Rhi` type/object contract defines formats, resource states, descriptor/capability vocabulary, adapters/devices/queues/swapchains, command objects, GPU resources, shader/pipeline objects, synchronization, and query pools without Vulkan types; an explicit runtime `GraphicsFactory` owns RHI backend registration/creation; and `Swim::RhiVulkan` now owns the Vulkan 1.3 instance/adapter/device/queue bootstrap through namespaced volk + vk-bootstrap plus SDL3-owned Vulkan WSI/swapchain presentation. `Swim::RhiVulkan` now also owns normal buffer/image allocation through VMA v3.4.0, with backend-neutral memory preferences mapped to VMA policy and VMA allocation names retained for diagnostics. **Item 38 (timeline/frame-context/deferred destruction)** is the next critical-path checkpoint. Do not spend that runway over-polishing the current BVH/scene/GPU-dirty machinery that the later renderer/GPU Scene phases are expected to replace.
 - **Testing:** the whole runnable test corpus is one program, `SwimTests`, built from self-registering suites under `Source/Tests/Suites/<group>/`. Adding coverage is a new `.cpp` in the right dependency group, never a new CMake target. The Windows clean/soft builds and the Linux builds run the complete suite, so coverage is continuously exercised instead of depending on a hand-maintained list of phase gate targets. Per-module public-header compile gates stay separate because their value is their narrow link surface. See section 32.
 - **Shipping asset policy:** development auto-cook is intentionally convenient and currently enabled by default when `SwimAssetCompiler` exists. Shipping/release packaging is intended to disable `SWIM_ENABLE_DEV_ASSET_AUTOCOOK`, pre-cook with `SwimAssetCooker`, and run from compiled `.sasset`/future `.spack` data without glTF/Draco/WebP source-import code. Final packaging presets and `.spack`/memory-mapped streaming are later work, so do not confuse the current development executable with the final shipping dependency closure.
 
@@ -73,9 +73,9 @@ This ordering is not cosmetic. It prevents the engine from building a modern ren
 - [x] File/path/IO abstractions exist before the asset pipeline is made authoritative.
 - [x] The jobs system exists before renderer extraction, asset processing, animation, streaming, and other parallel systems are expanded.
 - [x] Asset identity and ownership are fixed before the new renderer starts storing mesh/material/texture references. *(New work uses engine-owned `Swim::Assets::AssetSystem`, typed generational handles, and backend-neutral runtime asset schemas; the old renderer pools remain transitional migration targets only.)*
-- [ ] Scene ownership and transform dirty tracking are fixed before GPU Scene extraction is implemented.
-- [ ] Shader reflection contracts are defined before descriptor/pipeline layouts become entrenched in the RHI.
-- [ ] The RHI contract is defined before Vulkan implementation details spread through new renderer code.
+- [x] Scene ownership and transform dirty tracking are fixed before GPU Scene extraction is implemented.
+- [x] Shader reflection contracts are defined before descriptor/pipeline layouts become entrenched in the RHI.
+- [x] The RHI contract is defined before Vulkan implementation details spread through new renderer code.
 - [x] Physics components contain backend-neutral handles before Jolt and PhysX coexist. *(PhysX and Jolt now coexist behind `BodyHandle`/`ShapeHandle`/`PhysicsMaterialHandle` and the shared `IPhysicsBackend`/`IPhysicsWorldBackend` contracts.)*
 - [x] No new code reaches through `SwimEngine::GetInstance()` to discover dependencies.
 - [x] No new public generic header includes Win32, Vulkan, OpenGL, PhysX, Jolt, SDL implementation details, or source-importer types.
@@ -364,7 +364,7 @@ The current `ParallelUtils` render thread pool is useful experimentation, but re
 ## 3. Hard architecture boundaries
 
 - [x] `Swim::Platform` is the only generic runtime layer allowed to include OS-native window/process APIs. *(Native Win32 use is confined to Platform/internal or backend-specific implementation code; generic/public headers are guarded by verification.)*
-- [ ] `Swim::RhiVulkan` is the only normal layer allowed to include Vulkan implementation types.
+- [x] `Swim::RhiVulkan` is the only normal layer allowed to include Vulkan implementation types. *(The modern backend lives under `RHI/Backends/Vulkan`; its public factory header is Vulkan-free and the architecture verifier rejects Vulkan/volk/vk-bootstrap leakage into generic RHI headers.)*
 - [ ] `Swim::RhiD3D12` and `Swim::RhiMetal` can be added without changing high-level renderer contracts.
 - [x] `Swim::PhysicsPhysX` is the only normal layer allowed to include PhysX implementation types. *(Generic Physics/Rigidbody/Scene code is verifier-guarded against PhysX/Jolt implementation types.)*
 - [x] `Swim::PhysicsJolt` is the only normal layer allowed to include Jolt implementation types. *(Jolt includes/types are confined to `Systems/Physics/Backends/Jolt` and its private dependency target; the architecture verifier rejects Jolt leakage into generic physics.)*
@@ -410,7 +410,7 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | meshoptimizer | vertex/index optimization, LOD, meshlets | Use offline in asset compiler. |
 | KTX-Software/libktx | KTX2 texture processing/transcoding | Add/use when compiler-side KTX2 production needs it; runtime should consume Swim TextureAsset metadata/payloads rather than expose libktx types. |
 | zstd | package/chunk compression | Keep behind asset/package code. |
-| Slang | shader language/compiler/reflection | Use for all new first-party shaders. |
+| Slang | shader language/compiler/reflection | Canonical source/compiler path for all first-party shaders; emit backend artifacts and reflection at build/cook time. |
 | Vulkan-Headers | Vulkan API definitions | Use in Vulkan backend only. |
 | volk | Vulkan dispatch loading | Use in Vulkan backend. |
 | vk-bootstrap | instance/device/queue/swapchain bootstrap | Use for boilerplate, while Swim owns feature and adapter policy. |
@@ -489,13 +489,16 @@ Rules:
 | nlohmann/json | `3.10.4` single header + SHA-256 | editable config/tool/legacy scene interchange | yes while those paths use it | Verified release header avoids Windows path/cache issues. |
 | GLAD | `v2.0.8` generated loader | legacy OpenGL backend | yes while legacy backend ships | Must eventually live only in the OpenGL implementation target. |
 | OpenGL | Windows/system API | legacy OpenGL backend | yes while legacy backend ships | No source-import responsibility. |
-| Vulkan | system Vulkan SDK | Vulkan backend | yes | Must eventually live only in `Swim::RhiVulkan`. |
+| Vulkan-Headers | system Vulkan SDK | `Swim::RhiVulkan` | yes | Header/API definitions are private to the Vulkan implementation target. The modern backend does not link the Vulkan loader directly. |
+| volk | `1.4.350` | `Swim::RhiVulkan` | yes | Namespaced static meta-loader/dispatch tables so the modern backend can coexist temporarily with the legacy directly-linked Vulkan path without symbol collisions. |
+| vk-bootstrap | `v1.4.350` | `Swim::RhiVulkan` | yes | Instance, physical-device, logical-device, and queue bootstrap only; Swim still owns required feature/adapter policy. |
 | PhysX | `107.3-omni-and-physx-5.6.1` | `Swim::PhysicsPhysX` | yes | External CPU-only backend; implementation types stay private to the backend target. |
 | Jolt Physics | `v5.6.0` | `Swim::PhysicsJolt` | yes | CPM source build, static library, single-precision positions; Jolt compute/GPU/sample/tool paths are disabled and implementation types stay private to the backend target. |
+| Slang compiler SDK | `2026.16.1` official release ZIP + SHA-256 | `SwimSlangCompiler` build tool -> `Swim::ShaderCompiler` metadata tooling | no | Build-only `slangc`; emits SPIR-V, reflection JSON, and depfiles. Slang implementation libraries/types are not linked into runtime or exposed by public shader metadata headers. |
 
 `no*` means the normal compiled-asset runtime does not need the dependency; a development build with in-process auto-cooking may intentionally include the asset compiler.
 
-Build/tool dependencies are separate from linked engine libraries: CMake requires `3.25+`; CPM.cmake is pinned to `0.40.8`; Git is used for immutable dependency-cache validation and PhysX worktree setup; Python 3 is required by GLAD/PhysX upstream generation; and DXC is discovered from the Vulkan SDK/`PATH` for the existing HLSL -> SPIR-V build. These tools do not become runtime library dependencies.
+Build/tool dependencies are separate from linked engine libraries: CMake requires `3.25+`; CPM.cmake is pinned to `0.40.8`; Git is used for immutable dependency-cache validation and PhysX worktree setup; Python 3 is required by GLAD/PhysX upstream generation; Slang `2026.16.1` is fetched as a hash-verified compiler SDK for deterministic `.slang` -> SPIR-V/GLSL/reflection builds. The old first-party DXC/HLSL shader path is retired. These tools do not become runtime library dependencies.
 
 ### 4.3 Build graph and CMake invariants
 
@@ -503,12 +506,12 @@ CMake is the authoritative build description and should reinforce the engine arc
 
 - [ ] First-party subsystems have explicit targets with intentional public/private dependency edges.
 - [ ] Third-party libraries are linked only by the implementation target that owns them.
-- [ ] `Swim::Rhi` does not link Vulkan; `Swim::RhiVulkan` owns Vulkan-Headers, volk, vk-bootstrap, and VMA.
+- [x] `Swim::Rhi` does not link Vulkan; `Swim::RhiVulkan` privately owns Vulkan-Headers, volk, vk-bootstrap, and VMA. *(The generic target remains dependency-free; allocator implementation types never cross the RHI contract.)*
 - [x] `Swim::Physics` does not link PhysX or Jolt directly; `Swim::PhysicsPhysX` and `Swim::PhysicsJolt` own their implementation dependencies privately.
 - [x] `Swim::PhysicsJolt` owns Jolt privately through `Swim::Jolt`; generic/runtime consumers link the Swim backend target rather than raw `Jolt::Jolt`.
 - [x] `Swim::Platform` / `Swim::Input` own SDL3 integration rather than making SDL3 an engine-wide dependency.
 - [x] fastgltf, meshoptimizer, Draco, source-image decoders, and similar importer dependencies live in asset compiler/import targets unless runtime use is explicitly required. *(fastgltf/meshoptimizer and libwebp source-image decoding are compiler-only; the obsolete runtime tinygltf/Draco/WebP source-import chain has been removed. `stb` is compiler-only for PNG/JPEG authoring decode and remains an explicit legacy-runtime dependency only for still-loose texture/font compatibility paths.)*
-- [ ] Slang shader compilation/reflection is integrated through dedicated build/tool rules with correct source/include dependency tracking.
+- [x] Slang shader compilation/reflection is integrated through dedicated build/tool rules with correct source/include dependency tracking. *(The pinned `slangc` rule declares CMake `OUTPUT`s and consumes Slang's generated depfile; reflection is parsed behind the Swim-owned `ShaderReflection` contract.)*
 - [ ] Generated shader artifacts and compiled asset outputs have deterministic build dependencies and are not maintained by ad-hoc post-build shell scripts.
 - [ ] Platform-specific source files and libraries are selected inside the appropriate implementation targets; generic code does not accumulate broad `#ifdef _WIN32` / Linux branches.
 - [x] No machine-specific absolute include/library paths.
@@ -2027,9 +2030,9 @@ Implemented in this checkpoint:
 
 Validation in this environment: `scripts/verify-build-layout.py` passes with regression guards for the PhysX callback actor type, Vulkan `TransformSpace` header self-containment, single-header nlohmann/json dependency contract, EnTT empty-tag insertion, explicit physics-handle validity checks, and the new Linux/foundation placement of generic physics plus the shared backend-contract compile target. The dependency-stub CMake/Ninja tree builds and executes the portable EngineConfig, SceneCatalog, DeferredCommandBuffer, Memory, Jobs, AssetSystem, KTX2, PhysicsHandle, and HeadlessCoreAssets targets successfully. In addition, GCC/C++20 syntax-checks every generic physics `.cpp` and `PhysicsBackendContractCompile.cpp` successfully using a temporary local GLM compatibility stub solely for this isolated validation environment. A true dependency-enabled Linux configure cannot run inside this container because outbound GitHub DNS is blocked and the repository dependency cache is empty; this is an environment limitation rather than a CMake platform gate. The latest real Windows clean build now independently confirms the entire engine link and complete Phase 4 asset gate are green; the only reported blocker in that run is the Phase 6 explicit-handle test compile issue fixed above.
 
-**Checkpoint closure:** critical-path items 22 through 28 are now represented by completed guide checkboxes where their implementation is actually present. Item 29 intentionally remains unchecked: the generic seam and PhysX implementation are ready for it, but Jolt parity has not been implemented or falsely credited to this checkpoint.
+**Historical checkpoint closure:** at this 2026-09-03 checkpoint, items 22 through 28 were complete and item 29 was still pending. Item 29 was subsequently completed by the Jolt parity checkpoint documented below; the current implementation snapshot at the top of this guide is authoritative.
 
-**Next critical-path work:** item 29 — add `Swim::PhysicsJolt`, select it through the existing runtime physics factory/configuration seam, and run `PhysicsBackendContract` unchanged against both backends before checking the parity list below.
+**Historical next step at that point:** item 29 was to add `Swim::PhysicsJolt`, select it through the existing runtime physics factory/configuration seam, and run `PhysicsBackendContract` unchanged against both backends. That work is now complete.
 
 ### Test-suite consolidation checkpoint — 2026-09-04
 
@@ -2134,10 +2137,10 @@ Do this before final RHI descriptor/pipeline architecture is locked down.
 
 ### Source policy
 
-- [ ] all new first-party shaders use `.slang`;
-- [ ] existing HLSL can migrate incrementally because Slang is HLSL-oriented;
-- [ ] Vulkan shipping output is SPIR-V;
-- [ ] OpenGL legacy can consume generated GLSL/SPIR-V where the path is reliable;
+- [x] all first-party shader source uses `.slang`; no handwritten `.hlsl` or `.glsl` remains under `Source/Shaders`. The pre-Slang sources are archived at `Deprecated/Shaders/` — outside `Source/`, so no CMake glob can reach them — and the build-layout verifier fails if either a retired source reappears under `Source/Shaders` or the build system references the archive.
+- [x] the old DXC/HLSL first-party compilation path is retired; Slang owns Vulkan shader compilation. The build no longer requires `dxc.exe`.
+- [x] Vulkan runtime output is Slang-generated SPIR-V.
+- [x] OpenGL legacy consumes Slang-generated GLSL compatibility artifacts while it remains supported; handwritten GLSL source is retired.
 - [ ] D3D12 future output is DXIL;
 - [ ] Metal remains a future target and must not be assumed complete until toolchain support is production-ready.
 
@@ -2191,12 +2194,68 @@ High-level renderer should consume a backend-independent shader program descript
 
 Do not make render passes know `.spv` paths.
 
+
+### Slang/RHI/Vulkan-bootstrap checkpoint — 2026-09-04
+
+Critical-path items 30–37 are now implemented without widening the legacy renderer or scene/BVH surface:
+
+- `cmake/ShaderCompilerDependencies.cmake` pins the official Slang `2026.16.1` compiler SDK by platform and verifies the release archive SHA-256 before extraction. Slang is a build-only compiler dependency; the engine does not link the Slang runtime/library merely to consume shader artifacts.
+- `cmake/SlangShaders.cmake` provides deterministic CMake `OUTPUT` rules for backend shader artifacts plus reflection JSON and consumes Slang's depfile for source/include dependency tracking. It deliberately does not use `PRE_BUILD`. `cmake/Shaders.cmake` now sends every first-party Vulkan shader through Slang -> SPIR-V and every isolated legacy OpenGL shader through Slang -> generated GLSL; the old DXC/HLSL and handwritten-GLSL source paths are retired.
+- `Swim::ShaderCompiler` owns a stable first-party reflection schema. `simdjson` is private to its parser implementation, and no Slang/simdjson type appears in the public metadata header.
+- `Source/Shaders/Slang/Basic/Basic.slang` remains the reflection-first reference module and uses shader attributes plus `ParameterBlock` declarations. The former Vulkan HLSL and OpenGL GLSL shader sets have also been ported to `.slang`, preserving their current runtime artifact names so shader-language migration does not force unrelated renderer surgery.
+- `RHI/RhiTypes.h` establishes backend-neutral formats, buffer/texture usage, resource states, descriptor schema vocabulary, shader-stage masks, and a capability table. Its public-header gate is intentionally dependency-free and rejects Vulkan/D3D12/Metal implementation types.
+- The backend-neutral `Swim::Rhi` interface target now also defines the item 33 object/lifetime contract: `GraphicsSystem`, `Adapter`, `Device`, queue/swapchain/command objects, buffers/textures/views/samplers, shader and graphics/compute pipeline objects, descriptor tables, fences/timelines, and query pools. Swapchain creation accepts a forward-declared `Platform::Window&`; native handles are explicit escape hatches rather than the normal API.
+- Descriptor and pipeline layout ownership has been tightened before any Vulkan implementation is written: `ShaderProgram` owns the reflected descriptor/push-constant interface, `PipelineLayoutDesc` references a `ShaderProgram` instead of accepting a second hand-written schema, descriptor tables reference a reflected pipeline-layout space, and individual descriptor writes no longer repeat descriptor type information. The backend must validate writes against reflected program metadata.
+- Item 34 is implemented as the backend-neutral `GraphicsFactory`: backend creation functions register explicitly by `GraphicsApi`; duplicate/invalid registration is rejected; factory creation has no Vulkan/Win32 dependency or global static preregistration.
+- Item 35 is implemented as `Swim::RhiVulkan`: volk `1.4.350` and vk-bootstrap `v1.4.350` are pinned privately; volk is namespaced and uses per-instance/per-device dispatch tables; vk-bootstrap enumerates every suitable Vulkan 1.3 adapter and builds the logical device plus graphics/compute/transfer queues. Swim requires dynamic rendering, synchronization2, timeline semaphores, descriptor indexing/runtime arrays, indirect count, and buffer device address at selection time; adapter capability reporting is populated from Vulkan feature/property/memory queries. The device enables `VK_KHR_swapchain` up front so item 36 does not require device recreation.
+- Item 36 is implemented without leaking SDL or OS-native handles into the RHI: `Swim::Platform` owns an internal opaque Vulkan-WSI bridge that acquires/releases SDL's Vulkan loader, exposes SDL's required instance-extension list, filters queue families through SDL presentation support, and creates/destroys surfaces for `Platform::Window`. `Swim::RhiVulkan` consumes that bridge, revalidates the selected graphics queue against each concrete surface, and owns a baseline SDR swapchain path with image/image-view wrappers, acquire/present, configurable FIFO vs mailbox/immediate fallback presentation, resize/recreate, and the binary semaphore/fence primitives required by WSI. Resize still uses a temporary `vkDeviceWaitIdle` stopgap and HDR/minimized-window hardening remains intentionally deferred to the timeline/frame-context and HDR checkpoints rather than being hidden inside item 36.
+- Item 37 is implemented behind the RHI resource contracts with VMA `v3.4.0`, pinned privately under `Swim::RhiVulkan`. The allocator uses the same SDL/volk-resolved Vulkan function path as the backend, enables buffer-device-address support and memory-budget integration when available, and is destroyed before the logical device. `Device::CreateBuffer` now maps `DeviceLocal`, `CpuToGpu`, and `GpuToCpu` to VMA automatic memory policy; `Device::CreateTexture` owns device-local images; `CreateTextureView` owns non-swapchain views while swapchain views remain swapchain-owned. Normal buffer/image destruction is paired with VMA allocation destruction, and allocation debug names are retained without exposing VMA in public RHI headers.
+- Dependency-enabled builds also compile/link a Vulkan-backend public-header gate and a registration-only `GraphicsFactory` test without requiring a GPU/window. The offline/foundation build remains green after these additions: **54 cases / 252 checks** plus the ShaderCompiler and generic RHI public-header compile gates. This environment still cannot fetch/build the real Vulkan bootstrap/VMA dependencies or execute `slangc`, so those dependency-enabled compile/runtime gates must run in the normal clean build rather than being claimed here.
+
+**Next implementation checkpoint:** item 38, add the timeline/frame-context/deferred-destruction model before expanding command/resource lifetime behavior.
+
+### Phase 7 Slang/RHI bring-up checkpoint — 2026-09-04
+
+The Slang pipeline, the shader-reflection tool boundary, the backend-neutral RHI contracts, and the Vulkan RHI backend now configure, build, and run. Issues found and fixed while validating the bring-up:
+
+- **GLSL targets produced no output.** `slangc` emits one kernel per entry point for GLSL, so `-o` must follow an `-entry`. Every OpenGL shader failed with `E00070`. The runtime shader rules now pass `ENTRY_POINT main` for GLSL programs; SPIR-V still compiles the whole module.
+- **The platform WSI shim did not compile.** `VulkanWsi.cpp` used `VK_NULL_HANDLE`, which `SDL3/SDL_vulkan.h` does not define — it forward-declares the handle types only. Pulling in `vulkan.h` would have put the Vulkan API back inside `Swim::Platform`, so the surface handle is value-initialized instead.
+- **The modern RHI could not build against an older Vulkan SDK.** volk and vk-bootstrap 1.4.350 reference Vulkan 1.4 feature structures; a developer on the 1.3 SDK failed with dozens of undeclared-identifier errors inside vk-bootstrap. `cmake/VulkanRhiDependencies.cmake` now pins `Vulkan-Headers` v1.4.350 and points both dependencies at it. The legacy renderer keeps using the installed SDK; the two never exchange Vulkan types because the RHI boundary is opaque handles and the WSI shim resolves everything through SDL.
+- **One ported shader was mis-translated.** `decorator_fragment.slang` contained `float2(0.0f)x` where the GLSL original had `vec3(0.0)`, which failed to parse.
+- **Every SPIR-V module was a validation error.** `-fspv-reflect` embeds `SPV_GOOGLE_user_type` / `SPV_GOOGLE_hlsl_functionality1` decorations, which require the matching `VK_GOOGLE_*` device extensions. Swim reads reflection from the `-reflection-json` sidecar — byte-identical with or without the flag — so the flag was removed.
+- **Bindless indexing needed a device feature the renderer never enabled.** Slang emits the `SampledImageArrayNonUniformIndexing` capability for the unsized `Texture2D textures[]` binding where DXC did not. `shaderSampledImageArrayNonUniformIndexing` is separate from `descriptorIndexing`, so `VulkanDeviceManager` now requires and enables it. The shader source itself is byte-identical to the retired HLSL apart from the `[shader("fragment")]` attribute.
+- **Slang changed the meaning of `SV_InstanceID` relative to the retired DXC SPIR-V path.** The legacy renderer intentionally packs many mesh buckets into one instance SSBO and uses each indirect command's non-zero `firstInstance` as the global SSBO/visible-index base. DXC's old path exposed raw Vulkan `InstanceIndex` here, while Slang's `SV_InstanceID` is BaseInstance-relative. That caused later mesh buckets to read element zero again, producing cross-mesh transforms/materials (for example barrel geometry at cube transforms and one texture repeated across Sponza). Every shader that consumes the global instance base now explicitly uses `SV_VulkanInstanceID`; integer material/instance varyings are flat/nointerpolation and per-instance bindless texture indices use `NonUniformResourceIndex`. The build-layout verifier locks that semantic contract.
+- **Shader/C++ memory layout was audited instead of guessed at.** Runtime Slang compilation explicitly retains `-matrix-layout-column-major` to preserve the retired DXC matrix-memory convention, and shader-shared legacy instance/BVH/decorator/MSDF structs now have host-side `sizeof`/`offsetof` assertions. This keeps the transitional renderer computationally defined while those data paths are later replaced by the modern RHI/GPU-scene work.
+- **Depfiles shipped beside the executable.** `swim_add_slang_program` wrote `<name>.d` into the artifact directory, which is deployed wholesale. Depfiles now go to a separate `Generated/ShaderDeps` tree, so only `.spv`, `.glsl`, and `.reflection.json` reach the runtime directory.
+- **One RHI test used a nonexistent macro** (`SWIM_TEST_CASE`) and slash-separated suite naming, so it did not compile and would not have been addressable by the runner's dotted filters.
+
+Validation: configure and build are green, `SwimTests` runs 129 cases across 36 suites including the new `RHI.*`, `RHI.Vulkan`, and `ShaderCompiler.*` suites, all 22 first-party shaders compile through the pinned `slangc`, and the engine runs and shuts down cleanly on Vulkan with **zero validation-layer errors** using only Slang-generated SPIR-V.
+
+The later visual-corruption report is an important reminder that validation-clean SPIR-V is not semantic parity. The source-level audit against `Deprecated/Shaders/Vulkan` found the BaseInstance-relative `SV_InstanceID` migration mismatch described above; the correction is guarded structurally here, but the post-fix visual runtime still needs to be exercised by the normal dependency-enabled Windows build.
+
+Known unrelated issue: the legacy OpenGL renderer fails at startup in `SetPixelFormatForHDC` ("SetPixelFormat failed for multisample format"). This was confirmed pre-existing by building and running the committed baseline, which fails identically. It happens during WGL pixel-format selection, before any shader is loaded, and `SwimEngine` does not link the RHI targets, so it is independent of this work.
+
+### Visual Studio parallel-configure checkpoint — 2026-09-04
+
+A Release build from inside Visual Studio failed with `LNK1181: cannot open input file 'Release\SwimAssets.lib'`, `could not lock config file .git/config: File exists`, and an `MSB8066` cascade across most module targets, while the Ninja soft build of the same tree was green.
+
+Root cause: CMake's Visual Studio generator attaches a `--check-stamp-file` custom build to **every** generated project. MSBuild builds projects in parallel, so whenever the generate stamp is stale — which it is after any CMake edit — one full CMake configure is launched *per project*, concurrently, against a single binary directory. Those configures overwrite each other's generated files (observed as `configure_file` failures from simdjson and Draco) and race on the shared CPM dependency caches. `cmake/PhysX.cmake` normalizes the pinned PhysX checkout at configure time with `git config --local`, `git reset --hard`, and `git clean -ffdx`, so the collision surfaced as a Git lock error. The configure that lost the race failed, its target's custom build exited 1, and every target depending on it — including `SwimAssets` — never produced a library, which is what the linker then reported.
+
+Fixed in two places:
+
+- `CMAKE_SUPPRESS_REGENERATION` is now forced on for the Visual Studio generator as well as Ninja, so no project regenerates the build system and the IDE can never start a configure storm. This matches the contract the repository already relies on: every supported workflow configures explicitly before compiling, and both build scripts refresh the solution on every run. The trade is that CMake edits require re-running a build script or `cmake --preset windows-vs` before building in the IDE, which is now documented in `README.md` and `docs/VisualStudioProjectStructure.md`.
+- `cmake/PhysX.cmake` no longer writes to the shared dependency cache unconditionally. It reads the current Git config values and working-tree status first and only normalizes/resets when the checkout has actually drifted. This removes the write from the common path entirely (defence in depth for any other concurrent configure) and also stops every configure from paying a full `reset --hard` plus `clean -ffdx` over the PhysX tree.
+
+`verify-build-layout.py` now requires both invariants: the suppression guard covering both generators, and the read-before-write shape of the PhysX normalization.
+
+Validation: `msbuild SwimEngine.sln /p:Configuration=Release /m` completes with zero errors, both from a hand-run configure and from a solution freshly regenerated by the soft-build script. The Visual Studio-built `SwimTests.exe` runs 129 cases green and the Visual Studio-built engine runs and exits cleanly on Vulkan with zero validation-layer errors. The Ninja soft build remains green.
+
 ### Phase 7 exit criteria
 
-- [ ] one Slang shader compiles to Vulkan SPIR-V and reflects its bindings.
-- [ ] the same source can produce a legacy OpenGL-consumable artifact for a validation sample where practical.
-- [ ] C++/shader parameter layout validation exists.
-- [ ] descriptor/pipeline layout design no longer duplicates binding definitions manually in multiple source files.
+- [x] one Slang shader compiles to Vulkan SPIR-V and reflects its bindings. *(The dependency-enabled bring-up compiles all 22 first-party Slang programs and emits reflection sidecars.)*
+- [x] the same source can produce a legacy OpenGL-consumable artifact for a validation sample where practical. *(The Slang runtime rules emit the isolated legacy GLSL artifacts from `.slang` sources.)*
+- [x] C++/shader parameter layout validation exists. *(The transitional Camera/instance/BVH/decorator/MSDF host structs have explicit size/offset/alignment guards, and runtime Slang compilation locks the DXC-compatible matrix memory convention; later reflection-driven schema generation can replace these manual ABI assertions.)*
+- [x] descriptor/pipeline layout design no longer duplicates binding definitions manually in multiple source files. *(`ShaderProgram` owns the reflected interface; pipeline layouts and descriptor tables derive from it.)*
 
 ---
 
@@ -2230,26 +2289,26 @@ The RHI should model modern explicit APIs naturally.
 
 ### Core RHI concepts
 
-- [ ] `GraphicsSystem`
-- [ ] `Adapter`
-- [ ] `Device`
-- [ ] `Queue`
-- [ ] `Swapchain`
-- [ ] `CommandPool` / `CommandAllocator`
-- [ ] `CommandList`
-- [ ] `Buffer`
-- [ ] `Texture`
-- [ ] `TextureView`
-- [ ] `Sampler`
-- [ ] `ShaderProgram`
-- [ ] `PipelineLayout`
-- [ ] `GraphicsPipeline`
-- [ ] `ComputePipeline`
-- [ ] `DescriptorSchema` / resource layout
-- [ ] `DescriptorTable` / bind group/resource table
-- [ ] `Fence`
-- [ ] `Timeline`
-- [ ] `QueryPool`
+- [x] `GraphicsSystem`
+- [x] `Adapter`
+- [x] `Device`
+- [x] `Queue`
+- [x] `Swapchain`
+- [x] `CommandPool` / `CommandAllocator`
+- [x] `CommandList`
+- [x] `Buffer`
+- [x] `Texture`
+- [x] `TextureView`
+- [x] `Sampler`
+- [x] `ShaderProgram`
+- [x] `PipelineLayout`
+- [x] `GraphicsPipeline`
+- [x] `ComputePipeline`
+- [x] `DescriptorSchema` / resource layout
+- [x] `DescriptorTable` / bind group/resource table
+- [x] `Fence`
+- [x] `Timeline`
+- [x] `QueryPool`
 
 ### Resource descriptions
 
@@ -2340,9 +2399,9 @@ This preserves working OpenGL without poisoning the explicit RHI with GL-era lim
 
 ### Phase 8 exit criteria
 
-- [ ] no Vulkan type exists in generic render/RHI public headers.
-- [ ] RHI accepts the platform window abstraction, not `HWND`.
-- [ ] graphics backend is selected at runtime.
+- [x] no Vulkan type exists in generic render/RHI public headers.
+- [x] RHI accepts the platform window abstraction, not `HWND`.
+- [x] graphics backend is selected at runtime.
 - [ ] a null/mock RHI can support unit tests where useful.
 - [ ] D3D12/Metal can plausibly implement the contract without redesigning it.
 
@@ -2375,12 +2434,12 @@ Swim still owns:
 
 Prefer Vulkan 1.3 baseline on supported desktop hardware:
 
-- [ ] dynamic rendering;
-- [ ] synchronization2;
-- [ ] timeline semaphores;
-- [ ] descriptor indexing;
-- [ ] indirect count;
-- [ ] buffer device address where beneficial;
+- [x] dynamic rendering;
+- [x] synchronization2;
+- [x] timeline semaphore feature support; *(the frame/timeline ownership model is item 38)*
+- [x] descriptor indexing;
+- [x] indirect count;
+- [x] buffer device address where beneficial;
 - [ ] pipeline cache;
 - [ ] debug utils;
 - [ ] memory-budget telemetry.
@@ -2399,12 +2458,12 @@ Replace raw general `vkAllocateMemory` usage with VMA.
 
 Create:
 
-- [ ] device-local allocation policy;
+- [x] device-local allocation policy; *(normal RHI buffers/images now use VMA automatic device/host preference policy)*
 - [ ] persistent mapped upload arenas/rings;
 - [ ] readback arenas;
 - [ ] transient frame buffers via render graph;
-- [ ] memory-budget reporting;
-- [ ] allocation debug names/tags.
+- [ ] memory-budget reporting; *(the capability/extension is wired into VMA, but allocator budget telemetry is not yet surfaced through a renderer-facing API)*
+- [x] allocation debug names/tags. *(RHI resource debug names are copied into owned storage and assigned to VMA allocations.)*
 
 ### Frame synchronization
 
@@ -2432,14 +2491,14 @@ Rules:
 
 - [ ] resize/recreate without normal device-idle;
 - [ ] minimized/zero-size window handling;
-- [ ] SDR baseline;
+- [x] SDR baseline;
 - [ ] HDR capability path;
-- [ ] present mode configuration;
-- [ ] multiple swapchains/windows supported at RHI level.
+- [x] present mode configuration;
+- [x] multiple swapchains/windows supported at RHI object/lifetime level.
 
 ### Validation and diagnostics
 
-- [ ] validation enabled in debug/CI mode;
+- [x] validation requested in Debug builds;
 - [ ] Vulkan object names;
 - [ ] command labels;
 - [ ] adapter/driver info logging;
@@ -2451,7 +2510,7 @@ Rules:
 
 - [ ] clear/triangle/texture test on Windows and Linux.
 - [ ] validation clean.
-- [ ] VMA used for normal buffer/image allocation.
+- [x] VMA used for normal buffer/image allocation.
 - [ ] resize/minimize/restore loop is stable.
 - [ ] frame lifetime uses timeline-based retirement.
 
@@ -3575,8 +3634,8 @@ Build targets should mirror these module boundaries so dependency direction is v
 | `PhysicsWorld.*` | Split generic world API from PhysX world implementation. |
 | `RigidBody.h` | Remove Px pointers; store generic body handle/config only. |
 | `ParallelUtils.h` | Replace renderer-global pool with general Jobs service; port useful parallel algorithms. |
-| `Source/Shaders/Vulkan/*` | Migrate first-party shader source to Slang modules. |
-| `Source/Shaders/OpenGL/*` | Keep as legacy during migration; replace with Slang-generated/ported shaders where practical. |
+| `Source/Shaders/Vulkan/*` | Slang-only first-party Vulkan source; build emits SPIR-V + reflection. |
+| `Source/Shaders/OpenGL/*` | Slang-only source for the isolated legacy backend; build emits GLSL compatibility artifacts. |
 | `Source/Game/*` | Update incrementally to use EngineServices, generic Input, AssetHandle, MaterialHandle, and generic Physics APIs. |
 
 ---
@@ -3624,14 +3683,14 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.3 Shader/RHI foundation
 
-30. [ ] Integrate Slang compiler and reflection metadata.
-31. [ ] Port a minimal shader set to Slang.
-32. [ ] Define RHI formats/resource states/descriptors/capability table.
-33. [ ] Define RHI Device/Queue/Swapchain/Buffer/Texture/Sampler/Pipeline contracts.
-34. [ ] Add runtime graphics factory.
-35. [ ] Build Vulkan RHI instance/adapter/device using volk + vk-bootstrap.
-36. [ ] Create Vulkan surface from Platform window through SDL3 WSI.
-37. [ ] Add VMA buffer/image allocation.
+30. [x] Integrate Slang compiler and reflection metadata.
+31. [x] Port all first-party shader source to Slang; retire first-party HLSL/handwritten GLSL and DXC compilation.
+32. [x] Define RHI formats/resource states/descriptors/capability table.
+33. [x] Define RHI Device/Queue/Swapchain/Buffer/Texture/Sampler/Pipeline contracts.
+34. [x] Add runtime graphics factory.
+35. [x] Build Vulkan RHI instance/adapter/device using volk + vk-bootstrap.
+36. [x] Create Vulkan surface from Platform window through SDL3 WSI.
+37. [x] Add VMA buffer/image allocation.
 38. [ ] Add timeline/frame-context/deferred-destruction model.
 39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux.
 
@@ -3705,10 +3764,10 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 Before starting **RHI/Vulkan modernization**:
 
-- [ ] generic Window abstraction exists;
-- [ ] no RHI API takes `HWND`;
-- [ ] runtime graphics backend selection exists;
-- [ ] generic PCH no longer imports Vulkan/Win32 globally.
+- [x] generic Window abstraction exists;
+- [x] no RHI API takes `HWND`;
+- [x] runtime graphics backend selection exists;
+- [x] generic PCH no longer imports Vulkan/Win32 globally.
 
 Before starting **GPU Scene**:
 
@@ -3803,7 +3862,7 @@ Swim Engine reaches the intended architecture when:
 - [ ] metallic-roughness PBR + IBL is production baseline.
 - [ ] Clustered Forward+ is the standard local-light path.
 - [ ] shadows/HDR/post are RenderGraph modules.
-- [ ] PhysX and Jolt both implement the generic physics API and are runtime selectable.
+- [x] PhysX and Jolt both implement the generic physics API and are runtime selectable.
 - [ ] animation, particles, text/UI, audio, and streaming use the same jobs/assets/platform foundations rather than inventing new ones.
 - [ ] editor/tooling systems can be wired in without changing runtime architecture.
 - [ ] profiling, validation, and regression tests cover the performance-critical paths.

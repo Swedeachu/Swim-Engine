@@ -8,15 +8,26 @@ if(POLICY CMP0141)
 	cmake_policy(SET CMP0141 NEW)
 endif()
 
-# Swim's supported Ninja workflows always perform an explicit CMake configure
-# immediately before compiling. Disable Ninja's automatic regeneration graph
-# entirely so third-party CPM glob-watch rules cannot trap the build in a
-# perpetual VerifyGlobs -> RERUN_CMAKE cycle. New/renamed sources are still
-# discovered by the explicit configure at the start of every
-# clean or soft build.
-if(CMAKE_GENERATOR MATCHES "^Ninja")
+# Every supported Swim workflow performs an explicit CMake configure immediately
+# before compiling, so automatic regeneration is disabled for both generators.
+#
+# Ninja: third-party CPM glob-watch rules can otherwise trap the build in a
+# perpetual VerifyGlobs -> RERUN_CMAKE cycle.
+#
+# Visual Studio: CMake attaches a `--check-stamp-file` custom build to *every*
+# generated project. MSBuild builds projects in parallel, so a stale stamp makes
+# N projects launch N concurrent configures of the same binary directory. That is
+# never safe: they race on generated files and on the shared CPM dependency
+# caches, which surfaces as `could not lock config file .git/config`, spurious
+# `configure_file` failures, and an MSB8066 cascade that leaves libraries unbuilt.
+#
+# New/renamed sources and CMake edits are picked up by the explicit configure at
+# the start of every clean/soft build, both of which also refresh the Visual
+# Studio solution. After editing CMake files, re-run a build script (or
+# `cmake --preset windows-vs`) rather than relying on the IDE to regenerate.
+if(CMAKE_GENERATOR MATCHES "^Ninja" OR CMAKE_GENERATOR MATCHES "^Visual Studio ")
 	set(CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL
-		"Swim build scripts configure explicitly; suppress Ninja CMake regeneration" FORCE)
+		"Swim build scripts configure explicitly; suppress automatic CMake regeneration" FORCE)
 endif()
 
 # The legacy x64 project used /MT in both Debug and Release. Set this before
@@ -61,6 +72,8 @@ option(SWIM_ENABLE_JOLT_BACKEND "Compile the Jolt physics backend" ON)
 option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
 option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
 option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
+option(SWIM_BUILD_SHADER_COMPILER "Build Slang shader compiler/reflection tooling" ON)
+option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 
 if(SWIM_BUILD_LEGACY_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
@@ -262,6 +275,54 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	swim_set_solution_folder(SwimAssetCooker "${SWIM_SOLUTION_FOLDER_TOOLS}")
 endif()
 
+# Slang is a build-only shader compiler dependency. The first-party tool target
+# owns reflection parsing while deterministic CMake output rules own shader
+# compilation; runtime renderer targets do not link Slang.
+if(SWIM_BUILD_SHADER_COMPILER AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+	set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+	set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Shader Compiler")
+	include(cmake/ShaderCompilerDependencies.cmake)
+	set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+	unset(SWIM_SAVED_CMAKE_FOLDER)
+endif()
+
+if(SWIM_BUILD_SHADER_COMPILER AND SWIM_SHADER_COMPILER_DEPENDENCIES_AVAILABLE)
+	file(GLOB_RECURSE SWIM_SHADER_COMPILER_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.h
+	)
+
+	add_library(SwimShaderCompiler STATIC ${SWIM_SHADER_COMPILER_SOURCES})
+	add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)
+	target_include_directories(SwimShaderCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)
+	target_compile_features(SwimShaderCompiler PUBLIC cxx_std_20)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_SHADER_COMPILER_SOURCES})
+	swim_set_solution_folder(SwimShaderCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
+
+	if(MSVC)
+		target_compile_options(SwimShaderCompiler PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimShaderCompiler PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
+
+	include(cmake/SlangShaders.cmake)
+	swim_add_slang_program(SwimBasicRaster
+		SOURCE Source/Shaders/Slang/Basic/Basic.slang
+		OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Generated/Shaders/Basic"
+		PROFILE spirv_1_5
+	)
+	add_custom_target(SwimSlangReflectionSample
+		DEPENDS "${SwimBasicRaster_SPIRV}" "${SwimBasicRaster_REFLECTION}"
+		SOURCES Source/Shaders/Slang/Basic/Basic.slang
+	)
+	swim_set_solution_folder(SwimSlangReflectionSample "${SWIM_SOLUTION_FOLDER_TESTS}")
+	set(SWIM_SLANG_SPIRV_SAMPLE "${SwimBasicRaster_SPIRV}" CACHE INTERNAL
+		"Generated SPIR-V path for the Slang reflection sample" FORCE)
+	set(SWIM_SLANG_REFLECTION_SAMPLE "${SwimBasicRaster_REFLECTION}" CACHE INTERNAL
+		"Generated reflection path for the Slang reflection sample" FORCE)
+endif()
+
 file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
@@ -317,6 +378,57 @@ if(MSVC)
 	target_compile_options(SwimCore PRIVATE /utf-8 /W3 /permissive-)
 else()
 	target_compile_options(SwimCore PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# The modern RHI contract is backend-neutral and part of the cross-platform
+# foundation. Concrete Vulkan/D3D12/Metal implementations live in separate
+# targets and must not leak their API types or libraries through Swim::Rhi.
+add_library(SwimRhi INTERFACE
+	Source/Engine/Systems/Renderer/RHI/RhiTypes.h
+	Source/Engine/Systems/Renderer/RHI/RhiContracts.h
+)
+add_library(Swim::Rhi ALIAS SwimRhi)
+target_include_directories(SwimRhi INTERFACE ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimRhi INTERFACE cxx_std_20)
+swim_set_solution_folder(SwimRhi "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+
+# The modern Vulkan backend is a cross-platform foundation target, independent
+# from the still-Windows-only legacy renderer. Its third-party bootstrap stack
+# stays private so Vulkan implementation types cannot leak through Swim::Rhi.
+if(SWIM_ENABLE_VULKAN_RHI AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+	set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+	set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Vulkan RHI")
+	include(cmake/VulkanRhiDependencies.cmake)
+	set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+	unset(SWIM_SAVED_CMAKE_FOLDER)
+
+	file(GLOB_RECURSE SWIM_VULKAN_RHI_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.h
+	)
+
+	add_library(SwimRhiVulkan STATIC ${SWIM_VULKAN_RHI_SOURCES})
+	add_library(Swim::RhiVulkan ALIAS SwimRhiVulkan)
+	target_include_directories(SwimRhiVulkan PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_link_libraries(SwimRhiVulkan
+		PUBLIC Swim::Rhi
+		PRIVATE Swim::Platform volk::volk vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator
+	)
+	target_compile_features(SwimRhiVulkan PUBLIC cxx_std_20)
+	target_compile_definitions(SwimRhiVulkan PRIVATE
+		VMA_STATIC_VULKAN_FUNCTIONS=0
+		VMA_DYNAMIC_VULKAN_FUNCTIONS=1
+		VMA_VULKAN_VERSION=1003000
+		$<$<CONFIG:Debug>:SWIM_VULKAN_VALIDATION=1>
+	)
+	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_VULKAN_RHI_SOURCES})
+	swim_set_solution_folder(SwimRhiVulkan "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}/RHI Backends")
+
+	if(MSVC)
+		target_compile_options(SwimRhiVulkan PRIVATE /utf-8 /W3 /permissive-)
+	else()
+		target_compile_options(SwimRhiVulkan PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
 endif()
 
 # Generic physics is part of the cross-platform foundation. Keep the concrete
@@ -468,6 +580,7 @@ list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
 # Legacy scene JSON persistence / external-editor synchronization is intentionally dormant.
 # Keep the source/header files in-tree for reference, but do not compile the old runtime implementation.
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Scene/Serialization/Scene(Serializer|Storage|SyncTracker)[.]cpp$")
@@ -485,8 +598,7 @@ file(GLOB_RECURSE SWIM_GAME_SOURCES
 )
 
 file(GLOB_RECURSE SWIM_SHADER_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Shaders/*.hlsl
-	${CMAKE_SOURCE_DIR}/Source/Shaders/*.glsl
+	${CMAKE_SOURCE_DIR}/Source/Shaders/*.slang
 )
 
 set_source_files_properties(${SWIM_SHADER_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
@@ -650,9 +762,6 @@ if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 		COMMAND "${CMAKE_COMMAND}" -E copy_directory
 			"${CMAKE_SOURCE_DIR}/Assets"
 			"$<TARGET_FILE_DIR:SwimEngine>/Assets"
-		COMMAND "${CMAKE_COMMAND}" -E copy_directory
-			"${CMAKE_SOURCE_DIR}/Source/Shaders/OpenGL"
-			"$<TARGET_FILE_DIR:SwimEngine>/Shaders/OpenGL"
 		VERBATIM
 	)
 endif()

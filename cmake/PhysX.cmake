@@ -47,46 +47,82 @@ CPMAddPackage(
 # globally and also repairs the five mis-attributed UX files in this upstream
 # tag before CPM ever reuses the cache in the Visual Studio/soft configure.
 find_package(Git REQUIRED)
+
+# These steps write to a dependency cache that every build tree shares, so they
+# are deliberately conditional: read the current state first and only write when
+# the checkout is not already normalized. Unconditional `git config` / `reset
+# --hard` / `clean -ffdx` on every configure took a lock on the shared repo even
+# when there was nothing to do, which turns any concurrent configure into a
+# `could not lock config file .git/config` failure. It also made every configure
+# pay a full reset/clean of the PhysX tree.
+function(swim_physx_normalize_git_config key expected)
+	execute_process(
+		COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" config --local --get "${key}"
+		RESULT_VARIABLE SWIM_PHYSX_GIT_CONFIG_READ_RESULT
+		OUTPUT_VARIABLE SWIM_PHYSX_GIT_CONFIG_VALUE
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		ERROR_QUIET
+	)
+
+	# `--get` exits non-zero when the key is unset, which is itself a state that
+	# needs writing; only an exact match lets us skip the write.
+	if(SWIM_PHYSX_GIT_CONFIG_READ_RESULT EQUAL 0
+		AND "${SWIM_PHYSX_GIT_CONFIG_VALUE}" STREQUAL "${expected}")
+		return()
+	endif()
+
+	execute_process(
+		COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" config --local
+			"${key}" "${expected}"
+		RESULT_VARIABLE SWIM_PHYSX_GIT_CONFIG_RESULT
+	)
+	if(NOT SWIM_PHYSX_GIT_CONFIG_RESULT EQUAL 0)
+		message(FATAL_ERROR
+			"Could not normalize PhysX Git-LFS configuration key '${key}'. "
+			"If another CMake configure or Git process is using "
+			"'${swim_physx_source_SOURCE_DIR}' concurrently, let it finish and retry."
+		)
+	endif()
+endfunction()
+
 foreach(SWIM_PHYSX_GIT_CONFIG_KEY IN ITEMS
 	filter.lfs.process
 	filter.lfs.smudge
 	filter.lfs.clean
 )
-	execute_process(
-		COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" config --local
-			"${SWIM_PHYSX_GIT_CONFIG_KEY}" ""
-		RESULT_VARIABLE SWIM_PHYSX_GIT_CONFIG_RESULT
-	)
-	if(NOT SWIM_PHYSX_GIT_CONFIG_RESULT EQUAL 0)
-		message(FATAL_ERROR "Could not normalize PhysX Git-LFS configuration")
-	endif()
+	swim_physx_normalize_git_config("${SWIM_PHYSX_GIT_CONFIG_KEY}" "")
 endforeach()
 
-execute_process(
-	COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" config --local
-		filter.lfs.required false
-	RESULT_VARIABLE SWIM_PHYSX_GIT_CONFIG_RESULT
-)
-if(NOT SWIM_PHYSX_GIT_CONFIG_RESULT EQUAL 0)
-	message(FATAL_ERROR "Could not normalize PhysX Git-LFS required setting")
-endif()
+swim_physx_normalize_git_config(filter.lfs.required false)
 
+# Only reset/clean when the checkout has actually drifted. A pristine cache is
+# the normal case, and this keeps the shared repository read-only in it.
 execute_process(
-	COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" reset --hard HEAD
-	RESULT_VARIABLE SWIM_PHYSX_RESET_RESULT
-	OUTPUT_QUIET
+	COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" status --porcelain --untracked-files=all
+	RESULT_VARIABLE SWIM_PHYSX_STATUS_RESULT
+	OUTPUT_VARIABLE SWIM_PHYSX_STATUS_OUTPUT
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET
 )
-if(NOT SWIM_PHYSX_RESET_RESULT EQUAL 0)
-	message(FATAL_ERROR "Could not reset the pinned PhysX dependency checkout")
-endif()
 
-execute_process(
-	COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" clean -ffdx
-	RESULT_VARIABLE SWIM_PHYSX_CLEAN_RESULT
-	OUTPUT_QUIET
-)
-if(NOT SWIM_PHYSX_CLEAN_RESULT EQUAL 0)
-	message(FATAL_ERROR "Could not clean generated files from the pinned PhysX dependency checkout")
+if(NOT SWIM_PHYSX_STATUS_RESULT EQUAL 0 OR NOT SWIM_PHYSX_STATUS_OUTPUT STREQUAL "")
+	execute_process(
+		COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" reset --hard HEAD
+		RESULT_VARIABLE SWIM_PHYSX_RESET_RESULT
+		OUTPUT_QUIET
+	)
+	if(NOT SWIM_PHYSX_RESET_RESULT EQUAL 0)
+		message(FATAL_ERROR "Could not reset the pinned PhysX dependency checkout")
+	endif()
+
+	execute_process(
+		COMMAND "${GIT_EXECUTABLE}" -C "${swim_physx_source_SOURCE_DIR}" clean -ffdx
+		RESULT_VARIABLE SWIM_PHYSX_CLEAN_RESULT
+		OUTPUT_QUIET
+	)
+	if(NOT SWIM_PHYSX_CLEAN_RESULT EQUAL 0)
+		message(FATAL_ERROR "Could not clean generated files from the pinned PhysX dependency checkout")
+	endif()
 endif()
 
 set(SWIM_PHYSX_STAGE_DIR "${CMAKE_BINARY_DIR}/_deps/physx-stage")

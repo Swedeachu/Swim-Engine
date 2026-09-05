@@ -7,6 +7,11 @@
 namespace Swim::Platform
 {
 
+	namespace Internal
+	{
+		struct WindowAccess;
+	}
+
 	enum class WindowGraphicsSupport : uint8_t
 	{
 		None,
@@ -58,6 +63,7 @@ namespace Swim::Platform
 		std::unique_ptr<Impl> impl;
 
 		friend class WindowSystem;
+		friend struct Internal::WindowAccess;
 	};
 
 }

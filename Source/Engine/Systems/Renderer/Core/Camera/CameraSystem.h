@@ -5,12 +5,13 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include "Engine/Machine.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace Engine
 {
 
-	struct CameraUBO
+	struct alignas(16) CameraUBO
 	{
 		glm::mat4 view;					// 64 bytes
 		glm::mat4 proj;					// 64 bytes
@@ -20,6 +21,15 @@ namespace Engine
 		glm::vec2 viewportSize; // 8 bytes:  (width, height)
 		glm::vec2 padding;			// keep 16-byte alignment 
 	};
+
+	static_assert(sizeof(CameraUBO) == 288);
+	static_assert(alignof(CameraUBO) == 16);
+	static_assert(offsetof(CameraUBO, view) == 0);
+	static_assert(offsetof(CameraUBO, proj) == 64);
+	static_assert(offsetof(CameraUBO, screenView) == 128);
+	static_assert(offsetof(CameraUBO, screenProj) == 192);
+	static_assert(offsetof(CameraUBO, camParams) == 256);
+	static_assert(offsetof(CameraUBO, viewportSize) == 272);
 
 	// this code was thrown together very quickly, but honestly a camera should just be using the premade transform component 
 	// maybe camera deserves its own file

@@ -17,4 +17,15 @@ namespace Swim::Platform
 		std::uintptr_t OriginalWindowProc = 0;
 	};
 
+	namespace Internal
+	{
+		struct WindowAccess
+		{
+			static SDL_Window* GetSdlWindow(Window& window)
+			{
+				return window.impl ? window.impl->Window : nullptr;
+			}
+		};
+	}
+
 }

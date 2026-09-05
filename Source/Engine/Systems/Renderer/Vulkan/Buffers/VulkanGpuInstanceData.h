@@ -4,6 +4,9 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
+#include <cstdint>
+
 namespace Engine
 {
 
@@ -138,5 +141,41 @@ namespace Engine
   {
     static constexpr uint32_t HasTexture = 1u << 0;
   }
+
+  // These structs are copied byte-for-byte into StructuredBuffer storage. Slang's
+  // SPIR-V path uses std430 for StructuredBuffer by default, so keep the host ABI
+  // locked to the offsets/strides consumed by the shaders instead of relying on
+  // transitive GLM/compiler packing behavior.
+  static_assert(sizeof(GpuInstanceData) == 144);
+  static_assert(offsetof(GpuInstanceData, textureIndex) == 96);
+  static_assert(offsetof(GpuInstanceData, vertexOffsetInMegaBuffer) == 120);
+  static_assert(offsetof(GpuInstanceData, indexOffsetInMegaBuffer) == 128);
+
+  static_assert(sizeof(GpuWorldInstanceStaticData) == 32);
+  static_assert(offsetof(GpuWorldInstanceStaticData, textureIndex) == 16);
+
+  static_assert(sizeof(GpuWorldInstanceTransformData) == 64);
+  static_assert(offsetof(GpuWorldInstanceTransformData, enabled) == 48);
+
+  static_assert(sizeof(GpuWorldBvhNodeData) == 128);
+  static_assert(offsetof(GpuWorldBvhNodeData, childRef) == 96);
+  static_assert(offsetof(GpuWorldBvhNodeData, childCount) == 112);
+
+  static_assert(sizeof(GpuWorldBvhLeafData) == 16);
+  static_assert(sizeof(GpuWorldInstanceRangeData) == 8);
+  static_assert(sizeof(GpuWorldVisibleRangeData) == 16);
+
+  static_assert(sizeof(MeshDecoratorGpuInstanceData) == 96);
+  static_assert(offsetof(MeshDecoratorGpuInstanceData, resolution) == 64);
+  static_assert(offsetof(MeshDecoratorGpuInstanceData, renderOnTop) == 80);
+
+  static_assert(sizeof(MsdfTextGpuInstanceData) == 160);
+  static_assert(offsetof(MsdfTextGpuInstanceData, strokeWidthPx) == 128);
+  static_assert(offsetof(MsdfTextGpuInstanceData, pxToModel) == 144);
+  static_assert(offsetof(MsdfTextGpuInstanceData, atlasTexIndex) == 152);
+
+  static_assert(sizeof(GpuCullInputInstanceData) == 160);
+  static_assert(offsetof(GpuCullInputInstanceData, drawCommandIndex) == 144);
+  static_assert(sizeof(InstanceMeta) == 16);
 
 }

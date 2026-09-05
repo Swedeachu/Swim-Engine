@@ -577,6 +577,10 @@ They are build infrastructure, not engine architecture modules.
 
 The generated solution should always be treated as disposable output. Edit `CMakeLists.txt`/`cmake/*.cmake`, then regenerate the solution; do not hand-edit the `.sln` to change ownership or dependencies.
 
+**Regeneration is manual by design.** `CMAKE_SUPPRESS_REGENERATION` is forced on for the Visual Studio generator, so no project carries a `--check-stamp-file` custom build and `ZERO_CHECK` does nothing. This is not a cosmetic choice: CMake attaches that stamp check to *every* project, MSBuild builds projects in parallel, and a stale stamp therefore launches one concurrent CMake configure per project against a single build tree. Those configures overwrite each other's generated files and race on the shared CPM dependency caches, which shows up as `could not lock config file .git/config`, unexplained `configure_file` failures, an `MSB8066` cascade, and finally `LNK1181` for a library no project ever managed to build.
+
+Re-run `cmake --preset windows-vs` (or either build script, which both refresh the solution) after changing CMake files.
+
 ---
 
 # 9. What actually compiles during common workflows

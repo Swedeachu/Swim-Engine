@@ -356,13 +356,30 @@ def check_build_workflow(failures: list[str]) -> None:
             failures,
         )
 
+    # Both generators must suppress automatic regeneration. Ninja can otherwise
+    # loop on a dependency's VerifyGlobs edge; Visual Studio attaches a stamp
+    # check to every project, so a stale stamp launches one concurrent configure
+    # per project and they corrupt each other and the shared dependency caches.
     for fragment in (
-        'if(CMAKE_GENERATOR MATCHES "^Ninja")',
+        'if(CMAKE_GENERATOR MATCHES "^Ninja" OR CMAKE_GENERATOR MATCHES "^Visual Studio ")',
         "CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL",
     ):
         if fragment not in cmake_text:
             fail(
-                f"Ninja automatic CMake regeneration suppression is missing: {fragment}",
+                f"automatic CMake regeneration suppression is missing: {fragment}",
+                failures,
+            )
+
+    physx_cmake_text = (ROOT / "cmake" / "PhysX.cmake").read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "swim_physx_normalize_git_config",
+        "config --local --get",
+        "status --porcelain --untracked-files=all",
+    ):
+        if fragment not in physx_cmake_text:
+            fail(
+                "PhysX configure-time normalization must read the shared dependency cache before "
+                f"writing to it so concurrent configures cannot collide on Git locks: {fragment}",
                 failures,
             )
 
@@ -558,18 +575,22 @@ def check_preserved_build_contract(failures: list[str]) -> None:
             fail(f"PhysX external build no longer preserves the old ABI/config mapping: {fragment}", failures)
 
     required_shader_fragments = (
-        '-T vs_6_0',
-        '-T ps_6_0',
-        '-T cs_6_0',
-        '-spirv',
-        '-fspv-target-env=vulkan1.2',
-        '$<TARGET_FILE_DIR:${target}>/Shaders/VertexShaders',
-        '$<TARGET_FILE_DIR:${target}>/Shaders/FragmentShaders',
-        '$<TARGET_FILE_DIR:${target}>/Shaders/ComputeShaders',
+        'TARGET spirv',
+        'PROFILE spirv_1_5',
+        'TARGET glsl',
+        'PROFILE glsl_460',
+        '${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_SHADER_GROUP}',
+        '${SWIM_RUNTIME_SHADER_ROOT}/OpenGL',
+        'add_custom_target(SwimShaderArtifacts',
+        'add_dependencies(${target} SwimShaderArtifacts)',
+        '$<TARGET_FILE_DIR:${target}>/Shaders',
     )
     for fragment in required_shader_fragments:
         if fragment not in shader_text:
-            fail(f"legacy Vulkan shader build behavior is missing: {fragment}", failures)
+            fail(f"Slang runtime shader build behavior is missing: {fragment}", failures)
+    for forbidden in ('SWIM_DXC_EXECUTABLE', 'dxc.exe', 'PRE_BUILD'):
+        if forbidden in shader_text:
+            fail(f"retired DXC/PRE_BUILD shader path is still active: {forbidden}", failures)
 
     required_dependency_contract_fragments = (
         'NAME glm_source',
@@ -3097,6 +3118,442 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
             if fragment not in helper_text:
                 fail(f"Windows physics validation gate is missing: {fragment}", failures)
 
+
+def check_phase7_shader_architecture(failures: list[str]) -> None:
+    required_paths = (
+        ROOT / "cmake" / "ShaderCompilerDependencies.cmake",
+        ROOT / "cmake" / "SlangShaders.cmake",
+        ROOT / "Source" / "Tools" / "ShaderCompiler" / "ShaderReflection.h",
+        ROOT / "Source" / "Tools" / "ShaderCompiler" / "ShaderReflection.cpp",
+        ROOT / "Source" / "Shaders" / "Slang" / "Basic" / "Basic.slang",
+        ROOT / "Source" / "Tests" / "Suites" / "ShaderCompiler" / "ShaderReflectionTests.cpp",
+        ROOT / "Source" / "Tests" / "HeaderBoundary" / "ShaderCompilerPublicHeaders.cpp",
+    )
+    for path in required_paths:
+        if not path.is_file():
+            fail(f"Slang shader/compiler foundation file is missing: {path.relative_to(ROOT)}", failures)
+
+    if any(not path.is_file() for path in required_paths):
+        return
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    deps_text = (ROOT / "cmake" / "ShaderCompilerDependencies.cmake").read_text(encoding="utf-8", errors="ignore")
+    rules_text = (ROOT / "cmake" / "SlangShaders.cmake").read_text(encoding="utf-8", errors="ignore")
+    public_text = (ROOT / "Source" / "Tools" / "ShaderCompiler" / "ShaderReflection.h").read_text(encoding="utf-8", errors="ignore")
+    implementation_text = (ROOT / "Source" / "Tools" / "ShaderCompiler" / "ShaderReflection.cpp").read_text(encoding="utf-8", errors="ignore")
+    sample_text = (ROOT / "Source" / "Shaders" / "Slang" / "Basic" / "Basic.slang").read_text(encoding="utf-8", errors="ignore")
+    tests_text = (ROOT / "cmake" / "Tests.cmake").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        'option(SWIM_BUILD_SHADER_COMPILER',
+        'include(cmake/ShaderCompilerDependencies.cmake)',
+        'add_library(SwimShaderCompiler STATIC',
+        'add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)',
+        'target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)',
+        'swim_add_slang_program(SwimBasicRaster',
+    ):
+        if fragment not in cmake_text:
+            fail(f"Slang shader/compiler CMake boundary is missing: {fragment}", failures)
+
+    for fragment in (
+        'set(SWIM_SLANG_VERSION "2026.16.1"',
+        'EXPECTED_HASH "SHA256=${SWIM_SLANG_ARCHIVE_SHA256}"',
+        'slang-${SWIM_SLANG_VERSION}-windows-x86_64.zip',
+        '0fd3e6a9a5d05ed4cdd000d467f1ffb5d9701b827e83bfb428902a45c37ef8a5',
+        'slang-${SWIM_SLANG_VERSION}-linux-x86_64-glibc-2.27.zip',
+        '95eb246e758131545915406e5ac9e41ecd29a6bc1f83ae0b112d31e390fc9d33',
+        'add_executable(SwimSlangCompiler IMPORTED GLOBAL)',
+    ):
+        if fragment not in deps_text:
+            fail(f"pinned Slang compiler dependency contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'add_custom_command(',
+        'OUTPUT',
+        '-target "${SWIM_SLANG_PROGRAM_TARGET}"',
+        '-profile "${SWIM_SLANG_PROGRAM_PROFILE}"',
+        '-reflection-json "${SWIM_SLANG_PROGRAM_REFLECTION}"',
+        '-depfile "${SWIM_SLANG_PROGRAM_DEPFILE}"',
+        'DEPFILE "${SWIM_SLANG_PROGRAM_DEPFILE}"',
+    ):
+        if fragment not in rules_text:
+            fail(f"deterministic Slang shader build rule is missing: {fragment}", failures)
+    if 'PRE_BUILD' in rules_text:
+        fail("Slang shader compilation regressed to PRE_BUILD; keep explicit OUTPUT/DEPFILE artifacts", failures)
+
+    source_shader_root = ROOT / "Source" / "Shaders"
+    retired_shader_sources = tuple(source_shader_root.rglob("*.hlsl")) + tuple(source_shader_root.rglob("*.glsl"))
+    for path in retired_shader_sources:
+        fail(f"first-party shader source must be Slang: {path.relative_to(ROOT)}", failures)
+
+    # The pre-Slang HLSL/GLSL sources are archived outside Source/ so no glob can
+    # reach them. Keep that structural: an archive the build can see is not an
+    # archive, and a stale shader compiling again would be silent.
+    deprecated_root = ROOT / "Deprecated" / "Shaders"
+    if deprecated_root.is_dir():
+        for build_file in list(ROOT.glob("cmake/*.cmake")) + [ROOT / "CMakeLists.txt"]:
+            if not build_file.is_file():
+                continue
+            if "Deprecated" in build_file.read_text(encoding="utf-8", errors="ignore"):
+                fail(
+                    f"build system references the deprecated shader archive: {build_file.relative_to(ROOT)}",
+                    failures,
+                )
+    runtime_rules_text = (ROOT / "cmake" / "Shaders.cmake").read_text(encoding="utf-8", errors="ignore")
+    for fragment in ('TARGET spirv', 'PROFILE spirv_1_5', 'TARGET glsl', 'PROFILE glsl_460', 'SwimShaderArtifacts'):
+        if fragment not in runtime_rules_text:
+            fail(f"all-Slang runtime shader pipeline is missing: {fragment}", failures)
+    for forbidden in ('DXC', 'dxc', '*.hlsl', '*.glsl', 'PRE_BUILD'):
+        if forbidden in runtime_rules_text:
+            fail(f"retired shader compiler/source path remains in runtime shader rules: {forbidden}", failures)
+
+    slang_rules_text = (ROOT / "cmake" / "SlangShaders.cmake").read_text(encoding="utf-8", errors="ignore")
+    if "-matrix-layout-column-major" not in slang_rules_text:
+        fail("Slang runtime compilation lost DXC-compatible column-major matrix memory layout", failures)
+
+    for forbidden in ('#include <slang', 'Slang::', 'slang::', 'simdjson'):
+        if forbidden in public_text:
+            fail(f"ShaderReflection public contract leaks implementation dependency: {forbidden}", failures)
+    if '#include <simdjson.h>' not in implementation_text:
+        fail("ShaderReflection implementation no longer privately owns simdjson parsing", failures)
+
+    for fragment in ('ParameterBlock<', '[shader("vertex")]', '[shader("fragment")]'):
+        if fragment not in sample_text:
+            fail(f"minimal Slang raster sample is missing reflection-first source contract: {fragment}", failures)
+
+    # Slang intentionally defines SV_InstanceID as InstanceIndex - BaseInstance.
+    # The legacy Vulkan renderer uses VkDrawIndexedIndirectCommand::firstInstance
+    # as a global SSBO/visible-ID offset, so these shaders require the raw Vulkan
+    # InstanceIndex semantic. Accidentally switching back reproduces the severe
+    # cross-batch transform/material corruption seen during the Slang migration.
+    raw_instance_shader_paths = (
+        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_instanced.slang",
+        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_instanced_gpu.slang",
+        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_decorated.slang",
+        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_msdf.slang",
+    )
+    for shader_path in raw_instance_shader_paths:
+        if not shader_path.is_file():
+            fail(f"runtime Vulkan instance-index shader is missing: {shader_path.relative_to(ROOT)}", failures)
+            continue
+        shader_source = shader_path.read_text(encoding="utf-8", errors="ignore")
+        if "SV_VulkanInstanceID" not in shader_source:
+            fail(f"runtime Vulkan shader lost raw InstanceIndex semantics: {shader_path.relative_to(ROOT)}", failures)
+        if ": SV_InstanceID" in shader_source:
+            fail(f"runtime Vulkan shader regressed to BaseInstance-relative SV_InstanceID: {shader_path.relative_to(ROOT)}", failures)
+
+    camera_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
+    instance_abi_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "Buffers" / "VulkanGpuInstanceData.h"
+    for abi_path, required_fragments in (
+        (camera_header, ("struct alignas(16) CameraUBO", "static_assert(sizeof(CameraUBO) == 288)", "offsetof(CameraUBO, viewportSize) == 272")),
+        (instance_abi_header, ("static_assert(sizeof(GpuInstanceData) == 144)", "offsetof(GpuInstanceData, textureIndex) == 96", "static_assert(sizeof(MsdfTextGpuInstanceData) == 160)")),
+    ):
+        if not abi_path.is_file():
+            fail(f"shader/C++ ABI guard file is missing: {abi_path.relative_to(ROOT)}", failures)
+            continue
+        abi_source = abi_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in required_fragments:
+            if fragment not in abi_source:
+                fail(f"shader/C++ ABI guard is missing from {abi_path.relative_to(ROOT)}: {fragment}", failures)
+
+    divergent_bindless_shader_paths = (
+        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_instanced.slang",
+        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_decorated.slang",
+        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_msdf.slang",
+    )
+    for shader_path in divergent_bindless_shader_paths:
+        if not shader_path.is_file():
+            fail(f"runtime Vulkan bindless shader is missing: {shader_path.relative_to(ROOT)}", failures)
+            continue
+        shader_source = shader_path.read_text(encoding="utf-8", errors="ignore")
+        if "NonUniformResourceIndex" not in shader_source:
+            fail(f"per-instance bindless shader lost explicit non-uniform indexing: {shader_path.relative_to(ROOT)}", failures)
+
+    for fragment in ('SwimShaderCompilerPublicHeaders', 'SwimSlangReflectionSample', 'SWIM_SLANG_REFLECTION_SAMPLE_PATH'):
+        if fragment not in tests_text:
+            fail(f"Slang compiler/reflection validation wiring is missing: {fragment}", failures)
+
+
+def check_phase8_rhi_type_architecture(failures: list[str]) -> None:
+    types_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiTypes.h"
+    contracts_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiContracts.h"
+    factory_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "RhiFactory.h"
+    types_test = ROOT / "Source" / "Tests" / "Suites" / "RHI" / "RhiTypesTests.cpp"
+    contracts_test = ROOT / "Source" / "Tests" / "Suites" / "RHI" / "RhiContractsTests.cpp"
+    boundary = ROOT / "Source" / "Tests" / "HeaderBoundary" / "RhiPublicHeaders.cpp"
+    for path in (types_header, contracts_header, factory_header, types_test, contracts_test, boundary):
+        if not path.is_file():
+            fail(f"backend-neutral RHI foundation is missing: {path.relative_to(ROOT)}", failures)
+    if not types_header.is_file() or not contracts_header.is_file():
+        return
+
+    types_text = types_header.read_text(encoding="utf-8", errors="ignore")
+    contracts_text = contracts_header.read_text(encoding="utf-8", errors="ignore")
+    factory_text = factory_header.read_text(encoding="utf-8", errors="ignore") if factory_header.is_file() else ""
+    combined = types_text + contracts_text + factory_text
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    tests_text = (ROOT / "cmake" / "Tests.cmake").read_text(encoding="utf-8", errors="ignore")
+
+    for fragment in (
+        'enum class Format',
+        'enum class ResourceState',
+        'enum class DescriptorType',
+        'struct DescriptorBindingDesc',
+        'struct DescriptorSchemaDesc',
+        'struct GraphicsCapabilities',
+        'DescriptorIndexing',
+        'BufferDeviceAddress',
+        'MeshShaders',
+        'RayTracingPipeline',
+    ):
+        if fragment not in types_text:
+            fail(f"RHI item 32 contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'class GraphicsSystem',
+        'class Adapter : public RhiObject',
+        'class Device : public RhiObject',
+        'class Queue : public RhiObject',
+        'class Swapchain : public RhiObject',
+        'class CommandPool : public RhiObject',
+        'class CommandList : public RhiObject',
+        'class Buffer : public RhiObject',
+        'class Texture : public RhiObject',
+        'class TextureView : public RhiObject',
+        'class Sampler : public RhiObject',
+        'class ShaderProgram : public RhiObject',
+        'class PipelineLayout : public RhiObject',
+        'class GraphicsPipeline : public RhiObject',
+        'class ComputePipeline : public RhiObject',
+        'class DescriptorTable : public RhiObject',
+        'class Fence : public RhiObject',
+        'class Timeline : public RhiObject',
+        'class QueryPool : public RhiObject',
+        'CreateSwapchain(Platform::Window& window',
+        'virtual std::uintptr_t GetNativeHandle() const = 0',
+    ):
+        if fragment not in contracts_text:
+            fail(f"RHI item 33 object contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'ShaderProgramInterfaceDesc Interface{}',
+        'ShaderProgram* Program = nullptr',
+        'PipelineLayout* Layout = nullptr',
+        'virtual const ShaderProgramInterface& GetInterface() const = 0',
+        'CreateDescriptorTable(const DescriptorTableDesc& desc)',
+    ):
+        if fragment not in contracts_text:
+            fail(f"shader-reflection-owned RHI binding contract is missing: {fragment}", failures)
+    pipeline_layout_start = contracts_text.find('struct PipelineLayoutDesc')
+    descriptor_table_start = contracts_text.find('struct DescriptorTableDesc')
+    if pipeline_layout_start != -1 and descriptor_table_start != -1:
+        if 'DescriptorSchemas' in contracts_text[pipeline_layout_start:descriptor_table_start]:
+            fail("PipelineLayoutDesc duplicates descriptor schemas instead of deriving them from ShaderProgram reflection", failures)
+    descriptor_write_start = contracts_text.find('struct DescriptorWrite')
+    query_pool_start = contracts_text.find('struct QueryPoolDesc')
+    if descriptor_write_start != -1 and query_pool_start != -1:
+        if 'DescriptorType Type' in contracts_text[descriptor_write_start:query_pool_start]:
+            fail("DescriptorWrite duplicates the reflected descriptor type", failures)
+
+    for fragment in ('class GraphicsFactory', 'Register(GraphicsApi api', 'Create(GraphicsApi api) const'):
+        if fragment not in factory_text:
+            fail(f"RHI runtime graphics factory contract is missing: {fragment}", failures)
+
+    for forbidden in ('<vulkan/', 'VkFormat', 'VkImage', 'VkBuffer', 'D3D12_', 'ID3D12', 'MTL::', 'HWND'):
+        if forbidden in combined:
+            fail(f"generic RHI public contract leaks a backend/platform API: {forbidden}", failures)
+
+    for fragment in (
+        'add_library(SwimRhi INTERFACE',
+        'add_library(Swim::Rhi ALIAS SwimRhi)',
+        'target_include_directories(SwimRhi INTERFACE ${CMAKE_SOURCE_DIR}/Source)',
+    ):
+        if fragment not in cmake_text:
+            fail(f"Swim::Rhi target boundary is missing: {fragment}", failures)
+    generic_rhi_slice = cmake_text[
+        cmake_text.find('add_library(SwimRhi INTERFACE'):
+        cmake_text.find('# The modern Vulkan backend is a cross-platform foundation target')
+    ]
+    for forbidden in ('target_link_libraries(SwimRhi', 'Vulkan::', 'volk::', 'D3D12'):
+        if forbidden in generic_rhi_slice:
+            fail(f"Swim::Rhi target picked up a backend dependency: {forbidden}", failures)
+
+    if 'SwimRhiPublicHeaders' not in tests_text or '\n\t\tRHI\n' not in tests_text or 'Swim::Rhi' not in tests_text:
+        fail("RHI tests/header boundary are not part of the portable Swim::Rhi test graph", failures)
+
+
+
+def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
+    backend_root = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI" / "Backends" / "Vulkan"
+    backend_header = backend_root / "VulkanRhiBackend.h"
+    backend_source = backend_root / "VulkanRhiBackend.cpp"
+    dependency_file = ROOT / "cmake" / "VulkanRhiDependencies.cmake"
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+
+    for path in (backend_header, backend_source, dependency_file):
+        if not path.is_file():
+            fail(f"Vulkan RHI item 35 file is missing: {path.relative_to(ROOT)}", failures)
+    if not backend_source.is_file() or not dependency_file.is_file():
+        return
+
+    header_text = backend_header.read_text(encoding="utf-8", errors="ignore") if backend_header.is_file() else ""
+    source_text = backend_source.read_text(encoding="utf-8", errors="ignore")
+    dependency_text = dependency_file.read_text(encoding="utf-8", errors="ignore")
+
+    for forbidden in ('<vulkan/', '<volk.h>', '<VkBootstrap.h>', 'VkInstance', 'VkDevice', 'vkb::'):
+        if forbidden in header_text:
+            fail(f"Vulkan RHI public factory header leaks an implementation type/include: {forbidden}", failures)
+
+    for fragment in (
+        '#include <volk.h>',
+        '#include <VkBootstrap.h>',
+        'vkb::InstanceBuilder',
+        'vkb::PhysicalDeviceSelector',
+        'vkb::DeviceBuilder',
+        'volk::volkInitializeCustom',
+        'volk::volkLoadInstanceTable',
+        'volk::volkLoadDeviceTable',
+        '.require_api_version(1, 3, 0)',
+        '.set_minimum_version(1, 3)',
+        'features.synchronization2 = VK_TRUE',
+        'features.dynamicRendering = VK_TRUE',
+        'features.timelineSemaphore = VK_TRUE',
+        'features.descriptorIndexing = VK_TRUE',
+        'features.drawIndirectCount = VK_TRUE',
+        'features.bufferDeviceAddress = VK_TRUE',
+        'select_devices()',
+        'RegisterGraphicsBackend',
+    ):
+        if fragment not in source_text:
+            fail(f"Vulkan RHI item 35 bootstrap/feature contract is missing: {fragment}", failures)
+
+    for fragment in (
+        'GITHUB_REPOSITORY zeux/volk',
+        'GIT_TAG 1.4.350',
+        'GITHUB_REPOSITORY charles-lunarg/vk-bootstrap',
+        'GIT_TAG v1.4.350',
+        'VOLK_NAMESPACE ON',
+        'VK_BOOTSTRAP_TEST OFF',
+    ):
+        if fragment not in dependency_text:
+            fail(f"Vulkan RHI dependency pin/isolation is missing: {fragment}", failures)
+
+    for fragment in (
+        'option(SWIM_ENABLE_VULKAN_RHI',
+        'add_library(SwimRhiVulkan STATIC',
+        'add_library(Swim::RhiVulkan ALIAS SwimRhiVulkan)',
+        'PUBLIC Swim::Rhi',
+        'PRIVATE Swim::Platform volk::volk vk-bootstrap::vk-bootstrap',
+        'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")',
+    ):
+        if fragment not in cmake_text:
+            fail(f"Vulkan RHI target/isolation wiring is missing: {fragment}", failures)
+
+    tests_text = (ROOT / "cmake" / "Tests.cmake").read_text(encoding="utf-8", errors="ignore")
+    test_path = ROOT / "Source" / "Tests" / "Suites" / "RHIVulkan" / "VulkanFactoryTests.cpp"
+    boundary_path = ROOT / "Source" / "Tests" / "HeaderBoundary" / "RhiVulkanPublicHeaders.cpp"
+    if not test_path.is_file() or not boundary_path.is_file():
+        fail("Vulkan RHI registration/public-header validation files are missing", failures)
+    for fragment in ('SwimRhiVulkanPublicHeaders', 'SWIM_VULKAN_RHI_SUITES', 'Swim::RhiVulkan'):
+        if fragment not in tests_text:
+            fail(f"Vulkan RHI validation wiring is missing: {fragment}", failures)
+
+    for fragment in (
+        'Platform::Internal::AcquireVulkanLoader',
+        'Platform::Internal::ReleaseVulkanLoader',
+        'Platform::Internal::GetVulkanInstanceProcAddress',
+        'Platform::Internal::GetVulkanInstanceExtensions',
+        'Platform::Internal::GetVulkanPresentationSupport',
+        'Platform::Internal::CreateVulkanSurface',
+        'Platform::Internal::DestroyVulkanSurface',
+        'vkGetPhysicalDeviceSurfaceSupportKHR',
+        'vkb::SwapchainBuilder',
+    ):
+        if fragment not in source_text:
+            fail(f"Vulkan RHI item 36 SDL3 WSI/surface contract is missing: {fragment}", failures)
+
+    if 'window.GetNativeHandle()' in source_text:
+        fail("Vulkan RHI surface creation bypasses SDL3 WSI through a native window handle", failures)
+
+    vma_source = backend_root / "VulkanMemoryAllocator.cpp"
+    if not vma_source.is_file():
+        fail("Vulkan RHI item 37 VMA implementation unit is missing", failures)
+    else:
+        vma_source_text = vma_source.read_text(encoding="utf-8", errors="ignore")
+        if "#define VMA_IMPLEMENTATION" not in vma_source_text or "#include <vk_mem_alloc.h>" not in vma_source_text:
+            fail("Vulkan RHI item 37 VMA implementation unit is malformed", failures)
+
+    for fragment in (
+        'GITHUB_REPOSITORY GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator',
+        'GIT_TAG v3.4.0',
+        'GPUOpen::VulkanMemoryAllocator',
+    ):
+        if fragment not in dependency_text and fragment not in cmake_text:
+            fail(f"Vulkan RHI item 37 VMA dependency wiring is missing: {fragment}", failures)
+
+    for fragment in (
+        'VMA_STATIC_VULKAN_FUNCTIONS=0',
+        'VMA_DYNAMIC_VULKAN_FUNCTIONS=1',
+        'VMA_VULKAN_VERSION=1003000',
+        'GPUOpen::VulkanMemoryAllocator',
+    ):
+        if fragment not in cmake_text:
+            fail(f"Vulkan RHI item 37 VMA target isolation is missing: {fragment}", failures)
+
+    for fragment in (
+        'VmaAllocator Allocator = nullptr',
+        'vmaCreateAllocator',
+        'vmaDestroyAllocator',
+        'vmaCreateBuffer',
+        'vmaDestroyBuffer',
+        'vmaCreateImage',
+        'vmaDestroyImage',
+        'vmaSetAllocationName',
+        'VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE',
+        'VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT',
+        'VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT',
+    ):
+        if fragment not in source_text:
+            fail(f"Vulkan RHI item 37 allocation contract is missing: {fragment}", failures)
+
+    wsi_header = ROOT / "Source" / "Engine" / "Platform" / "Internal" / "VulkanWsi.h"
+    wsi_source = ROOT / "Source" / "Engine" / "Platform" / "Internal" / "VulkanWsi.cpp"
+    if not wsi_header.is_file() or not wsi_source.is_file():
+        fail("Platform SDL3 Vulkan WSI bridge files are missing", failures)
+    else:
+        wsi_header_text = wsi_header.read_text(encoding="utf-8", errors="ignore")
+        wsi_source_text = wsi_source.read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ('SDL_Window', 'VkSurfaceKHR', 'VkInstance', '<SDL3/', '<vulkan/'):
+            if forbidden in wsi_header_text:
+                fail(f"Platform Vulkan WSI bridge header leaks SDL/Vulkan implementation type: {forbidden}", failures)
+        for fragment in (
+            '#include <SDL3/SDL_vulkan.h>',
+            'SDL_Vulkan_LoadLibrary',
+            'SDL_Vulkan_UnloadLibrary',
+            'SDL_Vulkan_GetVkGetInstanceProcAddr',
+            'SDL_Vulkan_GetInstanceExtensions',
+            'SDL_Vulkan_GetPresentationSupport',
+            'SDL_Vulkan_CreateSurface',
+            'SDL_Vulkan_DestroySurface',
+            'WindowAccess::GetSdlWindow',
+        ):
+            if fragment not in wsi_source_text:
+                fail(f"Platform SDL3 Vulkan WSI implementation is missing: {fragment}", failures)
+
+    window_header = ROOT / "Source" / "Engine" / "Platform" / "Window.h"
+    window_text = window_header.read_text(encoding="utf-8", errors="ignore") if window_header.is_file() else ""
+    for forbidden in ('SDL_Window', 'VkSurfaceKHR', 'VkInstance', '<SDL3/', '<vulkan/'):
+        if forbidden in window_text:
+            fail(f"Platform::Window public contract leaks SDL/Vulkan WSI detail: {forbidden}", failures)
+
+    generic_rhi_root = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "RHI"
+    for path in generic_rhi_root.glob("*.h"):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for forbidden in ('<vulkan/', '<volk.h>', '<VkBootstrap.h>', 'VkInstance', 'VkDevice', 'vkb::'):
+            if forbidden in text:
+                fail(f"generic RHI header {path.relative_to(ROOT)} leaks Vulkan implementation detail: {forbidden}", failures)
+
+
 def check_runtime_logging_contract(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     dependencies_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
@@ -3160,7 +3617,7 @@ def check_source_files_are_utf8(failures: list[str]) -> None:
         if not source_root.exists():
             continue
         for path in source_root.rglob("*"):
-            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES | {".glsl", ".hlsl"}:
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES | {".glsl", ".hlsl", ".slang"}:
                 continue
             try:
                 source_text = path.read_text(encoding="utf-8")
@@ -3197,6 +3654,9 @@ def main() -> int:
     check_phase4_asset_architecture(failures)
     check_phase5_scene_architecture(failures)
     check_phase6_physics_architecture(failures)
+    check_phase7_shader_architecture(failures)
+    check_phase8_rhi_type_architecture(failures)
+    check_phase9_vulkan_rhi_architecture(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)
 

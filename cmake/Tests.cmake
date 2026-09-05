@@ -87,6 +87,20 @@ function(swim_configure_tests)
 	swim_add_header_boundary(SwimAssetCompilerPublicHeaders
 		SOURCE Source/Tests/HeaderBoundary/AssetCompilerPublicHeaders.cpp)
 
+	swim_add_header_boundary(SwimShaderCompilerPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/ShaderCompilerPublicHeaders.cpp)
+
+	swim_add_header_boundary(SwimRhiPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/RhiPublicHeaders.cpp
+		LINK Swim::Rhi)
+
+	if(TARGET SwimRhiVulkan)
+		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
+			SOURCE Source/Tests/HeaderBoundary/RhiVulkanPublicHeaders.cpp
+			LINK Swim::RhiVulkan
+			BUILD_BY_DEFAULT)
+	endif()
+
 	if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 		swim_add_header_boundary(SwimPhysicsPublicHeaders
 			SOURCE Source/Tests/HeaderBoundary/PhysicsPublicHeaders.cpp
@@ -121,6 +135,7 @@ function(swim_configure_tests)
 		Assets
 		Physics/Generic
 		Scene/Headless
+		RHI
 	)
 
 	set(SWIM_TEST_FIXTURE_SOURCES "")
@@ -129,6 +144,7 @@ function(swim_configure_tests)
 		Swim::Memory
 		Swim::Jobs
 		Swim::Assets
+		Swim::Rhi
 	)
 
 	if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
@@ -155,12 +171,24 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::AssetCompiler Swim::AssetCompilerDraco)
 	endif()
 
+	if(TARGET SwimShaderCompiler)
+		swim_collect_test_suite_sources(SWIM_SHADER_COMPILER_SUITES ShaderCompiler)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_SHADER_COMPILER_SUITES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::ShaderCompiler)
+	endif()
+
 	# Scene/ECS suites consume EnTT and the legacy renderer-facing headers, which
 	# only exist once the full runtime dependency surface is configured.
 	if(TARGET EnTT::EnTT)
 		swim_collect_test_suite_sources(SWIM_SCENE_ECS_SUITES Scene/Ecs)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_SCENE_ECS_SUITES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT glm::glm)
+	endif()
+
+	if(TARGET SwimRhiVulkan)
+		swim_collect_test_suite_sources(SWIM_VULKAN_RHI_SUITES RHIVulkan)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::RhiVulkan)
 	endif()
 
 	if(TARGET SwimPhysicsPhysX)
@@ -194,6 +222,14 @@ function(swim_configure_tests)
 	target_include_directories(SwimTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
+
+	if(TARGET SwimSlangReflectionSample)
+		add_dependencies(SwimTests SwimSlangReflectionSample)
+		target_compile_definitions(SwimTests PRIVATE
+			SWIM_SLANG_REFLECTION_SAMPLE_PATH="${SWIM_SLANG_REFLECTION_SAMPLE}"
+			SWIM_SLANG_SPIRV_SAMPLE_PATH="${SWIM_SLANG_SPIRV_SAMPLE}"
+		)
+	endif()
 
 	if(MSVC)
 		target_compile_options(SwimTests PRIVATE /MP /utf-8 /W3 /permissive- /external:anglebrackets /external:W0)

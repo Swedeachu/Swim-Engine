@@ -18,7 +18,7 @@ CMake is the only build-system source of truth. The repository does not commit g
 - Visual Studio 2022 with the Desktop development with C++ workload for the full Windows runtime.
 - Git and Python 3. Python is used by GLAD and by PhysX's upstream project bootstrap.
 - Ninja is optional on Windows: the build scripts discover Ninja from PATH or the Visual Studio CMake tools install and fall back to the Visual Studio generator when necessary.
-- A Vulkan SDK that provides Vulkan headers/libraries and `dxc.exe` for the existing Windows HLSL-to-SPIR-V shader build.
+- A Vulkan SDK for the legacy renderer's Vulkan headers/loader. The shader pipeline no longer needs `dxc.exe`: first-party shaders are Slang, and CMake downloads a pinned `slangc` SDK automatically. The modern RHI backend pins its own Vulkan headers, so it does not depend on the installed SDK version.
 - On Linux, a C++20 compiler plus Ninja is sufficient for the current Platform/Input foundation build; the legacy renderer/game executable remains Windows-only until the later renderer/RHI phases are completed.
 
 SDL3 is fetched and built by CMake as a pinned CPM dependency; no system-installed SDL3 is required. `Swim::Platform` owns SDL3 privately so SDL headers do not become public engine API.
@@ -32,6 +32,10 @@ cmake --preset windows-vs
 ```
 
 Then open `build/windows-vs/SwimEngine.sln`. The solution is generated from the same `CMakeLists.txt` used by every other workflow. Solution Explorer mirrors the physical `Source/...` tree inside each project, and adding/removing/renaming C/C++ or shader files under `Source/Engine`, `Source/Game`, or `Source/Shaders` is picked up by the explicit CMake configure performed at the start of every supported clean/soft build.
+
+**The IDE never regenerates the project itself.** `CMAKE_SUPPRESS_REGENERATION` is forced on for the Visual Studio generator as well as Ninja. Without it CMake attaches a stamp-check custom build to *every* project, and because MSBuild builds projects in parallel, a stale stamp starts one concurrent CMake configure per project against the same build tree — which corrupts generated files and races on the shared dependency caches (typically surfacing as `could not lock config file .git/config`, then a cascade of `MSB8066` and a `LNK1181` for a library that was never produced).
+
+So after editing any `CMakeLists.txt` or `cmake/*.cmake`, re-run a build script or `cmake --preset windows-vs` before building in the IDE. Both build scripts refresh the solution on every run, so the normal loop already does this for you.
 
 The generated solution is intentionally organized instead of exposing every CMake target at the root:
 
@@ -175,7 +179,18 @@ The previous `Source/Library` copies are replaced by pinned/verified CMake depen
 
 PhysX is kept deliberately isolated because its configuration model does not match the application's Debug/Release model. The pinned PhysX 5.6.1 checkout in CPM is treated as immutable. At build time Swim creates a short detached Git worktree at `build/.px`; NVIDIA's generated `compiler/` and `bin/` trees live there, keeping both MSBuild paths short and the CPM source cache clean for later soft builds. Swim Engine Debug links the **Checked** static PhysX libraries, while Swim Engine Release links **Release** PhysX. Both are built with the static non-debug MSVC runtime, matching the previous x64 project configuration (`/MT`, `PX_PHYSX_STATIC_LIB`, Debug `_ITERATOR_DEBUG_LEVEL=0`). The CPU-only VS2022 preset is used, so CUDA is not required. CMake audits every Git-backed cached dependency at configure time and fails immediately if a dependency source checkout is dirty instead of allowing that state to surface as a later compile failure.
 
-The existing Vulkan HLSL pipeline is also part of CMake: vertex, fragment, and compute shaders are compiled with DXC to SPIR-V under the executable's `Shaders` directory, and OpenGL shaders plus `Assets` are copied beside the executable after the build.
+### Shaders
+
+All first-party shaders are **Slang**. There is no handwritten HLSL or GLSL left in the build; the retired sources are archived under `Deprecated/Shaders/` and are not compiled, copied, or referenced.
+
+CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shader deterministically, emitting reflection JSON beside each artifact:
+
+```text
+Source/Shaders/Vulkan/{Vertex,Fragment,Compute}Shaders/*.slang  ->  Shaders/<group>/<name>.spv   + .reflection.json
+Source/Shaders/OpenGL/*.slang                                   ->  Shaders/OpenGL/<name>.glsl   + .reflection.json
+```
+
+Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` side effects), so incremental builds and dependency tracking work, and they are copied beside the executable after the build along with `Assets`. Reflection is read from the JSON sidecar rather than from decorations embedded in the SPIR-V, which keeps the emitted modules free of `SPV_GOOGLE_*` extensions that would otherwise require matching device extensions.
 
 ---
 

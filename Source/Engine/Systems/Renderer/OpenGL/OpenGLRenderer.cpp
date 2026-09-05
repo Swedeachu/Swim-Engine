@@ -984,6 +984,9 @@ namespace Engine
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, tc.GetFont()->msdfAtlas->GetTextureID());
 			glUniform1i(loc_txt_msdfAtlas, 0);
+			glUniform2f(loc_txt_atlasSize,
+				static_cast<float>(tc.GetFont()->msdfAtlas->GetWidth()),
+				static_cast<float>(tc.GetFont()->msdfAtlas->GetHeight()));
 
 			glDrawElements(GL_TRIANGLES, (GLsizei)I.size(), GL_UNSIGNED_INT, nullptr);
 			glBindVertexArray(0);
@@ -1064,6 +1067,9 @@ namespace Engine
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, tc.GetFont()->msdfAtlas->GetTextureID());
 			glUniform1i(loc_txt_msdfAtlas, 0);
+			glUniform2f(loc_txt_atlasSize,
+				static_cast<float>(tc.GetFont()->msdfAtlas->GetWidth()),
+				static_cast<float>(tc.GetFont()->msdfAtlas->GetHeight()));
 
 			glDrawElements(GL_TRIANGLES, (GLsizei)I.size(), GL_UNSIGNED_INT, nullptr);
 			glBindVertexArray(0);

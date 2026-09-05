@@ -225,8 +225,15 @@ namespace Engine
 			throw std::runtime_error("Selected GPU does not support drawIndirectFirstInstance.");
 		}
 
+		// shaderSampledImageArrayNonUniformIndexing is separate from
+		// descriptorIndexing: enabling the latter does not imply it. The bindless
+		// texture array is indexed by per-instance data, which is not uniform
+		// across a draw, so the capability is genuinely required. Slang emits it
+		// for the unsized `Texture2D textures[]` binding where DXC did not, which
+		// is why this became visible when first-party shaders moved to Slang.
 		if (supportedVulkan12Features.descriptorIndexing != VK_TRUE ||
 			supportedVulkan12Features.runtimeDescriptorArray != VK_TRUE ||
+			supportedVulkan12Features.shaderSampledImageArrayNonUniformIndexing != VK_TRUE ||
 			supportedVulkan12Features.descriptorBindingPartiallyBound != VK_TRUE ||
 			supportedVulkan12Features.descriptorBindingVariableDescriptorCount != VK_TRUE ||
 			supportedVulkan12Features.descriptorBindingSampledImageUpdateAfterBind != VK_TRUE)
@@ -249,6 +256,7 @@ namespace Engine
 		vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 		vulkan12Features.descriptorIndexing = VK_TRUE;
 		vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+		vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 		vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
 		vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
 		vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
