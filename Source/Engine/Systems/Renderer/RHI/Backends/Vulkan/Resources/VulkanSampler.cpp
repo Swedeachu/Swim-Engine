@@ -86,6 +86,7 @@ namespace Swim::RhiVulkan
 			result->sampler = VK_NULL_HANDLE;
 			return nullptr;
 		}
+		SetVulkanObjectName(*state, VK_OBJECT_TYPE_SAMPLER, ToNativeHandle(result->sampler), desc.DebugName);
 		return result;
 	}
 

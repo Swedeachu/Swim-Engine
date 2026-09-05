@@ -188,6 +188,7 @@ namespace Swim::RhiVulkan
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.
 				return nullptr;
 			}
+			SetVulkanObjectName(*state, VK_OBJECT_TYPE_PIPELINE, ToNativeHandle(result->pipeline), desc.DebugName);
 			return result;
 		}
 		catch (const std::invalid_argument&)

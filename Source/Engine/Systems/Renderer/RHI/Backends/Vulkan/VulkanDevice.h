@@ -377,6 +377,7 @@ namespace Swim::RhiVulkan
 				{
 					return nullptr;
 				}
+				SetVulkanObjectName(*state, VK_OBJECT_TYPE_SEMAPHORE, ToNativeHandle(semaphore), "Swim binary semaphore");
 				return std::make_unique<VulkanSemaphore>(state, semaphore);
 			}
 
@@ -391,6 +392,7 @@ namespace Swim::RhiVulkan
 				{
 					return nullptr;
 				}
+				SetVulkanObjectName(*state, VK_OBJECT_TYPE_FENCE, ToNativeHandle(fence), "Swim fence");
 				return std::make_unique<VulkanFence>(state, fence);
 			}
 
@@ -414,6 +416,7 @@ namespace Swim::RhiVulkan
 				auto timelineState = std::make_shared<VulkanTimelineState>();
 				timelineState->DeviceState = state;
 				timelineState->Semaphore = semaphore;
+				SetVulkanObjectName(*state, VK_OBJECT_TYPE_SEMAPHORE, ToNativeHandle(semaphore), "Swim timeline");
 				return std::make_unique<VulkanTimeline>(std::move(timelineState));
 			}
 

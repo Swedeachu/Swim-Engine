@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Framework/Test.h"
+#include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
 #ifdef SWIM_RHI_TEXTURE_SPIRV_PATH
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
@@ -16,7 +17,7 @@
 namespace
 {
 
-	void RunTextureSmoke()
+	void RunTextureSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 #ifndef SWIM_RHI_TEXTURE_SPIRV_PATH
 		SWIM_REQUIRE_MESSAGE(false, "Texture smoke requires SWIM_BUILD_SHADER_COMPILER=ON and generated shader/reflection artifacts");
@@ -56,8 +57,9 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem();
+		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE(graphics);
+		SWIM_REQUIRE_MESSAGE(graphics->IsValidationEnabled(), "Smoke requires active Vulkan validation");
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{{
@@ -131,6 +133,7 @@ namespace
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
+			commands.BeginDebugLabel("RunTextureSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
 			if (pass == 0)
 			{
 				commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
@@ -158,6 +161,7 @@ namespace
 			copy.Extent = targetDesc.Extent;
 			commands.CopyTextureToBuffer(*target, *readback, copy);
 			commands.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
+			commands.EndDebugLabel();
 			commands.End();
 			frames->SubmitCurrent();
 			frames->Drain();
@@ -184,7 +188,7 @@ namespace
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ReflectedTexturesAndTableReplacement", SWIM_TEST_LOCATION, &RunTextureSmoke });
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ReflectedTexturesAndTableReplacement", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTextureSmoke); } });
 		}
 		return true;
 	}();

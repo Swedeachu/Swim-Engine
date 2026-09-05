@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Framework/Test.h"
+#include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
 #include <array>
 #include <chrono>
@@ -13,7 +14,7 @@
 namespace
 {
 
-	void RunClearAndTransferSmoke()
+	void RunClearAndTransferSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 		using namespace Swim;
 		Platform::PlatformSystem platform;
@@ -25,8 +26,9 @@ namespace
 		windowDesc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(windowDesc);
 		SWIM_REQUIRE_MESSAGE(window, "RHI smoke could not create a Vulkan window");
-		auto graphics = RhiVulkan::CreateGraphicsSystem();
+		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "RHI smoke requires an adapter supporting the full Swim Vulkan 1.3 baseline");
+		SWIM_REQUIRE_MESSAGE(graphics->IsValidationEnabled(), "Smoke requires active Vulkan validation");
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -66,6 +68,7 @@ namespace
 		frames->BeginFrame();
 		auto& clear = frames->CreateCommandList();
 		clear.Begin();
+		clear.BeginDebugLabel("RunClearAndTransferSmoke: clear", { 0.2f, 0.6f, 0.9f, 1.0f });
 		clear.Transition(*source, Rhi::ResourceState::Undefined, Rhi::ResourceState::ColorAttachment);
 		Rhi::RenderingAttachmentDesc attachment{};
 		attachment.View = view.get();
@@ -77,6 +80,7 @@ namespace
 		clear.Transition(*readback, Rhi::ResourceState::Undefined, Rhi::ResourceState::CopyDestination);
 		clear.CopyTextureToBuffer(*source, *readback, copy);
 		clear.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
+		clear.EndDebugLabel();
 		clear.End();
 		frames->SubmitCurrent();
 		frames->Drain();
@@ -97,6 +101,7 @@ namespace
 		frames->BeginFrame();
 		auto& transfer = frames->CreateCommandList();
 		transfer.Begin();
+		transfer.BeginDebugLabel("RunClearAndTransferSmoke: transfer", { 0.2f, 0.6f, 0.9f, 1.0f });
 		transfer.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 		transfer.Transition(*source, Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 		transfer.CopyBufferToTexture(*upload, *source, copy);
@@ -109,6 +114,7 @@ namespace
 		transfer.Transition(*readback, Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
 		transfer.CopyTextureToBuffer(*destination, *readback, copy);
 		transfer.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
+		transfer.EndDebugLabel();
 		transfer.End();
 		frames->SubmitCurrent();
 		frames->Drain();
@@ -118,9 +124,11 @@ namespace
 		frames->BeginFrame();
 		auto& bufferCopy = frames->CreateCommandList();
 		bufferCopy.Begin();
+		bufferCopy.BeginDebugLabel("RunClearAndTransferSmoke: bufferCopy", { 0.2f, 0.6f, 0.9f, 1.0f });
 		bufferCopy.Transition(*readback, Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
 		bufferCopy.CopyBuffer(*upload, *readback, { 0, 0, byteCount });
 		bufferCopy.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
+		bufferCopy.EndDebugLabel();
 		bufferCopy.End();
 		frames->SubmitCurrent();
 		frames->Drain();
@@ -159,12 +167,14 @@ namespace
 				auto& backbuffer = swapchain->GetImageView(image.ImageIndex);
 				auto& commands = frames->CreateCommandList();
 				commands.Begin();
+				commands.BeginDebugLabel("RunClearAndTransferSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
 				// Every frame discards the old contents, so Undefined is intentional.
 				commands.Transition(backbuffer.GetTexture(), Rhi::ResourceState::Undefined, Rhi::ResourceState::ColorAttachment);
 				attachment.View = &backbuffer;
 				commands.BeginRendering({ { &attachment, 1 }, nullptr, swapchain->GetExtent() });
 				commands.EndRendering();
 				commands.Transition(backbuffer.GetTexture(), Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::Present);
+				commands.EndDebugLabel();
 				commands.End();
 				std::array<Rhi::CommandList*, 1> lists{ &commands };
 				std::array<Rhi::Semaphore*, 1> waits{ acquired[context.Index].get() };
@@ -200,7 +210,7 @@ namespace
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClearTransferAndPresent", SWIM_TEST_LOCATION, &RunClearAndTransferSmoke });
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClearTransferAndPresent", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunClearAndTransferSmoke); } });
 		}
 		return true;
 	}();

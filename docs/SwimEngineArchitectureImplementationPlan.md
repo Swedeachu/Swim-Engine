@@ -2517,7 +2517,7 @@ Prefer Vulkan 1.3 baseline on supported desktop hardware:
 - [x] indirect count;
 - [x] buffer device address where beneficial;
 - [ ] pipeline cache;
-- [ ] debug utils;
+- [x] debug utils; *(optional instance extension, captured messages, object names and command labels; see diagnostics checkpoint)*
 - [ ] memory-budget telemetry.
 
 Optional/capability-gated:
@@ -2566,7 +2566,7 @@ Rules:
 ### Swapchain
 
 - [x] resize/recreate without normal device-idle; *(replacement waits the caller-provided frame timeline and uses a presentation-queue-only WSI fallback before old swapchain destruction; no device-wide idle remains in resize)*
-- [ ] minimized/zero-size window handling;
+- [x] minimized/zero-size window handling; *(dormant creation, acquisition suspension, explicit resume/rebuild; desktop validation remains pending)*
 - [x] SDR baseline;
 - [ ] HDR capability path;
 - [x] present mode configuration;
@@ -2574,12 +2574,12 @@ Rules:
 
 ### Validation and diagnostics
 
-- [x] validation requested in Debug builds;
-- [ ] Vulkan object names;
-- [ ] command labels;
-- [ ] adapter/driver info logging;
+- [x] validation requested in Debug builds; *(explicit Required mode is used by every opt-in smoke in every build configuration)*
+- [x] Vulkan object names; *(implemented descriptor names and fixed infrastructure names via debug utils)*
+- [x] command labels; *(nested regions and point markers, with recording/balance validation)*
+- [x] adapter/driver info logging; *(device/API/driver strings and vendor/device/raw-driver identifiers)*
 - [ ] device-loss diagnostics;
-- [ ] RenderDoc-friendly markers;
+- [x] RenderDoc-friendly markers; *(debug-utils annotations implemented; actual GPU-tool capture remains unverified)*
 - [ ] GPU timestamps.
 
 ### Vulkan RHI file organization checkpoint — 2026-09-05
@@ -2615,7 +2615,7 @@ This is the first bounded implementation checkpoint inside critical-path item **
 
 **Validation in this environment:** a dependency-enabled GCC 13/C++20 Debug foundation build compiles and links the real pinned Vulkan-Headers/volk/vk-bootstrap/VMA backend and both RHI public-header gates. `SwimTests` passes **85 cases / 551 checks**, including **26 RHI cases / 167 checks**. The build-layout verifier passes. This build used the real SDL/GLM/mimalloc/enkiTS dependencies with asset/shader compilers, Jolt, PhysX, and the legacy Windows engine excluded; it is not a full Windows engine build. The real-driver smoke was attempted and stops at SDL initialization with `No available video device`, before any GPU validation. Windows/MSVC and actual GPU pixel/presentation validation therefore remain pending.
 
-To run the current clear/transfer and triangle smoke on a desktop with the full required Vulkan feature baseline, configure with `SWIM_BUILD_SHADER_COMPILER=ON`, build the Debug `SwimTests` target and enable the opt-in cases. The normal Windows/Linux presets already enable the shader compiler. Run with the Vulkan validation layers installed; inspect validation output as well as pixel checks. This includes reflected sampled-texture readback, table replacement, and the window-lifecycle smoke described below. Desktop execution and clean validation diagnostics remain required evidence.
+To run the current clear/transfer and triangle smoke on a desktop with the full required Vulkan feature baseline, configure with `SWIM_BUILD_SHADER_COMPILER=ON`, build the Debug `SwimTests` target and enable the opt-in cases. The normal Windows/Linux presets already enable the shader compiler. Run with the Vulkan validation layers installed; the smoke now requires active validation and fails on captured warnings/errors or dropped messages after teardown, as well as checking pixels. This includes reflected sampled-texture readback, table replacement, and the window-lifecycle smoke described below. Desktop execution and clean validation diagnostics remain required evidence.
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -2696,13 +2696,38 @@ This checkpoint continues item **39** from `Swim-Engine(2).zip`, preserving the 
 
 **Caller sequence:** pump events; begin a frame; acquire. When `HasImage()` is false, cancel the empty frame. Retry `NotReady` after pumping events; on `OutOfDate`, or when a suspended window becomes drawable, call `Resize` with current pixel dimensions and the last submitted retirement point. Only a `true` resize result permits rebuilding per-image presentation resources. When an image is acquired, consume its signal through submission and call `Present` even if acquisition was suboptimal. A `false` present requests replacement. All methods on one swapchain require external host serialization, and its window must outlive it.
 
-**Failure and lifetime limits:** native allocation failures can leave the object without images; retry `Resize` before acquiring. Surface/device loss throws and requires recreating the affected surface/device. The supplied timeline must cover every old-view submission. The existing core-WSI presentation-queue idle fallback is retained; this checkpoint adds no swapchain-maintenance present fences or asynchronous presentation retirement. Actual compositor/presentation lifetime validation remains part of the open desktop gate. The smoke reports functional failures, but validation-layer diagnostics must still be inspected; a test count alone does not establish clean validation.
+**Failure and lifetime limits:** native allocation failures can leave the object without images; retry `Resize` before acquiring. Surface/device loss throws and requires recreating the affected surface/device. The supplied timeline must cover every old-view submission. The existing core-WSI presentation-queue idle fallback is retained; this checkpoint adds no swapchain-maintenance present fences or asynchronous presentation retirement. Actual compositor/presentation lifetime validation remains part of the open desktop gate. The following diagnostics checkpoint makes the smoke fail automatically on captured warnings/errors, unavailable required validation, or dropped messages. A headless test count still does not establish desktop GPU validation.
 
 **Validation:** GCC 13/C++20 Debug foundation build with the real pinned SDL3, GLM, mimalloc, enkiTS, Vulkan-Headers/volk/vk-bootstrap/VMA, and Slang `2026.16.1` compiles and links `SwimTests`. All nine available public-header/backend-contract gates compile. The default suite passes **121 cases / 872 checks** and the build-layout verifier passes. All four opt-in GPU smoke cases were attempted; each stops at SDL initialization with `No available video device`, before native GPU execution. Asset compiler, concrete Jolt/PhysX backends, and the legacy Windows executable were excluded from this foundation build. No Windows/MSVC or desktop GPU validation success is claimed.
 
 **Delivery:** complete source repository ZIP for extraction into a fresh directory, with the guide and normal build/test workflow included. Build outputs, dependency caches and Python bytecode are excluded. No sources were retired in this checkpoint, so `Deprecated/` is unchanged.
 
 Implementation references: [Khronos swapchain replacement/retirement rules](https://docs.vulkan.org/refpages/latest/refpages/source/VkSwapchainCreateInfoKHR.html) and [bounded image acquisition and synchronization rules](https://docs.vulkan.org/refpages/latest/refpages/source/vkAcquireNextImageKHR.html).
+
+### RHI diagnostics implementation checkpoint — 2026-09-05
+
+This checkpoint continues Phase 9 / item **39** from `Swim-Engine(3).zip`. The next implementation work is observable Vulkan diagnostics and a strict desktop validation harness. The consolidated engine project and the existing source/dependency layout are preserved.
+
+- [x] Add backend-neutral `GraphicsSystemDesc` with `ValidationMode::{Default, Disabled, IfAvailable, Required}`, a shared `DiagnosticLog`, and configurable console echo. `GraphicsFactory::Create` forwards the descriptor to the registered backend; existing direct creation calls use default options. Default requests validation in Debug and disables it in other configurations. Explicit Required works in every configuration and refuses creation unless both the Khronos validation layer and debug-utils capture can be enabled.
+- [x] Add an owned, thread-safe diagnostic log. Callback text and IDs are copied; storage defaults to 256 messages, caps requested capacity at 4096, and bounds each stored ID/text to 256/8192 bytes. Warning/error/drop counters continue advancing after storage fills. `Record` never propagates allocation/locking exceptions into the driver. Snapshots own their data. There is no clear/reset operation that can erase failures during a validation run; use a new log for a new run.
+- [x] Replace the default bootstrap callback with `VulkanDiagnosticCallback`. It captures general, validation and performance warnings/errors, preserves message IDs, tolerates missing callback fields, returns `VK_FALSE`, and makes no Vulkan calls or arbitrary application callbacks. The instance owns callback state through native destruction; callers can retain the shared log to inspect teardown. Console echo defaults on and is disabled by the smoke wrapper, which prints one report.
+- [x] Explicitly enable optional `VK_EXT_debug_utils` independently of validation so GPU tools can use annotations in non-validation builds too. Use the pinned volk **instance** dispatch table for this instance extension. Required mode rejects missing prerequisites; selected validation/messenger setup failures cannot silently fall back to an unvalidated graphics system. Bootstrap loader/instance/adapter failures leave useful log entries when a caller supplies a log.
+- [x] Forward supported descriptor debug names to native buffers, images/views, samplers, shader modules, pipeline layouts, descriptor-set layouts/pools/sets, and graphics pipelines. Name devices, distinct queue handles, swapchains/backbuffers, command pools/lists, binary/timeline semaphores and fences with fixed infrastructure labels. VMA allocation names remain intact. Native names use owned null-terminated copies of string views; empty names or unavailable debug utils omit annotation. Naming failure records a warning while preserving the created resource.
+- [x] Add backend-neutral `BeginDebugLabel`, `EndDebugLabel`, and `InsertDebugLabel`. Vulkan validates recording/pool generation, nonempty names without embedded NUL, finite normalized RGBA colors, and balanced nesting within each command list. `End` rejects open regions; rerecording after a pool reset clears label state. Backends without debug utils can omit native annotations; Vulkan still validates region balance. These are GPU-tool labels, not GPU timestamps or cross-command-list regions.
+- [x] Query adapter driver properties through the Vulkan 1.3 baseline and report device name, API version, driver name/build description, vendor/device IDs, and the raw vendor-encoded driver version. Do not decode a vendor driver version as a Vulkan API version. Move adapter information queries into `Internal/VulkanAdapterInfo.cpp` instead of growing the adapter header.
+- [x] Make all four opt-in smoke cases use Required validation and verify the graphics system reports it active. `VulkanSmokeDiagnostics` retains the log outside the function that owns all native resources, device and instance, then checks warnings/errors/dropped messages **after teardown**. Any nonzero count fails the case. Reports are also printed on earlier functional failures. Annotate every smoke command buffer with named debug regions.
+- [x] Add three normal diagnostic-log cases, seven Vulkan diagnostic cases, and one factory forwarding case. Cover copied/bounded messages, concurrent callbacks and overflow counters, clean-result criteria, validation policy, callback lifetime/null fields, optional naming/dispatch and string-view bounds, actual resource/pipeline name forwarding, label state/translation/reset, driver properties, and factory option delivery. Extend the existing build-layout verifier to require the focused implementation/test units.
+- [ ] Run clear/triangle/texture/window smoke on Windows and Linux desktops with the required Vulkan baseline. Preserve the adapter report, all four passing results, and zero warning/error/drop totals. Only then close item 39 and begin RenderGraph.
+
+**API usage:** create a shared `Rhi::DiagnosticLog`, place it in `Rhi::GraphicsSystemDesc::Diagnostics`, and pass the descriptor to `GraphicsFactory::Create(api, desc)` or the Vulkan factory. A missing log is allocated by the backend and exposed by `GraphicsSystem::GetDiagnostics()`. `IsValidationEnabled()` reports the selected active configuration. Retain the log until after all resources, device and graphics system have been destroyed, then inspect `Snapshot()` / `IsClean()`. Snapshots taken while callbacks are still running are observations in progress, not a final clean-validation certificate.
+
+**Scope:** this does not implement GPU-assisted/synchronization-validation feature configuration, GPU timestamps, device-fault/crash-dump extensions, memory-budget telemetry, or swapchain-maintenance presentation fences. Those checkboxes remain open. Debug-utils names/labels are present for RenderDoc and similar tools, but no GPU-tool capture or desktop native execution is claimed here. Validation capture has no hidden filtering or allowlist for warning/error messages.
+
+**Validation:** the real GCC 13/C++20 Debug foundation build compiles and links the pinned SDL3/GLM/mimalloc/enkiTS/Vulkan-Headers/volk/vk-bootstrap/VMA backend plus Slang `2026.16.1` artifacts. `SwimTests` passes **132 cases / 958 checks**. All nine available public-header/backend-contract gates compile, and `verify-build-layout.py` passes. All four strict opt-in smoke cases were attempted and fail at SDL initialization (`No available video device`), before a graphics instance can be created. Zero captured Vulkan messages in those failed runs is not validation evidence. Asset compiler, concrete Jolt/PhysX backends and the legacy Windows executable were excluded from this foundation build; Windows/MSVC remains unverified.
+
+**Delivery:** complete clean source repository ZIP, preserving the consolidated `SwimEngine` project. Normal build/test scripts remain; no cleanup/migration scripts, retired-file ledgers, CMake tombstones, build outputs or dependency caches are added. No sources were retired during this checkpoint.
+
+Implementation references: [Khronos debug-utils guide](https://docs.vulkan.org/guide/latest/extensions/VK_EXT_debug_utils.html), [debug callback lifetime/threading rules](https://docs.vulkan.org/spec/latest/chapters/debugging.html), and [native debug-region balance rules](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdEndDebugUtilsLabelEXT.html). Swim deliberately requires regions to balance within one command list, a stricter boundary than native Vulkan's queue-level allowance.
 
 ### Phase 9 exit criteria
 
@@ -3911,7 +3936,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 36. [x] Create Vulkan surface from Platform window through SDL3 WSI.
 37. [x] Add VMA buffer/image allocation.
 38. [x] Add timeline/frame-context/deferred-destruction model.
-39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Real Windows/Linux GPU execution and clean validation diagnostics remain open. See the 2026-09-05 Phase 9 checkpoints.)*
+39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Required validation capture, native names/labels, adapter reports and strict post-teardown smoke checks are implemented. Real Windows/Linux GPU execution remains open. See the 2026-09-05 Phase 9 checkpoints.)*
 
 ### 35.4 Modern renderer foundation
 

@@ -28,6 +28,7 @@ namespace Swim::RhiVulkan
 				  desc(std::move(desc))
 			{
 				this->desc.DebugName = debugName;
+				SetVulkanObjectName(*this->state, VK_OBJECT_TYPE_BUFFER, ToNativeHandle(buffer), debugName);
 			}
 
 			~VulkanBuffer() override;

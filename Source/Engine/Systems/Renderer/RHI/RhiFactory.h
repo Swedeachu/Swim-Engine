@@ -9,7 +9,7 @@
 namespace Swim::Rhi
 {
 
-	using GraphicsSystemCreateFunction = std::unique_ptr<GraphicsSystem>(*)();
+	using GraphicsSystemCreateFunction = std::unique_ptr<GraphicsSystem>(*)(const GraphicsSystemDesc&);
 
 	class GraphicsFactory
 	{
@@ -53,13 +53,13 @@ namespace Swim::Rhi
 			return api != GraphicsApi::Count && createFunctions[ToIndex(api)] != nullptr;
 		}
 
-		std::unique_ptr<GraphicsSystem> Create(GraphicsApi api) const
+		std::unique_ptr<GraphicsSystem> Create(GraphicsApi api, const GraphicsSystemDesc& desc = {}) const
 		{
 			if (!IsAvailable(api))
 			{
 				return nullptr;
 			}
-			return createFunctions[ToIndex(api)]();
+			return createFunctions[ToIndex(api)](desc);
 		}
 
 	private:

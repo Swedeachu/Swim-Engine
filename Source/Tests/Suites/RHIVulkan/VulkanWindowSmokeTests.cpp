@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 #include "Tests/Framework/Test.h"
+#include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
 #include <array>
 #include <chrono>
@@ -32,7 +33,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(false, "Window manager did not complete the requested lifecycle transition within five seconds");
 	}
 
-	void RunWindowLifecycleSmoke()
+	void RunWindowLifecycleSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Window lifecycle smoke requires a desktop video driver and window manager");
@@ -43,8 +44,9 @@ namespace
 		desc.GraphicsSupport = Platform::WindowGraphicsSupport::Vulkan;
 		auto window = platform.GetWindowSystem().Create(desc);
 		SWIM_REQUIRE(window);
-		auto graphics = RhiVulkan::CreateGraphicsSystem();
+		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "Window smoke requires the full Swim Vulkan 1.3 baseline");
+		SWIM_REQUIRE_MESSAGE(graphics->IsValidationEnabled(), "Smoke requires active Vulkan validation");
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
@@ -120,6 +122,7 @@ namespace
 				auto& view = swapchain->GetImageView(image.ImageIndex);
 				auto& commands = frames->CreateCommandList();
 				commands.Begin();
+				commands.BeginDebugLabel("RunWindowLifecycleSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
 				commands.Transition(view.GetTexture(), Rhi::ResourceState::Undefined, Rhi::ResourceState::ColorAttachment);
 				Rhi::RenderingAttachmentDesc color{};
 				color.View = &view;
@@ -128,6 +131,7 @@ namespace
 				commands.BeginRendering({ { &color, 1 }, nullptr, swapchain->GetExtent() });
 				commands.EndRendering();
 				commands.Transition(view.GetTexture(), Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::Present);
+				commands.EndDebugLabel();
 				commands.End();
 				std::array<Rhi::CommandList*, 1> lists{ &commands };
 				std::array<Rhi::Semaphore*, 1> waits{ acquired[frame.Index].get() };
@@ -197,7 +201,7 @@ namespace
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ResizeMinimizeRestore", SWIM_TEST_LOCATION, &RunWindowLifecycleSmoke });
+			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunWindowLifecycleSmoke); } });
 		}
 		return true;
 	}();

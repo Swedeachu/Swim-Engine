@@ -40,6 +40,11 @@ namespace Swim::RhiVulkan
 			result->layoutState->Layout = VK_NULL_HANDLE;
 			return nullptr;
 		}
+		SetVulkanObjectName(*result->state, VK_OBJECT_TYPE_PIPELINE_LAYOUT, ToNativeHandle(result->layoutState->Layout), desc.DebugName);
+		for (VkDescriptorSetLayout set : result->layoutState->Sets)
+		{
+			SetVulkanObjectName(*result->state, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, ToNativeHandle(set), desc.DebugName);
+		}
 		return result;
 	}
 

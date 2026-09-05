@@ -46,26 +46,32 @@ namespace Swim::RhiVulkan
 
 	} // namespace
 
-	std::unique_ptr<Rhi::GraphicsSystem> CreateGraphicsSystem()
+	std::unique_ptr<Rhi::GraphicsSystem> CreateGraphicsSystem(const Rhi::GraphicsSystemDesc& desc)
 	{
+		auto log = desc.Diagnostics ? desc.Diagnostics : std::make_shared<Rhi::DiagnosticLog>();
 		if (!Platform::Internal::AcquireVulkanLoader())
 		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanLoader", "SDL could not load the Vulkan loader");
 			return nullptr;
 		}
 
 		auto instance = std::make_shared<VulkanInstanceState>();
 		instance->LoaderAcquired = true;
+		instance->Diagnostics.Log = log;
+		instance->Diagnostics.Echo = desc.EchoDiagnostics;
 
 		auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
 			Platform::Internal::GetVulkanInstanceProcAddress());
 		if (!getInstanceProcAddr)
 		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanLoader", "Vulkan instance procedure address is unavailable");
 			return nullptr;
 		}
 
 		const auto requiredExtensions = Platform::Internal::GetVulkanInstanceExtensions();
 		if (requiredExtensions.empty())
 		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanWSI", "SDL did not report Vulkan instance extensions");
 			return nullptr;
 		}
 
@@ -83,19 +89,24 @@ namespace Swim::RhiVulkan
 			instanceBuilder.enable_extension(extension);
 		}
 
-#if defined(SWIM_VULKAN_VALIDATION)
-		instanceBuilder
-			.request_validation_layers(true)
-			.use_default_debug_messenger();
-#endif
-
-		auto instanceResult = instanceBuilder.build();
-		if (!instanceResult)
+		if (!ConfigureInstanceDiagnostics(instanceBuilder, instance->Diagnostics, desc.Validation, getInstanceProcAddr))
 		{
 			return nullptr;
 		}
 
+		auto instanceResult = instanceBuilder.build();
+		if (!instanceResult)
+		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanInstance", instanceResult.error().message());
+			return nullptr;
+		}
+
 		instance->Instance = std::move(instanceResult).value();
+		if (instance->Diagnostics.DebugUtilsEnabled && instance->Instance.debug_messenger == VK_NULL_HANDLE)
+		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "DebugMessenger", "Vulkan debug messenger was not created");
+			return nullptr;
+		}
 		volk::volkLoadInstanceTable(&instance->Dispatch, instance->Instance.instance);
 
 		auto selector = vkb::PhysicalDeviceSelector{ instance->Instance };
@@ -111,6 +122,7 @@ namespace Swim::RhiVulkan
 		auto physicalDevicesResult = selector.select_devices();
 		if (!physicalDevicesResult)
 		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanAdapter", physicalDevicesResult.error().message());
 			return nullptr;
 		}
 
@@ -140,6 +152,7 @@ namespace Swim::RhiVulkan
 
 		if (adapters.empty())
 		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanAdapter", "No adapter satisfies the required graphics/presentation queue selection");
 			return nullptr;
 		}
 

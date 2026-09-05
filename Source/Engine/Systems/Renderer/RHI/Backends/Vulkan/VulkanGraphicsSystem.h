@@ -21,6 +21,16 @@ namespace Swim::RhiVulkan
 			{
 			}
 
+			bool IsValidationEnabled() const override
+			{
+				return instance->Diagnostics.ValidationEnabled;
+			}
+
+			std::shared_ptr<Rhi::DiagnosticLog> GetDiagnostics() const override
+			{
+				return instance->Diagnostics.Log;
+			}
+
 			std::uint32_t GetAdapterCount() const override
 			{
 				return static_cast<std::uint32_t>(adapters.size());

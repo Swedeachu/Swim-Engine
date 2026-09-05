@@ -30,6 +30,7 @@ namespace Swim::RhiVulkan
 				  desc(std::move(desc))
 			{
 				this->desc.DebugName = debugName;
+				SetVulkanObjectName(*this->state, VK_OBJECT_TYPE_IMAGE_VIEW, ToNativeHandle(view), debugName);
 			}
 
 			~VulkanTextureView() override

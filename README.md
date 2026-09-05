@@ -165,7 +165,7 @@ Remove-Item Env:SWIM_RUN_RHI_SMOKE
 SWIM_RUN_RHI_SMOKE=1 ./build/linux-debug/SwimTests --filter=RHI.Vulkan.Smoke
 ```
 
-The lifecycle test needs a window manager that supports minimize/restore. Missing video/GPU support fails the opted-in cases; default tests include dispatch-capture and frame-lifecycle coverage without a GPU. Inspect validation diagnostics as well as test results. Cross-platform desktop evidence remains open in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md).
+The lifecycle test needs a window manager that supports minimize/restore. Missing video/GPU support fails the opted-in cases; default tests include dispatch-capture and frame-lifecycle coverage without a GPU. Each smoke explicitly requires active validation and fails on captured warnings, errors, or dropped diagnostics, including resource/device/instance teardown. Its report includes adapter and driver information. Debug regions and native object names are available to GPU tools when debug utils is supported. Cross-platform desktop evidence remains open in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md).
 
 ### Development asset cooking
 

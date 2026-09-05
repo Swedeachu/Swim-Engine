@@ -6,6 +6,7 @@
 // allocator without depending on the concrete VulkanDevice type.
 
 #include "Engine/Platform/Internal/VulkanWsi.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDiagnostics.h"
 
 #include <volk.h>
 #include <VkBootstrap.h>
@@ -33,6 +34,7 @@ namespace Swim::RhiVulkan
 
 	struct VulkanInstanceState
 	{
+		VulkanDiagnosticsState Diagnostics;
 		vkb::Instance Instance{};
 		volk::VolkInstanceTable Dispatch{};
 		bool LoaderAcquired = false;

@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanShaderProgram.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
+
 #include <cstring>
 
 namespace Swim::RhiVulkan
@@ -64,6 +66,7 @@ namespace Swim::RhiVulkan
 				stage.Module = VK_NULL_HANDLE;
 				return nullptr;
 			}
+			SetVulkanObjectName(*program->state, VK_OBJECT_TYPE_SHADER_MODULE, ToNativeHandle(stage.Module), desc.DebugName);
 		}
 		return program;
 	}

@@ -19,6 +19,8 @@ namespace Swim::RhiVulkan
 			explicit VulkanCommandPool(std::shared_ptr<VulkanCommandPoolState> state)
 				: state(std::move(state))
 			{
+				SetVulkanObjectName(*this->state->DeviceState, VK_OBJECT_TYPE_COMMAND_POOL,
+					ToNativeHandle(this->state->Pool), "Swim command pool");
 			}
 
 			std::uintptr_t GetNativeHandle() const override

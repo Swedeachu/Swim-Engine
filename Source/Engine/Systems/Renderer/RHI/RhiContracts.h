@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
+
 #include "Engine/Systems/Renderer/RHI/RhiTypes.h"
 
 #include <array>
@@ -312,6 +314,10 @@ namespace Swim::Rhi
 	struct AdapterInfo
 	{
 		std::string Name;
+		std::string DriverName;
+		std::string DriverInfo;
+		std::string ApiVersion;
+		std::uint32_t DriverVersion = 0; // Backend/vendor encoding; do not decode as an API version.
 		std::uint32_t VendorId = 0;
 		std::uint32_t DeviceId = 0;
 		std::uint64_t DedicatedVideoMemory = 0;
@@ -427,6 +433,12 @@ namespace Swim::Rhi
 	public:
 		virtual void Begin() = 0;
 		virtual void End() = 0;
+		// Optional GPU-tool annotations. RHI regions must balance within one command
+		// list. Names must be nonempty without embedded NUL, and colors finite RGBA
+		// in [0, 1]. Backends without debug utilities may omit native annotations.
+		virtual void BeginDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
+		virtual void EndDebugLabel() {}
+		virtual void InsertDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
 		virtual void Transition(Buffer& buffer, ResourceState before, ResourceState after) = 0;
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
 		virtual void CopyBuffer(Buffer& source, Buffer& destination, const BufferCopyRegion& region) = 0;
@@ -543,6 +555,14 @@ namespace Swim::Rhi
 	{
 	public:
 		virtual ~GraphicsSystem() = default;
+		virtual bool IsValidationEnabled() const
+		{
+			return false;
+		}
+		virtual std::shared_ptr<DiagnosticLog> GetDiagnostics() const
+		{
+			return {};
+		}
 		virtual std::uint32_t GetAdapterCount() const = 0;
 		virtual Adapter& GetAdapter(std::uint32_t adapterIndex) = 0;
 	};

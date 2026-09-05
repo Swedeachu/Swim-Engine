@@ -21,12 +21,17 @@ namespace Swim::RhiVulkan
 		VulkanCommandList(std::shared_ptr<VulkanCommandPoolState> poolState, VkCommandBuffer commandBuffer)
 			: poolState(std::move(poolState)), commandBuffer(commandBuffer)
 		{
+			SetVulkanObjectName(*this->poolState->DeviceState, VK_OBJECT_TYPE_COMMAND_BUFFER,
+				ToNativeHandle(commandBuffer), "Swim command list");
 		}
 
 		~VulkanCommandList() override;
 		std::uintptr_t GetNativeHandle() const override;
 		void Begin() override;
 		void End() override;
+		void BeginDebugLabel(std::string_view name, const std::array<float, 4>& color = { 1, 1, 1, 1 }) override;
+		void EndDebugLabel() override;
+		void InsertDebugLabel(std::string_view name, const std::array<float, 4>& color = { 1, 1, 1, 1 }) override;
 		void Transition(Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after) override;
 		void Transition(Rhi::Texture& texture, Rhi::ResourceState before, Rhi::ResourceState after, const Rhi::TextureSubresourceRange& range) override;
 		void CopyBuffer(Rhi::Buffer& source, Rhi::Buffer& destination, const Rhi::BufferCopyRegion& region) override;
@@ -90,6 +95,7 @@ namespace Swim::RhiVulkan
 		void RequireDescriptorTables() const;
 		std::vector<const VulkanDescriptorTable*> boundTables;
 
+		std::uint32_t debugLabelDepth = 0;
 		bool executable = false;
 		bool recording = false;
 		bool rendering = false;

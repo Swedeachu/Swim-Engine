@@ -48,6 +48,7 @@ namespace Swim::RhiVulkan
 			throw std::runtime_error("Failed to begin Vulkan command buffer");
 		}
 		generation = poolState->Generation;
+		debugLabelDepth = 0;
 		executable = false;
 		rendering = false;
 		recording = true;
@@ -63,6 +64,10 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::End()
 	{
 		RequireRecording(true);
+		if (debugLabelDepth != 0)
+		{
+			throw std::logic_error("Close all RHI debug label regions before ending a command list");
+		}
 		if (poolState->DeviceState->Dispatch.vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to end Vulkan command buffer");

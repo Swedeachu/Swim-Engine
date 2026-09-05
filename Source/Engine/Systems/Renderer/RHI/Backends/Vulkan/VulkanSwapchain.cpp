@@ -131,6 +131,7 @@ namespace Swim::RhiVulkan
 		}
 
 		swapchain = std::move(swapchainResult).value();
+		SetVulkanObjectName(*state, VK_OBJECT_TYPE_SWAPCHAIN_KHR, ToNativeHandle(swapchain.swapchain), "Swim swapchain");
 		try
 		{
 			auto imagesResult = swapchain.get_images();
@@ -159,6 +160,7 @@ namespace Swim::RhiVulkan
 			for (std::size_t index = 0; index < newImages.size(); ++index)
 			{
 				Rhi::TextureDesc textureDesc{};
+				textureDesc.DebugName = "Swapchain color";
 				textureDesc.Dimension = Rhi::TextureDimension::Texture2D;
 				textureDesc.Extent = { extent.Width, extent.Height, 1 };
 				textureDesc.PixelFormat = format;
@@ -166,6 +168,7 @@ namespace Swim::RhiVulkan
 				textures.push_back(std::make_unique<VulkanTexture>(state, newImages[index], textureDesc));
 
 				Rhi::TextureViewDesc viewDesc{};
+				viewDesc.DebugName = "Swapchain color view";
 				viewDesc.Dimension = Rhi::TextureViewDimension::Texture2D;
 				viewDesc.PixelFormat = format;
 				views.push_back(std::make_unique<VulkanTextureView>(

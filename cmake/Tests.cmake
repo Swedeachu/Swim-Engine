@@ -216,6 +216,7 @@ function(swim_configure_tests)
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanSmokeDiagnostics.h
 		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})

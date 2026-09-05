@@ -5,7 +5,7 @@
 namespace Swim::RhiVulkan
 {
 
-	std::unique_ptr<Rhi::GraphicsSystem> CreateGraphicsSystem();
+	std::unique_ptr<Rhi::GraphicsSystem> CreateGraphicsSystem(const Rhi::GraphicsSystemDesc& desc = {});
 	bool RegisterGraphicsBackend(Rhi::GraphicsFactory& factory);
 
 } // namespace Swim::RhiVulkan
