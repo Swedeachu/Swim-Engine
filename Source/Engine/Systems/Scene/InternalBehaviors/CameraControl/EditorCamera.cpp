@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Input/InputSystem.h"
 #include "EditorCamera.h"
 
 namespace Engine
@@ -18,7 +19,8 @@ namespace Engine
 		// ----- Mouse Look -----
 		if (input->IsMouseButtonDown(Swim::Platform::MouseButton::Right))
 		{
-			glm::vec2 mouseDelta = input->GetMousePositionDelta();
+			const auto mouseDeltaInput = input->GetMousePositionDelta();
+			glm::vec2 mouseDelta{ mouseDeltaInput.X, mouseDeltaInput.Y };
 
 			// Update yaw (horizontal) and pitch (vertical)
 			yaw += mouseDelta.x * mouseSensitivity;

@@ -7,19 +7,19 @@
 namespace Engine::UiCoordinates
 {
 
-	inline glm::vec2 WindowToVirtualCanvas(const glm::vec2& position, Swim::Platform::Extent2D logicalWindowSize)
+	inline glm::vec2 WindowToVirtualCanvas(Swim::Platform::Float2 position, Swim::Platform::Extent2D logicalWindowSize)
 	{
 		if (logicalWindowSize.Width == 0 || logicalWindowSize.Height == 0)
 		{
-			return position;
+			return { position.X, position.Y };
 		}
 
 		const float scaleX = static_cast<float>(logicalWindowSize.Width) / Renderer::VirtualCanvasWidth;
 		const float scaleY = static_cast<float>(logicalWindowSize.Height) / Renderer::VirtualCanvasHeight;
 
 		return {
-			position.x / scaleX,
-			Renderer::VirtualCanvasHeight - (position.y / scaleY)
+			position.X / scaleX,
+			Renderer::VirtualCanvasHeight - (position.Y / scaleY)
 		};
 	}
 

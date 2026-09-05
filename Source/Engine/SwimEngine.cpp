@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Input/InputSystem.h"
 #include "SwimEngine.h"
 #include "Engine/Platform/MonotonicClock.h"
 #include "Engine/Systems/Renderer/Vulkan/VulkanRenderer.h"
@@ -228,9 +229,7 @@ namespace Engine
 		engineWindow->Show();
 		UpdateWindowSize();
 
-		// Legacy external-editor embedding/WM_COPYDATA IPC is intentionally dormant.
-		// Future editor work lives inside the engine UI. Keep EditorIpcBridge in-tree as
-		// historical/reference code, but do not initialize or consult it at runtime.
+		// Future editor work lives inside the engine UI. The external transport is archived.
 
 		minimized = engineWindow->IsMinimized();
 		needResize = true;
@@ -244,9 +243,9 @@ namespace Engine
 			return;
 		}
 
-		if (inputManager)
+		if (inputSystem)
 		{
-			inputManager->ProcessWindowEvent(event);
+			inputSystem->ProcessWindowEvent(event);
 		}
 
 		using Swim::Platform::WindowEventType;
@@ -345,8 +344,8 @@ namespace Engine
 		}
 #endif
 
-		inputManager = std::make_unique<InputManager>();
-		commandSystem = std::make_unique<CommandSystem>();
+		inputSystem = std::make_unique<Swim::Input::InputSystem>();
+		commandRegistry = std::make_unique<Swim::Commands::CommandRegistry>();
 		switch (physicsBackend)
 		{
 			case PhysicsBackend::PhysX:
@@ -423,8 +422,8 @@ namespace Engine
 		renderer.SetRuntimeServices(&rendererRuntimeServices);
 
 		SceneSystemServices sceneServices{};
-		sceneServices.Presentation.Input = inputManager.get();
-		sceneServices.Tools.Commands = commandSystem.get();
+		sceneServices.Presentation.Input = inputSystem.get();
+		sceneServices.Tools.Commands = commandRegistry.get();
 		sceneServices.Presentation.Camera = cameraSystem.get();
 		// Renderer-owned environment services are created during Renderer::Awake().
 		// Bind the cubemap controller after renderer Awake instead of snapshotting nullptr here.
@@ -474,7 +473,7 @@ namespace Engine
 		initialWindowEvent.Type = engineWindow->IsFocused()
 			? Swim::Platform::WindowEventType::FocusGained
 			: Swim::Platform::WindowEventType::FocusLost;
-		inputManager->ProcessWindowEvent(initialWindowEvent);
+		inputSystem->ProcessWindowEvent(initialWindowEvent);
 
 		RegisterVanillaEngineCommands();
 		return 0;
@@ -482,19 +481,8 @@ namespace Engine
 
 	int SwimEngine::AwakeSystems()
 	{
-		int result = inputManager->Awake();
-		if (result != 0)
-		{
-			return ReportLifecycleFailure("Awake", "InputManager", result);
-		}
-
-		result = commandSystem->Awake();
-		if (result != 0)
-		{
-			return ReportLifecycleFailure("Awake", "CommandSystem", result);
-		}
-
-		result = physicsSystem->Awake();
+		inputSystem->Reset();
+		int result = physicsSystem->Awake();
 		if (result != 0)
 		{
 			return ReportLifecycleFailure("Awake", "PhysicsSystem", result);
@@ -531,19 +519,7 @@ namespace Engine
 
 	int SwimEngine::InitSystems()
 	{
-		int result = inputManager->Init();
-		if (result != 0)
-		{
-			return ReportLifecycleFailure("Init", "InputManager", result);
-		}
-
-		result = commandSystem->Init();
-		if (result != 0)
-		{
-			return ReportLifecycleFailure("Init", "CommandSystem", result);
-		}
-
-		result = physicsSystem->Init();
+		int result = physicsSystem->Init();
 		if (result != 0)
 		{
 			return ReportLifecycleFailure("Init", "PhysicsSystem", result);
@@ -600,45 +576,45 @@ namespace Engine
 			std::cout << s << std::endl;
 		};
 
-		commandSystem->RegisterRaw("play", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("play", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Stopped;
 			self->engineState |= EngineState::Playing;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("pause", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("pause", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState |= EngineState::Paused;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("resume", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("resume", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Paused;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("stop", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("stop", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Playing;
 			self->engineState |= EngineState::Stopped;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("edit", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("edit", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState |= EngineState::Editing;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("game", [self, summarize](const std::vector<std::string>&)
+		commandRegistry->Register("game", [self, summarize](const std::vector<std::string>&)
 		{
 			self->engineState &= ~EngineState::Editing;
 			summarize(self);
 		});
 
-		commandSystem->RegisterRaw("restart", [self](const std::vector<std::string>&)
+		commandRegistry->Register("restart", [self](const std::vector<std::string>&)
 		{
 			std::cout << "[Engine] Restart requested (not implemented)" << std::endl;
 		});
@@ -673,11 +649,11 @@ namespace Engine
 				},
 				[this](const Swim::Platform::InputEvent& event)
 				{
-					if (!inputManager || !engineWindow || (event.Window != 0 && event.Window != engineWindow->GetId()))
+					if (!inputSystem || !engineWindow || (event.Window != 0 && event.Window != engineWindow->GetId()))
 					{
 						return;
 					}
-					inputManager->ProcessInputEvent(event);
+					inputSystem->ProcessInputEvent(event);
 				}
 			);
 
@@ -696,6 +672,9 @@ namespace Engine
 				accumulatedTime = 0.0;
 				continue;
 			}
+
+			// Publish one input snapshot for both fixed simulation and presentation.
+			inputSystem->AdvanceFrame();
 
 			accumulatedTime += delta;
 			frameArena.BeginFrame(static_cast<std::uint64_t>(totalFrames) + 1);
@@ -794,14 +773,6 @@ namespace Engine
 
 	void SwimEngine::UpdateSystems(double dt)
 	{
-		if (inputManager)
-		{
-			inputManager->Update(dt);
-		}
-		if (commandSystem)
-		{
-			commandSystem->Update(dt);
-		}
 		Scene* activeScene = nullptr;
 		if (sceneSystem)
 		{
@@ -846,14 +817,6 @@ namespace Engine
 
 	void SwimEngine::FixedUpdateSystems(unsigned int tickThisSecond)
 	{
-		if (inputManager)
-		{
-			inputManager->FixedUpdate(tickThisSecond);
-		}
-		if (commandSystem)
-		{
-			commandSystem->FixedUpdate(tickThisSecond);
-		}
 		Scene* activeScene = nullptr;
 		if (sceneSystem)
 		{
@@ -951,11 +914,9 @@ namespace Engine
 		exitSystem("PhysicsSystem", physicsSystem.get());
 		physicsSystem.reset();
 
-		exitSystem("CommandSystem", commandSystem.get());
-		commandSystem.reset();
+		commandRegistry.reset();
 
-		exitSystem("InputManager", inputManager.get());
-		inputManager.reset();
+		inputSystem.reset();
 
 		ioSystem.reset();
 

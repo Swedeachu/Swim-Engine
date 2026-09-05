@@ -136,11 +136,13 @@ function(swim_configure_tests)
 		Physics/Generic
 		Scene/Headless
 		RHI
+		Commands
 	)
 
 	set(SWIM_TEST_FIXTURE_SOURCES "")
 	set(SWIM_TEST_LINK_LIBRARIES
 		Swim::Core
+		Swim::Commands
 		Swim::Memory
 		Swim::Jobs
 		Swim::Assets
@@ -187,7 +189,10 @@ function(swim_configure_tests)
 
 	if(TARGET SwimRhiVulkan)
 		swim_collect_test_suite_sources(SWIM_VULKAN_RHI_SUITES RHIVulkan)
-		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h)
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
+		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
 		# Backend dispatch-spy suites inspect native commands without a GPU.
 		# These dependencies remain private to the test executable.
@@ -227,6 +232,11 @@ function(swim_configure_tests)
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
 
+	if(TARGET SwimRhiSmokeShaders)
+		add_dependencies(SwimTests SwimRhiSmokeShaders)
+		target_compile_definitions(SwimTests PRIVATE SWIM_RHI_TRIANGLE_SPIRV_PATH="${SwimRhiTriangle_SPIRV}")
+	endif()
+
 	if(TARGET SwimSlangReflectionSample)
 		add_dependencies(SwimTests SwimSlangReflectionSample)
 		target_compile_definitions(SwimTests PRIVATE
@@ -236,7 +246,15 @@ function(swim_configure_tests)
 	endif()
 
 	if(MSVC)
-		target_compile_options(SwimTests PRIVATE /MP /utf-8 /W3 /permissive- /external:anglebrackets /external:W0)
+		# /Zc:preprocessor: MSVC's legacy (non-conforming) preprocessor can
+		# mis-scan macro-argument boundaries around raw string literals that
+		# contain literal '(' / ')' characters (e.g. a SWIM_CHECK(...) whose
+		# argument is a raw string like R"(...)..."), silently truncating the
+		# argument and leaking the rest of the literal as unrelated tokens.
+		# The conforming preprocessor Microsoft ships behind this flag does
+		# not have that gap; test code is exactly where raw strings-as-macro-
+		# arguments come up, so this target opts in explicitly.
+		target_compile_options(SwimTests PRIVATE /MP /utf-8 /W3 /permissive- /Zc:preprocessor /external:anglebrackets /external:W0)
 		if(SWIM_WARNINGS_AS_ERRORS)
 			target_compile_options(SwimTests PRIVATE /WX)
 		endif()

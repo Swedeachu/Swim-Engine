@@ -16,6 +16,7 @@ namespace Swim::Input
 	public:
 
 		void Reset();
+		// Publish once after event pumping, before fixed/update consumers read this frame.
 		void AdvanceFrame();
 
 		void ProcessInputEvent(const Platform::InputEvent& event);

@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Input/InputSystem.h"
 #include "GizmoSystem.h"
 #include "Engine/Systems/Renderer/Core/Meshes/PrimitiveMeshes.h"
 #include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
@@ -269,13 +270,14 @@ namespace Engine
 
 	void GizmoSystem::GizmoRootControl()
 	{
-		auto input = activeScene->GetInputManager();
+		auto input = activeScene->GetInputSystem();
 		bool lDown = input->IsMouseButtonDown(Swim::Platform::MouseButton::Left);
 		bool lPressed = input->IsMouseButtonTriggered(Swim::Platform::MouseButton::Left);
 		bool lReleased = !lDown && isDragging; // basic release detection
 
 		// Build current mouse ray
-		glm::vec2 mousePos = input->GetMousePosition();
+		const auto mousePosInput = input->GetMousePosition();
+		glm::vec2 mousePos{ mousePosInput.X, mousePosInput.Y };
 		Engine::Ray ray = activeScene->ScreenPointToRay(mousePos);
 		const glm::vec3 rayOrigin = ray.origin;
 		const glm::vec3 rayDirN = glm::normalize(ray.dir);
@@ -357,7 +359,7 @@ namespace Engine
 	// Ray casts in world for if we left clicked anything
 	entt::entity GizmoSystem::LeftClickCheck()
 	{
-		auto input = activeScene->GetInputManager();
+		auto input = activeScene->GetInputSystem();
 		bool leftClicked = input->IsMouseButtonTriggered(Swim::Platform::MouseButton::Left) || input->IsMouseButtonDown(Swim::Platform::MouseButton::Left);
 
 		if (!leftClicked || activeScene->IsMouseBusyWithUI())
@@ -365,7 +367,8 @@ namespace Engine
 			return entt::null;
 		}
 
-		glm::vec2 mousePos = input->GetMousePosition();
+		const auto mousePosInput = input->GetMousePosition();
+		glm::vec2 mousePos{ mousePosInput.X, mousePosInput.Y };
 		mousePos.y += 14; // window title bar adjustment hack
 		Engine::Ray ray = activeScene->ScreenPointToRay(mousePos);
 
@@ -704,8 +707,9 @@ namespace Engine
 
 	entt::entity GizmoSystem::RayCastUnderMouse() const
 	{
-		auto input = activeScene->GetInputManager();
-		glm::vec2 mousePos = input->GetMousePosition();
+		auto input = activeScene->GetInputSystem();
+		const auto mousePosInput = input->GetMousePosition();
+		glm::vec2 mousePos{ mousePosInput.X, mousePosInput.Y };
 		mousePos.y += 14; // window title bar adjustment
 		Engine::Ray ray = activeScene->ScreenPointToRay(mousePos);
 
@@ -805,8 +809,9 @@ namespace Engine
 		dragStartObjRot = worldRotAtDrag; // used by translate/scale, not rotation now
 
 		// Cache the starting mouse position (and init previous for per-frame delta)
-		auto input = activeScene->GetInputManager();
-		dragStartMousePos = input->GetMousePosition();
+		auto input = activeScene->GetInputSystem();
+		const auto mousePosition = input->GetMousePosition();
+		dragStartMousePos = { mousePosition.X, mousePosition.Y };
 		dragPrevMousePos = dragStartMousePos;
 
 		// Highlight active axis strongly; lock hover
@@ -872,10 +877,11 @@ namespace Engine
 		// --- ROTATE ---
 		else if (activeGizmoType == GizmoType::Rotate)
 		{
-			auto input = activeScene->GetInputManager();
+			auto input = activeScene->GetInputSystem();
 
 			// Per-frame mouse delta
-			glm::vec2 currentMousePos = input->GetMousePosition();
+			const auto currentMousePosInput = input->GetMousePosition();
+			glm::vec2 currentMousePos{ currentMousePosInput.X, currentMousePosInput.Y };
 			glm::vec2 frameDelta = currentMousePos - dragPrevMousePos;
 			dragPrevMousePos = currentMousePos;
 

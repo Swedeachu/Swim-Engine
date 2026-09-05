@@ -8,7 +8,8 @@
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/IO/AsyncIoService.h"
 #include "Engine/Memory/FrameArena.h"
-#include "Engine/Systems/IO/CommandSystem.h"
+#include "Engine/Commands/CommandRegistry.h"
+#include "Engine/Input/InputSystem.h"
 #include "Engine/Systems/Physics/PhysicsSystem.h"
 #include "Engine/Systems/Renderer/Renderer.h"
 
@@ -23,7 +24,6 @@ namespace Engine
 {
 
 	class CameraSystem;
-	class InputManager;
 	class OpenGLRenderer;
 	class SceneSystem;
 	class MeshPool;
@@ -66,11 +66,11 @@ namespace Engine
 		Swim::Platform::Window& GetWindow() { return *engineWindow; }
 		const Swim::Platform::Window& GetWindow() const { return *engineWindow; }
 
-		InputManager* GetInputManager() { return inputManager.get(); }
+		Swim::Input::InputSystem* GetInputSystem() { return inputSystem.get(); }
 		PhysicsSystem* GetPhysicsSystem() { return physicsSystem.get(); }
 		SceneSystem* GetSceneSystem() { return sceneSystem.get(); }
 		CameraSystem* GetCameraSystem() { return cameraSystem.get(); }
-		CommandSystem* GetCommandSystem() { return commandSystem.get(); }
+		Swim::Commands::CommandRegistry* GetCommandRegistry() { return commandRegistry.get(); }
 		VulkanRenderer* GetVulkanRenderer() { return vulkanRenderer.get(); }
 		OpenGLRenderer* GetOpenGLRenderer() { return openglRenderer.get(); }
 		MeshPool* GetMeshPool() { return meshPool.get(); }
@@ -147,8 +147,8 @@ namespace Engine
 
 		// Core systems have unique ownership. Legacy consumers receive non-owning
 		// pointers whose lifetime is bounded by SwimEngine's explicit shutdown order.
-		std::unique_ptr<InputManager> inputManager;
-		std::unique_ptr<CommandSystem> commandSystem;
+		std::unique_ptr<Swim::Input::InputSystem> inputSystem;
+		std::unique_ptr<Swim::Commands::CommandRegistry> commandRegistry;
 		std::unique_ptr<SceneSystem> sceneSystem;
 		std::unique_ptr<VulkanRenderer> vulkanRenderer;
 		std::unique_ptr<OpenGLRenderer> openglRenderer;

@@ -51,6 +51,12 @@ namespace Swim::RhiVulkan
 		executable = false;
 		rendering = false;
 		recording = true;
+		graphicsPipeline = nullptr;
+		availableIndices = 0;
+		viewportSet = false;
+		scissorSet = false;
+		renderingColors.clear();
+		renderingDepth = Rhi::Format::Undefined;
 	}
 
 	void VulkanCommandList::End()
@@ -62,11 +68,6 @@ namespace Swim::RhiVulkan
 		}
 		recording = false;
 		executable = true;
-	}
-
-	void VulkanCommandList::BindGraphicsPipeline(Rhi::GraphicsPipeline&)
-	{
-		throw std::logic_error("Vulkan graphics pipelines are implemented with item 39");
 	}
 
 	void VulkanCommandList::BindComputePipeline(Rhi::ComputePipeline&)
@@ -82,21 +83,6 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::BindVertexBuffer(std::uint32_t, Rhi::Buffer&, std::uint64_t)
 	{
 		throw std::logic_error("Vulkan vertex binding is implemented with item 39");
-	}
-
-	void VulkanCommandList::BindIndexBuffer(Rhi::Buffer&, std::uint64_t, Rhi::IndexType)
-	{
-		throw std::logic_error("Vulkan index binding is implemented with item 39");
-	}
-
-	void VulkanCommandList::Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t)
-	{
-		throw std::logic_error("Vulkan draw commands are implemented with item 39");
-	}
-
-	void VulkanCommandList::DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t)
-	{
-		throw std::logic_error("Vulkan indexed draw commands are implemented with item 39");
 	}
 
 	void VulkanCommandList::Dispatch(std::uint32_t, std::uint32_t, std::uint32_t)

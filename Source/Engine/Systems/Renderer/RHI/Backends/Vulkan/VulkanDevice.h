@@ -17,6 +17,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanSwapchain.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanGraphicsPipeline.h"
+
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
@@ -298,19 +300,19 @@ namespace Swim::RhiVulkan
 				return nullptr;
 			}
 
-			std::unique_ptr<Rhi::ShaderProgram> CreateShaderProgram(const Rhi::ShaderProgramDesc&) override
+			std::unique_ptr<Rhi::ShaderProgram> CreateShaderProgram(const Rhi::ShaderProgramDesc& desc) override
 			{
-				return nullptr;
+				return VulkanShaderProgram::Create(state, desc);
 			}
 
-			std::unique_ptr<Rhi::PipelineLayout> CreatePipelineLayout(const Rhi::PipelineLayoutDesc&) override
+			std::unique_ptr<Rhi::PipelineLayout> CreatePipelineLayout(const Rhi::PipelineLayoutDesc& desc) override
 			{
-				return nullptr;
+				return VulkanPipelineLayout::Create(state, desc);
 			}
 
-			std::unique_ptr<Rhi::GraphicsPipeline> CreateGraphicsPipeline(const Rhi::GraphicsPipelineDesc&) override
+			std::unique_ptr<Rhi::GraphicsPipeline> CreateGraphicsPipeline(const Rhi::GraphicsPipelineDesc& desc) override
 			{
-				return nullptr;
+				return VulkanGraphicsPipeline::Create(state, desc);
 			}
 
 			std::unique_ptr<Rhi::ComputePipeline> CreateComputePipeline(const Rhi::ComputePipelineDesc&) override

@@ -125,6 +125,13 @@ namespace Swim::RhiVulkan
 		renderingInfo.pColorAttachments = colors.data();
 		renderingInfo.pDepthAttachment = desc.DepthStencilAttachment != nullptr ? &depth : nullptr;
 		renderingInfo.pStencilAttachment = hasStencil ? &depth : nullptr;
+		renderingColors.clear();
+		for (const auto& attachment : desc.ColorAttachments)
+		{
+			renderingColors.push_back(attachment.View->GetDesc().PixelFormat);
+		}
+		renderingDepth = desc.DepthStencilAttachment ? desc.DepthStencilAttachment->View->GetDesc().PixelFormat : Rhi::Format::Undefined;
+		renderingSamples = static_cast<Rhi::SampleCount>(samples);
 		GetState()->Dispatch.vkCmdBeginRendering(commandBuffer, &renderingInfo);
 		rendering = true;
 	}
@@ -160,6 +167,7 @@ namespace Swim::RhiVulkan
 		// RHI uses +Y-up NDC. Adapt at the viewport, never in camera projection.
 		const VkViewport native{ viewport.X, bottom, viewport.Width, -viewport.Height, viewport.MinDepth, viewport.MaxDepth };
 		GetState()->Dispatch.vkCmdSetViewport(commandBuffer, 0, 1, &native);
+		viewportSet = true;
 	}
 
 	void VulkanCommandList::SetScissor(const Rhi::ScissorRect& scissor)
@@ -174,6 +182,7 @@ namespace Swim::RhiVulkan
 		}
 		const VkRect2D native{ { scissor.X, scissor.Y }, { scissor.Width, scissor.Height } };
 		GetState()->Dispatch.vkCmdSetScissor(commandBuffer, 0, 1, &native);
+		scissorSet = true;
 	}
 
 } // namespace Swim::RhiVulkan

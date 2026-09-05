@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Input/InputSystem.h"
 #include "RayCasterCameraControl.h"
 #include "Engine/Components/Transform.h"
 
@@ -16,7 +17,8 @@ namespace Engine
 		// bool leftDown = input->IsMouseButtonDown(Swim::Platform::MouseButton::Left);
 		// bool rightDown = input->IsMouseButtonDown(Swim::Platform::MouseButton::Right);
 
-		glm::vec2 mousePos = input->GetMousePosition();
+		const auto mousePosInput = input->GetMousePosition();
+		glm::vec2 mousePos{ mousePosInput.X, mousePosInput.Y };
 		Engine::Ray ray = scene->ScreenPointToRay(mousePos);
 
 		// Left click to try and click an object in the scene

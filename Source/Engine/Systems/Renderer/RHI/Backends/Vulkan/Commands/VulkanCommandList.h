@@ -12,6 +12,8 @@
 namespace Swim::RhiVulkan
 {
 
+	class VulkanGraphicsPipeline;
+
 	class VulkanCommandList final : public Rhi::CommandList
 	{
 	public:
@@ -76,6 +78,15 @@ namespace Swim::RhiVulkan
 		void RequireGraphicsQueue() const;
 
 		std::uint64_t generation = UINT64_MAX;
+		const VulkanGraphicsPipeline* graphicsPipeline = nullptr;
+		std::vector<Rhi::Format> renderingColors;
+		Rhi::Format renderingDepth = Rhi::Format::Undefined;
+		Rhi::SampleCount renderingSamples = Rhi::SampleCount::X1;
+		std::uint64_t availableIndices = 0;
+		bool viewportSet = false;
+		bool scissorSet = false;
+		void RequireDraw() const;
+
 		bool executable = false;
 		bool recording = false;
 		bool rendering = false;

@@ -6,7 +6,7 @@
 #include "SubSceneSystems/GizmoSystem.h"
 #include "SubSceneSystems/SceneDebugDraw.h"
 #include "TransformSystem.h"
-#include "Serialization/EntityIdentityMap.h"
+#include "Identity/EntityIdentityMap.h"
 
 #include "Engine/Components/ObjectTag.h"
 #include "Engine/EngineState.h"
@@ -55,12 +55,16 @@ namespace Swim::Memory
 	class FrameArena;
 }
 
+namespace Swim::Input
+{
+	class InputSystem;
+}
+
 namespace Engine
 {
 
 	// Forward declaration of systems
 	class PhysicsSystem;
-	class InputManager;
 	class CameraSystem;
 	class CubeMapController;
 	class MeshPool;
@@ -146,7 +150,7 @@ namespace Engine
 		uint64_t GetRenderablesRevision() const { return renderablesRevision; }
 
 		// Called by the scene owner during Awake. These are non-owning engine service views.
-		void SetInputManager(InputManager* system) { inputManager = system; }
+		void SetInputSystem(Swim::Input::InputSystem* system) { inputSystem = system; }
 		void SetCameraSystem(CameraSystem* system) { cameraSystem = system; }
 		void SetEngineState(const EngineState* state) { engineState = state; }
 		void SetMeshPool(MeshPool* value) { meshPool = value; }
@@ -164,7 +168,7 @@ namespace Engine
 
 		void SetCubeMapController(CubeMapController* value) { cubeMapController = value; }
 
-		InputManager* GetInputManager() const { return inputManager; }
+		Swim::Input::InputSystem* GetInputSystem() const { return inputSystem; }
 		CameraSystem* GetCameraSystem() const { return cameraSystem; }
 		CubeMapController* GetCubeMapController() const { return cubeMapController; }
 		EngineState GetEngineState() const { return *GetSystem(engineState); }
@@ -183,7 +187,7 @@ namespace Engine
 		bool DispatchCommand(std::string_view command) const { return commandDispatcher && commandDispatcher(command); }
 		bool HasPresentationServices() const
 		{
-			return inputManager && cameraSystem && meshPool && texturePool && materialPool && fontPool;
+			return inputSystem && cameraSystem && meshPool && texturePool && materialPool && fontPool;
 		}
 
 		TransformSystem& GetTransformSystem() { return transformSystem; }
@@ -452,7 +456,7 @@ namespace Engine
 		TransformSystem transformSystem;
 		EntityIdentityMap entityIdentities;
 
-		InputManager* inputManager = nullptr;
+		Swim::Input::InputSystem* inputSystem = nullptr;
 		CameraSystem* cameraSystem = nullptr;
 		CubeMapController* cubeMapController = nullptr;
 		const EngineState* engineState = nullptr;

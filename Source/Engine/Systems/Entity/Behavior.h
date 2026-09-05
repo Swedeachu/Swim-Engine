@@ -5,12 +5,16 @@
 
 #include <entt/entt.hpp>
 
+namespace Swim::Input
+{
+	class InputSystem;
+}
+
 namespace Engine
 {
 
 	// Forward declare
 	class Scene;
-	class InputManager;
 	class CameraSystem;
 	struct Transform;
 	struct Material;
@@ -74,7 +78,7 @@ namespace Engine
 		Scene* scene = nullptr;
 		entt::entity entity = entt::null;
 
-		InputManager* input = nullptr;
+		Swim::Input::InputSystem* input = nullptr;
 		CameraSystem* cameraSystem = nullptr;
 
 		// These may be nullptr if the entity does not have the components but since they are so common we attempt to cache them on construction

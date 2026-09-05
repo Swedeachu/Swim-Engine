@@ -217,7 +217,13 @@ SwimInput
   -> SwimPlatform
 ```
 
-The old gameplay-facing `InputManager` still exists as a compatibility adapter around this system. Removing that remaining adapter from Scene/Behavior/gameplay APIs is separate migration work.
+Engine, Scene, Behavior, camera/gizmo/UI code, and game behaviors now consume `Swim::Input::InputSystem` directly. `SwimEngine` publishes input once after event pumping and before fixed/update consumers. The old `InputManager` is archived outside the active tree.
+
+## In-process commands: `SwimCommands`
+
+**Target type:** static library. **Owns:** `Swim::Commands::CommandRegistry` under `Source/Engine/Commands`.
+
+This dependency-free module dispatches current in-process engine commands. It owns no input state, file IO, external editor transport, or `Machine` lifecycle. `SwimEngine` owns the registry and injects it as an optional scene tool service. `SwimTests` covers parsing, invalid input, callback replacement, and lifetime during self-removal. The previous `CommandSystem` and the old `Systems/IO` directory are retired.
 
 ## 3.6 `SwimIO`
 
@@ -705,7 +711,7 @@ SwimEngine
   -> remaining legacy renderer/scene/game implementation targets/dependencies
 ```
 
-This is not yet the final engine graph. Future work will add the Jolt physics backend and extract Scene, RHI, Vulkan RHI, Render, UI, Audio, etc. into similarly explicit targets. The generic Physics API and current PhysX backend are already separate targets, so future backend parity should not require putting native physics types back into the root executable.
+This is not yet the final engine graph. The current graph also includes `SwimCommands`, `SwimPhysicsJolt`, `SwimRhi`, `SwimRhiVulkan`, and `SwimShaderCompiler`. Scene, Render, UI, and Audio extraction remain future work. The modern Vulkan RHI is a separate foundation module; the main game renderer is still transitional.
 
 ---
 
@@ -721,3 +727,21 @@ This is not yet the final engine graph. Future work will add the Jolt physics ba
 8. A tool that owns a `main()` belongs in its module's `Cli/` directory, not in a new module. The extra target is a link-time necessity, not a second owner of the logic.
 9. Source import/codec libraries belong to tooling targets; runtime-format readers belong to `SwimAssets`.
 10. The generated Visual Studio solution should make the ownership graph easier to read, but CMake remains the source of truth.
+
+## Retired source files
+
+`Deprecated/` is a reference archive outside `Source/`; it contributes no Visual Studio build projects or active source files. The old input/command managers, unused `SystemManager`, external editor IPC, and scene-JSON/editor-sync experiment are archived there. Runtime entity identity is under `Source/Engine/Systems/Scene/Identity`.
+
+The complete repository ZIP contains the intended layout. Extract it into a fresh directory and use the normal build scripts. See architecture plan §0.3 for current replacements and later renderer/pool retirement gates.
+
+## RHI graphics checkpoint projects
+
+| Project | Build role |
+| --- | --- |
+| `SwimRhi` | Backend-neutral interface target; public graphics/resource/command contracts. |
+| `SwimRhiVulkan` | Static library owning Vulkan bootstrap, resources, synchronization, commands and the new graphics pipeline implementation. Third-party Vulkan types remain private. |
+| `SwimShaderCompiler` | Build-tool library owning reflection metadata parsing. No Slang implementation library is linked into the RHI runtime. |
+| `SwimRhiSmokeShaders` | Build-only Slang artifact target under Tests; compiles the triangle shader and reflection sidecar when shader tooling and Vulkan RHI are enabled. |
+| `SwimTests` | One executable containing pipeline/draw capture tests and optional real-driver clear/triangle smoke cases; depends on the shader artifact target when available. |
+
+Shader artifacts are generated under the build directory. Rebuilding `SwimTests` updates its triangle shader through normal CMake dependencies. `SWIM_RUN_RHI_SMOKE=1` enables the desktop/GPU cases; ordinary tests do not require a Vulkan driver. The architecture plan's Phase 9 checkpoint lists the supported procedural/indexed graphics path and the remaining descriptor/sampler/textured-draw work.

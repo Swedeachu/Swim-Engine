@@ -806,7 +806,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
 
     generic_contract_files = (
         ROOT / "Source" / "Engine" / "SwimEngine.h",
-        ROOT / "Source" / "Engine" / "Systems" / "IO" / "InputManager.h",
+        ROOT / "Source" / "Engine" / "Input" / "InputSystem.h",
         ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Renderer.h",
     )
     win32_contract_tokens = re.compile(r"\b(?:HWND|HINSTANCE|WPARAM|LPARAM|LRESULT|WNDPROC)\b|\bWM_[A-Z0-9_]+\b|\bVK_[A-Z0-9_]+\b")
@@ -977,8 +977,8 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         fail("compile-time renderer selection returned to SwimEngine", failures)
 
     for owner_type in (
-        "InputManager",
-        "CommandSystem",
+        "Swim::Input::InputSystem",
+        "Swim::Commands::CommandRegistry",
         "SceneSystem",
         "VulkanRenderer",
         "OpenGLRenderer",
@@ -1150,7 +1150,7 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
     game_service_include_rules = (
         ("renderer->", "Engine/Systems/Renderer/Renderer.h"),
         ("scene->", "Engine/Systems/Scene/Scene.h"),
-        ("input->", "Engine/Systems/IO/InputManager.h"),
+        ("input->", "Engine/Input/InputSystem.h"),
         ("cameraSystem->", "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"),
         ("sceneSystem->", "Engine/Systems/Scene/SceneSystem.h"),
     )
@@ -1178,7 +1178,7 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
     for fragment in (
         '#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"',
         '#include "Engine/Systems/Scene/Scene.h"',
-        '#include "Engine/Systems/IO/InputManager.h"',
+        '#include "Engine/Input/InputSystem.h"',
     ):
         if fragment not in cubemap_test_source:
             fail(f"CubeMapControlTest direct dependency include is missing: {fragment}", failures)
@@ -1769,10 +1769,6 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         if fragment not in legacy_material_pool_text:
             fail(f"legacy cooked-model compatibility residency can terminate startup again: {fragment}", failures)
 
-    retired_tinygltf_exclusion = 'list(REMOVE_ITEM SWIM_ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/Source/Engine/ThirdParty/TinyGltfImplementation.cpp")'
-    if retired_tinygltf_exclusion not in cmake_text:
-        fail("legacy runtime source glob can resurrect a stale TinyGltfImplementation.cpp after overlay updates", failures)
-
     stb_image_implementation = ROOT / "Source" / "Engine" / "ThirdParty" / "StbImageImplementation.cpp"
     if not stb_image_implementation.is_file() or "STB_IMAGE_IMPLEMENTATION" not in stb_image_implementation.read_text(encoding="utf-8", errors="ignore"):
         fail("runtime loose-image compatibility lost its explicit stb_image implementation after tinygltf removal", failures)
@@ -2271,14 +2267,14 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     core_block = scene_system_header.split("struct SceneCoreServices", 1)[1].split("struct ScenePresentationServices", 1)[0]
     for forbidden in (
-        "InputManager*",
+        "Swim::Input::InputSystem*",
         "CameraSystem*",
         "CubeMapController*",
         "MeshPool*",
         "TexturePool*",
         "MaterialPool*",
         "FontPool*",
-        "CommandSystem*",
+        "Swim::Commands::CommandRegistry*",
     ):
         if forbidden in core_block:
             fail(f"headless Scene core services regained a presentation/tool dependency: {forbidden}", failures)
@@ -2287,7 +2283,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
         "bool HasPresentationServices() const",
         "if (HasPresentationServices())",
         "if (sceneDebugDraw)",
-        "if (inputManager)",
+        "if (inputSystem)",
         "if (!inputMgr)",
         "Scene::ScreenPointToRay requires presentation camera/input services.",
     ):
@@ -2601,10 +2597,11 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     # Durable entity IDs remain active, while the old external-editor scene JSON/IPC
     # experiment is intentionally retained only as dormant/reference code.
-    serialization_root = scene_root / "Serialization"
+    serialization_root = ROOT / "Deprecated" / "Engine" / "Systems" / "Scene" / "Serialization"
+    for name in ("SerializedEntityId.h", "EntityIdentityMap.h"):
+        if not (scene_root / "Identity" / name).is_file():
+            fail(f"active scene identity contract is missing: {name}", failures)
     required_serialization_files = (
-        "SerializedEntityId.h",
-        "EntityIdentityMap.h",
         "SceneSerializer.h",
         "SceneSerializer.cpp",
         "SceneStorage.h",
@@ -2714,16 +2711,10 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     for forbidden in ("SendEditorMessage;", "IsEditorConnected;", "bool SendEditorMessage("):
         if forbidden in scene_system_header_text:
             fail(f"SceneSystem exposes active legacy external-editor tooling seam: {forbidden}", failures)
-    if "#if 0" not in scene_system_header_text or "DORMANT LEGACY EXTERNAL-EDITOR PROTOCOL" not in scene_system_source:
-        fail("legacy SceneSystem external-editor command implementation must remain explicitly compile-disabled", failures)
+    if "#if 0" in scene_system_header_text or "DORMANT LEGACY EXTERNAL-EDITOR PROTOCOL" in scene_system_source:
+        fail("retired editor command blocks must live outside the active SceneSystem", failures)
 
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
-    for fragment in (
-        'EditorIpcBridge[.]cpp$',
-        'Scene(Serializer|Storage|SyncTracker)[.]cpp$',
-    ):
-        if fragment not in cmake_text:
-            fail(f"legacy external-editor/scene-JSON implementation is no longer excluded from active targets: {fragment}", failures)
 
     for fragment in (
         "ownsWindow = !config.Window.ExternalWindow.IsValid();",
@@ -2755,8 +2746,6 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     if "cmd.Register<unsigned int" in scene_system_source or "static_cast<entt::entity>(entityId)" in scene_system_source:
         fail("editor scene command transport regressed to raw/recyclable EnTT entity IDs", failures)
-    if "cmd.Register<std::uint64_t" not in scene_system_source:
-        fail("editor scene commands do not consume durable 64-bit SerializedEntityId values", failures)
     for path in scene_root.rglob("*"):
         if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and "to_integral" in path.read_text(encoding="utf-8", errors="ignore"):
             fail(f"raw EnTT integral identity leaked back into scene persistence/tooling: {path.relative_to(ROOT)}", failures)
@@ -3613,6 +3602,18 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
                 fail(f"generic RHI header {path.relative_to(ROOT)} leaks Vulkan implementation detail: {forbidden}", failures)
 
 
+    # Pipeline/draw implementations stay in focused backend units, outside generic headers.
+    for relative in (
+        "Pipelines/VulkanShaderProgram.cpp", "Pipelines/VulkanPipelineLayout.cpp",
+        "Pipelines/VulkanGraphicsPipeline.cpp", "Commands/VulkanCommandListDraw.cpp",
+        "Internal/VulkanPipelineUtils.cpp",
+    ):
+        if not (ROOT / "Source/Engine/Systems/Renderer/RHI/Backends/Vulkan" / relative).is_file():
+            fail(f"Vulkan graphics implementation unit is missing: {relative}", failures)
+    for suite_file in ("VulkanPipelineTests.cpp", "VulkanDrawTests.cpp", "VulkanTriangleSmokeTests.cpp"):
+        check_suite_is_compiled("RHIVulkan", suite_file, failures)
+
+
 def check_runtime_logging_contract(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     dependencies_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
@@ -3692,6 +3693,28 @@ def check_source_files_are_utf8(failures: list[str]) -> None:
                         failures,
                     )
 
+def check_retirement_boundaries(failures: list[str]) -> None:
+    retired_types = re.compile(r"\b(?:InputManager|CommandSystem|SystemManager|EditorIpcBridge|SceneSerializer|SceneStorage|SceneSyncTracker|SceneToolingBridge)\b")
+    for path in (ROOT / "Source").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
+        if retired_types.search(text) or re.search(r'#\s*include[^\n]*Deprecated/', text):
+            fail(f"active source references a retired implementation: {path.relative_to(ROOT)}", failures)
+    engine = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8")
+    pump = engine.find("platformSystem->PumpEvents(")
+    advance = engine.find("inputSystem->AdvanceFrame();")
+    fixed = engine.find("while (accumulatedTime >= fixedTimeStep)")
+    if engine.count("inputSystem->AdvanceFrame();") != 1 or not (0 <= pump < advance < fixed):
+        fail("input snapshot must advance once after pumping events and before fixed simulation", failures)
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    for fragment in ("add_library(Swim::Commands ALIAS SwimCommands)",
+                     'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Commands/")'):
+        if fragment not in cmake:
+            fail(f"command module ownership boundary is missing: {fragment}", failures)
+    check_suite_is_compiled("Commands", "CommandRegistryTests.cpp", failures)
+
+
 def main() -> int:
     failures: list[str] = []
 
@@ -3716,6 +3739,7 @@ def main() -> int:
     check_phase7_shader_architecture(failures)
     check_phase8_rhi_type_architecture(failures)
     check_phase9_vulkan_rhi_architecture(failures)
+    check_retirement_boundaries(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)
 

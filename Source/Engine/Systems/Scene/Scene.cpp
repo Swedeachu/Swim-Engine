@@ -1,4 +1,5 @@
 #include "PCH.h"
+#include "Engine/Input/InputSystem.h"
 
 #include <string_view>
 #include "Engine/Systems/Renderer/Core/Ui/UiCoordinates.h"
@@ -636,7 +637,7 @@ namespace Engine
 
 		// Initialize newly attached behaviors and run Update in one ECS traversal.
 		ForEachInitializedBehavior(&Behavior::Update, dt);
-		if (inputManager)
+		if (inputSystem)
 		{
 			UpdateUIBehaviors();
 		}
@@ -649,9 +650,9 @@ namespace Engine
 		// Was doing bvh update here but its more performant to do it in the fixed update.
 
 		// if constexpr (handleDebugDraw)
-		if (inputManager && sceneDebugDraw)
+		if (inputSystem && sceneDebugDraw)
 		{
-			InputManager* input = inputManager;
+			Swim::Input::InputSystem* input = inputSystem;
 			// control toggle with G key
 			if (input->IsControlDown() && input->IsKeyTriggered(Swim::Platform::KeyCode::G))
 			{
@@ -669,7 +670,7 @@ namespace Engine
 	{
 		mouseBusyWithUI = false; // reset mouse pointer UI focus status for this frame
 
-		InputManager* inputMgr = GetInputManager();
+		Swim::Input::InputSystem* inputMgr = GetInputSystem();
 		if (!inputMgr)
 		{
 			return;
@@ -752,7 +753,7 @@ namespace Engine
 	// Returns if we changed state
 	bool Scene::StateTestControl()
 	{
-		InputManager* input = GetInputManager();
+		Swim::Input::InputSystem* input = GetInputSystem();
 		if (!input || !commandDispatcher)
 		{
 			return false;
@@ -909,7 +910,7 @@ namespace Engine
 
 	bool Scene::IsTopFocusedElement(entt::entity target)
 	{
-		InputManager* inputMgr = GetInputManager();
+		Swim::Input::InputSystem* inputMgr = GetInputSystem();
 		if (!inputMgr)
 		{
 			return false;
@@ -991,7 +992,7 @@ namespace Engine
 	Ray Scene::ScreenPointToRay(const glm::vec2& point) const
 	{
 		CameraSystem* camera = GetCameraSystem();
-		InputManager* input = GetInputManager();
+		Swim::Input::InputSystem* input = GetInputSystem();
 		if (!camera || !input)
 		{
 			throw std::runtime_error("Scene::ScreenPointToRay requires presentation camera/input services.");

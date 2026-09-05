@@ -1,7 +1,7 @@
 #include "PCH.h"
 #include "SimpleMovement.h"
 #include "Engine/Components/Transform.h"
-#include "Engine/Systems/IO/InputManager.h"
+#include "Engine/Input/InputSystem.h"
 
 namespace Game
 {

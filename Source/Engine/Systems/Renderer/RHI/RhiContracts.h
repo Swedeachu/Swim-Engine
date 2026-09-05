@@ -318,6 +318,7 @@ namespace Swim::Rhi
 		GraphicsCapabilities Capabilities{};
 	};
 
+	// Callers retain recorded resources until GPU completion, using frame retirement when needed.
 	class RhiObject
 	{
 	public:
@@ -367,6 +368,7 @@ namespace Swim::Rhi
 		virtual const ShaderProgramInterface& GetInterface() const = 0;
 	};
 
+	// The originating shader program must outlive the layout returned by the device.
 	class PipelineLayout : public RhiObject
 	{
 	public:

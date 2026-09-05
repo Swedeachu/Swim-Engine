@@ -3,7 +3,7 @@
 #include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"
 #include "Engine/Systems/Renderer/Core/Textures/TexturePool.h"
 #include "Engine/Systems/Scene/Scene.h"
-#include "Engine/Systems/IO/InputManager.h"
+#include "Engine/Input/InputSystem.h"
 #include <array>
 #include <memory>
 #include <string>

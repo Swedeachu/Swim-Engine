@@ -1,4 +1,4 @@
-#include "Engine/Systems/Scene/Serialization/EntityIdentityMap.h"
+#include "Engine/Systems/Scene/Identity/EntityIdentityMap.h"
 #include "Tests/Framework/Test.h"
 
 #include <cstddef>

@@ -147,9 +147,6 @@ file(GLOB_RECURSE SWIM_PLATFORM_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
 )
 
-# The old external-process editor bridge is retained in-tree as reference only.
-# Future editor tooling is implemented inside Swim Engine itself.
-list(FILTER SWIM_PLATFORM_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/EditorIpcBridge[.]cpp$")
 
 add_library(SwimPlatform STATIC ${SWIM_PLATFORM_SOURCES})
 add_library(Swim::Platform ALIAS SwimPlatform)
@@ -167,6 +164,21 @@ if(MSVC)
 	target_compile_options(SwimPlatform PRIVATE /utf-8 /W3 /permissive-)
 else()
 	target_compile_options(SwimPlatform PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# In-process commands are independent of platform input, file IO, and Machine.
+add_library(SwimCommands STATIC
+	Source/Engine/Commands/CommandRegistry.h
+	Source/Engine/Commands/CommandRegistry.cpp
+)
+add_library(Swim::Commands ALIAS SwimCommands)
+target_include_directories(SwimCommands PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+target_compile_features(SwimCommands PUBLIC cxx_std_20)
+swim_set_solution_folder(SwimCommands "${SWIM_SOLUTION_FOLDER_ENGINE_MODULES}")
+if(MSVC)
+	target_compile_options(SwimCommands PRIVATE /utf-8 /W3 /permissive-)
+else()
+	target_compile_options(SwimCommands PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 file(GLOB_RECURSE SWIM_INPUT_SOURCES
@@ -321,6 +333,20 @@ if(SWIM_BUILD_SHADER_COMPILER AND SWIM_SHADER_COMPILER_DEPENDENCIES_AVAILABLE)
 		"Generated SPIR-V path for the Slang reflection sample" FORCE)
 	set(SWIM_SLANG_REFLECTION_SAMPLE "${SwimBasicRaster_REFLECTION}" CACHE INTERNAL
 		"Generated reflection path for the Slang reflection sample" FORCE)
+endif()
+
+# RHI smoke shaders use the same pinned Slang compiler and artifact path as engine shaders.
+if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
+	include(cmake/SlangShaders.cmake)
+	swim_add_slang_program(SwimRhiTriangle
+		SOURCE Source/Shaders/Slang/RhiSmoke/Triangle.slang
+		PROFILE spirv_1_5
+	)
+	add_custom_target(SwimRhiSmokeShaders
+		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
+		SOURCES Source/Shaders/Slang/RhiSmoke/Triangle.slang
+	)
+	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 file(GLOB_RECURSE SWIM_JOB_SOURCES
@@ -576,20 +602,14 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 )
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Platform/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Input/")
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Commands/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Memory/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Jobs/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/IO/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
-# Legacy scene JSON persistence / external-editor synchronization is intentionally dormant.
-# Keep the source/header files in-tree for reference, but do not compile the old runtime implementation.
-list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Scene/Serialization/Scene(Serializer|Storage|SyncTracker)[.]cpp$")
-# TinyGltfImplementation.cpp was retired when runtime GLB importing moved behind
-# the cooked AssetSystem boundary. Keep an explicit tombstone exclusion because
-# ZIP/overlay updates cannot delete an older checkout's stale source file, and
-# the recursive glob would otherwise silently compile it again.
-list(REMOVE_ITEM SWIM_ENGINE_SOURCES "${CMAKE_SOURCE_DIR}/Source/Engine/ThirdParty/TinyGltfImplementation.cpp")
+
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/EngineConfig[.]cpp$")
 
 file(GLOB_RECURSE SWIM_GAME_SOURCES
@@ -734,6 +754,7 @@ target_link_libraries(SwimEngine PRIVATE
 	Swim::IO
 	Swim::Platform
 	Swim::Input
+	Swim::Commands
 	spdlog::spdlog
 	Vulkan::Vulkan
 	OpenGL::GL
