@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
+#include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +19,7 @@ namespace Swim::Rhi
 	{
 		QueueType Queue = QueueType::Graphics;
 		std::uint32_t FrameCount = 3;
+		UploadArenaDesc Upload{}; // Capacity zero disables per-context upload storage.
 	};
 
 	class FrameContextRing
@@ -36,6 +38,7 @@ namespace Swim::Rhi
 		private:
 			friend class FrameContextRing;
 
+			std::unique_ptr<UploadArena> uploadArena;
 			std::unique_ptr<CommandPool> commandPool;
 			std::vector<std::unique_ptr<CommandList>> commandLists;
 			std::vector<std::unique_ptr<RhiObject>> retiredObjects;
@@ -63,6 +66,14 @@ namespace Swim::Rhi
 				if (!contexts[index].commandPool)
 				{
 					return nullptr;
+				}
+				if (desc.Upload.Capacity != 0)
+				{
+					contexts[index].uploadArena = UploadArena::Create(device, desc.Upload);
+					if (!contexts[index].uploadArena)
+					{
+						return nullptr;
+					}
 				}
 			}
 
@@ -105,6 +116,10 @@ namespace Swim::Rhi
 			context.commandLists.clear();
 			context.retiredObjects.clear();
 			context.commandPool->Reset();
+			if (context.uploadArena)
+			{
+				context.uploadArena->Reset();
+			}
 			context.CompletionValue = 0;
 
 			currentContext = &context;
@@ -117,12 +132,25 @@ namespace Swim::Rhi
 		void CancelFrame()
 		{
 			if (currentContext == nullptr || !currentContext->commandLists.empty() ||
-				!currentContext->retiredObjects.empty())
+				!currentContext->retiredObjects.empty() ||
+				(currentContext->uploadArena && currentContext->uploadArena->GetUsedBytes() != 0))
 			{
 				throw std::logic_error("Only an active empty RHI frame can be canceled");
 			}
 			nextContextIndex = currentContext->Index;
 			currentContext = nullptr;
+		}
+
+		// Returned bytes are writable only until SubmitCurrent. Do not submit
+		// their resources independently or retain spans across context reuse.
+		std::optional<UploadSlice> AllocateUpload(std::uint64_t size, std::uint64_t alignment = 4)
+		{
+			return CurrentUploadArena().Allocate(size, alignment);
+		}
+
+		std::optional<UploadSlice> WriteUpload(std::span<const std::byte> data, std::uint64_t alignment = 4)
+		{
+			return CurrentUploadArena().Write(data, alignment);
 		}
 
 		CommandList& CreateCommandList()
@@ -149,6 +177,10 @@ namespace Swim::Rhi
 				throw std::logic_error("Cannot submit an RHI frame before BeginFrame");
 			}
 
+			if (nextSignalValue == std::numeric_limits<std::uint64_t>::max())
+			{
+				throw std::overflow_error("RHI frame timeline exhausted");
+			}
 			const std::uint64_t signalValue = nextSignalValue;
 			std::vector<TimelinePoint> signals(desc.SignalTimelines.begin(), desc.SignalTimelines.end());
 			for (const TimelinePoint& signal : signals)
@@ -162,6 +194,10 @@ namespace Swim::Rhi
 
 			SubmitDesc submit = desc;
 			submit.SignalTimelines = signals;
+			if (currentContext->uploadArena)
+			{
+				currentContext->uploadArena->Flush();
+			}
 			queue.Submit(submit);
 			++nextSignalValue;
 
@@ -259,6 +295,10 @@ namespace Swim::Rhi
 			{
 				context.commandLists.clear();
 				context.retiredObjects.clear();
+				if (context.uploadArena)
+				{
+					context.uploadArena->Reset();
+				}
 				context.CompletionValue = 0;
 			}
 			deferredObjects.clear();
@@ -286,6 +326,15 @@ namespace Swim::Rhi
 		}
 
 	private:
+		UploadArena& CurrentUploadArena()
+		{
+			if (currentContext == nullptr || !currentContext->uploadArena)
+			{
+				throw std::logic_error("Upload allocation requires an active frame with upload storage enabled");
+			}
+			return *currentContext->uploadArena;
+		}
+
 		struct DeferredObject
 		{
 			std::uint64_t CompletionValue = 0;

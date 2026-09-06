@@ -20,12 +20,14 @@ namespace Swim::RhiVulkan
 				std::shared_ptr<VulkanDeviceState> state,
 				VkBuffer buffer,
 				VmaAllocation allocation,
-				Rhi::BufferDesc desc)
+				Rhi::BufferDesc desc,
+				void* mappedData = nullptr)
 				: state(std::move(state)),
 				  buffer(buffer),
 				  allocation(allocation),
 				  debugName(desc.DebugName),
-				  desc(std::move(desc))
+				  desc(std::move(desc)),
+				  mappedData(static_cast<std::byte*>(mappedData))
 			{
 				this->desc.DebugName = debugName;
 				SetVulkanObjectName(*this->state, VK_OBJECT_TYPE_BUFFER, ToNativeHandle(buffer), debugName);
@@ -34,6 +36,8 @@ namespace Swim::RhiVulkan
 			~VulkanBuffer() override;
 			void Write(std::uint64_t offset, std::span<const std::byte> data) override;
 			void Read(std::uint64_t offset, std::span<std::byte> data) override;
+			std::span<std::byte> GetMappedWriteSpan() override;
+			void FlushMappedWrites(std::uint64_t offset, std::uint64_t size) override;
 
 			std::uintptr_t GetNativeHandle() const override
 			{
@@ -56,6 +60,7 @@ namespace Swim::RhiVulkan
 			VmaAllocation allocation = nullptr;
 			std::string debugName;
 			Rhi::BufferDesc desc{};
+			std::byte* mappedData = nullptr;
 		};
 
 } // namespace Swim::RhiVulkan

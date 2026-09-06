@@ -265,3 +265,20 @@ The opt-in `RHI.Vulkan.Smoke.MemoryBudgetAllocationAndRelease` case checks real 
 Graphics pipelines automatically share a native cache per device. Call `Device::LoadPipelineCache(bytes)` before the first pipeline build to seed it, then persist the complete `Bytes` from a `Ready` `Device::GetPipelineCacheData()` result at a caller-chosen checkpoint. Cache data is bounded, versioned and checked against the device/driver; invalid files permit normal cold compilation. The RHI performs no automatic filesystem writes.
 
 The strict opt-in `RHI.Vulkan.Smoke.PipelineCachePersistenceAndReuse` case checks export, file round trip and recreation on a second device. See the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) for result handling, synchronization and persistence requirements.
+
+
+### Persistent upload arenas
+
+`Swim::Rhi::UploadArena` provides bounded staging storage backed by a persistently
+mapped `CpuToGpu` buffer. Enable per-frame storage with
+`FrameContextDesc::Upload.Capacity`, then use `FrameContextRing::AllocateUpload`
+or `WriteUpload` between `BeginFrame` and `SubmitCurrent`. Slices contain the
+buffer, byte offset and writable byte span. Submission flushes the used bytes;
+frame-slot reuse waits for the timeline before reclaiming them.
+
+Capacity exhaustion returns an empty optional. Finish CPU writes before
+submission and keep slices within their owning frame. Standalone arenas require
+explicit flushing and completion before reset/destruction. See the architecture
+plan's upload-arena checkpoint for alignment, failure and lifetime contracts, and
+`VulkanUploadArenaSmokeTests.cpp` for buffer/texture copies across reused slots.
+The native test joins `SWIM_RUN_RHI_SMOKE=1 SwimTests --filter=RHI.Vulkan.Smoke`.

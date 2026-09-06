@@ -134,7 +134,9 @@ namespace Swim::RhiVulkan
 			std::unique_ptr<Rhi::Buffer> CreateBuffer(const Rhi::BufferDesc& desc) override
 			{
 				RequireVulkanDevice(*state);
-				if (desc.Size == 0 || desc.Usage == Rhi::BufferUsage::None)
+				if (desc.Size == 0 || desc.Usage == Rhi::BufferUsage::None ||
+					(desc.PersistentMap && (desc.Memory != Rhi::MemoryPreference::CpuToGpu ||
+						desc.Size > std::numeric_limits<std::size_t>::max())))
 				{
 					return nullptr;
 				}
@@ -169,20 +171,40 @@ namespace Swim::RhiVulkan
 					return nullptr;
 				}
 
+				if (desc.PersistentMap)
+				{
+					allocationInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
+				}
+				VmaAllocationInfo mappedInfo{};
 				VkBuffer buffer = VK_NULL_HANDLE;
 				VmaAllocation allocation = nullptr;
 				if (CheckVulkanResult(*state, vmaCreateBuffer(
-					state->Allocator, &createInfo, &allocationInfo, &buffer, &allocation, nullptr), "vmaCreateBuffer") != VK_SUCCESS)
+					state->Allocator, &createInfo, &allocationInfo, &buffer, &allocation, &mappedInfo), "vmaCreateBuffer") != VK_SUCCESS)
 				{
 					return nullptr;
 				}
 
-				if (!desc.DebugName.empty())
+				if (desc.PersistentMap && mappedInfo.pMappedData == nullptr)
 				{
-					const std::string debugName(desc.DebugName);
-					vmaSetAllocationName(state->Allocator, allocation, debugName.c_str());
+					vmaDestroyBuffer(state->Allocator, buffer, allocation);
+					return nullptr;
 				}
-				return std::make_unique<VulkanBuffer>(state, buffer, allocation, desc);
+				try
+				{
+					if (!desc.DebugName.empty())
+					{
+						const std::string debugName(desc.DebugName);
+						vmaSetAllocationName(state->Allocator, allocation, debugName.c_str());
+					}
+					RequireVulkanDevice(*state);
+					return std::make_unique<VulkanBuffer>(state, buffer, allocation, desc,
+						desc.PersistentMap ? mappedInfo.pMappedData : nullptr);
+				}
+				catch (...)
+				{
+					vmaDestroyBuffer(state->Allocator, buffer, allocation);
+					throw;
+				}
 			}
 
 			std::unique_ptr<Rhi::Texture> CreateTexture(const Rhi::TextureDesc& desc) override

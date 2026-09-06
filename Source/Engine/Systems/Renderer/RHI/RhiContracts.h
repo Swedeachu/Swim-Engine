@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -92,6 +93,7 @@ namespace Swim::Rhi
 		BufferUsage Usage = BufferUsage::None;
 		MemoryPreference Memory = MemoryPreference::DeviceLocal;
 		std::string_view DebugName;
+		bool PersistentMap = false; // CpuToGpu only; mapping lives until buffer destruction.
 	};
 
 	struct TextureDesc
@@ -353,6 +355,19 @@ namespace Swim::Rhi
 		// Write accepts CpuToGpu, Read accepts GpuToCpu. Both maintain CPU caches.
 		virtual void Write(std::uint64_t offset, std::span<const std::byte> data) = 0;
 		virtual void Read(std::uint64_t offset, std::span<std::byte> data) = 0;
+
+		// Empty when persistent writes are unsupported or were not requested.
+		// Write-only bytes: no CPU alignment beyond byte access is promised. Finish
+		// host writes and FlushMappedWrites before submission. Neither call waits;
+		// retain the buffer and do not overwrite GPU-visible bytes before completion.
+		virtual std::span<std::byte> GetMappedWriteSpan()
+		{
+			return {};
+		}
+		virtual void FlushMappedWrites(std::uint64_t offset, std::uint64_t size)
+		{
+			throw std::logic_error("Persistent buffer writes are not supported");
+		}
 	};
 
 	class Texture : public RhiObject

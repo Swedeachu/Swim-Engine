@@ -40,4 +40,31 @@ namespace Swim::RhiVulkan
 		}
 	}
 
+	std::span<std::byte> VulkanBuffer::GetMappedWriteSpan()
+	{
+		RequireVulkanDevice(*state);
+		if (mappedData == nullptr)
+		{
+			return {};
+		}
+		return { mappedData, static_cast<std::size_t>(desc.Size) };
+	}
+
+	void VulkanBuffer::FlushMappedWrites(std::uint64_t offset, std::uint64_t size)
+	{
+		RequireVulkanDevice(*state);
+		if (mappedData == nullptr || desc.Memory != Rhi::MemoryPreference::CpuToGpu ||
+			offset > desc.Size || size > desc.Size - offset)
+		{
+			throw std::invalid_argument("Mapped flush requires an in-bounds persistent CpuToGpu range");
+		}
+		// VMA aligns the allocation-relative range to nonCoherentAtomSize and
+		// skips the native flush on coherent memory. Mapping alone does not flush.
+		if (size != 0 && CheckVulkanResult(*state,
+			vmaFlushAllocation(state->Allocator, allocation, offset, size), "vmaFlushAllocation") != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to flush Vulkan buffer allocation");
+		}
+	}
+
 } // namespace Swim::RhiVulkan
