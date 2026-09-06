@@ -259,3 +259,9 @@ Retain `Device::GetDeviceDiagnostics()` before starting GPU work. A Vulkan devic
 `Device::GetMemoryBudgetSnapshot()` returns owned per-heap allocator counters and memory-budget estimates without a GPU wait. Check `IsAvailable()` and each heap's `Source`: driver estimates describe process usage/budget; allocator fallback uses reserved block bytes and an 80%-of-capacity heuristic. `GetHeadroomBytes()` saturates at zero when usage exceeds budget. Host-visible and device-local heaps can overlap on UMA hardware.
 
 The opt-in `RHI.Vulkan.Smoke.MemoryBudgetAllocationAndRelease` case checks real buffer/texture allocation and release with required validation. The [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) documents counter semantics, sampling limits and the remaining desktop validation gate.
+
+### Vulkan pipeline caches
+
+Graphics pipelines automatically share a native cache per device. Call `Device::LoadPipelineCache(bytes)` before the first pipeline build to seed it, then persist the complete `Bytes` from a `Ready` `Device::GetPipelineCacheData()` result at a caller-chosen checkpoint. Cache data is bounded, versioned and checked against the device/driver; invalid files permit normal cold compilation. The RHI performs no automatic filesystem writes.
+
+The strict opt-in `RHI.Vulkan.Smoke.PipelineCachePersistenceAndReuse` case checks export, file round trip and recreation on a second device. See the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) for result handling, synchronization and persistence requirements.

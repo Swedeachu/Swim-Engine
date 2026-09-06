@@ -13,6 +13,12 @@ namespace Swim::Testing
 	{
 		capture = this;
 		State->Instance = std::make_shared<RhiVulkan::VulkanInstanceState>();
+		State->Dispatch.vkCreatePipelineCache = +[](VkDevice, const VkPipelineCacheCreateInfo*, const VkAllocationCallbacks*, VkPipelineCache* cache) -> VkResult
+		{
+			*cache = RhiVulkan::FromNativeHandle<VkPipelineCache>(100 + ++capture->CachesCreated);
+			return VK_SUCCESS;
+		};
+		State->Dispatch.vkDestroyPipelineCache = +[](VkDevice, VkPipelineCache, const VkAllocationCallbacks*) { ++capture->CachesDestroyed; };
 		auto& limits = State->Device.physical_device.properties.limits;
 		limits.framebufferColorSampleCounts = limits.framebufferDepthSampleCounts = limits.framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
 		State->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties = +[](VkPhysicalDevice, VkFormat, VkFormatProperties* properties)
@@ -36,9 +42,10 @@ namespace Swim::Testing
 			return VK_SUCCESS;
 		};
 		State->Dispatch.vkDestroyPipelineLayout = +[](VkDevice, VkPipelineLayout, const VkAllocationCallbacks*) { ++capture->LayoutsDestroyed; };
-		State->Dispatch.vkCreateGraphicsPipelines = +[](VkDevice, VkPipelineCache, std::uint32_t, const VkGraphicsPipelineCreateInfo* info,
+		State->Dispatch.vkCreateGraphicsPipelines = +[](VkDevice, VkPipelineCache cache, std::uint32_t, const VkGraphicsPipelineCreateInfo* info,
 			const VkAllocationCallbacks*, VkPipeline* pipeline) -> VkResult
 		{
+			capture->LastPipelineCache = cache;
 			*pipeline = RhiVulkan::FromNativeHandle<VkPipeline>(++capture->PipelinesCreated);
 			const auto& rendering = *static_cast<const VkPipelineRenderingCreateInfo*>(info->pNext);
 			capture->PipelineColors.assign(rendering.pColorAttachmentFormats, rendering.pColorAttachmentFormats + rendering.colorAttachmentCount);
@@ -69,6 +76,11 @@ namespace Swim::Testing
 			++capture->IndexedDrawCount;
 			capture->IndexedDraw = { indices, instances, firstIndex, vertexOffset, firstInstance };
 		};
+	}
+
+	VulkanPipelineCapture::~VulkanPipelineCapture()
+	{
+		RhiVulkan::DestroyVulkanPipelineCache(*State);
 	}
 
 	std::unique_ptr<RhiVulkan::VulkanShaderProgram> VulkanPipelineCapture::MakeProgram(Rhi::ShaderProgramInterfaceDesc interface)

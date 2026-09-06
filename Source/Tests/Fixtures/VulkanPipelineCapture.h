@@ -11,9 +11,13 @@ namespace Swim::Testing
 	struct VulkanPipelineCapture : VulkanCommandCapture
 	{
 		VulkanPipelineCapture();
+		~VulkanPipelineCapture();
 		std::unique_ptr<RhiVulkan::VulkanShaderProgram> MakeProgram(Rhi::ShaderProgramInterfaceDesc interface = {});
 		std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> MakePipeline(Rhi::Format format = Rhi::Format::RGBA8Unorm);
 
+		std::uint32_t CachesCreated = 0;
+		std::uint32_t CachesDestroyed = 0;
+		VkPipelineCache LastPipelineCache = VK_NULL_HANDLE;
 		std::uint32_t ModulesCreated = 0;
 		std::uint32_t ModulesDestroyed = 0;
 		std::uint32_t FailModule = 0;

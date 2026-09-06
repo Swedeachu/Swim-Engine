@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiDeviceDiagnostics.h"
 #include "Engine/Systems/Renderer/RHI/RhiMemoryBudget.h"
+#include "Engine/Systems/Renderer/RHI/RhiPipelineCache.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
 
@@ -551,6 +552,18 @@ namespace Swim::Rhi
 		// On-demand telemetry, without a GPU wait. Unsupported backends return an
 		// empty snapshot. A known device loss raises DeviceLostError.
 		virtual MemoryBudgetSnapshot GetMemoryBudgetSnapshot() const
+		{
+			return {};
+		}
+		// Seed once, before the first pipeline build. Invalid/incompatible data is
+		// ignored; a cache creation failure leaves normal compilation available.
+		virtual PipelineCacheLoadStatus LoadPipelineCache(std::span<const std::byte> data)
+		{
+			return PipelineCacheLoadStatus::Unsupported;
+		}
+		// Explicit export for caller-owned persistence. No file writes or GPU
+		// waits; known device loss raises DeviceLostError in both operations.
+		virtual PipelineCacheData GetPipelineCacheData() const
 		{
 			return {};
 		}

@@ -14,6 +14,8 @@
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceLoss.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPipelineCache.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -63,6 +65,7 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<Rhi::DeviceDiagnostics> Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>();
 		bool DeviceFaultEnabled = false;
 		bool MemoryBudgetEnabled = false;
+		mutable VulkanPipelineCacheState PipelineCache;
 		std::array<std::shared_ptr<std::mutex>, 3> QueueMutexes{};
 		mutable std::mutex RetirementMutex;
 		mutable bool LossRetirementAttempted = false;
@@ -79,6 +82,7 @@ namespace Swim::RhiVulkan
 		~VulkanDeviceState()
 		{
 			RetireLostVulkanDevice(*this);
+			DestroyVulkanPipelineCache(*this);
 			if (Allocator != nullptr)
 			{
 				vmaDestroyAllocator(Allocator);

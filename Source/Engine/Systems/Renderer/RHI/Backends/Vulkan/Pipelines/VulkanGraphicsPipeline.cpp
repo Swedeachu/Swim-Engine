@@ -188,7 +188,7 @@ namespace Swim::RhiVulkan
 			info.layout = FromNativeHandle<VkPipelineLayout>(layout->GetNativeHandle());
 			auto result = std::make_unique<VulkanGraphicsPipeline>(state, desc);
 			result->layoutState = layout->GetLayoutState();
-			if (CheckVulkanResult(*state, state->Dispatch.vkCreateGraphicsPipelines(state->Device.device, VK_NULL_HANDLE, 1, &info, nullptr, &result->pipeline), "vkCreateGraphicsPipelines") != VK_SUCCESS)
+			if (CreateCachedVulkanGraphicsPipeline(*state, info, result->pipeline) != VK_SUCCESS)
 			{
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.
 				return nullptr;

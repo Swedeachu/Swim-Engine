@@ -3618,6 +3618,7 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         "Queries/VulkanQueryPool.cpp", "Commands/VulkanCommandListQueries.cpp",
         "Internal/VulkanDeviceLoss.cpp", "Internal/VulkanDeviceFault.cpp",
         "Internal/VulkanDeviceRetirement.cpp", "Internal/VulkanMemoryBudget.cpp",
+        "Internal/VulkanPipelineCache.cpp", "Internal/VulkanPipelineCacheData.cpp",
     ):
         if not (ROOT / "Source/Engine/Systems/Renderer/RHI/Backends/Vulkan" / relative).is_file():
             fail(f"Vulkan graphics implementation unit is missing: {relative}", failures)
@@ -3626,7 +3627,10 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
                        "VulkanSwapchainTests.cpp", "VulkanWindowSmokeTests.cpp", "VulkanDiagnosticsTests.cpp",
                        "VulkanQueryTests.cpp", "VulkanTimestampSmokeTests.cpp",
                        "VulkanDeviceLossTests.cpp", "VulkanDeviceFaultTests.cpp",
-                       "VulkanMemoryBudgetTests.cpp", "VulkanMemoryBudgetSmokeTests.cpp"):
+                       "VulkanMemoryBudgetTests.cpp", "VulkanMemoryBudgetSmokeTests.cpp",
+                       "VulkanPipelineCacheTests.cpp", "VulkanPipelineCacheDataTests.cpp",
+                       "VulkanPipelineCacheConcurrencyTests.cpp", "VulkanPipelineCachePersistenceTests.cpp",
+                       "VulkanPipelineCacheSmokeTests.cpp"):
         check_suite_is_compiled("RHIVulkan", suite_file, failures)
     check_suite_is_compiled("RHI", "RhiDiagnosticsTests.cpp", failures)
     check_suite_is_compiled("RHI", "RhiTimestampTests.cpp", failures)

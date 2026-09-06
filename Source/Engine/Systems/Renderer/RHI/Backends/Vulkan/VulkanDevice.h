@@ -72,6 +72,16 @@ namespace Swim::RhiVulkan
 				return QueryVulkanMemoryBudget(*state);
 			}
 
+			Rhi::PipelineCacheLoadStatus LoadPipelineCache(std::span<const std::byte> data) override
+			{
+				return LoadVulkanPipelineCache(*state, data);
+			}
+
+			Rhi::PipelineCacheData GetPipelineCacheData() const override
+			{
+				return ExportVulkanPipelineCache(*state);
+			}
+
 			Rhi::Queue& GetQueue(Rhi::QueueType type) override
 			{
 				switch (type)
