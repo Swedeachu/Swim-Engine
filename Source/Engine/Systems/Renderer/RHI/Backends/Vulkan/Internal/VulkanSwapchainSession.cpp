@@ -40,6 +40,7 @@ namespace Swim::RhiVulkan
 
 	Rhi::SwapchainAcquireResult VulkanSwapchainSession::Acquire(Rhi::Semaphore& signal, Rhi::Fence* signalFence)
 	{
+		RequireVulkanDevice(*state);
 		auto* semaphore = dynamic_cast<VulkanSemaphore*>(&signal);
 		auto* fence = signalFence ? dynamic_cast<VulkanFence*>(signalFence) : nullptr;
 		if (semaphore == nullptr || semaphore->GetState().get() != state.get() ||
@@ -77,6 +78,7 @@ namespace Swim::RhiVulkan
 		if (nativeResult != VK_SUCCESS && nativeResult != VK_SUBOPTIMAL_KHR)
 		{
 			Invalidate();
+			CheckVulkanResult(*state, nativeResult, "vkAcquireNextImageKHR");
 			throw std::runtime_error("Failed to acquire Vulkan swapchain image: " + std::to_string(nativeResult));
 		}
 		if (imageIndex >= acquired.size() || acquired[imageIndex])
@@ -97,6 +99,7 @@ namespace Swim::RhiVulkan
 	bool VulkanSwapchainSession::Present(Rhi::Queue& queue, std::uint32_t imageIndex,
 		std::span<Rhi::Semaphore* const> waits)
 	{
+		RequireVulkanDevice(*state);
 		auto* vulkanQueue = dynamic_cast<VulkanQueue*>(&queue);
 		if (vulkanQueue == nullptr || vulkanQueue->GetState().get() != state.get() ||
 			vulkanQueue->GetFamilyIndex() != state->QueueFamilies.Graphics)
@@ -128,6 +131,7 @@ namespace Swim::RhiVulkan
 		info.pImageIndices = &imageIndex;
 
 		std::scoped_lock lock(vulkanQueue->GetMutex());
+		RequireVulkanDevice(*state);
 		const VkResult result = state->Dispatch.vkQueuePresentKHR(vulkanQueue->GetQueue(), &info);
 		acquired[imageIndex] = false;
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
@@ -138,6 +142,7 @@ namespace Swim::RhiVulkan
 		if (result != VK_SUCCESS)
 		{
 			Invalidate();
+			CheckVulkanResult(*state, result, "vkQueuePresentKHR");
 			throw std::runtime_error("Failed to present Vulkan swapchain image: " + std::to_string(result));
 		}
 		return !needsResize;

@@ -30,6 +30,7 @@ namespace Swim::RhiVulkan
 
 	VulkanSampler::~VulkanSampler()
 	{
+		RetireLostVulkanDevice(*state);
 		if (sampler != VK_NULL_HANDLE)
 		{
 			state->Dispatch.vkDestroySampler(state->Device.device, sampler, nullptr);
@@ -42,6 +43,10 @@ namespace Swim::RhiVulkan
 
 	std::unique_ptr<VulkanSampler> VulkanSampler::Create(std::shared_ptr<VulkanDeviceState> state, const Rhi::SamplerDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		const auto& limits = state->Device.physical_device.properties.limits;
 		const auto validFilter = [](Rhi::Filter filter) { return filter == Rhi::Filter::Nearest || filter == Rhi::Filter::Linear; };
 		if (!validFilter(desc.MinFilter) || !validFilter(desc.MagFilter) || !validFilter(desc.MipFilter) ||
@@ -81,9 +86,11 @@ namespace Swim::RhiVulkan
 			}
 		} while (!state->SamplerCount.compare_exchange_weak(count, count + 1));
 		result->reserved = true;
-		if (state->Dispatch.vkCreateSampler(state->Device.device, &info, nullptr, &result->sampler) != VK_SUCCESS)
+		const auto createResult = state->Dispatch.vkCreateSampler(state->Device.device, &info, nullptr, &result->sampler);
+		if (createResult != VK_SUCCESS)
 		{
 			result->sampler = VK_NULL_HANDLE;
+			CheckVulkanResult(*state, createResult, "vkCreateSampler");
 			return nullptr;
 		}
 		SetVulkanObjectName(*state, VK_OBJECT_TYPE_SAMPLER, ToNativeHandle(result->sampler), desc.DebugName);

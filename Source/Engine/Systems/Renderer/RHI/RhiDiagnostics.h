@@ -103,6 +103,7 @@ namespace Swim::Rhi
 		ValidationMode Validation = ValidationMode::Default;
 		std::shared_ptr<DiagnosticLog> Diagnostics;
 		bool EchoDiagnostics = true;
+		bool DeviceFaultDiagnostics = true; // Optional native details, never a device requirement.
 	};
 
 } // namespace Swim::Rhi

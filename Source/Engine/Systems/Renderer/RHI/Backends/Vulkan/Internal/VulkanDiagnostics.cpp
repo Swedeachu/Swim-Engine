@@ -36,7 +36,7 @@ namespace Swim::RhiVulkan
 	void SetVulkanObjectName(const VulkanDeviceState& state, VkObjectType type,
 		std::uint64_t handle, std::string_view name) noexcept
 	{
-		if (!state.Instance || !state.Instance->Diagnostics.DebugUtilsEnabled || handle == 0 || name.empty() ||
+		if (state.Diagnostics->IsLost() || !state.Instance || !state.Instance->Diagnostics.DebugUtilsEnabled || handle == 0 || name.empty() ||
 			state.Instance->Dispatch.vkSetDebugUtilsObjectNameEXT == nullptr)
 		{
 			return;
@@ -49,7 +49,8 @@ namespace Swim::RhiVulkan
 			info.objectType = type;
 			info.objectHandle = handle;
 			info.pObjectName = owned.c_str();
-			if (state.Instance->Dispatch.vkSetDebugUtilsObjectNameEXT(state.Device.device, &info) != VK_SUCCESS && state.Instance->Diagnostics.Log)
+			const auto result = ObserveVulkanResult(state, state.Instance->Dispatch.vkSetDebugUtilsObjectNameEXT(state.Device.device, &info), "vkSetDebugUtilsObjectNameEXT");
+			if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST && state.Instance->Diagnostics.Log)
 			{
 				state.Instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Warning,
 					"ObjectName", "Vulkan object naming failed");

@@ -20,6 +20,7 @@ namespace Swim::RhiVulkan
 
 		void VulkanQueue::Submit(const Rhi::SubmitDesc& desc)
 		{
+			RequireVulkanDevice(*state);
 			std::vector<VkCommandBufferSubmitInfo> commandInfos;
 			commandInfos.reserve(desc.CommandLists.size());
 			std::unordered_set<VkCommandBuffer> submittedCommands;
@@ -130,7 +131,8 @@ namespace Swim::RhiVulkan
 			submitInfo.pSignalSemaphoreInfos = signalInfos.data();
 
 			std::scoped_lock lock(*submissionMutex);
-			if (state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence) != VK_SUCCESS)
+			RequireVulkanDevice(*state);
+			if (CheckVulkanResult(*state, state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence), "vkQueueSubmit2") != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed to submit work to Vulkan queue");
 			}
@@ -142,8 +144,10 @@ namespace Swim::RhiVulkan
 
 		void VulkanQueue::WaitIdle()
 		{
+			RequireVulkanDevice(*state);
 			std::scoped_lock lock(*submissionMutex);
-			if (state->Dispatch.vkQueueWaitIdle(queue) != VK_SUCCESS)
+			RequireVulkanDevice(*state);
+			if (CheckVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(queue), "vkQueueWaitIdle") != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed waiting for Vulkan queue idle");
 			}

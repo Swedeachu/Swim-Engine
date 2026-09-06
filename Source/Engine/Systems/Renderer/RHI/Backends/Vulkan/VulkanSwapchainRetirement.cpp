@@ -20,7 +20,7 @@ namespace Swim::RhiVulkan
 		// Rendering completion alone cannot retire presentation waits. Retain the
 		// existing core-WSI presentation-queue fallback; never idle the whole device.
 		std::scoped_lock lock(*state->PresentationQueueMutex);
-		return state->Dispatch.vkQueueWaitIdle(state->PresentationQueue) == VK_SUCCESS;
+		return CheckVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(state->PresentationQueue), "vkQueueWaitIdle") == VK_SUCCESS;
 	}
 
 } // namespace Swim::RhiVulkan

@@ -267,7 +267,7 @@ SWIM_TEST("RHI.Vulkan.Queries", "ReadbackErrorsClearOldResultsAndRangeChecksCann
 	SWIM_REQUIRE(pool);
 	std::array<Rhi::TimestampResult, 2> results{};
 	SWIM_REQUIRE(pool->ReadTimestamps(0, results) == Rhi::QueryReadStatus::Ready);
-	capture.ReadResult = VK_ERROR_DEVICE_LOST;
+	capture.ReadResult = VK_ERROR_UNKNOWN;
 	SWIM_CHECK(pool->ReadTimestamps(0, results) == Rhi::QueryReadStatus::Error);
 	SWIM_CHECK(!results[0].Available && results[0].Ticks == 0);
 	SWIM_CHECK(!results[1].Available && results[1].Ticks == 0);
@@ -293,4 +293,20 @@ SWIM_TEST("RHI.Vulkan.Queries", "ComputeFamilyRecordsItsOwnQueriesAndRejectsGrap
 	capture.Commands->End();
 	SWIM_CHECK_EQUAL(capture.Operations.size(), 3u);
 	SWIM_CHECK_EQUAL(compute->GetTimestampInfo().ValidBits, 36u);
+}
+
+SWIM_TEST("RHI.Vulkan.Queries", "DeviceLossIsTypedAndClearsReadbackWithoutRetryingDriver")
+{
+	QueryCapture capture;
+	auto pool = capture.Create();
+	SWIM_REQUIRE(pool);
+	std::array<Rhi::TimestampResult, 2> results{};
+	SWIM_REQUIRE(pool->ReadTimestamps(0, results) == Rhi::QueryReadStatus::Ready);
+	capture.ReadResult = VK_ERROR_DEVICE_LOST;
+	SWIM_CHECK_THROWS(pool->ReadTimestamps(0, results), Rhi::DeviceLostError);
+	SWIM_CHECK(!results[0].Available && results[0].Ticks == 0);
+	SWIM_CHECK(!results[1].Available && results[1].Ticks == 0);
+	SWIM_CHECK(capture.State->Diagnostics->IsLost());
+	SWIM_CHECK_THROWS(pool->ReadTimestamps(0, results), Rhi::DeviceLostError);
+	SWIM_CHECK_EQUAL(capture.Reads, 2u);
 }

@@ -13,6 +13,7 @@ namespace Swim::RhiVulkan
 
 	VulkanDescriptorTable::~VulkanDescriptorTable()
 	{
+		RetireLostVulkanDevice(*GetState());
 		if (pool != VK_NULL_HANDLE)
 		{
 			GetState()->Dispatch.vkDestroyDescriptorPool(GetState()->Device.device, pool, nullptr);
@@ -22,6 +23,10 @@ namespace Swim::RhiVulkan
 	std::unique_ptr<VulkanDescriptorTable> VulkanDescriptorTable::Create(
 		std::shared_ptr<VulkanDeviceState> state, const Rhi::DescriptorTableDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		auto* layout = dynamic_cast<VulkanPipelineLayout*>(desc.Layout);
 		if (layout == nullptr || layout->GetState() != state || desc.VariableDescriptorCount != 0)
 		{
@@ -53,9 +58,11 @@ namespace Swim::RhiVulkan
 		poolInfo.maxSets = 1;
 		poolInfo.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
 		poolInfo.pPoolSizes = sizes.data();
-		if (state->Dispatch.vkCreateDescriptorPool(state->Device.device, &poolInfo, nullptr, &result->pool) != VK_SUCCESS)
+		const auto createResult = state->Dispatch.vkCreateDescriptorPool(state->Device.device, &poolInfo, nullptr, &result->pool);
+		if (createResult != VK_SUCCESS)
 		{
 			result->pool = VK_NULL_HANDLE;
+			CheckVulkanResult(*state, createResult, "vkCreateDescriptorPool");
 			return nullptr;
 		}
 		VkDescriptorSetAllocateInfo info{};
@@ -63,7 +70,7 @@ namespace Swim::RhiVulkan
 		info.descriptorPool = result->pool;
 		info.descriptorSetCount = 1;
 		info.pSetLayouts = &result->layoutState->Sets[desc.Space];
-		if (state->Dispatch.vkAllocateDescriptorSets(state->Device.device, &info, &result->set) != VK_SUCCESS)
+		if (CheckVulkanResult(*state, state->Dispatch.vkAllocateDescriptorSets(state->Device.device, &info, &result->set), "vkAllocateDescriptorSets") != VK_SUCCESS)
 		{
 			return nullptr;
 		}

@@ -33,6 +33,7 @@ namespace Swim::RhiVulkan
 
 	VulkanQueryPool::~VulkanQueryPool()
 	{
+		RetireLostVulkanDevice(*state);
 		if (pool != VK_NULL_HANDLE)
 		{
 			state->Dispatch.vkDestroyQueryPool(state->Device.device, pool, nullptr);
@@ -41,6 +42,10 @@ namespace Swim::RhiVulkan
 
 	std::unique_ptr<VulkanQueryPool> VulkanQueryPool::Create(std::shared_ptr<VulkanDeviceState> state, const Rhi::QueryPoolDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		if (!state || desc.Type != Rhi::QueryType::Timestamp || desc.Count == 0)
 		{
 			return nullptr;
@@ -69,9 +74,11 @@ namespace Swim::RhiVulkan
 		info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 		info.queryType = VK_QUERY_TYPE_TIMESTAMP;
 		info.queryCount = desc.Count;
-		if (state->Dispatch.vkCreateQueryPool(state->Device.device, &info, nullptr, &result->pool) != VK_SUCCESS)
+		const auto createResult = state->Dispatch.vkCreateQueryPool(state->Device.device, &info, nullptr, &result->pool);
+		if (createResult != VK_SUCCESS)
 		{
 			result->pool = VK_NULL_HANDLE;
+			CheckVulkanResult(*state, createResult, "vkCreateQueryPool");
 			return nullptr;
 		}
 		SetVulkanObjectName(*state, VK_OBJECT_TYPE_QUERY_POOL, ToNativeHandle(result->pool), result->debugName);
@@ -106,6 +113,7 @@ namespace Swim::RhiVulkan
 	Rhi::QueryReadStatus VulkanQueryPool::ReadTimestamps(std::uint32_t first, std::span<Rhi::TimestampResult> results)
 	{
 		std::fill(results.begin(), results.end(), Rhi::TimestampResult{});
+		RequireVulkanDevice(*state);
 		if (!Contains(first, results.size()))
 		{
 			return Rhi::QueryReadStatus::Error;
@@ -114,9 +122,9 @@ namespace Swim::RhiVulkan
 		// expose unspecified values for unavailable queries, including on failure.
 		using NativeResult = std::array<std::uint64_t, 2>;
 		std::vector<NativeResult> native(results.size());
-		const auto status = state->Dispatch.vkGetQueryPoolResults(state->Device.device, pool, first,
+		const auto status = CheckVulkanResult(*state, state->Dispatch.vkGetQueryPoolResults(state->Device.device, pool, first,
 			static_cast<std::uint32_t>(results.size()), native.size() * sizeof(NativeResult), native.data(),
-			sizeof(NativeResult), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+			sizeof(NativeResult), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT), "vkGetQueryPoolResults");
 		if (status != VK_SUCCESS && status != VK_NOT_READY)
 		{
 			return Rhi::QueryReadStatus::Error;

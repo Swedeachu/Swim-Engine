@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/RHI/RhiDeviceDiagnostics.h"
+
 #include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiTypes.h"
@@ -539,6 +541,12 @@ namespace Swim::Rhi
 	class Device : public RhiObject
 	{
 	public:
+		// Retain this report across teardown. Device loss throws DeviceLostError
+		// from fallible work; noexcept naming/destruction only records the loss.
+		virtual std::shared_ptr<DeviceDiagnostics> GetDeviceDiagnostics() const
+		{
+			return {};
+		}
 		virtual const AdapterInfo& GetAdapterInfo() const = 0;
 		virtual Queue& GetQueue(QueueType type) = 0;
 

@@ -9,6 +9,10 @@ namespace Swim::RhiVulkan
 
 	VulkanPipelineLayoutState::~VulkanPipelineLayoutState()
 	{
+		if (Device)
+		{
+			RetireLostVulkanDevice(*Device);
+		}
 		if (Layout != VK_NULL_HANDLE)
 		{
 			Device->Dispatch.vkDestroyPipelineLayout(Device->Device.device, Layout, nullptr);
@@ -136,10 +140,16 @@ namespace Swim::RhiVulkan
 				VkDescriptorSetLayoutSupport support{};
 				support.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT;
 				layout.Device->Dispatch.vkGetDescriptorSetLayoutSupport(layout.Device->Device.device, &info, &support);
-				if (!support.supported || layout.Device->Dispatch.vkCreateDescriptorSetLayout(
-					layout.Device->Device.device, &info, nullptr, &layout.Sets[space]) != VK_SUCCESS)
+				if (!support.supported)
+				{
+					return false;
+				}
+				const auto createResult = layout.Device->Dispatch.vkCreateDescriptorSetLayout(
+					layout.Device->Device.device, &info, nullptr, &layout.Sets[space]);
+				if (createResult != VK_SUCCESS)
 				{
 					layout.Sets[space] = VK_NULL_HANDLE;
+					CheckVulkanResult(*layout.Device, createResult, "vkCreateDescriptorSetLayout");
 					return false;
 				}
 			}

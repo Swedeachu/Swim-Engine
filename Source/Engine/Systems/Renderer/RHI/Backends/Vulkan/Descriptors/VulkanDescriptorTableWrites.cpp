@@ -14,6 +14,7 @@ namespace Swim::RhiVulkan
 
 	void VulkanDescriptorTable::Write(std::span<const Rhi::DescriptorWrite> writes)
 	{
+		RequireVulkanDevice(*GetState());
 		if (sealed.load())
 		{
 			throw std::logic_error("Recorded descriptor tables are immutable; allocate a replacement and retire the old table after GPU completion");

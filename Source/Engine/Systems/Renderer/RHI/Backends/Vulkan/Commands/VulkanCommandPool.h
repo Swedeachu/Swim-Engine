@@ -30,6 +30,7 @@ namespace Swim::RhiVulkan
 
 			std::unique_ptr<Rhi::CommandList> CreateCommandList() override
 			{
+				RequireVulkanDevice(*state->DeviceState);
 				VkCommandBufferAllocateInfo allocateInfo{};
 				allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 				allocateInfo.commandPool = state->Pool;
@@ -37,8 +38,8 @@ namespace Swim::RhiVulkan
 				allocateInfo.commandBufferCount = 1;
 
 				VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
-				if (state->DeviceState->Dispatch.vkAllocateCommandBuffers(
-					state->DeviceState->Device.device, &allocateInfo, &commandBuffer) != VK_SUCCESS)
+				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkAllocateCommandBuffers(
+					state->DeviceState->Device.device, &allocateInfo, &commandBuffer), "vkAllocateCommandBuffers") != VK_SUCCESS)
 				{
 					return nullptr;
 				}
@@ -47,8 +48,9 @@ namespace Swim::RhiVulkan
 
 			void Reset() override
 			{
-				if (state->DeviceState->Dispatch.vkResetCommandPool(
-					state->DeviceState->Device.device, state->Pool, 0) != VK_SUCCESS)
+				RequireVulkanDevice(*state->DeviceState);
+				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkResetCommandPool(
+					state->DeviceState->Device.device, state->Pool, 0), "vkResetCommandPool") != VK_SUCCESS)
 				{
 					throw std::runtime_error("Failed to reset Vulkan command pool");
 				}

@@ -18,6 +18,7 @@ namespace Swim::RhiVulkan
 
 	VulkanGraphicsPipeline::~VulkanGraphicsPipeline()
 	{
+		RetireLostVulkanDevice(*state);
 		if (pipeline != VK_NULL_HANDLE)
 		{
 			state->Dispatch.vkDestroyPipeline(state->Device.device, pipeline, nullptr);
@@ -27,6 +28,10 @@ namespace Swim::RhiVulkan
 	std::unique_ptr<VulkanGraphicsPipeline> VulkanGraphicsPipeline::Create(
 		std::shared_ptr<VulkanDeviceState> state, const Rhi::GraphicsPipelineDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
 		auto* layout = dynamic_cast<VulkanPipelineLayout*>(desc.Layout);
 		const auto& limits = state->Device.physical_device.properties.limits;
@@ -183,7 +188,7 @@ namespace Swim::RhiVulkan
 			info.layout = FromNativeHandle<VkPipelineLayout>(layout->GetNativeHandle());
 			auto result = std::make_unique<VulkanGraphicsPipeline>(state, desc);
 			result->layoutState = layout->GetLayoutState();
-			if (state->Dispatch.vkCreateGraphicsPipelines(state->Device.device, VK_NULL_HANDLE, 1, &info, nullptr, &result->pipeline) != VK_SUCCESS)
+			if (CheckVulkanResult(*state, state->Dispatch.vkCreateGraphicsPipelines(state->Device.device, VK_NULL_HANDLE, 1, &info, nullptr, &result->pipeline), "vkCreateGraphicsPipelines") != VK_SUCCESS)
 			{
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.
 				return nullptr;

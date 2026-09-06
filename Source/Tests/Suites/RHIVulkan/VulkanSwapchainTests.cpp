@@ -206,6 +206,18 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "FatalErrorsInvalidateAndRemainDistinctFromRes
 	capture.AcquireResult = VK_SUCCESS;
 	SWIM_REQUIRE(capture.Session.Acquire(capture.Signal, nullptr).HasImage());
 	capture.PresentResult = VK_ERROR_DEVICE_LOST;
-	SWIM_CHECK_THROWS(capture.Present(), std::runtime_error);
-	SWIM_CHECK_THROWS(capture.Present(), std::invalid_argument);
+	SWIM_CHECK_THROWS(capture.Present(), Rhi::DeviceLostError);
+	SWIM_CHECK_THROWS(capture.Present(), Rhi::DeviceLostError);
+}
+
+SWIM_TEST("RHI.Vulkan.Swapchain", "AcquireDeviceLossCannotBecomeAResizeRetry")
+{
+	SwapchainCapture capture;
+	capture.Build();
+	capture.AcquireResult = VK_ERROR_DEVICE_LOST;
+	SWIM_CHECK_THROWS(capture.Session.Acquire(capture.Signal, nullptr), Rhi::DeviceLostError);
+	SWIM_CHECK(capture.State->Diagnostics->IsLost());
+	SWIM_CHECK_EQUAL(capture.State->Diagnostics->Snapshot().Operation, std::string("vkAcquireNextImageKHR"));
+	SWIM_CHECK_THROWS(capture.Session.Acquire(capture.Signal, nullptr), Rhi::DeviceLostError);
+	SWIM_CHECK_EQUAL(capture.Acquires, 1u);
 }

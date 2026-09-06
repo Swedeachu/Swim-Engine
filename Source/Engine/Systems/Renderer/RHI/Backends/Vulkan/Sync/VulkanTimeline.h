@@ -19,6 +19,10 @@ namespace Swim::RhiVulkan
 
 			~VulkanTimelineState()
 			{
+				if (DeviceState)
+				{
+					RetireLostVulkanDevice(*DeviceState);
+				}
 				if (Semaphore != VK_NULL_HANDLE)
 				{
 					DeviceState->Dispatch.vkDestroySemaphore(DeviceState->Device.device, Semaphore, nullptr);
@@ -41,9 +45,10 @@ namespace Swim::RhiVulkan
 
 			std::uint64_t GetCompletedValue() const override
 			{
+				RequireVulkanDevice(*state->DeviceState);
 				std::uint64_t value = 0;
-				if (state->DeviceState->Dispatch.vkGetSemaphoreCounterValue(
-					state->DeviceState->Device.device, state->Semaphore, &value) != VK_SUCCESS)
+				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkGetSemaphoreCounterValue(
+					state->DeviceState->Device.device, state->Semaphore, &value), "vkGetSemaphoreCounterValue") != VK_SUCCESS)
 				{
 					throw std::runtime_error("Failed to query Vulkan timeline semaphore value");
 				}
@@ -52,14 +57,19 @@ namespace Swim::RhiVulkan
 
 			bool Wait(std::uint64_t value, std::uint64_t timeoutNanoseconds) override
 			{
+				RequireVulkanDevice(*state->DeviceState);
 				VkSemaphoreWaitInfo waitInfo{};
 				waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
 				waitInfo.semaphoreCount = 1;
 				waitInfo.pSemaphores = &state->Semaphore;
 				waitInfo.pValues = &value;
 
-				const VkResult result = state->DeviceState->Dispatch.vkWaitSemaphores(
-					state->DeviceState->Device.device, &waitInfo, timeoutNanoseconds);
+				const VkResult result = CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkWaitSemaphores(
+					state->DeviceState->Device.device, &waitInfo, timeoutNanoseconds), "vkWaitSemaphores");
+				if (result != VK_SUCCESS && result != VK_TIMEOUT)
+				{
+					throw std::runtime_error("Failed waiting for Vulkan synchronization");
+				}
 				return result == VK_SUCCESS;
 			}
 

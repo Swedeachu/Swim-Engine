@@ -64,16 +64,40 @@ namespace Swim::RhiVulkan
 					}
 				}
 
-				auto deviceResult = vkb::DeviceBuilder{ physicalDevice }
-					.custom_queue_setup(queueDescriptions)
-					.build();
+				auto selectedDevice = physicalDevice;
+				const auto extensions = selectedDevice.get_available_extensions();
+				auto faultFeatures = QueryDeviceFaultFeatures(instance->Dispatch, selectedDevice.physical_device,
+					HasExtension(extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME), instance->RequestDeviceFaultDiagnostics);
+				const bool faultEnabled = faultFeatures.deviceFault != VK_FALSE;
+				if (faultEnabled)
+				{
+					selectedDevice.enable_extension_if_present(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+				}
+				vkb::DeviceBuilder builder{ selectedDevice };
+				builder.custom_queue_setup(queueDescriptions);
+				if (faultEnabled)
+				{
+					builder.add_pNext(&faultFeatures);
+				}
+				auto deviceResult = builder.build();
 				if (!deviceResult)
 				{
+					if (instance->Diagnostics.Log)
+					{
+						instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Error, "VulkanDeviceCreation",
+							deviceResult.error().message() + "; native result=" + std::to_string(deviceResult.vk_result()));
+					}
+					if (deviceResult.vk_result() == VK_ERROR_DEVICE_LOST)
+					{
+						throw Rhi::DeviceLostError();
+					}
 					return nullptr;
 				}
 
 				auto deviceState = std::make_shared<VulkanDeviceState>();
 				deviceState->Instance = instance;
+				deviceState->DeviceFaultEnabled = faultEnabled;
+				deviceState->Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>(faultEnabled);
 				deviceState->Device = std::move(deviceResult).value();
 				deviceState->QueueFamilies = queueFamilies;
 				deviceState->QueueProperties = deviceState->Device.physical_device.get_queue_families();
@@ -93,7 +117,7 @@ namespace Swim::RhiVulkan
 				allocatorInfo.instance = deviceState->Instance->Instance.instance;
 				allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
 				allocatorInfo.pVulkanFunctions = &deviceState->AllocatorFunctions;
-				if (vmaCreateAllocator(&allocatorInfo, &deviceState->Allocator) != VK_SUCCESS)
+				if (CheckVulkanResult(*deviceState, vmaCreateAllocator(&allocatorInfo, &deviceState->Allocator), "vmaCreateAllocator") != VK_SUCCESS)
 				{
 					return nullptr;
 				}
@@ -139,6 +163,8 @@ namespace Swim::RhiVulkan
 				{
 					transferQueueMutex = std::make_shared<std::mutex>();
 				}
+
+				deviceState->QueueMutexes = { graphicsQueueMutex, computeQueueMutex, transferQueueMutex };
 
 				auto graphicsQueue = std::make_unique<VulkanQueue>(
 					deviceState, Rhi::QueueType::Graphics, graphicsQueueHandle, queueFamilies.Graphics, graphicsQueueMutex);

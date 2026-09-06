@@ -21,6 +21,7 @@ namespace Swim::RhiVulkan
 
 			~VulkanSemaphore() override
 			{
+				RetireLostVulkanDevice(*state);
 				if (semaphore != VK_NULL_HANDLE)
 				{
 					state->Dispatch.vkDestroySemaphore(state->Device.device, semaphore, nullptr);

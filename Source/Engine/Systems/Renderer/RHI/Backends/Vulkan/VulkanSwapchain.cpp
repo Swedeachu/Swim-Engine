@@ -11,10 +11,10 @@ namespace Swim::RhiVulkan
 
 	VulkanSwapchain::~VulkanSwapchain()
 	{
-		if (swapchain.swapchain != VK_NULL_HANDLE && state->PresentationQueue != VK_NULL_HANDLE)
+		if (swapchain.swapchain != VK_NULL_HANDLE && state->PresentationQueue != VK_NULL_HANDLE && !state->Diagnostics->IsLost())
 		{
 			std::scoped_lock lock(*state->PresentationQueueMutex);
-			state->Dispatch.vkQueueWaitIdle(state->PresentationQueue);
+			ObserveVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(state->PresentationQueue), "vkQueueWaitIdle (swapchain teardown)");
 		}
 		DestroySwapchain();
 		if (surface != VK_NULL_HANDLE)
@@ -59,6 +59,7 @@ namespace Swim::RhiVulkan
 
 	bool VulkanSwapchain::Rebuild(std::uint32_t width, std::uint32_t height, const Rhi::TimelinePoint* safeAfter)
 	{
+		RequireVulkanDevice(*state);
 		if (desc.Hdr)
 		{
 			return false;
@@ -71,10 +72,12 @@ namespace Swim::RhiVulkan
 		}
 		// The native surface can become zero-sized before SDL delivers its event.
 		VkSurfaceCapabilitiesKHR capabilities{};
-		if (state->Instance->Dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-			state->Device.physical_device.physical_device, surface, &capabilities) != VK_SUCCESS)
+		const auto capabilitiesResult = state->Instance->Dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+			state->Device.physical_device.physical_device, surface, &capabilities);
+		if (capabilitiesResult != VK_SUCCESS)
 		{
 			session.Invalidate();
+			CheckVulkanResult(*state, capabilitiesResult, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 			return false;
 		}
 		if (capabilities.currentExtent.width == 0 || capabilities.currentExtent.height == 0 ||
@@ -127,6 +130,7 @@ namespace Swim::RhiVulkan
 		DestroySwapchain();
 		if (!swapchainResult)
 		{
+			CheckVulkanResult(*state, swapchainResult.vk_result(), "vk-bootstrap swapchain build");
 			return false;
 		}
 
@@ -138,12 +142,14 @@ namespace Swim::RhiVulkan
 			if (!imagesResult)
 			{
 				DestroySwapchain();
+				CheckVulkanResult(*state, imagesResult.vk_result(), "vkGetSwapchainImagesKHR");
 				return false;
 			}
 			auto viewsResult = swapchain.get_image_views();
 			if (!viewsResult)
 			{
 				DestroySwapchain();
+				CheckVulkanResult(*state, viewsResult.vk_result(), "vk-bootstrap swapchain image views");
 				return false;
 			}
 			auto newImages = std::move(imagesResult).value();
@@ -186,6 +192,7 @@ namespace Swim::RhiVulkan
 
 	void VulkanSwapchain::DestroySwapchain()
 	{
+		RetireLostVulkanDevice(*state);
 		session.Invalidate();
 		extent = {};
 		format = Rhi::Format::Undefined;

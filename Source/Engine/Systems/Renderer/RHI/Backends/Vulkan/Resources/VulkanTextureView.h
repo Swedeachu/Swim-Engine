@@ -35,6 +35,7 @@ namespace Swim::RhiVulkan
 
 			~VulkanTextureView() override
 			{
+				RetireLostVulkanDevice(*state);
 				if (ownsView && view != VK_NULL_HANDLE)
 				{
 					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);

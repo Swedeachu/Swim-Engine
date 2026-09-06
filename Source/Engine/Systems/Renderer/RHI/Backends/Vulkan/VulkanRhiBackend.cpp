@@ -59,6 +59,7 @@ namespace Swim::RhiVulkan
 		instance->LoaderAcquired = true;
 		instance->Diagnostics.Log = log;
 		instance->Diagnostics.Echo = desc.EchoDiagnostics;
+		instance->RequestDeviceFaultDiagnostics = desc.DeviceFaultDiagnostics;
 
 		auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
 			Platform::Internal::GetVulkanInstanceProcAddress());

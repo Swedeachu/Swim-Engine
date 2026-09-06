@@ -247,3 +247,9 @@ Once the current goals listed above are completed, development will shift toward
 - MiniAudio integration for audio playback  
 - Multithreaded file I/O and asynchronous scene streaming  
 - Binary GPU buffer asset formats for optimized runtime loading
+
+### Vulkan device-loss reports
+
+Retain `Device::GetDeviceDiagnostics()` before starting GPU work. A Vulkan device-loss result raises `Rhi::DeviceLostError` from fallible work and preserves the first operation, native result and optional fault details in the retained snapshot. Stop/join GPU workers before releasing frames, resources and the device. Lost-device teardown makes one serialized idle attempt and retains its outcome; it does not automatically recreate the device.
+
+`GraphicsSystemDesc::DeviceFaultDiagnostics` optionally enables supported `VK_EXT_device_fault` textual/address reports, with bounded data and no vendor binary dumps. Missing support is allowed. See the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) for the caller contract, validation evidence and remaining desktop checks.

@@ -33,6 +33,7 @@ namespace Swim::RhiVulkan
 
 			~VulkanTexture() override
 			{
+				RetireLostVulkanDevice(*state);
 				if (image != VK_NULL_HANDLE && allocation != nullptr)
 				{
 					vmaDestroyImage(state->Allocator, image, allocation);

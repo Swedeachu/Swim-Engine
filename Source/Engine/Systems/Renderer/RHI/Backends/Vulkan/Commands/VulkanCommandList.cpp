@@ -5,6 +5,7 @@ namespace Swim::RhiVulkan
 
 	VulkanCommandList::~VulkanCommandList()
 	{
+		RetireLostVulkanDevice(*poolState->DeviceState);
 		if (commandBuffer != VK_NULL_HANDLE)
 		{
 			poolState->DeviceState->Dispatch.vkFreeCommandBuffers(
@@ -19,6 +20,7 @@ namespace Swim::RhiVulkan
 
 	void VulkanCommandList::RequireRecording(bool outsideRendering) const
 	{
+		RequireVulkanDevice(*GetState());
 		if (!recording || generation != poolState->Generation || (outsideRendering && rendering))
 		{
 			throw std::logic_error("Vulkan command requires recording in the appropriate rendering scope");
@@ -35,6 +37,7 @@ namespace Swim::RhiVulkan
 
 	void VulkanCommandList::Begin()
 	{
+		RequireVulkanDevice(*GetState());
 		if (generation == poolState->Generation)
 		{
 			throw std::logic_error("Vulkan one-time command list requires a pool reset before recording again");
@@ -43,7 +46,7 @@ namespace Swim::RhiVulkan
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-		if (poolState->DeviceState->Dispatch.vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+		if (CheckVulkanResult(*poolState->DeviceState, poolState->DeviceState->Dispatch.vkBeginCommandBuffer(commandBuffer, &beginInfo), "vkBeginCommandBuffer") != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to begin Vulkan command buffer");
 		}
@@ -68,7 +71,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::logic_error("Close all RHI debug label regions before ending a command list");
 		}
-		if (poolState->DeviceState->Dispatch.vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+		if (CheckVulkanResult(*poolState->DeviceState, poolState->DeviceState->Dispatch.vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer") != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to end Vulkan command buffer");
 		}

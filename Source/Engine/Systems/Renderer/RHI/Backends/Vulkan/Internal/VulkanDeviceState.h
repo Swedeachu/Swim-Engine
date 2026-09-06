@@ -12,6 +12,9 @@
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceLoss.h"
+
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -39,6 +42,7 @@ namespace Swim::RhiVulkan
 		vkb::Instance Instance{};
 		volk::VolkInstanceTable Dispatch{};
 		bool LoaderAcquired = false;
+		bool RequestDeviceFaultDiagnostics = true;
 
 		~VulkanInstanceState()
 		{
@@ -56,6 +60,11 @@ namespace Swim::RhiVulkan
 	struct VulkanDeviceState
 	{
 		std::shared_ptr<VulkanInstanceState> Instance;
+		std::shared_ptr<Rhi::DeviceDiagnostics> Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>();
+		bool DeviceFaultEnabled = false;
+		std::array<std::shared_ptr<std::mutex>, 3> QueueMutexes{};
+		mutable std::mutex RetirementMutex;
+		mutable bool LossRetirementAttempted = false;
 		vkb::Device Device{};
 		volk::VolkDeviceTable Dispatch{};
 		QueueFamilySelection QueueFamilies{};
@@ -68,6 +77,7 @@ namespace Swim::RhiVulkan
 
 		~VulkanDeviceState()
 		{
+			RetireLostVulkanDevice(*this);
 			if (Allocator != nullptr)
 			{
 				vmaDestroyAllocator(Allocator);

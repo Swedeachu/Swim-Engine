@@ -19,6 +19,10 @@ namespace Swim::RhiVulkan
 	std::unique_ptr<VulkanPipelineLayout> VulkanPipelineLayout::Create(
 		std::shared_ptr<VulkanDeviceState> state, const Rhi::PipelineLayoutDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
 		if (program == nullptr || program->GetState() != state ||
 			!program->GetInterface().PushConstants.empty())
@@ -35,9 +39,11 @@ namespace Swim::RhiVulkan
 		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		info.setLayoutCount = static_cast<std::uint32_t>(result->layoutState->Sets.size());
 		info.pSetLayouts = result->layoutState->Sets.data();
-		if (result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layoutState->Layout) != VK_SUCCESS)
+		const auto createResult = result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layoutState->Layout);
+		if (createResult != VK_SUCCESS)
 		{
 			result->layoutState->Layout = VK_NULL_HANDLE;
+			CheckVulkanResult(*result->state, createResult, "vkCreatePipelineLayout");
 			return nullptr;
 		}
 		SetVulkanObjectName(*result->state, VK_OBJECT_TYPE_PIPELINE_LAYOUT, ToNativeHandle(result->layoutState->Layout), desc.DebugName);

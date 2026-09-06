@@ -14,6 +14,7 @@ namespace Swim::RhiVulkan
 
 	VulkanShaderProgram::~VulkanShaderProgram()
 	{
+		RetireLostVulkanDevice(*state);
 		for (const auto& stage : stages)
 		{
 			if (stage.Module != VK_NULL_HANDLE)
@@ -26,6 +27,10 @@ namespace Swim::RhiVulkan
 	std::unique_ptr<VulkanShaderProgram> VulkanShaderProgram::Create(
 		std::shared_ptr<VulkanDeviceState> state, const Rhi::ShaderProgramDesc& desc)
 	{
+		if (state)
+		{
+			RequireVulkanDevice(*state);
+		}
 		if (desc.Stages.empty() || desc.Stages.size() > 2)
 		{
 			return nullptr;
@@ -61,9 +66,11 @@ namespace Swim::RhiVulkan
 			info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 			info.codeSize = source.Bytecode.size();
 			info.pCode = words.data();
-			if (program->state->Dispatch.vkCreateShaderModule(program->state->Device.device, &info, nullptr, &stage.Module) != VK_SUCCESS)
+			const auto createResult = program->state->Dispatch.vkCreateShaderModule(program->state->Device.device, &info, nullptr, &stage.Module);
+			if (createResult != VK_SUCCESS)
 			{
 				stage.Module = VK_NULL_HANDLE;
+				CheckVulkanResult(*program->state, createResult, "vkCreateShaderModule");
 				return nullptr;
 			}
 			SetVulkanObjectName(*program->state, VK_OBJECT_TYPE_SHADER_MODULE, ToNativeHandle(stage.Module), desc.DebugName);
