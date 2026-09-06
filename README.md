@@ -253,3 +253,9 @@ Once the current goals listed above are completed, development will shift toward
 Retain `Device::GetDeviceDiagnostics()` before starting GPU work. A Vulkan device-loss result raises `Rhi::DeviceLostError` from fallible work and preserves the first operation, native result and optional fault details in the retained snapshot. Stop/join GPU workers before releasing frames, resources and the device. Lost-device teardown makes one serialized idle attempt and retains its outcome; it does not automatically recreate the device.
 
 `GraphicsSystemDesc::DeviceFaultDiagnostics` optionally enables supported `VK_EXT_device_fault` textual/address reports, with bounded data and no vendor binary dumps. Missing support is allowed. See the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) for the caller contract, validation evidence and remaining desktop checks.
+
+### Vulkan memory telemetry
+
+`Device::GetMemoryBudgetSnapshot()` returns owned per-heap allocator counters and memory-budget estimates without a GPU wait. Check `IsAvailable()` and each heap's `Source`: driver estimates describe process usage/budget; allocator fallback uses reserved block bytes and an 80%-of-capacity heuristic. `GetHeadroomBytes()` saturates at zero when usage exceeds budget. Host-visible and device-local heaps can overlap on UMA hardware.
+
+The opt-in `RHI.Vulkan.Smoke.MemoryBudgetAllocationAndRelease` case checks real buffer/texture allocation and release with required validation. The [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) documents counter semantics, sampling limits and the remaining desktop validation gate.

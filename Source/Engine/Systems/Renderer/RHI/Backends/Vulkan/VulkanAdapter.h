@@ -108,7 +108,8 @@ namespace Swim::RhiVulkan
 
 				VmaAllocatorCreateInfo allocatorInfo{};
 				allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-				if (info.Capabilities.MemoryBudget)
+				deviceState->MemoryBudgetEnabled = info.Capabilities.MemoryBudget;
+				if (deviceState->MemoryBudgetEnabled)
 				{
 					allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 				}

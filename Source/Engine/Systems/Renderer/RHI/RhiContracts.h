@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/RHI/RhiDeviceDiagnostics.h"
+#include "Engine/Systems/Renderer/RHI/RhiMemoryBudget.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
 
@@ -544,6 +545,12 @@ namespace Swim::Rhi
 		// Retain this report across teardown. Device loss throws DeviceLostError
 		// from fallible work; noexcept naming/destruction only records the loss.
 		virtual std::shared_ptr<DeviceDiagnostics> GetDeviceDiagnostics() const
+		{
+			return {};
+		}
+		// On-demand telemetry, without a GPU wait. Unsupported backends return an
+		// empty snapshot. A known device loss raises DeviceLostError.
+		virtual MemoryBudgetSnapshot GetMemoryBudgetSnapshot() const
 		{
 			return {};
 		}

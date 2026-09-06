@@ -1,3 +1,4 @@
+#include "Engine/Systems/Renderer/RHI/RhiMemoryBudget.h"
 #include "Engine/Systems/Renderer/RHI/RhiDeviceDiagnostics.h"
 #include "Engine/Systems/Renderer/RHI/RhiTimestamps.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"

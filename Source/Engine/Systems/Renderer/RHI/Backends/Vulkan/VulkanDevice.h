@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandPool.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandPoolState.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceState.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanMemoryBudget.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
@@ -64,6 +65,11 @@ namespace Swim::RhiVulkan
 			std::shared_ptr<Rhi::DeviceDiagnostics> GetDeviceDiagnostics() const override
 			{
 				return state->Diagnostics;
+			}
+
+			Rhi::MemoryBudgetSnapshot GetMemoryBudgetSnapshot() const override
+			{
+				return QueryVulkanMemoryBudget(*state);
 			}
 
 			Rhi::Queue& GetQueue(Rhi::QueueType type) override

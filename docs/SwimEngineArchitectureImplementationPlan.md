@@ -2518,7 +2518,7 @@ Prefer Vulkan 1.3 baseline on supported desktop hardware:
 - [x] buffer device address where beneficial;
 - [ ] pipeline cache;
 - [x] debug utils; *(optional instance extension, captured messages, object names and command labels; see diagnostics checkpoint)*
-- [ ] memory-budget telemetry.
+- [x] memory-budget telemetry. *(owned per-heap driver estimates and allocator fallback; native desktop validation remains pending)*
 
 Optional/capability-gated:
 
@@ -2538,7 +2538,7 @@ Create:
 - [ ] persistent mapped upload arenas/rings;
 - [ ] readback arenas;
 - [ ] transient frame buffers via render graph;
-- [ ] memory-budget reporting; *(the capability/extension is wired into VMA, but allocator budget telemetry is not yet surfaced through a renderer-facing API)*
+- [x] memory-budget reporting; *(renderer-facing per-heap snapshots expose VMA counters, fresh driver estimates, explicit fallback and safe headroom)*
 - [x] allocation debug names/tags. *(RHI resource debug names are copied into owned storage and assigned to VMA allocations.)*
 
 ### Frame synchronization
@@ -2799,9 +2799,35 @@ This completes the next Phase 9 diagnostics implementation after GPU timestamps.
 
 **Validation:** GCC 13/C++20 Debug foundation build: **159 cases / 1,289 checks passed**, including the 16 new cases above. All nine public-header/backend-contract targets compile, and `scripts/verify-build-layout.py` passes. All five strict opt-in GPU smokes were attempted and fail at SDL initialization (`No available video device`), before Vulkan instance creation; zero native message totals are not clean-validation evidence. The foundation configuration uses the pinned dependency cache, shader compiler enabled, asset compiler disabled, Jolt disabled and legacy engine disabled. Concrete physics backends, the legacy Windows executable, Windows/MSVC, actual GPU fault capture and desktop execution remain unverified. Reconfigure before building so configure-time source globbing includes the new units and tests.
 
-**Next guide task:** memory-budget telemetry remains open in Phase 9. Desktop validation of item 39 is still required before beginning RenderGraph. This checkpoint retires no legacy files. Preserve top-level `Deprecated/`, the consolidated engine targets and normal build/test scripts; add no module subprojects, cleanup/migration scripts, deprecation ledgers or CMake tombstones. Delivery is the complete clean repository ZIP, excluding generated builds and downloaded dependencies.
+**Following checkpoint:** memory-budget telemetry is implemented below. Desktop validation of item 39 is still required before beginning RenderGraph. This checkpoint retires no legacy files. Preserve top-level `Deprecated/`, the consolidated engine targets and normal build/test scripts; add no module subprojects, cleanup/migration scripts, deprecation ledgers or CMake tombstones. Delivery is the complete clean repository ZIP, excluding generated builds and downloaded dependencies.
 
 Implementation references: [device-loss lifetime rules](https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#devsandqueues-lost-device), [optional device-fault extension](https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_device_fault.html), and [fault query counts, data and completion rules](https://docs.vulkan.org/refpages/latest/refpages/source/vkGetDeviceFaultInfoEXT.html).
+
+### RHI memory-budget telemetry checkpoint — 2026-09-06
+
+This completes the next Phase 9 diagnostics task from `Swim-Engine(5).zip`, preserving the current device-loss implementation and consolidated engine build.
+
+- [x] Expose backend-neutral `Device::GetMemoryBudgetSnapshot()` and owned per-heap `MemoryHeapBudget` values. Include stable heap index, capacity, device-local/host-visible classification, VMA allocation and native block counts/bytes, usage/budget provenance and saturating headroom. Empty snapshots mean unavailable; an available zero-use allocator still reports its heaps.
+- [x] Keep implementation in `Internal/VulkanMemoryBudget.h/.cpp`. Read immutable heap/type metadata and cheap allocator counters from VMA; query current `VK_EXT_memory_budget` estimates explicitly on demand. Driver values therefore refresh even while allocations and frames are idle. Do not add GPU waits, frame-control callbacks, worker jobs, global logs or hidden periodic polling.
+- [x] Track the enabled memory-budget extension in device state alongside the flag actually passed to VMA. The advertised `Capabilities.MemoryBudget` describes driver-estimate support; allocator telemetry works without the extension. The extension remains optional.
+- [x] Report provenance per heap. Valid driver budgets retain native usage verbatim, including usage exceeding budget and zero usage. Missing support/dispatch or invalid native budgets (zero or greater than heap capacity) use allocator block bytes and VMA's 80%-of-capacity heuristic. Compute that fallback without overflowing a 64-bit heap size. Never label VMA's cached or internally substituted values as fresh driver evidence.
+- [x] Query once per caller request; the VMA counter read can additionally refresh VMA's internal budget cache according to its own policy. Avoid `vmaCalculateStatistics` and full allocator traversal. Sampling does not mutate the application's frame index, implement allocation admission/eviction policy or promise allocation success.
+- [x] Preserve device-loss behavior: reject a previously lost device before allocator/native queries and recheck health after sampling. A concurrent observed loss cannot become an apparently healthy telemetry response. Snapshots already returned remain readable after resource/device teardown without keeping any native owners alive.
+- [x] Add nine deterministic tests, including real VMA allocation/free over captured native calls, suballocations versus reserved blocks, driver refresh while idle, unavailable/unsupported cases, per-heap fallback, shared host-visible/device-local heaps, owned snapshots, loss during sampling, bounds and 64-bit arithmetic.
+- [x] Add opt-in `RHI.Vulkan.Smoke.MemoryBudgetAllocationAndRelease`. Allocate two real buffers and a texture through the public device factories across four cycles; verify live allocation count/byte growth and return to baseline after release, print per-heap reports and require a clean validation snapshot after all native owners are destroyed. Retained empty blocks and changing/lagging driver estimates are deliberately allowed.
+- [ ] Run all six strict GPU smokes on Windows/Linux desktops and retain actual adapter/driver, memory, timestamp and post-teardown validation results. Dispatch capture and CPU-side VMA counters do not establish native GPU/driver behavior.
+
+**Usage:** call `device.GetMemoryBudgetSnapshot()` when a renderer overlay or memory-pressure decision needs updated telemetry. Check `IsAvailable()`, inspect each heap's `Source`, and use `GetHeadroomBytes()` or `IsOverBudget()` without unsigned underflow. Snapshots own their values; retain one for comparison after freeing resources or destroying the device. Sampling can allocate host memory and can raise `DeviceLostError` when loss has been observed.
+
+`AllocationBytes` is the total occupied VMA allocation size, which can include resource alignment requirements; `BlockBytes` is native memory reserved by this allocator, including space not occupied by allocations. Neither includes every allocation in the process. Driver `UsageBytes` and `BudgetBytes` are estimates for the process, not whole-system free/used VRAM or an allocation guarantee. A fallback budget is only a heuristic, and fallback usage excludes allocations outside this VMA allocator. Driver usage can exceed budget; preserve that information instead of clamping it. Do not infer fragmentation from the difference between block and allocation bytes.
+
+Heaps are returned once each. `HostVisible` means at least one memory type in that heap is host visible, not that every resource there can be mapped. UMA and host-visible device-local heaps may have both flags; do not add those categories together as separate physical capacities. Concurrent allocation/free activity can change individual counters during sampling: these are telemetry samples, not transactionally consistent allocation inventories. Stop allocation activity if exact cross-counter comparisons are required. VMA's own allocation-policy budget cache continues to follow VMA's existing update rules; this checkpoint adds reporting, not frame-driven allocator policy.
+
+**Validation:** GCC 13/C++20 Debug foundation build: **168 cases / 1,465 checks passed**, including nine new deterministic memory-budget cases. All nine public-header/backend-contract targets compile, and `scripts/verify-build-layout.py` passes. The six strict opt-in GPU smokes were attempted and all fail at SDL initialization (`No available video device`), before Vulkan instance creation; their zero native diagnostic totals are not validation-clean evidence. Configuration enables the shader compiler and uses the pinned dependency cache, with asset compiler, Jolt and legacy engine disabled. Windows/MSVC, concrete physics backends and actual native GPU allocation/budget behavior remain unverified. Reconfigure before building to discover the added implementation and test sources.
+
+**Next guide task:** pipeline-cache support remains the next open Phase 9 bootstrap feature. Persistent upload/readback arenas, HDR, GPU-assisted validation and RenderGraph remain separate work. Critical-path item **39** still requires desktop validation before item **40** begins. No legacy sources are retired by telemetry; preserve `Deprecated/` and add no cleanup/migration scripts, CMake tombstones, deprecation ledgers or engine module subprojects. Deliver the complete clean repository ZIP with source/docs/scripts only, excluding build outputs and downloaded dependencies.
+
+Implementation references: [VMA statistics and block/allocation semantics](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/statistics.html), [Vulkan per-process budgets and validity rules](https://docs.vulkan.org/refpages/latest/refpages/source/VkPhysicalDeviceMemoryBudgetPropertiesEXT.html). The implementation and deterministic tests use the repository's pinned VMA `v3.4.0`.
 
 ### Phase 9 exit criteria
 
@@ -4010,7 +4036,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 36. [x] Create Vulkan surface from Platform window through SDL3 WSI.
 37. [x] Add VMA buffer/image allocation.
 38. [x] Add timeline/frame-context/deferred-destruction model.
-39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Required validation capture, native names/labels, adapter reports and strict post-teardown smoke checks are implemented. GPU timestamp pools, queue precision, reset/write/readback and strict reuse smoke are implemented. Device-loss reports, optional bounded fault capture and lost-device retirement are implemented. Real Windows/Linux GPU execution remains open. See the September 2026 Phase 9 checkpoints.)*
+39. [ ] Validation-clean RHI clear/triangle/texture on Windows and Linux. *(Clear/transfer and Slang procedural/indexed triangle pipelines plus opt-in pixel/presentation smoke are implemented. Reflected fixed-count descriptors, samplers and sampled 2D texture drawing are implemented. Resize/minimize/restore handling, cancellation, and opt-in lifecycle smoke are implemented. Required validation capture, native names/labels, adapter reports and strict post-teardown smoke checks are implemented. GPU timestamp pools, queue precision, reset/write/readback and strict reuse smoke are implemented. Device-loss reports, optional bounded fault capture and lost-device retirement are implemented. Memory-budget snapshots, allocator counters and strict allocation/release smoke are implemented. Real Windows/Linux GPU execution remains open. See the September 2026 Phase 9 checkpoints.)*
 
 ### 35.4 Modern renderer foundation
 

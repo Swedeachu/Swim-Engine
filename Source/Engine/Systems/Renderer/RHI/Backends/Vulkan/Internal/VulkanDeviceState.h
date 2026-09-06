@@ -62,6 +62,7 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<VulkanInstanceState> Instance;
 		std::shared_ptr<Rhi::DeviceDiagnostics> Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>();
 		bool DeviceFaultEnabled = false;
+		bool MemoryBudgetEnabled = false;
 		std::array<std::shared_ptr<std::mutex>, 3> QueueMutexes{};
 		mutable std::mutex RetirementMutex;
 		mutable bool LossRetirementAttempted = false;

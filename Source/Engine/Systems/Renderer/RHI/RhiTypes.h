@@ -511,7 +511,7 @@ namespace Swim::Rhi
 		bool RayQuery = false;
 		bool RayTracingPipeline = false;
 		bool SparseResidency = false;
-		bool MemoryBudget = false;
+		bool MemoryBudget = false; // Driver estimates; allocator telemetry does not require this extension.
 		bool BcTextureCompression = false;
 		bool Etc2TextureCompression = false;
 		bool AstcTextureCompression = false;
