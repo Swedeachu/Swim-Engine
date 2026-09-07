@@ -98,12 +98,36 @@ namespace Swim::Rhi
 		Required // Creation fails unless validation and diagnostic capture are active.
 	};
 
+	struct ValidationChecks
+	{
+		bool Synchronization = false;
+		bool GpuAssisted = false;
+
+		bool Any() const
+		{
+			return Synchronization || GpuAssisted;
+		}
+
+		bool operator==(const ValidationChecks&) const = default;
+	};
+
+	struct ValidationConfiguration
+	{
+		bool Enabled = false;
+		// Configuration submitted by the backend, not proof of instrumentation.
+		// External layer settings can override it; inspect diagnostics as well.
+		ValidationChecks Checks{};
+	};
+
 	struct GraphicsSystemDesc
 	{
 		ValidationMode Validation = ValidationMode::Default;
 		std::shared_ptr<DiagnosticLog> Diagnostics;
 		bool EchoDiagnostics = true;
 		bool DeviceFaultDiagnostics = true; // Optional native details, never a device requirement.
+		// Explicit checks require validation/capture and backend support, including
+		// in Release and IfAvailable mode. Disabled plus any check is invalid.
+		ValidationChecks Checks{};
 	};
 
 } // namespace Swim::Rhi

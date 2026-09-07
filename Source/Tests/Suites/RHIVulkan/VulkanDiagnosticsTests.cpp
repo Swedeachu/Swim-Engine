@@ -71,17 +71,17 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "RequiredValidationNeverFallsBackToUnvalidat
 	{
 		for (bool debugUtils : { false, true })
 		{
-			const auto policy = RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Required, false, layers, debugUtils);
+			const auto policy = RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Required, false, { layers, debugUtils });
 			SWIM_CHECK_EQUAL(policy.Valid, layers && debugUtils);
 			SWIM_CHECK_EQUAL(policy.Validation, layers && debugUtils);
 		}
 	}
-	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, true, true, true).Validation);
-	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, false, true, true).Validation);
-	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Disabled, true, true, true).Validation);
-	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Disabled, true, true, true).DebugUtils);
-	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::IfAvailable, false, false, false).Valid);
-	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(static_cast<ValidationMode>(255), true, true, true).Valid);
+	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, true, { true, true }).Validation);
+	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, false, { true, true }).Validation);
+	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Disabled, true, { true, true }).Validation);
+	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Disabled, true, { true, true }).DebugUtils);
+	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::IfAvailable, false, {}).Valid);
+	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(static_cast<ValidationMode>(255), true, { true, true }).Valid);
 }
 
 SWIM_TEST("RHI.Vulkan.Diagnostics", "CallbackCopiesDriverMemoryAndSurvivesOwnerTeardown")

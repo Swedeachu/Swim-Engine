@@ -36,7 +36,7 @@ namespace
 		SWIM_REQUIRE(window);
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "Triangle smoke requires the full Swim Vulkan 1.3 baseline");
-		SWIM_REQUIRE_MESSAGE(graphics->IsValidationEnabled(), "Smoke requires active Vulkan validation");
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const std::array<Rhi::ShaderStageArtifact, 2> stages{{

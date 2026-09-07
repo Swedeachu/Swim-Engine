@@ -28,7 +28,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(window, "RHI smoke could not create a Vulkan window");
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "RHI smoke requires an adapter supporting the full Swim Vulkan 1.3 baseline");
-		SWIM_REQUIRE_MESSAGE(graphics->IsValidationEnabled(), "Smoke requires active Vulkan validation");
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 

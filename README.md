@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to clear/transfer/presentation, triangle pixel/indexed parity, reflected texture readback, resize/minimize/restore, and GPU timestamp readback/reuse tests:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the ten native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches and upload/readback arenas:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -166,6 +166,24 @@ SWIM_RUN_RHI_SMOKE=1 ./build/linux-debug/SwimTests --filter=RHI.Vulkan.Smoke
 ```
 
 The lifecycle test needs a window manager that supports minimize/restore. The timestamp test requires at least one timestamp-capable graphics/compute family, exercises eight reset/write/readback cycles on each supported queue role, and reports unsupported roles. Dedicated transfer-only families currently cannot provide the GPU query-reset lifecycle. Missing video/GPU support fails the opted-in cases; default tests include dispatch-capture and frame-lifecycle coverage without a GPU. Each smoke explicitly requires active validation and fails on captured warnings, errors, or dropped diagnostics, including resource/device/instance teardown. Its report includes adapter and driver information. Debug regions and native object names are available to GPU tools when debug utils is supported. Cross-platform desktop evidence remains open in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md).
+
+To request synchronization or GPU-assisted checks, use the existing smoke runner with a validation profile:
+
+```powershell
+$env:SWIM_RUN_RHI_SMOKE = "1"
+$env:SWIM_RHI_VALIDATION = "sync" # core, sync, gpu, or all
+.\build\windows-debug\SwimTests.exe --filter=RHI.Vulkan.Smoke
+Remove-Item Env:SWIM_RHI_VALIDATION
+Remove-Item Env:SWIM_RUN_RHI_SMOKE
+```
+
+```bash
+SWIM_RUN_RHI_SMOKE=1 SWIM_RHI_VALIDATION=sync ./build/linux-debug/SwimTests --filter=RHI.Vulkan.Smoke
+```
+
+`core` is the default. `sync` enables synchronization and submit-time checks; `gpu` enables GPU-assisted validation; `all` requests both. Core validation remains enabled in every smoke profile. Explicit checks require `VK_EXT_layer_settings` and a Khronos validation layer reporting API 1.4.335 or newer. GPU-assisted selection also requires vertex/fragment shader stores and atomics; normal core runs retain the existing device requirements. Missing support or an invalid profile fails the opted-in run. Run separate profiles first; instrumentation can significantly increase execution time.
+
+Runtime callers set `GraphicsSystemDesc::Checks.Synchronization` and/or `GpuAssisted`. Explicit checks require validation/capture even with Default or IfAvailable mode; combining them with Disabled is invalid. `GetValidationConfiguration()` reports the backend's submitted configuration. External Vulkan Configurator/environment/file settings can override it, so keep acceptance runs free of conflicting overrides and inspect the diagnostics through teardown. The [architecture plan](docs/SwimEngineArchitectureImplementationPlan.md) records the remaining native validation gate. `SWIM_REQUIRE_HDR_SMOKE=1` separately requires HDR support in the HDR lifecycle test.
 
 ### Development asset cooking
 

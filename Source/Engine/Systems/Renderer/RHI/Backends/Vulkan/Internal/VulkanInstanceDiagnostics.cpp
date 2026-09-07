@@ -3,35 +3,12 @@
 namespace Swim::RhiVulkan
 {
 
-	VulkanDiagnosticsPolicy SelectDiagnosticsPolicy(Rhi::ValidationMode mode,
-		bool debugDefault, bool layersAvailable, bool debugUtilsAvailable)
-	{
-		bool requested = false;
-		switch (mode)
-		{
-		case Rhi::ValidationMode::Default:
-			requested = debugDefault;
-			break;
-		case Rhi::ValidationMode::Disabled:
-			break;
-		case Rhi::ValidationMode::IfAvailable:
-		case Rhi::ValidationMode::Required:
-			requested = true;
-			break;
-		default:
-			return {};
-		}
-		const bool available = layersAvailable && debugUtilsAvailable;
-		return { mode != Rhi::ValidationMode::Required || available, requested && available, debugUtilsAvailable };
-	}
-
 	bool ConfigureInstanceDiagnostics(vkb::InstanceBuilder& builder, VulkanDiagnosticsState& state,
-		Rhi::ValidationMode mode, PFN_vkGetInstanceProcAddr getInstanceProcAddr)
+		const Rhi::GraphicsSystemDesc& desc, PFN_vkGetInstanceProcAddr getInstanceProcAddr)
 	{
-		auto system = vkb::SystemInfo::get_system_info(getInstanceProcAddr);
-		if (!system)
+		const auto capabilities = QueryValidationCapabilities(getInstanceProcAddr, *state.Log);
+		if (!capabilities)
 		{
-			state.Log->Record(Rhi::DiagnosticSeverity::Error, "InstanceDiagnostics", "Failed to enumerate Vulkan instance capabilities");
 			return false;
 		}
 #if defined(SWIM_VULKAN_VALIDATION)
@@ -39,20 +16,28 @@ namespace Swim::RhiVulkan
 #else
 		constexpr bool debugDefault = false;
 #endif
-		const auto policy = SelectDiagnosticsPolicy(mode, debugDefault,
-			system->validation_layers_available, system->debug_utils_available);
+		const auto policy = SelectDiagnosticsPolicy(desc.Validation, debugDefault, *capabilities, desc.Checks);
 		if (!policy.Valid)
 		{
-			state.Log->Record(Rhi::DiagnosticSeverity::Error, "ValidationRequired",
-				"Required Vulkan validation needs VK_LAYER_KHRONOS_validation and VK_EXT_debug_utils (or validation mode is invalid)");
+			state.Log->Record(Rhi::DiagnosticSeverity::Error, "ValidationRequired", policy.Failure);
 			return false;
 		}
 		state.ValidationEnabled = policy.Validation;
 		state.DebugUtilsEnabled = policy.DebugUtils;
+		state.Checks = policy.Checks;
 		if (policy.Validation)
 		{
 			// Required after capability selection: never silently degrade if setup fails.
 			builder.enable_validation_layers(true);
+		}
+		if (policy.Checks.Any())
+		{
+			// vk-bootstrap adds VK_EXT_layer_settings and the create-info chain.
+			// Values have static lifetime; no pointers into this stack escape.
+			for (const auto& setting : GetVulkanValidationSettings(policy.Checks))
+			{
+				builder.add_layer_setting(setting);
+			}
 		}
 		if (policy.DebugUtils)
 		{
@@ -63,7 +48,13 @@ namespace Swim::RhiVulkan
 				.set_debug_messenger_type(VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
 					VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT);
 		}
-		state.Log->Record(Rhi::DiagnosticSeverity::Info, "Validation", policy.Validation ? "Vulkan validation enabled" : "Vulkan validation disabled");
+		state.Log->Record(Rhi::DiagnosticSeverity::Info, "Validation",
+			std::string(policy.Validation ? "Vulkan validation configured" : "Vulkan validation disabled") +
+			"; synchronization=" + (policy.Checks.Synchronization ? "on" : "off") +
+			"; gpu-assisted=" + (policy.Checks.GpuAssisted ? "on" : "off") +
+			"; layer API=" + std::to_string(VK_API_VERSION_MAJOR(capabilities->LayerVersion)) + "." +
+			std::to_string(VK_API_VERSION_MINOR(capabilities->LayerVersion)) + "." +
+			std::to_string(VK_API_VERSION_PATCH(capabilities->LayerVersion)));
 		return true;
 	}
 

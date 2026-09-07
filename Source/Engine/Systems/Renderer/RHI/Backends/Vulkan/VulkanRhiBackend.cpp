@@ -90,7 +90,7 @@ namespace Swim::RhiVulkan
 			instanceBuilder.enable_extension(extension);
 		}
 
-		if (!ConfigureInstanceDiagnostics(instanceBuilder, instance->Diagnostics, desc.Validation, getInstanceProcAddr))
+		if (!ConfigureInstanceDiagnostics(instanceBuilder, instance->Diagnostics, desc, getInstanceProcAddr))
 		{
 			return nullptr;
 		}
@@ -127,6 +127,7 @@ namespace Swim::RhiVulkan
 			.require_present(false)
 			.set_minimum_version(1, 3)
 			.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+			.set_required_features(GetValidationDeviceFeatures(instance->Diagnostics.Checks))
 			.set_required_features_12(GetRequiredVulkan12Features())
 			.set_required_features_13(GetRequiredVulkan13Features())
 			.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)

@@ -19,7 +19,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Timestamp smoke requires a working SDL desktop video driver");
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "Timestamp smoke requires the full Swim Vulkan baseline and validation");
-		SWIM_REQUIRE(graphics->IsValidationEnabled());
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		unsigned testedQueues = 0;

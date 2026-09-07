@@ -43,7 +43,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Memory budget smoke requires a working SDL desktop video driver");
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "Memory budget smoke requires the Swim Vulkan baseline and validation");
-		SWIM_REQUIRE(graphics->IsValidationEnabled());
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		const bool driverSupported = device->GetAdapterInfo().Capabilities.MemoryBudget;

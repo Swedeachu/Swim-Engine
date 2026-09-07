@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanValidationSettings.h"
 
 #include <volk.h>
 #include <VkBootstrap.h>
@@ -16,19 +16,11 @@ namespace Swim::RhiVulkan
 		bool Echo = true;
 		bool ValidationEnabled = false;
 		bool DebugUtilsEnabled = false;
+		Rhi::ValidationChecks Checks{};
 	};
 
-	struct VulkanDiagnosticsPolicy
-	{
-		bool Valid = false;
-		bool Validation = false;
-		bool DebugUtils = false;
-	};
-
-	VulkanDiagnosticsPolicy SelectDiagnosticsPolicy(Rhi::ValidationMode mode,
-		bool debugDefault, bool layersAvailable, bool debugUtilsAvailable);
 	bool ConfigureInstanceDiagnostics(vkb::InstanceBuilder& builder, VulkanDiagnosticsState& state,
-		Rhi::ValidationMode mode, PFN_vkGetInstanceProcAddr getInstanceProcAddr);
+		const Rhi::GraphicsSystemDesc& desc, PFN_vkGetInstanceProcAddr getInstanceProcAddr);
 	VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDiagnosticCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 		VkDebugUtilsMessageTypeFlagsEXT type, const VkDebugUtilsMessengerCallbackDataEXT* data, void* userData) noexcept;
 	void SetVulkanObjectName(const VulkanDeviceState& state, VkObjectType type,

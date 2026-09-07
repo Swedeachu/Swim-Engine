@@ -645,6 +645,10 @@ namespace Swim::Rhi
 		{
 			return false;
 		}
+		virtual ValidationConfiguration GetValidationConfiguration() const
+		{
+			return { IsValidationEnabled(), {} };
+		}
 		virtual std::shared_ptr<DiagnosticLog> GetDiagnostics() const
 		{
 			return {};

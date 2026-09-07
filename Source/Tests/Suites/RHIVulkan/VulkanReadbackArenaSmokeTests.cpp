@@ -18,7 +18,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Readback arena smoke requires a working SDL desktop video driver");
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE(graphics);
-		SWIM_REQUIRE(graphics->IsValidationEnabled());
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		std::array<std::unique_ptr<Rhi::ReadbackArena>, 2> arenas;

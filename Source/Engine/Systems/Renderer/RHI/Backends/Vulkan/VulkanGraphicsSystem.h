@@ -26,6 +26,11 @@ namespace Swim::RhiVulkan
 				return instance->Diagnostics.ValidationEnabled;
 			}
 
+			Rhi::ValidationConfiguration GetValidationConfiguration() const override
+			{
+				return { instance->Diagnostics.ValidationEnabled, instance->Diagnostics.Checks };
+			}
+
 			std::shared_ptr<Rhi::DiagnosticLog> GetDiagnostics() const override
 			{
 				return instance->Diagnostics.Log;

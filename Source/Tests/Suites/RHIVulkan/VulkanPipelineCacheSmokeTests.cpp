@@ -48,7 +48,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Pipeline cache smoke requires a working SDL desktop video driver");
 		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
 		SWIM_REQUIRE_MESSAGE(graphics, "Pipeline cache smoke requires the full Swim Vulkan baseline and validation");
-		SWIM_REQUIRE(graphics->IsValidationEnabled());
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
 		const auto bytecode = platform.GetFileSystem().ReadFileBlocking(SWIM_RHI_TRIANGLE_SPIRV_PATH);
 		Testing::TemporaryPipelineCacheFile file;
 		Rhi::PipelineCacheData coldData;
