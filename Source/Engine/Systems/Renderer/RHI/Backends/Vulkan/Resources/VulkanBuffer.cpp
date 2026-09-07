@@ -43,7 +43,7 @@ namespace Swim::RhiVulkan
 	std::span<std::byte> VulkanBuffer::GetMappedWriteSpan()
 	{
 		RequireVulkanDevice(*state);
-		if (mappedData == nullptr)
+		if (mappedData == nullptr || desc.Memory != Rhi::MemoryPreference::CpuToGpu)
 		{
 			return {};
 		}
@@ -64,6 +64,33 @@ namespace Swim::RhiVulkan
 			vmaFlushAllocation(state->Allocator, allocation, offset, size), "vmaFlushAllocation") != VK_SUCCESS)
 		{
 			throw std::runtime_error("Failed to flush Vulkan buffer allocation");
+		}
+	}
+
+	std::span<const std::byte> VulkanBuffer::GetMappedReadSpan()
+	{
+		RequireVulkanDevice(*state);
+		if (mappedData == nullptr || desc.Memory != Rhi::MemoryPreference::GpuToCpu)
+		{
+			return {};
+		}
+		return { mappedData, static_cast<std::size_t>(desc.Size) };
+	}
+
+	void VulkanBuffer::InvalidateMappedReads(std::uint64_t offset, std::uint64_t size)
+	{
+		RequireVulkanDevice(*state);
+		if (mappedData == nullptr || desc.Memory != Rhi::MemoryPreference::GpuToCpu ||
+			offset > desc.Size || size > desc.Size - offset)
+		{
+			throw std::invalid_argument("Mapped invalidate requires an in-bounds persistent GpuToCpu range");
+		}
+		// VMA rounds to nonCoherentAtomSize and skips coherent memory. Callers
+		// prove completion before invalidating; this does not synchronize the GPU.
+		if (size != 0 && CheckVulkanResult(*state,
+			vmaInvalidateAllocation(state->Allocator, allocation, offset, size), "vmaInvalidateAllocation") != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to invalidate Vulkan buffer allocation");
 		}
 	}
 

@@ -152,14 +152,23 @@ namespace Swim::Testing
 		std::uint64_t LastFrameSignalValue = 0;
 	};
 
-	class MockUploadBuffer final : public Swim::Rhi::Buffer
+	class MockMappedBuffer final : public Swim::Rhi::Buffer
 	{
 	public:
-		explicit MockUploadBuffer(const Swim::Rhi::BufferDesc& desc)
+		explicit MockMappedBuffer(const Swim::Rhi::BufferDesc& desc)
 			: desc(desc), Bytes(static_cast<std::size_t>(desc.Size))
 		{
 		}
 
+		~MockMappedBuffer() override
+		{
+			if (OnDestroy)
+			{
+				OnDestroy();
+			}
+		}
+
+		std::function<void()> OnDestroy;
 		std::uintptr_t GetNativeHandle() const override { return 7; }
 		const Swim::Rhi::BufferDesc& GetDesc() const override { return desc; }
 		void Write(std::uint64_t, std::span<const std::byte>) override {}
@@ -180,6 +189,26 @@ namespace Swim::Testing
 			FlushSize = size;
 		}
 
+		std::span<const std::byte> GetMappedReadSpan() override
+		{
+			return ExposeReadMapping ? std::span<const std::byte>(Bytes) : std::span<const std::byte>{};
+		}
+		void InvalidateMappedReads(std::uint64_t offset, std::uint64_t size) override
+		{
+			++InvalidateCount;
+			if (FailInvalidate)
+			{
+				throw std::runtime_error("Captured invalidate failure");
+			}
+			InvalidateOffset = offset;
+			InvalidateSize = size;
+		}
+
+		bool ExposeReadMapping = true;
+		bool FailInvalidate = false;
+		std::uint32_t InvalidateCount = 0;
+		std::uint64_t InvalidateOffset = 0;
+		std::uint64_t InvalidateSize = 0;
 		Swim::Rhi::BufferDesc desc;
 		std::vector<std::byte> Bytes;
 		std::uint32_t MapAccessCount = 0;
@@ -203,8 +232,9 @@ namespace Swim::Testing
 			{
 				return nullptr;
 			}
-			auto buffer = std::make_unique<MockUploadBuffer>(desc);
+			auto buffer = std::make_unique<MockMappedBuffer>(desc);
 			LastBuffer = buffer.get();
+			buffer->ExposeReadMapping = ExposeReadMapping;
 			return buffer;
 		}
 		std::unique_ptr<Swim::Rhi::Texture> CreateTexture(const Swim::Rhi::TextureDesc&) override { return nullptr; }
@@ -240,7 +270,8 @@ namespace Swim::Testing
 		MockTimeline* LastTimeline = nullptr;
 		std::uint32_t WaitIdleCount = 0;
 
-		MockUploadBuffer* LastBuffer = nullptr;
+		bool ExposeReadMapping = true;
+		MockMappedBuffer* LastBuffer = nullptr;
 		std::uint32_t BufferCreateCount = 0;
 		std::uint32_t FailBufferCreate = 0;
 		Swim::Rhi::AdapterInfo adapterInfo{};

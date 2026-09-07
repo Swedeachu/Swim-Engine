@@ -38,6 +38,8 @@ namespace Swim::RhiVulkan
 			void Read(std::uint64_t offset, std::span<std::byte> data) override;
 			std::span<std::byte> GetMappedWriteSpan() override;
 			void FlushMappedWrites(std::uint64_t offset, std::uint64_t size) override;
+			std::span<const std::byte> GetMappedReadSpan() override;
+			void InvalidateMappedReads(std::uint64_t offset, std::uint64_t size) override;
 
 			std::uintptr_t GetNativeHandle() const override
 			{

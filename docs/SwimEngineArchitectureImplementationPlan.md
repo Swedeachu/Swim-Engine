@@ -2536,7 +2536,7 @@ Create:
 
 - [x] device-local allocation policy; *(normal RHI buffers/images now use VMA automatic device/host preference policy)*
 - [x] persistent mapped upload arenas/rings; *(bounded per-context arenas, persistent Vulkan mapping, automatic flush and timeline-safe reuse; native desktop validation remains pending)*
-- [ ] readback arenas;
+- [x] readback arenas; *(bounded persistent mapping, frame-submission completion, explicit CPU-result lifetime and non-coherent invalidation; native desktop validation remains pending)*
 - [ ] transient frame buffers via render graph;
 - [x] memory-budget reporting; *(renderer-facing per-heap snapshots expose VMA counters, fresh driver estimates, explicit fallback and safe headroom)*
 - [x] allocation debug names/tags. *(RHI resource debug names are copied into owned storage and assigned to VMA allocations.)*
@@ -2890,7 +2890,47 @@ This completes the next Phase 9 allocation task from `Swim-Engine(7).zip`. Uploa
 
 **Validation:** Linux GCC Debug build passed with **198 deterministic cases and 1,963 checks**, all nine public-header/backend-contract compile gates, and `scripts/verify-build-layout.py`. The build enabled the shader compiler and disabled the asset compiler, Jolt backend and legacy engine. All eight opt-in native smoke cases were attempted and stopped at SDL initialization with `No available video device`; their zero validation-message counts are not GPU evidence. Real desktop buffer/texture round trips, Windows/MSVC builds and native post-teardown validation remain open.
 
-**Next guide task:** readback arenas, followed by the remaining Phase 9 desktop validation work. Critical-path **39** remains open before **40** (RenderGraph). Item **41** is partially implemented: upload storage and existing transfer primitives are available, while readback arenas and later scheduling/integration work remain open. No legacy sources are retired by this checkpoint. Preserve the consolidated engine build and `Deprecated/`; add no migration/cleanup scripts, CMake tombstones or engine module subprojects. Deliver the complete clean repository ZIP without build/dependency caches or generated test artifacts.
+**Following checkpoint:** readback arenas are implemented below; remaining Phase 9 capability and desktop validation work stays open. Critical-path **39** remains open before **40** (RenderGraph). Item **41** is partially implemented: upload storage and existing transfer primitives are available, while readback arenas and later scheduling/integration work remain open. No legacy sources are retired by this checkpoint. Preserve the consolidated engine build and `Deprecated/`; add no migration/cleanup scripts, CMake tombstones or engine module subprojects. Deliver the complete clean repository ZIP without build/dependency caches or generated test artifacts.
+
+Implementation reference: [VMA persistent mapping and cache maintenance](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/memory_mapping.html). The repository remains pinned to VMA 3.4.0.
+
+### RHI readback-arena checkpoint — 2026-09-07
+
+This completes the next Phase 9 allocation task from `Swim-Engine(8).zip`. Bounded readback batches attach to the existing frame submission and preserve CPU results independently of frame-slot reuse.
+
+- [x] Extend `BufferDesc::PersistentMap` to `GpuToCpu` allocations and add `GetMappedReadSpan()` / `InvalidateMappedReads(offset, size)`. Read mapping is const bytes; upload buffers do not expose read mappings, and readback buffers do not expose write mappings. Unrequested/unsupported mappings remain empty. Device-local persistent mapping and invalid ranges are rejected.
+- [x] Use VMA's random host-access and persistent-map flags for readback buffers. Keep the mapping for the allocation lifetime. Invalidation uses `vmaInvalidateAllocation`, including non-coherent atom alignment and coherent-memory no-op behavior. Existing `Buffer::Read` remains available and can use the same persistent mapping without native remapping.
+- [x] Add `RhiReadbackArena.h`: one fixed-capacity transfer-destination buffer, checked aligned allocation, opaque batch-scoped slices, nonblocking `TryGetData` / `TryRead`, and explicit `TryReset`. Exhaustion returns an empty optional without moving the allocation cursor or growing storage. Zero-sized requests and non-power-of-two alignment throw. Slices validate their batch identity; foreign, default and expired slices cannot read replacement data.
+- [x] Attach readback arenas to both `FrameContextRing::SubmitCurrent` forms. Validate all batches and allocate retention bookkeeping before calling the queue. Reject null, duplicate, empty and already-submitted batches without sealing any of them. Successful submission commits the ring's actual timeline/value with no subsequent allocation or throwing bookkeeping. Caller-provided signals remain intact; there is no second submission or independent readback timeline scheduler.
+- [x] Retain each submitted readback buffer in its frame context until completion, including when the caller destroys its arena early. Keep the completion timeline alive for retained CPU results after frame-ring destruction. Frame reuse and `Drain` release GPU retirement references without resetting readback arenas or discarding their results.
+- [x] Return `NotSubmitted` before successful submission and `NotReady` before timeline completion. Never invalidate caches or expose a CPU span in either state. On the first successful read of a completed batch, invalidate its used prefix, then expose only the requested slice. Subsequent reads of that batch reuse the invalidation. Failed invalidation does not mark the batch ready and can be retried on a healthy device.
+- [x] Make reset explicit and nonblocking: reject reclamation while the batch is in flight; allow reset after completion or when discarding unsubmitted commands. Reset reuses the allocation and invalidates old slice handles. CPU consumption is independent of GPU completion, so an unread result is kept until the caller explicitly discards it. There is no automatic frame-index expiration, implicit blocking read, spill allocation or overwrite of unread results.
+- [x] Preserve typed device-loss handling. Mapping, reads, invalidation and reset recheck device health. Native invalidation loss raises `DeviceLostError`; subsequent operations do not keep calling the driver. `TryGetData` clears its output span before pending/error paths, and `TryRead` leaves the destination unchanged unless the complete slice is ready.
+- [x] Add 17 deterministic cases for capacity/alignment/overflow, unsupported mapping, pending reads, stale/foreign/default slices, exact bytes, invalidation retry, slot reuse, retained timeline lifetime, early arena destruction, failed flush/submission, invalid batch lists, multiple batches/signals, real VMA persistent mapping, atom isolation, coherent memory, bounds, allocation cleanup and device loss. Rename the shared captured allocator fixture to `VulkanMappedBufferCapture`, reflecting its upload/readback role; no old fixture alias remains.
+- [x] Add strict opt-in `RHI.Vulkan.Smoke.ReadbackArenaBufferTextureAndRetainedResults`: six submissions through two upload/frame slots and two readback arenas, nonzero offsets, exact buffer/pixel comparisons, reading results after frame-slot reuse, explicit reset, expired-slice rejection, and required validation through teardown.
+- [ ] Run all nine native GPU smokes on Windows/Linux desktops and retain adapter/driver and post-teardown validation evidence. Captured VMA tests prove host behavior, not native GPU execution.
+
+**Caller lifecycle:** create the arena, allocate destination slices, record copies using `GetBuffer()`, `GetOffset()` and `GetSize()`, and record a final transition to `HostRead`. Pass every batch written by those commands to `SubmitCurrent`. The ring binds readiness to that successful submission's own completion signal. Poll `TryRead` for an owned copy or `TryGetData` for a const mapped view. Consume the result before explicitly resetting the batch. Readback arenas use the same device as the frame ring and recorded commands. They must not receive additional GPU writes after submission; another write requires completion and reset. The API does not infer which commands wrote which bytes or add resource/queue-family transitions.
+
+```cpp
+std::array batches{ readbackArena.get() };
+frames->SubmitCurrent(batches); // All command lists owned by the current frame.
+// Or: frames->SubmitCurrent(submitDesc, batches);
+
+std::span<const std::byte> bytes;
+if (readbackArena->TryGetData(slice, bytes) == ReadbackStatus::Ready)
+{
+	// Consume bytes before TryReset; copy them to retain data beyond this batch.
+}
+```
+
+**Lifetime and capacity:** one arena is one externally synchronized host owner and one submission batch. Host readers must finish before reset/destruction. Slice handles are checked, but a previously returned raw span cannot be revoked and becomes invalid on reset, arena destruction or device loss. Early arena destruction discards CPU access; successful frame submission still retains its native buffer until GPU completion. Unsubmitted reset/destruction requires discarding any commands that reference the old slices. Capacity is explicit; keep multiple arenas for overlapping batches, poll completed work and release consumed results, or increase a later arena's configured size. No read/reset method waits for the GPU. Explicit frame waits/`Drain` retain their existing behavior.
+
+**Cache and alignment:** all slices in one arena share the same completion point, so invalidating the used prefix cannot overlap still-running writes to another slice in that batch. Distinct arenas use separate VMA allocations and non-coherent atoms. GPU offsets align to at least four bytes; callers request any stricter texel/block alignment and satisfy the existing transfer-size/format rules. Mapped bytes carry no typed CPU alignment guarantee. These arenas are transfer destinations; direct GPU storage-buffer writes and automatic screenshot/file encoding are separate policies.
+
+**Validation:** Linux GCC Debug build passed with **215 deterministic cases and 2,159 checks**, all nine public-header/backend-contract compile gates, and `scripts/verify-build-layout.py`. The shader compiler was enabled; asset compiler, Jolt backend and legacy engine were disabled. All nine opt-in native smoke cases were attempted and stopped at SDL initialization with `No available video device`. Their zero validation-message counts are not GPU validation evidence. Real desktop readback round trips, Windows/MSVC builds and native post-teardown validation remain open.
+
+**Following work:** the Phase 9 HDR capability path and desktop validation remain open. Critical-path **39** must pass before **40** (RenderGraph). For **41**, upload/readback storage and direct buffer/texture transfer primitives are now implemented; graph-scheduled transfer integration remains separate. No legacy runtime sources are retired in this checkpoint. Preserve the consolidated engine build and top-level `Deprecated/`, without cleanup/migration scripts, aliases for renamed fixtures or CMake tombstones. Deliver the complete clean repository ZIP with no build outputs or dependency caches.
 
 Implementation reference: [VMA persistent mapping and cache maintenance](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/memory_mapping.html). The repository remains pinned to VMA 3.4.0.
 
@@ -4106,7 +4146,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 ### 35.4 Modern renderer foundation
 
 40. [ ] Implement RenderGraph DAG/resource-state/barrier system.
-41. [ ] Implement upload/readback arenas and transfer helpers. *(Persistent mapped upload arenas, frame-slot integration and existing buffer/texture transfer primitives are implemented. Readback arenas and later scheduling/integration remain open; see the Phase 9 upload-arena checkpoint.)*
+41. [ ] Implement upload/readback arenas and transfer helpers. *(Persistent mapped upload/readback arenas, frame-submission integration, explicit CPU-result lifetime and direct buffer/texture transfer primitives are implemented. Graph-scheduled transfer integration remains open; see the Phase 9 allocation checkpoints.)*
 42. [ ] Implement generational GPU resource registries.
 43. [ ] Implement paged GeometryHeap.
 44. [ ] Connect compiled MeshAsset/TextureAsset to asynchronous GPU residency.

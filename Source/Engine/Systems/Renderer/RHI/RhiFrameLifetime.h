@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 #include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
+#include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -38,6 +39,7 @@ namespace Swim::Rhi
 		private:
 			friend class FrameContextRing;
 
+			std::vector<std::shared_ptr<Buffer>> readbackBuffers;
 			std::unique_ptr<UploadArena> uploadArena;
 			std::unique_ptr<CommandPool> commandPool;
 			std::vector<std::unique_ptr<CommandList>> commandLists;
@@ -115,6 +117,7 @@ namespace Swim::Rhi
 
 			context.commandLists.clear();
 			context.retiredObjects.clear();
+			context.readbackBuffers.clear();
 			context.commandPool->Reset();
 			if (context.uploadArena)
 			{
@@ -170,7 +173,9 @@ namespace Swim::Rhi
 			return *currentContext->commandLists.back();
 		}
 
-		std::uint64_t SubmitCurrent(const SubmitDesc& desc)
+		// Attach every readback batch written by these command lists. The same
+		// frame signal gates reads, and frame retirement retains its buffers.
+		std::uint64_t SubmitCurrent(const SubmitDesc& desc, std::span<ReadbackArena* const> readbacks = {})
 		{
 			if (currentContext == nullptr)
 			{
@@ -192,6 +197,19 @@ namespace Swim::Rhi
 			}
 			signals.push_back({ timeline.get(), signalValue });
 
+			std::vector<std::shared_ptr<Buffer>> retainedReadbacks;
+			retainedReadbacks.reserve(readbacks.size());
+			for (std::size_t index = 0; index < readbacks.size(); ++index)
+			{
+				auto* arena = readbacks[index];
+				if (arena == nullptr || std::find(readbacks.begin(), readbacks.begin() + index, arena) != readbacks.begin() + index)
+				{
+					throw std::invalid_argument("Readback batches must be non-null and unique within a submission");
+				}
+				arena->ValidateSubmission();
+				retainedReadbacks.push_back(arena->buffer);
+			}
+
 			SubmitDesc submit = desc;
 			submit.SignalTimelines = signals;
 			if (currentContext->uploadArena)
@@ -199,6 +217,13 @@ namespace Swim::Rhi
 				currentContext->uploadArena->Flush();
 			}
 			queue.Submit(submit);
+			// All potentially allocating validation/bookkeeping happened before
+			// submission. Committing successful GPU work must not throw.
+			currentContext->readbackBuffers = std::move(retainedReadbacks);
+			for (auto* arena : readbacks)
+			{
+				arena->CommitSubmission(timeline, signalValue);
+			}
 			++nextSignalValue;
 
 			currentContext->CompletionValue = signalValue;
@@ -207,7 +232,7 @@ namespace Swim::Rhi
 			return signalValue;
 		}
 
-		std::uint64_t SubmitCurrent()
+		std::uint64_t SubmitCurrent(std::span<ReadbackArena* const> readbacks = {})
 		{
 			if (currentContext == nullptr)
 			{
@@ -223,7 +248,7 @@ namespace Swim::Rhi
 
 			SubmitDesc desc{};
 			desc.CommandLists = commandLists;
-			return SubmitCurrent(desc);
+			return SubmitCurrent(desc, readbacks);
 		}
 
 		template <typename ObjectType>
@@ -295,6 +320,7 @@ namespace Swim::Rhi
 			{
 				context.commandLists.clear();
 				context.retiredObjects.clear();
+				context.readbackBuffers.clear();
 				if (context.uploadArena)
 				{
 					context.uploadArena->Reset();
@@ -350,7 +376,7 @@ namespace Swim::Rhi
 		}
 
 		Queue& queue;
-		std::unique_ptr<Timeline> timeline;
+		std::shared_ptr<Timeline> timeline;
 		std::vector<FrameContext> contexts;
 		std::vector<DeferredObject> deferredObjects;
 		FrameContext* currentContext = nullptr;

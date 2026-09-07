@@ -93,7 +93,7 @@ namespace Swim::Rhi
 		BufferUsage Usage = BufferUsage::None;
 		MemoryPreference Memory = MemoryPreference::DeviceLocal;
 		std::string_view DebugName;
-		bool PersistentMap = false; // CpuToGpu only; mapping lives until buffer destruction.
+		bool PersistentMap = false; // Host-visible only; mapping lives until buffer destruction.
 	};
 
 	struct TextureDesc
@@ -367,6 +367,18 @@ namespace Swim::Rhi
 		virtual void FlushMappedWrites(std::uint64_t offset, std::uint64_t size)
 		{
 			throw std::logic_error("Persistent buffer writes are not supported");
+		}
+
+		// GpuToCpu persistent mapping is read-only. Before accessing returned bytes,
+		// finish GPU writes, transition to HostRead, wait for completion and invalidate.
+		// These calls perform no wait; unsupported/unrequested mapping returns empty.
+		virtual std::span<const std::byte> GetMappedReadSpan()
+		{
+			return {};
+		}
+		virtual void InvalidateMappedReads(std::uint64_t offset, std::uint64_t size)
+		{
+			throw std::logic_error("Persistent buffer reads are not supported");
 		}
 	};
 

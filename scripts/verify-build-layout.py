@@ -3631,13 +3631,16 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
                        "VulkanPipelineCacheTests.cpp", "VulkanPipelineCacheDataTests.cpp",
                        "VulkanPipelineCacheConcurrencyTests.cpp", "VulkanPipelineCachePersistenceTests.cpp",
                        "VulkanPipelineCacheSmokeTests.cpp", "VulkanUploadArenaTests.cpp",
-                       "VulkanUploadArenaSmokeTests.cpp"):
+                       "VulkanUploadArenaSmokeTests.cpp", "VulkanReadbackArenaTests.cpp",
+                       "VulkanReadbackArenaSmokeTests.cpp"):
         check_suite_is_compiled("RHIVulkan", suite_file, failures)
     check_suite_is_compiled("RHI", "RhiDiagnosticsTests.cpp", failures)
     check_suite_is_compiled("RHI", "RhiTimestampTests.cpp", failures)
     check_suite_is_compiled("RHI", "RhiDeviceDiagnosticsTests.cpp", failures)
     check_suite_is_compiled("RHI", "RhiMemoryBudgetTests.cpp", failures)
     check_suite_is_compiled("RHI", "RhiUploadArenaTests.cpp", failures)
+    check_suite_is_compiled("RHI", "RhiReadbackArenaTests.cpp", failures)
+    check_suite_is_compiled("RHI", "RhiReadbackFrameTests.cpp", failures)
 
 
 def check_runtime_logging_contract(failures: list[str]) -> None:

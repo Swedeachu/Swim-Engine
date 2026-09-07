@@ -1,4 +1,4 @@
-#include "Tests/Fixtures/VulkanUploadCapture.h"
+#include "Tests/Fixtures/VulkanMappedBufferCapture.h"
 #include "Tests/Framework/Test.h"
 #include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
 
@@ -8,7 +8,7 @@ using namespace Swim;
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "PersistentMappingSurvivesWritesFlushesAndReuse")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	auto arena = Rhi::UploadArena::Create(*capture.Device, { 1024 });
 	SWIM_REQUIRE(arena);
 	SWIM_REQUIRE_EQUAL(capture.MapCalls, 1u);
@@ -41,7 +41,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "PersistentMappingSurvivesWritesFlushesAndRe
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "CoherentMemoryNeedsNoNativeFlush")
 {
-	Testing::VulkanUploadCapture capture(true);
+	Testing::VulkanMappedBufferCapture capture(true);
 	auto arena = Rhi::UploadArena::Create(*capture.Device, { 512 });
 	SWIM_REQUIRE(arena);
 	SWIM_REQUIRE(arena->Allocate(7));
@@ -52,7 +52,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "CoherentMemoryNeedsNoNativeFlush")
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "SeparateArenasDoNotShareNonCoherentAtoms")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	auto first = Rhi::UploadArena::Create(*capture.Device, { 31 });
 	auto second = Rhi::UploadArena::Create(*capture.Device, { 31 });
 	SWIM_REQUIRE(first && second);
@@ -68,10 +68,8 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "SeparateArenasDoNotShareNonCoherentAtoms")
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "MappingAndFlushContractsRejectInvalidRanges")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	Rhi::BufferDesc desc{ 512, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::DeviceLocal, {}, true };
-	SWIM_CHECK(!capture.Device->CreateBuffer(desc));
-	desc.Memory = Rhi::MemoryPreference::GpuToCpu;
 	SWIM_CHECK(!capture.Device->CreateBuffer(desc));
 	SWIM_CHECK_EQUAL(capture.CreateCalls, 0u);
 	desc.Memory = Rhi::MemoryPreference::CpuToGpu;
@@ -96,7 +94,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "MappingAndFlushContractsRejectInvalidRanges
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "MapFailureReleasesAllocationAndBuffer")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	capture.MapResult = VK_ERROR_MEMORY_MAP_FAILED;
 	SWIM_CHECK(!Rhi::UploadArena::Create(*capture.Device, { 1024 }));
 	SWIM_CHECK(capture.MapCalls != 0);
@@ -109,7 +107,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "MapFailureReleasesAllocationAndBuffer")
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "FlushErrorsRetainBytesAndDeviceLossPreventsFurtherWork")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	auto arena = Rhi::UploadArena::Create(*capture.Device, { 32 });
 	SWIM_REQUIRE(arena);
 	auto slice = arena->Allocate(4);
@@ -130,7 +128,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "FlushErrorsRetainBytesAndDeviceLossPrevents
 
 SWIM_TEST("RHI.Vulkan.UploadArena", "KnownDeviceLossRejectsMappingAndCreationBeforeNativeCalls")
 {
-	Testing::VulkanUploadCapture capture;
+	Testing::VulkanMappedBufferCapture capture;
 	auto arena = Rhi::UploadArena::Create(*capture.Device, { 64 });
 	SWIM_REQUIRE(arena);
 	RhiVulkan::ObserveVulkanResult(*capture.State, VK_ERROR_DEVICE_LOST, "captured loss before upload");

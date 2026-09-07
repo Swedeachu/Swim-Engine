@@ -282,3 +282,18 @@ explicit flushing and completion before reset/destruction. See the architecture
 plan's upload-arena checkpoint for alignment, failure and lifetime contracts, and
 `VulkanUploadArenaSmokeTests.cpp` for buffer/texture copies across reused slots.
 The native test joins `SWIM_RUN_RHI_SMOKE=1 SwimTests --filter=RHI.Vulkan.Smoke`.
+
+
+### Readback arenas
+
+`Swim::Rhi::ReadbackArena` provides bounded, persistently mapped transfer destinations.
+Allocate slices, record GPU copies and a final `HostRead` transition, then pass the
+arenas to `FrameContextRing::SubmitCurrent`. The frame signal gates CPU reads and
+retains buffers until completion. `TryRead` copies ready bytes; `TryGetData` returns
+a const mapped view. Neither waits for the GPU.
+
+Results survive frame-slot reuse and `Drain`. Call `TryReset` after consuming or
+explicitly discarding them; it refuses to reclaim in-flight storage and invalidates
+old slices on success. See the architecture guide's readback checkpoint and
+`VulkanReadbackArenaSmokeTests.cpp` for the complete lifetime and transfer example.
+The native test joins the existing `SWIM_RUN_RHI_SMOKE=1` smoke suite.

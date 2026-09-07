@@ -93,7 +93,7 @@ SWIM_TEST("RHI.UploadArena", "FrameSlotsFlushBeforeSubmitAndWaitBeforeReuse")
 	auto first = frames->AllocateUpload(32);
 	SWIM_REQUIRE(first);
 	first->Bytes[0] = std::byte{ 47 };
-	auto* buffer = static_cast<Testing::MockUploadBuffer*>(first->Resource);
+	auto* buffer = static_cast<Testing::MockMappedBuffer*>(first->Resource);
 	device.queue.BeforeSubmit = [&]
 	{
 		SWIM_CHECK_EQUAL(buffer->FlushCount, 1u);

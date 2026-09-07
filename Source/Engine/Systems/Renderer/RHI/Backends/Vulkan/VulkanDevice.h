@@ -135,7 +135,8 @@ namespace Swim::RhiVulkan
 			{
 				RequireVulkanDevice(*state);
 				if (desc.Size == 0 || desc.Usage == Rhi::BufferUsage::None ||
-					(desc.PersistentMap && (desc.Memory != Rhi::MemoryPreference::CpuToGpu ||
+					(desc.PersistentMap && ((desc.Memory != Rhi::MemoryPreference::CpuToGpu &&
+						desc.Memory != Rhi::MemoryPreference::GpuToCpu) ||
 						desc.Size > std::numeric_limits<std::size_t>::max())))
 				{
 					return nullptr;

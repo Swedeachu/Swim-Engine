@@ -1,3 +1,4 @@
+#include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 #include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
 #include "Engine/Systems/Renderer/RHI/RhiPipelineCache.h"
 #include "Engine/Systems/Renderer/RHI/RhiMemoryBudget.h"
