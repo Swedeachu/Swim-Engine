@@ -14,7 +14,8 @@ namespace Swim::Testing
 		~VulkanPipelineCapture();
 		std::unique_ptr<RhiVulkan::VulkanShaderProgram> MakeProgram(Rhi::ShaderProgramInterfaceDesc interface = {});
 		std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> MakePipeline(Rhi::Format format = Rhi::Format::RGBA8Unorm,
-			std::span<const Rhi::VertexBindingDesc> bindings = {}, std::span<const Rhi::VertexAttributeDesc> attributes = {});
+			std::span<const Rhi::VertexBindingDesc> bindings = {}, std::span<const Rhi::VertexAttributeDesc> attributes = {},
+			Rhi::ShaderProgramInterfaceDesc interface = {});
 
 		std::uint32_t CachesCreated = 0;
 		std::uint32_t CachesDestroyed = 0;
@@ -30,6 +31,16 @@ namespace Swim::Testing
 		std::uint32_t DrawCount = 0;
 		std::uint32_t IndexedDrawCount = 0;
 		VkResult PipelineResult = VK_SUCCESS;
+		VkResult LayoutResult = VK_SUCCESS;
+		std::vector<VkPushConstantRange> PushConstantRanges;
+		struct PushConstantWrite
+		{
+			VkPipelineLayout Layout = VK_NULL_HANDLE;
+			VkShaderStageFlags Stages = 0;
+			std::uint32_t Offset = 0;
+			std::vector<std::byte> Bytes;
+		};
+		std::vector<PushConstantWrite> PushConstantWrites;
 		VkFormatFeatureFlags FormatFeatures = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
 			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
 		std::vector<VkFormat> PipelineColors;

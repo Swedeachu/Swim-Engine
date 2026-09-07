@@ -57,6 +57,8 @@ namespace Swim::RhiVulkan
 		recording = true;
 		graphicsPipeline = nullptr;
 		boundTables.clear();
+		pushConstantRanges.clear();
+		initializedPushConstants.clear();
 		availableIndices = 0;
 		vertexBuffers.clear();
 		viewportSet = false;

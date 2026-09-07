@@ -46,6 +46,7 @@ namespace Swim::RhiVulkan
 			throw std::logic_error("Vulkan draw requires rendering, a graphics pipeline, viewport and scissor");
 		}
 		RequireDescriptorTables();
+		RequirePushConstants();
 		if (!graphicsPipeline->MatchesRendering(renderingColors, renderingDepth, renderingSamples))
 		{
 			throw std::invalid_argument("Vulkan graphics pipeline formats and samples must match the active attachments");

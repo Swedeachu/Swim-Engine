@@ -61,6 +61,7 @@ namespace Swim::Testing
 		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline&) override {}
 		void BindComputePipeline(Swim::Rhi::ComputePipeline&) override {}
 		void BindDescriptorTable(std::uint32_t, Swim::Rhi::DescriptorTable&) override {}
+		void PushConstants(Swim::Rhi::ShaderStageMask, std::uint32_t, std::span<const std::byte>) override {}
 		void SetViewport(const Swim::Rhi::Viewport&) override {}
 		void SetScissor(const Swim::Rhi::ScissorRect&) override {}
 		void BindVertexBuffer(std::uint32_t, Swim::Rhi::Buffer&, std::uint64_t) override {}

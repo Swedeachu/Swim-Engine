@@ -146,6 +146,8 @@ namespace Swim::Rhi
 		std::span<const std::byte> Bytecode;
 	};
 
+	// Byte ranges are nonempty, four-byte aligned and bounded by MaxPushConstantBytes.
+	// A stage appears in at most one range; different stages may overlap.
 	struct PushConstantRange
 	{
 		std::uint32_t Offset = 0;
@@ -501,6 +503,14 @@ namespace Swim::Rhi
 		virtual void BindGraphicsPipeline(GraphicsPipeline& pipeline) = 0;
 		virtual void BindComputePipeline(ComputePipeline& pipeline) = 0;
 		virtual void BindDescriptorTable(std::uint32_t space, DescriptorTable& table) = 0;
+		// Update the bound graphics pipeline's reflected push-constant layout, inside
+		// or outside rendering. Data is copied during recording. Offset/size must be
+		// nonzero-size, four-byte aligned and covered by every requested stage.
+		// Include every stage whose range overlaps the update. Initialize all reflected
+		// range bytes before drawing. Compatible layouts preserve values; after a push
+		// with an incompatible layout, initialize that layout fully. Pool reuse resets
+		// initialization. Binding a pipeline alone does not disturb pushed values.
+		virtual void PushConstants(ShaderStageMask stages, std::uint32_t offset, std::span<const std::byte> data) = 0;
 		virtual void SetViewport(const Viewport& viewport) = 0;
 		virtual void SetScissor(const ScissorRect& scissor) = 0;
 		// Bindings survive pipeline/rendering changes, but reset with command-pool

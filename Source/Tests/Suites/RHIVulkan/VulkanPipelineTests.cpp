@@ -44,7 +44,7 @@ SWIM_TEST("RHI.Vulkan.Pipelines", "ModuleAndPipelineFailuresReleasePartialNative
 	SWIM_CHECK_EQUAL(capture.ModulesDestroyed, 3u);
 }
 
-SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndUnimplementedPushConstants")
+SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndOwnsPushConstants")
 {
 	Testing::VulkanPipelineCapture capture;
 	auto program = capture.MakeProgram();
@@ -62,8 +62,8 @@ SWIM_TEST("RHI.Vulkan.Pipelines", "LayoutRejectsForeignProgramAndUnimplementedPu
 	SWIM_REQUIRE(withBindings);
 	range.Size = 32;
 	SWIM_CHECK_EQUAL(withBindings->GetInterface().PushConstants[0].Size, 16u);
-	SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { withBindings.get(), {} }));
-	SWIM_CHECK_EQUAL(capture.LayoutsCreated, 0u);
+	SWIM_CHECK(RhiVulkan::VulkanPipelineLayout::Create(capture.State, { withBindings.get(), {} }));
+	SWIM_CHECK_EQUAL(capture.LayoutsCreated, 1u);
 }
 
 SWIM_TEST("RHI.Vulkan.Pipelines", "GraphicsStateMapsToDynamicRenderingAndOwnsAttachmentSignature")

@@ -12,6 +12,7 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<VulkanDeviceState> Device;
 		Rhi::ShaderProgramInterface Interface;
 		std::vector<VkDescriptorSetLayout> Sets;
+		std::vector<VkPushConstantRange> PushConstants;
 		VkPipelineLayout Layout = VK_NULL_HANDLE;
 	};
 

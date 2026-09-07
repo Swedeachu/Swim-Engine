@@ -42,6 +42,7 @@ namespace Swim::ShaderCompiler
 		std::uint32_t Index = 0;
 		std::uint32_t Space = 0;
 		std::uint32_t Count = 1;
+		// Push-constant Offset/Size come from the uniform element layout, not its binding index.
 		std::uint32_t Offset = 0;
 		std::uint32_t Size = 0;
 		bool HasIndex = false;

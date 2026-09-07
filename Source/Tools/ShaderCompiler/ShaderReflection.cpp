@@ -87,6 +87,26 @@ namespace Swim::ShaderCompiler
 				if (!typeField->get_object().get(type))
 				{
 					reflection.TypeKind = ReadString(type, "kind");
+					if (reflection.BindingKind == "pushConstantBuffer")
+					{
+						reflection.HasOffset = reflection.HasSize = false;
+						if (const auto element = FindField(type, "elementVarLayout"))
+						{
+							simdjson::dom::object elementLayout;
+							if (!element->get_object().get(elementLayout) && !FindField(elementLayout, "bindings"))
+							{
+								if (const auto field = FindField(elementLayout, "binding"))
+								{
+									simdjson::dom::object binding;
+									if (!field->get_object().get(binding) && ReadString(binding, "kind") == "uniform")
+									{
+										reflection.HasOffset = ReadU32(binding, "offset", reflection.Offset);
+										reflection.HasSize = ReadU32(binding, "size", reflection.Size);
+									}
+								}
+							}
+						}
+					}
 					reflection.ResourceShape = ReadString(type, "baseShape");
 					reflection.ResourceAccess = ReadString(type, "access");
 					if (const auto array = FindField(type, "array"))

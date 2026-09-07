@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the eleven native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas and vertex/index/instance buffer drawing:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the twelve native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing and push-constant updates:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -190,6 +190,12 @@ Runtime callers set `GraphicsSystemDesc::Checks.Synchronization` and/or `GpuAssi
 Set `GraphicsPipelineDesc::VertexBindings` and `VertexAttributes` to declare buffer slots, strides, vertex/instance rates and shader locations. Pipeline creation copies these spans. Bind `BufferUsage::Vertex` buffers with `BindVertexBuffer(slot, buffer, offset)` before drawing; empty layouts continue to support procedural shaders. The device reports layout limits through `GraphicsCapabilities::VertexInput`.
 
 Attribute offsets, strides and bound offsets must satisfy component alignment, and attributes must fit a nonzero stride. Zero stride repeats one record. Direct draws validate vertex and instance byte ranges; indexed draws validate index bytes and instance ranges, while effective vertex indices remain the caller's responsibility. Keep buffers alive through GPU completion and issue explicit barriers. Shader locations and numeric types must match the declared attributes. See the explicit vertex-input checkpoint in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md) for the complete contract and pending desktop validation.
+
+### Vulkan RHI push constants
+
+Global Slang `[[vk::push_constant]] ConstantBuffer<T>` blocks now convert through `BuildRhiShaderInterface` into reflected pipeline-layout ranges. After binding a graphics pipeline, call `CommandList::PushConstants(stages, offset, bytes)` using the reflected stage mask. Data is copied during recording; full or partial writes can occur inside or outside rendering. Writes need four-byte alignment and complete reflected stage coverage.
+
+Initialize every reflected range byte before drawing, including padding. Values survive rendering-scope changes and pipeline switches with identical push-constant ranges. Binding an incompatible pipeline alone preserves them; a push under an incompatible layout requires full initialization of that layout before drawing. Pool reuse resets initialization. The current consumer supports vertex/fragment graphics stages and one global reflected block. See the push-constant checkpoint in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md) for layout, lifetime and desktop-validation details.
 
 ### Development asset cooking
 

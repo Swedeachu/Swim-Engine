@@ -20,6 +20,7 @@ namespace Swim::Testing
 		};
 		State->Dispatch.vkDestroyPipelineCache = +[](VkDevice, VkPipelineCache, const VkAllocationCallbacks*) { ++capture->CachesDestroyed; };
 		auto& limits = State->Device.physical_device.properties.limits;
+		limits.maxPushConstantsSize = 128;
 		limits.maxVertexInputBindings = 32;
 		limits.maxVertexInputAttributes = 32;
 		limits.maxVertexInputBindingStride = 2048;
@@ -41,10 +42,25 @@ namespace Swim::Testing
 			return VK_SUCCESS;
 		};
 		State->Dispatch.vkDestroyShaderModule = +[](VkDevice, VkShaderModule, const VkAllocationCallbacks*) { ++capture->ModulesDestroyed; };
-		State->Dispatch.vkCreatePipelineLayout = +[](VkDevice, const VkPipelineLayoutCreateInfo*, const VkAllocationCallbacks*, VkPipelineLayout* layout) -> VkResult
+		State->Dispatch.vkCreatePipelineLayout = +[](VkDevice, const VkPipelineLayoutCreateInfo* info, const VkAllocationCallbacks*, VkPipelineLayout* layout) -> VkResult
 		{
-			*layout = RhiVulkan::FromNativeHandle<VkPipelineLayout>(++capture->LayoutsCreated);
-			return VK_SUCCESS;
+			capture->PushConstantRanges.clear();
+			for (std::uint32_t index = 0; index < info->pushConstantRangeCount; ++index)
+			{
+				capture->PushConstantRanges.push_back(info->pPushConstantRanges[index]);
+			}
+			++capture->LayoutsCreated;
+			if (capture->LayoutResult == VK_SUCCESS)
+			{
+				*layout = RhiVulkan::FromNativeHandle<VkPipelineLayout>(capture->LayoutsCreated);
+			}
+			return capture->LayoutResult;
+		};
+		State->Dispatch.vkCmdPushConstants = +[](VkCommandBuffer, VkPipelineLayout layout, VkShaderStageFlags stages,
+			std::uint32_t offset, std::uint32_t size, const void* data)
+		{
+			const auto* bytes = static_cast<const std::byte*>(data);
+			capture->PushConstantWrites.push_back({ layout, stages, offset, { bytes, bytes + size } });
 		};
 		State->Dispatch.vkDestroyPipelineLayout = +[](VkDevice, VkPipelineLayout, const VkAllocationCallbacks*) { ++capture->LayoutsDestroyed; };
 		State->Dispatch.vkCreateGraphicsPipelines = +[](VkDevice, VkPipelineCache cache, std::uint32_t, const VkGraphicsPipelineCreateInfo* info,
@@ -120,9 +136,10 @@ namespace Swim::Testing
 	}
 
 	std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> VulkanPipelineCapture::MakePipeline(Rhi::Format format,
-		std::span<const Rhi::VertexBindingDesc> bindings, std::span<const Rhi::VertexAttributeDesc> attributes)
+		std::span<const Rhi::VertexBindingDesc> bindings, std::span<const Rhi::VertexAttributeDesc> attributes,
+		Rhi::ShaderProgramInterfaceDesc interface)
 	{
-		auto program = MakeProgram();
+		auto program = MakeProgram(interface);
 		auto layout = RhiVulkan::VulkanPipelineLayout::Create(State, { program.get(), {} });
 		Rhi::GraphicsPipelineDesc desc{};
 		desc.Program = program.get();

@@ -43,6 +43,7 @@ namespace Swim::RhiVulkan
 		void BindGraphicsPipeline(Rhi::GraphicsPipeline&) override;
 		void BindComputePipeline(Rhi::ComputePipeline&) override;
 		void BindDescriptorTable(std::uint32_t, Rhi::DescriptorTable&) override;
+		void PushConstants(Rhi::ShaderStageMask stages, std::uint32_t offset, std::span<const std::byte> data) override;
 		void SetViewport(const Rhi::Viewport& viewport) override;
 		void SetScissor(const Rhi::ScissorRect& scissor) override;
 		void BindVertexBuffer(std::uint32_t, Rhi::Buffer&, std::uint64_t) override;
@@ -94,6 +95,9 @@ namespace Swim::RhiVulkan
 		bool scissorSet = false;
 		void RequireDraw() const;
 		void RequireDescriptorTables() const;
+		void RequirePushConstants() const;
+		std::vector<VkPushConstantRange> pushConstantRanges;
+		std::vector<VkShaderStageFlags> initializedPushConstants;
 		void RequireVertexBuffers(bool indexed, std::uint32_t elementCount, std::uint32_t instanceCount,
 			std::uint32_t firstVertex, std::uint32_t firstInstance) const;
 		struct VertexBufferBinding

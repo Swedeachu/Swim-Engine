@@ -18,7 +18,8 @@ namespace Swim::ShaderCompiler
 	};
 
 	// Tool-side conversion. Runtime RHI consumes the owned result, never Slang/JSON types.
-	// Flat global descriptors are supported; nested parameter blocks and push constants fail explicitly.
+	// Supports flat global descriptors and one global push-constant buffer with a uniform element layout.
+	// Nested parameter blocks and entry-point resource parameters fail explicitly.
 	ShaderRhiInterfaceResult BuildRhiShaderInterface(const ShaderReflection& reflection);
 
 } // namespace Swim::ShaderCompiler

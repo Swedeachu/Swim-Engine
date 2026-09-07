@@ -45,6 +45,19 @@ namespace Swim::ShaderCompiler
 		}
 		for (const auto& parameter : reflection.GlobalParameters)
 		{
+			if (parameter.BindingKind == "pushConstantBuffer")
+			{
+				if (parameter.TypeKind != "constantBuffer" || parameter.Count != 1 ||
+					!parameter.HasOffset || !parameter.HasSize || parameter.Size == 0 ||
+					parameter.Offset % 4 != 0 || parameter.Size % 4 != 0 || parameter.Size > UINT32_MAX - parameter.Offset ||
+					!result.Interface.PushConstants.empty())
+				{
+					return fail("Push constants require one aligned, sized global constant buffer: " + parameter.Name);
+				}
+				// Whole-block byte extent comes from Slang; no C++ packing guesses.
+				result.Interface.PushConstants.push_back({ parameter.Offset, parameter.Size, stages });
+				continue;
+			}
 			if (parameter.BindingKind != "descriptorTableSlot" || !parameter.HasIndex || parameter.Count == 0)
 			{
 				return fail("Unsupported global resource binding: " + parameter.Name);

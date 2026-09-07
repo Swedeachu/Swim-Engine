@@ -1,5 +1,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanPipelineLayout.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPushConstants.h"
+
+#include <stdexcept>
 
 namespace Swim::RhiVulkan
 {
@@ -24,13 +27,25 @@ namespace Swim::RhiVulkan
 			RequireVulkanDevice(*state);
 		}
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
-		if (program == nullptr || program->GetState() != state ||
-			!program->GetInterface().PushConstants.empty())
+		if (program == nullptr || program->GetState() != state)
 		{
-			// Push-constant recording is a separate contract extension. Never discard reflection.
 			return nullptr;
 		}
 		auto result = std::make_unique<VulkanPipelineLayout>(std::move(state), *program);
+		try
+		{
+			VkShaderStageFlags stages = 0;
+			for (const auto& stage : program->GetStages())
+			{
+				stages |= stage.Stage;
+			}
+			result->layoutState->PushConstants = BuildVulkanPushConstantRanges(*result->state,
+				result->layoutState->Interface.PushConstants, stages);
+		}
+		catch (const std::invalid_argument&)
+		{
+			return nullptr;
+		}
 		if (!CreateDescriptorLayouts(*result->layoutState))
 		{
 			return nullptr;
@@ -39,6 +54,8 @@ namespace Swim::RhiVulkan
 		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		info.setLayoutCount = static_cast<std::uint32_t>(result->layoutState->Sets.size());
 		info.pSetLayouts = result->layoutState->Sets.data();
+		info.pushConstantRangeCount = static_cast<std::uint32_t>(result->layoutState->PushConstants.size());
+		info.pPushConstantRanges = result->layoutState->PushConstants.data();
 		const auto createResult = result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layoutState->Layout);
 		if (createResult != VK_SUCCESS)
 		{
