@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the ten native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches and upload/readback arenas:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the eleven native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas and vertex/index/instance buffer drawing:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -184,6 +184,12 @@ SWIM_RUN_RHI_SMOKE=1 SWIM_RHI_VALIDATION=sync ./build/linux-debug/SwimTests --fi
 `core` is the default. `sync` enables synchronization and submit-time checks; `gpu` enables GPU-assisted validation; `all` requests both. Core validation remains enabled in every smoke profile. Explicit checks require `VK_EXT_layer_settings` and a Khronos validation layer reporting API 1.4.335 or newer. GPU-assisted selection also requires vertex/fragment shader stores and atomics; normal core runs retain the existing device requirements. Missing support or an invalid profile fails the opted-in run. Run separate profiles first; instrumentation can significantly increase execution time.
 
 Runtime callers set `GraphicsSystemDesc::Checks.Synchronization` and/or `GpuAssisted`. Explicit checks require validation/capture even with Default or IfAvailable mode; combining them with Disabled is invalid. `GetValidationConfiguration()` reports the backend's submitted configuration. External Vulkan Configurator/environment/file settings can override it, so keep acceptance runs free of conflicting overrides and inspect the diagnostics through teardown. The [architecture plan](docs/SwimEngineArchitectureImplementationPlan.md) records the remaining native validation gate. `SWIM_REQUIRE_HDR_SMOKE=1` separately requires HDR support in the HDR lifecycle test.
+
+### Vulkan RHI vertex input
+
+Set `GraphicsPipelineDesc::VertexBindings` and `VertexAttributes` to declare buffer slots, strides, vertex/instance rates and shader locations. Pipeline creation copies these spans. Bind `BufferUsage::Vertex` buffers with `BindVertexBuffer(slot, buffer, offset)` before drawing; empty layouts continue to support procedural shaders. The device reports layout limits through `GraphicsCapabilities::VertexInput`.
+
+Attribute offsets, strides and bound offsets must satisfy component alignment, and attributes must fit a nonzero stride. Zero stride repeats one record. Direct draws validate vertex and instance byte ranges; indexed draws validate index bytes and instance ranges, while effective vertex indices remain the caller's responsibility. Keep buffers alive through GPU completion and issue explicit barriers. Shader locations and numeric types must match the declared attributes. See the explicit vertex-input checkpoint in [the architecture plan](docs/SwimEngineArchitectureImplementationPlan.md) for the complete contract and pending desktop validation.
 
 ### Development asset cooking
 

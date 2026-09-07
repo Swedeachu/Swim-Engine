@@ -94,6 +94,15 @@ namespace Swim::RhiVulkan
 		bool scissorSet = false;
 		void RequireDraw() const;
 		void RequireDescriptorTables() const;
+		void RequireVertexBuffers(bool indexed, std::uint32_t elementCount, std::uint32_t instanceCount,
+			std::uint32_t firstVertex, std::uint32_t firstInstance) const;
+		struct VertexBufferBinding
+		{
+			std::uint32_t Slot = 0;
+			std::uint64_t Offset = 0;
+			std::uint64_t Bytes = 0;
+		};
+		std::vector<VertexBufferBinding> vertexBuffers;
 		std::vector<const VulkanDescriptorTable*> boundTables;
 
 		std::uint32_t debugLabelDepth = 0;

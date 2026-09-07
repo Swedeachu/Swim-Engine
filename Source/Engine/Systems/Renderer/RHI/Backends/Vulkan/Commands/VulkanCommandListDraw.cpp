@@ -55,6 +55,7 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::Draw(std::uint32_t vertexCount, std::uint32_t instanceCount, std::uint32_t firstVertex, std::uint32_t firstInstance)
 	{
 		RequireDraw();
+		RequireVertexBuffers(false, vertexCount, instanceCount, firstVertex, firstInstance);
 		GetState()->Dispatch.vkCmdDraw(commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
 	}
 
@@ -66,6 +67,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::invalid_argument("Vulkan indexed draw exceeds the bound index buffer");
 		}
+		RequireVertexBuffers(true, indexCount, instanceCount, 0, firstInstance);
 		GetState()->Dispatch.vkCmdDrawIndexed(commandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
 

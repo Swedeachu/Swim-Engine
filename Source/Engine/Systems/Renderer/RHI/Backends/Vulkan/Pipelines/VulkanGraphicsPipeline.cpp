@@ -126,9 +126,13 @@ namespace Swim::RhiVulkan
 				native.pName = stage.EntryPoint.c_str();
 				stages.push_back(native);
 			}
+			auto vertexLayout = BuildVulkanVertexInput(*state, desc.VertexBindings, desc.VertexAttributes);
 			VkPipelineVertexInputStateCreateInfo vertex{};
 			vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-			// This first draw path uses SV_VertexID; explicit vertex layouts follow with resource bindings.
+			vertex.vertexBindingDescriptionCount = static_cast<std::uint32_t>(vertexLayout.Bindings.size());
+			vertex.pVertexBindingDescriptions = vertexLayout.Bindings.data();
+			vertex.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(vertexLayout.Attributes.size());
+			vertex.pVertexAttributeDescriptions = vertexLayout.Attributes.data();
 			VkPipelineInputAssemblyStateCreateInfo assembly{};
 			assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 			assembly.topology = ToVkPrimitiveTopology(desc.Topology);
@@ -188,6 +192,7 @@ namespace Swim::RhiVulkan
 			info.layout = FromNativeHandle<VkPipelineLayout>(layout->GetNativeHandle());
 			auto result = std::make_unique<VulkanGraphicsPipeline>(state, desc);
 			result->layoutState = layout->GetLayoutState();
+			result->vertexRequirements = std::move(vertexLayout.Requirements);
 			if (CreateCachedVulkanGraphicsPipeline(*state, info, result->pipeline) != VK_SUCCESS)
 			{
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.

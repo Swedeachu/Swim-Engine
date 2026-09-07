@@ -9,6 +9,7 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiTypes.h"
 #include "Engine/Systems/Renderer/RHI/RhiTimestamps.h"
+#include "Engine/Systems/Renderer/RHI/RhiVertexInput.h"
 
 #include <array>
 #include <cstddef>
@@ -197,6 +198,10 @@ namespace Swim::Rhi
 		DepthStencilState DepthStencil{};
 		SampleCount Samples = SampleCount::X1;
 		std::string_view DebugName;
+		// Empty layouts retain shader-generated vertices. Creation copies these
+		// spans; locations and numeric types must match the vertex shader.
+		std::span<const VertexBindingDesc> VertexBindings;
+		std::span<const VertexAttributeDesc> VertexAttributes;
 	};
 
 	struct ComputePipelineDesc
@@ -498,6 +503,8 @@ namespace Swim::Rhi
 		virtual void BindDescriptorTable(std::uint32_t space, DescriptorTable& table) = 0;
 		virtual void SetViewport(const Viewport& viewport) = 0;
 		virtual void SetScissor(const ScissorRect& scissor) = 0;
+		// Bindings survive pipeline/rendering changes, but reset with command-pool
+		// reuse. Buffers require Vertex usage and must live until GPU completion.
 		virtual void BindVertexBuffer(std::uint32_t slot, Buffer& buffer, std::uint64_t offset) = 0;
 		virtual void BindIndexBuffer(Buffer& buffer, std::uint64_t offset, IndexType type) = 0;
 		virtual void Draw(std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;

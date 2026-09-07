@@ -236,6 +236,10 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "AdapterReportsDriverPropertiesWithoutAssumi
 		std::strcpy(props->properties.deviceName, "Test GPU");
 		props->properties.apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 350);
 		props->properties.driverVersion = 0x12345678;
+		props->properties.limits.maxVertexInputBindings = 16;
+		props->properties.limits.maxVertexInputAttributes = 32;
+		props->properties.limits.maxVertexInputBindingStride = 2048;
+		props->properties.limits.maxVertexInputAttributeOffset = 2047;
 		props->properties.vendorID = 0x1234;
 		props->properties.deviceID = 0x5678;
 		for (auto* item = static_cast<VkBaseOutStructure*>(props->pNext); item; item = item->pNext)
@@ -255,6 +259,10 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "AdapterReportsDriverPropertiesWithoutAssumi
 	SWIM_CHECK_EQUAL(info.DriverInfo, std::string("Test driver build"));
 	SWIM_CHECK_EQUAL(info.ApiVersion, std::string("1.3.350"));
 	SWIM_CHECK_EQUAL(info.DriverVersion, 0x12345678u);
+	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxBindings, 16u);
+	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxAttributes, 32u);
+	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxBindingStride, 2048u);
+	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxAttributeOffset, 2047u);
 	RhiVulkan::VulkanDiagnosticsState state{ std::make_shared<Rhi::DiagnosticLog>(), false };
 	RhiVulkan::ReportAdapterInfo(state, info);
 	SWIM_CHECK(state.Log->Snapshot().IsClean());

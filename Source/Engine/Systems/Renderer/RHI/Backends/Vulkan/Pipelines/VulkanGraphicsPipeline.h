@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanPipelineLayout.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanVertexInput.h"
 
 namespace Swim::RhiVulkan
 {
@@ -16,6 +17,11 @@ namespace Swim::RhiVulkan
 		const std::shared_ptr<VulkanPipelineLayoutState>& GetLayoutState() const;
 		bool MatchesRendering(std::span<const Rhi::Format> colors, Rhi::Format depth, Rhi::SampleCount samples) const;
 
+		std::span<const VulkanVertexBindingRequirement> GetVertexRequirements() const
+		{
+			return vertexRequirements;
+		}
+
 	private:
 		std::shared_ptr<VulkanDeviceState> state;
 		std::vector<Rhi::Format> colorFormats;
@@ -23,6 +29,7 @@ namespace Swim::RhiVulkan
 		Rhi::SampleCount samples;
 		std::shared_ptr<VulkanPipelineLayoutState> layoutState;
 		VkPipeline pipeline = VK_NULL_HANDLE;
+		std::vector<VulkanVertexBindingRequirement> vertexRequirements;
 	};
 
 } // namespace Swim::RhiVulkan

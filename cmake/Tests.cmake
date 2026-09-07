@@ -285,6 +285,7 @@ function(swim_configure_tests)
 		add_dependencies(SwimTests SwimRhiSmokeShaders)
 		target_compile_definitions(SwimTests PRIVATE
 			SWIM_RHI_TRIANGLE_SPIRV_PATH="${SwimRhiTriangle_SPIRV}"
+			SWIM_RHI_VERTEX_INPUT_SPIRV_PATH="${SwimRhiVertexInput_SPIRV}"
 			SWIM_RHI_TEXTURE_SPIRV_PATH="${SwimRhiTexture_SPIRV}"
 			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"
 		)

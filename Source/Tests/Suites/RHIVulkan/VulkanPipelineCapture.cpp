@@ -20,10 +20,15 @@ namespace Swim::Testing
 		};
 		State->Dispatch.vkDestroyPipelineCache = +[](VkDevice, VkPipelineCache, const VkAllocationCallbacks*) { ++capture->CachesDestroyed; };
 		auto& limits = State->Device.physical_device.properties.limits;
+		limits.maxVertexInputBindings = 32;
+		limits.maxVertexInputAttributes = 32;
+		limits.maxVertexInputBindingStride = 2048;
+		limits.maxVertexInputAttributeOffset = 2047;
 		limits.framebufferColorSampleCounts = limits.framebufferDepthSampleCounts = limits.framebufferStencilSampleCounts = VK_SAMPLE_COUNT_1_BIT;
 		State->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties = +[](VkPhysicalDevice, VkFormat, VkFormatProperties* properties)
 		{
 			properties->optimalTilingFeatures = capture->FormatFeatures;
+			properties->bufferFeatures = capture->VertexFormatFeatures;
 		};
 		State->Dispatch.vkCreateShaderModule = +[](VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule* module) -> VkResult
 		{
@@ -51,6 +56,17 @@ namespace Swim::Testing
 			capture->PipelineColors.assign(rendering.pColorAttachmentFormats, rendering.pColorAttachmentFormats + rendering.colorAttachmentCount);
 			capture->PipelineDepth = rendering.depthAttachmentFormat;
 			capture->PipelineStencil = rendering.stencilAttachmentFormat;
+			capture->VertexBindings.clear();
+			capture->VertexAttributes.clear();
+			const auto& vertex = *info->pVertexInputState;
+			for (std::uint32_t index = 0; index < vertex.vertexBindingDescriptionCount; ++index)
+			{
+				capture->VertexBindings.push_back(vertex.pVertexBindingDescriptions[index]);
+			}
+			for (std::uint32_t index = 0; index < vertex.vertexAttributeDescriptionCount; ++index)
+			{
+				capture->VertexAttributes.push_back(vertex.pVertexAttributeDescriptions[index]);
+			}
 			capture->Topology = info->pInputAssemblyState->topology;
 			capture->Winding = info->pRasterizationState->frontFace;
 			capture->DepthState = *info->pDepthStencilState;
@@ -64,6 +80,14 @@ namespace Swim::Testing
 		};
 		State->Dispatch.vkDestroyPipeline = +[](VkDevice, VkPipeline, const VkAllocationCallbacks*) { ++capture->PipelinesDestroyed; };
 		State->Dispatch.vkCmdBindPipeline = +[](VkCommandBuffer, VkPipelineBindPoint, VkPipeline) { ++capture->BindCount; };
+		State->Dispatch.vkCmdBindVertexBuffers = +[](VkCommandBuffer, std::uint32_t slot, std::uint32_t,
+			const VkBuffer* buffers, const VkDeviceSize* offsets)
+		{
+			++capture->VertexBindCount;
+			capture->LastVertexSlot = slot;
+			capture->LastVertexBuffer = *buffers;
+			capture->LastVertexOffset = *offsets;
+		};
 		State->Dispatch.vkCmdBindIndexBuffer = +[](VkCommandBuffer, VkBuffer, VkDeviceSize, VkIndexType) {};
 		State->Dispatch.vkCmdDraw = +[](VkCommandBuffer, std::uint32_t vertices, std::uint32_t instances, std::uint32_t firstVertex, std::uint32_t firstInstance)
 		{
@@ -95,7 +119,8 @@ namespace Swim::Testing
 		return RhiVulkan::VulkanShaderProgram::Create(State, { stages, interface, {} });
 	}
 
-	std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> VulkanPipelineCapture::MakePipeline(Rhi::Format format)
+	std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> VulkanPipelineCapture::MakePipeline(Rhi::Format format,
+		std::span<const Rhi::VertexBindingDesc> bindings, std::span<const Rhi::VertexAttributeDesc> attributes)
 	{
 		auto program = MakeProgram();
 		auto layout = RhiVulkan::VulkanPipelineLayout::Create(State, { program.get(), {} });
@@ -103,6 +128,8 @@ namespace Swim::Testing
 		desc.Program = program.get();
 		desc.Layout = layout.get();
 		desc.ColorFormats = { &format, 1 };
+		desc.VertexBindings = bindings;
+		desc.VertexAttributes = attributes;
 		desc.DepthStencil.DepthTest = desc.DepthStencil.DepthWrite = false;
 		return RhiVulkan::VulkanGraphicsPipeline::Create(State, desc);
 	}

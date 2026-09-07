@@ -488,10 +488,19 @@ namespace Swim::Rhi
 		bool AsyncCompute = false;
 	};
 
+	struct VertexInputLimits
+	{
+		std::uint32_t MaxBindings = 0;
+		std::uint32_t MaxAttributes = 0;
+		std::uint32_t MaxBindingStride = 0;
+		std::uint32_t MaxAttributeOffset = 0;
+	};
+
 	struct GraphicsCapabilities
 	{
 		DescriptorLimits Descriptors;
 		QueueCapabilities Queues;
+		VertexInputLimits VertexInput;
 
 		std::uint32_t MaxPushConstantBytes = 0;
 		std::uint32_t MaxColorAttachments = 0;

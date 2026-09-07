@@ -99,6 +99,8 @@ namespace Swim::RhiVulkan
 		}
 
 		auto& capabilities = info.Capabilities;
+		capabilities.VertexInput = { limits.maxVertexInputBindings, limits.maxVertexInputAttributes,
+			limits.maxVertexInputBindingStride, limits.maxVertexInputAttributeOffset };
 		capabilities.Descriptors.MaxSampledTexturesPerStage = limits.maxPerStageDescriptorSampledImages;
 		capabilities.Descriptors.MaxSamplersPerStage = limits.maxPerStageDescriptorSamplers;
 		capabilities.Descriptors.MaxStorageTexturesPerStage = limits.maxPerStageDescriptorStorageImages;

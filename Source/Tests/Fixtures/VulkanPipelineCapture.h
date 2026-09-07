@@ -13,7 +13,8 @@ namespace Swim::Testing
 		VulkanPipelineCapture();
 		~VulkanPipelineCapture();
 		std::unique_ptr<RhiVulkan::VulkanShaderProgram> MakeProgram(Rhi::ShaderProgramInterfaceDesc interface = {});
-		std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> MakePipeline(Rhi::Format format = Rhi::Format::RGBA8Unorm);
+		std::unique_ptr<RhiVulkan::VulkanGraphicsPipeline> MakePipeline(Rhi::Format format = Rhi::Format::RGBA8Unorm,
+			std::span<const Rhi::VertexBindingDesc> bindings = {}, std::span<const Rhi::VertexAttributeDesc> attributes = {});
 
 		std::uint32_t CachesCreated = 0;
 		std::uint32_t CachesDestroyed = 0;
@@ -39,6 +40,13 @@ namespace Swim::Testing
 		VkPipelineColorBlendAttachmentState Blend{};
 		VkPipelineDepthStencilStateCreateInfo DepthState{};
 		std::vector<VkDynamicState> DynamicStates;
+		VkFormatFeatureFlags VertexFormatFeatures = VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
+		std::vector<VkVertexInputBindingDescription> VertexBindings;
+		std::vector<VkVertexInputAttributeDescription> VertexAttributes;
+		std::uint32_t VertexBindCount = 0;
+		std::uint32_t LastVertexSlot = 0;
+		VkBuffer LastVertexBuffer = VK_NULL_HANDLE;
+		VkDeviceSize LastVertexOffset = 0;
 		VkDrawIndirectCommand Draw{};
 		VkDrawIndexedIndirectCommand IndexedDraw{};
 	};
