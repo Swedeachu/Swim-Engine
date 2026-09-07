@@ -23,7 +23,7 @@ namespace Swim::RhiVulkan
 		case Format::RG16Unorm: case Format::RG16Snorm: case Format::RG16Uint: case Format::RG16Sint: case Format::RG16Float:
 		case Format::RGBA8Unorm: case Format::RGBA8UnormSrgb: case Format::RGBA8Snorm: case Format::RGBA8Uint: case Format::RGBA8Sint:
 		case Format::BGRA8Unorm: case Format::BGRA8UnormSrgb:
-		case Format::RGB10A2Unorm: case Format::RGB10A2Uint: case Format::R11G11B10Float: case Format::RGB9E5Float:
+		case Format::BGR10A2Unorm: case Format::RGB10A2Unorm: case Format::RGB10A2Uint: case Format::R11G11B10Float: case Format::RGB9E5Float:
 			return 4;
 		case Format::RG32Uint: case Format::RG32Sint: case Format::RG32Float:
 		case Format::RGBA16Unorm: case Format::RGBA16Snorm: case Format::RGBA16Uint: case Format::RGBA16Sint: case Format::RGBA16Float:

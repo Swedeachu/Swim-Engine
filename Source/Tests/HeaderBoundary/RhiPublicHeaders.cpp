@@ -1,3 +1,4 @@
+#include "Engine/Systems/Renderer/RHI/RhiSwapchainColor.h"
 #include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 #include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
 #include "Engine/Systems/Renderer/RHI/RhiPipelineCache.h"

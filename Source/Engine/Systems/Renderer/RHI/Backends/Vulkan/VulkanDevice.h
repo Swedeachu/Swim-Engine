@@ -96,40 +96,9 @@ namespace Swim::RhiVulkan
 				return *graphicsQueue;
 			}
 
+			Rhi::SwapchainSupport QuerySwapchainSupport(Platform::Window& window) const override;
 			std::unique_ptr<Rhi::Swapchain> CreateSwapchain(
-				Platform::Window& window,
-				const Rhi::SwapchainDesc& desc) override
-			{
-				RequireVulkanDevice(*state);
-				std::uintptr_t surfaceHandle = 0;
-				if (!Platform::Internal::CreateVulkanSurface(
-					window, ToNativeHandle(state->Instance->Instance.instance), surfaceHandle))
-				{
-					return nullptr;
-				}
-				const VkSurfaceKHR surface = FromNativeHandle<VkSurfaceKHR>(surfaceHandle);
-
-				VkBool32 presentationSupported = VK_FALSE;
-				const VkResult supportResult = state->Instance->Dispatch.vkGetPhysicalDeviceSurfaceSupportKHR(
-					state->Device.physical_device.physical_device,
-					state->QueueFamilies.Graphics,
-					surface,
-					&presentationSupported);
-				if (supportResult != VK_SUCCESS || presentationSupported == VK_FALSE)
-				{
-					Platform::Internal::DestroyVulkanSurface(
-						ToNativeHandle(state->Instance->Instance.instance), ToNativeHandle(surface));
-					CheckVulkanResult(*state, supportResult, "vkGetPhysicalDeviceSurfaceSupportKHR");
-					return nullptr;
-				}
-
-				auto result = std::make_unique<VulkanSwapchain>(state, window, surface, desc);
-				if (!result->Initialize())
-				{
-					return nullptr;
-				}
-				return result;
-			}
+				Platform::Window& window, const Rhi::SwapchainDesc& desc) override;
 
 			std::unique_ptr<Rhi::Buffer> CreateBuffer(const Rhi::BufferDesc& desc) override
 			{

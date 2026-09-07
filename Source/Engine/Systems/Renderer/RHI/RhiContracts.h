@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiDeviceDiagnostics.h"
 #include "Engine/Systems/Renderer/RHI/RhiMemoryBudget.h"
+#include "Engine/Systems/Renderer/RHI/RhiSwapchainColor.h"
 #include "Engine/Systems/Renderer/RHI/RhiPipelineCache.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiDiagnostics.h"
@@ -208,10 +209,12 @@ namespace Swim::Rhi
 
 	struct SwapchainDesc
 	{
+		// Preference within the requested color mode; HDR defaults to 10-bit PQ,
+		// then RGBA16Float linear. Always inspect the resulting format/color space.
 		Format PreferredFormat = Format::BGRA8UnormSrgb;
 		std::uint32_t ImageCount = 3;
 		bool Vsync = true;
-		bool Hdr = false;
+		SwapchainColorMode ColorMode = SwapchainColorMode::Sdr;
 	};
 
 	struct BufferCopyRegion
@@ -544,6 +547,12 @@ namespace Swim::Rhi
 	{
 	public:
 		virtual Format GetFormat() const = 0;
+		// Undefined until native images exist. Re-read after every successful
+		// Resize: PreferHdr may switch encodings as surface capabilities change.
+		virtual SwapchainColorSpace GetColorSpace() const
+		{
+			return SwapchainColorSpace::Undefined;
+		}
 		virtual Extent2D GetExtent() const = 0;
 		virtual std::uint32_t GetImageCount() const = 0;
 		virtual TextureView& GetImageView(std::uint32_t imageIndex) = 0;
@@ -597,6 +606,12 @@ namespace Swim::Rhi
 		virtual const AdapterInfo& GetAdapterInfo() const = 0;
 		virtual Queue& GetQueue(QueueType type) = 0;
 
+		// Empty for unsupported backends/presentation queues; native query failures
+		// throw. No GPU wait. Creation and resize requery the surface themselves.
+		virtual SwapchainSupport QuerySwapchainSupport(Platform::Window&) const
+		{
+			return {};
+		}
 		virtual std::unique_ptr<Swapchain> CreateSwapchain(Platform::Window& window, const SwapchainDesc& desc) = 0;
 		virtual std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
 		virtual std::unique_ptr<Texture> CreateTexture(const TextureDesc& desc) = 0;

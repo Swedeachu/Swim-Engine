@@ -4,7 +4,9 @@
 #include "Tests/Framework/Test.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 
+#include <algorithm>
 #include <array>
+#include <iostream>
 #include <chrono>
 #include <cstdlib>
 #include <string_view>
@@ -33,7 +35,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(false, "Window manager did not complete the requested lifecycle transition within five seconds");
 	}
 
-	void RunWindowLifecycleSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
+	void RunWindowLifecycle(const Rhi::GraphicsSystemDesc& graphicsDesc, Rhi::SwapchainColorMode colorMode)
 	{
 		Platform::PlatformSystem platform;
 		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "Window lifecycle smoke requires a desktop video driver and window manager");
@@ -50,13 +52,30 @@ namespace
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
+		Rhi::SwapchainDesc swapchainDesc{};
+		swapchainDesc.ColorMode = colorMode;
+		const auto initialSupport = device->QuerySwapchainSupport(*window);
+		SWIM_REQUIRE(initialSupport.PresentationSupported && !initialSupport.Formats.empty());
+		if (colorMode == Rhi::SwapchainColorMode::RequireHdr)
+		{
+			SWIM_REQUIRE_MESSAGE(initialSupport.SupportsHdr(), "Strict HDR smoke requires HDR enabled for this desktop window");
+		}
+		std::cerr << "[RHI surface] HDR advertised=" << initialSupport.SupportsHdr() << '\n';
+		if (!initialSupport.SupportsHdr())
+		{
+			auto strict = swapchainDesc;
+			strict.ColorMode = Rhi::SwapchainColorMode::RequireHdr;
+			SWIM_CHECK(!device->CreateSwapchain(*window, strict));
+		}
+
 		// First creation while minimized must succeed as a dormant object, with
 		// no zero-sized native swapchain and no acquire semaphore signal.
 		SWIM_REQUIRE(window->Minimize());
 		PumpUntil(platform, [&] { return window->IsMinimized(); });
-		auto swapchain = device->CreateSwapchain(*window, {});
+		auto swapchain = device->CreateSwapchain(*window, swapchainDesc);
 		SWIM_REQUIRE(swapchain);
 		SWIM_CHECK_EQUAL(swapchain->GetImageCount(), 0u);
+		SWIM_CHECK(swapchain->GetColorSpace() == Rhi::SwapchainColorSpace::Undefined);
 		std::array<std::unique_ptr<Rhi::Semaphore>, 2> acquired;
 		for (auto& semaphore : acquired)
 		{
@@ -75,6 +94,12 @@ namespace
 			{
 				return false;
 			}
+			const auto support = device->QuerySwapchainSupport(*window);
+			const Rhi::SwapchainSurfaceFormat selected{ swapchain->GetFormat(), swapchain->GetColorSpace() };
+			SWIM_CHECK(std::find(support.Formats.begin(), support.Formats.end(), selected) != support.Formats.end());
+			SWIM_CHECK_EQUAL(selected.IsHdr(), colorMode != Rhi::SwapchainColorMode::Sdr && support.SupportsHdr());
+			std::cerr << "[RHI swapchain] format=" << static_cast<unsigned>(selected.PixelFormat)
+				<< " colorSpace=" << static_cast<unsigned>(selected.ColorSpace) << '\n';
 			// Resize retires the old generation before these presentation waits are
 			// destroyed. A changed image count gets a fresh per-image semaphore set.
 			presentReady.clear();
@@ -127,7 +152,11 @@ namespace
 				Rhi::RenderingAttachmentDesc color{};
 				color.View = &view;
 				color.Load = Rhi::LoadOp::Clear;
-				color.Clear.Value = { 0.1f, rendered / 6.0f, 0.7f, 1.0f };
+				// This smoke tests presentation/lifetime, not HDR tone mapping. Black
+				// is valid in both PQ and linear encodings without a luminance policy.
+				color.Clear.Value = colorMode == Rhi::SwapchainColorMode::Sdr ?
+					std::array<float, 4>{ 0.1f, rendered / 6.0f, 0.7f, 1.0f } :
+					std::array<float, 4>{ 0.0f, 0.0f, 0.0f, 1.0f };
 				commands.BeginRendering({ { &color, 1 }, nullptr, swapchain->GetExtent() });
 				commands.EndRendering();
 				commands.Transition(view.GetTexture(), Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::Present);
@@ -196,11 +225,24 @@ namespace
 		}
 	}
 
+	void RunWindowLifecycleSmoke(const Rhi::GraphicsSystemDesc& desc)
+	{
+		RunWindowLifecycle(desc, Rhi::SwapchainColorMode::Sdr);
+	}
+
+	void RunHdrWindowLifecycleSmoke(const Rhi::GraphicsSystemDesc& desc)
+	{
+		const char* required = std::getenv("SWIM_REQUIRE_HDR_SMOKE");
+		const bool strict = required && std::string_view(required) == "1";
+		RunWindowLifecycle(desc, strict ? Rhi::SwapchainColorMode::RequireHdr : Rhi::SwapchainColorMode::PreferHdr);
+	}
+
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
+			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "HdrNegotiationResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunHdrWindowLifecycleSmoke); } });
 			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunWindowLifecycleSmoke); } });
 		}
 		return true;

@@ -89,6 +89,7 @@ namespace Swim::RhiVulkan
 			case Rhi::Format::RGBA32Sint: return VK_FORMAT_R32G32B32A32_SINT;
 			case Rhi::Format::RGBA32Float: return VK_FORMAT_R32G32B32A32_SFLOAT;
 
+			case Rhi::Format::BGR10A2Unorm: return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
 			case Rhi::Format::RGB10A2Unorm: return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
 			case Rhi::Format::RGB10A2Uint: return VK_FORMAT_A2B10G10R10_UINT_PACK32;
 			case Rhi::Format::R11G11B10Float: return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
@@ -135,6 +136,7 @@ namespace Swim::RhiVulkan
 			case VK_FORMAT_R8G8B8A8_SRGB: return Rhi::Format::RGBA8UnormSrgb;
 			case VK_FORMAT_B8G8R8A8_UNORM: return Rhi::Format::BGRA8Unorm;
 			case VK_FORMAT_B8G8R8A8_SRGB: return Rhi::Format::BGRA8UnormSrgb;
+			case VK_FORMAT_A2R10G10B10_UNORM_PACK32: return Rhi::Format::BGR10A2Unorm;
 			case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return Rhi::Format::RGB10A2Unorm;
 			default: return Rhi::Format::Undefined;
 			}

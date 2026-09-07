@@ -45,6 +45,7 @@ namespace Swim::RhiVulkan
 		volk::VolkInstanceTable Dispatch{};
 		bool LoaderAcquired = false;
 		bool RequestDeviceFaultDiagnostics = true;
+		bool SwapchainColorSpaceEnabled = false;
 
 		~VulkanInstanceState()
 		{

@@ -2,6 +2,8 @@
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanSwapchainColor.h"
+
 #include <algorithm>
 #include <mutex>
 #include <stdexcept>
@@ -60,10 +62,6 @@ namespace Swim::RhiVulkan
 	bool VulkanSwapchain::Rebuild(std::uint32_t width, std::uint32_t height, const Rhi::TimelinePoint* safeAfter)
 	{
 		RequireVulkanDevice(*state);
-		if (desc.Hdr)
-		{
-			return false;
-		}
 		const auto pixelSize = window.GetPixelSize();
 		if (width == 0 || height == 0 || window.IsMinimized() || pixelSize.Width == 0 || pixelSize.Height == 0)
 		{
@@ -87,6 +85,23 @@ namespace Swim::RhiVulkan
 			return true;
 		}
 		session.RequireNoAcquiredImages();
+		std::optional<Rhi::SwapchainSurfaceFormat> selected;
+		try
+		{
+			selected = SelectSwapchainFormat(QueryVulkanSwapchainSupport(*state, surface), desc);
+		}
+		catch (...)
+		{
+			session.Invalidate();
+			throw;
+		}
+		if (!selected)
+		{
+			// Selection failed before oldSwapchain retirement. Preserve its images,
+			// but require a successful rebuild before the next acquisition.
+			session.Invalidate();
+			return false;
+		}
 		const bool replaceExisting = swapchain.swapchain != VK_NULL_HANDLE;
 		if (replaceExisting && !WaitForRetirement(safeAfter))
 		{
@@ -99,13 +114,8 @@ namespace Swim::RhiVulkan
 			builder.set_old_swapchain(swapchain);
 		}
 
-		const VkFormat preferredFormat = ToVkFormat(desc.PreferredFormat);
-		if (preferredFormat != VK_FORMAT_UNDEFINED)
-		{
-			builder.set_desired_format({ preferredFormat, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR });
-		}
 		builder
-			.add_fallback_format({ VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR })
+			.set_desired_format(ToVkSurfaceFormat(*selected))
 			.set_desired_extent(width, height)
 			.set_desired_min_image_count(std::max(2u, desc.ImageCount))
 			.set_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
@@ -135,6 +145,13 @@ namespace Swim::RhiVulkan
 		}
 
 		swapchain = std::move(swapchainResult).value();
+		// vk-bootstrap may fall back to the first advertised pair when its own
+		// second enumeration races a display change. Never expose that mismatch.
+		if (!MatchesSwapchainFormat(*selected, swapchain.image_format, swapchain.color_space))
+		{
+			DestroySwapchain();
+			return false;
+		}
 		SetVulkanObjectName(*state, VK_OBJECT_TYPE_SWAPCHAIN_KHR, ToNativeHandle(swapchain.swapchain), "Swim swapchain");
 		try
 		{
@@ -159,7 +176,8 @@ namespace Swim::RhiVulkan
 				DestroySwapchain();
 				return false;
 			}
-			format = FromVkFormat(swapchain.image_format);
+			format = selected->PixelFormat;
+			colorSpace = selected->ColorSpace;
 			extent = { swapchain.extent.width, swapchain.extent.height };
 			textures.reserve(newImages.size());
 			views.reserve(newImages.size());
@@ -196,6 +214,7 @@ namespace Swim::RhiVulkan
 		session.Invalidate();
 		extent = {};
 		format = Rhi::Format::Undefined;
+		colorSpace = Rhi::SwapchainColorSpace::Undefined;
 		views.clear();
 		textures.clear();
 		if (!imageViews.empty() && swapchain.swapchain != VK_NULL_HANDLE)

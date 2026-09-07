@@ -100,6 +100,8 @@ namespace Swim::Rhi
 		ASTC6x6UnormSrgb,
 		ASTC8x8Unorm,
 		ASTC8x8UnormSrgb,
+
+		BGR10A2Unorm, // Appended to preserve existing format identifiers.
 	};
 
 	constexpr bool IsDepthFormat(Format format)
@@ -515,6 +517,7 @@ namespace Swim::Rhi
 		bool BcTextureCompression = false;
 		bool Etc2TextureCompression = false;
 		bool AstcTextureCompression = false;
+		// Backend can negotiate HDR color spaces; query each window for usable pairs.
 		bool HdrSwapchain = false;
 	};
 

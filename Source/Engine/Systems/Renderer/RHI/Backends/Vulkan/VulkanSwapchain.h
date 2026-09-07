@@ -46,6 +46,11 @@ namespace Swim::RhiVulkan
 				return format;
 			}
 
+			Rhi::SwapchainColorSpace GetColorSpace() const override
+			{
+				return colorSpace;
+			}
+
 			Rhi::Extent2D GetExtent() const override
 			{
 				return extent;
@@ -92,6 +97,7 @@ namespace Swim::RhiVulkan
 			std::vector<std::unique_ptr<VulkanTextureView>> views;
 			Rhi::Format format = Rhi::Format::Undefined;
 			Rhi::Extent2D extent{};
+			Rhi::SwapchainColorSpace colorSpace = Rhi::SwapchainColorSpace::Undefined;
 		};
 
 } // namespace Swim::RhiVulkan

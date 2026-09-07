@@ -95,6 +95,18 @@ namespace Swim::RhiVulkan
 			return nullptr;
 		}
 
+		const auto systemInfo = vkb::SystemInfo::get_system_info(getInstanceProcAddr);
+		if (!systemInfo)
+		{
+			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanInstance", systemInfo.error().message());
+			return nullptr;
+		}
+		instance->SwapchainColorSpaceEnabled = systemInfo->is_extension_available(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+		if (instance->SwapchainColorSpaceEnabled)
+		{
+			instanceBuilder.enable_extension(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+		}
+
 		auto instanceResult = instanceBuilder.build();
 		if (!instanceResult)
 		{

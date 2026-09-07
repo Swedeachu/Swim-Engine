@@ -33,6 +33,7 @@ namespace Swim::RhiVulkan
 				  queueFamilies(queueFamilies),
 				  info(BuildAdapterInfo(this->instance->Dispatch, this->physicalDevice))
 			{
+				info.Capabilities.HdrSwapchain = this->instance->SwapchainColorSpaceEnabled;
 				ReportAdapterInfo(this->instance->Diagnostics, info);
 			}
 
