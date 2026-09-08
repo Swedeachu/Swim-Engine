@@ -52,6 +52,9 @@ namespace Swim::ShaderCompiler
 		// Explicit storage-image qualifier and result scalar/vector width.
 		std::string ResourceFormat;
 		std::uint32_t ResourceComponentCount = 0;
+		// Multiple layout categories and malformed binding metadata cannot be flattened.
+		bool HasUnsupportedBindingLayout = false;
+		std::string SemanticName;
 	};
 
 	struct ShaderEntryPointReflection
@@ -60,6 +63,9 @@ namespace Swim::ShaderCompiler
 		ShaderStage Stage = ShaderStage::Unknown;
 		std::array<std::uint32_t, 3> ThreadGroupSize{ 0, 0, 0 };
 		std::vector<ShaderBindingReflection> Parameters;
+		// A scope container can introduce bindings/offsets outside its parameters.
+		std::string ScopeKind;
+		bool HasUnsupportedScopeLayout = false;
 	};
 
 	struct ShaderReflection

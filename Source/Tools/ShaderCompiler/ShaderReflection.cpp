@@ -66,6 +66,8 @@ namespace Swim::ShaderCompiler
 		{
 			ShaderBindingReflection reflection;
 			reflection.Name = ReadString(parameter, "name");
+			reflection.SemanticName = ReadString(parameter, "semanticName");
+			reflection.HasUnsupportedBindingLayout = FindField(parameter, "bindings").has_value();
 			reflection.ResourceFormat = ReadString(parameter, "format");
 
 			if (const auto bindingField = FindField(parameter, "binding"))
@@ -78,7 +80,15 @@ namespace Swim::ShaderCompiler
 					reflection.HasSpace = ReadU32(binding, "space", reflection.Space);
 					reflection.HasOffset = ReadU32(binding, "offset", reflection.Offset);
 					reflection.HasSize = ReadU32(binding, "size", reflection.Size);
-					ReadU32(binding, "count", reflection.Count);
+					if ((FindField(binding, "count") && !ReadU32(binding, "count", reflection.Count)) ||
+						(FindField(binding, "space") && !reflection.HasSpace))
+					{
+						reflection.HasUnsupportedBindingLayout = true;
+					}
+				}
+				else
+				{
+					reflection.HasUnsupportedBindingLayout = true;
 				}
 			}
 
@@ -113,12 +123,12 @@ namespace Swim::ShaderCompiler
 					if (const auto array = FindField(type, "array"))
 					{
 						const auto error = array->get_bool().get(reflection.ResourceArray);
-						(void)error;
+						reflection.HasUnsupportedBindingLayout = reflection.HasUnsupportedBindingLayout || error != simdjson::SUCCESS;
 					}
 					if (const auto multisample = FindField(type, "multisample"))
 					{
 						const auto error = multisample->get_bool().get(reflection.ResourceMultisample);
-						(void)error;
+						reflection.HasUnsupportedBindingLayout = reflection.HasUnsupportedBindingLayout || error != simdjson::SUCCESS;
 					}
 					if (const auto result = FindField(type, "resultType"))
 					{
@@ -151,14 +161,14 @@ namespace Swim::ShaderCompiler
 			return reflection;
 		}
 
-		void ParseParameterArray(
+		bool ParseParameterArray(
 			simdjson::dom::element parametersElement,
 			std::vector<ShaderBindingReflection>& outParameters)
 		{
 			simdjson::dom::array parameters;
 			if (parametersElement.get_array().get(parameters))
 			{
-				return;
+				return false;
 			}
 
 			for (simdjson::dom::element parameterElement : parameters)
@@ -166,10 +176,11 @@ namespace Swim::ShaderCompiler
 				simdjson::dom::object parameter;
 				if (parameterElement.get_object().get(parameter))
 				{
-					continue;
+					return false;
 				}
 				outParameters.push_back(ParseBindingParameter(parameter));
 			}
+			return true;
 		}
 
 		void ParseThreadGroupSize(
@@ -364,15 +375,25 @@ namespace Swim::ShaderCompiler
 						simdjson::dom::object scope;
 						if (!scopeField->get_object().get(scope))
 						{
+							entryPoint.ScopeKind = ReadString(scope, "kind");
+							entryPoint.HasUnsupportedScopeLayout = FindField(scope, "binding").has_value() ||
+								FindField(scope, "bindings").has_value() ||
+								(FindField(scope, "kind") && entryPoint.ScopeKind.empty());
 							if (const auto parameters = FindField(scope, "parameters"))
 							{
-								ParseParameterArray(*parameters, entryPoint.Parameters);
+								entryPoint.HasUnsupportedScopeLayout = !ParseParameterArray(*parameters, entryPoint.Parameters) ||
+							entryPoint.HasUnsupportedScopeLayout;
 							}
+						}
+						else
+						{
+							entryPoint.HasUnsupportedScopeLayout = true;
 						}
 					}
 					else if (const auto parameters = FindField(entryPointObject, "parameters"))
 					{
-						ParseParameterArray(*parameters, entryPoint.Parameters);
+						entryPoint.HasUnsupportedScopeLayout = !ParseParameterArray(*parameters, entryPoint.Parameters) ||
+							entryPoint.HasUnsupportedScopeLayout;
 					}
 
 					result.Reflection.EntryPoints.push_back(std::move(entryPoint));

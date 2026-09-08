@@ -1,5 +1,5 @@
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
-#include "Tools/ShaderCompiler/ShaderStorageTexture.h"
+#include "Tools/ShaderCompiler/ShaderDescriptorBinding.h"
 
 #include <algorithm>
 
@@ -18,6 +18,11 @@ namespace Swim::ShaderCompiler
 		Rhi::ShaderStageMask stages = Rhi::ShaderStageMask::None;
 		for (const auto& entry : reflection.EntryPoints)
 		{
+			if ((entry.Stage == ShaderStage::Vertex && (static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex)) != 0) ||
+				(entry.Stage == ShaderStage::Fragment && (static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Fragment)) != 0))
+			{
+				return fail("Shader reflection requires at most one entry point per graphics stage");
+			}
 			if (entry.Stage == ShaderStage::Vertex)
 			{
 				stages = stages | Rhi::ShaderStageMask::Vertex;
@@ -39,15 +44,6 @@ namespace Swim::ShaderCompiler
 			{
 				return fail("RHI reflection requires graphics stages or one compute entry point");
 			}
-			for (const auto& parameter : entry.Parameters)
-			{
-				if (parameter.BindingKind == "descriptorTableSlot" || parameter.BindingKind == "pushConstantBuffer" ||
-					parameter.TypeKind == "parameterBlock" || parameter.TypeKind == "constantBuffer" ||
-					parameter.TypeKind == "resource" || parameter.TypeKind == "samplerState" || parameter.TypeKind == "array")
-				{
-					return fail("Entry-point resource parameters require a scoped reflection conversion");
-				}
-			}
 		}
 		if (stages == Rhi::ShaderStageMask::None)
 		{
@@ -57,7 +53,7 @@ namespace Swim::ShaderCompiler
 		{
 			if (parameter.BindingKind == "pushConstantBuffer")
 			{
-				if (parameter.TypeKind != "constantBuffer" || parameter.Count != 1 ||
+				if (parameter.HasUnsupportedBindingLayout || parameter.TypeKind != "constantBuffer" || parameter.Count != 1 ||
 					!parameter.HasOffset || !parameter.HasSize || parameter.Size == 0 ||
 					parameter.Offset % 4 != 0 || parameter.Size % 4 != 0 || parameter.Size > UINT32_MAX - parameter.Offset ||
 					!result.Interface.PushConstants.empty())
@@ -68,71 +64,44 @@ namespace Swim::ShaderCompiler
 				result.Interface.PushConstants.push_back({ parameter.Offset, parameter.Size, stages });
 				continue;
 			}
-			if (parameter.BindingKind != "descriptorTableSlot" || !parameter.HasIndex || parameter.Count == 0)
+			if (auto error = AppendRhiDescriptorBinding(parameter, stages, result.Interface); !error.empty())
 			{
-				return fail("Unsupported global resource binding: " + parameter.Name);
+				return fail(std::move(error));
 			}
-			Rhi::DescriptorType type;
-			Rhi::Format storageFormat = Rhi::Format::Undefined;
-			if (parameter.TypeKind == "samplerState")
+		}
+		for (const auto& entry : reflection.EntryPoints)
+		{
+			if (entry.HasUnsupportedScopeLayout || (!entry.ScopeKind.empty() && entry.ScopeKind != "none"))
 			{
-				type = Rhi::DescriptorType::Sampler;
+				return fail("Entry-point scope containers require a nested layout conversion: " + entry.Name);
 			}
-			else if (parameter.TypeKind == "constantBuffer")
+			const auto visibility = entry.Stage == ShaderStage::Vertex ? Rhi::ShaderStageMask::Vertex :
+				entry.Stage == ShaderStage::Fragment ? Rhi::ShaderStageMask::Fragment : Rhi::ShaderStageMask::Compute;
+			for (const auto& parameter : entry.Parameters)
 			{
-				type = Rhi::DescriptorType::UniformBuffer;
-			}
-			else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
-				parameter.ResourceShape == "texture2D" && stages == Rhi::ShaderStageMask::Compute &&
-				!parameter.ResourceArray && !parameter.ResourceMultisample)
-			{
-				storageFormat = GetRhiStorageTextureFormat(parameter);
-				if (storageFormat == Rhi::Format::Undefined)
+				if (parameter.HasUnsupportedBindingLayout)
 				{
-					return fail("Storage textures require an explicit supported format and matching scalar/vector type: " + parameter.Name);
+					return fail("Unsupported entry-point binding layout: " + entry.Name + "." + parameter.Name);
 				}
-				type = Rhi::DescriptorType::StorageTexture;
-			}
-			else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
-				stages == Rhi::ShaderStageMask::Compute && !parameter.ResourceArray && !parameter.ResourceMultisample &&
-				(parameter.ResourceShape == "structuredBuffer" || parameter.ResourceShape == "byteAddressBuffer"))
-			{
-				type = Rhi::DescriptorType::StorageBuffer;
-			}
-			else if (parameter.TypeKind == "resource" && (parameter.ResourceAccess.empty() || parameter.ResourceAccess == "read"))
-			{
-				if (parameter.ResourceShape == "texture2D" && !parameter.ResourceArray && !parameter.ResourceMultisample &&
-					parameter.ResourceScalarType == "float32")
+				if (parameter.BindingKind == "descriptorTableSlot")
 				{
-					type = Rhi::DescriptorType::SampledTexture;
+					if (auto error = AppendRhiDescriptorBinding(parameter, visibility, result.Interface); !error.empty())
+					{
+						return fail(entry.Name + ": " + error);
+					}
+					continue;
 				}
-				else if (parameter.ResourceShape == "structuredBuffer" || parameter.ResourceShape == "byteAddressBuffer")
+				// Only stage IO is ignored. Uniform bytes, implicit scope containers,
+				// nested resources and entry-local push blocks must never disappear.
+				const bool valueType = parameter.TypeKind == "scalar" || parameter.TypeKind == "vector" ||
+					parameter.TypeKind == "matrix" || parameter.TypeKind == "struct";
+				const bool varying = parameter.BindingKind == "varyingInput" || parameter.BindingKind == "varyingOutput" ||
+					(parameter.BindingKind.empty() && parameter.SemanticName.starts_with("SV_"));
+				if (!valueType || !varying)
 				{
-					type = Rhi::DescriptorType::ReadOnlyStorageBuffer;
-				}
-				else
-				{
-					return fail("Unsupported reflected resource shape: " + parameter.ResourceShape);
+					return fail("Unsupported entry-point parameter: " + entry.Name + "." + parameter.Name);
 				}
 			}
-			else
-			{
-				return fail("Unsupported reflected resource type/access: " + parameter.Name);
-			}
-			const auto space = parameter.HasSpace ? parameter.Space : 0;
-			auto schema = std::find_if(result.Interface.DescriptorSchemas.begin(), result.Interface.DescriptorSchemas.end(),
-				[space](const auto& candidate) { return candidate.Space == space; });
-			if (schema == result.Interface.DescriptorSchemas.end())
-			{
-				result.Interface.DescriptorSchemas.push_back({ space, {} });
-				schema = result.Interface.DescriptorSchemas.end() - 1;
-			}
-			if (std::any_of(schema->Bindings.begin(), schema->Bindings.end(), [&](const auto& binding) { return binding.Binding == parameter.Index; }))
-			{
-				return fail("Duplicate reflected descriptor binding: " + parameter.Name);
-			}
-			// Conservatively visible to every program stage; no handwritten stage guesses.
-			schema->Bindings.push_back({ parameter.Index, type, parameter.Count, stages, false, false, storageFormat });
 		}
 		return result;
 	}

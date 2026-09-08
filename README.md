@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the fourteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback and typed storage-image readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the fifteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback typed storage-image readback and entry-point descriptor readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -343,3 +343,11 @@ Compute programs can use explicitly formatted `RWTexture2D` resources, for examp
 Use `ShaderRead | ShaderWrite` for storage-image access in General layout. Add an explicit same-state barrier between dependent dispatches. Plain texture `ShaderRead` selects sampled-image access. Graphics and compute-capable families support color-image transfers and barriers, so upload, compute and readback can all stay on one family. Keep resources alive and wait for completion before CPU access; queue ownership transfers remain unsupported.
 
 `VulkanStorageTextureSmokeTests.cpp` demonstrates typed float/uint/int images, nonzero mip/layer views, guarded writes, dependent passes and readback across reused frame slots. It joins the existing native smoke suite and requires desktop Vulkan validation support.
+
+### Entry-point resource descriptors
+
+Slang entry functions can declare directly bound `uniform` resources, for example `[[vk::binding(5, 1)]] uniform RWStructuredBuffer<uint> Output`. `BuildRhiShaderInterface` combines these with globals, preserves their absolute binding coordinates and gives entry descriptors only their declaring stage's visibility. Shared globals keep all program stages. Every duplicate `(space, binding)` rejects; independent declarations are not implicit aliases.
+
+Use the returned descriptor schemas, push ranges and compute local size together when creating the RHI program. The existing descriptor-table and synchronization APIs apply. Writable buffers and typed storage images remain compute-only. The new `ScopedCompute.slang` smoke exercises a global input/push block with entry-local output and uniform buffers across two descriptor spaces; `ScopedGraphics.slang` verifies shared, vertex-only and fragment-only reflection.
+
+Nested parameter blocks, implicit entry uniform containers, descriptor arrays and entry-local push-constant blocks still reject. For entry uniform data, use an explicitly bound `ConstantBuffer<Settings>`; plain `uniform uint` parameters introduce an unsupported container. Keep push constants in the supported global block. See the architecture plan's entry-point descriptor checkpoint for the exact scope and validation status.
