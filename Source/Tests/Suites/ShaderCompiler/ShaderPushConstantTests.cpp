@@ -96,7 +96,7 @@ SWIM_TEST("ShaderCompiler.PushConstants", "MultipleBlocksAndUnsupportedTypesDisc
 	SWIM_CHECK_EQUAL(converted.Interface.PushConstants.size(), 1u);
 }
 
-SWIM_TEST("ShaderCompiler.PushConstants", "EntryPointResourceScopeAndComputeRemainExplicitlyUnsupported")
+SWIM_TEST("ShaderCompiler.PushConstants", "EntryPointResourceScopeAndMissingComputeLocalSizeReject")
 {
 	auto parsed = ParsePushBlock(R"json({"binding":{"kind":"uniform","offset":0,"size":16}})json");
 	SWIM_REQUIRE(parsed);

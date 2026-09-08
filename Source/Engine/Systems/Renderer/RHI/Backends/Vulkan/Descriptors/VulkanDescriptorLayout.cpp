@@ -33,6 +33,7 @@ namespace Swim::RhiVulkan
 		case Rhi::DescriptorType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
 		case Rhi::DescriptorType::SampledTexture: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 		case Rhi::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		case Rhi::DescriptorType::StorageBuffer:
 		case Rhi::DescriptorType::ReadOnlyStorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		default: throw std::invalid_argument("Descriptor type is not supported by the graphics resource baseline");
 		}
@@ -41,11 +42,12 @@ namespace Swim::RhiVulkan
 	VkShaderStageFlags ToVkDescriptorStages(Rhi::ShaderStageMask stages)
 	{
 		const auto mask = static_cast<std::uint32_t>(stages);
-		if (mask == 0 || (mask & ~3u) != 0)
+		if (mask == 0 || (mask & ~7u) != 0)
 		{
-			throw std::invalid_argument("Graphics descriptors require explicit vertex/fragment visibility");
+			throw std::invalid_argument("Descriptors require explicit vertex/fragment/compute visibility");
 		}
-		return ((mask & 1u) ? VK_SHADER_STAGE_VERTEX_BIT : 0) | ((mask & 2u) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0);
+		return ((mask & 1u) ? VK_SHADER_STAGE_VERTEX_BIT : 0) | ((mask & 2u) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0) |
+			((mask & 4u) ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
 	}
 
 	const Rhi::DescriptorSchemaDesc* FindDescriptorSchema(const VulkanPipelineLayoutState& layout, std::uint32_t space)
@@ -66,7 +68,7 @@ namespace Swim::RhiVulkan
 		auto& schemas = layout.Interface.DescriptorSchemas;
 		std::sort(schemas.begin(), schemas.end(), [](const auto& a, const auto& b) { return a.Space < b.Space; });
 		std::array<std::uint64_t, 4> totals{};
-		std::array<std::array<std::uint64_t, 4>, 2> perStage{};
+		std::array<std::array<std::uint64_t, 4>, 3> perStage{};
 		const std::array<std::uint32_t, 4> totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
 			limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers };
 		const std::array<std::uint32_t, 4> stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
@@ -91,6 +93,11 @@ namespace Swim::RhiVulkan
 					}
 					const auto type = ToVkDescriptorType(binding.Type);
 					ToVkDescriptorStages(binding.Stages);
+					if ((static_cast<std::uint32_t>(binding.Stages) & ~static_cast<std::uint32_t>(layout.ProgramStages)) != 0 ||
+						(binding.Type == Rhi::DescriptorType::StorageBuffer && binding.Stages != Rhi::ShaderStageMask::Compute))
+					{
+						return false;
+					}
 					const std::size_t slot = type == VK_DESCRIPTOR_TYPE_SAMPLER ? 0 : type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ? 1 :
 						type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? 2 : 3;
 					totals[slot] += binding.Count;

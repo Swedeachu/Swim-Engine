@@ -127,6 +127,15 @@ namespace Swim::RhiVulkan
 			state.PipelineCache.Handle, 1, &info, nullptr, &pipeline), "vkCreateGraphicsPipelines");
 	}
 
+	VkResult CreateCachedVulkanComputePipeline(const VulkanDeviceState& state, const VkComputePipelineCreateInfo& info, VkPipeline& pipeline)
+	{
+		EnsureInitialized(state);
+		std::shared_lock lock(state.PipelineCache.Mutex);
+		RequireVulkanDevice(state);
+		return CheckVulkanResult(state, state.Dispatch.vkCreateComputePipelines(state.Device.device,
+			state.PipelineCache.Handle, 1, &info, nullptr, &pipeline), "vkCreateComputePipelines");
+	}
+
 	void DestroyVulkanPipelineCache(const VulkanDeviceState& state) noexcept
 	{
 		// Final device-state owner only: callers must have joined host workers.

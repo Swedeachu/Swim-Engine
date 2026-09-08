@@ -25,9 +25,18 @@ namespace Swim::ShaderCompiler
 			{
 				stages = stages | Rhi::ShaderStageMask::Fragment;
 			}
+			else if (entry.Stage == ShaderStage::Compute && reflection.EntryPoints.size() == 1)
+			{
+				if (std::any_of(entry.ThreadGroupSize.begin(), entry.ThreadGroupSize.end(), [](auto size) { return size == 0; }))
+				{
+					return fail("Compute requires three fixed positive local-size dimensions");
+				}
+				stages = Rhi::ShaderStageMask::Compute;
+				result.Interface.ComputeThreadGroupSize = entry.ThreadGroupSize;
+			}
 			else
 			{
-				return fail("RHI graphics reflection requires vertex/fragment entry points");
+				return fail("RHI reflection requires graphics stages or one compute entry point");
 			}
 			for (const auto& parameter : entry.Parameters)
 			{
@@ -41,7 +50,7 @@ namespace Swim::ShaderCompiler
 		}
 		if (stages == Rhi::ShaderStageMask::None)
 		{
-			return fail("Shader reflection has no graphics entry points");
+			return fail("Shader reflection has no supported entry points");
 		}
 		for (const auto& parameter : reflection.GlobalParameters)
 		{
@@ -70,6 +79,12 @@ namespace Swim::ShaderCompiler
 			else if (parameter.TypeKind == "constantBuffer")
 			{
 				type = Rhi::DescriptorType::UniformBuffer;
+			}
+			else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
+				stages == Rhi::ShaderStageMask::Compute && !parameter.ResourceArray && !parameter.ResourceMultisample &&
+				(parameter.ResourceShape == "structuredBuffer" || parameter.ResourceShape == "byteAddressBuffer"))
+			{
+				type = Rhi::DescriptorType::StorageBuffer;
 			}
 			else if (parameter.TypeKind == "resource" && (parameter.ResourceAccess.empty() || parameter.ResourceAccess == "read"))
 			{

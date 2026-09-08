@@ -22,6 +22,8 @@ namespace Swim::RhiVulkan
 	Rhi::PipelineCacheLoadStatus LoadVulkanPipelineCache(const VulkanDeviceState& state, std::span<const std::byte> data);
 	Rhi::PipelineCacheData ExportVulkanPipelineCache(const VulkanDeviceState& state);
 	VkResult CreateCachedVulkanGraphicsPipeline(const VulkanDeviceState& state, const VkGraphicsPipelineCreateInfo& info, VkPipeline& pipeline);
+	VkResult CreateCachedVulkanComputePipeline(const VulkanDeviceState& state, const VkComputePipelineCreateInfo& info, VkPipeline& pipeline);
+
 	void DestroyVulkanPipelineCache(const VulkanDeviceState& state) noexcept;
 
 } // namespace Swim::RhiVulkan

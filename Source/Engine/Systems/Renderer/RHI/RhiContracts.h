@@ -159,12 +159,16 @@ namespace Swim::Rhi
 	{
 		std::span<const DescriptorSchemaDesc> DescriptorSchemas;
 		std::span<const PushConstantRange> PushConstants;
+		// Fixed local size from the sole compute entry point; zero for graphics.
+		std::array<std::uint32_t, 3> ComputeThreadGroupSize{};
 	};
 
 	struct ShaderProgramInterface
 	{
 		std::vector<DescriptorSchemaDesc> DescriptorSchemas;
 		std::vector<PushConstantRange> PushConstants;
+		// Fixed local size from the sole compute entry point; zero for graphics.
+		std::array<std::uint32_t, 3> ComputeThreadGroupSize{};
 	};
 
 	struct ShaderProgramDesc
@@ -206,6 +210,7 @@ namespace Swim::Rhi
 		std::span<const VertexAttributeDesc> VertexAttributes;
 	};
 
+	// One compute entry point. An empty EntryPoint selects the program entry; otherwise it must match.
 	struct ComputePipelineDesc
 	{
 		ShaderProgram* Program = nullptr;
@@ -496,18 +501,20 @@ namespace Swim::Rhi
 		virtual void CopyTextureToBuffer(Texture& source, Buffer& destination, const BufferTextureCopyRegion& region) = 0;
 		// Transitions/copies are outside rendering. Resources remain alive until
 		// submission completion. Transitions do not transfer queue-family ownership.
-		// The Vulkan baseline uses the graphics family for barriers/image work;
-		// CopyBuffer alone may record on a transfer family. Caller supplies states.
+		// Image work uses the graphics family; buffer barriers also support compute
+		// families without vertex/index input states. CopyBuffer also supports transfer.
 		virtual void BeginRendering(const RenderingDesc& desc) = 0;
 		virtual void EndRendering() = 0;
+		// One active graphics/compute pipeline. Binding either clears table bindings;
+		// explicitly rebind tables for the selected pipeline before draw/dispatch.
 		virtual void BindGraphicsPipeline(GraphicsPipeline& pipeline) = 0;
 		virtual void BindComputePipeline(ComputePipeline& pipeline) = 0;
 		virtual void BindDescriptorTable(std::uint32_t space, DescriptorTable& table) = 0;
-		// Update the bound graphics pipeline's reflected push-constant layout, inside
+		// Update the active graphics/compute pipeline's reflected push-constant layout, inside
 		// or outside rendering. Data is copied during recording. Offset/size must be
 		// nonzero-size, four-byte aligned and covered by every requested stage.
 		// Include every stage whose range overlaps the update. Initialize all reflected
-		// range bytes before drawing. Compatible layouts preserve values; after a push
+		// range bytes before drawing/dispatching. Compatible layouts preserve values; after a push
 		// with an incompatible layout, initialize that layout fully. Pool reuse resets
 		// initialization. Binding a pipeline alone does not disturb pushed values.
 		virtual void PushConstants(ShaderStageMask stages, std::uint32_t offset, std::span<const std::byte> data) = 0;
@@ -519,6 +526,9 @@ namespace Swim::Rhi
 		virtual void BindIndexBuffer(Buffer& buffer, std::uint64_t offset, IndexType type) = 0;
 		virtual void Draw(std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
 		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0, std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
+		// Workgroup counts, bounded per axis by Capabilities.Compute.MaxGroupCount.
+		// Zero counts are valid no-work dispatches but still require complete state.
+		// Requires a compute-capable queue, active compute pipeline and no rendering.
 		virtual void Dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) = 0;
 		// Query commands require recording outside rendering. Reset each slot before
 		// its first write and every reuse; synchronize prior GPU uses before reset.

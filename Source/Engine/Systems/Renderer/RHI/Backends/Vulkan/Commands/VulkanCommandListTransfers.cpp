@@ -13,9 +13,16 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::Transition(Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after)
 	{
 		RequireRecording(true);
-		// This baseline records resource work on the graphics family. Dedicated
-		// transfer/compute ownership and granularity policy arrive with transfers.
-		RequireGraphicsQueue();
+		// Buffers remain on one family; barriers do not transfer queue ownership.
+		if (poolState->FamilyIndex != GetState()->QueueFamilies.Graphics)
+		{
+			RequireComputeQueue();
+			const auto unsupported = Rhi::ResourceState::VertexBuffer | Rhi::ResourceState::IndexBuffer;
+			if ((static_cast<std::uint32_t>(before | after) & static_cast<std::uint32_t>(unsupported)) != 0)
+			{
+				throw std::invalid_argument("Compute-family buffer barriers cannot use vertex/index input states");
+			}
+		}
 		RequireResource<VulkanBuffer>(buffer, GetState());
 		if (after == Rhi::ResourceState::Undefined)
 		{

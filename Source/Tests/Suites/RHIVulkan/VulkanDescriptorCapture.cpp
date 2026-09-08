@@ -93,11 +93,12 @@ namespace Swim::Testing
 			return capture->SamplerResult;
 		};
 		State->Dispatch.vkDestroySampler = +[](VkDevice, VkSampler, const VkAllocationCallbacks*) { ++capture->SamplersDestroyed; };
-		State->Dispatch.vkCmdBindDescriptorSets = +[](VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout,
+		State->Dispatch.vkCmdBindDescriptorSets = +[](VkCommandBuffer, VkPipelineBindPoint point, VkPipelineLayout,
 			std::uint32_t space, std::uint32_t, const VkDescriptorSet*, std::uint32_t, const std::uint32_t*)
 		{
 			++capture->DescriptorBinds;
 			capture->BoundSpace = space;
+			capture->DescriptorBindPoint = point;
 		};
 	}
 

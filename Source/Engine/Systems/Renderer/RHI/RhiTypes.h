@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -496,6 +497,13 @@ namespace Swim::Rhi
 		std::uint32_t MaxAttributeOffset = 0;
 	};
 
+	struct ComputeLimits
+	{
+		std::array<std::uint32_t, 3> MaxGroupCount{};
+		std::array<std::uint32_t, 3> MaxGroupSize{};
+		std::uint32_t MaxInvocations = 0;
+	};
+
 	struct GraphicsCapabilities
 	{
 		DescriptorLimits Descriptors;
@@ -503,6 +511,7 @@ namespace Swim::Rhi
 		VertexInputLimits VertexInput;
 
 		std::uint32_t MaxPushConstantBytes = 0;
+		ComputeLimits Compute{};
 		std::uint32_t MaxColorAttachments = 0;
 		std::uint32_t MaxSamples = 1;
 		std::uint32_t SubgroupSize = 0;

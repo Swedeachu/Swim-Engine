@@ -38,6 +38,9 @@ namespace Swim::RhiVulkan
 			for (const auto& stage : program->GetStages())
 			{
 				stages |= stage.Stage;
+				const auto mask = stage.Stage == VK_SHADER_STAGE_VERTEX_BIT ? Rhi::ShaderStageMask::Vertex :
+					stage.Stage == VK_SHADER_STAGE_FRAGMENT_BIT ? Rhi::ShaderStageMask::Fragment : Rhi::ShaderStageMask::Compute;
+				result->layoutState->ProgramStages = result->layoutState->ProgramStages | mask;
 			}
 			result->layoutState->PushConstants = BuildVulkanPushConstantRanges(*result->state,
 				result->layoutState->Interface.PushConstants, stages);

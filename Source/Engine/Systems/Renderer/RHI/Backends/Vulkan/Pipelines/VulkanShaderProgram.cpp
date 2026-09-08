@@ -31,13 +31,14 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 		}
-		if (desc.Stages.empty() || desc.Stages.size() > 2)
+		if (!state || desc.Stages.empty() || desc.Stages.size() > 2)
 		{
 			return nullptr;
 		}
 		auto program = std::make_unique<VulkanShaderProgram>(std::move(state));
 		program->interface.DescriptorSchemas.assign(desc.Interface.DescriptorSchemas.begin(), desc.Interface.DescriptorSchemas.end());
 		program->interface.PushConstants.assign(desc.Interface.PushConstants.begin(), desc.Interface.PushConstants.end());
+		program->interface.ComputeThreadGroupSize = desc.Interface.ComputeThreadGroupSize;
 		program->stages.resize(desc.Stages.size());
 		std::uint32_t seenStages = 0;
 		for (std::size_t index = 0; index < desc.Stages.size(); ++index)
@@ -45,7 +46,8 @@ namespace Swim::RhiVulkan
 			const auto& source = desc.Stages[index];
 			const auto bit = static_cast<std::uint32_t>(source.Stage);
 			// Additional shader stages require explicit device features and pipeline support.
-			if ((source.Stage != Rhi::ShaderStageMask::Vertex && source.Stage != Rhi::ShaderStageMask::Fragment) ||
+			if ((source.Stage != Rhi::ShaderStageMask::Vertex && source.Stage != Rhi::ShaderStageMask::Fragment && source.Stage != Rhi::ShaderStageMask::Compute) ||
+				(source.Stage == Rhi::ShaderStageMask::Compute && desc.Stages.size() != 1) ||
 				(seenStages & bit) != 0 || source.EntryPoint.empty() || source.EntryPoint.find('\0') != std::string_view::npos ||
 				source.Bytecode.size() < 5 * sizeof(std::uint32_t) || source.Bytecode.size() % sizeof(std::uint32_t) != 0)
 			{
@@ -60,7 +62,8 @@ namespace Swim::RhiVulkan
 				return nullptr;
 			}
 			auto& stage = program->stages[index];
-			stage.Stage = source.Stage == Rhi::ShaderStageMask::Vertex ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
+			stage.Stage = source.Stage == Rhi::ShaderStageMask::Vertex ? VK_SHADER_STAGE_VERTEX_BIT :
+				source.Stage == Rhi::ShaderStageMask::Fragment ? VK_SHADER_STAGE_FRAGMENT_BIT : VK_SHADER_STAGE_COMPUTE_BIT;
 			stage.EntryPoint = source.EntryPoint;
 			VkShaderModuleCreateInfo info{};
 			info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;

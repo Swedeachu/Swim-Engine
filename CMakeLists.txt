@@ -312,13 +312,19 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_slang_program(SwimRhiPushConstants
 		SOURCE Source/Shaders/Slang/RhiSmoke/PushConstants.slang
 	)
+	swim_add_slang_program(SwimRhiCompute
+		SOURCE Source/Shaders/Slang/RhiSmoke/Compute.slang
+		PROFILE spirv_1_5
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
 			"${SwimRhiVertexInput_SPIRV}" "${SwimRhiVertexInput_REFLECTION}"
 			"${SwimRhiPushConstants_SPIRV}" "${SwimRhiPushConstants_REFLECTION}"
+			"${SwimRhiCompute_SPIRV}" "${SwimRhiCompute_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/Triangle.slang Source/Shaders/Slang/RhiSmoke/Texture.slang
 			Source/Shaders/Slang/RhiSmoke/VertexInput.slang Source/Shaders/Slang/RhiSmoke/PushConstants.slang
+			Source/Shaders/Slang/RhiSmoke/Compute.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()

@@ -13,6 +13,8 @@ namespace Swim::RhiVulkan
 {
 
 	class VulkanGraphicsPipeline;
+	class VulkanComputePipeline;
+	struct VulkanPipelineLayoutState;
 	class VulkanDescriptorTable;
 
 	class VulkanCommandList final : public Rhi::CommandList
@@ -84,9 +86,12 @@ namespace Swim::RhiVulkan
 		VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 		void RequireRecording(bool outsideRendering = false) const;
 		void RequireGraphicsQueue() const;
+		void RequireComputeQueue() const;
+		const VulkanPipelineLayoutState& RequireActivePipeline() const;
 
 		std::uint64_t generation = UINT64_MAX;
 		const VulkanGraphicsPipeline* graphicsPipeline = nullptr;
+		const VulkanComputePipeline* computePipeline = nullptr;
 		std::vector<Rhi::Format> renderingColors;
 		Rhi::Format renderingDepth = Rhi::Format::Undefined;
 		Rhi::SampleCount renderingSamples = Rhi::SampleCount::X1;

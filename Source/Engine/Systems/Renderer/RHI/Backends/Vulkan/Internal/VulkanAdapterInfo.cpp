@@ -114,6 +114,12 @@ namespace Swim::RhiVulkan
 		capabilities.Queues.AsyncCompute = physicalDevice.has_separate_compute_queue();
 
 		capabilities.MaxPushConstantBytes = limits.maxPushConstantsSize;
+		for (std::size_t axis = 0; axis < 3; ++axis)
+		{
+			capabilities.Compute.MaxGroupCount[axis] = limits.maxComputeWorkGroupCount[axis];
+			capabilities.Compute.MaxGroupSize[axis] = limits.maxComputeWorkGroupSize[axis];
+		}
+		capabilities.Compute.MaxInvocations = limits.maxComputeWorkGroupInvocations;
 		capabilities.MaxColorAttachments = limits.maxColorAttachments;
 		capabilities.MaxSamples = GetMaximumSampleCount(
 			limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts);

@@ -16,6 +16,7 @@ namespace Swim::RhiVulkan
 		GetState()->Dispatch.vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			FromNativeHandle<VkPipeline>(native.GetNativeHandle()));
 		graphicsPipeline = &native;
+		computePipeline = nullptr;
 	}
 
 	void VulkanCommandList::BindIndexBuffer(Rhi::Buffer& buffer, std::uint64_t offset, Rhi::IndexType type)

@@ -19,6 +19,7 @@
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanGraphicsPipeline.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanComputePipeline.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanSampler.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorTable.h"
@@ -342,10 +343,10 @@ namespace Swim::RhiVulkan
 				return VulkanGraphicsPipeline::Create(state, desc);
 			}
 
-			std::unique_ptr<Rhi::ComputePipeline> CreateComputePipeline(const Rhi::ComputePipelineDesc&) override
+			std::unique_ptr<Rhi::ComputePipeline> CreateComputePipeline(const Rhi::ComputePipelineDesc& desc) override
 			{
 				RequireVulkanDevice(*state);
-				return nullptr;
+				return VulkanComputePipeline::Create(state, desc);
 			}
 
 			std::unique_ptr<Rhi::DescriptorTable> CreateDescriptorTable(const Rhi::DescriptorTableDesc& desc) override

@@ -178,21 +178,21 @@ namespace Swim::ShaderCompiler
 				return;
 			}
 
+			std::array<std::uint32_t, 3> parsed{};
 			std::size_t index = 0;
 			for (simdjson::dom::element valueElement : values)
 			{
-				if (index >= outSize.size())
-				{
-					break;
-				}
-
 				std::uint64_t value = 0;
-				if (!valueElement.get_uint64().get(value) &&
-					value <= std::numeric_limits<std::uint32_t>::max())
+				if (index >= parsed.size() || valueElement.get_uint64().get(value) || value == 0 ||
+					value > std::numeric_limits<std::uint32_t>::max())
 				{
-					outSize[index] = static_cast<std::uint32_t>(value);
+					return;
 				}
-				++index;
+				parsed[index++] = static_cast<std::uint32_t>(value);
+			}
+			if (index == parsed.size())
+			{
+				outSize = parsed;
 			}
 		}
 	}

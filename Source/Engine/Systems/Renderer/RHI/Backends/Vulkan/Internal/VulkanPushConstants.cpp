@@ -8,16 +8,17 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
-		VkShaderStageFlags GraphicsStages(Rhi::ShaderStageMask stages)
+		VkShaderStageFlags SupportedStages(Rhi::ShaderStageMask stages)
 		{
 			const auto mask = static_cast<std::uint32_t>(stages);
-			const auto allowed = static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment);
+			const auto allowed = static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute);
 			if (mask == 0 || (mask & ~allowed) != 0)
 			{
-				throw std::invalid_argument("Push constants require explicit vertex/fragment visibility");
+				throw std::invalid_argument("Push constants require explicit vertex/fragment/compute visibility");
 			}
 			return ((mask & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex)) ? VK_SHADER_STAGE_VERTEX_BIT : 0) |
-				((mask & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Fragment)) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0);
+				((mask & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Fragment)) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0) |
+				((mask & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Compute)) ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
 		}
 	}
 
@@ -30,7 +31,7 @@ namespace Swim::RhiVulkan
 		std::vector<VkPushConstantRange> result;
 		for (const auto& range : ranges)
 		{
-			const auto stages = GraphicsStages(range.Stages);
+			const auto stages = SupportedStages(range.Stages);
 			if ((stages & ~programStages) != 0 || (seen & stages) != 0 || range.Size == 0 ||
 				range.Offset % 4 != 0 || range.Size % 4 != 0 || range.Offset >= limit || range.Size > limit - range.Offset)
 			{
@@ -55,7 +56,7 @@ namespace Swim::RhiVulkan
 	VkShaderStageFlags ValidateVulkanPushConstantWrite(std::span<const VkPushConstantRange> ranges,
 		Rhi::ShaderStageMask stages, std::uint32_t offset, std::size_t size)
 	{
-		const auto flags = GraphicsStages(stages);
+		const auto flags = SupportedStages(stages);
 		if (size == 0 || offset % 4 != 0 || size % 4 != 0 || size > UINT32_MAX - offset)
 		{
 			throw std::invalid_argument("Push-constant writes require a nonempty aligned byte range");

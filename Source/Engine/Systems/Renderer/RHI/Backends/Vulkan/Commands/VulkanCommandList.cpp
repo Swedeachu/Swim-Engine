@@ -56,6 +56,7 @@ namespace Swim::RhiVulkan
 		rendering = false;
 		recording = true;
 		graphicsPipeline = nullptr;
+		computePipeline = nullptr;
 		boundTables.clear();
 		pushConstantRanges.clear();
 		initializedPushConstants.clear();
@@ -80,16 +81,6 @@ namespace Swim::RhiVulkan
 		}
 		recording = false;
 		executable = true;
-	}
-
-	void VulkanCommandList::BindComputePipeline(Rhi::ComputePipeline&)
-	{
-		throw std::logic_error("Vulkan compute pipelines are implemented with item 39");
-	}
-
-	void VulkanCommandList::Dispatch(std::uint32_t, std::uint32_t, std::uint32_t)
-	{
-		throw std::logic_error("Vulkan dispatch commands are implemented with item 39");
 	}
 
 } // namespace Swim::RhiVulkan

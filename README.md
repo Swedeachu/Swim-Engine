@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the twelve native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing and push-constant updates:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the thirteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates and compute/storage-buffer readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -292,7 +292,7 @@ The opt-in `RHI.Vulkan.Smoke.MemoryBudgetAllocationAndRelease` case checks real 
 
 ### Vulkan pipeline caches
 
-Graphics pipelines automatically share a native cache per device. Call `Device::LoadPipelineCache(bytes)` before the first pipeline build to seed it, then persist the complete `Bytes` from a `Ready` `Device::GetPipelineCacheData()` result at a caller-chosen checkpoint. Cache data is bounded, versioned and checked against the device/driver; invalid files permit normal cold compilation. The RHI performs no automatic filesystem writes.
+Graphics and compute pipelines automatically share a native cache per device. Call `Device::LoadPipelineCache(bytes)` before the first pipeline build to seed it, then persist the complete `Bytes` from a `Ready` `Device::GetPipelineCacheData()` result at a caller-chosen checkpoint. Cache data is bounded, versioned and checked against the device/driver; invalid files permit normal cold compilation. The RHI performs no automatic filesystem writes.
 
 The strict opt-in `RHI.Vulkan.Smoke.PipelineCachePersistenceAndReuse` case checks export, file round trip and recreation on a second device. See the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md) for result handling, synchronization and persistence requirements.
 
@@ -327,3 +327,11 @@ explicitly discarding them; it refuses to reclaim in-flight storage and invalida
 old slices on success. See the architecture guide's readback checkpoint and
 `VulkanReadbackArenaSmokeTests.cpp` for the complete lifetime and transfer example.
 The native test joins the existing `SWIM_RUN_RHI_SMOKE=1` smoke suite.
+
+### Vulkan RHI compute
+
+Compile a fixed-local-size compute entry with the pinned Slang compiler and convert its sidecar with `BuildRhiShaderInterface`. Pass all three owned interface members into `ShaderProgramDesc::Interface`: `DescriptorSchemas`, `PushConstants` and `ComputeThreadGroupSize`. Create its layout and compute pipeline, bind initialized descriptor tables and push constants, then call `Dispatch(x, y, z)` outside rendering on a compute-capable queue. Counts are workgroups; the device exposes limits through `GraphicsCapabilities::Compute`.
+
+`RWStructuredBuffer` and `RWByteAddressBuffer` use `DescriptorType::StorageBuffer`. Dependent read/write passes require explicit `ShaderRead | ShaderWrite` barriers, including same-state barriers. Transition output for copies and readback for host access, then wait for completion. Keep each buffer on one queue family and retain all referenced resources until completion. Binding graphics or compute selects the active pipeline and requires rebinding tables. Push-constant range compatibility follows the same rules as graphics.
+
+`VulkanComputeSmokeTests.cpp` demonstrates two dependent 3D dispatches, a partial constant update, guarded output elements and CPU verification across four frames. It joins `SWIM_RUN_RHI_SMOKE=1 SwimTests --filter=RHI.Vulkan.Smoke`. Storage images, graphics-stage writes, indirect dispatch and queue ownership transfers remain outside this checkpoint. See the architecture plan for scope and the open desktop validation gate.

@@ -24,6 +24,7 @@ namespace Swim::Testing
 		std::uint32_t Updates = 0;
 		std::uint32_t DescriptorBinds = 0;
 		std::uint32_t BoundSpace = 0;
+		VkPipelineBindPoint DescriptorBindPoint{};
 		std::uint32_t FailSet = 0;
 		bool LayoutSupported = true;
 		VkResult PoolResult = VK_SUCCESS;

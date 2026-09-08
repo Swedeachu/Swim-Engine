@@ -1,7 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandList.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorTable.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanResourceAccess.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanGraphicsPipeline.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorLayout.h"
 
 namespace Swim::RhiVulkan
 {
@@ -9,30 +9,25 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::BindDescriptorTable(std::uint32_t space, Rhi::DescriptorTable& table)
 	{
 		RequireRecording();
-		RequireGraphicsQueue();
-		if (graphicsPipeline == nullptr)
-		{
-			throw std::logic_error("Bind a graphics pipeline before its descriptor tables");
-		}
+		const auto& layout = RequireActivePipeline();
 		auto& native = RequireResource<VulkanDescriptorTable>(table, GetState());
-		const auto& layout = graphicsPipeline->GetLayoutState();
-		if (native.GetLayoutState() != layout || space != native.GetSpace() || space >= boundTables.size() || !native.IsComplete())
+		if (native.GetLayoutState().get() != &layout || space != native.GetSpace() || space >= boundTables.size() || !native.IsComplete())
 		{
 			throw std::invalid_argument("Descriptor table must match the pipeline layout/space and have every element initialized");
 		}
 		const auto set = FromNativeHandle<VkDescriptorSet>(native.GetNativeHandle());
-		GetState()->Dispatch.vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout->Layout, space, 1, &set, 0, nullptr);
+		GetState()->Dispatch.vkCmdBindDescriptorSets(commandBuffer, computePipeline ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Layout, space, 1, &set, 0, nullptr);
 		native.Seal();
 		boundTables[space] = &native;
 	}
 
 	void VulkanCommandList::RequireDescriptorTables() const
 	{
-		for (const auto& schema : graphicsPipeline->GetLayoutState()->Interface.DescriptorSchemas)
+		for (const auto& schema : RequireActivePipeline().Interface.DescriptorSchemas)
 		{
 			if (!schema.Bindings.empty() && (schema.Space >= boundTables.size() || boundTables[schema.Space] == nullptr))
 			{
-				throw std::logic_error("Every reflected descriptor space must be bound before drawing");
+				throw std::logic_error("Every reflected descriptor space must be bound before drawing or dispatching");
 			}
 		}
 	}
