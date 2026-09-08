@@ -217,6 +217,7 @@ function(swim_configure_tests)
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanComputeCapture.h
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanStorageTextureCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanSmokeDiagnostics.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanValidationCapture.h
 		)
@@ -290,6 +291,8 @@ function(swim_configure_tests)
 			SWIM_RHI_PUSH_CONSTANTS_REFLECTION_PATH="${SwimRhiPushConstants_REFLECTION}"
 			SWIM_RHI_COMPUTE_SPIRV_PATH="${SwimRhiCompute_SPIRV}"
 			SWIM_RHI_COMPUTE_REFLECTION_PATH="${SwimRhiCompute_REFLECTION}"
+			SWIM_RHI_STORAGE_TEXTURE_SPIRV_PATH="${SwimRhiStorageTexture_SPIRV}"
+			SWIM_RHI_STORAGE_TEXTURE_REFLECTION_PATH="${SwimRhiStorageTexture_REFLECTION}"
 			SWIM_RHI_VERTEX_INPUT_SPIRV_PATH="${SwimRhiVertexInput_SPIRV}"
 			SWIM_RHI_TEXTURE_SPIRV_PATH="${SwimRhiTexture_SPIRV}"
 			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"

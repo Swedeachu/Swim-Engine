@@ -1,4 +1,5 @@
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
+#include "Tools/ShaderCompiler/ShaderStorageTexture.h"
 
 #include <algorithm>
 
@@ -72,6 +73,7 @@ namespace Swim::ShaderCompiler
 				return fail("Unsupported global resource binding: " + parameter.Name);
 			}
 			Rhi::DescriptorType type;
+			Rhi::Format storageFormat = Rhi::Format::Undefined;
 			if (parameter.TypeKind == "samplerState")
 			{
 				type = Rhi::DescriptorType::Sampler;
@@ -79,6 +81,17 @@ namespace Swim::ShaderCompiler
 			else if (parameter.TypeKind == "constantBuffer")
 			{
 				type = Rhi::DescriptorType::UniformBuffer;
+			}
+			else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
+				parameter.ResourceShape == "texture2D" && stages == Rhi::ShaderStageMask::Compute &&
+				!parameter.ResourceArray && !parameter.ResourceMultisample)
+			{
+				storageFormat = GetRhiStorageTextureFormat(parameter);
+				if (storageFormat == Rhi::Format::Undefined)
+				{
+					return fail("Storage textures require an explicit supported format and matching scalar/vector type: " + parameter.Name);
+				}
+				type = Rhi::DescriptorType::StorageTexture;
 			}
 			else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
 				stages == Rhi::ShaderStageMask::Compute && !parameter.ResourceArray && !parameter.ResourceMultisample &&
@@ -119,7 +132,7 @@ namespace Swim::ShaderCompiler
 				return fail("Duplicate reflected descriptor binding: " + parameter.Name);
 			}
 			// Conservatively visible to every program stage; no handwritten stage guesses.
-			schema->Bindings.push_back({ parameter.Index, type, parameter.Count, stages, false, false });
+			schema->Bindings.push_back({ parameter.Index, type, parameter.Count, stages, false, false, storageFormat });
 		}
 		return result;
 	}

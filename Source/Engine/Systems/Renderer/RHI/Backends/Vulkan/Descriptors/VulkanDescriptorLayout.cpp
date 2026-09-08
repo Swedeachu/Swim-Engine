@@ -32,6 +32,7 @@ namespace Swim::RhiVulkan
 		{
 		case Rhi::DescriptorType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
 		case Rhi::DescriptorType::SampledTexture: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		case Rhi::DescriptorType::StorageTexture: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		case Rhi::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		case Rhi::DescriptorType::StorageBuffer:
 		case Rhi::DescriptorType::ReadOnlyStorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -67,12 +68,12 @@ namespace Swim::RhiVulkan
 		const auto& limits = layout.Device->Device.physical_device.properties.limits;
 		auto& schemas = layout.Interface.DescriptorSchemas;
 		std::sort(schemas.begin(), schemas.end(), [](const auto& a, const auto& b) { return a.Space < b.Space; });
-		std::array<std::uint64_t, 4> totals{};
-		std::array<std::array<std::uint64_t, 4>, 3> perStage{};
-		const std::array<std::uint32_t, 4> totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
-			limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers };
-		const std::array<std::uint32_t, 4> stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
-			limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers };
+		std::array<std::uint64_t, 5> totals{};
+		std::array<std::array<std::uint64_t, 5>, 3> perStage{};
+		const std::array<std::uint32_t, 5> totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
+			limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers, limits.maxDescriptorSetStorageImages };
+		const std::array<std::uint32_t, 5> stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
+			limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers, limits.maxPerStageDescriptorStorageImages };
 		try
 		{
 			for (std::size_t index = 0; index < schemas.size(); ++index)
@@ -94,12 +95,15 @@ namespace Swim::RhiVulkan
 					const auto type = ToVkDescriptorType(binding.Type);
 					ToVkDescriptorStages(binding.Stages);
 					if ((static_cast<std::uint32_t>(binding.Stages) & ~static_cast<std::uint32_t>(layout.ProgramStages)) != 0 ||
-						(binding.Type == Rhi::DescriptorType::StorageBuffer && binding.Stages != Rhi::ShaderStageMask::Compute))
+						((binding.Type == Rhi::DescriptorType::StorageBuffer || binding.Type == Rhi::DescriptorType::StorageTexture) &&
+							binding.Stages != Rhi::ShaderStageMask::Compute) ||
+						(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat) :
+							binding.StorageTextureFormat != Rhi::Format::Undefined))
 					{
 						return false;
 					}
 					const std::size_t slot = type == VK_DESCRIPTOR_TYPE_SAMPLER ? 0 : type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ? 1 :
-						type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? 2 : 3;
+						type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? 2 : type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? 3 : 4;
 					totals[slot] += binding.Count;
 					if (totals[slot] > totalLimits[slot])
 					{
@@ -120,7 +124,7 @@ namespace Swim::RhiVulkan
 			}
 			for (const auto& counts : perStage)
 			{
-				if (counts[1] + counts[2] + counts[3] > limits.maxPerStageResources)
+				if (counts[1] + counts[2] + counts[3] + counts[4] > limits.maxPerStageResources)
 				{
 					return false;
 				}

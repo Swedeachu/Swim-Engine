@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the thirteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates and compute/storage-buffer readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the fourteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback and typed storage-image readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -334,4 +334,12 @@ Compile a fixed-local-size compute entry with the pinned Slang compiler and conv
 
 `RWStructuredBuffer` and `RWByteAddressBuffer` use `DescriptorType::StorageBuffer`. Dependent read/write passes require explicit `ShaderRead | ShaderWrite` barriers, including same-state barriers. Transition output for copies and readback for host access, then wait for completion. Keep each buffer on one queue family and retain all referenced resources until completion. Binding graphics or compute selects the active pipeline and requires rebinding tables. Push-constant range compatibility follows the same rules as graphics.
 
-`VulkanComputeSmokeTests.cpp` demonstrates two dependent 3D dispatches, a partial constant update, guarded output elements and CPU verification across four frames. It joins `SWIM_RUN_RHI_SMOKE=1 SwimTests --filter=RHI.Vulkan.Smoke`. Storage images, graphics-stage writes, indirect dispatch and queue ownership transfers remain outside this checkpoint. See the architecture plan for scope and the open desktop validation gate.
+`VulkanComputeSmokeTests.cpp` demonstrates two dependent 3D dispatches, a partial constant update, guarded output elements and CPU verification across four frames. It joins `SWIM_RUN_RHI_SMOKE=1 SwimTests --filter=RHI.Vulkan.Smoke`. Typed 2D storage images are implemented below. Graphics-stage writes, indirect dispatch and queue ownership transfers remain separate work. See the architecture plan for scope and the open desktop validation gate.
+
+### Typed storage textures
+
+Compute programs can use explicitly formatted `RWTexture2D` resources, for example `[[vk::image_format("rgba32f")]] RWTexture2D<float4> Output;`. Reflection supplies `DescriptorBindingDesc::StorageTextureFormat`; create a matching image with `TextureUsage::Storage` and a 2D view covering one mip and one layer. Bind the view with `DescriptorWrite::TextureResource`. Float, unsigned and signed formats are supported as listed in the architecture plan; formatless, multisampled and other image shapes remain outside this contract.
+
+Use `ShaderRead | ShaderWrite` for storage-image access in General layout. Add an explicit same-state barrier between dependent dispatches. Plain texture `ShaderRead` selects sampled-image access. Graphics and compute-capable families support color-image transfers and barriers, so upload, compute and readback can all stay on one family. Keep resources alive and wait for completion before CPU access; queue ownership transfers remain unsupported.
+
+`VulkanStorageTextureSmokeTests.cpp` demonstrates typed float/uint/int images, nonzero mip/layer views, guarded writes, dependent passes and readback across reused frame slots. It joins the existing native smoke suite and requires desktop Vulkan validation support.

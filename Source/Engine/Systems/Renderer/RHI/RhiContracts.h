@@ -448,6 +448,9 @@ namespace Swim::Rhi
 		// Writes/first binding require external host synchronization. Keep the layout
 		// and referenced resources alive for the table's use; writes do not add barriers.
 		// BufferRange == 0 selects the remaining buffer range, subject to device limits.
+		// StorageTexture writes require an exact StorageTextureFormat match and a
+		// single-sampled 2D view of one mip/layer. Images must be in General layout
+		// at dispatch; writing a descriptor does not transition or initialize its image.
 		virtual void Write(std::span<const DescriptorWrite> writes) = 0;
 	};
 
@@ -494,6 +497,9 @@ namespace Swim::Rhi
 		virtual void EndDebugLabel() {}
 		virtual void InsertDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
 		virtual void Transition(Buffer& buffer, ResourceState before, ResourceState after) = 0;
+		// Texture ShaderRead selects sampled access; ShaderRead | ShaderWrite selects
+		// storage-image access in General layout, including storage-only reads.
+		// Dependent storage passes require an explicit barrier even without a state change.
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
 		virtual void CopyBuffer(Buffer& source, Buffer& destination, const BufferCopyRegion& region) = 0;
 		virtual void CopyTexture(Texture& source, Texture& destination, const TextureCopyRegion& region) = 0;
@@ -501,8 +507,9 @@ namespace Swim::Rhi
 		virtual void CopyTextureToBuffer(Texture& source, Buffer& destination, const BufferTextureCopyRegion& region) = 0;
 		// Transitions/copies are outside rendering. Resources remain alive until
 		// submission completion. Transitions do not transfer queue-family ownership.
-		// Image work uses the graphics family; buffer barriers also support compute
-		// families without vertex/index input states. CopyBuffer also supports transfer.
+		// Color-image transfers and buffer/image barriers support graphics and compute
+		// families. Compute barriers exclude attachment/present/vertex/index states.
+		// Transfer-only families support CopyBuffer. Keep each resource on one family.
 		virtual void BeginRendering(const RenderingDesc& desc) = 0;
 		virtual void EndRendering() = 0;
 		// One active graphics/compute pipeline. Binding either clears table bindings;

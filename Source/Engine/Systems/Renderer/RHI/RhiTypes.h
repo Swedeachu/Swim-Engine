@@ -119,6 +119,22 @@ namespace Swim::Rhi
 		}
 	}
 
+	// Formats supported by the typed 2D storage-texture contract. Device format
+	// support is still required; sRGB, compressed and formatless access are excluded.
+	constexpr bool IsStorageTextureFormat(Format format)
+	{
+		switch (format)
+		{
+		case Format::R32Float: case Format::R32Uint: case Format::R32Sint:
+		case Format::RGBA32Float: case Format::RGBA32Uint: case Format::RGBA32Sint:
+		case Format::RGBA16Float: case Format::RGBA16Uint: case Format::RGBA16Sint:
+		case Format::RGBA8Unorm: case Format::RGBA8Snorm: case Format::RGBA8Uint: case Format::RGBA8Sint:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	constexpr bool HasStencil(Format format)
 	{
 		return format == Format::D24UnormS8Uint || format == Format::D32FloatS8Uint;
@@ -463,6 +479,8 @@ namespace Swim::Rhi
 		ShaderStageMask Stages = ShaderStageMask::None;
 		bool VariableCount = false;
 		bool PartiallyBound = false;
+		// Required exact view format for StorageTexture; Undefined for other descriptors.
+		Format StorageTextureFormat = Format::Undefined;
 	};
 
 	struct DescriptorSchemaDesc

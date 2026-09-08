@@ -4,7 +4,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTransferUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanSampler.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTextureView.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorImages.h"
 
 #include <algorithm>
 #include <limits>
@@ -61,31 +61,9 @@ namespace Swim::RhiVulkan
 				images[index].sampler = FromNativeHandle<VkSampler>(sampler.GetNativeHandle());
 				target.pImageInfo = &images[index];
 			}
-			else if (binding->Type == Rhi::DescriptorType::SampledTexture)
+			else if (binding->Type == Rhi::DescriptorType::SampledTexture || binding->Type == Rhi::DescriptorType::StorageTexture)
 			{
-				if (!write.TextureResource || write.SamplerResource || write.BufferResource || write.BufferOffset || write.BufferRange)
-				{
-					throw std::invalid_argument("Sampled texture descriptor requires exactly one texture view");
-				}
-				const auto& view = RequireResource<VulkanTextureView>(*write.TextureResource, GetState());
-				const auto& desc = view.GetTexture().GetDesc();
-				const auto format = view.GetDesc().PixelFormat;
-				if (view.GetNativeHandle() == 0 || !HasTextureUsage(desc.Usage, Rhi::TextureUsage::Sampled) ||
-					desc.Samples != Rhi::SampleCount::X1 || view.GetDesc().Dimension != Rhi::TextureViewDimension::Texture2D ||
-					Rhi::IsDepthFormat(format) || IsIntegerColorFormat(format))
-				{
-					throw std::invalid_argument("Sampled descriptors currently require single-sampled floating/normalized 2D color views");
-				}
-				VkFormatProperties properties{};
-				GetState()->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties(GetState()->Device.physical_device.physical_device,
-					ToVkFormat(format), &properties);
-				constexpr auto required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
-				if ((properties.optimalTilingFeatures & required) != required)
-				{
-					throw std::invalid_argument("Sampled color format must support both nearest and linear filtering");
-				}
-				images[index].imageView = FromNativeHandle<VkImageView>(view.GetNativeHandle());
-				images[index].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				images[index] = BuildVulkanImageDescriptor(GetState(), *binding, write);
 				target.pImageInfo = &images[index];
 			}
 			else

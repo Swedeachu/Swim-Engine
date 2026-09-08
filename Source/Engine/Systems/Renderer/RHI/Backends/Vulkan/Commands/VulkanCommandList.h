@@ -87,6 +87,7 @@ namespace Swim::RhiVulkan
 		void RequireRecording(bool outsideRendering = false) const;
 		void RequireGraphicsQueue() const;
 		void RequireComputeQueue() const;
+		void RequireImageQueue() const;
 		const VulkanPipelineLayoutState& RequireActivePipeline() const;
 
 		std::uint64_t generation = UINT64_MAX;

@@ -7,6 +7,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceState.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanMemoryBudget.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanStorageTexture.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTexture.h"
@@ -181,7 +182,7 @@ namespace Swim::RhiVulkan
 			std::unique_ptr<Rhi::Texture> CreateTexture(const Rhi::TextureDesc& desc) override
 			{
 				RequireVulkanDevice(*state);
-				if (!ValidateTextureDesc(desc))
+				if (!ValidateTextureDesc(desc) || !ValidateVulkanStorageTexture(*state, desc))
 				{
 					return nullptr;
 				}

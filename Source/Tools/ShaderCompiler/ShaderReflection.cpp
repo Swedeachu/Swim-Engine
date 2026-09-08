@@ -66,6 +66,7 @@ namespace Swim::ShaderCompiler
 		{
 			ShaderBindingReflection reflection;
 			reflection.Name = ReadString(parameter, "name");
+			reflection.ResourceFormat = ReadString(parameter, "format");
 
 			if (const auto bindingField = FindField(parameter, "binding"))
 			{
@@ -125,6 +126,15 @@ namespace Swim::ShaderCompiler
 						if (!result->get_object().get(resultType))
 						{
 							reflection.ResourceScalarType = ReadString(resultType, "scalarType");
+							const auto kind = ReadString(resultType, "kind");
+							if (kind == "scalar")
+							{
+								reflection.ResourceComponentCount = 1;
+							}
+							else if (kind == "vector")
+							{
+								ReadU32(resultType, "elementCount", reflection.ResourceComponentCount);
+							}
 							if (const auto element = FindField(resultType, "elementType"))
 							{
 								simdjson::dom::object elementType;

@@ -49,6 +49,9 @@ namespace Swim::ShaderCompiler
 		bool HasSpace = false;
 		bool HasOffset = false;
 		bool HasSize = false;
+		// Explicit storage-image qualifier and result scalar/vector width.
+		std::string ResourceFormat;
+		std::uint32_t ResourceComponentCount = 0;
 	};
 
 	struct ShaderEntryPointReflection
