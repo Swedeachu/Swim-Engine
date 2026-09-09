@@ -17,6 +17,19 @@ set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(MI_WIN_REDIRECT OFF CACHE BOOL "" FORCE)
 set(MI_OPT_ARCH OFF CACHE BOOL "" FORCE)
 
+# Swim's Debug configuration intentionally pairs debug code generation with a
+# release-style CRT ABI (NDEBUG defined, _ITERATOR_DEBUG_LEVEL=0, /U_DEBUG).
+# mimalloc otherwise auto-enables MI_DEBUG=2 for a Debug build, and its
+# types.h then trips `#warning "mimalloc assertions enabled in a release build"`
+# which MSVC rejects with C1021. Keep mimalloc's assertions off so its
+# assumptions match the NDEBUG ABI we compile every dependency with.
+if(MSVC)
+	set(MI_NO_DEBUG ON CACHE BOOL "" FORCE)
+	set(MI_DEBUG OFF CACHE BOOL "" FORCE)
+	set(MI_DEBUG_INTERNAL OFF CACHE BOOL "" FORCE)
+	set(MI_DEBUG_FULL OFF CACHE BOOL "" FORCE)
+endif()
+
 set(SWIM_SAVED_MEMORY_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/mimalloc")
 CPMAddPackage(

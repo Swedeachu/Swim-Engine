@@ -52,7 +52,11 @@ function(swim_add_slang_program name)
 		# VK_GOOGLE_* device extensions are enabled. Swim reads reflection from
 		# the -reflection-json sidecar instead, which is byte-identical either
 		# way, so the decorations buy nothing and cost validity.
-		set(SWIM_SLANG_PROGRAM_TARGET_ARGS "")
+		#
+		# Slang otherwise rewrites every SPIR-V entry point to `main`. The RHI
+		# deliberately carries source/reflection entry-point names through its
+		# public shader artifacts, so preserve those names in OpEntryPoint too.
+		set(SWIM_SLANG_PROGRAM_TARGET_ARGS -fvk-use-entrypoint-name)
 	elseif(SWIM_SLANG_PROGRAM_TARGET STREQUAL "glsl")
 		if(NOT SWIM_SLANG_PROGRAM_PROFILE)
 			set(SWIM_SLANG_PROGRAM_PROFILE "glsl_460")

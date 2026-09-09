@@ -19,6 +19,17 @@ namespace Swim::RhiVulkan
 	namespace
 	{
 
+		VkPhysicalDeviceVulkan11Features GetRequiredVulkan11Features()
+		{
+			VkPhysicalDeviceVulkan11Features features{};
+			features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+			// Slang's Vulkan SPIR-V path can declare DrawParameters for graphics
+			// entry points that consume draw built-ins. Requiring the promoted 1.1
+			// feature keeps every generated module valid at vkCreateShaderModule.
+			features.shaderDrawParameters = VK_TRUE;
+			return features;
+		}
+
 		VkPhysicalDeviceVulkan12Features GetRequiredVulkan12Features()
 		{
 			VkPhysicalDeviceVulkan12Features features{};
@@ -128,6 +139,7 @@ namespace Swim::RhiVulkan
 			.set_minimum_version(1, 3)
 			.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
 			.set_required_features(GetValidationDeviceFeatures(instance->Diagnostics.Checks))
+			.set_required_features_11(GetRequiredVulkan11Features())
 			.set_required_features_12(GetRequiredVulkan12Features())
 			.set_required_features_13(GetRequiredVulkan13Features())
 			.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
