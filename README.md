@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the fifteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback typed storage-image readback and entry-point descriptor readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the sixteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback typed storage-image readback entry-point descriptor readback and fixed descriptor-array readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -350,4 +350,10 @@ Slang entry functions can declare directly bound `uniform` resources, for exampl
 
 Use the returned descriptor schemas, push ranges and compute local size together when creating the RHI program. The existing descriptor-table and synchronization APIs apply. Writable buffers and typed storage images remain compute-only. The new `ScopedCompute.slang` smoke exercises a global input/push block with entry-local output and uniform buffers across two descriptor spaces; `ScopedGraphics.slang` verifies shared, vertex-only and fragment-only reflection.
 
-Nested parameter blocks, implicit entry uniform containers, descriptor arrays and entry-local push-constant blocks still reject. For entry uniform data, use an explicitly bound `ConstantBuffer<Settings>`; plain `uniform uint` parameters introduce an unsupported container. Keep push constants in the supported global block. See the architecture plan's entry-point descriptor checkpoint for the exact scope and validation status.
+Nested parameter blocks, implicit entry uniform containers, runtime-sized descriptor arrays and entry-local push-constant blocks still reject. For entry uniform data, use an explicitly bound `ConstantBuffer<Settings>`; plain `uniform uint` parameters introduce an unsupported container. Keep push constants in the supported global block. See the architecture plan's entry-point descriptor checkpoint for the exact scope and validation status.
+
+### Fixed descriptor arrays
+
+Slang global and direct entry resources can use one-dimensional fixed arrays, such as `[[vk::binding(2, 0)]] StructuredBuffer<uint> Inputs[2];`. Reflection produces one binding with `Count == 2`. Populate every element using `DescriptorWrite::ArrayIndex`; an incomplete table cannot be bound, and a recorded table is immutable. Arrays support the same six descriptor classes and image-format/stage restrictions as scalar bindings.
+
+The `DescriptorArrays.slang` smoke uses both elements of all six classes and verifies buffer/image readback after dependent compute passes. Its descriptor indices are compile-time constants. Fixed array allocation does not enable dynamic/non-uniform indexing for all resource classes; that requires the corresponding device features. Runtime-sized/bindless arrays, partially bound descriptors, update-after-bind mutation and nested descriptor arrays remain separate work. See the architecture plan's fixed descriptor-array checkpoint for validation and scope.

@@ -20,10 +20,12 @@ namespace Swim::ShaderCompiler
 	// Tool-side conversion. Runtime RHI consumes the owned result, never Slang/JSON types.
 	// Accepts graphics stages or one fixed-local-size compute entry, including read/write storage buffers.
 	// Typed 2D storage images require explicit format qualifiers and matching numeric types.
-	// Supports flat global and entry-point descriptors, plus one global push-constant buffer.
+	// Supports flat global/entry descriptors and one-dimensional fixed descriptor arrays,
+	// plus one global push-constant buffer.
 	// Globals use all program stages; entry descriptors use only their declaring stage.
 	// All duplicate (space, binding) declarations reject. Nested parameter blocks,
-	// implicit uniform scope containers and entry-local push constants fail explicitly.
+	// implicit uniform scope containers, entry-local push constants, nested arrays and
+	// runtime-sized descriptor arrays fail explicitly.
 	ShaderRhiInterfaceResult BuildRhiShaderInterface(const ShaderReflection& reflection);
 
 } // namespace Swim::ShaderCompiler

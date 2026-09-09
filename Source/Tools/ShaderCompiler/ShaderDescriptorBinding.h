@@ -6,7 +6,7 @@
 namespace Swim::ShaderCompiler
 {
 
-	// Appends one flat descriptor. Every occupied (space, binding) rejects, even
+	// Appends one fixed binding, scalar or array. Every occupied (space, binding) rejects, even
 	// when types agree: independent declarations are not implicit resource aliases.
 	std::string AppendRhiDescriptorBinding(const ShaderBindingReflection& parameter,
 		Rhi::ShaderStageMask stages, Rhi::ShaderProgramInterface& interface);

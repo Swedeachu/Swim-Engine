@@ -55,6 +55,10 @@ namespace Swim::ShaderCompiler
 		// Multiple layout categories and malformed binding metadata cannot be flattened.
 		bool HasUnsupportedBindingLayout = false;
 		std::string SemanticName;
+		// Descriptor arrays preserve TypeKind == "array". Count remains the
+		// binding-slot count; DescriptorArrayCount is the number of descriptors.
+		std::string DescriptorElementTypeKind;
+		std::uint32_t DescriptorArrayCount = 0;
 	};
 
 	struct ShaderEntryPointReflection

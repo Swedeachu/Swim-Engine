@@ -14,17 +14,24 @@ namespace Swim::ShaderCompiler
 		{
 			return "Unsupported descriptor binding: " + parameter.Name;
 		}
+		const bool descriptorArray = parameter.TypeKind == "array";
+		const auto& typeKind = descriptorArray ? parameter.DescriptorElementTypeKind : parameter.TypeKind;
+		const auto count = descriptorArray ? parameter.DescriptorArrayCount : parameter.Count;
+		if (descriptorArray && (parameter.Count != 1 || count == 0))
+		{
+			return "Descriptor arrays require one binding and a fixed positive element count: " + parameter.Name;
+		}
 		Rhi::DescriptorType type;
 		Rhi::Format storageFormat = Rhi::Format::Undefined;
-		if (parameter.TypeKind == "samplerState")
+		if (typeKind == "samplerState")
 		{
 			type = Rhi::DescriptorType::Sampler;
 		}
-		else if (parameter.TypeKind == "constantBuffer")
+		else if (typeKind == "constantBuffer")
 		{
 			type = Rhi::DescriptorType::UniformBuffer;
 		}
-		else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
+		else if (typeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
 			parameter.ResourceShape == "texture2D" && stages == Rhi::ShaderStageMask::Compute &&
 			!parameter.ResourceArray && !parameter.ResourceMultisample)
 		{
@@ -35,13 +42,13 @@ namespace Swim::ShaderCompiler
 			}
 			type = Rhi::DescriptorType::StorageTexture;
 		}
-		else if (parameter.TypeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
+		else if (typeKind == "resource" && parameter.ResourceAccess == "readWrite" &&
 			stages == Rhi::ShaderStageMask::Compute && !parameter.ResourceArray && !parameter.ResourceMultisample &&
 			(parameter.ResourceShape == "structuredBuffer" || parameter.ResourceShape == "byteAddressBuffer"))
 		{
 			type = Rhi::DescriptorType::StorageBuffer;
 		}
-		else if (parameter.TypeKind == "resource" && (parameter.ResourceAccess.empty() || parameter.ResourceAccess == "read"))
+		else if (typeKind == "resource" && (parameter.ResourceAccess.empty() || parameter.ResourceAccess == "read"))
 		{
 			if (parameter.ResourceShape == "texture2D" && !parameter.ResourceArray && !parameter.ResourceMultisample &&
 				parameter.ResourceScalarType == "float32")
@@ -74,7 +81,7 @@ namespace Swim::ShaderCompiler
 			return "Duplicate reflected descriptor binding: " + parameter.Name;
 		}
 		// The caller supplies global or entry-point visibility; binding coordinates stay absolute.
-		schema->Bindings.push_back({ parameter.Index, type, parameter.Count, stages, false, false, storageFormat });
+		schema->Bindings.push_back({ parameter.Index, type, count, stages, false, false, storageFormat });
 		return {};
 	}
 
