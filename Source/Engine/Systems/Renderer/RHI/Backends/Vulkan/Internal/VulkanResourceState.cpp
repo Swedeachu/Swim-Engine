@@ -65,7 +65,7 @@ namespace Swim::RhiVulkan
 		case static_cast<std::uint32_t>(Rhi::ResourceState::ShaderRead):
 			usage = Rhi::TextureUsage::Sampled;
 			result = { VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-				Rhi::IsDepthFormat(desc.PixelFormat) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+				(Rhi::IsDepthFormat(desc.PixelFormat) && HasTextureUsage(desc.Usage, Rhi::TextureUsage::DepthStencilAttachment)) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 			break;
 		case static_cast<std::uint32_t>(Rhi::ResourceState::ShaderWrite):
 		case static_cast<std::uint32_t>(Rhi::ResourceState::ShaderRead | Rhi::ResourceState::ShaderWrite):

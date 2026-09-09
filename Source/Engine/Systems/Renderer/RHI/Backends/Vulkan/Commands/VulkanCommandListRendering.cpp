@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Commands/VulkanCommandList.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTextureViews.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanResourceAccess.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTransferUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTextureView.h"
@@ -62,7 +63,8 @@ namespace Swim::RhiVulkan
 			const auto& viewDesc = view->GetDesc();
 			const auto& textureDesc = view->GetTexture().GetDesc();
 			const auto usage = depth ? Rhi::TextureUsage::DepthStencilAttachment : Rhi::TextureUsage::ColorAttachment;
-			if (!HasTextureUsage(textureDesc.Usage, usage) || Rhi::IsDepthFormat(viewDesc.PixelFormat) != depth ||
+			if (GetVulkanTextureViewAspect(viewDesc.PixelFormat, viewDesc.Aspect) != GetImageAspectMask(viewDesc.PixelFormat) ||
+				!HasTextureUsage(textureDesc.Usage, usage) || Rhi::IsDepthFormat(viewDesc.PixelFormat) != depth ||
 				viewDesc.MipLevelCount != 1 || viewDesc.BaseMipLevel >= 32 ||
 				(viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D && viewDesc.Dimension != Rhi::TextureViewDimension::Texture2DArray) ||
 				desc.RenderArea.Width > std::max(1u, textureDesc.Extent.Width >> viewDesc.BaseMipLevel) ||

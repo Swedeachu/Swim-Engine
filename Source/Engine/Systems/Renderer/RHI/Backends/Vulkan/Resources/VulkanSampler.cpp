@@ -1,6 +1,8 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanSampler.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPipelineUtils.h"
+
 #include <cmath>
 #include <stdexcept>
 
@@ -50,7 +52,7 @@ namespace Swim::RhiVulkan
 		const auto& limits = state->Device.physical_device.properties.limits;
 		const auto validFilter = [](Rhi::Filter filter) { return filter == Rhi::Filter::Nearest || filter == Rhi::Filter::Linear; };
 		if (!validFilter(desc.MinFilter) || !validFilter(desc.MagFilter) || !validFilter(desc.MipFilter) ||
-			desc.EnableAnisotropy || desc.EnableComparison || !std::isfinite(desc.MinLod) || !std::isfinite(desc.MaxLod) ||
+			desc.EnableAnisotropy || !std::isfinite(desc.MinLod) || !std::isfinite(desc.MaxLod) ||
 			!std::isfinite(desc.MipLodBias) || desc.MinLod < 0 || desc.MaxLod < desc.MinLod || std::abs(desc.MipLodBias) > limits.maxSamplerLodBias)
 		{
 			return nullptr;
@@ -62,6 +64,7 @@ namespace Swim::RhiVulkan
 		info.mipmapMode = desc.MipFilter == Rhi::Filter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		try
 		{
+			info.compareOp = ToVkCompareOp(desc.Comparison);
 			info.addressModeU = AddressMode(desc.AddressU);
 			info.addressModeV = AddressMode(desc.AddressV);
 			info.addressModeW = AddressMode(desc.AddressW);
@@ -74,7 +77,7 @@ namespace Swim::RhiVulkan
 		info.maxLod = desc.MaxLod;
 		info.mipLodBias = desc.MipLodBias;
 		info.maxAnisotropy = 1.0f;
-		info.compareOp = VK_COMPARE_OP_ALWAYS;
+		info.compareEnable = desc.EnableComparison ? VK_TRUE : VK_FALSE;
 		info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
 		auto result = std::make_unique<VulkanSampler>(state, desc);
 		auto count = state->SamplerCount.load();

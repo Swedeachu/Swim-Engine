@@ -345,6 +345,10 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		DEFINES SWIM_TEST_CUBE_ARRAY=1
 	)
+	swim_add_slang_program(SwimRhiDepthSampling
+		SOURCE Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
+		PROFILE spirv_1_5
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
@@ -358,7 +362,9 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiSampledInteger_SPIRV}" "${SwimRhiSampledInteger_REFLECTION}"
 			"${SwimRhiSampledDimensions_SPIRV}" "${SwimRhiSampledDimensions_REFLECTION}"
 			"${SwimRhiSampledCubeArray_SPIRV}" "${SwimRhiSampledCubeArray_REFLECTION}"
-		SOURCES Source/Shaders/Slang/RhiSmoke/Triangle.slang Source/Shaders/Slang/RhiSmoke/Texture.slang
+			"${SwimRhiDepthSampling_SPIRV}" "${SwimRhiDepthSampling_REFLECTION}"
+		SOURCES Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
+			Source/Shaders/Slang/RhiSmoke/Triangle.slang Source/Shaders/Slang/RhiSmoke/Texture.slang
 			Source/Shaders/Slang/RhiSmoke/VertexInput.slang Source/Shaders/Slang/RhiSmoke/PushConstants.slang
 			Source/Shaders/Slang/RhiSmoke/Compute.slang Source/Shaders/Slang/RhiSmoke/StorageTexture.slang
 			Source/Shaders/Slang/RhiSmoke/ScopedCompute.slang Source/Shaders/Slang/RhiSmoke/ScopedGraphics.slang

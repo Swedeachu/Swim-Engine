@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the eighteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback sampled integer texture readback and sampled image dimension readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the nineteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback, sampled integer/dimension readback and depth/comparison readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -365,7 +365,7 @@ Slang `Texture2D<float/uint/int>` declarations now preserve their numeric class 
 entry-point resources. Descriptor writes reject a view with the wrong signedness or
 numeric class. Uint/Sint refer to shader results, not the texture's channel count or
 bit width: a `Texture2D<uint>` can read R8Uint or R32Uint. Float covers normalized,
-sRGB and floating-point color formats. Depth/comparison remains separate work; supported view shapes are described below.
+sRGB and floating-point color formats. Depth/comparison sampling and view shapes are described below.
 
 Use integer `Load` operations for exact texel reads without a sampler. Integer views
 require native sampled-image support; they do not require linear-filter support.
@@ -393,7 +393,7 @@ Vulkan enables this optional feature when supported. Plain cube views do not nee
 it. Cube views select six layers, cube arrays select a multiple of six, and volume
 views select a single image layer with depth supplied by the 3D extent. Mip and
 array-layer indices are relative to the view. Mutable-format views, multisample
-sampling and depth/comparison remain outside the reflected sampled-color contract.
+sampling remains outside this contract; depth/comparison uses the explicit aspect rules below.
 Storage images retain their separate typed 2D contract.
 
 `RHI.Vulkan.Smoke.SampledDimensionsAndReadback` selects a compiled base or cube-array
@@ -407,3 +407,32 @@ cube-array declarations. The optional smoke shader demonstrates an explicit
 `spirv_asm { OpCapability SampledCubeArray; };` declaration, checked in the compiled
 artifact tests. Use the same declaration for cube-array shader consumers with this
 compiler version.
+
+### Depth and comparison sampling
+
+Create single-sampled depth images with `TextureUsage::Sampled` (plus
+`DepthStencilAttachment` when rendering depth). Use `TextureViewDesc::Aspect =
+TextureAspect::Depth` for sampling combined depth/stencil formats. Automatic views
+retain every format aspect for attachment use. Depth-only formats also work with
+Automatic. Stencil sampling is not supported.
+
+Bind the depth view to a reflected Float texture binding with matching dimensions.
+The backend checks native sampled and depth-comparison format support before depth
+image allocation and descriptor publication. Use nearest filters for the supported
+depth sampling path; broader filtering/PCF policy remains separate work.
+
+For Slang `SamplerComparisonState` and `SampleCmpLevelZero`, set
+`SamplerDesc::EnableComparison = true` and choose `Comparison` explicitly. For
+ordinary `SampleLevel`, use a non-comparison sampler; `Load` needs no sampler.
+Pinned Slang JSON represents both sampler declarations as `samplerState`, so the
+application must select the matching sampler behavior. Shader/sampler pairing is
+not inferred from the reflection sidecar.
+
+Transition depth attachments from `DepthStencilWrite` to `ShaderRead` before sampling.
+The descriptor and barrier use the same read layout. Combined depth/stencil barriers
+transition both aspects together; use a separate full-aspect view when attaching
+that image again. `RHI.Vulkan.Smoke.DepthSamplingAndComparisonReadback` clears D32
+and a supported packed depth/stencil image, samples nonzero mip/layer views, checks
+raw reads and opposite comparison operators, and verifies output guards over three
+frames/two slots. It requires a graphics family capable of compute; it does not
+render through the sandbox or change the renderer's depth convention.

@@ -4,10 +4,23 @@
 namespace Swim::RhiVulkan
 {
 
+	VkImageAspectFlags GetVulkanTextureViewAspect(Rhi::Format format, Rhi::TextureAspect aspect)
+	{
+		const auto available = GetImageAspectMask(format);
+		switch (aspect)
+		{
+		case Rhi::TextureAspect::Automatic: return available;
+		case Rhi::TextureAspect::Color: return available & VK_IMAGE_ASPECT_COLOR_BIT;
+		case Rhi::TextureAspect::Depth: return available & VK_IMAGE_ASPECT_DEPTH_BIT;
+		case Rhi::TextureAspect::Stencil: return available & VK_IMAGE_ASPECT_STENCIL_BIT;
+		default: return 0;
+		}
+	}
+
 	bool ValidateVulkanTextureView(const Rhi::TextureDesc& texture, const Rhi::TextureViewDesc& view, bool cubeArrays)
 	{
 		const auto format = view.PixelFormat == Rhi::Format::Undefined ? texture.PixelFormat : view.PixelFormat;
-		if (format != texture.PixelFormat || ToVkFormat(format) == VK_FORMAT_UNDEFINED ||
+		if (GetVulkanTextureViewAspect(format, view.Aspect) == 0 || format != texture.PixelFormat || ToVkFormat(format) == VK_FORMAT_UNDEFINED ||
 			view.MipLevelCount == 0 || view.ArrayLayerCount == 0 || view.BaseMipLevel >= texture.MipLevels ||
 			view.MipLevelCount > texture.MipLevels - view.BaseMipLevel || view.BaseArrayLayer >= texture.ArrayLayers ||
 			view.ArrayLayerCount > texture.ArrayLayers - view.BaseArrayLayer)

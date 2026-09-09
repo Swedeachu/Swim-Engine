@@ -119,6 +119,7 @@ namespace Swim::Rhi
 		std::uint32_t BaseArrayLayer = 0;
 		std::uint32_t ArrayLayerCount = 1;
 		std::string_view DebugName;
+		TextureAspect Aspect = TextureAspect::Automatic;
 	};
 
 	struct SamplerDesc
@@ -450,6 +451,8 @@ namespace Swim::Rhi
 		// BufferRange == 0 selects the remaining buffer range, subject to device limits.
 		// SampledTexture writes require matching SampledClass (Float/Uint/Sint) and
 		// SampledDimension. Image layers are independent of descriptor ArrayIndex.
+		// Depth sampling requires a depth-only aspect and Float class. Use EnableComparison
+		// for SampleCmp; reflection does not distinguish sampler comparison types or pairings.
 		// Integer texel loads need no sampler; this API does not validate shader/sampler pairings.
 		// StorageTexture writes require an exact StorageTextureFormat match and a
 		// single-sampled 2D view of one mip/layer. Images must be in General layout

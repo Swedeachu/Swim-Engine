@@ -148,6 +148,15 @@ namespace Swim::Rhi
 		TextureCube,
 	};
 
+	// Automatic selects all format aspects; sampled depth/stencil needs Depth.
+	enum class TextureAspect : std::uint8_t
+	{
+		Automatic,
+		Color,
+		Depth,
+		Stencil
+	};
+
 	enum class TextureViewDimension : std::uint8_t
 	{
 		Texture1D,

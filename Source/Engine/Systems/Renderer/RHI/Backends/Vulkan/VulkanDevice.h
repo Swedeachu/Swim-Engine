@@ -8,6 +8,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanMemoryBudget.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanStorageTexture.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDepthSampling.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTextureViews.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
@@ -183,7 +184,7 @@ namespace Swim::RhiVulkan
 			std::unique_ptr<Rhi::Texture> CreateTexture(const Rhi::TextureDesc& desc) override
 			{
 				RequireVulkanDevice(*state);
-				if (!ValidateTextureDesc(desc) || !ValidateVulkanStorageTexture(*state, desc))
+				if (!ValidateTextureDesc(desc) || !ValidateVulkanStorageTexture(*state, desc) || !ValidateVulkanSampledDepthTexture(*state, desc))
 				{
 					return nullptr;
 				}
@@ -252,7 +253,7 @@ namespace Swim::RhiVulkan
 				createInfo.image = FromNativeHandle<VkImage>(vulkanTexture->GetNativeHandle());
 				createInfo.viewType = ToVkImageViewType(desc.Dimension);
 				createInfo.format = ToVkFormat(viewFormat);
-				createInfo.subresourceRange.aspectMask = GetImageAspectMask(viewFormat);
+				createInfo.subresourceRange.aspectMask = GetVulkanTextureViewAspect(viewFormat, desc.Aspect);
 				createInfo.subresourceRange.baseMipLevel = desc.BaseMipLevel;
 				createInfo.subresourceRange.levelCount = desc.MipLevelCount;
 				createInfo.subresourceRange.baseArrayLayer = desc.BaseArrayLayer;
