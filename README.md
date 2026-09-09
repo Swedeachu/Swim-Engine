@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the sixteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback typed storage-image readback entry-point descriptor readback and fixed descriptor-array readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the seventeen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback and sampled integer texture readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -357,3 +357,26 @@ Nested parameter blocks, implicit entry uniform containers, runtime-sized descri
 Slang global and direct entry resources can use one-dimensional fixed arrays, such as `[[vk::binding(2, 0)]] StructuredBuffer<uint> Inputs[2];`. Reflection produces one binding with `Count == 2`. Populate every element using `DescriptorWrite::ArrayIndex`; an incomplete table cannot be bound, and a recorded table is immutable. Arrays support the same six descriptor classes and image-format/stage restrictions as scalar bindings.
 
 The `DescriptorArrays.slang` smoke uses both elements of all six classes and verifies buffer/image readback after dependent compute passes. Its descriptor indices are compile-time constants. Fixed array allocation does not enable dynamic/non-uniform indexing for all resource classes; that requires the corresponding device features. Runtime-sized/bindless arrays, partially bound descriptors, update-after-bind mutation and nested descriptor arrays remain separate work. See the architecture plan's fixed descriptor-array checkpoint for validation and scope.
+
+### Typed sampled 2D textures
+
+Slang `Texture2D<float/uint/int>` declarations now preserve their numeric class in
+`DescriptorBindingDesc::SampledClass`, including fixed descriptor arrays and direct
+entry-point resources. Descriptor writes reject a view with the wrong signedness or
+numeric class. Uint/Sint refer to shader results, not the texture's channel count or
+bit width: a `Texture2D<uint>` can read R8Uint or R32Uint. Float covers normalized,
+sRGB and floating-point color formats. Depth/comparison and additional image shapes
+remain separate work.
+
+Use integer `Load` operations for exact texel reads without a sampler. Integer views
+require native sampled-image support; they do not require linear-filter support.
+Float views retain the existing filtering requirement. The RHI does not inspect
+shader/sampler pairings, and enabling integer descriptors does not enable arbitrary
+filtering or dynamic/non-uniform descriptor indexing features.
+
+The opt-in `RHI.Vulkan.Smoke.SampledIntegerTexturesAndReadback` checks four frames of
+unsigned/signed/narrow-integer/normalized inputs, fixed arrays, nonzero mip/layer
+views, output guards and CPU readback. Run it through the desktop smoke command above.
+The sandbox still uses the transitional Vulkan renderer; launching `Swim Engine.exe`
+does not run this RHI validation suite. The architecture guide's current snapshot
+records which foundations are active in the sandbox and which RHI consumers remain separate.

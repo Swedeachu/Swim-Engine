@@ -98,7 +98,10 @@ namespace Swim::RhiVulkan
 						((binding.Type == Rhi::DescriptorType::StorageBuffer || binding.Type == Rhi::DescriptorType::StorageTexture) &&
 							binding.Stages != Rhi::ShaderStageMask::Compute) ||
 						(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat) :
-							binding.StorageTextureFormat != Rhi::Format::Undefined))
+							binding.StorageTextureFormat != Rhi::Format::Undefined) ||
+						(binding.Type == Rhi::DescriptorType::SampledTexture ?
+							(binding.SampledClass != Rhi::SampledTextureClass::Float && binding.SampledClass != Rhi::SampledTextureClass::Uint &&
+								binding.SampledClass != Rhi::SampledTextureClass::Sint) : binding.SampledClass != Rhi::SampledTextureClass::Float))
 					{
 						return false;
 					}

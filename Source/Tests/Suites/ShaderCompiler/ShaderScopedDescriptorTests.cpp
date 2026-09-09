@@ -156,6 +156,7 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "ComputeDescriptorsReuseAllSupport
 	image.TypeKind = "resource";
 	image.ResourceShape = "texture2D";
 	image.ResourceScalarType = "float32";
+	image.ResourceComponentCount = 4;
 	parameters.push_back(image);
 	image.Index = 5;
 	image.ResourceAccess = "readWrite";

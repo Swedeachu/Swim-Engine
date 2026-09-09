@@ -49,7 +49,8 @@ SWIM_TEST("ShaderCompiler.RhiInterface", "UnsupportedInterfacesAndDuplicateSlots
 	reflection.GlobalParameters[0].ResourceAccess = "readWrite";
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
 	reflection.GlobalParameters[0].ResourceAccess.clear();
-	reflection.GlobalParameters[0].ResourceScalarType = "uint32";
+	reflection.GlobalParameters[0].ResourceComponentCount = 4;
+	reflection.GlobalParameters[0].ResourceScalarType = "float64";
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
 	reflection.GlobalParameters[0].ResourceScalarType = "float32";
 	reflection.GlobalParameters[0].ResourceMultisample = true;

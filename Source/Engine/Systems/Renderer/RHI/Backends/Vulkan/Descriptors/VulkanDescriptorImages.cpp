@@ -1,7 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorImages.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanResourceAccess.h"
-#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTransferUtils.h"
+#include "Engine/Systems/Renderer/RHI/RhiSampledTexture.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTextureView.h"
 
 namespace Swim::RhiVulkan
@@ -38,11 +38,21 @@ namespace Swim::RhiVulkan
 		{
 			if (view.GetNativeHandle() == 0 || !HasTextureUsage(desc.Usage, Rhi::TextureUsage::Sampled) ||
 				desc.Samples != Rhi::SampleCount::X1 || viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D ||
-				Rhi::IsDepthFormat(format) || IsIntegerColorFormat(format))
+				viewDesc.ArrayLayerCount != 1 || format != desc.PixelFormat ||
+				viewDesc.MipLevelCount == 0 || viewDesc.BaseMipLevel >= desc.MipLevels ||
+				viewDesc.MipLevelCount > desc.MipLevels - viewDesc.BaseMipLevel || viewDesc.BaseArrayLayer >= desc.ArrayLayers ||
+				Rhi::GetSampledTextureClass(format) == Rhi::SampledTextureClass::Undefined ||
+				Rhi::GetSampledTextureClass(format) != binding.SampledClass)
 			{
-				throw std::invalid_argument("Sampled descriptors currently require single-sampled floating/normalized 2D color views");
+				throw std::invalid_argument("Sampled descriptors require a single-sampled 2D color view matching the shader numeric class");
 			}
-			required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+			required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+			// Preserve the floating/normalized filtering contract. Integer texel loads
+			// do not use a sampler and must not require linear filtering support.
+			if (binding.SampledClass == Rhi::SampledTextureClass::Float)
+			{
+				required |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+			}
 			layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		}
 		else

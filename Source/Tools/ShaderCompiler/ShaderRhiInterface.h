@@ -19,6 +19,7 @@ namespace Swim::ShaderCompiler
 
 	// Tool-side conversion. Runtime RHI consumes the owned result, never Slang/JSON types.
 	// Accepts graphics stages or one fixed-local-size compute entry, including read/write storage buffers.
+	// Sampled 2D color images retain Float/Uint/Sint numeric classes.
 	// Typed 2D storage images require explicit format qualifiers and matching numeric types.
 	// Supports flat global/entry descriptors and one-dimensional fixed descriptor arrays,
 	// plus one global push-constant buffer.

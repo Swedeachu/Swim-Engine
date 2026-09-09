@@ -471,6 +471,15 @@ namespace Swim::Rhi
 		std::uint32_t Height = 0;
 	};
 
+	// Shader-visible numeric class, independent of channel count and bit width.
+	enum class SampledTextureClass : std::uint8_t
+	{
+		Undefined,
+		Float,
+		Uint,
+		Sint,
+	};
+
 	struct DescriptorBindingDesc
 	{
 		std::uint32_t Binding = 0;
@@ -481,6 +490,8 @@ namespace Swim::Rhi
 		bool PartiallyBound = false;
 		// Required exact view format for StorageTexture; Undefined for other descriptors.
 		Format StorageTextureFormat = Format::Undefined;
+		// SampledTexture only; other descriptors retain Float. Appended for aggregate compatibility.
+		SampledTextureClass SampledClass = SampledTextureClass::Float;
 	};
 
 	struct DescriptorSchemaDesc
