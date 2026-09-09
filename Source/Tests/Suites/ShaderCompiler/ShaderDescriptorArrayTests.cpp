@@ -121,7 +121,7 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "NestedArraysValuesBlocksAndUnsuppo
 		R"json({"kind":"array","elementCount":2,"elementType":{"kind":"samplerState"}})json",
 		R"json({"kind":"scalar","scalarType":"uint32"})json",
 		R"json({"kind":"struct"})json", R"json({"kind":"parameterBlock"})json", "null",
-		R"json({"kind":"resource","baseShape":"texture2D","array":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json",
+		R"json({"kind":"resource","baseShape":"texture3D","array":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json",
 		R"json({"kind":"resource","baseShape":"texture2D","multisample":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json" })
 	{
 		const auto parsed = ParseArray(element);

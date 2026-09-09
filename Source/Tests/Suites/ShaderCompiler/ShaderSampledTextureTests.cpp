@@ -69,6 +69,7 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "UnsupportedScalarShapeAndResultWidt
 		if (invalid == 0)
 		{
 			image.ResourceArray = true;
+			image.ResourceShape = "texture3D";
 		}
 		if (invalid == 1)
 		{
@@ -76,7 +77,7 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "UnsupportedScalarShapeAndResultWidt
 		}
 		if (invalid == 2)
 		{
-			image.ResourceShape = "textureCube";
+			image.ResourceShape = "unknownTexture";
 		}
 		if (invalid == 3)
 		{

@@ -24,6 +24,7 @@ namespace Swim::ShaderCompiler
 		Rhi::DescriptorType type;
 		Rhi::Format storageFormat = Rhi::Format::Undefined;
 		Rhi::SampledTextureClass sampledClass = Rhi::SampledTextureClass::Float;
+		Rhi::TextureViewDimension sampledDimension = Rhi::TextureViewDimension::Texture2D;
 		if (typeKind == "samplerState")
 		{
 			type = Rhi::DescriptorType::Sampler;
@@ -51,11 +52,28 @@ namespace Swim::ShaderCompiler
 		}
 		else if (typeKind == "resource" && (parameter.ResourceAccess.empty() || parameter.ResourceAccess == "read"))
 		{
-			if (parameter.ResourceShape == "texture2D" && !parameter.ResourceArray && !parameter.ResourceMultisample &&
+			if ((parameter.ResourceShape == "texture1D" || parameter.ResourceShape == "texture2D" ||
+					parameter.ResourceShape == "textureCube" || (parameter.ResourceShape == "texture3D" && !parameter.ResourceArray)) && !parameter.ResourceMultisample &&
 				parameter.ResourceComponentCount >= 1 && parameter.ResourceComponentCount <= 4 &&
 				(parameter.ResourceScalarType == "float32" || parameter.ResourceScalarType == "uint32" || parameter.ResourceScalarType == "int32"))
 			{
 				type = Rhi::DescriptorType::SampledTexture;
+				if (parameter.ResourceShape == "texture1D")
+				{
+					sampledDimension = parameter.ResourceArray ? Rhi::TextureViewDimension::Texture1DArray : Rhi::TextureViewDimension::Texture1D;
+				}
+				else if (parameter.ResourceShape == "texture2D")
+				{
+					sampledDimension = parameter.ResourceArray ? Rhi::TextureViewDimension::Texture2DArray : Rhi::TextureViewDimension::Texture2D;
+				}
+				else if (parameter.ResourceShape == "textureCube")
+				{
+					sampledDimension = parameter.ResourceArray ? Rhi::TextureViewDimension::TextureCubeArray : Rhi::TextureViewDimension::TextureCube;
+				}
+				else
+				{
+					sampledDimension = Rhi::TextureViewDimension::Texture3D;
+				}
 				sampledClass = parameter.ResourceScalarType == "uint32" ? Rhi::SampledTextureClass::Uint :
 					parameter.ResourceScalarType == "int32" ? Rhi::SampledTextureClass::Sint : Rhi::SampledTextureClass::Float;
 			}
@@ -85,7 +103,7 @@ namespace Swim::ShaderCompiler
 			return "Duplicate reflected descriptor binding: " + parameter.Name;
 		}
 		// The caller supplies global or entry-point visibility; binding coordinates stay absolute.
-		schema->Bindings.push_back({ parameter.Index, type, count, stages, false, false, storageFormat, sampledClass });
+		schema->Bindings.push_back({ parameter.Index, type, count, stages, false, false, storageFormat, sampledClass, sampledDimension });
 		return {};
 	}
 

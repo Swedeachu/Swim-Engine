@@ -218,6 +218,7 @@ function(swim_configure_tests)
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanComputeCapture.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanStorageTextureCapture.h
+			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/SampledDimensionData.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanSmokeDiagnostics.h
 			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanValidationCapture.h
 		)
@@ -291,6 +292,10 @@ function(swim_configure_tests)
 			SWIM_RHI_PUSH_CONSTANTS_REFLECTION_PATH="${SwimRhiPushConstants_REFLECTION}"
 			SWIM_RHI_COMPUTE_SPIRV_PATH="${SwimRhiCompute_SPIRV}"
 			SWIM_RHI_COMPUTE_REFLECTION_PATH="${SwimRhiCompute_REFLECTION}"
+			SWIM_RHI_SAMPLED_DIMENSIONS_SPIRV_PATH="${SwimRhiSampledDimensions_SPIRV}"
+			SWIM_RHI_SAMPLED_DIMENSIONS_REFLECTION_PATH="${SwimRhiSampledDimensions_REFLECTION}"
+			SWIM_RHI_SAMPLED_CUBE_ARRAY_SPIRV_PATH="${SwimRhiSampledCubeArray_SPIRV}"
+			SWIM_RHI_SAMPLED_CUBE_ARRAY_REFLECTION_PATH="${SwimRhiSampledCubeArray_REFLECTION}"
 			SWIM_RHI_SAMPLED_INTEGER_SPIRV_PATH="${SwimRhiSampledInteger_SPIRV}"
 			SWIM_RHI_SAMPLED_INTEGER_REFLECTION_PATH="${SwimRhiSampledInteger_REFLECTION}"
 			SWIM_RHI_DESCRIPTOR_ARRAYS_SPIRV_PATH="${SwimRhiDescriptorArrays_SPIRV}"

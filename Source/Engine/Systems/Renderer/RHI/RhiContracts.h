@@ -448,7 +448,8 @@ namespace Swim::Rhi
 		// Writes/first binding require external host synchronization. Keep the layout
 		// and referenced resources alive for the table's use; writes do not add barriers.
 		// BufferRange == 0 selects the remaining buffer range, subject to device limits.
-		// SampledTexture writes require a matching SampledClass (Float/Uint/Sint).
+		// SampledTexture writes require matching SampledClass (Float/Uint/Sint) and
+		// SampledDimension. Image layers are independent of descriptor ArrayIndex.
 		// Integer texel loads need no sampler; this API does not validate shader/sampler pairings.
 		// StorageTexture writes require an exact StorageTextureFormat match and a
 		// single-sampled 2D view of one mip/layer. Images must be in General layout

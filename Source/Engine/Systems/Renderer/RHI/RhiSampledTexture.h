@@ -5,6 +5,19 @@
 namespace Swim::Rhi
 {
 
+	constexpr bool IsSampledTextureDimension(TextureViewDimension dimension)
+	{
+		switch (dimension)
+		{
+		case TextureViewDimension::Texture1D: case TextureViewDimension::Texture1DArray:
+		case TextureViewDimension::Texture2D: case TextureViewDimension::Texture2DArray:
+		case TextureViewDimension::Texture3D: case TextureViewDimension::TextureCube:
+		case TextureViewDimension::TextureCubeArray:
+			return true;
+		default: return false;
+		}
+	}
+
 	// Depth/stencil and unknown formats are outside the sampled-color contract.
 	constexpr SampledTextureClass GetSampledTextureClass(Format format)
 	{

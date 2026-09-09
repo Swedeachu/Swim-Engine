@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Descriptors/VulkanDescriptorLayout.h"
 
+#include "Engine/Systems/Renderer/RHI/RhiSampledTexture.h"
+
 #include <algorithm>
 #include <array>
 #include <stdexcept>
@@ -89,6 +91,14 @@ namespace Swim::RhiVulkan
 					const auto& binding = schema.Bindings[bindingIndex];
 					if (binding.Count == 0 || binding.VariableCount || binding.PartiallyBound ||
 						(bindingIndex > 0 && binding.Binding == schema.Bindings[bindingIndex - 1].Binding))
+					{
+						return false;
+					}
+					if (binding.Type == Rhi::DescriptorType::SampledTexture ?
+						(!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
+							(binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
+								!layout.Device->Device.physical_device.features.imageCubeArray)) :
+						binding.SampledDimension != Rhi::TextureViewDimension::Texture2D)
 					{
 						return false;
 					}

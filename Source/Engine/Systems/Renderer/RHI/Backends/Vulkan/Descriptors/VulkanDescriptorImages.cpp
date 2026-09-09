@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanResourceAccess.h"
 #include "Engine/Systems/Renderer/RHI/RhiSampledTexture.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTextureViews.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTextureView.h"
 
 namespace Swim::RhiVulkan
@@ -37,14 +38,12 @@ namespace Swim::RhiVulkan
 		else if (binding.Type == Rhi::DescriptorType::SampledTexture)
 		{
 			if (view.GetNativeHandle() == 0 || !HasTextureUsage(desc.Usage, Rhi::TextureUsage::Sampled) ||
-				desc.Samples != Rhi::SampleCount::X1 || viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D ||
-				viewDesc.ArrayLayerCount != 1 || format != desc.PixelFormat ||
-				viewDesc.MipLevelCount == 0 || viewDesc.BaseMipLevel >= desc.MipLevels ||
-				viewDesc.MipLevelCount > desc.MipLevels - viewDesc.BaseMipLevel || viewDesc.BaseArrayLayer >= desc.ArrayLayers ||
+				desc.Samples != Rhi::SampleCount::X1 || viewDesc.Dimension != binding.SampledDimension ||
+				!ValidateVulkanTextureView(desc, viewDesc, state->Device.physical_device.features.imageCubeArray != VK_FALSE) ||
 				Rhi::GetSampledTextureClass(format) == Rhi::SampledTextureClass::Undefined ||
 				Rhi::GetSampledTextureClass(format) != binding.SampledClass)
 			{
-				throw std::invalid_argument("Sampled descriptors require a single-sampled 2D color view matching the shader numeric class");
+				throw std::invalid_argument("Sampled descriptors require a single-sampled color view matching the shader dimension and numeric class");
 			}
 			required = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 			// Preserve the floating/normalized filtering contract. Integer texel loads

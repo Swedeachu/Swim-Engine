@@ -153,7 +153,7 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the seventeen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback and sampled integer texture readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the eighteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback sampled integer texture readback and sampled image dimension readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"
@@ -365,8 +365,7 @@ Slang `Texture2D<float/uint/int>` declarations now preserve their numeric class 
 entry-point resources. Descriptor writes reject a view with the wrong signedness or
 numeric class. Uint/Sint refer to shader results, not the texture's channel count or
 bit width: a `Texture2D<uint>` can read R8Uint or R32Uint. Float covers normalized,
-sRGB and floating-point color formats. Depth/comparison and additional image shapes
-remain separate work.
+sRGB and floating-point color formats. Depth/comparison remains separate work; supported view shapes are described below.
 
 Use integer `Load` operations for exact texel reads without a sampler. Integer views
 require native sampled-image support; they do not require linear-filter support.
@@ -380,3 +379,31 @@ views, output guards and CPU readback. Run it through the desktop smoke command 
 The sandbox still uses the transitional Vulkan renderer; launching `Swim Engine.exe`
 does not run this RHI validation suite. The architecture guide's current snapshot
 records which foundations are active in the sandbox and which RHI consumers remain separate.
+
+### Sampled image dimensions
+
+Reflected `Texture1D`, `Texture1DArray`, `Texture2D`, `Texture2DArray`, `Texture3D`,
+`TextureCube` and `TextureCubeArray` declarations carry `DescriptorBindingDesc::SampledDimension`.
+The view must match that shape and the shader's Float/Uint/Sint numeric class. A
+one-layer `Texture2DArray` view still requires an array shader type. Image layers
+are independent of descriptor-array `Count` and `DescriptorWrite::ArrayIndex`.
+
+Cube-array views and layouts require `AdapterInfo::Capabilities.SampledCubeArray`;
+Vulkan enables this optional feature when supported. Plain cube views do not need
+it. Cube views select six layers, cube arrays select a multiple of six, and volume
+views select a single image layer with depth supplied by the 3D extent. Mip and
+array-layer indices are relative to the view. Mutable-format views, multisample
+sampling and depth/comparison remain outside the reflected sampled-color contract.
+Storage images retain their separate typed 2D contract.
+
+`RHI.Vulkan.Smoke.SampledDimensionsAndReadback` selects a compiled base or cube-array
+variant and validates mip-1 inputs, nonzero base layers, array layers, volume slices,
+all six cube faces and untouched output guards across four frames. The base variant
+still runs on devices without cube-array support. Use the desktop smoke command
+above; the default test run uses reflection and native-dispatch captures.
+
+Pinned Slang 2026.16.1 currently omits the `SampledCubeArray` SPIR-V capability for
+cube-array declarations. The optional smoke shader demonstrates an explicit
+`spirv_asm { OpCapability SampledCubeArray; };` declaration, checked in the compiled
+artifact tests. Use the same declaration for cube-array shader consumers with this
+compiler version.

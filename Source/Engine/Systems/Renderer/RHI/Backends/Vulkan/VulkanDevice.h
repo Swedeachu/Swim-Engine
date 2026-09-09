@@ -8,6 +8,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanMemoryBudget.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanStorageTexture.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanTextureViews.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanNativeHandle.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanBuffer.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Resources/VulkanTexture.h"
@@ -241,60 +242,8 @@ namespace Swim::RhiVulkan
 				const Rhi::Format viewFormat = desc.PixelFormat == Rhi::Format::Undefined
 					? textureDesc.PixelFormat
 					: desc.PixelFormat;
-				if (viewFormat != textureDesc.PixelFormat || ToVkFormat(viewFormat) == VK_FORMAT_UNDEFINED ||
-					((desc.Dimension == Rhi::TextureViewDimension::Texture1D ||
-						desc.Dimension == Rhi::TextureViewDimension::Texture2D ||
-						desc.Dimension == Rhi::TextureViewDimension::Texture3D) && desc.ArrayLayerCount != 1) ||
-					desc.MipLevelCount == 0 || desc.ArrayLayerCount == 0 ||
-					desc.BaseMipLevel >= textureDesc.MipLevels ||
-					desc.MipLevelCount > textureDesc.MipLevels - desc.BaseMipLevel ||
-					desc.BaseArrayLayer >= textureDesc.ArrayLayers ||
-					desc.ArrayLayerCount > textureDesc.ArrayLayers - desc.BaseArrayLayer)
+				if (!ValidateVulkanTextureView(textureDesc, desc, state->Device.physical_device.features.imageCubeArray != VK_FALSE))
 				{
-					return nullptr;
-				}
-
-				switch (textureDesc.Dimension)
-				{
-				case Rhi::TextureDimension::Texture1D:
-					if (desc.Dimension != Rhi::TextureViewDimension::Texture1D &&
-						desc.Dimension != Rhi::TextureViewDimension::Texture1DArray)
-					{
-						return nullptr;
-					}
-					break;
-				case Rhi::TextureDimension::Texture2D:
-					if (desc.Dimension != Rhi::TextureViewDimension::Texture2D &&
-						desc.Dimension != Rhi::TextureViewDimension::Texture2DArray)
-					{
-						return nullptr;
-					}
-					break;
-				case Rhi::TextureDimension::Texture3D:
-					if (desc.Dimension != Rhi::TextureViewDimension::Texture3D)
-					{
-						return nullptr;
-					}
-					break;
-				case Rhi::TextureDimension::TextureCube:
-					if (desc.Dimension != Rhi::TextureViewDimension::Texture2D &&
-						desc.Dimension != Rhi::TextureViewDimension::Texture2DArray &&
-						desc.Dimension != Rhi::TextureViewDimension::TextureCube &&
-						desc.Dimension != Rhi::TextureViewDimension::TextureCubeArray)
-					{
-						return nullptr;
-					}
-					if (desc.Dimension == Rhi::TextureViewDimension::TextureCube && desc.ArrayLayerCount != 6)
-					{
-						return nullptr;
-					}
-					if (desc.Dimension == Rhi::TextureViewDimension::TextureCubeArray &&
-						(desc.ArrayLayerCount % 6) != 0)
-					{
-						return nullptr;
-					}
-					break;
-				default:
 					return nullptr;
 				}
 

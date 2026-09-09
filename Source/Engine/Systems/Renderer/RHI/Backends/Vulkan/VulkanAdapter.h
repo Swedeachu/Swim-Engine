@@ -33,6 +33,9 @@ namespace Swim::RhiVulkan
 				  queueFamilies(queueFamilies),
 				  info(BuildAdapterInfo(this->instance->Dispatch, this->physicalDevice))
 			{
+				VkPhysicalDeviceFeatures optionalFeatures{};
+				optionalFeatures.imageCubeArray = VK_TRUE;
+				info.Capabilities.SampledCubeArray = this->physicalDevice.enable_features_if_present(optionalFeatures);
 				info.Capabilities.HdrSwapchain = this->instance->SwapchainColorSpaceEnabled;
 				ReportAdapterInfo(this->instance->Diagnostics, info);
 			}

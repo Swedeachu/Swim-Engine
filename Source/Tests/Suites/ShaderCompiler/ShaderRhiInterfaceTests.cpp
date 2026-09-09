@@ -57,6 +57,7 @@ SWIM_TEST("ShaderCompiler.RhiInterface", "UnsupportedInterfacesAndDuplicateSlots
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
 	reflection.GlobalParameters[0].ResourceMultisample = false;
 	reflection.GlobalParameters[0].ResourceArray = true;
+	reflection.GlobalParameters[0].ResourceShape = "texture3D";
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
 
 	reflection.GlobalParameters[0].TypeKind = "array";

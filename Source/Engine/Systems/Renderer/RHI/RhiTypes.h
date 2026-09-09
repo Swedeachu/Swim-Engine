@@ -492,6 +492,8 @@ namespace Swim::Rhi
 		Format StorageTextureFormat = Format::Undefined;
 		// SampledTexture only; other descriptors retain Float. Appended for aggregate compatibility.
 		SampledTextureClass SampledClass = SampledTextureClass::Float;
+		// SampledTexture view shape, independent of descriptor Count. Other types retain Texture2D.
+		TextureViewDimension SampledDimension = TextureViewDimension::Texture2D;
 	};
 
 	struct DescriptorSchemaDesc
@@ -566,6 +568,7 @@ namespace Swim::Rhi
 		bool AstcTextureCompression = false;
 		// Backend can negotiate HDR color spaces; query each window for usable pairs.
 		bool HdrSwapchain = false;
+		bool SampledCubeArray = false; // Optional enabled device feature; not required by the baseline.
 	};
 
 } // namespace Swim::Rhi
