@@ -1,6 +1,8 @@
 #include "Tests/Framework/Test.h"
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
 
+#include <fstream>
+
 using namespace Swim;
 
 namespace
@@ -117,7 +119,57 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "GraphicsVisibilityAndCollisionRules
 	SWIM_CHECK(result.Interface.DescriptorSchemas.empty());
 }
 
+SWIM_TEST("ShaderCompiler.SampledTextures", "ExplicitStorageFormatsCannotBeLostInNumericClassReflection")
+{
+	for (bool local : { false, true })
+	{
+		for (bool array : { false, true })
+		{
+			auto parsed = ParseSampled("uint32", local, array);
+			SWIM_REQUIRE(parsed);
+			auto& parameter = local ? parsed.Reflection.EntryPoints[0].Parameters[0] : parsed.Reflection.GlobalParameters[0];
+			parameter.ResourceFormat = "r32ui";
+			const auto rejected = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
+			SWIM_CHECK(!rejected);
+			SWIM_CHECK(rejected.Interface.DescriptorSchemas.empty());
+			parameter.ResourceFormat = "unknown";
+			SWIM_CHECK(ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection));
+		}
+	}
+}
+
 #ifdef SWIM_RHI_SAMPLED_INTEGER_REFLECTION_PATH
+SWIM_TEST("ShaderCompiler.SampledTextures", "SampledSpirvDoesNotConstrainViewsToAnInferredStorageFormat")
+{
+	std::ifstream file(SWIM_RHI_SAMPLED_INTEGER_SPIRV_PATH, std::ios::binary | std::ios::ate);
+	SWIM_REQUIRE(file);
+	const auto size = static_cast<std::size_t>(file.tellg());
+	SWIM_REQUIRE(size >= 5 * sizeof(std::uint32_t) && size % sizeof(std::uint32_t) == 0);
+	std::vector<std::uint32_t> words(size / sizeof(std::uint32_t));
+	file.seekg(0);
+	file.read(reinterpret_cast<char*>(words.data()), static_cast<std::streamsize>(size));
+	SWIM_REQUIRE(file);
+	SWIM_REQUIRE_EQUAL(words[0], 0x07230203u);
+	unsigned sampledTypes = 0;
+	for (std::size_t offset = 5; offset < words.size();)
+	{
+		const auto count = words[offset] >> 16;
+		const auto opcode = words[offset] & 0xffffu;
+		SWIM_REQUIRE(count != 0 && count <= words.size() - offset);
+		if (opcode == 25) // OpTypeImage: Sampled operand 1 means a sampled image.
+		{
+			SWIM_REQUIRE(count >= 9);
+			if (words[offset + 7] == 1)
+			{
+				++sampledTypes;
+				SWIM_CHECK_EQUAL(words[offset + 8], 0u); // ImageFormat Unknown
+			}
+		}
+		offset += count;
+	}
+	SWIM_CHECK_EQUAL(sampledTypes, 3u); // float, uint, int
+}
+
 SWIM_TEST("ShaderCompiler.SampledTextures", "PinnedSlangPreservesThreeClassesAndComputeEntry")
 {
 	const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_SAMPLED_INTEGER_REFLECTION_PATH);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -497,15 +498,24 @@ def check_machine_specific_paths(failures: list[str]) -> None:
         re.compile(r"\$\(VULKAN_SDK\)"),
     )
 
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES | {".cmake", ".txt", ".md", ".json"}:
-            continue
-
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        for pattern in patterns:
-            if pattern.search(text):
-                fail(f"machine/manual dependency path remains in {path.relative_to(ROOT)}: {pattern.pattern}", failures)
-                break
+    # CMake caches, generated shader reflection, third-party sources, and
+    # archived code are not maintained source. Prune them before traversal:
+    # generated files necessarily contain absolute build-machine paths, and
+    # walking a populated CPM cache is especially costly from WSL.
+    for directory, children, files in os.walk(ROOT):
+        if Path(directory) == ROOT:
+            children[:] = [name for name in children if name not in {".git", ".cache", "build", "Deprecated"}]
+        if Path(directory) == ROOT / "Assets":
+            children[:] = [name for name in children if name != "Cooked"]
+        for name in files:
+            path = Path(directory) / name
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES | {".cmake", ".txt", ".md", ".json"}:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for pattern in patterns:
+                if pattern.search(text):
+                    fail(f"machine/manual dependency path remains in {path.relative_to(ROOT)}: {pattern.pattern}", failures)
+                    break
 
 
 def check_legacy_library_includes(failures: list[str]) -> None:

@@ -4,12 +4,32 @@
 #include "Tests/Framework/Test.h"
 
 #include <cstdlib>
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
 
 namespace Swim::Testing
 {
+
+	inline bool IsExpectedVulkanSmokeAdvisory(const Rhi::DiagnosticMessage& message, const Rhi::ValidationChecks& checks)
+	{
+		// GPU-AV clamps this limit to the capacity of its descriptor tracking
+		// heap. This exact startup advisory is expected on the desktop adapters;
+		// retain its original severity/text and reject every other adjustment
+		// (especially disabled instrumentation or unsupported features).
+		return checks.GpuAssisted && message.Severity == Rhi::DiagnosticSeverity::Warning &&
+			message.Id == "WARNING-Setting-Limit-Adjusted" &&
+			message.Text == "vkGetPhysicalDeviceProperties2(): Warning that validation is adjusting settings:\n"
+				"\tSetting VkPhysicalDeviceDescriptorIndexingProperties::maxUpdateAfterBindDescriptorsInAllPools to 4194304\n";
+	}
+
+	inline bool HasCleanVulkanSmokeDiagnostics(const Rhi::DiagnosticSnapshot& snapshot, const Rhi::ValidationChecks& checks)
+	{
+		const auto expected = std::count_if(snapshot.Messages.begin(), snapshot.Messages.end(),
+			[&](const auto& message) { return IsExpectedVulkanSmokeAdvisory(message, checks); });
+		return snapshot.Errors == 0 && snapshot.Dropped == 0 && snapshot.Warnings == static_cast<std::uint64_t>(expected);
+	}
 
 	inline Rhi::ValidationChecks ParseVulkanSmokeChecks(std::string_view profile)
 	{
@@ -73,7 +93,14 @@ namespace Swim::Testing
 		// teardown diagnostics, not just the messages observed before GPU draining.
 		const auto snapshot = desc.Diagnostics->Snapshot();
 		PrintVulkanSmokeDiagnostics(snapshot);
-		SWIM_REQUIRE_MESSAGE(snapshot.IsClean(), "Vulkan smoke emitted validation warnings/errors or lost diagnostics (including teardown)");
+		const auto expected = std::count_if(snapshot.Messages.begin(), snapshot.Messages.end(),
+			[&](const auto& message) { return IsExpectedVulkanSmokeAdvisory(message, desc.Checks); });
+		if (expected != 0)
+		{
+			std::cerr << "[RHI validation] expected descriptor-limit startup advisories=" << expected << '\n';
+		}
+		SWIM_REQUIRE_MESSAGE(HasCleanVulkanSmokeDiagnostics(snapshot, desc.Checks),
+			"Vulkan smoke emitted unexpected validation warnings/errors or lost diagnostics (including teardown)");
 	}
 
 } // namespace Swim::Testing

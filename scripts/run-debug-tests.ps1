@@ -41,6 +41,10 @@ param(
     [ValidateSet("core", "sync", "gpu", "all")]
     [string]$Validation = "core",
 
+    # Select an SDK root or x64 Bin folder. Otherwise discover the newest layer
+    # in VULKAN_SDK, C:\VulkanSDK or .cache/vulkan-sdk, respecting VK_LAYER_PATH.
+    [string]$VulkanSdkPath,
+
     # SwimTests --filter patterns for the opt-in pass. Pass @() to run everything.
     [string[]]$Filter = @("RHI.Vulkan.Smoke"),
 
@@ -62,6 +66,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BuildDirectory = Join-Path $Root "build/windows-debug"
+. (Join-Path $PSScriptRoot 'vulkan-test-environment.ps1')
 
 function Restore-SwimEnvironmentVariable {
     param(
@@ -83,8 +88,12 @@ Push-Location $Root
 # Capture the caller's environment so the smoke gate never leaks out of this run.
 $PreviousRunRhiSmoke = $env:SWIM_RUN_RHI_SMOKE
 $PreviousRhiValidation = $env:SWIM_RHI_VALIDATION
+$PreviousVkLayerPath = $env:VK_LAYER_PATH
 
 try {
+    $LayerDirectory = Get-SwimVulkanTestLayer -Root $Root -SdkPath $VulkanSdkPath -Validation $Validation
+    if ($LayerDirectory) { $env:VK_LAYER_PATH = $LayerDirectory }
+
     if (-not $SkipBuild) {
         $BuildScript = if ($Clean) {
             Join-Path $PSScriptRoot "build-windows-clean.ps1"
@@ -163,5 +172,6 @@ catch {
 finally {
     Restore-SwimEnvironmentVariable -Name "SWIM_RUN_RHI_SMOKE" -Value $PreviousRunRhiSmoke
     Restore-SwimEnvironmentVariable -Name "SWIM_RHI_VALIDATION" -Value $PreviousRhiValidation
+    Restore-SwimEnvironmentVariable -Name "VK_LAYER_PATH" -Value $PreviousVkLayerPath
     Pop-Location
 }

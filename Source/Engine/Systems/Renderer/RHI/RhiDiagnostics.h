@@ -101,6 +101,8 @@ namespace Swim::Rhi
 	struct ValidationChecks
 	{
 		bool Synchronization = false;
+		// GPU instrumentation runs separately from core validation. Validate
+		// core first; GPU-AV plus core checks triggers a Khronos warning.
 		bool GpuAssisted = false;
 
 		bool Any() const

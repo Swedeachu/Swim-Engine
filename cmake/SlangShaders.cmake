@@ -56,7 +56,11 @@ function(swim_add_slang_program name)
 		# Slang otherwise rewrites every SPIR-V entry point to `main`. The RHI
 		# deliberately carries source/reflection entry-point names through its
 		# public shader artifacts, so preserve those names in OpEntryPoint too.
-		set(SWIM_SLANG_PROGRAM_TARGET_ARGS -fvk-use-entrypoint-name)
+		# Sampled images are constrained by numeric class, not storage format:
+		# a Texture2D<uint> array may contain both R8_UINT and R32_UINT views.
+		# Do not let Slang infer R32ui for that array. Writable images retain
+		# their explicit [format(...)] qualifiers, required by RHI reflection.
+		set(SWIM_SLANG_PROGRAM_TARGET_ARGS -fvk-use-entrypoint-name -default-image-format-unknown)
 	elseif(SWIM_SLANG_PROGRAM_TARGET STREQUAL "glsl")
 		if(NOT SWIM_SLANG_PROGRAM_PROFILE)
 			set(SWIM_SLANG_PROGRAM_PROFILE "glsl_460")

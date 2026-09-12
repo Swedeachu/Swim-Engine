@@ -57,6 +57,10 @@ namespace Swim::ShaderCompiler
 				parameter.ResourceComponentCount >= 1 && parameter.ResourceComponentCount <= 4 &&
 				(parameter.ResourceScalarType == "float32" || parameter.ResourceScalarType == "uint32" || parameter.ResourceScalarType == "int32"))
 			{
+				if (!parameter.ResourceFormat.empty() && parameter.ResourceFormat != "unknown")
+				{
+					return "Sampled textures require an unknown image format; the RHI binding describes numeric class, not an exact storage format: " + parameter.Name;
+				}
 				type = Rhi::DescriptorType::SampledTexture;
 				if (parameter.ResourceShape == "texture1D")
 				{

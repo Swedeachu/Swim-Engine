@@ -19,9 +19,9 @@ namespace Swim::RhiVulkan
 	namespace
 	{
 
-		VkPhysicalDeviceVulkan11Features GetRequiredVulkan11Features()
+		VkPhysicalDeviceVulkan11Features GetRequiredVulkan11Features(const Rhi::ValidationChecks& checks)
 		{
-			VkPhysicalDeviceVulkan11Features features{};
+			auto features = GetValidationVulkan11Features(checks);
 			features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 			// Slang's Vulkan SPIR-V path can declare DrawParameters for graphics
 			// entry points that consume draw built-ins. Requiring the promoted 1.1
@@ -30,9 +30,9 @@ namespace Swim::RhiVulkan
 			return features;
 		}
 
-		VkPhysicalDeviceVulkan12Features GetRequiredVulkan12Features()
+		VkPhysicalDeviceVulkan12Features GetRequiredVulkan12Features(const Rhi::ValidationChecks& checks)
 		{
-			VkPhysicalDeviceVulkan12Features features{};
+			auto features = GetValidationVulkan12Features(checks);
 			features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
 			features.drawIndirectCount = VK_TRUE;
 			features.descriptorIndexing = VK_TRUE;
@@ -89,7 +89,10 @@ namespace Swim::RhiVulkan
 
 		volk::volkInitializeCustom(getInstanceProcAddr);
 
-		vkb::InstanceBuilder instanceBuilder{ getInstanceProcAddr };
+		// vk-bootstrap caches its global entry points for the process lifetime.
+		// Let it own a loader reference: SDL releases its reference on platform
+		// shutdown, and a later load need not map the DLL at the same address.
+		vkb::InstanceBuilder instanceBuilder;
 		instanceBuilder
 			.set_app_name("Swim Engine")
 			.set_engine_name("Swim Engine")
@@ -106,7 +109,7 @@ namespace Swim::RhiVulkan
 			return nullptr;
 		}
 
-		const auto systemInfo = vkb::SystemInfo::get_system_info(getInstanceProcAddr);
+		const auto systemInfo = vkb::SystemInfo::get_system_info();
 		if (!systemInfo)
 		{
 			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanInstance", systemInfo.error().message());
@@ -139,8 +142,8 @@ namespace Swim::RhiVulkan
 			.set_minimum_version(1, 3)
 			.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
 			.set_required_features(GetValidationDeviceFeatures(instance->Diagnostics.Checks))
-			.set_required_features_11(GetRequiredVulkan11Features())
-			.set_required_features_12(GetRequiredVulkan12Features())
+			.set_required_features_11(GetRequiredVulkan11Features(instance->Diagnostics.Checks))
+			.set_required_features_12(GetRequiredVulkan12Features(instance->Diagnostics.Checks))
 			.set_required_features_13(GetRequiredVulkan13Features())
 			.prefer_gpu_device_type(vkb::PreferredDeviceType::discrete)
 			.allow_any_gpu_device_type(true);
