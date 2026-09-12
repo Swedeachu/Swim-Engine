@@ -21,10 +21,11 @@ namespace Swim::ShaderCompiler
 	// Accepts graphics stages or one fixed-local-size compute entry, including read/write storage buffers.
 	// Sampled 2D color images retain Float/Uint/Sint numeric classes.
 	// Typed 2D storage images require explicit format qualifiers and matching numeric types.
-	// Supports flat global/entry descriptors and one-dimensional fixed descriptor arrays,
+	// Supports resolved global/entry descriptors and one-dimensional fixed descriptor arrays,
 	// plus one global push-constant buffer.
 	// Globals use all program stages; entry descriptors use only their declaring stage.
-	// All duplicate (space, binding) declarations reject. Nested parameter blocks,
+	// The parser resolves nested structs/explicit parameter groups and retains uniform byte ranges.
+	// All duplicate (space, binding) declarations reject. Arrays of resource-bearing groups,
 	// implicit uniform scope containers, entry-local push constants, nested arrays and
 	// runtime-sized descriptor arrays fail explicitly.
 	ShaderRhiInterfaceResult BuildRhiShaderInterface(const ShaderReflection& reflection);

@@ -1,5 +1,6 @@
 #include "Tests/Framework/Test.h"
 #include "Tools/ShaderCompiler/ShaderReflection.h"
+#include "Tools/ShaderCompiler/ShaderRhiInterface.h"
 
 #include <algorithm>
 #include <array>
@@ -96,7 +97,14 @@ SWIM_TEST("ShaderCompiler.Slang", "BasicRasterCompilesAndReflects")
 
 	SWIM_CHECK(ContainsGlobalParameter(reflection.Reflection, "Frame"));
 	SWIM_CHECK(ContainsGlobalParameter(reflection.Reflection, "Object"));
-	SWIM_CHECK(ContainsGlobalParameter(reflection.Reflection, "Material"));
+	SWIM_CHECK(ContainsGlobalParameter(reflection.Reflection, "Material.AlbedoTexture"));
+	SWIM_CHECK(ContainsGlobalParameter(reflection.Reflection, "Material.AlbedoSampler"));
+	const auto interface = Swim::ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+	SWIM_REQUIRE_MESSAGE(interface, interface.Error);
+	SWIM_REQUIRE_EQUAL(interface.Interface.DescriptorSchemas.size(), 3u);
+	SWIM_REQUIRE_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings.size(), 2u);
+	SWIM_CHECK_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings[0].Type, Swim::Rhi::DescriptorType::SampledTexture);
+	SWIM_CHECK_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings[1].Type, Swim::Rhi::DescriptorType::Sampler);
 	SWIM_CHECK(ContainsEntryPoint(
 		reflection.Reflection,
 		"vertexMain",

@@ -345,6 +345,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		DEFINES SWIM_TEST_CUBE_ARRAY=1
 	)
+	swim_add_slang_program(SwimRhiNestedParameters
+		SOURCE Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
+	)
+	swim_add_slang_program(SwimRhiNestedGraphics
+		SOURCE Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
+	)
 	swim_add_slang_program(SwimRhiDepthSampling
 		SOURCE Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
 		PROFILE spirv_1_5
@@ -363,7 +369,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiSampledDimensions_SPIRV}" "${SwimRhiSampledDimensions_REFLECTION}"
 			"${SwimRhiSampledCubeArray_SPIRV}" "${SwimRhiSampledCubeArray_REFLECTION}"
 			"${SwimRhiDepthSampling_SPIRV}" "${SwimRhiDepthSampling_REFLECTION}"
-		SOURCES Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
+			"${SwimRhiNestedParameters_SPIRV}" "${SwimRhiNestedParameters_REFLECTION}"
+			"${SwimRhiNestedGraphics_SPIRV}" "${SwimRhiNestedGraphics_REFLECTION}"
+		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
+			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
+			Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
 			Source/Shaders/Slang/RhiSmoke/Triangle.slang Source/Shaders/Slang/RhiSmoke/Texture.slang
 			Source/Shaders/Slang/RhiSmoke/VertexInput.slang Source/Shaders/Slang/RhiSmoke/PushConstants.slang
 			Source/Shaders/Slang/RhiSmoke/Compute.slang Source/Shaders/Slang/RhiSmoke/StorageTexture.slang

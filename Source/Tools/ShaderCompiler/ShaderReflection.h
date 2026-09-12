@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Tools/ShaderCompiler/ShaderUniformReflection.h"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -52,13 +54,15 @@ namespace Swim::ShaderCompiler
 		// Explicit storage-image qualifier and result scalar/vector width.
 		std::string ResourceFormat;
 		std::uint32_t ResourceComponentCount = 0;
-		// Multiple layout categories and malformed binding metadata cannot be flattened.
+		// Unsupported leaf categories or malformed recursive layouts fail conversion.
 		bool HasUnsupportedBindingLayout = false;
 		std::string SemanticName;
 		// Descriptor arrays preserve TypeKind == "array". Count remains the
 		// binding-slot count; DescriptorArrayCount is the number of descriptors.
 		std::string DescriptorElementTypeKind;
 		std::uint32_t DescriptorArrayCount = 0;
+		// Owned byte ranges within a reflected uniform buffer. Names retain the source path.
+		std::vector<ShaderUniformReflection> UniformFields;
 	};
 
 	struct ShaderEntryPointReflection
@@ -78,6 +82,7 @@ namespace Swim::ShaderCompiler
 		std::string GlobalScopeKind;
 		std::vector<ShaderBindingReflection> GlobalParameters;
 		std::vector<ShaderEntryPointReflection> EntryPoints;
+		bool HasUnsupportedGlobalScopeLayout = false;
 	};
 
 	struct ShaderReflectionResult

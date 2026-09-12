@@ -15,6 +15,11 @@ namespace Swim::ShaderCompiler
 			result.Error = std::move(message);
 			return result;
 		};
+		if (reflection.HasUnsupportedGlobalScopeLayout ||
+			(!reflection.GlobalScopeKind.empty() && reflection.GlobalScopeKind != "none"))
+		{
+			return fail("Unsupported global scope layout; use explicitly bound parameter groups");
+		}
 		Rhi::ShaderStageMask stages = Rhi::ShaderStageMask::None;
 		for (const auto& entry : reflection.EntryPoints)
 		{

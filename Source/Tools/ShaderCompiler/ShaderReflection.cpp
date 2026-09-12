@@ -1,6 +1,6 @@
 #include "Tools/ShaderCompiler/ShaderReflection.h"
 
-#include "Tools/ShaderCompiler/ShaderBindingReflection.h"
+#include "Tools/ShaderCompiler/ShaderParameterLayout.h"
 #include "Tools/ShaderCompiler/ShaderReflectionJson.h"
 
 #include <simdjson.h>
@@ -34,7 +34,7 @@ namespace Swim::ShaderCompiler
 				{
 					return false;
 				}
-				outParameters.push_back(Detail::ParseSlangBindingParameter(parameter));
+				Detail::ParseSlangParameterLayout(parameter, outParameters);
 			}
 			return true;
 		}
@@ -197,15 +197,24 @@ namespace Swim::ShaderCompiler
 			if (!globalScopeField->get_object().get(globalScope))
 			{
 				result.Reflection.GlobalScopeKind = ReadString(globalScope, "kind");
+				result.Reflection.HasUnsupportedGlobalScopeLayout = FindField(globalScope, "binding").has_value() ||
+					FindField(globalScope, "bindings").has_value() ||
+					(FindField(globalScope, "kind") && result.Reflection.GlobalScopeKind.empty());
 				if (const auto parameters = FindField(globalScope, "parameters"))
 				{
-					ParseParameterArray(*parameters, result.Reflection.GlobalParameters);
+					result.Reflection.HasUnsupportedGlobalScopeLayout = !ParseParameterArray(*parameters, result.Reflection.GlobalParameters) ||
+						result.Reflection.HasUnsupportedGlobalScopeLayout;
 				}
+			}
+			else
+			{
+				result.Reflection.HasUnsupportedGlobalScopeLayout = true;
 			}
 		}
 		else if (const auto parameters = FindField(root, "parameters"))
 		{
-			ParseParameterArray(*parameters, result.Reflection.GlobalParameters);
+			result.Reflection.HasUnsupportedGlobalScopeLayout = !ParseParameterArray(*parameters, result.Reflection.GlobalParameters) ||
+				result.Reflection.HasUnsupportedGlobalScopeLayout;
 		}
 
 		if (const auto entryPointsField = FindField(root, "entryPoints"))
