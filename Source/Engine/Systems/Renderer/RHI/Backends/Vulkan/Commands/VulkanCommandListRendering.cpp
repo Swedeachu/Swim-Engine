@@ -21,10 +21,14 @@ namespace Swim::RhiVulkan
 		{
 			switch (op)
 			{
-			case Rhi::LoadOp::Load: return VK_ATTACHMENT_LOAD_OP_LOAD;
-			case Rhi::LoadOp::Clear: return VK_ATTACHMENT_LOAD_OP_CLEAR;
-			case Rhi::LoadOp::Discard: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-			default: throw std::invalid_argument("Unknown RHI attachment load operation");
+			case Rhi::LoadOp::Load:
+				return VK_ATTACHMENT_LOAD_OP_LOAD;
+			case Rhi::LoadOp::Clear:
+				return VK_ATTACHMENT_LOAD_OP_CLEAR;
+			case Rhi::LoadOp::Discard:
+				return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			default:
+				throw std::invalid_argument("Unknown RHI attachment load operation");
 			}
 		}
 
@@ -32,9 +36,12 @@ namespace Swim::RhiVulkan
 		{
 			switch (op)
 			{
-			case Rhi::StoreOp::Store: return VK_ATTACHMENT_STORE_OP_STORE;
-			case Rhi::StoreOp::Discard: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			default: throw std::invalid_argument("Unknown RHI attachment store operation");
+			case Rhi::StoreOp::Store:
+				return VK_ATTACHMENT_STORE_OP_STORE;
+			case Rhi::StoreOp::Discard:
+				return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			default:
+				throw std::invalid_argument("Unknown RHI attachment store operation");
 			}
 		}
 
@@ -45,9 +52,8 @@ namespace Swim::RhiVulkan
 		RequireRecording(true);
 		RequireGraphicsQueue();
 		const auto& limits = GetState()->Device.physical_device.properties.limits;
-		if (desc.RenderArea.Width == 0 || desc.RenderArea.Height == 0 ||
-			desc.RenderArea.Width > limits.maxFramebufferWidth || desc.RenderArea.Height > limits.maxFramebufferHeight ||
-			desc.ColorAttachments.size() > limits.maxColorAttachments ||
+		if (desc.RenderArea.Width == 0 || desc.RenderArea.Height == 0 || desc.RenderArea.Width > limits.maxFramebufferWidth ||
+			desc.RenderArea.Height > limits.maxFramebufferHeight || desc.ColorAttachments.size() > limits.maxColorAttachments ||
 			(desc.ColorAttachments.empty() && desc.DepthStencilAttachment == nullptr))
 		{
 			throw std::invalid_argument("Vulkan rendering requires attachments and a nonempty supported render area");
@@ -66,7 +72,8 @@ namespace Swim::RhiVulkan
 			if (GetVulkanTextureViewAspect(viewDesc.PixelFormat, viewDesc.Aspect) != GetImageAspectMask(viewDesc.PixelFormat) ||
 				!HasTextureUsage(textureDesc.Usage, usage) || Rhi::IsDepthFormat(viewDesc.PixelFormat) != depth ||
 				viewDesc.MipLevelCount != 1 || viewDesc.BaseMipLevel >= 32 ||
-				(viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D && viewDesc.Dimension != Rhi::TextureViewDimension::Texture2DArray) ||
+				(viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D &&
+					viewDesc.Dimension != Rhi::TextureViewDimension::Texture2DArray) ||
 				desc.RenderArea.Width > std::max(1u, textureDesc.Extent.Width >> viewDesc.BaseMipLevel) ||
 				desc.RenderArea.Height > std::max(1u, textureDesc.Extent.Height >> viewDesc.BaseMipLevel))
 			{
@@ -160,9 +167,9 @@ namespace Swim::RhiVulkan
 			!std::isfinite(viewport.Width) || !std::isfinite(viewport.Height) || viewport.Width <= 0.0f || viewport.Height <= 0.0f ||
 			viewport.Width > limits.maxViewportDimensions[0] || viewport.Height > limits.maxViewportDimensions[1] ||
 			viewport.X < limits.viewportBoundsRange[0] || viewport.Y < limits.viewportBoundsRange[0] ||
-			right > limits.viewportBoundsRange[1] || bottom > limits.viewportBoundsRange[1] ||
-			!std::isfinite(viewport.MinDepth) || !std::isfinite(viewport.MaxDepth) ||
-			viewport.MinDepth < 0.0f || viewport.MinDepth > 1.0f || viewport.MaxDepth < 0.0f || viewport.MaxDepth > 1.0f)
+			right > limits.viewportBoundsRange[1] || bottom > limits.viewportBoundsRange[1] || !std::isfinite(viewport.MinDepth) ||
+			!std::isfinite(viewport.MaxDepth) || viewport.MinDepth < 0.0f || viewport.MinDepth > 1.0f || viewport.MaxDepth < 0.0f ||
+			viewport.MaxDepth > 1.0f)
 		{
 			throw std::invalid_argument("Vulkan viewport exceeds supported bounds or depth range");
 		}

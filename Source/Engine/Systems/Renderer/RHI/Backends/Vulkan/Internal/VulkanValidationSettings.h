@@ -42,8 +42,8 @@ namespace Swim::RhiVulkan
 		const VulkanValidationCapabilities& capabilities, const Rhi::ValidationChecks& checks = {});
 	// The setting value pointers refer to immutable static storage and remain
 	// valid through deferred vk-bootstrap instance creation and builder copies.
-	std::vector<VkLayerSettingEXT> GetVulkanValidationSettings(const Rhi::ValidationChecks& checks,
-		std::uint32_t layerVersion = MinimumGpuValidationSettingsVersion);
+	std::vector<VkLayerSettingEXT> GetVulkanValidationSettings(
+		const Rhi::ValidationChecks& checks, std::uint32_t layerVersion = MinimumGpuValidationSettingsVersion);
 	VkPhysicalDeviceFeatures GetValidationDeviceFeatures(const Rhi::ValidationChecks& checks);
 	VkPhysicalDeviceVulkan11Features GetValidationVulkan11Features(const Rhi::ValidationChecks& checks);
 	VkPhysicalDeviceVulkan12Features GetValidationVulkan12Features(const Rhi::ValidationChecks& checks);

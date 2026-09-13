@@ -10,16 +10,18 @@ namespace
 
 	ShaderCompiler::ShaderReflectionResult ParseSampled(std::string_view scalar, bool local, bool array)
 	{
-		const std::string resource = "{\"kind\":\"resource\",\"baseShape\":\"texture2D\",\"resultType\":{\"kind\":\"scalar\",\"scalarType\":\"" +
+		const std::string resource =
+			"{\"kind\":\"resource\",\"baseShape\":\"texture2D\",\"resultType\":{\"kind\":\"scalar\",\"scalarType\":\"" +
 			std::string(scalar) + "\"}}";
 		const std::string type = array ? "{\"kind\":\"array\",\"elementCount\":2,\"elementType\":" + resource + "}" : resource;
-		const std::string parameter = "{\"name\":\"image\",\"binding\":{\"kind\":\"descriptorTableSlot\",\"index\":5,\"space\":1},\"type\":" + type + "}";
+		const std::string parameter =
+			"{\"name\":\"image\",\"binding\":{\"kind\":\"descriptorTableSlot\",\"index\":5,\"space\":1},\"type\":" + type + "}";
 		return ShaderCompiler::ParseSlangReflectionJson("{\"parameters\":[" + (local ? std::string{} : parameter) +
 			"],\"entryPoints\":[{\"name\":\"computeMain\",\"stage\":\"compute\",\"threadGroupSize\":[8,1,1],\"parameters\":[" +
 			(local ? parameter : std::string{}) + "]}]}");
 	}
 
-}
+} // namespace
 
 SWIM_TEST("ShaderCompiler.SampledTextures", "NumericClassesConvertForGlobalsLocalsAndArrays")
 {

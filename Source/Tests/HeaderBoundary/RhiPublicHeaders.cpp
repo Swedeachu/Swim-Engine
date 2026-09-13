@@ -20,4 +20,4 @@ namespace
 	[[maybe_unused]] Swim::Rhi::BufferDesc bufferDesc;
 	[[maybe_unused]] Swim::Rhi::TextureDesc textureDesc;
 
-}
+} // namespace

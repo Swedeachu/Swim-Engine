@@ -15,14 +15,19 @@ namespace Swim::RhiVulkan
 		{
 			switch (mode)
 			{
-			case Rhi::SamplerAddressMode::Repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-			case Rhi::SamplerAddressMode::MirroredRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-			case Rhi::SamplerAddressMode::ClampToEdge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-			case Rhi::SamplerAddressMode::ClampToBorder: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-			default: throw std::invalid_argument("Unknown sampler address mode");
+			case Rhi::SamplerAddressMode::Repeat:
+				return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			case Rhi::SamplerAddressMode::MirroredRepeat:
+				return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+			case Rhi::SamplerAddressMode::ClampToEdge:
+				return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			case Rhi::SamplerAddressMode::ClampToBorder:
+				return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+			default:
+				throw std::invalid_argument("Unknown sampler address mode");
 			}
 		}
-	}
+	} // namespace
 
 	VulkanSampler::VulkanSampler(std::shared_ptr<VulkanDeviceState> state, const Rhi::SamplerDesc& desc)
 		: state(std::move(state)), debugName(desc.DebugName), desc(desc)
@@ -50,10 +55,13 @@ namespace Swim::RhiVulkan
 			RequireVulkanDevice(*state);
 		}
 		const auto& limits = state->Device.physical_device.properties.limits;
-		const auto validFilter = [](Rhi::Filter filter) { return filter == Rhi::Filter::Nearest || filter == Rhi::Filter::Linear; };
-		if (!validFilter(desc.MinFilter) || !validFilter(desc.MagFilter) || !validFilter(desc.MipFilter) ||
-			desc.EnableAnisotropy || !std::isfinite(desc.MinLod) || !std::isfinite(desc.MaxLod) ||
-			!std::isfinite(desc.MipLodBias) || desc.MinLod < 0 || desc.MaxLod < desc.MinLod || std::abs(desc.MipLodBias) > limits.maxSamplerLodBias)
+		const auto validFilter = [](Rhi::Filter filter)
+		{
+			return filter == Rhi::Filter::Nearest || filter == Rhi::Filter::Linear;
+		};
+		if (!validFilter(desc.MinFilter) || !validFilter(desc.MagFilter) || !validFilter(desc.MipFilter) || desc.EnableAnisotropy ||
+			!std::isfinite(desc.MinLod) || !std::isfinite(desc.MaxLod) || !std::isfinite(desc.MipLodBias) || desc.MinLod < 0 ||
+			desc.MaxLod < desc.MinLod || std::abs(desc.MipLodBias) > limits.maxSamplerLodBias)
 		{
 			return nullptr;
 		}

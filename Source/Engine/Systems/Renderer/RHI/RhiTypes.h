@@ -125,10 +125,19 @@ namespace Swim::Rhi
 	{
 		switch (format)
 		{
-		case Format::R32Float: case Format::R32Uint: case Format::R32Sint:
-		case Format::RGBA32Float: case Format::RGBA32Uint: case Format::RGBA32Sint:
-		case Format::RGBA16Float: case Format::RGBA16Uint: case Format::RGBA16Sint:
-		case Format::RGBA8Unorm: case Format::RGBA8Snorm: case Format::RGBA8Uint: case Format::RGBA8Sint:
+		case Format::R32Float:
+		case Format::R32Uint:
+		case Format::R32Sint:
+		case Format::RGBA32Float:
+		case Format::RGBA32Uint:
+		case Format::RGBA32Sint:
+		case Format::RGBA16Float:
+		case Format::RGBA16Uint:
+		case Format::RGBA16Sint:
+		case Format::RGBA8Unorm:
+		case Format::RGBA8Snorm:
+		case Format::RGBA8Uint:
+		case Format::RGBA8Sint:
 			return true;
 		default:
 			return false;
@@ -224,20 +233,14 @@ namespace Swim::Rhi
 		HostWrite = 1u << 16,
 	};
 
-	template <typename Enum>
-	constexpr Enum EnumOr(Enum left, Enum right)
+	template <typename Enum> constexpr Enum EnumOr(Enum left, Enum right)
 	{
-		return static_cast<Enum>(
-			static_cast<std::uint32_t>(left) |
-			static_cast<std::uint32_t>(right));
+		return static_cast<Enum>(static_cast<std::uint32_t>(left) | static_cast<std::uint32_t>(right));
 	}
 
-	template <typename Enum>
-	constexpr Enum EnumAnd(Enum left, Enum right)
+	template <typename Enum> constexpr Enum EnumAnd(Enum left, Enum right)
 	{
-		return static_cast<Enum>(
-			static_cast<std::uint32_t>(left) &
-			static_cast<std::uint32_t>(right));
+		return static_cast<Enum>(static_cast<std::uint32_t>(left) & static_cast<std::uint32_t>(right));
 	}
 
 	constexpr BufferUsage operator|(BufferUsage left, BufferUsage right)
@@ -288,9 +291,7 @@ namespace Swim::Rhi
 		ClosestHit = 1u << 11,
 		Miss = 1u << 12,
 		Callable = 1u << 13,
-		AllGraphics =
-			(1u << 0) | (1u << 1) | (1u << 3) | (1u << 4) |
-			(1u << 5) | (1u << 6) | (1u << 7),
+		AllGraphics = (1u << 0) | (1u << 1) | (1u << 3) | (1u << 4) | (1u << 5) | (1u << 6) | (1u << 7),
 		All = 0x3fffu,
 	};
 
@@ -371,9 +372,7 @@ namespace Swim::Rhi
 
 	constexpr ColorWriteMask operator|(ColorWriteMask left, ColorWriteMask right)
 	{
-		return static_cast<ColorWriteMask>(
-			static_cast<std::uint8_t>(left) |
-			static_cast<std::uint8_t>(right));
+		return static_cast<ColorWriteMask>(static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right));
 	}
 
 	enum class CullMode : std::uint8_t

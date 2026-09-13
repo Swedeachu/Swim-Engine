@@ -11,10 +11,7 @@ namespace Swim::ShaderCompiler
 		Rhi::ShaderProgramInterface Interface;
 		std::string Error;
 
-		explicit operator bool() const
-		{
-			return Error.empty();
-		}
+		explicit operator bool() const { return Error.empty(); }
 	};
 
 	// Tool-side conversion. Runtime RHI consumes the owned result, never Slang/JSON types.

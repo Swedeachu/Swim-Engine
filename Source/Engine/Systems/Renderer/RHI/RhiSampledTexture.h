@@ -9,12 +9,16 @@ namespace Swim::Rhi
 	{
 		switch (dimension)
 		{
-		case TextureViewDimension::Texture1D: case TextureViewDimension::Texture1DArray:
-		case TextureViewDimension::Texture2D: case TextureViewDimension::Texture2DArray:
-		case TextureViewDimension::Texture3D: case TextureViewDimension::TextureCube:
+		case TextureViewDimension::Texture1D:
+		case TextureViewDimension::Texture1DArray:
+		case TextureViewDimension::Texture2D:
+		case TextureViewDimension::Texture2DArray:
+		case TextureViewDimension::Texture3D:
+		case TextureViewDimension::TextureCube:
 		case TextureViewDimension::TextureCubeArray:
 			return true;
-		default: return false;
+		default:
+			return false;
 		}
 	}
 
@@ -95,7 +99,8 @@ namespace Swim::Rhi
 		case Format::RGBA16Sint:
 		case Format::RGBA32Sint:
 			return SampledTextureClass::Sint;
-		default: return SampledTextureClass::Undefined;
+		default:
+			return SampledTextureClass::Undefined;
 		}
 	}
 

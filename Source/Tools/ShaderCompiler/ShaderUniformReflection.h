@@ -13,4 +13,4 @@ namespace Swim::ShaderCompiler
 		std::uint32_t Size = 0;
 	};
 
-}
+} // namespace Swim::ShaderCompiler

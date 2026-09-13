@@ -10,10 +10,9 @@ using namespace Swim;
 
 namespace
 {
-	constexpr RhiVulkan::VulkanValidationCapabilities Available{
-		true, true, true, RhiVulkan::MinimumGpuValidationSettingsVersion };
-	constexpr std::array<Rhi::ValidationChecks, 3> Requests{{ { true, false }, { false, true }, { true, true } }};
-}
+	constexpr RhiVulkan::VulkanValidationCapabilities Available{ true, true, true, RhiVulkan::MinimumGpuValidationSettingsVersion };
+	constexpr std::array<Rhi::ValidationChecks, 3> Requests{ { { true, false }, { false, true }, { true, true } } };
+} // namespace
 
 SWIM_TEST("RHI.Vulkan.ValidationSettings", "ExplicitChecksRequireSupportInEveryRequestMode")
 {
@@ -41,8 +40,9 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "ExplicitChecksRequireSupportInEveryR
 				}
 				if (missing == 3)
 				{
-					caps.LayerVersion = (checks.GpuAssisted ? RhiVulkan::MinimumGpuValidationSettingsVersion :
-						RhiVulkan::MinimumValidationSettingsVersion) - 1;
+					caps.LayerVersion = (checks.GpuAssisted ? RhiVulkan::MinimumGpuValidationSettingsVersion
+															: RhiVulkan::MinimumValidationSettingsVersion) -
+						1;
 				}
 				const auto failed = RhiVulkan::SelectDiagnosticsPolicy(mode, true, caps, checks);
 				SWIM_CHECK(!failed.Valid && !failed.Validation && !failed.Checks.Any());
@@ -147,7 +147,8 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "OlderSettingsLayersStillSupportSyncB
 SWIM_TEST("RHI.Vulkan.ValidationSettings", "SmokeAllowsOnlyTheReviewedGpuDescriptorLimitAdvisory")
 {
 	Rhi::DiagnosticLog log;
-	const std::string advisory = "vkGetPhysicalDeviceProperties2(): Warning that validation is adjusting settings:\n"
+	const std::string advisory =
+		"vkGetPhysicalDeviceProperties2(): Warning that validation is adjusting settings:\n"
 		"\tSetting VkPhysicalDeviceDescriptorIndexingProperties::maxUpdateAfterBindDescriptorsInAllPools to 4194304\n";
 	log.Record(Rhi::DiagnosticSeverity::Warning, "WARNING-Setting-Limit-Adjusted", advisory);
 	const auto snapshot = log.Snapshot();
@@ -158,12 +159,30 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "SmokeAllowsOnlyTheReviewedGpuDescrip
 	for (unsigned mutation = 0; mutation < 6; ++mutation)
 	{
 		auto invalid = snapshot;
-		if (mutation == 0) invalid.Messages[0].Text += "Disabling shader instrumentation";
-		if (mutation == 1) invalid.Messages[0].Id = "VUID-Test";
-		if (mutation == 2) invalid.Messages[0].Text = "GPU validation is disabled";
-		if (mutation == 3) ++invalid.Warnings;
-		if (mutation == 4) ++invalid.Errors;
-		if (mutation == 5) ++invalid.Dropped;
+		if (mutation == 0)
+		{
+			invalid.Messages[0].Text += "Disabling shader instrumentation";
+		}
+		if (mutation == 1)
+		{
+			invalid.Messages[0].Id = "VUID-Test";
+		}
+		if (mutation == 2)
+		{
+			invalid.Messages[0].Text = "GPU validation is disabled";
+		}
+		if (mutation == 3)
+		{
+			++invalid.Warnings;
+		}
+		if (mutation == 4)
+		{
+			++invalid.Errors;
+		}
+		if (mutation == 5)
+		{
+			++invalid.Dropped;
+		}
 		SWIM_CHECK(!Testing::HasCleanVulkanSmokeDiagnostics(invalid, { false, true }));
 	}
 }
@@ -179,8 +198,8 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "InstanceSetupAndPublicReportingPrese
 		desc.Validation = Rhi::ValidationMode::IfAvailable;
 		desc.Checks = checks;
 		vkb::InstanceBuilder builder{ &Testing::VulkanValidationCapture::GetInstanceProcAddress };
-		SWIM_REQUIRE(RhiVulkan::ConfigureInstanceDiagnostics(builder, instance->Diagnostics, desc,
-			&Testing::VulkanValidationCapture::GetInstanceProcAddress));
+		SWIM_REQUIRE(RhiVulkan::ConfigureInstanceDiagnostics(
+			builder, instance->Diagnostics, desc, &Testing::VulkanValidationCapture::GetInstanceProcAddress));
 		RhiVulkan::VulkanGraphicsSystem graphics(instance, {});
 		SWIM_CHECK(graphics.IsValidationEnabled());
 		const auto configuration = graphics.GetValidationConfiguration();
@@ -201,8 +220,7 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "SetupFailureReportsReasonWithoutConf
 	Rhi::GraphicsSystemDesc desc{};
 	desc.Checks = { true, true };
 	vkb::InstanceBuilder builder{ &Testing::VulkanValidationCapture::GetInstanceProcAddress };
-	SWIM_CHECK(!RhiVulkan::ConfigureInstanceDiagnostics(builder, state, desc,
-		&Testing::VulkanValidationCapture::GetInstanceProcAddress));
+	SWIM_CHECK(!RhiVulkan::ConfigureInstanceDiagnostics(builder, state, desc, &Testing::VulkanValidationCapture::GetInstanceProcAddress));
 	SWIM_CHECK(!state.ValidationEnabled && !state.Checks.Any());
 	const auto snapshot = state.Log->Snapshot();
 	SWIM_CHECK_EQUAL(snapshot.Errors, 1u);

@@ -90,10 +90,7 @@ namespace Swim::ShaderCompiler
 		ShaderReflection Reflection;
 		std::string Error;
 
-		explicit operator bool() const
-		{
-			return Error.empty();
-		}
+		explicit operator bool() const { return Error.empty(); }
 	};
 
 	ShaderStage ShaderStageFromSlangName(std::string_view stageName);
@@ -102,4 +99,4 @@ namespace Swim::ShaderCompiler
 	ShaderReflectionResult ParseSlangReflectionJson(std::string_view jsonText);
 	ShaderReflectionResult LoadSlangReflectionJson(const std::filesystem::path& path);
 
-}
+} // namespace Swim::ShaderCompiler

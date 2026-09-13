@@ -3754,6 +3754,24 @@ def check_retirement_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("Commands", "CommandRegistryTests.cpp", failures)
 
 
+def check_render_graph_boundaries(failures: list[str]) -> None:
+    renderer = ROOT / "Source/Engine/Systems/Renderer"
+    graph_root = renderer / "RenderGraph"
+    for path in graph_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', text):
+            normalized = include.replace("\\", "/")
+            if any(part in normalized for part in ("Backends/", "vulkan", "volk", "vk_mem_alloc", "entt", "Engine/Scene", "Engine/Platform")):
+                fail(f"RenderGraph leaks a backend, scene or platform dependency: {path.relative_to(ROOT)} -> {include}", failures)
+    for path in (renderer / "RHI").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        if re.search(r'#\s*include[^\n]*RenderGraph/', path.read_text(encoding="utf-8")):
+            fail(f"RHI must not depend on higher-level RenderGraph: {path.relative_to(ROOT)}", failures)
+
+
 def main() -> int:
     failures: list[str] = []
 
@@ -3778,6 +3796,7 @@ def main() -> int:
     check_phase7_shader_architecture(failures)
     check_phase8_rhi_type_architecture(failures)
     check_phase9_vulkan_rhi_architecture(failures)
+    check_render_graph_boundaries(failures)
     check_retirement_boundaries(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)

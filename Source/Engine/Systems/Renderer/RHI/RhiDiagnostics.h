@@ -33,10 +33,7 @@ namespace Swim::Rhi
 		std::uint64_t Errors = 0;
 		std::uint64_t Dropped = 0;
 
-		bool IsClean() const
-		{
-			return Warnings == 0 && Errors == 0 && Dropped == 0;
-		}
+		bool IsClean() const { return Warnings == 0 && Errors == 0 && Dropped == 0; }
 	};
 
 	// One owned log per graphics-system lifetime. Native callbacks can arrive on
@@ -44,10 +41,8 @@ namespace Swim::Rhi
 	// Retain this object past graphics-system destruction to inspect teardown too.
 	class DiagnosticLog
 	{
-	public:
-		explicit DiagnosticLog(std::size_t capacity = 256) : capacity(std::min(capacity, std::size_t{ 4096 }))
-		{
-		}
+	  public:
+		explicit DiagnosticLog(std::size_t capacity = 256) : capacity(std::min(capacity, std::size_t{ 4096 })) {}
 
 		void Record(DiagnosticSeverity severity, std::string_view id, std::string_view text) noexcept
 		{
@@ -81,7 +76,7 @@ namespace Swim::Rhi
 			return { messages, warnings.load(), errors.load(), dropped.load() };
 		}
 
-	private:
+	  private:
 		const std::size_t capacity;
 		mutable std::mutex mutex;
 		std::vector<DiagnosticMessage> messages;
@@ -105,10 +100,7 @@ namespace Swim::Rhi
 		// core first; GPU-AV plus core checks triggers a Khronos warning.
 		bool GpuAssisted = false;
 
-		bool Any() const
-		{
-			return Synchronization || GpuAssisted;
-		}
+		bool Any() const { return Synchronization || GpuAssisted; }
 
 		bool operator==(const ValidationChecks&) const = default;
 	};

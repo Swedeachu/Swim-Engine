@@ -72,8 +72,7 @@ namespace Swim::RhiVulkan
 		instance->Diagnostics.Echo = desc.EchoDiagnostics;
 		instance->RequestDeviceFaultDiagnostics = desc.DeviceFaultDiagnostics;
 
-		auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-			Platform::Internal::GetVulkanInstanceProcAddress());
+		auto getInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(Platform::Internal::GetVulkanInstanceProcAddress());
 		if (!getInstanceProcAddr)
 		{
 			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanLoader", "Vulkan instance procedure address is unavailable");
@@ -93,11 +92,7 @@ namespace Swim::RhiVulkan
 		// Let it own a loader reference: SDL releases its reference on platform
 		// shutdown, and a later load need not map the DLL at the same address.
 		vkb::InstanceBuilder instanceBuilder;
-		instanceBuilder
-			.set_app_name("Swim Engine")
-			.set_engine_name("Swim Engine")
-			.require_api_version(1, 3, 0)
-			.set_headless(true);
+		instanceBuilder.set_app_name("Swim Engine").set_engine_name("Swim Engine").require_api_version(1, 3, 0).set_headless(true);
 
 		for (const char* extension : requiredExtensions)
 		{
@@ -137,8 +132,7 @@ namespace Swim::RhiVulkan
 		volk::volkLoadInstanceTable(&instance->Dispatch, instance->Instance.instance);
 
 		auto selector = vkb::PhysicalDeviceSelector{ instance->Instance };
-		selector
-			.require_present(false)
+		selector.require_present(false)
 			.set_minimum_version(1, 3)
 			.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
 			.set_required_features(GetValidationDeviceFeatures(instance->Diagnostics.Checks))
@@ -165,8 +159,7 @@ namespace Swim::RhiVulkan
 		adapters.reserve(physicalDevices.size());
 		for (auto& physicalDevice : physicalDevices)
 		{
-			const QueueFamilySelection queueFamilies = SelectQueueFamilies(
-				instance->Instance.instance, physicalDevice);
+			const QueueFamilySelection queueFamilies = SelectQueueFamilies(instance->Instance.instance, physicalDevice);
 			if (!queueFamilies.IsValid())
 			{
 				continue;
@@ -175,13 +168,13 @@ namespace Swim::RhiVulkan
 #ifdef VK_EXT_memory_budget
 			physicalDevice.enable_extension_if_present(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 #endif
-			adapters.push_back(std::make_unique<VulkanAdapter>(
-				instance, std::move(physicalDevice), queueFamilies));
+			adapters.push_back(std::make_unique<VulkanAdapter>(instance, std::move(physicalDevice), queueFamilies));
 		}
 
 		if (adapters.empty())
 		{
-			log->Record(Rhi::DiagnosticSeverity::Error, "VulkanAdapter", "No adapter satisfies the required graphics/presentation queue selection");
+			log->Record(
+				Rhi::DiagnosticSeverity::Error, "VulkanAdapter", "No adapter satisfies the required graphics/presentation queue selection");
 			return nullptr;
 		}
 

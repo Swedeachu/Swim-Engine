@@ -351,7 +351,7 @@ namespace Swim::Rhi
 	// Callers retain recorded resources until GPU completion, using frame retirement when needed.
 	class RhiObject
 	{
-	public:
+	  public:
 		RhiObject() = default;
 		virtual ~RhiObject() = default;
 
@@ -363,7 +363,7 @@ namespace Swim::Rhi
 
 	class Buffer : public RhiObject
 	{
-	public:
+	  public:
 		virtual const BufferDesc& GetDesc() const = 0;
 
 		// CPU access does not wait for GPU work. Callers own completion and must
@@ -376,10 +376,8 @@ namespace Swim::Rhi
 		// Write-only bytes: no CPU alignment beyond byte access is promised. Finish
 		// host writes and FlushMappedWrites before submission. Neither call waits;
 		// retain the buffer and do not overwrite GPU-visible bytes before completion.
-		virtual std::span<std::byte> GetMappedWriteSpan()
-		{
-			return {};
-		}
+		virtual std::span<std::byte> GetMappedWriteSpan() { return {}; }
+
 		virtual void FlushMappedWrites(std::uint64_t offset, std::uint64_t size)
 		{
 			throw std::logic_error("Persistent buffer writes are not supported");
@@ -388,10 +386,8 @@ namespace Swim::Rhi
 		// GpuToCpu persistent mapping is read-only. Before accessing returned bytes,
 		// finish GPU writes, transition to HostRead, wait for completion and invalidate.
 		// These calls perform no wait; unsupported/unrequested mapping returns empty.
-		virtual std::span<const std::byte> GetMappedReadSpan()
-		{
-			return {};
-		}
+		virtual std::span<const std::byte> GetMappedReadSpan() { return {}; }
+
 		virtual void InvalidateMappedReads(std::uint64_t offset, std::uint64_t size)
 		{
 			throw std::logic_error("Persistent buffer reads are not supported");
@@ -400,33 +396,33 @@ namespace Swim::Rhi
 
 	class Texture : public RhiObject
 	{
-	public:
+	  public:
 		virtual const TextureDesc& GetDesc() const = 0;
 	};
 
 	class TextureView : public RhiObject
 	{
-	public:
+	  public:
 		virtual Texture& GetTexture() const = 0;
 		virtual const TextureViewDesc& GetDesc() const = 0;
 	};
 
 	class Sampler : public RhiObject
 	{
-	public:
+	  public:
 		virtual const SamplerDesc& GetDesc() const = 0;
 	};
 
 	class ShaderProgram : public RhiObject
 	{
-	public:
+	  public:
 		virtual const ShaderProgramInterface& GetInterface() const = 0;
 	};
 
 	// The originating shader program must outlive the layout returned by the device.
 	class PipelineLayout : public RhiObject
 	{
-	public:
+	  public:
 		virtual ShaderProgram& GetProgram() const = 0;
 		virtual const ShaderProgramInterface& GetInterface() const = 0;
 	};
@@ -441,7 +437,7 @@ namespace Swim::Rhi
 
 	class DescriptorTable : public RhiObject
 	{
-	public:
+	  public:
 		virtual PipelineLayout& GetLayout() const = 0;
 		virtual std::uint32_t GetSpace() const = 0;
 		// Initialize every descriptor before binding. First binding freezes this table;
@@ -466,7 +462,7 @@ namespace Swim::Rhi
 
 	class Fence : public RhiObject
 	{
-	public:
+	  public:
 		virtual bool IsSignaled() const = 0;
 		virtual bool Wait(std::uint64_t timeoutNanoseconds = InfiniteTimeout) = 0;
 		virtual void Reset() = 0;
@@ -474,14 +470,14 @@ namespace Swim::Rhi
 
 	class Timeline : public RhiObject
 	{
-	public:
+	  public:
 		virtual std::uint64_t GetCompletedValue() const = 0;
 		virtual bool Wait(std::uint64_t value, std::uint64_t timeoutNanoseconds = InfiniteTimeout) = 0;
 	};
 
 	class QueryPool : public RhiObject
 	{
-	public:
+	  public:
 		virtual const QueryPoolDesc& GetDesc() const = 0;
 		virtual TimestampInfo GetTimestampInfo() const = 0;
 		// Nonblocking. Output is cleared on errors; unavailable entries have zero ticks.
@@ -493,15 +489,19 @@ namespace Swim::Rhi
 
 	class CommandList : public RhiObject
 	{
-	public:
+	  public:
 		virtual void Begin() = 0;
 		virtual void End() = 0;
+
 		// Optional GPU-tool annotations. RHI regions must balance within one command
 		// list. Names must be nonempty without embedded NUL, and colors finite RGBA
 		// in [0, 1]. Backends without debug utilities may omit native annotations.
 		virtual void BeginDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
+
 		virtual void EndDebugLabel() {}
+
 		virtual void InsertDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
+
 		virtual void Transition(Buffer& buffer, ResourceState before, ResourceState after) = 0;
 		// Texture ShaderRead selects sampled access; ShaderRead | ShaderWrite selects
 		// storage-image access in General layout, including storage-only reads.
@@ -537,8 +537,10 @@ namespace Swim::Rhi
 		// reuse. Buffers require Vertex usage and must live until GPU completion.
 		virtual void BindVertexBuffer(std::uint32_t slot, Buffer& buffer, std::uint64_t offset) = 0;
 		virtual void BindIndexBuffer(Buffer& buffer, std::uint64_t offset, IndexType type) = 0;
-		virtual void Draw(std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
-		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0, std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
+		virtual void Draw(
+			std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
+		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0,
+			std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
 		// Workgroup counts, bounded per axis by Capabilities.Compute.MaxGroupCount.
 		// Zero counts are valid no-work dispatches but still require complete state.
 		// Requires a compute-capable queue, active compute pipeline and no rendering.
@@ -552,19 +554,18 @@ namespace Swim::Rhi
 
 	class CommandPool : public RhiObject
 	{
-	public:
+	  public:
 		virtual std::unique_ptr<CommandList> CreateCommandList() = 0;
 		virtual void Reset() = 0;
 	};
 
 	class Queue : public RhiObject
 	{
-	public:
+	  public:
 		virtual QueueType GetType() const = 0;
-		virtual TimestampInfo GetTimestampInfo() const
-		{
-			return {};
-		}
+
+		virtual TimestampInfo GetTimestampInfo() const { return {}; }
+
 		virtual void Submit(const SubmitDesc& desc) = 0;
 		virtual void WaitIdle() = 0;
 	};
@@ -577,22 +578,18 @@ namespace Swim::Rhi
 		bool Suspended = false;
 		bool NotReady = false;
 
-		bool HasImage() const
-		{
-			return ImageIndex != UINT32_MAX && !OutOfDate && !Suspended && !NotReady;
-		}
+		bool HasImage() const { return ImageIndex != UINT32_MAX && !OutOfDate && !Suspended && !NotReady; }
 	};
 
 	class Swapchain : public RhiObject
 	{
-	public:
+	  public:
 		virtual Format GetFormat() const = 0;
+
 		// Undefined until native images exist. Re-read after every successful
 		// Resize: PreferHdr may switch encodings as surface capabilities change.
-		virtual SwapchainColorSpace GetColorSpace() const
-		{
-			return SwapchainColorSpace::Undefined;
-		}
+		virtual SwapchainColorSpace GetColorSpace() const { return SwapchainColorSpace::Undefined; }
+
 		virtual Extent2D GetExtent() const = 0;
 		virtual std::uint32_t GetImageCount() const = 0;
 		virtual TextureView& GetImageView(std::uint32_t imageIndex) = 0;
@@ -618,40 +615,30 @@ namespace Swim::Rhi
 
 	class Device : public RhiObject
 	{
-	public:
+	  public:
 		// Retain this report across teardown. Device loss throws DeviceLostError
 		// from fallible work; noexcept naming/destruction only records the loss.
-		virtual std::shared_ptr<DeviceDiagnostics> GetDeviceDiagnostics() const
-		{
-			return {};
-		}
+		virtual std::shared_ptr<DeviceDiagnostics> GetDeviceDiagnostics() const { return {}; }
+
 		// On-demand telemetry, without a GPU wait. Unsupported backends return an
 		// empty snapshot. A known device loss raises DeviceLostError.
-		virtual MemoryBudgetSnapshot GetMemoryBudgetSnapshot() const
-		{
-			return {};
-		}
+		virtual MemoryBudgetSnapshot GetMemoryBudgetSnapshot() const { return {}; }
+
 		// Seed once, before the first pipeline build. Invalid/incompatible data is
 		// ignored; a cache creation failure leaves normal compilation available.
-		virtual PipelineCacheLoadStatus LoadPipelineCache(std::span<const std::byte> data)
-		{
-			return PipelineCacheLoadStatus::Unsupported;
-		}
+		virtual PipelineCacheLoadStatus LoadPipelineCache(std::span<const std::byte> data) { return PipelineCacheLoadStatus::Unsupported; }
+
 		// Explicit export for caller-owned persistence. No file writes or GPU
 		// waits; known device loss raises DeviceLostError in both operations.
-		virtual PipelineCacheData GetPipelineCacheData() const
-		{
-			return {};
-		}
+		virtual PipelineCacheData GetPipelineCacheData() const { return {}; }
+
 		virtual const AdapterInfo& GetAdapterInfo() const = 0;
 		virtual Queue& GetQueue(QueueType type) = 0;
 
 		// Empty for unsupported backends/presentation queues; native query failures
 		// throw. No GPU wait. Creation and resize requery the surface themselves.
-		virtual SwapchainSupport QuerySwapchainSupport(Platform::Window&) const
-		{
-			return {};
-		}
+		virtual SwapchainSupport QuerySwapchainSupport(Platform::Window&) const { return {}; }
+
 		virtual std::unique_ptr<Swapchain> CreateSwapchain(Platform::Window& window, const SwapchainDesc& desc) = 0;
 		virtual std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
 		virtual std::unique_ptr<Texture> CreateTexture(const TextureDesc& desc) = 0;
@@ -672,27 +659,22 @@ namespace Swim::Rhi
 
 	class Adapter : public RhiObject
 	{
-	public:
+	  public:
 		virtual const AdapterInfo& GetInfo() const = 0;
 		virtual std::unique_ptr<Device> CreateDevice() = 0;
 	};
 
 	class GraphicsSystem
 	{
-	public:
+	  public:
 		virtual ~GraphicsSystem() = default;
-		virtual bool IsValidationEnabled() const
-		{
-			return false;
-		}
-		virtual ValidationConfiguration GetValidationConfiguration() const
-		{
-			return { IsValidationEnabled(), {} };
-		}
-		virtual std::shared_ptr<DiagnosticLog> GetDiagnostics() const
-		{
-			return {};
-		}
+
+		virtual bool IsValidationEnabled() const { return false; }
+
+		virtual ValidationConfiguration GetValidationConfiguration() const { return { IsValidationEnabled(), {} }; }
+
+		virtual std::shared_ptr<DiagnosticLog> GetDiagnostics() const { return {}; }
+
 		virtual std::uint32_t GetAdapterCount() const = 0;
 		virtual Adapter& GetAdapter(std::uint32_t adapterIndex) = 0;
 	};

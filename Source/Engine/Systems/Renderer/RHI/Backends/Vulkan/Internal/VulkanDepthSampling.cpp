@@ -14,8 +14,8 @@ namespace Swim::RhiVulkan
 		VkFormatProperties2 properties{};
 		properties.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
 		properties.pNext = &features;
-		state.Instance->Dispatch.vkGetPhysicalDeviceFormatProperties2(state.Device.physical_device.physical_device,
-			ToVkFormat(format), &properties);
+		state.Instance->Dispatch.vkGetPhysicalDeviceFormatProperties2(
+			state.Device.physical_device.physical_device, ToVkFormat(format), &properties);
 		const auto required = VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_DEPTH_COMPARISON_BIT;
 		return (features.optimalTilingFeatures & required) == required;
 	}

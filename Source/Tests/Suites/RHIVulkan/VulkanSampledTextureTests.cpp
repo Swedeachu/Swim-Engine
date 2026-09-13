@@ -15,22 +15,18 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "SignednessWidthAndFilteringAreIndepende
 	Testing::VulkanDescriptorCapture capture;
 	Rhi::DescriptorBindingDesc binding{};
 	binding.SampledClass = Rhi::SampledTextureClass::Uint;
+
 	struct Case
 	{
 		Rhi::Format Format;
 		Rhi::SampledTextureClass Class;
 	};
-	const std::array cases{
-		Case{ Rhi::Format::R8Uint, Rhi::SampledTextureClass::Uint },
-		Case{ Rhi::Format::RG16Uint, Rhi::SampledTextureClass::Uint },
-		Case{ Rhi::Format::R32Uint, Rhi::SampledTextureClass::Uint },
-		Case{ Rhi::Format::RGBA32Uint, Rhi::SampledTextureClass::Uint },
-		Case{ Rhi::Format::RGB10A2Uint, Rhi::SampledTextureClass::Uint },
-		Case{ Rhi::Format::R8Sint, Rhi::SampledTextureClass::Sint },
-		Case{ Rhi::Format::RG16Sint, Rhi::SampledTextureClass::Sint },
-		Case{ Rhi::Format::R32Sint, Rhi::SampledTextureClass::Sint },
-		Case{ Rhi::Format::RGBA32Sint, Rhi::SampledTextureClass::Sint }
-	};
+
+	const std::array cases{ Case{ Rhi::Format::R8Uint, Rhi::SampledTextureClass::Uint },
+		Case{ Rhi::Format::RG16Uint, Rhi::SampledTextureClass::Uint }, Case{ Rhi::Format::R32Uint, Rhi::SampledTextureClass::Uint },
+		Case{ Rhi::Format::RGBA32Uint, Rhi::SampledTextureClass::Uint }, Case{ Rhi::Format::RGB10A2Uint, Rhi::SampledTextureClass::Uint },
+		Case{ Rhi::Format::R8Sint, Rhi::SampledTextureClass::Sint }, Case{ Rhi::Format::RG16Sint, Rhi::SampledTextureClass::Sint },
+		Case{ Rhi::Format::R32Sint, Rhi::SampledTextureClass::Sint }, Case{ Rhi::Format::RGBA32Sint, Rhi::SampledTextureClass::Sint } };
 	for (const auto& item : cases)
 	{
 		const auto format = item.Format;
@@ -49,7 +45,8 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "SignednessWidthAndFilteringAreIndepende
 		const auto image = RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write);
 		SWIM_CHECK_EQUAL(image.imageLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		SWIM_CHECK(image.sampler == VK_NULL_HANDLE);
-		binding.SampledClass = binding.SampledClass == Rhi::SampledTextureClass::Uint ? Rhi::SampledTextureClass::Sint : Rhi::SampledTextureClass::Uint;
+		binding.SampledClass =
+			binding.SampledClass == Rhi::SampledTextureClass::Uint ? Rhi::SampledTextureClass::Sint : Rhi::SampledTextureClass::Uint;
 		SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write), std::invalid_argument);
 		binding.SampledClass = Rhi::SampledTextureClass::Float;
 		SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write), std::invalid_argument);
@@ -57,13 +54,13 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "SignednessWidthAndFilteringAreIndepende
 		capture.FormatFeatures = 0;
 		SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write), std::invalid_argument);
 	}
-	for (const auto format : { Rhi::Format::RGBA8Unorm, Rhi::Format::RGBA8Snorm, Rhi::Format::RGBA8UnormSrgb,
-		Rhi::Format::R16Float, Rhi::Format::R32Float, Rhi::Format::BC6HSfloat, Rhi::Format::BC7Unorm })
+	for (const auto format : { Rhi::Format::RGBA8Unorm, Rhi::Format::RGBA8Snorm, Rhi::Format::RGBA8UnormSrgb, Rhi::Format::R16Float,
+			 Rhi::Format::R32Float, Rhi::Format::BC6HSfloat, Rhi::Format::BC7Unorm })
 	{
 		SWIM_CHECK_EQUAL(Rhi::GetSampledTextureClass(format), Rhi::SampledTextureClass::Float);
 	}
-	for (const auto format : { Rhi::Format::Undefined, Rhi::Format::D16Unorm, Rhi::Format::D24UnormS8Uint,
-		Rhi::Format::D32Float, Rhi::Format::D32FloatS8Uint, static_cast<Rhi::Format>(UINT16_MAX) })
+	for (const auto format : { Rhi::Format::Undefined, Rhi::Format::D16Unorm, Rhi::Format::D24UnormS8Uint, Rhi::Format::D32Float,
+			 Rhi::Format::D32FloatS8Uint, static_cast<Rhi::Format>(UINT16_MAX) })
 	{
 		SWIM_CHECK_EQUAL(Rhi::GetSampledTextureClass(format), Rhi::SampledTextureClass::Undefined);
 	}
@@ -73,8 +70,9 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "TypedArrayBatchRejectsMismatchWithoutPu
 {
 	Testing::VulkanComputeCapture capture;
 	capture.FormatFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-	Rhi::DescriptorSchemaDesc schema{ 0, { { 2, Rhi::DescriptorType::SampledTexture, 2,
-		Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined, Rhi::SampledTextureClass::Uint } } };
+	Rhi::DescriptorSchemaDesc schema{ 0,
+		{ { 2, Rhi::DescriptorType::SampledTexture, 2, Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined,
+			Rhi::SampledTextureClass::Uint } } };
 	auto program = capture.MakeComputeProgram({ { &schema, 1 } });
 	SWIM_REQUIRE(program);
 	// Caller-owned reflection can go away or change without changing the program/layout.
@@ -120,14 +118,15 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "InvalidClassContractsRejectBeforeNative
 	Testing::VulkanDescriptorCapture capture;
 	for (const auto type : { Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::UniformBuffer, Rhi::DescriptorType::Sampler })
 	{
-		for (const auto numeric : { Rhi::SampledTextureClass::Undefined, static_cast<Rhi::SampledTextureClass>(255), Rhi::SampledTextureClass::Uint })
+		for (const auto numeric :
+			{ Rhi::SampledTextureClass::Undefined, static_cast<Rhi::SampledTextureClass>(255), Rhi::SampledTextureClass::Uint })
 		{
 			if (type == Rhi::DescriptorType::SampledTexture && numeric == Rhi::SampledTextureClass::Uint)
 			{
 				continue;
 			}
-			Rhi::DescriptorSchemaDesc schema{ 0, { { 0, type, 1, Rhi::ShaderStageMask::Fragment,
-				false, false, Rhi::Format::Undefined, numeric } } };
+			Rhi::DescriptorSchemaDesc schema{ 0,
+				{ { 0, type, 1, Rhi::ShaderStageMask::Fragment, false, false, Rhi::Format::Undefined, numeric } } };
 			auto program = capture.MakeProgram({ { &schema, 1 } });
 			SWIM_REQUIRE(program);
 			SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} }));
@@ -185,7 +184,8 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "ViewsSelectValidMipAndLayerRanges")
 		write.TextureResource = &view;
 		if (invalid == 0)
 		{
-			SWIM_CHECK_EQUAL(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write).imageLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			SWIM_CHECK_EQUAL(
+				RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write).imageLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 		else
 		{
@@ -203,7 +203,8 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "CompiledInterfaceRetainsNumericClassesI
 	SWIM_REQUIRE(converted);
 	Testing::VulkanComputeCapture capture;
 	const auto& interface = converted.Interface;
-	auto program = capture.MakeComputeProgram({ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, interface.ComputeThreadGroupSize);
+	auto program = capture.MakeComputeProgram(
+		{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, interface.ComputeThreadGroupSize);
 	SWIM_REQUIRE(program);
 	auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 	SWIM_REQUIRE(layout);

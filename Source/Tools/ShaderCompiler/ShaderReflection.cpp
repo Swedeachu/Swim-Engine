@@ -17,9 +17,7 @@ namespace Swim::ShaderCompiler
 		using Detail::FindField;
 		using Detail::ReadString;
 
-		bool ParseParameterArray(
-			simdjson::dom::element parametersElement,
-			std::vector<ShaderBindingReflection>& outParameters)
+		bool ParseParameterArray(simdjson::dom::element parametersElement, std::vector<ShaderBindingReflection>& outParameters)
 		{
 			simdjson::dom::array parameters;
 			if (parametersElement.get_array().get(parameters))
@@ -39,9 +37,7 @@ namespace Swim::ShaderCompiler
 			return true;
 		}
 
-		void ParseThreadGroupSize(
-			simdjson::dom::object entryPoint,
-			std::array<std::uint32_t, 3>& outSize)
+		void ParseThreadGroupSize(simdjson::dom::object entryPoint, std::array<std::uint32_t, 3>& outSize)
 		{
 			const auto field = FindField(entryPoint, "threadGroupSize");
 			if (!field)
@@ -72,7 +68,7 @@ namespace Swim::ShaderCompiler
 				outSize = parsed;
 			}
 		}
-	}
+	} // namespace
 
 	ShaderStage ShaderStageFromSlangName(std::string_view stageName)
 	{
@@ -139,20 +135,34 @@ namespace Swim::ShaderCompiler
 	{
 		switch (stage)
 		{
-		case ShaderStage::Vertex: return "vertex";
-		case ShaderStage::Fragment: return "fragment";
-		case ShaderStage::Compute: return "compute";
-		case ShaderStage::Geometry: return "geometry";
-		case ShaderStage::Hull: return "hull";
-		case ShaderStage::Domain: return "domain";
-		case ShaderStage::Mesh: return "mesh";
-		case ShaderStage::Amplification: return "amplification";
-		case ShaderStage::RayGeneration: return "raygeneration";
-		case ShaderStage::Intersection: return "intersection";
-		case ShaderStage::AnyHit: return "anyhit";
-		case ShaderStage::ClosestHit: return "closesthit";
-		case ShaderStage::Miss: return "miss";
-		case ShaderStage::Callable: return "callable";
+		case ShaderStage::Vertex:
+			return "vertex";
+		case ShaderStage::Fragment:
+			return "fragment";
+		case ShaderStage::Compute:
+			return "compute";
+		case ShaderStage::Geometry:
+			return "geometry";
+		case ShaderStage::Hull:
+			return "hull";
+		case ShaderStage::Domain:
+			return "domain";
+		case ShaderStage::Mesh:
+			return "mesh";
+		case ShaderStage::Amplification:
+			return "amplification";
+		case ShaderStage::RayGeneration:
+			return "raygeneration";
+		case ShaderStage::Intersection:
+			return "intersection";
+		case ShaderStage::AnyHit:
+			return "anyhit";
+		case ShaderStage::ClosestHit:
+			return "closesthit";
+		case ShaderStage::Miss:
+			return "miss";
+		case ShaderStage::Callable:
+			return "callable";
 		case ShaderStage::Unknown:
 		default:
 			return "unknown";
@@ -202,7 +212,8 @@ namespace Swim::ShaderCompiler
 					(FindField(globalScope, "kind") && result.Reflection.GlobalScopeKind.empty());
 				if (const auto parameters = FindField(globalScope, "parameters"))
 				{
-					result.Reflection.HasUnsupportedGlobalScopeLayout = !ParseParameterArray(*parameters, result.Reflection.GlobalParameters) ||
+					result.Reflection.HasUnsupportedGlobalScopeLayout =
+						!ParseParameterArray(*parameters, result.Reflection.GlobalParameters) ||
 						result.Reflection.HasUnsupportedGlobalScopeLayout;
 				}
 			}
@@ -213,8 +224,8 @@ namespace Swim::ShaderCompiler
 		}
 		else if (const auto parameters = FindField(root, "parameters"))
 		{
-			result.Reflection.HasUnsupportedGlobalScopeLayout = !ParseParameterArray(*parameters, result.Reflection.GlobalParameters) ||
-				result.Reflection.HasUnsupportedGlobalScopeLayout;
+			result.Reflection.HasUnsupportedGlobalScopeLayout =
+				!ParseParameterArray(*parameters, result.Reflection.GlobalParameters) || result.Reflection.HasUnsupportedGlobalScopeLayout;
 		}
 
 		if (const auto entryPointsField = FindField(root, "entryPoints"))
@@ -242,12 +253,11 @@ namespace Swim::ShaderCompiler
 						{
 							entryPoint.ScopeKind = ReadString(scope, "kind");
 							entryPoint.HasUnsupportedScopeLayout = FindField(scope, "binding").has_value() ||
-								FindField(scope, "bindings").has_value() ||
-								(FindField(scope, "kind") && entryPoint.ScopeKind.empty());
+								FindField(scope, "bindings").has_value() || (FindField(scope, "kind") && entryPoint.ScopeKind.empty());
 							if (const auto parameters = FindField(scope, "parameters"))
 							{
-								entryPoint.HasUnsupportedScopeLayout = !ParseParameterArray(*parameters, entryPoint.Parameters) ||
-							entryPoint.HasUnsupportedScopeLayout;
+								entryPoint.HasUnsupportedScopeLayout =
+									!ParseParameterArray(*parameters, entryPoint.Parameters) || entryPoint.HasUnsupportedScopeLayout;
 							}
 						}
 						else
@@ -257,8 +267,8 @@ namespace Swim::ShaderCompiler
 					}
 					else if (const auto parameters = FindField(entryPointObject, "parameters"))
 					{
-						entryPoint.HasUnsupportedScopeLayout = !ParseParameterArray(*parameters, entryPoint.Parameters) ||
-							entryPoint.HasUnsupportedScopeLayout;
+						entryPoint.HasUnsupportedScopeLayout =
+							!ParseParameterArray(*parameters, entryPoint.Parameters) || entryPoint.HasUnsupportedScopeLayout;
 					}
 
 					result.Reflection.EntryPoints.push_back(std::move(entryPoint));
@@ -294,4 +304,4 @@ namespace Swim::ShaderCompiler
 		return ParseSlangReflectionJson(buffer.str());
 	}
 
-}
+} // namespace Swim::ShaderCompiler

@@ -20,14 +20,18 @@ namespace Swim::Testing
 		// (especially disabled instrumentation or unsupported features).
 		return checks.GpuAssisted && message.Severity == Rhi::DiagnosticSeverity::Warning &&
 			message.Id == "WARNING-Setting-Limit-Adjusted" &&
-			message.Text == "vkGetPhysicalDeviceProperties2(): Warning that validation is adjusting settings:\n"
-				"\tSetting VkPhysicalDeviceDescriptorIndexingProperties::maxUpdateAfterBindDescriptorsInAllPools to 4194304\n";
+			message.Text ==
+			"vkGetPhysicalDeviceProperties2(): Warning that validation is adjusting settings:\n"
+			"\tSetting VkPhysicalDeviceDescriptorIndexingProperties::maxUpdateAfterBindDescriptorsInAllPools to 4194304\n";
 	}
 
 	inline bool HasCleanVulkanSmokeDiagnostics(const Rhi::DiagnosticSnapshot& snapshot, const Rhi::ValidationChecks& checks)
 	{
 		const auto expected = std::count_if(snapshot.Messages.begin(), snapshot.Messages.end(),
-			[&](const auto& message) { return IsExpectedVulkanSmokeAdvisory(message, checks); });
+			[&](const auto& message)
+			{
+				return IsExpectedVulkanSmokeAdvisory(message, checks);
+			});
 		return snapshot.Errors == 0 && snapshot.Dropped == 0 && snapshot.Warnings == static_cast<std::uint64_t>(expected);
 	}
 
@@ -55,8 +59,7 @@ namespace Swim::Testing
 	inline void RequireVulkanSmokeValidation(const Rhi::GraphicsSystem& graphics, const Rhi::ValidationChecks& checks)
 	{
 		const auto configured = graphics.GetValidationConfiguration();
-		SWIM_REQUIRE_MESSAGE(graphics.IsValidationEnabled() && configured.Enabled,
-			"Smoke requires active Vulkan validation");
+		SWIM_REQUIRE_MESSAGE(graphics.IsValidationEnabled() && configured.Enabled, "Smoke requires active Vulkan validation");
 		SWIM_REQUIRE_MESSAGE(configured.Checks == checks, "Smoke validation checks were not configured as requested");
 	}
 
@@ -66,8 +69,8 @@ namespace Swim::Testing
 		{
 			std::cerr << "[RHI diagnostic] " << message.Id << ": " << message.Text << '\n';
 		}
-		std::cerr << "[RHI validation] warnings=" << snapshot.Warnings << " errors=" << snapshot.Errors
-			<< " dropped=" << snapshot.Dropped << '\n';
+		std::cerr << "[RHI validation] warnings=" << snapshot.Warnings << " errors=" << snapshot.Errors << " dropped=" << snapshot.Dropped
+				  << '\n';
 	}
 
 	inline void RunValidatedVulkanSmoke(void (*run)(const Rhi::GraphicsSystemDesc&))
@@ -79,7 +82,7 @@ namespace Swim::Testing
 		const char* profile = std::getenv("SWIM_RHI_VALIDATION");
 		desc.Checks = ParseVulkanSmokeChecks(profile ? profile : "core");
 		std::cerr << "[RHI validation request] synchronization=" << desc.Checks.Synchronization
-			<< " gpu-assisted=" << desc.Checks.GpuAssisted << '\n';
+				  << " gpu-assisted=" << desc.Checks.GpuAssisted << '\n';
 		try
 		{
 			run(desc);
@@ -94,7 +97,10 @@ namespace Swim::Testing
 		const auto snapshot = desc.Diagnostics->Snapshot();
 		PrintVulkanSmokeDiagnostics(snapshot);
 		const auto expected = std::count_if(snapshot.Messages.begin(), snapshot.Messages.end(),
-			[&](const auto& message) { return IsExpectedVulkanSmokeAdvisory(message, desc.Checks); });
+			[&](const auto& message)
+			{
+				return IsExpectedVulkanSmokeAdvisory(message, desc.Checks);
+			});
 		if (expected != 0)
 		{
 			std::cerr << "[RHI validation] expected descriptor-limit startup advisories=" << expected << '\n';

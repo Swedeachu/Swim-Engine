@@ -18,12 +18,14 @@ namespace Swim::Testing
 	inline SampledDimensionData MakeSampledDimensionData(std::uint32_t index)
 	{
 		using D = Rhi::TextureViewDimension;
-		const std::array dimensions{ D::Texture1D, D::Texture1DArray, D::Texture2DArray,
-			D::Texture3D, D::TextureCube, D::Texture2D, D::TextureCubeArray };
+		const std::array dimensions{ D::Texture1D, D::Texture1DArray, D::Texture2DArray, D::Texture3D, D::TextureCube, D::Texture2D,
+			D::TextureCubeArray };
 		SampledDimensionData data{};
 		const bool cube = index == 4 || index == 6;
-		data.Texture.Dimension = index < 2 ? Rhi::TextureDimension::Texture1D : index == 3 ?
-			Rhi::TextureDimension::Texture3D : cube ? Rhi::TextureDimension::TextureCube : Rhi::TextureDimension::Texture2D;
+		data.Texture.Dimension = index < 2 ? Rhi::TextureDimension::Texture1D
+			: index == 3				   ? Rhi::TextureDimension::Texture3D
+			: cube						   ? Rhi::TextureDimension::TextureCube
+										   : Rhi::TextureDimension::Texture2D;
 		data.Texture.PixelFormat = cube ? Rhi::Format::R32Float : Rhi::Format::R32Uint;
 		data.Texture.Extent = { 8, index < 2 ? 1u : 8u, index == 3 ? 8u : 1u };
 		data.Texture.MipLevels = 2;
@@ -38,8 +40,8 @@ namespace Swim::Testing
 		return data;
 	}
 
-	inline std::uint32_t SampledDimensionValue(std::uint32_t frame, std::uint32_t image,
-		std::uint32_t layer, std::uint32_t x, std::uint32_t y, std::uint32_t z)
+	inline std::uint32_t SampledDimensionValue(
+		std::uint32_t frame, std::uint32_t image, std::uint32_t layer, std::uint32_t x, std::uint32_t y, std::uint32_t z)
 	{
 		// Cubes contain a distinct constant per face, independent of face orientation.
 		const auto texel = image == 4 || image == 6 ? 0 : z * 16 + y * 4 + x;

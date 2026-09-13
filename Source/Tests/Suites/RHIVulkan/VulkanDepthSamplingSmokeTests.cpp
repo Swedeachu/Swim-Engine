@@ -82,9 +82,11 @@ namespace
 		}
 		constexpr std::uint64_t bytes = 64 * sizeof(float);
 		auto guards = device->CreateBuffer({ bytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Depth guards" });
-		auto output = device->CreateBuffer({ bytes, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination,
-			Rhi::MemoryPreference::DeviceLocal, "Depth output" });
-		auto readback = device->CreateBuffer({ bytes, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu, "Depth readback" });
+		auto output = device->CreateBuffer(
+			{ bytes, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination,
+				Rhi::MemoryPreference::DeviceLocal, "Depth output" });
+		auto readback =
+			device->CreateBuffer({ bytes, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu, "Depth readback" });
 		SWIM_REQUIRE(guards && output && readback);
 		std::array<float, 64> expected{}, actual{};
 		expected.fill(-7.0f);
@@ -117,7 +119,8 @@ namespace
 			{
 				commands.Transition(*guards, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
-			commands.Transition(*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
+			commands.Transition(
+				*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*guards, *output, { 0, 0, bytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderWrite);
 			for (std::size_t index = 0; index < images.size(); ++index)
@@ -141,7 +144,8 @@ namespace
 			commands.BindDescriptorTable(0, *table);
 			commands.Dispatch(2, 1, 1);
 			commands.Transition(*output, Rhi::ResourceState::ShaderWrite, Rhi::ResourceState::CopySource);
-			commands.Transition(*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
+			commands.Transition(
+				*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*output, *readback, { 0, 0, bytes });
 			commands.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
 			commands.End();
@@ -161,8 +165,11 @@ namespace
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "DepthSamplingAndComparisonReadback",
-				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunDepthSamplingSmoke); } });
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "DepthSamplingAndComparisonReadback", SWIM_TEST_LOCATION,
+				+[]
+				{
+					Swim::Testing::RunValidatedVulkanSmoke(&RunDepthSamplingSmoke);
+				} });
 		}
 		return true;
 	}();

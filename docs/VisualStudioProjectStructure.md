@@ -4,6 +4,8 @@
 
 ## 1. The important rule
 
+Optional developer targets `SwimFormat` and `SwimFormatCheck` appear under Tools when Python and clang-format are found. They format/check changed first-party C/C++ files using the root style and do not participate in ordinary builds. See [the formatting workflow](../README.md#c-formatting).
+
 The Visual Studio solution is generated from CMake. The solution folders are presentation only; the real architecture is the CMake target dependency graph.
 
 **Since 2026-09-05, "engine module" no longer means "separate CMake target."** Earlier revisions of this document described roughly a dozen first-party static libraries (`SwimCore`, `SwimMemory`, `SwimJobs`, `SwimPlatform`, `SwimInput`, `SwimIO`, `SwimAssets`, `SwimCommands`, `SwimPhysics`, `SwimPhysicsJolt`, `SwimPhysicsPhysX`, `SwimRhi`, `SwimRhiVulkan`), each its own Visual Studio project under an "Engine Modules" solution folder. That gave the build graph strong ownership enforcement, but it meant editing the engine's own code meant working across a dozen small projects whose Solution Explorer layout did not match the folders on disk. That tradeoff was reversed: those source lists still exist and are still discovered by the same `file(GLOB_RECURSE ...)` calls, at the same points in the configure, but they are compiled directly into whichever real binary needs them — almost always `SwimEngine` — and shown there as Solution Explorer filters that mirror `Source/...` on disk (via `source_group(TREE ...)`), the same mechanism `SwimEngine` already used for its own remaining sources. A module's source list is a build-graph *concept* now, not a build-graph *target*. `Tests`, `Tools`, `Third Party`, and `Examples` were intentionally left exactly as they were — see §11 for why the header-boundary gates specifically could not follow the same collapse.
@@ -506,6 +508,7 @@ Generic Physics -> glm
 PhysX backend  -> Generic Physics, PhysX
 Jolt backend   -> Generic Physics, Jolt
 RHI contract   (header-only, no deps)
+RenderGraph    -> RHI contract (compiled directly into SwimEngine/SwimTests)
 Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAllocator
 
 SwimEngine
@@ -521,7 +524,7 @@ SwimShaderCompiler (Tools)
   -> RHI contract headers (no link needed), simdjson
 ```
 
-Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI is a separate foundation subtree within `SwimEngine` now (see §3.13), and the main game renderer is still transitional.
+Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph adds no module project or runnable test target: its suites join `SwimTests`, and only `SwimRenderGraphPublicHeaders` is a separate compile boundary under Tests/Header Boundary. See [the graph contract](RenderGraph.md).
 
 ---
 

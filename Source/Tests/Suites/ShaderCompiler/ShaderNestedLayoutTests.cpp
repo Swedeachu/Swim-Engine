@@ -12,8 +12,8 @@ namespace
 {
 	ShaderCompiler::ShaderReflectionResult Parse(const std::string& parameter)
 	{
-		return ShaderCompiler::ParseSlangReflectionJson(
-			"{\"parameters\":[" + parameter + "],\"entryPoints\":[{\"name\":\"computeMain\",\"stage\":\"compute\",\"threadGroupSize\":[8,1,1]}]}");
+		return ShaderCompiler::ParseSlangReflectionJson("{\"parameters\":[" + parameter +
+			"],\"entryPoints\":[{\"name\":\"computeMain\",\"stage\":\"compute\",\"threadGroupSize\":[8,1,1]}]}");
 	}
 
 	void Reject(const ShaderCompiler::ShaderReflection& reflection)
@@ -26,21 +26,23 @@ namespace
 		SWIM_CHECK((result.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{}));
 	}
 
-	std::string Group(const std::string& fields, const std::string& elementBinding =
-		R"({"kind":"descriptorTableSlot","index":1,"count":2})")
+	std::string Group(
+		const std::string& fields, const std::string& elementBinding = R"({"kind":"descriptorTableSlot","index":1,"count":2})")
 	{
 		return R"({"name":"Root","binding":{"kind":"subElementRegisterSpace","index":2},"type":{"kind":"parameterBlock",
 			"containerVarLayout":{"binding":{"kind":"subElementRegisterSpace","index":0}},
-			"elementVarLayout":{"binding":)" + elementBinding + R"(,"type":{"kind":"struct","fields":[)" + fields + "]}}}}";
+			"elementVarLayout":{"binding":)" +
+			elementBinding + R"(,"type":{"kind":"struct","fields":[)" + fields + "]}}}}";
 	}
 
 	const std::string Sampler = R"({"name":"Sampler","binding":{"kind":"descriptorTableSlot","index":3},"type":{"kind":"samplerState"}})";
-}
+} // namespace
 
 SWIM_TEST("ShaderCompiler.NestedLayouts", "RelativeStructAndSetOffsetsResolveOnce")
 {
 	const auto parsed = Parse(Group(R"({"name":"Pair","binding":{"kind":"descriptorTableSlot","index":2,"count":4},
-		"type":{"kind":"struct","fields":[)" + Sampler + "]}}"));
+		"type":{"kind":"struct","fields":[)" +
+		Sampler + "]}}"));
 	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
 	SWIM_REQUIRE_EQUAL(parsed.Reflection.GlobalParameters.size(), 1u);
 	const auto& leaf = parsed.Reflection.GlobalParameters[0];
@@ -78,13 +80,13 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "MixedConstantBufferSeparatesBytesFrom
 
 SWIM_TEST("ShaderCompiler.NestedLayouts", "MalformedLayoutsAndArithmeticOverflowDiscardTheWholeParameter")
 {
-	for (const auto& fields : {
-		Sampler + ",3",
-		Sampler + R"(,{"name":"Bad","binding":{"kind":"uniform","offset":0,"size":4},"type":{"kind":"scalar"}})",
-		Sampler + R"(,{"name":"Bad","binding":{"kind":"descriptorTableSlot","index":4294967295},"type":{"kind":"samplerState"}})",
-		Sampler + R"(,{"name":"Bad","bindings":[{"kind":"descriptorTableSlot","index":0},{"kind":"descriptorTableSlot","index":1}],"type":{"kind":"struct","fields":[]}})",
-		Sampler + R"(,{"name":"Bad","binding":{"kind":"unknown","index":0},"type":{"kind":"struct","fields":[]}})",
-		Sampler + R"(,{"name":"Bad","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"struct","fields":{}}})" })
+	for (const auto& fields :
+		{ Sampler + ",3", Sampler + R"(,{"name":"Bad","binding":{"kind":"uniform","offset":0,"size":4},"type":{"kind":"scalar"}})",
+			Sampler + R"(,{"name":"Bad","binding":{"kind":"descriptorTableSlot","index":4294967295},"type":{"kind":"samplerState"}})",
+			Sampler +
+				R"(,{"name":"Bad","bindings":[{"kind":"descriptorTableSlot","index":0},{"kind":"descriptorTableSlot","index":1}],"type":{"kind":"struct","fields":[]}})",
+			Sampler + R"(,{"name":"Bad","binding":{"kind":"unknown","index":0},"type":{"kind":"struct","fields":[]}})",
+			Sampler + R"(,{"name":"Bad","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"struct","fields":{}}})" })
 	{
 		const auto parsed = Parse(Group(fields));
 		SWIM_REQUIRE(parsed);
@@ -92,10 +94,8 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "MalformedLayoutsAndArithmeticOverflow
 		SWIM_CHECK(parsed.Reflection.GlobalParameters[0].HasUnsupportedBindingLayout);
 		Reject(parsed.Reflection);
 	}
-	for (const auto binding : {
-		R"({"kind":"descriptorTableSlot","index":0,"count":0})",
-		R"({"kind":"descriptorTableSlot","index":0,"space":-1})",
-		R"({"kind":"subElementRegisterSpace","index":4294967295})" })
+	for (const auto binding : { R"({"kind":"descriptorTableSlot","index":0,"count":0})",
+			 R"({"kind":"descriptorTableSlot","index":0,"space":-1})", R"({"kind":"subElementRegisterSpace","index":4294967295})" })
 	{
 		const auto parsed = Parse(Group(Sampler, binding));
 		SWIM_REQUIRE(parsed);
@@ -116,15 +116,16 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ResolvedCollisionsRejectAcrossGlobalA
 
 SWIM_TEST("ShaderCompiler.NestedLayouts", "UniformExtentAndResourceArraysCannotHideNestedResources")
 {
-	for (const auto field : {
-		R"({"name":"Bad","binding":{"kind":"uniform","offset":12,"size":8},"type":{"kind":"scalar"}})",
-		R"({"name":"Bad","binding":{"kind":"uniform","offset":0,"size":16},"type":{"kind":"array","elementCount":2,"elementType":{"kind":"samplerState"}}})",
-		R"({"name":"Bad","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"array","elementCount":2,"elementType":{"kind":"parameterBlock"}}})" })
+	for (const auto field :
+		{ R"({"name":"Bad","binding":{"kind":"uniform","offset":12,"size":8},"type":{"kind":"scalar"}})",
+			R"({"name":"Bad","binding":{"kind":"uniform","offset":0,"size":16},"type":{"kind":"array","elementCount":2,"elementType":{"kind":"samplerState"}}})",
+			R"({"name":"Bad","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"array","elementCount":2,"elementType":{"kind":"parameterBlock"}}})" })
 	{
 		const auto parsed = Parse(R"({"name":"Root","binding":{"kind":"subElementRegisterSpace","index":0},"type":{"kind":"parameterBlock",
 			"containerVarLayout":{"bindings":[{"kind":"descriptorTableSlot","index":0},{"kind":"subElementRegisterSpace","index":0}]},
 			"elementVarLayout":{"bindings":[{"kind":"descriptorTableSlot","index":1},{"kind":"uniform","offset":0,"size":16}],
-			"type":{"kind":"struct","fields":[)" + std::string(field) + "]}}}}");
+			"type":{"kind":"struct","fields":[)" +
+			std::string(field) + "]}}}}");
 		SWIM_REQUIRE(parsed);
 		Reject(parsed.Reflection);
 	}
@@ -248,20 +249,18 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ExcessiveNestingAndMalformedGlobalSco
 	std::string nested = Sampler;
 	for (int depth = 0; depth < 66; ++depth)
 	{
-		nested = R"({"name":"Nested","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"struct","fields":[)" + nested + "]}}";
+		nested =
+			R"({"name":"Nested","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"struct","fields":[)" + nested + "]}}";
 	}
 	const auto parsed = Parse(nested);
 	SWIM_REQUIRE(parsed);
 	Reject(parsed.Reflection);
-	for (const auto scope : {
-		R"({"kind":"none","parameters":[3]})",
-		R"({"kind":"none","parameters":{}})",
-		R"({"kind":"constantBuffer","parameters":[]})",
-		R"({"kind":"none","binding":{"kind":"descriptorTableSlot","index":0},"parameters":[]})",
-		"null" })
+	for (const auto scope :
+		{ R"({"kind":"none","parameters":[3]})", R"({"kind":"none","parameters":{}})", R"({"kind":"constantBuffer","parameters":[]})",
+			R"({"kind":"none","binding":{"kind":"descriptorTableSlot","index":0},"parameters":[]})", "null" })
 	{
-		const auto bad = ShaderCompiler::ParseSlangReflectionJson(std::string("{\"globalScope\":") + scope +
-			R"(,"entryPoints":[{"name":"main","stage":"fragment"}]})");
+		const auto bad = ShaderCompiler::ParseSlangReflectionJson(
+			std::string("{\"globalScope\":") + scope + R"(,"entryPoints":[{"name":"main","stage":"fragment"}]})");
 		SWIM_REQUIRE(bad);
 		Reject(bad.Reflection);
 	}
@@ -271,7 +270,8 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ConstantBufferArraysRejectResourceBea
 {
 	const auto parsed = Parse(R"({"name":"Buffers","binding":{"kind":"descriptorTableSlot","index":0},
 		"type":{"kind":"array","elementCount":2,"elementType":{"kind":"constantBuffer",
-		"elementType":{"kind":"struct","fields":[)" + Sampler + "]}}}}");
+		"elementType":{"kind":"struct","fields":[)" +
+		Sampler + "]}}}}");
 	SWIM_REQUIRE(parsed);
 	Reject(parsed.Reflection);
 }

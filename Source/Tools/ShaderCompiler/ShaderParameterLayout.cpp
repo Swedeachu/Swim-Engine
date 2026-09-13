@@ -48,11 +48,12 @@ namespace Swim::ShaderCompiler::Detail
 				if (kind == "uniform" && !offsets.HasUniform && !FindField(binding, "space"))
 				{
 					offsets.HasUniform = true;
-					return ReadU32(binding, "offset", offsets.Uniform) &&
-						ReadU32(binding, "size", offsets.UniformSize) && offsets.UniformSize <= UINT32_MAX - offsets.Uniform;
+					return ReadU32(binding, "offset", offsets.Uniform) && ReadU32(binding, "size", offsets.UniformSize) &&
+						offsets.UniformSize <= UINT32_MAX - offsets.Uniform;
 				}
 				return false;
 			};
+
 			const auto binding = FindField(layout, "binding");
 			const auto bindings = FindField(layout, "bindings");
 			if (binding && bindings)
@@ -83,8 +84,8 @@ namespace Swim::ShaderCompiler::Detail
 
 		bool ApplyOffsets(ShaderParameterOffsets& base, const ShaderParameterOffsets& local)
 		{
-			return Add(base.Descriptor, local.Descriptor) && Add(base.Space, local.Space) &&
-				Add(base.RegisterSpace, local.RegisterSpace) && Add(base.Uniform, local.Uniform);
+			return Add(base.Descriptor, local.Descriptor) && Add(base.Space, local.Space) && Add(base.RegisterSpace, local.RegisterSpace) &&
+				Add(base.Uniform, local.Uniform);
 		}
 
 		bool GetObject(simdjson::dom::object parent, const char* name, simdjson::dom::object& object)
@@ -99,6 +100,7 @@ namespace Swim::ShaderCompiler::Detail
 			{
 				return false;
 			}
+
 			const auto kind = ReadString(type, "kind");
 			if (kind == "scalar" || kind == "vector" || kind == "matrix")
 			{
@@ -108,8 +110,8 @@ namespace Swim::ShaderCompiler::Detail
 			{
 				std::uint32_t count = 0;
 				simdjson::dom::object element;
-				return ReadU32(type, "elementCount", count) && count > 0 &&
-					GetObject(type, "elementType", element) && IsUniformValue(element, depth + 1);
+				return ReadU32(type, "elementCount", count) && count > 0 && GetObject(type, "elementType", element) &&
+					IsUniformValue(element, depth + 1);
 			}
 			if (kind == "struct")
 			{
@@ -132,9 +134,8 @@ namespace Swim::ShaderCompiler::Detail
 			return false;
 		}
 
-		bool ParseLayout(simdjson::dom::object parameter, ShaderParameterOffsets base,
-			const std::string& path, std::vector<ShaderBindingReflection>& output,
-			std::size_t uniformOwner, std::uint32_t depth)
+		bool ParseLayout(simdjson::dom::object parameter, ShaderParameterOffsets base, const std::string& path,
+			std::vector<ShaderBindingReflection>& output, std::size_t uniformOwner, std::uint32_t depth)
 		{
 			if (depth > 64)
 			{
@@ -147,8 +148,9 @@ namespace Swim::ShaderCompiler::Detail
 				return false;
 			}
 			const auto kind = ReadString(type, "kind");
-			if (local.HasUniform && (uniformOwner >= output.size() || base.Uniform > output[uniformOwner].Size ||
-				local.UniformSize > output[uniformOwner].Size - base.Uniform))
+			if (local.HasUniform &&
+				(uniformOwner >= output.size() || base.Uniform > output[uniformOwner].Size ||
+					local.UniformSize > output[uniformOwner].Size - base.Uniform))
 			{
 				return false;
 			}
@@ -179,13 +181,15 @@ namespace Swim::ShaderCompiler::Detail
 			{
 				simdjson::dom::object container, element;
 				ShaderParameterOffsets containerOffsets, elementOffsets;
-				if (local.HasUniform || (kind == "parameterBlock" ? (!local.HasRegisterSpace || local.HasDescriptor) :
-					(!local.HasDescriptor || local.HasRegisterSpace)) ||
+				if (local.HasUniform ||
+					(kind == "parameterBlock" ? (!local.HasRegisterSpace || local.HasDescriptor)
+											  : (!local.HasDescriptor || local.HasRegisterSpace)) ||
 					!GetObject(type, "containerVarLayout", container) || !GetObject(type, "elementVarLayout", element) ||
 					!ReadOffsets(container, containerOffsets, true) || !ReadOffsets(element, elementOffsets))
 				{
 					return false;
 				}
+
 				if (kind == "parameterBlock")
 				{
 					// Parameter blocks start a new descriptor set. Child set indices
@@ -193,6 +197,7 @@ namespace Swim::ShaderCompiler::Detail
 					base.Space = base.RegisterSpace;
 					base.Descriptor = 0;
 				}
+
 				base.Uniform = 0;
 				auto containerBase = base;
 				if (containerOffsets.HasUniform || containerOffsets.RegisterSpace != 0 ||
@@ -201,6 +206,7 @@ namespace Swim::ShaderCompiler::Detail
 				{
 					return false;
 				}
+
 				uniformOwner = SIZE_MAX;
 				if (containerOffsets.HasDescriptor)
 				{
@@ -208,6 +214,7 @@ namespace Swim::ShaderCompiler::Detail
 					{
 						return false;
 					}
+
 					ShaderBindingReflection uniform;
 					uniform.Name = path;
 					uniform.BindingKind = "descriptorTableSlot";
@@ -223,6 +230,7 @@ namespace Swim::ShaderCompiler::Detail
 				{
 					return false;
 				}
+
 				return ParseLayout(element, base, path, output, uniformOwner, depth + 1);
 			}
 			if (local.HasUniform)
@@ -238,11 +246,13 @@ namespace Swim::ShaderCompiler::Detail
 			{
 				return false;
 			}
+
 			auto leaf = ParseSlangBindingParameter(parameter);
 			if (leaf.HasUnsupportedBindingLayout || leaf.Count != 1)
 			{
 				return false;
 			}
+
 			leaf.Name = path;
 			leaf.Index = base.Descriptor;
 			leaf.Space = base.Space;
@@ -250,18 +260,17 @@ namespace Swim::ShaderCompiler::Detail
 			output.push_back(std::move(leaf));
 			return true;
 		}
-	}
+	} // namespace
 
-	void ParseSlangParameterLayout(simdjson::dom::object parameter,
-		std::vector<ShaderBindingReflection>& outParameters)
+	void ParseSlangParameterLayout(simdjson::dom::object parameter, std::vector<ShaderBindingReflection>& outParameters)
 	{
 		auto reflection = ParseSlangBindingParameter(parameter);
 		simdjson::dom::object type;
 		const bool group = reflection.TypeKind == "parameterBlock" ||
 			(reflection.TypeKind == "constantBuffer" && reflection.BindingKind != "pushConstantBuffer" &&
 				GetObject(parameter, "type", type) && FindField(type, "elementVarLayout"));
-		const bool structure = reflection.TypeKind == "struct" &&
-			reflection.BindingKind != "varyingInput" && reflection.BindingKind != "varyingOutput" && reflection.SemanticName.empty();
+		const bool structure = reflection.TypeKind == "struct" && reflection.BindingKind != "varyingInput" &&
+			reflection.BindingKind != "varyingOutput" && reflection.SemanticName.empty();
 		if (!group && !structure)
 		{
 			if (reflection.TypeKind == "array" && reflection.DescriptorElementTypeKind == "constantBuffer")
@@ -276,6 +285,7 @@ namespace Swim::ShaderCompiler::Detail
 			outParameters.push_back(std::move(reflection));
 			return;
 		}
+
 		std::vector<ShaderBindingReflection> flattened;
 		if (!ParseLayout(parameter, {}, reflection.Name, flattened, SIZE_MAX, 0))
 		{
@@ -289,4 +299,4 @@ namespace Swim::ShaderCompiler::Detail
 		}
 	}
 
-}
+} // namespace Swim::ShaderCompiler::Detail

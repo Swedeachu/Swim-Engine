@@ -27,9 +27,10 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph, GPU registries/GeometryHeap, asynchronous residency, bindless allocation and persistent GPU Scene/extraction remain future integration work. |
+| Modern renderer | RenderGraph DAG/state/barrier compilation and single-queue execution are implemented with native reference consumers. GPU registries/GeometryHeap, asynchronous residency, bindless allocation and persistent GPU Scene/extraction remain future integration work. |
 
-- **Latest RHI checkpoint — item 39 complete:** all nineteen native cases pass core, synchronization, GPU-assisted and combined validation on Windows (RTX 4070 Laptop GPU) and Linux (Mesa llvmpipe on Xvfb/Openbox). Windows strict HDR also passes. The only accepted warning is the exact user-approved GPU-AV descriptor-limit startup advisory, retained in the reports; every other warning/error/drop still fails. See [the September 12 evidence and reproduction record](validation/Item39-2026-09-12.md). Linux physical-GPU coverage remains additional work; item **40** (RenderGraph) is the next unstarted critical-path gate.
+- **Latest renderer checkpoint — item 40 complete:** RenderGraph now owns pass dependencies, initialization validation, culling, mip/layer states, barriers, transient pooling, imported/exported resources, GPU pass labels/timestamps and deterministic single-queue execution. Windows passes all 21 native smokes under all four profiles; Linux passes both new graph smokes under all four profiles on llvmpipe/Xvfb/Openbox. Default suites pass 439 Windows / 380 Linux cases. See [the graph contract](RenderGraph.md) and [item 40 evidence](validation/Item40-2026-09-12.md). Dedicated queue ownership transfers and async scheduling remain explicit Phase 10 follow-ups; item **41** is the next critical-path checkpoint.
+- **Previous RHI checkpoint — item 39 complete:** all nineteen native cases pass core, synchronization, GPU-assisted and combined validation on Windows (RTX 4070 Laptop GPU) and Linux (Mesa llvmpipe on Xvfb/Openbox). Windows strict HDR also passes. The only accepted warning is the exact user-approved GPU-AV descriptor-limit startup advisory, retained in the reports; every other warning/error/drop still fails. See [the September 12 evidence and reproduction record](validation/Item39-2026-09-12.md). Linux physical-GPU coverage remains additional work; item **40** (RenderGraph) is implemented by the following checkpoint.
 - **Previous RHI checkpoint — nested resource layouts/parameter blocks:** tool-side reflection now resolves explicit global/entry parameter blocks, resource-bearing constant buffers and nested structs into the existing RHI descriptor schemas. Relative bindings and child descriptor sets are accumulated independently, fixed resource arrays remain single bindings, and generated uniform buffers retain source paths and reflected byte ranges. The original Basic Slang sample now converts to an RHI interface. No additional desktop smoke was introduced by that checkpoint; the nineteen existing cases now pass the item **39** desktop matrix recorded above. See the September 12 Phase 9 checkpoint below.
 
 - **File organization pass — Vulkan RHI and physics backends:** the monolithic `VulkanRhiBackend.cpp`, `JoltWorldBackend.cpp`, and `PhysXWorldBackend.cpp` — each previously a single file defining most or all of that backend's concrete types — have been split one-type-per-file under `Internal/`, `Resources/`, `Sync/`, `Commands/`, `Filters/`, and `Callbacks/` subfolders (see §0.2 for the rule and §33 for the target layout). This was pure code motion: no behavior changed. `VulkanSwapchain` was further split into a declaration-only header plus a `.cpp` for its non-trivial method bodies, matching the pattern already used by `VulkanQueue`. While validating the physics split, one genuine pre-existing latent bug was found and fixed: `JoltWorldBackend.cpp` defined `ToGlm(JPH::RVec3Arg)` unconditionally, but the header only declares it under `#ifdef JPH_DOUBLE_PRECISION`; since this project builds Jolt with `DOUBLE_PRECISION OFF` (where `RVec3Arg` aliases `Vec3Arg`), the unguarded definition collided with the `Vec3Arg` overload. The `.cpp` now matches the header's guard. No genuinely deprecated/dead code was found in either area to relocate into `Deprecated/`.
@@ -3325,21 +3326,21 @@ Graph.AddPass("CullInstances",
 
 ### Responsibilities
 
-- [ ] pass dependency DAG;
-- [ ] read/write declarations;
-- [ ] read-before-write validation;
-- [ ] cycle detection;
-- [ ] resource lifetime analysis;
-- [ ] image layout/resource-state transitions;
-- [ ] memory barriers;
-- [ ] queue ownership transfer;
-- [ ] pass culling;
-- [ ] imported persistent resources;
-- [ ] exported resources;
-- [ ] transient resource pooling;
-- [ ] graphics/compute/transfer passes;
-- [ ] GPU labels/timestamps per pass;
-- [ ] deterministic ordering where dependencies are otherwise equal.
+- [x] pass dependency DAG;
+- [x] read/write declarations;
+- [x] read-before-write validation;
+- [x] cycle detection;
+- [x] resource lifetime analysis;
+- [x] image layout/resource-state transitions;
+- [x] memory barriers;
+- [ ] queue ownership transfer; *(Deferred with dedicated-queue scheduling. The initial executor keeps all pass roles on the graphics family and rejects imports declaring another owner.)*
+- [x] pass culling;
+- [x] imported persistent resources;
+- [x] exported resources;
+- [x] transient resource pooling;
+- [x] graphics/compute/transfer passes;
+- [x] GPU labels/timestamps per pass;
+- [x] deterministic ordering where dependencies are otherwise equal.
 
 ### Async compute
 
@@ -3351,11 +3352,19 @@ First:
 2. profile pass overlap opportunities;
 3. schedule async only when it produces measurable value.
 
+### Item 40 implementation checkpoint — 2026-09-12
+
+`Swim::Render` now provides the backend-neutral graph definition, compiler, checked pass context and timeline-owned executor under `Systems/Renderer/RenderGraph`. Graphics, compute and transfer pass roles share one graphics queue. The compiler validates initialization and state/usage/range declarations, detects cycles, distinguishes data dependencies from ordering-only hazards for culling, and synthesizes same-state write barriers as well as texture layout changes. Compatible transient objects share slots only across nonoverlapping lifetimes; exports remain pinned, imports are never pooled, and the executor waits before reusing resources or query slots. External WSI semaphore/timeline dependencies are forwarded explicitly.
+
+All 17 graph CPU cases pass on Windows and Linux. The complete Windows default suite passes 439 cases / 10,185 checks; the available Linux default suite passes 380 / 5,977. Windows passes all 21 native Vulkan smokes under core, synchronization, GPU-assisted and combined profiles. Linux passes both new graph rendering/compute smokes under all four profiles on llvmpipe with Xvfb/Openbox. Native tests verify exact pixel/compute readback, repeated pooling, per-pass timestamps, presentation and swapchain replacement. The exact previously approved GPU-AV startup advisory is the sole accepted warning. See [contracts and reproduction](RenderGraph.md) and [the retained evidence summary](validation/Item40-2026-09-12.md).
+
+Item **40** is complete for the DAG/resource-state/barrier foundation. Phase 10's dedicated-family ownership transfer and async scheduling are deliberately still open; there is no claim of overlapping queues/frames or Linux physical-GPU coverage. The sandbox is still transitional, and no legacy source is retired here. Item **41** remains next: connect the existing upload/readback arenas and transfer helpers to graph-scheduled ownership and completion. Keep the consolidated engine/test source layout and top-level `Deprecated/`.
+
 ### Phase 10 exit criteria
 
-- [ ] an offscreen pass -> post pass -> present sequence uses graph-generated synchronization.
-- [ ] hand-written barriers are no longer scattered through high-level renderer features.
-- [ ] graph debug dump/view exists.
+- [x] an offscreen pass -> post pass -> present sequence uses graph-generated synchronization. *(Native Windows hardware and Linux software-Vulkan tests, including readback and swapchain replacement.)*
+- [x] hand-written barriers are no longer scattered through high-level renderer features. *(The new modern graph reference consumers declare usage and contain no manual barriers; transitional sandbox migration and direct-RHI test coverage remain separate.)*
+- [x] graph debug dump/view exists. *(Deterministic text dump includes pass order/culling, dependencies, allocation slots, lifetimes and subresource barriers.)*
 
 ---
 
@@ -4501,7 +4510,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.4 Modern renderer foundation
 
-40. [ ] Implement RenderGraph DAG/resource-state/barrier system.
+40. [x] Implement RenderGraph DAG/resource-state/barrier system. *(Validated graph compiler, single-graphics-queue executor, pooling, import/export lifetime, GPU diagnostics and native render/compute consumers; see the Phase 10 checkpoint and [evidence](validation/Item40-2026-09-12.md). Dedicated ownership transfers/async scheduling remain explicit Phase 10 follow-ups.)*
 41. [ ] Implement upload/readback arenas and transfer helpers. *(Persistent mapped upload/readback arenas, frame-submission integration, explicit CPU-result lifetime and direct buffer/texture transfer primitives are implemented. Graph-scheduled transfer integration remains open; see the Phase 9 allocation checkpoints.)*
 42. [ ] Implement generational GPU resource registries.
 43. [ ] Implement paged GeometryHeap.

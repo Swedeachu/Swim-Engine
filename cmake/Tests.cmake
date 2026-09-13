@@ -100,6 +100,9 @@ function(swim_configure_tests)
 	# Swim::RhiVulkan::CreateGraphicsSystem only needs the declaration.
 	swim_add_header_boundary(SwimRhiPublicHeaders
 		SOURCE Source/Tests/HeaderBoundary/RhiPublicHeaders.cpp)
+	swim_add_header_boundary(SwimRenderGraphPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/RenderGraphPublicHeaders.cpp
+		BUILD_BY_DEFAULT)
 
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
@@ -145,6 +148,7 @@ function(swim_configure_tests)
 		Physics/Generic
 		Scene/Headless
 		RHI
+		RenderGraph
 		Commands
 	)
 
@@ -160,6 +164,7 @@ function(swim_configure_tests)
 	# gets Assets through linking it instead of compiling Assets a second time
 	# into the same binary.
 	set(SWIM_TEST_MODULE_SOURCES
+		${SWIM_RENDER_GRAPH_SOURCES}
 		${SWIM_CORE_SOURCES}
 		${SWIM_COMMANDS_SOURCES}
 		${SWIM_MEMORY_SOURCES}

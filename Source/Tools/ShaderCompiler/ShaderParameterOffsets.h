@@ -17,4 +17,4 @@ namespace Swim::ShaderCompiler::Detail
 		bool HasUniform = false;
 	};
 
-}
+} // namespace Swim::ShaderCompiler::Detail

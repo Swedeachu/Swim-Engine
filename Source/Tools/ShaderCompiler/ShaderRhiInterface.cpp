@@ -15,16 +15,17 @@ namespace Swim::ShaderCompiler
 			result.Error = std::move(message);
 			return result;
 		};
-		if (reflection.HasUnsupportedGlobalScopeLayout ||
-			(!reflection.GlobalScopeKind.empty() && reflection.GlobalScopeKind != "none"))
+		if (reflection.HasUnsupportedGlobalScopeLayout || (!reflection.GlobalScopeKind.empty() && reflection.GlobalScopeKind != "none"))
 		{
 			return fail("Unsupported global scope layout; use explicitly bound parameter groups");
 		}
 		Rhi::ShaderStageMask stages = Rhi::ShaderStageMask::None;
 		for (const auto& entry : reflection.EntryPoints)
 		{
-			if ((entry.Stage == ShaderStage::Vertex && (static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex)) != 0) ||
-				(entry.Stage == ShaderStage::Fragment && (static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Fragment)) != 0))
+			if ((entry.Stage == ShaderStage::Vertex &&
+					(static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Vertex)) != 0) ||
+				(entry.Stage == ShaderStage::Fragment &&
+					(static_cast<std::uint32_t>(stages) & static_cast<std::uint32_t>(Rhi::ShaderStageMask::Fragment)) != 0))
 			{
 				return fail("Shader reflection requires at most one entry point per graphics stage");
 			}
@@ -38,7 +39,11 @@ namespace Swim::ShaderCompiler
 			}
 			else if (entry.Stage == ShaderStage::Compute && reflection.EntryPoints.size() == 1)
 			{
-				if (std::any_of(entry.ThreadGroupSize.begin(), entry.ThreadGroupSize.end(), [](auto size) { return size == 0; }))
+				if (std::any_of(entry.ThreadGroupSize.begin(), entry.ThreadGroupSize.end(),
+						[](auto size)
+						{
+							return size == 0;
+						}))
 				{
 					return fail("Compute requires three fixed positive local-size dimensions");
 				}
@@ -59,9 +64,8 @@ namespace Swim::ShaderCompiler
 			if (parameter.BindingKind == "pushConstantBuffer")
 			{
 				if (parameter.HasUnsupportedBindingLayout || parameter.TypeKind != "constantBuffer" || parameter.Count != 1 ||
-					!parameter.HasOffset || !parameter.HasSize || parameter.Size == 0 ||
-					parameter.Offset % 4 != 0 || parameter.Size % 4 != 0 || parameter.Size > UINT32_MAX - parameter.Offset ||
-					!result.Interface.PushConstants.empty())
+					!parameter.HasOffset || !parameter.HasSize || parameter.Size == 0 || parameter.Offset % 4 != 0 ||
+					parameter.Size % 4 != 0 || parameter.Size > UINT32_MAX - parameter.Offset || !result.Interface.PushConstants.empty())
 				{
 					return fail("Push constants require one aligned, sized global constant buffer: " + parameter.Name);
 				}
@@ -80,8 +84,9 @@ namespace Swim::ShaderCompiler
 			{
 				return fail("Entry-point scope containers require a nested layout conversion: " + entry.Name);
 			}
-			const auto visibility = entry.Stage == ShaderStage::Vertex ? Rhi::ShaderStageMask::Vertex :
-				entry.Stage == ShaderStage::Fragment ? Rhi::ShaderStageMask::Fragment : Rhi::ShaderStageMask::Compute;
+			const auto visibility = entry.Stage == ShaderStage::Vertex ? Rhi::ShaderStageMask::Vertex
+				: entry.Stage == ShaderStage::Fragment				   ? Rhi::ShaderStageMask::Fragment
+																	   : Rhi::ShaderStageMask::Compute;
 			for (const auto& parameter : entry.Parameters)
 			{
 				if (parameter.HasUnsupportedBindingLayout)
@@ -98,8 +103,8 @@ namespace Swim::ShaderCompiler
 				}
 				// Only stage IO is ignored. Uniform bytes, implicit scope containers,
 				// nested resources and entry-local push blocks must never disappear.
-				const bool valueType = parameter.TypeKind == "scalar" || parameter.TypeKind == "vector" ||
-					parameter.TypeKind == "matrix" || parameter.TypeKind == "struct";
+				const bool valueType = parameter.TypeKind == "scalar" || parameter.TypeKind == "vector" || parameter.TypeKind == "matrix" ||
+					parameter.TypeKind == "struct";
 				const bool varying = parameter.BindingKind == "varyingInput" || parameter.BindingKind == "varyingOutput" ||
 					(parameter.BindingKind.empty() && parameter.SemanticName.starts_with("SV_"));
 				if (!valueType || !varying)

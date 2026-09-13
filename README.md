@@ -151,9 +151,28 @@ Note that Swim defines `NDEBUG` in every configuration, including Debug, so `ass
 
 A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution folder stay separate from `SwimTests` on purpose: each compiles a public-header surface with only its declared include paths/dependencies, proving those headers are self-contained. The broad dependency environment of `SwimTests` cannot prove that isolation.
 
+### C++ formatting
+
+The root `.clang-format` uses Allman braces, tabs, and explicit braces around every `if`/`else` and loop body. Use clang-format **22 or newer**. Short control-flow bodies stay on separate lines; logical sections inside functions still need a manual spacing review.
+
+When Python and clang-format are available at configure time, CMake exposes `SwimFormat` and `SwimFormatCheck` under Tools. They operate on changed/new first-party C/C++ files relative to `HEAD`, including staged changes, and never run as part of a normal build:
+
+```powershell
+cmake --build build/windows-debug --target SwimFormat
+cmake --build build/windows-debug --target SwimFormatCheck
+```
+
+For a commit-range review, configure `-DSWIM_FORMAT_BASE_REF=<base-revision>` or run `python scripts/format-source.py --base-ref HEAD~5 --check` directly. Omit `--check` to apply fixes. `--all` explicitly selects all maintained C/C++ source; dependencies and `Deprecated/` remain excluded. Review inserted braces, especially near macros/preprocessor branches. The formatter does not replace compilation or tests.
+
+### RenderGraph
+
+The modern `Swim::Render` graph compiles declared passes into a deterministic dependency DAG, validates initialization, culls unused work, tracks mip/layer states, synthesizes barriers and pools compatible transient resources. `RenderGraphExecutor` runs graphics/compute/transfer work on one graphics queue, retains resources through timeline completion, and records per-pass labels/timestamps. Dedicated queue ownership transfers and async scheduling remain later work.
+
+See [RenderGraph contracts and usage](docs/RenderGraph.md). Run the CPU tests with `SwimTests --filter=RenderGraph`; opt-in Vulkan tests exercise offscreen → post → present, swapchain replacement, dependent compute and exact readback. These reference consumers use graph-generated synchronization. The sandbox remains on its transitional renderer.
+
 ### Vulkan RHI desktop validation
 
-Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the nineteen native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback, sampled integer/dimension readback and depth/comparison readback:
+Build Debug `SwimTests` with `SWIM_ENABLE_VULKAN_RHI=ON` and `SWIM_BUILD_SHADER_COMPILER=ON` (both defaults). On a desktop with the required Vulkan feature baseline and validation layers, opt in to the twenty-one native tests covering clear/transfer/presentation, triangle and texture readback, window/HDR lifecycle, timestamps, memory budgets, pipeline caches, upload/readback arenas, vertex/index/instance buffer drawing, push-constant updates, compute/storage-buffer readback, typed storage-image readback, entry-point descriptor readback, fixed descriptor-array readback, sampled integer/dimension readback, depth/comparison readback, and RenderGraph rendering/compute/readback:
 
 ```powershell
 $env:SWIM_RUN_RHI_SMOKE = "1"

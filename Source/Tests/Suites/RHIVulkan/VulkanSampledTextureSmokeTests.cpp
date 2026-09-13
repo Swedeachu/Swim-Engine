@@ -76,11 +76,15 @@ namespace
 			views[index] = device->CreateTextureView(*textures[index], view);
 			SWIM_REQUIRE(views[index]);
 		}
-		auto upload = device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Sampled upload" });
-		auto guards = device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Sampled guards" });
-		auto output = device->CreateBuffer({ outputBytes, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination,
-			Rhi::MemoryPreference::DeviceLocal, "Sampled output" });
-		auto readback = device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu, "Sampled readback" });
+		auto upload =
+			device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Sampled upload" });
+		auto guards =
+			device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Sampled guards" });
+		auto output = device->CreateBuffer(
+			{ outputBytes, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::TransferDestination,
+				Rhi::MemoryPreference::DeviceLocal, "Sampled output" });
+		auto readback = device->CreateBuffer(
+			{ outputBytes, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu, "Sampled readback" });
 		SWIM_REQUIRE(upload && guards && output && readback);
 		std::array<std::uint32_t, count * 4> expected{}, actual{};
 		expected.fill(0xDEADBEEFu);
@@ -107,8 +111,9 @@ namespace
 					else
 					{
 						SWIM_REQUIRE_EQUAL(binding.Type, Rhi::DescriptorType::SampledTexture);
-						const auto index = binding.SampledClass == Rhi::SampledTextureClass::Uint ? write.ArrayIndex :
-							binding.SampledClass == Rhi::SampledTextureClass::Sint ? 2u : 3u;
+						const auto index = binding.SampledClass == Rhi::SampledTextureClass::Uint ? write.ArrayIndex
+							: binding.SampledClass == Rhi::SampledTextureClass::Sint			  ? 2u
+																								  : 3u;
 						SWIM_REQUIRE(index < views.size());
 						write.TextureResource = views[index].get();
 					}
@@ -150,7 +155,8 @@ namespace
 			{
 				commands.Transition(*guards, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
-			commands.Transition(*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
+			commands.Transition(
+				*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*guards, *output, { 0, 0, outputBytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderWrite);
 			for (std::uint32_t index = 0; index < textures.size(); ++index)
@@ -170,7 +176,8 @@ namespace
 			commands.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(push)));
 			commands.Dispatch(count / 8, 1, 1);
 			commands.Transition(*output, Rhi::ResourceState::ShaderWrite, Rhi::ResourceState::CopySource);
-			commands.Transition(*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
+			commands.Transition(
+				*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*output, *readback, { 0, 0, outputBytes });
 			commands.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
 			commands.End();
@@ -190,8 +197,11 @@ namespace
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
-			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "SampledIntegerTexturesAndReadback",
-				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunSampledIntegerSmoke); } });
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "SampledIntegerTexturesAndReadback", SWIM_TEST_LOCATION,
+				+[]
+				{
+					Swim::Testing::RunValidatedVulkanSmoke(&RunSampledIntegerSmoke);
+				} });
 		}
 		return true;
 	}();

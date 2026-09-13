@@ -3,8 +3,8 @@
 namespace Swim::RhiVulkan
 {
 
-	VulkanDiagnosticsPolicy SelectDiagnosticsPolicy(Rhi::ValidationMode mode, bool debugDefault,
-		const VulkanValidationCapabilities& capabilities, const Rhi::ValidationChecks& checks)
+	VulkanDiagnosticsPolicy SelectDiagnosticsPolicy(
+		Rhi::ValidationMode mode, bool debugDefault, const VulkanValidationCapabilities& capabilities, const Rhi::ValidationChecks& checks)
 	{
 		bool requested = checks.Any();
 		switch (mode)
@@ -25,24 +25,26 @@ namespace Swim::RhiVulkan
 		default:
 			return {};
 		}
-		const bool available = capabilities.LayerAvailable &&
-			(capabilities.DebugUtilsAvailable || capabilities.LayerDebugUtilsAvailable);
+
+		const bool available = capabilities.LayerAvailable && (capabilities.DebugUtilsAvailable || capabilities.LayerDebugUtilsAvailable);
 		if ((mode == Rhi::ValidationMode::Required || checks.Any()) && !available)
 		{
 			return { false, false, false, {}, "Requested Vulkan validation needs VK_LAYER_KHRONOS_validation and VK_EXT_debug_utils" };
 		}
-		if (checks.Any() && (!capabilities.LayerSettingsAvailable ||
-			capabilities.LayerVersion < MinimumValidationSettingsVersion))
+		if (checks.Any() && (!capabilities.LayerSettingsAvailable || capabilities.LayerVersion < MinimumValidationSettingsVersion))
 		{
-			return { false, false, false, {}, "Explicit validation checks need VK_EXT_layer_settings and Khronos validation layer 1.4.335 or newer" };
+			return { false, false, false, {},
+				"Explicit validation checks need VK_EXT_layer_settings and Khronos validation layer 1.4.335 or newer" };
 		}
 		if (checks.GpuAssisted && capabilities.LayerVersion < MinimumGpuValidationSettingsVersion)
 		{
-			return { false, false, false, {}, "GPU-assisted validation needs Khronos validation layer 1.4.350 or newer for independently configurable GPU checks" };
+			return { false, false, false, {},
+				"GPU-assisted validation needs Khronos validation layer 1.4.350 or newer for independently configurable GPU checks" };
 		}
+
 		const bool validation = requested && available;
-		return { true, validation, capabilities.DebugUtilsAvailable ||
-			(validation && capabilities.LayerDebugUtilsAvailable), checks, nullptr };
+		return { true, validation, capabilities.DebugUtilsAvailable || (validation && capabilities.LayerDebugUtilsAvailable), checks,
+			nullptr };
 	}
 
 	std::vector<VkLayerSettingEXT> GetVulkanValidationSettings(const Rhi::ValidationChecks& checks, std::uint32_t layerVersion)
@@ -50,16 +52,15 @@ namespace Swim::RhiVulkan
 		static constexpr VkBool32 enabled = VK_TRUE;
 		static constexpr VkBool32 disabled = VK_FALSE;
 		std::vector<VkLayerSettingEXT> settings{
-			{ "VK_LAYER_KHRONOS_validation", "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-				1, checks.Synchronization ? &enabled : &disabled },
-			{ "VK_LAYER_KHRONOS_validation", "gpuav_enable", VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-				1, checks.GpuAssisted ? &enabled : &disabled },
-			{ "VK_LAYER_KHRONOS_validation", "syncval_submit_time_validation", VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-				1, &enabled },
+			{ "VK_LAYER_KHRONOS_validation", "validate_sync", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
+				checks.Synchronization ? &enabled : &disabled },
+			{ "VK_LAYER_KHRONOS_validation", "gpuav_enable", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
+				checks.GpuAssisted ? &enabled : &disabled },
+			{ "VK_LAYER_KHRONOS_validation", "syncval_submit_time_validation", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &enabled },
 			// GPU-AV is a separate pass after core validation, as recommended
 			// by Khronos. Combining both emits a performance warning.
-			{ "VK_LAYER_KHRONOS_validation", "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT,
-				1, checks.GpuAssisted ? &disabled : &enabled },
+			{ "VK_LAYER_KHRONOS_validation", "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
+				checks.GpuAssisted ? &disabled : &enabled },
 		};
 		if (checks.GpuAssisted)
 		{
@@ -73,10 +74,11 @@ namespace Swim::RhiVulkan
 			// 1.4.357 merged ray-query validation into the trace-ray setting.
 			if (layerVersion < VK_MAKE_API_VERSION(0, 1, 4, 357))
 			{
-				settings.push_back({ "VK_LAYER_KHRONOS_validation", "gpuav_validate_ray_query",
-					VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &disabled });
+				settings.push_back(
+					{ "VK_LAYER_KHRONOS_validation", "gpuav_validate_ray_query", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &disabled });
 			}
 		}
+
 		return settings;
 	}
 
@@ -90,6 +92,7 @@ namespace Swim::RhiVulkan
 			features.shaderInt64 = VK_TRUE;
 			features.shaderInt16 = VK_TRUE;
 		}
+
 		// Vulkan 1.3, timeline semaphores and buffer device address are already
 		// part of Swim's baseline. The layer reserves its descriptor slot and
 		// exposes the reduced maxBoundDescriptorSets to normal layout validation.

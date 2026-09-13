@@ -38,19 +38,23 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "ElementCountsAndTypesConvertForGlo
 		Rhi::DescriptorType Type;
 		std::string_view Format{};
 	};
-	const std::array cases{
-		Case{ R"json({"kind":"samplerState"})json", Rhi::DescriptorType::Sampler },
+
+	const std::array cases{ Case{ R"json({"kind":"samplerState"})json", Rhi::DescriptorType::Sampler },
 		Case{ R"json({"kind":"constantBuffer"})json", Rhi::DescriptorType::UniformBuffer },
 		Case{ R"json({"kind":"resource","baseShape":"structuredBuffer"})json", Rhi::DescriptorType::ReadOnlyStorageBuffer },
 		Case{ R"json({"kind":"resource","baseShape":"byteAddressBuffer","access":"readWrite"})json", Rhi::DescriptorType::StorageBuffer },
-		Case{ R"json({"kind":"resource","baseShape":"texture2D","resultType":{"kind":"vector","elementCount":4,"elementType":{"kind":"scalar","scalarType":"float32"}}})json", Rhi::DescriptorType::SampledTexture },
-		Case{ R"json({"kind":"resource","baseShape":"texture2D","access":"readWrite","resultType":{"kind":"scalar","scalarType":"uint32"}})json", Rhi::DescriptorType::StorageTexture, "r32ui" }
-	};
+		Case{
+			R"json({"kind":"resource","baseShape":"texture2D","resultType":{"kind":"vector","elementCount":4,"elementType":{"kind":"scalar","scalarType":"float32"}}})json",
+			Rhi::DescriptorType::SampledTexture },
+		Case{
+			R"json({"kind":"resource","baseShape":"texture2D","access":"readWrite","resultType":{"kind":"scalar","scalarType":"uint32"}})json",
+			Rhi::DescriptorType::StorageTexture, "r32ui" } };
 	for (const auto& item : cases)
 	{
 		for (const bool scoped : { false, true })
 		{
-			const auto parsed = ParseArray(item.Json, "3", R"json({"kind":"descriptorTableSlot","space":1,"index":7})json", scoped, item.Format);
+			const auto parsed =
+				ParseArray(item.Json, "3", R"json({"kind":"descriptorTableSlot","space":1,"index":7})json", scoped, item.Format);
 			SWIM_REQUIRE(parsed);
 			const auto& parameter = scoped ? parsed.Reflection.EntryPoints[0].Parameters[0] : parsed.Reflection.GlobalParameters[0];
 			SWIM_CHECK_EQUAL(parameter.TypeKind, std::string("array"));
@@ -66,7 +70,8 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "ElementCountsAndTypesConvertForGlo
 			SWIM_CHECK_EQUAL(binding.Type, item.Type);
 			SWIM_CHECK_EQUAL(binding.Stages, Rhi::ShaderStageMask::Compute);
 			SWIM_CHECK(!binding.VariableCount && !binding.PartiallyBound);
-			SWIM_CHECK_EQUAL(binding.StorageTextureFormat, item.Type == Rhi::DescriptorType::StorageTexture ? Rhi::Format::R32Uint : Rhi::Format::Undefined);
+			SWIM_CHECK_EQUAL(binding.StorageTextureFormat,
+				item.Type == Rhi::DescriptorType::StorageTexture ? Rhi::Format::R32Uint : Rhi::Format::Undefined);
 		}
 	}
 }
@@ -79,7 +84,8 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "RuntimeZeroMalformedAndOverflowCou
 		SWIM_REQUIRE(parsed);
 		Reject(parsed.Reflection);
 	}
-	const auto missing = ShaderCompiler::ParseSlangReflectionJson(R"json({"parameters":[{"name":"Unbounded","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"array","elementType":{"kind":"samplerState"}}}],"entryPoints":[{"stage":"fragment"}]})json");
+	const auto missing = ShaderCompiler::ParseSlangReflectionJson(
+		R"json({"parameters":[{"name":"Unbounded","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"array","elementType":{"kind":"samplerState"}}}],"entryPoints":[{"stage":"fragment"}]})json");
 	SWIM_REQUIRE(missing);
 	Reject(missing.Reflection);
 	for (auto count : { "1", "4294967295" })
@@ -94,17 +100,16 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "RuntimeZeroMalformedAndOverflowCou
 
 SWIM_TEST("ShaderCompiler.DescriptorArrays", "OneBindingSlotIsDistinctFromDescriptorElementCount")
 {
-	for (const auto binding : {
-		R"json({"kind":"descriptorTableSlot","index":0,"count":2})json",
-		R"json({"kind":"descriptorTableSlot","index":0,"count":0})json",
-		R"json({"kind":"descriptorTableSlot","index":0,"count":"1"})json",
-		R"json({"kind":"uniform","offset":0,"size":8})json" })
+	for (const auto binding :
+		{ R"json({"kind":"descriptorTableSlot","index":0,"count":2})json", R"json({"kind":"descriptorTableSlot","index":0,"count":0})json",
+			R"json({"kind":"descriptorTableSlot","index":0,"count":"1"})json", R"json({"kind":"uniform","offset":0,"size":8})json" })
 	{
 		const auto parsed = ParseArray(R"json({"kind":"samplerState"})json", "2", binding);
 		SWIM_REQUIRE(parsed);
 		Reject(parsed.Reflection);
 	}
-	const auto parsed = ParseArray(R"json({"kind":"samplerState"})json", "2", R"json({"kind":"descriptorTableSlot","index":7,"count":1})json");
+	const auto parsed =
+		ParseArray(R"json({"kind":"samplerState"})json", "2", R"json({"kind":"descriptorTableSlot","index":7,"count":1})json");
 	SWIM_REQUIRE(parsed);
 	auto reflection = parsed.Reflection;
 	auto adjacent = reflection.GlobalParameters[0];
@@ -119,12 +124,12 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "OneBindingSlotIsDistinctFromDescri
 
 SWIM_TEST("ShaderCompiler.DescriptorArrays", "NestedArraysValuesBlocksAndUnsupportedImageShapesReject")
 {
-	for (const auto element : {
-		R"json({"kind":"array","elementCount":2,"elementType":{"kind":"samplerState"}})json",
-		R"json({"kind":"scalar","scalarType":"uint32"})json",
-		R"json({"kind":"struct"})json", R"json({"kind":"parameterBlock"})json", "null",
-		R"json({"kind":"resource","baseShape":"texture3D","array":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json",
-		R"json({"kind":"resource","baseShape":"texture2D","multisample":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json" })
+	for (const auto element :
+		{ R"json({"kind":"array","elementCount":2,"elementType":{"kind":"samplerState"}})json",
+			R"json({"kind":"scalar","scalarType":"uint32"})json", R"json({"kind":"struct"})json", R"json({"kind":"parameterBlock"})json",
+			"null",
+			R"json({"kind":"resource","baseShape":"texture3D","array":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json",
+			R"json({"kind":"resource","baseShape":"texture2D","multisample":true,"resultType":{"kind":"scalar","scalarType":"float32"}})json" })
 	{
 		const auto parsed = ParseArray(element);
 		SWIM_REQUIRE(parsed);
@@ -134,7 +139,8 @@ SWIM_TEST("ShaderCompiler.DescriptorArrays", "NestedArraysValuesBlocksAndUnsuppo
 
 SWIM_TEST("ShaderCompiler.DescriptorArrays", "ArrayMetadataDoesNotBypassStorageFormatOrStageRules")
 {
-	const auto parsed = ParseArray(R"json({"kind":"resource","baseShape":"texture2D","access":"readWrite","resultType":{"kind":"scalar","scalarType":"uint32"}})json",
+	const auto parsed = ParseArray(
+		R"json({"kind":"resource","baseShape":"texture2D","access":"readWrite","resultType":{"kind":"scalar","scalarType":"uint32"}})json",
 		"2", R"json({"kind":"descriptorTableSlot","space":1,"index":7})json", false, "r32ui");
 	SWIM_REQUIRE(parsed);
 	auto reflection = parsed.Reflection;

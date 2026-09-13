@@ -11,13 +11,9 @@
 namespace
 {
 
-	bool ContainsGlobalParameter(
-		const Swim::ShaderCompiler::ShaderReflection& reflection,
-		const std::string& name)
+	bool ContainsGlobalParameter(const Swim::ShaderCompiler::ShaderReflection& reflection, const std::string& name)
 	{
-		return std::any_of(
-			reflection.GlobalParameters.begin(),
-			reflection.GlobalParameters.end(),
+		return std::any_of(reflection.GlobalParameters.begin(), reflection.GlobalParameters.end(),
 			[&name](const Swim::ShaderCompiler::ShaderBindingReflection& parameter)
 			{
 				return parameter.Name == name;
@@ -25,20 +21,16 @@ namespace
 	}
 
 	bool ContainsEntryPoint(
-		const Swim::ShaderCompiler::ShaderReflection& reflection,
-		const std::string& name,
-		Swim::ShaderCompiler::ShaderStage stage)
+		const Swim::ShaderCompiler::ShaderReflection& reflection, const std::string& name, Swim::ShaderCompiler::ShaderStage stage)
 	{
-		return std::any_of(
-			reflection.EntryPoints.begin(),
-			reflection.EntryPoints.end(),
+		return std::any_of(reflection.EntryPoints.begin(), reflection.EntryPoints.end(),
 			[&name, stage](const Swim::ShaderCompiler::ShaderEntryPointReflection& entryPoint)
 			{
 				return entryPoint.Name == name && entryPoint.Stage == stage;
 			});
 	}
 
-}
+} // namespace
 
 SWIM_TEST("ShaderCompiler.Reflection", "ParsesStableSwimOwnedMetadata")
 {
@@ -71,8 +63,7 @@ SWIM_TEST("ShaderCompiler.Reflection", "ParsesStableSwimOwnedMetadata")
 	}
 	)json";
 
-	const Swim::ShaderCompiler::ShaderReflectionResult result =
-		Swim::ShaderCompiler::ParseSlangReflectionJson(reflectionJson);
+	const Swim::ShaderCompiler::ShaderReflectionResult result = Swim::ShaderCompiler::ParseSlangReflectionJson(reflectionJson);
 	SWIM_REQUIRE(result);
 	SWIM_CHECK_EQUAL(result.Reflection.SchemaVersion, std::string("1.1"));
 	SWIM_CHECK_EQUAL(result.Reflection.GlobalParameters.size(), std::size_t(1));
@@ -105,14 +96,8 @@ SWIM_TEST("ShaderCompiler.Slang", "BasicRasterCompilesAndReflects")
 	SWIM_REQUIRE_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings.size(), 2u);
 	SWIM_CHECK_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings[0].Type, Swim::Rhi::DescriptorType::SampledTexture);
 	SWIM_CHECK_EQUAL(interface.Interface.DescriptorSchemas[2].Bindings[1].Type, Swim::Rhi::DescriptorType::Sampler);
-	SWIM_CHECK(ContainsEntryPoint(
-		reflection.Reflection,
-		"vertexMain",
-		Swim::ShaderCompiler::ShaderStage::Vertex));
-	SWIM_CHECK(ContainsEntryPoint(
-		reflection.Reflection,
-		"fragmentMain",
-		Swim::ShaderCompiler::ShaderStage::Fragment));
+	SWIM_CHECK(ContainsEntryPoint(reflection.Reflection, "vertexMain", Swim::ShaderCompiler::ShaderStage::Vertex));
+	SWIM_CHECK(ContainsEntryPoint(reflection.Reflection, "fragmentMain", Swim::ShaderCompiler::ShaderStage::Fragment));
 
 	std::ifstream spirv(SWIM_SLANG_SPIRV_SAMPLE_PATH, std::ios::binary);
 	SWIM_REQUIRE(spirv.good());

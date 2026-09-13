@@ -40,6 +40,7 @@ set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
 project(SwimEngine C CXX)
 
 include(cmake/SolutionLayout.cmake)
+include(cmake/Formatting.cmake)
 include(cmake/Tests.cmake)
 
 option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
@@ -384,6 +385,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
+
+file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.h
+)
 
 file(GLOB_RECURSE SWIM_JOB_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp

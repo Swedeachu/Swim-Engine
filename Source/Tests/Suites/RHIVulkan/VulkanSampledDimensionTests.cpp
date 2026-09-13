@@ -51,7 +51,8 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "EveryShapeRequiresMatchingShaderAndVa
 			write.TextureResource = &view;
 			if (invalid == 0)
 			{
-				SWIM_CHECK_EQUAL(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write).imageLayout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+				SWIM_CHECK_EQUAL(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write).imageLayout,
+					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 			}
 			else
 			{
@@ -64,9 +65,9 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "EveryShapeRequiresMatchingShaderAndVa
 SWIM_TEST("RHI.Vulkan.SampledDimensions", "CubeArraysAreOptionalAndLayoutsOwnTheDimension")
 {
 	Testing::VulkanComputeCapture capture;
-	Rhi::DescriptorSchemaDesc schema{ 0, { { 0, Rhi::DescriptorType::SampledTexture, 2,
-		Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined,
-		Rhi::SampledTextureClass::Float, Rhi::TextureViewDimension::TextureCubeArray } } };
+	Rhi::DescriptorSchemaDesc schema{ 0,
+		{ { 0, Rhi::DescriptorType::SampledTexture, 2, Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined,
+			Rhi::SampledTextureClass::Float, Rhi::TextureViewDimension::TextureCubeArray } } };
 	auto program = capture.MakeComputeProgram({ { &schema, 1 } });
 	SWIM_REQUIRE(program);
 	schema.Bindings[0].SampledDimension = Rhi::TextureViewDimension::Texture2D;
@@ -75,7 +76,8 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "CubeArraysAreOptionalAndLayoutsOwnThe
 	capture.State->Device.physical_device.features.imageCubeArray = VK_TRUE;
 	auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 	SWIM_REQUIRE(layout);
-	SWIM_CHECK_EQUAL(layout->GetLayoutState()->Interface.DescriptorSchemas[0].Bindings[0].SampledDimension, Rhi::TextureViewDimension::TextureCubeArray);
+	SWIM_CHECK_EQUAL(
+		layout->GetLayoutState()->Interface.DescriptorSchemas[0].Bindings[0].SampledDimension, Rhi::TextureViewDimension::TextureCubeArray);
 	SWIM_CHECK_EQUAL(capture.SetBindings[0][0].descriptorCount, 2u);
 	SWIM_CHECK_EQUAL(capture.SetBindings[0][0].descriptorType, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
 }
@@ -117,8 +119,8 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "InvalidDimensionsRejectBeforeNativeLa
 	for (const auto type : { Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::Sampler, Rhi::DescriptorType::UniformBuffer })
 	{
 		Rhi::DescriptorSchemaDesc schema{ 0, { { 0, type, 1, Rhi::ShaderStageMask::Compute } } };
-		schema.Bindings[0].SampledDimension = type == Rhi::DescriptorType::SampledTexture ?
-			static_cast<Rhi::TextureViewDimension>(255) : Rhi::TextureViewDimension::Texture3D;
+		schema.Bindings[0].SampledDimension = type == Rhi::DescriptorType::SampledTexture ? static_cast<Rhi::TextureViewDimension>(255)
+																						  : Rhi::TextureViewDimension::Texture3D;
 		auto program = capture.MakeComputeProgram({ { &schema, 1 } });
 		SWIM_REQUIRE(program);
 		SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} }));
@@ -129,9 +131,9 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "InvalidDimensionsRejectBeforeNativeLa
 SWIM_TEST("RHI.Vulkan.SampledDimensions", "LayerArrayAndDescriptorArrayDoNotAliasAndBatchIsAtomic")
 {
 	Testing::VulkanComputeCapture capture;
-	Rhi::DescriptorSchemaDesc schema{ 0, { { 0, Rhi::DescriptorType::SampledTexture, 2,
-		Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined,
-		Rhi::SampledTextureClass::Uint, Rhi::TextureViewDimension::Texture2DArray } } };
+	Rhi::DescriptorSchemaDesc schema{ 0,
+		{ { 0, Rhi::DescriptorType::SampledTexture, 2, Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::Undefined,
+			Rhi::SampledTextureClass::Uint, Rhi::TextureViewDimension::Texture2DArray } } };
 	auto program = capture.MakeComputeProgram({ { &schema, 1 } });
 	auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 	SWIM_REQUIRE(layout);
@@ -163,8 +165,8 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "DeviceFactoryEmitsNativeShapesAndReso
 	static std::uint32_t creates = 0;
 	static std::uint32_t destroys = 0;
 	creates = destroys = 0;
-	capture.State->Dispatch.vkCreateImageView = +[](VkDevice, const VkImageViewCreateInfo* info,
-		const VkAllocationCallbacks*, VkImageView* result) -> VkResult
+	capture.State->Dispatch.vkCreateImageView =
+		+[](VkDevice, const VkImageViewCreateInfo* info, const VkAllocationCallbacks*, VkImageView* result) -> VkResult
 	{
 		native = *info;
 		*result = RhiVulkan::FromNativeHandle<VkImageView>(++creates);
@@ -175,8 +177,8 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "DeviceFactoryEmitsNativeShapesAndReso
 		++destroys;
 	};
 	RhiVulkan::VulkanDevice device(capture.State, {}, nullptr, nullptr, nullptr);
-	const std::array nativeTypes{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-		VK_IMAGE_VIEW_TYPE_3D, VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY };
+	const std::array nativeTypes{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_IMAGE_VIEW_TYPE_3D,
+		VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY };
 	for (std::uint32_t index = 0; index < 7; ++index)
 	{
 		const auto data = Testing::MakeSampledDimensionData(index);
@@ -207,16 +209,16 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "CompiledVariantsReachOwnedNativeLayou
 {
 	for (bool cubes : { false, true })
 	{
-		const auto parsed = ShaderCompiler::LoadSlangReflectionJson(cubes ?
-			SWIM_RHI_SAMPLED_CUBE_ARRAY_REFLECTION_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_REFLECTION_PATH);
+		const auto parsed = ShaderCompiler::LoadSlangReflectionJson(
+			cubes ? SWIM_RHI_SAMPLED_CUBE_ARRAY_REFLECTION_PATH : SWIM_RHI_SAMPLED_DIMENSIONS_REFLECTION_PATH);
 		SWIM_REQUIRE(parsed);
 		const auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
 		SWIM_REQUIRE(converted);
 		const auto& interface = converted.Interface;
 		Testing::VulkanComputeCapture capture;
 		capture.State->Device.physical_device.features.imageCubeArray = cubes;
-		auto program = capture.MakeComputeProgram({ interface.DescriptorSchemas, interface.PushConstants,
-			interface.ComputeThreadGroupSize }, interface.ComputeThreadGroupSize);
+		auto program = capture.MakeComputeProgram(
+			{ interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, interface.ComputeThreadGroupSize);
 		SWIM_REQUIRE(program);
 		auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 		SWIM_REQUIRE(layout);

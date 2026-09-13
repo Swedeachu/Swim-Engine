@@ -13,7 +13,8 @@ namespace
 	void EnableDepth(Testing::VulkanDescriptorCapture& capture)
 	{
 		depthFeatures = VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_DEPTH_COMPARISON_BIT;
-		capture.State->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties2 = +[](VkPhysicalDevice, VkFormat, VkFormatProperties2* properties)
+		capture.State->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties2 =
+			+[](VkPhysicalDevice, VkFormat, VkFormatProperties2* properties)
 		{
 			static_cast<VkFormatProperties3*>(properties->pNext)->optimalTilingFeatures = depthFeatures;
 		};
@@ -29,21 +30,23 @@ namespace
 		desc.ArrayLayers = 2;
 		return desc;
 	}
-}
+} // namespace
 
 SWIM_TEST("RHI.Vulkan.DepthSampling", "DepthAspectViewsDescriptorsAndAttachmentTransitionsAgree")
 {
 	Testing::VulkanDescriptorCapture capture;
 	EnableDepth(capture);
 	static VkImageAspectFlags nativeAspect = 0;
-	capture.State->Dispatch.vkCreateImageView = +[](VkDevice, const VkImageViewCreateInfo* info,
-		const VkAllocationCallbacks*, VkImageView* view) -> VkResult
+	capture.State->Dispatch.vkCreateImageView =
+		+[](VkDevice, const VkImageViewCreateInfo* info, const VkAllocationCallbacks*, VkImageView* view) -> VkResult
 	{
 		nativeAspect = info->subresourceRange.aspectMask;
 		*view = RhiVulkan::FromNativeHandle<VkImageView>(1);
 		return VK_SUCCESS;
 	};
-	capture.State->Dispatch.vkDestroyImageView = +[](VkDevice, VkImageView, const VkAllocationCallbacks*) {};
+	capture.State->Dispatch.vkDestroyImageView = +[](VkDevice, VkImageView, const VkAllocationCallbacks*)
+	{
+	};
 	RhiVulkan::VulkanDevice device(capture.State, {}, nullptr, nullptr, nullptr);
 	capture.Commands->Begin();
 	for (const auto format : { Rhi::Format::D16Unorm, Rhi::Format::D32Float, Rhi::Format::D24UnormS8Uint, Rhi::Format::D32FloatS8Uint })

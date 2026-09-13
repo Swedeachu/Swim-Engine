@@ -85,27 +85,24 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "EveryDuplicateSlotRejectsEvenAcro
 
 SWIM_TEST("ShaderCompiler.ScopedDescriptors", "NestedScopeContainersAndMalformedBindingsCannotDisappear")
 {
-	for (const auto scope : {
-		R"json({"kind":"constantBuffer","binding":{"kind":"pushConstantBuffer","index":0},"parameters":[]})json",
-		R"json({"kind":"parameterBlock","parameters":[]})json",
-		R"json({"kind":"none","binding":{"kind":"descriptorTableSlot","index":0},"parameters":[]})json",
-		R"json({"kind":"none","bindings":[],"parameters":[]})json",
-		R"json({"kind":"none","parameters":{}})json",
-		R"json({"kind":"none","parameters":[3]})json",
-		R"json(3)json" })
+	for (const auto scope : { R"json({"kind":"constantBuffer","binding":{"kind":"pushConstantBuffer","index":0},"parameters":[]})json",
+			 R"json({"kind":"parameterBlock","parameters":[]})json",
+			 R"json({"kind":"none","binding":{"kind":"descriptorTableSlot","index":0},"parameters":[]})json",
+			 R"json({"kind":"none","bindings":[],"parameters":[]})json", R"json({"kind":"none","parameters":{}})json",
+			 R"json({"kind":"none","parameters":[3]})json", R"json(3)json" })
 	{
-		const auto parsed = ShaderCompiler::ParseSlangReflectionJson(std::string(R"json({"entryPoints":[{"name":"main","stage":"fragment","scope":)json") + scope + "}]}");
+		const auto parsed = ShaderCompiler::ParseSlangReflectionJson(
+			std::string(R"json({"entryPoints":[{"name":"main","stage":"fragment","scope":)json") + scope + "}]}");
 		SWIM_REQUIRE(parsed);
 		RequireFailure(parsed.Reflection);
 	}
-	for (const auto binding : {
-		R"json({"binding":{"kind":"descriptorTableSlot","index":0,"count":"2"}})json",
-		R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":-1}})json",
-		R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":4294967296}})json",
-		R"json({"bindings":[{"kind":"descriptorTableSlot","index":0}]})json",
-		R"json({"binding":3})json" })
+	for (const auto binding : { R"json({"binding":{"kind":"descriptorTableSlot","index":0,"count":"2"}})json",
+			 R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":-1}})json",
+			 R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":4294967296}})json",
+			 R"json({"bindings":[{"kind":"descriptorTableSlot","index":0}]})json", R"json({"binding":3})json" })
 	{
-		auto parsed = ShaderCompiler::ParseSlangReflectionJson(std::string(R"json({"entryPoints":[{"name":"main","stage":"fragment","parameters":[)json") + binding + "]}]}");
+		auto parsed = ShaderCompiler::ParseSlangReflectionJson(
+			std::string(R"json({"entryPoints":[{"name":"main","stage":"fragment","parameters":[)json") + binding + "]}]}");
 		SWIM_REQUIRE(parsed);
 		SWIM_REQUIRE_EQUAL(parsed.Reflection.EntryPoints[0].Parameters.size(), 1u);
 		auto& parameter = parsed.Reflection.EntryPoints[0].Parameters[0];
@@ -119,7 +116,8 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "NestedScopeContainersAndMalformed
 
 SWIM_TEST("ShaderCompiler.ScopedDescriptors", "StageIoIsIgnoredButUniformAndUnknownParametersReject")
 {
-	const auto parsed = ShaderCompiler::ParseSlangReflectionJson(R"json({"entryPoints":[{"name":"main","stage":"vertex","scope":{"kind":"none","parameters":[
+	const auto parsed = ShaderCompiler::ParseSlangReflectionJson(
+		R"json({"entryPoints":[{"name":"main","stage":"vertex","scope":{"kind":"none","parameters":[
 		{"name":"id","semanticName":"SV_VERTEXID","type":{"kind":"scalar"}},
 		{"name":"input","binding":{"kind":"varyingInput","index":0},"type":{"kind":"struct"}},
 		{"name":"output","binding":{"kind":"varyingOutput","index":0},"type":{"kind":"vector"}}
@@ -165,9 +163,8 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "ComputeDescriptorsReuseAllSupport
 	parameters.push_back(image);
 	const auto result = ShaderCompiler::BuildRhiShaderInterface(reflection);
 	SWIM_REQUIRE_MESSAGE(result, result.Error);
-	const std::array types{ Rhi::DescriptorType::Sampler, Rhi::DescriptorType::UniformBuffer,
-		Rhi::DescriptorType::ReadOnlyStorageBuffer, Rhi::DescriptorType::StorageBuffer,
-		Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::StorageTexture };
+	const std::array types{ Rhi::DescriptorType::Sampler, Rhi::DescriptorType::UniformBuffer, Rhi::DescriptorType::ReadOnlyStorageBuffer,
+		Rhi::DescriptorType::StorageBuffer, Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::StorageTexture };
 	SWIM_REQUIRE_EQUAL(result.Interface.DescriptorSchemas.size(), 1u);
 	const auto& bindings = result.Interface.DescriptorSchemas[0].Bindings;
 	SWIM_REQUIRE_EQUAL(bindings.size(), types.size());
@@ -242,8 +239,8 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "PinnedSlangGraphicsKeepsSharedVer
 	const auto result = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
 	SWIM_REQUIRE_MESSAGE(result, result.Error);
 	SWIM_REQUIRE_EQUAL(result.Interface.DescriptorSchemas.size(), 2u);
-	SWIM_CHECK_EQUAL(result.Interface.DescriptorSchemas[0].Bindings[0].Stages,
-		Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment);
+	SWIM_CHECK_EQUAL(
+		result.Interface.DescriptorSchemas[0].Bindings[0].Stages, Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment);
 	const auto& local = result.Interface.DescriptorSchemas[1];
 	SWIM_CHECK_EQUAL(local.Space, 1u);
 	SWIM_REQUIRE_EQUAL(local.Bindings.size(), 3u);

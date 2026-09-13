@@ -32,13 +32,19 @@ namespace Swim::RhiVulkan
 	{
 		switch (type)
 		{
-		case Rhi::DescriptorType::Sampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
-		case Rhi::DescriptorType::SampledTexture: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-		case Rhi::DescriptorType::StorageTexture: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		case Rhi::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		case Rhi::DescriptorType::Sampler:
+			return VK_DESCRIPTOR_TYPE_SAMPLER;
+		case Rhi::DescriptorType::SampledTexture:
+			return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		case Rhi::DescriptorType::StorageTexture:
+			return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		case Rhi::DescriptorType::UniformBuffer:
+			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		case Rhi::DescriptorType::StorageBuffer:
-		case Rhi::DescriptorType::ReadOnlyStorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		default: throw std::invalid_argument("Descriptor type is not supported by the graphics resource baseline");
+		case Rhi::DescriptorType::ReadOnlyStorageBuffer:
+			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		default:
+			throw std::invalid_argument("Descriptor type is not supported by the graphics resource baseline");
 		}
 	}
 
@@ -69,13 +75,18 @@ namespace Swim::RhiVulkan
 	{
 		const auto& limits = layout.Device->Device.physical_device.properties.limits;
 		auto& schemas = layout.Interface.DescriptorSchemas;
-		std::sort(schemas.begin(), schemas.end(), [](const auto& a, const auto& b) { return a.Space < b.Space; });
+		std::sort(schemas.begin(), schemas.end(),
+			[](const auto& a, const auto& b)
+			{
+				return a.Space < b.Space;
+			});
 		std::array<std::uint64_t, 5> totals{};
 		std::array<std::array<std::uint64_t, 5>, 3> perStage{};
 		const std::array<std::uint32_t, 5> totalLimits{ limits.maxDescriptorSetSamplers, limits.maxDescriptorSetSampledImages,
 			limits.maxDescriptorSetUniformBuffers, limits.maxDescriptorSetStorageBuffers, limits.maxDescriptorSetStorageImages };
 		const std::array<std::uint32_t, 5> stageLimits{ limits.maxPerStageDescriptorSamplers, limits.maxPerStageDescriptorSampledImages,
-			limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers, limits.maxPerStageDescriptorStorageImages };
+			limits.maxPerStageDescriptorUniformBuffers, limits.maxPerStageDescriptorStorageBuffers,
+			limits.maxPerStageDescriptorStorageImages };
 		try
 		{
 			for (std::size_t index = 0; index < schemas.size(); ++index)
@@ -85,7 +96,11 @@ namespace Swim::RhiVulkan
 				{
 					return false;
 				}
-				std::sort(schema.Bindings.begin(), schema.Bindings.end(), [](const auto& a, const auto& b) { return a.Binding < b.Binding; });
+				std::sort(schema.Bindings.begin(), schema.Bindings.end(),
+					[](const auto& a, const auto& b)
+					{
+						return a.Binding < b.Binding;
+					});
 				for (std::size_t bindingIndex = 0; bindingIndex < schema.Bindings.size(); ++bindingIndex)
 				{
 					const auto& binding = schema.Bindings[bindingIndex];
@@ -94,11 +109,11 @@ namespace Swim::RhiVulkan
 					{
 						return false;
 					}
-					if (binding.Type == Rhi::DescriptorType::SampledTexture ?
-						(!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
-							(binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
-								!layout.Device->Device.physical_device.features.imageCubeArray)) :
-						binding.SampledDimension != Rhi::TextureViewDimension::Texture2D)
+					if (binding.Type == Rhi::DescriptorType::SampledTexture
+							? (!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
+								  (binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
+									  !layout.Device->Device.physical_device.features.imageCubeArray))
+							: binding.SampledDimension != Rhi::TextureViewDimension::Texture2D)
 					{
 						return false;
 					}
@@ -107,16 +122,20 @@ namespace Swim::RhiVulkan
 					if ((static_cast<std::uint32_t>(binding.Stages) & ~static_cast<std::uint32_t>(layout.ProgramStages)) != 0 ||
 						((binding.Type == Rhi::DescriptorType::StorageBuffer || binding.Type == Rhi::DescriptorType::StorageTexture) &&
 							binding.Stages != Rhi::ShaderStageMask::Compute) ||
-						(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat) :
-							binding.StorageTextureFormat != Rhi::Format::Undefined) ||
-						(binding.Type == Rhi::DescriptorType::SampledTexture ?
-							(binding.SampledClass != Rhi::SampledTextureClass::Float && binding.SampledClass != Rhi::SampledTextureClass::Uint &&
-								binding.SampledClass != Rhi::SampledTextureClass::Sint) : binding.SampledClass != Rhi::SampledTextureClass::Float))
+						(binding.Type == Rhi::DescriptorType::StorageTexture ? !Rhi::IsStorageTextureFormat(binding.StorageTextureFormat)
+																			 : binding.StorageTextureFormat != Rhi::Format::Undefined) ||
+						(binding.Type == Rhi::DescriptorType::SampledTexture ? (binding.SampledClass != Rhi::SampledTextureClass::Float &&
+																				   binding.SampledClass != Rhi::SampledTextureClass::Uint &&
+																				   binding.SampledClass != Rhi::SampledTextureClass::Sint)
+																			 : binding.SampledClass != Rhi::SampledTextureClass::Float))
 					{
 						return false;
 					}
-					const std::size_t slot = type == VK_DESCRIPTOR_TYPE_SAMPLER ? 0 : type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ? 1 :
-						type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ? 2 : type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ? 3 : 4;
+					const std::size_t slot = type == VK_DESCRIPTOR_TYPE_SAMPLER ? 0
+						: type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE				? 1
+						: type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER				? 2
+						: type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER				? 3
+																				: 4;
 					totals[slot] += binding.Count;
 					if (totals[slot] > totalLimits[slot])
 					{
@@ -154,7 +173,8 @@ namespace Swim::RhiVulkan
 				{
 					for (const auto& binding : schema->Bindings)
 					{
-						bindings.push_back({ binding.Binding, ToVkDescriptorType(binding.Type), binding.Count, ToVkDescriptorStages(binding.Stages), nullptr });
+						bindings.push_back({ binding.Binding, ToVkDescriptorType(binding.Type), binding.Count,
+							ToVkDescriptorStages(binding.Stages), nullptr });
 					}
 				}
 				VkDescriptorSetLayoutCreateInfo info{};
@@ -168,8 +188,8 @@ namespace Swim::RhiVulkan
 				{
 					return false;
 				}
-				const auto createResult = layout.Device->Dispatch.vkCreateDescriptorSetLayout(
-					layout.Device->Device.device, &info, nullptr, &layout.Sets[space]);
+				const auto createResult =
+					layout.Device->Dispatch.vkCreateDescriptorSetLayout(layout.Device->Device.device, &info, nullptr, &layout.Sets[space]);
 				if (createResult != VK_SUCCESS)
 				{
 					layout.Sets[space] = VK_NULL_HANDLE;
