@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine/Systems/Renderer/Geometry/GeometryLodRange.h"
+#include "Engine/Systems/Renderer/Geometry/GeometrySubmesh.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 
 namespace Swim::Render
@@ -15,7 +16,10 @@ namespace Swim::Render
 		std::span<const std::byte> Vertices;
 		Rhi::IndexType IndexFormat = Rhi::IndexType::Uint32;
 		std::span<const std::byte> Indices; // Optional: empty for non-indexed meshes.
-		// Up to GpuMeshMetadata::MaxLods. Empty with indices = one LOD over all of them.
+		// Draw ranges (e.g. one per material slot). Empty with indices = one submesh
+		// over all indices; non-indexed meshes have no submeshes.
+		std::span<const GeometrySubmesh> Submeshes;
+		// Up to GpuMeshMetadata::MaxLods submesh ranges. Empty = one LOD over all submeshes.
 		std::span<const GeometryLodRange> Lods;
 		std::span<const std::byte> Meshlets; // Optional opaque meshlet payload.
 		std::uint32_t MeshletCount = 0;

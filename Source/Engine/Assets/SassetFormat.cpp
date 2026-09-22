@@ -1,6 +1,7 @@
 #include "Engine/Assets/SassetFormat.h"
 
 #include "Engine/Assets/AssetSystem.h"
+#include "Engine/Assets/SassetDecodedAsset.h"
 #include "Engine/Assets/MaterialAsset.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/ModelAsset.h"
@@ -12,7 +13,9 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace Swim::Assets
 {
@@ -840,6 +843,111 @@ namespace Swim::Assets
 			return MakeLoadError(SassetErrorCode::PublishFailed, "runtime AssetSystem rejected the .sasset publish operation");
 		}
 
+		SassetLoadResult result;
+		result.Id = metadata.Id;
+		result.Type = metadata.Type;
+		return result;
+	}
+
+	namespace
+	{
+		template<typename T, typename ReaderFn>
+		bool DecodeInto(SassetDecodedAsset& decoded, BinaryReader& reader, ReaderFn&& read)
+		{
+			T asset{};
+			if (!read(reader, asset))
+			{
+				return false;
+			}
+			decoded.Asset = std::move(asset);
+			return true;
+		}
+
+		template<typename T>
+		bool PublishValue(AssetSystem& assets, const SassetMetadata& metadata, T&& asset)
+		{
+			using Asset = std::decay_t<T>;
+			const AssetHandle<Asset> handle = assets.Declare<Asset>(metadata.Id);
+			assets.BeginLoading(handle);
+			return assets.Publish(handle, std::forward<T>(asset), metadata.ContentHashValue, metadata.Dependencies);
+		}
+	}
+
+	SassetDecodeResult DecodeSasset(std::span<const std::byte> bytes, bool validateChunkHashes)
+	{
+		SassetDecodeResult result;
+		SassetParseResult parsed = ParseSasset(bytes, validateChunkHashes);
+		if (!parsed)
+		{
+			result.Error = parsed.Error;
+			return result;
+		}
+		result.Decoded.Metadata = std::move(parsed.Metadata);
+		const SassetMetadata& metadata = result.Decoded.Metadata;
+
+		BinaryReader reader(GetSassetChunkBytes(bytes, metadata, SassetChunkType::AssetPayload));
+		bool decoded = true;
+		switch (metadata.Type)
+		{
+		case SassetAssetType::Mesh:
+			decoded = DecodeInto<MeshAsset>(result.Decoded, reader, [](BinaryReader& input, MeshAsset& asset) { return ReadMesh(input, asset); });
+			break;
+		case SassetAssetType::Texture:
+			decoded = DecodeInto<TextureAsset>(
+				result.Decoded, reader, [](BinaryReader& input, TextureAsset& asset) { return ReadTexture(input, asset); });
+			break;
+		case SassetAssetType::Sampler:
+			decoded = DecodeInto<SamplerAsset>(
+				result.Decoded, reader, [](BinaryReader& input, SamplerAsset& asset) { return ReadSampler(input, asset); });
+			break;
+		case SassetAssetType::MaterialTemplate:
+			decoded = DecodeInto<MaterialTemplateAsset>(result.Decoded, reader,
+				[](BinaryReader& input, MaterialTemplateAsset& asset) { return ReadMaterialTemplate(input, asset); });
+			break;
+		case SassetAssetType::MaterialInstance:
+		case SassetAssetType::Model:
+			break; // Handle-resolving payloads decode on the owner thread through LoadSasset.
+		default:
+			result.Error = { SassetErrorCode::InvalidAssetType, "unsupported .sasset asset type" };
+			return result;
+		}
+		if (!decoded)
+		{
+			result.Decoded.Asset = std::monostate{};
+			result.Error = { SassetErrorCode::InvalidPayload, "invalid .sasset payload" };
+		}
+		return result;
+	}
+
+	SassetLoadResult PublishSasset(AssetSystem& assets, SassetDecodedAsset decoded)
+	{
+		if (decoded.RequiresOwnerThreadDecode())
+		{
+			return MakeLoadError(SassetErrorCode::InvalidAssetType, "this .sasset type must be loaded with LoadSasset on the owner thread");
+		}
+		const SassetMetadata& metadata = decoded.Metadata;
+		if (!assets.GetDatabase().Bind(metadata.Id, metadata.LogicalPath))
+		{
+			return MakeLoadError(SassetErrorCode::PathConflict, ".sasset logical path conflicts with the runtime asset database");
+		}
+		const bool published = std::visit(
+			[&](auto&& asset) -> bool
+			{
+				using T = std::decay_t<decltype(asset)>;
+				if constexpr (std::is_same_v<T, std::monostate>)
+				{
+					return false;
+				}
+				else
+				{
+					return PublishValue(assets, metadata, std::move(asset));
+				}
+			},
+			decoded.Asset);
+		if (!published)
+		{
+			return MakeLoadError(SassetErrorCode::PublishFailed, "runtime AssetSystem rejected the .sasset publish operation");
+		}
 		SassetLoadResult result;
 		result.Id = metadata.Id;
 		result.Type = metadata.Type;

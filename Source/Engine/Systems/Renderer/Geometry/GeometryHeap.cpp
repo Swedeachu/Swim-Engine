@@ -55,9 +55,10 @@ namespace Swim::Render
 				throw std::invalid_argument("GeometryHeap page sizes must be between 1 byte and 4 GiB");
 			}
 		}
-		if (!desc.MaxMeshes || !desc.MaxPages || desc.MaxPages == GpuMeshMetadata::InvalidPage)
+		if (!desc.MaxMeshes || !desc.MaxSubmeshes || !desc.MaxPages || desc.MaxPages == GpuMeshMetadata::InvalidPage ||
+			desc.MaxSubmeshes > std::uint32_t(INT32_MAX))
 		{
-			throw std::invalid_argument("GeometryHeap needs mesh slots and pages");
+			throw std::invalid_argument("GeometryHeap needs mesh slots, submesh rows and pages");
 		}
 
 		const auto metadataName = name + " metadata";
@@ -68,8 +69,19 @@ namespace Swim::Render
 		{
 			throw std::runtime_error("GeometryHeap metadata buffer allocation failed");
 		}
+		const auto submeshName = name + " submeshes";
+		submeshBuffer = device.CreateBuffer({ std::uint64_t(desc.MaxSubmeshes) * sizeof(GpuSubmeshRecord),
+			Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferDestination | Rhi::BufferUsage::TransferSource,
+			Rhi::MemoryPreference::DeviceLocal, submeshName });
+		if (!submeshBuffer)
+		{
+			throw std::runtime_error("GeometryHeap submesh buffer allocation failed");
+		}
+		submeshAllocator.emplace(desc.MaxSubmeshes);
 		metadata.resize(desc.MaxMeshes);
-		dirty.resize(desc.MaxMeshes, false);
+		submeshRows.resize(desc.MaxSubmeshes);
+		dirtyMetadata.Resize(desc.MaxMeshes);
+		dirtySubmeshes.Resize(desc.MaxSubmeshes);
 	}
 
 	GeometryHeap::~GeometryHeap()
@@ -198,16 +210,12 @@ namespace Swim::Render
 		Free(record.Vertex);
 		Free(record.Index);
 		Free(record.Meshlet);
-		record.Vertex = record.Index = record.Meshlet = {};
-	}
-
-	void GeometryHeap::MarkDirty(std::uint32_t row)
-	{
-		if (!dirty[row])
+		if (record.Submeshes.Size)
 		{
-			dirty[row] = true;
-			dirtyRows.push_back(row);
+			submeshAllocator->Free(record.Submeshes);
 		}
+		record.Vertex = record.Index = record.Meshlet = {};
+		record.Submeshes = {};
 	}
 
 	GpuMeshHandle GeometryHeap::CreateMesh(const GeometryMeshDesc& mesh)
@@ -224,15 +232,36 @@ namespace Swim::Render
 		}
 		const auto vertexCount = static_cast<std::uint32_t>(mesh.Vertices.size() / mesh.VertexStride);
 		const auto indexCount = static_cast<std::uint32_t>(mesh.Indices.size() / indexBytes);
-		if (mesh.Lods.size() > GpuMeshMetadata::MaxLods || (!indexCount && !mesh.Lods.empty()))
+		if (!indexCount && !mesh.Submeshes.empty())
 		{
-			throw std::invalid_argument("GeometryHeap LODs need indices and at most GpuMeshMetadata::MaxLods entries");
+			throw std::invalid_argument("GeometryHeap submeshes need indices");
+		}
+		// Empty submesh lists with indices mean one submesh over every index.
+		const GeometrySubmesh implicitSubmesh{ 0, indexCount, 0, 0 };
+		const std::span<const GeometrySubmesh> submeshes =
+			mesh.Submeshes.empty() && indexCount ? std::span<const GeometrySubmesh>(&implicitSubmesh, 1) : mesh.Submeshes;
+		if (submeshes.size() > desc.MaxSubmeshes)
+		{
+			throw std::length_error(name + " mesh has more submeshes than the heap has rows");
+		}
+		for (const auto& submesh : submeshes)
+		{
+			if (!submesh.IndexCount || submesh.FirstIndex > indexCount || submesh.IndexCount > indexCount - submesh.FirstIndex ||
+				submesh.VertexOffset < 0 || std::uint32_t(submesh.VertexOffset) >= vertexCount)
+			{
+				throw std::invalid_argument("GeometryHeap submesh range exceeds the mesh indices or vertices");
+			}
+		}
+		const auto submeshCount = static_cast<std::uint32_t>(submeshes.size());
+		if (mesh.Lods.size() > GpuMeshMetadata::MaxLods || (!submeshCount && !mesh.Lods.empty()))
+		{
+			throw std::invalid_argument("GeometryHeap LODs need submeshes and at most GpuMeshMetadata::MaxLods entries");
 		}
 		for (const auto& lod : mesh.Lods)
 		{
-			if (!lod.IndexCount || lod.FirstIndex > indexCount || lod.IndexCount > indexCount - lod.FirstIndex)
+			if (!lod.SubmeshCount || lod.FirstSubmesh > submeshCount || lod.SubmeshCount > submeshCount - lod.FirstSubmesh)
 			{
-				throw std::invalid_argument("GeometryHeap LOD range exceeds the mesh indices");
+				throw std::invalid_argument("GeometryHeap LOD range exceeds the mesh submeshes");
 			}
 		}
 		if (mesh.Meshlets.empty() != (mesh.MeshletCount == 0))
@@ -260,6 +289,15 @@ namespace Swim::Render
 			{
 				record.Meshlet = Allocate(Stream::Meshlet, mesh.Meshlets.size(), 16, "meshlet");
 			}
+			if (submeshCount)
+			{
+				const auto rows = submeshAllocator->Allocate(submeshCount, 1);
+				if (!rows)
+				{
+					throw std::length_error(name + " has no contiguous free submesh rows");
+				}
+				record.Submeshes = *rows;
+			}
 		}
 		catch (...)
 		{
@@ -283,17 +321,29 @@ namespace Swim::Render
 			row.FirstIndex = static_cast<std::uint32_t>(record.Index.Range.Offset / indexBytes);
 			row.IndexCount = indexCount;
 			row.IndexBytes = indexBytes;
+		}
+		if (submeshCount)
+		{
+			row.FirstSubmesh = static_cast<std::uint32_t>(record.Submeshes.Offset);
+			row.SubmeshCount = submeshCount;
+			for (std::uint32_t i = 0; i < submeshCount; ++i)
+			{
+				const auto& submesh = submeshes[i];
+				submeshRows[row.FirstSubmesh + i] = { row.FirstIndex + submesh.FirstIndex, submesh.IndexCount,
+					static_cast<std::int32_t>(row.VertexOffset + std::uint32_t(submesh.VertexOffset)), submesh.MaterialSlot };
+			}
+			dirtySubmeshes.MarkRange(row.FirstSubmesh, submeshCount);
 			if (mesh.Lods.empty())
 			{
 				row.LodCount = 1;
-				row.Lods[0] = { row.FirstIndex, indexCount, 0.0f, 0 };
+				row.Lods[0] = { row.FirstSubmesh, submeshCount, 0.0f, 0 };
 			}
 			else
 			{
 				row.LodCount = static_cast<std::uint32_t>(mesh.Lods.size());
 				for (std::size_t i = 0; i < mesh.Lods.size(); ++i)
 				{
-					row.Lods[i] = { row.FirstIndex + mesh.Lods[i].FirstIndex, mesh.Lods[i].IndexCount, mesh.Lods[i].Error, 0 };
+					row.Lods[i] = { row.FirstSubmesh + mesh.Lods[i].FirstSubmesh, mesh.Lods[i].SubmeshCount, mesh.Lods[i].Error, 0 };
 				}
 			}
 		}
@@ -312,7 +362,7 @@ namespace Swim::Render
 
 		row.Generation = handle->Generation;
 		metadata[handle->Index] = row;
-		MarkDirty(handle->Index);
+		dirtyMetadata.Mark(handle->Index);
 		return *handle;
 	}
 
@@ -339,7 +389,7 @@ namespace Swim::Render
 			}
 		}
 		metadata[mesh.Index] = {}; // Culling/draw code sees an empty row from the next upload on.
-		MarkDirty(mesh.Index);
+		dirtyMetadata.Mark(mesh.Index);
 		return meshes.Release(mesh, lastUse);
 	}
 
@@ -392,6 +442,16 @@ namespace Swim::Render
 	const GpuMeshMetadata* GeometryHeap::GetMetadata(GpuMeshHandle mesh) const
 	{
 		return meshes.IsValid(mesh) ? &metadata[mesh.Index] : nullptr;
+	}
+
+	std::span<const GpuSubmeshRecord> GeometryHeap::GetSubmeshes(GpuMeshHandle mesh) const
+	{
+		if (!meshes.IsValid(mesh))
+		{
+			return {};
+		}
+		const auto& row = metadata[mesh.Index];
+		return std::span<const GpuSubmeshRecord>(submeshRows).subspan(row.FirstSubmesh, row.SubmeshCount);
 	}
 
 	Rhi::Buffer* GeometryHeap::GetPage(std::uint32_t page) const
@@ -453,7 +513,10 @@ namespace Swim::Render
 				}
 			});
 		stats.RetiringMeshes = meshes.GetStats().Retiring;
-		stats.DirtyMetadataRows = static_cast<std::uint32_t>(dirtyRows.size());
+		stats.DirtyMetadataRows = static_cast<std::uint32_t>(dirtyMetadata.Rows.size());
+		stats.DirtySubmeshRows = static_cast<std::uint32_t>(dirtySubmeshes.Rows.size());
+		stats.SubmeshRowsAllocated = submeshAllocator->GetAllocatedBytes();
+		stats.SubmeshRowCapacity = submeshAllocator->GetCapacity();
 		return stats;
 	}
 } // namespace Swim::Render

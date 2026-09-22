@@ -68,6 +68,49 @@ namespace Swim::Render
 					}
 				});
 		}
+
+		// Copies contiguous runs of CPU-mirror rows (snapshotted now) into a row buffer.
+		template <typename Row>
+		GraphPass RecordRowUpload(RenderGraph& graph, const std::string& label, GraphBuffer target, const std::vector<Row>& mirror,
+			const std::vector<std::uint32_t>& rows, std::uint64_t& recordedBytes)
+		{
+			auto snapshot = std::make_shared<std::vector<Row>>();
+			std::vector<RowRun> runs;
+			for (auto row : rows)
+			{
+				if (runs.empty() || runs.back().FirstRow + runs.back().RowCount != row)
+				{
+					runs.push_back({ row, 0, snapshot->size() * sizeof(Row) });
+				}
+				++runs.back().RowCount;
+				snapshot->push_back(mirror[row]);
+			}
+			const auto bytes = snapshot->size() * sizeof(Row);
+			const auto staging = graph.CreateUpload({ bytes, Rhi::BufferUsage::TransferSource, 16, label + " staging" },
+				[snapshot](std::span<std::byte> destination)
+				{
+					std::memcpy(destination.data(), snapshot->data(), snapshot->size() * sizeof(Row));
+				});
+			recordedBytes += bytes;
+			return graph.AddPass(
+				label, Rhi::QueueType::Transfer,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Read(staging, S::CopySource);
+					b.ReadWrite(target, S::CopyDestination);
+				},
+				[staging, target, runs](RenderCommandContext& c)
+				{
+					const auto source = c.GetRange(staging);
+					const auto destination = c.GetRange(target);
+					for (const auto& run : runs)
+					{
+						c.Commands().CopyBuffer(*source.Buffer, *destination.Buffer,
+							{ source.Offset + run.StagingOffset, destination.Offset + std::uint64_t(run.FirstRow) * sizeof(Row),
+								std::uint64_t(run.RowCount) * sizeof(Row) });
+					}
+				});
+		}
 	} // namespace
 
 	GeometryGraphResources GeometryHeap::Import(RenderGraph& graph)
@@ -89,6 +132,7 @@ namespace Swim::Render
 			}
 		}
 		resources.Metadata = graph.ImportBuffer(*metadataBuffer, S::ShaderRead);
+		resources.Submeshes = graph.ImportBuffer(*submeshBuffer, S::ShaderRead);
 
 		std::map<std::uint32_t, PageUpload> uploads;
 		const auto stage = [&](const Internal::GeometryAllocation& allocation, const Internal::GeometryPayload& bytes)
@@ -123,60 +167,41 @@ namespace Swim::Render
 				RecordPageUpload(graph, name + " upload page " + std::to_string(page), resources.Pages[page], std::move(upload)));
 		}
 
-		std::vector<std::uint32_t> rows = dirtyRows;
-		std::sort(rows.begin(), rows.end());
-		if (!rows.empty())
+		auto rows = dirtyMetadata.Take();
+		auto submeshRowIds = dirtySubmeshes.Take();
+		try
 		{
-			auto snapshot = std::make_shared<std::vector<GpuMeshMetadata>>();
-			std::vector<RowRun> runs;
+			if (!rows.empty())
+			{
+				resources.UploadPasses.push_back(
+					RecordRowUpload(graph, name + " upload metadata", resources.Metadata, metadata, rows, resources.RecordedBytes));
+			}
+			if (!submeshRowIds.empty())
+			{
+				resources.UploadPasses.push_back(RecordRowUpload(
+					graph, name + " upload submeshes", resources.Submeshes, submeshRows, submeshRowIds, resources.RecordedBytes));
+			}
+		}
+		catch (...)
+		{
 			for (auto row : rows)
 			{
-				if (runs.empty() || runs.back().FirstRow + runs.back().RowCount != row)
-				{
-					runs.push_back({ row, 0, snapshot->size() * sizeof(GpuMeshMetadata) });
-				}
-				++runs.back().RowCount;
-				snapshot->push_back(metadata[row]);
+				dirtyMetadata.Mark(row);
 			}
-			const auto bytes = snapshot->size() * sizeof(GpuMeshMetadata);
-			const auto staging = graph.CreateUpload({ bytes, Rhi::BufferUsage::TransferSource, 16, name + " metadata staging" },
-				[snapshot](std::span<std::byte> destination)
-				{
-					std::memcpy(destination.data(), snapshot->data(), snapshot->size() * sizeof(GpuMeshMetadata));
-				});
-			const auto target = resources.Metadata;
-			resources.UploadPasses.push_back(graph.AddPass(
-				name + " upload metadata", Rhi::QueueType::Transfer,
-				[&](RenderGraphBuilder& b)
-				{
-					b.Read(staging, S::CopySource);
-					b.ReadWrite(target, S::CopyDestination);
-				},
-				[staging, target, runs](RenderCommandContext& c)
-				{
-					const auto source = c.GetRange(staging);
-					const auto destination = c.GetRange(target);
-					for (const auto& run : runs)
-					{
-						c.Commands().CopyBuffer(*source.Buffer, *destination.Buffer,
-							{ source.Offset + run.StagingOffset, destination.Offset + std::uint64_t(run.FirstRow) * sizeof(GpuMeshMetadata),
-								std::uint64_t(run.RowCount) * sizeof(GpuMeshMetadata) });
-					}
-				}));
-			resources.RecordedBytes += bytes;
+			for (auto row : submeshRowIds)
+			{
+				dirtySubmeshes.Mark(row);
+			}
+			throw;
 		}
 
 		for (auto handle : recorded)
 		{
 			meshes.Get(handle)->State = GeometryResidency::Recorded;
 		}
-		for (auto row : rows)
-		{
-			dirty[row] = false;
-		}
-		dirtyRows.clear();
 		recordedMeshes = std::move(recorded);
 		recordedRows = std::move(rows);
+		recordedSubmeshRows = std::move(submeshRowIds);
 		resources.RecordedMeshes = static_cast<std::uint32_t>(recordedMeshes.size());
 		importPending = !resources.UploadPasses.empty();
 		return resources;
@@ -206,6 +231,7 @@ namespace Swim::Render
 		}
 		recordedMeshes.clear();
 		recordedRows.clear();
+		recordedSubmeshRows.clear();
 		importPending = false;
 	}
 
@@ -220,10 +246,15 @@ namespace Swim::Render
 		}
 		for (auto row : recordedRows)
 		{
-			MarkDirty(row);
+			dirtyMetadata.Mark(row);
+		}
+		for (auto row : recordedSubmeshRows)
+		{
+			dirtySubmeshes.Mark(row);
 		}
 		recordedMeshes.clear();
 		recordedRows.clear();
+		recordedSubmeshRows.clear();
 		importPending = false;
 	}
 } // namespace Swim::Render

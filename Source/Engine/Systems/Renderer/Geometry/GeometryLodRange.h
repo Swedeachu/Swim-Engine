@@ -3,12 +3,12 @@
 
 namespace Swim::Render
 {
-	// One level of detail as an index range relative to the mesh's own indices,
-	// plus the screen-space error used by later LOD selection.
+	// One level of detail: a contiguous range of the mesh's submeshes (relative
+	// to its first submesh) plus the screen-space error used by LOD selection.
 	struct GeometryLodRange
 	{
-		std::uint32_t FirstIndex = 0;
-		std::uint32_t IndexCount = 0;
+		std::uint32_t FirstSubmesh = 0;
+		std::uint32_t SubmeshCount = 0;
 		float Error = 0.0f;
 	};
 } // namespace Swim::Render

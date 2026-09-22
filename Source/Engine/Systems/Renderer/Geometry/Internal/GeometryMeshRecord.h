@@ -14,6 +14,7 @@ namespace Swim::Render::Internal
 		GeometryAllocation Vertex;
 		GeometryAllocation Index;
 		GeometryAllocation Meshlet;
+		GeometryRange Submeshes{}; // Rows in the submesh buffer; Size zero when none.
 		GeometryResidency State = GeometryResidency::PendingUpload;
 		Rhi::TimelinePoint Upload{};
 		// CPU copies retained until their upload submission is committed.

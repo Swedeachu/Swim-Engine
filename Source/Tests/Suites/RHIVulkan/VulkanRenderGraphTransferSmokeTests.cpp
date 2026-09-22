@@ -3,8 +3,10 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
+#include "Engine/Systems/Renderer/Residency/TextureResidency.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 #include "Tests/Framework/Test.h"
+#include <algorithm>
 #include <cstdlib>
 
 namespace
@@ -203,6 +205,84 @@ namespace
 		}
 		executor.Trim();
 	}
+
+	// TextureResidency on a real device: a full RGBA8 mip chain uploaded by the
+	// residency's graph pass, read back per mip in the same graph, then retired.
+	void RunTextureResidencySmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
+	{
+		using namespace Swim;
+		using namespace Swim::Render;
+
+		Platform::PlatformSystem platform;
+		SWIM_REQUIRE(platform.Initialize());
+		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
+		SWIM_REQUIRE(graphics);
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		auto device = graphics->GetAdapter(0).CreateDevice();
+		SWIM_REQUIRE(device);
+
+		Assets::TextureAsset asset;
+		asset.Width = 16;
+		asset.Height = 8;
+		Assets::TexturePayloadVariant payload;
+		payload.Format = Assets::TexturePayloadFormat::RGBA8UNorm;
+		std::uint64_t offset = 0;
+		for (std::uint32_t mip = 0; mip < 5; ++mip)
+		{
+			const std::uint32_t w = std::max(1u, 16u >> mip);
+			const std::uint32_t h = std::max(1u, 8u >> mip);
+			payload.Mips.push_back({ w, h, 1, offset, std::uint64_t(w) * h * 4, std::uint64_t(w) * h * 4 });
+			offset += std::uint64_t(w) * h * 4;
+		}
+		payload.Bytes = Bytes(static_cast<std::size_t>(offset), 77);
+		asset.Payloads.push_back(payload);
+
+		RenderGraphExecutor executor(*device);
+		{
+			TextureResidency residency(*device);
+			const auto handle = residency.CreateTexture(asset, "Residency smoke texture");
+			RenderGraph graph;
+			const auto uploads = residency.Import(graph);
+			SWIM_REQUIRE_EQUAL(uploads.Uploads.size(), 1u);
+			std::vector<GraphReadback> readbacks;
+			for (std::uint32_t mip = 0; mip < 5; ++mip)
+			{
+				Rhi::BufferTextureCopyRegion region{};
+				region.Subresource = { mip, 0 };
+				region.Extent = { payload.Mips[mip].Width, payload.Mips[mip].Height, 1 };
+				readbacks.push_back(AddTextureReadback(graph, "Read residency mip", uploads.Uploads[0].Graph, region));
+			}
+			const auto completion = executor.Execute(graph.Compile());
+			residency.CommitUploads(completion);
+			executor.Wait();
+			residency.Collect();
+			SWIM_CHECK(residency.GetState(handle) == GpuUploadState::Resident);
+			for (std::uint32_t mip = 0; mip < 5; ++mip)
+			{
+				std::vector<std::byte> actual(static_cast<std::size_t>(payload.Mips[mip].SizeBytes));
+				SWIM_REQUIRE(executor.TryReadback(readbacks[mip].Buffer, actual) == Rhi::ReadbackStatus::Ready);
+				SWIM_CHECK(std::equal(
+					actual.begin(), actual.end(), payload.Bytes.begin() + static_cast<std::ptrdiff_t>(payload.Mips[mip].OffsetBytes)));
+			}
+			SWIM_CHECK(residency.DestroyTexture(handle, completion));
+			residency.Drain();
+		}
+		executor.Trim();
+	}
+
+	[[maybe_unused]] const bool registeredTextures = []
+	{
+		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+		if (enabled && std::string_view(enabled) == "1")
+		{
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TextureResidencyMipChainUploadAndRetirement", SWIM_TEST_LOCATION,
+				+[]
+				{
+					Swim::Testing::RunValidatedVulkanSmoke(&RunTextureResidencySmoke);
+				} });
+		}
+		return true;
+	}();
 
 	[[maybe_unused]] const bool registeredGeometry = []
 	{

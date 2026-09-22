@@ -387,8 +387,10 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 endif()
 
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
-# resource registries (Resources/) and paged GeometryHeap (Geometry/) built on it.
-# None of it includes a native backend, scene/ECS or platform header.
+# resource registries (Resources/), paged GeometryHeap (Geometry/) and the asset
+# residency layer (Residency/, listed separately below) built on them. None of it
+# includes a native backend or scene/ECS header; only Residency/ reaches Assets,
+# IO and Jobs.
 file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.h
@@ -396,6 +398,13 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
+)
+
+# Residency/ connects Assets + async IO + Jobs to the GPU residency layers, so it
+# is compiled only where those foundation sources are (never with offline stubs).
+file(GLOB_RECURSE SWIM_RENDER_RESIDENCY_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.h
 )
 
 file(GLOB_RECURSE SWIM_JOB_SOURCES

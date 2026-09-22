@@ -170,6 +170,26 @@ SWIM_TEST("IO.AsyncIoService", "FullFileReadCompletesOnTheOwnerThread")
 	SWIM_CHECK(full.GetResult().GetSingleBuffer() == fixture.Payload());
 }
 
+SWIM_TEST("IO.AsyncIoService", "DispatchedCompletionsReleaseTheirCaptures")
+{
+	ScopedIoFixture fixture;
+	SWIM_REQUIRE(fixture.IsReady());
+
+	// A callback that captures state (commonly its own request) must not keep it
+	// alive after dispatch; the service drops each callback once it has run.
+	auto sentinel = std::make_shared<int>(7);
+	int calls = 0;
+	auto request = fixture.Io().ReadFileAsync(fixture.DataPath(), {}, [&calls, sentinel](const Swim::IO::ReadRequest&)
+	{
+		++calls;
+	});
+	SWIM_CHECK(sentinel.use_count() > 1);
+	fixture.Io().Wait(request);
+	fixture.Io().PumpCompletions();
+	SWIM_CHECK_EQUAL(calls, 1);
+	SWIM_CHECK_EQUAL(sentinel.use_count(), 1);
+}
+
 SWIM_TEST("IO.AsyncIoService", "SingleRangeRead")
 {
 	ScopedIoFixture fixture;

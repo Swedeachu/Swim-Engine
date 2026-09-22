@@ -1,18 +1,8 @@
 #pragma once
-#include <cstdint>
+#include "Engine/Systems/Renderer/Resources/GpuUploadState.h"
 
 namespace Swim::Render
 {
-	// Explicit GPU residency of a GeometryHeap mesh, separate from asset validity:
-	// PendingUpload (bytes staged on the CPU) -> Recorded (upload passes added to a
-	// graph, awaiting CommitUploads/AbortUploads) -> Uploading (submitted, waiting
-	// for its completion value) -> Resident.
-	enum class GeometryResidency : std::uint8_t
-	{
-		Invalid,
-		PendingUpload,
-		Recorded,
-		Uploading,
-		Resident
-	};
+	// GeometryHeap meshes use the shared GPU upload state machine.
+	using GeometryResidency = GpuUploadState;
 } // namespace Swim::Render

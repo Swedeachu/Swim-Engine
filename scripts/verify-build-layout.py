@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry"):
+    for module in ("RenderGraph", "Resources", "Geometry", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3780,6 +3780,18 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderGraph", "RenderGraphTransferTests.cpp", failures)
     check_suite_is_compiled("RenderResources", "GpuResourceRegistryTests.cpp", failures)
     check_suite_is_compiled("RenderGeometry", "GeometryHeapTests.cpp", failures)
+    check_suite_is_compiled("RenderResidency", "AssetResidencyServiceTests.cpp", failures)
+    # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
+    for module in ("RenderGraph", "Resources", "Geometry"):
+        for path in (renderer / module).rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if re.search(r'#\s*include[^\n]*(Renderer/Residency/|Engine/Assets/|Engine/IO/|Engine/Jobs/)', text):
+                fail(f"{module} must not depend on asset residency, assets, IO or jobs: {path.relative_to(ROOT)}", failures)
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    if "SWIM_RENDER_RESIDENCY_SOURCES" not in cmake_text or "SWIM_RENDER_RESIDENCY_SOURCES" not in read_tests_cmake():
+        fail("Residency sources must stay a separate, dependency-gated source list", failures)
     for path in (renderer / "RHI").rglob("*"):
         if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
             continue

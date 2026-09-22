@@ -86,13 +86,15 @@ SWIM_TEST("Render.GeometryHeap", "CreatesStableMetadataRowsInSharedPages")
 {
 	Testing::MockDevice device;
 	GeometryHeap heap(device, SmallHeap());
-	SWIM_CHECK_EQUAL(device.BufferCreateCount, 1u); // Metadata only; pages are lazy.
+	SWIM_CHECK_EQUAL(device.BufferCreateCount, 2u); // Metadata + submesh rows; pages are lazy.
 	SWIM_CHECK_EQUAL(heap.GetMetadataBuffer().GetDesc().Size, 8u * sizeof(GpuMeshMetadata));
 
 	const auto first = Mesh(36, 24, 1);
 	const auto second = Mesh(120, 12, 2, 64);
-	std::array<GeometryLodRange, 2> lods{ { { 0, 6, 0.0f }, { 3, 3, 0.5f } } };
+	std::array<GeometrySubmesh, 2> submeshes{ { { 0, 3, 0, 0 }, { 3, 3, 1, 2 } } };
+	std::array<GeometryLodRange, 2> lods{ { { 0, 2, 0.0f }, { 1, 1, 0.5f } } };
 	auto firstDesc = first.Desc();
+	firstDesc.Submeshes = submeshes;
 	firstDesc.Lods = lods;
 	auto a = heap.CreateMesh(firstDesc);
 	auto b = heap.CreateMesh(second.Desc(12, Rhi::IndexType::Uint16));
@@ -107,8 +109,16 @@ SWIM_TEST("Render.GeometryHeap", "CreatesStableMetadataRowsInSharedPages")
 	SWIM_CHECK_EQUAL(rowA->IndexCount, 6u);
 	SWIM_CHECK_EQUAL(rowA->IndexBytes, 4u);
 	SWIM_CHECK_EQUAL(rowA->LodCount, 2u);
-	SWIM_CHECK_EQUAL(rowA->Lods[1].FirstIndex, rowA->FirstIndex + 3);
-	SWIM_CHECK_EQUAL(rowA->Lods[1].IndexCount, 3u);
+	SWIM_CHECK_EQUAL(rowA->SubmeshCount, 2u);
+	SWIM_CHECK_EQUAL(rowA->Lods[0].FirstSubmesh, rowA->FirstSubmesh);
+	SWIM_CHECK_EQUAL(rowA->Lods[1].FirstSubmesh, rowA->FirstSubmesh + 1);
+	SWIM_CHECK_EQUAL(rowA->Lods[1].SubmeshCount, 1u);
+	const auto drawRanges = heap.GetSubmeshes(a);
+	SWIM_REQUIRE_EQUAL(drawRanges.size(), 2u);
+	SWIM_CHECK_EQUAL(drawRanges[1].FirstIndex, rowA->FirstIndex + 3);
+	SWIM_CHECK_EQUAL(drawRanges[1].IndexCount, 3u);
+	SWIM_CHECK_EQUAL(drawRanges[1].VertexOffset, std::int32_t(rowA->VertexOffset + 1));
+	SWIM_CHECK_EQUAL(drawRanges[1].MaterialSlot, 2u);
 	SWIM_CHECK_EQUAL(rowA->Generation, a.Generation);
 	SWIM_CHECK_EQUAL(rowA->MeshletPage, GpuMeshMetadata::InvalidPage);
 
@@ -117,7 +127,10 @@ SWIM_TEST("Render.GeometryHeap", "CreatesStableMetadataRowsInSharedPages")
 	SWIM_CHECK_EQUAL(rowB->IndexBytes, 2u);
 	SWIM_CHECK_EQUAL(rowB->IndexCount, 6u);
 	SWIM_CHECK_EQUAL(rowB->LodCount, 1u);
-	SWIM_CHECK_EQUAL(rowB->Lods[0].IndexCount, 6u);
+	SWIM_CHECK_EQUAL(rowB->Lods[0].SubmeshCount, 1u);
+	SWIM_CHECK_EQUAL(rowB->SubmeshCount, 1u);
+	SWIM_CHECK(rowB->FirstSubmesh >= rowA->FirstSubmesh + 2);
+	SWIM_CHECK_EQUAL(heap.GetSubmeshes(b)[0].IndexCount, 6u); // Implicit whole-mesh submesh.
 	SWIM_CHECK_EQUAL(rowB->MeshletCount, 2u);
 	SWIM_CHECK_EQUAL(rowB->MeshletOffset % 16, 0u);
 	SWIM_CHECK(heap.GetResidency(a) == GeometryResidency::PendingUpload);
@@ -126,6 +139,8 @@ SWIM_TEST("Render.GeometryHeap", "CreatesStableMetadataRowsInSharedPages")
 	SWIM_CHECK_EQUAL(stats.PendingMeshes, 2u);
 	SWIM_CHECK_EQUAL(stats.PendingUploadBytes, 36u + 24u + 120u + 12u + 64u);
 	SWIM_CHECK_EQUAL(stats.DirtyMetadataRows, 2u);
+	SWIM_CHECK_EQUAL(stats.DirtySubmeshRows, 3u);
+	SWIM_CHECK_EQUAL(stats.SubmeshRowsAllocated, 3u);
 	SWIM_CHECK_EQUAL(stats.Vertex.Pages, 1u);
 	SWIM_CHECK_EQUAL(stats.Vertex.ReservedBytes, 4096u);
 	SWIM_CHECK_EQUAL(stats.Vertex.AllocatedBytes, 156u);
@@ -145,8 +160,8 @@ SWIM_TEST("Render.GeometryHeap", "GraphUploadsBatchPerPageAndBecomeResidentAfter
 	const auto completion = Upload(heap, executor, &resources);
 	SWIM_CHECK_EQUAL(resources.RecordedMeshes, 2u);
 	SWIM_CHECK_EQUAL(resources.Pages.size(), 3u);
-	SWIM_CHECK_EQUAL(resources.UploadPasses.size(), 4u); // Three pages + metadata.
-	SWIM_CHECK_EQUAL(resources.RecordedBytes, 48u + 12u + 24u + 8u + 32u + 2u * sizeof(GpuMeshMetadata));
+	SWIM_CHECK_EQUAL(resources.UploadPasses.size(), 5u); // Three pages + metadata + submeshes.
+	SWIM_CHECK_EQUAL(resources.RecordedBytes, 48u + 12u + 24u + 8u + 32u + 2u * sizeof(GpuMeshMetadata) + 2u * sizeof(GpuSubmeshRecord));
 	SWIM_CHECK(heap.GetResidency(a) == GeometryResidency::Uploading);
 	SWIM_CHECK_EQUAL(heap.GetStats().PendingUploadBytes, 0u);
 	SWIM_CHECK_EQUAL(heap.GetStats().DirtyMetadataRows, 0u);
@@ -163,6 +178,11 @@ SWIM_TEST("Render.GeometryHeap", "GraphUploadsBatchPerPageAndBecomeResidentAfter
 	std::memcpy(&uploaded, Host(&heap.GetMetadataBuffer()).Bytes.data() + b.Index * sizeof(GpuMeshMetadata), sizeof(uploaded));
 	SWIM_CHECK_EQUAL(uploaded.VertexOffset, rowB->VertexOffset);
 	SWIM_CHECK_EQUAL(uploaded.Generation, b.Generation);
+	GpuSubmeshRecord uploadedSubmesh;
+	std::memcpy(&uploadedSubmesh, Host(&heap.GetSubmeshBuffer()).Bytes.data() + rowB->FirstSubmesh * sizeof(GpuSubmeshRecord),
+		sizeof(uploadedSubmesh));
+	SWIM_CHECK_EQUAL(uploadedSubmesh.FirstIndex, rowB->FirstIndex);
+	SWIM_CHECK_EQUAL(uploadedSubmesh.IndexCount, 4u);
 
 	SWIM_CHECK_EQUAL(heap.Collect(), 0u); // Not complete yet.
 	executor.Wait();
@@ -293,7 +313,8 @@ SWIM_TEST("Render.GeometryHeap", "ValidatesInputAndFailsWithoutPartialState")
 	Testing::MockDevice device;
 	SWIM_CHECK_THROWS(GeometryHeap(device, { 0, 1, 1, 1, 1 }), std::invalid_argument);
 	SWIM_CHECK_THROWS(GeometryHeap(device, { 1ull << 33, 1, 1, 1, 1 }), std::invalid_argument);
-	SWIM_CHECK_THROWS(GeometryHeap(device, { 1, 1, 1, 0, 1 }), std::invalid_argument);
+	SWIM_CHECK_THROWS(GeometryHeap(device, { 1, 1, 1, 0, 1, 1 }), std::invalid_argument);
+	SWIM_CHECK_THROWS(GeometryHeap(device, { 1, 1, 1, 1, 0, 1 }), std::invalid_argument);
 
 	auto desc = SmallHeap();
 	desc.MaxMeshes = 2;
@@ -311,6 +332,10 @@ SWIM_TEST("Render.GeometryHeap", "ValidatesInputAndFailsWithoutPartialState")
 	const GeometryLodRange lod{ 2, 2, 0.0f };
 	badLod.Lods = { &lod, 1 };
 	SWIM_CHECK_THROWS(heap.CreateMesh(badLod), std::invalid_argument);
+	auto badSubmesh = data.Desc();
+	const GeometrySubmesh outside{ 0, 3, 2, 0 }; // Only two vertices exist.
+	badSubmesh.Submeshes = { &outside, 1 };
+	SWIM_CHECK_THROWS(heap.CreateMesh(badSubmesh), std::invalid_argument);
 	auto meshletMismatch = data.Desc();
 	meshletMismatch.MeshletCount = 3;
 	SWIM_CHECK_THROWS(heap.CreateMesh(meshletMismatch), std::invalid_argument);

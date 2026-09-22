@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeapDesc.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryHeapStats.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryMeshDesc.h"
+#include "Engine/Systems/Renderer/Geometry/Internal/GeometryDirtyRows.h"
 #include "Engine/Systems/Renderer/Geometry/Internal/GeometryMeshRecord.h"
 #include "Engine/Systems/Renderer/Geometry/Internal/GeometryPage.h"
 #include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
@@ -13,7 +14,7 @@ namespace Swim::Render
 
 	// Paged device-local residency for compiled mesh geometry.
 	//
-	//   CreateMesh     allocate vertex/index/meshlet ranges + a stable metadata row
+	//   CreateMesh     allocate vertex/index/meshlet ranges, submesh rows and a stable metadata row
 	//   Import(graph)  import pages/metadata and record batched upload passes
 	//   CommitUploads  after the graph's successful Execute (or AbortUploads)
 	//   Collect        Uploading -> Resident, and retire released meshes' ranges
@@ -63,6 +64,11 @@ namespace Swim::Render
 
 		Rhi::Buffer& GetMetadataBuffer() const { return *metadataBuffer; }
 
+		Rhi::Buffer& GetSubmeshBuffer() const { return *submeshBuffer; }
+
+		// CPU mirror of a live mesh's submesh rows (empty for invalid handles).
+		std::span<const GpuSubmeshRecord> GetSubmeshes(GpuMeshHandle mesh) const;
+
 		GeometryHeapStats GetStats() const;
 
 		static Rhi::ResourceState GetRestingState(Internal::GeometryStream stream);
@@ -75,7 +81,6 @@ namespace Swim::Render
 		void Retire(Internal::GeometryMeshRecord& record);
 		std::uint64_t PageSize(Stream stream) const;
 		GeometryPoolStats PoolStats(Stream stream) const;
-		void MarkDirty(std::uint32_t row);
 
 		Rhi::Device& device;
 		GeometryHeapDesc desc;
@@ -83,12 +88,16 @@ namespace Swim::Render
 		std::unique_ptr<Rhi::Buffer> metadataBuffer;
 		std::vector<Internal::GeometryPage> pages;
 		std::vector<std::uint32_t> freePageSlots;
+		std::unique_ptr<Rhi::Buffer> submeshBuffer;
+		std::optional<GeometryRangeAllocator> submeshAllocator;
 		std::vector<GpuMeshMetadata> metadata;
-		std::vector<bool> dirty;
-		std::vector<std::uint32_t> dirtyRows;
+		std::vector<GpuSubmeshRecord> submeshRows;
+		Internal::GeometryDirtyRows dirtyMetadata;
+		Internal::GeometryDirtyRows dirtySubmeshes;
 		GpuResourceRegistry<GpuMeshTag, Internal::GeometryMeshRecord> meshes;
 		std::vector<GpuMeshHandle> recordedMeshes;
 		std::vector<std::uint32_t> recordedRows;
+		std::vector<std::uint32_t> recordedSubmeshRows;
 		bool importPending = false;
 	};
 } // namespace Swim::Render

@@ -301,6 +301,10 @@ load/publish root ModelAsset
 
 `AssetSystem` becomes the authoritative CPU runtime asset owner. The renderer should consume those typed assets/handles through residency adapters rather than re-opening the source GLB.
 
+## Step 9 — Asynchronous GPU residency (modern renderer path)
+
+The bootstrap above loads blocking and publishes everything. The modern renderer's `AssetResidencyService` instead streams individual cooked objects on demand: it resolves an `AssetId` to its cooked object, reads it with `AsyncIoService`, runs `Assets::DecodeSasset` (container parse, chunk/content hash validation and payload decode) on a job worker, publishes with `Assets::PublishSasset` on the `AssetSystem` owner thread, then stages the decoded mesh/texture into `GeometryHeap`/`TextureResidency` within a per-frame byte budget. The CPU asset is released once the GPU copy is staged unless the caller retains it. Material instances and models still use `LoadSasset` because decoding them resolves `AssetHandle`s. Textures currently need an uncompressed native-mip payload variant for this path; KTX2/Basis variants are rejected there until block-aware uploads/transcoding exist. See [GPU resource residency](GpuResidency.md).
+
 ---
 
 # 5. `.sasset` v1 binary structure

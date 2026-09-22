@@ -125,6 +125,23 @@ namespace Swim::Testing
 		Swim::Rhi::TextureDesc desc;
 	};
 
+	class MockTextureView final : public Swim::Rhi::TextureView
+	{
+	public:
+		MockTextureView(Swim::Rhi::Texture& texture, const Swim::Rhi::TextureViewDesc& desc) : texture(texture), desc(desc)
+		{
+			this->desc.DebugName = {};
+		}
+
+		std::uintptr_t GetNativeHandle() const override { return 9; }
+		Swim::Rhi::Texture& GetTexture() const override { return texture; }
+		const Swim::Rhi::TextureViewDesc& GetDesc() const override { return desc; }
+
+	private:
+		Swim::Rhi::Texture& texture;
+		Swim::Rhi::TextureViewDesc desc;
+	};
+
 	class MockCommandList final : public Swim::Rhi::CommandList
 	{
 	public:
@@ -346,14 +363,17 @@ namespace Swim::Testing
 		}
 		std::unique_ptr<Swim::Rhi::Texture> CreateTexture(const Swim::Rhi::TextureDesc& desc) override
 		{
-			if (!CreateTextures)
+			if (!CreateTextures || ++TextureAttemptCount == FailTextureCreate)
 			{
 				return nullptr;
 			}
 			++TextureCreateCount;
 			return std::make_unique<MockTexture>(desc);
 		}
-		std::unique_ptr<Swim::Rhi::TextureView> CreateTextureView(Swim::Rhi::Texture&, const Swim::Rhi::TextureViewDesc&) override { return nullptr; }
+		std::unique_ptr<Swim::Rhi::TextureView> CreateTextureView(Swim::Rhi::Texture& texture, const Swim::Rhi::TextureViewDesc& desc) override
+		{
+			return CreateTextures ? std::make_unique<MockTextureView>(texture, desc) : nullptr;
+		}
 		std::unique_ptr<Swim::Rhi::Sampler> CreateSampler(const Swim::Rhi::SamplerDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::ShaderProgram> CreateShaderProgram(const Swim::Rhi::ShaderProgramDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::PipelineLayout> CreatePipelineLayout(const Swim::Rhi::PipelineLayoutDesc&) override { return nullptr; }
@@ -394,6 +414,8 @@ namespace Swim::Testing
 		Swim::Rhi::AdapterInfo adapterInfo{};
 		bool CreateTextures = false;
 		std::uint32_t TextureCreateCount = 0;
+		std::uint32_t TextureAttemptCount = 0;
+		std::uint32_t FailTextureCreate = 0;
 		std::shared_ptr<std::vector<MockCommand>> Commands = std::make_shared<std::vector<MockCommand>>();
 	};
 

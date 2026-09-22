@@ -29,5 +29,8 @@ namespace Swim::Render
 		std::uint32_t RetiringMeshes = 0;
 		std::uint64_t PendingUploadBytes = 0;
 		std::uint32_t DirtyMetadataRows = 0;
+		std::uint32_t DirtySubmeshRows = 0;
+		std::uint64_t SubmeshRowsAllocated = 0;
+		std::uint64_t SubmeshRowCapacity = 0;
 	};
 } // namespace Swim::Render

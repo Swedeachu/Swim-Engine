@@ -2,6 +2,9 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
+#include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
+#include "Engine/Systems/Renderer/Residency/MeshGeometryPayload.h"
+#include "Engine/Systems/Renderer/Residency/TextureResidency.h"
 #include <memory>
 #include <type_traits>
 
@@ -19,3 +22,6 @@ static_assert(!std::is_copy_constructible_v<Swim::Render::GpuResourceRegistry<Sw
 static_assert(!std::is_same_v<Swim::Render::GpuMeshHandle, Swim::Render::GpuTextureHandle>);
 static_assert(sizeof(Swim::Render::GpuMeshHandle) == sizeof(std::uint64_t));
 static_assert(sizeof(Swim::Render::GpuMeshMetadata) % 16 == 0);
+static_assert(sizeof(Swim::Render::GpuSubmeshRecord) == 16);
+static_assert(!std::is_copy_constructible_v<Swim::Render::TextureResidency>);
+static_assert(!std::is_copy_constructible_v<Swim::Render::AssetResidencyService>);

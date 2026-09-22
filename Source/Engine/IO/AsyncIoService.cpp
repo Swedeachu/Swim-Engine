@@ -496,8 +496,16 @@ namespace Swim::IO
 		impl->Track(request);
 
 		Impl* service = impl.get();
-		request->Work = impl->Jobs->ScheduleBlocking([service, request]()
+		// The job must not own its request: the request owns the job handle, so a
+		// strong capture would form a cycle that leaks every request and its bytes.
+		// Track() keeps the request alive until its completion is pumped.
+		request->Work = impl->Jobs->ScheduleBlocking([service, weakRequest = std::weak_ptr<Detail::IoRequestState>(request)]()
 		{
+			const std::shared_ptr<Detail::IoRequestState> request = weakRequest.lock();
+			if (!request)
+			{
+				return;
+			}
 			if (request->CancelRequested.load(std::memory_order_acquire))
 			{
 				request->ErrorMessage = "IO request cancelled before read";
@@ -584,7 +592,11 @@ namespace Swim::IO
 			if (requestState->Completion)
 			{
 				const ReadRequest request(requestState);
-				requestState->Completion(request);
+				// Dispatch once, then drop the callback: callbacks commonly capture their
+				// own ReadRequest, which would otherwise keep the request alive forever.
+				auto completion = std::move(requestState->Completion);
+				requestState->Completion = {};
+				completion(request);
 			}
 		}
 		return ready.size();

@@ -12,8 +12,9 @@ namespace Swim::Render
 		std::uint64_t VertexPageSize = 64ull << 20;
 		std::uint64_t IndexPageSize = 32ull << 20;
 		std::uint64_t MeshletPageSize = 16ull << 20;
-		std::uint32_t MaxMeshes = 16384; // Metadata rows and GpuMeshHandle slots.
-		std::uint32_t MaxPages = 256;	 // Across all streams, including dedicated pages.
+		std::uint32_t MaxMeshes = 16384;	// Metadata rows and GpuMeshHandle slots.
+		std::uint32_t MaxSubmeshes = 65536; // GpuSubmeshRecord rows shared by all meshes.
+		std::uint32_t MaxPages = 256;		// Across all streams, including dedicated pages.
 		std::string_view DebugName = "GeometryHeap";
 	};
 } // namespace Swim::Render
