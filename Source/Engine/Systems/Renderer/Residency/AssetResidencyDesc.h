@@ -7,6 +7,8 @@
 
 namespace Swim::Render
 {
+	class BindlessResourceTable;
+
 	struct AssetResidencyDesc
 	{
 		// Maps a cooked asset identity to its .sasset object. Requests for assets
@@ -21,5 +23,8 @@ namespace Swim::Render
 		// Keep the CPU MeshAsset/TextureAsset resident after its GPU copy is staged.
 		// By default it is unloaded (GPU residency is independent of CPU validity).
 		bool RetainCpuAssets = false;
+		// Optional. Resident textures are registered here (their view becomes a bindless
+		// element) and released with the texture's lastUse. Must outlive the service.
+		BindlessResourceTable* Bindless = nullptr;
 	};
 } // namespace Swim::Render

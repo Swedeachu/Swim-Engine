@@ -15,15 +15,24 @@ namespace Swim::RhiVulkan
 	void VulkanDescriptorTable::Write(std::span<const Rhi::DescriptorWrite> writes)
 	{
 		RequireVulkanDevice(*GetState());
-		if (sealed.load())
-		{
-			throw std::logic_error("Recorded descriptor tables are immutable; allocate a replacement and retire the old table after GPU completion");
-		}
 		if (writes.size() > std::numeric_limits<std::uint32_t>::max())
 		{
 			throw std::invalid_argument("Too many descriptor writes");
 		}
 		const auto& bindings = FindDescriptorSchema(*layoutState, space)->Bindings;
+		if (sealed.load())
+		{
+			// Only update-after-bind (bindless) elements remain writable once recorded.
+			for (const auto& write : writes)
+			{
+				const auto binding = std::find_if(bindings.begin(), bindings.end(), [&](const auto& candidate) { return candidate.Binding == write.Binding; });
+				if (binding == bindings.end() || !binding->UpdateAfterBind)
+				{
+					throw std::logic_error("Recorded descriptor tables are immutable outside update-after-bind bindings; allocate a replacement and "
+										   "retire the old table after GPU completion");
+				}
+			}
+		}
 		const auto& limits = GetState()->Device.physical_device.properties.limits;
 		std::vector<VkWriteDescriptorSet> native(writes.size());
 		std::vector<VkDescriptorImageInfo> images(writes.size());

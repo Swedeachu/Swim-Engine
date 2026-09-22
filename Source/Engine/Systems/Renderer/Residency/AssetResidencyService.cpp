@@ -4,6 +4,7 @@
 #include "Engine/Systems/Renderer/RHI/RhiFormatInfo.h"
 #include "Engine/Systems/Renderer/Residency/MeshGeometryPayload.h"
 #include "Engine/Systems/Renderer/Residency/TextureResidency.h"
+#include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 
 #include <algorithm>
 
@@ -193,6 +194,12 @@ namespace Swim::Render
 			}
 			else
 			{
+				// The element retires with the texture, so no submission indexes a destroyed view.
+				if (desc.Bindless && request.Bindless)
+				{
+					desc.Bindless->Release(request.Bindless, lastUse);
+					request.Bindless = {};
+				}
 				textures.DestroyTexture(request.Texture, lastUse);
 			}
 			break;
@@ -507,6 +514,11 @@ namespace Swim::Render
 		textures.Collect();
 		for (auto& [id, request] : requests)
 		{
+			if (request.State == State::Resident && request.Kind == Kind::Texture && !request.Bindless && !request.BindlessRejected)
+			{
+				RegisterBindless(request); // Retry after the table was full.
+				continue;
+			}
 			if (request.State != State::Uploading)
 			{
 				continue;
@@ -515,11 +527,42 @@ namespace Swim::Render
 			if (state == GpuUploadState::Resident)
 			{
 				request.State = State::Resident;
+				if (request.Kind == Kind::Texture)
+				{
+					RegisterBindless(request);
+				}
 			}
 			else if (state == GpuUploadState::Invalid)
 			{
 				Fail(request, AssetErrorCode::Internal, "GPU residency was destroyed outside AssetResidencyService", false);
 			}
+		}
+	}
+
+	void AssetResidencyService::RegisterBindless(Request& request)
+	{
+		if (!desc.Bindless)
+		{
+			return;
+		}
+		// A rejected view leaves the texture Resident (still usable through
+		// GetGpuTexture) on the fallback element, with the reason in GetError.
+		auto* view = textures.GetView(request.Texture);
+		try
+		{
+			if (!view)
+			{
+				throw std::logic_error("resident texture has no view");
+			}
+			if (auto handle = desc.Bindless->TryRegisterTexture(*view))
+			{
+				request.Bindless = *handle;
+			}
+		}
+		catch (const std::exception& error)
+		{
+			request.BindlessRejected = true;
+			request.Error = { AssetErrorCode::Internal, std::string("texture could not become bindless: ") + error.what() };
 		}
 	}
 
@@ -575,6 +618,12 @@ namespace Swim::Render
 		return request ? request->Texture : GpuTextureHandle{};
 	}
 
+	std::uint32_t AssetResidencyService::GetBindlessIndex(Assets::AssetHandle<Assets::TextureAsset> texture) const
+	{
+		const auto* request = FindRequest(texture);
+		return request && desc.Bindless ? desc.Bindless->GetIndex(request->Bindless) : BindlessResourceTable::FallbackIndex;
+	}
+
 	Assets::AssetError AssetResidencyService::GetError(Assets::AssetId id) const
 	{
 		const auto found = requests.find(id);
@@ -606,6 +655,17 @@ namespace Swim::Render
 				break;
 			case State::Resident:
 				++stats.Resident;
+				if (request.Kind == Kind::Texture && desc.Bindless)
+				{
+					if (request.Bindless)
+					{
+						++stats.BindlessTextures;
+					}
+					else if (!request.BindlessRejected)
+					{
+						++stats.BindlessPending;
+					}
+				}
 				break;
 			case State::Failed:
 				++stats.Failed;

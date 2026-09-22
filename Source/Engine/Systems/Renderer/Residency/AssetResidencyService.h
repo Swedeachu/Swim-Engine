@@ -29,6 +29,10 @@ namespace Swim::Render
 	//              after the graph's successful Execute, AbortUploads otherwise
 	//   Release*   cancels outstanding work or retires GPU data after lastUse
 	//
+	// With AssetResidencyDesc::Bindless, a texture becomes bindless explicitly when
+	// Update observes it Resident (item 45); until then, and while the table is
+	// full, GetBindlessIndex returns the fallback element.
+	//
 	// Owner thread only (the AssetSystem owner). IO completion is polled, so no
 	// callback can outlive this object. The AssetSystem, IO service, optional job
 	// system, GeometryHeap and TextureResidency must outlive the service. GPU
@@ -66,6 +70,9 @@ namespace Swim::Render
 		// Valid from Uploading onward.
 		GpuMeshHandle GetGpuMesh(Assets::AssetHandle<Assets::MeshAsset> mesh) const;
 		GpuTextureHandle GetGpuTexture(Assets::AssetHandle<Assets::TextureAsset> texture) const;
+		// The shader-visible bindless element of a Resident texture, or
+		// BindlessResourceTable::FallbackIndex until it has one (or without a table).
+		std::uint32_t GetBindlessIndex(Assets::AssetHandle<Assets::TextureAsset> texture) const;
 		// The failure recorded for a Failed request (Code None otherwise).
 		Assets::AssetError GetError(Assets::AssetId id) const;
 		AssetResidencyStats GetStats() const;
@@ -83,6 +90,7 @@ namespace Swim::Render
 		void PollDecodes();
 		void StageUploads();
 		void ObserveUploads();
+		void RegisterBindless(Request& request);
 		void Publish(Request& request, Assets::SassetDecodeResult result);
 		void Fail(Request& request, Assets::AssetErrorCode code, std::string message, bool failCpuAsset = true);
 		bool StageOne(Request& request, std::uint64_t& bytes);

@@ -31,6 +31,14 @@ namespace Swim::RhiVulkan
 			VkPhysicalDeviceFeatures optionalFeatures{};
 			optionalFeatures.imageCubeArray = VK_TRUE;
 			info.Capabilities.SampledCubeArray = this->physicalDevice.enable_features_if_present(optionalFeatures);
+			// Bindless tables are rewritten while earlier frames are still pending, which
+			// needs update-unused-while-pending on top of the required indexing features.
+			VkPhysicalDeviceVulkan12Features bindlessFeatures{};
+			bindlessFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+			bindlessFeatures.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+			info.Capabilities.BindlessDescriptors = info.Capabilities.DescriptorIndexing &&
+				info.Capabilities.Descriptors.MaxBindlessSampledTextures > 0 && info.Capabilities.Descriptors.MaxBindlessSamplers > 0 &&
+				this->physicalDevice.enable_extension_features_if_present(bindlessFeatures);
 			info.Capabilities.HdrSwapchain = this->instance->SwapchainColorSpaceEnabled;
 			ReportAdapterInfo(this->instance->Diagnostics, info);
 		}
@@ -102,6 +110,13 @@ namespace Swim::RhiVulkan
 			VmaAllocatorCreateInfo allocatorInfo{};
 			allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 			deviceState->MemoryBudgetEnabled = info.Capabilities.MemoryBudget;
+			deviceState->BindlessDescriptorsEnabled = info.Capabilities.BindlessDescriptors;
+			deviceState->DescriptorIndexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+			VkPhysicalDeviceProperties2 indexingProperties{};
+			indexingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+			indexingProperties.pNext = &deviceState->DescriptorIndexing;
+			instance->Dispatch.vkGetPhysicalDeviceProperties2(deviceState->Device.physical_device.physical_device, &indexingProperties);
+			deviceState->DescriptorIndexing.pNext = nullptr;
 			if (deviceState->MemoryBudgetEnabled)
 			{
 				allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;

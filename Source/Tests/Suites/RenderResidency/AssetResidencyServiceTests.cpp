@@ -1,3 +1,5 @@
+#include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
+#include "Tests/Fixtures/BindlessTableFixture.h"
 #include "Tests/Fixtures/ResidencyServiceFixture.h"
 
 #include <cstring>
@@ -223,4 +225,82 @@ SWIM_TEST("Render.AssetResidency", "RecordedUploadsMustBeCommittedOrAbortedBefor
 	SWIM_CHECK(fixture.geometry->GetResidency(service.GetGpuMesh(mesh)) == GpuUploadState::PendingUpload);
 	fixture.UploadFrame();
 	SWIM_CHECK(service.GetState(mesh) == State::Resident);
+}
+
+SWIM_TEST("Render.AssetResidency", "ResidentTexturesBecomeBindlessExplicitlyAndRetireTheirElementWithTheTexture")
+{
+	Testing::ResidencyServiceFixture fixture("Bindless");
+	Testing::BindlessTableFixture elements(3); // The fallback plus two texture elements.
+	BindlessResourceTable bindless(elements.device, elements.Desc());
+	AssetResidencyDesc desc;
+	desc.Bindless = &bindless;
+	auto& service = fixture.Service(std::move(desc));
+	std::vector<Assets::AssetHandle<Assets::TextureAsset>> textures;
+	for (int i = 0; i < 3; ++i)
+	{
+		const std::string path = "Textures/Bindless" + std::to_string(i) + ".texture";
+		textures.push_back(PublishCpu(fixture.assets, path.c_str(), MakeTexture()));
+		service.RequestTexture(textures.back());
+	}
+	service.Update();
+	for (const auto& texture : textures)
+	{
+		SWIM_CHECK(service.GetState(texture) == State::Uploading);
+		SWIM_CHECK_EQUAL(service.GetBindlessIndex(texture), BindlessResourceTable::FallbackIndex); // Not before residency.
+	}
+	fixture.UploadFrame();
+	auto stats = service.GetStats();
+	SWIM_CHECK_EQUAL(stats.Resident, 3u);
+	SWIM_CHECK_EQUAL(stats.BindlessTextures, 2u);
+	SWIM_CHECK_EQUAL(stats.BindlessPending, 1u); // The table is full.
+
+	Assets::AssetHandle<Assets::TextureAsset> pending;
+	Assets::AssetHandle<Assets::TextureAsset> released;
+	std::uint32_t releasedIndex = 0;
+	for (const auto& texture : textures)
+	{
+		const auto index = service.GetBindlessIndex(texture);
+		if (index == BindlessResourceTable::FallbackIndex)
+		{
+			pending = texture;
+			continue;
+		}
+		SWIM_CHECK(elements.Table().Element(1, index) == fixture.textures->GetView(service.GetGpuTexture(texture)));
+		released = texture;
+		releasedIndex = index;
+	}
+	SWIM_REQUIRE(pending && released);
+
+	// The element retires with the texture; the waiting texture takes it once free.
+	Testing::MockTimeline timeline;
+	SWIM_CHECK(service.ReleaseTexture(released, { &timeline, 4 }));
+	service.Update();
+	SWIM_CHECK_EQUAL(service.GetBindlessIndex(pending), BindlessResourceTable::FallbackIndex);
+	SWIM_CHECK(elements.Table().Element(1, releasedIndex) != nullptr);
+	timeline.Complete(4);
+	SWIM_CHECK_EQUAL(bindless.Collect(), 1u);
+	SWIM_CHECK(elements.Table().Element(1, releasedIndex) == elements.fallbackView.get());
+	service.Update();
+	SWIM_CHECK_EQUAL(service.GetBindlessIndex(pending), releasedIndex);
+	SWIM_CHECK(elements.Table().Element(1, releasedIndex) == fixture.textures->GetView(service.GetGpuTexture(pending)));
+	SWIM_CHECK_EQUAL(service.GetStats().BindlessPending, 0u);
+
+	// A view the RHI refuses leaves the texture Resident on the fallback, with an error.
+	SWIM_CHECK(service.ReleaseTexture(pending));
+	bindless.Collect();
+	const auto refused = PublishCpu(fixture.assets, "Textures/Refused.texture", MakeTexture());
+	service.RequestTexture(refused);
+	service.Update();
+	elements.Table().Reject = fixture.textures->GetView(service.GetGpuTexture(refused));
+	fixture.UploadFrame();
+	SWIM_CHECK(service.GetState(refused) == State::Resident);
+	SWIM_CHECK_EQUAL(service.GetBindlessIndex(refused), BindlessResourceTable::FallbackIndex);
+	SWIM_CHECK(service.GetError(refused.GetId()).Message.find("bindless") != std::string::npos);
+	service.Update();
+	stats = service.GetStats();
+	SWIM_CHECK_EQUAL(stats.BindlessPending, 0u);
+	SWIM_CHECK_EQUAL(stats.BindlessTextures, 1u);
+	service.ReleaseAll({});
+	bindless.Collect();
+	SWIM_CHECK_EQUAL(bindless.GetStats().LiveTextures, 1u);
 }

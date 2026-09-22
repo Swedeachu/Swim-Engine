@@ -325,6 +325,8 @@ function(swim_configure_tests)
 			SWIM_RHI_VERTEX_INPUT_SPIRV_PATH="${SwimRhiVertexInput_SPIRV}"
 			SWIM_RHI_TEXTURE_SPIRV_PATH="${SwimRhiTexture_SPIRV}"
 			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"
+			SWIM_RHI_BINDLESS_SPIRV_PATH="${SwimRhiBindless_SPIRV}"
+			SWIM_RHI_BINDLESS_REFLECTION_PATH="${SwimRhiBindless_REFLECTION}"
 		)
 	endif()
 

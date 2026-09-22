@@ -356,6 +356,10 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		SOURCE Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
 		PROFILE spirv_1_5
 	)
+	swim_add_slang_program(SwimRhiBindless
+		SOURCE Source/Shaders/Slang/RhiSmoke/Bindless.slang
+		PROFILE spirv_1_5
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
@@ -372,6 +376,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiDepthSampling_SPIRV}" "${SwimRhiDepthSampling_REFLECTION}"
 			"${SwimRhiNestedParameters_SPIRV}" "${SwimRhiNestedParameters_REFLECTION}"
 			"${SwimRhiNestedGraphics_SPIRV}" "${SwimRhiNestedGraphics_REFLECTION}"
+			"${SwimRhiBindless_SPIRV}" "${SwimRhiBindless_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
 			Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
@@ -382,6 +387,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/RhiSmoke/DescriptorArrays.slang
 			Source/Shaders/Slang/RhiSmoke/SampledInteger.slang
 			Source/Shaders/Slang/RhiSmoke/SampledDimensions.slang
+			Source/Shaders/Slang/RhiSmoke/Bindless.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()

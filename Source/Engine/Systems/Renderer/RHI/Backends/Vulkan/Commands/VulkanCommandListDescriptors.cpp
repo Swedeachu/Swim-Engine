@@ -11,9 +11,11 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		const auto& layout = RequireActivePipeline();
 		auto& native = RequireResource<VulkanDescriptorTable>(table, GetState());
-		if (native.GetLayoutState().get() != &layout || space != native.GetSpace() || space >= boundTables.size() || !native.IsComplete())
+		if (space != native.GetSpace() || space >= boundTables.size() || !AreDescriptorSpacesCompatible(*native.GetLayoutState(), layout, space) ||
+			!native.IsComplete())
 		{
-			throw std::invalid_argument("Descriptor table must match the pipeline layout/space and have every element initialized");
+			throw std::invalid_argument(
+				"Descriptor table must match an identically defined pipeline layout space and have every required element initialized");
 		}
 		const auto set = FromNativeHandle<VkDescriptorSet>(native.GetNativeHandle());
 		GetState()->Dispatch.vkCmdBindDescriptorSets(commandBuffer, computePipeline ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS, layout.Layout, space, 1, &set, 0, nullptr);

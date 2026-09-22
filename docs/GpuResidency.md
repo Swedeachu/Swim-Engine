@@ -1,13 +1,14 @@
 # GPU resource residency
 
-This covers critical-path items **42** (generational GPU resource registries), **43** (paged `GeometryHeap`) and **44** (compiled `MeshAsset`/`TextureAsset` → asynchronous GPU residency). They live above the RHI and RenderGraph and below any scene/extraction code:
+This covers critical-path items **42** (generational GPU resource registries), **43** (paged `GeometryHeap`), **44** (compiled `MeshAsset`/`TextureAsset` → asynchronous GPU residency) and **45** (bindless texture/sampler table and sampler residency). They live above the RHI and RenderGraph and below any scene/extraction code:
 
 ```text
 Renderer/Residency  AssetResidencyService, TextureResidency, MeshGeometryPayload   (Assets + async IO + Jobs)
         |
 Renderer/Geometry   GeometryHeap, GeometryRangeAllocator, GpuMeshMetadata, GpuSubmeshRecord
         |
-Renderer/Resources  GpuHandle<Tag>, GpuResourceRegistry<Tag, Record>, GpuUploadState
+Renderer/Resources  GpuHandle<Tag>, GpuResourceRegistry<Tag, Record>, GpuUploadState,
+                    BindlessResourceTable, GpuSamplerCache
         |
 Renderer/RenderGraph (staged uploads, transfer helpers)  ->  RHI contract
 ```
@@ -97,12 +98,56 @@ Unloaded -> Queued -> Reading -> Decoding -> WaitingForGpuUpload -> Uploading ->
 - Errors map to `Assets::AssetError`: missing path → `NotFound`, IO failure → `Io`, cancellation → `Cancelled`, bad container/payload or wrong id/type → `InvalidData`. GPU staging failures (for example a compressed-only texture) fail the request with `InvalidData` **without** invalidating the valid CPU asset.
 - `GetStats()` reports per-state counts, abandoned decodes, total bytes read, bytes staged in the last update and in total.
 
+## Bindless textures and samplers (item 45)
+
+### RHI contract
+
+- **Runtime-sized arrays.** Slang reflects `Texture2D<float4> Textures[]` and `SamplerState Samplers[]` with `elementCount` 0. The shader compiler converts sampler and sampled-texture arrays like these to bindings with `Count = 0`. Other resource classes still reject when runtime-sized.
+- **Explicit spaces.** `PipelineLayoutDesc::DescriptorSpaces` supplies whole spaces that replace the program's reflected layout for those spaces.
+  - Each reflected binding must reappear with the same type, sampled class/dimension and storage format. Its stage mask must cover the reflected stages. Fixed arrays keep their count. A runtime-sized binding is only accepted when the explicit space gives it a capacity with `PartiallyBound` and `UpdateAfterBind`.
+  - Explicit bindings may be visible to stages the program lacks, and a space the program never reflects may be supplied.
+  - `PipelineLayout::GetInterface()` reports the merged result.
+- **Bindless bindings.** `UpdateAfterBind` requires `PartiallyBound`, a sampler or sampled-texture binding, and `GraphicsCapabilities::BindlessDescriptors`.
+  - That capability is the optional Vulkan `descriptorBindingUpdateUnusedWhilePending` feature, on top of the required descriptor-indexing features.
+  - Vulkan builds such bindings with the partially-bound, update-after-bind and update-unused-while-pending flags, in an update-after-bind set layout and pool.
+  - Plain descriptor limits count plain sets only. Once a layout has a bindless set, the update-after-bind limits count every set.
+- **Tables.** Partially bound elements need no write before binding.
+  - After the first bind, only update-after-bind bindings accept writes, and a mixed batch is rejected before any native write.
+  - A table binds to any pipeline whose layout defines its space identically, so one bindless table serves every program built with the same explicit space.
+
+### BindlessResourceTable
+
+`Render::BindlessResourceTable(device, BindlessTableDesc)` owns the descriptor table of one such space. The space must hold exactly two bindings: a float `Texture2D` array and a sampler array, both bindless. Their counts are the capacities.
+
+- Separate `BindlessTextureHandle` and `BindlessSamplerHandle` index spaces sit on two `GpuResourceRegistry` instances, so any texture pairs with any sampler. A shader receives `GetIndex(handle)`: the array element, or `FallbackIndex` (0) for invalid, stale or released handles.
+- The caller's fallback texture and sampler permanently occupy element 0 and cannot be released.
+- `RegisterTexture`/`RegisterSampler` (and the `TryRegister*` forms, which return empty when full) write the element immediately. Any submission recorded afterwards can index it, even while earlier submissions are still pending. When the RHI rejects the resource, the call throws and the element is freed at the next `Collect`.
+- `Release(handle, lastUse)` invalidates the handle at once. The element keeps its resource until `lastUse` completes. `Collect()` then rewrites it to the fallback, so a stale index samples something valid, and returns it to the FIFO free list. `Drain()` waits for pending releases first.
+- Registered views and samplers must outlive their release. Destroy the table only after the last submission that bound it has completed.
+
+### GpuSamplerCache
+
+Sampler identity is the `SamplerDesc`, with names ignored.
+
+- `Acquire(desc)` returns the existing `GpuSamplerHandle` for an equal description or creates a sampler. When a table is supplied, the new sampler is registered with it (`GetBindlessIndex`).
+- References are counted. The last `Release` retires the sampler, and its bindless element, after the latest `lastUse` reported by any holder. All releases to one cache must use one timeline.
+- Call `BindlessResourceTable::Collect` before `GpuSamplerCache::Collect` so elements point at the fallback before their samplers are destroyed. Either order is safe for the GPU, since both points have completed.
+
+### Explicit residency operation
+
+With `AssetResidencyDesc::Bindless` set, `AssetResidencyService::Update` registers a texture's view when it observes the texture `Resident`. This is the explicit operation that makes a texture bindless; loading an asset alone never does it.
+
+- `GetBindlessIndex(texture)` returns the fallback element until the texture is registered.
+- While the table is full, the texture stays Resident and registration is retried each update (`AssetResidencyStats::BindlessPending`).
+- If the RHI refuses the view, the texture stays Resident and usable through `GetGpuTexture`, keeps the fallback index, and `GetError` records why.
+- `ReleaseTexture(texture, lastUse)` releases the element with the same `lastUse` before destroying the texture.
+
 ## Not in this checkpoint
 
 - `ModelAsset` graphs (and material instances) are not requested through the service yet; they still load through `LoadSasset`, and their meshes/textures can be requested individually.
 - Block-compressed/KTX2 texture upload (needs block-aware RHI copies and/or runtime Basis transcoding) and texture streaming by mip.
 - Memory budgets and eviction (the service budgets bytes staged per update, not resident bytes); `.spack` packages (item 81).
-- Bindless texture/sampler tables built on `GpuResourceRegistry`, item **45**, including the fallback texture.
+- Layout-free bindless tables, bindless storage buffers/images, variable descriptor counts, and GPU material records carrying bindless ids (item 59). The engine does not construct a `BindlessResourceTable` yet.
 - The engine runtime does not construct the service yet; the sandbox still renders through the transitional renderer.
 - Relocation/compaction and page trimming (metrics exist; policy is later). Normal pages are retained once created.
 - Dedicated transfer-queue ownership for uploads (Phase 10 follow-up); uploads run on the graph's graphics queue.
@@ -118,3 +163,9 @@ Unloaded -> Queued -> Reading -> Decoding -> WaitingForGpuUpload -> Uploading ->
 - `Render.AssetResidency.*` — resident CPU assets through GPU residency, per-update budget ordering, NotFound/Io/InvalidData failures and retry, compressed-texture failure that keeps the CPU asset, capacity backpressure, release rules around pending imports.
 - `AssetCompiler.SassetDecode.*` and `AssetCompiler.AssetResidency.*` (built where `SwimAssetCompiler` exists, because they cook real `.sasset` objects) — off-thread decode/owner-thread publish, hash failure, owner-thread-only types, and end-to-end streaming of cooked meshes and textures through async IO and job decodes into GPU pages/textures, wrong id/type rejection and release during reads.
 - Opt-in native `RHI.Vulkan.Smoke.TextureResidencyMipChainUploadAndRetirement` — a five-level RGBA8 chain uploaded by `TextureResidency` and read back per mip in the same graph, then retired.
+- `ShaderCompiler.DescriptorArrays.RuntimeSizedSamplerAndTextureArraysKeepCountZeroForTheLayout` — runtime-sized sampler/texture arrays convert; buffer, uniform and storage-image arrays still reject.
+- `RHI.Vulkan.Bindless.*` (Vulkan dispatch capture) — explicit-space merging and every rejection rule, binding flags and update-after-bind set/pool flags, update-after-bind limits, post-bind writes limited to update-after-bind bindings, binding across identically defined spaces, and the compiled `Bindless.slang` reflection.
+- `Render.Bindless.*` — fallback elements, immediate writes, full tables, handle invalidation, timeline-gated retirement with fallback rewrite, FIFO reuse, drain, rejected writes, layout validation.
+- `Render.SamplerCache.*` — description identity, reference counts, latest-use retirement, one-timeline rule, bindless and table-free use.
+- `Render.AssetResidency.ResidentTexturesBecomeBindlessExplicitlyAndRetireTheirElementWithTheTexture` — registration at residency, full-table retry, element retirement with the texture, rejected views.
+- Opt-in native `RHI.Vulkan.Smoke.BindlessTableTimelineSafeReuse` — a compute shader samples texture/sampler pairs through nonuniform indices in one shared bindless space. It checks nearest versus linear filtering and the fallbacks, writes a new element while earlier work may still be pending, releases an element against that work's timeline point, samples the fallback through the stale index after `Collect`, and then samples the element's reuse.

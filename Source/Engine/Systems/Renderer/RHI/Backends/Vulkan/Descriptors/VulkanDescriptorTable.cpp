@@ -55,6 +55,10 @@ namespace Swim::RhiVulkan
 		}
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		if (result->layoutState->UpdateAfterBindSets[desc.Space])
+		{
+			poolInfo.flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+		}
 		poolInfo.maxSets = 1;
 		poolInfo.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
 		poolInfo.pPoolSizes = sizes.data();
@@ -106,9 +110,11 @@ namespace Swim::RhiVulkan
 
 	bool VulkanDescriptorTable::IsComplete() const
 	{
-		for (const auto& binding : initialized)
+		// Partially bound elements only need a descriptor before shaders access them.
+		const auto& bindings = FindDescriptorSchema(*layoutState, space)->Bindings;
+		for (std::size_t index = 0; index < initialized.size(); ++index)
 		{
-			if (std::find(binding.begin(), binding.end(), false) != binding.end())
+			if (!bindings[index].PartiallyBound && std::find(initialized[index].begin(), initialized[index].end(), false) != initialized[index].end())
 			{
 				return false;
 			}

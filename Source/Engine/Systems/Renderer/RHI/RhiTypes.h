@@ -502,6 +502,11 @@ namespace Swim::Rhi
 		SampledTextureClass SampledClass = SampledTextureClass::Float;
 		// SampledTexture view shape, independent of descriptor Count. Other types retain Texture2D.
 		TextureViewDimension SampledDimension = TextureViewDimension::Texture2D;
+		// Bindless element contract (Sampler/SampledTexture only, requires
+		// GraphicsCapabilities::BindlessDescriptors and PartiallyBound): elements may be
+		// written after the table is bound and while submitted work is pending,
+		// provided that pending work does not dynamically access the rewritten element.
+		bool UpdateAfterBind = false;
 	};
 
 	struct DescriptorSchemaDesc
@@ -577,6 +582,10 @@ namespace Swim::Rhi
 		// Backend can negotiate HDR color spaces; query each window for usable pairs.
 		bool HdrSwapchain = false;
 		bool SampledCubeArray = false; // Optional enabled device feature; not required by the baseline.
+		// Partially bound, update-after-bind (including while unused elements are pending)
+		// and nonuniformly indexed sampler/sampled-texture arrays. Optional; bindless
+		// descriptor spaces are rejected without it. Size them with Descriptors.MaxBindless*.
+		bool BindlessDescriptors = false;
 	};
 
 } // namespace Swim::Rhi

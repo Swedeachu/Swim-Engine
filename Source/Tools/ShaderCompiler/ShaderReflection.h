@@ -61,6 +61,9 @@ namespace Swim::ShaderCompiler
 		// binding-slot count; DescriptorArrayCount is the number of descriptors.
 		std::string DescriptorElementTypeKind;
 		std::uint32_t DescriptorArrayCount = 0;
+		// Unbounded `T name[]` arrays reflect elementCount 0. They convert to Count 0
+		// bindings whose capacity comes from an explicit pipeline-layout space.
+		bool DescriptorArrayRuntimeSized = false;
 		// Owned byte ranges within a reflected uniform buffer. Names retain the source path.
 		std::vector<ShaderUniformReflection> UniformFields;
 	};

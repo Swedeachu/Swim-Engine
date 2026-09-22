@@ -35,7 +35,7 @@ SWIM_TEST("RHI.Vulkan.Descriptors", "SparseSpacesPreserveBindingsAndRejectInvali
 		}
 		if (invalid == 2)
 		{
-			bad.Bindings[0].PartiallyBound = true;
+			bad.Bindings[0].UpdateAfterBind = true; // Needs PartiallyBound and bindless-capable devices.
 		}
 		if (invalid == 3)
 		{

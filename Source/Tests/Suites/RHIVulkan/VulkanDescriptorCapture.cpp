@@ -37,6 +37,12 @@ namespace Swim::Testing
 			{
 				capture->SetBindings.back().push_back(info->pBindings[index]);
 			}
+			capture->SetFlags.push_back(info->flags);
+			capture->SetBindingFlags.emplace_back();
+			if (const auto* flags = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo*>(info->pNext))
+			{
+				capture->SetBindingFlags.back().assign(flags->pBindingFlags, flags->pBindingFlags + flags->bindingCount);
+			}
 			if (capture->SetBindings.size() == capture->FailSet)
 			{
 				return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -50,6 +56,7 @@ namespace Swim::Testing
 		{
 			++capture->PoolsCreated;
 			capture->PoolSizes.assign(info->pPoolSizes, info->pPoolSizes + info->poolSizeCount);
+			capture->PoolFlags = info->flags;
 			if (capture->PoolResult == VK_SUCCESS)
 			{
 				*pool = RhiVulkan::FromNativeHandle<VkDescriptorPool>(capture->PoolsCreated);

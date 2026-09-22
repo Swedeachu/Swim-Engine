@@ -66,6 +66,11 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<Rhi::DeviceDiagnostics> Diagnostics = std::make_shared<Rhi::DeviceDiagnostics>();
 		bool DeviceFaultEnabled = false;
 		bool MemoryBudgetEnabled = false;
+		// Optional descriptorBindingUpdateUnusedWhilePending was enabled with the
+		// required descriptor-indexing features (GraphicsCapabilities::BindlessDescriptors).
+		bool BindlessDescriptorsEnabled = false;
+		// Update-after-bind limits for layouts containing bindless spaces.
+		VkPhysicalDeviceDescriptorIndexingProperties DescriptorIndexing{};
 		mutable VulkanPipelineCacheState PipelineCache;
 		std::array<std::shared_ptr<std::mutex>, 3> QueueMutexes{};
 		mutable std::mutex RetirementMutex;

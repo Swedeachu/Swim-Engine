@@ -6,6 +6,8 @@
 
 #include <cstring>
 #include <functional>
+#include <map>
+#include <stdexcept>
 #include <string>
 
 namespace Swim::Testing
@@ -140,6 +142,86 @@ namespace Swim::Testing
 	private:
 		Swim::Rhi::Texture& texture;
 		Swim::Rhi::TextureViewDesc desc;
+	};
+
+	class MockSampler final : public Swim::Rhi::Sampler
+	{
+	public:
+		explicit MockSampler(const Swim::Rhi::SamplerDesc& desc) : desc(desc) { this->desc.DebugName = {}; }
+		std::uintptr_t GetNativeHandle() const override { return 10; }
+		const Swim::Rhi::SamplerDesc& GetDesc() const override { return desc; }
+
+	private:
+		Swim::Rhi::SamplerDesc desc;
+	};
+
+	class MockShaderProgram final : public Swim::Rhi::ShaderProgram
+	{
+	public:
+		std::uintptr_t GetNativeHandle() const override { return 11; }
+		const Swim::Rhi::ShaderProgramInterface& GetInterface() const override { return Interface; }
+		Swim::Rhi::ShaderProgramInterface Interface;
+	};
+
+	// A layout whose (merged) interface is set directly by the test.
+	class MockPipelineLayout final : public Swim::Rhi::PipelineLayout
+	{
+	public:
+		std::uintptr_t GetNativeHandle() const override { return 12; }
+		Swim::Rhi::ShaderProgram& GetProgram() const override { return program; }
+		const Swim::Rhi::ShaderProgramInterface& GetInterface() const override { return program.Interface; }
+		mutable MockShaderProgram program;
+	};
+
+	// Records the resource currently written to each (binding, element).
+	class MockDescriptorTable final : public Swim::Rhi::DescriptorTable
+	{
+	public:
+		MockDescriptorTable(Swim::Rhi::PipelineLayout& layout, std::uint32_t space) : layout(layout), space(space) {}
+		std::uintptr_t GetNativeHandle() const override { return 13; }
+		Swim::Rhi::PipelineLayout& GetLayout() const override { return layout; }
+		std::uint32_t GetSpace() const override { return space; }
+
+		void Write(std::span<const Swim::Rhi::DescriptorWrite> writes) override
+		{
+			const Swim::Rhi::DescriptorSchemaDesc* schema = nullptr;
+			for (const auto& candidate : layout.GetInterface().DescriptorSchemas)
+			{
+				schema = candidate.Space == space ? &candidate : schema;
+			}
+			for (const auto& write : writes)
+			{
+				const Swim::Rhi::DescriptorBindingDesc* binding = nullptr;
+				for (const auto& candidate : schema->Bindings)
+				{
+					binding = candidate.Binding == write.Binding ? &candidate : binding;
+				}
+				if (!binding || write.ArrayIndex >= binding->Count || (Reject && (write.TextureResource == Reject || write.SamplerResource == Reject)))
+				{
+					throw std::invalid_argument("MockDescriptorTable rejected a write");
+				}
+			}
+			for (const auto& write : writes)
+			{
+				Elements[{ write.Binding, write.ArrayIndex }] =
+					write.TextureResource ? static_cast<const void*>(write.TextureResource) : static_cast<const void*>(write.SamplerResource);
+				++ElementWrites;
+			}
+		}
+
+		const void* Element(std::uint32_t binding, std::uint32_t index) const
+		{
+			const auto found = Elements.find({ binding, index });
+			return found == Elements.end() ? nullptr : found->second;
+		}
+
+		std::map<std::pair<std::uint32_t, std::uint32_t>, const void*> Elements;
+		std::uint32_t ElementWrites = 0;
+		const void* Reject = nullptr; // Writes of this resource throw, as an RHI validation failure would.
+
+	private:
+		Swim::Rhi::PipelineLayout& layout;
+		std::uint32_t space;
 	};
 
 	class MockCommandList final : public Swim::Rhi::CommandList
@@ -374,12 +456,25 @@ namespace Swim::Testing
 		{
 			return CreateTextures ? std::make_unique<MockTextureView>(texture, desc) : nullptr;
 		}
-		std::unique_ptr<Swim::Rhi::Sampler> CreateSampler(const Swim::Rhi::SamplerDesc&) override { return nullptr; }
+		std::unique_ptr<Swim::Rhi::Sampler> CreateSampler(const Swim::Rhi::SamplerDesc& desc) override
+		{
+			++SamplerCreateCount;
+			return std::make_unique<MockSampler>(desc);
+		}
 		std::unique_ptr<Swim::Rhi::ShaderProgram> CreateShaderProgram(const Swim::Rhi::ShaderProgramDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::PipelineLayout> CreatePipelineLayout(const Swim::Rhi::PipelineLayoutDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::GraphicsPipeline> CreateGraphicsPipeline(const Swim::Rhi::GraphicsPipelineDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::ComputePipeline> CreateComputePipeline(const Swim::Rhi::ComputePipelineDesc&) override { return nullptr; }
-		std::unique_ptr<Swim::Rhi::DescriptorTable> CreateDescriptorTable(const Swim::Rhi::DescriptorTableDesc&) override { return nullptr; }
+		std::unique_ptr<Swim::Rhi::DescriptorTable> CreateDescriptorTable(const Swim::Rhi::DescriptorTableDesc& desc) override
+		{
+			if (!desc.Layout || FailDescriptorTable)
+			{
+				return nullptr;
+			}
+			auto table = std::make_unique<MockDescriptorTable>(*desc.Layout, desc.Space);
+			LastDescriptorTable = table.get();
+			return table;
+		}
 
 		std::unique_ptr<Swim::Rhi::CommandPool> CreateCommandPool(Swim::Rhi::QueueType) override
 		{
@@ -416,6 +511,9 @@ namespace Swim::Testing
 		std::uint32_t TextureCreateCount = 0;
 		std::uint32_t TextureAttemptCount = 0;
 		std::uint32_t FailTextureCreate = 0;
+		std::uint32_t SamplerCreateCount = 0;
+		bool FailDescriptorTable = false;
+		MockDescriptorTable* LastDescriptorTable = nullptr;
 		std::shared_ptr<std::vector<MockCommand>> Commands = std::make_shared<std::vector<MockCommand>>();
 	};
 

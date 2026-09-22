@@ -49,7 +49,7 @@ namespace Swim::RhiVulkan
 		{
 			return nullptr;
 		}
-		if (!CreateDescriptorLayouts(*result->layoutState))
+		if (!CreateDescriptorLayouts(*result->layoutState, desc.DescriptorSpaces))
 		{
 			return nullptr;
 		}

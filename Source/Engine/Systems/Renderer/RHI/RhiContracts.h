@@ -183,6 +183,15 @@ namespace Swim::Rhi
 	{
 		ShaderProgram* Program = nullptr;
 		std::string_view DebugName;
+		// Explicit layouts that replace the program's reflected layout for their spaces,
+		// so tables can be shared between pipelines (for example one bindless space for
+		// every program). Each reflected binding in such a space must appear with the
+		// same type, sampled class/dimension and a stage mask covering its reflected
+		// stages; fixed arrays keep their count. Runtime-sized reflected arrays (Count 0)
+		// must be given here with a capacity, PartiallyBound and UpdateAfterBind.
+		// Explicit bindings may be visible to stages the program lacks. A space may also
+		// be supplied that the program does not reflect at all.
+		std::span<const DescriptorSchemaDesc> DescriptorSpaces{};
 	};
 
 	struct DescriptorTableDesc
@@ -440,8 +449,13 @@ namespace Swim::Rhi
 	  public:
 		virtual PipelineLayout& GetLayout() const = 0;
 		virtual std::uint32_t GetSpace() const = 0;
-		// Initialize every descriptor before binding. First binding freezes this table;
-		// later resource changes use a replacement table and normal GPU retirement.
+		// Initialize every descriptor before binding, except PartiallyBound elements, which
+		// only need to be written before shaders access them. First binding freezes this
+		// table's other bindings; later resource changes use a replacement table and
+		// normal GPU retirement. UpdateAfterBind elements stay writable after binding and
+		// while submitted work is pending, as long as that work does not access the
+		// element being rewritten (retire element reuse on the GPU timeline).
+		// A table binds to any pipeline whose layout defines its space identically.
 		// Writes/first binding require external host synchronization. Keep the layout
 		// and referenced resources alive for the table's use; writes do not add barriers.
 		// BufferRange == 0 selects the remaining buffer range, subject to device limits.

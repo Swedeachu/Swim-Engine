@@ -37,6 +37,8 @@ namespace Swim::Render::Internal
 		std::shared_ptr<AssetDecodeSlot> Slot;
 		GpuMeshHandle Mesh;
 		GpuTextureHandle Texture;
+		BindlessTextureHandle Bindless; // Registered once the texture is Resident.
+		bool BindlessRejected = false;	// The RHI refused the view; Error explains why.
 		Assets::AssetError Error;
 	};
 } // namespace Swim::Render::Internal

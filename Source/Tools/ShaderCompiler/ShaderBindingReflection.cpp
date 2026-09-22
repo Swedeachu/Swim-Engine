@@ -45,10 +45,13 @@ namespace Swim::ShaderCompiler::Detail
 					// A SPIR-V descriptor array occupies one binding. Its element
 					// count lives on the array type, not the binding's slot count.
 					if (reflection.BindingKind != "descriptorTableSlot" || reflection.Count != 1 ||
-						!ReadU32(type, "elementCount", reflection.DescriptorArrayCount) || reflection.DescriptorArrayCount == 0)
+						!ReadU32(type, "elementCount", reflection.DescriptorArrayCount))
 					{
 						reflection.HasUnsupportedBindingLayout = true;
 					}
+					// Slang reports unbounded (runtime-sized) arrays with elementCount 0.
+					reflection.DescriptorArrayRuntimeSized =
+						!reflection.HasUnsupportedBindingLayout && reflection.DescriptorArrayCount == 0;
 					const auto element = FindField(type, "elementType");
 					simdjson::dom::object elementType;
 					if (!element || element->get_object().get(elementType))

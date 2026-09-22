@@ -11,7 +11,10 @@ namespace Swim::Testing
 	{
 		VulkanDescriptorCapture();
 		std::vector<std::vector<VkDescriptorSetLayoutBinding>> SetBindings;
+		std::vector<VkDescriptorSetLayoutCreateFlags> SetFlags;
+		std::vector<std::vector<VkDescriptorBindingFlags>> SetBindingFlags;
 		std::vector<VkDescriptorPoolSize> PoolSizes;
+		VkDescriptorPoolCreateFlags PoolFlags = 0;
 		std::vector<VkDescriptorImageInfo> ImagesWritten;
 		std::vector<VkDescriptorBufferInfo> BuffersWritten;
 		std::vector<VkWriteDescriptorSet> Writes;

@@ -18,9 +18,10 @@ namespace Swim::ShaderCompiler
 		const bool descriptorArray = parameter.TypeKind == "array";
 		const auto& typeKind = descriptorArray ? parameter.DescriptorElementTypeKind : parameter.TypeKind;
 		const auto count = descriptorArray ? parameter.DescriptorArrayCount : parameter.Count;
-		if (descriptorArray && (parameter.Count != 1 || count == 0))
+		const bool runtimeSized = descriptorArray && parameter.DescriptorArrayRuntimeSized;
+		if (descriptorArray && (parameter.Count != 1 || (count == 0 && !runtimeSized)))
 		{
-			return "Descriptor arrays require one binding and a fixed positive element count: " + parameter.Name;
+			return "Descriptor arrays require one binding and a fixed positive or runtime-sized element count: " + parameter.Name;
 		}
 
 		Rhi::DescriptorType type;
@@ -113,6 +114,11 @@ namespace Swim::ShaderCompiler
 			return "Unsupported reflected resource type/access: " + parameter.Name;
 		}
 
+		if (runtimeSized && type != Rhi::DescriptorType::Sampler && type != Rhi::DescriptorType::SampledTexture)
+		{
+			return "Runtime-sized descriptor arrays are limited to samplers and sampled textures: " + parameter.Name;
+		}
+
 		const auto space = parameter.HasSpace ? parameter.Space : 0;
 		auto schema = std::find_if(interface.DescriptorSchemas.begin(), interface.DescriptorSchemas.end(),
 			[space](const auto& candidate)
@@ -134,7 +140,9 @@ namespace Swim::ShaderCompiler
 		}
 
 		// The caller supplies global or entry-point visibility; binding coordinates stay absolute.
-		schema->Bindings.push_back({ parameter.Index, type, count, stages, false, false, storageFormat, sampledClass, sampledDimension });
+		// Runtime-sized arrays keep Count 0: the pipeline layout supplies their capacity.
+		schema->Bindings.push_back(
+			{ parameter.Index, type, runtimeSized ? 0u : count, stages, false, false, storageFormat, sampledClass, sampledDimension });
 		return {};
 	}
 
