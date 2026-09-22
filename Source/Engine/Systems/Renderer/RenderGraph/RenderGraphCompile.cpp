@@ -61,7 +61,7 @@ namespace Swim::Render
 
 					if (use.Access != GraphAccess::Write)
 					{
-						if (hazard.Writer == unused && (!r.Imported || r.Initial == Rhi::ResourceState::Undefined))
+						if (hazard.Writer == unused && !r.InitiallyDefined())
 						{
 							throw std::invalid_argument("RenderGraph read before write: pass '" + pass.Name + "', resource '" + r.Name +
 								"', subresource " + std::to_string(cell));
@@ -99,7 +99,7 @@ namespace Swim::Render
 				{
 					live[hazard.Writer] = true;
 				}
-				else if (!definition.Resources[r].Imported || definition.Resources[r].Initial == Rhi::ResourceState::Undefined)
+				else if (!definition.Resources[r].InitiallyDefined())
 				{
 					throw std::invalid_argument("RenderGraph exports uninitialized contents: " + definition.Resources[r].Name);
 				}
@@ -230,7 +230,7 @@ namespace Swim::Render
 			for (std::uint32_t slot = 0; slot < result.allocations.size(); ++slot)
 			{
 				const auto& candidate = definition.Resources[result.allocations[slot]];
-				if (!candidate.Imported && !definition.Resources[r].Imported && slotLast[slot] < life.First &&
+				if (candidate.Poolable() && definition.Resources[r].Poolable() && slotLast[slot] < life.First &&
 					Compatible(candidate, definition.Resources[r]))
 				{
 					life.Allocation = slot;

@@ -1,0 +1,21 @@
+#include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
+#include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
+#include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
+#include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
+#include <memory>
+#include <type_traits>
+
+namespace
+{
+	struct Record
+	{
+		std::unique_ptr<Swim::Rhi::Buffer> Buffer;
+	};
+} // namespace
+
+// Registries/GeometryHeap compile against only backend-neutral RHI + RenderGraph headers.
+static_assert(!std::is_copy_constructible_v<Swim::Render::GeometryHeap>);
+static_assert(!std::is_copy_constructible_v<Swim::Render::GpuResourceRegistry<Swim::Render::GpuMeshTag, Record>>);
+static_assert(!std::is_same_v<Swim::Render::GpuMeshHandle, Swim::Render::GpuTextureHandle>);
+static_assert(sizeof(Swim::Render::GpuMeshHandle) == sizeof(std::uint64_t));
+static_assert(sizeof(Swim::Render::GpuMeshMetadata) % 16 == 0);

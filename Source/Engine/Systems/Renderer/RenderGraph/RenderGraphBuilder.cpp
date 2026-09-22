@@ -9,6 +9,10 @@ namespace Swim::Render
 	{
 		const auto& r = Internal::RequireResource(definition, graph, index, kind);
 		Internal::ValidateAccess(r, access, state, pass.Type);
+		if (r.Staging == Internal::GraphStaging::Upload && access != GraphAccess::Read)
+		{
+			throw std::invalid_argument("RenderGraph upload buffers are GPU read-only: " + r.Name);
+		}
 
 		range = Internal::NormalizeRange(r, range);
 		const auto cells = Internal::Cells(r, range);

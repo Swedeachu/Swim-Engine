@@ -509,6 +509,8 @@ PhysX backend  -> Generic Physics, PhysX
 Jolt backend   -> Generic Physics, Jolt
 RHI contract   (header-only, no deps)
 RenderGraph    -> RHI contract (compiled directly into SwimEngine/SwimTests)
+Resources      -> RHI contract (GPU handles/registries; same source list as RenderGraph)
+Geometry       -> Resources, RenderGraph, RHI contract (paged GeometryHeap)
 Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAllocator
 
 SwimEngine
@@ -524,7 +526,7 @@ SwimShaderCompiler (Tools)
   -> RHI contract headers (no link needed), simdjson
 ```
 
-Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph adds no module project or runnable test target: its suites join `SwimTests`, and only `SwimRenderGraphPublicHeaders` is a separate compile boundary under Tests/Header Boundary. See [the graph contract](RenderGraph.md).
+Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph, `Renderer/Resources` and `Renderer/Geometry` add no module project or runnable test target: their suites (`RenderGraph`, `RenderResources`, `RenderGeometry`) join `SwimTests`, and only `SwimRenderGraphPublicHeaders` and `SwimRenderResourcesPublicHeaders` are separate compile boundaries under Tests/Header Boundary. See [the graph contract](RenderGraph.md) and [GPU resource residency](GpuResidency.md).
 
 ---
 

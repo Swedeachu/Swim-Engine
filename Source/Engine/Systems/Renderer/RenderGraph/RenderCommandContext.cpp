@@ -48,7 +48,23 @@ namespace Swim::Render
 
 	Rhi::Buffer& RenderCommandContext::Get(GraphBuffer r) const
 	{
-		return static_cast<Rhi::Buffer&>(GetResource(r.Graph, r.Index, GraphKind::Buffer, {}));
+		auto& buffer = static_cast<Rhi::Buffer&>(GetResource(r.Graph, r.Index, GraphKind::Buffer, {}));
+		if (state.Graph.definition->Resources[r.Index].Staging != Internal::GraphStaging::None)
+		{
+			throw std::invalid_argument(
+				"Staged RenderGraph buffers are suballocated; use GetRange: " + state.Graph.definition->Resources[r.Index].Name);
+		}
+		return buffer;
+	}
+
+	GraphBufferRange RenderCommandContext::GetRange(GraphBuffer r) const
+	{
+		auto& buffer = static_cast<Rhi::Buffer&>(GetResource(r.Graph, r.Index, GraphKind::Buffer, {}));
+		if (state.Ranges[r.Index].Buffer)
+		{
+			return state.Ranges[r.Index];
+		}
+		return { &buffer, 0, buffer.GetDesc().Size };
 	}
 
 	Rhi::Texture& RenderCommandContext::Get(GraphTexture r, Rhi::TextureSubresourceRange range) const

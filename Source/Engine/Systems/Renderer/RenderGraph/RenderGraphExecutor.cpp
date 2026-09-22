@@ -5,15 +5,17 @@
 
 namespace Swim::Render
 {
-	RenderGraphExecutor::RenderGraphExecutor(Rhi::Device& device) : state(std::make_unique<Internal::GraphExecutionState>(device))
+	RenderGraphExecutor::RenderGraphExecutor(Rhi::Device& device, const RenderGraphExecutorDesc& desc)
+		: state(std::make_unique<Internal::GraphExecutionState>(device, desc))
 	{
-		state->Timeline = device.CreateTimeline();
+		state->Timeline = std::shared_ptr<Rhi::Timeline>(device.CreateTimeline());
 		state->CommandPool = device.CreateCommandPool(Rhi::QueueType::Graphics);
 
 		if (!state->Timeline || !state->CommandPool)
 		{
 			throw std::runtime_error("RenderGraph could not create execution synchronization/command pool");
 		}
+		CreateInitialStaging();
 	}
 
 	RenderGraphExecutor::~RenderGraphExecutor()
@@ -38,6 +40,9 @@ namespace Swim::Render
 		state->Retained.clear();
 		state->Queries.reset();
 		state->Pool.clear();
+		state->ReadbackSlices.clear();
+		state->Upload.reset();
+		state->Readback.reset();
 	}
 
 	void RenderGraphExecutor::Wait()
@@ -63,6 +68,10 @@ namespace Swim::Render
 		state->Queries.reset();
 		state->Resources.clear();
 		state->Pool.clear();
+		state->Ranges.clear();
+		state->ReadbackSlices.clear();
+		state->Upload.reset();
+		state->Readback.reset();
 
 		state->Graph = {};
 		state->HasResult = false;
@@ -137,6 +146,11 @@ namespace Swim::Render
 				slots.push_back(desc.Imported);
 				continue;
 			}
+			if (desc.Staging != Internal::GraphStaging::None)
+			{
+				slots.push_back(nullptr); // Bound to an arena suballocation by StageBuffers.
+				continue;
+			}
 
 			auto found = std::find_if(state->Pool.begin(), state->Pool.end(),
 				[&](const auto& pooled)
@@ -180,6 +194,7 @@ namespace Swim::Render
 				state->Resources[r] = slots[graph.lifetimes[r].Allocation];
 			}
 		}
+		StageBuffers(graph); // Runs upload writers; failure leaves no published result.
 
 		if (!graph.schedule.empty() && state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
 		{
@@ -241,6 +256,17 @@ namespace Swim::Render
 			}
 			state->Commands->End();
 
+			const bool uploads = state->Upload && state->Upload->GetUsedBytes() != 0;
+			const bool readbacks = state->Readback && state->Readback->GetUsedBytes() != 0;
+			if (uploads)
+			{
+				state->Upload->Flush();
+			}
+			if (readbacks)
+			{
+				Rhi::ReadbackSubmission::Validate(*state->Readback);
+			}
+
 			std::vector<Rhi::TimelinePoint> signals(synchronization.SignalTimelines.begin(), synchronization.SignalTimelines.end());
 			signals.push_back({ state->Timeline.get(), state->Submitted + 1 });
 			auto* commands = state->Commands.get();
@@ -250,6 +276,10 @@ namespace Swim::Render
 			state->Device.GetQueue(Rhi::QueueType::Graphics).Submit(submit);
 
 			++state->Submitted;
+			if (readbacks)
+			{
+				Rhi::ReadbackSubmission::Commit(*state->Readback, state->Timeline, state->Submitted);
+			}
 			state->HasResult = true;
 			state->Recording = false;
 			return { state->Timeline.get(), state->Submitted };
@@ -272,6 +302,10 @@ namespace Swim::Render
 		if (!r.Exported)
 		{
 			throw std::invalid_argument("Only exported RenderGraph resources may escape a pass");
+		}
+		if (r.Staging != Internal::GraphStaging::None)
+		{
+			throw std::invalid_argument("Staged RenderGraph readbacks are read through TryReadback: " + r.Name);
 		}
 
 		return *state->Resources[index];

@@ -103,6 +103,9 @@ function(swim_configure_tests)
 	swim_add_header_boundary(SwimRenderGraphPublicHeaders
 		SOURCE Source/Tests/HeaderBoundary/RenderGraphPublicHeaders.cpp
 		BUILD_BY_DEFAULT)
+	swim_add_header_boundary(SwimRenderResourcesPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/RenderResourcesPublicHeaders.cpp
+		BUILD_BY_DEFAULT)
 
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
@@ -149,6 +152,8 @@ function(swim_configure_tests)
 		Scene/Headless
 		RHI
 		RenderGraph
+		RenderResources
+		RenderGeometry
 		Commands
 	)
 

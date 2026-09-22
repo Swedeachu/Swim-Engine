@@ -3756,15 +3756,30 @@ def check_retirement_boundaries(failures: list[str]) -> None:
 
 def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
-    graph_root = renderer / "RenderGraph"
-    for path in graph_root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+    # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
+    # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
+    for module in ("RenderGraph", "Resources", "Geometry"):
+        module_root = renderer / module
+        if not module_root.is_dir():
+            fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
             continue
-        text = path.read_text(encoding="utf-8")
-        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', text):
-            normalized = include.replace("\\", "/")
-            if any(part in normalized for part in ("Backends/", "vulkan", "volk", "vk_mem_alloc", "entt", "Engine/Scene", "Engine/Platform")):
-                fail(f"RenderGraph leaks a backend, scene or platform dependency: {path.relative_to(ROOT)} -> {include}", failures)
+        for path in module_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', text):
+                normalized = include.replace("\\", "/")
+                if any(part in normalized for part in ("Backends/", "vulkan", "volk", "vk_mem_alloc", "entt", "Engine/Scene", "Engine/Platform", "Systems/Scene")):
+                    fail(f"{module} leaks a backend, scene or platform dependency: {path.relative_to(ROOT)} -> {include}", failures)
+    # The graph must stay below residency policy.
+    for path in (renderer / "RenderGraph").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/Geometry/|Renderer/Resources/)', path.read_text(encoding="utf-8")
+        ):
+            fail(f"RenderGraph must not depend on residency layers: {path.relative_to(ROOT)}", failures)
+    check_suite_is_compiled("RenderGraph", "RenderGraphTransferTests.cpp", failures)
+    check_suite_is_compiled("RenderResources", "GpuResourceRegistryTests.cpp", failures)
+    check_suite_is_compiled("RenderGeometry", "GeometryHeapTests.cpp", failures)
     for path in (renderer / "RHI").rglob("*"):
         if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
             continue

@@ -114,9 +114,79 @@ namespace Swim::Render
 		return handle;
 	}
 
+	GraphBuffer RenderGraph::CreateUpload(const GraphUploadDesc& desc, GraphUploadWriter writer)
+	{
+		constexpr auto allowed = Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::Vertex | Rhi::BufferUsage::Index |
+			Rhi::BufferUsage::Uniform | Rhi::BufferUsage::Storage | Rhi::BufferUsage::Indirect;
+		if (!desc.Size || desc.Usage == Rhi::BufferUsage::None ||
+			(static_cast<std::uint32_t>(desc.Usage) & ~static_cast<std::uint32_t>(allowed)) != 0)
+		{
+			throw std::invalid_argument("RenderGraph upload needs a size and GPU-read usage");
+		}
+		if (!desc.Alignment || (desc.Alignment & (desc.Alignment - 1)) != 0)
+		{
+			throw std::invalid_argument("RenderGraph upload alignment must be a power of two");
+		}
+		if (!writer)
+		{
+			throw std::invalid_argument("RenderGraph upload needs a writer");
+		}
+
+		const auto handle = CreateBuffer({ desc.Size, desc.Usage, Rhi::MemoryPreference::CpuToGpu,
+			desc.DebugName.empty() ? std::string_view("GraphUpload") : desc.DebugName, true });
+		auto& r = definition.Resources.back();
+		r.Staging = Internal::GraphStaging::Upload;
+		r.Initial = Rhi::ResourceState::HostWrite;
+		r.Alignment = desc.Alignment;
+		r.Writer = std::move(writer);
+		return handle;
+	}
+
+	GraphBuffer RenderGraph::CreateUpload(
+		std::span<const std::byte> bytes, std::string_view name, Rhi::BufferUsage usage, std::uint64_t alignment)
+	{
+		auto owned = std::make_shared<const std::vector<std::byte>>(bytes.begin(), bytes.end());
+		return CreateUpload({ bytes.size(), usage, alignment, name },
+			[owned](std::span<std::byte> destination)
+			{
+				std::copy(owned->begin(), owned->end(), destination.begin());
+			});
+	}
+
+	GraphBuffer RenderGraph::CreateReadback(const GraphReadbackDesc& desc)
+	{
+		if (!desc.Size || !desc.Alignment || (desc.Alignment & (desc.Alignment - 1)) != 0)
+		{
+			throw std::invalid_argument("RenderGraph readback needs a size and power-of-two alignment");
+		}
+
+		const auto handle = CreateBuffer({ desc.Size, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu,
+			desc.DebugName.empty() ? std::string_view("GraphReadback") : desc.DebugName, true });
+		auto& r = definition.Resources.back();
+		r.Staging = Internal::GraphStaging::Readback;
+		r.Alignment = desc.Alignment;
+		r.Exported = true;
+		r.Final = Rhi::ResourceState::HostRead;
+		return handle;
+	}
+
+	const Rhi::BufferDesc& RenderGraph::GetDesc(GraphBuffer resource) const
+	{
+		return Internal::RequireResource(definition, resource.Graph, resource.Index, GraphKind::Buffer).Buffer;
+	}
+
+	const Rhi::TextureDesc& RenderGraph::GetDesc(GraphTexture resource) const
+	{
+		return Internal::RequireResource(definition, resource.Graph, resource.Index, GraphKind::Texture).Texture;
+	}
+
 	void RenderGraph::ExportResource(std::uint64_t graph, std::uint32_t index, GraphKind kind, Rhi::ResourceState final)
 	{
 		const auto& r = Internal::RequireResource(definition, graph, index, kind);
+		if (r.Staging != Internal::GraphStaging::None)
+		{
+			throw std::invalid_argument("Staged RenderGraph buffers have fixed completion states: " + r.Name);
+		}
 		Internal::ValidateState(r, final);
 		if (r.Exported && r.Final != final)
 		{

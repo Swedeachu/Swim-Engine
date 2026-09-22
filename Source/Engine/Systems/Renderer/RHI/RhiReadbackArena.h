@@ -174,6 +174,7 @@ namespace Swim::Rhi
 
 	private:
 		friend class FrameContextRing;
+		friend class ReadbackSubmission;
 
 		explicit ReadbackArena(std::shared_ptr<Buffer> buffer)
 			: buffer(std::move(buffer)), batch(std::make_shared<ReadbackSlice::Batch>())
@@ -202,6 +203,31 @@ namespace Swim::Rhi
 		std::uint64_t completionValue = 0;
 		std::uint64_t used = 0;
 		bool invalidated = false;
+	};
+
+	// Binds readback batches to a queue submission performed by an owner other
+	// than FrameContextRing (for example a render-graph executor that owns its
+	// own completion timeline). Validate every batch before the queue call and
+	// Commit only after that call succeeds; Commit cannot fail. Retain returns the
+	// batch's native buffer so an owner can keep it alive until GPU completion
+	// even if the arena is destroyed early.
+	class ReadbackSubmission
+	{
+	public:
+		static void Validate(const ReadbackArena& arena)
+		{
+			arena.ValidateSubmission();
+		}
+
+		static std::shared_ptr<Buffer> Retain(const ReadbackArena& arena)
+		{
+			return arena.buffer;
+		}
+
+		static void Commit(ReadbackArena& arena, const std::shared_ptr<Timeline>& timeline, std::uint64_t value) noexcept
+		{
+			arena.CommitSubmission(timeline, value);
+		}
 	};
 
 } // namespace Swim::Rhi

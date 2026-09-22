@@ -126,11 +126,10 @@ namespace Swim::Render::Internal
 		{
 			throw std::invalid_argument("RenderGraph access/state mismatch: " + r.Name);
 		}
-		if (access == GraphAccess::ReadWrite && state == S::CopyDestination)
-		{
-			throw std::invalid_argument("CopyDestination does not read existing contents");
-		}
-		if (access == GraphAccess::ReadWrite && r.Kind == GraphKind::Buffer && !Rhi::HasAny(state, S::ShaderRead | S::Common))
+		// ReadWrite + CopyDestination is a partial copy that preserves the bytes or
+		// texels it does not overwrite; it therefore requires initialized contents.
+		if (access == GraphAccess::ReadWrite && r.Kind == GraphKind::Buffer && state != S::CopyDestination &&
+			!Rhi::HasAny(state, S::ShaderRead | S::Common))
 		{
 			throw std::invalid_argument("RenderGraph read/write buffers need a state with shader read access");
 		}

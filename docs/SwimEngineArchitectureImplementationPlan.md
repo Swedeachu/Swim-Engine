@@ -12,7 +12,7 @@
 
 ---
 
-## Current implementation snapshot — 2026-09-12
+## Current implementation snapshot — 2026-09-22
 
 This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
 
@@ -27,9 +27,10 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation and single-queue execution are implemented with native reference consumers. GPU registries/GeometryHeap, asynchronous residency, bindless allocation and persistent GPU Scene/extraction remain future integration work. |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries and the paged GeometryHeap (items 42–43) exist as backend-neutral residency layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet. Asynchronous asset residency, bindless allocation and persistent GPU Scene/extraction remain future integration work. |
 
-- **Latest renderer checkpoint — item 40 complete:** RenderGraph now owns pass dependencies, initialization validation, culling, mip/layer states, barriers, transient pooling, imported/exported resources, GPU pass labels/timestamps and deterministic single-queue execution. Windows passes all 21 native smokes under all four profiles; Linux passes both new graph smokes under all four profiles on llvmpipe/Xvfb/Openbox. Default suites pass 439 Windows / 380 Linux cases. See [the graph contract](RenderGraph.md) and [item 40 evidence](validation/Item40-2026-09-12.md). Dedicated queue ownership transfers and async scheduling remain explicit Phase 10 follow-ups; item **41** is the next critical-path checkpoint.
+- **Latest renderer checkpoint — items 41, 42 and 43 implemented (2026-09-22):** the RenderGraph now schedules staging itself: `CreateUpload`/`CreateReadback` declare buffers suballocated from executor-owned upload/readback arenas that are reset only after the predecessor wait, flushed before submission and bound to the submission's own completion value; `RenderGraphTransfers.h` adds whole/partial buffer and texture upload/readback passes, and `ReadWrite` + `CopyDestination` now means a preserving partial copy. `Renderer/Resources` adds `GpuHandle<Tag>` aliases and `GpuResourceRegistry` with timeline-retired records and FIFO slot reuse. `Renderer/Geometry` adds the paged `GeometryHeap`: best-fit ranges in large device-local vertex/index/meshlet pages (dedicated pages for oversized streams), stable 192-byte `GpuMeshMetadata` rows, per-page batched graph uploads, explicit `PendingUpload → Recorded → Uploading → Resident` residency, deferred frees and fragmentation metrics. The Linux foundation/RHI/shader configuration passes **402 cases / 6,384 checks** (was 380 / 5,977), including the 22 new CPU cases; the new graph/residency sources are also clean under ASan/UBSan and clang `-Wall -Wextra -Wpedantic -Wshadow`. The two new native smokes (`RenderGraphStagedTransfersAndReadback`, `GeometryHeapPagedUploadAndRetirement`) compile but were **not executed on a GPU** in this checkpoint's container (no video device), and Windows/MSVC was not rebuilt; both remain desktop gates. See [RenderGraph staging](RenderGraph.md#staged-transfers-item-41), [GPU residency](GpuResidency.md) and [the validation record](validation/Items41-43-2026-09-22.md). Dedicated transfer-queue ownership remains an open Phase 10 follow-up. Item **44** (asynchronous asset residency) is next.
+- **Previous renderer checkpoint — item 40 complete:** RenderGraph now owns pass dependencies, initialization validation, culling, mip/layer states, barriers, transient pooling, imported/exported resources, GPU pass labels/timestamps and deterministic single-queue execution. Windows passes all 21 native smokes under all four profiles; Linux passes both new graph smokes under all four profiles on llvmpipe/Xvfb/Openbox. Default suites pass 439 Windows / 380 Linux cases. See [the graph contract](RenderGraph.md) and [item 40 evidence](validation/Item40-2026-09-12.md). Dedicated queue ownership transfers and async scheduling remain explicit Phase 10 follow-ups; item **41** is the next critical-path checkpoint.
 - **Previous RHI checkpoint — item 39 complete:** all nineteen native cases pass core, synchronization, GPU-assisted and combined validation on Windows (RTX 4070 Laptop GPU) and Linux (Mesa llvmpipe on Xvfb/Openbox). Windows strict HDR also passes. The only accepted warning is the exact user-approved GPU-AV descriptor-limit startup advisory, retained in the reports; every other warning/error/drop still fails. See [the September 12 evidence and reproduction record](validation/Item39-2026-09-12.md). Linux physical-GPU coverage remains additional work; item **40** (RenderGraph) is implemented by the following checkpoint.
 - **Previous RHI checkpoint — nested resource layouts/parameter blocks:** tool-side reflection now resolves explicit global/entry parameter blocks, resource-bearing constant buffers and nested structs into the existing RHI descriptor schemas. Relative bindings and child descriptor sets are accumulated independently, fixed resource arrays remain single bindings, and generated uniform buffers retain source paths and reflected byte ranges. The original Basic Slang sample now converts to an RHI interface. No additional desktop smoke was introduced by that checkpoint; the nineteen existing cases now pass the item **39** desktop matrix recorded above. See the September 12 Phase 9 checkpoint below.
 
@@ -50,6 +51,8 @@ Companion documentation for the current generated solution and asset pipeline:
 
 - `docs/VisualStudioProjectStructure.md` — what the projects/folders in the generated Visual Studio solution mean, how they depend on one another, and what a normal build actually compiles.
 - `docs/SassetCookPipeline.md` — the source -> import -> cook -> `.sasset` -> runtime path, including development auto-cook versus release/shipping usage.
+- `docs/RenderGraph.md` — graph declaration/compilation/execution contracts, including executor-staged transfers.
+- `docs/GpuResidency.md` — generational GPU registries and the paged GeometryHeap.
 
 ---
 
@@ -138,6 +141,7 @@ A replacement is not complete merely because a new API or folder exists. Its cal
 | Scene identity | `Systems/Scene/Identity` | IDs/maps remain runtime foundations. Old JSON serializer/storage/sync and external editor command fragments are archived. Future persistence is an explicit optional service, not automatic per-frame JSON work. |
 | Jobs/memory | `Engine/Jobs`, `Engine/Memory` | Modern shared services are active. `ParallelUtils` still has renderer callers; retain only as a documented adapter until those callers migrate. |
 | Asset identity/import/cook | `Engine/Assets`, `Tools/AssetCompiler` | Modern asset authority is active. `MeshPool`, `TexturePool`, `MaterialPool`, `FontPool`, `LegacyRenderBinding`, and renderer-facing `Texture2D`/mesh data still serve the current renderer; retire each after its matching replacement and consumers migrate: geometry/texture residency (items 41–47), materials (58–59), and text/font services (79). |
+| GPU residency | `Systems/Renderer/Resources`, `Systems/Renderer/Geometry` | New backend-neutral layers (items 42–43); no legacy consumer yet. `MeshPool`/`VulkanIndexDraw` mega-buffer paths stay active until item 44 connects compiled `MeshAsset`s to `GeometryHeap` and the modern renderer draws from it. |
 | Modern graphics backend | `Systems/Renderer/RHI/Backends/Vulkan` | RHI clear/transfer, triangle/textured pipelines and explicit vertex/instance input are implemented. Item 39 desktop validation passes on Windows hardware and Linux software Vulkan (see the validation record). It is not yet the game renderer. |
 | Current game rendering | `Systems/Renderer/Vulkan`, `Systems/Renderer/OpenGL`, current `Renderer` facade | **Active legacy**, not retired. First reach the RHI/render-graph/residency/GPU-scene replacement gates, move game presentation onto them, then archive the replaced Vulkan path and facade pieces. OpenGL may remain an explicitly built compatibility renderer under `Legacy/OpenGL` only while it is intentionally supported; archive it when support and consumers are removed. `Legacy/` therefore means active compatibility; `Deprecated/` means never used. |
 | Physics | Generic physics API plus selectable PhysX/Jolt backends | Both are current implementations of the same contract, not an old/new duplicate pair. Preserve both; retire only obsolete bypasses or backend-leaking adapters. |
@@ -3360,6 +3364,19 @@ All 17 graph CPU cases pass on Windows and Linux. The complete Windows default s
 
 Item **40** is complete for the DAG/resource-state/barrier foundation. Phase 10's dedicated-family ownership transfer and async scheduling are deliberately still open; there is no claim of overlapping queues/frames or Linux physical-GPU coverage. The sandbox is still transitional, and no legacy source is retired here. Item **41** remains next: connect the existing upload/readback arenas and transfer helpers to graph-scheduled ownership and completion. Keep the consolidated engine/test source layout and top-level `Deprecated/`.
 
+### Item 41 graph-scheduled transfer checkpoint — 2026-09-22
+
+Item 41's remaining work — connecting the upload/readback arenas and transfer helpers to graph-scheduled ownership and completion — is implemented. Full contract: [RenderGraph staging](RenderGraph.md#staged-transfers-item-41).
+
+- [x] `RenderGraph::CreateUpload(desc, writer)` / `CreateUpload(bytes, name)` declare host-written, GPU-read-only buffers initialized at graph start; `CreateReadback(desc)` declares GPU-written buffers implicitly exported to `HostRead`. Staged buffers cannot be exported, uploads cannot be written by passes, and neither is pooled or aliased.
+- [x] `RenderGraphExecutor` owns one `Rhi::UploadArena` and one `Rhi::ReadbackArena`. After the predecessor wait it resets both, suballocates every live staged buffer, then runs upload writers before recording. Used upload bytes are flushed before submission; the readback batch is validated before and committed after the queue call through the new backend-neutral `Rhi::ReadbackSubmission` hook, using the executor's (now shared) completion timeline. Growth happens only between submissions (next power of two, minimum 64 KiB, sized by a conservative alignment bound); there is no in-flight growth, spill or ring wrap. `RenderGraphExecutorDesc` pre-reserves capacity; `Trim` releases the arenas.
+- [x] `RenderCommandContext::GetRange` exposes `{Buffer, Offset, Size}` for any declared buffer; `Get` rejects staged suballocations. `TryReadback`/`TryGetReadback` are nonblocking and valid until the next `Execute`/`Trim`.
+- [x] `ReadWrite` + `CopyDestination` is now a preserving partial copy (requires initialized contents). `RenderGraphTransfers.h` provides `AddBufferUpload` (span or writer), `AddTextureUpload`, `AddBufferReadback`, `AddTextureReadback` and `GetTextureCopyBytes`, choosing `Write` for whole-resource copies and `ReadWrite` otherwise. The backend-neutral `Rhi::GetUncompressedColorTexelBytes` replaces the Vulkan-private texel table.
+- [x] Failures publish nothing: writer/allocation failures leave before recording; flush/validation/submission failures leave the completion value unchanged and the next execution resets uncommitted staging.
+- [x] Seven CPU cases (`RenderGraph.Transfers.*`) with byte-exact round trips through the shared mock command stream, plus the opt-in native `RHI.Vulkan.Smoke.RenderGraphStagedTransfersAndReadback`.
+- [ ] Execute the new native smoke under the four validation profiles on Windows hardware and Linux llvmpipe.
+- [ ] Dedicated transfer-queue ownership and asynchronous upload scheduling (the open queue-ownership responsibility above).
+
 ### Phase 10 exit criteria
 
 - [x] an offscreen pass -> post pass -> present sequence uses graph-generated synchronization. *(Native Windows hardware and Linux software-Vulkan tests, including readback and swapchain replacement.)*
@@ -3382,7 +3399,7 @@ Use compact generational handles for persistent renderer resources:
 - `RenderObjectHandle`
 - `GpuSkinHandle`
 
-Do not use shared owning pointers as IDs.
+Do not use shared owning pointers as IDs. *(Implemented in `Renderer/Resources/GpuHandle.h`, plus `GpuSamplerHandle` so image and sampler identity stay separate; see the item 42–43 checkpoint below.)*
 
 ### GeometryHeap
 
@@ -3401,16 +3418,16 @@ GeometryHeap
 
 Requirements:
 
-- [ ] large device-local pages rather than one fragile fixed buffer;
-- [ ] variable range allocation;
-- [ ] stable metadata indirection;
-- [ ] 16/32-bit indices;
-- [ ] multiple packed vertex formats;
-- [ ] LOD ranges;
-- [ ] meshlet ranges;
-- [ ] async transfer upload;
-- [ ] safe deferred free;
-- [ ] fragmentation metrics;
+- [x] large device-local pages rather than one fragile fixed buffer; *(dedicated pages for oversized streams)*
+- [x] variable range allocation; *(best-fit `GeometryRangeAllocator`, any alignment, coalescing)*
+- [x] stable metadata indirection; *(`GpuMeshMetadata` row = `GpuMeshHandle::Index`, reused only after retirement)*
+- [x] 16/32-bit indices;
+- [x] multiple packed vertex formats; *(per-mesh stride + caller layout id; whole-vertex offsets)*
+- [x] LOD ranges; *(up to eight absolute index ranges with error metric per row)*
+- [x] meshlet ranges; *(opaque meshlet payload pages; meshlet generation itself is later work)*
+- [ ] async transfer upload; *(uploads are graph-scheduled and staged, but run on the graph's graphics queue until dedicated-queue ownership lands)*
+- [x] safe deferred free;
+- [x] fragmentation metrics;
 - [ ] optional relocation/compaction later.
 
 ### Texture residency
@@ -3418,7 +3435,7 @@ Requirements:
 - [ ] bindless texture table;
 - [ ] separate image identity from sampler identity;
 - [ ] fallback texture;
-- [ ] timeline-retired bindless IDs;
+- [ ] timeline-retired bindless IDs; *(the retirement/reuse rule exists in `GpuResourceRegistry`; the bindless table is item 45)*
 - [ ] residency state separate from AssetHandle validity;
 - [ ] KTX2/native compressed upload;
 - [ ] future mip streaming metadata.
@@ -3437,12 +3454,22 @@ Unloaded
  -> Resident
 ```
 
+### Item 42–43 GPU registry and GeometryHeap checkpoint — 2026-09-22
+
+Full contract and caller lifecycle: [GPU resource residency](GpuResidency.md).
+
+- [x] **Item 42:** `GpuHandle<Tag>` (32-bit index + generation, packable) and `GpuResourceRegistry<Tag, Record>`: immediate handle invalidation, records retired only after their timeline point, FIFO reuse of retired slots, capacity that counts retiring slots, nonblocking `CollectRetired` with a retirement callback, `Drain`, permanent retirement instead of generation wrap. Six CPU cases.
+- [x] **Item 43:** `GeometryHeap` with vertex/index/meshlet pages, `GeometryRangeAllocator`, stable `GpuMeshMetadata` rows, per-page batched uploads recorded into a `RenderGraph` (preserving partial copies, graph-generated barriers, pages imported in resting read states), explicit residency with commit/abort, deferred frees with upload-aware retirement points, dedicated-page release, limits with full rollback and fragmentation statistics. Nine CPU cases (two allocator, seven heap) plus the opt-in native `RHI.Vulkan.Smoke.GeometryHeapPagedUploadAndRetirement`.
+- [x] Architecture verifier: `Resources/` and `Geometry/` may not include backend, platform, EnTT or scene headers, RenderGraph may not include them, and their suites must be collected. `SwimRenderResourcesPublicHeaders` compiles the public headers alone.
+- [ ] Execute the native GeometryHeap smoke on Windows and Linux desktops under the validation profiles.
+- [ ] Item 44: feed compiled `MeshAsset` chunks through async IO into `GeometryHeap`, and retire `MeshPool`/`VulkanIndexDraw` geometry ownership once the modern renderer draws from it.
+
 ### Phase 11 exit criteria
 
 - [ ] one compiled model uploads without source importer involvement.
-- [ ] large geometry uses paged GeometryHeap allocation.
+- [x] large geometry uses paged GeometryHeap allocation. *(Heap and native smoke exist; the sandbox's legacy renderer does not use it yet.)*
 - [ ] texture becomes bindless through an explicit residency operation.
-- [ ] GPU resource destruction is timeline safe.
+- [x] GPU resource destruction is timeline safe. *(For registries, GeometryHeap ranges/pages and graph staging; bindless tables will reuse the same registry rule.)*
 
 ---
 
@@ -4253,7 +4280,10 @@ Run common RHI tests against each modern backend as backends arrive:
 - barrier synthesis;
 - pass culling;
 - resource lifetime;
-- imported/exported resources.
+- imported/exported resources;
+- staged upload/readback suballocation, growth, failure recovery and partial preserving copies (`RenderGraph.Transfers`).
+
+GPU residency layers have their own groups: `RenderResources` (`Render.GpuResourceRegistry`) and `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`).
 
 ### 32.8 GPU Scene/visibility
 
@@ -4511,9 +4541,9 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 ### 35.4 Modern renderer foundation
 
 40. [x] Implement RenderGraph DAG/resource-state/barrier system. *(Validated graph compiler, single-graphics-queue executor, pooling, import/export lifetime, GPU diagnostics and native render/compute consumers; see the Phase 10 checkpoint and [evidence](validation/Item40-2026-09-12.md). Dedicated ownership transfers/async scheduling remain explicit Phase 10 follow-ups.)*
-41. [ ] Implement upload/readback arenas and transfer helpers. *(Persistent mapped upload/readback arenas, frame-submission integration, explicit CPU-result lifetime and direct buffer/texture transfer primitives are implemented. Graph-scheduled transfer integration remains open; see the Phase 9 allocation checkpoints.)*
-42. [ ] Implement generational GPU resource registries.
-43. [ ] Implement paged GeometryHeap.
+41. [x] Implement upload/readback arenas and transfer helpers. *(Persistent mapped arenas and frame-ring integration from Phase 9, plus graph-declared staged uploads/readbacks with executor-owned arenas, completion-bound readback batches and whole/partial buffer/texture transfer passes. Native execution of the new smoke and dedicated transfer-queue ownership remain open; see the item 41 checkpoint in Phase 10.)*
+42. [x] Implement generational GPU resource registries. *(`GpuHandle<Tag>` + timeline-retiring `GpuResourceRegistry`; see the Phase 11 item 42–43 checkpoint.)*
+43. [x] Implement paged GeometryHeap. *(CPU/mock-validated paged residency with graph-recorded uploads; native smoke compiled, desktop execution pending; see [GPU residency](GpuResidency.md).)*
 44. [ ] Connect compiled MeshAsset/TextureAsset to asynchronous GPU residency.
 45. [ ] Implement bindless texture/sampler table with timeline-safe ID reuse.
 46. [ ] Implement persistent GPU Scene records.

@@ -386,9 +386,16 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
+# The backend-neutral modern renderer foundation: RenderGraph plus the GPU
+# resource registries (Resources/) and paged GeometryHeap (Geometry/) built on it.
+# None of it includes a native backend, scene/ECS or platform header.
 file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
 )
 
 file(GLOB_RECURSE SWIM_JOB_SOURCES

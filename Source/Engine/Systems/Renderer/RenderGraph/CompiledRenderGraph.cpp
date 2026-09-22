@@ -48,6 +48,10 @@ namespace Swim::Render
 			const auto& resource = definition->Resources[r];
 			out << "resource " << r << " \"" << resource.Name << "\" imported=" << bool(resource.Imported)
 				<< " exported=" << resource.Exported;
+			if (resource.Staging != Internal::GraphStaging::None)
+			{
+				out << " staging=" << (resource.Staging == Internal::GraphStaging::Upload ? "upload" : "readback");
+			}
 			if (life.First == GraphResourceLifetime::Unused)
 			{
 				out << " unused\n";

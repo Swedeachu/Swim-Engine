@@ -2,7 +2,11 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiFrameLifetime.h"
 
+#include "Engine/Systems/Renderer/RHI/RhiFormatInfo.h"
+
+#include <cstring>
 #include <functional>
+#include <string>
 
 namespace Swim::Testing
 {
@@ -43,18 +47,105 @@ namespace Swim::Testing
 		std::uint64_t completedValue = 0;
 	};
 
+	// Captured command stream shared by every list a MockDevice creates.
+	struct MockCommand
+	{
+		std::string Kind;
+		const void* Source = nullptr;
+		const void* Destination = nullptr;
+		std::uint64_t SourceOffset = 0;
+		std::uint64_t DestinationOffset = 0;
+		std::uint64_t Size = 0;
+		Swim::Rhi::ResourceState Before = Swim::Rhi::ResourceState::Undefined;
+		Swim::Rhi::ResourceState After = Swim::Rhi::ResourceState::Undefined;
+	};
+
+	// Host-memory texture: one tightly packed byte vector per mip/layer.
+	class MockTexture final : public Swim::Rhi::Texture
+	{
+	public:
+		explicit MockTexture(const Swim::Rhi::TextureDesc& desc) : desc(desc)
+		{
+			this->desc.DebugName = {};
+			const std::uint32_t texel = Swim::Rhi::GetUncompressedColorTexelBytes(desc.PixelFormat);
+			for (std::uint32_t layer = 0; layer < desc.ArrayLayers; ++layer)
+			{
+				for (std::uint32_t mip = 0; mip < desc.MipLevels; ++mip)
+				{
+					const auto e = MipExtent(mip);
+					Subresources.emplace_back(std::size_t(texel) * e.Width * e.Height * e.Depth);
+				}
+			}
+		}
+
+		std::uintptr_t GetNativeHandle() const override { return 8; }
+		const Swim::Rhi::TextureDesc& GetDesc() const override { return desc; }
+
+		Swim::Rhi::Extent3D MipExtent(std::uint32_t mip) const
+		{
+			const auto shrink = [&](std::uint32_t v) { return std::max(1u, v >> mip); };
+			return { shrink(desc.Extent.Width), shrink(desc.Extent.Height), shrink(desc.Extent.Depth) };
+		}
+
+		std::vector<std::byte>& Bytes(const Swim::Rhi::TextureSubresource& sub)
+		{
+			return Subresources[std::size_t(sub.ArrayLayer) * desc.MipLevels + sub.MipLevel];
+		}
+
+		// Copies a tightly packed region between `buffer` and this subresource.
+		void CopyRegion(std::span<std::byte> buffer, const Swim::Rhi::BufferTextureCopyRegion& region, bool toTexture)
+		{
+			const std::size_t texel = Swim::Rhi::GetUncompressedColorTexelBytes(desc.PixelFormat);
+			auto& image = Bytes(region.Subresource);
+			const auto e = MipExtent(region.Subresource.MipLevel);
+			std::size_t cursor = static_cast<std::size_t>(region.BufferOffset);
+			for (std::uint32_t z = 0; z < region.Extent.Depth; ++z)
+			{
+				for (std::uint32_t y = 0; y < region.Extent.Height; ++y)
+				{
+					const std::size_t row = (((std::size_t(region.TextureOffset.Z) + z) * e.Height + region.TextureOffset.Y + y) * e.Width +
+						region.TextureOffset.X) * texel;
+					const std::size_t bytes = std::size_t(region.Extent.Width) * texel;
+					if (toTexture)
+					{
+						std::memcpy(image.data() + row, buffer.data() + cursor, bytes);
+					}
+					else
+					{
+						std::memcpy(buffer.data() + cursor, image.data() + row, bytes);
+					}
+					cursor += bytes;
+				}
+			}
+		}
+
+		std::vector<std::vector<std::byte>> Subresources;
+
+	private:
+		Swim::Rhi::TextureDesc desc;
+	};
+
 	class MockCommandList final : public Swim::Rhi::CommandList
 	{
 	public:
 		std::uintptr_t GetNativeHandle() const override { return 2; }
 		void Begin() override { Recording = true; }
 		void End() override { Recording = false; }
-		void Transition(Swim::Rhi::Buffer&, Swim::Rhi::ResourceState, Swim::Rhi::ResourceState) override {}
-		void Transition(Swim::Rhi::Texture&, Swim::Rhi::ResourceState, Swim::Rhi::ResourceState, const Swim::Rhi::TextureSubresourceRange&) override {}
-		void CopyBuffer(Swim::Rhi::Buffer&, Swim::Rhi::Buffer&, const Swim::Rhi::BufferCopyRegion&) override {}
+		void Transition(Swim::Rhi::Buffer& buffer, Swim::Rhi::ResourceState before, Swim::Rhi::ResourceState after) override
+		{
+			Capture({ "TransitionBuffer", nullptr, &buffer, 0, 0, 0, before, after });
+		}
+		void Transition(Swim::Rhi::Texture& texture, Swim::Rhi::ResourceState before, Swim::Rhi::ResourceState after,
+			const Swim::Rhi::TextureSubresourceRange&) override
+		{
+			Capture({ "TransitionTexture", nullptr, &texture, 0, 0, 0, before, after });
+		}
+		// Copies execute at record time on host-backed mocks. Upload writers run
+		// before recording, so recorded order equals GPU order for these tests.
+		void CopyBuffer(Swim::Rhi::Buffer& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferCopyRegion& region) override;
 		void CopyTexture(Swim::Rhi::Texture&, Swim::Rhi::Texture&, const Swim::Rhi::TextureCopyRegion&) override {}
-		void CopyBufferToTexture(Swim::Rhi::Buffer&, Swim::Rhi::Texture&, const Swim::Rhi::BufferTextureCopyRegion&) override {}
-		void CopyTextureToBuffer(Swim::Rhi::Texture&, Swim::Rhi::Buffer&, const Swim::Rhi::BufferTextureCopyRegion&) override {}
+		void CopyBufferToTexture(Swim::Rhi::Buffer& source, Swim::Rhi::Texture& destination, const Swim::Rhi::BufferTextureCopyRegion& region) override;
+		void CopyTextureToBuffer(Swim::Rhi::Texture& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferTextureCopyRegion& region) override;
 
 		void BeginRendering(const Swim::Rhi::RenderingDesc&) override {}
 		void EndRendering() override {}
@@ -73,6 +164,16 @@ namespace Swim::Testing
 		void WriteTimestamp(Swim::Rhi::QueryPool&, std::uint32_t, Swim::Rhi::TimestampStage) override {}
 
 		bool Recording = false;
+		std::shared_ptr<std::vector<MockCommand>> Log;
+
+	private:
+		void Capture(MockCommand command)
+		{
+			if (Log)
+			{
+				Log->push_back(std::move(command));
+			}
+		}
 	};
 
 	class MockCommandPool final : public Swim::Rhi::CommandPool
@@ -86,7 +187,9 @@ namespace Swim::Testing
 		std::unique_ptr<Swim::Rhi::CommandList> CreateCommandList() override
 		{
 			++CreateCount;
-			return std::make_unique<MockCommandList>();
+			auto list = std::make_unique<MockCommandList>();
+			list->Log = Log;
+			return list;
 		}
 
 		void Reset() override
@@ -96,6 +199,7 @@ namespace Swim::Testing
 
 		std::uint32_t CreateCount = 0;
 		std::uint32_t ResetCount = 0;
+		std::shared_ptr<std::vector<MockCommand>> Log;
 	};
 
 	class MockQueue final : public Swim::Rhi::Queue
@@ -157,8 +261,9 @@ namespace Swim::Testing
 	{
 	public:
 		explicit MockMappedBuffer(const Swim::Rhi::BufferDesc& desc)
-			: desc(desc), Bytes(static_cast<std::size_t>(desc.Size))
+			: debugName(desc.DebugName), desc(desc), Bytes(static_cast<std::size_t>(desc.Size))
 		{
+			this->desc.DebugName = debugName; // Own the name, as the Vulkan backend does.
 		}
 
 		~MockMappedBuffer() override
@@ -210,6 +315,7 @@ namespace Swim::Testing
 		std::uint32_t InvalidateCount = 0;
 		std::uint64_t InvalidateOffset = 0;
 		std::uint64_t InvalidateSize = 0;
+		std::string debugName;
 		Swim::Rhi::BufferDesc desc;
 		std::vector<std::byte> Bytes;
 		std::uint32_t MapAccessCount = 0;
@@ -238,7 +344,15 @@ namespace Swim::Testing
 			buffer->ExposeReadMapping = ExposeReadMapping;
 			return buffer;
 		}
-		std::unique_ptr<Swim::Rhi::Texture> CreateTexture(const Swim::Rhi::TextureDesc&) override { return nullptr; }
+		std::unique_ptr<Swim::Rhi::Texture> CreateTexture(const Swim::Rhi::TextureDesc& desc) override
+		{
+			if (!CreateTextures)
+			{
+				return nullptr;
+			}
+			++TextureCreateCount;
+			return std::make_unique<MockTexture>(desc);
+		}
 		std::unique_ptr<Swim::Rhi::TextureView> CreateTextureView(Swim::Rhi::Texture&, const Swim::Rhi::TextureViewDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::Sampler> CreateSampler(const Swim::Rhi::SamplerDesc&) override { return nullptr; }
 		std::unique_ptr<Swim::Rhi::ShaderProgram> CreateShaderProgram(const Swim::Rhi::ShaderProgramDesc&) override { return nullptr; }
@@ -249,7 +363,9 @@ namespace Swim::Testing
 
 		std::unique_ptr<Swim::Rhi::CommandPool> CreateCommandPool(Swim::Rhi::QueueType) override
 		{
-			return std::make_unique<MockCommandPool>();
+			auto pool = std::make_unique<MockCommandPool>();
+			pool->Log = Commands;
+			return pool;
 		}
 
 		std::unique_ptr<Swim::Rhi::Semaphore> CreateGpuSemaphore() override { return nullptr; }
@@ -276,6 +392,47 @@ namespace Swim::Testing
 		std::uint32_t BufferCreateCount = 0;
 		std::uint32_t FailBufferCreate = 0;
 		Swim::Rhi::AdapterInfo adapterInfo{};
+		bool CreateTextures = false;
+		std::uint32_t TextureCreateCount = 0;
+		std::shared_ptr<std::vector<MockCommand>> Commands = std::make_shared<std::vector<MockCommand>>();
 	};
+
+	inline void MockCommandList::CopyBuffer(
+		Swim::Rhi::Buffer& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferCopyRegion& region)
+	{
+		Capture({ "CopyBuffer", &source, &destination, region.SourceOffset, region.DestinationOffset, region.Size });
+		auto* from = dynamic_cast<MockMappedBuffer*>(&source);
+		auto* to = dynamic_cast<MockMappedBuffer*>(&destination);
+		if (from && to && region.SourceOffset + region.Size <= from->Bytes.size() &&
+			region.DestinationOffset + region.Size <= to->Bytes.size())
+		{
+			std::memmove(to->Bytes.data() + region.DestinationOffset, from->Bytes.data() + region.SourceOffset,
+				static_cast<std::size_t>(region.Size));
+		}
+	}
+
+	inline void MockCommandList::CopyBufferToTexture(
+		Swim::Rhi::Buffer& source, Swim::Rhi::Texture& destination, const Swim::Rhi::BufferTextureCopyRegion& region)
+	{
+		Capture({ "CopyBufferToTexture", &source, &destination, region.BufferOffset, 0, 0 });
+		auto* from = dynamic_cast<MockMappedBuffer*>(&source);
+		auto* to = dynamic_cast<MockTexture*>(&destination);
+		if (from && to)
+		{
+			to->CopyRegion(from->Bytes, region, true);
+		}
+	}
+
+	inline void MockCommandList::CopyTextureToBuffer(
+		Swim::Rhi::Texture& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferTextureCopyRegion& region)
+	{
+		Capture({ "CopyTextureToBuffer", &source, &destination, 0, region.BufferOffset, 0 });
+		auto* from = dynamic_cast<MockTexture*>(&source);
+		auto* to = dynamic_cast<MockMappedBuffer*>(&destination);
+		if (from && to)
+		{
+			from->CopyRegion(to->Bytes, region, false);
+		}
+	}
 
 } // namespace Swim::Testing

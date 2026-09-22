@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Systems/Renderer/RenderGraph/GraphBufferRange.h"
 #include "Engine/Systems/Renderer/RenderGraph/GraphHandle.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 
@@ -16,7 +17,10 @@ namespace Swim::Render
 		RenderCommandContext& operator=(const RenderCommandContext&) = delete;
 		Rhi::CommandList& Commands() const;
 		Rhi::Device& Device() const;
+		// Whole-allocation buffers only; staged upload/readback buffers throw.
 		Rhi::Buffer& Get(GraphBuffer resource) const;
+		// Any declared buffer, including staged suballocations (add Offset).
+		GraphBufferRange GetRange(GraphBuffer resource) const;
 		Rhi::Texture& Get(GraphTexture resource, Rhi::TextureSubresourceRange range = {}) const;
 		Rhi::TextureView& CreateView(GraphTexture resource, const Rhi::TextureViewDesc& desc = {});
 		// Descriptors/views created during recording must survive GPU execution.
