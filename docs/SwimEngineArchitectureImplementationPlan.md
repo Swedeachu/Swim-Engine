@@ -27,9 +27,36 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), and GPU-built image-based lighting with a PBR regression gallery (items 61–62) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 59 and 60: GPU material table and metallic-roughness PBR (2026-09-23):** GPU Scene objects now shade from GPU-resident materials.
+- **Latest renderer checkpoint — items 61 and 62: environment/IBL and the PBR image-regression gallery (2026-09-23):** the standard material now receives image-based lighting built entirely on the GPU, and a gallery pins the result per pixel.
+  - **`Renderer/Environment` (item 61):**
+    - `EnvironmentBuilder` records graph-scheduled compute passes:
+      - a procedural HDR sky (`ProceduralSky`) or any `RGBA16Float` source cube;
+      - box-filtered mips down to 4×4;
+      - a GGX-prefiltered specular cube using filtered importance sampling (mip *m* = roughness *m*/(*M*−1));
+      - order-2 SH irradiance, from one group with exact texel solid angles;
+      - the split-sum BRDF LUT.
+    - Caller-owned targets can replace the transient outputs.
+    - `EnvironmentMath`, `CubeImage` (Vulkan-exact seamless trilinear sampling) and `EnvironmentReference` are the CPU definitions; `Shaders/Slang/Environment` mirrors them.
+    - Environment intensity and Y rotation are per-view controls.
+  - **Shading:**
+    - `StandardPbr` now splits into `Resolve` → `EvaluateEnvironment` → `ShadeResolved` (split-sum IBL with roughness-dependent Fresnel, occlusion on both terms).
+    - `Shade` is unchanged bit for bit. `EnvironmentLighting.slang` performs the shader-side lookup.
+  - **RHI:** storage textures may be cube-compatible (square, 6*n* layers); shaders write one face and mip through 2D views.
+  - **Gallery (item 62):**
+    - `PbrGalleryFixture.h` is a golden CPU renderer: a 6×4 sphere-impostor gallery of gold, red plastic, white dielectric and occluded copper over roughness 0..1.
+    - `RhiSmoke/PbrGallery.slang` renders the same image on the GPU.
+    - The expectations are CPU-tested: the furnace is exact, highlights dim monotonically, and occlusion is exact.
+  - **Validation:**
+    - The official Linux configuration passes **520 cases / 161,181 checks** (was 498 / 12,375). The EnTT-enabled sanitizer build passes 543 cases cleanly.
+    - A new reflection test caught a `uint3` std430 padding bug in three shader records before any GPU run.
+    - Two new native smokes:
+      - `EnvironmentMapsMatchTheirCpuReferences` checks every GPU stage for three environments, including a furnace;
+      - `PbrGalleryMatchesTheCpuReference` checks the gallery per pixel in lit, rotated and furnace frames. `SWIM_PBR_GALLERY_DUMP` writes the images.
+    - 31 native cases now. See [Environment](Environment.md) and [the items 61–62 record](validation/Items61-62-2026-09-23.md).
+  - **Still needed:** desktop execution of the two smokes. HDR environment *assets* and tone mapping (item 73) remain. `GpuLightBuffer` (item 63) comes next.
+- **Previous renderer checkpoint — items 59 and 60: GPU material table and metallic-roughness PBR (2026-09-23):** GPU Scene objects now shade from GPU-resident materials.
   - **`Renderer/GpuMaterials/GpuMaterialTable` (item 59):**
     - One device-local row per `MaterialInstance`, in its template's layout. The row index is what `RenderObjectDesc::MaterialSet` stores; textures and samplers are `BindlessResourceTable` indices.
     - Row 0 is a permanent fallback holding the template defaults, used for unassigned, released and out-of-range indices.
@@ -47,8 +74,8 @@ This section is the short authoritative status summary for the current repositor
       - draws six GPU Scene quads GPU-driven with bindless textures (sRGB base color, metallic-roughness channels, a derivative-frame normal map, occlusion + emission, alpha mask, out-of-range fallback), checking every pixel against `StandardPbr::Shade`;
       - proves that material edits upload only the changed rows.
     - 29 native cases now. See [Materials](Materials.md#gpu-material-table-item-59) and [the items 59–60 record](validation/Items59-60-2026-09-23.md).
-  - **Still needed:** desktop execution of the new smoke. Environment/IBL (item 61) and the PBR image gallery (item 62) come next.
-- **Previous renderer checkpoint — item 58 material templates and instances (2026-09-23):** Phase 14 starts with a backend-neutral material data layer.
+  - **Still needed:** desktop execution of the new smoke. Environment/IBL (item 61) and the PBR image gallery (item 62) followed.
+- **Earlier renderer checkpoint — item 58 material templates and instances (2026-09-23):** Phase 14 starts with a backend-neutral material data layer.
   - `Renderer/Materials`:
     - `MaterialTemplate` is an immutable, shared std430 parameter layout. Types are float..float4, uint, int and bindless texture/sampler indices. Alignment, overlap, bounds and name rules are validated, and templates carry per-template defaults.
     - `MaterialInstance` is a cheap mutable record with typed setters and getters. A version counter only advances on real changes, so item 59's GPU material buffer can upload dirty records only.
@@ -3851,7 +3878,7 @@ Optional material extensions come after the baseline is visually validated.
 
 ### Phase 14 exit criteria
 
-- [ ] PBR gallery matches reference expectations. *(Six-material native comparison with the CPU model exists; the image gallery is item 62.)*
+- [x] PBR gallery matches reference expectations. *(Item 62: the CPU golden gallery meets furnace/monotonicity/occlusion expectations; the native gallery is compared per pixel — desktop run pending.)*
 - [x] materials are independent from mesh assets.
 - [x] shader reflection drives layout validation. *(`BuildMaterialTemplateDesc`; the built-in standard layout is checked against reflection)*
 - [x] material changes update only affected GPU ranges. *(Version-driven dirty rows; asserted on the mock and native smokes.)*
@@ -3970,11 +3997,11 @@ Set practical configurable budgets from measurement rather than arbitrary hardco
 
 Rebuild cubemap/environment rendering as generic render passes/assets rather than backend-owned cube-map classes.
 
-- [ ] sky environment;
-- [ ] IBL irradiance;
-- [ ] prefiltered specular environment;
-- [ ] environment rotation/intensity;
-- [ ] HDR environment asset support.
+- [x] sky environment; *(`ProceduralSky` + `EnvironmentBuilder::RecordSky`, item 61)*
+- [x] IBL irradiance; *(order-2 SH, `EnvironmentIrradiance.slang`)*
+- [x] prefiltered specular environment; *(GGX filtered importance sampling, `EnvironmentPrefilter.slang`)*
+- [x] environment rotation/intensity; *(`EnvironmentLighting`, applied in the lookup)*
+- [ ] HDR environment asset support. *(`RecordFromSource` accepts any uploaded RGBA16Float cube; asset import/equirect conversion is not implemented.)*
 
 ### Post stack
 
@@ -4728,9 +4755,9 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 58. [x] MaterialTemplate/MaterialInstance + reflected parameters. *(2026-09-23: CPU data layer and tool-side reflection conversion; [Materials](Materials.md). Features/variants, pass participation and render-state policy arrive with items 59–60.)*
 59. [x] GPU material buffer/bindless material resources. *(2026-09-23: `GpuMaterialTable`; [Materials](Materials.md#gpu-material-table-item-59). Native smoke awaits desktop execution.)*
-60. [x] metallic-roughness PBR. *(`StandardPbr` CPU definition + `StandardPbr.slang`; IBL and tone mapping are items 61/73)*
-61. [ ] environment/IBL.
-62. [ ] PBR image regression gallery.
+60. [x] metallic-roughness PBR. *(`StandardPbr` CPU definition + `StandardPbr.slang`; IBL is item 61, tone mapping item 73)*
+61. [x] environment/IBL. *(2026-09-23: `Renderer/Environment` + `Shaders/Slang/Environment`; [Environment](Environment.md). HDR environment assets and tone mapping (item 73) remain; native smoke awaits desktop execution.)*
+62. [x] PBR image regression gallery. *(2026-09-23: CPU golden renderer `PbrGalleryFixture.h` + native `PbrGalleryMatchesTheCpuReference`; [Environment](Environment.md#pbr-image-regression-gallery-item-62).)*
 63. [ ] GpuLightBuffer.
 64. [ ] clustered grid.
 65. [ ] GPU light assignment/compaction.

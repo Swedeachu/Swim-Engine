@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3815,6 +3815,36 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     if "Renderer/Materials/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
         fail("Materials sources must compile with the backend-neutral renderer source list", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanGpuOcclusionSmokeTests.cpp", failures)
+    # Items 61/62: image-based lighting sits above RenderGraph and Materials. The layers
+    # below never include it, it never reaches the GPU Scene, visibility, the GPU
+    # material table or residency, and it keeps a CPU definition next to its shaders.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Environment/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on the environment layer: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "Environment").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/GpuScene/|Renderer/Visibility/|Renderer/GpuMaterials/|Renderer/Residency/|Engine/Assets/)',
+            path.read_text(encoding="utf-8"),
+        ):
+            fail(f"Environment must stay above RenderGraph/Materials only: {path.relative_to(ROOT)}", failures)
+    for relative in ("Environment/EnvironmentMath.cpp", "Environment/EnvironmentReference.cpp", "Environment/EnvironmentBuilder.cpp"):
+        if not (renderer / relative).is_file():
+            fail(f"Environment unit is missing: Renderer/{relative}", failures)
+    for shader in ("EnvironmentCommon", "EnvironmentSky", "EnvironmentDownsample", "EnvironmentPrefilter", "EnvironmentIrradiance",
+                   "EnvironmentBrdfLut", "EnvironmentLighting"):
+        if not (ROOT / f"Source/Shaders/Slang/Environment/{shader}.slang").is_file():
+            fail(f"Environment shader is missing: Shaders/Slang/Environment/{shader}.slang", failures)
+    if "Renderer/Environment/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("Environment sources must compile with the backend-neutral renderer source list", failures)
+    check_suite_is_compiled("RenderEnvironment", "EnvironmentMathTests.cpp", failures)
+    check_suite_is_compiled("RenderEnvironment", "EnvironmentReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderEnvironment", "EnvironmentBuilderTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanEnvironmentSmokeTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanPbrGallerySmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderEnvironmentLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3841,7 +3871,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

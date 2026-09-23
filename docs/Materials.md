@@ -1,6 +1,6 @@
 # Materials
 
-This covers critical-path items **58** (`MaterialTemplate`/`MaterialInstance` with reflected parameters), **59** (the GPU material table with bindless material resources) and **60** (metallic-roughness PBR). Variants, pass participation and render-state policy build on these layers. The transitional renderer's `MaterialData`/`LegacyRenderBinding` are unaffected.
+This covers critical-path items **58** (`MaterialTemplate`/`MaterialInstance` with reflected parameters), **59** (the GPU material table with bindless material resources) and **60** (metallic-roughness PBR). Image-based lighting (item 61) and the PBR gallery (item 62) are in [Environment](Environment.md). Variants, pass participation and render-state policy build on these layers. The transitional renderer's `MaterialData`/`LegacyRenderBinding` are unaffected.
 
 ```text
 Shaders/Slang/Materials/*.slang   material parameter struct (std430)

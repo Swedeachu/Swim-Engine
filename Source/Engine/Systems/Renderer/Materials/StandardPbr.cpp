@@ -79,8 +79,7 @@ namespace Swim::Render::StandardPbr
 		return result;
 	}
 
-	std::optional<std::array<float, 4>> Shade(
-		const Parameters& parameters, const Texels& texels, const Frame& frame, const Lighting& lighting)
+	std::optional<ResolvedSurface> Resolve(const Parameters& parameters, const Texels& texels, const Frame& frame)
 	{
 		const float alpha = parameters.BaseColorFactor[3] * texels.BaseColor[3];
 		if ((parameters.Flags & FlagAlphaMask) != 0 && alpha < parameters.AlphaCutoff)
@@ -89,32 +88,79 @@ namespace Swim::Render::StandardPbr
 		}
 		const bool flip = !frame.FrontFacing && (parameters.Flags & FlagDoubleSided) != 0;
 		const float sign = flip ? -1.0f : 1.0f;
-		Float3 normal{ frame.Normal[0] * sign, frame.Normal[1] * sign, frame.Normal[2] * sign };
+		ResolvedSurface surface;
+		surface.Normal = { frame.Normal[0] * sign, frame.Normal[1] * sign, frame.Normal[2] * sign };
 		if (texels.TangentNormal)
 		{
 			const auto& t = *texels.TangentNormal;
 			const auto n = Normalize({ t[0] * parameters.NormalScale, t[1] * parameters.NormalScale, t[2] });
 			for (int c = 0; c < 3; ++c)
 			{
-				normal[c] = frame.Tangent[c] * n[0] + frame.Bitangent[c] * n[1] + normal[c] * n[2];
+				surface.Normal[c] = frame.Tangent[c] * n[0] + frame.Bitangent[c] * n[1] + surface.Normal[c] * n[2];
 			}
-			normal = Normalize(normal);
+			surface.Normal = Normalize(surface.Normal);
 		}
-		Surface surface;
 		for (int c = 0; c < 3; ++c)
 		{
 			surface.BaseColor[c] = parameters.BaseColorFactor[c] * texels.BaseColor[c];
+			surface.Emissive[c] = parameters.EmissiveFactor[c] * texels.Emissive[c];
 		}
 		surface.Metallic = parameters.MetallicFactor * texels.MetallicRoughness[2];
 		surface.PerceptualRoughness = parameters.RoughnessFactor * texels.MetallicRoughness[1];
-		const float occlusion = 1.0f + parameters.OcclusionStrength * (texels.Occlusion - 1.0f);
-		const auto brdf = EvaluateBrdf(surface, normal, lighting.View, lighting.LightDirection);
-		std::array<float, 4> color{ 0, 0, 0, alpha };
+		surface.Occlusion = 1.0f + parameters.OcclusionStrength * (texels.Occlusion - 1.0f);
+		surface.Alpha = alpha;
+		return surface;
+	}
+
+	Float3 Reflect(const Float3& view, const Float3& normal)
+	{
+		const float d = 2.0f * Dot(normal, view);
+		return { d * normal[0] - view[0], d * normal[1] - view[1], d * normal[2] - view[2] };
+	}
+
+	Float3 EvaluateEnvironment(const ResolvedSurface& surface, const Float3& view, const EnvironmentTerms& environment)
+	{
+		const float roughness = std::clamp(surface.PerceptualRoughness, MinPerceptualRoughness, 1.0f);
+		const float metallic = std::clamp(surface.Metallic, 0.0f, 1.0f);
+		const float nDotV = std::clamp(Dot(surface.Normal, view), 1.0e-4f, 1.0f);
+		const float fresnel = std::pow(1.0f - nDotV, 5.0f);
+		Float3 result;
 		for (int c = 0; c < 3; ++c)
 		{
-			color[c] = brdf[c] * lighting.LightRadiance[c] + lighting.Ambient[c] * surface.BaseColor[c] * occlusion +
-				parameters.EmissiveFactor[c] * texels.Emissive[c];
+			const float f0 = DielectricF0 + (surface.BaseColor[c] - DielectricF0) * metallic;
+			const float diffuseColor = surface.BaseColor[c] * (1.0f - metallic);
+			const float fr = std::max(1.0f - roughness, f0) - f0;
+			const float ks = f0 + fr * fresnel;
+			const float singleScatter = ks * environment.BrdfScale + environment.BrdfBias;
+			const float specular = environment.Prefiltered[c] * singleScatter;
+			const float diffuse = environment.Irradiance[c] * diffuseColor * (1.0f - singleScatter);
+			result[c] = (diffuse + specular) * surface.Occlusion;
+		}
+		return result;
+	}
+
+	std::array<float, 4> ShadeResolved(const ResolvedSurface& surface, const Lighting& lighting, const EnvironmentTerms* environment)
+	{
+		const auto brdf = EvaluateBrdf(
+			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, lighting.View, lighting.LightDirection);
+		const auto ibl = environment ? EvaluateEnvironment(surface, lighting.View, *environment) : Float3{ 0, 0, 0 };
+		std::array<float, 4> color{ 0, 0, 0, surface.Alpha };
+		for (int c = 0; c < 3; ++c)
+		{
+			color[c] = brdf[c] * lighting.LightRadiance[c] + lighting.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c] +
+				surface.Emissive[c];
 		}
 		return color;
+	}
+
+	std::optional<std::array<float, 4>> Shade(
+		const Parameters& parameters, const Texels& texels, const Frame& frame, const Lighting& lighting)
+	{
+		const auto surface = Resolve(parameters, texels, frame);
+		if (!surface)
+		{
+			return std::nullopt;
+		}
+		return ShadeResolved(*surface, lighting, nullptr);
 	}
 } // namespace Swim::Render::StandardPbr

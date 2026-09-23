@@ -1,3 +1,5 @@
+#include "Engine/Systems/Renderer/Environment/EnvironmentBuilder.h"
+#include "Engine/Systems/Renderer/Environment/EnvironmentReference.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
 #include "Engine/Systems/Renderer/GpuMaterials/GpuMaterialTable.h"
 #include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
@@ -38,6 +40,8 @@ static_assert(sizeof(Swim::Render::GpuSubmeshRecord) == 16);
 static_assert(!std::is_copy_constructible_v<Swim::Render::TextureResidency>);
 static_assert(!std::is_copy_constructible_v<Swim::Render::AssetResidencyService>);
 static_assert(!std::is_copy_constructible_v<Swim::Render::BindlessResourceTable>);
+static_assert(sizeof(Swim::Render::Environment::ProceduralSkyConstants) == Swim::Render::EnvironmentSkyBindings::PushConstantBytes);
+static_assert(sizeof(Swim::Render::EnvironmentPrefilterConstants) == Swim::Render::EnvironmentPrefilterBindings::PushConstantBytes);
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuSamplerCache>);
 static_assert(!std::is_same_v<Swim::Render::BindlessTextureHandle, Swim::Render::BindlessSamplerHandle>);
 static_assert(Swim::Render::BindlessResourceTable::FallbackIndex == 0);

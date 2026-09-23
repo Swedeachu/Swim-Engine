@@ -394,6 +394,37 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Environment / image-based lighting programs (item 61) and the PBR gallery (item 62).
+	swim_add_slang_program(SwimEnvironmentSky
+		SOURCE Source/Shaders/Slang/Environment/EnvironmentSky.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimEnvironmentDownsample
+		SOURCE Source/Shaders/Slang/Environment/EnvironmentDownsample.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimEnvironmentPrefilter
+		SOURCE Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimEnvironmentIrradiance
+		SOURCE Source/Shaders/Slang/Environment/EnvironmentIrradiance.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimEnvironmentBrdfLut
+		SOURCE Source/Shaders/Slang/Environment/EnvironmentBrdfLut.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimRhiPbrGallery
+		SOURCE Source/Shaders/Slang/RhiSmoke/PbrGallery.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimRhiGpuDrivenDraw
 		SOURCE Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 		PROFILE spirv_1_5
@@ -423,6 +454,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiStandardPbrProbe_SPIRV}" "${SwimRhiStandardPbrProbe_REFLECTION}"
 			"${SwimRhiStandardMaterialDraw_SPIRV}" "${SwimRhiStandardMaterialDraw_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
+			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
+			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
+			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
+			"${SwimEnvironmentIrradiance_SPIRV}" "${SwimEnvironmentIrradiance_REFLECTION}"
+			"${SwimEnvironmentBrdfLut_SPIRV}" "${SwimEnvironmentBrdfLut_REFLECTION}"
+			"${SwimRhiPbrGallery_SPIRV}" "${SwimRhiPbrGallery_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
 			Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
@@ -446,13 +483,22 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/RhiSmoke/StandardPbrProbe.slang
 			Source/Shaders/Slang/RhiSmoke/StandardMaterialDraw.slang
 			Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
+			Source/Shaders/Slang/Environment/EnvironmentCommon.slang
+			Source/Shaders/Slang/Environment/EnvironmentLighting.slang
+			Source/Shaders/Slang/Environment/EnvironmentSky.slang
+			Source/Shaders/Slang/Environment/EnvironmentDownsample.slang
+			Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang
+			Source/Shaders/Slang/Environment/EnvironmentIrradiance.slang
+			Source/Shaders/Slang/Environment/EnvironmentBrdfLut.slang
+			Source/Shaders/Slang/RhiSmoke/PbrGallery.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
 # resource registries (Resources/), paged GeometryHeap (Geometry/), the
-# persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/) and the asset
+# persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
+# image-based lighting (Environment/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -471,6 +517,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

@@ -15,8 +15,15 @@ namespace Swim::RhiVulkan
 		}
 		RequireVulkanDevice(state);
 		if (!ValidateTextureDesc(desc) || !Rhi::IsStorageTextureFormat(desc.PixelFormat) || desc.Samples != Rhi::SampleCount::X1 ||
-			desc.Dimension != Rhi::TextureDimension::Texture2D ||
+			(desc.Dimension != Rhi::TextureDimension::Texture2D && desc.Dimension != Rhi::TextureDimension::TextureCube) ||
 			desc.MipLevels > static_cast<std::uint32_t>(std::bit_width(std::max(desc.Extent.Width, desc.Extent.Height))))
+		{
+			return false;
+		}
+		// Cube-compatible storage images (environment maps) are written one face and
+		// mip at a time through single-layer 2D views.
+		const bool cube = desc.Dimension == Rhi::TextureDimension::TextureCube;
+		if (cube && (desc.Extent.Width != desc.Extent.Height || desc.ArrayLayers % 6 != 0))
 		{
 			return false;
 		}
@@ -31,7 +38,8 @@ namespace Swim::RhiVulkan
 		// native extent/mip/layer limits; storage support alone is insufficient.
 		VkImageFormatProperties image{};
 		const auto result = state.Instance->Dispatch.vkGetPhysicalDeviceImageFormatProperties(state.Device.physical_device.physical_device,
-			format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, ToVkImageUsage(desc.Usage), 0, &image);
+			format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, ToVkImageUsage(desc.Usage), cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0,
+			&image);
 		if (CheckVulkanResult(state, result, "vkGetPhysicalDeviceImageFormatProperties (storage texture)") != VK_SUCCESS)
 		{
 			return false;

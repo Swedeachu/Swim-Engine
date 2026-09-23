@@ -158,6 +158,7 @@ function(swim_configure_tests)
 		RenderVisibility
 		RenderMaterials
 		RenderGpuMaterials
+		RenderEnvironment
 		Commands
 	)
 
@@ -346,6 +347,18 @@ function(swim_configure_tests)
 			SWIM_RHI_STANDARD_MATERIAL_DRAW_REFLECTION_PATH="${SwimRhiStandardMaterialDraw_REFLECTION}"
 			SWIM_RHI_GPU_DRIVEN_DRAW_SPIRV_PATH="${SwimRhiGpuDrivenDraw_SPIRV}"
 			SWIM_RHI_GPU_DRIVEN_DRAW_REFLECTION_PATH="${SwimRhiGpuDrivenDraw_REFLECTION}"
+			SWIM_ENVIRONMENT_SKY_SPIRV_PATH="${SwimEnvironmentSky_SPIRV}"
+			SWIM_ENVIRONMENT_SKY_REFLECTION_PATH="${SwimEnvironmentSky_REFLECTION}"
+			SWIM_ENVIRONMENT_DOWNSAMPLE_SPIRV_PATH="${SwimEnvironmentDownsample_SPIRV}"
+			SWIM_ENVIRONMENT_DOWNSAMPLE_REFLECTION_PATH="${SwimEnvironmentDownsample_REFLECTION}"
+			SWIM_ENVIRONMENT_PREFILTER_SPIRV_PATH="${SwimEnvironmentPrefilter_SPIRV}"
+			SWIM_ENVIRONMENT_PREFILTER_REFLECTION_PATH="${SwimEnvironmentPrefilter_REFLECTION}"
+			SWIM_ENVIRONMENT_IRRADIANCE_SPIRV_PATH="${SwimEnvironmentIrradiance_SPIRV}"
+			SWIM_ENVIRONMENT_IRRADIANCE_REFLECTION_PATH="${SwimEnvironmentIrradiance_REFLECTION}"
+			SWIM_ENVIRONMENT_BRDF_LUT_SPIRV_PATH="${SwimEnvironmentBrdfLut_SPIRV}"
+			SWIM_ENVIRONMENT_BRDF_LUT_REFLECTION_PATH="${SwimEnvironmentBrdfLut_REFLECTION}"
+			SWIM_RHI_PBR_GALLERY_SPIRV_PATH="${SwimRhiPbrGallery_SPIRV}"
+			SWIM_RHI_PBR_GALLERY_REFLECTION_PATH="${SwimRhiPbrGallery_REFLECTION}"
 		)
 	endif()
 

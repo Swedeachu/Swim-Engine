@@ -29,14 +29,15 @@ namespace Swim::RhiVulkan
 		if (binding.Type == Rhi::DescriptorType::StorageTexture)
 		{
 			if (view.GetNativeHandle() == 0 || !HasTextureUsage(desc.Usage, Rhi::TextureUsage::Storage) ||
-				desc.Samples != Rhi::SampleCount::X1 || desc.Dimension != Rhi::TextureDimension::Texture2D ||
+				desc.Samples != Rhi::SampleCount::X1 ||
+				(desc.Dimension != Rhi::TextureDimension::Texture2D && desc.Dimension != Rhi::TextureDimension::TextureCube) ||
 				viewDesc.Dimension != Rhi::TextureViewDimension::Texture2D || viewDesc.MipLevelCount != 1 ||
 				viewDesc.ArrayLayerCount != 1 || aspect != VK_IMAGE_ASPECT_COLOR_BIT || !Rhi::IsStorageTextureFormat(format) ||
 				format != binding.StorageTextureFormat || format != desc.PixelFormat || viewDesc.BaseMipLevel >= desc.MipLevels ||
 				viewDesc.BaseArrayLayer >= desc.ArrayLayers)
 			{
-				throw std::invalid_argument(
-					"Storage descriptors require a matching typed, single-sampled 2D color view of one mip and layer");
+				throw std::invalid_argument("Storage descriptors require a matching typed, single-sampled 2D color view of one mip and "
+											"layer (of a 2D or cube texture)");
 			}
 			required = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
 			layout = VK_IMAGE_LAYOUT_GENERAL;

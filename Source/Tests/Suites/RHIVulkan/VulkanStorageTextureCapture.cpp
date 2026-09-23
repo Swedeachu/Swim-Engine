@@ -20,10 +20,11 @@ namespace Swim::Testing
 		ImageProperties.maxArrayLayers = 8;
 		ImageProperties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
 		State->Instance->Dispatch.vkGetPhysicalDeviceImageFormatProperties = +[](VkPhysicalDevice, VkFormat format,
-			VkImageType, VkImageTiling, VkImageUsageFlags usage, VkImageCreateFlags, VkImageFormatProperties* properties) -> VkResult
+			VkImageType, VkImageTiling, VkImageUsageFlags usage, VkImageCreateFlags flags, VkImageFormatProperties* properties) -> VkResult
 		{
 			++capture->ImageQueries;
 			capture->ImageUsage = usage;
+			capture->ImageFlags = flags;
 			capture->ImageFormat = format;
 			*properties = capture->ImageProperties;
 			return capture->ImageResult;

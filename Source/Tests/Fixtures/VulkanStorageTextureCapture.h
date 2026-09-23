@@ -18,6 +18,7 @@ namespace Swim::Testing
 		VkResult ImageResult = VK_SUCCESS;
 		std::uint32_t ImageQueries = 0;
 		VkImageUsageFlags ImageUsage = 0;
+		VkImageCreateFlags ImageFlags = 0;
 		VkFormat ImageFormat = VK_FORMAT_UNDEFINED;
 		void CreateTable();
 	};

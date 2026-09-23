@@ -66,12 +66,22 @@ SWIM_TEST("RHI.Vulkan.StorageTextureCreation", "FormatsMultisamplingDimensionsAn
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	}
 	desc.PixelFormat = Rhi::Format::RGBA32Float;
-	for (auto dimension : { Rhi::TextureDimension::Texture1D, Rhi::TextureDimension::Texture3D, Rhi::TextureDimension::TextureCube })
+	for (auto dimension : { Rhi::TextureDimension::Texture1D, Rhi::TextureDimension::Texture3D })
 	{
 		desc.Dimension = dimension;
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	}
+	// Cube-compatible storage (environment maps) must be square with whole cubes of layers.
+	desc.Dimension = Rhi::TextureDimension::TextureCube;
+	desc.ArrayLayers = 5;
+	SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
+	desc.ArrayLayers = 6;
+	desc.Extent = { 32, 16, 1 };
+	SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
+	desc.Extent = { 32, 32, 1 };
 	desc.Dimension = Rhi::TextureDimension::Texture2D;
+	desc.ArrayLayers = 1;
+	SWIM_CHECK_EQUAL(capture.ImageQueries, 0u);
 	desc.Samples = Rhi::SampleCount::X4;
 	SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	SWIM_CHECK_EQUAL(capture.ImageQueries, 0u);
@@ -81,6 +91,14 @@ SWIM_TEST("RHI.Vulkan.StorageTextureCreation", "FormatsMultisamplingDimensionsAn
 	SWIM_CHECK_EQUAL(capture.ImageQueries, 0u);
 	capture.FormatFeatures = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
 	SWIM_CHECK(RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
+	SWIM_CHECK_EQUAL(capture.ImageFlags, VkImageCreateFlags(0));
+	// A whole cube is queried as cube-compatible.
+	desc.Dimension = Rhi::TextureDimension::TextureCube;
+	desc.ArrayLayers = 6;
+	SWIM_CHECK(RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
+	SWIM_CHECK_EQUAL(capture.ImageFlags, VkImageCreateFlags(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT));
+	desc.Dimension = Rhi::TextureDimension::Texture2D;
+	desc.ArrayLayers = 1;
 	capture.State->Diagnostics->TryRecordLoss("storage creation test", VK_ERROR_DEVICE_LOST);
 	SWIM_CHECK_THROWS(RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc), Rhi::DeviceLostError);
 }

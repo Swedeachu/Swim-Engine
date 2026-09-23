@@ -5,7 +5,8 @@
 // sampler (RGBA8UnormSrgb views). Texture index 0 is the bindless fallback (white),
 // and a zero NormalTexture means "no normal map". Shaders sample the textures from
 // their own bindless arrays (see RhiSmoke/StandardMaterialDraw.slang) and pass the
-// texels in.
+// texels in. Image-based lighting (item 61) enters through StandardPbrEnvironment,
+// looked up by Environment/EnvironmentLighting.slang.
 #ifndef SWIM_STANDARD_PBR_SLANG
 #define SWIM_STANDARD_PBR_SLANG
 #include "Materials/StandardMaterialParameters.slang"
@@ -83,12 +84,26 @@ struct StandardPbrResult
 	bool Discard;
 };
 
-StandardPbrResult StandardPbrShade(StandardMaterialParameters parameters, StandardPbrTexels texels, float3 geometricNormal, float3 tangent,
-	float3 bitangent, bool frontFacing, StandardPbrLighting lighting)
+// A pixel's material inputs after texturing, normal mapping and the alpha test
+// (StandardPbr::ResolvedSurface).
+struct StandardPbrSurface
 {
-	StandardPbrResult result;
+	float3 Normal;
+	float3 BaseColor;
+	float Metallic;
+	float PerceptualRoughness;
+	float Occlusion;
+	float3 Emissive;
+	float Alpha;
+	bool Discard; // Alpha masking rejected the pixel.
+};
+
+StandardPbrSurface StandardPbrResolve(StandardMaterialParameters parameters, StandardPbrTexels texels, float3 geometricNormal,
+	float3 tangent, float3 bitangent, bool frontFacing)
+{
+	StandardPbrSurface surface;
 	const float alpha = parameters.BaseColorFactor.a * texels.BaseColor.a;
-	result.Discard = (parameters.Flags & StandardMaterialFlagAlphaMask) != 0 && alpha < parameters.AlphaCutoff;
+	surface.Discard = (parameters.Flags & StandardMaterialFlagAlphaMask) != 0 && alpha < parameters.AlphaCutoff;
 	const bool flip = !frontFacing && (parameters.Flags & StandardMaterialFlagDoubleSided) != 0;
 	float3 normal = flip ? -geometricNormal : geometricNormal;
 	if (texels.HasNormal)
@@ -96,13 +111,65 @@ StandardPbrResult StandardPbrShade(StandardMaterialParameters parameters, Standa
 		const float3 n = normalize(float3(texels.TangentNormal.xy * parameters.NormalScale, texels.TangentNormal.z));
 		normal = normalize(tangent * n.x + bitangent * n.y + normal * n.z);
 	}
-	const float3 baseColor = parameters.BaseColorFactor.rgb * texels.BaseColor.rgb;
-	const float metallic = parameters.MetallicFactor * texels.MetallicRoughness.b;
-	const float roughness = parameters.RoughnessFactor * texels.MetallicRoughness.g;
-	const float occlusion = 1.0 + parameters.OcclusionStrength * (texels.Occlusion - 1.0);
-	const float3 brdf = StandardPbrEvaluateBrdf(baseColor, metallic, roughness, normal, lighting.View, lighting.LightDirection);
-	const float3 color = brdf * lighting.LightRadiance + lighting.Ambient * baseColor * occlusion + parameters.EmissiveFactor * texels.Emissive;
-	result.Color = float4(color, alpha);
+	surface.Normal = normal;
+	surface.BaseColor = parameters.BaseColorFactor.rgb * texels.BaseColor.rgb;
+	surface.Emissive = parameters.EmissiveFactor * texels.Emissive;
+	surface.Metallic = parameters.MetallicFactor * texels.MetallicRoughness.b;
+	surface.PerceptualRoughness = parameters.RoughnessFactor * texels.MetallicRoughness.g;
+	surface.Occlusion = 1.0 + parameters.OcclusionStrength * (texels.Occlusion - 1.0);
+	surface.Alpha = alpha;
+	return surface;
+}
+
+// Image-based lighting inputs (StandardPbr::EnvironmentTerms): irradiance / pi at the
+// normal, prefiltered radiance at the reflection vector and the split-sum LUT (A, B).
+struct StandardPbrEnvironment
+{
+	float3 Irradiance;
+	float3 Prefiltered;
+	float BrdfScale;
+	float BrdfBias;
+};
+
+float3 StandardPbrEvaluateEnvironment(StandardPbrSurface surface, float3 view, StandardPbrEnvironment environment)
+{
+	const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
+	const float metallic = clamp(surface.Metallic, 0.0, 1.0);
+	const float nDotV = clamp(dot(surface.Normal, view), 1.0e-4, 1.0);
+	const float fresnel = pow(1.0 - nDotV, 5.0);
+	const float3 f0 = StandardPbrDielectricF0 + (surface.BaseColor - StandardPbrDielectricF0) * metallic;
+	const float3 diffuseColor = surface.BaseColor * (1.0 - metallic);
+	const float3 fr = max(float3(1.0 - roughness), f0) - f0;
+	const float3 ks = f0 + fr * fresnel;
+	const float3 singleScatter = ks * environment.BrdfScale + environment.BrdfBias;
+	const float3 specular = environment.Prefiltered * singleScatter;
+	const float3 diffuse = environment.Irradiance * diffuseColor * (1.0 - singleScatter);
+	return (diffuse + specular) * surface.Occlusion;
+}
+
+// Direct light + constant ambient + optional IBL + emission (StandardPbr::ShadeResolved).
+float4 StandardPbrShadeResolved(StandardPbrSurface surface, StandardPbrLighting lighting, bool hasEnvironment,
+	StandardPbrEnvironment environment)
+{
+	const float3 brdf = StandardPbrEvaluateBrdf(
+		surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal, lighting.View, lighting.LightDirection);
+	const float3 ibl = hasEnvironment ? StandardPbrEvaluateEnvironment(surface, lighting.View, environment) : float3(0.0, 0.0, 0.0);
+	const float3 color = brdf * lighting.LightRadiance + lighting.Ambient * surface.BaseColor * surface.Occlusion + ibl + surface.Emissive;
+	return float4(color, surface.Alpha);
+}
+
+StandardPbrResult StandardPbrShade(StandardMaterialParameters parameters, StandardPbrTexels texels, float3 geometricNormal, float3 tangent,
+	float3 bitangent, bool frontFacing, StandardPbrLighting lighting)
+{
+	const StandardPbrSurface surface = StandardPbrResolve(parameters, texels, geometricNormal, tangent, bitangent, frontFacing);
+	StandardPbrEnvironment none;
+	none.Irradiance = float3(0.0, 0.0, 0.0);
+	none.Prefiltered = float3(0.0, 0.0, 0.0);
+	none.BrdfScale = 0.0;
+	none.BrdfBias = 0.0;
+	StandardPbrResult result;
+	result.Discard = surface.Discard;
+	result.Color = StandardPbrShadeResolved(surface, lighting, false, none);
 	return result;
 }
 

@@ -86,8 +86,51 @@ namespace Swim::Render::StandardPbr
 		bool FrontFacing = true;
 	};
 
+	// A pixel's material inputs after texturing, normal mapping and the alpha test:
+	// what the lighting terms consume.
+	struct ResolvedSurface
+	{
+		Float3 Normal{ 0, 0, 1 }; // Shading normal (unit).
+		Float3 BaseColor{ 1, 1, 1 };
+		float Metallic = 1.0f;
+		float PerceptualRoughness = 1.0f;
+		float Occlusion = 1.0f; // After OcclusionStrength.
+		Float3 Emissive{ 0, 0, 0 };
+		float Alpha = 1.0f;
+	};
+
+	// Empty when alpha masking discards the pixel. Back faces of double-sided
+	// materials use the flipped normal.
+	std::optional<ResolvedSurface> Resolve(const Parameters& parameters, const Texels& texels, const Frame& frame);
+
+	// Image-based lighting inputs for one pixel (item 61), already looked up by the
+	// environment (see Renderer/Environment/EnvironmentReference.h):
+	//  - Irradiance: diffuse irradiance / pi around the shading normal;
+	//  - Prefiltered: the GGX-prefiltered radiance around the reflection vector at
+	//    the surface's roughness;
+	//  - BrdfScale/BrdfBias: the split-sum LUT's (A, B) at (N.V, roughness).
+	struct EnvironmentTerms
+	{
+		Float3 Irradiance{ 0, 0, 0 };
+		Float3 Prefiltered{ 0, 0, 0 };
+		float BrdfScale = 0.0f;
+		float BrdfBias = 0.0f;
+	};
+
+	// Mirror direction of `view` about `normal`: 2 (N.V) N - V.
+	Float3 Reflect(const Float3& view, const Float3& normal);
+
+	// Split-sum IBL (Karis 2013) with the roughness-dependent Fresnel of Fdez-Aguera
+	// 2019: specular = prefiltered * (kS * A + B), diffuse = irradiance * diffuseColor
+	// * (1 - (kS * A + B)), both scaled by occlusion. A white dielectric therefore
+	// reflects a uniform environment exactly (the furnace test).
+	Float3 EvaluateEnvironment(const ResolvedSurface& surface, const Float3& view, const EnvironmentTerms& environment);
+
+	// Direct light + constant ambient + optional IBL + emission, and alpha.
+	std::array<float, 4> ShadeResolved(const ResolvedSurface& surface, const Lighting& lighting, const EnvironmentTerms* environment);
+
 	// Final linear color (rgb) and alpha of one pixel, or empty when alpha masking
-	// discards it. Back faces of double-sided materials use the flipped normal.
+	// discards it: Resolve followed by ShadeResolved without IBL.
 	std::optional<std::array<float, 4>> Shade(
 		const Parameters& parameters, const Texels& texels, const Frame& frame, const Lighting& lighting);
 } // namespace Swim::Render::StandardPbr

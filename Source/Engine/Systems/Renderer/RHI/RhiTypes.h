@@ -121,6 +121,8 @@ namespace Swim::Rhi
 
 	// Formats supported by the typed 2D storage-texture contract. Device format
 	// support is still required; sRGB, compressed and formatless access are excluded.
+	// Storage textures are 2D or (square, 6n-layer) cube-compatible; shaders always
+	// access one mip of one layer through a 2D view.
 	constexpr bool IsStorageTextureFormat(Format format)
 	{
 		switch (format)
