@@ -29,13 +29,32 @@ This section is the short authoritative status summary for the current repositor
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
 | Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — item 58 material templates and instances (2026-09-23):** Phase 14 starts with a backend-neutral material data layer.
+- **Latest renderer checkpoint — items 59 and 60: GPU material table and metallic-roughness PBR (2026-09-23):** GPU Scene objects now shade from GPU-resident materials.
+  - **`Renderer/GpuMaterials/GpuMaterialTable` (item 59):**
+    - One device-local row per `MaterialInstance`, in its template's layout. The row index is what `RenderObjectDesc::MaterialSet` stores; textures and samplers are `BindlessResourceTable` indices.
+    - Row 0 is a permanent fallback holding the template defaults, used for unassigned, released and out-of-range indices.
+    - `Import` uploads only instances whose version changed, batched into runs, with commit/abort.
+    - Released rows retire after their timeline point, reset to the defaults and are reused FIFO.
+  - **Standard metallic-roughness PBR (item 60):**
+    - `Materials/StandardPbr.h/.cpp` is the CPU definition: Lambert diffuse, GGX, height-correlated Smith, Schlick Fresnel with F0 0.04, exact sRGB transfer functions, and shading with texture channels, tangent-space normals, occlusion on ambient, emission, alpha mask and double-sided flipping.
+    - `Shaders/Slang/Materials/StandardPbr.slang` mirrors it line for line.
+    - `StandardMaterial.h` provides the built-in template with glTF defaults; its hand-written layout is proven equal to the compiled shader's reflection.
+  - **Validation:**
+    - The official Linux configuration passes **498 cases / 12,375 checks** (was 490). The EnTT-enabled sanitizer build passes 521 cases cleanly.
+    - The CPU tests prove GGX normalization, Fresnel limits, reciprocity, energy (directional albedo ≤ 1), clamping and every shading rule.
+    - The new native smoke `StandardMaterialsShadeFromTheGpuMaterialTable` does three things:
+      - compares the GPU BRDF with the CPU definition for 96 random inputs;
+      - draws six GPU Scene quads GPU-driven with bindless textures (sRGB base color, metallic-roughness channels, a derivative-frame normal map, occlusion + emission, alpha mask, out-of-range fallback), checking every pixel against `StandardPbr::Shade`;
+      - proves that material edits upload only the changed rows.
+    - 29 native cases now. See [Materials](Materials.md#gpu-material-table-item-59) and [the items 59–60 record](validation/Items59-60-2026-09-23.md).
+  - **Still needed:** desktop execution of the new smoke. Environment/IBL (item 61) and the PBR image gallery (item 62) come next.
+- **Previous renderer checkpoint — item 58 material templates and instances (2026-09-23):** Phase 14 starts with a backend-neutral material data layer.
   - `Renderer/Materials`:
     - `MaterialTemplate` is an immutable, shared std430 parameter layout. Types are float..float4, uint, int and bindless texture/sampler indices. Alignment, overlap, bounds and name rules are validated, and templates carry per-template defaults.
     - `MaterialInstance` is a cheap mutable record with typed setters and getters. A version counter only advances on real changes, so item 59's GPU material buffer can upload dirty records only.
   - **Reflection:** structured-element reflection now records each leaf's scalar type and component count, and `ShaderCompiler::BuildMaterialTemplateDesc` turns a shader's material struct into a template. `Shaders/Slang/Materials/StandardMaterialParameters.slang` is the metallic-roughness record that item 60 will shade with.
   - **Validation:** the official Linux configuration passes **490 cases / 11,355 checks** (was 486). The EnTT-enabled sanitizer build passes 513 cases cleanly. No new native smoke; the case count stays at 28. See [Materials](Materials.md).
-- **Previous renderer checkpoint — no-IndirectCount fallback for GPU visibility (2026-09-23):** this closes the last open Phase 13 "required behavior" box that does not depend on item 56.
+- **Earlier renderer checkpoint — no-IndirectCount fallback for GPU visibility (2026-09-23):** this closes the last open Phase 13 "required behavior" box that does not depend on item 56.
   - `VisibilityDraws.h` adds `SelectVisibilityDrawPath` (the count path whenever the device has `IndirectCount`) and `DrawVisibilityBin`.
   - On devices without `IndirectCount`, the fallback zeroes the phase's command buffer (`VisibilityFrameDesc::ZeroUnusedCommands`) and issues each bin's whole capacity with `DrawIndexedIndirect`; unwritten slots draw zero instances.
   - **Validation:**
@@ -3797,15 +3816,15 @@ GpuMaterial
 - [x] immutable shared templates; *(`MaterialTemplate`, shared as `std::shared_ptr<const MaterialTemplate>`)*
 - [x] cheap mutable instances; *(`MaterialInstance`: one record copy, typed setters, change version)*
 - [x] reflected typed parameters; *(`ShaderCompiler::BuildMaterialTemplateDesc` from structured-element reflection)*
-- [ ] GPU material parameter buffer;
-- [ ] bindless textures/samplers;
-- [ ] alpha opaque/mask/blend/additive;
-- [ ] double-sided/cull policy;
+- [x] GPU material parameter buffer; *(`GpuMaterialTable`, dirty-row uploads, timeline-retired rows)*
+- [x] bindless textures/samplers; *(material records hold `BindlessResourceTable` indices; index 0 is the fallback)*
+- [ ] alpha opaque/mask/blend/additive; *(opaque and mask in `StandardPbr`; blend/additive need pass participation)*
+- [ ] double-sided/cull policy; *(the shader flips back-face normals for double-sided materials; pipeline cull selection comes with pass participation)*
 - [ ] custom game material templates;
 - [ ] hot reload;
-- [ ] deterministic fallback material;
+- [x] deterministic fallback material; *(material row 0 = template defaults for unassigned/released/out-of-range indices)*
 - [ ] no renderer-wide `switch` for every material feature;
-- [ ] no mesh ownership in material.
+- [x] no mesh ownership in material. *(`MaterialInstance` holds parameters only; GPU Scene rows pair a mesh with a material index)*
 
 ### PBR baseline
 
@@ -3832,10 +3851,10 @@ Optional material extensions come after the baseline is visually validated.
 
 ### Phase 14 exit criteria
 
-- [ ] PBR gallery matches reference expectations.
-- [ ] materials are independent from mesh assets.
-- [ ] shader reflection drives layout validation.
-- [ ] material changes update only affected GPU ranges.
+- [ ] PBR gallery matches reference expectations. *(Six-material native comparison with the CPU model exists; the image gallery is item 62.)*
+- [x] materials are independent from mesh assets.
+- [x] shader reflection drives layout validation. *(`BuildMaterialTemplateDesc`; the built-in standard layout is checked against reflection)*
+- [x] material changes update only affected GPU ranges. *(Version-driven dirty rows; asserted on the mock and native smokes.)*
 
 ---
 
@@ -4426,7 +4445,7 @@ Run common RHI tests against each modern backend as backends arrive:
 - imported/exported resources;
 - staged upload/readback suballocation, growth, failure recovery and partial preserving copies (`RenderGraph.Transfers`).
 
-GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. Material templates/instances have `RenderMaterials` (`Render.Materials`), with reflection conversion in `ShaderCompiler.MaterialLayout`. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`, `Render.DepthConvention`, `Render.Hzb`, `Render.Occlusion`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
+GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. Material templates/instances and the PBR model have `RenderMaterials` (`Render.Materials`, `Render.StandardPbr`), the GPU material table has `RenderGpuMaterials` (`Render.GpuMaterials`), and reflection conversion is in `ShaderCompiler.MaterialLayout`. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`, `Render.DepthConvention`, `Render.Hzb`, `Render.Occlusion`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
 
 ### 32.8 GPU Scene/visibility
 
@@ -4708,8 +4727,8 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 ### 35.6 Shading and lighting
 
 58. [x] MaterialTemplate/MaterialInstance + reflected parameters. *(2026-09-23: CPU data layer and tool-side reflection conversion; [Materials](Materials.md). Features/variants, pass participation and render-state policy arrive with items 59–60.)*
-59. [ ] GPU material buffer/bindless material resources.
-60. [ ] metallic-roughness PBR.
+59. [x] GPU material buffer/bindless material resources. *(2026-09-23: `GpuMaterialTable`; [Materials](Materials.md#gpu-material-table-item-59). Native smoke awaits desktop execution.)*
+60. [x] metallic-roughness PBR. *(`StandardPbr` CPU definition + `StandardPbr.slang`; IBL and tone mapping are items 61/73)*
 61. [ ] environment/IBL.
 62. [ ] PBR image regression gallery.
 63. [ ] GpuLightBuffer.

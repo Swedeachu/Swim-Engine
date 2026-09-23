@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
+#include "Engine/Systems/Renderer/GpuMaterials/GpuMaterialTable.h"
 #include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
+#include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
@@ -48,3 +50,5 @@ static_assert(Swim::Render::CanonicalDepthConvention == Swim::Render::DepthConve
 static_assert(sizeof(Swim::Render::VisibilityStats) == 80);
 static_assert(Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabilities{}) == Swim::Render::VisibilityDrawPath::ZeroFilledIndirect);
 static_assert(Swim::Render::MaterialParameterAlignment(Swim::Render::MaterialParameterType::Float3) == 16);
+static_assert(!std::is_copy_constructible_v<Swim::Render::GpuMaterialTable>);
+static_assert(Swim::Render::StandardMaterialRecordSize == 80);

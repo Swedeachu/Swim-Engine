@@ -273,6 +273,7 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StructFieldsConvertToMaterialParamet
 
 #ifdef SWIM_STANDARD_MATERIAL_REFLECTION_PATH
 #include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
+#include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 
 // The standard material's compiled record becomes a working template.
 SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialProgramBuildsItsTemplate")
@@ -283,6 +284,16 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialProgramBuildsItsTemp
 	SWIM_REQUIRE_MESSAGE(layout, layout.Error);
 	SWIM_CHECK_EQUAL(layout.Desc.RecordSize, 80u);
 	SWIM_CHECK_EQUAL(layout.Desc.Parameters.size(), 15u);
+	// The runtime's hand-written standard layout equals the compiled shader's.
+	const auto builtIn = Render::StandardMaterialTemplateDesc();
+	SWIM_CHECK_EQUAL(builtIn.RecordSize, layout.Desc.RecordSize);
+	SWIM_REQUIRE_EQUAL(builtIn.Parameters.size(), layout.Desc.Parameters.size());
+	for (std::size_t i = 0; i < builtIn.Parameters.size(); ++i)
+	{
+		SWIM_CHECK_EQUAL(builtIn.Parameters[i].Name, layout.Desc.Parameters[i].Name);
+		SWIM_CHECK(builtIn.Parameters[i].Type == layout.Desc.Parameters[i].Type);
+		SWIM_CHECK_EQUAL(builtIn.Parameters[i].Offset, layout.Desc.Parameters[i].Offset);
+	}
 	const auto materialTemplate = std::make_shared<const Render::MaterialTemplate>(std::move(layout.Desc));
 	using T = Render::MaterialParameterType;
 	const auto expect = [&](const char* name, T type, std::uint32_t offset)
@@ -303,5 +314,43 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialProgramBuildsItsTemp
 	Render::MaterialInstance instance(materialTemplate);
 	instance.SetTexture("NormalTexture", 5);
 	SWIM_CHECK_EQUAL(instance.GetUint("NormalTexture"), 5u);
+}
+#endif
+
+#if defined(SWIM_RHI_STANDARD_MATERIAL_DRAW_REFLECTION_PATH) && defined(SWIM_RHI_STANDARD_PBR_REFLECTION_PATH)
+// The standard-material smoke programs: material records bind at the standard
+// layout, the shading view and PBR probe records keep their C++ mirrors' strides,
+// and the bindless arrays reflect as runtime-sized space-1 bindings.
+SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialSmokeProgramsMatchTheirCppLayouts")
+{
+	const auto draw = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_STANDARD_MATERIAL_DRAW_REFLECTION_PATH);
+	SWIM_REQUIRE_MESSAGE(draw, draw.Error);
+	const auto* materials = FindParameter(draw.Reflection, "Materials");
+	const auto* views = FindParameter(draw.Reflection, "Views");
+	SWIM_REQUIRE(materials != nullptr && views != nullptr);
+	SWIM_CHECK_EQUAL(materials->ElementSize, Render::StandardMaterialRecordSize);
+	SWIM_CHECK_EQUAL(views->ElementSize, 144u);
+	SWIM_CHECK(Fields(*views).at("MaterialCount").first == 128u);
+	const auto layout = ShaderCompiler::BuildMaterialTemplateDesc(draw.Reflection, "Materials", "Standard");
+	SWIM_REQUIRE_MESSAGE(layout, layout.Error);
+	SWIM_CHECK_EQUAL(layout.Desc.Parameters.size(), Render::StandardMaterialTemplateDesc().Parameters.size());
+	const auto converted = ShaderCompiler::BuildRhiShaderInterface(draw.Reflection);
+	SWIM_REQUIRE_MESSAGE(converted, converted.Error);
+	std::uint32_t runtimeSized = 0;
+	for (const auto& schema : converted.Interface.DescriptorSchemas)
+	{
+		for (const auto& binding : schema.Bindings)
+		{
+			runtimeSized += schema.Space == 1 && binding.Count == 0;
+		}
+	}
+	SWIM_CHECK_EQUAL(runtimeSized, 2u);
+
+	const auto probe = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_STANDARD_PBR_REFLECTION_PATH);
+	SWIM_REQUIRE_MESSAGE(probe, probe.Error);
+	const auto* cases = FindParameter(probe.Reflection, "Cases");
+	SWIM_REQUIRE(cases != nullptr);
+	SWIM_CHECK_EQUAL(cases->ElementSize, 64u);
+	SWIM_CHECK(Fields(*cases).at("BaseColor").first == 48u);
 }
 #endif

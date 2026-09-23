@@ -378,6 +378,17 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Standard metallic-roughness material smokes (items 59-60).
+	swim_add_slang_program(SwimRhiStandardPbrProbe
+		SOURCE Source/Shaders/Slang/RhiSmoke/StandardPbrProbe.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimRhiStandardMaterialDraw
+		SOURCE Source/Shaders/Slang/RhiSmoke/StandardMaterialDraw.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimHzbReduce
 		SOURCE Source/Shaders/Slang/GpuScene/HzbReduce.slang
 		PROFILE spirv_1_5
@@ -409,6 +420,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimGpuVisibility_SPIRV}" "${SwimGpuVisibility_REFLECTION}"
 			"${SwimHzbReduce_SPIRV}" "${SwimHzbReduce_REFLECTION}"
 			"${SwimStandardMaterialProbe_SPIRV}" "${SwimStandardMaterialProbe_REFLECTION}"
+			"${SwimRhiStandardPbrProbe_SPIRV}" "${SwimRhiStandardPbrProbe_REFLECTION}"
+			"${SwimRhiStandardMaterialDraw_SPIRV}" "${SwimRhiStandardMaterialDraw_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
@@ -429,6 +442,9 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/GpuScene/HzbReduce.slang
 			Source/Shaders/Slang/Materials/StandardMaterialParameters.slang
 			Source/Shaders/Slang/Materials/StandardMaterialProbe.slang
+			Source/Shaders/Slang/Materials/StandardPbr.slang
+			Source/Shaders/Slang/RhiSmoke/StandardPbrProbe.slang
+			Source/Shaders/Slang/RhiSmoke/StandardMaterialDraw.slang
 			Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
@@ -453,6 +469,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

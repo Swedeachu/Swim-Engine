@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3789,6 +3789,23 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RHIVulkan", "VulkanGpuVisibilitySmokeTests.cpp", failures)
     check_suite_is_compiled("RenderVisibility", "OcclusionTests.cpp", failures)
     check_suite_is_compiled("RenderMaterials", "MaterialTemplateTests.cpp", failures)
+    check_suite_is_compiled("RenderMaterials", "StandardPbrTests.cpp", failures)
+    check_suite_is_compiled("RenderGpuMaterials", "GpuMaterialTableTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanStandardMaterialSmokeTests.cpp", failures)
+    # Items 59/60: the GPU material table sits above Materials and the GPU layers; nothing
+    # below it (and not Materials itself) may include it. The standard PBR model keeps its
+    # CPU definition next to the shader.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/GpuMaterials/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on the GPU material table: {path.relative_to(ROOT)}", failures)
+    for relative in ("Source/Engine/Systems/Renderer/Materials/StandardPbr.cpp", "Source/Shaders/Slang/Materials/StandardPbr.slang"):
+        if not (ROOT / relative).is_file():
+            fail(f"Standard PBR definition is missing: {relative}", failures)
+    if "Renderer/GpuMaterials/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("GpuMaterials sources must compile with the backend-neutral renderer source list", failures)
     # Material templates (item 58) are pure layout/data: no RHI, graph or GPU layer.
     for path in (renderer / "Materials").rglob("*"):
         if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
@@ -3824,7 +3841,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
