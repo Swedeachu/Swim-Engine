@@ -6,7 +6,9 @@
 #include "Engine/Systems/Renderer/Visibility/GpuDrawRecord.h"
 #include "Engine/Systems/Renderer/Visibility/GpuLodState.h"
 #include "Engine/Systems/Renderer/Visibility/GpuViewRecord.h"
+#include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityBinLayout.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityPhase.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityStats.h"
 
 #include <span>
@@ -24,6 +26,8 @@ namespace Swim::Render
 		std::span<const std::uint32_t> MaterialBins; // MaterialSet -> material bin; out of range -> bin 0.
 		std::span<const std::uint32_t> IndexPages;	 // Page slot -> GeometryHeap index page id.
 		const VisibilityBinLayout* Bins = nullptr;
+		VisibilityPhase Phase = VisibilityPhase::Single;
+		const HzbReference* Hzb = nullptr; // Late phase: this frame's HZB.
 	};
 
 	struct VisibilityReferenceDraw
@@ -38,8 +42,13 @@ namespace Swim::Render
 		VisibilityStats Stats;
 	};
 
-	// The CPU definition of GPU visibility (frustum culling, LOD with hysteresis,
-	// binning, command generation). `lodState` is read and updated like the GPU's
-	// persistent LOD buffer (one entry per row, resized as needed).
+	// The CPU definition of GPU visibility (frustum culling, two-phase HZB occlusion,
+	// LOD with hysteresis, binning, command generation). `lodState` and
+	// `occlusionHistory` are read and updated like the GPU's persistent buffers (one
+	// entry per row, resized as needed): the history holds the row's generation when
+	// the late phase found it visible, else 0.
+	VisibilityReferenceResult RunVisibilityReference(
+		const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState, std::vector<std::uint32_t>& occlusionHistory);
+	// Single phase only (no occlusion history involved).
 	VisibilityReferenceResult RunVisibilityReference(const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState);
 } // namespace Swim::Render

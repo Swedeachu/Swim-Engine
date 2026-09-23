@@ -1,11 +1,14 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
 #include "Engine/Systems/Renderer/Visibility/GpuDrawRecord.h"
 #include "Engine/Systems/Renderer/Visibility/GpuLodState.h"
+#include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
+#include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityStats.h"
 #include "Tests/Fixtures/GpuSceneFixture.h"
 
+#include <array>
 #include <cstring>
 
 using namespace Swim;
@@ -23,11 +26,13 @@ namespace
 	{
 		using B = GpuVisibilityBindings;
 		Rhi::DescriptorSchemaDesc schema{ 0, {} };
-		for (std::uint32_t binding = B::Instances; binding <= B::Stats; ++binding)
+		for (std::uint32_t binding = B::Instances; binding < B::Count; ++binding)
 		{
 			const bool writable = binding >= B::LodState;
-			schema.Bindings.push_back({ binding, writable ? Rhi::DescriptorType::StorageBuffer : Rhi::DescriptorType::ReadOnlyStorageBuffer,
-				1, Rhi::ShaderStageMask::Compute });
+			const auto type = binding == B::Hzb ? Rhi::DescriptorType::SampledTexture
+				: writable						? Rhi::DescriptorType::StorageBuffer
+												: Rhi::DescriptorType::ReadOnlyStorageBuffer;
+			schema.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 		}
 		layout.program.Interface.DescriptorSchemas = { schema };
 	}
@@ -36,6 +41,7 @@ namespace
 	{
 		VisibilityWorld() : scene(64)
 		{
+			scene.device.CreateTextures = true; // The null HZB and its views.
 			DeclareCullingInterface(layout);
 			GeometryHeapDesc heapDesc;
 			heapDesc.VertexPageSize = 4096;
@@ -102,16 +108,17 @@ SWIM_TEST("Render.GpuVisibility", "RecordsClearCullAndReadbackWithPersistentStat
 	VisibilityFrameDesc frame;
 	frame.View = BuildGpuViewRecord({});
 	VisibilityGraphResources resources;
-	// Frame 1: scene rows (2) + clear (2) + material table (1) + LOD history reset (1) + stats readback (1).
-	SWIM_CHECK_EQUAL(world.Frame(visibility, frame, &resources), 7u);
+	// Frame 1: scene rows (2) + clear (2) + material table (1) + LOD and occlusion history resets (2) + stats readback (1).
+	SWIM_CHECK_EQUAL(world.Frame(visibility, frame, &resources), 8u);
 	SWIM_REQUIRE(resources.StatsReadback.has_value());
 	SWIM_CHECK(resources.Bins == &visibility.GetBins());
-	SWIM_CHECK_EQUAL(world.passes, 7u); // Two scene uploads, clear, two persistent uploads, cull, readback.
+	// Two scene uploads, clear, material table, two history resets, the null HZB upload, cull, readback.
+	SWIM_CHECK_EQUAL(world.passes, 9u);
 
-	// The cull pass bound all thirteen descriptors, including the persistent buffers.
+	// The cull pass bound all fifteen descriptors, including the persistent buffers.
 	auto* table = world.scene.device.LastDescriptorTable;
 	SWIM_REQUIRE(table != nullptr);
-	SWIM_CHECK_EQUAL(table->Elements.size(), 13u);
+	SWIM_CHECK_EQUAL(table->Elements.size(), 15u);
 	SWIM_CHECK(table->Element(GpuVisibilityBindings::Instances, 0) == &world.scene.scene->GetInstanceBuffer());
 	SWIM_CHECK(table->Element(GpuVisibilityBindings::Meshes, 0) == &world.geometry->GetMetadataBuffer());
 	const auto* lodBuffer = static_cast<const Testing::MockMappedBuffer*>(table->Element(GpuVisibilityBindings::LodState, 0));
@@ -171,7 +178,7 @@ SWIM_TEST("Render.GpuVisibility", "RejectsInvalidConfigurationsAndFrames")
 SWIM_TEST("Render.GpuVisibility", "RecordLayoutsMatchTheShaderContract")
 {
 	static_assert(sizeof(GpuViewRecord) == 192);
-	static_assert(sizeof(VisibilityStats) == 16 * sizeof(std::uint32_t));
+	static_assert(sizeof(VisibilityStats) == 20 * sizeof(std::uint32_t));
 	static_assert(sizeof(GpuDrawRecord) == 8 && sizeof(GpuLodState) == 8 && sizeof(VisibilityBinRange) == 8);
 	static_assert(sizeof(Rhi::DrawIndexedIndirectCommand) == 20);
 	RenderViewDesc desc;
@@ -183,4 +190,113 @@ SWIM_TEST("Render.GpuVisibility", "RecordLayoutsMatchTheShaderContract")
 	SWIM_CHECK_EQUAL(view.LodScale, 700.0f);
 	SWIM_CHECK_EQUAL(view.Flags, 2u);
 	SWIM_CHECK_EQUAL(view.ViewProjection[15], 1.0f);
+}
+
+SWIM_TEST("Render.GpuVisibility", "EarlyAndLatePhasesShareHistoryAndTheLatePhaseBindsTheHzb")
+{
+	VisibilityWorld world;
+	auto visibility = world.Make();
+	world.scene.scene->Create({});
+	Testing::MockPipelineLayout hzbLayout;
+	Rhi::DescriptorSchemaDesc hzbSchema{ 0, {} };
+	hzbSchema.Bindings.push_back({ HzbBindings::Source, Rhi::DescriptorType::SampledTexture, 1, Rhi::ShaderStageMask::Compute });
+	hzbSchema.Bindings.push_back({ HzbBindings::Destination, Rhi::DescriptorType::StorageTexture, 1, Rhi::ShaderStageMask::Compute });
+	hzbLayout.program.Interface.DescriptorSchemas = { hzbSchema };
+	Testing::MockComputePipeline hzbPipeline;
+	const HzbBuilder builder({ &hzbPipeline, &hzbLayout, 0, "Test HZB" });
+
+	VisibilityFrameDesc frame;
+	frame.View = BuildGpuViewRecord({});
+	frame.ReadStats = false;
+	const auto logBefore = world.scene.device.Commands->size();
+	RenderGraph graph;
+	const auto sceneResources = world.scene.scene->Import(graph);
+	const auto geometryResources = world.geometry->Import(graph);
+	frame.Phase = VisibilityPhase::Early;
+	const auto early = visibility.Record(graph, sceneResources, geometryResources, frame);
+	SWIM_CHECK(early.Phase == VisibilityPhase::Early);
+	// The early draws would render depth here; the HZB reads it.
+	Rhi::TextureDesc depthDesc;
+	depthDesc.Extent = { 40, 24, 1 };
+	depthDesc.PixelFormat = CanonicalDepthFormat;
+	depthDesc.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled;
+	const auto depth = graph.CreateTexture(depthDesc);
+	graph.AddPass(
+		"Early draws", Rhi::QueueType::Graphics,
+		[&](RenderGraphBuilder& b)
+		{
+			b.Read(early.Commands, Rhi::ResourceState::IndirectArgument);
+			b.Read(early.Counts, Rhi::ResourceState::IndirectArgument);
+			b.Write(depth, Rhi::ResourceState::DepthStencilWrite);
+		},
+		[](RenderCommandContext&)
+		{
+		});
+	const auto hzb = builder.Record(graph, depth);
+	frame.Phase = VisibilityPhase::Late;
+	frame.Hzb = &hzb;
+	const auto late = visibility.Record(graph, sceneResources, geometryResources, frame);
+	graph.AddPass(
+		"Late draws", Rhi::QueueType::Graphics,
+		[&](RenderGraphBuilder& b)
+		{
+			b.Read(late.Commands, Rhi::ResourceState::IndirectArgument);
+			b.Read(late.Counts, Rhi::ResourceState::IndirectArgument);
+		},
+		[](RenderCommandContext&)
+		{
+		});
+	const auto plan = graph.Compile();
+	const auto completion = world.scene.executor->Execute(plan);
+	world.scene.scene->CommitUploads();
+	world.geometry->CommitUploads(completion);
+	world.scene.executor->Wait();
+
+	// The late cull (last descriptor table) binds the whole pyramid and the shared history.
+	const auto* table = world.scene.device.LastDescriptorTable;
+	SWIM_REQUIRE(table != nullptr);
+	const auto* hzbView = static_cast<const Rhi::TextureView*>(table->Element(GpuVisibilityBindings::Hzb, 0));
+	SWIM_REQUIRE(hzbView != nullptr);
+	SWIM_CHECK_EQUAL(hzbView->GetDesc().MipLevelCount, hzb.MipCount);
+	SWIM_CHECK_EQUAL(hzb.MipCount, 6u);
+	const auto* history = static_cast<const Testing::MockMappedBuffer*>(table->Element(GpuVisibilityBindings::OcclusionHistory, 0));
+	SWIM_REQUIRE(history != nullptr);
+	SWIM_CHECK_EQUAL(history->Bytes.size(), 64u * sizeof(std::uint32_t));
+
+	// Push constants: phase and HZB size for the late pass; the early pass has no HZB.
+	std::vector<std::array<std::uint32_t, 8>> cullConstants;
+	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
+	{
+		const auto& command = (*world.scene.device.Commands)[i];
+		if (command.Kind == "PushConstants" && command.Data.size() == GpuVisibilityBindings::PushConstantBytes)
+		{
+			cullConstants.emplace_back();
+			std::memcpy(cullConstants.back().data(), command.Data.data(), command.Data.size());
+		}
+	}
+	SWIM_REQUIRE_EQUAL(cullConstants.size(), 2u);
+	std::size_t dispatches = 0;
+	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
+	{
+		dispatches += (*world.scene.device.Commands)[i].Kind == "Dispatch";
+	}
+	SWIM_CHECK_EQUAL(dispatches, 8u); // Early cull, six HZB mips (40x24 -> 1x1), late cull.
+	SWIM_CHECK_EQUAL(cullConstants[0][4], std::uint32_t(VisibilityPhase::Early));
+	SWIM_CHECK_EQUAL(cullConstants[0][7], 0u);
+	SWIM_CHECK_EQUAL(cullConstants[1][4], std::uint32_t(VisibilityPhase::Late));
+	SWIM_CHECK((cullConstants[1][5] == 40u && cullConstants[1][6] == 24u && cullConstants[1][7] == 6u));
+
+	// Late needs an HZB of the view's convention.
+	RenderGraph invalid;
+	const auto invalidScene = world.scene.scene->Import(invalid);
+	const auto invalidGeometry = world.geometry->Import(invalid);
+	frame.Hzb = nullptr;
+	SWIM_CHECK_THROWS(visibility.Record(invalid, invalidScene, invalidGeometry, frame), std::invalid_argument);
+	HzbGraphResources forward = hzb;
+	forward.Convention = DepthConvention::Forward;
+	frame.Hzb = &forward;
+	SWIM_CHECK_THROWS(visibility.Record(invalid, invalidScene, invalidGeometry, frame), std::invalid_argument);
+	frame.Phase = static_cast<VisibilityPhase>(7);
+	SWIM_CHECK_THROWS(visibility.Record(invalid, invalidScene, invalidGeometry, frame), std::invalid_argument);
+	world.scene.scene->AbortUploads();
 }

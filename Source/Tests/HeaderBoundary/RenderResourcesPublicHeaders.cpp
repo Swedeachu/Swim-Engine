@@ -9,6 +9,8 @@
 #include "Engine/Systems/Renderer/Residency/MeshGeometryPayload.h"
 #include "Engine/Systems/Renderer/Residency/TextureResidency.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
+#include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
+#include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityReference.h"
 #include <memory>
@@ -40,3 +42,5 @@ static_assert(sizeof(Swim::Render::GpuInstanceRecord) == 64 && sizeof(Swim::Rend
 static_assert(sizeof(Swim::Render::RenderAffine) == 48);
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuVisibility>);
 static_assert(sizeof(Swim::Render::GpuViewRecord) == 192);
+static_assert(Swim::Render::CanonicalDepthConvention == Swim::Render::DepthConvention::ReverseZ);
+static_assert(sizeof(Swim::Render::VisibilityStats) == 80);

@@ -25,7 +25,11 @@ namespace Swim::Render
 		static constexpr std::uint32_t DrawRecords = 10;
 		static constexpr std::uint32_t Counts = 11;
 		static constexpr std::uint32_t Stats = 12;
+		static constexpr std::uint32_t Hzb = 13;			  // Texture2D<float>, every HZB mip (late phase).
+		static constexpr std::uint32_t OcclusionHistory = 14; // uint per row: generation when visible last frame.
+		static constexpr std::uint32_t Count = 15;
 		static constexpr std::uint32_t ThreadGroupSize = 64;
+		static constexpr std::uint32_t PushConstantBytes = 32;
 	};
 
 	struct GpuVisibilityDesc
@@ -33,7 +37,7 @@ namespace Swim::Render
 		Rhi::ComputePipeline* CullPipeline = nullptr;
 		Rhi::PipelineLayout* Layout = nullptr;
 		std::uint32_t Space = 0;
-		std::uint32_t MaxObjects = 16384;	  // LOD history rows; at least the GPU Scene capacity.
+		std::uint32_t MaxObjects = 16384;	  // LOD/occlusion history rows; at least the GPU Scene capacity.
 		std::uint32_t MaxMaterialSets = 1024; // MaterialSet -> material bin table size.
 		// Draw capacity per material bin (bin 0 also takes unmapped material sets),
 		// replicated for every index-page slot.

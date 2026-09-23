@@ -79,23 +79,23 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "SlangRecordsMatchTheCppRecords")
 	SWIM_CHECK_EQUAL(transforms->ElementSize, std::uint32_t(sizeof(GpuTransformRecord)));
 
 	const std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> instanceLayout{
-		{ "LocalCenter", { offsetof(GpuInstanceRecord, LocalCenter), 12 } },
-		{ "MeshIndex", { offsetof(GpuInstanceRecord, MeshIndex), 4 } },
-		{ "LocalExtents", { offsetof(GpuInstanceRecord, LocalExtents), 12 } },
-		{ "MeshGeneration", { offsetof(GpuInstanceRecord, MeshGeneration), 4 } },
-		{ "TransformIndex", { offsetof(GpuInstanceRecord, TransformIndex), 4 } },
-		{ "MaterialSet", { offsetof(GpuInstanceRecord, MaterialSet), 4 } },
-		{ "ObjectId", { offsetof(GpuInstanceRecord, ObjectId), 4 } },
-		{ "Flags", { offsetof(GpuInstanceRecord, Flags), 4 } },
-		{ "SkinIndex", { offsetof(GpuInstanceRecord, SkinIndex), 4 } },
-		{ "LodBias", { offsetof(GpuInstanceRecord, LodBias), 4 } },
-		{ "Generation", { offsetof(GpuInstanceRecord, Generation), 4 } },
-		{ "Reserved", { offsetof(GpuInstanceRecord, Reserved), 4 } },
+		{ "LocalCenter", { std::uint32_t(offsetof(GpuInstanceRecord, LocalCenter)), 12u } },
+		{ "MeshIndex", { std::uint32_t(offsetof(GpuInstanceRecord, MeshIndex)), 4u } },
+		{ "LocalExtents", { std::uint32_t(offsetof(GpuInstanceRecord, LocalExtents)), 12u } },
+		{ "MeshGeneration", { std::uint32_t(offsetof(GpuInstanceRecord, MeshGeneration)), 4u } },
+		{ "TransformIndex", { std::uint32_t(offsetof(GpuInstanceRecord, TransformIndex)), 4u } },
+		{ "MaterialSet", { std::uint32_t(offsetof(GpuInstanceRecord, MaterialSet)), 4u } },
+		{ "ObjectId", { std::uint32_t(offsetof(GpuInstanceRecord, ObjectId)), 4u } },
+		{ "Flags", { std::uint32_t(offsetof(GpuInstanceRecord, Flags)), 4u } },
+		{ "SkinIndex", { std::uint32_t(offsetof(GpuInstanceRecord, SkinIndex)), 4u } },
+		{ "LodBias", { std::uint32_t(offsetof(GpuInstanceRecord, LodBias)), 4u } },
+		{ "Generation", { std::uint32_t(offsetof(GpuInstanceRecord, Generation)), 4u } },
+		{ "Reserved", { std::uint32_t(offsetof(GpuInstanceRecord, Reserved)), 4u } },
 	};
 	SWIM_CHECK(Fields(*instances) == instanceLayout);
 	const std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> transformLayout{
-		{ "Current", { offsetof(GpuTransformRecord, Current), 48 } },
-		{ "Previous", { offsetof(GpuTransformRecord, Previous), 48 } },
+		{ "Current", { std::uint32_t(offsetof(GpuTransformRecord, Current)), 48u } },
+		{ "Previous", { std::uint32_t(offsetof(GpuTransformRecord, Previous)), 48u } },
 	};
 	SWIM_CHECK(Fields(*transforms) == transformLayout);
 }
@@ -139,6 +139,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "VisibilityProgramMatchesItsCppContra
 		{ "DrawRecords", B::DrawRecords, sizeof(GpuDrawRecord) },
 		{ "Counts", B::Counts, 0 },
 		{ "Stats", B::Stats, 0 },
+		{ "OcclusionHistory", B::OcclusionHistory, 0 },
 	};
 	for (const auto& item : expected)
 	{
@@ -176,6 +177,51 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "VisibilityProgramMatchesItsCppContra
 	SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 	SWIM_CHECK((converted.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ B::ThreadGroupSize, 1, 1 }));
 	SWIM_REQUIRE_EQUAL(converted.Interface.PushConstants.size(), 1u);
-	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, 16u);
+	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, B::PushConstantBytes);
+	const auto* hzb = FindParameter(parsed.Reflection, "Hzb");
+	SWIM_REQUIRE(hzb != nullptr);
+	SWIM_CHECK_EQUAL(hzb->Index, B::Hzb);
+	SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
+	std::uint32_t found = 0;
+	for (const auto& binding : converted.Interface.DescriptorSchemas[0].Bindings)
+	{
+		found += binding.Binding == B::Hzb && binding.Type == Rhi::DescriptorType::SampledTexture;
+		found += binding.Binding == B::OcclusionHistory && binding.Type == Rhi::DescriptorType::StorageBuffer;
+	}
+	SWIM_CHECK_EQUAL(found, 2u);
+	SWIM_CHECK_EQUAL(converted.Interface.DescriptorSchemas[0].Bindings.size(), std::size_t(B::Count));
+}
+#endif
+
+#ifdef SWIM_HZB_REDUCE_REFLECTION_PATH
+#include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
+
+// The HZB reduction program's bindings, thread group and push constants must match HzbBindings.
+SWIM_TEST("ShaderCompiler.GpuSceneLayout", "HzbReduceProgramMatchesItsCppContract")
+{
+	using B = Render::HzbBindings;
+	const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_HZB_REDUCE_REFLECTION_PATH);
+	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
+	const auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
+	SWIM_REQUIRE_MESSAGE(converted, converted.Error);
+	SWIM_CHECK((converted.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ B::ThreadGroupSize, B::ThreadGroupSize, 1 }));
+	SWIM_REQUIRE_EQUAL(converted.Interface.PushConstants.size(), 1u);
+	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, B::PushConstantBytes);
+	SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
+	const auto& bindings = converted.Interface.DescriptorSchemas[0].Bindings;
+	SWIM_REQUIRE_EQUAL(bindings.size(), 2u);
+	for (const auto& binding : bindings)
+	{
+		if (binding.Binding == B::Source)
+		{
+			SWIM_CHECK(binding.Type == Rhi::DescriptorType::SampledTexture);
+		}
+		else
+		{
+			SWIM_CHECK_EQUAL(binding.Binding, B::Destination);
+			SWIM_CHECK(binding.Type == Rhi::DescriptorType::StorageTexture);
+			SWIM_CHECK(binding.StorageTextureFormat == Rhi::Format::R32Float);
+		}
+	}
 }
 #endif

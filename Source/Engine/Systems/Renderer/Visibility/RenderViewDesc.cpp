@@ -49,6 +49,14 @@ namespace Swim::Render
 		view.LodPixelError = desc.LodPixelError;
 		view.LodHysteresis = desc.LodHysteresis;
 		view.Flags = desc.Flags;
+		if (desc.Depth == DepthConvention::Forward)
+		{
+			view.Flags |= std::uint32_t(GpuViewFlags::ForwardDepth);
+		}
+		else
+		{
+			view.Flags &= ~std::uint32_t(GpuViewFlags::ForwardDepth);
+		}
 		return view;
 	}
 
@@ -92,6 +100,26 @@ namespace Swim::Render
 		m[5] = f;
 		m[10] = farPlane / (nearPlane - farPlane);
 		m[11] = nearPlane * farPlane / (nearPlane - farPlane);
+		m[14] = -1.0f;
+		return m;
+	}
+
+	std::array<float, 16> OrthographicReverseZRowMajor(float left, float right, float bottom, float top, float nearPlane, float farPlane)
+	{
+		auto m = OrthographicRowMajor(left, right, bottom, top, nearPlane, farPlane);
+		// z_view = -near -> 1, -far -> 0.
+		m[10] = 1.0f / (farPlane - nearPlane);
+		m[11] = farPlane / (farPlane - nearPlane);
+		return m;
+	}
+
+	std::array<float, 16> PerspectiveReverseZRowMajor(float verticalFov, float aspect, float nearPlane)
+	{
+		std::array<float, 16> m{};
+		const float f = 1.0f / std::tan(verticalFov * 0.5f);
+		m[0] = f / aspect;
+		m[5] = f;
+		m[11] = nearPlane; // clip z = near, clip w = -z_view: depth = near / distance.
 		m[14] = -1.0f;
 		return m;
 	}

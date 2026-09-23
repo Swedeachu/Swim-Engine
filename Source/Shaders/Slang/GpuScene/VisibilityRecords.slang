@@ -5,6 +5,14 @@
 
 static const uint GpuViewFlagDisableFrustumCulling = 1u << 0;
 static const uint GpuViewFlagResetLodHistory = 1u << 1;
+static const uint GpuViewFlagResetOcclusionHistory = 1u << 2;
+static const uint GpuViewFlagForwardDepth = 1u << 3;
+static const uint GpuViewFlagDisableOcclusion = 1u << 4;
+
+// VisibilityPhase.
+static const uint VisibilityPhaseSingle = 0;
+static const uint VisibilityPhaseEarly = 1;
+static const uint VisibilityPhaseLate = 2;
 
 struct GpuViewRecord
 {
@@ -53,6 +61,9 @@ static const uint VisibilityStatVisible = 3;
 static const uint VisibilityStatDraws = 4;
 static const uint VisibilityStatDropped = 5;
 static const uint VisibilityStatOtherPage = 6;
-static const uint VisibilityStatLodCounts = 8;
+static const uint VisibilityStatOccluded = 7;
+static const uint VisibilityStatDeferred = 8;
+static const uint VisibilityStatAlreadyDrawn = 9;
+static const uint VisibilityStatLodCounts = 12;
 
 #endif

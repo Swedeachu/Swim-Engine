@@ -27,9 +27,28 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48, 49, 52–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet. HZB/occlusion (items 50/51) waits for the depth-convention gate. |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 49, 52, 53, 54, 55 and 57 implemented (2026-09-23):** GPU Scene rows are now culled, LOD-selected, binned and turned into indirect draws entirely on the GPU.
+- **Latest renderer checkpoint — items 50 and 51 implemented (2026-09-23):** the depth-convention gate is closed and GPU visibility gained hierarchical-Z occlusion culling that never hides newly visible objects.
+  - **Depth convention (the item 50 gate):** reverse-Z is final for the modern renderer.
+    - Near → 1, far/infinity → 0, `D32Float`, clear 0, `GreaterEqual` (`DepthConvention.h`).
+    - `OrthographicReverseZRowMajor` and `PerspectiveReverseZRowMajor` (infinite far) build canonical projections.
+    - Views record their convention (`GpuViewFlags::ForwardDepth` for the opt-in forward mapping).
+  - **`HzbBuilder` (item 50):** reduces a sampled depth texture into a transient `R32Float` pyramid (`HzbReduce.slang`), one graph compute pass per mip. Each texel keeps the farthest depth of its footprint, and odd sizes round up. `HzbReference` is the CPU definition.
+  - **Two-phase occlusion (item 51):**
+    - `VisibilityPhase::Early` draws what was visible last frame.
+    - The HZB is built from that depth.
+    - `VisibilityPhase::Late` tests every in-frustum object against it, draws the ones not yet drawn that are not occluded, and rewrites a per-row, generation-tagged visibility history.
+    - Newly visible and teleported objects are therefore found in the same frame.
+    - `CameraCut` (`ResetLodHistory | ResetOcclusionHistory`) makes the early phase draw everything in view. Reused rows start without history.
+    - `VisibilityStats` gained `Occluded`, `Deferred` and `AlreadyDrawn`.
+  - **Validation:**
+    - The official Linux configuration passes **485 cases / 11,248 checks** (was 476 / 7,445; most new checks are brute-force HZB and occlusion comparisons).
+    - With EnTT supplied locally, **508 cases** pass. Both are clean under ASan/LSan/UBSan; the sanitizer found and fixed a use-after-free in the first `HzbBuilder` draft.
+    - The new native smoke `GpuOcclusionTwoPhaseHzbRevealsNewlyVisibleObjects` runs the whole early → draw → HZB → late → draw pipeline on a real device and compares it with the CPU reference fed with the GPU's own HZB.
+    - See [GPU visibility](GpuVisibility.md#two-phase-occlusion-item-51) and [the items 50–51 record](validation/Items50-51-2026-09-23.md).
+  - **Still needed:** desktop execution of both visibility smokes (28 native cases). Item **56** needs the engine runtime to draw from `GpuScene` + `GpuVisibility`; Phase 14 (items 58+) follows.
+- **Previous renderer checkpoint — items 49, 52, 53, 54, 55 and 57 implemented (2026-09-23):** GPU Scene rows are now culled, LOD-selected, binned and turned into indirect draws entirely on the GPU.
   - **RHI:** `CommandList::DrawIndexedIndirect`/`DrawIndexedIndirectCount` with `DrawIndexedIndirectCommand` (20 bytes). The Vulkan backend validates usage, alignment, stride, ranges and `maxDrawIndirectCount`, and the device now enables `multiDrawIndirect` and `drawIndirectFirstInstance`.
   - **`Renderer/Visibility`:**
     - `GpuViewRecord`/`BuildGpuViewRecord` extract depth-[0,1] frustum planes (convention-agnostic, so reverse-Z works unchanged).
@@ -43,7 +62,7 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `GpuVisibilityCullsBinsAndDrawsIndirect` draws a 64×64 grid through every bin with `DrawIndexedIndirectCount` over three frames (camera moves, edits, a camera cut) and compares commands, records, counts, statistics and pixels with the CPU reference.
     - See [GPU visibility](GpuVisibility.md) and [the items 49–57 record](validation/Items49-57-2026-09-23.md).
   - **Still needed:** desktop execution of the new smoke (27 native cases). Items **50/51** (HZB, occlusion) wait for the reverse-Z/depth-convention decision, and item **56** needs the engine runtime to draw from `GpuScene` + `GpuVisibility`.
-- **Previous renderer checkpoint — items 46, 47 and 48 implemented (2026-09-22):** the renderer now has a persistent render-facing object database that is not EnTT.
+- **Earlier renderer checkpoint — items 46, 47 and 48 implemented (2026-09-22):** the renderer now has a persistent render-facing object database that is not EnTT.
   - **`Render::GpuScene` (item 46):**
     - Stable `RenderObjectHandle` rows live in two device-local std430 buffers: 64-byte `GpuInstanceRecord` (local bounds, mesh index + generation, material set, object id, flags, skin, LOD bias, generation) and 96-byte `GpuTransformRecord` (current and previous world 3x4).
     - `GpuRecordBuffer<T>` provides CPU mirrors with dirty-row tracking. Each import uploads only changed rows, batched into contiguous runs, as one staged graph pass per buffer.
@@ -1881,7 +1900,7 @@ Recommended modern convention:
 - depth range 0..1;
 - a consistent screen/UI origin defined by UI, not by graphics API;
 - renderer controls viewport orientation/front-face handling;
-- adopt reverse-Z when the modern depth pipeline is established, before HZB/occlusion code depends on depth semantics.
+- adopt reverse-Z when the modern depth pipeline is established, before HZB/occlusion code depends on depth semantics. *(Decided 2026-09-23: the modern renderer uses reverse-Z with `D32Float`, clear 0, `GreaterEqual` and infinite-far perspective; see `Renderer/Visibility/DepthConvention.h` and [GPU visibility](GpuVisibility.md#depth-convention-the-item-50-gate).)*
 
 Vulkan, D3D12, and Metal should adapt at the RHI/backend boundary rather than modifying Camera math. Legacy OpenGL 4.6 can use clip-control/backend adjustments where necessary.
 
@@ -3665,9 +3684,9 @@ DrawIndexedIndirectCount / RHI equivalent
 ### Required behavior
 
 - [x] no CPU-visible-list round trip for frame correctness; *(`GpuVisibility` → `DrawIndexedIndirectCount`; proven by the native smoke. The engine runtime still uses the legacy path until item 56.)*
-- [ ] HZB built each appropriate frame;
-- [ ] conservative behavior for newly visible/teleported objects; *(nothing is occlusion-culled yet; reused rows and `ResetLodHistory` restart LOD history)*
-- [ ] camera cut invalidates occlusion history; *(`GpuViewFlags::ResetLodHistory` exists and resets LOD history; occlusion history comes with item 51)*
+- [x] HZB built each appropriate frame; *(`HzbBuilder` from the early phase's depth, every frame that uses occlusion)*
+- [x] conservative behavior for newly visible/teleported objects; *(two-phase: the late test uses this frame's HZB, so revealed objects are drawn in the same frame; objects visible last frame are drawn early regardless)*
+- [x] camera cut invalidates occlusion history; *(`GpuViewFlags::CameraCut` resets LOD and occlusion history; reused rows carry a new generation)*
 - [x] GPU compaction; *(per-bin atomic slots)*
 - [x] GPU draw counts; *(one count per bin)*
 - [x] LOD hysteresis; *(per-row `GpuLodState`, `threshold × (1 ± h)`)*
@@ -3711,12 +3730,25 @@ Full contract: [GPU visibility](GpuVisibility.md).
 - [ ] Items 50/51 (HZB, occlusion with history invalidation) after the depth-convention gate.
 - [ ] Item 56: construct `GpuScene` + `GpuVisibility` in the engine runtime and retire the CPU visible list.
 
+### Items 50–51 HZB and occlusion checkpoint — 2026-09-23
+
+Full contract: [GPU visibility](GpuVisibility.md#hzb-item-50).
+
+- [x] Depth-convention gate: canonical reverse-Z (`DepthConvention.h`), reverse-Z orthographic/infinite perspective projections, `GpuViewFlags::ForwardDepth` for the opt-in forward mapping.
+- [x] `HzbBuilder` + `HzbReduce.slang`: per-mip graph compute passes over a transient `R32Float` pyramid (farthest depth, odd sizes round up); `HzbReference` CPU definition with GPU readback adoption.
+- [x] Two-phase occlusion in `GpuVisibility` (`VisibilityPhase::Early/Late`) with a persistent generation-tagged visibility history, a 1×1 stand-in HZB for the other phases, one persistent import per graph, and new statistics.
+- [x] `VisibilityMath::OccludedByHzb` and `RunVisibilityReference` phases; the shader mirrors them.
+- [x] Tests: depth convention, HZB reduction brute force, occlusion conservativeness against full-resolution depth, the CPU two-phase sequence, the 90k-object benchmark, mock early/late recording, reflected HZB/visibility layouts, the native two-phase smoke.
+- [ ] Execute the native smokes on Windows and Linux desktops.
+- [ ] GPU timing benchmark for occlusion on real content (the CPU benchmark shows the draw savings).
+- [ ] Item 56: the engine runtime draws the world through `GpuScene` + `GpuVisibility`.
+
 ### Phase 13 exit criteria
 
 - [ ] 100k mixed objects render without CPU visibility feedback.
-- [ ] occlusion-heavy benchmark shows HZB benefit.
-- [ ] camera cuts/teleports do not incorrectly occlude objects.
-- [ ] GPU visibility stats are readable asynchronously for debugging.
+- [ ] occlusion-heavy benchmark shows HZB benefit. *(CPU two-phase benchmark: 35.6% of 90k draws removed behind one wall; a GPU timing benchmark on real content is still needed.)*
+- [x] camera cuts/teleports do not incorrectly occlude objects. *(Two-phase design; asserted on the CPU and by the native occlusion smoke, which awaits desktop execution.)*
+- [x] GPU visibility stats are readable asynchronously for debugging. *(`VisibilityStats` through the readback arena, per phase.)*
 
 ---
 
@@ -4380,7 +4412,7 @@ Run common RHI tests against each modern backend as backends arrive:
 - imported/exported resources;
 - staged upload/readback suballocation, growth, failure recovery and partial preserving copies (`RenderGraph.Transfers`).
 
-GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
+GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`, `Render.DepthConvention`, `Render.Hzb`, `Render.Occlusion`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
 
 ### 32.8 GPU Scene/visibility
 
@@ -4650,8 +4682,8 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 ### 35.5 GPU-driven renderer
 
 49. [x] GPU frustum culling. *(2026-09-23: `GpuVisibility` sphere/plane culling over `GpuScene`; [GPU visibility](GpuVisibility.md). Native smoke awaits desktop execution.)*
-50. [ ] depth/HZB build using final reverse-Z/depth convention.
-51. [ ] occlusion culling with history invalidation.
+50. [x] depth/HZB build using final reverse-Z/depth convention. *(2026-09-23: canonical reverse-Z `D32Float`; `HzbBuilder` + `HzbReduce.slang`; [GPU visibility](GpuVisibility.md#hzb-item-50). Native smoke awaits desktop execution.)*
+51. [x] occlusion culling with history invalidation. *(two-phase early/late culling against the current frame's HZB; generation-tagged visibility history; `CameraCut` resets it)*
 52. [x] LOD selection/hysteresis. *(projected mesh-LOD error, per-row history, reset on generation change or `ResetLodHistory`)*
 53. [x] visible compaction. *(atomic per-bin slots)*
 54. [x] material/pass binning. *(material bins × index-page slots with bounded capacity; per-pass bins arrive with shadow/depth views)*
@@ -4721,9 +4753,9 @@ Before starting **GPU Scene**:
 
 Before starting **HZB/occlusion**:
 
-- [ ] canonical depth convention is final;
-- [ ] reverse-Z decision is final;
-- [ ] per-view history/camera-cut state exists.
+- [x] canonical depth convention is final; *(2026-09-23, `DepthConvention.h`)*
+- [x] reverse-Z decision is final; *(reverse-Z, infinite-far perspective)*
+- [x] per-view history/camera-cut state exists. *(each `GpuVisibility` owns one view's LOD/occlusion history; `GpuViewFlags::CameraCut`)*
 
 Before starting **Clustered Forward+**:
 

@@ -1,4 +1,4 @@
-// GPU-driven visibility and draw generation over the GPU Scene (items 49, 52-55).
+// GPU-driven visibility and draw generation over the GPU Scene (items 49, 51-55).
 // One thread per GPU Scene row. Mirrors VisibilityMath.h / VisibilityReference.cpp;
 // bindings follow GpuVisibilityBindings.
 #include "GpuScene/GpuSceneRecords.slang"
@@ -11,6 +11,10 @@ struct VisibilityConstants
 	uint BinCount;
 	uint MaterialSetCount;
 	uint PageSlotCount;
+	uint Phase;		  // VisibilityPhase.
+	uint HzbWidth;	  // Depth (HZB level 0) size; late phase only.
+	uint HzbHeight;
+	uint HzbMipCount; // Hzb mip i is depth level i + 1.
 };
 
 [[vk::push_constant]] ConstantBuffer<VisibilityConstants> Constants;
@@ -27,6 +31,8 @@ struct VisibilityConstants
 [[vk::binding(10, 0)]] RWStructuredBuffer<GpuDrawRecord> DrawRecords;
 [[vk::binding(11, 0)]] RWStructuredBuffer<uint> Counts;
 [[vk::binding(12, 0)]] RWStructuredBuffer<uint> Stats;
+[[vk::binding(13, 0)]] Texture2D<float> Hzb;
+[[vk::binding(14, 0)]] RWStructuredBuffer<uint> OcclusionHistory;
 
 void Count(uint stat)
 {
@@ -54,6 +60,72 @@ uint SelectLod(GpuMeshMetadata mesh, float errorScale, float threshold)
 	return lod;
 }
 
+// VisibilityMath::OccludedByHzb, line for line.
+bool OccludedByHzb(GpuViewRecord view, float3 center, float radius)
+{
+	if (Constants.HzbMipCount == 0 || Constants.HzbWidth == 0 || Constants.HzbHeight == 0)
+	{
+		return false;
+	}
+	const bool reverse = (view.Flags & GpuViewFlagForwardDepth) == 0;
+	const float width = float(Constants.HzbWidth);
+	const float height = float(Constants.HzbHeight);
+	float minX = 3.0e38;
+	float minY = 3.0e38;
+	float maxX = -3.0e38;
+	float maxY = -3.0e38;
+	float nearest = reverse ? -3.0e38 : 3.0e38;
+	for (uint i = 0; i < 8; ++i)
+	{
+		const float3 p = center + float3((i & 1u) != 0 ? radius : -radius, (i & 2u) != 0 ? radius : -radius,
+			(i & 4u) != 0 ? radius : -radius);
+		const float4 point = float4(p, 1.0);
+		const float cx = dot(view.ViewProjection[0], point);
+		const float cy = dot(view.ViewProjection[1], point);
+		const float cz = dot(view.ViewProjection[2], point);
+		const float cw = dot(view.ViewProjection[3], point);
+		if (cw <= 1.0e-5)
+		{
+			return false;
+		}
+		const float z = cz / cw;
+		if (reverse ? z > 1.0 : z < 0.0)
+		{
+			return false;
+		}
+		const float sx = (cx / cw * 0.5 + 0.5) * width;
+		const float sy = (0.5 - cy / cw * 0.5) * height;
+		minX = min(minX, sx);
+		maxX = max(maxX, sx);
+		minY = min(minY, sy);
+		maxY = max(maxY, sy);
+		nearest = reverse ? max(nearest, z) : min(nearest, z);
+	}
+	if (maxX < 0.0 || maxY < 0.0 || minX >= width || minY >= height)
+	{
+		return false;
+	}
+	const uint x0 = uint(floor(max(minX, 0.0)));
+	const uint y0 = uint(floor(max(minY, 0.0)));
+	const uint x1 = uint(floor(min(maxX, width - 1.0)));
+	const uint y1 = uint(floor(min(maxY, height - 1.0)));
+	uint level = 1;
+	while (level < Constants.HzbMipCount && (((x1 >> level) - (x0 >> level)) > 1u || ((y1 >> level) - (y0 >> level)) > 1u))
+	{
+		++level;
+	}
+	float farthest = reverse ? 3.0e38 : -3.0e38;
+	for (uint ty = y0 >> level; ty <= (y1 >> level); ++ty)
+	{
+		for (uint tx = x0 >> level; tx <= (x1 >> level); ++tx)
+		{
+			const float value = Hzb.Load(int3(int(tx), int(ty), int(level - 1)));
+			farthest = reverse ? min(farthest, value) : max(farthest, value);
+		}
+	}
+	return reverse ? farthest > nearest : farthest < nearest;
+}
+
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void computeMain(uint3 id : SV_DispatchThreadID)
@@ -73,9 +145,14 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	uint meshCount;
 	uint meshStride;
 	Meshes.GetDimensions(meshCount, meshStride);
+	const bool late = Constants.Phase == VisibilityPhaseLate;
 	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount)
 	{
 		Count(VisibilityStatNotDrawable);
+		if (late)
+		{
+			OcclusionHistory[row] = 0;
+		}
 		return;
 	}
 
@@ -101,8 +178,36 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			if (dot(plane.xyz, center) + plane.w < -radius)
 			{
 				Count(VisibilityStatFrustumCulled);
+				if (late)
+				{
+					OcclusionHistory[row] = 0;
+				}
 				return;
 			}
+		}
+	}
+
+	// Two-phase occlusion: early draws last frame's visible set, late the rest.
+	const bool visibleLastFrame =
+		(view.Flags & GpuViewFlagResetOcclusionHistory) != 0 || OcclusionHistory[row] == instance.Generation;
+	if (Constants.Phase == VisibilityPhaseEarly && !visibleLastFrame)
+	{
+		Count(VisibilityStatDeferred);
+		return;
+	}
+	if (late)
+	{
+		const bool occluded = (view.Flags & GpuViewFlagDisableOcclusion) == 0 && !unbounded && OccludedByHzb(view, center, radius);
+		OcclusionHistory[row] = occluded ? 0u : instance.Generation;
+		if (visibleLastFrame)
+		{
+			Count(VisibilityStatAlreadyDrawn);
+			return;
+		}
+		if (occluded)
+		{
+			Count(VisibilityStatOccluded);
+			return;
 		}
 	}
 	Count(VisibilityStatVisible);

@@ -3787,6 +3787,8 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderVisibility", "GpuVisibilityTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanIndirectDrawTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanGpuVisibilitySmokeTests.cpp", failures)
+    check_suite_is_compiled("RenderVisibility", "OcclusionTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanGpuOcclusionSmokeTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3797,6 +3799,13 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
                 fail(f"{module} must not depend on GPU visibility: {path.relative_to(ROOT)}", failures)
     if not (renderer / "Visibility/VisibilityReference.cpp").is_file():
         fail("GPU visibility CPU reference (Visibility/VisibilityReference.cpp) is missing", failures)
+    # Items 50/51: the HZB and occlusion keep a CPU definition next to the GPU path,
+    # and the canonical depth convention is declared once.
+    for relative in ("Visibility/HzbPyramid.cpp", "Visibility/HzbBuilder.cpp", "Visibility/DepthConvention.h"):
+        if not (renderer / relative).is_file():
+            fail(f"GPU occlusion unit is missing: Renderer/{relative}", failures)
+    if not (ROOT / "Source/Shaders/Slang/GpuScene/HzbReduce.slang").is_file():
+        fail("HZB reduction shader (Shaders/Slang/GpuScene/HzbReduce.slang) is missing", failures)
     # The GPU Scene sits above Resources and below residency/extraction: the lower
     # layers never include it, and it never reaches assets, residency or EnTT.
     for module in ("RenderGraph", "Resources", "Geometry"):

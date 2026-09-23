@@ -185,6 +185,7 @@ namespace
 				viewDesc.LodPixelError = 1.0f;
 				viewDesc.LodHysteresis = 0.25f;
 				viewDesc.Flags = flags;
+				viewDesc.Depth = DepthConvention::Forward; // OrthographicRowMajor; no depth buffer here.
 				VisibilityFrameDesc frameDesc;
 				frameDesc.View = BuildGpuViewRecord(viewDesc);
 				frameDesc.IndexPages = pages;

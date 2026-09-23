@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Systems/Renderer/Visibility/DepthConvention.h"
 #include "Engine/Systems/Renderer/Visibility/GpuViewRecord.h"
 
 #include <array>
@@ -16,6 +17,8 @@ namespace Swim::Render
 		float LodPixelError = 1.0f;
 		float LodHysteresis = 0.25f;
 		std::uint32_t Flags = 0; // GpuViewFlags.
+		// How ViewProjection maps depth; Forward sets GpuViewFlags::ForwardDepth.
+		DepthConvention Depth = CanonicalDepthConvention;
 	};
 
 	GpuViewRecord BuildGpuViewRecord(const RenderViewDesc& desc);
@@ -26,4 +29,8 @@ namespace Swim::Render
 	std::array<float, 16> OrthographicRowMajor(float left, float right, float bottom, float top, float nearPlane, float farPlane);
 	// Perspective projection (right-handed, looking down -Z) to clip depth [0, 1].
 	std::array<float, 16> PerspectiveRowMajor(float verticalFov, float aspect, float nearPlane, float farPlane);
+	// Canonical reverse-Z projections: near -> depth 1, far -> depth 0.
+	std::array<float, 16> OrthographicReverseZRowMajor(float left, float right, float bottom, float top, float nearPlane, float farPlane);
+	// Infinite far plane: depth = near / distance, which tends to 0.
+	std::array<float, 16> PerspectiveReverseZRowMajor(float verticalFov, float aspect, float nearPlane);
 } // namespace Swim::Render

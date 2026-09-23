@@ -372,6 +372,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	swim_add_slang_program(SwimHzbReduce
+		SOURCE Source/Shaders/Slang/GpuScene/HzbReduce.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimRhiGpuDrivenDraw
 		SOURCE Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 		PROFILE spirv_1_5
@@ -396,6 +401,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiBindless_SPIRV}" "${SwimRhiBindless_REFLECTION}"
 			"${SwimRhiGpuSceneProbe_SPIRV}" "${SwimRhiGpuSceneProbe_REFLECTION}"
 			"${SwimGpuVisibility_SPIRV}" "${SwimGpuVisibility_REFLECTION}"
+			"${SwimHzbReduce_SPIRV}" "${SwimHzbReduce_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
@@ -413,6 +419,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/GpuScene/GeometryRecords.slang
 			Source/Shaders/Slang/GpuScene/VisibilityRecords.slang
 			Source/Shaders/Slang/GpuScene/GpuVisibility.slang
+			Source/Shaders/Slang/GpuScene/HzbReduce.slang
 			Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")

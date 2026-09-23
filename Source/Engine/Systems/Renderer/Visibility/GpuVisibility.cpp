@@ -55,7 +55,16 @@ namespace Swim::Render
 			{ materialBins.size() * sizeof(std::uint32_t), usage, Rhi::MemoryPreference::DeviceLocal, name + " material bins" });
 		lodStateBuffer = device.CreateBuffer(
 			{ std::uint64_t(maxObjects) * sizeof(GpuLodState), usage, Rhi::MemoryPreference::DeviceLocal, name + " LOD history" });
-		if (!materialBinBuffer || !lodStateBuffer)
+		occlusionHistoryBuffer = device.CreateBuffer(
+			{ std::uint64_t(maxObjects) * sizeof(std::uint32_t), usage, Rhi::MemoryPreference::DeviceLocal, name + " occlusion history" });
+		Rhi::TextureDesc nullDesc;
+		nullDesc.Extent = { 1, 1, 1 };
+		nullDesc.PixelFormat = Rhi::Format::R32Float;
+		nullDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+		const auto nullName = name + " null HZB";
+		nullDesc.DebugName = nullName;
+		nullHzb = device.CreateTexture(nullDesc);
+		if (!materialBinBuffer || !lodStateBuffer || !occlusionHistoryBuffer || !nullHzb)
 		{
 			throw std::runtime_error(name + " buffers could not be created");
 		}
@@ -81,6 +90,37 @@ namespace Swim::Render
 		return materialSet < materialBins.size() ? materialBins[materialSet] : 0u;
 	}
 
+	GpuVisibility::PersistentImports& GpuVisibility::Import(RenderGraph& graph, std::uint64_t graphId)
+	{
+		// One import per graph: a frame's early and late phases share the history.
+		if (imports.Graph == graphId)
+		{
+			return imports;
+		}
+		imports.Graph = graphId;
+		imports.MaterialTable = graph.ImportBuffer(*materialBinBuffer, S::ShaderRead);
+		imports.LodState = graph.ImportBuffer(*lodStateBuffer, S::ShaderRead);
+		imports.OcclusionHistory = graph.ImportBuffer(*occlusionHistoryBuffer, S::ShaderRead);
+		if (!historyInitialized)
+		{
+			RecordPersistentUpload(
+				graph, name + " LOD history reset", imports.LodState, std::vector<std::byte>(lodStateBuffer->GetDesc().Size));
+			RecordPersistentUpload(graph, name + " occlusion history reset", imports.OcclusionHistory,
+				std::vector<std::byte>(occlusionHistoryBuffer->GetDesc().Size));
+			imports.NullHzb = graph.ImportTexture(*nullHzb, S::Undefined);
+			const float zero = 0.0f;
+			AddTextureUpload(
+				graph, name + " null HZB upload", std::as_bytes(std::span(&zero, 1)), imports.NullHzb, { 0, {}, {}, { 1, 1, 1 } });
+			graph.Export(imports.NullHzb, S::ShaderRead);
+			historyInitialized = true;
+		}
+		else
+		{
+			imports.NullHzb = graph.ImportTexture(*nullHzb, S::ShaderRead);
+		}
+		return imports;
+	}
+
 	VisibilityGraphResources GpuVisibility::Record(
 		RenderGraph& graph, const GpuSceneGraphResources& scene, const GeometryGraphResources& geometry, const VisibilityFrameDesc& frame)
 	{
@@ -92,9 +132,20 @@ namespace Swim::Render
 		{
 			throw std::length_error(name + " LOD history is smaller than the GPU Scene row count");
 		}
+		const bool late = frame.Phase == VisibilityPhase::Late;
+		const bool forwardDepth = (frame.View.Flags & std::uint32_t(GpuViewFlags::ForwardDepth)) != 0;
+		if (late && (!frame.Hzb || frame.Hzb->MipCount == 0 || (frame.Hzb->Convention == DepthConvention::Forward) != forwardDepth))
+		{
+			throw std::invalid_argument(name + " late phase needs this frame's HZB built with the view's depth convention");
+		}
+		if (frame.Phase != VisibilityPhase::Single && frame.Phase != VisibilityPhase::Early && !late)
+		{
+			throw std::invalid_argument(name + " unknown visibility phase");
+		}
 
 		VisibilityGraphResources resources;
 		resources.Bins = &bins;
+		resources.Phase = frame.Phase;
 		const auto binCount = bins.GetBinCount();
 		const auto capacity = bins.GetTotalCapacity();
 		resources.Commands = graph.CreateBuffer({ std::uint64_t(capacity) * sizeof(Rhi::DrawIndexedIndirectCommand),
@@ -136,24 +187,27 @@ namespace Swim::Render
 				c.Commands().CopyBuffer(*source.Buffer, c.Get(stats), { source.Offset + countBytes, 0, sizeof(VisibilityStats) });
 			});
 
-		// Persistent state: material-bin table when edited, LOD history once.
-		const auto materialTable = graph.ImportBuffer(*materialBinBuffer, S::ShaderRead);
-		const auto lodState = graph.ImportBuffer(*lodStateBuffer, S::ShaderRead);
+		// Persistent state: material-bin table when edited, histories once.
+		const auto& persistent = Import(graph, scene.Instances.Graph);
+		const auto materialTable = persistent.MaterialTable;
+		const auto lodState = persistent.LodState;
+		const auto occlusion = persistent.OcclusionHistory;
+		const auto hzbTexture = late ? frame.Hzb->Pyramid : persistent.NullHzb;
+		const auto hzbMips = late ? frame.Hzb->MipCount : 1u;
 		if (materialBinsDirty)
 		{
 			std::vector<std::byte> bytes(materialBins.size() * sizeof(std::uint32_t));
 			std::memcpy(bytes.data(), materialBins.data(), bytes.size());
 			RecordPersistentUpload(graph, name + " material bins upload", materialTable, std::move(bytes));
 		}
-		if (!lodStateInitialized)
-		{
-			RecordPersistentUpload(graph, name + " LOD history reset", lodState, std::vector<std::byte>(lodStateBuffer->GetDesc().Size));
-		}
 
-		const std::array<std::uint32_t, 4> constants{ scene.RowCount, binCount, static_cast<std::uint32_t>(materialBins.size()),
-			bins.GetPageSlots() };
+		const std::array<std::uint32_t, 8> constants{ scene.RowCount, binCount, static_cast<std::uint32_t>(materialBins.size()),
+			bins.GetPageSlots(), static_cast<std::uint32_t>(frame.Phase), late ? frame.Hzb->Width : 0u, late ? frame.Hzb->Height : 0u,
+			late ? frame.Hzb->MipCount : 0u };
+		static_assert(sizeof(constants) == B::PushConstantBytes);
+		const char* phaseName = frame.Phase == VisibilityPhase::Early ? " early cull" : late ? " late cull" : " cull";
 		resources.CullPass = graph.AddPass(
-			name + " cull", Rhi::QueueType::Compute,
+			name + phaseName, Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
 			{
 				b.Read(scene.Instances, S::ShaderRead);
@@ -169,6 +223,8 @@ namespace Swim::Render
 				b.Write(resources.DrawRecords, S::ShaderWrite);
 				b.ReadWrite(resources.Counts, S::ShaderRead | S::ShaderWrite);
 				b.ReadWrite(resources.Stats, S::ShaderRead | S::ShaderWrite);
+				b.ReadWrite(occlusion, S::ShaderRead | S::ShaderWrite);
+				b.Read(hzbTexture, S::ShaderRead);
 			},
 			[=, pipeline = pipeline, layout = layout, space = space, instances = scene.Instances, transforms = scene.Transforms,
 				meshes = geometry.Metadata, submeshes = geometry.Submeshes, commands = resources.Commands, records = resources.DrawRecords,
@@ -179,7 +235,7 @@ namespace Swim::Render
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
-				std::array<Rhi::DescriptorWrite, 13> writes{};
+				std::array<Rhi::DescriptorWrite, B::Count> writes{};
 				const auto whole = [&](std::uint32_t binding, GraphBuffer buffer)
 				{
 					writes[binding].Binding = binding;
@@ -206,6 +262,12 @@ namespace Swim::Render
 				whole(B::DrawRecords, records);
 				whole(B::Counts, counts);
 				whole(B::Stats, stats);
+				whole(B::OcclusionHistory, occlusion);
+				Rhi::TextureViewDesc hzbView;
+				hzbView.PixelFormat = Rhi::Format::R32Float;
+				hzbView.MipLevelCount = hzbMips;
+				writes[B::Hzb].Binding = B::Hzb;
+				writes[B::Hzb].TextureResource = &c.CreateView(hzbTexture, hzbView);
 				table->Write(writes);
 				auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 				auto& list = c.Commands();
@@ -219,7 +281,6 @@ namespace Swim::Render
 			resources.StatsReadback = AddBufferReadback(graph, name + " stats readback", resources.Stats, 0, sizeof(VisibilityStats));
 		}
 		materialBinsDirty = false;
-		lodStateInitialized = true;
 		return resources;
 	}
 } // namespace Swim::Render

@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/GpuScene/RenderObjectFlags.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityMath.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -9,9 +10,33 @@ namespace Swim::Render
 {
 	VisibilityReferenceResult RunVisibilityReference(const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState)
 	{
+		if (inputs.Phase != VisibilityPhase::Single)
+		{
+			throw std::invalid_argument("Early/late visibility phases need an occlusion history");
+		}
+		std::vector<std::uint32_t> unused;
+		return RunVisibilityReference(inputs, lodState, unused);
+	}
+
+	VisibilityReferenceResult RunVisibilityReference(
+		const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState, std::vector<std::uint32_t>& occlusionHistory)
+	{
 		if (!inputs.Bins || inputs.IndexPages.size() > inputs.Bins->GetPageSlots())
 		{
 			throw std::invalid_argument("Visibility reference needs a bin layout covering every index-page slot");
+		}
+		const bool late = inputs.Phase == VisibilityPhase::Late;
+		if (late && (!inputs.Hzb || inputs.Hzb->GetConvention() != VisibilityMath::ViewDepthConvention(inputs.View)))
+		{
+			throw std::invalid_argument("The late visibility phase needs this frame's HZB, built with the view's depth convention");
+		}
+		occlusionHistory.resize(std::max(occlusionHistory.size(), inputs.Instances.size()), 0u);
+		const bool resetOcclusion = (inputs.View.Flags & std::uint32_t(GpuViewFlags::ResetOcclusionHistory)) != 0;
+		const bool disableOcclusion = (inputs.View.Flags & std::uint32_t(GpuViewFlags::DisableOcclusion)) != 0;
+		VisibilityMath::HzbDims dims;
+		if (late)
+		{
+			dims = { inputs.Hzb->GetWidth(), inputs.Hzb->GetHeight(), inputs.Hzb->GetMipCount() };
 		}
 		VisibilityReferenceResult result;
 		result.Bins.resize(inputs.Bins->GetBinCount());
@@ -31,13 +56,48 @@ namespace Swim::Render
 			if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= inputs.Meshes.size())
 			{
 				++stats.NotDrawable;
+				if (late)
+				{
+					occlusionHistory[row] = 0;
+				}
 				continue;
 			}
 			const auto sphere = VisibilityMath::WorldSphere(instance, inputs.Transforms[instance.TransformIndex]);
 			if (!VisibilityMath::InsideFrustum(inputs.View, sphere))
 			{
 				++stats.FrustumCulled;
+				if (late)
+				{
+					occlusionHistory[row] = 0;
+				}
 				continue;
+			}
+			// Two-phase occlusion: early draws last frame's visible set, late the rest.
+			const bool visibleLastFrame = resetOcclusion || occlusionHistory[row] == instance.Generation;
+			if (inputs.Phase == VisibilityPhase::Early && !visibleLastFrame)
+			{
+				++stats.Deferred;
+				continue;
+			}
+			if (late)
+			{
+				const bool occluded = !disableOcclusion &&
+					VisibilityMath::OccludedByHzb(inputs.View, sphere, dims,
+						[&](std::uint32_t mip, std::uint32_t x, std::uint32_t y)
+						{
+							return inputs.Hzb->Fetch(mip, x, y);
+						});
+				occlusionHistory[row] = occluded ? 0u : instance.Generation;
+				if (visibleLastFrame)
+				{
+					++stats.AlreadyDrawn;
+					continue;
+				}
+				if (occluded)
+				{
+					++stats.Occluded;
+					continue;
+				}
 			}
 			++stats.Visible;
 			const auto& mesh = inputs.Meshes[instance.MeshIndex];

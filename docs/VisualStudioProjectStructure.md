@@ -512,7 +512,7 @@ RenderGraph    -> RHI contract (compiled directly into SwimEngine/SwimTests)
 Resources      -> RHI contract (GPU handles/registries; same source list as RenderGraph)
 Geometry       -> Resources, RenderGraph, RHI contract (paged GeometryHeap)
 GpuScene       -> Resources, RenderGraph, RHI contract (persistent render objects)
-Visibility     -> GpuScene (records), Geometry (records), RenderGraph, RHI contract (GPU culling, LOD, indirect draws)
+Visibility     -> GpuScene (records), Geometry (records), RenderGraph, RHI contract (GPU culling, HZB occlusion, LOD, indirect draws)
 Residency      -> GpuScene (types), Geometry, Resources, RenderGraph, Assets, IO, Jobs (asset -> GPU residency)
 Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAllocator
 

@@ -9,6 +9,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace Swim::Testing
 {
@@ -60,6 +61,7 @@ namespace Swim::Testing
 		std::uint64_t Size = 0;
 		Swim::Rhi::ResourceState Before = Swim::Rhi::ResourceState::Undefined;
 		Swim::Rhi::ResourceState After = Swim::Rhi::ResourceState::Undefined;
+		std::vector<std::byte> Data; // PushConstants bytes.
 	};
 
 	// Host-memory texture: one tightly packed byte vector per mip/layer.
@@ -258,7 +260,12 @@ namespace Swim::Testing
 		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline&) override {}
 		void BindComputePipeline(Swim::Rhi::ComputePipeline&) override {}
 		void BindDescriptorTable(std::uint32_t, Swim::Rhi::DescriptorTable&) override {}
-		void PushConstants(Swim::Rhi::ShaderStageMask, std::uint32_t, std::span<const std::byte>) override {}
+		void PushConstants(Swim::Rhi::ShaderStageMask, std::uint32_t offset, std::span<const std::byte> data) override
+		{
+			MockCommand command{ "PushConstants", nullptr, nullptr, offset, 0, data.size() };
+			command.Data.assign(data.begin(), data.end());
+			Capture(std::move(command));
+		}
 		void SetViewport(const Swim::Rhi::Viewport&) override {}
 		void SetScissor(const Swim::Rhi::ScissorRect&) override {}
 		void BindVertexBuffer(std::uint32_t, Swim::Rhi::Buffer&, std::uint64_t) override {}
@@ -274,7 +281,7 @@ namespace Swim::Testing
 		{
 			Capture({ "DrawIndexedIndirectCount", &arguments, &count, offset, countOffset, maxDrawCount });
 		}
-		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override {}
+		void Dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) override { Capture({ "Dispatch", nullptr, nullptr, x, y, z }); }
 		void ResetQueries(Swim::Rhi::QueryPool&, std::uint32_t, std::uint32_t) override {}
 		void WriteTimestamp(Swim::Rhi::QueryPool&, std::uint32_t, Swim::Rhi::TimestampStage) override {}
 

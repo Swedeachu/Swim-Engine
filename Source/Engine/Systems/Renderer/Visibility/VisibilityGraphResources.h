@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/GraphReadback.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraph.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityBinLayout.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityPhase.h"
 
 #include <optional>
 
@@ -20,5 +21,6 @@ namespace Swim::Render
 		GraphPass CullPass;
 		std::optional<GraphReadback> StatsReadback;
 		const VisibilityBinLayout* Bins = nullptr;
+		VisibilityPhase Phase = VisibilityPhase::Single;
 	};
 } // namespace Swim::Render

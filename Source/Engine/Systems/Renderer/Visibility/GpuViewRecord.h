@@ -10,7 +10,21 @@ namespace Swim::Render
 		DisableFrustumCulling = 1u << 0,
 		// Camera cut/teleport: ignore every object's previous LOD this frame.
 		ResetLodHistory = 1u << 1,
+		// Camera cut/teleport: treat every in-frustum object as visible last frame, so
+		// the early phase draws them all and nothing is occluded by stale history.
+		ResetOcclusionHistory = 1u << 2,
+		// Depth is conventional (near 0, far 1) rather than the canonical reverse-Z.
+		ForwardDepth = 1u << 3,
+		// The late phase draws every remaining in-frustum object (HZB test skipped).
+		DisableOcclusion = 1u << 4,
+		// Both histories reset: what a camera cut or teleport sets.
+		CameraCut = ResetLodHistory | ResetOcclusionHistory,
 	};
+
+	constexpr std::uint32_t operator|(GpuViewFlags left, GpuViewFlags right)
+	{
+		return static_cast<std::uint32_t>(left) | static_cast<std::uint32_t>(right);
+	}
 
 	// One std430 view for GPU visibility (Shaders/Slang/GpuScene/GpuVisibility.slang).
 	// Build it with BuildGpuViewRecord; the planes are derived from ViewProjection.
