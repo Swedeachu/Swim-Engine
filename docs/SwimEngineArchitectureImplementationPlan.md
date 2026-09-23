@@ -27,9 +27,24 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62) and the GPU light buffer (item 63) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63) and GPU clustered light assignment with overflow diagnostics (items 64, 65, 68) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — item 63: GPU light buffer (2026-09-23):** Phase 15 starts with a persistent, GPU-resident light schema.
+- **Latest renderer checkpoint — items 64, 65 and 68: cluster grid, GPU light assignment and overflow diagnostics (2026-09-23):** local lights are now binned into compact per-cluster lists on the GPU.
+  - **`Renderer/ClusteredLighting`:**
+    - `ClusterGrid` (item 64): screen tiles × logarithmic depth slices, with configurable tile size, slice count, near/far and limits. It works for any perspective depth mapping, decodes view depth from the depth buffer, and is rebuilt per frame, so resizing is just a new desc.
+    - `ClusteredLightAssigner` (item 65) records five deterministic compute passes with no atomics: light cull to view space, cluster AABBs, count, a one-group prefix scan into compact offsets, and write. Lists are in light-index order. Directional lights stay outside them.
+    - `ClusterReference` is the CPU definition of every pass, plus `ShadeClustered`; `ClusteredLighting.slang` provides the shader-side `ClusteredShade`.
+  - **Overflow and diagnostics (item 68):**
+    - `MaxLightsPerCluster` truncates lists and `IndexCapacity` clamps offsets; nothing is written out of bounds, and truncation only removes light.
+    - `ClusterStats` reports visible lights, requested/written/dropped indices, overflowing and non-empty clusters and the maximum raw count.
+    - `RecordHeatmap` colors each pixel by its cluster's count from the depth buffer, with magenta for truncated clusters.
+  - **Validation:**
+    - The official Linux configuration passes **539 cases / 225,498 checks** (was 530 / 181,469). The EnTT-enabled sanitizer build passes 562 cases cleanly.
+    - The CPU tests prove that the AABBs tile the volume, that assignment is conservative, and that clustered shading equals `ShadeAllLights`.
+    - The new native smoke `ClusteredLightingMatchesTheCpuReference` compares every GPU output with the CPU definition over 1,502 lights in three frames: roomy, overflowing and resized after light moves.
+    - 33 native cases now. See [Clustered lighting](ClusteredLighting.md) and [the items 64, 65, 68 record](validation/Items64-65-68-2026-09-23.md).
+  - **Still needed:** desktop execution of the new smoke. Opaque Clustered Forward+ (item 66) comes next.
+- **Previous renderer checkpoint — item 63: GPU light buffer (2026-09-23):** Phase 15 starts with a persistent, GPU-resident light schema.
   - **`Renderer/Lights`:**
     - `LightDesc` → `EncodeLight` → a 64-byte `GpuLightRecord`, following glTF punctual semantics: directional (lux), point and spot (candela), with an inverse-square window reaching zero at `Range`, glTF spot falloff, shadow index and flags.
     - `LightMath` is the CPU definition: evaluation, `LightBoundingSphere` (tight spot bounds for clustering) and `ShadeAllLights`, the brute-force reference clustered lighting must match. `GpuLightRecords.slang` mirrors it.
@@ -41,8 +56,8 @@ This section is the short authoritative status summary for the current repositor
     - The official Linux configuration passes **530 cases / 181,469 checks** (was 520). The EnTT-enabled sanitizer build passes 553 cases cleanly.
     - The new native smoke `GpuLightBufferMatchesBruteForceShading` shades 512 points over 2,002 lights with a compute probe, matches the CPU reference, and proves churn uploads only touched rows.
     - 32 native cases now. See [GPU lights](Lights.md) and [the item 63 record](validation/Item63-2026-09-23.md).
-  - **Still needed:** desktop execution of the new smoke. The cluster grid (item 64) comes next.
-- **Previous renderer checkpoint — items 61 and 62: environment/IBL and the PBR image-regression gallery (2026-09-23):** the standard material now receives image-based lighting built entirely on the GPU, and a gallery pins the result per pixel.
+  - **Still needed:** desktop execution of the new smoke. The cluster grid, light assignment and heatmap (items 64, 65, 68) followed.
+- **Earlier renderer checkpoint — items 61 and 62: environment/IBL and the PBR image-regression gallery (2026-09-23):** the standard material now receives image-based lighting built entirely on the GPU, and a gallery pins the result per pixel.
   - **`Renderer/Environment` (item 61):**
     - `EnvironmentBuilder` records graph-scheduled compute passes:
       - a procedural HDR sky (`ProceduralSky`) or any `RGBA16Float` source cube;
@@ -3926,23 +3941,23 @@ GpuLightBuffer                 Depth/View
 
 ### Cluster grid
 
-- [ ] configurable X/Y screen tiles;
-- [ ] configurable Z slices;
-- [ ] logarithmic/depth-aware Z partitioning;
-- [ ] view-relative bounds;
-- [ ] resolution changes regenerate grid parameters cleanly.
+- [x] configurable X/Y screen tiles;
+- [x] configurable Z slices;
+- [x] logarithmic/depth-aware Z partitioning;
+- [x] view-relative bounds;
+- [x] resolution changes regenerate grid parameters cleanly.
 
 ### Light assignment
 
-- [ ] point lights;
-- [ ] spot lights;
-- [ ] directional lights handled outside local cluster lists;
-- [ ] GPU cluster/light intersection;
-- [ ] compact index storage;
-- [ ] bounded overflow behavior;
-- [ ] overflow counters;
-- [ ] debug heatmap;
-- [ ] no per-object CPU light list.
+- [x] point lights;
+- [x] spot lights;
+- [x] directional lights handled outside local cluster lists;
+- [x] GPU cluster/light intersection;
+- [x] compact index storage;
+- [x] bounded overflow behavior;
+- [x] overflow counters;
+- [x] debug heatmap;
+- [x] no per-object CPU light list.
 
 ### Transparency
 
@@ -3965,7 +3980,7 @@ Set practical configurable budgets from measurement rather than arbitrary hardco
 
 - [ ] thousands of dynamic lights scale predictably.
 - [ ] opaque and transparent rendering consume the clustered data path.
-- [ ] overflow behavior is visible and safe.
+- [x] overflow behavior is visible and safe. *(items 65/68: bounded lists, `ClusterStats`, magenta heatmap)*
 - [ ] zero/few-light scenes remain cheap.
 
 ---
@@ -4772,11 +4787,11 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 61. [x] environment/IBL. *(2026-09-23: `Renderer/Environment` + `Shaders/Slang/Environment`; [Environment](Environment.md). HDR environment assets and tone mapping (item 73) remain; native smoke awaits desktop execution.)*
 62. [x] PBR image regression gallery. *(2026-09-23: CPU golden renderer `PbrGalleryFixture.h` + native `PbrGalleryMatchesTheCpuReference`; [Environment](Environment.md#pbr-image-regression-gallery-item-62).)*
 63. [x] GpuLightBuffer. *(2026-09-23: `Renderer/Lights` + `GpuLightRecords.slang`; [GPU lights](Lights.md). Native smoke awaits desktop execution.)*
-64. [ ] clustered grid.
-65. [ ] GPU light assignment/compaction.
+64. [x] clustered grid. *(2026-09-23: `Renderer/ClusteredLighting/ClusterGrid`; [Clustered lighting](ClusteredLighting.md). Native smoke awaits desktop execution.)*
+65. [x] GPU light assignment/compaction. *(2026-09-23: `ClusteredLightAssigner` + `Shaders/Slang/ClusteredLighting`.)*
 66. [ ] opaque Clustered Forward+.
 67. [ ] transparent Clustered Forward+.
-68. [ ] cluster heatmap/overflow diagnostics.
+68. [x] cluster heatmap/overflow diagnostics. *(2026-09-23: `ClusterStats` and `RecordHeatmap`; done ahead of 66–67 because it validates assignment.)*
 69. [ ] 1k/10k+ light benchmarks.
 
 ### 35.7 Complete modern frame

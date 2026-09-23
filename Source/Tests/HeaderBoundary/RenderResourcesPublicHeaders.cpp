@@ -1,3 +1,5 @@
+#include "Engine/Systems/Renderer/ClusteredLighting/ClusterReference.h"
+#include "Engine/Systems/Renderer/ClusteredLighting/ClusteredLightAssigner.h"
 #include "Engine/Systems/Renderer/Environment/EnvironmentBuilder.h"
 #include "Engine/Systems/Renderer/Environment/EnvironmentReference.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"

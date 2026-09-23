@@ -76,4 +76,34 @@ GpuLightSample GpuLightEvaluate(GpuLightRecord light, float3 position)
 	return sample;
 }
 
+// A sphere containing every point a local light reaches (Lights::LightBoundingSphere).
+float4 GpuLightBoundingSphere(GpuLightRecord light)
+{
+	float4 sphere = float4(light.Position, light.Range);
+	if (light.Type != GpuLightTypeSpot || light.SpotScale <= 0.0)
+	{
+		return sphere;
+	}
+	const float cosOuter = clamp(-light.SpotOffset / light.SpotScale, 0.0, 1.0);
+	const float sinOuter = sqrt(max(1.0 - cosOuter * cosOuter, 0.0));
+	const float h = light.Range;
+	float along = 0.0;
+	float radius = h;
+	if (cosOuter >= 0.70710678)
+	{
+		along = h / (2.0 * cosOuter);
+		radius = along;
+	}
+	else
+	{
+		along = h * cosOuter;
+		radius = h * sinOuter;
+	}
+	if (radius < sphere.w)
+	{
+		sphere = float4(light.Position + light.Direction * along, radius);
+	}
+	return sphere;
+}
+
 #endif

@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3871,6 +3871,34 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderLights", "GpuLightBufferTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanGpuLightSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderLightLayoutTests.cpp", failures)
+    # Items 64/65/68: clustered light assignment sits above the GPU light buffer.
+    # Nothing below it includes it, it never reaches visibility, environment,
+    # materials or residency, and every GPU pass keeps its CPU definition.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/ClusteredLighting/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on clustered lighting: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "ClusteredLighting").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/Visibility/|Renderer/Environment/|Renderer/GpuMaterials/|Renderer/Residency/|Engine/Assets/)',
+            path.read_text(encoding="utf-8"),
+        ):
+            fail(f"ClusteredLighting must depend only on the light buffer and the graph: {path.relative_to(ROOT)}", failures)
+    for relative in ("ClusteredLighting/ClusterGrid.cpp", "ClusteredLighting/ClusterReference.cpp",
+                     "ClusteredLighting/ClusteredLightAssigner.cpp", "ClusteredLighting/ClusterBindings.h"):
+        if not (renderer / relative).is_file():
+            fail(f"clustered lighting unit is missing: Renderer/{relative}", failures)
+    for shader in ("ClusterGrid", "ClusterLightCull", "ClusterBounds", "ClusterAssign", "ClusterScan", "ClusterHeatmap", "ClusteredLighting"):
+        if not (ROOT / f"Source/Shaders/Slang/ClusteredLighting/{shader}.slang").is_file():
+            fail(f"clustered lighting shader is missing: Shaders/Slang/ClusteredLighting/{shader}.slang", failures)
+    if "Renderer/ClusteredLighting/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("ClusteredLighting sources must compile with the backend-neutral renderer source list", failures)
+    check_suite_is_compiled("RenderClusteredLighting", "ClusterGridTests.cpp", failures)
+    check_suite_is_compiled("RenderClusteredLighting", "ClusteredLightAssignerTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanClusteredLightingSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderClusterLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3897,7 +3925,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

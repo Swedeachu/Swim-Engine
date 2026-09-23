@@ -516,6 +516,7 @@ Materials      -> (standard library only; material templates/instances, standard
 GpuMaterials   -> Materials, Resources, RenderGraph, GpuScene (record uploads), RHI contract
 Environment    -> Materials (StandardPbr), RenderGraph, RHI contract (GPU-built IBL + CPU references)
 Lights         -> Materials (StandardPbr), RenderGraph, GpuScene (record uploads), RHI contract (GPU light buffer)
+ClusteredLighting -> Lights, Materials (StandardPbr), RenderGraph, RHI contract (cluster grid, light assignment, heatmap)
 Visibility     -> GpuScene (records), Geometry (records), RenderGraph, RHI contract (GPU culling, HZB occlusion, LOD, indirect draws)
 Residency      -> GpuScene (types), Geometry, Resources, RenderGraph, Assets, IO, Jobs (asset -> GPU residency)
 Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAllocator
@@ -533,7 +534,7 @@ SwimShaderCompiler (Tools)
   -> RHI contract headers (no link needed), simdjson
 ```
 
-Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph, `Renderer/Resources`, `Renderer/Geometry`, `Renderer/GpuScene`, `Renderer/Visibility`, `Renderer/Materials`, `Renderer/GpuMaterials`, `Renderer/Environment`, `Renderer/Lights` and `Renderer/Residency` add no module project or runnable test target: their suites (`RenderGraph`, `RenderResources`, `RenderGeometry`, `RenderScene`, `RenderVisibility`, `RenderMaterials`, `RenderGpuMaterials`, `RenderEnvironment`, `RenderLights`, `RenderResidency`) join `SwimTests`, as does the EnTT render extraction suite in `Scene/Ecs`, and only `SwimRenderGraphPublicHeaders` and `SwimRenderResourcesPublicHeaders` are separate compile boundaries under Tests/Header Boundary. See [the graph contract](RenderGraph.md), [GPU resource residency](GpuResidency.md), [GPU Scene](GpuScene.md), [GPU visibility](GpuVisibility.md), [Materials](Materials.md), [Environment](Environment.md) and [GPU lights](Lights.md).
+Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph, `Renderer/Resources`, `Renderer/Geometry`, `Renderer/GpuScene`, `Renderer/Visibility`, `Renderer/Materials`, `Renderer/GpuMaterials`, `Renderer/Environment`, `Renderer/Lights`, `Renderer/ClusteredLighting` and `Renderer/Residency` add no module project or runnable test target: their suites (`RenderGraph`, `RenderResources`, `RenderGeometry`, `RenderScene`, `RenderVisibility`, `RenderMaterials`, `RenderGpuMaterials`, `RenderEnvironment`, `RenderLights`, `RenderClusteredLighting`, `RenderResidency`) join `SwimTests`, as does the EnTT render extraction suite in `Scene/Ecs`, and only `SwimRenderGraphPublicHeaders` and `SwimRenderResourcesPublicHeaders` are separate compile boundaries under Tests/Header Boundary. See [the graph contract](RenderGraph.md), [GPU resource residency](GpuResidency.md), [GPU Scene](GpuScene.md), [GPU visibility](GpuVisibility.md), [Materials](Materials.md), [Environment](Environment.md), [GPU lights](Lights.md) and [Clustered lighting](ClusteredLighting.md).
 
 ---
 

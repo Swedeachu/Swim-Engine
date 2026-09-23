@@ -160,6 +160,7 @@ function(swim_configure_tests)
 		RenderGpuMaterials
 		RenderEnvironment
 		RenderLights
+		RenderClusteredLighting
 		Commands
 	)
 
@@ -362,6 +363,18 @@ function(swim_configure_tests)
 			SWIM_RHI_PBR_GALLERY_REFLECTION_PATH="${SwimRhiPbrGallery_REFLECTION}"
 			SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH="${SwimRhiGpuLightProbe_SPIRV}"
 			SWIM_RHI_GPU_LIGHT_PROBE_REFLECTION_PATH="${SwimRhiGpuLightProbe_REFLECTION}"
+			SWIM_CLUSTER_LIGHT_CULL_SPIRV_PATH="${SwimClusterLightCull_SPIRV}"
+			SWIM_CLUSTER_LIGHT_CULL_REFLECTION_PATH="${SwimClusterLightCull_REFLECTION}"
+			SWIM_CLUSTER_BOUNDS_SPIRV_PATH="${SwimClusterBounds_SPIRV}"
+			SWIM_CLUSTER_BOUNDS_REFLECTION_PATH="${SwimClusterBounds_REFLECTION}"
+			SWIM_CLUSTER_ASSIGN_SPIRV_PATH="${SwimClusterAssign_SPIRV}"
+			SWIM_CLUSTER_ASSIGN_REFLECTION_PATH="${SwimClusterAssign_REFLECTION}"
+			SWIM_CLUSTER_SCAN_SPIRV_PATH="${SwimClusterScan_SPIRV}"
+			SWIM_CLUSTER_SCAN_REFLECTION_PATH="${SwimClusterScan_REFLECTION}"
+			SWIM_CLUSTER_HEATMAP_SPIRV_PATH="${SwimClusterHeatmap_SPIRV}"
+			SWIM_CLUSTER_HEATMAP_REFLECTION_PATH="${SwimClusterHeatmap_REFLECTION}"
+			SWIM_RHI_CLUSTERED_LIGHT_PROBE_SPIRV_PATH="${SwimRhiClusteredLightProbe_SPIRV}"
+			SWIM_RHI_CLUSTERED_LIGHT_PROBE_REFLECTION_PATH="${SwimRhiClusteredLightProbe_REFLECTION}"
 		)
 	endif()
 

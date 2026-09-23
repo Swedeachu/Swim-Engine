@@ -431,6 +431,37 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Clustered light assignment (items 64-65, 68) and its shading probe.
+	swim_add_slang_program(SwimClusterLightCull
+		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterLightCull.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimClusterBounds
+		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterBounds.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimClusterAssign
+		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterAssign.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimClusterScan
+		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterScan.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimClusterHeatmap
+		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterHeatmap.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimRhiClusteredLightProbe
+		SOURCE Source/Shaders/Slang/RhiSmoke/ClusteredLightProbe.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimRhiGpuDrivenDraw
 		SOURCE Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 		PROFILE spirv_1_5
@@ -461,6 +492,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiStandardMaterialDraw_SPIRV}" "${SwimRhiStandardMaterialDraw_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
 			"${SwimRhiGpuLightProbe_SPIRV}" "${SwimRhiGpuLightProbe_REFLECTION}"
+			"${SwimClusterLightCull_SPIRV}" "${SwimClusterLightCull_REFLECTION}"
+			"${SwimClusterBounds_SPIRV}" "${SwimClusterBounds_REFLECTION}"
+			"${SwimClusterAssign_SPIRV}" "${SwimClusterAssign_REFLECTION}"
+			"${SwimClusterScan_SPIRV}" "${SwimClusterScan_REFLECTION}"
+			"${SwimClusterHeatmap_SPIRV}" "${SwimClusterHeatmap_REFLECTION}"
+			"${SwimRhiClusteredLightProbe_SPIRV}" "${SwimRhiClusteredLightProbe_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -500,6 +537,14 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/RhiSmoke/PbrGallery.slang
 			Source/Shaders/Slang/Lights/GpuLightRecords.slang
 			Source/Shaders/Slang/RhiSmoke/GpuLightProbe.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterGrid.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusteredLighting.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterLightCull.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterBounds.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterAssign.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterScan.slang
+			Source/Shaders/Slang/ClusteredLighting/ClusterHeatmap.slang
+			Source/Shaders/Slang/RhiSmoke/ClusteredLightProbe.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -507,7 +552,8 @@ endif()
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
 # resource registries (Resources/), paged GeometryHeap (Geometry/), the
 # persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
-# image-based lighting (Environment/), the GPU light buffer (Lights/) and the asset
+# image-based lighting (Environment/), the GPU light buffer (Lights/),
+# clustered light assignment (ClusteredLighting/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -530,6 +576,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/
