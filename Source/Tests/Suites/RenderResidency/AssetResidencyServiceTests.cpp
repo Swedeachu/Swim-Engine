@@ -304,3 +304,32 @@ SWIM_TEST("Render.AssetResidency", "ResidentTexturesBecomeBindlessExplicitlyAndR
 	bindless.Collect();
 	SWIM_CHECK_EQUAL(bindless.GetStats().LiveTextures, 1u);
 }
+
+SWIM_TEST("Render.AssetResidency", "ResolveRenderMeshYieldsResidentMeshesWithTheirStagedBounds")
+{
+	Testing::ResidencyServiceFixture fixture("ResolveMesh");
+	auto& service = fixture.Service();
+	auto meshAsset = MakeMesh(3);
+	meshAsset.Bounds.Min = { -1.0f, 0.0f, -3.0f };
+	meshAsset.Bounds.Max = { 1.0f, 4.0f, 3.0f };
+	const auto mesh = PublishCpu(fixture.assets, "Models/Bounded.mesh", meshAsset);
+	const auto unbounded = PublishCpu(fixture.assets, "Models/Unbounded.mesh", MakeMesh(4)); // Default (empty) bounds.
+	SWIM_CHECK(!service.ResolveRenderMesh(mesh));											 // Not requested.
+	service.RequestMesh(mesh);
+	service.RequestMesh(unbounded);
+	service.Update();
+	SWIM_CHECK(!service.ResolveRenderMesh(mesh));		 // Uploading: not drawable yet.
+	SWIM_CHECK(fixture.assets.Resolve(mesh) == nullptr); // The CPU copy is gone; bounds were kept.
+	fixture.UploadFrame();
+
+	const auto resolved = service.ResolveRenderMesh(mesh);
+	SWIM_REQUIRE(resolved.has_value());
+	SWIM_CHECK(resolved->Mesh == service.GetGpuMesh(mesh));
+	SWIM_CHECK_EQUAL(resolved->LocalBounds.Center[1], 2.0f);
+	SWIM_CHECK_EQUAL(resolved->LocalBounds.Extents[2], 3.0f);
+	const auto open = service.ResolveRenderMesh(unbounded);
+	SWIM_REQUIRE(open.has_value());
+	SWIM_CHECK(open->LocalBounds == RenderBounds::Infinite());
+	service.ReleaseMesh(mesh);
+	SWIM_CHECK(!service.ResolveRenderMesh(mesh));
+}

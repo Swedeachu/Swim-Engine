@@ -66,6 +66,11 @@ namespace Swim::ShaderCompiler
 		bool DescriptorArrayRuntimeSized = false;
 		// Owned byte ranges within a reflected uniform buffer. Names retain the source path.
 		std::vector<ShaderUniformReflection> UniformFields;
+		// Structured buffers of structs: the element's std430 fields (nested struct
+		// members flattened to "Outer.Inner"; arrays stay one field) and its stride.
+		// Lets CPU record layouts be checked against the compiled shader.
+		std::vector<ShaderUniformReflection> ElementFields;
+		std::uint32_t ElementSize = 0;
 	};
 
 	struct ShaderEntryPointReflection

@@ -154,6 +154,7 @@ function(swim_configure_tests)
 		RenderGraph
 		RenderResources
 		RenderGeometry
+		RenderScene
 		Commands
 	)
 
@@ -219,6 +220,8 @@ function(swim_configure_tests)
 	if(TARGET EnTT::EnTT)
 		swim_collect_test_suite_sources(SWIM_SCENE_ECS_SUITES Scene/Ecs)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_SCENE_ECS_SUITES})
+		# RenderExtractor (EnTT -> GPU Scene) is compiled with the Scene/ECS suites.
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_SCENE_RENDER_EXTRACTION_SOURCES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT glm::glm)
 	endif()
 
@@ -327,6 +330,8 @@ function(swim_configure_tests)
 			SWIM_RHI_TEXTURE_REFLECTION_PATH="${SwimRhiTexture_REFLECTION}"
 			SWIM_RHI_BINDLESS_SPIRV_PATH="${SwimRhiBindless_SPIRV}"
 			SWIM_RHI_BINDLESS_REFLECTION_PATH="${SwimRhiBindless_REFLECTION}"
+			SWIM_RHI_GPU_SCENE_PROBE_SPIRV_PATH="${SwimRhiGpuSceneProbe_SPIRV}"
+			SWIM_RHI_GPU_SCENE_PROBE_REFLECTION_PATH="${SwimRhiGpuSceneProbe_REFLECTION}"
 		)
 	endif()
 

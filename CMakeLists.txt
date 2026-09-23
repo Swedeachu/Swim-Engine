@@ -360,6 +360,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		SOURCE Source/Shaders/Slang/RhiSmoke/Bindless.slang
 		PROFILE spirv_1_5
 	)
+	swim_add_slang_program(SwimRhiGpuSceneProbe
+		SOURCE Source/Shaders/Slang/RhiSmoke/GpuSceneProbe.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
@@ -377,6 +382,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiNestedParameters_SPIRV}" "${SwimRhiNestedParameters_REFLECTION}"
 			"${SwimRhiNestedGraphics_SPIRV}" "${SwimRhiNestedGraphics_REFLECTION}"
 			"${SwimRhiBindless_SPIRV}" "${SwimRhiBindless_REFLECTION}"
+			"${SwimRhiGpuSceneProbe_SPIRV}" "${SwimRhiGpuSceneProbe_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
 			Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
@@ -388,12 +394,15 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/RhiSmoke/SampledInteger.slang
 			Source/Shaders/Slang/RhiSmoke/SampledDimensions.slang
 			Source/Shaders/Slang/RhiSmoke/Bindless.slang
+			Source/Shaders/Slang/RhiSmoke/GpuSceneProbe.slang
+			Source/Shaders/Slang/GpuScene/GpuSceneRecords.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
-# resource registries (Resources/), paged GeometryHeap (Geometry/) and the asset
+# resource registries (Resources/), paged GeometryHeap (Geometry/), the
+# persistent GPU Scene (GpuScene/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -404,6 +413,16 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.h
+)
+
+# EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/
+# adapters, which need the full Transform/Scene runtime). SwimEngine compiles it
+# through its own glob; SwimTests adds it wherever EnTT is available.
+file(GLOB SWIM_SCENE_RENDER_EXTRACTION_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.h
 )
 
 # Residency/ connects Assets + async IO + Jobs to the GPU residency layers, so it

@@ -3,6 +3,66 @@
 
 namespace Swim::ShaderCompiler::Detail
 {
+	namespace
+	{
+		std::uint32_t ReadUniformSize(simdjson::dom::object type)
+		{
+			const auto sizes = FindField(type, "sizes");
+			simdjson::dom::array array;
+			if (!sizes || sizes->get_array().get(array))
+			{
+				return 0;
+			}
+			for (auto entry : array)
+			{
+				simdjson::dom::object size;
+				std::uint32_t value = 0;
+				if (!entry.get_object().get(size) && ReadString(size, "kind") == "uniform" && ReadU32(size, "value", value))
+				{
+					return value;
+				}
+			}
+			return 0;
+		}
+
+		// Flattens struct fields with absolute offsets; false on malformed layouts.
+		bool ReadStructFields(simdjson::dom::object type, const std::string& prefix, std::uint32_t base,
+			std::vector<ShaderUniformReflection>& fields, std::uint32_t depth)
+		{
+			const auto list = FindField(type, "fields");
+			simdjson::dom::array array;
+			if (depth > 16 || !list || list->get_array().get(array))
+			{
+				return false;
+			}
+			for (auto entry : array)
+			{
+				simdjson::dom::object field;
+				simdjson::dom::object binding;
+				simdjson::dom::object fieldType;
+				std::uint32_t offset = 0;
+				std::uint32_t size = 0;
+				if (entry.get_object().get(field) || !FindField(field, "binding") ||
+					FindField(field, "binding")->get_object().get(binding) || ReadString(binding, "kind") != "uniform" ||
+					!ReadU32(binding, "offset", offset) || !ReadU32(binding, "size", size) || !FindField(field, "type") ||
+					FindField(field, "type")->get_object().get(fieldType) || offset > UINT32_MAX - base)
+				{
+					return false;
+				}
+				const auto name = prefix + ReadString(field, "name");
+				if (ReadString(fieldType, "kind") == "struct")
+				{
+					if (!ReadStructFields(fieldType, name + ".", base + offset, fields, depth + 1))
+					{
+						return false;
+					}
+					continue;
+				}
+				fields.push_back({ name, base + offset, size });
+			}
+			return true;
+		}
+	} // namespace
 
 	ShaderBindingReflection ParseSlangBindingParameter(simdjson::dom::object parameter)
 	{
@@ -103,6 +163,15 @@ namespace Swim::ShaderCompiler::Detail
 					simdjson::dom::object resultType;
 					if (!result->get_object().get(resultType))
 					{
+						if (reflection.ResourceShape == "structuredBuffer" && ReadString(resultType, "kind") == "struct")
+						{
+							reflection.ElementSize = ReadUniformSize(resultType);
+							if (!ReadStructFields(resultType, {}, 0, reflection.ElementFields, 0))
+							{
+								reflection.ElementFields.clear(); // Layout metadata only; the binding itself stays valid.
+								reflection.ElementSize = 0;
+							}
+						}
 						reflection.ResourceScalarType = ReadString(resultType, "scalarType");
 						const auto kind = ReadString(resultType, "kind");
 						if (kind == "scalar")

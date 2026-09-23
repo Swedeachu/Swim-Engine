@@ -511,7 +511,8 @@ RHI contract   (header-only, no deps)
 RenderGraph    -> RHI contract (compiled directly into SwimEngine/SwimTests)
 Resources      -> RHI contract (GPU handles/registries; same source list as RenderGraph)
 Geometry       -> Resources, RenderGraph, RHI contract (paged GeometryHeap)
-Residency      -> Geometry, Resources, RenderGraph, Assets, IO, Jobs (asset -> GPU residency)
+GpuScene       -> Resources, RenderGraph, RHI contract (persistent render objects)
+Residency      -> GpuScene (types), Geometry, Resources, RenderGraph, Assets, IO, Jobs (asset -> GPU residency)
 Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAllocator
 
 SwimEngine
@@ -527,7 +528,7 @@ SwimShaderCompiler (Tools)
   -> RHI contract headers (no link needed), simdjson
 ```
 
-Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph, `Renderer/Resources`, `Renderer/Geometry` and `Renderer/Residency` add no module project or runnable test target: their suites (`RenderGraph`, `RenderResources`, `RenderGeometry`, `RenderResidency`) join `SwimTests`, and only `SwimRenderGraphPublicHeaders` and `SwimRenderResourcesPublicHeaders` are separate compile boundaries under Tests/Header Boundary. See [the graph contract](RenderGraph.md) and [GPU resource residency](GpuResidency.md).
+Scene, Render, UI, and Audio extraction remain future work; the modern Vulkan RHI and RenderGraph are separate foundation subtrees within `SwimEngine`, and the main game renderer is still transitional. RenderGraph, `Renderer/Resources`, `Renderer/Geometry`, `Renderer/GpuScene` and `Renderer/Residency` add no module project or runnable test target: their suites (`RenderGraph`, `RenderResources`, `RenderGeometry`, `RenderScene`, `RenderResidency`) join `SwimTests`, as does the EnTT render extraction suite in `Scene/Ecs`, and only `SwimRenderGraphPublicHeaders` and `SwimRenderResourcesPublicHeaders` are separate compile boundaries under Tests/Header Boundary. See [the graph contract](RenderGraph.md), [GPU resource residency](GpuResidency.md) and [GPU Scene](GpuScene.md).
 
 ---
 

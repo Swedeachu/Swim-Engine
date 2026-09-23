@@ -1,5 +1,6 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
+#include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 #include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
@@ -31,3 +32,6 @@ static_assert(!std::is_copy_constructible_v<Swim::Render::BindlessResourceTable>
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuSamplerCache>);
 static_assert(!std::is_same_v<Swim::Render::BindlessTextureHandle, Swim::Render::BindlessSamplerHandle>);
 static_assert(Swim::Render::BindlessResourceTable::FallbackIndex == 0);
+static_assert(!std::is_copy_constructible_v<Swim::Render::GpuScene>);
+static_assert(sizeof(Swim::Render::GpuInstanceRecord) == 64 && sizeof(Swim::Render::GpuTransformRecord) == 96);
+static_assert(sizeof(Swim::Render::RenderAffine) == 48);

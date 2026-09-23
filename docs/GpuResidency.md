@@ -97,6 +97,7 @@ Unloaded -> Queued -> Reading -> Decoding -> WaitingForGpuUpload -> Uploading ->
 - `ReleaseMesh`/`ReleaseTexture(handle, lastUse)` cancel queued/reading work, abandon running decode jobs (their shared slot keeps the bytes alive, nothing is published), reset the CPU asset's `Queued`/`Loading` bookkeeping, or retire GPU data after `lastUse` (raised to the upload completion while in flight). Releasing while an import awaits commit throws and leaves the request intact. `ReleaseAll(lastUse)` releases everything; the destructor cancels reads and waits abandoned decodes but leaves GPU data to the heap/residency `Drain`.
 - Errors map to `Assets::AssetError`: missing path → `NotFound`, IO failure → `Io`, cancellation → `Cancelled`, bad container/payload or wrong id/type → `InvalidData`. GPU staging failures (for example a compressed-only texture) fail the request with `InvalidData` **without** invalidating the valid CPU asset.
 - `GetStats()` reports per-state counts, abandoned decodes, total bytes read, bytes staged in the last update and in total.
+- `ResolveRenderMesh(mesh)` returns a Resident mesh's `GpuMeshHandle` together with the local bounds recorded from its `MeshAsset` when it was staged. Those bounds stay valid after the CPU asset unloads. This is the mesh resolver the GPU Scene's `RenderExtractor` uses; see [GPU Scene](GpuScene.md).
 
 ## Bindless textures and samplers (item 45)
 

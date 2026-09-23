@@ -2,11 +2,13 @@
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/TextureAsset.h"
+#include "Engine/Systems/Renderer/GpuScene/ResolvedRenderMesh.h"
 #include "Engine/Systems/Renderer/Residency/AssetResidencyDesc.h"
 #include "Engine/Systems/Renderer/Residency/AssetResidencyStats.h"
 #include "Engine/Systems/Renderer/Residency/GpuResidencyGraphResources.h"
 #include "Engine/Systems/Renderer/Residency/Internal/AssetResidencyRequest.h"
 
+#include <optional>
 #include <unordered_map>
 
 namespace Swim::Render
@@ -70,6 +72,10 @@ namespace Swim::Render
 		// Valid from Uploading onward.
 		GpuMeshHandle GetGpuMesh(Assets::AssetHandle<Assets::MeshAsset> mesh) const;
 		GpuTextureHandle GetGpuTexture(Assets::AssetHandle<Assets::TextureAsset> texture) const;
+		// A Resident mesh with the local bounds recorded from its MeshAsset at staging
+		// (valid after the CPU asset unloads); empty in every other state. This is the
+		// mesh resolver GPU Scene producers (render extraction) use.
+		std::optional<ResolvedRenderMesh> ResolveRenderMesh(Assets::AssetHandle<Assets::MeshAsset> mesh) const;
 		// The shader-visible bindless element of a Resident texture, or
 		// BindlessResourceTable::FallbackIndex until it has one (or without a table).
 		std::uint32_t GetBindlessIndex(Assets::AssetHandle<Assets::TextureAsset> texture) const;

@@ -253,7 +253,7 @@ namespace Swim::Render
 		void FinishRetirement(Pending& entry)
 		{
 			{
-				Record discarded = std::move(entry.Data); // Destroy owned GPU objects now.
+				[[maybe_unused]] Record discarded = std::move(entry.Data); // Destroy owned GPU objects now.
 			}
 			auto& slot = slots[entry.Released.Index];
 			if (slot.Generation == 0)

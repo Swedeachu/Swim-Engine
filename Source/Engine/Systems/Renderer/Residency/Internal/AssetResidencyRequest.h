@@ -5,6 +5,7 @@
 #include "Engine/IO/AsyncIoService.h"
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
+#include "Engine/Systems/Renderer/GpuScene/RenderBounds.h"
 #include "Engine/Systems/Renderer/Residency/AssetResidencyState.h"
 #include "Engine/Systems/Renderer/Resources/GpuHandle.h"
 
@@ -36,6 +37,7 @@ namespace Swim::Render::Internal
 		Jobs::JobHandle Decode;
 		std::shared_ptr<AssetDecodeSlot> Slot;
 		GpuMeshHandle Mesh;
+		RenderBounds MeshBounds = RenderBounds::Infinite();
 		GpuTextureHandle Texture;
 		BindlessTextureHandle Bindless; // Registered once the texture is Resident.
 		bool BindlessRejected = false;	// The RHI refused the view; Error explains why.

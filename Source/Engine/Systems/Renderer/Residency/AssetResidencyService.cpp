@@ -430,6 +430,7 @@ namespace Swim::Render
 				}
 				const auto payload = BuildMeshGeometryPayload(*mesh);
 				request.Mesh = geometry.CreateMesh(payload.Describe(label));
+				request.MeshBounds = RenderBounds::FromMinMax(mesh->Bounds.Min, mesh->Bounds.Max); // Kept after the CPU copy unloads.
 				bytes = payload.GetUploadBytes();
 			}
 			else
@@ -616,6 +617,16 @@ namespace Swim::Render
 	{
 		const auto* request = FindRequest(texture);
 		return request ? request->Texture : GpuTextureHandle{};
+	}
+
+	std::optional<ResolvedRenderMesh> AssetResidencyService::ResolveRenderMesh(Assets::AssetHandle<Assets::MeshAsset> mesh) const
+	{
+		const auto* request = FindRequest(mesh);
+		if (!request || request->State != State::Resident)
+		{
+			return std::nullopt;
+		}
+		return ResolvedRenderMesh{ request->Mesh, request->MeshBounds };
 	}
 
 	std::uint32_t AssetResidencyService::GetBindlessIndex(Assets::AssetHandle<Assets::TextureAsset> texture) const
