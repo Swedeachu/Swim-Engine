@@ -425,6 +425,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# GPU light buffer probe (item 63): brute-force forward lighting over every light.
+	swim_add_slang_program(SwimRhiGpuLightProbe
+		SOURCE Source/Shaders/Slang/RhiSmoke/GpuLightProbe.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimRhiGpuDrivenDraw
 		SOURCE Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 		PROFILE spirv_1_5
@@ -454,6 +460,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiStandardPbrProbe_SPIRV}" "${SwimRhiStandardPbrProbe_REFLECTION}"
 			"${SwimRhiStandardMaterialDraw_SPIRV}" "${SwimRhiStandardMaterialDraw_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
+			"${SwimRhiGpuLightProbe_SPIRV}" "${SwimRhiGpuLightProbe_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -491,6 +498,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/Environment/EnvironmentIrradiance.slang
 			Source/Shaders/Slang/Environment/EnvironmentBrdfLut.slang
 			Source/Shaders/Slang/RhiSmoke/PbrGallery.slang
+			Source/Shaders/Slang/Lights/GpuLightRecords.slang
+			Source/Shaders/Slang/RhiSmoke/GpuLightProbe.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -498,7 +507,7 @@ endif()
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
 # resource registries (Resources/), paged GeometryHeap (Geometry/), the
 # persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
-# image-based lighting (Environment/) and the asset
+# image-based lighting (Environment/), the GPU light buffer (Lights/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -519,6 +528,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

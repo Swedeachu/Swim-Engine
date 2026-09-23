@@ -159,6 +159,7 @@ function(swim_configure_tests)
 		RenderMaterials
 		RenderGpuMaterials
 		RenderEnvironment
+		RenderLights
 		Commands
 	)
 
@@ -359,6 +360,8 @@ function(swim_configure_tests)
 			SWIM_ENVIRONMENT_BRDF_LUT_REFLECTION_PATH="${SwimEnvironmentBrdfLut_REFLECTION}"
 			SWIM_RHI_PBR_GALLERY_SPIRV_PATH="${SwimRhiPbrGallery_SPIRV}"
 			SWIM_RHI_PBR_GALLERY_REFLECTION_PATH="${SwimRhiPbrGallery_REFLECTION}"
+			SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH="${SwimRhiGpuLightProbe_SPIRV}"
+			SWIM_RHI_GPU_LIGHT_PROBE_REFLECTION_PATH="${SwimRhiGpuLightProbe_REFLECTION}"
 		)
 	endif()
 

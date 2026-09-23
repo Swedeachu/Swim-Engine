@@ -35,6 +35,7 @@ namespace Swim::Render
 	struct GpuMaterialTag;
 	struct RenderObjectTag;
 	struct GpuSkinTag;
+	struct GpuLightTag;
 	struct BindlessTextureTag;
 	struct BindlessSamplerTag;
 
@@ -44,6 +45,7 @@ namespace Swim::Render
 	using GpuMaterialHandle = GpuHandle<GpuMaterialTag>;
 	using RenderObjectHandle = GpuHandle<RenderObjectTag>;
 	using GpuSkinHandle = GpuHandle<GpuSkinTag>;
+	using GpuLightHandle = GpuHandle<GpuLightTag>;
 	// Bindless element identities: Index is the shader-visible array element.
 	// Image and sampler identities are independent, so any pair can be combined.
 	using BindlessTextureHandle = GpuHandle<BindlessTextureTag>;

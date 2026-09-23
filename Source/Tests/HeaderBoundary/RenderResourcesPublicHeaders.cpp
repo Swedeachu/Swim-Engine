@@ -1,6 +1,8 @@
 #include "Engine/Systems/Renderer/Environment/EnvironmentBuilder.h"
 #include "Engine/Systems/Renderer/Environment/EnvironmentReference.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
+#include "Engine/Systems/Renderer/Lights/GpuLightBuffer.h"
+#include "Engine/Systems/Renderer/Lights/LightMath.h"
 #include "Engine/Systems/Renderer/GpuMaterials/GpuMaterialTable.h"
 #include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
@@ -56,3 +58,4 @@ static_assert(Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabili
 static_assert(Swim::Render::MaterialParameterAlignment(Swim::Render::MaterialParameterType::Float3) == 16);
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuMaterialTable>);
 static_assert(Swim::Render::StandardMaterialRecordSize == 80);
+static_assert(sizeof(Swim::Render::GpuLightRecord) == 64 && sizeof(Swim::Render::GpuLightHeader) == 32);

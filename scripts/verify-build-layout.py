@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3845,6 +3845,32 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RHIVulkan", "VulkanEnvironmentSmokeTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanPbrGallerySmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderEnvironmentLayoutTests.cpp", failures)
+    # Item 63: the GPU light buffer sits beside GpuMaterials (it reuses the GPU Scene's
+    # record-upload helpers). Nothing below it includes it, it never reaches
+    # visibility, environment or residency, and its CPU definition sits next to the shader.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Lights/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on the GPU light buffer: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "Lights").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/Visibility/|Renderer/Environment/|Renderer/GpuMaterials/|Renderer/Residency/|Engine/Assets/)',
+            path.read_text(encoding="utf-8"),
+        ):
+            fail(f"Lights must stay beside the GPU Scene layers: {path.relative_to(ROOT)}", failures)
+    for relative in ("Lights/LightMath.cpp", "Lights/GpuLightBuffer.cpp", "Lights/GpuLightRecord.h"):
+        if not (renderer / relative).is_file():
+            fail(f"GPU light unit is missing: Renderer/{relative}", failures)
+    if not (ROOT / "Source/Shaders/Slang/Lights/GpuLightRecords.slang").is_file():
+        fail("GPU light shader records (Shaders/Slang/Lights/GpuLightRecords.slang) are missing", failures)
+    if "Renderer/Lights/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("Lights sources must compile with the backend-neutral renderer source list", failures)
+    check_suite_is_compiled("RenderLights", "LightMathTests.cpp", failures)
+    check_suite_is_compiled("RenderLights", "GpuLightBufferTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanGpuLightSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderLightLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3871,7 +3897,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
