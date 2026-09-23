@@ -7,6 +7,7 @@
 
 static const uint StandardMaterialFlagAlphaMask = 1u << 0;
 static const uint StandardMaterialFlagDoubleSided = 1u << 1;
+static const uint StandardMaterialFlagAlphaBlend = 1u << 2; // Drawn by the sorted transparent Forward+ pass.
 
 struct StandardMaterialParameters
 {

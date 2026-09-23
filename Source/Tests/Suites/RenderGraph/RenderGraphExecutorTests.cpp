@@ -47,6 +47,7 @@ SWIM_TEST("RenderGraph.Execute", "WaitsBeforePoolingAndKeepsExportsUntilReuse")
 	SWIM_REQUIRE_EQUAL(timings.size(), 1u);
 	SWIM_CHECK_EQUAL(timings[0].Name, "compute");
 	SWIM_CHECK(!timings[0].Nanoseconds);
+	SWIM_CHECK(!timings[0].EndOffsetNanoseconds);
 	executor.Trim();
 	SWIM_CHECK_EQUAL(executor.GetPooledResourceCount(), 0u);
 	SWIM_CHECK_THROWS(executor.GetExported(buffer), std::logic_error);

@@ -161,6 +161,7 @@ function(swim_configure_tests)
 		RenderEnvironment
 		RenderLights
 		RenderClusteredLighting
+		RenderForwardPlus
 		Commands
 	)
 
@@ -375,6 +376,12 @@ function(swim_configure_tests)
 			SWIM_CLUSTER_HEATMAP_REFLECTION_PATH="${SwimClusterHeatmap_REFLECTION}"
 			SWIM_RHI_CLUSTERED_LIGHT_PROBE_SPIRV_PATH="${SwimRhiClusteredLightProbe_SPIRV}"
 			SWIM_RHI_CLUSTERED_LIGHT_PROBE_REFLECTION_PATH="${SwimRhiClusteredLightProbe_REFLECTION}"
+			SWIM_FORWARD_OPAQUE_SPIRV_PATH="${SwimForwardOpaque_SPIRV}"
+			SWIM_FORWARD_OPAQUE_REFLECTION_PATH="${SwimForwardOpaque_REFLECTION}"
+			SWIM_FORWARD_TRANSPARENT_SPIRV_PATH="${SwimForwardTransparent_SPIRV}"
+			SWIM_FORWARD_TRANSPARENT_REFLECTION_PATH="${SwimForwardTransparent_REFLECTION}"
+			SWIM_FORWARD_TRANSPARENT_SORT_SPIRV_PATH="${SwimForwardTransparentSort_SPIRV}"
+			SWIM_FORWARD_TRANSPARENT_SORT_REFLECTION_PATH="${SwimForwardTransparentSort_REFLECTION}"
 		)
 	endif()
 

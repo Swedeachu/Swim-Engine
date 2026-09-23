@@ -338,10 +338,12 @@ namespace Swim::Render
 
 		for (std::size_t i = 0; i < state->Graph.schedule.size(); ++i)
 		{
-			GraphPassTiming timing{ state->Graph.definition->Passes[state->Graph.schedule[i].Pass].Name, {} };
+			GraphPassTiming timing{ state->Graph.definition->Passes[state->Graph.schedule[i].Pass].Name, {}, {} };
 			if (state->Queries)
 			{
-				timing.Nanoseconds = state->Queries->GetTimestampInfo().ElapsedNanoseconds(ticks[2 * i], ticks[2 * i + 1]);
+				const auto info = state->Queries->GetTimestampInfo();
+				timing.Nanoseconds = info.ElapsedNanoseconds(ticks[2 * i], ticks[2 * i + 1]);
+				timing.EndOffsetNanoseconds = info.ElapsedNanoseconds(ticks[0], ticks[2 * i + 1]);
 			}
 			result.push_back(std::move(timing));
 		}

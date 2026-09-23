@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "ForwardPlus", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3899,6 +3899,40 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderClusteredLighting", "ClusteredLightAssignerTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanClusteredLightingSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderClusterLayoutTests.cpp", failures)
+    # Items 66/67/69: Clustered Forward+ is the consumer layer above visibility,
+    # materials, environment, lights and clusters. Nothing below it (or residency)
+    # includes it, it never reaches residency or assets, and its CPU definition,
+    # shaders and tests stay in place.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/ForwardPlus/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on Clustered Forward+: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "ForwardPlus").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/Residency/|Engine/Assets/|Engine/IO/|Engine/Jobs/)', path.read_text(encoding="utf-8")
+        ):
+            fail(f"ForwardPlus must not depend on residency, assets, IO or jobs: {path.relative_to(ROOT)}", failures)
+    for relative in ("ForwardPlus/ForwardPlusReference.cpp", "ForwardPlus/ForwardPlusRenderer.cpp", "ForwardPlus/ForwardPlusBindings.h",
+                     "ForwardPlus/ForwardPlusRecords.h", "ForwardPlus/StandardVertex.h"):
+        if not (renderer / relative).is_file():
+            fail(f"Clustered Forward+ unit is missing: Renderer/{relative}", failures)
+    for shader in ("ForwardPlusRecords", "ClusteredForward", "ForwardTransparentSort"):
+        if not (ROOT / f"Source/Shaders/Slang/ForwardPlus/{shader}.slang").is_file():
+            fail(f"Clustered Forward+ shader is missing: Shaders/Slang/ForwardPlus/{shader}.slang", failures)
+    if "Renderer/ForwardPlus/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("ForwardPlus sources must compile with the backend-neutral renderer source list", failures)
+    if "FORWARD_TRANSPARENT=1" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("the transparent Forward+ variant must be compiled from ClusteredForward.slang", failures)
+    check_suite_is_compiled("RenderForwardPlus", "ForwardPlusReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderForwardPlus", "ForwardPlusRendererTests.cpp", failures)
+    check_suite_is_compiled("RenderForwardPlus", "ForwardPlusFixtureTests.cpp", failures)
+    check_suite_is_compiled("RenderResidency", "StandardVertexLayoutTests.cpp", failures)
+    check_suite_is_compiled("RenderClusteredLighting", "ClusterScalingTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanForwardPlusSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderForwardPlusLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3925,7 +3959,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "ForwardPlus"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

@@ -6,7 +6,7 @@ This covers three critical-path items:
 - **item 65:** GPU light assignment and compaction;
 - **item 68:** the cluster heatmap and overflow diagnostics.
 
-It consumes the [GPU light buffer](Lights.md) (item 63). Opaque and transparent Forward+ (items 66–67) will shade from its lists through `ClusteredLighting.slang`, and light-count benchmarks (item 69) will measure it.
+It consumes the [GPU light buffer](Lights.md) (item 63). [Clustered Forward+](ForwardPlus.md) (items 66–67) shades opaque and transparent surfaces from its lists through `ClusteredLighting.slang`, and the item 69 benchmarks below measure it.
 
 ```text
 Renderer/ClusteredLighting
@@ -77,7 +77,7 @@ Nothing is ever written out of bounds, and a truncated cluster only loses light:
 | Suite | What it proves |
 | --- | --- |
 | `Render.ClusterGrid` (3) | Layout rounding and validation. Logarithmic slices with equal ratios. Depth decoding for forward and reverse-Z. Every pixel's view point lies in its own cluster's AABB, and the AABBs tile the volume |
-| `Render.ClusteredLights` (3) | Assignment is conservative (each lit point's light is in its cluster's list), compact and ordered. Clustered shading equals `ShadeAllLights`. Truncation and capacity overflow are bounded, counted and only remove light. Heatmap colors |
+| `Render.ClusteredLights` (4) | Assignment is conservative (each lit point's light is in its cluster's list), compact and ordered. Clustered shading equals `ShadeAllLights`. Truncation and capacity overflow are bounded, counted and only remove light. Heatmap colors. The item 69 scaling scenarios (below) |
 | `Render.ClusteredLightAssigner` (2) | On the mock device: five passes in order with the right bindings, push modes and dispatch sizes; heatmap validation |
 | `ShaderCompiler.ClusterLayout` (1) | Every program's bindings and group size match `ClusterBindings.h`. The grid, record and stats layouts equal the C++ structs |
 | Native `ClusteredLightingMatchesTheCpuReference` | Three frames over 2 directional + 1,500 local lights. See below |
@@ -89,3 +89,13 @@ The native smoke compares the view lights, every cluster AABB, list and record, 
 - 800×450 after 300 lights moved.
 
 The CPU assignment is fed the GPU's own view lights and bounds, so only lights grazing an AABB within float rounding may differ.
+
+## Scaling (item 69)
+
+The count and write passes walk every local light for every cluster, so their cost grows with lights × clusters. A light the cull pass rejected (off-screen) costs one groupshared load and a skip; a visible one costs a sphere/AABB test. The benchmarks characterize the Phase 15 scenarios:
+
+- **CPU (`Render.ClusteredLights.ScalingScenariosKeepStatisticsConsistentAndBounded`):** 0 lights, 1k and 10k spread through the view, 10k behind the camera, and 1k packed into a 4 m ball, on a 640×360 grid. Every `ClusterStats` field is checked against its definition. The empty and off-screen scenes write nothing, 10k overflows both limits (bounded and counted), and the dense ball overflows its clusters.
+- **Native (`RHI.Vulkan.Smoke.ClusteredLightingScalesToTensOfThousandsOfLights`):** 0, 1k, 10k and 32k lights through a 1280×720 × 24-slice grid, plus 10k off-screen and 10k dense. Each scenario runs three frames. The last frame's GPU timestamps are printed per pass, and its statistics are checked against the CPU cull and `ClusterStats`' identities.
+- **Forward+ (`ClusteredForwardPlusMatchesTheCpuReference`, last frame):** 10,000 lights rendered and compared, with the cluster, opaque, sort and transparent pass times printed.
+
+Budgets (`MaxLightsPerCluster`, `IndexCapacity`, slice count) should be set from the desktop numbers these print. The validation records keep them.

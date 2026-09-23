@@ -69,6 +69,9 @@ namespace Swim::Render::StandardPbr
 
 	inline constexpr std::uint32_t FlagAlphaMask = 1u << 0;
 	inline constexpr std::uint32_t FlagDoubleSided = 1u << 1;
+	// glTF alphaMode BLEND: the pixel is blended over what is behind it with its
+	// alpha (Clustered Forward+ draws these in the sorted transparent pass, item 67).
+	inline constexpr std::uint32_t FlagAlphaBlend = 1u << 2;
 
 	struct Lighting
 	{

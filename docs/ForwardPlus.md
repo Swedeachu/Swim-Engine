@@ -1,0 +1,143 @@
+# Clustered Forward+
+
+This covers critical-path items **66** (opaque Clustered Forward+) and **67** (transparent Clustered Forward+). Item 69's light-count benchmarks are described in [Clustered lighting](ClusteredLighting.md#scaling-item-69).
+
+Clustered Forward+ is the modern renderer's standard lighting path. It draws GPU Scene objects GPU-driven from [GPU visibility](GpuVisibility.md)'s indirect commands and shades them with:
+
+- the [standard material](Materials.md), through the GPU material table and bindless textures;
+- every directional light plus the pixel's [cluster](ClusteredLighting.md) list of point and spot lights from the [GPU light buffer](Lights.md);
+- [image-based lighting](Environment.md).
+
+No CPU visible list, per-object light list or draw list exists anywhere in the frame.
+
+```text
+Renderer/ForwardPlus
+  StandardVertex             the 48-byte vertex (the cooked static-mesh layout) and its layout id
+  ForwardPlusRecords         ForwardViewRecord, bins, debug modes, sort entries
+  ForwardPlusBindings        descriptor contract of the draw and sort programs, bindless space
+  ForwardPlusReference       CPU definition: material bins, transforms, shading frame,
+                             face culling, sort keys/order, Shade, debug color, blending
+  ForwardPlusRenderer        pipeline states + Record: opaque, sort, transparent passes
+  ForwardPlusGraphResources  what one Record scheduled
+Shaders/Slang/ForwardPlus
+  ForwardPlusRecords.slang       mirrors the records and reference helpers
+  ClusteredForward.slang         vertex + fragment; compiled as SwimForwardOpaque and
+                                 SwimForwardTransparent (FORWARD_TRANSPARENT=1)
+  ForwardTransparentSort.slang   the back-to-front bitonic sort
+```
+
+`Renderer/ForwardPlus` is the consumer layer. It sits above Visibility, GpuScene, Geometry, GpuMaterials, Environment, Lights and ClusteredLighting. None of those layers, nor Residency, include it, and it never reaches residency, assets, IO or jobs. `scripts/verify-build-layout.py` enforces this.
+
+## A frame
+
+```text
+GpuScene / GeometryHeap / GpuMaterialTable / GpuLightBuffer imports
+      |
+GpuVisibility::Record ---- commands, counts, draw records (bins: Opaque, Transparent)
+ClusteredLightAssigner ---- grid, records, indices
+EnvironmentBuilder -------- prefiltered cube, SH irradiance, BRDF LUT (optional)
+      |
+ForwardPlusRenderer::Record
+  1. opaque       every page slot's Opaque bin -> color (RGBA16F), object id (R32F), depth (D32)
+  2. sort         one group per page slot: Transparent bin back to front -> sorted commands
+  3. transparent  sorted draws, premultiplied blending over the opaque color, depth-tested
+```
+
+### Material bins
+
+`GpuVisibility` bins by material set. Forward+ uses two bins (`ForwardPlusBinCount`):
+
+- **Opaque:** opaque, alpha-masked and double-sided materials.
+- **Transparent:** materials with `StandardPbr::FlagAlphaBlend` (glTF `BLEND`).
+
+`ForwardPlusRenderer::RouteMaterial` routes a material set with `ForwardPlus::MaterialBin`. `VisibilityBinCapacities(opaque, transparent)` sizes the bins. Unrouted sets land in the opaque bin.
+
+### Vertices and page slots
+
+Vertices are pulled from the GeometryHeap vertex page as `StandardVertex`: position, normal, tangent (w = bitangent sign) and one UV set, 48 bytes. That is exactly the cooked static mesh the StaticModelCompiler writes, and `StandardVertexLayoutId()` equals the `VertexLayout` the residency layer computes for it (tested).
+
+Each index-page slot of the visibility frame names its index and vertex page (`ForwardPlusPageSlot`). Every mesh binned into a slot must keep its 32-bit indices and its vertices in those pages. The renderer binds one space-0 table per slot.
+
+### Shading (ClusteredForward.slang = ForwardPlus::Shade)
+
+- **Vertex stage:** transforms the position by the GPU Scene row. The normal is transformed by the cofactor matrix (exact under non-uniform scale), and the tangent by the linear part. For mirroring transforms (negative determinant) it flips the tangent sign and the triangle facing, so their normals, tangents and faces stay correct.
+- **Faces:** both pipelines rasterize both faces. Single-sided materials discard back faces in the shader (`CullsFace`); double-sided ones shade them with the flipped normal. This keeps mirrored instances correct without a second pipeline.
+- **Surface:** `StandardPbrResolve` over bindless texels (alpha mask, normal map through the vertex tangent frame).
+- **Radiance:** directional lights + the pixel's cluster list (`ClusteredShade`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
+- **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), and depth with the canonical reverse-Z compare.
+- **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty), with truncated clusters in magenta.
+
+The object-id target is `R32Float` because the RHI clears only float and normalized attachments.
+
+### Transparency (item 67)
+
+- **Sort key:** the object's world bounds center along the camera's forward axis. Farther draws first; ties go to the lower instance row, then the lower submesh row.
+- **Sort:** `ForwardTransparentSort.slang` fills a scratch buffer from the bin's compacted draws, runs a bitonic network in one 256-thread group per page slot, writes the commands in draw order and zeroes the rest.
+  - The draw order therefore never depends on visibility's atomic compaction order.
+  - The zeroing also makes the no-`IndirectCount` fallback path work.
+- **Draw:** the transparent pipeline blends premultiplied color with `One / OneMinusSourceAlpha`. It tests depth against the opaque result without writing it, and draws each page slot's sorted commands with `DrawIndexedIndirectCount`.
+- **Limits:**
+  - At most `ForwardTransparentSortBindings::MaxDraws` (65,536) transparent draws per page slot.
+  - Order is per object, not per triangle. Intersecting or self-overlapping transparent meshes are not sorted within themselves.
+  - Order is exact within a page slot. With several index pages, slots draw in slot order.
+
+### Environment
+
+With `ForwardPlusFrame::Environment` and `BrdfLut`, the view sets `ForwardViewFlagEnvironment` and the shader performs `EnvironmentLookup`. Without them the renderer binds 1×1 zero stand-ins and IBL is skipped.
+
+## Pipelines
+
+`ForwardPlusRenderer::PipelineDesc(bin, program, layout)` returns the pipeline state; callers compile the programs and create the pipelines:
+
+| | Opaque | Transparent |
+| --- | --- | --- |
+| Color targets | RGBA16Float, R32Float (object id) | RGBA16Float |
+| Blend | off | premultiplied (One, OneMinusSourceAlpha for color and alpha) |
+| Depth | D32Float, GreaterEqual, write | D32Float, GreaterEqual, no write |
+| Cull | none (shader culls single-sided back faces) | none (same) |
+
+Both programs share the bindless space `ForwardPlusBindlessSpace(textures, samplers)`, so one `BindlessResourceTable` serves them.
+
+## Not yet
+
+- A depth prepass and hardware back-face culling split by winding.
+- Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
+- Engine wiring (item 56), shadows (Phase 16), tone mapping (item 73).
+- Importing glTF `alphaMode` into `FlagAlphaBlend`.
+
+## Tests
+
+| Suite | What it proves |
+| --- | --- |
+| `Render.ForwardPlus.Reference` (7) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation |
+| `Render.ForwardPlus.Fixture` (1) | The test meshes are CCW-outward with exact tangents, and the analytic ray caster agrees with triangle intersection under rotated, scaled and mirrored transforms |
+| `Render.ForwardPlus` (1, RenderResidency) | `StandardVertexLayoutId` is the residency layer's layout of a cooked static mesh |
+| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment stand-ins, and every rejected input |
+| `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings`; the view record and sort entry equal the C++ structs; the sort's group size and push constants |
+| Native `ClusteredForwardPlusMatchesTheCpuReference` | A lit scene compared pixel by pixel with an exact CPU ray cast. See below |
+| Native `ClusteredLightingScalesToTensOfThousandsOfLights` | Item 69 (see [Clustered lighting](ClusteredLighting.md#scaling-item-69)) |
+
+### Native smoke
+
+`ClusteredForwardPlusMatchesTheCpuReference` renders 480×270. The scene has:
+
+- a ground plane;
+- a gold cube (textured metallic-roughness);
+- a normal-mapped cube with non-uniform scale;
+- a mirrored cube;
+- an alpha-masked cube that must vanish;
+- an occluded, emissive cube;
+- five blended quads, created out of depth order: three overlapping, one partly behind a cube, and one single-sided and facing away.
+
+It is lit by a sun, 300 clustered lights and the GPU-built sky environment. Every pixel whose 3×3 neighborhood sees the same surfaces is compared with `Tests/Fixtures/ForwardPlusFixture.h`'s exact ray cast of the same shapes. The cast is shaded by `ForwardPlus::Shade` over the GPU's own cluster lists and environment maps.
+
+- **Object ids:** at most 0.2 % of interior pixels may differ, and the masked cube never appears.
+- **Color:** at most 0.5 % outliers (0.01 + 3 %), and a mean relative error < 5·10⁻³. Transparent layers are composited with `ForwardPlus::Over` in the GPU's sorted order.
+- **Sort:** the GPU order must equal `SortTransparentDraws`, with unused commands zeroed. Reversing the order must visibly change at least 50 pixels, so the order is observable.
+
+Frames:
+
+1. lit;
+2. the cluster heatmap;
+3. a moved camera with the red quad moved in front of the green one (the order must flip), without an environment (stand-ins);
+4. 10,000 lights, every 7th pixel compared, with pass timings printed.

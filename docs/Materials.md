@@ -80,8 +80,8 @@ Texture and sampler parameters hold `BindlessResourceTable` indices. They start 
   - The occlusion texture uses R, blended by `OcclusionStrength`, and scales only the ambient term.
   - Emission is `EmissiveFactor × emissive texel`.
 - **Normal maps:** a nonzero `NormalTexture` is a tangent-space map, `n = normalize(xy · NormalScale, z)`. Without a tangent stream, the draw shader derives T = ∂p/∂u and B = ∂p/∂v from screen-space derivatives by inverting the UV Jacobian, which is exact for planar, affinely mapped surfaces and safe with the flipped viewport.
-- **Alpha and double-sided:** `FlagAlphaMask` discards below `AlphaCutoff`. `FlagDoubleSided` shades back faces with the flipped normal.
-- **Lighting:** one directional light per call, plus a constant ambient term (`Ambient × baseColor × occlusion`). Image-based lighting replaces the ambient term in item 61; clustered lights arrive with items 63–66.
+- **Alpha and double-sided:** `FlagAlphaMask` discards below `AlphaCutoff`. `FlagDoubleSided` shades back faces with the flipped normal. `FlagAlphaBlend` (glTF `BLEND`) routes the material to the sorted, blended transparent pass of [Clustered Forward+](ForwardPlus.md); it does not change the shading itself.
+- **Lighting:** one directional light per call, plus a constant ambient term (`Ambient × baseColor × occlusion`). Image-based lighting replaces the ambient term in item 61. Clustered Forward+ (items 63–67) replaces the single light with every directional light plus the pixel's cluster list; see [Clustered Forward+](ForwardPlus.md).
 
 `CreateStandardMaterialTemplate()` builds the built-in template with the glTF defaults. `ReadStandardParameters`/`ReadStandardTextures` decode an instance for the CPU model.
 

@@ -27,9 +27,27 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63) and GPU clustered light assignment with overflow diagnostics (items 64, 65, 68) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68) and opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 64, 65 and 68: cluster grid, GPU light assignment and overflow diagnostics (2026-09-23):** local lights are now binned into compact per-cluster lists on the GPU.
+- **Latest renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
+  - **`Renderer/ForwardPlus` (items 66–67):**
+    - `ForwardPlusRenderer::Record` draws GPU visibility's Opaque bin GPU-driven, shaded by `ClusteredForward.slang` into HDR color, an object-id target and reverse-Z depth. Shading is `StandardPbr` through the material table and bindless textures, plus directional lights, the pixel's cluster list, ambient, optional IBL and emission.
+    - It then sorts the Transparent bin (`StandardPbr::FlagAlphaBlend`) back to front on the GPU with a bitonic network. The order is deterministic, independent of compaction order, and the unused commands are zeroed. The sorted draws are blended with premultiplied alpha.
+    - Meshes use `StandardVertex`, the cooked static-mesh layout (its layout id is tested against the residency layer). Normals use the cofactor transform, and mirrored instances keep correct faces and tangents.
+    - `ForwardPlusReference` is the CPU definition of every rule. A cluster-heatmap debug mode is included.
+  - **Item 69:**
+    - The CPU scaling scenarios (0, 1k, 10k, off-screen, dense) check every `ClusterStats` field.
+    - The native `ClusteredLightingScalesToTensOfThousandsOfLights` times the clustering passes at 0, 1k, 10k and 32k lights, plus 10k off-screen and 10k dense.
+    - The Forward+ smoke renders 10,000 lights and prints its pass times.
+  - **Validation:**
+    - The official Linux configuration passes **555 cases / 249,085 checks** (was 539 / 225,498). The EnTT-enabled sanitizer build passes 578 cases cleanly.
+    - The new native smoke `ClusteredForwardPlusMatchesTheCpuReference` compares every interior pixel with an exact CPU ray cast shaded by `ForwardPlus::Shade`: object ids, opaque color, composited transparency and the GPU sort order. It also covers a heatmap frame, a moved camera without an environment, and 10k lights.
+    - 35 native cases now. See [Clustered Forward+](ForwardPlus.md) and [the items 66, 67, 69 record](validation/Items66-67-69-2026-09-23.md).
+  - **First desktop run (RTX 4070 Laptop):**
+    - The Forward+ smoke matched the CPU reference in every frame, with 0 id mismatches, 0 outliers and a mean error of 3·10⁻⁴. It failed only on one validation warning: the transparent variant wrote an unread `ObjectId` varying. That is now fixed.
+    - The per-pass timings overlapped. `GraphPassTiming` gained `EndOffsetNanoseconds`, and the smokes now attribute time by end timestamps.
+  - **Still needed:** a clean re-run of both smokes on all profiles, then recording the GPU timings as budgets. Directional shadows (item 70) come next on the critical path. Engine wiring remains item 56.
+- **Previous renderer checkpoint — items 64, 65 and 68: cluster grid, GPU light assignment and overflow diagnostics (2026-09-23):** local lights are now binned into compact per-cluster lists on the GPU.
   - **`Renderer/ClusteredLighting`:**
     - `ClusterGrid` (item 64): screen tiles × logarithmic depth slices, with configurable tile size, slice count, near/far and limits. It works for any perspective depth mapping, decodes view depth from the depth buffer, and is rebuilt per frame, so resizing is just a new desc.
     - `ClusteredLightAssigner` (item 65) records five deterministic compute passes with no atomics: light cull to view space, cluster AABBs, count, a one-group prefix scan into compact offsets, and write. Lists are in light-index order. Directional lights stay outside them.
@@ -43,8 +61,8 @@ This section is the short authoritative status summary for the current repositor
     - The CPU tests prove that the AABBs tile the volume, that assignment is conservative, and that clustered shading equals `ShadeAllLights`.
     - The new native smoke `ClusteredLightingMatchesTheCpuReference` compares every GPU output with the CPU definition over 1,502 lights in three frames: roomy, overflowing and resized after light moves.
     - 33 native cases now. See [Clustered lighting](ClusteredLighting.md) and [the items 64, 65, 68 record](validation/Items64-65-68-2026-09-23.md).
-  - **Still needed:** desktop execution of the new smoke. Opaque Clustered Forward+ (item 66) comes next.
-- **Previous renderer checkpoint — item 63: GPU light buffer (2026-09-23):** Phase 15 starts with a persistent, GPU-resident light schema.
+  - **Still needed:** desktop execution of the new smoke. Clustered Forward+ and the light benchmarks (items 66, 67, 69) followed.
+- **Earlier renderer checkpoint — item 63: GPU light buffer (2026-09-23):** Phase 15 starts with a persistent, GPU-resident light schema.
   - **`Renderer/Lights`:**
     - `LightDesc` → `EncodeLight` → a 64-byte `GpuLightRecord`, following glTF punctual semantics: directional (lux), point and spot (candela), with an inverse-square window reaching zero at `Range`, glTF spot falloff, shadow index and flags.
     - `LightMath` is the CPU definition: evaluation, `LightBoundingSphere` (tight spot bounds for clustering) and `ShadeAllLights`, the brute-force reference clustered lighting must match. `GpuLightRecords.slang` mirrors it.
@@ -3978,10 +3996,10 @@ Set practical configurable budgets from measurement rather than arbitrary hardco
 
 ### Phase 15 exit criteria
 
-- [ ] thousands of dynamic lights scale predictably.
-- [ ] opaque and transparent rendering consume the clustered data path.
+- [ ] thousands of dynamic lights scale predictably. *(benchmarks exist (item 69); awaiting desktop numbers)*
+- [x] opaque and transparent rendering consume the clustered data path. *(items 66–67)*
 - [x] overflow behavior is visible and safe. *(items 65/68: bounded lists, `ClusterStats`, magenta heatmap)*
-- [ ] zero/few-light scenes remain cheap.
+- [ ] zero/few-light scenes remain cheap. *(the empty scenario is benchmarked; awaiting desktop numbers)*
 
 ---
 
@@ -4789,10 +4807,10 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 63. [x] GpuLightBuffer. *(2026-09-23: `Renderer/Lights` + `GpuLightRecords.slang`; [GPU lights](Lights.md). Native smoke awaits desktop execution.)*
 64. [x] clustered grid. *(2026-09-23: `Renderer/ClusteredLighting/ClusterGrid`; [Clustered lighting](ClusteredLighting.md). Native smoke awaits desktop execution.)*
 65. [x] GPU light assignment/compaction. *(2026-09-23: `ClusteredLightAssigner` + `Shaders/Slang/ClusteredLighting`.)*
-66. [ ] opaque Clustered Forward+.
-67. [ ] transparent Clustered Forward+.
+66. [x] opaque Clustered Forward+. *(2026-09-23: `Renderer/ForwardPlus` + `ClusteredForward.slang`; [Clustered Forward+](ForwardPlus.md). Native smoke awaits desktop execution.)*
+67. [x] transparent Clustered Forward+. *(2026-09-23: `FlagAlphaBlend` bin, GPU back-to-front sort `ForwardTransparentSort.slang`, premultiplied blending.)*
 68. [x] cluster heatmap/overflow diagnostics. *(2026-09-23: `ClusterStats` and `RecordHeatmap`; done ahead of 66–67 because it validates assignment.)*
-69. [ ] 1k/10k+ light benchmarks.
+69. [x] 1k/10k+ light benchmarks. *(2026-09-23: CPU scaling scenarios + native `ClusteredLightingScalesToTensOfThousandsOfLights` with GPU pass timings; budgets are recorded from the desktop run.)*
 
 ### 35.7 Complete modern frame
 
