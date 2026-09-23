@@ -239,7 +239,7 @@ namespace Swim::ShaderCompiler::Detail
 				{
 					return false;
 				}
-				output[uniformOwner].UniformFields.push_back({ path, base.Uniform, local.UniformSize });
+				output[uniformOwner].UniformFields.push_back({ path, base.Uniform, local.UniformSize, {}, 0 });
 				return true;
 			}
 			if (!local.HasDescriptor || local.HasRegisterSpace)

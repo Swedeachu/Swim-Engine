@@ -156,6 +156,7 @@ function(swim_configure_tests)
 		RenderGeometry
 		RenderScene
 		RenderVisibility
+		RenderMaterials
 		Commands
 	)
 
@@ -337,6 +338,7 @@ function(swim_configure_tests)
 			SWIM_GPU_VISIBILITY_REFLECTION_PATH="${SwimGpuVisibility_REFLECTION}"
 			SWIM_HZB_REDUCE_SPIRV_PATH="${SwimHzbReduce_SPIRV}"
 			SWIM_HZB_REDUCE_REFLECTION_PATH="${SwimHzbReduce_REFLECTION}"
+			SWIM_STANDARD_MATERIAL_REFLECTION_PATH="${SwimStandardMaterialProbe_REFLECTION}"
 			SWIM_RHI_GPU_DRIVEN_DRAW_SPIRV_PATH="${SwimRhiGpuDrivenDraw_SPIRV}"
 			SWIM_RHI_GPU_DRIVEN_DRAW_REFLECTION_PATH="${SwimRhiGpuDrivenDraw_REFLECTION}"
 		)

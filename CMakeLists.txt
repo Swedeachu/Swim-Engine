@@ -372,6 +372,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Reflection probe for the standard material's parameter record (item 58).
+	swim_add_slang_program(SwimStandardMaterialProbe
+		SOURCE Source/Shaders/Slang/Materials/StandardMaterialProbe.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimHzbReduce
 		SOURCE Source/Shaders/Slang/GpuScene/HzbReduce.slang
 		PROFILE spirv_1_5
@@ -402,6 +408,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiGpuSceneProbe_SPIRV}" "${SwimRhiGpuSceneProbe_REFLECTION}"
 			"${SwimGpuVisibility_SPIRV}" "${SwimGpuVisibility_REFLECTION}"
 			"${SwimHzbReduce_SPIRV}" "${SwimHzbReduce_REFLECTION}"
+			"${SwimStandardMaterialProbe_SPIRV}" "${SwimStandardMaterialProbe_REFLECTION}"
 			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
@@ -420,6 +427,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/GpuScene/VisibilityRecords.slang
 			Source/Shaders/Slang/GpuScene/GpuVisibility.slang
 			Source/Shaders/Slang/GpuScene/HzbReduce.slang
+			Source/Shaders/Slang/Materials/StandardMaterialParameters.slang
+			Source/Shaders/Slang/Materials/StandardMaterialProbe.slang
 			Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
@@ -442,6 +451,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

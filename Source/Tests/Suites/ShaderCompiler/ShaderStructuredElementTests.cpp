@@ -225,3 +225,83 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "HzbReduceProgramMatchesItsCppContrac
 	}
 }
 #endif
+
+#include "Tools/ShaderCompiler/ShaderMaterialLayout.h"
+
+// Structured-element leaves carry their scalar type and component count, and a
+// struct element converts to a material template layout.
+SWIM_TEST("ShaderCompiler.MaterialLayout", "StructFieldsConvertToMaterialParameters")
+{
+	const auto parsed = ShaderCompiler::ParseSlangReflectionJson(R"json({"parameters":[{"name":"Materials",
+		"binding":{"kind":"descriptorTableSlot","index":0},
+		"type":{"kind":"resource","baseShape":"structuredBuffer","resultType":{"kind":"struct","name":"M","fields":[
+			{"name":"Color","type":{"kind":"vector","elementCount":4,"elementType":{"kind":"scalar","scalarType":"float32"}},"binding":{"kind":"uniform","offset":0,"size":16}},
+			{"name":"Roughness","type":{"kind":"scalar","scalarType":"float32"},"binding":{"kind":"uniform","offset":16,"size":4}},
+			{"name":"AlbedoTexture","type":{"kind":"scalar","scalarType":"uint32"},"binding":{"kind":"uniform","offset":20,"size":4}},
+			{"name":"LinearSampler","type":{"kind":"scalar","scalarType":"uint32"},"binding":{"kind":"uniform","offset":24,"size":4}},
+			{"name":"Layer","type":{"kind":"scalar","scalarType":"int32"},"binding":{"kind":"uniform","offset":28,"size":4}}],
+			"sizes":[{"kind":"uniform","value":32}]}}},
+		{"name":"Bad","binding":{"kind":"descriptorTableSlot","index":1},
+		"type":{"kind":"resource","baseShape":"structuredBuffer","resultType":{"kind":"struct","name":"B","fields":[
+			{"name":"Matrix","type":{"kind":"matrix","rowCount":4,"columnCount":4,"elementType":{"kind":"scalar","scalarType":"float32"}},"binding":{"kind":"uniform","offset":0,"size":64}}],
+			"sizes":[{"kind":"uniform","value":64}]}}},
+		{"name":"Words","binding":{"kind":"descriptorTableSlot","index":2},
+		"type":{"kind":"resource","baseShape":"structuredBuffer","resultType":{"kind":"scalar","scalarType":"uint32"}}}],
+		"entryPoints":[{"name":"main","stage":"compute","threadGroupSize":[1,1,1]}]})json");
+	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
+	const auto* materials = FindParameter(parsed.Reflection, "Materials");
+	SWIM_REQUIRE(materials != nullptr && materials->ElementFields.size() == 5);
+	SWIM_CHECK_EQUAL(materials->ElementFields[0].ScalarType, std::string("float32"));
+	SWIM_CHECK_EQUAL(materials->ElementFields[0].ComponentCount, 4u);
+	SWIM_CHECK_EQUAL(materials->ElementFields[4].ScalarType, std::string("int32"));
+
+	const auto layout = ShaderCompiler::BuildMaterialTemplateDesc(parsed.Reflection, "Materials", "Test");
+	SWIM_REQUIRE_MESSAGE(layout, layout.Error);
+	SWIM_CHECK_EQUAL(layout.Desc.RecordSize, 32u);
+	SWIM_REQUIRE_EQUAL(layout.Desc.Parameters.size(), 5u);
+	using T = Render::MaterialParameterType;
+	SWIM_CHECK(layout.Desc.Parameters[0].Type == T::Float4);
+	SWIM_CHECK(layout.Desc.Parameters[1].Type == T::Float);
+	SWIM_CHECK(layout.Desc.Parameters[2].Type == T::TextureIndex);
+	SWIM_CHECK(layout.Desc.Parameters[3].Type == T::SamplerIndex);
+	SWIM_CHECK(layout.Desc.Parameters[4].Type == T::Int);
+	SWIM_CHECK_EQUAL(layout.Desc.Parameters[4].Offset, 28u);
+	SWIM_CHECK(!ShaderCompiler::BuildMaterialTemplateDesc(parsed.Reflection, "Bad", "Bad"));	 // Matrices are not material parameters.
+	SWIM_CHECK(!ShaderCompiler::BuildMaterialTemplateDesc(parsed.Reflection, "Words", "Words")); // Not a struct.
+	SWIM_CHECK(!ShaderCompiler::BuildMaterialTemplateDesc(parsed.Reflection, "Missing", "Missing"));
+}
+
+#ifdef SWIM_STANDARD_MATERIAL_REFLECTION_PATH
+#include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
+
+// The standard material's compiled record becomes a working template.
+SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialProgramBuildsItsTemplate")
+{
+	const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_STANDARD_MATERIAL_REFLECTION_PATH);
+	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
+	auto layout = ShaderCompiler::BuildMaterialTemplateDesc(parsed.Reflection, "Materials", "Standard");
+	SWIM_REQUIRE_MESSAGE(layout, layout.Error);
+	SWIM_CHECK_EQUAL(layout.Desc.RecordSize, 80u);
+	SWIM_CHECK_EQUAL(layout.Desc.Parameters.size(), 15u);
+	const auto materialTemplate = std::make_shared<const Render::MaterialTemplate>(std::move(layout.Desc));
+	using T = Render::MaterialParameterType;
+	const auto expect = [&](const char* name, T type, std::uint32_t offset)
+	{
+		const auto* parameter = materialTemplate->FindParameter(name);
+		SWIM_REQUIRE_MESSAGE(parameter != nullptr, name);
+		SWIM_CHECK(parameter->Type == type);
+		SWIM_CHECK_EQUAL(parameter->Offset, offset);
+	};
+	expect("BaseColorFactor", T::Float4, 0);
+	expect("EmissiveFactor", T::Float3, 16);
+	expect("MetallicFactor", T::Float, 28);
+	expect("AlphaCutoff", T::Float, 44);
+	expect("BaseColorTexture", T::TextureIndex, 48);
+	expect("EmissiveTexture", T::TextureIndex, 64);
+	expect("MaterialSampler", T::SamplerIndex, 68);
+	expect("Flags", T::Uint, 72);
+	Render::MaterialInstance instance(materialTemplate);
+	instance.SetTexture("NormalTexture", 5);
+	SWIM_CHECK_EQUAL(instance.GetUint("NormalTexture"), 5u);
+}
+#endif

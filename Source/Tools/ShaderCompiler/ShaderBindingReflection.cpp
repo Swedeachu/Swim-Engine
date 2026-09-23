@@ -58,7 +58,25 @@ namespace Swim::ShaderCompiler::Detail
 					}
 					continue;
 				}
-				fields.push_back({ name, base + offset, size });
+				ShaderUniformReflection leaf{ name, base + offset, size, {}, 0 };
+				const auto kind = ReadString(fieldType, "kind");
+				if (kind == "scalar")
+				{
+					leaf.ScalarType = ReadString(fieldType, "scalarType");
+					leaf.ComponentCount = 1;
+				}
+				else if (kind == "vector")
+				{
+					simdjson::dom::object elementType;
+					std::uint32_t count = 0;
+					if (FindField(fieldType, "elementType") && !FindField(fieldType, "elementType")->get_object().get(elementType) &&
+						ReadU32(fieldType, "elementCount", count) && ReadString(elementType, "kind") == "scalar")
+					{
+						leaf.ScalarType = ReadString(elementType, "scalarType");
+						leaf.ComponentCount = count;
+					}
+				}
+				fields.push_back(std::move(leaf));
 			}
 			return true;
 		}

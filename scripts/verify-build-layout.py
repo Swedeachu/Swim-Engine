@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3788,6 +3788,15 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RHIVulkan", "VulkanIndirectDrawTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanGpuVisibilitySmokeTests.cpp", failures)
     check_suite_is_compiled("RenderVisibility", "OcclusionTests.cpp", failures)
+    check_suite_is_compiled("RenderMaterials", "MaterialTemplateTests.cpp", failures)
+    # Material templates (item 58) are pure layout/data: no RHI, graph or GPU layer.
+    for path in (renderer / "Materials").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/RHI/|Renderer/RenderGraph/|Renderer/GpuScene/|Renderer/Visibility/)', path.read_text(encoding="utf-8")
+        ):
+            fail(f"Materials must stay a data layer: {path.relative_to(ROOT)}", failures)
+    if "Renderer/Materials/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("Materials sources must compile with the backend-neutral renderer source list", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanGpuOcclusionSmokeTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
@@ -3815,7 +3824,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

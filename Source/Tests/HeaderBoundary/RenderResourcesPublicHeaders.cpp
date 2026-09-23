@@ -1,4 +1,5 @@
 #include "Engine/Systems/Renderer/Geometry/GeometryHeap.h"
+#include "Engine/Systems/Renderer/Materials/MaterialInstance.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
@@ -46,3 +47,4 @@ static_assert(sizeof(Swim::Render::GpuViewRecord) == 192);
 static_assert(Swim::Render::CanonicalDepthConvention == Swim::Render::DepthConvention::ReverseZ);
 static_assert(sizeof(Swim::Render::VisibilityStats) == 80);
 static_assert(Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabilities{}) == Swim::Render::VisibilityDrawPath::ZeroFilledIndirect);
+static_assert(Swim::Render::MaterialParameterAlignment(Swim::Render::MaterialParameterType::Float3) == 16);

@@ -29,14 +29,20 @@ This section is the short authoritative status summary for the current repositor
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
 | Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — no-IndirectCount fallback for GPU visibility (2026-09-23):** this closes the last open Phase 13 "required behavior" box that does not depend on item 56.
+- **Latest renderer checkpoint — item 58 material templates and instances (2026-09-23):** Phase 14 starts with a backend-neutral material data layer.
+  - `Renderer/Materials`:
+    - `MaterialTemplate` is an immutable, shared std430 parameter layout. Types are float..float4, uint, int and bindless texture/sampler indices. Alignment, overlap, bounds and name rules are validated, and templates carry per-template defaults.
+    - `MaterialInstance` is a cheap mutable record with typed setters and getters. A version counter only advances on real changes, so item 59's GPU material buffer can upload dirty records only.
+  - **Reflection:** structured-element reflection now records each leaf's scalar type and component count, and `ShaderCompiler::BuildMaterialTemplateDesc` turns a shader's material struct into a template. `Shaders/Slang/Materials/StandardMaterialParameters.slang` is the metallic-roughness record that item 60 will shade with.
+  - **Validation:** the official Linux configuration passes **490 cases / 11,355 checks** (was 486). The EnTT-enabled sanitizer build passes 513 cases cleanly. No new native smoke; the case count stays at 28. See [Materials](Materials.md).
+- **Previous renderer checkpoint — no-IndirectCount fallback for GPU visibility (2026-09-23):** this closes the last open Phase 13 "required behavior" box that does not depend on item 56.
   - `VisibilityDraws.h` adds `SelectVisibilityDrawPath` (the count path whenever the device has `IndirectCount`) and `DrawVisibilityBin`.
   - On devices without `IndirectCount`, the fallback zeroes the phase's command buffer (`VisibilityFrameDesc::ZeroUnusedCommands`) and issues each bin's whole capacity with `DrawIndexedIndirect`; unwritten slots draw zero instances.
   - **Validation:**
     - The official Linux configuration passes **486 cases / 11,266 checks** (was 485 / 11,248).
     - The existing native `GpuVisibilityCullsBinsAndDrawsIndirect` smoke gained a fourth frame drawn through the fallback with the same command, count, statistic and pixel checks, plus zero-instance checks for every unwritten slot. The native case count stays at 28.
     - See [GPU visibility](GpuVisibility.md#drawing-the-bins-and-the-no-count-fallback) and [the record](validation/IndirectFallback-2026-09-23.md).
-- **Previous renderer checkpoint — items 50 and 51 implemented (2026-09-23):** the depth-convention gate is closed and GPU visibility gained hierarchical-Z occlusion culling that never hides newly visible objects.
+- **Earlier renderer checkpoint — items 50 and 51 implemented (2026-09-23):** the depth-convention gate is closed and GPU visibility gained hierarchical-Z occlusion culling that never hides newly visible objects.
   - **Depth convention (the item 50 gate):** reverse-Z is final for the modern renderer.
     - Near → 1, far/infinity → 0, `D32Float`, clear 0, `GreaterEqual` (`DepthConvention.h`).
     - `OrthographicReverseZRowMajor` and `PerspectiveReverseZRowMajor` (infinite far) build canonical projections.
@@ -113,6 +119,7 @@ Companion documentation for the current generated solution and asset pipeline:
 - `docs/RenderGraph.md` — graph declaration/compilation/execution contracts, including executor-staged transfers.
 - `docs/GpuResidency.md` — generational GPU registries, the paged GeometryHeap, TextureResidency and the asynchronous asset residency service.
 - `docs/GpuVisibility.md` — GPU-driven culling, LOD, binning and indirect draw generation over the GPU Scene.
+- `docs/Materials.md` — material templates, instances and reflected parameter layouts.
 
 ---
 
@@ -3787,9 +3794,9 @@ GpuMaterial
 
 ### Requirements
 
-- [ ] immutable shared templates;
-- [ ] cheap mutable instances;
-- [ ] reflected typed parameters;
+- [x] immutable shared templates; *(`MaterialTemplate`, shared as `std::shared_ptr<const MaterialTemplate>`)*
+- [x] cheap mutable instances; *(`MaterialInstance`: one record copy, typed setters, change version)*
+- [x] reflected typed parameters; *(`ShaderCompiler::BuildMaterialTemplateDesc` from structured-element reflection)*
 - [ ] GPU material parameter buffer;
 - [ ] bindless textures/samplers;
 - [ ] alpha opaque/mask/blend/additive;
@@ -4419,7 +4426,7 @@ Run common RHI tests against each modern backend as backends arrive:
 - imported/exported resources;
 - staged upload/readback suballocation, growth, failure recovery and partial preserving copies (`RenderGraph.Transfers`).
 
-GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`, `Render.DepthConvention`, `Render.Hzb`, `Render.Occlusion`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
+GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. Material templates/instances have `RenderMaterials` (`Render.Materials`), with reflection conversion in `ShaderCompiler.MaterialLayout`. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`, `Render.DepthConvention`, `Render.Hzb`, `Render.Occlusion`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
 
 ### 32.8 GPU Scene/visibility
 
@@ -4700,7 +4707,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.6 Shading and lighting
 
-58. [ ] MaterialTemplate/MaterialInstance + reflected parameters.
+58. [x] MaterialTemplate/MaterialInstance + reflected parameters. *(2026-09-23: CPU data layer and tool-side reflection conversion; [Materials](Materials.md). Features/variants, pass participation and render-state policy arrive with items 59–60.)*
 59. [ ] GPU material buffer/bindless material resources.
 60. [ ] metallic-roughness PBR.
 61. [ ] environment/IBL.

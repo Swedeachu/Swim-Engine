@@ -174,6 +174,8 @@ Above the graph, `Renderer/Resources` provides generational GPU handles and a ti
 
 `Renderer/Visibility` turns GPU Scene rows into draws without a CPU round trip: one compute pass per view frustum-culls world bounding spheres, selects mesh LODs from projected error with per-row hysteresis, compacts visible submeshes into bounded (material bin × index page) bins and writes `DrawIndexedIndirectCommand`s plus per-bin counts for the new RHI `DrawIndexedIndirectCount`. Statistics are read back asynchronously, and `RunVisibilityReference` is the CPU definition the GPU is tested against. The modern renderer's depth is reverse-Z (`D32Float`, clear 0, `GreaterEqual`); `HzbBuilder` reduces it to a hierarchical-Z pyramid, and two-phase occlusion culling draws last frame's visible set early, then draws whatever the current frame's HZB reveals, so newly visible objects are never hidden. See [GPU visibility](docs/GpuVisibility.md).
 
+`Renderer/Materials` holds material data: immutable `MaterialTemplate` parameter layouts, usually derived from a Slang struct's reflection, and mutable `MaterialInstance` records with typed setters and change versions. See [Materials](docs/Materials.md).
+
 See [RenderGraph contracts and usage](docs/RenderGraph.md). Run the CPU tests with `SwimTests --filter=RenderGraph` and `SwimTests --filter=Render.`; opt-in Vulkan tests exercise offscreen → post → present, swapchain replacement, dependent compute and exact readback. These reference consumers use graph-generated synchronization. The sandbox remains on its transitional renderer.
 
 ### Vulkan RHI desktop validation
