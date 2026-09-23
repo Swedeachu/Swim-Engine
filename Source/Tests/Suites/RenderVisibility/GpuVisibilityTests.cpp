@@ -5,9 +5,11 @@
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
 #include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityStats.h"
 #include "Tests/Fixtures/GpuSceneFixture.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -299,4 +301,68 @@ SWIM_TEST("Render.GpuVisibility", "EarlyAndLatePhasesShareHistoryAndTheLatePhase
 	frame.Phase = static_cast<VisibilityPhase>(7);
 	SWIM_CHECK_THROWS(visibility.Record(invalid, invalidScene, invalidGeometry, frame), std::invalid_argument);
 	world.scene.scene->AbortUploads();
+}
+
+SWIM_TEST("Render.GpuVisibility", "NoIndirectCountFallbackZeroesCommandsAndDrawsWholeBins")
+{
+	// Path selection: the count path whenever the device has it.
+	Rhi::GraphicsCapabilities capabilities;
+	SWIM_CHECK(SelectVisibilityDrawPath(capabilities) == VisibilityDrawPath::ZeroFilledIndirect);
+	SWIM_CHECK(NeedsZeroedCommands(SelectVisibilityDrawPath(capabilities)));
+	capabilities.IndirectCount = true;
+	SWIM_CHECK(SelectVisibilityDrawPath(capabilities) == VisibilityDrawPath::IndirectCount);
+	SWIM_CHECK(!NeedsZeroedCommands(VisibilityDrawPath::IndirectCount));
+
+	VisibilityWorld world;
+	auto visibility = world.Make();
+	world.scene.scene->Create({});
+	VisibilityFrameDesc frame;
+	frame.View = BuildGpuViewRecord({});
+	frame.ReadStats = false;
+	world.Frame(visibility, frame); // First frame: persistent uploads.
+
+	// Without the fallback only counts and stats are cleared; with it the whole
+	// command buffer is zeroed before the cull (which then preserves unwritten slots).
+	VisibilityGraphResources resources;
+	SWIM_CHECK_EQUAL(world.Frame(visibility, frame, &resources), 2u);
+	frame.ZeroUnusedCommands = true;
+	const auto logBefore = world.scene.device.Commands->size();
+	SWIM_CHECK_EQUAL(world.Frame(visibility, frame, &resources), 3u);
+	const auto* commands = world.scene.device.LastDescriptorTable->Element(GpuVisibilityBindings::Commands, 0);
+	SWIM_REQUIRE(commands != nullptr);
+	std::uint32_t commandClears = 0;
+	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
+	{
+		const auto& command = (*world.scene.device.Commands)[i];
+		commandClears += command.Kind == "CopyBuffer" && command.Destination == commands &&
+			command.Size == 72u * sizeof(Rhi::DrawIndexedIndirectCommand);
+	}
+	SWIM_CHECK_EQUAL(commandClears, 1u);
+	const auto& bytes = static_cast<const Testing::MockMappedBuffer*>(commands)->Bytes;
+	// The mock cull writes nothing: every slot stays a zero-instance draw.
+	SWIM_CHECK(std::all_of(bytes.begin(), bytes.end(),
+		[](std::byte value)
+		{
+			return value == std::byte{ 0 };
+		}));
+
+	// Drawing a bin: count path vs whole-capacity fallback, same offsets.
+	Testing::MockCommandList list;
+	list.Log = std::make_shared<std::vector<Testing::MockCommand>>();
+	auto& bins = visibility.GetBins(); // Capacities {32, 4} x 2 page slots: bins at 0, 32, 64, 68.
+	Testing::MockMappedBuffer args({ 72 * 20, Rhi::BufferUsage::Indirect, Rhi::MemoryPreference::DeviceLocal, {} });
+	Testing::MockMappedBuffer counts({ 16, Rhi::BufferUsage::Indirect, Rhi::MemoryPreference::DeviceLocal, {} });
+	DrawVisibilityBin(list, args, counts, bins, 2, VisibilityDrawPath::IndirectCount);
+	DrawVisibilityBin(list, args, counts, bins, 2, VisibilityDrawPath::ZeroFilledIndirect);
+	SWIM_CHECK_THROWS(DrawVisibilityBin(list, args, counts, bins, 4, VisibilityDrawPath::IndirectCount), std::out_of_range);
+	SWIM_REQUIRE_EQUAL(list.Log->size(), 2u);
+	const auto& counted = (*list.Log)[0];
+	SWIM_CHECK_EQUAL(counted.Kind, std::string("DrawIndexedIndirectCount"));
+	SWIM_CHECK_EQUAL(counted.SourceOffset, std::uint64_t(bins.GetRange(2).First) * 20u);
+	SWIM_CHECK_EQUAL(counted.DestinationOffset, 2u * 4u);
+	SWIM_CHECK_EQUAL(counted.Size, std::uint64_t(bins.GetRange(2).Capacity));
+	const auto& whole = (*list.Log)[1];
+	SWIM_CHECK_EQUAL(whole.Kind, std::string("DrawIndexedIndirect"));
+	SWIM_CHECK_EQUAL(whole.SourceOffset, counted.SourceOffset);
+	SWIM_CHECK_EQUAL(whole.Size, counted.Size);
 }

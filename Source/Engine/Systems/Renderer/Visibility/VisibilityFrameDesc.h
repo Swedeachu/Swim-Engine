@@ -23,5 +23,10 @@ namespace Swim::Render
 		// Late phase: the HZB built from the early phase's depth, with the view's
 		// depth convention. Ignored by the other phases.
 		const HzbGraphResources* Hzb = nullptr;
+		// Fallback for devices without GraphicsCapabilities::IndirectCount: zero every
+		// command slot before the cull so DrawIndexedIndirect can issue a bin's whole
+		// capacity (unused slots draw zero instances). Costs one staged clear of the
+		// command buffer per phase; see VisibilityDraws.h.
+		bool ZeroUnusedCommands = false;
 	};
 } // namespace Swim::Render

@@ -11,6 +11,7 @@
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
 #include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityReference.h"
 #include <memory>
@@ -44,3 +45,4 @@ static_assert(!std::is_copy_constructible_v<Swim::Render::GpuVisibility>);
 static_assert(sizeof(Swim::Render::GpuViewRecord) == 192);
 static_assert(Swim::Render::CanonicalDepthConvention == Swim::Render::DepthConvention::ReverseZ);
 static_assert(sizeof(Swim::Render::VisibilityStats) == 80);
+static_assert(Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabilities{}) == Swim::Render::VisibilityDrawPath::ZeroFilledIndirect);

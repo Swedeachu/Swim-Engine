@@ -93,6 +93,17 @@ Early cull  -> draw (clear color/depth) -> HzbBuilder -> Late cull -> draw (load
 
 A `Single` phase keeps the pre-occlusion behavior (no HZB, history untouched).
 
+## Drawing the bins, and the no-count fallback
+
+`DrawVisibilityBin(list, commands, counts, bins, bin, path)` (`VisibilityDraws.h`) issues one bin after the caller has bound the pipeline, descriptors and the bin's index page. `SelectVisibilityDrawPath(capabilities)` chooses the path, and a device only gets the fallback when it genuinely lacks `IndirectCount`:
+
+| Path | Draw call | Frame setting |
+| --- | --- | --- |
+| `IndirectCount` (fast path) | `DrawIndexedIndirectCount` over the bin's range, limited by the GPU count | none |
+| `ZeroFilledIndirect` (fallback) | `DrawIndexedIndirect` over the bin's whole capacity | `VisibilityFrameDesc::ZeroUnusedCommands = NeedsZeroedCommands(path)` |
+
+With `ZeroUnusedCommands`, the phase's clear pass also zeroes the whole command buffer, and the cull pass declares it `ReadWrite` so that zeroed slots survive. Slots the cull does not write therefore draw zero instances. The cost is one staged clear of `capacity × 20` bytes per phase, so the flag stays off on the fast path.
+
 ## Bins
 
 `VisibilityBinLayout(materialBinCapacities, indexPageSlots)` gives each (material bin, page slot) pair a fixed `VisibilityBinRange {First, Capacity}`: the prefix sum of the material bin's capacity repeated per page slot. The command and draw-record buffers hold `GetTotalCapacity()` entries, so memory is bounded regardless of scene size. An empty capacity list or a zero capacity is rejected.
@@ -133,15 +144,15 @@ The view record, bin ranges and page table are small per-frame uploads, so the C
 | Suite | What it proves |
 | --- | --- |
 | `Render.Visibility` (6) | plane extraction for both projections, culling/drawability counts, the LOD hysteresis sequence including reset, generation change and bias, binning/capacity/other-page, the 100k benchmark, and the two-phase sequence (fresh history, steady state, teleported occluder revealing objects in the same frame, camera cut, `DisableOcclusion`, reused rows) on a CPU depth rasterizer |
-| `Render.GpuVisibility` (4) | pass and upload counts per frame (persistent tables only when needed), the 15 bindings, indirect usages, rejection of invalid configurations and frames, record layouts; early + late phases in one graph sharing the history, the late phase binding the whole pyramid, phase/HZB push constants |
+| `Render.GpuVisibility` (5) | pass and upload counts per frame (persistent tables only when needed), the 15 bindings, indirect usages, rejection of invalid configurations and frames, record layouts; early + late phases in one graph sharing the history, the late phase binding the whole pyramid, phase/HZB push constants; draw-path selection, the command clear of the no-count fallback and `DrawVisibilityBin` on both paths |
 | `Render.DepthConvention` (1), `Render.Hzb` (2), `Render.Occlusion` (3) | the canonical convention and reverse-Z projections; mip sizes and brute-force footprint equality of every HZB texel (both conventions); the builder's per-mip passes, views and constants; the occlusion test is conservative against full-resolution depth for 6,000 random spheres; near-plane, off-screen, unbounded and partial-coverage objects are never occluded; the 90k-object benchmark |
 | `RHI.Vulkan.IndirectDraw` (2) | argument forwarding and every validation rule for both calls |
 | `ShaderCompiler.GpuSceneLayout` (+2) | C++ ↔ Slang layout of every visibility record and binding; the HZB program's bindings, `r32f` storage format, 8×8 groups and push constants |
-| `RHI.Vulkan.Smoke.GpuVisibilityCullsBinsAndDrawsIndirect` (opt-in) | a 64×64 grid of two-LOD quads on a real device over three frames (camera moves, hidden/destroyed/moved/re-binned objects, a camera cut): the commands, draw records, counts and statistics match the CPU reference; an overflowing bin clamps; both LODs are used; every drawn object's pixels carry its id and nothing culled, hidden, dropped or destroyed appears |
+| `RHI.Vulkan.Smoke.GpuVisibilityCullsBinsAndDrawsIndirect` (opt-in) | a 64×64 grid of two-LOD quads on a real device over three frames (camera moves, hidden/destroyed/moved/re-binned objects, a camera cut): the commands, draw records, counts and statistics match the CPU reference; an overflowing bin clamps; both LODs are used; every drawn object's pixels carry its id and nothing culled, hidden, dropped or destroyed appears; a fourth frame repeats the view on the no-count fallback, whose unwritten slots must be zero-instance commands |
 | `RHI.Vulkan.Smoke.GpuOcclusionTwoPhaseHzbRevealsNewlyVisibleObjects` (opt-in) | a 20×20 grid behind a wall, reverse-Z depth, the full early → draw → HZB → late → draw pipeline over five frames (fresh history, steady state, the wall teleporting away, the wall back with a camera cut): early and late statistics and draw sets equal the CPU reference fed with the GPU's own HZB; every HZB mip equals the CPU reduction of the mip below; 36 covered objects stop being drawn; revealed objects are drawn in the same frame; no object is ever drawn twice or missing from the image |
 
 ## Not yet done
 
 - A GPU timing benchmark for occlusion on real scenes, per-view histories for several views of one scene (one `GpuVisibility` per view today), and meshlet/cone culling.
 - The engine runtime constructing `GpuScene` + `GpuVisibility` and drawing the world from them (item 56 then retires `SceneBVH` visibility and the CPU visible list).
-- Per-pass bins (shadow/depth-only views), meshlet/cone culling, and a non-count fallback for devices without `IndirectCount`.
+- Per-pass bins (shadow/depth-only views).

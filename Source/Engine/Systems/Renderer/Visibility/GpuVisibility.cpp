@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Visibility/GpuLodState.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityStats.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <stdexcept>
@@ -149,8 +150,9 @@ namespace Swim::Render
 		const auto binCount = bins.GetBinCount();
 		const auto capacity = bins.GetTotalCapacity();
 		resources.Commands = graph.CreateBuffer({ std::uint64_t(capacity) * sizeof(Rhi::DrawIndexedIndirectCommand),
-			Rhi::BufferUsage::Indirect | Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::DeviceLocal,
-			name + " commands" });
+			Rhi::BufferUsage::Indirect | Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource |
+				Rhi::BufferUsage::TransferDestination,
+			Rhi::MemoryPreference::DeviceLocal, name + " commands" });
 		resources.DrawRecords = graph.CreateBuffer({ std::uint64_t(capacity) * sizeof(GpuDrawRecord),
 			Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::DeviceLocal, name + " draw records" });
 		resources.Counts = graph.CreateBuffer({ std::uint64_t(binCount) * sizeof(std::uint32_t),
@@ -168,9 +170,13 @@ namespace Swim::Render
 		std::copy(frame.IndexPages.begin(), frame.IndexPages.end(), pages.begin());
 		const auto pageTable = graph.CreateUpload(AsBytes(pages), name + " index pages", Rhi::BufferUsage::Storage, 16);
 
-		// Counters restart at zero every frame.
-		const std::vector<std::uint32_t> zeros(binCount + sizeof(VisibilityStats) / sizeof(std::uint32_t), 0u);
-		const auto zeroUpload = graph.CreateUpload(AsBytes(zeros), name + " zeros");
+		// Counters restart at zero every frame. The no-count fallback also zeroes every
+		// command slot, so slots the cull leaves unwritten draw zero instances.
+		const bool zeroCommands = frame.ZeroUnusedCommands;
+		const std::uint64_t countBytes = std::uint64_t(binCount) * sizeof(std::uint32_t);
+		const std::uint64_t commandBytes = zeroCommands ? std::uint64_t(capacity) * sizeof(Rhi::DrawIndexedIndirectCommand) : 0;
+		const std::vector<std::byte> zeros(std::max<std::uint64_t>(countBytes + sizeof(VisibilityStats), commandBytes));
+		const auto zeroUpload = graph.CreateUpload(std::span<const std::byte>(zeros), name + " zeros");
 		graph.AddPass(
 			name + " clear", Rhi::QueueType::Transfer,
 			[&](RenderGraphBuilder& b)
@@ -178,13 +184,21 @@ namespace Swim::Render
 				b.Read(zeroUpload, S::CopySource);
 				b.Write(resources.Counts, S::CopyDestination);
 				b.Write(resources.Stats, S::CopyDestination);
+				if (zeroCommands)
+				{
+					b.Write(resources.Commands, S::CopyDestination);
+				}
 			},
-			[zeroUpload, counts = resources.Counts, stats = resources.Stats, binCount](RenderCommandContext& c)
+			[zeroUpload, counts = resources.Counts, stats = resources.Stats, commands = resources.Commands, countBytes, commandBytes](
+				RenderCommandContext& c)
 			{
 				const auto source = c.GetRange(zeroUpload);
-				const std::uint64_t countBytes = std::uint64_t(binCount) * sizeof(std::uint32_t);
 				c.Commands().CopyBuffer(*source.Buffer, c.Get(counts), { source.Offset, 0, countBytes });
 				c.Commands().CopyBuffer(*source.Buffer, c.Get(stats), { source.Offset + countBytes, 0, sizeof(VisibilityStats) });
+				if (commandBytes != 0)
+				{
+					c.Commands().CopyBuffer(*source.Buffer, c.Get(commands), { source.Offset, 0, commandBytes });
+				}
 			});
 
 		// Persistent state: material-bin table when edited, histories once.
@@ -219,7 +233,14 @@ namespace Swim::Render
 				b.Read(ranges, S::ShaderRead);
 				b.Read(pageTable, S::ShaderRead);
 				b.ReadWrite(lodState, S::ShaderRead | S::ShaderWrite);
-				b.Write(resources.Commands, S::ShaderWrite);
+				if (zeroCommands)
+				{
+					b.ReadWrite(resources.Commands, S::ShaderRead | S::ShaderWrite); // Keeps the zeroed slots.
+				}
+				else
+				{
+					b.Write(resources.Commands, S::ShaderWrite);
+				}
 				b.Write(resources.DrawRecords, S::ShaderWrite);
 				b.ReadWrite(resources.Counts, S::ShaderRead | S::ShaderWrite);
 				b.ReadWrite(resources.Stats, S::ShaderRead | S::ShaderWrite);

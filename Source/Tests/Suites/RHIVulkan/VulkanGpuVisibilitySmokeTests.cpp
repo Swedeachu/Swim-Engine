@@ -7,6 +7,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityReference.h"
 #include "Tests/Fixtures/VulkanSmokeDiagnostics.h"
 #include "Tests/Framework/Test.h"
@@ -59,7 +60,9 @@ namespace
 	// DrawIndexedIndirectCount using vertex pulling. Over three frames (camera
 	// move + scene edits, then a camera cut) the commands, draw records, counts
 	// and statistics match RunVisibilityReference, and every drawn object's
-	// pixels carry its id while nothing culled, hidden or destroyed appears.
+	// pixels carry its id while nothing culled, hidden or destroyed appears. A
+	// fourth frame repeats the view on the no-IndirectCount fallback (zeroed
+	// commands drawn with whole-bin DrawIndexedIndirect) with the same checks.
 	void RunGpuVisibilitySmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 #ifndef SWIM_GPU_VISIBILITY_SMOKE_AVAILABLE
@@ -175,7 +178,8 @@ namespace
 			std::vector<GpuLodState> referenceLods;
 
 			constexpr std::uint32_t size = 256;
-			const auto frame = [&](float cameraX, float cameraY, std::uint32_t flags)
+			const auto frame =
+				[&](float cameraX, float cameraY, std::uint32_t flags, VisibilityDrawPath path = VisibilityDrawPath::IndirectCount)
 			{
 				RenderViewDesc viewDesc;
 				const std::array<float, 16> view{ 1, 0, 0, -cameraX, 0, 1, 0, -cameraY, 0, 0, 1, -10, 0, 0, 0, 1 };
@@ -189,6 +193,7 @@ namespace
 				VisibilityFrameDesc frameDesc;
 				frameDesc.View = BuildGpuViewRecord(viewDesc);
 				frameDesc.IndexPages = pages;
+				frameDesc.ZeroUnusedCommands = NeedsZeroedCommands(path);
 
 				RenderGraph graph;
 				const auto sceneResources = scene.Import(graph);
@@ -246,10 +251,7 @@ namespace
 						commands.BindIndexBuffer(c.Get(indexPage), 0, Rhi::IndexType::Uint32);
 						for (std::uint32_t bin = 0; bin < bins.GetBinCount(); ++bin)
 						{
-							const auto& range = bins.GetRange(bin);
-							commands.DrawIndexedIndirectCount(c.Get(visible.Commands),
-								std::uint64_t(range.First) * sizeof(Rhi::DrawIndexedIndirectCommand), c.Get(visible.Counts),
-								std::uint64_t(bin) * sizeof(std::uint32_t), range.Capacity);
+							DrawVisibilityBin(commands, c.Get(visible.Commands), c.Get(visible.Counts), bins, bin, path);
 						}
 						commands.EndRendering();
 					});
@@ -344,6 +346,15 @@ namespace
 					{
 						SWIM_CHECK(seen == allowed); // Unclamped bins hold exactly the expected set.
 					}
+					if (NeedsZeroedCommands(path))
+					{
+						// The fallback issues every slot: the unwritten ones must draw nothing.
+						for (std::uint32_t slot = written; slot < range.Capacity; ++slot)
+						{
+							SWIM_CHECK_EQUAL(commands[range.First + slot].InstanceCount, 0u);
+							SWIM_CHECK_EQUAL(commands[range.First + slot].IndexCount, 0u);
+						}
+					}
 				}
 
 				// Pixels: every drawn object shows its id at its sample point; no other id appears.
@@ -403,6 +414,10 @@ namespace
 
 			// Frame 3: camera cut resets LOD history.
 			frame(41.1f, 39.6f, std::uint32_t(GpuViewFlags::ResetLodHistory));
+
+			// Frame 4: the no-IndirectCount fallback (zeroed commands, whole-bin
+			// DrawIndexedIndirect) must produce the same draws and pixels.
+			frame(41.1f, 39.6f, 0, VisibilityDrawPath::ZeroFilledIndirect);
 
 			scene.Collect();
 			scene.Drain();

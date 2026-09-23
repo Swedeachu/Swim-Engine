@@ -29,7 +29,14 @@ This section is the short authoritative status summary for the current repositor
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
 | Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 50 and 51 implemented (2026-09-23):** the depth-convention gate is closed and GPU visibility gained hierarchical-Z occlusion culling that never hides newly visible objects.
+- **Latest renderer checkpoint — no-IndirectCount fallback for GPU visibility (2026-09-23):** this closes the last open Phase 13 "required behavior" box that does not depend on item 56.
+  - `VisibilityDraws.h` adds `SelectVisibilityDrawPath` (the count path whenever the device has `IndirectCount`) and `DrawVisibilityBin`.
+  - On devices without `IndirectCount`, the fallback zeroes the phase's command buffer (`VisibilityFrameDesc::ZeroUnusedCommands`) and issues each bin's whole capacity with `DrawIndexedIndirect`; unwritten slots draw zero instances.
+  - **Validation:**
+    - The official Linux configuration passes **486 cases / 11,266 checks** (was 485 / 11,248).
+    - The existing native `GpuVisibilityCullsBinsAndDrawsIndirect` smoke gained a fourth frame drawn through the fallback with the same command, count, statistic and pixel checks, plus zero-instance checks for every unwritten slot. The native case count stays at 28.
+    - See [GPU visibility](GpuVisibility.md#drawing-the-bins-and-the-no-count-fallback) and [the record](validation/IndirectFallback-2026-09-23.md).
+- **Previous renderer checkpoint — items 50 and 51 implemented (2026-09-23):** the depth-convention gate is closed and GPU visibility gained hierarchical-Z occlusion culling that never hides newly visible objects.
   - **Depth convention (the item 50 gate):** reverse-Z is final for the modern renderer.
     - Near → 1, far/infinity → 0, `D32Float`, clear 0, `GreaterEqual` (`DepthConvention.h`).
     - `OrthographicReverseZRowMajor` and `PerspectiveReverseZRowMajor` (infinite far) build canonical projections.
@@ -48,7 +55,7 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `GpuOcclusionTwoPhaseHzbRevealsNewlyVisibleObjects` runs the whole early → draw → HZB → late → draw pipeline on a real device and compares it with the CPU reference fed with the GPU's own HZB.
     - See [GPU visibility](GpuVisibility.md#two-phase-occlusion-item-51) and [the items 50–51 record](validation/Items50-51-2026-09-23.md).
   - **Still needed:** desktop execution of both visibility smokes (28 native cases). Item **56** needs the engine runtime to draw from `GpuScene` + `GpuVisibility`; Phase 14 (items 58+) follows.
-- **Previous renderer checkpoint — items 49, 52, 53, 54, 55 and 57 implemented (2026-09-23):** GPU Scene rows are now culled, LOD-selected, binned and turned into indirect draws entirely on the GPU.
+- **Earlier renderer checkpoint — items 49, 52, 53, 54, 55 and 57 implemented (2026-09-23):** GPU Scene rows are now culled, LOD-selected, binned and turned into indirect draws entirely on the GPU.
   - **RHI:** `CommandList::DrawIndexedIndirect`/`DrawIndexedIndirectCount` with `DrawIndexedIndirectCommand` (20 bytes). The Vulkan backend validates usage, alignment, stride, ranges and `maxDrawIndirectCount`, and the device now enables `multiDrawIndirect` and `drawIndirectFirstInstance`.
   - **`Renderer/Visibility`:**
     - `GpuViewRecord`/`BuildGpuViewRecord` extract depth-[0,1] frustum planes (convention-agnostic, so reverse-Z works unchanged).
@@ -3693,7 +3700,7 @@ DrawIndexedIndirectCount / RHI equivalent
 - [x] bounded binning structures; *(`VisibilityBinLayout`: fixed capacity per material bin × index page; overflow counted as `Dropped`)*
 - [x] asynchronous diagnostic counters only; *(`VisibilityStats` via the readback arena, never waited on in-frame)*
 - [x] indirect-count fast path; *(`Rhi::CommandList::DrawIndexedIndirectCount`)*
-- [ ] fallback path only for capabilities that genuinely require it. *(`DrawIndexedIndirect` exists; a non-count fallback is not wired into `GpuVisibility` yet)*
+- [x] fallback path only for capabilities that genuinely require it. *(`SelectVisibilityDrawPath`: devices without `IndirectCount` zero the command buffer and draw whole bins with `DrawIndexedIndirect`; everything else uses `DrawIndexedIndirectCount`)*
 
 ### Relationship to current BVH work
 
