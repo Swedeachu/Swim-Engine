@@ -155,6 +155,7 @@ function(swim_configure_tests)
 		RenderResources
 		RenderGeometry
 		RenderScene
+		RenderVisibility
 		Commands
 	)
 
@@ -332,6 +333,10 @@ function(swim_configure_tests)
 			SWIM_RHI_BINDLESS_REFLECTION_PATH="${SwimRhiBindless_REFLECTION}"
 			SWIM_RHI_GPU_SCENE_PROBE_SPIRV_PATH="${SwimRhiGpuSceneProbe_SPIRV}"
 			SWIM_RHI_GPU_SCENE_PROBE_REFLECTION_PATH="${SwimRhiGpuSceneProbe_REFLECTION}"
+			SWIM_GPU_VISIBILITY_SPIRV_PATH="${SwimGpuVisibility_SPIRV}"
+			SWIM_GPU_VISIBILITY_REFLECTION_PATH="${SwimGpuVisibility_REFLECTION}"
+			SWIM_RHI_GPU_DRIVEN_DRAW_SPIRV_PATH="${SwimRhiGpuDrivenDraw_SPIRV}"
+			SWIM_RHI_GPU_DRIVEN_DRAW_REFLECTION_PATH="${SwimRhiGpuDrivenDraw_REFLECTION}"
 		)
 	endif()
 

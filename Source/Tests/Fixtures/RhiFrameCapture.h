@@ -163,6 +163,12 @@ namespace Swim::Testing
 		Swim::Rhi::ShaderProgramInterface Interface;
 	};
 
+	class MockComputePipeline final : public Swim::Rhi::ComputePipeline
+	{
+	public:
+		std::uintptr_t GetNativeHandle() const override { return 14; }
+	};
+
 	// A layout whose (merged) interface is set directly by the test.
 	class MockPipelineLayout final : public Swim::Rhi::PipelineLayout
 	{
@@ -203,8 +209,9 @@ namespace Swim::Testing
 			}
 			for (const auto& write : writes)
 			{
-				Elements[{ write.Binding, write.ArrayIndex }] =
-					write.TextureResource ? static_cast<const void*>(write.TextureResource) : static_cast<const void*>(write.SamplerResource);
+				Elements[{ write.Binding, write.ArrayIndex }] = write.TextureResource ? static_cast<const void*>(write.TextureResource)
+					: write.SamplerResource ? static_cast<const void*>(write.SamplerResource)
+											: static_cast<const void*>(write.BufferResource);
 				++ElementWrites;
 			}
 		}
@@ -258,6 +265,15 @@ namespace Swim::Testing
 		void BindIndexBuffer(Swim::Rhi::Buffer&, std::uint64_t, Swim::Rhi::IndexType) override {}
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override {}
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override {}
+		void DrawIndexedIndirect(Swim::Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t) override
+		{
+			Capture({ "DrawIndexedIndirect", &arguments, nullptr, offset, 0, drawCount });
+		}
+		void DrawIndexedIndirectCount(Swim::Rhi::Buffer& arguments, std::uint64_t offset, Swim::Rhi::Buffer& count, std::uint64_t countOffset,
+			std::uint32_t maxDrawCount, std::uint32_t) override
+		{
+			Capture({ "DrawIndexedIndirectCount", &arguments, &count, offset, countOffset, maxDrawCount });
+		}
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override {}
 		void ResetQueries(Swim::Rhi::QueryPool&, std::uint32_t, std::uint32_t) override {}
 		void WriteTimestamp(Swim::Rhi::QueryPool&, std::uint32_t, Swim::Rhi::TimestampStage) override {}

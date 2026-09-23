@@ -239,6 +239,18 @@ namespace Swim::Rhi
 		SwapchainColorMode ColorMode = SwapchainColorMode::Sdr;
 	};
 
+	// Tightly packed indexed-draw arguments as the GPU reads them (Vulkan/D3D12 layout).
+	struct DrawIndexedIndirectCommand
+	{
+		std::uint32_t IndexCount = 0;
+		std::uint32_t InstanceCount = 0;
+		std::uint32_t FirstIndex = 0;
+		std::int32_t VertexOffset = 0;
+		std::uint32_t FirstInstance = 0;
+	};
+
+	static_assert(sizeof(DrawIndexedIndirectCommand) == 20);
+
 	struct BufferCopyRegion
 	{
 		std::uint64_t SourceOffset = 0;
@@ -555,6 +567,19 @@ namespace Swim::Rhi
 			std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
 		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0,
 			std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
+		// GPU-generated indexed draws (same state requirements as DrawIndexed, with an index
+		// buffer and every vertex binding bound; argument contents are not validated).
+		// `arguments` needs Indirect usage and holds DrawIndexedIndirectCommand records from
+		// a four-byte aligned offset; stride is at least 20 and four-byte aligned. Arguments
+		// must be in IndirectArgument state. FirstInstance may be nonzero (for example a
+		// per-draw record index read through the instance id).
+		virtual void DrawIndexedIndirect(Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
+			std::uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
+		// As DrawIndexedIndirect, with the draw count read on the GPU from a uint32 at
+		// countOffset (four-byte aligned, Indirect usage, IndirectArgument state) and clamped
+		// to maxDrawCount. Requires GraphicsCapabilities::IndirectCount.
+		virtual void DrawIndexedIndirectCount(Buffer& arguments, std::uint64_t offset, Buffer& count, std::uint64_t countOffset,
+			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
 		// Workgroup counts, bounded per axis by Capabilities.Compute.MaxGroupCount.
 		// Zero counts are valid no-work dispatches but still require complete state.
 		// Requires a compute-capable queue, active compute pipeline and no rendering.

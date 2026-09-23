@@ -19,6 +19,16 @@ namespace Swim::RhiVulkan
 	namespace
 	{
 
+		VkPhysicalDeviceFeatures GetRequiredDeviceFeatures(const Rhi::ValidationChecks& checks)
+		{
+			auto features = GetValidationDeviceFeatures(checks);
+			// GPU-driven draws: many commands per indirect call, and per-draw record
+			// indices carried in FirstInstance.
+			features.multiDrawIndirect = VK_TRUE;
+			features.drawIndirectFirstInstance = VK_TRUE;
+			return features;
+		}
+
 		VkPhysicalDeviceVulkan11Features GetRequiredVulkan11Features(const Rhi::ValidationChecks& checks)
 		{
 			auto features = GetValidationVulkan11Features(checks);
@@ -135,7 +145,7 @@ namespace Swim::RhiVulkan
 		selector.require_present(false)
 			.set_minimum_version(1, 3)
 			.add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-			.set_required_features(GetValidationDeviceFeatures(instance->Diagnostics.Checks))
+			.set_required_features(GetRequiredDeviceFeatures(instance->Diagnostics.Checks))
 			.set_required_features_11(GetRequiredVulkan11Features(instance->Diagnostics.Checks))
 			.set_required_features_12(GetRequiredVulkan12Features(instance->Diagnostics.Checks))
 			.set_required_features_13(GetRequiredVulkan13Features())

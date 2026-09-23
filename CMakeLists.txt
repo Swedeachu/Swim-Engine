@@ -365,6 +365,18 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# The modern renderer's culling/draw-generation program (not yet loaded by the
+	# engine runtime; the visibility smoke and layout tests consume it).
+	swim_add_slang_program(SwimGpuVisibility
+		SOURCE Source/Shaders/Slang/GpuScene/GpuVisibility.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimRhiGpuDrivenDraw
+		SOURCE Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
@@ -383,6 +395,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiNestedGraphics_SPIRV}" "${SwimRhiNestedGraphics_REFLECTION}"
 			"${SwimRhiBindless_SPIRV}" "${SwimRhiBindless_REFLECTION}"
 			"${SwimRhiGpuSceneProbe_SPIRV}" "${SwimRhiGpuSceneProbe_REFLECTION}"
+			"${SwimGpuVisibility_SPIRV}" "${SwimGpuVisibility_REFLECTION}"
+			"${SwimRhiGpuDrivenDraw_SPIRV}" "${SwimRhiGpuDrivenDraw_REFLECTION}"
 		SOURCES Source/Shaders/Slang/RhiSmoke/NestedParameters.slang
 			Source/Shaders/Slang/RhiSmoke/NestedGraphics.slang
 			Source/Shaders/Slang/RhiSmoke/DepthSampling.slang
@@ -396,13 +410,17 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/RhiSmoke/Bindless.slang
 			Source/Shaders/Slang/RhiSmoke/GpuSceneProbe.slang
 			Source/Shaders/Slang/GpuScene/GpuSceneRecords.slang
+			Source/Shaders/Slang/GpuScene/GeometryRecords.slang
+			Source/Shaders/Slang/GpuScene/VisibilityRecords.slang
+			Source/Shaders/Slang/GpuScene/GpuVisibility.slang
+			Source/Shaders/Slang/RhiSmoke/GpuDrivenDraw.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
 
 # The backend-neutral modern renderer foundation: RenderGraph plus the GPU
 # resource registries (Resources/), paged GeometryHeap (Geometry/), the
-# persistent GPU Scene (GpuScene/) and the asset
+# persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -415,6 +433,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

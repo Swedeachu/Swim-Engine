@@ -100,3 +100,82 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "SlangRecordsMatchTheCppRecords")
 	SWIM_CHECK(Fields(*transforms) == transformLayout);
 }
 #endif
+
+#ifdef SWIM_GPU_VISIBILITY_REFLECTION_PATH
+#include "Engine/Systems/Renderer/Geometry/GpuMeshMetadata.h"
+#include "Engine/Systems/Renderer/Visibility/GpuDrawRecord.h"
+#include "Engine/Systems/Renderer/Visibility/GpuLodState.h"
+#include "Engine/Systems/Renderer/Visibility/GpuViewRecord.h"
+#include "Engine/Systems/Renderer/Visibility/GpuVisibilityDesc.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityBinRange.h"
+
+// The culling program's bindings, element strides and record fields must match
+// GpuVisibilityBindings and the C++ records GpuVisibility uploads and reads.
+SWIM_TEST("ShaderCompiler.GpuSceneLayout", "VisibilityProgramMatchesItsCppContract")
+{
+	using namespace Render;
+	using B = GpuVisibilityBindings;
+	const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_GPU_VISIBILITY_REFLECTION_PATH);
+	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
+
+	struct Expected
+	{
+		const char* Name;
+		std::uint32_t Binding;
+		std::uint32_t ElementSize;
+	};
+
+	const Expected expected[] = {
+		{ "Instances", B::Instances, sizeof(GpuInstanceRecord) },
+		{ "Transforms", B::Transforms, sizeof(GpuTransformRecord) },
+		{ "Meshes", B::Meshes, sizeof(GpuMeshMetadata) },
+		{ "Submeshes", B::Submeshes, sizeof(GpuSubmeshRecord) },
+		{ "Views", B::View, sizeof(GpuViewRecord) },
+		{ "MaterialBins", B::MaterialBins, 0 },
+		{ "BinRanges", B::BinRanges, sizeof(VisibilityBinRange) },
+		{ "IndexPages", B::IndexPages, 0 },
+		{ "LodStates", B::LodState, sizeof(GpuLodState) },
+		{ "Commands", B::Commands, sizeof(Rhi::DrawIndexedIndirectCommand) },
+		{ "DrawRecords", B::DrawRecords, sizeof(GpuDrawRecord) },
+		{ "Counts", B::Counts, 0 },
+		{ "Stats", B::Stats, 0 },
+	};
+	for (const auto& item : expected)
+	{
+		const auto* parameter = FindParameter(parsed.Reflection, item.Name);
+		SWIM_REQUIRE_MESSAGE(parameter != nullptr, item.Name);
+		SWIM_CHECK_EQUAL(parameter->Index, item.Binding);
+		SWIM_CHECK_EQUAL(parameter->Space, 0u);
+		SWIM_CHECK_EQUAL(parameter->ElementSize, item.ElementSize); // Zero: scalar elements.
+	}
+
+	const auto view = Fields(*FindParameter(parsed.Reflection, "Views"));
+	SWIM_CHECK(view.at("ViewProjection") == std::make_pair(std::uint32_t(offsetof(GpuViewRecord, ViewProjection)), 64u));
+	SWIM_CHECK(view.at("FrustumPlanes") == std::make_pair(std::uint32_t(offsetof(GpuViewRecord, FrustumPlanes)), 96u));
+	SWIM_CHECK(view.at("CameraPosition").first == offsetof(GpuViewRecord, CameraPosition));
+	SWIM_CHECK(view.at("LodScale").first == offsetof(GpuViewRecord, LodScale));
+	SWIM_CHECK(view.at("LodPixelError").first == offsetof(GpuViewRecord, LodPixelError));
+	SWIM_CHECK(view.at("LodHysteresis").first == offsetof(GpuViewRecord, LodHysteresis));
+	SWIM_CHECK(view.at("Flags").first == offsetof(GpuViewRecord, Flags));
+
+	const auto mesh = Fields(*FindParameter(parsed.Reflection, "Meshes"));
+	SWIM_CHECK(mesh.at("IndexPage").first == offsetof(GpuMeshMetadata, IndexPage));
+	SWIM_CHECK(mesh.at("LodCount").first == offsetof(GpuMeshMetadata, LodCount));
+	SWIM_CHECK(mesh.at("Generation").first == offsetof(GpuMeshMetadata, Generation));
+	SWIM_CHECK(mesh.at("FirstSubmesh").first == offsetof(GpuMeshMetadata, FirstSubmesh));
+	SWIM_CHECK(mesh.at("SubmeshCount").first == offsetof(GpuMeshMetadata, SubmeshCount));
+	SWIM_CHECK(mesh.at("Lods") == std::make_pair(std::uint32_t(offsetof(GpuMeshMetadata, Lods)), std::uint32_t(sizeof(GpuMeshLod) * 8)));
+	const auto submesh = Fields(*FindParameter(parsed.Reflection, "Submeshes"));
+	SWIM_CHECK(submesh.at("VertexOffset").first == offsetof(GpuSubmeshRecord, VertexOffset));
+	SWIM_CHECK(submesh.at("MaterialSlot").first == offsetof(GpuSubmeshRecord, MaterialSlot));
+	const auto command = Fields(*FindParameter(parsed.Reflection, "Commands"));
+	SWIM_CHECK(command.at("VertexOffset").first == offsetof(Rhi::DrawIndexedIndirectCommand, VertexOffset));
+	SWIM_CHECK(command.at("FirstInstance").first == offsetof(Rhi::DrawIndexedIndirectCommand, FirstInstance));
+
+	const auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
+	SWIM_REQUIRE_MESSAGE(converted, converted.Error);
+	SWIM_CHECK((converted.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ B::ThreadGroupSize, 1, 1 }));
+	SWIM_REQUIRE_EQUAL(converted.Interface.PushConstants.size(), 1u);
+	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, 16u);
+}
+#endif

@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3783,6 +3783,20 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderResidency", "AssetResidencyServiceTests.cpp", failures)
     check_suite_is_compiled("RenderScene", "GpuSceneTests.cpp", failures)
     check_suite_is_compiled("Scene/Ecs", "RenderExtractionTests.cpp", failures)
+    check_suite_is_compiled("RenderVisibility", "VisibilityReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderVisibility", "GpuVisibilityTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanIndirectDrawTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanGpuVisibilitySmokeTests.cpp", failures)
+    # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
+    # Scene; the layers below never include it, and it never reaches residency.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Visibility/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on GPU visibility: {path.relative_to(ROOT)}", failures)
+    if not (renderer / "Visibility/VisibilityReference.cpp").is_file():
+        fail("GPU visibility CPU reference (Visibility/VisibilityReference.cpp) is missing", failures)
     # The GPU Scene sits above Resources and below residency/extraction: the lower
     # layers never include it, and it never reaches assets, residency or EnTT.
     for module in ("RenderGraph", "Resources", "Geometry"):
@@ -3792,7 +3806,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
@@ -3804,6 +3818,8 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
         fail("Residency sources must stay a separate, dependency-gated source list", failures)
     if "Renderer/GpuScene/*.cpp" not in cmake_text:
         fail("GpuScene sources must compile with the backend-neutral renderer source list", failures)
+    if "Renderer/Visibility/*.cpp" not in cmake_text:
+        fail("Visibility sources must compile with the backend-neutral renderer source list", failures)
     # EnTT -> GPU Scene extraction stays testable: its core files use only EnTT,
     # the TransformSystem and the GPU Scene; the Transform/Scene runtime adapter
     # lives in RenderExtraction/Runtime and is compiled by SwimEngine alone.

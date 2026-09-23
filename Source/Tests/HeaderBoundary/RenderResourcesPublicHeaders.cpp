@@ -8,6 +8,9 @@
 #include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
 #include "Engine/Systems/Renderer/Residency/MeshGeometryPayload.h"
 #include "Engine/Systems/Renderer/Residency/TextureResidency.h"
+#include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
+#include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
+#include "Engine/Systems/Renderer/Visibility/VisibilityReference.h"
 #include <memory>
 #include <type_traits>
 
@@ -35,3 +38,5 @@ static_assert(Swim::Render::BindlessResourceTable::FallbackIndex == 0);
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuScene>);
 static_assert(sizeof(Swim::Render::GpuInstanceRecord) == 64 && sizeof(Swim::Render::GpuTransformRecord) == 96);
 static_assert(sizeof(Swim::Render::RenderAffine) == 48);
+static_assert(!std::is_copy_constructible_v<Swim::Render::GpuVisibility>);
+static_assert(sizeof(Swim::Render::GpuViewRecord) == 192);

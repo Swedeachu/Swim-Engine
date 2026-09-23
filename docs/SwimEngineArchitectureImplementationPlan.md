@@ -12,7 +12,7 @@
 
 ---
 
-## Current implementation snapshot — 2026-09-22
+## Current implementation snapshot — 2026-09-23
 
 This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
 
@@ -27,9 +27,23 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency and the persistent `GpuScene` with dirty-only record uploads (items 42–46, 48) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet. GPU-driven visibility/draw generation (Phase 13) is the next consumer. |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48, 49, 52–55, 57) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet. HZB/occlusion (items 50/51) waits for the depth-convention gate. |
 
-- **Latest renderer checkpoint — items 46, 47 and 48 implemented (2026-09-22):** the renderer now has a persistent render-facing object database that is not EnTT.
+- **Latest renderer checkpoint — items 49, 52, 53, 54, 55 and 57 implemented (2026-09-23):** GPU Scene rows are now culled, LOD-selected, binned and turned into indirect draws entirely on the GPU.
+  - **RHI:** `CommandList::DrawIndexedIndirect`/`DrawIndexedIndirectCount` with `DrawIndexedIndirectCommand` (20 bytes). The Vulkan backend validates usage, alignment, stride, ranges and `maxDrawIndirectCount`, and the device now enables `multiDrawIndirect` and `drawIndirectFirstInstance`.
+  - **`Renderer/Visibility`:**
+    - `GpuViewRecord`/`BuildGpuViewRecord` extract depth-[0,1] frustum planes (convention-agnostic, so reverse-Z works unchanged).
+    - `GpuVisibility` records one clear pass, a compute pass (`GpuVisibility.slang`) and an optional asynchronous statistics readback per view. The compute pass does drawability + sphere frustum culling (item 49), projected-error LOD selection with per-row hysteresis history reset by generation or `ResetLodHistory` (item 52), atomic compaction into bounded (material bin × index page) bins (items 53/54), and one `DrawIndexedIndirectCommand` + `GpuDrawRecord` per submesh with per-bin counts for `DrawIndexedIndirectCount` (item 55).
+    - Persistent state (material-bin table, LOD history) uploads only when it changes.
+    - `VisibilityStats` (item 57) accounts for every row and counts per-LOD usage and dropped draws.
+  - **CPU definition:** `RunVisibilityReference` over the same rules (`VisibilityMath.h`); a 100k-row benchmark keeps the statistics consistent.
+  - **Validation:**
+    - The official Linux configuration passes **476 cases / 7,445 checks** (was 465 / 7,236).
+    - With EnTT supplied locally, **499 cases** pass. Both are clean under ASan/LSan/UBSan.
+    - The new native smoke `GpuVisibilityCullsBinsAndDrawsIndirect` draws a 64×64 grid through every bin with `DrawIndexedIndirectCount` over three frames (camera moves, edits, a camera cut) and compares commands, records, counts, statistics and pixels with the CPU reference.
+    - See [GPU visibility](GpuVisibility.md) and [the items 49–57 record](validation/Items49-57-2026-09-23.md).
+  - **Still needed:** desktop execution of the new smoke (27 native cases). Items **50/51** (HZB, occlusion) wait for the reverse-Z/depth-convention decision, and item **56** needs the engine runtime to draw from `GpuScene` + `GpuVisibility`.
+- **Previous renderer checkpoint — items 46, 47 and 48 implemented (2026-09-22):** the renderer now has a persistent render-facing object database that is not EnTT.
   - **`Render::GpuScene` (item 46):**
     - Stable `RenderObjectHandle` rows live in two device-local std430 buffers: 64-byte `GpuInstanceRecord` (local bounds, mesh index + generation, material set, object id, flags, skin, LOD bias, generation) and 96-byte `GpuTransformRecord` (current and previous world 3x4).
     - `GpuRecordBuffer<T>` provides CPU mirrors with dirty-row tracking. Each import uploads only changed rows, batched into contiguous runs, as one staged graph pass per buffer.
@@ -44,7 +58,7 @@ This section is the short authoritative status summary for the current repositor
     - The official Linux configuration passes **465 cases / 7,236 checks** (was 455 / 7,086).
     - With EnTT supplied locally, **488 cases** pass, including the Scene/ECS suites and the five extraction cases. Both are clean under ASan/LSan/UBSan.
     - See [GPU Scene](GpuScene.md) and [the items 46–48 record](validation/Items46-48-2026-09-22.md).
-  - **Still needed:** desktop execution of the new smoke (26 native cases), and a Windows build of the Scene/ECS extraction suite in the full configuration. Phase 13 (item **49**, GPU frustum culling over `GpuScene`) is next.
+  - **Still needed:** desktop execution of the new smoke (26 native cases), and a Windows build of the Scene/ECS extraction suite in the full configuration. *(The developer then passed the default suite and all 26 native smokes under every profile.)* Phase 13 followed.
 - **Previous renderer checkpoint — item 45 implemented (2026-09-22):** one persistent descriptor table now holds every sampled texture and sampler a shader may index. The RHI gained the bindless contract it previously rejected: Slang's unbounded `Texture2D T[]`/`SamplerState S[]` arrays reflect as runtime-sized (Count 0) bindings; `PipelineLayoutDesc::DescriptorSpaces` supplies explicit, shareable spaces that size them and may be visible to more stages than the program; `DescriptorBindingDesc::UpdateAfterBind` (with `PartiallyBound`) maps to Vulkan partially-bound, update-after-bind and update-unused-while-pending bindings in update-after-bind pools, checked against the update-after-bind limits; such elements stay writable after binding and while other elements are in flight; and a table now binds to any pipeline whose layout defines its space identically. The last feature, `descriptorBindingUpdateUnusedWhilePending`, is enabled optionally and reported as `GraphicsCapabilities::BindlessDescriptors`. On top of that, `Render::BindlessResourceTable` keeps separate texture and sampler index spaces on `GpuResourceRegistry`, keeps permanent fallbacks at element 0, writes new elements immediately, and rewrites released elements to the fallback only after their timeline point before FIFO reuse. `GpuSamplerCache` deduplicates samplers by description and counts references. `AssetResidencyService` registers a texture explicitly when it becomes Resident (`GetBindlessIndex`) and retires the element with the texture. The Linux configuration passes **455 cases / 7,086 checks** (was 443 / 6,867) and is clean under ASan/LSan/UBSan; see [GPU residency](GpuResidency.md#bindless-textures-and-samplers-item-45) and [the item 45 record](validation/Item45-2026-09-22.md). The new native smoke `BindlessTableTimelineSafeReuse` needs desktop execution (25 native cases). Items **46–48** (GPU Scene, extraction, stress) followed.
 - **Previous renderer checkpoint — item 44 implemented (2026-09-22):** compiled `MeshAsset`/`TextureAsset` identities now reach GPU residency through explicit asynchronous state: `AssetResidencyService` runs `Queued → Reading → Decoding → WaitingForGpuUpload → Uploading → Resident` (or `Failed` with an `AssetError`) with bounded `AsyncIoService` reads, `DecodeSasset` hash validation/decoding on `JobSystem` workers, owner-thread `PublishSasset`, request-ordered staging under a per-update byte budget, graph-recorded uploads committed against the executor's completion value, and CPU assets released once their GPU copy is staged. `MeshGeometryPayload` interleaves vertex streams, derives layout ids and maps primitives/LODs/meshlets; `GeometryHeap` gained a `GpuSubmeshRecord` row buffer (draw ranges with material slots) and LODs became submesh ranges; `TextureResidency` uploads uncompressed native mip chains through the graph with timeline-retired RHI objects (block-compressed/KTX2 variants are rejected explicitly for now). A real pre-existing `AsyncIoService` leak was fixed along the way: each read job captured its own request state while the request held the job handle, so every request and its file bytes leaked; jobs now hold a weak reference and dispatched completion callbacks are dropped. The Linux configuration, now built **with** the asset compiler, passes **443 cases / 6,867 checks**, and the whole suite is clean under AddressSanitizer/LeakSanitizer/UBSan; see [GPU residency](GpuResidency.md) and [the item 44 record](validation/Item44-2026-09-22.md). The new native smoke `TextureResidencyMipChainUploadAndRetirement` needs desktop execution. Item **45** (bindless texture/sampler table) followed.
 - **Windows desktop validation of items 41–43 (2026-09-22):** the developer's soft MSVC Debug build passed the default suite (461 cases / 10,592 checks) and all 23 native smokes under `core`, `sync`, `gpu` and `all` on the RTX 4070 Laptop GPU; see [the items 41–43 record](validation/Items41-43-2026-09-22.md).
@@ -72,6 +86,7 @@ Companion documentation for the current generated solution and asset pipeline:
 - `docs/SassetCookPipeline.md` — the source -> import -> cook -> `.sasset` -> runtime path, including development auto-cook versus release/shipping usage.
 - `docs/RenderGraph.md` — graph declaration/compilation/execution contracts, including executor-staged transfers.
 - `docs/GpuResidency.md` — generational GPU registries, the paged GeometryHeap, TextureResidency and the asynchronous asset residency service.
+- `docs/GpuVisibility.md` — GPU-driven culling, LOD, binning and indirect draw generation over the GPU Scene.
 
 ---
 
@@ -160,7 +175,7 @@ A replacement is not complete merely because a new API or folder exists. Its cal
 | Scene identity | `Systems/Scene/Identity` | IDs/maps remain runtime foundations. Old JSON serializer/storage/sync and external editor command fragments are archived. Future persistence is an explicit optional service, not automatic per-frame JSON work. |
 | Jobs/memory | `Engine/Jobs`, `Engine/Memory` | Modern shared services are active. `ParallelUtils` still has renderer callers; retain only as a documented adapter until those callers migrate. |
 | Asset identity/import/cook | `Engine/Assets`, `Tools/AssetCompiler` | Modern asset authority is active. `MeshPool`, `TexturePool`, `MaterialPool`, `FontPool`, `LegacyRenderBinding`, and renderer-facing `Texture2D`/mesh data still serve the current renderer; retire each after its matching replacement and consumers migrate: geometry/texture residency (items 41–47), materials (58–59), and text/font services (79). |
-| GPU residency | `Systems/Renderer/Resources`, `Systems/Renderer/Geometry`, `Systems/Renderer/GpuScene`, `Systems/Renderer/Residency` | New backend-neutral layers (items 42–46, including `BindlessResourceTable`/`GpuSamplerCache` and the persistent `GpuScene`); no legacy consumer yet. `Systems/Scene/RenderExtraction` + `Components/MeshRenderer.h` (item 47) are the EnTT producer; the legacy `Material`/`LegacyRenderBinding` component and `SceneBVH` renderable slots stay until the modern renderer draws the GPU Scene. The legacy renderer's own bindless path (`VulkanDescriptorManager`) stays until the modern renderer binds `BindlessResourceTable`. `MeshPool`/`TexturePool`/`VulkanIndexDraw` paths stay active until the modern renderer draws from `GeometryHeap`/`TextureResidency` and the engine constructs `AssetResidencyService`; only then can those pools be archived. |
+| GPU residency | `Systems/Renderer/Resources`, `Systems/Renderer/Geometry`, `Systems/Renderer/GpuScene`, `Systems/Renderer/Visibility`, `Systems/Renderer/Residency` | New backend-neutral layers (items 42–46, including `BindlessResourceTable`/`GpuSamplerCache` and the persistent `GpuScene`, plus GPU-driven visibility, items 49/52–55/57); no legacy consumer yet. `SceneBVH` culling and the CPU visible list in `VulkanIndexDraw` stay until the engine draws through `GpuVisibility` (item 56). `Systems/Scene/RenderExtraction` + `Components/MeshRenderer.h` (item 47) are the EnTT producer; the legacy `Material`/`LegacyRenderBinding` component and `SceneBVH` renderable slots stay until the modern renderer draws the GPU Scene. The legacy renderer's own bindless path (`VulkanDescriptorManager`) stays until the modern renderer binds `BindlessResourceTable`. `MeshPool`/`TexturePool`/`VulkanIndexDraw` paths stay active until the modern renderer draws from `GeometryHeap`/`TextureResidency` and the engine constructs `AssetResidencyService`; only then can those pools be archived. |
 | Modern graphics backend | `Systems/Renderer/RHI/Backends/Vulkan` | RHI clear/transfer, triangle/textured pipelines and explicit vertex/instance input are implemented. Item 39 desktop validation passes on Windows hardware and Linux software Vulkan (see the validation record). It is not yet the game renderer. |
 | Current game rendering | `Systems/Renderer/Vulkan`, `Systems/Renderer/OpenGL`, current `Renderer` facade | **Active legacy**, not retired. First reach the RHI/render-graph/residency/GPU-scene replacement gates, move game presentation onto them, then archive the replaced Vulkan path and facade pieces. OpenGL may remain an explicitly built compatibility renderer under `Legacy/OpenGL` only while it is intentionally supported; archive it when support and consumers are removed. `Legacy/` therefore means active compatibility; `Deprecated/` means never used. |
 | Physics | Generic physics API plus selectable PhysX/Jolt backends | Both are current implementations of the same contract, not an old/new duplicate pair. Preserve both; retire only obsolete bypasses or backend-leaking adapters. |
@@ -3649,17 +3664,17 @@ DrawIndexedIndirectCount / RHI equivalent
 
 ### Required behavior
 
-- [ ] no CPU-visible-list round trip for frame correctness;
+- [x] no CPU-visible-list round trip for frame correctness; *(`GpuVisibility` → `DrawIndexedIndirectCount`; proven by the native smoke. The engine runtime still uses the legacy path until item 56.)*
 - [ ] HZB built each appropriate frame;
-- [ ] conservative behavior for newly visible/teleported objects;
-- [ ] camera cut invalidates occlusion history;
-- [ ] GPU compaction;
-- [ ] GPU draw counts;
-- [ ] LOD hysteresis;
-- [ ] bounded binning structures;
-- [ ] asynchronous diagnostic counters only;
-- [ ] indirect-count fast path;
-- [ ] fallback path only for capabilities that genuinely require it.
+- [ ] conservative behavior for newly visible/teleported objects; *(nothing is occlusion-culled yet; reused rows and `ResetLodHistory` restart LOD history)*
+- [ ] camera cut invalidates occlusion history; *(`GpuViewFlags::ResetLodHistory` exists and resets LOD history; occlusion history comes with item 51)*
+- [x] GPU compaction; *(per-bin atomic slots)*
+- [x] GPU draw counts; *(one count per bin)*
+- [x] LOD hysteresis; *(per-row `GpuLodState`, `threshold × (1 ± h)`)*
+- [x] bounded binning structures; *(`VisibilityBinLayout`: fixed capacity per material bin × index page; overflow counted as `Dropped`)*
+- [x] asynchronous diagnostic counters only; *(`VisibilityStats` via the readback arena, never waited on in-frame)*
+- [x] indirect-count fast path; *(`Rhi::CommandList::DrawIndexedIndirectCount`)*
+- [ ] fallback path only for capabilities that genuinely require it. *(`DrawIndexedIndirect` exists; a non-count fallback is not wired into `GpuVisibility` yet)*
 
 ### Relationship to current BVH work
 
@@ -3680,6 +3695,21 @@ But the final high-level ownership belongs to GPU Scene/Visibility modules, not 
 Generate meshlets offline now so the data is available.
 
 Use indexed-indirect rendering as the excellent baseline. Mesh/task shader paths remain optional capability-based accelerators and should not block the renderer.
+
+### Items 49, 52–55 and 57 GPU visibility checkpoint — 2026-09-23
+
+Full contract: [GPU visibility](GpuVisibility.md).
+
+- [x] RHI `DrawIndexedIndirect`/`DrawIndexedIndirectCount` + `DrawIndexedIndirectCommand`; Vulkan validation (usage, alignment, stride, range, `maxDrawIndirectCount`, bound index buffer); `multiDrawIndirect` and `drawIndirectFirstInstance` enabled.
+- [x] `GpuViewRecord`/`RenderViewDesc`/`BuildGpuViewRecord`: row-major view-projection, depth-[0,1] frustum planes, LOD parameters, view flags.
+- [x] `VisibilityMath` + `RunVisibilityReference`: the CPU definition (drawability, sphere frustum test, projected-error LOD, hysteresis, material/page binning, command generation, statistics).
+- [x] `GpuVisibility.slang` + `GeometryRecords.slang`/`VisibilityRecords.slang`; `ShaderCompiler.GpuSceneLayout.VisibilityProgramMatchesItsCppContract` checks the layouts.
+- [x] `GpuVisibility`: persistent material-bin table and LOD history, clear/cull/readback passes, bounded bins, transient indirect command/count buffers.
+- [x] Item 57: `VisibilityStats` asynchronous readback; 100k-row reference benchmark.
+- [x] Native smoke `GpuVisibilityCullsBinsAndDrawsIndirect` (vertex pulling through `GpuDrivenDraw.slang`) compiled; architecture verifier rules for `Renderer/Visibility`.
+- [ ] Execute the native smoke on Windows and Linux desktops.
+- [ ] Items 50/51 (HZB, occlusion with history invalidation) after the depth-convention gate.
+- [ ] Item 56: construct `GpuScene` + `GpuVisibility` in the engine runtime and retire the CPU visible list.
 
 ### Phase 13 exit criteria
 
@@ -4350,7 +4380,7 @@ Run common RHI tests against each modern backend as backends arrive:
 - imported/exported resources;
 - staged upload/readback suballocation, growth, failure recovery and partial preserving copies (`RenderGraph.Transfers`).
 
-GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured.
+GPU residency layers have their own groups: `RenderScene` (`Render.GpuScene`, `Render.GpuSceneStress`), `RenderResources` (`Render.GpuResourceRegistry`, `Render.Bindless`, `Render.SamplerCache`), `RenderGeometry` (`Render.GeometryRangeAllocator`, `Render.GeometryHeap`) and `RenderResidency` (`Render.MeshGeometryPayload`, `Render.TextureResidency`, `Render.AssetResidency`, compiled with the IO/Platform foundation). Cases that cook real `.sasset` objects live in the `AssetCompiler` group. Vulkan bindless layout/table capture cases are `RHI.Vulkan.Bindless` in the `RHIVulkan` group. EnTT extraction (`Scene.RenderExtraction`) is in `Scene/Ecs`, built wherever EnTT is configured. GPU visibility has `RenderVisibility` (`Render.Visibility`, `Render.GpuVisibility`); indirect-draw capture cases are `RHI.Vulkan.IndirectDraw` in `RHIVulkan`.
 
 ### 32.8 GPU Scene/visibility
 
@@ -4619,15 +4649,15 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.5 GPU-driven renderer
 
-49. [ ] GPU frustum culling.
+49. [x] GPU frustum culling. *(2026-09-23: `GpuVisibility` sphere/plane culling over `GpuScene`; [GPU visibility](GpuVisibility.md). Native smoke awaits desktop execution.)*
 50. [ ] depth/HZB build using final reverse-Z/depth convention.
 51. [ ] occlusion culling with history invalidation.
-52. [ ] LOD selection/hysteresis.
-53. [ ] visible compaction.
-54. [ ] material/pass binning.
-55. [ ] indirect command/count generation.
+52. [x] LOD selection/hysteresis. *(projected mesh-LOD error, per-row history, reset on generation change or `ResetLodHistory`)*
+53. [x] visible compaction. *(atomic per-bin slots)*
+54. [x] material/pass binning. *(material bins × index-page slots with bounded capacity; per-pass bins arrive with shadow/depth views)*
+55. [x] indirect command/count generation. *(`DrawIndexedIndirectCommand` + `GpuDrawRecord` per submesh, per-bin counts for `DrawIndexedIndirectCount`)*
 56. [ ] remove CPU-visible-list dependency from normal world rendering.
-57. [ ] add visibility diagnostics/benchmarks.
+57. [x] add visibility diagnostics/benchmarks. *(`VisibilityStats` async readback; `Render.Visibility.HundredThousandObjectBenchmarkKeepsStatisticsConsistent`)*
 
 ### 35.6 Shading and lighting
 

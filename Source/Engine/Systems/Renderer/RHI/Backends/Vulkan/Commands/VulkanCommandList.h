@@ -52,6 +52,10 @@ namespace Swim::RhiVulkan
 		void BindIndexBuffer(Rhi::Buffer&, std::uint64_t, Rhi::IndexType) override;
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override;
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override;
+		void DrawIndexedIndirect(Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
+			std::uint32_t stride = sizeof(Rhi::DrawIndexedIndirectCommand)) override;
+		void DrawIndexedIndirectCount(Rhi::Buffer& arguments, std::uint64_t offset, Rhi::Buffer& count, std::uint64_t countOffset,
+			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(Rhi::DrawIndexedIndirectCommand)) override;
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
 		void ResetQueries(Rhi::QueryPool&, std::uint32_t first, std::uint32_t count) override;
 		void WriteTimestamp(Rhi::QueryPool&, std::uint32_t, Rhi::TimestampStage stage = Rhi::TimestampStage::End) override;
@@ -100,6 +104,7 @@ namespace Swim::RhiVulkan
 		bool viewportSet = false;
 		bool scissorSet = false;
 		void RequireDraw() const;
+		void RequireIndirectDraw(const Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride) const;
 		void RequireDescriptorTables() const;
 		void RequirePushConstants() const;
 		std::vector<VkPushConstantRange> pushConstantRanges;
