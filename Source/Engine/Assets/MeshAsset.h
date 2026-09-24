@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace Swim::Assets
@@ -78,6 +79,20 @@ namespace Swim::Assets
 		std::uint32_t TriangleCount = 0;
 	};
 
+	// One blend shape. Each delta array holds three floats per mesh vertex (over
+	// the whole vertex payload, in stream order) or is empty when the target does
+	// not displace that attribute. Tangent deltas move xyz only.
+	struct MeshMorphTarget
+	{
+		std::string Name;
+		std::vector<float> PositionDeltas;
+		std::vector<float> NormalDeltas;
+		std::vector<float> TangentDeltas;
+	};
+
+	// Skinned meshes carry a second vertex stream with Joints0 (UInt16x4, indices
+	// into the model's SkeletonAsset) and Weights0 (Float32x4, normalized, sorted
+	// by decreasing weight). Stream 0 stays the static layout.
 	struct MeshAsset
 	{
 		std::vector<VertexStreamDesc> VertexStreams;
@@ -87,6 +102,8 @@ namespace Swim::Assets
 		std::vector<MeshLod> Lods;
 		std::vector<MeshletDesc> Meshlets;
 		AssetBounds Bounds{};
+		std::vector<MeshMorphTarget> MorphTargets;
+		std::vector<float> DefaultMorphWeights; // One per morph target.
 
 		// Runtime CPU payload only. These bytes are deliberately backend-neutral
 		// and upload-friendly; GPU buffers/heap offsets belong to renderer residency.
@@ -96,4 +113,4 @@ namespace Swim::Assets
 		std::vector<std::byte> MeshletTriangleBytes;
 	};
 
-}
+} // namespace Swim::Assets

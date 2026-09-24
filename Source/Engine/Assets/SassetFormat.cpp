@@ -2,13 +2,16 @@
 
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Assets/SassetDecodedAsset.h"
+#include "Engine/Assets/AnimationClipAsset.h"
 #include "Engine/Assets/MaterialAsset.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/ModelAsset.h"
+#include "Engine/Assets/SkeletonAsset.h"
 #include "Engine/Assets/TextureAsset.h"
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -21,11 +24,8 @@ namespace Swim::Assets
 {
 	namespace
 	{
-		constexpr std::array<std::byte, 8> SassetMagic
-		{
-			std::byte{ 'S' }, std::byte{ 'A' }, std::byte{ 'S' }, std::byte{ 'S' },
-			std::byte{ 'E' }, std::byte{ 'T' }, std::byte{ 0x0D }, std::byte{ 0x0A }
-		};
+		constexpr std::array<std::byte, 8> SassetMagic{ std::byte{ 'S' }, std::byte{ 'A' }, std::byte{ 'S' }, std::byte{ 'S' },
+			std::byte{ 'E' }, std::byte{ 'T' }, std::byte{ 0x0D }, std::byte{ 0x0A } };
 		constexpr std::size_t HeaderSize = SassetHeaderSize;
 		constexpr std::size_t ChunkEntrySize = SassetChunkEntrySize;
 		constexpr std::size_t ChunkHashOffset = 40;
@@ -58,25 +58,18 @@ namespace Swim::Assets
 
 		std::uint16_t ReadU16(std::span<const std::byte> bytes, std::size_t offset)
 		{
-			return
-				static_cast<std::uint16_t>(bytes[offset + 0]) |
-				(static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
+			return static_cast<std::uint16_t>(bytes[offset + 0]) | (static_cast<std::uint16_t>(bytes[offset + 1]) << 8);
 		}
 
 		std::uint32_t ReadU32(std::span<const std::byte> bytes, std::size_t offset)
 		{
-			return
-				static_cast<std::uint32_t>(bytes[offset + 0]) |
-				(static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
-				(static_cast<std::uint32_t>(bytes[offset + 2]) << 16) |
-				(static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+			return static_cast<std::uint32_t>(bytes[offset + 0]) | (static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
+				(static_cast<std::uint32_t>(bytes[offset + 2]) << 16) | (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
 		}
 
 		std::uint64_t ReadU64(std::span<const std::byte> bytes, std::size_t offset)
 		{
-			return
-				static_cast<std::uint64_t>(ReadU32(bytes, offset)) |
-				(static_cast<std::uint64_t>(ReadU32(bytes, offset + 4)) << 32);
+			return static_cast<std::uint64_t>(ReadU32(bytes, offset)) | (static_cast<std::uint64_t>(ReadU32(bytes, offset + 4)) << 32);
 		}
 
 		ContentHash ReadHash(std::span<const std::byte> bytes, std::size_t offset)
@@ -99,6 +92,8 @@ namespace Swim::Assets
 			case SassetAssetType::MaterialTemplate:
 			case SassetAssetType::MaterialInstance:
 			case SassetAssetType::Model:
+			case SassetAssetType::Skeleton:
+			case SassetAssetType::AnimationClip:
 				return true;
 			default:
 				return false;
@@ -107,13 +102,11 @@ namespace Swim::Assets
 
 		class BinaryReader
 		{
-		public:
-			explicit BinaryReader(std::span<const std::byte> bytes)
-				: bytes(bytes)
-			{
-			}
+		  public:
+			explicit BinaryReader(std::span<const std::byte> bytes) : bytes(bytes) {}
 
 			bool IsValid() const { return valid; }
+
 			bool IsAtEnd() const { return valid && offset == bytes.size(); }
 
 			std::uint8_t U8()
@@ -147,10 +140,7 @@ namespace Swim::Assets
 				return value;
 			}
 
-			std::int32_t I32()
-			{
-				return static_cast<std::int32_t>(U32());
-			}
+			std::int32_t I32() { return static_cast<std::int32_t>(U32()); }
 
 			std::uint64_t U64()
 			{
@@ -163,10 +153,7 @@ namespace Swim::Assets
 				return value;
 			}
 
-			float F32()
-			{
-				return std::bit_cast<float>(U32());
-			}
+			float F32() { return std::bit_cast<float>(U32()); }
 
 			std::string String()
 			{
@@ -217,7 +204,7 @@ namespace Swim::Assets
 				return true;
 			}
 
-		private:
+		  private:
 			bool Require(std::size_t count)
 			{
 				if (!valid || offset > bytes.size() || count > bytes.size() - offset)
@@ -263,8 +250,31 @@ namespace Swim::Assets
 			return reader.IsValid();
 		}
 
-		template<typename T>
-		AssetHandle<T> DeclareReference(AssetSystem& assets, AssetId id)
+		bool ReadFloats(BinaryReader& reader, std::vector<float>& values)
+		{
+			std::uint32_t count = 0;
+			if (!reader.Count(count))
+			{
+				return false;
+			}
+			values.resize(count);
+			for (float& value : values)
+			{
+				value = reader.F32();
+			}
+			return reader.IsValid();
+		}
+
+		bool ReadMatrix(BinaryReader& reader, std::array<float, 16>& matrix)
+		{
+			for (float& value : matrix)
+			{
+				value = reader.F32();
+			}
+			return reader.IsValid();
+		}
+
+		template <typename T> AssetHandle<T> DeclareReference(AssetSystem& assets, AssetId id)
 		{
 			if (!id.IsValid())
 			{
@@ -275,7 +285,8 @@ namespace Swim::Assets
 
 		bool ReadMesh(BinaryReader& reader, MeshAsset& asset)
 		{
-			if (reader.U32() != SassetPayloadVersion)
+			const std::uint32_t version = reader.U32();
+			if (version != SassetPayloadVersion && version != SassetMeshPayloadVersion)
 			{
 				return false;
 			}
@@ -354,6 +365,145 @@ namespace Swim::Assets
 			asset.IndexBytes = reader.ByteVector();
 			asset.MeshletVertexBytes = reader.ByteVector();
 			asset.MeshletTriangleBytes = reader.ByteVector();
+			if (version == SassetMeshPayloadVersion)
+			{
+				if (!reader.Count(count))
+				{
+					return false;
+				}
+				asset.MorphTargets.resize(count);
+				for (MeshMorphTarget& target : asset.MorphTargets)
+				{
+					target.Name = reader.String();
+					if (!ReadFloats(reader, target.PositionDeltas) || !ReadFloats(reader, target.NormalDeltas) ||
+						!ReadFloats(reader, target.TangentDeltas))
+					{
+						return false;
+					}
+				}
+				if (!ReadFloats(reader, asset.DefaultMorphWeights))
+				{
+					return false;
+				}
+				// Every non-empty delta array covers the whole vertex payload (stream 0).
+				const std::uint64_t vertices = asset.VertexStreams.empty() || asset.VertexStreams[0].StrideBytes == 0
+					? 0
+					: asset.VertexStreams[0].DataSizeBytes / asset.VertexStreams[0].StrideBytes;
+				for (const MeshMorphTarget& target : asset.MorphTargets)
+				{
+					for (const std::vector<float>* deltas : { &target.PositionDeltas, &target.NormalDeltas, &target.TangentDeltas })
+					{
+						if (!deltas->empty() && deltas->size() != vertices * 3)
+						{
+							return false;
+						}
+					}
+				}
+				if (!asset.DefaultMorphWeights.empty() && asset.DefaultMorphWeights.size() != asset.MorphTargets.size())
+				{
+					return false;
+				}
+			}
+			return reader.IsAtEnd();
+		}
+
+		bool ReadSkeleton(BinaryReader& reader, SkeletonAsset& asset)
+		{
+			if (reader.U32() != SassetPayloadVersion || !ReadMatrix(reader, asset.RootTransform))
+			{
+				return false;
+			}
+			std::uint32_t count = 0;
+			if (!reader.Count(count))
+			{
+				return false;
+			}
+			asset.Joints.resize(count);
+			for (std::uint32_t index = 0; index < count; ++index)
+			{
+				SkeletonJoint& joint = asset.Joints[index];
+				joint.Name = reader.String();
+				joint.Parent = reader.U32();
+				joint.SourceNode = reader.U32();
+				if (!ReadTransform(reader, joint.RestTransform) || !ReadMatrix(reader, joint.InverseBind))
+				{
+					return false;
+				}
+				// Parents first: one forward pass computes model-space poses.
+				if (joint.Parent != SkeletonJoint::InvalidJoint && joint.Parent >= index)
+				{
+					return false;
+				}
+			}
+			return reader.IsAtEnd();
+		}
+
+		bool IsValidTrack(const AnimationTrack& track)
+		{
+			const std::uint32_t expected = track.Path == AnimationPath::Rotation ? 4u
+				: track.Path == AnimationPath::MorphWeights						 ? track.Components
+																				 : 3u;
+			if (static_cast<std::uint8_t>(track.Path) > static_cast<std::uint8_t>(AnimationPath::MorphWeights) ||
+				static_cast<std::uint8_t>(track.Interpolation) > static_cast<std::uint8_t>(AnimationInterpolation::CubicSpline) ||
+				track.Components == 0 || track.Components != expected || track.Times.empty())
+			{
+				return false;
+			}
+			const std::uint64_t perKey =
+				std::uint64_t(track.Components) * (track.Interpolation == AnimationInterpolation::CubicSpline ? 3u : 1u);
+			if (track.Values.size() != track.Times.size() * perKey)
+			{
+				return false;
+			}
+			for (std::size_t key = 0; key < track.Times.size(); ++key)
+			{
+				if (!std::isfinite(track.Times[key]) || (key > 0 && !(track.Times[key] > track.Times[key - 1])))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool ReadAnimationClip(BinaryReader& reader, AnimationClipAsset& asset)
+		{
+			if (reader.U32() != SassetPayloadVersion)
+			{
+				return false;
+			}
+			asset.Name = reader.String();
+			asset.Duration = reader.F32();
+			std::uint32_t count = 0;
+			if (!reader.Count(count) || !std::isfinite(asset.Duration) || asset.Duration < 0.0f)
+			{
+				return false;
+			}
+			asset.Tracks.resize(count);
+			for (AnimationTrack& track : asset.Tracks)
+			{
+				track.Target = reader.String();
+				track.Path = static_cast<AnimationPath>(reader.U8());
+				track.Interpolation = static_cast<AnimationInterpolation>(reader.U8());
+				track.Components = reader.U32();
+				if (!ReadFloats(reader, track.Times) || !ReadFloats(reader, track.Values) || !IsValidTrack(track))
+				{
+					return false;
+				}
+			}
+			if (!reader.Count(count))
+			{
+				return false;
+			}
+			asset.Events.resize(count);
+			for (std::size_t index = 0; index < asset.Events.size(); ++index)
+			{
+				asset.Events[index].Time = reader.F32();
+				asset.Events[index].Name = reader.String();
+				if (!std::isfinite(asset.Events[index].Time) || (index > 0 && asset.Events[index].Time < asset.Events[index - 1].Time))
+				{
+					return false;
+				}
+			}
 			return reader.IsAtEnd();
 		}
 
@@ -485,10 +635,12 @@ namespace Swim::Assets
 
 		bool ReadModel(BinaryReader& reader, AssetSystem& assets, ModelAsset& asset)
 		{
-			if (reader.U32() != SassetPayloadVersion)
+			const std::uint32_t version = reader.U32();
+			if (version != SassetPayloadVersion && version != SassetModelPayloadVersion)
 			{
 				return false;
 			}
+			const bool animated = version == SassetModelPayloadVersion;
 			std::uint32_t count = 0;
 			if (!reader.Count(count))
 			{
@@ -512,6 +664,14 @@ namespace Swim::Assets
 				{
 					material = DeclareReference<MaterialInstanceAsset>(assets, AssetId{ reader.U64() });
 				}
+				if (animated)
+				{
+					node.Skin = DeclareReference<SkeletonAsset>(assets, AssetId{ reader.U64() });
+					if (!ReadFloats(reader, node.MorphWeights))
+					{
+						return false;
+					}
+				}
 			}
 
 			if (!reader.Count(count))
@@ -523,15 +683,32 @@ namespace Swim::Assets
 			{
 				root = reader.U32();
 			}
+			if (animated)
+			{
+				if (!reader.Count(count))
+				{
+					return false;
+				}
+				asset.Skeletons.resize(count);
+				for (AssetHandle<SkeletonAsset>& skeleton : asset.Skeletons)
+				{
+					skeleton = DeclareReference<SkeletonAsset>(assets, AssetId{ reader.U64() });
+				}
+				if (!reader.Count(count))
+				{
+					return false;
+				}
+				asset.Animations.resize(count);
+				for (AssetHandle<AnimationClipAsset>& animation : asset.Animations)
+				{
+					animation = DeclareReference<AnimationClipAsset>(assets, AssetId{ reader.U64() });
+				}
+			}
 			return reader.IsAtEnd();
 		}
 
-		template<typename T, typename ReaderFn>
-		bool PublishDecoded(
-			AssetSystem& assets,
-			const SassetMetadata& metadata,
-			BinaryReader& reader,
-			ReaderFn&& read)
+		template <typename T, typename ReaderFn>
+		bool PublishDecoded(AssetSystem& assets, const SassetMetadata& metadata, BinaryReader& reader, ReaderFn&& read)
 		{
 			AssetHandle<T> handle = assets.Declare<T>(metadata.Id);
 			assets.BeginLoading(handle);
@@ -543,12 +720,9 @@ namespace Swim::Assets
 			}
 			return assets.Publish(handle, std::move(asset), metadata.ContentHashValue, metadata.Dependencies);
 		}
-	}
+	} // namespace
 
-	std::span<const std::byte> GetSassetChunkBytes(
-		std::span<const std::byte> bytes,
-		const SassetMetadata& metadata,
-		SassetChunkType type)
+	std::span<const std::byte> GetSassetChunkBytes(std::span<const std::byte> bytes, const SassetMetadata& metadata, SassetChunkType type)
 	{
 		for (const SassetChunkDesc& chunk : metadata.Chunks)
 		{
@@ -657,7 +831,8 @@ namespace Swim::Assets
 			}
 			if (chunk.Compression != SassetCompression::None)
 			{
-				return MakeParseError(SassetErrorCode::UnsupportedCompression, ".sasset v1 runtime currently accepts uncompressed chunks only");
+				return MakeParseError(
+					SassetErrorCode::UnsupportedCompression, ".sasset v1 runtime currently accepts uncompressed chunks only");
 			}
 			if (chunk.UncompressedSizeBytes != chunk.SizeBytes)
 			{
@@ -665,7 +840,8 @@ namespace Swim::Assets
 			}
 			if (validateChunkHashes)
 			{
-				const auto chunkBytes = bytes.subspan(static_cast<std::size_t>(chunk.OffsetBytes), static_cast<std::size_t>(chunk.SizeBytes));
+				const auto chunkBytes =
+					bytes.subspan(static_cast<std::size_t>(chunk.OffsetBytes), static_cast<std::size_t>(chunk.SizeBytes));
 				if (ComputeContentHash(chunkBytes) != chunk.Hash)
 				{
 					return MakeParseError(SassetErrorCode::HashMismatch, ".sasset chunk content hash mismatch");
@@ -711,9 +887,7 @@ namespace Swim::Assets
 		{
 			return MakeParseError(SassetErrorCode::InvalidChunk, ".sasset logical path cannot be empty");
 		}
-		metadata.LogicalPath.assign(
-			reinterpret_cast<const char*>(logicalPathBytes.data()),
-			logicalPathBytes.size());
+		metadata.LogicalPath.assign(reinterpret_cast<const char*>(logicalPathBytes.data()), logicalPathBytes.size());
 		try
 		{
 			if (NormalizeAssetPath(metadata.LogicalPath) != metadata.LogicalPath)
@@ -794,46 +968,72 @@ namespace Swim::Assets
 		{
 		case SassetAssetType::Mesh:
 			published = PublishDecoded<MeshAsset>(assets, metadata, reader,
-				[](BinaryReader& input, MeshAsset& asset) { return ReadMesh(input, asset); });
+				[](BinaryReader& input, MeshAsset& asset)
+				{
+					return ReadMesh(input, asset);
+				});
 			break;
 		case SassetAssetType::Texture:
 			published = PublishDecoded<TextureAsset>(assets, metadata, reader,
-				[](BinaryReader& input, TextureAsset& asset) { return ReadTexture(input, asset); });
+				[](BinaryReader& input, TextureAsset& asset)
+				{
+					return ReadTexture(input, asset);
+				});
 			break;
 		case SassetAssetType::Sampler:
 			published = PublishDecoded<SamplerAsset>(assets, metadata, reader,
-				[](BinaryReader& input, SamplerAsset& asset) { return ReadSampler(input, asset); });
+				[](BinaryReader& input, SamplerAsset& asset)
+				{
+					return ReadSampler(input, asset);
+				});
 			break;
 		case SassetAssetType::MaterialTemplate:
 			published = PublishDecoded<MaterialTemplateAsset>(assets, metadata, reader,
-				[](BinaryReader& input, MaterialTemplateAsset& asset) { return ReadMaterialTemplate(input, asset); });
+				[](BinaryReader& input, MaterialTemplateAsset& asset)
+				{
+					return ReadMaterialTemplate(input, asset);
+				});
+			break;
+		case SassetAssetType::Skeleton:
+			published = PublishDecoded<SkeletonAsset>(assets, metadata, reader,
+				[](BinaryReader& input, SkeletonAsset& asset)
+				{
+					return ReadSkeleton(input, asset);
+				});
+			break;
+		case SassetAssetType::AnimationClip:
+			published = PublishDecoded<AnimationClipAsset>(assets, metadata, reader,
+				[](BinaryReader& input, AnimationClipAsset& asset)
+				{
+					return ReadAnimationClip(input, asset);
+				});
 			break;
 		case SassetAssetType::MaterialInstance:
+		{
+			const AssetHandle<MaterialInstanceAsset> handle = assets.Declare<MaterialInstanceAsset>(metadata.Id);
+			assets.BeginLoading(handle);
+			MaterialInstanceAsset asset{};
+			if (!ReadMaterialInstance(reader, assets, asset))
 			{
-				const AssetHandle<MaterialInstanceAsset> handle = assets.Declare<MaterialInstanceAsset>(metadata.Id);
-				assets.BeginLoading(handle);
-				MaterialInstanceAsset asset{};
-				if (!ReadMaterialInstance(reader, assets, asset))
-				{
-					assets.Fail(handle, AssetError{ AssetErrorCode::InvalidData, "invalid material-instance .sasset payload" });
-					return MakeLoadError(SassetErrorCode::InvalidPayload, "invalid material-instance .sasset payload");
-				}
-				published = assets.Publish(handle, std::move(asset), metadata.ContentHashValue, metadata.Dependencies);
+				assets.Fail(handle, AssetError{ AssetErrorCode::InvalidData, "invalid material-instance .sasset payload" });
+				return MakeLoadError(SassetErrorCode::InvalidPayload, "invalid material-instance .sasset payload");
 			}
-			break;
+			published = assets.Publish(handle, std::move(asset), metadata.ContentHashValue, metadata.Dependencies);
+		}
+		break;
 		case SassetAssetType::Model:
+		{
+			const AssetHandle<ModelAsset> handle = assets.Declare<ModelAsset>(metadata.Id);
+			assets.BeginLoading(handle);
+			ModelAsset asset{};
+			if (!ReadModel(reader, assets, asset))
 			{
-				const AssetHandle<ModelAsset> handle = assets.Declare<ModelAsset>(metadata.Id);
-				assets.BeginLoading(handle);
-				ModelAsset asset{};
-				if (!ReadModel(reader, assets, asset))
-				{
-					assets.Fail(handle, AssetError{ AssetErrorCode::InvalidData, "invalid model .sasset payload" });
-					return MakeLoadError(SassetErrorCode::InvalidPayload, "invalid model .sasset payload");
-				}
-				published = assets.Publish(handle, std::move(asset), metadata.ContentHashValue, metadata.Dependencies);
+				assets.Fail(handle, AssetError{ AssetErrorCode::InvalidData, "invalid model .sasset payload" });
+				return MakeLoadError(SassetErrorCode::InvalidPayload, "invalid model .sasset payload");
 			}
-			break;
+			published = assets.Publish(handle, std::move(asset), metadata.ContentHashValue, metadata.Dependencies);
+		}
+		break;
 		default:
 			return MakeLoadError(SassetErrorCode::InvalidAssetType, "unsupported .sasset asset type");
 		}
@@ -851,8 +1051,7 @@ namespace Swim::Assets
 
 	namespace
 	{
-		template<typename T, typename ReaderFn>
-		bool DecodeInto(SassetDecodedAsset& decoded, BinaryReader& reader, ReaderFn&& read)
+		template <typename T, typename ReaderFn> bool DecodeInto(SassetDecodedAsset& decoded, BinaryReader& reader, ReaderFn&& read)
 		{
 			T asset{};
 			if (!read(reader, asset))
@@ -863,15 +1062,14 @@ namespace Swim::Assets
 			return true;
 		}
 
-		template<typename T>
-		bool PublishValue(AssetSystem& assets, const SassetMetadata& metadata, T&& asset)
+		template <typename T> bool PublishValue(AssetSystem& assets, const SassetMetadata& metadata, T&& asset)
 		{
 			using Asset = std::decay_t<T>;
 			const AssetHandle<Asset> handle = assets.Declare<Asset>(metadata.Id);
 			assets.BeginLoading(handle);
 			return assets.Publish(handle, std::forward<T>(asset), metadata.ContentHashValue, metadata.Dependencies);
 		}
-	}
+	} // namespace
 
 	SassetDecodeResult DecodeSasset(std::span<const std::byte> bytes, bool validateChunkHashes)
 	{
@@ -890,19 +1088,46 @@ namespace Swim::Assets
 		switch (metadata.Type)
 		{
 		case SassetAssetType::Mesh:
-			decoded = DecodeInto<MeshAsset>(result.Decoded, reader, [](BinaryReader& input, MeshAsset& asset) { return ReadMesh(input, asset); });
+			decoded = DecodeInto<MeshAsset>(result.Decoded, reader,
+				[](BinaryReader& input, MeshAsset& asset)
+				{
+					return ReadMesh(input, asset);
+				});
 			break;
 		case SassetAssetType::Texture:
-			decoded = DecodeInto<TextureAsset>(
-				result.Decoded, reader, [](BinaryReader& input, TextureAsset& asset) { return ReadTexture(input, asset); });
+			decoded = DecodeInto<TextureAsset>(result.Decoded, reader,
+				[](BinaryReader& input, TextureAsset& asset)
+				{
+					return ReadTexture(input, asset);
+				});
 			break;
 		case SassetAssetType::Sampler:
-			decoded = DecodeInto<SamplerAsset>(
-				result.Decoded, reader, [](BinaryReader& input, SamplerAsset& asset) { return ReadSampler(input, asset); });
+			decoded = DecodeInto<SamplerAsset>(result.Decoded, reader,
+				[](BinaryReader& input, SamplerAsset& asset)
+				{
+					return ReadSampler(input, asset);
+				});
 			break;
 		case SassetAssetType::MaterialTemplate:
 			decoded = DecodeInto<MaterialTemplateAsset>(result.Decoded, reader,
-				[](BinaryReader& input, MaterialTemplateAsset& asset) { return ReadMaterialTemplate(input, asset); });
+				[](BinaryReader& input, MaterialTemplateAsset& asset)
+				{
+					return ReadMaterialTemplate(input, asset);
+				});
+			break;
+		case SassetAssetType::Skeleton:
+			decoded = DecodeInto<SkeletonAsset>(result.Decoded, reader,
+				[](BinaryReader& input, SkeletonAsset& asset)
+				{
+					return ReadSkeleton(input, asset);
+				});
+			break;
+		case SassetAssetType::AnimationClip:
+			decoded = DecodeInto<AnimationClipAsset>(result.Decoded, reader,
+				[](BinaryReader& input, AnimationClipAsset& asset)
+				{
+					return ReadAnimationClip(input, asset);
+				});
 			break;
 		case SassetAssetType::MaterialInstance:
 		case SassetAssetType::Model:
@@ -954,4 +1179,4 @@ namespace Swim::Assets
 		return result;
 	}
 
-}
+} // namespace Swim::Assets

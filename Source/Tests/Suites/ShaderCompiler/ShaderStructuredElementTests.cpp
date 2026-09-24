@@ -90,7 +90,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "SlangRecordsMatchTheCppRecords")
 		{ "SkinIndex", { std::uint32_t(offsetof(GpuInstanceRecord, SkinIndex)), 4u } },
 		{ "LodBias", { std::uint32_t(offsetof(GpuInstanceRecord, LodBias)), 4u } },
 		{ "Generation", { std::uint32_t(offsetof(GpuInstanceRecord, Generation)), 4u } },
-		{ "Reserved", { std::uint32_t(offsetof(GpuInstanceRecord, Reserved)), 4u } },
+		{ "PreviousVertexOffset", { std::uint32_t(offsetof(GpuInstanceRecord, PreviousVertexOffset)), 4u } },
 	};
 	SWIM_CHECK(Fields(*instances) == instanceLayout);
 	const std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> transformLayout{

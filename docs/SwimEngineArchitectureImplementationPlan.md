@@ -23,13 +23,35 @@ This section is the short authoritative status summary for the current repositor
 | Platform/Input/configuration | Active: SDL windows/events, normalized InputSystem, one accepted-frame input snapshot, explicit engine-owned services and runtime configuration. |
 | Jobs/memory | Active: enkiTS jobs in renderer/BVH work, mimalloc, job scratch scopes and CPU frame-arena lifecycle. CPU frame memory is separate from RHI GPU frame contexts. |
 | Scene/physics | Active: catalog/runtime identities, scene command buffer, scene-owned transforms, per-view frustum, generic physics handles/bridge. PhysX is default; Jolt is selected explicitly when compiled. `RenderExtractor` (EnTT `MeshRenderer` → GPU Scene, item 47) exists but no scene constructs it yet. |
+| Animation | `Systems/Animation` (item 78): skeletons, clip sampling, pose blending, layered state machines, events, root motion, sockets and skinning palettes, jobified. Cooked skeletons and clips load through `.sasset`; no scene constructs an animator yet (item 56). |
 | Assets | Active cooked `.sasset` identity/load path and development auto-cook, with legacy engine-owned pools and `LegacyRenderBinding` still adapting assets for rendering. Async IO is available/injected. `Renderer/Residency` now streams cooked meshes/textures through async IO and job decodes into `GeometryHeap`/`TextureResidency` (item 44), but the engine runtime does not construct it yet. |
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), screen-space GTAO, reflections and exponential height fog (item 76) and GPU particles (item 77) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), screen-space GTAO, reflections and exponential height fog (item 76), GPU particles (item 77) and compute GPU skinning with morph targets and deformation motion vectors (item 78) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — item 76 complete (screen-space reflections) and item 77, GPU particles (2026-09-24):** the last screen-space module and Phase 19's GPU particle system.
+- **Latest checkpoint — item 78: animation, skinning and morph targets (2026-09-24):** Phase 18, end to end from glTF to motion vectors.
+  - **Assets:**
+    - The glTF importer now reads skins (joints, inverse binds, `JOINTS_0`/`WEIGHTS_0`, Draco included), morph targets (position/normal/tangent deltas, mesh default weights) and every node-targeted animation channel (translation, rotation, scale, morph weights; step, linear, cubic spline).
+    - The static model compiler emits `Skeleton` (7) and `AnimationClip` (8) `.sasset`s. Joints are ordered parents first with remapped vertex joints; influences are normalized, sorted and stored in a second 24-byte vertex stream; morph targets are dense per vertex. Clips bind by unique joint/node names. Models reference their skeletons, clips, per-node skins and morph weights.
+    - Static meshes and models keep payload version 1 byte for byte; version 2 carries the new data, and readers validate all of it. The compiler profile is `v2`, so auto-cook recooks once.
+    - Known limitation: the pinned fastgltf 0.9 rejects node-level `weights` arrays (an inverted check in its node parser); mesh-level weights work.
+  - **`Systems/Animation` (CPU):**
+    - `Skeleton`, `AnimationClip` (binding by name), `SampleClip`, `BlendPose`, `MakeAdditivePose`/`AddPose` and `BoneMask`.
+    - `Animator`: layered override/additive state machines with float/bool/trigger parameters, any-state and exit-time transitions, linear crossfades, `Play`, events forward/backward/across loops, root motion from layer 0 (per axis, accumulated across loops), playback speed/direction/looping and morph weight overrides.
+    - `SkeletonInstance`: model transforms, the skinning palette (`model × inverseBind`, GPU 3×4 rows) with the previous palette and weights, and sockets. `UpdateAnimations` runs animators and instances over `JobSystem::ParallelFor`, identical to the serial result.
+    - It depends only on Jobs and the asset structs.
+  - **`Renderer/Skinning` (GPU, `SwimSkinning`):**
+    - Compute linear blend skinning with sparse per-vertex morph deltas, once per character per frame, into a `GeometryHeap` output mesh of 2 × vertices. The first half holds the skinned `StandardVertex`s, the second the previous-frame positions.
+    - Visibility, shadows and Forward+ draw it as any mesh. Instances settle once (previous = current) after their last `SetPose`. `ComputeBounds` is a conservative per-joint-box bound, morph reach included.
+    - `GpuInstanceRecord::Reserved` became `PreviousVertexOffset`. Clustered Forward+ reads the previous local position through it in the same load loop, 73 of 75 GPU-AV accesses. `ForwardPlus::MotionVector` gained the previous-local overload.
+  - **Validation:**
+    - The official Linux configuration passes **674 cases / 652,846 checks** (was 648 / 641,003). The EnTT-enabled sanitizer build passes 697 cases cleanly. See [the item 78 record](validation/Item78-2026-09-24.md).
+    - The new native smoke `GpuSkinningMatchesTheCpuReference` compares 4,080 skinned vertices and their previous positions over 10 frames of three animated characters with 0 outliers (worst 2.4·10⁻⁷). It also checks settling and pose bounds, and passes all four validation profiles on Mesa lavapipe.
+    - The Forward+ smoke now draws its gold cube with shifted previous positions from the moved frame on: 1,431 and 1,672 deformed pixels, 0 velocity outliers under core and synchronization validation. GPU-AV on lavapipe still hits only the layer-1.4.350 reports already recorded.
+    - 41 native cases now. See [Animation and skinning](Animation.md).
+  - **Still needed:** desktop execution of the new and changed smokes on the RTX 4070 (all four profiles), then recording the skinning timing as a budget. Engine wiring (ECS animator/skinned-mesh components, residency of skeletons and clips) remains item 56. Runtime UI and text (item 79) is next.
+- **Previous renderer checkpoint — item 76 complete (screen-space reflections) and item 77, GPU particles (2026-09-24):** the last screen-space module and Phase 19's GPU particle system.
   - **Forward+ reflectance and specular targets (item 76):**
     - A reflection found on screen must *replace* the specular IBL already inside Color, and a colored metal must tint it. The opaque pass therefore writes `ForwardPlusTargets::Reflectance` (the split-sum specular reflectance, `StandardPbr::EnvironmentSpecularWeight`) and `ForwardPlusTargets::Specular` (the specular IBL, `Prefiltered ×` reflectance), both RGBA16Float and scaled behind glass like Indirect. `ForwardPlus::SpecularEnvironment` is the CPU definition.
     - Seven opaque and four transparent color attachments; every desktop Vulkan driver exposes 8. Packing the thin G-buffer is a later bandwidth optimization.
@@ -52,7 +74,8 @@ This section is the short authoritative status summary for the current repositor
       - The whole native suite (40 cases): 38 pass core and synchronization validation (the two window minimize/restore smokes fail because the offscreen driver cannot minimize), 31 pass GPU-assisted and combined (the same two, plus seven earlier smokes on the reductions above and on a `WARNING-GPU-AV-drawCount` in item 49's visibility smoke, whose per-bin counts deliberately exceed the capacity that `maxDrawCount` clamps). See [the item 77 record](validation/Item77-2026-09-24.md#whole-native-suite-on-mesa-lavapipe).
     - `GpuParticlesMatchTheCpuReference` compares 4,732 particle-steps over 30 frames with 0 id mismatches and 0 field outliers (worst 10⁻⁷), 891 sorted pairs with 0 inversions, and 36,427 drawn pixels with 0 outliers (532 occluded by the depth plane).
     - 40 native cases now. See [Screen-space effects](ScreenSpace.md), [GPU particles](Particles.md) and [Clustered Forward+](ForwardPlus.md).
-  - **Still needed:** desktop execution of the new and changed smokes on the RTX 4070 (all four profiles), then recording SSR and particle timings as budgets. Animation/skinning (item 78) is next; engine wiring remains item 56.
+  - **Desktop run (RTX 4070 Laptop, NVIDIA 581.29, layer 1.4.357, 2026-09-24):** the default suite (688 cases / 645,077 checks) and all 40 native cases pass core, synchronization, GPU-assisted and combined validation with 0 warnings (user report). Reflections: 10,027 / 10,027 and 9,985 / 9,985 hits, 0 outliers; Forward+ surface targets 0 outliers in every frame; particles 0 mismatches (worst 1.14·10⁻⁶), 0 inversions, 0 pixel outliers. The lavapipe/1.4.350 GPU-AV reports (shared-memory race on the irradiance and cluster-scan reductions, item 49's drawCount warning) did **not** reproduce there, so they are recorded as that layer's behaviour on lavapipe and nothing was changed.
+  - **Budgets (core, 1080p unless stated):** GTAO 1.28 ms, blur 0.42 ms, reflections 1.08 ms, screen-space composite 0.29 ms; TAA resolve 0.26–0.33 ms; 60k particles: simulate 0.027, emit 0.008, compact 0.005, finalize 0.004, draw 0.157 ms. Recorded in the [item 75](validation/Item75-2026-09-24.md), [item 76](validation/Item76-2026-09-24.md#desktop-run) and [item 77](validation/Item77-2026-09-24.md#desktop-run) records, with the post, clustering and shadow budgets in their own records. Animation/skinning (item 78) followed; engine wiring remains item 56.
 - **Previous renderer checkpoint — item 76, first part: screen-space ambient occlusion and height fog (2026-09-24):** Phase 17's optional screen-space modules start, between Forward+ and TAA. SSR, the third module of item 76, was left for the latest checkpoint.
   - **Forward+ surface targets:**
     - The opaque pass writes two more attachments. `ForwardPlusTargets::Normal` (RGBA16Float) holds the world shading normal after normal mapping, with perceptual roughness in w. `ForwardPlusTargets::Indirect` (RGBA16Float) holds the ambient + IBL radiance (`ForwardPlus::IndirectRadiance`) already inside Color. Transient targets stand in when none are supplied.
@@ -71,7 +94,7 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `ScreenSpaceEffectsMatchTheCpuReference` compares every stage texel by texel, each from the GPU's own previous stage: raw GTAO, the blur, and the composite. It covers AO alone, AO with jittered fog and R32Float depth, fog alone, all off, and a 1080p timing frame.
     - `ShaderCompiler.GpuAvBudget` covers the three programs (AO 12, blur 6, composite 16 instrumented accesses).
     - 39 native cases now. See [Screen-space effects](ScreenSpace.md) and [the item 76 record](validation/Item76-2026-09-24.md).
-  - **Still needed:** desktop execution of the new and changed smokes (and item 75's), then recording AO and fog timings as budgets. *(The smokes now pass core and synchronization validation on Mesa lavapipe; see the latest checkpoint.)* SSR, the rest of item 76, followed. Engine wiring remains item 56.
+  - **Still needed:** ~~desktop execution of the new and changed smokes (and item 75's), then recording AO and fog timings as budgets~~ *(done 2026-09-24: all four profiles pass on the RTX 4070; budgets in the item 76 record)*. SSR, the rest of item 76, followed. Engine wiring remains item 56.
 - **Earlier renderer checkpoint — item 75: motion vectors and temporal anti-aliasing (2026-09-24):** Phase 17's post stack gains TAA, fed by motion vectors that Forward+ now writes.
   - **Motion vectors and jitter (Forward+):**
     - `ForwardViewRecord` grows to 208 bytes: `ViewProjection` stays unjittered, and `PreviousViewProjection` and `Jitter` (an NDC offset) follow. The previous matrix defaults to the current one, so a first frame has no camera motion.
@@ -89,7 +112,7 @@ This section is the short authoritative status summary for the current repositor
     - The Forward+ smoke now compares the velocity target with `ForwardPlus::MotionVector` for every interior opaque pixel. Its moved frame is jittered by (0.37, −0.21) pixels, and the CPU ray cast follows the jitter.
     - The new native smoke `TemporalAntiAliasingMatchesTheCpuReference` resolves jittered, panning HDR frames with a moving rectangle, and compares every texel with `Temporal::ResolveTexel` over the GPU's own previous output. It covers the first frame, history, a reset, a resize to R32Float depth, and 1080p timing.
     - 38 native cases now. See [Temporal anti-aliasing](TemporalAntiAliasing.md) and [the item 75 record](validation/Item75-2026-09-24.md).
-  - **Still needed:** desktop execution of the new and changed smokes, then recording TAA timings as budgets. AO and fog (item 76) followed.
+  - **Still needed:** ~~desktop execution of the new and changed smokes, then recording TAA timings as budgets~~ *(done 2026-09-24: all four profiles pass on the RTX 4070; resolve 0.26–0.33 ms at 1080p)*. AO and fog (item 76) followed.
 - **Earlier renderer checkpoint — items 73 and 74: exposure, tone mapping, bloom and color grading (2026-09-23):** Phase 17's post stack starts: HDR scene color now becomes display output entirely on the GPU.
   - **`Renderer/PostProcess` (item 73):**
     - A 256-bin log-luminance histogram (group-shared atomics) and a one-thread exposure pass.
@@ -106,7 +129,7 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `PostProcessMatchesTheCpuReference` reads back the histogram, the exposure state, every bloom level and every output texel, and compares each with the CPU definition. It runs five compared frames (auto sRGB, adaptation, graded ACES, HDR10, scRGB) plus a 1080p timing frame.
     - `ShaderCompiler.GpuAvBudget` covers the six post programs.
     - 37 native cases now. See [Post-processing](PostProcess.md) and [the items 73–74 record](validation/Items73-74-2026-09-23.md).
-  - **Desktop run (RTX 4070 Laptop, 2026-09-24):** the default suite and all 37 native cases pass the four validation profiles (user report). Recording post pass timings as budgets remains. Motion vectors and TAA (item 75) followed.
+  - **Desktop run (RTX 4070 Laptop, 2026-09-24):** the default suite and all 37 native cases pass the four validation profiles (user report). *(Budgets recorded 2026-09-24: histogram 0.20, exposure 0.02, bloom 0.51, composite 0.17 ms at 1080p.)* Motion vectors and TAA (item 75) followed.
 - **Earlier renderer checkpoint — items 70, 71 and 72: directional, spot and point shadows (2026-09-23):** Phase 16's first checkpoint shadows every light kind from one depth atlas, rendered GPU-driven and sampled by Clustered Forward+.
   - **`Renderer/Shadows`:**
     - **Directional (item 70):** `ComputeCascades` fits 1–4 cascades (practical splits) with rotation-invariant bounding spheres, texel-snapped centers and a caster extension toward the light.
@@ -125,7 +148,7 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `ShadowedForwardPlusMatchesTheCpuReference` reads the atlas back and compares it texel by texel with CPU shadow maps: masked-away, blended and non-casting objects must be absent. It compares the shadowed image with `ForwardPlus::Shade` over the GPU's own atlas, and runs an eviction frame.
     - 36 native cases now. See [Shadows](Shadows.md) and [the items 70–72 record](validation/Items70-72-2026-09-23.md).
   - **Desktop run (RTX 4070 Laptop):** core and synchronization validation pass all 36 native cases. The shadow atlas matched the CPU shadow maps with 0 mismatches, and the shadowed image had 0 outliers (mean error 3.4·10⁻⁴). GPU-assisted validation failed both Forward+ smokes on `GPUAV-Compile-time-general-buffer`: more than 75 instrumented buffer accesses per module. The shader now has one light loop (the shadow lookup is inlined once), member view loads and single copies of the transform and vertex, which brings it from 125 to 72. `ShaderCompiler.GpuAvBudget` (591 cases now) fails any renderer program above the limit.
-  - **Re-run:** after the GPU-AV fix, all four validation profiles pass. Recording shadow pass timings as budgets remains. The post stack (items 73–74) followed.
+  - **Re-run:** after the GPU-AV fix, all four validation profiles pass. *(Budgets recorded 2026-09-24: caster culls 0.17 ms, depth 0.05 ms for 10 views, shadowed Forward+ opaque 0.08 ms.)* The post stack (items 73–74) followed.
 - **Earlier renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
   - **`Renderer/ForwardPlus` (items 66–67):**
     - `ForwardPlusRenderer::Record` draws GPU visibility's Opaque bin GPU-driven, shaded by `ClusteredForward.slang` into HDR color, an object-id target and reverse-Z depth. Shading is `StandardPbr` through the material table and bindless textures, plus directional lights, the pixel's cluster list, ambient, optional IBL and emission.
@@ -1542,7 +1565,7 @@ Critical-path item 15 is now complete at the source-import boundary:
 - `GltfImporter` owns the entire fastgltf object graph and translates it immediately into a Swim-owned `IntermediateModel` containing source nodes/hierarchy, decomposed transforms, meshes/primitives, material-slot indices, metallic-roughness material data, textures/samplers, source images, and root-node identity;
 - the importer handles indexed and generated-index primitives, optional normals/tangents/UV0, external buffers/images, embedded/data-source image bytes, GLB/buffer-view image payloads, and structured import failures;
 - deliberately supported source extensions are currently `KHR_mesh_quantization`, `KHR_texture_basisu`, `EXT_texture_webp`, `MSFT_texture_dds`, and `KHR_materials_unlit`. `KHR_texture_transform` is intentionally not advertised until its transform semantics are preserved by the intermediate representation;
-- skins/skeletons, animation channels, morph targets, and camera/light import remain explicit future importer expansion and are not silently discarded under a claimed-support flag;
+- skins/skeletons, animation channels, morph targets, and camera/light import remain explicit future importer expansion and are not silently discarded under a claimed-support flag; *(2026-09-24: skins, animation channels and morph targets are now imported and compiled, item 78; cameras and lights remain)*
 - simdjson v3.12.3 is pinned and provided before fastgltf v0.9.0. This prevents fastgltf's v0.9.0 dependency fallback from downloading a simdjson single-header file into its own CPM source checkout, preserving the repository rule that cached dependency sources are immutable;
 - `scripts/verify-build-layout.py` now enforces the importer boundary, dependency pins/order, private fastgltf linkage, absence of fastgltf/tinygltf types from the intermediate/public/runtime asset boundary, and the immutable-cache audit;
 - `SwimAssetCompilerPublicHeaders` compiles in the dependency-free/offline configuration, while `SwimGltfImporterTests` provides a real tiny glTF import smoke test for dependency-enabled builds.
@@ -1723,7 +1746,7 @@ A mesh asset should contain CPU/runtime metadata such as:
 - local bounds;
 - LOD descriptors;
 - meshlet descriptors/data where generated;
-- skin/morph stream references where applicable.
+- skin/morph stream references where applicable. *(2026-09-24, item 78: a second vertex stream with `Joints0`/`Weights0`, and mesh payload version 2 with morph targets and default weights.)*
 
 A mesh asset should **not** contain:
 
@@ -1785,9 +1808,9 @@ Import:
 - [x] material slots;
 - [x] metallic-roughness materials;
 - [x] textures/samplers;
-- [ ] skins/skeletons;
-- [ ] animation channels;
-- [ ] morph targets;
+- [x] skins/skeletons; *(2026-09-24, item 78: joints, inverse binds, JOINTS_0/WEIGHTS_0 incl. Draco; compiled parents first with remapped joints; [Animation](Animation.md))*
+- [x] animation channels; *(translation/rotation/scale/morph weights, step/linear/cubic spline; node-level `weights` arrays hit a fastgltf 0.9 parser defect, see [Animation](Animation.md#gltf-import))*
+- [x] morph targets; *(position/normal/tangent deltas, mesh default weights)*
 - [ ] relevant cameras/lights if desired;
 - [x] deliberately supported extensions. *(Current parser set includes `KHR_mesh_quantization`, `KHR_texture_basisu`, `KHR_texture_transform`, `KHR_draco_mesh_compression`, `EXT_texture_webp`, `MSFT_texture_dds`, and `KHR_materials_unlit`; accepting parser metadata is separate from implementing each extension's codec/material semantics.)*
 
@@ -4183,30 +4206,32 @@ Compiled model importer already provides:
 - interpolation;
 - morph targets.
 
+*(2026-09-24, item 78: `Assets` skeleton/clip types, `Systems/Animation`, `Renderer/Skinning` + `Shaders/Slang/Skinning`; [Animation and skinning](Animation.md).)*
+
 ### Runtime
 
-- [ ] `SkeletonAsset`;
-- [ ] `SkeletonInstance`;
-- [ ] `AnimationClip`;
-- [ ] `Animator`;
-- [ ] layers;
-- [ ] state machine;
-- [ ] crossfade;
-- [ ] additive animation;
-- [ ] bone masks;
-- [ ] root motion;
-- [ ] events;
-- [ ] playback speed/direction/looping;
-- [ ] sockets/attachments;
-- [ ] morph weights.
+- [x] `SkeletonAsset`; *(asset type 7; the runtime `Skeleton` validates and shares it)*
+- [x] `SkeletonInstance`; *(model-space joints, skinning palette + previous palette)*
+- [x] `AnimationClip`; *(asset type 8; name-bound tracks, step/linear/cubic spline)*
+- [x] `Animator`;
+- [x] layers; *(override and additive, weights at run time)*
+- [x] state machine; *(float/bool/trigger parameters, conditions, any-state, exit times)*
+- [x] crossfade; *(linear; inertial blending remains)*
+- [x] additive animation;
+- [x] bone masks;
+- [x] root motion; *(layer 0, per-axis translation and optional rotation, accumulated across loops)*
+- [x] events; *(forward, reverse and across loops)*
+- [x] playback speed/direction/looping;
+- [x] sockets/attachments;
+- [x] morph weights. *(clip tracks, defaults and manual overrides)*
 
 ### Jobs/GPU
 
-- jobify clip sampling/blending;
-- GPU skinning baseline;
-- choose vertex vs compute skinning by measured workload;
-- preserve previous state for motion vectors;
-- explicit bridge to physics ragdolls later.
+- [x] jobify clip sampling/blending; *(`UpdateAnimations` over `JobSystem::ParallelFor`, bit-identical to serial)*
+- [x] GPU skinning baseline; *(compute LBS + sparse morph targets into GeometryHeap output meshes)*
+- [x] choose vertex vs compute skinning by measured workload; *(compute: skinned once per frame for every pass and view instead of per shadow/depth/Forward+ draw; 64 × 1,032 vertices time in the smoke. Visibility-driven skinning lists remain an optimization)*
+- [x] preserve previous state for motion vectors; *(previous positions next to the current ones; Forward+ reads them through `GpuInstanceRecord::PreviousVertexOffset`)*
+- [ ] explicit bridge to physics ragdolls later.
 
 ---
 
@@ -4887,7 +4912,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 45. [x] Implement bindless texture/sampler table with timeline-safe ID reuse. *(`BindlessResourceTable` + `GpuSamplerCache` on new RHI bindless spaces; native smoke pending desktop execution; see the Phase 11 item 45 checkpoint.)*
 46. [x] Implement persistent GPU Scene records. *(`GpuScene` + `GpuRecordBuffer`, shared Slang records with a reflected layout check; see the Phase 12 checkpoint.)*
 47. [x] Implement EnTT render extraction -> RenderObject updates. *(`RenderExtractor` over `MeshRenderer` and the TransformSystem dirty list; not yet constructed by the runtime.)*
-48. [x] Reach 100k object GPU Scene stress with dirty-only updates. *(CPU stress for GpuScene and extraction plus the native 100k-row probe smoke; desktop execution pending.)*
+48. [x] Reach 100k object GPU Scene stress with dirty-only updates. *(CPU stress for GpuScene and extraction plus the native 100k-row probe smoke, which passes all four profiles on the RTX 4070.)*
 
 ### 35.5 GPU-driven renderer
 
@@ -4923,10 +4948,10 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 72. [x] point shadow policy. *(2026-09-23: six cube-face tiles under `MaxPointShadows` and the atlas policy.)*
 73. [x] HDR scene color/exposure/tone mapping. *(2026-09-23: `Renderer/PostProcess` + `Shaders/Slang/PostProcess`; [Post-processing](PostProcess.md). Native smoke passes all profiles on the Windows desktop.)*
 74. [x] bloom/color grading. *(2026-09-23: bloom chains and the grading stage of the composite.)*
-75. [x] motion vectors/TAA. *(2026-09-24: Forward+ velocity target and jitter, `Renderer/Temporal` + `Shaders/Slang/Temporal`; [Temporal anti-aliasing](TemporalAntiAliasing.md). Native smoke awaits desktop execution.)*
-76. [x] optional AO/SSR/fog modules. *(2026-09-24: GTAO, SSR and height fog — Forward+ normal, indirect, reflectance and specular targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). Native smokes pass on Mesa lavapipe; desktop execution pending.)*
-77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on Mesa lavapipe; desktop execution pending.)*
-78. [ ] animation/skinning/morphs.
+75. [x] motion vectors/TAA. *(2026-09-24: Forward+ velocity target and jitter, `Renderer/Temporal` + `Shaders/Slang/Temporal`; [Temporal anti-aliasing](TemporalAntiAliasing.md). Native smoke passes all four profiles on the RTX 4070.)*
+76. [x] optional AO/SSR/fog modules. *(2026-09-24: GTAO, SSR and height fog — Forward+ normal, indirect, reflectance and specular targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). Native smokes pass all four profiles on the RTX 4070 and on Mesa lavapipe.)*
+77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe.)*
+78. [x] animation/skinning/morphs. *(2026-09-24: glTF skins/animations/morphs, `.sasset` skeleton and clip types, `Systems/Animation`, `Renderer/Skinning` + `Shaders/Slang/Skinning`, Forward+ previous-position motion vectors; [Animation and skinning](Animation.md). Native smoke passes all four profiles on Mesa lavapipe; desktop execution pending. Engine wiring remains item 56.)*
 79. [ ] runtime UI + HarfBuzz/FreeType/MSDF.
 80. [ ] miniaudio audio system.
 81. [ ] `.spack` streaming/residency budgets/eviction.

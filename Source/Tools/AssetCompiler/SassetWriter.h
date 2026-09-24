@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Engine/Assets/AnimationClipAsset.h"
 #include "Engine/Assets/MaterialAsset.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/ModelAsset.h"
 #include "Engine/Assets/SassetFormat.h"
+#include "Engine/Assets/SkeletonAsset.h"
 #include "Engine/Assets/TextureAsset.h"
 
 #include <cstddef>
@@ -31,10 +33,7 @@ namespace Swim::AssetCompiler
 		std::vector<std::byte> Bytes;
 		Swim::Assets::SassetError Error;
 
-		explicit operator bool() const
-		{
-			return Error.Code == Swim::Assets::SassetErrorCode::None;
-		}
+		explicit operator bool() const { return Error.Code == Swim::Assets::SassetErrorCode::None; }
 	};
 
 	SassetBuildResult BuildSasset(const SassetBuildInput& input);
@@ -46,5 +45,7 @@ namespace Swim::AssetCompiler
 	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::MaterialTemplateAsset& asset);
 	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::MaterialInstanceAsset& asset);
 	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::ModelAsset& asset);
+	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::SkeletonAsset& asset);
+	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::AnimationClipAsset& asset);
 
-}
+} // namespace Swim::AssetCompiler

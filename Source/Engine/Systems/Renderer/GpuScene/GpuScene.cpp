@@ -62,6 +62,7 @@ namespace Swim::Render
 		WriteMesh(instance, desc.Mesh);
 		instance.SkinIndex = desc.SkinIndex;
 		instance.LodBias = desc.LodBias;
+		instance.PreviousVertexOffset = desc.PreviousVertexOffset;
 		instance.Generation = handle->Generation;
 		auto& transform = transforms.Edit(handle->Index);
 		std::copy(desc.Transform.Rows.begin(), desc.Transform.Rows.end(), transform.Current);
@@ -199,6 +200,19 @@ namespace Swim::Render
 		if (instances.Get(object.Index).SkinIndex != skinIndex)
 		{
 			EditInstance(object).SkinIndex = skinIndex;
+		}
+		return true;
+	}
+
+	bool GpuScene::SetPreviousVertexOffset(RenderObjectHandle object, std::uint32_t vertices)
+	{
+		if (!objects.IsValid(object))
+		{
+			return false;
+		}
+		if (instances.Get(object.Index).PreviousVertexOffset != vertices)
+		{
+			EditInstance(object).PreviousVertexOffset = vertices;
 		}
 		return true;
 	}

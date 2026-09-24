@@ -106,6 +106,11 @@ function(swim_configure_tests)
 	swim_add_header_boundary(SwimRenderResourcesPublicHeaders
 		SOURCE Source/Tests/HeaderBoundary/RenderResourcesPublicHeaders.cpp
 		BUILD_BY_DEFAULT)
+	# The CPU animation runtime (item 78) needs only the standard library and the
+	# plain skeleton/clip asset structs.
+	swim_add_header_boundary(SwimAnimationPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/AnimationPublicHeaders.cpp
+		BUILD_BY_DEFAULT)
 
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
@@ -167,6 +172,8 @@ function(swim_configure_tests)
 		RenderTemporal
 		RenderScreenSpace
 		RenderParticles
+		RenderSkinning
+		Animation
 		Commands
 	)
 
@@ -183,6 +190,7 @@ function(swim_configure_tests)
 	# into the same binary.
 	set(SWIM_TEST_MODULE_SOURCES
 		${SWIM_RENDER_GRAPH_SOURCES}
+		${SWIM_ANIMATION_SOURCES}
 		${SWIM_CORE_SOURCES}
 		${SWIM_COMMANDS_SOURCES}
 		${SWIM_MEMORY_SOURCES}
@@ -423,6 +431,8 @@ function(swim_configure_tests)
 			SWIM_PARTICLE_FINALIZE_REFLECTION_PATH="${SwimParticleFinalize_REFLECTION}"
 			SWIM_PARTICLE_RENDER_SPIRV_PATH="${SwimParticleRender_SPIRV}"
 			SWIM_PARTICLE_RENDER_REFLECTION_PATH="${SwimParticleRender_REFLECTION}"
+			SWIM_SKINNING_SPIRV_PATH="${SwimSkinning_SPIRV}"
+			SWIM_SKINNING_REFLECTION_PATH="${SwimSkinning_REFLECTION}"
 		)
 	endif()
 

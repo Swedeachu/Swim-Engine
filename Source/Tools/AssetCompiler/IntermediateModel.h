@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Assets/AnimationClipAsset.h"
 #include "Engine/Assets/AssetMath.h"
 
 #include <array>
@@ -65,9 +66,23 @@ namespace Swim::AssetCompiler
 		std::array<float, 3> Normal{};
 		std::array<float, 4> Tangent{};
 		std::array<float, 2> TexCoord0{};
+		// Skin influences (glTF JOINTS_0/WEIGHTS_0): joint indices into the node's
+		// skin, weights as authored (the compiler normalizes and sorts them).
+		std::array<std::uint16_t, 4> Joints{};
+		std::array<float, 4> Weights{};
 		bool HasNormal = false;
 		bool HasTangent = false;
 		bool HasTexCoord0 = false;
+		bool HasSkin = false;
+	};
+
+	// One glTF morph target of a primitive: per-vertex deltas, each empty when the
+	// target does not displace that attribute (tangent deltas are xyz).
+	struct SourceMorphTarget
+	{
+		std::vector<std::array<float, 3>> Position;
+		std::vector<std::array<float, 3>> Normal;
+		std::vector<std::array<float, 3>> Tangent;
 	};
 
 	struct SourcePrimitive
@@ -77,12 +92,38 @@ namespace Swim::AssetCompiler
 		std::vector<std::uint32_t> Indices;
 		std::optional<std::uint32_t> MaterialIndex;
 		Swim::Assets::AssetBounds Bounds{};
+		std::vector<SourceMorphTarget> Targets; // Every primitive of a mesh has the same count.
 	};
 
 	struct SourceMesh
 	{
 		std::string Name;
 		std::vector<SourcePrimitive> Primitives;
+		std::vector<float> DefaultWeights; // glTF mesh.weights (one per morph target).
+	};
+
+	struct SourceSkin
+	{
+		std::string Name;
+		std::vector<std::uint32_t> Joints;						// Node indices; vertex joint indices address this list.
+		std::vector<std::array<float, 16>> InverseBindMatrices; // Column-major; identity when absent.
+		std::optional<std::uint32_t> Skeleton;
+	};
+
+	struct SourceAnimationChannel
+	{
+		std::uint32_t Node = 0;
+		Swim::Assets::AnimationPath Path = Swim::Assets::AnimationPath::Translation;
+		Swim::Assets::AnimationInterpolation Interpolation = Swim::Assets::AnimationInterpolation::Linear;
+		std::uint32_t Components = 3;
+		std::vector<float> Times;
+		std::vector<float> Values; // Keys x Components (x 3 for CubicSpline).
+	};
+
+	struct SourceAnimation
+	{
+		std::string Name;
+		std::vector<SourceAnimationChannel> Channels;
 	};
 
 	struct SourceMaterial
@@ -135,6 +176,8 @@ namespace Swim::AssetCompiler
 		std::uint32_t Parent = InvalidNode;
 		Swim::Assets::AssetTransform LocalTransform{};
 		std::optional<std::uint32_t> MeshIndex;
+		std::optional<std::uint32_t> SkinIndex;
+		std::vector<float> Weights; // Node morph weights (override the mesh defaults).
 	};
 
 	struct IntermediateModel
@@ -150,6 +193,8 @@ namespace Swim::AssetCompiler
 		std::vector<SourceTexture> Textures;
 		std::vector<SourceNode> Nodes;
 		std::vector<std::uint32_t> Roots;
+		std::vector<SourceSkin> Skins;
+		std::vector<SourceAnimation> Animations;
 	};
 
-}
+} // namespace Swim::AssetCompiler

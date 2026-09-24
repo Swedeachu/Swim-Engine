@@ -59,6 +59,10 @@ namespace Swim::Render::ForwardPlus
 	// (x right, y down; prevUV = uv - motion), from the current transform with the
 	// unjittered view-projection and the previous transform with the previous one.
 	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local);
+	// Deforming meshes (item 78): the vertex's previous local position is its own
+	// (GpuInstanceRecord::PreviousVertexOffset vertices further in the same page).
+	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local,
+		const Float3& previousLocal);
 	Float3 TransformDirection(const float (&rows)[12], const Float3& direction);
 	float Determinant(const float (&rows)[12]);
 	// The cofactor (determinant x inverse-transpose) of the linear part times the

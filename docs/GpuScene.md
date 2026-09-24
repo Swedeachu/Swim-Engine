@@ -19,7 +19,7 @@ Two device-local std430 buffers are allocated for `GpuSceneDesc::MaxObjects` row
 
 | Record | Bytes | Contents |
 | --- | ---: | --- |
-| `GpuInstanceRecord` | 64 | local bounds center/half extents, `MeshIndex` + `MeshGeneration` (GeometryHeap metadata row), `TransformIndex`, `MaterialSet`, `ObjectId`, `Flags`, `SkinIndex`, `LodBias`, `Generation` |
+| `GpuInstanceRecord` | 64 | local bounds center/half extents, `MeshIndex` + `MeshGeneration` (GeometryHeap metadata row), `TransformIndex`, `MaterialSet`, `ObjectId`, `Flags`, `SkinIndex`, `LodBias`, `Generation`, `PreviousVertexOffset` (item 78: vertices to a GPU-skinned mesh's previous-frame positions, 0 for rigid meshes) |
 | `GpuTransformRecord` | 96 | `Current` and `Previous` world transform, each three row-major float4 rows (`RenderAffine`) |
 
 Flags have two owners:

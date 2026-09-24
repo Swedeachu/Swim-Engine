@@ -25,7 +25,7 @@ struct GpuInstanceRecord
 	uint SkinIndex;
 	float LodBias;
 	uint Generation;
-	uint Reserved;
+	uint PreviousVertexOffset; // Vertices to the previous-frame position (0: none).
 };
 
 // Row-major 3x4 affine rows: world = float3(dot(Current[0], p1), dot(Current[1], p1), dot(Current[2], p1)).

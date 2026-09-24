@@ -46,6 +46,10 @@ namespace Swim::AssetCompiler
 		std::size_t Materials = 0;
 		std::size_t Textures = 0;
 		std::size_t Samplers = 0;
+		std::size_t Skeletons = 0;
+		std::size_t Animations = 0;
+		std::size_t SkinnedMeshes = 0;
+		std::size_t MorphTargets = 0;
 	};
 
 	struct StaticModelCompileResult
@@ -56,21 +60,16 @@ namespace Swim::AssetCompiler
 		StaticModelCompileStats Stats;
 		StaticModelCompileError Error;
 
-		explicit operator bool() const
-		{
-			return Error.Code == StaticModelCompileErrorCode::None;
-		}
+		explicit operator bool() const { return Error.Code == StaticModelCompileErrorCode::None; }
 	};
 
 	Swim::Assets::ContentHash GetStaticModelCompilerProfileHash();
 
 	class StaticModelCompiler
 	{
-	public:
-		StaticModelCompileResult Compile(
-			const IntermediateModel& model,
-			std::string_view sourceLogicalPath,
+	  public:
+		StaticModelCompileResult Compile(const IntermediateModel& model, std::string_view sourceLogicalPath,
 			std::vector<Swim::Assets::SassetSourceDependency> sourceDependencies) const;
 	};
 
-}
+} // namespace Swim::AssetCompiler

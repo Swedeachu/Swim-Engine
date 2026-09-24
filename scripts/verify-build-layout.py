@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles", "Skinning", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -4092,6 +4092,72 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderParticles", "ParticleSystemTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanParticleSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderParticleLayoutTests.cpp", failures)
+    # Item 78: GPU skinning writes GeometryHeap output meshes, so it may include Geometry,
+    # GpuScene's RenderBounds and Forward+'s StandardVertex layout besides the graph, the
+    # RHI contract and Resources/ handles; no other renderer module includes it.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Skinning/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on GPU skinning: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "Skinning").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if "Renderer/" in include and not re.search(
+                r"Renderer/(Skinning|RenderGraph|RHI|Resources|Geometry)/|Renderer/GpuScene/RenderBounds\.h|Renderer/ForwardPlus/StandardVertex\.h", include
+            ):
+                fail(f"Skinning may include only Skinning, RenderGraph, RHI, Resources, Geometry, RenderBounds.h and StandardVertex.h: {path.relative_to(ROOT)} -> {include}", failures)
+            if re.search(r"Systems/Animation/", include):
+                fail(f"Skinning takes palettes, not animators: {path.relative_to(ROOT)} -> {include}", failures)
+    for relative in ("Skinning/SkinningRecords.h", "Skinning/SkinningBindings.h", "Skinning/SkinningReference.cpp",
+                     "Skinning/SkinningSystem.cpp", "Skinning/SkinningGraphResources.h"):
+        if not (renderer / relative).is_file():
+            fail(f"skinning unit is missing: Renderer/{relative}", failures)
+    for shader in ("SkinningRecords", "Skinning"):
+        if not (ROOT / f"Source/Shaders/Slang/Skinning/{shader}.slang").is_file():
+            fail(f"skinning shader is missing: Shaders/Slang/Skinning/{shader}.slang", failures)
+    if "Renderer/Skinning/*.cpp" not in post_cmake:
+        fail("Skinning sources must compile with the backend-neutral renderer source list", failures)
+    if "PreviousVertexOffset" not in (ROOT / "Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang").read_text(encoding="utf-8"):
+        fail("the opaque Forward+ program must read skinned previous positions (GpuInstanceRecord::PreviousVertexOffset)", failures)
+    check_suite_is_compiled("RenderSkinning", "SkinningReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderSkinning", "SkinningSystemTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanSkinningSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderSkinningLayoutTests.cpp", failures)
+    # Item 78: the CPU animation runtime (Systems/Animation) reads plain asset structs and
+    # may use Jobs; it knows nothing about renderers, scenes, platforms or EnTT, and no
+    # renderer module includes it (skinning takes palettes).
+    animation = ROOT / "Source/Engine/Systems/Animation"
+    if not animation.is_dir():
+        fail("the animation runtime (Source/Engine/Systems/Animation) is missing", failures)
+    else:
+        for path in animation.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+                if include.startswith("Engine/") and not re.match(
+                    r"Engine/(Systems/Animation/|Jobs/|Assets/(AnimationClipAsset|SkeletonAsset|AssetMath)\.h)", include
+                ):
+                    fail(f"Animation may include only Animation, Jobs and the skeleton/clip asset structs: {path.relative_to(ROOT)} -> {include}", failures)
+                if any(part in include for part in ("entt", "glm", "SDL", "vulkan")):
+                    fail(f"Animation must not depend on {include}: {path.relative_to(ROOT)}", failures)
+        for relative in ("AnimationMath.cpp", "Skeleton.cpp", "AnimationClip.cpp", "Animator.cpp", "SkeletonInstance.cpp", "AnimationUpdate.cpp"):
+            if not (animation / relative).is_file():
+                fail(f"animation unit is missing: Systems/Animation/{relative}", failures)
+    for module_root in [renderer / m for m in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "ForwardPlus", "Skinning", "Particles")]:
+        for path in module_root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Systems/Animation/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"renderer modules must not depend on the animation runtime: {path.relative_to(ROOT)}", failures)
+    if "SWIM_ANIMATION_SOURCES" not in post_cmake or "SWIM_ANIMATION_SOURCES" not in read_tests_cmake():
+        fail("the animation runtime must compile into SwimTests through SWIM_ANIMATION_SOURCES", failures)
+    check_suite_is_compiled("Animation", "AnimationClipTests.cpp", failures)
+    check_suite_is_compiled("Animation", "AnimatorTests.cpp", failures)
+    check_suite_is_compiled("AssetCompiler", "AnimationAssetTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -4118,7 +4184,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles", "Skinning"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

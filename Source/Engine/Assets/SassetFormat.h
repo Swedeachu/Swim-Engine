@@ -16,6 +16,10 @@ namespace Swim::Assets
 
 	inline constexpr std::uint32_t SassetSchemaVersion = 1;
 	inline constexpr std::uint32_t SassetPayloadVersion = 1;
+	// Mesh payload 2 appends morph targets; model payload 2 appends skins, morph
+	// weights, skeletons and animations. Readers accept both versions.
+	inline constexpr std::uint32_t SassetMeshPayloadVersion = 2;
+	inline constexpr std::uint32_t SassetModelPayloadVersion = 2;
 	inline constexpr std::size_t SassetHeaderSize = 160;
 	inline constexpr std::size_t SassetChunkEntrySize = 72;
 
@@ -27,7 +31,9 @@ namespace Swim::Assets
 		Sampler = 3,
 		MaterialTemplate = 4,
 		MaterialInstance = 5,
-		Model = 6
+		Model = 6,
+		Skeleton = 7,
+		AnimationClip = 8
 	};
 
 	enum class SassetChunkType : std::uint32_t
@@ -102,10 +108,7 @@ namespace Swim::Assets
 		SassetMetadata Metadata;
 		SassetError Error;
 
-		explicit operator bool() const
-		{
-			return Error.Code == SassetErrorCode::None;
-		}
+		explicit operator bool() const { return Error.Code == SassetErrorCode::None; }
 	};
 
 	struct SassetLoadResult
@@ -114,17 +117,11 @@ namespace Swim::Assets
 		SassetAssetType Type = SassetAssetType::Unknown;
 		SassetError Error;
 
-		explicit operator bool() const
-		{
-			return Error.Code == SassetErrorCode::None;
-		}
+		explicit operator bool() const { return Error.Code == SassetErrorCode::None; }
 	};
 
 	SassetParseResult ParseSasset(std::span<const std::byte> bytes, bool validateChunkHashes = true);
 	SassetLoadResult LoadSasset(AssetSystem& assets, std::span<const std::byte> bytes);
-	std::span<const std::byte> GetSassetChunkBytes(
-		std::span<const std::byte> bytes,
-		const SassetMetadata& metadata,
-		SassetChunkType type);
+	std::span<const std::byte> GetSassetChunkBytes(std::span<const std::byte> bytes, const SassetMetadata& metadata, SassetChunkType type);
 
-}
+} // namespace Swim::Assets

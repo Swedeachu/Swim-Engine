@@ -362,9 +362,33 @@ namespace
 		};
 		const auto cubeMesh = upload(Fs::MakeCube(), "Cube");
 		const auto quadMesh = upload(Fs::MakeQuad(), "Quad");
+		// Item 78: a cube whose previous-frame positions follow its vertices, shifted by
+		// DeformedShift, as a GPU-skinned output mesh lays them out
+		// (GpuInstanceRecord::PreviousVertexOffset). Object 1 switches to it for the
+		// moved frame, so Forward+ must read the previous positions from the page.
+		const Fs::Float3 deformedShift{ 0.15f, -0.1f, 0.05f };
+		const auto cubeVertexCount = static_cast<std::uint32_t>(Fs::MakeCube().Vertices.size());
+		const auto deformedCubeMesh = [&]
+		{
+			Fs::Mesh deformed = Fs::MakeCube();
+			const auto count = deformed.Vertices.size();
+			for (std::size_t v = 0; v < count; ++v)
+			{
+				auto previous = deformed.Vertices[v];
+				for (int c = 0; c < 3; ++c)
+				{
+					previous.Position[c] += deformedShift[c];
+				}
+				deformed.Vertices.push_back(previous);
+			}
+			return upload(deformed, "Deformed cube");
+		}();
+		bool deformedCube = false;
 		const auto& cubeMeta = *heap.GetMetadata(cubeMesh);
 		const auto& quadMeta = *heap.GetMetadata(quadMesh);
 		SWIM_REQUIRE(cubeMeta.VertexPage == quadMeta.VertexPage && cubeMeta.IndexPage == quadMeta.IndexPage);
+		SWIM_REQUIRE(heap.GetMetadata(deformedCubeMesh)->VertexPage == cubeMeta.VertexPage &&
+			heap.GetMetadata(deformedCubeMesh)->IndexPage == cubeMeta.IndexPage);
 		const ForwardPlusPageSlot pageSlot{ cubeMeta.IndexPage, cubeMeta.VertexPage };
 
 		// Scene: shape, transform, material per object; ObjectId = index.
@@ -498,7 +522,8 @@ namespace
 		{
 			std::vector<std::uint32_t> SortedObjects;
 			std::uint32_t Overflow = 0;
-			std::uint32_t MovingPixels = 0; // Opaque pixels with motion vectors above 1e-3 UV.
+			std::uint32_t MovingPixels = 0;	  // Opaque pixels with motion vectors above 1e-3 UV.
+			std::uint32_t DeformedPixels = 0; // Pixels of the deformed cube (previous positions from the page).
 		};
 
 		Rhi::TimelinePoint lastCompletion{};
@@ -784,7 +809,7 @@ namespace
 			float normalWorst = 0.0f;
 
 			std::uint32_t idInterior = 0, idMismatch = 0, compared = 0, outliers = 0, layered = 0, orderSensitive = 0;
-			std::uint32_t velocityCompared = 0, velocityOutliers = 0, moving = 0;
+			std::uint32_t velocityCompared = 0, velocityOutliers = 0, moving = 0, deformedCompared = 0;
 			float velocityWorst = 0.0f;
 			std::map<std::uint32_t, std::uint32_t> comparedPerObject;
 			double errorSum = 0.0;
@@ -824,7 +849,13 @@ namespace
 						{
 							local[r] = inverse[r * 3] * relative[0] + inverse[r * 3 + 1] * relative[1] + inverse[r * 3 + 2] * relative[2];
 						}
-						const auto motion = Fp::MotionVector(forward.ViewRecord, transform.Current, transform.Previous, local);
+						const bool deformed = deformedCube && pixel.Opaque->Object == 1;
+						const Fs::Float3 previousLocal = deformed
+							? Fs::Float3{ local[0] + deformedShift[0], local[1] + deformedShift[1], local[2] + deformedShift[2] }
+							: local;
+						const auto motion =
+							Fp::MotionVector(forward.ViewRecord, transform.Current, transform.Previous, local, previousLocal);
+						deformedCompared += deformed ? 1u : 0u;
 						bool outlier = false;
 						for (int c = 0; c < 2; ++c)
 						{
@@ -962,11 +993,12 @@ namespace
 			SWIM_CHECK(specularOutliers <= surfaceCompared / 200);
 			if (velocityCompared)
 			{
-				std::printf("             [forward+ %s] velocity: %u compared (%u moving), %u outliers, worst %.2e\n", spec.Name,
-					velocityCompared, moving, velocityOutliers, double(velocityWorst));
+				std::printf("             [forward+ %s] velocity: %u compared (%u moving, %u deformed), %u outliers, worst %.2e\n",
+					spec.Name, velocityCompared, moving, deformedCompared, velocityOutliers, double(velocityWorst));
 				SWIM_CHECK(velocityOutliers <= velocityCompared / 500);
 			}
 			result.MovingPixels = moving;
+			result.DeformedPixels = deformedCompared;
 			SWIM_CHECK(idInterior > width * height / 2);
 			SWIM_CHECK(idMismatch <= idInterior / 500);
 			SWIM_CHECK_EQUAL(maskedSeen, 0u);
@@ -1019,13 +1051,18 @@ namespace
 			RenderAffine moved;
 			std::copy(std::begin(objects[8].Transform.Current), std::end(objects[8].Transform.Current), moved.Rows.begin());
 			SWIM_CHECK(scene.SetTransform(handles[8], moved));
+			SWIM_CHECK(scene.SetMesh(handles[1], deformedCubeMesh, RenderBounds::FromMinMax({ -1, -1, -1 }, { 1, 1, 1 })));
+			SWIM_CHECK(scene.SetPreviousVertexOffset(handles[1], cubeVertexCount));
+			deformedCube = true;
 		}
 		const auto side = frame({ "moved", { 5.0f, 3.0f, 12.5f }, { 0.0f, 1.2f, 0.0f }, false, ForwardPlusDebugMode::None,
 			{ 0.08f, 0.08f, 0.1f }, 1, true, { 0.37f, -0.21f } });
 		SWIM_CHECK(position(lit.SortedObjects, 8) < position(lit.SortedObjects, 6));   // Red before green...
 		SWIM_CHECK(position(side.SortedObjects, 8) > position(side.SortedObjects, 6)); // ...until it moved in front.
 		SWIM_CHECK_EQUAL(lit.MovingPixels, 0u);										   // No history: the previous matrix is this frame's.
-		SWIM_CHECK(side.MovingPixels > width * height / 4);							   // The camera moved.
+		SWIM_CHECK(side.MovingPixels > width * height / 4);
+		SWIM_CHECK(
+			side.DeformedPixels > 200u); // The gold cube, now deforming, is in view.							   // The camera moved.
 
 		// 10,000 lights: clusters may truncate; the CPU uses the GPU's own lists.
 		for (int i = 0; i < 9700; ++i)

@@ -8,7 +8,8 @@ namespace Swim::Render
 	// GpuSceneRecords.slang mirrors it; a reflection test compares offsets). The
 	// row index is RenderObjectHandle::Index. It changes only when the object's
 	// mesh, material set, flags, skin, LOD bias or bounds change, never for
-	// transform-only updates, which touch GpuTransformRecord alone.
+	// transform-only updates, which touch GpuTransformRecord alone (deforming
+	// meshes keep their offset to the previous positions fixed).
 	struct GpuInstanceRecord
 	{
 		static constexpr std::uint32_t InvalidIndex = 0xffffffffu;
@@ -24,7 +25,10 @@ namespace Swim::Render
 		std::uint32_t SkinIndex = InvalidIndex;
 		float LodBias = 0.0f;
 		std::uint32_t Generation = 0; // RenderObjectHandle generation; zero when dead.
-		std::uint32_t Reserved = 0;
+		// Vertices between a vertex and its previous-frame position in the same
+		// vertex page (GPU-skinned output meshes, Renderer/Skinning); 0 = the mesh
+		// does not deform, so the previous position is this frame's local position.
+		std::uint32_t PreviousVertexOffset = 0;
 	};
 
 	static_assert(sizeof(GpuInstanceRecord) == 64);

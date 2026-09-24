@@ -103,6 +103,12 @@ namespace Swim::Render::ForwardPlus
 
 	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local)
 	{
+		return MotionVector(view, current, previous, local, local);
+	}
+
+	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local,
+		const Float3& previousLocal)
+	{
 		const auto project = [](const float (&m)[16], const Float3& p)
 		{
 			std::array<float, 4> clip{};
@@ -113,7 +119,7 @@ namespace Swim::Render::ForwardPlus
 			return Float2{ clip[0] / clip[3], clip[1] / clip[3] };
 		};
 		const auto now = project(view.ViewProjection, TransformPoint(current, local));
-		const auto before = project(view.PreviousViewProjection, TransformPoint(previous, local));
+		const auto before = project(view.PreviousViewProjection, TransformPoint(previous, previousLocal));
 		return { (now[0] - before[0]) * 0.5f, (now[1] - before[1]) * -0.5f };
 	}
 

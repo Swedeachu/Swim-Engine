@@ -117,11 +117,23 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	}
 	float4 viewProjection[4] = { projections[0], projections[1], projections[2], projections[3] };
 	const uint base = vertexId * ForwardVertexFloats;
+#if FORWARD_TRANSPARENT
 	float v[ForwardVertexFloats];
 	for (uint i = 0; i < ForwardVertexFloats; ++i)
 	{
 		v[i] = Vertices[base + i];
 	}
+#else
+	// Three more floats: the previous-frame local position, PreviousVertexOffset
+	// vertices further in the same page for GPU-skinned meshes (item 78), or this
+	// vertex's own position again (offset 0). Still one load site.
+	const uint previousBase = (vertexId + instance.PreviousVertexOffset) * ForwardVertexFloats;
+	float v[ForwardVertexFloats + 3];
+	for (uint i = 0; i < ForwardVertexFloats + 3; ++i)
+	{
+		v[i] = Vertices[i < ForwardVertexFloats ? base + i : previousBase + (i - ForwardVertexFloats)];
+	}
+#endif
 	const float3 position = float3(v[0], v[1], v[2]);
 	const float3 normal = float3(v[3], v[4], v[5]);
 	const float4 tangent = float4(v[6], v[7], v[8], v[9]);
@@ -144,7 +156,8 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	float4 previous[3] = { rows[3], rows[4], rows[5] };
 	output.CurrentClip = clip;
 	float4 previousViewProjection[4] = { projections[4], projections[5], projections[6], projections[7] };
-	output.PreviousClip = ForwardProject(previousViewProjection, float4(GpuSceneTransformPoint(previous, position), 1.0));
+	const float3 previousPosition = float3(v[ForwardVertexFloats], v[ForwardVertexFloats + 1], v[ForwardVertexFloats + 2]);
+	output.PreviousClip = ForwardProject(previousViewProjection, float4(GpuSceneTransformPoint(previous, previousPosition), 1.0));
 #endif
 	output.Mirrored = mirrored ? 1u : 0u;
 	return output;

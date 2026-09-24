@@ -14,19 +14,13 @@ namespace Swim::AssetCompiler
 {
 	namespace
 	{
-		constexpr std::array<std::byte, 8> SassetMagic
-		{
-			std::byte{ 'S' }, std::byte{ 'A' }, std::byte{ 'S' }, std::byte{ 'S' },
-			std::byte{ 'E' }, std::byte{ 'T' }, std::byte{ 0x0D }, std::byte{ 0x0A }
-		};
+		constexpr std::array<std::byte, 8> SassetMagic{ std::byte{ 'S' }, std::byte{ 'A' }, std::byte{ 'S' }, std::byte{ 'S' },
+			std::byte{ 'E' }, std::byte{ 'T' }, std::byte{ 0x0D }, std::byte{ 0x0A } };
 
 		class BinaryWriter
 		{
-		public:
-			void U8(std::uint8_t value)
-			{
-				bytes.push_back(static_cast<std::byte>(value));
-			}
+		  public:
+			void U8(std::uint8_t value) { bytes.push_back(static_cast<std::byte>(value)); }
 
 			void U16(std::uint16_t value)
 			{
@@ -42,10 +36,7 @@ namespace Swim::AssetCompiler
 				}
 			}
 
-			void I32(std::int32_t value)
-			{
-				U32(static_cast<std::uint32_t>(value));
-			}
+			void I32(std::int32_t value) { U32(static_cast<std::uint32_t>(value)); }
 
 			void U64(std::uint64_t value)
 			{
@@ -53,10 +44,7 @@ namespace Swim::AssetCompiler
 				U32(static_cast<std::uint32_t>(value >> 32));
 			}
 
-			void F32(float value)
-			{
-				U32(std::bit_cast<std::uint32_t>(value));
-			}
+			void F32(float value) { U32(std::bit_cast<std::uint32_t>(value)); }
 
 			void String(std::string_view value)
 			{
@@ -82,10 +70,7 @@ namespace Swim::AssetCompiler
 				Append(value);
 			}
 
-			void Append(std::span<const std::byte> value)
-			{
-				bytes.insert(bytes.end(), value.begin(), value.end());
-			}
+			void Append(std::span<const std::byte> value) { bytes.insert(bytes.end(), value.begin(), value.end()); }
 
 			void Align(std::size_t alignment)
 			{
@@ -98,10 +83,12 @@ namespace Swim::AssetCompiler
 			}
 
 			std::size_t Size() const { return bytes.size(); }
+
 			const std::vector<std::byte>& Bytes() const { return bytes; }
+
 			std::vector<std::byte>& Bytes() { return bytes; }
 
-		private:
+		  private:
 			std::vector<std::byte> bytes;
 		};
 
@@ -112,6 +99,27 @@ namespace Swim::AssetCompiler
 				writer.F32(value);
 			}
 			for (const float value : bounds.Max)
+			{
+				writer.F32(value);
+			}
+		}
+
+		void WriteFloats(BinaryWriter& writer, const std::vector<float>& values)
+		{
+			if (values.size() > std::numeric_limits<std::uint32_t>::max())
+			{
+				throw std::overflow_error("float array exceeds .sasset 32-bit count field");
+			}
+			writer.U32(static_cast<std::uint32_t>(values.size()));
+			for (const float value : values)
+			{
+				writer.F32(value);
+			}
+		}
+
+		void WriteMatrix(BinaryWriter& writer, const std::array<float, 16>& matrix)
+		{
+			for (const float value : matrix)
 			{
 				writer.F32(value);
 			}
@@ -178,15 +186,16 @@ namespace Swim::AssetCompiler
 			std::uint32_t Alignment = 1;
 			std::vector<std::byte> Bytes;
 		};
-	}
+	} // namespace
 
 	Swim::Assets::ContentHash ComputeSourceGraphHash(std::span<const Swim::Assets::SassetSourceDependency> dependencies)
 	{
 		std::vector<Swim::Assets::SassetSourceDependency> ordered(dependencies.begin(), dependencies.end());
-		std::sort(ordered.begin(), ordered.end(), [](const auto& left, const auto& right)
-		{
-			return left.LogicalPath < right.LogicalPath;
-		});
+		std::sort(ordered.begin(), ordered.end(),
+			[](const auto& left, const auto& right)
+			{
+				return left.LogicalPath < right.LogicalPath;
+			});
 
 		BinaryWriter writer;
 		writer.U32(static_cast<std::uint32_t>(ordered.size()));
@@ -219,8 +228,7 @@ namespace Swim::AssetCompiler
 			PendingChunk logicalPathChunk;
 			logicalPathChunk.Type = Swim::Assets::SassetChunkType::LogicalPath;
 			logicalPathChunk.Alignment = 1;
-			logicalPathChunk.Bytes.assign(
-				reinterpret_cast<const std::byte*>(logicalPath.data()),
+			logicalPathChunk.Bytes.assign(reinterpret_cast<const std::byte*>(logicalPath.data()),
 				reinterpret_cast<const std::byte*>(logicalPath.data() + logicalPath.size()));
 			chunks.push_back(std::move(logicalPathChunk));
 
@@ -239,7 +247,8 @@ namespace Swim::AssetCompiler
 			payloadChunk.Bytes = input.Payload;
 			chunks.push_back(std::move(payloadChunk));
 
-			if (input.Dependencies.size() > std::numeric_limits<std::uint32_t>::max() || chunks.size() > std::numeric_limits<std::uint32_t>::max())
+			if (input.Dependencies.size() > std::numeric_limits<std::uint32_t>::max() ||
+				chunks.size() > std::numeric_limits<std::uint32_t>::max())
 			{
 				result.Error = { Swim::Assets::SassetErrorCode::InvalidTable, ".sasset dependency/chunk count exceeds v1 limits" };
 				return result;
@@ -252,7 +261,8 @@ namespace Swim::AssetCompiler
 			{
 				if (!dependency.IsValid() || dependency == input.Id)
 				{
-					result.Error = { Swim::Assets::SassetErrorCode::InvalidTable, ".sasset dependency list contains an invalid/self dependency" };
+					result.Error = { Swim::Assets::SassetErrorCode::InvalidTable,
+						".sasset dependency list contains an invalid/self dependency" };
 					return result;
 				}
 				writer.U64(dependency.Value);
@@ -266,6 +276,7 @@ namespace Swim::AssetCompiler
 				std::uint64_t Offset = 0;
 				Swim::Assets::ContentHash Hash{};
 			};
+
 			std::vector<WrittenChunk> writtenChunks(chunks.size());
 			for (std::size_t index = 0; index < chunks.size(); ++index)
 			{
@@ -318,8 +329,10 @@ namespace Swim::AssetCompiler
 
 	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::MeshAsset& asset)
 	{
+		// Static meshes keep payload version 1 byte for byte; morph targets need 2.
+		const bool hasMorphs = !asset.MorphTargets.empty() || !asset.DefaultMorphWeights.empty();
 		BinaryWriter writer;
-		writer.U32(Swim::Assets::SassetPayloadVersion);
+		writer.U32(hasMorphs ? Swim::Assets::SassetMeshPayloadVersion : Swim::Assets::SassetPayloadVersion);
 		writer.U8(static_cast<std::uint8_t>(asset.IndexFormat));
 		WriteBounds(writer, asset.Bounds);
 
@@ -366,6 +379,18 @@ namespace Swim::AssetCompiler
 		writer.ByteVector(asset.IndexBytes);
 		writer.ByteVector(asset.MeshletVertexBytes);
 		writer.ByteVector(asset.MeshletTriangleBytes);
+		if (hasMorphs)
+		{
+			writer.U32(static_cast<std::uint32_t>(asset.MorphTargets.size()));
+			for (const auto& target : asset.MorphTargets)
+			{
+				writer.String(target.Name);
+				WriteFloats(writer, target.PositionDeltas);
+				WriteFloats(writer, target.NormalDeltas);
+				WriteFloats(writer, target.TangentDeltas);
+			}
+			WriteFloats(writer, asset.DefaultMorphWeights);
+		}
 		return std::move(writer.Bytes());
 	}
 
@@ -461,8 +486,15 @@ namespace Swim::AssetCompiler
 
 	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::ModelAsset& asset)
 	{
+		// Static models keep payload version 1 byte for byte; skins, morph weights,
+		// skeletons and animations need 2.
+		bool animated = !asset.Skeletons.empty() || !asset.Animations.empty();
+		for (const auto& node : asset.Nodes)
+		{
+			animated = animated || node.Skin.GetId().IsValid() || !node.MorphWeights.empty();
+		}
 		BinaryWriter writer;
-		writer.U32(Swim::Assets::SassetPayloadVersion);
+		writer.U32(animated ? Swim::Assets::SassetModelPayloadVersion : Swim::Assets::SassetPayloadVersion);
 		writer.U32(static_cast<std::uint32_t>(asset.Nodes.size()));
 		for (const auto& node : asset.Nodes)
 		{
@@ -475,13 +507,73 @@ namespace Swim::AssetCompiler
 			{
 				writer.U64(material.GetId().Value);
 			}
+			if (animated)
+			{
+				writer.U64(node.Skin.GetId().Value);
+				WriteFloats(writer, node.MorphWeights);
+			}
 		}
 		writer.U32(static_cast<std::uint32_t>(asset.Roots.size()));
 		for (const std::uint32_t root : asset.Roots)
 		{
 			writer.U32(root);
 		}
+		if (animated)
+		{
+			writer.U32(static_cast<std::uint32_t>(asset.Skeletons.size()));
+			for (const auto skeleton : asset.Skeletons)
+			{
+				writer.U64(skeleton.GetId().Value);
+			}
+			writer.U32(static_cast<std::uint32_t>(asset.Animations.size()));
+			for (const auto animation : asset.Animations)
+			{
+				writer.U64(animation.GetId().Value);
+			}
+		}
 		return std::move(writer.Bytes());
 	}
 
-}
+	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::SkeletonAsset& asset)
+	{
+		BinaryWriter writer;
+		writer.U32(Swim::Assets::SassetPayloadVersion);
+		WriteMatrix(writer, asset.RootTransform);
+		writer.U32(static_cast<std::uint32_t>(asset.Joints.size()));
+		for (const auto& joint : asset.Joints)
+		{
+			writer.String(joint.Name);
+			writer.U32(joint.Parent);
+			writer.U32(joint.SourceNode);
+			WriteTransform(writer, joint.RestTransform);
+			WriteMatrix(writer, joint.InverseBind);
+		}
+		return std::move(writer.Bytes());
+	}
+
+	std::vector<std::byte> SerializeAssetPayload(const Swim::Assets::AnimationClipAsset& asset)
+	{
+		BinaryWriter writer;
+		writer.U32(Swim::Assets::SassetPayloadVersion);
+		writer.String(asset.Name);
+		writer.F32(asset.Duration);
+		writer.U32(static_cast<std::uint32_t>(asset.Tracks.size()));
+		for (const auto& track : asset.Tracks)
+		{
+			writer.String(track.Target);
+			writer.U8(static_cast<std::uint8_t>(track.Path));
+			writer.U8(static_cast<std::uint8_t>(track.Interpolation));
+			writer.U32(track.Components);
+			WriteFloats(writer, track.Times);
+			WriteFloats(writer, track.Values);
+		}
+		writer.U32(static_cast<std::uint32_t>(asset.Events.size()));
+		for (const auto& event : asset.Events)
+		{
+			writer.F32(event.Time);
+			writer.String(event.Name);
+		}
+		return std::move(writer.Bytes());
+	}
+
+} // namespace Swim::AssetCompiler

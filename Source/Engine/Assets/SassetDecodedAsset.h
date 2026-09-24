@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Engine/Assets/AnimationClipAsset.h"
 #include "Engine/Assets/MaterialAsset.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/SassetFormat.h"
+#include "Engine/Assets/SkeletonAsset.h"
 #include "Engine/Assets/TextureAsset.h"
 
 #include <variant>
@@ -18,7 +20,7 @@ namespace Swim::Assets
 	struct SassetDecodedAsset
 	{
 		SassetMetadata Metadata;
-		std::variant<std::monostate, MeshAsset, TextureAsset, SamplerAsset, MaterialTemplateAsset> Asset;
+		std::variant<std::monostate, MeshAsset, TextureAsset, SamplerAsset, MaterialTemplateAsset, SkeletonAsset, AnimationClipAsset> Asset;
 
 		bool RequiresOwnerThreadDecode() const { return std::holds_alternative<std::monostate>(Asset); }
 	};

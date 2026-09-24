@@ -59,6 +59,8 @@ namespace Swim::Render
 		bool SetFlags(RenderObjectHandle object, RenderObjectFlags flags);
 		bool SetObjectId(RenderObjectHandle object, std::uint32_t objectId);
 		bool SetSkin(RenderObjectHandle object, std::uint32_t skinIndex);
+		// GpuInstanceRecord::PreviousVertexOffset (a GPU-skinned mesh's previous positions).
+		bool SetPreviousVertexOffset(RenderObjectHandle object, std::uint32_t vertices);
 		bool SetLodBias(RenderObjectHandle object, float lodBias);
 
 		// Mirror contents (what the GPU will hold after the next import).

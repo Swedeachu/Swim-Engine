@@ -28,6 +28,7 @@
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowRenderer.h"
 #include "Engine/Systems/Renderer/Particles/ParticleSystem.h"
+#include "Engine/Systems/Renderer/Skinning/SkinningSystem.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceEffects.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalAntiAliasing.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
@@ -99,3 +100,7 @@ static_assert(!std::is_copy_constructible_v<Swim::Render::ParticleSystem>);
 static_assert(sizeof(Swim::Render::GpuParticle) == 48 && sizeof(Swim::Render::GpuParticleEmitter) == 320 &&
 	sizeof(Swim::Render::GpuParticleFrame) == 128 && sizeof(Swim::Render::GpuParticleCounters) == 16);
 static_assert(Swim::Render::ParticleRenderBindings::BindlessSpace == Swim::Render::ForwardPlusDrawBindings::BindlessSpace);
+static_assert(!std::is_copy_constructible_v<Swim::Render::SkinningSystem>);
+static_assert(
+	sizeof(Swim::Render::GpuSkinVertex) == 32 && sizeof(Swim::Render::GpuMorphDelta) == 40 && sizeof(Swim::Render::GpuSkinDispatch) == 48);
+static_assert(sizeof(Swim::Render::GpuInstanceRecord) == 64 && offsetof(Swim::Render::GpuInstanceRecord, PreviousVertexOffset) == 60);

@@ -572,6 +572,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# GPU skinning and morph targets (item 78).
+	swim_add_slang_program(SwimSkinning
+		SOURCE Source/Shaders/Slang/Skinning/Skinning.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimForwardTransparentSort
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
@@ -629,6 +635,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimScreenSpaceBlur_SPIRV}" "${SwimScreenSpaceBlur_REFLECTION}"
 			"${SwimScreenSpaceComposite_SPIRV}" "${SwimScreenSpaceComposite_REFLECTION}"
 			"${SwimScreenSpaceReflection_SPIRV}" "${SwimScreenSpaceReflection_REFLECTION}"
+			"${SwimSkinning_SPIRV}" "${SwimSkinning_REFLECTION}"
 			"${SwimParticleSimulate_SPIRV}" "${SwimParticleSimulate_REFLECTION}"
 			"${SwimParticleEmit_SPIRV}" "${SwimParticleEmit_REFLECTION}"
 			"${SwimParticleCompact_SPIRV}" "${SwimParticleCompact_REFLECTION}"
@@ -705,6 +712,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/Particles/ParticleCompact.slang
 			Source/Shaders/Slang/Particles/ParticleFinalize.slang
 			Source/Shaders/Slang/Particles/ParticleRender.slang
+			Source/Shaders/Slang/Skinning/SkinningRecords.slang
+			Source/Shaders/Slang/Skinning/Skinning.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -716,7 +725,7 @@ endif()
 # clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
 # Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/), temporal
 # anti-aliasing (Temporal/), screen-space AO, reflections and fog (ScreenSpace/),
-# GPU particles (Particles/) and the asset
+# GPU particles (Particles/), GPU skinning (Skinning/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -753,6 +762,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/
@@ -761,6 +772,15 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 file(GLOB SWIM_SCENE_RENDER_EXTRACTION_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.h
+)
+
+# CPU animation runtime (Systems/Animation): skeletons, clip sampling, pose
+# blending, layered state machines, root motion, sockets and skinning palettes.
+# It reaches only Assets' plain asset structs and Jobs; nothing renderer- or
+# scene-specific. SwimEngine compiles it through its own Source/Engine glob.
+file(GLOB_RECURSE SWIM_ANIMATION_SOURCES
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Animation/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Animation/*.h
 )
 
 # Residency/ connects Assets + async IO + Jobs to the GPU residency layers, so it

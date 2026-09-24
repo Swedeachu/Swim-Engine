@@ -19,5 +19,8 @@ namespace Swim::Render
 		RenderObjectFlags Flags = RenderObjectFlags::Default; // Producer bits only.
 		std::uint32_t SkinIndex = GpuInstanceRecord::InvalidIndex;
 		float LodBias = 0.0f;
+		// GpuInstanceRecord::PreviousVertexOffset: SkinningSystem::GetPreviousVertexOffset
+		// for a GPU-skinned output mesh, 0 for rigid meshes.
+		std::uint32_t PreviousVertexOffset = 0;
 	};
 } // namespace Swim::Render
