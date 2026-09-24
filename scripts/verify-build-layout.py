@@ -1278,6 +1278,31 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
         fail("SwimTests must link Swim::TextDependencies privately for the Text suites", failures)
     check_suite_is_compiled("Text", "TextDependencyTests.cpp", failures)
 
+    for group, name in (("Text", "FontFaceTests.cpp"), ("Text", "GlyphAtlasTests.cpp"), ("UI", "UiDocumentTests.cpp")):
+        check_suite_is_compiled(group, name, failures)
+    for fragment in ("SWIM_TEXT_UI_SOURCES", "target_link_libraries(SwimEngine PRIVATE Swim::TextDependencies)"):
+        if fragment not in cmake_text:
+            fail(f"text/UI runtime build wiring is missing: {fragment}", failures)
+    for fragment in ("${SWIM_TEXT_UI_SOURCES}", "SwimTextUiPublicHeaders", "SWIM_TEXT_FONT_FIXTURE_PATH"):
+        if fragment not in read_tests_cmake():
+            fail(f"text/UI test wiring is missing: {fragment}", failures)
+
+    # No scene/renderer/platform dependency, and no third-party types in public headers.
+    text_ui_roots = (ROOT / "Source/Engine/Systems/Text", ROOT / "Source/Engine/Systems/UI")
+    for module in text_ui_roots:
+        for path in module.rglob("*"):
+            if not path.is_file() or path.suffix not in SOURCE_SUFFIXES:
+                continue
+            content = path.read_text(encoding="utf-8", errors="ignore")
+            for forbidden in ("Engine/Systems/Renderer/", "Engine/Systems/Scene/", "Engine/Platform/",
+                              "Engine/Components/", "<SDL", "<vulkan", "<entt", "SwimEngine::GetInstance"):
+                if forbidden in content:
+                    fail(f"text/UI dependency boundary violated: {path.relative_to(ROOT)} ({forbidden})", failures)
+            if path.suffix == ".h":
+                for forbidden in ("ft2build.h", "FT_FREETYPE_H", "<freetype/", "<hb", "<msdfgen", "FT_Face", "hb_font_t", "msdfgen::"):
+                    if forbidden in content:
+                        fail(f"text implementation type leaked into public header: {path.relative_to(ROOT)} ({forbidden})", failures)
+
     # Only the text/UI module (Systems/Text, Systems/UI) and its tests may see the libraries.
     allowed_roots = (
         ROOT / "Source" / "Engine" / "Systems" / "Text",

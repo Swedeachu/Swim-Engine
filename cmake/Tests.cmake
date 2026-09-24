@@ -112,6 +112,10 @@ function(swim_configure_tests)
 		SOURCE Source/Tests/HeaderBoundary/AnimationPublicHeaders.cpp
 		BUILD_BY_DEFAULT)
 
+	swim_add_header_boundary(SwimTextUiPublicHeaders
+		SOURCE Source/Tests/HeaderBoundary/TextUiPublicHeaders.cpp
+		BUILD_BY_DEFAULT)
+
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_add_header_boundary(SwimRhiVulkanPublicHeaders
 			SOURCE Source/Tests/HeaderBoundary/RhiVulkanPublicHeaders.cpp
@@ -229,10 +233,11 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::AssetCompiler Swim::AssetCompilerDraco)
 	endif()
 
-	# Text suites prove the FreeType/HarfBuzz/msdfgen integration; the libraries
+	# Text/UI suites cover shaping, atlas residency, retained layout and input; the libraries
 	# are private to SwimTests like every other module dependency.
 	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
-		swim_collect_test_suite_sources(SWIM_TEXT_SUITES Text)
+		swim_collect_test_suite_sources(SWIM_TEXT_SUITES Text UI)
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_TEXT_UI_SOURCES})
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_TEXT_SUITES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::TextDependencies)
 	endif()
@@ -311,6 +316,10 @@ function(swim_configure_tests)
 	endif()
 
 	target_include_directories(SwimTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
+		target_compile_definitions(SwimTests PRIVATE
+			SWIM_TEXT_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf")
+	endif()
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
 

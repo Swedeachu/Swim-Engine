@@ -791,6 +791,18 @@ file(GLOB_RECURSE SWIM_ANIMATION_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Animation/*.h
 )
 
+# Item 79 text/UI runtime. Third-party headers stay in Text implementation
+# files; public contracts, UI layout and paint records use Swim types only.
+set(SWIM_TEXT_UI_SOURCES "")
+if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
+	file(GLOB_RECURSE SWIM_TEXT_UI_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.h
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.h
+	)
+endif()
+
 # Residency/ connects Assets + async IO + Jobs to the GPU residency layers, so it
 # is compiled only where those foundation sources are (never with offline stubs).
 file(GLOB_RECURSE SWIM_RENDER_RESIDENCY_SOURCES
@@ -1015,6 +1027,9 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
+if(NOT SWIM_TEXT_DEPENDENCIES_AVAILABLE)
+	list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/(Text|UI)/")
+endif()
 
 list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSICS_SOURCES})
 if(SWIM_JOLT_BACKEND_AVAILABLE)
@@ -1198,6 +1213,10 @@ target_link_libraries(SwimEngine PRIVATE
 	Swim::BasisTranscoder
 	glad::glad
 )
+
+if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
+	target_link_libraries(SwimEngine PRIVATE Swim::TextDependencies)
+endif()
 
 if(SWIM_VULKAN_RHI_AVAILABLE)
 	target_link_libraries(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
