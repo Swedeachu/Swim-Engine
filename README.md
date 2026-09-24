@@ -261,6 +261,8 @@ build\windows-release\SwimAssetCooker.exe Assets
 
 The asset compiler owns pinned simdjson/fastgltf/meshoptimizer/Draco/libwebp dependencies through `Swim::AssetCompilerDependencies`. Draco 1.5.7 is wrapped by `Swim::AssetCompilerDraco`, which supplies both its `<source>/src` headers and generated `draco/draco_features.h` include root to compiler/test consumers while keeping that package-layout quirk out of first-party source. The first Windows build after adding or changing this checkpoint should use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
 
+Runtime text uses FreeType 2.14.3, HarfBuzz 14.5.0 and msdfgen 1.13 (core), pinned in `cmake/TextDependencies.cmake` and bundled privately as `Swim::TextDependencies` (Phase 20, item 79). The `Text.Dependencies` cases prove all three build and link. A dependency cache made before these libraries existed needs one configure with downloads enabled (`cmake --preset windows-release -DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) or one clean build. Soft builds cannot fetch them.
+
 For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf, Draco, libwebp, and meshoptimizer stay on the compiler side. Basis Universal is the intentional transitional exception: only `Swim::BasisTranscoder` remains runtime-facing while universal KTX2/Basis payloads are transcoded at residency time.
 
 ### Dependency policy

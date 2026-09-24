@@ -137,6 +137,14 @@ include(cmake/PlatformDependencies.cmake)
 set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
 unset(SWIM_SAVED_CMAKE_FOLDER)
 
+# FreeType, HarfBuzz and msdfgen for runtime text (Phase 20, item 79). They stay
+# private to the text/UI module behind Swim::TextDependencies.
+set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text")
+include(cmake/TextDependencies.cmake)
+set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
+unset(SWIM_SAVED_CMAKE_FOLDER)
+
 # Build scripts always run an explicit configure before compiling. Keep source
 # discovery configure-time only instead of using CONFIGURE_DEPENDS: the latter
 # adds Ninja VerifyGlobs manifest edges, which can participate in a perpetual

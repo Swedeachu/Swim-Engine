@@ -16,10 +16,13 @@ VENDORED_DEPENDENCIES = (
     "basis",
     "draco",
     "fastgltf",
+    "freetype",
     "glad",
     "glm",
+    "harfbuzz",
     "json",
     "meshoptimizer",
+    "msdfgen",
     "physx",
     "simdjson",
     "spdlog",
@@ -47,6 +50,7 @@ REQUIRED_CMAKE_FILES = (
     "cmake/PlatformDependencies.cmake",
     "cmake/MathDependencies.cmake",
     "cmake/AssetCompilerDependencies.cmake",
+    "cmake/TextDependencies.cmake",
     "cmake/PhysX.cmake",
     "cmake/SolutionLayout.cmake",
 )
@@ -1238,6 +1242,61 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         text = path.read_text(encoding="utf-8", errors="ignore")
         if fragment not in text:
             fail(f"project-local include spelling/case regressed in {path.relative_to(ROOT)}: {fragment}", failures)
+
+def check_phase20_text_dependencies(failures: list[str]) -> None:
+    """Item 79 groundwork: FreeType, HarfBuzz and msdfgen are pinned CPM
+    dependencies bundled as Swim::TextDependencies and stay private to the
+    text/UI module and its tests."""
+    dependency_path = ROOT / "cmake" / "TextDependencies.cmake"
+    if not dependency_path.is_file():
+        fail("Phase 20 text dependency module is missing: cmake/TextDependencies.cmake", failures)
+        return
+    dependency_text = dependency_path.read_text(encoding="utf-8", errors="ignore")
+    for fragment in (
+        "GITHUB_REPOSITORY freetype/freetype",
+        "GIT_TAG VER-2-14-3",
+        "GITHUB_REPOSITORY harfbuzz/harfbuzz",
+        "GIT_TAG 14.5.0",
+        "src/harfbuzz.cc",
+        "GITHUB_REPOSITORY Chlumsky/msdfgen",
+        "GIT_TAG v1.13",
+        'set(MSDFGEN_CORE_ONLY ON CACHE BOOL "" FORCE)',
+        'PROPERTY MSVC_RUNTIME_LIBRARY "${CMAKE_MSVC_RUNTIME_LIBRARY}"',
+        'set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")',
+        "add_library(Swim::TextDependencies ALIAS SwimTextDependencies)",
+        "set(SWIM_TEXT_DEPENDENCIES_AVAILABLE ON)",
+    ):
+        if fragment not in dependency_text:
+            fail(f"Phase 20 text dependency contract is missing: {fragment}", failures)
+    if dependency_text.count("UPDATE_DISCONNECTED YES") < 3:
+        fail("Phase 20 text dependencies must all be UPDATE_DISCONNECTED", failures)
+
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
+    if "include(cmake/TextDependencies.cmake)" not in cmake_text:
+        fail("CMakeLists.txt does not include cmake/TextDependencies.cmake", failures)
+    if "Swim::TextDependencies" not in read_tests_cmake():
+        fail("SwimTests must link Swim::TextDependencies privately for the Text suites", failures)
+    check_suite_is_compiled("Text", "TextDependencyTests.cpp", failures)
+
+    # Only the text/UI module (Systems/Text, Systems/UI) and its tests may see the libraries.
+    allowed_roots = (
+        ROOT / "Source" / "Engine" / "Systems" / "Text",
+        ROOT / "Source" / "Engine" / "Systems" / "UI",
+        ROOT / "Source" / "Tests" / "Suites" / "Text",
+    )
+    library_includes = ("<ft2build.h>", "FT_FREETYPE_H", "<freetype/", "<hb.h>", "<hb-", "<msdfgen")
+    for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game", ROOT / "Source" / "Tools", ROOT / "Source" / "Tests"):
+        if not source_root.exists():
+            continue
+        for path in source_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+                continue
+            if any(path.is_relative_to(allowed) for allowed in allowed_roots):
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if any(f"#include {token}" in text or f"#include{token}" in text for token in library_includes):
+                fail(f"text library headers leaked outside the text/UI module: {path.relative_to(ROOT)}", failures)
+
 
 def check_phase3_job_architecture(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
@@ -4235,6 +4294,7 @@ def main() -> int:
     check_foundation_architecture_boundaries(failures)
     check_phase2_engine_architecture(failures)
     check_phase3_job_architecture(failures)
+    check_phase20_text_dependencies(failures)
     check_phase3_io_architecture(failures)
     check_phase3_memory_architecture(failures)
     check_phase4_asset_architecture(failures)

@@ -229,6 +229,14 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::AssetCompiler Swim::AssetCompilerDraco)
 	endif()
 
+	# Text suites prove the FreeType/HarfBuzz/msdfgen integration; the libraries
+	# are private to SwimTests like every other module dependency.
+	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
+		swim_collect_test_suite_sources(SWIM_TEXT_SUITES Text)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_TEXT_SUITES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::TextDependencies)
+	endif()
+
 	if(TARGET SwimShaderCompiler)
 		swim_collect_test_suite_sources(SWIM_SHADER_COMPILER_SUITES ShaderCompiler)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_SHADER_COMPILER_SUITES})

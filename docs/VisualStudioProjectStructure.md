@@ -392,6 +392,7 @@ Examples include groups for:
 - Jolt;
 - PhysX;
 - Vulkan RHI (volk, vk-bootstrap, VulkanMemoryAllocator);
+- Text (FreeType, `SwimHarfBuzz`, msdfgen-core; item 79);
 - other backend/runtime dependencies.
 
 These are **not first-party engine modules** just because they appear as Visual Studio projects.
