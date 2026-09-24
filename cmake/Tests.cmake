@@ -162,6 +162,7 @@ function(swim_configure_tests)
 		RenderLights
 		RenderClusteredLighting
 		RenderForwardPlus
+		RenderShadows
 		Commands
 	)
 
@@ -382,6 +383,10 @@ function(swim_configure_tests)
 			SWIM_FORWARD_TRANSPARENT_REFLECTION_PATH="${SwimForwardTransparent_REFLECTION}"
 			SWIM_FORWARD_TRANSPARENT_SORT_SPIRV_PATH="${SwimForwardTransparentSort_SPIRV}"
 			SWIM_FORWARD_TRANSPARENT_SORT_REFLECTION_PATH="${SwimForwardTransparentSort_REFLECTION}"
+			SWIM_SHADOW_DEPTH_SPIRV_PATH="${SwimShadowDepth_SPIRV}"
+			SWIM_SHADOW_DEPTH_REFLECTION_PATH="${SwimShadowDepth_REFLECTION}"
+			SWIM_SHADOW_MASKED_SPIRV_PATH="${SwimShadowMasked_SPIRV}"
+			SWIM_SHADOW_MASKED_REFLECTION_PATH="${SwimShadowMasked_REFLECTION}"
 		)
 	endif()
 

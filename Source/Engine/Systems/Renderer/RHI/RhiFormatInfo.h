@@ -37,4 +37,13 @@ namespace Swim::Rhi
 		}
 	}
 
+	// Bytes per texel of a buffer/image transfer: the color formats above plus
+	// D32Float, whose only aspect (depth) copies as tightly packed 32-bit floats
+	// (for example a shadow atlas read back for verification). Zero otherwise:
+	// packed depth/stencil formats need a per-aspect contract.
+	constexpr std::uint32_t GetTransferTexelBytes(Format format)
+	{
+		return format == Format::D32Float ? 4u : GetUncompressedColorTexelBytes(format);
+	}
+
 } // namespace Swim::Rhi

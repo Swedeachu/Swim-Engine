@@ -101,7 +101,7 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "DrawProgramsMatchTheBindingContra
 			{
 				SWIM_CHECK(type == Rhi::DescriptorType::Sampler);
 			}
-			else if (binding == B::EnvironmentPrefiltered || binding == B::EnvironmentBrdfLut)
+			else if (binding == B::EnvironmentPrefiltered || binding == B::EnvironmentBrdfLut || binding == B::ShadowAtlas)
 			{
 				SWIM_CHECK(type == Rhi::DescriptorType::SampledTexture);
 			}

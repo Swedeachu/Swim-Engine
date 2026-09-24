@@ -58,7 +58,7 @@ The light model follows glTF `KHR_lights_punctual`. Positions and directions are
 
 - **Row ranges:** directional lights occupy rows [0, `DirectionalCount`). Local lights occupy rows [`FirstLocalRow`, `FirstLocalRow` + `LocalCount`), where `FirstLocalRow` equals the directional capacity. Both ranges are dense.
 - **Header:** the 32-byte `GpuLightHeader` storage buffer carries the counts. Shaders loop without holes, and the clustered assignment reads only the local range; directional lights stay outside cluster lists.
-- **Shadows:** the record carries a shadow index and flags only. It knows nothing about shadow internals (Phase 16).
+- **Shadows:** the record carries a shadow index and flags only. It knows nothing about shadow internals: `ShadowIndex` names a `GpuShadowRecord` slot that the shadow planner fills each frame (see [Shadows](Shadows.md#records)).
 
 ## GpuLightBuffer
 

@@ -16,6 +16,7 @@ namespace Swim::Render
 
 	// ForwardViewRecord::Flags.
 	inline constexpr std::uint32_t ForwardViewFlagEnvironment = 1u << 0; // Image-based lighting is bound.
+	inline constexpr std::uint32_t ForwardViewFlagShadows = 1u << 1;	 // A shadow atlas is bound (Phase 16).
 
 	// ForwardViewRecord::DebugMode.
 	enum class ForwardPlusDebugMode : std::uint32_t

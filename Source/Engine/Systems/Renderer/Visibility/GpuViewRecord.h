@@ -17,6 +17,9 @@ namespace Swim::Render
 		ForwardDepth = 1u << 3,
 		// The late phase draws every remaining in-frustum object (HZB test skipped).
 		DisableOcclusion = 1u << 4,
+		// Shadow views: only objects with RenderObjectFlags::CastShadows are drawable;
+		// the rest count as NotDrawable (Phase 16 GPU caster culling).
+		ShadowCasters = 1u << 5,
 		// Both histories reset: what a camera cut or teleport sets.
 		CameraCut = ResetLodHistory | ResetOcclusionHistory,
 	};

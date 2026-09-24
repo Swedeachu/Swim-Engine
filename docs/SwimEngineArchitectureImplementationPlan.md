@@ -27,9 +27,28 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68) and opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69) and cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
+- **Latest renderer checkpoint — items 70, 71 and 72: directional, spot and point shadows (2026-09-23):** Phase 16's first checkpoint shadows every light kind from one depth atlas, rendered GPU-driven and sampled by Clustered Forward+.
+  - **`Renderer/Shadows`:**
+    - **Directional (item 70):** `ComputeCascades` fits 1–4 cascades (practical splits) with rotation-invariant bounding spheres, texel-snapped centers and a caster extension toward the light.
+    - **Spot (item 71):** each spot gets one cone view. `ShadowAtlasAllocator` places power-of-two tiles in priority order and keeps last frame's tiles for unchanged requests. When the atlas is full it downgrades, then displaces lower-priority tiles, then evicts; downgraded tiles grow back when room frees.
+    - **Point (item 72):** six cube faces as atlas tiles, only for lights with `CastsShadows`. Cost is controlled by per-kind budgets (`MaxPointShadows` 2, `MaxSpotShadows` 16, `MaxDirectionalShadows` 1), per-light resolutions and the atlas policy.
+    - `PlanShadows` turns casters into `GpuShadowRecord`s (slot = `GpuLightRecord::ShadowIndex`), `GpuShadowView`s, tiles and visibility views. Over-budget and evicted lights become `ShadowKind::None` (lit).
+    - `ShadowRenderer` records one GPU caster cull per view (`GpuViewFlags::ShadowCasters`: `RenderObjectFlags::CastShadows` joins the drawable mask), then a single depth pass that draws each tile's Opaque and Masked bins. `SwimShadowMasked` is the alpha-tested variant; blended materials cast nothing.
+    - Sampling is PCF with receiver-side normal-offset and slope bias, scaled by the kernel radius, using exact `Load`s. `Shadows::ShadowFactor` is the CPU definition.
+  - **Integration:** Forward+ binds the atlas, records and views (15–17), sets `ForwardViewFlagShadows` and scales every shadowed directional and clustered light by its factor; without shadows it binds stand-ins. `Rhi::GetTransferTexelBytes` lets `D32Float` textures be read back (depth aspect), so the atlas can be verified.
+  - **Fixed along the way:**
+    - The opaque depth variant's fragment stage originally took an input struct holding only `SV_Position`. That reflects without a varying binding, which the RHI interface conversion rejects. The fragment stage now has no parameters, and `ShaderCompiler.ShadowLayout` pins it.
+    - The mock command list now records pipeline, table, viewport, scissor and index-buffer binds.
+  - **Validation:**
+    - The official Linux configuration passes **590 cases / 260,048 checks** (was 555 / 249,085). The EnTT-enabled sanitizer build passes 613 cases cleanly.
+    - The CPU sampling tests compare shadow factors with exact ray-cast visibility for cascades, spots and every cube face. They also show no acne on lit caster faces.
+    - The new native smoke `ShadowedForwardPlusMatchesTheCpuReference` reads the atlas back and compares it texel by texel with CPU shadow maps: masked-away, blended and non-casting objects must be absent. It compares the shadowed image with `ForwardPlus::Shade` over the GPU's own atlas, and runs an eviction frame.
+    - 36 native cases now. See [Shadows](Shadows.md) and [the items 70–72 record](validation/Items70-72-2026-09-23.md).
+  - **Desktop run (RTX 4070 Laptop):** core and synchronization validation pass all 36 native cases. The shadow atlas matched the CPU shadow maps with 0 mismatches, and the shadowed image had 0 outliers (mean error 3.4·10⁻⁴). GPU-assisted validation failed both Forward+ smokes on `GPUAV-Compile-time-general-buffer`: more than 75 instrumented buffer accesses per module. The shader now has one light loop (the shadow lookup is inlined once), member view loads and single copies of the transform and vertex, which brings it from 125 to 72. `ShaderCompiler.GpuAvBudget` (591 cases now) fails any renderer program above the limit.
+  - **Still needed:** the GPU-assisted and combined re-run, then recording shadow pass timings as budgets. HDR scene color, exposure and tone mapping (item 73) come next on the critical path. Engine wiring remains item 56.
+- **Previous renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
   - **`Renderer/ForwardPlus` (items 66–67):**
     - `ForwardPlusRenderer::Record` draws GPU visibility's Opaque bin GPU-driven, shaded by `ClusteredForward.slang` into HDR color, an object-id target and reverse-Z depth. Shading is `StandardPbr` through the material table and bindless textures, plus directional lights, the pixel's cluster list, ambient, optional IBL and emission.
     - It then sorts the Transparent bin (`StandardPbr::FlagAlphaBlend`) back to front on the GPU with a bitonic network. The order is deterministic, independent of compaction order, and the unused commands are zeroed. The sorted draws are blended with premultiplied alpha.
@@ -46,8 +65,8 @@ This section is the short authoritative status summary for the current repositor
   - **First desktop run (RTX 4070 Laptop):**
     - The Forward+ smoke matched the CPU reference in every frame, with 0 id mismatches, 0 outliers and a mean error of 3·10⁻⁴. It failed only on one validation warning: the transparent variant wrote an unread `ObjectId` varying. That is now fixed.
     - The per-pass timings overlapped. `GraphPassTiming` gained `EndOffsetNanoseconds`, and the smokes now attribute time by end timestamps.
-  - **Still needed:** a clean re-run of both smokes on all profiles, then recording the GPU timings as budgets. Directional shadows (item 70) come next on the critical path. Engine wiring remains item 56.
-- **Previous renderer checkpoint — items 64, 65 and 68: cluster grid, GPU light assignment and overflow diagnostics (2026-09-23):** local lights are now binned into compact per-cluster lists on the GPU.
+  - **Still needed:** a clean re-run of both smokes on all profiles, then recording the GPU timings as budgets. Shadows (items 70–72) followed.
+- **Earlier renderer checkpoint — items 64, 65 and 68: cluster grid, GPU light assignment and overflow diagnostics (2026-09-23):** local lights are now binned into compact per-cluster lists on the GPU.
   - **`Renderer/ClusteredLighting`:**
     - `ClusterGrid` (item 64): screen tiles × logarithmic depth slices, with configurable tile size, slice count, near/far and limits. It works for any perspective depth mapping, decodes view depth from the depth buffer, and is rebuilt per frame, so resizing is just a new desc.
     - `ClusteredLightAssigner` (item 65) records five deterministic compute passes with no atomics: light cull to view space, cluster AABBs, count, a one-group prefix scan into compact offsets, and write. Lists are in light-index order. Directional lights stay outside them.
@@ -4007,33 +4026,33 @@ Set practical configurable budgets from measurement rather than arbitrary hardco
 
 ### Directional
 
-- [ ] cascaded shadow maps or another stable first implementation;
-- [ ] stable cascade snapping;
-- [ ] GPU-driven caster culling;
-- [ ] alpha-mask shadow variant;
-- [ ] configurable cascade count/resolution.
+- [x] cascaded shadow maps or another stable first implementation; *(item 70: `ComputeCascades`, practical splits, rotation-invariant spheres; [Shadows](Shadows.md#directional-shadows-item-70))*
+- [x] stable cascade snapping; *(centers rounded to whole light-space texels)*
+- [x] GPU-driven caster culling; *(`GpuVisibility` per shadow view with `GpuViewFlags::ShadowCasters`)*
+- [x] alpha-mask shadow variant; *(`SwimShadowMasked`, `SHADOW_ALPHA_TEST=1`; blended materials cast nothing)*
+- [x] configurable cascade count/resolution. *(`CascadeSettings` 1–4 cascades, `CascadeResolution`)*
 
 ### Spot
 
-- [ ] shadow atlas allocator;
-- [ ] stable allocation where possible;
-- [ ] budget/eviction policy;
-- [ ] GPU caster culling.
+- [x] shadow atlas allocator; *(item 71: `ShadowAtlasAllocator`, power-of-two tiles in one D32 atlas)*
+- [x] stable allocation where possible; *(unchanged requests keep last frame's tiles, downgraded tiles grow back)*
+- [x] budget/eviction policy; *(per-kind budgets by priority, downgrade → displacement → eviction to `ShadowKind::None`)*
+- [x] GPU caster culling.
 
 ### Point
 
-- [ ] cube/array strategy only for selected shadow-casting lights;
-- [ ] explicit cost controls.
+- [x] cube/array strategy only for selected shadow-casting lights; *(item 72: six cube faces as atlas tiles, only for `CastsShadows` lights with a slot)*
+- [x] explicit cost controls. *(`MaxPointShadows`, per-light resolution, atlas downgrade/eviction, `ShadowPlanStats`)*
 
 ### Filtering/bias
 
-- PCF baseline;
-- slope/depth/normal-offset policy;
+- PCF baseline; *(done: (2R + 1)² exact comparisons)*
+- slope/depth/normal-offset policy; *(done: receiver-side normal offset + slope term scaled by the kernel, constant depth bias)*
 - later EVSM/VSM/PCSS experiments as modules.
 
 ### Integration
 
-`GpuLight` stores a shadow handle/index. Clustered lighting does not need to know shadow implementation internals.
+`GpuLight` stores a shadow handle/index. Clustered lighting does not need to know shadow implementation internals. *(Done: `GpuLightRecord::ShadowIndex` names a `GpuShadowRecord` slot; Forward+ calls `ShadowFactor` without knowing the kind.)*
 
 ---
 
@@ -4814,9 +4833,9 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 
 ### 35.7 Complete modern frame
 
-70. [ ] directional shadows.
-71. [ ] spot atlas.
-72. [ ] point shadow policy.
+70. [x] directional shadows. *(2026-09-23: `Renderer/Shadows` cascades + `Shaders/Slang/Shadows`; [Shadows](Shadows.md). Native smoke awaits desktop execution.)*
+71. [x] spot atlas. *(2026-09-23: `ShadowAtlasAllocator` + `ShadowPlanner` budgets.)*
+72. [x] point shadow policy. *(2026-09-23: six cube-face tiles under `MaxPointShadows` and the atlas policy.)*
 73. [ ] HDR scene color/exposure/tone mapping.
 74. [ ] bloom/color grading.
 75. [ ] motion vectors/TAA.

@@ -43,7 +43,11 @@ namespace Swim::Render
 		lodState.resize(std::max(lodState.size(), inputs.Instances.size()));
 		auto& stats = result.Stats;
 		const auto live = static_cast<std::uint32_t>(RenderObjectFlags::Live);
-		const auto drawable = static_cast<std::uint32_t>(RenderObjectFlags::Live | RenderObjectFlags::HasMesh | RenderObjectFlags::Visible);
+		const auto casters = (inputs.View.Flags & std::uint32_t(GpuViewFlags::ShadowCasters)) != 0
+			? static_cast<std::uint32_t>(RenderObjectFlags::CastShadows)
+			: 0u;
+		const auto drawable =
+			static_cast<std::uint32_t>(RenderObjectFlags::Live | RenderObjectFlags::HasMesh | RenderObjectFlags::Visible) | casters;
 		const bool reset = (inputs.View.Flags & std::uint32_t(GpuViewFlags::ResetLodHistory)) != 0;
 		for (std::uint32_t row = 0; row < inputs.Instances.size(); ++row)
 		{

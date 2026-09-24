@@ -1,5 +1,6 @@
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusRenderer.h"
 #include "Engine/Systems/Renderer/Environment/EnvironmentBindings.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowRecords.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Visibility/DepthConvention.h"
@@ -75,19 +76,25 @@ namespace Swim::Render
 			GraphTexture Prefiltered;
 			GraphTexture BrdfLut;
 			std::uint32_t PrefilteredMipCount = 1;
+			GraphTexture ShadowAtlas;
+			bool ShadowAtlasIsDepth = false; // D32 (depth aspect) or the R32Float stand-in.
+			GraphBuffer ShadowRecords;
+			GraphBuffer ShadowViews;
 			std::vector<GraphBuffer> VertexPages; // Per slot.
 			std::vector<GraphBuffer> IndexPages;  // Per slot.
 		};
 
 		void DeclareDrawReads(RenderGraphBuilder& b, const DrawInputs& inputs)
 		{
-			for (const auto buffer : { inputs.Instances, inputs.Transforms, inputs.DrawRecords, inputs.View, inputs.Materials,
-					 inputs.Lights, inputs.LightHeader, inputs.Grid, inputs.Records, inputs.Indices, inputs.Irradiance })
+			for (const auto buffer :
+				{ inputs.Instances, inputs.Transforms, inputs.DrawRecords, inputs.View, inputs.Materials, inputs.Lights, inputs.LightHeader,
+					inputs.Grid, inputs.Records, inputs.Indices, inputs.Irradiance, inputs.ShadowRecords, inputs.ShadowViews })
 			{
 				b.Read(buffer, S::ShaderRead);
 			}
 			b.Read(inputs.Prefiltered, S::ShaderRead);
 			b.Read(inputs.BrdfLut, S::ShaderRead);
+			b.Read(inputs.ShadowAtlas, S::ShaderRead);
 			std::vector<GraphBuffer> declared;
 			const auto once = [&](GraphBuffer page, S state)
 			{
@@ -121,6 +128,10 @@ namespace Swim::Render
 			lutView.PixelFormat = Rhi::Format::RGBA16Float;
 			auto& prefiltered = c.CreateView(inputs.Prefiltered, cubeView);
 			auto& lut = c.CreateView(inputs.BrdfLut, lutView);
+			Rhi::TextureViewDesc shadowView;
+			shadowView.PixelFormat = inputs.ShadowAtlasIsDepth ? Rhi::Format::D32Float : Rhi::Format::R32Float;
+			shadowView.Aspect = inputs.ShadowAtlasIsDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic;
+			auto& shadowAtlas = c.CreateView(inputs.ShadowAtlas, shadowView);
 			std::vector<Rhi::DescriptorTable*> tables;
 			for (std::size_t slot = 0; slot < inputs.VertexPages.size(); ++slot)
 			{
@@ -136,6 +147,10 @@ namespace Swim::Render
 					BufferWrite(c, B::LightHeader, inputs.LightHeader), BufferWrite(c, B::ClusterGrid, inputs.Grid),
 					BufferWrite(c, B::ClusterRecords, inputs.Records), BufferWrite(c, B::ClusterIndices, inputs.Indices),
 					BufferWrite(c, B::EnvironmentIrradiance, inputs.Irradiance) };
+				writes[B::ShadowRecords] = BufferWrite(c, B::ShadowRecords, inputs.ShadowRecords);
+				writes[B::ShadowViews] = BufferWrite(c, B::ShadowViews, inputs.ShadowViews);
+				writes[B::ShadowAtlas].Binding = B::ShadowAtlas;
+				writes[B::ShadowAtlas].TextureResource = &shadowAtlas;
 				writes[B::EnvironmentPrefiltered].Binding = B::EnvironmentPrefiltered;
 				writes[B::EnvironmentPrefiltered].TextureResource = &prefiltered;
 				writes[B::EnvironmentBrdfLut].Binding = B::EnvironmentBrdfLut;
@@ -283,7 +298,7 @@ namespace Swim::Render
 		resources.TransparentCapacity = capacity;
 		resources.SortSize = NextPowerOfTwo(capacity);
 		resources.ViewRecord = BuildForwardViewRecord(frame.View, frame.Materials->MaterialCount,
-			frame.Environment ? frame.Environment->PrefilteredMipCount : 1u, frame.Environment != nullptr);
+			frame.Environment ? frame.Environment->PrefilteredMipCount : 1u, frame.Environment != nullptr, frame.Shadows != nullptr);
 		resources.View =
 			graph.CreateUpload(std::as_bytes(std::span(&resources.ViewRecord, 1)), name + " view", Rhi::BufferUsage::Storage, 16);
 
@@ -322,6 +337,31 @@ namespace Swim::Render
 				AddTextureUpload(graph, cubeName + " upload", texel, inputs.Prefiltered, { 0, { 0, face }, {}, { 1, 1, 1 } });
 			}
 			AddTextureUpload(graph, lutName + " upload", texel, inputs.BrdfLut, { 0, {}, {}, { 1, 1, 1 } });
+		}
+		// Shadows or stand-ins (never sampled: the view flag is clear).
+		if (frame.Shadows)
+		{
+			inputs.ShadowAtlas = frame.Shadows->Atlas;
+			inputs.ShadowAtlasIsDepth = graph.GetDesc(frame.Shadows->Atlas).PixelFormat == Rhi::Format::D32Float;
+			inputs.ShadowRecords = frame.Shadows->Records;
+			inputs.ShadowViews = frame.Shadows->Views;
+		}
+		else
+		{
+			resources.ShadowFallback = true;
+			const std::array<std::byte, sizeof(GpuShadowRecord)> record{};
+			inputs.ShadowRecords = graph.CreateUpload(record, name + " null shadow records", Rhi::BufferUsage::Storage, 16);
+			const std::array<std::byte, sizeof(GpuShadowView)> view{};
+			inputs.ShadowViews = graph.CreateUpload(view, name + " null shadow views", Rhi::BufferUsage::Storage, 16);
+			Rhi::TextureDesc atlas;
+			atlas.Extent = { 1, 1, 1 };
+			atlas.PixelFormat = Rhi::Format::R32Float;
+			atlas.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+			const std::string atlasName = name + " null shadow atlas";
+			atlas.DebugName = atlasName;
+			inputs.ShadowAtlas = graph.CreateTexture(atlas);
+			const std::array<std::byte, 4> texel{};
+			AddTextureUpload(graph, atlasName + " upload", texel, inputs.ShadowAtlas, { 0, {}, {}, { 1, 1, 1 } });
 		}
 		inputs.Instances = frame.Scene->Instances;
 		inputs.Transforms = frame.Scene->Transforms;

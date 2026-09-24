@@ -124,4 +124,28 @@ SWIM_TEST("RHI.Vulkan.Transfer", "UnsupportedFormatsAndByteCountOverflowAreRejec
 	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
 	SWIM_CHECK_THROWS(RhiVulkan::GetColorTexelBytes(Rhi::Format::BC7Unorm), std::invalid_argument);
 	SWIM_CHECK_THROWS(RhiVulkan::GetColorTexelBytes(Rhi::Format::D32Float), std::invalid_argument);
+	SWIM_CHECK_THROWS(RhiVulkan::RequireTransferTexelBytes(Rhi::Format::D24UnormS8Uint), std::invalid_argument);
+	SWIM_CHECK_THROWS(RhiVulkan::RequireTransferTexelBytes(Rhi::Format::BC7Unorm), std::invalid_argument);
+}
+
+// D32Float transfers copy the depth aspect as packed floats (shadow-atlas readback);
+// color formats keep the color aspect.
+SWIM_TEST("RHI.Vulkan.Transfer", "D32FloatCopiesItsDepthAspect")
+{
+	SWIM_CHECK_EQUAL(RhiVulkan::RequireTransferTexelBytes(Rhi::Format::D32Float), 4u);
+	SWIM_CHECK_EQUAL(RhiVulkan::RequireTransferTexelBytes(Rhi::Format::RGBA16Float), 8u);
+	Rhi::BufferDesc buffer{ 64 * 64 * 4, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::DeviceLocal, {} };
+	Rhi::TextureDesc texture{};
+	texture.Extent = { 64, 64, 1 };
+	texture.PixelFormat = Rhi::Format::D32Float;
+	Rhi::BufferTextureCopyRegion region{};
+	region.Extent = texture.Extent;
+	const auto depth = RhiVulkan::GetBufferImageCopy(buffer, texture, region);
+	SWIM_CHECK_EQUAL(depth.imageSubresource.aspectMask, VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT));
+	texture.PixelFormat = Rhi::Format::R32Float;
+	const auto color = RhiVulkan::GetBufferImageCopy(buffer, texture, region);
+	SWIM_CHECK_EQUAL(color.imageSubresource.aspectMask, VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT));
+	buffer.Size -= 4;
+	texture.PixelFormat = Rhi::Format::D32Float;
+	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
 }

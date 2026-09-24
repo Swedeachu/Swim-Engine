@@ -38,7 +38,8 @@ namespace
 			for (std::uint32_t binding = 0; binding < ForwardPlusDrawBindings::Count; ++binding)
 			{
 				const auto type = binding == ForwardPlusDrawBindings::EnvironmentSampler ? T::Sampler
-					: binding == ForwardPlusDrawBindings::EnvironmentPrefiltered || binding == ForwardPlusDrawBindings::EnvironmentBrdfLut
+					: binding == ForwardPlusDrawBindings::EnvironmentPrefiltered ||
+						binding == ForwardPlusDrawBindings::EnvironmentBrdfLut || binding == ForwardPlusDrawBindings::ShadowAtlas
 					? T::SampledTexture
 					: T::ReadOnlyStorageBuffer;
 				draw.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment });
@@ -72,6 +73,13 @@ namespace
 			records = buffer(1024 * 16, Rhi::BufferUsage::None);
 			indices = buffer(4096, Rhi::BufferUsage::None);
 			irradiance = buffer(144, Rhi::BufferUsage::None);
+			shadowRecords = buffer(4 * 64, Rhi::BufferUsage::None);
+			shadowViews = buffer(4 * 96, Rhi::BufferUsage::None);
+			Rhi::TextureDesc shadowAtlasDesc;
+			shadowAtlasDesc.Extent = { 256, 256, 1 };
+			shadowAtlasDesc.PixelFormat = Rhi::Format::D32Float;
+			shadowAtlasDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::DepthStencilAttachment;
+			shadowAtlas = fixture.device.CreateTexture(shadowAtlasDesc);
 			instances = buffer(16 * 64, Rhi::BufferUsage::None);
 			transforms = buffer(16 * 96, Rhi::BufferUsage::None);
 			Rhi::TextureDesc cube;
@@ -156,6 +164,12 @@ namespace
 				environmentResources.PrefilteredMipCount = 5;
 				frame.Environment = &environmentResources;
 				frame.BrdfLut = graph.ImportTexture(*brdfLut, Rhi::ResourceState::ShaderRead);
+				shadowResources = {};
+				shadowResources.Atlas = graph.ImportTexture(*shadowAtlas, Rhi::ResourceState::ShaderRead);
+				shadowResources.Records = in(shadowRecords);
+				shadowResources.Views = in(shadowViews);
+				shadowResources.AtlasSize = 256;
+				frame.Shadows = &shadowResources;
 			}
 		}
 
@@ -198,7 +212,7 @@ namespace
 		std::unique_ptr<Rhi::DescriptorTable> bindlessTable;
 		std::array<std::unique_ptr<Rhi::Buffer>, 4> pages;
 		std::unique_ptr<Rhi::Buffer> commands, counts, drawRecords, materials, lightRows, lightHeader, grid, records, indices, irradiance,
-			instances, transforms;
+			shadowRecords, shadowViews, instances, transforms;
 		std::unique_ptr<Rhi::Texture> prefiltered, brdfLut;
 		GpuSceneGraphResources scene;
 		GeometryGraphResources geometry;
@@ -207,6 +221,8 @@ namespace
 		GpuLightGraphResources lights;
 		ClusterGraphResources clusters;
 		EnvironmentGraphResources environmentResources;
+		ShadowGraphResources shadowResources;
+		std::unique_ptr<Rhi::Texture> shadowAtlas;
 	};
 } // namespace
 
@@ -260,7 +276,8 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK(!resources.EnvironmentFallback);
 	SWIM_CHECK_EQUAL(resources.TransparentCapacity, ForwardWorld::TransparentCapacity);
 	SWIM_CHECK_EQUAL(resources.SortSize, 8u);
-	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, ForwardViewFlagEnvironment);
+	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, ForwardViewFlagEnvironment | ForwardViewFlagShadows);
+	SWIM_CHECK(!resources.ShadowFallback);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.PrefilteredMipCount, 5u);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.MaterialCount, 4u);
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.SortedCommands).Size, std::uint64_t(2 * 5 * 20));
@@ -305,7 +322,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK_EQUAL(constants[1], world.bins.GetRange(world.bins.GetBin(1, 0)).First);
 	SWIM_CHECK_EQUAL(constants[2], 5u);
 	SWIM_CHECK_EQUAL(constants[3], 8u);
-	SWIM_CHECK(world.Commands("CopyBufferToTexture").empty()); // The environment was supplied.
+	SWIM_CHECK(world.Commands("CopyBufferToTexture").empty()); // The environment and shadows were supplied.
 
 	// The last table is the transparent pass's slot 1: its vertex page and the shared inputs.
 	const auto* table = world.fixture.device.LastDescriptorTable;
@@ -316,6 +333,9 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::EnvironmentIrradiance, 0) == world.irradiance.get());
 	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::EnvironmentSampler, 0) == &renderer.GetEnvironmentSampler());
 	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::EnvironmentPrefiltered, 0) != nullptr);
+	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::ShadowRecords, 0) == world.shadowRecords.get());
+	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::ShadowViews, 0) == world.shadowViews.get());
+	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::ShadowAtlas, 0) != nullptr);
 	SWIM_CHECK_EQUAL(table->ElementWrites, ForwardPlusDrawBindings::Count);
 }
 
@@ -331,6 +351,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "FallbacksForMissingEnvironmentAndIndire
 	const auto resources = renderer.Record(graph, frame, targets);
 	graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
 	SWIM_CHECK(resources.EnvironmentFallback);
+	SWIM_CHECK(resources.ShadowFallback);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, 0u);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.PrefilteredMipCount, 1u);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.DebugMode, 1u);
@@ -344,8 +365,8 @@ SWIM_TEST("Render.ForwardPlusRenderer", "FallbacksForMissingEnvironmentAndIndire
 	SWIM_CHECK_EQUAL(draws[1].Size, std::uint64_t(ForwardWorld::OpaqueCapacity));
 	SWIM_CHECK_EQUAL(draws[3].SourceOffset, std::uint64_t(5 * 20));
 	SWIM_CHECK_EQUAL(draws[3].Size, std::uint64_t(5)); // The sort zero-fills the unused commands.
-	// Six cube faces and the LUT stand-in are initialized.
-	SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(7));
+	// Six cube faces, the LUT and the shadow-atlas stand-ins are initialized.
+	SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(8));
 }
 
 SWIM_TEST("Render.ForwardPlusRenderer", "RejectsIncompleteFramesAndMismatchedTargets")

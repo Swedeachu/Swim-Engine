@@ -6,6 +6,7 @@
 #include "Engine/Systems/Renderer/GpuScene/GpuTransformRecord.h"
 #include "Engine/Systems/Renderer/Lights/GpuLightRecord.h"
 #include "Engine/Systems/Renderer/Materials/StandardPbr.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
 #include "Engine/Systems/Renderer/Visibility/GpuDrawRecord.h"
 
 #include <array>
@@ -28,8 +29,8 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for a non-finite matrix/position, a zero forward
 	// vector, negative ambient or intensity, or an unknown debug mode.
-	ForwardViewRecord BuildForwardViewRecord(
-		const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount, bool hasEnvironment);
+	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
+		bool hasEnvironment, bool hasShadows = false);
 } // namespace Swim::Render
 
 namespace Swim::Render::ForwardPlus
@@ -81,14 +82,25 @@ namespace Swim::Render::ForwardPlus
 		std::span<const ClusterRecord> Records;
 		std::span<const std::uint32_t> Indices;
 		const Environment::EnvironmentProbe* Environment = nullptr; // Used when the view has ForwardViewFlagEnvironment.
+		const Shadows::ShadowSampleInputs* Shadows = nullptr;		// Used when the view has ForwardViewFlagShadows.
 	};
+
+	// Camera view depth of a world point along the view record's forward axis (the
+	// depth cascades are selected by).
+	float CameraDepth(const ForwardViewRecord& view, const Float3& world);
+
+	// A light's shadow factor at a point (1 = lit): Shadows::ShadowFactor for lights
+	// with a ShadowIndex and LightFlags::CastsShadows when the view has
+	// ForwardViewFlagShadows and shadows are supplied; 1 otherwise.
+	float LightShadow(const LightingInputs& inputs, const ForwardViewRecord& view, const GpuLightRecord& light, const Float3& position,
+		const Float3& normal, const Float3& toLight);
 
 	// View depth of a world point under the grid's view (> 0 in front of the camera).
 	float ViewDepth(const ClusterGridRecord& grid, const Float3& world);
 
 	// Linear radiance toward the camera (rgb) and the surface's alpha: direct light
-	// (directional + clustered local) + ambient * base color * occlusion + IBL +
-	// emission. pixelX/pixelY select the cluster (framebuffer pixels, top-left).
+	// (directional + clustered local, each times LightShadow along the shading
+	// normal) + ambient * base color * occlusion + IBL + emission. pixelX/pixelY select the cluster (framebuffer pixels, top-left).
 	Float4 Shade(const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface,
 		const Float3& position, float pixelX, float pixelY);
 

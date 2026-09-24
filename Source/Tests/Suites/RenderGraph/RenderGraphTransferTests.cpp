@@ -374,3 +374,40 @@ SWIM_TEST("RenderGraph.Transfers", "TextureUploadAndReadbackUseSubresourceStates
 	auto rgbTexture = unsupported.CreateTexture(rgb);
 	SWIM_CHECK_THROWS(AddTextureUpload(unsupported, "RGB", Pattern(4 * 4 * 12, 0), rgbTexture, whole), std::invalid_argument);
 }
+
+// D32Float (a shadow atlas) reads back as packed floats; packed depth/stencil formats
+// have no single-aspect transfer and are rejected.
+SWIM_TEST("RenderGraph.Transfers", "D32FloatDepthReadsBackAsPackedFloats")
+{
+	Testing::MockDevice device;
+	device.CreateTextures = true;
+	Rhi::TextureDesc desc;
+	desc.Extent = { 8, 4, 1 };
+	desc.PixelFormat = Rhi::Format::D32Float;
+	desc.Usage = Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination | Rhi::TextureUsage::DepthStencilAttachment;
+	Rhi::BufferTextureCopyRegion whole{};
+	whole.Extent = { 8, 4, 1 };
+	SWIM_CHECK_EQUAL(Rhi::GetTransferTexelBytes(Rhi::Format::D32Float), 4u);
+	SWIM_CHECK_EQUAL(Rhi::GetTransferTexelBytes(Rhi::Format::D24UnormS8Uint), 0u);
+	SWIM_CHECK_EQUAL(GetTextureCopyBytes(desc, whole), std::uint64_t(8 * 4 * 4));
+
+	std::vector<float> depths(32);
+	std::iota(depths.begin(), depths.end(), 0.0f);
+	RenderGraph graph;
+	auto texture = graph.CreateTexture(desc);
+	AddTextureUpload(graph, "Depth", std::as_bytes(std::span(depths)), texture, whole);
+	const auto readback = AddTextureReadback(graph, "Read depth", texture, whole);
+	SWIM_CHECK_EQUAL(graph.GetDesc(readback.Buffer).Size, 128u);
+	RenderGraphExecutor executor(device);
+	executor.Execute(graph.Compile());
+	executor.Wait();
+	std::vector<float> result(32);
+	SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(result))) == Rhi::ReadbackStatus::Ready);
+	SWIM_CHECK(result == depths);
+
+	auto packed = desc;
+	packed.PixelFormat = Rhi::Format::D24UnormS8Uint;
+	RenderGraph unsupported;
+	auto stencil = unsupported.CreateTexture(packed);
+	SWIM_CHECK_THROWS(AddTextureReadback(unsupported, "Stencil", stencil, whole), std::invalid_argument);
+}

@@ -22,5 +22,6 @@ namespace Swim::Render
 		std::uint32_t TransparentCapacity = 0; // Per page slot.
 		std::uint32_t SortSize = 0;			   // Next power of two of TransparentCapacity.
 		bool EnvironmentFallback = false;	   // No environment: 1x1 zero stand-ins were bound.
+		bool ShadowFallback = false;		   // No shadows: a 1x1 atlas and an empty record were bound.
 	};
 } // namespace Swim::Render

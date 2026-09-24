@@ -25,7 +25,10 @@ namespace Swim::Render
 		static constexpr std::uint32_t EnvironmentPrefiltered = 12; // TextureCube<float4>, every mip.
 		static constexpr std::uint32_t EnvironmentBrdfLut = 13;		// Texture2D<float4>.
 		static constexpr std::uint32_t EnvironmentSampler = 14;		// Linear clamp.
-		static constexpr std::uint32_t Count = 15;
+		static constexpr std::uint32_t ShadowAtlas = 15;			// Texture2D<float>: the D32 shadow atlas (depth aspect).
+		static constexpr std::uint32_t ShadowRecords = 16;			// StructuredBuffer<GpuShadowRecord>.
+		static constexpr std::uint32_t ShadowViews = 17;			// StructuredBuffer<GpuShadowView>.
+		static constexpr std::uint32_t Count = 18;
 
 		static constexpr std::uint32_t BindlessSpace = 1;
 		static constexpr std::uint32_t BindlessSamplers = 0; // SamplerState[].

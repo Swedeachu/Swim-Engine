@@ -71,7 +71,7 @@ namespace Swim::Testing
 		explicit MockTexture(const Swim::Rhi::TextureDesc& desc) : desc(desc)
 		{
 			this->desc.DebugName = {};
-			const std::uint32_t texel = Swim::Rhi::GetUncompressedColorTexelBytes(desc.PixelFormat);
+			const std::uint32_t texel = Swim::Rhi::GetTransferTexelBytes(desc.PixelFormat);
 			for (std::uint32_t layer = 0; layer < desc.ArrayLayers; ++layer)
 			{
 				for (std::uint32_t mip = 0; mip < desc.MipLevels; ++mip)
@@ -99,7 +99,7 @@ namespace Swim::Testing
 		// Copies a tightly packed region between `buffer` and this subresource.
 		void CopyRegion(std::span<std::byte> buffer, const Swim::Rhi::BufferTextureCopyRegion& region, bool toTexture)
 		{
-			const std::size_t texel = Swim::Rhi::GetUncompressedColorTexelBytes(desc.PixelFormat);
+			const std::size_t texel = Swim::Rhi::GetTransferTexelBytes(desc.PixelFormat);
 			auto& image = Bytes(region.Subresource);
 			const auto e = MipExtent(region.Subresource.MipLevel);
 			std::size_t cursor = static_cast<std::size_t>(region.BufferOffset);
@@ -257,19 +257,33 @@ namespace Swim::Testing
 
 		void BeginRendering(const Swim::Rhi::RenderingDesc&) override {}
 		void EndRendering() override {}
-		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline&) override {}
+		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline& pipeline) override { Capture({ "BindGraphicsPipeline", &pipeline }); }
 		void BindComputePipeline(Swim::Rhi::ComputePipeline&) override {}
-		void BindDescriptorTable(std::uint32_t, Swim::Rhi::DescriptorTable&) override {}
+		void BindDescriptorTable(std::uint32_t space, Swim::Rhi::DescriptorTable& table) override
+		{
+			Capture({ "BindDescriptorTable", &table, nullptr, space });
+		}
 		void PushConstants(Swim::Rhi::ShaderStageMask, std::uint32_t offset, std::span<const std::byte> data) override
 		{
 			MockCommand command{ "PushConstants", nullptr, nullptr, offset, 0, data.size() };
 			command.Data.assign(data.begin(), data.end());
 			Capture(std::move(command));
 		}
-		void SetViewport(const Swim::Rhi::Viewport&) override {}
-		void SetScissor(const Swim::Rhi::ScissorRect&) override {}
+		// Viewport/scissor: SourceOffset = x, DestinationOffset = y, Size = width.
+		void SetViewport(const Swim::Rhi::Viewport& viewport) override
+		{
+			Capture(
+				{ "SetViewport", nullptr, nullptr, std::uint64_t(viewport.X), std::uint64_t(viewport.Y), std::uint64_t(viewport.Width) });
+		}
+		void SetScissor(const Swim::Rhi::ScissorRect& scissor) override
+		{
+			Capture({ "SetScissor", nullptr, nullptr, std::uint64_t(scissor.X), std::uint64_t(scissor.Y), scissor.Width });
+		}
 		void BindVertexBuffer(std::uint32_t, Swim::Rhi::Buffer&, std::uint64_t) override {}
-		void BindIndexBuffer(Swim::Rhi::Buffer&, std::uint64_t, Swim::Rhi::IndexType) override {}
+		void BindIndexBuffer(Swim::Rhi::Buffer& buffer, std::uint64_t offset, Swim::Rhi::IndexType) override
+		{
+			Capture({ "BindIndexBuffer", &buffer, nullptr, offset });
+		}
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override {}
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override {}
 		void DrawIndexedIndirect(Swim::Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t) override

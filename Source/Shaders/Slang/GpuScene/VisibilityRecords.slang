@@ -8,6 +8,7 @@ static const uint GpuViewFlagResetLodHistory = 1u << 1;
 static const uint GpuViewFlagResetOcclusionHistory = 1u << 2;
 static const uint GpuViewFlagForwardDepth = 1u << 3;
 static const uint GpuViewFlagDisableOcclusion = 1u << 4;
+static const uint GpuViewFlagShadowCasters = 1u << 5;
 
 // VisibilityPhase.
 static const uint VisibilityPhaseSingle = 0;

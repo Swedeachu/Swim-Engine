@@ -1,5 +1,6 @@
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusReference.h"
 #include "Engine/Systems/Renderer/ClusteredLighting/ClusterReference.h"
+#include "Engine/Systems/Renderer/Lights/LightDesc.h"
 #include "Engine/Systems/Renderer/Lights/LightMath.h"
 
 #include <algorithm>
@@ -9,7 +10,7 @@
 namespace Swim::Render
 {
 	ForwardViewRecord BuildForwardViewRecord(
-		const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount, bool hasEnvironment)
+		const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount, bool hasEnvironment, bool hasShadows)
 	{
 		const auto finite = [](std::span<const float> values)
 		{
@@ -46,7 +47,7 @@ namespace Swim::Render
 		record.EnvironmentRotation = view.EnvironmentRotation;
 		record.MaterialCount = materialCount;
 		record.PrefilteredMipCount = std::max(prefilteredMipCount, 1u);
-		record.Flags = hasEnvironment ? ForwardViewFlagEnvironment : 0u;
+		record.Flags = (hasEnvironment ? ForwardViewFlagEnvironment : 0u) | (hasShadows ? ForwardViewFlagShadows : 0u);
 		record.DebugMode = static_cast<std::uint32_t>(view.DebugMode);
 		return record;
 	}
@@ -199,6 +200,23 @@ namespace Swim::Render::ForwardPlus
 		return -(row[0] * world[0] + row[1] * world[1] + row[2] * world[2] + row[3]);
 	}
 
+	float CameraDepth(const ForwardViewRecord& view, const Float3& world)
+	{
+		return (world[0] - view.CameraPosition[0]) * view.CameraForward[0] + (world[1] - view.CameraPosition[1]) * view.CameraForward[1] +
+			(world[2] - view.CameraPosition[2]) * view.CameraForward[2];
+	}
+
+	float LightShadow(const LightingInputs& inputs, const ForwardViewRecord& view, const GpuLightRecord& light, const Float3& position,
+		const Float3& normal, const Float3& toLight)
+	{
+		if ((view.Flags & ForwardViewFlagShadows) == 0 || !inputs.Shadows || light.ShadowIndex == GpuLightNoShadow ||
+			(light.Flags & static_cast<std::uint32_t>(LightFlags::CastsShadows)) == 0)
+		{
+			return 1.0f;
+		}
+		return Shadows::ShadowFactor(*inputs.Shadows, light.ShadowIndex, position, normal, toLight, CameraDepth(view, position));
+	}
+
 	Float4 Shade(const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface,
 		const Float3& position, float pixelX, float pixelY)
 	{
@@ -210,9 +228,10 @@ namespace Swim::Render::ForwardPlus
 		{
 			const auto sample = Lights::EvaluateLight(light, position);
 			const auto brdf = StandardPbr::EvaluateBrdf(brdfSurface, surface.Normal, toCamera, sample.Direction);
+			const float shadow = LightShadow(inputs, view, light, position, surface.Normal, sample.Direction);
 			for (int c = 0; c < 3; ++c)
 			{
-				color[c] += brdf[c] * sample.Radiance[c];
+				color[c] += brdf[c] * sample.Radiance[c] * shadow;
 			}
 		};
 		for (std::uint32_t i = 0; i < inputs.Header.DirectionalCount; ++i)

@@ -6,7 +6,8 @@ Clustered Forward+ is the modern renderer's standard lighting path. It draws GPU
 
 - the [standard material](Materials.md), through the GPU material table and bindless textures;
 - every directional light plus the pixel's [cluster](ClusteredLighting.md) list of point and spot lights from the [GPU light buffer](Lights.md);
-- [image-based lighting](Environment.md).
+- [image-based lighting](Environment.md);
+- [shadows](Shadows.md), through each light's shadow record.
 
 No CPU visible list, per-object light list or draw list exists anywhere in the frame.
 
@@ -63,7 +64,7 @@ Each index-page slot of the visibility frame names its index and vertex page (`F
 - **Vertex stage:** transforms the position by the GPU Scene row. The normal is transformed by the cofactor matrix (exact under non-uniform scale), and the tangent by the linear part. For mirroring transforms (negative determinant) it flips the tangent sign and the triangle facing, so their normals, tangents and faces stay correct.
 - **Faces:** both pipelines rasterize both faces. Single-sided materials discard back faces in the shader (`CullsFace`); double-sided ones shade them with the flipped normal. This keeps mirrored instances correct without a second pipeline.
 - **Surface:** `StandardPbrResolve` over bindless texels (alpha mask, normal map through the vertex tangent frame).
-- **Radiance:** directional lights + the pixel's cluster list (`ClusteredShade`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
+- **Radiance:** directional lights + the pixel's cluster list, each times its shadow factor (`ForwardDirect`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
 - **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), and depth with the canonical reverse-Z compare.
 - **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty), with truncated clusters in magenta.
 
@@ -85,6 +86,18 @@ The object-id target is `R32Float` because the RHI clears only float and normali
 
 With `ForwardPlusFrame::Environment` and `BrdfLut`, the view sets `ForwardViewFlagEnvironment` and the shader performs `EnvironmentLookup`. Without them the renderer binds 1×1 zero stand-ins and IBL is skipped.
 
+### Shadows (items 70–72)
+
+With `ForwardPlusFrame::Shadows` (from `ShadowRenderer::Record`), the view sets `ForwardViewFlagShadows`. The atlas binds at 15 (through a depth-aspect view), the shadow records at 16 and the views at 17.
+
+A directional or clustered light is shadowed when its `ShadowIndex` names a record and it has `LightFlags::CastsShadows`. Its radiance is then scaled by `ShadowFactor` (PCF with normal-offset bias; see [Shadows](Shadows.md#sampling-shadowrecordsslang--shadowsshadowfactor)). `ForwardPlus::LightShadow` is the CPU definition.
+
+Without shadows, a 1×1 atlas and empty records are bound (`ShadowFallback`) and the flag stays clear.
+
+### GPU-assisted validation budget
+
+GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns (`GPUAV-Compile-time-general-buffer`) above 75 per module; the smokes fail on that warning. `ClusteredForward.slang` therefore walks directional and clustered lights in one loop (one inlined shadow lookup), loads shadow-view members individually and copies the transform and vertex once through loops (Slang otherwise re-loads at each use). `ShaderCompiler.GpuAvBudget` counts the accesses in every renderer program's SPIR-V (opaque 72, transparent 67 today) and fails above 75.
+
 ## Pipelines
 
 `ForwardPlusRenderer::PipelineDesc(bin, program, layout)` returns the pipeline state; callers compile the programs and create the pipelines:
@@ -102,20 +115,21 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 - A depth prepass and hardware back-face culling split by winding.
 - Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
-- Engine wiring (item 56), shadows (Phase 16), tone mapping (item 73).
+- Engine wiring (item 56), tone mapping (item 73).
 - Importing glTF `alphaMode` into `FlagAlphaBlend`.
 
 ## Tests
 
 | Suite | What it proves |
 | --- | --- |
-| `Render.ForwardPlus.Reference` (7) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation |
+| `Render.ForwardPlus.Reference` (8) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
 | `Render.ForwardPlus.Fixture` (1) | The test meshes are CCW-outward with exact tangents, and the analytic ray caster agrees with triangle intersection under rotated, scaled and mirrored transforms |
 | `Render.ForwardPlus` (1, RenderResidency) | `StandardVertexLayoutId` is the residency layer's layout of a cooked static mesh |
-| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment stand-ins, and every rejected input |
-| `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings`; the view record and sort entry equal the C++ structs; the sort's group size and push constants |
+| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, and every rejected input |
+| `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings` (including the shadow atlas, records and views); the view record and sort entry equal the C++ structs; the sort's group size and push constants |
 | Native `ClusteredForwardPlusMatchesTheCpuReference` | A lit scene compared pixel by pixel with an exact CPU ray cast. See below |
 | Native `ClusteredLightingScalesToTensOfThousandsOfLights` | Item 69 (see [Clustered lighting](ClusteredLighting.md#scaling-item-69)) |
+| Native `ShadowedForwardPlusMatchesTheCpuReference` | Forward+ with the shadow atlas (see [Shadows](Shadows.md#native-smoke)) |
 
 ### Native smoke
 

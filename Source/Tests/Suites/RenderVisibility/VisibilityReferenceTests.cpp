@@ -164,6 +164,31 @@ SWIM_TEST("Render.Visibility", "CullingCountsLiveRowsAndSkipsUndrawableOnes")
 	SWIM_CHECK_EQUAL(result.Stats.Visible, 3u);
 }
 
+SWIM_TEST("Render.Visibility", "ShadowCasterViewsSkipRowsThatDoNotCastShadows")
+{
+	Scene scene;
+	const auto mesh = scene.AddMesh({ 0.0f });
+	scene.Add(mesh, 0, 0, 0, Drawable | RenderObjectFlags::CastShadows);
+	scene.Add(mesh, 2, 0, 0, Drawable); // Visible, but casts no shadow.
+	scene.Add(mesh, 4, 0, 0, RenderObjectFlags::Live | RenderObjectFlags::HasMesh | RenderObjectFlags::CastShadows); // Hidden caster.
+	scene.Add(mesh, -4, 0, 0, Drawable | RenderObjectFlags::CastShadows);
+	const VisibilityBinLayout bins(std::vector<std::uint32_t>{ 16, 16 }, 1);
+	std::vector<GpuLodState> lods;
+
+	auto result = scene.Run(OrthoView(), bins, lods);
+	SWIM_CHECK_EQUAL(result.Stats.Visible, 3u);
+	SWIM_CHECK_EQUAL(result.Stats.NotDrawable, 1u);
+
+	// Shadow views draw Visible rows that also cast (hidden rows stay hidden).
+	result = scene.Run(OrthoView(1, 1, std::uint32_t(GpuViewFlags::ShadowCasters)), bins, lods);
+	SWIM_CHECK_EQUAL(result.Stats.Tested, 4u);
+	SWIM_CHECK_EQUAL(result.Stats.NotDrawable, 2u);
+	SWIM_CHECK_EQUAL(result.Stats.Visible, 2u);
+	SWIM_REQUIRE_EQUAL(result.Bins[0].size(), 2u);
+	SWIM_CHECK_EQUAL(result.Bins[0][0].Record.InstanceRow, 0u);
+	SWIM_CHECK_EQUAL(result.Bins[0][1].Record.InstanceRow, 3u);
+}
+
 SWIM_TEST("Render.Visibility", "LodFollowsProjectedErrorWithHysteresisAndHistoryResets")
 {
 	Scene scene;

@@ -8,6 +8,8 @@ namespace Swim::RhiVulkan
 {
 
 	std::uint32_t GetColorTexelBytes(Rhi::Format format);
+	// GetColorTexelBytes plus D32Float (depth aspect) for buffer/image copies.
+	std::uint32_t RequireTransferTexelBytes(Rhi::Format format);
 	bool IsIntegerColorFormat(Rhi::Format format);
 	VkImageSubresourceRange GetSubresourceRange(const Rhi::TextureDesc& desc, const Rhi::TextureSubresourceRange& range);
 	void ValidateCopyExtent(const Rhi::TextureDesc& desc, const Rhi::TextureSubresource& subresource,

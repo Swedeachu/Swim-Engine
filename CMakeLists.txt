@@ -475,6 +475,18 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_TRANSPARENT=1
 	)
+	# Shadow maps (Phase 16, items 70-72): depth-only and alpha-tested casters.
+	swim_add_slang_program(SwimShadowDepth
+		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimShadowMasked
+		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES SHADOW_ALPHA_TEST=1
+	)
 	swim_add_slang_program(SwimForwardTransparentSort
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
@@ -519,6 +531,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimForwardOpaque_SPIRV}" "${SwimForwardOpaque_REFLECTION}"
 			"${SwimForwardTransparent_SPIRV}" "${SwimForwardTransparent_REFLECTION}"
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
+			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
+			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -569,6 +583,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/ForwardPlus/ForwardPlusRecords.slang
 			Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 			Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
+			Source/Shaders/Slang/Shadows/ShadowRecords.slang
+			Source/Shaders/Slang/Shadows/ShadowDepth.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -577,8 +593,8 @@ endif()
 # resource registries (Resources/), paged GeometryHeap (Geometry/), the
 # persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
 # image-based lighting (Environment/), the GPU light buffer (Lights/),
-# clustered light assignment (ClusteredLighting/), Clustered Forward+
-# (ForwardPlus/) and the asset
+# clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
+# Clustered Forward+ (ForwardPlus/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -603,6 +619,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.h
 )

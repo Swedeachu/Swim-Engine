@@ -13,6 +13,7 @@
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
+#include "Engine/Systems/Renderer/RHI/RhiFormatInfo.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
 #include "Engine/Systems/Renderer/Resources/GpuResourceRegistry.h"
@@ -20,6 +21,10 @@
 #include "Engine/Systems/Renderer/Residency/AssetResidencyService.h"
 #include "Engine/Systems/Renderer/Residency/MeshGeometryPayload.h"
 #include "Engine/Systems/Renderer/Residency/TextureResidency.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowAtlasAllocator.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowRenderer.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
 #include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
@@ -64,3 +69,7 @@ static_assert(Swim::Render::MaterialParameterAlignment(Swim::Render::MaterialPar
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuMaterialTable>);
 static_assert(Swim::Render::StandardMaterialRecordSize == 80);
 static_assert(sizeof(Swim::Render::GpuLightRecord) == 64 && sizeof(Swim::Render::GpuLightHeader) == 32);
+static_assert(sizeof(Swim::Render::GpuShadowRecord) == 64 && sizeof(Swim::Render::GpuShadowView) == 96);
+static_assert(Swim::Render::ShadowRenderer::AtlasFormat == Swim::Rhi::Format::D32Float);
+static_assert(Swim::Render::ShadowDepthBindings::Count == 6 && Swim::Render::ShadowBinCount == 3);
+static_assert(Swim::Rhi::GetTransferTexelBytes(Swim::Rhi::Format::D32Float) == 4);

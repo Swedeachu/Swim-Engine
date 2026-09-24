@@ -20,6 +20,16 @@ namespace Swim::RhiVulkan
 		return bytes;
 	}
 
+	std::uint32_t RequireTransferTexelBytes(Rhi::Format format)
+	{
+		const std::uint32_t bytes = Rhi::GetTransferTexelBytes(format);
+		if (bytes == 0)
+		{
+			throw std::invalid_argument("Vulkan buffer/image copies require an uncompressed color format or D32Float");
+		}
+		return bytes;
+	}
+
 	bool IsIntegerColorFormat(Rhi::Format format)
 	{
 		using Rhi::Format;
@@ -73,7 +83,7 @@ namespace Swim::RhiVulkan
 		const Rhi::BufferTextureCopyRegion& region)
 	{
 		ValidateCopyExtent(texture, region.Subresource, region.TextureOffset, region.Extent);
-		const std::uint32_t texelBytes = GetColorTexelBytes(texture.PixelFormat);
+		const std::uint32_t texelBytes = RequireTransferTexelBytes(texture.PixelFormat);
 		if (texture.Samples != Rhi::SampleCount::X1 || region.BufferOffset % texelBytes != 0 || region.BufferOffset % 4 != 0)
 		{
 			throw std::invalid_argument("Vulkan buffer/image copies require single-sample textures and aligned offsets");
@@ -93,7 +103,10 @@ namespace Swim::RhiVulkan
 		}
 		VkBufferImageCopy result{};
 		result.bufferOffset = region.BufferOffset;
-		result.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, region.Subresource.MipLevel, region.Subresource.ArrayLayer, 1 };
+		// D32Float copies its depth aspect; every other accepted format is color.
+		const VkImageAspectFlags aspect =
+			texture.PixelFormat == Rhi::Format::D32Float ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+		result.imageSubresource = { aspect, region.Subresource.MipLevel, region.Subresource.ArrayLayer, 1 };
 		result.imageOffset = { region.TextureOffset.X, region.TextureOffset.Y, region.TextureOffset.Z };
 		result.imageExtent = { region.Extent.Width, region.Extent.Height, region.Extent.Depth };
 		return result;

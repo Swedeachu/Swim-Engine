@@ -7,13 +7,15 @@
 // Draws come from GPU visibility (the instance id is the draw slot); vertices are
 // pulled from the slot's GeometryHeap vertex page as StandardVertex (12 floats).
 // Each pixel: StandardPbrResolve -> every directional light + its cluster's local
-// lights (ClusteredShade) + ambient + optional IBL + emission. Mirrors
-// ForwardPlus::Shade; bindings follow ForwardPlusDrawBindings.
+// lights, each times its shadow factor (Shadows/ShadowRecords.slang) + ambient +
+// optional IBL + emission. Mirrors ForwardPlus::Shade; bindings follow
+// ForwardPlusDrawBindings.
 #include "ClusteredLighting/ClusteredLighting.slang"
 #include "Environment/EnvironmentLighting.slang"
 #include "ForwardPlus/ForwardPlusRecords.slang"
 #include "GpuScene/GpuSceneRecords.slang"
 #include "GpuScene/VisibilityRecords.slang"
+#include "Shadows/ShadowRecords.slang"
 
 #ifndef FORWARD_TRANSPARENT
 #define FORWARD_TRANSPARENT 0
@@ -34,8 +36,45 @@
 [[vk::binding(12, 0)]] TextureCube<float4> EnvironmentPrefiltered;
 [[vk::binding(13, 0)]] Texture2D<float4> EnvironmentBrdfLut;
 [[vk::binding(14, 0)]] SamplerState EnvironmentSampler;
+[[vk::binding(15, 0)]] Texture2D<float> ShadowAtlas;
+[[vk::binding(16, 0)]] StructuredBuffer<GpuShadowRecord> ShadowRecords;
+[[vk::binding(17, 0)]] StructuredBuffer<GpuShadowView> ShadowViews;
 [[vk::binding(0, 1)]] SamplerState Samplers[];
 [[vk::binding(1, 1)]] Texture2D<float4> Textures[];
+
+// ForwardPlus::LightShadow.
+float ForwardLightShadow(ForwardView view, GpuLightRecord light, float3 position, float3 normal, float3 toLight)
+{
+	if ((view.Flags & ForwardViewFlagShadows) == 0 || light.ShadowIndex == GpuLightNoShadow || (light.Flags & GpuLightFlagCastsShadows) == 0)
+	{
+		return 1.0;
+	}
+	const float cameraDepth = dot(position - view.CameraPosition, view.CameraForward);
+	return ShadowFactor(ShadowAtlas, ShadowRecords, ShadowViews, light.ShadowIndex, position, normal, toLight, cameraDepth);
+}
+
+// The direct term of ForwardPlus::Shade: directional lights and the cluster's list, shadowed.
+float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surface, float3 toCamera, float3 position, float pixelX,
+	float pixelY, float viewDepth)
+{
+	const GpuLightHeader header = LightHeader[0];
+	const ClusterRecord record = ClusterRecords[ClusterIndexFor(grid, pixelX, pixelY, viewDepth)];
+	// One loop over the directional lights, then the cluster's list: a single call site
+	// keeps the shadow lookup inlined once (GPU-assisted validation instruments every
+	// storage-buffer access and flags shaders with too many).
+	float3 sum = float3(0.0, 0.0, 0.0);
+	const uint count = header.DirectionalCount + record.Count;
+	for (uint i = 0; i < count; ++i)
+	{
+		const uint row = i < header.DirectionalCount ? i : header.FirstLocalRow + ClusterIndices[record.Offset + (i - header.DirectionalCount)];
+		const GpuLightRecord light = Lights[row];
+		const GpuLightSample sample = GpuLightEvaluate(light, position);
+		sum += StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal, toCamera,
+				   sample.Direction) *
+			sample.Radiance * ForwardLightShadow(view, light, position, surface.Normal, sample.Direction);
+	}
+	return sum;
+}
 
 struct VertexOutput
 {
@@ -58,23 +97,35 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 {
 	const GpuDrawRecord record = DrawRecords[drawSlot];
 	const GpuInstanceRecord instance = Instances[record.InstanceRow];
-	const GpuTransformRecord transform = Transforms[instance.TransformIndex];
+	// Loops copy the transform and vertex once each: GPU-assisted validation instruments
+	// every storage-buffer load and flags shaders with more than 75 of them, and Slang
+	// otherwise re-loads at each use.
+	float4 current[3];
+	for (uint row = 0; row < 3; ++row)
+	{
+		current[row] = Transforms[instance.TransformIndex].Current[row];
+	}
 	const ForwardView view = Views[0];
 	const uint base = vertexId * ForwardVertexFloats;
-	const float3 position = float3(Vertices[base], Vertices[base + 1], Vertices[base + 2]);
-	const float3 normal = float3(Vertices[base + 3], Vertices[base + 4], Vertices[base + 5]);
-	const float4 tangent = float4(Vertices[base + 6], Vertices[base + 7], Vertices[base + 8], Vertices[base + 9]);
-	const float2 uv = float2(Vertices[base + 10], Vertices[base + 11]);
+	float v[ForwardVertexFloats];
+	for (uint i = 0; i < ForwardVertexFloats; ++i)
+	{
+		v[i] = Vertices[base + i];
+	}
+	const float3 position = float3(v[0], v[1], v[2]);
+	const float3 normal = float3(v[3], v[4], v[5]);
+	const float4 tangent = float4(v[6], v[7], v[8], v[9]);
+	const float2 uv = float2(v[10], v[11]);
 
-	const float3 world = GpuSceneTransformPoint(transform.Current, position);
-	const bool mirrored = ForwardDeterminant(transform.Current) < 0.0;
+	const float3 world = GpuSceneTransformPoint(current, position);
+	const bool mirrored = ForwardDeterminant(current) < 0.0;
 	const float4 p = float4(world, 1.0);
 	VertexOutput output;
 	output.Position = float4(dot(view.ViewProjection[0], p), dot(view.ViewProjection[1], p), dot(view.ViewProjection[2], p),
 		dot(view.ViewProjection[3], p));
 	output.WorldPosition = world;
-	output.Normal = ForwardTransformNormal(transform.Current, normal);
-	output.Tangent = float4(ForwardTransformDirection(transform.Current, tangent.xyz), (tangent.w < 0.0) != mirrored ? -1.0 : 1.0);
+	output.Normal = ForwardTransformNormal(current, normal);
+	output.Tangent = float4(ForwardTransformDirection(current, tangent.xyz), (tangent.w < 0.0) != mirrored ? -1.0 : 1.0);
 	output.Uv = uv;
 	output.Material = instance.MaterialSet < view.MaterialCount ? instance.MaterialSet : 0u;
 #if !FORWARD_TRANSPARENT
@@ -122,8 +173,7 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const ClusterGrid grid = Grid[0];
 	const float3 toCamera = normalize(view.CameraPosition - input.WorldPosition);
 	const float viewDepth = -dot(grid.ViewRow2, float4(input.WorldPosition, 1.0));
-	const float3 direct = ClusteredShade(grid, Lights, LightHeader[0], ClusterRecords, ClusterIndices, surface.BaseColor, surface.Metallic,
-		surface.PerceptualRoughness, surface.Normal, toCamera, input.WorldPosition, input.Position.x, input.Position.y, viewDepth);
+	const float3 direct = ForwardDirect(view, grid, surface, toCamera, input.WorldPosition, input.Position.x, input.Position.y, viewDepth);
 	float3 ibl = float3(0.0, 0.0, 0.0);
 	if ((view.Flags & ForwardViewFlagEnvironment) != 0)
 	{

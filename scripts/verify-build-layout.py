@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "ForwardPlus", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3933,6 +3933,41 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderClusteredLighting", "ClusterScalingTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanForwardPlusSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderForwardPlusLayoutTests.cpp", failures)
+    # Items 70-72: shadows sit above visibility, GPU Scene, geometry, materials and
+    # lights, and below Forward+ (which samples the atlas). The layers below never
+    # include them, they never reach Forward+, clustering, environment or residency,
+    # and their CPU definitions, shaders and tests stay in place.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Shadows/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on shadows: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "Shadows").rglob("*"):
+        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+            r'#\s*include[^\n]*(Renderer/ForwardPlus/|Renderer/ClusteredLighting/|Renderer/Environment/|Renderer/Residency/|Engine/Assets/|Engine/IO/|Engine/Jobs/)',
+            path.read_text(encoding="utf-8"),
+        ):
+            fail(f"Shadows must not depend on Forward+, clustering, environment, residency, assets, IO or jobs: {path.relative_to(ROOT)}", failures)
+    for relative in ("Shadows/ShadowMath.cpp", "Shadows/ShadowAtlasAllocator.cpp", "Shadows/ShadowPlanner.cpp", "Shadows/ShadowRenderer.cpp",
+                     "Shadows/ShadowRecords.h", "Shadows/ShadowBindings.h", "Shadows/ShadowGraphResources.h"):
+        if not (renderer / relative).is_file():
+            fail(f"shadow unit is missing: Renderer/{relative}", failures)
+    for shader in ("ShadowRecords", "ShadowDepth"):
+        if not (ROOT / f"Source/Shaders/Slang/Shadows/{shader}.slang").is_file():
+            fail(f"shadow shader is missing: Shaders/Slang/Shadows/{shader}.slang", failures)
+    if "Renderer/Shadows/*.cpp" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("Shadows sources must compile with the backend-neutral renderer source list", failures)
+    if "SHADOW_ALPHA_TEST=1" not in (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"):
+        fail("the alpha-tested shadow variant must be compiled from ShadowDepth.slang", failures)
+    if "Shadows/ShadowRecords.slang" not in (ROOT / "Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang").read_text(encoding="utf-8"):
+        fail("Clustered Forward+ must sample shadows through Shadows/ShadowRecords.slang", failures)
+    for test in ("ShadowMathTests.cpp", "ShadowAtlasTests.cpp", "ShadowPlannerTests.cpp", "ShadowSamplingTests.cpp", "ShadowRendererTests.cpp"):
+        check_suite_is_compiled("RenderShadows", test, failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanShadowSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderShadowLayoutTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderGpuAvBudgetTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3959,7 +3994,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "ForwardPlus"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

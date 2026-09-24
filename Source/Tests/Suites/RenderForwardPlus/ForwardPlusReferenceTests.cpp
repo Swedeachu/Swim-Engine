@@ -1,6 +1,8 @@
 #include "Engine/Systems/Renderer/ClusteredLighting/ClusterReference.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusReference.h"
+#include "Engine/Systems/Renderer/Lights/LightDesc.h"
 #include "Engine/Systems/Renderer/Lights/LightMath.h"
+#include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Tests/Fixtures/ClusterFixture.h"
 #include "Tests/Framework/Test.h"
 
@@ -408,4 +410,102 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ViewRecordsNormalizeAndValidate")
 	bad = view;
 	bad.DebugMode = static_cast<ForwardPlusDebugMode>(9);
 	SWIM_CHECK_THROWS(BuildForwardViewRecord(bad, 1, 1, false), std::invalid_argument);
+}
+
+SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowFactor")
+{
+	namespace Sh = Swim::Render::Shadows;
+	// Two suns; the first casts through shadow record 0, whose one cascade looks
+	// straight down on the ground. The left half of its 16x16 atlas holds an occluder.
+	LightDesc desc;
+	desc.Type = LightType::Directional;
+	desc.Direction = { 0.2f, -1.0f, 0.1f };
+	desc.Intensity = 3.0f;
+	desc.ShadowIndex = 0;
+	desc.Flags = LightFlags::CastsShadows;
+	const auto shadowed = Lights::EncodeLight(desc);
+	desc.Direction = { -0.3f, -1.0f, 0.0f };
+	desc.Color = { 0.2f, 0.5f, 1.0f };
+	desc.ShadowIndex = GpuLightNoShadow;
+	desc.Flags = LightFlags::None;
+	const auto open = Lights::EncodeLight(desc);
+	auto unflagged = shadowed;
+	unflagged.Flags = 0; // A ShadowIndex without CastsShadows is ignored.
+
+	GpuShadowRecord record;
+	record.Kind = static_cast<std::uint32_t>(ShadowKind::Directional);
+	record.ViewCount = 1;
+	record.CascadeFar[0] = 1.0e9f;
+	GpuShadowView shadowView;
+	const auto viewProjection =
+		MultiplyRowMajor(OrthographicReverseZRowMajor(-10, 10, -10, 10, 0.0f, 20.0f), Sh::LookAlong({ 0, 10, 0 }, { 0, -1, 0 }));
+	std::copy(viewProjection.begin(), viewProjection.end(), shadowView.ViewProjection);
+	shadowView.AtlasRect[2] = shadowView.AtlasRect[3] = 16.0f;
+	shadowView.TexelWorldSize = 20.0f / 16.0f;
+	Sh::ShadowAtlasImage atlas;
+	atlas.Size = 16;
+	atlas.Depth.assign(256, 0.0f);
+	for (std::uint32_t y = 0; y < 16; ++y)
+	{
+		for (std::uint32_t x = 0; x < 8; ++x)
+		{
+			atlas.Depth[y * 16 + x] = 0.9f; // The ground is at depth 0.5.
+		}
+	}
+	const std::vector<GpuShadowRecord> records{ record };
+	const std::vector<GpuShadowView> views{ shadowView };
+	const Sh::ShadowSampleInputs shadowInputs{ &atlas, records, views };
+
+	const auto camera = Scene::Camera(16.0f / 9.0f);
+	auto withShadows = ViewRecord(camera, false);
+	withShadows.Flags |= ForwardViewFlagShadows;
+	const auto withoutShadows = ViewRecord(camera, false);
+	const std::vector<GpuLightRecord> both{ shadowed, open };
+	const std::vector<GpuLightRecord> openOnly{ open };
+	const std::vector<GpuLightRecord> ignored{ unflagged, open };
+	const GpuLightHeader twoSuns{ 2, 0, 2, 0 };
+	const GpuLightHeader oneSun{ 1, 0, 1, 0 };
+	const Fp::LightingInputs inputs{ both, twoSuns, nullptr, {}, {}, nullptr, &shadowInputs };
+	const Fp::LightingInputs openInputs{ openOnly, oneSun, nullptr, {}, {}, nullptr, nullptr };
+	const Fp::LightingInputs ignoredInputs{ ignored, twoSuns, nullptr, {}, {}, nullptr, &shadowInputs };
+	const Fp::LightingInputs noAtlas{ both, twoSuns, nullptr, {}, {}, nullptr, nullptr };
+
+	std::mt19937 random(72);
+	std::uniform_real_distribution<float> unit(-9.0f, 9.0f);
+	std::uint32_t inShadow = 0, inLight = 0;
+	for (int i = 0; i < 400; ++i)
+	{
+		auto surface = RandomSurface(random);
+		surface.Normal = { 0, 1, 0 };
+		const Fp::Float3 position{ unit(random), 0.0f, unit(random) };
+		const auto projected = Sh::ProjectToShadowView(shadowView, position);
+		SWIM_REQUIRE(projected.has_value());
+		const float px = projected->PixelX;
+		const bool dark = px >= 2.0f && px < 6.0f;
+		const bool bright = px >= 10.0f && px < 14.0f;
+		if (!dark && !bright)
+		{
+			continue;
+		}
+		const auto result = Fp::Shade(inputs, withShadows, surface, position, 0, 0);
+		const auto expected = dark ? Fp::Shade(openInputs, withoutShadows, surface, position, 0, 0)
+								   : Fp::Shade(inputs, withoutShadows, surface, position, 0, 0);
+		const auto unshadowedFlag = Fp::Shade(ignoredInputs, withShadows, surface, position, 0, 0);
+		const auto unshadowedView = Fp::Shade(inputs, withoutShadows, surface, position, 0, 0);
+		const auto unshadowedAtlas = Fp::Shade(noAtlas, withShadows, surface, position, 0, 0);
+		for (int c = 0; c < 4; ++c)
+		{
+			SWIM_CHECK(std::abs(result[c] - expected[c]) <= 1.0e-6f + 1.0e-5f * std::abs(expected[c]));
+			SWIM_CHECK(unshadowedFlag[c] == unshadowedView[c] && unshadowedAtlas[c] == unshadowedView[c]);
+		}
+		SWIM_CHECK_EQUAL(Fp::LightShadow(inputs, withShadows, shadowed, position, surface.Normal, { 0, 1, 0 }), dark ? 0.0f : 1.0f);
+		SWIM_CHECK_EQUAL(Fp::LightShadow(inputs, withShadows, open, position, surface.Normal, { 0, 1, 0 }), 1.0f);
+		(dark ? inShadow : inLight) += 1;
+	}
+	SWIM_CHECK(inShadow > 50u && inLight > 50u);
+
+	// The packed view carries the flag.
+	ForwardPlusView packed;
+	SWIM_CHECK((BuildForwardViewRecord(packed, 1, 1, false, true).Flags & ForwardViewFlagShadows) != 0u);
+	SWIM_CHECK((BuildForwardViewRecord(packed, 1, 1, true, false).Flags & ForwardViewFlagShadows) == 0u);
 }

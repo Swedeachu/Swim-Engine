@@ -46,13 +46,13 @@ The modern renderer's depth convention is now final (`DepthConvention.h`):
 - `ViewProjection` (row-major; `MultiplyRowMajor`, `OrthographicRowMajor`, `PerspectiveRowMajor` help build it);
 - six frustum planes extracted with Gribb–Hartmann for clip depth `[0, 1]`, so the same code works for ordinary and reverse-Z projections (a degenerate plane becomes the always-inside `(0, 0, 0, 1)`);
 - camera position, `LodScale` (pixels per world unit at distance 1, for example `viewportHeight / (2 tan(fovY / 2))`), `LodPixelError`, `LodHysteresis`;
-- `Flags`: `DisableFrustumCulling`, `ResetLodHistory`, `ResetOcclusionHistory` (`CameraCut` sets both, for camera cuts and teleports), `ForwardDepth`, `DisableOcclusion` (debug: the late phase skips the HZB test).
+- `Flags`: `DisableFrustumCulling`, `ResetLodHistory`, `ResetOcclusionHistory` (`CameraCut` sets both, for camera cuts and teleports), `ForwardDepth`, `DisableOcclusion` (debug: the late phase skips the HZB test), `ShadowCasters` (a shadow view: only rows with `RenderObjectFlags::CastShadows` are drawable; see [Shadows](Shadows.md#rendering-casters)).
 
 ## Rules
 
 `VisibilityMath.h` states each rule once. `RunVisibilityReference` uses it on the CPU, and `GpuVisibility.slang` mirrors it line for line.
 
-1. **Drawable.** A row is tested only when `Live | HasMesh | Visible` are all set (`NotDrawable` counts the rest).
+1. **Drawable.** A row is tested only when `Live | HasMesh | Visible` are all set, plus `CastShadows` in a `ShadowCasters` view (`NotDrawable` counts the rest).
 2. **Frustum.** The local bounds become a world sphere (center through the current transform, radius = local half-extent length × largest axis scale). A sphere is culled when it is fully behind any plane. Bounds with an extent ≥ `RenderBounds::Unbounded / 2` are never culled.
 3. **LOD.** Projected error per world unit is `LodScale / max(distance − radius, 1e-4)`. The threshold is `LodPixelError × exp2(instance.LodBias)`. The chosen LOD is the coarsest whose `GpuMeshLod::Error × scale ≤ threshold`. A mesh with `LodCount == 0` is one LOD covering its submesh range.
 4. **Hysteresis.** Each row keeps `GpuLodState {Generation, Lod}` in a persistent buffer. With valid history (same instance generation, no reset flag), a row moves coarser only when the LOD is still acceptable at `threshold × (1 − h)`, and finer only when the current LOD fails at `threshold × (1 + h)`. Reused rows (new generation), the first frame and `ResetLodHistory` start without history.
@@ -143,7 +143,7 @@ The view record, bin ranges and page table are small per-frame uploads, so the C
 
 | Suite | What it proves |
 | --- | --- |
-| `Render.Visibility` (6) | plane extraction for both projections, culling/drawability counts, the LOD hysteresis sequence including reset, generation change and bias, binning/capacity/other-page, the 100k benchmark, and the two-phase sequence (fresh history, steady state, teleported occluder revealing objects in the same frame, camera cut, `DisableOcclusion`, reused rows) on a CPU depth rasterizer |
+| `Render.Visibility` (7) | plane extraction for both projections, culling/drawability counts, the `ShadowCasters` drawable rule, the LOD hysteresis sequence including reset, generation change and bias, binning/capacity/other-page, the 100k benchmark, and the two-phase sequence (fresh history, steady state, teleported occluder revealing objects in the same frame, camera cut, `DisableOcclusion`, reused rows) on a CPU depth rasterizer |
 | `Render.GpuVisibility` (5) | pass and upload counts per frame (persistent tables only when needed), the 15 bindings, indirect usages, rejection of invalid configurations and frames, record layouts; early + late phases in one graph sharing the history, the late phase binding the whole pyramid, phase/HZB push constants; draw-path selection, the command clear of the no-count fallback and `DrawVisibilityBin` on both paths |
 | `Render.DepthConvention` (1), `Render.Hzb` (2), `Render.Occlusion` (3) | the canonical convention and reverse-Z projections; mip sizes and brute-force footprint equality of every HZB texel (both conventions); the builder's per-mip passes, views and constants; the occlusion test is conservative against full-resolution depth for 6,000 random spheres; near-plane, off-screen, unbounded and partial-coverage objects are never occluded; the 90k-object benchmark |
 | `RHI.Vulkan.IndirectDraw` (2) | argument forwarding and every validation rule for both calls |
@@ -155,4 +155,4 @@ The view record, bin ranges and page table are small per-frame uploads, so the C
 
 - A GPU timing benchmark for occlusion on real scenes, per-view histories for several views of one scene (one `GpuVisibility` per view today), and meshlet/cone culling.
 - The engine runtime constructing `GpuScene` + `GpuVisibility` and drawing the world from them (item 56 then retires `SceneBVH` visibility and the CPU visible list).
-- Per-pass bins (shadow/depth-only views).
+- Shadow views share one `GpuVisibility` instance with its own material bins (Opaque, Masked, Excluded) and reset LOD history per view (`ResetLodHistory`); occlusion culling for shadow casters is not implemented.

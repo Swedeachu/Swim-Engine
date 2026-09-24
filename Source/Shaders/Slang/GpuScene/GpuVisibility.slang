@@ -141,7 +141,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		return;
 	}
 	Count(VisibilityStatTested);
-	const uint drawable = GpuSceneFlagLive | GpuSceneFlagHasMesh | GpuSceneFlagVisible;
+	const uint casters = (Views[0].Flags & GpuViewFlagShadowCasters) != 0 ? GpuSceneFlagCastShadows : 0u;
+	const uint drawable = GpuSceneFlagLive | GpuSceneFlagHasMesh | GpuSceneFlagVisible | casters;
 	uint meshCount;
 	uint meshStride;
 	Meshes.GetDimensions(meshCount, meshStride);

@@ -9,6 +9,7 @@
 #include "Engine/Systems/Renderer/GpuScene/GpuSceneGraphResources.h"
 #include "Engine/Systems/Renderer/Lights/GpuLightGraphResources.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraph.h"
+#include "Engine/Systems/Renderer/Shadows/ShadowGraphResources.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityGraphResources.h"
 
@@ -66,6 +67,9 @@ namespace Swim::Render
 		// renderer binds 1x1 zero stand-ins and clears ForwardViewFlagEnvironment.
 		const EnvironmentGraphResources* Environment = nullptr;
 		std::optional<GraphTexture> BrdfLut;
+		// Optional shadows (ShadowRenderer::Record earlier in the graph). Without them the
+		// renderer binds a 1x1 atlas and one empty record and clears ForwardViewFlagShadows.
+		const ShadowGraphResources* Shadows = nullptr;
 		ForwardPlusView View;
 	};
 

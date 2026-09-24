@@ -56,10 +56,11 @@ namespace Swim::Render
 
 		std::uint64_t TexelAlignment(const Rhi::TextureDesc& desc)
 		{
-			const auto texel = Rhi::GetUncompressedColorTexelBytes(desc.PixelFormat);
+			const auto texel = Rhi::GetTransferTexelBytes(desc.PixelFormat);
 			if (!texel || !std::has_single_bit(texel))
 			{
-				throw std::invalid_argument("RenderGraph texture transfers need an uncompressed power-of-two-texel color format");
+				throw std::invalid_argument(
+					"RenderGraph texture transfers need an uncompressed power-of-two-texel color format or D32Float");
 			}
 			return std::max<std::uint64_t>(4, texel);
 		}
@@ -67,10 +68,10 @@ namespace Swim::Render
 
 	std::uint64_t GetTextureCopyBytes(const Rhi::TextureDesc& texture, const Rhi::BufferTextureCopyRegion& region)
 	{
-		std::uint64_t bytes = Rhi::GetUncompressedColorTexelBytes(texture.PixelFormat);
+		std::uint64_t bytes = Rhi::GetTransferTexelBytes(texture.PixelFormat);
 		if (!bytes)
 		{
-			throw std::invalid_argument("RenderGraph texture transfers need an uncompressed color format");
+			throw std::invalid_argument("RenderGraph texture transfers need an uncompressed color format or D32Float");
 		}
 		for (std::uint32_t size : { region.Extent.Width, region.Extent.Height, region.Extent.Depth })
 		{
