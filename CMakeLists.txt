@@ -519,6 +519,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES POST_OUTPUT_HDR=1
 	)
+	# Temporal anti-aliasing (item 75).
+	swim_add_slang_program(SwimTemporalResolve
+		SOURCE Source/Shaders/Slang/Temporal/TemporalResolve.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimForwardTransparentSort
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
@@ -571,6 +577,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimPostBloomUpsample_SPIRV}" "${SwimPostBloomUpsample_REFLECTION}"
 			"${SwimPostComposite_SPIRV}" "${SwimPostComposite_REFLECTION}"
 			"${SwimPostCompositeHdr_SPIRV}" "${SwimPostCompositeHdr_REFLECTION}"
+			"${SwimTemporalResolve_SPIRV}" "${SwimTemporalResolve_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -629,6 +636,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/PostProcess/PostBloomDownsample.slang
 			Source/Shaders/Slang/PostProcess/PostBloomUpsample.slang
 			Source/Shaders/Slang/PostProcess/PostComposite.slang
+			Source/Shaders/Slang/Temporal/TemporalRecords.slang
+			Source/Shaders/Slang/Temporal/TemporalResolve.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -638,7 +647,8 @@ endif()
 # persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
 # image-based lighting (Environment/), the GPU light buffer (Lights/),
 # clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
-# Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/) and the asset
+# Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/), temporal
+# anti-aliasing (Temporal/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -669,6 +679,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

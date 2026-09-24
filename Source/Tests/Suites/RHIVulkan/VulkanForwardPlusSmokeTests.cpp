@@ -489,17 +489,20 @@ namespace
 			bool Environment;
 			ForwardPlusDebugMode Debug;
 			std::array<float, 3> Ambient;
-			std::uint32_t PixelStride; // Compare every n-th pixel (row-major).
-			bool ExpectExact;		   // No cluster overflow allowed.
+			std::uint32_t PixelStride;		   // Compare every n-th pixel (row-major).
+			bool ExpectExact;				   // No cluster overflow allowed.
+			std::array<float, 2> JitterPixels; // TAA jitter (item 75), in pixels (x right, y down).
 		};
 
 		struct FrameResult
 		{
 			std::vector<std::uint32_t> SortedObjects;
 			std::uint32_t Overflow = 0;
+			std::uint32_t MovingPixels = 0; // Opaque pixels with motion vectors above 1e-3 UV.
 		};
 
 		Rhi::TimelinePoint lastCompletion{};
+		std::optional<std::array<float, 16>> previousViewProjection; // The last frame's, for motion vectors.
 		const auto frame = [&](const FrameSpec& spec)
 		{
 			const float aspect = float(width) / float(height);
@@ -545,6 +548,8 @@ namespace
 			targets.ObjectId = target(ForwardPlusRenderer::ObjectIdFormat,
 				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ object id");
 			targets.Depth = target(CanonicalDepthFormat, Rhi::TextureUsage::DepthStencilAttachment, "Forward+ depth");
+			targets.Velocity = target(ForwardPlusRenderer::VelocityFormat,
+				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ velocity");
 
 			ForwardPlusFrame forwardFrame;
 			forwardFrame.Scene = &sceneResources;
@@ -564,11 +569,16 @@ namespace
 			forwardFrame.View.EnvironmentIntensity = 0.8f;
 			forwardFrame.View.EnvironmentRotation = 0.6f;
 			forwardFrame.View.DebugMode = spec.Debug;
+			forwardFrame.View.PreviousViewProjection = previousViewProjection;
+			// Pixels to NDC: x right; NDC y is up, pixel y down.
+			forwardFrame.View.Jitter = { spec.JitterPixels[0] * 2.0f / float(width), -spec.JitterPixels[1] * 2.0f / float(height) };
 			const auto forward = renderer.Record(graph, forwardFrame, targets);
+			previousViewProjection = viewProjection;
 
 			const std::uint32_t clusterCount = clusters.Layout.ClusterCount;
 			const auto colorReadback = AddTextureReadback(graph, "Color", targets.Color, { 0, {}, {}, { width, height, 1 } });
 			const auto idReadback = AddTextureReadback(graph, "Object id", targets.ObjectId, { 0, {}, {}, { width, height, 1 } });
+			const auto velocityReadback = AddTextureReadback(graph, "Velocity", *targets.Velocity, { 0, {}, {}, { width, height, 1 } });
 			const auto sortedReadback =
 				AddBufferReadback(graph, "Sorted commands", forward.SortedCommands, 0, std::uint64_t(forward.TransparentCapacity) * 20);
 			const auto sortedCountReadback = AddBufferReadback(graph, "Sorted count", forward.SortedCounts, 0, 4);
@@ -604,6 +614,7 @@ namespace
 			};
 			std::vector<std::uint16_t> colorHalves(std::size_t(width) * height * 4);
 			std::vector<float> ids(std::size_t(width) * height);
+			std::vector<std::uint16_t> velocityHalves(std::size_t(width) * height * 2);
 			std::vector<Rhi::DrawIndexedIndirectCommand> sorted(forward.TransparentCapacity);
 			std::array<std::uint32_t, 1> sortedCount{};
 			std::vector<GpuDrawRecord> drawRecords(visible.Bins->GetTotalCapacity());
@@ -612,6 +623,7 @@ namespace
 			std::array<ClusterStats, 1> stats{};
 			read(colorReadback, colorHalves);
 			read(idReadback, ids);
+			read(velocityReadback, velocityHalves);
 			read(sortedReadback, sorted);
 			read(sortedCountReadback, sortedCount);
 			read(drawRecordReadback, drawRecords);
@@ -649,6 +661,11 @@ namespace
 			for (std::uint32_t row = 0; row < maxTransform; ++row)
 			{
 				transformRows.push_back(scene.GetTransformRow(row));
+			}
+			std::map<std::uint32_t, GpuTransformRecord> transformOf; // ObjectId -> its transform row.
+			for (const auto& row : instanceRows)
+			{
+				transformOf[row.ObjectId] = transformRows[row.TransformIndex];
 			}
 			const std::uint32_t transparentCount = sortedCount[0];
 			SWIM_CHECK_EQUAL(transparentCount, 5u); // Frustum-visible transparent quads (the culled one is culled per pixel).
@@ -691,8 +708,10 @@ namespace
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
 				{
-					const float px = float(x) + 0.5f;
-					const float py = float(y) + 0.5f;
+					// The jitter moves the geometry by JitterPixels, so this pixel's centre sees
+					// what the unjittered projection shows at centre - jitter.
+					const float px = float(x) + 0.5f - spec.JitterPixels[0];
+					const float py = float(y) + 0.5f - spec.JitterPixels[1];
 					const auto through = Scene::ViewToWorld(grid, Scene::ViewPoint(grid, px, py, 1.0f));
 					const Fs::Float3 direction{ through[0] - spec.Eye[0], through[1] - spec.Eye[1], through[2] - spec.Eye[2] };
 					auto& pixel = truth[std::size_t(y) * width + x];
@@ -738,6 +757,8 @@ namespace
 			};
 
 			std::uint32_t idInterior = 0, idMismatch = 0, compared = 0, outliers = 0, layered = 0, orderSensitive = 0;
+			std::uint32_t velocityCompared = 0, velocityOutliers = 0, moving = 0;
+			float velocityWorst = 0.0f;
 			std::map<std::uint32_t, std::uint32_t> comparedPerObject;
 			double errorSum = 0.0;
 			float worst = 0.0f;
@@ -764,6 +785,31 @@ namespace
 					}
 					++idInterior;
 					idMismatch += gpuId != pixel.Id ? 1u : 0u;
+					// Motion vectors: ForwardPlus::MotionVector of the surface point this pixel sees.
+					if (pixel.Opaque && spec.Debug == ForwardPlusDebugMode::None)
+					{
+						const auto& transform = transformOf.at(pixel.Opaque->Object);
+						const auto inverse = Fs::InverseLinear(transform.Current);
+						const Fs::Float3 relative{ pixel.Opaque->Position[0] - transform.Current[3],
+							pixel.Opaque->Position[1] - transform.Current[7], pixel.Opaque->Position[2] - transform.Current[11] };
+						Fs::Float3 local{};
+						for (int r = 0; r < 3; ++r)
+						{
+							local[r] = inverse[r * 3] * relative[0] + inverse[r * 3 + 1] * relative[1] + inverse[r * 3 + 2] * relative[2];
+						}
+						const auto motion = Fp::MotionVector(forward.ViewRecord, transform.Current, transform.Previous, local);
+						bool outlier = false;
+						for (int c = 0; c < 2; ++c)
+						{
+							const float actual = Smoke::HalfToFloat(velocityHalves[index * 2 + c]);
+							const float error = std::abs(actual - motion[c]);
+							velocityWorst = std::max(velocityWorst, error);
+							outlier = outlier || error > 1.0e-4f + 2.0e-3f * std::abs(motion[c]);
+						}
+						++velocityCompared;
+						velocityOutliers += outlier ? 1u : 0u;
+						moving += std::abs(motion[0]) + std::abs(motion[1]) > 1.0e-3f ? 1u : 0u;
+					}
 					if (index % spec.PixelStride != 0)
 					{
 						continue;
@@ -833,6 +879,13 @@ namespace
 			std::printf("             [forward+ %s] %u interior pixels, %u id mismatches; %u compared, %u outliers, mean %.2e, worst %.2e; "
 						"%u layered (%u order-sensitive); %u clusters overflowing\n",
 				spec.Name, idInterior, idMismatch, compared, outliers, mean, double(worst), layered, orderSensitive, result.Overflow);
+			if (velocityCompared)
+			{
+				std::printf("             [forward+ %s] velocity: %u compared (%u moving), %u outliers, worst %.2e\n", spec.Name,
+					velocityCompared, moving, velocityOutliers, double(velocityWorst));
+				SWIM_CHECK(velocityOutliers <= velocityCompared / 500);
+			}
+			result.MovingPixels = moving;
 			SWIM_CHECK(idInterior > width * height / 2);
 			SWIM_CHECK(idMismatch <= idInterior / 500);
 			SWIM_CHECK_EQUAL(maskedSeen, 0u);
@@ -865,7 +918,7 @@ namespace
 
 		const Fs::Float3 eye{ 0.0f, 3.5f, 14.0f };
 		const Fs::Float3 target{ 0.0f, 1.2f, 0.0f };
-		const auto lit = frame({ "lit", eye, target, true, ForwardPlusDebugMode::None, { 0.02f, 0.02f, 0.03f }, 1, true });
+		const auto lit = frame({ "lit", eye, target, true, ForwardPlusDebugMode::None, { 0.02f, 0.02f, 0.03f }, 1, true, { 0.0f, 0.0f } });
 		const auto position = [](const std::vector<std::uint32_t>& order, std::uint32_t object)
 		{
 			return std::find(order.begin(), order.end(), object) - order.begin();
@@ -875,9 +928,10 @@ namespace
 		SWIM_CHECK(position(lit.SortedObjects, 7) < position(lit.SortedObjects, 8));
 		SWIM_CHECK(position(lit.SortedObjects, 8) < position(lit.SortedObjects, 6));
 
-		frame({ "heatmap", eye, target, true, ForwardPlusDebugMode::ClusterHeatmap, { 0.02f, 0.02f, 0.03f }, 1, true });
+		frame({ "heatmap", eye, target, true, ForwardPlusDebugMode::ClusterHeatmap, { 0.02f, 0.02f, 0.03f }, 1, true, { 0.0f, 0.0f } });
 
 		// Move the red quad in front of the green one and the camera to the side; no environment.
+		// Jittered by (0.37, -0.21) pixels, and every opaque pixel moves (camera and quad motion).
 		{
 			const auto& p = placements[8];
 			objects[8].Transform = Fs::MakeTransform({ p.Translation[0], p.Translation[1], 6.8f }, p.Yaw, p.Pitch, p.Scale);
@@ -885,17 +939,19 @@ namespace
 			std::copy(std::begin(objects[8].Transform.Current), std::end(objects[8].Transform.Current), moved.Rows.begin());
 			SWIM_CHECK(scene.SetTransform(handles[8], moved));
 		}
-		const auto side = frame(
-			{ "moved", { 5.0f, 3.0f, 12.5f }, { 0.0f, 1.2f, 0.0f }, false, ForwardPlusDebugMode::None, { 0.08f, 0.08f, 0.1f }, 1, true });
+		const auto side = frame({ "moved", { 5.0f, 3.0f, 12.5f }, { 0.0f, 1.2f, 0.0f }, false, ForwardPlusDebugMode::None,
+			{ 0.08f, 0.08f, 0.1f }, 1, true, { 0.37f, -0.21f } });
 		SWIM_CHECK(position(lit.SortedObjects, 8) < position(lit.SortedObjects, 6));   // Red before green...
 		SWIM_CHECK(position(side.SortedObjects, 8) > position(side.SortedObjects, 6)); // ...until it moved in front.
+		SWIM_CHECK_EQUAL(lit.MovingPixels, 0u);										   // No history: the previous matrix is this frame's.
+		SWIM_CHECK(side.MovingPixels > width * height / 4);							   // The camera moved.
 
 		// 10,000 lights: clusters may truncate; the CPU uses the GPU's own lists.
 		for (int i = 0; i < 9700; ++i)
 		{
 			lights.Create(localLight(1.4f));
 		}
-		frame({ "10k lights", eye, target, true, ForwardPlusDebugMode::None, { 0.02f, 0.02f, 0.03f }, 7, false });
+		frame({ "10k lights", eye, target, true, ForwardPlusDebugMode::None, { 0.02f, 0.02f, 0.03f }, 7, false, { 0.0f, 0.0f } });
 
 		scene.Collect();
 		scene.Drain();

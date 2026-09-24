@@ -15,6 +15,7 @@ namespace Swim::Render
 		GraphBuffer SortScratch;	// ForwardSortEntry per slot * SortSize.
 		GraphBuffer SortedCommands; // DrawIndexedIndirectCommand per slot * TransparentCapacity.
 		GraphBuffer SortedCounts;	// uint per page slot.
+		GraphTexture Velocity;		// ForwardPlusTargets::Velocity, or the transient one used in its place.
 		GraphPass OpaquePass;
 		GraphPass SortPass;
 		GraphPass TransparentPass;

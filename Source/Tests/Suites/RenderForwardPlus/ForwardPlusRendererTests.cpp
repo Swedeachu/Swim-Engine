@@ -231,11 +231,12 @@ SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
 	Testing::MockPipelineLayout layout;
 	Testing::MockShaderProgram program;
 	const auto opaque = ForwardPlusRenderer::PipelineDesc(ForwardPlusBin::Opaque, program, layout);
-	SWIM_REQUIRE_EQUAL(opaque.ColorFormats.size(), std::size_t(2));
+	SWIM_REQUIRE_EQUAL(opaque.ColorFormats.size(), std::size_t(3));
 	SWIM_CHECK(opaque.ColorFormats[0] == Rhi::Format::RGBA16Float);
 	SWIM_CHECK(opaque.ColorFormats[1] == Rhi::Format::R32Float);
-	SWIM_REQUIRE_EQUAL(opaque.BlendAttachments.size(), std::size_t(2));
-	SWIM_CHECK(!opaque.BlendAttachments[0].Enabled && !opaque.BlendAttachments[1].Enabled);
+	SWIM_CHECK(opaque.ColorFormats[2] == Rhi::Format::RG16Float); // Motion vectors (item 75).
+	SWIM_REQUIRE_EQUAL(opaque.BlendAttachments.size(), std::size_t(3));
+	SWIM_CHECK(!opaque.BlendAttachments[0].Enabled && !opaque.BlendAttachments[1].Enabled && !opaque.BlendAttachments[2].Enabled);
 	SWIM_CHECK(opaque.DepthStencilFormat == Rhi::Format::D32Float);
 	SWIM_CHECK(opaque.DepthStencil.DepthTest && opaque.DepthStencil.DepthWrite);
 	SWIM_CHECK(opaque.DepthStencil.DepthCompare == Rhi::CompareOp::GreaterEqual); // Reverse-Z.
@@ -283,6 +284,11 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.SortedCommands).Size, std::uint64_t(2 * 5 * 20));
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.SortedCounts).Size, std::uint64_t(2 * 4));
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.SortScratch).Size, std::uint64_t(2 * 8 * 16));
+	// No velocity target: a transient RG16Float attachment of the grid's size stands in.
+	const auto& velocity = graph.GetDesc(resources.Velocity);
+	SWIM_CHECK(velocity.PixelFormat == ForwardPlusRenderer::VelocityFormat);
+	SWIM_CHECK_EQUAL(velocity.Extent.Width, ForwardWorld::Width);
+	SWIM_CHECK_EQUAL(velocity.Extent.Height, ForwardWorld::Height);
 	world.fixture.device.Commands->clear();
 	world.fixture.executor->Execute(graph.Compile());
 	world.fixture.executor->Wait();
@@ -347,8 +353,16 @@ SWIM_TEST("Render.ForwardPlusRenderer", "FallbacksForMissingEnvironmentAndIndire
 	ForwardPlusFrame frame;
 	world.Import(graph, frame, false);
 	frame.View.DebugMode = ForwardPlusDebugMode::ClusterHeatmap;
-	const auto targets = world.Targets(graph);
+	frame.View.Jitter = { 0.001f, -0.002f };
+	auto targets = world.Targets(graph);
+	Rhi::TextureDesc velocityDesc;
+	velocityDesc.Extent = { ForwardWorld::Width, ForwardWorld::Height, 1 };
+	velocityDesc.PixelFormat = ForwardPlusRenderer::VelocityFormat;
+	velocityDesc.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled;
+	targets.Velocity = graph.CreateTexture(velocityDesc);
 	const auto resources = renderer.Record(graph, frame, targets);
+	SWIM_CHECK(resources.Velocity == *targets.Velocity); // A supplied velocity target is used as is.
+	SWIM_CHECK(resources.ViewRecord.Jitter[0] == 0.001f && resources.ViewRecord.Jitter[1] == -0.002f);
 	graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
 	SWIM_CHECK(resources.EnvironmentFallback);
 	SWIM_CHECK(resources.ShadowFallback);
@@ -439,6 +453,12 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RejectsIncompleteFramesAndMismatchedTar
 						  [](RenderGraph&, ForwardPlusFrame&, ForwardPlusTargets& targets)
 						  {
 							  std::swap(targets.Color, targets.Depth);
+						  }),
+		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ForwardPlusFrame&, ForwardPlusTargets& targets)
+						  {
+							  targets.Velocity = targets.ObjectId; // R32Float, not the velocity format.
 						  }),
 		std::invalid_argument);
 

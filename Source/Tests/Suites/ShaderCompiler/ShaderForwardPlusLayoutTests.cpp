@@ -127,6 +127,9 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "DrawProgramsMatchTheBindingContra
 		SWIM_CHECK_EQUAL(offsets.at("PrefilteredMipCount"), std::uint32_t(offsetof(Render::ForwardViewRecord, PrefilteredMipCount)));
 		SWIM_CHECK_EQUAL(offsets.at("Flags"), std::uint32_t(offsetof(Render::ForwardViewRecord, Flags)));
 		SWIM_CHECK_EQUAL(offsets.at("DebugMode"), std::uint32_t(offsetof(Render::ForwardViewRecord, DebugMode)));
+		SWIM_CHECK_EQUAL(view.ElementSize, 208u); // Item 75 appended the previous matrix and jitter.
+		SWIM_CHECK_EQUAL(offsets.at("PreviousViewProjection"), std::uint32_t(offsetof(Render::ForwardViewRecord, PreviousViewProjection)));
+		SWIM_CHECK_EQUAL(offsets.at("Jitter"), std::uint32_t(offsetof(Render::ForwardViewRecord, Jitter)));
 		SWIM_CHECK_EQUAL(Parameter(*program, "Materials").ElementSize, 80u);
 		SWIM_CHECK_EQUAL(Parameter(*program, "Grid").ElementSize, 128u);
 	}

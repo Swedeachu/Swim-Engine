@@ -412,6 +412,51 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ViewRecordsNormalizeAndValidate")
 	SWIM_CHECK_THROWS(BuildForwardViewRecord(bad, 1, 1, false), std::invalid_argument);
 }
 
+SWIM_TEST("Render.ForwardPlus.Reference", "MotionVectorsFollowObjectAndCameraMotion")
+{
+	// The previous matrix defaults to this frame's; jitter is copied, never applied to it.
+	ForwardPlusView view;
+	view.Jitter = { 0.25f, -0.5f };
+	const auto still = BuildForwardViewRecord(view, 1, 1, false);
+	SWIM_CHECK(std::equal(std::begin(still.PreviousViewProjection), std::end(still.PreviousViewProjection), view.ViewProjection.begin()));
+	SWIM_CHECK(still.Jitter[0] == 0.25f && still.Jitter[1] == -0.5f);
+	SWIM_CHECK(still.Reserved1[0] == 0.0f && still.Reserved1[1] == 0.0f);
+
+	const float identity[12]{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+	float movedRight[12]{ 1, 0, 0, 0.2f, 0, 1, 0, 0, 0, 0, 1, 0 };
+	float movedUp[12]{ 1, 0, 0, 0, 0, 1, 0, 0.2f, 0, 0, 1, 0 };
+	const Fp::Float3 local{ 0.1f, -0.3f, 0.5f };
+	const auto none = Fp::MotionVector(still, identity, identity, local);
+	SWIM_CHECK(none[0] == 0.0f && none[1] == 0.0f); // Jitter never shows up as motion.
+	// NDC spans 2 per UV unit, and UV y points down.
+	const auto right = Fp::MotionVector(still, movedRight, identity, local);
+	SWIM_CHECK(std::abs(right[0] - 0.1f) < 1e-6f && std::abs(right[1]) < 1e-6f);
+	const auto up = Fp::MotionVector(still, movedUp, identity, local);
+	SWIM_CHECK(std::abs(up[0]) < 1e-6f && std::abs(up[1] + 0.1f) < 1e-6f);
+
+	// Camera motion alone: the previous camera saw the point 0.4 NDC further left.
+	auto panned = view;
+	panned.PreviousViewProjection = std::array<float, 16>{ 1, 0, 0, -0.4f, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+	const auto pan = Fp::MotionVector(BuildForwardViewRecord(panned, 1, 1, false), identity, identity, local);
+	SWIM_CHECK(std::abs(pan[0] - 0.2f) < 1e-6f && std::abs(pan[1]) < 1e-6f);
+
+	// Perspective: a point moving toward the camera slides away from the centre.
+	ForwardPlusView deep;
+	deep.ViewProjection = PerspectiveReverseZRowMajor(1.2f, 1.0f, 0.1f);
+	const auto deepRecord = BuildForwardViewRecord(deep, 1, 1, false);
+	const float near[12]{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2 };
+	const auto approach = Fp::MotionVector(deepRecord, near, identity, { 0.5f, 0.5f, -5.0f });
+	SWIM_CHECK(approach[0] > 0.0f && approach[1] < 0.0f);
+	SWIM_CHECK(std::abs(approach[0] + approach[1]) < 1e-6f); // Symmetric in x and y (square aspect).
+
+	auto bad = view;
+	bad.Jitter[1] = INFINITY;
+	SWIM_CHECK_THROWS(BuildForwardViewRecord(bad, 1, 1, false), std::invalid_argument);
+	bad = panned;
+	(*bad.PreviousViewProjection)[3] = NAN;
+	SWIM_CHECK_THROWS(BuildForwardViewRecord(bad, 1, 1, false), std::invalid_argument);
+}
+
 SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowFactor")
 {
 	namespace Sh = Swim::Render::Shadows;

@@ -39,7 +39,7 @@ ClusteredLightAssigner ---- grid, records, indices
 EnvironmentBuilder -------- prefiltered cube, SH irradiance, BRDF LUT (optional)
       |
 ForwardPlusRenderer::Record
-  1. opaque       every page slot's Opaque bin -> color (RGBA16F), object id (R32F), depth (D32)
+  1. opaque       every page slot's Opaque bin -> color (RGBA16F), object id (R32F), velocity (RG16F), depth (D32)
   2. sort         one group per page slot: Transparent bin back to front -> sorted commands
   3. transparent  sorted draws, premultiplied blending over the opaque color, depth-tested
 ```
@@ -65,10 +65,17 @@ Each index-page slot of the visibility frame names its index and vertex page (`F
 - **Faces:** both pipelines rasterize both faces. Single-sided materials discard back faces in the shader (`CullsFace`); double-sided ones shade them with the flipped normal. This keeps mirrored instances correct without a second pipeline.
 - **Surface:** `StandardPbrResolve` over bindless texels (alpha mask, normal map through the vertex tangent frame).
 - **Radiance:** directional lights + the pixel's cluster list, each times its shadow factor (`ForwardDirect`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
-- **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), and depth with the canonical reverse-Z compare.
+- **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), a motion vector, and depth with the canonical reverse-Z compare.
 - **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty), with truncated clusters in magenta.
 
 The object-id target is `R32Float` because the RHI clears only float and normalized attachments.
+
+### Motion vectors and jitter (item 75)
+
+- **View record:** `ForwardViewRecord` (208 bytes) keeps `ViewProjection` unjittered and adds `PreviousViewProjection` and `Jitter`. `ForwardPlusView::PreviousViewProjection` defaults to the current matrix, so a first frame or a camera cut reports no camera motion. Both must be finite.
+- **Jitter:** an NDC offset (`Temporal::JitterNdc`, x right, y up). The vertex stage adds `Jitter × w` to the clip position; nothing else sees it. Shading, cluster lookup and motion vectors are unaffected.
+- **Velocity:** the vertex stage also outputs the unjittered clip position and the previous one: the previous transform (`GpuTransformRecord::Previous`, which `GpuScene` updates on the first move of a frame) through `PreviousViewProjection`. The opaque fragment stage writes `(now − before) × (0.5, −0.5)` to `SV_Target2`: UV of this frame minus UV of the previous one, y down, so `previousUv = uv − velocity`. `ForwardPlus::MotionVector` is the CPU definition.
+- **Target:** `ForwardPlusTargets::Velocity` (`VelocityFormat` = RG16Float, `ColorAttachment`, grid-sized), cleared to 0 like the other targets. Without one the renderer creates a transient target; `ForwardPlusGraphResources::Velocity` names whichever was used. Pixels with no opaque surface keep the clear value (0). Transparent surfaces write no velocity.
 
 ### Transparency (item 67)
 
@@ -96,7 +103,7 @@ Without shadows, a 1×1 atlas and empty records are bound (`ShadowFallback`) and
 
 ### GPU-assisted validation budget
 
-GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns (`GPUAV-Compile-time-general-buffer`) above 75 per module; the smokes fail on that warning. `ClusteredForward.slang` therefore walks directional and clustered lights in one loop (one inlined shadow lookup), loads shadow-view members individually and copies the transform and vertex once through loops (Slang otherwise re-loads at each use). `ShaderCompiler.GpuAvBudget` counts the accesses in every renderer program's SPIR-V (opaque 72, transparent 67 today) and fails above 75.
+GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns (`GPUAV-Compile-time-general-buffer`) above 75 per module; the smokes fail on that warning. `ClusteredForward.slang` therefore walks directional and clustered lights in one loop (one inlined shadow lookup), loads shadow-view members individually and copies the transform and vertex once through loops (Slang otherwise re-loads at each use). `ShaderCompiler.GpuAvBudget` counts the accesses in every renderer program's SPIR-V (opaque 72, transparent 67 today, including the previous-transform and previous-projection copies of item 75) and fails above 75.
 
 ## Pipelines
 
@@ -104,7 +111,7 @@ GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns
 
 | | Opaque | Transparent |
 | --- | --- | --- |
-| Color targets | RGBA16Float, R32Float (object id) | RGBA16Float |
+| Color targets | RGBA16Float, R32Float (object id), RG16Float (velocity) | RGBA16Float |
 | Blend | off | premultiplied (One, OneMinusSourceAlpha for color and alpha) |
 | Depth | D32Float, GreaterEqual, write | D32Float, GreaterEqual, no write |
 | Cull | none (shader culls single-sided back faces) | none (same) |
@@ -115,18 +122,19 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 - A depth prepass and hardware back-face culling split by winding.
 - Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
-- Engine wiring (item 56). The HDR color target feeds [post-processing](PostProcess.md) (items 73–74) for exposure, bloom, grading and tone mapping.
+- Engine wiring (item 56). The HDR color, depth and velocity targets feed [temporal anti-aliasing](TemporalAntiAliasing.md) (item 75), whose output feeds [post-processing](PostProcess.md) (items 73–74).
+- Velocity for the background (sky) from camera motion; it keeps the cleared 0.
 - Importing glTF `alphaMode` into `FlagAlphaBlend`.
 
 ## Tests
 
 | Suite | What it proves |
 | --- | --- |
-| `Render.ForwardPlus.Reference` (8) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
+| `Render.ForwardPlus.Reference` (9) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation. Motion vectors for object, camera and perspective motion, never jitter. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
 | `Render.ForwardPlus.Fixture` (1) | The test meshes are CCW-outward with exact tangents, and the analytic ray caster agrees with triangle intersection under rotated, scaled and mirrored transforms |
 | `Render.ForwardPlus` (1, RenderResidency) | `StandardVertexLayoutId` is the residency layer's layout of a cooked static mesh |
-| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, and every rejected input |
-| `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings` (including the shadow atlas, records and views); the view record and sort entry equal the C++ structs; the sort's group size and push constants |
+| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, the transient or supplied velocity target, and every rejected input |
+| `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings` (including the shadow atlas, records and views); the view record (208 bytes, including the previous matrix and jitter) and sort entry equal the C++ structs; the sort's group size and push constants |
 | Native `ClusteredForwardPlusMatchesTheCpuReference` | A lit scene compared pixel by pixel with an exact CPU ray cast. See below |
 | Native `ClusteredLightingScalesToTensOfThousandsOfLights` | Item 69 (see [Clustered lighting](ClusteredLighting.md#scaling-item-69)) |
 | Native `ShadowedForwardPlusMatchesTheCpuReference` | Forward+ with the shadow atlas (see [Shadows](Shadows.md#native-smoke)) |
@@ -148,10 +156,11 @@ It is lit by a sun, 300 clustered lights and the GPU-built sky environment. Ever
 - **Object ids:** at most 0.2 % of interior pixels may differ, and the masked cube never appears.
 - **Color:** at most 0.5 % outliers (0.01 + 3 %), and a mean relative error < 5·10⁻³. Transparent layers are composited with `ForwardPlus::Over` in the GPU's sorted order.
 - **Sort:** the GPU order must equal `SortTransparentDraws`, with unused commands zeroed. Reversing the order must visibly change at least 50 pixels, so the order is observable.
+- **Velocity:** every interior opaque pixel's motion vector must equal `ForwardPlus::MotionVector` at the ray-cast point (within 10⁻⁴ + 0.2 %; at most 0.2 % outliers). The first frame must have no motion, and the moved frame must move more than a quarter of the image.
 
 Frames:
 
 1. lit;
 2. the cluster heatmap;
-3. a moved camera with the red quad moved in front of the green one (the order must flip), without an environment (stand-ins);
+3. a moved camera with the red quad moved in front of the green one (the order must flip), without an environment (stand-ins), jittered by (0.37, −0.21) pixels; the CPU ray cast follows the jitter;
 4. 10,000 lights, every 7th pixel compared, with pass timings printed.

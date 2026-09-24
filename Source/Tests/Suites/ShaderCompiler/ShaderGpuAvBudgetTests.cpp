@@ -108,6 +108,9 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 		{ "SwimPostComposite", SWIM_POST_COMPOSITE_SPIRV_PATH },
 		{ "SwimPostCompositeHdr", SWIM_POST_COMPOSITE_HDR_SPIRV_PATH },
 #endif
+#if defined(SWIM_TEMPORAL_RESOLVE_SPIRV_PATH)
+		{ "SwimTemporalResolve", SWIM_TEMPORAL_RESOLVE_SPIRV_PATH },
+#endif
 	};
 
 	std::uint32_t total = 0;

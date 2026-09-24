@@ -164,6 +164,7 @@ function(swim_configure_tests)
 		RenderForwardPlus
 		RenderShadows
 		RenderPostProcess
+		RenderTemporal
 		Commands
 	)
 
@@ -400,6 +401,8 @@ function(swim_configure_tests)
 			SWIM_POST_COMPOSITE_REFLECTION_PATH="${SwimPostComposite_REFLECTION}"
 			SWIM_POST_COMPOSITE_HDR_SPIRV_PATH="${SwimPostCompositeHdr_SPIRV}"
 			SWIM_POST_COMPOSITE_HDR_REFLECTION_PATH="${SwimPostCompositeHdr_REFLECTION}"
+			SWIM_TEMPORAL_RESOLVE_SPIRV_PATH="${SwimTemporalResolve_SPIRV}"
+			SWIM_TEMPORAL_RESOLVE_REFLECTION_PATH="${SwimTemporalResolve_REFLECTION}"
 		)
 	endif()
 

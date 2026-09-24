@@ -22,9 +22,10 @@ namespace Swim::Render
 		};
 		const auto& f = view.CameraForward;
 		const float length = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
-		if (!finite(view.ViewProjection) || !finite(view.CameraPosition) || !finite(view.CameraForward) || !finite(view.Ambient) ||
-			!(length > 1.0e-12f) || !std::isfinite(length) || !(view.EnvironmentIntensity >= 0.0f) ||
-			!std::isfinite(view.EnvironmentIntensity) || !std::isfinite(view.EnvironmentRotation) ||
+		const auto previous = view.PreviousViewProjection.value_or(view.ViewProjection);
+		if (!finite(view.ViewProjection) || !finite(previous) || !finite(view.Jitter) || !finite(view.CameraPosition) ||
+			!finite(view.CameraForward) || !finite(view.Ambient) || !(length > 1.0e-12f) || !std::isfinite(length) ||
+			!(view.EnvironmentIntensity >= 0.0f) || !std::isfinite(view.EnvironmentIntensity) || !std::isfinite(view.EnvironmentRotation) ||
 			std::any_of(view.Ambient.begin(), view.Ambient.end(),
 				[](float value)
 				{
@@ -32,11 +33,15 @@ namespace Swim::Render
 				}) ||
 			(view.DebugMode != ForwardPlusDebugMode::None && view.DebugMode != ForwardPlusDebugMode::ClusterHeatmap))
 		{
-			throw std::invalid_argument("Forward+ view needs a finite matrix and camera, a nonzero forward vector, nonnegative ambient and "
-										"intensity, and a known debug mode");
+			throw std::invalid_argument(
+				"Forward+ view needs finite matrices, jitter and camera, a nonzero forward vector, nonnegative ambient and "
+				"intensity, and a known debug mode");
 		}
 		ForwardViewRecord record;
 		std::copy(view.ViewProjection.begin(), view.ViewProjection.end(), record.ViewProjection);
+		std::copy(previous.begin(), previous.end(), record.PreviousViewProjection);
+		record.Jitter[0] = view.Jitter[0];
+		record.Jitter[1] = view.Jitter[1];
 		for (int c = 0; c < 3; ++c)
 		{
 			record.CameraPosition[c] = view.CameraPosition[c];
@@ -93,6 +98,22 @@ namespace Swim::Render::ForwardPlus
 			result[r] = rows[r * 4] * p[0] + rows[r * 4 + 1] * p[1] + rows[r * 4 + 2] * p[2] + rows[r * 4 + 3];
 		}
 		return result;
+	}
+
+	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local)
+	{
+		const auto project = [](const float(&m)[16], const Float3& p)
+		{
+			std::array<float, 4> clip{};
+			for (int r = 0; r < 4; ++r)
+			{
+				clip[r] = m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3];
+			}
+			return Float2{ clip[0] / clip[3], clip[1] / clip[3] };
+		};
+		const auto now = project(view.ViewProjection, TransformPoint(current, local));
+		const auto before = project(view.PreviousViewProjection, TransformPoint(previous, local));
+		return { (now[0] - before[0]) * 0.5f, (now[1] - before[1]) * -0.5f };
 	}
 
 	Float3 TransformDirection(const float (&rows)[12], const Float3& d)

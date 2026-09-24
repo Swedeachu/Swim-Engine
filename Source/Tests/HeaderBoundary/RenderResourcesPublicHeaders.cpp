@@ -27,6 +27,8 @@
 #include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowRenderer.h"
+#include "Engine/Systems/Renderer/Temporal/TemporalAntiAliasing.h"
+#include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
 #include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
@@ -78,3 +80,7 @@ static_assert(Swim::Rhi::GetTransferTexelBytes(Swim::Rhi::Format::D32Float) == 4
 static_assert(sizeof(Swim::Render::GpuExposureState) == 16 && sizeof(Swim::Render::GpuPostParams) == 128);
 static_assert(Swim::Render::PostHistogramBins == 256 && Swim::Render::MaxBloomMips == 8);
 static_assert(!std::is_copy_constructible_v<Swim::Render::PostProcessor>);
+static_assert(sizeof(Swim::Render::TemporalResolveConstants) == 32 && Swim::Render::TemporalResolveBindings::Count == 5);
+static_assert(!std::is_copy_constructible_v<Swim::Render::TemporalAntiAliasing>);
+static_assert(sizeof(Swim::Render::ForwardViewRecord) == 208);
+static_assert(Swim::Render::ForwardPlusRenderer::VelocityFormat == Swim::Rhi::Format::RG16Float);

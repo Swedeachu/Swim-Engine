@@ -10,6 +10,7 @@
 #include "Engine/Systems/Renderer/Visibility/GpuDrawRecord.h"
 
 #include <array>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -18,7 +19,12 @@ namespace Swim::Render
 	// Per-view inputs of a Forward+ frame (BuildForwardViewRecord packs them).
 	struct ForwardPlusView
 	{
-		std::array<float, 16> ViewProjection{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // Row-major.
+		std::array<float, 16> ViewProjection{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }; // Row-major, unjittered.
+		// Item 75: the previous frame's unjittered view-projection (defaults to this
+		// frame's: no camera motion) and the sub-pixel jitter as an NDC offset
+		// (Temporal::JitterNdc). Jitter moves only the rasterized position.
+		std::optional<std::array<float, 16>> PreviousViewProjection;
+		std::array<float, 2> Jitter{ 0, 0 };
 		std::array<float, 3> CameraPosition{ 0, 0, 0 };
 		std::array<float, 3> CameraForward{ 0, 0, -1 }; // Normalized when packed.
 		std::array<float, 3> Ambient{ 0, 0, 0 };
@@ -27,7 +33,7 @@ namespace Swim::Render
 		ForwardPlusDebugMode DebugMode = ForwardPlusDebugMode::None;
 	};
 
-	// Throws std::invalid_argument for a non-finite matrix/position, a zero forward
+	// Throws std::invalid_argument for a non-finite matrix/position/jitter, a zero forward
 	// vector, negative ambient or intensity, or an unknown debug mode.
 	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
 		bool hasEnvironment, bool hasShadows = false);
@@ -40,6 +46,7 @@ namespace Swim::Render::ForwardPlus
 	// compares the two pixel by pixel.
 	using Float3 = std::array<float, 3>;
 	using Float4 = std::array<float, 4>;
+	using Float2 = std::array<float, 2>;
 
 	// Which visibility bin a material draws in: FlagAlphaBlend -> Transparent, the
 	// rest (opaque, alpha-masked, double-sided) -> Opaque.
@@ -47,6 +54,10 @@ namespace Swim::Render::ForwardPlus
 
 	// GpuTransformRecord rows (row-major 3x4 affine).
 	Float3 TransformPoint(const float (&rows)[12], const Float3& point);
+	// Item 75: screen-space motion of an object-space point, current minus previous UV
+	// (x right, y down; prevUV = uv - motion), from the current transform with the
+	// unjittered view-projection and the previous transform with the previous one.
+	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local);
 	Float3 TransformDirection(const float (&rows)[12], const Float3& direction);
 	float Determinant(const float (&rows)[12]);
 	// The cofactor (determinant x inverse-transpose) of the linear part times the

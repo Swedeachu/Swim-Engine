@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3971,7 +3971,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     # Items 73-74: post-processing consumes only the render graph and RHI contract.
     # No other renderer module includes it, and it includes no other renderer module.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
-                   "ClusteredLighting", "Shadows", "ForwardPlus", "Residency"):
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "Temporal", "Residency"):
         for path in (renderer / module).rglob("*"):
             if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
                 r'#\s*include[^\n]*Renderer/PostProcess/', path.read_text(encoding="utf-8")
@@ -4001,6 +4001,37 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderPostProcess", "PostProcessorTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanPostProcessSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderPostProcessLayoutTests.cpp", failures)
+    # Item 75: temporal anti-aliasing consumes only the render graph and RHI contract,
+    # and no other renderer module includes it (the Forward+ motion vectors it reads are
+    # plain graph textures).
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/Temporal/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on temporal anti-aliasing: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "Temporal").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if "Renderer/" in include and not re.search(r"Renderer/(Temporal|RenderGraph|RHI)/", include):
+                fail(f"Temporal may include only Temporal, RenderGraph and RHI headers: {path.relative_to(ROOT)} -> {include}", failures)
+    for relative in ("Temporal/TemporalReference.cpp", "Temporal/TemporalAntiAliasing.cpp", "Temporal/TemporalSettings.h",
+                     "Temporal/TemporalRecords.h", "Temporal/TemporalBindings.h", "Temporal/TemporalGraphResources.h"):
+        if not (renderer / relative).is_file():
+            fail(f"temporal anti-aliasing unit is missing: Renderer/{relative}", failures)
+    for shader in ("TemporalRecords", "TemporalResolve"):
+        if not (ROOT / f"Source/Shaders/Slang/Temporal/{shader}.slang").is_file():
+            fail(f"temporal shader is missing: Shaders/Slang/Temporal/{shader}.slang", failures)
+    if "Renderer/Temporal/*.cpp" not in post_cmake:
+        fail("Temporal sources must compile with the backend-neutral renderer source list", failures)
+    if "SV_Target2" not in (ROOT / "Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang").read_text(encoding="utf-8"):
+        fail("the opaque Forward+ program must write motion vectors (SV_Target2)", failures)
+    check_suite_is_compiled("RenderTemporal", "TemporalReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderTemporal", "TemporalAntiAliasingTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanTemporalSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderTemporalLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -4027,7 +4058,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

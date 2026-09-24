@@ -23,6 +23,9 @@ struct ForwardView
 	uint PrefilteredMipCount;
 	uint Flags;
 	uint DebugMode;
+	float4 PreviousViewProjection[4]; // Previous frame, unjittered (motion vectors, item 75).
+	float2 Jitter;					  // NDC offset added to clip.xy / clip.w.
+	float2 Reserved1;
 };
 
 struct ForwardSortEntry
@@ -35,6 +38,11 @@ struct ForwardSortEntry
 
 // Stride of StandardVertex in floats: Position 3, Normal 3, Tangent 4, TexCoord0 2.
 static const uint ForwardVertexFloats = 12;
+
+float4 ForwardProject(float4 rows[4], float4 p)
+{
+	return float4(dot(rows[0], p), dot(rows[1], p), dot(rows[2], p), dot(rows[3], p));
+}
 
 float ForwardDeterminant(float4 rows[3])
 {

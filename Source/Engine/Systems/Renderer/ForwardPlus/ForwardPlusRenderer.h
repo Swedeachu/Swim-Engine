@@ -80,7 +80,10 @@ namespace Swim::Render
 		GraphTexture
 			ObjectId;		// R32Float, ColorAttachment: GpuInstanceRecord::ObjectId + 1 of opaque pixels (exact below 2^24), 0 elsewhere.
 		GraphTexture Depth; // D32Float (reverse-Z), DepthStencilAttachment.
-		bool Clear = true;	// Clear color/id/depth first; otherwise load them.
+		// Item 75: RG16Float, ColorAttachment: opaque pixels' motion (current minus previous
+		// UV, ForwardPlus::MotionVector), 0 elsewhere. Without one, a transient target is used.
+		std::optional<GraphTexture> Velocity;
+		bool Clear = true; // Clear color/id/depth first; otherwise load them.
 		std::array<float, 4> ClearColor{ 0, 0, 0, 0 };
 	};
 
@@ -88,7 +91,7 @@ namespace Swim::Render
 	//  1. opaque: every Opaque-bin draw of every page slot, GPU-driven from the
 	//     visibility commands, shaded by ClusteredForward.slang (StandardPbr resolve,
 	//     directional + clustered local lights, ambient, IBL, emission), writing
-	//     color, object id and depth;
+	//     color, object id, motion vectors and depth (jittered rasterization, item 75);
 	//  2. sort: one group per page slot orders the Transparent bin back to front by
 	//     bounds-center depth (deterministic tie-breaks) into compacted commands;
 	//  3. transparent: the sorted draws, blended (premultiplied alpha) over the
@@ -100,12 +103,13 @@ namespace Swim::Render
 		static constexpr Rhi::Format ColorFormat = Rhi::Format::RGBA16Float;
 		// Float so it can be cleared (the RHI clears only float and normalized targets).
 		static constexpr Rhi::Format ObjectIdFormat = Rhi::Format::R32Float;
+		static constexpr Rhi::Format VelocityFormat = Rhi::Format::RG16Float;
 
 		// Pipeline state of a variant: both rasterize both faces (single-sided
 		// materials discard back faces in the shader, so mirrored transforms work),
 		// test depth with the canonical reverse-Z compare, and use the RHI's +Y-up
-		// counter-clockwise front faces. Opaque writes depth and two targets (color,
-		// object id); Transparent writes color only, premultiplied One /
+		// counter-clockwise front faces. Opaque writes depth and three targets (color,
+		// object id, velocity); Transparent writes color only, premultiplied One /
 		// OneMinusSourceAlpha, and never writes depth.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(ForwardPlusBin bin, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
 

@@ -88,6 +88,9 @@ struct VertexOutput
 	// Opaque only: an output the transparent fragment stage never reads would draw a
 	// validation warning (Shader-OutputNotConsumed).
 	nointerpolation uint ObjectId : OBJECT_ID;
+	// Unjittered clip positions of this frame and the previous one (motion vectors).
+	float4 CurrentClip : CURRENT_CLIP;
+	float4 PreviousClip : PREVIOUS_CLIP;
 #endif
 	nointerpolation uint Mirrored : MIRRORED;
 };
@@ -100,12 +103,19 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	// Loops copy the transform and vertex once each: GPU-assisted validation instruments
 	// every storage-buffer load and flags shaders with more than 75 of them, and Slang
 	// otherwise re-loads at each use.
-	float4 current[3];
-	for (uint row = 0; row < 3; ++row)
+	float4 rows[6];
+	for (uint row = 0; row < 6; ++row)
 	{
-		current[row] = Transforms[instance.TransformIndex].Current[row];
+		rows[row] = row < 3 ? Transforms[instance.TransformIndex].Current[row] : Transforms[instance.TransformIndex].Previous[row - 3];
 	}
-	const ForwardView view = Views[0];
+	float4 current[3] = { rows[0], rows[1], rows[2] };
+	// This frame's and the previous frame's view-projection rows, copied once each.
+	float4 projections[8];
+	for (uint row = 0; row < 8; ++row)
+	{
+		projections[row] = row < 4 ? Views[0].ViewProjection[row] : Views[0].PreviousViewProjection[row - 4];
+	}
+	float4 viewProjection[4] = { projections[0], projections[1], projections[2], projections[3] };
 	const uint base = vertexId * ForwardVertexFloats;
 	float v[ForwardVertexFloats];
 	for (uint i = 0; i < ForwardVertexFloats; ++i)
@@ -121,15 +131,20 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	const bool mirrored = ForwardDeterminant(current) < 0.0;
 	const float4 p = float4(world, 1.0);
 	VertexOutput output;
-	output.Position = float4(dot(view.ViewProjection[0], p), dot(view.ViewProjection[1], p), dot(view.ViewProjection[2], p),
-		dot(view.ViewProjection[3], p));
+	const float4 clip = ForwardProject(viewProjection, p);
+	// TAA jitter (ForwardPlus::BuildForwardViewRecord): an NDC offset, so clip.xy moves by jitter * w.
+	output.Position = float4(clip.xy + Views[0].Jitter * clip.w, clip.zw);
 	output.WorldPosition = world;
 	output.Normal = ForwardTransformNormal(current, normal);
 	output.Tangent = float4(ForwardTransformDirection(current, tangent.xyz), (tangent.w < 0.0) != mirrored ? -1.0 : 1.0);
 	output.Uv = uv;
-	output.Material = instance.MaterialSet < view.MaterialCount ? instance.MaterialSet : 0u;
+	output.Material = instance.MaterialSet < Views[0].MaterialCount ? instance.MaterialSet : 0u;
 #if !FORWARD_TRANSPARENT
 	output.ObjectId = instance.ObjectId;
+	float4 previous[3] = { rows[3], rows[4], rows[5] };
+	output.CurrentClip = clip;
+	float4 previousViewProjection[4] = { projections[4], projections[5], projections[6], projections[7] };
+	output.PreviousClip = ForwardProject(previousViewProjection, float4(GpuSceneTransformPoint(previous, position), 1.0));
 #endif
 	output.Mirrored = mirrored ? 1u : 0u;
 	return output;
@@ -206,6 +221,7 @@ struct OpaqueOutput
 {
 	float4 Color : SV_Target0;
 	float ObjectId : SV_Target1;
+	float2 Velocity : SV_Target2; // ForwardPlus::MotionVector: UV of this frame minus UV of the previous.
 };
 
 [shader("fragment")]
@@ -215,6 +231,9 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 	OpaqueOutput output;
 	output.Color = pixel.UseDebug ? pixel.Debug : float4(pixel.Color.rgb, 1.0);
 	output.ObjectId = float(input.ObjectId + 1u);
+	const float2 now = input.CurrentClip.xy / input.CurrentClip.w;
+	const float2 before = input.PreviousClip.xy / input.PreviousClip.w;
+	output.Velocity = (now - before) * float2(0.5, -0.5);
 	return output;
 }
 #endif

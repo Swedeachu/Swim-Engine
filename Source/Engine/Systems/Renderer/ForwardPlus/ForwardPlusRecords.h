@@ -27,10 +27,10 @@ namespace Swim::Render
 		ClusterHeatmap = 1,
 	};
 
-	// ForwardPlusRecords.slang's ForwardView (std430, 128 bytes): one per view.
+	// ForwardPlusRecords.slang's ForwardView (std430, 208 bytes): one per view.
 	struct ForwardViewRecord
 	{
-		float ViewProjection[16] = {}; // Row-major rows (clip = M * world).
+		float ViewProjection[16] = {}; // Row-major rows (clip = M * world), unjittered.
 		float CameraPosition[3] = {};
 		float EnvironmentIntensity = 1.0f;
 		float CameraForward[3] = { 0, 0, -1 }; // Unit; transparent sort depth axis.
@@ -41,9 +41,14 @@ namespace Swim::Render
 		std::uint32_t PrefilteredMipCount = 1;
 		std::uint32_t Flags = 0;
 		std::uint32_t DebugMode = 0;
+		// Item 75: the previous frame's unjittered view-projection (motion vectors) and
+		// this frame's sub-pixel jitter as an NDC offset added to clip.xy / clip.w.
+		float PreviousViewProjection[16] = {};
+		float Jitter[2] = {};
+		float Reserved1[2] = {};
 	};
 
-	static_assert(sizeof(ForwardViewRecord) == 128);
+	static_assert(sizeof(ForwardViewRecord) == 208);
 
 	// ForwardTransparentSort.slang's scratch entry (16 bytes).
 	struct ForwardSortEntry
