@@ -115,7 +115,7 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 - A depth prepass and hardware back-face culling split by winding.
 - Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
-- Engine wiring (item 56), tone mapping (item 73).
+- Engine wiring (item 56). The HDR color target feeds [post-processing](PostProcess.md) (items 73–74) for exposure, bloom, grading and tone mapping.
 - Importing glTF `alphaMode` into `FlagAlphaBlend`.
 
 ## Tests

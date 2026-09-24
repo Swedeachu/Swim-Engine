@@ -258,7 +258,7 @@ namespace Swim::Testing
 		void BeginRendering(const Swim::Rhi::RenderingDesc&) override {}
 		void EndRendering() override {}
 		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline& pipeline) override { Capture({ "BindGraphicsPipeline", &pipeline }); }
-		void BindComputePipeline(Swim::Rhi::ComputePipeline&) override {}
+		void BindComputePipeline(Swim::Rhi::ComputePipeline& pipeline) override { Capture({ "BindComputePipeline", &pipeline }); }
 		void BindDescriptorTable(std::uint32_t space, Swim::Rhi::DescriptorTable& table) override
 		{
 			Capture({ "BindDescriptorTable", &table, nullptr, space });

@@ -13,6 +13,8 @@
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryRangeAllocator.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
+#include "Engine/Systems/Renderer/PostProcess/PostProcessReference.h"
+#include "Engine/Systems/Renderer/PostProcess/PostProcessor.h"
 #include "Engine/Systems/Renderer/RHI/RhiFormatInfo.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 #include "Engine/Systems/Renderer/Resources/BindlessResourceTable.h"
@@ -73,3 +75,6 @@ static_assert(sizeof(Swim::Render::GpuShadowRecord) == 64 && sizeof(Swim::Render
 static_assert(Swim::Render::ShadowRenderer::AtlasFormat == Swim::Rhi::Format::D32Float);
 static_assert(Swim::Render::ShadowDepthBindings::Count == 6 && Swim::Render::ShadowBinCount == 3);
 static_assert(Swim::Rhi::GetTransferTexelBytes(Swim::Rhi::Format::D32Float) == 4);
+static_assert(sizeof(Swim::Render::GpuExposureState) == 16 && sizeof(Swim::Render::GpuPostParams) == 128);
+static_assert(Swim::Render::PostHistogramBins == 256 && Swim::Render::MaxBloomMips == 8);
+static_assert(!std::is_copy_constructible_v<Swim::Render::PostProcessor>);

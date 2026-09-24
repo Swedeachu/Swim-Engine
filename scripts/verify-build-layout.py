@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3968,6 +3968,39 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RHIVulkan", "VulkanShadowSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderShadowLayoutTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderGpuAvBudgetTests.cpp", failures)
+    # Items 73-74: post-processing consumes only the render graph and RHI contract.
+    # No other renderer module includes it, and it includes no other renderer module.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/PostProcess/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on post-processing: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "PostProcess").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if "Renderer/" in include and not re.search(r"Renderer/(PostProcess|RenderGraph|RHI)/", include):
+                fail(f"PostProcess may include only PostProcess, RenderGraph and RHI headers: {path.relative_to(ROOT)} -> {include}", failures)
+            if re.search(r"Engine/(Assets|IO|Jobs)/", include):
+                fail(f"PostProcess must not depend on assets, IO or jobs: {path.relative_to(ROOT)} -> {include}", failures)
+    for relative in ("PostProcess/PostProcessReference.cpp", "PostProcess/PostProcessor.cpp", "PostProcess/PostProcessSettings.h",
+                     "PostProcess/PostProcessRecords.h", "PostProcess/PostProcessBindings.h", "PostProcess/PostProcessGraphResources.h"):
+        if not (renderer / relative).is_file():
+            fail(f"post-processing unit is missing: Renderer/{relative}", failures)
+    for shader in ("PostProcessRecords", "PostHistogram", "PostExposure", "PostBloomDownsample", "PostBloomUpsample", "PostComposite"):
+        if not (ROOT / f"Source/Shaders/Slang/PostProcess/{shader}.slang").is_file():
+            fail(f"post-processing shader is missing: Shaders/Slang/PostProcess/{shader}.slang", failures)
+    post_cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    if "Renderer/PostProcess/*.cpp" not in post_cmake:
+        fail("PostProcess sources must compile with the backend-neutral renderer source list", failures)
+    if "POST_OUTPUT_HDR=1" not in post_cmake:
+        fail("the HDR composite variant must be compiled from PostComposite.slang", failures)
+    check_suite_is_compiled("RenderPostProcess", "PostProcessReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderPostProcess", "PostProcessorTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanPostProcessSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderPostProcessLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -3994,7 +4027,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue

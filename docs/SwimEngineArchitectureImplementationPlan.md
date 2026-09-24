@@ -27,9 +27,26 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69) and cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) and the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — items 70, 71 and 72: directional, spot and point shadows (2026-09-23):** Phase 16's first checkpoint shadows every light kind from one depth atlas, rendered GPU-driven and sampled by Clustered Forward+.
+- **Latest renderer checkpoint — items 73 and 74: exposure, tone mapping, bloom and color grading (2026-09-23):** Phase 17's post stack starts: HDR scene color now becomes display output entirely on the GPU.
+  - **`Renderer/PostProcess` (item 73):**
+    - A 256-bin log-luminance histogram (group-shared atomics) and a one-thread exposure pass.
+    - The exposure pass averages between percentiles, meters with EV100, clamps, applies compensation and adapts asymmetrically over time. It works in a persistent `GpuExposureState`, with snaps on the first frame and after `ResetExposureHistory`. Manual EV skips the histogram.
+    - Four tone mappers: Clamp, Reinhard with a white point, ACES (Hill fit) and Khronos PBR Neutral (the default).
+    - Three encodings: sRGB with interleaved-gradient dither into RGBA8Unorm, and HDR10 (BT.2020 + PQ) or scRGB into RGBA16Float. HDR tone-maps relative to the display peak, with SDR white at paper white.
+  - **Item 74:**
+    - Bloom: a Karis-averaged, soft-thresholded 13-tap downsample chain whose taps are exact 2×2 box averages, and a tent upsample chain that accumulates.
+    - Grading: white balance (LMS von Kries toward the daylight locus), contrast around 18 % grey, ASC CDL and saturation. Default values skip grading entirely.
+  - Every pass has a CPU definition in `PostProcessReference` (`Post::`), and every effect can be disabled cleanly. The module depends only on RenderGraph and the RHI contract.
+  - Compute shaders cannot store to sRGB formats, so the sRGB OETF is applied in the shader.
+  - **Validation:**
+    - The official Linux configuration passes **606 cases / 275,973 checks** (was 591 / 260,063). The EnTT-enabled sanitizer build passes 629 cases cleanly.
+    - The new native smoke `PostProcessMatchesTheCpuReference` reads back the histogram, the exposure state, every bloom level and every output texel, and compares each with the CPU definition. It runs five compared frames (auto sRGB, adaptation, graded ACES, HDR10, scRGB) plus a 1080p timing frame.
+    - `ShaderCompiler.GpuAvBudget` covers the six post programs.
+    - 37 native cases now. See [Post-processing](PostProcess.md) and [the items 73–74 record](validation/Items73-74-2026-09-23.md).
+  - **Still needed:** desktop execution of the new smoke, then recording post pass timings as budgets. Motion vectors and TAA (item 75) come next on the critical path. Engine wiring, including presenting the output, remains item 56.
+- **Previous renderer checkpoint — items 70, 71 and 72: directional, spot and point shadows (2026-09-23):** Phase 16's first checkpoint shadows every light kind from one depth atlas, rendered GPU-driven and sampled by Clustered Forward+.
   - **`Renderer/Shadows`:**
     - **Directional (item 70):** `ComputeCascades` fits 1–4 cascades (practical splits) with rotation-invariant bounding spheres, texel-snapped centers and a caster extension toward the light.
     - **Spot (item 71):** each spot gets one cone view. `ShadowAtlasAllocator` places power-of-two tiles in priority order and keeps last frame's tiles for unchanged requests. When the atlas is full it downgrades, then displaces lower-priority tiles, then evicts; downgraded tiles grow back when room frees.
@@ -47,8 +64,8 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `ShadowedForwardPlusMatchesTheCpuReference` reads the atlas back and compares it texel by texel with CPU shadow maps: masked-away, blended and non-casting objects must be absent. It compares the shadowed image with `ForwardPlus::Shade` over the GPU's own atlas, and runs an eviction frame.
     - 36 native cases now. See [Shadows](Shadows.md) and [the items 70–72 record](validation/Items70-72-2026-09-23.md).
   - **Desktop run (RTX 4070 Laptop):** core and synchronization validation pass all 36 native cases. The shadow atlas matched the CPU shadow maps with 0 mismatches, and the shadowed image had 0 outliers (mean error 3.4·10⁻⁴). GPU-assisted validation failed both Forward+ smokes on `GPUAV-Compile-time-general-buffer`: more than 75 instrumented buffer accesses per module. The shader now has one light loop (the shadow lookup is inlined once), member view loads and single copies of the transform and vertex, which brings it from 125 to 72. `ShaderCompiler.GpuAvBudget` (591 cases now) fails any renderer program above the limit.
-  - **Still needed:** the GPU-assisted and combined re-run, then recording shadow pass timings as budgets. HDR scene color, exposure and tone mapping (item 73) come next on the critical path. Engine wiring remains item 56.
-- **Previous renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
+  - **Re-run:** after the GPU-AV fix, all four validation profiles pass. Recording shadow pass timings as budgets remains. The post stack (items 73–74) followed.
+- **Earlier renderer checkpoint — items 66, 67 and 69: Clustered Forward+ and light-count benchmarks (2026-09-23):** the modern renderer now draws and lights GPU Scene objects end to end on the GPU.
   - **`Renderer/ForwardPlus` (items 66–67):**
     - `ForwardPlusRenderer::Record` draws GPU visibility's Opaque bin GPU-driven, shaded by `ClusteredForward.slang` into HDR color, an object-id target and reverse-Z depth. Shading is `StandardPbr` through the material table and bindless textures, plus directional lights, the pixel's cluster list, ambient, optional IBL and emission.
     - It then sorts the Transparent bin (`StandardPbr::FlagAlphaBlend`) back to front on the GPU with a bitonic network. The order is deterministic, independent of compaction order, and the unused commands are zeroed. The sorted draws are blended with premultiplied alpha.
@@ -4072,11 +4089,11 @@ Rebuild cubemap/environment rendering as generic render passes/assets rather tha
 
 Recommended order:
 
-1. HDR scene color;
-2. exposure;
-3. tone mapping;
-4. bloom;
-5. color grading;
+1. HDR scene color; *(done: Forward+ renders RGBA16Float; `PostProcessor` consumes it, items 73–74 — [Post-processing](PostProcess.md))*
+2. exposure; *(done: histogram auto exposure with percentiles, adaptation and compensation, or manual EV100)*
+3. tone mapping; *(done: Clamp, Reinhard, ACES fit, PBR Neutral; sRGB, HDR10 PQ and scRGB outputs)*
+4. bloom; *(done: Karis-averaged 13-tap downsample and tent upsample chains)*
+5. color grading; *(done: white balance, contrast, ASC CDL, saturation; a 3D LUT is later work)*
 6. TAA once motion vectors/history are solid;
 7. optional GTAO/SSAO;
 8. optional SSR;
@@ -4821,7 +4838,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 58. [x] MaterialTemplate/MaterialInstance + reflected parameters. *(2026-09-23: CPU data layer and tool-side reflection conversion; [Materials](Materials.md). Features/variants, pass participation and render-state policy arrive with items 59–60.)*
 59. [x] GPU material buffer/bindless material resources. *(2026-09-23: `GpuMaterialTable`; [Materials](Materials.md#gpu-material-table-item-59). Native smoke awaits desktop execution.)*
 60. [x] metallic-roughness PBR. *(`StandardPbr` CPU definition + `StandardPbr.slang`; IBL is item 61, tone mapping item 73)*
-61. [x] environment/IBL. *(2026-09-23: `Renderer/Environment` + `Shaders/Slang/Environment`; [Environment](Environment.md). HDR environment assets and tone mapping (item 73) remain; native smoke awaits desktop execution.)*
+61. [x] environment/IBL. *(2026-09-23: `Renderer/Environment` + `Shaders/Slang/Environment`; [Environment](Environment.md). HDR environment assets remain; tone mapping arrived with item 73.)*
 62. [x] PBR image regression gallery. *(2026-09-23: CPU golden renderer `PbrGalleryFixture.h` + native `PbrGalleryMatchesTheCpuReference`; [Environment](Environment.md#pbr-image-regression-gallery-item-62).)*
 63. [x] GpuLightBuffer. *(2026-09-23: `Renderer/Lights` + `GpuLightRecords.slang`; [GPU lights](Lights.md). Native smoke awaits desktop execution.)*
 64. [x] clustered grid. *(2026-09-23: `Renderer/ClusteredLighting/ClusterGrid`; [Clustered lighting](ClusteredLighting.md). Native smoke awaits desktop execution.)*
@@ -4836,8 +4853,8 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 70. [x] directional shadows. *(2026-09-23: `Renderer/Shadows` cascades + `Shaders/Slang/Shadows`; [Shadows](Shadows.md). Native smoke awaits desktop execution.)*
 71. [x] spot atlas. *(2026-09-23: `ShadowAtlasAllocator` + `ShadowPlanner` budgets.)*
 72. [x] point shadow policy. *(2026-09-23: six cube-face tiles under `MaxPointShadows` and the atlas policy.)*
-73. [ ] HDR scene color/exposure/tone mapping.
-74. [ ] bloom/color grading.
+73. [x] HDR scene color/exposure/tone mapping. *(2026-09-23: `Renderer/PostProcess` + `Shaders/Slang/PostProcess`; [Post-processing](PostProcess.md). Native smoke awaits desktop execution.)*
+74. [x] bloom/color grading. *(2026-09-23: bloom chains and the grading stage of the composite.)*
 75. [ ] motion vectors/TAA.
 76. [ ] optional AO/SSR/fog modules.
 77. [ ] GPU particles.

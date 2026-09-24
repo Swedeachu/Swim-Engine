@@ -487,6 +487,38 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES SHADOW_ALPHA_TEST=1
 	)
+	# Post-processing (items 73-74): histogram, exposure, bloom and the composite.
+	swim_add_slang_program(SwimPostHistogram
+		SOURCE Source/Shaders/Slang/PostProcess/PostHistogram.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimPostExposure
+		SOURCE Source/Shaders/Slang/PostProcess/PostExposure.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimPostBloomDownsample
+		SOURCE Source/Shaders/Slang/PostProcess/PostBloomDownsample.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimPostBloomUpsample
+		SOURCE Source/Shaders/Slang/PostProcess/PostBloomUpsample.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimPostComposite
+		SOURCE Source/Shaders/Slang/PostProcess/PostComposite.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimPostCompositeHdr
+		SOURCE Source/Shaders/Slang/PostProcess/PostComposite.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES POST_OUTPUT_HDR=1
+	)
 	swim_add_slang_program(SwimForwardTransparentSort
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
@@ -533,6 +565,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
 			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
 			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
+			"${SwimPostHistogram_SPIRV}" "${SwimPostHistogram_REFLECTION}"
+			"${SwimPostExposure_SPIRV}" "${SwimPostExposure_REFLECTION}"
+			"${SwimPostBloomDownsample_SPIRV}" "${SwimPostBloomDownsample_REFLECTION}"
+			"${SwimPostBloomUpsample_SPIRV}" "${SwimPostBloomUpsample_REFLECTION}"
+			"${SwimPostComposite_SPIRV}" "${SwimPostComposite_REFLECTION}"
+			"${SwimPostCompositeHdr_SPIRV}" "${SwimPostCompositeHdr_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -585,6 +623,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 			Source/Shaders/Slang/Shadows/ShadowRecords.slang
 			Source/Shaders/Slang/Shadows/ShadowDepth.slang
+			Source/Shaders/Slang/PostProcess/PostProcessRecords.slang
+			Source/Shaders/Slang/PostProcess/PostHistogram.slang
+			Source/Shaders/Slang/PostProcess/PostExposure.slang
+			Source/Shaders/Slang/PostProcess/PostBloomDownsample.slang
+			Source/Shaders/Slang/PostProcess/PostBloomUpsample.slang
+			Source/Shaders/Slang/PostProcess/PostComposite.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -594,7 +638,7 @@ endif()
 # persistent GPU Scene (GpuScene/), GPU-driven visibility (Visibility/), materials,
 # image-based lighting (Environment/), the GPU light buffer (Lights/),
 # clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
-# Clustered Forward+ (ForwardPlus/) and the asset
+# Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -623,6 +667,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

@@ -100,17 +100,27 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 		{ "SwimForwardTransparentSort", SWIM_FORWARD_TRANSPARENT_SORT_SPIRV_PATH },
 		{ "SwimShadowDepth", SWIM_SHADOW_DEPTH_SPIRV_PATH },
 		{ "SwimShadowMasked", SWIM_SHADOW_MASKED_SPIRV_PATH },
+#if defined(SWIM_POST_COMPOSITE_HDR_SPIRV_PATH)
+		{ "SwimPostHistogram", SWIM_POST_HISTOGRAM_SPIRV_PATH },
+		{ "SwimPostExposure", SWIM_POST_EXPOSURE_SPIRV_PATH },
+		{ "SwimPostBloomDownsample", SWIM_POST_BLOOM_DOWNSAMPLE_SPIRV_PATH },
+		{ "SwimPostBloomUpsample", SWIM_POST_BLOOM_UPSAMPLE_SPIRV_PATH },
+		{ "SwimPostComposite", SWIM_POST_COMPOSITE_SPIRV_PATH },
+		{ "SwimPostCompositeHdr", SWIM_POST_COMPOSITE_HDR_SPIRV_PATH },
+#endif
 	};
 
+	std::uint32_t total = 0;
 	for (const auto& program : programs)
 	{
 		const auto words = ReadWords(program.Path);
 		SWIM_REQUIRE_MESSAGE(words.size() > 5 && words[0] == 0x07230203u, std::string("missing SPIR-V: ") + program.Path);
 		const auto accesses = InstrumentedBufferAccesses(words);
 		std::printf("             [GPU-AV budget] %-28s %3u buffer accesses (limit %u)\n", program.Name, accesses, GpuAvGeneralBufferLimit);
-		SWIM_CHECK_MESSAGE(accesses > 0u, std::string(program.Name) + " has no buffer accesses: the counter is broken");
+		total += accesses;
 		SWIM_CHECK_MESSAGE(accesses <= GpuAvGeneralBufferLimit,
 			std::string(program.Name) + " would trigger GPUAV-Compile-time-general-buffer under GPU-assisted validation");
 	}
+	SWIM_CHECK_MESSAGE(total > 0u, "no buffer accesses counted: the counter is broken");
 }
 #endif

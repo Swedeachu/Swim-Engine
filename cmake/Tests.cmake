@@ -163,6 +163,7 @@ function(swim_configure_tests)
 		RenderClusteredLighting
 		RenderForwardPlus
 		RenderShadows
+		RenderPostProcess
 		Commands
 	)
 
@@ -387,6 +388,18 @@ function(swim_configure_tests)
 			SWIM_SHADOW_DEPTH_REFLECTION_PATH="${SwimShadowDepth_REFLECTION}"
 			SWIM_SHADOW_MASKED_SPIRV_PATH="${SwimShadowMasked_SPIRV}"
 			SWIM_SHADOW_MASKED_REFLECTION_PATH="${SwimShadowMasked_REFLECTION}"
+			SWIM_POST_HISTOGRAM_SPIRV_PATH="${SwimPostHistogram_SPIRV}"
+			SWIM_POST_HISTOGRAM_REFLECTION_PATH="${SwimPostHistogram_REFLECTION}"
+			SWIM_POST_EXPOSURE_SPIRV_PATH="${SwimPostExposure_SPIRV}"
+			SWIM_POST_EXPOSURE_REFLECTION_PATH="${SwimPostExposure_REFLECTION}"
+			SWIM_POST_BLOOM_DOWNSAMPLE_SPIRV_PATH="${SwimPostBloomDownsample_SPIRV}"
+			SWIM_POST_BLOOM_DOWNSAMPLE_REFLECTION_PATH="${SwimPostBloomDownsample_REFLECTION}"
+			SWIM_POST_BLOOM_UPSAMPLE_SPIRV_PATH="${SwimPostBloomUpsample_SPIRV}"
+			SWIM_POST_BLOOM_UPSAMPLE_REFLECTION_PATH="${SwimPostBloomUpsample_REFLECTION}"
+			SWIM_POST_COMPOSITE_SPIRV_PATH="${SwimPostComposite_SPIRV}"
+			SWIM_POST_COMPOSITE_REFLECTION_PATH="${SwimPostComposite_REFLECTION}"
+			SWIM_POST_COMPOSITE_HDR_SPIRV_PATH="${SwimPostCompositeHdr_SPIRV}"
+			SWIM_POST_COMPOSITE_HDR_REFLECTION_PATH="${SwimPostCompositeHdr_REFLECTION}"
 		)
 	endif()
 
