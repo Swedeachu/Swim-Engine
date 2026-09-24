@@ -27,6 +27,8 @@ jitter = taa.GetJitterNdc(settings, width, height)
 ForwardPlusView { ViewProjection (unjittered), PreviousViewProjection = last frame's, Jitter = jitter }
 ForwardPlusRenderer::Record(graph, frame, { Color, ObjectId, Depth (Sampled), Velocity (Sampled) })
       |
+ScreenSpaceEffects::Record (item 76, optional) -> AO and fog applied to Color
+      |
 TemporalAntiAliasing::Record(graph, { Color, Depth, Velocity, Settings })
   resolve    one compute pass: history (last output) + current -> output (next history)
       |

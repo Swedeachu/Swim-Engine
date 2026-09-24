@@ -111,6 +111,11 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 #if defined(SWIM_TEMPORAL_RESOLVE_SPIRV_PATH)
 		{ "SwimTemporalResolve", SWIM_TEMPORAL_RESOLVE_SPIRV_PATH },
 #endif
+#if defined(SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH)
+		{ "SwimScreenSpaceAo", SWIM_SCREEN_SPACE_AO_SPIRV_PATH },
+		{ "SwimScreenSpaceBlur", SWIM_SCREEN_SPACE_BLUR_SPIRV_PATH },
+		{ "SwimScreenSpaceComposite", SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH },
+#endif
 	};
 
 	std::uint32_t total = 0;

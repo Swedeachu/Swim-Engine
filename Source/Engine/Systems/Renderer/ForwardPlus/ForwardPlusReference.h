@@ -115,6 +115,12 @@ namespace Swim::Render::ForwardPlus
 	Float4 Shade(const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface,
 		const Float3& position, float pixelX, float pixelY);
 
+	// Item 76: the indirect part of Shade, ambient * base color * occlusion + IBL: what
+	// the opaque pass writes to ForwardPlusTargets::Indirect and what ambient occlusion
+	// attenuates.
+	Float3 IndirectRadiance(
+		const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface, const Float3& position);
+
 	// ForwardPlusDebugMode::ClusterHeatmap: the cluster's heatmap color, opaque black
 	// where the cluster has no lights.
 	Float4 DebugColor(const ClusterGridRecord& grid, std::span<const ClusterRecord> records, float pixelX, float pixelY, float viewDepth);

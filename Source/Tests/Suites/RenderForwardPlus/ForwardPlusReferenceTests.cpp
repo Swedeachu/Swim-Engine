@@ -292,6 +292,17 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 			SWIM_CHECK(std::abs(withoutIbl[c] - expected) <= 1.0e-5f + 1.0e-5f * expected);
 			SWIM_CHECK(std::abs(b[c] - (expected + ibl[c])) <= 1.0e-5f + 1.0e-5f * (expected + ibl[c]));
 		}
+		// Item 76: the indirect part is exactly ambient + IBL, and the rest is direct + emission.
+		const auto indirect = Fp::IndirectRadiance(brute, lit, surface, position);
+		const auto indirectUnlit = Fp::IndirectRadiance(brute, unlit, surface, position);
+		for (int c = 0; c < 3; ++c)
+		{
+			const float ambient = lit.Ambient[c] * surface.BaseColor[c] * surface.Occlusion;
+			SWIM_CHECK(std::abs(indirect[c] - (ambient + ibl[c])) <= 1.0e-6f + 1.0e-5f * (ambient + ibl[c]));
+			SWIM_CHECK(std::abs(indirectUnlit[c] - ambient) <= 1.0e-7f + 1.0e-6f * ambient); // No environment: ambient only.
+			const float rest = direct[c] + surface.Emissive[c];
+			SWIM_CHECK(std::abs(b[c] - indirect[c] - rest) <= 1.0e-5f + 1.0e-4f * rest);
+		}
 		const auto directionalOnly = Lights::ShadeAllLights(scene.Rows, { 2, 0, scene.Header.FirstLocalRow, 0 },
 			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, toCamera, position);
 		litByLocal += direct[0] > directionalOnly[0] + 1.0e-4f ? 1u : 0u;

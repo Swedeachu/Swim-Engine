@@ -550,6 +550,10 @@ namespace
 			targets.Depth = target(CanonicalDepthFormat, Rhi::TextureUsage::DepthStencilAttachment, "Forward+ depth");
 			targets.Velocity = target(ForwardPlusRenderer::VelocityFormat,
 				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ velocity");
+			targets.Normal = target(ForwardPlusRenderer::NormalFormat,
+				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ normal");
+			targets.Indirect = target(ForwardPlusRenderer::IndirectFormat,
+				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ indirect");
 
 			ForwardPlusFrame forwardFrame;
 			forwardFrame.Scene = &sceneResources;
@@ -579,6 +583,8 @@ namespace
 			const auto colorReadback = AddTextureReadback(graph, "Color", targets.Color, { 0, {}, {}, { width, height, 1 } });
 			const auto idReadback = AddTextureReadback(graph, "Object id", targets.ObjectId, { 0, {}, {}, { width, height, 1 } });
 			const auto velocityReadback = AddTextureReadback(graph, "Velocity", *targets.Velocity, { 0, {}, {}, { width, height, 1 } });
+			const auto normalReadback = AddTextureReadback(graph, "Normal", *targets.Normal, { 0, {}, {}, { width, height, 1 } });
+			const auto indirectReadback = AddTextureReadback(graph, "Indirect", *targets.Indirect, { 0, {}, {}, { width, height, 1 } });
 			const auto sortedReadback =
 				AddBufferReadback(graph, "Sorted commands", forward.SortedCommands, 0, std::uint64_t(forward.TransparentCapacity) * 20);
 			const auto sortedCountReadback = AddBufferReadback(graph, "Sorted count", forward.SortedCounts, 0, 4);
@@ -615,6 +621,8 @@ namespace
 			std::vector<std::uint16_t> colorHalves(std::size_t(width) * height * 4);
 			std::vector<float> ids(std::size_t(width) * height);
 			std::vector<std::uint16_t> velocityHalves(std::size_t(width) * height * 2);
+			std::vector<std::uint16_t> normalHalves(std::size_t(width) * height * 4);
+			std::vector<std::uint16_t> indirectHalves(std::size_t(width) * height * 4);
 			std::vector<Rhi::DrawIndexedIndirectCommand> sorted(forward.TransparentCapacity);
 			std::array<std::uint32_t, 1> sortedCount{};
 			std::vector<GpuDrawRecord> drawRecords(visible.Bins->GetTotalCapacity());
@@ -624,6 +632,8 @@ namespace
 			read(colorReadback, colorHalves);
 			read(idReadback, ids);
 			read(velocityReadback, velocityHalves);
+			read(normalReadback, normalHalves);
+			read(indirectReadback, indirectHalves);
 			read(sortedReadback, sorted);
 			read(sortedCountReadback, sortedCount);
 			read(drawRecordReadback, drawRecords);
@@ -747,14 +757,20 @@ namespace
 					pixel.Layers = std::move(layers);
 				}
 			}
-			const auto shade = [&](const Fs::Hit& hit, float px, float py)
+			const auto surfaceOf = [&](const Fs::Hit& hit)
 			{
 				const auto& instance = materialOf(hit.Object);
 				const auto parameters = ReadStandardParameters(instance);
 				const auto axes = Fp::BuildFrame(hit.Normal, hit.Tangent, hit.FrontFacing != hit.Mirrored, hit.Mirrored);
-				const auto surface = *Pbr::Resolve(parameters, texelsOf(instance), axes);
-				return Fp::Shade(inputs, forward.ViewRecord, surface, hit.Position, px, py);
+				return *Pbr::Resolve(parameters, texelsOf(instance), axes);
 			};
+			const auto shade = [&](const Fs::Hit& hit, float px, float py)
+			{
+				return Fp::Shade(inputs, forward.ViewRecord, surfaceOf(hit), hit.Position, px, py);
+			};
+			// Item 76: the normal + roughness and indirect targets of opaque pixels.
+			std::uint32_t surfaceCompared = 0, normalOutliers = 0, indirectOutliers = 0;
+			float normalWorst = 0.0f;
 
 			std::uint32_t idInterior = 0, idMismatch = 0, compared = 0, outliers = 0, layered = 0, orderSensitive = 0;
 			std::uint32_t velocityCompared = 0, velocityOutliers = 0, moving = 0;
@@ -846,6 +862,39 @@ namespace
 					{
 						reversed = Fp::Over(*it, reversed);
 					}
+					if (pixel.Opaque)
+					{
+						// Normal + roughness as resolved; indirect radiance times every layer's transmittance
+						// (0 in the heatmap view).
+						const auto surface = surfaceOf(*pixel.Opaque);
+						Fp::Float3 indirect = spec.Debug == ForwardPlusDebugMode::ClusterHeatmap
+							? Fp::Float3{ 0, 0, 0 }
+							: Fp::IndirectRadiance(inputs, forward.ViewRecord, surface, pixel.Opaque->Position);
+						for (const auto& layer : layerColors)
+						{
+							for (auto& value : indirect)
+							{
+								value *= 1.0f - layer[3];
+							}
+						}
+						bool normalOutlier = false, indirectOutlier = false;
+						for (int c = 0; c < 4; ++c)
+						{
+							const float expectedNormal = c < 3 ? surface.Normal[c] : surface.PerceptualRoughness;
+							const float error = std::abs(Smoke::HalfToFloat(normalHalves[index * 4 + c]) - expectedNormal);
+							normalWorst = std::max(normalWorst, error);
+							normalOutlier = normalOutlier || error > 0.02f;
+							if (c < 3)
+							{
+								const float actualIndirect = Smoke::HalfToFloat(indirectHalves[index * 4 + c]);
+								indirectOutlier =
+									indirectOutlier || std::abs(actualIndirect - indirect[c]) > 0.01f + 0.03f * std::abs(indirect[c]);
+							}
+						}
+						++surfaceCompared;
+						normalOutliers += normalOutlier ? 1u : 0u;
+						indirectOutliers += indirectOutlier ? 1u : 0u;
+					}
 					std::array<float, 4> actual{};
 					for (int c = 0; c < 4; ++c)
 					{
@@ -879,6 +928,11 @@ namespace
 			std::printf("             [forward+ %s] %u interior pixels, %u id mismatches; %u compared, %u outliers, mean %.2e, worst %.2e; "
 						"%u layered (%u order-sensitive); %u clusters overflowing\n",
 				spec.Name, idInterior, idMismatch, compared, outliers, mean, double(worst), layered, orderSensitive, result.Overflow);
+			std::printf("             [forward+ %s] surface targets: %u compared, %u normal outliers (worst %.2e), %u indirect outliers\n",
+				spec.Name, surfaceCompared, normalOutliers, double(normalWorst), indirectOutliers);
+			SWIM_CHECK(surfaceCompared > 0u);
+			SWIM_CHECK(normalOutliers <= surfaceCompared / 200);
+			SWIM_CHECK(indirectOutliers <= surfaceCompared / 200);
 			if (velocityCompared)
 			{
 				std::printf("             [forward+ %s] velocity: %u compared (%u moving), %u outliers, worst %.2e\n", spec.Name,

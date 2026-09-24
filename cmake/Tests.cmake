@@ -165,6 +165,7 @@ function(swim_configure_tests)
 		RenderShadows
 		RenderPostProcess
 		RenderTemporal
+		RenderScreenSpace
 		Commands
 	)
 
@@ -403,6 +404,12 @@ function(swim_configure_tests)
 			SWIM_POST_COMPOSITE_HDR_REFLECTION_PATH="${SwimPostCompositeHdr_REFLECTION}"
 			SWIM_TEMPORAL_RESOLVE_SPIRV_PATH="${SwimTemporalResolve_SPIRV}"
 			SWIM_TEMPORAL_RESOLVE_REFLECTION_PATH="${SwimTemporalResolve_REFLECTION}"
+			SWIM_SCREEN_SPACE_AO_SPIRV_PATH="${SwimScreenSpaceAo_SPIRV}"
+			SWIM_SCREEN_SPACE_AO_REFLECTION_PATH="${SwimScreenSpaceAo_REFLECTION}"
+			SWIM_SCREEN_SPACE_BLUR_SPIRV_PATH="${SwimScreenSpaceBlur_SPIRV}"
+			SWIM_SCREEN_SPACE_BLUR_REFLECTION_PATH="${SwimScreenSpaceBlur_REFLECTION}"
+			SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH="${SwimScreenSpaceComposite_SPIRV}"
+			SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH="${SwimScreenSpaceComposite_REFLECTION}"
 		)
 	endif()
 

@@ -274,18 +274,32 @@ namespace Swim::Render::ForwardPlus
 				add(inputs.Lights[inputs.Header.FirstLocalRow + i]);
 			}
 		}
+		const auto indirect = IndirectRadiance(inputs, view, surface, position);
+		Float4 result{};
+		for (int c = 0; c < 3; ++c)
+		{
+			result[c] = color[c] + indirect[c] + surface.Emissive[c];
+		}
+		result[3] = surface.Alpha;
+		return result;
+	}
+
+	Float3 IndirectRadiance(
+		const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface, const Float3& position)
+	{
+		const auto toCamera =
+			Normalize({ view.CameraPosition[0] - position[0], view.CameraPosition[1] - position[1], view.CameraPosition[2] - position[2] });
 		Float3 ibl{ 0, 0, 0 };
 		if ((view.Flags & ForwardViewFlagEnvironment) != 0 && inputs.Environment)
 		{
 			const auto terms = inputs.Environment->Lookup(surface, toCamera, { view.EnvironmentIntensity, view.EnvironmentRotation });
 			ibl = StandardPbr::EvaluateEnvironment(surface, toCamera, terms);
 		}
-		Float4 result{};
+		Float3 result{};
 		for (int c = 0; c < 3; ++c)
 		{
-			result[c] = color[c] + view.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c] + surface.Emissive[c];
+			result[c] = view.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c];
 		}
-		result[3] = surface.Alpha;
 		return result;
 	}
 

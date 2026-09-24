@@ -152,7 +152,10 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 
 struct ShadedPixel
 {
-	float4 Color; // Linear radiance, straight alpha.
+	float4 Color;	 // Linear radiance, straight alpha.
+	float3 Indirect; // Ambient + IBL (ForwardPlus::IndirectRadiance), already in Color.
+	float3 Normal;	 // World shading normal.
+	float Roughness; // Perceptual.
 	float4 Debug;
 	bool UseDebug;
 };
@@ -197,7 +200,10 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 		ibl = StandardPbrEvaluateEnvironment(surface, toCamera, environment);
 	}
 	ShadedPixel pixel;
-	pixel.Color = float4(direct + view.Ambient * surface.BaseColor * surface.Occlusion + ibl + surface.Emissive, surface.Alpha);
+	pixel.Indirect = view.Ambient * surface.BaseColor * surface.Occlusion + ibl;
+	pixel.Color = float4(direct + pixel.Indirect + surface.Emissive, surface.Alpha);
+	pixel.Normal = surface.Normal;
+	pixel.Roughness = surface.PerceptualRoughness;
 	pixel.UseDebug = view.DebugMode == ForwardDebugClusterHeatmap;
 	pixel.Debug = float4(0.0, 0.0, 0.0, 1.0);
 	if (pixel.UseDebug)
@@ -210,11 +216,20 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 }
 
 #if FORWARD_TRANSPARENT
+struct TransparentOutput
+{
+	float4 Color : SV_Target0;	  // Premultiplied.
+	float4 Indirect : SV_Target1; // (0, 0, 0, alpha): the blend scales the opaque indirect radiance by the transmittance.
+};
+
 [shader("fragment")]
-float4 fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace) : SV_Target0
+TransparentOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 {
 	const ShadedPixel pixel = ShadePixel(input, frontFacing);
-	return float4(pixel.Color.rgb * pixel.Color.a, pixel.Color.a); // Premultiplied.
+	TransparentOutput output;
+	output.Color = float4(pixel.Color.rgb * pixel.Color.a, pixel.Color.a);
+	output.Indirect = float4(0.0, 0.0, 0.0, pixel.Color.a);
+	return output;
 }
 #else
 struct OpaqueOutput
@@ -222,6 +237,8 @@ struct OpaqueOutput
 	float4 Color : SV_Target0;
 	float ObjectId : SV_Target1;
 	float2 Velocity : SV_Target2; // ForwardPlus::MotionVector: UV of this frame minus UV of the previous.
+	float4 Normal : SV_Target3;	  // World shading normal, perceptual roughness (item 76).
+	float4 Indirect : SV_Target4; // Ambient + IBL radiance, 0 in debug views (item 76).
 };
 
 [shader("fragment")]
@@ -234,6 +251,8 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 	const float2 now = input.CurrentClip.xy / input.CurrentClip.w;
 	const float2 before = input.PreviousClip.xy / input.PreviousClip.w;
 	output.Velocity = (now - before) * float2(0.5, -0.5);
+	output.Normal = float4(pixel.Normal, pixel.Roughness);
+	output.Indirect = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Indirect, 1.0);
 	return output;
 }
 #endif

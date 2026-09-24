@@ -27,6 +27,7 @@
 #include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowRenderer.h"
+#include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceEffects.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalAntiAliasing.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
@@ -84,3 +85,7 @@ static_assert(sizeof(Swim::Render::TemporalResolveConstants) == 32 && Swim::Rend
 static_assert(!std::is_copy_constructible_v<Swim::Render::TemporalAntiAliasing>);
 static_assert(sizeof(Swim::Render::ForwardViewRecord) == 208);
 static_assert(Swim::Render::ForwardPlusRenderer::VelocityFormat == Swim::Rhi::Format::RG16Float);
+static_assert(Swim::Render::ForwardPlusRenderer::NormalFormat == Swim::Rhi::Format::RGBA16Float &&
+	Swim::Render::ForwardPlusRenderer::IndirectFormat == Swim::Rhi::Format::RGBA16Float);
+static_assert(sizeof(Swim::Render::GpuScreenSpaceParams) == 288 && Swim::Render::ScreenSpaceCompositeBindings::Count == 6);
+static_assert(Swim::Render::MaxAoSlices == 4 && Swim::Render::MaxAoSteps == 8);

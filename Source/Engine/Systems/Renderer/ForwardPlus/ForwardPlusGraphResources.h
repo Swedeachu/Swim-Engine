@@ -16,6 +16,8 @@ namespace Swim::Render
 		GraphBuffer SortedCommands; // DrawIndexedIndirectCommand per slot * TransparentCapacity.
 		GraphBuffer SortedCounts;	// uint per page slot.
 		GraphTexture Velocity;		// ForwardPlusTargets::Velocity, or the transient one used in its place.
+		GraphTexture Normal;		// ForwardPlusTargets::Normal, or the transient one.
+		GraphTexture Indirect;		// ForwardPlusTargets::Indirect, or the transient one.
 		GraphPass OpaquePass;
 		GraphPass SortPass;
 		GraphPass TransparentPass;

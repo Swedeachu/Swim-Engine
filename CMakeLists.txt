@@ -525,6 +525,22 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Screen-space ambient occlusion and fog (item 76).
+	swim_add_slang_program(SwimScreenSpaceAo
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceAo.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimScreenSpaceBlur
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceBlur.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimScreenSpaceComposite
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimForwardTransparentSort
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
@@ -578,6 +594,9 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimPostComposite_SPIRV}" "${SwimPostComposite_REFLECTION}"
 			"${SwimPostCompositeHdr_SPIRV}" "${SwimPostCompositeHdr_REFLECTION}"
 			"${SwimTemporalResolve_SPIRV}" "${SwimTemporalResolve_REFLECTION}"
+			"${SwimScreenSpaceAo_SPIRV}" "${SwimScreenSpaceAo_REFLECTION}"
+			"${SwimScreenSpaceBlur_SPIRV}" "${SwimScreenSpaceBlur_REFLECTION}"
+			"${SwimScreenSpaceComposite_SPIRV}" "${SwimScreenSpaceComposite_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -638,6 +657,10 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/PostProcess/PostComposite.slang
 			Source/Shaders/Slang/Temporal/TemporalRecords.slang
 			Source/Shaders/Slang/Temporal/TemporalResolve.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceRecords.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceAo.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceBlur.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -648,7 +671,7 @@ endif()
 # image-based lighting (Environment/), the GPU light buffer (Lights/),
 # clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
 # Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/), temporal
-# anti-aliasing (Temporal/) and the asset
+# anti-aliasing (Temporal/), screen-space AO and fog (ScreenSpace/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -681,6 +704,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

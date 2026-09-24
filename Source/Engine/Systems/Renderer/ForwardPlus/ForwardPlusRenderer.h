@@ -83,6 +83,16 @@ namespace Swim::Render
 		// Item 75: RG16Float, ColorAttachment: opaque pixels' motion (current minus previous
 		// UV, ForwardPlus::MotionVector), 0 elsewhere. Without one, a transient target is used.
 		std::optional<GraphTexture> Velocity;
+		// Item 76, for screen-space effects; transient targets stand in when absent:
+		//  - Normal (RGBA16Float, ColorAttachment): opaque pixels' world-space shading
+		//    normal (xyz, after normal mapping and back-face flips) and perceptual
+		//    roughness (w); 0 elsewhere;
+		//  - Indirect (RGBA16Float, ColorAttachment): opaque pixels' ambient + IBL
+		//    radiance (rgb, ForwardPlus::IndirectRadiance), scaled by the transmittance of
+		//    the transparent layers blended over them; 0 elsewhere. Ambient occlusion
+		//    removes a fraction of exactly this part of Color.
+		std::optional<GraphTexture> Normal;
+		std::optional<GraphTexture> Indirect;
 		bool Clear = true; // Clear color/id/depth first; otherwise load them.
 		std::array<float, 4> ClearColor{ 0, 0, 0, 0 };
 	};
@@ -91,11 +101,13 @@ namespace Swim::Render
 	//  1. opaque: every Opaque-bin draw of every page slot, GPU-driven from the
 	//     visibility commands, shaded by ClusteredForward.slang (StandardPbr resolve,
 	//     directional + clustered local lights, ambient, IBL, emission), writing
-	//     color, object id, motion vectors and depth (jittered rasterization, item 75);
+	//     color, object id, motion vectors (jittered rasterization, item 75), normal +
+	//     roughness and indirect radiance (item 76), and depth;
 	//  2. sort: one group per page slot orders the Transparent bin back to front by
 	//     bounds-center depth (deterministic tie-breaks) into compacted commands;
 	//  3. transparent: the sorted draws, blended (premultiplied alpha) over the
-	//     opaque result, depth-tested without depth writes.
+	//     opaque result, depth-tested without depth writes; the indirect target is
+	//     scaled by each layer's transmittance.
 	// No per-object CPU light or draw list exists anywhere in the frame.
 	class ForwardPlusRenderer
 	{
@@ -104,6 +116,8 @@ namespace Swim::Render
 		// Float so it can be cleared (the RHI clears only float and normalized targets).
 		static constexpr Rhi::Format ObjectIdFormat = Rhi::Format::R32Float;
 		static constexpr Rhi::Format VelocityFormat = Rhi::Format::RG16Float;
+		static constexpr Rhi::Format NormalFormat = Rhi::Format::RGBA16Float;	// Item 76: world shading normal + roughness.
+		static constexpr Rhi::Format IndirectFormat = Rhi::Format::RGBA16Float; // Item 76: ambient + IBL radiance.
 
 		// Pipeline state of a variant: both rasterize both faces (single-sided
 		// materials discard back faces in the shader, so mirrored transforms work),

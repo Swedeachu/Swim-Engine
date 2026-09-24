@@ -3758,7 +3758,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     # RenderGraph and the GPU residency layers built on it (Resources/, Geometry/)
     # share one boundary: backend-neutral RHI only, no scene/ECS or platform.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "Residency"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Residency"):
         module_root = renderer / module
         if not module_root.is_dir():
             fail(f"modern renderer module is missing: {module_root.relative_to(ROOT)}", failures)
@@ -3971,7 +3971,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     # Items 73-74: post-processing consumes only the render graph and RHI contract.
     # No other renderer module includes it, and it includes no other renderer module.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
-                   "ClusteredLighting", "Shadows", "ForwardPlus", "Temporal", "Residency"):
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "Temporal", "ScreenSpace", "Residency"):
         for path in (renderer / module).rglob("*"):
             if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
                 r'#\s*include[^\n]*Renderer/PostProcess/', path.read_text(encoding="utf-8")
@@ -4005,7 +4005,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     # and no other renderer module includes it (the Forward+ motion vectors it reads are
     # plain graph textures).
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
-                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Residency"):
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "ScreenSpace", "Residency"):
         for path in (renderer / module).rglob("*"):
             if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
                 r'#\s*include[^\n]*Renderer/Temporal/', path.read_text(encoding="utf-8")
@@ -4032,6 +4032,36 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
     check_suite_is_compiled("RenderTemporal", "TemporalAntiAliasingTests.cpp", failures)
     check_suite_is_compiled("RHIVulkan", "VulkanTemporalSmokeTests.cpp", failures)
     check_suite_is_compiled("ShaderCompiler", "ShaderTemporalLayoutTests.cpp", failures)
+    # Item 76: screen-space AO and fog consume only the render graph and RHI contract; the
+    # Forward+ normal and indirect targets they read are plain graph textures.
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*Renderer/ScreenSpace/', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on the screen-space effects: {path.relative_to(ROOT)}", failures)
+    for path in (renderer / "ScreenSpace").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if "Renderer/" in include and not re.search(r"Renderer/(ScreenSpace|RenderGraph|RHI)/", include):
+                fail(f"ScreenSpace may include only ScreenSpace, RenderGraph and RHI headers: {path.relative_to(ROOT)} -> {include}", failures)
+    for relative in ("ScreenSpace/ScreenSpaceReference.cpp", "ScreenSpace/ScreenSpaceEffects.cpp", "ScreenSpace/ScreenSpaceSettings.h",
+                     "ScreenSpace/ScreenSpaceRecords.h", "ScreenSpace/ScreenSpaceBindings.h", "ScreenSpace/ScreenSpaceGraphResources.h"):
+        if not (renderer / relative).is_file():
+            fail(f"screen-space unit is missing: Renderer/{relative}", failures)
+    for shader in ("ScreenSpaceRecords", "ScreenSpaceAo", "ScreenSpaceBlur", "ScreenSpaceComposite"):
+        if not (ROOT / f"Source/Shaders/Slang/ScreenSpace/{shader}.slang").is_file():
+            fail(f"screen-space shader is missing: Shaders/Slang/ScreenSpace/{shader}.slang", failures)
+    if "Renderer/ScreenSpace/*.cpp" not in post_cmake:
+        fail("ScreenSpace sources must compile with the backend-neutral renderer source list", failures)
+    if "SV_Target4" not in (ROOT / "Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang").read_text(encoding="utf-8"):
+        fail("the opaque Forward+ program must write the normal and indirect targets (SV_Target3-4)", failures)
+    check_suite_is_compiled("RenderScreenSpace", "ScreenSpaceReferenceTests.cpp", failures)
+    check_suite_is_compiled("RenderScreenSpace", "ScreenSpaceEffectsTests.cpp", failures)
+    check_suite_is_compiled("RHIVulkan", "VulkanScreenSpaceSmokeTests.cpp", failures)
+    check_suite_is_compiled("ShaderCompiler", "ShaderScreenSpaceLayoutTests.cpp", failures)
     # GPU visibility (culling, LOD, binning, indirect commands) sits above the GPU
     # Scene; the layers below never include it, and it never reaches residency.
     for module in ("RenderGraph", "Resources", "Geometry", "GpuScene"):
@@ -4058,7 +4088,7 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             ):
                 fail(f"{module} must not depend on the GPU Scene: {path.relative_to(ROOT)}", failures)
     # Residency (Assets/IO/Jobs aware) sits above the GPU layers; they never see it.
-    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal"):
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights", "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace"):
         for path in (renderer / module).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
