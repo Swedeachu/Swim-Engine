@@ -15,15 +15,18 @@ namespace Swim::Render
 	{
 		using S = Rhi::ResourceState;
 
-		constexpr std::array<Rhi::Format, 5> OpaqueFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::ObjectIdFormat,
-			ForwardPlusRenderer::VelocityFormat, ForwardPlusRenderer::NormalFormat, ForwardPlusRenderer::IndirectFormat };
-		constexpr std::array<Rhi::Format, 2> TransparentFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::IndirectFormat };
-		constexpr std::array<Rhi::BlendAttachmentState, 5> OpaqueBlends{};
-		// Premultiplied over for color. The indirect target receives (0, 0, 0, alpha), so the
-		// same state scales it by the layer's transmittance.
+		constexpr std::array<Rhi::Format, 7> OpaqueFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::ObjectIdFormat,
+			ForwardPlusRenderer::VelocityFormat, ForwardPlusRenderer::NormalFormat, ForwardPlusRenderer::IndirectFormat,
+			ForwardPlusRenderer::ReflectanceFormat, ForwardPlusRenderer::SpecularFormat };
+		constexpr std::array<Rhi::Format, 4> TransparentFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::IndirectFormat,
+			ForwardPlusRenderer::ReflectanceFormat, ForwardPlusRenderer::SpecularFormat };
+		constexpr std::array<Rhi::BlendAttachmentState, 7> OpaqueBlends{};
+		// Premultiplied over for color. The indirect, reflectance and specular targets
+		// receive (0, 0, 0, alpha), so the same state scales them by the layer's transmittance.
 		constexpr Rhi::BlendAttachmentState PremultipliedOver{ true, Rhi::BlendFactor::One, Rhi::BlendFactor::OneMinusSourceAlpha,
 			Rhi::BlendOp::Add, Rhi::BlendFactor::One, Rhi::BlendFactor::OneMinusSourceAlpha, Rhi::BlendOp::Add, Rhi::ColorWriteMask::All };
-		constexpr std::array<Rhi::BlendAttachmentState, 2> TransparentBlends{ PremultipliedOver, PremultipliedOver };
+		constexpr std::array<Rhi::BlendAttachmentState, 4> TransparentBlends{ PremultipliedOver, PremultipliedOver, PremultipliedOver,
+			PremultipliedOver };
 
 		constexpr std::uint64_t CommandBytes = sizeof(Rhi::DrawIndexedIndirectCommand);
 
@@ -298,6 +301,8 @@ namespace Swim::Render
 		const GraphTexture velocity = attachment(targets.Velocity, VelocityFormat, "velocity");
 		const GraphTexture normal = attachment(targets.Normal, NormalFormat, "normal");
 		const GraphTexture indirect = attachment(targets.Indirect, IndirectFormat, "indirect");
+		const GraphTexture reflectance = attachment(targets.Reflectance, ReflectanceFormat, "reflectance");
+		const GraphTexture specular = attachment(targets.Specular, SpecularFormat, "specular");
 
 		// Transparent bins: equal capacities, consecutive per slot (VisibilityBinLayout).
 		const auto transparentBin = static_cast<std::uint32_t>(ForwardPlusBin::Transparent) * slots;
@@ -320,7 +325,8 @@ namespace Swim::Render
 		resources.TransparentCapacity = capacity;
 		resources.SortSize = NextPowerOfTwo(capacity);
 		resources.ViewRecord = BuildForwardViewRecord(frame.View, frame.Materials->MaterialCount,
-			frame.Environment ? frame.Environment->PrefilteredMipCount : 1u, frame.Environment != nullptr, frame.Shadows != nullptr);
+			frame.Environment ? frame.Environment->PrefilteredMipCount : 1u, frame.Environment != nullptr, frame.Shadows != nullptr,
+			frame.BrdfLut.has_value());
 		resources.View =
 			graph.CreateUpload(std::as_bytes(std::span(&resources.ViewRecord, 1)), name + " view", Rhi::BufferUsage::Storage, 16);
 
@@ -346,19 +352,26 @@ namespace Swim::Render
 			const std::string cubeName = name + " null environment";
 			cube.DebugName = cubeName;
 			inputs.Prefiltered = graph.CreateTexture(cube);
-			Rhi::TextureDesc lut;
-			lut.Extent = { 1, 1, 1 };
-			lut.PixelFormat = Rhi::Format::RGBA16Float;
-			lut.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
-			const std::string lutName = name + " null BRDF LUT";
-			lut.DebugName = lutName;
-			inputs.BrdfLut = graph.CreateTexture(lut);
 			const std::array<std::byte, 8> texel{};
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				AddTextureUpload(graph, cubeName + " upload", texel, inputs.Prefiltered, { 0, { 0, face }, {}, { 1, 1, 1 } });
 			}
-			AddTextureUpload(graph, lutName + " upload", texel, inputs.BrdfLut, { 0, {}, {}, { 1, 1, 1 } });
+			if (frame.BrdfLut)
+			{
+				inputs.BrdfLut = *frame.BrdfLut; // Item 76: the specular reflectance still uses it.
+			}
+			else
+			{
+				Rhi::TextureDesc lut;
+				lut.Extent = { 1, 1, 1 };
+				lut.PixelFormat = Rhi::Format::RGBA16Float;
+				lut.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+				const std::string lutName = name + " null BRDF LUT";
+				lut.DebugName = lutName;
+				inputs.BrdfLut = graph.CreateTexture(lut);
+				AddTextureUpload(graph, lutName + " upload", texel, inputs.BrdfLut, { 0, {}, {}, { 1, 1, 1 } });
+			}
 		}
 		// Shadows or stand-ins (never sampled: the view flag is clear).
 		if (frame.Shadows)
@@ -406,6 +419,8 @@ namespace Swim::Render
 		resources.Velocity = velocity;
 		resources.Normal = normal;
 		resources.Indirect = indirect;
+		resources.Reflectance = reflectance;
+		resources.Specular = specular;
 		resources.OpaquePass = graph.AddPass(
 			name + " opaque", Rhi::QueueType::Graphics,
 			[&](RenderGraphBuilder& b)
@@ -420,6 +435,8 @@ namespace Swim::Render
 					b.Write(velocity, S::ColorAttachment);
 					b.Write(normal, S::ColorAttachment);
 					b.Write(indirect, S::ColorAttachment);
+					b.Write(reflectance, S::ColorAttachment);
+					b.Write(specular, S::ColorAttachment);
 					b.Write(targets.Depth, S::DepthStencilWrite);
 				}
 				else
@@ -429,15 +446,17 @@ namespace Swim::Render
 					b.ReadWrite(velocity, S::ColorAttachment);
 					b.ReadWrite(normal, S::ColorAttachment);
 					b.ReadWrite(indirect, S::ColorAttachment);
+					b.ReadWrite(reflectance, S::ColorAttachment);
+					b.ReadWrite(specular, S::ColorAttachment);
 					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
 			},
-			[program = desc.Opaque, label = name + " opaque", inputs, targets, velocity, normal, indirect, commands, counts, bins, path,
-				bindless, sampler, slots, width, height](RenderCommandContext& c)
+			[program = desc.Opaque, label = name + " opaque", inputs, targets, velocity, normal, indirect, reflectance, specular, commands,
+				counts, bins, path, bindless, sampler, slots, width, height](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				const auto load = targets.Clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
-				std::array<Rhi::RenderingAttachmentDesc, 5> colors{};
+				std::array<Rhi::RenderingAttachmentDesc, 7> colors{};
 				colors[0].View = &c.CreateView(targets.Color);
 				colors[0].Load = load;
 				colors[0].Clear.Value = targets.ClearColor;
@@ -449,6 +468,10 @@ namespace Swim::Render
 				colors[3].Load = load;
 				colors[4].View = &c.CreateView(indirect);
 				colors[4].Load = load;
+				colors[5].View = &c.CreateView(reflectance);
+				colors[5].Load = load;
+				colors[6].View = &c.CreateView(specular);
+				colors[6].Load = load;
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
 				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), load, Rhi::StoreOp::Store,
@@ -527,18 +550,24 @@ namespace Swim::Render
 				b.Read(r.SortedCounts, S::IndirectArgument);
 				b.ReadWrite(targets.Color, S::ColorAttachment);
 				b.ReadWrite(indirect, S::ColorAttachment);
+				b.ReadWrite(reflectance, S::ColorAttachment);
+				b.ReadWrite(specular, S::ColorAttachment);
 				// The attachment layout is the writable one; the pipeline never writes depth.
 				b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 			},
-			[program = desc.Transparent, label = name + " transparent", inputs, targets, indirect, r, path, bindless, sampler, capacity,
-				slots, width, height](RenderCommandContext& c)
+			[program = desc.Transparent, label = name + " transparent", inputs, targets, indirect, reflectance, specular, r, path, bindless,
+				sampler, capacity, slots, width, height](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
-				std::array<Rhi::RenderingAttachmentDesc, 2> colors{};
+				std::array<Rhi::RenderingAttachmentDesc, 4> colors{};
 				colors[0].View = &c.CreateView(targets.Color);
-				colors[0].Load = Rhi::LoadOp::Load;
 				colors[1].View = &c.CreateView(indirect);
-				colors[1].Load = Rhi::LoadOp::Load;
+				colors[2].View = &c.CreateView(reflectance);
+				colors[3].View = &c.CreateView(specular);
+				for (auto& color : colors)
+				{
+					color.Load = Rhi::LoadOp::Load;
+				}
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
 				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), Rhi::LoadOp::Load,

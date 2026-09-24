@@ -554,6 +554,10 @@ namespace
 				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ normal");
 			targets.Indirect = target(ForwardPlusRenderer::IndirectFormat,
 				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ indirect");
+			targets.Reflectance = target(ForwardPlusRenderer::ReflectanceFormat,
+				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ reflectance");
+			targets.Specular = target(ForwardPlusRenderer::SpecularFormat,
+				Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource, "Forward+ specular");
 
 			ForwardPlusFrame forwardFrame;
 			forwardFrame.Scene = &sceneResources;
@@ -585,6 +589,9 @@ namespace
 			const auto velocityReadback = AddTextureReadback(graph, "Velocity", *targets.Velocity, { 0, {}, {}, { width, height, 1 } });
 			const auto normalReadback = AddTextureReadback(graph, "Normal", *targets.Normal, { 0, {}, {}, { width, height, 1 } });
 			const auto indirectReadback = AddTextureReadback(graph, "Indirect", *targets.Indirect, { 0, {}, {}, { width, height, 1 } });
+			const auto reflectanceReadback =
+				AddTextureReadback(graph, "Reflectance", *targets.Reflectance, { 0, {}, {}, { width, height, 1 } });
+			const auto specularReadback = AddTextureReadback(graph, "Specular", *targets.Specular, { 0, {}, {}, { width, height, 1 } });
 			const auto sortedReadback =
 				AddBufferReadback(graph, "Sorted commands", forward.SortedCommands, 0, std::uint64_t(forward.TransparentCapacity) * 20);
 			const auto sortedCountReadback = AddBufferReadback(graph, "Sorted count", forward.SortedCounts, 0, 4);
@@ -623,6 +630,8 @@ namespace
 			std::vector<std::uint16_t> velocityHalves(std::size_t(width) * height * 2);
 			std::vector<std::uint16_t> normalHalves(std::size_t(width) * height * 4);
 			std::vector<std::uint16_t> indirectHalves(std::size_t(width) * height * 4);
+			std::vector<std::uint16_t> reflectanceHalves(std::size_t(width) * height * 4);
+			std::vector<std::uint16_t> specularHalves(std::size_t(width) * height * 4);
 			std::vector<Rhi::DrawIndexedIndirectCommand> sorted(forward.TransparentCapacity);
 			std::array<std::uint32_t, 1> sortedCount{};
 			std::vector<GpuDrawRecord> drawRecords(visible.Bins->GetTotalCapacity());
@@ -634,6 +643,8 @@ namespace
 			read(velocityReadback, velocityHalves);
 			read(normalReadback, normalHalves);
 			read(indirectReadback, indirectHalves);
+			read(reflectanceReadback, reflectanceHalves);
+			read(specularReadback, specularHalves);
 			read(sortedReadback, sorted);
 			read(sortedCountReadback, sortedCount);
 			read(drawRecordReadback, drawRecords);
@@ -769,7 +780,7 @@ namespace
 				return Fp::Shade(inputs, forward.ViewRecord, surfaceOf(hit), hit.Position, px, py);
 			};
 			// Item 76: the normal + roughness and indirect targets of opaque pixels.
-			std::uint32_t surfaceCompared = 0, normalOutliers = 0, indirectOutliers = 0;
+			std::uint32_t surfaceCompared = 0, normalOutliers = 0, indirectOutliers = 0, specularOutliers = 0;
 			float normalWorst = 0.0f;
 
 			std::uint32_t idInterior = 0, idMismatch = 0, compared = 0, outliers = 0, layered = 0, orderSensitive = 0;
@@ -870,14 +881,22 @@ namespace
 						Fp::Float3 indirect = spec.Debug == ForwardPlusDebugMode::ClusterHeatmap
 							? Fp::Float3{ 0, 0, 0 }
 							: Fp::IndirectRadiance(inputs, forward.ViewRecord, surface, pixel.Opaque->Position);
+						// Item 76 (SSR): the specular reflectance and IBL radiance, scaled the same way.
+						auto specular = Fp::SpecularEnvironment(inputs, forward.ViewRecord, surface, pixel.Opaque->Position);
+						if (spec.Debug == ForwardPlusDebugMode::ClusterHeatmap)
+						{
+							specular = {};
+						}
 						for (const auto& layer : layerColors)
 						{
-							for (auto& value : indirect)
+							for (int c = 0; c < 3; ++c)
 							{
-								value *= 1.0f - layer[3];
+								indirect[c] *= 1.0f - layer[3];
+								specular.Reflectance[c] *= 1.0f - layer[3];
+								specular.Radiance[c] *= 1.0f - layer[3];
 							}
 						}
-						bool normalOutlier = false, indirectOutlier = false;
+						bool normalOutlier = false, indirectOutlier = false, specularOutlier = false;
 						for (int c = 0; c < 4; ++c)
 						{
 							const float expectedNormal = c < 3 ? surface.Normal[c] : surface.PerceptualRoughness;
@@ -889,11 +908,17 @@ namespace
 								const float actualIndirect = Smoke::HalfToFloat(indirectHalves[index * 4 + c]);
 								indirectOutlier =
 									indirectOutlier || std::abs(actualIndirect - indirect[c]) > 0.01f + 0.03f * std::abs(indirect[c]);
+								const float actualReflectance = Smoke::HalfToFloat(reflectanceHalves[index * 4 + c]);
+								const float actualSpecular = Smoke::HalfToFloat(specularHalves[index * 4 + c]);
+								specularOutlier = specularOutlier ||
+									std::abs(actualReflectance - specular.Reflectance[c]) > 0.01f + 0.03f * specular.Reflectance[c] ||
+									std::abs(actualSpecular - specular.Radiance[c]) > 0.01f + 0.03f * specular.Radiance[c];
 							}
 						}
 						++surfaceCompared;
 						normalOutliers += normalOutlier ? 1u : 0u;
 						indirectOutliers += indirectOutlier ? 1u : 0u;
+						specularOutliers += specularOutlier ? 1u : 0u;
 					}
 					std::array<float, 4> actual{};
 					for (int c = 0; c < 4; ++c)
@@ -928,11 +953,13 @@ namespace
 			std::printf("             [forward+ %s] %u interior pixels, %u id mismatches; %u compared, %u outliers, mean %.2e, worst %.2e; "
 						"%u layered (%u order-sensitive); %u clusters overflowing\n",
 				spec.Name, idInterior, idMismatch, compared, outliers, mean, double(worst), layered, orderSensitive, result.Overflow);
-			std::printf("             [forward+ %s] surface targets: %u compared, %u normal outliers (worst %.2e), %u indirect outliers\n",
-				spec.Name, surfaceCompared, normalOutliers, double(normalWorst), indirectOutliers);
+			std::printf("             [forward+ %s] surface targets: %u compared, %u normal outliers (worst %.2e), %u indirect outliers, "
+						"%u reflectance/specular outliers\n",
+				spec.Name, surfaceCompared, normalOutliers, double(normalWorst), indirectOutliers, specularOutliers);
 			SWIM_CHECK(surfaceCompared > 0u);
 			SWIM_CHECK(normalOutliers <= surfaceCompared / 200);
 			SWIM_CHECK(indirectOutliers <= surfaceCompared / 200);
+			SWIM_CHECK(specularOutliers <= surfaceCompared / 200);
 			if (velocityCompared)
 			{
 				std::printf("             [forward+ %s] velocity: %u compared (%u moving), %u outliers, worst %.2e\n", spec.Name,

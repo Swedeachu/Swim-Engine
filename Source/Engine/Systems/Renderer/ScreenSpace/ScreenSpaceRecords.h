@@ -25,7 +25,7 @@ namespace Swim::Render
 		std::uint32_t NoiseFrame = 0; // Rotates the noise per frame (0 .. 63).
 		std::uint32_t AoEnabled = 0;
 		std::uint32_t FogEnabled = 0;
-		std::uint32_t Reserved0 = 0;
+		std::uint32_t SsrEnabled = 0;
 		float FogColor[3] = {};
 		float FogDensity = 0.0f;
 		float FogSunColor[3] = {};
@@ -36,8 +36,23 @@ namespace Swim::Render
 		float FogStartDistance = 0.0f;
 		float FogMaxDistance = 1000.0f;
 		float Reserved1 = 0.0f;
+		// Screen-space reflections (item 76).
+		float Projection[16] = {}; // View -> clip (unjittered), to project the rays.
+		float SsrMaxDistance = 20.0f;
+		float SsrThickness = 0.3f;
+		float SsrStride = 2.0f;
+		float SsrMaxRoughness = 0.6f;
+		float SsrRoughnessFade = 0.2f;
+		float SsrEdgeFade = 0.1f;
+		float SsrDistanceFade = 0.25f;
+		float SsrNearZ = -0.1f; // View z of the near plane (< 0): rays are clipped to it.
+		std::uint32_t SsrMaxSteps = 64;
+		std::uint32_t SsrRefineSteps = 4;
+		std::uint32_t Reserved2 = 0;
+		std::uint32_t Reserved3 = 0;
 	};
 
-	static_assert(sizeof(GpuScreenSpaceParams) == 288);
+	static_assert(sizeof(GpuScreenSpaceParams) == 400);
 	static_assert(offsetof(GpuScreenSpaceParams, AoRadius) == 176 && offsetof(GpuScreenSpaceParams, FogColor) == 224);
+	static_assert(offsetof(GpuScreenSpaceParams, Projection) == 288 && offsetof(GpuScreenSpaceParams, SsrMaxSteps) == 384);
 } // namespace Swim::Render

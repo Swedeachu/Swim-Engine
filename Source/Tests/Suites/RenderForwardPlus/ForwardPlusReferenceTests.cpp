@@ -303,6 +303,27 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 			const float rest = direct[c] + surface.Emissive[c];
 			SWIM_CHECK(std::abs(b[c] - indirect[c] - rest) <= 1.0e-5f + 1.0e-4f * rest);
 		}
+		// Item 76 (SSR): the specular IBL is Prefiltered x reflectance and part of the
+		// indirect radiance. Without an environment a bound LUT still gives the reflectance
+		// (ForwardViewFlagBrdfLut); with neither, both are 0.
+		const auto terms = probe.Lookup(surface, toCamera, { 0.7f, 0.4f });
+		const auto specular = Fp::SpecularEnvironment(brute, lit, surface, position);
+		const auto lutWeight = Pbr::EnvironmentSpecularWeight(surface, toCamera, terms.BrdfScale, terms.BrdfBias);
+		auto lutOnly = unlit;
+		lutOnly.Flags |= ForwardViewFlagBrdfLut;
+		Fp::LightingInputs noProbe{ scene.Rows, scene.Header, nullptr, {}, {}, nullptr };
+		noProbe.BrdfLut = &probe.GetBrdfLut();
+		const auto specularLutOnly = Fp::SpecularEnvironment(noProbe, lutOnly, surface, position);
+		const auto specularNone = Fp::SpecularEnvironment(brute, unlit, surface, position);
+		for (int c = 0; c < 3; ++c)
+		{
+			SWIM_CHECK(std::abs(specular.Reflectance[c] - lutWeight[c]) <= 1.0e-6f);
+			SWIM_CHECK(std::abs(specular.Radiance[c] - terms.Prefiltered[c] * lutWeight[c]) <= 1.0e-6f + 1.0e-5f * specular.Radiance[c]);
+			SWIM_CHECK(specular.Radiance[c] <= indirect[c] + 1.0e-5f);
+			SWIM_CHECK(std::abs(specularLutOnly.Reflectance[c] - lutWeight[c]) <= 1.0e-6f);
+			SWIM_CHECK(specularLutOnly.Radiance[c] == 0.0f);
+			SWIM_CHECK(specularNone.Reflectance[c] == 0.0f && specularNone.Radiance[c] == 0.0f);
+		}
 		const auto directionalOnly = Lights::ShadeAllLights(scene.Rows, { 2, 0, scene.Header.FirstLocalRow, 0 },
 			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, toCamera, position);
 		litByLocal += direct[0] > directionalOnly[0] + 1.0e-4f ? 1u : 0u;
@@ -399,7 +420,8 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ViewRecordsNormalizeAndValidate")
 	SWIM_CHECK(record.Ambient[2] == 0.3f);
 	SWIM_CHECK_EQUAL(record.MaterialCount, 12u);
 	SWIM_CHECK_EQUAL(record.PrefilteredMipCount, 6u);
-	SWIM_CHECK_EQUAL(record.Flags, ForwardViewFlagEnvironment);
+	SWIM_CHECK_EQUAL(record.Flags, ForwardViewFlagEnvironment | ForwardViewFlagBrdfLut); // An environment implies its LUT.
+	SWIM_CHECK_EQUAL(BuildForwardViewRecord(view, 12, 1, false, false, true).Flags, ForwardViewFlagBrdfLut); // A LUT alone (item 76).
 	SWIM_CHECK_EQUAL(record.DebugMode, 1u);
 	SWIM_CHECK(record.EnvironmentIntensity == 0.5f && record.EnvironmentRotation == 1.25f);
 	const auto plain = BuildForwardViewRecord(ForwardPlusView{}, 0, 0, false);

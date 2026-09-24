@@ -139,6 +139,23 @@ namespace Swim::Render::StandardPbr
 		return result;
 	}
 
+	Float3 EnvironmentSpecularWeight(const ResolvedSurface& surface, const Float3& view, float brdfScale, float brdfBias)
+	{
+		const float roughness = std::clamp(surface.PerceptualRoughness, MinPerceptualRoughness, 1.0f);
+		const float metallic = std::clamp(surface.Metallic, 0.0f, 1.0f);
+		const float nDotV = std::clamp(Dot(surface.Normal, view), 1.0e-4f, 1.0f);
+		const float fresnel = std::pow(1.0f - nDotV, 5.0f);
+		Float3 result;
+		for (int c = 0; c < 3; ++c)
+		{
+			const float f0 = DielectricF0 + (surface.BaseColor[c] - DielectricF0) * metallic;
+			const float fr = std::max(1.0f - roughness, f0) - f0;
+			const float ks = f0 + fr * fresnel;
+			result[c] = (ks * brdfScale + brdfBias) * surface.Occlusion;
+		}
+		return result;
+	}
+
 	std::array<float, 4> ShadeResolved(const ResolvedSurface& surface, const Lighting& lighting, const EnvironmentTerms* environment)
 	{
 		const auto brdf = EvaluateBrdf(

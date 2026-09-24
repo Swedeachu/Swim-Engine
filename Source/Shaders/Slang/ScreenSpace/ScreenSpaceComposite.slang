@@ -1,5 +1,6 @@
 // Screen-space composite (item 76): ScreenSpace::CompositeTexel for every pixel, AO on
-// the indirect radiance, then fog. Bindings follow ScreenSpaceCompositeBindings.
+// the indirect radiance, reflections in place of the specular IBL, then fog. Bindings
+// follow ScreenSpaceCompositeBindings.
 #include "ScreenSpace/ScreenSpaceRecords.slang"
 
 [[vk::binding(0, 0)]] Texture2D<float4> Color;
@@ -8,6 +9,9 @@
 [[vk::binding(3, 0)]] Texture2D<float> Depth;
 [[vk::binding(4, 0)]] StructuredBuffer<ScreenSpaceParams> Params;
 [[vk::binding(5, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> Output;
+[[vk::binding(6, 0)]] Texture2D<float4> Reflection;
+[[vk::binding(7, 0)]] Texture2D<float4> Reflectance;
+[[vk::binding(8, 0)]] Texture2D<float4> Specular;
 
 struct FogParams
 {
@@ -56,9 +60,20 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const int3 at = int3(int(id.x), int(id.y), 0);
 	const float4 color = Color.Load(at);
 	float3 c = color.rgb;
-	if (Params[0].AoEnabled != 0u)
+	const bool aoEnabled = Params[0].AoEnabled != 0u;
+	const float ao = aoEnabled ? Ao.Load(at) : 1.0;
+	if (aoEnabled)
 	{
-		c = max(c - (1.0 - Ao.Load(at)) * Indirect.Load(at).rgb, float3(0.0, 0.0, 0.0));
+		c = max(c - (1.0 - ao) * Indirect.Load(at).rgb, float3(0.0, 0.0, 0.0));
+	}
+	if (Params[0].SsrEnabled != 0u)
+	{
+		const float4 reflection = Reflection.Load(at);
+		if (reflection.a > 0.0)
+		{
+			const float weight = reflection.a * ao;
+			c = max(c + weight * (Reflectance.Load(at).rgb * reflection.rgb - Specular.Load(at).rgb), float3(0.0, 0.0, 0.0));
+		}
 	}
 	if (Params[0].FogEnabled != 0u)
 	{

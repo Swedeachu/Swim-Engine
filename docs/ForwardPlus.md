@@ -67,7 +67,7 @@ Each index-page slot of the visibility frame names its index and vertex page (`F
 - **Faces:** both pipelines rasterize both faces. Single-sided materials discard back faces in the shader (`CullsFace`); double-sided ones shade them with the flipped normal. This keeps mirrored instances correct without a second pipeline.
 - **Surface:** `StandardPbrResolve` over bindless texels (alpha mask, normal map through the vertex tangent frame).
 - **Radiance:** directional lights + the pixel's cluster list, each times its shadow factor (`ForwardDirect`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
-- **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), a motion vector, the shading normal + roughness, the indirect radiance, and depth with the canonical reverse-Z compare.
+- **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), a motion vector, the shading normal + roughness, the indirect radiance, the specular reflectance, the specular IBL radiance, and depth with the canonical reverse-Z compare.
 - **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty), with truncated clusters in magenta.
 
 The object-id target is `R32Float` because the RHI clears only float and normalized attachments.
@@ -85,6 +85,17 @@ The object-id target is `R32Float` because the RHI clears only float and normali
 
 The transparent pipeline has a second attachment, the indirect target. It receives (0, 0, 0, alpha) under the same premultiplied blend, so the indirect light is scaled by each layer's transmittance, as it is inside Color. The heatmap view writes 0 indirect light. See [Screen-space effects](ScreenSpace.md).
 
+### Reflectance and specular targets (item 76, screen-space reflections)
+
+A screen-space reflection must *replace* the specular IBL already added into Color, and a colored metal must tint what it reflects. Both need two more per-pixel terms (`ForwardPlus::SpecularEnvironment`):
+
+- `ForwardPlusTargets::Reflectance`: the split-sum specular reflectance `(kS × A + B) × occlusion` (`StandardPbr::EnvironmentSpecularWeight`), the weight a reflected radiance is multiplied by;
+- `ForwardPlusTargets::Specular`: the specular IBL radiance, `Prefiltered × Reflectance`, the part of Indirect a reflection replaces (0 without an environment).
+
+Both are RGBA16Float with transient stand-ins, and the transparent pipeline scales them by each layer's transmittance exactly like Indirect (it now has four attachments). The heatmap view writes 0. With seven opaque color attachments the pass is above Vulkan's guaranteed minimum of 4; every desktop driver exposes 8, and the Vulkan backend rejects a pipeline above the device limit.
+
+The reflectance needs the split-sum LUT's (A, B). `ForwardPlusFrame::BrdfLut` may therefore be supplied **without** an environment: the renderer binds it (the cube stays a stand-in), sets `ForwardViewFlagBrdfLut`, and the specular radiance is 0. With neither, the reflectance is 0 and reflections have no effect. An environment always sets `ForwardViewFlagBrdfLut` too. (Karis' analytic split-sum fit was tried as a LUT-free fallback and rejected: against this engine's height-correlated LUT it is off by up to 0.4.)
+
 ### Transparency (item 67)
 
 - **Sort key:** the object's world bounds center along the camera's forward axis. Farther draws first; ties go to the lower instance row, then the lower submesh row.
@@ -99,7 +110,7 @@ The transparent pipeline has a second attachment, the indirect target. It receiv
 
 ### Environment
 
-With `ForwardPlusFrame::Environment` and `BrdfLut`, the view sets `ForwardViewFlagEnvironment` and the shader performs `EnvironmentLookup`. Without them the renderer binds 1×1 zero stand-ins and IBL is skipped.
+With `ForwardPlusFrame::Environment` and `BrdfLut`, the view sets `ForwardViewFlagEnvironment` (and `ForwardViewFlagBrdfLut`) and the shader performs `EnvironmentLookup`. Without them the renderer binds 1×1 zero stand-ins and IBL is skipped; a `BrdfLut` alone is still bound for the specular reflectance (see above).
 
 ### Shadows (items 70–72)
 
@@ -119,8 +130,8 @@ GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns
 
 | | Opaque | Transparent |
 | --- | --- | --- |
-| Color targets | RGBA16Float, R32Float (object id), RG16Float (velocity), RGBA16Float (normal), RGBA16Float (indirect) | RGBA16Float, RGBA16Float (indirect) |
-| Blend | off | premultiplied (One, OneMinusSourceAlpha for color and alpha), on both attachments |
+| Color targets | RGBA16Float, R32Float (object id), RG16Float (velocity), RGBA16Float (normal), RGBA16Float (indirect), RGBA16Float (reflectance), RGBA16Float (specular) | RGBA16Float, RGBA16Float (indirect), RGBA16Float (reflectance), RGBA16Float (specular) |
+| Blend | off | premultiplied (One, OneMinusSourceAlpha for color and alpha), on all four attachments |
 | Depth | D32Float, GreaterEqual, write | D32Float, GreaterEqual, no write |
 | Cull | none (shader culls single-sided back faces) | none (same) |
 
@@ -130,7 +141,8 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 - A depth prepass and hardware back-face culling split by winding.
 - Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
-- Engine wiring (item 56). The color, depth, normal and indirect targets feed [screen-space AO and fog](ScreenSpace.md) (item 76); that output, the depth and the velocity feed [temporal anti-aliasing](TemporalAntiAliasing.md) (item 75), whose output feeds [post-processing](PostProcess.md) (items 73–74).
+- Packing the thin G-buffer (octahedral normals, one reflectance/specular target) to save bandwidth.
+- Engine wiring (item 56). The color, depth, normal, indirect, reflectance and specular targets feed [screen-space AO, reflections and fog](ScreenSpace.md) (item 76); that output, the depth and the velocity feed [temporal anti-aliasing](TemporalAntiAliasing.md) (item 75), whose output feeds [post-processing](PostProcess.md) (items 73–74).
 - Velocity for the background (sky) from camera motion; it keeps the cleared 0.
 - Importing glTF `alphaMode` into `FlagAlphaBlend`.
 
@@ -138,10 +150,10 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 | Suite | What it proves |
 | --- | --- |
-| `Render.ForwardPlus.Reference` (9) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation. `IndirectRadiance` is exactly ambient + IBL. Motion vectors for object, camera and perspective motion, never jitter. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
+| `Render.ForwardPlus.Reference` (9) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation (an environment implies `ForwardViewFlagBrdfLut`; a LUT alone sets only it). `IndirectRadiance` is exactly ambient + IBL; `SpecularEnvironment` is the LUT-weighted reflectance and `Prefiltered ×` it, part of the indirect light, and without an environment uses a supplied LUT or is 0. Motion vectors for object, camera and perspective motion, never jitter. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
 | `Render.ForwardPlus.Fixture` (1) | The test meshes are CCW-outward with exact tangents, and the analytic ray caster agrees with triangle intersection under rotated, scaled and mirrored transforms |
 | `Render.ForwardPlus` (1, RenderResidency) | `StandardVertexLayoutId` is the residency layer's layout of a cooked static mesh |
-| `Render.ForwardPlusRenderer` (4) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, the transient or supplied velocity, normal and indirect targets, five opaque and two transparent attachments, and every rejected input |
+| `Render.ForwardPlusRenderer` (5) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, a BRDF LUT bound without an environment, the transient or supplied velocity, normal, indirect, reflectance and specular targets, seven opaque and four transparent attachments, and every rejected input |
 | `ShaderCompiler.ForwardPlusLayout` (2) | Both variants reflect identical bindings matching `ForwardPlusDrawBindings` (including the shadow atlas, records and views); the view record (208 bytes, including the previous matrix and jitter) and sort entry equal the C++ structs; the sort's group size and push constants |
 | Native `ClusteredForwardPlusMatchesTheCpuReference` | A lit scene compared pixel by pixel with an exact CPU ray cast. See below |
 | Native `ClusteredLightingScalesToTensOfThousandsOfLights` | Item 69 (see [Clustered lighting](ClusteredLighting.md#scaling-item-69)) |
@@ -164,7 +176,7 @@ It is lit by a sun, 300 clustered lights and the GPU-built sky environment. Ever
 - **Object ids:** at most 0.2 % of interior pixels may differ, and the masked cube never appears.
 - **Color:** at most 0.5 % outliers (0.01 + 3 %), and a mean relative error < 5·10⁻³. Transparent layers are composited with `ForwardPlus::Over` in the GPU's sorted order.
 - **Sort:** the GPU order must equal `SortTransparentDraws`, with unused commands zeroed. Reversing the order must visibly change at least 50 pixels, so the order is observable.
-- **Normal and indirect:** every compared opaque pixel's normal + roughness must match the resolved surface within 0.02, and its indirect radiance `IndirectRadiance` times the transmittance of the layers in front (0.01 + 3 %); at most 0.5 % outliers each.
+- **Normal, indirect, reflectance and specular:** every compared opaque pixel's normal + roughness must match the resolved surface within 0.02, and its indirect radiance `IndirectRadiance`, specular reflectance and specular IBL radiance (`SpecularEnvironment`) times the transmittance of the layers in front (0.01 + 3 %); at most 0.5 % outliers each.
 - **Velocity:** every interior opaque pixel's motion vector must equal `ForwardPlus::MotionVector` at the ray-cast point (within 10⁻⁴ + 0.2 %; at most 0.2 % outliers). The first frame must have no motion, and the moved frame must move more than a quarter of the image.
 
 Frames:

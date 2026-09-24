@@ -3,7 +3,9 @@
 #include "Tests/Fixtures/ScreenSpaceFixture.h"
 #include "Tests/Framework/Test.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <numbers>
 #include <random>
@@ -559,4 +561,327 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 	settings.Fog.Density = 0.0f;
 	const auto clear = BuildScreenSpaceParams(settings, view, Width, Height, 0);
 	SWIM_CHECK(Ss::CompositeTexel(clear, color, { 0, 0, 0, 0 }, 1.0f, inputs.Depth.At(80, 60), 80, 60) == color);
+}
+
+namespace
+{
+	// A mirror floor in front of a box: the floor between the camera and the box
+	// reflects the box's front face, the rest reflects the sky.
+	Scene::Scene MirrorScene()
+	{
+		Scene::Scene scene;
+		scene.Boxes.push_back({ { -1.0f, 0.0f, -1.0f }, { 1.0f, 2.0f, 1.0f } });
+		return scene;
+	}
+
+	ScreenSpaceView MirrorView()
+	{
+		return Scene::View({ 0.4f, 1.5f, 6.0f }, { 0.0f, 0.8f, 0.0f }, float(Width) / float(Height));
+	}
+
+	ScreenSpaceSettings MirrorSettings()
+	{
+		ScreenSpaceSettings settings;
+		settings.AmbientOcclusion.Enabled = false;
+		settings.Reflections.Enabled = true;
+		settings.Reflections.Stride = 1.0f;
+		settings.Reflections.MaxSteps = 256;
+		settings.Reflections.RefineSteps = 6;
+		settings.Reflections.Thickness = 0.2f;
+		settings.Reflections.EdgeFade = 0.02f;
+		return settings;
+	}
+
+	Ss::Float3 Reflect(const Ss::Float3& d, const Ss::Float3& n)
+	{
+		const float k = 2.0f * (d[0] * n[0] + d[1] * n[1] + d[2] * n[2]);
+		return { d[0] - k * n[0], d[1] - k * n[1], d[2] - k * n[2] };
+	}
+
+	float Distance(const Ss::Float3& a, const Ss::Float3& b)
+	{
+		return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+	}
+} // namespace
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsFindTheMirrorImageAndMissTheSky")
+{
+	const auto scene = MirrorScene();
+	const auto view = MirrorView();
+	const auto inputs = Scene::Render(scene, view, Width, Height, 0.0f);
+	const auto params = BuildScreenSpaceParams(MirrorSettings(), view, Width, Height, 0);
+	const auto viewProjection = MultiplyRowMajor(view.Projection, view.View);
+
+	std::uint32_t visible = 0, found = 0, accurate = 0, sky = 0, skyMisses = 0, distances = 0;
+	float worst = 0.0f;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			const auto& hit = inputs.Hits[std::size_t(y) * Width + x];
+			if (hit.T == 0.0f || hit.Normal[1] < 0.5f || hit.Position[1] > 1.0e-3f)
+			{
+				continue; // Floor pixels only.
+			}
+			const Ss::Float3 incoming{ (hit.Position[0] - inputs.Camera[0]) / hit.T, (hit.Position[1] - inputs.Camera[1]) / hit.T,
+				(hit.Position[2] - inputs.Camera[2]) / hit.T };
+			const auto truth = Scene::Cast(scene, hit.Position, Reflect(incoming, hit.Normal));
+			const auto traced = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
+			if (!truth)
+			{
+				++sky;
+				skyMisses += traced ? 0u : 1u;
+				continue;
+			}
+			// Is the true reflected point on screen and seen directly by the camera?
+			std::array<float, 4> clip{};
+			for (int r = 0; r < 4; ++r)
+			{
+				clip[r] = viewProjection[r * 4] * truth->Position[0] + viewProjection[r * 4 + 1] * truth->Position[1] +
+					viewProjection[r * 4 + 2] * truth->Position[2] + viewProjection[r * 4 + 3];
+			}
+			const float px = (clip[0] / clip[3] + 1.0f) * 0.5f * float(Width);
+			const float py = (1.0f - clip[1] / clip[3]) * 0.5f * float(Height);
+			// Well inside the screen (the edge fade is tiny) and seen directly.
+			if (!(px >= 4.0f && py >= 4.0f && px < float(Width) - 4.0f && py < float(Height) - 4.0f))
+			{
+				continue;
+			}
+			const auto& direct = inputs.Hits[std::size_t(py) * Width + std::size_t(px)];
+			if (direct.T == 0.0f || Distance(direct.Position, truth->Position) > 0.05f)
+			{
+				continue;
+			}
+			++visible;
+			if (!traced)
+			{
+				continue;
+			}
+			++found;
+			const auto& at = inputs.Hits[std::size_t(traced->Y) * Width + traced->X];
+			const float error = Distance(at.Position, truth->Position);
+			worst = std::max(worst, error);
+			accurate += error < 0.1f ? 1u : 0u;
+			SWIM_CHECK(traced->Confidence > 0.0f && traced->Confidence <= 1.0f);
+			distances += std::abs(traced->Distance - truth->T) < 0.15f ? 1u : 0u; // The travelled distance.
+		}
+	}
+	std::printf("             [ssr] %u visible reflections: %u found, %u within 0.1 m (worst %.3f m); %u sky rays, %u missed\n", visible,
+		found, accurate, double(worst), sky, skyMisses);
+	SWIM_REQUIRE(visible > 200u && sky > 200u);
+	SWIM_CHECK(found >= visible * 95 / 100);
+	SWIM_CHECK(accurate >= found * 95 / 100);
+	SWIM_CHECK(distances >= found * 95 / 100);
+	SWIM_CHECK(skyMisses >= sky * 97 / 100);
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionConfidenceFadesWithRoughnessEdgesAndDistance")
+{
+	const auto scene = MirrorScene();
+	const auto view = MirrorView();
+	const auto settings = MirrorSettings();
+	const auto base = BuildScreenSpaceParams(settings, view, Width, Height, 0);
+	const auto mirror = Scene::Render(scene, view, Width, Height, 0.0f);
+
+	// Pixels whose mirror ray hits with full confidence.
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> strong;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			const auto hit = Ss::TraceReflection(base, mirror.Depth, mirror.Normal, x, y);
+			if (hit && hit->Confidence == 1.0f)
+			{
+				strong.push_back({ x, y });
+			}
+		}
+	}
+	SWIM_REQUIRE(strong.size() > 100u);
+
+	// Roughness: half way down the fade halves the confidence; at the limit nothing is traced.
+	const float halfway = settings.Reflections.MaxRoughness - 0.5f * settings.Reflections.RoughnessFade;
+	const auto glossy = Scene::Render(scene, view, Width, Height, halfway);
+	const auto rough = Scene::Render(scene, view, Width, Height, settings.Reflections.MaxRoughness);
+	for (const auto& [x, y] : strong)
+	{
+		const auto hit = Ss::TraceReflection(base, glossy.Depth, glossy.Normal, x, y);
+		SWIM_REQUIRE(hit.has_value());
+		SWIM_CHECK(Near(hit->Confidence, 0.5f, 1.0e-5f));
+		SWIM_CHECK(!Ss::TraceReflection(base, rough.Depth, rough.Normal, x, y));
+	}
+
+	// Distance: nothing beyond MaxDistance is hit, and the confidence falls linearly over it.
+	auto shortSettings = settings;
+	shortSettings.Reflections.MaxDistance = 1.0f;
+	shortSettings.Reflections.DistanceFade = 1.0f;
+	const auto shortParams = BuildScreenSpaceParams(shortSettings, view, Width, Height, 0);
+	std::uint32_t faded = 0;
+	for (const auto& [x, y] : strong)
+	{
+		const auto limited = Ss::TraceReflection(shortParams, mirror.Depth, mirror.Normal, x, y);
+		if (limited)
+		{
+			SWIM_CHECK(limited->Distance <= 1.0f + 1.0e-4f);
+			SWIM_CHECK(Near(limited->Confidence, std::clamp(1.0f - limited->Distance, 0.0f, 1.0f), 1.0e-4f));
+			++faded;
+		}
+	}
+	SWIM_CHECK(faded > 0u);
+
+	// Edges: a wide edge fade lowers the confidence of hits near the border and never raises it.
+	auto edgeSettings = settings;
+	edgeSettings.Reflections.EdgeFade = 0.5f;
+	const auto edgeParams = BuildScreenSpaceParams(edgeSettings, view, Width, Height, 0);
+	for (const auto& [x, y] : strong)
+	{
+		const auto hit = Ss::TraceReflection(edgeParams, mirror.Depth, mirror.Normal, x, y);
+		SWIM_REQUIRE(hit.has_value());
+		const float u = (float(hit->X) + 0.5f) / float(Width);
+		const float v = (float(hit->Y) + 0.5f) / float(Height);
+		const float edge = std::min(std::min(u, 1.0f - u), std::min(v, 1.0f - v));
+		SWIM_CHECK(Near(hit->Confidence, std::clamp(edge / 0.5f, 0.0f, 1.0f), 1.0e-5f));
+	}
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipToTheNearPlane")
+{
+	const auto scene = MirrorScene();
+	const auto view = MirrorView();
+	const auto params = BuildScreenSpaceParams(MirrorSettings(), view, Width, Height, 0);
+	auto inputs = Scene::Render(scene, view, Width, Height, 0.0f);
+	SWIM_CHECK(Near(params.SsrNearZ, -0.1f, 1.0e-6f));
+
+	// Sky pixels and normal-less pixels trace nothing.
+	std::uint32_t tested = 0;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			if (inputs.Depth.At(x, y) == 0.0f)
+			{
+				SWIM_CHECK(!Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y));
+				++tested;
+			}
+		}
+	}
+	SWIM_CHECK(tested > 0u);
+
+	// Flip the box's normals: every hit on it becomes a back face and is rejected.
+	std::vector<std::pair<std::uint32_t, std::uint32_t>> hits;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			if (Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y))
+			{
+				hits.push_back({ x, y });
+			}
+		}
+	}
+	SWIM_REQUIRE(!hits.empty());
+	auto flipped = inputs.Normal;
+	for (auto& texel : flipped.Texels)
+	{
+		if (texel[1] < 0.5f)
+		{
+			texel = { -texel[0], -texel[1], -texel[2], texel[3] };
+		}
+	}
+	for (const auto& [x, y] : hits)
+	{
+		const auto hit = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
+		const auto& hitNormal = inputs.Normal.At(hit->X, hit->Y);
+		if (hitNormal[1] < 0.5f) // The hit is on the box.
+		{
+			const auto again = Ss::TraceReflection(params, inputs.Depth, flipped, x, y);
+			SWIM_CHECK(!again || flipped.At(again->X, again->Y)[1] >= 0.5f);
+		}
+	}
+
+	// A mirror facing the camera sends rays back toward it: they are clipped to the near
+	// plane and stay finite.
+	Scene::Scene wall;
+	wall.Ground = false;
+	wall.Boxes.push_back({ { -10.0f, -10.0f, -1.0f }, { 10.0f, 10.0f, 0.0f } });
+	const auto wallView = Scene::View({ 0.0f, 0.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, float(Width) / float(Height));
+	const auto wallInputs = Scene::Render(wall, wallView, Width, Height, 0.0f);
+	const auto wallParams = BuildScreenSpaceParams(MirrorSettings(), wallView, Width, Height, 0);
+	for (std::uint32_t y = 0; y < Height; y += 7)
+	{
+		for (std::uint32_t x = 0; x < Width; x += 7)
+		{
+			const auto hit = Ss::TraceReflection(wallParams, wallInputs.Depth, wallInputs.Normal, x, y);
+			SWIM_CHECK(!hit || (std::isfinite(hit->Distance) && hit->Distance <= 3.0f)); // Never past the near plane.
+		}
+	}
+
+	// Reflections need a near plane in front of the camera.
+	auto bad = view;
+	bad.Projection[11] = -bad.Projection[11];
+	SWIM_CHECK_THROWS(BuildScreenSpaceParams(MirrorSettings(), bad, Width, Height, 0), std::invalid_argument);
+	ScreenSpaceSettings invalid = MirrorSettings();
+	invalid.Reflections.Stride = 0.5f;
+	SWIM_CHECK_THROWS(BuildScreenSpaceParams(invalid, view, Width, Height, 0), std::invalid_argument);
+	invalid = MirrorSettings();
+	invalid.Reflections.EdgeFade = 0.0f;
+	SWIM_CHECK_THROWS(BuildScreenSpaceParams(invalid, view, Width, Height, 0), std::invalid_argument);
+	invalid = MirrorSettings();
+	invalid.Reflections.Thickness = -1.0f;
+	SWIM_CHECK_THROWS(BuildScreenSpaceParams(invalid, view, Width, Height, 0), std::invalid_argument);
+	invalid = MirrorSettings();
+	invalid.Reflections.RefineSteps = MaxReflectionRefineSteps + 1;
+	SWIM_CHECK_THROWS(BuildScreenSpaceParams(invalid, view, Width, Height, 0), std::invalid_argument);
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "CompositeReplacesTheSpecularIblWithTheReflection")
+{
+	auto view = MirrorView();
+	ScreenSpaceSettings settings;
+	settings.Reflections.Enabled = true;
+	const auto params = BuildScreenSpaceParams(settings, view, Width, Height, 0);
+	const Ss::Float4 color{ 2.0f, 1.5f, 1.0f, 1.0f };
+	const Ss::Float4 indirect{ 0.8f, 0.6f, 0.4f, 1.0f };
+	Ss::ReflectionSample reflection;
+	reflection.Reflection = { 3.0f, 2.0f, 1.0f, 0.75f };
+	reflection.Reflectance = { 0.5f, 0.4f, 0.3f, 1.0f };
+	reflection.Specular = { 0.2f, 0.15f, 0.1f, 1.0f };
+	const float ao = 0.6f;
+	const auto out = Ss::CompositeTexel(params, color, indirect, ao, reflection, 0.5f, 10, 10);
+	for (int c = 0; c < 3; ++c)
+	{
+		const float afterAo = color[c] - (1.0f - ao) * indirect[c];
+		const float expected = afterAo + 0.75f * ao * (reflection.Reflectance[c] * reflection.Reflection[c] - reflection.Specular[c]);
+		SWIM_CHECK(Near(out[c], expected, 1.0e-6f));
+	}
+	SWIM_CHECK(out[3] == 1.0f);
+	// A miss (confidence 0) leaves the color as AO left it; reflections off ignore the inputs.
+	auto miss = reflection;
+	miss.Reflection[3] = 0.0f;
+	const auto kept = Ss::CompositeTexel(params, color, indirect, ao, miss, 0.5f, 10, 10);
+	auto off = params;
+	off.SsrEnabled = 0;
+	const auto ignored = Ss::CompositeTexel(off, color, indirect, ao, reflection, 0.5f, 10, 10);
+	for (int c = 0; c < 3; ++c)
+	{
+		SWIM_CHECK(Near(kept[c], color[c] - (1.0f - ao) * indirect[c], 1.0e-6f));
+		SWIM_CHECK(kept[c] == ignored[c]);
+	}
+	// With AO off the full specular IBL is replaced; a darker reflection never goes negative.
+	auto noAo = params;
+	noAo.AoEnabled = 0;
+	auto dark = reflection;
+	dark.Reflection = { 0.0f, 0.0f, 0.0f, 1.0f };
+	dark.Specular = { 5.0f, 5.0f, 5.0f, 1.0f };
+	const auto clamped = Ss::CompositeTexel(noAo, color, indirect, 0.2f, dark, 0.5f, 10, 10);
+	SWIM_CHECK(clamped[0] == 0.0f && clamped[1] == 0.0f && clamped[2] == 0.0f);
+
+	// The hit radiance carries the hit's own occlusion.
+	Ss::ColorImage colors(2, 1, { 1.0f, 1.0f, 1.0f, 1.0f });
+	Ss::ColorImage indirects(2, 1, { 0.5f, 0.25f, 0.0f, 1.0f });
+	Ss::ScalarImage occlusion(2, 1, 0.5f);
+	const auto radiance = Ss::HitRadiance(params, colors, indirects, &occlusion, 1, 0);
+	SWIM_CHECK(Near(radiance[0], 0.75f, 1.0e-6f) && Near(radiance[1], 0.875f, 1.0e-6f) && radiance[2] == 1.0f);
+	auto noOcclusion = params;
+	noOcclusion.AoEnabled = 0;
+	SWIM_CHECK(Ss::HitRadiance(noOcclusion, colors, indirects, &occlusion, 1, 0)[0] == 1.0f);
 }

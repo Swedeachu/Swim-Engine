@@ -75,6 +75,29 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("fog start distance must be >= 0 and below a finite max distance");
 		}
+		const auto& ssr = settings.Reflections;
+		if (!Finite(ssr.MaxDistance) || ssr.MaxDistance <= 0.0f || !Finite(ssr.Thickness) || ssr.Thickness <= 0.0f)
+		{
+			throw std::invalid_argument("reflection max distance and thickness must be finite and positive");
+		}
+		if (!Finite(ssr.Stride) || ssr.Stride < 1.0f || ssr.Stride > 64.0f)
+		{
+			throw std::invalid_argument("reflection stride must be 1 .. 64 pixels");
+		}
+		if (ssr.MaxSteps < 1 || ssr.MaxSteps > MaxReflectionSteps || ssr.RefineSteps > MaxReflectionRefineSteps)
+		{
+			throw std::invalid_argument("reflection steps must be 1 .. MaxReflectionSteps and refine steps 0 .. MaxReflectionRefineSteps");
+		}
+		if (!Finite(ssr.MaxRoughness) || ssr.MaxRoughness <= 0.0f || ssr.MaxRoughness > 1.0f || !Finite(ssr.RoughnessFade) ||
+			ssr.RoughnessFade <= 0.0f || ssr.RoughnessFade > ssr.MaxRoughness)
+		{
+			throw std::invalid_argument("reflection max roughness must be in (0, 1] and its fade in (0, max roughness]");
+		}
+		if (!Finite(ssr.EdgeFade) || ssr.EdgeFade <= 0.0f || ssr.EdgeFade > 0.5f || !Finite(ssr.DistanceFade) || ssr.DistanceFade <= 0.0f ||
+			ssr.DistanceFade > 1.0f)
+		{
+			throw std::invalid_argument("reflection edge fade must be in (0, 0.5] and distance fade in (0, 1]");
+		}
 	}
 
 	GpuScreenSpaceParams BuildScreenSpaceParams(const ScreenSpaceSettings& settings, const ScreenSpaceView& view, std::uint32_t width,
@@ -135,6 +158,25 @@ namespace Swim::Render
 		params.FogAnisotropy = fog.Anisotropy;
 		params.FogStartDistance = fog.StartDistance;
 		params.FogMaxDistance = fog.MaxDistance;
+		const auto& ssr = settings.Reflections;
+		std::copy(view.Projection.begin(), view.Projection.end(), params.Projection);
+		params.SsrEnabled = ssr.Enabled ? 1u : 0u;
+		params.SsrMaxDistance = ssr.MaxDistance;
+		params.SsrThickness = ssr.Thickness;
+		params.SsrStride = ssr.Stride;
+		params.SsrMaxRoughness = ssr.MaxRoughness;
+		params.SsrRoughnessFade = ssr.RoughnessFade;
+		params.SsrEdgeFade = ssr.EdgeFade;
+		params.SsrDistanceFade = ssr.DistanceFade;
+		params.SsrMaxSteps = ssr.MaxSteps;
+		params.SsrRefineSteps = ssr.RefineSteps;
+		// Near plane: where the projected depth z_ndc = (p10 z + p11) / -z reaches 1.
+		const float nearZ = -p[11] / (p[10] + 1.0f);
+		if (ssr.Enabled && (!Finite(nearZ) || !(nearZ < 0.0f)))
+		{
+			throw std::invalid_argument("screen-space reflections need a projection whose near plane is in front of the camera");
+		}
+		params.SsrNearZ = Finite(nearZ) && nearZ < 0.0f ? nearZ : -1.0e-3f;
 		return params;
 	}
 } // namespace Swim::Render
@@ -503,8 +545,200 @@ namespace Swim::Render::ScreenSpace
 		return sample;
 	}
 
-	Float4 CompositeTexel(const GpuScreenSpaceParams& params, const Float4& color, const Float4& indirect, float ao, float depth,
+	ScreenPoint ProjectToScreen(const GpuScreenSpaceParams& params, const Float3& view)
+	{
+		std::array<float, 4> clip{};
+		for (int r = 0; r < 4; ++r)
+		{
+			clip[r] = params.Projection[r * 4] * view[0] + params.Projection[r * 4 + 1] * view[1] + params.Projection[r * 4 + 2] * view[2] +
+				params.Projection[r * 4 + 3];
+		}
+		const float inverseW = 1.0f / clip[3];
+		ScreenPoint point;
+		point.X = (clip[0] * inverseW + 1.0f + params.Jitter[0]) * 0.5f * float(params.Width);
+		point.Y = (1.0f - clip[1] * inverseW - params.Jitter[1]) * 0.5f * float(params.Height);
+		point.W = clip[3];
+		return point;
+	}
+
+	std::optional<ReflectionHit> TraceReflection(
+		const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x, std::uint32_t y)
+	{
+		const auto center = ViewPositionAt(params, depth, x, y);
+		const auto& encoded = normal.At(x, y);
+		const auto n3 = center ? ViewNormal(params, { encoded[0], encoded[1], encoded[2] }) : std::nullopt;
+		if (!center || !n3 || !(-(*center)[2] > 0.0f))
+		{
+			return std::nullopt;
+		}
+		const float roughness = encoded[3];
+		if (!(roughness < params.SsrMaxRoughness))
+		{
+			return std::nullopt;
+		}
+		const float roughnessFade = std::clamp((params.SsrMaxRoughness - roughness) / params.SsrRoughnessFade, 0.0f, 1.0f);
+		const Float3 p = *center;
+		const Float3 n = *n3;
+		const Float3 v = Scale(p, 1.0f / Length(p));
+		const Float3 reflectedRaw = Subtract(v, Scale(n, 2.0f * Dot(v, n)));
+		const Float3 r = Scale(reflectedRaw, 1.0f / Length(reflectedRaw));
+		float rayLength = params.SsrMaxDistance;
+		if (p[2] + r[2] * rayLength > params.SsrNearZ)
+		{
+			rayLength = (params.SsrNearZ - p[2]) / r[2]; // Clipped to the near plane.
+		}
+		if (!(rayLength > 0.0f))
+		{
+			return std::nullopt;
+		}
+		const Float3 end{ p[0] + r[0] * rayLength, p[1] + r[1] * rayLength, p[2] + r[2] * rayLength };
+		const auto s0 = ProjectToScreen(params, p);
+		const auto s1 = ProjectToScreen(params, end);
+		const float k0 = 1.0f / s0.W;
+		const float k1 = 1.0f / s1.W;
+		const Float3 q0 = Scale(p, k0);
+		const Float3 q1 = Scale(end, k1);
+		const float dx = s1.X - s0.X;
+		const float dy = s1.Y - s0.Y;
+		const float pixelLength = std::sqrt(dx * dx + dy * dy);
+		const auto steps = std::min(params.SsrMaxSteps, static_cast<std::uint32_t>(std::ceil(pixelLength / params.SsrStride)));
+		const float jitter = InterleavedGradientNoise(float(x) + 23.0f, float(y) + 41.0f, params.NoiseFrame);
+		const float width = float(params.Width);
+		const float height = float(params.Height);
+
+		struct Sample
+		{
+			bool Inside = false;
+			std::uint32_t X = 0;
+			std::uint32_t Y = 0;
+			float RayDepth = 0.0f;
+		};
+
+		const auto sampleAt = [&](float t)
+		{
+			Sample sample;
+			const float sx = s0.X + dx * t;
+			const float sy = s0.Y + dy * t;
+			if (!(sx >= 0.0f && sy >= 0.0f && sx < width && sy < height))
+			{
+				return sample;
+			}
+			sample.Inside = true;
+			sample.X = static_cast<std::uint32_t>(std::floor(sx));
+			sample.Y = static_cast<std::uint32_t>(std::floor(sy));
+			sample.RayDepth = -(q0[2] + (q1[2] - q0[2]) * t) / (k0 + (k1 - k0) * t);
+			return sample;
+		};
+
+		float previous = 0.0f;
+		for (std::uint32_t i = 1; i <= steps; ++i)
+		{
+			const float t = std::min((float(i) + jitter) / float(steps), 1.0f);
+			const auto sample = sampleAt(t);
+			if (!sample.Inside)
+			{
+				return std::nullopt; // Left the screen.
+			}
+			const auto scene = (sample.X == x && sample.Y == y) ? std::nullopt : ViewPositionAt(params, depth, sample.X, sample.Y);
+			if (!scene || !(sample.RayDepth >= -(*scene)[2] && sample.RayDepth <= -(*scene)[2] + params.SsrThickness))
+			{
+				previous = t;
+				continue;
+			}
+			// Bisect (previous, t] toward the first sample behind the depth buffer.
+			float lo = previous;
+			float hi = t;
+			for (std::uint32_t k = 0; k < params.SsrRefineSteps; ++k)
+			{
+				const float mid = 0.5f * (lo + hi);
+				const auto probe = sampleAt(mid);
+				const auto probeScene = probe.Inside ? ViewPositionAt(params, depth, probe.X, probe.Y) : std::nullopt;
+				if (probeScene && probe.RayDepth >= -(*probeScene)[2])
+				{
+					hi = mid;
+				}
+				else
+				{
+					lo = mid;
+				}
+			}
+			auto hit = sampleAt(hi);
+			if (!hit.Inside || (hit.X == x && hit.Y == y) || !ViewPositionAt(params, depth, hit.X, hit.Y))
+			{
+				hit = sample;
+				hi = t;
+			}
+			const auto& hitEncoded = normal.At(hit.X, hit.Y);
+			const auto hitNormal = ViewNormal(params, { hitEncoded[0], hitEncoded[1], hitEncoded[2] });
+			if (!hitNormal || Dot(*hitNormal, r) > 0.0f)
+			{
+				return std::nullopt; // A back face.
+			}
+			const float k = k0 + (k1 - k0) * hi;
+			const Float3 point{ (q0[0] + (q1[0] - q0[0]) * hi) / k, (q0[1] + (q1[1] - q0[1]) * hi) / k,
+				(q0[2] + (q1[2] - q0[2]) * hi) / k };
+			const float travelled = Length(Subtract(point, p));
+			const float u = (float(hit.X) + 0.5f) / width;
+			const float w = (float(hit.Y) + 0.5f) / height;
+			const float edge = std::min(std::min(u, 1.0f - u), std::min(w, 1.0f - w));
+			const float edgeFade = std::clamp(edge / params.SsrEdgeFade, 0.0f, 1.0f);
+			const float distanceFade =
+				std::clamp((params.SsrMaxDistance - travelled) / (params.SsrMaxDistance * params.SsrDistanceFade), 0.0f, 1.0f);
+			const float confidence = roughnessFade * edgeFade * distanceFade;
+			if (!(confidence > 0.0f))
+			{
+				return std::nullopt;
+			}
+			return ReflectionHit{ hit.X, hit.Y, travelled, confidence };
+		}
+		return std::nullopt;
+	}
+
+	Float3 HitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect, const ScalarImage* ao,
 		std::uint32_t x, std::uint32_t y)
+	{
+		const auto& c = color.At(x, y);
+		Float3 radiance{ c[0], c[1], c[2] };
+		if (params.AoEnabled != 0u && ao)
+		{
+			const float occlusion = ao->At(x, y);
+			const auto& i = indirect.At(x, y);
+			for (int k = 0; k < 3; ++k)
+			{
+				radiance[k] = std::max(radiance[k] - (1.0f - occlusion) * i[k], 0.0f);
+			}
+		}
+		return radiance;
+	}
+
+	Float4 ReflectionTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
+		const ColorImage& indirect, const ScalarImage* ao, std::uint32_t x, std::uint32_t y)
+	{
+		const auto hit = TraceReflection(params, depth, normal, x, y);
+		if (!hit)
+		{
+			return { 0, 0, 0, 0 };
+		}
+		const auto radiance = HitRadiance(params, color, indirect, ao, hit->X, hit->Y);
+		return { radiance[0], radiance[1], radiance[2], hit->Confidence };
+	}
+
+	ColorImage Reflections(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
+		const ColorImage& indirect, const ScalarImage* ao)
+	{
+		ColorImage result(depth.Width, depth.Height);
+		for (std::uint32_t y = 0; y < depth.Height; ++y)
+		{
+			for (std::uint32_t x = 0; x < depth.Width; ++x)
+			{
+				result.At(x, y) = ReflectionTexel(params, depth, normal, color, indirect, ao, x, y);
+			}
+		}
+		return result;
+	}
+
+	Float4 CompositeTexel(const GpuScreenSpaceParams& params, const Float4& color, const Float4& indirect, float ao,
+		const ReflectionSample& reflection, float depth, std::uint32_t x, std::uint32_t y)
 	{
 		Float3 c{ color[0], color[1], color[2] };
 		if (params.AoEnabled != 0u)
@@ -512,6 +746,14 @@ namespace Swim::Render::ScreenSpace
 			for (int i = 0; i < 3; ++i)
 			{
 				c[i] = std::max(c[i] - (1.0f - ao) * indirect[i], 0.0f);
+			}
+		}
+		if (params.SsrEnabled != 0u && reflection.Reflection[3] > 0.0f)
+		{
+			const float weight = reflection.Reflection[3] * (params.AoEnabled != 0u ? ao : 1.0f);
+			for (int i = 0; i < 3; ++i)
+			{
+				c[i] = std::max(c[i] + weight * (reflection.Reflectance[i] * reflection.Reflection[i] - reflection.Specular[i]), 0.0f);
 			}
 		}
 		if (params.FogEnabled != 0u)
@@ -540,15 +782,27 @@ namespace Swim::Render::ScreenSpace
 		return { c[0], c[1], c[2], color[3] };
 	}
 
+	Float4 CompositeTexel(const GpuScreenSpaceParams& params, const Float4& color, const Float4& indirect, float ao, float depth,
+		std::uint32_t x, std::uint32_t y)
+	{
+		return CompositeTexel(params, color, indirect, ao, ReflectionSample{}, depth, x, y);
+	}
+
 	ColorImage Composite(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect, const ScalarImage* ao,
-		const ScalarImage& depth)
+		const ScalarImage& depth, const ReflectionImages& reflections)
 	{
 		ColorImage result(color.Width, color.Height);
 		for (std::uint32_t y = 0; y < color.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < color.Width; ++x)
 			{
-				result.At(x, y) = CompositeTexel(params, color.At(x, y), indirect.At(x, y), ao ? ao->At(x, y) : 1.0f, depth.At(x, y), x, y);
+				ReflectionSample reflection;
+				if (reflections.Reflection && reflections.Reflectance && reflections.Specular)
+				{
+					reflection = { reflections.Reflection->At(x, y), reflections.Reflectance->At(x, y), reflections.Specular->At(x, y) };
+				}
+				result.At(x, y) =
+					CompositeTexel(params, color.At(x, y), indirect.At(x, y), ao ? ao->At(x, y) : 1.0f, reflection, depth.At(x, y), x, y);
 			}
 		}
 		return result;

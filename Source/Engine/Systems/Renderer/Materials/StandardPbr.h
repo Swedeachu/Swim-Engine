@@ -129,6 +129,11 @@ namespace Swim::Render::StandardPbr
 	// reflects a uniform environment exactly (the furnace test).
 	Float3 EvaluateEnvironment(const ResolvedSurface& surface, const Float3& view, const EnvironmentTerms& environment);
 
+	// Item 76 (screen-space reflections): the split-sum specular reflectance of the
+	// environment term above, (kS * A + B) * occlusion per channel. The specular IBL
+	// radiance is exactly Prefiltered times this weight.
+	Float3 EnvironmentSpecularWeight(const ResolvedSurface& surface, const Float3& view, float brdfScale, float brdfBias);
+
 	// Direct light + constant ambient + optional IBL + emission, and alpha.
 	std::array<float, 4> ShadeResolved(const ResolvedSurface& surface, const Lighting& lighting, const EnvironmentTerms* environment);
 

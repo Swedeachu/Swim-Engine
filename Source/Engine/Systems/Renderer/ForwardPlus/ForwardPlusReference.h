@@ -35,8 +35,9 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for a non-finite matrix/position/jitter, a zero forward
 	// vector, negative ambient or intensity, or an unknown debug mode.
+	// ForwardViewFlagBrdfLut is set with an environment or hasBrdfLut.
 	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
-		bool hasEnvironment, bool hasShadows = false);
+		bool hasEnvironment, bool hasShadows = false, bool hasBrdfLut = false);
 } // namespace Swim::Render
 
 namespace Swim::Render::ForwardPlus
@@ -94,6 +95,9 @@ namespace Swim::Render::ForwardPlus
 		std::span<const std::uint32_t> Indices;
 		const Environment::EnvironmentProbe* Environment = nullptr; // Used when the view has ForwardViewFlagEnvironment.
 		const Shadows::ShadowSampleInputs* Shadows = nullptr;		// Used when the view has ForwardViewFlagShadows.
+		// Item 76: a BRDF LUT bound without an environment (ForwardViewFlagBrdfLut); the
+		// environment's own LUT is used when this is null.
+		const Environment::Image2D* BrdfLut = nullptr;
 	};
 
 	// Camera view depth of a world point along the view record's forward axis (the
@@ -119,6 +123,22 @@ namespace Swim::Render::ForwardPlus
 	// the opaque pass writes to ForwardPlusTargets::Indirect and what ambient occlusion
 	// attenuates.
 	Float3 IndirectRadiance(
+		const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface, const Float3& position);
+
+	// Item 76 (screen-space reflections): what the opaque pass writes to
+	// ForwardPlusTargets::Reflectance and ::Specular. SpecularReflectance is the
+	// split-sum weight StandardPbr::EnvironmentSpecularWeight from the bilinear BRDF LUT
+	// at (N.V, roughness) when the view has ForwardViewFlagBrdfLut, 0 otherwise (no
+	// reflections without a LUT). SpecularRadiance is the specular IBL, Prefiltered x
+	// SpecularReflectance, 0 without an environment: the part of IndirectRadiance a
+	// screen-space reflection replaces.
+	struct SpecularTerms
+	{
+		Float3 Reflectance{ 0, 0, 0 };
+		Float3 Radiance{ 0, 0, 0 };
+	};
+
+	SpecularTerms SpecularEnvironment(
 		const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface, const Float3& position);
 
 	// ForwardPlusDebugMode::ClusterHeatmap: the cluster's heatmap color, opaque black

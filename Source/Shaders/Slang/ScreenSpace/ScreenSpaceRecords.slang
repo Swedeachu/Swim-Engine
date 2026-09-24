@@ -1,4 +1,4 @@
-// Screen-space ambient occlusion and fog (critical-path item 76): mirrors
+// Screen-space ambient occlusion, reflections and fog (critical-path item 76): mirrors
 // ScreenSpaceRecords.h and every ScreenSpace:: function of ScreenSpaceReference.h.
 
 struct ScreenSpaceParams
@@ -20,7 +20,7 @@ struct ScreenSpaceParams
 	uint NoiseFrame;
 	uint AoEnabled;
 	uint FogEnabled;
-	uint Reserved0;
+	uint SsrEnabled;
 	float3 FogColor;
 	float FogDensity;
 	float3 FogSunColor;
@@ -31,6 +31,19 @@ struct ScreenSpaceParams
 	float FogStartDistance;
 	float FogMaxDistance;
 	float Reserved1;
+	float4 Projection[4];
+	float SsrMaxDistance;
+	float SsrThickness;
+	float SsrStride;
+	float SsrMaxRoughness;
+	float SsrRoughnessFade;
+	float SsrEdgeFade;
+	float SsrDistanceFade;
+	float SsrNearZ;
+	uint SsrMaxSteps;
+	uint SsrRefineSteps;
+	uint Reserved2;
+	uint Reserved3;
 };
 
 static const float ScreenSpacePi = 3.14159265358979;

@@ -147,6 +147,19 @@ float3 StandardPbrEvaluateEnvironment(StandardPbrSurface surface, float3 view, S
 	return (diffuse + specular) * surface.Occlusion;
 }
 
+// StandardPbr::EnvironmentSpecularWeight (item 76): (kS * A + B) * occlusion.
+float3 StandardPbrEnvironmentSpecularWeight(StandardPbrSurface surface, float3 view, float brdfScale, float brdfBias)
+{
+	const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
+	const float metallic = clamp(surface.Metallic, 0.0, 1.0);
+	const float nDotV = clamp(dot(surface.Normal, view), 1.0e-4, 1.0);
+	const float fresnel = pow(1.0 - nDotV, 5.0);
+	const float3 f0 = StandardPbrDielectricF0 + (surface.BaseColor - StandardPbrDielectricF0) * metallic;
+	const float3 fr = max(float3(1.0 - roughness), f0) - f0;
+	const float3 ks = f0 + fr * fresnel;
+	return (ks * brdfScale + brdfBias) * surface.Occlusion;
+}
+
 // Direct light + constant ambient + optional IBL + emission (StandardPbr::ShadeResolved).
 float4 StandardPbrShadeResolved(StandardPbrSurface surface, StandardPbrLighting lighting, bool hasEnvironment,
 	StandardPbrEnvironment environment)

@@ -6,6 +6,8 @@ namespace Swim::Render
 {
 	inline constexpr std::uint32_t MaxAoSlices = 4;
 	inline constexpr std::uint32_t MaxAoSteps = 8;
+	inline constexpr std::uint32_t MaxReflectionSteps = 256;
+	inline constexpr std::uint32_t MaxReflectionRefineSteps = 8;
 
 	// Ground-truth-based ambient occlusion (GTAO, critical-path item 76). It attenuates
 	// only the indirect radiance Forward+ writes to ForwardPlusTargets::Indirect.
@@ -36,10 +38,31 @@ namespace Swim::Render
 		float MaxDistance = 1000.0f;					// Distances (and the sky) are capped here (> StartDistance).
 	};
 
+	// Screen-space reflections (item 76): one mirror ray per pixel, marched through the
+	// depth buffer in screen space, replacing the specular IBL (ForwardPlusTargets::
+	// Specular) with the radiance found where it hits, weighted by the specular
+	// reflectance (ForwardPlusTargets::Reflectance) and a confidence. Glossy
+	// reflections are faded out by roughness rather than blurred; TAA resolves the
+	// per-frame jitter of the march.
+	struct ReflectionSettings
+	{
+		bool Enabled = false;
+		float MaxDistance = 20.0f;	   // View-space ray length in metres (> 0).
+		float Thickness = 0.3f;		   // How far behind the depth buffer a sample still hits, in metres (> 0).
+		float Stride = 2.0f;		   // Pixels between march samples, [1, 64].
+		std::uint32_t MaxSteps = 64;   // March samples per ray, 1 .. MaxReflectionSteps.
+		std::uint32_t RefineSteps = 4; // Binary-search steps after a hit, 0 .. MaxReflectionRefineSteps.
+		float MaxRoughness = 0.6f;	   // Perceptual roughness at and above which nothing is reflected, (0, 1].
+		float RoughnessFade = 0.2f;	   // Confidence ramps to 0 over this roughness range below MaxRoughness, (0, MaxRoughness].
+		float EdgeFade = 0.1f;		   // Hits within this fraction of the screen edge fade out, (0, 0.5].
+		float DistanceFade = 0.25f;	   // Hits in the last fraction of MaxDistance fade out, (0, 1].
+	};
+
 	struct ScreenSpaceSettings
 	{
 		AmbientOcclusionSettings AmbientOcclusion;
 		FogSettings Fog;
+		ReflectionSettings Reflections;
 	};
 
 	// Throws std::invalid_argument for values outside the ranges above.

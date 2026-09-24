@@ -27,6 +27,7 @@
 #include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowRenderer.h"
+#include "Engine/Systems/Renderer/Particles/ParticleSystem.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceEffects.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalAntiAliasing.h"
 #include "Engine/Systems/Renderer/Temporal/TemporalReference.h"
@@ -69,7 +70,8 @@ static_assert(!std::is_copy_constructible_v<Swim::Render::GpuVisibility>);
 static_assert(sizeof(Swim::Render::GpuViewRecord) == 192);
 static_assert(Swim::Render::CanonicalDepthConvention == Swim::Render::DepthConvention::ReverseZ);
 static_assert(sizeof(Swim::Render::VisibilityStats) == 80);
-static_assert(Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabilities{}) == Swim::Render::VisibilityDrawPath::ZeroFilledIndirect);
+static_assert(
+	Swim::Render::SelectVisibilityDrawPath(Swim::Rhi::GraphicsCapabilities{}) == Swim::Render::VisibilityDrawPath::ZeroFilledIndirect);
 static_assert(Swim::Render::MaterialParameterAlignment(Swim::Render::MaterialParameterType::Float3) == 16);
 static_assert(!std::is_copy_constructible_v<Swim::Render::GpuMaterialTable>);
 static_assert(Swim::Render::StandardMaterialRecordSize == 80);
@@ -87,5 +89,13 @@ static_assert(sizeof(Swim::Render::ForwardViewRecord) == 208);
 static_assert(Swim::Render::ForwardPlusRenderer::VelocityFormat == Swim::Rhi::Format::RG16Float);
 static_assert(Swim::Render::ForwardPlusRenderer::NormalFormat == Swim::Rhi::Format::RGBA16Float &&
 	Swim::Render::ForwardPlusRenderer::IndirectFormat == Swim::Rhi::Format::RGBA16Float);
-static_assert(sizeof(Swim::Render::GpuScreenSpaceParams) == 288 && Swim::Render::ScreenSpaceCompositeBindings::Count == 6);
+static_assert(Swim::Render::ForwardPlusRenderer::ReflectanceFormat == Swim::Rhi::Format::RGBA16Float &&
+	Swim::Render::ForwardPlusRenderer::SpecularFormat == Swim::Rhi::Format::RGBA16Float);
+static_assert(sizeof(Swim::Render::GpuScreenSpaceParams) == 400 && Swim::Render::ScreenSpaceCompositeBindings::Count == 9 &&
+	Swim::Render::ScreenSpaceReflectionBindings::Count == 7);
 static_assert(Swim::Render::MaxAoSlices == 4 && Swim::Render::MaxAoSteps == 8);
+static_assert(Swim::Render::MaxReflectionSteps == 256 && Swim::Render::MaxReflectionRefineSteps == 8);
+static_assert(!std::is_copy_constructible_v<Swim::Render::ParticleSystem>);
+static_assert(sizeof(Swim::Render::GpuParticle) == 48 && sizeof(Swim::Render::GpuParticleEmitter) == 320 &&
+	sizeof(Swim::Render::GpuParticleFrame) == 128 && sizeof(Swim::Render::GpuParticleCounters) == 16);
+static_assert(Swim::Render::ParticleRenderBindings::BindlessSpace == Swim::Render::ForwardPlusDrawBindings::BindlessSpace);

@@ -3,7 +3,7 @@
 
 namespace Swim::Render
 {
-	// Descriptor contracts (space 0) of the three screen-space programs. Every texture is
+	// Descriptor contracts (space 0) of the four screen-space programs. Every texture is
 	// read with Load; all run 8 x 8 groups and take no push constants.
 	inline constexpr std::uint32_t ScreenSpaceThreadGroupSize = 8;
 
@@ -25,14 +25,29 @@ namespace Swim::Render
 		static constexpr std::uint32_t Count = 4;
 	};
 
-	struct ScreenSpaceCompositeBindings // SwimScreenSpaceComposite: AO on indirect light, then fog.
+	struct ScreenSpaceReflectionBindings // SwimScreenSpaceReflection: one screen-space mirror ray per pixel.
+	{
+		static constexpr std::uint32_t Depth = 0;
+		static constexpr std::uint32_t Normal = 1;	 // Texture2D<float4>: world normal + roughness.
+		static constexpr std::uint32_t Color = 2;	 // Texture2D<float4>: HDR scene color (the radiance rays find).
+		static constexpr std::uint32_t Indirect = 3; // Texture2D<float4>: ForwardPlusTargets::Indirect (AO at the hit).
+		static constexpr std::uint32_t Ao = 4;		 // Texture2D<float>: blurred visibility (1x1 stand-in without AO).
+		static constexpr std::uint32_t Params = 5;
+		static constexpr std::uint32_t Output = 6; // RWTexture2D<float4> rgba16f: hit radiance, confidence.
+		static constexpr std::uint32_t Count = 7;
+	};
+
+	struct ScreenSpaceCompositeBindings // SwimScreenSpaceComposite: AO on indirect light, reflections, then fog.
 	{
 		static constexpr std::uint32_t Color = 0;	 // Texture2D<float4>: HDR scene color.
 		static constexpr std::uint32_t Indirect = 1; // Texture2D<float4>: ForwardPlusTargets::Indirect.
 		static constexpr std::uint32_t Ao = 2;		 // Texture2D<float>: blurred visibility (1x1 stand-in without AO).
 		static constexpr std::uint32_t Depth = 3;
 		static constexpr std::uint32_t Params = 4;
-		static constexpr std::uint32_t Output = 5; // RWTexture2D<float4> rgba16f.
-		static constexpr std::uint32_t Count = 6;
+		static constexpr std::uint32_t Output = 5;		// RWTexture2D<float4> rgba16f.
+		static constexpr std::uint32_t Reflection = 6;	// Texture2D<float4>: the reflection pass (1x1 stand-in without SSR).
+		static constexpr std::uint32_t Reflectance = 7; // Texture2D<float4>: ForwardPlusTargets::Reflectance (stand-in without SSR).
+		static constexpr std::uint32_t Specular = 8;	// Texture2D<float4>: ForwardPlusTargets::Specular (stand-in without SSR).
+		static constexpr std::uint32_t Count = 9;
 	};
 } // namespace Swim::Render

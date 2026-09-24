@@ -64,7 +64,9 @@ namespace Swim::Render
 		const GpuLightGraphResources* Lights = nullptr;
 		const ClusterGraphResources* Clusters = nullptr; // Built for this view and viewport.
 		// Optional image-based lighting; BrdfLut is required with it. Without it the
-		// renderer binds 1x1 zero stand-ins and clears ForwardViewFlagEnvironment.
+		// renderer binds 1x1 zero stand-ins and clears ForwardViewFlagEnvironment. A
+		// BrdfLut alone (item 76) is still bound and sets ForwardViewFlagBrdfLut, so the
+		// specular reflectance target (and screen-space reflections) work without IBL.
 		const EnvironmentGraphResources* Environment = nullptr;
 		std::optional<GraphTexture> BrdfLut;
 		// Optional shadows (ShadowRenderer::Record earlier in the graph). Without them the
@@ -93,6 +95,15 @@ namespace Swim::Render
 		//    removes a fraction of exactly this part of Color.
 		std::optional<GraphTexture> Normal;
 		std::optional<GraphTexture> Indirect;
+		// Item 76, for screen-space reflections; transient targets stand in when absent,
+		// both scaled by the transmittance of the transparent layers like Indirect:
+		//  - Reflectance (RGBA16Float, ColorAttachment): opaque pixels' split-sum
+		//    specular reflectance (rgb, ForwardPlus::SpecularEnvironment), the weight a
+		//    reflected radiance is multiplied by; 0 elsewhere;
+		//  - Specular (RGBA16Float, ColorAttachment): opaque pixels' specular IBL radiance
+		//    (rgb), the part of Indirect a screen-space reflection replaces; 0 elsewhere.
+		std::optional<GraphTexture> Reflectance;
+		std::optional<GraphTexture> Specular;
 		bool Clear = true; // Clear color/id/depth first; otherwise load them.
 		std::array<float, 4> ClearColor{ 0, 0, 0, 0 };
 	};
@@ -102,12 +113,13 @@ namespace Swim::Render
 	//     visibility commands, shaded by ClusteredForward.slang (StandardPbr resolve,
 	//     directional + clustered local lights, ambient, IBL, emission), writing
 	//     color, object id, motion vectors (jittered rasterization, item 75), normal +
-	//     roughness and indirect radiance (item 76), and depth;
+	//     roughness, indirect radiance, specular reflectance and specular IBL radiance
+	//     (item 76), and depth;
 	//  2. sort: one group per page slot orders the Transparent bin back to front by
 	//     bounds-center depth (deterministic tie-breaks) into compacted commands;
 	//  3. transparent: the sorted draws, blended (premultiplied alpha) over the
-	//     opaque result, depth-tested without depth writes; the indirect target is
-	//     scaled by each layer's transmittance.
+	//     opaque result, depth-tested without depth writes; the indirect, reflectance
+	//     and specular targets are scaled by each layer's transmittance.
 	// No per-object CPU light or draw list exists anywhere in the frame.
 	class ForwardPlusRenderer
 	{
@@ -116,14 +128,17 @@ namespace Swim::Render
 		// Float so it can be cleared (the RHI clears only float and normalized targets).
 		static constexpr Rhi::Format ObjectIdFormat = Rhi::Format::R32Float;
 		static constexpr Rhi::Format VelocityFormat = Rhi::Format::RG16Float;
-		static constexpr Rhi::Format NormalFormat = Rhi::Format::RGBA16Float;	// Item 76: world shading normal + roughness.
-		static constexpr Rhi::Format IndirectFormat = Rhi::Format::RGBA16Float; // Item 76: ambient + IBL radiance.
+		static constexpr Rhi::Format NormalFormat = Rhi::Format::RGBA16Float;	   // Item 76: world shading normal + roughness.
+		static constexpr Rhi::Format IndirectFormat = Rhi::Format::RGBA16Float;	   // Item 76: ambient + IBL radiance.
+		static constexpr Rhi::Format ReflectanceFormat = Rhi::Format::RGBA16Float; // Item 76 (SSR): specular reflectance.
+		static constexpr Rhi::Format SpecularFormat = Rhi::Format::RGBA16Float;	   // Item 76 (SSR): specular IBL radiance.
 
 		// Pipeline state of a variant: both rasterize both faces (single-sided
 		// materials discard back faces in the shader, so mirrored transforms work),
 		// test depth with the canonical reverse-Z compare, and use the RHI's +Y-up
-		// counter-clockwise front faces. Opaque writes depth and three targets (color,
-		// object id, velocity); Transparent writes color only, premultiplied One /
+		// counter-clockwise front faces. Opaque writes depth and seven targets (color,
+		// object id, velocity, normal, indirect, reflectance, specular); Transparent
+		// writes color, indirect, reflectance and specular, premultiplied One /
 		// OneMinusSourceAlpha, and never writes depth.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(ForwardPlusBin bin, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
 

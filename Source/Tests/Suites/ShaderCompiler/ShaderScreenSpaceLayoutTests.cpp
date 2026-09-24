@@ -1,7 +1,7 @@
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_SCREEN_SPACE_AO_REFLECTION_PATH) && defined(SWIM_SCREEN_SPACE_BLUR_REFLECTION_PATH) &&                                    \
-	defined(SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH)
+	defined(SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH) && defined(SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH)
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceBindings.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceRecords.h"
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
@@ -69,6 +69,12 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("FogDensity"), std::uint32_t(offsetof(P, FogDensity)));
 		SWIM_CHECK_EQUAL(offsets.at("FogSunDirection"), std::uint32_t(offsetof(P, FogSunDirection)));
 		SWIM_CHECK_EQUAL(offsets.at("FogMaxDistance"), std::uint32_t(offsetof(P, FogMaxDistance)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrEnabled"), std::uint32_t(offsetof(P, SsrEnabled)));
+		SWIM_CHECK_EQUAL(offsets.at("Projection"), std::uint32_t(offsetof(P, Projection)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrMaxDistance"), std::uint32_t(offsetof(P, SsrMaxDistance)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrNearZ"), std::uint32_t(offsetof(P, SsrNearZ)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrMaxSteps"), std::uint32_t(offsetof(P, SsrMaxSteps)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrRefineSteps"), std::uint32_t(offsetof(P, SsrRefineSteps)));
 		(void)paramsBinding;
 	}
 } // namespace
@@ -83,9 +89,14 @@ SWIM_TEST("ShaderCompiler.ScreenSpaceLayout", "ProgramsMatchTheBindingContract")
 	CheckProgram(Load(SWIM_SCREEN_SPACE_BLUR_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture }, Render::ScreenSpaceBlurBindings::Params);
 	CheckProgram(Load(SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH),
-		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture },
+		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture,
+			T::SampledTexture, T::SampledTexture, T::SampledTexture },
 		Render::ScreenSpaceCompositeBindings::Params);
+	CheckProgram(Load(SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH),
+		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer,
+			T::StorageTexture },
+		Render::ScreenSpaceReflectionBindings::Params);
 	static_assert(Render::ScreenSpaceAoBindings::Count == 4 && Render::ScreenSpaceBlurBindings::Count == 4 &&
-		Render::ScreenSpaceCompositeBindings::Count == 6);
+		Render::ScreenSpaceCompositeBindings::Count == 9 && Render::ScreenSpaceReflectionBindings::Count == 7);
 }
 #endif

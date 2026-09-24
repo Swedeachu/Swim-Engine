@@ -116,6 +116,16 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 		{ "SwimScreenSpaceBlur", SWIM_SCREEN_SPACE_BLUR_SPIRV_PATH },
 		{ "SwimScreenSpaceComposite", SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH },
 #endif
+#if defined(SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH)
+		{ "SwimScreenSpaceReflection", SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH },
+#endif
+#if defined(SWIM_PARTICLE_RENDER_SPIRV_PATH)
+		{ "SwimParticleSimulate", SWIM_PARTICLE_SIMULATE_SPIRV_PATH },
+		{ "SwimParticleEmit", SWIM_PARTICLE_EMIT_SPIRV_PATH },
+		{ "SwimParticleCompact", SWIM_PARTICLE_COMPACT_SPIRV_PATH },
+		{ "SwimParticleFinalize", SWIM_PARTICLE_FINALIZE_SPIRV_PATH },
+		{ "SwimParticleRender", SWIM_PARTICLE_RENDER_SPIRV_PATH },
+#endif
 	};
 
 	std::uint32_t total = 0;

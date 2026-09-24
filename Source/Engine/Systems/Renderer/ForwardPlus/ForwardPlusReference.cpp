@@ -9,8 +9,8 @@
 
 namespace Swim::Render
 {
-	ForwardViewRecord BuildForwardViewRecord(
-		const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount, bool hasEnvironment, bool hasShadows)
+	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
+		bool hasEnvironment, bool hasShadows, bool hasBrdfLut)
 	{
 		const auto finite = [](std::span<const float> values)
 		{
@@ -52,7 +52,8 @@ namespace Swim::Render
 		record.EnvironmentRotation = view.EnvironmentRotation;
 		record.MaterialCount = materialCount;
 		record.PrefilteredMipCount = std::max(prefilteredMipCount, 1u);
-		record.Flags = (hasEnvironment ? ForwardViewFlagEnvironment : 0u) | (hasShadows ? ForwardViewFlagShadows : 0u);
+		record.Flags = (hasEnvironment ? ForwardViewFlagEnvironment : 0u) | (hasShadows ? ForwardViewFlagShadows : 0u) |
+			(hasEnvironment || hasBrdfLut ? ForwardViewFlagBrdfLut : 0u);
 		record.DebugMode = static_cast<std::uint32_t>(view.DebugMode);
 		return record;
 	}
@@ -102,7 +103,7 @@ namespace Swim::Render::ForwardPlus
 
 	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local)
 	{
-		const auto project = [](const float(&m)[16], const Float3& p)
+		const auto project = [](const float (&m)[16], const Float3& p)
 		{
 			std::array<float, 4> clip{};
 			for (int r = 0; r < 4; ++r)
@@ -301,6 +302,33 @@ namespace Swim::Render::ForwardPlus
 			result[c] = view.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c];
 		}
 		return result;
+	}
+
+	SpecularTerms SpecularEnvironment(
+		const LightingInputs& inputs, const ForwardViewRecord& view, const StandardPbr::ResolvedSurface& surface, const Float3& position)
+	{
+		const auto toCamera =
+			Normalize({ view.CameraPosition[0] - position[0], view.CameraPosition[1] - position[1], view.CameraPosition[2] - position[2] });
+		SpecularTerms terms;
+		if ((view.Flags & ForwardViewFlagEnvironment) != 0 && inputs.Environment)
+		{
+			const auto environment = inputs.Environment->Lookup(surface, toCamera, { view.EnvironmentIntensity, view.EnvironmentRotation });
+			terms.Reflectance = StandardPbr::EnvironmentSpecularWeight(surface, toCamera, environment.BrdfScale, environment.BrdfBias);
+			for (int c = 0; c < 3; ++c)
+			{
+				terms.Radiance[c] = environment.Prefiltered[c] * terms.Reflectance[c];
+			}
+			return terms;
+		}
+		const auto* lut = inputs.BrdfLut ? inputs.BrdfLut : inputs.Environment ? &inputs.Environment->GetBrdfLut() : nullptr;
+		if ((view.Flags & ForwardViewFlagBrdfLut) != 0 && lut)
+		{
+			const float roughness = std::clamp(surface.PerceptualRoughness, StandardPbr::MinPerceptualRoughness, 1.0f);
+			const float nDotV = std::clamp(StandardPbr::Dot(surface.Normal, toCamera), 1.0e-4f, 1.0f);
+			const auto ab = lut->SampleBilinear(nDotV, roughness);
+			terms.Reflectance = StandardPbr::EnvironmentSpecularWeight(surface, toCamera, ab[0], ab[1]);
+		}
+		return terms;
 	}
 
 	Float4 DebugColor(const ClusterGridRecord& grid, std::span<const ClusterRecord> records, float pixelX, float pixelY, float viewDepth)

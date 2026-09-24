@@ -109,7 +109,7 @@ In HDR, the tone mapper's white is the display peak (default 1,000 nits), and SD
 
 ## Not yet
 
-- SSR, depth of field and motion blur (item 76 and later). AO and fog ([Screen-space effects](ScreenSpace.md), item 76) and TAA (item 75) run before this stack: `TemporalAntiAliasing`'s output is a valid `PostProcessFrame::Source` (see [Temporal anti-aliasing](TemporalAntiAliasing.md)).
+- Depth of field and motion blur (later). AO, reflections and fog ([Screen-space effects](ScreenSpace.md), item 76) and TAA (item 75) run before this stack: `TemporalAntiAliasing`'s output is a valid `PostProcessFrame::Source` (see [Temporal anti-aliasing](TemporalAntiAliasing.md)).
 - A 3D grading LUT and user LUT import.
 - Local exposure.
 - Physical camera (aperture, shutter, ISO) presets.

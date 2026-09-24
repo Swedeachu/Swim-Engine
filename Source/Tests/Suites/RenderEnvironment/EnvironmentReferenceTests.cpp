@@ -497,3 +497,36 @@ SWIM_TEST("Render.PbrGallery", "CpuReferenceMeetsTheGalleryExpectations")
 	const auto open = Gallery::ShadePixel(unoccluded, probe, lit, *coverage);
 	SWIM_CHECK(std::abs(occluded[1] - 0.6f * open[1]) < 1.0e-5f);
 }
+
+SWIM_TEST("Render.Environment.Shading", "SpecularWeightTimesPrefilteredRadianceIsTheSpecularIbl")
+{
+	// Item 76 (SSR): the specular reflectance times the prefiltered radiance is exactly the
+	// specular part of EvaluateEnvironment.
+	std::mt19937 random(76);
+	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+	for (int i = 0; i < 200; ++i)
+	{
+		Pbr::ResolvedSurface surface;
+		surface.Normal = RandomDirection(random);
+		surface.BaseColor = { unit(random), unit(random), unit(random) };
+		surface.Metallic = unit(random);
+		surface.PerceptualRoughness = unit(random);
+		surface.Occlusion = 0.3f + 0.7f * unit(random);
+		auto view = RandomDirection(random);
+		if (Env::Dot(view, surface.Normal) < 0.0f)
+		{
+			view = { -view[0], -view[1], -view[2] };
+		}
+		Pbr::EnvironmentTerms terms;
+		terms.Prefiltered = { 2.0f * unit(random), unit(random), 0.5f * unit(random) };
+		terms.BrdfScale = unit(random);
+		terms.BrdfBias = 0.2f * unit(random);
+		const auto specularOnly = Pbr::EvaluateEnvironment(surface, view, terms);
+		const auto weight = Pbr::EnvironmentSpecularWeight(surface, view, terms.BrdfScale, terms.BrdfBias);
+		for (int c = 0; c < 3; ++c)
+		{
+			SWIM_CHECK(weight[c] >= 0.0f);
+			SWIM_CHECK(std::abs(specularOnly[c] - terms.Prefiltered[c] * weight[c]) <= 1.0e-6f + 1.0e-5f * specularOnly[c]);
+		}
+	}
+}

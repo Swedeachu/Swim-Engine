@@ -166,6 +166,7 @@ function(swim_configure_tests)
 		RenderPostProcess
 		RenderTemporal
 		RenderScreenSpace
+		RenderParticles
 		Commands
 	)
 
@@ -410,6 +411,18 @@ function(swim_configure_tests)
 			SWIM_SCREEN_SPACE_BLUR_REFLECTION_PATH="${SwimScreenSpaceBlur_REFLECTION}"
 			SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH="${SwimScreenSpaceComposite_SPIRV}"
 			SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH="${SwimScreenSpaceComposite_REFLECTION}"
+			SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH="${SwimScreenSpaceReflection_SPIRV}"
+			SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH="${SwimScreenSpaceReflection_REFLECTION}"
+			SWIM_PARTICLE_SIMULATE_SPIRV_PATH="${SwimParticleSimulate_SPIRV}"
+			SWIM_PARTICLE_SIMULATE_REFLECTION_PATH="${SwimParticleSimulate_REFLECTION}"
+			SWIM_PARTICLE_EMIT_SPIRV_PATH="${SwimParticleEmit_SPIRV}"
+			SWIM_PARTICLE_EMIT_REFLECTION_PATH="${SwimParticleEmit_REFLECTION}"
+			SWIM_PARTICLE_COMPACT_SPIRV_PATH="${SwimParticleCompact_SPIRV}"
+			SWIM_PARTICLE_COMPACT_REFLECTION_PATH="${SwimParticleCompact_REFLECTION}"
+			SWIM_PARTICLE_FINALIZE_SPIRV_PATH="${SwimParticleFinalize_SPIRV}"
+			SWIM_PARTICLE_FINALIZE_REFLECTION_PATH="${SwimParticleFinalize_REFLECTION}"
+			SWIM_PARTICLE_RENDER_SPIRV_PATH="${SwimParticleRender_SPIRV}"
+			SWIM_PARTICLE_RENDER_REFLECTION_PATH="${SwimParticleRender_REFLECTION}"
 		)
 	endif()
 

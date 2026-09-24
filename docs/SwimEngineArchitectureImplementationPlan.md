@@ -27,9 +27,33 @@ This section is the short authoritative status summary for the current repositor
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
-| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), and screen-space GTAO and exponential height fog (item 76; SSR remains) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
+| Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), screen-space GTAO, reflections and exponential height fog (item 76) and GPU particles (item 77) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest renderer checkpoint — item 76, first part: screen-space ambient occlusion and height fog (2026-09-24):** Phase 17's optional screen-space modules start, between Forward+ and TAA. SSR, the third module of item 76, remains open.
+- **Latest renderer checkpoint — item 76 complete (screen-space reflections) and item 77, GPU particles (2026-09-24):** the last screen-space module and Phase 19's GPU particle system.
+  - **Forward+ reflectance and specular targets (item 76):**
+    - A reflection found on screen must *replace* the specular IBL already inside Color, and a colored metal must tint it. The opaque pass therefore writes `ForwardPlusTargets::Reflectance` (the split-sum specular reflectance, `StandardPbr::EnvironmentSpecularWeight`) and `ForwardPlusTargets::Specular` (the specular IBL, `Prefiltered ×` reflectance), both RGBA16Float and scaled behind glass like Indirect. `ForwardPlus::SpecularEnvironment` is the CPU definition.
+    - Seven opaque and four transparent color attachments; every desktop Vulkan driver exposes 8. Packing the thin G-buffer is a later bandwidth optimization.
+    - A `BrdfLut` may now be supplied without an environment (`ForwardViewFlagBrdfLut`), so reflections work without IBL. Karis' analytic split-sum fit was tried as a LUT-free fallback and rejected: against this engine's height-correlated LUT it is off by up to 0.4.
+  - **Screen-space reflections (`SwimScreenSpaceReflection`, item 76):**
+    - One mirror ray per pixel, marched in screen space with perspective-correct depth (after McGuire and Mara 2014): clipped to the near plane, jittered per pixel and frame for TAA, a thickness hit test, binary refinement, back-face rejection, and a confidence from roughness, screen-edge and distance fades. The hit's color carries its own AO.
+    - The composite replaces `confidence × ao × specular` with `confidence × ao × reflectance × hit`, so misses and disabled reflections leave the IBL untouched. `GpuScreenSpaceParams` grows to 400 bytes (projection + reflection fields); one 1×1 stand-in fills the three reflection slots when reflections are off. `ScreenSpace::TraceReflection`, `ReflectionTexel` and the extended `CompositeTexel` are the CPU definitions.
+    - Glossy (importance-sampled) rays, hierarchical-Z tracing and reflecting the previous frame's final image remain later work.
+  - **`Renderer/Particles` (item 77):**
+    - `ParticleSystem` keeps a persistent pool with per-emitter ranges, free lists, draw lists, counters and indirect arguments. Emitters are generational handles whose ranges retire after their last GPU use and coalesce.
+    - `Simulate` records four compute passes: simulate (semi-implicit Euler, drag, ground-plane bounces; dead slots return to the free list), emit (spawns pop free slots; drops are counted), compact (live slots onto the draw list) and finalize (a one-group bitonic back-to-front sort for alpha-blended emitters, then each emitter's `DrawIndexedIndirectCommand`).
+    - `Draw` records one pass of camera-facing billboards: additive emitters first, then alpha-blended ones back to front by origin, each one indirect draw. Size and color curves over life, flipbooks over life or by frame rate, and bindless sprites (or a procedural disc) shared with Forward+'s table.
+    - Emission is the only CPU work: `Particles::AdvanceEmission` (rate, bursts, looping cycles, capacity cap). Every random draw is a pure function of the particle id and the emitter seed, so the GPU and `Particles::` agree particle by particle whatever slot each lands in.
+    - The module depends only on RenderGraph, the RHI contract and `Resources/` handles; `scripts/verify-build-layout.py` enforces it.
+  - **Validation:**
+    - The official Linux configuration passes **648 cases / 641,003 checks** (was 626 / 374,352). The EnTT-enabled sanitizer build passes 671 cases cleanly. See [the item 76 record](validation/Item76-2026-09-24.md) and [the item 77 record](validation/Item77-2026-09-24.md).
+    - The native smokes now run in the container on **Mesa lavapipe** (llvmpipe, SDL's offscreen video driver) with a source-built Khronos validation layer 1.4.350:
+      - `ScreenSpaceEffectsMatchTheCpuReference` (with two new reflection frames: GPU and CPU agree on every hit, 0 outliers), the extended `ClusteredForwardPlusMatchesTheCpuReference` (0 reflectance/specular outliers), item 75's `TemporalAntiAliasingMatchesTheCpuReference` and the new `GpuParticlesMatchTheCpuReference` pass core and synchronization validation;
+      - the particle, screen-space and TAA smokes also pass GPU-assisted and combined validation. The Forward+ smoke fails those two profiles on `SharedMemoryDataRace-RaceOnStore` in item 61's `EnvironmentIrradiance.slang` and item 65's `ClusterScan.slang` tree reductions. Both read as race-free (a workgroup barrier between rounds, correct barrier semantics in the SPIR-V, each report an invocation against itself) and a 16-byte element stride did not change the report, so they are recorded as an open question about this newest layer's detector, not changed; the desktop SDK passed these profiles before.
+      - The whole native suite (40 cases): 38 pass core and synchronization validation (the two window minimize/restore smokes fail because the offscreen driver cannot minimize), 31 pass GPU-assisted and combined (the same two, plus seven earlier smokes on the reductions above and on a `WARNING-GPU-AV-drawCount` in item 49's visibility smoke, whose per-bin counts deliberately exceed the capacity that `maxDrawCount` clamps). See [the item 77 record](validation/Item77-2026-09-24.md#whole-native-suite-on-mesa-lavapipe).
+    - `GpuParticlesMatchTheCpuReference` compares 4,732 particle-steps over 30 frames with 0 id mismatches and 0 field outliers (worst 10⁻⁷), 891 sorted pairs with 0 inversions, and 36,427 drawn pixels with 0 outliers (532 occluded by the depth plane).
+    - 40 native cases now. See [Screen-space effects](ScreenSpace.md), [GPU particles](Particles.md) and [Clustered Forward+](ForwardPlus.md).
+  - **Still needed:** desktop execution of the new and changed smokes on the RTX 4070 (all four profiles), then recording SSR and particle timings as budgets. Animation/skinning (item 78) is next; engine wiring remains item 56.
+- **Previous renderer checkpoint — item 76, first part: screen-space ambient occlusion and height fog (2026-09-24):** Phase 17's optional screen-space modules start, between Forward+ and TAA. SSR, the third module of item 76, was left for the latest checkpoint.
   - **Forward+ surface targets:**
     - The opaque pass writes two more attachments. `ForwardPlusTargets::Normal` (RGBA16Float) holds the world shading normal after normal mapping, with perceptual roughness in w. `ForwardPlusTargets::Indirect` (RGBA16Float) holds the ambient + IBL radiance (`ForwardPlus::IndirectRadiance`) already inside Color. Transient targets stand in when none are supplied.
     - The transparent pass writes (0, 0, 0, alpha) to the indirect target with the same premultiplied blend, so behind glass it holds exactly the transmitted share. The heatmap view writes 0.
@@ -47,8 +71,8 @@ This section is the short authoritative status summary for the current repositor
     - The new native smoke `ScreenSpaceEffectsMatchTheCpuReference` compares every stage texel by texel, each from the GPU's own previous stage: raw GTAO, the blur, and the composite. It covers AO alone, AO with jittered fog and R32Float depth, fog alone, all off, and a 1080p timing frame.
     - `ShaderCompiler.GpuAvBudget` covers the three programs (AO 12, blur 6, composite 16 instrumented accesses).
     - 39 native cases now. See [Screen-space effects](ScreenSpace.md) and [the item 76 record](validation/Item76-2026-09-24.md).
-  - **Still needed:** desktop execution of the new and changed smokes (and item 75's), then recording AO and fog timings as budgets. SSR, the rest of item 76, comes next and reads the new normal + roughness target. Engine wiring remains item 56.
-- **Previous renderer checkpoint — item 75: motion vectors and temporal anti-aliasing (2026-09-24):** Phase 17's post stack gains TAA, fed by motion vectors that Forward+ now writes.
+  - **Still needed:** desktop execution of the new and changed smokes (and item 75's), then recording AO and fog timings as budgets. *(The smokes now pass core and synchronization validation on Mesa lavapipe; see the latest checkpoint.)* SSR, the rest of item 76, followed. Engine wiring remains item 56.
+- **Earlier renderer checkpoint — item 75: motion vectors and temporal anti-aliasing (2026-09-24):** Phase 17's post stack gains TAA, fed by motion vectors that Forward+ now writes.
   - **Motion vectors and jitter (Forward+):**
     - `ForwardViewRecord` grows to 208 bytes: `ViewProjection` stays unjittered, and `PreviousViewProjection` and `Jitter` (an NDC offset) follow. The previous matrix defaults to the current one, so a first frame has no camera motion.
     - The vertex stage adds `Jitter × w` to the clip position only. It also passes the unjittered current and previous clip positions, the latter from `GpuTransformRecord::Previous`, which the GPU Scene already kept.
@@ -4138,7 +4162,7 @@ Recommended order:
 5. color grading; *(done: white balance, contrast, ASC CDL, saturation; a 3D LUT is later work)*
 6. TAA once motion vectors/history are solid; *(done: Forward+ motion vectors and jitter, `TemporalAntiAliasing` with variance clipping, item 75 — [Temporal anti-aliasing](TemporalAntiAliasing.md))*
 7. optional GTAO/SSAO; *(done: `ScreenSpaceEffects` GTAO on the Forward+ indirect radiance, item 76 — [Screen-space effects](ScreenSpace.md))*
-8. optional SSR; *(next: reads the Forward+ normal + roughness target added for item 76)*
+8. optional SSR; *(done: a screen-space mirror march over the Forward+ normal + roughness, replacing the specular IBL through the new reflectance and specular targets, item 76 — [Screen-space effects](ScreenSpace.md#reflections-screenspacereflectionslang--screenspacereflectiontexel))*
 9. fog; *(done: analytic exponential height fog with a sun lobe in the same composite, item 76)*
 10. later volumetrics/DoF/motion blur as needed.
 
@@ -4188,18 +4212,20 @@ Compiled model importer already provides:
 
 ## Phase 19 — GPU particles
 
-- [ ] emitter assets/components;
-- [ ] GPU particle pool;
-- [ ] GPU spawn command buffer;
-- [ ] compute simulation;
-- [ ] death/compaction;
-- [ ] billboard/mesh/trail rendering;
-- [ ] local/world space;
-- [ ] curves;
-- [ ] flipbooks;
-- [ ] optional collisions;
-- [ ] indirect generation;
-- [ ] transparency/sorting policy.
+*(2026-09-24, item 77: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md).)*
+
+- [ ] emitter assets/components; *(`ParticleEmitterDesc` + `ParticleSystem::CreateEmitter` are the runtime API; a cooked emitter asset and an ECS component arrive with engine wiring, item 56)*
+- [x] GPU particle pool; *(persistent pool with per-emitter ranges, free lists, draw lists and counters; ranges retire after their last GPU use)*
+- [x] GPU spawn command buffer; *(per-frame emitter records carry spawn counts and first ids; spawns pop the GPU free list)*
+- [x] compute simulation; *(semi-implicit Euler with gravity and drag, `SwimParticleSimulate`)*
+- [x] death/compaction; *(dead slots return to the free list; live slots compact onto the draw list)*
+- [ ] billboard/mesh/trail rendering; *(camera-facing rotated billboards done; mesh particles and trails remain)*
+- [x] local/world space;
+- [x] curves; *(four-key size and RGBA color over life)*
+- [x] flipbooks; *(over life or by frame rate, bindless sprites)*
+- [x] optional collisions; *(a ground plane with restitution and friction; depth-buffer collisions remain)*
+- [x] indirect generation; *(one `DrawIndexedIndirectCommand` per emitter from the finalize pass)*
+- [x] transparency/sorting policy. *(additive unsorted; alpha-blended emitters sorted back to front per emitter, up to 2,048 particles; emitters ordered additive first, then blended back to front)*
 
 Particles are a GPU Scene/render-graph producer, not thousands of normal EnTT mesh entities.
 
@@ -4898,8 +4924,8 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 73. [x] HDR scene color/exposure/tone mapping. *(2026-09-23: `Renderer/PostProcess` + `Shaders/Slang/PostProcess`; [Post-processing](PostProcess.md). Native smoke passes all profiles on the Windows desktop.)*
 74. [x] bloom/color grading. *(2026-09-23: bloom chains and the grading stage of the composite.)*
 75. [x] motion vectors/TAA. *(2026-09-24: Forward+ velocity target and jitter, `Renderer/Temporal` + `Shaders/Slang/Temporal`; [Temporal anti-aliasing](TemporalAntiAliasing.md). Native smoke awaits desktop execution.)*
-76. [ ] optional AO/SSR/fog modules. *(2026-09-24: GTAO and height fog done — Forward+ normal and indirect targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). SSR remains. Native smoke awaits desktop execution.)*
-77. [ ] GPU particles.
+76. [x] optional AO/SSR/fog modules. *(2026-09-24: GTAO, SSR and height fog — Forward+ normal, indirect, reflectance and specular targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). Native smokes pass on Mesa lavapipe; desktop execution pending.)*
+77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on Mesa lavapipe; desktop execution pending.)*
 78. [ ] animation/skinning/morphs.
 79. [ ] runtime UI + HarfBuzz/FreeType/MSDF.
 80. [ ] miniaudio audio system.

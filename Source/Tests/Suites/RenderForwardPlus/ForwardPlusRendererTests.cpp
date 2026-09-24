@@ -231,13 +231,15 @@ SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
 	Testing::MockPipelineLayout layout;
 	Testing::MockShaderProgram program;
 	const auto opaque = ForwardPlusRenderer::PipelineDesc(ForwardPlusBin::Opaque, program, layout);
-	SWIM_REQUIRE_EQUAL(opaque.ColorFormats.size(), std::size_t(5));
+	SWIM_REQUIRE_EQUAL(opaque.ColorFormats.size(), std::size_t(7));
 	SWIM_CHECK(opaque.ColorFormats[0] == Rhi::Format::RGBA16Float);
 	SWIM_CHECK(opaque.ColorFormats[1] == Rhi::Format::R32Float);
 	SWIM_CHECK(opaque.ColorFormats[2] == Rhi::Format::RG16Float);	// Motion vectors (item 75).
 	SWIM_CHECK(opaque.ColorFormats[3] == Rhi::Format::RGBA16Float); // Normal + roughness (item 76).
 	SWIM_CHECK(opaque.ColorFormats[4] == Rhi::Format::RGBA16Float); // Indirect radiance (item 76).
-	SWIM_REQUIRE_EQUAL(opaque.BlendAttachments.size(), std::size_t(5));
+	SWIM_CHECK(opaque.ColorFormats[5] == Rhi::Format::RGBA16Float); // Specular reflectance (item 76, SSR).
+	SWIM_CHECK(opaque.ColorFormats[6] == Rhi::Format::RGBA16Float); // Specular IBL radiance (item 76, SSR).
+	SWIM_REQUIRE_EQUAL(opaque.BlendAttachments.size(), std::size_t(7));
 	for (const auto& attachment : opaque.BlendAttachments)
 	{
 		SWIM_CHECK(!attachment.Enabled);
@@ -250,13 +252,19 @@ SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
 	SWIM_CHECK(opaque.Program == &program && opaque.Layout == &layout);
 
 	const auto transparent = ForwardPlusRenderer::PipelineDesc(ForwardPlusBin::Transparent, program, layout);
-	SWIM_REQUIRE_EQUAL(transparent.ColorFormats.size(), std::size_t(2));
+	SWIM_REQUIRE_EQUAL(transparent.ColorFormats.size(), std::size_t(4));
 	SWIM_CHECK(transparent.ColorFormats[1] == ForwardPlusRenderer::IndirectFormat);
-	SWIM_REQUIRE_EQUAL(transparent.BlendAttachments.size(), std::size_t(2));
-	// The indirect target gets the same premultiplied blend: (0, 0, 0, alpha) scales it by the transmittance.
-	SWIM_CHECK(transparent.BlendAttachments[1].Enabled &&
-		transparent.BlendAttachments[1].DestinationColor == Rhi::BlendFactor::OneMinusSourceAlpha &&
-		transparent.BlendAttachments[1].SourceColor == Rhi::BlendFactor::One);
+	SWIM_CHECK(transparent.ColorFormats[2] == ForwardPlusRenderer::ReflectanceFormat);
+	SWIM_CHECK(transparent.ColorFormats[3] == ForwardPlusRenderer::SpecularFormat);
+	SWIM_REQUIRE_EQUAL(transparent.BlendAttachments.size(), std::size_t(4));
+	// The indirect, reflectance and specular targets get the same premultiplied blend:
+	// (0, 0, 0, alpha) scales them by the transmittance.
+	for (std::size_t i = 1; i < 4; ++i)
+	{
+		SWIM_CHECK(transparent.BlendAttachments[i].Enabled &&
+			transparent.BlendAttachments[i].DestinationColor == Rhi::BlendFactor::OneMinusSourceAlpha &&
+			transparent.BlendAttachments[i].SourceColor == Rhi::BlendFactor::One);
+	}
 	const auto& blend = transparent.BlendAttachments[0];
 	SWIM_CHECK(blend.Enabled);
 	SWIM_CHECK(blend.SourceColor == Rhi::BlendFactor::One && blend.DestinationColor == Rhi::BlendFactor::OneMinusSourceAlpha);
@@ -287,7 +295,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK(!resources.EnvironmentFallback);
 	SWIM_CHECK_EQUAL(resources.TransparentCapacity, ForwardWorld::TransparentCapacity);
 	SWIM_CHECK_EQUAL(resources.SortSize, 8u);
-	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, ForwardViewFlagEnvironment | ForwardViewFlagShadows);
+	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, ForwardViewFlagEnvironment | ForwardViewFlagShadows | ForwardViewFlagBrdfLut);
 	SWIM_CHECK(!resources.ShadowFallback);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.PrefilteredMipCount, 5u);
 	SWIM_CHECK_EQUAL(resources.ViewRecord.MaterialCount, 4u);
@@ -304,6 +312,10 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK(graph.GetDesc(resources.Indirect).PixelFormat == ForwardPlusRenderer::IndirectFormat);
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.Indirect).Extent.Width, ForwardWorld::Width);
 	SWIM_CHECK(resources.Normal != resources.Indirect && resources.Normal != resources.Velocity);
+	SWIM_CHECK(graph.GetDesc(resources.Reflectance).PixelFormat == ForwardPlusRenderer::ReflectanceFormat);
+	SWIM_CHECK(graph.GetDesc(resources.Specular).PixelFormat == ForwardPlusRenderer::SpecularFormat);
+	SWIM_CHECK_EQUAL(graph.GetDesc(resources.Specular).Extent.Height, ForwardWorld::Height);
+	SWIM_CHECK(resources.Reflectance != resources.Specular && resources.Reflectance != resources.Indirect);
 	world.fixture.device.Commands->clear();
 	world.fixture.executor->Execute(graph.Compile());
 	world.fixture.executor->Wait();
@@ -378,9 +390,12 @@ SWIM_TEST("Render.ForwardPlusRenderer", "FallbacksForMissingEnvironmentAndIndire
 	velocityDesc.PixelFormat = ForwardPlusRenderer::NormalFormat;
 	targets.Normal = graph.CreateTexture(velocityDesc);
 	targets.Indirect = graph.CreateTexture(velocityDesc);
+	targets.Reflectance = graph.CreateTexture(velocityDesc);
+	targets.Specular = graph.CreateTexture(velocityDesc);
 	const auto resources = renderer.Record(graph, frame, targets);
 	SWIM_CHECK(resources.Velocity == *targets.Velocity); // Supplied targets are used as they are.
 	SWIM_CHECK(resources.Normal == *targets.Normal && resources.Indirect == *targets.Indirect);
+	SWIM_CHECK(resources.Reflectance == *targets.Reflectance && resources.Specular == *targets.Specular);
 	SWIM_CHECK(resources.ViewRecord.Jitter[0] == 0.001f && resources.ViewRecord.Jitter[1] == -0.002f);
 	graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
 	SWIM_CHECK(resources.EnvironmentFallback);
@@ -493,6 +508,19 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RejectsIncompleteFramesAndMismatchedTar
 							  targets.Indirect = world.Targets(graph, 300).Color; // Not the grid's viewport.
 						  }),
 		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ForwardPlusFrame&, ForwardPlusTargets& targets)
+						  {
+							  targets.Reflectance = targets.ObjectId; // R32Float, not RGBA16Float.
+						  }),
+		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [&](RenderGraph& graph, ForwardPlusFrame&, ForwardPlusTargets& targets)
+						  {
+							  targets = world.Targets(graph);
+							  targets.Specular = world.Targets(graph, 300).Color; // Not the grid's viewport.
+						  }),
+		std::invalid_argument);
 
 	// Three material bins are not the Forward+ contract.
 	const VisibilityBinLayout three(std::array<std::uint32_t, 3>{ 4, 4, 4 }, 2);
@@ -502,4 +530,27 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RejectsIncompleteFramesAndMismatchedTar
 							  const_cast<VisibilityGraphResources*>(frame.Visibility)->Bins = &three;
 						  }),
 		std::invalid_argument);
+}
+
+SWIM_TEST("Render.ForwardPlusRenderer", "ABrdfLutWithoutAnEnvironmentStillFeedsTheReflectance")
+{
+	// Item 76: screen-space reflections need the specular reflectance even without IBL,
+	// so a LUT alone is bound and flagged, and only the cube is a stand-in.
+	ForwardWorld world;
+	const ForwardPlusRenderer renderer(world.fixture.device, world.Desc());
+	RenderGraph graph;
+	ForwardPlusFrame frame;
+	world.Import(graph, frame, false);
+	const auto lut = graph.ImportTexture(*world.brdfLut, Rhi::ResourceState::ShaderRead);
+	frame.BrdfLut = lut;
+	const auto targets = world.Targets(graph);
+	const auto resources = renderer.Record(graph, frame, targets);
+	graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
+	SWIM_CHECK(resources.EnvironmentFallback);
+	SWIM_CHECK_EQUAL(resources.ViewRecord.Flags, ForwardViewFlagBrdfLut);
+	world.fixture.device.Commands->clear();
+	world.fixture.executor->Execute(graph.Compile());
+	world.fixture.executor->Wait();
+	// Six cube faces and the shadow atlas; no LUT stand-in.
+	SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(7));
 }

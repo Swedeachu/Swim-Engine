@@ -118,7 +118,7 @@ Set `SWIM_PBR_GALLERY_DUMP=<directory>` when running the native smoke to write e
 | --- | --- |
 | `Render.Environment.Math` (9) | Face table round trips; solid angles sum to 4π; Hammersley stratification; GGX samples follow the normalized D; tangent frames; the split-sum matches brute-force directional albedo; lod mapping; rotation; SH orthonormality and exact convolution to band 2 |
 | `Render.Environment.CubeImage` (2) | Mip layout, box filter, nearest/trilinear rules, seamless edges and corners |
-| `Render.Environment.Sky/Prefilter/BrdfLut/Shading/Probe` (5) | Sky continuity and constants; prefilter preserves uniform radiance and converges to the brute-force GGX lobe; LUT texel mapping; furnace energy; `Shade` equivalence; lookup rotation, intensity and roughness lod |
+| `Render.Environment.Sky/Prefilter/BrdfLut/Shading/Probe` (6) | Sky continuity and constants; prefilter preserves uniform radiance and converges to the brute-force GGX lobe; LUT texel mapping; furnace energy; `Shade` equivalence; lookup rotation, intensity and roughness lod; `StandardPbr::EnvironmentSpecularWeight` × prefiltered radiance is exactly the specular part of the split-sum IBL (item 76, the reflectance screen-space reflections are weighted by) |
 | `Render.EnvironmentBuilder` (3) | Pass and dispatch structure, push constants per face and mip, view shapes (cube, 2D array, per-face 2D), targets, culling, contract violations |
 | `Render.PbrGallery` (1) | The CPU gallery meets the expectations; image dumps |
 | `ShaderCompiler.EnvironmentLayout` (2) | Compiled programs match their C++ contracts (it caught a `uint3` std430 padding bug before any GPU run) |

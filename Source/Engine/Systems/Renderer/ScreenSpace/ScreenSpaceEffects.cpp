@@ -68,12 +68,17 @@ namespace Swim::Render
 
 	ScreenSpaceEffects::ScreenSpaceEffects(ScreenSpaceEffectsDesc descInput) : desc(std::move(descInput))
 	{
+		const bool partialReflection = (desc.Reflection.Pipeline == nullptr) != (desc.Reflection.Layout == nullptr);
 		for (const auto* program : { &desc.AmbientOcclusion, &desc.Blur, &desc.Composite })
 		{
 			if (!program->Pipeline || !program->Layout)
 			{
 				throw std::invalid_argument(desc.DebugName + " needs the AO, blur and composite programs");
 			}
+		}
+		if (partialReflection)
+		{
+			throw std::invalid_argument(desc.DebugName + " reflection program needs both its pipeline and layout");
 		}
 	}
 
@@ -127,7 +132,26 @@ namespace Swim::Render
 		resources.ParamsRecord = BuildScreenSpaceParams(frame.Settings, frame.View, width, height, frame.NoiseFrame);
 		const bool ao = resources.ParamsRecord.AoEnabled != 0u;
 		const bool fog = resources.ParamsRecord.FogEnabled != 0u;
-		if (!ao && !fog)
+		const bool ssr = resources.ParamsRecord.SsrEnabled != 0u;
+		if (ssr)
+		{
+			if (!desc.Reflection.Pipeline)
+			{
+				throw std::invalid_argument(name + " reflections need the reflection program");
+			}
+			if (!frame.Reflectance || !frame.Specular)
+			{
+				throw std::invalid_argument(name + " reflections need the reflectance and specular inputs");
+			}
+			const auto reflectanceDesc = graph.GetDesc(*frame.Reflectance);
+			const auto specularDesc = graph.GetDesc(*frame.Specular);
+			if (!sameSize(reflectanceDesc) || reflectanceDesc.PixelFormat != Rhi::Format::RGBA16Float || !sameSize(specularDesc) ||
+				specularDesc.PixelFormat != Rhi::Format::RGBA16Float)
+			{
+				throw std::invalid_argument(name + " reflectance and specular must be color-sized sampled RGBA16Float textures");
+			}
+		}
+		if (!ao && !fog && !ssr)
 		{
 			resources.Output = frame.Color;
 			resources.Passthrough = true;
@@ -204,6 +228,62 @@ namespace Swim::Render
 				graph, name + " AO stand-in upload", std::as_bytes(std::span(&one, 1)), visibility, { 0, {}, {}, { 1, 1, 1 } });
 		}
 
+		// Reflections, or one 1x1 zero stand-in for the reflection, reflectance and specular.
+		GraphTexture reflection;
+		GraphTexture reflectance;
+		GraphTexture specular;
+		if (ssr)
+		{
+			auto reflectionDesc = OutputDesc(width, height);
+			const std::string reflectionName = name + " reflections";
+			reflectionDesc.DebugName = reflectionName;
+			reflection = graph.CreateTexture(reflectionDesc);
+			reflectance = *frame.Reflectance;
+			specular = *frame.Specular;
+			resources.Reflection = reflection;
+			const auto normal = frame.Normal;
+			const auto color = frame.Color;
+			const auto indirect = frame.Indirect;
+			resources.ReflectionPass = graph.AddPass(
+				name + " reflections", Rhi::QueueType::Compute,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Read(depth, S::ShaderRead);
+					b.Read(normal, S::ShaderRead);
+					b.Read(color, S::ShaderRead);
+					b.Read(indirect, S::ShaderRead);
+					b.Read(visibility, S::ShaderRead);
+					b.Read(params, S::ShaderRead);
+					b.Write(reflection, S::ShaderWrite);
+				},
+				[program = desc.Reflection, label = name + " reflections", depth, depthFormat, depthAspect, normal, color, indirect,
+					visibility, params, reflection, width, height](RenderCommandContext& c)
+				{
+					using B = ScreenSpaceReflectionBindings;
+					const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Depth, depth, depthFormat, depthAspect),
+						TextureWrite(c, B::Normal, normal, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Color, color, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Indirect, indirect, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Ao, visibility, Rhi::Format::R32Float), BufferWrite(c, B::Params, params),
+						TextureWrite(c, B::Output, reflection, Rhi::Format::RGBA16Float) };
+					Dispatch(c, program, label, writes, width, height);
+				});
+		}
+		else
+		{
+			// Never read by the composite (SsrEnabled = 0).
+			auto standInDesc = OutputDesc(1, 1);
+			standInDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+			const std::string standInName = name + " reflection stand-in";
+			standInDesc.DebugName = standInName;
+			reflection = graph.CreateTexture(standInDesc);
+			reflectance = reflection;
+			specular = reflection;
+			const std::array<std::uint16_t, 4> zero{};
+			AddTextureUpload(
+				graph, name + " reflection stand-in upload", std::as_bytes(std::span(zero)), reflection, { 0, {}, {}, { 1, 1, 1 } });
+		}
+
 		auto outputDesc = OutputDesc(width, height);
 		const std::string outputName = name + " output";
 		outputDesc.DebugName = outputName;
@@ -220,16 +300,25 @@ namespace Swim::Render
 				b.Read(visibility, S::ShaderRead);
 				b.Read(depth, S::ShaderRead);
 				b.Read(params, S::ShaderRead);
+				b.Read(reflection, S::ShaderRead);
+				if (ssr)
+				{
+					b.Read(reflectance, S::ShaderRead);
+					b.Read(specular, S::ShaderRead);
+				}
 				b.Write(output, S::ShaderWrite);
 			},
 			[program = desc.Composite, label = name + " composite", color, indirect, visibility, depth, depthFormat, depthAspect, params,
-				output, width, height](RenderCommandContext& c)
+				output, reflection, reflectance, specular, width, height](RenderCommandContext& c)
 			{
 				using B = ScreenSpaceCompositeBindings;
 				const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Color, color, Rhi::Format::RGBA16Float),
 					TextureWrite(c, B::Indirect, indirect, Rhi::Format::RGBA16Float),
 					TextureWrite(c, B::Ao, visibility, Rhi::Format::R32Float), TextureWrite(c, B::Depth, depth, depthFormat, depthAspect),
-					BufferWrite(c, B::Params, params), TextureWrite(c, B::Output, output, Rhi::Format::RGBA16Float) };
+					BufferWrite(c, B::Params, params), TextureWrite(c, B::Output, output, Rhi::Format::RGBA16Float),
+					TextureWrite(c, B::Reflection, reflection, Rhi::Format::RGBA16Float),
+					TextureWrite(c, B::Reflectance, reflectance, Rhi::Format::RGBA16Float),
+					TextureWrite(c, B::Specular, specular, Rhi::Format::RGBA16Float) };
 				Dispatch(c, program, label, writes, width, height);
 			});
 		return resources;

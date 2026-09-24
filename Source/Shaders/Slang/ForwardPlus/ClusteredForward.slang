@@ -154,6 +154,8 @@ struct ShadedPixel
 {
 	float4 Color;	 // Linear radiance, straight alpha.
 	float3 Indirect; // Ambient + IBL (ForwardPlus::IndirectRadiance), already in Color.
+	float3 Reflectance; // Split-sum specular reflectance (ForwardPlus::SpecularReflectance).
+	float3 Specular;	// Specular IBL (ForwardPlus::SpecularRadiance), part of Indirect.
 	float3 Normal;	 // World shading normal.
 	float Roughness; // Perceptual.
 	float4 Debug;
@@ -193,13 +195,28 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float viewDepth = -dot(grid.ViewRow2, float4(input.WorldPosition, 1.0));
 	const float3 direct = ForwardDirect(view, grid, surface, toCamera, input.WorldPosition, input.Position.x, input.Position.y, viewDepth);
 	float3 ibl = float3(0.0, 0.0, 0.0);
+	ShadedPixel pixel;
+	pixel.Specular = float3(0.0, 0.0, 0.0);
 	if ((view.Flags & ForwardViewFlagEnvironment) != 0)
 	{
 		const StandardPbrEnvironment environment = EnvironmentLookup(EnvironmentIrradiance, EnvironmentPrefiltered, view.PrefilteredMipCount,
 			EnvironmentBrdfLut, EnvironmentSampler, view.EnvironmentIntensity, view.EnvironmentRotation, surface, toCamera);
 		ibl = StandardPbrEvaluateEnvironment(surface, toCamera, environment);
+		pixel.Reflectance = StandardPbrEnvironmentSpecularWeight(surface, toCamera, environment.BrdfScale, environment.BrdfBias);
+		pixel.Specular = environment.Prefiltered * pixel.Reflectance;
 	}
-	ShadedPixel pixel;
+	else if ((view.Flags & ForwardViewFlagBrdfLut) != 0)
+	{
+		// A LUT without an environment (item 76): the reflectance screen-space reflections use.
+		const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
+		const float nDotV = clamp(dot(surface.Normal, toCamera), 1.0e-4, 1.0);
+		const float2 ab = EnvironmentBrdfLut.SampleLevel(EnvironmentSampler, float2(nDotV, roughness), 0.0).rg;
+		pixel.Reflectance = StandardPbrEnvironmentSpecularWeight(surface, toCamera, ab.x, ab.y);
+	}
+	else
+	{
+		pixel.Reflectance = float3(0.0, 0.0, 0.0);
+	}
 	pixel.Indirect = view.Ambient * surface.BaseColor * surface.Occlusion + ibl;
 	pixel.Color = float4(direct + pixel.Indirect + surface.Emissive, surface.Alpha);
 	pixel.Normal = surface.Normal;
@@ -220,6 +237,8 @@ struct TransparentOutput
 {
 	float4 Color : SV_Target0;	  // Premultiplied.
 	float4 Indirect : SV_Target1; // (0, 0, 0, alpha): the blend scales the opaque indirect radiance by the transmittance.
+	float4 Reflectance : SV_Target2; // The same for the specular reflectance and radiance (item 76, SSR).
+	float4 Specular : SV_Target3;
 };
 
 [shader("fragment")]
@@ -229,6 +248,8 @@ TransparentOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFront
 	TransparentOutput output;
 	output.Color = float4(pixel.Color.rgb * pixel.Color.a, pixel.Color.a);
 	output.Indirect = float4(0.0, 0.0, 0.0, pixel.Color.a);
+	output.Reflectance = output.Indirect;
+	output.Specular = output.Indirect;
 	return output;
 }
 #else
@@ -239,6 +260,8 @@ struct OpaqueOutput
 	float2 Velocity : SV_Target2; // ForwardPlus::MotionVector: UV of this frame minus UV of the previous.
 	float4 Normal : SV_Target3;	  // World shading normal, perceptual roughness (item 76).
 	float4 Indirect : SV_Target4; // Ambient + IBL radiance, 0 in debug views (item 76).
+	float4 Reflectance : SV_Target5; // Split-sum specular reflectance, 0 in debug views (item 76, SSR).
+	float4 Specular : SV_Target6;	 // Specular IBL radiance (part of Indirect), 0 in debug views.
 };
 
 [shader("fragment")]
@@ -253,6 +276,8 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 	output.Velocity = (now - before) * float2(0.5, -0.5);
 	output.Normal = float4(pixel.Normal, pixel.Roughness);
 	output.Indirect = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Indirect, 1.0);
+	output.Reflectance = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Reflectance, 1.0);
+	output.Specular = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Specular, 1.0);
 	return output;
 }
 #endif

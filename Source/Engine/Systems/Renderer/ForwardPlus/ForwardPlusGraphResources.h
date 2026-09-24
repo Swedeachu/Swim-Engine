@@ -18,6 +18,8 @@ namespace Swim::Render
 		GraphTexture Velocity;		// ForwardPlusTargets::Velocity, or the transient one used in its place.
 		GraphTexture Normal;		// ForwardPlusTargets::Normal, or the transient one.
 		GraphTexture Indirect;		// ForwardPlusTargets::Indirect, or the transient one.
+		GraphTexture Reflectance;	// ForwardPlusTargets::Reflectance, or the transient one.
+		GraphTexture Specular;		// ForwardPlusTargets::Specular, or the transient one.
 		GraphPass OpaquePass;
 		GraphPass SortPass;
 		GraphPass TransparentPass;

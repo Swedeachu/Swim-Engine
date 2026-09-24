@@ -9,9 +9,10 @@
 #include "Tests/Framework/Test.h"
 
 #if defined(SWIM_SCREEN_SPACE_AO_SPIRV_PATH) && defined(SWIM_SCREEN_SPACE_BLUR_SPIRV_PATH) &&                                              \
-	defined(SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_SKY_SPIRV_PATH) &&                                         \
-	defined(SWIM_ENVIRONMENT_DOWNSAMPLE_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_PREFILTER_SPIRV_PATH) &&                                   \
-	defined(SWIM_ENVIRONMENT_IRRADIANCE_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_BRDF_LUT_SPIRV_PATH)
+	defined(SWIM_SCREEN_SPACE_COMPOSITE_SPIRV_PATH) && defined(SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH) &&                                 \
+	defined(SWIM_ENVIRONMENT_SKY_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_DOWNSAMPLE_SPIRV_PATH) &&                                         \
+	defined(SWIM_ENVIRONMENT_PREFILTER_SPIRV_PATH) && defined(SWIM_ENVIRONMENT_IRRADIANCE_SPIRV_PATH) &&                                   \
+	defined(SWIM_ENVIRONMENT_BRDF_LUT_SPIRV_PATH)
 #include "Tests/Fixtures/VulkanEnvironmentFixture.h"
 #define SWIM_SCREEN_SPACE_SMOKE_AVAILABLE 1
 #endif
@@ -115,8 +116,9 @@ namespace
 #endif
 
 	// Critical-path item 76 on a real device. Ray-cast inputs (reverse-Z depth, world
-	// normals, HDR color and its indirect part) go through ScreenSpaceEffects (GTAO,
-	// the depth-aware blur, AO on indirect light and exponential height fog) and every
+	// normals, HDR color and its indirect, reflectance and specular parts) go through
+	// ScreenSpaceEffects (GTAO, the depth-aware blur, screen-space reflections, AO on
+	// indirect light, the reflection composite and exponential height fog) and every
 	// stage is read back and compared with ScreenSpace:: (ScreenSpaceReference.h), each
 	// from the GPU's own previous stage.
 	void RunScreenSpaceSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
@@ -145,6 +147,9 @@ namespace
 		desc.AmbientOcclusion = { ao.Pipeline.get(), ao.Layout.get(), ao.Space };
 		desc.Blur = { blur.Pipeline.get(), blur.Layout.get(), blur.Space };
 		desc.Composite = { composite.Pipeline.get(), composite.Layout.get(), composite.Space };
+		const auto reflection = Smoke::MakeCompute(
+			*device, SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH, SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH, "Screen-space reflections");
+		desc.Reflection = { reflection.Pipeline.get(), reflection.Layout.get(), reflection.Space };
 		desc.DebugName = "Screen space";
 		const ScreenSpaceEffects effects(desc);
 		RenderGraphExecutor executor(*device);
@@ -160,15 +165,19 @@ namespace
 			std::array<float, 2> JitterPixels;
 			std::uint32_t NoiseFrame;
 			bool Compare; // False: timing only.
+			float Roughness = 0.4f;
 		};
 
 		const auto frame = [&](const FrameSpec& spec)
 		{
 			auto view = Scene::View({ 4.0f, 2.5f, 7.0f }, { -1.0f, 0.5f, 0.0f }, float(spec.Width) / float(spec.Height));
 			view.Jitter = { spec.JitterPixels[0] * 2.0f / float(spec.Width), -spec.JitterPixels[1] * 2.0f / float(spec.Height) };
-			auto inputs = Scene::Render(scene, view, spec.Width, spec.Height, 0.4f);
-			// Color = direct (a sun) + indirect (ambient * albedo), albedo a 1 m checker.
+			auto inputs = Scene::Render(scene, view, spec.Width, spec.Height, spec.Roughness);
+			// Color = direct (a sun) + indirect (ambient * albedo), albedo a 1 m checker. The
+			// specular reflectance is 0.04 on the floor and 0.5 elsewhere (a sky-colored
+			// specular IBL of that weight is part of the indirect light).
 			Ss::ColorImage color(spec.Width, spec.Height), indirect(spec.Width, spec.Height);
+			Ss::ColorImage reflectance(spec.Width, spec.Height), specular(spec.Width, spec.Height);
 			for (std::size_t i = 0; i < inputs.Hits.size(); ++i)
 			{
 				const auto& hit = inputs.Hits[i];
@@ -180,17 +189,25 @@ namespace
 				const bool dark = (int(std::floor(hit.Position[0])) + int(std::floor(hit.Position[2]))) % 2 != 0;
 				const Ss::Float3 albedo = dark ? Ss::Float3{ 0.2f, 0.25f, 0.3f } : Ss::Float3{ 0.8f, 0.7f, 0.6f };
 				const float sun = std::max(0.0f, 0.5f * hit.Normal[0] + 0.8f * hit.Normal[1] + 0.33f * hit.Normal[2]) * 3.0f;
+				const float weight = hit.Normal[1] > 0.5f ? 0.04f : 0.5f;
+				const Ss::Float3 skyColor{ 0.3f, 0.5f, 0.9f };
 				for (int c = 0; c < 3; ++c)
 				{
-					indirect.Texels[i][c] = 0.6f * albedo[c];
+					reflectance.Texels[i][c] = weight;
+					specular.Texels[i][c] = weight * skyColor[c];
+					indirect.Texels[i][c] = 0.6f * albedo[c] + specular.Texels[i][c];
 					color.Texels[i][c] = sun * albedo[c] + indirect.Texels[i][c];
 				}
 				color.Texels[i][3] = 1.0f;
 				indirect.Texels[i][3] = 1.0f;
+				reflectance.Texels[i][3] = 1.0f;
+				specular.Texels[i][3] = 1.0f;
 			}
 			const auto colorHalves = ToHalves(color);
 			const auto indirectHalves = ToHalves(indirect);
 			const auto normalHalves = ToHalves(inputs.Normal);
+			const auto reflectanceHalves = ToHalves(reflectance);
+			const auto specularHalves = ToHalves(specular);
 
 			RenderGraph graph;
 			const Rhi::BufferTextureCopyRegion whole{ 0, {}, {}, { spec.Width, spec.Height, 1 } };
@@ -207,12 +224,16 @@ namespace
 			input.Color = texture(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment, "Screen-space color");
 			input.Indirect = texture(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment, "Screen-space indirect");
 			input.Normal = texture(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment, "Screen-space normal");
+			input.Reflectance = texture(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment, "Screen-space reflectance");
+			input.Specular = texture(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment, "Screen-space specular");
 			input.Depth = texture(spec.DepthFormat,
 				spec.DepthFormat == Rhi::Format::D32Float ? Rhi::TextureUsage::DepthStencilAttachment : Rhi::TextureUsage::ColorAttachment,
 				"Screen-space depth");
 			AddTextureUpload(graph, "Color upload", std::as_bytes(std::span(colorHalves)), input.Color, whole);
 			AddTextureUpload(graph, "Indirect upload", std::as_bytes(std::span(indirectHalves)), input.Indirect, whole);
 			AddTextureUpload(graph, "Normal upload", std::as_bytes(std::span(normalHalves)), input.Normal, whole);
+			AddTextureUpload(graph, "Reflectance upload", std::as_bytes(std::span(reflectanceHalves)), *input.Reflectance, whole);
+			AddTextureUpload(graph, "Specular upload", std::as_bytes(std::span(specularHalves)), *input.Specular, whole);
 			AddTextureUpload(graph, "Depth upload", std::as_bytes(std::span(inputs.Depth.Texels)), input.Depth, whole);
 			input.View = view;
 			input.Settings = spec.Settings;
@@ -225,11 +246,15 @@ namespace
 				std::printf("             [screen space %s] passthrough: nothing recorded\n", spec.Name);
 				return;
 			}
-			std::optional<GraphReadback> rawReadback, aoReadback;
+			std::optional<GraphReadback> rawReadback, aoReadback, reflectionReadback;
 			if (spec.Compare && resources.AmbientOcclusion)
 			{
 				rawReadback = AddTextureReadback(graph, "AO raw", *resources.AmbientOcclusionRaw, whole);
 				aoReadback = AddTextureReadback(graph, "AO", *resources.AmbientOcclusion, whole);
+			}
+			if (spec.Compare && resources.Reflection)
+			{
+				reflectionReadback = AddTextureReadback(graph, "Reflections", *resources.Reflection, whole);
 			}
 			const auto outputReadback = AddTextureReadback(graph, "Output", resources.Output, whole);
 			executor.Execute(graph.Compile());
@@ -241,6 +266,7 @@ namespace
 			};
 
 			std::uint32_t rawOutliers = 0, blurOutliers = 0, outputMismatches = 0, texels = spec.Width * spec.Height;
+			std::uint32_t reflectionOutliers = 0, reflectionHits = 0, cpuReflectionHits = 0;
 			float rawWorst = 0.0f, blurWorst = 0.0f, outputWorst = 0.0f;
 			double creaseSum = 0.0, openSum = 0.0;
 			std::uint32_t creaseCount = 0, openCount = 0;
@@ -288,7 +314,42 @@ namespace
 					SWIM_REQUIRE(creaseCount > 0u && openCount > 0u);
 					SWIM_CHECK(creaseSum / creaseCount + 0.2 < openSum / openCount); // The wall's base is darker than the open floor.
 				}
-				// 3. The composite over the GPU's visibility.
+				// 3. Reflections over the same inputs and the GPU's visibility (a march can step to a
+				// neighbouring pixel where the CPU and GPU round differently: a small outlier budget).
+				std::optional<Ss::ColorImage> gpuReflection;
+				if (reflectionReadback)
+				{
+					std::vector<std::uint16_t> reflectionHalvesRead(std::size_t(texels) * 4);
+					read(*reflectionReadback, reflectionHalvesRead);
+					gpuReflection.emplace(spec.Width, spec.Height);
+					for (std::size_t i = 0; i < gpuReflection->Texels.size(); ++i)
+					{
+						for (int c = 0; c < 4; ++c)
+						{
+							gpuReflection->Texels[i][c] = Smoke::HalfToFloat(reflectionHalvesRead[i * 4 + c]);
+						}
+					}
+					for (std::uint32_t y = 0; y < spec.Height; ++y)
+					{
+						for (std::uint32_t x = 0; x < spec.Width; ++x)
+						{
+							const auto expected =
+								Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, color, indirect, gpuAo ? &*gpuAo : nullptr, x, y);
+							const auto& actual = gpuReflection->At(x, y);
+							bool mismatch = false;
+							for (int c = 0; c < 4; ++c)
+							{
+								mismatch = mismatch || !Close(actual[c], expected[c], 3.0e-3f, 1.0e-3f);
+							}
+							reflectionOutliers += mismatch ? 1u : 0u;
+							reflectionHits += actual[3] > 0.0f ? 1u : 0u;
+							cpuReflectionHits += expected[3] > 0.0f ? 1u : 0u;
+						}
+					}
+					SWIM_CHECK(reflectionOutliers <= texels / 50);
+					SWIM_CHECK(reflectionHits > texels / 20); // The floor reflects the wall, pillar and slab.
+				}
+				// 4. The composite over the GPU's visibility and reflections.
 				std::vector<std::uint16_t> raw(std::size_t(texels) * 4);
 				read(outputReadback, raw);
 				for (std::uint32_t y = 0; y < spec.Height; ++y)
@@ -296,8 +357,13 @@ namespace
 					for (std::uint32_t x = 0; x < spec.Width; ++x)
 					{
 						const std::size_t i = std::size_t(y) * spec.Width + x;
-						const auto expected = Ss::CompositeTexel(
-							params, color.Texels[i], indirect.Texels[i], gpuAo ? gpuAo->At(x, y) : 1.0f, inputs.Depth.Texels[i], x, y);
+						Ss::ReflectionSample reflectionSample;
+						if (gpuReflection)
+						{
+							reflectionSample = { gpuReflection->At(x, y), reflectance.Texels[i], specular.Texels[i] };
+						}
+						const auto expected = Ss::CompositeTexel(params, color.Texels[i], indirect.Texels[i],
+							gpuAo ? gpuAo->At(x, y) : 1.0f, reflectionSample, inputs.Depth.Texels[i], x, y);
 						bool mismatch = false;
 						for (int c = 0; c < 4; ++c)
 						{
@@ -314,13 +380,18 @@ namespace
 						"%.3f; output worst relative %.2e (%u mismatches)\n",
 				spec.Name, spec.Width, spec.Height, double(rawWorst), rawOutliers, double(blurWorst), blurOutliers,
 				creaseCount ? creaseSum / creaseCount : 0.0, openCount ? openSum / openCount : 0.0, double(outputWorst), outputMismatches);
+			if (resources.Reflection && spec.Compare)
+			{
+				std::printf("             [screen space %s] reflections: %u GPU hits vs %u CPU hits, %u outliers\n", spec.Name,
+					reflectionHits, cpuReflectionHits, reflectionOutliers);
+			}
 			bool measured = false;
 			const double compositeMs = PassMilliseconds(timings, "Screen space composite", &measured);
 			if (measured)
 			{
-				std::printf("             [screen space %s] GPU: AO %.3f ms, blur %.3f ms, composite %.3f ms\n", spec.Name,
-					PassMilliseconds(timings, "Screen space AO") - PassMilliseconds(timings, "Screen space AO blur"),
-					PassMilliseconds(timings, "Screen space AO blur"), compositeMs);
+				std::printf("             [screen space %s] GPU: AO %.3f ms, blur %.3f ms, reflections %.3f ms, composite %.3f ms\n",
+					spec.Name, PassMilliseconds(timings, "Screen space AO") - PassMilliseconds(timings, "Screen space AO blur"),
+					PassMilliseconds(timings, "Screen space AO blur"), PassMilliseconds(timings, "Screen space reflections"), compositeMs);
 			}
 		};
 
@@ -353,9 +424,23 @@ namespace
 		off.AmbientOcclusion.Enabled = false;
 		frame({ "off", width, height, Rhi::Format::D32Float, off, { 0.0f, 0.0f }, 0, true });
 
+		// Reflections: alone, then with AO and fog on jittered R32Float depth.
+		ScreenSpaceSettings reflections;
+		reflections.AmbientOcclusion.Enabled = false;
+		reflections.Reflections.Enabled = true;
+		reflections.Reflections.Stride = 1.0f;
+		reflections.Reflections.MaxSteps = 128;
+		frame({ "reflections", width, height, Rhi::Format::D32Float, reflections, { 0.0f, 0.0f }, 0, true, 0.1f });
+		ScreenSpaceSettings everything = full;
+		everything.Reflections = reflections.Reflections;
+		everything.Reflections.RefineSteps = 6;
+		frame({ "ao + reflections + fog, jittered, r32f depth", width, height, Rhi::Format::R32Float, everything, { -0.22f, 0.35f }, 9,
+			true, 0.25f });
+
 		ScreenSpaceSettings timing = aoOnly;
 		timing.Fog.Enabled = true;
-		frame({ "1080p timing", 1920, 1080, Rhi::Format::D32Float, timing, { 0.0f, 0.0f }, 0, false });
+		timing.Reflections.Enabled = true;
+		frame({ "1080p timing", 1920, 1080, Rhi::Format::D32Float, timing, { 0.0f, 0.0f }, 0, false, 0.1f });
 		executor.Trim();
 #endif
 	}

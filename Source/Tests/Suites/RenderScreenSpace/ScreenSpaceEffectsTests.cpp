@@ -13,7 +13,7 @@ using namespace Swim::Render;
 
 namespace
 {
-	// Screen-space effects on the mock device: imported inputs and the three programs
+	// Screen-space effects on the mock device: imported inputs and the four programs
 	// with their reflected-style interfaces.
 	struct ScreenSpaceWorld
 	{
@@ -45,7 +45,15 @@ namespace
 				{ { ScreenSpaceCompositeBindings::Color, T::SampledTexture }, { ScreenSpaceCompositeBindings::Indirect, T::SampledTexture },
 					{ ScreenSpaceCompositeBindings::Ao, T::SampledTexture }, { ScreenSpaceCompositeBindings::Depth, T::SampledTexture },
 					{ ScreenSpaceCompositeBindings::Params, T::ReadOnlyStorageBuffer },
-					{ ScreenSpaceCompositeBindings::Output, T::StorageTexture } });
+					{ ScreenSpaceCompositeBindings::Output, T::StorageTexture },
+					{ ScreenSpaceCompositeBindings::Reflection, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::Reflectance, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::Specular, T::SampledTexture } });
+			using R = ScreenSpaceReflectionBindings;
+			schema(reflectionLayout,
+				{ { R::Depth, T::SampledTexture }, { R::Normal, T::SampledTexture }, { R::Color, T::SampledTexture },
+					{ R::Indirect, T::SampledTexture }, { R::Ao, T::SampledTexture }, { R::Params, T::ReadOnlyStorageBuffer },
+					{ R::Output, T::StorageTexture } });
 			const auto make = [&](Rhi::Format format, Rhi::TextureUsage usage)
 			{
 				Rhi::TextureDesc desc;
@@ -58,6 +66,8 @@ namespace
 			depth = make(Rhi::Format::D32Float, Rhi::TextureUsage::DepthStencilAttachment);
 			normal = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
 			indirect = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
+			reflectance = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
+			specular = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
 		}
 
 		ScreenSpaceEffectsDesc Desc()
@@ -66,6 +76,7 @@ namespace
 			desc.AmbientOcclusion = { &aoPipeline, &aoLayout, 0 };
 			desc.Blur = { &blurPipeline, &blurLayout, 0 };
 			desc.Composite = { &compositePipeline, &compositeLayout, 0 };
+			desc.Reflection = { &reflectionPipeline, &reflectionLayout, 0 };
 			desc.DebugName = "Test screen space";
 			return desc;
 		}
@@ -77,6 +88,8 @@ namespace
 			frame.Depth = graph.ImportTexture(*depth, Rhi::ResourceState::ShaderRead);
 			frame.Normal = graph.ImportTexture(*normal, Rhi::ResourceState::ShaderRead);
 			frame.Indirect = graph.ImportTexture(*indirect, Rhi::ResourceState::ShaderRead);
+			frame.Reflectance = graph.ImportTexture(*reflectance, Rhi::ResourceState::ShaderRead);
+			frame.Specular = graph.ImportTexture(*specular, Rhi::ResourceState::ShaderRead);
 			frame.View = Testing::ScreenSpaceScene::View({ 0, 2, 6 }, { 0, 0, 0 }, float(Width) / float(Height));
 			frame.Settings = settings;
 			frame.NoiseFrame = 3;
@@ -114,9 +127,9 @@ namespace
 
 		Testing::MockDevice device;
 		std::unique_ptr<RenderGraphExecutor> executor;
-		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout;
-		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline;
-		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect;
+		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout;
+		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline;
+		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular;
 	};
 } // namespace
 
@@ -177,8 +190,12 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEna
 		SWIM_CHECK(!resources.AmbientOcclusion && !resources.AmbientOcclusionPass && resources.CompositePass);
 		world.Run(graph, resources.Output);
 		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(1));
-		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(1));
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(2)); // The AO and reflection stand-ins.
 		SWIM_CHECK_EQUAL(world.Bound(C::Ao).GetTexture().GetDesc().Extent.Width, 1u);
+		// Reflections off: one 1x1 stand-in fills the reflection, reflectance and specular slots.
+		SWIM_CHECK_EQUAL(world.Bound(C::Reflection).GetTexture().GetDesc().Extent.Width, 1u);
+		SWIM_CHECK(&world.Bound(C::Reflectance).GetTexture() == &world.Bound(C::Reflection).GetTexture());
+		SWIM_CHECK(&world.Bound(C::Specular).GetTexture() == &world.Bound(C::Reflection).GetTexture());
 	}
 
 	// Everything off: nothing is recorded and the color passes through.
@@ -285,4 +302,107 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RejectsMissingProgramsAndInvalidInputs")
 							  f.View.Projection[14] = 0.0f;
 						  }),
 		std::invalid_argument);
+}
+
+SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheComposite")
+{
+	using C = ScreenSpaceCompositeBindings;
+	ScreenSpaceWorld world;
+	const ScreenSpaceEffects effects(world.Desc());
+
+	// AO and reflections: AO, blur, reflections, composite.
+	{
+		ScreenSpaceSettings settings;
+		settings.Reflections.Enabled = true;
+		RenderGraph graph;
+		const auto frame = world.Frame(graph, settings);
+		const auto resources = effects.Record(graph, frame);
+		SWIM_REQUIRE(resources.Reflection && resources.ReflectionPass);
+		SWIM_CHECK(graph.GetDesc(*resources.Reflection).PixelFormat == Rhi::Format::RGBA16Float);
+		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Height, ScreenSpaceWorld::Height);
+		SWIM_CHECK(resources.ParamsRecord.SsrEnabled == 1u && resources.ParamsRecord.SsrMaxSteps == 64u);
+		SWIM_CHECK(resources.ParamsRecord.SsrNearZ == -0.1f); // The fixture's near plane.
+		world.Run(graph, resources.Output);
+		const auto pipelines = world.Commands("BindComputePipeline");
+		SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(4));
+		SWIM_CHECK(pipelines[0].Source == &world.aoPipeline && pipelines[1].Source == &world.blurPipeline &&
+			pipelines[2].Source == &world.reflectionPipeline && pipelines[3].Source == &world.compositePipeline);
+		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(4));
+		SWIM_CHECK(&world.Bound(C::Reflectance).GetTexture() == world.reflectance.get());
+		SWIM_CHECK(&world.Bound(C::Specular).GetTexture() == world.specular.get());
+		SWIM_CHECK(world.Bound(C::Reflection).GetTexture().GetDesc().Extent.Width == ScreenSpaceWorld::Width);
+		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, C::Count);
+	}
+
+	// Reflections alone: the reflection pass reads the AO stand-in, then the composite.
+	{
+		ScreenSpaceSettings settings;
+		settings.AmbientOcclusion.Enabled = false;
+		settings.Reflections.Enabled = true;
+		RenderGraph graph;
+		const auto resources = effects.Record(graph, world.Frame(graph, settings));
+		SWIM_CHECK(!resources.Passthrough && !resources.AmbientOcclusionPass && resources.ReflectionPass);
+		world.Run(graph, resources.Output);
+		const auto pipelines = world.Commands("BindComputePipeline");
+		SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(2));
+		SWIM_CHECK(pipelines[0].Source == &world.reflectionPipeline && pipelines[1].Source == &world.compositePipeline);
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(1)); // The AO stand-in only.
+	}
+}
+
+SWIM_TEST("Render.ScreenSpaceEffects", "ReflectionsNeedTheirProgramAndInputs")
+{
+	ScreenSpaceWorld world;
+	ScreenSpaceSettings settings;
+	settings.Reflections.Enabled = true;
+
+	auto noReflection = world.Desc();
+	noReflection.Reflection = {};
+	const ScreenSpaceEffects withoutProgram(noReflection); // Fine while reflections stay off.
+	{
+		RenderGraph graph;
+		SWIM_CHECK_THROWS(withoutProgram.Record(graph, world.Frame(graph, settings)), std::invalid_argument);
+	}
+	auto half = world.Desc();
+	half.Reflection.Layout = nullptr;
+	SWIM_CHECK_THROWS(ScreenSpaceEffects(half), std::invalid_argument);
+
+	const ScreenSpaceEffects effects(world.Desc());
+	const auto attempt = [&](const std::function<void(RenderGraph&, ScreenSpaceFrame&)>& edit)
+	{
+		RenderGraph graph;
+		auto frame = world.Frame(graph, settings);
+		edit(graph, frame);
+		effects.Record(graph, frame);
+	};
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ScreenSpaceFrame& f)
+						  {
+							  f.Specular.reset();
+						  }),
+		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ScreenSpaceFrame& f)
+						  {
+							  f.Reflectance = f.Depth; // D32Float.
+						  }),
+		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ScreenSpaceFrame& f)
+						  {
+							  f.Settings.Reflections.MaxSteps = MaxReflectionSteps + 1;
+						  }),
+		std::invalid_argument);
+	SWIM_CHECK_THROWS(attempt(
+						  [](RenderGraph&, ScreenSpaceFrame& f)
+						  {
+							  f.Settings.Reflections.RoughnessFade = 0.9f; // Above MaxRoughness.
+						  }),
+		std::invalid_argument);
+	// A reflection-free frame never needs the inputs.
+	RenderGraph graph;
+	auto frame = world.Frame(graph);
+	frame.Reflectance.reset();
+	frame.Specular.reset();
+	SWIM_CHECK(!effects.Record(graph, frame).ReflectionPass);
 }

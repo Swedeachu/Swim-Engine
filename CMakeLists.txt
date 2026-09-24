@@ -525,7 +525,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
-	# Screen-space ambient occlusion and fog (item 76).
+	# Screen-space ambient occlusion, reflections and fog (item 76).
 	swim_add_slang_program(SwimScreenSpaceAo
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceAo.slang
 		PROFILE spirv_1_5
@@ -538,6 +538,37 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	)
 	swim_add_slang_program(SwimScreenSpaceComposite
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimScreenSpaceReflection
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflection.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	# GPU particles (item 77).
+	swim_add_slang_program(SwimParticleSimulate
+		SOURCE Source/Shaders/Slang/Particles/ParticleSimulate.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimParticleEmit
+		SOURCE Source/Shaders/Slang/Particles/ParticleEmit.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimParticleCompact
+		SOURCE Source/Shaders/Slang/Particles/ParticleCompact.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimParticleFinalize
+		SOURCE Source/Shaders/Slang/Particles/ParticleFinalize.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimParticleRender
+		SOURCE Source/Shaders/Slang/Particles/ParticleRender.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
@@ -597,6 +628,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimScreenSpaceAo_SPIRV}" "${SwimScreenSpaceAo_REFLECTION}"
 			"${SwimScreenSpaceBlur_SPIRV}" "${SwimScreenSpaceBlur_REFLECTION}"
 			"${SwimScreenSpaceComposite_SPIRV}" "${SwimScreenSpaceComposite_REFLECTION}"
+			"${SwimScreenSpaceReflection_SPIRV}" "${SwimScreenSpaceReflection_REFLECTION}"
+			"${SwimParticleSimulate_SPIRV}" "${SwimParticleSimulate_REFLECTION}"
+			"${SwimParticleEmit_SPIRV}" "${SwimParticleEmit_REFLECTION}"
+			"${SwimParticleCompact_SPIRV}" "${SwimParticleCompact_REFLECTION}"
+			"${SwimParticleFinalize_SPIRV}" "${SwimParticleFinalize_REFLECTION}"
+			"${SwimParticleRender_SPIRV}" "${SwimParticleRender_REFLECTION}"
 			"${SwimEnvironmentSky_SPIRV}" "${SwimEnvironmentSky_REFLECTION}"
 			"${SwimEnvironmentDownsample_SPIRV}" "${SwimEnvironmentDownsample_REFLECTION}"
 			"${SwimEnvironmentPrefilter_SPIRV}" "${SwimEnvironmentPrefilter_REFLECTION}"
@@ -661,6 +698,13 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/ScreenSpace/ScreenSpaceAo.slang
 			Source/Shaders/Slang/ScreenSpace/ScreenSpaceBlur.slang
 			Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflection.slang
+			Source/Shaders/Slang/Particles/ParticleRecords.slang
+			Source/Shaders/Slang/Particles/ParticleSimulate.slang
+			Source/Shaders/Slang/Particles/ParticleEmit.slang
+			Source/Shaders/Slang/Particles/ParticleCompact.slang
+			Source/Shaders/Slang/Particles/ParticleFinalize.slang
+			Source/Shaders/Slang/Particles/ParticleRender.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -671,7 +715,8 @@ endif()
 # image-based lighting (Environment/), the GPU light buffer (Lights/),
 # clustered light assignment (ClusteredLighting/), shadow maps (Shadows/),
 # Clustered Forward+ (ForwardPlus/), post-processing (PostProcess/), temporal
-# anti-aliasing (Temporal/), screen-space AO and fog (ScreenSpace/) and the asset
+# anti-aliasing (Temporal/), screen-space AO, reflections and fog (ScreenSpace/),
+# GPU particles (Particles/) and the asset
 # residency layer (Residency/, listed separately below) built on them. None of it
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
@@ -706,6 +751,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/
