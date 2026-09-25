@@ -236,8 +236,15 @@ function(swim_configure_tests)
 	# Text/UI suites cover shaping, atlas residency, retained layout and input; the libraries
 	# are private to SwimTests like every other module dependency.
 	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
-		swim_collect_test_suite_sources(SWIM_TEXT_SUITES Text UI)
-		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_TEXT_UI_SOURCES})
+		swim_collect_test_suite_sources(SWIM_TEXT_SUITES Text UI RenderUi)
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_TEXT_UI_SOURCES} ${SWIM_RENDER_UI_SOURCES})
+		if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+			# The Input -> UiDocument bridge needs the Input foundation sources, which
+			# only dependency-enabled builds compile into SwimTests.
+			swim_collect_test_suite_sources(SWIM_UI_INPUT_SUITES UiInput)
+			list(APPEND SWIM_TEXT_SUITES ${SWIM_UI_INPUT_SUITES})
+			list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_UI_INPUT_SOURCES})
+		endif()
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_TEXT_SUITES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::TextDependencies)
 	endif()
@@ -318,7 +325,8 @@ function(swim_configure_tests)
 	target_include_directories(SwimTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
 	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE
-			SWIM_TEXT_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf")
+			SWIM_TEXT_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf"
+			SWIM_TEXT_FALLBACK_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFallbackFixture.ttf")
 	endif()
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
@@ -450,6 +458,8 @@ function(swim_configure_tests)
 			SWIM_PARTICLE_RENDER_REFLECTION_PATH="${SwimParticleRender_REFLECTION}"
 			SWIM_SKINNING_SPIRV_PATH="${SwimSkinning_SPIRV}"
 			SWIM_SKINNING_REFLECTION_PATH="${SwimSkinning_REFLECTION}"
+			SWIM_UI_QUAD_SPIRV_PATH="${SwimUiQuad_SPIRV}"
+			SWIM_UI_QUAD_REFLECTION_PATH="${SwimUiQuad_REFLECTION}"
 		)
 	endif()
 

@@ -32,6 +32,12 @@ namespace Swim::Input
 		deferredMouseDelta = {};
 		textInput.clear();
 		deferredTextInput.clear();
+		keyPresses.clear();
+		deferredKeyPresses.clear();
+		textEditEvents.clear();
+		deferredTextEditEvents.clear();
+		textCompositionUpdated = false;
+		deferredTextCompositionUpdated = false;
 		textComposition.clear();
 		deferredTextComposition.clear();
 		textCompositionStart = 0;
@@ -65,6 +71,12 @@ namespace Swim::Input
 
 		textInput = std::move(deferredTextInput);
 		deferredTextInput.clear();
+		keyPresses = std::move(deferredKeyPresses);
+		deferredKeyPresses.clear();
+		textEditEvents = std::move(deferredTextEditEvents);
+		deferredTextEditEvents.clear();
+		textCompositionUpdated = deferredTextCompositionUpdated;
+		deferredTextCompositionUpdated = false;
 		textComposition = std::move(deferredTextComposition);
 		deferredTextComposition.clear();
 		textCompositionStart = deferredTextCompositionStart;
@@ -87,6 +99,11 @@ namespace Swim::Input
 				if (keyIndex > 0 && keyIndex < keyState.size())
 				{
 					keyState[keyIndex].Deferred = down;
+					if (down)
+					{
+						deferredKeyPresses.push_back(event.Key);
+						deferredTextEditEvents.push_back({ event.Key, {}, event.Repeat });
+					}
 				}
 
 				const size_t scanCodeIndex = ToIndex(event.PhysicalKey);
@@ -123,10 +140,12 @@ namespace Swim::Input
 				if (!event.Text.empty())
 				{
 					deferredTextInput.push_back(event.Text);
+					deferredTextEditEvents.push_back({ KeyCode::Unknown, event.Text, false });
 				}
 				break;
 
 			case InputEventType::TextEditing:
+				deferredTextCompositionUpdated = true;
 				deferredTextComposition = event.Text;
 				deferredTextCompositionStart = event.EditStart;
 				deferredTextCompositionLength = event.EditLength;
@@ -404,6 +423,12 @@ namespace Swim::Input
 		deferredMouseDelta = {};
 		textInput.clear();
 		deferredTextInput.clear();
+		keyPresses.clear();
+		deferredKeyPresses.clear();
+		textEditEvents.clear();
+		deferredTextEditEvents.clear();
+		textCompositionUpdated = false;
+		deferredTextCompositionUpdated = false;
 		textComposition.clear();
 		deferredTextComposition.clear();
 		textCompositionStart = 0;

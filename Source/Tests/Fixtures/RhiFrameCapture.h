@@ -284,7 +284,11 @@ namespace Swim::Testing
 		{
 			Capture({ "BindIndexBuffer", &buffer, nullptr, offset });
 		}
-		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override {}
+		// Draw: SourceOffset = vertex count, DestinationOffset = instance count, Size = first instance.
+		void Draw(std::uint32_t vertexCount, std::uint32_t instanceCount, std::uint32_t, std::uint32_t firstInstance) override
+		{
+			Capture({ "Draw", nullptr, nullptr, vertexCount, instanceCount, firstInstance });
+		}
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override {}
 		void DrawIndexedIndirect(Swim::Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t) override
 		{

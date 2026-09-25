@@ -580,6 +580,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Retained UI and text quads (item 79).
+	swim_add_slang_program(SwimUiQuad
+		SOURCE Source/Shaders/Slang/Ui/UiQuad.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	# GPU skinning and morph targets (item 78).
 	swim_add_slang_program(SwimSkinning
 		SOURCE Source/Shaders/Slang/Skinning/Skinning.slang
@@ -644,6 +650,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimScreenSpaceComposite_SPIRV}" "${SwimScreenSpaceComposite_REFLECTION}"
 			"${SwimScreenSpaceReflection_SPIRV}" "${SwimScreenSpaceReflection_REFLECTION}"
 			"${SwimSkinning_SPIRV}" "${SwimSkinning_REFLECTION}"
+			"${SwimUiQuad_SPIRV}" "${SwimUiQuad_REFLECTION}"
 			"${SwimParticleSimulate_SPIRV}" "${SwimParticleSimulate_REFLECTION}"
 			"${SwimParticleEmit_SPIRV}" "${SwimParticleEmit_REFLECTION}"
 			"${SwimParticleCompact_SPIRV}" "${SwimParticleCompact_REFLECTION}"
@@ -722,6 +729,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/Particles/ParticleRender.slang
 			Source/Shaders/Slang/Skinning/SkinningRecords.slang
 			Source/Shaders/Slang/Skinning/Skinning.slang
+			Source/Shaders/Slang/Ui/UiRecords.slang
+			Source/Shaders/Slang/Ui/UiQuad.slang
 	)
 	swim_set_solution_folder(SwimRhiSmokeShaders "${SWIM_SOLUTION_FOLDER_TESTS}")
 endif()
@@ -793,13 +802,26 @@ file(GLOB_RECURSE SWIM_ANIMATION_SOURCES
 
 # Item 79 text/UI runtime. Third-party headers stay in Text implementation
 # files; public contracts, UI layout and paint records use Swim types only.
+# The UI renderer (Renderer/UiRendering: graph pass, atlas residency, CPU
+# reference) consumes the UI paint output and glyph atlas pages, so it compiles
+# wherever the text/UI module does. Systems/UiInput adapts the Input snapshot.
 set(SWIM_TEXT_UI_SOURCES "")
+set(SWIM_RENDER_UI_SOURCES "")
+set(SWIM_UI_INPUT_SOURCES "")
 if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 	file(GLOB_RECURSE SWIM_TEXT_UI_SOURCES
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.h
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.cpp
 		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.h
+	)
+	file(GLOB_RECURSE SWIM_RENDER_UI_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.h
+	)
+	file(GLOB_RECURSE SWIM_UI_INPUT_SOURCES
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.cpp
+		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.h
 	)
 endif()
 
@@ -1028,7 +1050,7 @@ list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
 if(NOT SWIM_TEXT_DEPENDENCIES_AVAILABLE)
-	list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/(Text|UI)/")
+	list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/(Text|UI|UiInput|Renderer/UiRendering)/")
 endif()
 
 list(APPEND SWIM_ENGINE_SOURCES ${SWIM_PHYSICS_SOURCES})

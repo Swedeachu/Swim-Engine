@@ -11,6 +11,14 @@
 namespace Swim::Input
 {
 
+	// One key press (Text empty) or one committed text string, in event order.
+	struct TextEditEvent
+	{
+		Platform::KeyCode Key = Platform::KeyCode::Unknown;
+		std::string Text;
+		bool Repeat = false;
+	};
+
 	class InputSystem
 	{
 	public:
@@ -46,6 +54,15 @@ namespace Swim::Input
 		Platform::Extent2D GetWindowSize() const { return windowSize; }
 
 		const std::vector<std::string>& GetTextInput() const { return textInput; }
+		// Every key press of the frame in event order, including operating-system key
+		// repeats (IsKeyTriggered reports only the first press). For text editing.
+		const std::vector<Platform::KeyCode>& GetKeyPresses() const { return keyPresses; }
+		// Key presses and committed text interleaved in event order (typing "ab" and
+		// pressing Left in one frame must not move the caret before the text arrives).
+		const std::vector<TextEditEvent>& GetTextEditEvents() const { return textEditEvents; }
+		// True when the platform reported an IME composition update this frame; the
+		// composition (possibly empty, which ends it) is then GetTextComposition().
+		bool HasTextCompositionUpdate() const { return textCompositionUpdated; }
 		const std::string& GetTextComposition() const { return textComposition; }
 		int GetTextCompositionStart() const { return textCompositionStart; }
 		int GetTextCompositionLength() const { return textCompositionLength; }
@@ -105,6 +122,12 @@ namespace Swim::Input
 
 		std::vector<std::string> textInput;
 		std::vector<std::string> deferredTextInput;
+		std::vector<Platform::KeyCode> keyPresses;
+		std::vector<Platform::KeyCode> deferredKeyPresses;
+		std::vector<TextEditEvent> textEditEvents;
+		std::vector<TextEditEvent> deferredTextEditEvents;
+		bool textCompositionUpdated = false;
+		bool deferredTextCompositionUpdated = false;
 		std::string textComposition;
 		std::string deferredTextComposition;
 		int textCompositionStart = 0;

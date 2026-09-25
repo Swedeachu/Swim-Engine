@@ -1,8 +1,10 @@
 # Runtime text dependencies for Phase 20 (item 79): FreeType loads font faces,
 # metrics and outlines, HarfBuzz shapes Unicode runs, and msdfgen turns glyph
-# outlines into multi-channel signed distance fields for atlas pages.
+# outlines into multi-channel signed distance fields for atlas pages. SheenBidi
+# (bidi levels, script runs) and libunibreak (line, grapheme and word breaks)
+# segment paragraphs before shaping.
 #
-# All three are private implementation dependencies of the future text/UI
+# All of them are private implementation dependencies of the future text/UI
 # module. Nothing outside that module (and its tests) may include their headers;
 # public Swim text contracts expose Swim types only (architecture plan 4.1).
 #
@@ -92,6 +94,65 @@ CPMAddPackage(
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
+# Paragraph text (item 79, second checkpoint): SheenBidi implements the Unicode
+# Bidirectional Algorithm (UAX #9) and Unicode script itemization; libunibreak
+# implements line breaking (UAX #14), grapheme clusters and word boundaries
+# (UAX #29). Both are plain C without configuration, so, like HarfBuzz, Swim
+# compiles their documented source sets itself instead of running their builds
+# (SheenBidi's unity TU; libunibreak's Makefile.am library sources).
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/SheenBidi")
+CPMAddPackage(
+	NAME swim_sheenbidi_source
+	GITHUB_REPOSITORY Tehreer/SheenBidi
+	GIT_TAG v3.0.0
+	DOWNLOAD_ONLY YES
+	UPDATE_DISCONNECTED YES
+)
+set(SWIM_SHEENBIDI_SOURCE "${swim_sheenbidi_source_SOURCE_DIR}/Source/SheenBidi.c")
+if(NOT EXISTS "${SWIM_SHEENBIDI_SOURCE}")
+	message(FATAL_ERROR "SheenBidi v3.0.0 source is missing Source/SheenBidi.c" ${SWIM_TEXT_DEPENDENCY_HINT})
+endif()
+add_library(SwimSheenBidi STATIC EXCLUDE_FROM_ALL "${SWIM_SHEENBIDI_SOURCE}")
+target_include_directories(SwimSheenBidi SYSTEM PUBLIC "${swim_sheenbidi_source_SOURCE_DIR}/Headers")
+target_include_directories(SwimSheenBidi PRIVATE "${swim_sheenbidi_source_SOURCE_DIR}/Source")
+target_compile_definitions(SwimSheenBidi PRIVATE SB_CONFIG_UNITY)
+if(MSVC)
+	target_compile_options(SwimSheenBidi PRIVATE /utf-8 /W0)
+else()
+	target_compile_options(SwimSheenBidi PRIVATE -w)
+endif()
+set_property(TARGET SwimSheenBidi PROPERTY MSVC_RUNTIME_LIBRARY "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+swim_set_solution_folder(SwimSheenBidi "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/SheenBidi")
+unset(SWIM_SHEENBIDI_SOURCE)
+
+set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/libunibreak")
+CPMAddPackage(
+	NAME swim_unibreak_source
+	GITHUB_REPOSITORY adah1972/libunibreak
+	GIT_TAG libunibreak_8_0
+	DOWNLOAD_ONLY YES
+	UPDATE_DISCONNECTED YES
+)
+set(SWIM_UNIBREAK_SOURCES "")
+foreach(SWIM_UNIBREAK_FILE IN ITEMS unibreakbase.c unibreakdef.c linebreak.c linebreakdata.c linebreakdef.c
+		eastasianwidthdef.c emojidef.c graphemebreak.c wordbreak.c)
+	if(NOT EXISTS "${swim_unibreak_source_SOURCE_DIR}/src/${SWIM_UNIBREAK_FILE}")
+		message(FATAL_ERROR "libunibreak 8.0 source is missing src/${SWIM_UNIBREAK_FILE}" ${SWIM_TEXT_DEPENDENCY_HINT})
+	endif()
+	list(APPEND SWIM_UNIBREAK_SOURCES "${swim_unibreak_source_SOURCE_DIR}/src/${SWIM_UNIBREAK_FILE}")
+endforeach()
+add_library(SwimUnibreak STATIC EXCLUDE_FROM_ALL ${SWIM_UNIBREAK_SOURCES})
+target_include_directories(SwimUnibreak SYSTEM PUBLIC "${swim_unibreak_source_SOURCE_DIR}/src")
+if(MSVC)
+	target_compile_options(SwimUnibreak PRIVATE /utf-8 /W0)
+else()
+	target_compile_options(SwimUnibreak PRIVATE -w)
+endif()
+set_property(TARGET SwimUnibreak PROPERTY MSVC_RUNTIME_LIBRARY "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+swim_set_solution_folder(SwimUnibreak "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/libunibreak")
+unset(SWIM_UNIBREAK_SOURCES)
+unset(SWIM_UNIBREAK_FILE)
+
 set(CMAKE_FOLDER "${SWIM_SAVED_TEXT_CMAKE_FOLDER}")
 unset(SWIM_SAVED_TEXT_CMAKE_FOLDER)
 # msdfgen's CMakeLists sets the global PREDEFINED_TARGETS_FOLDER to "meta",
@@ -115,6 +176,8 @@ target_link_libraries(SwimTextDependencies INTERFACE
 	freetype
 	SwimHarfBuzz
 	msdfgen::msdfgen-core
+	SwimSheenBidi
+	SwimUnibreak
 )
 swim_set_solution_folder(SwimTextDependencies "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text")
 

@@ -26,6 +26,10 @@ namespace Swim::Platform
 
 		void StartTextInput(Window& window);
 		void StopTextInput(Window& window);
+		// Where the IME candidate/composition window should appear, in window coordinates
+		// (the focused text caret; UiDocument::GetTextInputRect divided by the pixel scale).
+		// cursor is the caret's horizontal offset inside the rectangle.
+		void SetTextInputArea(Window& window, int x, int y, int width, int height, int cursor = 0);
 		bool SetGamepadRumble(InputDeviceId device, float lowFrequency, float highFrequency, uint32_t durationMilliseconds);
 
 	private:

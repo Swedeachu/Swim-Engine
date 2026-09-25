@@ -129,6 +129,9 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 #if defined(SWIM_SKINNING_SPIRV_PATH)
 		{ "SwimSkinning", SWIM_SKINNING_SPIRV_PATH },
 #endif
+#if defined(SWIM_UI_QUAD_SPIRV_PATH)
+		{ "SwimUiQuad", SWIM_UI_QUAD_SPIRV_PATH },
+#endif
 	};
 
 	std::uint32_t total = 0;

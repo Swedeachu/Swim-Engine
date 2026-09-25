@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -59,6 +60,96 @@ namespace Swim::Text
 				}
 			}
 		};
+
+		// FreeType outline -> msdfgen shape (lines, conics, cubics), scaled from
+		// 26.6 font units, normalized and oriented.
+		msdfgen::Shape BuildShape(FT_Outline& outline, double scale)
+		{
+			OutlineBuilder builder;
+			builder.Scale = scale;
+			FT_Outline_Funcs callbacks{};
+			callbacks.move_to = [](const FT_Vector* to, void* user)
+			{
+				auto& b = *static_cast<OutlineBuilder*>(user);
+				return b.Apply(
+					[&]
+					{
+						b.Close();
+						b.Shape.addContour();
+						b.Current = b.Start = b.Point(to);
+					});
+			};
+			callbacks.line_to = [](const FT_Vector* to, void* user)
+			{
+				auto& b = *static_cast<OutlineBuilder*>(user);
+				return b.Apply(
+					[&]
+					{
+						b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(to)));
+						b.Current = b.Point(to);
+					});
+			};
+			callbacks.conic_to = [](const FT_Vector* control, const FT_Vector* to, void* user)
+			{
+				auto& b = *static_cast<OutlineBuilder*>(user);
+				return b.Apply(
+					[&]
+					{
+						b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(control), b.Point(to)));
+						b.Current = b.Point(to);
+					});
+			};
+			callbacks.cubic_to = [](const FT_Vector* first, const FT_Vector* second, const FT_Vector* to, void* user)
+			{
+				auto& b = *static_cast<OutlineBuilder*>(user);
+				return b.Apply(
+					[&]
+					{
+						b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(first), b.Point(second), b.Point(to)));
+						b.Current = b.Point(to);
+					});
+			};
+			const int error = FT_Outline_Decompose(&outline, &callbacks, &builder);
+			if (builder.Error)
+			{
+				std::rethrow_exception(builder.Error);
+			}
+			if (error != 0)
+			{
+				throw std::runtime_error("Unable to decompose glyph outline");
+			}
+			builder.Close();
+			builder.Shape.normalize();
+			builder.Shape.orientContours();
+			if (!builder.Shape.validate())
+			{
+				throw std::runtime_error("Invalid MSDF outline");
+			}
+			return std::move(builder.Shape);
+		}
+
+		// msdfgen's bottom-up float bitmap -> top-down RGB8 UNORM distances.
+		std::vector<std::uint8_t> EncodeTopDown(const msdfgen::Bitmap<float, 3>& bitmap, std::uint32_t width, std::uint32_t height)
+		{
+			std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 3);
+			for (std::uint32_t y = 0; y < height; ++y)
+			{
+				for (std::uint32_t x = 0; x < width; ++x)
+				{
+					const float* sample = bitmap(static_cast<int>(x), static_cast<int>(height - y - 1));
+					for (std::uint32_t c = 0; c < 3; ++c)
+					{
+						if (!std::isfinite(sample[c]))
+						{
+							throw std::runtime_error("MSDF generation produced a non-finite distance");
+						}
+						pixels[(static_cast<std::size_t>(y) * width + x) * 3 + c] =
+							static_cast<std::uint8_t>(std::lround(std::clamp(sample[c], 0.0f, 1.0f) * 255.0f));
+					}
+				}
+			}
+			return pixels;
+		}
 	} // namespace
 
 	struct FontFace::Impl
@@ -164,10 +255,14 @@ namespace Swim::Text
 		}
 		hb_buffer_add_utf8(buffer.get(), utf8.empty() ? "" : utf8.data(), static_cast<int>(utf8.size()), 0, static_cast<int>(utf8.size()));
 		hb_buffer_guess_segment_properties(buffer.get());
-		const hb_feature_t features[] = { { HB_TAG('k', 'e', 'r', 'n'), options.Kerning ? 1u : 0u, 0, HB_FEATURE_GLOBAL_END },
-			{ HB_TAG('l', 'i', 'g', 'a'), options.Ligatures ? 1u : 0u, 0, HB_FEATURE_GLOBAL_END },
-			{ HB_TAG('c', 'l', 'i', 'g'), options.Ligatures ? 1u : 0u, 0, HB_FEATURE_GLOBAL_END } };
-		hb_shape(impl->Font, buffer.get(), features, 3);
+		const unsigned kerning = options.Kerning ? 1u : 0u;
+		const unsigned ligatures = options.Ligatures ? 1u : 0u;
+		const hb_feature_t features[] = {
+			{ HB_TAG('k', 'e', 'r', 'n'), kerning, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+			{ HB_TAG('l', 'i', 'g', 'a'), ligatures, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+			{ HB_TAG('c', 'l', 'i', 'g'), ligatures, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+		};
+		hb_shape(impl->Font, buffer.get(), features, static_cast<unsigned>(std::size(features)));
 		if (!hb_buffer_allocation_successful(buffer.get()))
 		{
 			throw std::bad_alloc();
@@ -191,85 +286,31 @@ namespace Swim::Text
 
 	FontFace::GlyphBitmap FontFace::Rasterize(std::uint32_t glyph, float emSize, float range, std::uint32_t maxDimension) const
 	{
-		std::lock_guard lock(impl->Mutex);
-		if (glyph >= static_cast<std::uint32_t>(impl->Face->num_glyphs))
-		{
-			throw std::out_of_range("Glyph index is outside the font");
-		}
-		// Size at units-per-em without hinting also preserves fractional coordinates
-		// in variable fonts, unlike FT_LOAD_NO_SCALE's integer font units.
-		if (FT_Set_Char_Size(impl->Face, 0, impl->Face->units_per_EM * 64L, 72, 72) != 0 ||
-			FT_Load_Glyph(impl->Face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0 ||
-			impl->Face->glyph->format != FT_GLYPH_FORMAT_OUTLINE)
-		{
-			throw std::runtime_error("Unable to load glyph outline");
-		}
 		GlyphBitmap result;
-		if (impl->Face->glyph->outline.n_points == 0)
+		msdfgen::Shape shape;
 		{
-			return result; // Spaces advance but consume no atlas texels.
+			// FreeType's glyph slot is per face: only outline extraction is serialized.
+			// Distance-field generation below runs concurrently (GlyphAtlas::Prewarm).
+			std::lock_guard lock(impl->Mutex);
+			if (glyph >= static_cast<std::uint32_t>(impl->Face->num_glyphs))
+			{
+				throw std::out_of_range("Glyph index is outside the font");
+			}
+			// Size at units-per-em without hinting also preserves fractional coordinates
+			// in variable fonts, unlike FT_LOAD_NO_SCALE's integer font units.
+			if (FT_Set_Char_Size(impl->Face, 0, impl->Face->units_per_EM * 64L, 72, 72) != 0 ||
+				FT_Load_Glyph(impl->Face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0 ||
+				impl->Face->glyph->format != FT_GLYPH_FORMAT_OUTLINE)
+			{
+				throw std::runtime_error("Unable to load glyph outline");
+			}
+			if (impl->Face->glyph->outline.n_points == 0)
+			{
+				return result; // Spaces advance but consume no atlas texels.
+			}
+			shape = BuildShape(impl->Face->glyph->outline, static_cast<double>(emSize) / (64.0 * impl->Face->units_per_EM));
 		}
-		OutlineBuilder builder;
-		builder.Scale = static_cast<double>(emSize) / (64.0 * impl->Face->units_per_EM);
-		FT_Outline_Funcs callbacks{};
-		callbacks.move_to = [](const FT_Vector* to, void* user)
-		{
-			auto& b = *static_cast<OutlineBuilder*>(user);
-			return b.Apply(
-				[&]
-				{
-					b.Close();
-					b.Shape.addContour();
-					b.Current = b.Start = b.Point(to);
-				});
-		};
-		callbacks.line_to = [](const FT_Vector* to, void* user)
-		{
-			auto& b = *static_cast<OutlineBuilder*>(user);
-			return b.Apply(
-				[&]
-				{
-					b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(to)));
-					b.Current = b.Point(to);
-				});
-		};
-		callbacks.conic_to = [](const FT_Vector* control, const FT_Vector* to, void* user)
-		{
-			auto& b = *static_cast<OutlineBuilder*>(user);
-			return b.Apply(
-				[&]
-				{
-					b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(control), b.Point(to)));
-					b.Current = b.Point(to);
-				});
-		};
-		callbacks.cubic_to = [](const FT_Vector* first, const FT_Vector* second, const FT_Vector* to, void* user)
-		{
-			auto& b = *static_cast<OutlineBuilder*>(user);
-			return b.Apply(
-				[&]
-				{
-					b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(first), b.Point(second), b.Point(to)));
-					b.Current = b.Point(to);
-				});
-		};
-		const int error = FT_Outline_Decompose(&impl->Face->glyph->outline, &callbacks, &builder);
-		if (builder.Error)
-		{
-			std::rethrow_exception(builder.Error);
-		}
-		if (error != 0)
-		{
-			throw std::runtime_error("Unable to decompose glyph outline");
-		}
-		builder.Close();
-		builder.Shape.normalize();
-		builder.Shape.orientContours();
-		if (!builder.Shape.validate())
-		{
-			throw std::runtime_error("Invalid MSDF outline");
-		}
-		const auto bounds = builder.Shape.getBounds();
+		const auto bounds = shape.getBounds();
 		const double padding = std::ceil(range * 0.5) + 1.0;
 		const double left = std::floor(bounds.l - padding);
 		const double bottom = std::floor(bounds.b - padding);
@@ -284,28 +325,12 @@ namespace Swim::Text
 		result.Height = static_cast<std::uint32_t>(top - bottom);
 		result.Left = static_cast<float>(left);
 		result.Top = static_cast<float>(top);
-		msdfgen::edgeColoringSimple(builder.Shape, 3.0);
+		msdfgen::edgeColoringSimple(shape, 3.0);
 		msdfgen::Bitmap<float, 3> bitmap(static_cast<int>(result.Width), static_cast<int>(result.Height));
-		msdfgen::generateMSDF(bitmap, builder.Shape,
-			msdfgen::SDFTransformation(msdfgen::Projection(msdfgen::Vector2(1.0), msdfgen::Vector2(-left, -bottom)),
-				msdfgen::DistanceMapping(msdfgen::Range(range))));
-		result.Pixels.resize(static_cast<std::size_t>(result.Width) * result.Height * 3);
-		for (std::uint32_t y = 0; y < result.Height; ++y)
-		{
-			for (std::uint32_t x = 0; x < result.Width; ++x)
-			{
-				const float* sample = bitmap(static_cast<int>(x), static_cast<int>(result.Height - y - 1));
-				for (std::uint32_t c = 0; c < 3; ++c)
-				{
-					if (!std::isfinite(sample[c]))
-					{
-						throw std::runtime_error("MSDF generation produced a non-finite distance");
-					}
-					result.Pixels[(static_cast<std::size_t>(y) * result.Width + x) * 3 + c] =
-						static_cast<std::uint8_t>(std::lround(std::clamp(sample[c], 0.0f, 1.0f) * 255.0f));
-				}
-			}
-		}
+		const msdfgen::SDFTransformation transformation(
+			msdfgen::Projection(msdfgen::Vector2(1.0), msdfgen::Vector2(-left, -bottom)), msdfgen::DistanceMapping(msdfgen::Range(range)));
+		msdfgen::generateMSDF(bitmap, shape, transformation);
+		result.Pixels = EncodeTopDown(bitmap, result.Width, result.Height);
 		return result;
 	}
 } // namespace Swim::Text

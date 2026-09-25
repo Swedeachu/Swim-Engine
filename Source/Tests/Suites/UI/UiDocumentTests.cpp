@@ -257,7 +257,7 @@ SWIM_TEST("UI.Text", "MeasuresHardLinesAndProducesCachedGlyphQuads")
 	ui.SetText(label, font, "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85", 24);
 	ui.Layout({ 400, 300 });
 	SWIM_CHECK_EQUAL(ui.Paint(atlas).size(), 3u);
-	ui.SetText(label, {}, {}, 24);
+	ui.SetText(label, std::shared_ptr<const Swim::Text::FontFace>{}, {}, 24);
 	ui.Layout({ 400, 300 });
 	SWIM_CHECK(ui.Paint(atlas).empty());
 	SWIM_CHECK_EQUAL(ui.GetBounds(label).Height, 0.0f);

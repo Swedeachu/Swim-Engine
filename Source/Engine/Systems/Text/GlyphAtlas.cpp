@@ -2,16 +2,28 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <mutex>
 #include <stdexcept>
 
 namespace Swim::Text
 {
+	namespace
+	{
+		constexpr std::uint64_t MaxAtlasBytes = 256ull * 1024 * 1024;
+
+		bool InRange(float value, float low, float high)
+		{
+			return std::isfinite(value) && value >= low && value <= high;
+		}
+	} // namespace
+
 	GlyphAtlas::GlyphAtlas(const GlyphAtlasDesc& description) : desc(description)
 	{
-		if (desc.PageSize < 16 || desc.PageSize > 4096 || desc.MaxPages == 0 || desc.MaxPages > 256 || !std::isfinite(desc.EmSize) ||
-			desc.EmSize < 4.0f || desc.EmSize > 512.0f || !std::isfinite(desc.DistanceRange) || desc.DistanceRange < 1.0f ||
-			desc.DistanceRange > 32.0f ||
-			static_cast<std::uint64_t>(desc.PageSize) * desc.PageSize * 3 * desc.MaxPages > 256u * 1024u * 1024u)
+		const std::uint64_t pageBytes = static_cast<std::uint64_t>(desc.PageSize) * desc.PageSize * 3;
+		const bool valid = desc.PageSize >= 16 && desc.PageSize <= 4096 && desc.MaxPages >= 1 && desc.MaxPages <= 256 &&
+			InRange(desc.EmSize, 4.0f, 512.0f) && InRange(desc.DistanceRange, 1.0f, 32.0f) && pageBytes * desc.MaxPages <= MaxAtlasBytes;
+		if (!valid)
 		{
 			throw std::invalid_argument("Invalid glyph atlas configuration (256 MiB maximum)");
 		}
@@ -33,7 +45,72 @@ namespace Swim::Text
 		{
 			return found->second.Glyph;
 		}
-		const auto bitmap = face->Rasterize(glyph, desc.EmSize, desc.DistanceRange, desc.PageSize - 2);
+		return Insert(face, glyph, face->Rasterize(glyph, desc.EmSize, desc.DistanceRange, desc.PageSize - 2));
+	}
+
+	bool GlyphAtlas::Contains(const FontFace& face, std::uint32_t glyph) const
+	{
+		return glyphs.contains(Key{ &face, glyph });
+	}
+
+	std::size_t GlyphAtlas::Prewarm(
+		const std::shared_ptr<const FontFace>& face, std::span<const std::uint32_t> requested, const ParallelFor& parallelFor)
+	{
+		if (!face)
+		{
+			throw std::invalid_argument("Glyph atlas needs a font face");
+		}
+		std::vector<std::uint32_t> missing;
+		for (const auto glyph : requested)
+		{
+			if (!Contains(*face, glyph) && std::find(missing.begin(), missing.end(), glyph) == missing.end())
+			{
+				missing.push_back(glyph);
+			}
+		}
+		std::vector<FontFace::GlyphBitmap> bitmaps(missing.size());
+		std::exception_ptr failure;
+		std::mutex failureMutex;
+		const auto rasterize = [&](std::size_t index)
+		{
+			try
+			{
+				bitmaps[index] = face->Rasterize(missing[index], desc.EmSize, desc.DistanceRange, desc.PageSize - 2);
+			}
+			catch (...)
+			{
+				std::lock_guard lock(failureMutex);
+				if (!failure)
+				{
+					failure = std::current_exception();
+				}
+			}
+		};
+		if (parallelFor && missing.size() > 1)
+		{
+			parallelFor(missing.size(), rasterize);
+		}
+		else
+		{
+			for (std::size_t index = 0; index < missing.size(); ++index)
+			{
+				rasterize(index);
+			}
+		}
+		if (failure)
+		{
+			std::rethrow_exception(failure);
+		}
+		for (std::size_t index = 0; index < missing.size(); ++index)
+		{
+			Insert(face, missing[index], bitmaps[index]);
+		}
+		return missing.size();
+	}
+
+	AtlasGlyph GlyphAtlas::Insert(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph, const FontFace::GlyphBitmap& bitmap)
+	{
+		const Key key{ face.get(), glyph };
 		AtlasGlyph result;
 		result.Width = bitmap.Width;
 		result.Height = bitmap.Height;
@@ -85,8 +162,9 @@ namespace Swim::Text
 		result.Y = y;
 		try
 		{
-			// Insert before committing the shelf or writing texels; allocation failure
+			// Allocate before committing the shelf or writing texels; allocation failure
 			// leaves all existing entries, revisions and packing positions unchanged.
+			pages[pageIndex].Writes.reserve(pages[pageIndex].Writes.size() + 1);
 			glyphs.emplace(key, Entry{ face, result });
 		}
 		catch (...)
@@ -106,6 +184,7 @@ namespace Swim::Text
 		page.X = x + bitmap.Width + 1;
 		page.Y = y;
 		page.RowHeight = std::max(rowHeight, bitmap.Height);
+		page.Writes.push_back({ y, bitmap.Height });
 		++page.Revision;
 		return result;
 	}
@@ -114,5 +193,22 @@ namespace Swim::Text
 	{
 		const auto& page = pages.at(index);
 		return { desc.PageSize, page.Revision, page.Pixels };
+	}
+
+	AtlasRowSpan GlyphAtlas::GetChangedRows(std::uint32_t index, std::uint64_t sinceRevision) const
+	{
+		const auto& page = pages.at(index);
+		if (sinceRevision > page.Revision)
+		{
+			throw std::out_of_range("Glyph atlas page has not reached that revision");
+		}
+		std::uint32_t top = desc.PageSize;
+		std::uint32_t bottom = 0;
+		for (auto write = page.Writes.begin() + static_cast<std::ptrdiff_t>(sinceRevision); write != page.Writes.end(); ++write)
+		{
+			top = std::min(top, write->Y);
+			bottom = std::max(bottom, write->Y + write->Height);
+		}
+		return top < bottom ? AtlasRowSpan{ top, bottom - top } : AtlasRowSpan{};
 	}
 } // namespace Swim::Text

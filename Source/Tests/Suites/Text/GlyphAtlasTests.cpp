@@ -159,3 +159,39 @@ SWIM_TEST("Text.Atlas", "DistanceSignsAndTopDownOrientationMatchFreeTypeCoverage
 	SWIM_CHECK(compared > 1500);
 	SWIM_CHECK_MESSAGE(mismatches * 100 < compared, "MSDF sign/orientation must agree with over 99% of non-edge FreeType samples");
 }
+
+SWIM_TEST("Text.Atlas", "ChangedRowsCoverEveryWriteSinceARevision")
+{
+	const auto font = LoadTextFontFixture();
+	GlyphAtlas atlas({ 128, 4, 24, 4 });
+	const auto first = atlas.Get(font, font->GetGlyph(U'H'));
+	SWIM_REQUIRE_EQUAL(first.Page, 0u);
+	SWIM_CHECK(atlas.GetChangedRows(0, 0) == (AtlasRowSpan{ first.Y, first.Height }));
+	SWIM_CHECK(atlas.GetChangedRows(0, 1) == AtlasRowSpan{});
+
+	// Fill the first shelf and start the next: a consumer at revision 1 needs both bands.
+	std::uint32_t lowest = first.Y;
+	std::uint32_t highest = first.Y + first.Height;
+	for (char32_t c = U'a'; c <= U'z'; ++c)
+	{
+		const auto glyph = atlas.Get(font, font->GetGlyph(c));
+		if (glyph.Page == 0)
+		{
+			lowest = std::min(lowest, glyph.Y);
+			highest = std::max(highest, glyph.Y + glyph.Height);
+		}
+	}
+	const auto page = atlas.GetPage(0);
+	SWIM_CHECK(page.Revision > 2);
+	const auto since = atlas.GetChangedRows(0, 1);
+	SWIM_CHECK(since.Y <= lowest);
+	SWIM_CHECK(since.Y + since.Height >= highest);
+	SWIM_CHECK(since.Y + since.Height <= page.Size);
+	SWIM_CHECK(atlas.GetChangedRows(0, page.Revision) == AtlasRowSpan{});
+	SWIM_CHECK_THROWS(atlas.GetChangedRows(0, page.Revision + 1), std::out_of_range);
+	SWIM_CHECK_THROWS(atlas.GetChangedRows(atlas.GetPageCount(), 0), std::out_of_range);
+	// Cache hits and whitespace change nothing.
+	atlas.Get(font, font->GetGlyph(U'H'));
+	atlas.Get(font, font->GetGlyph(U' '));
+	SWIM_CHECK_EQUAL(atlas.GetPage(0).Revision, page.Revision);
+}

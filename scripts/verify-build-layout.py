@@ -1260,6 +1260,14 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
         "src/harfbuzz.cc",
         "GITHUB_REPOSITORY Chlumsky/msdfgen",
         "GIT_TAG v1.13",
+        "GITHUB_REPOSITORY Tehreer/SheenBidi",
+        "GIT_TAG v3.0.0",
+        "Source/SheenBidi.c",
+        "SB_CONFIG_UNITY",
+        "GITHUB_REPOSITORY adah1972/libunibreak",
+        "GIT_TAG libunibreak_8_0",
+        "add_library(SwimSheenBidi STATIC",
+        "add_library(SwimUnibreak STATIC",
         'set(MSDFGEN_CORE_ONLY ON CACHE BOOL "" FORCE)',
         'PROPERTY MSVC_RUNTIME_LIBRARY "${CMAKE_MSVC_RUNTIME_LIBRARY}"',
         'set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")',
@@ -1268,7 +1276,7 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
     ):
         if fragment not in dependency_text:
             fail(f"Phase 20 text dependency contract is missing: {fragment}", failures)
-    if dependency_text.count("UPDATE_DISCONNECTED YES") < 3:
+    if dependency_text.count("UPDATE_DISCONNECTED YES") < 5:
         fail("Phase 20 text dependencies must all be UPDATE_DISCONNECTED", failures)
 
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
@@ -1278,7 +1286,9 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
         fail("SwimTests must link Swim::TextDependencies privately for the Text suites", failures)
     check_suite_is_compiled("Text", "TextDependencyTests.cpp", failures)
 
-    for group, name in (("Text", "FontFaceTests.cpp"), ("Text", "GlyphAtlasTests.cpp"), ("UI", "UiDocumentTests.cpp")):
+    for group, name in (("Text", "FontFaceTests.cpp"), ("Text", "GlyphAtlasTests.cpp"), ("UI", "UiDocumentTests.cpp"),
+                        ("Text", "TextSegmentationTests.cpp"), ("Text", "TextLayoutTests.cpp"), ("UI", "UiLayoutFlexTests.cpp"),
+                        ("UI", "UiTextEditTests.cpp")):
         check_suite_is_compiled(group, name, failures)
     for fragment in ("SWIM_TEXT_UI_SOURCES", "target_link_libraries(SwimEngine PRIVATE Swim::TextDependencies)"):
         if fragment not in cmake_text:
@@ -1299,7 +1309,8 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
                 if forbidden in content:
                     fail(f"text/UI dependency boundary violated: {path.relative_to(ROOT)} ({forbidden})", failures)
             if path.suffix == ".h":
-                for forbidden in ("ft2build.h", "FT_FREETYPE_H", "<freetype/", "<hb", "<msdfgen", "FT_Face", "hb_font_t", "msdfgen::"):
+                for forbidden in ("ft2build.h", "FT_FREETYPE_H", "<freetype/", "<hb", "<msdfgen", "FT_Face", "hb_font_t", "msdfgen::",
+                                  "<SheenBidi/", "SBParagraphRef", "<linebreak.h>", "<graphemebreak.h>", "<wordbreak.h>"):
                     if forbidden in content:
                         fail(f"text implementation type leaked into public header: {path.relative_to(ROOT)} ({forbidden})", failures)
 
@@ -1309,7 +1320,8 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
         ROOT / "Source" / "Engine" / "Systems" / "UI",
         ROOT / "Source" / "Tests" / "Suites" / "Text",
     )
-    library_includes = ("<ft2build.h>", "FT_FREETYPE_H", "<freetype/", "<hb.h>", "<hb-", "<msdfgen")
+    library_includes = ("<ft2build.h>", "FT_FREETYPE_H", "<freetype/", "<hb.h>", "<hb-", "<msdfgen", "<SheenBidi/",
+                        "<linebreak.h>", "<graphemebreak.h>", "<wordbreak.h>", "<unibreak")
     for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game", ROOT / "Source" / "Tools", ROOT / "Source" / "Tests"):
         if not source_root.exists():
             continue
@@ -1321,6 +1333,62 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
             text = path.read_text(encoding="utf-8", errors="ignore")
             if any(f"#include {token}" in text or f"#include{token}" in text for token in library_includes):
                 fail(f"text library headers leaked outside the text/UI module: {path.relative_to(ROOT)}", failures)
+
+
+def check_phase20_ui_rendering(failures: list[str]) -> None:
+    """Item 79 rendering and input: Renderer/UiRendering turns UiDocument paint into one
+    graph pass (atlas residency, CPU reference, SwimUiQuad); Systems/UiInput adapts the
+    Input snapshot. Both compile only with the text/UI module."""
+    renderer = ROOT / "Source/Engine/Systems/Renderer"
+    ui_rendering = renderer / "UiRendering"
+    for relative in ("UiRenderRecords.h", "UiRenderBindings.h", "UiRenderSettings.h", "UiRenderReference.cpp", "UiAtlasTextures.cpp",
+                     "UiRenderer.cpp"):
+        if not (ui_rendering / relative).is_file():
+            fail(f"UI rendering unit is missing: Renderer/UiRendering/{relative}", failures)
+    for shader in ("UiRecords", "UiQuad"):
+        if not (ROOT / f"Source/Shaders/Slang/Ui/{shader}.slang").is_file():
+            fail(f"UI shader is missing: Shaders/Slang/Ui/{shader}.slang", failures)
+    for path in ui_rendering.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if "Renderer/" in include and not re.search(r"Renderer/(UiRendering|RenderGraph|RHI|Resources)/", include):
+                fail(f"UiRendering may include only UiRendering, RenderGraph, RHI and Resources renderer headers: {path.relative_to(ROOT)} -> {include}", failures)
+            if any(part in include for part in ("Backends/", "vulkan", "entt", "Systems/Scene", "Engine/Platform", "Engine/Assets", "Engine/IO",
+                                                "Engine/Jobs", "<hb", "ft2build", "msdfgen", "SheenBidi", "linebreak.h")):
+                fail(f"UiRendering must not depend on {include}: {path.relative_to(ROOT)}", failures)
+    for module in ("RenderGraph", "Resources", "Geometry", "GpuScene", "Visibility", "Materials", "GpuMaterials", "Environment", "Lights",
+                   "ClusteredLighting", "Shadows", "ForwardPlus", "PostProcess", "Temporal", "ScreenSpace", "Particles", "Skinning", "Residency"):
+        for path in (renderer / module).rglob("*"):
+            if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and re.search(
+                r'#\s*include[^\n]*(Renderer/UiRendering/|Systems/UI/|Systems/Text/)', path.read_text(encoding="utf-8")
+            ):
+                fail(f"{module} must not depend on UI rendering or the text/UI module: {path.relative_to(ROOT)}", failures)
+    ui_input = ROOT / "Source/Engine/Systems/UiInput"
+    if not (ui_input / "UiInputBridge.cpp").is_file():
+        fail("the Input -> UiDocument bridge (Systems/UiInput/UiInputBridge.cpp) is missing", failures)
+    for path in ui_input.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if include.startswith("Engine/") and not re.match(r"Engine/(Systems/UiInput/|Systems/UI/|Systems/Text/|Input/)", include):
+                fail(f"UiInput may include only UiInput, UI, Text and Input headers: {path.relative_to(ROOT)} -> {include}", failures)
+    cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    tests_text = read_tests_cmake()
+    for fragment in ("SWIM_RENDER_UI_SOURCES", "SWIM_UI_INPUT_SOURCES", "swim_add_slang_program(SwimUiQuad",
+                     "Source/Shaders/Slang/Ui/UiQuad.slang", "Systems/(Text|UI|UiInput|Renderer/UiRendering)/"):
+        if fragment not in cmake_text:
+            fail(f"UI rendering build wiring is missing from CMakeLists.txt: {fragment}", failures)
+    for fragment in ("${SWIM_RENDER_UI_SOURCES}", "${SWIM_UI_INPUT_SOURCES}", "SWIM_UI_QUAD_SPIRV_PATH", "SWIM_UI_QUAD_REFLECTION_PATH",
+                     "SWIM_TEXT_FALLBACK_FONT_FIXTURE_PATH"):
+        if fragment not in tests_text:
+            fail(f"UI rendering test wiring is missing from cmake/Tests.cmake: {fragment}", failures)
+    for group, name in (("RenderUi", "UiRenderReferenceTests.cpp"), ("RenderUi", "UiRendererTests.cpp"),
+                        ("UiInput", "UiInputBridgeTests.cpp"), ("Input", "InputTextEditingTests.cpp"),
+                        ("RHIVulkan", "VulkanUiSmokeTests.cpp"), ("ShaderCompiler", "ShaderUiLayoutTests.cpp")):
+        check_suite_is_compiled(group, name, failures)
+    if not (ROOT / "Source/Tests/Fixtures/Fonts/SwimTextFallbackFixture.ttf").is_file():
+        fail("the Hebrew/Greek fallback font fixture is missing", failures)
 
 
 def check_phase3_job_architecture(failures: list[str]) -> None:
@@ -4320,6 +4388,7 @@ def main() -> int:
     check_phase2_engine_architecture(failures)
     check_phase3_job_architecture(failures)
     check_phase20_text_dependencies(failures)
+    check_phase20_ui_rendering(failures)
     check_phase3_io_architecture(failures)
     check_phase3_memory_architecture(failures)
     check_phase4_asset_architecture(failures)

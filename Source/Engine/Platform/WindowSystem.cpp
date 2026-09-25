@@ -762,6 +762,15 @@ namespace Swim::Platform
 		}
 	}
 
+	void WindowSystem::SetTextInputArea(Window& window, int x, int y, int width, int height, int cursor)
+	{
+		if (window.impl && window.impl->Window)
+		{
+			const SDL_Rect area{ x, y, width > 0 ? width : 1, height > 0 ? height : 1 };
+			SDL_SetTextInputArea(window.impl->Window, &area, cursor);
+		}
+	}
+
 	bool WindowSystem::SetGamepadRumble(InputDeviceId device, float lowFrequency, float highFrequency, uint32_t durationMilliseconds)
 	{
 		auto it = impl->Gamepads.find(static_cast<SDL_JoystickID>(device));

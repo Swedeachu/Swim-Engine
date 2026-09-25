@@ -1,148 +1,241 @@
 # Text and retained UI
 
-2026-09-24 — item 79, first runtime checkpoint.
+Critical-path item **79** (Phase 20). Checkpoints:
 
-This checkpoint provides text services and a retained UI CPU foundation. It produces paint data; it does not yet draw through the modern RHI or replace the sandbox's legacy text/UI. Item 79 remains open.
+- **2026-09-24 — foundation:** font faces, horizontal run shaping, the MSDF glyph atlas and the retained `UiDocument` (layout, paint records, pointer/focus input).
+- **2026-09-25 — paragraphs, editing and rendering (this document's current state):** paragraph layout (bidi, script itemization, cluster fallback, line breaking, alignment), caret/selection/IME text editing, flex/anchor/aspect layout, rounded/bordered solids and nine-slice images, measure and paint caches, parallel atlas prewarm, a widget layer, the Input → UI bridge, and `Renderer/UiRendering`: the RenderGraph UI pass with atlas residency and SDR/HDR composition, with a CPU reference and a native smoke.
 
-## Text ownership and shaping
+Item 79 stays **open** until the native smoke has passed on the desktop and the runtime draws its UI through it. Sandbox migration waits for the modern renderer to present frames (item 56); the legacy text/UI remains active.
 
-`Systems/Text/FontFace` accepts a byte span and copies it. Load those bytes through the application's existing asset/IO service; there is no filesystem access, OS font lookup, singleton or renderer dependency in the module. Each face owns its FreeType library/face and immutable HarfBuzz font. The constructor rejects malformed, bitmap-only, non-SFNT or non-Unicode faces. Collection face indices are supported; variable fonts use their default instance (no variation-axis API yet).
+## Module map
 
-`Shape(utf8, logicalSize, options)` shapes **one horizontal script/direction run**. It returns visual-order glyph IDs, UTF-8 byte clusters, advances/offsets, font metrics, resolved direction and a missing-glyph count. Options select direction, ISO 15924 script, BCP 47 language, kerning and standard/contextual ligatures. Empty language means `und`, independent of process locale. Invalid UTF-8 is replaced by HarfBuzz with U+FFFD. Input is bounded to 1 MiB per run; logical font sizes must be finite and in `(0, 16384]`.
+| Path | Role | Depends on |
+| --- | --- | --- |
+| `Systems/Text` | `FontFace`, `FontCollection`, `GlyphAtlas`, `TextSegmentation`, `TextLayout`, `Utf8` | FreeType, HarfBuzz, msdfgen, SheenBidi, libunibreak (private) |
+| `Systems/UI` | `UiDocument` (tree/API, layout, paint, input, editing units), `UiWidgets` | Text |
+| `Systems/UiInput` | `UiInputBridge`: `Input::InputSystem` frame → `UiDocument` | UI, Input |
+| `Renderer/UiRendering` | `UiRenderer`, `UiAtlasTextures`, `UiRenderReference` (`Ui::` CPU definition), records/bindings/settings | RenderGraph, RHI contract, Resources, UI/Text headers |
+| `Shaders/Slang/Ui` | `UiRecords.slang`, `UiQuad.slang` (`SwimUiQuad`) | — |
 
-Coordinates are font coordinates (positive Y up); `UiDocument` converts these to top-down screen coordinates. `GetMetrics` returns ascender, negative descender and line height. Shaping uses the font's unhinted OpenType advances scaled to logical units. Concurrent const face calls are supported; FreeType outline generation is serialized per face. There is no second thread pool.
+`scripts/verify-build-layout.py` enforces the boundaries: text libraries stay inside `Systems/Text`/`Systems/UI` and the Text tests, no public header names a library type, Text/UI never include renderer/scene/platform headers, `UiRendering` includes only RenderGraph/RHI/Resources renderer headers, no other renderer module includes UI, and `UiInput` includes only UI, Text and Input.
 
-HarfBuzz does not perform paragraph bidi ordering, script itemization, fallback or Unicode line breaking for us. Callers must segment such paragraphs before using this run API. The current UI label API supports a homogeneous script/direction per hard line and handles LF/CRLF, including an empty trailing line. It does not claim mixed-script paragraph support. Keep the original UTF-8 bytes when using the returned clusters; glyph indices are not caret positions.
+All five text libraries are compiled from pinned sources as private static libraries in `Swim::TextDependencies` (`cmake/TextDependencies.cmake`): FreeType `VER-2-14-3`, HarfBuzz `14.5.0` (single TU), msdfgen `v1.13` (core), **SheenBidi `v3.0.0`** (unity TU, UAX #9 and script runs) and **libunibreak `8.0`** (UAX #14 line breaks, UAX #29 graphemes and words; Unicode 17). The UI modules compile only where those dependencies are available.
 
-## MSDF cache
+## Text
 
-`GlyphAtlas` keys entries by retained font identity and glyph ID. Its configuration fixes page size, maximum pages, raster em size and full signed-distance range in texels. Defaults: 512² pages, up to 8 pages, 48 texels/em, range 4. Descriptor validation caps texture storage at 256 MiB. Pages allocate only on demand.
+### Font faces and shaping (unchanged contract)
 
-FreeType outlines are converted through line, quadratic and cubic callbacks into msdfgen shapes, normalized and oriented, edge-colored and rasterized. The bitmap is flipped into top-down RGB8 **linear UNORM distance data**, never sRGB. Glyph quad bounds include distance padding. A separate one-texel packing gutter prevents adjacent glyph contamination. Whitespace is cached with `NoAtlasPage`; it keeps its shaping advance but allocates no texels.
+`FontFace` copies font bytes and owns its FreeType face and immutable HarfBuzz font. `Shape(utf8, size, options)` shapes one horizontal script/direction run with UTF-8 byte clusters (grapheme-monotone), kerning and ligatures. Coordinates are font coordinates (Y up). Concurrent const calls are supported; only FreeType outline extraction is serialized per face now — distance-field generation runs concurrently (see `GlyphAtlas::Prewarm`).
 
-- `Get(face, glyph)` returns an `AtlasGlyph` by value. It retains the face, preventing pointer reuse from aliasing a different font.
-- `GetPage(page)` exposes a read-only byte span and monotonically increasing page revision. Cache hits do not increase revisions. Consumers can compare revisions to decide when uploads are necessary. Spans remain valid until atlas destruction; subsequent additions can update their pixels, so do not read them concurrently with mutation.
-- Placements never repack or evict. Glyph UVs remain stable for the atlas's lifetime. Keep the atlas alive while its paint records are used.
-- Out-of-range glyphs, oversized glyphs and full page budgets report exceptions. Failed requests do not change existing glyph placements, pixels or packing state.
-- Atlas mutation is single-owner/external synchronization. Generation is synchronous and can be expensive. Prewarm known runs with `atlas.Get(face, glyph.Glyph)` before time-critical frames. Async population and GPU lifetime management remain future consumer work.
+### Fallback: `FontCollection`
 
-The GPU consumer must decode the RGB median around 0.5, use the supplied distance range and screen derivatives for coverage, and multiply the premultiplied quad color by coverage. Store/upload these pages as linear data. Do not add ordinary box-filtered mipmaps without a distance-field sampling policy. Upload completion and timeline-safe texture/descriptor retirement belong to the future rendering adapter.
+An immutable, shareable ordered chain (face 0 is primary; at most 64). There is no OS font lookup. `SelectFace(cluster, preferred)` picks, per grapheme cluster:
 
-## Retained UI contract
+1. the preferred face (the previous cluster's) when the cluster starts with whitespace, punctuation or a symbol and that face covers it — runs are not split around spaces;
+2. otherwise the first face that maps every code point of the cluster, ignoring controls and default-ignorables (ZWJ/ZWNJ, variation selectors, bidi controls, tags);
+3. otherwise the primary face, which shapes `.notdef` (reported as `MissingGlyphs`).
 
-`Systems/UI/UiDocument` has process-unique node IDs and explicit ownership; IDs are never reused. Invalid or foreign IDs throw for operations requiring a node. `Remove` returns false for absent IDs/root, removes a whole subtree otherwise, and clears focus/capture safely. `Reparent` rejects cycles/root movement and appends to a different parent in paint/tab order. Limits are 65,536 nodes and 256 levels.
+### Segmentation: `TextSegmentation`
 
-`Layout(framebufferSize, dpiScale)` converts the canvas to logical units. Root bounds always fill that canvas. Node sizes are content plus padding when Auto, or the preferred logical/percentage size, clamped to min/max. Preferred sizes include padding. Positive margins sit outside the node; a stack's gap is between participating children. Absolute children use top-left offsets relative to parent content, do not participate in intrinsic measurement and do contribute to scroll extent. Overlay siblings share the same origin. Text and child flow share the content origin; place them in separate nodes when they should stack.
+- `FindTextBoundaries(utf8, language)`: grapheme, word and line-break (`None`/`Allowed`/`Mandatory`) flags before every byte, from libunibreak with the language's tailoring.
+- `FindScriptSpans(utf8)`: maximal single-script runs (ISO 15924 tags), Common/Inherited characters joining their neighbours.
+- `AnalyzeBidi(utf8, direction)`: paragraphs (P1; CR LF, LF, CR, U+2029, NEL separate them), base level (P2–P3 for `Auto`, left-to-right without a strong character) and per-byte embedding levels. Text ending in a separator gets a final empty paragraph that keeps the previous direction.
+- Input must be valid UTF-8 (≤ 1 MiB); `Utf8.h` decodes, steps back and sanitizes (every invalid byte → U+FFFD).
 
-Percentages are fractions `[0, 1]` of the **final parent content size**. To break intrinsic sizing cycles, a percentage on an Auto parent axis contributes zero to that parent's measurement, then resolves at arrangement time; resulting overflow follows normal clipping rules. Row/column layouts do not grow/shrink children or implicitly stretch them. Anchors, aspect ratios and flex alignment are not present yet.
+### Paragraph layout: `TextLayout`
 
-`Clip` restricts descendants/text to the content box intersected with ancestor clips; the node background uses its outer box. Scrolling is enabled by `Clip`, clamped against measured content extents and applied to both text and children. Without clipping the scroll offset resolves to zero. Hidden nodes and descendants are omitted from measure/paint/input and have zero query bounds after layout. Disabled subtrees still paint but cannot receive pointer/focus input.
+`TextLayout(utf8, fonts, desc)` builds, immutably:
 
-Mutations invalidate layout. Call `Layout` before bounds, paint, hit-testing or tab traversal; stale access throws instead of returning last-frame hit regions. Repeating Layout on an unchanged document/canvas is a no-op. Text shaping is retained, and setting identical text/font/size/direction does not invalidate it. Dirty layout currently recomputes the document; Paint rebuilds the ordered list.
+1. sanitized text (offsets refer to `GetText()`), boundaries, script spans and per-grapheme faces;
+2. per bidi paragraph: a measuring shape of the (level, script, face) items, then greedy line breaking over UAX #14 opportunities. Trailing spaces hang (they never cause a wrap); a word wider than the line breaks between graphemes (emergency break, at least one grapheme per line). U+2028/VT/FF end lines without ending the paragraph and are never shaped;
+3. per line: SheenBidi's line runs (rules L1–L2, so trailing whitespace takes the paragraph level) split by face/script, each shaped again with its own level — the visual order of `TextRun`s and `TextGlyph`s;
+4. vertical metrics from the tallest face used on the line (the primary face always counts; `LineSpacing` multiplies the line height, extra space split above and below);
+5. alignment: `Start`/`End` resolve per paragraph direction; `Left`/`Right`/`Center` are absolute. The box is `MaxWidth` when finite, else the widest line. Hanging whitespace sits outside the box (to the right in LTR, to the left in RTL paragraphs).
 
-`Paint(atlas)` emits `UiPaintQuad`s in stable parent-before-child and sibling order. A quad carries logical bounds, a logical clip rectangle, premultiplied linear RGBA, and optionally an atlas page/UV/distance range. Zero-alpha or fully clipped quads are omitted. The returned vector belongs to the document and is replaced by the next Paint; copy it if a renderer needs a separate frame snapshot. Calls can populate the atlas and can fail on atlas budget exhaustion. There is no draw submission, GPU upload, image widget or HDR conversion in this module yet.
+Glyph origins are in layout space (top-left origin, Y down, on the baseline, offsets applied). `GetWidth()` is the widest visible line, `GetHeight()` the sum of line heights.
 
-## Input contract
+**Editing queries** (grapheme boundaries are caret stops): `GetCaret` (visual x/top/height; at a direction boundary the caret attaches to the leading edge of the following character), `HitTest(x, y)`, `GetSelectionRects(begin, end)` (one rectangle per contiguous visual piece — a mixed-direction selection is several), `Next/PreviousCaretStop`, `Next/PreviousWord` (starts of words, spaces skipped), `LineStart/LineEnd`, `LineAbove/LineBelow` (preferred x). Soft-wrap positions use downstream affinity (the offset belongs to the next line); `LineEnd` of a soft line stops before its hanging space so the caret stays on that line. A ligature spanning several graphemes ("ffi") divides its advance evenly between them. Cursor movement is logical (Right moves forward in memory order, which is visually leftwards inside RTL text).
 
-Pass **framebuffer-pixel** coordinates to `HitTest`/pointer methods. The platform adapter must convert window logical coordinates when necessary. Paint and layout coordinates remain logical, so the renderer applies the same DPI scale.
+Shaping runs twice per line (measure, then per line segment). Contexts are not shared across a soft break. Layout cost is linear in the text; `UiDocument` caches layouts per node and width.
 
-- Hit-testing walks reverse paint order and respects clipping, visibility, enablement and `HitTest` flags.
-- Primary pointer down captures a node; release always targets the captured node and clicks only when the pointer is over that same node. `CancelPointer` cancels capture without a click.
-- Down focuses a focusable target or clears focus. `FocusNext` walks stable hierarchy order, wraps and supports reverse Tab. `ActivateFocused` supplies keyboard activation. Focusable offscreen scroll children remain in tab order; automatic scroll-to-focus remains widget work.
-- Disabling/hiding/removing a focused or captured node (including an ancestor) emits Blur/Cancel/Leave as applicable. Invalid IDs in removal events intentionally identify the removed node; check `Contains` before reading it.
-- Events are queued (`DrainEvents`), avoiding mutation during callbacks. There is no DOM capture/bubble propagation or multi-touch handling yet.
-- The future platform adapter should call `CancelPointer` and `Focus({})` on application focus loss and drain events every input frame. Hover is updated on pointer samples; resample the current pointer after layout changes when hover feedback must track moving widgets.
+## Retained UI
+
+### Layout
+
+`UiDocument` keeps its first-checkpoint contract (unique IDs, cycle/depth checks, Auto/logical/percentage sizes with min/max, margins/padding/gaps, row/column/overlay flow, clipping and scrolling, logical DPI units) and adds:
+
+- **Flex (Row/Column parents):** children `Grow` into positive free space (by weight) and `Shrink` from an overflow (weighted by preferred size), clamped to min/max. The parent's `Justify` distributes what is left (`Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`); `AlignItems`/`AlignSelf` place children on the cross axis (`Start`, `Center`, `End`, `Stretch` — stretch fills Auto cross lengths). Defaults (grow/shrink 0, start/start) keep the previous behaviour. Overlay parents align children on both axes.
+- **Anchors (Absolute children):** `AnchorMin`/`AnchorMax` are fractions of the parent's content box. Equal anchors pin `Pivot` (a fraction of the node's size) at `AnchorMin × size + Offset`; different anchors on an axis stretch the node between them minus its margins. The default (all zero) is the previous top-left `Offset` placement.
+- **Aspect ratio:** `AspectRatio` (width/height) derives an Auto axis from the other (width wins when both are Auto).
+- **Text in layout:** `SetText(node, fonts, text, size, {direction, language})` (a single-face overload remains). Style carries `TextAlign`, `TextWrap` and `LineSpacing`. Wrapping text measures against the room its ancestors give it: the node's own definite content width, else the nearest definite ancestor's content width (the canvas at the root) minus paddings and margins, capped by `MaxSize`. Arrangement lays the text out again at the final content width when wrapping or alignment depends on it.
+- **Images:** `SetImage(node, UiImage)` — renderer-defined texture/sampler handles (for example bindless indices), natural size (the node's intrinsic content size), UV rectangle, straight-alpha tint, `Stretch`/`Contain` fit and nine-slice borders (on-screen widths plus UV fractions; borders shrink proportionally when the box is too small). Textures are sampled as **premultiplied** alpha.
+- **Rounded and bordered backgrounds:** `CornerRadius` (clamped to half the shorter side) and an inner `BorderWidth`/`BorderColor` ring; paint-only.
+
+**Caches.** `SetStyle` compares the old and new style: changes to colors, radius or border are paint-only and skip layout entirely (`Layout` returns without a new revision). Any other change marks the node and its ancestors; `Measure` reuses a node's cached size when neither it nor a descendant changed and its inputs (available size, wrap room) are equal, so a leaf change remeasures its ancestor path only (`GetMeasuredNodeCount`). Arrangement still visits the whole tree (cheap; bounds, clips and order). `Paint` rebuilds only nodes whose content, bounds, clip or scroll changed, or all of them when a different atlas is passed (`GetRepaintedNodeCount`); the returned list concatenates the per-node caches in paint order.
+
+### Paint output
+
+`UiPaintQuad` gained `CornerRadius`, `BorderWidth`, `BorderColor` (solids) and `Texture`/`Sampler` (the new `Image` kind). Colors stay premultiplied linear RGBA; bounds and clips stay logical. Per node, in order: background, image quads, selection rectangles, glyphs, preedit underline, caret.
+
+### Input and editing
+
+Pointer input is still in framebuffer pixels; `PointerDown` takes modifiers (Shift extends a text selection). `Wheel(point, delta)` scrolls the innermost clipped node under the point that can still move. `PointerMove/Down/Up`, `Wheel` and `FocusNext` lay the document out again with the last canvas when it changed since (for example after typing earlier in the same frame); `HitTest`, `GetBounds` and `Paint` still require a current `Layout` (`IsLayoutCurrent`).
+
+`SetEditable(node, true, {Multiline, MaxBytes})` makes a text node an editor (focusable and hit-testable regardless of its style):
+
+- `KeyDown(key, modifiers)` routes to the focused node: Left/Right by grapheme or word (Control), Up/Down by line with a preferred column (ends of the text in single-line fields), Home/End by line or document (Control), Backspace/Delete by grapheme or word, Enter (line break in multiline fields, a `Submit` event otherwise), Escape (collapse the selection or abandon the preedit), Control+A/C/X/V through `SetClipboard` callbacks, and Tab/Shift+Tab focus traversal. Non-editable focus maps Enter/Space to activation and Escape to blur.
+- `TextInput(utf8)` replaces the selection with committed text: sanitized, other C0 controls dropped, line breaks dropped in single-line fields, truncated at a grapheme boundary to `MaxBytes`. Committed edits queue `TextChanged`.
+- `SetComposition(utf8, cursor)` shows an IME preedit at the caret, underlined, without changing `GetText()`; the IME owns the keyboard meanwhile. Commit arrives as `TextInput`; an empty composition, Escape or focus loss abandons it.
+- A pointer press places the caret, a drag extends the selection; clipped editors scroll to keep the caret visible. `GetTextInputRect()` gives the caret rectangle in framebuffer pixels for the IME candidate window; `WantsTextInput()` says when to start platform text input; `SetCaretVisible` is the application-timed blink phase.
+
+### Widgets (`UiWidgets.h`)
+
+`CreateLabel`, `CreateButton` (`DefaultButtonStyle`: padding, rounded, centered text, hit-testable and focusable), `CreateImage`, `CreateScrollView` (clipped column) and `CreateTextField` (clipped editor) create ordinary nodes. `UiButtonStates` turns drained Enter/Leave/Press/Release/Cancel/Focus/Blur events into hover/pressed/focus-ring colors through paint-only style changes.
+
+### Input bridge (`Systems/UiInput/UiInputBridge`)
+
+`UiInputBridge::Apply(inputSystem, document)`, once per frame after `InputSystem::AdvanceFrame` and a `Layout`:
+
+- window → framebuffer pixels by `FramebufferScale`; primary-button press/release; wheel notches × `WheelStep` (positive wheel scrolls up);
+- key presses **including operating-system repeats** and committed text, interleaved in event order through the new `InputSystem::GetTextEditEvents()` (`GetKeyPresses()` lists the presses alone); Control or, for macOS, Super as the shortcut modifier; keys reach the document only while a node has focus (Tab starts traversal when `TabStartsNavigation`);
+- IME composition only when `InputSystem::HasTextCompositionUpdate()` (a preedit persists across frames without events; SDL's code-point cursor is converted to bytes);
+- application focus loss cancels pointer capture and clears UI focus.
+
+It returns `PointerOverUi`, `KeyboardCaptured` and `WantsTextInput` so the game can ignore input the UI consumed. Starting/stopping platform text input and `WindowSystem::SetTextInputArea` (new, SDL3's `SDL_SetTextInputArea`) stay with the application.
+
+## Glyph atlas
+
+Unchanged contract (single owner, stable UVs, no eviction, page revisions, `GetChangedRows`), plus:
+
+- `Prewarm(face, glyphs, parallelFor)`: distance fields of the missing glyphs are generated through a caller-supplied parallel-for (for example `JobSystem::ParallelFor`), then packed serially in the given order — pixel-identical to calling `Get` in that order. A failed generation inserts nothing and rethrows; `Contains(face, glyph)` checks the cache.
+- `UiDocument::PrewarmGlyphs(atlas, parallelFor)` prewarms every glyph a laid-out document shows, so the following `Paint` only looks glyphs up (use before time-critical frames). True background population (while frames render) is still future work.
+
+## UI rendering (`Renderer/UiRendering`)
+
+### One pass, one draw
+
+`UiRenderer::Record(graph, frame, program, bindlessTable)` converts the paint list (`Ui::BuildQuads`) into `GpuUiQuad` instances (112 bytes: rectangle, clip and UV in framebuffer pixels, premultiplied color and border color, radius, border, glyph pixel range, kind, bindless texture and sampler), uploads them as a graph upload, and records **one graphics pass with one instanced draw** (6 vertices per quad) in paint order:
+
+- The vertex stage intersects each quad with its clip rectangle and remaps the UV to the clipped part — exact for axis-aligned rectangles, so there are no discards, scissor changes or batch splits. The scissor covers the target.
+- Clip space: the RHI is +Y-up (the Vulkan backend flips the viewport), while UI rectangles are +Y-down framebuffer pixels, so the vertex stage negates NDC y. The fragment stage's `SV_Position` is already in top-left-origin pixels.
+- Glyph pages and images are sampled through the shared bindless table (space 1, the same layout as Forward+ and particles), so textures never split the draw.
+- Fragments shade solids (a rounded-box SDF with a one-pixel ramp; the border ring from a second, inset SDF), MSDF glyphs (median of the three channels, `PixelRange = max(1, DistanceRange × screen pixels per atlas texel)`, computed on the CPU so GPU and reference agree), and images (premultiplied texel × tint).
+- Output: premultiplied, blended with `One, OneMinusSourceAlpha` on color and alpha. `UiRenderer::PipelineDesc(format, …)` builds the pipeline per target format.
+
+`frame.DpiScale`/`OffsetX/Y` map logical units to framebuffer pixels (split screens); `frame.Clear` makes an overlay-only target; `frame.Atlas` and `frame.Images` declare the sampled textures as graph reads, so this frame's atlas uploads run first. An empty paint list records nothing (unless `Clear`).
+
+### Composition (`UiCompositionSettings`)
+
+UI is composited **after** tone mapping, onto the display-encoded image:
+
+| Encoding | Target | UI white | Blending space |
+| --- | --- | --- | --- |
+| `Srgb` | UNORM holding sRGB values (the post stack's SDR output, BGRA8 swapchains) | 1.0 | sRGB-encoded (conventional UI blending) |
+| `Linear` | `*Srgb` formats (hardware encodes after a linear blend) or float intermediates | `LinearScale` | linear |
+| `Hdr10` | the post stack's HDR10 output (BT.2020 + PQ) | `PaperWhiteNits` | PQ |
+| `ScRgb` | scRGB float (1.0 = 80 nits) | `PaperWhiteNits` | linear |
+
+Each quad's premultiplied color is un-premultiplied, encoded, and premultiplied again (`Ui::Encode`), then blended. `Srgb` into an `*Srgb` format is rejected (double encoding). Match `PaperWhiteNits` with the post stack's so UI white equals SDR scene white.
+
+### Atlas residency (`UiAtlasTextures`)
+
+One RGBA8 UNORM texture per atlas page (linear distance data, alpha 1), registered in the bindless table, sampled with its own linear clamp sampler (no mips). `Update(graph, atlas)` imports every page (exported `ShaderRead`), uploads a new page whole (an initializing write) and afterwards only the row band `GetChangedRows` reports since the last committed revision (a partial `ReadWrite` copy), as graph-scheduled transfers. `CommitFrame` after executing, `AbortFrame` when the graph was dropped (the uploads repeat). `Release(lastUse)` detaches an atlas: views and bindless elements retire after the timeline point, `Collect` frees them (rewriting their bindless elements to the fallback first), `Drain` waits. Switching atlases without `Release` throws.
+
+### CPU reference (`UiRenderReference.h`, namespace `Swim::Render::Ui`)
+
+`BuildQuads`, `BuildDrawConstants`, `ShadeQuad`, `Encode`, `Blend`, `Rasterize` (pixel centres in the clipped `[x0, x1) × [y0, y1)`, the top-left rule for axis-aligned edges) and `SampleBilinear` (Vulkan's texel-centre, clamp-to-edge convention) define every rule `UiQuad.slang` evaluates, line for line.
 
 ## Minimal consumer
 
-The caller supplies `fontBytes`, framebuffer dimensions and input. These are not process globals.
-
 ```cpp
-#include "Engine/Systems/UI/UiDocument.h"
+#include "Engine/Systems/Renderer/UiRendering/UiRenderer.h"
+#include "Engine/Systems/UI/UiWidgets.h"
+#include "Engine/Systems/UiInput/UiInputBridge.h"
 
-auto face = std::make_shared<Swim::Text::FontFace>(fontBytes);
+// Setup (fonts come from the asset/IO layer; no OS lookup).
+auto fonts = std::make_shared<Swim::Text::FontCollection>(
+	std::vector<std::shared_ptr<const Swim::Text::FontFace>>{ latinFace, cjkFace, emojiFace });
+Swim::UI::UiDocument ui;
 Swim::Text::GlyphAtlas atlas;
-Swim::UI::UiDocument document;
-const auto button = document.Create(document.GetRoot());
-Swim::UI::UiStyle style;
-style.Width = Swim::UI::UiLength::Pixels(220.0f);
-style.Height = Swim::UI::UiLength::Pixels(48.0f);
-style.Padding = { 12.0f, 8.0f, 12.0f, 8.0f };
-style.Clip = true;
-style.HitTest = true;
-style.Focusable = true;
-style.Background = { 0.04f, 0.08f, 0.18f, 1.0f };
-document.SetStyle(button, style);
-document.SetText(button, face, "Play", 24.0f);
-document.Layout({ 1920.0f, 1080.0f }, 1.5f);
-const auto& paint = document.Paint(atlas);
-// A future UI renderer consumes paint and the changed atlas pages.
+Swim::UI::UiButtonStates buttonStates;
+const auto play = Swim::UI::CreateButton(ui, ui.GetRoot(), fonts, "Play", 24.0f);
+buttonStates.Track(play);
+const auto name = Swim::UI::CreateTextField(ui, ui.GetRoot(), fonts, 18.0f);
+Swim::UI::UiInputBridge input({ /* FramebufferScale */ pixelDensity });
+Swim::Render::UiAtlasTextures atlasTextures(device, bindlessTable);
+Swim::Render::UiRenderer uiRenderer;
+
+// Per frame, after InputSystem::AdvanceFrame and the post stack.
+ui.Layout({ framebufferWidth, framebufferHeight }, dpiScale);
+const auto consumed = input.Apply(inputSystem, ui); // PointerOverUi / KeyboardCaptured for the game.
+const auto events = ui.DrainEvents();
+buttonStates.Apply(ui, events);
+for (const auto& event : events) { /* Click, TextChanged, Submit, ... */ }
+ui.Layout({ framebufferWidth, framebufferHeight }, dpiScale);
+const auto& paint = ui.Paint(atlas);
+const auto atlasFrame = atlasTextures.Update(graph, atlas);
+Swim::Render::UiRenderFrame frame;
+frame.Paint = paint;
+frame.Target = postOutput;          // RGBA8Unorm (sRGB values) or RGBA16Float (HDR10/scRGB).
+frame.DpiScale = dpiScale;
+frame.Composition.Encoding = Swim::Render::UiOutputEncoding::Srgb;
+frame.Atlas = &atlasFrame;
+uiRenderer.Record(graph, frame, uiProgram, bindlessTable.GetTable());
+const auto done = executor.Execute(graph.Compile());
+atlasTextures.CommitFrame();
+if (ui.WantsTextInput()) { /* WindowSystem::StartTextInput + SetTextInputArea(ui.GetTextInputRect() / pixelDensity) */ }
 ```
 
 ## Build and test
 
-From the repository root in PowerShell, using the existing Ninja/MSVC Debug setup:
+Windows (PowerShell, repository root). **Two new text dependencies (SheenBidi, libunibreak) must be downloaded once:** the soft build is disconnected, so run the clean build, or configure once with downloads enabled.
 
 ```powershell
+cmake --preset windows-debug -DFETCHCONTENT_FULLY_DISCONNECTED=OFF   # once, fetches SheenBidi + libunibreak
 & .\scripts\build-windows-soft.ps1 -Debug
 if ($LASTEXITCODE -ne 0) { throw "Debug build/default tests failed" }
 
-& .\build\windows-debug\SwimTests.exe --filter=Text --filter=UI --verbose
+& .\build\windows-debug\SwimTests.exe --filter=Text --filter=UI --filter=UiInput --filter=Render.Ui --filter=Input.TextEditing --filter=ShaderCompiler.UiLayout --verbose
 if ($LASTEXITCODE -ne 0) { throw "Text/UI tests failed" }
 
+$env:SWIM_RUN_RHI_SMOKE = "1"
+foreach ($profile in "core", "sync", "gpu", "all") {
+	$env:SWIM_RHI_VALIDATION = $profile
+	& .\build\windows-debug\SwimTests.exe --filter=RHI.Vulkan.Smoke.UiRendererMatchesTheCpuReference --verbose
+	if ($LASTEXITCODE -ne 0) { throw "UI smoke failed ($profile)" }
+}
+Remove-Item Env:SWIM_RUN_RHI_SMOKE, Env:SWIM_RHI_VALIDATION
+
 python .\scripts\verify-build-layout.py
-if ($LASTEXITCODE -ne 0) { throw "Build layout verification failed" }
 ```
 
-If the build script uses its Visual Studio fallback, use `build\windows-vs\Debug\SwimTests.exe` for the focused run. The existing soft build requires the previously introduced text dependencies to be cached; no new dependency is introduced here. On a machine without that cache, use `build-windows-clean.ps1 -Debug` for the initial build.
-
-The new suites are in the normal default corpus. Repeated `--filter` arguments select their union. This focused command must report **20 cases**, not zero: 3 existing `Text.Dependencies`, 4 `Text.Font`, 4 `Text.Atlas`, and 9 `UI.*`. These are CPU tests; no `SWIM_RUN_RHI_SMOKE` or GPU validation profile is needed. Launching the sandbox does not exercise this checkpoint.
-
-Linux with the existing configured dependency-enabled build:
+Linux:
 
 ```bash
 cmake --preset linux-debug
 cmake --build --preset linux-debug --target SwimTests SwimTextUiPublicHeaders --parallel
-./build/linux-debug/SwimTests --filter=Text --filter=UI --verbose
+./build/linux-debug/SwimTests --filter=Text --filter=UI --filter=UiInput --filter=Render.Ui --filter=Input.TextEditing --filter=ShaderCompiler.UiLayout
+SWIM_RUN_RHI_SMOKE=1 SWIM_RHI_VALIDATION=core ./build/linux-debug/SwimTests --filter=RHI.Vulkan.Smoke.UiRendererMatchesTheCpuReference
 python3 scripts/verify-build-layout.py
 ```
 
-Local verification performed for this change:
+`--filter=Render.Ui` selects `Render.Ui.Reference`, `Render.Ui.Renderer` and `Render.Ui.AtlasTextures`; the focused command runs **57 cases**. The smoke prints one line per target (`[ui sdr]`, `[ui hdr10]`, `[ui scrgb]`, `[ui linear-srgb]`, `[ui sdr-grown]`) with compared/lit/outlier counts, then `[ui 1080p] … draw … ms`. Record those and the pass time in the validation record.
 
-- GCC 13.3 Debug, exact pinned FreeType 2.14.3, HarfBuzz 14.5.0 and msdfgen 1.13: **20 cases / 1,932 checks pass**. A temporary standalone CMake harness compiled the unchanged Swim test framework, the new Text/UI sources, and the Text/UI suites against those dependencies. This is targeted source validation, not a full engine build.
-- The same first-party sources/cases pass with AddressSanitizer and UndefinedBehaviorSanitizer. Third-party libraries were not sanitizer-instrumented. LeakSanitizer cannot run under this environment's process tracing, so leak checking was disabled for that run.
-- The atlas test compares distance signs and top-down orientation against independently rasterized FreeType coverage for L/O/A/g, ignoring partially covered contour samples. Other tests cover contextual Arabic/ligatures, combining and non-BMP clusters, malformed input, concurrent shaping, stable atlas entries, capacity failures, DPI, intrinsic/percentage layout, clipping and focus/capture lifecycle.
-- `python scripts/verify-build-layout.py` passes. The repository's `SwimTextUiPublicHeaders` CMake target compiles with only `Source/` on its include path using the offline configuration.
-- Full default engine suites, MSVC/Windows builds and desktop execution remain to run on the development machine. No new GPU pass exists to validate yet.
+In the container the smoke passed on a source-built SwiftShader with 0 outliers in all five frames ([record](validation/Item79-2026-09-25.md)); SwiftShader lacks `shaderDrawParameters`, so that run used a variant of `UiQuad.slang` with `SV_VulkanVertexID`/`SV_VulkanInstanceID`. The committed shader keeps `SV_VertexID`/`SV_InstanceID` like the other RHI programs, so the desktop run is still the gate.
 
-## Next checkpoint
+## Remaining work (item 79 stays open)
 
-1. RenderGraph UI pass, staged atlas uploads, bindless atlas/image residency, batched instanced quads, scissor/clip translation and defined sRGB/HDR output composition; native image smoke and timeline lifetime tests.
-2. Paragraph script/bidi segmentation, cluster-aware fallback and line wrapping; then caret/selection, input-field editing and IME, with explicit platform text-input integration.
-3. Anchors/aspect/flex alignment, widget wrappers, incremental subtree layout/paint invalidation, async glyph population and runtime migration.
-
-Do not check off item 79 or claim sandbox integration until the relevant work and desktop validation exist. The existing world-renderer migration remains item 56.
-
-## Suggested commit
-
-Subject:
-
-```text
-Add text services and retained UI foundation
-```
-
-Description:
-
-```text
-Add owned FreeType faces, HarfBuzz shaping and bounded MSDF atlas pages.
-Implement retained UI layout, clipping, scrolling, paint data and input/focus routing.
-Wire build boundaries and focused regression coverage, and update the architecture plan.
-Leave GPU UI rendering and advanced text/widget integration for the next checkpoint.
-```
+1. Run the native smoke on the desktop under all four validation profiles; record the 1080p UI budget.
+2. Runtime wiring: construct `UiAtlasTextures`/`UiRenderer` where the modern renderer presents frames (with item 56), migrate sandbox UI/text and retire `FontPool`/legacy text.
+3. Background (cross-frame) atlas population and atlas page compaction/eviction for very large glyph sets; world-space text instances.
+4. Visual (not logical) cursor movement in bidi text, double-click word selection, undo/redo, password fields, rich text spans (per-range fonts/colors), tab stops.
+5. Layout: wrapping flex lines, baseline alignment, grid; rounded clipping of children (clips stay rectangles).
 
 ## Implementation references
 
-- [HarfBuzz buffer properties](https://harfbuzz.github.io/setting-buffer-properties.html)
-- [HarfBuzz OpenType font functions](https://harfbuzz.github.io/harfbuzz-hb-ot-font.html)
-- [FreeType outline processing](https://freetype.org/freetype2/docs/reference/ft2-outline_processing.html)
-- [msdfgen](https://github.com/Chlumsky/msdfgen)
+- [UAX #9 Unicode Bidirectional Algorithm](https://www.unicode.org/reports/tr9/), [SheenBidi](https://github.com/Tehreer/SheenBidi)
+- [UAX #14 Line Breaking](https://www.unicode.org/reports/tr14/), [UAX #29 Text Segmentation](https://www.unicode.org/reports/tr29/), [libunibreak](https://github.com/adah1972/libunibreak)
+- [UAX #24 Script property](https://www.unicode.org/reports/tr24/)
+- [HarfBuzz buffer properties](https://harfbuzz.github.io/setting-buffer-properties.html), [clusters](https://harfbuzz.github.io/clusters.html)
+- [msdfgen](https://github.com/Chlumsky/msdfgen) (median, screen pixel range)
+- [SDL3 text input](https://wiki.libsdl.org/SDL3/SDL_SetTextInputArea)

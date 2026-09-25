@@ -12,7 +12,7 @@
 
 ---
 
-## Current implementation snapshot — 2026-09-24
+## Current implementation snapshot — 2026-09-25
 
 This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
 
@@ -25,20 +25,35 @@ This section is the short authoritative status summary for the current repositor
 | Scene/physics | Active: catalog/runtime identities, scene command buffer, scene-owned transforms, per-view frustum, generic physics handles/bridge. PhysX is default; Jolt is selected explicitly when compiled. `RenderExtractor` (EnTT `MeshRenderer` → GPU Scene, item 47) exists but no scene constructs it yet. |
 | Animation | `Systems/Animation` (item 78): skeletons, clip sampling, pose blending, layered state machines, events, root motion, sockets and skinning palettes, jobified. Cooked skeletons and clips load through `.sasset`; no scene constructs an animator yet (item 56). |
 | Assets | Active cooked `.sasset` identity/load path and development auto-cook, with legacy engine-owned pools and `LegacyRenderBinding` still adapting assets for rendering. Async IO is available/injected. `Renderer/Residency` now streams cooked meshes/textures through async IO and job decodes into `GeometryHeap`/`TextureResidency` (item 44), but the engine runtime does not construct it yet. |
-| Text/UI | `Systems/Text` font faces/shaping/MSDF atlas and `Systems/UI` retained layout/paint/input foundation (item 79) are available to consumers and tested. No new RHI UI pass or sandbox wiring yet; legacy text/UI remains active. |
+| Text/UI | `Systems/Text` (font faces, fallback chains, bidi/script/line-break paragraph layout, carets, MSDF atlas with parallel prewarm), `Systems/UI` (retained flex/anchor layout with measure/paint caches, images, editing and IME, widgets), `Systems/UiInput` (Input → UI bridge) and `Renderer/UiRendering` (one-draw RenderGraph UI pass, atlas residency, SDR/HDR composition; item 79) are tested and available to consumers. Nothing in the sandbox constructs them yet; legacy text/UI remains active until the modern renderer presents frames (item 56). |
 | Shaders | Active Slang-generated shaders for the transitional renderer. Reflected modern RHI program/layout binding remains a separate consumer. |
 | Commands/editor | Active command registry. Retired input managers, external-editor IPC and scene-JSON experiment have no active runtime references. Durable scene entity identities remain active. |
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
 | Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), screen-space GTAO, reflections and exponential height fog (item 76), GPU particles (item 77) and compute GPU skinning with morph targets and deformation motion vectors (item 78) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest checkpoint — item 79, text and retained UI foundation (2026-09-24):** the first runtime portion of Phase 20 is implemented; item 79 remains open until rendering and the remaining text/widget capabilities are delivered.
+- **Latest checkpoint — item 79, paragraphs, editing and UI rendering (2026-09-25):** the rest of Phase 20's runtime is implemented; item 79 stays open until the new native smoke passes on the desktop and the runtime draws its UI through it.
+  - **Text** (`Systems/Text`, two new pinned private dependencies: SheenBidi `v3.0.0`, libunibreak `8.0`):
+    - `FontCollection`: ordered fallback chains, per grapheme cluster (neutral characters keep the previous face; ignorables never force a face).
+    - `TextSegmentation`: UAX #29 graphemes/words, UAX #14 break opportunities, UAX #24 script runs, UAX #9 paragraphs and levels. `Utf8` decodes and sanitizes.
+    - `TextLayout`: paragraphs → items (level, script, face) → measuring shape → greedy line breaking (hanging spaces, emergency grapheme breaks, U+2028) → per-line L1–L2 reordering and shaping → per-line metrics → Start/End/Left/Right/Center alignment. Caret, hit-test, selection rectangles and grapheme/word/line movement queries.
+    - `GlyphAtlas::Prewarm` builds distance fields through a caller's parallel-for and packs deterministically (pixel-identical to sequential `Get`); `FontFace` now serializes only outline extraction.
+  - **UI** (`Systems/UI`, split into tree/layout/paint/input/editing units):
+    - Flex grow/shrink, justification and cross alignment (stretch); anchors and pivots; aspect ratios; wrapping paragraph text with alignment and line spacing; images (stretch/contain, nine-slice); rounded and bordered backgrounds.
+    - Paint-only style changes skip layout; measurement is cached per subtree; paint is cached per node.
+    - Editable text: grapheme/word/line navigation, selection, clipboard callbacks, `MaxBytes`, submit, IME preedit with underline, caret reveal in clipped fields, `GetTextInputRect`. Wheel scrolling. A widget layer (`UiWidgets`) with button visual states.
+  - **Input:** `Systems/UiInput/UiInputBridge` applies an `Input::InputSystem` frame to a document (DPI, press/release, wheel, key repeats, ordered text, composition, focus loss). `InputSystem` gained `GetKeyPresses`, `GetTextEditEvents` (keys and text in event order) and `HasTextCompositionUpdate`; `WindowSystem` gained `SetTextInputArea`.
+  - **Rendering** (`Renderer/UiRendering`, `Shaders/Slang/Ui`, `SwimUiQuad`): `UiRenderer` records one pass with one instanced draw of 112-byte `GpuUiQuad`s in paint order — per-instance clipping in the vertex stage, bindless glyph pages and images, rounded/bordered SDF solids, MSDF glyphs with CPU-computed pixel ranges, premultiplied blending — composited onto sRGB, linear (`*Srgb`/float), HDR10 (PQ) or scRGB targets with a paper-white UI level. `UiAtlasTextures` uploads new pages whole and later only the changed row band, with commit/abort and timeline-retired pages. `UiRenderReference` (`Ui::`) is the CPU definition; `ShaderCompiler.UiLayout` pins the record layout; the GPU-AV budget counts 12 accesses.
+  - **Validation:** the Linux configuration passes **740 cases / 657,513 checks** (was 704 / 656,771 in this container; the documented Windows default suite was 714). 36 cases are new (57 in the focused Text/UI/rendering filter); the focused set also passes under AddressSanitizer/UndefinedBehaviorSanitizer/LeakSanitizer. `verify-build-layout.py` passes with the new boundary rules, each checked to fire on a planted violation. The native smoke `UiRendererMatchesTheCpuReference` ran on a source-built **SwiftShader** (no lavapipe in this container) with a draw-parameters-free shader variant: 159,840 pixels over five frames (sRGB, HDR10, scRGB, linear→`*Srgb`, grown atlas) with **0 outliers** (worst 6.3·10⁻³). That run found and fixed two bugs: the vertex stage ignored the RHI's +Y-up clip space (the image was flipped), and the float-target tolerance did not scale with scRGB white. See [the item 79 record](validation/Item79-2026-09-25.md).
+  - **Next:** run the native smoke on the RTX 4070 under all four profiles and record the 1080p UI budget; then the themeable control set (scroll bars, checkboxes, toggles, sliders, focus navigation) and world-space canvases (render surfaces, world panels, billboards, ray-cast input and shared focus) — see Phase 20; then runtime wiring with item 56. Contracts and commands are in [Text and retained UI](TextAndUi.md).
+- **Previous checkpoint — item 79, text and retained UI foundation (2026-09-24):** the first runtime portion of Phase 20.
   - `Systems/Text/FontFace` owns font bytes and FreeType/HarfBuzz resources. It shapes horizontal UTF-8 runs with byte clusters, language/script/direction options, kerning and ligatures, metrics, missing-glyph counts and immutable concurrent shaping. Arabic contextual shaping/RTL and four-byte code points are covered by a bundled, licensed font fixture.
   - `GlyphAtlas` converts FreeType line/quadratic/cubic outlines into top-down RGB8 MSDF pages. Fixed page/byte budgets, cache hits, stable placements, padding, page revisions and retained font ownership provide the CPU side of a future upload consumer. Spaces consume no texels; oversized/full-atlas requests fail without changing existing entries. Generation is synchronous; prewarm glyphs before time-critical rendering.
   - `Systems/UI/UiDocument` owns a retained hierarchy with unique node IDs, cycle/depth checks, intrinsic/preferred/percentage/min/max sizing, row/column/overlay flow, margins/padding/gaps, absolute offsets, logical DPI units, clipped scrolling and ordered solid/glyph paint quads. Paint colors are premultiplied linear RGBA. It has pointer hit-testing/capture/cancel, focus traversal, keyboard activation and queued events; removal/disable/hide invalidates focus and capture safely.
   - Layout skips unchanged documents; unchanged text assignments reuse shaped runs. A dirty layout currently recomputes the whole document and paint output is rebuilt on demand. Hard lines support LF/CRLF; paragraph bidi, fallback, wrapping, caret/selection and IME are not implemented. This is a UI foundation, not an editable widget toolkit.
   - Build wiring compiles the modules into `SwimEngine` and dependency-enabled `SwimTests`. Text libraries remain private; `SwimTextUiPublicHeaders` and `verify-build-layout.py` enforce public and subsystem boundaries. No sandbox scene constructs the new document and no RHI UI pass exists yet; legacy text/UI remains active until explicit migration.
   - **Validation:** 20 focused cases / 1,932 checks pass with the exact pinned dependencies in a standalone Linux build of the repository's new module and test sources (17 new cases plus the 3 dependency cases). The same cases pass with AddressSanitizer/UndefinedBehaviorSanitizer on first-party sources; LeakSanitizer is unavailable under this environment's process tracing. The repository layout verifier and actual CMake public-header target pass. Full engine/default-suite, MSVC and desktop validation were not run here.
-  - **Next:** add the RenderGraph UI renderer/atlas uploads and desktop smoke; then paragraph segmentation/fallback/wrapping and editable widgets. Keep item 79 open. Detailed contracts, reproduction commands and commit text are in [Text and retained UI](TextAndUi.md).
+  - **Cleanup (2026-09-25):** style validation, content boxes and glyph quads in `UiDocument` are split into named helpers; `FontFace` rasterization is split into outline→shape and bitmap-encoding helpers; `UiEvent::Kind` is default-initialized. `GlyphAtlas::GetChangedRows` reports the rows written since a revision (new `Text.Atlas` case) for partial page uploads. 21 Text/UI cases pass.
+  - **Followed by:** the paragraph, editing and UI rendering checkpoint above.
 - **Previous setup — item 79 text libraries (2026-09-24):** only the dependencies of Phase 20; no UI or text code yet.
   - `cmake/TextDependencies.cmake`, included from `CMakeLists.txt` after the platform dependencies, pins:
     - FreeType `VER-2-14-3`, with zlib, bzip2, PNG, Brotli and HarfBuzz disabled;
@@ -726,7 +741,7 @@ Current text code has useful MSDF work, but:
 - UI layering is mixed into `Transform` and clip-space Z rules;
 - UI interaction lives partly as scene behaviors/gizmo logic.
 
-**Target:** FreeType + HarfBuzz + MSDF atlas generation/caching, plus a retained runtime UI system with its own layout and hit-testing model. World-space text can still be a scene/render feature.
+**Target:** FreeType + HarfBuzz + MSDF atlas generation/caching, plus a retained runtime UI system with its own layout and hit-testing model. It needs a complete, themeable control set (buttons, text fields, scroll views and scroll bars, checkboxes, toggles, sliders) and focus navigation. Any UI document must also be displayable as a screen overlay, a render-surface texture, a world-space panel or a billboard, with pointer, keyboard and focus input in every mode.
 
 ### 2.14 Threading should become engine-wide infrastructure
 
@@ -872,6 +887,8 @@ Rules:
 | FreeType | `VER-2-14-3` | `Swim::TextDependencies` -> text/UI module (item 79) | yes, once the text module ships | Font faces, metrics and outlines. zlib/bzip2/PNG/Brotli/HarfBuzz integration disabled. |
 | HarfBuzz | `14.5.0` single-file `src/harfbuzz.cc` | `SwimHarfBuzz` -> `Swim::TextDependencies` | yes, once the text module ships | Unicode shaping with built-in Unicode data; no FreeType/ICU/GLib interop. |
 | msdfgen | `v1.13` core | `Swim::TextDependencies` | yes, once the text module ships | Glyph MSDF generation from Swim-built shapes. msdf-atlas-gen is not pinned: atlas packing is planned in Swim; revisit if that proves insufficient. |
+| SheenBidi | `v3.0.0` unity TU (`Source/SheenBidi.c`) | `SwimSheenBidi` -> `Swim::TextDependencies` | yes, once the text module ships | Unicode Bidirectional Algorithm (paragraphs, levels, per-line L1–L2 runs) and UAX #24 script runs, over UTF-8 byte offsets. Apache-2.0. |
+| libunibreak | `libunibreak_8_0` library sources (Makefile.am set) | `SwimUnibreak` -> `Swim::TextDependencies` | yes, once the text module ships | UAX #14 line breaking and UAX #29 grapheme/word boundaries (Unicode 17). zlib licence. |
 | Slang compiler SDK | `2026.16.1` official release ZIP + SHA-256 | `SwimSlangCompiler` build tool -> `Swim::ShaderCompiler` metadata tooling | no | Build-only `slangc`; emits SPIR-V, reflection JSON, and depfiles. Slang implementation libraries/types are not linked into runtime or exposed by public shader metadata headers. |
 
 `no*` means the normal compiled-asset runtime does not need the dependency; a development build with in-process auto-cooking may intentionally include the asset compiler.
@@ -4282,58 +4299,107 @@ Particles are a GPU Scene/render-graph producer, not thousands of normal EnTT me
 
 ### Text and retained UI foundation checkpoint — 2026-09-24
 
-See [Text and retained UI](TextAndUi.md) for API contracts, build/test commands and remaining work. Item 79 is **partially implemented**, not checked off as a complete runtime renderer/widget toolkit.
+Font faces, run shaping, the MSDF atlas and the retained `UiDocument` foundation.
+
+### Paragraph, editing and UI rendering checkpoint — 2026-09-25
+
+See [Text and retained UI](TextAndUi.md) for contracts, commands and remaining work, and [the item 79 record](validation/Item79-2026-09-25.md). Item 79 is **implemented but open**: the native smoke has not run on the desktop yet, and no runtime path constructs the UI renderer until the modern renderer presents frames (item 56). Also still required: the control set with theming and world-space/render-surface canvases (see the two sections below).
 
 ### Separate UI from world Transform hacks
 
 - [x] Dedicated retained `UiDocument`, document-owned nodes, `UiNodeId`, `UiStyle`, canvas layout and paint records, independent of Scene/Transform/RHI/SDL.
 - [x] Safe hierarchy ownership, cycle/depth checks, subtree removal and stale/cross-document ID rejection.
 - [x] Clipped scrolling, hit-testing in reverse paint order, pointer capture/cancellation, focus traversal and activation through queued events.
-- [ ] Widget layer: `UiImage`, `UiText`, `UiButton`, `UiScrollView`, `UiInputField`. *(Text, button activation and scroll mechanics exist on generic nodes; dedicated widgets, editing and image resources remain.)*
-- [ ] Platform/Input adapter and sandbox migration. *(Consumers currently call the document directly.)*
+- [x] Widget layer: images (`SetImage`, `CreateImage`, stretch/contain, nine-slice), text (`CreateLabel`), buttons (`CreateButton`, `UiButtonStates` hover/pressed/focus visuals), scroll views (`CreateScrollView`, `Wheel`), input fields (`CreateTextField`, `SetEditable`). *(Nodes with conventional styles, not a separate widget class hierarchy.)*
+- [x] Platform/Input adapter (`Systems/UiInput/UiInputBridge`; `InputSystem` text-edit events and composition updates; `WindowSystem::SetTextInputArea`).
+- [ ] Sandbox migration. *(Needs the modern renderer to present frames, item 56; legacy text/UI stays active.)*
+
+### Controls (required, not started)
+
+Every control is built from ordinary document nodes and events and is driven only through `UiDocument` input (pointer, wheel, keys, focus, activation). None reads the platform or `InputSystem` directly, so the same control works on a screen canvas and on a world-space canvas.
+
+- [ ] **Scroll bars:** vertical and horizontal, attached to any scroll view or clipped node. Thumb size follows the viewport/content ratio (with a minimum length). Drag the thumb with pointer capture; click the track to page; optional step buttons; wheel and keyboard (arrows, Page Up/Down, Home/End) when focused. Visibility modes: always, auto (only on overflow) and overlay (fades after inactivity). The bar stays in sync when content, viewport or scroll offset changes from code.
+- [ ] **Checkboxes:** checked, unchecked and indeterminate states. Toggled by click, Space or Enter; an optional label that is also a hit target; a `ValueChanged` event.
+- [ ] **Toggles (switches):** on/off with an animated knob. Click, drag or keyboard; the same `ValueChanged` contract as checkboxes.
+- [ ] **Sliders:** horizontal and vertical; float or integer range with optional step snapping. Drag with pointer capture, click the track to jump or page (configurable), wheel, and arrow/Page/Home/End keys when focused. Optional value label and tick marks. `ValueChanged` while dragging and `ValueCommitted` on release.
+- [ ] **Shared control contract:** `ValueChanged`/`ValueCommitted` events in `UiEvent`; set values from code without emitting user events; disabled and read-only states (no hover, press or focus; dimmed style); keyboard focus visuals.
+- [ ] **Focus navigation:** Tab/Shift+Tab order (document order by default, explicit tab index override), directional (arrow/gamepad D-pad) navigation between focusable controls, and activation with Enter/Space or gamepad A. The bridge maps gamepad input the same way it maps keyboard input.
+- [ ] **Customization and theming:**
+  - every control exposes its parts (track, thumb, fill, knob, check mark, label) as normal nodes that can be styled or replaced;
+  - a per-state style set (normal, hover, pressed, focused, disabled, checked) generalizing `UiButtonColors`/`UiButtonStates` to all controls;
+  - a document-level theme (colors, corner radii, borders, font chain and sizes, spacing, control dimensions) with per-node overrides;
+  - image/nine-slice skins for any part;
+  - optional state transitions (color and position easing), a no-op when duration is 0;
+  - existing widgets (buttons, labels, images, text fields, scroll views) move onto the same theme and state-style model.
+- [ ] **Tests:** CPU tests for every control's pointer, keyboard, disabled and value-from-code paths; theme overrides without relayout for paint-only changes; the same interaction tests repeated through a world-space canvas (below).
+
+### World-space and render-surface canvases (required, not started)
+
+A `UiDocument` stays a 2D canvas in logical units. Where it is shown is decided by the renderer and one input mapping, not by the document, so every control and widget above works unchanged in each mode.
+
+- [ ] **Canvas placement modes:**
+  - **Screen:** the current overlay on the swapchain or any color target (`UiRenderFrame`, done).
+  - **Render surface:** the document renders into its own color texture (size, DPI and clear color per canvas). The texture is a normal bindless texture, so any material, mesh or post pass can sample it (monitors, in-game screens, mirrors of UI).
+  - **World panel:** the canvas is placed on a quad in world space with a transform, physical size (world units per canvas unit) and pivot. Draw it either directly (UI quads transformed by the panel matrix, depth tested, correct order with transparents) or through a render surface on a mesh (fixed cost, mip-mapped when far away).
+  - **Billboard:** a world panel that faces the camera — fully (spherical), around an up axis (cylindrical), or screen-aligned. Optional constant screen size (scale by distance), distance fade and occlusion (depth-tested or always on top).
+- [ ] **Rendering requirements:** the quad shader gains a world/view-projection path (a per-canvas transform in the draw constants) while keeping per-instance clipping in canvas space. MSDF text stays sharp at any distance and angle (screen-space pixel range from derivatives instead of the CPU-computed range). World panels use depth, sorting and fog like other transparents, and support HDR composition with a paper-white level per canvas. Many canvases per frame, each still one draw, with render-surface canvases only re-rendered when their paint list changed.
+- [ ] **Input and focus in world space:**
+  - a pointer (mouse, crosshair or VR/controller ray) is ray-cast against panel quads or render-surface meshes (hit mesh → UV → canvas coordinates);
+  - the nearest hit canvas receives `PointerMove`/`PointerDown`/`PointerUp`/`Wheel` in its own logical units;
+  - pointer capture follows the canvas that received the press, even when the ray leaves it (drag a world-space slider);
+  - a single engine-level focus owner decides which canvas (screen or world) receives keys, text and IME. IME and the candidate window use the projected caret rectangle;
+  - canvases can be set to non-interactive (display only) or to block the pointer from reaching the world behind them.
+- [ ] **API/ownership:** a canvas component (document handle, placement mode, transform or target texture, size, DPI, interactivity) owned by the scene/ECS. `Systems/UI` remains independent of Scene/RHI/SDL; the placement, ray casting and projection code lives in the renderer and in a scene-side UI system.
+- [ ] **Tests:**
+  - CPU tests for ray → canvas mapping (rotated, scaled and billboarded panels; back-face and edge hits);
+  - capture across frames while the ray leaves the panel;
+  - focus handoff between screen and world canvases;
+  - a native smoke drawing one document as a screen overlay, a render surface on a mesh and a billboard, compared with the CPU reference in canvas space.
 
 ### Layout
 
 - [x] measure -> layout -> paint;
 - [x] parent/child hierarchy;
-- [ ] anchors;
+- [x] anchors; *(min/max anchors with pivots for absolute children; stretch between different anchors)*
 - [x] margin/padding;
 - [x] min/max/preferred size;
-- [x] row/column stacks and overlay layout; *(flex grow/shrink/alignment remain)*
+- [x] row/column stacks and overlay layout; flex grow/shrink, justification and cross alignment/stretch; *(no wrapping flex lines, no baseline alignment)*
 - [x] absolute placement;
-- [ ] aspect ratio;
+- [x] aspect ratio;
 - [x] percentage sizing; *(resolved against final parent content; percentage contributions on an intrinsic parent axis are zero during measurement)*
 - [x] DPI-aware logical units;
-- [x] scrolling/clipping;
+- [x] scrolling/clipping; *(wheel scrolling of the innermost scrollable clip)*
 - [x] document-level dirty layout invalidation and reuse of unchanged shaped text;
-- [ ] subtree-only layout invalidation and cached paint-list updates. *(A dirty document currently recomputes layout; Paint rebuilds output.)*
+- [x] subtree-only layout invalidation and cached paint-list updates. *(Measure results are cached per subtree and paint per node; paint-only style changes skip layout. Arrangement still visits every node.)*
 
 ### Text
 
 - [x] FreeType scalable Unicode OpenType font loading, metrics and outline decomposition;
 - [x] HarfBuzz horizontal run shaping;
 - [x] UTF-8 byte clusters, combining marks, ligatures, kerning and non-BMP code points;
-- [ ] font fallback; *(missing glyphs are counted, never silently substituted by an OS font)*
+- [x] font fallback; *(ordered `FontCollection` chains per grapheme cluster; never an OS font)*
 - [x] homogeneous RTL/script runs; *(Arabic contextual shaping covered)*
-- [ ] paragraph bidi/script segmentation; *(explicit run-level contract; HarfBuzz guessing is not a bidi algorithm)*
-- [ ] Unicode line breaking/wrapping; *(LF/CRLF hard lines only)*
-- [ ] selection/caret;
-- [ ] IME visualization;
+- [x] paragraph bidi/script segmentation; *(UAX #9 via SheenBidi, including L1–L2 per line; UAX #24 script runs)*
+- [x] Unicode line breaking/wrapping; *(UAX #14 via libunibreak; hanging spaces, emergency grapheme breaks, alignment)*
+- [x] selection/caret; *(grapheme/word/line movement is logical; ligatures split carets)*
+- [x] IME visualization; *(preedit at the caret with underline, candidate-window rectangle)*
 - [x] MSDF atlas pages, bounded packing, stable UVs and page revisions;
-- [ ] async atlas generation, GPU uploads/residency and timeline-safe atlas retirement.
+- [x] GPU uploads/residency and timeline-safe atlas retirement (`UiAtlasTextures`); parallel atlas prewarm (`GlyphAtlas::Prewarm`, `UiDocument::PrewarmGlyphs`);
+- [ ] background (cross-frame) atlas population and atlas eviction.
 
 ### Rendering
 
-- [x] Backend-neutral ordered solid/glyph quad output with clip rectangles, UVs and MSDF distance range;
-- [ ] batched instanced quad RenderGraph pass;
-- [ ] bindless images/glyph atlases;
-- [ ] rounded/SDF primitives;
-- [ ] borders/nine-slice;
-- [ ] GPU clipping/scissor indexing; *(CPU paint/hit-test clip intersections exist)*
+- [x] Backend-neutral ordered solid/glyph/image quad output with clip rectangles, UVs and MSDF distance range;
+- [x] batched instanced quad RenderGraph pass; *(one draw per document)*
+- [x] bindless images/glyph atlases;
+- [x] rounded/SDF primitives;
+- [x] borders/nine-slice;
+- [x] GPU clipping/scissor indexing; *(per-instance clipping of axis-aligned quads in the vertex stage; clips are rectangles)*
 - [x] premultiplied linear alpha paint policy;
-- [ ] HDR-aware composition and native image-regression smoke.
+- [x] HDR-aware composition (sRGB, linear/`*Srgb`, HDR10 PQ, scRGB with paper white);
+- [ ] native image-regression smoke passing on the desktop. *(`RHI.Vulkan.Smoke.UiRendererMatchesTheCpuReference` is implemented; not yet executed on a GPU.)*
 
-World-space text can reuse the new shaping/atlas services while producing world render instances. The current sandbox still uses legacy text/UI; this checkpoint does not rewire it.
+World-space text and world-space UI both reuse the shaping/atlas services and the same retained document; see *World-space and render-surface canvases* above. The current sandbox still uses legacy text/UI; this checkpoint does not rewire it.
 
 ---
 
@@ -4968,7 +5034,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 76. [x] optional AO/SSR/fog modules. *(2026-09-24: GTAO, SSR and height fog — Forward+ normal, indirect, reflectance and specular targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). Native smokes pass all four profiles on the RTX 4070 and on Mesa lavapipe.)*
 77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe.)*
 78. [x] animation/skinning/morphs. *(2026-09-24: glTF skins/animations/morphs, `.sasset` skeleton and clip types, `Systems/Animation`, `Renderer/Skinning` + `Shaders/Slang/Skinning`, Forward+ previous-position motion vectors; [Animation and skinning](Animation.md). Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe; 64 × 1,032-vertex skinning 0.054–0.074 ms. Engine wiring remains item 56.)*
-79. [ ] runtime UI + HarfBuzz/FreeType/MSDF. *(2026-09-24: font faces, horizontal run shaping, bounded MSDF atlas pages and retained UI layout/paint/input foundation implemented; 20 focused cases pass. RHI quad rendering/atlas uploads, full paragraph text handling, editable widgets and sandbox migration remain. See [Text and retained UI](TextAndUi.md) and Phase 20 checkoffs.)*
+79. [ ] runtime UI + HarfBuzz/FreeType/MSDF. *(2026-09-24: font faces, run shaping, MSDF atlas and retained UI foundation. 2026-09-25: fallback chains, bidi/script/line-break paragraph layout, carets and IME editing, flex/anchor/aspect layout with caches, images and rounded/bordered solids, widgets, the Input → UI bridge and `Renderer/UiRendering` — one-draw RenderGraph UI pass, atlas residency, SDR/HDR composition, CPU reference; 740 Linux cases pass. Open: the native smoke on the desktop; the control set (scroll bars, checkboxes, toggles, sliders, focus navigation) with theming and per-state styles; world-space/render-surface/billboard canvases with ray-cast input and shared focus; runtime wiring and sandbox migration (item 56). See [Text and retained UI](TextAndUi.md) and [the item 79 record](validation/Item79-2026-09-25.md).)*
 80. [ ] miniaudio audio system.
 81. [ ] `.spack` streaming/residency budgets/eviction.
 
