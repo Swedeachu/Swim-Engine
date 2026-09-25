@@ -2,7 +2,7 @@
 #include "Engine/Systems/Text/Utf8.h"
 
 #include <algorithm>
-
+#include <limits>
 #include <stdexcept>
 
 namespace Swim::UI
@@ -58,11 +58,24 @@ namespace Swim::UI
 				impl->Events.push_back({ UiEventKind::Enter, hit });
 			}
 		}
-		// Drag selection continues outside the node's bounds.
+		// Drag selection and control drags continue outside the node's bounds.
 		if (impl->Selecting && impl->Selecting == impl->Pressed && Finite(point))
 		{
 			auto& node = impl->Get(impl->Selecting);
 			impl->SetCaret(node, impl->TextHit(node, { point.X / impl->Dpi, point.Y / impl->Dpi }), true);
+		}
+		if (impl->Dragging && Finite(point))
+		{
+			impl->ControlPointerMove({ point.X / impl->Dpi, point.Y / impl->Dpi });
+		}
+	}
+
+	void UiDocument::PointerLeave()
+	{
+		if (impl->Hover)
+		{
+			impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
+			impl->Hover = {};
 		}
 	}
 
@@ -82,6 +95,10 @@ namespace Swim::UI
 				impl->SetCaret(node, impl->TextHit(node, { point.X / impl->Dpi, point.Y / impl->Dpi }), modifiers.Shift);
 				impl->Selecting = node.Id;
 			}
+			if (impl->IsControl(node) && Finite(point))
+			{
+				impl->ControlPointerDown(node, { point.X / impl->Dpi, point.Y / impl->Dpi });
+			}
 		}
 	}
 
@@ -91,6 +108,10 @@ namespace Swim::UI
 		impl->Selecting = {};
 		if (impl->Pressed)
 		{
+			if (impl->IsControl(impl->Get(impl->Pressed)))
+			{
+				impl->ControlPointerUp(impl->Get(impl->Pressed), impl->Pressed == impl->Hover);
+			}
 			impl->Events.push_back({ UiEventKind::Release, impl->Pressed });
 			if (impl->Pressed == impl->Hover)
 			{
@@ -103,6 +124,10 @@ namespace Swim::UI
 	void UiDocument::CancelPointer()
 	{
 		impl->Selecting = {};
+		if (impl->Dragging)
+		{
+			impl->EndDrag(true); // Keeps (and commits) the value reached so far.
+		}
 		if (impl->Pressed)
 		{
 			impl->Events.push_back({ UiEventKind::Cancel, impl->Pressed });
@@ -119,6 +144,17 @@ namespace Swim::UI
 			return false;
 		}
 		const UiPoint point{ framebufferPoint.X / impl->Dpi, framebufferPoint.Y / impl->Dpi };
+		// Scroll bars under the pointer scroll their target; a focused slider under the
+		// pointer steps its value. Anything else scrolls the innermost clipped node.
+		if (const auto hit = HitTest(framebufferPoint))
+		{
+			auto& node = impl->Get(hit);
+			const auto kind = node.Control.Kind;
+			if (kind == UiControlKind::ScrollBar || (kind == UiControlKind::Slider && impl->Focused == hit))
+			{
+				return impl->ControlWheel(node, delta);
+			}
+		}
 		for (auto it = impl->Order.rbegin(); it != impl->Order.rend(); ++it)
 		{
 			auto& node = impl->Get(*it);
@@ -167,19 +203,37 @@ namespace Swim::UI
 		}
 	}
 
-	void UiDocument::FocusNext(bool backwards)
+	std::vector<UiNodeId> UiDocument::Impl::TabOrder() const
 	{
-		EnsureLayout();
-		impl->RequireLayout();
 		std::vector<UiNodeId> candidates;
-		for (auto id : impl->Order)
+		for (auto id : Order)
 		{
-			const auto& node = impl->Get(id);
-			if (node.Active && impl->IsFocusable(node))
+			const auto& node = Get(id);
+			if (node.Active && IsFocusable(node) && node.Style.TabIndex >= 0)
 			{
 				candidates.push_back(id);
 			}
 		}
+		// Positive indices first in ascending order, then 0 in document order.
+		std::stable_sort(candidates.begin(), candidates.end(),
+			[&](UiNodeId a, UiNodeId b)
+			{
+				const auto ia = Get(a).Style.TabIndex;
+				const auto ib = Get(b).Style.TabIndex;
+				if ((ia > 0) != (ib > 0))
+				{
+					return ia > 0;
+				}
+				return ia > 0 && ia < ib;
+			});
+		return candidates;
+	}
+
+	void UiDocument::FocusNext(bool backwards)
+	{
+		EnsureLayout();
+		impl->RequireLayout();
+		const auto candidates = impl->TabOrder();
 		if (candidates.empty())
 		{
 			Focus({});
@@ -193,12 +247,84 @@ namespace Swim::UI
 		Focus(candidates[next]);
 	}
 
+	bool UiDocument::Navigate(UiNavDirection direction)
+	{
+		EnsureLayout();
+		impl->RequireLayout();
+		const auto candidates = impl->TabOrder();
+		if (candidates.empty())
+		{
+			return false;
+		}
+		if (!impl->Focused || std::find(candidates.begin(), candidates.end(), impl->Focused) == candidates.end())
+		{
+			Focus(candidates.front());
+			return true;
+		}
+		const auto from = impl->Get(impl->Focused).Bounds;
+		const bool horizontal = direction == UiNavDirection::Left || direction == UiNavDirection::Right;
+		const float sign = direction == UiNavDirection::Right || direction == UiNavDirection::Down ? 1.0f : -1.0f;
+		UiNodeId best;
+		float bestScore = std::numeric_limits<float>::infinity();
+		for (const auto id : candidates)
+		{
+			if (id == impl->Focused)
+			{
+				continue;
+			}
+			const auto to = impl->Get(id).Bounds;
+			// Distance along the direction between facing edges (centers break ties for
+			// overlapping boxes), and the gap across it (0 when the boxes overlap).
+			const float fromLow = horizontal ? from.X : from.Y;
+			const float fromHigh = fromLow + (horizontal ? from.Width : from.Height);
+			const float toLow = horizontal ? to.X : to.Y;
+			const float toHigh = toLow + (horizontal ? to.Width : to.Height);
+			const float fromCenter = (fromLow + fromHigh) * 0.5f;
+			const float toCenter = (toLow + toHigh) * 0.5f;
+			if ((toCenter - fromCenter) * sign <= 0.5f)
+			{
+				continue;
+			}
+			const float primary = std::max(0.0f, sign > 0.0f ? toLow - fromHigh : fromLow - toHigh);
+			const float crossLowA = horizontal ? from.Y : from.X;
+			const float crossHighA = crossLowA + (horizontal ? from.Height : from.Width);
+			const float crossLowB = horizontal ? to.Y : to.X;
+			const float crossHighB = crossLowB + (horizontal ? to.Height : to.Width);
+			const float cross = std::max({ 0.0f, crossLowB - crossHighA, crossLowA - crossHighB });
+			const float score = primary + 2.0f * cross + 0.001f * std::abs(toCenter - fromCenter);
+			if (score < bestScore)
+			{
+				bestScore = score;
+				best = id;
+			}
+		}
+		if (!best)
+		{
+			return false;
+		}
+		Focus(best);
+		return true;
+	}
+
+	void UiDocument::SetArrowNavigation(bool enabled)
+	{
+		impl->ArrowNavigation = enabled;
+	}
+
 	void UiDocument::ActivateFocused()
 	{
-		if (impl->Focused)
+		if (!impl->Focused)
 		{
-			impl->Events.push_back({ UiEventKind::Click, impl->Focused });
+			return;
 		}
+		auto& node = impl->Get(impl->Focused);
+		const auto kind = node.Control.Kind;
+		if (kind == UiControlKind::Checkbox || kind == UiControlKind::Toggle)
+		{
+			impl->Toggle(node);
+			return;
+		}
+		impl->Events.push_back({ UiEventKind::Click, impl->Focused });
 	}
 
 	UiNodeId UiDocument::GetFocus() const
@@ -222,6 +348,10 @@ namespace Swim::UI
 		{
 			return impl->EditKey(node, key, modifiers);
 		}
+		if (impl->IsControl(node) && impl->ControlKey(node, key))
+		{
+			return true;
+		}
 		if (key == UiKey::Enter || key == UiKey::Space)
 		{
 			ActivateFocused();
@@ -231,6 +361,22 @@ namespace Swim::UI
 		{
 			Focus({});
 			return true;
+		}
+		if (impl->ArrowNavigation)
+		{
+			switch (key)
+			{
+			case UiKey::Left:
+				return Navigate(UiNavDirection::Left);
+			case UiKey::Right:
+				return Navigate(UiNavDirection::Right);
+			case UiKey::Up:
+				return Navigate(UiNavDirection::Up);
+			case UiKey::Down:
+				return Navigate(UiNavDirection::Down);
+			default:
+				break;
+			}
 		}
 		return false;
 	}

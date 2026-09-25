@@ -426,6 +426,19 @@ namespace Swim::UI
 		{
 			placed[item.Slot].second = item.Rect;
 		}
+		// Control parts with geometry roles (slider track/fill/thumb, scroll bar thumb,
+		// toggle knob) are placed by their control instead of the flow.
+		for (auto& [id, rect] : placed)
+		{
+			const auto& child = Get(id);
+			if (child.PartOf)
+			{
+				if (const auto geometry = PartGeometry(child, inner))
+				{
+					rect = *geometry;
+				}
+			}
+		}
 		for (const auto& [id, rect] : placed)
 		{
 			const auto& cs = Get(id).Style;

@@ -1,3 +1,4 @@
+#include "Engine/Systems/UI/UiWidgets.h"
 #include "Engine/Systems/UiInput/UiInputBridge.h"
 #include "Tests/Fixtures/TextFontFixture.h"
 #include "Tests/Framework/Test.h"
@@ -74,7 +75,41 @@ namespace
 			event.Delta = { 0.0f, y };
 			Input.ProcessInputEvent(event);
 		}
+
+		void Pad(Platform::InputDeviceId device)
+		{
+			Platform::InputEvent event{};
+			event.Type = Platform::InputEventType::GamepadAdded;
+			event.Device = device;
+			Input.ProcessInputEvent(event);
+		}
+
+		void PadButton(Platform::InputDeviceId device, Platform::GamepadButton button, bool down)
+		{
+			Platform::InputEvent event{};
+			event.Type = down ? Platform::InputEventType::GamepadButtonDown : Platform::InputEventType::GamepadButtonUp;
+			event.Device = device;
+			event.Gamepad = button;
+			Input.ProcessInputEvent(event);
+		}
+
+		void PadAxis(Platform::InputDeviceId device, Platform::GamepadAxis axis, float value)
+		{
+			Platform::InputEvent event{};
+			event.Type = Platform::InputEventType::GamepadAxisMotion;
+			event.Device = device;
+			event.Axis = axis;
+			event.AxisValue = value;
+			Input.ProcessInputEvent(event);
+		}
 	};
+
+	std::shared_ptr<UiTheme> FontTheme()
+	{
+		auto theme = std::make_shared<UiTheme>();
+		theme->Fonts = Swim::Testing::LoadTextFontChain();
+		return theme;
+	}
 } // namespace
 
 SWIM_TEST("UiInput.Bridge", "RoutesPointerKeysTextCompositionAndFocusLoss")
@@ -201,9 +236,152 @@ SWIM_TEST("UiInput.Bridge", "WheelScrollsAndShortcutModifierIsConfigurable")
 	SWIM_CHECK(!result.PointerOverUi); // Scrollable, but not hit-testable.
 	ui.Layout({ 400, 400 });
 	SWIM_CHECK_NEAR(ui.GetScroll(list).Y, 96.0f, 1e-4f);
-	SWIM_CHECK_THROWS(UiInputBridge({ 0.0f }), std::invalid_argument);
+	UiInputBridgeDesc invalid;
+	invalid.FramebufferScale = 0.0f;
+	SWIM_CHECK_THROWS(UiInputBridge{ invalid }, std::invalid_argument);
+	invalid = {};
+	invalid.RepeatIntervalSeconds = 0.0f;
+	SWIM_CHECK_THROWS(UiInputBridge{ invalid }, std::invalid_argument);
 	UiInputBridgeDesc mac;
 	mac.Shortcut = UiShortcutModifier::Super;
 	UiInputBridge macBridge(mac);
 	(void)macBridge;
+}
+
+SWIM_TEST("UiInput.Bridge", "GamepadNavigatesAdjustsSlidersActivatesAndRepeatsHeldDirections")
+{
+	using B = Platform::GamepadButton;
+	UiDocument ui;
+	ui.SetTheme(FontTheme());
+	const auto checkbox = CreateCheckbox(ui, ui.GetRoot(), "Invert Y");
+	const auto slider = CreateSlider(ui, ui.GetRoot(), { .Min = 0.0f, .Max = 10.0f, .Step = 1.0f });
+	const auto button = CreateButton(ui, ui.GetRoot(), "Back");
+	ui.Layout({ 400, 300 });
+	Input::InputSystem input;
+	Frame frame{ input };
+	constexpr Platform::InputDeviceId pad = 7;
+	frame.Pad(pad);
+	UiInputBridgeDesc desc;
+	desc.Gamepad = pad;
+	UiInputBridge bridge(desc);
+	const auto press = [&](B buttonId, float seconds = 0.016f)
+	{
+		frame.PadButton(pad, buttonId, true);
+		input.AdvanceFrame();
+		const auto result = bridge.Apply(input, ui, seconds);
+		frame.PadButton(pad, buttonId, false);
+		input.AdvanceFrame();
+		bridge.Apply(input, ui, seconds);
+		return result;
+	};
+
+	// The first direction focuses the first control; South activates.
+	auto result = press(B::DpadDown);
+	SWIM_CHECK(ui.GetFocus() == checkbox);
+	SWIM_CHECK(result.GamepadCaptured);
+	press(B::South);
+	SWIM_CHECK(ui.GetChecked(checkbox) == UiCheckState::Checked);
+	press(B::DpadDown);
+	SWIM_CHECK(ui.GetFocus() == slider);
+
+	// Right adjusts the focused slider; holding repeats after the delay.
+	frame.PadButton(pad, B::DpadRight, true);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.016f);
+	SWIM_CHECK_NEAR(ui.GetValue(slider), 1.0f, 1e-6f);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.3f);
+	SWIM_CHECK_NEAR(ui.GetValue(slider), 1.0f, 1e-6f); // Within the repeat delay.
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.15f);
+	SWIM_CHECK_NEAR(ui.GetValue(slider), 2.0f, 1e-6f);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.1f);
+	SWIM_CHECK_NEAR(ui.GetValue(slider), 3.0f, 1e-6f);
+	frame.PadButton(pad, B::DpadRight, false);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.016f);
+
+	// The left stick navigates past its threshold (one step per push).
+	frame.PadAxis(pad, Platform::GamepadAxis::LeftY, 0.9f);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.016f);
+	SWIM_CHECK(ui.GetFocus() == button);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.016f);
+	SWIM_CHECK(ui.GetFocus() == button);
+	frame.PadAxis(pad, Platform::GamepadAxis::LeftY, 0.1f);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui, 0.016f);
+	press(B::South);
+	SWIM_CHECK_EQUAL(Count(ui.DrainEvents(), UiEventKind::Click, button), 1u);
+
+	// East is Escape; the shoulders are Shift+Tab / Tab.
+	result = press(B::East);
+	SWIM_CHECK(!ui.GetFocus());
+	press(B::RightShoulder);
+	SWIM_CHECK(ui.GetFocus() == checkbox);
+	press(B::LeftShoulder);
+	SWIM_CHECK(ui.GetFocus() == button);
+
+	// Without a configured gamepad the pad is left to the game.
+	UiInputBridge keyboardOnly;
+	ui.Focus({});
+	frame.PadButton(pad, B::DpadDown, true);
+	input.AdvanceFrame();
+	SWIM_CHECK(!keyboardOnly.Apply(input, ui, 0.016f).GamepadCaptured);
+	SWIM_CHECK(!ui.GetFocus());
+	SWIM_CHECK_THROWS(bridge.Apply(input, ui, -1.0f), std::invalid_argument);
+}
+
+SWIM_TEST("UiInput.Bridge", "RouterFramesCastTheMouseIntoWorldCanvasesThroughTheCamera")
+{
+	UiDocument world;
+	world.SetTheme(FontTheme());
+	const auto button = CreateButton(world, world.GetRoot(), "Open");
+	world.Layout({ 400, 200 });
+	UiCameraView camera;
+	camera.View = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, -5, 0, 0, 0, 1 };
+	camera.Projection = { 0.75f, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0.1f, 0, 0, -1, 0 };
+	camera.ViewportWidth = 800.0f;
+	camera.ViewportHeight = 600.0f;
+	UiCanvasRouter router;
+	UiCanvasDesc canvasDesc;
+	canvasDesc.Document = &world;
+	canvasDesc.Mode = UiCanvasMode::WorldPanel;
+	const auto canvas = router.Add(canvasDesc);
+	UiWorldPlacement placement;
+	placement.UnitsPerPixel = 0.01f;
+	const auto toWorld = CanvasToWorld(UiCanvasMode::WorldPanel, placement, { 400, 200 });
+	router.SetWorldPlacement(canvas, toWorld, { 400, 200 });
+	const auto bounds = world.GetBounds(button);
+	const auto pixel = ProjectCanvasPoint(
+		ClipFromCanvas(toWorld, camera), { 800, 600 }, { bounds.X + bounds.Width * 0.5f, bounds.Y + bounds.Height * 0.5f });
+	SWIM_REQUIRE(pixel.has_value());
+
+	Input::InputSystem input;
+	Frame frame{ input };
+	UiInputBridge bridge;
+	frame.Mouse(pixel->X, pixel->Y);
+	frame.Button(true, pixel->X, pixel->Y);
+	input.AdvanceFrame();
+	auto result = bridge.Apply(input, router, &camera);
+	SWIM_CHECK(result.PointerOverUi);
+	SWIM_CHECK(router.GetFocused() == canvas);
+	SWIM_CHECK(result.KeyboardCaptured);
+	frame.Button(false, pixel->X, pixel->Y);
+	input.AdvanceFrame();
+	bridge.Apply(input, router, &camera);
+	SWIM_CHECK_EQUAL(Count(world.DrainEvents(), UiEventKind::Click, button), 1u);
+	// Without a camera only screen canvases can be hit.
+	input.AdvanceFrame();
+	SWIM_CHECK(!bridge.Apply(input, router).PointerOverUi);
+	// Focus loss clears the router's focus.
+	Platform::WindowEvent lost{};
+	lost.Type = Platform::WindowEventType::FocusLost;
+	input.ProcessWindowEvent(lost);
+	input.AdvanceFrame();
+	bridge.Apply(input, router, &camera);
+	SWIM_CHECK(!router.GetFocused());
+	SWIM_CHECK(!world.GetFocus());
 }

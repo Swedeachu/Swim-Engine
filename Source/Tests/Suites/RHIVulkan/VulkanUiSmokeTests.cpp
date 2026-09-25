@@ -11,7 +11,9 @@
 // SwimTests only when the text dependencies are, which also defines the font path).
 #if defined(SWIM_UI_QUAD_SPIRV_PATH) && defined(SWIM_UI_QUAD_REFLECTION_PATH) && defined(SWIM_TEXT_FONT_FIXTURE_PATH) &&                   \
 	defined(SWIM_TEXT_FALLBACK_FONT_FIXTURE_PATH)
-#include "Engine/Systems/Renderer/UiRendering/UiRenderer.h"
+#include "Engine/Systems/Renderer/UiRendering/UiRenderSurfaces.h"
+#include "Engine/Systems/UI/UiCanvas.h"
+#include "Engine/Systems/UI/UiWidgets.h"
 #include "Tests/Fixtures/TextFontFixture.h"
 #include "Tests/Fixtures/VulkanEnvironmentFixture.h"
 #define SWIM_UI_SMOKE_AVAILABLE 1
@@ -59,8 +61,13 @@ namespace
 		std::unique_ptr<Swim::Rhi::ShaderProgram> Program;
 		std::unique_ptr<Swim::Rhi::PipelineLayout> Layout;
 		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> Pipelines;
+		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> DepthPipelines; // D32Float scene depth.
 
-		Swim::Render::UiRenderProgram Get(Swim::Rhi::Format format) const { return { Pipelines.at(format).get(), Layout.get() }; }
+		Swim::Render::UiRenderProgram Get(Swim::Rhi::Format format) const
+		{
+			const auto depth = DepthPipelines.find(format);
+			return { Pipelines.at(format).get(), Layout.get(), depth == DepthPipelines.end() ? nullptr : depth->second.get() };
+		}
 	};
 
 	UiProgram LoadUi(Swim::Rhi::Device& device, const Swim::Rhi::DescriptorSchemaDesc& bindlessSpace)
@@ -82,6 +89,9 @@ namespace
 				device.CreateGraphicsPipeline(Render::UiRenderer::PipelineDesc(format, *program.Program, *program.Layout));
 			SWIM_REQUIRE(program.Pipelines[format]);
 		}
+		program.DepthPipelines[Rhi::Format::RGBA16Float] = device.CreateGraphicsPipeline(
+			Render::UiRenderer::PipelineDesc(Rhi::Format::RGBA16Float, *program.Program, *program.Layout, Rhi::Format::D32Float));
+		SWIM_REQUIRE(program.DepthPipelines[Rhi::Format::RGBA16Float]);
 		return program;
 	}
 
@@ -588,6 +598,513 @@ namespace
 #endif
 	}
 
+#ifdef SWIM_UI_SMOKE_AVAILABLE
+	float SrgbEotf(float encoded)
+	{
+		return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+	}
+
+	// Pixels whose canvas point lies within 1/50 of a pixel footprint of a clipped quad
+	// edge (or that see no canvas) may round either way on hardware.
+	std::vector<bool> AmbiguousProjected(std::span<const Swim::Render::GpuUiQuad> quads, const Swim::Render::GpuUiDrawConstants& constants,
+		std::uint32_t width, std::uint32_t height)
+	{
+		std::vector<bool> ambiguous(std::size_t(width) * height, false);
+		for (std::uint32_t y = 0; y < height; ++y)
+		{
+			for (std::uint32_t x = 0; x < width; ++x)
+			{
+				const auto sample = R::CanvasAt(constants, float(x) + 0.5f, float(y) + 0.5f);
+				auto flag = ambiguous[std::size_t(y) * width + x]; // A std::vector<bool> proxy.
+				if (!sample)
+				{
+					flag = true;
+					continue;
+				}
+				const float ex = 0.02f * sample->FootprintX;
+				const float ey = 0.02f * sample->FootprintY;
+				for (const auto& quad : quads)
+				{
+					const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
+					const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
+					const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
+					const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+					const bool inX = sample->X > x0 - ex && sample->X < x1 + ex;
+					const bool inY = sample->Y > y0 - ey && sample->Y < y1 + ey;
+					if ((inY && (std::abs(sample->X - x0) < ex || std::abs(sample->X - x1) < ex)) ||
+						(inX && (std::abs(sample->Y - y0) < ey || std::abs(sample->Y - y1) < ey)))
+					{
+						flag = true;
+						break;
+					}
+				}
+			}
+		}
+		return ambiguous;
+	}
+#endif
+
+	// Critical-path item 79, world canvases on a real device: the smoke document drawn as
+	// a world panel into an HDR scene target through orthographic (1:1) and perspective
+	// cameras (a rotated panel and an off-axis billboard), depth tested against scene
+	// depth (visible, then fully occluded), faded by canvas opacity, and as a render
+	// surface with a re-rasterized mip chain that a world panel then samples. Every image
+	// is read back and compared with Ui::RasterizeProjected / Ui::Rasterize.
+	void RunUiWorldSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
+	{
+#ifndef SWIM_UI_SMOKE_AVAILABLE
+		SWIM_REQUIRE_MESSAGE(false, "UI smoke requires generated Slang artifacts and the text/UI module");
+#else
+		using namespace Swim;
+		using namespace Swim::Render;
+
+		Platform::PlatformSystem platform;
+		SWIM_REQUIRE_MESSAGE(platform.Initialize(), "UI smoke requires working SDL Vulkan platform services");
+		auto graphics = RhiVulkan::CreateGraphicsSystem(graphicsDesc);
+		SWIM_REQUIRE(graphics);
+		Testing::RequireVulkanSmokeValidation(*graphics, graphicsDesc.Checks);
+		SWIM_REQUIRE_MESSAGE(
+			graphics->GetAdapter(0).GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
+		auto device = graphics->GetAdapter(0).CreateDevice();
+		SWIM_REQUIRE(device);
+		const auto bindlessSpace = ForwardPlusBindlessSpace(16, 4);
+		const auto program = LoadUi(*device, bindlessSpace);
+		RenderGraphExecutor executor(*device);
+
+		Rhi::TextureDesc whiteDesc;
+		whiteDesc.Extent = { 1, 1, 1 };
+		whiteDesc.PixelFormat = Rhi::Format::RGBA8Unorm;
+		whiteDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+		auto white = device->CreateTexture(whiteDesc);
+		auto imageDesc = whiteDesc;
+		imageDesc.Extent = { ImageSize, ImageSize, 1 };
+		auto image = device->CreateTexture(imageDesc);
+		SWIM_REQUIRE(white && image);
+		Rhi::TextureViewDesc viewDesc;
+		viewDesc.PixelFormat = Rhi::Format::RGBA8Unorm;
+		auto whiteView = device->CreateTextureView(*white, viewDesc);
+		auto imageView = device->CreateTextureView(*image, viewDesc);
+		Rhi::SamplerDesc samplerDesc{};
+		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
+		samplerDesc.MipFilter = Rhi::Filter::Nearest;
+		samplerDesc.MaxLod = 0.0f;
+		auto sampler = device->CreateSampler(samplerDesc);
+		SWIM_REQUIRE(whiteView && imageView && sampler);
+		const auto imageTexels = MakeImage();
+		{
+			RenderGraph uploads;
+			const auto whiteTexture = uploads.ImportTexture(*white, Rhi::ResourceState::Undefined);
+			const auto imageTexture = uploads.ImportTexture(*image, Rhi::ResourceState::Undefined);
+			const std::array<std::uint8_t, 4> opaque{ 255, 255, 255, 255 };
+			AddTextureUpload(uploads, "White upload", std::as_bytes(std::span(opaque)), whiteTexture, { 0, {}, {}, { 1, 1, 1 } });
+			AddTextureUpload(
+				uploads, "Image upload", std::as_bytes(std::span(imageTexels)), imageTexture, { 0, {}, {}, { ImageSize, ImageSize, 1 } });
+			uploads.Export(whiteTexture, Rhi::ResourceState::ShaderRead);
+			uploads.Export(imageTexture, Rhi::ResourceState::ShaderRead);
+			executor.Execute(uploads.Compile());
+			executor.Wait();
+		}
+		BindlessTableDesc bindlessDesc;
+		bindlessDesc.Layout = program.Layout.get();
+		bindlessDesc.Space = UiRenderBindings::BindlessSpace;
+		bindlessDesc.FallbackTexture = whiteView.get();
+		bindlessDesc.FallbackSampler = sampler.get();
+		BindlessResourceTable bindless(*device, bindlessDesc);
+		const auto imageHandle = bindless.RegisterTexture(*imageView);
+		const auto samplerHandle = bindless.RegisterSampler(*sampler);
+		const std::uint32_t imageIndex = bindless.GetIndex(imageHandle);
+
+		auto fonts = Testing::LoadTextFontChain();
+		Scene scene(fonts, imageIndex, bindless.GetIndex(samplerHandle));
+		Text::GlyphAtlas atlas;
+		UiAtlasTextures atlasTextures(*device, bindless);
+		UiRenderer renderer;
+		constexpr std::uint32_t CanvasWidth = 256;
+		constexpr std::uint32_t CanvasHeight = 128;
+		constexpr float Dpi = 1.25f;
+		scene.Document.Layout({ float(CanvasWidth), float(CanvasHeight) }, Dpi);
+		const auto& paint = scene.Document.Paint(atlas);
+		// Themed controls in their states: a checked checkbox, a hovered toggle, a focused
+		// half-way slider, a button and a scroll area with its bar.
+		UI::UiDocument widgets;
+		constexpr float WidgetDpi = 0.85f;
+		{
+			auto theme = std::make_shared<UI::UiTheme>();
+			theme->Fonts = fonts;
+			widgets.SetTheme(theme);
+			UI::UiStyle row;
+			row.Flow = UI::UiFlow::Row;
+			row.Gap = 8.0f;
+			row.Padding = { 4, 4, 4, 4 };
+			widgets.SetStyle(widgets.GetRoot(), row);
+			const auto panel = UI::CreatePanel(widgets, widgets.GetRoot());
+			const auto box = UI::CreateCheckbox(widgets, panel, "Subtitles", UI::UiCheckState::Checked);
+			const auto toggle = UI::CreateToggle(widgets, panel, "V-sync", true);
+			const auto slider =
+				UI::CreateSlider(widgets, panel, { .Min = 0.0f, .Max = 1.0f, .Value = 0.5f, .Ticks = 5, .ShowValue = true, .Decimals = 2 });
+			UI::CreateButton(widgets, panel, "Apply");
+			UI::UiStyle areaStyle;
+			areaStyle.Width = UI::UiLength::Pixels(60);
+			areaStyle.Height = UI::UiLength::Pixels(60);
+			const auto area =
+				UI::CreateScrollArea(widgets, widgets.GetRoot(), areaStyle, true, false, UI::UiScrollBarVisibility::Auto, true);
+			UI::CreateLabel(widgets, area.Viewport, "One\nTwo\nThree\nFour");
+			widgets.Layout({ float(CanvasWidth), float(CanvasHeight) }, WidgetDpi);
+			widgets.Focus(slider);
+			const auto knob = widgets.GetBounds(widgets.GetControl(toggle).Parts.Track);
+			widgets.PointerMove({ (knob.X + 2.0f) * WidgetDpi, (knob.Y + 2.0f) * WidgetDpi }); // Framebuffer pixels.
+			SWIM_CHECK(widgets.GetChecked(box) == UI::UiCheckState::Checked);
+			widgets.Update(0.0f);
+		}
+		const auto& widgetPaint = widgets.Paint(atlas);
+
+		const auto cpuSampler = [&](const UiAtlasFrame& frame)
+		{
+			std::map<std::uint32_t, std::vector<std::uint8_t>> pages;
+			for (std::uint32_t page = 0; page < frame.Pages.size(); ++page)
+			{
+				const auto view = atlas.GetPage(page);
+				auto& rgba = pages[frame.TextureIndices[page]];
+				rgba.resize(std::size_t(view.Size) * view.Size * 4);
+				for (std::size_t i = 0; i < std::size_t(view.Size) * view.Size; ++i)
+				{
+					rgba[i * 4 + 0] = view.Pixels[i * 3 + 0];
+					rgba[i * 4 + 1] = view.Pixels[i * 3 + 1];
+					rgba[i * 4 + 2] = view.Pixels[i * 3 + 2];
+					rgba[i * 4 + 3] = 255;
+				}
+			}
+			const std::uint32_t pageSize = frame.PageSize;
+			return [pages = std::move(pages), pageSize, imageIndex, &imageTexels](std::uint32_t texture, std::uint32_t, float u, float v)
+			{
+				if (texture == imageIndex)
+				{
+					return R::SampleBilinear(imageTexels, ImageSize, ImageSize, u, v);
+				}
+				const auto found = pages.find(texture);
+				return found == pages.end() ? R::Float4{ 1, 1, 1, 1 } : R::SampleBilinear(found->second, pageSize, pageSize, u, v);
+			};
+		};
+		const auto readColors = [&](const GraphReadback& readback, Rhi::Format format, std::uint32_t width, std::uint32_t height)
+		{
+			std::vector<R::Float4> texels(std::size_t(width) * height);
+			if (format == Rhi::Format::RGBA16Float)
+			{
+				std::vector<std::uint16_t> halves(texels.size() * 4);
+				SWIM_REQUIRE(
+					executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(halves))) == Rhi::ReadbackStatus::Ready);
+				for (std::size_t i = 0; i < texels.size(); ++i)
+				{
+					for (int c = 0; c < 4; ++c)
+					{
+						texels[i][c] = Smoke::HalfToFloat(halves[i * 4 + c]);
+					}
+				}
+				return texels;
+			}
+			std::vector<std::uint8_t> bytes(texels.size() * 4);
+			SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(bytes))) == Rhi::ReadbackStatus::Ready);
+			for (std::size_t i = 0; i < texels.size(); ++i)
+			{
+				for (int c = 0; c < 4; ++c)
+				{
+					texels[i][c] = bytes[i * 4 + c] / 255.0f;
+				}
+			}
+			return texels;
+		};
+
+		// The scene: HDR color and reverse-Z depth, cleared by a scene pass.
+		constexpr std::uint32_t Width = 256;
+		constexpr std::uint32_t Height = 160;
+		const R::Float4 clear{ 0.02f, 0.03f, 0.05f, 1.0f };
+		UiCompositionSettings hdrScene;
+		hdrScene.Encoding = UiOutputEncoding::Linear;
+		hdrScene.LinearScale = 1.5f; // UI white at 1.5 x the scene's SDR white.
+		const auto aspect = float(Width) / float(Height);
+		const float fovY = 1.0471976f; // 60 degrees.
+		const float focal = 1.0f / std::tan(fovY * 0.5f);
+		const UI::UiMatrix4 perspective{ focal / aspect, 0, 0, 0, 0, focal, 0, 0, 0, 0, 0, 0.05f, 0, 0, -1, 0 };
+		// Orthographic: world [0, 2.56] x [-1.44, 0.16] -> the viewport, depth 0.45 at z = 0.
+		const UI::UiMatrix4 orthographic{ 1.0f / 1.28f, 0, 0, 0, 0, 1.0f / 0.8f, 0, 0, 0, 0, -0.01f, 0.4f, 0, 0, 0, 1 };
+		const auto cameraAt = [&](UI::UiVec3 position, const UI::UiMatrix4& projection)
+		{
+			UI::UiCameraView camera;
+			camera.View = { 1, 0, 0, -position.X, 0, 1, 0, -position.Y, 0, 0, 1, -position.Z, 0, 0, 0, 1 };
+			camera.Projection = projection;
+			camera.ViewportWidth = float(Width);
+			camera.ViewportHeight = float(Height);
+			return camera;
+		};
+		UI::UiWorldPlacement topLeft;
+		topLeft.Pivot = { 0.0f, 0.0f };
+		topLeft.UnitsPerPixel = 0.01f;
+		const UI::UiPoint canvasSize{ float(CanvasWidth), float(CanvasHeight) };
+
+		struct WorldCase
+		{
+			const char* Name;
+			std::span<const UI::UiPaintQuad> Paint;
+			float Dpi;
+			UI::UiCanvasMode Mode;
+			UI::UiWorldPlacement Placement;
+			UI::UiCameraView Camera;
+			float DepthClear;
+			float Opacity;
+			bool Occluded;
+		};
+
+		auto rotated = topLeft;
+		rotated.Pivot = { 0.5f, 0.5f };
+		rotated.Transform = { std::cos(0.45f), 0, std::sin(0.45f), 1.28f, 0, 1, 0, -0.64f, -std::sin(0.45f), 0, std::cos(0.45f), 0 };
+		auto billboard = rotated;
+		billboard.Transform = { 1, 0, 0, 1.28f, 0, 1, 0, -0.64f, 0, 0, 1, 0 };
+		const auto ortho = cameraAt({ 1.28f, -0.64f, 5.0f }, orthographic);
+		const std::array<WorldCase, 7> cases{ {
+			{ "world-ortho", paint, Dpi, UI::UiCanvasMode::WorldPanel, topLeft, ortho, 0.0f, 1.0f, false },
+			{ "world-faded", paint, Dpi, UI::UiCanvasMode::WorldPanel, topLeft, ortho, 0.0f, 0.5f, false },
+			{ "world-occluded", paint, Dpi, UI::UiCanvasMode::WorldPanel, topLeft, ortho, 1.0f, 1.0f, true },
+			{ "world-rotated", paint, Dpi, UI::UiCanvasMode::WorldPanel, rotated, cameraAt({ 1.28f, -0.64f, 2.6f }, perspective), 0.0f,
+				1.0f, false },
+			{ "world-billboard", paint, Dpi, UI::UiCanvasMode::Billboard, billboard, cameraAt({ 2.4f, -0.2f, 2.8f }, perspective), 0.0f,
+				1.0f, false },
+			{ "world-widgets", widgetPaint, WidgetDpi, UI::UiCanvasMode::WorldPanel, topLeft, ortho, 0.0f, 1.0f, false },
+			{ "world-widgets-billboard", widgetPaint, WidgetDpi, UI::UiCanvasMode::Billboard, billboard,
+				cameraAt({ 2.4f, -0.2f, 2.8f }, perspective), 0.0f, 1.0f, false },
+		} };
+		std::uint32_t totalCompared = 0;
+		std::uint32_t totalOutliers = 0;
+		for (const auto& test : cases)
+		{
+			const auto toWorld = UI::CanvasToWorld(test.Mode, test.Placement, canvasSize, &test.Camera);
+			const auto clip = UI::ClipFromCanvas(toWorld, test.Camera);
+			RenderGraph graph;
+			const auto atlasFrame = atlasTextures.Update(graph, atlas);
+			const auto sampledImage = graph.ImportTexture(*image, Rhi::ResourceState::ShaderRead);
+			Rhi::TextureDesc colorDesc;
+			colorDesc.Extent = { Width, Height, 1 };
+			colorDesc.PixelFormat = Rhi::Format::RGBA16Float;
+			colorDesc.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource;
+			const auto color = graph.CreateTexture(colorDesc);
+			Rhi::TextureDesc depthDesc;
+			depthDesc.Extent = { Width, Height, 1 };
+			depthDesc.PixelFormat = Rhi::Format::D32Float;
+			depthDesc.Usage = Rhi::TextureUsage::DepthStencilAttachment;
+			const auto depth = graph.CreateTexture(depthDesc);
+			const float depthClear = test.DepthClear;
+			graph.AddPass(
+				"Scene clear", Rhi::QueueType::Graphics,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Write(color, Rhi::ResourceState::ColorAttachment);
+					b.Write(depth, Rhi::ResourceState::DepthStencilWrite);
+				},
+				[color, depth, clear, depthClear](RenderCommandContext& c)
+				{
+					std::array<Rhi::RenderingAttachmentDesc, 1> colors{};
+					colors[0].View = &c.CreateView(color);
+					colors[0].Load = Rhi::LoadOp::Clear;
+					colors[0].Clear.Value = { clear[0], clear[1], clear[2], clear[3] };
+					Rhi::TextureViewDesc depthView;
+					depthView.PixelFormat = Rhi::Format::D32Float;
+					const Rhi::DepthStencilAttachmentDesc depthAttachment{ &c.CreateView(depth, depthView), Rhi::LoadOp::Clear,
+						Rhi::StoreOp::Store, depthClear, 0 };
+					c.Commands().BeginRendering({ colors, &depthAttachment, { Width, Height } });
+					c.Commands().EndRendering();
+				});
+			UiRenderFrame frame;
+			frame.Paint = test.Paint;
+			frame.Target = color;
+			frame.Depth = depth;
+			frame.DpiScale = test.Dpi;
+			frame.ClipFromCanvas = clip;
+			frame.Opacity = test.Opacity;
+			frame.Composition = hdrScene;
+			frame.Atlas = &atlasFrame;
+			frame.Images = std::span(&sampledImage, 1);
+			SWIM_REQUIRE(renderer.Record(graph, frame, program.Get(Rhi::Format::RGBA16Float), bindless.GetTable()).has_value());
+			const auto readback = AddTextureReadback(graph, "UI world readback", color, { 0, {}, {}, { Width, Height, 1 } });
+			executor.Execute(graph.Compile());
+			atlasTextures.CommitFrame();
+			executor.Wait();
+			const auto gpu = readColors(readback, Rhi::Format::RGBA16Float, Width, Height);
+			const auto& quads = renderer.GetLastQuads();
+			const auto& constants = renderer.GetLastConstants();
+			SWIM_CHECK_EQUAL(constants.Flags, UiDrawWorld);
+			R::Canvas canvas{ Width, Height, std::vector<R::Float4>(gpu.size(), clear) };
+			if (!test.Occluded)
+			{
+				R::RasterizeProjected(canvas, quads, constants, cpuSampler(atlasFrame));
+			}
+			const auto ambiguous = AmbiguousProjected(quads, constants, Width, Height);
+			// The 1:1 cases match to 2.5 LSB like screen overlays; perspective ones compare
+			// hardware derivatives (2 x 2 pixel differences) with analytic footprints, so
+			// edge ramps and glyph ranges differ more: 6 LSB, at most 3 % outliers.
+			const bool projective = test.Camera.Projection[14] != 0.0f;
+			const float tolerance = (projective ? 6.0f : 2.5f) / 255.0f;
+			const auto result = Compare(gpu, canvas, ambiguous, clear, tolerance, constants.WhiteScale, false);
+			std::printf("             [ui %s] %zu quads: %u pixels compared, %u lit, %u outliers (worst %.2e)\n", test.Name, quads.size(),
+				result.Compared, result.Lit, result.Outliers, double(result.Worst));
+			if (test.Occluded)
+			{
+				SWIM_CHECK_EQUAL(result.Lit, 0u); // Scene depth in front of the panel hides it entirely.
+			}
+			else
+			{
+				SWIM_CHECK(result.Lit > result.Compared / (projective ? 20u : 4u));
+			}
+			SWIM_CHECK(result.Outliers <= result.Compared / (projective ? 33u : 100u));
+			totalCompared += result.Compared;
+			totalOutliers += result.Outliers;
+		}
+
+		// Render surface: the same document drawn into every mip of an sRGB surface (each
+		// level re-rasterized at DPI / 2^mip), then shown 1:1 by a world panel that samples it.
+		UiRenderSurfaces surfaces(*device, bindless);
+		UiRenderSurfaceDesc surfaceDesc;
+		surfaceDesc.Width = CanvasWidth;
+		surfaceDesc.Height = CanvasHeight;
+		const auto surface = surfaces.Create(surfaceDesc);
+		UiSurfaceFrame surfaceFrame;
+		std::vector<R::Float4> surfaceTexels; // Mip 0 as stored, decoded to linear.
+		{
+			RenderGraph graph;
+			const auto atlasFrame = atlasTextures.Update(graph, atlas);
+			const auto sampledImage = graph.ImportTexture(*image, Rhi::ResourceState::ShaderRead);
+			UiSurfaceContent content;
+			content.Paint = paint;
+			content.PaintRevision = scene.Document.GetPaintRevision();
+			content.DpiScale = Dpi;
+			content.Atlas = &atlasFrame;
+			content.Images = std::span(&sampledImage, 1);
+			surfaceFrame =
+				surfaces.Record(graph, surface, renderer, program.Get(Rhi::Format::RGBA8UnormSrgb), bindless.GetTable(), content);
+			SWIM_CHECK(surfaceFrame.Drawn);
+			SWIM_CHECK_EQUAL(surfaceFrame.MipLevels, 9u);
+			std::vector<GraphReadback> readbacks;
+			for (const std::uint32_t mip : { 0u, 2u })
+			{
+				readbacks.push_back(AddTextureReadback(graph, "UI surface readback", surfaceFrame.Texture,
+					{ 0, { mip, 0 }, {}, { CanvasWidth >> mip, CanvasHeight >> mip, 1 } }));
+			}
+			executor.Execute(graph.Compile());
+			atlasTextures.CommitFrame();
+			surfaces.CommitFrame();
+			executor.Wait();
+			for (std::size_t level = 0; level < readbacks.size(); ++level)
+			{
+				const std::uint32_t mip = level == 0 ? 0u : 2u;
+				const std::uint32_t w = CanvasWidth >> mip;
+				const std::uint32_t h = CanvasHeight >> mip;
+				const auto gpu = readColors(readbacks[level], Rhi::Format::RGBA8UnormSrgb, w, h);
+				if (mip == 0)
+				{
+					surfaceTexels = gpu;
+					for (auto& texel : surfaceTexels)
+					{
+						for (int c = 0; c < 3; ++c)
+						{
+							texel[c] = SrgbEotf(texel[c]);
+						}
+					}
+				}
+				R::QuadBuildDesc build;
+				build.DpiScale = Dpi / float(1u << mip);
+				build.AtlasPageSize = atlasFrame.PageSize;
+				build.AtlasTextures = atlasFrame.TextureIndices;
+				build.AtlasSampler = atlasFrame.SamplerIndex;
+				const auto quads = R::BuildQuads(paint, build);
+				R::Canvas canvas{ w, h, std::vector<R::Float4>(gpu.size()) };
+				R::Rasterize(canvas, quads, R::BuildDrawConstants(w, h, content.Composition), cpuSampler(atlasFrame));
+				const auto result = Compare(gpu, canvas, AmbiguousPixels(quads, w, h), {}, 2.5f / 255.0f, 1.0f, true);
+				std::printf("             [ui surface mip %u] %ux%u: %u pixels compared, %u lit, %u outliers (worst %.2e)\n", mip, w, h,
+					result.Compared, result.Lit, result.Outliers, double(result.Worst));
+				SWIM_CHECK(result.Lit > result.Compared / 4u);
+				SWIM_CHECK(result.Outliers <= result.Compared / 100u);
+				totalCompared += result.Compared;
+				totalOutliers += result.Outliers;
+			}
+		}
+		{
+			// A world panel showing the surface 1:1 (unchanged paint: the surface is only
+			// imported, not drawn again): its decoded texels blended over the scene.
+			RenderGraph graph;
+			UiSurfaceContent content;
+			content.Paint = paint;
+			content.PaintRevision = scene.Document.GetPaintRevision();
+			const auto shown =
+				surfaces.Record(graph, surface, renderer, program.Get(Rhi::Format::RGBA8UnormSrgb), bindless.GetTable(), content);
+			SWIM_CHECK(!shown.Drawn);
+			const auto panel = UiRenderSurfaces::PanelPaint(shown, canvasSize);
+			const auto& camera = cases[0].Camera;
+			const auto clip = UI::ClipFromCanvas(UI::CanvasToWorld(UI::UiCanvasMode::WorldPanel, topLeft, canvasSize), camera);
+			Rhi::TextureDesc colorDesc;
+			colorDesc.Extent = { Width, Height, 1 };
+			colorDesc.PixelFormat = Rhi::Format::RGBA16Float;
+			colorDesc.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::TransferSource;
+			const auto color = graph.CreateTexture(colorDesc);
+			UiRenderFrame frame;
+			frame.Paint = panel;
+			frame.Target = color;
+			frame.ClipFromCanvas = clip;
+			frame.Composition = hdrScene;
+			frame.Images = std::span(&shown.Texture, 1);
+			frame.Clear = true;
+			frame.ClearColor = { clear[0], clear[1], clear[2], clear[3] };
+			SWIM_REQUIRE(renderer.Record(graph, frame, program.Get(Rhi::Format::RGBA16Float), bindless.GetTable()).has_value());
+			const auto readback = AddTextureReadback(graph, "UI panel readback", color, { 0, {}, {}, { Width, Height, 1 } });
+			executor.Execute(graph.Compile());
+			surfaces.CommitFrame();
+			executor.Wait();
+			const auto gpu = readColors(readback, Rhi::Format::RGBA16Float, Width, Height);
+			const auto quads = renderer.GetLastQuads();
+			const auto constants = renderer.GetLastConstants();
+			R::Canvas canvas{ Width, Height, std::vector<R::Float4>(gpu.size(), clear) };
+			const auto sampleSurface = [&](std::uint32_t, std::uint32_t, float u, float v)
+			{
+				const float fx = u * float(CanvasWidth) - 0.5f;
+				const float fy = v * float(CanvasHeight) - 0.5f;
+				const int x0 = int(std::floor(fx));
+				const int y0 = int(std::floor(fy));
+				const float tx = fx - float(x0);
+				const float ty = fy - float(y0);
+				const auto texel = [&](int x, int y)
+				{
+					x = std::clamp(x, 0, int(CanvasWidth) - 1);
+					y = std::clamp(y, 0, int(CanvasHeight) - 1);
+					return surfaceTexels[std::size_t(y) * CanvasWidth + std::size_t(x)];
+				};
+				R::Float4 result{};
+				for (int c = 0; c < 4; ++c)
+				{
+					result[c] = (texel(x0, y0)[c] * (1 - tx) + texel(x0 + 1, y0)[c] * tx) * (1 - ty) +
+						(texel(x0, y0 + 1)[c] * (1 - tx) + texel(x0 + 1, y0 + 1)[c] * tx) * ty;
+				}
+				return result;
+			};
+			R::RasterizeProjected(canvas, quads, constants, sampleSurface);
+			const auto result = Compare(
+				gpu, canvas, AmbiguousProjected(quads, constants, Width, Height), clear, 2.5f / 255.0f, constants.WhiteScale, false);
+			std::printf("             [ui surface panel] %u pixels compared, %u lit, %u outliers (worst %.2e)\n", result.Compared,
+				result.Lit, result.Outliers, double(result.Worst));
+			SWIM_CHECK(result.Lit > result.Compared / 4u);
+			SWIM_CHECK(result.Outliers <= result.Compared / 100u);
+			SWIM_CHECK_EQUAL(surfaces.GetStats().DrawnSurfaces, 1u);
+			SWIM_CHECK_EQUAL(surfaces.GetStats().SkippedSurfaces, 1u);
+			totalCompared += result.Compared;
+			totalOutliers += result.Outliers;
+		}
+		std::printf("             [ui world] %u pixels compared, %u outliers\n", totalCompared, totalOutliers);
+		executor.Wait();
+		surfaces.Release(surface);
+		surfaces.Drain();
+		atlasTextures.Release({});
+		atlasTextures.Collect();
+		bindless.Drain();
+		executor.Trim();
+#endif
+	}
+
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
@@ -597,6 +1114,11 @@ namespace
 				+[]
 				{
 					Swim::Testing::RunValidatedVulkanSmoke(&RunUiSmoke);
+				} });
+			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "UiWorldCanvasesMatchTheCpuReference", SWIM_TEST_LOCATION,
+				+[]
+				{
+					Swim::Testing::RunValidatedVulkanSmoke(&RunUiWorldSmoke);
 				} });
 		}
 		return true;

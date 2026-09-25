@@ -4,8 +4,10 @@
 // layout, paint, input and editing). Not part of the public UI contract.
 
 #include "Engine/Systems/UI/UiDocument.h"
+#include "Engine/Systems/UI/UiTheme.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <unordered_map>
@@ -46,6 +48,8 @@ namespace Swim::UI
 		}
 
 		void ValidateStyle(const UiStyle& style);
+		void ValidateVisual(const UiVisual& visual);
+		void ValidateImage(const UiImage& image);
 		// True when the two styles differ only in paint properties.
 		bool OnlyPaintChanged(const UiStyle& before, const UiStyle& after);
 	} // namespace Internal
@@ -74,6 +78,30 @@ namespace Swim::UI
 			UiTextSelection Selection;
 			float PreferredCaretX = std::numeric_limits<float>::quiet_NaN();
 			bool RevealCaret = false;
+			// Control behaviour (UiControls.cpp).
+			UiControl Control;
+			UiNodeId PartOf; // The control this node is a part of.
+			UiPartRole Role = UiPartRole::None;
+			float PartValue = 0.0f;		 // Slider ticks: the marked value.
+			float Knob = 0.0f;			 // Toggle: displayed knob position 0 .. 1 (eases towards the state).
+			float ScrollActivity = 1e9f; // Overlay scroll bars: seconds since the last activity.
+			bool ControlHidden = false;	 // Auto/overlay scroll bar without overflow: not painted, not hit.
+			float ControlOpacity = 1.0f; // Overlay scroll bar fade.
+			// Theme and visual states (UiVisuals.cpp).
+			UiThemeClass ThemeClass = UiThemeClass::None;
+			UiThemeApply ThemeApply = UiThemeApply::None;
+			std::vector<UiStateRule> Rules;
+			bool VisualDirty = true;
+			bool HasVisual = false;
+			UiState LastState = UiState::None;
+			UiResolvedVisual Visual; // Displayed.
+			UiResolvedVisual TransitionFrom;
+			UiResolvedVisual TransitionTo;
+			float TransitionElapsed = 0.0f;
+			float TransitionDuration = 0.0f;
+			bool Transitioning = false;
+			float EffectiveOpacity = 1.0f; // Product along ancestors (Paint).
+			float PaintedOpacity = -1.0f;
 			// Layout results.
 			UiPoint TextSize;
 			UiPoint Desired;
@@ -112,6 +140,23 @@ namespace Swim::UI
 		std::vector<UiPaintQuad> Quads;
 		std::vector<UiEvent> Events;
 		const Text::GlyphAtlas* PaintAtlas = nullptr;
+		std::uint64_t PaintRevision = 0;
+		std::uint64_t PaintedLayoutRevision = 0;
+		// Control pointer drag (UiControls.cpp).
+		UiNodeId Dragging;		 // The control under a thumb/knob drag.
+		float DragGrab = 0.0f;	 // Pointer minus thumb start along the axis (logical units).
+		float DragStart = 0.0f;	 // Pointer position along the axis at press.
+		float PressValue = 0.0f; // Value (or check state) at press.
+		bool DragMoved = false;
+		// Scroll bar step button held down (repeats in Update).
+		UiNodeId Stepping;
+		float StepDirection = 0.0f;
+		float StepHeld = 0.0f;
+		float NextStep = 0.0f;
+		bool ArrowNavigation = true;
+		// Theme.
+		std::shared_ptr<const UiTheme> Theme;
+		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> Classes;
 		std::string Composition;
 		std::uint32_t CompositionCursor = 0;
 		UiClipboard Clipboard;
@@ -125,9 +170,24 @@ namespace Swim::UI
 		std::size_t Depth(UiNodeId id) const;
 		std::size_t Height(UiNodeId id) const;
 
-		bool IsHitTestable(const Node& node) const { return node.Style.HitTest || node.Editable; }
+		bool IsControl(const Node& node) const { return node.Control.Kind != UiControlKind::None; }
 
-		bool IsFocusable(const Node& node) const { return node.Style.Focusable || node.Editable; }
+		bool IsHitTestable(const Node& node) const
+		{
+			return !node.ControlHidden && (node.Style.HitTest || node.Editable || IsControl(node));
+		}
+
+		bool IsFocusable(const Node& node) const
+		{
+			return !node.ControlHidden &&
+				(node.Style.Focusable || node.Editable || (IsControl(node) && node.Control.Kind != UiControlKind::ScrollBar));
+		}
+
+		// Hit-testable, focusable, editable or a control: the owner of descendants' states.
+		bool IsInteractive(const Node& node) const
+		{
+			return node.Style.HitTest || node.Style.Focusable || node.Editable || IsControl(node);
+		}
 
 		bool Available(UiNodeId id) const;
 		void ClearUnavailable();
@@ -154,6 +214,47 @@ namespace Swim::UI
 
 		// --- Paint (UiPaint.cpp) ---
 		void BuildPaint(Node& node, Text::GlyphAtlas& atlas);
+
+		// --- Controls (UiControls.cpp) ---
+		void ValidateControl(const Node& node, const UiControl& control) const;
+		float ClampValue(const UiControl& control, float value) const;
+		// The rectangle (relative to the parent's content box) of a placed part, if any.
+		std::optional<UiRect> PartGeometry(const Node& part, const UiRect& parentInner) const;
+		// Refreshes scroll bars from their targets after an Arrange (values, thumbs,
+		// visibility), re-arranging thumbs that moved.
+		void SyncScrollBars();
+		void ReArrange(Node& node, UiRect bounds);
+		bool ControlPointerDown(Node& control, UiPoint logical);
+		void ControlPointerMove(UiPoint logical);
+		void ControlPointerUp(Node& control, bool inside);
+		void EndDrag(bool commit);
+		bool ControlKey(Node& control, UiKey key);
+		bool ControlWheel(Node& control, UiPoint delta);
+		// Input changes: clamps/snaps, emits ValueChanged (and ValueCommitted when commit).
+		bool ChangeValue(Node& control, float value, bool commit);
+		void Toggle(Node& control);
+		float CheckValue(UiCheckState state) const;
+		void MarkControlDirty(Node& control);
+		void SyncValueLabel(Node& control);
+		// A scroll bar's thumb track along its axis (after its step buttons), relative to its
+		// content box: start and length.
+		std::pair<float, float> ScrollTrack(const Node& bar, const UiRect& inner) const;
+		void StepScrollBar(Node& bar, float direction);
+		bool AnimateControls(float seconds);
+		float Axis(const Node& control, UiPoint logical) const; // Pointer position along the control's axis.
+
+		// --- Visual states and theme (UiVisuals.cpp) ---
+		UiNodeId StateOwner(UiNodeId id) const;
+		UiState ComputeState(UiNodeId id) const;
+		UiResolvedVisual ResolveTarget(const Node& node, UiState state) const;
+		// Resolves every node whose state or style changed; starts transitions.
+		void ResolveVisuals();
+		bool AdvanceTransitions(float seconds);
+		void ApplyTheme(Node& node);
+		void MarkSubtreeVisualDirty(UiNodeId id);
+
+		// --- Navigation (UiInput.cpp) ---
+		std::vector<UiNodeId> TabOrder() const;
 
 		// --- Editing (UiEditing.cpp) ---
 		UiTextSelection ClampSelection(Node& node, UiTextSelection selection);

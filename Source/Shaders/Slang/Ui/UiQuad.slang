@@ -1,9 +1,12 @@
 // UI quads (critical-path item 79): one instance per GpuUiQuad, six vertices each.
-// The vertex stage clips the quad to its clip rectangle and remaps the UV, so no
-// fragment is discarded and one draw covers every clip. Fragments shade solids (with
-// rounded corners and borders), MSDF glyphs and premultiplied images through the
-// bindless table, then encode for the target (UiEncode) before premultiplied blending.
-// Bindings follow UiRenderBindings; Ui::ShadeQuad and Ui::Encode are the CPU definition.
+// The vertex stage clips the quad to its clip rectangle in canvas pixels, remaps the UV
+// and maps the corners through ClipFromCanvas (screen overlays 1:1, world panels and
+// billboards through the camera), so no fragment is discarded and one draw covers every
+// clip. Fragments shade solids (with rounded corners and borders), MSDF glyphs and
+// premultiplied images through the bindless table, then encode for the target (UiEncode)
+// before premultiplied blending. World canvases take coverage ramps and MSDF ranges from
+// screen-space derivatives. Bindings follow UiRenderBindings; Ui::ShadeQuad and Ui::Encode
+// are the CPU definition.
 #include "Ui/UiRecords.slang"
 
 [[vk::binding(0, 0)]] StructuredBuffer<UiQuad> Quads;
@@ -16,7 +19,8 @@ struct VertexOutput
 {
 	float4 Position : SV_Position;
 	float2 Uv : TEXCOORD0;
-	nointerpolation uint Quad : TEXCOORD1;
+	float2 Canvas : TEXCOORD1; // Canvas pixels (perspective-correct for world canvases).
+	nointerpolation uint Quad : TEXCOORD2;
 };
 
 [shader("vertex")]
@@ -32,11 +36,12 @@ VertexOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_Instan
 	const float2 t = float2(float(corner & 1u), float(corner >> 1u));
 	const float2 p = lerp(low, high, t);
 	const float2 s = (p - rect.xy) / max(rect.zw - rect.xy, 1e-6);
+	const float4 v = float4(p, 0.0, 1.0);
 	VertexOutput output;
-	// RHI clip space is +Y-up (the Vulkan backend flips the viewport); UI pixels are +Y-down.
-	const float2 ndc = p / Draw.TargetSize * 2.0 - 1.0;
-	output.Position = float4(ndc.x, -ndc.y, 0.0, 1.0);
+	output.Position = float4(dot(Draw.ClipFromCanvas[0], v), dot(Draw.ClipFromCanvas[1], v), dot(Draw.ClipFromCanvas[2], v),
+		dot(Draw.ClipFromCanvas[3], v));
 	output.Uv = lerp(uv.xy, uv.zw, s);
+	output.Canvas = p;
 	output.Quad = instanceId;
 	return output;
 }
@@ -45,13 +50,18 @@ VertexOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_Instan
 float4 fragmentMain(VertexOutput input) : SV_Target0
 {
 	const UiQuad q = Quads[input.Quad];
-	const float2 p = input.Position.xy;
+	const float2 p = input.Canvas;
+	// Derivatives in uniform control flow, before any per-quad branch.
+	const float2 canvasWidth = fwidth(p);
+	const float2 uvWidth = max(fwidth(input.Uv), float2(1e-9, 1e-9));
+	const bool world = (Draw.Flags & UiDrawWorld) != 0u;
 	float4 color;
 	if (q.Kind == UiQuadGlyph)
 	{
 		const float3 msd =
 			Textures[NonUniformResourceIndex(q.Texture)].Sample(Samplers[NonUniformResourceIndex(q.Sampler)], input.Uv).rgb;
-		color = q.Color * saturate(q.PixelRange * (UiMedian(msd) - 0.5) + 0.5);
+		const float range = world ? max(0.5 * (q.UnitRange / uvWidth.x + q.UnitRange / uvWidth.y), 1.0) : q.PixelRange;
+		color = q.Color * saturate(range * (UiMedian(msd) - 0.5) + 0.5);
 	}
 	else if (q.Kind == UiQuadImage)
 	{
@@ -59,7 +69,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 	}
 	else
 	{
-		color = UiShadeSolid(q, p);
+		color = UiShadeSolid(q, p, world ? max(0.5 * (canvasWidth.x + canvasWidth.y), 1e-6) : 1.0);
 	}
-	return UiEncode(color, Draw.Encoding, Draw.WhiteScale);
+	return UiEncode(color * Draw.Opacity, Draw.Encoding, Draw.WhiteScale);
 }

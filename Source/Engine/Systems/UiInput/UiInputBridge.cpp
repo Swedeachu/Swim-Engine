@@ -4,6 +4,7 @@
 #include <cmath>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 
 namespace Swim::UI
 {
@@ -26,6 +27,10 @@ namespace Swim::UI
 				return UiKey::Home;
 			case K::End:
 				return UiKey::End;
+			case K::PageUp:
+				return UiKey::PageUp;
+			case K::PageDown:
+				return UiKey::PageDown;
 			case K::Backspace:
 				return UiKey::Backspace;
 			case K::Delete:
@@ -51,6 +56,21 @@ namespace Swim::UI
 			}
 		}
 
+		UiKey ArrowKey(UiNavDirection direction)
+		{
+			switch (direction)
+			{
+			case UiNavDirection::Up:
+				return UiKey::Up;
+			case UiNavDirection::Down:
+				return UiKey::Down;
+			case UiNavDirection::Left:
+				return UiKey::Left;
+			default:
+				return UiKey::Right;
+			}
+		}
+
 		// SDL reports the composition cursor in code points; UiDocument takes bytes.
 		std::uint32_t CodePointsToBytes(const std::string& text, int codePoints)
 		{
@@ -61,29 +81,162 @@ namespace Swim::UI
 			}
 			return static_cast<std::uint32_t>(std::min(offset, text.size()));
 		}
+
+		struct DocumentTarget
+		{
+			UiDocument& Document;
+			UiPoint Last;
+
+			void Move(UiPoint point)
+			{
+				Document.PointerMove(point); // Lays the document out again if it changed.
+				Last = point;
+			}
+
+			bool Over() const { return Document.IsLayoutCurrent() && static_cast<bool>(Document.HitTest(Last)); }
+
+			void Down(UiKeyModifiers modifiers) { Document.PointerDown(Last, modifiers); }
+
+			void Up() { Document.PointerUp(Last); }
+
+			bool Wheel(UiPoint delta) { return Document.Wheel(Last, delta); }
+
+			void LoseFocus()
+			{
+				Document.CancelPointer();
+				Document.Focus({});
+			}
+
+			bool HasFocus() const { return static_cast<bool>(Document.GetFocus()); }
+
+			bool FocusedEditable() const { return Document.GetFocus() && Document.IsEditable(Document.GetFocus()); }
+
+			bool KeyDown(UiKey key, UiKeyModifiers modifiers) { return Document.KeyDown(key, modifiers); }
+
+			bool Navigate(UiNavDirection direction) { return Document.Navigate(direction); }
+
+			void TextInput(std::string_view text) { Document.TextInput(text); }
+
+			void Composition(std::string_view text, std::uint32_t cursor) { Document.SetComposition(text, cursor); }
+
+			bool WantsTextInput() const { return Document.WantsTextInput(); }
+		};
+
+		struct RouterTarget
+		{
+			UiCanvasRouter& Router;
+			const UiCameraView* Camera;
+			std::span<const UiSurfaceHit> Hits;
+
+			void Move(UiPoint point)
+			{
+				UiPointer pointer;
+				pointer.Screen = point;
+				if (Camera)
+				{
+					pointer.Ray = ScreenRay(*Camera, point);
+				}
+				pointer.SurfaceHits = Hits;
+				Router.PointerMove(pointer);
+			}
+
+			bool Over() const { return Router.IsPointerOverUi(); }
+
+			void Down(UiKeyModifiers modifiers) { Router.PointerDown(modifiers); }
+
+			void Up() { Router.PointerUp(); }
+
+			bool Wheel(UiPoint delta) { return Router.Wheel(delta); }
+
+			void LoseFocus()
+			{
+				Router.CancelPointer();
+				Router.ClearFocus();
+			}
+
+			UiDocument* Focused() const { return Router.GetDocument(Router.GetFocused()); }
+
+			bool HasFocus() const { return Focused() && Focused()->GetFocus(); }
+
+			bool FocusedEditable() const { return HasFocus() && Focused()->IsEditable(Focused()->GetFocus()); }
+
+			bool KeyDown(UiKey key, UiKeyModifiers modifiers) { return Router.KeyDown(key, modifiers); }
+
+			bool Navigate(UiNavDirection direction) { return Router.Navigate(direction); }
+
+			void TextInput(std::string_view text) { Router.TextInput(text); }
+
+			void Composition(std::string_view text, std::uint32_t cursor) { Router.SetComposition(text, cursor); }
+
+			bool WantsTextInput() const { return Router.WantsTextInput(); }
+		};
 	} // namespace
 
 	UiInputBridge::UiInputBridge(UiInputBridgeDesc descInput) : desc(descInput)
 	{
 		if (!std::isfinite(desc.FramebufferScale) || desc.FramebufferScale <= 0.0f || !std::isfinite(desc.WheelStep) ||
-			desc.WheelStep <= 0.0f)
+			desc.WheelStep <= 0.0f || !std::isfinite(desc.StickThreshold) || desc.StickThreshold <= 0.0f || desc.StickThreshold > 1.0f ||
+			!std::isfinite(desc.RepeatDelaySeconds) || desc.RepeatDelaySeconds <= 0.0f || !std::isfinite(desc.RepeatIntervalSeconds) ||
+			desc.RepeatIntervalSeconds <= 0.0f)
 		{
-			throw std::invalid_argument("UI input bridge needs a positive framebuffer scale and wheel step");
+			throw std::invalid_argument(
+				"UI input bridge needs a positive framebuffer scale, wheel step, stick threshold and repeat timing");
 		}
 	}
 
-	UiInputFrame UiInputBridge::Apply(const Input::InputSystem& input, UiDocument& document)
+	std::optional<UiNavDirection> UiInputBridge::GamepadDirection(const Input::InputSystem& input) const
 	{
+		if (!desc.Gamepad || !input.IsGamepadConnected(*desc.Gamepad))
+		{
+			return std::nullopt;
+		}
+		const auto device = *desc.Gamepad;
+		using B = Platform::GamepadButton;
+		if (input.IsGamepadButtonDown(device, B::DpadUp))
+		{
+			return UiNavDirection::Up;
+		}
+		if (input.IsGamepadButtonDown(device, B::DpadDown))
+		{
+			return UiNavDirection::Down;
+		}
+		if (input.IsGamepadButtonDown(device, B::DpadLeft))
+		{
+			return UiNavDirection::Left;
+		}
+		if (input.IsGamepadButtonDown(device, B::DpadRight))
+		{
+			return UiNavDirection::Right;
+		}
+		const float x = input.GetGamepadAxis(device, Platform::GamepadAxis::LeftX);
+		const float y = input.GetGamepadAxis(device, Platform::GamepadAxis::LeftY); // Positive down (SDL).
+		if (std::max(std::abs(x), std::abs(y)) < desc.StickThreshold)
+		{
+			return std::nullopt;
+		}
+		if (std::abs(x) >= std::abs(y))
+		{
+			return x < 0.0f ? UiNavDirection::Left : UiNavDirection::Right;
+		}
+		return y < 0.0f ? UiNavDirection::Up : UiNavDirection::Down;
+	}
+
+	template <typename Target> UiInputFrame UiInputBridge::Run(const Input::InputSystem& input, Target& target, float deltaSeconds)
+	{
+		if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0f)
+		{
+			throw std::invalid_argument("UI input bridge needs a non-negative frame time");
+		}
 		UiInputFrame frame;
 		if (!input.HasFocus())
 		{
 			if (hadFocus)
 			{
-				document.CancelPointer();
-				document.Focus({});
+				target.LoseFocus();
 			}
 			hadFocus = false;
 			hasPointer = false;
+			heldDirection.reset();
 			return frame;
 		}
 		hadFocus = true;
@@ -97,33 +250,34 @@ namespace Swim::UI
 
 		const auto mouse = input.GetMousePosition();
 		const UiPoint pointer{ mouse.X * desc.FramebufferScale, mouse.Y * desc.FramebufferScale };
-		if (!hasPointer || pointer.X != lastPointer.X || pointer.Y != lastPointer.Y)
+		constexpr bool alwaysMove = std::is_same_v<Target, RouterTarget>; // World canvases move under a still mouse.
+		if (alwaysMove || !hasPointer || pointer.X != lastPointer.X || pointer.Y != lastPointer.Y)
 		{
-			document.PointerMove(pointer); // Lays the document out again if it changed.
+			target.Move(pointer);
 			lastPointer = pointer;
 			hasPointer = true;
 		}
-		frame.PointerOverUi = document.IsLayoutCurrent() && static_cast<bool>(document.HitTest(pointer));
+		frame.PointerOverUi = target.Over();
 		if (input.IsMouseButtonTriggered(Platform::MouseButton::Left))
 		{
-			document.PointerDown(pointer, modifiers);
+			target.Down(modifiers);
 		}
 		if (input.IsMouseButtonReleased(Platform::MouseButton::Left))
 		{
-			document.PointerUp(pointer);
+			target.Up();
 		}
 		const float wheel = input.GetMouseScrollDelta();
 		if (wheel != 0.0f && std::isfinite(wheel))
 		{
 			// A positive wheel delta scrolls up, towards smaller offsets.
-			document.Wheel(pointer, { 0.0f, -wheel * desc.WheelStep });
+			target.Wheel({ 0.0f, -wheel * desc.WheelStep });
 		}
 
 		for (const auto& event : input.GetTextEditEvents())
 		{
 			if (!event.Text.empty())
 			{
-				document.TextInput(event.Text);
+				target.TextInput(event.Text);
 				continue;
 			}
 			const auto mapped = ToUiKey(event.Key);
@@ -131,12 +285,11 @@ namespace Swim::UI
 			{
 				continue;
 			}
-			const bool focused = static_cast<bool>(document.GetFocus());
-			if (!focused && !(*mapped == UiKey::Tab && desc.TabStartsNavigation))
+			if (!target.HasFocus() && !(*mapped == UiKey::Tab && desc.TabStartsNavigation))
 			{
 				continue;
 			}
-			if (document.KeyDown(*mapped, modifiers))
+			if (target.KeyDown(*mapped, modifiers))
 			{
 				++frame.KeysConsumed;
 			}
@@ -145,11 +298,74 @@ namespace Swim::UI
 		{
 			const auto& composition = input.GetTextComposition();
 			const int start = input.GetTextCompositionStart();
-			document.SetComposition(
+			target.Composition(
 				composition, start < 0 ? static_cast<std::uint32_t>(composition.size()) : CodePointsToBytes(composition, start));
 		}
-		frame.KeyboardCaptured = static_cast<bool>(document.GetFocus());
-		frame.WantsTextInput = document.WantsTextInput();
+
+		// Gamepad navigation.
+		if (desc.Gamepad && input.IsGamepadConnected(*desc.Gamepad))
+		{
+			using B = Platform::GamepadButton;
+			const auto device = *desc.Gamepad;
+			const auto direction = GamepadDirection(input);
+			bool fire = false;
+			if (direction != heldDirection)
+			{
+				heldDirection = direction;
+				heldSeconds = 0.0f;
+				nextRepeat = desc.RepeatDelaySeconds;
+				fire = direction.has_value();
+			}
+			else if (direction)
+			{
+				heldSeconds += deltaSeconds;
+				if (heldSeconds >= nextRepeat)
+				{
+					fire = true;
+					nextRepeat = heldSeconds + desc.RepeatIntervalSeconds;
+				}
+			}
+			if (fire)
+			{
+				// A text field would keep arrows for its caret; the pad always leaves it.
+				const bool consumed =
+					target.HasFocus() && !target.FocusedEditable() ? target.KeyDown(ArrowKey(*direction), {}) : target.Navigate(*direction);
+				frame.KeysConsumed += consumed ? 1u : 0u;
+			}
+			if (target.HasFocus())
+			{
+				if (input.IsGamepadButtonTriggered(device, B::South))
+				{
+					frame.KeysConsumed += target.KeyDown(UiKey::Enter, {}) ? 1u : 0u;
+				}
+				if (input.IsGamepadButtonTriggered(device, B::East))
+				{
+					frame.KeysConsumed += target.KeyDown(UiKey::Escape, {}) ? 1u : 0u;
+				}
+			}
+			if (input.IsGamepadButtonTriggered(device, B::LeftShoulder) || input.IsGamepadButtonTriggered(device, B::RightShoulder))
+			{
+				UiKeyModifiers shift;
+				shift.Shift = input.IsGamepadButtonTriggered(device, B::LeftShoulder);
+				frame.KeysConsumed += target.KeyDown(UiKey::Tab, shift) ? 1u : 0u;
+			}
+			frame.GamepadCaptured = target.HasFocus();
+		}
+		frame.KeyboardCaptured = target.HasFocus();
+		frame.WantsTextInput = target.WantsTextInput();
 		return frame;
+	}
+
+	UiInputFrame UiInputBridge::Apply(const Input::InputSystem& input, UiDocument& document, float deltaSeconds)
+	{
+		DocumentTarget target{ document, lastPointer };
+		return Run(input, target, deltaSeconds);
+	}
+
+	UiInputFrame UiInputBridge::Apply(const Input::InputSystem& input, UiCanvasRouter& router, const UiCameraView* camera,
+		std::span<const UiSurfaceHit> surfaceHits, float deltaSeconds)
+	{
+		RouterTarget target{ router, camera, surfaceHits };
+		return Run(input, target, deltaSeconds);
 	}
 } // namespace Swim::UI

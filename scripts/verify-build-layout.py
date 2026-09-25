@@ -1342,7 +1342,7 @@ def check_phase20_ui_rendering(failures: list[str]) -> None:
     renderer = ROOT / "Source/Engine/Systems/Renderer"
     ui_rendering = renderer / "UiRendering"
     for relative in ("UiRenderRecords.h", "UiRenderBindings.h", "UiRenderSettings.h", "UiRenderReference.cpp", "UiAtlasTextures.cpp",
-                     "UiRenderer.cpp"):
+                     "UiRenderer.cpp", "UiRenderSurfaces.cpp"):
         if not (ui_rendering / relative).is_file():
             fail(f"UI rendering unit is missing: Renderer/UiRendering/{relative}", failures)
     for shader in ("UiRecords", "UiQuad"):
@@ -1389,6 +1389,31 @@ def check_phase20_ui_rendering(failures: list[str]) -> None:
         check_suite_is_compiled(group, name, failures)
     if not (ROOT / "Source/Tests/Fixtures/Fonts/SwimTextFallbackFixture.ttf").is_file():
         fail("the Hebrew/Greek fallback font fixture is missing", failures)
+
+
+def check_phase20_controls_and_canvases(failures: list[str]) -> None:
+    """Item 79 controls, themes and canvases: behaviour, visual states, themes, canvas
+    math and multi-canvas input live in Systems/UI, which stays independent of the
+    renderer, scene, platform and input modules (world-space drawing is UiRendering's)."""
+    ui = ROOT / "Source/Engine/Systems/UI"
+    for relative in ("UiControls.cpp", "UiVisuals.cpp", "UiTheme.h", "UiTheme.cpp", "UiWidgets.cpp", "UiCanvas.h", "UiCanvas.cpp",
+                     "UiCanvasRouter.h", "UiCanvasRouter.cpp"):
+        if not (ui / relative).is_file():
+            fail(f"UI controls/canvas unit is missing: Systems/UI/{relative}", failures)
+    for path in ui.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        for include in re.findall(r'#\s*include\s*[<"]([^>"\n]+)', path.read_text(encoding="utf-8")):
+            if include.startswith("Engine/") and not re.match(r"Engine/Systems/(UI|Text)/", include):
+                fail(f"Systems/UI may include only UI and Text headers: {path.relative_to(ROOT)} -> {include}", failures)
+            if any(part in include for part in ("SDL", "vulkan", "entt", "glm/", "<hb", "ft2build", "msdfgen")):
+                fail(f"Systems/UI must not depend on {include}: {path.relative_to(ROOT)}", failures)
+    for group, name in (("UI", "UiControlTests.cpp"), ("UI", "UiCanvasTests.cpp"), ("UI", "UiWidgetTests.cpp"),
+                        ("RenderUi", "UiWorldRenderingTests.cpp")):
+        check_suite_is_compiled(group, name, failures)
+    smoke = ROOT / "Source/Tests/Suites/RHIVulkan/VulkanUiSmokeTests.cpp"
+    if smoke.is_file() and "UiWorldCanvasesMatchTheCpuReference" not in smoke.read_text(encoding="utf-8"):
+        fail("the world-canvas native smoke (UiWorldCanvasesMatchTheCpuReference) is not registered", failures)
 
 
 def check_phase3_job_architecture(failures: list[str]) -> None:
@@ -4389,6 +4414,7 @@ def main() -> int:
     check_phase3_job_architecture(failures)
     check_phase20_text_dependencies(failures)
     check_phase20_ui_rendering(failures)
+    check_phase20_controls_and_canvases(failures)
     check_phase3_io_architecture(failures)
     check_phase3_memory_architecture(failures)
     check_phase4_asset_architecture(failures)

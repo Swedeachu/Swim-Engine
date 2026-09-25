@@ -96,3 +96,29 @@ SWIM_TEST("UI.Text", "PrewarmGlyphsFillsTheAtlasBeforePaint")
 	SWIM_CHECK_EQUAL(atlas.GetPage(0).Revision, revision);
 	SWIM_CHECK_EQUAL(ui.PrewarmGlyphs(atlas), 0u);
 }
+
+// The fixture's 'u' carries a point-only contour above its bowl (as fonts from subsetting
+// or hinting tools may). It must not reach msdfgen: an empty contour in the overlap-aware
+// combiner used to draw a streak through the open top of the glyph.
+SWIM_TEST("Text.Atlas", "PointOnlyContoursLeaveNoDistanceFieldArtifacts")
+{
+	const auto font = Swim::Testing::LoadTextFontFixture();
+	Swim::Text::GlyphAtlas atlas;
+	const auto entry = atlas.Get(font, font->GetGlyph(U'u'));
+	SWIM_REQUIRE(entry.Page != Swim::Text::NoAtlasPage);
+	const auto page = atlas.GetPage(entry.Page);
+	// Between the stems, above the bowl, every texel is outside the glyph (median < 0.5).
+	std::uint32_t inside = 0;
+	for (std::uint32_t y = 0; y < 20; ++y)
+	{
+		for (std::uint32_t x = 9; x <= 19; ++x)
+		{
+			const auto* texel = &page.Pixels[(std::size_t(entry.Y + y) * page.Size + entry.X + x) * 3];
+			const auto r = texel[0], g = texel[1], b = texel[2];
+			const auto median = std::max(std::min(r, g), std::min(std::max(r, g), b));
+			inside += median >= 128 ? 1u : 0u;
+		}
+	}
+	SWIM_CHECK_EQUAL(inside, 0u);
+	SWIM_CHECK(entry.Width >= 26u && entry.Height >= 30u);
+}

@@ -11,9 +11,13 @@ namespace Swim::Render
 	inline constexpr std::uint32_t UiQuadGlyph = 1; // MSDF glyph from an atlas page.
 	inline constexpr std::uint32_t UiQuadImage = 2; // Premultiplied texture times the tint.
 
-	// One UI paint quad in framebuffer pixels, drawn as one instance of six vertices.
-	// The vertex stage clips Rect to Clip (exact for these axis-aligned rectangles, so no
-	// fragment is discarded) and remaps the UV to the clipped part.
+	// GpuUiDrawConstants::Flags.
+	inline constexpr std::uint32_t UiDrawWorld = 1; // Canvas mapped through a projection: derivative-based coverage.
+
+	// One UI paint quad in canvas pixels (the target's pixels for screen overlays), drawn as
+	// one instance of six vertices. The vertex stage clips Rect to Clip in canvas space
+	// (exact for these axis-aligned rectangles, also under a projection, so no fragment is
+	// discarded) and remaps the UV to the clipped part.
 	struct GpuUiQuad
 	{
 		float Rect[4] = {};		   // x0, y0, x1, y1 (unclipped).
@@ -23,23 +27,32 @@ namespace Swim::Render
 		float BorderColor[4] = {}; // Premultiplied linear RGBA.
 		float Radius = 0.0f;	   // Corner radius in pixels (solid).
 		float Border = 0.0f;	   // Inner border width in pixels (solid).
-		float PixelRange = 0.0f;   // Glyph: screen pixels per unit of normalized distance (>= 1).
+		float PixelRange = 0.0f;   // Glyph, screen overlays: screen pixels per unit of normalized distance (>= 1).
 		std::uint32_t Kind = UiQuadSolid;
 		std::uint32_t Texture = 0; // Bindless texture index (glyph page or image).
 		std::uint32_t Sampler = 0; // Bindless sampler index.
-		std::uint32_t Reserved[2] = {};
+		float UnitRange = 0.0f;	   // Glyph: distance range / atlas page size (UV units), for world canvases.
+		std::uint32_t Reserved = 0;
 	};
 
 	static_assert(sizeof(GpuUiQuad) == 112);
-	static_assert(offsetof(GpuUiQuad, Radius) == 80 && offsetof(GpuUiQuad, Kind) == 92 && offsetof(GpuUiQuad, Sampler) == 100);
+	static_assert(offsetof(GpuUiQuad, Radius) == 80 && offsetof(GpuUiQuad, Kind) == 92 && offsetof(GpuUiQuad, Sampler) == 100 &&
+		offsetof(GpuUiQuad, UnitRange) == 104);
 
 	// Push constants of SwimUiQuad (vertex and fragment stages).
 	struct GpuUiDrawConstants
 	{
-		float TargetSize[2] = {};	// Framebuffer pixels.
+		// Canvas pixels -> clip, row-major (clip = M * (x, y, 0, 1)). Screen overlays map
+		// pixels 1:1 (+Y down to the RHI's +Y-up clip space); world canvases project.
+		float ClipFromCanvas[16] = {};
+		float TargetSize[2] = {};	// Framebuffer pixels of the drawn mip.
 		std::uint32_t Encoding = 0; // UiOutputEncoding.
 		float WhiteScale = 1.0f;	// Linear/scRGB: multiplier; HDR10: nits of UI white.
+		std::uint32_t Flags = 0;	// UiDrawWorld.
+		float Opacity = 1.0f;		// Canvas fade, multiplies every premultiplied color.
+		float Reserved[2] = {};
 	};
 
-	static_assert(sizeof(GpuUiDrawConstants) == 16);
+	static_assert(sizeof(GpuUiDrawConstants) == 96);
+	static_assert(offsetof(GpuUiDrawConstants, TargetSize) == 64 && offsetof(GpuUiDrawConstants, Flags) == 80);
 } // namespace Swim::Render

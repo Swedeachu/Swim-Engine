@@ -20,11 +20,16 @@ namespace Swim::Render
 		}
 	} // namespace
 
-	Rhi::GraphicsPipelineDesc UiRenderer::PipelineDesc(Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+	Rhi::GraphicsPipelineDesc UiRenderer::PipelineDesc(
+		Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout, Rhi::Format depthFormat)
 	{
 		if (colorFormat == Rhi::Format::Undefined || Rhi::IsDepthFormat(colorFormat))
 		{
 			throw std::invalid_argument("UI pipelines need a color format");
+		}
+		if (depthFormat != Rhi::Format::Undefined && depthFormat != Rhi::Format::D32Float)
+		{
+			throw std::invalid_argument("UI depth pipelines test D32Float scene depth");
 		}
 		// The desc holds spans, so each format's one-element array has static storage.
 		static const auto formatStorage = []
@@ -49,11 +54,12 @@ namespace Swim::Render
 		pipeline.Layout = &layout;
 		pipeline.ColorFormats = formatStorage[formatIndex];
 		pipeline.BlendAttachments = Blend;
-		pipeline.DepthStencilFormat = Rhi::Format::Undefined;
-		pipeline.DepthStencil.DepthTest = false;
+		pipeline.DepthStencilFormat = depthFormat;
+		pipeline.DepthStencil.DepthTest = depthFormat != Rhi::Format::Undefined;
 		pipeline.DepthStencil.DepthWrite = false;
-		pipeline.Raster.Cull = Rhi::CullMode::None;
-		pipeline.DebugName = "UI quads";
+		pipeline.DepthStencil.DepthCompare = Rhi::CompareOp::GreaterEqual; // Canonical reverse-Z.
+		pipeline.Raster.Cull = Rhi::CullMode::None;						   // Panels are two-sided.
+		pipeline.DebugName = depthFormat != Rhi::Format::Undefined ? "UI quads (depth tested)" : "UI quads";
 		return pipeline;
 	}
 
@@ -84,8 +90,31 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + ": an *Srgb target encodes in hardware; use UiOutputEncoding::Linear");
 		}
-		const std::uint32_t width = targetDesc.Extent.Width;
-		const std::uint32_t height = targetDesc.Extent.Height;
+		if (frame.TargetMip >= targetDesc.MipLevels)
+		{
+			throw std::invalid_argument(name + " target mip is beyond the texture's mips");
+		}
+		const std::uint32_t mip = frame.TargetMip;
+		const std::uint32_t width = std::max(targetDesc.Extent.Width >> mip, 1u);
+		const std::uint32_t height = std::max(targetDesc.Extent.Height >> mip, 1u);
+		const bool world = frame.ClipFromCanvas.has_value();
+		if (world && (frame.OffsetX != 0.0f || frame.OffsetY != 0.0f))
+		{
+			throw std::invalid_argument(name + ": canvas matrices replace offsets (fold them into ClipFromCanvas)");
+		}
+		if (frame.Depth)
+		{
+			const auto depthDesc = graph.GetDesc(*frame.Depth);
+			if (!world || !program.DepthPipeline || depthDesc.PixelFormat != Rhi::Format::D32Float ||
+				!HasUsage(depthDesc.Usage, Rhi::TextureUsage::DepthStencilAttachment) || depthDesc.Extent.Width != width ||
+				depthDesc.Extent.Height != height || depthDesc.Samples != Rhi::SampleCount::X1)
+			{
+				throw std::invalid_argument(
+					name + " depth needs a canvas matrix, the depth pipeline and a single-sampled D32Float attachment of the drawn extent");
+			}
+		}
+		const auto constants = world ? Ui::BuildCanvasDrawConstants(width, height, frame.Composition, *frame.ClipFromCanvas, frame.Opacity)
+									 : Ui::BuildDrawConstants(width, height, frame.Composition, frame.Opacity);
 
 		Ui::QuadBuildDesc build;
 		build.DpiScale = frame.DpiScale;
@@ -99,7 +128,7 @@ namespace Swim::Render
 		}
 		Ui::QuadBuildStats built;
 		lastQuads = Ui::BuildQuads(frame.Paint, build, &built);
-		lastConstants = Ui::BuildDrawConstants(width, height, frame.Composition);
+		lastConstants = constants;
 		stats = { static_cast<std::uint32_t>(lastQuads.size()), built.Solids, built.Glyphs, built.Images, built.Culled };
 		if (lastQuads.size() > desc.MaxQuads)
 		{
@@ -122,21 +151,28 @@ namespace Swim::Render
 		}
 		sampled.insert(sampled.end(), frame.Images.begin(), frame.Images.end());
 		const auto target = frame.Target;
+		const auto depth = frame.Depth;
 		const bool clear = frame.Clear;
 		const auto clearColor = frame.ClearColor;
-		const auto constants = lastConstants;
 		const auto count = static_cast<std::uint32_t>(lastQuads.size());
+		const auto format = targetDesc.PixelFormat;
+		const Rhi::TextureSubresourceRange range{ mip, 1, 0, 1 };
 		return graph.AddPass(
 			name + " draw", Rhi::QueueType::Graphics,
 			[&](RenderGraphBuilder& b)
 			{
 				if (clear)
 				{
-					b.Write(target, S::ColorAttachment);
+					b.Write(target, S::ColorAttachment, range);
 				}
 				else
 				{
-					b.ReadWrite(target, S::ColorAttachment);
+					b.ReadWrite(target, S::ColorAttachment, range);
+				}
+				if (depth)
+				{
+					// The attachment layout is the writable one; the pipeline never writes depth.
+					b.ReadWrite(*depth, S::DepthStencilWrite);
 				}
 				if (quads)
 				{
@@ -147,15 +183,26 @@ namespace Swim::Render
 					b.Read(texture, S::ShaderRead);
 				}
 			},
-			[program, label = name + " draw", target, quads, clear, clearColor, constants, count, bindlessTable = &bindless, width, height](
-				RenderCommandContext& c)
+			[program, label = name + " draw", target, depth, quads, clear, clearColor, constants, count, bindlessTable = &bindless, width,
+				height, format, mip](RenderCommandContext& c)
 			{
+				Rhi::TextureViewDesc colorView;
+				colorView.PixelFormat = format;
+				colorView.BaseMipLevel = mip;
 				std::array<Rhi::RenderingAttachmentDesc, 1> colors{};
-				colors[0].View = &c.CreateView(target);
+				colors[0].View = &c.CreateView(target, colorView);
 				colors[0].Load = clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
 				colors[0].Clear.Value = clearColor;
+				std::optional<Rhi::DepthStencilAttachmentDesc> depthAttachment;
+				if (depth)
+				{
+					Rhi::TextureViewDesc depthView;
+					depthView.PixelFormat = Rhi::Format::D32Float;
+					depthAttachment = Rhi::DepthStencilAttachmentDesc{ &c.CreateView(*depth, depthView), Rhi::LoadOp::Load,
+						Rhi::StoreOp::Store, 0.0f, 0 };
+				}
 				auto& list = c.Commands();
-				list.BeginRendering({ colors, nullptr, { width, height } });
+				list.BeginRendering({ colors, depthAttachment ? &*depthAttachment : nullptr, { width, height } });
 				if (count > 0)
 				{
 					auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
@@ -173,7 +220,7 @@ namespace Swim::Render
 					auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 					list.SetViewport({ 0, 0, float(width), float(height) });
 					list.SetScissor({ 0, 0, width, height });
-					list.BindGraphicsPipeline(*program.Pipeline);
+					list.BindGraphicsPipeline(depth ? *program.DepthPipeline : *program.Pipeline);
 					list.BindDescriptorTable(0, retained);
 					list.BindDescriptorTable(UiRenderBindings::BindlessSpace, *bindlessTable);
 					list.PushConstants(

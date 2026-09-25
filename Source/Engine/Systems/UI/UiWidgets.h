@@ -1,57 +1,76 @@
 #pragma once
 
 #include "Engine/Systems/UI/UiDocument.h"
+#include "Engine/Systems/UI/UiTheme.h"
 
-#include <span>
-#include <unordered_map>
-
-// Thin widget layer over UiDocument nodes (critical-path item 79). Widgets are ordinary
-// nodes with a conventional style; everything stays reachable through the document.
+// Widget layer over UiDocument nodes (critical-path item 79). Widgets are ordinary nodes
+// (a control and its part nodes) styled by the document's theme: fonts, sizes and colors
+// come from UiDocument::GetTheme(), and SetTheme restyles every widget. Every part stays
+// reachable (UiDocument::GetControl(node).Parts) for per-node rules, images or
+// replacement. Behaviour lives in the document, so widgets work on any canvas.
 namespace Swim::UI
 {
-	struct UiButtonColors
+	// Themed helpers. Those that show text throw std::logic_error when the document's
+	// theme has no fonts.
+	UiNodeId CreatePanel(UiDocument& document, UiNodeId parent, UiFlow flow = UiFlow::Column);
+	UiNodeId CreateLabel(UiDocument& document, UiNodeId parent, std::string text);
+	// A Button control: Click on release inside or Enter/Space/gamepad A while focused.
+	UiNodeId CreateButton(UiDocument& document, UiNodeId parent, std::string label);
+	// An editable, clipped text node.
+	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, const UiTextEditOptions& options = {});
+	// Row [box [mark, mixed mark], label]; an empty label creates no label part.
+	UiNodeId CreateCheckbox(UiDocument& document, UiNodeId parent, std::string label, UiCheckState state = UiCheckState::Unchecked);
+	// Row [track [knob], label].
+	UiNodeId CreateToggle(UiDocument& document, UiNodeId parent, std::string label, bool on = false);
+
+	struct UiSliderDesc
 	{
-		UiColor Normal{ 0.16f, 0.18f, 0.22f, 1.0f };
-		UiColor Hover{ 0.22f, 0.25f, 0.31f, 1.0f };
-		UiColor Pressed{ 0.10f, 0.12f, 0.15f, 1.0f };
-		UiColor Focus{ 0.45f, 0.65f, 1.0f, 1.0f }; // Border color while focused.
-		float FocusBorder = 2.0f;
+		float Min = 0.0f;
+		float Max = 1.0f;
+		float Value = 0.0f;
+		float Step = 0.0f;
+		float PageStep = 0.0f;
+		UiOrientation Orientation = UiOrientation::Horizontal;
+		UiTrackClick TrackClick = UiTrackClick::Jump;
+		std::uint32_t Ticks = 0; // >= 2: evenly spaced tick marks from Min to Max (inclusive).
+		bool ShowValue = false;	 // A value label next to the slider (the pair sits in a row).
+		std::int32_t Decimals = 0;
 	};
 
-	// Labels do not take input. Style defaults to Auto size.
+	// [track, ticks..., fill, thumb], all placed by the slider; with ShowValue the slider
+	// and its label (Parts.Label, updated by the document) share a new row container.
+	UiNodeId CreateSlider(UiDocument& document, UiNodeId parent, const UiSliderDesc& desc = {});
+
+	struct UiScrollBarDesc
+	{
+		UiOrientation Orientation = UiOrientation::Vertical;
+		UiScrollBarVisibility Visibility = UiScrollBarVisibility::Auto;
+		UiTrackClick TrackClick = UiTrackClick::Page;
+		bool StepButtons = false; // Decrement/increment buttons at the ends (held: repeat).
+	};
+
+	// A bar [thumb, step buttons] driving target's scroll offset; target must be a clipped node.
+	UiNodeId CreateScrollBar(UiDocument& document, UiNodeId parent, UiNodeId target, const UiScrollBarDesc& desc = {});
+
+	struct UiScrollArea
+	{
+		UiNodeId Root;
+		UiNodeId Viewport; // The clipped content node: add children here.
+		UiNodeId Vertical; // Empty when not requested.
+		UiNodeId Horizontal;
+	};
+
+	// A root (styled by rootStyle, typically a size) holding a clipped viewport and its
+	// scroll bars: in flow next to the viewport, or floating over its edges for Overlay.
+	UiScrollArea CreateScrollArea(UiDocument& document, UiNodeId parent, const UiStyle& rootStyle, bool vertical = true,
+		bool horizontal = false, UiScrollBarVisibility visibility = UiScrollBarVisibility::Auto, bool stepButtons = false);
+
+	// Unthemed helpers with explicit fonts and styles.
 	UiNodeId CreateLabel(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, std::string text,
 		float size, const UiStyle& style = {});
-	// A hit-testable, focusable node with centered text, padding and rounded corners.
-	UiStyle DefaultButtonStyle(const UiButtonColors& colors = {});
-	UiNodeId CreateButton(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, std::string label,
-		float size, const UiStyle& style = DefaultButtonStyle());
 	UiNodeId CreateImage(UiDocument& document, UiNodeId parent, const UiImage& image, const UiStyle& style = {});
-	// A clipped column: children scroll with UiDocument::Wheel/SetScroll.
+	// A clipped node: children scroll with UiDocument::Wheel/SetScroll.
 	UiNodeId CreateScrollView(UiDocument& document, UiNodeId parent, const UiStyle& style);
-	// An editable, clipped text node.
 	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, float size,
 		const UiTextEditOptions& options = {}, const UiStyle& style = {});
-
-	// Hover/pressed/focus visuals of tracked buttons, driven by the document's events as
-	// paint-only style changes (no relayout).
-	class UiButtonStates
-	{
-	  public:
-		void Track(UiNodeId button, const UiButtonColors& colors = {});
-		void Untrack(UiNodeId button);
-		// Feed every drained event batch; untracked nodes and removed nodes are ignored.
-		void Apply(UiDocument& document, std::span<const UiEvent> events);
-
-	  private:
-		struct State
-		{
-			UiButtonColors Colors;
-			bool Hovered = false;
-			bool Pressed = false;
-			bool Focused = false;
-		};
-
-		void Refresh(UiDocument& document, UiNodeId button, const State& state) const;
-		std::unordered_map<std::uint64_t, State> buttons;
-	};
 } // namespace Swim::UI

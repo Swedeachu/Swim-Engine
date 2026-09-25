@@ -28,6 +28,11 @@ namespace Swim::UI
 			return quad;
 		}
 
+		UiColor Fade(const UiColor& premultiplied, float opacity)
+		{
+			return { premultiplied.R * opacity, premultiplied.G * opacity, premultiplied.B * opacity, premultiplied.A * opacity };
+		}
+
 		UiPaintQuad SolidQuad(UiNodeId node, const UiRect& bounds, const UiRect& clip, const UiColor& premultiplied)
 		{
 			UiPaintQuad quad;
@@ -62,13 +67,14 @@ namespace Swim::UI
 		// One image quad, or nine when slice borders are set. Borders keep their size;
 		// edges stretch along one axis and the centre along both. Borders larger than the
 		// destination shrink proportionally.
-		template <typename Emit> void AddImage(UiNodeId node, const UiImage& image, const UiRect& dest, const UiRect& clip, Emit emit)
+		template <typename Emit>
+		void AddImage(UiNodeId node, const UiImage& image, const UiColor& tint, const UiRect& dest, const UiRect& clip, Emit emit)
 		{
 			UiPaintQuad base;
 			base.Node = node;
 			base.Kind = UiPaintKind::Image;
 			base.Clip = clip;
-			base.Color = Premultiply(image.Tint);
+			base.Color = tint;
 			base.Texture = image.Texture;
 			base.Sampler = image.Sampler;
 			const auto& slice = image.Slice;
@@ -116,10 +122,20 @@ namespace Swim::UI
 			}
 		};
 		const auto& s = node.Style;
-		auto background = SolidQuad(node.Id, node.Bounds, node.Clip, Premultiply(s.Background));
-		background.CornerRadius = std::min(s.CornerRadius, 0.5f * std::min(node.Bounds.Width, node.Bounds.Height));
-		background.BorderWidth = s.BorderWidth;
-		background.BorderColor = Premultiply(s.BorderColor);
+		const auto& v = node.Visual;
+		const float opacity = node.EffectiveOpacity;
+		if (opacity <= 0.0f)
+		{
+			return;
+		}
+		const auto color = [&](const UiColor& straight)
+		{
+			return Fade(Premultiply(straight), opacity);
+		};
+		auto background = SolidQuad(node.Id, node.Bounds, node.Clip, color(v.Background));
+		background.CornerRadius = std::min(v.CornerRadius, 0.5f * std::min(node.Bounds.Width, node.Bounds.Height));
+		background.BorderWidth = v.BorderWidth;
+		background.BorderColor = color(v.BorderColor);
 		emit(background);
 
 		const UiRect content = Internal::ContentBox(node.Bounds, s.Padding);
@@ -129,9 +145,10 @@ namespace Swim::UI
 			return;
 		}
 		const UiPoint origin{ content.X - node.Scroll.X, content.Y - node.Scroll.Y };
-		if (node.HasImage)
+		if (v.HasImage)
 		{
-			AddImage(node.Id, node.Image, FitImage(node.Image, { origin.X, origin.Y, content.Width, content.Height }), clip, emit);
+			AddImage(
+				node.Id, v.Image, color(v.ImageTint), FitImage(v.Image, { origin.X, origin.Y, content.Width, content.Height }), clip, emit);
 		}
 		if (!node.TextLayout)
 		{
@@ -146,20 +163,18 @@ namespace Swim::UI
 		{
 			for (const auto& rect : layout.GetSelectionRects(selectionBegin, selectionEnd))
 			{
-				emit(SolidQuad(
-					node.Id, { origin.X + rect.X, origin.Y + rect.Y, rect.Width, rect.Height }, clip, Premultiply(s.SelectionColor)));
+				emit(SolidQuad(node.Id, { origin.X + rect.X, origin.Y + rect.Y, rect.Width, rect.Height }, clip, color(s.SelectionColor)));
 			}
 		}
-		if (s.TextColor.A > 0.0f)
+		if (v.TextColor.A > 0.0f)
 		{
-			const UiColor color = Premultiply(s.TextColor);
+			const UiColor text = color(v.TextColor);
 			for (const auto& glyph : layout.GetGlyphs())
 			{
 				const auto entry = atlas.Get(node.Fonts->GetFace(glyph.Face), glyph.Glyph);
 				if (entry.Page != Text::NoAtlasPage)
 				{
-					emit(
-						GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip, color));
+					emit(GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip, text));
 				}
 			}
 		}
@@ -172,7 +187,7 @@ namespace Swim::UI
 			for (const auto& rect : layout.GetSelectionRects(begin, end))
 			{
 				emit(SolidQuad(node.Id, { origin.X + rect.X, origin.Y + rect.Y + rect.Height - thickness, rect.Width, thickness }, clip,
-					Premultiply(s.TextColor)));
+					color(v.TextColor)));
 			}
 		}
 		if (focusedEditor && CaretVisible && (composing || selectionBegin == selectionEnd))
@@ -182,8 +197,8 @@ namespace Swim::UI
 				: node.Selection.Caret;
 			const auto caret = layout.GetCaret(offset);
 			const float width = std::max(1.0f, 1.0f / Dpi);
-			emit(SolidQuad(node.Id, { origin.X + caret.X - width * 0.5f, origin.Y + caret.Top, width, caret.Height }, clip,
-				Premultiply(s.CaretColor)));
+			emit(SolidQuad(
+				node.Id, { origin.X + caret.X - width * 0.5f, origin.Y + caret.Top, width, caret.Height }, clip, color(s.CaretColor)));
 		}
 	}
 
@@ -195,7 +210,7 @@ namespace Swim::UI
 		for (const auto id : impl->Order)
 		{
 			const auto& node = impl->Get(id);
-			if (!node.TextLayout || node.Style.TextColor.A <= 0.0f)
+			if (!node.TextLayout || (node.Style.TextColor.A <= 0.0f && node.Visual.TextColor.A <= 0.0f))
 			{
 				continue;
 			}
@@ -237,13 +252,22 @@ namespace Swim::UI
 			}
 			impl->PaintAtlas = &atlas;
 		}
+		impl->ResolveVisuals();
+		const auto previousCount = impl->Quads.size();
 		impl->Quads.clear();
 		impl->RepaintedNodes = 0;
 		for (const auto id : impl->Order)
 		{
 			auto& node = impl->Get(id);
+			// Opacity multiplies down the tree; hidden scroll bars hide their parts.
+			float opacity = node.ControlHidden ? 0.0f : node.Visual.Opacity * node.ControlOpacity;
+			if (node.Parent && impl->Nodes.contains(node.Parent.Value))
+			{
+				opacity *= impl->Get(node.Parent).EffectiveOpacity;
+			}
+			node.EffectiveOpacity = opacity;
 			const bool moved = !Internal::SameRect(node.PaintedBounds, node.Bounds) || !Internal::SameRect(node.PaintedClip, node.Clip) ||
-				node.PaintedScroll.X != node.Scroll.X || node.PaintedScroll.Y != node.Scroll.Y;
+				node.PaintedScroll.X != node.Scroll.X || node.PaintedScroll.Y != node.Scroll.Y || node.PaintedOpacity != opacity;
 			if (node.PaintDirty || moved)
 			{
 				impl->BuildPaint(node, atlas);
@@ -251,9 +275,15 @@ namespace Swim::UI
 				node.PaintedBounds = node.Bounds;
 				node.PaintedClip = node.Clip;
 				node.PaintedScroll = node.Scroll;
+				node.PaintedOpacity = opacity;
 				++impl->RepaintedNodes;
 			}
 			impl->Quads.insert(impl->Quads.end(), node.Paint.begin(), node.Paint.end());
+		}
+		if (impl->RepaintedNodes > 0 || impl->Quads.size() != previousCount || impl->PaintedLayoutRevision != impl->Revision)
+		{
+			++impl->PaintRevision;
+			impl->PaintedLayoutRevision = impl->Revision;
 		}
 		return impl->Quads;
 	}

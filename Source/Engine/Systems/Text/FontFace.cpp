@@ -85,7 +85,11 @@ namespace Swim::Text
 				return b.Apply(
 					[&]
 					{
-						b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(to)));
+						// Zero-length lines have no direction; msdfgen turns them into artifacts.
+						if (b.Point(to) != b.Current)
+						{
+							b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(to)));
+						}
 						b.Current = b.Point(to);
 					});
 			};
@@ -119,6 +123,14 @@ namespace Swim::Text
 				throw std::runtime_error("Unable to decompose glyph outline");
 			}
 			builder.Close();
+			// Fonts may carry point-only contours (anchor or phantom points left by subsetting
+			// or hinting tools): they have no area and no edges, and an empty contour in the
+			// overlap-aware combiner produces streaks in the distance field.
+			std::erase_if(builder.Shape.contours,
+				[](const msdfgen::Contour& contour)
+				{
+					return contour.edges.empty();
+				});
 			builder.Shape.normalize();
 			builder.Shape.orientContours();
 			if (!builder.Shape.validate())

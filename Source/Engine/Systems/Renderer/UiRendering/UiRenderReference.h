@@ -5,6 +5,7 @@
 
 #include <array>
 #include <functional>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -34,10 +35,17 @@ namespace Swim::Render::Ui
 	};
 
 	// Paint order is preserved. Rectangles are scaled by DpiScale and offset; glyph
-	// PixelRange = max(1, DistanceRange x screen pixels per atlas texel).
+	// PixelRange = max(1, DistanceRange x screen pixels per atlas texel) and UnitRange =
+	// DistanceRange / AtlasPageSize.
 	std::vector<GpuUiQuad> BuildQuads(std::span<const UI::UiPaintQuad> paint, const QuadBuildDesc& desc, QuadBuildStats* stats = nullptr);
 
-	GpuUiDrawConstants BuildDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings);
+	// A screen overlay of a width x height target: canvas pixels are target pixels.
+	GpuUiDrawConstants BuildDrawConstants(
+		std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings, float opacity = 1.0f);
+	// A canvas seen through clipFromCanvas (UI::ClipFromCanvas): UiDrawWorld. Throws
+	// std::invalid_argument for a non-finite matrix or an opacity outside [0, 1].
+	GpuUiDrawConstants BuildCanvasDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings,
+		const std::array<float, 16>& clipFromCanvas, float opacity = 1.0f);
 
 	float SrgbOetf(float linear);
 	float PqOetf(float nits); // SMPTE ST 2084 inverse EOTF.
@@ -49,10 +57,22 @@ namespace Swim::Render::Ui
 	// Samples a bindless texture: (texture, sampler, u, v) -> RGBA.
 	using TextureSampler = std::function<Float4(std::uint32_t, std::uint32_t, float, float)>;
 
-	// The premultiplied linear color a quad contributes at pixel centre (px, py), before
-	// encoding and blending; transparent outside the clipped rectangle.
-	Float4 ShadeQuad(const GpuUiQuad& quad, float px, float py, const TextureSampler& sample);
-	// Output encoding of a premultiplied color (UiOutputEncoding).
+	// What a screen pixel covers of a world canvas, as the shader's fwidth: canvas pixels
+	// (|d/dx| + |d/dy| per axis) and UV units.
+	struct Footprint
+	{
+		float CanvasX = 1.0f;
+		float CanvasY = 1.0f;
+		float U = 0.0f;
+		float V = 0.0f;
+	};
+
+	// The premultiplied linear color a quad contributes at canvas point (px, py), before
+	// encoding and blending; transparent outside the clipped rectangle. Without a footprint
+	// (screen overlays) ramps are one pixel wide and glyphs use PixelRange; with one
+	// (UiDrawWorld) ramps span the footprint and glyph ranges come from UnitRange.
+	Float4 ShadeQuad(const GpuUiQuad& quad, float px, float py, const TextureSampler& sample, const Footprint* footprint = nullptr);
+	// Output encoding of a premultiplied color (UiOutputEncoding), after the canvas opacity.
 	Float4 Encode(const Float4& premultiplied, const GpuUiDrawConstants& constants);
 	// Premultiplied source over destination: One, OneMinusSourceAlpha on all channels.
 	Float4 Blend(const Float4& destination, const Float4& source);
@@ -65,8 +85,29 @@ namespace Swim::Render::Ui
 	};
 
 	// Rasterizes quads in order: a pixel is covered when its centre lies in the clipped
-	// rectangle [x0, x1) x [y0, y1) (the top-left rule for axis-aligned edges).
+	// rectangle [x0, x1) x [y0, y1) (the top-left rule for axis-aligned edges). Screen
+	// overlays (canvas pixels are target pixels).
 	void Rasterize(Canvas& canvas, std::span<const GpuUiQuad> quads, const GpuUiDrawConstants& constants, const TextureSampler& sample);
+
+	// The canvas point seen at a target pixel centre through ClipFromCanvas (the inverse
+	// homography of the canvas plane) and its footprint for a quad's UV scale; empty where
+	// the plane is behind the camera or seen edge-on.
+	struct CanvasSample
+	{
+		float X = 0.0f;
+		float Y = 0.0f;
+		float FootprintX = 1.0f; // fwidth of canvas x per screen pixel.
+		float FootprintY = 1.0f;
+	};
+
+	std::optional<CanvasSample> CanvasAt(const GpuUiDrawConstants& constants, float px, float py);
+
+	// World canvases (UiDrawWorld): each target pixel centre is mapped back to the canvas
+	// and shaded with its analytic footprint. Depth is not modelled (a front-facing canvas
+	// in front of everything); pixels are covered where their canvas point lies inside the
+	// clipped rectangle.
+	void RasterizeProjected(
+		Canvas& canvas, std::span<const GpuUiQuad> quads, const GpuUiDrawConstants& constants, const TextureSampler& sample);
 
 	// Bilinear, clamp-to-edge sampling of a tightly packed RGBA8 UNORM image with
 	// Vulkan's texel-centre convention.

@@ -3,10 +3,13 @@
 #include "Engine/Systems/Text/GlyphAtlas.h"
 #include "Engine/Systems/Text/TextLayout.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Swim::UI
 {
@@ -131,6 +134,15 @@ namespace Swim::UI
 		// Editable text only.
 		UiColor SelectionColor{ 0.25f, 0.45f, 0.95f, 0.45f };
 		UiColor CaretColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		// Paint-only: multiplies the paint of this node and its descendants (0 .. 1).
+		float Opacity = 1.0f;
+		// Paint-only: state changes (hover, press, focus, ...) ease the resolved paint
+		// (colors, border, radius, opacity) over this many seconds through Update(); 0 snaps.
+		float TransitionSeconds = 0.0f;
+		// Keyboard/gamepad order: nodes with TabIndex > 0 come first in ascending order,
+		// then TabIndex 0 in document order; negative values are skipped by Tab and
+		// directional navigation (still focusable by pointer or Focus()).
+		std::int32_t TabIndex = 0;
 	};
 
 	struct UiNodeId
@@ -160,6 +172,228 @@ namespace Swim::UI
 		UiEdges SliceUv;			// The same borders in the source, as fractions of the full texture.
 		UiColor Tint{ 1, 1, 1, 1 }; // Straight alpha, linear.
 		UiImageFit Fit = UiImageFit::Stretch;
+	};
+
+	// Interaction state of a node, taken from its nearest interactive ancestor-or-self
+	// (hit-testable, focusable, editable or a control), so a control's parts and a
+	// button's label follow the control. Disabled comes from the node's own availability.
+	enum class UiState : std::uint16_t
+	{
+		None = 0,
+		Hovered = 1u << 0,
+		Pressed = 1u << 1,
+		Focused = 1u << 2,
+		Disabled = 1u << 3,
+		Checked = 1u << 4,	// Checkbox/toggle on.
+		Mixed = 1u << 5,	// Checkbox indeterminate.
+		ReadOnly = 1u << 6, // Control with ReadOnly.
+		Dragging = 1u << 7, // Slider/scroll bar thumb or toggle knob under a pointer drag.
+	};
+
+	constexpr UiState operator|(UiState a, UiState b)
+	{
+		return static_cast<UiState>(static_cast<std::uint16_t>(a) | static_cast<std::uint16_t>(b));
+	}
+
+	constexpr UiState operator&(UiState a, UiState b)
+	{
+		return static_cast<UiState>(static_cast<std::uint16_t>(a) & static_cast<std::uint16_t>(b));
+	}
+
+	constexpr bool HasState(UiState state, UiState flags)
+	{
+		return (state & flags) == flags;
+	}
+
+	// Paint properties a state rule overrides; unset fields keep the value below it.
+	struct UiVisual
+	{
+		std::optional<UiColor> Background;
+		std::optional<UiColor> BorderColor;
+		std::optional<UiColor> TextColor;
+		std::optional<UiColor> ImageTint;
+		std::optional<float> BorderWidth;
+		std::optional<float> CornerRadius;
+		std::optional<float> Opacity;
+		// A skin: this image is painted in the node's content box instead of (or without)
+		// the node's own image. Skins never change layout (intrinsic size stays the node's).
+		std::optional<UiImage> Image;
+	};
+
+	// Applies when the node's state has every When flag and none of the Unless flags.
+	// Rules apply in order: the document theme's class rules first, then the node's own.
+	struct UiStateRule
+	{
+		UiState When = UiState::None;
+		UiState Unless = UiState::None;
+		UiVisual Visual;
+	};
+
+	// The paint a node is drawn with: its style, then the matching rules, eased by
+	// TransitionSeconds. Opacity is the node's own (not multiplied by ancestors).
+	struct UiResolvedVisual
+	{
+		UiColor Background;
+		UiColor BorderColor;
+		UiColor TextColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+		UiColor ImageTint{ 1.0f, 1.0f, 1.0f, 1.0f };
+		float BorderWidth = 0.0f;
+		float CornerRadius = 0.0f;
+		float Opacity = 1.0f;
+		bool HasImage = false;
+		UiImage Image;
+	};
+
+	// Behaviour the document implements for a node (critical-path item 79 controls).
+	// Controls are ordinary nodes: they get pointer, wheel and keyboard input through the
+	// document only, so they work the same on screen and world-space canvases.
+	enum class UiControlKind : std::uint8_t
+	{
+		None,
+		Button,	   // Click on release inside, Enter/Space.
+		Checkbox,  // Unchecked/Checked/Mixed; click, Space or Enter.
+		Toggle,	   // Off/on switch; click, knob drag or Space/Enter; the knob eases.
+		Slider,	   // A value in [Min, Max]: thumb drag, track click, keys, wheel while focused.
+		ScrollBar, // Shows and drives the scroll offset of ScrollTarget.
+	};
+
+	enum class UiOrientation : std::uint8_t
+	{
+		Horizontal,
+		Vertical // Sliders: Min at the bottom. Scroll bars: offset 0 at the top.
+	};
+
+	enum class UiCheckState : std::uint8_t
+	{
+		Unchecked,
+		Checked,
+		Mixed // Settable from code; a click turns it Checked.
+	};
+
+	enum class UiTrackClick : std::uint8_t
+	{
+		Jump, // The thumb jumps under the pointer and follows it.
+		Page  // One PageStep towards the pointer.
+	};
+
+	enum class UiScrollBarVisibility : std::uint8_t
+	{
+		Always,
+		Auto,	// Hidden (not painted, not hit) while the target does not overflow.
+		Overlay // As Auto, and fades out after FadeDelaySeconds without scrolling or hover.
+	};
+
+	// The role of a control's part node; geometry roles are placed by the control.
+	enum class UiPartRole : std::uint8_t
+	{
+		None,
+		Track,	   // Slider: full length, centered across (placed). Toggle/checkbox: the box (flow).
+		Fill,	   // Slider: from the value's start to the thumb center (placed).
+		Thumb,	   // Slider/scroll bar: at the value (placed); toggle: the knob, inside the track.
+		Mark,	   // Checkbox check mark (flow; shown by state rules).
+		Mixed,	   // Checkbox indeterminate mark (flow; shown by state rules).
+		Label,	   // Checkbox/toggle: text next to the control (flow). Slider: its value display.
+		Decrement, // Scroll bar step button at the start (placed; press steps, holding repeats).
+		Increment, // Scroll bar step button at the end.
+		Tick,	   // Slider tick mark at a value (placed; UiDocument::SetPartRole).
+	};
+
+	// Part nodes must be descendants of the control, except a slider's value Label (any
+	// node). Slider Track/Fill/Thumb and scroll bar Thumb/Decrement/Increment must be direct
+	// children; a toggle's Thumb is a child of its Track.
+	struct UiControlParts
+	{
+		UiNodeId Track;
+		UiNodeId Fill;
+		UiNodeId Thumb;
+		UiNodeId Mark;
+		UiNodeId Mixed;
+		UiNodeId Label;
+		UiNodeId Decrement;
+		UiNodeId Increment;
+	};
+
+	struct UiControl
+	{
+		UiControlKind Kind = UiControlKind::None;
+		UiOrientation Orientation = UiOrientation::Horizontal;
+		// Slider range and value (scroll bars mirror their target: Min 0, Max the maximum
+		// scroll offset, Value the offset). Step > 0 snaps values to Min + k * Step.
+		float Min = 0.0f;
+		float Max = 1.0f;
+		float Value = 0.0f;
+		float Step = 0.0f;	   // 0: continuous; keys move 1 % of the range.
+		float PageStep = 0.0f; // 0: 10 % of the range (scroll bars: the viewport length).
+		UiCheckState Check = UiCheckState::Unchecked;
+		bool ReadOnly = false; // Focusable and hoverable, but the value never changes by input.
+		UiTrackClick TrackClick = UiTrackClick::Jump;
+		// Scroll bars.
+		UiNodeId ScrollTarget; // A clipped node; its MaxScroll/Scroll on this axis drive the bar.
+		UiScrollBarVisibility Visibility = UiScrollBarVisibility::Auto;
+		float MinThumbLength = 16.0f; // Logical units.
+		float FadeDelaySeconds = 1.0f;
+		float FadeSeconds = 0.3f;
+		// Sliders: >= 0 makes the document write the value, with this many decimals, into
+		// the Label part's text whenever it changes (the label needs fonts).
+		std::int32_t LabelDecimals = -1;
+		UiControlParts Parts;
+	};
+
+	enum class UiThemeClass : std::uint8_t
+	{
+		None,
+		Panel,
+		Label,
+		Button,
+		TextField,
+		ScrollView,
+		ScrollBar,
+		ScrollThumb,
+		Checkbox,
+		CheckBox, // The checkbox's box.
+		CheckMark,
+		CheckMixed,
+		Toggle,
+		ToggleTrack,
+		ToggleKnob,
+		Slider,
+		SliderTrack,
+		SliderFill,
+		SliderThumb,
+		SliderTick,
+		SliderValue,
+		ScrollButton,
+		Count
+	};
+
+	// Which parts of a theme class a themed node takes (UiDocument::SetThemeClass).
+	enum class UiThemeApply : std::uint8_t
+	{
+		None = 0,
+		Paint = 1u << 0,  // Paint fields (colors, border, radius, opacity, transition) and the class's state rules.
+		Layout = 1u << 1, // Width, Height, MinSize, Padding and Gap (axes swapped for vertical controls).
+		Text = 1u << 2,	  // The theme's fonts and the class's text size, for nodes with text.
+		All = Paint | Layout | Text
+	};
+
+	constexpr UiThemeApply operator|(UiThemeApply a, UiThemeApply b)
+	{
+		return static_cast<UiThemeApply>(static_cast<std::uint8_t>(a) | static_cast<std::uint8_t>(b));
+	}
+
+	constexpr bool HasApply(UiThemeApply apply, UiThemeApply flag)
+	{
+		return (static_cast<std::uint8_t>(apply) & static_cast<std::uint8_t>(flag)) != 0;
+	}
+
+	class UiTheme;
+
+	enum class UiNavDirection : std::uint8_t
+	{
+		Up,
+		Down,
+		Left,
+		Right
 	};
 
 	enum class UiPaintKind : std::uint8_t
@@ -198,14 +432,19 @@ namespace Swim::UI
 		Focus,
 		Blur,
 		Cancel,
-		TextChanged, // An editable node's committed text changed.
-		Submit		 // Enter in a single-line editable node.
+		TextChanged,	// An editable node's committed text changed.
+		Submit,			// Enter in a single-line editable node.
+		ValueChanged,	// A control's value or check state changed by input (Value: the new value).
+		ValueCommitted, // The end of a value change: drag release, key, click (Value: the committed value).
 	};
 
 	struct UiEvent
 	{
 		UiEventKind Kind = UiEventKind::Enter;
 		UiNodeId Node;
+		// ValueChanged/ValueCommitted: the slider value, the scroll offset, or the check
+		// state (0 unchecked, 1 checked, 0.5 mixed).
+		float Value = 0.0f;
 	};
 
 	// Keys the document handles itself; the input adapter maps platform keys.
@@ -226,7 +465,9 @@ namespace Swim::UI
 		A,
 		C,
 		V,
-		X
+		X,
+		PageUp,
+		PageDown
 	};
 
 	struct UiKeyModifiers
@@ -320,11 +561,66 @@ namespace Swim::UI
 		void CancelPointer(); // Platform focus loss / pointer cancellation.
 		// Scrolls the innermost clipped, scrollable node under the point; true if it moved.
 		bool Wheel(UiPoint framebufferPoint, UiPoint delta);
+		// The pointer left this document (another canvas took it): hover ends. A pressed
+		// node keeps its capture until PointerUp/CancelPointer.
+		void PointerLeave();
 		void Focus(UiNodeId node); // Empty clears focus; unavailable targets are rejected.
+		// Tab order (see UiStyle::TabIndex); wraps around.
 		void FocusNext(bool backwards = false);
-		void ActivateFocused(); // Map Enter/Space to this at the input adapter.
+		// Moves focus to the nearest focusable node in a direction (keyboard arrows,
+		// gamepad D-pad); without focus, focuses the first node in tab order. False when
+		// nothing lies that way (no wrap-around).
+		bool Navigate(UiNavDirection direction);
+		// Arrow keys that the focused node does not use navigate (default on).
+		void SetArrowNavigation(bool enabled);
+		// Enter/Space/gamepad A: toggles checkboxes and toggles, clicks anything else.
+		void ActivateFocused();
 		UiNodeId GetFocus() const;
 		std::vector<UiEvent> DrainEvents();
+		// Lays the document out again with the last canvas when it changed since the last
+		// Layout (no-op before the first Layout).
+		void EnsureLayout();
+
+		// --- Controls (critical-path item 79). ---
+		// Makes a node a control: it becomes hit-testable (and focusable, except scroll
+		// bars without Style.Focusable); parts must be descendants (see UiControlParts).
+		// The value is clamped and snapped. Kind None removes the behaviour. Throws
+		// std::invalid_argument for an invalid range, step, parts or scroll target.
+		void SetControl(UiNodeId node, const UiControl& control);
+		const UiControl& GetControl(UiNodeId node) const;
+		// From code: clamped and snapped, no events. Scroll bars set their target's offset.
+		void SetValue(UiNodeId node, float value);
+		float GetValue(UiNodeId node) const;
+		void SetChecked(UiNodeId node, UiCheckState state); // From code: no events.
+		UiCheckState GetChecked(UiNodeId node) const;
+		// Registers an extra part (slider Tick marks at `value`, one node each; a direct
+		// child of the slider). UiPartRole::None releases it. Throws std::invalid_argument
+		// for another role, a node that is not a direct child of a slider, or a
+		// non-finite value.
+		void SetPartRole(UiNodeId part, UiNodeId control, UiPartRole role, float value = 0.0f);
+
+		// --- Visual states and theming. ---
+		// Rules applied after the theme class's rules (per-node overrides).
+		void SetStateRules(UiNodeId node, std::vector<UiStateRule> rules);
+		const std::vector<UiStateRule>& GetStateRules(UiNodeId node) const;
+		UiState GetState(UiNodeId node) const;
+		// The paint the node is drawn with, as of the last Paint or Update.
+		const UiResolvedVisual& GetVisual(UiNodeId node) const;
+		// The document theme (a default dark theme without fonts initially). Changing it
+		// re-applies every themed node. Null is rejected.
+		void SetTheme(std::shared_ptr<const UiTheme> theme);
+		const std::shared_ptr<const UiTheme>& GetTheme() const;
+		// Themes a node now and on every SetTheme (UiThemeClass::None unthemes it, keeping
+		// its current style).
+		void SetThemeClass(UiNodeId node, UiThemeClass themeClass, UiThemeApply apply = UiThemeApply::All);
+		UiThemeClass GetThemeClass(UiNodeId node) const;
+		// Advances paint transitions, toggle knobs and overlay scroll bar fades by seconds
+		// and resolves visual states. True while anything is still animating. Knob motion
+		// needs a Layout afterwards (IsLayoutCurrent turns false).
+		bool Update(float seconds);
+		bool IsAnimating() const;
+		// Changes whenever Paint's output changed (render surfaces redraw only then).
+		std::uint64_t GetPaintRevision() const;
 
 		// --- Editable text (critical-path item 79). ---
 		// Editable nodes are focusable and hit-testable; they need text fonts. Carets move
@@ -352,10 +648,6 @@ namespace Swim::UI
 		void SetCaretVisible(bool visible);
 
 	  private:
-		// Pointer, wheel and focus traversal re-run Layout with the last canvas when the
-		// document changed since (for example text typed earlier in the same frame).
-		void EnsureLayout();
-
 		struct Impl;
 		std::unique_ptr<Impl> impl;
 	};

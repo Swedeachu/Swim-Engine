@@ -85,6 +85,7 @@ namespace Swim::Render::Ui
 				quad.Sampler = desc.AtlasSampler;
 				const float texels = source.Uv.Width * float(desc.AtlasPageSize);
 				quad.PixelRange = std::max(1.0f, source.DistanceRange * (b.Width * s) / texels);
+				quad.UnitRange = source.DistanceRange / float(desc.AtlasPageSize);
 				++local.Glyphs;
 				break;
 			}
@@ -114,10 +115,34 @@ namespace Swim::Render::Ui
 		return quads;
 	}
 
-	GpuUiDrawConstants BuildDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings)
+	GpuUiDrawConstants BuildDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings, float opacity)
+	{
+		const float w = float(std::max(width, 1u));
+		const float h = float(std::max(height, 1u));
+		// Clip space is +Y up (the Vulkan backend flips the viewport); pixels are +Y down.
+		const std::array<float, 16> screen{ 2.0f / w, 0, 0, -1.0f, 0, -2.0f / h, 0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 1 };
+		auto constants = BuildCanvasDrawConstants(width, height, settings, screen, opacity);
+		constants.Flags = 0;
+		return constants;
+	}
+
+	GpuUiDrawConstants BuildCanvasDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings,
+		const std::array<float, 16>& clipFromCanvas, float opacity)
 	{
 		ValidateUiCompositionSettings(settings);
+		if (!std::isfinite(opacity) || opacity < 0.0f || opacity > 1.0f ||
+			!std::all_of(clipFromCanvas.begin(), clipFromCanvas.end(),
+				[](float v)
+				{
+					return std::isfinite(v);
+				}))
+		{
+			throw std::invalid_argument("UI draw constants need a finite canvas matrix and an opacity in [0, 1]");
+		}
 		GpuUiDrawConstants constants;
+		std::copy(clipFromCanvas.begin(), clipFromCanvas.end(), constants.ClipFromCanvas);
+		constants.Flags = UiDrawWorld;
+		constants.Opacity = opacity;
 		constants.TargetSize[0] = float(width);
 		constants.TargetSize[1] = float(height);
 		constants.Encoding = static_cast<std::uint32_t>(settings.Encoding);
@@ -171,7 +196,7 @@ namespace Swim::Render::Ui
 		return std::sqrt(ox * ox + oy * oy) + std::min(std::max(qx, qy), 0.0f) - radius;
 	}
 
-	Float4 ShadeQuad(const GpuUiQuad& q, float px, float py, const TextureSampler& sample)
+	Float4 ShadeQuad(const GpuUiQuad& q, float px, float py, const TextureSampler& sample, const Footprint* footprint)
 	{
 		const float x0 = std::max(q.Rect[0], q.Clip[0]);
 		const float y0 = std::max(q.Rect[1], q.Clip[1]);
@@ -189,7 +214,10 @@ namespace Swim::Render::Ui
 		if (q.Kind == UiQuadGlyph)
 		{
 			const auto msd = sample(q.Texture, q.Sampler, u, v);
-			const float coverage = Saturate(q.PixelRange * (Median(msd[0], msd[1], msd[2]) - 0.5f) + 0.5f);
+			const float range = footprint
+				? std::max(0.5f * (q.UnitRange / std::max(footprint->U, 1e-9f) + q.UnitRange / std::max(footprint->V, 1e-9f)), 1.0f)
+				: q.PixelRange;
+			const float coverage = Saturate(range * (Median(msd[0], msd[1], msd[2]) - 0.5f) + 0.5f);
 			return Scale(color, coverage);
 		}
 		if (q.Kind == UiQuadImage)
@@ -206,7 +234,8 @@ namespace Swim::Render::Ui
 		const float hx = width * 0.5f;
 		const float hy = height * 0.5f;
 		const float radius = std::min(q.Radius, std::min(hx, hy));
-		const float outer = Saturate(0.5f - RoundedBoxDistance(px, py, cx, cy, hx, hy, radius));
+		const float ramp = footprint ? std::max(0.5f * (footprint->CanvasX + footprint->CanvasY), 1e-6f) : 1.0f;
+		const float outer = Saturate(0.5f - RoundedBoxDistance(px, py, cx, cy, hx, hy, radius) / ramp);
 		if (q.Border <= 0.0f)
 		{
 			return Scale(color, outer);
@@ -214,7 +243,7 @@ namespace Swim::Render::Ui
 		const float ix = std::max(hx - q.Border, 0.0f);
 		const float iy = std::max(hy - q.Border, 0.0f);
 		const float fill = ix > 0.0f && iy > 0.0f
-			? std::min(outer, Saturate(0.5f - RoundedBoxDistance(px, py, cx, cy, ix, iy, std::max(radius - q.Border, 0.0f))))
+			? std::min(outer, Saturate(0.5f - RoundedBoxDistance(px, py, cx, cy, ix, iy, std::max(radius - q.Border, 0.0f)) / ramp))
 			: 0.0f;
 		const Float4 border{ q.BorderColor[0], q.BorderColor[1], q.BorderColor[2], q.BorderColor[3] };
 		Float4 result{};
@@ -225,8 +254,9 @@ namespace Swim::Render::Ui
 		return result;
 	}
 
-	Float4 Encode(const Float4& p, const GpuUiDrawConstants& constants)
+	Float4 Encode(const Float4& color, const GpuUiDrawConstants& constants)
 	{
+		const Float4 p = Scale(color, constants.Opacity);
 		const auto encoding = static_cast<UiOutputEncoding>(constants.Encoding);
 		if (encoding == UiOutputEncoding::Linear || encoding == UiOutputEncoding::ScRgb)
 		{
@@ -288,6 +318,91 @@ namespace Swim::Render::Ui
 					auto& texel = canvas.Texels[std::size_t(y) * canvas.Width + std::size_t(x)];
 					texel = Blend(texel, Encode(shaded, constants));
 				}
+			}
+		}
+	}
+
+	std::optional<CanvasSample> CanvasAt(const GpuUiDrawConstants& constants, float px, float py)
+	{
+		const auto& m = constants.ClipFromCanvas;
+		const float width = std::max(constants.TargetSize[0], 1.0f);
+		const float height = std::max(constants.TargetSize[1], 1.0f);
+		const auto point = [&](float x, float y) -> std::optional<std::array<float, 2>>
+		{
+			const float nx = 2.0f * x / width - 1.0f;
+			const float ny = 1.0f - 2.0f * y / height;
+			// (row0 - nx row3) . (cx, cy, 0, 1) = 0, (row1 - ny row3) . (cx, cy, 0, 1) = 0.
+			const float a0 = m[0] - nx * m[12], b0 = m[1] - nx * m[13], c0 = m[3] - nx * m[15];
+			const float a1 = m[4] - ny * m[12], b1 = m[5] - ny * m[13], c1 = m[7] - ny * m[15];
+			const float det = a0 * b1 - a1 * b0;
+			if (!(std::abs(det) > 1e-20f))
+			{
+				return std::nullopt;
+			}
+			const float cx = (-c0 * b1 + c1 * b0) / det;
+			const float cy = (-a0 * c1 + a1 * c0) / det;
+			const float w = m[12] * cx + m[13] * cy + m[15];
+			if (!(w > 0.0f) || !std::isfinite(cx) || !std::isfinite(cy))
+			{
+				return std::nullopt;
+			}
+			return std::array<float, 2>{ cx, cy };
+		};
+		const auto centre = point(px, py);
+		const auto left = point(px - 0.5f, py);
+		const auto right = point(px + 0.5f, py);
+		const auto up = point(px, py - 0.5f);
+		const auto down = point(px, py + 0.5f);
+		if (!centre || !left || !right || !up || !down)
+		{
+			return std::nullopt;
+		}
+		CanvasSample sample;
+		sample.X = (*centre)[0];
+		sample.Y = (*centre)[1];
+		sample.FootprintX = std::abs((*right)[0] - (*left)[0]) + std::abs((*down)[0] - (*up)[0]);
+		sample.FootprintY = std::abs((*right)[1] - (*left)[1]) + std::abs((*down)[1] - (*up)[1]);
+		return sample;
+	}
+
+	void RasterizeProjected(
+		Canvas& canvas, std::span<const GpuUiQuad> quads, const GpuUiDrawConstants& constants, const TextureSampler& sample)
+	{
+		// Canvas point and footprint per target pixel, shared by every quad.
+		std::vector<std::optional<CanvasSample>> samples(std::size_t(canvas.Width) * canvas.Height);
+		for (std::uint32_t y = 0; y < canvas.Height; ++y)
+		{
+			for (std::uint32_t x = 0; x < canvas.Width; ++x)
+			{
+				samples[std::size_t(y) * canvas.Width + x] = CanvasAt(constants, float(x) + 0.5f, float(y) + 0.5f);
+			}
+		}
+		for (const auto& quad : quads)
+		{
+			const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
+			const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
+			const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
+			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+			if (x0 >= x1 || y0 >= y1)
+			{
+				continue;
+			}
+			const float du = (quad.Uv[2] - quad.Uv[0]) / std::max(quad.Rect[2] - quad.Rect[0], 1e-6f);
+			const float dv = (quad.Uv[3] - quad.Uv[1]) / std::max(quad.Rect[3] - quad.Rect[1], 1e-6f);
+			for (std::size_t i = 0; i < samples.size(); ++i)
+			{
+				const auto& s = samples[i];
+				if (!s || !(s->X >= x0 && s->X < x1 && s->Y >= y0 && s->Y < y1))
+				{
+					continue;
+				}
+				Footprint footprint;
+				footprint.CanvasX = s->FootprintX;
+				footprint.CanvasY = s->FootprintY;
+				footprint.U = std::abs(du) * s->FootprintX;
+				footprint.V = std::abs(dv) * s->FootprintY;
+				const auto shaded = ShadeQuad(quad, s->X, s->Y, sample, &footprint);
+				canvas.Texels[i] = Blend(canvas.Texels[i], Encode(shaded, constants));
 			}
 		}
 	}

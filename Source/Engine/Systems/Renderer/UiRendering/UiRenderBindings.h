@@ -9,7 +9,7 @@ namespace Swim::Render
 		static constexpr std::uint32_t Quads = 0; // StructuredBuffer<UiQuad> (GpuUiQuad).
 		static constexpr std::uint32_t Count = 1;
 		// Push constants: GpuUiDrawConstants.
-		static constexpr std::uint32_t PushConstantBytes = 16;
+		static constexpr std::uint32_t PushConstantBytes = 96;
 		// The bindless space shared with Forward+ and particles (BindlessResourceTable):
 		// atlas pages and UI images are sampled through it.
 		static constexpr std::uint32_t BindlessSpace = 1;

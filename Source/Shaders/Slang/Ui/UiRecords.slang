@@ -16,16 +16,22 @@ struct UiQuad
 	uint Kind;
 	uint Texture;
 	uint Sampler;
-	uint Reserved0;
-	uint Reserved1;
+	float UnitRange;
+	uint Reserved;
 };
 
 struct UiDrawConstants
 {
+	float4 ClipFromCanvas[4]; // Row-major rows: canvas pixels -> clip.
 	float2 TargetSize;
 	uint Encoding;
 	float WhiteScale;
+	uint Flags;
+	float Opacity;
+	float2 Reserved;
 };
+
+static const uint UiDrawWorld = 1u;
 
 static const uint UiQuadSolid = 0u;
 static const uint UiQuadGlyph = 1u;
@@ -99,8 +105,9 @@ float4 UiEncode(float4 color, uint encoding, float whiteScale)
 	return float4(encoded * color.a, color.a);
 }
 
-// Ui::ShadeQuad for solid quads (the fragment is inside the clipped rectangle).
-float4 UiShadeSolid(UiQuad q, float2 p)
+// Ui::ShadeQuad for solid quads (the fragment is inside the clipped rectangle). footprint
+// is the canvas pixels per screen pixel (1 for screen overlays): the one-pixel ramp.
+float4 UiShadeSolid(UiQuad q, float2 p, float footprint)
 {
 	if (q.Radius <= 0.0 && q.Border <= 0.0)
 	{
@@ -109,7 +116,7 @@ float4 UiShadeSolid(UiQuad q, float2 p)
 	const float2 center = (q.Rect.xy + q.Rect.zw) * 0.5;
 	const float2 halfSize = max(q.Rect.zw - q.Rect.xy, 1e-6) * 0.5;
 	const float radius = min(q.Radius, min(halfSize.x, halfSize.y));
-	const float outer = saturate(0.5 - UiRoundedBoxDistance(p, center, halfSize, radius));
+	const float outer = saturate(0.5 - UiRoundedBoxDistance(p, center, halfSize, radius) / footprint);
 	if (q.Border <= 0.0)
 	{
 		return q.Color * outer;
@@ -118,7 +125,7 @@ float4 UiShadeSolid(UiQuad q, float2 p)
 	float fill = 0.0;
 	if (innerHalf.x > 0.0 && innerHalf.y > 0.0)
 	{
-		fill = min(outer, saturate(0.5 - UiRoundedBoxDistance(p, center, innerHalf, max(radius - q.Border, 0.0))));
+		fill = min(outer, saturate(0.5 - UiRoundedBoxDistance(p, center, innerHalf, max(radius - q.Border, 0.0)) / footprint));
 	}
 	return q.BorderColor * (outer - fill) + q.Color * fill;
 }

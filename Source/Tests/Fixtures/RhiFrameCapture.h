@@ -255,7 +255,19 @@ namespace Swim::Testing
 		void CopyBufferToTexture(Swim::Rhi::Buffer& source, Swim::Rhi::Texture& destination, const Swim::Rhi::BufferTextureCopyRegion& region) override;
 		void CopyTextureToBuffer(Swim::Rhi::Texture& source, Swim::Rhi::Buffer& destination, const Swim::Rhi::BufferTextureCopyRegion& region) override;
 
-		void BeginRendering(const Swim::Rhi::RenderingDesc&) override {}
+		// BeginRendering: Source = the first color view, Destination = the depth view (or
+		// null), SourceOffset/DestinationOffset = render area, Size = color attachment count.
+		void BeginRendering(const Swim::Rhi::RenderingDesc& desc) override
+		{
+			MockCommand command;
+			command.Kind = "BeginRendering";
+			command.Source = desc.ColorAttachments.empty() ? nullptr : desc.ColorAttachments[0].View;
+			command.Destination = desc.DepthStencilAttachment ? desc.DepthStencilAttachment->View : nullptr;
+			command.SourceOffset = desc.RenderArea.Width;
+			command.DestinationOffset = desc.RenderArea.Height;
+			command.Size = desc.ColorAttachments.size();
+			Capture(std::move(command));
+		}
 		void EndRendering() override {}
 		void BindGraphicsPipeline(Swim::Rhi::GraphicsPipeline& pipeline) override { Capture({ "BindGraphicsPipeline", &pipeline }); }
 		void BindComputePipeline(Swim::Rhi::ComputePipeline& pipeline) override { Capture({ "BindComputePipeline", &pipeline }); }

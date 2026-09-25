@@ -66,6 +66,10 @@ namespace Swim::UI
 				static_cast<std::uint8_t>(s.TextWrap) <= static_cast<std::uint8_t>(Text::TextWrap::Word);
 		}
 
+	} // namespace
+
+	namespace Internal
+	{
 		void ValidateImage(const UiImage& image)
 		{
 			const bool valid = InRange(image.Size.X, 0.0f, Internal::MaxLogical) && InRange(image.Size.Y, 0.0f, Internal::MaxLogical) &&
@@ -80,10 +84,27 @@ namespace Swim::UI
 				throw std::invalid_argument("Invalid UI image");
 			}
 		}
-	} // namespace
 
-	namespace Internal
-	{
+		void ValidateVisual(const UiVisual& v)
+		{
+			for (const auto* color : { &v.Background, &v.BorderColor, &v.TextColor, &v.ImageTint })
+			{
+				if (*color && !IsValidColor(**color))
+				{
+					throw std::invalid_argument("Invalid UI state rule color");
+				}
+			}
+			if ((v.BorderWidth && !InRange(*v.BorderWidth, 0.0f, MaxLogical)) ||
+				(v.CornerRadius && !InRange(*v.CornerRadius, 0.0f, MaxLogical)) || (v.Opacity && !InRange(*v.Opacity, 0.0f, 1.0f)))
+			{
+				throw std::invalid_argument("Invalid UI state rule value");
+			}
+			if (v.Image)
+			{
+				ValidateImage(*v.Image);
+			}
+		}
+
 		void ValidateStyle(const UiStyle& s)
 		{
 			const bool valid = IsValidLength(s.Width) && IsValidLength(s.Height) && IsValidSizeRange(s.MinSize, s.MaxSize) &&
@@ -93,7 +114,7 @@ namespace Swim::UI
 				IsUnitPoint(s.AnchorMax) && IsUnitPoint(s.Pivot) && IsValidEnums(s) && IsValidColor(s.Background) &&
 				InRange(s.CornerRadius, 0.0f, MaxLogical) && InRange(s.BorderWidth, 0.0f, MaxLogical) && IsValidColor(s.BorderColor) &&
 				IsValidColor(s.TextColor) && InRange(s.LineSpacing, 0.25f, 8.0f) && IsValidColor(s.SelectionColor) &&
-				IsValidColor(s.CaretColor);
+				IsValidColor(s.CaretColor) && InRange(s.Opacity, 0.0f, 1.0f) && InRange(s.TransitionSeconds, 0.0f, 60.0f);
 			if (!valid)
 			{
 				throw std::invalid_argument("Invalid UI style");
@@ -115,7 +136,8 @@ namespace Swim::UI
 				return x.Unit == y.Unit && x.Value == y.Value;
 			};
 			// Everything except Background, CornerRadius, BorderWidth/Color, TextColor,
-			// SelectionColor and CaretColor affects measurement or arrangement.
+			// SelectionColor, CaretColor, Opacity, TransitionSeconds and TabIndex affects
+			// measurement or arrangement.
 			return length(a.Width, b.Width) && length(a.Height, b.Height) && point(a.MinSize, b.MinSize) && point(a.MaxSize, b.MaxSize) &&
 				edges(a.Margin, b.Margin) && edges(a.Padding, b.Padding) && a.Flow == b.Flow && a.Gap == b.Gap && a.Grow == b.Grow &&
 				a.Shrink == b.Shrink && a.Justify == b.Justify && a.AlignItems == b.AlignItems && a.AlignSelf == b.AlignSelf &&
@@ -190,8 +212,16 @@ namespace Swim::UI
 		}
 		if (Pressed && (!Available(Pressed) || !IsHitTestable(Get(Pressed))))
 		{
+			if (Dragging == Pressed && Nodes.contains(Dragging.Value))
+			{
+				EndDrag(true);
+			}
 			Events.push_back({ UiEventKind::Cancel, Pressed });
 			Pressed = {};
+		}
+		if (Dragging && (!Nodes.contains(Dragging.Value) || Dragging != Pressed))
+		{
+			Dragging = {};
 		}
 		if (Hover && (!Available(Hover) || !IsHitTestable(Get(Hover))))
 		{
@@ -223,6 +253,7 @@ namespace Swim::UI
 		auto& node = Get(id);
 		node.MeasureDirty = true;
 		node.PaintDirty = true;
+		node.VisualDirty = true;
 		for (auto parent = node.Parent; parent; parent = Get(parent).Parent)
 		{
 			auto& ancestor = Get(parent);
@@ -238,7 +269,9 @@ namespace Swim::UI
 	{
 		if (id && Nodes.contains(id.Value))
 		{
-			Get(id).PaintDirty = true;
+			auto& node = Get(id);
+			node.PaintDirty = true;
+			node.VisualDirty = true;
 		}
 	}
 
@@ -248,6 +281,8 @@ namespace Swim::UI
 		Impl::Node root;
 		root.Id = impl->Root;
 		impl->Nodes.emplace(root.Id.Value, std::move(root));
+		impl->Theme = std::make_shared<const UiTheme>();
+		impl->Classes = impl->Theme->Build();
 	}
 
 	UiDocument::~UiDocument() = default;
@@ -342,6 +377,7 @@ namespace Swim::UI
 		if (paintOnly)
 		{
 			node.PaintDirty = true;
+			node.VisualDirty = true;
 			return;
 		}
 		impl->MarkLayoutDirty(id);
@@ -414,7 +450,7 @@ namespace Swim::UI
 
 	void UiDocument::SetImage(UiNodeId id, const UiImage& image)
 	{
-		ValidateImage(image);
+		Internal::ValidateImage(image);
 		auto& node = impl->Get(id);
 		node.HasImage = true;
 		node.Image = image;
@@ -475,6 +511,7 @@ namespace Swim::UI
 		if (root.Style.Visible)
 		{
 			impl->Arrange(root, { 0, 0, logical.X, logical.Y }, { 0, 0, logical.X, logical.Y }, true);
+			impl->SyncScrollBars();
 		}
 		impl->Dirty = false;
 		++impl->Revision;

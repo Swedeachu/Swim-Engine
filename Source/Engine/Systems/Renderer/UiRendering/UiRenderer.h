@@ -4,6 +4,7 @@
 #include "Engine/Systems/Renderer/UiRendering/UiRenderBindings.h"
 #include "Engine/Systems/Renderer/UiRendering/UiRenderReference.h"
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -12,11 +13,13 @@
 namespace Swim::Render
 {
 	// SwimUiQuad built by UiRenderer::PipelineDesc for the target's format; its layout's
-	// space 1 is the shared bindless space.
+	// space 1 is the shared bindless space. DepthPipeline (PipelineDesc with D32Float) is
+	// needed only by frames with Depth.
 	struct UiRenderProgram
 	{
 		Rhi::GraphicsPipeline* Pipeline = nullptr;
 		Rhi::PipelineLayout* Layout = nullptr;
+		Rhi::GraphicsPipeline* DepthPipeline = nullptr;
 	};
 
 	struct UiRendererDesc
@@ -32,6 +35,15 @@ namespace Swim::Render
 		float DpiScale = 1.0f;					// The document's Layout DPI scale.
 		float OffsetX = 0.0f;					// Framebuffer pixels (split screen, viewports).
 		float OffsetY = 0.0f;
+		// World panels, billboards and surfaces on quads: canvas pixels -> clip
+		// (UI::ClipFromCanvas). Quads stay in canvas pixels (offsets must be 0); coverage and
+		// glyph ranges come from screen-space derivatives. Empty: a screen overlay.
+		std::optional<std::array<float, 16>> ClipFromCanvas;
+		// D32Float reverse-Z scene depth, tested (GreaterEqual) and never written; needs
+		// ClipFromCanvas and UiRenderProgram::DepthPipeline.
+		std::optional<GraphTexture> Depth;
+		float Opacity = 1.0f;		 // Canvas fade (UI::CanvasFade), [0, 1].
+		std::uint32_t TargetMip = 0; // The mip level drawn (render-surface chains); its extent is the target's >> mip.
 		UiCompositionSettings Composition;
 		const UiAtlasFrame* Atlas = nullptr;  // This frame's UiAtlasTextures::Update (glyph pages).
 		std::span<const GraphTexture> Images; // Imported textures behind UiImage handles, declared as sampled reads.
@@ -58,15 +70,19 @@ namespace Swim::Render
 	class UiRenderer
 	{
 	  public:
-		// Premultiplied One / OneMinusSourceAlpha on color and alpha, no depth, no culling.
-		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		// Premultiplied One / OneMinusSourceAlpha on color and alpha, no culling. With a depth
+		// format (D32Float): the canonical reverse-Z test (GreaterEqual), no depth writes.
+		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout,
+			Rhi::Format depthFormat = Rhi::Format::Undefined);
 
 		explicit UiRenderer(UiRendererDesc desc = {});
 
 		// Nothing is recorded without visible quads unless Clear is set. Throws
 		// std::invalid_argument for a missing pipeline, a target that is not a 2D color
-		// attachment, invalid composition settings or Srgb encoding into an *Srgb format
-		// (double encoding), and std::length_error above MaxQuads.
+		// attachment, a mip beyond the target's, invalid composition settings, opacity or
+		// canvas matrix, Srgb encoding into an *Srgb format (double encoding), offsets with a
+		// canvas matrix, or a depth target without a canvas matrix, depth pipeline or the
+		// drawn extent, and std::length_error above MaxQuads.
 		std::optional<GraphPass> Record(
 			RenderGraph& graph, const UiRenderFrame& frame, const UiRenderProgram& program, Rhi::DescriptorTable& bindless);
 
