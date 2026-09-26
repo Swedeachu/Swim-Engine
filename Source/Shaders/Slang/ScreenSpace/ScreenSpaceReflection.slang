@@ -58,6 +58,51 @@ float3 ViewNormalOf(ReflectionParams reflection, float3 world, out bool valid)
 	return valid ? n * (1.0 / normalLength) : float3(0.0, 0.0, 0.0);
 }
 
+// The perspective-correct view depth (positive) at t along the projected ray.
+float RayDepthAt(float3 q0, float3 q1, float k0, float k1, float t)
+{
+	return -(q0.z + (q1.z - q0.z) * t) / (k0 + (k1 - k0) * t);
+}
+
+// ScreenSpace::HitRadiance.
+float3 HitRadiance(ReflectionParams reflection, int3 at)
+{
+	float3 radiance = Color.Load(at).rgb;
+	if (reflection.AoEnabled)
+	{
+		radiance = max(radiance - (1.0 - Ao.Load(at)) * Indirect.Load(at).rgb, float3(0.0, 0.0, 0.0));
+	}
+	return radiance;
+}
+
+// ScreenSpace::FilteredHitRadiance: bilinear over the four nearest texels, each weighted
+// by 1 / (1 + luminance) and renormalized.
+float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, float px, float py)
+{
+	const float ux = px - 0.5;
+	const float uy = py - 0.5;
+	const float bx = floor(ux);
+	const float by = floor(uy);
+	const float fx = ux - bx;
+	const float fy = uy - by;
+	const int maxX = int(view.Width) - 1;
+	const int maxY = int(view.Height) - 1;
+	float3 sum = float3(0.0, 0.0, 0.0);
+	float weights = 0.0;
+	for (int j = 0; j < 4; ++j)
+	{
+		const int ox = j & 1;
+		const int oy = j >> 1;
+		const int3 at = int3(clamp(int(bx) + ox, 0, maxX), clamp(int(by) + oy, 0, maxY), 0);
+		const float3 radiance = HitRadiance(reflection, at);
+		const float luma = 0.2126 * radiance.r + 0.7152 * radiance.g + 0.0722 * radiance.b;
+		const float weight = (ox != 0 ? fx : 1.0 - fx) * (oy != 0 ? fy : 1.0 - fy) / (1.0 + luma);
+		sum += weight * radiance;
+		weights += weight;
+	}
+	return weights > 0.0 ? sum * (1.0 / weights) : float3(0.0, 0.0, 0.0);
+}
+
 // ScreenSpace::ReflectionTexel.
 float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 {
@@ -104,7 +149,11 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 	const float width = float(view.Width);
 	const float height = float(view.Height);
 
+	// Candidates: within the thickness behind the depth buffer, or just crossed from in
+	// front to behind (a thin intersection the stride stepped over). A refined candidate
+	// that ends up far behind a closer surface is not a hit; the march goes on.
 	float previous = 0.0;
+	bool previousBehind = false;
 	for (uint i = 1; i <= steps; ++i)
 	{
 		const float t = min((float(i) + jitter) / float(steps), 1.0);
@@ -116,16 +165,19 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		}
 		const int ix = int(floor(sx));
 		const int iy = int(floor(sy));
-		const float rayDepth = -(q0.z + (q1.z - q0.z) * t) / (k0 + (k1 - k0) * t);
+		const float rayDepth = RayDepthAt(q0, q1, k0, k1, t);
 		bool sceneValid = false;
 		float3 scene = float3(0.0, 0.0, 0.0);
 		if (ix != x || iy != y)
 		{
 			scene = ScreenSpaceLoadViewPosition(view, Depth, ix, iy, sceneValid);
 		}
-		if (!sceneValid || !(rayDepth >= -scene.z && rayDepth <= -scene.z + reflection.Thickness))
+		const bool behind = sceneValid && rayDepth >= -scene.z;
+		const bool within = behind && rayDepth <= -scene.z + reflection.Thickness;
+		if (!within && !(behind && !previousBehind))
 		{
 			previous = t;
+			previousBehind = behind;
 			continue;
 		}
 		float lo = previous;
@@ -141,7 +193,7 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 			{
 				probe = ScreenSpaceLoadViewPosition(view, Depth, int(floor(mx)), int(floor(my)), probeValid);
 			}
-			const float probeDepth = -(q0.z + (q1.z - q0.z) * mid) / (k0 + (k1 - k0) * mid);
+			const float probeDepth = RayDepthAt(q0, q1, k0, k1, mid);
 			if (probeValid && probeDepth >= -probe.z)
 			{
 				hi = mid;
@@ -153,6 +205,8 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		}
 		int hx = ix;
 		int hy = iy;
+		float hitSceneDepth = -scene.z;
+		bool refined = false;
 		const float fx = s0.x + dx * hi;
 		const float fy = s0.y + dy * hi;
 		if (fx >= 0.0 && fy >= 0.0 && fx < width && fy < height)
@@ -160,23 +214,31 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 			const int rx = int(floor(fx));
 			const int ry = int(floor(fy));
 			bool refinedValid = false;
+			float3 refinedScene = float3(0.0, 0.0, 0.0);
 			if (rx != x || ry != y)
 			{
-				ScreenSpaceLoadViewPosition(view, Depth, rx, ry, refinedValid);
+				refinedScene = ScreenSpaceLoadViewPosition(view, Depth, rx, ry, refinedValid);
 			}
 			if (refinedValid)
 			{
 				hx = rx;
 				hy = ry;
-			}
-			else
-			{
-				hi = t;
+				hitSceneDepth = -refinedScene.z;
+				refined = true;
 			}
 		}
-		else
+		if (!refined)
 		{
 			hi = t;
+			lo = previous;
+		}
+		const float hitRayDepth = RayDepthAt(q0, q1, k0, k1, hi);
+		const float span = abs(hitRayDepth - RayDepthAt(q0, q1, k0, k1, lo));
+		if (!(hitRayDepth - hitSceneDepth <= max(reflection.Thickness, span)))
+		{
+			previous = t;
+			previousBehind = behind;
+			continue;
 		}
 		bool hitNormalValid;
 		const float3 hitNormal = ViewNormalOf(reflection, Normal.Load(int3(hx, hy, 0)).xyz, hitNormalValid);
@@ -187,8 +249,10 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		const float k = k0 + (k1 - k0) * hi;
 		const float3 hitPoint = (q0 + (q1 - q0) * hi) / k;
 		const float travelled = length(hitPoint - p);
-		const float u = (float(hx) + 0.5) / width;
-		const float w = (float(hy) + 0.5) / height;
+		const float hitX = s0.x + dx * hi;
+		const float hitY = s0.y + dy * hi;
+		const float u = hitX / width;
+		const float w = hitY / height;
 		const float edge = min(min(u, 1.0 - u), min(w, 1.0 - w));
 		const float edgeFade = clamp(edge / reflection.EdgeFade, 0.0, 1.0);
 		const float distanceFade = clamp((reflection.MaxDistance - travelled) / (reflection.MaxDistance * reflection.DistanceFade), 0.0, 1.0);
@@ -197,14 +261,7 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		{
 			return miss;
 		}
-		// ScreenSpace::HitRadiance.
-		const int3 at = int3(hx, hy, 0);
-		float3 radiance = Color.Load(at).rgb;
-		if (reflection.AoEnabled)
-		{
-			radiance = max(radiance - (1.0 - Ao.Load(at)) * Indirect.Load(at).rgb, float3(0.0, 0.0, 0.0));
-		}
-		return float4(radiance, confidence);
+		return float4(FilteredHitRadiance(view, reflection, hitX, hitY), confidence);
 	}
 	return miss;
 }

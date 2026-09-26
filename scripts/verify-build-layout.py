@@ -3520,6 +3520,43 @@ def check_source_files_are_utf8(failures: list[str]) -> None:
                         failures,
                     )
 
+def check_include_case_and_sandbox_assets(failures: list[str]) -> None:
+    # Windows resolves includes case-insensitively, Linux does not: every quoted include
+    # of a first-party header must name the file with its exact case (SandBox.h vs
+    # Sandbox.h broke the Linux build once).
+    source_root = ROOT / "Source"
+    names: dict[Path, set[str]] = {}
+
+    def exact(relative: str) -> bool | None:
+        current = source_root
+        for part in relative.split("/"):
+            if current not in names:
+                if not current.is_dir():
+                    return None
+                names[current] = set(os.listdir(current))
+            if part not in names[current]:
+                lowered = {name.lower() for name in names[current]}
+                return False if part.lower() in lowered else None
+            current = current / part
+        return True
+
+    include = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
+    for path in source_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES | {".slang"}:
+            continue
+        for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+            match = include.match(line)
+            if match and exact(match.group(1)) is False:
+                fail(
+                    f"include does not match the file's case: {path.relative_to(ROOT)}:{line_number} ({match.group(1)})",
+                    failures,
+                )
+
+    # The sandbox loads this Sponza; without it only the light swarm appears.
+    sponza = ROOT / "Assets" / "Models" / "Sponza" / "sponza-ktx-draco.glb"
+    if (ROOT / "Assets").is_dir() and not sponza.is_file():
+        fail("Assets/Models/Sponza/sponza-ktx-draco.glb is missing (the sandbox's Sponza source)", failures)
+
 def check_retirement_boundaries(failures: list[str]) -> None:
     retired_types = re.compile(
         r"\b(?:InputManager|CommandSystem|SystemManager|EditorIpcBridge|SceneSerializer|SceneStorage|SceneSyncTracker|SceneToolingBridge"
@@ -4097,6 +4134,7 @@ def main() -> int:
     check_phase22_23_runtime(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)
+    check_include_case_and_sandbox_assets(failures)
 
     if failures:
         print("Swim Engine build-layout verification FAILED:")

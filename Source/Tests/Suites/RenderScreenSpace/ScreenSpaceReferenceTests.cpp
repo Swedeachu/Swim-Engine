@@ -736,8 +736,9 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionConfidenceFadesWithRoughnes
 	{
 		const auto hit = Ss::TraceReflection(edgeParams, mirror.Depth, mirror.Normal, x, y);
 		SWIM_REQUIRE(hit.has_value());
-		const float u = (float(hit->X) + 0.5f) / float(Width);
-		const float v = (float(hit->Y) + 0.5f) / float(Height);
+		SWIM_CHECK(hit->X == static_cast<std::uint32_t>(std::floor(hit->HitX)) && hit->Y == static_cast<std::uint32_t>(std::floor(hit->HitY)));
+		const float u = hit->HitX / float(Width);
+		const float v = hit->HitY / float(Height);
 		const float edge = std::min(std::min(u, 1.0f - u), std::min(v, 1.0f - v));
 		SWIM_CHECK(Near(hit->Confidence, std::clamp(edge / 0.5f, 0.0f, 1.0f), 1.0e-5f));
 	}
@@ -884,4 +885,56 @@ SWIM_TEST("Render.ScreenSpace.Reference", "CompositeReplacesTheSpecularIblWithTh
 	auto noOcclusion = params;
 	noOcclusion.AoEnabled = 0;
 	SWIM_CHECK(Ss::HitRadiance(noOcclusion, colors, indirects, &occlusion, 1, 0)[0] == 1.0f);
+
+	// The filtered radiance: a texel centre returns that texel, a uniform area itself, and
+	// a lone highlight is damped by its luminance instead of flickering at full strength.
+	Ss::ColorImage patch(4, 4, { 0.5f, 0.5f, 0.5f, 1.0f });
+	const auto uniform = Ss::FilteredHitRadiance(noOcclusion, patch, patch, nullptr, 2.3f, 1.7f);
+	SWIM_CHECK(Near(uniform[0], 0.5f, 1.0e-6f) && Near(uniform[2], 0.5f, 1.0e-6f));
+	patch.At(2, 1) = { 50.0f, 50.0f, 50.0f, 1.0f };
+	const auto centre = Ss::FilteredHitRadiance(noOcclusion, patch, patch, nullptr, 2.5f, 1.5f);
+	SWIM_CHECK(Near(centre[1], 50.0f, 1.0e-4f));
+	const auto between = Ss::FilteredHitRadiance(noOcclusion, patch, patch, nullptr, 2.0f, 1.0f); // A quarter of the highlight.
+	SWIM_CHECK(between[0] > 0.5f && between[0] < 0.25f * 50.0f + 0.75f * 0.5f);
+	SWIM_CHECK(between[0] < 2.0f);
+	const auto corner = Ss::FilteredHitRadiance(noOcclusion, patch, patch, nullptr, -3.0f, 9.0f); // Clamped to the image.
+	SWIM_CHECK(Near(corner[0], 0.5f, 1.0e-6f));
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsDoNotAliasToTheStride")
+{
+	// With a coarse stride many samples land far behind the box's faces (more than the
+	// thickness): the crossing test still finds those hits and refines them to the same
+	// place as a one-pixel stride, so reflected edges do not alias to the stride.
+	const auto scene = MirrorScene();
+	const auto view = MirrorView();
+	const auto inputs = Scene::Render(scene, view, Width, Height, 0.0f);
+	auto fine = MirrorSettings();
+	auto coarse = fine;
+	coarse.Reflections.Stride = 4.0f;
+	coarse.Reflections.MaxSteps = 64;
+	const auto fineParams = BuildScreenSpaceParams(fine, view, Width, Height, 0);
+	const auto coarseParams = BuildScreenSpaceParams(coarse, view, Width, Height, 0);
+	std::uint32_t fineHits = 0, coarseHits = 0, agree = 0;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			const auto a = Ss::TraceReflection(fineParams, inputs.Depth, inputs.Normal, x, y);
+			const auto b = Ss::TraceReflection(coarseParams, inputs.Depth, inputs.Normal, x, y);
+			fineHits += a ? 1u : 0u;
+			coarseHits += b ? 1u : 0u;
+			if (a && b)
+			{
+				agree += std::abs(a->HitX - b->HitX) <= 1.5f && std::abs(a->HitY - b->HitY) <= 1.5f ? 1u : 0u;
+			}
+		}
+	}
+	std::printf("             [ssr] stride 1: %u hits, stride 4: %u hits, %u within 1.5 px\n", fineHits, coarseHits, agree);
+	SWIM_REQUIRE(fineHits > 200u);
+	// At 160 x 90 a 4-pixel stride still steps over whole faces near the ray's start
+	// (sample-based marching cannot see those); the crossing test keeps about three
+	// quarters of the hits, where the thickness test alone kept 42 %.
+	SWIM_CHECK(coarseHits >= fineHits * 70 / 100);
+	SWIM_CHECK(agree >= coarseHits * 97 / 100);
 }

@@ -1058,8 +1058,9 @@ namespace Engine
 				forwardResources = I.forward->Record(graph, forwardFrame, targets);
 			}
 
-			// --- Particles --------------------------------------------------------------
+			// --- Particles (simulation; drawn after the composite, below) ---------------
 			stats.ParticleEmitters = I.particles->GetStats().LiveEmitters;
+			std::optional<R::ParticleGraphResources> simulatedParticles;
 			if (settings.Particles && stats.ParticleEmitters > 0)
 			{
 				R::ParticleView particleView;
@@ -1067,10 +1068,8 @@ namespace Engine
 				particleView.Projection = camera.Projection;
 				particleView.Jitter = jitter;
 				const float dt = std::clamp(std::isfinite(input.SimulationDeltaTime) ? input.SimulationDeltaTime : 0.0f, 0.0f, 0.1f);
-				const auto simulated = I.particles->Simulate(graph, particleView, dt);
+				simulatedParticles = I.particles->Simulate(graph, particleView, dt);
 				particlesPending = true;
-				const R::ParticleRenderProgram program{ I.particleAdditive.get(), I.particleAlpha.get(), I.particleRender.Layout.get() };
-				I.particles->Draw(graph, simulated, program, { targets.Color, targets.Depth }, I.bindless->GetTable());
 			}
 
 			// --- Screen-space effects, TAA and post -------------------------------------
@@ -1180,6 +1179,16 @@ namespace Engine
 			};
 
 			R::GraphTexture sceneColor = runFeatures(RenderFeatureStage::BeforeTemporal, screen.Output);
+			// Particles blend over the finished scene: drawn into the Forward+ color, the
+			// screen-space composite re-fogged them with the depth behind them and the clouds
+			// were composited over them wherever the sky showed through, so near the horizon
+			// (thick fog, long cloud paths) whole bands of a fountain vanished. They still
+			// depth-test against the scene and are resolved by TAA like everything else.
+			if (simulatedParticles)
+			{
+				const R::ParticleRenderProgram program{ I.particleAdditive.get(), I.particleAlpha.get(), I.particleRender.Layout.get() };
+				I.particles->Draw(graph, *simulatedParticles, program, { sceneColor, targets.Depth }, I.bindless->GetTable());
+			}
 			R::GraphTexture resolved = sceneColor;
 			if (temporalOn)
 			{

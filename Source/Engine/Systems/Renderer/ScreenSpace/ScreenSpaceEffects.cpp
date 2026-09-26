@@ -96,7 +96,9 @@ namespace Swim::Render
 		Rhi::TextureDesc texture;
 		texture.Extent = { width, height, 1 };
 		texture.PixelFormat = Rhi::Format::RGBA16Float;
-		texture.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource;
+		// ColorAttachment: particles are drawn over the composited frame.
+		texture.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource |
+			Rhi::TextureUsage::ColorAttachment;
 		return texture;
 	}
 

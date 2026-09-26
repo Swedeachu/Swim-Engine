@@ -38,7 +38,7 @@ clouds->Enabled = false;          // Or switch it off.
 
 | Stage | Scene color | Typical use |
 | --- | --- | --- |
-| `BeforeTemporal` | Linear HDR (RGBA16Float) after Forward+, particles and the screen-space effects | Noisy, dithered effects that TAA resolves: volumetric clouds, ray-marched fog |
+| `BeforeTemporal` | Linear HDR (RGBA16Float) after Forward+ and the screen-space effects (particles are drawn over the result afterwards) | Noisy, dithered effects that TAA resolves: volumetric clouds, ray-marched fog |
 | `BeforePostProcess` | Linear HDR after TAA | Light that should be exposed and bloom with the scene: sun shafts, lens flares |
 | `AfterPostProcess` | Display-referred RGBA8Unorm after tone mapping, before the UI | Overlays, vignettes, fades |
 

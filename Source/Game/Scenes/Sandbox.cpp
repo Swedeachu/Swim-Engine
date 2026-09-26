@@ -46,6 +46,8 @@ namespace Game
 		const glm::vec3 HallCenter{ 12.0f, 0.0f, -6.0f };
 		// Sponza sits behind the playgrounds (its long axis along X), the swarm of coloured
 		// lights inside its atrium.
+		// Side of the square checkered ground plane and of its collider, in metres.
+		constexpr float GroundSize = 130.0f;
 		const glm::vec3 SponzaCenter{ 0.0f, 0.02f, -52.0f };
 		constexpr float SponzaLength = 30.0f;
 		constexpr std::uint32_t SwarmLightCount = 256;
@@ -240,7 +242,7 @@ namespace Game
 		palette.Ground = render->Meshes->Find("SandboxGround");
 		if (!palette.Ground.IsValid())
 		{
-			palette.Ground = render->Meshes->Register("SandboxGround", Engine::ProceduralMeshes::MakePlane(130.0f, 13, 65.0f));
+			palette.Ground = render->Meshes->Register("SandboxGround", Engine::ProceduralMeshes::MakePlane(GroundSize, 13, GroundSize * 0.5f));
 		}
 		auto checker = render->Meshes->FindTexture("SandboxChecker");
 		if (!checker.IsValid())
@@ -281,14 +283,14 @@ namespace Game
 		sky.GroundColor = { 0.16f, 0.55f, 0.88f };
 		sky.SunSharpness = 600.0f; // A tight sun glow; the shafts and the lens flare carry the rest.
 		sky.Intensity = 1.0f;
-		settings.EnvironmentIntensity = 1.05f;
-		settings.Ambient = { 0.03f, 0.05f, 0.065f };
+		settings.EnvironmentIntensity = 1.3f;
+		settings.Ambient = { 0.05f, 0.07f, 0.085f };
 		auto& post = settings.Post;
 		post.ToneMap.Operator = Swim::Render::ToneMapper::PbrNeutral;
-		post.Exposure.Compensation = 0.35f;
+		post.Exposure.Compensation = 1.3f;
 		post.Grading.Temperature = 5.0f;
 		post.Grading.Tint = -2.0f;
-		post.Grading.Contrast = 1.06f;
+		post.Grading.Contrast = 1.0f;
 		post.Grading.Saturation = 1.14f;
 		post.Grading.Slope = { 1.0f, 1.0f, 1.02f };
 		post.Bloom.Intensity = 0.05f;
@@ -303,6 +305,14 @@ namespace Game
 		fog.SunColor = { 0.55f, 0.5f, 0.42f };
 		fog.StartDistance = 12.0f;
 		fog.MaxDistance = 600.0f;
+		// Screen-space reflections are on by default in the sandbox (chrome and glossy
+		// props); the HUD's Rendering tab can turn them off.
+		settings.ScreenSpace.Reflections.Enabled = true;
+		// Sharper sun shadows: 4096-texel cascades in an 8192 atlas halve the texel size
+		// (the last cascade, 16-70 m, went from 8 cm to 4 cm per texel), so the PCF edge
+		// no longer shows the texel staircase through its blur at playground distances.
+		settings.Shadow.AtlasSize = 8192;
+		settings.Shadow.CascadeResolution = 4096;
 	}
 
 	void Sandbox::AddAtmosphereFeatures()
@@ -310,10 +320,11 @@ namespace Game
 		// Render features are plain objects the scene configures and hands to the renderer;
 		// the renderer records them every frame (Engine/Systems/Renderer/Runtime/RenderFeature.h).
 		clouds = std::make_shared<Engine::VolumetricClouds>();
-		clouds->Settings.Coverage = 0.38f; // Scattered trade-wind cumulus.
+		clouds->Settings.Coverage = 0.5f; // Plenty of trade-wind cumulus, still mostly blue sky.
 		clouds->Settings.BottomAltitude = 420.0f;
 		clouds->Settings.TopAltitude = 1250.0f;
-		clouds->Settings.Wind = { 9.0f, 0.0f, 3.5f };
+		// 15 % faster than the original { 9, 0, 3.5 } m/s drift.
+		clouds->Settings.Wind = { 9.0f * 1.15f, 0.0f, 3.5f * 1.15f };
 		sunShafts = std::make_shared<Engine::SunShafts>();
 		lensFlare = std::make_shared<Engine::LensFlare>();
 		auto* render = GetRenderServices();
@@ -415,7 +426,8 @@ namespace Game
 				{ Engine::Tags::World, Engine::Tags::Static } });
 		const entt::entity collider = CreateEntity("Ground collider");
 		AddComponent<Engine::Transform>(collider, Engine::Transform(glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(1.0f)));
-		AddBoxBody(*this, collider, Engine::RigidbodyType::Static, { 40.0f, 0.5f, 40.0f });
+		// The collider covers the whole visible plane (it used to stop 25 m short of each edge).
+		AddBoxBody(*this, collider, Engine::RigidbodyType::Static, { GroundSize * 0.5f, 0.5f, GroundSize * 0.5f });
 		AddTag(collider, Engine::Tags::Static);
 	}
 

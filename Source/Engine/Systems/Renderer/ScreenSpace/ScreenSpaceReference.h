@@ -101,6 +101,8 @@ namespace Swim::Render::ScreenSpace
 	{
 		std::uint32_t X = 0; // Hit pixel.
 		std::uint32_t Y = 0;
+		float HitX = 0.0f; // Exact hit position in pixels (top-left origin); X, Y = floor.
+		float HitY = 0.0f;
 		float Distance = 0.0f;	 // View-space distance travelled.
 		float Confidence = 0.0f; // (0, 1].
 	};
@@ -112,13 +114,17 @@ namespace Swim::Render::ScreenSpace
 	//     SsrNearZ; both ends are projected (ProjectToScreen) and the ray is sampled at
 	//     t_i = min((i + j) / N, 1), i = 1 .. N, N = min(SsrMaxSteps, ceil(pixel length /
 	//     SsrStride)), j the pixel's interleaved-gradient noise (x + 23, y + 41);
-	//  3. each sample's pixel (floor) is compared with the depth buffer: the ray depth
-	//     (perspective-correct) must lie within [scene, scene + SsrThickness] view depth;
-	//     sky pixels and the start pixel never hit, and leaving the screen misses;
-	//  4. a hit refines by SsrRefineSteps bisections of (previous t, t]; a refined pixel on
-	//     the sky falls back to the sample's pixel;
+	//  3. each sample's pixel (floor) is compared with the depth buffer: the sample is a
+	//     candidate when the ray depth (perspective-correct) lies within [scene, scene +
+	//     SsrThickness] view depth, or when it is behind the scene and the previous sample
+	//     was not (a crossing the stride stepped over); sky pixels and the start pixel are
+	//     never behind, and leaving the screen misses;
+	//  4. a candidate refines by SsrRefineSteps bisections of (previous t, t]; a refined
+	//     pixel on the sky falls back to the sample's pixel. It hits only when the ray is at
+	//     most max(SsrThickness, ray depth span of the final interval) behind the scene
+	//     there; otherwise it passed behind a closer surface and the march goes on;
 	//  5. a hit whose normal faces along the ray (a back face) is rejected;
-	//  6. confidence = roughness fade x screen-edge fade (hit pixel centre) x distance fade.
+	//  6. confidence = roughness fade x screen-edge fade (exact hit position) x distance fade.
 	std::optional<ReflectionHit> TraceReflection(
 		const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x, std::uint32_t y);
 
@@ -127,7 +133,13 @@ namespace Swim::Render::ScreenSpace
 	Float3 HitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect, const ScalarImage* ao,
 		std::uint32_t x, std::uint32_t y);
 
-	// The reflection pass output: (hit radiance, confidence), or 0 on a miss.
+	// The radiance around an exact hit position (pixels): the four nearest texels'
+	// HitRadiance, bilinearly weighted and divided by 1 + luminance (so a single bright
+	// texel cannot flicker through the reflection), then renormalized.
+	Float3 FilteredHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
+		const ScalarImage* ao, float px, float py);
+
+	// The reflection pass output: (FilteredHitRadiance at the hit, confidence), or 0 on a miss.
 	Float4 ReflectionTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
 		const ColorImage& indirect, const ScalarImage* ao, std::uint32_t x, std::uint32_t y);
 	ColorImage Reflections(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,

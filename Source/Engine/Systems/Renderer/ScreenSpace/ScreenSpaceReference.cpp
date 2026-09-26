@@ -630,7 +630,14 @@ namespace Swim::Render::ScreenSpace
 			return sample;
 		};
 
+		// A sample hits when the ray is behind the depth buffer by at most the thickness, or
+		// when it has just crossed from in front of the surface to behind it (a thin
+		// intersection the stride stepped over: without this, silhouettes in the reflection
+		// alias to the stride). Either way the hit refines by bisection and is kept only if
+		// the ray is still within the thickness there (the span of the last bisection
+		// interval, for grazing rays): a ray that passed behind a closer silhouette marches on.
 		float previous = 0.0f;
+		bool previousBehind = false;
 		for (std::uint32_t i = 1; i <= steps; ++i)
 		{
 			const float t = std::min((float(i) + jitter) / float(steps), 1.0f);
@@ -640,9 +647,12 @@ namespace Swim::Render::ScreenSpace
 				return std::nullopt; // Left the screen.
 			}
 			const auto scene = (sample.X == x && sample.Y == y) ? std::nullopt : ViewPositionAt(params, depth, sample.X, sample.Y);
-			if (!scene || !(sample.RayDepth >= -(*scene)[2] && sample.RayDepth <= -(*scene)[2] + params.SsrThickness))
+			const bool behind = scene && sample.RayDepth >= -(*scene)[2];
+			const bool within = behind && sample.RayDepth <= -(*scene)[2] + params.SsrThickness;
+			if (!within && !(behind && !previousBehind))
 			{
 				previous = t;
+				previousBehind = behind;
 				continue;
 			}
 			// Bisect (previous, t] toward the first sample behind the depth buffer.
@@ -663,10 +673,20 @@ namespace Swim::Render::ScreenSpace
 				}
 			}
 			auto hit = sampleAt(hi);
-			if (!hit.Inside || (hit.X == x && hit.Y == y) || !ViewPositionAt(params, depth, hit.X, hit.Y))
+			auto hitScene = hit.Inside && !(hit.X == x && hit.Y == y) ? ViewPositionAt(params, depth, hit.X, hit.Y) : std::nullopt;
+			if (!hitScene)
 			{
 				hit = sample;
+				hitScene = scene;
 				hi = t;
+				lo = previous;
+			}
+			const float span = std::abs(hit.RayDepth - sampleAt(lo).RayDepth);
+			if (!(hit.RayDepth - -(*hitScene)[2] <= std::max(params.SsrThickness, span)))
+			{
+				previous = t;
+				previousBehind = behind;
+				continue; // Behind a closer surface, not on it.
 			}
 			const auto& hitEncoded = normal.At(hit.X, hit.Y);
 			const auto hitNormal = ViewNormal(params, { hitEncoded[0], hitEncoded[1], hitEncoded[2] });
@@ -678,8 +698,10 @@ namespace Swim::Render::ScreenSpace
 			const Float3 point{ (q0[0] + (q1[0] - q0[0]) * hi) / k, (q0[1] + (q1[1] - q0[1]) * hi) / k,
 				(q0[2] + (q1[2] - q0[2]) * hi) / k };
 			const float travelled = Length(Subtract(point, p));
-			const float u = (float(hit.X) + 0.5f) / width;
-			const float w = (float(hit.Y) + 0.5f) / height;
+			const float hitX = s0.X + dx * hi;
+			const float hitY = s0.Y + dy * hi;
+			const float u = hitX / width;
+			const float w = hitY / height;
 			const float edge = std::min(std::min(u, 1.0f - u), std::min(w, 1.0f - w));
 			const float edgeFade = std::clamp(edge / params.SsrEdgeFade, 0.0f, 1.0f);
 			const float distanceFade =
@@ -689,7 +711,7 @@ namespace Swim::Render::ScreenSpace
 			{
 				return std::nullopt;
 			}
-			return ReflectionHit{ hit.X, hit.Y, travelled, confidence };
+			return ReflectionHit{ hit.X, hit.Y, hitX, hitY, travelled, confidence };
 		}
 		return std::nullopt;
 	}
@@ -711,6 +733,38 @@ namespace Swim::Render::ScreenSpace
 		return radiance;
 	}
 
+	Float3 FilteredHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
+		const ScalarImage* ao, float px, float py)
+	{
+		const float ux = px - 0.5f;
+		const float uy = py - 0.5f;
+		const float bx = std::floor(ux);
+		const float by = std::floor(uy);
+		const float fx = ux - bx;
+		const float fy = uy - by;
+		const int maxX = int(color.Width) - 1;
+		const int maxY = int(color.Height) - 1;
+		Float3 sum{ 0, 0, 0 };
+		float weights = 0.0f;
+		for (int j = 0; j < 4; ++j)
+		{
+			const int ox = j & 1;
+			const int oy = j >> 1;
+			const auto tx = static_cast<std::uint32_t>(std::clamp(int(bx) + ox, 0, maxX));
+			const auto ty = static_cast<std::uint32_t>(std::clamp(int(by) + oy, 0, maxY));
+			const auto radiance = HitRadiance(params, color, indirect, ao, tx, ty);
+			const float luma = 0.2126f * radiance[0] + 0.7152f * radiance[1] + 0.0722f * radiance[2];
+			const float weight = (ox != 0 ? fx : 1.0f - fx) * (oy != 0 ? fy : 1.0f - fy) / (1.0f + luma);
+			for (int k = 0; k < 3; ++k)
+			{
+				sum[k] += weight * radiance[k];
+			}
+			weights += weight;
+		}
+		const float inverse = weights > 0.0f ? 1.0f / weights : 0.0f;
+		return { sum[0] * inverse, sum[1] * inverse, sum[2] * inverse };
+	}
+
 	Float4 ReflectionTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
 		const ColorImage& indirect, const ScalarImage* ao, std::uint32_t x, std::uint32_t y)
 	{
@@ -719,7 +773,7 @@ namespace Swim::Render::ScreenSpace
 		{
 			return { 0, 0, 0, 0 };
 		}
-		const auto radiance = HitRadiance(params, color, indirect, ao, hit->X, hit->Y);
+		const auto radiance = FilteredHitRadiance(params, color, indirect, ao, hit->HitX, hit->HitY);
 		return { radiance[0], radiance[1], radiance[2], hit->Confidence };
 	}
 

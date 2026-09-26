@@ -119,6 +119,32 @@ SWIM_TEST("Game.Sandbox", "BallsFallRestAndCountImpacts")
 	SWIM_CHECK_EQUAL(sandbox->CountWithTag(Game::GameTags::Spawned), std::size_t{ 0 });
 }
 
+SWIM_TEST("Game.Sandbox", "TheGroundColliderSpansTheWholeCheckeredPlane")
+{
+	// The visible plane is 130 m square; the collider used to stop at +-40 m, so balls
+	// fell through the outer 25 m of every edge (the Sponza end included).
+	auto engine = MakeSandbox();
+	SWIM_REQUIRE(engine.Started());
+	SWIM_REQUIRE(engine.Tick(1));
+	auto* sandbox = engine.SceneAs<Game::Sandbox>();
+	SWIM_REQUIRE(sandbox != nullptr);
+	const std::vector<glm::vec3> spots{ { 62.0f, 2.0f, 62.0f }, { -62.0f, 2.0f, -62.0f }, { 50.0f, 2.0f, -3.0f }, { 5.0f, 2.0f, -60.0f } };
+	std::vector<entt::entity> balls;
+	for (const auto& spot : spots)
+	{
+		const entt::entity ball = sandbox->CreateEntity("Edge probe");
+		sandbox->AddComponent<Engine::Transform>(ball, Engine::Transform(spot, glm::vec3(1.0f)));
+		Game::AddSphereBody(*sandbox, ball, Engine::RigidbodyType::Dynamic, 0.5f, 1.0f);
+		balls.push_back(ball);
+	}
+	SWIM_REQUIRE(engine.Tick(120)); // 2 s: long enough to fall through if nothing is there.
+	for (const entt::entity ball : balls)
+	{
+		const float y = sandbox->GetRegistry().get<Engine::Transform>(ball).GetPosition().y;
+		SWIM_CHECK(y > 0.3f && y < 0.7f); // Resting on the ground (radius 0.5).
+	}
+}
+
 SWIM_TEST("Game.Sandbox", "PausedWorldHoldsStillAndStopRestoresIt")
 {
 	auto engine = MakeSandbox();
