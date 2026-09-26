@@ -141,3 +141,36 @@ function(swim_add_slang_program name)
 		set(${name}_SPIRV "${SWIM_SLANG_PROGRAM_OUTPUT}" PARENT_SCOPE)
 	endif()
 endfunction()
+
+# swim_add_runtime_shader(<RuntimeName> SOURCE <file.slang> [DEFINES ...])
+#
+# The one call a new runtime program needs (render features, gameplay passes): it
+# compiles the Slang source like every engine program (spirv_1_5, the shared include
+# root) and stages it into the runtime shader set as <RuntimeName>.spv +
+# <RuntimeName>.reflection.json, where ShaderLibrary and RenderFeatureContext::Compute
+# find it by name.
+function(swim_add_runtime_shader name)
+	cmake_parse_arguments(SWIM_RUNTIME_SHADER "" "SOURCE" "DEFINES" ${ARGN})
+	if(NOT SWIM_RUNTIME_SHADER_SOURCE)
+		message(FATAL_ERROR "swim_add_runtime_shader(${name}) needs SOURCE")
+	endif()
+	set(program "Swim${name}")
+	if(SWIM_RUNTIME_SHADER_DEFINES)
+		swim_add_slang_program(${program}
+			SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
+			PROFILE spirv_1_5
+			INCLUDE_DIRECTORIES Source/Shaders/Slang
+			DEFINES ${SWIM_RUNTIME_SHADER_DEFINES}
+		)
+	else()
+		swim_add_slang_program(${program}
+			SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
+			PROFILE spirv_1_5
+			INCLUDE_DIRECTORIES Source/Shaders/Slang
+		)
+	endif()
+	set(${program}_SPIRV "${${program}_SPIRV}" PARENT_SCOPE)
+	set(${program}_REFLECTION "${${program}_REFLECTION}" PARENT_SCOPE)
+	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADERS "${name}=${program}")
+	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADER_FILES "${${program}_SPIRV}" "${${program}_REFLECTION}")
+endfunction()

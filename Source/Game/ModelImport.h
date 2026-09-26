@@ -34,6 +34,10 @@ namespace Game
 	Swim::Assets::AssetHandle<Swim::Assets::ModelAsset> FindCookedModel(const Swim::Assets::AssetSystem& assets,
 		const std::vector<std::string>& keywords, const std::vector<std::string>& prefer = {}, const std::vector<std::string>& avoid = {});
 
+	// The sandbox's Sponza: the Draco + KTX2/Basis GLB (smallest: Draco meshes, ETC1S
+	// textures the cooker transcodes), then the KTX2/Basis GLB, then a glTF Sponza.
+	Swim::Assets::AssetHandle<Swim::Assets::ModelAsset> FindSponzaModel(const Swim::Assets::AssetSystem& assets);
+
 	struct ModelPlacement
 	{
 		// Where the bottom center of the model's bounds lands.

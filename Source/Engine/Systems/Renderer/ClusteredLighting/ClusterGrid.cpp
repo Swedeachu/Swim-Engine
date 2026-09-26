@@ -16,7 +16,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Cluster grid needs 0 < Near < Far (finite)");
 		}
-		if (desc.MaxLightsPerCluster == 0 || desc.IndexCapacity == 0)
+		if (desc.MaxLightsPerCluster == 0 || desc.LightCapacity == 0 || desc.LightCapacity > MaxClusterLights)
 		{
 			throw std::invalid_argument("Cluster grid needs non-zero light limits");
 		}
@@ -75,7 +75,7 @@ namespace Swim::Render
 		record.Limits[0] = desc.ViewportWidth;
 		record.Limits[1] = desc.ViewportHeight;
 		record.Limits[2] = desc.MaxLightsPerCluster;
-		record.Limits[3] = desc.IndexCapacity;
+		record.Limits[3] = (desc.LightCapacity + 31u) / 32u;
 		return record;
 	}
 

@@ -19,6 +19,7 @@
 #include "Engine/Systems/Scene/SceneCommandBuffer.h"
 #include "Engine/Systems/UI/UiWidgets.h"
 #include "Game/Behaviors/BallShooter.h"
+#include "Engine/Assets/AssetSystem.h"
 #include "Game/Behaviors/LightSwarm.h"
 #include "Game/Behaviors/Motion.h"
 #include "Game/Behaviors/TentacleAnimator.h"
@@ -137,7 +138,30 @@ namespace Game
 			commands->Register("sandbox.tab",
 				[this, number](const std::vector<std::string>& arguments)
 				{
-					RequestTab(static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 3.0f)));
+					RequestTab(static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 2.0f)));
+				});
+			commands->Register("sandbox.clouds",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (clouds)
+					{
+						const float coverage = std::clamp(number(arguments, 0.4f), 0.0f, 1.0f);
+						clouds->Enabled = coverage > 0.0f;
+						clouds->Settings.Coverage = coverage;
+					}
+				});
+			commands->Register("sandbox.sunfx",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					const bool on = number(arguments, 1.0f) != 0.0f;
+					if (sunShafts)
+					{
+						sunShafts->Enabled = on;
+					}
+					if (lensFlare)
+					{
+						lensFlare->Enabled = on;
+					}
 				});
 			commands->Register("sandbox.hud",
 				[this, number](const std::vector<std::string>& arguments)
@@ -221,11 +245,12 @@ namespace Game
 		auto checker = render->Meshes->FindTexture("SandboxChecker");
 		if (!checker.IsValid())
 		{
-			checker = render->Meshes->RegisterChecker("SandboxChecker", 256, 2, { 200, 200, 205, 255 }, { 150, 152, 160, 255 });
+			// Warm coral-sand tiles (the tropical look).
+			checker = render->Meshes->RegisterChecker("SandboxChecker", 256, 2, { 240, 222, 184, 255 }, { 212, 188, 146, 255 });
 		}
 		Engine::MaterialDesc ground;
 		ground.Name = "Sandbox ground";
-		ground.BaseColor = { 0.55f, 0.56f, 0.58f, 1.0f };
+		ground.BaseColor = { 0.78f, 0.76f, 0.72f, 1.0f };
 		ground.Roughness = 0.85f;
 		ground.BaseColorTexture = checker;
 		palette.GroundMaterial = render->Materials->GetOrCreate(ground);
@@ -243,15 +268,72 @@ namespace Game
 			transparent ? Engine::MaterialBlend::Transparent : Engine::MaterialBlend::Opaque, alpha);
 	}
 
+	void Sandbox::ApplyTropicalLook(Engine::RenderSettings& settings)
+	{
+		// Tropical afternoon, blue in every direction: a deep saturated zenith, a bright
+		// cyan horizon (never grey) and a turquoise "sea" below the horizon instead of a
+		// brown ground, so looking level or slightly down never turns the sky muddy. The
+		// hue-preserving PBR Neutral curve keeps the blues blue (ACES desaturated and
+		// darkened them), with a little warmth and saturation on top.
+		auto& sky = settings.Sky;
+		sky.ZenithColor = { 0.16f, 0.56f, 1.55f };
+		sky.HorizonColor = { 0.50f, 0.92f, 1.40f };
+		sky.GroundColor = { 0.16f, 0.55f, 0.88f };
+		sky.SunSharpness = 600.0f; // A tight sun glow; the shafts and the lens flare carry the rest.
+		sky.Intensity = 1.0f;
+		settings.EnvironmentIntensity = 1.05f;
+		settings.Ambient = { 0.03f, 0.05f, 0.065f };
+		auto& post = settings.Post;
+		post.ToneMap.Operator = Swim::Render::ToneMapper::PbrNeutral;
+		post.Exposure.Compensation = 0.35f;
+		post.Grading.Temperature = 5.0f;
+		post.Grading.Tint = -2.0f;
+		post.Grading.Contrast = 1.06f;
+		post.Grading.Saturation = 1.14f;
+		post.Grading.Slope = { 1.0f, 1.0f, 1.02f };
+		post.Bloom.Intensity = 0.05f;
+		post.Bloom.Threshold = 1.2f;
+		// A thin sea-air haze that turns distant geometry turquoise and glows toward the sun.
+		auto& fog = settings.ScreenSpace.Fog;
+		fog.Enabled = true;
+		fog.Density = 0.004f;
+		fog.HeightFalloff = 0.12f;
+		fog.BaseHeight = 0.0f;
+		fog.Color = { 0.40f, 0.80f, 1.25f }; // Matches the horizon's blue.
+		fog.SunColor = { 0.55f, 0.5f, 0.42f };
+		fog.StartDistance = 12.0f;
+		fog.MaxDistance = 600.0f;
+	}
+
+	void Sandbox::AddAtmosphereFeatures()
+	{
+		// Render features are plain objects the scene configures and hands to the renderer;
+		// the renderer records them every frame (Engine/Systems/Renderer/Runtime/RenderFeature.h).
+		clouds = std::make_shared<Engine::VolumetricClouds>();
+		clouds->Settings.Coverage = 0.38f; // Scattered trade-wind cumulus.
+		clouds->Settings.BottomAltitude = 420.0f;
+		clouds->Settings.TopAltitude = 1250.0f;
+		clouds->Settings.Wind = { 9.0f, 0.0f, 3.5f };
+		sunShafts = std::make_shared<Engine::SunShafts>();
+		lensFlare = std::make_shared<Engine::LensFlare>();
+		auto* render = GetRenderServices();
+		if (render && render->Renderer)
+		{
+			render->Renderer->AddFeature(clouds);
+			render->Renderer->AddFeature(sunShafts);
+			render->Renderer->AddFeature(lensFlare);
+		}
+	}
+
 	int Sandbox::Init()
 	{
 		if (++builds == 1)
 		{
 			if (auto* render = GetRenderServices(); render && render->Settings)
 			{
-				render->Settings->Post.Exposure.Compensation = 0.7f;
-				render->Settings->Ambient = { 0.03f, 0.035f, 0.045f };
+				ApplyTropicalLook(*render->Settings);
 			}
+			AddAtmosphereFeatures();
 		}
 		impacts = 0;
 		strongestImpact = 0.0f;
@@ -352,13 +434,22 @@ namespace Game
 		if (!sponza.Valid() && !sponzaSearched)
 		{
 			sponzaSearched = true;
-			// Prefer the Khronos glTF (PNG/JPEG textures, decoded by the cooker) over KTX2/Basis
-			// variants, whose supercompressed textures the runtime cannot upload yet.
-			const auto model = FindCookedModel(*assets, { "sponza" }, { "gltf/sponza", "raw", "sponza.model" }, { "ktx", "basis" });
+			// The optimized GLB (Draco meshes, KTX2/Basis textures transcoded by the cooker).
+			const auto model = FindSponzaModel(*assets);
 			if (!model.IsValid())
 			{
-				std::cout << "[Sandbox] No cooked Sponza found. Put the Khronos glTF Sponza in Assets/Models/Sponza/glTF/ "
-							 "(Sponza.gltf, Sponza.bin and its textures); it is cooked on the next start.\n";
+				std::cout << "[Sandbox] No cooked Sponza found. Put sponza-ktx-draco.glb (or sponza-ktx.glb) in "
+							 "Assets/Models/Sponza/; it is cooked on the next start. Cooked models loaded:";
+				std::size_t models = 0;
+				for (const auto& entry : assets->GetDatabase().Snapshot())
+				{
+					if (entry.LogicalPath.size() > 6 && entry.LogicalPath.ends_with(".model"))
+					{
+						std::cout << ' ' << entry.LogicalPath;
+						++models;
+					}
+				}
+				std::cout << (models ? "\n" : " none (see the [Assets] lines above for cook errors).\n");
 				return;
 			}
 			ModelPlacement placement;
@@ -428,8 +519,10 @@ namespace Game
 			Engine::Light point;
 			point.Kind = Engine::LightKind::Point;
 			point.Color = hues[h];
-			point.Intensity = 7.0f + 5.0f * unit(colors);
-			point.Range = 4.5f + 2.0f * unit(colors);
+			// Compact ranges keep each cluster's light list short (and the frame fast)
+			// while the pools of colour still overlap.
+			point.Intensity = 6.0f + 4.0f * unit(colors);
+			point.Range = 2.8f + 1.4f * unit(colors);
 			AddComponent<Engine::Light>(light, point);
 			swarm->Add(light);
 		}
@@ -452,9 +545,10 @@ namespace Game
 		if (auto* render = GetRenderServices(); render && render->Settings)
 		{
 			render->Settings->Sky.SunDirection = { towardSun.x, towardSun.y, towardSun.z };
+			render->Settings->ScreenSpace.Fog.SunDirection = { -towardSun.x, -towardSun.y, -towardSun.z };
 			// A lower sun is warmer and dimmer.
 			const float warmth = 1.0f - std::clamp((sunElevation - 5.0f) / 40.0f, 0.0f, 1.0f);
-			render->Settings->Sky.SunColor = { 12.0f, 11.0f - 3.0f * warmth, 9.5f - 5.0f * warmth };
+			render->Settings->Sky.SunColor = { 16.0f, 13.5f - 3.5f * warmth, 9.5f - 5.0f * warmth };
 		}
 		if (IsValid(sun))
 		{
@@ -471,7 +565,7 @@ namespace Game
 		AddComponent<Engine::Transform>(sun, Engine::Transform());
 		Engine::Light light;
 		light.Kind = Engine::LightKind::Directional;
-		light.Color = { 1.0f, 0.95f, 0.86f };
+		light.Color = { 1.0f, 0.9f, 0.74f }; // Golden tropical sun.
 		light.Intensity = 2.5f;
 		light.CastShadows = true;
 		light.ShadowPriority = 10.0f;
@@ -557,7 +651,7 @@ namespace Game
 			{ "Gallery wall", palette.Mesh(Engine::BuiltinMesh::Cube), Mat("Gallery wall", SrgbColor(60, 64, 72), 0.0f, 0.9f),
 				{ -13.1f, 3.0f, -10.3f }, { 10.5f, 6.0f, 0.4f }, glm::quat(1, 0, 0, 0),
 				Swim::Render::RenderObjectFlags::Default | Swim::Render::RenderObjectFlags::Static, { Engine::Tags::Static } });
-		AddBoxBody(*this, wall, Engine::RigidbodyType::Static, { 5.25f, 3.0f, 0.2f });
+		AddBoxBody(*this, wall, Engine::RigidbodyType::Static, glm::vec3(0.5f));
 	}
 
 	void Sandbox::BuildInstanceHall()
@@ -633,7 +727,7 @@ namespace Game
 					{ "Crate " + std::to_string(++index), palette.Mesh(Engine::BuiltinMesh::Cube), (level + i) % 2 ? crate : crateDark,
 						PhysicsCenter + glm::vec3(x, size * 0.5f + static_cast<float>(level) * size, 0.0f), glm::vec3(size),
 						glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default, { GameTags::PhysicsToy, Engine::Tags::Dynamic } });
-				AddBoxBody(*this, box, Engine::RigidbodyType::Dynamic, glm::vec3(size * 0.5f), 4.0f);
+				AddBoxBody(*this, box, Engine::RigidbodyType::Dynamic, glm::vec3(0.5f), 4.0f);
 			}
 		}
 		// A ramp and a few capsules and spheres to knock around.
@@ -642,7 +736,7 @@ namespace Game
 			{ "Ramp", palette.Mesh(Engine::BuiltinMesh::Cube), Mat("Ramp", SrgbColor(90, 100, 115), 0.2f, 0.5f),
 				PhysicsCenter + glm::vec3(-5.5f, 1.0f, -1.0f), { 2.5f, 0.3f, 6.0f }, tilt, Swim::Render::RenderObjectFlags::Default,
 				{ GameTags::PhysicsToy, Engine::Tags::Static } });
-		AddBoxBody(*this, ramp, Engine::RigidbodyType::Static, { 1.25f, 0.15f, 3.0f });
+		AddBoxBody(*this, ramp, Engine::RigidbodyType::Static, glm::vec3(0.5f));
 		for (int i = 0; i < 4; ++i)
 		{
 			const entt::entity capsule = SpawnMesh(*this,
@@ -661,7 +755,7 @@ namespace Game
 					PhysicsCenter + glm::vec3(3.0f + 0.9f * static_cast<float>(i % 3), 0.45f, -1.5f + 1.2f * static_cast<float>(i / 3)),
 					glm::vec3(0.9f), glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default,
 					{ GameTags::PhysicsToy, Engine::Tags::Dynamic } });
-			AddSphereBody(*this, ball, Engine::RigidbodyType::Dynamic, 0.45f, 3.0f);
+			AddSphereBody(*this, ball, Engine::RigidbodyType::Dynamic, 0.5f, 3.0f);
 		}
 	}
 
@@ -901,7 +995,7 @@ namespace Game
 				Engine::MeshRenderer renderer;
 				renderer.Parts.push_back({ mesh, material });
 				owner.AddComponent<Engine::MeshRenderer>(ball, std::move(renderer));
-				AddSphereBody(owner, ball, Engine::RigidbodyType::Dynamic, 0.25f, 2.0f);
+				AddSphereBody(owner, ball, Engine::RigidbodyType::Dynamic, 0.5f, 2.0f);
 				owner.GetRegistry().get<Engine::Rigidbody>(ball).SetInitialLinearVelocity(velocity);
 				owner.AddTag(ball, Engine::Tags::Projectile);
 				owner.AddTag(ball, GameTags::Spawned);
@@ -941,13 +1035,13 @@ namespace Game
 		switch (mesh)
 		{
 		case Engine::BuiltinMesh::Sphere:
-			AddSphereBody(*this, entity, Engine::RigidbodyType::Dynamic, 0.4f, 2.0f);
+			AddSphereBody(*this, entity, Engine::RigidbodyType::Dynamic, 0.5f, 2.0f);
 			break;
 		case Engine::BuiltinMesh::Capsule:
-			AddCapsuleBody(*this, entity, Engine::RigidbodyType::Dynamic, 0.2f, 0.2f, 1.5f);
+			AddCapsuleBody(*this, entity, Engine::RigidbodyType::Dynamic, 0.25f, 0.25f, 1.5f);
 			break;
 		default:
-			AddBoxBody(*this, entity, Engine::RigidbodyType::Dynamic, glm::vec3(0.4f), 2.0f);
+			AddBoxBody(*this, entity, Engine::RigidbodyType::Dynamic, glm::vec3(0.5f), 2.0f);
 			break;
 		}
 		++spawned;

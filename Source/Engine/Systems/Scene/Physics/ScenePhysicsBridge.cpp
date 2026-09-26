@@ -42,16 +42,15 @@ namespace Engine
 		bool ScaleChanged(const glm::vec3& a, const glm::vec3& b)
 		{
 			constexpr float Epsilon = 0.00001f;
-			return std::abs(a.x - b.x) > Epsilon
-				|| std::abs(a.y - b.y) > Epsilon
-				|| std::abs(a.z - b.z) > Epsilon;
+			return std::abs(a.x - b.x) > Epsilon || std::abs(a.y - b.y) > Epsilon || std::abs(a.z - b.z) > Epsilon;
 		}
 
-	}
+	} // namespace
 
 	ScenePhysicsBridge::ScenePhysicsBridge(PhysicsSystem& system, entt::registry& reg, PhysicsWorldDesc desc)
 		: physicsSystem(system), registry(reg), worldDesc(desc)
-	{}
+	{
+	}
 
 	ScenePhysicsBridge::~ScenePhysicsBridge()
 	{
@@ -147,14 +146,14 @@ namespace Engine
 
 		if (!IsFiniteVec3(position))
 		{
-			std::cerr << "ScenePhysicsBridge | invalid entity position pos=(" << position.x << "," << position.y << "," << position.z << ")\n";
+			std::cerr << "ScenePhysicsBridge | invalid entity position pos=(" << position.x << "," << position.y << "," << position.z
+					  << ")\n";
 			position = glm::vec3(0.0f);
 		}
 
 		rotation = SafeUnitQuat(rotation);
 		return PhysicsPose{ position, rotation };
 	}
-
 
 	void ScenePhysicsBridge::CreateOrRebuildBody(entt::entity entity, Transform& transform, Rigidbody& rigidbody)
 	{
@@ -165,8 +164,8 @@ namespace Engine
 
 		const glm::vec3 scale = glm::abs(transform.GetWorldScale(registry));
 		const auto resourcesIt = bodyResources.find(entity);
-		if (rigidbody.body && world->IsBodyValid(rigidbody.body) && !rigidbody.dirty
-			&& resourcesIt != bodyResources.end() && !ScaleChanged(resourcesIt->second.Scale, scale))
+		if (rigidbody.body && world->IsBodyValid(rigidbody.body) && !rigidbody.dirty && resourcesIt != bodyResources.end() &&
+			!ScaleChanged(resourcesIt->second.Scale, scale))
 		{
 			return;
 		}
@@ -182,44 +181,44 @@ namespace Engine
 
 		switch (rigidbody.collider.type)
 		{
-			case ColliderType::Box:
+		case ColliderType::Box:
+		{
+			shapeDesc.Box.HalfExtents = rigidbody.collider.box.halfExtents * scale;
+			if (!(shapeDesc.Box.HalfExtents.x > 0.0f) || !(shapeDesc.Box.HalfExtents.y > 0.0f) || !(shapeDesc.Box.HalfExtents.z > 0.0f))
 			{
-				shapeDesc.Box.HalfExtents = rigidbody.collider.box.halfExtents * scale;
-				if (!(shapeDesc.Box.HalfExtents.x > 0.0f) || !(shapeDesc.Box.HalfExtents.y > 0.0f) || !(shapeDesc.Box.HalfExtents.z > 0.0f))
-				{
-					return;
-				}
-				break;
-			}
-			case ColliderType::Sphere:
-			{
-				const float uniformScale = std::max(scale.x, std::max(scale.y, scale.z));
-				shapeDesc.Sphere.Radius = rigidbody.collider.sphere.radius * uniformScale;
-				if (!(shapeDesc.Sphere.Radius > 0.0f) || !std::isfinite(shapeDesc.Sphere.Radius))
-				{
-					return;
-				}
-				break;
-			}
-			case ColliderType::Capsule:
-			{
-				shapeDesc.Capsule.Radius = rigidbody.collider.capsule.radius * std::max(scale.x, scale.z);
-				shapeDesc.Capsule.HalfHeight = rigidbody.collider.capsule.halfHeight * scale.y;
-				if (!(shapeDesc.Capsule.Radius > 0.0f) || !(shapeDesc.Capsule.HalfHeight >= 0.0f)
-					|| !std::isfinite(shapeDesc.Capsule.Radius) || !std::isfinite(shapeDesc.Capsule.HalfHeight))
-				{
-					return;
-				}
-				break;
-			}
-			case ColliderType::ConvexMesh:
-			case ColliderType::TriangleMesh:
-			{
-				// The generic contract owns mesh-collision handles now. The legacy
-				// component intentionally cannot request one until cooked collision
-				// AssetId data is added in the asset/compiler phase.
 				return;
 			}
+			break;
+		}
+		case ColliderType::Sphere:
+		{
+			const float uniformScale = std::max(scale.x, std::max(scale.y, scale.z));
+			shapeDesc.Sphere.Radius = rigidbody.collider.sphere.radius * uniformScale;
+			if (!(shapeDesc.Sphere.Radius > 0.0f) || !std::isfinite(shapeDesc.Sphere.Radius))
+			{
+				return;
+			}
+			break;
+		}
+		case ColliderType::Capsule:
+		{
+			shapeDesc.Capsule.Radius = rigidbody.collider.capsule.radius * std::max(scale.x, scale.z);
+			shapeDesc.Capsule.HalfHeight = rigidbody.collider.capsule.halfHeight * scale.y;
+			if (!(shapeDesc.Capsule.Radius > 0.0f) || !(shapeDesc.Capsule.HalfHeight >= 0.0f) || !std::isfinite(shapeDesc.Capsule.Radius) ||
+				!std::isfinite(shapeDesc.Capsule.HalfHeight))
+			{
+				return;
+			}
+			break;
+		}
+		case ColliderType::ConvexMesh:
+		case ColliderType::TriangleMesh:
+		{
+			// The generic contract owns mesh-collision handles now. The legacy
+			// component intentionally cannot request one until cooked collision
+			// AssetId data is added in the asset/compiler phase.
+			return;
+		}
 		}
 
 		const PhysicsMaterialHandle material = world->CreateMaterial(PhysicsMaterialDesc{});
@@ -306,8 +305,8 @@ namespace Engine
 			{
 				const auto resourcesIt = bodyResources.find(entity);
 				const glm::vec3 scale = glm::abs(transform.GetWorldScale(registry));
-				if (!rigidbody.body || !world->IsBodyValid(rigidbody.body) || rigidbody.dirty
-					|| resourcesIt == bodyResources.end() || ScaleChanged(resourcesIt->second.Scale, scale))
+				if (!rigidbody.body || !world->IsBodyValid(rigidbody.body) || rigidbody.dirty || resourcesIt == bodyResources.end() ||
+					ScaleChanged(resourcesIt->second.Scale, scale))
 				{
 					CreateOrRebuildBody(entity, transform, rigidbody);
 				}
@@ -319,6 +318,22 @@ namespace Engine
 				if (!rigidbody.body || !world->IsBodyValid(rigidbody.body))
 				{
 					return;
+				}
+
+				// Initial velocities set after the body was created (the usual order: the
+				// Rigidbody component is added first, which creates the body immediately,
+				// then SetInitialLinearVelocity is called) are applied at the next step.
+				if (rigidbody.type == RigidbodyType::Dynamic && (rigidbody.hasInitialLinearVelocity || rigidbody.hasInitialAngularVelocity))
+				{
+					if (rigidbody.hasInitialLinearVelocity)
+					{
+						world->SetLinearVelocity(rigidbody.body, rigidbody.initialLinearVelocity, true);
+					}
+					if (rigidbody.hasInitialAngularVelocity)
+					{
+						world->SetAngularVelocity(rigidbody.body, rigidbody.initialAngularVelocity, true);
+					}
+					rigidbody.ClearInitialVelocities();
 				}
 
 				if (rigidbody.type == RigidbodyType::Static)
@@ -385,7 +400,8 @@ namespace Engine
 		registry.view<Transform, Rigidbody>().each(
 			[&](entt::entity entity, Transform& transform, Rigidbody& rigidbody)
 			{
-				if (rigidbody.type != RigidbodyType::Dynamic || !rigidbody.body || !world->IsBodyValid(rigidbody.body) || !transform.HasPhysicsTarget())
+				if (rigidbody.type != RigidbodyType::Dynamic || !rigidbody.body || !world->IsBodyValid(rigidbody.body) ||
+					!transform.HasPhysicsTarget())
 				{
 					return;
 				}

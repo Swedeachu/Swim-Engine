@@ -503,7 +503,7 @@ namespace
 		gridDesc.Near = 0.1f;
 		gridDesc.Far = 60.0f;
 		gridDesc.MaxLightsPerCluster = 256;
-		gridDesc.IndexCapacity = 1u << 20;
+		gridDesc.LightCapacity = 1024;
 
 		struct FrameSpec
 		{
@@ -623,8 +623,8 @@ namespace
 			const auto drawRecordReadback =
 				AddBufferReadback(graph, "Draw records", visible.DrawRecords, 0, std::uint64_t(visible.Bins->GetTotalCapacity()) * 8);
 			const auto recordsReadback = AddBufferReadback(graph, "Cluster records", clusters.Records, 0, std::uint64_t(clusterCount) * 16);
-			const auto indicesReadback =
-				AddBufferReadback(graph, "Cluster indices", clusters.Indices, 0, std::uint64_t(gridDesc.IndexCapacity) * 4);
+			const auto indicesReadback = AddBufferReadback(
+				graph, "Cluster indices", clusters.Indices, 0, std::uint64_t(clusterCount) * ClusterBlockWords(clusters.GridRecord) * 4);
 			const auto statsReadback = AddBufferReadback(graph, "Cluster stats", clusters.Stats, 0, sizeof(ClusterStats));
 			std::optional<Smoke::CubeReadback> prefilteredReadback;
 			std::optional<GraphReadback> irradianceReadback;
@@ -661,7 +661,7 @@ namespace
 			std::array<std::uint32_t, 1> sortedCount{};
 			std::vector<GpuDrawRecord> drawRecords(visible.Bins->GetTotalCapacity());
 			std::vector<ClusterRecord> clusterRecords(clusterCount);
-			std::vector<std::uint32_t> clusterIndices(gridDesc.IndexCapacity);
+			std::vector<std::uint32_t> clusterIndices(std::size_t(clusterCount) * ClusterBlockWords(clusters.GridRecord));
 			std::array<ClusterStats, 1> stats{};
 			read(colorReadback, colorHalves);
 			read(idReadback, ids);
@@ -1126,7 +1126,7 @@ namespace
 		gridDesc.Near = 0.1f;
 		gridDesc.Far = 200.0f;
 		gridDesc.MaxLightsPerCluster = 128;
-		gridDesc.IndexCapacity = 1u << 20;
+		gridDesc.LightCapacity = 1024;
 		const auto view = Scene::Camera(16.0f / 9.0f);
 		const auto grid = MakeClusterGridRecord(gridDesc, view);
 		const auto layout = ComputeClusterGridLayout(gridDesc);
@@ -1185,11 +1185,13 @@ namespace
 
 			ClusterStats stats{};
 			std::vector<GraphPassTiming> timings;
+			auto scenarioGrid = gridDesc;
+			scenarioGrid.LightCapacity = std::max(32u, scenario.Count); // The bitmasks address every light.
 			for (int repeat = 0; repeat < 3; ++repeat)
 			{
 				RenderGraph graph;
 				const auto lightResources = lights.Import(graph);
-				const auto clusters = assigner.Record(graph, lightResources, gridDesc, view);
+				const auto clusters = assigner.Record(graph, lightResources, scenarioGrid, view);
 				const auto statsReadback = AddBufferReadback(graph, "Stats", clusters.Stats, 0, sizeof(ClusterStats));
 				executor.Execute(graph.Compile());
 				lights.CommitUploads();
@@ -1210,7 +1212,7 @@ namespace
 				std::uint32_t(std::abs(int(stats.VisibleLights) - int(visible))) <= std::max(2u, visible / 1000)); // Grazing spheres.
 			SWIM_CHECK_EQUAL(stats.ClusterCount, layout.ClusterCount);
 			SWIM_CHECK_EQUAL(stats.DroppedIndices, stats.RequestedIndices - stats.WrittenIndices);
-			SWIM_CHECK(stats.WrittenIndices <= gridDesc.IndexCapacity);
+			SWIM_CHECK_EQUAL(stats.DroppedIndices, 0u);
 			SWIM_CHECK(stats.OverflowClusters <= stats.NonEmptyClusters && stats.NonEmptyClusters <= stats.ClusterCount);
 			SWIM_CHECK((stats.OverflowClusters > 0) == (stats.MaxRawLightsPerCluster > gridDesc.MaxLightsPerCluster));
 			if (scenario.Count == 0 || scenario.Shape == Layout::OffScreen)

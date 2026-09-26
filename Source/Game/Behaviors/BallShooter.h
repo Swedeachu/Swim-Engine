@@ -7,8 +7,8 @@
 
 namespace Game
 {
-	// Fires physics balls from the camera: left click (when the UI does not have the
-	// pointer and the fly camera is not looking) or F. Balls live 12 simulated seconds.
+	// Fires physics balls from the camera along its view direction while F is held (when the
+	// UI does not own the keyboard), or through sandbox.fire. Balls live 12 simulated seconds.
 	class BallShooter : public Engine::Behavior
 	{
 	  public:

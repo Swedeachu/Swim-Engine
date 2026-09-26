@@ -510,7 +510,7 @@ namespace Swim::AssetCompiler
 		return Swim::Assets::ComputeContentHash(
 			"SwimStaticModelCompiler:v2;sasset=1;fastgltf=0.9.0;draco=1.5.7;meshoptimizer=1.1;"
 			"mesh=float32-interleaved-v1;skin=u16x4-f32x4-sorted-v1;morph=dense-v1;skeleton=parents-first-v1;animation=v1;"
-			"texture=ktx2-or-rgba8-mips-v3");
+			"texture=ktx2-or-rgba8-mips-v4;basisu=1.60-rgba8");
 	}
 
 	StaticModelCompileResult StaticModelCompiler::Compile(const IntermediateModel& model, std::string_view sourceLogicalPath,

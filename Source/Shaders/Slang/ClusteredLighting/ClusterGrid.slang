@@ -14,7 +14,7 @@ struct ClusterGrid
 	float4 DepthParams; // P22, P23, Near, Far.
 	float4 SliceParams; // SliceScale, SliceBias, TileSize, 0.
 	uint4 Dimensions;	// TilesX, TilesY, Slices, ClusterCount.
-	uint4 Limits;		// ViewportWidth, ViewportHeight, MaxLightsPerCluster, IndexCapacity.
+	uint4 Limits;		// ViewportWidth, ViewportHeight, MaxLightsPerCluster (heatmap scale), MaskWords.
 };
 
 struct ClusterAabb
@@ -29,6 +29,9 @@ struct ClusterViewLight
 	float Radius; // < 0: culled.
 };
 
+// A cluster's block in the light-index buffer (at Offset): OccupancyWords, then
+// MaskWords light bitmask words (bit i of word w = local light 32 w + i). Count =
+// RawCount = the cluster's light count; lists are never truncated.
 struct ClusterRecord
 {
 	uint Offset;
@@ -48,6 +51,21 @@ struct ClusterStats
 	uint NonEmptyClusters;
 	uint ClusterCount;
 };
+
+uint ClusterMaskWords(ClusterGrid grid)
+{
+	return grid.Limits.w;
+}
+
+uint ClusterOccupancyWords(ClusterGrid grid)
+{
+	return (grid.Limits.w + 31u) / 32u;
+}
+
+uint ClusterBlockWords(ClusterGrid grid)
+{
+	return ClusterOccupancyWords(grid) + ClusterMaskWords(grid);
+}
 
 float3 ClusterWorldToView(ClusterGrid grid, float3 p)
 {

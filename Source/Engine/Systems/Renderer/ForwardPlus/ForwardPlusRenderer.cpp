@@ -213,6 +213,24 @@ namespace Swim::Render
 		return pipeline;
 	}
 
+	Rhi::GraphicsPipelineDesc ForwardPlusRenderer::DepthPrepassPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+	{
+		Rhi::GraphicsPipelineDesc pipeline = PipelineDesc(ForwardPlusBin::Opaque, program, layout);
+		pipeline.ColorFormats = {};
+		pipeline.BlendAttachments = {};
+		pipeline.DepthStencil.DepthWrite = true;
+		pipeline.DebugName = "Forward+ depth prepass";
+		return pipeline;
+	}
+
+	Rhi::GraphicsPipelineDesc ForwardPlusRenderer::PrepassedPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+	{
+		Rhi::GraphicsPipelineDesc pipeline = PipelineDesc(ForwardPlusBin::Opaque, program, layout);
+		pipeline.DepthStencil.DepthWrite = false;
+		pipeline.DebugName = "Forward+ opaque (prepassed)";
+		return pipeline;
+	}
+
 	std::vector<std::uint32_t> ForwardPlusRenderer::VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t transparent)
 	{
 		if (!opaque || !transparent || transparent > ForwardTransparentSortBindings::MaxDraws)
@@ -233,6 +251,12 @@ namespace Swim::Render
 			!desc.SortLayout)
 		{
 			throw std::invalid_argument(desc.DebugName + " needs the opaque, transparent and sort programs");
+		}
+		const bool prepass = desc.DepthPrepass.Pipeline && desc.DepthPrepass.Layout;
+		const bool prepassed = desc.OpaquePrepassed.Pipeline && desc.OpaquePrepassed.Layout;
+		if (prepass != prepassed || (!prepass && (desc.DepthPrepass.Pipeline || desc.OpaquePrepassed.Pipeline)))
+		{
+			throw std::invalid_argument(desc.DebugName + " depth prepass needs both the depth and the prepassed opaque programs");
 		}
 		Rhi::SamplerDesc sampler{};
 		sampler.AddressU = sampler.AddressV = sampler.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
@@ -415,6 +439,55 @@ namespace Swim::Render
 		auto* bindless = frame.Bindless;
 		auto* sampler = environmentSampler.get();
 
+		// 0. Depth prepass (optional): lays down the nearest opaque depth so the shading
+		// pass below runs its lighting once per pixel.
+		const bool prepass = desc.DepthPrepass.Pipeline != nullptr;
+		if (prepass)
+		{
+			resources.DepthPrepass = graph.AddPass(
+				name + " depth prepass", Rhi::QueueType::Graphics,
+				[&](RenderGraphBuilder& b)
+				{
+					DeclareDrawReads(b, inputs);
+					b.Read(commands, S::IndirectArgument);
+					b.Read(counts, S::IndirectArgument);
+					if (targets.Clear)
+					{
+						b.Write(targets.Depth, S::DepthStencilWrite);
+					}
+					else
+					{
+						b.ReadWrite(targets.Depth, S::DepthStencilWrite);
+					}
+				},
+				[program = desc.DepthPrepass, label = name + " depth prepass", inputs, targets, commands, counts, bins, path, bindless,
+					sampler, slots, width, height](RenderCommandContext& c)
+				{
+					const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
+					Rhi::TextureViewDesc depthView;
+					depthView.PixelFormat = CanonicalDepthFormat;
+					const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView),
+						targets.Clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load, Rhi::StoreOp::Store,
+						DepthClearValue(CanonicalDepthConvention), 0 };
+					auto& list = c.Commands();
+					list.BeginRendering({ {}, &depth, { width, height } });
+					list.BindGraphicsPipeline(*program.Pipeline);
+					list.SetViewport({ 0, 0, float(width), float(height) });
+					list.SetScissor({ 0, 0, width, height });
+					auto& commandBuffer = c.Get(commands);
+					auto& countBuffer = c.Get(counts);
+					for (std::uint32_t slot = 0; slot < slots; ++slot)
+					{
+						list.BindDescriptorTable(0, *tables[slot]);
+						list.BindDescriptorTable(ForwardPlusDrawBindings::BindlessSpace, *bindless);
+						list.BindIndexBuffer(c.Get(inputs.IndexPages[slot]), 0, Rhi::IndexType::Uint32);
+						DrawVisibilityBin(list, commandBuffer, countBuffer, bins,
+							bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
+					}
+					list.EndRendering();
+				});
+		}
+
 		// 1. Opaque.
 		resources.Velocity = velocity;
 		resources.Normal = normal;
@@ -437,7 +510,14 @@ namespace Swim::Render
 					b.Write(indirect, S::ColorAttachment);
 					b.Write(reflectance, S::ColorAttachment);
 					b.Write(specular, S::ColorAttachment);
-					b.Write(targets.Depth, S::DepthStencilWrite);
+					if (prepass)
+					{
+						b.ReadWrite(targets.Depth, S::DepthStencilWrite);
+					}
+					else
+					{
+						b.Write(targets.Depth, S::DepthStencilWrite);
+					}
 				}
 				else
 				{
@@ -451,8 +531,9 @@ namespace Swim::Render
 					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
 			},
-			[program = desc.Opaque, label = name + " opaque", inputs, targets, velocity, normal, indirect, reflectance, specular, commands,
-				counts, bins, path, bindless, sampler, slots, width, height](RenderCommandContext& c)
+			[program = prepass ? desc.OpaquePrepassed : desc.Opaque, prepass, label = name + " opaque", inputs, targets, velocity, normal,
+				indirect, reflectance, specular, commands, counts, bins, path, bindless, sampler, slots, width,
+				height](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				const auto load = targets.Clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
@@ -474,8 +555,8 @@ namespace Swim::Render
 				colors[6].Load = load;
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
-				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), load, Rhi::StoreOp::Store,
-					DepthClearValue(CanonicalDepthConvention), 0 };
+				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), prepass ? Rhi::LoadOp::Load : load,
+					Rhi::StoreOp::Store, DepthClearValue(CanonicalDepthConvention), 0 };
 				auto& list = c.Commands();
 				list.BeginRendering({ colors, &depth, { width, height } });
 				list.BindGraphicsPipeline(*program.Pipeline);

@@ -65,10 +65,11 @@ Each index-page slot of the visibility frame names its index and vertex page (`F
 
 - **Vertex stage:** transforms the position by the GPU Scene row. The normal is transformed by the cofactor matrix (exact under non-uniform scale), and the tangent by the linear part. For mirroring transforms (negative determinant) it flips the tangent sign and the triangle facing, so their normals, tangents and faces stay correct.
 - **Faces:** both pipelines rasterize both faces. Single-sided materials discard back faces in the shader (`CullsFace`); double-sided ones shade them with the flipped normal. This keeps mirrored instances correct without a second pipeline.
+- **Depth prepass (optional, on in the runtime):** with `ForwardPlusRendererDesc::DepthPrepass` and `OpaquePrepassed` set, the Opaque bin is drawn twice. `SwimForwardDepth` (`FORWARD_DEPTH_ONLY`) writes depth only, discarding culled faces and alpha-masked texels. `SwimForwardOpaquePrepassed` (`FORWARD_PREPASSED`) then shades with `[earlydepthstencil]`, GreaterEqual and no depth writes and never discards, so only the visible surface runs the lighting loop. The vertex position math is `precise` in all variants so both passes rasterize identical depths.
 - **Surface:** `StandardPbrResolve` over bindless texels (alpha mask, normal map through the vertex tangent frame).
 - **Radiance:** directional lights + the pixel's cluster list, each times its shadow factor (`ForwardDirect`) + `Ambient × baseColor × occlusion` + split-sum IBL (when an environment is bound) + emission.
 - **Opaque output:** color with alpha 1, `ObjectId + 1` as a float (exact below 2²⁴; 0 = nothing drawn), a motion vector, the shading normal + roughness, the indirect radiance, the specular reflectance, the specular IBL radiance, and depth with the canonical reverse-Z compare.
-- **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty), with truncated clusters in magenta.
+- **Debug:** `ForwardPlusDebugMode::ClusterHeatmap` replaces opaque colors with the pixel's cluster heatmap color (black where the cluster is empty). Cluster light sets are bitmasks and never truncated, so no cluster is magenta.
 
 The object-id target is `R32Float` because the RHI clears only float and normalized attachments.
 
@@ -127,7 +128,7 @@ GPU-AV instruments every storage/uniform-buffer load, store and atomic and warns
 
 ## Pipelines
 
-`ForwardPlusRenderer::PipelineDesc(bin, program, layout)` returns the pipeline state; callers compile the programs and create the pipelines:
+`ForwardPlusRenderer::PipelineDesc(bin, program, layout)` returns the pipeline state (`DepthPrepassPipelineDesc` and `PrepassedPipelineDesc` for the prepass pair: no color targets with depth writes, and the Opaque state without depth writes); callers compile the programs and create the pipelines:
 
 | | Opaque | Transparent |
 | --- | --- | --- |
@@ -140,7 +141,7 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 ## Not yet
 
-- A depth prepass and hardware back-face culling split by winding.
+- Hardware back-face culling split by winding.
 - Consuming the HZB/visibility late phase for opaque draws beyond what `GpuVisibility` already culls.
 - Packing the thin G-buffer (octahedral normals, one reflectance/specular target) to save bandwidth.
 - Engine wiring (item 56). The color, depth, normal, indirect, reflectance and specular targets feed [screen-space AO, reflections and fog](ScreenSpace.md) (item 76); that output, the depth and the velocity feed [temporal anti-aliasing](TemporalAntiAliasing.md) (item 75), whose output feeds [post-processing](PostProcess.md) (items 73–74).
@@ -151,7 +152,7 @@ Both programs share the bindless space `ForwardPlusBindlessSpace(textures, sampl
 
 | Suite | What it proves |
 | --- | --- |
-| `Render.ForwardPlus.Reference` (9) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission; truncation only removes light. Heatmap debug colors and blending. View-record validation (an environment implies `ForwardViewFlagBrdfLut`; a LUT alone sets only it). `IndirectRadiance` is exactly ambient + IBL; `SpecularEnvironment` is the LUT-weighted reflectance and `Prefiltered ×` it, part of the indirect light, and without an environment uses a supplied LUT or is 0. Motion vectors for object, camera and perspective motion, never jitter. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
+| `Render.ForwardPlus.Reference` (9) | Material bins and face culling. Normals stay perpendicular and outward under non-uniform scale and mirroring (400 random transforms). Tangent-sign and mirrored facing. The transparent order is back to front with stable tie-breaks and independent of compaction order. Clustered shading equals brute force and decomposes into lights + ambient + IBL + emission, also when clusters exceed the heatmap scale (bitmask sets are never truncated). Heatmap debug colors and blending. View-record validation (an environment implies `ForwardViewFlagBrdfLut`; a LUT alone sets only it). `IndirectRadiance` is exactly ambient + IBL; `SpecularEnvironment` is the LUT-weighted reflectance and `Prefiltered ×` it, part of the indirect light, and without an environment uses a supplied LUT or is 0. Motion vectors for object, camera and perspective motion, never jitter. Shadowed lights are scaled by exactly their shadow factor, and only with the view flag, the light flag and an atlas |
 | `Render.ForwardPlus.Fixture` (1) | The test meshes are CCW-outward with exact tangents, and the analytic ray caster agrees with triangle intersection under rotated, scaled and mirrored transforms |
 | `Render.ForwardPlus` (1, RenderResidency) | `StandardVertexLayoutId` is the residency layer's layout of a cooked static mesh |
 | `Render.ForwardPlusRenderer` (5) | Pipeline states. On the mock device: per-slot opaque count draws over the visibility commands, one sort dispatch with its push constants, per-slot transparent draws over the sorted commands, every binding of the last table, the no-`IndirectCount` fallback, the environment and shadow stand-ins, a BRDF LUT bound without an environment, the transient or supplied velocity, normal, indirect, reflectance and specular targets, seven opaque and four transparent attachments, and every rejected input |

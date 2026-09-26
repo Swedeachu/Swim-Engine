@@ -4,6 +4,7 @@
 #include "Engine/Systems/Renderer/Materials/StandardPbr.h"
 
 #include <array>
+#include <bit>
 #include <span>
 #include <vector>
 
@@ -50,22 +51,56 @@ namespace Swim::Render::Clustering
 		std::vector<ViewLight> ViewLights; // Per local light.
 		std::vector<Aabb> Bounds;		   // Per cluster.
 		std::vector<ClusterRecord> Records;
-		std::vector<std::uint32_t> Indices; // Local light indices (row - FirstLocalRow), WrittenIndices of them.
+		// ClusterCount * ClusterBlockWords(grid) uints: per cluster its occupancy words,
+		// then its light bitmask words (see ClusterRecord).
+		std::vector<std::uint32_t> Indices;
 		ClusterStats Stats;
 	};
 
-	// Every local light is tested against every cluster in light-index order; a
-	// cluster keeps its first MaxLightsPerCluster hits. Offsets are the exclusive
-	// prefix sum of the kept counts in cluster order, clamped to IndexCapacity (later
-	// clusters lose their lists first). Fully deterministic, like the GPU passes.
+	// Every local light is tested against every cluster; a cluster's bitmask holds every
+	// light whose view sphere touches its AABB (never truncated). Record c's Offset is
+	// c * ClusterBlockWords. Throws std::invalid_argument when more lights are given than
+	// the grid's mask words address. Fully deterministic, like the GPU passes.
 	ClusterAssignment AssignLights(const ClusterGridRecord& grid, std::span<const GpuLightRecord> rows, const GpuLightHeader& header);
 	// The same assignment from precomputed view lights and cluster bounds (for
 	// example the GPU's own, read back), so a comparison isolates the list building.
 	ClusterAssignment AssignLights(const ClusterGridRecord& grid, std::vector<ViewLight> viewLights, std::vector<Aabb> bounds);
 
+	// Calls visit(localIndex) for every light in a cluster's bitmask, in increasing index
+	// order (ClusteredLighting.slang walks the words the same way).
+	template <typename Visit>
+	void ForEachClusterLight(const ClusterGridRecord& grid, std::span<const ClusterRecord> records, std::span<const std::uint32_t> words,
+		std::uint32_t cluster, Visit&& visit)
+	{
+		const auto& record = records[cluster];
+		if (record.Count == 0)
+		{
+			return;
+		}
+		const std::uint32_t occupancyWords = ClusterOccupancyWords(grid);
+		for (std::uint32_t o = 0; o < occupancyWords; ++o)
+		{
+			std::uint32_t occupancy = words[record.Offset + o];
+			while (occupancy != 0)
+			{
+				const std::uint32_t w = o * 32u + static_cast<std::uint32_t>(std::countr_zero(occupancy));
+				occupancy &= occupancy - 1u;
+				std::uint32_t mask = words[record.Offset + occupancyWords + w];
+				while (mask != 0)
+				{
+					visit(w * 32u + static_cast<std::uint32_t>(std::countr_zero(mask)));
+					mask &= mask - 1u;
+				}
+			}
+		}
+	}
+
+	// A cluster's local light indices in increasing order.
+	std::vector<std::uint32_t> ClusterLightList(const ClusterAssignment& assignment, const ClusterGridRecord& grid, std::uint32_t cluster);
+
 	// Clustered forward shading of one point: every directional light plus the
 	// cluster's local lights, each StandardPbr::EvaluateBrdf times its radiance.
-	// Without truncation it equals Lights::ShadeAllLights.
+	// It equals Lights::ShadeAllLights (the assignment is conservative and complete).
 	Float3 ShadeClustered(const ClusterAssignment& assignment, const ClusterGridRecord& grid, std::span<const GpuLightRecord> rows,
 		const GpuLightHeader& header, const StandardPbr::Surface& surface, const Float3& normal, const Float3& view,
 		const Float3& worldPosition, float pixelX, float pixelY, float viewDepth);

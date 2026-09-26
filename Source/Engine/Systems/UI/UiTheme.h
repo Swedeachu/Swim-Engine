@@ -16,31 +16,32 @@ namespace Swim::UI
 {
 	struct UiPalette
 	{
-		UiColor Panel{ 0.055f, 0.06f, 0.075f, 0.94f };
-		UiColor Surface{ 0.13f, 0.145f, 0.18f, 1.0f };
-		UiColor SurfaceHover{ 0.18f, 0.2f, 0.25f, 1.0f };
-		UiColor SurfacePressed{ 0.09f, 0.1f, 0.13f, 1.0f };
-		UiColor Field{ 0.035f, 0.04f, 0.05f, 1.0f };
-		UiColor Border{ 0.3f, 0.33f, 0.4f, 1.0f };
-		UiColor Accent{ 0.22f, 0.45f, 0.95f, 1.0f };
-		UiColor AccentHover{ 0.32f, 0.55f, 1.0f, 1.0f };
-		UiColor AccentPressed{ 0.15f, 0.33f, 0.75f, 1.0f };
+		// Sleek dark mode: blue-black panels, lifted slate surfaces and an electric-blue accent.
+		UiColor Panel{ 0.043f, 0.051f, 0.071f, 0.92f };
+		UiColor Surface{ 0.09f, 0.105f, 0.14f, 1.0f };
+		UiColor SurfaceHover{ 0.13f, 0.155f, 0.21f, 1.0f };
+		UiColor SurfacePressed{ 0.06f, 0.07f, 0.1f, 1.0f };
+		UiColor Field{ 0.03f, 0.035f, 0.05f, 1.0f };
+		UiColor Border{ 0.16f, 0.19f, 0.26f, 1.0f };
+		UiColor Accent{ 0.2f, 0.52f, 1.0f, 1.0f };
+		UiColor AccentHover{ 0.35f, 0.63f, 1.0f, 1.0f };
+		UiColor AccentPressed{ 0.13f, 0.4f, 0.85f, 1.0f };
 		UiColor OnAccent{ 0.97f, 0.98f, 1.0f, 1.0f };
-		UiColor Focus{ 0.55f, 0.72f, 1.0f, 1.0f };
-		UiColor Text{ 0.92f, 0.93f, 0.96f, 1.0f };
-		UiColor TextMuted{ 0.55f, 0.58f, 0.65f, 1.0f };
-		UiColor Track{ 0.22f, 0.24f, 0.3f, 1.0f };
-		UiColor Selection{ 0.25f, 0.45f, 0.95f, 0.45f };
-		UiColor Caret{ 1.0f, 1.0f, 1.0f, 1.0f };
-		UiColor Popup{ 0.1f, 0.11f, 0.14f, 0.98f }; // Menus, dropdown lists, dialogs.
-		UiColor Tooltip{ 0.02f, 0.02f, 0.03f, 0.94f };
-		UiColor Scrim{ 0.0f, 0.0f, 0.0f, 0.5f }; // Behind modal dialogs.
+		UiColor Focus{ 0.38f, 0.66f, 1.0f, 1.0f };
+		UiColor Text{ 0.9f, 0.93f, 0.98f, 1.0f };
+		UiColor TextMuted{ 0.5f, 0.56f, 0.66f, 1.0f };
+		UiColor Track{ 0.14f, 0.17f, 0.23f, 1.0f };
+		UiColor Selection{ 0.2f, 0.52f, 1.0f, 0.4f };
+		UiColor Caret{ 0.55f, 0.78f, 1.0f, 1.0f };
+		UiColor Popup{ 0.055f, 0.065f, 0.09f, 0.98f }; // Menus, dropdown lists, dialogs.
+		UiColor Tooltip{ 0.02f, 0.025f, 0.04f, 0.95f };
+		UiColor Scrim{ 0.0f, 0.0f, 0.02f, 0.55f }; // Behind modal dialogs.
 	};
 
 	// Logical units; the classes of horizontal controls, swapped for vertical ones.
 	struct UiMetrics
 	{
-		float CornerRadius = 6.0f;
+		float CornerRadius = 7.0f;
 		float BorderWidth = 1.0f;
 		float FocusWidth = 2.0f;
 		float Spacing = 8.0f;

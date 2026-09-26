@@ -15,10 +15,14 @@ namespace Swim::Render
 		std::uint32_t ViewportHeight = 0;
 		std::uint32_t TileSize = 64; // Pixels per tile edge.
 		std::uint32_t SliceCount = 24;
-		float Near = 0.1f;						  // View depth where slicing starts (> 0).
-		float Far = 500.0f;						  // View depth where the last slice ends; lights beyond are culled.
-		std::uint32_t MaxLightsPerCluster = 64;	  // Longer lists are truncated (counted as overflow).
-		std::uint32_t IndexCapacity = 256 * 1024; // Total light-index slots for all clusters.
+		float Near = 0.1f;	// View depth where slicing starts (> 0).
+		float Far = 500.0f; // View depth where the last slice ends; lights beyond are culled.
+		// Full scale of the debug heatmap (a cluster with this many lights is red). Lists are
+		// never truncated: every cluster keeps a bitmask over all local lights.
+		std::uint32_t MaxLightsPerCluster = 64;
+		// Local lights the per-cluster bitmasks address (rounded up to 32). Assignment
+		// throws when more local lights are bound; the runtime sets it from the light count.
+		std::uint32_t LightCapacity = 1024;
 	};
 
 	// The camera the grid is built for: a row-major world-to-view affine (right-handed,
@@ -38,14 +42,16 @@ namespace Swim::Render
 		float DepthParams[4] = {};		  // P22, P23, Near, Far.
 		float SliceParams[4] = {};		  // SliceScale, SliceBias, TileSize, 0.
 		std::uint32_t Dimensions[4] = {}; // TilesX, TilesY, Slices, ClusterCount.
-		std::uint32_t Limits[4] = {};	  // ViewportWidth, ViewportHeight, MaxLightsPerCluster, IndexCapacity.
+		std::uint32_t Limits[4] = {};	  // ViewportWidth, ViewportHeight, MaxLightsPerCluster (heatmap scale), MaskWords.
 	};
 
 	static_assert(sizeof(ClusterGridRecord) == 128);
 
-	// One cluster's light list (ClusterRecords buffer, 16 bytes): Count indices at
-	// Offset in the light-index buffer; RawCount is how many lights intersected the
-	// cluster before truncation (MaxLightsPerCluster or the index capacity).
+	// One cluster's light set (ClusterRecords buffer, 16 bytes). The light-index buffer
+	// holds, per cluster at Offset, OccupancyWords then MaskWords uints: bit i of mask word
+	// w marks local light 32 w + i; bit j of occupancy word o marks a non-zero mask word
+	// 32 o + j, so shading visits only words that hold lights. Count = RawCount = the
+	// cluster's light count (lists are never truncated).
 	struct ClusterRecord
 	{
 		std::uint32_t Offset = 0;
@@ -60,10 +66,10 @@ namespace Swim::Render
 	struct ClusterStats
 	{
 		std::uint32_t VisibleLights = 0;	// Local lights intersecting the clustered volume.
-		std::uint32_t RequestedIndices = 0; // Sum of per-cluster counts after MaxLightsPerCluster.
-		std::uint32_t WrittenIndices = 0;	// After the index capacity.
-		std::uint32_t OverflowClusters = 0; // Clusters whose raw count exceeded MaxLightsPerCluster.
-		std::uint32_t DroppedIndices = 0;	// RequestedIndices - WrittenIndices (index capacity overflow).
+		std::uint32_t RequestedIndices = 0; // Sum of per-cluster light counts.
+		std::uint32_t WrittenIndices = 0;	// Equal to RequestedIndices (bitmasks never drop lights).
+		std::uint32_t OverflowClusters = 0; // Clusters above MaxLightsPerCluster (heatmap scale only; nothing is dropped).
+		std::uint32_t DroppedIndices = 0;	// Always 0 (kept for the buffer layout).
 		std::uint32_t MaxRawLightsPerCluster = 0;
 		std::uint32_t NonEmptyClusters = 0;
 		std::uint32_t ClusterCount = 0;
@@ -82,10 +88,28 @@ namespace Swim::Render
 		float SliceBias = 0.0f;
 	};
 
+	// Bitmask layout of a grid: MaskWords = ceil(LightCapacity / 32) words per cluster,
+	// OccupancyWords = ceil(MaskWords / 32), and each cluster's block is their sum.
+	inline std::uint32_t ClusterMaskWords(const ClusterGridRecord& grid)
+	{
+		return grid.Limits[3];
+	}
+
+	inline std::uint32_t ClusterOccupancyWords(const ClusterGridRecord& grid)
+	{
+		return (grid.Limits[3] + 31u) / 32u;
+	}
+
+	inline std::uint32_t ClusterBlockWords(const ClusterGridRecord& grid)
+	{
+		return ClusterOccupancyWords(grid) + ClusterMaskWords(grid);
+	}
+
 	// Throws std::invalid_argument for a zero viewport, tile size or slice count,
 	// 0 < Near < Far violations, zero limits or more than MaxClusterCount clusters.
 	ClusterGridLayout ComputeClusterGridLayout(const ClusterGridDesc& desc);
 	inline constexpr std::uint32_t MaxClusterCount = 1u << 20;
+	inline constexpr std::uint32_t MaxClusterLights = 1u << 16; // LightCapacity limit (2048 mask words).
 
 	// Throws std::invalid_argument when the projection is not a perspective one
 	// (P32 != -1 or P33 != 0) or the view is not affine.

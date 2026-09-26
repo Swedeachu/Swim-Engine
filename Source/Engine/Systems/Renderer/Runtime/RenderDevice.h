@@ -23,7 +23,7 @@ namespace Engine
 		Swim::Platform::Window* Window = nullptr;
 		std::uint32_t Width = 1280; // Headless size, and the initial size of a window.
 		std::uint32_t Height = 720;
-		bool VSync = true;
+		bool VSync = false;
 		bool Validation = false;
 	};
 

@@ -146,7 +146,7 @@ With `AssetResidencyDesc::Bindless` set, `AssetResidencyService::Update` registe
 ## Not in this checkpoint
 
 - `ModelAsset` graphs (and material instances) are not requested through the service yet; they still load through `LoadSasset`, and their meshes/textures can be requested individually.
-- Block-compressed/KTX2 texture upload (needs block-aware RHI copies and/or runtime Basis transcoding) and texture streaming by mip.
+- Block-compressed/KTX2 texture upload (needs block-aware RHI copies; Basis KTX2 sources are already transcoded to RGBA8 by the cooker) and texture streaming by mip.
 - Memory budgets and eviction (the service budgets bytes staged per update, not resident bytes); `.spack` packages (item 81).
 - Layout-free bindless tables, bindless storage buffers/images, variable descriptor counts, and GPU material records carrying bindless ids (item 59). The engine does not construct a `BindlessResourceTable` yet.
 - The engine runtime does not construct the service yet; the sandbox still renders through the transitional renderer.

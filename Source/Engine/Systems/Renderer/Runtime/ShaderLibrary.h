@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -14,13 +15,25 @@
 
 namespace Engine
 {
+	// A reflected descriptor of a runtime program, by its Slang parameter name.
+	struct RuntimeBinding
+	{
+		std::string Name;
+		std::uint32_t Space = 0;
+		std::uint32_t Binding = 0;
+		Swim::Rhi::DescriptorType Type = Swim::Rhi::DescriptorType::SampledTexture;
+		Swim::Rhi::Format StorageFormat = Swim::Rhi::Format::Undefined; // StorageTexture only.
+	};
+
 	// A compiled compute program and the objects it owns.
 	struct RuntimeComputeProgram
 	{
 		std::unique_ptr<Swim::Rhi::ShaderProgram> Program;
 		std::unique_ptr<Swim::Rhi::PipelineLayout> Layout;
 		std::unique_ptr<Swim::Rhi::ComputePipeline> Pipeline;
-		std::uint32_t Space = 0; // The first reflected descriptor space.
+		std::uint32_t Space = 0;			  // The first reflected descriptor space.
+		std::vector<RuntimeBinding> Bindings; // Every descriptor, named (render features bind by name).
+		std::array<std::uint32_t, 3> ThreadGroupSize{ 1, 1, 1 };
 	};
 
 	// A compiled vertex + fragment program and its layout; pipelines are created by the

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace Swim::Render::Clustering
 {
@@ -111,56 +112,64 @@ namespace Swim::Render::Clustering
 	{
 		ClusterAssignment result;
 		const std::uint32_t clusterCount = grid.Dimensions[3];
-		const std::uint32_t maxPerCluster = grid.Limits[2];
-		const std::uint32_t capacity = grid.Limits[3];
+		const std::uint32_t maskWords = ClusterMaskWords(grid);
+		const std::uint32_t occupancyWords = ClusterOccupancyWords(grid);
+		const std::uint32_t block = ClusterBlockWords(grid);
 		result.ViewLights = std::move(viewLights);
 		result.Bounds = std::move(bounds);
 		const auto lightCount = static_cast<std::uint32_t>(result.ViewLights.size());
+		if (std::uint64_t(lightCount) > std::uint64_t(maskWords) * 32u)
+		{
+			throw std::invalid_argument("More local lights than the cluster grid's LightCapacity");
+		}
 		for (const auto& light : result.ViewLights)
 		{
 			result.Stats.VisibleLights += light.Radius >= 0.0f ? 1u : 0u;
 		}
 		result.Records.resize(clusterCount);
-		std::vector<std::vector<std::uint32_t>> lists(clusterCount);
+		result.Indices.assign(std::size_t(clusterCount) * block, 0u);
 		for (std::uint32_t c = 0; c < clusterCount; ++c)
 		{
 			auto& record = result.Records[c];
+			record.Offset = c * block;
+			std::uint32_t* words = result.Indices.data() + record.Offset;
 			for (std::uint32_t i = 0; i < lightCount; ++i)
 			{
 				const auto& light = result.ViewLights[i];
 				if (SphereIntersectsAabb(light.Center, light.Radius, result.Bounds[c]))
 				{
-					++record.RawCount;
-					if (lists[c].size() < maxPerCluster)
-					{
-						lists[c].push_back(i);
-					}
+					words[occupancyWords + i / 32u] |= 1u << (i % 32u);
+					++record.Count;
 				}
 			}
-		}
-		std::uint32_t prefix = 0;
-		for (std::uint32_t c = 0; c < clusterCount; ++c)
-		{
-			auto& record = result.Records[c];
-			const auto count = static_cast<std::uint32_t>(lists[c].size());
-			record.Offset = std::min(prefix, capacity);
-			record.Count = std::min(count, capacity - record.Offset);
-			prefix += count;
-			result.Stats.RequestedIndices += count;
-			result.Stats.WrittenIndices += record.Count;
-			result.Stats.OverflowClusters += record.RawCount > maxPerCluster ? 1u : 0u;
-			result.Stats.MaxRawLightsPerCluster = std::max(result.Stats.MaxRawLightsPerCluster, record.RawCount);
+			for (std::uint32_t w = 0; w < maskWords; ++w)
+			{
+				if (words[occupancyWords + w] != 0)
+				{
+					words[w / 32u] |= 1u << (w % 32u);
+				}
+			}
+			record.RawCount = record.Count;
+			result.Stats.RequestedIndices += record.Count;
+			result.Stats.OverflowClusters += record.Count > grid.Limits[2] ? 1u : 0u;
+			result.Stats.MaxRawLightsPerCluster = std::max(result.Stats.MaxRawLightsPerCluster, record.Count);
 			result.Stats.NonEmptyClusters += record.Count > 0 ? 1u : 0u;
 		}
-		result.Stats.DroppedIndices = result.Stats.RequestedIndices - result.Stats.WrittenIndices;
+		result.Stats.WrittenIndices = result.Stats.RequestedIndices;
+		result.Stats.DroppedIndices = 0;
 		result.Stats.ClusterCount = clusterCount;
-		result.Indices.resize(result.Stats.WrittenIndices);
-		for (std::uint32_t c = 0; c < clusterCount; ++c)
-		{
-			const auto& record = result.Records[c];
-			std::copy_n(lists[c].begin(), record.Count, result.Indices.begin() + record.Offset);
-		}
 		return result;
+	}
+
+	std::vector<std::uint32_t> ClusterLightList(const ClusterAssignment& assignment, const ClusterGridRecord& grid, std::uint32_t cluster)
+	{
+		std::vector<std::uint32_t> list;
+		ForEachClusterLight(grid, assignment.Records, assignment.Indices, cluster,
+			[&](std::uint32_t index)
+			{
+				list.push_back(index);
+			});
+		return list;
 	}
 
 	Float3 ShadeClustered(const ClusterAssignment& assignment, const ClusterGridRecord& grid, std::span<const GpuLightRecord> rows,
@@ -181,11 +190,11 @@ namespace Swim::Render::Clustering
 		{
 			add(rows[i]);
 		}
-		const auto& record = assignment.Records[ClusterIndexFor(grid, pixelX, pixelY, viewDepth)];
-		for (std::uint32_t i = 0; i < record.Count; ++i)
-		{
-			add(rows[header.FirstLocalRow + assignment.Indices[record.Offset + i]]);
-		}
+		ForEachClusterLight(grid, assignment.Records, assignment.Indices, ClusterIndexFor(grid, pixelX, pixelY, viewDepth),
+			[&](std::uint32_t index)
+			{
+				add(rows[header.FirstLocalRow + index]);
+			});
 		return sum;
 	}
 

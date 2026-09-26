@@ -12,13 +12,13 @@ namespace Engine
 {
 	namespace
 	{
-		constexpr std::array<std::string_view, 36> RequiredProgramNames{ "Present", "SkyBackground", "GpuVisibility", "ClusterLightCull",
-			"ClusterBounds", "ClusterAssign", "ClusterScan", "ForwardOpaque", "ForwardTransparent", "ForwardTransparentSort", "ShadowDepth",
-			"ShadowMasked", "EnvironmentSky", "EnvironmentDownsample", "EnvironmentPrefilter", "EnvironmentIrradiance",
-			"EnvironmentBrdfLut", "PostHistogram", "PostExposure", "PostBloomDownsample", "PostBloomUpsample", "PostComposite",
-			"PostCompositeHdr", "TemporalResolve", "ScreenSpaceAo", "ScreenSpaceBlur", "ScreenSpaceComposite", "ScreenSpaceReflection",
-			"ParticleSimulate", "ParticleEmit", "ParticleCompact", "ParticleFinalize", "ParticleRender", "Skinning", "UiQuad",
-			"HzbReduce" };
+		constexpr std::array<std::string_view, 38> RequiredProgramNames{ "Present", "SkyBackground", "GpuVisibility", "ClusterLightCull",
+			"ClusterBounds", "ClusterAssign", "ClusterScan", "ForwardOpaque", "ForwardTransparent", "ForwardDepth",
+			"ForwardOpaquePrepassed", "ForwardTransparentSort", "ShadowDepth", "ShadowMasked", "EnvironmentSky", "EnvironmentDownsample",
+			"EnvironmentPrefilter", "EnvironmentIrradiance", "EnvironmentBrdfLut", "PostHistogram", "PostExposure", "PostBloomDownsample",
+			"PostBloomUpsample", "PostComposite", "PostCompositeHdr", "TemporalResolve", "ScreenSpaceAo", "ScreenSpaceBlur",
+			"ScreenSpaceComposite", "ScreenSpaceReflection", "ParticleSimulate", "ParticleEmit", "ParticleCompact", "ParticleFinalize",
+			"ParticleRender", "Skinning", "UiQuad", "HzbReduce" };
 
 		std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
 		{
@@ -47,6 +47,7 @@ namespace Engine
 	{
 		std::vector<std::byte> Bytes;
 		Swim::Rhi::ShaderProgramInterface Interface;
+		std::vector<RuntimeBinding> Names;
 	};
 
 	ShaderLibrary::ShaderLibrary(Swim::Rhi::Device& deviceValue, std::filesystem::path rootValue)
@@ -82,6 +83,40 @@ namespace Engine
 			throw std::runtime_error("ShaderLibrary: " + std::string(name) + " interface: " + converted.Error);
 		}
 		loaded.Interface = std::move(converted.Interface);
+		// Name every descriptor the interface declares (global and entry-point parameters).
+		const auto nameBinding = [&](const Swim::ShaderCompiler::ShaderBindingReflection& parameter)
+		{
+			if (!parameter.HasIndex || parameter.BindingKind != "descriptorTableSlot")
+			{
+				return; // Push constants and uniforms are not descriptors.
+			}
+			for (const auto& schema : loaded.Interface.DescriptorSchemas)
+			{
+				if (schema.Space != parameter.Space)
+				{
+					continue;
+				}
+				for (const auto& binding : schema.Bindings)
+				{
+					if (binding.Binding == parameter.Index)
+					{
+						loaded.Names.push_back(
+							{ parameter.Name, schema.Space, binding.Binding, binding.Type, binding.StorageTextureFormat });
+					}
+				}
+			}
+		};
+		for (const auto& parameter : reflection.Reflection.GlobalParameters)
+		{
+			nameBinding(parameter);
+		}
+		for (const auto& entry : reflection.Reflection.EntryPoints)
+		{
+			for (const auto& parameter : entry.Parameters)
+			{
+				nameBinding(parameter);
+			}
+		}
 		return loaded;
 	}
 
@@ -108,6 +143,8 @@ namespace Engine
 			throw std::runtime_error("ShaderLibrary: cannot create the pipeline of " + label);
 		}
 		program.Space = loaded.Interface.DescriptorSchemas.empty() ? 0u : loaded.Interface.DescriptorSchemas.front().Space;
+		program.Bindings = loaded.Names;
+		program.ThreadGroupSize = loaded.Interface.ComputeThreadGroupSize;
 		return program;
 	}
 

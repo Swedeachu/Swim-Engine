@@ -20,6 +20,7 @@ namespace Swim::Render
 		GraphTexture Indirect;		// ForwardPlusTargets::Indirect, or the transient one.
 		GraphTexture Reflectance;	// ForwardPlusTargets::Reflectance, or the transient one.
 		GraphTexture Specular;		// ForwardPlusTargets::Specular, or the transient one.
+		GraphPass DepthPrepass;		// Invalid without ForwardPlusRendererDesc::DepthPrepass.
 		GraphPass OpaquePass;
 		GraphPass SortPass;
 		GraphPass TransparentPass;

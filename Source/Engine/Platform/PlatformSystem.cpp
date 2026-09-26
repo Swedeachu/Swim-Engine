@@ -48,6 +48,7 @@ namespace Swim::Platform
 		FileSystemDesc fileSystemDesc{};
 		fileSystemDesc.OrganizationName = desc.OrganizationName;
 		fileSystemDesc.ApplicationName = desc.ApplicationName;
+		fileSystemDesc.AssetRootOverride = desc.AssetRoot;
 		if (!fileSystem->Initialize(fileSystemDesc))
 		{
 			fileSystem.reset();
@@ -114,9 +115,10 @@ namespace Swim::Platform
 		return *fileSystem;
 	}
 
-	void PlatformSystem::PumpEvents(const WindowSystem::WindowEventHandler& windowHandler, const WindowSystem::InputEventHandler& inputHandler)
+	void PlatformSystem::PumpEvents(
+		const WindowSystem::WindowEventHandler& windowHandler, const WindowSystem::InputEventHandler& inputHandler)
 	{
 		GetWindowSystem().PumpEvents(windowHandler, inputHandler);
 	}
 
-}
+} // namespace Swim::Platform

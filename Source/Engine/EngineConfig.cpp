@@ -252,6 +252,17 @@ namespace Engine
 					fail("Invalid --state value. Expected playing, paused or stopped.");
 				}
 			}
+			else if (Option(argument, "--assets", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("--assets requires a directory.");
+				}
+				else
+				{
+					config.AssetRoot = std::string(value);
+				}
+			}
 			else if (Option(argument, "--scene", i, argc, argv, value, hasValue))
 			{
 				if (!hasValue || value.empty())
@@ -422,6 +433,7 @@ namespace Engine
 			<< "  --physics=auto|physx|jolt           Physics backend (auto = physx if built, else jolt)\n"
 			<< "  --state=playing|paused|stopped      Initial engine state\n"
 			<< "  --scene=<name>                      Startup scene\n"
+			<< "  --assets=<dir>                      Loose-asset root (default: the repository's Assets/)\n"
 			<< "  --width=<px> --height=<px>          Window size (or --size=<W>x<H>)\n"
 			<< "  --vsync=on|off, --no-vsync          Present with/without vsync\n"
 			<< "  --validation[=on|off]               GPU validation layers\n"

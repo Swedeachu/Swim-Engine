@@ -249,7 +249,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 	gridDesc.SliceCount = 16;
 	gridDesc.Far = 60.0f;
 	gridDesc.MaxLightsPerCluster = 256;
-	gridDesc.IndexCapacity = 1u << 20;
+	gridDesc.LightCapacity = 512;
 	const auto camera = Scene::Camera(16.0f / 9.0f);
 	const auto grid = MakeClusterGridRecord(gridDesc, camera);
 	const auto assignment = Clustering::AssignLights(grid, scene.Rows, scene.Header);
@@ -330,24 +330,26 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 	}
 	SWIM_CHECK(litByLocal > 25u); // Local lights matter in this scene.
 
-	// A truncated list only removes light.
+	// Lists are never truncated: a tiny heatmap scale (MaxLightsPerCluster) changes
+	// nothing, and clustered shading still equals the brute-force sum.
 	auto tightDesc = gridDesc;
 	tightDesc.MaxLightsPerCluster = 2;
 	auto tightGrid = MakeClusterGridRecord(tightDesc, camera);
-	const auto truncated = Clustering::AssignLights(tightGrid, scene.Rows, scene.Header);
-	SWIM_REQUIRE(truncated.Stats.OverflowClusters > 0u);
-	Fp::LightingInputs partial{ scene.Rows, scene.Header, &tightGrid, truncated.Records, truncated.Indices, nullptr };
+	const auto dense = Clustering::AssignLights(tightGrid, scene.Rows, scene.Header);
+	SWIM_REQUIRE(dense.Stats.OverflowClusters > 0u);
+	SWIM_CHECK_EQUAL(dense.Stats.DroppedIndices, 0u);
+	Fp::LightingInputs complete{ scene.Rows, scene.Header, &tightGrid, dense.Records, dense.Indices, nullptr };
 	for (int i = 0; i < 200; ++i)
 	{
 		const float px = unit(random) * 640.0f;
 		const float py = unit(random) * 360.0f;
 		const auto position = Scene::ViewToWorld(tightGrid, Scene::ViewPoint(tightGrid, px, py, 1.0f + 30.0f * unit(random)));
 		const auto surface = RandomSurface(random);
-		const auto some = Fp::Shade(partial, unlit, surface, position, px, py);
+		const auto some = Fp::Shade(complete, unlit, surface, position, px, py);
 		const auto all = Fp::Shade(brute, unlit, surface, position, px, py);
 		for (int c = 0; c < 3; ++c)
 		{
-			SWIM_CHECK(some[c] <= all[c] * (1.0f + 1.0e-5f) + 1.0e-6f);
+			SWIM_CHECK(std::abs(some[c] - all[c]) <= 1.0e-5f + 1.0e-4f * std::abs(all[c]));
 		}
 	}
 }
@@ -362,7 +364,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "DebugHeatmapAndPremultipliedBlending"
 	gridDesc.SliceCount = 8;
 	gridDesc.Far = 50.0f;
 	gridDesc.MaxLightsPerCluster = 6;
-	gridDesc.IndexCapacity = 1u << 16;
+	gridDesc.LightCapacity = 1024;
 	const auto grid = MakeClusterGridRecord(gridDesc, Scene::Camera(16.0f / 9.0f));
 	const auto assignment = Clustering::AssignLights(grid, scene.Rows, scene.Header);
 	std::uint32_t black = 0, magenta = 0, ramp = 0;
@@ -384,8 +386,9 @@ SWIM_TEST("Render.ForwardPlus.Reference", "DebugHeatmapAndPremultipliedBlending"
 				else
 				{
 					SWIM_CHECK(color == heat);
-					magenta += record.Count < record.RawCount ? 1u : 0u;
-					ramp += record.Count == record.RawCount ? 1u : 0u;
+					magenta += record.Count >= gridDesc.MaxLightsPerCluster ? 1u : 0u; // Saturated (red): above the scale, never truncated.
+					ramp += record.Count < gridDesc.MaxLightsPerCluster ? 1u : 0u;
+					SWIM_CHECK_EQUAL(record.Count, record.RawCount);
 				}
 			}
 		}

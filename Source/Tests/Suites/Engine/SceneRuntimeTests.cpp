@@ -497,3 +497,38 @@ SWIM_TEST("Engine.SceneRuntime", "PhysicsBodiesFallCollideAndCanBeRaycast")
 	SWIM_REQUIRE(engine.Tick(10));
 	SWIM_CHECK_EQUAL(scene.GetPhysicsStepCount(), steps);
 }
+
+// Collider sizes are mesh-local and follow Transform scale (a unit sphere mesh at scale 0.4
+// rests with its centre 0.2 m above the floor), and an initial velocity set after the
+// Rigidbody component was added (which creates the body at once) still launches it.
+SWIM_TEST("Engine.SceneRuntime", "ScaledCollidersRestOnTheirSurfaceAndInitialVelocityLaunches")
+{
+	ProbeLog log;
+	Swim::Tests::HeadlessEngine engine(
+		[&log](Engine::SceneSystem& scenes)
+		{
+			RegisterProbeScenes(scenes, log);
+		});
+	SWIM_REQUIRE(engine.Started());
+	auto& scene = engine.Scene();
+
+	const entt::entity floor = scene.CreateEntity("Floor");
+	scene.AddComponent<Engine::Transform>(floor, Engine::Transform({ 0, -0.5f, 0 }, glm::vec3(40.0f, 1.0f, 40.0f)));
+	Game::AddBoxBody(scene, floor, Engine::RigidbodyType::Static, glm::vec3(0.5f));
+
+	const entt::entity resting = scene.CreateEntity("Resting");
+	scene.AddComponent<Engine::Transform>(resting, Engine::Transform({ -3.0f, 1.0f, 0 }, glm::vec3(0.4f)));
+	Game::AddSphereBody(scene, resting, Engine::RigidbodyType::Dynamic, 0.5f, 1.0f);
+
+	const entt::entity fired = scene.CreateEntity("Fired");
+	scene.AddComponent<Engine::Transform>(fired, Engine::Transform({ 3.0f, 1.0f, 0 }, glm::vec3(0.4f)));
+	Game::AddSphereBody(scene, fired, Engine::RigidbodyType::Dynamic, 0.5f, 1.0f);
+	scene.GetRegistry().get<Engine::Rigidbody>(fired).SetInitialLinearVelocity({ 0.0f, 0.0f, 12.0f });
+
+	SWIM_REQUIRE(engine.Tick(20));
+	const glm::vec3 flight = scene.GetRegistry().get<Engine::Transform>(fired).GetPosition();
+	SWIM_CHECK(flight.z > 2.0f);
+	SWIM_REQUIRE(engine.Tick(100));
+	const float y = scene.GetRegistry().get<Engine::Transform>(resting).GetPosition().y;
+	SWIM_CHECK_NEAR(y, 0.2f, 0.03f);
+}

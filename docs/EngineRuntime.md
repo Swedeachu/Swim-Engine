@@ -70,8 +70,9 @@ This page describes the assembled Swim Engine runtime: what `Swim Engine` constr
   - GPU visibility (frustum and LOD culling, binning, compaction, indirect commands);
   - light clusters;
   - opaque and transparent clustered Forward+ with IBL and shadow sampling.
-- **Effects:** GPU particles (simulate and draw), screen-space GTAO, SSR and height fog, then TAA.
-- **Post:** auto exposure, bloom, grading and tone mapping into an RGBA8 output.
+- **Effects:** GPU particles (simulate and draw), screen-space GTAO, SSR and height fog, then render features at `BeforeTemporal` (for example volumetric clouds), then TAA.
+- **Render features** at `BeforePostProcess` (sun shafts, lens flare), see [Render features](RenderFeatures.md).
+- **Post:** auto exposure, bloom, grading and tone mapping into an RGBA8 output, then render features at `AfterPostProcess`.
 - **UI:** `UiRenderer` draws each canvas. World canvases are depth-tested and fade with distance.
 - **Output:** a present pass onto the swapchain, or an export when headless. An optional capture readback writes a binary PPM.
 
@@ -86,9 +87,17 @@ Scenes feed the renderer through components that the `SceneRenderBridge` reads:
 | `UiCanvas` | A UI document as a screen overlay, world panel or billboard |
 | `CameraComponent` | Drives the main camera from an entity |
 
-`MeshLibrary` publishes procedural meshes as assets and streams them through `AssetResidencyService`. Its built-ins are box, plane, sphere, cylinder, cone, torus and capsule, plus skinned columns. `MaterialLibrary` builds GPU material table entries from `MaterialDesc`. `ShaderLibrary` loads the runtime shader set: 36 programs, compiled from Slang at build time into `Shaders/Runtime` next to the executable (`SWIM_SHADER_DIR` overrides the location).
+`MeshLibrary` publishes procedural meshes as assets and streams them through `AssetResidencyService`. Its built-ins are box, plane, sphere, cylinder, cone, torus and capsule, plus skinned columns. `MaterialLibrary` builds GPU material table entries from `MaterialDesc`. `ShaderLibrary` loads the runtime shader set: 38 core programs plus the render-feature programs added with `swim_add_runtime_shader`, compiled from Slang at build time into `Shaders/Runtime` next to the executable (`SWIM_SHADER_DIR` overrides the location). Compute programs expose their descriptors by Slang parameter name, which is what `RenderFeatureContext::Compute` binds.
+
+**Frame pacing.** `BeginFrame` no longer waits for the GPU: the previous frame keeps executing while the engine runs UI, gameplay, physics and render extraction for the next one, and `Render` waits for it right before acquiring and recording. One submission is still in flight at a time (the executor's contract); see [Performance analysis](PerformanceAnalysis.md) for the next step.
 
 The indirect draw path uses `DrawIndexedIndirectCount` when the device supports it. It falls back to zero-filled `DrawIndexedIndirect` on SwiftShader (vendor 0x1AE0), with `SWIM_FORCE_INDIRECT_FALLBACK=1`, or with `FrameRendererDesc::ForceIndirectFallback`.
+
+## Assets
+
+Development builds read loose assets from the repository's `Assets/` folder directly: CMake bakes its path into the engine (`SWIM_DEVELOPMENT_ASSET_ROOT`), the engine cooks new or changed `.gltf`/`.glb` sources on startup into `Assets/Cooked/` next to them, and `SwimAssetCooker` (and `scripts/recook-sassets.*`) cooks the same folder. There is one cooked cache and nothing is copied next to the executable. `--assets=<dir>` overrides the root; `-DSWIM_DEPLOY_ASSETS=ON` copies `Assets/` next to the executable after each build for packaged runs (the engine then reads `<exe dir>/Assets`).
+
+A cooked model is current when its compiler-profile hash and its source-file hashes match; otherwise it is re-cooked. Cook and load errors are printed as `[Assets] [stage] <file>: <message>`, and the sandbox lists the cooked models it found when no Sponza is among them.
 
 ## Running
 
@@ -98,7 +107,8 @@ Swim Engine [options]
   --physics=auto|physx|jolt           Physics backend
   --state=playing|paused|stopped      Initial engine state
   --scene=<name>                      Startup scene
-  --size=<W>x<H>, --vsync=on|off      Window
+  --assets=<dir>                      Loose-asset root (default: the repository's Assets/)
+  --size=<W>x<H>, --vsync=on|off      Window (vsync is off by default)
   --validation[=on|off]               GPU validation layers (on by default in Debug)
   --fixed-rate=<hz>, --time-scale=<x> Simulation clock
   --headless                          Render offscreen without a window
@@ -129,8 +139,10 @@ The sandbox adds these commands:
 | `sandbox.fire` | Fire a ball from the camera |
 | `sandbox.view <0-6>` | Jump to a camera bookmark |
 | `sandbox.sun <elevation> <azimuth>` | Move the sun |
-| `sandbox.tab <0-3>` | Select a panel tab |
-| `sandbox.hud 0\|1` | Hide or show all sandbox UI: the HUD and every world panel and label (what F1 toggles) |
+| `sandbox.tab <0-2>` | Select a panel tab |
+| `sandbox.clouds <coverage>` | Volumetric cloud coverage 0..1 (0 turns the feature off) |
+| `sandbox.sunfx 0\|1` | Sun shafts and lens flare off or on |
+| `sandbox.hud 0\|1` | Hide or show all sandbox UI: the HUD and every world panel and label (what C toggles) |
 
 Example: a deterministic 1280x720 offscreen capture of the physics playground:
 
@@ -158,13 +170,15 @@ Example: a deterministic 1280x720 offscreen capture of the physics playground:
   - *Simulation:* play/pause/step/stop, time scale, camera bookmarks, physics actions, reset with a confirmation modal.
   - *Rendering:* every renderer switch, tone mapper, exposure, bloom, grading, sun, environment, debug view.
   - *Scene:* a filtered, virtualised entity list with details, focus and delete, and a spawn menu.
-  - *Findings:* the list below, with details.
 
   The panel uses every widget kind: buttons, toggles, checkboxes, sliders with editable values, a radio group, dropdowns, a text field, a list view, a virtual list, a scroll area, a menu, tooltips and a modal.
-- **Diagnostics overlay** (F3): frame and GPU times, the costliest passes, scene counts (objects, lights, shadow views, emitters, skinned instances, entities) and residency.
-- **Sponza and the light swarm:** behind the playgrounds (centered at z = −52, scaled to 30 m long) stands the Crytek Sponza, imported from the cooked model by `Game::SpawnCookedModel` (`Source/Game/ModelImport.*`). The GPU scene draws one material per object, so the importer regroups the model's 103 primitives by material (25 meshes, node transforms baked in, vertices compacted, tangents generated when missing) and builds the materials from the cooked material instances (factors, alpha mask, double-sidedness, all five texture slots). The importer prefers the Khronos glTF Sponza (`Assets/Models/Sponza/glTF/`, PNG/JPEG textures the cooker decodes) over KTX2/Basis variants, whose supercompressed textures the runtime cannot upload yet. Inside the atrium, 256 coloured point lights with glowing orbs roam randomly: one `LightSwarm` behaviour steers each toward a random target inside the atrium box at its own speed (simulation time, so they freeze while paused). Without a cooked Sponza (or without a renderer) the swarm still runs in the same box.
+- **Diagnostics overlay** (X): frame and GPU times, the costliest passes, scene counts (objects, lights, shadow views, emitters, skinned instances, entities) and residency.
+- **Sponza and the light swarm:** behind the playgrounds (centered at z = −52, scaled to 30 m long) stands the Crytek Sponza, imported from the cooked model by `Game::SpawnCookedModel` (`Source/Game/ModelImport.*`). The GPU scene draws one material per object, so the importer regroups the model's 103 primitives by material (25 meshes, node transforms baked in, vertices compacted, tangents generated when missing) and builds the materials from the cooked material instances (factors, alpha mask, double-sidedness, all five texture slots). `Game::FindSponzaModel` picks `Assets/Models/Sponza/sponza-ktx-draco.glb` (Draco-compressed meshes, KTX2/Basis ETC1S textures, about 9 MB), then `sponza-ktx.glb`, then a glTF Sponza. The cooker decodes the Draco meshes and transcodes the Basis textures into RGBA8 mip chains on first start (`CompileKtx2Texture`), so the runtime needs neither codec. Inside the atrium, 256 coloured point lights with glowing orbs roam randomly: one `LightSwarm` behaviour steers each toward a random target inside the atrium box at its own speed (simulation time, so they freeze while paused). Without a cooked Sponza (or without a renderer) the swarm still runs in the same box.
   ![The Sponza atrium with the light swarm (SwiftShader, 640×360)](validation/images/Sponza-atrium.jpg) ![From above](validation/images/Sponza-above.jpg)
-- **Shortcuts** (when the UI does not own the keyboard): F1 all UI on/off (panel, diagnostics, help bar, world panels and labels), F2 the control panel only, F3 the diagnostics only, P pause/resume, N step, 1–7 views, LMB/F fire.
+- **Shortcuts** (when the UI does not own the keyboard): C all UI on/off (panel, diagnostics, help bar, world panels and labels), V the control panel only, X the diagnostics only, P pause/resume, N step, 1–7 views, F fire (hold to repeat) along the camera's view direction. The mouse never fires: the left button belongs to the UI, the right one to the fly camera.
+- **Look:** a tropical afternoon (`Sandbox::ApplyTropicalLook`): a saturated blue zenith, a bright cyan horizon and a turquoise "sea" below the horizon (no grey or brown band anywhere), a tight golden sun, the hue-preserving PBR Neutral tone mapper with a little warmth, contrast and saturation, and a thin blue sea-air haze.
+- **Atmosphere** (`Sandbox::AddAtmosphereFeatures`, render features): volumetric trade-wind cumulus (coverage 0.38, 420–1250 m, drifting with the wind), sun shafts and a lens flare. The Rendering tab toggles each and sets cloud coverage and shaft/flare intensity; `sandbox.clouds` and `sandbox.sunfx` do the same from the command line.
+- **Colliders** are sized in the entity's local space and follow its Transform scale, like the mesh (`AddSphereBody` radius 0.5 and `AddBoxBody` half extents 0.5 for the unit builtin meshes).
 
 ## Tests
 
@@ -174,7 +188,7 @@ The Phase 22 and 23 tests are in `Source/Tests/Suites/Engine` and `Source/Tests/
 | --- | --- |
 | `Engine.StateMachine` | Transitions, rejected transitions, listener order and unsubscribe, names |
 | `Engine.SimulationClock` | Accumulation, time scale, pause and single steps, the spiral guard, per-domain participation |
-| `Engine.SceneRuntime` | A real headless engine (`--no-render`) with probe behaviours: lifecycle order, pause and step, time scale versus real-time behaviours, Stop reset and Play, initial states, deferred scene switches, the tag index and names, the command buffer, and physics collisions, raycasts and pause |
+| `Engine.SceneRuntime` | A real headless engine (`--no-render`) with probe behaviours: lifecycle order, pause and step, time scale versus real-time behaviours, Stop reset and Play, initial states, deferred scene switches, the tag index and names, the command buffer, physics collisions, raycasts and pause, and scaled colliders resting on their surface plus initial velocities applied after the body exists |
 | `Engine.UiRuntime` | Bundled fonts, draw-list order (world canvases, then screen canvases by order), hidden canvases, canvases following the scene |
 | `Engine.Camera`, `Engine.FlyCamera` | Reverse-Z projection equal to the renderer's, view conventions, look, move, boost, wheel limits |
 | `Engine.ProceduralMeshes` | Winding versus normals, tangent space, bounds and counts, mesh asset layout, skinned column weights |
@@ -186,7 +200,7 @@ The GPU path is checked by headless captures. See [the Phase 22/23 validation re
 
 ## Findings
 
-The same list appears in the sandbox's Findings tab (`Source/Game/Findings.cpp`). Keep the two in sync.
+The list is kept in `Source/Game/Findings.cpp` (checked by `Game.Findings`) and copied here by `scripts/sync-findings-doc.py`. The sandbox no longer shows it in a tab.
 
 <!-- findings:begin -->
 
@@ -209,14 +223,21 @@ The same list appears in the sandbox's Findings tab (`Source/Game/Findings.cpp`)
 | Fixed | UI bindings reported initial values as changes | The HUD's value/checked/text watchers fired once on their first poll, which snapped the camera back to the first bookmark after a startup --exec. The first poll now only records the initial state. |
 | Fixed | MSVC rejected a default-initialized initializer_list member | MeshSpawn::Tags was a std::initializer_list with a {} default member initializer: MSVC stops with C2797 (and the list would dangle after the braced initializer anyway). It is a std::vector now. |
 | Workaround | One material per GPU scene object | Instances carry a single material set and the submesh material slot is not used by visibility or Forward+. Cooked models are regrouped by material at import (Sponza: 103 primitives become 25 meshes); per-submesh materials in the GPU scene would remove the regrouping. |
-| Open | KTX2/Basis textures cannot be uploaded | TextureResidency uploads uncompressed native mip chains only; supercompressed KTX2 (BasisLZ/UASTC) payloads need a transcoder (retired with the legacy renderer) or BC encoding in the cooker. Such textures fall back to white. |
+| Workaround | KTX2/Basis textures could not be uploaded | TextureResidency uploads uncompressed native mip chains only, so KHR_texture_basisu textures fell back to white. The cooker now transcodes Basis Universal KTX2 (ETC1S/BasisLZ and UASTC) into RGBA8 mip chains with the Basis transcoder (compiler-only; the runtime links none), and the sandbox loads the Draco + KTX2 Sponza GLB. Keeping the textures block-compressed (BC7) on the GPU needs block-aware uploads in the RHI and residency. |
 | Fixed | PhysX contacts of destroyed bodies crashed the step | After a body is destroyed, PhysX still reports its lost-touch pairs with the released actor flagged as removed; resolving that actor (a virtual call) was an access violation once the sandbox's balls expired. Removed actors and shapes are skipped now, and the shared physics contract destroys a resting body to cover it. |
 | Fixed | Swapchain rebuild before the first frame | Windows can request a resize before anything was submitted; the RHI requires a same-device retirement timeline for swapchain replacement and the frame failed. RenderDevice now passes an already-signalled timeline then. |
-| Open | Colliders ignore Transform scale | Rigidbody collider sizes are in world units and do not follow the entity's scale; the sandbox sizes every collider to its mesh explicitly. |
+| Fixed | Sandbox colliders were scaled twice | The physics bridge multiplies collider sizes by the Transform's world scale, but the sandbox passed world-unit sizes to scaled entities: balls rested half sunk into the floor, stacked boxes overlapped and the ramp collider was nearly flat. Collider sizes are now mesh-local (radius 0.5, half extents 0.5 for the unit meshes) and a test pins a scaled sphere resting exactly on the floor. |
+| Fixed | Fired balls dropped straight down | Adding the Rigidbody component creates the physics body at once, so SetInitialLinearVelocity called afterwards (the order BallShooter and ball rain use) was never applied. The bridge now applies pending initial velocities to existing bodies before the next step. |
+| Fixed | Unlit screen tiles among many lights | Cluster light lists were capped at MaxLightsPerCluster and the rest dropped in index order, so over a dense swarm (especially seen from afar, where one cluster covers many lights) neighbouring clusters kept different subsets and showed as square, darker tiles (an overflowing 2^20 index pool made it worse). Clusters now keep a bitmask over every local light plus occupancy words: nothing is ever truncated, memory is bounded by clusters x lights / 8 bytes, and MaxLightsPerCluster is only the heatmap scale. |
+| Fixed | Jagged shadows and cascade pops | Shadows compared a point-sampled 3x3 texel box (stair-stepped edges) and switched cascades abruptly. Sampling is now bilinear-weighted PCF (the box slides continuously over the texels), cascades cross-fade over the far 20 % of their range and the last one fades out, and cascades are 2048 texels over 70 m. |
+| Fixed | Forward+ shaded hidden surfaces | The opaque pass rasterised both faces and discarded back faces in the shader, which disabled early depth testing, so every overlapping surface ran the full clustered lighting loop. A depth prepass now lays down the nearest depth and the shading pass tests it with early fragment tests and no depth writes, so each pixel is lit once. |
+| Fixed | Development assets were copied next to the executable | Every engine build copied Assets/ beside the executable and the engine cooked into that copy, while the build scripts and SwimAssetCooker cooked the repository's Assets/Cooked: two caches, copies that only refreshed when the engine relinked, and deleted sources that lingered in the copy. Development builds now read and cook the repository's Assets/ directly (SWIM_DEVELOPMENT_ASSET_ROOT, --assets overrides it), cook/load errors and the cooked models found are logged, and SWIM_DEPLOY_ASSETS copies assets only for packaged runs. |
+| Workaround | CPU and GPU frames ran back to back | FrameRenderer::BeginFrame waited for the previous frame before gameplay, physics and extraction ran, so a frame took about CPU + GPU time. The wait now happens right before the next frame is recorded, overlapping the game update with GPU work; recording is still serialized with the GPU (one submission in flight per executor). Two executors used alternately are the next step (docs/PerformanceAnalysis.md). |
+| Open | Cooked asset validation is slow in Debug | Every start re-hashes every cooked .sasset to decide whether it is current; in Debug builds that takes minutes for Sponza's RGBA8 textures. Recording file sizes and times beside the hashes would skip unchanged files. |
 | Open | Render surfaces are not mirrored yet | UiCanvas supports screen overlays, world panels and billboards; RenderSurface canvases (UI rendered into a texture sampled by a material) exist in the UI renderer but the runtime does not route them yet. |
 | Open | Occlusion culling is not enabled | The runtime uses single-phase GPU frustum culling; the two-phase HZB occlusion path (HzbBuilder) is built and tested but not wired into the frame yet. |
 | Open | Only validated on SwiftShader so far | The assembled runtime was built and captured on Linux with SwiftShader (no validation layer available there, about 3.5 s per frame). The four validation profiles, the RTX 4070 run and the 1080p pass budgets are still to be recorded. |
-| Open | No HDR output toggle or device-loss recovery | The swapchain is SDR (BGRA8, vsync). The post stack can tone map to HDR10/scRGB and the RHI supports HDR swapchains, but the runtime neither offers the toggle nor recreates the device after a loss. |
+| Open | No HDR output toggle or device-loss recovery | The swapchain is SDR (BGRA8; vsync off by default, --vsync=on for FIFO). The post stack can tone map to HDR10/scRGB and the RHI supports HDR swapchains, but the runtime neither offers the toggle nor recreates the device after a loss. |
 | Open | Physics backend and gravity are fixed at startup | --physics selects PhysX or Jolt at launch; switching from the panel would rebuild every body, and PhysicsWorld has no runtime gravity setter yet. |
 | Open | Playground extras not built | No domino run, trigger volumes or per-body inspector yet; the entity browser shows names, tags and transforms. Entity context menus and camera bookmarks beyond the five presets are also missing. |
 | Open | Shadow and debug-view controls are partial | The panel toggles shadows and shows the cluster heat map; cascade count, resolution, bias and cascade debug views, wireframe and overdraw views are not exposed. |

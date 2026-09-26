@@ -20,24 +20,24 @@ namespace Swim::Render
 	{
 		ClusterProgram Cull;	// ClusterLightCull.slang
 		ClusterProgram Bounds;	// ClusterBounds.slang
-		ClusterProgram Assign;	// ClusterAssign.slang (count and write modes)
-		ClusterProgram Scan;	// ClusterScan.slang
+		ClusterProgram Assign;	// ClusterAssign.slang (bitmask words)
+		ClusterProgram Scan;	// ClusterScan.slang (per-cluster summary)
 		ClusterProgram Heatmap; // ClusterHeatmap.slang; optional (RecordHeatmap throws without it).
 		std::string DebugName = "Clustered lights";
 	};
 
 	// GPU clustered light assignment (critical-path items 64, 65 and 68). Per frame
-	// and view, Record schedules five compute passes over a GpuLightBuffer import:
+	// and view, Record schedules four compute passes over a GpuLightBuffer import:
 	//   1. cull: each local light's bounding sphere to view space, culled against
 	//      the clustered volume;
 	//   2. bounds: each cluster's view-space AABB (ClusterGrid tiles x log slices);
-	//   3. count: per cluster, the lights whose spheres touch it, capped at
-	//      MaxLightsPerCluster (the raw count is kept for overflow diagnostics);
-	//   4. scan: one group prefix-sums the counts into compact offsets, clamps them
-	//      to IndexCapacity and writes ClusterStats;
-	//   5. write: per cluster, the first Count light indices in index order.
+	//   3. masks: per (cluster, 32-light word), the bitmask of lights whose spheres
+	//      touch the cluster (never truncated, so any number of lights up to the
+	//      grid's LightCapacity stays exact: no dropped lights, no tile seams);
+	//   4. summary: per cluster, the occupancy words (which mask words hold lights),
+	//      the record (block offset, light count) and ClusterStats.
 	// Every pass is deterministic, so Clustering::AssignLights reproduces the result
-	// exactly. Directional lights stay outside cluster lists; shaders loop them
+	// exactly. Directional lights stay outside the clusters; shaders loop them
 	// separately (ClusteredLighting.slang).
 	class ClusteredLightAssigner
 	{

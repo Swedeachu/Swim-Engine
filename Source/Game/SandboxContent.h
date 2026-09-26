@@ -39,7 +39,10 @@ namespace Game
 	// iterating the registry).
 	entt::entity SpawnMesh(Engine::Scene& scene, const MeshSpawn& spawn);
 
-	// Physics bodies sized in world units (the collider does not follow Transform scale).
+	// Physics bodies sized in the entity's local (unscaled) space: the physics bridge
+	// multiplies them by the Transform's world scale, exactly like the mesh. For the unit
+	// builtin meshes that means radius 0.5 (sphere) and half extents 0.5 (cube) whatever
+	// the scale, so the collider always matches what is drawn.
 	void AddBoxBody(Engine::Scene& scene, entt::entity entity, Engine::RigidbodyType type, const glm::vec3& halfExtents, float mass = 1.0f);
 	void AddSphereBody(Engine::Scene& scene, entt::entity entity, Engine::RigidbodyType type, float radius, float mass = 1.0f);
 	void AddCapsuleBody(

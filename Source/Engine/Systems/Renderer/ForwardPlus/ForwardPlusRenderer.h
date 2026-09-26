@@ -35,6 +35,13 @@ namespace Swim::Render
 	{
 		ForwardPlusProgram Opaque;
 		ForwardPlusProgram Transparent;
+		// Optional depth prepass (both or neither): DepthPrepass is SwimForwardDepth with
+		// DepthPrepassPipelineDesc, OpaquePrepassed is SwimForwardOpaquePrepassed with
+		// PrepassedPipelineDesc. With them the opaque bin is drawn twice: depth only, then
+		// shaded with early depth tests and no depth writes, so every pixel runs the
+		// lighting loop once instead of once per overlapping surface. Opaque is unused then.
+		ForwardPlusProgram DepthPrepass;
+		ForwardPlusProgram OpaquePrepassed;
 		Rhi::ComputePipeline* SortPipeline = nullptr; // ForwardTransparentSort.slang.
 		Rhi::PipelineLayout* SortLayout = nullptr;
 		// IndirectCount needs GraphicsCapabilities::IndirectCount; ZeroFilledIndirect
@@ -109,6 +116,7 @@ namespace Swim::Render
 	};
 
 	// Clustered Forward+ (critical-path items 66 and 67). Per view, Record schedules:
+	//  0. (optional) depth prepass of the Opaque bin, see ForwardPlusRendererDesc;
 	//  1. opaque: every Opaque-bin draw of every page slot, GPU-driven from the
 	//     visibility commands, shaded by ClusteredForward.slang (StandardPbr resolve,
 	//     directional + clustered local lights, ambient, IBL, emission), writing
@@ -141,6 +149,13 @@ namespace Swim::Render
 		// writes color, indirect, reflectance and specular, premultiplied One /
 		// OneMinusSourceAlpha, and never writes depth.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(ForwardPlusBin bin, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		// Depth prepass: no color targets, depth test + write (canonical reverse-Z compare).
+		static Rhi::GraphicsPipelineDesc DepthPrepassPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		// Opaque shading after the prepass: the Opaque state without depth writes (the
+		// GreaterEqual compare passes exactly the prepass's nearest surface).
+		static Rhi::GraphicsPipelineDesc PrepassedPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
+		bool UsesDepthPrepass() const { return desc.DepthPrepass.Pipeline != nullptr; }
 
 		// Draw capacities for GpuVisibilityDesc::MaterialBinCapacities.
 		static std::vector<std::uint32_t> VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t transparent);

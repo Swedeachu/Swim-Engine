@@ -22,11 +22,14 @@ namespace Swim::Render
 		std::uint32_t Kind = 0; // ShadowKind.
 		std::uint32_t FirstView = 0;
 		std::uint32_t ViewCount = 0;
-		std::uint32_t PcfRadius = 1; // (2R + 1)^2 texel comparisons.
+		std::uint32_t PcfRadius = 1; // 0: one texel; R >= 1: a (2R + 1)-texel box, bilinearly weighted ((2R + 2)^2 taps).
 		float NormalBias = 1.0f;	 // Normal offset in shadow texels.
 		float SlopeBias = 1.0f;		 // Extra texels of normal offset at grazing light (1 - N.L).
 		float DepthBias = 0.0f;		 // Added to the receiver's shadow-map depth (reverse-Z: toward the light).
-		float Reserved0 = 0.0f;
+		// Directional: the fraction of each cascade's depth range (at its far end) over which
+		// it blends into the next one; the last cascade fades to lit over the same fraction.
+		// 0 = hard cascade switches.
+		float CascadeBlend = 0.0f;
 		float CascadeFar[MaxShadowCascades] = {}; // Directional: camera view depth where cascade i ends.
 		float LightPosition[3] = {};			  // Point: the light (cube-face selection).
 		float Reserved1 = 0.0f;

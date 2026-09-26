@@ -36,7 +36,7 @@ namespace
 					{ 3, T::ReadOnlyStorageBuffer }, { 4, T::StorageBuffer }, { 5, T::StorageBuffer } });
 			schema(scanLayout,
 				{ { 0, T::ReadOnlyStorageBuffer }, { 1, T::ReadOnlyStorageBuffer }, { 2, T::ReadOnlyStorageBuffer },
-					{ 3, T::StorageBuffer }, { 4, T::StorageBuffer } });
+					{ 3, T::StorageBuffer }, { 4, T::StorageBuffer }, { 5, T::StorageBuffer } });
 			schema(heatmapLayout,
 				{ { 0, T::ReadOnlyStorageBuffer }, { 1, T::ReadOnlyStorageBuffer }, { 2, T::SampledTexture }, { 3, T::StorageTexture } });
 		}
@@ -83,12 +83,12 @@ namespace
 		desc.SliceCount = 12;
 		desc.Far = 50.0f;
 		desc.MaxLightsPerCluster = 16;
-		desc.IndexCapacity = 4096;
+		desc.LightCapacity = 64; // Two mask words and one occupancy word per cluster.
 		return desc;
 	}
 } // namespace
 
-SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsCountScanAndWritePasses")
+SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsMaskAndSummaryPasses")
 {
 	AssignerWorld world;
 	SWIM_CHECK_THROWS(ClusteredLightAssigner(ClusteredLightAssignerDesc{}), std::invalid_argument);
@@ -108,11 +108,11 @@ SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsCountScanAndWritePa
 	const auto lights = world.lights.Import(graph);
 	const auto view = Scene::Camera(1.5f);
 	const auto clusters = assigner.Record(graph, lights, GridDesc(), view);
-	SWIM_CHECK_EQUAL(clusters.Passes.size(), std::size_t(5));
+	SWIM_CHECK_EQUAL(clusters.Passes.size(), std::size_t(4));
 	SWIM_CHECK_EQUAL(clusters.Layout.ClusterCount, 10u * 7u * 12u);
 	SWIM_CHECK_EQUAL(clusters.LocalLightCapacity, 64u);
 	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.Records).Size, std::uint64_t(840) * 16);
-	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.Indices).Size, std::uint64_t(4096) * 4);
+	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.Indices).Size, std::uint64_t(840) * 3 * 4);
 	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.ViewLights).Size, std::uint64_t(64) * 16);
 	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.Bounds).Size, std::uint64_t(840) * 32);
 	SWIM_CHECK_EQUAL(graph.GetDesc(clusters.Stats).Size, std::uint64_t(sizeof(ClusterStats)));
@@ -124,21 +124,19 @@ SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsCountScanAndWritePa
 	world.fixture.executor->Wait();
 	world.lights.CommitUploads();
 
-	// Cull: one thread per local light; bounds, count and write: one per cluster; scan: one group.
+	// Cull: one thread per local light; bounds: one per cluster; masks: one per (cluster,
+	// mask word); summary: one per cluster.
 	const auto dispatches = world.Commands("Dispatch");
-	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(5));
+	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(4));
 	SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, 1u);  // 40 lights / 64.
 	SWIM_CHECK_EQUAL(dispatches[1].SourceOffset, 14u); // 840 clusters / 64.
-	SWIM_CHECK_EQUAL(dispatches[2].SourceOffset, 14u);
-	SWIM_CHECK_EQUAL(dispatches[3].SourceOffset, 1u);
-	SWIM_CHECK_EQUAL(dispatches[4].SourceOffset, 14u);
+	SWIM_CHECK_EQUAL(dispatches[2].SourceOffset, 27u); // 1680 mask words / 64.
+	SWIM_CHECK_EQUAL(dispatches[3].SourceOffset, 14u);
 	const auto constants = world.Commands("PushConstants");
-	SWIM_REQUIRE_EQUAL(constants.size(), std::size_t(2));
-	std::array<std::uint32_t, 4> mode{};
-	std::memcpy(mode.data(), constants[0].Data.data(), sizeof(mode));
-	SWIM_CHECK_EQUAL(mode[0], ClusterAssignBindings::CountMode);
-	std::memcpy(mode.data(), constants[1].Data.data(), sizeof(mode));
-	SWIM_CHECK_EQUAL(mode[0], ClusterAssignBindings::WriteMode);
+	SWIM_REQUIRE_EQUAL(constants.size(), std::size_t(1));
+	std::array<std::uint32_t, 4> rowThreads{};
+	std::memcpy(rowThreads.data(), constants[0].Data.data(), sizeof(rowThreads));
+	SWIM_CHECK_EQUAL(rowThreads[0], 27u * 64u);
 
 	// The grid record the passes read is MakeClusterGridRecord's.
 	const auto expected = MakeClusterGridRecord(GridDesc(), view);
@@ -150,6 +148,9 @@ SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsCountScanAndWritePa
 	auto badGrid = GridDesc();
 	badGrid.SliceCount = 0;
 	SWIM_CHECK_THROWS(assigner.Record(bad, badLights, badGrid, view), std::invalid_argument);
+	auto smallGrid = GridDesc();
+	smallGrid.LightCapacity = 32; // 40 local lights do not fit.
+	SWIM_CHECK_THROWS(assigner.Record(bad, badLights, smallGrid, view), std::invalid_argument);
 	world.lights.AbortUploads();
 }
 

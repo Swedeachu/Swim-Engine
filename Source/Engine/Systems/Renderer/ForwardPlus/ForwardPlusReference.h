@@ -96,7 +96,7 @@ namespace Swim::Render::ForwardPlus
 		GpuLightHeader Header{};
 		const ClusterGridRecord* Grid = nullptr;
 		std::span<const ClusterRecord> Records;
-		std::span<const std::uint32_t> Indices;
+		std::span<const std::uint32_t> Indices; // Cluster occupancy + bitmask words (Clustering::ClusterAssignment::Indices).
 		const Environment::EnvironmentProbe* Environment = nullptr; // Used when the view has ForwardViewFlagEnvironment.
 		const Shadows::ShadowSampleInputs* Shadows = nullptr;		// Used when the view has ForwardViewFlagShadows.
 		// Item 76: a BRDF LUT bound without an environment (ForwardViewFlagBrdfLut); the

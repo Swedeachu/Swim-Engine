@@ -215,6 +215,42 @@ else()
 	message(FATAL_ERROR "libwebp v1.5.0 did not provide a WebP decoder target")
 endif()
 
+# Basis Universal transcoder (compiler-only): the cooker transcodes KHR_texture_basisu
+# KTX2 images (ETC1S/BasisLZ and UASTC) into native mip chains, so the runtime never
+# links a transcoder. Only the transcoder translation unit is built; Zstandard-
+# supercompressed UASTC is not enabled (no zstd dependency).
+CPMAddPackage(
+	NAME swim_basis_universal_source
+	GITHUB_REPOSITORY BinomialLLC/basis_universal
+	GIT_TAG v1_60_snapshot_final
+	DOWNLOAD_ONLY YES
+	UPDATE_DISCONNECTED YES
+)
+if(NOT EXISTS "${swim_basis_universal_source_SOURCE_DIR}/transcoder/basisu_transcoder.cpp")
+	message(FATAL_ERROR "basis_universal v1_60_snapshot_final is missing transcoder/basisu_transcoder.cpp")
+endif()
+add_library(SwimAssetCompilerBasisTranscoder STATIC
+	"${swim_basis_universal_source_SOURCE_DIR}/transcoder/basisu_transcoder.cpp"
+)
+add_library(Swim::AssetCompilerBasisTranscoder ALIAS SwimAssetCompilerBasisTranscoder)
+target_include_directories(SwimAssetCompilerBasisTranscoder SYSTEM PUBLIC
+	"${swim_basis_universal_source_SOURCE_DIR}/transcoder"
+)
+target_compile_definitions(SwimAssetCompilerBasisTranscoder PUBLIC
+	BASISU_FORCE_DEVEL_MESSAGES=0
+	BASISD_SUPPORT_KTX2=1
+	BASISD_SUPPORT_KTX2_ZSTD=0
+	BASISD_SUPPORT_ETC1S=1
+	BASISD_SUPPORT_UASTC=1
+)
+target_compile_features(SwimAssetCompilerBasisTranscoder PRIVATE cxx_std_17)
+if(MSVC)
+	target_compile_options(SwimAssetCompilerBasisTranscoder PRIVATE /W0)
+else()
+	target_compile_options(SwimAssetCompilerBasisTranscoder PRIVATE -w)
+endif()
+swim_set_solution_folder(SwimAssetCompilerBasisTranscoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/Basis Universal")
+
 # One explicit private dependency bundle makes the compiler/runtime ownership
 # visible at the CMake target boundary. SwimAssetCompiler is the only first-party
 # production target that should consume this bundle; test fixtures may link an
@@ -226,6 +262,7 @@ target_link_libraries(SwimAssetCompilerDependencies INTERFACE
 	meshoptimizer
 	Swim::AssetCompilerDraco
 	SwimAssetCompilerStb
+	Swim::AssetCompilerBasisTranscoder
 	${SWIM_ASSET_COMPILER_WEBP_TARGET}
 )
 swim_set_solution_folder(SwimAssetCompilerDependencies "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler")

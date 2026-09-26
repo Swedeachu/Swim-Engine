@@ -151,13 +151,9 @@ The runtime should not need libwebp to consume that cooked texture.
 
 These are likewise authoring inputs decoded by compiler-side stb image code and converted into runtime texture payloads.
 
-## Basis/KTX2 is currently a deliberate exception
+## Basis/KTX2 is transcoded at cook time
 
-Basis Universal is still runtime-facing **only because the current cooked texture strategy may intentionally preserve universal KTX2/Basis payloads** and transcode them to a GPU-appropriate format at residency time.
-
-That is different from source importing.
-
-Longer term, platform-specific native texture variants can move that transcoding entirely into build/cook tooling, at which point Basis can disappear from the shipping runtime too.
+`CompileKtx2Texture` (Tools/AssetCompiler) transcodes Basis Universal KTX2 images (KHR_texture_basisu: ETC1S/BasisLZ and UASTC without Zstandard) with the Basis transcoder into an RGBA8 native mip chain, sRGB when the file's DFD transfer function is sRGB. The transcoder is a compiler-only dependency (`Swim::AssetCompilerBasisTranscoder`); the shipping runtime links no Basis code. Other KTX2 files keep their validated container bytes. Keeping textures block-compressed on the GPU (BC7 variants) is the next step and needs block-aware RHI copies.
 
 ---
 
@@ -303,7 +299,7 @@ load/publish root ModelAsset
 
 ## Step 9 — Asynchronous GPU residency (modern renderer path)
 
-The bootstrap above loads blocking and publishes everything. The modern renderer's `AssetResidencyService` instead streams individual cooked objects on demand: it resolves an `AssetId` to its cooked object, reads it with `AsyncIoService`, runs `Assets::DecodeSasset` (container parse, chunk/content hash validation and payload decode) on a job worker, publishes with `Assets::PublishSasset` on the `AssetSystem` owner thread, then stages the decoded mesh/texture into `GeometryHeap`/`TextureResidency` within a per-frame byte budget. The CPU asset is released once the GPU copy is staged unless the caller retains it. Material instances and models still use `LoadSasset` because decoding them resolves `AssetHandle`s. Textures currently need an uncompressed native-mip payload variant for this path; KTX2/Basis variants are rejected there until block-aware uploads/transcoding exist. See [GPU resource residency](GpuResidency.md).
+The bootstrap above loads blocking and publishes everything. The modern renderer's `AssetResidencyService` instead streams individual cooked objects on demand: it resolves an `AssetId` to its cooked object, reads it with `AsyncIoService`, runs `Assets::DecodeSasset` (container parse, chunk/content hash validation and payload decode) on a job worker, publishes with `Assets::PublishSasset` on the `AssetSystem` owner thread, then stages the decoded mesh/texture into `GeometryHeap`/`TextureResidency` within a per-frame byte budget. The CPU asset is released once the GPU copy is staged unless the caller retains it. Material instances and models still use `LoadSasset` because decoding them resolves `AssetHandle`s. Textures need an uncompressed native-mip payload variant for this path; the cooker produces one for Basis KTX2 sources, and other KTX2 variants are rejected until block-aware uploads exist. See [GPU resource residency](GpuResidency.md).
 
 ---
 

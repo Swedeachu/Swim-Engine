@@ -43,3 +43,9 @@ Phase 22 removed OpenGL and the editor. Phase 23 replaced the transitional rende
 | `Engine/Systems/Scene/Serialization/Scene*` | The retired scene-JSON, storage and editor-sync experiment. Durable entity identity remains active under `Source/Engine/Systems/Scene/Identity/`. |
 | `Engine/Systems/Scene/SceneSystemEditorCommands.*` | Fragments from the old `#if 0` editor-command blocks. They cannot be built on their own. |
 | `Shaders/README.md` | Notes on the pre-Slang HLSL/GLSL sources. |
+
+## Retired 2026-09-26
+
+| Archived | Replaced by / status |
+| --- | --- |
+| `Game/Ui/SandboxHudFindingsTab.cpp` (the sandbox panel's Findings tab) | The findings stay in `Source/Game/Findings.cpp` and [docs/EngineRuntime.md](../docs/EngineRuntime.md#findings) only; the panel has three tabs. |

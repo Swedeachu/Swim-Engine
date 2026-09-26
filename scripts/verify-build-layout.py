@@ -1958,7 +1958,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         "CompileSourceImageTexture",
         "StaticModelCompileErrorCode::Ktx2CompileFailed",
         "StaticModelCompileErrorCode::InvalidSourceData",
-        "texture=ktx2-or-rgba8-mips-v3",
+        "texture=ktx2-or-rgba8-mips-v4;basisu=1.60-rgba8",
     ):
         if fragment not in static_model_compiler_source_text:
             fail(f"static-model compiler does not route ordinary source images through cooked TextureAsset output: {fragment}", failures)

@@ -14,7 +14,6 @@
 #include "Engine/Systems/Scene/SceneCommandBuffer.h"
 #include "Engine/Systems/UI/UiTheme.h"
 #include "Game/Behaviors/BallShooter.h"
-#include "Game/Findings.h"
 #include "Game/Scenes/Sandbox.h"
 
 #include <algorithm>
@@ -28,8 +27,9 @@ namespace Game
 
 	namespace
 	{
-		constexpr UiColor PanelColor{ 0.035f, 0.04f, 0.055f, 0.96f };
-		constexpr UiColor PanelBorder{ 0.22f, 0.3f, 0.45f, 0.9f };
+		constexpr UiColor PanelColor{ 0.03f, 0.037f, 0.055f, 0.9f };
+		constexpr UiColor PanelBorder{ 0.2f, 0.45f, 0.95f, 0.45f };
+		constexpr UiColor AccentText{ 0.4f, 0.68f, 1.0f, 1.0f };
 
 		std::string Lower(std::string text)
 		{
@@ -177,10 +177,15 @@ namespace Game
 		panel = CreateStyledNode(*document, document->GetRoot(), style);
 
 		const auto titleRow = CreateRow(*document, panel, 8);
-		CreateLabel(*document, titleRow, ui.GetBoldFonts(), "Swim Engine", 22.0f);
+		const auto title = CreateLabel(*document, titleRow, ui.GetBoldFonts(), "Swim Engine", 22.0f);
+		{
+			auto titleStyle = document->GetStyle(title);
+			titleStyle.TextColor = AccentText;
+			document->SetStyle(title, titleStyle);
+		}
 		CreateLabel(*document, titleRow, ui.GetFonts(), "sandbox", 16.0f);
 
-		tabs = CreateRadioGroup(*document, panel, { "Simulation", "Rendering", "Scene", "Findings" }, 0, UiOrientation::Horizontal);
+		tabs = CreateRadioGroup(*document, panel, { "Simulation", "Rendering", "Scene" }, 0, UiOrientation::Horizontal);
 		bindings.OnValue(tabs,
 			[this](float value)
 			{
@@ -200,7 +205,6 @@ namespace Game
 		BuildSimulation(sections[0]);
 		BuildRendering(sections[1]);
 		BuildScene(sections[2]);
-		BuildFindings(sections[3]);
 		ShowSection(0);
 	}
 
@@ -360,11 +364,52 @@ namespace Game
 		AddCheckbox(parent, "Height fog", s.ScreenSpace.Fog.Enabled,
 			[&s](bool on)
 			{
-				s.ScreenSpace.Fog.Enabled = on;
-				s.ScreenSpace.Fog.Density = 0.035f;
-				s.ScreenSpace.Fog.HeightFalloff = 0.25f;
-				s.ScreenSpace.Fog.Color = { 0.35f, 0.42f, 0.55f };
+				s.ScreenSpace.Fog.Enabled = on; // Keeps the scene's own (tropical) fog settings.
 			});
+		// Render features added by the sandbox (Engine/Systems/Renderer/Features).
+		if (sandbox)
+		{
+			CreateHeading(*document, parent, "Atmosphere");
+			if (auto* clouds = sandbox->GetClouds())
+			{
+				AddCheckbox(parent, "Volumetric clouds", clouds->Enabled,
+					[clouds](bool on)
+					{
+						clouds->Enabled = on;
+					});
+				AddSlider(parent, "Cloud coverage", 0.0f, 1.0f, clouds->Settings.Coverage, 2,
+					[clouds](float value)
+					{
+						clouds->Settings.Coverage = value;
+					});
+			}
+			if (auto* shafts = sandbox->GetSunShafts())
+			{
+				AddCheckbox(parent, "Sun shafts (god rays)", shafts->Enabled,
+					[shafts](bool on)
+					{
+						shafts->Enabled = on;
+					});
+				AddSlider(parent, "Shaft intensity", 0.0f, 0.3f, shafts->Settings.Intensity, 3,
+					[shafts](float value)
+					{
+						shafts->Settings.Intensity = value;
+					});
+			}
+			if (auto* flare = sandbox->GetLensFlare())
+			{
+				AddCheckbox(parent, "Lens flare", flare->Enabled,
+					[flare](bool on)
+					{
+						flare->Enabled = on;
+					});
+				AddSlider(parent, "Flare intensity", 0.0f, 1.5f, flare->Settings.Intensity, 2,
+					[flare](float value)
+					{
+						flare->Settings.Intensity = value;
+					});
+			}
+		}
 		AddCheckbox(parent, "Bloom", s.Post.Bloom.Enabled,
 			[&s](bool on)
 			{
@@ -579,35 +624,6 @@ namespace Game
 		}
 	}
 
-	void SandboxHud::BuildFindings(UiNodeId parent)
-	{
-		CreateLabel(*document, parent, "What building the runtime found:");
-		std::vector<std::string> titles;
-		for (const auto& finding : GetFindings())
-		{
-			titles.push_back("[" + std::string(finding.Status) + "] " + std::string(finding.Title));
-		}
-		UiStyle listStyle;
-		listStyle.Width = UiLength::Percent(1.0f);
-		listStyle.Height = UiLength::Pixels(250.0f);
-		findingsList = CreateListView(*document, parent, listStyle, titles, 0);
-		findingDetails = CreateLabel(*document, parent, "-");
-		auto style = document->GetStyle(findingDetails);
-		style.TextWrap = Swim::Text::TextWrap::Word;
-		style.Width = UiLength::Percent(1.0f);
-		document->SetStyle(findingDetails, style);
-		bindings.OnValue(findingsList.Root,
-			[this](float value)
-			{
-				const auto findings = GetFindings();
-				const auto index = static_cast<std::int64_t>(value);
-				if (index >= 0 && static_cast<std::size_t>(index) < findings.size())
-				{
-					SetLabelText(*document, findingDetails, std::string(findings[static_cast<std::size_t>(index)].Detail));
-				}
-			});
-	}
-
 	void SandboxHud::BuildDiagnostics()
 	{
 		UiStyle style;
@@ -635,11 +651,13 @@ namespace Game
 		style.Pivot = { 0.5f, 1.0f };
 		style.Offset = { 0.0f, -10.0f };
 		style.Padding = { 12, 6, 12, 6 };
-		style.Background = { 0.0f, 0.0f, 0.0f, 0.55f };
-		style.CornerRadius = 6;
+		style.Background = { 0.03f, 0.037f, 0.055f, 0.78f };
+		style.BorderWidth = 1.0f;
+		style.BorderColor = PanelBorder;
+		style.CornerRadius = 8;
 		help = CreateStyledNode(*document, document->GetRoot(), style);
 		CreateLabel(*document, help, render->Ui->GetFonts(),
-			"RMB + WASD fly  |  1-7 views  |  LMB / F fire  |  P pause  |  N step  |  F1 all UI  |  F2 panel  |  F3 stats", 14.0f);
+			"RMB + WASD fly  |  1-7 views  |  F fire  |  P pause  |  N step  |  C all UI  |  V panel  |  X stats", 14.0f);
 	}
 
 	void SandboxHud::SetPanelVisible(UiNodeId node, bool visible)
@@ -664,18 +682,18 @@ namespace Game
 		{
 			Command("step");
 		}
-		// F1: every sandbox UI surface (panel, diagnostics, help bar, world panels and
-		// labels) on/off; F2: only the control panel.
-		if (input->IsKeyTriggered(KeyCode::F1) && sandbox)
+		// C: every sandbox UI surface (panel, diagnostics, help bar, world panels and
+		// labels) on/off; V: only the control panel; X: only the diagnostics.
+		if (input->IsKeyTriggered(KeyCode::C) && sandbox)
 		{
 			sandbox->SetHudVisible(!sandbox->IsHudVisible());
 		}
-		if (input->IsKeyTriggered(KeyCode::F2))
+		if (input->IsKeyTriggered(KeyCode::V))
 		{
 			panelVisible = !panelVisible;
 			SetPanelVisible(panel, panelVisible);
 		}
-		if (input->IsKeyTriggered(KeyCode::F3))
+		if (input->IsKeyTriggered(KeyCode::X))
 		{
 			diagnosticsVisible = !diagnosticsVisible;
 			SetPanelVisible(diagnostics, diagnosticsVisible);

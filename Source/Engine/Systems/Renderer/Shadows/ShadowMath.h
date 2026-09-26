@@ -32,8 +32,8 @@ namespace Swim::Render::Shadows
 	struct CascadeSettings
 	{
 		std::uint32_t Count = 3;	   // 1 .. MaxShadowCascades.
-		float MaxDistance = 60.0f;	   // Camera view depth covered by the last cascade.
-		float SplitLambda = 0.75f;	   // 0 = uniform splits, 1 = logarithmic.
+		float MaxDistance = 70.0f;	   // Camera view depth covered by the last cascade.
+		float SplitLambda = 0.8f;	   // 0 = uniform splits, 1 = logarithmic.
 		float CasterExtension = 50.0f; // Depth range added toward the light for off-screen casters.
 	};
 
@@ -112,11 +112,20 @@ namespace Swim::Render::Shadows
 	// point light's cube face.
 	std::optional<std::uint32_t> SelectShadowView(const GpuShadowRecord& record, const Float3& position, float cameraViewDepth);
 
+	// The filtered comparison of one view at an already offset point (1 = lit): PcfRadius
+	// 0 compares the one texel under it; R >= 1 slides a (2R + 1)-texel box continuously
+	// over the texel grid, comparing the (2R + 2)^2 texels it touches with the outer ring
+	// weighted by the covered fraction (bilinear PCF, no stair steps). Texels are clamped
+	// to the tile; lit where depth + DepthBias >= stored (reverse-Z). Points outside the
+	// view are lit.
+	float SampleShadowView(const ShadowAtlasImage& atlas, const GpuShadowRecord& record, const GpuShadowView& view, const Float3& shifted);
+
 	// Fraction of the light reaching `position` (1 = lit): the point is offset along
-	// the surface normal by (NormalBias + SlopeBias * (1 - N.L)) * max(PcfRadius, 1) shadow texels,
-	// projected into its view (selected again for the offset point, which can cross
-	// into another cube face), and compared with the (2 PcfRadius + 1)^2 texels around
-	// it, clamped to the tile: lit where depth + DepthBias >= stored (reverse-Z).
+	// the surface normal by (NormalBias + SlopeBias * (1 - N.L)) * (PcfRadius + 1) shadow
+	// texels and sampled with SampleShadowView. Spot and point lights select their view
+	// again for the offset point (which can cross into another cube face). Directional
+	// lights blend into the next cascade over the far CascadeBlend fraction of each
+	// cascade's depth range, and fade to lit at the end of the last one.
 	// Unknown or None records, points outside every view and missing atlases are lit.
 	float ShadowFactor(const ShadowSampleInputs& inputs, std::uint32_t shadowIndex, const Float3& position, const Float3& normal,
 		const Float3& toLight, float cameraViewDepth);

@@ -109,7 +109,7 @@ namespace Swim::Render::ForwardPlus
 	Float2 MotionVector(const ForwardViewRecord& view, const float (&current)[12], const float (&previous)[12], const Float3& local,
 		const Float3& previousLocal)
 	{
-		const auto project = [](const float (&m)[16], const Float3& p)
+		const auto project = [](const float(&m)[16], const Float3& p)
 		{
 			std::array<float, 4> clip{};
 			for (int r = 0; r < 4; ++r)
@@ -268,11 +268,12 @@ namespace Swim::Render::ForwardPlus
 		}
 		if (inputs.Grid)
 		{
-			const auto& record = inputs.Records[ClusterIndexFor(*inputs.Grid, pixelX, pixelY, ViewDepth(*inputs.Grid, position))];
-			for (std::uint32_t i = 0; i < record.Count; ++i)
-			{
-				add(inputs.Lights[inputs.Header.FirstLocalRow + inputs.Indices[record.Offset + i]]);
-			}
+			Clustering::ForEachClusterLight(*inputs.Grid, inputs.Records, inputs.Indices,
+				ClusterIndexFor(*inputs.Grid, pixelX, pixelY, ViewDepth(*inputs.Grid, position)),
+				[&](std::uint32_t index)
+				{
+					add(inputs.Lights[inputs.Header.FirstLocalRow + index]);
+				});
 		}
 		else
 		{

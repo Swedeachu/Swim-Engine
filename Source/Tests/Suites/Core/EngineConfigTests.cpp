@@ -19,7 +19,7 @@ namespace
 		return Engine::ParseEngineConfigArgs(static_cast<int>(argv.size()), argv.data());
 	}
 
-}
+} // namespace
 
 SWIM_TEST("Core.EngineConfig", "DefaultsWithoutArguments")
 {
@@ -29,7 +29,7 @@ SWIM_TEST("Core.EngineConfig", "DefaultsWithoutArguments")
 	SWIM_CHECK(result.Config.Physics == Engine::PhysicsBackend::Auto);
 	SWIM_CHECK(result.Config.InitialState == Engine::EngineState::Playing);
 	SWIM_CHECK(result.Config.Present == Engine::PresentMode::Window);
-	SWIM_CHECK(result.Config.VSync);
+	SWIM_CHECK(!result.Config.VSync); // Uncapped by default.
 	SWIM_CHECK_EQUAL(result.Config.MaxFrames, std::uint64_t{ 0 });
 	SWIM_CHECK(result.Config.CapturePath.empty());
 	SWIM_CHECK(result.Config.StartupScene.empty());
@@ -106,7 +106,8 @@ SWIM_TEST("Core.EngineConfig", "WindowAndPresentationOptions")
 
 SWIM_TEST("Core.EngineConfig", "AutomationOptions")
 {
-	const auto result = Parse({ "SwimEngine", "--frames=12", "--capture=out.ppm", "--fixed-delta=0.016", "--fixed-rate=120", "--time-scale=0.5" });
+	const auto result =
+		Parse({ "SwimEngine", "--frames=12", "--capture=out.ppm", "--fixed-delta=0.016", "--fixed-rate=120", "--time-scale=0.5" });
 	SWIM_REQUIRE(result.IsValid());
 	SWIM_CHECK_EQUAL(result.Config.MaxFrames, std::uint64_t{ 12 });
 	SWIM_CHECK(result.Config.CapturePath == "out.ppm");
@@ -135,4 +136,18 @@ SWIM_TEST("Core.EngineConfig", "UnknownArgumentsAndHelp")
 	SWIM_REQUIRE(help.IsValid());
 	SWIM_CHECK(help.Config.ShowHelp);
 	SWIM_CHECK(Engine::GetEngineConfigUsage().find("--headless") != std::string::npos);
+}
+
+SWIM_TEST("Core.EngineConfig", "AssetRootOption")
+{
+	const auto defaults = Parse({ "SwimEngine" });
+	SWIM_REQUIRE(defaults.IsValid());
+	SWIM_CHECK(defaults.Config.AssetRoot.empty()); // The repository's Assets/ (development) or <exe dir>/Assets.
+	const auto explicitRoot = Parse({ "SwimEngine", "--assets=D:/Game/Assets" });
+	SWIM_REQUIRE(explicitRoot.IsValid());
+	SWIM_CHECK_EQUAL(explicitRoot.Config.AssetRoot, std::string("D:/Game/Assets"));
+	const auto separate = Parse({ "SwimEngine", "--assets", "Content" });
+	SWIM_REQUIRE(separate.IsValid());
+	SWIM_CHECK_EQUAL(separate.Config.AssetRoot, std::string("Content"));
+	SWIM_CHECK(!Parse({ "SwimEngine", "--assets=" }).IsValid());
 }

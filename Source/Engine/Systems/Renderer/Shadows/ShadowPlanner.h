@@ -19,7 +19,10 @@ namespace Swim::Render
 		std::uint32_t MaxSlots = 64;	// GpuShadowRecord slots (GpuLightRecord::ShadowIndex range).
 
 		Shadows::CascadeSettings Cascades;
-		std::uint32_t CascadeResolution = 1024; // Per cascade tile.
+		std::uint32_t CascadeResolution = 2048; // Per cascade tile.
+		// GpuShadowRecord::CascadeBlend: the far fraction of each cascade's depth range that
+		// cross-fades into the next (and fades the last one out), hiding the seams.
+		float CascadeBlend = 0.2f;
 		std::uint32_t SpotResolution = 512;
 		std::uint32_t PointResolution = 256; // Per cube face.
 

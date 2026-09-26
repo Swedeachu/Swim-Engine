@@ -210,6 +210,58 @@ namespace Swim::Render::Shadows
 		}
 	}
 
+	float SampleShadowView(const ShadowAtlasImage& atlas, const GpuShadowRecord& record, const GpuShadowView& view, const Float3& shifted)
+	{
+		const auto projected = ProjectToShadowView(view, shifted);
+		if (!projected)
+		{
+			return 1.0f;
+		}
+		const int x0 = int(view.AtlasRect[0]);
+		const int y0 = int(view.AtlasRect[1]);
+		const int x1 = x0 + int(view.AtlasRect[2]) - 1;
+		const int y1 = y0 + int(view.AtlasRect[3]) - 1;
+		const float receiver = projected->Depth + record.DepthBias;
+		const int radius = int(record.PcfRadius);
+		if (radius == 0)
+		{
+			const auto tx = std::uint32_t(std::clamp(int(std::floor(projected->PixelX)), x0, x1));
+			const auto ty = std::uint32_t(std::clamp(int(std::floor(projected->PixelY)), y0, y1));
+			return receiver >= atlas.At(tx, ty) ? 1.0f : 0.0f;
+		}
+		const float ux = projected->PixelX - 0.5f;
+		const float uy = projected->PixelY - 0.5f;
+		const float bx = std::floor(ux);
+		const float by = std::floor(uy);
+		const float fx = ux - bx;
+		const float fy = uy - by;
+		float lit = 0.0f;
+		int hits = 0;
+		for (int dy = -radius; dy <= radius + 1; ++dy)
+		{
+			const float wy = dy == -radius ? 1.0f - fy : (dy == radius + 1 ? fy : 1.0f);
+			const auto ty = std::uint32_t(std::clamp(int(by) + dy, y0, y1));
+			for (int dx = -radius; dx <= radius + 1; ++dx)
+			{
+				const float wx = dx == -radius ? 1.0f - fx : (dx == radius + 1 ? fx : 1.0f);
+				const auto tx = std::uint32_t(std::clamp(int(bx) + dx, x0, x1));
+				if (receiver >= atlas.At(tx, ty))
+				{
+					lit += wx * wy;
+					++hits;
+				}
+			}
+		}
+		// Exactly 0 or 1 when every tap agrees (the weights need not sum to exactly 1 in float).
+		const int taps = (2 * radius + 2) * (2 * radius + 2);
+		if (hits == 0 || hits == taps)
+		{
+			return hits == 0 ? 0.0f : 1.0f;
+		}
+		const float width = float(2 * radius + 1);
+		return std::clamp(lit / (width * width), 0.0f, 1.0f);
+	}
+
 	float ShadowFactor(const ShadowSampleInputs& inputs, std::uint32_t shadowIndex, const Float3& position, const Float3& normal,
 		const Float3& toLight, float cameraViewDepth)
 	{
@@ -223,15 +275,40 @@ namespace Swim::Render::Shadows
 		{
 			return 1.0f;
 		}
+		const float nDotL = std::clamp(Dot(normal, toLight), 0.0f, 1.0f);
+		// Wider PCF kernels compare texels farther from the receiver: scale the offset.
+		const float bias = (record.NormalBias + record.SlopeBias * (1.0f - nDotL)) * float(record.PcfRadius + 1u);
+		const auto offsetBy = [&](float offset)
+		{
+			return Float3{ position[0] + normal[0] * offset, position[1] + normal[1] * offset, position[2] + normal[2] * offset };
+		};
+		if (static_cast<ShadowKind>(record.Kind) == ShadowKind::Directional)
+		{
+			const std::uint32_t cascade = *viewIndex - record.FirstView;
+			const float farDepth = record.CascadeFar[cascade];
+			const float nearDepth = cascade == 0 ? 0.0f : record.CascadeFar[cascade - 1];
+			const float band = record.CascadeBlend * (farDepth - nearDepth);
+			const float t = band > 0.0f ? std::clamp((cameraViewDepth - (farDepth - band)) / band, 0.0f, 1.0f) : 0.0f;
+			const auto& view = inputs.Views[*viewIndex];
+			const float lit = SampleShadowView(*inputs.Atlas, record, view, offsetBy(view.TexelWorldSize * bias));
+			if (t <= 0.0f)
+			{
+				return lit;
+			}
+			const std::uint32_t count = std::min(record.ViewCount, MaxShadowCascades);
+			float next = 1.0f;
+			if (cascade + 1 < count && *viewIndex + 1 < inputs.Views.size())
+			{
+				const auto& nextView = inputs.Views[*viewIndex + 1];
+				next = SampleShadowView(*inputs.Atlas, record, nextView, offsetBy(nextView.TexelWorldSize * bias));
+			}
+			return lit + (next - lit) * t;
+		}
 		const auto& view = inputs.Views[*viewIndex];
 		const Float3 fromLight{ position[0] - record.LightPosition[0], position[1] - record.LightPosition[1],
 			position[2] - record.LightPosition[2] };
 		const float distance = view.Perspective != 0 ? std::sqrt(Dot(fromLight, fromLight)) : 1.0f;
-		const float texel = view.TexelWorldSize * distance;
-		const float nDotL = std::clamp(Dot(normal, toLight), 0.0f, 1.0f);
-		// Wider PCF kernels compare texels farther from the receiver: scale the offset.
-		const float offset = texel * (record.NormalBias + record.SlopeBias * (1.0f - nDotL)) * float(std::max(record.PcfRadius, 1u));
-		const Float3 shifted{ position[0] + normal[0] * offset, position[1] + normal[1] * offset, position[2] + normal[2] * offset };
+		const Float3 shifted = offsetBy(view.TexelWorldSize * distance * bias);
 		// The offset can cross into another cube face (all faces share TexelWorldSize):
 		// select again with the shifted point.
 		const auto shiftedIndex = SelectShadowView(record, shifted, cameraViewDepth);
@@ -239,30 +316,6 @@ namespace Swim::Render::Shadows
 		{
 			return 1.0f;
 		}
-		const auto& shiftedView = inputs.Views[*shiftedIndex];
-		const auto projected = ProjectToShadowView(shiftedView, shifted);
-		if (!projected)
-		{
-			return 1.0f;
-		}
-		const int x0 = int(shiftedView.AtlasRect[0]);
-		const int y0 = int(shiftedView.AtlasRect[1]);
-		const int x1 = x0 + int(shiftedView.AtlasRect[2]) - 1;
-		const int y1 = y0 + int(shiftedView.AtlasRect[3]) - 1;
-		const int cx = std::clamp(int(std::floor(projected->PixelX)), x0, x1);
-		const int cy = std::clamp(int(std::floor(projected->PixelY)), y0, y1);
-		const int radius = int(record.PcfRadius);
-		float lit = 0.0f;
-		for (int dy = -radius; dy <= radius; ++dy)
-		{
-			for (int dx = -radius; dx <= radius; ++dx)
-			{
-				const auto tx = std::uint32_t(std::clamp(cx + dx, x0, x1));
-				const auto ty = std::uint32_t(std::clamp(cy + dy, y0, y1));
-				lit += projected->Depth + record.DepthBias >= inputs.Atlas->At(tx, ty) ? 1.0f : 0.0f;
-			}
-		}
-		const float taps = float((2 * radius + 1) * (2 * radius + 1));
-		return lit / taps;
+		return SampleShadowView(*inputs.Atlas, record, inputs.Views[*shiftedIndex], shifted);
 	}
 } // namespace Swim::Render::Shadows

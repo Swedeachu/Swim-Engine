@@ -3,6 +3,7 @@
 #include "Tests/Framework/Test.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <random>
 #include <set>
@@ -24,7 +25,7 @@ namespace
 		desc.Near = 0.1f;
 		desc.Far = 60.0f;
 		desc.MaxLightsPerCluster = 256;
-		desc.IndexCapacity = 1u << 20;
+		desc.LightCapacity = 1024;
 		return desc;
 	}
 
@@ -101,7 +102,12 @@ SWIM_TEST("Render.ClusterGrid", "LayoutRoundsTilesUpAndValidatesTheDesc")
 	rejects(
 		[](ClusterGridDesc& d)
 		{
-			d.IndexCapacity = 0;
+			d.LightCapacity = 0;
+		});
+	rejects(
+		[](ClusterGridDesc& d)
+		{
+			d.LightCapacity = MaxClusterLights + 1;
 		});
 	rejects(
 		[](ClusterGridDesc& d)
@@ -122,6 +128,9 @@ SWIM_TEST("Render.ClusterGrid", "LayoutRoundsTilesUpAndValidatesTheDesc")
 	SWIM_CHECK_EQUAL(record.SliceParams[2], 64.0f);
 	SWIM_CHECK_EQUAL(record.Dimensions[3], layout.ClusterCount);
 	SWIM_CHECK_EQUAL(record.Limits[2], 256u);
+	SWIM_CHECK_EQUAL(record.Limits[3], 32u); // 1024 lights = 32 mask words.
+	SWIM_CHECK_EQUAL(ClusterOccupancyWords(record), 1u);
+	SWIM_CHECK_EQUAL(ClusterBlockWords(record), 33u);
 	auto orthographic = view;
 	orthographic.Projection = OrthographicReverseZRowMajor(-1, 1, -1, 1, 0.1f, 10.0f);
 	SWIM_CHECK_THROWS(MakeClusterGridRecord(desc, orthographic), std::invalid_argument);
@@ -239,9 +248,8 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 		const float py = unit(random) * 720.0f;
 		const float depth = 0.05f + unit(random) * 40.0f;
 		const auto world = Scene::ViewToWorld(grid, Scene::ViewPoint(grid, px, py, depth));
-		const auto& record = assignment.Records[ClusterIndexFor(grid, px, py, depth)];
-		const std::set<std::uint32_t> list(
-			assignment.Indices.begin() + record.Offset, assignment.Indices.begin() + record.Offset + record.Count);
+		const auto lights = Cl::ClusterLightList(assignment, grid, ClusterIndexFor(grid, px, py, depth));
+		const std::set<std::uint32_t> list(lights.begin(), lights.end());
 		bool lit = false;
 		for (std::uint32_t light = 0; light < scene.Header.LocalCount; ++light)
 		{
@@ -267,18 +275,33 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 	}
 	SWIM_CHECK(litPoints > 300u);
 
-	// Lists are in light-index order, offsets are the exclusive prefix sum, and the
-	// index buffer is compact.
-	std::uint32_t prefix = 0;
-	for (const auto& record : assignment.Records)
+	// Each cluster owns one block (occupancy words, then mask words); the occupancy bits
+	// mark exactly the non-zero mask words, and the counts are the set bits.
+	const std::uint32_t block = ClusterBlockWords(grid);
+	const std::uint32_t occupancyWords = ClusterOccupancyWords(grid);
+	SWIM_CHECK_EQUAL(assignment.Indices.size(), std::size_t(grid.Dimensions[3]) * block);
+	std::uint32_t total = 0;
+	for (std::uint32_t c = 0; c < grid.Dimensions[3]; ++c)
 	{
-		SWIM_CHECK_EQUAL(record.Offset, prefix);
+		const auto& record = assignment.Records[c];
+		SWIM_CHECK_EQUAL(record.Offset, c * block);
 		SWIM_CHECK_EQUAL(record.Count, record.RawCount);
-		SWIM_CHECK(std::is_sorted(assignment.Indices.begin() + record.Offset, assignment.Indices.begin() + record.Offset + record.Count));
-		prefix += record.Count;
+		std::uint32_t bits = 0;
+		for (std::uint32_t w = 0; w < ClusterMaskWords(grid); ++w)
+		{
+			const std::uint32_t mask = assignment.Indices[record.Offset + occupancyWords + w];
+			bits += static_cast<std::uint32_t>(std::popcount(mask));
+			const bool occupied = (assignment.Indices[record.Offset + w / 32] >> (w % 32) & 1u) != 0;
+			SWIM_CHECK(occupied == (mask != 0));
+		}
+		SWIM_CHECK_EQUAL(bits, record.Count);
+		const auto list = Cl::ClusterLightList(assignment, grid, c);
+		SWIM_CHECK_EQUAL(std::uint32_t(list.size()), record.Count);
+		SWIM_CHECK(std::is_sorted(list.begin(), list.end()));
+		total += record.Count;
 	}
-	SWIM_CHECK_EQUAL(prefix, assignment.Stats.WrittenIndices);
-	SWIM_CHECK_EQUAL(std::uint32_t(assignment.Indices.size()), prefix);
+	SWIM_CHECK_EQUAL(total, assignment.Stats.WrittenIndices);
+	SWIM_CHECK_EQUAL(assignment.Stats.RequestedIndices, assignment.Stats.WrittenIndices);
 
 	// No lights: empty lists, zero stats.
 	Scene::Scene empty = Scene::RandomScene(1, 0, 67);
@@ -288,59 +311,40 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 	SWIM_CHECK_EQUAL(none.Stats.VisibleLights, 0u);
 }
 
-SWIM_TEST("Render.ClusteredLights", "TruncationAndCapacityOverflowAreBoundedAndCounted")
+SWIM_TEST("Render.ClusteredLights", "DenseSwarmsAreNeverTruncated")
 {
+	// Thousands of overlapping lights seen from afar: every cluster keeps every light
+	// touching it, whatever MaxLightsPerCluster (the heatmap scale) says. Truncated
+	// lists were what showed as square, darker tiles over big light swarms.
 	auto desc = Desc(640, 360);
 	desc.MaxLightsPerCluster = 4;
+	desc.LightCapacity = 4096;
 	const auto grid = Grid(desc);
-	const auto scene = Scene::RandomScene(0, 800, 68, 4.0f, 10.0f);
-	const auto full = Cl::AssignLights(Grid(
-										   [&]
-										   {
-											   auto d = desc;
-											   d.MaxLightsPerCluster = 1024;
-											   return d;
-										   }()),
-		scene.Rows, scene.Header);
-	const auto capped = Cl::AssignLights(grid, scene.Rows, scene.Header);
-	SWIM_CHECK(capped.Stats.OverflowClusters > 0u);
-	SWIM_CHECK(capped.Stats.MaxRawLightsPerCluster > 4u);
-	std::uint32_t overflow = 0;
-	for (std::uint32_t c = 0; c < grid.Dimensions[3]; ++c)
+	const auto scene = Scene::RandomScene(0, 3000, 68, 4.0f, 10.0f);
+	const auto assignment = Cl::AssignLights(grid, scene.Rows, scene.Header);
+	SWIM_CHECK_EQUAL(assignment.Stats.DroppedIndices, 0u);
+	SWIM_CHECK(assignment.Stats.MaxRawLightsPerCluster > 256u); // Far more than the old per-cluster cap.
+	SWIM_CHECK(assignment.Stats.OverflowClusters > 0u);			// Above the heatmap scale, nothing dropped.
+	std::uint32_t checked = 0;
+	for (std::uint32_t c = 0; c < grid.Dimensions[3]; c += 7)
 	{
-		const auto& record = capped.Records[c];
-		const auto& reference = full.Records[c];
-		SWIM_CHECK_EQUAL(record.RawCount, reference.RawCount);
-		SWIM_CHECK(record.Count == std::min(reference.RawCount, 4u));
-		overflow += record.RawCount > 4u ? 1u : 0u;
-		// The kept lights are the first ones by index.
-		SWIM_CHECK(std::equal(capped.Indices.begin() + record.Offset, capped.Indices.begin() + record.Offset + record.Count,
-			full.Indices.begin() + reference.Offset));
+		std::vector<std::uint32_t> expected;
+		for (std::uint32_t i = 0; i < scene.Header.LocalCount; ++i)
+		{
+			const auto& light = assignment.ViewLights[i];
+			if (Cl::SphereIntersectsAabb(light.Center, light.Radius, assignment.Bounds[c]))
+			{
+				expected.push_back(i);
+			}
+		}
+		SWIM_CHECK(Cl::ClusterLightList(assignment, grid, c) == expected);
+		checked += expected.empty() ? 0u : 1u;
 	}
-	SWIM_CHECK_EQUAL(overflow, capped.Stats.OverflowClusters);
+	SWIM_CHECK(checked > 50u);
 
-	// A small index capacity: later clusters lose their lists, stats balance.
-	desc.IndexCapacity = capped.Stats.RequestedIndices / 2 + 3;
-	const auto starved = Cl::AssignLights(Grid(desc), scene.Rows, scene.Header);
-	SWIM_CHECK_EQUAL(starved.Stats.RequestedIndices, capped.Stats.RequestedIndices);
-	SWIM_CHECK_EQUAL(starved.Stats.WrittenIndices, desc.IndexCapacity);
-	SWIM_CHECK_EQUAL(starved.Stats.DroppedIndices, starved.Stats.RequestedIndices - desc.IndexCapacity);
-	bool reachedEnd = false;
-	for (std::uint32_t c = 0; c < grid.Dimensions[3]; ++c)
-	{
-		const auto& record = starved.Records[c];
-		SWIM_CHECK(record.Offset + record.Count <= desc.IndexCapacity);
-		if (reachedEnd)
-		{
-			SWIM_CHECK_EQUAL(record.Count, 0u);
-		}
-		reachedEnd = reachedEnd || record.Offset + record.Count == desc.IndexCapacity;
-		if (!reachedEnd)
-		{
-			SWIM_CHECK_EQUAL(record.Count, capped.Records[c].Count);
-		}
-	}
-	SWIM_CHECK(reachedEnd);
+	// More lights than the masks address is rejected instead of silently dropped.
+	desc.LightCapacity = 1024;
+	SWIM_CHECK_THROWS(Cl::AssignLights(Grid(desc), scene.Rows, scene.Header), std::invalid_argument);
 }
 
 SWIM_TEST("Render.ClusteredLights", "HeatmapColorsCountsAndFlagsTruncation")
@@ -349,7 +353,6 @@ SWIM_TEST("Render.ClusteredLights", "HeatmapColorsCountsAndFlagsTruncation")
 	SWIM_CHECK((Cl::HeatmapColor(32, 32, 32) == std::array<float, 4>{ 1, 0, 0, 1 }));
 	SWIM_CHECK((Cl::HeatmapColor(16, 16, 32) == std::array<float, 4>{ 0, 1, 0, 1 }));
 	SWIM_CHECK((Cl::HeatmapColor(4, 40, 4) == std::array<float, 4>{ 1, 0, 1, 1 })); // Truncated.
-	SWIM_CHECK((Cl::HeatmapColor(3, 5, 8) == std::array<float, 4>{ 1, 0, 1, 1 }));	// Cut by the index capacity.
 	const auto low = Cl::HeatmapColor(1, 1, 32);
 	SWIM_CHECK(low[2] > 0.9f && low[1] < 0.1f && low[3] == 1.0f);
 

@@ -22,6 +22,8 @@ set(SWIM_RUNTIME_SHADER_PROGRAMS
 	"ClusterHeatmap=SwimClusterHeatmap"
 	"ForwardOpaque=SwimForwardOpaque"
 	"ForwardTransparent=SwimForwardTransparent"
+	"ForwardDepth=SwimForwardDepth"
+	"ForwardOpaquePrepassed=SwimForwardOpaquePrepassed"
 	"ForwardTransparentSort=SwimForwardTransparentSort"
 	"ShadowDepth=SwimShadowDepth"
 	"ShadowMasked=SwimShadowMasked"
@@ -60,6 +62,10 @@ function(swim_define_runtime_shader_set)
 			"The runtime shader set needs the Slang programs defined with SWIM_ENABLE_VULKAN_RHI and SWIM_BUILD_SHADER_COMPILER."
 		)
 	endif()
+
+	# Programs added with swim_add_runtime_shader (SlangShaders.cmake) join the set.
+	get_property(SWIM_EXTRA_RUNTIME_SHADERS GLOBAL PROPERTY SWIM_EXTRA_RUNTIME_SHADERS)
+	list(APPEND SWIM_RUNTIME_SHADER_PROGRAMS ${SWIM_EXTRA_RUNTIME_SHADERS})
 
 	set(SWIM_RUNTIME_SHADER_ROOT "${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet")
 	set(SWIM_RUNTIME_SHADER_OUTPUTS "")

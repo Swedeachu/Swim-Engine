@@ -1,6 +1,10 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/Features/LensFlare.h"
+#include "Engine/Systems/Renderer/Features/SunShafts.h"
+#include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
+#include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Game/ModelImport.h"
@@ -62,6 +66,10 @@ namespace Game
 
 		// Lighting.
 		void SetSunAngles(float elevationDegrees, float azimuthDegrees);
+		// The sandbox's sky, ambient, exposure, tone map and grading (applied once at startup).
+		static void ApplyTropicalLook(Engine::RenderSettings& settings);
+		// Volumetric clouds, sun shafts and a lens flare as renderer features.
+		void AddAtmosphereFeatures();
 
 		float GetSunElevation() const { return sunElevation; }
 
@@ -90,6 +98,13 @@ namespace Game
 
 		entt::entity GetSwarmController() const { return swarmController; }
 
+		// The render features the sandbox adds to the renderer (null without one).
+		Engine::VolumetricClouds* GetClouds() const { return clouds.get(); }
+
+		Engine::SunShafts* GetSunShafts() const { return sunShafts.get(); }
+
+		Engine::LensFlare* GetLensFlare() const { return lensFlare.get(); }
+
 		glm::vec3 GetSwarmMin() const { return swarmMin; }
 
 		glm::vec3 GetSwarmMax() const { return swarmMax; }
@@ -99,7 +114,7 @@ namespace Game
 		// The control panel tab the HUD shows (the "sandbox.tab" command sets it).
 		void RequestTab(std::uint32_t tab) { requestedTab = tab; }
 
-		// All sandbox UI on/off: the HUD and every world canvas (F1, or "sandbox.hud 0|1").
+		// All sandbox UI on/off: the HUD and every world canvas (C, or "sandbox.hud 0|1").
 		void SetHudVisible(bool value) { hudVisible = value; }
 
 		bool IsHudVisible() const { return hudVisible; }
@@ -161,6 +176,9 @@ namespace Game
 		ImportedModel sponza;
 		bool sponzaSearched = false;
 		entt::entity swarmController = entt::null;
+		std::shared_ptr<Engine::VolumetricClouds> clouds;
+		std::shared_ptr<Engine::SunShafts> sunShafts;
+		std::shared_ptr<Engine::LensFlare> lensFlare;
 		glm::vec3 swarmMin{ 0.0f };
 		glm::vec3 swarmMax{ 0.0f };
 		std::mt19937 random{ 1234u };

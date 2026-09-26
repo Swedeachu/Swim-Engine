@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/Lights/GpuLightRecord.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 
@@ -87,7 +88,12 @@ namespace Swim::Render
 			graph.CreateBuffer(StorageBuffer(std::uint64_t(resources.LocalLightCapacity) * 16, desc.DebugName + " view lights"));
 		resources.Bounds = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * 32, desc.DebugName + " bounds"));
 		resources.Records = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * sizeof(ClusterRecord), desc.DebugName + " records"));
-		resources.Indices = graph.CreateBuffer(StorageBuffer(std::uint64_t(gridDesc.IndexCapacity) * 4, desc.DebugName + " indices"));
+		if (localCount > std::uint64_t(ClusterMaskWords(resources.GridRecord)) * 32u)
+		{
+			throw std::invalid_argument(desc.DebugName + ": more local lights than the grid's LightCapacity");
+		}
+		const std::uint64_t blockWords = ClusterBlockWords(resources.GridRecord);
+		resources.Indices = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * blockWords * 4, desc.DebugName + " light masks"));
 		resources.Stats = graph.CreateBuffer(StorageBuffer(sizeof(ClusterStats), desc.DebugName + " stats"));
 		const auto r = resources; // Handles captured by the pass callbacks.
 
@@ -128,64 +134,58 @@ namespace Swim::Render
 				c.Commands().Dispatch(Groups(clusters, ClusterBoundsBindings::ThreadGroupSize), 1, 1);
 			}));
 
-		// 3 and 5. Count and write share one program.
-		const auto assignPass = [&](const char* suffix, std::uint32_t mode)
-		{
-			return graph.AddPass(
-				desc.DebugName + suffix, Rhi::QueueType::Compute,
-				[&](RenderGraphBuilder& b)
-				{
-					b.Read(r.Grid, S::ShaderRead);
-					b.Read(lights.Header, S::ShaderRead);
-					b.Read(r.ViewLights, S::ShaderRead);
-					b.Read(r.Bounds, S::ShaderRead);
-					if (mode == ClusterAssignBindings::CountMode)
-					{
-						b.Write(r.Records, S::ShaderWrite);
-					}
-					else
-					{
-						b.Read(r.Records, S::ShaderRead);
-						b.Write(r.Indices, S::ShaderWrite);
-					}
-				},
-				[program = desc.Assign, label = desc.DebugName + suffix, r, header = lights.Header, clusters, mode](RenderCommandContext& c)
-				{
-					// Count mode has no index buffer access; bind it anyway so the table is complete.
-					const std::array<Rhi::DescriptorWrite, 6> writes{ BufferWrite(c, ClusterAssignBindings::Grid, r.Grid),
-						BufferWrite(c, ClusterAssignBindings::LightHeader, header),
-						BufferWrite(c, ClusterAssignBindings::ViewLights, r.ViewLights),
-						BufferWrite(c, ClusterAssignBindings::Bounds, r.Bounds), BufferWrite(c, ClusterAssignBindings::Records, r.Records),
-						BufferWrite(c, ClusterAssignBindings::Indices, mode == ClusterAssignBindings::CountMode ? r.Records : r.Indices) };
-					Bind(c, program, label, writes);
-					const std::array<std::uint32_t, 4> constants{ mode, 0, 0, 0 };
-					c.Commands().PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(constants)));
-					c.Commands().Dispatch(Groups(clusters, ClusterAssignBindings::ThreadGroupSize), 1, 1);
-				});
-		};
-		resources.Passes.push_back(assignPass(" count", ClusterAssignBindings::CountMode));
-
-		// 4. Scan.
+		// 3. Masks: one thread per (cluster, mask word), 2D past 65535 groups.
+		const std::uint64_t maskThreads = std::uint64_t(clusters) * ClusterMaskWords(resources.GridRecord);
+		const std::uint64_t maskGroups =
+			(maskThreads + ClusterAssignBindings::ThreadGroupSize - 1) / ClusterAssignBindings::ThreadGroupSize;
+		const auto groupsX = static_cast<std::uint32_t>(std::min<std::uint64_t>(maskGroups, ClusterAssignBindings::MaxGroupsPerRow));
+		const auto groupsY = static_cast<std::uint32_t>((maskGroups + groupsX - 1) / groupsX);
 		resources.Passes.push_back(graph.AddPass(
-			desc.DebugName + " scan", Rhi::QueueType::Compute,
+			desc.DebugName + " masks", Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
 			{
 				b.Read(r.Grid, S::ShaderRead);
 				b.Read(lights.Header, S::ShaderRead);
 				b.Read(r.ViewLights, S::ShaderRead);
-				b.ReadWrite(r.Records, S::ShaderRead | S::ShaderWrite);
+				b.Read(r.Bounds, S::ShaderRead);
+				b.Write(r.Indices, S::ShaderWrite);
 				b.Write(r.Stats, S::ShaderWrite);
 			},
-			[program = desc.Scan, label = desc.DebugName + " scan", r, header = lights.Header](RenderCommandContext& c)
+			[program = desc.Assign, label = desc.DebugName + " masks", r, header = lights.Header, groupsX, groupsY](RenderCommandContext& c)
 			{
-				const std::array<Rhi::DescriptorWrite, 5> writes{ BufferWrite(c, ClusterScanBindings::Grid, r.Grid),
-					BufferWrite(c, ClusterScanBindings::LightHeader, header), BufferWrite(c, ClusterScanBindings::ViewLights, r.ViewLights),
-					BufferWrite(c, ClusterScanBindings::Records, r.Records), BufferWrite(c, ClusterScanBindings::Stats, r.Stats) };
+				const std::array<Rhi::DescriptorWrite, 6> writes{ BufferWrite(c, ClusterAssignBindings::Grid, r.Grid),
+					BufferWrite(c, ClusterAssignBindings::LightHeader, header),
+					BufferWrite(c, ClusterAssignBindings::ViewLights, r.ViewLights),
+					BufferWrite(c, ClusterAssignBindings::Bounds, r.Bounds), BufferWrite(c, ClusterAssignBindings::Indices, r.Indices),
+					BufferWrite(c, ClusterAssignBindings::Stats, r.Stats) };
 				Bind(c, program, label, writes);
-				c.Commands().Dispatch(1, 1, 1);
+				const std::array<std::uint32_t, 4> constants{ groupsX * ClusterAssignBindings::ThreadGroupSize, 0, 0, 0 };
+				c.Commands().PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(constants)));
+				c.Commands().Dispatch(groupsX, groupsY, 1);
 			}));
 
-		resources.Passes.push_back(assignPass(" write", ClusterAssignBindings::WriteMode));
+		// 4. Summary: occupancy words, records and statistics.
+		const std::uint32_t summaryThreads = std::max(clusters, localCount);
+		resources.Passes.push_back(graph.AddPass(
+			desc.DebugName + " summary", Rhi::QueueType::Compute,
+			[&](RenderGraphBuilder& b)
+			{
+				b.Read(r.Grid, S::ShaderRead);
+				b.Read(lights.Header, S::ShaderRead);
+				b.Read(r.ViewLights, S::ShaderRead);
+				b.Write(r.Records, S::ShaderWrite);
+				b.ReadWrite(r.Stats, S::ShaderRead | S::ShaderWrite);
+				b.ReadWrite(r.Indices, S::ShaderRead | S::ShaderWrite);
+			},
+			[program = desc.Scan, label = desc.DebugName + " summary", r, header = lights.Header, summaryThreads](RenderCommandContext& c)
+			{
+				const std::array<Rhi::DescriptorWrite, 6> writes{ BufferWrite(c, ClusterScanBindings::Grid, r.Grid),
+					BufferWrite(c, ClusterScanBindings::LightHeader, header), BufferWrite(c, ClusterScanBindings::ViewLights, r.ViewLights),
+					BufferWrite(c, ClusterScanBindings::Records, r.Records), BufferWrite(c, ClusterScanBindings::Stats, r.Stats),
+					BufferWrite(c, ClusterScanBindings::Indices, r.Indices) };
+				Bind(c, program, label, writes);
+				c.Commands().Dispatch(Groups(summaryThreads, ClusterScanBindings::ThreadGroupSize), 1, 1);
+			}));
 		return resources;
 	}
 

@@ -256,7 +256,7 @@ The same path can be run without launching the engine:
 build\windows-release\SwimAssetCooker.exe Assets
 ```
 
-The asset compiler owns pinned simdjson/fastgltf/meshoptimizer/Draco/libwebp dependencies through `Swim::AssetCompilerDependencies`. Draco 1.5.7 is wrapped by `Swim::AssetCompilerDraco`, which supplies both its `<source>/src` headers and generated `draco/draco_features.h` include root to compiler/test consumers while keeping that package-layout quirk out of first-party source. The first Windows build after adding or changing this checkpoint should use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
+The asset compiler owns pinned simdjson/fastgltf/meshoptimizer/Draco/libwebp/Basis Universal (transcoder only) dependencies through `Swim::AssetCompilerDependencies`. KHR_texture_basisu KTX2 images are transcoded to RGBA8 mip chains at cook time. Draco 1.5.7 is wrapped by `Swim::AssetCompilerDraco`, which supplies both its `<source>/src` headers and generated `draco/draco_features.h` include root to compiler/test consumers while keeping that package-layout quirk out of first-party source. The first Windows build after adding or changing this checkpoint should use the clean build once to populate `.cache/cpm`; subsequent normal iteration can use the soft build again.
 
 Runtime text uses FreeType 2.14.3, HarfBuzz 14.5.0 and msdfgen 1.13 (core), pinned in `cmake/TextDependencies.cmake` and bundled privately as `Swim::TextDependencies` (Phase 20, item 79). The `Text.Dependencies` cases prove all three build and link. A dependency cache made before these libraries existed needs one configure with downloads enabled (`cmake --preset windows-release -DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) or one clean build. Soft builds cannot fetch them.
 
@@ -272,7 +272,7 @@ PhysX is kept deliberately isolated because its configuration model does not mat
 
 All first-party shaders are **Slang**. There is no handwritten HLSL or GLSL left in the build; the retired sources are archived under `Deprecated/Shaders/` and are not compiled, copied, or referenced.
 
-CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shader deterministically, emitting reflection JSON beside each artifact. The runtime set (36 programs: Forward+, shadows, visibility, lighting, environment, post, TAA, screen-space, particles, skinning, UI, sky and present) is staged once and deployed next to the executable:
+CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shader deterministically, emitting reflection JSON beside each artifact. The runtime set (38 programs: Forward+, shadows, visibility, lighting, environment, post, TAA, screen-space, particles, skinning, UI, sky and present) is staged once and deployed next to the executable:
 
 ```text
 Source/Shaders/Slang/<Module>/*.slang  ->  <exe>/Shaders/Runtime/<Program>.spv  + .reflection.json
@@ -284,7 +284,7 @@ Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` si
 
 ## Running
 
-`Swim Engine` starts the sandbox demo: a physics and rendering playground with a UI control panel, world-space UI, lighting and shadows, play/pause/step/stop and a fly camera. Behind it stands the Crytek Sponza with 256 coloured lights roaming its atrium (the glTF Sponza lives in `Assets/Models/Sponza/glTF/` and is cooked on first start). Hold the right mouse button and use WASD to fly, 1–7 jump between views (6 and 7 are Sponza), P pauses, N steps, F1 toggles all UI, F2 the control panel and F3 the diagnostics.
+`Swim Engine` starts the sandbox demo: a physics and rendering playground with a UI control panel, world-space UI, lighting and shadows, play/pause/step/stop and a fly camera. Behind it stands the Crytek Sponza with 256 coloured lights roaming its atrium (`Assets/Models/Sponza/sponza-ktx-draco.glb`, Draco meshes and KTX2/Basis textures, cooked on first start into the repository's `Assets/Cooked/`, which development builds read directly). Hold the right mouse button and use WASD to fly, 1–7 jump between views (6 and 7 are Sponza), P pauses, N steps, F fires balls from the camera, C toggles all UI, V the control panel and X the diagnostics.
 
 ```bash
 ./build/linux-release/"Swim Engine"                         # window
@@ -294,14 +294,14 @@ Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` si
 ./build/linux-release/"Swim Engine" --help                  # every option
 ```
 
-See [Engine runtime](docs/EngineRuntime.md) for the frame, the engine state machine and simulation clock, the components scenes use, commands, tests and the current findings.
+See [Engine runtime](docs/EngineRuntime.md) and [Performance analysis](docs/PerformanceAnalysis.md) for the frame, the engine state machine and simulation clock, the components scenes use, commands, tests and the current findings.
 
 ---
 
 ## Features
 
 - **Runtime:** explicit engine ownership; an engine state machine (Playing / Paused / Stopped); a simulation clock with time scale, pause, single steps and per-domain participation; behaviours with state masks and a deterministic lifecycle; hashed multi-tags with a scene index; a scene command buffer.
-- **Renderer:** Vulkan RHI with RenderGraph; paged geometry heap and asynchronous residency; a persistent GPU scene; GPU frustum/LOD culling with indirect draws; bindless materials (metallic-roughness PBR); clustered Forward+ with sorted transparents; cascaded, spot and point shadows; image-based lighting; auto exposure, bloom, grading and tone mapping; TAA; GTAO, SSR and height fog; GPU particles; GPU skinning.
+- **Renderer:** Vulkan RHI with RenderGraph; paged geometry heap and asynchronous residency; a persistent GPU scene; GPU frustum/LOD culling with indirect draws; bindless materials (metallic-roughness PBR); clustered Forward+ with sorted transparents; cascaded, spot and point shadows; image-based lighting; auto exposure, bloom, grading and tone mapping; TAA; GTAO, SSR and height fog; GPU particles; GPU skinning; clustered lights as per-cluster bitmasks (thousands of lights, never truncated); render features added from gameplay code (volumetric clouds, sun shafts, lens flare — see [Render features](docs/RenderFeatures.md)).
 - **UI:** shaped text (FreeType/HarfBuzz, MSDF atlas), retained flex/anchor layout, themed controls, popups, menus, lists and modals, screen overlays, world panels and billboards with ray-cast input.
 - **Physics:** backend-neutral handles, bodies, queries and collision callbacks, with PhysX and Jolt backends.
 - **Assets:** cooked `.sasset` models and textures with development auto-cook from glTF.

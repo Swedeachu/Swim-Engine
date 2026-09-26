@@ -23,28 +23,28 @@ namespace Swim::Render
 		static constexpr std::uint32_t ThreadGroupSize = 64;
 	};
 
-	struct ClusterAssignBindings // ClusterAssign.slang: one thread per cluster, lights batched through groupshared memory.
+	struct ClusterAssignBindings // ClusterAssign.slang: one thread per (cluster, mask word).
 	{
 		static constexpr std::uint32_t Grid = 0;
 		static constexpr std::uint32_t LightHeader = 1;
 		static constexpr std::uint32_t ViewLights = 2;
 		static constexpr std::uint32_t Bounds = 3;
-		static constexpr std::uint32_t Records = 4; // RWStructuredBuffer<ClusterRecord>.
-		static constexpr std::uint32_t Indices = 5; // RWStructuredBuffer<uint>.
+		static constexpr std::uint32_t Indices = 4; // RWStructuredBuffer<uint>: cluster blocks (occupancy + mask words).
+		static constexpr std::uint32_t Stats = 5;	// RWStructuredBuffer<ClusterStats>: cleared here.
 		static constexpr std::uint32_t ThreadGroupSize = 64;
-		static constexpr std::uint32_t PushConstantBytes = 16; // uint Mode (CountMode/WriteMode), 3 reserved.
-		static constexpr std::uint32_t CountMode = 0;
-		static constexpr std::uint32_t WriteMode = 1;
+		static constexpr std::uint32_t PushConstantBytes = 16; // uint RowThreads (2D dispatch pitch), 3 reserved.
+		static constexpr std::uint32_t MaxGroupsPerRow = 65535;
 	};
 
-	struct ClusterScanBindings // ClusterScan.slang: one group prefix-sums every cluster.
+	struct ClusterScanBindings // ClusterScan.slang: one thread per cluster (and per local light for the visible count).
 	{
 		static constexpr std::uint32_t Grid = 0;
 		static constexpr std::uint32_t LightHeader = 1;
 		static constexpr std::uint32_t ViewLights = 2;
 		static constexpr std::uint32_t Records = 3; // RWStructuredBuffer<ClusterRecord>.
-		static constexpr std::uint32_t Stats = 4;	// RWStructuredBuffer<ClusterStats>.
-		static constexpr std::uint32_t ThreadGroupSize = 256;
+		static constexpr std::uint32_t Stats = 4;	// RWStructuredBuffer<ClusterStats> (atomics).
+		static constexpr std::uint32_t Indices = 5; // RWStructuredBuffer<uint>: occupancy words written here.
+		static constexpr std::uint32_t ThreadGroupSize = 64;
 	};
 
 	struct ClusterHeatmapBindings // ClusterHeatmap.slang: one thread per pixel.

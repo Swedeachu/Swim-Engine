@@ -28,8 +28,35 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
+
+namespace
+{
+	// Development builds read loose assets (and cook into Assets/Cooked) straight from the
+	// repository, so there is one cooked cache and nothing to copy or sync: an explicit
+	// --assets wins, then the repository's Assets/ folder (SWIM_DEVELOPMENT_ASSET_ROOT),
+	// then <exe dir>/Assets (empty path) for packaged builds.
+	std::filesystem::path ResolveAssetRoot(const std::string& requested)
+	{
+		if (!requested.empty())
+		{
+			return std::filesystem::path(requested);
+		}
+#ifdef SWIM_DEVELOPMENT_ASSET_ROOT
+		std::error_code error;
+		// The literal is UTF-8 (/utf-8 on MSVC): keep non-ASCII repository paths intact.
+		const std::string_view literal = SWIM_DEVELOPMENT_ASSET_ROOT;
+		const std::filesystem::path development(std::u8string(literal.begin(), literal.end()));
+		if (std::filesystem::is_directory(development, error))
+		{
+			return development;
+		}
+#endif
+		return {};
+	}
+} // namespace
 
 namespace Engine
 {
@@ -188,6 +215,7 @@ namespace Engine
 		platformDesc.OrganizationName = "Swim Services";
 		platformDesc.ApplicationName = "Swim Engine";
 		platformDesc.Headless = config.Present == PresentMode::Headless;
+		platformDesc.AssetRoot = ResolveAssetRoot(config.AssetRoot);
 		if (!platformSystem->Initialize(platformDesc))
 		{
 			std::cerr << "[Engine] Platform initialization failed.\n";

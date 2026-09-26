@@ -21,7 +21,7 @@ struct GpuShadowRecord
 	float NormalBias;
 	float SlopeBias;
 	float DepthBias;
-	float Reserved0;
+	float CascadeBlend;
 	float4 CascadeFar;
 	float3 LightPosition;
 	float Reserved1;
@@ -78,6 +78,72 @@ uint ShadowSelectView(GpuShadowRecord record, float3 position, float cameraViewD
 	return ShadowNoView;
 }
 
+// Shadows::SampleShadowView: the filtered comparison of one view (1 = lit).
+float ShadowSampleView(Texture2D<float> atlas, StructuredBuffer<GpuShadowView> views, uint viewIndex, GpuShadowRecord record,
+	float3 shifted)
+{
+	const float4 rows[4] = views[viewIndex].ViewProjection;
+	const float4 rect = views[viewIndex].AtlasRect;
+	const float4 p = float4(shifted, 1.0);
+	const float4 clip = float4(dot(rows[0], p), dot(rows[1], p), dot(rows[2], p), dot(rows[3], p));
+	if (!(clip.w > 1.0e-6))
+	{
+		return 1.0;
+	}
+	const float3 ndc = clip.xyz / clip.w;
+	if (!(abs(ndc.x) <= 1.0) || !(abs(ndc.y) <= 1.0) || !(ndc.z >= 0.0) || !(ndc.z <= 1.0))
+	{
+		return 1.0;
+	}
+	const float pixelX = rect.x + (ndc.x * 0.5 + 0.5) * rect.z;
+	const float pixelY = rect.y + (0.5 - ndc.y * 0.5) * rect.w;
+	const int x0 = int(rect.x);
+	const int y0 = int(rect.y);
+	const int x1 = x0 + int(rect.z) - 1;
+	const int y1 = y0 + int(rect.w) - 1;
+	const float receiver = ndc.z + record.DepthBias;
+	const int radius = int(record.PcfRadius);
+	if (radius == 0)
+	{
+		const int tx = clamp(int(floor(pixelX)), x0, x1);
+		const int ty = clamp(int(floor(pixelY)), y0, y1);
+		return receiver >= atlas.Load(int3(tx, ty, 0)) ? 1.0 : 0.0;
+	}
+	// A (2R + 1)-texel box slid continuously across the texel grid: the (2R + 2)^2 texels
+	// it touches, the outer ring weighted by the covered fraction (bilinear PCF).
+	const float ux = pixelX - 0.5;
+	const float uy = pixelY - 0.5;
+	const float bx = floor(ux);
+	const float by = floor(uy);
+	const float fx = ux - bx;
+	const float fy = uy - by;
+	float lit = 0.0;
+	int hits = 0;
+	for (int dy = -radius; dy <= radius + 1; ++dy)
+	{
+		const float wy = dy == -radius ? 1.0 - fy : (dy == radius + 1 ? fy : 1.0);
+		const int ty = clamp(int(by) + dy, y0, y1);
+		for (int dx = -radius; dx <= radius + 1; ++dx)
+		{
+			const float wx = dx == -radius ? 1.0 - fx : (dx == radius + 1 ? fx : 1.0);
+			const int tx = clamp(int(bx) + dx, x0, x1);
+			if (receiver >= atlas.Load(int3(tx, ty, 0)))
+			{
+				lit += wx * wy;
+				hits += 1;
+			}
+		}
+	}
+	// Exactly 0 or 1 when every tap agrees (the weights need not sum to exactly 1 in float).
+	const int taps = (2 * radius + 2) * (2 * radius + 2);
+	if (hits == 0 || hits == taps)
+	{
+		return hits == 0 ? 0.0 : 1.0;
+	}
+	const float width = float(2 * radius + 1);
+	return saturate(lit / (width * width));
+}
+
 // Shadows::ShadowFactor: 1 = lit.
 float ShadowFactor(Texture2D<float> atlas, StructuredBuffer<GpuShadowRecord> records, StructuredBuffer<GpuShadowView> views,
 	uint shadowIndex, float3 position, float3 normal, float3 toLight, float cameraViewDepth)
@@ -98,55 +164,61 @@ float ShadowFactor(Texture2D<float> atlas, StructuredBuffer<GpuShadowRecord> rec
 	{
 		return 1.0;
 	}
-	// Member loads only: GPU-assisted validation instruments each storage-buffer access.
-	const float3 fromLight = position - record.LightPosition;
-	const float distance = views[viewIndex].Perspective != 0 ? sqrt(dot(fromLight, fromLight)) : 1.0;
-	const float texel = views[viewIndex].TexelWorldSize * distance;
 	const float nDotL = clamp(dot(normal, toLight), 0.0, 1.0);
 	// Wider PCF kernels compare texels farther from the receiver: scale the offset.
-	const float offset = texel * (record.NormalBias + record.SlopeBias * (1.0 - nDotL)) * float(max(record.PcfRadius, 1u));
-	const float3 shifted = position + normal * offset;
-	// The offset can cross into another cube face (all faces share TexelWorldSize):
-	// select again with the shifted point.
-	const uint shiftedIndex = ShadowSelectView(record, shifted, cameraViewDepth);
-	if (shiftedIndex == ShadowNoView || shiftedIndex >= viewCount)
+	const float bias = (record.NormalBias + record.SlopeBias * (1.0 - nDotL)) * float(record.PcfRadius + 1u);
+	const bool directional = record.Kind == ShadowKindDirectional;
+	uint first = viewIndex;
+	uint second = ShadowNoView;
+	float t = 0.0;
+	float3 shifted = position;
+	if (directional)
 	{
-		return 1.0;
-	}
-	const float4 rows[4] = views[shiftedIndex].ViewProjection;
-	const float4 rect = views[shiftedIndex].AtlasRect;
-	const float4 p = float4(shifted, 1.0);
-	const float4 clip = float4(dot(rows[0], p), dot(rows[1], p), dot(rows[2], p), dot(rows[3], p));
-	if (!(clip.w > 1.0e-6))
-	{
-		return 1.0;
-	}
-	const float3 ndc = clip.xyz / clip.w;
-	if (!(abs(ndc.x) <= 1.0) || !(abs(ndc.y) <= 1.0) || !(ndc.z >= 0.0) || !(ndc.z <= 1.0))
-	{
-		return 1.0;
-	}
-	const float pixelX = rect.x + (ndc.x * 0.5 + 0.5) * rect.z;
-	const float pixelY = rect.y + (0.5 - ndc.y * 0.5) * rect.w;
-	const int x0 = int(rect.x);
-	const int y0 = int(rect.y);
-	const int x1 = x0 + int(rect.z) - 1;
-	const int y1 = y0 + int(rect.w) - 1;
-	const int cx = clamp(int(floor(pixelX)), x0, x1);
-	const int cy = clamp(int(floor(pixelY)), y0, y1);
-	const int radius = int(record.PcfRadius);
-	float lit = 0.0;
-	for (int dy = -radius; dy <= radius; ++dy)
-	{
-		for (int dx = -radius; dx <= radius; ++dx)
+		// Blend into the next cascade (or fade out after the last one) over the far
+		// CascadeBlend fraction of this cascade's depth range.
+		const uint cascade = viewIndex - record.FirstView;
+		const float farDepth = record.CascadeFar[cascade];
+		const float nearDepth = cascade == 0u ? 0.0 : record.CascadeFar[cascade - 1u];
+		const float band = record.CascadeBlend * (farDepth - nearDepth);
+		t = band > 0.0 ? saturate((cameraViewDepth - (farDepth - band)) / band) : 0.0;
+		if (cascade + 1u < min(record.ViewCount, ShadowMaxCascades) && viewIndex + 1u < viewCount)
 		{
-			const int tx = clamp(cx + dx, x0, x1);
-			const int ty = clamp(cy + dy, y0, y1);
-			lit += ndc.z + record.DepthBias >= atlas.Load(int3(tx, ty, 0)) ? 1.0 : 0.0;
+			second = viewIndex + 1u;
 		}
 	}
-	const float taps = float((2 * radius + 1) * (2 * radius + 1));
-	return lit / taps;
+	else
+	{
+		// Spot and point views are perspective: texels grow with the distance to the light.
+		const float3 fromLight = position - record.LightPosition;
+		const float distance = sqrt(dot(fromLight, fromLight));
+		shifted = position + normal * (views[viewIndex].TexelWorldSize * distance * bias);
+		// The offset can cross into another cube face (all faces share TexelWorldSize):
+		// select again with the shifted point.
+		first = ShadowSelectView(record, shifted, cameraViewDepth);
+		if (first == ShadowNoView || first >= viewCount)
+		{
+			return 1.0;
+		}
+	}
+	// One sampling site for both cascades (a loop, not two inlined copies, keeps the
+	// storage-buffer access count under the GPU-AV instrumentation budget).
+	float lit[2] = { 1.0, 1.0 };
+	[loop]
+	for (uint k = 0; k < 2u; ++k)
+	{
+		const uint v = k == 0u ? first : second;
+		if (v == ShadowNoView)
+		{
+			break;
+		}
+		const float3 at = directional ? position + normal * (views[v].TexelWorldSize * bias) : shifted;
+		lit[k] = ShadowSampleView(atlas, views, v, record, at);
+		if (!(t > 0.0))
+		{
+			break;
+		}
+	}
+	return lerp(lit[0], lit[1], t);
 }
 
 #endif

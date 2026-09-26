@@ -229,6 +229,11 @@ namespace Game
 		return best;
 	}
 
+	Assets::AssetHandle<Assets::ModelAsset> FindSponzaModel(const Assets::AssetSystem& assets)
+	{
+		return FindCookedModel(assets, { "sponza" }, { "sponza-ktx-draco", "sponza-ktx", "gltf/sponza" });
+	}
+
 	ImportedModel SpawnCookedModel(Engine::Scene& scene, Engine::RenderServices& render, Assets::AssetSystem& assets,
 		Assets::AssetHandle<Assets::ModelAsset> modelHandle, std::string_view name, const ModelPlacement& placement)
 	{

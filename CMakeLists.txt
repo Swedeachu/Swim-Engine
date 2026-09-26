@@ -74,6 +74,7 @@ option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" O
 option(SWIM_BUILD_SHADER_COMPILER "Build Slang shader compiler/reflection tooling" ON)
 option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
+option(SWIM_DEPLOY_ASSETS "Copy Assets/ next to SwimEngine after each build (packaged runs); development builds read the repository's Assets/ directly" OFF)
 
 if(SWIM_BUILD_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
 	message(FATAL_ERROR
@@ -481,6 +482,26 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_TRANSPARENT=1
 	)
+	# Depth prepass + the opaque colour pass that shades only the visible surface.
+	# Built-in render features (Engine/Systems/Renderer/Features): each program is one
+	# swim_add_runtime_shader call and is loaded by name through RenderFeatureContext.
+	swim_add_runtime_shader(SunShaftsMask SOURCE Source/Shaders/Slang/Features/SunShafts.slang)
+	swim_add_runtime_shader(SunShaftsComposite SOURCE Source/Shaders/Slang/Features/SunShafts.slang DEFINES SUN_SHAFTS_COMPOSITE=1)
+	swim_add_runtime_shader(LensFlare SOURCE Source/Shaders/Slang/Features/LensFlare.slang)
+	swim_add_runtime_shader(VolumetricCloudsMarch SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang)
+	swim_add_runtime_shader(VolumetricCloudsComposite SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_COMPOSITE=1)
+	swim_add_slang_program(SwimForwardDepth
+		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES FORWARD_DEPTH_ONLY=1
+	)
+	swim_add_slang_program(SwimForwardOpaquePrepassed
+		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES FORWARD_PREPASSED=1
+	)
 	# Shadow maps (Phase 16, items 70-72): depth-only and alpha-tested casters.
 	swim_add_slang_program(SwimShadowDepth
 		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
@@ -645,6 +666,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimRhiClusteredLightProbe_SPIRV}" "${SwimRhiClusteredLightProbe_REFLECTION}"
 			"${SwimForwardOpaque_SPIRV}" "${SwimForwardOpaque_REFLECTION}"
 			"${SwimForwardTransparent_SPIRV}" "${SwimForwardTransparent_REFLECTION}"
+			"${SwimForwardDepth_SPIRV}" "${SwimForwardDepth_REFLECTION}"
+			"${SwimForwardOpaquePrepassed_SPIRV}" "${SwimForwardOpaquePrepassed_REFLECTION}"
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
 			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
 			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
@@ -1155,6 +1178,7 @@ target_compile_definitions(SwimEngine PRIVATE
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
 	$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:_ITERATOR_DEBUG_LEVEL=0>
 	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
+	$<$<NOT:$<BOOL:${SWIM_DEPLOY_ASSETS}>>:SWIM_DEVELOPMENT_ASSET_ROOT="${CMAKE_SOURCE_DIR}/Assets">
 	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
 	SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
 	# Module-level compile definitions that used to be PRIVATE to the module's
@@ -1268,9 +1292,12 @@ if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 			"$<TARGET_FILE_DIR:SwimEngine>/Resources"
 		VERBATIM
 	)
-	# Loose development assets are optional: the sandbox is fully procedural.
-	if(EXISTS "${CMAKE_SOURCE_DIR}/Assets")
+	# Loose development assets: the engine reads the repository's Assets/ folder directly
+	# (SWIM_DEVELOPMENT_ASSET_ROOT) and cooks into Assets/Cooked there, so nothing is
+	# copied. SWIM_DEPLOY_ASSETS copies them next to the executable for a packaged run.
+	if(SWIM_DEPLOY_ASSETS AND EXISTS "${CMAKE_SOURCE_DIR}/Assets")
 		add_custom_command(TARGET SwimEngine POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_FILE_DIR:SwimEngine>/Assets"
 			COMMAND "${CMAKE_COMMAND}" -E copy_directory
 				"${CMAKE_SOURCE_DIR}/Assets"
 				"$<TARGET_FILE_DIR:SwimEngine>/Assets"

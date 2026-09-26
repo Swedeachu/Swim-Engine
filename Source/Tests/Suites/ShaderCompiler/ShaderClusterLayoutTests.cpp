@@ -83,23 +83,25 @@ SWIM_TEST("ShaderCompiler.ClusterLayout", "ClusterRecordsAndProgramsMatchTheirCp
 	SWIM_CHECK_EQUAL(gridOffsets.at("SliceParams"), std::uint32_t(offsetof(Render::ClusterGridRecord, SliceParams)));
 	SWIM_CHECK_EQUAL(gridOffsets.at("Dimensions"), std::uint32_t(offsetof(Render::ClusterGridRecord, Dimensions)));
 	SWIM_CHECK_EQUAL(gridOffsets.at("Limits"), std::uint32_t(offsetof(Render::ClusterGridRecord, Limits)));
-	const auto& records = Parameter(assign, "Records");
-	SWIM_CHECK_EQUAL(records.ElementSize, std::uint32_t(sizeof(Render::ClusterRecord)));
-	const auto recordOffsets = Offsets(records);
-	SWIM_CHECK_EQUAL(recordOffsets.at("Count"), std::uint32_t(offsetof(Render::ClusterRecord, Count)));
-	SWIM_CHECK_EQUAL(recordOffsets.at("RawCount"), std::uint32_t(offsetof(Render::ClusterRecord, RawCount)));
 	SWIM_CHECK_EQUAL(Parameter(assign, "ViewLights").ElementSize, 16u);
+	SWIM_CHECK_EQUAL(Parameter(assign, "Stats").ElementSize, std::uint32_t(sizeof(Render::ClusterStats)));
 	SWIM_CHECK_EQUAL(Parameter(assign, "Bounds").ElementSize, 32u);
 	CheckBindings(assign, Render::ClusterAssignBindings::ThreadGroupSize, Render::ClusterAssignBindings::PushConstantBytes, 6);
 
 	const auto scan = Load(SWIM_CLUSTER_SCAN_REFLECTION_PATH);
+	const auto& records = Parameter(scan, "Records");
+	SWIM_CHECK_EQUAL(records.ElementSize, std::uint32_t(sizeof(Render::ClusterRecord)));
+	const auto recordOffsets = Offsets(records);
+	SWIM_CHECK_EQUAL(recordOffsets.at("Offset"), std::uint32_t(offsetof(Render::ClusterRecord, Offset)));
+	SWIM_CHECK_EQUAL(recordOffsets.at("Count"), std::uint32_t(offsetof(Render::ClusterRecord, Count)));
+	SWIM_CHECK_EQUAL(recordOffsets.at("RawCount"), std::uint32_t(offsetof(Render::ClusterRecord, RawCount)));
 	const auto& stats = Parameter(scan, "Stats");
 	SWIM_CHECK_EQUAL(stats.ElementSize, std::uint32_t(sizeof(Render::ClusterStats)));
 	const auto statOffsets = Offsets(stats);
 	SWIM_CHECK_EQUAL(statOffsets.at("WrittenIndices"), std::uint32_t(offsetof(Render::ClusterStats, WrittenIndices)));
 	SWIM_CHECK_EQUAL(statOffsets.at("DroppedIndices"), std::uint32_t(offsetof(Render::ClusterStats, DroppedIndices)));
 	SWIM_CHECK_EQUAL(statOffsets.at("ClusterCount"), std::uint32_t(offsetof(Render::ClusterStats, ClusterCount)));
-	CheckBindings(scan, Render::ClusterScanBindings::ThreadGroupSize, 0, 5);
+	CheckBindings(scan, Render::ClusterScanBindings::ThreadGroupSize, 0, 6);
 
 	CheckBindings(Load(SWIM_CLUSTER_LIGHT_CULL_REFLECTION_PATH), Render::ClusterLightCullBindings::ThreadGroupSize, 0, 4);
 	CheckBindings(Load(SWIM_CLUSTER_BOUNDS_REFLECTION_PATH), Render::ClusterBoundsBindings::ThreadGroupSize, 0, 2);

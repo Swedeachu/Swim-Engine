@@ -81,7 +81,7 @@ namespace
 		ShadowSettings settings;
 		settings.AtlasSize = 2048;
 		settings.MinTile = 64;
-		settings.CascadeResolution = 512;
+		settings.CascadeResolution = 1024;
 		settings.SpotResolution = 256;
 		settings.PointResolution = 256;
 		settings.Cascades.MaxDistance = 30.0f;
@@ -194,12 +194,29 @@ namespace
 					continue;
 				}
 				const float factor = Sh::ShadowFactor(inputs, slot, p, up, toLight, depth);
-				const auto& view = world.Plan.Views[*viewIndex];
+				const auto& record = world.Plan.Records[slot];
+				// Cascade blending can mix in the next (coarser) cascade: size the margin by it.
+				std::uint32_t coarsest = *viewIndex;
+				if (record.Kind == static_cast<std::uint32_t>(Swim::Render::ShadowKind::Directional) &&
+					*viewIndex + 1 < record.FirstView + record.ViewCount)
+				{
+					const std::uint32_t cascade = *viewIndex - record.FirstView;
+					const float farDepth = record.CascadeFar[cascade];
+					const float nearDepth = cascade == 0 ? 0.0f : record.CascadeFar[cascade - 1];
+					if (depth > farDepth - record.CascadeBlend * (farDepth - nearDepth))
+					{
+						coarsest = *viewIndex + 1;
+					}
+				}
+				const auto& view = world.Plan.Views[coarsest];
 				const Sh::Float3 d{ p[0] - light.Position[0], p[1] - light.Position[1], p[2] - light.Position[2] };
 				const float texel = view.TexelWorldSize * (view.Perspective ? std::sqrt(Fs::Dot(d, d)) : 1.0f);
-				// The PCF footprint plus the normal offset, in world units on the ground.
-				const auto& record = world.Plan.Records[slot];
-				const float margin = 2.0f * float(record.PcfRadius + 1) * texel / std::max(Fs::Dot(toLight, up), 0.2f);
+				// The bilinear PCF footprint (R + 1 texels each way, doubled for safety) plus how
+				// far the normal offset ((NormalBias + SlopeBias (1 - N.L)) (R + 1) texels up)
+				// moves the lookup along the ground, in world units.
+				const float nDotL = std::max(Fs::Dot(toLight, up), 0.2f);
+				const float lift = (record.NormalBias + record.SlopeBias * (1.0f - nDotL)) * float(record.PcfRadius + 1) * texel;
+				const float margin = 2.0f * float(record.PcfRadius + 1) * texel / nDotL + lift * std::sqrt(1.0f - nDotL * nDotL) / nDotL;
 				const bool center = Occluded(world, light, p, up);
 				bool uniform = true;
 				for (int oz = -1; oz <= 1 && uniform; ++oz)
@@ -348,6 +365,7 @@ SWIM_TEST("Render.Shadows.Sampling", "WiderPcfSoftensTheSameEdge")
 	auto hard = SharedWorld();
 	auto soft = SharedWorld();
 	hard.Plan.Records[0].PcfRadius = 0;
+	hard.Plan.Records[0].CascadeBlend = 0.0f; // Hard cascade switches too: strictly one tap.
 	soft.Plan.Records[0].PcfRadius = 2;
 	const auto hardTally = CheckGround(hard, 0, 10.0f, 0.08f);
 	const auto softTally = CheckGround(soft, 0, 10.0f, 0.08f);

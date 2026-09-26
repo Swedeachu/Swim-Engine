@@ -33,9 +33,9 @@ namespace Engine
 
 		// Clustered lights.
 		std::uint32_t ClusterTileSize = 64;
-		std::uint32_t ClusterSlices = 24;
+		std::uint32_t ClusterSlices = 32;
 		float ClusterFar = 200.0f;
-		std::uint32_t MaxLightsPerCluster = 128;
+		std::uint32_t MaxLightsPerCluster = 128; // Heatmap full scale only: cluster light sets are bitmasks, never truncated.
 
 		// Effects.
 		bool Particles = true;

@@ -25,8 +25,7 @@ namespace Game
 	//   control panel   Simulation (play / pause / step / stop, time scale, ball rain,
 	//                   reset with a confirmation modal), Rendering (every renderer switch,
 	//                   tone mapping, exposure, sun, bloom, debug view), Scene (a filtered,
-	//                   virtualized entity browser, focus/delete, a spawn menu) and
-	//                   Findings (a list with details)
+	//                   virtualized entity browser, focus/delete, a spawn menu)
 	//   diagnostics     frame timings, the costliest GPU passes, scene and renderer counters
 	//   help bar        the controls
 	//
@@ -34,8 +33,8 @@ namespace Game
 	// panels, labels, buttons, toggles, checkboxes, sliders (with editable values), a radio
 	// group, dropdowns, a text field, a list view, a virtual list, a scroll area, a menu,
 	// tooltips and a modal dialog. Shortcuts (when the UI does not own the keyboard):
-	// P pause/resume, N step, 1-7 camera bookmarks, F1 all UI on/off (panel, diagnostics, help
-	// bar, world panels and labels), F2 the panel only, F3 the diagnostics only.
+	// P pause/resume, N step, F fire, 1-7 camera bookmarks, C all UI on/off (panel,
+	// diagnostics, help bar, world panels and labels), V the panel only, X the diagnostics only.
 	class SandboxHud : public Engine::Behavior
 	{
 	  public:
@@ -67,7 +66,6 @@ namespace Game
 		void BuildSimulation(Swim::UI::UiNodeId parent);
 		void BuildRendering(Swim::UI::UiNodeId parent);
 		void BuildScene(Swim::UI::UiNodeId parent);
-		void BuildFindings(Swim::UI::UiNodeId parent);
 		void BuildDiagnostics();
 		void BuildHelp();
 		void ShowSection(std::uint32_t index);
@@ -87,7 +85,7 @@ namespace Game
 
 		Swim::UI::UiNodeId panel;
 		Swim::UI::UiNodeId tabs;
-		std::array<Swim::UI::UiNodeId, 4> sections{};
+		std::array<Swim::UI::UiNodeId, 3> sections{};
 		std::uint32_t section = 0;
 		Swim::UI::UiNodeId stateLabel;
 		Swim::UI::UiNodeId clockLabel;
@@ -110,10 +108,6 @@ namespace Game
 		Swim::UI::UiPopupList spawnMenu;
 		Swim::UI::UiNodeId spawnButton;
 		std::array<Swim::UI::UiNodeId, 5> spawnItems{};
-
-		Swim::UI::UiListView findingsList;
-		Swim::UI::UiNodeId findingDetails;
-		int shownFinding = -2;
 
 		Swim::UI::UiNodeId diagnostics;
 		Swim::UI::UiNodeId diagnosticsText;

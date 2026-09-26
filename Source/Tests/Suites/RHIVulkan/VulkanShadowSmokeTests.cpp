@@ -464,7 +464,7 @@ namespace
 		gridDesc.Near = 0.1f;
 		gridDesc.Far = 60.0f;
 		gridDesc.MaxLightsPerCluster = 256;
-		gridDesc.IndexCapacity = 1u << 18;
+		gridDesc.LightCapacity = 1024;
 
 		const Fs::Float3 eye{ 1.0f, 5.5f, 11.0f };
 		const Fs::Float3 target{ 0.0f, 0.8f, 0.0f };
@@ -566,8 +566,8 @@ namespace
 			const auto colorReadback = AddTextureReadback(graph, "Color", targets.Color, { 0, {}, {}, { width, height, 1 } });
 			const auto idReadback = AddTextureReadback(graph, "Object id", targets.ObjectId, { 0, {}, {}, { width, height, 1 } });
 			const auto recordsReadback = AddBufferReadback(graph, "Cluster records", clusters.Records, 0, std::uint64_t(clusterCount) * 16);
-			const auto indicesReadback =
-				AddBufferReadback(graph, "Cluster indices", clusters.Indices, 0, std::uint64_t(gridDesc.IndexCapacity) * 4);
+			const auto indicesReadback = AddBufferReadback(
+				graph, "Cluster indices", clusters.Indices, 0, std::uint64_t(clusterCount) * ClusterBlockWords(clusters.GridRecord) * 4);
 			const auto completion = executor.Execute(graph.Compile());
 			scene.CommitUploads();
 			heap.CommitUploads(completion);
@@ -586,7 +586,7 @@ namespace
 			std::vector<std::uint16_t> colorHalves(std::size_t(width) * height * 4);
 			std::vector<float> ids(std::size_t(width) * height);
 			std::vector<ClusterRecord> clusterRecords(clusterCount);
-			std::vector<std::uint32_t> clusterIndices(gridDesc.IndexCapacity);
+			std::vector<std::uint32_t> clusterIndices(std::size_t(clusterCount) * ClusterBlockWords(clusters.GridRecord));
 			read(atlasReadback, gpuAtlas.Depth);
 			read(colorReadback, colorHalves);
 			read(idReadback, ids);

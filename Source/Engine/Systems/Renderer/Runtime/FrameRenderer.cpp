@@ -37,6 +37,7 @@
 #include "Engine/Systems/UI/UiDocument.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -134,8 +135,9 @@ namespace Engine
 		Shadow.SpotResolution = std::clamp(PowerOfTwoFloor(std::max(Shadow.SpotResolution, 64u)), 64u, Shadow.AtlasSize);
 		Shadow.PointResolution = std::clamp(PowerOfTwoFloor(std::max(Shadow.PointResolution, 64u)), 64u, Shadow.AtlasSize);
 		Shadow.Cascades.Count = std::clamp(Shadow.Cascades.Count, 1u, 4u);
-		clampFinite(Shadow.Cascades.MaxDistance, 1.0f, 10000.0f, 60.0f);
-		clampFinite(Shadow.Cascades.SplitLambda, 0.0f, 1.0f, 0.75f);
+		clampFinite(Shadow.Cascades.MaxDistance, 1.0f, 10000.0f, 70.0f);
+		clampFinite(Shadow.Cascades.SplitLambda, 0.0f, 1.0f, 0.8f);
+		clampFinite(Shadow.CascadeBlend, 0.0f, 0.5f, 0.2f);
 		Temporal.JitterPhases = std::min(Temporal.JitterPhases, Swim::Render::MaxJitterPhases);
 		clampFinite(Temporal.Feedback, 0.01f, 1.0f, 0.1f);
 		clampFinite(Temporal.ClipGamma, 0.25f, 8.0f, 1.25f);
@@ -169,8 +171,10 @@ namespace Engine
 		RuntimeComputeProgram postHistogram, postExposure, postBloomDown, postBloomUp, postComposite, postCompositeHdr;
 		RuntimeComputeProgram temporalResolve, ssAo, ssBlur, ssComposite, ssReflection;
 		RuntimeComputeProgram particleSimulate, particleEmit, particleCompact, particleFinalize, skinningProgram;
-		RuntimeGraphicsProgram forwardOpaque, forwardTransparent, shadowDepth, shadowMasked, particleRender, uiQuad, skyBackground, present;
-		std::unique_ptr<S::GraphicsPipeline> forwardOpaquePipeline, forwardTransparentPipeline, shadowDepthPipeline, shadowMaskedPipeline;
+		RuntimeGraphicsProgram forwardOpaque, forwardTransparent, forwardDepth, forwardPrepassed, shadowDepth, shadowMasked, particleRender,
+			uiQuad, skyBackground, present;
+		std::unique_ptr<S::GraphicsPipeline> forwardOpaquePipeline, forwardTransparentPipeline, forwardDepthPipeline,
+			forwardPrepassedPipeline, shadowDepthPipeline, shadowMaskedPipeline;
 		std::unique_ptr<S::GraphicsPipeline> particleAdditive, particleAlpha, uiPipeline, uiDepthPipeline, skyPipeline;
 		std::map<S::Format, std::unique_ptr<S::GraphicsPipeline>> presentPipelines;
 
@@ -232,6 +236,8 @@ namespace Engine
 		// History.
 		std::optional<std::array<float, 16>> previousViewProjection;
 		std::uint64_t frameIndex = 0;
+		double featureTime = 0.0;
+		std::unordered_map<std::string, std::unique_ptr<RuntimeComputeProgram>> featurePrograms; // Loaded on first use.
 
 		void Route(std::uint32_t set, const R::StandardPbr::Parameters& parameters);
 		void EnsureVisibility(std::uint32_t slots);
@@ -300,6 +306,8 @@ namespace Engine
 		const auto shadowSpace = R::ShadowBindlessSpace(desc.BindlessTextures, desc.BindlessSamplers);
 		forwardOpaque = LoadDrawProgram("ForwardOpaque", &bindlessSpace);
 		forwardTransparent = LoadDrawProgram("ForwardTransparent", &bindlessSpace);
+		forwardDepth = LoadDrawProgram("ForwardDepth", &bindlessSpace);
+		forwardPrepassed = LoadDrawProgram("ForwardOpaquePrepassed", &bindlessSpace);
 		shadowDepth = LoadDrawProgram("ShadowDepth", nullptr);
 		shadowMasked = LoadDrawProgram("ShadowMasked", &shadowSpace);
 		particleRender = LoadDrawProgram("ParticleRender", &bindlessSpace);
@@ -321,6 +329,12 @@ namespace Engine
 		forwardTransparentPipeline = require(device.CreateGraphicsPipeline(R::ForwardPlusRenderer::PipelineDesc(
 												 R::ForwardPlusBin::Transparent, *forwardTransparent.Program, *forwardTransparent.Layout)),
 			"Forward+ transparent");
+		forwardDepthPipeline = require(
+			device.CreateGraphicsPipeline(R::ForwardPlusRenderer::DepthPrepassPipelineDesc(*forwardDepth.Program, *forwardDepth.Layout)),
+			"Forward+ depth prepass");
+		forwardPrepassedPipeline = require(device.CreateGraphicsPipeline(R::ForwardPlusRenderer::PrepassedPipelineDesc(
+											   *forwardPrepassed.Program, *forwardPrepassed.Layout)),
+			"Forward+ prepassed opaque");
 		shadowDepthPipeline = require(
 			device.CreateGraphicsPipeline(R::ShadowRenderer::PipelineDesc(*shadowDepth.Program, *shadowDepth.Layout)), "shadow depth");
 		shadowMaskedPipeline = require(
@@ -443,6 +457,8 @@ namespace Engine
 		R::ForwardPlusRendererDesc forwardDesc;
 		forwardDesc.Opaque = { forwardOpaquePipeline.get(), forwardOpaque.Layout.get() };
 		forwardDesc.Transparent = { forwardTransparentPipeline.get(), forwardTransparent.Layout.get() };
+		forwardDesc.DepthPrepass = { forwardDepthPipeline.get(), forwardDepth.Layout.get() };
+		forwardDesc.OpaquePrepassed = { forwardPrepassedPipeline.get(), forwardPrepassed.Layout.get() };
 		forwardDesc.SortPipeline = sortProgram.Pipeline.get();
 		forwardDesc.SortLayout = sortProgram.Layout.get();
 		forwardDesc.DrawPath = drawPath;
@@ -672,6 +688,21 @@ namespace Engine
 
 	void FrameRenderer::BeginFrame()
 	{
+		// No GPU wait here: the previous frame keeps running on the GPU while the engine
+		// updates UI, gameplay, physics and render extraction for the next one. Every
+		// Collect/Update below only checks completion values (non-blocking); Render waits
+		// for the previous submission right before it acquires and records (GatherTimings).
+		impl->scene->Collect();
+		impl->materialTable->Collect();
+		impl->particles->Collect();
+		impl->skinning->Collect();
+		impl->atlasTextures->Collect();
+		impl->residency->Update();
+		impl->materials->Update();
+	}
+
+	void FrameRenderer::GatherTimings()
+	{
 		auto& executor = device.GetExecutor();
 		executor.Wait();
 
@@ -712,14 +743,6 @@ namespace Engine
 		{
 			stats.TopPasses[i] = passes[i];
 		}
-
-		impl->scene->Collect();
-		impl->materialTable->Collect();
-		impl->particles->Collect();
-		impl->skinning->Collect();
-		impl->atlasTextures->Collect();
-		impl->residency->Update();
-		impl->materials->Update();
 	}
 
 	bool FrameRenderer::Render(const RenderFrameInput& input)
@@ -729,6 +752,10 @@ namespace Engine
 		auto& I = *impl;
 		auto& executor = device.GetExecutor();
 		settings.Sanitize();
+		// The previous frame must be complete before its executor, staging and acquire
+		// semaphore are reused (one submission in flight); the CPU work since BeginFrame
+		// overlapped it.
+		GatherTimings();
 
 		auto frame = device.Acquire();
 		const auto extent = device.GetExtent();
@@ -998,7 +1025,9 @@ namespace Engine
 				grid.Near = camera.Near;
 				grid.Far = std::max(settings.ClusterFar, camera.Near * 2.0f);
 				grid.MaxLightsPerCluster = settings.MaxLightsPerCluster;
-				grid.IndexCapacity = 1u << 20;
+				// Per-cluster bitmasks over every local light (never truncated): the masks
+				// address the frame's local lights, rounded up so the size changes rarely.
+				grid.LightCapacity = std::max(32u, (lightResources.LocalCount + 255u) / 256u * 256u);
 				R::ClusterView clusterView;
 				clusterView.View = camera.View;
 				clusterView.Projection = camera.Projection;
@@ -1064,18 +1093,107 @@ namespace Engine
 			ssFrame.NoiseFrame = static_cast<std::uint32_t>(I.frameIndex);
 			const auto screen = I.screenSpace->Record(graph, ssFrame);
 
-			R::GraphTexture resolved = screen.Output;
+			// Render features (gameplay-added passes) run at three stages of the frame.
+			RenderFeatureView featureView;
+			featureView.View = camera.View;
+			featureView.Projection = camera.Projection;
+			featureView.ViewProjection = viewProjection;
+			featureView.Position = camera.Position;
+			featureView.Forward = camera.Forward;
+			featureView.Right = camera.Right;
+			featureView.Up = camera.Up;
+			featureView.TanHalfFovY = std::tan(camera.VerticalFov * 0.5f);
+			featureView.TanHalfFovX = featureView.TanHalfFovY * camera.Aspect;
+			featureView.Width = width;
+			featureView.Height = height;
+			{
+				const auto& sun = settings.Sky.SunDirection;
+				const float length = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+				for (int c = 0; c < 3; ++c)
+				{
+					featureView.SunDirection[c] = length > 0.0f ? sun[c] / length : (c == 1 ? 1.0f : 0.0f);
+					featureView.SunColor[c] = settings.Sky.SunColor[c] * settings.Sky.Intensity;
+				}
+			}
+			const float frameSeconds = std::clamp(std::isfinite(input.DeltaTime) ? input.DeltaTime : 0.0f, 0.0f, 1.0f);
+			I.featureTime += frameSeconds;
+			featureView.Time = static_cast<float>(I.featureTime);
+			featureView.DeltaTime = frameSeconds;
+			featureView.Frame = static_cast<std::uint32_t>(I.frameIndex);
+			const auto runFeatures = [&](RenderFeatureStage stage, R::GraphTexture color)
+			{
+				std::vector<RenderFeature*> ordered;
+				for (const auto& feature : features)
+				{
+					if (feature && feature->Enabled && feature->GetStage() == stage)
+					{
+						ordered.push_back(feature.get());
+					}
+				}
+				if (ordered.empty() || !draw3D)
+				{
+					return color;
+				}
+				std::stable_sort(ordered.begin(), ordered.end(),
+					[](const RenderFeature* a, const RenderFeature* b)
+					{
+						return a->GetOrder() < b->GetOrder();
+					});
+				RenderFeatureContext::Services services;
+				services.LoadCompute = [this](std::string_view name) -> const RuntimeComputeProgram&
+				{
+					auto& slot = impl->featurePrograms[std::string(name)];
+					if (!slot)
+					{
+						slot = std::make_unique<RuntimeComputeProgram>(impl->shaders.LoadCompute(name));
+					}
+					return *slot;
+				};
+				services.GetSampler = [this](std::string_view kind) -> S::Sampler&
+				{
+					if (kind == "LinearRepeat")
+					{
+						return *impl->linearRepeat;
+					}
+					if (kind == "PointClamp")
+					{
+						return *impl->presentSampler;
+					}
+					return *impl->linearClamp;
+				};
+				RenderFeatureContext context(graph, stage, featureView, settings, color, targets.Depth, std::move(services));
+				for (auto* feature : ordered)
+				{
+					// A broken feature (missing program, wrong bindings) is switched off with a
+					// log line instead of failing every frame.
+					try
+					{
+						feature->Record(context);
+					}
+					catch (const std::exception& error)
+					{
+						feature->Enabled = false;
+						std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
+					}
+				}
+				return context.Color();
+			};
+
+			R::GraphTexture sceneColor = runFeatures(RenderFeatureStage::BeforeTemporal, screen.Output);
+			R::GraphTexture resolved = sceneColor;
 			if (temporalOn)
 			{
 				R::TemporalFrame temporalFrame;
-				temporalFrame.Color = screen.Output;
+				temporalFrame.Color = sceneColor;
 				temporalFrame.Depth = targets.Depth;
 				temporalFrame.Velocity = *targets.Velocity;
 				temporalFrame.Settings = settings.Temporal;
 				resolved = I.temporal->Record(graph, temporalFrame).Output;
 			}
 
-			const auto postOutput = target(S::Format::RGBA8Unorm,
+			resolved = runFeatures(RenderFeatureStage::BeforePostProcess, resolved);
+
+			auto postOutput = target(S::Format::RGBA8Unorm,
 				S::TextureUsage::Storage | S::TextureUsage::ColorAttachment | S::TextureUsage::Sampled | S::TextureUsage::TransferSource,
 				"Frame");
 			R::PostProcessFrame postFrame;
@@ -1085,6 +1203,15 @@ namespace Engine
 			postFrame.Settings.Output.Encoding = R::OutputEncoding::Srgb;
 			postFrame.DeltaTime = std::clamp(std::isfinite(input.DeltaTime) ? input.DeltaTime : 0.0f, 0.0f, 1.0f);
 			I.post->Record(graph, postFrame);
+			{
+				// Display-referred features write their own RGBA8 target; the UI and the
+				// presentation then use it (it keeps the Frame target's usages).
+				const auto finalColor = runFeatures(RenderFeatureStage::AfterPostProcess, postOutput);
+				if (finalColor != postOutput)
+				{
+					postOutput = finalColor;
+				}
+			}
 
 			// --- UI -----------------------------------------------------------------------
 			stats.UiQuads = 0;
@@ -1285,6 +1412,29 @@ namespace Engine
 			(I.meshes->GetRequestedMeshCount() - stats.ResidentMeshes) + (I.meshes->GetRequestedTextureCount() - stats.ResidentTextures);
 		stats.CpuMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - cpuStart).count();
 		(void)pageConflict;
+		return true;
+	}
+
+	void FrameRenderer::AddFeature(std::shared_ptr<RenderFeature> feature)
+	{
+		if (feature && std::find(features.begin(), features.end(), feature) == features.end())
+		{
+			features.push_back(std::move(feature));
+		}
+	}
+
+	bool FrameRenderer::RemoveFeature(const RenderFeature* feature)
+	{
+		const auto found = std::find_if(features.begin(), features.end(),
+			[&](const auto& entry)
+			{
+				return entry.get() == feature;
+			});
+		if (found == features.end())
+		{
+			return false;
+		}
+		features.erase(found);
 		return true;
 	}
 

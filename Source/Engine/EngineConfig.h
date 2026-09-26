@@ -47,10 +47,15 @@ namespace Engine
 		EngineState InitialState{ EngineState::Playing };
 		// Overrides the application's startup scene when non-empty.
 		std::string StartupScene;
+		// Loose-asset root (--assets). Empty: the repository's Assets/ folder in development
+		// builds (SWIM_DEVELOPMENT_ASSET_ROOT) when it exists, else <exe dir>/Assets.
+		std::string AssetRoot;
 
 		// False: no GPU at all (simulation, UI logic and tests only; --no-render).
 		bool Render{ true };
-		bool VSync{ true };
+		// Off by default (mailbox, else immediate): the frame rate is not capped at the
+		// display's refresh. --vsync=on presents FIFO.
+		bool VSync{ false };
 		// GPU validation layers (debug builds enable them by default).
 		bool Validation{ DefaultValidation };
 		// Simulation fixed rate in Hz and initial time scale.

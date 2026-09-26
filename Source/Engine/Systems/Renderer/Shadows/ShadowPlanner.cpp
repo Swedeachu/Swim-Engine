@@ -146,6 +146,7 @@ namespace Swim::Render
 			record.NormalBias = settings.NormalBias;
 			record.SlopeBias = settings.SlopeBias;
 			record.DepthBias = settings.DepthBias;
+			record.CascadeBlend = kind == ShadowKind::Directional ? settings.CascadeBlend : 0.0f;
 			for (int c = 0; c < 3; ++c)
 			{
 				record.LightPosition[c] = light.Position[c];

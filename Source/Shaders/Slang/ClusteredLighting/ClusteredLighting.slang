@@ -1,6 +1,6 @@
 // Clustered Forward+ shading (items 65-66): every directional light plus the local
-// lights of the pixel's cluster. Mirrors Clustering::ShadeClustered; without
-// truncation it equals the brute-force sum over the whole light buffer.
+// lights of the pixel's cluster. Mirrors Clustering::ShadeClustered (bitmask walk in
+// increasing light order); it equals the brute-force sum over the whole light buffer.
 #ifndef SWIM_CLUSTERED_LIGHTING_SLANG
 #define SWIM_CLUSTERED_LIGHTING_SLANG
 #include "ClusteredLighting/ClusterGrid.slang"
@@ -18,10 +18,23 @@ float3 ClusteredShade(ClusterGrid grid, StructuredBuffer<GpuLightRecord> lights,
 		sum += StandardPbrEvaluateBrdf(baseColor, metallic, roughness, normal, view, light.Direction) * light.Radiance;
 	}
 	const ClusterRecord record = records[ClusterIndexFor(grid, pixelX, pixelY, viewDepth)];
-	for (uint i = 0; i < record.Count; ++i)
+	const uint occupancyWords = record.Count != 0 ? ClusterOccupancyWords(grid) : 0u;
+	for (uint o = 0; o < occupancyWords; ++o)
 	{
-		const GpuLightSample light = GpuLightEvaluate(lights[header.FirstLocalRow + indices[record.Offset + i]], worldPosition);
-		sum += StandardPbrEvaluateBrdf(baseColor, metallic, roughness, normal, view, light.Direction) * light.Radiance;
+		uint occupancy = indices[record.Offset + o];
+		while (occupancy != 0)
+		{
+			const uint w = o * 32u + firstbitlow(occupancy);
+			occupancy &= occupancy - 1u;
+			uint mask = indices[record.Offset + occupancyWords + w];
+			while (mask != 0)
+			{
+				const uint index = w * 32u + firstbitlow(mask);
+				mask &= mask - 1u;
+				const GpuLightSample light = GpuLightEvaluate(lights[header.FirstLocalRow + index], worldPosition);
+				sum += StandardPbrEvaluateBrdf(baseColor, metallic, roughness, normal, view, light.Direction) * light.Radiance;
+			}
+		}
 	}
 	return sum;
 }

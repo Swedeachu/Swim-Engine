@@ -47,7 +47,8 @@ ForwardPlusFrame::Shadows = &shadowResources
 | --- | --- |
 | `Kind` | None, Directional, Spot or Point |
 | `FirstView`, `ViewCount` | its views: cascades, 1, or 6 cube faces |
-| `PcfRadius` | (2R + 1)² comparisons |
+| `PcfRadius` | 0: one texel; R ≥ 1: a (2R + 1)-texel box, bilinearly weighted ((2R + 2)² comparisons) |
+| `CascadeBlend` | directional: the far fraction of each cascade's depth range that cross-fades into the next (the last one fades to lit) |
 | `NormalBias`, `SlopeBias`, `DepthBias` | the receiver-side bias (below) |
 | `CascadeFar[4]` | directional: camera view depth where cascade i ends |
 | `LightPosition` | point: cube-face selection, and perspective texel size |
@@ -60,8 +61,9 @@ A `GpuShadowView` holds the row-major reverse-Z `ViewProjection`, the tile (`Atl
 - **Bounds:** each slice is enclosed by the smallest sphere centered on the view axis (`CascadeSphere`). The radius depends only on the slice and the projection, never on the camera's orientation, so rotating the camera never resizes a cascade.
 - **Snapping:** the light view looks along the light direction from the origin. The sphere center is rounded to whole texels in light x/y. A moving camera therefore moves each cascade in whole-texel steps, and static geometry stays on the same texels (no shimmer).
 - **Casters behind the camera:** the orthographic depth range extends `CasterExtension` (default 50 m) toward the light, so off-screen casters still shadow the slice.
-- **Resolution:** `CascadeResolution` per cascade tile (default 1024), all cascades one size.
+- **Resolution:** `CascadeResolution` per cascade tile (default 2048), all cascades one size; `MaxDistance` 70 m, `SplitLambda` 0.8.
 - **Selection:** a point uses the first cascade whose `CascadeFar` exceeds its camera view depth. Beyond the last cascade it is unshadowed.
+- **Blending:** over the far `ShadowSettings::CascadeBlend` fraction (default 0.2) of its depth range, a cascade cross-fades into the next one; the last cascade fades to lit over the same band. Quality therefore changes smoothly with distance instead of popping at the splits.
 
 ## Spot shadows and the atlas (item 71)
 
@@ -102,9 +104,11 @@ All tiles of one light (cascades, cube faces) share one size and are placed or e
 The RHI has no rasterizer depth-bias state, so bias is applied when sampling:
 
 1. **Texel size:** the view's `TexelWorldSize`, times the distance to the light for perspective views.
-2. **Offset:** the receiver moves along its normal by `texel × (NormalBias + SlopeBias × (1 − N·L)) × max(PcfRadius, 1)`. Wider kernels compare texels farther away, so they get more offset.
-3. **View:** the view is selected again for the offset point, which can cross into another cube face.
-4. **PCF:** the offset point is projected into its tile, and the (2R + 1)² texels around it (clamped to the tile) are compared with exact `Load`s: a texel is lit where `depth + DepthBias ≥ stored` (reverse-Z). The factor is the lit fraction.
+2. **Offset:** the receiver moves along its normal by `texel × (NormalBias + SlopeBias × (1 − N·L)) × (PcfRadius + 1)`. Wider kernels compare texels farther away, so they get more offset.
+3. **View:** spot and point lights select the view again for the offset point, which can cross into another cube face. Directional lights sample their cascade, and inside the blend band also the next cascade (each with its own texel size), and interpolate.
+4. **PCF (`SampleShadowView`):** the offset point is projected into its tile and compared with exact `Load`s, clamped to the tile: a texel is lit where `depth + DepthBias ≥ stored` (reverse-Z). Radius 0 compares the one texel under the point (hard edges). Radius R ≥ 1 slides a (2R + 1)-texel box continuously over the texel grid: the (2R + 2)² texels it touches count fully, the outer ring by the fraction the box covers (bilinear PCF), so edges are smooth gradients instead of texel stair steps. When every tap agrees the factor is exactly 0 or 1.
+
+The GPU version keeps one sampling site (a two-iteration loop over the cascades) so the Forward+ programs stay within the GPU-assisted validation budget.
 
 Defaults: `NormalBias` 1, `SlopeBias` 1.5, `DepthBias` 0, `PcfRadius` 1. Unknown or None records, points outside every view and a missing atlas are lit.
 

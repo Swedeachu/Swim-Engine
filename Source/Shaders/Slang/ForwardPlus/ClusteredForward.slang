@@ -20,6 +20,17 @@
 #ifndef FORWARD_TRANSPARENT
 #define FORWARD_TRANSPARENT 0
 #endif
+// Depth prepass (SwimForwardDepth): the opaque vertex stage and a fragment stage that only
+// rejects culled faces and alpha-masked texels, writing depth. The opaque colour pass that
+// follows it (SwimForwardOpaquePrepassed, FORWARD_PREPASSED=1) tests that depth (reverse-Z
+// GreaterOrEqual, no depth writes) with early fragment tests and never discards, so each
+// pixel is shaded once instead of once per overlapping surface.
+#ifndef FORWARD_DEPTH_ONLY
+#define FORWARD_DEPTH_ONLY 0
+#endif
+#ifndef FORWARD_PREPASSED
+#define FORWARD_PREPASSED 0
+#endif
 
 [[vk::binding(0, 0)]] StructuredBuffer<GpuInstanceRecord> Instances;
 [[vk::binding(1, 0)]] StructuredBuffer<GpuTransformRecord> Transforms;
@@ -62,13 +73,55 @@ float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surf
 	// One loop over the directional lights, then the cluster's list: a single call site
 	// keeps the shadow lookup inlined once (GPU-assisted validation instruments every
 	// storage-buffer access and flags shaders with too many).
+	// Local lights come from the cluster's bitmask: occupancy words name the non-zero mask
+	// words, and each set bit is a light (increasing index order, never truncated).
 	float3 sum = float3(0.0, 0.0, 0.0);
-	const uint count = header.DirectionalCount + record.Count;
-	for (uint i = 0; i < count; ++i)
+	const uint occupancyWords = record.Count != 0 ? ClusterOccupancyWords(grid) : 0u;
+	uint nextOccupancy = 0;
+	uint occupancy = 0;
+	uint occupancyBase = 0;
+	uint mask = 0;
+	uint maskBase = 0;
+	uint directional = 0;
+	[loop]
+	for (;;)
 	{
-		const uint row = i < header.DirectionalCount ? i : header.FirstLocalRow + ClusterIndices[record.Offset + (i - header.DirectionalCount)];
+		uint row;
+		if (directional < header.DirectionalCount)
+		{
+			row = directional;
+			++directional;
+		}
+		else
+		{
+			if (mask == 0)
+			{
+				while (occupancy == 0 && nextOccupancy < occupancyWords)
+				{
+					occupancy = ClusterIndices[record.Offset + nextOccupancy];
+					occupancyBase = nextOccupancy * 32u;
+					++nextOccupancy;
+				}
+				if (occupancy == 0)
+				{
+					break;
+				}
+				const uint word = occupancyBase + firstbitlow(occupancy);
+				occupancy &= occupancy - 1u;
+				mask = ClusterIndices[record.Offset + occupancyWords + word];
+				maskBase = word * 32u;
+			}
+			row = header.FirstLocalRow + maskBase + firstbitlow(mask);
+			mask &= mask - 1u;
+		}
 		const GpuLightRecord light = Lights[row];
 		const GpuLightSample sample = GpuLightEvaluate(light, position);
+		// Clusters are conservative: skip the BRDF and shadow lookup of lights that do not
+		// reach this pixel (their contribution is exactly zero).
+		if (all(sample.Radiance <= float3(0.0, 0.0, 0.0)))
+		{
+			continue;
+		}
 		sum += StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal, toCamera,
 				   sample.Direction) *
 			sample.Radiance * ForwardLightShadow(view, light, position, surface.Normal, sample.Direction);
@@ -139,13 +192,16 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	const float4 tangent = float4(v[6], v[7], v[8], v[9]);
 	const float2 uv = float2(v[10], v[11]);
 
-	const float3 world = GpuSceneTransformPoint(current, position);
+	// precise: the depth prepass (FORWARD_DEPTH_ONLY) and the prepassed shading pass must
+	// rasterize bit-identical depths, so no FMA contraction may differ between variants.
+	precise const float3 world = GpuSceneTransformPoint(current, position);
 	const bool mirrored = ForwardDeterminant(current) < 0.0;
 	const float4 p = float4(world, 1.0);
 	VertexOutput output;
-	const float4 clip = ForwardProject(viewProjection, p);
+	precise const float4 clip = ForwardProject(viewProjection, p);
 	// TAA jitter (ForwardPlus::BuildForwardViewRecord): an NDC offset, so clip.xy moves by jitter * w.
-	output.Position = float4(clip.xy + Views[0].Jitter * clip.w, clip.zw);
+	precise const float4 jittered = float4(clip.xy + Views[0].Jitter * clip.w, clip.zw);
+	output.Position = jittered;
 	output.WorldPosition = world;
 	output.Normal = ForwardTransformNormal(current, normal);
 	output.Tangent = float4(ForwardTransformDirection(current, tangent.xyz), (tangent.w < 0.0) != mirrored ? -1.0 : 1.0);
@@ -181,10 +237,12 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const StandardMaterialParameters material = Materials[input.Material];
 	// ForwardPlus::BuildFrame: the rasterizer's facing, corrected for mirroring transforms.
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
+#if !FORWARD_PREPASSED
 	if (ForwardCullsFace(material, frontFacing))
 	{
 		discard;
 	}
+#endif
 	const SamplerState materialSampler = Samplers[NonUniformResourceIndex(material.MaterialSampler)];
 	StandardPbrTexels texels;
 	texels.BaseColor = Textures[NonUniformResourceIndex(material.BaseColorTexture)].Sample(materialSampler, input.Uv);
@@ -198,10 +256,12 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float3 tangent = normalize(input.Tangent.xyz - normal * dot(normal, input.Tangent.xyz) + float3(1.0e-20, 0.0, 0.0));
 	const float3 bitangent = cross(normal, tangent) * (input.Tangent.w < 0.0 ? -1.0 : 1.0);
 	const StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
+#if !FORWARD_PREPASSED
 	if (surface.Discard)
 	{
 		discard;
 	}
+#endif
 
 	const ClusterGrid grid = Grid[0];
 	const float3 toCamera = normalize(view.CameraPosition - input.WorldPosition);
@@ -277,6 +337,32 @@ struct OpaqueOutput
 	float4 Specular : SV_Target6;	 // Specular IBL radiance (part of Indirect), 0 in debug views.
 };
 
+#if FORWARD_DEPTH_ONLY
+// Depth prepass: coverage only.
+[shader("fragment")]
+void fragmentMain(VertexOutput input, bool rasterFrontFacing : SV_IsFrontFace)
+{
+	const StandardMaterialParameters material = Materials[input.Material];
+	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
+	if (ForwardCullsFace(material, frontFacing))
+	{
+		discard;
+	}
+	if ((material.Flags & StandardMaterialFlagAlphaMask) != 0)
+	{
+		const SamplerState materialSampler = Samplers[NonUniformResourceIndex(material.MaterialSampler)];
+		const float alpha =
+			material.BaseColorFactor.a * Textures[NonUniformResourceIndex(material.BaseColorTexture)].Sample(materialSampler, input.Uv).a;
+		if (alpha < material.AlphaCutoff)
+		{
+			discard;
+		}
+	}
+}
+#else
+#if FORWARD_PREPASSED
+[earlydepthstencil]
+#endif
 [shader("fragment")]
 OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 {
@@ -293,4 +379,5 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 	output.Specular = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Specular, 1.0);
 	return output;
 }
+#endif // FORWARD_DEPTH_ONLY
 #endif

@@ -178,9 +178,12 @@ SWIM_TEST("Game.Sandbox", "CommandsDriveTheSunTabsHudAndShooter")
 
 	auto* hud = FindHud(*sandbox);
 	SWIM_REQUIRE(hud != nullptr);
-	SWIM_CHECK(engine.Command("sandbox.tab 3"));
+	SWIM_CHECK(engine.Command("sandbox.tab 2"));
 	SWIM_REQUIRE(engine.Tick(1));
-	SWIM_CHECK_EQUAL(hud->GetVisibleSection(), 3u);
+	SWIM_CHECK_EQUAL(hud->GetVisibleSection(), 2u);
+	SWIM_CHECK(engine.Command("sandbox.tab 9")); // Clamped to the last tab (Scene).
+	SWIM_REQUIRE(engine.Tick(1));
+	SWIM_CHECK_EQUAL(hud->GetVisibleSection(), 2u);
 	SWIM_CHECK(engine.Command("sandbox.hud 0"));
 	SWIM_CHECK(!sandbox->IsHudVisible());
 	SWIM_CHECK(engine.Command("sandbox.hud 1"));
@@ -410,21 +413,30 @@ SWIM_TEST("Game.Sandbox", "F1SwitchHidesEveryUiCanvas")
 	SWIM_CHECK_EQUAL(countVisible(), total);
 }
 
-SWIM_TEST("Game.ModelImport", "FindCookedModelPrefersUploadableVariants")
+SWIM_TEST("Game.ModelImport", "FindSponzaPrefersTheDracoKtxGlb")
 {
 	Swim::Assets::AssetSystem assets;
 	SWIM_REQUIRE(assets.Initialize());
-	for (const char* path : { "Models/Sponza/sponza-ktx.model", "Models/Sponza/glTF/Sponza.model", "Models/Barrel/barrel.model" })
+	for (const char* path : { "Models/Sponza/sponza-ktx.model", "Models/Sponza/sponza-ktx-draco.model", "Models/Sponza/glTF/Sponza.model",
+			 "Models/Barrel/barrel.model" })
 	{
 		const auto handle = assets.Declare<Swim::Assets::ModelAsset>(path);
 		SWIM_REQUIRE(assets.Publish(handle, Swim::Assets::ModelAsset{}));
 	}
-	const auto sponza = Game::FindCookedModel(assets, { "sponza" }, { "gltf/sponza" }, { "ktx" });
+	const auto path = [&](auto handle)
+	{
+		return assets.GetDatabase().FindPath(handle.GetId()).value_or(std::string());
+	};
+	const auto sponza = Game::FindSponzaModel(assets);
 	SWIM_REQUIRE(sponza.IsValid());
-	SWIM_CHECK_EQUAL(assets.GetDatabase().FindPath(sponza.GetId()).value_or(std::string()), std::string("Models/Sponza/glTF/Sponza.model"));
-	const auto ktxOnly = Game::FindCookedModel(assets, { "sponza", "ktx" });
+	SWIM_CHECK_EQUAL(path(sponza), std::string("Models/Sponza/sponza-ktx-draco.model"));
+	// Keyword filtering, preference order and avoidance.
+	const auto plain = Game::FindCookedModel(assets, { "sponza" }, { "gltf/sponza" }, { "ktx" });
+	SWIM_REQUIRE(plain.IsValid());
+	SWIM_CHECK_EQUAL(path(plain), std::string("Models/Sponza/glTF/Sponza.model"));
+	const auto ktxOnly = Game::FindCookedModel(assets, { "sponza", "ktx" }, {}, { "draco" });
 	SWIM_REQUIRE(ktxOnly.IsValid());
-	SWIM_CHECK_EQUAL(assets.GetDatabase().FindPath(ktxOnly.GetId()).value_or(std::string()), std::string("Models/Sponza/sponza-ktx.model"));
+	SWIM_CHECK_EQUAL(path(ktxOnly), std::string("Models/Sponza/sponza-ktx.model"));
 	SWIM_CHECK(!Game::FindCookedModel(assets, { "helmet" }).IsValid());
 	assets.Shutdown();
 }

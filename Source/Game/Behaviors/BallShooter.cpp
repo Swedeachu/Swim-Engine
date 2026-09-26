@@ -28,11 +28,10 @@ namespace Game
 			return;
 		}
 		using Swim::Platform::KeyCode;
-		using Swim::Platform::MouseButton;
+		// F only (held = repeat fire); the mouse buttons belong to the UI and the camera.
 		const bool gated = inputGate && inputGate();
-		const bool click = input->IsMouseButtonTriggered(MouseButton::Left) && !input->IsMouseButtonDown(MouseButton::Right);
 		const bool key = input->IsKeyDown(KeyCode::F) && cooldown <= 0.0f;
-		if (!gated && (click || key))
+		if (!gated && key)
 		{
 			Fire();
 			cooldown = 0.12f;
@@ -71,7 +70,7 @@ namespace Game
 				Engine::MeshRenderer renderer;
 				renderer.Parts.push_back({ mesh, material });
 				owner.AddComponent<Engine::MeshRenderer>(ball, std::move(renderer));
-				AddSphereBody(owner, ball, Engine::RigidbodyType::Dynamic, 0.2f, 2.0f);
+				AddSphereBody(owner, ball, Engine::RigidbodyType::Dynamic, 0.5f, 2.0f); // Mesh-local: 0.2 m at scale 0.4.
 				owner.GetRegistry().get<Engine::Rigidbody>(ball).SetInitialLinearVelocity(forward * speed);
 				owner.AddTag(ball, Engine::Tags::Projectile);
 				owner.AddTag(ball, GameTags::Spawned);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 
@@ -108,7 +109,7 @@ namespace Engine
 		std::filesystem::path ShaderRoot;
 		std::uint32_t MaxObjects = 16384;
 		std::uint32_t MaxMaterials = 1024;
-		std::uint32_t MaxLocalLights = 4096;
+		std::uint32_t MaxLocalLights = 16384;
 		std::uint32_t MaxDirectionalLights = 4;
 		std::uint32_t MaxParticles = 1u << 18;
 		std::uint32_t MaxEmitters = 128;
@@ -136,9 +137,11 @@ namespace Engine
 	//                 AO/reflections/fog, TAA, post (exposure, bloom, grading, tone mapping),
 	//                 UI (screen and world canvases) and presentation
 	//
-	// Per frame: BeginFrame (waits for the previous frame, collects retired resources,
-	// advances residency), then the scene bridge updates the GPU scene/lights/emitters,
-	// then Render records one render graph, submits and presents it. Owner thread only.
+	// Per frame: BeginFrame (collects retired resources and advances residency without
+	// waiting for the GPU), then the scene bridge updates the GPU scene/lights/emitters,
+	// then Render waits for the previous submission, records one render graph, submits and
+	// presents it. Gameplay and extraction therefore overlap the previous frame's GPU work.
+	// Owner thread only.
 	class FrameRenderer
 	{
 	  public:
@@ -184,12 +187,34 @@ namespace Engine
 		// Writes the last capture as a binary PPM (P6); false without one.
 		bool WriteCapture(const std::filesystem::path& path) const;
 
+		// Render features (RenderFeature.h): gameplay-owned passes recorded every frame at
+		// their stage. Adding the same object twice is ignored; programs load on first use.
+		void AddFeature(std::shared_ptr<RenderFeature> feature);
+		bool RemoveFeature(const RenderFeature* feature);
+
+		const std::vector<std::shared_ptr<RenderFeature>>& GetFeatures() const { return features; }
+
+		template <typename T> T* FindFeature() const
+		{
+			for (const auto& feature : features)
+			{
+				if (auto* typed = dynamic_cast<T*>(feature.get()))
+				{
+					return typed;
+				}
+			}
+			return nullptr;
+		}
+
 	  private:
+		void GatherTimings(); // Waits for the previous submission and reads its pass timings.
+
 		struct Impl;
 		RenderDevice& device;
 		RenderSettings settings;
 		RenderStats stats;
 		std::unique_ptr<Impl> impl;
+		std::vector<std::shared_ptr<RenderFeature>> features;
 		Swim::Rhi::TimelinePoint lastCompletion{};
 		std::vector<std::uint8_t> capture;
 		std::uint32_t captureWidth = 0;

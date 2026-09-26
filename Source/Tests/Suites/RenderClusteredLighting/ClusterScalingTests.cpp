@@ -50,24 +50,22 @@ namespace
 	void CheckStats(const ClusterGridRecord& grid, const Cl::ClusterAssignment& assignment, std::uint32_t visibleExpected)
 	{
 		const auto maxPerCluster = grid.Limits[2];
-		const auto capacity = grid.Limits[3];
 		std::uint64_t requested = 0;
 		std::uint32_t overflow = 0, nonEmpty = 0, maxRaw = 0, written = 0;
 		for (const auto& record : assignment.Records)
 		{
-			requested += std::min(record.RawCount, maxPerCluster);
+			requested += record.RawCount;
 			overflow += record.RawCount > maxPerCluster ? 1u : 0u;
 			nonEmpty += record.Count > 0 ? 1u : 0u;
 			maxRaw = std::max(maxRaw, record.RawCount);
 			written += record.Count;
-			SWIM_CHECK(record.Offset + record.Count <= capacity);
+			SWIM_CHECK_EQUAL(record.Count, record.RawCount); // Never truncated.
 		}
 		const auto& stats = assignment.Stats;
 		SWIM_CHECK_EQUAL(stats.VisibleLights, visibleExpected);
 		SWIM_CHECK_EQUAL(std::uint64_t(stats.RequestedIndices), requested);
 		SWIM_CHECK_EQUAL(stats.WrittenIndices, written);
-		SWIM_CHECK_EQUAL(stats.WrittenIndices, std::uint32_t(std::min<std::uint64_t>(requested, capacity)));
-		SWIM_CHECK_EQUAL(stats.DroppedIndices, stats.RequestedIndices - stats.WrittenIndices);
+		SWIM_CHECK_EQUAL(stats.DroppedIndices, 0u);
 		SWIM_CHECK_EQUAL(stats.OverflowClusters, overflow);
 		SWIM_CHECK_EQUAL(stats.NonEmptyClusters, nonEmpty);
 		SWIM_CHECK_EQUAL(stats.MaxRawLightsPerCluster, maxRaw);
@@ -77,7 +75,7 @@ namespace
 
 // Item 69 on the CPU reference: the scaling scenarios the native benchmark times
 // (Phase 15: 1k and 10k lights, mostly off-screen, dense overlap, no lights) keep
-// every statistic consistent and bounded. The native
+// every statistic consistent, and no cluster ever drops a light. The native
 // ClusteredLightingScalesToTensOfThousandsOfLights smoke times the GPU passes.
 SWIM_TEST("Render.ClusteredLights", "ScalingScenariosKeepStatisticsConsistentAndBounded")
 {
@@ -88,7 +86,7 @@ SWIM_TEST("Render.ClusteredLights", "ScalingScenariosKeepStatisticsConsistentAnd
 	desc.SliceCount = 16;
 	desc.Far = 60.0f;
 	desc.MaxLightsPerCluster = 128;
-	desc.IndexCapacity = 64 * 1024;
+	desc.LightCapacity = 10000;
 	const auto grid = MakeClusterGridRecord(desc, Scene::Camera(16.0f / 9.0f));
 
 	// No lights: the empty fast path writes nothing.
@@ -98,7 +96,11 @@ SWIM_TEST("Render.ClusteredLights", "ScalingScenariosKeepStatisticsConsistentAnd
 		CheckStats(grid, assignment, 0);
 		SWIM_CHECK_EQUAL(assignment.Stats.RequestedIndices, 0u);
 		SWIM_CHECK_EQUAL(assignment.Stats.NonEmptyClusters, 0u);
-		SWIM_CHECK(assignment.Indices.empty());
+		SWIM_CHECK(std::all_of(assignment.Indices.begin(), assignment.Indices.end(),
+			[](std::uint32_t w)
+			{
+				return w == 0;
+			}));
 	}
 
 	struct Case
@@ -129,16 +131,15 @@ SWIM_TEST("Render.ClusteredLights", "ScalingScenariosKeepStatisticsConsistentAnd
 		}
 		if (c.Shape == Layout::Dense)
 		{
-			SWIM_CHECK(stats.OverflowClusters > 0u); // Bounded, counted, and visible in the heatmap.
+			SWIM_CHECK(stats.OverflowClusters > 0u); // Above the heatmap scale; nothing dropped.
 			SWIM_CHECK(stats.MaxRawLightsPerCluster > desc.MaxLightsPerCluster);
 			SWIM_CHECK_EQUAL(stats.VisibleLights, c.Count);
 		}
 		if (c.Shape == Layout::Uniform)
 		{
 			SWIM_CHECK(stats.VisibleLights > c.Count / 2);
-			// 1k fits; 10k overflows both limits, which stay bounded and counted.
+			// 10k lights exceed the heatmap scale in places; every light is still kept.
 			SWIM_CHECK((stats.OverflowClusters == 0u) == (c.Count == 1000));
-			SWIM_CHECK((stats.DroppedIndices > 0u) == (c.Count == 10000));
 		}
 		std::printf("             [clusters CPU reference] %-10s %5u lights: %5u visible, %6u indices, %4u overflowing, max %4u; %.2f ms\n",
 			c.Name, c.Count, stats.VisibleLights, stats.WrittenIndices, stats.OverflowClusters, stats.MaxRawLightsPerCluster, ms);

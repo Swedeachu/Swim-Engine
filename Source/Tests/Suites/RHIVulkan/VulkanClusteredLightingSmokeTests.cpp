@@ -242,8 +242,8 @@ namespace
 				AddBufferReadback(graph, "View lights", clusters.ViewLights, 0, std::uint64_t(clusters.LocalLightCapacity) * 16);
 			const auto boundsReadback = AddBufferReadback(graph, "Bounds", clusters.Bounds, 0, std::uint64_t(clusterCount) * 32);
 			const auto recordsReadback = AddBufferReadback(graph, "Records", clusters.Records, 0, std::uint64_t(clusterCount) * 16);
-			const auto indicesReadback =
-				AddBufferReadback(graph, "Indices", clusters.Indices, 0, std::uint64_t(gridDesc.IndexCapacity) * 4);
+			const std::uint64_t maskBufferWords = std::uint64_t(clusterCount) * ClusterBlockWords(grid);
+			const auto indicesReadback = AddBufferReadback(graph, "Light masks", clusters.Indices, 0, maskBufferWords * 4);
 			const auto statsReadback = AddBufferReadback(graph, "Stats", clusters.Stats, 0, sizeof(ClusterStats));
 			const auto resultsReadback = AddBufferReadback(graph, "Probe", results, 0, sampleCount * 32);
 			const auto heatmapReadback = AddTextureReadback(graph, "Heatmap", heatmapTexture, { 0, {}, {}, { width, height, 1 } });
@@ -260,7 +260,7 @@ namespace
 			std::vector<std::array<float, 4>> gpuViewLights(clusters.LocalLightCapacity);
 			std::vector<std::array<float, 8>> gpuBounds(clusterCount);
 			std::vector<ClusterRecord> gpuRecords(clusterCount);
-			std::vector<std::uint32_t> gpuIndices(gridDesc.IndexCapacity);
+			std::vector<std::uint32_t> gpuIndices(maskBufferWords);
 			ClusterStats gpuStats{};
 			std::vector<std::array<float, 4>> gpuResults(sampleCount * 2);
 			std::vector<std::uint8_t> gpuHeatmap(std::size_t(width) * height * 4);
@@ -312,20 +312,19 @@ namespace
 			// 2. Lists and stats against the CPU assignment over the GPU's inputs.
 			const auto reference = Cl::AssignLights(grid, viewLights, gpuAabbs);
 			std::uint32_t listDifferences = 0;
-			std::uint32_t prefix = 0;
+			Cl::ClusterAssignment gpuAssignment;
+			gpuAssignment.Records = gpuRecords;
+			gpuAssignment.Indices = gpuIndices;
 			for (std::uint32_t c = 0; c < clusterCount; ++c)
 			{
 				const auto& actual = gpuRecords[c];
 				const auto& expected = reference.Records[c];
-				SWIM_CHECK_EQUAL(actual.Offset, std::min(prefix, gridDesc.IndexCapacity));
-				prefix += std::min(actual.RawCount, gridDesc.MaxLightsPerCluster);
-				SWIM_REQUIRE(actual.Offset + actual.Count <= gridDesc.IndexCapacity);
-				const std::vector<std::uint32_t> gpuList(
-					gpuIndices.begin() + actual.Offset, gpuIndices.begin() + actual.Offset + actual.Count);
-				const std::vector<std::uint32_t> cpuList(
-					reference.Indices.begin() + expected.Offset, reference.Indices.begin() + expected.Offset + expected.Count);
-				SWIM_CHECK(std::is_sorted(gpuList.begin(), gpuList.end()));
-				if (actual.RawCount == expected.RawCount && gpuList == cpuList && actual.Offset == expected.Offset)
+				SWIM_CHECK_EQUAL(actual.Offset, expected.Offset);
+				SWIM_CHECK_EQUAL(actual.Count, actual.RawCount); // Never truncated.
+				const auto gpuList = Cl::ClusterLightList(gpuAssignment, grid, c);
+				const auto cpuList = Cl::ClusterLightList(reference, grid, c);
+				SWIM_CHECK_EQUAL(std::uint32_t(gpuList.size()), actual.Count);
+				if (actual.RawCount == expected.RawCount && gpuList == cpuList)
 				{
 					continue;
 				}
@@ -344,8 +343,8 @@ namespace
 			SWIM_CHECK(listDifferences <= clusterCount / 200); // Grazing contacts only.
 			SWIM_CHECK_EQUAL(gpuStats.ClusterCount, clusterCount);
 			SWIM_CHECK_EQUAL(gpuStats.VisibleLights, reference.Stats.VisibleLights);
-			SWIM_CHECK_EQUAL(gpuStats.DroppedIndices, gpuStats.RequestedIndices - gpuStats.WrittenIndices);
-			SWIM_CHECK_EQUAL(gpuStats.WrittenIndices, std::min(prefix, gridDesc.IndexCapacity));
+			SWIM_CHECK_EQUAL(gpuStats.DroppedIndices, 0u);
+			SWIM_CHECK_EQUAL(gpuStats.WrittenIndices, gpuStats.RequestedIndices);
 			if (listDifferences == 0)
 			{
 				SWIM_CHECK(std::memcmp(&gpuStats, &reference.Stats, sizeof(ClusterStats)) == 0);
@@ -366,18 +365,10 @@ namespace
 					{ s.View[0], s.View[1], s.View[2] }, { s.Position[0], s.Position[1], s.Position[2] });
 				const auto cluster = static_cast<std::uint32_t>(clustered[3]);
 				SWIM_REQUIRE(cluster < clusterCount);
-				const bool complete = gpuRecords[cluster].Count == gpuRecords[cluster].RawCount;
 				for (int c = 0; c < 3; ++c)
 				{
 					SWIM_CHECK(std::abs(brute[c] - cpu[c]) <= 1.0e-4f + 2.0e-3f * std::abs(cpu[c]));
-					if (complete)
-					{
-						SWIM_CHECK(std::abs(clustered[c] - brute[c]) <= 1.0e-4f + 1.0e-3f * std::abs(brute[c]));
-					}
-					else
-					{
-						SWIM_CHECK(clustered[c] <= brute[c] * (1.0f + 1.0e-3f) + 1.0e-4f); // Truncation only removes light.
-					}
+					SWIM_CHECK(std::abs(clustered[c] - brute[c]) <= 1.0e-4f + 1.0e-3f * std::abs(brute[c])); // Complete lists.
 				}
 				lit += brute[0] > 0.0f ? 1u : 0u;
 			}
@@ -428,18 +419,17 @@ namespace
 		gridDesc.Near = 0.1f;
 		gridDesc.Far = 60.0f;
 		gridDesc.MaxLightsPerCluster = 256;
-		gridDesc.IndexCapacity = 1u << 20;
+		gridDesc.LightCapacity = 1024;
 		const auto roomy = frame("roomy", gridDesc);
 		SWIM_CHECK_EQUAL(roomy[1], 0u);
 
-		// Truncation and capacity overflow.
+		// A tiny heatmap scale: clusters above it are counted, none is truncated (no magenta).
 		auto tight = gridDesc;
 		tight.MaxLightsPerCluster = 4;
-		tight.IndexCapacity = 4096;
-		const auto overflow = frame("overflow", tight);
-		SWIM_CHECK(overflow[1] > 0u);
-		SWIM_CHECK(overflow[0] > tight.IndexCapacity);
-		SWIM_CHECK(overflow[2] > 0u);
+		const auto dense = frame("dense", tight);
+		SWIM_CHECK(dense[1] > 0u);
+		SWIM_CHECK_EQUAL(dense[0], roomy[0]);
+		SWIM_CHECK_EQUAL(dense[2], 0u);
 
 		// Moved lights and a new resolution.
 		for (std::size_t i = 0; i < 300; ++i)

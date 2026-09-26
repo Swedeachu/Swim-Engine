@@ -28,7 +28,7 @@ This section is the short authoritative status summary for the current repositor
 | Rendering | Active through `FrameRenderer`: GPU scene extraction (`SceneRenderBridge`), single-phase GPU frustum/LOD visibility with indirect draws (zero-filled fallback on SwiftShader), clustered Forward+ (opaque and sorted transparent), cascaded/spot/point shadows, a procedural sky with GPU-built IBL, post (auto exposure, bloom, grading, tone mapping), TAA, GTAO/SSR/fog, GPU particles and compute skinning. Two-phase HZB occlusion is built but not wired (see findings). |
 | Text/UI | Active through `UiRuntime`: screen overlays, world panels and billboards from `UiCanvas` components, routed input (pointer, keyboard, text, gamepad) and the `UiRenderer` pass. Render-surface canvases are not routed yet. |
 | Animation | Compute skinning is active (a procedural palette drives the sandbox tentacles). The CPU animation runtime (item 78) is not constructed by any scene yet. |
-| Shaders | Active: the Slang runtime set (36 programs) compiled at build time and deployed as `Shaders/Runtime`. |
+| Shaders | Active: the Slang runtime set (38 programs) compiled at build time and deployed as `Shaders/Runtime`. |
 | Commands | Active command registry: engine commands (play, pause, step, timescale, scene, reload, capture, camera, quit) and scene-registered commands. |
 
 ### Next work, in order (decided 2026-09-25)
@@ -241,7 +241,7 @@ The critical-path ladder for these steps is [35.9](#359-engine-assembly-and-game
     - `ClusteredLightAssigner` (item 65) records five deterministic compute passes with no atomics: light cull to view space, cluster AABBs, count, a one-group prefix scan into compact offsets, and write. Lists are in light-index order. Directional lights stay outside them.
     - `ClusterReference` is the CPU definition of every pass, plus `ShadeClustered`; `ClusteredLighting.slang` provides the shader-side `ClusteredShade`.
   - **Overflow and diagnostics (item 68):**
-    - `MaxLightsPerCluster` truncates lists and `IndexCapacity` clamps offsets; nothing is written out of bounds, and truncation only removes light.
+    - (2026-09-26) Cluster light lists became per-cluster bitmasks with occupancy words: no truncation and no index capacity; `MaxLightsPerCluster` is only the heatmap scale. See docs/ClusteredLighting.md.
     - `ClusterStats` reports visible lights, requested/written/dropped indices, overflowing and non-empty clusters and the maximum raw count.
     - `RecordHeatmap` colors each pixel by its cluster's count from the depth buffer, with magenta for truncated clusters.
   - **Validation:**
@@ -830,7 +830,7 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | fastgltf | glTF/GLB structure + extension metadata import | Compiler/dev-import only. It parses glTF and exposes extension metadata; it is **not** treated as the codec implementation for Draco, WebP, or Basis payloads. Never make it a shipping runtime dependency for compiled assets. |
 | Draco | `KHR_draco_mesh_compression` geometry decode | Compiler/import only. Decode compressed primitives to ordinary Swim intermediate vertex/index data, then run meshoptimizer/cooking. Draco must not be linked by the shipping runtime. |
 | libwebp | `EXT_texture_webp` image decode | Compiler/import only. Decode authoring WebP to compiler image data, then cook normal TextureAssets. WebP must not be a shipping runtime texture dependency. |
-| Basis Universal transcoder | Basis/KTX2 universal texture transcode | Runtime use is allowed only while cooked KTX2/Basis payloads are intentionally platform-neutral. Keep the dependency behind texture residency; remove it from runtime once platform-native texture variants make runtime transcoding unnecessary. Encoder/tool code stays compiler-side. |
+| Basis Universal transcoder | Basis/KTX2 universal texture transcode | Compiler-only since 2026-09-26: the cooker transcodes KHR_texture_basisu images to RGBA8 mip chains (`Swim::AssetCompilerBasisTranscoder`). The runtime links no Basis code. BC7 variants would need block-aware RHI copies. |
 | meshoptimizer | vertex/index optimization, LOD, meshlets | Use offline in asset compiler. |
 | KTX-Software/libktx | KTX2 texture processing/transcoding | Add/use when compiler-side KTX2 production needs it; runtime should consume Swim TextureAsset metadata/payloads rather than expose libktx types. |
 | zstd | package/chunk compression | Keep behind asset/package code. |
