@@ -57,12 +57,10 @@ endif()
 set(CPM_USE_NAMED_CACHE_DIRECTORIES ON CACHE BOOL
 	"Keep CPM dependency cache directories human-readable" FORCE)
 
-if(WIN32)
-	set(SWIM_BUILD_LEGACY_ENGINE_DEFAULT ON)
-else()
-	set(SWIM_BUILD_LEGACY_ENGINE_DEFAULT OFF)
-endif()
-option(SWIM_BUILD_LEGACY_ENGINE "Build the existing renderer/game runtime while it is being migrated" ${SWIM_BUILD_LEGACY_ENGINE_DEFAULT})
+# The SwimEngine executable (runtime + sandbox game). Phase 23 made it cross-platform:
+# it renders only through the modern RHI (Vulkan) and builds on Windows and Linux.
+# Turn it off for foundation-only configures (module tests without the runtime).
+option(SWIM_BUILD_ENGINE "Build the SwimEngine runtime executable (Source/Engine + Source/Game)" ON)
 if(WIN32 AND MSVC)
 	set(SWIM_ENABLE_PHYSX_BACKEND_DEFAULT ON)
 else()
@@ -77,7 +75,7 @@ option(SWIM_BUILD_SHADER_COMPILER "Build Slang shader compiler/reflection toolin
 option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
 
-if(SWIM_BUILD_LEGACY_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
+if(SWIM_BUILD_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
 	message(FATAL_ERROR
 		"The SwimEngine executable requires at least one compiled physics backend. "
 		"Enable SWIM_ENABLE_PHYSX_BACKEND and/or SWIM_ENABLE_JOLT_BACKEND."
@@ -602,6 +600,18 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
+	# Runtime-only programs (Phase 23): presentation onto the swapchain and the sky
+	# background drawn before Clustered Forward+.
+	swim_add_slang_program(SwimRuntimePresent
+		SOURCE Source/Shaders/Slang/Runtime/Present.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimRuntimeSkyBackground
+		SOURCE Source/Shaders/Slang/Runtime/SkyBackground.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	add_custom_target(SwimRhiSmokeShaders
 		DEPENDS "${SwimRhiTriangle_SPIRV}" "${SwimRhiTriangle_REFLECTION}"
 			"${SwimRhiTexture_SPIRV}" "${SwimRhiTexture_REFLECTION}"
@@ -977,7 +987,7 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 	swim_set_solution_folder(SwimHeadlessCoreAssets "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
-if(NOT SWIM_BUILD_LEGACY_ENGINE)
+if(NOT SWIM_BUILD_ENGINE)
 	# Foundation-only configure: define the test program now, with whatever
 	# module targets this configuration actually has.
 	if(SWIM_BUILD_FOUNDATION_TESTS)
@@ -986,13 +996,16 @@ if(NOT SWIM_BUILD_LEGACY_ENGINE)
 	return()
 endif()
 
-if(NOT WIN32)
+if(NOT SWIM_VULKAN_RHI_AVAILABLE AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	message(FATAL_ERROR
-		"SWIM_BUILD_LEGACY_ENGINE is still Windows-only while the renderer backends are being migrated. "
-		"The Swim::Platform module and SwimHelloWindow are cross-platform."
+		"The SwimEngine runtime renders through the modern Vulkan RHI. Enable SWIM_ENABLE_VULKAN_RHI "
+		"(or configure with -DSWIM_BUILD_ENGINE=OFF for a foundation-only build)."
 	)
 endif()
 
+# Runtime third-party dependencies (EnTT, spdlog). The legacy OpenGL loader (glad),
+# nlohmann/json, stb, zstd and the Basis transcoder left with the legacy renderer
+# (Phase 22); their old rules live in Deprecated/cmake/LegacyDependencies.cmake.
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 include(cmake/Dependencies.cmake)
@@ -1015,11 +1028,6 @@ endif()
 if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_library(SwimVulkan INTERFACE)
 	add_library(Vulkan::Vulkan ALIAS SwimVulkan)
-	add_library(SwimOpenGL INTERFACE)
-	add_library(OpenGL::GL ALIAS SwimOpenGL)
-else()
-	find_package(Vulkan REQUIRED)
-	find_package(OpenGL REQUIRED)
 endif()
 
 # Platform, Input, Commands, Memory, Jobs, IO, and Core (EngineConfig/
@@ -1049,6 +1057,8 @@ file(GLOB_RECURSE SWIM_ENGINE_SOURCES
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")
+# The precompiled header's own translation unit is compiled only with PCH enabled.
+list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Utility/PCH\\.cpp$")
 if(NOT SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 	list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/(Text|UI|UiInput|Renderer/UiRendering)/")
 endif()
@@ -1064,6 +1074,7 @@ if(SWIM_VULKAN_RHI_AVAILABLE)
 	list(APPEND SWIM_ENGINE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})
 endif()
 
+# The sandbox game: scenes, behaviours and UI panels (Source/Game).
 file(GLOB_RECURSE SWIM_GAME_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Game/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Game/*.h
@@ -1134,7 +1145,6 @@ if(NOT SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
 endif()
 
 target_compile_definitions(SwimEngine PRIVATE
-	NDEBUG
 	_CONSOLE
 	UNICODE
 	_UNICODE
@@ -1143,7 +1153,7 @@ target_compile_definitions(SwimEngine PRIVATE
 	$<$<PLATFORM_ID:Windows>:NOMINMAX>
 	$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
 	$<$<CONFIG:Debug>:_SWIM_DEBUG>
-	$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
+	$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:_ITERATOR_DEBUG_LEVEL=0>
 	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
 	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
 	SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
@@ -1158,18 +1168,11 @@ if(SWIM_VULKAN_RHI_AVAILABLE)
 endif()
 
 if(SWIM_ENABLE_PCH)
+	target_sources(SwimEngine PRIVATE ${CMAKE_SOURCE_DIR}/Source/Engine/Utility/PCH.cpp)
 	target_precompile_headers(SwimEngine PRIVATE
 		"$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/Source/Engine/Utility/PCH.h>"
 	)
 endif()
-
-# These implementation TUs own third-party implementation macros and must not
-# inherit PCH definitions that can instantiate the same headers prematurely.
-set_source_files_properties(
-	Source/Engine/ThirdParty/StbImageImplementation.cpp
-	Source/Engine/ThirdParty/StbImageResizeImplementation.cpp
-	PROPERTIES SKIP_PRECOMPILE_HEADERS ON
-)
 
 if(MSVC)
 	target_compile_options(SwimEngine PRIVATE
@@ -1215,25 +1218,26 @@ if(SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
 	target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)
 endif()
 
+# The runtime ShaderLibrary reads Slang reflection sidecars through the shader
+# tool library (reflection JSON -> RHI program interface); Slang itself is not linked.
+if(TARGET SwimShaderCompiler)
+	target_link_libraries(SwimEngine PRIVATE Swim::ShaderCompiler)
+endif()
+
 # Third-party dependencies that used to be PRIVATE to a module's own
 # now-retired target (SDL3/Platform, mimalloc/Memory, enkiTS/Jobs) move
 # directly onto SwimEngine, since that module's sources compile as part of
 # SwimEngine's own translation units now. Swim::Core/Memory/Assets/Jobs/IO/
 # Platform/Input/Commands/Physics no longer exist as separate targets to link.
+find_package(Threads REQUIRED)
 target_link_libraries(SwimEngine PRIVATE
 	${SWIM_SDL3_TARGET}
 	Swim::Mimalloc
 	Swim::EnkiTS
 	spdlog::spdlog
-	Vulkan::Vulkan
-	OpenGL::GL
 	glm::glm
 	EnTT::EnTT
-	nlohmann_json::nlohmann_json
-	stb::stb
-	zstd::zstd
-	Swim::BasisTranscoder
-	glad::glad
+	Threads::Threads
 )
 
 if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
@@ -1253,21 +1257,30 @@ if(SWIM_JOLT_BACKEND_AVAILABLE)
 	target_link_libraries(SwimEngine PRIVATE Swim::Jolt)
 endif()
 
+# Runtime shaders (Shaders/Runtime next to the executable) and resources (fonts).
 include(cmake/Shaders.cmake)
 swim_configure_shaders(SwimEngine)
-
 
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	add_custom_command(TARGET SwimEngine POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E copy_directory
-			"${CMAKE_SOURCE_DIR}/Assets"
-			"$<TARGET_FILE_DIR:SwimEngine>/Assets"
+			"${CMAKE_SOURCE_DIR}/Resources"
+			"$<TARGET_FILE_DIR:SwimEngine>/Resources"
 		VERBATIM
 	)
+	# Loose development assets are optional: the sandbox is fully procedural.
+	if(EXISTS "${CMAKE_SOURCE_DIR}/Assets")
+		add_custom_command(TARGET SwimEngine POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E copy_directory
+				"${CMAKE_SOURCE_DIR}/Assets"
+				"$<TARGET_FILE_DIR:SwimEngine>/Assets"
+			VERBATIM
+		)
+	endif()
 endif()
 
-# The full Windows/legacy configure has the widest dependency surface (EnTT,
-# GLM, and the PhysX backend), so the single test program is defined last and
+# The full configure has the widest dependency surface (EnTT, GLM, the physics
+# backends and the runtime), so the single test program is defined last and
 # picks up every suite group this configuration can build.
 if(SWIM_BUILD_FOUNDATION_TESTS)
 	swim_configure_tests()

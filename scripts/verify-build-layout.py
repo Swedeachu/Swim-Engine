@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -196,9 +197,6 @@ def check_build_workflow(failures: list[str]) -> None:
             )
 
     for fragment in (
-        'swim_set_solution_folder(SwimZstd "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Zstd")',
-        'swim_set_solution_folder(SwimBasisTranscoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Basis Universal")',
-        'swim_set_solution_folder(SwimGlad "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/GLAD")',
     ):
         if fragment not in dependency_text:
             fail(f"third-party Visual Studio target organization is missing: {fragment}", failures)
@@ -573,10 +571,8 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")',
         '$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:_ITERATOR_DEBUG_LEVEL=0>',
         '$<$<CONFIG:Debug>:_SWIM_DEBUG>',
-        '$<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>',
         '$<$<CONFIG:Debug>:/U_DEBUG>',
         'target_precompile_headers(SwimEngine',
-        'SKIP_PRECOMPILE_HEADERS ON',
     )
     for fragment in required_root_fragments:
         if fragment not in cmake_text:
@@ -621,16 +617,13 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         if fragment not in physx_build_text:
             fail(f"PhysX external build no longer preserves the old ABI/config mapping: {fragment}", failures)
 
+    # Phase 23: the runtime shader set (Slang -> SPIR-V through SwimSlangCompiler) is
+    # staged once and deployed next to the executable as Shaders/Runtime.
     required_shader_fragments = (
-        'TARGET spirv',
-        'PROFILE spirv_1_5',
-        'TARGET glsl',
-        'PROFILE glsl_460',
-        '${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_SHADER_GROUP}',
-        '${SWIM_RUNTIME_SHADER_ROOT}/OpenGL',
-        'add_custom_target(SwimShaderArtifacts',
-        'add_dependencies(${target} SwimShaderArtifacts)',
-        '$<TARGET_FILE_DIR:${target}>/Shaders',
+        'function(swim_define_runtime_shader_set)',
+        'add_custom_target(SwimRuntimeShaders',
+        'function(swim_configure_shaders target)',
+        '$<TARGET_FILE_DIR:${target}>/Shaders/Runtime',
     )
     for fragment in required_shader_fragments:
         if fragment not in shader_text:
@@ -646,14 +639,6 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         'NAME entt_source',
         'add_library(SwimEnTT INTERFACE)',
         'add_library(EnTT::EnTT ALIAS SwimEnTT)',
-        'set(SWIM_NLOHMANN_JSON_VERSION "3.10.4")',
-        'c9ac7589260f36ea7016d4d51a6c95809803298c7caec9f55830a0214c5f9140',
-        'releases/download/v${SWIM_NLOHMANN_JSON_VERSION}/json.hpp',
-        'EXPECTED_HASH "SHA256=${SWIM_NLOHMANN_JSON_SHA256}"',
-        'file(SHA256 "${SWIM_NLOHMANN_JSON_HEADER}" SWIM_JSON_ACTUAL_SHA256)',
-        'if(FETCHCONTENT_FULLY_DISCONNECTED)',
-        'add_library(SwimJson INTERFACE)',
-        'add_library(nlohmann_json::nlohmann_json ALIAS SwimJson)',
         'function(swim_assert_cached_git_dependency_clean dependency_name source_dir)',
         'status --porcelain --untracked-files=all',
         "Cached dependency '${dependency_name}' is dirty",
@@ -737,10 +722,6 @@ def check_preserved_build_contract(failures: list[str]) -> None:
     pins = (
         'GIT_TAG 1.0.0',
         'GIT_TAG v3.13.2',
-        'set(SWIM_NLOHMANN_JSON_VERSION "3.10.4")',
-        'GIT_TAG v1.4.9',
-        'GIT_TAG v1_60_snapshot_final',
-        'GIT_TAG v2.0.8',
     )
     for fragment in pins:
         if fragment not in dependency_contract_text:
@@ -750,39 +731,25 @@ def check_preserved_build_contract(failures: list[str]) -> None:
 def check_modern_cmake_dependency_compatibility(failures: list[str]) -> None:
     dependency_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
 
-    if 'add_subdirectory("${zstd_source_SOURCE_DIR}/build/cmake"' in dependency_text:
-        fail("zstd 1.4.9 still executes its obsolete upstream CMake project", failures)
-
-    if '${zstd_source_SOURCE_DIR}/contrib/single_file_libs/zstd-in.c' in dependency_text:
-        fail("zstd integration still compiles the ungenerated zstd-in.c amalgamation template", failures)
-
-    required_zstd_fragments = (
-        'file(GLOB SWIM_ZSTD_COMMON_SOURCES',
-        'lib/common/*.c',
-        'file(GLOB SWIM_ZSTD_COMPRESS_SOURCES',
-        'lib/compress/*.c',
-        'file(GLOB SWIM_ZSTD_DECOMPRESS_SOURCES',
-        'lib/decompress/*.c',
-        'file(GLOB SWIM_ZSTD_DICTBUILDER_SOURCES',
-        'lib/dictBuilder/*.c',
-        'add_library(SwimZstd STATIC',
-        'ZSTD_DISABLE_ASM',
-        'ZSTD_MULTITHREAD',
-        'target_include_directories(SwimZstd SYSTEM',
-        'add_library(zstd::zstd ALIAS SwimZstd)',
-    )
-    for fragment in required_zstd_fragments:
+    # Phase 22/23 retired the legacy renderer and its third-party stack (GLAD/OpenGL,
+    # zstd, Basis Universal, nlohmann/json, stb, the legacy font/ImGui helpers). Their
+    # CMake lives in Deprecated/cmake/LegacyDependencies.cmake for reference only.
+    for retired in ("SwimZstd", "SwimBasisTranscoder", "SwimGlad", "SwimJson", "glad_add_library", "nlohmann_json"):
+        if retired in dependency_text:
+            fail(f"runtime dependency list regained a retired legacy dependency: {retired}", failures)
+    for fragment in ("NAME entt_source", "add_library(EnTT::EnTT ALIAS SwimEnTT)"):
         if fragment not in dependency_text:
-            fail(f"modern-CMake zstd integration is missing: {fragment}", failures)
+            fail(f"runtime dependency list is missing: {fragment}", failures)
+    if (ROOT / "cmake" / "LegacyDependencies.cmake").exists():
+        fail("cmake/LegacyDependencies.cmake must stay archived under Deprecated/cmake", failures)
+    if not (ROOT / "Deprecated" / "cmake" / "LegacyDependencies.cmake").is_file():
+        fail("archived Deprecated/cmake/LegacyDependencies.cmake is missing", failures)
 
 
 def check_windows_compile_contract_and_warning_hygiene(failures: list[str]) -> None:
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
     dependency_text = (ROOT / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8", errors="ignore")
     physx_build_text = (ROOT / "cmake" / "BuildPhysX.cmake").read_text(encoding="utf-8", errors="ignore")
-    vulkan_renderer_text = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanRenderer.h"
-    ).read_text(encoding="utf-8", errors="ignore")
 
     for definition in ("UNICODE", "_UNICODE"):
         if definition not in cmake_text:
@@ -791,23 +758,16 @@ def check_windows_compile_contract_and_warning_hygiene(failures: list[str]) -> N
     if "/W3" not in cmake_text or "/W4" in cmake_text:
         fail("MSVC warning level no longer matches the legacy x64 /W3 project", failures)
 
-    required_wgl_extensions = (
-        "WGL_ARB_create_context",
-        "WGL_ARB_create_context_profile",
-        "WGL_ARB_extensions_string",
-        "WGL_ARB_multisample",
-        "WGL_ARB_pixel_format",
-        "WGL_EXT_extensions_string",
-        "WGL_EXT_swap_control",
-    )
-    for extension in required_wgl_extensions:
-        if extension not in dependency_text:
-            fail(f"GLAD generation is missing legacy WGL extension: {extension}", failures)
-
-    if "const VkDevice& GetDevice() const" in vulkan_renderer_text:
-        fail("VulkanRenderer::GetDevice still returns a reference to a temporary handle", failures)
-    if "const VkPhysicalDevice& GetPhysicalDevice() const" in vulkan_renderer_text:
-        fail("VulkanRenderer::GetPhysicalDevice still returns a reference to a temporary handle", failures)
+    # OpenGL (and WGL context creation) was removed in Phase 22.
+    for retired in ("glad", "GLAD", "WGL_"):
+        if retired in dependency_text:
+            fail(f"OpenGL/WGL dependency returned to cmake/Dependencies.cmake: {retired}", failures)
+    for path in (ROOT / "Source").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"#\s*include\s*[<\"](?:glad/|GL/gl)", text):
+            fail(f"active source includes OpenGL headers again: {path.relative_to(ROOT)}", failures)
 
     if "PX_BUILDPUBLICSAMPLES" in physx_build_text:
         fail("PhysX reconfigure still passes the unused PX_BUILDPUBLICSAMPLES option", failures)
@@ -854,7 +814,8 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
     generic_contract_files = (
         ROOT / "Source" / "Engine" / "SwimEngine.h",
         ROOT / "Source" / "Engine" / "Input" / "InputSystem.h",
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Renderer.h",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Runtime" / "RenderDevice.h",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Runtime" / "FrameRenderer.h",
     )
     win32_contract_tokens = re.compile(r"\b(?:HWND|HINSTANCE|WPARAM|LPARAM|LRESULT|WNDPROC)\b|\bWM_[A-Z0-9_]+\b|\bVK_[A-Z0-9_]+\b")
     for path in generic_contract_files:
@@ -914,14 +875,6 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
                 failures,
             )
 
-    vulkan_device_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanDeviceManager.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    vk_platform_define = vulkan_device_header.find("VK_USE_PLATFORM_WIN32_KHR")
-    vk_header_include = vulkan_device_header.find("<vulkan/vulkan.h>")
-    if vk_platform_define < 0 or vk_header_include < 0 or vk_platform_define > vk_header_include:
-        fail("VulkanDeviceManager.h must define VK_USE_PLATFORM_WIN32_KHR before including Vulkan headers", failures)
-
     for compile_definition in ("WIN32_LEAN_AND_MEAN", "NOMINMAX", "VK_USE_PLATFORM_WIN32_KHR"):
         if f"$<$<PLATFORM_ID:Windows>:{compile_definition}>" not in cmake_text:
             fail(f"SwimEngine is missing Windows compile definition: {compile_definition}", failures)
@@ -978,7 +931,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
 
 
 def check_phase2_engine_architecture(failures: list[str]) -> None:
-    engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
+    """Phase 2 explicit ownership, as reshaped by Phase 22/23 (runtime, no editor, no OpenGL)."""
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     config_header = (ROOT / "Source" / "Engine" / "EngineConfig.h").read_text(encoding="utf-8", errors="ignore")
@@ -992,98 +945,69 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         "GraphicsBackend Graphics",
         "PhysicsBackend Physics",
         "Swim::Platform::WindowDesc Window",
+        "EngineState InitialState",
+        "double FixedRate",
+        "double TimeScale",
+        "bool Render",
+        "std::uint64_t MaxFrames",
+        "double FixedFrameDelta",
+        "std::vector<std::string> StartupCommands",
     ):
         if fragment not in config_header:
-            fail(f"Phase 2 runtime configuration contract is missing: {fragment}", failures)
+            fail(f"runtime configuration contract is missing: {fragment}", failures)
 
-    for fragment in (
-        'argument == "--graphics"',
-        'argument == "--physics"',
-        "ResolveGraphicsBackend",
-        "ResolvePhysicsBackend",
-    ):
+    for fragment in ('"--graphics"', '"--physics"', "ResolveGraphicsBackend", "ResolvePhysicsBackend", '"--no-render"', '"--exec"'):
         if fragment not in config_source:
-            fail(f"Phase 2 command-line backend selection is missing: {fragment}", failures)
+            fail(f"command-line runtime selection is missing: {fragment}", failures)
+    if "OpenGL" in config_header or "GraphicsBackend::OpenGL" in config_source:
+        fail("the OpenGL backend returned to the runtime configuration", failures)
 
     if "SystemManager" in engine_header or "systemManager" in engine_source or "AddSystem<" in engine_source:
         fail("SwimEngine core lifecycle regressed to stringly typed SystemManager ownership", failures)
 
     for fragment in (
-        "int SwimEngine::AwakeSystems()",
-        "int SwimEngine::InitSystems()",
-        "void SwimEngine::UpdateSystems(double dt)",
-        "void SwimEngine::FixedUpdateSystems(unsigned int tickThisSecond)",
-        "int SwimEngine::ExitSystems()",
-        "Destroy consumers before the services they reference.",
-        "switch (graphicsBackend)",
+        "int SwimEngine::Start()",
+        "int SwimEngine::Run()",
+        "bool SwimEngine::Tick()",
+        "int SwimEngine::Awake()",
+        "int SwimEngine::Init()",
+        "void SwimEngine::Update(double realDelta)",
+        "int SwimEngine::Exit()",
+        "int SwimEngine::InitRenderer()",
+        "void SwimEngine::RegisterEngineCommands()",
     ):
         if fragment not in engine_source:
-            fail(f"Phase 2 explicit lifecycle/backend contract is missing: {fragment}", failures)
-
-    if "SwimEngine::CONTEXT" in engine_source or "RenderContext" in engine_header:
-        fail("compile-time renderer selection returned to SwimEngine", failures)
+            fail(f"runtime lifecycle contract is missing: {fragment}", failures)
 
     for owner_type in (
         "Swim::Input::InputSystem",
         "Swim::Commands::CommandRegistry",
         "SceneSystem",
-        "VulkanRenderer",
-        "OpenGLRenderer",
         "CameraSystem",
         "PhysicsSystem",
+        "RenderDevice",
+        "FrameRenderer",
+        "SceneRenderBridge",
+        "UiRuntime",
     ):
         if f"std::unique_ptr<{owner_type}>" not in engine_header:
-            fail(f"Phase 2 core owner is not uniquely owned: {owner_type}", failures)
+            fail(f"core owner is not uniquely owned: {owner_type}", failures)
         if f"std::shared_ptr<{owner_type}>" in engine_header:
-            fail(f"Phase 2 core owner regressed to shared ownership: {owner_type}", failures)
+            fail(f"core owner regressed to shared ownership: {owner_type}", failures)
+    for fragment in ("EngineStateMachine stateMachine", "SimulationClock clock", "TagRegistry tagRegistry"):
+        if fragment not in engine_header:
+            fail(f"engine-owned runtime state is missing: {fragment}", failures)
 
-    camera_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    camera_source = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "SwimEngine::GetInstance" in camera_header or "SwimEngine::GetInstance" in camera_source:
-        fail("CameraSystem regressed to global engine discovery instead of injected runtime configuration", failures)
+    for retired in ("VulkanRenderer", "OpenGLRenderer", "EditorCamera", "EngineState::Editing", "Gizmo", "RenderContext"):
+        if retired in engine_header or retired in engine_source:
+            fail(f"SwimEngine still references retired legacy/editor machinery: {retired}", failures)
 
-    vulkan_index_draw = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "SwimEngine::GetInstance" in vulkan_index_draw:
-        fail("VulkanIndexDraw regressed to global engine discovery instead of injected renderer/scene/camera services", failures)
-
-    transform_source = (
-        ROOT / "Source" / "Engine" / "Components" / "Transform.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "SwimEngine::GetInstance" in transform_source:
-        fail("Transform regressed to global active-scene discovery", failures)
-    if "GraphicsBackend::" in transform_source:
-        fail("Transform regressed to graphics-API-specific clip-space behavior", failures)
-
-    cubemap_controller_source = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Environment" / "CubeMapController.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "SwimEngine::GetInstance" in cubemap_controller_source:
-        fail("CubeMapController regressed to global engine discovery instead of renderer-owned backend injection", failures)
-
-    for renderer_name, relative_path in (
-        ("VulkanRenderer", ("Vulkan", "VulkanRenderer.cpp")),
-        ("OpenGLRenderer", ("OpenGL", "OpenGLRenderer.cpp")),
-    ):
-        renderer_source = (
-            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / relative_path[0] / relative_path[1]
-        ).read_text(encoding="utf-8", errors="ignore")
-        if "GetInstance()->GetSceneSystem()" in renderer_source:
-            fail(f"{renderer_name} regressed to global active-scene discovery", failures)
-
-    for fragment in (
-        "set(SWIM_CORE_SOURCES",
-        "Source/Engine/EngineConfig.cpp",
-    ):
+    for fragment in ("set(SWIM_CORE_SOURCES", "Source/Engine/EngineConfig.cpp", "option(SWIM_BUILD_ENGINE"):
         if fragment not in cmake_text:
-            fail(f"Phase 2 Core CMake/test boundary is missing: {fragment}", failures)
+            fail(f"Core CMake/test boundary is missing: {fragment}", failures)
+    if "SWIM_BUILD_LEGACY_ENGINE" in cmake_text:
+        fail("CMakeLists.txt still offers the retired SWIM_BUILD_LEGACY_ENGINE switch", failures)
 
-    # Phase 2 is a whole-tree invariant now, not a handful of migrated call sites.
     runtime_locator_patterns = (
         "SwimEngine::GetInstance()",
         "MeshPool::GetInstance()",
@@ -1092,116 +1016,36 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
         "FontPool::GetInstance()",
         "EntityFactory::GetInstance()",
     )
-    source_roots = (ROOT / "Source" / "Engine", ROOT / "Source" / "Game")
-    for source_root in source_roots:
-        if not source_root.exists():
-            continue
+    for source_root in (ROOT / "Source" / "Engine", ROOT / "Source" / "Game"):
         for path in source_root.rglob("*"):
             if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for locator in runtime_locator_patterns:
                 if locator in text:
-                    fail(
-                        f"Phase 2 runtime service locator returned in {path.relative_to(ROOT)}: {locator}",
-                        failures,
-                    )
+                    fail(f"runtime service locator returned in {path.relative_to(ROOT)}: {locator}", failures)
 
-    for shared_engine_pattern in (
-        "std::shared_ptr<SwimEngine>",
-        "std::weak_ptr<SwimEngine>",
-        "enable_shared_from_this<SwimEngine>",
-    ):
+    for shared_engine_pattern in ("std::shared_ptr<SwimEngine>", "std::weak_ptr<SwimEngine>", "enable_shared_from_this<SwimEngine>"):
         if shared_engine_pattern in engine_header or shared_engine_pattern in engine_source:
             fail(f"SwimEngine lifetime regressed to process-shared ownership: {shared_engine_pattern}", failures)
 
-    scene_system_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    scene_system_source = (
-        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "Preregister(std::shared_ptr<Scene>" in scene_system_header:
-        fail("Scene preregistration regressed to process-global mutable Scene instances", failures)
-    if "factory.clear()" in scene_system_source:
-        fail("Scene constructor metadata is cleared by the first engine instance", failures)
-
-    primitive_meshes_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "PrimitiveMeshes.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if '#include "Vertex.h"' not in primitive_meshes_header:
-        fail("PrimitiveMeshes.h must include Vertex.h directly instead of relying on PCH/transitive includes", failures)
-
-    scene_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    scene_source = (
-        ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    for fragment in (
-        "Scene();",
-        "explicit Scene(const std::string& name);",
-        "~Scene() override;",
-    ):
+    scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
+    scene_source = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp").read_text(encoding="utf-8", errors="ignore")
+    for fragment in ("Scene();", "explicit Scene(const std::string& name);", "~Scene() override;"):
         if fragment not in scene_header:
             fail(f"Scene incomplete-type ownership boundary is missing declaration: {fragment}", failures)
-    for fragment in (
-        "Scene::Scene()",
-        "Scene::Scene(const std::string& name)",
-        "Scene::~Scene() = default;",
-    ):
+    for fragment in ("Scene::Scene()", "Scene::Scene(const std::string&", "Scene::~Scene()"):
         if fragment not in scene_source:
             fail(f"Scene incomplete-type ownership boundary is missing out-of-line definition: {fragment}", failures)
-    if "Scene() :" in scene_header or "explicit Scene(const std::string& name =" in scene_header:
-        fail("Scene constructors must remain out-of-line while Scene owns forward-declared scene subsystems", failures)
 
-    font_pool_header = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Font" / "FontPool.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    font_pool_source = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Font" / "FontPool.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "void Flush();" not in font_pool_header or "void FontPool::Flush()" not in font_pool_source:
-        fail("FontPool shutdown API must declare and define Flush() consistently", failures)
-
-    direct_service_include_checks = (
-        (
-            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp",
-            '#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"',
-            "OpenGLRenderer must include MaterialPool.h directly before calling MaterialPool methods",
-        ),
-        (
-            ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanRenderer.cpp",
-            '#include "Engine/Platform/FileSystem.h"',
-            "VulkanRenderer must include FileSystem.h directly before calling FileSystem methods",
-        ),
-        (
-            ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp",
-            '#include "Engine/Systems/Renderer/Core/Meshes/MeshPool.h"',
-            "Scene.cpp must include MeshPool.h directly for scene-owned resource wiring",
-        ),
-        (
-            ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.cpp",
-            '#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"',
-            "Scene.cpp must include MaterialPool.h directly for scene-owned resource wiring",
-        ),
-    )
-    for path, fragment, message in direct_service_include_checks:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if fragment not in text:
-            fail(message, failures)
-
-    # Behavior/gameplay translation units must not dereference services that Behavior only forward-declares
-    # unless they include the concrete service header themselves. This catches MSVC/PCH-only completeness failures.
+    # Gameplay translation units include the concrete service headers they dereference.
     game_service_include_rules = (
-        ("renderer->", "Engine/Systems/Renderer/Renderer.h"),
         ("scene->", "Engine/Systems/Scene/Scene.h"),
         ("input->", "Engine/Input/InputSystem.h"),
-        ("cameraSystem->", "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"),
+        ("cameraSystem->", "Engine/Systems/Camera/CameraSystem.h"),
         ("sceneSystem->", "Engine/Systems/Scene/SceneSystem.h"),
     )
-    game_source_root = ROOT / "Source" / "Game"
-    for path in game_source_root.rglob("*.cpp"):
+    for path in (ROOT / "Source" / "Game").rglob("*.cpp"):
         text = path.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
         for expression, include_path in game_service_include_rules:
             if expression in text and include_path not in text:
@@ -1211,37 +1055,6 @@ def check_phase2_engine_architecture(failures: list[str]) -> None:
                     failures,
                 )
 
-    cubemap_test_header = (
-        ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "CubeMapControlTest.h"
-    ).read_text(encoding="utf-8", errors="ignore")
-    cubemap_test_source = (
-        ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "CubeMapControlTest.cpp"
-    ).read_text(encoding="utf-8", errors="ignore")
-    if "class CubeMapController;" not in cubemap_test_header:
-        fail("CubeMapControlTest must explicitly declare its non-owning CubeMapController dependency", failures)
-    if "std::unique_ptr<Engine::CubeMapController>&" in cubemap_test_header:
-        fail("CubeMapControlTest helper must not expose renderer ownership through unique_ptr", failures)
-    for fragment in (
-        '#include "Engine/Systems/Renderer/Core/Environment/CubeMapController.h"',
-        '#include "Engine/Systems/Scene/Scene.h"',
-        '#include "Engine/Input/InputSystem.h"',
-    ):
-        if fragment not in cubemap_test_source:
-            fail(f"CubeMapControlTest direct dependency include is missing: {fragment}", failures)
-
-    if '#include "Engine/Systems/Renderer/Renderer.h"' in cubemap_test_source or "renderer->" in cubemap_test_source:
-        fail("CubeMapControlTest regained a direct Renderer dependency; use the optional CubeMapController scene service", failures)
-
-    include_case_checks = (
-        (ROOT / "Source" / "Game" / "Behaviors" / "Demo" / "SetTextCallBack.cpp", '#include "SetTextCallBack.h"'),
-        (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "Rigibody.cpp", '#include "RigidBody.h"'),
-        (ROOT / "Source" / "Game" / "Testing" / "PrimitiveTest.cpp", '#include "PCH.h"'),
-        (ROOT / "Source" / "Game" / "Testing" / "PrimitivePhysicsTest.cpp", '#include "PCH.h"'),
-    )
-    for path, fragment in include_case_checks:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if fragment not in text:
-            fail(f"project-local include spelling/case regressed in {path.relative_to(ROOT)}: {fragment}", failures)
 
 def check_phase20_text_dependencies(failures: list[str]) -> None:
     """Item 79 groundwork: FreeType, HarfBuzz and msdfgen are pinned CPM
@@ -1502,8 +1315,8 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
     for fragment in (
         "std::unique_ptr<Swim::Jobs::JobSystem> jobSystem",
         "jobSystem->Initialize(jobDesc)",
-        "rendererRuntimeServices.Jobs = jobSystem.get()",
-        "sceneServices.Core.Jobs = jobSystem.get()",
+        "services.Jobs = jobSystem.get()",
+        "sceneSystem->SetServices(std::move(services))",
         "jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain)",
     ):
         target = engine_header if "unique_ptr" in fragment else engine_source
@@ -1529,13 +1342,12 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
     io_source = io_source_path.read_text(encoding="utf-8", errors="ignore")
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
-    renderer_services = (
-        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h"
-    ).read_text(encoding="utf-8", errors="ignore")
+    # Phase 22: one SceneServices struct (Scene.h) replaced the legacy renderer runtime services.
+    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
     scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(
         encoding="utf-8", errors="ignore"
     )
-    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(
+    scene_system_header = renderer_services + (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(
         encoding="utf-8", errors="ignore"
     )
 
@@ -1581,8 +1393,8 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
     for fragment in (
         "std::unique_ptr<Swim::IO::AsyncIoService> ioSystem",
         "ioSystem->Initialize(platformSystem->GetFileSystem(), *jobSystem)",
-        "rendererRuntimeServices.IO = ioSystem.get()",
-        "sceneServices.Core.IO = ioSystem.get()",
+        "services.IO = ioSystem.get()",
+        "sceneSystem->SetServices(std::move(services))",
         "ioSystem->PumpCompletions()",
         "ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain)",
     ):
@@ -1591,14 +1403,14 @@ def check_phase3_io_architecture(failures: list[str]) -> None:
             fail(f"engine-owned Async IO lifecycle/injection is missing: {fragment}", failures)
 
     if "Swim::IO::AsyncIoService* IO" not in renderer_services:
-        fail("legacy renderer runtime services do not expose the engine-owned Async IO service", failures)
+        fail("SceneServices do not expose the engine-owned Async IO service", failures)
     if "Swim::IO::AsyncIoService* IO" not in scene_system_header:
         fail("SceneSystem services do not expose the engine-owned Async IO service", failures)
     if "GetIoSystem()" not in scene_header:
         fail("Scene runtime service view does not expose Async IO without global discovery", failures)
 
     io_shutdown_index = engine_source.find("ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain)")
-    scene_exit_index = engine_source.find('exitSystem("SceneSystem", sceneSystem.get())')
+    scene_exit_index = engine_source.find('record("SceneSystem", sceneSystem->Exit())')
     jobs_shutdown_index = engine_source.find("jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain)")
     if io_shutdown_index == -1 or scene_exit_index == -1 or jobs_shutdown_index == -1:
         fail("cannot validate Async IO shutdown ordering", failures)
@@ -1631,8 +1443,8 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
     job_source = (ROOT / "Source" / "Engine" / "Jobs" / "JobSystem.cpp").read_text(encoding="utf-8", errors="ignore")
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
-    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h").read_text(encoding="utf-8", errors="ignore")
-    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
+    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
+    scene_system_header = renderer_services + (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
     scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
 
     for fragment in (
@@ -1684,14 +1496,14 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
             fail(f"engine-owned frame arena is missing: {fragment}", failures)
     for fragment in (
         "frameArena.BeginFrame",
-        "rendererRuntimeServices.FrameMemory = &frameArena",
-        "sceneServices.Core.FrameMemory = &frameArena",
+        "services.FrameMemory = &frameArena",
+        "sceneSystem->SetServices(std::move(services))",
     ):
         if fragment not in engine_source:
             fail(f"frame arena lifecycle/injection is missing: {fragment}", failures)
 
     if "Swim::Memory::FrameArena* FrameMemory" not in renderer_services:
-        fail("legacy renderer runtime services do not expose frame memory", failures)
+        fail("SceneServices do not expose frame memory", failures)
     if "Swim::Memory::FrameArena* FrameMemory" not in scene_system_header:
         fail("SceneSystem services do not expose frame memory", failures)
     if "GetFrameArena()" not in scene_header:
@@ -1780,9 +1592,9 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
     sasset_source = (asset_root / "SassetFormat.cpp").read_text(encoding="utf-8", errors="ignore")
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
-    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RendererRuntimeServices.h").read_text(encoding="utf-8", errors="ignore")
+    renderer_services = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
     scene_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "Scene.h").read_text(encoding="utf-8", errors="ignore")
-    scene_system_header = (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
+    scene_system_header = renderer_services + (ROOT / "Source" / "Engine" / "Systems" / "Scene" / "SceneSystem.h").read_text(encoding="utf-8", errors="ignore")
 
     for fragment in (
         "file(GLOB_RECURSE SWIM_ASSET_SOURCES",
@@ -1861,148 +1673,50 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
             fail(f"engine-owned AssetSystem declaration is missing: {fragment}", failures)
     for fragment in (
         "assetSystem->Initialize()",
-        "rendererRuntimeServices.Assets = assetSystem.get()",
-        "sceneServices.Core.Assets = assetSystem.get()",
+        "services.Assets = assetSystem.get()",
+        "sceneSystem->SetServices(std::move(services))",
         "assetSystem->Shutdown()",
     ):
         if fragment not in engine_source:
             fail(f"engine-owned AssetSystem lifecycle/injection is missing: {fragment}", failures)
 
     if "Swim::Assets::AssetSystem* Assets" not in renderer_services:
-        fail("legacy renderer runtime services do not expose the engine-owned AssetSystem", failures)
+        fail("SceneServices do not expose the engine-owned AssetSystem", failures)
     if "Swim::Assets::AssetSystem* Assets" not in scene_system_header:
         fail("SceneSystem services do not expose the engine-owned AssetSystem", failures)
     if "GetAssetSystem()" not in scene_header:
         fail("Scene runtime service view does not expose AssetSystem without global discovery", failures)
 
-    legacy_material = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "MaterialData.h"
-    legacy_binding = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "LegacyRenderBinding.h"
-    legacy_material_pool = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "MaterialPool.cpp"
-    legacy_material_pool_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Material" / "MaterialPool.h"
-    legacy_mesh = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "Mesh.h"
-    legacy_mesh_pool_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "MeshPool.h"
-    legacy_mesh_pool = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Meshes" / "MeshPool.cpp"
-    legacy_texture = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "Texture2D.cpp"
-    legacy_texture_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "Texture2D.h"
-    legacy_texture_pool = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "TexturePool.cpp"
-    legacy_texture_pool_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Textures" / "TexturePool.h"
-    material_component = ROOT / "Source" / "Engine" / "Components" / "Material.h"
-    vulkan_index_draw = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.cpp"
-
-    if not all(path.is_file() for path in (legacy_material, legacy_binding, legacy_material_pool, legacy_material_pool_header, legacy_mesh, legacy_mesh_pool_header, legacy_mesh_pool, legacy_texture, legacy_texture_header, legacy_texture_pool, legacy_texture_pool_header, material_component, vulkan_index_draw)):
-        fail("Phase 4 legacy mesh/material ownership migration seam is incomplete", failures)
-        return
-
-    legacy_material_text = legacy_material.read_text(encoding="utf-8", errors="ignore")
-    legacy_binding_text = legacy_binding.read_text(encoding="utf-8", errors="ignore")
-    legacy_material_pool_text = legacy_material_pool.read_text(encoding="utf-8", errors="ignore")
-    legacy_material_pool_header_text = legacy_material_pool_header.read_text(encoding="utf-8", errors="ignore")
-    legacy_mesh_text = legacy_mesh.read_text(encoding="utf-8", errors="ignore")
-    legacy_mesh_pool_header_text = legacy_mesh_pool_header.read_text(encoding="utf-8", errors="ignore")
-    legacy_mesh_pool_text = legacy_mesh_pool.read_text(encoding="utf-8", errors="ignore")
-    legacy_texture_text = legacy_texture.read_text(encoding="utf-8", errors="ignore")
-    legacy_texture_header_text = legacy_texture_header.read_text(encoding="utf-8", errors="ignore")
-    legacy_texture_pool_text = legacy_texture_pool.read_text(encoding="utf-8", errors="ignore")
-    legacy_texture_pool_header_text = legacy_texture_pool_header.read_text(encoding="utf-8", errors="ignore")
-    material_component_text = material_component.read_text(encoding="utf-8", errors="ignore")
-    vulkan_index_draw_text = vulkan_index_draw.read_text(encoding="utf-8", errors="ignore")
-
-    for fragment in ("MeshBufferData", "std::shared_ptr<Mesh>", "VkBuffer", "GLuint"):
-        if fragment in legacy_material_text:
-            fail(f"legacy MaterialData regained geometry/backend ownership: {fragment}", failures)
-
-    for fragment in ("std::shared_ptr<Mesh> mesh", "std::shared_ptr<MeshBufferData> meshBufferData", "std::shared_ptr<MaterialData> material"):
-        if fragment not in legacy_binding_text:
-            fail(f"legacy draw compatibility binding no longer keeps mesh/material residency separate: {fragment}", failures)
-
-    for fragment in ("MeshBufferData", "VkBuffer", "GLuint", "meshBufferData"):
-        if fragment in legacy_mesh_text:
-            fail(f"legacy CPU Mesh regained renderer residency/backend state: {fragment}", failures)
-
-    for fragment in ("GetMeshBufferData", "RequestMeshResidency", "meshResidency", "ComputeLegacyMeshContentHash", "meshContentIndex"):
-        if fragment not in legacy_mesh_pool_text and fragment not in legacy_mesh_pool_header_text:
-            fail(f"legacy mesh residency/content-hash migration seam is missing: {fragment}", failures)
-
-    request_mesh_residency_index = legacy_mesh_pool_text.find("MeshPool::RequestMeshResidency")
-    mesh_upload_index = legacy_mesh_pool_text.find("GenerateBuffersAndAABB")
-    if request_mesh_residency_index == -1 or mesh_upload_index == -1 or mesh_upload_index < request_mesh_residency_index:
-        fail("legacy MeshPool registration regained an implicit renderer upload instead of explicit RequestMeshResidency", failures)
-    if "meshes->RequestMeshResidency(mesh)" not in legacy_material_pool_text:
-        fail("MaterialPool must explicitly request mesh renderer residency when creating a legacy draw binding", failures)
-    if "Meshes->RequestMeshResidency(m)" not in vulkan_index_draw_text:
-        fail("Vulkan glyph compatibility path must explicitly request mesh renderer residency", failures)
-
-    for fragment in ("ComputeLegacyTextureContentHash", "textureContentIndex"):
-        if fragment not in legacy_texture_pool_text and fragment not in legacy_texture_pool_header_text:
-            fail(f"legacy texture content-hash migration seam is missing: {fragment}", failures)
-
-    for fragment in (
-        "Texture2D(const std::string& filePath",
-        "Texture2D(uint32_t width, uint32_t height",
-        "MakeResident(TextureRuntimeContext residencyContext)",
-        "friend class TexturePool",
-    ):
-        if fragment not in legacy_texture_header_text and fragment not in legacy_texture_text:
-            fail(f"legacy Texture2D CPU-construction/explicit-residency boundary is missing: {fragment}", failures)
-    if "Texture2D(TextureRuntimeContext" in legacy_texture_header_text or "Texture2D::Texture2D(TextureRuntimeContext" in legacy_texture_text:
-        fail("Texture2D construction regained renderer-context coupling", failures)
-    if "Generate();" in legacy_texture_text:
-        fail("Texture2D constructor path regained implicit renderer upload", failures)
-    for fragment in (
-        "RequestTextureResidency(const std::shared_ptr<Texture2D>& texture)",
-        "RequestTextureResidencyLocked",
-        "texture->MakeResident(runtimeContext)",
-    ):
-        if fragment not in legacy_texture_pool_text and fragment not in legacy_texture_pool_header_text:
-            fail(f"legacy TexturePool explicit renderer-residency request is missing: {fragment}", failures)
-    if "std::make_shared<Texture2D>(runtimeContext" in legacy_texture_pool_text:
-        fail("TexturePool regained renderer-coupled Texture2D construction", failures)
-
-    for fragment in (
-        "Swim::Assets::AssetSystem& assets",
-        "LoadAndRegisterCompositeMaterial(const std::string& sourcePath)",
-        "assets->Find<Swim::Assets::ModelAsset>",
-        "ComputeDependencyRevisionHash",
-        "compositeMaterialRevisions",
-        "assets->Resolve(node.Mesh)",
-        "GetOrCreateTextureFromAsset",
-    ):
-        if fragment not in legacy_material_pool_text and fragment not in legacy_material_pool_header_text:
-            fail(f"cooked ModelAsset -> legacy renderer residency seam is missing: {fragment}", failures)
-
-    for fragment in (
-        "AssetHandle<Swim::Assets::TextureAsset>",
-        "GetOrCreateTextureFromAsset",
-        "assets.GetStatus(handle)",
-        "assets.Resolve(handle)",
-        "TranscodeBasisKtx2",
-    ):
-        if fragment not in legacy_texture_pool_text and fragment not in legacy_texture_pool_header_text:
-            fail(f"cooked TextureAsset -> legacy renderer residency seam is missing: {fragment}", failures)
-
-    for stale_fragment in ("tinygltf", "tiny_gltf", "WebPDecode", "draco::"):
-        if stale_fragment in legacy_material_pool_text or stale_fragment in legacy_material_pool_header_text:
-            fail(f"runtime MaterialPool regained source-import dependency: {stale_fragment}", failures)
-
-    for fragment in (
-        "catch (const std::exception& error)",
-        "Failed to resolve cooked model for",
-        "return cached;",
-    ):
-        if fragment not in legacy_material_pool_text:
-            fail(f"legacy cooked-model compatibility residency can terminate startup again: {fragment}", failures)
-
-    stb_image_implementation = ROOT / "Source" / "Engine" / "ThirdParty" / "StbImageImplementation.cpp"
-    if not stb_image_implementation.is_file() or "STB_IMAGE_IMPLEMENTATION" not in stb_image_implementation.read_text(encoding="utf-8", errors="ignore"):
-        fail("runtime loose-image compatibility lost its explicit stb_image implementation after tinygltf removal", failures)
-    for implementation_source in (
+    # Phase 23 retired the legacy mesh/material/texture/font pools, their loose-image
+    # (stb) compatibility TUs and the VulkanRenderer draw paths that consumed them. The
+    # runtime streams cooked/procedural geometry and textures through the
+    # AssetResidencyService (MeshLibrary) and GPU material tables (MaterialLibrary).
+    for retired in (
+        "Source/Engine/Systems/Renderer/Core/Material/MaterialPool.cpp",
+        "Source/Engine/Systems/Renderer/Core/Meshes/MeshPool.cpp",
+        "Source/Engine/Systems/Renderer/Core/Textures/TexturePool.cpp",
+        "Source/Engine/Systems/Renderer/Core/Font/FontPool.cpp",
+        "Source/Engine/Systems/Renderer/Vulkan/VulkanRenderer.cpp",
+        "Source/Engine/Systems/Renderer/OpenGL/OpenGLRenderer.cpp",
+        "Source/Engine/Components/Material.h",
         "Source/Engine/ThirdParty/StbImageImplementation.cpp",
-        "Source/Engine/ThirdParty/StbImageResizeImplementation.cpp",
     ):
-        if implementation_source not in cmake_text:
-            fail(f"third-party implementation TU is missing explicit PCH exclusion: {implementation_source}", failures)
-    if "PROPERTIES SKIP_PRECOMPILE_HEADERS ON" not in cmake_text:
-        fail("third-party implementation TUs lost their PCH exclusion", failures)
+        if (ROOT / retired).exists():
+            fail(f"retired legacy renderer/resource file is back in the active tree: {retired}", failures)
+    runtime_root = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Runtime"
+    for name, fragments in (
+        ("MeshLibrary.h", ("class MeshLibrary", "AssetResidencyService")),
+        ("MaterialLibrary.h", ("class MaterialLibrary", "struct MaterialDesc")),
+        ("FrameRenderer.h", ("class FrameRenderer", "struct RenderFrameInput")),
+    ):
+        path = runtime_root / name
+        if not path.is_file():
+            fail(f"modern runtime renderer file is missing: {path.relative_to(ROOT)}", failures)
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in fragments:
+            if fragment not in text:
+                fail(f"modern runtime renderer contract is missing from {name}: {fragment}", failures)
 
     for stale_link in ("tinygltf::tinygltf", "Swim::WebP"):
         if stale_link in cmake_text:
@@ -2013,11 +1727,6 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         if stale_package in dependency_text:
             fail(f"obsolete runtime source-import package remains in Dependencies.cmake: {stale_package}", failures)
 
-    if "std::memcmp" in legacy_mesh_pool_text or "std::memcmp" in legacy_texture_pool_text:
-        fail("legacy renderer pools regressed to O(N) raw-byte deduplication scans", failures)
-
-    if "std::shared_ptr<LegacyRenderBinding> binding" not in material_component_text:
-        fail("scene Material component does not use the geometry/material compatibility binding", failures)
 
     for source_root in (ROOT / "Source" / "Game",):
         for path in source_root.rglob("*"):
@@ -2376,7 +2085,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     main_source = (ROOT / "Source" / "main.cpp").read_text(encoding="utf-8", errors="ignore")
     engine_header = (ROOT / "Source" / "Engine" / "SwimEngine.h").read_text(encoding="utf-8", errors="ignore")
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
-    sandbox_header = (ROOT / "Source" / "Game" / "Scenes" / "SandBox.h").read_text(encoding="utf-8", errors="ignore")
+    sandbox_header = (ROOT / "Source" / "Game" / "Scenes" / "Sandbox.h").read_text(encoding="utf-8", errors="ignore")
     sandbox_source = (ROOT / "Source" / "Game" / "Scenes" / "Sandbox.cpp").read_text(encoding="utf-8", errors="ignore")
     cmake_text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8", errors="ignore")
 
@@ -2422,109 +2131,78 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
         if fragment not in scene_id_header:
             fail(f"Phase 5 runtime SceneId contract is missing: {fragment}", failures)
 
-    for fragment in (
-        'scenes->RegisterSceneType<Game::SandBox>("SandBox")',
-        'scenes->SetStartupScene("SandBox")',
-    ):
-        if fragment not in main_source:
-            fail(f"application-owned scene registration/startup selection is missing: {fragment}", failures)
+    game_source = (ROOT / "Source" / "Game" / "Game.cpp").read_text(encoding="utf-8", errors="ignore")
+    if "Game::Register(*engine.GetSceneSystem())" not in main_source:
+        fail("application-owned scene registration is missing from main.cpp: Game::Register(*engine.GetSceneSystem())", failures)
+    for fragment in ('scenes.RegisterSceneType<Sandbox>("Sandbox")', 'scenes.SetStartupScene("Sandbox")'):
+        if fragment not in game_source:
+            fail(f"application-owned scene registration/startup selection is missing from Game.cpp: {fragment}", failures)
 
+    # SceneSystem exists from construction so scenes can be registered before Start.
     scene_system_construction = "sceneSystem = std::make_unique<SceneSystem>();"
-    create_begin = engine_source.find("void SwimEngine::Create()")
-    create_end = engine_source.find("EngineConfigParseResult SwimEngine::ParseStartingEngineArgs", create_begin)
-    init_begin = engine_source.find("int SwimEngine::Init()")
-    init_end = engine_source.find("int SwimEngine::AwakeSystems()", init_begin)
+    constructor_begin = engine_source.find("SwimEngine::SwimEngine(")
+    constructor_end = engine_source.find("SwimEngine::~SwimEngine()", constructor_begin)
     if engine_source.count(scene_system_construction) != 1:
         fail("SceneSystem must have exactly one SwimEngine-owned construction site", failures)
-    elif not (0 <= create_begin < engine_source.find(scene_system_construction, create_begin, create_end) < create_end):
-        fail("SceneSystem must be constructed in SwimEngine::Create so pre-Start scene registration is valid", failures)
-    if 0 <= init_begin < init_end and scene_system_construction in engine_source[init_begin:init_end]:
-        fail("SwimEngine::Init must not recreate SceneSystem and discard pre-Start SceneCatalog registrations", failures)
+    elif not (0 <= constructor_begin < engine_source.find(scene_system_construction) < constructor_end):
+        fail("SceneSystem must be constructed in the SwimEngine constructor so pre-Start scene registration is valid", failures)
     if "Engine/Systems/Scene/SceneSystem.h" not in engine_source:
         fail("SwimEngine.cpp must explicitly include SceneSystem.h for its owned SceneSystem construction", failures)
 
     if "DEFINE_SCENE" in sandbox_header or "REGISTER_SCENE" in sandbox_header:
-        fail("SandBox scene regained static scene-registration macros", failures)
-    if "GetSceneSystem()->SetScene(name" in sandbox_source:
-        fail("SandBox::Awake regained self-selection as the active scene", failures)
+        fail("Sandbox scene regained static scene-registration macros", failures)
+    if "SetScene(" in sandbox_source:
+        fail("Sandbox regained self-selection as the active scene", failures)
 
     check_suite_is_compiled("Scene/Headless", "SceneCatalogTests.cpp", failures)
+    check_suite_is_compiled("Engine", "SceneRuntimeTests.cpp", failures)
+    check_suite_is_compiled("Game", "SandboxRuntimeTests.cpp", failures)
 
     for forbidden in (
-        "VulkanRenderer*",
-        "OpenGLRenderer*",
+        "VulkanRenderer",
+        "OpenGLRenderer",
+        "FrameRenderer",
         "Renderer* renderer",
-        "GetVulkanRenderer()",
-        "GetOpenGLRenderer()",
-        "GetRenderer() const",
-        "SetVulkanRenderer(",
-        "SetOpenGLRenderer(",
+        "GetRenderer()",
+        "CubeMapController",
+        "MeshPool",
+        "MaterialPool",
     ):
         if forbidden in scene_header or forbidden in scene_source:
-            fail(f"Phase 5 Scene regained a renderer/backend pointer dependency: {forbidden}", failures)
-
+            fail(f"Scene regained a renderer/backend dependency: {forbidden}", failures)
     if "Renderer* renderer" in behavior_header or "scene->GetRenderer()" in behavior_source:
         fail("Behavior base regained cached renderer ownership/discovery", failures)
-    if "CubeMapController* CubeMap" not in scene_system_header or "SetCubeMapController(services.Presentation.CubeMap)" not in scene_system_source:
-        fail("backend-neutral optional cubemap presentation service is missing from Scene injection", failures)
-    if "void SetCubeMapController(CubeMapController* cubeMap)" not in scene_system_header:
-        fail("SceneSystem cannot late-bind renderer-owned cubemap presentation state", failures)
 
-    renderer_awake_position = engine_source.find("result = GetRenderer().Awake()")
-    cubemap_bind_position = engine_source.find("sceneSystem->SetCubeMapController(GetRenderer().GetCubeMapController().get())")
-    scene_awake_position = engine_source.find("result = sceneSystem->Awake()", renderer_awake_position)
-    if not (0 <= renderer_awake_position < cubemap_bind_position < scene_awake_position):
-        fail("cubemap presentation service must be bound after Renderer::Awake and before SceneSystem::Awake", failures)
-    if "sceneServices.Presentation.CubeMap = renderer.GetCubeMapController().get()" in engine_source:
-        fail("SwimEngine snapshots the cubemap controller before Renderer::Awake creates it", failures)
-
+    # One SceneServices struct: the headless core (required) plus optional presentation
+    # and tool services. Scenes run headless without input, camera or rendering.
     for fragment in (
-        "struct SceneCoreServices",
-        "struct ScenePresentationServices",
-        "struct SceneToolServices",
-        "return Core.IsValid();",
-        "return Presentation.IsAvailable();",
+        "struct SceneServices",
+        "bool HasCore() const",
+        "const EngineStateMachine* State",
+        "const SimulationFrame* Time",
+        "TagRegistry* Tags",
+        "Swim::Input::InputSystem* Input = nullptr;",
+        "CameraSystem* Camera = nullptr;",
+        "RenderServices* Render = nullptr;",
+        "Swim::Commands::CommandRegistry* Commands = nullptr;",
+        "std::function<bool(std::string_view)> DispatchCommand;",
+        "EngineState GetExecutionState() const;",
     ):
-        if fragment not in scene_system_header:
-            fail(f"Phase 5 core/presentation/tool scene-service split is missing: {fragment}", failures)
-
-    core_block = scene_system_header.split("struct SceneCoreServices", 1)[1].split("struct ScenePresentationServices", 1)[0]
-    for forbidden in (
-        "Swim::Input::InputSystem*",
-        "CameraSystem*",
-        "CubeMapController*",
-        "MeshPool*",
-        "TexturePool*",
-        "MaterialPool*",
-        "FontPool*",
-        "Swim::Commands::CommandRegistry*",
-    ):
+        if fragment not in scene_header:
+            fail(f"SceneServices/runtime contract is missing from Scene.h: {fragment}", failures)
+    core_block = scene_header.split("struct SceneServices", 1)[-1].split("// Presentation (optional).", 1)[0]
+    for forbidden in ("Swim::Input::InputSystem*", "CameraSystem*", "RenderServices*", "Swim::Commands::CommandRegistry*"):
         if forbidden in core_block:
             fail(f"headless Scene core services regained a presentation/tool dependency: {forbidden}", failures)
 
     for fragment in (
-        "bool HasPresentationServices() const",
-        "if (HasPresentationServices())",
-        "if (sceneDebugDraw)",
-        "if (inputSystem)",
-        "if (!inputMgr)",
-        "Scene::ScreenPointToRay requires presentation camera/input services.",
+        "void OnEngineStateChanged(EngineState previous, EngineState current);",
+        "void RequestScene(std::string name)",
+        "void RequestReload()",
+        "void BeginFrame();",
     ):
-        if fragment not in scene_header and fragment not in scene_source:
-            fail(f"Phase 5 headless Scene lifecycle guard is missing: {fragment}", failures)
-
-    for forbidden in (
-        "sceneServices.Input =",
-        "sceneServices.Camera =",
-        "sceneServices.Meshes =",
-        "sceneServices.Textures =",
-        "sceneServices.Materials =",
-        "sceneServices.Fonts =",
-    ):
-        engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
-        if forbidden in engine_source:
-            fail(f"Scene services regressed to a flat mandatory presentation profile: {forbidden}", failures)
-
+        if fragment not in scene_system_header:
+            fail(f"SceneSystem state/reload contract is missing: {fragment}", failures)
 
     physics_header = (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "PhysicsSystem.h").read_text(encoding="utf-8", errors="ignore")
     physics_source = (ROOT / "Source" / "Engine" / "Systems" / "Physics" / "PhysicsSystem.cpp").read_text(encoding="utf-8", errors="ignore")
@@ -2544,9 +2222,9 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
 
     engine_source = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8", errors="ignore")
     for fragment in (
-        "activeScene->UpdatePhysics(*physicsSystem, dt)",
-        "activeScene->FixedUpdatePhysics(*physicsSystem)",
-        "GetRenderer().SetRenderScene(activeScene)",
+        "scene->UpdatePhysics(*physicsSystem,",
+        "scene->FixedUpdatePhysics(*physicsSystem,",
+        "renderBridge->Update(",
     ):
         if fragment not in engine_source:
             fail(f"application-level explicit scene traversal input is missing: {fragment}", failures)
@@ -2560,7 +2238,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             fail(f"Scene/Behavior regained SceneSystem ownership/discovery: {forbidden}", failures)
 
     for fragment in (
-        "SetCommandDispatcher",
+        "DispatchCommand",
         "DispatchCommand(std::string_view command) const",
     ):
         if fragment not in scene_header and fragment not in scene_system_source:
@@ -2614,63 +2292,17 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
         fail("engine frame orchestration does not begin per-scene transform tracking", failures)
     check_suite_is_compiled("Scene/Ecs", "TransformSystemTests.cpp", failures)
 
-    frustum_header_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "Frustum.h"
-    frustum_test_path = ROOT / "Source" / "Tests" / "Suites" / "Scene" / "Ecs" / "FrustumTests.cpp"
-    opengl_renderer_header = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.h").read_text(encoding="utf-8", errors="ignore")
-    opengl_renderer_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
-    vulkan_index_header = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.h").read_text(encoding="utf-8", errors="ignore")
-    vulkan_index_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanIndexDraw.cpp").read_text(encoding="utf-8", errors="ignore")
-    scene_bvh_source = (scene_root / "SubSceneSystems" / "SceneBVH.cpp").read_text(encoding="utf-8", errors="ignore")
-
-    if not frustum_header_path.is_file() or not frustum_test_path.is_file():
-        fail("Phase 5 per-view Frustum implementation/tests are missing", failures)
-    else:
-        frustum_header = frustum_header_path.read_text(encoding="utf-8", errors="ignore")
-        for forbidden in (
-            "inline static const Frustum& Get()",
-            "static void SetCameraMatrices",
-            "static Frustum cachedFrustum",
-            "static uint64_t revision",
-            "Frustum::cachedFrustum",
-            "Frustum::revision",
-            "Frustum::cameraMovedThisFrame",
-        ):
-            if forbidden in frustum_header:
-                fail(f"Phase 5 Frustum regained process-global view state: {forbidden}", failures)
-
-        for fragment in (
-            "void Update(const glm::mat4& view, const glm::mat4& proj)",
-            "std::uint64_t GetRevision() const",
-            "bool DidCameraMoveThisFrame() const",
-            "std::uint64_t revision = 1",
-            "bool cameraMovedThisFrame = true",
-        ):
-            if fragment not in frustum_header:
-                fail(f"Phase 5 per-view Frustum contract is missing: {fragment}", failures)
-
-    if '#include "Engine/Systems/Renderer/Core/Camera/Frustum.h"' not in opengl_renderer_header:
-        fail("OpenGL renderer owns concrete Frustum state without including the Frustum contract explicitly", failures)
-    if "Frustum viewFrustum" not in opengl_renderer_header or "viewFrustum.Update(view, proj)" not in opengl_renderer_source:
-        fail("OpenGL renderer does not own/update explicit per-view Frustum state", failures)
-    if "Frustum viewFrustum" not in vulkan_index_header or "viewFrustum.Update(camera->GetViewMatrix(), camera->GetProjectionMatrix())" not in vulkan_index_source:
-        fail("Vulkan draw traversal does not own/update explicit per-view Frustum state", failures)
-    if '#include "Engine/Components/Transform.h"' not in vulkan_index_header:
-        fail("VulkanIndexDraw uses TransformSpace enumerators/defaults without including the TransformSpace definition", failures)
-    if "enum class TransformSpace;" in vulkan_index_header:
-        fail("VulkanIndexDraw must not replace the TransformSpace definition with a forward declaration while using enum values", failures)
-    if "frustum.GetRevision()" not in scene_bvh_source:
-        fail("SceneBVH does not consume the supplied Frustum revision", failures)
-
-    for path_text, label in (
-        (opengl_renderer_source, "OpenGL renderer"),
-        (vulkan_index_source, "Vulkan draw traversal"),
-        (scene_bvh_source, "SceneBVH"),
+    # Phase 23: culling is GPU visibility over the GPU scene (Renderer/Visibility); the
+    # CPU Frustum/SceneBVH of the legacy renderer are archived under Deprecated/.
+    for retired in (
+        scene_root / "SubSceneSystems" / "SceneBVH.cpp",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "Frustum.h",
     ):
-        for forbidden in ("Frustum::Get()", "Frustum::SetCameraMatrices", "Frustum::GetRevision()", "Frustum::DidCameraMoveThisFrame()"):
-            if forbidden in path_text:
-                fail(f"{label} regained static/global Frustum access: {forbidden}", failures)
-
-    check_suite_is_compiled("Scene/Ecs", "FrustumTests.cpp", failures)
+        if retired.exists():
+            fail(f"retired CPU culling path is back in the active tree: {retired.relative_to(ROOT)}", failures)
+    visibility_root = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Visibility"
+    if not (visibility_root / "RenderViewDesc.h").is_file():
+        fail("GPU visibility view contract (Renderer/Visibility/RenderViewDesc.h) is missing", failures)
 
     # Scene-owned mutation boundary.
     deferred_command_path = scene_root / "DeferredCommandBuffer.h"
@@ -2760,11 +2392,10 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     for fragment in (
         "BehaviorRegistry behaviorRegistry",
         "RegisterBehaviorType(const std::string& name)",
-        'RegisterBehaviorType<Game::Spin>("Spin")',
-        'RegisterBehaviorType<Game::SimpleMovement>("SimpleMovement")',
-        'RegisterBehaviorType<Game::BallShooter>("BallShooter")',
+        'RegisterBehaviorType<Spin>("Spin")',
+        'RegisterBehaviorType<BallShooter>("BallShooter")',
     ):
-        if fragment not in scene_system_header and fragment not in main_source:
+        if fragment not in scene_system_header and fragment not in game_source:
             fail(f"explicit behavior registration seam is missing: {fragment}", failures)
     check_suite_is_compiled("Scene/Ecs", "BehaviorRegistryTests.cpp", failures)
 
@@ -2773,7 +2404,7 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
     for fragment in (
         "void ForEachInitializedBehavior",
         "behavior->InitIfNeeded()",
-        "ForEachInitializedBehavior(&Behavior::Update, dt)",
+        "behavior->Update(behavior->UsesRealTime() ? realDelta : dt)",
         "ForEachInitializedBehavior(&Behavior::FixedUpdate, tickThisSecond)",
     ):
         if fragment not in scene_header and fragment not in scene_source:
@@ -2974,40 +2605,24 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             fail(f"raw EnTT integral identity leaked back into scene persistence/tooling: {path.relative_to(ROOT)}", failures)
     check_suite_is_compiled("Scene/Ecs", "EntityIdentityMapTests.cpp", failures)
 
-    # Canonical backend-neutral camera/clip-space contract.
-    render_conventions_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "RenderConventions.h"
-    camera_header_path = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
-    if not render_conventions_path.is_file() or not camera_header_path.is_file():
-        fail("canonical render/camera convention headers are missing", failures)
+    # Canonical camera/clip-space contract: right-handed, +Y up, -Z forward, the
+    # renderer's infinite-far reverse-Z projection (Renderer/Visibility/RenderViewDesc.h).
+    camera_header_path = ROOT / "Source" / "Engine" / "Systems" / "Camera" / "Camera.h"
+    camera_source_path = ROOT / "Source" / "Engine" / "Systems" / "Camera" / "Camera.cpp"
+    if not camera_header_path.is_file() or not camera_source_path.is_file():
+        fail("runtime camera (Systems/Camera/Camera.h/.cpp) is missing", failures)
     else:
-        render_conventions = render_conventions_path.read_text(encoding="utf-8", errors="ignore")
-        camera_header_text = camera_header_path.read_text(encoding="utf-8", errors="ignore")
-        for fragment in (
-            "CanonicalWorldHandedness = WorldHandedness::RightHanded",
-            "CanonicalClipSpaceDepthRange = ClipSpaceDepthRange::ZeroToOne",
-            "CanonicalClipSpaceYAxis = ClipSpaceYAxis::Up",
-            "CanonicalUiCoordinateOrigin = UiCoordinateOrigin::BottomLeft",
-        ):
-            if fragment not in render_conventions:
-                fail(f"canonical render convention is missing: {fragment}", failures)
-        if "glm::perspectiveRH_ZO" not in camera_header_text:
-            fail("Camera projection is not explicitly right-handed with 0..1 depth", failures)
-        for forbidden in ("GraphicsBackend", "projMatrix[1][1] *= -1"):
-            if forbidden in camera_header_text:
+        camera_text = camera_header_path.read_text(encoding="utf-8", errors="ignore") + camera_source_path.read_text(encoding="utf-8", errors="ignore")
+        for fragment in ("right-handed", "reverse-Z", "PerspectiveReverseZRowMajor"):
+            if fragment not in camera_text:
+                fail(f"camera convention documentation/contract is missing: {fragment}", failures)
+        for forbidden in ("GraphicsBackend", "projMatrix[1][1] *= -1", "perspectiveRH_NO"):
+            if forbidden in camera_text:
                 fail(f"Camera math regained backend-specific behavior: {forbidden}", failures)
-
-    opengl_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL" / "OpenGLRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
-    vulkan_source = (ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "VulkanRenderer.cpp").read_text(encoding="utf-8", errors="ignore")
-    if "glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)" not in opengl_source:
-        fail("legacy OpenGL backend does not adapt to canonical 0..1 clip depth", failures)
-    if "-(float)extent.height" not in vulkan_source:
-        fail("Vulkan backend does not adapt canonical +Y camera space through viewport orientation", failures)
     for forbidden in ("Presentation.ClipDepth", "SetClipSpaceDepthRange", "GetClipSpaceDepthRange", "MinusOneToOne"):
         if forbidden in scene_header or forbidden in scene_system_header or forbidden in scene_system_source or forbidden in engine_source:
             fail(f"scene/camera convention regained backend-dependent clip-depth policy: {forbidden}", failures)
-    check_suite_is_compiled("Scene/Ecs", "RenderConventionsTests.cpp", failures)
-
-
+    check_suite_is_compiled("Engine", "CameraAndProceduralMeshTests.cpp", failures)
 
 
 def check_phase6_physics_architecture(failures: list[str]) -> None:
@@ -3256,10 +2871,10 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
     cmake_path = ROOT / "CMakeLists.txt"
     if cmake_path.is_file():
         cmake_text = cmake_path.read_text(encoding="utf-8", errors="ignore")
-        legacy_return = cmake_text.find("if(NOT SWIM_BUILD_LEGACY_ENGINE)")
+        legacy_return = cmake_text.find("if(NOT SWIM_BUILD_ENGINE)")
         generic_physics = cmake_text.find("# Generic physics is part of the cross-platform foundation")
         if legacy_return < 0 or generic_physics < 0 or generic_physics > legacy_return:
-            fail("generic Swim::Physics is not compiled before the non-Windows legacy-runtime return", failures)
+            fail("generic Swim::Physics is not compiled before the foundation-only (SWIM_BUILD_ENGINE=OFF) return", failures)
 
         # The foundation-only configure must still define the test targets before
         # it returns, otherwise the shared physics backend contract and the
@@ -3404,13 +3019,14 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
         for build_file in list(ROOT.glob("cmake/*.cmake")) + [ROOT / "CMakeLists.txt"]:
             if not build_file.is_file():
                 continue
-            if "Deprecated" in build_file.read_text(encoding="utf-8", errors="ignore"):
+            build_code = re.sub(r"#[^\n]*", "", build_file.read_text(encoding="utf-8", errors="ignore"))
+            if "Deprecated" in build_code:
                 fail(
                     f"build system references the deprecated shader archive: {build_file.relative_to(ROOT)}",
                     failures,
                 )
     runtime_rules_text = (ROOT / "cmake" / "Shaders.cmake").read_text(encoding="utf-8", errors="ignore")
-    for fragment in ('TARGET spirv', 'PROFILE spirv_1_5', 'TARGET glsl', 'PROFILE glsl_460', 'SwimShaderArtifacts'):
+    for fragment in ('SWIM_RUNTIME_SHADER_PROGRAMS', 'SwimRuntimeShaders', 'Shaders/Runtime'):
         if fragment not in runtime_rules_text:
             fail(f"all-Slang runtime shader pipeline is missing: {fragment}", failures)
     for forbidden in ('DXC', 'dxc', '*.hlsl', '*.glsl', 'PRE_BUILD'):
@@ -3431,53 +3047,37 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
         if fragment not in sample_text:
             fail(f"minimal Slang raster sample is missing reflection-first source contract: {fragment}", failures)
 
-    # Slang intentionally defines SV_InstanceID as InstanceIndex - BaseInstance.
-    # The legacy Vulkan renderer uses VkDrawIndexedIndirectCommand::firstInstance
-    # as a global SSBO/visible-ID offset, so these shaders require the raw Vulkan
-    # InstanceIndex semantic. Accidentally switching back reproduces the severe
-    # cross-batch transform/material corruption seen during the Slang migration.
-    raw_instance_shader_paths = (
-        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_instanced.slang",
-        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_instanced_gpu.slang",
-        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_decorated.slang",
-        ROOT / "Source" / "Shaders" / "Vulkan" / "VertexShaders" / "vertex_msdf.slang",
+    # Draws that index by vertex/instance use the raw Vulkan semantics. Slang lowers
+    # SV_VertexID/SV_InstanceID to (index - base), which needs the DrawParameters
+    # capability that some drivers (SwiftShader) lack; the runtime's non-indexed draws
+    # start at vertex/instance 0, so the raw indices are equal and portable.
+    raw_index_shader_paths = (
+        ROOT / "Source" / "Shaders" / "Slang" / "Runtime" / "Present.slang",
+        ROOT / "Source" / "Shaders" / "Slang" / "Runtime" / "SkyBackground.slang",
+        ROOT / "Source" / "Shaders" / "Slang" / "Ui" / "UiQuad.slang",
+        ROOT / "Source" / "Shaders" / "Slang" / "Particles" / "ParticleRender.slang",
     )
-    for shader_path in raw_instance_shader_paths:
+    for shader_path in raw_index_shader_paths:
         if not shader_path.is_file():
-            fail(f"runtime Vulkan instance-index shader is missing: {shader_path.relative_to(ROOT)}", failures)
+            fail(f"runtime shader is missing: {shader_path.relative_to(ROOT)}", failures)
             continue
         shader_source = shader_path.read_text(encoding="utf-8", errors="ignore")
-        if "SV_VulkanInstanceID" not in shader_source:
-            fail(f"runtime Vulkan shader lost raw InstanceIndex semantics: {shader_path.relative_to(ROOT)}", failures)
-        if ": SV_InstanceID" in shader_source:
-            fail(f"runtime Vulkan shader regressed to BaseInstance-relative SV_InstanceID: {shader_path.relative_to(ROOT)}", failures)
+        if "SV_VulkanVertexID" not in shader_source:
+            fail(f"runtime shader lost raw Vulkan vertex-index semantics: {shader_path.relative_to(ROOT)}", failures)
+        if re.search(r":\s*SV_(?:Vertex|Instance)ID\b", shader_source):
+            fail(f"runtime shader regressed to base-relative SV_VertexID/SV_InstanceID: {shader_path.relative_to(ROOT)}", failures)
 
-    camera_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core" / "Camera" / "CameraSystem.h"
-    instance_abi_header = ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan" / "Buffers" / "VulkanGpuInstanceData.h"
-    for abi_path, required_fragments in (
-        (camera_header, ("struct alignas(16) CameraUBO", "static_assert(sizeof(CameraUBO) == 288)", "offsetof(CameraUBO, viewportSize) == 272")),
-        (instance_abi_header, ("static_assert(sizeof(GpuInstanceData) == 144)", "offsetof(GpuInstanceData, textureIndex) == 96", "static_assert(sizeof(MsdfTextGpuInstanceData) == 160)")),
+    # Per-draw bindless indexing stays explicitly non-uniform.
+    for shader_path in (
+        ROOT / "Source" / "Shaders" / "Slang" / "ForwardPlus" / "ClusteredForward.slang",
+        ROOT / "Source" / "Shaders" / "Slang" / "Ui" / "UiQuad.slang",
     ):
-        if not abi_path.is_file():
-            fail(f"shader/C++ ABI guard file is missing: {abi_path.relative_to(ROOT)}", failures)
-            continue
-        abi_source = abi_path.read_text(encoding="utf-8", errors="ignore")
-        for fragment in required_fragments:
-            if fragment not in abi_source:
-                fail(f"shader/C++ ABI guard is missing from {abi_path.relative_to(ROOT)}: {fragment}", failures)
+        if shader_path.is_file() and "NonUniformResourceIndex" not in shader_path.read_text(encoding="utf-8", errors="ignore"):
+            fail(f"bindless shader lost explicit non-uniform indexing: {shader_path.relative_to(ROOT)}", failures)
 
-    divergent_bindless_shader_paths = (
-        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_instanced.slang",
-        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_decorated.slang",
-        ROOT / "Source" / "Shaders" / "Vulkan" / "FragmentShaders" / "fragment_msdf.slang",
-    )
-    for shader_path in divergent_bindless_shader_paths:
-        if not shader_path.is_file():
-            fail(f"runtime Vulkan bindless shader is missing: {shader_path.relative_to(ROOT)}", failures)
-            continue
-        shader_source = shader_path.read_text(encoding="utf-8", errors="ignore")
-        if "NonUniformResourceIndex" not in shader_source:
-            fail(f"per-instance bindless shader lost explicit non-uniform indexing: {shader_path.relative_to(ROOT)}", failures)
+    legacy_shader_root = ROOT / "Source" / "Shaders" / "Vulkan"
+    if legacy_shader_root.exists():
+        fail("the legacy VulkanRenderer shader group is back under Source/Shaders/Vulkan", failures)
 
     for fragment in ('SwimShaderCompilerPublicHeaders', 'SwimSlangReflectionSample', 'SWIM_SLANG_REFLECTION_SAMPLE_PATH'):
         if fragment not in tests_text:
@@ -3921,17 +3521,21 @@ def check_source_files_are_utf8(failures: list[str]) -> None:
                     )
 
 def check_retirement_boundaries(failures: list[str]) -> None:
-    retired_types = re.compile(r"\b(?:InputManager|CommandSystem|SystemManager|EditorIpcBridge|SceneSerializer|SceneStorage|SceneSyncTracker|SceneToolingBridge)\b")
+    retired_types = re.compile(
+        r"\b(?:InputManager|CommandSystem|SystemManager|EditorIpcBridge|SceneSerializer|SceneStorage|SceneSyncTracker|SceneToolingBridge"
+        r"|VulkanRenderer|OpenGLRenderer|MeshPool|MaterialPool|TexturePool|FontPool|EditorCamera|CubeMapController)\b"
+    )
     for path in (ROOT / "Source").rglob("*"):
         if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
             continue
         text = path.read_text(encoding="utf-8", errors="ignore").replace("\\", "/")
-        if retired_types.search(text) or re.search(r'#\s*include[^\n]*Deprecated/', text):
+        code = re.sub(r"//[^\n]*", "", text)
+        if retired_types.search(code) or re.search(r'#\s*include[^\n]*Deprecated/', text):
             fail(f"active source references a retired implementation: {path.relative_to(ROOT)}", failures)
     engine = (ROOT / "Source" / "Engine" / "SwimEngine.cpp").read_text(encoding="utf-8")
     pump = engine.find("platformSystem->PumpEvents(")
     advance = engine.find("inputSystem->AdvanceFrame();")
-    fixed = engine.find("while (accumulatedTime >= fixedTimeStep)")
+    fixed = engine.find("scene->FixedUpdatePhysics(")
     if engine.count("inputSystem->AdvanceFrame();") != 1 or not (0 <= pump < advance < fixed):
         fail("input snapshot must advance once after pumping events and before fixed simulation", failures)
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -4407,6 +4011,60 @@ def check_render_graph_boundaries(failures: list[str]) -> None:
             fail(f"RHI must not depend on higher-level RenderGraph: {path.relative_to(ROOT)}", failures)
 
 
+def check_phase22_23_runtime(failures: list[str]) -> None:
+    """Phase 22 (no OpenGL, no editor; state, clock, tags, behaviours) and Phase 23 (assembled runtime)."""
+    for retired in (
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "OpenGL",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Vulkan",
+        ROOT / "Source" / "Engine" / "Systems" / "Renderer" / "Core",
+        ROOT / "Source" / "Engine" / "Systems" / "Editor",
+        ROOT / "Source" / "Engine" / "Components" / "ObjectTag.h",
+    ):
+        if retired.exists():
+            fail(f"retired Phase 22/23 code is back in the active tree: {retired.relative_to(ROOT)}", failures)
+    for path in (ROOT / "Source").rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
+            continue
+        code = re.sub(r"//[^\n]*", "", path.read_text(encoding="utf-8", errors="ignore"))
+        for forbidden in ("EngineState::Editing", "GizmoSystem", "GraphicsBackend::OpenGL"):
+            if forbidden in code:
+                fail(f"removed editor/OpenGL symbol returned: {forbidden} in {path.relative_to(ROOT)}", failures)
+
+    for relative in (
+        "Source/Engine/Runtime/EngineStateMachine.h",
+        "Source/Engine/Runtime/SimulationClock.h",
+        "Source/Engine/Runtime/UiRuntime.h",
+        "Source/Engine/Components/Tags.h",
+        "Source/Engine/Systems/Camera/FlyCameraController.h",
+        "Source/Engine/Systems/Renderer/Runtime/FrameRenderer.h",
+        "Source/Engine/Systems/Renderer/Runtime/RenderDevice.h",
+        "Source/Engine/Systems/Scene/RenderExtraction/Runtime/SceneRenderBridge.h",
+        "Source/Game/Scenes/Sandbox.h",
+        "Source/Game/Ui/SandboxHud.h",
+        "Resources/Fonts/DejaVuSans.ttf",
+        "docs/EngineRuntime.md",
+        "Deprecated/README.md",
+    ):
+        if not (ROOT / relative).is_file():
+            fail(f"Phase 22/23 runtime file is missing: {relative}", failures)
+    for suite, file_name in (
+        ("Engine", "EngineStateMachineTests.cpp"),
+        ("Engine", "SimulationClockTests.cpp"),
+        ("Engine", "SceneRuntimeTests.cpp"),
+        ("Engine", "UiRuntimeTests.cpp"),
+        ("Game", "SandboxRuntimeTests.cpp"),
+    ):
+        check_suite_is_compiled(suite, file_name, failures)
+
+    sync_script = ROOT / "scripts" / "sync-findings-doc.py"
+    if sync_script.is_file():
+        result = subprocess.run([sys.executable, str(sync_script), "--check"], capture_output=True, text=True)
+        if result.returncode != 0:
+            fail("docs/EngineRuntime.md findings differ from Source/Game/Findings.cpp (run scripts/sync-findings-doc.py)", failures)
+    else:
+        fail("scripts/sync-findings-doc.py is missing", failures)
+
+
 def main() -> int:
     failures: list[str] = []
 
@@ -4436,6 +4094,7 @@ def main() -> int:
     check_phase9_vulkan_rhi_architecture(failures)
     check_render_graph_boundaries(failures)
     check_retirement_boundaries(failures)
+    check_phase22_23_runtime(failures)
     check_runtime_logging_contract(failures)
     check_source_files_are_utf8(failures)
 

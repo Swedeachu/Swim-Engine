@@ -15,8 +15,7 @@ namespace Swim::Platform
 	enum class WindowGraphicsSupport : uint8_t
 	{
 		None,
-		Vulkan,
-		OpenGL
+		Vulkan
 	};
 
 	struct WindowDesc

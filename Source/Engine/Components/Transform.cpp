@@ -1,4 +1,3 @@
-#include "PCH.h"
 #include "Transform.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/Scene/TransformSystem.h"
@@ -141,77 +140,6 @@ namespace Engine
 
 		SetWorldPosition(registry, worldPos);
 		SetWorldRotation(registry, worldRot);
-	}
-
-	void Transform::SetScreenSpaceLayerRelativeToParent(bool aboveParent)
-	{
-		if (parent == entt::null || !ownerRegistry)
-		{
-			return;
-		}
-
-		entt::registry& reg = *ownerRegistry;
-		if (!reg.valid(parent) || !reg.any_of<Transform>(parent))
-		{
-			return;
-		}
-
-		Transform& parentTransform = reg.get<Transform>(parent);
-		const float parentReadableZ = parentTransform.readableLayer;
-		const float parentClipZ = parentTransform.position.z;
-		constexpr float kOffset = 1e-5f;
-
-		float readableZ = parentReadableZ;
-		if (aboveParent)
-		{
-			readableZ = glm::max(parentReadableZ - kOffset, -1.0f);
-		}
-		else
-		{
-			readableZ = glm::min(parentReadableZ + kOffset, +1.0f);
-		}
-		readableLayer = readableZ;
-
-		const float minDepth = 0.0f;
-		const float maxDepth = 1.0f;
-		float z = aboveParent
-			? glm::max(parentClipZ - kOffset, minDepth)
-			: glm::min(parentClipZ + kOffset, maxDepth);
-
-		if (z != position.z)
-		{
-			GetPositionRef().z = z;
-		}
-	}
-
-	void Transform::SetScreenSpaceLayer(int layer)
-	{
-		constexpr int kMaxLayers = 4096;
-		constexpr float kEpsilon = 1e-6f;
-
-		int clampedLayer = layer;
-		if (clampedLayer < 0)
-		{
-			clampedLayer = 0;
-		}
-		if (clampedLayer >= kMaxLayers)
-		{
-			clampedLayer = kMaxLayers - 1;
-		}
-
-		const float readableStep = 2.0f / (kMaxLayers + 2);
-		float readableZ = +1.0f - (static_cast<float>(clampedLayer) + 1.0f) * readableStep;
-		readableZ = glm::clamp(readableZ, -1.0f + kEpsilon, +1.0f - kEpsilon);
-		readableLayer = readableZ;
-
-		const float step = 1.0f / (kMaxLayers + 2);
-		float z = 1.0f - (static_cast<float>(clampedLayer) + 1.0f) * step;
-		z = glm::clamp(z, kEpsilon, 1.0f - kEpsilon);
-
-		if (z != position.z)
-		{
-			GetPositionRef().z = z;
-		}
 	}
 
 	const glm::mat4& Transform::GetModelMatrix() const

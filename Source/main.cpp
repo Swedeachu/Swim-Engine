@@ -1,28 +1,21 @@
-#include "PCH.h"
 #include "Engine/Logging/Log.h"
-#include "Engine/SwimEngine.h"
 #include "Engine/Systems/Scene/SceneSystem.h"
-#include "Game/Scenes/SandBox.h"
-#include "Game/Behaviors/Demo/Spin.h"
-#include "Game/Behaviors/Demo/SimpleMovement.h"
-#include "Game/Behaviors/Phys/BallShooter.h"
+#include "Engine/SwimEngine.h"
+#include "Game/Game.h"
+
+#include <exception>
+#include <iostream>
 
 namespace
 {
 	class LoggingLifetime final
 	{
-	public:
-		LoggingLifetime()
-		{
-			Engine::Logging::Initialize();
-		}
+	  public:
+		LoggingLifetime() { Engine::Logging::Initialize(); }
 
-		~LoggingLifetime()
-		{
-			Engine::Logging::Shutdown();
-		}
+		~LoggingLifetime() { Engine::Logging::Shutdown(); }
 	};
-}
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -37,16 +30,17 @@ int main(int argc, char** argv)
 			{
 				std::cerr << "[Engine] " << error << '\n';
 			}
+			std::cerr << Engine::GetEngineConfigUsage();
 			return -1;
+		}
+		if (parsedConfig.Config.ShowHelp)
+		{
+			std::cout << Engine::GetEngineConfigUsage();
+			return 0;
 		}
 
 		Engine::SwimEngine engine(std::move(parsedConfig.Config));
-		Engine::SceneSystem* scenes = engine.GetSceneSystem();
-		scenes->RegisterBehaviorType<Game::Spin>("Spin");
-		scenes->RegisterBehaviorType<Game::SimpleMovement>("SimpleMovement");
-		scenes->RegisterBehaviorType<Game::BallShooter>("BallShooter");
-		scenes->RegisterSceneType<Game::SandBox>("SandBox");
-		scenes->SetStartupScene("SandBox");
+		Game::Register(*engine.GetSceneSystem());
 
 		if (engine.Start() == 0)
 		{

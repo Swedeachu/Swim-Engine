@@ -1,58 +1,35 @@
-#include "PCH.h"
-#include "Behavior.h"
+#include "Engine/Systems/Entity/Behavior.h"
 
-#include "Engine/Systems/Scene/Scene.h"
-#include "Engine/Input/InputSystem.h"
-#include "Engine/Systems/Renderer/Core/Camera/CameraSystem.h"
-#include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
+#include "Engine/Systems/Scene/Scene.h"
+
+#include <stdexcept>
 
 namespace Engine
 {
-
-	// We might want to defer behavior creation like this to a method, for example if we have factory archetypes that won't belong to a scene.
-	Behavior::Behavior(Scene* scene, entt::entity owner) : scene(scene), entity(owner)
+	Behavior::Behavior(Scene* sceneValue, entt::entity owner) : scene(sceneValue), entity(owner)
 	{
 		if (scene == nullptr || entity == entt::null)
 		{
 			throw std::runtime_error("Behavior requires a valid Scene and entt::entity.");
 		}
-
 		RefreshFieldCache();
 	}
 
 	void Behavior::RefreshFieldCache()
 	{
-		if (!scene)
-		{
-			std::cout << "Behavior::RefreshFieldCache() scene is null, unable to refresh cache" << std::endl;
-			return;
-		}
-
-		// Cache commonly used systems
 		input = scene->GetInputSystem();
 		cameraSystem = scene->GetCameraSystem();
-
-		// Cache common crucial components if they exist
-		auto& registry = scene->GetRegistry();
-
-		if (registry.any_of<Transform>(entity))
-		{
-			transform = &registry.get<Transform>(entity);
-		}
-		else
-		{
-			transform = nullptr;
-		}
-
-		if (registry.any_of<Material>(entity))
-		{
-			material = &registry.get<Material>(entity);
-		}
-		else
-		{
-			material = nullptr;
-		}
 	}
 
-}
+	Transform* Behavior::GetTransform() const
+	{
+		auto& registry = scene->GetRegistry();
+		return registry.valid(entity) ? registry.try_get<Transform>(entity) : nullptr;
+	}
+
+	const SimulationFrame& Behavior::GetTime() const
+	{
+		return scene->GetTime();
+	}
+} // namespace Engine

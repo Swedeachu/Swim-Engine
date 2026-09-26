@@ -1,4 +1,3 @@
-#include "PCH.h"
 #include "Engine/Logging/Log.h"
 
 #include <spdlog/logger.h>

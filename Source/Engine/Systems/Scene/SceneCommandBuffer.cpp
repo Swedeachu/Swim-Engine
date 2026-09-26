@@ -1,5 +1,6 @@
-#include "PCH.h"
 #include "SceneCommandBuffer.h"
+
+#include <stdexcept>
 
 namespace Engine
 {
@@ -44,13 +45,37 @@ namespace Engine
 		);
 	}
 
-	void SceneCommandBuffer::CreateWithTransformAndMaterial(const Transform& transform, const Material& material)
+	void SceneCommandBuffer::AddTag(entt::entity entity, TagId tag)
 	{
-		CreateWithTransformAndMaterial(
-			transform,
-			material,
-			[](entt::entity, Transform&, Material&) {}
-		);
+		Defer([entity, tag](Scene& owningScene)
+		{
+			if (owningScene.IsValid(entity))
+			{
+				owningScene.AddTag(entity, tag);
+			}
+		});
+	}
+
+	void SceneCommandBuffer::RemoveTag(entt::entity entity, TagId tag)
+	{
+		Defer([entity, tag](Scene& owningScene)
+		{
+			if (owningScene.IsValid(entity))
+			{
+				owningScene.RemoveTag(entity, tag);
+			}
+		});
+	}
+
+	void SceneCommandBuffer::SetName(entt::entity entity, std::string name)
+	{
+		Defer([entity, name = std::move(name)](Scene& owningScene)
+		{
+			if (owningScene.IsValid(entity))
+			{
+				owningScene.SetEntityName(entity, name);
+			}
+		});
 	}
 
 }

@@ -23,8 +23,11 @@ struct VertexOutput
 	nointerpolation uint Quad : TEXCOORD2;
 };
 
+// gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*): every draw of this program
+// starts at vertex, index offset and instance 0, so they equal SV_VertexID/SV_InstanceID
+// without the DrawParameters capability (absent on some devices, e.g. SwiftShader).
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
+VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID)
 {
 	const float4 rect = Quads[instanceId].Rect;
 	const float4 clip = Quads[instanceId].Clip;

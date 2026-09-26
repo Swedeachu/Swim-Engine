@@ -260,6 +260,7 @@ namespace Engine
 		}
 
 		rigidbody.body = body;
+		bodyEntities[body] = entity;
 		rigidbody.dirty = false;
 		rigidbody.ClearInitialVelocities();
 		bodyResources[entity] = BodyResources{ shape, material, scale };
@@ -267,6 +268,10 @@ namespace Engine
 
 	void ScenePhysicsBridge::DestroyEntityBody(entt::entity entity, Rigidbody& rigidbody)
 	{
+		if (rigidbody.body)
+		{
+			bodyEntities.erase(rigidbody.body);
+		}
 		if (world && rigidbody.body)
 		{
 			world->DestroyBody(rigidbody.body);
@@ -387,6 +392,12 @@ namespace Engine
 
 				transform.ApplyPhysicsInterpolation(registry, t);
 			});
+	}
+
+	entt::entity ScenePhysicsBridge::FindEntity(BodyHandle body) const
+	{
+		const auto it = bodyEntities.find(body);
+		return it != bodyEntities.end() && registry.valid(it->second) ? it->second : entt::entity{ entt::null };
 	}
 
 	bool ScenePhysicsBridge::HasBody(entt::entity entity) const

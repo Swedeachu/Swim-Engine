@@ -43,6 +43,13 @@ namespace Engine
 			{
 				return;
 			}
+			// A body destroyed since the last step still gets its lost-touch pairs reported,
+			// but the actor pointer is already released: it must not be dereferenced (even
+			// PxActor::is<> is a virtual call). Its handle is gone on our side anyway.
+			if (pairHeader.flags & (physx::PxContactPairHeaderFlag::eREMOVED_ACTOR_0 | physx::PxContactPairHeaderFlag::eREMOVED_ACTOR_1))
+			{
+				return;
+			}
 
 			const BodyHandle bodyA = owner.ResolveBody(pairHeader.actors[0]);
 			const BodyHandle bodyB = owner.ResolveBody(pairHeader.actors[1]);
@@ -58,6 +65,11 @@ namespace Engine
 				CollisionEvent event{};
 				event.BodyA = bodyA;
 				event.BodyB = bodyB;
+				// Released shapes are flagged the same way; skip them rather than resolve them.
+				if (pair.flags & (physx::PxContactPairFlag::eREMOVED_SHAPE_0 | physx::PxContactPairFlag::eREMOVED_SHAPE_1))
+				{
+					continue;
+				}
 				event.ShapeA = owner.ResolveShape(pair.shapes[0]);
 				event.ShapeB = owner.ResolveShape(pair.shapes[1]);
 

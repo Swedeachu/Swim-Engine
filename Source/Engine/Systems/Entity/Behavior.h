@@ -1,9 +1,11 @@
 #pragma once
 
-#include "Engine/Machine.h"
 #include "Engine/EngineState.h"
+#include "Engine/Machine.h"
+#include "Engine/Runtime/SimulationClock.h"
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 
 namespace Swim::Input
 {
@@ -12,21 +14,41 @@ namespace Swim::Input
 
 namespace Engine
 {
-
-	// Forward declare
 	class Scene;
 	class CameraSystem;
-	struct Transform;
-	struct Material;
+	class Transform;
 
+	// A collision reported to a behaviour (from the scene's physics world events).
+	struct BehaviorCollision
+	{
+		entt::entity Other = entt::null;
+		glm::vec3 Position{ 0.0f };
+		glm::vec3 Normal{ 0.0f, 1.0f, 0.0f };
+		float Impulse = 0.0f;
+	};
+
+	// Gameplay code attached to an entity (BehaviorComponents). Lifecycle, in order:
+	//
+	//   Awake        once, when attached
+	//   Init         once, before the first Update/FixedUpdate it takes part in
+	//   Update(dt)   every frame the behaviour can run; dt is the Behaviors-domain delta
+	//                (scaled simulation time, 0 while paused for behaviours that run
+	//                while paused, e.g. cameras)
+	//   FixedUpdate  every fixed simulation step
+	//   OnPlay/OnPause/OnResume/OnStop   engine state transitions (every behaviour)
+	//   OnCollisionEnter/Stay/Exit       physics contacts of its entity's body
+	//   Exit         once, when removed or when its entity/scene is destroyed
+	//
+	// Which states a behaviour runs in is its BehaviorComponents mask (Playing by
+	// default). Mutate the scene through GetScene().GetCommandBuffer() while iterating.
 	class Behavior : public Machine
 	{
-
-	public:
-
+	  public:
 		Behavior(Scene* scene, entt::entity owner);
+		~Behavior() override = default;
 
 		bool HasInited() const { return hasInited; }
+
 		void SetInited() { hasInited = true; }
 
 		void InitIfNeeded()
@@ -38,60 +60,52 @@ namespace Engine
 			}
 		}
 
-		// Intended to regrab all the common components and systems
+		// Re-reads the cached services (input, camera).
 		void RefreshFieldCache();
 
-		virtual ~Behavior() = default;
+		// Real-time behaviours (cameras, UI helpers) receive wall-clock deltas in Update and
+		// keep moving while the simulation is paused or time-scaled.
+		virtual bool UsesRealTime() const { return false; }
 
-		// These will be implemented once PhysX is integrated later on
+		virtual void OnPlay() {}
 
-		virtual void OnCollisionEnter(entt::entity other) {}
-		virtual void OnCollisionStay(entt::entity other) {}
-		virtual void OnCollisionExit(entt::entity other) {}
+		virtual void OnPause() {}
 
-		// Mouse behavior callbacks to be optionally overriden:
+		virtual void OnResume() {}
 
-		virtual void OnMouseEnter() {}
-		virtual void OnMouseHover() {}
-		virtual void OnMouseExit() {}
+		virtual void OnStop() {}
 
-		virtual void OnLeftClicked() {}
-		virtual void OnRightClicked() {}
+		virtual void OnCollisionEnter(const BehaviorCollision& collision) {}
 
-		virtual void OnLeftClickDown() {}
-		virtual void OnRightClickDown() {}
+		virtual void OnCollisionStay(const BehaviorCollision& collision) {}
 
-		virtual void OnLeftClickUp() {}
-		virtual void OnRightClickUp() {}
+		virtual void OnCollisionExit(const BehaviorCollision& collision) {}
 
-		const bool RunMouseCallBacks() const { return runMouseCallBacks; }
-		const bool RunCollisionCallBacks() const { return runCollisionCallBacks; }
+		bool RunCollisionCallBacks() const { return runCollisionCallBacks; }
 
-		void EnableMouseCallBacks(bool value = true) { runMouseCallBacks = value; }
 		void EnableCollisionCallBacks(bool value = true) { runCollisionCallBacks = value; }
 
-		const bool FocusedByMouse() const { return focusedByMouse; }
-		void SetFocusedByMouse(bool value) { focusedByMouse = value; }
+		Scene& GetScene() const { return *scene; }
 
-	protected:
+		entt::entity GetEntity() const { return entity; }
 
+		// Null when the entity has no Transform. Looked up each call: EnTT storage may move
+		// components, so behaviours never cache component pointers across frames.
+		Transform* GetTransform() const;
+
+		Swim::Input::InputSystem* GetInput() const { return input; }
+
+		CameraSystem* GetCameraSystem() const { return cameraSystem; }
+
+		// The current frame's simulated time (pause, time scale, fixed steps).
+		const SimulationFrame& GetTime() const;
+
+	  protected:
 		Scene* scene = nullptr;
 		entt::entity entity = entt::null;
-
 		Swim::Input::InputSystem* input = nullptr;
 		CameraSystem* cameraSystem = nullptr;
-
-		// These may be nullptr if the entity does not have the components but since they are so common we attempt to cache them on construction
-		Transform* transform = nullptr;
-		Material* material = nullptr;
-
-		bool runMouseCallBacks = false;
 		bool runCollisionCallBacks = false;
-
-		bool focusedByMouse = false;
-
 		bool hasInited = false;
-
 	};
-
-}
+} // namespace Engine

@@ -1,5 +1,95 @@
 include_guard(GLOBAL)
 
+# The engine's runtime shader set (Phase 23). Every program the FrameRenderer loads
+# is compiled once by swim_add_slang_program (CMakeLists.txt, next to the native
+# smokes that validate the same programs) and staged here under its runtime name:
+#
+#   ${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.spv
+#   ${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.reflection.json
+#
+# SwimEngine deploys the directory as <exe dir>/Shaders/Runtime (ShaderLibrary's
+# default root); SwimTests reads it through SWIM_RUNTIME_SHADER_DIR. The retired
+# Vulkan/OpenGL legacy shader groups are archived under Deprecated/Shaders.
+set(SWIM_RUNTIME_SHADER_PROGRAMS
+	"Present=SwimRuntimePresent"
+	"SkyBackground=SwimRuntimeSkyBackground"
+	"GpuVisibility=SwimGpuVisibility"
+	"HzbReduce=SwimHzbReduce"
+	"ClusterLightCull=SwimClusterLightCull"
+	"ClusterBounds=SwimClusterBounds"
+	"ClusterAssign=SwimClusterAssign"
+	"ClusterScan=SwimClusterScan"
+	"ClusterHeatmap=SwimClusterHeatmap"
+	"ForwardOpaque=SwimForwardOpaque"
+	"ForwardTransparent=SwimForwardTransparent"
+	"ForwardTransparentSort=SwimForwardTransparentSort"
+	"ShadowDepth=SwimShadowDepth"
+	"ShadowMasked=SwimShadowMasked"
+	"EnvironmentSky=SwimEnvironmentSky"
+	"EnvironmentDownsample=SwimEnvironmentDownsample"
+	"EnvironmentPrefilter=SwimEnvironmentPrefilter"
+	"EnvironmentIrradiance=SwimEnvironmentIrradiance"
+	"EnvironmentBrdfLut=SwimEnvironmentBrdfLut"
+	"PostHistogram=SwimPostHistogram"
+	"PostExposure=SwimPostExposure"
+	"PostBloomDownsample=SwimPostBloomDownsample"
+	"PostBloomUpsample=SwimPostBloomUpsample"
+	"PostComposite=SwimPostComposite"
+	"PostCompositeHdr=SwimPostCompositeHdr"
+	"TemporalResolve=SwimTemporalResolve"
+	"ScreenSpaceAo=SwimScreenSpaceAo"
+	"ScreenSpaceBlur=SwimScreenSpaceBlur"
+	"ScreenSpaceComposite=SwimScreenSpaceComposite"
+	"ScreenSpaceReflection=SwimScreenSpaceReflection"
+	"ParticleSimulate=SwimParticleSimulate"
+	"ParticleEmit=SwimParticleEmit"
+	"ParticleCompact=SwimParticleCompact"
+	"ParticleFinalize=SwimParticleFinalize"
+	"ParticleRender=SwimParticleRender"
+	"Skinning=SwimSkinning"
+	"UiQuad=SwimUiQuad"
+)
+
+# Defines SwimRuntimeShaders (the staged set) once.
+function(swim_define_runtime_shader_set)
+	if(TARGET SwimRuntimeShaders OR SWIM_OFFLINE_DEPENDENCY_STUBS)
+		return()
+	endif()
+	if(NOT DEFINED SwimForwardOpaque_SPIRV)
+		message(FATAL_ERROR
+			"The runtime shader set needs the Slang programs defined with SWIM_ENABLE_VULKAN_RHI and SWIM_BUILD_SHADER_COMPILER."
+		)
+	endif()
+
+	set(SWIM_RUNTIME_SHADER_ROOT "${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet")
+	set(SWIM_RUNTIME_SHADER_OUTPUTS "")
+	set(SWIM_RUNTIME_SHADER_SOURCES "")
+	foreach(SWIM_ENTRY IN LISTS SWIM_RUNTIME_SHADER_PROGRAMS)
+		string(REPLACE "=" ";" SWIM_PAIR "${SWIM_ENTRY}")
+		list(GET SWIM_PAIR 0 SWIM_RUNTIME_NAME)
+		list(GET SWIM_PAIR 1 SWIM_PROGRAM)
+		if(NOT DEFINED ${SWIM_PROGRAM}_SPIRV OR NOT DEFINED ${SWIM_PROGRAM}_REFLECTION)
+			message(FATAL_ERROR "Runtime shader ${SWIM_RUNTIME_NAME}: program ${SWIM_PROGRAM} is not defined")
+		endif()
+		set(SWIM_SPV "${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.spv")
+		set(SWIM_JSON "${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_RUNTIME_NAME}.reflection.json")
+		add_custom_command(
+			OUTPUT "${SWIM_SPV}" "${SWIM_JSON}"
+			COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_RUNTIME_SHADER_ROOT}"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${SWIM_PROGRAM}_SPIRV}" "${SWIM_SPV}"
+			COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${SWIM_PROGRAM}_REFLECTION}" "${SWIM_JSON}"
+			DEPENDS "${${SWIM_PROGRAM}_SPIRV}" "${${SWIM_PROGRAM}_REFLECTION}"
+			COMMENT "Staging runtime shader ${SWIM_RUNTIME_NAME}"
+			VERBATIM
+		)
+		list(APPEND SWIM_RUNTIME_SHADER_OUTPUTS "${SWIM_SPV}" "${SWIM_JSON}")
+	endforeach()
+
+	add_custom_target(SwimRuntimeShaders DEPENDS ${SWIM_RUNTIME_SHADER_OUTPUTS})
+	swim_set_solution_folder(SwimRuntimeShaders "${SWIM_SOLUTION_FOLDER_TOOLS}")
+	set(SWIM_RUNTIME_SHADER_DIR "${SWIM_RUNTIME_SHADER_ROOT}" CACHE INTERNAL "Staged runtime shader set" FORCE)
+endfunction()
+
 function(swim_configure_shaders target)
 	if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		return()
@@ -11,71 +101,12 @@ function(swim_configure_shaders target)
 		)
 	endif()
 
-	include(cmake/SlangShaders.cmake)
-
-	set(SWIM_RUNTIME_SHADER_ROOT "${CMAKE_CURRENT_BINARY_DIR}/Generated/Shaders/Runtime")
-	set(SWIM_RUNTIME_SHADER_OUTPUTS "")
-	set(SWIM_RUNTIME_SHADER_REFLECTION "")
-
-	set(SWIM_VULKAN_SHADER_GROUPS
-		"VertexShaders"
-		"FragmentShaders"
-		"ComputeShaders"
-	)
-
-	foreach(SWIM_SHADER_GROUP IN LISTS SWIM_VULKAN_SHADER_GROUPS)
-		file(GLOB SWIM_GROUP_SHADERS
-			"${CMAKE_SOURCE_DIR}/Source/Shaders/Vulkan/${SWIM_SHADER_GROUP}/*.slang"
-		)
-		foreach(SWIM_SHADER IN LISTS SWIM_GROUP_SHADERS)
-			get_filename_component(SWIM_SHADER_NAME "${SWIM_SHADER}" NAME_WE)
-			string(MAKE_C_IDENTIFIER "Vulkan_${SWIM_SHADER_GROUP}_${SWIM_SHADER_NAME}" SWIM_SHADER_TARGET_NAME)
-			swim_add_slang_program(${SWIM_SHADER_TARGET_NAME}
-				SOURCE "${SWIM_SHADER}"
-				OUTPUT_DIRECTORY "${SWIM_RUNTIME_SHADER_ROOT}/${SWIM_SHADER_GROUP}"
-				OUTPUT_NAME "${SWIM_SHADER_NAME}"
-				TARGET spirv
-				PROFILE spirv_1_5
-			)
-			list(APPEND SWIM_RUNTIME_SHADER_OUTPUTS "${${SWIM_SHADER_TARGET_NAME}_OUTPUT}")
-			list(APPEND SWIM_RUNTIME_SHADER_REFLECTION "${${SWIM_SHADER_TARGET_NAME}_REFLECTION}")
-		endforeach()
-	endforeach()
-
-	file(GLOB SWIM_OPENGL_SHADERS
-		"${CMAKE_SOURCE_DIR}/Source/Shaders/OpenGL/*.slang"
-	)
-	foreach(SWIM_SHADER IN LISTS SWIM_OPENGL_SHADERS)
-		get_filename_component(SWIM_SHADER_NAME "${SWIM_SHADER}" NAME_WE)
-		string(MAKE_C_IDENTIFIER "OpenGL_${SWIM_SHADER_NAME}" SWIM_SHADER_TARGET_NAME)
-		# Unlike SPIR-V, a GLSL target emits one kernel per entry point, so slangc
-		# requires the entry point to be named before its -o path. Every legacy
-		# OpenGL shader is a single-entry module using the conventional name.
-		swim_add_slang_program(${SWIM_SHADER_TARGET_NAME}
-			SOURCE "${SWIM_SHADER}"
-			OUTPUT_DIRECTORY "${SWIM_RUNTIME_SHADER_ROOT}/OpenGL"
-			OUTPUT_NAME "${SWIM_SHADER_NAME}"
-			TARGET glsl
-			PROFILE glsl_460
-			ENTRY_POINT main
-		)
-		list(APPEND SWIM_RUNTIME_SHADER_OUTPUTS "${${SWIM_SHADER_TARGET_NAME}_OUTPUT}")
-		list(APPEND SWIM_RUNTIME_SHADER_REFLECTION "${${SWIM_SHADER_TARGET_NAME}_REFLECTION}")
-	endforeach()
-
-	if(NOT TARGET SwimShaderArtifacts)
-		add_custom_target(SwimShaderArtifacts
-			DEPENDS ${SWIM_RUNTIME_SHADER_OUTPUTS} ${SWIM_RUNTIME_SHADER_REFLECTION}
-			SOURCES ${SWIM_SHADER_SOURCES}
-		)
-		swim_set_solution_folder(SwimShaderArtifacts "${SWIM_SOLUTION_FOLDER_TOOLS}")
-	endif()
-
-	add_dependencies(${target} SwimShaderArtifacts)
+	swim_define_runtime_shader_set()
+	add_dependencies(${target} SwimRuntimeShaders)
 	add_custom_command(TARGET ${target} POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E copy_directory
-			"${SWIM_RUNTIME_SHADER_ROOT}"
-			"$<TARGET_FILE_DIR:${target}>/Shaders"
+			"${SWIM_RUNTIME_SHADER_DIR}"
+			"$<TARGET_FILE_DIR:${target}>/Shaders/Runtime"
 		VERBATIM
 	)
 endfunction()

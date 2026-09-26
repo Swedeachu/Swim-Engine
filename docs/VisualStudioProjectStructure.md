@@ -65,7 +65,7 @@ SwimEngine
   -> volk / vk-bootstrap / VulkanMemoryAllocator   (was private to SwimRhiVulkan, when SWIM_ENABLE_VULKAN_RHI is on)
   -> Jolt                 (was private to SwimPhysicsJolt, when that backend is enabled)
   -> PhysX                (was private to SwimPhysicsPhysX, when that backend is enabled)
-  -> spdlog, Vulkan, OpenGL, EnTT, nlohmann_json, stb, zstd, Basis transcoder, GLAD
+  -> spdlog, EnTT, Swim::ShaderCompiler (runtime shader set), Threads
 ```
 
 Each of the first six used to be a `PRIVATE` dependency of a now-retired module target; they moved directly onto `SwimEngine` because that module's `.cpp` files are now `SwimEngine`'s own translation units. Nothing about *what* links what changed — only *which target* declares the link.
@@ -102,7 +102,7 @@ This section used to describe a dozen separate static-library projects (`SwimCor
 
 ## 3.4 Platform (`Source/Engine/Platform`)
 
-**Owns:** OS/window/platform services — `PlatformSystem`, `WindowSystem`/`Window`, normalized window events, native-window escape-hatch descriptors, legacy Windows external-editor/`WM_COPYDATA` compatibility code (retained but runtime-dormant), filesystem roots/path services, mapped files, dynamic libraries, monotonic clock, thread helpers, headless startup support. Links `SDL3` directly. SDL types are implementation details and should not become normal engine API types.
+**Owns:** OS/window/platform services — `PlatformSystem`, `WindowSystem`/`Window`, normalized window events, native-window escape-hatch descriptors, filesystem roots/path services, mapped files, dynamic libraries, monotonic clock, thread helpers, headless startup support. Links `SDL3` directly. SDL types are implementation details and should not become normal engine API types.
 
 ## 3.5 Input (`Source/Engine/Input`)
 
@@ -385,9 +385,6 @@ Examples include groups for:
 - Draco;
 - WebP;
 - meshoptimizer;
-- zstd;
-- Basis Universal;
-- GLAD;
 - spdlog;
 - Jolt;
 - PhysX;
@@ -442,7 +439,8 @@ SwimEngine
   |
   +-- required runtime third-party targets
   |
-  +-- legacy engine/game/renderer sources still owned by SwimEngine directly
+  +-- the runtime (Source/Engine/Runtime, Renderer/Runtime, Camera, Scene) and the
+  |   sandbox game (Source/Game)
   |
   `-- SwimAssetCompiler only when development auto-cook is enabled (*then Assets
       compiles there instead, not into SwimEngine -- see §2)
@@ -460,11 +458,9 @@ Because `SwimAssetCooker` is a normal tool target rather than an excluded exampl
 
 Selecting one test/example project builds only that target and the dependencies it requires. Building `SwimTests` compiles the whole test corpus, the former-module sources it needs, and whatever Tools targets it still links (`SwimAssetCompiler`, `SwimShaderCompiler`); use `--filter` at run time to narrow what actually executes. A header-boundary gate builds only its own module's public headers, which is the cheapest way to check that a module's public surface is still self-contained.
 
-## 9.4 `SWIM_BUILD_LEGACY_ENGINE=OFF`
+## 9.4 `SWIM_BUILD_ENGINE=OFF`
 
-When the legacy engine is disabled, CMake stops before creating the full `SwimEngine` renderer/game executable. Foundation module sources, asset tooling, tests, and examples can still exist and compile — into `SwimTests`/the example executables directly, since `SwimEngine` itself never gets created in this mode.
-
-This is important for Linux and headless/foundation validation while the old renderer remains Windows-only.
+`SWIM_BUILD_ENGINE` (default `ON`, on Windows and Linux) creates the `SwimEngine` runtime executable. With it off, CMake stops before creating the executable. Foundation module sources, asset tooling, tests and examples still compile, into `SwimTests` and the example executables directly; the `Engine.*`/`Game.*` suites that need the runtime are left out. It replaced the retired `SWIM_BUILD_LEGACY_ENGINE` switch (Phase 22/23), which existed while the old renderer was Windows-only.
 
 ## 9.5 `SWIM_BUILD_ASSET_COMPILER=OFF`
 
@@ -533,7 +529,7 @@ Vulkan RHI     -> RHI contract, Platform, volk, vk-bootstrap, VulkanMemoryAlloca
 SwimEngine
   -> all of the above, compiled directly (Assets only when dev auto-cook is off)
   -> SwimAssetCompiler only when dev auto-cook is on
-  -> remaining legacy renderer/scene/game implementation sources/dependencies
+  -> Runtime (FrameRenderer, RenderDevice, libraries), SceneRenderBridge, UiRuntime and Source/Game
 
 SwimAssetCompiler (Tools)
   -> Assets (embedded), fastgltf / simdjson / meshoptimizer / Draco / stb / libwebp

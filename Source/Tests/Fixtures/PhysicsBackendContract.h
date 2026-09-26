@@ -572,6 +572,21 @@ namespace Engine::Tests
 
 		// A 2 kg sphere falling onto a floor cannot resolve with a zero impulse.
 		SWIM_CHECK(strongestImpulse > 0.0f);
+
+		// Destroying a body that is resting in contact: the backend still learns about the
+		// lost touch on the next steps (PhysX reports it with the released actor flagged as
+		// removed), which must neither crash nor produce events for the dead body.
+		const BodyHandle removed = verbose.Dynamic();
+		world.DestroyBody(removed);
+		SWIM_CHECK(!world.IsBodyValid(removed));
+		for (int i = 0; i < 10; ++i)
+		{
+			StepPhysics(world, 1.0f / 60.0f);
+			for (const CollisionEvent& event : world.GetCollisionEvents())
+			{
+				SWIM_CHECK(event.BodyA != removed && event.BodyB != removed);
+			}
+		}
 	}
 
 } // namespace Engine::Tests

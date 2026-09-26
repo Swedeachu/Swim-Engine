@@ -1,21 +1,20 @@
 #pragma once
 
+// Precompiled header for the SwimEngine executable. Only stable, widely used
+// headers belong here: every source must still include what it uses, so the
+// build stays correct with SWIM_ENABLE_PCH=OFF and on every platform.
+
 // STL
-#include <vector>
-#include <string>
+#include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
-#include <iostream>
-#include <memory> // For smart pointers
+#include <vector>
 
-// Swim Engine
-#include "Engine\Machine.h"
-#include "Engine\Systems\Scene\Scene.h"
-#include "Engine\Systems\Scene\SceneSystem.h"
-#include "Engine\Systems\Renderer\Core\Camera\CameraSystem.h"
-
-// glm math
-#include <glm/glm.hpp>
-
-// entt
+// Math / ECS
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>

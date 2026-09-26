@@ -4,169 +4,184 @@
 #include <cctype>
 #include <charconv>
 #include <cstdlib>
+#include <sstream>
 
 namespace Engine
 {
-
 	namespace
 	{
+		std::string Lower(std::string_view value)
+		{
+			std::string out(value);
+			std::transform(out.begin(), out.end(), out.begin(),
+				[](unsigned char ch)
+				{
+					return static_cast<char>(std::tolower(ch));
+				});
+			return out;
+		}
 
 		bool ParseGraphicsBackend(std::string_view value, GraphicsBackend& backend)
 		{
-			if (value == "auto")
+			const std::string v = Lower(value);
+			if (v == "auto")
 			{
 				backend = GraphicsBackend::Auto;
-				return true;
 			}
-			if (value == "vulkan")
+			else if (v == "vulkan")
 			{
 				backend = GraphicsBackend::Vulkan;
-				return true;
 			}
-			if (value == "opengl" || value == "opengl-legacy")
-			{
-				backend = GraphicsBackend::OpenGLLegacy;
-				return true;
-			}
-			if (value == "d3d12")
+			else if (v == "d3d12")
 			{
 				backend = GraphicsBackend::D3D12;
-				return true;
 			}
-			if (value == "metal")
+			else if (v == "metal")
 			{
 				backend = GraphicsBackend::Metal;
-				return true;
 			}
-			return false;
+			else
+			{
+				return false;
+			}
+			return true;
 		}
 
 		bool ParsePhysicsBackend(std::string_view value, PhysicsBackend& backend)
 		{
-			if (value == "auto")
+			const std::string v = Lower(value);
+			if (v == "auto")
 			{
 				backend = PhysicsBackend::Auto;
-				return true;
 			}
-			if (value == "physx")
+			else if (v == "physx")
 			{
 				backend = PhysicsBackend::PhysX;
-				return true;
 			}
-			if (value == "jolt")
+			else if (v == "jolt")
 			{
 				backend = PhysicsBackend::Jolt;
-				return true;
 			}
-			return false;
+			else
+			{
+				return false;
+			}
+			return true;
 		}
 
-		bool ParseUnsigned(std::string_view value, uint64_t& result)
+		bool ParseUnsigned(std::string_view value, std::uint64_t& result)
 		{
 			result = 0;
 			const char* begin = value.data();
 			const char* end = begin + value.size();
 			auto [ptr, error] = std::from_chars(begin, end, result);
-			return error == std::errc{} && ptr == end;
+			return !value.empty() && error == std::errc{} && ptr == end;
 		}
 
-		bool ParseEngineStateValue(std::string_view value, EngineState& state)
+		bool ParseDouble(std::string_view value, double& result)
 		{
 			if (value.empty())
 			{
 				return false;
 			}
+			const std::string text(value);
+			char* end = nullptr;
+			result = std::strtod(text.c_str(), &end);
+			return end == text.c_str() + text.size();
+		}
 
-			state = EngineState::None;
-			std::size_t start = 0;
-			while (start <= value.size())
+		bool ParseBool(std::string_view value, bool& result)
+		{
+			const std::string v = Lower(value);
+			if (v == "on" || v == "true" || v == "1" || v == "yes")
 			{
-				const std::size_t delimiter = value.find_first_of(",|", start);
-				std::string token = delimiter == std::string_view::npos
-					? std::string(value.substr(start))
-					: std::string(value.substr(start, delimiter - start));
-
-				token.erase(token.begin(), std::find_if(token.begin(), token.end(),
-					[](unsigned char ch) { return !std::isspace(ch); }));
-				token.erase(std::find_if(token.rbegin(), token.rend(),
-					[](unsigned char ch) { return !std::isspace(ch); }).base(), token.end());
-
-				if (token.empty())
-				{
-					return false;
-				}
-
-				std::string normalized = token;
-				std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-					[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-
-				const EngineState tokenState = ParseEngineStateToken(token);
-				if (tokenState == EngineState::None && normalized != "none")
-				{
-					char* end = nullptr;
-					const unsigned long long numericValue = std::strtoull(normalized.c_str(), &end, 0);
-					if (end == normalized.c_str() || *end != '\0' || numericValue != 0)
-					{
-						return false;
-					}
-				}
-
-				state |= tokenState;
-
-				if (delimiter == std::string_view::npos)
-				{
-					break;
-				}
-				start = delimiter + 1;
+				result = true;
+				return true;
 			}
+			if (v == "off" || v == "false" || v == "0" || v == "no")
+			{
+				result = false;
+				return true;
+			}
+			return false;
+		}
 
+		bool ParseInitialState(std::string_view value, EngineState& state)
+		{
+			const EngineState parsed = ParseEngineStateToken(std::string(value));
+			if (!IsSingleEngineState(parsed))
+			{
+				return false;
+			}
+			state = parsed;
 			return true;
 		}
 
-		std::string_view ReadValue(int& index, int argc, char** argv, std::string_view argument, std::string_view prefix)
+		// Matches "--name", "--name=value" or "--name value". Returns false when the
+		// argument is a different option.
+		bool Option(
+			std::string_view argument, std::string_view name, int& index, int argc, char** argv, std::string_view& value, bool& hasValue)
 		{
-			if (argument.rfind(prefix, 0) == 0)
+			if (argument.rfind(name, 0) != 0)
 			{
-				return argument.substr(prefix.size());
+				return false;
 			}
-
-			if (index + 1 < argc)
+			const std::string_view rest = argument.substr(name.size());
+			if (rest.empty())
 			{
-				return argv[++index];
+				if (index + 1 < argc && std::string_view(argv[index + 1]).rfind("--", 0) != 0)
+				{
+					value = argv[++index];
+					hasValue = true;
+				}
+				else
+				{
+					value = {};
+					hasValue = false;
+				}
+				return true;
 			}
-
-			return {};
+			if (rest.front() != '=')
+			{
+				return false;
+			}
+			value = rest.substr(1);
+			hasValue = true;
+			return true;
 		}
-
-	}
+	} // namespace
 
 	GraphicsBackend ResolveGraphicsBackend(GraphicsBackend backend)
 	{
-		if (backend == GraphicsBackend::Auto)
-		{
-			return GraphicsBackend::Vulkan;
-		}
-		return backend;
+		return backend == GraphicsBackend::Auto ? GraphicsBackend::Vulkan : backend;
 	}
 
-	PhysicsBackend ResolvePhysicsBackend(PhysicsBackend backend)
+	PhysicsBackend ResolvePhysicsBackend(PhysicsBackend backend, bool physXAvailable, bool joltAvailable)
 	{
-		if (backend == PhysicsBackend::Auto)
+		switch (backend)
 		{
-			return PhysicsBackend::PhysX;
+		case PhysicsBackend::Auto:
+			return physXAvailable ? PhysicsBackend::PhysX : (joltAvailable ? PhysicsBackend::Jolt : PhysicsBackend::Auto);
+		case PhysicsBackend::PhysX:
+			return physXAvailable ? PhysicsBackend::PhysX : PhysicsBackend::Auto;
+		case PhysicsBackend::Jolt:
+			return joltAvailable ? PhysicsBackend::Jolt : PhysicsBackend::Auto;
 		}
-		return backend;
+		return PhysicsBackend::Auto;
 	}
 
 	std::string_view ToString(GraphicsBackend backend)
 	{
 		switch (backend)
 		{
-			case GraphicsBackend::Auto: return "Auto";
-			case GraphicsBackend::Vulkan: return "Vulkan";
-			case GraphicsBackend::OpenGLLegacy: return "OpenGL Legacy";
-			case GraphicsBackend::D3D12: return "D3D12";
-			case GraphicsBackend::Metal: return "Metal";
+		case GraphicsBackend::Auto:
+			return "Auto";
+		case GraphicsBackend::Vulkan:
+			return "Vulkan";
+		case GraphicsBackend::D3D12:
+			return "D3D12";
+		case GraphicsBackend::Metal:
+			return "Metal";
 		}
 		return "Unknown";
 	}
@@ -175,9 +190,24 @@ namespace Engine
 	{
 		switch (backend)
 		{
-			case PhysicsBackend::Auto: return "Auto";
-			case PhysicsBackend::PhysX: return "PhysX";
-			case PhysicsBackend::Jolt: return "Jolt";
+		case PhysicsBackend::Auto:
+			return "Auto";
+		case PhysicsBackend::PhysX:
+			return "PhysX";
+		case PhysicsBackend::Jolt:
+			return "Jolt";
+		}
+		return "Unknown";
+	}
+
+	std::string_view ToString(PresentMode mode)
+	{
+		switch (mode)
+		{
+		case PresentMode::Window:
+			return "Window";
+		case PresentMode::Headless:
+			return "Headless";
 		}
 		return "Unknown";
 	}
@@ -185,74 +215,225 @@ namespace Engine
 	EngineConfigParseResult ParseEngineConfigArgs(int argc, char** argv)
 	{
 		EngineConfigParseResult result{};
-		result.Config.Window.Title = "Swim Engine";
+		EngineConfig& config = result.Config;
 
 		for (int i = 1; i < argc; ++i)
 		{
 			const std::string_view argument = argv[i];
-
-			if (argument == "--graphics" || argument.rfind("--graphics=", 0) == 0)
+			std::string_view value;
+			bool hasValue = false;
+			const auto fail = [&](std::string message)
 			{
-				const std::string_view value = ReadValue(i, argc, argv, argument, "--graphics=");
-				if (value.empty() || !ParseGraphicsBackend(value, result.Config.Graphics))
-				{
-					result.Errors.emplace_back("Invalid --graphics value. Expected auto, vulkan, opengl, d3d12, or metal.");
-				}
-				continue;
+				result.Errors.push_back(std::move(message));
+			};
+
+			if (argument == "--help" || argument == "-h")
+			{
+				config.ShowHelp = true;
 			}
-
-			if (argument == "--physics" || argument.rfind("--physics=", 0) == 0)
+			else if (Option(argument, "--graphics", i, argc, argv, value, hasValue))
 			{
-				const std::string_view value = ReadValue(i, argc, argv, argument, "--physics=");
-				if (value.empty() || !ParsePhysicsBackend(value, result.Config.Physics))
+				if (!hasValue || !ParseGraphicsBackend(value, config.Graphics))
 				{
-					result.Errors.emplace_back("Invalid --physics value. Expected auto, physx, or jolt.");
+					fail("Invalid --graphics value. Expected auto, vulkan, d3d12 or metal.");
 				}
-				continue;
 			}
-
-			if (argument == "--state" || argument.rfind("--state=", 0) == 0)
+			else if (Option(argument, "--physics", i, argc, argv, value, hasValue))
 			{
-				const std::string_view value = ReadValue(i, argc, argv, argument, "--state=");
-				EngineState state = EngineState::None;
-				if (!ParseEngineStateValue(value, state))
+				if (!hasValue || !ParsePhysicsBackend(value, config.Physics))
 				{
-					result.Errors.emplace_back("Invalid --state value.");
+					fail("Invalid --physics value. Expected auto, physx or jolt.");
+				}
+			}
+			else if (Option(argument, "--state", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || !ParseInitialState(value, config.InitialState))
+				{
+					fail("Invalid --state value. Expected playing, paused or stopped.");
+				}
+			}
+			else if (Option(argument, "--scene", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("--scene requires a scene name.");
 				}
 				else
 				{
-					result.Config.InitialState = state;
+					config.StartupScene = std::string(value);
 				}
-				continue;
 			}
-
-			if (argument == "--parent-hwnd" || argument.rfind("--parent-hwnd=", 0) == 0)
+			else if (Option(argument, "--width", i, argc, argv, value, hasValue) ||
+				Option(argument, "--height", i, argc, argv, value, hasValue))
 			{
-				const std::string_view value = ReadValue(i, argc, argv, argument, "--parent-hwnd=");
-				uint64_t nativeValue = 0;
-				if (value.empty() || !ParseUnsigned(value, nativeValue) || nativeValue == 0)
+				std::uint64_t pixels = 0;
+				const bool width = argument.rfind("--width", 0) == 0;
+				if (!hasValue || !ParseUnsigned(value, pixels) || pixels < 16 || pixels > 16384)
 				{
-					result.Errors.emplace_back("Invalid --parent-hwnd value.");
+					fail(width ? "Invalid --width value (16..16384)." : "Invalid --height value (16..16384).");
+				}
+				else if (width)
+				{
+					config.Window.Width = static_cast<std::uint32_t>(pixels);
 				}
 				else
 				{
-					result.Config.Window.ExternalParent = {
-						Swim::Platform::NativeWindowType::Win32,
-						reinterpret_cast<void*>(static_cast<std::uintptr_t>(nativeValue)),
-						nullptr
-					};
+					config.Window.Height = static_cast<std::uint32_t>(pixels);
 				}
-				continue;
 			}
-
-			if (argument == "--opengl-shadertoy")
+			else if (Option(argument, "--size", i, argc, argv, value, hasValue))
 			{
-				result.Config.UseOpenGLShaderToy = true;
-				continue;
+				const std::size_t x = hasValue ? value.find_first_of("xX") : std::string_view::npos;
+				std::uint64_t w = 0;
+				std::uint64_t h = 0;
+				if (x == std::string_view::npos || !ParseUnsigned(value.substr(0, x), w) || !ParseUnsigned(value.substr(x + 1), h) ||
+					w < 16 || h < 16 || w > 16384 || h > 16384)
+				{
+					fail("Invalid --size value. Expected <width>x<height>.");
+				}
+				else
+				{
+					config.Window.Width = static_cast<std::uint32_t>(w);
+					config.Window.Height = static_cast<std::uint32_t>(h);
+				}
+			}
+			else if (argument == "--no-vsync")
+			{
+				config.VSync = false;
+			}
+			else if (Option(argument, "--vsync", i, argc, argv, value, hasValue))
+			{
+				if (hasValue && !ParseBool(value, config.VSync))
+				{
+					fail("Invalid --vsync value. Expected on or off.");
+				}
+				else if (!hasValue)
+				{
+					config.VSync = true;
+				}
+			}
+			else if (Option(argument, "--validation", i, argc, argv, value, hasValue))
+			{
+				if (hasValue && !ParseBool(value, config.Validation))
+				{
+					fail("Invalid --validation value. Expected on or off.");
+				}
+				else if (!hasValue)
+				{
+					config.Validation = true;
+				}
+			}
+			else if (Option(argument, "--fixed-rate", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || !ParseDouble(value, config.FixedRate) || config.FixedRate < 1.0 || config.FixedRate > 1000.0)
+				{
+					fail("Invalid --fixed-rate value (1..1000 Hz).");
+				}
+			}
+			else if (Option(argument, "--time-scale", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || !ParseDouble(value, config.TimeScale) || config.TimeScale < 0.0 || config.TimeScale > 100.0)
+				{
+					fail("Invalid --time-scale value (0..100).");
+				}
+			}
+			else if (argument == "--headless")
+			{
+				config.Present = PresentMode::Headless;
+			}
+			else if (argument == "--no-render")
+			{
+				config.Render = false;
+				config.Present = PresentMode::Headless;
+			}
+			else if (Option(argument, "--frames", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || !ParseUnsigned(value, config.MaxFrames) || config.MaxFrames == 0)
+				{
+					fail("Invalid --frames value (a positive frame count).");
+				}
+			}
+			else if (Option(argument, "--capture", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("--capture requires an output path.");
+				}
+				else
+				{
+					config.CapturePath = std::string(value);
+				}
+			}
+			else if (Option(argument, "--fixed-delta", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || !ParseDouble(value, config.FixedFrameDelta) || config.FixedFrameDelta <= 0.0 ||
+					config.FixedFrameDelta > 1.0)
+				{
+					fail("Invalid --fixed-delta value (0..1 seconds).");
+				}
+			}
+			else if (Option(argument, "--exec", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("--exec requires a command.");
+				}
+				else
+				{
+					config.StartupCommands.emplace_back(value);
+				}
+			}
+			else if (Option(argument, "--parent-hwnd", i, argc, argv, value, hasValue))
+			{
+				std::uint64_t nativeValue = 0;
+				if (!hasValue || !ParseUnsigned(value, nativeValue) || nativeValue == 0)
+				{
+					fail("Invalid --parent-hwnd value.");
+				}
+				else
+				{
+					config.Window.ExternalParent = { Swim::Platform::NativeWindowType::Win32,
+						reinterpret_cast<void*>(static_cast<std::uintptr_t>(nativeValue)), nullptr };
+				}
+			}
+			else
+			{
+				fail("Unknown argument '" + std::string(argument) + "' (see --help).");
 			}
 		}
 
+		if (!config.Render && !config.CapturePath.empty())
+		{
+			result.Errors.emplace_back("--capture needs rendering (drop --no-render).");
+		}
+		if (!config.CapturePath.empty() && config.MaxFrames == 0)
+		{
+			// A capture without a frame budget captures after the first few frames.
+			config.MaxFrames = 60;
+		}
 		return result;
 	}
 
-}
+	std::string GetEngineConfigUsage()
+	{
+		std::ostringstream out;
+		out << "Swim Engine options:\n"
+			<< "  --graphics=auto|vulkan|d3d12|metal  Graphics backend (auto = vulkan)\n"
+			<< "  --physics=auto|physx|jolt           Physics backend (auto = physx if built, else jolt)\n"
+			<< "  --state=playing|paused|stopped      Initial engine state\n"
+			<< "  --scene=<name>                      Startup scene\n"
+			<< "  --width=<px> --height=<px>          Window size (or --size=<W>x<H>)\n"
+			<< "  --vsync=on|off, --no-vsync          Present with/without vsync\n"
+			<< "  --validation[=on|off]               GPU validation layers\n"
+			<< "  --fixed-rate=<hz>                   Fixed simulation rate (default 60)\n"
+			<< "  --time-scale=<scale>                Initial simulation time scale\n"
+			<< "  --headless                          Render offscreen without a window\n"
+			<< "  --no-render                         Run without a GPU (simulation and UI logic only)\n"
+			<< "  --frames=<n>                        Exit after n frames\n"
+			<< "  --capture=<file.ppm>                Save the last frame (implies --frames=60)\n"
+			<< "  --fixed-delta=<seconds>             Deterministic frame delta\n"
+			<< "  --exec=<command>                    Run an engine command after startup (repeatable)\n"
+			<< "  --parent-hwnd=<handle>              Embed in a native parent window (Windows)\n";
+		return out.str();
+	}
+} // namespace Engine

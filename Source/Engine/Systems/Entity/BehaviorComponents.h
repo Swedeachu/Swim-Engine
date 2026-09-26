@@ -1,18 +1,16 @@
 #pragma once
 
-#include <memory>
-#include <vector>
 #include "Behavior.h"
+
+#include <memory>
+#include <type_traits>
+#include <vector>
 
 namespace Engine
 {
-
-	// Note: yes this completely defeats the purpose of an optimzied data driven ECS, but behaviors are intended as close control OOP stuff that won't really ever impact performance. 
-	// For example the player controller, or a gameplay score manager, or the simple ticking of a behavior tree, etc.
-	// Of course physics updates and rendering will always be fully data driven, while the behavior scripting part of the engine is traditonal virtual OOP like this in derived Behavior classes.
-	// I'm not worried because scenarios where a lot of behavior among entities would happen is already traditionally programmed as data driven, such as swarms and flocking. 
-
-	// A wrapper for all the behavior components on an entity. We iterate all the BehaviorComponents in the scene's registry each frame for behavior updates.
+	// The behaviours of one entity and the engine states they run in. Behaviours are
+	// the OOP scripting layer (player controllers, cameras, managers); bulk simulation
+	// (physics, rendering, particles) stays data-driven.
 	struct BehaviorComponents
 	{
 		std::vector<std::unique_ptr<Behavior>> behaviors;
@@ -23,87 +21,20 @@ namespace Engine
 		BehaviorComponents(BehaviorComponents&&) noexcept = default;
 		BehaviorComponents& operator=(BehaviorComponents&&) noexcept = default;
 
-		// Adds a new behavior to the list
-		void Add(std::unique_ptr<Behavior> behavior)
-		{
-			behaviors.emplace_back(std::move(behavior));
-		}
+		void Add(std::unique_ptr<Behavior> behavior) { behaviors.emplace_back(std::move(behavior)); }
 
-		// Set exactly which engine states these behaviors are enabled in.
-		// Default is EngineState::Playing.
+		// Exactly the states these behaviours run in (default: Playing). A camera
+		// controller that must work while paused uses Playing | Paused.
 		void SetEnabledStates(EngineState states) { enabledStates = states; }
-
-		// Add one or more states to the enable mask.
 		void AddEnabledStates(EngineState states) { enabledStates |= states; }
-
-		// Remove one or more states from the enable mask.
-		void RemoveEnabledStates(EngineState states)
-		{
-			enabledStates = static_cast<EngineState>(
-				static_cast<std::underlying_type_t<EngineState>>(enabledStates) &
-				~static_cast<std::underlying_type_t<EngineState>>(states)
-				);
-		}
-
-		// Query which states are enabled for this behavior (bitmask).
+		void RemoveEnabledStates(EngineState states) { enabledStates &= ~states; }
 		EngineState GetEnabledStates() const { return enabledStates; }
 
-		// Convenient predicate: is this behavior enabled in a specific state?
-		bool IsEnabledIn(EngineState state) const
-		{
-			return HasAnyEngineStates(enabledStates, state);
-		}
+		bool IsEnabledIn(EngineState state) const { return HasAnyEngineStates(enabledStates, state); }
 
-		// Priority:
-		// 1) Stopped: block unless explicitly enabled in Stopped
-		// 2) Paused: ONLY run behaviors enabled for Paused OR Editing (tools still work)
-		// 3) Live (not paused/stopped):
-		//    - If Playing + Editing: run if enabled in Playing OR Editing
-		//    - If only Playing:      run if enabled in Playing (NOT Editing)
-		//    - If only Editing:      run if enabled in Editing
-		bool CanExecute(EngineState current) const
-		{
-			// 1) Stopped gate
-			if (HasAnyEngineStates(current, EngineState::Stopped))
-			{
-				return IsEnabledIn(EngineState::Stopped);
-			}
+		// Whether the behaviours run while the engine is in `current` (one state).
+		bool CanExecute(EngineState current) const { return IsEnabledIn(current); }
 
-			// 2) Paused gate (freeze gameplay, allow tools)
-			if (HasAnyEngineStates(current, EngineState::Paused))
-			{
-				return IsEnabledIn(EngineState::Paused) || IsEnabledIn(EngineState::Editing);
-			}
-
-			// 3) Live (not paused/stopped)
-			const bool isPlaying = HasAnyEngineStates(current, EngineState::Playing);
-			const bool isEditing = HasAnyEngineStates(current, EngineState::Editing);
-
-			if (isPlaying && isEditing)
-			{
-				// Coexist: gameplay + editing tools
-				return IsEnabledIn(EngineState::Playing) || IsEnabledIn(EngineState::Editing);
-			}
-
-			if (isPlaying)
-			{
-				// Pure play: NO editor-only behaviors
-				return IsEnabledIn(EngineState::Playing);
-			}
-
-			if (isEditing)
-			{
-				// Pure edit session
-				return IsEnabledIn(EngineState::Editing);
-			}
-
-			return false;
-		}
-
-		// Which engine states this behavior is active in (bitmask)
-		// Default: active only while Playing
 		EngineState enabledStates = EngineState::Playing;
-
 	};
-
-}
+} // namespace Engine

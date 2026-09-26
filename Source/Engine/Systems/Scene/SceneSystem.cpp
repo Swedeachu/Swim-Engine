@@ -1,119 +1,159 @@
-#include "PCH.h"
-#include "SceneSystem.h"
-#include "Engine/Components/Transform.h"
-#include "Engine/Components/Material.h"
-#include "Engine/Components/CompositeMaterial.h"
-#include "Engine/Components/ObjectTag.h"
-#include "Engine/Systems/Renderer/Core/Material/MaterialPool.h"
-#include "SceneCommandBuffer.h"
+#include "Engine/Systems/Scene/SceneSystem.h"
+
+#include "Engine/Systems/Scene/SceneCommandBuffer.h"
+
+#include <iostream>
 
 namespace Engine
 {
+	void SceneSystem::SetServices(SceneServices value)
+	{
+		services = std::move(value);
+		services.Behaviors = &behaviorRegistry;
+		for (auto& [name, loaded] : scenes)
+		{
+			(void)name;
+			InjectServices(*loaded.Instance);
+		}
+	}
 
 	void SceneSystem::RegisterSceneType(std::string name, SceneFactory sceneFactory)
 	{
 		sceneCatalog.Register(std::move(name), std::move(sceneFactory));
 	}
 
+	void SceneSystem::AddLoaded(const std::string& name, std::shared_ptr<Scene> scene)
+	{
+		if (!scene)
+		{
+			throw std::invalid_argument("SceneSystem: scene '" + name + "' is null.");
+		}
+		if (services.HasCore())
+		{
+			InjectServices(*scene);
+		}
+		SceneId id(nextSceneId++);
+		scenes.emplace(name, LoadedScene{ id, std::move(scene), false });
+	}
+
 	int SceneSystem::Awake()
 	{
-		if (!services.IsValid())
+		if (!services.HasCore())
 		{
 			std::cerr << "[SceneSystem] Required engine services were not injected before Awake.\n";
 			return -1;
 		}
 
 		int err = 0;
-
-		// Construct runtime instances from this SceneSystem's explicit catalog.
-		// There is no process-global scene registration or static initialization path.
+		// Construct runtime instances from this system's explicit catalog (no global
+		// registration or static initialisation).
 		for (const SceneCatalog::Descriptor& descriptor : sceneCatalog.GetDescriptors())
 		{
 			if (scenes.contains(descriptor.Name))
 			{
-				std::cerr << "Scene instance '" << descriptor.Name << "' is already loaded.\n";
-				if (err == 0)
-				{
-					err = -1;
-				}
 				continue;
 			}
-
 			std::shared_ptr<Scene> scene = descriptor.Create(descriptor.Name);
 			if (!scene)
 			{
-				std::cerr << "Scene factory '" << descriptor.Name << "' returned null.\n";
-				if (err == 0)
-				{
-					err = -1;
-				}
+				std::cerr << "[SceneSystem] Scene factory '" << descriptor.Name << "' returned null.\n";
+				err = err ? err : -1;
 				continue;
 			}
-
-			SceneId id(nextSceneId++);
-			scenes.emplace(descriptor.Name, LoadedScene{ id, std::move(scene) });
+			AddLoaded(descriptor.Name, std::move(scene));
 		}
 
-		// Inject services into every scene, including scenes registered explicitly
-		// before Awake(), then awaken the scene only after all dependencies exist.
-		for (auto& [name, loadedScene] : scenes)
+		for (auto& [name, loaded] : scenes)
 		{
-			std::shared_ptr<Scene>& scene = loadedScene.Instance;
-			InjectServices(*scene);
-			scene->InternalSceneAwake();
-			int terr = scene->Awake();
-			if (terr != 0)
-			{
-				std::cerr << "Scene '" << name << "' failed to Awake.\n";
-				if (err == 0) { err = terr; }
-			}
+			(void)name;
+			InjectServices(*loaded.Instance);
 		}
 
-		if (!startupSceneName.empty())
+		if (startupSceneName.empty() && !scenes.empty())
 		{
-			auto startup = scenes.find(startupSceneName);
-			if (startup == scenes.end())
-			{
-				std::cerr << "Startup scene '" << startupSceneName << "' is not registered.\n";
-				if (err == 0)
-				{
-					err = -1;
-				}
-			}
-			else
-			{
-				activeScene = startup->second.Instance;
-				activeSceneId = startup->second.Id;
-			}
+			startupSceneName = scenes.begin()->first;
 		}
-
-		// Legacy external-editor scene commands are intentionally not registered.
-		// Future editor tooling is internal engine UI and operates on engine state directly.
-
+		if (!startupSceneName.empty() && !scenes.contains(startupSceneName))
+		{
+			std::cerr << "[SceneSystem] Startup scene '" << startupSceneName << "' is not registered.\n";
+			err = err ? err : -1;
+		}
+		awake = true;
 		return err;
 	}
 
 	int SceneSystem::Init()
 	{
-		if (activeScene)
+		if (startupSceneName.empty())
 		{
-			activeScene->InternalSceneInit();
-			activeScene->Init();
-			activeScene->InternalScenePostInit();
+			return 0;
 		}
+		auto it = scenes.find(startupSceneName);
+		if (it == scenes.end())
+		{
+			return -1;
+		}
+		return ActivateLoaded(it->second, it->first);
+	}
 
-		return 0;
+	int SceneSystem::ActivateLoaded(LoadedScene& loaded, const std::string& name)
+	{
+		activeScene = loaded.Instance;
+		activeSceneId = loaded.Id;
+		InjectServices(*activeScene);
+
+		int err = 0;
+		if (!loaded.Awakened)
+		{
+			loaded.Awakened = true;
+			activeScene->InternalSceneAwake();
+			if (const int result = activeScene->Awake(); result != 0)
+			{
+				std::cerr << "[SceneSystem] Scene '" << name << "' failed to Awake.\n";
+				err = result;
+			}
+		}
+		activeScene->InternalSceneInit();
+		if (const int result = activeScene->Init(); result != 0)
+		{
+			std::cerr << "[SceneSystem] Scene '" << name << "' failed to Init.\n";
+			err = err ? err : result;
+		}
+		activeScene->InternalScenePostInit();
+		return err;
+	}
+
+	void SceneSystem::ExitActive()
+	{
+		if (!activeScene)
+		{
+			return;
+		}
+		if (activeScene->Exit() != 0)
+		{
+			std::cerr << "[SceneSystem] Scene '" << activeScene->GetName() << "' failed to Exit.\n";
+		}
+		activeScene->InternalSceneExit();
 	}
 
 	void SceneSystem::BeginFrame()
 	{
-		for (auto& [name, loaded] : scenes)
+		if (!pendingScene.empty())
 		{
-			(void)name;
-			if (loaded.Instance)
-			{
-				loaded.Instance->BeginFrameTransformTracking();
-			}
+			std::string name = std::move(pendingScene);
+			pendingScene.clear();
+			pendingReload = false;
+			SetScene(name);
+		}
+		else if (pendingReload)
+		{
+			pendingReload = false;
+			ReloadActiveScene();
+		}
+
+		if (activeScene)
+		{
+			activeScene->BeginFrameTransformTracking();
 		}
 	}
 
@@ -139,122 +179,87 @@ namespace Engine
 
 	int SceneSystem::Exit()
 	{
-		int err = 0;
-
-		for (auto& [name, loadedScene] : scenes)
-		{
-			std::shared_ptr<Scene>& scene = loadedScene.Instance;
-			scene->InternalSceneExit();
-			int sceneError = scene->Exit();
-			if (sceneError != 0)
-			{
-				std::cerr << "Scene '" << name << "' failed to Exit.\n";
-				if (err == 0)
-				{
-					err = sceneError;
-				}
-			}
-		}
-
+		ExitActive();
 		activeScene.reset();
 		activeSceneId = {};
 		scenes.clear();
-		return err;
+		awake = false;
+		return 0;
 	}
 
-	SceneId SceneSystem::FindSceneId(std::string_view name) const
+	void SceneSystem::OnEngineStateChanged(EngineState previous, EngineState current)
 	{
-		auto it = scenes.find(std::string(name));
-		if (it == scenes.end())
+		if (activeScene)
 		{
-			return {};
+			activeScene->InternalStateChanged(previous, current);
 		}
-
-		return it->second.Id;
+		if (current == EngineState::Stopped && previous != EngineState::None)
+		{
+			RequestReload();
+		}
 	}
 
-	void SceneSystem::SetScene(const std::string& name, bool exitCurrent, bool initNew, bool awakeNew)
+	void SceneSystem::SetScene(const std::string& name)
 	{
-		// Check if the scene exists in the map
 		auto it = scenes.find(name);
 		if (it == scenes.end())
 		{
 			throw std::runtime_error("Scene with name '" + name + "' does not exist.");
 		}
+		ExitActive();
+		ActivateLoaded(it->second, it->first);
+	}
 
-		// Exit the current scene if requested
-		if (exitCurrent && activeScene)
+	void SceneSystem::ReloadActiveScene()
+	{
+		if (!activeScene)
 		{
-			activeScene->InternalSceneExit();
-			if (activeScene->Exit() != 0)
+			return;
+		}
+		const std::string name = GetActiveSceneName();
+		ExitActive();
+		auto it = scenes.find(name);
+		if (it != scenes.end())
+		{
+			ActivateLoaded(it->second, it->first);
+		}
+		++reloadCount;
+	}
+
+	std::string SceneSystem::GetActiveSceneName() const
+	{
+		for (const auto& [name, loaded] : scenes)
+		{
+			if (loaded.Instance == activeScene)
 			{
-				std::cerr << "Failed to exit the current scene.\n";
+				return name;
 			}
 		}
+		return {};
+	}
 
-		// Set the new active scene
-		activeScene = it->second.Instance;
-		activeSceneId = it->second.Id;
-		if (activeScene)
+	SceneId SceneSystem::FindSceneId(std::string_view name) const
+	{
+		auto it = scenes.find(std::string(name));
+		return it == scenes.end() ? SceneId{} : it->second.Id;
+	}
+
+	std::vector<std::string> SceneSystem::GetSceneNames() const
+	{
+		std::vector<std::string> names;
+		names.reserve(scenes.size());
+		for (const auto& [name, loaded] : scenes)
 		{
-			InjectServices(*activeScene);
-			if (awakeNew)
-			{
-				activeScene->InternalSceneAwake();
-				if (activeScene->Awake() != 0)
-				{
-					std::cerr << "Failed to Awake the new scene '" << name << "'.\n";
-				}
-			}
-
-			if (initNew)
-			{
-				activeScene->InternalSceneInit();
-				if (activeScene->Init() != 0)
-				{
-					std::cerr << "Failed to Init the new scene '" << name << "'.\n";
-				}
-			}
+			(void)loaded;
+			names.push_back(name);
 		}
+		return names;
 	}
 
 	void SceneSystem::InjectServices(Scene& scene)
 	{
-		scene.SetInputSystem(services.Presentation.Input);
-		scene.SetCameraSystem(services.Presentation.Camera);
-		scene.SetEngineState(services.Core.State);
-		scene.SetMeshPool(services.Presentation.Meshes);
-		scene.SetTexturePool(services.Presentation.Textures);
-		scene.SetMaterialPool(services.Presentation.Materials);
-		scene.SetFontPool(services.Presentation.Fonts);
-		scene.SetFileSystem(services.Core.Files);
-		scene.SetJobSystem(services.Core.Jobs);
-		scene.SetIoSystem(services.Core.IO);
-		scene.SetAssetSystem(services.Core.Assets);
-		scene.SetBehaviorRegistry(&behaviorRegistry);
-		scene.SetFrameArena(services.Core.FrameMemory);
-		scene.SetFPSProvider(services.Tools.GetFPS);
-		scene.SetCommandDispatcher([commands = services.Tools.Commands](std::string_view command)
-		{
-			if (!commands)
-			{
-				return false;
-			}
-
-			return commands->ParseAndDispatch(command);
-		});
-
-		scene.SetCubeMapController(services.Presentation.CubeMap);
+		SceneServices injected = services;
+		injected.Behaviors = &behaviorRegistry;
+		scene.SetServices(std::move(injected));
 	}
-
-	bool SceneSystem::DispatchCommand(std::string_view command)
-	{
-		if (!services.Tools.Commands)
-		{
-			return false;
-		}
-
-		return services.Tools.Commands->ParseAndDispatch(command);
-	}
-
-}
+} // namespace Engine

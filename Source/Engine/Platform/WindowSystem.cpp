@@ -466,11 +466,6 @@ namespace Swim::Platform
 		{
 			SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
 		}
-		else if (desc.GraphicsSupport == WindowGraphicsSupport::OpenGL)
-		{
-			SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true);
-			SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_EXTERNAL_GRAPHICS_CONTEXT_BOOLEAN, true);
-		}
 
 		if (!SetExternalWindowProperty(properties, desc.ExternalWindow))
 		{

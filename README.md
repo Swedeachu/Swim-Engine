@@ -1,6 +1,6 @@
 # Swim Engine
 
-This engine is built using **EnTT**, a custom **Scene System**, a first-party cross-platform **Platform/Input foundation**, and currently retains both **Vulkan** and **OpenGL** rendering backends while the renderer is being modernized.
+Swim Engine is built on **EnTT**, a custom **Scene System**, a first-party cross-platform **Platform/Input foundation**, and a modern GPU-driven **Vulkan** renderer behind an explicit RHI: RenderGraph, GPU scene and visibility, clustered Forward+, shadows, image-based lighting, post, TAA, screen-space effects, GPU particles, GPU skinning and retained UI. The runtime and its sandbox demo are described in [Engine runtime](docs/EngineRuntime.md).
 The project is my life's work, nearly all knowledge in engineering I have goes into this in one way or another.
 <br>
 <br>
@@ -16,10 +16,10 @@ CMake is the only build-system source of truth. The repository does not commit g
 
 - CMake 3.25 or newer.
 - Visual Studio 2022 with the Desktop development with C++ workload for the full Windows runtime.
-- Git and Python 3. Python is used by GLAD and by PhysX's upstream project bootstrap.
+- Git and Python 3. Python is used by PhysX's upstream project bootstrap and the repository scripts.
 - Ninja is optional on Windows: the build scripts discover Ninja from PATH or the Visual Studio CMake tools install and fall back to the Visual Studio generator when necessary.
-- A Vulkan SDK for the legacy renderer's Vulkan headers/loader. The shader pipeline no longer needs `dxc.exe`: first-party shaders are Slang, and CMake downloads a pinned `slangc` SDK automatically. The modern RHI backend pins its own Vulkan headers, so it does not depend on the installed SDK version.
-- On Linux, a C++20 compiler plus Ninja is sufficient for the current Platform/Input foundation build; the legacy renderer/game executable remains Windows-only until the later renderer/RHI phases are completed.
+- A Vulkan 1.3 driver with bindless descriptor support. The Vulkan SDK is only needed for its validation layers (Debug builds enable validation by default; pass `--validation=off` without it). First-party shaders are Slang; CMake downloads a pinned `slangc` SDK automatically, and the RHI pins its own Vulkan headers.
+- On Linux, a C++20 compiler plus Ninja builds the full runtime (`Swim Engine`), the tools and the tests. Configure with `-DSWIM_BUILD_ENGINE=OFF` for a foundation-only build without the executable.
 
 SDL3 is fetched and built by CMake as a pinned CPM dependency; no system-installed SDL3 is required. `Source/Engine/Platform` owns SDL3 usage; consuming executables link SDL3 privately, and public engine headers remain SDL-free.
 
@@ -54,9 +54,6 @@ Third Party/
   SDL3/
   Draco/
   WebP/
-  Zstd/
-  Basis Universal/
-  GLAD/
   PhysX/
 CMake/
   ALL_BUILD, ZERO_CHECK, INSTALL, ...
@@ -85,7 +82,7 @@ scripts\build-windows-clean.ps1 -Debug
 ```
 
 ```bash
-# Linux Release / Debug foundation builds
+# Linux Release / Debug builds
 ./scripts/build-linux-clean.sh
 ./scripts/build-linux-clean.sh --debug
 ```
@@ -99,7 +96,7 @@ scripts\build-windows-soft.ps1 -Debug
 ```
 
 ```bash
-# Linux Release / Debug foundation builds
+# Linux Release / Debug builds
 ./scripts/build-linux-soft.sh
 ./scripts/build-linux-soft.sh --debug
 ```
@@ -178,7 +175,7 @@ Above the graph, `Renderer/Resources` provides generational GPU handles and a ti
 
 `Renderer/Materials` holds material data: immutable `MaterialTemplate` parameter layouts, usually derived from a Slang struct's reflection, and mutable `MaterialInstance` records with typed setters and change versions. `Renderer/GpuMaterials/GpuMaterialTable` keeps those records on the GPU (row = a GPU Scene object's material index, dirty-only uploads, row 0 the default-material fallback), and `StandardPbr` / `StandardPbr.slang` shade the built-in glTF metallic-roughness material. See [Materials](docs/Materials.md). `Renderer/Environment` builds image-based lighting on the GPU (procedural sky or any source cube, GGX-prefiltered specular cube, SH irradiance, split-sum BRDF LUT) with CPU definitions of every pass, and a PBR image-regression gallery checks the result per pixel. See [Environment](docs/Environment.md). `Renderer/Lights` keeps punctual lights (directional, point, spot) in a persistent GPU buffer with dense per-type ranges and dirty-row uploads, plus the CPU light model that clustered lighting will be checked against. See [GPU lights](docs/Lights.md). `Renderer/ClusteredLighting` bins local lights into compact per-cluster lists on the GPU (screen tiles × logarithmic depth slices, deterministic count/scan/write passes, bounded overflow with counters and a debug heatmap), each pass mirrored by a CPU definition. See [Clustered lighting](docs/ClusteredLighting.md). `Renderer/ForwardPlus` draws GPU Scene objects GPU-driven from the visibility bins and shades them with the standard material, directional plus clustered lights and image-based lighting; alpha-blended materials are sorted back to front on the GPU and blended afterwards. See [Clustered Forward+](docs/ForwardPlus.md). `Renderer/Shadows` gives directional (stable, texel-snapped cascades), spot and point lights (six cube faces under a budget) shadows in one depth atlas: a stable, priority-ordered tile allocator with downgrade and eviction, GPU caster culling per shadow view, an alpha-tested caster variant, and PCF with normal-offset bias sampled by Forward+. See [Shadows](docs/Shadows.md). `Renderer/PostProcess` turns HDR scene color into display output on the GPU: a luminance histogram drives adaptive auto exposure (or manual EV100), a Karis-averaged bloom chain, color grading (white balance, contrast, ASC CDL, saturation), four tone mappers and sRGB, HDR10 (PQ) or scRGB output. See [Post-processing](docs/PostProcess.md). `Renderer/Temporal` adds temporal anti-aliasing: Forward+ renders with a Halton sub-pixel jitter and writes motion vectors, and a compute resolve reprojects the previous frame through them, clips it against the current neighborhood in YCoCg and blends. See [Temporal anti-aliasing](docs/TemporalAntiAliasing.md). `Renderer/ScreenSpace` adds ground-truth-based ambient occlusion, which darkens only the indirect light Forward+ writes to its own target, screen-space reflections that replace the specular image-based light where a mirror ray finds the scene on screen, and analytic exponential height fog with a sun lobe. See [Screen-space effects](docs/ScreenSpace.md). `Renderer/Particles` simulates, sorts and draws particles entirely on the GPU: a persistent pool with per-emitter free and draw lists, compute emission and simulation (gravity, drag, ground bounces), back-to-front sorting for alpha-blended emitters, and indirect billboard draws with size and color curves and bindless flipbooks. See [GPU particles](docs/Particles.md).
 
-See [RenderGraph contracts and usage](docs/RenderGraph.md). Run the CPU tests with `SwimTests --filter=RenderGraph` and `SwimTests --filter=Render.`; opt-in Vulkan tests exercise offscreen → post → present, swapchain replacement, dependent compute and exact readback. These reference consumers use graph-generated synchronization. The sandbox remains on its transitional renderer.
+See [RenderGraph contracts and usage](docs/RenderGraph.md). Run the CPU tests with `SwimTests --filter=RenderGraph` and `SwimTests --filter=Render.`; opt-in Vulkan tests exercise offscreen → post → present, swapchain replacement, dependent compute and exact readback. These reference consumers use graph-generated synchronization. The engine runtime assembles all of these systems in `FrameRenderer` (see [Engine runtime](docs/EngineRuntime.md)).
 
 ### Vulkan RHI desktop validation
 
@@ -263,11 +260,11 @@ The asset compiler owns pinned simdjson/fastgltf/meshoptimizer/Draco/libwebp dep
 
 Runtime text uses FreeType 2.14.3, HarfBuzz 14.5.0 and msdfgen 1.13 (core), pinned in `cmake/TextDependencies.cmake` and bundled privately as `Swim::TextDependencies` (Phase 20, item 79). The `Text.Dependencies` cases prove all three build and link. A dependency cache made before these libraries existed needs one configure with downloads enabled (`cmake --preset windows-release -DFETCHCONTENT_FULLY_DISCONNECTED=OFF`) or one clean build. Soft builds cannot fetch them.
 
-For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf, Draco, libwebp, and meshoptimizer stay on the compiler side. Basis Universal is the intentional transitional exception: only `Swim::BasisTranscoder` remains runtime-facing while universal KTX2/Basis payloads are transcoded at residency time.
+For a shipping/runtime-only configuration, set `SWIM_ENABLE_DEV_ASSET_AUTOCOOK=OFF`; the runtime `.sasset` reader remains in `Swim::Assets`, while fastgltf, Draco, libwebp, and meshoptimizer stay on the compiler side.
 
 ### Dependency policy
 
-The previous `Source/Library` copies are replaced by pinned/verified CMake dependencies. Runtime ownership is SDL3, mimalloc, enkiTS, spdlog, GLM, EnTT, nlohmann/json, transitional stb compatibility, zstd, the Basis transcoder, GLAD/OpenGL, Vulkan, and PhysX. Asset-compiler-only ownership is simdjson/fastgltf, meshoptimizer, Draco, libwebp, and compiler-side stb. tinygltf is retired. Nothing downloaded by CMake should be committed, and codec support does not imply that codec belongs in the shipping runtime.
+The previous `Source/Library` copies are replaced by pinned/verified CMake dependencies. Runtime ownership is SDL3, mimalloc, enkiTS, spdlog, GLM, EnTT, FreeType/HarfBuzz/msdfgen (text), Vulkan (through the RHI), and PhysX/Jolt. The legacy renderer's GLAD/OpenGL, nlohmann/json, stb, zstd and Basis dependencies were retired with it (Phase 22/23; archived in `Deprecated/cmake/LegacyDependencies.cmake`). Asset-compiler-only ownership is simdjson/fastgltf, meshoptimizer, Draco, libwebp, and compiler-side stb. tinygltf is retired. Nothing downloaded by CMake should be committed, and codec support does not imply that codec belongs in the shipping runtime.
 
 PhysX is kept deliberately isolated because its configuration model does not match the application's Debug/Release model. The pinned PhysX 5.6.1 checkout in CPM is treated as immutable. At build time Swim creates a short detached Git worktree at `build/.px`; NVIDIA's generated `compiler/` and `bin/` trees live there, keeping both MSBuild paths short and the CPM source cache clean for later soft builds. Swim Engine Debug links the **Checked** static PhysX libraries, while Swim Engine Release links **Release** PhysX. Both are built with the static non-debug MSVC runtime, matching the previous x64 project configuration (`/MT`, `PX_PHYSX_STATIC_LIB`, Debug `_ITERATOR_DEBUG_LEVEL=0`). The CPU-only VS2022 preset is used, so CUDA is not required. CMake audits every Git-backed cached dependency at configure time and fails immediately if a dependency source checkout is dirty instead of allowing that state to surface as a later compile failure.
 
@@ -275,57 +272,53 @@ PhysX is kept deliberately isolated because its configuration model does not mat
 
 All first-party shaders are **Slang**. There is no handwritten HLSL or GLSL left in the build; the retired sources are archived under `Deprecated/Shaders/` and are not compiled, copied, or referenced.
 
-CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shader deterministically, emitting reflection JSON beside each artifact:
+CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shader deterministically, emitting reflection JSON beside each artifact. The runtime set (36 programs: Forward+, shadows, visibility, lighting, environment, post, TAA, screen-space, particles, skinning, UI, sky and present) is staged once and deployed next to the executable:
 
 ```text
-Source/Shaders/Vulkan/{Vertex,Fragment,Compute}Shaders/*.slang  ->  Shaders/<group>/<name>.spv   + .reflection.json
-Source/Shaders/OpenGL/*.slang                                   ->  Shaders/OpenGL/<name>.glsl   + .reflection.json
+Source/Shaders/Slang/<Module>/*.slang  ->  <exe>/Shaders/Runtime/<Program>.spv  + .reflection.json
 ```
 
-Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` side effects), so incremental builds and dependency tracking work, and they are copied beside the executable after the build along with `Assets`. Reflection is read from the JSON sidecar rather than from decorations embedded in the SPIR-V, which keeps the emitted modules free of `SPV_GOOGLE_*` extensions that would otherwise require matching device extensions.
+Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` side effects), so incremental builds and dependency tracking work, and they are copied beside the executable after the build along with `Resources` (fonts) and `Assets`. `SWIM_SHADER_DIR` overrides the runtime shader folder. Reflection is read from the JSON sidecar rather than from decorations embedded in the SPIR-V, which keeps the emitted modules free of `SPV_GOOGLE_*` extensions that would otherwise require matching device extensions.
+
+---
+
+## Running
+
+`Swim Engine` starts the sandbox demo: a physics and rendering playground with a UI control panel, world-space UI, lighting and shadows, play/pause/step/stop and a fly camera. Behind it stands the Crytek Sponza with 256 coloured lights roaming its atrium (the glTF Sponza lives in `Assets/Models/Sponza/glTF/` and is cooked on first start). Hold the right mouse button and use WASD to fly, 1–7 jump between views (6 and 7 are Sponza), P pauses, N steps, F1 toggles all UI, F2 the control panel and F3 the diagnostics.
+
+```bash
+./build/linux-release/"Swim Engine"                         # window
+./build/linux-release/"Swim Engine" --state=paused --physics=jolt
+./build/linux-release/"Swim Engine" --headless --size=1280x720 --frames=40 \
+    --fixed-delta=0.033 --exec="sandbox.view 3" --capture=physics.ppm
+./build/linux-release/"Swim Engine" --help                  # every option
+```
+
+See [Engine runtime](docs/EngineRuntime.md) for the frame, the engine state machine and simulation clock, the components scenes use, commands, tests and the current findings.
 
 ---
 
 ## Features
 
-- **Entity Component System (ECS):** Scene management powered by EnTT with a Behavior component system for lifecycle-driven scripting.  
-- **Model & Texture Loading:** Full **GLTF/GLB** pipeline with bindless texture support, mipmap generation, and multiple image formats.  
-- **Rendering Abstraction:** Vulkan and OpenGL renderers with complete feature parity.  
-- **Skybox System:** Cubemap rendering with adjustable rotation, exposure, and per-face textures.  
-- **Spatial Partitioning:** Scene-level **BVH** for accelerated frustum culling and ray queries.  
-- **GPU-Driven Rendering:** Vulkan bindless indexed indirect draw system for high-performance instancing.  
-- **Text & SDF Rendering:** MSDF-based text rendering and stylized SDF effects (outline, color, softness).  
-- **Debug Rendering:** Immediate-mode 3D debug mesh rendering.  
-- **Physics Boundary:** Backend-neutral generational handles, descriptors, queries, collision/trigger events, and scene synchronization with the current PhysX implementation isolated behind `SwimPhysicsPhysX`.  
-- **Input System:** Platform-neutral keyboard, mouse, text/IME, and gamepad events/state with action-map support; SDL3/native translation is isolated in the Platform implementation.
+- **Runtime:** explicit engine ownership; an engine state machine (Playing / Paused / Stopped); a simulation clock with time scale, pause, single steps and per-domain participation; behaviours with state masks and a deterministic lifecycle; hashed multi-tags with a scene index; a scene command buffer.
+- **Renderer:** Vulkan RHI with RenderGraph; paged geometry heap and asynchronous residency; a persistent GPU scene; GPU frustum/LOD culling with indirect draws; bindless materials (metallic-roughness PBR); clustered Forward+ with sorted transparents; cascaded, spot and point shadows; image-based lighting; auto exposure, bloom, grading and tone mapping; TAA; GTAO, SSR and height fog; GPU particles; GPU skinning.
+- **UI:** shaped text (FreeType/HarfBuzz, MSDF atlas), retained flex/anchor layout, themed controls, popups, menus, lists and modals, screen overlays, world panels and billboards with ray-cast input.
+- **Physics:** backend-neutral handles, bodies, queries and collision callbacks, with PhysX and Jolt backends.
+- **Assets:** cooked `.sasset` models and textures with development auto-cook from glTF.
+- **Input and platform:** SDL3-backed windows and events; keyboard, mouse, text/IME and gamepad with action maps.
 
 ---
 
 ## Current Development Goals
 
-- Editor gizmos and property inspectors for primitive component fields.  
-- Archetype and prefab pipeline for Behavior components.  
-- Deliberate scene persistence format/restore path after the runtime scene model stabilizes; the old automatic JSON sync experiment is currently dormant.  
-- Jolt backend implementation and parity testing against the existing generic Physics/PhysX contract.  
-- Compute-based culling pass + occlusion.  
-- Recursive parent-child transform hierarchy for UI entities.  
-- Controller input support.  
-- In-process editor UI: hierarchy, inspectors, gizmos, asset/scene tooling, and debugging directly against engine state.
+The ordered plan is in the [architecture implementation plan](docs/SwimEngineArchitectureImplementationPlan.md):
+
+- Desktop validation of the assembled runtime (four validation profiles, RTX 4070, 1080p pass budgets) and the open [findings](docs/EngineRuntime.md#findings).
+- Phase 24: `.spack` packages, asset streaming and hot reload, level streaming, mesh and texture LODs.
+- Phase 21: audio (miniaudio) with physics and gameplay callbacks.
+- Phase 25: a gameplay API pass.
 
 ---
-
-## Future Objectives
-
-Once the current goals listed above are completed, development will shift toward advanced rendering and runtime systems:
-
-- Physically Based Rendering (PBR)  
-- Clustered Forward+ rendering pipeline with global illumination  
-- Dynamic and baked shadow systems  
-- GPU-driven particle simulation  
-- Skeletal animation and ragdoll physics  
-- MiniAudio integration for audio playback  
-- Multithreaded file I/O and asynchronous scene streaming  
-- Binary GPU buffer asset formats for optimized runtime loading
 
 ### Vulkan device-loss reports
 
@@ -429,9 +422,8 @@ filtering or dynamic/non-uniform descriptor indexing features.
 The opt-in `RHI.Vulkan.Smoke.SampledIntegerTexturesAndReadback` checks four frames of
 unsigned/signed/narrow-integer/normalized inputs, fixed arrays, nonzero mip/layer
 views, output guards and CPU readback. Run it through the desktop smoke command above.
-The sandbox still uses the transitional Vulkan renderer; launching `Swim Engine.exe`
-does not run this RHI validation suite. The architecture guide's current snapshot
-records which foundations are active in the sandbox and which RHI consumers remain separate.
+Launching `Swim Engine` does not run this RHI validation suite; the smokes remain the
+per-feature native checks.
 
 ### Sampled image dimensions
 

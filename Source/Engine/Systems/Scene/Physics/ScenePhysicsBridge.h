@@ -39,6 +39,10 @@ namespace Engine
 		void SetLinearVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);
 		void SetAngularVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);
 
+		// The entity whose Rigidbody owns a body (collision events, ray casts); null for
+		// unknown or destroyed bodies.
+		entt::entity FindEntity(BodyHandle body) const;
+
 	private:
 
 		struct BodyResources
@@ -53,6 +57,7 @@ namespace Engine
 		PhysicsWorldDesc worldDesc{};
 		std::unique_ptr<PhysicsWorld> world;
 		std::unordered_map<entt::entity, BodyResources> bodyResources;
+		std::unordered_map<BodyHandle, entt::entity, PhysicsHandleHash<BodyHandle>> bodyEntities;
 		bool initialized = false;
 
 		void OnRigidbodyConstruct(entt::registry& reg, entt::entity entity);

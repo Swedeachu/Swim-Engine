@@ -1,192 +1,142 @@
 #pragma once
 
 #include "Scene.h"
-#include "SceneId.h"
 #include "SceneCatalog.h"
-#include "Engine/Commands/CommandRegistry.h"
+#include "SceneId.h"
+
 #include "Engine/EngineState.h"
+#include "Engine/Machine.h"
 #include "Engine/Systems/Entity/BehaviorRegistry.h"
 
 #include <cstdint>
-#include <functional>
 #include <map>
 #include <memory>
-#include <string>
 #include <stdexcept>
-#include <vector>
+#include <string>
 #include <string_view>
 #include <utility>
-
-namespace Swim::Platform
-{
-	class FileSystem;
-}
-
-namespace Swim::Jobs
-{
-	class JobSystem;
-}
-
-namespace Swim::IO
-{
-	class AsyncIoService;
-}
-
-namespace Swim::Assets
-{
-	class AssetSystem;
-}
-
-namespace Swim::Memory
-{
-	class FrameArena;
-}
+#include <vector>
 
 namespace Engine
 {
-
-	struct SceneCoreServices
-	{
-		Swim::Platform::FileSystem* Files = nullptr;
-		Swim::Jobs::JobSystem* Jobs = nullptr;
-		Swim::IO::AsyncIoService* IO = nullptr;
-		Swim::Assets::AssetSystem* Assets = nullptr;
-		Swim::Memory::FrameArena* FrameMemory = nullptr;
-		const EngineState* State = nullptr;
-
-		bool IsValid() const
-		{
-			return Files && Jobs && IO && Assets && FrameMemory && State;
-		}
-	};
-
-	struct ScenePresentationServices
-	{
-		Swim::Input::InputSystem* Input = nullptr;
-		CameraSystem* Camera = nullptr;
-		CubeMapController* CubeMap = nullptr;
-		MeshPool* Meshes = nullptr;
-		TexturePool* Textures = nullptr;
-		MaterialPool* Materials = nullptr;
-		FontPool* Fonts = nullptr;
-
-		bool IsAvailable() const
-		{
-			return Input && Camera && Meshes && Textures && Materials && Fonts;
-		}
-	};
-
-	struct SceneToolServices
-	{
-		Swim::Commands::CommandRegistry* Commands = nullptr;
-		std::function<int()> GetFPS;
-	};
-
-	struct SceneSystemServices
-	{
-		SceneCoreServices Core{};
-		ScenePresentationServices Presentation{};
-		SceneToolServices Tools{};
-
-		bool IsValid() const { return Core.IsValid(); }
-		bool HasPresentation() const { return Presentation.IsAvailable(); }
-	};
-
+	// Owns the loaded scenes, the scene/behaviour type catalogs and the active scene.
+	//
+	// Lifecycle of a scene: Awake once (when first activated), then Init each time it
+	// becomes active (or is reloaded), Update/FixedUpdate while active, and Exit when it
+	// is left (Exit destroys its entities, so the next Init starts from scratch).
+	//
+	// Engine state transitions are forwarded to the active scene (behaviour
+	// OnPlay/OnPause/OnResume/OnStop, then Scene::OnStateChanged). Entering Stopped
+	// resets the active scene to its initial state at the start of the next frame, so a
+	// later Play starts fresh; the reset is deferred because a transition may be
+	// requested from inside a behaviour or a UI callback.
 	class SceneSystem : public Machine
 	{
-
-	public:
-
+	  public:
 		using SceneFactory = SceneCatalog::Factory;
 
-		void SetServices(SceneSystemServices services) { this->services = std::move(services); }
-		void SetCubeMapController(CubeMapController* cubeMap) { services.Presentation.CubeMap = cubeMap; }
+		// Services shared with every scene. The behaviour registry is always this
+		// system's own.
+		void SetServices(SceneServices value);
 
-		template <typename T>
-		void RegisterSceneType(const std::string& name)
+		const SceneServices& GetServices() const { return services; }
+
+		template <typename T> void RegisterSceneType(const std::string& name)
 		{
-			RegisterSceneType(name, [](const std::string& instanceName)
-			{
-				return std::static_pointer_cast<Scene>(std::make_shared<T>(instanceName));
-			});
+			RegisterSceneType(name,
+				[](const std::string& instanceName)
+				{
+					return std::static_pointer_cast<Scene>(std::make_shared<T>(instanceName));
+				});
 		}
 
 		void RegisterSceneType(std::string name, SceneFactory factory);
 
-		template <typename T>
-		void RegisterBehaviorType(const std::string& name)
-		{
-			behaviorRegistry.Register<T>(name);
-		}
+		template <typename T> void RegisterBehaviorType(const std::string& name) { behaviorRegistry.Register<T>(name); }
+
+		BehaviorRegistry& GetBehaviorRegistry() { return behaviorRegistry; }
 
 		void SetStartupScene(std::string name) { startupSceneName = std::move(name); }
 
-		int Awake() override;
+		const std::string& GetStartupScene() const { return startupSceneName; }
 
-		int Init() override;
-
-		void BeginFrame();
-
-		void Update(double dt) override;
-
-		void FixedUpdate(unsigned int tickThisSecond) override;
-
-		int Exit() override;
-
-		template <typename T, typename... Args>
-		void RegisterScene(const std::string& name, Args&&... args)
+		// Adds an already-constructed scene instance under `name`.
+		template <typename T, typename... Args> T& RegisterScene(const std::string& name, Args&&... args)
 		{
 			if (scenes.contains(name))
 			{
 				throw std::runtime_error("Scene instance with name '" + name + "' is already registered.");
 			}
-
-			std::shared_ptr<Scene> scene = std::make_shared<T>(std::forward<Args>(args)...);
-			if (services.IsValid())
-			{
-				InjectServices(*scene);
-			}
-			SceneId id(nextSceneId++);
-			scenes.emplace(name, LoadedScene{ id, std::move(scene) });
+			auto scene = std::make_shared<T>(std::forward<Args>(args)...);
+			T& ref = *scene;
+			AddLoaded(name, std::move(scene));
+			return ref;
 		}
 
-		// Sets the active scene by name, optionally exiting the current one
-		void SetScene(const std::string& name, bool exitCurrent = true, bool initNew = true, bool awakeNew = false);
+		int Awake() override;
+		int Init() override;
+		// Applies deferred scene switches/resets and starts transform tracking.
+		void BeginFrame();
+		void Update(double dt) override;
+		void FixedUpdate(unsigned int tickThisSecond) override;
+		int Exit() override;
+
+		// Engine state transition (from the EngineStateMachine).
+		void OnEngineStateChanged(EngineState previous, EngineState current);
+
+		// Switches immediately: exits the current scene and Awakes (first time) / Inits
+		// the new one. Do not call from inside a scene update; use RequestScene.
+		void SetScene(const std::string& name);
+
+		// Switches at the start of the next frame.
+		void RequestScene(std::string name) { pendingScene = std::move(name); }
+
+		// Resets the active scene (Exit + Init) at the start of the next frame.
+		void RequestReload() { pendingReload = true; }
+
+		void ReloadActiveScene();
 
 		std::shared_ptr<Scene>& GetActiveScene() { return activeScene; }
+
 		const std::shared_ptr<Scene>& GetActiveScene() const { return activeScene; }
+
 		SceneId GetActiveSceneId() const { return activeSceneId; }
+
+		std::string GetActiveSceneName() const;
 		SceneId FindSceneId(std::string_view name) const;
-		bool DispatchCommand(std::string_view command);
+		std::vector<std::string> GetSceneNames() const;
 
-	private:
+		std::uint64_t GetReloadCount() const { return reloadCount; }
 
-		void InjectServices(Scene& scene);
+		bool DispatchCommand(std::string_view command) const { return services.DispatchCommand && services.DispatchCommand(command); }
 
-
-
+	  private:
 		struct LoadedScene
 		{
 			SceneId Id;
 			std::shared_ptr<Scene> Instance;
+			bool Awakened = false;
 		};
 
-		// Loaded scene instances are owned by this SceneSystem and receive a runtime SceneId.
-		std::map<std::string, LoadedScene> scenes;
+		void AddLoaded(const std::string& name, std::shared_ptr<Scene> scene);
+		void InjectServices(Scene& scene);
+		int ActivateLoaded(LoadedScene& loaded, const std::string& name);
+		void ExitActive();
 
-		// Scene type construction metadata is owned by this SceneSystem instance.
-		// Game/application code registers descriptors explicitly before Awake().
+		std::map<std::string, LoadedScene> scenes;
 		SceneCatalog sceneCatalog;
 		BehaviorRegistry behaviorRegistry;
 		std::string startupSceneName;
 
-		// Shared pointer to the application-designated active scene.
 		std::shared_ptr<Scene> activeScene = nullptr;
 		SceneId activeSceneId{};
 		std::uint64_t nextSceneId = 1;
+		std::uint64_t reloadCount = 0;
 
-		SceneSystemServices services{};
+		std::string pendingScene;
+		bool pendingReload = false;
+		bool awake = false;
 
+		SceneServices services{};
 	};
-
-}
+} // namespace Engine

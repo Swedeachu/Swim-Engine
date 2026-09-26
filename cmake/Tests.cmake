@@ -255,14 +255,29 @@ function(swim_configure_tests)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::ShaderCompiler)
 	endif()
 
-	# Scene/ECS suites consume EnTT and the legacy renderer-facing headers, which
-	# only exist once the full runtime dependency surface is configured.
+	# Scene/ECS suites consume EnTT, which exists once the runtime dependency surface
+	# (cmake/Dependencies.cmake) is configured.
 	if(TARGET EnTT::EnTT)
 		swim_collect_test_suite_sources(SWIM_SCENE_ECS_SUITES Scene/Ecs)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_SCENE_ECS_SUITES})
 		# RenderExtractor (EnTT -> GPU Scene) is compiled with the Scene/ECS suites.
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_SCENE_RENDER_EXTRACTION_SOURCES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT glm::glm)
+	endif()
+
+	# The engine runtime (Phase 22/23: state machine, simulation clock, scenes, tags,
+	# behaviours, camera, the frame renderer and its scene bridge, the UI runtime) and
+	# the sandbox game compile into SwimTests whenever SwimEngine is configured, so
+	# their suites (Engine, Game) run headless without the executable.
+	if(SWIM_BUILD_ENGINE AND DEFINED SWIM_ENGINE_SOURCES AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+		swim_collect_test_suite_sources(SWIM_ENGINE_RUNTIME_SUITES Engine Game)
+		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_ENGINE_RUNTIME_SUITES})
+		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_ENGINE_SOURCES} ${SWIM_GAME_SOURCES})
+		list(APPEND SWIM_TEST_LINK_LIBRARIES EnTT::EnTT spdlog::spdlog glm::glm)
+		if(TARGET SwimShaderCompiler)
+			list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::ShaderCompiler)
+		endif()
+		set(SWIM_TEST_COMPILES_ENGINE TRUE)
 	endif()
 
 	if(SWIM_VULKAN_RHI_AVAILABLE)
@@ -304,6 +319,9 @@ function(swim_configure_tests)
 	endif()
 
 	list(REMOVE_DUPLICATES SWIM_TEST_FIXTURE_SOURCES)
+	# The engine list overlaps the per-module lists above; compile each file once.
+	list(REMOVE_DUPLICATES SWIM_TEST_MODULE_SOURCES)
+	list(REMOVE_DUPLICATES SWIM_TEST_LINK_LIBRARIES)
 
 	add_executable(SwimTests EXCLUDE_FROM_ALL
 		${SWIM_TEST_FRAMEWORK_SOURCES}
@@ -340,6 +358,16 @@ function(swim_configure_tests)
 		SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
 		SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
 	)
+	if(SWIM_TEST_COMPILES_ENGINE)
+		target_compile_definitions(SwimTests PRIVATE
+			SWIM_TESTS_HAVE_ENGINE=1
+			SWIM_ENABLE_DEV_ASSET_AUTOCOOK=0
+			SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
+			SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
+			SWIM_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/Resources"
+			$<$<CONFIG:Debug>:_SWIM_DEBUG>
+		)
+	endif()
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
 	endif()
@@ -461,6 +489,12 @@ function(swim_configure_tests)
 			SWIM_UI_QUAD_SPIRV_PATH="${SwimUiQuad_SPIRV}"
 			SWIM_UI_QUAD_REFLECTION_PATH="${SwimUiQuad_REFLECTION}"
 		)
+	endif()
+
+	# The runtime shader set (FrameRenderer smokes and the ShaderLibrary tests).
+	if(TARGET SwimRuntimeShaders)
+		add_dependencies(SwimTests SwimRuntimeShaders)
+		target_compile_definitions(SwimTests PRIVATE SWIM_RUNTIME_SHADER_DIR="${SWIM_RUNTIME_SHADER_DIR}")
 	endif()
 
 	if(TARGET SwimSlangReflectionSample)

@@ -3,10 +3,10 @@
 #include "DeferredCommandBuffer.h"
 #include "Scene.h"
 
-#include "Engine/Components/Material.h"
 #include "Engine/Components/Transform.h"
 
 #include <cstddef>
+#include <string>
 #include <functional>
 #include <tuple>
 #include <type_traits>
@@ -100,60 +100,39 @@ namespace Engine
 			);
 		}
 
-		// High-level creation helpers retained while gameplay call sites move toward
-		// explicit generic SceneCommandBuffer operations.
+		// Queue a named entity with a Transform; the callback (optional) receives the
+		// scene, the entity and its Transform after creation.
 		void CreateWithTransform(const Transform& transform);
-		void CreateWithTransformAndMaterial(const Transform& transform, const Material& material);
 
 		template<typename Func, typename... Args>
-		void CreateWithTransformAndMaterial(const Transform& transform, const Material& material, Func&& func, Args&&... args)
+		void CreateWithTransform(const Transform& transform, Func&& func, Args&&... args)
 		{
 			Create(
-				[transform, material, fn = std::forward<Func>(func), ...capturedArgs = std::forward<Args>(args)](Scene& owningScene, entt::entity entity) mutable
+				[transform, fn = std::forward<Func>(func), ...capturedArgs = std::forward<Args>(args)](Scene& owningScene, entt::entity entity) mutable
 			{
-				Transform& transformRef = owningScene.AddComponent<Transform>(entity, transform);
-				Material& materialRef = owningScene.AddComponent<Material>(entity, material);
-				std::invoke(fn, entity, transformRef, materialRef, std::move(capturedArgs)...);
+				owningScene.AddComponent<Transform>(entity, transform);
+				std::invoke(fn, owningScene, entity, std::move(capturedArgs)...);
 			}
 			);
 		}
 
 		template<typename... BehaviorTypes>
-		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material)
+		void CreateWithTransformAndBehaviors(const Transform& transform)
 		{
 			Create(
-				[transform, material](Scene& owningScene, entt::entity entity)
+				[transform](Scene& owningScene, entt::entity entity)
 			{
 				owningScene.AddComponent<Transform>(entity, transform);
-				owningScene.AddComponent<Material>(entity, material);
 				((void)owningScene.EmplaceBehavior<BehaviorTypes>(entity), ...);
 				owningScene.RefreshBehaviorFieldCacheForEntity(entity);
 			}
 			);
 		}
 
-		template<typename... BehaviorTypes, typename Func, typename... Args>
-		void CreateWithTransformAndMaterialAndBehaviors(const Transform& transform, const Material& material, Func&& func, Args&&... args)
-		{
-			Create(
-				[transform, material, fn = std::forward<Func>(func), ...capturedArgs = std::forward<Args>(args)](Scene& owningScene, entt::entity entity) mutable
-			{
-				Transform& transformRef = owningScene.AddComponent<Transform>(entity, transform);
-				Material& materialRef = owningScene.AddComponent<Material>(entity, material);
-				auto behaviorPointers = std::make_tuple(owningScene.EmplaceBehavior<BehaviorTypes>(entity)...);
-
-				std::apply(
-					[&](auto*... behaviors)
-				{
-					std::invoke(fn, entity, transformRef, materialRef, behaviors..., std::move(capturedArgs)...);
-				},
-					behaviorPointers
-				);
-
-				owningScene.RefreshBehaviorFieldCacheForEntity(entity);
-			}
-			);
-		}
+		// Tags and names resolve at flush time (the entity may still be pending).
+		void AddTag(entt::entity entity, TagId tag);
+		void RemoveTag(entt::entity entity, TagId tag);
+		void SetName(entt::entity entity, std::string name);
 
 		template<typename... BehaviorTypes>
 		void CreateWithBehaviors()

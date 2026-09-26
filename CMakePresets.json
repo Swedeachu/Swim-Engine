@@ -63,9 +63,6 @@
             "hidden": true,
             "inherits": "base",
             "generator": "Ninja",
-            "cacheVariables": {
-                "SWIM_BUILD_LEGACY_ENGINE": "OFF"
-            },
             "condition": {
                 "type": "equals",
                 "lhs": "${hostSystemName}",
@@ -74,7 +71,7 @@
         },
         {
             "name": "linux-debug",
-            "displayName": "Linux Debug (Ninja, cross-platform foundation)",
+            "displayName": "Linux Debug (Ninja)",
             "inherits": "linux-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -82,7 +79,7 @@
         },
         {
             "name": "linux-release",
-            "displayName": "Linux Release (Ninja, cross-platform foundation)",
+            "displayName": "Linux Release (Ninja)",
             "inherits": "linux-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
