@@ -69,7 +69,11 @@ namespace Swim::UI
 
 	void UiDocument::Impl::ValidateControl(const Node& node, const UiControl& c) const
 	{
-		const bool valid = static_cast<std::uint8_t>(c.Kind) <= static_cast<std::uint8_t>(UiControlKind::ScrollBar) &&
+		const bool owner = c.Kind == UiControlKind::RadioGroup || c.Kind == UiControlKind::ListView || c.Kind == UiControlKind::Dropdown;
+		const bool valid = static_cast<std::uint8_t>(c.Kind) <= static_cast<std::uint8_t>(UiControlKind::Dropdown) &&
+			node.Control.Kind != UiControlKind::Option && Finite(c.ItemExtent) && c.ItemExtent >= 0.0f &&
+			c.ItemExtent <= Internal::MaxLogical && c.ItemCount <= (1u << 24) &&
+			(!owner || (Finite(c.Value) && c.Value >= -1.0f && c.Value == std::floor(c.Value) && c.Value < float(1u << 24))) &&
 			static_cast<std::uint8_t>(c.Orientation) <= static_cast<std::uint8_t>(UiOrientation::Vertical) &&
 			static_cast<std::uint8_t>(c.Check) <= static_cast<std::uint8_t>(UiCheckState::Mixed) &&
 			static_cast<std::uint8_t>(c.TrackClick) <= static_cast<std::uint8_t>(UiTrackClick::Page) &&
@@ -113,6 +117,16 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("Slider track, fill and thumb must be children of the slider");
 		}
+		if (c.ScrollTarget && c.Kind != UiControlKind::ScrollBar &&
+			((c.Kind != UiControlKind::ListView && c.Kind != UiControlKind::Dropdown) || !Nodes.contains(c.ScrollTarget.Value) ||
+				c.ScrollTarget == node.Id))
+		{
+			throw std::invalid_argument("Only scroll bars, list views and dropdowns have a scroll target");
+		}
+		if (parts.Popup && (c.Kind != UiControlKind::Dropdown || !Nodes.contains(parts.Popup.Value) || Get(parts.Popup).Parent != Root))
+		{
+			throw std::invalid_argument("A dropdown's popup must be a child of the UI root");
+		}
 		if (c.Kind == UiControlKind::ScrollBar)
 		{
 			if (!directChild(parts.Thumb) || !directChild(parts.Decrement) || !directChild(parts.Increment))
@@ -137,7 +151,7 @@ namespace Swim::UI
 		MarkSubtreeVisualDirty(control.Id);
 	}
 
-	void UiDocument::Impl::SyncValueLabel(Node& control)
+	void UiDocument::Impl::SyncValueLabel(Node& control, bool force)
 	{
 		const auto& c = control.Control;
 		if (c.Kind != UiControlKind::Slider || c.LabelDecimals < 0 || !c.Parts.Label || !Nodes.contains(c.Parts.Label.Value))
@@ -145,9 +159,9 @@ namespace Swim::UI
 			return;
 		}
 		auto& label = Get(c.Parts.Label);
-		if (!label.Fonts)
+		if (!label.Fonts || (!force && label.Editable && label.Id == Focused))
 		{
-			return;
+			return; // Typing into an editable value is not overwritten.
 		}
 		char buffer[64];
 		const float shown = std::abs(c.Value) < 0.5f * std::pow(10.0f, -float(c.LabelDecimals)) ? 0.0f : c.Value; // No "-0".
@@ -623,11 +637,23 @@ namespace Swim::UI
 		{
 			Toggle(node);
 		}
+		if (kind == UiControlKind::Option)
+		{
+			OptionPressed(node, inside);
+		}
+		if (inside && kind == UiControlKind::Dropdown)
+		{
+			ToggleDropdown(node);
+		}
 	}
 
 	bool UiDocument::Impl::ControlKey(Node& node, UiKey key)
 	{
 		auto& c = node.Control;
+		if (IsSelectionOwner(node))
+		{
+			return !c.ReadOnly && OwnerKey(node, key);
+		}
 		if (c.ReadOnly || (c.Kind != UiControlKind::Slider && c.Kind != UiControlKind::ScrollBar))
 		{
 			return false;
@@ -787,8 +813,22 @@ namespace Swim::UI
 		{
 			impl->Stepping = {};
 		}
+		const bool wasOwner = impl->IsSelectionOwner(node);
 		node.Control = control;
-		node.Control.Value = impl->ClampValue(control, control.Value);
+		if (impl->IsSelectionOwner(node))
+		{
+			const auto count = impl->OptionCount(node);
+			node.Control.Value = count > 0 ? std::min(control.Value, float(count) - 1.0f) : control.Value;
+			node.Highlight = -1;
+		}
+		else
+		{
+			node.Control.Value = impl->ClampValue(control, control.Value);
+			if (wasOwner)
+			{
+				node.Options.clear(); // The options stay registered to nothing; they no longer select.
+			}
+		}
 		node.Knob = control.Check == UiCheckState::Checked ? 1.0f : 0.0f;
 		node.ControlHidden = false;
 		node.ControlOpacity = 1.0f;
@@ -820,34 +860,10 @@ namespace Swim::UI
 			impl->ApplyTheme(node);
 		}
 		impl->SyncValueLabel(node);
+		impl->SyncOwner(node);
 		impl->MarkLayoutDirty(id);
 		impl->MarkSubtreeVisualDirty(id);
 		impl->ClearUnavailable();
-	}
-
-	void UiDocument::SetPartRole(UiNodeId partId, UiNodeId controlId, UiPartRole role, float value)
-	{
-		auto& part = impl->Get(partId);
-		if (role == UiPartRole::None)
-		{
-			part.PartOf = {};
-			part.Role = UiPartRole::None;
-			impl->MarkLayoutDirty(partId);
-			return;
-		}
-		const auto& control = impl->Get(controlId);
-		if (role != UiPartRole::Tick || control.Control.Kind != UiControlKind::Slider || part.Parent != controlId || !std::isfinite(value))
-		{
-			throw std::invalid_argument("SetPartRole registers slider tick marks (direct children) at finite values");
-		}
-		part.PartOf = controlId;
-		part.Role = role;
-		part.PartValue = value;
-		if (part.ThemeClass != UiThemeClass::None)
-		{
-			impl->ApplyTheme(part);
-		}
-		impl->MarkLayoutDirty(partId);
 	}
 
 	const UiControl& UiDocument::GetControl(UiNodeId id) const
@@ -882,8 +898,23 @@ namespace Swim::UI
 		case UiControlKind::Toggle:
 			SetChecked(id, value > 0.5f ? UiCheckState::Checked : UiCheckState::Unchecked);
 			break;
+		case UiControlKind::RadioGroup:
+		case UiControlKind::ListView:
+		case UiControlKind::Dropdown:
+		{
+			const auto count = static_cast<float>(impl->OptionCount(node));
+			value = std::isfinite(value) ? std::round(value) : -1.0f;
+			value = count > 0.0f ? std::clamp(value, -1.0f, count - 1.0f) : std::clamp(value, -1.0f, float(1u << 24) - 1.0f);
+			if (value != c.Value)
+			{
+				c.Value = value;
+				impl->MarkControlDirty(node);
+				impl->SyncOwner(node);
+			}
+			break;
+		}
 		default:
-			throw std::invalid_argument("SetValue needs a slider, scroll bar, checkbox or toggle");
+			throw std::invalid_argument("SetValue needs a slider, scroll bar, checkbox, toggle or selection control");
 		}
 	}
 

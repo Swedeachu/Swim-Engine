@@ -462,3 +462,56 @@ SWIM_TEST("UI.CanvasRouter", "KeyboardTextAndImeGoToTheFocusedCanvasAndProjectTh
 	SWIM_CHECK(!world.GetFocus());
 	SWIM_CHECK(!router.KeyDown(UiKey::Backspace));
 }
+
+SWIM_TEST("UI.CanvasRouter", "ContextMenusOpenOnTheHoveredCanvasAndPressesElsewhereDismissPopups")
+{
+	auto theme = FontTheme();
+	UiDocument hud;
+	UiDocument side;
+	hud.SetTheme(theme);
+	side.SetTheme(theme);
+	const auto button = CreateButton(hud, hud.GetRoot(), "Tools");
+	const auto menu = CreateMenu(hud);
+	const auto item = AddMenuItem(hud, menu, "Reset");
+	hud.SetContextMenu(button, menu.Root);
+	const auto sideButton = CreateButton(side, side.GetRoot(), "Side");
+	hud.Layout({ 400, 300 });
+	side.Layout({ 200, 100 });
+	UiCanvasRouter router;
+	const auto hudCanvas = router.Add(Desc(hud));
+	const auto sideCanvas = router.Add(
+		[&]
+		{
+			auto d = Desc(side);
+			d.Order = 1;
+			return d;
+		}());
+	router.SetScreenPlacement(hudCanvas, {}, { 400, 300 });
+	router.SetScreenPlacement(sideCanvas, { 500, 0 }, { 200, 100 });
+
+	SWIM_CHECK(!router.OpenContextMenu()); // Nothing hovered.
+	router.PointerMove(At(Center(hud.GetBounds(button))));
+	SWIM_CHECK(router.OpenContextMenu());
+	SWIM_CHECK(router.GetFocused() == hudCanvas);
+	SWIM_CHECK(hud.IsPopupOpen(menu.Root));
+	hud.Layout({ 400, 300 });
+	SWIM_CHECK(hud.GetFocus() == item);
+
+	// A press on another canvas closes the menu.
+	router.PointerMove(At(UiPoint{ 510, 10 }));
+	router.PointerDown();
+	router.PointerUp();
+	SWIM_CHECK(!hud.IsPopupOpen(menu.Root));
+	SWIM_CHECK(router.GetFocused() == sideCanvas);
+	SWIM_CHECK(side.GetFocus() == sideButton);
+
+	// Keyboard: the focused canvas's focused node; a press in the world closes it.
+	hud.Focus(button);
+	router.Focus(hudCanvas);
+	SWIM_CHECK(router.OpenContextMenuForFocus());
+	SWIM_CHECK(hud.IsPopupOpen(menu.Root));
+	router.PointerMove(At(UiPoint{ 450, 250 }));
+	router.PointerDown();
+	router.PointerUp();
+	SWIM_CHECK(!hud.IsPopupOpen(menu.Root));
+}

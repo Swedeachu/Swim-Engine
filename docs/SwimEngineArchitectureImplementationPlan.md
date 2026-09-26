@@ -31,7 +31,26 @@ This section is the short authoritative status summary for the current repositor
 | New Vulkan RHI | Separate tests/consumers: devices/resources, timelines, swapchains/HDR, transfers/arenas, draw/compute pipelines, typed descriptors and diagnostics. It does not yet render the sandbox. |
 | Modern renderer | RenderGraph DAG/state/barrier compilation, single-queue execution and executor-staged upload/readback transfers are implemented with native reference consumers. Generational GPU registries, the paged GeometryHeap with submeshes, TextureResidency, the asynchronous `AssetResidencyService`, the bindless texture/sampler table with sampler residency, the persistent `GpuScene` with dirty-only record uploads and GPU-driven visibility (frustum culling, reverse-Z HZB and two-phase occlusion culling, LOD hysteresis, bounded binning, compaction and `DrawIndexedIndirectCount` command generation; items 42–46, 48–55, 57), material templates with the GPU material table and metallic-roughness PBR (items 58–60), GPU-built image-based lighting with a PBR regression gallery (items 61–62), the GPU light buffer (item 63), GPU clustered light assignment with overflow diagnostics (items 64, 65, 68), opaque/transparent Clustered Forward+ with light-count benchmarks (items 66, 67, 69), cascaded/spot/point shadows in one atlas sampled by Forward+ (items 70–72) the post stack (auto exposure, bloom, grading, tone mapping to sRGB/HDR10/scRGB; items 73–74) temporal anti-aliasing with Forward+ motion vectors and jitter (item 75), screen-space GTAO, reflections and exponential height fog (item 76), GPU particles (item 77) and compute GPU skinning with morph targets and deformation motion vectors (item 78) exist as backend-neutral layers with CPU/mock coverage and opt-in native smokes; nothing in the sandbox consumes them yet (item 56). |
 
-- **Latest checkpoint — item 79, controls, themes and world-space canvases (2026-09-25):** the two Phase 20 checklists added after the previous checkpoint (controls with theming; world-space and render-surface canvases) are implemented, except the scene/ECS canvas component and fog on world UI, which move to the runtime wiring with item 56. Item 79 stays open until both native UI smokes pass on the desktop and the runtime draws its UI through them.
+### Next work, in order (decided 2026-09-25)
+
+The UI widget set is complete (below). The work that follows is ordered; each step starts only when the previous one is done:
+
+1. **Retire OpenGL and the editor** ([Phase 22](#phase-22--retire-opengl-and-the-editor-keep-engine-state-tags-pause-and-behaviors)): delete the OpenGL renderer and the editor systems (gizmos, editor camera, gizmo behaviours, `Editing` state plumbing), while keeping and improving what the runtime needs — engine state, object tags, simulation pausing and behaviours.
+2. **Assemble the modern engine and the sandbox demo** ([Phase 23](#phase-23--engine-assembly-and-the-sandbox-demo)): the runtime constructs the new systems (RHI Vulkan, RenderGraph, GPU Scene, visibility, Forward+, shadows, post, TAA, particles, skinning, UI), the transitional `Engine::VulkanRenderer` and legacy pools go away, and one real sandbox scene demonstrates everything with UI controls: a physics and rendering playground, lighting and shadows, play/pause/step, the same movable camera. It shows where the engine stands and what needs fixing.
+3. **Assets, level streaming and LODs** ([Phase 24](#phase-24--asset-handling-level-streaming-and-lods)).
+4. **Audio** ([Phase 21](#phase-21--audio)), after the scene exists to test it: miniaudio behind a Swim API, real-time effects, callbacks from physics contacts and gameplay events, sound groups.
+5. **Gameplay API pass** ([Phase 25](#phase-25--gameplay-api-pass-documented-not-scheduled)): documented now, done later.
+
+The critical-path ladder for these steps is [35.9](#359-engine-assembly-and-gameplay-next-in-this-order).
+
+- **Latest checkpoint — item 79, popups and selection controls (2026-09-25):** the controls the previous checkpoint left out are implemented; the UI widget set is complete for the assembly phase. Item 79 stays open for the desktop smokes and the runtime wiring (Phase 23).
+  - **Popups** (`UiPopups.cpp`): a popup stack in `UiDocument` — root children placed after Layout below/above/beside an anchor, at a point or centered, flipped when they do not fit and clamped inside the canvas, painted and hit-tested above everything in opening order. Light dismiss, Escape, close-on-activate, focus-first with focus restored on close, and modal popups that scope hits, Tab and directions to themselves. Menus, context menus (`SetContextMenu`, `OpenContextMenu`, `OpenContextMenuForFocus`), tooltips (delay through `Update`, never interactive) and modal dialogs build on it; `ScrollIntoView` reveals any node.
+  - **Selection controls** (`UiSelection.cpp`): `RadioGroup`, `ListView` and `Dropdown` owners with `Option` nodes (`SetPartRole(…, Option, index)`). Wrapping radio arrows; list keys with page sizes from the viewport and reveal by item extent or bounds; `Submit` on Enter; dropdowns with a highlight, hover tracking, commit on Enter/click and a label that shows the choice. Options show `Checked`/`Focused` for themes.
+  - **Widgets:** `CreateRadioGroup`, `CreateListView`, `CreateDropdown`, `CreateMenu`/`AddMenuItem`/`AddMenuSeparator`/`OpenMenu`, `CreateTooltip`, `CreateModal`/`AddModalButton`/`OpenModal`, `UiVirtualList` (a pooled list: rows bound only while visible, 10,000 items with ~12 rows), and editable slider values (`UiSliderDesc::EditableValue`). The theme gained 13 classes and palette/metric entries.
+  - **Input:** right click, Shift+F10 and gamepad North open context menus through `UiInputBridge` (`ContextMenuOpened`); `UiCanvasRouter::OpenContextMenu`/`OpenContextMenuForFocus`, and a press on one canvas (or the world) light-dismisses the popups of the others.
+  - **Validation:** **778 cases / 658,279 checks** on Linux (was 765 / 658,001); 13 new cases (`UI.Selection` 6, `UI.Popups` 5, one bridge, one router); 95 in the focused filter; the focused modules (94 cases) pass under ASan/UBSan/LeakSanitizer; CPU-reference images of the new widgets were inspected ([record](validation/Item79-Popups-2026-09-25.md)).
+  - **Next:** the desktop UI smokes under the four validation profiles; then Phase 22.
+- **Previous checkpoint — item 79, controls, themes and world-space canvases (2026-09-25):** the two Phase 20 checklists added after the previous checkpoint (controls with theming; world-space and render-surface canvases) are implemented, except the scene/ECS canvas component and fog on world UI, which move to the runtime wiring with item 56. Item 79 stays open until both native UI smokes pass on the desktop and the runtime draws its UI through them.
   - **Controls** (`Systems/UI`, `UiControls.cpp`): `SetControl(node, UiControl)` turns a node into a button, checkbox (Unchecked/Checked/Mixed), toggle (eased knob, knob drag), slider (horizontal/vertical, step snapping, jump/page track clicks, keys, wheel while focused, tick marks, a value label kept current by the document) or scroll bar (tracks a clipped target; thumb drag, paging, step buttons that repeat while held, Always/Auto/Overlay visibility with fade). Parts are ordinary nodes (placed by the control where geometry matters). Shared contract: `ValueChanged`/`ValueCommitted` events with values, `SetValue`/`SetChecked` from code without events, read-only and disabled states.
   - **Visual states and themes** (`UiVisuals.cpp`, `UiTheme`): `UiState` per node (from its nearest interactive ancestor); layered `UiStateRule`s (theme class, then node) override paint and image skins; state changes ease over `TransitionSeconds` through `UiDocument::Update`; subtree `Opacity`. `UiTheme` (palette, metrics, fonts, `Customize` hook) builds 21 classes; `SetTheme` restyles every themed node (paint, layout with axis swap for vertical controls, text). `UiWidgets` now builds every widget from the theme; `UiButtonColors`/`UiButtonStates` are replaced.
   - **Navigation:** `TabIndex` ordering, spatial `Navigate` (arrows that the focused node does not use), activation that toggles checkboxes/toggles; the bridge maps a gamepad (D-pad and stick with hold-repeat, South/East, shoulders) and PageUp/PageDown.
@@ -2821,6 +2840,8 @@ GraphicsBackend::OpenGLLegacy
 
 This preserves working OpenGL without poisoning the explicit RHI with GL-era limitations.
 
+> **Superseded (2026-09-25):** OpenGL is being removed rather than kept as a legacy backend — see [Phase 22](#phase-22--retire-opengl-and-the-editor-keep-engine-state-tags-pause-and-behaviors). `GraphicsBackend::OpenGLLegacy` goes away with it; Vulkan is the only backend until D3D12/Metal seams are needed.
+
 ### Phase 8 exit criteria
 
 - [x] no Vulkan type exists in generic render/RHI public headers.
@@ -4345,7 +4366,23 @@ Every control is built from ordinary document nodes and events and is driven onl
   - state transitions (color, border, radius, opacity easing; toggle knob motion), a no-op when `TransitionSeconds` is 0; subtree `Opacity`;
   - labels, buttons, text fields, panels, scroll areas and every new control are built by themed `UiWidgets` helpers (unthemed helpers remain).
 - [x] **Tests:** `UI.Controls` (6), `UI.Theme` (2), `UI.Navigation` (2), `UI.Widgets` (2) and two gamepad/router `UiInput.Bridge` cases cover pointer, keyboard, gamepad, disabled, read-only and value-from-code paths, paint-only theme changes, transitions and skins; `UI.CanvasRouter` drags a slider through a world panel; the world smoke draws the themed controls on a world panel and a billboard.
-- [ ] More controls: dropdowns, list views, radio groups, tooltips, context menus, modal dialogs. *(Not required by this checklist; tracked in [Text and retained UI — Remaining work](TextAndUi.md#remaining-work-item-79-stays-open).)*
+- [x] **More controls** (checkpoint below): dropdowns, list views (with virtualization), radio groups, tooltips, context menus, modal dialogs, and slider values edited by typing.
+
+### Popups and selection controls (checkpoint 2026-09-25)
+
+Contracts: [Text and retained UI — Selection controls](TextAndUi.md#selection-controls) and [Popups](TextAndUi.md#popups-menus-context-menus-tooltips-modal-dialogs). Record: [Item79-Popups](validation/Item79-Popups-2026-09-25.md).
+
+- [x] **Popup layer:** `OpenPopup(node, UiPopupDesc)` for root children: anchored (below/above/right/left, flipped), at a point, or centered; clamped inside the canvas; `MatchAnchorWidth`; a stack painted and hit-tested above the page in opening order; closing one closes those above it; opening one closes unrelated light-dismiss popups; `PopupOpened`/`PopupClosed`.
+- [x] **Dismissal and focus:** light dismiss (outside the popup and its anchor; the press still lands), Escape (top popup; tooltips first), close on activation (menus), focus-first after placement and focus restored to the anchor or the previous node; `DismissPopups` for presses on other canvases.
+- [x] **Modal dialogs:** input below the top modal is ignored (hits, wheel, Tab, directions), focus below is cleared; a scrim popup with a centered dialog (`CreateModal`, `OpenModal`).
+- [x] **Menus and context menus:** menus of buttons with arrow navigation confined to the popup; `SetContextMenu`, `OpenContextMenu(point)` (top-most node or its ancestors), `OpenContextMenuForFocus()`; right click, Shift+F10 and gamepad North in the bridge; the router opens them on the hovered canvas.
+- [x] **Tooltips:** after a delay on any node (through `Update`), below the pointer, never interactive; hidden by leaving, pressing, the wheel or Escape.
+- [x] **Selection owners:** `RadioGroup`, `ListView`, `Dropdown` with `Option` parts, `Value` = selected index (−1 none), events with the index, read-only support, `Checked`/`Focused` option states, reveal by `ItemExtent` or bounds, `ScrollIntoView`.
+- [x] **Virtualized lists:** `UiVirtualList` binds a pool of rows to the visible range (plus overscan) through a `Bind` callback; `ItemCount`/`ItemExtent` keep keys and selection working for unbound rows. *(At most 1,000,000 logical units long, the document's coordinate limit.)*
+- [x] **Editable slider values:** the value label as a text field, applied on Enter or blur (clamped and snapped), restored when unparsable.
+- [x] **Theme and widgets:** `Popup`, `MenuItem`, `MenuSeparator`, `ListView`, `Dropdown`, `DropdownArrow`, `RadioOption`, `RadioCircle`, `RadioDot`, `Tooltip`, `ModalScrim`, `Dialog`, `DialogTitle`; palette `Popup`/`Tooltip`/`Scrim`; metrics for radios, menu items, popups, tooltips and dialogs.
+- [x] **Tests:** `UI.Selection` (6), `UI.Popups` (5), `UiInput.Bridge.RightClickShiftF10AndGamepadNorthOpenContextMenus`, `UI.CanvasRouter.ContextMenusOpenOnTheHoveredCanvasAndPressesElsewhereDismissPopups`.
+- [ ] Polish found while building the sandbox (Phase 23): editable combo boxes, multi-selection, hover-opened cascading submenus, focus-anchored tooltips for gamepads, vector glyphs for arrows and checks.
 
 ### World-space and render-surface canvases (checkpoint 2026-09-25)
 
@@ -4416,64 +4453,151 @@ World-space text and world-space UI both reuse the shaping/atlas services and th
 
 ## Phase 21 — Audio
 
-Use miniaudio behind a Swim API.
+**Scheduled after Phases 22–24** (decided 2026-09-25): audio is a simulation-facing system whose value shows only in a real scene — collisions, footsteps, UI and gameplay events — so it starts once the modern engine and the sandbox are assembled (Phase 23) and assets stream (Phase 24). The sandbox then gains an audio playground.
 
-- [ ] audio device;
-- [ ] sound asset vs playing voice;
-- [ ] one-shot/looping;
-- [ ] streaming;
-- [ ] buses;
-- [ ] listener/source 3D audio;
-- [ ] attenuation;
-- [ ] Doppler;
-- [ ] pitch/pan/spread;
-- [ ] priorities/voice stealing;
-- [ ] device hot-change;
-- [ ] async decode/stream jobs.
+Use miniaudio behind a Swim API (miniaudio types never cross the public boundary). miniaudio supplies devices, decoding, resampling, a node graph and basic filters; Swim owns voices, buses, effects, spatialization policy, events and assets.
 
-Audio assets participate in the same AssetId/dependency model.
+### Core runtime
+
+- [ ] audio device (default and explicit, hot change and loss, null device for tests and headless);
+- [ ] sound asset vs playing voice (handles, generations; voices never own assets);
+- [ ] one-shot/looping, start offset, fade in/out, scheduled start (sample-accurate);
+- [ ] streaming (music, ambience, dialogue) with async decode/stream jobs; small sounds fully decoded;
+- [ ] listener/source 3D audio: attenuation curves (inverse, linear, log, custom), cones, Doppler, pitch/pan/spread, distance-based low-pass (air absorption);
+- [ ] priorities, virtual voices and voice stealing under a voice budget;
+- [ ] audio thread fed by a lock-free command queue; no allocation, locks or asset loads on the audio thread.
+
+### Mixing: buses, groups and snapshots
+
+- [ ] **Bus graph:** master ← music/SFX/ambience/UI/voice (user-defined), each with volume, mute, solo, an effect chain and sends (e.g. to a reverb return bus).
+- [ ] **Sound groups:** a named group of sounds with shared volume, pitch and effects, **instance limits** (per group, per emitter; oldest/quietest/farthest stealing), cooldowns and priority. Groups carry categories for occlusion and ducking.
+- [ ] **Containers** (what an event plays): random (weighted, avoid repeats), sequence, switch (by a parameter such as surface material), blend (by a continuous parameter such as speed), layered.
+- [ ] **Snapshots/mix states:** blended bus volumes and effect parameters (underwater, paused, menu, slow motion); **sidechain ducking** (dialogue ducks music).
+- [ ] **Parameter smoothing:** every volume, pitch and effect parameter ramps per block (no zipper noise); automation from gameplay parameters (RTPC-style).
+
+### Real-time effects (DSP)
+
+Every effect is a Swim node usable on a voice, a group or a bus, with smoothed parameters, deterministic offline processing for tests, and a wet/dry mix:
+
+- [ ] **Filters:** low-pass, high-pass, band-pass, notch, peaking and shelving EQ (biquad / state-variable; miniaudio's `ma_lpf`/`ma_hpf`/`ma_bpf` where they fit); resonance (Q) and cutoff automation.
+- [ ] **Reverb:** algorithmic reverb (Freeverb-style comb/all-pass or a feedback delay network) with room size, damping, pre-delay, early reflections, wet/dry; reverb zones in the scene that crossfade by listener position; convolution reverb (impulse responses, partitioned FFT) as a later option.
+- [ ] **Echo/delay:** feedback delay with filtering in the loop, ping-pong stereo, tempo sync, modulated delay (chorus/flanger).
+- [ ] **Static/noise and degradation:** white/pink noise generators, radio/telephone effect (band-pass + saturation + noise), bit-crush and sample-rate reduction, crackle.
+- [ ] **Distortion/saturation**, tremolo, pitch shift.
+- [ ] **Dynamics:** compressor and limiter (the master bus always limits), gate.
+- [ ] **Occlusion/obstruction:** physics ray casts (jobified, budgeted, smoothed) between listener and source drive low-pass cutoff and gain; portal/room awareness later.
+
+### Callbacks from physics and gameplay
+
+- [ ] **Physics contacts:** collision begin/persist/end and trigger events from the generic physics layer (PhysX and Jolt alike) map to sound events: impact volume and pitch from the impulse and relative speed; switch containers by surface-material pair; rolling/sliding loops driven by contact velocity; per-body cooldowns and rate limits so a stack of boxes does not spam voices.
+- [ ] **Gameplay events:** named events (`PlayEvent("Footstep", entity, params)`) from behaviours, animation events (item 78 footsteps) and UI events (button hover/click sounds from the widget theme); events attach to entities and follow their transforms.
+- [ ] **Callbacks back to gameplay:** voice finished, loop point, marker/cue reached, beat/bar for music.
+- [ ] Events are data (assets) so sound design changes do not need code.
+
+### Assets, tools and tests
+
+- [ ] audio assets participate in the same AssetId/dependency model (compressed sources cooked to runtime formats; streaming flags; loudness normalization metadata);
+- [ ] debug overlay: active voices, stolen voices, bus meters, occlusion rays, 3D gizmos for emitters (drawn by the debug renderer, not an editor);
+- [ ] tests on the null device with offline rendering: deterministic DSP golden buffers (filter responses, reverb tail energy, delay taps), voice limits and stealing, snapshot blending, contact-to-event mapping;
+- [ ] sandbox audio playground (Phase 23 scene): impacts with material switches, a reverb zone, an occluding wall, a radio with static, music ducking under dialogue.
 
 ---
 
-## Phase 22 — Legacy OpenGL and editor/tooling compatibility
+## Phase 22 — Retire OpenGL and the editor; keep engine state, tags, pause and behaviors
 
-### OpenGL stays functional but isolated
+**Next after item 79's widgets** (decided 2026-09-25; supersedes the earlier plan to keep OpenGL as an isolated legacy backend and to preserve editor systems as tooling). The modern RHI path is the engine; carrying a second renderer and editor-era systems into the assembly phase would double every migration.
 
-Move the existing OpenGL renderer under a clearly legacy module, for example:
+### Remove
 
-```text
-Source/Swim/Legacy/OpenGL/
-```
+- [ ] **OpenGL renderer** (`Systems/Renderer/OpenGL`, GL loaders and dependencies, `--graphics=opengl`, `GraphicsBackend::OpenGLLegacy`, GL branches in shared types, GL shader outputs in the Slang build). The verifier rejects GL includes and symbols afterwards.
+- [ ] **Editor systems:** gizmos (`GizmoSystem`, `ChangeGizmoTypeButtonBehavior`), the editor camera as an editor concept, editor-only commands, editor scene bookkeeping, and `Editing`-state branches in systems. The archived IPC (`Deprecated/`) stays archived.
+- [ ] Generic `Vertex`/`Texture`/`Transform`/`Camera` types lose remaining backend behavior (item 83).
+- [ ] Tests, examples and docs that exercise removed code are deleted or rewritten; nothing is kept "for later" behind flags.
 
-Rules:
+### Keep and improve (runtime features the editor used to host)
 
-- [ ] it uses Platform window/input abstractions;
-- [ ] it no longer forces generic `Vertex`, `Texture`, `Camera`, or `Transform` types to contain GL behavior;
-- [ ] new renderer features do not require OpenGL parity;
-- [ ] basic legacy mesh/text/cubemap/debug functionality remains usable;
-- [ ] Slang-generated shader output is used where practical;
-- [ ] OpenGL-specific types stay in the legacy implementation.
+- [ ] **Engine state:** `Playing`, `Paused`, `Stopped` as an explicit state machine with transitions and events (`OnStateChanged`), owned by the engine (not a global), queryable by systems and behaviours; `Editing` is removed (a future tool mode would be a separate host, not an engine state).
+- [ ] **Simulation pausing and time:** one `SimulationClock` with time scale, pause, single-step (one fixed step while paused) and per-domain participation — physics, animation, particles, behaviours and audio each follow or ignore pause (UI and the camera keep running). Fixed-step accumulation with a clamp; deterministic step counts in tests.
+- [ ] **Tags:** `ObjectTag` becomes a proper tag set (several tags per entity, hashed names with a registry, fast queries `ForEachWithTag`, add/remove through the scene command buffer), used by gameplay and the sandbox (e.g. "Spawned", "Light", "Physics").
+- [ ] **Behaviours:** the behaviour registry and lifecycle (`OnCreate/OnStart/OnUpdate/OnFixedUpdate/OnPause/OnResume/OnDestroy`), per-behaviour state masks (runs while playing, paused or always), deterministic order, safe entity mutation through the command buffer; the fly/editor camera survives as a runtime **camera controller behaviour** (the same movement and controls as today).
+- [ ] **Commands:** the command registry stays for debug/console use.
 
-### Editor code is preserved where useful, but not foundational
+### Exit criteria
 
-Do not delete editor systems just because they are not part of the runtime core.
+- [ ] no OpenGL or editor code, dependency or option remains; the verifier enforces it;
+- [ ] the transitional sandbox still runs on the transitional Vulkan renderer with the camera controller, pause/step and tags working, until Phase 23 replaces the renderer;
+- [ ] engine state, clock, tags and behaviours have unit tests (state transitions, pause participation, single-step, tag queries, behaviour order and state masks).
 
-Reclassify them:
+---
 
-- gizmos -> generic debug/tooling module;
-- editor camera -> debug/tool camera;
-- serialized scene manager -> authoring/serialization service;
-- editor commands -> tooling command bridge;
-- `WM_COPYDATA` -> Windows-specific editor transport adapter;
-- embedded child window -> Platform external-window support.
+## Phase 23 — Engine assembly and the sandbox demo
 
-The engine runs fully with these modules absent/unwired.
+Put the modern systems together into the actual runtime and prove them in one real scene. This phase closes item 56 (normal rendering without CPU visible lists) and item 79's runtime wiring, and replaces the transitional renderer.
 
-### Generic tooling transport
+### Runtime assembly
 
-If editor communication remains important, define a transport-neutral command/event interface and let Win32 IPC be one adapter.
+- [ ] The engine constructs the modern stack from runtime configuration: `RhiVulkan` device/swapchain (HDR when available), RenderGraph executor, residency (`AssetResidencyService`, `GeometryHeap`, `TextureResidency`, bindless tables), `GpuScene` + `RenderExtractor`, GPU visibility (frustum, HZB occlusion, LOD, binning, indirect draws), materials, clustered Forward+ (opaque and transparent), shadows, environment/IBL, post (exposure, bloom, grading), TAA, AO/SSR/fog, particles, skinning and animation, and the UI renderer with atlas residency.
+- [ ] One frame graph owned by a `FrameRenderer` with explicit views (main camera; shadow views; UI overlays; world UI among transparents, sorted and fogged).
+- [ ] `Engine::VulkanRenderer`, `LegacyRenderBinding`, `MeshPool`/`TexturePool`/`MaterialPool` and `FontPool`/legacy text are removed once the sandbox renders through the new path.
+- [ ] Scene/ECS components for the new systems: renderable (mesh, material instances), lights, shadows settings, environment, particles emitters, animators/skinned meshes, UI canvases (document, placement, surface, size, DPI, interactivity), cameras.
+- [ ] Resize, minimize, HDR toggle, device loss handled; Windows and Linux.
 
-Possible future adapters can include local sockets/pipes without changing scene/engine code.
+### The sandbox demo scene (the "real deal")
+
+A single scene that shows where every system stands, driven by a UI built with the new widgets:
+
+- [ ] **Controls panel** (screen canvas): play/pause/step/stop and time scale; physics backend and gravity; spawn menus (boxes, spheres, stacks, ragdoll-like chains, projectiles); lighting (sun direction/intensity, point/spot light spawner with color, radius, shadows on/off); shadows (cascade count, resolution, bias, cascade debug view); environment (IBL map dropdown, exposure); post (bloom, grading, TAA, AO, SSR, fog toggles and sliders); rendering debug views (cluster heatmap, visibility stats, wireframe, overdraw if available); material gallery selector. Uses dropdowns, radio groups, sliders with typed values, toggles, tooltips, list views (entity list with a virtual list), context menus on entities and a modal for reset/quit.
+- [ ] **Physics playground:** throwable/stackable bodies, a ramp and a domino run, triggers, per-body inspection through the UI, PhysX and Jolt switchable.
+- [ ] **Rendering playground:** PBR material spheres, a hall of instances for culling/LOD, animated skinned characters, particle emitters, transparent objects, emissive objects with bloom.
+- [ ] **World-space UI:** an in-world terminal panel and a billboard label, interactive through the ray-cast router.
+- [ ] **Camera:** the same movable fly camera as today (a behaviour), camera bookmarks, and pause not affecting it.
+- [ ] **Diagnostics overlay:** CPU/GPU frame times per pass, draw/instance counts, residency and memory, visibility statistics.
+- [ ] **Findings list:** a short document of what does not work or needs improvement, fed back into this plan.
+
+### Exit criteria
+
+- [ ] the sandbox runs through the modern renderer only, validation-clean under the four profiles, on Windows (RTX 4070) and Linux;
+- [ ] 1080p budgets recorded for the full frame and per pass (including UI);
+- [ ] all item 79 and item 56 runtime boxes closed.
+
+---
+
+## Phase 24 — Asset handling, level streaming and LODs
+
+After the sandbox shows the engine assembled:
+
+- [ ] **`.spack` packages** and residency budgets/eviction (item 81), packaged builds that load without source assets;
+- [ ] **asset handling:** dependency-aware async loading with priorities and cancellation, hot reload of cooked assets in development, clear error assets, load statistics;
+- [ ] **level/scene streaming:** scenes split into cells or sublevels, async load/activate/deactivate/unload with frame budgets, persistent vs streamed entities, streaming volumes around the camera;
+- [ ] **LODs:** mesh LOD generation in the cooker (meshoptimizer simplification with error metrics feeding the GPU LOD selection of item 52), texture mip streaming with feedback, optional impostors/HLOD for distant cells;
+- [ ] a "streaming city" demo ladder entry (§31) built on the sandbox.
+
+---
+
+## Phase 25 — Gameplay API pass (documented, not scheduled)
+
+The engine's systems now have correct but low-level APIs. Before calling the engine usable for game code, one pass over every gameplay-facing surface makes it consistent and friendly. **Only documented here for now**; it runs after audio.
+
+Principles:
+
+- one include per domain for gameplay (`Swim/Gameplay/...` facades) over the internal module headers; internal types (RHI, residency, EnTT) never appear in gameplay signatures;
+- entities as small typed handles with component access (`entity.Get<Transform>()`, `entity.Add<RigidBody>(desc)`), spawning and destruction through the command buffer with prefab/archetype helpers;
+- behaviours as the unit of game code (the Phase 22 lifecycle) with timers, coroutines or tasks, and events rather than polling (collision/trigger callbacks, UI events, animation events, audio callbacks);
+- time through the simulation clock (delta, fixed delta, scale, paused) only;
+- input through **actions** and bindings (keyboard, mouse, gamepad) instead of raw keys, with UI capture respected;
+- queries by tag and component, ray casts and overlaps through one physics query API;
+- UI building helpers for game HUDs and menus, data binding for values (sliders bound to settings, lists bound to collections);
+- audio through events and parameters (Phase 21);
+- consistent naming, units (meters, seconds, radians vs degrees policy), error reporting (validated inputs, clear failures, no silent no-ops), documentation comments on every public function, and examples;
+- public-header compile tests and API examples as tests so the surface stays stable (item 87).
+
+Checklist (to be expanded when scheduled):
+
+- [ ] API inventory and a gap list per domain;
+- [ ] facades and handle types;
+- [ ] action-based input;
+- [ ] behaviour lifecycle, timers/coroutines and event subscriptions;
+- [ ] examples: a small game built only on the gameplay API.
 
 ---
 
@@ -4604,11 +4728,12 @@ Build these in the same order as the engine so every phase has a proof target.
 15. [ ] animated character
 16. [ ] skinned crowd
 17. [ ] GPU particle storm
-18. [ ] runtime UI gallery
+18. [ ] runtime UI gallery *(becomes the sandbox controls panel, Phase 23)*
 19. [ ] PhysX/Jolt physics sandbox
 20. [ ] spatial audio scene
 21. [ ] streaming city
-22. [ ] multi-window/editor-host sample
+22. [ ] ~~multi-window/editor-host sample~~ *(dropped with the editor, Phase 22)*
+23. [ ] sandbox demo scene (Phase 23): physics and rendering playground, lighting/shadows, UI controls, play/pause
 
 ---
 
@@ -5045,19 +5170,30 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 76. [x] optional AO/SSR/fog modules. *(2026-09-24: GTAO, SSR and height fog — Forward+ normal, indirect, reflectance and specular targets, `Renderer/ScreenSpace` + `Shaders/Slang/ScreenSpace`; [Screen-space effects](ScreenSpace.md). Native smokes pass all four profiles on the RTX 4070 and on Mesa lavapipe.)*
 77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe.)*
 78. [x] animation/skinning/morphs. *(2026-09-24: glTF skins/animations/morphs, `.sasset` skeleton and clip types, `Systems/Animation`, `Renderer/Skinning` + `Shaders/Slang/Skinning`, Forward+ previous-position motion vectors; [Animation and skinning](Animation.md). Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe; 64 × 1,032-vertex skinning 0.054–0.074 ms. Engine wiring remains item 56.)*
-79. [ ] runtime UI + HarfBuzz/FreeType/MSDF. *(2026-09-24: font faces, run shaping, MSDF atlas and retained UI foundation. 2026-09-25: fallback chains, bidi/script/line-break paragraph layout, carets and IME editing, flex/anchor/aspect layout with caches, images and rounded/bordered solids, the Input → UI bridge and `Renderer/UiRendering` — one-draw RenderGraph UI pass, atlas residency, SDR/HDR composition, CPU reference ([record](validation/Item79-2026-09-25.md)). Later on 2026-09-25: themed checkboxes, toggles, sliders and scroll bars with visual states, transitions and skins; Tab/spatial/gamepad navigation; screen, render-surface, world-panel and billboard canvases with ray-cast input, capture and one focus owner; world drawing with depth, canvas fade and surface mips; a second native smoke; 765 Linux cases pass ([record](validation/Item79-Controls-2026-09-25.md)). Open: both UI smokes on the desktop under the validation profiles; the scene canvas component, world UI sorted and fogged with transparents, and sandbox migration (item 56). See [Text and retained UI](TextAndUi.md).)*
-80. [ ] miniaudio audio system.
+79. [ ] runtime UI + HarfBuzz/FreeType/MSDF. *(Later on 2026-09-25: popups (menus, context menus, tooltips, modal dialogs), radio groups, list views, dropdowns, virtual lists and editable slider values; 778 Linux cases pass ([record](validation/Item79-Popups-2026-09-25.md)). 2026-09-24: font faces, run shaping, MSDF atlas and retained UI foundation. 2026-09-25: fallback chains, bidi/script/line-break paragraph layout, carets and IME editing, flex/anchor/aspect layout with caches, images and rounded/bordered solids, the Input → UI bridge and `Renderer/UiRendering` — one-draw RenderGraph UI pass, atlas residency, SDR/HDR composition, CPU reference ([record](validation/Item79-2026-09-25.md)). Later on 2026-09-25: themed checkboxes, toggles, sliders and scroll bars with visual states, transitions and skins; Tab/spatial/gamepad navigation; screen, render-surface, world-panel and billboard canvases with ray-cast input, capture and one focus owner; world drawing with depth, canvas fade and surface mips; a second native smoke; 765 Linux cases pass ([record](validation/Item79-Controls-2026-09-25.md)). Open: both UI smokes on the desktop under the validation profiles; the scene canvas component, world UI sorted and fogged with transparents, and sandbox migration (item 56). See [Text and retained UI](TextAndUi.md).)*
+80. [ ] miniaudio audio system. *(Scheduled after the engine assembly and streaming work: item 95 and Phase 21.)*
 81. [ ] `.spack` streaming/residency budgets/eviction.
 
 ### 35.8 Compatibility and hardening
 
-82. [ ] Move OpenGL under legacy module and make it consume Platform/Input abstractions.
+82. [ ] ~~Move OpenGL under legacy module and make it consume Platform/Input abstractions.~~ *(Superseded 2026-09-25: OpenGL is removed, item 89.)*
 83. [ ] Remove Vulkan/OpenGL behavior from generic Vertex/Texture/Transform/Camera types.
 84. [x] Retire external-editor IPC and disconnected scene-JSON synchronization outside the active tree. *(Archived under `Deprecated/`; future in-process tooling is separate work, not reactivation of this transport.)*
-85. [ ] Move gizmos/editor camera to tooling/debug module.
+85. [ ] ~~Move gizmos/editor camera to tooling/debug module.~~ *(Superseded 2026-09-25: gizmos are removed and the camera becomes a runtime behaviour, item 90.)*
 86. [ ] Windows/Linux long-run/perf/validation hardening.
 87. [ ] external engine consumer/API examples.
 88. [ ] prepare Apple/Android platform/RHI/backend seams without implementing speculative platform code early.
+
+### 35.9 Engine assembly and gameplay (next, in this order)
+
+89. [ ] Remove the OpenGL renderer, backend option and dependencies (Phase 22).
+90. [ ] Remove editor systems (gizmos, gizmo behaviours, editor-only commands, `Editing` state); the fly camera becomes a runtime camera-controller behaviour (Phase 22).
+91. [ ] Engine state machine, simulation clock (pause, time scale, single-step, per-domain participation), tag sets and the behaviour lifecycle with state masks (Phase 22).
+92. [ ] Assemble the modern runtime (`FrameRenderer`, residency, GPU Scene extraction, visibility, Forward+, shadows, post, TAA, screen-space effects, particles, skinning, UI) and retire the transitional renderer and legacy pools; closes items 56 and 79's runtime wiring (Phase 23).
+93. [ ] Sandbox demo scene with the UI control panel, physics and rendering playgrounds, lighting/shadows, world UI, play/pause/step and the fly camera; findings list (Phase 23).
+94. [ ] Asset handling, `.spack` streaming (item 81), level streaming and LODs (Phase 24).
+95. [ ] Audio (item 80): runtime, buses/groups/snapshots, real-time effects, physics/gameplay callbacks, sandbox audio playground (Phase 21).
+96. [ ] Gameplay API pass (Phase 25).
 
 ---
 

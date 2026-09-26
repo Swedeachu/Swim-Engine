@@ -82,7 +82,12 @@ namespace Swim::UI
 			UiControl Control;
 			UiNodeId PartOf; // The control this node is a part of.
 			UiPartRole Role = UiPartRole::None;
-			float PartValue = 0.0f;		 // Slider ticks: the marked value.
+			float PartValue = 0.0f;		   // Slider ticks: the marked value. Options: their index.
+			std::vector<UiNodeId> Options; // Selection owners: registered option nodes.
+			std::int32_t Highlight = -1;   // Open dropdowns: the option keys move to.
+			UiNodeId Tooltip;
+			float TooltipDelay = 0.5f;
+			UiNodeId ContextMenu;
 			float Knob = 0.0f;			 // Toggle: displayed knob position 0 .. 1 (eases towards the state).
 			float ScrollActivity = 1e9f; // Overlay scroll bars: seconds since the last activity.
 			bool ControlHidden = false;	 // Auto/overlay scroll bar without overflow: not painted, not hit.
@@ -106,6 +111,7 @@ namespace Swim::UI
 			UiPoint TextSize;
 			UiPoint Desired;
 			UiPoint Scroll;
+			UiPoint ArrangedScroll; // The offset Bounds of descendants were arranged with.
 			UiPoint MaxScroll;
 			UiRect Bounds;
 			UiRect Clip;
@@ -154,6 +160,25 @@ namespace Swim::UI
 		float StepHeld = 0.0f;
 		float NextStep = 0.0f;
 		bool ArrowNavigation = true;
+
+		// Popups, bottom to top.
+		struct PopupEntry
+		{
+			UiNodeId Node;
+			UiPopupDesc Desc;
+			UiNodeId PriorFocus;
+			bool PendingFocus = false;
+			bool PendingReveal = false; // Dropdown lists: scroll the highlight into view once laid out.
+		};
+
+		std::vector<PopupEntry> Popups;
+		// Pointer tracking for tooltips (logical units).
+		UiPoint LastPointer;
+		bool HasPointer = false;
+		UiNodeId TooltipTarget; // The node whose tooltip the pointer rests on.
+		float TooltipTime = 0.0f;
+		bool TooltipSuppressed = false; // Pressed or scrolled: no tooltip until the target changes.
+		UiNodeId TooltipShown;
 		// Theme.
 		std::shared_ptr<const UiTheme> Theme;
 		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> Classes;
@@ -180,7 +205,8 @@ namespace Swim::UI
 		bool IsFocusable(const Node& node) const
 		{
 			return !node.ControlHidden &&
-				(node.Style.Focusable || node.Editable || (IsControl(node) && node.Control.Kind != UiControlKind::ScrollBar));
+				(node.Style.Focusable || node.Editable ||
+					(IsControl(node) && node.Control.Kind != UiControlKind::ScrollBar && node.Control.Kind != UiControlKind::Option));
 		}
 
 		// Hit-testable, focusable, editable or a control: the owner of descendants' states.
@@ -235,13 +261,50 @@ namespace Swim::UI
 		void Toggle(Node& control);
 		float CheckValue(UiCheckState state) const;
 		void MarkControlDirty(Node& control);
-		void SyncValueLabel(Node& control);
+		// An editable label keeps the typed text while focused unless forced.
+		void SyncValueLabel(Node& control, bool force = false);
 		// A scroll bar's thumb track along its axis (after its step buttons), relative to its
 		// content box: start and length.
 		std::pair<float, float> ScrollTrack(const Node& bar, const UiRect& inner) const;
 		void StepScrollBar(Node& bar, float direction);
 		bool AnimateControls(float seconds);
 		float Axis(const Node& control, UiPoint logical) const; // Pointer position along the control's axis.
+
+		// --- Selection owners (UiSelection.cpp) ---
+		bool IsSelectionOwner(const Node& node) const
+		{
+			return node.Control.Kind == UiControlKind::RadioGroup || node.Control.Kind == UiControlKind::ListView ||
+				node.Control.Kind == UiControlKind::Dropdown;
+		}
+
+		std::uint32_t OptionCount(const Node& owner) const;
+		UiNodeId OptionFor(const Node& owner, std::int32_t index) const;
+		// Input selection: clamps to [-1, count - 1]; ValueChanged (+ ValueCommitted) when changed.
+		bool SelectOption(Node& owner, std::int32_t index, bool commit);
+		void SyncOwner(Node& owner); // Dropdown label text and option visuals.
+		void RevealOption(Node& owner, std::int32_t index);
+		bool OwnerKey(Node& owner, UiKey key);
+		void OptionPressed(Node& option, bool inside);
+		void ToggleDropdown(Node& owner);
+		bool IsDropdownOpen(const Node& owner) const;
+		void CommitValueLabel(Node& label);
+
+		// --- Popups (UiPopups.cpp) ---
+		std::optional<std::size_t> PopupIndexOf(UiNodeId id) const; // The open popup containing a node.
+		std::optional<std::size_t> TopModal() const;
+		bool InputAllowed(UiNodeId id) const; // Outside a modal's reach: false.
+		void ShowPopup(Node& node, bool visible);
+		void ClosePopupsFrom(std::size_t index);
+		void PlacePopups();
+		void MoveToTop(UiNodeId id); // Moves a subtree's Order range to the end (painted last).
+		// Closes light-dismiss popups that do not contain the point (or their anchor).
+		void LightDismiss(UiPoint logical);
+		void CloseOnActivate(UiNodeId activated);
+		// Before a popup opens: closes the light-dismiss popups above the one holding its
+		// anchor (unrelated menus and lists), and the tooltip.
+		void DismissForOpen(UiNodeId anchor, UiNodeId opening);
+		void UpdateTooltips(float seconds);
+		void HideTooltip(bool suppress);
 
 		// --- Visual states and theme (UiVisuals.cpp) ---
 		UiNodeId StateOwner(UiNodeId id) const;

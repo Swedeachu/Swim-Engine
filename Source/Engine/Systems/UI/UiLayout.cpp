@@ -518,6 +518,7 @@ namespace Swim::UI
 		node.Scroll = s.Clip
 			? UiPoint{ std::clamp(node.Scroll.X, 0.0f, node.MaxScroll.X), std::clamp(node.Scroll.Y, 0.0f, node.MaxScroll.Y) }
 			: UiPoint{};
+		node.ArrangedScroll = node.Scroll;
 		const UiRect childClip = s.Clip ? Internal::Intersect(node.Clip, inner) : node.Clip;
 		for (auto [id, rect] : placed)
 		{

@@ -338,8 +338,20 @@ namespace Swim::UI
 		auto* canvas = Find(hovered);
 		if (!canvas)
 		{
+			for (auto& other : canvases)
+			{
+				other.Desc.Document->DismissPopups(); // Menus close on a press in the world.
+			}
 			ClearFocus(); // A press outside every canvas returns the keyboard to the game.
 			return;
+		}
+		// A press on one canvas is a press outside every other canvas's popups.
+		for (auto& other : canvases)
+		{
+			if (other.Handle != canvas->Handle)
+			{
+				other.Desc.Document->DismissPopups();
+			}
 		}
 		auto& document = *canvas->Desc.Document;
 		document.PointerDown(canvas->LastPoint, modifiers);
@@ -352,6 +364,34 @@ namespace Swim::UI
 		{
 			ClearFocus();
 		}
+	}
+
+	bool UiCanvasRouter::OpenContextMenu()
+	{
+		auto* canvas = Find(hovered);
+		if (!canvas || !canvas->Desc.Interactive)
+		{
+			return false;
+		}
+		for (auto& other : canvases)
+		{
+			if (other.Handle != canvas->Handle)
+			{
+				other.Desc.Document->DismissPopups();
+			}
+		}
+		if (!canvas->Desc.Document->OpenContextMenu(canvas->LastPoint))
+		{
+			return false;
+		}
+		SetFocused(canvas->Handle); // The menu takes focus at its document's next Layout.
+		return true;
+	}
+
+	bool UiCanvasRouter::OpenContextMenuForFocus()
+	{
+		auto* canvas = Find(focused);
+		return canvas && canvas->Desc.Document->OpenContextMenuForFocus();
 	}
 
 	void UiCanvasRouter::PointerUp()

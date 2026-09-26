@@ -37,10 +37,11 @@ namespace Swim::UI
 
 	struct UiInputFrame
 	{
-		bool PointerOverUi = false;	   // A hit-testable node is under the pointer: keep it from the game.
-		bool KeyboardCaptured = false; // A node has focus: keyboard input belongs to the UI.
-		bool WantsTextInput = false;   // An editable node has focus: start platform text input.
-		bool GamepadCaptured = false;  // The UI has focus and a navigating gamepad: keep its buttons from the game.
+		bool PointerOverUi = false;		// A hit-testable node is under the pointer: keep it from the game.
+		bool KeyboardCaptured = false;	// A node has focus: keyboard input belongs to the UI.
+		bool WantsTextInput = false;	// An editable node has focus: start platform text input.
+		bool GamepadCaptured = false;	// The UI has focus and a navigating gamepad: keep its buttons from the game.
+		bool ContextMenuOpened = false; // Right button, Shift+F10 or gamepad North opened a context menu.
 		std::uint32_t KeysConsumed = 0;
 	};
 

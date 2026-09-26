@@ -4,7 +4,8 @@ Critical-path item **79** (Phase 20). Checkpoints:
 
 - **2026-09-24 — foundation:** font faces, horizontal run shaping, the MSDF glyph atlas and the retained `UiDocument` (layout, paint records, pointer/focus input).
 - **2026-09-25 — paragraphs, editing and rendering:** paragraph layout (bidi, script itemization, cluster fallback, line breaking, alignment), caret/selection/IME text editing, flex/anchor/aspect layout, rounded/bordered solids and nine-slice images, measure and paint caches, parallel atlas prewarm, a widget layer, the Input → UI bridge, and `Renderer/UiRendering`: the RenderGraph UI pass with atlas residency and SDR/HDR composition, with a CPU reference and a native smoke.
-- **2026-09-25 — controls, themes and canvases (this document's current state):** checkboxes, toggles, sliders (ticks, value labels) and scroll bars (step buttons, auto/overlay visibility) as document behaviour; visual states with per-state rules, eased transitions and image skins; document themes; Tab order, spatial and gamepad navigation; canvas placement (screen, render surface, world panel, billboard) with ray-cast input, pointer capture and one keyboard owner across canvases (`UiCanvasRouter`); world-space drawing (a canvas-to-clip matrix, derivative-based coverage and MSDF ranges, depth testing, canvas fade) and render surfaces with re-rasterized mip chains; a second native smoke; and a glyph-atlas fix for point-only contours.
+- **2026-09-25 — controls, themes and canvases:** checkboxes, toggles, sliders (ticks, value labels) and scroll bars (step buttons, auto/overlay visibility) as document behaviour; visual states with per-state rules, eased transitions and image skins; document themes; Tab order, spatial and gamepad navigation; canvas placement (screen, render surface, world panel, billboard) with ray-cast input, pointer capture and one keyboard owner across canvases (`UiCanvasRouter`); world-space drawing (a canvas-to-clip matrix, derivative-based coverage and MSDF ranges, depth testing, canvas fade) and render surfaces with re-rasterized mip chains; a second native smoke; and a glyph-atlas fix for point-only contours.
+- **2026-09-25 — popups and selection controls (this document's current state):** a popup layer in `UiDocument` (placement with flipping and clamping, stacking, light dismiss, Escape, close-on-activate, modal input scoping), menus, context menus, tooltips and modal dialogs; radio groups, list views, dropdowns and virtualized lists as selection owners; slider values edited by typing; context-menu input in the bridge and router. The UI widget set is complete for the engine assembly phase.
 
 Item 79 stays **open** until the native smokes have passed on the desktop and the runtime draws its UI through them. Sandbox migration and the scene-side canvas component wait for the modern renderer to present frames (item 56); the legacy text/UI remains active.
 
@@ -13,12 +14,12 @@ Item 79 stays **open** until the native smokes have passed on the desktop and th
 | Path | Role | Depends on |
 | --- | --- | --- |
 | `Systems/Text` | `FontFace`, `FontCollection`, `GlyphAtlas`, `TextSegmentation`, `TextLayout`, `Utf8` | FreeType, HarfBuzz, msdfgen, SheenBidi, libunibreak (private) |
-| `Systems/UI` | `UiDocument` (tree/API, layout, paint, input, editing, controls and visual-state units), `UiTheme`, `UiWidgets`, `UiCanvas` (placement math), `UiCanvasRouter` (multi-canvas input) | Text |
+| `Systems/UI` | `UiDocument` (tree/API, layout, paint, input, editing, controls, selection, popups and visual-state units), `UiTheme`, `UiWidgets`, `UiCanvas` (placement math), `UiCanvasRouter` (multi-canvas input) | Text |
 | `Systems/UiInput` | `UiInputBridge`: `Input::InputSystem` frame → a `UiDocument` or a `UiCanvasRouter` (mouse, keys, text, IME, gamepad) | UI, Input |
 | `Renderer/UiRendering` | `UiRenderer` (screen and world canvases), `UiAtlasTextures`, `UiRenderSurfaces`, `UiRenderReference` (`Ui::` CPU definition), records/bindings/settings | RenderGraph, RHI contract, Resources, UI/Text headers |
 | `Shaders/Slang/Ui` | `UiRecords.slang`, `UiQuad.slang` (`SwimUiQuad`) | — |
 
-`scripts/verify-build-layout.py` enforces the boundaries: text libraries stay inside `Systems/Text`/`Systems/UI` and the Text tests, no public header names a library type, `Systems/UI` includes only UI and Text headers (no renderer, scene, platform, input, SDL, EnTT or glm), `UiRendering` includes only RenderGraph/RHI/Resources renderer headers, no other renderer module includes UI, and `UiInput` includes only UI, Text and Input. It also requires the controls/canvas units, their suites and both native UI smokes.
+`scripts/verify-build-layout.py` enforces the boundaries: text libraries stay inside `Systems/Text`/`Systems/UI` and the Text tests, no public header names a library type, `Systems/UI` includes only UI and Text headers (no renderer, scene, platform, input, SDL, EnTT or glm), `UiRendering` includes only RenderGraph/RHI/Resources renderer headers, no other renderer module includes UI, and `UiInput` includes only UI, Text and Input. It also requires the controls/canvas/popup/selection units, their suites, the popup/selection API and widgets, and both native UI smokes.
 
 All five text libraries are compiled from pinned sources as private static libraries in `Swim::TextDependencies` (`cmake/TextDependencies.cmake`): FreeType `VER-2-14-3`, HarfBuzz `14.5.0` (single TU), msdfgen `v1.13` (core), **SheenBidi `v3.0.0`** (unity TU, UAX #9 and script runs) and **libunibreak `8.0`** (UAX #14 line breaks, UAX #29 graphemes and words; Unicode 17). The UI modules compile only where those dependencies are available.
 
@@ -100,11 +101,43 @@ A control is behaviour the document implements for an ordinary node (`SetControl
 | `Toggle` | Click or Space/Enter switches; dragging the knob past half switches on release; the knob eases over the knob's `TransitionSeconds` (`Update`) | Track, Thumb (the knob, a child of the track, placed), Label |
 | `Slider` | Thumb drag keeps the grab offset; track press `Jump`s under the pointer (then drags) or `Page`s towards it; Left/Right (Up/Down when vertical) step, PageUp/PageDown page, Home/End; wheel steps while focused; vertical sliders put Min at the bottom | Track, Fill, Thumb and Tick marks (direct children, placed); Label (any node) shows the value when `LabelDecimals >= 0` |
 | `ScrollBar` | Mirrors `ScrollTarget`'s offset on its axis: thumb drag, track press pages by the viewport (or jumps), step buttons step 40 units (or `Step`) and repeat while held (0.4 s delay, 20 per second, through `Update`), wheel over the bar, keys when focusable | Thumb, Decrement, Increment (direct children, placed) |
+| `RadioGroup` | Click an option; arrows select the previous/next option, wrapping; Home/End; Space/Enter select the first when nothing is | Options (descendants) |
+| `ListView` | Click an option; Up/Down (Left/Right when horizontal), PageUp/PageDown by the rows that fit, Home/End select and scroll `ScrollTarget` to reveal; Enter emits `Submit` with the index | Options (descendants) |
+| `Dropdown` | Click or Enter/Space opens `Parts.Popup` below it (at least as wide); closed, Up/Down/Home/End select directly; open, they move the highlight and Enter/Space commits and closes; hovering an option moves the highlight; Escape, a press outside or focus leaving closes it | Label (shows the choice), Popup (a root child), Options (in the popup) |
 
 - **Values.** `Min ≤ Value ≤ Max`, snapped to `Min + k·Step` when `Step > 0`. `SetValue`/`SetChecked` (code) clamp and snap and emit nothing. Input emits `ValueChanged` (with `UiEvent::Value`) on every change and `ValueCommitted` at its end: drag release, each key, each click or wheel step. A cancelled pointer (`CancelPointer`, focus loss) keeps and commits the value reached. Check states are reported as 0, 1 and 0.5 (Mixed).
 - **`ReadOnly`** controls keep hover, focus and visuals but never change by input (their axis keys then navigate). Disabled controls (`Enabled = false` on them or an ancestor) take no input and show `UiState::Disabled`.
 - **Scroll bars** refresh from their target after every Layout (a bar arranged before its target is re-arranged once the target's extent is known, in the same Layout). The thumb length is `track × viewport / (viewport + maximum)`, at least `MinThumbLength`. `Auto` bars are neither painted nor hit while the target does not overflow (they keep their space); `Overlay` bars also fade out after `FadeDelaySeconds` without scrolling or hover (over `FadeSeconds`, through `Update`) and reappear when the target scrolls.
+- **Editable slider values.** When a slider's value Label is editable (`UiSliderDesc::EditableValue`), the document stops rewriting it while it has focus; Enter or leaving it parses the text (a plain decimal, surrounding spaces and a leading `+` allowed), applies it clamped and snapped (`ValueChanged`/`ValueCommitted`) and reformats; anything unparsable restores the value.
 - **Geometry roles** (slider track/fill/thumb/ticks, scroll thumb/buttons, toggle knob) are placed by the control inside their parent's content box; their own sizes come from their styles (the theme's metrics). Everything else lays out normally.
+
+### Selection controls
+
+`RadioGroup`, `ListView` and `Dropdown` are *selection owners*: `UiControl::Value` is the selected index (−1 for none; integral, validated by `SetControl`). Their choices are **Option** nodes registered with `SetPartRole(option, owner, UiPartRole::Option, index)` — inside a radio group or list view, anywhere for a dropdown (its popup). An option becomes an `Option` control: hit-testable, never focusable; pressing one focuses its owner, and keys go to the owner. Registering a node again with another index moves it (virtualized rows); `UiPartRole::None` releases it. `FindOption(owner, index)` and `GetOptionCount(owner)` query the registration (`UiControl::ItemCount > 0` overrides the count for virtual lists).
+
+- **States.** An option (and its parts: a radio's circle and dot, a row's text) is `Checked` while selected and `Focused` while its owner is focused and it is the selection — or, in an open dropdown, the highlight. Themes style those two states (`MenuItem`, `RadioCircle`, `RadioDot`).
+- **Events.** Input selection emits `ValueChanged` and `ValueCommitted` with the index; `SetValue` (code) clamps to `[−1, count − 1]` and emits nothing. Read-only owners ignore input.
+- **Revealing.** List views and dropdowns keep the selection (or highlight) visible in `ScrollTarget`: by `ItemExtent` (index × extent; works for rows that do not exist yet) or by the option's laid-out bounds. `ScrollIntoView(node)` does the same for any node and its clipped ancestors.
+- **Dropdown text.** The Label part shows the selected option's text (the option's own, or its first descendant's); with nothing selected it keeps its text (a placeholder).
+
+### Popups: menus, context menus, tooltips, modal dialogs
+
+A popup is a child of the root that the document shows, places and dismisses (`OpenPopup(node, UiPopupDesc)`, `ClosePopup`, `CloseAllPopups`, `IsPopupOpen`, `GetTopPopup`). Open popups form a stack: each is placed after Layout (in canvas logical units) and painted and hit-tested above everything else, in opening order. `ClosePopup` also closes every popup opened after it; opening a popup first closes the light-dismiss popups above the one holding its anchor (so an unrelated menu replaces an open list, while a submenu keeps its parent). `PopupOpened`/`PopupClosed` report changes.
+
+| `UiPopupDesc` | Meaning |
+| --- | --- |
+| `Anchor`, `Side` | `Below`/`Above` or `Right`/`Left` of the anchor's bounds (flipped when the preferred side does not fit), `AtPoint` (`Point`, flipped up/left), `Center`; always clamped inside the canvas |
+| `Offset`, `MatchAnchorWidth` | a gap added after placement; at least the anchor's width (dropdown lists) |
+| `Modal` | only this popup and those above it take input: hits below land on nothing (a full-canvas scrim takes them), Tab and directions stay inside, focus below is cleared |
+| `LightDismiss` | a press outside it and its anchor closes it (the press still reaches what it hit) |
+| `CloseOnEscape`, `CloseOnActivate` | Escape closes the top popup; a click or activation of a control or focusable node inside closes it (menus; its background does not) |
+| `FocusFirst` | its first focusable node takes focus once laid out; on close, focus returns to the anchor (or the node focused before) when it was inside the popup |
+
+- **Menus** are popups of buttons: arrows navigate inside the focused node's popup only (never out to the page), Enter/click activates and closes.
+- **Context menus**: `SetContextMenu(target, menu)`; `OpenContextMenu(point)` opens the menu of the top-most node under the point (or its nearest ancestor with one) at the point, `OpenContextMenuForFocus()` the focused node's below it. Both emit `ContextMenu` (the target) and close on activation. The bridge maps the right mouse button, Shift+F10 and gamepad North to them.
+- **Tooltips**: `SetTooltip(target, tooltip, delay)`; after the pointer rests on the target (or a descendant; any node, not only interactive ones) for the delay — through `Update`, which keeps returning true while a delay runs — the tooltip opens 20 units below the pointer. It never takes input or focus; leaving, pressing, the wheel or Escape closes it (a press or wheel suppresses it until the pointer moves to another target).
+- **`DismissPopups()`** closes light-dismiss popups as a press elsewhere would; the canvas router calls it on every other canvas when one is pressed (or all of them when the press lands in the world).
+- Popups are ordinary nodes: any style, theme class or content. A popup's theme should not set its size when it must fit its content; `UiMetrics::PopupMaxHeight` caps themed popups, whose items then scroll.
 
 ### Visual states, rules and transitions
 
@@ -118,7 +151,7 @@ The paint a node is drawn with (`GetVisual`, a `UiResolvedVisual`) is its style'
 
 ### Themes (`UiTheme.h`)
 
-`UiDocument::SetTheme(shared_ptr<const UiTheme>)` (a default dark theme without fonts initially) turns a `UiPalette` (surface, accent, focus, text, track, … colors), `UiMetrics` (corner radius, border and focus widths, spacing, paddings, control height, text sizes, slider/checkbox/toggle/scroll bar dimensions, transition seconds, disabled opacity) and a font chain into one `UiClassStyle` per `UiThemeClass` (Panel, Label, Button, TextField, ScrollView, ScrollBar/ScrollThumb/ScrollButton, Checkbox/CheckBox/CheckMark/CheckMixed, Toggle/ToggleTrack/ToggleKnob, Slider/SliderTrack/SliderFill/SliderThumb/SliderTick/SliderValue): a base style plus state rules. `UiTheme::Customize(class, style)` adjusts any generated class (colors, sizes, extra rules, image skins). Invalid themes are rejected before anything changes.
+`UiDocument::SetTheme(shared_ptr<const UiTheme>)` (a default dark theme without fonts initially) turns a `UiPalette` (surface, accent, focus, text, track, … colors), `UiMetrics` (corner radius, border and focus widths, spacing, paddings, control height, text sizes, slider/checkbox/toggle/scroll bar dimensions, transition seconds, disabled opacity) and a font chain into one `UiClassStyle` per `UiThemeClass` (Panel, Label, Button, TextField, ScrollView, ScrollBar/ScrollThumb/ScrollButton, Checkbox/CheckBox/CheckMark/CheckMixed, Toggle/ToggleTrack/ToggleKnob, Slider/SliderTrack/SliderFill/SliderThumb/SliderTick/SliderValue, Popup/MenuItem/MenuSeparator, ListView, Dropdown/DropdownArrow, RadioOption/RadioCircle/RadioDot, Tooltip, ModalScrim/Dialog/DialogTitle; the palette adds `Popup`, `Tooltip` and `Scrim` colors and the metrics radio, menu item, popup, tooltip and dialog sizes): a base style plus state rules. `UiTheme::Customize(class, style)` adjusts any generated class (colors, sizes, extra rules, image skins). Invalid themes are rejected before anything changes.
 
 `SetThemeClass(node, class, apply)` themes a node now and on every later `SetTheme`, taking the parts of its class chosen by `UiThemeApply`:
 
@@ -132,11 +165,16 @@ Per-node overrides are the node's own rules (after the class's); to keep a custo
 
 - **Tab order:** `FocusNext`/Tab visit focusable, available nodes with `TabIndex > 0` first in ascending order, then `TabIndex = 0` in document order, wrapping around; negative indices are skipped (still focusable by pointer or `Focus`).
 - **Spatial:** `Navigate(Up/Down/Left/Right)` moves focus to the nearest candidate that way: facing-edge distance plus twice the gap across the direction (0 when the boxes overlap), no wrap-around. Without focus it focuses the first node in tab order. Arrow keys that the focused node does not use navigate (`SetArrowNavigation(false)` turns that off); editors keep Left/Right, sliders and scroll bars keep their axis.
-- **Activation:** Enter/Space (`ActivateFocused`) toggle checkboxes and toggles and click anything else; Escape blurs.
+- **Activation:** Enter/Space (`ActivateFocused`) toggle checkboxes and toggles, open or close dropdowns and click anything else; Escape closes the tooltip, then the top popup, and otherwise blurs.
+- **Pointer focus:** a press focuses the pressed node when focusable, an option's owner, or else the nearest focusable ancestor (a list's scroll bar focuses the list); presses on a popup's non-focusable background keep the focus; anything else clears it.
 
 ### Widgets (`UiWidgets.h`)
 
-Themed helpers build controls from nodes and theme them from the document's theme (text helpers throw when the theme has no fonts): `CreatePanel`, `CreateLabel`, `CreateButton`, `CreateTextField`, `CreateCheckbox(label, state)`, `CreateToggle(label, on)`, `CreateSlider(UiSliderDesc)` (range, step, page, orientation, track click, `Ticks`, `ShowValue`/`Decimals`), `CreateScrollBar(target, UiScrollBarDesc)` (orientation, visibility, track click, `StepButtons`) and `CreateScrollArea(rootStyle, vertical, horizontal, visibility, stepButtons)` (a clipped viewport with its bars in flow, or floating over its edges for `Overlay`). Unthemed helpers with explicit fonts and styles remain (`CreateLabel(fonts, …)`, `CreateImage`, `CreateScrollView`, `CreateTextField(fonts, …)`). Every part is reachable through `GetControl(node).Parts` for rules, images or replacement.
+Themed helpers build controls from nodes and theme them from the document's theme (text helpers throw when the theme has no fonts): `CreatePanel`, `CreateLabel`, `CreateButton`, `CreateTextField`, `CreateCheckbox(label, state)`, `CreateToggle(label, on)`, `CreateSlider(UiSliderDesc)` (range, step, page, orientation, track click, `Ticks`, `ShowValue`/`Decimals`), `CreateScrollBar(target, UiScrollBarDesc)` (orientation, visibility, track click, `StepButtons`) and `CreateScrollArea(rootStyle, vertical, horizontal, visibility, stepButtons)` (a clipped viewport with its bars in flow, or floating over its edges for `Overlay`). Selection and popup widgets: `CreateRadioGroup(options, selected, orientation)` / `AddRadioOption`, `CreateListView(rootStyle, items, selected)` → `UiListView{Root, Viewport, ScrollBar}` / `AddListItem`, `CreateDropdown(options, selected, placeholder)` → `UiDropdown{Root, Label, Arrow, List}` / `AddDropdownOption`, `CreateMenu()` → `UiPopupList{Root, Items, ScrollBar}` / `AddMenuItem` (buttons) / `AddMenuSeparator` / `OpenMenu(menu, anchor, side)`, `CreateTooltip(target, text, delay)`, and `CreateModal(title)` → `UiModal{Root (scrim), Dialog, Title, Content, Buttons}` / `AddModalButton` / `OpenModal` (centered, modal, not light-dismissed; the application closes it on its buttons' clicks). `UiSliderDesc::EditableValue` makes the value label a text field.
+
+**`UiVirtualList`** (`UiVirtualListDesc{ItemCount, ItemHeight, Bind, Style, Overscan, Selected}`) is a list view whose rows exist only while visible: a pool of themed rows placed at index × `ItemHeight` in a content node `ItemCount × ItemHeight` long (at most 1,000,000 units), re-registered as options of their current index and filled by `Bind(document, row, index)`. Call `Update()` after Layout; when it returns true (rows were rebound), lay out again before Paint. Selection, keys (`ItemExtent` reveals rows that are not bound yet) and scrolling behave as for `CreateListView`; `SetItemCount` clamps the selection, `Refresh` rebinds everything.
+
+Unthemed helpers with explicit fonts and styles remain (`CreateLabel(fonts, …)`, `CreateImage`, `CreateScrollView`, `CreateTextField(fonts, …)`). Every part is reachable through `GetControl(node).Parts` for rules, images or replacement.
 
 ### Canvases (`UiCanvas.h`)
 
@@ -156,6 +194,7 @@ A document is always a 2D canvas in framebuffer pixels (its Layout size). A canv
 The router owns no documents; it routes one pointer and one keyboard across every canvas of a frame (`Add(UiCanvasDesc{document, mode, Interactive, BlocksPointer, Order})`, `SetScreenPlacement`, `SetWorldPlacement(canvasToWorld, size, twoSided)`, `SetCamera`):
 
 - `PointerMove(UiPointer{Screen, Ray, SurfaceHits})` picks the hovered canvas: screen canvases first (top-most `Order`), where a hit-testable node is under the pointer (or anywhere inside with `BlocksPointer`); then world panels/billboards hit by the ray and the application's `UiSurfaceHit`s (a mesh ray cast converted from UV to canvas pixels for render surfaces), nearest first, with the same node-or-blocking rule — so the world behind a HUD or an empty part of a panel stays reachable. The previous canvas gets `PointerLeave`.
+- `OpenContextMenu()` opens the hovered canvas's context menu at the pointer and makes it the keyboard owner; `OpenContextMenuForFocus()` uses the owner's focused node. A press on one canvas (or in the world) light-dismisses the popups of the others.
 - `PointerDown` captures the pointer for the hovered canvas until `PointerUp`: its positions then follow the ray on the canvas's unbounded plane (a world slider keeps dragging off its panel; parallel rays keep the last point).
 - **One focus owner.** A press that focuses a node makes its canvas the keyboard owner and blurs the previous owner's document; a press outside every canvas returns the keyboard to the game. `KeyDown`, `TextInput`, `SetComposition` and `Navigate` go to the owner; without one, Tab (`FocusNext`) and directions start in the first interactive canvas with focusable nodes. `GetTextInputRect()` gives the owner's caret in viewport pixels — offset for screen canvases, projected through the camera for world ones.
 
@@ -166,10 +205,11 @@ The router owns no documents; it routes one pointer and one keyboard across ever
 - window → framebuffer pixels by `FramebufferScale`; primary-button press/release; wheel notches × `WheelStep` (positive wheel scrolls up). With a router, the mouse is also a world ray through the camera (re-cast every frame, since world canvases move under a still mouse);
 - key presses **including operating-system repeats** (now also PageUp/PageDown) and committed text in event order (`InputSystem::GetTextEditEvents()`); Control or, for macOS, Super as the shortcut modifier; keys reach the UI only while a node has focus (Tab starts traversal when `TabStartsNavigation`);
 - IME composition only when `InputSystem::HasTextCompositionUpdate()`;
-- **gamepad** (`Gamepad = deviceId`): D-pad and left stick (past `StickThreshold`) send arrow keys to the focused node — adjusting a focused slider on its axis, navigating otherwise, always navigating out of text fields — or navigate from nothing; held directions repeat after `RepeatDelaySeconds` every `RepeatIntervalSeconds` (needs `deltaSeconds`); South is Enter, East is Escape, the shoulders are Shift+Tab / Tab;
+- **gamepad** (`Gamepad = deviceId`): D-pad and left stick (past `StickThreshold`) send arrow keys to the focused node — adjusting a focused slider on its axis, navigating otherwise, always navigating out of text fields — or navigate from nothing; held directions repeat after `RepeatDelaySeconds` every `RepeatIntervalSeconds` (needs `deltaSeconds`); South is Enter, East is Escape, North opens the focused node's context menu, the shoulders are Shift+Tab / Tab;
+- **context menus:** the right mouse button (at the pointer), Shift+F10 (the focused node's);
 - application focus loss cancels pointer capture and clears UI focus.
 
-It returns `PointerOverUi`, `KeyboardCaptured`, `GamepadCaptured` and `WantsTextInput` so the game can ignore input the UI consumed. Starting/stopping platform text input and `WindowSystem::SetTextInputArea` stay with the application.
+It returns `PointerOverUi`, `KeyboardCaptured`, `GamepadCaptured`, `WantsTextInput` and `ContextMenuOpened` so the game can ignore input the UI consumed. Starting/stopping platform text input and `WindowSystem::SetTextInputArea` stay with the application.
 
 ## Glyph atlas
 
@@ -244,6 +284,13 @@ terminal.SetTheme(theme);
 const auto play = Swim::UI::CreateButton(hud, hud.GetRoot(), "Play");
 const auto volume = Swim::UI::CreateSlider(hud, hud.GetRoot(), { .Max = 100.0f, .Step = 1.0f, .ShowValue = true });
 const auto power = Swim::UI::CreateToggle(terminal, terminal.GetRoot(), "Power");
+const auto mode = Swim::UI::CreateDropdown(hud, hud.GetRoot(), { "Windowed", "Borderless", "Fullscreen" }, 0);
+const auto sceneMenu = Swim::UI::CreateMenu(hud);
+const auto reset = Swim::UI::AddMenuItem(hud, sceneMenu, "Reset scene");
+hud.SetContextMenu(hud.GetRoot(), sceneMenu.Root); // Right click / Shift+F10 / gamepad North.
+Swim::UI::CreateTooltip(hud, play, "Starts the simulation");
+auto quit = Swim::UI::CreateModal(hud, "Quit?");
+const auto confirmQuit = Swim::UI::AddModalButton(hud, quit, "Quit");
 Swim::UI::UiCanvasRouter router;
 const auto hudCanvas = router.Add({ &hud });
 const auto terminalCanvas = router.Add({ &terminal, Swim::UI::UiCanvasMode::WorldPanel });
@@ -259,8 +306,9 @@ const auto toWorld = Swim::UI::CanvasToWorld(Swim::UI::UiCanvasMode::WorldPanel,
 router.SetCamera(camera);
 router.SetWorldPlacement(terminalCanvas, toWorld, { 512, 256 });
 const auto consumed = input.Apply(inputSystem, router, &camera, {}, deltaSeconds); // PointerOverUi / KeyboardCaptured for the game.
-for (const auto& event : hud.DrainEvents()) { /* Click, ValueChanged, ValueCommitted, TextChanged, Submit, ... */ }
-hud.Update(deltaSeconds); // Transitions, toggle knobs, overlay scroll bars, held step buttons.
+for (const auto& event : hud.DrainEvents()) { /* Click, ValueChanged (mode.Root: the index), PopupClosed, ContextMenu, ... */ }
+// if (event.Kind == Click && event.Node == quitButton) Swim::UI::OpenModal(hud, quit);
+hud.Update(deltaSeconds); // Transitions, toggle knobs, overlay scroll bars, held step buttons, tooltip delays.
 terminal.Update(deltaSeconds);
 hud.Layout({ framebufferWidth, framebufferHeight }, dpiScale);
 terminal.Layout({ 512, 256 });
@@ -316,17 +364,17 @@ SWIM_RUN_RHI_SMOKE=1 SWIM_RHI_VALIDATION=core ./build/linux-debug/SwimTests --fi
 python3 scripts/verify-build-layout.py
 ```
 
-The focused command runs **82 cases** (`--filter=Render.Ui` selects `Render.Ui.Reference`, `Render.Ui.Renderer`, `Render.Ui.AtlasTextures` and `Render.Ui.Surfaces`; `--filter=UI` includes `UI.Controls`, `UI.Theme`, `UI.Navigation`, `UI.Canvas` and `UI.CanvasRouter`).
+The focused command runs **95 cases** (`--filter=Render.Ui` selects `Render.Ui.Reference`, `Render.Ui.Renderer`, `Render.Ui.AtlasTextures` and `Render.Ui.Surfaces`; `--filter=UI` includes `UI.Controls`, `UI.Theme`, `UI.Navigation`, `UI.Selection`, `UI.Popups`, `UI.Canvas` and `UI.CanvasRouter`).
 
 The screen smoke prints one line per target (`[ui sdr]`, `[ui hdr10]`, `[ui scrgb]`, `[ui linear-srgb]`, `[ui sdr-grown]`) with compared/lit/outlier counts, then `[ui 1080p] … draw … ms`. The world smoke prints `[ui world-ortho]`, `[ui world-faded]`, `[ui world-occluded]` (0 lit: scene depth hides the panel), `[ui world-rotated]`, `[ui world-billboard]`, `[ui world-widgets]`, `[ui world-widgets-billboard]`, `[ui surface mip 0]`, `[ui surface mip 2]` and `[ui surface panel]`, then a total. 1:1 frames allow 2.5 LSB and 1 % outliers; perspective frames compare hardware derivatives with analytic footprints and allow 6 LSB and 3 %. Record those lines and the pass times in the validation record.
 
-In the container both smokes passed on a source-built SwiftShader with 0 outliers in every frame ([record](validation/Item79-Controls-2026-09-25.md)); SwiftShader lacks `shaderDrawParameters`, so those runs used a variant of `UiQuad.slang` with `SV_VulkanVertexID`/`SV_VulkanInstanceID` and no validation layer. The committed shader keeps `SV_VertexID`/`SV_InstanceID` like the other RHI programs, so the desktop runs under the four validation profiles are still the gate.
+In the container both smokes passed on a source-built SwiftShader with 0 outliers in every frame ([record](validation/Item79-Controls-2026-09-25.md); the popup checkpoint's [record](validation/Item79-Popups-2026-09-25.md) adds CPU-reference images of the new widgets); SwiftShader lacks `shaderDrawParameters`, so those runs used a variant of `UiQuad.slang` with `SV_VulkanVertexID`/`SV_VulkanInstanceID` and no validation layer. The committed shader keeps `SV_VertexID`/`SV_InstanceID` like the other RHI programs, so the desktop runs under the four validation profiles are still the gate.
 
 ## Remaining work (item 79 stays open)
 
 1. Run both native UI smokes on the desktop under all four validation profiles; record the 1080p UI budget.
 2. Runtime wiring (with item 56): construct `UiAtlasTextures`/`UiRenderer`/`UiRenderSurfaces` where the modern renderer presents frames; draw world canvases with the scene's transparents (sorted, fogged — world UI does not apply fog yet); a scene/ECS canvas component (document, placement mode, transform or target surface, size, DPI, interactivity) feeding `UiCanvasRouter` and the renderer; migrate sandbox UI/text and retire `FontPool`/legacy text.
-3. More controls: dropdowns/combo boxes, list views with virtualization, radio groups, tooltips, context menus, modal dialogs; slider value editing by typing.
+3. Widget polish found while assembling the sandbox (item 56 phase): editable combo boxes (a text field with a filtered list), multi-selection lists, cascading submenus opened by hover/Right, tooltip placement next to focused nodes for gamepads, and vector arrows/check glyphs instead of solid shapes.
 4. Background (cross-frame) atlas population and atlas page compaction/eviction for very large glyph sets.
 5. Visual (not logical) cursor movement in bidi text, double-click word selection, undo/redo, password fields, rich text spans (per-range fonts/colors), tab stops.
 6. Layout: wrapping flex lines, baseline alignment, grid; rounded clipping of children (clips stay rectangles).

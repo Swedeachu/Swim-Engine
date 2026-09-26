@@ -126,7 +126,37 @@ namespace Swim::UI
 				state = state | UiState::Dragging;
 			}
 			const auto& control = Get(owner).Control;
-			if (control.Kind != UiControlKind::None)
+			if (control.Kind == UiControlKind::Option)
+			{
+				// Checked while selected; Focused while its owner is focused and it is the
+				// selection (or, in an open dropdown, the highlight keys move).
+				const auto& option = Get(owner);
+				if (option.PartOf && Nodes.contains(option.PartOf.Value) && IsSelectionOwner(Get(option.PartOf)))
+				{
+					const auto& group = Get(option.PartOf);
+					const auto index = static_cast<std::int32_t>(std::lround(option.PartValue));
+					const auto selected =
+						std::isfinite(group.Control.Value) ? static_cast<std::int32_t>(std::lround(group.Control.Value)) : -1;
+					if (index == selected)
+					{
+						state = state | UiState::Checked;
+					}
+					const bool open = IsDropdownOpen(group);
+					if ((open && group.Highlight == index) || (!open && group.Id == Focused && index == selected))
+					{
+						state = state | UiState::Focused;
+					}
+					if (group.Control.ReadOnly)
+					{
+						state = state | UiState::ReadOnly;
+					}
+					if (!Available(group.Id))
+					{
+						state = state | UiState::Disabled;
+					}
+				}
+			}
+			else if (control.Kind != UiControlKind::None)
 			{
 				if (control.Check == UiCheckState::Checked)
 				{
@@ -418,11 +448,17 @@ namespace Swim::UI
 		impl->ResolveVisuals();
 		const bool transitions = impl->AdvanceTransitions(seconds);
 		const bool controls = impl->AnimateControls(seconds);
-		return transitions || controls;
+		impl->UpdateTooltips(seconds);
+		const bool tooltip = impl->TooltipTarget && !impl->TooltipShown && !impl->TooltipSuppressed;
+		return transitions || controls || tooltip;
 	}
 
 	bool UiDocument::IsAnimating() const
 	{
+		if (impl->TooltipTarget && !impl->TooltipShown && !impl->TooltipSuppressed)
+		{
+			return true; // A tooltip delay is running.
+		}
 		for (const auto& [key, node] : impl->Nodes)
 		{
 			if (node.Transitioning)

@@ -28,7 +28,8 @@ namespace Swim::UI
 			const auto& node = impl->Get(*it);
 			if (node.Active && impl->IsHitTestable(node) && node.Bounds.Contains(point) && node.Clip.Contains(point))
 			{
-				return node.Id;
+				// Under an open modal, nodes below it do not take input (the scrim blocks).
+				return impl->InputAllowed(node.Id) ? node.Id : UiNodeId{};
 			}
 		}
 		return {};
@@ -45,6 +46,11 @@ namespace Swim::UI
 	void UiDocument::PointerMove(UiPoint point)
 	{
 		EnsureLayout();
+		if (Finite(point))
+		{
+			impl->LastPointer = { point.X / impl->Dpi, point.Y / impl->Dpi };
+			impl->HasPointer = true;
+		}
 		const auto hit = HitTest(point);
 		if (hit != impl->Hover)
 		{
@@ -56,6 +62,17 @@ namespace Swim::UI
 			if (hit)
 			{
 				impl->Events.push_back({ UiEventKind::Enter, hit });
+				// Hovering an option of an open dropdown moves its highlight.
+				const auto& node = impl->Get(hit);
+				if (node.Control.Kind == UiControlKind::Option && node.PartOf && impl->Nodes.contains(node.PartOf.Value))
+				{
+					auto& owner = impl->Get(node.PartOf);
+					if (impl->IsDropdownOpen(owner))
+					{
+						owner.Highlight = static_cast<std::int32_t>(std::lround(node.PartValue));
+						impl->MarkSubtreeVisualDirty(owner.Control.Parts.Popup);
+					}
+				}
 			}
 		}
 		// Drag selection and control drags continue outside the node's bounds.
@@ -72,6 +89,7 @@ namespace Swim::UI
 
 	void UiDocument::PointerLeave()
 	{
+		impl->HasPointer = false;
 		if (impl->Hover)
 		{
 			impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
@@ -83,8 +101,48 @@ namespace Swim::UI
 	{
 		PointerMove(point);
 		CancelPointer();
+		impl->HideTooltip(true);
+		if (!impl->Popups.empty() && Finite(point))
+		{
+			const auto open = impl->Popups.size();
+			impl->LightDismiss({ point.X / impl->Dpi, point.Y / impl->Dpi });
+			if (impl->Popups.size() != open)
+			{
+				PointerMove(point); // What lay under the closed popups.
+			}
+		}
 		impl->Pressed = impl->Hover;
-		Focus(impl->Pressed && impl->IsFocusable(impl->Get(impl->Pressed)) ? impl->Pressed : UiNodeId{});
+		UiNodeId focus;
+		if (impl->Pressed)
+		{
+			const auto& pressed = impl->Get(impl->Pressed);
+			if (impl->IsFocusable(pressed))
+			{
+				focus = impl->Pressed;
+			}
+			else if (pressed.Control.Kind == UiControlKind::Option && pressed.PartOf && impl->Available(pressed.PartOf) &&
+				impl->IsFocusable(impl->Get(pressed.PartOf)) && impl->InputAllowed(pressed.PartOf))
+			{
+				focus = pressed.PartOf; // Options focus their owner.
+			}
+			else
+			{
+				// A part of a focusable node (a list's scroll bar) focuses that node.
+				for (auto current = pressed.Parent; current; current = impl->Get(current).Parent)
+				{
+					if (impl->IsFocusable(impl->Get(current)) && impl->Available(current) && impl->InputAllowed(current))
+					{
+						focus = current;
+						break;
+					}
+				}
+				if (!focus && impl->PopupIndexOf(impl->Pressed))
+				{
+					focus = impl->Focused; // Pressing a popup's background or bar keeps focus.
+				}
+			}
+		}
+		Focus(focus);
 		if (impl->Pressed)
 		{
 			impl->Events.push_back({ UiEventKind::Press, impl->Pressed });
@@ -113,11 +171,13 @@ namespace Swim::UI
 				impl->ControlPointerUp(impl->Get(impl->Pressed), impl->Pressed == impl->Hover);
 			}
 			impl->Events.push_back({ UiEventKind::Release, impl->Pressed });
-			if (impl->Pressed == impl->Hover)
-			{
-				impl->Events.push_back({ UiEventKind::Click, impl->Pressed });
-			}
+			const auto pressed = impl->Pressed;
 			impl->Pressed = {};
+			if (pressed == impl->Hover)
+			{
+				impl->Events.push_back({ UiEventKind::Click, pressed });
+				impl->CloseOnActivate(pressed);
+			}
 		}
 	}
 
@@ -144,6 +204,7 @@ namespace Swim::UI
 			return false;
 		}
 		const UiPoint point{ framebufferPoint.X / impl->Dpi, framebufferPoint.Y / impl->Dpi };
+		impl->HideTooltip(true);
 		// Scroll bars under the pointer scroll their target; a focused slider under the
 		// pointer steps its value. Anything else scrolls the innermost clipped node.
 		if (const auto hit = HitTest(framebufferPoint))
@@ -161,6 +222,10 @@ namespace Swim::UI
 			if (!node.Active || !node.Style.Clip || !node.Bounds.Contains(point) || !node.Clip.Contains(point))
 			{
 				continue;
+			}
+			if (!impl->InputAllowed(node.Id))
+			{
+				return false; // Below a modal.
 			}
 			const UiPoint target{ std::clamp(node.Scroll.X + delta.X, 0.0f, node.MaxScroll.X),
 				std::clamp(node.Scroll.Y + delta.Y, 0.0f, node.MaxScroll.Y) };
@@ -184,6 +249,18 @@ namespace Swim::UI
 		{
 			return;
 		}
+		// Focus leaving a dropdown closes its list (unless it moves into the list).
+		if (impl->Focused && impl->Get(impl->Focused).Control.Kind == UiControlKind::Dropdown &&
+			impl->IsDropdownOpen(impl->Get(impl->Focused)))
+		{
+			const auto popup = impl->Get(impl->Focused).Control.Parts.Popup;
+			const auto into = impl->PopupIndexOf(id);
+			if (!into || impl->Popups[*into].Node != popup)
+			{
+				impl->ToggleDropdown(impl->Get(impl->Focused));
+			}
+		}
+		const auto previous = impl->Focused;
 		impl->Composition.clear();
 		if (impl->Focused)
 		{
@@ -201,6 +278,11 @@ namespace Swim::UI
 			impl->MarkPaintDirty(id);
 			impl->Get(id).RevealCaret = impl->Get(id).Editable;
 		}
+		// An editable slider value applies when it loses focus.
+		if (previous && impl->Nodes.contains(previous.Value) && impl->Get(previous).Editable)
+		{
+			impl->CommitValueLabel(impl->Get(previous));
+		}
 	}
 
 	std::vector<UiNodeId> UiDocument::Impl::TabOrder() const
@@ -209,7 +291,7 @@ namespace Swim::UI
 		for (auto id : Order)
 		{
 			const auto& node = Get(id);
-			if (node.Active && IsFocusable(node) && node.Style.TabIndex >= 0)
+			if (node.Active && IsFocusable(node) && node.Style.TabIndex >= 0 && InputAllowed(id))
 			{
 				candidates.push_back(id);
 			}
@@ -262,13 +344,15 @@ namespace Swim::UI
 			return true;
 		}
 		const auto from = impl->Get(impl->Focused).Bounds;
+		// Directions stay in the focused node's layer (the page, or one popup).
+		const auto layer = impl->PopupIndexOf(impl->Focused);
 		const bool horizontal = direction == UiNavDirection::Left || direction == UiNavDirection::Right;
 		const float sign = direction == UiNavDirection::Right || direction == UiNavDirection::Down ? 1.0f : -1.0f;
 		UiNodeId best;
 		float bestScore = std::numeric_limits<float>::infinity();
 		for (const auto id : candidates)
 		{
-			if (id == impl->Focused)
+			if (id == impl->Focused || impl->PopupIndexOf(id) != layer)
 			{
 				continue;
 			}
@@ -322,9 +406,17 @@ namespace Swim::UI
 		if (kind == UiControlKind::Checkbox || kind == UiControlKind::Toggle)
 		{
 			impl->Toggle(node);
+			impl->CloseOnActivate(node.Id);
 			return;
 		}
-		impl->Events.push_back({ UiEventKind::Click, impl->Focused });
+		if (kind == UiControlKind::Dropdown)
+		{
+			impl->ToggleDropdown(node);
+			return;
+		}
+		const auto focused = impl->Focused;
+		impl->Events.push_back({ UiEventKind::Click, focused });
+		impl->CloseOnActivate(focused);
 	}
 
 	UiNodeId UiDocument::GetFocus() const
@@ -339,6 +431,22 @@ namespace Swim::UI
 			FocusNext(modifiers.Shift);
 			return true;
 		}
+		const bool composing = impl->Focused && impl->Get(impl->Focused).Editable && !impl->Composition.empty();
+		if (key == UiKey::Escape && !composing)
+		{
+			// Escape dismisses the tooltip, then the top popup that allows it.
+			const bool tooltip = static_cast<bool>(impl->TooltipShown);
+			impl->HideTooltip(true);
+			if (!impl->Popups.empty() && impl->Popups.back().Desc.CloseOnEscape)
+			{
+				impl->ClosePopupsFrom(impl->Popups.size() - 1);
+				return true;
+			}
+			if (tooltip)
+			{
+				return true;
+			}
+		}
 		if (!impl->Focused)
 		{
 			return false;
@@ -346,7 +454,13 @@ namespace Swim::UI
 		auto& node = impl->Get(impl->Focused);
 		if (node.Editable && node.Fonts)
 		{
-			return impl->EditKey(node, key, modifiers);
+			const bool submit = key == UiKey::Enter && !node.EditOptions.Multiline;
+			const bool consumed = impl->EditKey(node, key, modifiers);
+			if (submit)
+			{
+				impl->CommitValueLabel(node); // An editable slider value applies on Enter.
+			}
+			return consumed;
 		}
 		if (impl->IsControl(node) && impl->ControlKey(node, key))
 		{

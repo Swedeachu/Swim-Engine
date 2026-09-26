@@ -107,6 +107,10 @@ namespace Swim::UI
 				Document.Focus({});
 			}
 
+			bool ContextMenu() { return Document.OpenContextMenu(Last); }
+
+			bool ContextMenuForFocus() { return Document.OpenContextMenuForFocus(); }
+
 			bool HasFocus() const { return static_cast<bool>(Document.GetFocus()); }
 
 			bool FocusedEditable() const { return Document.GetFocus() && Document.IsEditable(Document.GetFocus()); }
@@ -153,6 +157,10 @@ namespace Swim::UI
 				Router.CancelPointer();
 				Router.ClearFocus();
 			}
+
+			bool ContextMenu() { return Router.OpenContextMenu(); }
+
+			bool ContextMenuForFocus() { return Router.OpenContextMenuForFocus(); }
 
 			UiDocument* Focused() const { return Router.GetDocument(Router.GetFocused()); }
 
@@ -266,6 +274,10 @@ namespace Swim::UI
 		{
 			target.Up();
 		}
+		if (input.IsMouseButtonTriggered(Platform::MouseButton::Right) && target.ContextMenu())
+		{
+			frame.ContextMenuOpened = true;
+		}
 		const float wheel = input.GetMouseScrollDelta();
 		if (wheel != 0.0f && std::isfinite(wheel))
 		{
@@ -278,6 +290,16 @@ namespace Swim::UI
 			if (!event.Text.empty())
 			{
 				target.TextInput(event.Text);
+				continue;
+			}
+			if (event.Key == Platform::KeyCode::F10 && modifiers.Shift && target.HasFocus())
+			{
+				// Shift+F10: the focused node's context menu.
+				if (target.ContextMenuForFocus())
+				{
+					frame.ContextMenuOpened = true;
+					++frame.KeysConsumed;
+				}
 				continue;
 			}
 			const auto mapped = ToUiKey(event.Key);
@@ -341,6 +363,11 @@ namespace Swim::UI
 				if (input.IsGamepadButtonTriggered(device, B::East))
 				{
 					frame.KeysConsumed += target.KeyDown(UiKey::Escape, {}) ? 1u : 0u;
+				}
+				if (input.IsGamepadButtonTriggered(device, B::North) && target.ContextMenuForFocus())
+				{
+					frame.ContextMenuOpened = true;
+					++frame.KeysConsumed;
 				}
 			}
 			if (input.IsGamepadButtonTriggered(device, B::LeftShoulder) || input.IsGamepadButtonTriggered(device, B::RightShoulder))

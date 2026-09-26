@@ -1397,7 +1397,7 @@ def check_phase20_controls_and_canvases(failures: list[str]) -> None:
     renderer, scene, platform and input modules (world-space drawing is UiRendering's)."""
     ui = ROOT / "Source/Engine/Systems/UI"
     for relative in ("UiControls.cpp", "UiVisuals.cpp", "UiTheme.h", "UiTheme.cpp", "UiWidgets.cpp", "UiCanvas.h", "UiCanvas.cpp",
-                     "UiCanvasRouter.h", "UiCanvasRouter.cpp"):
+                     "UiCanvasRouter.h", "UiCanvasRouter.cpp", "UiPopups.cpp", "UiSelection.cpp"):
         if not (ui / relative).is_file():
             fail(f"UI controls/canvas unit is missing: Systems/UI/{relative}", failures)
     for path in ui.rglob("*"):
@@ -1409,8 +1409,19 @@ def check_phase20_controls_and_canvases(failures: list[str]) -> None:
             if any(part in include for part in ("SDL", "vulkan", "entt", "glm/", "<hb", "ft2build", "msdfgen")):
                 fail(f"Systems/UI must not depend on {include}: {path.relative_to(ROOT)}", failures)
     for group, name in (("UI", "UiControlTests.cpp"), ("UI", "UiCanvasTests.cpp"), ("UI", "UiWidgetTests.cpp"),
-                        ("RenderUi", "UiWorldRenderingTests.cpp")):
+                        ("UI", "UiSelectionTests.cpp"), ("UI", "UiPopupTests.cpp"), ("RenderUi", "UiWorldRenderingTests.cpp")):
         check_suite_is_compiled(group, name, failures)
+    # Popups, selection controls and virtual lists (the remaining item 79 widgets).
+    header = (ui / "UiDocument.h").read_text(encoding="utf-8") if (ui / "UiDocument.h").is_file() else ""
+    for fragment in ("void OpenPopup(", "void SetTooltip(", "bool OpenContextMenu(", "Option,",
+                     "RadioGroup,", "ListView,", "Dropdown,"):
+        if fragment not in header:
+            fail(f"UiDocument is missing the popup/selection contract: {fragment}", failures)
+    widgets = (ui / "UiWidgets.h").read_text(encoding="utf-8") if (ui / "UiWidgets.h").is_file() else ""
+    for fragment in ("CreateRadioGroup(", "CreateListView(", "CreateDropdown(", "CreateMenu(", "CreateTooltip(", "CreateModal(",
+                     "class UiVirtualList", "EditableValue"):
+        if fragment not in widgets:
+            fail(f"UiWidgets is missing a widget: {fragment}", failures)
     smoke = ROOT / "Source/Tests/Suites/RHIVulkan/VulkanUiSmokeTests.cpp"
     if smoke.is_file() and "UiWorldCanvasesMatchTheCpuReference" not in smoke.read_text(encoding="utf-8"):
         fail("the world-canvas native smoke (UiWorldCanvasesMatchTheCpuReference) is not registered", failures)

@@ -86,6 +86,11 @@ namespace Swim::UI
 		bool FocusNext(bool backwards = false);
 		void Focus(UiCanvasHandle canvas); // Makes the canvas the keyboard owner (its document keeps its node focus).
 		void ClearFocus();				   // Blurs the focused canvas's document.
+		// Context menus (right button, Shift+F10, gamepad North): the menu registered under
+		// the pointer on the hovered canvas (which becomes the focused canvas), or the one of
+		// the focused canvas's focused node. False when there is none.
+		bool OpenContextMenu();
+		bool OpenContextMenuForFocus();
 
 		UiCanvasHandle GetHovered() const { return hovered; }
 

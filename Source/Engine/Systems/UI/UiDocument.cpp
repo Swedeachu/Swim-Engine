@@ -331,6 +331,15 @@ namespace Swim::UI
 		const auto parent = impl->Get(id).Parent;
 		std::erase(impl->Get(parent).Children, id);
 		impl->Erase(id);
+		std::erase_if(impl->Popups,
+			[&](const Impl::PopupEntry& entry)
+			{
+				return !impl->Nodes.contains(entry.Node.Value);
+			});
+		if (impl->TooltipShown && !impl->Nodes.contains(impl->TooltipShown.Value))
+		{
+			impl->TooltipShown = {};
+		}
 		impl->ClearUnavailable();
 		impl->MarkLayoutDirty(parent);
 		return true;
@@ -512,9 +521,51 @@ namespace Swim::UI
 		{
 			impl->Arrange(root, { 0, 0, logical.X, logical.Y }, { 0, 0, logical.X, logical.Y }, true);
 			impl->SyncScrollBars();
+			impl->PlacePopups();
 		}
 		impl->Dirty = false;
 		++impl->Revision;
+		// Popups opened with FocusFirst take focus once they are laid out (focus changes may
+		// close popups, so the stack is re-read each step).
+		bool focused = false;
+		for (std::size_t i = 0; i < impl->Popups.size(); ++i)
+		{
+			auto& entry = impl->Popups[i];
+			const auto popup = entry.Node;
+			if (entry.PendingReveal)
+			{
+				entry.PendingReveal = false;
+				const auto anchor = entry.Desc.Anchor;
+				if (anchor && impl->Nodes.contains(anchor.Value) && impl->Get(anchor).Control.Kind == UiControlKind::Dropdown)
+				{
+					auto& owner = impl->Get(anchor);
+					impl->RevealOption(owner, owner.Highlight);
+				}
+			}
+			if (!impl->Popups[i].PendingFocus)
+			{
+				continue;
+			}
+			impl->Popups[i].PendingFocus = false;
+			for (const auto id : impl->TabOrder())
+			{
+				const auto index = impl->PopupIndexOf(id);
+				if (index && impl->Popups[*index].Node == popup)
+				{
+					Focus(id);
+					focused = true;
+					break;
+				}
+			}
+		}
+		if (!focused && impl->Focused && !impl->InputAllowed(impl->Focused))
+		{
+			Focus({}); // A modal opened without anything to focus: nothing below it keeps focus.
+		}
+		if (impl->Dirty)
+		{
+			Layout(framebufferSize, dpiScale); // Focus changes that relayout (editable text).
+		}
 	}
 
 	UiRect UiDocument::GetBounds(UiNodeId id) const

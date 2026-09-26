@@ -42,6 +42,15 @@ namespace
 			Input.ProcessInputEvent(event);
 		}
 
+		void RightButton(bool down, float x, float y)
+		{
+			Platform::InputEvent event{};
+			event.Type = down ? Platform::InputEventType::MouseButtonDown : Platform::InputEventType::MouseButtonUp;
+			event.Mouse = Platform::MouseButton::Right;
+			event.Position = { x, y };
+			Input.ProcessInputEvent(event);
+		}
+
 		void Key(Platform::KeyCode key, bool down = true, bool repeat = false)
 		{
 			Platform::InputEvent event{};
@@ -384,4 +393,77 @@ SWIM_TEST("UiInput.Bridge", "RouterFramesCastTheMouseIntoWorldCanvasesThroughThe
 	bridge.Apply(input, router, &camera);
 	SWIM_CHECK(!router.GetFocused());
 	SWIM_CHECK(!world.GetFocus());
+}
+
+SWIM_TEST("UiInput.Bridge", "RightClickShiftF10AndGamepadNorthOpenContextMenus")
+{
+	UiDocument ui;
+	ui.SetTheme(FontTheme());
+	const auto button = CreateButton(ui, ui.GetRoot(), "Target");
+	const auto menu = CreateMenu(ui);
+	const auto first = AddMenuItem(ui, menu, "Rename");
+	ui.SetContextMenu(button, menu.Root);
+	ui.Layout({ 600, 400 });
+	const auto bounds = ui.GetBounds(button);
+
+	Input::InputSystem input;
+	Frame frame{ input };
+	constexpr Platform::InputDeviceId pad = 7;
+	UiInputBridgeDesc desc;
+	desc.Gamepad = pad;
+	UiInputBridge bridge(desc);
+	frame.Pad(pad);
+
+	// Right button over the target: the menu opens at the pointer and takes focus.
+	const float x = bounds.X + 5.0f;
+	const float y = bounds.Y + 5.0f;
+	frame.Mouse(x, y);
+	frame.RightButton(true, x, y);
+	input.AdvanceFrame();
+	auto result = bridge.Apply(input, ui);
+	SWIM_CHECK(result.ContextMenuOpened);
+	SWIM_CHECK(ui.IsPopupOpen(menu.Root));
+	ui.Layout({ 600, 400 });
+	SWIM_CHECK_NEAR(ui.GetBounds(menu.Root).X, x, 1e-3f);
+	SWIM_CHECK(ui.GetFocus() == first);
+	frame.RightButton(false, x, y);
+
+	// Escape closes; focus falls back to where it was (nothing): press the button first.
+	frame.Key(Platform::KeyCode::Escape);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui);
+	frame.Key(Platform::KeyCode::Escape, false);
+	SWIM_CHECK(!ui.IsPopupOpen(menu.Root));
+
+	// Shift+F10 opens the focused node's menu below it.
+	ui.Layout({ 600, 400 });
+	ui.Focus(button);
+	frame.Key(Platform::KeyCode::LeftShift);
+	frame.Key(Platform::KeyCode::F10);
+	input.AdvanceFrame();
+	result = bridge.Apply(input, ui);
+	SWIM_CHECK(result.ContextMenuOpened);
+	SWIM_CHECK_EQUAL(result.KeysConsumed, 1u);
+	ui.Layout({ 600, 400 });
+	SWIM_CHECK_NEAR(ui.GetBounds(menu.Root).Y, bounds.Y + bounds.Height, 1e-3f);
+	frame.Key(Platform::KeyCode::F10, false);
+	frame.Key(Platform::KeyCode::LeftShift, false);
+	ui.CloseAllPopups();
+	SWIM_CHECK(ui.GetFocus() == button);
+
+	// Gamepad North does the same; South activates the item and closes the menu.
+	frame.PadButton(pad, Platform::GamepadButton::North, true);
+	input.AdvanceFrame();
+	result = bridge.Apply(input, ui);
+	SWIM_CHECK(result.ContextMenuOpened);
+	frame.PadButton(pad, Platform::GamepadButton::North, false);
+	ui.Layout({ 600, 400 });
+	SWIM_CHECK(ui.GetFocus() == first);
+	ui.DrainEvents();
+	frame.PadButton(pad, Platform::GamepadButton::South, true);
+	input.AdvanceFrame();
+	bridge.Apply(input, ui);
+	SWIM_CHECK_EQUAL(Count(ui.DrainEvents(), UiEventKind::Click, first), 1u);
+	SWIM_CHECK(!ui.IsPopupOpen(menu.Root));
+	SWIM_CHECK(ui.GetFocus() == button);
 }

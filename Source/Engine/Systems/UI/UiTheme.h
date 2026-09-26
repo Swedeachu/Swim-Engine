@@ -32,6 +32,9 @@ namespace Swim::UI
 		UiColor Track{ 0.22f, 0.24f, 0.3f, 1.0f };
 		UiColor Selection{ 0.25f, 0.45f, 0.95f, 0.45f };
 		UiColor Caret{ 1.0f, 1.0f, 1.0f, 1.0f };
+		UiColor Popup{ 0.1f, 0.11f, 0.14f, 0.98f }; // Menus, dropdown lists, dialogs.
+		UiColor Tooltip{ 0.02f, 0.02f, 0.03f, 0.94f };
+		UiColor Scrim{ 0.0f, 0.0f, 0.0f, 0.5f }; // Behind modal dialogs.
 	};
 
 	// Logical units; the classes of horizontal controls, swapped for vertical ones.
@@ -55,6 +58,15 @@ namespace Swim::UI
 		float ToggleInset = 2.0f;
 		float ScrollBarThickness = 10.0f;
 		float ScrollBarMinThumb = 24.0f;
+		float RadioSize = 18.0f;
+		UiEdges MenuItemPadding{ 10.0f, 5.0f, 10.0f, 5.0f };
+		float PopupPadding = 4.0f;
+		float PopupMaxHeight = 280.0f; // Longer menus and dropdown lists scroll.
+		float DropdownArrowSize = 8.0f;
+		UiEdges TooltipPadding{ 8.0f, 4.0f, 8.0f, 4.0f };
+		float TooltipTextSize = 14.0f;
+		float DialogMinWidth = 280.0f;
+		float DialogTitleTextSize = 20.0f;
 		// Eases state changes (and toggle knobs) when > 0; call UiDocument::Update every frame.
 		float TransitionSeconds = 0.0f;
 		float DisabledOpacity = 0.45f;

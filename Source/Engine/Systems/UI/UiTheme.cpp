@@ -213,17 +213,125 @@ namespace Swim::UI
 			s.MinSize = { m.LabelTextSize * 2.5f, 0.0f }; // Values of changing width do not shift the layout.
 			c.TextSize = m.LabelTextSize;
 			c.Rules = { Rule(UiState::Disabled,
-				[&]
-				{
-					UiVisual v;
-					v.TextColor = p.TextMuted;
-					return v;
-				}()) };
+							[&]
+							{
+								UiVisual v;
+								v.TextColor = p.TextMuted;
+								return v;
+							}()),
+				Rule(UiState::Focused, FocusRing(p, m)) }; // Editable values (UiSliderDesc::EditableValue).
 			break;
 		case UiThemeClass::ScrollButton:
 			s.Background = WithAlpha(p.Track, 0.5f);
 			s.CornerRadius = m.ScrollBarThickness * 0.25f;
 			c.Rules = { Rule(UiState::Hovered, Fill(WithAlpha(p.Track, 0.85f))), Rule(UiState::Pressed, Fill(p.Accent)) };
+			break;
+		case UiThemeClass::Popup:
+			s.Background = p.Popup;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = p.Border;
+			s.CornerRadius = m.CornerRadius;
+			s.Padding = { m.PopupPadding, m.PopupPadding, m.PopupPadding, m.PopupPadding };
+			s.MaxSize = { Internal::MaxLogical, std::max(m.PopupMaxHeight, 1.0f) };
+			break;
+		case UiThemeClass::MenuItem:
+		{
+			// Menu entries (buttons) and dropdown/list options. Focused marks the keyboard
+			// item (or an open dropdown's highlight); Checked the selected option.
+			s.Padding = m.MenuItemPadding;
+			s.MinSize = { 0.0f, m.ControlHeight };
+			s.CornerRadius = std::min(m.CornerRadius, 4.0f);
+			UiVisual selected;
+			selected.Background = WithAlpha(p.Accent, 0.35f);
+			UiVisual selectedFocus;
+			selectedFocus.Background = p.Accent;
+			selectedFocus.TextColor = p.OnAccent;
+			c.TextSize = m.LabelTextSize;
+			c.Rules = { Rule(UiState::Hovered, Fill(p.SurfaceHover)), Rule(UiState::Checked, selected),
+				Rule(UiState::Focused, Fill(p.SurfaceHover)), Rule(UiState::Checked | UiState::Focused, selectedFocus),
+				Rule(UiState::Pressed, Fill(p.SurfacePressed)), Rule(UiState::Disabled, Faded(m.DisabledOpacity)) };
+			break;
+		}
+		case UiThemeClass::MenuSeparator:
+			s.Height = Px(std::max(1.0f, m.BorderWidth));
+			s.Background = WithAlpha(p.Border, 0.8f);
+			break;
+		case UiThemeClass::ListView:
+			s.Background = p.Field;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = p.Border;
+			s.CornerRadius = std::min(m.CornerRadius, 4.0f);
+			s.Padding = { m.BorderWidth, m.BorderWidth, m.BorderWidth, m.BorderWidth };
+			c.Rules = { Rule(UiState::Focused, FocusRing(p, m)), Rule(UiState::Disabled, Faded(m.DisabledOpacity)) };
+			break;
+		case UiThemeClass::Dropdown:
+			s.Padding = m.FieldPadding;
+			s.MinSize = { 0.0f, m.ControlHeight };
+			s.Gap = m.Spacing;
+			s.Background = p.Surface;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = p.Border;
+			s.CornerRadius = std::min(m.CornerRadius, 4.0f);
+			c.TextSize = m.LabelTextSize;
+			c.Rules = { Rule(UiState::Hovered, Fill(p.SurfaceHover)), Rule(UiState::Pressed, Fill(p.SurfacePressed)),
+				Rule(UiState::Focused, FocusRing(p, m)), Rule(UiState::Disabled, Faded(m.DisabledOpacity)) };
+			break;
+		case UiThemeClass::DropdownArrow:
+			s.Width = Px(m.DropdownArrowSize);
+			s.Height = Px(m.DropdownArrowSize * 0.5f);
+			s.Background = p.TextMuted;
+			s.CornerRadius = m.DropdownArrowSize * 0.25f;
+			break;
+		case UiThemeClass::RadioOption:
+			s.Gap = m.Spacing * 0.75f;
+			c.TextSize = m.LabelTextSize;
+			c.Rules = { Rule(UiState::Disabled, Faded(m.DisabledOpacity)) };
+			break;
+		case UiThemeClass::RadioCircle:
+		{
+			s.Width = Px(m.RadioSize);
+			s.Height = Px(m.RadioSize);
+			s.Background = p.Surface;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = p.Border;
+			s.CornerRadius = m.RadioSize * 0.5f;
+			UiVisual on;
+			on.BorderColor = p.Accent;
+			on.BorderWidth = std::max(m.BorderWidth, m.FocusWidth);
+			c.Rules = { Rule(UiState::Hovered, Fill(p.SurfaceHover)), Rule(UiState::Pressed, Fill(p.SurfacePressed)),
+				Rule(UiState::Checked, on), Rule(UiState::Focused, FocusRing(p, m)) };
+			break;
+		}
+		case UiThemeClass::RadioDot:
+			s.Width = Px(m.RadioSize * 0.5f);
+			s.Height = Px(m.RadioSize * 0.5f);
+			s.Background = p.Accent;
+			s.CornerRadius = m.RadioSize * 0.25f;
+			s.Opacity = 0.0f;
+			c.Rules = { Rule(UiState::Checked, Faded(1.0f)) };
+			break;
+		case UiThemeClass::Tooltip:
+			s.Background = p.Tooltip;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = WithAlpha(p.Border, 0.6f);
+			s.CornerRadius = std::min(m.CornerRadius, 4.0f);
+			s.Padding = m.TooltipPadding;
+			c.TextSize = m.TooltipTextSize;
+			break;
+		case UiThemeClass::ModalScrim:
+			s.Background = p.Scrim;
+			break;
+		case UiThemeClass::Dialog:
+			s.Background = p.Popup;
+			s.BorderWidth = m.BorderWidth;
+			s.BorderColor = p.Border;
+			s.CornerRadius = m.CornerRadius;
+			s.Padding = { m.Spacing * 2.0f, m.Spacing * 2.0f, m.Spacing * 2.0f, m.Spacing * 2.0f };
+			s.Gap = m.Spacing * 1.5f;
+			s.MinSize = { m.DialogMinWidth, 0.0f };
+			break;
+		case UiThemeClass::DialogTitle:
+			c.TextSize = m.DialogTitleTextSize;
 			break;
 		default:
 			break;

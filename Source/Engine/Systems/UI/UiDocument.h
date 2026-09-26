@@ -255,6 +255,13 @@ namespace Swim::UI
 		Toggle,	   // Off/on switch; click, knob drag or Space/Enter; the knob eases.
 		Slider,	   // A value in [Min, Max]: thumb drag, track click, keys, wheel while focused.
 		ScrollBar, // Shows and drives the scroll offset of ScrollTarget.
+		// Selection owners: one selected index (Value, -1 for none) among Option nodes
+		// registered with SetPartRole(option, owner, UiPartRole::Option, index).
+		RadioGroup, // Arrows select the previous/next option (wrapping); a click selects.
+		ListView,	// Up/Down/Page/Home/End select and scroll ScrollTarget to reveal; Enter submits.
+		Dropdown,	// Activation opens Parts.Popup below it; Up/Down select while closed and
+					// highlight while open; Enter commits the highlight; the Label shows the choice.
+		Option,		// A choice of an owner (set by SetPartRole): hit-testable, not focusable.
 	};
 
 	enum class UiOrientation : std::uint8_t
@@ -296,6 +303,7 @@ namespace Swim::UI
 		Decrement, // Scroll bar step button at the start (placed; press steps, holding repeats).
 		Increment, // Scroll bar step button at the end.
 		Tick,	   // Slider tick mark at a value (placed; UiDocument::SetPartRole).
+		Option,	   // A choice of a radio group, list view or dropdown (UiDocument::SetPartRole).
 	};
 
 	// Part nodes must be descendants of the control, except a slider's value Label (any
@@ -311,6 +319,7 @@ namespace Swim::UI
 		UiNodeId Label;
 		UiNodeId Decrement;
 		UiNodeId Increment;
+		UiNodeId Popup; // Dropdown: its option list, a popup (a child of the root).
 	};
 
 	struct UiControl
@@ -336,7 +345,38 @@ namespace Swim::UI
 		// Sliders: >= 0 makes the document write the value, with this many decimals, into
 		// the Label part's text whenever it changes (the label needs fonts).
 		std::int32_t LabelDecimals = -1;
+		// List views and dropdowns: options of index i occupy [i, i + 1) x ItemExtent of the
+		// ScrollTarget's content (virtualized lists whose rows exist only while visible);
+		// 0 reveals options by their laid-out bounds. ItemCount > 0 overrides the number of
+		// registered options (virtualized lists).
+		float ItemExtent = 0.0f;
+		std::uint32_t ItemCount = 0;
 		UiControlParts Parts;
+	};
+
+	enum class UiPopupSide : std::uint8_t
+	{
+		Below, // Under Anchor (flipped above when it does not fit).
+		Above,
+		Right, // Beside Anchor (flipped to the left when it does not fit).
+		Left,
+		AtPoint, // At Point (canvas logical units), flipped up/left when it does not fit.
+		Center,	 // Centered in the canvas.
+	};
+
+	// How UiDocument::OpenPopup places and dismisses a popup.
+	struct UiPopupDesc
+	{
+		UiNodeId Anchor; // Placement reference; focus returns to it (or the prior focus) on close.
+		UiPoint Point;
+		UiPopupSide Side = UiPopupSide::Below;
+		UiPoint Offset;				   // Added after placement (a gap).
+		bool MatchAnchorWidth = false; // At least as wide as the anchor (dropdown lists).
+		bool Modal = false;			   // Only this popup and those above it take input; Tab stays inside.
+		bool LightDismiss = true;	   // A press outside it (and its anchor) closes it.
+		bool CloseOnEscape = true;
+		bool CloseOnActivate = false; // Clicking or activating a node inside closes it (menus).
+		bool FocusFirst = true;		  // Focus its first focusable node on open.
 	};
 
 	enum class UiThemeClass : std::uint8_t
@@ -363,6 +403,19 @@ namespace Swim::UI
 		SliderTick,
 		SliderValue,
 		ScrollButton,
+		Popup,		   // Menus, dropdown lists: a raised panel.
+		MenuItem,	   // Menu entries and dropdown/list options.
+		MenuSeparator, // A thin rule between menu entries.
+		ListView,
+		Dropdown,
+		DropdownArrow,
+		RadioOption, // A radio button row: [circle [dot], label].
+		RadioCircle,
+		RadioDot,
+		Tooltip,
+		ModalScrim, // The full-canvas dimmer behind a modal dialog.
+		Dialog,
+		DialogTitle,
 		Count
 	};
 
@@ -436,6 +489,9 @@ namespace Swim::UI
 		Submit,			// Enter in a single-line editable node.
 		ValueChanged,	// A control's value or check state changed by input (Value: the new value).
 		ValueCommitted, // The end of a value change: drag release, key, click (Value: the committed value).
+		PopupOpened,	// Node: the popup.
+		PopupClosed,	// Node: the popup (light dismiss, Escape, activation or ClosePopup).
+		ContextMenu,	// Node: the target a context menu opened for (before PopupOpened).
 	};
 
 	struct UiEvent
@@ -588,16 +644,49 @@ namespace Swim::UI
 		// std::invalid_argument for an invalid range, step, parts or scroll target.
 		void SetControl(UiNodeId node, const UiControl& control);
 		const UiControl& GetControl(UiNodeId node) const;
-		// From code: clamped and snapped, no events. Scroll bars set their target's offset.
+		// From code: clamped and snapped, no events. Scroll bars set their target's offset;
+		// selection owners take the selected index (-1: none), clamped to the options.
 		void SetValue(UiNodeId node, float value);
 		float GetValue(UiNodeId node) const;
 		void SetChecked(UiNodeId node, UiCheckState state); // From code: no events.
 		UiCheckState GetChecked(UiNodeId node) const;
-		// Registers an extra part (slider Tick marks at `value`, one node each; a direct
-		// child of the slider). UiPartRole::None releases it. Throws std::invalid_argument
-		// for another role, a node that is not a direct child of a slider, or a
-		// non-finite value.
+		// Registers an extra part: slider Tick marks at `value` (direct children of the
+		// slider), or Options of a selection owner at the integral index `value` (inside a
+		// radio group or list view, anywhere for a dropdown; the node becomes an Option
+		// control: hit-testable, never focusable). Registering an index again moves it (virtual
+		// rows); UiPartRole::None releases it. Throws std::invalid_argument otherwise.
 		void SetPartRole(UiNodeId part, UiNodeId control, UiPartRole role, float value = 0.0f);
+		// The option node showing an index of a selection owner (empty when not bound).
+		UiNodeId FindOption(UiNodeId owner, std::uint32_t index) const;
+		std::uint32_t GetOptionCount(UiNodeId owner) const; // ItemCount, else the registered options.
+
+		// --- Popups: menus, dropdown lists, tooltips, modal dialogs. ---
+		// A popup is a child of the root that the document shows, places (after Layout, in
+		// canvas logical units, kept inside the canvas), paints above everything else in
+		// opening order and dismisses. Opening an open popup moves it to the top and
+		// replaces its description. Throws std::invalid_argument for a node that is not a
+		// child of the root, or an unknown anchor.
+		void OpenPopup(UiNodeId popup, const UiPopupDesc& desc = {});
+		bool ClosePopup(UiNodeId popup); // Also closes every popup opened after it.
+		void CloseAllPopups();
+		bool IsPopupOpen(UiNodeId popup) const;
+		UiNodeId GetTopPopup() const;
+		// Tooltips: after the pointer rests on target (or a descendant) for delaySeconds
+		// (through Update), tooltip opens below the pointer; leaving, pressing or scrolling
+		// closes it. An empty tooltip removes the registration.
+		void SetTooltip(UiNodeId target, UiNodeId tooltip, float delaySeconds = 0.5f);
+		// Context menus: OpenContextMenu opens the menu registered on the node under the
+		// point (or its nearest ancestor) at the point; OpenContextMenuForFocus opens the
+		// focused node's (or its ancestors') below it. False when there is none.
+		void SetContextMenu(UiNodeId target, UiNodeId menu);
+		bool OpenContextMenu(UiPoint framebufferPoint);
+		bool OpenContextMenuForFocus();
+		// Closes the light-dismiss popups, as a press outside all of them would (a press on
+		// another canvas: UiCanvasRouter calls it).
+		void DismissPopups();
+		// Adjusts the scroll of clipped ancestors so the node's bounds are visible. Requires
+		// a current Layout; the new offsets apply at the next Layout.
+		void ScrollIntoView(UiNodeId node);
 
 		// --- Visual states and theming. ---
 		// Rules applied after the theme class's rules (per-node overrides).
