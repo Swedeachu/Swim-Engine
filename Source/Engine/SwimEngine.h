@@ -159,7 +159,7 @@ namespace Engine
 		void ApplyCameraComponents();
 		void UpdateTextInput();
 		std::string GetWindowTitle() const;
-		std::filesystem::path FindResourceRoot() const;
+		std::filesystem::path FindFontRoot() const; // The asset root holding Fonts/.
 
 		EngineConfig config{};
 		GraphicsBackend graphicsBackend{ GraphicsBackend::Vulkan };

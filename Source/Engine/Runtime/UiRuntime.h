@@ -30,7 +30,7 @@ namespace Engine
 {
 	class Scene;
 
-	// The runtime side of retained UI (Phase 23): the fonts (Resources/Fonts), the theme
+	// The runtime side of retained UI (Phase 23): the fonts (Assets/Fonts), the theme
 	// every document shares, one glyph atlas, the canvas router and the input bridge.
 	// Each frame it mirrors the active scene's UiCanvas components into router canvases
 	// (screen overlays, world panels, billboards placed by their Transforms), lays their
@@ -40,9 +40,9 @@ namespace Engine
 	class UiRuntime
 	{
 	  public:
-		// Loads DejaVuSans(-Bold/Mono).ttf from <resourceRoot>/Fonts; throws
+		// Loads DejaVuSans(-Bold/Mono).ttf from <assetRoot>/Fonts; throws
 		// std::runtime_error when the regular face is missing.
-		explicit UiRuntime(const std::filesystem::path& resourceRoot);
+		explicit UiRuntime(const std::filesystem::path& assetRoot);
 		~UiRuntime();
 
 		const std::shared_ptr<const Swim::Text::FontCollection>& GetFonts() const { return fonts; }

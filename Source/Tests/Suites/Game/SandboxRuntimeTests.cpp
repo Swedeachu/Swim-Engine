@@ -503,7 +503,7 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 
 SWIM_TEST("Game.UiBindings", "HandlersSeeChangesButNotTheInitialState")
 {
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	auto document = ui.CreateDocument();
 	Swim::UI::UiSliderDesc desc;
 	desc.Min = 0.0f;

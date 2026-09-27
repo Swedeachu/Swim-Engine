@@ -4078,7 +4078,7 @@ def check_phase22_23_runtime(failures: list[str]) -> None:
         "Source/Engine/Systems/Scene/RenderExtraction/Runtime/SceneRenderBridge.h",
         "Source/Game/Scenes/Sandbox.h",
         "Source/Game/Ui/SandboxHud.h",
-        "Resources/Fonts/DejaVuSans.ttf",
+        "Assets/Fonts/DejaVuSans.ttf",
         "docs/EngineRuntime.md",
         "Deprecated/README.md",
     ):

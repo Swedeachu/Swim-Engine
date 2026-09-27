@@ -1322,17 +1322,12 @@ if(SWIM_JOLT_BACKEND_AVAILABLE)
 	target_link_libraries(SwimEngine PRIVATE Swim::Jolt)
 endif()
 
-# Runtime shaders (Shaders/Runtime next to the executable) and resources (fonts).
+# Runtime shaders (Shaders/Runtime next to the executable). The UI fonts are assets
+# (Assets/Fonts) and come with the asset root like every other asset.
 include(cmake/Shaders.cmake)
 swim_configure_shaders(SwimEngine)
 
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
-	add_custom_command(TARGET SwimEngine POST_BUILD
-		COMMAND "${CMAKE_COMMAND}" -E copy_directory
-			"${CMAKE_SOURCE_DIR}/Resources"
-			"$<TARGET_FILE_DIR:SwimEngine>/Resources"
-		VERBATIM
-	)
 	# Loose development assets: the engine reads the repository's Assets/ folder directly
 	# (SWIM_DEVELOPMENT_ASSET_ROOT) and cooks into Assets/Cooked there, so nothing is
 	# copied. SWIM_DEPLOY_ASSETS copies them next to the executable for a packaged run.

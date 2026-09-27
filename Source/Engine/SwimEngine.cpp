@@ -252,17 +252,13 @@ namespace Engine
 		return true;
 	}
 
-	std::filesystem::path SwimEngine::FindResourceRoot() const
+	std::filesystem::path SwimEngine::FindFontRoot() const
 	{
+		// The UI fonts live in Assets/Fonts: the resolved asset root (--assets, the
+		// repository's Assets/ in development builds, else <exe dir>/Assets) first.
 		const auto& files = platformSystem->GetFileSystem();
-		const std::array<std::filesystem::path, 4> candidates{ files.GetExecutableDirectory() / "Resources",
-			std::filesystem::current_path() / "Resources", files.GetExecutableDirectory() / ".." / ".." / "Resources",
-#if defined(SWIM_RESOURCE_DIR)
-			std::filesystem::path(SWIM_RESOURCE_DIR)
-#else
-			files.GetExecutableDirectory() / ".." / ".." / ".." / "Resources"
-#endif
-		};
+		const std::array<std::filesystem::path, 3> candidates{ files.GetAssetRoot(), files.GetExecutableDirectory() / "Assets",
+			std::filesystem::current_path() / "Assets" };
 		for (const auto& candidate : candidates)
 		{
 			std::error_code error;
@@ -366,7 +362,7 @@ namespace Engine
 			// No GPU: the UI runtime still runs (documents, input, layout), nothing draws.
 			try
 			{
-				uiRuntime = std::make_unique<UiRuntime>(FindResourceRoot());
+				uiRuntime = std::make_unique<UiRuntime>(FindFontRoot());
 				renderServices.Ui = uiRuntime.get();
 				CreateConsole();
 			}
@@ -492,7 +488,7 @@ namespace Engine
 			}
 			frameRenderer = std::make_unique<FrameRenderer>(*renderDevice, *assetSystem, *ioSystem, jobSystem.get(), rendererDesc);
 			renderBridge = std::make_unique<SceneRenderBridge>(*frameRenderer);
-			uiRuntime = std::make_unique<UiRuntime>(FindResourceRoot());
+			uiRuntime = std::make_unique<UiRuntime>(FindFontRoot());
 		}
 		catch (const std::exception& error)
 		{

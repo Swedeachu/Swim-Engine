@@ -278,7 +278,7 @@ CMake downloads a pinned, SHA-256-verified `slangc` SDK and compiles every shade
 Source/Shaders/Slang/<Module>/*.slang  ->  <exe>/Shaders/Runtime/<Program>.spv  + .reflection.json
 ```
 
-Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` side effects), so incremental builds and dependency tracking work, and they are copied beside the executable after the build along with `Resources` (fonts) and `Assets`. `SWIM_SHADER_DIR` overrides the runtime shader folder. Reflection is read from the JSON sidecar rather than from decorations embedded in the SPIR-V, which keeps the emitted modules free of `SPV_GOOGLE_*` extensions that would otherwise require matching device extensions.
+Artifacts are produced as real CMake `OUTPUT`s with depfiles (not `PRE_BUILD` side effects), so incremental builds and dependency tracking work, and they are copied beside the executable after the build. The UI fonts are assets (`Assets/Fonts`) and are found through the asset root (development builds read the repository's `Assets/`; `SWIM_DEPLOY_ASSETS` copies `Assets/` beside the executable). `SWIM_SHADER_DIR` overrides the runtime shader folder. Reflection is read from the JSON sidecar rather than from decorations embedded in the SPIR-V, which keeps the emitted modules free of `SPV_GOOGLE_*` extensions that would otherwise require matching device extensions.
 
 ---
 

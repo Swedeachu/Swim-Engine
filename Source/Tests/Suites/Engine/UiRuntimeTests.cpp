@@ -50,18 +50,18 @@ namespace
 
 SWIM_TEST("Engine.UiRuntime", "LoadsTheBundledFontsAndRejectsAMissingFolder")
 {
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	SWIM_CHECK(ui.GetFonts() != nullptr);
 	SWIM_CHECK(ui.GetBoldFonts() != nullptr);
 	SWIM_CHECK(ui.GetMonoFonts() != nullptr);
 	SWIM_CHECK(ui.GetTheme() != nullptr);
 	SWIM_CHECK(ui.CreateDocument() != nullptr);
-	SWIM_CHECK_THROWS(Engine::UiRuntime(std::filesystem::path(SWIM_RESOURCE_DIR) / "does-not-exist"), std::runtime_error);
+	SWIM_CHECK_THROWS(Engine::UiRuntime(std::filesystem::path(SWIM_TEST_ASSET_ROOT) / "does-not-exist"), std::runtime_error);
 }
 
 SWIM_TEST("Engine.UiRuntime", "DrawListPutsWorldCanvasesFirstThenScreensByOrder")
 {
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	Engine::Scene scene("UiRuntimeTest");
 	const auto top = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Screen, 5, glm::vec3(0.0f));
 	const auto bottom = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Screen, -1, glm::vec3(0.0f));
@@ -82,7 +82,7 @@ SWIM_TEST("Engine.UiRuntime", "DrawListPutsWorldCanvasesFirstThenScreensByOrder"
 
 SWIM_TEST("Engine.UiRuntime", "CanvasesFollowTheSceneAndLeaveWithIt")
 {
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	Engine::Scene scene("UiRuntimeTest");
 	const auto first = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Screen, 0, glm::vec3(0.0f));
 	AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Billboard, 0, glm::vec3(0.0f, 1.0f, -4.0f));
@@ -101,7 +101,7 @@ SWIM_TEST("Engine.UiRuntime", "CanvasesFollowTheSceneAndLeaveWithIt")
 
 SWIM_TEST("Engine.UiRuntime", "ConstantSizeBillboardsBehindTheCameraAreSkippedNotFatal")
 {
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	Engine::Scene scene("UiRuntimeTest");
 	const auto front = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Billboard, 0, glm::vec3(0.0f, 0.0f, -5.0f));
 	const auto behind = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Billboard, 0, glm::vec3(0.0f, 0.0f, 5.0f));

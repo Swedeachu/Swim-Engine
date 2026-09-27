@@ -139,7 +139,7 @@ SWIM_TEST("Engine.RuntimeConsole", "TheOverlayOpensFocusesRunsAndCloses")
 		{
 			++runs;
 		});
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_RESOURCE_DIR) };
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
 	Engine::RuntimeConsole console(registry);
 	Engine::RuntimeConsoleOverlay overlay(ui, console);
 	ui.Sync(nullptr, View());
