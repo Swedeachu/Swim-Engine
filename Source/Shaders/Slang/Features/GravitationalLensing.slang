@@ -7,17 +7,19 @@
 //     a = -1.5 R_s h^2 x / r^5,  h = |x x v|
 // (the orbit equation u'' + u = 1.5 R_s u^2), integrated with midpoint steps that shrink
 // near the hole. The ray either falls through the horizon (the shadow: its background is
-// black) or passes behind a surface of the rendered frame (tested against the depth buffer
-// along the whole curved path, and on along a straight line once it leaves the region):
-// lensed sky, floor and objects, Einstein rings, the far-side image, without cut-offs.
-// Along the way it crosses the gas (GravitationalLensing::GasDensity mirrors it):
+// black) or escapes. An escaped ray's background is a warp of the rendered frame: the
+// frame where the ray's bent direction projects (far away), averaged over the patch the
+// pixel covers there, so the warped image is smooth: lensed sky and floor, Einstein rings
+// and the far-side image. Surfaces in front of the region are left as they are.
+// Along the way the ray crosses the gas (GravitationalLensing::GasDensity mirrors it):
 //  - a thick, turbulent accretion torus in the hole's equatorial plane, rotating
 //    differentially (Kepler: omega ~ r^-3/2) so its clumps shear into streams;
 //  - Orbits (0..3) inclined gas rings around the hole like electron shells, each with
 //    three bright clumps racing around it;
 // emitting in rainbow hues that flow with the gas (Doppler-brightened on the approaching
-// side) and absorbing a little (emission-absorption, front to back). The deflection
-// builds up only inside the region, so it fades to zero at its edge without a seam.
+// side) and absorbing a little (emission-absorption, front to back); gas behind the
+// pixel's own surface is hidden. The deflection builds up only inside the region, so it
+// fades to zero at its edge without a seam.
 #include "Features/FeatureCommon.slang"
 
 static const uint MaxLenses = 4;	   // GravitationalLensing::MaxLenses.
@@ -221,7 +223,7 @@ float3 Acceleration(float3 x, float3 v, float rs)
 	return -1.5 * rs * dot(h, h) * x / (r2 * r2 * sqrt(r2));
 }
 
-// --- Screen-space hits ----------------------------------------------------------------
+// --- The frame --------------------------------------------------------------------------
 
 // Projects a point (relative to the camera) into the frame. False behind the near plane.
 bool ProjectPoint(LensingParams p, float3 rel, out float2 uv, out float z)
@@ -237,67 +239,61 @@ bool ProjectPoint(LensingParams p, float3 rel, out float2 uv, out float z)
 	return true;
 }
 
-// Tests a point on the bent ray against the depth buffer: a hit when it lies just behind
-// the surface drawn at its pixel (within a thickness that grows with distance and with how
-// far the ray moved in depth since the last test, so fast steps cannot tunnel through).
-// Only depth is read per step; the colour is fetched once, where the trace ends. Records
-// where the ray last passed over geometry (for misses into the void).
-bool SceneHit(LensingParams p, float3 rel, float stepDz, inout float2 hitUv, inout float2 lastGeometryUv, inout bool haveGeometry)
-{
-	float2 uv;
-	float z;
-	if (!ProjectPoint(p, rel, uv, z) || any(uv < 0.0) || any(uv > 1.0))
-	{
-		return false;
-	}
-	const uint2 pixel = min(uint2(uv * float2(p.Size.xy)), p.Size.xy - 1u);
-	const float sceneZ = ViewZ(Depth.Load(int3(pixel, 0)), p.Up.w);
-	if (sceneZ >= 1.0e8)
-	{
-		return false; // Sky: nothing to hit.
-	}
-	const float gap = z - sceneZ;
-	if (gap < 0.0)
-	{
-		lastGeometryUv = uv;
-		haveGeometry = true;
-		return false;
-	}
-	const float thickness = max(max(0.25, 0.04 * sceneZ), abs(stepDz) * 1.5);
-	if (gap > thickness)
-	{
-		return false;
-	}
-	hitUv = uv;
-	return true;
-}
+// Each thread's lensed frame position (x < 0: none), shared so the group can measure how
+// fast it changes from pixel to pixel.
+groupshared float2 SharedUv[8][8];
 
-float3 FrameColor(float2 uv)
+// The frame averaged over the patch one output pixel covers in it (axes a and b, in frame
+// pixels). Where the lens magnifies, the patch is still at least a pixel and a half across,
+// so the frame's pixel steps (the jagged floor edge, stretched into bands) blend into a
+// smooth gradient instead of being enlarged; where it shrinks the image, the average keeps
+// the squeezed pattern from aliasing.
+float3 FootprintColor(float2 uv, float2 a, float2 b, float2 size)
 {
-	return Color.SampleLevel(LinearClamp, uv, 0.0).rgb;
+	const float MinAxis = 1.5;
+	const float MaxAxis = 24.0;
+	const float la = length(a);
+	const float lb = length(b);
+	a = la > 1.0e-4 ? a * (clamp(la, MinAxis, MaxAxis) / la) : float2(MinAxis, 0.0);
+	b = lb > 1.0e-4 ? b * (clamp(lb, MinAxis, MaxAxis) / lb) : float2(0.0, MinAxis);
+	const uint taps = max(length(a), length(b)) > 6.0 ? 4u : 3u;
+	float3 sum = float3(0.0, 0.0, 0.0);
+	for (uint j = 0; j < taps; ++j)
+	{
+		for (uint i = 0; i < taps; ++i)
+		{
+			const float2 o = (float2(i, j) + 0.5) / float(taps) - 0.5;
+			sum += Color.SampleLevel(LinearClamp, saturate(uv + (a * o.x + b * o.y) / size), 0.0).rgb;
+		}
+	}
+	return sum / float(taps * taps);
 }
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void computeMain(uint3 id : SV_DispatchThreadID)
+void computeMain(uint3 dispatchId : SV_DispatchThreadID, uint3 local : SV_GroupThreadID)
 {
 	const LensingParams p = Params[0];
-	if (id.x >= p.Size.x || id.y >= p.Size.y)
-	{
-		return;
-	}
+	// Every thread takes part in the group's exchange; those outside the frame trace nothing.
+	const bool inside = dispatchId.x < p.Size.x && dispatchId.y < p.Size.y;
+	const uint2 id = min(dispatchId.xy, p.Size.xy - 1u);
 	const float2 size = float2(p.Size.xy);
 	const float2 uv = (float2(id.xy) + 0.5) / size;
 	const float3 ray = FeatureViewRay(uv, p.Forward, p.Right, p.Up);
 	const float near = p.Up.w;
 	const float pixelZ = ViewZ(Depth.Load(int3(id.xy, 0)), near);
-	// How far along the (unbent) ray the pixel's own surface is.
-	const float sceneDistance = pixelZ >= 1.0e8 ? 1.0e9 : pixelZ / max(dot(ray, p.Forward.xyz), 1.0e-3);
+	// How far along the (unbent) ray the pixel's own surface is; the sky is far away.
+	const bool sky = pixelZ >= 1.0e8;
+	const float sceneDistance = sky ? 1.0e4 : pixelZ / max(dot(ray, p.Forward.xyz), 1.0e-3);
 	const float3 original = Color.Load(int3(id.xy, 0)).rgb;
 	float3 color = original;
 	const float time = p.Misc.x;
+	// The last lens's background, when it is a lookup of the frame (sampled after the exchange).
+	float2 frameUv = float2(-1.0, -1.0);
+	float frameTransmittance = 1.0;
+	float3 frameLight = float3(0.0, 0.0, 0.0);
 
-	const uint count = min(uint(p.Camera.w), MaxLenses);
+	const uint count = inside ? min(uint(p.Camera.w), MaxLenses) : 0u;
 	for (uint i = 0; i < count; ++i)
 	{
 		const LensRecord lens = p.Lenses[i];
@@ -335,31 +331,24 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		const GasFrame gasFrame = MakeGasFrame(axis, time, lens); // Only for rays that enter the region.
 		float3 light = float3(0.0, 0.0, 0.0);
 		float transmittance = 1.0;
-		// The bent ray is traced against the depth buffer along its whole curved path (the
-		// frame is the only record of the scene): the first surface it passes behind is what
-		// the pixel sees. So a surface inside the region is seen through the bending around
-		// it, never cut off at the depth its unbent pixel happened to have.
-		float2 hitUv = uv;
-		float2 lastGeometryUv = uv;
-		bool haveGeometry = false;
-		const float3 camToHole = lens.PositionRadius.xyz - p.Camera.xyz;
-		uint outcome = 0u; // 0: undecided (orbiting: treated as captured), 1: captured, 2: escaped, 3: hit the scene.
-		float lastZ = dot(camToHole + x, p.Forward.xyz);
+		bool captured = true; // Orbiting until the step budget runs out counts as captured.
 		for (uint step = 0; step < MaxSteps; ++step)
 		{
 			const float r = length(x);
 			if (r < rs)
 			{
-				outcome = 1u;
 				break;
 			}
 			if (r > region * 1.0001 && dot(x, v) > 0.0)
 			{
-				outcome = 2u;
+				captured = false;
 				break;
 			}
-			float ds = max(0.14 * (r - 0.5 * rs), 0.02 * rs);
-			const bool inGas = r < gasOuter + GasStep * rs && lens.Params.w > 0.0;
+			// Small steps: a coarser integration left the bent direction off by a step-dependent
+			// amount, which showed as concentric bands and jagged steps in the warped image.
+			float ds = max(0.07 * (r - 0.5 * rs), 0.015 * rs);
+			// Gas in front of the pixel's own surface only (a nearer surface hides the rest).
+			const bool inGas = r < gasOuter + GasStep * rs && lens.Params.w > 0.0 && travelled < sceneDistance;
 			if (inGas)
 			{
 				ds = min(ds, GasStep * rs);
@@ -369,28 +358,21 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			const float3 xm = x + v * (0.5 * ds);
 			const float3 vm = normalize(v + a1 * (0.5 * ds));
 			const float3 a2 = Acceleration(xm, vm, bendRs);
-			const float3 next = x + vm * ds;
-			const float nextZ = dot(camToHole + next, p.Forward.xyz);
-			if (SceneHit(p, camToHole + next, nextZ - lastZ, hitUv, lastGeometryUv, haveGeometry))
-			{
-				outcome = 3u; // The gas behind the surface is hidden: stop before it.
-				break;
-			}
 			if (inGas)
 			{
 				const GasSample gas = Gas(xm / rs, gasFrame, vm, time, lens);
 				if (gas.Density > 0.0)
 				{
-					const float dt = ds / rs;
+					const float dt = min(ds, sceneDistance - travelled) / rs;
 					const float absorbed = exp(-GasExtinction * gas.Density * dt);
 					// Emission integrated over the step with its own absorption.
 					light += transmittance * gas.Emission * (1.0 - absorbed) / GasExtinction;
 					transmittance *= absorbed;
 				}
 			}
-			x = next;
+			x += vm * ds;
 			v = normalize(v + a2 * ds);
-			lastZ = nextZ;
+			travelled += ds;
 			if (transmittance < 0.005)
 			{
 				break;
@@ -398,67 +380,55 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		}
 
 		float3 background = float3(0.0, 0.0, 0.0);
-		if (outcome == 3u)
+		frameUv = float2(-1.0, -1.0);
+		if (!captured)
 		{
-			background = FrameColor(hitUv);
-		}
-		else if (outcome == 2u)
-		{
-			// Out of the region the ray is straight: march on (in steps that grow with
-			// distance) until it passes behind a surface or leaves the frame.
-			bool hit = false;
-			float3 rel = camToHole + x;
-			float t = max(0.25 * rs, 0.02 * length(rel));
-			for (uint k = 0; k < 64u; ++k)
+			// The escaped ray's direction, seen far away: the frame where that direction
+			// projects is what it sees. (Going on for the pixel's own distance instead cut the
+			// image straight across where the pixels' depth jumps, at the horizon.)
+			const float3 rel = lens.PositionRadius.xyz - p.Camera.xyz + x + v * 1.0e4;
+			float2 source;
+			float z;
+			if (ProjectPoint(p, rel, source, z))
 			{
-				const float3 nextRel = rel + v * t;
-				const float nextZ = dot(nextRel, p.Forward.xyz);
-				float2 uv;
-				float z;
-				if (!ProjectPoint(p, nextRel, uv, z) || any(uv < -0.02) || any(uv > 1.02))
+				const float2 outside = max(max(-source, source - 1.0), 0.0);
+				const float onScreen = 1.0 - saturate(max(outside.x, outside.y) * 8.0);
+				background = lerp(original, Color.SampleLevel(LinearClamp, saturate(source), 0.0).rgb, onScreen);
+				if (onScreen >= 1.0)
 				{
-					break;
+					frameUv = source; // Sampled over its footprint after the exchange below.
 				}
-				if (SceneHit(p, nextRel, nextZ - lastZ, hitUv, lastGeometryUv, haveGeometry))
-				{
-					hit = true;
-					break;
-				}
-				rel = nextRel;
-				lastZ = nextZ;
-				t *= 1.12;
-			}
-			if (hit)
-			{
-				background = FrameColor(hitUv);
 			}
 			else
 			{
-				// No surface on screen: the direction's own point far away (sky, or distant
-				// geometry the march ran out of steps before), fading to the pixel itself where
-				// it leaves the frame.
-				float2 uv;
-				float z;
-				if (ProjectPoint(p, camToHole + x + v * 1.0e4, uv, z))
-				{
-					const float2 outside = max(max(-uv, uv - 1.0), 0.0);
-					const float onScreen = 1.0 - saturate(max(outside.x, outside.y) * 8.0);
-					background = lerp(original, Color.SampleLevel(LinearClamp, saturate(uv), 0.0).rgb, onScreen);
-					// A downward ray that found no floor went past the ground's edge into the
-					// void: it keeps the last ground it crossed rather than showing sky there.
-					const uint2 pixel = min(uint2(saturate(uv) * size), p.Size.xy - 1u);
-					if (v.y < 0.0 && haveGeometry && Depth.Load(int3(pixel, 0)) <= 0.0)
-					{
-						background = FrameColor(lastGeometryUv);
-					}
-				}
-				else
-				{
-					background = haveGeometry ? FrameColor(lastGeometryUv) : original; // Bent behind the camera.
-				}
+				background = original; // Bent behind the camera.
 			}
 		}
 		color = background * transmittance + light;
+		frameTransmittance = transmittance;
+		frameLight = light;
 	}
+
+	SharedUv[local.y][local.x] = frameUv;
+	GroupMemoryBarrierWithGroupSync();
+	if (!inside || frameUv.x < 0.0)
+	{
+		if (inside)
+		{
+			Output[id.xy] = float4(color, 1.0);
+		}
+		return;
+	}
+	// How far the lensed position moves between neighbouring pixels (within the group; not
+	// across the shadow or a jump between images): the footprint to average over.
+	const uint nx = local.x < 7u ? local.x + 1u : local.x - 1u;
+	const uint ny = local.y < 7u ? local.y + 1u : local.y - 1u;
+	const float2 ux = SharedUv[local.y][nx];
+	const float2 uy = SharedUv[ny][local.x];
+	float2 a = ux.x >= 0.0 ? (ux - frameUv) * size : float2(0.0, 0.0);
+	float2 b = uy.x >= 0.0 ? (uy - frameUv) * size : float2(0.0, 0.0);
+	a = length(a) < 48.0 ? a : float2(0.0, 0.0);
+	b = length(b) < 48.0 ? b : float2(0.0, 0.0);
+	color = FootprintColor(frameUv, a, b, size) * frameTransmittance + frameLight;
 	Output[id.xy] = float4(color, 1.0);
 }

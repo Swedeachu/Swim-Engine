@@ -6,7 +6,7 @@ namespace Game
 {
 	namespace
 	{
-		constexpr std::array<Finding, 54> Items{ {
+		constexpr std::array<Finding, 55> Items{ {
 			{ "Behaviour Exit ran twice on scene exit",
 				"InternalSceneExit called every behaviour's Exit and then DestroyAllEntities called it again. Scene exit now destroys the "
 				"entities once, after the scene's own Exit, so every behaviour exits exactly once.",
@@ -78,10 +78,15 @@ namespace Game
 				"Workaround" },
 			{ "KTX2/Basis textures could not be uploaded",
 				"TextureResidency uploads uncompressed native mip chains only, so KHR_texture_basisu textures fell back to white. The "
-				"cooker now transcodes Basis Universal KTX2 (ETC1S/BasisLZ and UASTC) into RGBA8 mip chains with the Basis transcoder "
-				"(compiler-only; the runtime links none), and the sandbox loads the Draco + KTX2 Sponza GLB. Keeping the textures "
-				"block-compressed (BC7) on the GPU needs block-aware uploads in the RHI and residency.",
+				"cooker now transcodes Basis Universal KTX2 (ETC1S/BasisLZ and UASTC) into BC7 mip chains with the Basis transcoder "
+				"(compiler-only; the runtime links none), and the sandbox loads the Draco + KTX2 Sponza GLB.",
 				"Workaround" },
+			{ "Cooked textures were uncompressed",
+				"Every cooked texture was an RGBA8 mip chain (442 MB of cooked objects for the sandbox) and was copied four times on "
+				"its way to the GPU. The cooker now writes BC7 (Basis KTX2 transcoded directly, PNG/JPEG/WebP encoded through UASTC), "
+				"the RHI copies BC formats block by block, and the texture residency uploads the cooked bytes as they are (adopting "
+				"them from the unloading asset). Cooked objects are 123 MB and texture memory is a quarter.",
+				"Fixed" },
 			{ "PhysX contacts of destroyed bodies crashed the step",
 				"After a body is destroyed, PhysX still reports its lost-touch pairs with the released actor flagged as removed; "
 				"resolving that actor (a virtual call) was an access violation once the sandbox's balls expired. Removed actors and "
@@ -182,10 +187,11 @@ namespace Game
 				"range. The jitter is now fixed per pixel, the composite softens reflections by roughness over same-surface taps, "
 				"and only surfaces seen nearly edge-on fade.",
 				"Fixed" },
-			{ "Cooked asset validation is slow in Debug",
-				"Every start re-hashes every cooked .sasset to decide whether it is current; in Debug builds that takes minutes for "
-				"Sponza's RGBA8 textures. Recording file sizes and times beside the hashes would skip unchanged files.",
-				"Open" },
+			{ "Engine start was slow",
+				"Every start re-hashed every cooked .sasset (six SHA-256 passes per file) to decide whether it was current: 10.6 s in "
+				"Release, minutes in Debug. Sources are now stamped with size and write time, cooked files are read once and chunk "
+				"hashes are only verified with SWIM_VERIFY_ASSETS=1; with BC7 textures the bootstrap takes about 0.2 s.",
+				"Fixed" },
 			{ "Render surfaces are not mirrored yet",
 				"UiCanvas supports screen overlays, world panels and billboards; RenderSurface canvases (UI rendered into a texture "
 				"sampled by a material) exist in the UI renderer but the runtime does not route them yet.",
@@ -248,15 +254,16 @@ namespace Game
 				"now traced as a Schwarzschild geodesic through the hole's region, crossing a volumetric gas instead of a textured disk; "
 				"only the escaped ray's background comes from the frame.",
 				"Fixed" },
-			{ "Black-hole image cut into slices near the floor",
-				"The lensed background was looked up at the depth the pixel's unbent ray had, so where the bent ray and that depth "
-				"disagreed (near the floor, across walls behind the hole) the image was cut into slices and bands. Each bent ray is now "
-				"tested against the depth buffer along its whole path, and on in a straight line after it leaves the region.",
+			{ "Black-hole image flickered along the lensed horizon",
+				"Tracing each bent ray against the depth buffer (to stop the image being cut at the depth its unbent pixel had) "
+				"made the lensed floor near the horizon alias into moire and sky-coloured stripes that flickered with every frame's "
+				"jitter. The lens is back to a warp of the frame: the escaped ray goes on for the pixel's own distance and the frame "
+				"is sampled once where that lands, which is as smooth as the frame; objects at a depth edge right behind the hole can "
+				"show a seam again.",
 				"Fixed" },
 			{ "Black-hole backgrounds are screen space",
 				"The lensed image is the rendered frame: what is off screen or hidden behind nearer surfaces cannot be seen through "
-				"the lens (a ray that leaves the screen fades to the pixel's own colour, one bent behind the camera keeps the last "
-				"surface it crossed).",
+				"the lens (a ray that leaves the screen fades to the pixel's own colour, as does one bent behind the camera).",
 				"Open" },
 			{ "240 FPS not reached yet",
 				"Every pass and feature can be switched off, profiled and benchmarked (docs/Profiling.md). Half-resolution reflections "

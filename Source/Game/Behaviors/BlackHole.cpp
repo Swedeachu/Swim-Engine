@@ -35,6 +35,11 @@ namespace Game
 		// The gas disk's axis is the entity's local +Y.
 		const glm::vec3 axis = transform->GetWorldRotation(scene->GetRegistry()) * glm::vec3(0.0f, 1.0f, 0.0f);
 		lens.DiskNormal = { axis.x, axis.y, axis.z };
+		if (pendingGasDensity)
+		{
+			lens.GasDensity = *pendingGasDensity;
+			pendingGasDensity.reset();
+		}
 	}
 
 	int BlackHole::Exit()

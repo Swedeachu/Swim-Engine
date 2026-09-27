@@ -7,6 +7,7 @@
 #include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/ParticleEmitter.h"
 #include "Engine/Components/ReflectionProbe.h"
+#include "Game/Behaviors/BlackHole.h"
 #include "Game/Behaviors/ReflectionLabFloor.h"
 #include "Engine/Components/SkinnedMeshRenderer.h"
 #include "Engine/Components/Transform.h"
@@ -159,7 +160,8 @@ namespace Game
 					const auto preset = std::clamp(number(arguments, 0.0f), 0.0f, float(Engine::CameraPresetCount - 1));
 					ApplyCameraPreset(static_cast<Engine::CameraPreset>(static_cast<std::uint32_t>(preset)));
 				});
-			// sandbox.blackhole <x> <y> <z>: moves the black hole (like dragging it).
+			// sandbox.blackhole <x> <y> <z> [gas density]: moves the black hole (like dragging
+			// it) and optionally sets its gas density (0: lensing only, as the HUD slider).
 			commands->Register("sandbox.blackhole",
 				[this](const std::vector<std::string>& arguments)
 				{
@@ -170,6 +172,13 @@ namespace Game
 					auto& transform = GetRegistry().get<Engine::Transform>(blackHole);
 					transform.SetWorldPosition(GetRegistry(),
 						glm::vec3(std::stof(arguments[0]), std::stof(arguments[1]), std::stof(arguments[2])));
+					if (arguments.size() >= 4)
+					{
+						if (auto* hole = GetBehavior<Game::BlackHole>(blackHole))
+						{
+							hole->SetGasDensity(std::max(0.0f, std::stof(arguments[3])));
+						}
+					}
 				});
 			commands->Register("sandbox.dof",
 				[this, number](const std::vector<std::string>& arguments)

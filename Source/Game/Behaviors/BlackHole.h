@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace Game
 {
@@ -25,6 +26,9 @@ namespace Game
 
 		float GetSchwarzschildRadius() const { return schwarzschildRadius; }
 
+		// Sets the lens's gas density on the next update (the lens exists from then on).
+		void SetGasDensity(float density) { pendingGasDensity = density; }
+
 		// The shadow's radius (photon capture): what picking and dragging should grab.
 		float GetShadowRadius() const { return Engine::GravitationalLensing::ShadowRadius(schwarzschildRadius); }
 
@@ -33,6 +37,7 @@ namespace Game
 
 		std::weak_ptr<Engine::GravitationalLensing> lensing;
 		float schwarzschildRadius;
+		std::optional<float> pendingGasDensity;
 	};
 
 	// Drags its entity with the left mouse button: a press whose closest pick
