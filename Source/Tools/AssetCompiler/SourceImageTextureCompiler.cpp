@@ -353,7 +353,8 @@ namespace Swim::AssetCompiler
 		std::span<const std::byte> bytes,
 		SourceImageMimeType mimeType,
 		Swim::Assets::TextureColorSpace colorSpace,
-		Swim::Assets::TextureSemantic semantic)
+		Swim::Assets::TextureSemantic semantic,
+		CookedTextureEncoding encoding)
 	{
 		mimeType = DetectSourceImageMimeType(bytes, mimeType);
 		if (mimeType != SourceImageMimeType::Png && mimeType != SourceImageMimeType::Jpeg && mimeType != SourceImageMimeType::WebP)
@@ -396,6 +397,26 @@ namespace Swim::AssetCompiler
 		if (!BuildMipChain(std::move(rgba), result.Asset.Width, result.Asset.Height, colorSpace, semantic, payload))
 		{
 			return MakeError(SourceImageTextureCompileErrorCode::Overflow, "generated source-image mip chain exceeds TextureAsset payload limits");
+		}
+		if (encoding == CookedTextureEncoding::Bc7)
+		{
+			// The mips are filtered in RGBA8 (sRGB-correct, normals renormalized), then each
+			// level is block-compressed on its own.
+			Swim::Assets::TexturePayloadVariant bc7;
+			bc7.Container = Swim::Assets::TextureContainerFormat::NativeMipData;
+			bc7.Format = colorSpace == Swim::Assets::TextureColorSpace::SRgb ? Swim::Assets::TexturePayloadFormat::BC7SRgb
+																			  : Swim::Assets::TexturePayloadFormat::BC7UNorm;
+			bc7.Supercompression = Swim::Assets::TextureSupercompression::None;
+			for (const auto& mip : payload.Mips)
+			{
+				const auto blocks = EncodeRgba8ToBc7(
+					std::span(payload.Bytes).subspan(static_cast<std::size_t>(mip.OffsetBytes), static_cast<std::size_t>(mip.SizeBytes)),
+					mip.Width, mip.Height);
+				const std::uint64_t offset = bc7.Bytes.size();
+				bc7.Bytes.insert(bc7.Bytes.end(), blocks.begin(), blocks.end());
+				bc7.Mips.push_back({ mip.Width, mip.Height, 1, offset, blocks.size(), blocks.size() });
+			}
+			payload = std::move(bc7);
 		}
 		result.Asset.Payloads.push_back(std::move(payload));
 		return result;

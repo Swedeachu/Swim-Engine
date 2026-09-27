@@ -48,6 +48,10 @@ struct ScreenSpaceParams
 	uint ProbeMipCount;
 	uint ReflectionDebug;
 	uint SsrHalf;
+	uint ReflectionTemporal;
+	float ReflectionTemporalBlend;
+	uint Reserved5;
+	uint Reserved6;
 };
 
 static const float ScreenSpacePi = 3.14159265358979;

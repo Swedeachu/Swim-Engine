@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <span>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -577,8 +579,8 @@ namespace
 SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToAnRgba8MipChain")
 {
 	const std::vector<std::byte> bytes = MakeEtc1sKtx2();
-	const Swim::AssetCompiler::Ktx2TextureCompileResult result =
-		Swim::AssetCompiler::CompileKtx2Texture(bytes, Swim::Assets::TextureColorSpace::Linear, Swim::Assets::TextureSemantic::Color);
+	const Swim::AssetCompiler::Ktx2TextureCompileResult result = Swim::AssetCompiler::CompileKtx2Texture(bytes,
+		Swim::Assets::TextureColorSpace::Linear, Swim::Assets::TextureSemantic::Color, Swim::AssetCompiler::CookedTextureEncoding::Rgba8);
 	SWIM_REQUIRE_MESSAGE(static_cast<bool>(result), result.Error.Message);
 
 	SWIM_CHECK_EQUAL(result.Asset.Width, 4u);
@@ -606,6 +608,41 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToAnRgba8M
 	{
 		SWIM_CHECK_EQUAL(std::to_integer<int>(payload.Bytes[texel * 4 + 3]), 255);
 	}
+}
+
+SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToABc7MipChainByDefault")
+{
+	const std::vector<std::byte> bytes = MakeEtc1sKtx2();
+	const auto rgba = Swim::AssetCompiler::CompileKtx2Texture(bytes, Swim::Assets::TextureColorSpace::Linear,
+		Swim::Assets::TextureSemantic::Color, Swim::AssetCompiler::CookedTextureEncoding::Rgba8);
+	const auto bc7 =
+		Swim::AssetCompiler::CompileKtx2Texture(bytes, Swim::Assets::TextureColorSpace::Linear, Swim::Assets::TextureSemantic::Color);
+	SWIM_REQUIRE_MESSAGE(static_cast<bool>(rgba), rgba.Error.Message);
+	SWIM_REQUIRE_MESSAGE(static_cast<bool>(bc7), bc7.Error.Message);
+	SWIM_REQUIRE(bc7.Asset.Payloads.size() == 1);
+	const auto& payload = bc7.Asset.Payloads[0];
+	SWIM_CHECK(payload.Container == Swim::Assets::TextureContainerFormat::NativeMipData);
+	SWIM_CHECK(payload.Format == Swim::Assets::TexturePayloadFormat::BC7SRgb);
+	SWIM_REQUIRE(payload.Mips.size() == 3);
+	for (std::uint32_t mip = 0; mip < 3; ++mip)
+	{
+		SWIM_CHECK_EQUAL(payload.Mips[mip].Width, 4u >> mip);
+		SWIM_CHECK_EQUAL(payload.Mips[mip].OffsetBytes, std::uint64_t(mip) * 16u);
+		SWIM_CHECK_EQUAL(payload.Mips[mip].SizeBytes, std::uint64_t{ 16 });
+		// ETC1S -> BC7 is exact up to rounding: the blocks decode to the RGBA8 transcode.
+		const auto& texels = rgba.Asset.Payloads[0];
+		const auto decoded = Swim::AssetCompiler::DecodeBc7ToRgba8(
+			std::span(payload.Bytes).subspan(mip * 16u, 16), payload.Mips[mip].Width, payload.Mips[mip].Height);
+		SWIM_REQUIRE(decoded.size() == texels.Mips[mip].SizeBytes);
+		int worst = 0;
+		for (std::size_t i = 0; i < decoded.size(); ++i)
+		{
+			const int expected = std::to_integer<int>(texels.Bytes[texels.Mips[mip].OffsetBytes + i]);
+			worst = std::max(worst, std::abs(std::to_integer<int>(decoded[i]) - expected));
+		}
+		SWIM_CHECK(worst <= 3);
+	}
+	SWIM_CHECK_EQUAL(payload.Bytes.size(), std::size_t{ 48 });
 }
 
 SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "CorruptBasisPayloadsFailInsteadOfCooking")

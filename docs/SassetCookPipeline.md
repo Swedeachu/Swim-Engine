@@ -149,11 +149,13 @@ The runtime should not need libwebp to consume that cooked texture.
 
 ### PNG/JPEG
 
-These are likewise authoring inputs decoded by compiler-side stb image code and converted into runtime texture payloads.
+These are likewise authoring inputs decoded by compiler-side stb image code (WebP by libwebp) and converted into runtime texture payloads: the mip chain is filtered in RGBA8 (sRGB-correct averaging, renormalized normals), then every level is encoded to BC7 (`EncodeRgba8ToBc7`: each 4 x 4 block through the Basis UASTC encoder at its "faster" level and the transcoder's UASTC -> BC7 step, block rows spread over the cores). The Basis encoder is compiler-only too (`Swim::AssetCompilerBasisEncoder`, plain C++ without SSE, OpenCL or Zstandard).
 
 ## Basis/KTX2 is transcoded at cook time
 
-`CompileKtx2Texture` (Tools/AssetCompiler) transcodes Basis Universal KTX2 images (KHR_texture_basisu: ETC1S/BasisLZ and UASTC without Zstandard) with the Basis transcoder into an RGBA8 native mip chain, sRGB when the file's DFD transfer function is sRGB. The transcoder is a compiler-only dependency (`Swim::AssetCompilerBasisTranscoder`); the shipping runtime links no Basis code. Other KTX2 files keep their validated container bytes. Keeping textures block-compressed on the GPU (BC7 variants) is the next step and needs block-aware RHI copies.
+`CompileKtx2Texture` (Tools/AssetCompiler) transcodes Basis Universal KTX2 images (KHR_texture_basisu: ETC1S/BasisLZ and UASTC without Zstandard) with the Basis transcoder straight into a BC7 native mip chain (`cTFBC7_RGBA`; ETC1S and UASTC both map to BC7 with no visible loss), sRGB when the file's DFD transfer function is sRGB. The transcoder is a compiler-only dependency (`Swim::AssetCompilerBasisTranscoder`); the shipping runtime links no Basis code. Other KTX2 files keep their validated container bytes.
+
+Cooked textures are BC7 (`BC7UNorm`/`BC7SRgb`): whole 4 x 4 blocks of 16 bytes per mip, mips in order at 16-byte offsets, so the runtime uploads them without repacking. Both texture compilers take a `CookedTextureEncoding` (`Bc7` by default, `Rgba8` for tools and tests that inspect texels). The compiler profile hash names the encoding (`texture=ktx2-or-bc7-mips-v5`), so changing it recooks every model on the next start. On the reference machine the sandbox's cooked objects went from 442 MB (RGBA8) to 123 MB; the full recook of the four sandbox models takes 9.4 s, warm starts 0.2 s.
 
 ---
 
@@ -299,7 +301,7 @@ load/publish root ModelAsset
 
 ## Step 9 — Asynchronous GPU residency (modern renderer path)
 
-The bootstrap above loads blocking and publishes everything. The modern renderer's `AssetResidencyService` instead streams individual cooked objects on demand: it resolves an `AssetId` to its cooked object, reads it with `AsyncIoService`, runs `Assets::DecodeSasset` (container parse, chunk/content hash validation and payload decode) on a job worker, publishes with `Assets::PublishSasset` on the `AssetSystem` owner thread, then stages the decoded mesh/texture into `GeometryHeap`/`TextureResidency` within a per-frame byte budget. The CPU asset is released once the GPU copy is staged unless the caller retains it. Material instances and models still use `LoadSasset` because decoding them resolves `AssetHandle`s. Textures need an uncompressed native-mip payload variant for this path; the cooker produces one for Basis KTX2 sources, and other KTX2 variants are rejected until block-aware uploads exist. See [GPU resource residency](GpuResidency.md).
+The bootstrap above loads blocking and publishes everything. The modern renderer's `AssetResidencyService` instead streams individual cooked objects on demand: it resolves an `AssetId` to its cooked object, reads it with `AsyncIoService`, runs `Assets::DecodeSasset` (container parse, chunk/content hash validation and payload decode) on a job worker, publishes with `Assets::PublishSasset` on the `AssetSystem` owner thread, then stages the decoded mesh/texture into `GeometryHeap`/`TextureResidency` within a per-frame byte budget. The CPU asset is released once the GPU copy is staged unless the caller retains it. Material instances and models still use `LoadSasset` because decoding them resolves `AssetHandle`s. Textures need a native-mip payload variant for this path (uncompressed, or BC where the device samples it); the cooker writes BC7 for every source, and KTX2-container variants are rejected. See [GPU resource residency](GpuResidency.md).
 
 ---
 

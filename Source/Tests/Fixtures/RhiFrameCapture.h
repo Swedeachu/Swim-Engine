@@ -71,13 +71,13 @@ namespace Swim::Testing
 		explicit MockTexture(const Swim::Rhi::TextureDesc& desc) : desc(desc)
 		{
 			this->desc.DebugName = {};
-			const std::uint32_t texel = Swim::Rhi::GetTransferTexelBytes(desc.PixelFormat);
 			for (std::uint32_t layer = 0; layer < desc.ArrayLayers; ++layer)
 			{
 				for (std::uint32_t mip = 0; mip < desc.MipLevels; ++mip)
 				{
 					const auto e = MipExtent(mip);
-					Subresources.emplace_back(std::size_t(texel) * e.Width * e.Height * e.Depth);
+					Subresources.emplace_back(
+						static_cast<std::size_t>(Swim::Rhi::GetTransferRegionBytes(desc.PixelFormat, e.Width, e.Height, e.Depth)));
 				}
 			}
 		}
@@ -99,17 +99,24 @@ namespace Swim::Testing
 		// Copies a tightly packed region between `buffer` and this subresource.
 		void CopyRegion(std::span<std::byte> buffer, const Swim::Rhi::BufferTextureCopyRegion& region, bool toTexture)
 		{
-			const std::size_t texel = Swim::Rhi::GetTransferTexelBytes(desc.PixelFormat);
+			// Texels, or 4 x 4 blocks of a BC format (rows of blocks).
+			const auto block = Swim::Rhi::GetTransferBlockInfo(desc.PixelFormat);
+			const std::size_t texel = block.Bytes;
 			auto& image = Bytes(region.Subresource);
-			const auto e = MipExtent(region.Subresource.MipLevel);
+			const auto texels = MipExtent(region.Subresource.MipLevel);
+			const Swim::Rhi::Extent3D e{ (texels.Width + block.Width - 1) / block.Width, (texels.Height + block.Height - 1) / block.Height,
+				texels.Depth };
+			const std::uint32_t columns = (region.Extent.Width + block.Width - 1) / block.Width;
+			const std::uint32_t rows = (region.Extent.Height + block.Height - 1) / block.Height;
+			const std::size_t originX = std::size_t(region.TextureOffset.X) / block.Width;
+			const std::size_t originY = std::size_t(region.TextureOffset.Y) / block.Height;
 			std::size_t cursor = static_cast<std::size_t>(region.BufferOffset);
 			for (std::uint32_t z = 0; z < region.Extent.Depth; ++z)
 			{
-				for (std::uint32_t y = 0; y < region.Extent.Height; ++y)
+				for (std::uint32_t y = 0; y < rows; ++y)
 				{
-					const std::size_t row = (((std::size_t(region.TextureOffset.Z) + z) * e.Height + region.TextureOffset.Y + y) * e.Width +
-						region.TextureOffset.X) * texel;
-					const std::size_t bytes = std::size_t(region.Extent.Width) * texel;
+					const std::size_t row = (((std::size_t(region.TextureOffset.Z) + z) * e.Height + originY + y) * e.Width + originX) * texel;
+					const std::size_t bytes = std::size_t(columns) * texel;
 					if (toTexture)
 					{
 						std::memcpy(image.data() + row, buffer.data() + cursor, bytes);

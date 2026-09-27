@@ -55,9 +55,15 @@ namespace Swim::Render
 		std::uint32_t ProbeMipCount = 1;   // Prefiltered probe atlas mips.
 		std::uint32_t ReflectionDebug = 0; // ReflectionDebugView.
 		std::uint32_t SsrHalf = 0; // 1: the reflection texture is half size (ReflectionSettings::HalfResolution).
+		// The temporal reflection filter: bit 0 writes this frame's reflection term, bit 1
+		// blends last frame's in (ScreenSpaceFrame::ReflectionTemporal).
+		std::uint32_t ReflectionTemporal = 0;
+		float ReflectionTemporalBlend = 0.3f; // Weight of this frame's term, (0, 1].
+		std::uint32_t Reserved5 = 0;
+		std::uint32_t Reserved6 = 0;
 	};
 
-	static_assert(sizeof(GpuScreenSpaceParams) == 416);
+	static_assert(sizeof(GpuScreenSpaceParams) == 432);
 	static_assert(offsetof(GpuScreenSpaceParams, AoRadius) == 176 && offsetof(GpuScreenSpaceParams, FogColor) == 224);
 	static_assert(offsetof(GpuScreenSpaceParams, Projection) == 288 && offsetof(GpuScreenSpaceParams, SsrMaxSteps) == 384);
 } // namespace Swim::Render

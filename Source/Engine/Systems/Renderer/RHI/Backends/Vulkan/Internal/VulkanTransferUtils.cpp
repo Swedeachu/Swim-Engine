@@ -83,13 +83,34 @@ namespace Swim::RhiVulkan
 		const Rhi::BufferTextureCopyRegion& region)
 	{
 		ValidateCopyExtent(texture, region.Subresource, region.TextureOffset, region.Extent);
-		const std::uint32_t texelBytes = RequireTransferTexelBytes(texture.PixelFormat);
-		if (texture.Samples != Rhi::SampleCount::X1 || region.BufferOffset % texelBytes != 0 || region.BufferOffset % 4 != 0)
+		const auto block = Rhi::GetTransferBlockInfo(texture.PixelFormat);
+		if (block.Bytes == 0)
+		{
+			throw std::invalid_argument("Vulkan buffer/image copies require an uncompressed color, BC or D32Float format");
+		}
+		if (texture.Samples != Rhi::SampleCount::X1 || region.BufferOffset % block.Bytes != 0 || region.BufferOffset % 4 != 0)
 		{
 			throw std::invalid_argument("Vulkan buffer/image copies require single-sample textures and aligned offsets");
 		}
-		std::uint64_t bytes = texelBytes;
-		for (std::uint32_t size : { region.Extent.Width, region.Extent.Height, region.Extent.Depth })
+		if (block.Width > 1)
+		{
+			// Block formats copy whole blocks: offsets on block corners, extents a block
+			// multiple unless they end at the mip's edge.
+			const std::uint32_t mip = region.Subresource.MipLevel;
+			const std::uint32_t mipWidth = std::max(1u, texture.Extent.Width >> mip);
+			const std::uint32_t mipHeight = std::max(1u, texture.Extent.Height >> mip);
+			const auto aligned = [](std::int32_t start, std::uint32_t count, std::uint32_t limit, std::uint32_t unit)
+			{ return start % std::int32_t(unit) == 0 && (count % unit == 0 || std::uint32_t(start) + count == limit); };
+			if (!aligned(region.TextureOffset.X, region.Extent.Width, mipWidth, block.Width) ||
+				!aligned(region.TextureOffset.Y, region.Extent.Height, mipHeight, block.Height))
+			{
+				throw std::invalid_argument("Vulkan block-compressed copies must cover whole blocks");
+			}
+		}
+		const std::uint64_t columns = (std::uint64_t(region.Extent.Width) + block.Width - 1) / block.Width;
+		const std::uint64_t rows = (std::uint64_t(region.Extent.Height) + block.Height - 1) / block.Height;
+		std::uint64_t bytes = block.Bytes;
+		for (std::uint64_t size : { columns, rows, std::uint64_t(region.Extent.Depth) })
 		{
 			if (bytes > std::numeric_limits<std::uint64_t>::max() / size)
 			{

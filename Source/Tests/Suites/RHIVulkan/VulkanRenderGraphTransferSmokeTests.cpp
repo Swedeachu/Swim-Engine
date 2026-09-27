@@ -206,7 +206,7 @@ namespace
 		executor.Trim();
 	}
 
-	// TextureResidency on a real device: a full RGBA8 mip chain uploaded by the
+	// TextureResidency on a real device: full RGBA8 and BC7 mip chains uploaded by the
 	// residency's graph pass, read back per mip in the same graph, then retired.
 	void RunTextureResidencySmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
@@ -221,26 +221,36 @@ namespace
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 
-		Assets::TextureAsset asset;
-		asset.Width = 16;
-		asset.Height = 8;
-		Assets::TexturePayloadVariant payload;
-		payload.Format = Assets::TexturePayloadFormat::RGBA8UNorm;
-		std::uint64_t offset = 0;
-		for (std::uint32_t mip = 0; mip < 5; ++mip)
-		{
-			const std::uint32_t w = std::max(1u, 16u >> mip);
-			const std::uint32_t h = std::max(1u, 8u >> mip);
-			payload.Mips.push_back({ w, h, 1, offset, std::uint64_t(w) * h * 4, std::uint64_t(w) * h * 4 });
-			offset += std::uint64_t(w) * h * 4;
-		}
-		payload.Bytes = Bytes(static_cast<std::size_t>(offset), 77);
-		asset.Payloads.push_back(payload);
-
+		// RGBA8, then (where the device samples BC) a BC7 chain whose small mips are single
+		// partial blocks, written the way the cooker lays them out.
 		RenderGraphExecutor executor(*device);
+		const bool bc = device->GetAdapterInfo().Capabilities.BcTextureCompression;
+		for (const auto format : { Assets::TexturePayloadFormat::RGBA8UNorm, Assets::TexturePayloadFormat::BC7SRgb })
 		{
+			const bool bc7 = format == Assets::TexturePayloadFormat::BC7SRgb;
+			if (bc7 && !bc)
+			{
+				continue;
+			}
+			Assets::TextureAsset asset;
+			asset.Width = 16;
+			asset.Height = 8;
+			Assets::TexturePayloadVariant payload;
+			payload.Format = format;
+			std::uint64_t offset = 0;
+			for (std::uint32_t mip = 0; mip < 5; ++mip)
+			{
+				const std::uint32_t w = std::max(1u, 16u >> mip);
+				const std::uint32_t h = std::max(1u, 8u >> mip);
+				const std::uint64_t size = bc7 ? std::uint64_t((w + 3) / 4) * ((h + 3) / 4) * 16 : std::uint64_t(w) * h * 4;
+				payload.Mips.push_back({ w, h, 1, offset, size, size });
+				offset += size;
+			}
+			payload.Bytes = Bytes(static_cast<std::size_t>(offset), 77);
+			asset.Payloads.push_back(payload);
+
 			TextureResidency residency(*device);
-			const auto handle = residency.CreateTexture(asset, "Residency smoke texture");
+			const auto handle = residency.CreateTexture(std::move(asset), "Residency smoke texture");
 			RenderGraph graph;
 			const auto uploads = residency.Import(graph);
 			SWIM_REQUIRE_EQUAL(uploads.Uploads.size(), 1u);

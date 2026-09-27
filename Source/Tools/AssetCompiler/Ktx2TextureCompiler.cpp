@@ -52,10 +52,11 @@ namespace Swim::AssetCompiler
 			return result;
 		}
 
-		// Transcodes every mip of a 2D Basis Universal KTX2 into a tightly packed RGBA8 native
-		// mip chain (sRGB when the file's transfer function is sRGB), which every GPU and the
-		// runtime's texture residency can upload directly.
-		Ktx2TextureCompileResult TranscodeBasis(std::span<const std::byte> bytes, Swim::Assets::TextureSemantic semantic)
+		// Transcodes every mip of a 2D Basis Universal KTX2 into a tightly packed BC7 (or RGBA8)
+		// native mip chain (sRGB when the file's transfer function is sRGB), which the runtime's
+		// texture residency uploads as is. ETC1S and UASTC both transcode to BC7 directly.
+		Ktx2TextureCompileResult TranscodeBasis(
+			std::span<const std::byte> bytes, Swim::Assets::TextureSemantic semantic, CookedTextureEncoding encoding)
 		{
 			static std::once_flag initialized;
 			std::call_once(initialized,
@@ -97,7 +98,9 @@ namespace Swim::AssetCompiler
 
 			Swim::Assets::TexturePayloadVariant payload;
 			payload.Container = Swim::Assets::TextureContainerFormat::NativeMipData;
-			payload.Format = srgb ? Swim::Assets::TexturePayloadFormat::RGBA8SRgb : Swim::Assets::TexturePayloadFormat::RGBA8UNorm;
+			const bool bc7 = encoding == CookedTextureEncoding::Bc7;
+			using PF = Swim::Assets::TexturePayloadFormat;
+			payload.Format = bc7 ? (srgb ? PF::BC7SRgb : PF::BC7UNorm) : (srgb ? PF::RGBA8SRgb : PF::RGBA8UNorm);
 			payload.Supercompression = Swim::Assets::TextureSupercompression::None;
 			const std::uint32_t levels = std::max(1u, transcoder.get_levels());
 			for (std::uint32_t level = 0; level < levels; ++level)
@@ -115,11 +118,12 @@ namespace Swim::AssetCompiler
 					return Fail(Swim::Assets::Ktx2ErrorCode::InvalidDimensions,
 						"Basis KTX2 level " + std::to_string(level) + " is not a regular mip chain level");
 				}
-				const std::uint64_t size = std::uint64_t(width) * height * 4u;
+				const std::uint64_t size = bc7 ? GetBc7Bytes(width, height) : std::uint64_t(width) * height * 4u;
+				const std::uint32_t units = bc7 ? static_cast<std::uint32_t>(size / 16u) : width * height;
 				const std::uint64_t offset = payload.Bytes.size();
 				payload.Bytes.resize(static_cast<std::size_t>(offset + size));
-				if (!transcoder.transcode_image_level(
-						level, 0, 0, payload.Bytes.data() + offset, width * height, basist::transcoder_texture_format::cTFRGBA32))
+				if (!transcoder.transcode_image_level(level, 0, 0, payload.Bytes.data() + offset, units,
+						bc7 ? basist::transcoder_texture_format::cTFBC7_RGBA : basist::transcoder_texture_format::cTFRGBA32))
 				{
 					return Fail(Swim::Assets::Ktx2ErrorCode::InvalidLevelData,
 						"Basis KTX2 level " + std::to_string(level) + " failed to transcode");
@@ -131,8 +135,8 @@ namespace Swim::AssetCompiler
 		}
 	} // namespace
 
-	Ktx2TextureCompileResult CompileKtx2Texture(
-		std::span<const std::byte> bytes, Swim::Assets::TextureColorSpace colorSpace, Swim::Assets::TextureSemantic semantic)
+	Ktx2TextureCompileResult CompileKtx2Texture(std::span<const std::byte> bytes, Swim::Assets::TextureColorSpace colorSpace,
+		Swim::Assets::TextureSemantic semantic, CookedTextureEncoding encoding)
 	{
 		const Swim::Assets::Ktx2ParseResult parsed = Swim::Assets::ParseKtx2Metadata(bytes);
 		if (!parsed)
@@ -143,7 +147,7 @@ namespace Swim::AssetCompiler
 		}
 		if (IsBasisUniversal(bytes))
 		{
-			return TranscodeBasis(bytes, semantic);
+			return TranscodeBasis(bytes, semantic, encoding);
 		}
 
 		Ktx2TextureCompileResult result;

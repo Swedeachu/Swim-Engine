@@ -5,6 +5,7 @@
 #include "Tests/Framework/Test.h"
 
 #include <cstring>
+#include <tuple>
 
 using namespace Swim;
 using namespace Swim::Render;
@@ -57,13 +58,18 @@ SWIM_TEST("Render.TextureResidency", "SelectsUncompressedNativePayloadsOnly")
 	SWIM_REQUIRE(selection.has_value());
 	SWIM_CHECK(selection->Format == Rhi::Format::RGBA8Unorm);
 
-	// A compressed variant first is skipped in favour of the native fallback.
+	// A compressed variant first is taken where the device samples BC formats, else skipped
+	// in favour of the uncompressed fallback.
 	Assets::TexturePayloadVariant bc7;
 	bc7.Format = TexturePayloadFormat::BC7UNorm;
 	texture.Payloads.insert(texture.Payloads.begin(), bc7);
-	selection = TextureResidency::SelectPayload(texture);
+	selection = TextureResidency::SelectPayload(texture, false);
 	SWIM_REQUIRE(selection.has_value());
 	SWIM_CHECK_EQUAL(selection->Payload, 1u);
+	selection = TextureResidency::SelectPayload(texture, true);
+	SWIM_REQUIRE(selection.has_value());
+	SWIM_CHECK_EQUAL(selection->Payload, 0u);
+	SWIM_CHECK(selection->Format == Rhi::Format::BC7Unorm);
 
 	auto srgb = MakeTexture(TexturePayloadFormat::RGBA8SRgb);
 	SWIM_CHECK(TextureResidency::SelectPayload(srgb)->Format == Rhi::Format::RGBA8UnormSrgb);
@@ -74,7 +80,10 @@ SWIM_TEST("Render.TextureResidency", "SelectsUncompressedNativePayloadsOnly")
 	cube.Dimension = Assets::TextureDimension::Cube;
 	SWIM_CHECK(!TextureResidency::SelectPayload(cube));
 	auto compressedOnly = MakeTexture(TexturePayloadFormat::BC1UNorm);
-	SWIM_CHECK(!TextureResidency::SelectPayload(compressedOnly));
+	SWIM_CHECK(!TextureResidency::SelectPayload(compressedOnly, false));
+	SWIM_CHECK(TextureResidency::SelectPayload(compressedOnly, true)->Format == Rhi::Format::BC1RGBAUnorm);
+	auto bc7Srgb = MakeTexture(TexturePayloadFormat::BC7SRgb);
+	SWIM_CHECK(TextureResidency::SelectPayload(bc7Srgb)->Format == Rhi::Format::BC7UnormSrgb);
 }
 
 SWIM_TEST("Render.TextureResidency", "UploadsEveryMipThroughTheGraphAndBecomesResident")
@@ -176,4 +185,76 @@ SWIM_TEST("Render.TextureResidency", "AbortRecommitsAndDestructionWaitsForGpuUse
 	residency.Collect();
 	SWIM_CHECK_EQUAL(residency.GetStats().RetiringTextures, 0u);
 	SWIM_CHECK(!residency.DestroyTexture(handle));
+}
+
+namespace
+{
+	// An 8x4 BC7 texture, full chain (8x4, 4x2, 2x1, 1x1): 2 x 1 blocks, then one block per
+	// level, laid out the way the cooker writes it (in order, 16-byte aligned).
+	Assets::TextureAsset MakeBc7Texture()
+	{
+		Assets::TextureAsset texture;
+		texture.Width = 8;
+		texture.Height = 4;
+		Assets::TexturePayloadVariant payload;
+		payload.Format = TexturePayloadFormat::BC7SRgb;
+		std::uint64_t offset = 0;
+		for (auto [w, h, size] : { std::tuple{ 8u, 4u, 32ull }, std::tuple{ 4u, 2u, 16ull }, std::tuple{ 2u, 1u, 16ull }, std::tuple{ 1u, 1u, 16ull } })
+		{
+			payload.Mips.push_back({ w, h, 1, offset, size, size });
+			offset += size;
+		}
+		payload.Bytes.resize(static_cast<std::size_t>(offset));
+		for (std::size_t i = 0; i < payload.Bytes.size(); ++i)
+		{
+			payload.Bytes[i] = static_cast<std::byte>(i * 7 + 5);
+		}
+		texture.Payloads.push_back(std::move(payload));
+		return texture;
+	}
+} // namespace
+
+SWIM_TEST("Render.TextureResidency", "Bc7ChainsUploadBlockRowsWhereTheDeviceSamplesThem")
+{
+	Testing::MockDevice device;
+	device.CreateTextures = true;
+	{
+		TextureResidency withoutBc(device);
+		SWIM_CHECK_THROWS(withoutBc.CreateTexture(MakeBc7Texture()), std::invalid_argument);
+	}
+	device.adapterInfo.Capabilities.BcTextureCompression = true;
+	TextureResidency residency(device);
+	RenderGraphExecutor executor(device);
+
+	const auto expected = MakeBc7Texture();
+	auto asset = MakeBc7Texture();
+	// Mips whose blocks do not match the extent are rejected.
+	auto wrongSize = MakeBc7Texture();
+	wrongSize.Payloads[0].Mips[0].SizeBytes = 8 * 4 * 4;
+	SWIM_CHECK_THROWS(residency.CreateTexture(wrongSize), std::invalid_argument);
+
+	// Handing the asset over adopts its bytes (no copy): the payload is left empty.
+	const auto handle = residency.CreateTexture(std::move(asset), "bc7");
+	SWIM_CHECK(asset.Payloads[0].Bytes.empty());
+	SWIM_CHECK(residency.GetTexture(handle)->GetDesc().PixelFormat == Rhi::Format::BC7UnormSrgb);
+	SWIM_CHECK_EQUAL(residency.GetTexture(handle)->GetDesc().MipLevels, 4u);
+	SWIM_CHECK_EQUAL(residency.GetStats().PendingUploadBytes, 80u);
+
+	Upload(residency, executor);
+	auto* texture = static_cast<Testing::MockTexture*>(residency.GetTexture(handle));
+	const auto& payload = expected.Payloads[0];
+	for (std::uint32_t mip = 0; mip < 4; ++mip)
+	{
+		const auto& actual = texture->Bytes({ mip, 0 });
+		SWIM_REQUIRE_EQUAL(actual.size(), std::size_t(payload.Mips[mip].SizeBytes));
+		SWIM_CHECK(std::memcmp(actual.data(), payload.Bytes.data() + payload.Mips[mip].OffsetBytes, actual.size()) == 0);
+	}
+	executor.Wait();
+	residency.Collect();
+	SWIM_CHECK(residency.GetState(handle) == GpuUploadState::Resident);
+
+	// A copied (not adopted) upload keeps the caller's asset intact.
+	const auto copy = MakeBc7Texture();
+	residency.CreateTexture(copy);
+	SWIM_CHECK_EQUAL(copy.Payloads[0].Bytes.size(), std::size_t{ 80 });
 }

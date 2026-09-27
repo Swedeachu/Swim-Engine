@@ -302,8 +302,11 @@ namespace Engine
 			if (std::filesystem::is_directory(assetRoot, error))
 			{
 				std::cout << "[Assets] Development asset root: " << assetRoot.string() << '\n';
+				const auto bootstrapStart = std::chrono::steady_clock::now();
 				const auto bootstrap = Swim::AssetCompiler::RunDevelopmentAssetBootstrap(assetRoot, *assetSystem);
-				std::cout << "[Assets] Sources: " << bootstrap.Stats.SourcesDiscovered << ", current: " << bootstrap.Stats.SourcesCurrent
+				const double bootstrapMs =
+					std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bootstrapStart).count();
+				std::cout << "[Assets] Bootstrap took " << static_cast<int>(bootstrapMs) << " ms. Sources: " << bootstrap.Stats.SourcesDiscovered << ", current: " << bootstrap.Stats.SourcesCurrent
 						  << ", cooked: " << bootstrap.Stats.SourcesCooked
 						  << ", skipped unsupported: " << bootstrap.Stats.SourcesSkippedUnsupported
 						  << ", root models loaded: " << bootstrap.Stats.RootModelsLoaded
@@ -757,6 +760,7 @@ namespace Engine
 					{ "ssr.roughness", &ssr.MaxRoughness },
 					{ "ssr.half", nullptr, &ssrHalf },
 					{ "ao.half", nullptr, &aoHalf },
+					{ "reflections.blend", &ssr.TemporalBlend },
 					{ "ao.slices", nullptr, &ao.SliceCount },
 					{ "ao.steps", nullptr, &ao.StepCount },
 					{ "ao.radius", &ao.Radius },

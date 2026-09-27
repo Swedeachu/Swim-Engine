@@ -30,6 +30,10 @@ struct ReflectionProbeRecord
 
 [[vk::binding(12, 0)]] StructuredBuffer<ReflectionProbeRecord> ProbeRecords;
 [[vk::binding(13, 0)]] Texture2D<float> ObjectId;
+// The reflection term for the temporal filter (ReflectionTemporal != 0; a 1x1 stand-in
+// otherwise): rgb = what replaced the specular IBL this frame, a = the weight it entered the
+// colour with (AO times the fog transmittance); ScreenSpaceReflectionTemporal.slang filters it.
+[[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> ReflectionTermOut;
 
 // ReflectionProbes::ParallaxSteps / ParallaxRefineSteps / ParallaxReach.
 static const uint ProbeParallaxSteps = 96;
@@ -122,13 +126,16 @@ float ProbeExcess(float slot, float3 offset, float3 direction, float t, out floa
 }
 
 // ReflectionProbes::ParallaxDirection (with ParallaxThickness), then the prefiltered radiance there.
-float3 SampleProbe(ReflectionProbeRecord record, float3 position, float3 direction, float lod, float texelAngle)
+// Alpha: 1 where the ray found the surface it hits (or passed in front of everything the probe
+// captured), 0 where it ended behind a nearer surface as the probe sees it (diagnostics).
+float4 SampleProbe(ReflectionProbeRecord record, float3 position, float3 direction, float lod, float texelAngle)
 {
 	const float slot = record.Params.y;
 	const float3 offset = position - record.PositionRadius.xyz;
 	float3 found = direction;
 	float t = 0.0;
 	bool wasBeyond = false;
+	bool resolved = false;
 	for (uint i = 0; i < ProbeParallaxSteps; ++i)
 	{
 		// Texel-adaptive step: the sample's direction from the probe turns by about
@@ -173,13 +180,15 @@ float3 SampleProbe(ReflectionProbeRecord record, float3 position, float3 directi
 		{
 			const float3 hit = offset + direction * hi;
 			found = hitLength > 0.0 ? hit / hitLength : direction;
+			resolved = true;
 			break;
 		}
 		// Behind an occluder (as the probe sees it): march on.
 		wasBeyond = true;
 		t = next;
 	}
-	return max(ProbeCubes.SampleLevel(ProbeSampler, float4(found, slot), lod).rgb, float3(0.0, 0.0, 0.0));
+	const float confidence = resolved || !wasBeyond ? 1.0 : 0.0;
+	return float4(max(ProbeCubes.SampleLevel(ProbeSampler, float4(found, slot), lod).rgb, float3(0.0, 0.0, 0.0)), confidence);
 }
 
 float3 DebugHue(float h)
@@ -363,6 +372,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	float3 debugColor = float3(0.0, 0.0, 0.0);
 	bool reflective = false;
 	const bool ssrEnabled = Params[0].SsrEnabled != 0u;
+	float4 reflectionTerm = float4(0.0, 0.0, 0.0, 0.0); // Weight 0: nothing to filter.
 	if (ssrEnabled || Params[0].ProbeCount > 0u)
 	{
 		const float3 reflectance = Reflectance.Load(at).rgb;
@@ -405,23 +415,28 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 					const ReflectionProbeRecord first = ProbeRecords[selection.First];
 					// The probe atlas's texel angle: faces are 4 << (mips - 1) texels over 90 degrees.
 					const float texelAngle = 1.5707963 / float(4u << (max(Params[0].ProbeMipCount, 1u) - 1u));
-					float3 probe = selection.FirstShare * SampleProbe(first, world, r, lod, texelAngle);
+					const float4 firstSample = SampleProbe(first, world, r, lod, texelAngle);
+					float3 probe = selection.FirstShare * firstSample.rgb;
+
 					if (selection.Second >= 0)
 					{
-						probe += selection.SecondShare * SampleProbe(ProbeRecords[selection.Second], world, r, lod, texelAngle);
+						const float4 secondSample = SampleProbe(ProbeRecords[selection.Second], world, r, lod, texelAngle);
+						probe += selection.SecondShare * secondSample.rgb;
 					}
 					probeCoverage = selection.Coverage;
 					probeAge = first.Params.z;
 					probeSlot = int(first.Params.y);
 					fallback = lerp(specular, reflectance * probe, probeCoverage);
-					c = max(c + ao * (fallback - specular), float3(0.0, 0.0, 0.0));
 				}
 			}
 		}
-		if (confidence > 0.0)
+		// The reflection term: the screen-space hit over the fallback by its confidence, then
+		// (optionally) filtered over time, replacing the specular IBL Forward+ added.
+		const float3 reflected = confidence > 0.0 ? lerp(fallback, reflectance * reflection.rgb, confidence) : fallback;
+		c = max(c + ao * (reflected - specular), float3(0.0, 0.0, 0.0));
+		if (debug == 0u)
 		{
-			const float weight = confidence * ao;
-			c = max(c + weight * (reflectance * reflection.rgb - fallback), float3(0.0, 0.0, 0.0));
+			reflectionTerm = float4(reflected, ao);
 		}
 		if (debug == 1u)
 		{
@@ -472,6 +487,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 				const float transmittance = exp(-FogOpticalDepth(fog, camera, direction, fogDistance));
 				const float3 inscatter = fog.Color + fog.SunColor * HenyeyGreenstein(fog.Anisotropy, -dot(fog.SunDirection, direction));
 				c = c * transmittance + inscatter * (1.0 - transmittance);
+				reflectionTerm.a *= transmittance;
 			}
 		}
 	}
@@ -481,4 +497,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		c = reflective ? debugColor : float3(grey, grey, grey) * 0.15;
 	}
 	Output[id.xy] = float4(c, color.a);
+	if (Params[0].ReflectionTemporal != 0u)
+	{
+		ReflectionTermOut[id.xy] = reflectionTerm;
+	}
 }

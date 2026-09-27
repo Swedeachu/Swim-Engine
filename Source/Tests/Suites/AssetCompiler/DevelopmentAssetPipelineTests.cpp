@@ -154,6 +154,14 @@ SWIM_TEST("AssetCompiler.DevelopmentAssetPipeline", "UnchangedSourcesSkipTheCook
 	SWIM_REQUIRE_MESSAGE(second.Succeeded(), FirstErrorOr(second, "second bootstrap failed"));
 	SWIM_CHECK_EQUAL(second.Stats.SourcesCurrent, std::size_t{ 1 });
 	SWIM_CHECK_EQUAL(second.Stats.SourcesCooked, std::size_t{ 0 });
+	// The cook left a source stamp (sizes and times of the sources with their hash) next to
+	// the cooked root, so later starts skip re-hashing unchanged sources.
+	bool stamped = false;
+	for (const auto& entry : std::filesystem::recursive_directory_iterator(root.Path() / "Cooked"))
+	{
+		stamped = stamped || entry.path().extension() == ".stamp";
+	}
+	SWIM_CHECK(stamped);
 
 	const ModelAsset* model = assets.Resolve(modelHandle);
 	SWIM_REQUIRE(model != nullptr);

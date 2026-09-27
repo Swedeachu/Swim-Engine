@@ -26,6 +26,7 @@ set(SWIM_RUNTIME_SHADER_PROGRAMS
 	"ForwardOpaquePrepassed=SwimForwardOpaquePrepassed"
 	"ForwardOpaqueDeferred=SwimForwardOpaqueDeferred"
 	"ForwardLocalLights=SwimForwardLocalLights"
+	"ScreenSpaceReflectionTemporal=SwimScreenSpaceReflectionTemporal"
 	"ForwardTransparentSort=SwimForwardTransparentSort"
 	"ShadowDepth=SwimShadowDepth"
 	"ShadowMasked=SwimShadowMasked"

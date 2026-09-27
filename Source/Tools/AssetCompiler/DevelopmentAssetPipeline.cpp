@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <optional>
@@ -17,6 +18,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -24,11 +26,30 @@ namespace Swim::AssetCompiler
 {
 	namespace
 	{
+		// The cooked files the inspection read, by path: the load publishes them without
+		// reading any file a second time.
+		using CookedFileCache = std::unordered_map<std::string, std::vector<std::byte>>;
+
 		struct CookInspection
 		{
 			bool Current = false;
 			std::filesystem::path RootSasset;
+			CookedFileCache Files;
 		};
+
+		// Cooked files are written whole by the cooker (WriteFileReplace) and parsed with their
+		// structure and sizes checked, so their content hashes are not recomputed on every
+		// start (that was about six SHA-256 passes over every cooked byte). SWIM_VERIFY_ASSETS=1
+		// turns the full hash validation back on.
+		bool VerifyCookedHashes()
+		{
+			static const bool verify = []
+			{
+				const char* value = std::getenv("SWIM_VERIFY_ASSETS");
+				return value != nullptr && value[0] == '1';
+			}();
+			return verify;
+		}
 
 		std::string LowerExtension(const std::filesystem::path& path)
 		{
@@ -226,6 +247,98 @@ namespace Swim::AssetCompiler
 			return result;
 		}
 
+		// A source file's size and modification time, the key of the source stamp.
+		std::string SourceStampLine(const std::string& logicalPath, const std::filesystem::path& path)
+		{
+			std::error_code error;
+			const auto size = std::filesystem::file_size(path, error);
+			if (error)
+			{
+				return {};
+			}
+			const auto time = std::filesystem::last_write_time(path, error);
+			if (error)
+			{
+				return {};
+			}
+			std::ostringstream line;
+			line << logicalPath << '\t' << size << '\t' << time.time_since_epoch().count();
+			return line.str();
+		}
+
+		std::filesystem::path SourceStampPath(const std::filesystem::path& rootSasset)
+		{
+			std::filesystem::path path = rootSasset;
+			path += ".stamp";
+			return path;
+		}
+
+		// The stamp next to a cooked root: the source graph hash and, per source file, its
+		// size and modification time when that hash was computed. While every source still
+		// has them, the hash is taken from the stamp instead of re-reading and hashing sources.
+		std::string BuildSourceStamp(const std::filesystem::path& assetRoot,
+			std::span<const Swim::Assets::SassetSourceDependency> stored, const Swim::Assets::ContentHash& hash)
+		{
+			std::string stamp = hash.ToHex() + "\n";
+			for (const auto& dependency : stored)
+			{
+				const std::string line = SourceStampLine(dependency.LogicalPath, assetRoot / std::filesystem::path(dependency.LogicalPath));
+				if (line.empty())
+				{
+					return {};
+				}
+				stamp += line + "\n";
+			}
+			return stamp;
+		}
+
+		std::optional<Swim::Assets::ContentHash> StampedSourceHash(const std::filesystem::path& assetRoot,
+			const std::filesystem::path& rootSasset, std::span<const Swim::Assets::SassetSourceDependency> stored)
+		{
+			std::ifstream file(SourceStampPath(rootSasset), std::ios::binary);
+			if (!file)
+			{
+				return std::nullopt;
+			}
+			std::string hashLine;
+			std::getline(file, hashLine);
+			std::string expected;
+			for (const auto& dependency : stored)
+			{
+				const std::string line = SourceStampLine(dependency.LogicalPath, assetRoot / std::filesystem::path(dependency.LogicalPath));
+				if (line.empty())
+				{
+					return std::nullopt;
+				}
+				expected += line + "\n";
+			}
+			const std::string rest((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+			if (rest != expected)
+			{
+				return std::nullopt;
+			}
+			try
+			{
+				return Swim::Assets::ContentHash::FromHex(hashLine);
+			}
+			catch (const std::exception&)
+			{
+				return std::nullopt;
+			}
+		}
+
+		void WriteSourceStamp(const std::filesystem::path& assetRoot, const std::filesystem::path& rootSasset,
+			std::span<const Swim::Assets::SassetSourceDependency> stored, const Swim::Assets::ContentHash& hash)
+		{
+			const std::string stamp = BuildSourceStamp(assetRoot, stored, hash);
+			if (stamp.empty())
+			{
+				return;
+			}
+			std::ofstream file(SourceStampPath(rootSasset), std::ios::binary | std::ios::trunc);
+			file << stamp;
+		}
+
 		std::optional<Swim::Assets::ContentHash> ComputeCurrentSourceHash(
 			const std::filesystem::path& assetRoot,
 			std::span<const Swim::Assets::SassetSourceDependency> stored)
@@ -252,7 +365,8 @@ namespace Swim::AssetCompiler
 		bool ValidateCookedGraph(
 			const std::filesystem::path& path,
 			const std::filesystem::path& cookedRoot,
-			std::unordered_set<Swim::Assets::AssetId>& visited)
+			std::unordered_set<Swim::Assets::AssetId>& visited,
+			CookedFileCache& files)
 		{
 			std::error_code error;
 			if (!std::filesystem::is_regular_file(path, error) || error)
@@ -260,8 +374,8 @@ namespace Swim::AssetCompiler
 				return false;
 			}
 
-			const auto bytes = ReadFile(path);
-			const auto parsed = Swim::Assets::ParseSasset(bytes, true);
+			auto bytes = ReadFile(path);
+			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
 			if (!parsed)
 			{
 				return false;
@@ -270,10 +384,12 @@ namespace Swim::AssetCompiler
 			{
 				return true;
 			}
+			const auto dependencies = parsed.Metadata.Dependencies;
+			files[path.string()] = std::move(bytes);
 
-			for (const Swim::Assets::AssetId dependency : parsed.Metadata.Dependencies)
+			for (const Swim::Assets::AssetId dependency : dependencies)
 			{
-				if (!ValidateCookedGraph(ObjectPath(cookedRoot, dependency), cookedRoot, visited))
+				if (!ValidateCookedGraph(ObjectPath(cookedRoot, dependency), cookedRoot, visited, files))
 				{
 					return false;
 				}
@@ -295,7 +411,7 @@ namespace Swim::AssetCompiler
 			}
 
 			const auto bytes = ReadFile(result.RootSasset);
-			const auto parsed = Swim::Assets::ParseSasset(bytes, true);
+			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
 			if (!parsed || parsed.Metadata.Type != Swim::Assets::SassetAssetType::Model)
 			{
 				return result;
@@ -304,16 +420,25 @@ namespace Swim::AssetCompiler
 			{
 				return result;
 			}
-			const auto currentSourceHash = ComputeCurrentSourceHash(assetRoot, parsed.Metadata.SourceDependencies);
+			// The sources' hash from the stamp while their sizes and times are unchanged;
+			// otherwise hashed from the files (and the stamp refreshed when they still match).
+			auto currentSourceHash = StampedSourceHash(assetRoot, result.RootSasset, parsed.Metadata.SourceDependencies);
 			if (!currentSourceHash.has_value() || *currentSourceHash != parsed.Metadata.SourceHash)
 			{
-				return result;
+				currentSourceHash = ComputeCurrentSourceHash(assetRoot, parsed.Metadata.SourceDependencies);
+				if (!currentSourceHash.has_value() || *currentSourceHash != parsed.Metadata.SourceHash)
+				{
+					return result;
+				}
+				WriteSourceStamp(assetRoot, result.RootSasset, parsed.Metadata.SourceDependencies, *currentSourceHash);
 			}
 			std::unordered_set<Swim::Assets::AssetId> validated;
-			if (!ValidateCookedGraph(result.RootSasset, cookedRoot, validated))
+			CookedFileCache files;
+			if (!ValidateCookedGraph(result.RootSasset, cookedRoot, validated, files))
 			{
 				return result;
 			}
+			result.Files = std::move(files);
 			result.Current = true;
 			return result;
 		}
@@ -345,10 +470,20 @@ namespace Swim::AssetCompiler
 			Swim::Assets::AssetSystem& assets,
 			std::unordered_set<Swim::Assets::AssetId>& loaded,
 			std::size_t& loadedCount,
-			std::string& errorMessage)
+			std::string& errorMessage,
+			CookedFileCache& files)
 		{
-			const auto bytes = ReadFile(rootPath);
-			const auto parsed = Swim::Assets::ParseSasset(bytes, true);
+			std::vector<std::byte> bytes;
+			if (const auto cached = files.find(rootPath.string()); cached != files.end())
+			{
+				bytes = std::move(cached->second);
+				files.erase(cached);
+			}
+			else
+			{
+				bytes = ReadFile(rootPath);
+			}
+			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
 			if (!parsed)
 			{
 				errorMessage = parsed.Error.Message;
@@ -368,13 +503,13 @@ namespace Swim::AssetCompiler
 					errorMessage = "missing cooked dependency object " + AssetIdHex(dependency);
 					return false;
 				}
-				if (!LoadSassetGraph(dependencyPath, cookedRoot, assets, loaded, loadedCount, errorMessage))
+				if (!LoadSassetGraph(dependencyPath, cookedRoot, assets, loaded, loadedCount, errorMessage, files))
 				{
 					return false;
 				}
 			}
 
-			const auto loadedAsset = Swim::Assets::LoadSasset(assets, bytes);
+			const auto loadedAsset = Swim::Assets::LoadSasset(assets, bytes, VerifyCookedHashes());
 			if (!loadedAsset)
 			{
 				errorMessage = loadedAsset.Error.Message;
@@ -430,6 +565,7 @@ namespace Swim::AssetCompiler
 		MeshOptimizer optimizer;
 		StaticModelCompiler compiler;
 		std::vector<std::filesystem::path> rootsToLoad;
+		CookedFileCache files; // What the inspections read, handed to the load.
 		for (const std::filesystem::path& source : sources)
 		{
 			CookInspection inspection;
@@ -447,6 +583,7 @@ namespace Swim::AssetCompiler
 			{
 				++result.Stats.SourcesCurrent;
 				rootsToLoad.push_back(inspection.RootSasset);
+				files.merge(inspection.Files);
 				continue;
 			}
 
@@ -496,22 +633,41 @@ namespace Swim::AssetCompiler
 			}
 			++result.Stats.SourcesCooked;
 			rootsToLoad.push_back(inspection.RootSasset);
+			if (!compiled.Assets.empty())
+			{
+				// The fresh cook's sources are current: stamp them so the next start skips hashing.
+				const auto rootBytes = ReadFile(inspection.RootSasset);
+				const auto rootParsed = Swim::Assets::ParseSasset(rootBytes, false);
+				if (rootParsed)
+				{
+					WriteSourceStamp(assetRoot, inspection.RootSasset, rootParsed.Metadata.SourceDependencies, rootParsed.Metadata.SourceHash);
+				}
+			}
 		}
 
 		std::unordered_set<Swim::Assets::AssetId> loaded;
 		for (const std::filesystem::path& root : rootsToLoad)
 		{
+			// The root's id and type first (its bytes are still cached; the load consumes them).
+			std::optional<Swim::Assets::AssetId> rootModel;
+			{
+				const auto cached = files.find(root.string());
+				const auto rootBytes = cached != files.end() ? std::vector<std::byte>() : ReadFile(root);
+				const auto parsed = Swim::Assets::ParseSasset(cached != files.end() ? std::span<const std::byte>(cached->second) : std::span<const std::byte>(rootBytes), false);
+				if (parsed && parsed.Metadata.Type == Swim::Assets::SassetAssetType::Model)
+				{
+					rootModel = parsed.Metadata.Id;
+				}
+			}
 			std::string loadError;
-			if (!LoadSassetGraph(root, cookedRoot, assets, loaded, result.Stats.SassetsLoaded, loadError))
+			if (!LoadSassetGraph(root, cookedRoot, assets, loaded, result.Stats.SassetsLoaded, loadError, files))
 			{
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Load, root, std::move(loadError) });
 				continue;
 			}
-			const auto rootBytes = ReadFile(root);
-			const auto parsed = Swim::Assets::ParseSasset(rootBytes, false);
-			if (parsed && parsed.Metadata.Type == Swim::Assets::SassetAssetType::Model)
+			if (rootModel)
 			{
-				result.RootModels.push_back(parsed.Metadata.Id);
+				result.RootModels.push_back(*rootModel);
 				++result.Stats.RootModelsLoaded;
 			}
 		}

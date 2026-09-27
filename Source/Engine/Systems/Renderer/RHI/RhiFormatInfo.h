@@ -46,4 +46,43 @@ namespace Swim::Rhi
 		return format == Format::D32Float ? 4u : GetUncompressedColorTexelBytes(format);
 	}
 
+	// The copy unit of a buffer/image transfer: one texel (1 x 1) for the formats of
+	// GetTransferTexelBytes, one 4 x 4 block for the BC formats. Bytes is zero for formats
+	// without a transfer contract.
+	struct TransferBlockInfo
+	{
+		std::uint32_t Bytes = 0;
+		std::uint32_t Width = 1;
+		std::uint32_t Height = 1;
+	};
+
+	constexpr TransferBlockInfo GetTransferBlockInfo(Format format)
+	{
+		switch (format)
+		{
+		case Format::BC1RGBAUnorm: case Format::BC1RGBAUnormSrgb: case Format::BC4Unorm: case Format::BC4Snorm:
+			return { 8, 4, 4 };
+		case Format::BC3Unorm: case Format::BC3UnormSrgb: case Format::BC5Unorm: case Format::BC5Snorm:
+		case Format::BC6HUfloat: case Format::BC6HSfloat: case Format::BC7Unorm: case Format::BC7UnormSrgb:
+			return { 16, 4, 4 };
+		default:
+			return { GetTransferTexelBytes(format), 1, 1 };
+		}
+	}
+
+	constexpr bool IsBlockCompressed(Format format)
+	{
+		return GetTransferBlockInfo(format).Width > 1;
+	}
+
+	// Tightly packed bytes of a width x height x depth region (partial edge blocks count
+	// whole); zero for formats without a transfer contract or an empty region.
+	constexpr std::uint64_t GetTransferRegionBytes(Format format, std::uint32_t width, std::uint32_t height, std::uint32_t depth)
+	{
+		const auto block = GetTransferBlockInfo(format);
+		const std::uint64_t columns = (std::uint64_t(width) + block.Width - 1) / block.Width;
+		const std::uint64_t rows = (std::uint64_t(height) + block.Height - 1) / block.Height;
+		return block.Bytes * columns * rows * depth;
+	}
+
 } // namespace Swim::Rhi

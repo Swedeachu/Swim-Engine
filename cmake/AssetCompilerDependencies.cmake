@@ -251,6 +251,31 @@ else()
 endif()
 swim_set_solution_folder(SwimAssetCompilerBasisTranscoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/Basis Universal")
 
+# Basis Universal encoder (compiler-only): source images (PNG/JPEG/WebP) are encoded to
+# BC7 at cook time through UASTC (encode_uastc, then the transcoder's lossless-grade
+# UASTC -> BC7 step), so every cooked texture is GPU block-compressed. Plain C++ build
+# (no SSE kernels, no OpenCL, no Zstandard).
+set(SWIM_BASIS_ENCODER_SOURCES
+	basisu_backend.cpp basisu_basis_file.cpp basisu_comp.cpp basisu_enc.cpp basisu_etc.cpp basisu_frontend.cpp
+	basisu_gpu_texture.cpp basisu_pvrtc1_4.cpp basisu_resampler.cpp basisu_resample_filters.cpp basisu_ssim.cpp
+	basisu_uastc_enc.cpp basisu_bc7enc.cpp jpgd.cpp basisu_kernels_sse.cpp basisu_opencl.cpp pvpngreader.cpp
+	basisu_uastc_hdr_4x4_enc.cpp basisu_astc_hdr_6x6_enc.cpp basisu_astc_hdr_common.cpp
+	3rdparty/android_astc_decomp.cpp 3rdparty/tinyexr.cpp
+)
+list(TRANSFORM SWIM_BASIS_ENCODER_SOURCES PREPEND "${swim_basis_universal_source_SOURCE_DIR}/encoder/")
+add_library(SwimAssetCompilerBasisEncoder STATIC ${SWIM_BASIS_ENCODER_SOURCES})
+add_library(Swim::AssetCompilerBasisEncoder ALIAS SwimAssetCompilerBasisEncoder)
+target_include_directories(SwimAssetCompilerBasisEncoder SYSTEM PUBLIC "${swim_basis_universal_source_SOURCE_DIR}")
+target_compile_definitions(SwimAssetCompilerBasisEncoder PUBLIC BASISU_SUPPORT_SSE=0 BASISU_SUPPORT_OPENCL=0)
+target_link_libraries(SwimAssetCompilerBasisEncoder PUBLIC Swim::AssetCompilerBasisTranscoder)
+target_compile_features(SwimAssetCompilerBasisEncoder PRIVATE cxx_std_17)
+if(MSVC)
+	target_compile_options(SwimAssetCompilerBasisEncoder PRIVATE /W0 /bigobj)
+else()
+	target_compile_options(SwimAssetCompilerBasisEncoder PRIVATE -w)
+endif()
+swim_set_solution_folder(SwimAssetCompilerBasisEncoder "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/Basis Universal")
+
 # One explicit private dependency bundle makes the compiler/runtime ownership
 # visible at the CMake target boundary. SwimAssetCompiler is the only first-party
 # production target that should consume this bundle; test fixtures may link an
@@ -263,6 +288,7 @@ target_link_libraries(SwimAssetCompilerDependencies INTERFACE
 	Swim::AssetCompilerDraco
 	SwimAssetCompilerStb
 	Swim::AssetCompilerBasisTranscoder
+	Swim::AssetCompilerBasisEncoder
 	${SWIM_ASSET_COMPILER_WEBP_TARGET}
 )
 swim_set_solution_folder(SwimAssetCompilerDependencies "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler")

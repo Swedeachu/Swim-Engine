@@ -30,9 +30,9 @@ namespace Swim::Render
 				});
 		}
 
-		std::uint64_t TextureUploadBytes(const Assets::TextureAsset& texture)
+		std::uint64_t TextureUploadBytes(const TextureResidency& residency, const Assets::TextureAsset& texture)
 		{
-			const auto selection = TextureResidency::SelectPayload(texture);
+			const auto selection = residency.SelectPayloadFor(texture);
 			if (!selection)
 			{
 				return 0;
@@ -435,14 +435,17 @@ namespace Swim::Render
 			}
 			else
 			{
-				const auto* texture = assets.Resolve(request.TextureAsset);
+				auto* texture = assets.Resolve(request.TextureAsset);
 				if (!texture)
 				{
 					Fail(request, AssetErrorCode::Internal, "texture asset is no longer resident before GPU staging", false);
 					return false;
 				}
-				bytes = TextureUploadBytes(*texture);
-				request.Texture = textures.CreateTexture(*texture, label);
+				bytes = TextureUploadBytes(textures, *texture);
+				// Without retained CPU assets the texture unloads right after this, so the
+				// residency takes its payload bytes over instead of copying them.
+				request.Texture =
+					desc.RetainCpuAssets ? textures.CreateTexture(*texture, label) : textures.CreateTexture(std::move(*texture), label);
 			}
 		}
 		catch (const std::length_error&)

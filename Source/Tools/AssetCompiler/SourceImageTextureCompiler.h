@@ -2,6 +2,7 @@
 
 #include "Engine/Assets/TextureAsset.h"
 #include "Tools/AssetCompiler/IntermediateModel.h"
+#include "Tools/AssetCompiler/TextureBlockEncoder.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +45,7 @@ namespace Swim::AssetCompiler
 		std::span<const std::byte> bytes,
 		SourceImageMimeType mimeType,
 		Swim::Assets::TextureColorSpace colorSpace,
-		Swim::Assets::TextureSemantic semantic);
+		Swim::Assets::TextureSemantic semantic,
+		CookedTextureEncoding encoding = CookedTextureEncoding::Bc7);
 
 }

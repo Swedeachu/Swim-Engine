@@ -55,6 +55,59 @@ namespace Swim::Assets
 				static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[3]));
 		}
 
+		// One SHA-256 compression of a 64-byte block into the state.
+		void CompressBlock(std::array<std::uint32_t, 8>& state, const std::byte* block)
+		{
+			std::array<std::uint32_t, 64> words{};
+			for (std::size_t index = 0; index < 16; ++index)
+			{
+				words[index] = LoadBigEndian32(block + index * 4);
+			}
+			for (std::size_t index = 16; index < words.size(); ++index)
+			{
+				const std::uint32_t s0 = std::rotr(words[index - 15], 7) ^ std::rotr(words[index - 15], 18) ^ (words[index - 15] >> 3);
+				const std::uint32_t s1 = std::rotr(words[index - 2], 17) ^ std::rotr(words[index - 2], 19) ^ (words[index - 2] >> 10);
+				words[index] = words[index - 16] + s0 + words[index - 7] + s1;
+			}
+
+			std::uint32_t a = state[0];
+			std::uint32_t b = state[1];
+			std::uint32_t c = state[2];
+			std::uint32_t d = state[3];
+			std::uint32_t e = state[4];
+			std::uint32_t f = state[5];
+			std::uint32_t g = state[6];
+			std::uint32_t h = state[7];
+
+			for (std::size_t index = 0; index < words.size(); ++index)
+			{
+				const std::uint32_t sum1 = std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
+				const std::uint32_t choose = (e & f) ^ ((~e) & g);
+				const std::uint32_t temp1 = h + sum1 + choose + RoundConstants[index] + words[index];
+				const std::uint32_t sum0 = std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
+				const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+				const std::uint32_t temp2 = sum0 + majority;
+
+				h = g;
+				g = f;
+				f = e;
+				e = d + temp1;
+				d = c;
+				c = b;
+				b = a;
+				a = temp1 + temp2;
+			}
+
+			state[0] += a;
+			state[1] += b;
+			state[2] += c;
+			state[3] += d;
+			state[4] += e;
+			state[5] += f;
+			state[6] += g;
+			state[7] += h;
+		}
+
 		std::uint8_t HexValue(char character)
 		{
 			if (character >= '0' && character <= '9')
@@ -121,72 +174,30 @@ namespace Swim::Assets
 			throw std::length_error("ContentHash input is too large for SHA-256 length encoding.");
 		}
 
-		std::vector<std::byte> padded(bytes.begin(), bytes.end());
-		padded.push_back(std::byte{ 0x80 });
-
-		while ((padded.size() % 64) != 56)
-		{
-			padded.push_back(std::byte{ 0 });
-		}
-
-		const std::uint64_t bitLength = static_cast<std::uint64_t>(bytes.size()) * 8ull;
-		for (int shift = 56; shift >= 0; shift -= 8)
-		{
-			padded.push_back(std::byte{ static_cast<std::uint8_t>((bitLength >> shift) & 0xffu) });
-		}
-
 		std::array<std::uint32_t, 8> state = InitialState;
-		std::array<std::uint32_t, 64> words{};
-
-		for (std::size_t blockOffset = 0; blockOffset < padded.size(); blockOffset += 64)
+		// Full blocks straight from the input; only the tail is copied into the padded block(s)
+		// (the input used to be copied whole and padded byte by byte).
+		const std::size_t fullBlocks = bytes.size() / 64;
+		for (std::size_t block = 0; block < fullBlocks; ++block)
 		{
-			for (std::size_t index = 0; index < 16; ++index)
-			{
-				words[index] = LoadBigEndian32(padded.data() + blockOffset + index * 4);
-			}
-			for (std::size_t index = 16; index < words.size(); ++index)
-			{
-				const std::uint32_t s0 = std::rotr(words[index - 15], 7) ^ std::rotr(words[index - 15], 18) ^ (words[index - 15] >> 3);
-				const std::uint32_t s1 = std::rotr(words[index - 2], 17) ^ std::rotr(words[index - 2], 19) ^ (words[index - 2] >> 10);
-				words[index] = words[index - 16] + s0 + words[index - 7] + s1;
-			}
-
-			std::uint32_t a = state[0];
-			std::uint32_t b = state[1];
-			std::uint32_t c = state[2];
-			std::uint32_t d = state[3];
-			std::uint32_t e = state[4];
-			std::uint32_t f = state[5];
-			std::uint32_t g = state[6];
-			std::uint32_t h = state[7];
-
-			for (std::size_t index = 0; index < words.size(); ++index)
-			{
-				const std::uint32_t sum1 = std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
-				const std::uint32_t choose = (e & f) ^ ((~e) & g);
-				const std::uint32_t temp1 = h + sum1 + choose + RoundConstants[index] + words[index];
-				const std::uint32_t sum0 = std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
-				const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
-				const std::uint32_t temp2 = sum0 + majority;
-
-				h = g;
-				g = f;
-				f = e;
-				e = d + temp1;
-				d = c;
-				c = b;
-				b = a;
-				a = temp1 + temp2;
-			}
-
-			state[0] += a;
-			state[1] += b;
-			state[2] += c;
-			state[3] += d;
-			state[4] += e;
-			state[5] += f;
-			state[6] += g;
-			state[7] += h;
+			CompressBlock(state, bytes.data() + block * 64);
+		}
+		std::array<std::byte, 128> tail{};
+		const std::size_t remainder = bytes.size() - fullBlocks * 64;
+		if (remainder > 0)
+		{
+			std::memcpy(tail.data(), bytes.data() + fullBlocks * 64, remainder);
+		}
+		tail[remainder] = std::byte{ 0x80 };
+		const std::size_t tailSize = remainder < 56 ? 64 : 128;
+		const std::uint64_t bitLength = static_cast<std::uint64_t>(bytes.size()) * 8ull;
+		for (int i = 0; i < 8; ++i)
+		{
+			tail[tailSize - 1 - i] = std::byte{ static_cast<std::uint8_t>((bitLength >> (8 * i)) & 0xffu) };
+		}
+		for (std::size_t offset = 0; offset < tailSize; offset += 64)
+		{
+			CompressBlock(state, tail.data() + offset);
 		}
 
 		ContentHash result{};

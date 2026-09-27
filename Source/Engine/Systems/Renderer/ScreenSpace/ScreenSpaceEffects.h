@@ -23,6 +23,7 @@ namespace Swim::Render
 		ScreenSpaceProgram Blur;			 // SwimScreenSpaceBlur
 		ScreenSpaceProgram Composite;		 // SwimScreenSpaceComposite
 		ScreenSpaceProgram Reflection;		 // SwimScreenSpaceReflection; optional unless reflections are enabled.
+		ScreenSpaceProgram ReflectionTemporal; // SwimScreenSpaceReflectionTemporal; optional (ScreenSpaceFrame::ReflectionTemporal).
 		// Linear clamp with mips: the composite's probe sampler (a stand-in binding without probes).
 		Rhi::Sampler* ProbeSampler = nullptr;
 		std::string DebugName = "Screen space";
@@ -61,6 +62,18 @@ namespace Swim::Render
 			std::uint32_t MipCount = 1;
 		};
 		std::optional<ProbeInputs> Probes;
+		// Optional (needs ScreenSpaceEffectsDesc::ReflectionTemporal and Velocity): the temporal
+		// reflection filter. After the composite, the reflection term (what replaced the specular
+		// IBL) is blended with last frame's filtered term at the reprojected position, clamped to
+		// this frame's 3x3 neighbourhood, and written into Next (RGBA16Float, Storage | Sampled,
+		// same size) for the next frame. Previous is read only when given.
+		struct ReflectionHistoryInputs
+		{
+			std::optional<GraphTexture> Previous; // Last frame's Next (Sampled, same size).
+			GraphTexture Next;
+			float Blend = 0.4f; // Weight of this frame's term.
+		};
+		std::optional<ReflectionHistoryInputs> ReflectionTemporal;
 		ScreenSpaceView View;					 // The camera the inputs were rendered with, including their jitter.
 		ScreenSpaceSettings Settings;
 		std::uint32_t NoiseFrame = 0; // Rotates the AO noise; pass the frame index when TAA follows.

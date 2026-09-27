@@ -79,6 +79,8 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("SsrBackDepth"), std::uint32_t(offsetof(P, SsrBackDepth)));
 		SWIM_CHECK_EQUAL(offsets.at("ProbeCount"), std::uint32_t(offsetof(P, ProbeCount)));
 		SWIM_CHECK_EQUAL(offsets.at("ReflectionDebug"), std::uint32_t(offsetof(P, ReflectionDebug)));
+		SWIM_CHECK_EQUAL(offsets.at("ReflectionTemporal"), std::uint32_t(offsetof(P, ReflectionTemporal)));
+		SWIM_CHECK_EQUAL(offsets.at("ReflectionTemporalBlend"), std::uint32_t(offsetof(P, ReflectionTemporalBlend)));
 		(void)paramsBinding;
 	}
 } // namespace
@@ -95,13 +97,13 @@ SWIM_TEST("ShaderCompiler.ScreenSpaceLayout", "ProgramsMatchTheBindingContract")
 	CheckProgram(Load(SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture,
 			T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::Sampler,
-			T::ReadOnlyStorageBuffer, T::SampledTexture },
+			T::ReadOnlyStorageBuffer, T::SampledTexture, T::StorageTexture },
 		Render::ScreenSpaceCompositeBindings::Params);
 	CheckProgram(Load(SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer,
 			T::StorageTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture },
 		Render::ScreenSpaceReflectionBindings::Params);
 	static_assert(Render::ScreenSpaceAoBindings::Count == 4 && Render::ScreenSpaceBlurBindings::Count == 4 &&
-		Render::ScreenSpaceCompositeBindings::Count == 14 && Render::ScreenSpaceReflectionBindings::Count == 10);
+		Render::ScreenSpaceCompositeBindings::Count == 15 && Render::ScreenSpaceReflectionBindings::Count == 10);
 }
 #endif

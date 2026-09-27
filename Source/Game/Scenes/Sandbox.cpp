@@ -452,6 +452,7 @@ namespace Game
 		reflections.MaxSteps = 128;
 		// A quarter of the rays (the reflection was the costliest pass after the lights).
 		reflections.HalfResolution = true;
+		reflections.Temporal = true; // Settles the half-resolution pattern, jitter and probe refreshes.
 		settings.ScreenSpace.AmbientOcclusion.HalfResolution = true; // Likewise the AO (TAA gathers the block).
 		reflections.DistanceFade = 0.15f;
 		reflections.EdgeFade = 0.05f; // Close up, most hits are near the screen edge.

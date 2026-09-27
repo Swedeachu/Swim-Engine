@@ -525,6 +525,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_PREPASSED=1 FORWARD_DEFERRED_LOCAL=1
 	)
+	swim_add_slang_program(SwimScreenSpaceReflectionTemporal
+		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflectionTemporal.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	swim_add_slang_program(SwimForwardLocalLights
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardLocalLights.slang
 		PROFILE spirv_1_5
@@ -703,6 +708,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimForwardOpaquePrepassed_SPIRV}" "${SwimForwardOpaquePrepassed_REFLECTION}"
 			"${SwimForwardOpaqueDeferred_SPIRV}" "${SwimForwardOpaqueDeferred_REFLECTION}"
 			"${SwimForwardLocalLights_SPIRV}" "${SwimForwardLocalLights_REFLECTION}"
+			"${SwimScreenSpaceReflectionTemporal_SPIRV}" "${SwimScreenSpaceReflectionTemporal_REFLECTION}"
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
 			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
 			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
@@ -777,6 +783,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 			Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 			Source/Shaders/Slang/ForwardPlus/ForwardLocalLights.slang
+			Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflectionTemporal.slang
 			Source/Shaders/Slang/Shadows/ShadowRecords.slang
 			Source/Shaders/Slang/Shadows/ShadowDepth.slang
 			Source/Shaders/Slang/Shadows/ShadowClear.slang

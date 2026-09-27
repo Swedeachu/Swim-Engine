@@ -901,7 +901,7 @@ namespace Swim::Assets
 		}
 
 		const std::span<const std::byte> payloadBytes = GetSassetChunkBytes(bytes, metadata, SassetChunkType::AssetPayload);
-		if (payloadBytes.empty() || ComputeContentHash(payloadBytes) != metadata.ContentHashValue)
+		if (payloadBytes.empty() || (validateChunkHashes && ComputeContentHash(payloadBytes) != metadata.ContentHashValue))
 		{
 			return MakeParseError(SassetErrorCode::HashMismatch, ".sasset asset payload hash does not match the header content hash");
 		}
@@ -948,7 +948,12 @@ namespace Swim::Assets
 
 	SassetLoadResult LoadSasset(AssetSystem& assets, std::span<const std::byte> bytes)
 	{
-		const SassetParseResult parsed = ParseSasset(bytes, true);
+		return LoadSasset(assets, bytes, true);
+	}
+
+	SassetLoadResult LoadSasset(AssetSystem& assets, std::span<const std::byte> bytes, bool validateChunkHashes)
+	{
+		const SassetParseResult parsed = ParseSasset(bytes, validateChunkHashes);
 		if (!parsed)
 		{
 			SassetLoadResult result;

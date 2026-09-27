@@ -149,3 +149,42 @@ SWIM_TEST("RHI.Vulkan.Transfer", "D32FloatCopiesItsDepthAspect")
 	texture.PixelFormat = Rhi::Format::D32Float;
 	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
 }
+
+// BC formats copy whole 4 x 4 blocks: byte counts are per block row, offsets sit on block
+// corners and extents are block multiples unless they end at the mip's edge.
+SWIM_TEST("RHI.Vulkan.Transfer", "BlockCompressedCopiesCountWholeBlocks")
+{
+	Rhi::TextureDesc texture{};
+	texture.Extent = { 10, 6, 1 };
+	texture.MipLevels = 4;
+	texture.PixelFormat = Rhi::Format::BC7UnormSrgb;
+	Rhi::BufferDesc buffer{ 3 * 2 * 16, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, {} };
+	Rhi::BufferTextureCopyRegion region{};
+	region.Extent = { 10, 6, 1 };
+	const auto whole = RhiVulkan::GetBufferImageCopy(buffer, texture, region);
+	SWIM_CHECK_EQUAL(whole.imageExtent.width, 10u);
+	SWIM_CHECK_EQUAL(whole.imageSubresource.aspectMask, VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT));
+	buffer.Size -= 1;
+	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
+	buffer.Size += 1;
+
+	// Mip 2 is 2 x 1: one partial block, 16 bytes.
+	region.Subresource.MipLevel = 2;
+	region.Extent = { 2, 1, 1 };
+	SWIM_CHECK_EQUAL(RhiVulkan::GetBufferImageCopy(buffer, texture, region).imageExtent.width, 2u);
+	region.BufferOffset = 8; // Not a block multiple.
+	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
+
+	// Mip 0: a block-aligned sub-rectangle is fine, an unaligned one is not.
+	region = {};
+	region.TextureOffset = { 4, 0, 0 };
+	region.Extent = { 4, 4, 1 };
+	SWIM_CHECK_EQUAL(RhiVulkan::GetBufferImageCopy(buffer, texture, region).imageOffset.x, 4);
+	region.TextureOffset.X = 2;
+	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
+	region.TextureOffset.X = 4;
+	region.Extent.Width = 3; // Neither a block multiple nor reaching the edge (10).
+	SWIM_CHECK_THROWS(RhiVulkan::GetBufferImageCopy(buffer, texture, region), std::invalid_argument);
+	region.Extent.Width = 6; // Ends at the edge.
+	SWIM_CHECK_EQUAL(RhiVulkan::GetBufferImageCopy(buffer, texture, region).imageExtent.width, 6u);
+}

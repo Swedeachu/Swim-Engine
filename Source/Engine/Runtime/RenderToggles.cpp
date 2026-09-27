@@ -100,6 +100,8 @@ namespace Engine
 		toggles.push_back(Flag("screen.ao", "GTAO and its blur", s.ScreenSpace.AmbientOcclusion.Enabled));
 		toggles.push_back(Flag("screen.ssr", "Screen-space reflections", s.ScreenSpace.Reflections.Enabled));
 		toggles.push_back(Flag("screen.ssr-history", "SSR reading the previous frame (reflections of reflections)", s.ScreenSpace.Reflections.History));
+		toggles.push_back(Flag("screen.reflection-temporal", "Temporal filter of the reflections (history blend)",
+			s.ScreenSpace.Reflections.Temporal));
 		toggles.push_back(Flag("screen.ssr-back-faces", "The back-face depth pass (SSR thickness)", s.ScreenSpace.Reflections.BackFaces));
 		toggles.push_back(Flag("screen.fog", "Height fog", s.ScreenSpace.Fog.Enabled));
 		toggles.push_back(Flag("reflections.probes", "Local reflection probes (captures, filtering, lookups)", s.ReflectionProbes.Enabled));

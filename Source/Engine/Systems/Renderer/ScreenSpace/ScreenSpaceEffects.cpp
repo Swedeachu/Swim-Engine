@@ -198,6 +198,13 @@ namespace Swim::Render
 			resources.Passthrough = true;
 			return resources;
 		}
+		const bool temporal = frame.ReflectionTemporal.has_value() && frame.Velocity.has_value() && (ssr || probes) &&
+			desc.ReflectionTemporal.Pipeline != nullptr;
+		if (temporal)
+		{
+			resources.ParamsRecord.ReflectionTemporal = 1u | (frame.ReflectionTemporal->Previous ? 2u : 0u);
+			resources.ParamsRecord.ReflectionTemporalBlend = std::clamp(frame.ReflectionTemporal->Blend, 0.01f, 1.0f);
+		}
 		const auto params =
 			graph.CreateUpload(std::as_bytes(std::span(&resources.ParamsRecord, 1)), name + " params", Rhi::BufferUsage::Storage, 16);
 		resources.Params = params;
@@ -437,6 +444,32 @@ namespace Swim::Render
 			throw std::invalid_argument(name + " needs the probe sampler");
 		}
 
+		// The reflection term the temporal filter reads, or a 1x1 stand-in the composite never writes.
+		GraphTexture reflectionTerm;
+		if (temporal)
+		{
+			const auto& t = *frame.ReflectionTemporal;
+			const auto nextDesc = graph.GetDesc(t.Next);
+			if (!sameSize(nextDesc) || nextDesc.PixelFormat != Rhi::Format::RGBA16Float ||
+				(t.Previous && (!sameSize(graph.GetDesc(*t.Previous)) || graph.GetDesc(*t.Previous).PixelFormat != Rhi::Format::RGBA16Float)))
+			{
+				throw std::invalid_argument(name + " reflection history must be color-sized RGBA16Float textures");
+			}
+			auto termDesc = OutputDesc(width, height);
+			termDesc.Usage = Rhi::TextureUsage::Storage | Rhi::TextureUsage::Sampled;
+			const std::string termName = name + " reflection term";
+			termDesc.DebugName = termName;
+			reflectionTerm = graph.CreateTexture(termDesc);
+		}
+		else
+		{
+			auto termDesc = OutputDesc(1, 1);
+			termDesc.Usage = Rhi::TextureUsage::Storage | Rhi::TextureUsage::Sampled;
+			const std::string termName = name + " reflection term stand-in";
+			termDesc.DebugName = termName;
+			reflectionTerm = graph.CreateTexture(termDesc);
+		}
+
 		auto outputDesc = OutputDesc(width, height);
 		const std::string outputName = name + " output";
 		outputDesc.DebugName = outputName;
@@ -465,9 +498,10 @@ namespace Swim::Render
 				b.Read(probeRecords, S::ShaderRead);
 				b.Read(objectId, S::ShaderRead);
 				b.Write(output, S::ShaderWrite);
+				b.Write(reflectionTerm, S::ShaderWrite);
 			},
 			[program = desc.Composite, label = name + " composite", color, indirect, visibility, depth, depthFormat, depthAspect, params,
-				output, reflection, reflectance, specular, surfaceNormal, probeCubes, probeRecords, objectId, probeLayers,
+				output, reflection, reflectance, specular, surfaceNormal, probeCubes, probeRecords, objectId, reflectionTerm, probeLayers,
 				probeMips, probeSampler = desc.ProbeSampler, width, height](RenderCommandContext& c)
 			{
 				using B = ScreenSpaceCompositeBindings;
@@ -480,7 +514,8 @@ namespace Swim::Render
 					TextureWrite(c, B::Specular, specular, Rhi::Format::RGBA16Float),
 					TextureWrite(c, B::Normal, surfaceNormal, Rhi::Format::RGBA16Float), Rhi::DescriptorWrite{},
 					Rhi::DescriptorWrite{}, BufferWrite(c, B::ProbeRecords, probeRecords),
-					TextureWrite(c, B::ObjectId, objectId, Rhi::Format::R32Float) };
+					TextureWrite(c, B::ObjectId, objectId, Rhi::Format::R32Float),
+					TextureWrite(c, B::ReflectionTermOut, reflectionTerm, Rhi::Format::RGBA16Float) };
 				auto completed = writes;
 				Rhi::TextureViewDesc cubeView;
 				cubeView.Dimension = Rhi::TextureViewDimension::TextureCubeArray;
@@ -493,6 +528,47 @@ namespace Swim::Render
 				completed[B::ProbeSampler].SamplerResource = probeSampler;
 				Dispatch(c, program, label, completed, width, height);
 			});
+		if (temporal)
+		{
+			const auto& t = *frame.ReflectionTemporal;
+			auto filteredDesc = OutputDesc(width, height);
+			const std::string filteredName = name + " output (reflections filtered)";
+			filteredDesc.DebugName = filteredName;
+			const auto filtered = graph.CreateTexture(filteredDesc);
+			const auto velocity = *frame.Velocity;
+			const auto history = t.Previous.value_or(reflectionTerm); // Not read without a previous frame.
+			const auto next = t.Next;
+			resources.ReflectionTemporalPass = graph.AddPass(
+				name + " reflection temporal", Rhi::QueueType::Compute,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Read(output, S::ShaderRead);
+					b.Read(reflectionTerm, S::ShaderRead);
+					b.Read(velocity, S::ShaderRead);
+					if (t.Previous)
+					{
+						b.Read(history, S::ShaderRead);
+					}
+					b.Read(params, S::ShaderRead);
+					b.Write(filtered, S::ShaderWrite);
+					b.Write(next, S::ShaderWrite);
+				},
+				[program = desc.ReflectionTemporal, label = name + " reflection temporal", output, reflectionTerm, velocity, history, params,
+					filtered, next, sampler = desc.ProbeSampler, width, height](RenderCommandContext& c)
+				{
+					using B = ScreenSpaceReflectionTemporalBindings;
+					std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Color, output, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Term, reflectionTerm, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Velocity, velocity, Rhi::Format::RG16Float),
+						TextureWrite(c, B::History, history, Rhi::Format::RGBA16Float), Rhi::DescriptorWrite{},
+						BufferWrite(c, B::Params, params), TextureWrite(c, B::Output, filtered, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::HistoryOut, next, Rhi::Format::RGBA16Float) };
+					writes[B::Sampler].Binding = B::Sampler;
+					writes[B::Sampler].SamplerResource = sampler;
+					Dispatch(c, program, label, writes, width, height);
+				});
+			resources.Output = filtered;
+		}
 		return resources;
 	}
 } // namespace Swim::Render

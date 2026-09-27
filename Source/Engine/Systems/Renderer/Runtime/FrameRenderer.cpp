@@ -192,7 +192,7 @@ namespace Engine
 		RuntimeComputeProgram environmentOverlay; // Optional: feature overlays (clouds) in the environment.
 		RuntimeComputeProgram probeResolve, probePrefilter; // Optional: reflection probes.
 		RuntimeComputeProgram postHistogram, postExposure, postBloomDown, postBloomUp, postComposite, postCompositeHdr;
-		RuntimeComputeProgram temporalResolve, ssAo, ssBlur, ssComposite, ssReflection;
+		RuntimeComputeProgram temporalResolve, ssAo, ssBlur, ssComposite, ssReflection, ssReflectionTemporal;
 		RuntimeComputeProgram particleSimulate, particleEmit, particleCompact, particleFinalize, skinningProgram;
 		RuntimeGraphicsProgram forwardBackDepth; // Optional (screen-space reflection thickness).
 		std::unique_ptr<S::GraphicsPipeline> forwardBackDepthPipeline;
@@ -275,6 +275,11 @@ namespace Engine
 			R::ShadowTile Tile;
 		};
 		std::map<std::pair<std::uint32_t, std::uint32_t>, CachedShadowView> shadowCache;
+		// The temporal reflection filter's history (ReflectionSettings::Temporal): written and
+		// read in turn; invalid after a cut, a resize or a frame without the filter.
+		std::array<std::unique_ptr<S::Texture>, 2> reflectionHistory;
+		std::uint32_t reflectionHistoryLatest = 0;
+		bool reflectionHistoryValid = false;
 		std::uint64_t shadowFrames = 0;
 		std::uint64_t lastShadowFrame = 0;
 
@@ -460,6 +465,10 @@ namespace Engine
 		ssBlur = shaders.LoadCompute("ScreenSpaceBlur");
 		ssComposite = shaders.LoadCompute("ScreenSpaceComposite");
 		ssReflection = shaders.LoadCompute("ScreenSpaceReflection");
+		if (shaders.Contains("ScreenSpaceReflectionTemporal"))
+		{
+			ssReflectionTemporal = shaders.LoadCompute("ScreenSpaceReflectionTemporal");
+		}
 		particleSimulate = shaders.LoadCompute("ParticleSimulate");
 		particleEmit = shaders.LoadCompute("ParticleEmit");
 		particleCompact = shaders.LoadCompute("ParticleCompact");
@@ -688,6 +697,10 @@ namespace Engine
 		ssDesc.AmbientOcclusion = { ssAo.Pipeline.get(), ssAo.Layout.get(), ssAo.Space };
 		ssDesc.Blur = { ssBlur.Pipeline.get(), ssBlur.Layout.get(), ssBlur.Space };
 		ssDesc.Composite = { ssComposite.Pipeline.get(), ssComposite.Layout.get(), ssComposite.Space };
+		if (ssReflectionTemporal.Pipeline)
+		{
+			ssDesc.ReflectionTemporal = { ssReflectionTemporal.Pipeline.get(), ssReflectionTemporal.Layout.get(), ssReflectionTemporal.Space };
+		}
 		ssDesc.Reflection = { ssReflection.Pipeline.get(), ssReflection.Layout.get(), ssReflection.Space };
 		ssDesc.ProbeSampler = linearClamp.get();
 		screenSpace = std::make_unique<R::ScreenSpaceEffects>(ssDesc);
@@ -1016,6 +1029,7 @@ namespace Engine
 		const auto& camera = input.Camera;
 		if (camera.Cut)
 		{
+			I.reflectionHistoryValid = false;
 			I.temporal->ResetHistory();
 			I.previousViewProjection.reset();
 		}
@@ -1669,7 +1683,55 @@ namespace Engine
 					ssFrame.Velocity = *targets.Velocity;
 				}
 			}
+			if (targets.Velocity)
+			{
+				ssFrame.Velocity = *targets.Velocity;
+			}
+			// The temporal reflection filter: this frame writes one history texture while the
+			// other holds last frame's.
+			std::optional<R::GraphTexture> reflectionHistoryNext;
+			const bool reflectionTemporal = ssFrame.Settings.Reflections.Temporal && targets.Velocity &&
+				(ssFrame.Settings.Reflections.Enabled || probeInputs.has_value());
+			if (reflectionTemporal)
+			{
+				for (auto& texture : I.reflectionHistory)
+				{
+					if (!texture || texture->GetDesc().Extent.Width != width || texture->GetDesc().Extent.Height != height)
+					{
+						S::TextureDesc historyDesc;
+						historyDesc.Extent = { width, height, 1 };
+						historyDesc.PixelFormat = S::Format::RGBA16Float;
+						historyDesc.Usage = S::TextureUsage::Sampled | S::TextureUsage::Storage;
+						historyDesc.DebugName = "Reflection history";
+						texture = I.device.CreateTexture(historyDesc);
+						I.reflectionHistoryValid = false;
+					}
+				}
+				if (I.reflectionHistory[0] && I.reflectionHistory[1])
+				{
+					R::ScreenSpaceFrame::ReflectionHistoryInputs history;
+					const auto next = 1u - I.reflectionHistoryLatest;
+					if (I.reflectionHistoryValid)
+					{
+						history.Previous = graph.ImportTexture(*I.reflectionHistory[I.reflectionHistoryLatest], ResourceState::ShaderRead);
+					}
+					history.Next = graph.ImportTexture(*I.reflectionHistory[next], ResourceState::Undefined);
+					history.Blend = ssFrame.Settings.Reflections.TemporalBlend;
+					ssFrame.ReflectionTemporal = history;
+					reflectionHistoryNext = history.Next;
+				}
+			}
 			const auto screen = I.screenSpace->Record(graph, ssFrame);
+			if (reflectionHistoryNext && !screen.Passthrough)
+			{
+				graph.Export(*reflectionHistoryNext, ResourceState::ShaderRead);
+				I.reflectionHistoryLatest = 1u - I.reflectionHistoryLatest;
+				I.reflectionHistoryValid = true;
+			}
+			else
+			{
+				I.reflectionHistoryValid = false;
+			}
 
 			// Render features (gameplay-added passes) run at three stages of the frame.
 			const auto runFeatures = [&](RenderFeatureStage stage, R::GraphTexture color)

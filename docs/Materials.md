@@ -74,7 +74,7 @@ Texture and sampler parameters hold `BindlessResourceTable` indices. They start 
 `StandardPbr` (CPU) and `StandardPbr.slang` (GPU) implement the glTF 2.0 metallic-roughness model:
 
 - **BRDF:** Lambert diffuse `(1 − F) · baseColor · (1 − metallic) / π`, plus GGX `D`, height-correlated Smith `V` and Schlick `F` with `F0 = lerp(0.04, baseColor, metallic)`. The perceptual roughness is clamped to [0.045, 1] and squared.
-- **Colors:** everything is linear. sRGB textures (base color, emissive) are created as `RGBA8UnormSrgb`, so the sampler decodes them; `SrgbToLinear`/`LinearToSrgb` are the exact transfer functions used by the CPU model.
+- **Colors:** everything is linear. sRGB textures (base color, emissive) are created with sRGB formats (`BC7UnormSrgb` for cooked textures, `RGBA8UnormSrgb` for generated ones), so the sampler decodes them; `SrgbToLinear`/`LinearToSrgb` are the exact transfer functions used by the CPU model.
 - **Texture channels:**
   - The metallic-roughness texture uses G for roughness and B for metallic, multiplied by the factors.
   - The occlusion texture uses R, blended by `OcclusionStrength`, and scales only the ambient term.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Assets/Ktx2Container.h"
+#include "Tools/AssetCompiler/TextureBlockEncoder.h"
 
 #include <cstddef>
 #include <span>
@@ -17,10 +18,10 @@ namespace Swim::AssetCompiler
 	};
 
 	// Validates a KTX2 container. Basis Universal payloads (KHR_texture_basisu: ETC1S/BasisLZ or
-	// UASTC) are transcoded here, at cook time, into an RGBA8 native mip chain (sRGB when the
-	// file's transfer function is sRGB), so the runtime needs no transcoder. Other KTX2 files
-	// keep their validated container bytes.
-	Ktx2TextureCompileResult CompileKtx2Texture(
-		std::span<const std::byte> bytes, Swim::Assets::TextureColorSpace colorSpace, Swim::Assets::TextureSemantic semantic);
+	// UASTC) are transcoded here, at cook time, into a BC7 (or RGBA8) native mip chain (sRGB
+	// when the file's transfer function is sRGB), so the runtime needs no transcoder. Other
+	// KTX2 files keep their validated container bytes.
+	Ktx2TextureCompileResult CompileKtx2Texture(std::span<const std::byte> bytes, Swim::Assets::TextureColorSpace colorSpace,
+		Swim::Assets::TextureSemantic semantic, CookedTextureEncoding encoding = CookedTextureEncoding::Bc7);
 
 } // namespace Swim::AssetCompiler

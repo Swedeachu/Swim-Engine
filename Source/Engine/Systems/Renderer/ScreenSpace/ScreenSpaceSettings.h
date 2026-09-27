@@ -84,6 +84,11 @@ namespace Swim::Render
 		// resolve the full frame with a depth- and normal-aware filter in the composite: a
 		// quarter of the rays. TAA gathers the four positions over four frames.
 		bool HalfResolution = false;
+		// Blend the reflection term (screen space over probes over the environment) with last
+		// frame's at the reprojected position (FrameRenderer keeps the history; needs motion
+		// vectors): settles flicker from the trace pattern, jitter and probe refreshes.
+		bool Temporal = false;
+		float TemporalBlend = 0.4f; // Weight of this frame's term, (0, 1]: lower is smoother and lags more.
 		ReflectionDebugView Debug = ReflectionDebugView::None;
 	};
 

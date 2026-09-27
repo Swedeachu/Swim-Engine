@@ -18,6 +18,7 @@ namespace Swim::Render
 		std::optional<GraphPass> BlurPass;
 		std::optional<GraphPass> ReflectionPass;
 		std::optional<GraphPass> CompositePass;
+		std::optional<GraphPass> ReflectionTemporalPass; // With ScreenSpaceFrame::ReflectionTemporal.
 		GpuScreenSpaceParams ParamsRecord;
 		bool Passthrough = false; // AO, reflections and fog all off: nothing was recorded.
 	};

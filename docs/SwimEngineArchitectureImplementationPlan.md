@@ -830,7 +830,7 @@ Use mature libraries for commodity work. Spend first-party engineering effort wh
 | fastgltf | glTF/GLB structure + extension metadata import | Compiler/dev-import only. It parses glTF and exposes extension metadata; it is **not** treated as the codec implementation for Draco, WebP, or Basis payloads. Never make it a shipping runtime dependency for compiled assets. |
 | Draco | `KHR_draco_mesh_compression` geometry decode | Compiler/import only. Decode compressed primitives to ordinary Swim intermediate vertex/index data, then run meshoptimizer/cooking. Draco must not be linked by the shipping runtime. |
 | libwebp | `EXT_texture_webp` image decode | Compiler/import only. Decode authoring WebP to compiler image data, then cook normal TextureAssets. WebP must not be a shipping runtime texture dependency. |
-| Basis Universal transcoder | Basis/KTX2 universal texture transcode | Compiler-only since 2026-09-26: the cooker transcodes KHR_texture_basisu images to RGBA8 mip chains (`Swim::AssetCompilerBasisTranscoder`). The runtime links no Basis code. BC7 variants would need block-aware RHI copies. |
+| Basis Universal transcoder | Basis/KTX2 universal texture transcode | Compiler-only since 2026-09-26: the cooker transcodes KHR_texture_basisu images to BC7 mip chains (`Swim::AssetCompilerBasisTranscoder`) and encodes PNG/JPEG/WebP to BC7 through UASTC (`Swim::AssetCompilerBasisEncoder`, since 2026-09-27). The runtime links no Basis code. |
 | meshoptimizer | vertex/index optimization, LOD, meshlets | Use offline in asset compiler. |
 | KTX-Software/libktx | KTX2 texture processing/transcoding | Add/use when compiler-side KTX2 production needs it; runtime should consume Swim TextureAsset metadata/payloads rather than expose libktx types. |
 | zstd | package/chunk compression | Keep behind asset/package code. |
@@ -1896,7 +1896,7 @@ Then run offline processing:
 - [ ] generate LODs if configured;
 - [ ] generate meshlets;
 - [ ] pack/quantize runtime vertex formats;
-- [ ] convert textures to KTX2/native compressed formats; *(PNG/JPEG/WebP now decode compiler-side into full cooked RGBA8 mip chains and KTX2 sources stay KTX2; final compressed/native payload production and platform-variant selection remain open.)*
+- [x] convert textures to KTX2/native compressed formats; *(2026-09-27: every cooked texture is a native BC7 mip chain: Basis KTX2 transcoded to BC7, PNG/JPEG/WebP filtered in RGBA8 then encoded to BC7 through UASTC. Non-Basis KTX2 sources keep their container. Per-platform variants (ASTC/ETC2 for mobile, BC5 normals) and an RGBA8 fallback for devices without BC remain open.)*
 - [x] decode Draco only in import/compiler path when source uses it. *(Pinned Draco 1.5.7 is private to the asset-compiler dependency bundle. `GltfImporter` resolves extension attribute IDs, decodes mesh points/faces/attributes, and emits ordinary Swim intermediate geometry; runtime assets and renderer residency contain no Draco types or decoder dependency.)*
 
 ### KTX2 runtime texture path

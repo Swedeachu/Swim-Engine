@@ -31,6 +31,10 @@ namespace Swim::RhiVulkan
 			VkPhysicalDeviceFeatures optionalFeatures{};
 			optionalFeatures.imageCubeArray = VK_TRUE;
 			info.Capabilities.SampledCubeArray = this->physicalDevice.enable_features_if_present(optionalFeatures);
+			// BC1-7 sampling (cooked textures are BC7); every desktop GPU has it.
+			VkPhysicalDeviceFeatures blockCompression{};
+			blockCompression.textureCompressionBC = VK_TRUE;
+			info.Capabilities.BcTextureCompression = this->physicalDevice.enable_features_if_present(blockCompression);
 			// Bindless tables are rewritten while earlier frames are still pending, which
 			// needs update-unused-while-pending on top of the required indexing features.
 			VkPhysicalDeviceVulkan12Features bindlessFeatures{};

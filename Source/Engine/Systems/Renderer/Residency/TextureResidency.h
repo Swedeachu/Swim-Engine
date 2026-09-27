@@ -27,9 +27,9 @@ namespace Swim::Render
 	//   Collect        Uploading -> Resident, destroy retired textures
 	//   DestroyTexture handle invalid now; RHI objects retire after the last use
 	//
-	// This checkpoint uploads uncompressed native-mip 2D payloads (R8, RG8,
-	// RGBA8, RGBA8 sRGB, RGBA16F). Block-compressed/KTX2 payloads are rejected
-	// explicitly until the RHI gains block-aware buffer/image copies. Handles are
+	// Uploads native-mip 2D payloads: uncompressed (R8, RG8, RGBA8, RGBA8 sRGB,
+	// RGBA16F) and, where the device samples BC formats, BC1/3/5/7 (the cooker's
+	// BC7). Supercompressed/KTX2 payloads are rejected. Handles are
 	// registry slots (not yet bindless descriptors). Externally synchronized; the
 	// device must outlive this object and supplied timelines its pending work.
 	class TextureResidency
@@ -40,13 +40,21 @@ namespace Swim::Render
 		TextureResidency(const TextureResidency&) = delete;
 		TextureResidency& operator=(const TextureResidency&) = delete;
 
-		// Chooses the first payload variant this residency can upload, if any.
-		static std::optional<TexturePayloadSelection> SelectPayload(const Assets::TextureAsset& texture);
+		// Chooses the first payload variant this residency can upload, if any
+		// (block-compressed variants only when blockCompression is set).
+		static std::optional<TexturePayloadSelection> SelectPayload(const Assets::TextureAsset& texture, bool blockCompression = true);
+		std::optional<TexturePayloadSelection> SelectPayloadFor(const Assets::TextureAsset& texture) const
+		{
+			return SelectPayload(texture, blockCompression);
+		}
 
 		// Throws std::invalid_argument for unsupported/inconsistent payloads,
 		// std::length_error when slots are exhausted and std::runtime_error when the
 		// RHI cannot create the texture or view. Nothing changes on failure.
 		GpuTextureHandle CreateTexture(const Assets::TextureAsset& texture, std::string_view debugName = {});
+		// Same, taking the payload's bytes over when they are already in upload layout
+		// (no CPU copy); the asset is left without them on success.
+		GpuTextureHandle CreateTexture(Assets::TextureAsset&& texture, std::string_view debugName = {});
 		// Same retirement rules as GeometryHeap::DestroyMesh.
 		bool DestroyTexture(GpuTextureHandle texture, Rhi::TimelinePoint lastUse = {});
 
@@ -67,10 +75,13 @@ namespace Swim::Render
 		TextureResidencyStats GetStats() const;
 
 	  private:
+		GpuTextureHandle CreateTexture(const Assets::TextureAsset& texture, std::string_view debugName, Assets::TextureAsset* adopt);
+
 		Rhi::Device& device;
 		std::string name;
 		GpuResourceRegistry<GpuTextureTag, Internal::TextureRecord> textures;
 		std::vector<GpuTextureHandle> recorded;
 		bool importPending = false;
+		bool blockCompression = false;
 	};
 } // namespace Swim::Render

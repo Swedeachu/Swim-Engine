@@ -122,6 +122,9 @@ namespace Swim::Assets
 
 	SassetParseResult ParseSasset(std::span<const std::byte> bytes, bool validateChunkHashes = true);
 	SassetLoadResult LoadSasset(AssetSystem& assets, std::span<const std::byte> bytes);
+	// validateChunkHashes = false: structure and sizes are checked, content hashes are not
+	// recomputed (cooked files the cooker wrote whole; the development bootstrap's default).
+	SassetLoadResult LoadSasset(AssetSystem& assets, std::span<const std::byte> bytes, bool validateChunkHashes);
 	std::span<const std::byte> GetSassetChunkBytes(std::span<const std::byte> bytes, const SassetMetadata& metadata, SassetChunkType type);
 
 } // namespace Swim::Assets

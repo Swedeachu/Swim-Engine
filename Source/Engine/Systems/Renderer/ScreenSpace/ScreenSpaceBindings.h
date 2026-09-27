@@ -64,7 +64,23 @@ namespace Swim::Render
 		static constexpr std::uint32_t ProbeCubes = 10;	  // TextureCubeArray<float4>: prefiltered probes (alpha: captured distance).
 		static constexpr std::uint32_t ProbeSampler = 11; // SamplerState: linear, clamp, mips.
 		static constexpr std::uint32_t ProbeRecords = 12; // StructuredBuffer<GpuReflectionProbeRecord>.
-		static constexpr std::uint32_t ObjectId = 13;	  // Texture2D<float>: ForwardPlusTargets::ObjectId (object probes).
-		static constexpr std::uint32_t Count = 14;
+		static constexpr std::uint32_t ObjectId = 13;	  // Texture2D<float>: ForwardPlusTargets::ObjectId (object probes, reflection history).
+		// RWTexture2D<float4> rgba16f: the reflection term (rgb) and its weight in the colour (a) for
+		// the temporal reflection filter (a 1x1 stand-in without it).
+		static constexpr std::uint32_t ReflectionTermOut = 14;
+		static constexpr std::uint32_t Count = 15;
+	};
+
+	struct ScreenSpaceReflectionTemporalBindings // SwimScreenSpaceReflectionTemporal: filters the reflection term over time.
+	{
+		static constexpr std::uint32_t Color = 0;	   // Texture2D<float4>: the composite's output.
+		static constexpr std::uint32_t Term = 1;	   // Texture2D<float4>: the composite's reflection term.
+		static constexpr std::uint32_t Velocity = 2;   // Texture2D<float2>: ForwardPlusTargets::Velocity.
+		static constexpr std::uint32_t History = 3;	   // Texture2D<float4>: last frame's filtered term.
+		static constexpr std::uint32_t Sampler = 4;	   // SamplerState: linear clamp.
+		static constexpr std::uint32_t Params = 5;
+		static constexpr std::uint32_t Output = 6;	   // RWTexture2D<float4> rgba16f: the corrected colour.
+		static constexpr std::uint32_t HistoryOut = 7; // RWTexture2D<float4> rgba16f: this frame's filtered term.
+		static constexpr std::uint32_t Count = 8;
 	};
 } // namespace Swim::Render

@@ -38,6 +38,13 @@ namespace
 			schema(aoLayout,
 				{ { ScreenSpaceAoBindings::Depth, T::SampledTexture }, { ScreenSpaceAoBindings::Normal, T::SampledTexture },
 					{ ScreenSpaceAoBindings::Params, T::ReadOnlyStorageBuffer }, { ScreenSpaceAoBindings::Output, T::StorageTexture } });
+			{
+				using R = ScreenSpaceReflectionTemporalBindings;
+				schema(temporalLayout,
+					{ { R::Color, T::SampledTexture }, { R::Term, T::SampledTexture }, { R::Velocity, T::SampledTexture },
+						{ R::History, T::SampledTexture }, { R::Sampler, T::Sampler }, { R::Params, T::ReadOnlyStorageBuffer },
+						{ R::Output, T::StorageTexture }, { R::HistoryOut, T::StorageTexture } });
+			}
 			schema(blurLayout,
 				{ { ScreenSpaceBlurBindings::Source, T::SampledTexture }, { ScreenSpaceBlurBindings::Depth, T::SampledTexture },
 					{ ScreenSpaceBlurBindings::Params, T::ReadOnlyStorageBuffer },
@@ -54,7 +61,8 @@ namespace
 					{ ScreenSpaceCompositeBindings::ProbeCubes, T::SampledTexture },
 					{ ScreenSpaceCompositeBindings::ProbeSampler, T::Sampler },
 					{ ScreenSpaceCompositeBindings::ProbeRecords, T::ReadOnlyStorageBuffer },
-					{ ScreenSpaceCompositeBindings::ObjectId, T::SampledTexture } });
+					{ ScreenSpaceCompositeBindings::ObjectId, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::ReflectionTermOut, T::StorageTexture } });
 			using R = ScreenSpaceReflectionBindings;
 			schema(reflectionLayout,
 				{ { R::Depth, T::SampledTexture }, { R::Normal, T::SampledTexture }, { R::Color, T::SampledTexture },
@@ -97,6 +105,7 @@ namespace
 			desc.Blur = { &blurPipeline, &blurLayout, 0 };
 			desc.Composite = { &compositePipeline, &compositeLayout, 0 };
 			desc.Reflection = { &reflectionPipeline, &reflectionLayout, 0 };
+			desc.ReflectionTemporal = { &temporalPipeline, &temporalLayout, 0 };
 			desc.ProbeSampler = sampler.get();
 			desc.DebugName = "Test screen space";
 			return desc;
@@ -148,8 +157,8 @@ namespace
 
 		Testing::MockDevice device;
 		std::unique_ptr<RenderGraphExecutor> executor;
-		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout;
-		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline;
+		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout, temporalLayout;
+		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline, temporalPipeline;
 		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular, history, velocity, backDepth, objectId, probeCubes;
 		std::unique_ptr<Rhi::Sampler> sampler;
 	};
@@ -412,6 +421,63 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		SWIM_CHECK(pipelines[0].Source == &world.reflectionPipeline && pipelines[1].Source == &world.compositePipeline);
 		// The AO, velocity and back-depth stand-ins, the probe cube's six faces and the object id.
 		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(3 + 6 + 1));
+	}
+}
+
+SWIM_TEST("Render.ScreenSpaceEffects", "TheTemporalReflectionFilterRunsAfterTheComposite")
+{
+	using R = ScreenSpaceReflectionTemporalBindings;
+	ScreenSpaceWorld world;
+	const ScreenSpaceEffects effects(world.Desc());
+	std::vector<std::unique_ptr<Rhi::Texture>> owned;
+	const auto texture = [&](RenderGraph& graph, Rhi::Format format)
+	{
+		Rhi::TextureDesc desc;
+		desc.Extent = { ScreenSpaceWorld::Width, ScreenSpaceWorld::Height, 1 };
+		desc.PixelFormat = format;
+		desc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage;
+		owned.push_back(world.device.CreateTexture(desc));
+		return graph.ImportTexture(*owned.back(), Rhi::ResourceState::ShaderRead);
+	};
+	for (const bool previous : { false, true })
+	{
+		ScreenSpaceSettings settings;
+		settings.Reflections.Enabled = true;
+		RenderGraph graph;
+		auto frame = world.Frame(graph, settings);
+		frame.Velocity = texture(graph, Rhi::Format::RG16Float);
+		ScreenSpaceFrame::ReflectionHistoryInputs history;
+		history.Next = texture(graph, Rhi::Format::RGBA16Float);
+		history.Blend = 0.25f;
+		if (previous)
+		{
+			history.Previous = texture(graph, Rhi::Format::RGBA16Float);
+		}
+		frame.ReflectionTemporal = history;
+		const auto resources = effects.Record(graph, frame);
+		// Bit 0: the composite writes the term; bit 1: last frame's history is read.
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ReflectionTemporal, previous ? 3u : 1u);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ReflectionTemporalBlend, 0.25f);
+		SWIM_REQUIRE(resources.ReflectionTemporalPass.has_value());
+		graph.Export(history.Next, Rhi::ResourceState::ShaderRead);
+		world.Run(graph, resources.Output);
+		const auto pipelines = world.Commands("BindComputePipeline");
+		SWIM_REQUIRE(!pipelines.empty());
+		SWIM_CHECK(pipelines.back().Source == &world.temporalPipeline);
+		SWIM_CHECK_EQUAL(world.Bound(R::HistoryOut).GetTexture().GetDesc().Extent.Width, ScreenSpaceWorld::Width);
+		SWIM_CHECK_EQUAL(world.Bound(R::Term).GetTexture().GetDesc().Extent.Width, ScreenSpaceWorld::Width);
+		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, R::Count);
+	}
+	// Without it: no pass, the flags stay clear and the composite's term is a 1x1 stand-in.
+	{
+		ScreenSpaceSettings settings;
+		settings.Reflections.Enabled = true;
+		RenderGraph graph;
+		const auto resources = effects.Record(graph, world.Frame(graph, settings));
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ReflectionTemporal, 0u);
+		SWIM_CHECK(!resources.ReflectionTemporalPass.has_value());
+		world.Run(graph, resources.Output);
+		SWIM_CHECK_EQUAL(world.Bound(ScreenSpaceCompositeBindings::ReflectionTermOut).GetTexture().GetDesc().Extent.Width, 1u);
 	}
 }
 

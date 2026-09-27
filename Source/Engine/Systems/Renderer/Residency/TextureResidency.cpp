@@ -23,8 +23,22 @@ namespace Swim::Render
 				return Rhi::Format::RGBA8UnormSrgb;
 			case F::RGBA16Float:
 				return Rhi::Format::RGBA16Float;
+			case F::BC1UNorm:
+				return Rhi::Format::BC1RGBAUnorm;
+			case F::BC1SRgb:
+				return Rhi::Format::BC1RGBAUnormSrgb;
+			case F::BC3UNorm:
+				return Rhi::Format::BC3Unorm;
+			case F::BC3SRgb:
+				return Rhi::Format::BC3UnormSrgb;
+			case F::BC5UNorm:
+				return Rhi::Format::BC5Unorm;
+			case F::BC7UNorm:
+				return Rhi::Format::BC7Unorm;
+			case F::BC7SRgb:
+				return Rhi::Format::BC7UnormSrgb;
 			default:
-				return std::nullopt; // Block-compressed formats need block-aware copies.
+				return std::nullopt;
 			}
 		}
 
@@ -36,7 +50,7 @@ namespace Swim::Render
 
 	TextureResidency::TextureResidency(Rhi::Device& device, const TextureResidencyDesc& desc)
 		: device(device), name(desc.DebugName.empty() ? "TextureResidency" : desc.DebugName),
-		  textures({ desc.MaxTextures, "TextureResidency textures" })
+		  textures({ desc.MaxTextures, "TextureResidency textures" }), blockCompression(device.GetAdapterInfo().Capabilities.BcTextureCompression)
 	{
 	}
 
@@ -51,7 +65,7 @@ namespace Swim::Render
 		}
 	}
 
-	std::optional<TexturePayloadSelection> TextureResidency::SelectPayload(const Assets::TextureAsset& texture)
+	std::optional<TexturePayloadSelection> TextureResidency::SelectPayload(const Assets::TextureAsset& texture, bool blockCompression)
 	{
 		if (texture.Dimension != Assets::TextureDimension::Texture2D || texture.Depth != 1 || texture.ArrayLayers != 1)
 		{
@@ -65,7 +79,8 @@ namespace Swim::Render
 			{
 				continue;
 			}
-			if (const auto format = ToRhiFormat(payload.Format))
+			const auto format = ToRhiFormat(payload.Format);
+			if (format && (blockCompression || !Rhi::IsBlockCompressed(*format)))
 			{
 				return TexturePayloadSelection{ i, *format };
 			}
@@ -75,13 +90,24 @@ namespace Swim::Render
 
 	GpuTextureHandle TextureResidency::CreateTexture(const Assets::TextureAsset& texture, std::string_view debugName)
 	{
-		const auto selection = SelectPayload(texture);
+		return CreateTexture(texture, debugName, nullptr);
+	}
+
+	GpuTextureHandle TextureResidency::CreateTexture(Assets::TextureAsset&& texture, std::string_view debugName)
+	{
+		return CreateTexture(texture, debugName, &texture);
+	}
+
+	GpuTextureHandle TextureResidency::CreateTexture(
+		const Assets::TextureAsset& texture, std::string_view debugName, Assets::TextureAsset* adopt)
+	{
+		const auto selection = SelectPayload(texture, blockCompression);
 		if (!selection)
 		{
-			throw std::invalid_argument(name + ": texture has no uncompressed native-mip 2D payload this residency can upload");
+			throw std::invalid_argument(name + ": texture has no native-mip 2D payload this device can sample");
 		}
 		const auto& payload = texture.Payloads[selection->Payload];
-		const std::uint64_t texel = Rhi::GetUncompressedColorTexelBytes(selection->Format);
+		const auto block = Rhi::GetTransferBlockInfo(selection->Format);
 		if (!texture.Width || !texture.Height || payload.Mips.empty())
 		{
 			throw std::invalid_argument(name + ": texture needs an extent and at least one mip");
@@ -97,26 +123,29 @@ namespace Swim::Render
 		}
 
 		Internal::TextureRecord record;
-		record.Alignment = std::max<std::uint64_t>(4, texel);
-		auto bytes = std::make_shared<std::vector<std::byte>>();
+		record.Alignment = std::max<std::uint64_t>(4, block.Bytes);
+		// Validate the chain and lay it out for upload. A payload already in that layout
+		// (mips in order at aligned offsets, as the cooker writes them) is uploaded from
+		// its own bytes: adopted when the caller hands the asset over, else copied once.
+		bool inPlace = true;
+		std::uint64_t packed = 0;
 		for (std::uint32_t mip = 0; mip < payload.Mips.size(); ++mip)
 		{
 			const auto& source = payload.Mips[mip];
 			const std::uint32_t width = std::max(1u, texture.Width >> mip);
 			const std::uint32_t height = std::max(1u, texture.Height >> mip);
-			const std::uint64_t size = texel * width * height;
+			const std::uint64_t size = Rhi::GetTransferRegionBytes(selection->Format, width, height, 1);
 			if (source.Width != width || source.Height != height || source.Depth != 1 || source.SizeBytes != size ||
 				source.OffsetBytes > payload.Bytes.size() || size > payload.Bytes.size() - source.OffsetBytes)
 			{
 				throw std::invalid_argument(name + ": texture mip " + std::to_string(mip) + " is not a tightly packed chain level");
 			}
-			const std::uint64_t offset = (bytes->size() + record.Alignment - 1) / record.Alignment * record.Alignment;
-			bytes->resize(static_cast<std::size_t>(offset + size));
-			std::memcpy(bytes->data() + offset, payload.Bytes.data() + source.OffsetBytes, static_cast<std::size_t>(size));
+			const std::uint64_t offset = (packed + record.Alignment - 1) / record.Alignment * record.Alignment;
+			inPlace = inPlace && source.OffsetBytes == offset;
+			packed = offset + size;
 			record.Mips.push_back({ { width, height, 1 }, offset, size });
 			record.TexelBytes += size;
 		}
-
 		const auto stats = textures.GetStats();
 		if (!stats.FreeSlots && stats.SlotHighWater >= stats.MaxSlots)
 		{
@@ -144,6 +173,27 @@ namespace Swim::Render
 		{
 			throw std::runtime_error(name + ": texture view creation failed");
 		}
+		// Last, after every failure point: an adopted payload must stay with the asset on failure.
+		std::shared_ptr<std::vector<std::byte>> bytes;
+		if (inPlace && adopt)
+		{
+			bytes = std::make_shared<std::vector<std::byte>>(std::move(adopt->Payloads[selection->Payload].Bytes));
+			bytes->resize(static_cast<std::size_t>(packed));
+		}
+		else if (inPlace)
+		{
+			bytes = std::make_shared<std::vector<std::byte>>(payload.Bytes.begin(), payload.Bytes.begin() + static_cast<std::ptrdiff_t>(packed));
+		}
+		else
+		{
+			bytes = std::make_shared<std::vector<std::byte>>(static_cast<std::size_t>(packed));
+			for (std::uint32_t mip = 0; mip < payload.Mips.size(); ++mip)
+			{
+				std::memcpy(bytes->data() + record.Mips[mip].Offset, payload.Bytes.data() + payload.Mips[mip].OffsetBytes,
+					static_cast<std::size_t>(record.Mips[mip].Size));
+			}
+		}
+
 		record.Bytes = std::move(bytes);
 
 		auto handle = textures.TryCreate(std::move(record));

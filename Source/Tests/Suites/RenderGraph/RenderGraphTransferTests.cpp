@@ -390,6 +390,15 @@ SWIM_TEST("RenderGraph.Transfers", "D32FloatDepthReadsBackAsPackedFloats")
 	SWIM_CHECK_EQUAL(Rhi::GetTransferTexelBytes(Rhi::Format::D32Float), 4u);
 	SWIM_CHECK_EQUAL(Rhi::GetTransferTexelBytes(Rhi::Format::D24UnormS8Uint), 0u);
 	SWIM_CHECK_EQUAL(GetTextureCopyBytes(desc, whole), std::uint64_t(8 * 4 * 4));
+	// BC formats count whole 4 x 4 blocks.
+	Rhi::TextureDesc bc7 = desc;
+	bc7.PixelFormat = Rhi::Format::BC7Unorm;
+	Rhi::BufferTextureCopyRegion partial{};
+	partial.Extent = { 6, 3, 1 };
+	SWIM_CHECK_EQUAL(GetTextureCopyBytes(bc7, whole), std::uint64_t(2 * 1 * 16));
+	SWIM_CHECK_EQUAL(GetTextureCopyBytes(bc7, partial), std::uint64_t(2 * 1 * 16));
+	bc7.PixelFormat = Rhi::Format::BC1RGBAUnorm;
+	SWIM_CHECK_EQUAL(GetTextureCopyBytes(bc7, whole), std::uint64_t(2 * 1 * 8));
 
 	std::vector<float> depths(32);
 	std::iota(depths.begin(), depths.end(), 0.0f);
