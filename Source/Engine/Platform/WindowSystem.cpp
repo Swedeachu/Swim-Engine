@@ -109,6 +109,7 @@ namespace Swim::Platform
 				case SDLK_F10: return KeyCode::F10;
 				case SDLK_F11: return KeyCode::F11;
 				case SDLK_F12: return KeyCode::F12;
+				case SDLK_GRAVE: return KeyCode::Grave;
 				default: return KeyCode::Unknown;
 			}
 		}
@@ -186,6 +187,7 @@ namespace Swim::Platform
 				case SDL_SCANCODE_F10: return ScanCode::F10;
 				case SDL_SCANCODE_F11: return ScanCode::F11;
 				case SDL_SCANCODE_F12: return ScanCode::F12;
+				case SDL_SCANCODE_GRAVE: return ScanCode::Grave;
 				default: return ScanCode::Unknown;
 			}
 		}

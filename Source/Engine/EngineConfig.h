@@ -56,6 +56,8 @@ namespace Engine
 		// Off by default (mailbox, else immediate): the frame rate is not capped at the
 		// display's refresh. --vsync=on presents FIFO.
 		bool VSync{ false };
+		// Frames the CPU records ahead of the GPU (--frames-in-flight=1|2).
+		std::uint32_t FramesInFlight{ 2 };
 		// GPU validation layers (debug builds enable them by default).
 		bool Validation{ DefaultValidation };
 		// Simulation fixed rate in Hz and initial time scale.

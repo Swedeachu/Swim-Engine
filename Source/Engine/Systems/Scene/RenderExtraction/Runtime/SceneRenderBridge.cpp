@@ -1,7 +1,9 @@
 #include "Engine/Systems/Scene/RenderExtraction/Runtime/SceneRenderBridge.h"
 
 #include "Engine/Components/Light.h"
+#include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/ParticleEmitter.h"
+#include "Engine/Components/ReflectionProbe.h"
 #include "Engine/Components/SkinnedMeshRenderer.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuScene.h"
@@ -171,6 +173,8 @@ namespace Engine
 	void SceneRenderBridge::Update()
 	{
 		casters.clear();
+		probes.clear();
+		movers.clear();
 		if (!scene)
 		{
 			return;
@@ -183,17 +187,78 @@ namespace Engine
 		UpdateLights(registry);
 		UpdateEmitters(registry);
 		UpdateSkins(registry);
+		UpdateProbes(registry);
+	}
+
+	void SceneRenderBridge::UpdateProbes(entt::registry& registry)
+	{
+		for (auto [entity, probe, transform] : registry.view<ReflectionProbe, Transform>().each())
+		{
+			if (!probe.Enabled)
+			{
+				continue;
+			}
+			const auto id = scene->GetSerializedEntityId(entity).Value;
+			const glm::vec3 position = transform.GetWorldPosition(registry) + probe.Offset;
+			Swim::Render::ReflectionProbeDesc desc;
+			desc.Key = id;
+			desc.Position = { position.x, position.y, position.z };
+			desc.InfluenceRadius = probe.InfluenceRadius;
+			desc.BlendDistance = probe.BlendDistance;
+			desc.CaptureNear = probe.CaptureNear;
+			// The same durable id RenderExtractor gives the entity's render objects, + 1.
+			desc.OwnerObjectId = probe.ObjectProbe ? static_cast<std::uint32_t>(id & 0xffffffu) + 1u : 0u;
+			desc.Priority = probe.Priority;
+			desc.Dynamic = probe.Dynamic;
+			probes.push_back(desc);
+		}
+		if (probes.empty())
+		{
+			lastPositions.clear();
+			return;
+		}
+		// Movers: mesh entities whose world position changed (a bounding sphere of the unit
+		// builtin meshes scaled by the largest axis).
+		std::erase_if(lastPositions,
+			[&registry](const auto& entry)
+			{
+				return !registry.valid(entry.first) || !registry.all_of<MeshRenderer, Transform>(entry.first);
+			});
+		for (auto [entity, mesh, transform] : registry.view<MeshRenderer, Transform>().each())
+		{
+			(void)mesh;
+			const glm::vec3 position = transform.GetWorldPosition(registry);
+			const std::array<float, 3> p{ position.x, position.y, position.z };
+			auto [it, inserted] = lastPositions.try_emplace(entity, p);
+			if (inserted)
+			{
+				continue;
+			}
+			const float dx = p[0] - it->second[0];
+			const float dy = p[1] - it->second[1];
+			const float dz = p[2] - it->second[2];
+			if (dx * dx + dy * dy + dz * dz > 1.0e-6f && movers.size() < 256u)
+			{
+				const glm::vec3 scale = transform.GetWorldScale(registry);
+				const float radius = 0.87f * std::max({ std::abs(scale.x), std::abs(scale.y), std::abs(scale.z) });
+				movers.push_back({ p, radius });
+				it->second = p;
+			}
+		}
 	}
 
 	void SceneRenderBridge::UpdateLights(entt::registry& registry)
 	{
 		using namespace Swim::Render;
 		auto& buffer = renderer.GetLights();
+		// RenderSettings::LocalLights off drops every point and spot light (profiling).
+		const bool localLights = renderer.GetSettings().LocalLights;
 		// Forget lights whose entity or component went away.
 		for (auto it = lights.begin(); it != lights.end();)
 		{
-			const bool alive =
-				registry.valid(it->first) && registry.all_of<Light, Transform>(it->first) && registry.get<Light>(it->first).Enabled;
+			const bool alive = registry.valid(it->first) && registry.all_of<Light, Transform>(it->first) &&
+							   registry.get<Light>(it->first).Enabled &&
+							   (localLights || registry.get<Light>(it->first).Kind == LightKind::Directional);
 			if (alive)
 			{
 				++it;
@@ -207,7 +272,7 @@ namespace Engine
 		for (const entt::entity entity : view)
 		{
 			const auto& light = view.get<Light>(entity);
-			if (!light.Enabled)
+			if (!light.Enabled || (!localLights && light.Kind != LightKind::Directional))
 			{
 				continue;
 			}

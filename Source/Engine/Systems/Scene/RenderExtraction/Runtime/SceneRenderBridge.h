@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/Lights/LightDesc.h"
 #include "Engine/Systems/Renderer/Particles/ParticleGraphResources.h"
 #include "Engine/Systems/Renderer/Particles/ParticleSettings.h"
+#include "Engine/Systems/Renderer/Reflections/ReflectionProbeTypes.h"
 #include "Engine/Systems/Renderer/Skinning/SkinningGraphResources.h"
 #include "Engine/Systems/Renderer/Resources/GpuHandle.h"
 #include "Engine/Systems/Renderer/Runtime/ProceduralMeshes.h"
@@ -56,6 +57,13 @@ namespace Engine
 
 		std::span<const Swim::Render::ShadowCasterDesc> GetShadowCasters() const { return casters; }
 
+		// This frame's reflection probes (Engine::ReflectionProbe on entities with a Transform).
+		std::span<const Swim::Render::ReflectionProbeDesc> GetReflectionProbes() const { return probes; }
+
+		// Mesh entities that moved since the last frame (bounding spheres), while any probe
+		// exists: the renderer re-captures the probe faces that see them first.
+		std::span<const Swim::Render::ReflectionProbeMover> GetReflectionMovers() const { return movers; }
+
 		const RenderExtractionStats& GetExtractionStats() const { return extraction; }
 
 		std::uint32_t GetLightCount() const { return static_cast<std::uint32_t>(lights.size()); }
@@ -108,6 +116,7 @@ namespace Engine
 		void UpdateLights(entt::registry& registry);
 		void UpdateEmitters(entt::registry& registry);
 		void UpdateSkins(entt::registry& registry);
+		void UpdateProbes(entt::registry& registry);
 		void ReleaseAll();
 		void ReleaseLight(LightState& state);
 		void ReleaseSkin(SkinState& state);
@@ -124,5 +133,8 @@ namespace Engine
 		std::unordered_map<std::string, SkinnedMeshState> skinnedMeshes;
 		std::vector<bool> shadowSlots;
 		std::vector<Swim::Render::ShadowCasterDesc> casters;
+		std::vector<Swim::Render::ReflectionProbeDesc> probes;
+		std::vector<Swim::Render::ReflectionProbeMover> movers;
+		std::unordered_map<entt::entity, std::array<float, 3>> lastPositions;
 	};
 } // namespace Engine

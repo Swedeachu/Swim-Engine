@@ -42,6 +42,9 @@ namespace Engine::ProceduralMeshes
 	MeshData MakeCone(float radius = 0.5f, float height = 1.0f, std::uint32_t segments = 32);
 	// A torus around Y.
 	MeshData MakeTorus(float majorRadius = 0.4f, float minorRadius = 0.15f, std::uint32_t segments = 48, std::uint32_t sides = 24);
+	// A flat ring on XZ facing +Y between the radii (u: angle / 2 pi, v: inner -> outer);
+	// discs, accretion disks, halos. Draw it with a double-sided material to see both faces.
+	MeshData MakeAnnulus(float innerRadius, float outerRadius, std::uint32_t segments = 128, std::uint32_t rings = 4);
 	// A capsule along Y: a cylinder of `height` between the hemisphere centers.
 	MeshData MakeCapsule(float radius = 0.25f, float height = 0.5f, std::uint32_t segments = 24, std::uint32_t rings = 8);
 

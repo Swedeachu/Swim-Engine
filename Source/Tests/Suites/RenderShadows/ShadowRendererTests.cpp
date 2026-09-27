@@ -324,6 +324,69 @@ SWIM_TEST("Render.ShadowRenderer", "CullsEveryViewThenDrawsBothVariantsIntoEachT
 	SWIM_CHECK_EQUAL(table->ElementWrites, ShadowDepthBindings::Count);
 }
 
+SWIM_TEST("Render.ShadowRenderer", "APersistentAtlasRedrawsOnlyTheFlaggedTilesAfterClearingThem")
+{
+	ShadowWorld world;
+	Testing::MockPipelineLayout clearLayout;
+	MockGraphicsPipeline clearPipeline;
+	auto desc = world.Desc();
+	const ShadowRenderer transientOnly(desc);
+	SWIM_CHECK(!transientOnly.SupportsPersistentAtlas());
+	desc.Clear = { &clearPipeline, &clearLayout };
+	const ShadowRenderer renderer(desc);
+	SWIM_CHECK(renderer.SupportsPersistentAtlas());
+	Testing::MockShaderProgram program;
+	const auto clearState = ShadowRenderer::ClearPipelineDesc(program, clearLayout);
+	SWIM_CHECK(clearState.DepthStencil.DepthCompare == Rhi::CompareOp::Always && clearState.DepthStencil.DepthWrite);
+	world.Plan({ Caster(LightType::Spot, 4), Caster(LightType::Point, 1) });
+	SWIM_REQUIRE_EQUAL(world.plan.Views.size(), std::size_t(7));
+
+	Rhi::TextureDesc atlasDesc;
+	atlasDesc.Extent = { 2048, 2048, 1 };
+	atlasDesc.PixelFormat = Rhi::Format::D32Float;
+	atlasDesc.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled;
+	auto atlas = world.fixture.device.CreateTexture(atlasDesc);
+	RenderGraph graph;
+	auto frame = world.Import(graph);
+	frame.Atlas = graph.ImportTexture(*atlas, Rhi::ResourceState::ShaderRead);
+	frame.Render = { 1, 0, 0, 1, 0, 0, 0 }; // The spot view and one cube face.
+	// Without the clear program a persistent atlas is refused, and flags must match the views.
+	SWIM_CHECK_THROWS(transientOnly.Record(graph, frame), std::invalid_argument);
+	auto wrong = frame;
+	wrong.Render.pop_back();
+	SWIM_CHECK_THROWS(renderer.Record(graph, wrong), std::invalid_argument);
+	const auto resources = renderer.Record(graph, frame);
+	graph.Export(resources.Atlas, Rhi::ResourceState::ShaderRead);
+	SWIM_CHECK(resources.Atlas == *frame.Atlas);
+	SWIM_CHECK_EQUAL(resources.RenderedViews, 2u);
+	SWIM_CHECK_EQUAL(resources.Visibility.size(), std::size_t(2));
+	SWIM_CHECK_EQUAL(resources.ViewCount, 7u); // Every view stays in the lookup buffer.
+	world.Execute(graph);
+	SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(2)); // Two culls.
+	// Per drawn view: the clear triangle, then both variants over both page slots.
+	SWIM_CHECK_EQUAL(world.Commands("Draw").size(), std::size_t(2));
+	SWIM_CHECK_EQUAL(world.Commands("DrawIndexedIndirectCount").size(), std::size_t(2 * 2 * 2));
+	const auto pipelines = world.Commands("BindGraphicsPipeline");
+	SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(6));
+	SWIM_CHECK(pipelines[0].Source == &clearPipeline && pipelines[1].Source == &world.opaquePipeline);
+	// The views keep their buffer index (push constant 0).
+	std::vector<std::uint32_t> viewIndices;
+	for (const auto& push : world.Commands("PushConstants"))
+	{
+		if (push.Data.size() == ShadowDepthBindings::PushConstantBytes)
+		{
+			std::uint32_t index = 0;
+			std::memcpy(&index, push.Data.data(), sizeof(index));
+			viewIndices.push_back(index);
+		}
+	}
+	SWIM_REQUIRE_EQUAL(viewIndices.size(), std::size_t(8));
+	SWIM_CHECK(viewIndices.front() == 0u && viewIndices.back() == 3u);
+	const auto viewports = world.Commands("SetViewport");
+	SWIM_REQUIRE(!viewports.empty());
+	SWIM_CHECK(viewports[0].SourceOffset == world.plan.Draws[0].Tile.X && viewports[0].Size == world.plan.Draws[0].Tile.Size);
+}
+
 SWIM_TEST("Render.ShadowRenderer", "EmptyPlansClearTheAtlasAndTheFallbackPathZeroFills")
 {
 	ShadowWorld world;

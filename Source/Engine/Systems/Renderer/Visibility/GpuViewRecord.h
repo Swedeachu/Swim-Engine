@@ -40,7 +40,9 @@ namespace Swim::Render
 		float LodPixelError = 1.0f;	 // Coarsest LOD whose projected error stays within this many pixels.
 		float LodHysteresis = 0.25f; // Relative band around the threshold that keeps the previous LOD.
 		std::uint32_t Flags = 0;	 // GpuViewFlags.
-		std::uint32_t Reserved = 0;
+		// Capture views (reflection probes): the GPU Scene row whose ObjectId + 1 equals this
+		// is culled (0: none), so a probe inside its owner does not see the owner.
+		std::uint32_t ExcludedObjectId = 0;
 	};
 
 	static_assert(sizeof(GpuViewRecord) == 192);

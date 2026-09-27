@@ -360,6 +360,38 @@ namespace Engine::ProceduralMeshes
 		return mesh;
 	}
 
+	MeshData MakeAnnulus(float innerRadius, float outerRadius, std::uint32_t segments, std::uint32_t rings)
+	{
+		segments = std::max(segments, 3u);
+		rings = std::max(rings, 1u);
+		innerRadius = std::max(innerRadius, 0.0f);
+		outerRadius = std::max(outerRadius, innerRadius + 1.0e-4f);
+		MeshData mesh;
+		for (std::uint32_t s = 0; s <= segments; ++s)
+		{
+			const float u = float(s) / float(segments);
+			const float phi = u * 2.0f * Pi;
+			for (std::uint32_t k = 0; k <= rings; ++k)
+			{
+				const float v = float(k) / float(rings);
+				const float r = innerRadius + (outerRadius - innerRadius) * v;
+				mesh.AddVertex({ std::sin(phi) * r, 0.0f, std::cos(phi) * r }, { 0, 1, 0 }, { u, v });
+			}
+		}
+		const std::uint32_t row = rings + 1;
+		for (std::uint32_t s = 0; s < segments; ++s)
+		{
+			for (std::uint32_t k = 0; k < rings; ++k)
+			{
+				const std::uint32_t i = s * row + k;
+				// Counter-clockwise seen from +Y: outward (k + 1), then along phi (s + 1).
+				mesh.AddQuad(i, i + 1, i + row + 1, i + row);
+			}
+		}
+		GenerateTangents(mesh);
+		return mesh;
+	}
+
 	MeshData MakeCapsule(float radius, float height, std::uint32_t segments, std::uint32_t rings)
 	{
 		segments = std::max(segments, 3u);

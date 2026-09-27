@@ -75,6 +75,10 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("SsrNearZ"), std::uint32_t(offsetof(P, SsrNearZ)));
 		SWIM_CHECK_EQUAL(offsets.at("SsrMaxSteps"), std::uint32_t(offsetof(P, SsrMaxSteps)));
 		SWIM_CHECK_EQUAL(offsets.at("SsrRefineSteps"), std::uint32_t(offsetof(P, SsrRefineSteps)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrHistory"), std::uint32_t(offsetof(P, SsrHistory)));
+		SWIM_CHECK_EQUAL(offsets.at("SsrBackDepth"), std::uint32_t(offsetof(P, SsrBackDepth)));
+		SWIM_CHECK_EQUAL(offsets.at("ProbeCount"), std::uint32_t(offsetof(P, ProbeCount)));
+		SWIM_CHECK_EQUAL(offsets.at("ReflectionDebug"), std::uint32_t(offsetof(P, ReflectionDebug)));
 		(void)paramsBinding;
 	}
 } // namespace
@@ -90,13 +94,14 @@ SWIM_TEST("ShaderCompiler.ScreenSpaceLayout", "ProgramsMatchTheBindingContract")
 		{ T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture }, Render::ScreenSpaceBlurBindings::Params);
 	CheckProgram(Load(SWIM_SCREEN_SPACE_COMPOSITE_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer, T::StorageTexture,
-			T::SampledTexture, T::SampledTexture, T::SampledTexture },
+			T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::Sampler,
+			T::ReadOnlyStorageBuffer, T::SampledTexture },
 		Render::ScreenSpaceCompositeBindings::Params);
 	CheckProgram(Load(SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer,
-			T::StorageTexture },
+			T::StorageTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture },
 		Render::ScreenSpaceReflectionBindings::Params);
 	static_assert(Render::ScreenSpaceAoBindings::Count == 4 && Render::ScreenSpaceBlurBindings::Count == 4 &&
-		Render::ScreenSpaceCompositeBindings::Count == 9 && Render::ScreenSpaceReflectionBindings::Count == 7);
+		Render::ScreenSpaceCompositeBindings::Count == 14 && Render::ScreenSpaceReflectionBindings::Count == 10);
 }
 #endif

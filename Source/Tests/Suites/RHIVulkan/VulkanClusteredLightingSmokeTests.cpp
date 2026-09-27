@@ -164,7 +164,10 @@ namespace
 			const std::uint32_t height = gridDesc.ViewportHeight;
 			RenderGraph graph;
 			const auto lightResources = lights.Import(graph);
-			const auto clusters = assigner.Record(graph, lightResources, gridDesc, view);
+			// The bitmasks address every local light the buffer holds.
+			auto sizedGrid = gridDesc;
+			sizedGrid.LightCapacity = std::max(sizedGrid.LightCapacity, lightResources.LocalCount);
+			const auto clusters = assigner.Record(graph, lightResources, sizedGrid, view);
 			const auto& grid = clusters.GridRecord;
 
 			// Synthetic reverse-Z depth: a sloped, rippled surface; the left 16 columns are sky.

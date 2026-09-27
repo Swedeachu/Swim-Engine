@@ -144,7 +144,7 @@ namespace Game
 	{
 		const auto label = CreateLabel(document, parent, text);
 		auto style = document.GetStyle(label);
-		style.TextColor = { 0.55f, 0.75f, 1.0f, 1.0f };
+		style.TextColor = UiSrgbHex(0x6fadff); // Authored in sRGB.
 		style.Margin.Top = 6.0f;
 		document.SetStyle(label, style);
 		return label;

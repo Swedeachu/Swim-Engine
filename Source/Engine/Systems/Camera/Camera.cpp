@@ -144,4 +144,44 @@ namespace Engine
 		ray.Direction = glm::normalize(rotation * viewDirection);
 		return ray;
 	}
+	glm::vec2 Camera::ScreenToNdc(float x, float y, float width, float height)
+	{
+		if (width <= 0.0f || height <= 0.0f)
+		{
+			return glm::vec2(0.0f);
+		}
+		return { 2.0f * x / width - 1.0f, 1.0f - 2.0f * y / height };
+	}
+
+	glm::vec2 Camera::NdcToScreen(const glm::vec2& ndc, float width, float height)
+	{
+		return { (ndc.x + 1.0f) * 0.5f * width, (1.0f - ndc.y) * 0.5f * height };
+	}
+
+	std::optional<glm::vec3> Camera::WorldToScreen(const glm::vec3& world, float width, float height) const
+	{
+		const glm::vec3 view = glm::vec3(GetViewMatrix() * glm::vec4(world, 1.0f));
+		const float depth = -view.z;
+		if (!(depth > 1.0e-6f) || width <= 0.0f || height <= 0.0f)
+		{
+			return std::nullopt;
+		}
+		const float tanHalf = std::tan(glm::radians(fieldOfView) * 0.5f);
+		const glm::vec2 ndc(view.x / (depth * tanHalf * aspect), view.y / (depth * tanHalf));
+		const glm::vec2 pixel = NdcToScreen(ndc, width, height);
+		return glm::vec3(pixel, depth);
+	}
+
+	glm::vec3 Camera::ScreenToWorld(float x, float y, float distance, float width, float height) const
+	{
+		const auto ray = ScreenPointToRay(x, y, width, height);
+		return ray.Origin + ray.Direction * distance;
+	}
+
+	glm::vec3 Camera::ScreenToWorldAtDepth(float x, float y, float depth, float width, float height) const
+	{
+		const auto ray = ScreenPointToRay(x, y, width, height);
+		const float along = glm::dot(ray.Direction, GetForward());
+		return ray.Origin + ray.Direction * (along > 1.0e-6f ? depth / along : depth);
+	}
 } // namespace Engine

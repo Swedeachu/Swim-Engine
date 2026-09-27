@@ -53,6 +53,14 @@ namespace Swim::Render
 		static constexpr std::uint64_t OutputBytes = 9 * 16;
 	};
 
+	struct EnvironmentOverlayBindings // EnvironmentOverlay.slang
+	{
+		static constexpr std::uint32_t Overlay = 0;		// Texture2D<float4>: size x 6 * size atlas, face f in rows f * size..
+		static constexpr std::uint32_t Destination = 1; // RWTexture2D<float4> (rgba16f): one face of mip 0 (read-modify-write).
+		static constexpr std::uint32_t ThreadGroupSize = 8;
+		static constexpr std::uint32_t PushConstantBytes = 16; // uint Size, uint Face, 2 reserved.
+	};
+
 	struct EnvironmentBrdfLutBindings // EnvironmentBrdfLut.slang
 	{
 		static constexpr std::uint32_t Destination = 0; // RWTexture2D<float4> (rgba16f): (A, B, 0, 1).

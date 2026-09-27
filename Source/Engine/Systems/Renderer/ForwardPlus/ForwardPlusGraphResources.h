@@ -21,7 +21,10 @@ namespace Swim::Render
 		GraphTexture Reflectance;	// ForwardPlusTargets::Reflectance, or the transient one.
 		GraphTexture Specular;		// ForwardPlusTargets::Specular, or the transient one.
 		GraphPass DepthPrepass;		// Invalid without ForwardPlusRendererDesc::DepthPrepass.
+		GraphPass BackDepthPass;	// Invalid without ForwardPlusTargets::BackDepth.
 		GraphPass OpaquePass;
+		GraphTexture Material;	  // Deferred local lights only: base colour + metalness (transient).
+		GraphPass LocalLightsPass; // Deferred local lights only.
 		GraphPass SortPass;
 		GraphPass TransparentPass;
 		ForwardViewRecord ViewRecord;

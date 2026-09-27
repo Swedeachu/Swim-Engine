@@ -21,6 +21,10 @@ namespace Swim::Render
 		constexpr std::array<Rhi::Format, 4> TransparentFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::IndirectFormat,
 			ForwardPlusRenderer::ReflectanceFormat, ForwardPlusRenderer::SpecularFormat };
 		constexpr std::array<Rhi::BlendAttachmentState, 7> OpaqueBlends{};
+		constexpr std::array<Rhi::Format, 8> DeferredFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::ObjectIdFormat,
+			ForwardPlusRenderer::VelocityFormat, ForwardPlusRenderer::NormalFormat, ForwardPlusRenderer::IndirectFormat,
+			ForwardPlusRenderer::ReflectanceFormat, ForwardPlusRenderer::SpecularFormat, ForwardPlusRenderer::MaterialFormat };
+		constexpr std::array<Rhi::BlendAttachmentState, 8> DeferredBlends{};
 		// Premultiplied over for color. The indirect, reflectance and specular targets
 		// receive (0, 0, 0, alpha), so the same state scales them by the layer's transmittance.
 		constexpr Rhi::BlendAttachmentState PremultipliedOver{ true, Rhi::BlendFactor::One, Rhi::BlendFactor::OneMinusSourceAlpha,
@@ -231,6 +235,15 @@ namespace Swim::Render
 		return pipeline;
 	}
 
+	Rhi::GraphicsPipelineDesc ForwardPlusRenderer::DeferredPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+	{
+		Rhi::GraphicsPipelineDesc pipeline = PrepassedPipelineDesc(program, layout);
+		pipeline.ColorFormats = DeferredFormats;
+		pipeline.BlendAttachments = DeferredBlends;
+		pipeline.DebugName = "Forward+ opaque (deferred local lights)";
+		return pipeline;
+	}
+
 	std::vector<std::uint32_t> ForwardPlusRenderer::VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t transparent)
 	{
 		if (!opaque || !transparent || transparent > ForwardTransparentSortBindings::MaxDraws)
@@ -258,6 +271,12 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " depth prepass needs both the depth and the prepassed opaque programs");
 		}
+		const bool deferred = desc.OpaqueDeferred.Pipeline && desc.OpaqueDeferred.Layout && desc.LocalLightsPipeline && desc.LocalLightsLayout;
+		if ((desc.OpaqueDeferred.Pipeline || desc.OpaqueDeferred.Layout || desc.LocalLightsPipeline || desc.LocalLightsLayout) &&
+			(!deferred || !prepass))
+		{
+			throw std::invalid_argument(desc.DebugName + " deferred local lights need both programs and the depth prepass");
+		}
 		Rhi::SamplerDesc sampler{};
 		sampler.AddressU = sampler.AddressV = sampler.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
 		environmentSampler = device.CreateSampler(sampler);
@@ -272,7 +291,8 @@ namespace Swim::Render
 	ForwardPlusGraphResources ForwardPlusRenderer::Record(
 		RenderGraph& graph, const ForwardPlusFrame& frame, const ForwardPlusTargets& targets) const
 	{
-		const auto& name = desc.DebugName;
+		// A frame may name its passes (probe captures: "Probe Forward+ opaque" and so on).
+		const std::string name = frame.DebugName.empty() ? desc.DebugName : frame.DebugName;
 		if (!frame.Scene || !frame.Geometry || !frame.Visibility || !frame.Visibility->Bins || !frame.Materials || !frame.Bindless ||
 			!frame.Lights || !frame.Clusters || frame.PageSlots.empty() || (frame.Environment && !frame.BrdfLut))
 		{
@@ -317,7 +337,7 @@ namespace Swim::Render
 			Rhi::TextureDesc attachmentDesc;
 			attachmentDesc.Extent = { width, height, 1 };
 			attachmentDesc.PixelFormat = format;
-			attachmentDesc.Usage = Rhi::TextureUsage::ColorAttachment;
+			attachmentDesc.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled; // Sampled: deferred local lights read the normal.
 			const std::string attachmentName = name + " " + label;
 			attachmentDesc.DebugName = attachmentName;
 			return graph.CreateTexture(attachmentDesc);
@@ -488,7 +508,72 @@ namespace Swim::Render
 				});
 		}
 
-		// 1. Opaque.
+		// 0b. Back-face depth (optional): the nearest back face per pixel, for surface thickness.
+		if (targets.BackDepth)
+		{
+			if (!desc.BackDepth.Pipeline || !desc.BackDepth.Layout)
+			{
+				throw std::invalid_argument(name + " back depth needs the back-depth program");
+			}
+			const auto backDepthTarget = *targets.BackDepth;
+			const auto& backDesc = graph.GetDesc(backDepthTarget);
+			if (backDesc.PixelFormat != CanonicalDepthFormat || backDesc.Extent.Width != width || backDesc.Extent.Height != height)
+			{
+				throw std::invalid_argument(name + " back depth must be a viewport-sized D32Float target");
+			}
+			resources.BackDepthPass = graph.AddPass(
+				name + " back depth", Rhi::QueueType::Graphics,
+				[&](RenderGraphBuilder& b)
+				{
+					DeclareDrawReads(b, inputs);
+					b.Read(commands, S::IndirectArgument);
+					b.Read(counts, S::IndirectArgument);
+					b.Write(backDepthTarget, S::DepthStencilWrite);
+				},
+				[program = desc.BackDepth, label = name + " back depth", inputs, backDepthTarget, commands, counts, bins, path, bindless,
+					sampler, slots, width, height](RenderCommandContext& c)
+				{
+					const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
+					Rhi::TextureViewDesc depthView;
+					depthView.PixelFormat = CanonicalDepthFormat;
+					const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(backDepthTarget, depthView), Rhi::LoadOp::Clear,
+						Rhi::StoreOp::Store, DepthClearValue(CanonicalDepthConvention), 0 };
+					auto& list = c.Commands();
+					list.BeginRendering({ {}, &depth, { width, height } });
+					list.BindGraphicsPipeline(*program.Pipeline);
+					list.SetViewport({ 0, 0, float(width), float(height) });
+					list.SetScissor({ 0, 0, width, height });
+					auto& commandBuffer = c.Get(commands);
+					auto& countBuffer = c.Get(counts);
+					for (std::uint32_t slot = 0; slot < slots; ++slot)
+					{
+						list.BindDescriptorTable(0, *tables[slot]);
+						list.BindDescriptorTable(ForwardPlusDrawBindings::BindlessSpace, *bindless);
+						list.BindIndexBuffer(c.Get(inputs.IndexPages[slot]), 0, Rhi::IndexType::Uint32);
+						DrawVisibilityBin(list, commandBuffer, countBuffer, bins,
+							bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
+					}
+					list.EndRendering();
+				});
+		}
+
+		// 1. Opaque (with deferred local lights: without them, plus the material target).
+		const bool deferLocal = frame.DeferLocalLights && prepass && SupportsDeferredLocalLights() &&
+			HasUsage(graph.GetDesc(targets.Color).Usage, Rhi::TextureUsage::Storage) &&
+			HasUsage(graph.GetDesc(targets.Depth).Usage, Rhi::TextureUsage::Sampled) &&
+			HasUsage(graph.GetDesc(normal).Usage, Rhi::TextureUsage::Sampled);
+		GraphTexture material;
+		if (deferLocal)
+		{
+			Rhi::TextureDesc materialDesc;
+			materialDesc.Extent = { width, height, 1 };
+			materialDesc.PixelFormat = MaterialFormat;
+			materialDesc.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Sampled;
+			const std::string materialName = name + " material";
+			materialDesc.DebugName = materialName;
+			material = graph.CreateTexture(materialDesc);
+			resources.Material = material;
+		}
 		resources.Velocity = velocity;
 		resources.Normal = normal;
 		resources.Indirect = indirect;
@@ -510,6 +595,10 @@ namespace Swim::Render
 					b.Write(indirect, S::ColorAttachment);
 					b.Write(reflectance, S::ColorAttachment);
 					b.Write(specular, S::ColorAttachment);
+					if (deferLocal)
+					{
+						b.Write(material, S::ColorAttachment);
+					}
 					if (prepass)
 					{
 						b.ReadWrite(targets.Depth, S::DepthStencilWrite);
@@ -518,6 +607,21 @@ namespace Swim::Render
 					{
 						b.Write(targets.Depth, S::DepthStencilWrite);
 					}
+				}
+				else if (targets.ClearAuxiliary)
+				{
+					b.ReadWrite(targets.Color, S::ColorAttachment);
+					b.Write(targets.ObjectId, S::ColorAttachment);
+					b.Write(velocity, S::ColorAttachment);
+					b.Write(normal, S::ColorAttachment);
+					b.Write(indirect, S::ColorAttachment);
+					b.Write(reflectance, S::ColorAttachment);
+					b.Write(specular, S::ColorAttachment);
+					if (deferLocal)
+					{
+						b.Write(material, S::ColorAttachment);
+					}
+					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
 				else
 				{
@@ -528,37 +632,47 @@ namespace Swim::Render
 					b.ReadWrite(indirect, S::ColorAttachment);
 					b.ReadWrite(reflectance, S::ColorAttachment);
 					b.ReadWrite(specular, S::ColorAttachment);
+					if (deferLocal)
+					{
+						b.Write(material, S::ColorAttachment);
+					}
 					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
 			},
-			[program = prepass ? desc.OpaquePrepassed : desc.Opaque, prepass, label = name + " opaque", inputs, targets, velocity, normal,
-				indirect, reflectance, specular, commands, counts, bins, path, bindless, sampler, slots, width,
-				height](RenderCommandContext& c)
+			[program = deferLocal ? desc.OpaqueDeferred : (prepass ? desc.OpaquePrepassed : desc.Opaque), prepass, deferLocal,
+				label = name + " opaque", inputs, targets, velocity, normal, indirect, reflectance, specular, material, commands, counts,
+				bins, path, bindless, sampler, slots, width, height](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				const auto load = targets.Clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
-				std::array<Rhi::RenderingAttachmentDesc, 7> colors{};
+				const auto auxiliaryLoad = targets.Clear || targets.ClearAuxiliary ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
+				std::array<Rhi::RenderingAttachmentDesc, 8> colors{};
 				colors[0].View = &c.CreateView(targets.Color);
 				colors[0].Load = load;
 				colors[0].Clear.Value = targets.ClearColor;
 				colors[1].View = &c.CreateView(targets.ObjectId);
-				colors[1].Load = load;
+				colors[1].Load = auxiliaryLoad;
 				colors[2].View = &c.CreateView(velocity);
-				colors[2].Load = load;
+				colors[2].Load = auxiliaryLoad;
 				colors[3].View = &c.CreateView(normal);
-				colors[3].Load = load;
+				colors[3].Load = auxiliaryLoad;
 				colors[4].View = &c.CreateView(indirect);
-				colors[4].Load = load;
+				colors[4].Load = auxiliaryLoad;
 				colors[5].View = &c.CreateView(reflectance);
-				colors[5].Load = load;
+				colors[5].Load = auxiliaryLoad;
 				colors[6].View = &c.CreateView(specular);
-				colors[6].Load = load;
+				colors[6].Load = auxiliaryLoad;
+				if (deferLocal)
+				{
+					colors[7].View = &c.CreateView(material);
+					colors[7].Load = Rhi::LoadOp::Clear;
+				}
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
 				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), prepass ? Rhi::LoadOp::Load : load,
 					Rhi::StoreOp::Store, DepthClearValue(CanonicalDepthConvention), 0 };
 				auto& list = c.Commands();
-				list.BeginRendering({ colors, &depth, { width, height } });
+				list.BeginRendering({ std::span(colors.data(), deferLocal ? 8u : 7u), &depth, { width, height } });
 				list.BindGraphicsPipeline(*program.Pipeline);
 				list.SetViewport({ 0, 0, float(width), float(height) });
 				list.SetScissor({ 0, 0, width, height });
@@ -575,6 +689,68 @@ namespace Swim::Render
 				list.EndRendering();
 			});
 
+		// 1b. Deferred local lights: added to the colour target, before the transparent layers.
+		if (deferLocal)
+		{
+			resources.LocalLightsPass = graph.AddPass(
+				name + " local lights", Rhi::QueueType::Compute,
+				[&](RenderGraphBuilder& b)
+				{
+					for (const auto buffer : { inputs.View, inputs.Lights, inputs.LightHeader, inputs.Grid, inputs.Records, inputs.Indices,
+							 inputs.ShadowRecords, inputs.ShadowViews })
+					{
+						b.Read(buffer, S::ShaderRead);
+					}
+					b.Read(targets.Depth, S::ShaderRead);
+					b.Read(normal, S::ShaderRead);
+					b.Read(material, S::ShaderRead);
+					b.Read(inputs.ShadowAtlas, S::ShaderRead);
+					b.ReadWrite(targets.Color, S::ShaderRead | S::ShaderWrite);
+				},
+				[pipeline = desc.LocalLightsPipeline, layout = desc.LocalLightsLayout, label = name + " local lights", inputs, targets,
+					normal, material, width, height](RenderCommandContext& c)
+				{
+					using B = ForwardLocalLightsBindings;
+					auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+					if (!table)
+					{
+						throw std::runtime_error(label + " descriptor table could not be created");
+					}
+					const auto texture = [&](std::uint32_t binding, GraphTexture handle, Rhi::Format format,
+											 Rhi::TextureAspect aspect = Rhi::TextureAspect::Automatic)
+					{
+						Rhi::TextureViewDesc view;
+						view.PixelFormat = format;
+						view.Aspect = aspect;
+						Rhi::DescriptorWrite write{};
+						write.Binding = binding;
+						write.TextureResource = &c.CreateView(handle, view);
+						return write;
+					};
+					const std::array<Rhi::DescriptorWrite, B::Count> writes{ BufferWrite(c, B::View, inputs.View),
+						BufferWrite(c, B::Lights, inputs.Lights), BufferWrite(c, B::LightHeader, inputs.LightHeader),
+						BufferWrite(c, B::ClusterGrid, inputs.Grid), BufferWrite(c, B::ClusterRecords, inputs.Records),
+						BufferWrite(c, B::ClusterIndices, inputs.Indices),
+						texture(B::Depth, targets.Depth, CanonicalDepthFormat, Rhi::TextureAspect::Depth),
+						texture(B::Normal, normal, NormalFormat), texture(B::Material, material, MaterialFormat),
+						texture(B::Color, targets.Color, ColorFormat),
+						texture(B::ShadowAtlas, inputs.ShadowAtlas, inputs.ShadowAtlasIsDepth ? Rhi::Format::D32Float : Rhi::Format::R32Float,
+							inputs.ShadowAtlasIsDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic),
+						BufferWrite(c, B::ShadowRecords, inputs.ShadowRecords), BufferWrite(c, B::ShadowViews, inputs.ShadowViews) };
+					table->Write(writes);
+					auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
+					auto& list = c.Commands();
+					list.BindComputePipeline(*pipeline);
+					list.BindDescriptorTable(0, retained);
+					const std::uint32_t group = B::ThreadGroupSize;
+					list.Dispatch((width + group - 1) / group, (height + group - 1) / group, 1);
+				});
+		}
+
+		if (!frame.Transparent)
+		{
+			return resources;
+		}
 		// 2. Sort the transparent bins.
 		resources.SortScratch = graph.CreateBuffer(StorageBuffer(
 			std::uint64_t(slots) * resources.SortSize * sizeof(ForwardSortEntry), Rhi::BufferUsage::None, name + " sort scratch"));
@@ -598,7 +774,7 @@ namespace Swim::Render
 				b.Write(r.SortedCounts, S::ShaderWrite);
 			},
 			[pipeline = desc.SortPipeline, layout = desc.SortLayout, label = name + " transparent sort", r, commands, counts, inputs,
-				transparentBin, first = firstRange.First, capacity, slots](RenderCommandContext& c)
+				transparentBin, first = firstRange.First, capacity, slots, path](RenderCommandContext& c)
 			{
 				using B = ForwardTransparentSortBindings;
 				auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
@@ -616,7 +792,9 @@ namespace Swim::Render
 				auto& list = c.Commands();
 				list.BindComputePipeline(*pipeline);
 				list.BindDescriptorTable(0, retained);
-				const std::array<std::uint32_t, 4> constants{ transparentBin, first, capacity, r.SortSize };
+				// Bit 31: zero-fill every command (the draw has no count buffer).
+				const std::uint32_t zeroFill = path == VisibilityDrawPath::IndirectCount ? 0u : 0x80000000u;
+				const std::array<std::uint32_t, 4> constants{ transparentBin, first, capacity, r.SortSize | zeroFill };
 				list.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(constants)));
 				list.Dispatch(slots, 1, 1);
 			});

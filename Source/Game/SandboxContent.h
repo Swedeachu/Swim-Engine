@@ -67,5 +67,7 @@ namespace Game
 		inline constexpr Engine::TagId Spawned = Engine::MakeTag("Game.Spawned");
 		inline constexpr Engine::TagId Sponza = Engine::MakeTag("Game.Sponza");
 		inline constexpr Engine::TagId SwarmLight = Engine::MakeTag("Game.SwarmLight");
+		inline constexpr Engine::TagId ReflectionLab = Engine::MakeTag("Game.ReflectionLab");
+		inline constexpr Engine::TagId BlackHole = Engine::MakeTag("Game.BlackHole");
 	} // namespace GameTags
 } // namespace Game

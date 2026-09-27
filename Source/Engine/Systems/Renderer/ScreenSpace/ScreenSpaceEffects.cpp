@@ -135,9 +135,28 @@ namespace Swim::Render
 		const bool ao = resources.ParamsRecord.AoEnabled != 0u;
 		const bool fog = resources.ParamsRecord.FogEnabled != 0u;
 		const bool ssr = resources.ParamsRecord.SsrEnabled != 0u;
-		if (ssr)
+		const bool probes = frame.Probes && frame.Probes->Count > 0;
+		if (probes)
 		{
-			if (!desc.Reflection.Pipeline)
+			if (frame.Probes->Count > ScreenSpaceMaxProbes || frame.Probes->MipCount == 0)
+			{
+				throw std::invalid_argument(name + " probes: 1 .. ScreenSpaceMaxProbes records and at least one mip");
+			}
+			if (!desc.ProbeSampler)
+			{
+				throw std::invalid_argument(name + " probes need the probe sampler");
+			}
+			const auto idDesc = graph.GetDesc(frame.Probes->ObjectId);
+			if (!sameSize(idDesc) || idDesc.PixelFormat != Rhi::Format::R32Float)
+			{
+				throw std::invalid_argument(name + " probes need a color-sized R32Float object id");
+			}
+			resources.ParamsRecord.ProbeCount = frame.Probes->Count;
+			resources.ParamsRecord.ProbeMipCount = frame.Probes->MipCount;
+		}
+		if (ssr || probes)
+		{
+			if (ssr && !desc.Reflection.Pipeline)
 			{
 				throw std::invalid_argument(name + " reflections need the reflection program");
 			}
@@ -152,8 +171,28 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument(name + " reflectance and specular must be color-sized sampled RGBA16Float textures");
 			}
+			if (ssr && frame.BackDepth)
+			{
+				const auto backDesc = graph.GetDesc(*frame.BackDepth);
+				if (!sameSize(backDesc) || backDesc.PixelFormat != Rhi::Format::D32Float)
+				{
+					throw std::invalid_argument(name + " back depth must be a color-sized sampled D32Float texture");
+				}
+				resources.ParamsRecord.SsrBackDepth = 1u;
+			}
+			if (ssr && frame.History && frame.Velocity)
+			{
+				const auto historyDesc = graph.GetDesc(*frame.History);
+				const auto velocityDesc = graph.GetDesc(*frame.Velocity);
+				if (!sameSize(historyDesc) || historyDesc.PixelFormat != Rhi::Format::RGBA16Float || !sameSize(velocityDesc) ||
+					velocityDesc.PixelFormat != Rhi::Format::RG16Float)
+				{
+					throw std::invalid_argument(name + " reflection history must be color-sized RGBA16Float and velocity RG16Float");
+				}
+				resources.ParamsRecord.SsrHistory = 1u;
+			}
 		}
-		if (!ao && !fog && !ssr)
+		if (!ao && !fog && !ssr && !probes)
 		{
 			resources.Output = frame.Color;
 			resources.Passthrough = true;
@@ -169,7 +208,10 @@ namespace Swim::Render
 		GraphTexture visibility;
 		if (ao)
 		{
-			auto rawDesc = OcclusionDesc(width, height);
+			const bool halfAo = resources.ParamsRecord.AoHalf != 0u;
+			const std::uint32_t aoWidth = halfAo ? (width + 1u) / 2u : width;
+			const std::uint32_t aoHeight = halfAo ? (height + 1u) / 2u : height;
+			auto rawDesc = OcclusionDesc(aoWidth, aoHeight);
 			const std::string rawName = name + " AO raw";
 			rawDesc.DebugName = rawName;
 			const auto raw = graph.CreateTexture(rawDesc);
@@ -189,14 +231,14 @@ namespace Swim::Render
 					b.Read(params, S::ShaderRead);
 					b.Write(raw, S::ShaderWrite);
 				},
-				[program = desc.AmbientOcclusion, label = name + " AO", depth, depthFormat, depthAspect, normal, params, raw, width,
-					height](RenderCommandContext& c)
+				[program = desc.AmbientOcclusion, label = name + " AO", depth, depthFormat, depthAspect, normal, params, raw, aoWidth,
+					aoHeight](RenderCommandContext& c)
 				{
 					using B = ScreenSpaceAoBindings;
 					const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Depth, depth, depthFormat, depthAspect),
 						TextureWrite(c, B::Normal, normal, Rhi::Format::RGBA16Float), BufferWrite(c, B::Params, params),
 						TextureWrite(c, B::Output, raw, Rhi::Format::R32Float) };
-					Dispatch(c, program, label, writes, width, height);
+					Dispatch(c, program, label, writes, aoWidth, aoHeight);
 				});
 			resources.BlurPass = graph.AddPass(
 				name + " AO blur", Rhi::QueueType::Compute,
@@ -234,9 +276,17 @@ namespace Swim::Render
 		GraphTexture reflection;
 		GraphTexture reflectance;
 		GraphTexture specular;
+		if (ssr || probes)
+		{
+			reflectance = *frame.Reflectance;
+			specular = *frame.Specular;
+		}
 		if (ssr)
 		{
-			auto reflectionDesc = OutputDesc(width, height);
+			const bool half = resources.ParamsRecord.SsrHalf != 0u;
+			const std::uint32_t traceWidth = half ? (width + 1u) / 2u : width;
+			const std::uint32_t traceHeight = half ? (height + 1u) / 2u : height;
+			auto reflectionDesc = OutputDesc(traceWidth, traceHeight);
 			const std::string reflectionName = name + " reflections";
 			reflectionDesc.DebugName = reflectionName;
 			reflection = graph.CreateTexture(reflectionDesc);
@@ -246,6 +296,47 @@ namespace Swim::Render
 			const auto normal = frame.Normal;
 			const auto color = frame.Color;
 			const auto indirect = frame.Indirect;
+			const bool useHistory = resources.ParamsRecord.SsrHistory != 0u;
+			const bool useBackDepth = resources.ParamsRecord.SsrBackDepth != 0u;
+			GraphTexture backDepth;
+			if (useBackDepth)
+			{
+				backDepth = *frame.BackDepth;
+			}
+			else
+			{
+				Rhi::TextureDesc standInDesc;
+				standInDesc.Extent = { 1, 1, 1 };
+				standInDesc.PixelFormat = Rhi::Format::R32Float;
+				standInDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+				const std::string standInName = name + " back depth stand-in";
+				standInDesc.DebugName = standInName;
+				backDepth = graph.CreateTexture(standInDesc);
+				const float zero = 0.0f;
+				AddTextureUpload(graph, name + " back depth stand-in upload", std::as_bytes(std::span(&zero, 1)), backDepth,
+					{ 0, {}, {}, { 1, 1, 1 } });
+			}
+			const auto backDepthFormat = useBackDepth ? Rhi::Format::D32Float : Rhi::Format::R32Float;
+			const auto backDepthAspect = useBackDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic;
+			const auto historyTexture = useHistory ? *frame.History : color;
+			GraphTexture velocity;
+			if (useHistory)
+			{
+				velocity = *frame.Velocity;
+			}
+			else
+			{
+				Rhi::TextureDesc standInDesc;
+				standInDesc.Extent = { 1, 1, 1 };
+				standInDesc.PixelFormat = Rhi::Format::RG16Float;
+				standInDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+				const std::string standInName = name + " velocity stand-in";
+				standInDesc.DebugName = standInName;
+				velocity = graph.CreateTexture(standInDesc);
+				const std::array<std::uint16_t, 2> zero{};
+				AddTextureUpload(
+					graph, name + " velocity stand-in upload", std::as_bytes(std::span(zero)), velocity, { 0, {}, {}, { 1, 1, 1 } });
+			}
 			resources.ReflectionPass = graph.AddPass(
 				name + " reflections", Rhi::QueueType::Compute,
 				[&](RenderGraphBuilder& b)
@@ -256,10 +347,17 @@ namespace Swim::Render
 					b.Read(indirect, S::ShaderRead);
 					b.Read(visibility, S::ShaderRead);
 					b.Read(params, S::ShaderRead);
+					b.Read(velocity, S::ShaderRead);
+					b.Read(backDepth, S::ShaderRead);
+					if (useHistory)
+					{
+						b.Read(historyTexture, S::ShaderRead);
+					}
 					b.Write(reflection, S::ShaderWrite);
 				},
 				[program = desc.Reflection, label = name + " reflections", depth, depthFormat, depthAspect, normal, color, indirect,
-					visibility, params, reflection, width, height](RenderCommandContext& c)
+					visibility, params, reflection, velocity, historyTexture, backDepth, backDepthFormat, backDepthAspect, traceWidth,
+					traceHeight](RenderCommandContext& c)
 				{
 					using B = ScreenSpaceReflectionBindings;
 					const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Depth, depth, depthFormat, depthAspect),
@@ -267,8 +365,11 @@ namespace Swim::Render
 						TextureWrite(c, B::Color, color, Rhi::Format::RGBA16Float),
 						TextureWrite(c, B::Indirect, indirect, Rhi::Format::RGBA16Float),
 						TextureWrite(c, B::Ao, visibility, Rhi::Format::R32Float), BufferWrite(c, B::Params, params),
-						TextureWrite(c, B::Output, reflection, Rhi::Format::RGBA16Float) };
-					Dispatch(c, program, label, writes, width, height);
+						TextureWrite(c, B::Output, reflection, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::Velocity, velocity, Rhi::Format::RG16Float),
+						TextureWrite(c, B::History, historyTexture, Rhi::Format::RGBA16Float),
+						TextureWrite(c, B::BackDepth, backDepth, backDepthFormat, backDepthAspect) };
+					Dispatch(c, program, label, writes, traceWidth, traceHeight);
 				});
 		}
 		else
@@ -279,11 +380,61 @@ namespace Swim::Render
 			const std::string standInName = name + " reflection stand-in";
 			standInDesc.DebugName = standInName;
 			reflection = graph.CreateTexture(standInDesc);
-			reflectance = reflection;
-			specular = reflection;
+			if (!probes)
+			{
+				reflectance = reflection;
+				specular = reflection;
+			}
 			const std::array<std::uint16_t, 4> zero{};
 			AddTextureUpload(
 				graph, name + " reflection stand-in upload", std::as_bytes(std::span(zero)), reflection, { 0, {}, {}, { 1, 1, 1 } });
+		}
+
+		// Probe inputs, or 1x1 stand-ins the composite never reads (ProbeCount = 0).
+		GraphTexture probeCubes;
+		GraphBuffer probeRecords;
+		GraphTexture objectId;
+		std::uint32_t probeLayers = 6u;
+		std::uint32_t probeMips = 1;
+		if (probes)
+		{
+			probeCubes = frame.Probes->Cubes;
+			probeRecords = frame.Probes->Records;
+			objectId = frame.Probes->ObjectId;
+			probeLayers = graph.GetDesc(probeCubes).ArrayLayers;
+			probeMips = frame.Probes->MipCount;
+		}
+		else
+		{
+			Rhi::TextureDesc cubeDesc;
+			cubeDesc.Dimension = Rhi::TextureDimension::TextureCube;
+			cubeDesc.Extent = { 1, 1, 1 };
+			cubeDesc.ArrayLayers = 6u;
+			cubeDesc.PixelFormat = Rhi::Format::RGBA16Float;
+			cubeDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+			const std::string cubeName = name + " probe stand-in";
+			cubeDesc.DebugName = cubeName;
+			probeCubes = graph.CreateTexture(cubeDesc);
+			const std::array<std::uint16_t, 4> zero{};
+			for (std::uint32_t face = 0; face < 6u; ++face)
+			{
+				AddTextureUpload(graph, cubeName + " upload", std::as_bytes(std::span(zero)), probeCubes, { 0, { 0, face }, {}, { 1, 1, 1 } });
+			}
+			const std::array<std::byte, ScreenSpaceProbeRecordBytes> record{};
+			probeRecords = graph.CreateUpload(record, name + " probe records stand-in", Rhi::BufferUsage::Storage, 16);
+			Rhi::TextureDesc idDesc;
+			idDesc.Extent = { 1, 1, 1 };
+			idDesc.PixelFormat = Rhi::Format::R32Float;
+			idDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+			const std::string idName = name + " object id stand-in";
+			idDesc.DebugName = idName;
+			objectId = graph.CreateTexture(idDesc);
+			const float zeroId = 0.0f;
+			AddTextureUpload(graph, idName + " upload", std::as_bytes(std::span(&zeroId, 1)), objectId, { 0, {}, {}, { 1, 1, 1 } });
+		}
+		if (!desc.ProbeSampler)
+		{
+			throw std::invalid_argument(name + " needs the probe sampler");
 		}
 
 		auto outputDesc = OutputDesc(width, height);
@@ -293,6 +444,7 @@ namespace Swim::Render
 		resources.Output = output;
 		const auto color = frame.Color;
 		const auto indirect = frame.Indirect;
+		const auto surfaceNormal = frame.Normal;
 		resources.CompositePass = graph.AddPass(
 			name + " composite", Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
@@ -303,15 +455,20 @@ namespace Swim::Render
 				b.Read(depth, S::ShaderRead);
 				b.Read(params, S::ShaderRead);
 				b.Read(reflection, S::ShaderRead);
-				if (ssr)
+				b.Read(surfaceNormal, S::ShaderRead);
+				if (ssr || probes)
 				{
 					b.Read(reflectance, S::ShaderRead);
 					b.Read(specular, S::ShaderRead);
 				}
+				b.Read(probeCubes, S::ShaderRead);
+				b.Read(probeRecords, S::ShaderRead);
+				b.Read(objectId, S::ShaderRead);
 				b.Write(output, S::ShaderWrite);
 			},
 			[program = desc.Composite, label = name + " composite", color, indirect, visibility, depth, depthFormat, depthAspect, params,
-				output, reflection, reflectance, specular, width, height](RenderCommandContext& c)
+				output, reflection, reflectance, specular, surfaceNormal, probeCubes, probeRecords, objectId, probeLayers,
+				probeMips, probeSampler = desc.ProbeSampler, width, height](RenderCommandContext& c)
 			{
 				using B = ScreenSpaceCompositeBindings;
 				const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Color, color, Rhi::Format::RGBA16Float),
@@ -320,8 +477,21 @@ namespace Swim::Render
 					BufferWrite(c, B::Params, params), TextureWrite(c, B::Output, output, Rhi::Format::RGBA16Float),
 					TextureWrite(c, B::Reflection, reflection, Rhi::Format::RGBA16Float),
 					TextureWrite(c, B::Reflectance, reflectance, Rhi::Format::RGBA16Float),
-					TextureWrite(c, B::Specular, specular, Rhi::Format::RGBA16Float) };
-				Dispatch(c, program, label, writes, width, height);
+					TextureWrite(c, B::Specular, specular, Rhi::Format::RGBA16Float),
+					TextureWrite(c, B::Normal, surfaceNormal, Rhi::Format::RGBA16Float), Rhi::DescriptorWrite{},
+					Rhi::DescriptorWrite{}, BufferWrite(c, B::ProbeRecords, probeRecords),
+					TextureWrite(c, B::ObjectId, objectId, Rhi::Format::R32Float) };
+				auto completed = writes;
+				Rhi::TextureViewDesc cubeView;
+				cubeView.Dimension = Rhi::TextureViewDimension::TextureCubeArray;
+				cubeView.PixelFormat = Rhi::Format::RGBA16Float;
+				cubeView.MipLevelCount = probeMips;
+				cubeView.ArrayLayerCount = probeLayers;
+				completed[B::ProbeCubes].Binding = B::ProbeCubes;
+				completed[B::ProbeCubes].TextureResource = &c.CreateView(probeCubes, cubeView);
+				completed[B::ProbeSampler].Binding = B::ProbeSampler;
+				completed[B::ProbeSampler].SamplerResource = probeSampler;
+				Dispatch(c, program, label, completed, width, height);
 			});
 		return resources;
 	}

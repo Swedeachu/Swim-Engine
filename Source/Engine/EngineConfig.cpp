@@ -357,6 +357,18 @@ namespace Engine
 				config.Render = false;
 				config.Present = PresentMode::Headless;
 			}
+			else if (Option(argument, "--frames-in-flight", i, argc, argv, value, hasValue))
+			{
+				std::uint64_t frames = 0;
+				if (!hasValue || !ParseUnsigned(value, frames) || frames < 1 || frames > 2)
+				{
+					fail("Invalid --frames-in-flight value (1 or 2).");
+				}
+				else
+				{
+					config.FramesInFlight = static_cast<std::uint32_t>(frames);
+				}
+			}
 			else if (Option(argument, "--frames", i, argc, argv, value, hasValue))
 			{
 				if (!hasValue || !ParseUnsigned(value, config.MaxFrames) || config.MaxFrames == 0)
@@ -442,6 +454,7 @@ namespace Engine
 			<< "  --headless                          Render offscreen without a window\n"
 			<< "  --no-render                         Run without a GPU (simulation and UI logic only)\n"
 			<< "  --frames=<n>                        Exit after n frames\n"
+			<< "  --frames-in-flight=1|2              Frames recorded ahead of the GPU (default 2)\n"
 			<< "  --capture=<file.ppm>                Save the last frame (implies --frames=60)\n"
 			<< "  --fixed-delta=<seconds>             Deterministic frame delta\n"
 			<< "  --exec=<command>                    Run an engine command after startup (repeatable)\n"

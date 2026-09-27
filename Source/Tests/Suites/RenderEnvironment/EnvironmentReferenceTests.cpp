@@ -530,3 +530,22 @@ SWIM_TEST("Render.Environment.Shading", "SpecularWeightTimesPrefilteredRadianceI
 		}
 	}
 }
+
+SWIM_TEST("Render.Environment.Sky", "GroundFalloffBringsTheGroundUpToTheHorizon")
+{
+	Env::ProceduralSky sky;
+	sky.SunColor = { 0, 0, 0 };
+	sky.HorizonColor = { 1, 1, 1 };
+	sky.GroundColor = { 0, 0, 0 };
+	const Env::Float3 below{ 0.9950372f, -0.0995037f, 0.0f }; // 5.7 degrees under the horizon.
+	// The default keeps the quadratic blend (0.19 of the way to the ground there).
+	SWIM_CHECK(std::abs(sky.Evaluate(below)[0] - 0.81f) < 1.0e-3f);
+	// A steep falloff is nearly all ground a few degrees down, continuous at the horizon,
+	// and leaves the sky above the horizon alone.
+	auto floorLike = sky;
+	floorLike.GroundFalloff = 24.0f;
+	SWIM_CHECK(floorLike.Evaluate(below)[0] < 0.1f);
+	SWIM_CHECK(std::abs(floorLike.Evaluate({ 1, -1.0e-6f, 0 })[0] - 1.0f) < 1.0e-3f);
+	SWIM_CHECK(floorLike.Evaluate({ 0.5f, 0.3f, 0.2f }) == sky.Evaluate({ 0.5f, 0.3f, 0.2f }));
+	SWIM_CHECK(Env::MakeProceduralSkyConstants(floorLike, 0, 16).Ground[3] == 24.0f);
+}

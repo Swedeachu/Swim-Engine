@@ -25,6 +25,11 @@ namespace Engine
 		std::uint32_t Height = 720;
 		bool VSync = false;
 		bool Validation = false;
+		// Frames the CPU may record ahead of the GPU (1 or 2). With 2, frame N+1 is built
+		// and recorded while the GPU still renders frame N: each frame slot has its own
+		// render-graph executor (commands, transient pool, staging arenas, timestamps) and
+		// swapchain acquire semaphore, and a slot waits only for its own previous frame.
+		std::uint32_t FramesInFlight = 2;
 	};
 
 	// The GPU the engine renders with (Phase 23): the RHI graphics system and device
@@ -43,7 +48,14 @@ namespace Engine
 
 		Swim::Rhi::Device& GetDevice() const { return *device; }
 
-		Swim::Render::RenderGraphExecutor& GetExecutor() const { return *executor; }
+		// The current frame slot's executor.
+		Swim::Render::RenderGraphExecutor& GetExecutor() const { return *executors[slot]; }
+
+		// Moves to the next frame slot (FrameRenderer::Render, once per frame, before it
+		// waits for that slot's previous frame).
+		void AdvanceFrameSlot() { slot = (slot + 1) % static_cast<std::uint32_t>(executors.size()); }
+
+		std::uint32_t GetFramesInFlight() const { return static_cast<std::uint32_t>(executors.size()); }
 
 		const Swim::Rhi::AdapterInfo& GetAdapterInfo() const { return *adapterInfo; }
 
@@ -89,10 +101,11 @@ namespace Engine
 		std::unique_ptr<Swim::Rhi::GraphicsSystem> graphics;
 		std::unique_ptr<Swim::Rhi::Device> device;
 		const Swim::Rhi::AdapterInfo* adapterInfo = nullptr;
-		std::unique_ptr<Swim::Render::RenderGraphExecutor> executor;
+		std::vector<std::unique_ptr<Swim::Render::RenderGraphExecutor>> executors;
+		std::uint32_t slot = 0;
 		Swim::Platform::Window* window = nullptr;
 		std::unique_ptr<Swim::Rhi::Swapchain> swapchain;
-		std::unique_ptr<Swim::Rhi::Semaphore> acquired;
+		std::vector<std::unique_ptr<Swim::Rhi::Semaphore>> acquired; // Per frame slot.
 		std::vector<std::unique_ptr<Swim::Rhi::Semaphore>> ready;
 		std::vector<bool> presented;
 		std::array<Swim::Rhi::Semaphore*, 1> waits{};

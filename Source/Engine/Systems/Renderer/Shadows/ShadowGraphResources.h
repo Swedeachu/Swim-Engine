@@ -15,10 +15,11 @@ namespace Swim::Render
 		GraphTexture Atlas;
 		GraphBuffer Records;
 		GraphBuffer Views;
-		std::vector<VisibilityGraphResources> Visibility; // One caster cull per view.
+		std::vector<VisibilityGraphResources> Visibility; // One caster cull per rendered view.
 		GraphPass DepthPass;
 		std::uint32_t AtlasSize = 0;
 		std::uint32_t ViewCount = 0;
 		std::uint32_t RecordCount = 0;
+		std::uint32_t RenderedViews = 0; // Views culled and drawn this frame (the rest were cached).
 	};
 } // namespace Swim::Render

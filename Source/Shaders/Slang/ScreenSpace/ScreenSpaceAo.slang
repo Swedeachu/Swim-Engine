@@ -121,9 +121,13 @@ float Gtao(ScreenSpaceView view, int x, int y)
 void computeMain(uint3 id : SV_DispatchThreadID)
 {
 	const ScreenSpaceView view = ScreenSpaceLoadView(Params);
-	if (id.x >= view.Width || id.y >= view.Height)
+	// Half resolution: thread (x, y) traces the pixel of the 2 x 2 block at (2x, 2y) that
+	// ScreenSpaceHalfOffset picks this frame (the blur knows which).
+	const bool half = Params[0].AoHalf != 0u;
+	if (half ? (id.x >= (view.Width + 1u) / 2u || id.y >= (view.Height + 1u) / 2u) : (id.x >= view.Width || id.y >= view.Height))
 	{
 		return;
 	}
-	Output[id.xy] = Gtao(view, int(id.x), int(id.y));
+	const uint2 pixel = half ? min(id.xy * 2u + ScreenSpaceHalfOffset(Params[0].NoiseFrame), uint2(view.Width, view.Height) - 1u) : id.xy;
+	Output[id.xy] = Gtao(view, int(pixel.x), int(pixel.y));
 }

@@ -35,7 +35,7 @@ namespace Swim::Render
 		float FogAnisotropy = 0.0f;
 		float FogStartDistance = 0.0f;
 		float FogMaxDistance = 1000.0f;
-		float Reserved1 = 0.0f;
+		std::uint32_t AoHalf = 0; // 1: the raw AO is half size (AmbientOcclusionSettings::HalfResolution).
 		// Screen-space reflections (item 76).
 		float Projection[16] = {}; // View -> clip (unjittered), to project the rays.
 		float SsrMaxDistance = 20.0f;
@@ -48,11 +48,16 @@ namespace Swim::Render
 		float SsrNearZ = -0.1f; // View z of the near plane (< 0): rays are clipped to it.
 		std::uint32_t SsrMaxSteps = 64;
 		std::uint32_t SsrRefineSteps = 4;
-		std::uint32_t Reserved2 = 0;
-		std::uint32_t Reserved3 = 0;
+		std::uint32_t SsrHistory = 0; // 1: hits read the previous frame's color (reflections of reflections).
+		std::uint32_t SsrBackDepth = 0; // 1: surface thickness from the back-face depth (ScreenSpace::SurfaceThickness).
+		// The reflection fallback (composite): local reflection probes, then the global IBL.
+		std::uint32_t ProbeCount = 0;	   // Active GpuReflectionProbeRecords.
+		std::uint32_t ProbeMipCount = 1;   // Prefiltered probe atlas mips.
+		std::uint32_t ReflectionDebug = 0; // ReflectionDebugView.
+		std::uint32_t SsrHalf = 0; // 1: the reflection texture is half size (ReflectionSettings::HalfResolution).
 	};
 
-	static_assert(sizeof(GpuScreenSpaceParams) == 400);
+	static_assert(sizeof(GpuScreenSpaceParams) == 416);
 	static_assert(offsetof(GpuScreenSpaceParams, AoRadius) == 176 && offsetof(GpuScreenSpaceParams, FogColor) == 224);
 	static_assert(offsetof(GpuScreenSpaceParams, Projection) == 288 && offsetof(GpuScreenSpaceParams, SsrMaxSteps) == 384);
 } // namespace Swim::Render

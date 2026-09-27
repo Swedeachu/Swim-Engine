@@ -232,16 +232,28 @@ namespace Swim::RhiVulkan
 			createInfo.subresourceRange.baseArrayLayer = desc.BaseArrayLayer;
 			createInfo.subresourceRange.layerCount = desc.ArrayLayerCount;
 
-			VkImageView view = VK_NULL_HANDLE;
-			if (CheckVulkanResult(*state, state->Dispatch.vkCreateImageView(state->Device.device, &createInfo, nullptr, &view),
-					"vkCreateImageView") != VK_SUCCESS)
+			// Cached on the texture: the view objects handed out do not own the VkImageView.
+			const VulkanTexture::ViewKey key{ static_cast<std::uint32_t>(createInfo.viewType), static_cast<std::uint32_t>(createInfo.format),
+				createInfo.subresourceRange.aspectMask, desc.BaseMipLevel, desc.MipLevelCount, desc.BaseArrayLayer, desc.ArrayLayerCount };
+			const VkImageView view = vulkanTexture->GetOrCreateView(key,
+				[&]
+				{
+					VkImageView created = VK_NULL_HANDLE;
+					if (CheckVulkanResult(*state, state->Dispatch.vkCreateImageView(state->Device.device, &createInfo, nullptr, &created),
+							"vkCreateImageView") != VK_SUCCESS)
+					{
+						return VkImageView(VK_NULL_HANDLE);
+					}
+					return created;
+				});
+			if (view == VK_NULL_HANDLE)
 			{
 				return nullptr;
 			}
 
 			Rhi::TextureViewDesc resolvedDesc = desc;
 			resolvedDesc.PixelFormat = viewFormat;
-			return std::make_unique<VulkanTextureView>(state, *vulkanTexture, view, resolvedDesc, true);
+			return std::make_unique<VulkanTextureView>(state, *vulkanTexture, view, resolvedDesc, false);
 		}
 
 		std::unique_ptr<Rhi::Sampler> CreateSampler(const Rhi::SamplerDesc& desc) override

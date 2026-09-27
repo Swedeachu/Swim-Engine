@@ -147,7 +147,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	uint meshStride;
 	Meshes.GetDimensions(meshCount, meshStride);
 	const bool late = Constants.Phase == VisibilityPhaseLate;
-	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount)
+	const uint excluded = Views[0].ExcludedObjectId;
+	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount || (excluded != 0u && instance.ObjectId + 1u == excluded))
 	{
 		Count(VisibilityStatNotDrawable);
 		if (late)

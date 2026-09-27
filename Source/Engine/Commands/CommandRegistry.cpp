@@ -1,5 +1,6 @@
 #include "CommandRegistry.h"
 
+#include <algorithm>
 #include <cctype>
 #include <stdexcept>
 #include <utility>
@@ -21,6 +22,19 @@ namespace Swim::Commands
 			}
 		}
 		callbacks.insert_or_assign(std::move(name), std::move(callback));
+	}
+
+	std::vector<std::string> CommandRegistry::GetNames() const
+	{
+		std::vector<std::string> names;
+		names.reserve(callbacks.size());
+		for (const auto& [name, callback] : callbacks)
+		{
+			(void)callback;
+			names.push_back(name);
+		}
+		std::sort(names.begin(), names.end());
+		return names;
 	}
 
 	bool CommandRegistry::Unregister(std::string_view name)

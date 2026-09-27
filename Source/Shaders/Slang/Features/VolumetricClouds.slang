@@ -8,10 +8,21 @@
 //    which runs after this stage, resolves the noise.
 //  - VolumetricCloudsComposite (CLOUDS_COMPOSITE=1): upsamples that onto the sky pixels
 //    of the HDR scene color (color * transmittance + radiance).
+//  - VolumetricCloudsEnvironment (CLOUDS_ENVIRONMENT=1): the same march for every texel
+//    of the environment cube (Size.x = face size, a Size.x x 6 * Size.x atlas with face f
+//    in rows f * Size.x..), from the probe at Camera.xyz, with a fixed dither. The
+//    EnvironmentBuilder folds it into the sky cube before prefiltering, so reflections
+//    and ambient light see the clouds. Forward.w holds the environment rotation.
 #include "Features/FeatureCommon.slang"
 
 #ifndef CLOUDS_COMPOSITE
 #define CLOUDS_COMPOSITE 0
+#endif
+#ifndef CLOUDS_ENVIRONMENT
+#define CLOUDS_ENVIRONMENT 0
+#endif
+#if CLOUDS_ENVIRONMENT
+#include "Environment/EnvironmentCommon.slang"
 #endif
 
 struct CloudParams
@@ -35,6 +46,11 @@ struct CloudParams
 
 #if !CLOUDS_COMPOSITE
 [[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> Clouds;
+#if !CLOUDS_ENVIRONMENT
+// The scene's depth (0 = sky): march cells whose whole footprint is covered by geometry are
+// skipped (the composite only draws clouds over sky pixels).
+[[vk::binding(2, 0)]] Texture2D<float> Depth;
+#endif
 
 float CloudHash3(int3 cell)
 {
@@ -108,17 +124,10 @@ float CloudPhase(float cosine, float g)
 	return (1.0 - g2) / (12.5663706 * pow(max(1.0 + g2 - 2.0 * g * cosine, 1.0e-4), 1.5));
 }
 
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void computeMain(uint3 id : SV_DispatchThreadID)
+// In-scattered radiance (rgb) and transmittance (a) along one ray from Camera.xyz;
+// `jitter` (0..1) offsets the first sample within a step.
+float4 MarchClouds(CloudParams params, float3 ray, float jitter)
 {
-	const CloudParams params = Params[0];
-	if (id.x >= params.Size.x || id.y >= params.Size.y)
-	{
-		return;
-	}
-	const float2 uv = (float2(id.xy) + 0.5) / float2(params.Size.xy);
-	const float3 ray = FeatureViewRay(uv, params.Forward, params.Right, params.Up);
 	const float3 camera = params.Camera.xyz;
 	const float bottom = params.Layer.x;
 	const float top = params.Layer.y;
@@ -140,12 +149,10 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	}
 	if (t1 <= t0)
 	{
-		Clouds[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
-		return;
+		return float4(0.0, 0.0, 0.0, 1.0);
 	}
 	const uint steps = clamp(params.Size.z, 4u, 256u);
 	const float stepLength = (t1 - t0) / float(steps);
-	const float jitter = FeatureGradientNoise(float2(id.xy), params.Size.w);
 	const float sigma = max(params.SunDirection.w, 1.0e-6);
 	const float cosine = dot(ray, params.SunDirection.xyz);
 	const float g = params.AmbientTop.w;
@@ -201,7 +208,51 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	// Distant clouds fade into the sky (hides the far, undersampled part of the layer).
 	const float fadeStart = saturate(params.Lighting.w) * maxDistance;
 	const float fade = 1.0 - saturate((t0 - fadeStart) / max(maxDistance - fadeStart, 1.0));
-	Clouds[id.xy] = float4(radiance * fade, lerp(1.0, transmittance, fade));
+	return float4(radiance * fade, lerp(1.0, transmittance, fade));
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void computeMain(uint3 id : SV_DispatchThreadID)
+{
+	const CloudParams params = Params[0];
+	if (id.x >= params.Size.x || id.y >= params.Size.y)
+	{
+		return;
+	}
+#if CLOUDS_ENVIRONMENT
+	// Cube texel -> world direction: lookups rotate world directions by +rotation.
+	const uint size = params.Size.x;
+	const float3 cube = EnvironmentCubeTexelDirection(id.y / size, id.x, id.y % size, size);
+	const float3 ray = EnvironmentRotateLookup(cube, -params.Forward.w);
+	// A fixed per-texel dither: the cube is prefiltered, and a changing one would shimmer.
+	const float jitter = FeatureGradientNoise(float2(id.xy), 0u);
+#else
+	const float2 uv = (float2(id.xy) + 0.5) / float2(params.Size.xy);
+	// The full-resolution footprint of this cell, one texel wider on each side (the
+	// composite filters bilinearly): any sky pixel in it needs the march.
+	const float2 scale = float2(params.Output.xy) / float2(params.Size.xy);
+	const int2 lo = int2(floor((float2(id.xy) - 1.0) * scale));
+	const int2 hi = int2(ceil((float2(id.xy) + 2.0) * scale)) - 1;
+	const int2 limit = int2(params.Output.xy) - 1;
+	bool sky = false;
+	const int2 step = max(int2(1, 1), (hi - lo) / 3);
+	for (int y = lo.y; y <= hi.y && !sky; y += step.y)
+	{
+		for (int x = lo.x; x <= hi.x && !sky; x += step.x)
+		{
+			sky = Depth.Load(int3(clamp(int2(x, y), int2(0, 0), limit), 0)) <= 0.0;
+		}
+	}
+	if (!sky)
+	{
+		Clouds[id.xy] = float4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+	const float3 ray = FeatureViewRay(uv, params.Forward, params.Right, params.Up);
+	const float jitter = FeatureGradientNoise(float2(id.xy), params.Size.w);
+#endif
+	Clouds[id.xy] = MarchClouds(params, ray, jitter);
 }
 #else
 [[vk::binding(1, 0)]] Texture2D<float4> Color;

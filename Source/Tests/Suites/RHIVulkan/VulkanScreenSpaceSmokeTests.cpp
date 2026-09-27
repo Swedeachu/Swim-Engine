@@ -151,9 +151,15 @@ namespace
 			*device, SWIM_SCREEN_SPACE_REFLECTION_SPIRV_PATH, SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH, "Screen-space reflections");
 		desc.Reflection = { reflection.Pipeline.get(), reflection.Layout.get(), reflection.Space };
 		desc.DebugName = "Screen space";
+		const auto probeSampler = device->CreateSampler({});
+		desc.ProbeSampler = probeSampler.get();
 		const ScreenSpaceEffects effects(desc);
 		RenderGraphExecutor executor(*device);
-		const auto scene = MakeScene();
+		const auto boxes = MakeScene();
+		// The back-face frame adds two nearly touching spheres in front of the pillar.
+		auto withSpheres = boxes;
+		withSpheres.Spheres.push_back({ { 1.2f, 0.5f, 1.2f }, 0.5f });
+		withSpheres.Spheres.push_back({ { 2.22f, 0.5f, 1.2f }, 0.5f });
 
 		struct FrameSpec
 		{
@@ -166,12 +172,14 @@ namespace
 			std::uint32_t NoiseFrame;
 			bool Compare; // False: timing only.
 			float Roughness = 0.4f;
+			bool BackFaces = false; // Bind the back-face depth (and add the spheres).
 		};
 
 		const auto frame = [&](const FrameSpec& spec)
 		{
 			auto view = Scene::View({ 4.0f, 2.5f, 7.0f }, { -1.0f, 0.5f, 0.0f }, float(spec.Width) / float(spec.Height));
 			view.Jitter = { spec.JitterPixels[0] * 2.0f / float(spec.Width), -spec.JitterPixels[1] * 2.0f / float(spec.Height) };
+			const auto& scene = spec.BackFaces ? withSpheres : boxes;
 			auto inputs = Scene::Render(scene, view, spec.Width, spec.Height, spec.Roughness);
 			// Color = direct (a sun) + indirect (ambient * albedo), albedo a 1 m checker. The
 			// specular reflectance is 0.04 on the floor and 0.5 elsewhere (a sky-colored
@@ -235,6 +243,11 @@ namespace
 			AddTextureUpload(graph, "Reflectance upload", std::as_bytes(std::span(reflectanceHalves)), *input.Reflectance, whole);
 			AddTextureUpload(graph, "Specular upload", std::as_bytes(std::span(specularHalves)), *input.Specular, whole);
 			AddTextureUpload(graph, "Depth upload", std::as_bytes(std::span(inputs.Depth.Texels)), input.Depth, whole);
+			if (spec.BackFaces)
+			{
+				input.BackDepth = texture(Rhi::Format::D32Float, Rhi::TextureUsage::DepthStencilAttachment, "Screen-space back depth");
+				AddTextureUpload(graph, "Back depth upload", std::as_bytes(std::span(inputs.BackDepth.Texels)), *input.BackDepth, whole);
+			}
 			input.View = view;
 			input.Settings = spec.Settings;
 			input.NoiseFrame = spec.NoiseFrame;
@@ -334,7 +347,8 @@ namespace
 						for (std::uint32_t x = 0; x < spec.Width; ++x)
 						{
 							const auto expected =
-								Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, color, indirect, gpuAo ? &*gpuAo : nullptr, x, y);
+								Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, color, indirect, gpuAo ? &*gpuAo : nullptr, x, y, {},
+									spec.BackFaces ? &inputs.BackDepth : nullptr);
 							const auto& actual = gpuReflection->At(x, y);
 							bool mismatch = false;
 							for (int c = 0; c < 4; ++c)
@@ -360,7 +374,8 @@ namespace
 						Ss::ReflectionSample reflectionSample;
 						if (gpuReflection)
 						{
-							reflectionSample = { gpuReflection->At(x, y), reflectance.Texels[i], specular.Texels[i] };
+							reflectionSample = { Ss::ResolvedReflectionTexel(params, *gpuReflection, inputs.Normal, inputs.Depth, x, y),
+								reflectance.Texels[i], specular.Texels[i] };
 						}
 						const auto expected = Ss::CompositeTexel(params, color.Texels[i], indirect.Texels[i],
 							gpuAo ? gpuAo->At(x, y) : 1.0f, reflectionSample, inputs.Depth.Texels[i], x, y);
@@ -431,6 +446,7 @@ namespace
 		reflections.Reflections.Stride = 1.0f;
 		reflections.Reflections.MaxSteps = 128;
 		frame({ "reflections", width, height, Rhi::Format::D32Float, reflections, { 0.0f, 0.0f }, 0, true, 0.1f });
+		frame({ "reflections, back faces", width, height, Rhi::Format::D32Float, reflections, { 0.0f, 0.0f }, 0, true, 0.0f, true });
 		ScreenSpaceSettings everything = full;
 		everything.Reflections = reflections.Reflections;
 		everything.Reflections.RefineSteps = 6;

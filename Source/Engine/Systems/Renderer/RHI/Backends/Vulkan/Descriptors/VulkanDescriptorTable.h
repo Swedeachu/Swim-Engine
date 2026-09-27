@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Pipelines/VulkanPipelineLayout.h"
 
 #include <atomic>
+#include <vector>
 
 namespace Swim::RhiVulkan
 {
@@ -27,6 +28,7 @@ namespace Swim::RhiVulkan
 		std::shared_ptr<VulkanPipelineLayoutState> layoutState;
 		std::uint32_t space;
 		VkDescriptorPool pool = VK_NULL_HANDLE;
+		std::vector<std::uint32_t> poolSignature; // FreeDescriptorPools key.
 		VkDescriptorSet set = VK_NULL_HANDLE;
 		std::vector<std::vector<bool>> initialized;
 		std::atomic<bool> sealed{ false };

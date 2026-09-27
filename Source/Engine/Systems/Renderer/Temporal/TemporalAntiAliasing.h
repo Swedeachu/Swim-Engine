@@ -7,6 +7,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,12 @@ namespace Swim::Render
 		// contract, std::runtime_error when the history textures cannot be created.
 		TemporalGraphResources Record(RenderGraph& graph, const TemporalFrame& frame);
 
+		// The previous frame's resolved color (RGBA16Float, unjittered) imported into this
+		// graph for reading before Record, e.g. by screen-space reflections that reflect
+		// last frame's finished image (reflections of reflections). Empty without a valid
+		// history of this size. Record reuses the same import.
+		std::optional<GraphTexture> ImportPreviousOutput(RenderGraph& graph, std::uint32_t width, std::uint32_t height);
+
 		// The next frame starts from the current frame alone (camera cuts, teleports).
 		// A size change resets the history as well.
 		void ResetHistory() { historyValid = false; }
@@ -78,5 +85,7 @@ namespace Swim::Render
 		std::uint32_t latest = 0; // Index of the texture holding the last output.
 		bool historyValid = false;
 		std::uint64_t frameIndex = 0;
+		const RenderGraph* importedGraph = nullptr; // The graph importedHistory belongs to.
+		GraphTexture importedHistory{};
 	};
 } // namespace Swim::Render

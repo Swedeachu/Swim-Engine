@@ -23,6 +23,8 @@ namespace Swim::Render
 		ScreenSpaceProgram Blur;			 // SwimScreenSpaceBlur
 		ScreenSpaceProgram Composite;		 // SwimScreenSpaceComposite
 		ScreenSpaceProgram Reflection;		 // SwimScreenSpaceReflection; optional unless reflections are enabled.
+		// Linear clamp with mips: the composite's probe sampler (a stand-in binding without probes).
+		Rhi::Sampler* ProbeSampler = nullptr;
 		std::string DebugName = "Screen space";
 	};
 
@@ -35,6 +37,30 @@ namespace Swim::Render
 		// Required with reflections on: same size, Sampled, RGBA16Float.
 		std::optional<GraphTexture> Reflectance; // ForwardPlusTargets::Reflectance.
 		std::optional<GraphTexture> Specular;	 // ForwardPlusTargets::Specular.
+		// Optional, with reflections on: the previous frame's finished color (same size,
+		// RGBA16Float; TemporalAntiAliasing::ImportPreviousOutput) and this frame's motion
+		// vectors (RG16Float, ForwardPlusTargets::Velocity). With both, reflections show
+		// what the hit looked like last frame including its own reflections.
+		std::optional<GraphTexture> History;
+		std::optional<GraphTexture> Velocity;
+		// Optional, with reflections on: ForwardPlusTargets::BackDepth (same size, D32Float):
+		// surfaces get their real thickness (ScreenSpace::SurfaceThickness) instead of
+		// Settings.Reflections.Thickness, and rays that reach a surface from its hidden side
+		// report RejectedHit and fall back.
+		std::optional<GraphTexture> BackDepth;
+		// Optional: the local reflection probes the composite falls back to where the
+		// screen-space ray found nothing (ReflectionProbeRenderer's prefiltered atlas as a
+		// cube array, the active GpuReflectionProbeRecords, and the object-id target that
+		// routes object probes). Works with SSR off too (probes over the environment).
+		struct ProbeInputs
+		{
+			GraphTexture Cubes;		  // Cube-compatible RGBA16Float array, Sampled, MipCount mips.
+			GraphBuffer Records;	  // Count GpuReflectionProbeRecords.
+			GraphTexture ObjectId;	  // ForwardPlusTargets::ObjectId (R32Float, same size as Color).
+			std::uint32_t Count = 0;  // 1 .. MaxReflectionProbes.
+			std::uint32_t MipCount = 1;
+		};
+		std::optional<ProbeInputs> Probes;
 		ScreenSpaceView View;					 // The camera the inputs were rendered with, including their jitter.
 		ScreenSpaceSettings Settings;
 		std::uint32_t NoiseFrame = 0; // Rotates the AO noise; pass the frame index when TAA follows.

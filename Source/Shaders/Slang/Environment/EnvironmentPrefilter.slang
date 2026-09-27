@@ -5,6 +5,10 @@
 // Environment::PrefilterDirection; bindings follow EnvironmentPrefilterBindings.
 #include "Environment/EnvironmentCommon.slang"
 
+#ifndef PREFILTER_KEEP_ALPHA
+#define PREFILTER_KEEP_ALPHA 0
+#endif
+
 struct PrefilterConstants
 {
 	uint Face;
@@ -57,5 +61,11 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		return;
 	}
 	const float3 normal = EnvironmentCubeTexelDirection(Constants.Face, id.x, id.y, Constants.Size);
+#if PREFILTER_KEEP_ALPHA
+	// Reflection probes (ReflectionProbePrefilter): alpha carries the captured distance
+	// along the texel's own direction (parallax correction), unfiltered.
+	Destination[id.xy] = float4(Prefilter(normal), Source.SampleLevel(SourceSampler, normal, 0.0).a);
+#else
 	Destination[id.xy] = float4(Prefilter(normal), 1.0);
+#endif
 }

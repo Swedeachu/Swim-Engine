@@ -46,6 +46,14 @@ namespace Swim::Render
 		return pipeline;
 	}
 
+	Rhi::GraphicsPipelineDesc ShadowRenderer::ClearPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout)
+	{
+		Rhi::GraphicsPipelineDesc pipeline = PipelineDesc(program, layout);
+		pipeline.DepthStencil.DepthCompare = Rhi::CompareOp::Always;
+		pipeline.DebugName = "Shadow tile clear";
+		return pipeline;
+	}
+
 	std::vector<std::uint32_t> ShadowRenderer::VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t masked, std::uint32_t excluded)
 	{
 		if (!opaque || !masked || !excluded)
@@ -109,6 +117,21 @@ namespace Swim::Render
 		}
 		const auto& plan = *frame.Plan;
 
+		const bool persistent = frame.Atlas.has_value();
+		const bool loadAtlas = persistent && frame.AtlasHoldsDepth; // Otherwise the whole atlas is cleared first.
+		if (persistent && !desc.Clear.Pipeline)
+		{
+			throw std::invalid_argument(name + " persistent atlas needs the tile clear program");
+		}
+		if (!frame.Render.empty() && frame.Render.size() != plan.Draws.size())
+		{
+			throw std::invalid_argument(name + " render flags must match the plan's views");
+		}
+		const auto renders = [&](std::size_t v)
+		{
+			return !persistent || frame.Render.empty() || frame.Render[v] != 0;
+		};
+
 		ShadowGraphResources resources;
 		resources.AtlasSize = plan.AtlasSize;
 		resources.ViewCount = static_cast<std::uint32_t>(plan.Views.size());
@@ -116,39 +139,58 @@ namespace Swim::Render
 		resources.Records = graph.CreateUpload(std::as_bytes(std::span(plan.Records)), name + " records", Rhi::BufferUsage::Storage, 16);
 		const std::vector<GpuShadowView> views = plan.Views.empty() ? std::vector<GpuShadowView>(1) : plan.Views;
 		resources.Views = graph.CreateUpload(std::as_bytes(std::span(views)), name + " views", Rhi::BufferUsage::Storage, 16);
-		Rhi::TextureDesc atlas;
-		atlas.Extent = { plan.AtlasSize, plan.AtlasSize, 1 };
-		atlas.PixelFormat = AtlasFormat;
-		atlas.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferSource;
-		const std::string atlasName = name + " atlas";
-		atlas.DebugName = atlasName;
-		resources.Atlas = graph.CreateTexture(atlas);
-
-		// GPU caster culling, one visibility record per view.
-		for (const auto& draw : plan.Draws)
+		if (persistent)
 		{
-			VisibilityFrameDesc visibilityFrame;
-			visibilityFrame.View = BuildGpuViewRecord(draw.Visibility);
-			visibilityFrame.IndexPages = indexPageIds;
-			visibilityFrame.ReadStats = false;
-			visibilityFrame.ZeroUnusedCommands = frame.ZeroUnusedCommands;
-			resources.Visibility.push_back(frame.Visibility->Record(graph, *frame.Scene, *frame.Geometry, visibilityFrame));
+			const auto& atlasDesc = graph.GetDesc(*frame.Atlas);
+			if (atlasDesc.PixelFormat != AtlasFormat || atlasDesc.Extent.Width != plan.AtlasSize || atlasDesc.Extent.Height != plan.AtlasSize)
+			{
+				throw std::invalid_argument(name + " persistent atlas must be a D32Float texture of the plan's atlas size");
+			}
+			resources.Atlas = *frame.Atlas;
+		}
+		else
+		{
+			Rhi::TextureDesc atlas;
+			atlas.Extent = { plan.AtlasSize, plan.AtlasSize, 1 };
+			atlas.PixelFormat = AtlasFormat;
+			atlas.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferSource;
+			const std::string atlasName = name + " atlas";
+			atlas.DebugName = atlasName;
+			resources.Atlas = graph.CreateTexture(atlas);
 		}
 
+		// GPU caster culling, one visibility record per rendered view.
 		struct DrawView
 		{
 			GraphBuffer Commands;
 			GraphBuffer Counts;
 			GraphBuffer DrawRecords;
 			ShadowTile Tile;
+			std::uint32_t ViewIndex = 0; // Into the views buffer.
 		};
-
 		std::vector<DrawView> drawViews;
 		for (std::size_t v = 0; v < plan.Draws.size(); ++v)
 		{
-			drawViews.push_back({ resources.Visibility[v].Commands, resources.Visibility[v].Counts, resources.Visibility[v].DrawRecords,
-				plan.Draws[v].Tile });
+			if (!renders(v))
+			{
+				continue;
+			}
+			const auto& draw = plan.Draws[v];
+			VisibilityFrameDesc visibilityFrame;
+			visibilityFrame.View = BuildGpuViewRecord(draw.Visibility);
+			visibilityFrame.IndexPages = indexPageIds;
+			visibilityFrame.ReadStats = false;
+			visibilityFrame.ZeroUnusedCommands = frame.ZeroUnusedCommands;
+			resources.Visibility.push_back(frame.Visibility->Record(graph, *frame.Scene, *frame.Geometry, visibilityFrame));
+			const auto& visibility = resources.Visibility.back();
+			drawViews.push_back({ visibility.Commands, visibility.Counts, visibility.DrawRecords, draw.Tile, static_cast<std::uint32_t>(v) });
 		}
+		resources.RenderedViews = static_cast<std::uint32_t>(drawViews.size());
+		if (persistent && drawViews.empty())
+		{
+			return resources; // Every tile is cached: nothing to draw.
+		}
+
 		const auto instances = frame.Scene->Instances;
 		const auto transforms = frame.Scene->Transforms;
 		const auto materials = frame.Materials->Materials;
@@ -187,29 +229,44 @@ namespace Swim::Render
 				{
 					once(page, S::IndexBuffer);
 				}
-				b.Write(atlasTexture, S::DepthStencilWrite);
+				if (loadAtlas)
+				{
+					b.ReadWrite(atlasTexture, S::DepthStencilWrite);
+				}
+				else
+				{
+					b.Write(atlasTexture, S::DepthStencilWrite);
+				}
 			},
-			[programs = std::array<ShadowProgram, 2>{ desc.Opaque, desc.Masked }, label = name + " depth", drawViews, bins, vertexPages,
-				indexPages, instances, transforms, viewsBuffer, materials, materialCount, atlasTexture, atlasSize, path = desc.DrawPath,
-				bindless = frame.Bindless](RenderCommandContext& c)
+			[programs = std::array<ShadowProgram, 2>{ desc.Opaque, desc.Masked }, clear = desc.Clear, persistent, loadAtlas,
+				label = name + " depth",
+				drawViews, bins, vertexPages, indexPages, instances, transforms, viewsBuffer, materials, materialCount, atlasTexture,
+				atlasSize, path = desc.DrawPath, bindless = frame.Bindless](RenderCommandContext& c)
 			{
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = AtlasFormat;
-				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(atlasTexture, depthView), Rhi::LoadOp::Clear,
-					Rhi::StoreOp::Store, DepthClearValue(CanonicalDepthConvention), 0 };
+				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(atlasTexture, depthView),
+					loadAtlas ? Rhi::LoadOp::Load : Rhi::LoadOp::Clear, Rhi::StoreOp::Store, DepthClearValue(CanonicalDepthConvention), 0 };
 				auto& list = c.Commands();
 				list.BeginRendering({ {}, &depth, { atlasSize, atlasSize } });
-				for (std::uint32_t v = 0; v < drawViews.size(); ++v)
+				for (const auto& view : drawViews)
 				{
-					const auto& view = drawViews[v];
 					const auto& tile = view.Tile;
+					if (persistent)
+					{
+						// The tile's old depth goes: a full-tile triangle at the far depth.
+						list.BindGraphicsPipeline(*clear.Pipeline);
+						list.SetViewport({ float(tile.X), float(tile.Y), float(tile.Size), float(tile.Size), 0.0f, 1.0f });
+						list.SetScissor({ std::int32_t(tile.X), std::int32_t(tile.Y), tile.Size, tile.Size });
+						list.Draw(3);
+					}
 					for (std::uint32_t variant = 0; variant < 2; ++variant)
 					{
 						const auto& program = programs[variant];
 						list.BindGraphicsPipeline(*program.Pipeline);
 						list.SetViewport({ float(tile.X), float(tile.Y), float(tile.Size), float(tile.Size), 0.0f, 1.0f });
 						list.SetScissor({ std::int32_t(tile.X), std::int32_t(tile.Y), tile.Size, tile.Size });
-						const std::array<std::uint32_t, 4> constants{ v, materialCount, 0, 0 };
+						const std::array<std::uint32_t, 4> constants{ view.ViewIndex, materialCount, 0, 0 };
 						auto& commands = c.Get(view.Commands);
 						auto& counts = c.Get(view.Counts);
 						for (std::uint32_t slot = 0; slot < vertexPages.size(); ++slot)

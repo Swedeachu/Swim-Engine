@@ -11,6 +11,8 @@
 #include "Engine/Memory/FrameArena.h"
 #include "Engine/Platform/PlatformSystem.h"
 #include "Engine/Components/Tags.h"
+#include "Engine/Runtime/FrameProfiler.h"
+#include "Engine/Runtime/RenderToggles.h"
 #include "Engine/Runtime/EngineStateMachine.h"
 #include "Engine/Runtime/SimulationClock.h"
 #include "Engine/Systems/Physics/PhysicsSystem.h"
@@ -25,6 +27,8 @@
 
 namespace Engine
 {
+	class RuntimeConsole;
+	class RuntimeConsoleOverlay;
 	class CameraSystem;
 	class FrameRenderer;
 	class RenderDevice;
@@ -64,6 +68,9 @@ namespace Engine
 
 		void Quit() { running = false; }
 
+		// Per-frame CPU zones, renderer phases and GPU passes (the `profile` command).
+		FrameProfiler& GetProfiler() { return profiler; }
+
 		// True once a "camera" command placed the main camera.
 		bool IsCameraPlacedByCommand() const { return cameraLocked; }
 
@@ -101,6 +108,10 @@ namespace Engine
 		Swim::Input::InputSystem* GetInputSystem() { return inputSystem.get(); }
 
 		Swim::Commands::CommandRegistry* GetCommandRegistry() { return commandRegistry.get(); }
+
+		RuntimeConsole* GetConsole() { return console.get(); }
+
+		RuntimeConsoleOverlay* GetConsoleOverlay() { return consoleOverlay.get(); }
 
 		PhysicsSystem* GetPhysicsSystem() { return physicsSystem.get(); }
 
@@ -140,6 +151,9 @@ namespace Engine
 		bool MakeWindow();
 		int InitRenderer();
 		void RegisterEngineCommands();
+		void CreateConsole();
+		void PrintRenderStats() const;
+		void RecordFrameProfile(double wallMs);
 		void HandleWindowEvent(const Swim::Platform::WindowEvent& event);
 		void UpdateSurfaceSize();
 		void ApplyCameraComponents();
@@ -157,6 +171,26 @@ namespace Engine
 		TagRegistry tagRegistry;
 
 		std::uint64_t totalFrames{ 0 };
+		std::uint32_t statsInterval = 0; // render.stats <n>.
+		FrameProfiler profiler;			  // The `profile` command.
+		std::chrono::steady_clock::time_point lastTickStart{};
+		bool haveLastTick = false;
+		bool quitAfterProfile = false;
+		// bench: a queue of commands and captures run one after another (see the command).
+		struct BenchStep
+		{
+			std::string Command;   // Run before the capture (a view change, a toggle).
+			std::string Label;	   // The capture's label ("" = no capture).
+			std::string Restore;   // Run after the capture (turning a toggle back on).
+		};
+		std::vector<BenchStep> benchSteps;
+		std::size_t benchNext = 0;
+		std::filesystem::path benchCsv;
+		std::uint32_t benchFrames = 120;
+		std::uint32_t benchWarmup = 30;
+		std::string benchRestore;
+		bool benchQuit = false;
+		void AdvanceBench();
 		unsigned int tickCounter{ 1 };
 		double fpsTimeAccumulator{ 0.0 };
 		int fpsFrameCounter{ 0 };
@@ -189,8 +223,12 @@ namespace Engine
 		std::unique_ptr<PhysicsSystem> physicsSystem;
 		std::unique_ptr<RenderDevice> renderDevice;
 		std::unique_ptr<FrameRenderer> frameRenderer;
+		std::unique_ptr<RenderToggles> renderToggles;
 		std::unique_ptr<SceneRenderBridge> renderBridge;
 		std::unique_ptr<UiRuntime> uiRuntime;
+		// The runtime console (with a UI runtime): ` toggles it; lines run through commandRegistry.
+		std::unique_ptr<RuntimeConsole> console;
+		std::unique_ptr<RuntimeConsoleOverlay> consoleOverlay;
 		RenderServices renderServices{};
 	};
 } // namespace Engine

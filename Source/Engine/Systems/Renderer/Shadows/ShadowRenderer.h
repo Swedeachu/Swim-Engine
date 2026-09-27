@@ -10,6 +10,7 @@
 #include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 
 #include <string>
+#include <optional>
 #include <vector>
 
 namespace Swim::Render
@@ -37,6 +38,7 @@ namespace Swim::Render
 	{
 		ShadowProgram Opaque; // SwimShadowDepth.
 		ShadowProgram Masked; // SwimShadowMasked (SHADOW_ALPHA_TEST=1).
+		ShadowProgram Clear;  // Optional: SwimShadowClear with ClearPipelineDesc (needed for ShadowFrame::Atlas).
 		VisibilityDrawPath DrawPath = VisibilityDrawPath::IndirectCount;
 		std::string DebugName = "Shadows";
 	};
@@ -58,6 +60,14 @@ namespace Swim::Render
 		Rhi::DescriptorTable* Bindless = nullptr; // ShadowBindlessSpace; used by the masked variant.
 		const ShadowPlan* Plan = nullptr;
 		bool ZeroUnusedCommands = false; // VisibilityFrameDesc::ZeroUnusedCommands for the fallback draw path.
+		// Optional persistent atlas (the cascade cache): a D32Float texture of Plan->AtlasSize
+		// imported into the graph with its previous contents. Then only the views flagged in
+		// Render are culled, cleared (their tile) and drawn; the other tiles keep last frame's
+		// depth, and the plan's views for them must describe that depth (the caller keeps
+		// them). Without it a transient atlas is cleared and every view is drawn.
+		std::optional<GraphTexture> Atlas;
+		std::vector<std::uint8_t> Render; // Per Plan->Draws (empty: all); only with Atlas.
+		bool AtlasHoldsDepth = true;	  // False the first time: the atlas is cleared whole, not loaded.
 	};
 
 	// Renders every tile of a ShadowPlan into one D32Float atlas (Phase 16, items 70-72).
@@ -74,6 +84,9 @@ namespace Swim::Render
 		// writes, both faces rasterized (thin and single-sided casters shadow from
 		// either side). Bias is applied when sampling, not while rendering.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		// The tile clear: depth test Always with writes, no colour.
+		static Rhi::GraphicsPipelineDesc ClearPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		bool SupportsPersistentAtlas() const { return desc.Clear.Pipeline != nullptr; }
 		static std::vector<std::uint32_t> VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t masked, std::uint32_t excluded = 1);
 		static ShadowBin MaterialBin(const StandardPbr::Parameters& parameters);
 		static void RouteMaterial(GpuVisibility& visibility, std::uint32_t materialSet, const StandardPbr::Parameters& parameters);

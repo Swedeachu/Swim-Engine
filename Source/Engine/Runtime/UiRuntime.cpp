@@ -61,6 +61,15 @@ namespace Engine
 	UiRuntime::~UiRuntime()
 	{
 		RemoveAll();
+		for (auto& [id, overlay] : overlays)
+		{
+			(void)id;
+			if (overlay.Routed)
+			{
+				router.Remove(overlay.Canvas.Handle);
+			}
+		}
+		overlays.clear();
 	}
 
 	std::shared_ptr<Swim::UI::UiDocument> UiRuntime::CreateDocument() const
@@ -92,6 +101,7 @@ namespace Engine
 		router.SetCamera(view.Camera);
 		if (!scene)
 		{
+			SyncOverlays();
 			return;
 		}
 		auto& registry = scene->GetRegistry();
@@ -194,12 +204,91 @@ namespace Engine
 			router.SetInteractive(state.Handle, component.Interactive && !state.Culled);
 			state.Document->Layout(state.LayoutSize, state.DpiScale);
 		}
+		SyncOverlays();
+	}
+
+	std::uint32_t UiRuntime::AddOverlay(std::shared_ptr<Swim::UI::UiDocument> document, std::int32_t order)
+	{
+		OverlayState overlay;
+		overlay.Canvas.Document = std::move(document);
+		overlay.Canvas.Mode = Swim::UI::UiCanvasMode::Screen;
+		overlay.Canvas.Order = order;
+		const std::uint32_t id = nextOverlay++;
+		overlays.emplace(id, std::move(overlay));
+		return id;
+	}
+
+	void UiRuntime::SetOverlayVisible(std::uint32_t overlay, bool visible)
+	{
+		if (const auto found = overlays.find(overlay); found != overlays.end())
+		{
+			found->second.Visible = visible;
+			SyncOverlays();
+		}
+	}
+
+	void UiRuntime::RemoveOverlay(std::uint32_t overlay)
+	{
+		const auto found = overlays.find(overlay);
+		if (found == overlays.end())
+		{
+			return;
+		}
+		if (found->second.Routed)
+		{
+			router.Remove(found->second.Canvas.Handle);
+		}
+		overlays.erase(found);
+	}
+
+	void UiRuntime::SyncOverlays()
+	{
+		namespace UI = Swim::UI;
+		const float viewportWidth = std::max(view.Camera.ViewportWidth, 1.0f);
+		const float viewportHeight = std::max(view.Camera.ViewportHeight, 1.0f);
+		for (auto& [id, overlay] : overlays)
+		{
+			(void)id;
+			auto& state = overlay.Canvas;
+			if (!overlay.Visible || !state.Document)
+			{
+				if (overlay.Routed)
+				{
+					router.Remove(state.Handle);
+					overlay.Routed = false;
+				}
+				continue;
+			}
+			if (!overlay.Routed)
+			{
+				UI::UiCanvasDesc desc;
+				desc.Document = state.Document.get();
+				desc.Mode = UI::UiCanvasMode::Screen;
+				desc.Interactive = true;
+				desc.BlocksPointer = false; // Only its visible nodes (HitTest) take the pointer.
+				desc.Order = state.Order + 1000000; // Above every scene canvas.
+				state.Handle = router.Add(desc);
+				state.Sequence = ++sequence;
+				overlay.Routed = true;
+			}
+			state.LayoutSize = { viewportWidth, viewportHeight };
+			state.DpiScale = view.DpiScale;
+			state.Offset = {};
+			router.SetScreenPlacement(state.Handle, {}, {});
+			router.SetInteractive(state.Handle, true);
+			state.Document->Layout(state.LayoutSize, state.DpiScale);
+		}
 	}
 
 	const Swim::UI::UiInputFrame& UiRuntime::ApplyInput(const Swim::Input::InputSystem* input, float deltaSeconds)
 	{
 		inputFrame = {};
-		if (input && !canvases.empty())
+		const bool overlayShown = std::any_of(overlays.begin(), overlays.end(),
+			[](const auto& entry)
+			{
+				return entry.second.Routed;
+			});
+		if (input && (!canvases.empty() || overlayShown))
 		{
 			inputFrame = bridge.Apply(*input, router, &view.Camera, {}, deltaSeconds);
 		}
@@ -219,6 +308,22 @@ namespace Engine
 			state.Document->Layout(state.LayoutSize, state.DpiScale);
 			ordered.push_back(&state);
 		}
+		std::vector<CanvasState*> overlayStates;
+		for (auto& [id, overlay] : overlays)
+		{
+			(void)id;
+			if (overlay.Routed)
+			{
+				overlay.Canvas.Document->Update(std::max(deltaSeconds, 0.0f));
+				overlay.Canvas.Document->Layout(overlay.Canvas.LayoutSize, overlay.Canvas.DpiScale);
+				overlayStates.push_back(&overlay.Canvas);
+			}
+		}
+		std::stable_sort(overlayStates.begin(), overlayStates.end(),
+			[](const CanvasState* a, const CanvasState* b)
+			{
+				return a->Order < b->Order;
+			});
 		std::sort(ordered.begin(), ordered.end(),
 			[](const CanvasState* a, const CanvasState* b)
 			{
@@ -257,6 +362,13 @@ namespace Engine
 					UI::CanvasDistance(state->CanvasToWorld, state->LayoutSize, state->Placement.Pivot, view.Camera.View);
 				item.Opacity = UI::CanvasFade(state->Placement, distance);
 			}
+			drawList.push_back(item);
+		}
+		for (const CanvasState* state : overlayStates)
+		{
+			UiDrawItem item;
+			item.Document = state->Document.get();
+			item.DpiScale = state->DpiScale;
 			drawList.push_back(item);
 		}
 		return drawList;

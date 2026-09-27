@@ -1,4 +1,5 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
+#include "Engine/Systems/Renderer/Reflections/ReflectionProbeTypes.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceEffects.h"
 #include "Tests/Fixtures/RhiFrameCapture.h"
 #include "Tests/Fixtures/ScreenSpaceFixture.h"
@@ -48,12 +49,18 @@ namespace
 					{ ScreenSpaceCompositeBindings::Output, T::StorageTexture },
 					{ ScreenSpaceCompositeBindings::Reflection, T::SampledTexture },
 					{ ScreenSpaceCompositeBindings::Reflectance, T::SampledTexture },
-					{ ScreenSpaceCompositeBindings::Specular, T::SampledTexture } });
+					{ ScreenSpaceCompositeBindings::Specular, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::Normal, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::ProbeCubes, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::ProbeSampler, T::Sampler },
+					{ ScreenSpaceCompositeBindings::ProbeRecords, T::ReadOnlyStorageBuffer },
+					{ ScreenSpaceCompositeBindings::ObjectId, T::SampledTexture } });
 			using R = ScreenSpaceReflectionBindings;
 			schema(reflectionLayout,
 				{ { R::Depth, T::SampledTexture }, { R::Normal, T::SampledTexture }, { R::Color, T::SampledTexture },
 					{ R::Indirect, T::SampledTexture }, { R::Ao, T::SampledTexture }, { R::Params, T::ReadOnlyStorageBuffer },
-					{ R::Output, T::StorageTexture } });
+					{ R::Output, T::StorageTexture }, { R::Velocity, T::SampledTexture }, { R::History, T::SampledTexture },
+					{ R::BackDepth, T::SampledTexture } });
 			const auto make = [&](Rhi::Format format, Rhi::TextureUsage usage)
 			{
 				Rhi::TextureDesc desc;
@@ -68,6 +75,19 @@ namespace
 			indirect = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
 			reflectance = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
 			specular = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::ColorAttachment);
+			history = make(Rhi::Format::RGBA16Float, Rhi::TextureUsage::Storage);
+			velocity = make(Rhi::Format::RG16Float, Rhi::TextureUsage::ColorAttachment);
+			backDepth = make(Rhi::Format::D32Float, Rhi::TextureUsage::DepthStencilAttachment);
+			objectId = make(Rhi::Format::R32Float, Rhi::TextureUsage::ColorAttachment);
+			Rhi::TextureDesc cubes;
+			cubes.Dimension = Rhi::TextureDimension::TextureCube;
+			cubes.Extent = { 16, 16, 1 };
+			cubes.ArrayLayers = 12;
+			cubes.MipLevels = 3;
+			cubes.PixelFormat = Rhi::Format::RGBA16Float;
+			cubes.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage;
+			probeCubes = device.CreateTexture(cubes);
+			sampler = device.CreateSampler({});
 		}
 
 		ScreenSpaceEffectsDesc Desc()
@@ -77,6 +97,7 @@ namespace
 			desc.Blur = { &blurPipeline, &blurLayout, 0 };
 			desc.Composite = { &compositePipeline, &compositeLayout, 0 };
 			desc.Reflection = { &reflectionPipeline, &reflectionLayout, 0 };
+			desc.ProbeSampler = sampler.get();
 			desc.DebugName = "Test screen space";
 			return desc;
 		}
@@ -129,7 +150,8 @@ namespace
 		std::unique_ptr<RenderGraphExecutor> executor;
 		Testing::MockPipelineLayout aoLayout, blurLayout, compositeLayout, reflectionLayout;
 		Testing::MockComputePipeline aoPipeline, blurPipeline, compositePipeline, reflectionPipeline;
-		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular;
+		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular, history, velocity, backDepth, objectId, probeCubes;
+		std::unique_ptr<Rhi::Sampler> sampler;
 	};
 } // namespace
 
@@ -190,7 +212,8 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEna
 		SWIM_CHECK(!resources.AmbientOcclusion && !resources.AmbientOcclusionPass && resources.CompositePass);
 		world.Run(graph, resources.Output);
 		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(1));
-		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(2)); // The AO and reflection stand-ins.
+		// The AO and reflection stand-ins, the six faces of the probe cube stand-in and the object id stand-in.
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(2 + 6 + 1));
 		SWIM_CHECK_EQUAL(world.Bound(C::Ao).GetTexture().GetDesc().Extent.Width, 1u);
 		// Reflections off: one 1x1 stand-in fills the reflection, reflectance and specular slots.
 		SWIM_CHECK_EQUAL(world.Bound(C::Reflection).GetTexture().GetDesc().Extent.Width, 1u);
@@ -334,6 +357,47 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, C::Count);
 	}
 
+	// Half resolution: a quarter-size reflection texture (rounded up), flagged for the composite.
+	{
+		ScreenSpaceSettings settings;
+		settings.Reflections.Enabled = true;
+		settings.Reflections.HalfResolution = true;
+		RenderGraph graph;
+		const auto frame = world.Frame(graph, settings);
+		const auto resources = effects.Record(graph, frame);
+		SWIM_REQUIRE(resources.Reflection && resources.ReflectionPass);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.SsrHalf, 1u);
+		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Width, (ScreenSpaceWorld::Width + 1u) / 2u);
+		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Height, (ScreenSpaceWorld::Height + 1u) / 2u);
+		world.Run(graph, resources.Output);
+		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(4));
+	}
+
+	// With the previous frame and motion vectors, reflections read them (SsrHistory = 1);
+	// without, Color and a 1x1 velocity stand-in fill those slots.
+	{
+		ScreenSpaceSettings settings;
+		settings.AmbientOcclusion.Enabled = false;
+		settings.Reflections.Enabled = true;
+		RenderGraph graph;
+		auto frame = world.Frame(graph, settings);
+		frame.History = graph.ImportTexture(*world.history, Rhi::ResourceState::ShaderRead);
+		frame.Velocity = graph.ImportTexture(*world.velocity, Rhi::ResourceState::ShaderRead);
+		const auto resources = effects.Record(graph, frame);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.SsrHistory, 1u);
+		world.Run(graph, resources.Output);
+		RenderGraph plain;
+		const auto without = effects.Record(plain, world.Frame(plain, settings));
+		SWIM_CHECK_EQUAL(without.ParamsRecord.SsrHistory, 0u);
+		world.Run(plain, without.Output);
+		// A history of the wrong format is rejected.
+		RenderGraph bad;
+		auto badFrame = world.Frame(bad, settings);
+		badFrame.History = bad.ImportTexture(*world.velocity, Rhi::ResourceState::ShaderRead);
+		badFrame.Velocity = badFrame.History;
+		SWIM_CHECK_THROWS(effects.Record(bad, badFrame), std::invalid_argument);
+	}
+
 	// Reflections alone: the reflection pass reads the AO stand-in, then the composite.
 	{
 		ScreenSpaceSettings settings;
@@ -346,7 +410,8 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		const auto pipelines = world.Commands("BindComputePipeline");
 		SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(2));
 		SWIM_CHECK(pipelines[0].Source == &world.reflectionPipeline && pipelines[1].Source == &world.compositePipeline);
-		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(1)); // The AO stand-in only.
+		// The AO, velocity and back-depth stand-ins, the probe cube's six faces and the object id.
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(3 + 6 + 1));
 	}
 }
 
@@ -405,4 +470,74 @@ SWIM_TEST("Render.ScreenSpaceEffects", "ReflectionsNeedTheirProgramAndInputs")
 	frame.Reflectance.reset();
 	frame.Specular.reset();
 	SWIM_CHECK(!effects.Record(graph, frame).ReflectionPass);
+}
+
+SWIM_TEST("Render.ScreenSpaceEffects", "BackFaceDepthAndProbesReachTheirPasses")
+{
+	using C = ScreenSpaceCompositeBindings;
+	using R = ScreenSpaceReflectionBindings;
+	ScreenSpaceWorld world;
+	const ScreenSpaceEffects effects(world.Desc());
+	ScreenSpaceSettings settings;
+	settings.AmbientOcclusion.Enabled = false;
+	settings.Reflections.Enabled = true;
+	settings.Reflections.Debug = ReflectionDebugView::Sources;
+
+	// With the back-face depth the march uses surface thickness (SsrBackDepth = 1) and binds it
+	// by its depth aspect.
+	{
+		RenderGraph graph;
+		auto frame = world.Frame(graph, settings);
+		frame.BackDepth = graph.ImportTexture(*world.backDepth, Rhi::ResourceState::ShaderRead);
+		const auto resources = effects.Record(graph, frame);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.SsrBackDepth, 1u);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ReflectionDebug, 1u);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ProbeCount, 0u);
+		world.Run(graph, resources.Output);
+		// A back depth of the wrong format is rejected.
+		RenderGraph bad;
+		auto badFrame = world.Frame(bad, settings);
+		badFrame.BackDepth = bad.ImportTexture(*world.velocity, Rhi::ResourceState::ShaderRead);
+		SWIM_CHECK_THROWS(effects.Record(bad, badFrame), std::invalid_argument);
+	}
+
+	// Probes: the composite binds the cube array (every layer and mip), the records and the
+	// object ids, and runs even with every screen-space effect off.
+	{
+		ScreenSpaceSettings off;
+		off.AmbientOcclusion.Enabled = false;
+		RenderGraph graph;
+		auto frame = world.Frame(graph, off);
+		ScreenSpaceFrame::ProbeInputs probes;
+		probes.Cubes = graph.ImportTexture(*world.probeCubes, Rhi::ResourceState::ShaderRead);
+		const std::array<GpuReflectionProbeRecord, 2> records{};
+		probes.Records = graph.CreateUpload(std::as_bytes(std::span(records)), "Probe records", Rhi::BufferUsage::Storage, 16);
+		probes.ObjectId = graph.ImportTexture(*world.objectId, Rhi::ResourceState::ShaderRead);
+		probes.Count = 2;
+		probes.MipCount = 3;
+		frame.Probes = probes;
+		const auto resources = effects.Record(graph, frame);
+		SWIM_CHECK(!resources.Passthrough && resources.CompositePass && !resources.ReflectionPass);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ProbeCount, 2u);
+		SWIM_CHECK_EQUAL(resources.ParamsRecord.ProbeMipCount, 3u);
+		world.Run(graph, resources.Output);
+		const auto& cubes = world.Bound(C::ProbeCubes);
+		SWIM_CHECK(cubes.GetDesc().Dimension == Rhi::TextureViewDimension::TextureCubeArray);
+		SWIM_CHECK_EQUAL(cubes.GetDesc().ArrayLayerCount, 12u);
+		SWIM_CHECK_EQUAL(cubes.GetDesc().MipLevelCount, 3u);
+		SWIM_CHECK(&world.Bound(C::ObjectId).GetTexture() == world.objectId.get());
+		// Probes replace the specular IBL, so the reflectance and specular inputs are the real ones.
+		SWIM_CHECK(&world.Bound(C::Reflectance).GetTexture() == world.reflectance.get());
+		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, C::Count);
+		// An object id of the wrong format is rejected.
+		RenderGraph bad;
+		auto badFrame = world.Frame(bad, off);
+		auto badProbes = probes;
+		badProbes.Cubes = bad.ImportTexture(*world.probeCubes, Rhi::ResourceState::ShaderRead);
+		badProbes.Records = bad.CreateUpload(std::as_bytes(std::span(records)), "Probe records", Rhi::BufferUsage::Storage, 16);
+		badProbes.ObjectId = bad.ImportTexture(*world.velocity, Rhi::ResourceState::ShaderRead);
+		badFrame.Probes = badProbes;
+		SWIM_CHECK_THROWS(effects.Record(bad, badFrame), std::invalid_argument);
+	}
+	(void)sizeof(R);
 }

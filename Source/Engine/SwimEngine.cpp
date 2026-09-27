@@ -1,4 +1,6 @@
 #include "Engine/SwimEngine.h"
+#include "Engine/Runtime/RuntimeConsole.h"
+#include "Engine/Runtime/RuntimeConsoleOverlay.h"
 
 #include "Engine/Components/CameraComponent.h"
 #include "Engine/Components/Transform.h"
@@ -27,6 +29,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -365,12 +368,18 @@ namespace Engine
 			{
 				uiRuntime = std::make_unique<UiRuntime>(FindResourceRoot());
 				renderServices.Ui = uiRuntime.get();
+				CreateConsole();
 			}
 			catch (const std::exception& error)
 			{
 				std::cerr << "[Engine] UI runtime unavailable: " << error.what() << '\n';
 			}
 		}
+
+		// Profiling switches (render.toggle) over the renderer, its features and what scenes add.
+		renderToggles = std::make_unique<RenderToggles>(frameRenderer.get());
+		renderServices.Toggles = renderToggles.get();
+		renderServices.Profiler = &profiler;
 
 		// Scenes consume every service above, so they come last.
 		SceneServices services;
@@ -458,6 +467,7 @@ namespace Engine
 			deviceDesc.Width = surfaceWidth;
 			deviceDesc.Height = surfaceHeight;
 			deviceDesc.VSync = config.VSync;
+			deviceDesc.FramesInFlight = config.FramesInFlight;
 			deviceDesc.Validation = config.Validation;
 			renderDevice = std::make_unique<RenderDevice>(deviceDesc);
 			std::cout << "[Render] " << renderDevice->GetAdapterInfo().Name << " (" << renderDevice->GetAdapterInfo().DriverName << "), "
@@ -497,7 +507,35 @@ namespace Engine
 		renderServices.Stats = &frameRenderer->GetStats();
 		renderServices.Bridge = renderBridge.get();
 		renderServices.Ui = uiRuntime.get();
+		CreateConsole();
 		return 0;
+	}
+
+	void SwimEngine::PrintRenderStats() const
+	{
+		if (!frameRenderer)
+		{
+			std::cout << "[Render] no renderer\n";
+			return;
+		}
+		const auto& s = frameRenderer->GetStats();
+		std::cout << "[Render] frame " << s.Frame << ": " << s.Width << "x" << s.Height << ", CPU " << s.CpuMilliseconds << " ms, GPU "
+				  << (s.GpuTimingsAvailable ? std::to_string(s.GpuMilliseconds) + " ms" : std::string("n/a")) << " (" << s.Passes
+				  << " passes), probes " << s.ReflectionProbes << " active / " << s.ReflectionProbeFaces << " faces captured\n";
+		for (std::uint32_t i = 0; i < s.TopPassCount; ++i)
+		{
+			std::cout << "[Render]   " << s.TopPasses[i].Name << ": " << s.TopPasses[i].Milliseconds << " ms\n";
+		}
+	}
+
+	void SwimEngine::CreateConsole()
+	{
+		if (!uiRuntime || !commandRegistry || consoleOverlay)
+		{
+			return;
+		}
+		console = std::make_unique<RuntimeConsole>(*commandRegistry);
+		consoleOverlay = std::make_unique<RuntimeConsoleOverlay>(*uiRuntime, *console);
 	}
 
 	void SwimEngine::RegisterEngineCommands()
@@ -603,6 +641,236 @@ namespace Engine
 				}
 				cameraSystem->RequestCameraCut();
 				cameraLocked = true;
+			});
+		// render.stats: the last frame's CPU/GPU times, the costliest GPU passes and the
+		// reflection probe work; render.stats <n>: print it every n frames (0 stops).
+		commands.Register("render.stats",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (!arguments.empty())
+				{
+					try
+					{
+						statsInterval = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[0])));
+					}
+					catch (...)
+					{
+						statsInterval = 0;
+					}
+					return;
+				}
+				PrintRenderStats();
+			});
+		// profile <frames> [warmup] [csv path] [label] [quit]: measures every CPU zone, renderer
+		// phase and GPU pass over <frames> frames (after [warmup]) and prints the costliest;
+		// with a path, appends the full table to that CSV; "quit" ends the run after it.
+		commands.Register("profile",
+			[this](const std::vector<std::string>& arguments)
+			{
+				const auto number = [&](std::size_t i, std::uint32_t fallback)
+				{
+					try
+					{
+						return i < arguments.size() ? static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[i]))) : fallback;
+					}
+					catch (...)
+					{
+						return fallback;
+					}
+				};
+				const std::uint32_t frames = number(0, 240);
+				const std::uint32_t warmup = number(1, 60);
+				const std::filesystem::path csv = arguments.size() > 2 && arguments[2] != "-" ? std::filesystem::path(arguments[2]) : std::filesystem::path();
+				const std::string label = arguments.size() > 3 ? arguments[3] : std::string();
+				quitAfterProfile = arguments.size() > 4 && arguments[4] == "quit";
+				profiler.Begin(warmup, frames, csv, label);
+				std::cout << "[Profile] capturing " << frames << " frames after " << warmup << " warm-up frames\n";
+			});
+		// render.toggles [filter]: every profiling switch and its state; render.toggle
+		// <name|group.*|all> [0|1]: set (or flip) switches.
+		commands.Register("render.toggles",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (!renderToggles)
+				{
+					return;
+				}
+				const std::string filter = arguments.empty() ? std::string() : arguments[0];
+				for (const auto& toggle : renderToggles->List())
+				{
+					if (!filter.empty() && toggle.Name.find(filter) == std::string::npos)
+					{
+						continue;
+					}
+					std::cout << "[Toggle] " << (toggle.Get() ? "on  " : "off ") << toggle.Name << "  - " << toggle.Description << '\n';
+				}
+			});
+		commands.Register("render.toggle",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (!renderToggles || arguments.empty())
+				{
+					throw std::invalid_argument("usage: render.toggle <name|group.*|all> [0|1]");
+				}
+				bool on = true;
+				if (arguments.size() > 1)
+				{
+					on = arguments[1] != "0" && arguments[1] != "off" && arguments[1] != "false";
+				}
+				else if (const auto current = renderToggles->Get(arguments[0]))
+				{
+					on = !*current;
+				}
+				const auto changed = renderToggles->Set(arguments[0], on);
+				if (changed == 0)
+				{
+					throw std::invalid_argument("no render toggle matches " + arguments[0] + " (see render.toggles)");
+				}
+				std::cout << "[Toggle] " << arguments[0] << " -> " << (on ? "on" : "off") << " (" << changed << ")\n";
+			});
+		// render.set [<knob> <value>]: the numeric quality knobs of the render settings, live
+		// (bench sweeps them: "tile32=render.set cluster.tile 32"). No arguments: lists them.
+		commands.Register("render.set",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (!renderServices.Settings)
+				{
+					throw std::invalid_argument("render.set needs the renderer");
+				}
+				auto& s = *renderServices.Settings;
+				auto& ssr = s.ScreenSpace.Reflections;
+				auto& ao = s.ScreenSpace.AmbientOcclusion;
+				auto& shadow = s.Shadow;
+				auto& probes = s.ReflectionProbes;
+				std::uint32_t ssrHalf = ssr.HalfResolution ? 1u : 0u;
+				std::uint32_t aoHalf = ao.HalfResolution ? 1u : 0u;
+				struct Knob
+				{
+					const char* Name;
+					float* F = nullptr;
+					std::uint32_t* U = nullptr;
+				};
+				const Knob knobs[] = {
+					{ "cluster.tile", nullptr, &s.ClusterTileSize },
+					{ "cluster.slices", nullptr, &s.ClusterSlices },
+					{ "cluster.far", &s.ClusterFar },
+					{ "ssr.steps", nullptr, &ssr.MaxSteps },
+					{ "ssr.stride", &ssr.Stride },
+					{ "ssr.refine", nullptr, &ssr.RefineSteps },
+					{ "ssr.distance", &ssr.MaxDistance },
+					{ "ssr.roughness", &ssr.MaxRoughness },
+					{ "ssr.half", nullptr, &ssrHalf },
+					{ "ao.half", nullptr, &aoHalf },
+					{ "ao.slices", nullptr, &ao.SliceCount },
+					{ "ao.steps", nullptr, &ao.StepCount },
+					{ "ao.radius", &ao.Radius },
+					{ "shadow.cascade", nullptr, &shadow.CascadeResolution },
+					{ "shadow.spot", nullptr, &shadow.SpotResolution },
+					{ "shadow.point", nullptr, &shadow.PointResolution },
+					{ "shadow.spots", nullptr, &shadow.MaxSpotShadows },
+					{ "shadow.points", nullptr, &shadow.MaxPointShadows },
+					{ "shadow.pcf", nullptr, &shadow.PcfRadius },
+					{ "probes.resolution", nullptr, &probes.Resolution },
+					{ "probes.faces", nullptr, &probes.FacesPerFrame },
+					{ "probes.filters", nullptr, &probes.FiltersPerFrame },
+					{ "probes.idle", nullptr, &probes.IdleRefreshFrames },
+					{ "probes.samples", nullptr, &probes.PrefilterSamples },
+				};
+				if (arguments.size() < 2)
+				{
+					for (const auto& knob : knobs)
+					{
+						std::cout << "[Set] " << knob.Name << " = " << (knob.F ? *knob.F : static_cast<float>(*knob.U)) << "\n";
+					}
+					return;
+				}
+				for (const auto& knob : knobs)
+				{
+					if (arguments[0] == knob.Name)
+					{
+						const float value = std::stof(arguments[1]);
+						if (knob.F)
+						{
+							*knob.F = value;
+						}
+						else
+						{
+							*knob.U = static_cast<std::uint32_t>(std::max(0.0f, value));
+						}
+						ssr.HalfResolution = ssrHalf != 0u;
+						ao.HalfResolution = aoHalf != 0u;
+						std::cout << "[Set] " << knob.Name << " -> " << value << "\n";
+						return;
+					}
+				}
+				throw std::invalid_argument("unknown render knob " + arguments[0] + " (render.set lists them)");
+			});
+		// bench <csv> <frames> <warmup> <ablate|base> <scenario>[|<scenario>...] [quit]
+		// A scenario is "<label>=<command>[;<command>...]" (e.g. "atrium=sandbox.view 5").
+		// For each scenario: its commands, a baseline capture, and with "ablate" one capture
+		// per profiling switch turned off alone (and back on after). Captures append to the CSV
+		// labelled "<scenario>|baseline" or "<scenario>|-<switch>".
+		commands.Register("bench",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.size() < 5)
+				{
+					throw std::invalid_argument("usage: bench <csv> <frames> <warmup> <ablate|base> <label=cmd;cmd|label=cmd> [quit]");
+				}
+				benchCsv = arguments[0];
+				benchFrames = static_cast<std::uint32_t>(std::max(1, std::stoi(arguments[1])));
+				benchWarmup = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
+				const bool ablate = arguments[3] == "ablate";
+				// The scenario list may have been split on spaces: join the rest.
+				std::string scenarios;
+				benchQuit = false;
+				for (std::size_t i = 4; i < arguments.size(); ++i)
+				{
+					if (i + 1 == arguments.size() && arguments[i] == "quit")
+					{
+						benchQuit = true;
+						break;
+					}
+					scenarios += (scenarios.empty() ? "" : " ") + arguments[i];
+				}
+				benchSteps.clear();
+				benchNext = 0;
+				std::size_t start = 0;
+				while (start <= scenarios.size())
+				{
+					const auto end = std::min(scenarios.find('|', start), scenarios.size());
+					const std::string scenario = scenarios.substr(start, end - start);
+					start = end + 1;
+					if (scenario.empty())
+					{
+						continue;
+					}
+					const auto equals = scenario.find('=');
+					const std::string label = equals == std::string::npos ? scenario : scenario.substr(0, equals);
+					std::string setup = equals == std::string::npos ? std::string() : scenario.substr(equals + 1);
+					// Commands separated by ';' run one after another.
+					std::size_t from = 0;
+					while (from <= setup.size())
+					{
+						const auto to = std::min(setup.find(';', from), setup.size());
+						benchSteps.push_back({ setup.substr(from, to - from), "", "" });
+						from = to + 1;
+					}
+					benchSteps.push_back({ "", label + "|baseline", "" });
+					if (ablate && renderToggles)
+					{
+						for (const auto& toggle : renderToggles->List())
+						{
+							if (!toggle.Get())
+							{
+								continue; // Already off in this scenario.
+							}
+							benchSteps.push_back({ "render.toggle " + toggle.Name + " 0", label + "|-" + toggle.Name,
+								"render.toggle " + toggle.Name + " 1" });
+						}
+					}
+				}
+				std::cout << "[Bench] " << benchSteps.size() << " steps\n";
 			});
 		commands.Register("quit",
 			[this](const std::vector<std::string>&)
@@ -748,6 +1016,34 @@ namespace Engine
 		{
 			return false;
 		}
+		const auto tickStart = std::chrono::steady_clock::now();
+		if (haveLastTick)
+		{
+			// The whole previous frame, start to start (what the frame rate is).
+			profiler.Add("frame", "Frame (wall, start to start)", std::chrono::duration<double, std::milli>(tickStart - lastTickStart).count());
+		}
+		lastTickStart = tickStart;
+		haveLastTick = true;
+		if (profiler.EndFrame())
+		{
+			const auto& report = profiler.GetReport();
+			std::cout << FrameProfiler::Summary(report, benchSteps.empty() ? 12 : 4);
+			if (quitAfterProfile)
+			{
+				running = false;
+				return false;
+			}
+		}
+		if (!benchSteps.empty() && !profiler.IsCapturing())
+		{
+			AdvanceBench();
+			if (!running)
+			{
+				return false;
+			}
+		}
+		std::optional<FrameProfiler::Scope> eventsScope;
+		eventsScope.emplace(profiler, "Platform events");
 		platformSystem->PumpEvents(
 			[this](const Swim::Platform::WindowEvent& event)
 			{
@@ -761,6 +1057,7 @@ namespace Engine
 				}
 				inputSystem->ProcessInputEvent(event);
 			});
+		eventsScope.reset();
 		if (!running)
 		{
 			return false;
@@ -782,16 +1079,25 @@ namespace Engine
 
 		Update(realDelta);
 
-		if (jobSystem && jobSystem->IsRunning())
 		{
-			jobSystem->RunMainThreadJobs();
+			FrameProfiler::Scope scope(profiler, "Jobs and IO completions");
+			if (jobSystem && jobSystem->IsRunning())
+			{
+				jobSystem->RunMainThreadJobs();
+			}
+			if (ioSystem && ioSystem->IsRunning())
+			{
+				ioSystem->PumpCompletions();
+			}
 		}
-		if (ioSystem && ioSystem->IsRunning())
-		{
-			ioSystem->PumpCompletions();
-		}
+		profiler.Add("frame", "Tick (CPU, excluding the wait for the next frame)",
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tickStart).count());
 
 		++totalFrames;
+		if (statsInterval != 0 && totalFrames % statsInterval == 0)
+		{
+			PrintRenderStats();
+		}
 		fpsTimeAccumulator += realDelta;
 		++fpsFrameCounter;
 		if (fpsTimeAccumulator >= 1.0)
@@ -815,14 +1121,18 @@ namespace Engine
 	void SwimEngine::Update(double realDelta)
 	{
 		// Deferred scene switches and Stop resets apply before anything reads the scene.
+		std::optional<FrameProfiler::Scope> zone;
+		zone.emplace(profiler, "Scene begin frame");
 		sceneSystem->BeginFrame();
 		const auto& activeScene = sceneSystem->GetActiveScene();
 		Scene* scene = activeScene.get();
 
+		zone.emplace(profiler, "Renderer begin frame (collect)");
 		if (frameRenderer)
 		{
 			frameRenderer->BeginFrame();
 		}
+		zone.emplace(profiler, "UI sync and input");
 
 		// Camera aspect and the UI view (canvases route this frame's input before gameplay
 		// reads it, so behaviours can see whether the UI took the pointer).
@@ -840,23 +1150,36 @@ namespace Engine
 		if (uiRuntime)
 		{
 			uiRuntime->Sync(scene, uiView);
+			if (consoleOverlay)
+			{
+				consoleOverlay->BeforeInput(engineWindow ? inputSystem.get() : nullptr);
+			}
 			uiRuntime->ApplyInput(engineWindow ? inputSystem.get() : nullptr, static_cast<float>(realDelta));
+			if (consoleOverlay)
+			{
+				consoleOverlay->AfterInput();
+			}
 			UpdateTextInput();
 		}
 
+		zone.reset();
 		// Fixed steps: behaviours, then one physics step each (collision callbacks follow).
 		for (std::uint32_t step = 0; step < currentFrame.FixedSteps; ++step)
 		{
 			FixedUpdate(tickCounter);
 			tickCounter = tickCounter % 1000 + 1;
 		}
+		zone.emplace(profiler, "Physics interpolation");
 		if (scene && physicsSystem && scene->GetPhysicsWorld())
 		{
 			scene->UpdatePhysics(*physicsSystem, static_cast<float>(currentFrame.Alpha));
 		}
 
+		zone.emplace(profiler, "Behaviours (update)");
 		sceneSystem->Update(currentFrame.ScaledDelta);
+		zone.emplace(profiler, "Camera components");
 		ApplyCameraComponents();
+		zone.reset();
 
 		if (!frameRenderer)
 		{
@@ -870,13 +1193,16 @@ namespace Engine
 		{
 			renderBridge->Attach(scene, sceneSystem->GetActiveSceneId().GetValue());
 		}
+		zone.emplace(profiler, "Render bridge (extraction, lights, probes)");
 		renderBridge->Update();
 
+		zone.emplace(profiler, "UI layout and paint");
 		std::span<const UiDrawItem> ui;
 		if (uiRuntime)
 		{
 			ui = uiRuntime->Finish(static_cast<float>(realDelta));
 		}
+		zone.reset();
 
 		RenderFrameInput input;
 		auto& render = input.Camera;
@@ -894,13 +1220,20 @@ namespace Engine
 		input.DeltaTime = static_cast<float>(realDelta);
 		input.SimulationDeltaTime = static_cast<float>(clock.GetDelta(SimulationDomain::Particles, currentFrame));
 		input.ShadowCasters = renderBridge->GetShadowCasters();
+		input.ReflectionProbes = renderBridge->GetReflectionProbes();
+		input.ReflectionMovers = renderBridge->GetReflectionMovers();
 		input.Ui = ui;
 		input.GlyphAtlas = uiRuntime ? &uiRuntime->GetAtlas() : nullptr;
 		const bool finalFrame = config.MaxFrames != 0 && totalFrames + 1 >= config.MaxFrames;
 		input.Capture = !pendingCapture.empty() || (finalFrame && !config.CapturePath.empty());
 		try
 		{
-			if (frameRenderer->Render(input) && input.Capture)
+			const auto renderStart = std::chrono::steady_clock::now();
+			const bool rendered = frameRenderer->Render(input);
+			profiler.Add("cpu", "Render (renderer CPU total)",
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count());
+			RecordFrameProfile(0.0);
+			if (rendered && input.Capture)
 			{
 				const auto path = !pendingCapture.empty() ? pendingCapture : std::filesystem::path(config.CapturePath);
 				if (frameRenderer->WriteCapture(path))
@@ -924,11 +1257,86 @@ namespace Engine
 
 	void SwimEngine::FixedUpdate(unsigned int tickThisSecond)
 	{
-		sceneSystem->FixedUpdate(tickThisSecond);
+		{
+			FrameProfiler::Scope scope(profiler, "Behaviours (fixed update)");
+			sceneSystem->FixedUpdate(tickThisSecond);
+		}
+		FrameProfiler::Scope scope(profiler, "Physics step");
 		const auto& scene = sceneSystem->GetActiveScene();
 		if (scene && physicsSystem)
 		{
 			scene->FixedUpdatePhysics(*physicsSystem, static_cast<float>(currentFrame.FixedDelta));
+		}
+	}
+
+	void SwimEngine::AdvanceBench()
+	{
+		const auto run = [this](const std::string& line)
+		{
+			if (line.empty())
+			{
+				return;
+			}
+			try
+			{
+				commandRegistry->ParseAndDispatch(line);
+			}
+			catch (const std::exception& error)
+			{
+				std::cerr << "[Bench] " << line << ": " << error.what() << '\n';
+			}
+		};
+		run(benchRestore);
+		benchRestore.clear();
+		while (benchNext < benchSteps.size())
+		{
+			const auto step = benchSteps[benchNext++];
+			run(step.Command);
+			if (!step.Label.empty())
+			{
+				benchRestore = step.Restore;
+				profiler.Begin(benchWarmup, benchFrames, benchCsv, step.Label);
+				std::cout << "[Bench] " << benchNext << "/" << benchSteps.size() << ": " << step.Label << '\n';
+				return;
+			}
+		}
+		std::cout << "[Bench] done: " << benchCsv.string() << '\n';
+		benchSteps.clear();
+		benchNext = 0;
+		if (benchQuit)
+		{
+			running = false;
+		}
+	}
+
+	void SwimEngine::RecordFrameProfile(double)
+	{
+		if (!frameRenderer)
+		{
+			return;
+		}
+		const auto& stats = frameRenderer->GetStats();
+		for (const auto& phase : stats.CpuPhases)
+		{
+			profiler.Add("render", phase.Name, phase.Milliseconds);
+		}
+		for (const auto& phase : stats.RecordPhases)
+		{
+			profiler.Add("render", phase.Name, phase.Milliseconds);
+		}
+		for (const auto& pass : stats.RecordPasses)
+		{
+			profiler.Add("record", pass.Name, pass.Milliseconds);
+		}
+		double gpu = 0.0;
+		for (const auto& pass : stats.GpuPasses)
+		{
+			profiler.Add("gpu", pass.Name, pass.Milliseconds);
+			gpu += pass.Milliseconds;
+		}
+		if (stats.GpuTimingsAvailable)
+		{
+			profiler.Add("frame", "GPU (first begin to last end)", gpu);
 		}
 	}
 
@@ -976,6 +1384,9 @@ namespace Engine
 			record("SceneSystem", sceneSystem->Exit());
 		}
 		renderBridge.reset();
+		renderToggles.reset();
+		consoleOverlay.reset();
+		console.reset();
 		uiRuntime.reset();
 		renderServices = {};
 		frameRenderer.reset();

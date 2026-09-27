@@ -723,7 +723,11 @@ namespace
 				const auto& command = sorted[i];
 				if (i >= transparentCount)
 				{
-					SWIM_CHECK(command.IndexCount == 0 && command.InstanceCount == 0); // Zero-filled.
+					// Zero-filled only where the draw has no count buffer (the sort skips it otherwise).
+					if (NeedsZeroedCommands(path))
+					{
+						SWIM_CHECK(command.IndexCount == 0 && command.InstanceCount == 0);
+					}
 					continue;
 				}
 				SWIM_CHECK_EQUAL(command.FirstInstance, expectedOrder[i]);
@@ -1191,6 +1195,9 @@ namespace
 			{
 				RenderGraph graph;
 				const auto lightResources = lights.Import(graph);
+				// The bitmasks address every local light the buffer holds (its rows can exceed the
+				// scenario's count after earlier scenarios released theirs).
+				scenarioGrid.LightCapacity = std::max(scenarioGrid.LightCapacity, lightResources.LocalCount);
 				const auto clusters = assigner.Record(graph, lightResources, scenarioGrid, view);
 				const auto statsReadback = AddBufferReadback(graph, "Stats", clusters.Stats, 0, sizeof(ClusterStats));
 				executor.Execute(graph.Compile());

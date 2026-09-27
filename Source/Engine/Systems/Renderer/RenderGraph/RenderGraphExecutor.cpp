@@ -1,4 +1,6 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
+
+#include <chrono>
 #include "Engine/Systems/Renderer/RenderGraph/Internal/GraphExecutionState.h"
 #include "Engine/Systems/Renderer/RenderGraph/Internal/GraphValidation.h"
 #include <algorithm>
@@ -125,12 +127,21 @@ namespace Swim::Render
 			throw std::overflow_error("RenderGraph timeline exhausted");
 		}
 
+		using Clock = std::chrono::steady_clock;
+		const auto ms = [](Clock::time_point a, Clock::time_point b)
+		{
+			return std::chrono::duration<double, std::milli>(b - a).count();
+		};
+		lastTimings = {};
+		auto mark = Clock::now();
 		Wait();
+		lastTimings.Wait = ms(mark, Clock::now());
+		mark = Clock::now();
 
 		state->Commands.reset();
 		state->CommandPool->Reset();
 		state->Retained.clear();
-		state->Queries.reset();
+		// The timestamp pool is kept while it is large enough (it is reset in the command list).
 		state->HasResult = false;
 
 		state->Graph = graph; // Own the immutable description and callbacks through completion.
@@ -194,23 +205,37 @@ namespace Swim::Render
 				state->Resources[r] = slots[graph.lifetimes[r].Allocation];
 			}
 		}
+		lastTimings.Allocate = ms(mark, Clock::now());
+		mark = Clock::now();
 		StageBuffers(graph); // Runs upload writers; failure leaves no published result.
+		lastTimings.Stage = ms(mark, Clock::now());
+		mark = Clock::now();
 
-		if (!graph.schedule.empty() && state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
+		if (graph.schedule.empty() || !state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
+		{
+			state->Queries.reset();
+		}
+		else
 		{
 			if (graph.schedule.size() > UINT32_MAX / 2)
 			{
 				throw std::overflow_error("RenderGraph timestamp count overflow");
 			}
 
-			state->Queries = state->Device.CreateQueryPool(
-				{ Rhi::QueryType::Timestamp, static_cast<std::uint32_t>(graph.schedule.size() * 2), "RenderGraph passes" });
+			const auto needed = static_cast<std::uint32_t>(graph.schedule.size() * 2);
+			if (!state->Queries || state->Queries->GetDesc().Count < needed)
+			{
+				// Room to grow, so a frame with a few more passes does not recreate it.
+				state->Queries = state->Device.CreateQueryPool({ Rhi::QueryType::Timestamp, needed + needed / 2 + 16, "RenderGraph passes" });
+			}
 			if (!state->Queries)
 			{
 				throw std::runtime_error("RenderGraph timestamp pool allocation failed");
 			}
 		}
 
+		lastTimings.Queries = ms(mark, Clock::now());
+		mark = Clock::now();
 		state->Commands = state->CommandPool->CreateCommandList();
 		if (!state->Commands)
 		{
@@ -241,7 +266,10 @@ namespace Swim::Render
 				}
 
 				RenderCommandContext context(*state, scheduled.Pass);
+				const auto passStart = Clock::now();
 				pass.Execute(context);
+				lastTimings.Passes.push_back(
+					{ pass.Name, std::chrono::duration<double, std::nano>(Clock::now() - passStart).count(), std::nullopt });
 
 				if (state->Queries)
 				{
@@ -255,6 +283,8 @@ namespace Swim::Render
 				RecordBarrier(barrier);
 			}
 			state->Commands->End();
+			lastTimings.Record = ms(mark, Clock::now());
+			mark = Clock::now();
 
 			const bool uploads = state->Upload && state->Upload->GetUsedBytes() != 0;
 			const bool readbacks = state->Readback && state->Readback->GetUsedBytes() != 0;
@@ -276,6 +306,7 @@ namespace Swim::Render
 			state->Device.GetQueue(Rhi::QueueType::Graphics).Submit(submit);
 
 			++state->Submitted;
+			lastTimings.Submit = ms(mark, Clock::now());
 			if (readbacks)
 			{
 				Rhi::ReadbackSubmission::Commit(*state->Readback, state->Timeline, state->Submitted);

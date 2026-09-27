@@ -31,6 +31,18 @@
 #ifndef FORWARD_PREPASSED
 #define FORWARD_PREPASSED 0
 #endif
+// SwimForwardBackDepth (FORWARD_DEPTH_ONLY=1, FORWARD_BACK_DEPTH=1): keeps only back faces
+// (whatever the material's culling), for the nearest back face per pixel: the far side of
+// every visible closed surface (ForwardPlusTargets::BackDepth).
+#ifndef FORWARD_BACK_DEPTH
+#define FORWARD_BACK_DEPTH 0
+#endif
+// SwimForwardOpaqueDeferred (FORWARD_PREPASSED=1, FORWARD_DEFERRED_LOCAL=1): the prepassed
+// opaque pass without the clustered local lights, writing the surface's base colour and
+// metalness to an eighth target; ForwardLocalLights.slang adds the local lights after it.
+#ifndef FORWARD_DEFERRED_LOCAL
+#define FORWARD_DEFERRED_LOCAL 0
+#endif
 
 [[vk::binding(0, 0)]] StructuredBuffer<GpuInstanceRecord> Instances;
 [[vk::binding(1, 0)]] StructuredBuffer<GpuTransformRecord> Transforms;
@@ -76,7 +88,7 @@ float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surf
 	// Local lights come from the cluster's bitmask: occupancy words name the non-zero mask
 	// words, and each set bit is a light (increasing index order, never truncated).
 	float3 sum = float3(0.0, 0.0, 0.0);
-	const uint occupancyWords = record.Count != 0 ? ClusterOccupancyWords(grid) : 0u;
+	const uint occupancyWords = (FORWARD_DEFERRED_LOCAL == 0 && record.Count != 0) ? ClusterOccupancyWords(grid) : 0u;
 	uint nextOccupancy = 0;
 	uint occupancy = 0;
 	uint occupancyBase = 0;
@@ -115,16 +127,29 @@ float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surf
 			mask &= mask - 1u;
 		}
 		const GpuLightRecord light = Lights[row];
+		// Clusters are conservative: a local light out of range contributes exactly zero, so
+		// it is skipped before its direction, spot cone, BRDF and shadow are evaluated.
+		if (light.Type != GpuLightTypeDirectional)
+		{
+			const float3 delta = light.Position - position;
+			if (dot(delta, delta) * light.InverseRangeSquared >= 1.0)
+			{
+				continue;
+			}
+		}
 		const GpuLightSample sample = GpuLightEvaluate(light, position);
-		// Clusters are conservative: skip the BRDF and shadow lookup of lights that do not
-		// reach this pixel (their contribution is exactly zero).
 		if (all(sample.Radiance <= float3(0.0, 0.0, 0.0)))
 		{
 			continue;
 		}
-		sum += StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal, toCamera,
-				   sample.Direction) *
-			sample.Radiance * ForwardLightShadow(view, light, position, surface.Normal, sample.Direction);
+		const float3 brdf = StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal,
+			toCamera, sample.Direction);
+		// Facing away (zero BRDF): no shadow lookup (its PCF taps are the costliest part).
+		if (all(brdf <= float3(0.0, 0.0, 0.0)))
+		{
+			continue;
+		}
+		sum += brdf * sample.Radiance * ForwardLightShadow(view, light, position, surface.Normal, sample.Direction);
 	}
 	return sum;
 }
@@ -227,6 +252,8 @@ struct ShadedPixel
 	float3 Specular;	// Specular IBL (ForwardPlus::SpecularRadiance), part of Indirect.
 	float3 Normal;	 // World shading normal.
 	float Roughness; // Perceptual.
+	float3 BaseColor;
+	float Metallic;
 	float4 Debug;
 	bool UseDebug;
 };
@@ -294,6 +321,8 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	pixel.Color = float4(direct + pixel.Indirect + surface.Emissive, surface.Alpha);
 	pixel.Normal = surface.Normal;
 	pixel.Roughness = surface.PerceptualRoughness;
+	pixel.BaseColor = surface.BaseColor;
+	pixel.Metallic = surface.Metallic;
 	pixel.UseDebug = view.DebugMode == ForwardDebugClusterHeatmap;
 	pixel.Debug = float4(0.0, 0.0, 0.0, 1.0);
 	if (pixel.UseDebug)
@@ -335,6 +364,9 @@ struct OpaqueOutput
 	float4 Indirect : SV_Target4; // Ambient + IBL radiance, 0 in debug views (item 76).
 	float4 Reflectance : SV_Target5; // Split-sum specular reflectance, 0 in debug views (item 76, SSR).
 	float4 Specular : SV_Target6;	 // Specular IBL radiance (part of Indirect), 0 in debug views.
+#if FORWARD_DEFERRED_LOCAL
+	float4 Material : SV_Target7; // Base colour, metalness; alpha -1 in debug views (no local lights added).
+#endif
 };
 
 #if FORWARD_DEPTH_ONLY
@@ -344,10 +376,17 @@ void fragmentMain(VertexOutput input, bool rasterFrontFacing : SV_IsFrontFace)
 {
 	const StandardMaterialParameters material = Materials[input.Material];
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
+#if FORWARD_BACK_DEPTH
+	if (frontFacing)
+	{
+		discard;
+	}
+#else
 	if (ForwardCullsFace(material, frontFacing))
 	{
 		discard;
 	}
+#endif
 	if ((material.Flags & StandardMaterialFlagAlphaMask) != 0)
 	{
 		const SamplerState materialSampler = Samplers[NonUniformResourceIndex(material.MaterialSampler)];
@@ -377,6 +416,9 @@ OpaqueOutput fragmentMain(VertexOutput input, bool frontFacing : SV_IsFrontFace)
 	output.Indirect = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Indirect, 1.0);
 	output.Reflectance = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Reflectance, 1.0);
 	output.Specular = float4(pixel.UseDebug ? float3(0.0, 0.0, 0.0) : pixel.Specular, 1.0);
+#if FORWARD_DEFERRED_LOCAL
+	output.Material = float4(pixel.BaseColor, pixel.UseDebug ? -1.0 : pixel.Metallic);
+#endif
 	return output;
 }
 #endif // FORWARD_DEPTH_ONLY

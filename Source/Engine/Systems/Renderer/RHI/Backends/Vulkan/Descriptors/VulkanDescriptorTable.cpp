@@ -13,11 +13,26 @@ namespace Swim::RhiVulkan
 
 	VulkanDescriptorTable::~VulkanDescriptorTable()
 	{
-		RetireLostVulkanDevice(*GetState());
-		if (pool != VK_NULL_HANDLE)
+		const auto& state = GetState();
+		RetireLostVulkanDevice(*state);
+		if (pool == VK_NULL_HANDLE)
 		{
-			GetState()->Dispatch.vkDestroyDescriptorPool(GetState()->Device.device, pool, nullptr);
+			return;
 		}
+		// Keep the pool for the next table with the same signature (its set is freed by the
+		// reset). The caller's contract is unchanged: the GPU no longer uses the table.
+		if (!state->Diagnostics->IsLost() && state->Dispatch.vkResetDescriptorPool != nullptr &&
+			state->Dispatch.vkResetDescriptorPool(state->Device.device, pool, 0) == VK_SUCCESS)
+		{
+			std::lock_guard lock(state->DescriptorPoolMutex);
+			auto& free = state->FreeDescriptorPools[poolSignature];
+			if (free.size() < 1024)
+			{
+				free.push_back(pool);
+				return;
+			}
+		}
+		state->Dispatch.vkDestroyDescriptorPool(state->Device.device, pool, nullptr);
 	}
 
 	std::unique_ptr<VulkanDescriptorTable> VulkanDescriptorTable::Create(
@@ -62,12 +77,32 @@ namespace Swim::RhiVulkan
 		poolInfo.maxSets = 1;
 		poolInfo.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
 		poolInfo.pPoolSizes = sizes.data();
-		const auto createResult = state->Dispatch.vkCreateDescriptorPool(state->Device.device, &poolInfo, nullptr, &result->pool);
-		if (createResult != VK_SUCCESS)
+		result->poolSignature.push_back(static_cast<std::uint32_t>(poolInfo.flags));
+		for (const auto& size : sizes)
 		{
-			result->pool = VK_NULL_HANDLE;
-			CheckVulkanResult(*state, createResult, "vkCreateDescriptorPool");
-			return nullptr;
+			result->poolSignature.push_back(static_cast<std::uint32_t>(size.type));
+			result->poolSignature.push_back(size.descriptorCount);
+		}
+		bool recycled = false;
+		{
+			std::lock_guard lock(state->DescriptorPoolMutex);
+			const auto found = state->FreeDescriptorPools.find(result->poolSignature);
+			if (found != state->FreeDescriptorPools.end() && !found->second.empty())
+			{
+				result->pool = found->second.back();
+				found->second.pop_back();
+				recycled = true;
+			}
+		}
+		if (!recycled)
+		{
+			const auto createResult = state->Dispatch.vkCreateDescriptorPool(state->Device.device, &poolInfo, nullptr, &result->pool);
+			if (createResult != VK_SUCCESS)
+			{
+				result->pool = VK_NULL_HANDLE;
+				CheckVulkanResult(*state, createResult, "vkCreateDescriptorPool");
+				return nullptr;
+			}
 		}
 		VkDescriptorSetAllocateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;

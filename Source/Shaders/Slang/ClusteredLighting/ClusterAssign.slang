@@ -1,5 +1,5 @@
 // Clustered lighting pass 3 (item 65): the per-cluster light bitmasks. One thread per
-// (cluster, mask word) tests its 32 lights' view spheres against the cluster's AABB and
+// (mask word, cluster) tests its 32 lights' view spheres against the cluster's AABB and
 // writes the word; nothing is ever truncated, so thousands of lights stay exact. The
 // first thread also clears ClusterStats for the summary pass. Mirrors the mask half of
 // Clustering::AssignLights; bindings follow ClusterAssignBindings.
@@ -41,13 +41,17 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		Stats[0] = cleared;
 	}
 	const ClusterGrid grid = Grid[0];
+	// Word-major: neighbouring threads are neighbouring clusters testing the same 32 lights,
+	// so each light's sphere is one broadcast load for the whole wave (cluster-major, every
+	// thread of a wave read different lights: the pass was bound by those loads).
 	const uint maskWords = ClusterMaskWords(grid);
-	const uint cluster = thread / maskWords;
-	if (cluster >= grid.Dimensions.w)
+	const uint clusterCount = grid.Dimensions.w;
+	const uint word = thread / clusterCount;
+	if (word >= maskWords)
 	{
 		return;
 	}
-	const uint word = thread - cluster * maskWords;
+	const uint cluster = thread - word * clusterCount;
 	const uint lightCount = LightHeader[0].LocalCount;
 	const ClusterAabb box = Bounds[cluster];
 	const uint first = word * 32u;

@@ -25,6 +25,9 @@ namespace Engine
 
 		// Ray through a pixel of the render surface (top-left origin).
 		CameraRay ScreenPointToRay(float x, float y) const;
+		// Camera::WorldToScreen / ScreenToWorld on the render surface.
+		std::optional<glm::vec3> WorldToScreen(const glm::vec3& world) const;
+		glm::vec3 ScreenToWorld(float x, float y, float distance) const;
 
 		void RequestCameraCut() { cut = true; }
 

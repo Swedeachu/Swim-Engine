@@ -6,6 +6,8 @@
 #include "Game/Ui/UiBindings.h"
 
 #include <array>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,6 +56,14 @@ namespace Game
 
 		Swim::UI::UiNodeId GetBookmarkDropdown() const { return bookmarkDropdown; }
 
+		Swim::UI::UiNodeId GetPanel() const { return panel; }
+
+		// The tab buttons (Simulation, Rendering, Camera/Post, Scene).
+		const std::array<Swim::UI::UiNodeId, 4>& GetTabOptions() const { return tabOptions; }
+
+		// Sets every bound control from the state it edits (after console commands or presets).
+		void SyncControls();
+
 	  private:
 		Swim::UI::UiNodeId CreateSection(Swim::UI::UiNodeId parent);
 		Swim::UI::UiNodeId AddButton(
@@ -62,6 +72,14 @@ namespace Game
 			std::function<void(float)> onChange);
 		Swim::UI::UiNodeId AddCheckbox(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
 		Swim::UI::UiNodeId AddToggle(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
+		// Controls bound both ways to a value: edits write it, SyncControls shows changes made elsewhere.
+		Swim::UI::UiNodeId SliderFor(
+			Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals);
+		Swim::UI::UiNodeId CheckFor(Swim::UI::UiNodeId parent, const std::string& label, bool& value);
+		Swim::UI::UiNodeId DropdownFor(Swim::UI::UiNodeId parent, const std::string& label, const std::vector<std::string>& options,
+			std::function<std::uint32_t()> get, std::function<void(std::uint32_t)> set);
+		void Bind(Swim::UI::UiNodeId node, std::function<float()> get, bool check);
+		void BuildCamera(Swim::UI::UiNodeId parent);
 		void BuildPanel();
 		void BuildSimulation(Swim::UI::UiNodeId parent);
 		void BuildRendering(Swim::UI::UiNodeId parent);
@@ -85,7 +103,19 @@ namespace Game
 
 		Swim::UI::UiNodeId panel;
 		Swim::UI::UiNodeId tabs;
-		std::array<Swim::UI::UiNodeId, 3> sections{};
+		std::array<Swim::UI::UiNodeId, 4> sections{};
+		std::array<Swim::UI::UiNodeId, 4> tabOptions{};
+
+		struct SyncedControl
+		{
+			Swim::UI::UiNodeId Node;
+			std::function<float()> Get;
+			bool Check = false;
+		};
+
+		std::vector<SyncedControl> synced;
+		Swim::UI::UiNodeId profileLabel;
+		bool profilePending = false;
 		std::uint32_t section = 0;
 		Swim::UI::UiNodeId stateLabel;
 		Swim::UI::UiNodeId clockLabel;

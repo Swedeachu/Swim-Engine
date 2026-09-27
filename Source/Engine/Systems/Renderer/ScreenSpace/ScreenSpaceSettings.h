@@ -21,6 +21,9 @@ namespace Swim::Render
 		std::uint32_t SliceCount = 2;	 // Directions per pixel, 1 .. MaxAoSlices.
 		std::uint32_t StepCount = 4;	 // Samples per direction and side, 1 .. MaxAoSteps.
 		float BlurDepthTolerance = 0.1f; // Relative depth difference at which the 5x5 blur stops mixing, (0, 1].
+		// Trace one pixel of every 2 x 2 block (rotating each frame, like the half-resolution
+		// reflections); the blur resamples the traced texels on each pixel's own surface.
+		bool HalfResolution = false;
 	};
 
 	// Analytic exponential height fog with a sun in-scattering lobe (item 76).
@@ -44,6 +47,21 @@ namespace Swim::Render
 	// reflectance (ForwardPlusTargets::Reflectance) and a confidence. Glossy
 	// reflections are faded out by roughness rather than blurred; TAA resolves the
 	// per-frame jitter of the march.
+	// What the composite shows instead of the lit reflection (reflective pixels only; the
+	// rest of the frame is dimmed to grey):
+	//  Sources:  red = screen-space reflection, green = local probe, blue = global
+	//            environment (the share each contributes), magenta = a screen-space ray that
+	//            reached geometry from its hidden side (RejectedHit) and fell back;
+	//  ProbeAge: the probe in use (hue by slot, scaled by its coverage), darkening to a quarter
+	//            as its oldest face reaches 4 s (stale),
+	//            the global environment in dark blue.
+	enum class ReflectionDebugView : std::uint32_t
+	{
+		None = 0,
+		Sources = 1,
+		ProbeAge = 2,
+	};
+
 	struct ReflectionSettings
 	{
 		bool Enabled = false;
@@ -56,6 +74,17 @@ namespace Swim::Render
 		float RoughnessFade = 0.2f;	   // Confidence ramps to 0 over this roughness range below MaxRoughness, (0, MaxRoughness].
 		float EdgeFade = 0.1f;		   // Hits within this fraction of the screen edge fade out, (0, 0.5].
 		float DistanceFade = 0.25f;	   // Hits in the last fraction of MaxDistance fade out, (0, 1].
+		// Hits read the previous frame's finished color (reflections of reflections) when the
+		// renderer has one (TAA on); off: the current frame's color.
+		bool History = true;
+		// Surface thickness from the back-face depth (ForwardPlusTargets::BackDepth, one more
+		// depth-only draw of the opaque scene) when the renderer supports it; off: Thickness.
+		bool BackFaces = true;
+		// Trace one pixel of every 2 x 2 block (rotating through the block each frame) and
+		// resolve the full frame with a depth- and normal-aware filter in the composite: a
+		// quarter of the rays. TAA gathers the four positions over four frames.
+		bool HalfResolution = false;
+		ReflectionDebugView Debug = ReflectionDebugView::None;
 	};
 
 	struct ScreenSpaceSettings

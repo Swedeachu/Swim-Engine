@@ -7,8 +7,12 @@
 #include <vk_mem_alloc.h>
 #include <volk.h>
 
+#include <array>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace Swim::RhiVulkan
 {
@@ -34,6 +38,12 @@ namespace Swim::RhiVulkan
 			~VulkanTexture() override
 			{
 				RetireLostVulkanDevice(*state);
+				for (const auto& [key, view] : views)
+				{
+					(void)key;
+					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
+				}
+				views.clear();
 				if (image != VK_NULL_HANDLE && allocation != nullptr)
 				{
 					vmaDestroyImage(state->Allocator, image, allocation);
@@ -60,12 +70,36 @@ namespace Swim::RhiVulkan
 				return allocation == nullptr;
 			}
 
+			// Views of this image by their creation parameters, created once and destroyed
+			// with the image (render graphs ask for the same views every frame).
+			using ViewKey = std::array<std::uint32_t, 7>;
+
+			template <typename Create> VkImageView GetOrCreateView(const ViewKey& key, Create&& create)
+			{
+				std::lock_guard lock(viewMutex);
+				for (const auto& [existing, view] : views)
+				{
+					if (existing == key)
+					{
+						return view;
+					}
+				}
+				const VkImageView view = create();
+				if (view != VK_NULL_HANDLE)
+				{
+					views.emplace_back(key, view);
+				}
+				return view;
+			}
+
 		private:
 			std::shared_ptr<VulkanDeviceState> state;
 			VkImage image = VK_NULL_HANDLE;
 			VmaAllocation allocation = nullptr;
 			std::string debugName;
 			Rhi::TextureDesc desc{};
+			std::mutex viewMutex;
+			std::vector<std::pair<ViewKey, VkImageView>> views;
 		};
 
 } // namespace Swim::RhiVulkan

@@ -30,7 +30,7 @@ struct ScreenSpaceParams
 	float FogAnisotropy;
 	float FogStartDistance;
 	float FogMaxDistance;
-	float Reserved1;
+	uint AoHalf;
 	float4 Projection[4];
 	float SsrMaxDistance;
 	float SsrThickness;
@@ -42,11 +42,23 @@ struct ScreenSpaceParams
 	float SsrNearZ;
 	uint SsrMaxSteps;
 	uint SsrRefineSteps;
-	uint Reserved2;
-	uint Reserved3;
+	uint SsrHistory;
+	uint SsrBackDepth;
+	uint ProbeCount;
+	uint ProbeMipCount;
+	uint ReflectionDebug;
+	uint SsrHalf;
 };
 
 static const float ScreenSpacePi = 3.14159265358979;
+
+// Half-resolution reflections: the pixel of each 2 x 2 block traced this frame, cycling
+// (0,0), (1,1), (1,0), (0,1) so four frames cover the block.
+uint2 ScreenSpaceHalfOffset(uint frame)
+{
+	const uint k = frame & 3u;
+	return uint2(k == 1u || k == 2u ? 1u : 0u, k == 1u || k == 3u ? 1u : 0u);
+}
 
 // The parameters one program uses, loaded once: GPU-assisted validation instruments
 // every storage-buffer load.

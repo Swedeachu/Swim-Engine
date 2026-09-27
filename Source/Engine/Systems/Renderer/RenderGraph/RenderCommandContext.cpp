@@ -22,22 +22,42 @@ namespace Swim::Render
 		const auto& r = Internal::RequireResource(definition, graph, index, kind);
 		range = Internal::NormalizeRange(r, range);
 
-		for (auto cell : Internal::Cells(r, range))
+		// Declared by one of the pass's uses of this resource: usually a single use contains
+		// the whole requested range (checked on the mip/layer intervals); otherwise every
+		// requested cell must be covered by some use. (Enumerating cells per use was O(n^2)
+		// on large arrays - a probe atlas has hundreds of subresources.)
+		const auto& uses = definition.Passes[pass].Uses;
+		for (const auto& use : uses)
 		{
-			bool declared = false;
-			for (const auto& use : definition.Passes[pass].Uses)
+			if (use.Resource != index)
 			{
-				if (use.Resource == index)
+				continue;
+			}
+			if (r.Kind == GraphKind::Buffer)
+			{
+				return *state.Resources[index];
+			}
+			const auto u = Internal::NormalizeRange(r, use.Range);
+			if (range.BaseMipLevel >= u.BaseMipLevel && range.BaseMipLevel + range.MipLevelCount <= u.BaseMipLevel + u.MipLevelCount &&
+				range.BaseArrayLayer >= u.BaseArrayLayer && range.BaseArrayLayer + range.ArrayLayerCount <= u.BaseArrayLayer + u.ArrayLayerCount)
+			{
+				return *state.Resources[index];
+			}
+		}
+		std::vector<bool> covered(Internal::CellCount(r), false);
+		for (const auto& use : uses)
+		{
+			if (use.Resource == index)
+			{
+				for (const auto cell : Internal::Cells(r, Internal::NormalizeRange(r, use.Range)))
 				{
-					const auto cells = Internal::Cells(r, use.Range);
-					if (std::find(cells.begin(), cells.end(), cell) != cells.end())
-					{
-						declared = true;
-						break;
-					}
+					covered[cell] = true;
 				}
 			}
-			if (!declared)
+		}
+		for (const auto cell : Internal::Cells(r, range))
+		{
+			if (!covered[cell])
 			{
 				throw std::invalid_argument("RenderGraph callback accesses an undeclared subresource: " + r.Name);
 			}

@@ -1,3 +1,4 @@
+#include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
 #include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
@@ -159,4 +160,57 @@ SWIM_TEST("Engine.RenderFeature", "DirectionsProjectToTheScreenLikePointsAtInfin
 	const auto upRight = view.ProjectDirection({ 0.5f, 0.5f, -1 });
 	SWIM_CHECK(std::abs(upRight[0] - 0.75f) < 1e-6f && std::abs(upRight[1] - 0.25f) < 1e-6f); // Top-left uv origin.
 	SWIM_CHECK(view.ProjectDirection({ 0, 0, 1 })[2] < 0.0f);								  // Behind the camera.
+}
+
+SWIM_TEST("Engine.RenderFeature", "CloudsMarchIntoAnEnvironmentAtlasWhenTheyContribute")
+{
+	FeatureWorld world;
+	// VolumetricCloudsEnvironment's interface: the params buffer and the RGBA16F atlas.
+	auto layout = std::make_unique<Swim::Testing::MockPipelineLayout>();
+	S::DescriptorSchemaDesc space{ 0, {} };
+	space.Bindings.push_back({ 0, S::DescriptorType::ReadOnlyStorageBuffer, 1, S::ShaderStageMask::Compute });
+	S::DescriptorBindingDesc atlas{ 1, S::DescriptorType::StorageTexture, 1, S::ShaderStageMask::Compute };
+	atlas.StorageTextureFormat = S::Format::RGBA16Float;
+	space.Bindings.push_back(atlas);
+	layout->program.Interface.DescriptorSchemas = { space };
+	world.program.Layout = std::move(layout);
+	world.program.Bindings = { { "Params", 0, 0, S::DescriptorType::ReadOnlyStorageBuffer, S::Format::Undefined },
+		{ "Clouds", 0, 1, S::DescriptorType::StorageTexture, S::Format::RGBA16Float } };
+
+	Engine::VolumetricClouds clouds;
+	SWIM_CHECK(clouds.ContributesToEnvironment());
+	clouds.Settings.Environment = false;
+	SWIM_CHECK(!clouds.ContributesToEnvironment());
+	clouds.Settings.Environment = true;
+	clouds.Settings.Coverage = 0.0f;
+	SWIM_CHECK(!clouds.ContributesToEnvironment());
+	clouds.Settings.Coverage = 0.5f;
+
+	R::RenderGraph graph;
+	// The environment context has no scene color or depth.
+	auto context = world.Context(graph, {}, {});
+	SWIM_CHECK(!clouds.RecordEnvironment(context, 0).has_value());
+	const auto result = clouds.RecordEnvironment(context, 32);
+	SWIM_REQUIRE(result.has_value());
+	SWIM_CHECK(world.loaded.back() == "VolumetricCloudsEnvironment");
+	const auto desc = graph.GetDesc(*result);
+	SWIM_CHECK(desc.Extent.Width == 32 && desc.Extent.Height == 32 * 6);
+	SWIM_CHECK(desc.PixelFormat == S::Format::RGBA16Float);
+	SWIM_CHECK((static_cast<std::uint32_t>(desc.Usage) & static_cast<std::uint32_t>(S::TextureUsage::Sampled)) != 0);
+	graph.Export(*result, S::ResourceState::ShaderRead);
+	world.fixture.device.Commands->clear();
+	world.fixture.executor->Execute(graph.Compile());
+	world.fixture.executor->Wait();
+	std::vector<Swim::Testing::MockCommand> dispatches;
+	for (const auto& command : *world.fixture.device.Commands)
+	{
+		if (command.Kind == "Dispatch")
+		{
+			dispatches.push_back(command);
+		}
+	}
+	// One texel per thread over the 32 x 192 atlas.
+	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(1));
+	SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, 4u);
+	SWIM_CHECK_EQUAL(dispatches[0].DestinationOffset, 24u);
 }

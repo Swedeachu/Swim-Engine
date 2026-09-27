@@ -22,7 +22,8 @@ float3 EvaluateSky(float3 direction)
 {
 	const float3 d = normalize(direction);
 	const float up = clamp(d.y, -1.0, 1.0);
-	const float blend = 1.0 - (1.0 - abs(up)) * (1.0 - abs(up));
+	const float falloff = up >= 0.0 ? 2.0 : max(Constants.Ground.w, 1.0); // ProceduralSky::GroundFalloff.
+	const float blend = 1.0 - pow(1.0 - abs(up), falloff);
 	const float3 end = up >= 0.0 ? Constants.Zenith.rgb : Constants.Ground.rgb;
 	const float lobe = pow(max(dot(d, Constants.SunDirection.xyz), 0.0), Constants.SunDirection.w);
 	return (Constants.Horizon.rgb + (end - Constants.Horizon.rgb) * blend + Constants.SunColor.rgb * lobe) * Constants.Zenith.w;

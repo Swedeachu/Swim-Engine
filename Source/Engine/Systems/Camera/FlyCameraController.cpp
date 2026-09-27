@@ -52,6 +52,33 @@ namespace Engine
 		}
 	}
 
+	void FlyCameraController::ApplyZoom(Camera& camera, ZoomState& state, const Settings& settings, float wheel, bool reset, float dt)
+	{
+		const float current = camera.GetFieldOfView();
+		if (state.BaseFieldOfView <= 0.0f || std::abs(current - state.AppliedFieldOfView) > 1.0e-3f)
+		{
+			// First use, or the field of view was set elsewhere (a bookmark, a script): that
+			// becomes the view at the current zoom.
+			state.BaseFieldOfView = current * state.Zoom;
+		}
+		const float minZoom = std::max(settings.MinZoom, 1.0e-3f);
+		const float maxZoom = std::max(settings.MaxZoom, minZoom);
+		if (reset)
+		{
+			state.Target = 1.0f;
+		}
+		if (std::isfinite(wheel) && wheel != 0.0f)
+		{
+			state.Target = std::clamp(state.Target * std::pow(settings.ZoomStep, wheel), minZoom, maxZoom);
+		}
+		const float blend = settings.ZoomSmoothing > 0.0f && dt > 0.0f ? 1.0f - std::exp(-dt / settings.ZoomSmoothing) : 1.0f;
+		const float logZoom = std::log(state.Zoom) + (std::log(state.Target) - std::log(state.Zoom)) * std::clamp(blend, 0.0f, 1.0f);
+		state.Zoom = std::abs(logZoom - std::log(state.Target)) < 1.0e-4f ? state.Target : std::exp(logZoom);
+		const float fieldOfView = std::clamp(state.BaseFieldOfView / state.Zoom, 1.0f, std::min(settings.MaxFieldOfView, 170.0f));
+		camera.SetFieldOfView(fieldOfView);
+		state.AppliedFieldOfView = camera.GetFieldOfView();
+	}
+
 	void FlyCameraController::Update(double dt)
 	{
 		if (!input || !cameraSystem)
@@ -72,6 +99,12 @@ namespace Engine
 		{
 			looking = true;
 		}
+		// Wheel zoom and middle-click reset (not while looking: then the wheel sets the speed,
+		// and not while the UI has the pointer, which scrolls its panels). The easing runs
+		// every frame so a zoom finishes even after the pointer moves onto the UI.
+		const float wheel = !looking && !gated ? input->GetMouseScrollDelta() : 0.0f;
+		const bool resetZoom = !gated && input->IsMouseButtonTriggered(MouseButton::Middle);
+		ApplyZoom(cameraSystem->GetCamera(), zoom, settings, wheel, resetZoom, static_cast<float>(dt));
 		if (gated && !looking)
 		{
 			return;

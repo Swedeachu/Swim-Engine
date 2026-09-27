@@ -1,10 +1,13 @@
 #include "Game/Scenes/Sandbox.h"
+#include "Engine/Runtime/RenderToggles.h"
 
 #include "Engine/Commands/CommandRegistry.h"
 #include "Engine/Components/CameraComponent.h"
 #include "Engine/Components/Light.h"
 #include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/ParticleEmitter.h"
+#include "Engine/Components/ReflectionProbe.h"
+#include "Game/Behaviors/ReflectionLabFloor.h"
 #include "Engine/Components/SkinnedMeshRenderer.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/UiCanvas.h"
@@ -32,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 
 namespace Game
@@ -60,7 +64,7 @@ namespace Game
 			glm::vec3 Target;
 		};
 
-		const std::array<Bookmark, 7> Bookmarks{ {
+		const std::array<Bookmark, 10> Bookmarks{ {
 			{ "Overview", { 2.0f, 7.5f, 26.0f }, { -1.0f, 1.5f, 0.0f } },
 			{ "PBR gallery", { -13.1f, 3.4f, 1.5f }, { -13.1f, 2.7f, -9.0f } },
 			{ "Instance hall", { 12.0f, 9.0f, 9.0f }, { 12.0f, 0.5f, -6.0f } },
@@ -68,6 +72,11 @@ namespace Game
 			{ "Fountain", { 0.0f, 3.5f, -3.0f }, { 0.0f, 1.8f, -12.0f } },
 			{ "Sponza atrium", { -9.5f, 1.8f, -52.2f }, { 8.0f, 5.5f, -52.2f } },
 			{ "Sponza from above", { -4.0f, 19.0f, -52.2f }, { 3.0f, 0.5f, -52.2f } },
+			// The reflection lab (Sandbox::GetReflectionLabCenter) and the chrome playground balls.
+			{ "Reflection lab", { -22.0f, 1.7f, 21.5f }, { -22.0f, 0.6f, 16.0f } },
+			{ "Chrome spheres", { 5.2f, 1.1f, 12.6f }, { 3.9f, 0.5f, 9.2f } },
+			// Sandbox::GetBlackHoleHome, from the side its disk is tilted toward.
+			{ "Black hole", { 24.0f, 6.2f, 31.0f }, { 24.0f, 5.0f, 18.0f } },
 		} };
 
 		glm::quat LookRotation(const glm::vec3& direction)
@@ -140,7 +149,40 @@ namespace Game
 			commands->Register("sandbox.tab",
 				[this, number](const std::vector<std::string>& arguments)
 				{
-					RequestTab(static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 2.0f)));
+					RequestTab(static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, float(SandboxTabCount - 1))));
+				});
+			// Camera presets: 0 off, 1 clean modern, 2 cinematic 35mm, 3 anamorphic, 4 vintage,
+			// 5 neutral photoreal.
+			commands->Register("sandbox.camera",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					const auto preset = std::clamp(number(arguments, 0.0f), 0.0f, float(Engine::CameraPresetCount - 1));
+					ApplyCameraPreset(static_cast<Engine::CameraPreset>(static_cast<std::uint32_t>(preset)));
+				});
+			// sandbox.blackhole <x> <y> <z>: moves the black hole (like dragging it).
+			commands->Register("sandbox.blackhole",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (blackHole == entt::null || arguments.size() < 3)
+					{
+						return;
+					}
+					auto& transform = GetRegistry().get<Engine::Transform>(blackHole);
+					transform.SetWorldPosition(GetRegistry(),
+						glm::vec3(std::stof(arguments[0]), std::stof(arguments[1]), std::stof(arguments[2])));
+				});
+			commands->Register("sandbox.dof",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					// sandbox.dof <f-number> [focus metres, 0 = auto]; f-number 0 turns it off.
+					if (depthOfField)
+					{
+						const float fNumber = number(arguments, 2.8f);
+						depthOfField->Enabled = fNumber > 0.0f;
+						depthOfField->Settings.FNumber = std::max(fNumber, 0.7f);
+						depthOfField->Settings.FocusDistance =
+							arguments.size() > 1 ? std::max(std::strtof(arguments[1].c_str(), nullptr), 0.0f) : 0.0f;
+					}
 				});
 			commands->Register("sandbox.clouds",
 				[this, number](const std::vector<std::string>& arguments)
@@ -150,6 +192,61 @@ namespace Game
 						const float coverage = std::clamp(number(arguments, 0.4f), 0.0f, 1.0f);
 						clouds->Enabled = coverage > 0.0f;
 						clouds->Settings.Coverage = coverage;
+					}
+				});
+			// Clouds in the environment cube (reflections, ambient light) on/off.
+			commands->Register("sandbox.cloudenv",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (clouds)
+					{
+						clouds->Settings.Environment = number(arguments, 1.0f) != 0.0f;
+					}
+				});
+			// The reflection lab's floor: 0 checker, 1 green, 2 rainbow (animated), 3 removed.
+			commands->Register("sandbox.labfloor",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (labFloor)
+					{
+						labFloor->SetMode(static_cast<ReflectionLabFloor::Mode>(
+							static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 3.0f))));
+					}
+				});
+			// Local reflection probes on/off, and the reflection debug view (0 off, 1 sources, 2 probe age).
+			commands->Register("sandbox.probes",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ReflectionProbes.Enabled = number(arguments, 1.0f) != 0.0f;
+					}
+				});
+			commands->Register("sandbox.reflectdebug",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Reflections.Debug = static_cast<Swim::Render::ReflectionDebugView>(
+							static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 2.0f)));
+					}
+				});
+			// Screen-space reflection thickness from the back faces (1) or the constant (0).
+			commands->Register("sandbox.ssrbackfaces",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Reflections.BackFaces = number(arguments, 1.0f) != 0.0f;
+					}
+				});
+			// Whether the clouds in the environment also change the ambient light.
+			commands->Register("sandbox.cloudambient",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->EnvironmentFeatureAmbient = number(arguments, 1.0f) != 0.0f;
 					}
 				});
 			commands->Register("sandbox.sunfx",
@@ -163,6 +260,41 @@ namespace Game
 					if (lensFlare)
 					{
 						lensFlare->Enabled = on;
+					}
+				});
+			// Screen-space reflections and height fog on/off (A/B comparisons from the command line).
+			commands->Register("sandbox.ssr",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Reflections.Enabled = number(arguments, 1.0f) != 0.0f;
+					}
+				});
+			commands->Register("sandbox.ssrhistory",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Reflections.History = number(arguments, 1.0f) != 0.0f;
+					}
+				});
+			// Exposure: sandbox.exposure 0 = manual (Manual EV100), 1 = automatic.
+			commands->Register("sandbox.exposure",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->Post.Exposure.Mode =
+							number(arguments, 1.0f) != 0.0f ? Swim::Render::ExposureMode::Automatic : Swim::Render::ExposureMode::Manual;
+					}
+				});
+			commands->Register("sandbox.fog",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Fog.Enabled = number(arguments, 1.0f) != 0.0f;
 					}
 				});
 			commands->Register("sandbox.hud",
@@ -272,42 +404,70 @@ namespace Game
 
 	void Sandbox::ApplyTropicalLook(Engine::RenderSettings& settings)
 	{
-		// Tropical afternoon, blue in every direction: a deep saturated zenith, a bright
-		// cyan horizon (never grey) and a turquoise "sea" below the horizon instead of a
-		// brown ground, so looking level or slightly down never turns the sky muddy. The
-		// hue-preserving PBR Neutral curve keeps the blues blue (ACES desaturated and
-		// darkened them), with a little warmth and saturation on top.
+		// Clear midday: a deep blue zenith fading to a lighter blue horizon, blue all the way
+		// down in the void below it, and a high, soft white sun. The sky is kept moderately
+		// bright: the tone curve desaturates whatever sits far above the exposure (the floor
+		// sets it), and a brighter sky turned the horizon and the haze grey. No colour grade tints
+		// the frame; warmth comes only from the sun being a touch warmer than the sky.
 		auto& sky = settings.Sky;
-		sky.ZenithColor = { 0.16f, 0.56f, 1.55f };
-		sky.HorizonColor = { 0.50f, 0.92f, 1.40f };
-		sky.GroundColor = { 0.16f, 0.55f, 0.88f };
+		sky.ZenithColor = { 0.10f, 0.36f, 1.10f };
+		sky.HorizonColor = { 0.40f, 0.66f, 1.12f };
+		// Lighting and the reflection fallback see the lit floor below the horizon
+		// (SetSunAngles computes its colour); the visible void stays blue.
+		sky.GroundFalloff = 24.0f; // The ground starts right under the horizon, like the floor does.
+		settings.SkyBackgroundGround = std::array<float, 3>{ 0.26f, 0.54f, 1.10f }; // A clear sky blue.
 		sky.SunSharpness = 600.0f; // A tight sun glow; the shafts and the lens flare carry the rest.
 		sky.Intensity = 1.0f;
-		settings.EnvironmentIntensity = 1.3f;
-		settings.Ambient = { 0.05f, 0.07f, 0.085f };
+		settings.EnvironmentIntensity = 1.1f;
+		settings.Ambient = { 0.06f, 0.064f, 0.07f };
 		auto& post = settings.Post;
 		post.ToneMap.Operator = Swim::Render::ToneMapper::PbrNeutral;
-		post.Exposure.Compensation = 1.3f;
-		post.Grading.Temperature = 5.0f;
-		post.Grading.Tint = -2.0f;
-		post.Grading.Contrast = 1.0f;
-		post.Grading.Saturation = 1.14f;
-		post.Grading.Slope = { 1.0f, 1.0f, 1.02f };
-		post.Bloom.Intensity = 0.05f;
+		post.Exposure.Compensation = 2.9f;
+		post.Exposure.ManualEv100 = 1.8f;
+		post.Grading.Temperature = 0.0f;
+		post.Grading.Tint = 0.0f;
+		post.Grading.Contrast = TropicalContrast;
+		post.Grading.Saturation = TropicalSaturation;
+		post.Grading.Slope = { 1.0f, 1.0f, 1.0f };
+		post.Bloom.Intensity = 0.056f;
 		post.Bloom.Threshold = 1.2f;
-		// A thin sea-air haze that turns distant geometry turquoise and glows toward the sun.
+		// A thin, pale, sunlit haze on distant geometry (a cyan haze tinted the whole scene).
 		auto& fog = settings.ScreenSpace.Fog;
 		fog.Enabled = true;
-		fog.Density = 0.004f;
-		fog.HeightFalloff = 0.12f;
+		fog.Density = 0.0025f;
+		fog.HeightFalloff = 0.05f;
 		fog.BaseHeight = 0.0f;
-		fog.Color = { 0.40f, 0.80f, 1.25f }; // Matches the horizon's blue.
-		fog.SunColor = { 0.55f, 0.5f, 0.42f };
+		fog.Color = { 0.40f, 0.66f, 1.12f }; // The horizon's colour: distant haze and sky blend.
+		fog.SunColor = { 0.55f, 0.52f, 0.46f };
 		fog.StartDistance = 12.0f;
-		fog.MaxDistance = 600.0f;
+		fog.MaxDistance = 100.0f; // The sky and the void are fogged along this much of their rays: a light haze, not a grey band.
 		// Screen-space reflections are on by default in the sandbox (chrome and glossy
 		// props); the HUD's Rendering tab can turn them off.
-		settings.ScreenSpace.Reflections.Enabled = true;
+		auto& reflections = settings.ScreenSpace.Reflections;
+		reflections.Enabled = true;
+		// Long rays: the floor seen in a chrome ball's rim is often 20-60 m away; with the
+		// 20 m default those rays faded out and fell back to the environment, which showed
+		// as a fuzzy inner "ball" of sky colour inside the reflection.
+		reflections.MaxDistance = 70.0f;
+		reflections.MaxSteps = 128;
+		// A quarter of the rays (the reflection was the costliest pass after the lights).
+		reflections.HalfResolution = true;
+		settings.ScreenSpace.AmbientOcclusion.HalfResolution = true; // Likewise the AO (TAA gathers the block).
+		reflections.DistanceFade = 0.15f;
+		reflections.EdgeFade = 0.05f; // Close up, most hits are near the screen edge.
+		// Only used without the back-face depth (each surface's real thickness otherwise).
+		reflections.Thickness = 0.1f;
+		// Local reflection probes (chrome balls, the gallery, the reflection lab): up to 16,
+		// three cube faces a frame at 128 x 128.
+		settings.ReflectionProbes.MaxProbes = 16;
+		settings.ReflectionProbes.FacesPerFrame = 6; // Faces that see moving objects go first (ReflectionMovers).
+		settings.ReflectionProbes.Resolution = 256; // Flat mirrors show the probe 1:1.
+		// Idle faces (no mover in view) refresh every 30 frames; faces that see movers still
+		// update every frame the budget allows.
+		settings.ReflectionProbes.IdleRefreshFrames = 30;
+		// 32-pixel light clusters: shorter light lists for the 256-light swarm (measured: the
+		// Forward+ pass -0.6 ms in the atrium; the mask pass is word-major and cheap).
+		settings.ClusterTileSize = 32;
 		// Sharper sun shadows: 4096-texel cascades in an 8192 atlas halve the texel size
 		// (the last cascade, 16-70 m, went from 8 cm to 4 cm per texel), so the PCF edge
 		// no longer shows the texel staircase through its blur at playground distances.
@@ -322,18 +482,51 @@ namespace Game
 		clouds = std::make_shared<Engine::VolumetricClouds>();
 		clouds->Settings.Coverage = 0.5f; // Plenty of trade-wind cumulus, still mostly blue sky.
 		clouds->Settings.BottomAltitude = 420.0f;
+		// Fade the layer out well before the horizon: grazing rays cross kilometres of cloud
+		// and turned the band above the horizon slate grey.
+		clouds->Settings.MaxDistance = 9000.0f;
+		clouds->Settings.HorizonFade = 0.3f;
+		clouds->Settings.SunIntensity = 1.25f;	 // Bright white midday cumulus,
+		clouds->Settings.AmbientStrength = 2.2f; // with light blue-grey (not storm grey) undersides.
 		clouds->Settings.TopAltitude = 1250.0f;
 		// 15 % faster than the original { 9, 0, 3.5 } m/s drift.
 		clouds->Settings.Wind = { 9.0f * 1.15f, 0.0f, 3.5f * 1.15f };
+		// A third of the pixels and 40 dithered steps (TAA resolves the dither): the march was
+		// the costliest pass in open views (1.6 ms at 1080p on an RTX 4070 laptop).
+		clouds->Settings.ResolutionScale = 0.375f;
+		clouds->Settings.Steps = 40;
 		sunShafts = std::make_shared<Engine::SunShafts>();
 		lensFlare = std::make_shared<Engine::LensFlare>();
+		// The camera: all three start disabled (the Off preset); the Camera/Post tab or
+		// "sandbox.camera" turns them on.
+		depthOfField = std::make_shared<Engine::DepthOfField>();
+		cameraLens = std::make_shared<Engine::CameraLens>();
+		filmSensor = std::make_shared<Engine::FilmSensor>();
+		lensing = std::make_shared<Engine::GravitationalLensing>();
 		auto* render = GetRenderServices();
 		if (render && render->Renderer)
 		{
 			render->Renderer->AddFeature(clouds);
 			render->Renderer->AddFeature(sunShafts);
 			render->Renderer->AddFeature(lensFlare);
+			render->Renderer->AddFeature(depthOfField);
+			render->Renderer->AddFeature(cameraLens);
+			render->Renderer->AddFeature(filmSensor);
+			render->Renderer->AddFeature(lensing);
 		}
+	}
+
+	void Sandbox::ApplyCameraPreset(Engine::CameraPreset preset)
+	{
+		cameraPreset = preset;
+		const auto derived = Engine::DeriveCameraLook(Engine::CameraPresetLook(preset));
+		Swim::Render::ColorGradingSettings scratch;
+		auto* render = GetRenderServices();
+		auto& grading = render && render->Settings ? render->Settings->Post.Grading : scratch;
+		Engine::ApplyCameraLook(derived, depthOfField.get(), cameraLens.get(), filmSensor.get(), grading);
+		// The tropical look's contrast and saturation are the neutral point the camera scales.
+		grading.Contrast = TropicalContrast * derived.Contrast;
+		grading.Saturation = TropicalSaturation * derived.Saturation;
 	}
 
 	int Sandbox::Init()
@@ -362,13 +555,99 @@ namespace Game
 		BuildTentacles();
 		BuildSponza();
 		BuildLightSwarm();
+		BuildReflectionLab();
+		BuildBlackHole();
 		BuildWorldUi();
+		RegisterProfilingToggles();
 		BuildHud();
 		return 0;
 	}
 
+	void Sandbox::SetGroupShown(Engine::TagId tag, bool shown)
+	{
+		using Flags = Swim::Render::RenderObjectFlags;
+		auto& registry = GetRegistry();
+		for (const entt::entity entity : GetEntitiesWithTag(tag))
+		{
+			if (auto* mesh = registry.try_get<Engine::MeshRenderer>(entity))
+			{
+				const bool visible = (static_cast<std::uint32_t>(mesh->Flags) & static_cast<std::uint32_t>(Flags::Visible)) != 0;
+				if (visible != shown)
+				{
+					registry.patch<Engine::MeshRenderer>(entity,
+						[shown](Engine::MeshRenderer& renderer)
+						{
+							renderer.Flags = shown ? (renderer.Flags | Flags::Visible)
+												   : static_cast<Flags>(static_cast<std::uint32_t>(renderer.Flags) & ~static_cast<std::uint32_t>(Flags::Visible));
+						});
+				}
+			}
+			if (auto* light = registry.try_get<Engine::Light>(entity))
+			{
+				light->Enabled = shown;
+			}
+		}
+		hiddenGroups[tag.Value] = !shown;
+	}
+
+	bool Sandbox::IsGroupShown(Engine::TagId tag) const
+	{
+		const auto it = hiddenGroups.find(tag.Value);
+		return it == hiddenGroups.end() || !it->second;
+	}
+
+	void Sandbox::RegisterProfilingToggles()
+	{
+		// scene.* switches (render.toggle, the panel's Profiling section): hide a part of the
+		// sandbox - its meshes, and its lights - to measure what it costs.
+		auto* render = GetRenderServices();
+		if (!render || !render->Toggles)
+		{
+			return;
+		}
+		hiddenGroups.clear();
+		const auto group = [&](const std::string& name, const std::string& description, Engine::TagId tag)
+		{
+			render->Toggles->Register({ "scene." + name, description,
+				[this, tag]
+				{
+					return IsGroupShown(tag);
+				},
+				[this, tag](bool on)
+				{
+					SetGroupShown(tag, on);
+				} });
+		};
+		group("sponza", "The Sponza model", GameTags::Sponza);
+		group("light-swarm", "The 256 roaming point lights and their orbs", GameTags::SwarmLight);
+		group("instance-hall", "The 576-object instance hall", GameTags::InstanceHall);
+		group("pbr-gallery", "The PBR gallery spheres", GameTags::PbrGallery);
+		group("physics-toys", "The physics playground's bodies (drawing only)", GameTags::PhysicsToy);
+		group("glass", "The glass panes (transparent)", GameTags::Glass);
+		group("emissive", "The emissive tori", GameTags::Emissive);
+		group("tentacles", "The GPU-skinned tentacles (drawing)", GameTags::Tentacle);
+		group("reflection-lab", "The reflection lab (its probes stay)", GameTags::ReflectionLab);
+		render->Toggles->Register({ "scene.light-swarm-motion", "Moving the swarm lights (CPU behaviour)",
+			[this]
+			{
+				return swarmController == entt::null || swarmMotion;
+			},
+			[this](bool on)
+			{
+				swarmMotion = on;
+				if (swarmController != entt::null)
+				{
+					SetEnabledStates(swarmController, on ? Engine::EngineState::Playing : Engine::EngineState::None);
+				}
+			} });
+	}
+
 	int Sandbox::Exit()
 	{
+		if (auto* render = GetRenderServices(); render && render->Toggles)
+		{
+			render->Toggles->Unregister("scene.");
+		}
 		infoDocument.reset();
 		infoBody = {};
 		cameraRig = entt::null;
@@ -377,6 +656,8 @@ namespace Game
 		swarmController = entt::null;
 		sponza.Entities.clear();
 		infoButton = {};
+		labFloor = nullptr;
+		blackHole = entt::null;
 		return 0;
 	}
 
@@ -558,15 +839,16 @@ namespace Game
 		{
 			render->Settings->Sky.SunDirection = { towardSun.x, towardSun.y, towardSun.z };
 			render->Settings->ScreenSpace.Fog.SunDirection = { -towardSun.x, -towardSun.y, -towardSun.z };
-			// A lower sun is warmer and dimmer.
+			// A lower sun is warmer and dimmer; a high one is nearly white.
 			const float warmth = 1.0f - std::clamp((sunElevation - 5.0f) / 40.0f, 0.0f, 1.0f);
-			render->Settings->Sky.SunColor = { 16.0f, 13.5f - 3.5f * warmth, 9.5f - 5.0f * warmth };
+			render->Settings->Sky.SunColor = { 16.0f, 15.2f - 4.5f * warmth, 13.6f - 8.0f * warmth };
 		}
+		const float sunIntensity = 9.0f * std::clamp(std::sin(el) * 1.6f, 0.15f, 1.0f);
 		if (IsValid(sun))
 		{
 			if (auto* light = GetRegistry().try_get<Engine::Light>(sun))
 			{
-				light->Intensity = 9.0f * std::clamp(std::sin(el) * 1.6f, 0.15f, 1.0f);
+				light->Intensity = sunIntensity;
 			}
 		}
 	}
@@ -577,7 +859,7 @@ namespace Game
 		AddComponent<Engine::Transform>(sun, Engine::Transform());
 		Engine::Light light;
 		light.Kind = Engine::LightKind::Directional;
-		light.Color = { 1.0f, 0.9f, 0.74f }; // Golden tropical sun.
+		light.Color = { 1.0f, 0.97f, 0.92f }; // Soft white midday sun.
 		light.Intensity = 2.5f;
 		light.CastShadows = true;
 		light.ShadowPriority = 10.0f;
@@ -664,6 +946,15 @@ namespace Game
 				{ -13.1f, 3.0f, -10.3f }, { 10.5f, 6.0f, 0.4f }, glm::quat(1, 0, 0, 0),
 				Swim::Render::RenderObjectFlags::Default | Swim::Render::RenderObjectFlags::Static, { Engine::Tags::Static } });
 		AddBoxBody(*this, wall, Engine::RigidbodyType::Static, glm::vec3(0.5f));
+		// One static area probe for the whole gallery (28 spheres share it).
+		const entt::entity probe = CreateEntity("PBR gallery probe");
+		AddComponent<Engine::Transform>(probe, Engine::Transform(glm::vec3(-13.1f, 2.5f, -7.5f), glm::vec3(1.0f)));
+		Engine::ReflectionProbe area;
+		area.ObjectProbe = false;
+		area.Dynamic = false;
+		area.InfluenceRadius = 7.0f;
+		area.BlendDistance = 2.0f;
+		AddComponent<Engine::ReflectionProbe>(probe, area);
 	}
 
 	void Sandbox::BuildInstanceHall()
@@ -768,6 +1059,9 @@ namespace Game
 					glm::vec3(0.9f), glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default,
 					{ GameTags::PhysicsToy, Engine::Tags::Dynamic } });
 			AddSphereBody(*this, ball, Engine::RigidbodyType::Dynamic, 0.5f, 3.0f);
+			// Chrome: an object probe shows the floor, the other balls and whatever is behind the
+			// camera (screen-space reflections alone cannot).
+			AddComponent<Engine::ReflectionProbe>(ball, Engine::ReflectionProbe{});
 		}
 	}
 
@@ -910,10 +1204,10 @@ namespace Game
 			rootStyle.Flow = UiFlow::Column;
 			rootStyle.Padding = { 18, 14, 18, 14 };
 			rootStyle.Gap = 6;
-			rootStyle.Background = { 0.05f, 0.07f, 0.1f, 0.82f };
+			rootStyle.Background = UiSrgbHex(0x0a0d13, 0.93f);
 			rootStyle.CornerRadius = 14;
-			rootStyle.BorderWidth = 2;
-			rootStyle.BorderColor = { 0.3f, 0.55f, 0.95f, 0.9f };
+			rootStyle.BorderWidth = 3;
+			rootStyle.BorderColor = UiSrgbHex(0x1f7aff);
 			rootStyle.Width = UiLength::Percent(1.0f);
 			rootStyle.Height = UiLength::Percent(1.0f);
 			const auto frame = CreateStyledNode(*infoDocument, infoDocument->GetRoot(), rootStyle);
@@ -950,7 +1244,7 @@ namespace Game
 			auto document = ui.CreateDocument();
 			UiStyle style;
 			style.Padding = { 14, 6, 14, 6 };
-			style.Background = { 0.02f, 0.02f, 0.03f, 0.7f };
+			style.Background = UiSrgbHex(0x07090d, 0.85f);
 			style.CornerRadius = 10;
 			style.AlignSelf = UiAlign::Center;
 			const auto box = CreateStyledNode(*document, document->GetRoot(), style);

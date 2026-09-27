@@ -6,7 +6,7 @@ namespace Game
 {
 	namespace
 	{
-		constexpr std::array<Finding, 36> Items{ {
+		constexpr std::array<Finding, 54> Items{ {
 			{ "Behaviour Exit ran twice on scene exit",
 				"InternalSceneExit called every behaviour's Exit and then DestroyAllEntities called it again. Scene exit now destroys the "
 				"entities once, after the scene's own Exit, so every behaviour exits exactly once.",
@@ -132,6 +132,56 @@ namespace Game
 				"with GPU work; recording is still serialized with the GPU (one submission in flight per executor). Two executors "
 				"used alternately are the next step (docs/PerformanceAnalysis.md).",
 				"Workaround" },
+			{ "Ground collider shorter than the floor",
+				"The checkered plane is 130 m square but its box collider had 40 m half extents, so bodies fell through the outer 25 m "
+				"of every edge (including under Sponza). Both now come from one GroundSize, and a test drops balls near all four edges.",
+				"Fixed" },
+			{ "Particles erased near the horizon",
+				"Particles were drawn into the Forward+ colour before the screen-space composite and the cloud feature: the fog "
+				"re-fogged them with the depth behind them and the clouds were composited over them wherever sky showed through. They "
+				"are now drawn over the composited colour, after the BeforeTemporal features (and are not fogged).",
+				"Fixed" },
+			{ "Sponza missing on a fresh checkout",
+				"The Draco + KTX2 Sponza GLB had been dropped from Assets/Models/Sponza/ in a commit, so only the light swarm appeared. "
+				"It is restored; verify-build-layout.py fails when it is missing and when an include's case does not match the file.",
+				"Fixed" },
+			{ "SSR edges aliased to the march stride",
+				"A ray near a silhouette hit or missed depending on where its samples landed, so reflected edges were stair-stepped and "
+				"TAA smeared them. Crossings between samples are now refined by bisection, and the hit colour is sampled at the exact "
+				"hit position (bilinear, luminance-weighted).",
+				"Fixed" },
+			{ "SSR grain and flicker",
+				"Rays toward the camera spread their steps over a projected line far off screen, leaving one or two samples on screen, "
+				"and self-intersections and silhouettes the ray passed behind counted as hits, so hits came and went with the per-frame "
+				"jitter. The march now covers only the on-screen segment, ignores the start pixel's tangent plane, rejects "
+				"discontinuous grazing hits and fades edge-on hits: 2.5 % of hit pixels flicker in the stability test, down from 17 %.",
+				"Fixed" },
+			{ "Chrome balls showed a fuzzy blue inner ball",
+				"Reflection rays that ended beyond the 20 m SSR range or left the screen fell back to the environment, whose ground was "
+				"sea blue, and the distance fade blurred the boundary. The sandbox traces 70 m rays and its environment ground is sand, "
+				"the colour of the floor.",
+				"Fixed" },
+			{ "Dark UI displayed as grey",
+				"UI colours are linear and encoded to sRGB at composition, but the theme palette and the sandbox panels were written "
+				"as sRGB numbers, so every near-black showed as mid grey and the accent was washed out. Colours are now authored "
+				"with UiSrgb / UiSrgbHex; panels are near-opaque and the accent borders and slider track are thicker.",
+				"Fixed" },
+			{ "No reflections of reflections",
+				"Reflection rays read the current frame's colour, which has no reflections yet, so chrome balls showed each other "
+				"without their own reflections. With TAA on, hits now read the previous resolved frame at the position the hit's "
+				"motion vector gives (TemporalAntiAliasing::ImportPreviousOutput).",
+				"Fixed" },
+			{ "Sky below the horizon grey or brown",
+				"The procedural sky's ground colour served both the visible void and the reflection fallback, and its gentle "
+				"horizon-to-ground blend left reflections of the floor sky-blue. RenderSettings::SkyBackgroundGround draws the void "
+				"blue while ProceduralSky::GroundFalloff gives lighting and reflections a floor-like ground right under the horizon.",
+				"Fixed" },
+			{ "Fuzzy, fading reflections on flat glossy faces",
+				"Rough metals got mirror-sharp reflections whose hits moved with a per-frame jitter (grain TAA could not resolve), and "
+				"hits on surfaces seen at a shallow angle (the floor, in most of what a wall reflects) faded out over a wide facing "
+				"range. The jitter is now fixed per pixel, the composite softens reflections by roughness over same-surface taps, "
+				"and only surfaces seen nearly edge-on fade.",
+				"Fixed" },
 			{ "Cooked asset validation is slow in Debug",
 				"Every start re-hashes every cooked .sasset to decide whether it is current; in Debug builds that takes minutes for "
 				"Sponza's RGBA8 textures. Recording file sizes and times beside the hashes would skip unchanged files.",
@@ -144,9 +194,10 @@ namespace Game
 				"The runtime uses single-phase GPU frustum culling; the two-phase HZB occlusion path (HzbBuilder) is built and tested "
 				"but not wired into the frame yet.",
 				"Open" },
-			{ "Only validated on SwiftShader so far",
-				"The assembled runtime was built and captured on Linux with SwiftShader (no validation layer available there, about "
-				"3.5 s per frame). The four validation profiles, the RTX 4070 run and the 1080p pass budgets are still to be recorded.",
+			{ "Desktop validation is partial",
+				"The runtime is built and captured on Linux with SwiftShader and on Windows on the RTX 4070 (the full suite, the "
+				"validated screen-space and particle smokes, and 1080p headless captures). The four validation profiles over every "
+				"smoke and the 1080p pass budgets are still to be recorded.",
 				"Open" },
 			{ "No HDR output toggle or device-loss recovery",
 				"The swapchain is SDR (BGRA8; vsync off by default, --vsync=on for FIFO). The post stack can tone map to HDR10/scRGB and "
@@ -165,9 +216,53 @@ namespace Game
 				"The panel toggles shadows and shows the cluster heat map; cascade count, resolution, bias and cascade debug views, "
 				"wireframe and overdraw views are not exposed.",
 				"Open" },
-			{ "One procedural sky, no IBL map selection",
-				"The environment is built from the procedural sky (prefiltered cube + irradiance); loading HDR environment maps "
-				"from assets waits for Phase 24 asset handling.",
+			{ "Reflections fell back to a floor-coloured sky",
+				"Screen-space reflection misses used the global environment with a floor-albedo ground colour, so chrome showed a sandy "
+				"blur below the horizon, touching spheres showed dark blobs and objects beside a mirror reflected sliced. Reflections are "
+				"now a hierarchy: SSR (with back-face thickness and hidden-side rejection) -> time-sliced, parallax-corrected local probes "
+				"captured by the Forward+ pipeline -> the global environment with clouds.",
+				"Fixed" },
+			{ "Probe parallax stopped at occluder silhouettes",
+				"The probe march took the first sample beyond the captured distance as the hit, so rays passing behind a nearby object "
+				"(as the probe saw it) stopped at its silhouette and reflections beside a mirror smeared in bands, one per march step. A "
+				"crossing now counts only when the refined point lies on the captured surface, and the march offset is jittered per "
+				"pixel for the temporal resolve.",
+				"Fixed" },
+			{ "One procedural sky, no HDR environment maps",
+				"The global environment is built from the procedural sky with the volumetric clouds folded in; local reflection probes "
+				"now cover nearby geometry, but loading HDR environment maps waits for Phase 24.",
+				"Open" },
+			{ "Probe reflections are limited by what the probe sees",
+				"A probe stores one distance per direction, so a reflected surface hidden from the probe's centre (behind another "
+				"object) cannot be found; the march then falls back to the ray direction. Probes are 128 px per face, so sharp mirrors "
+				"show soft probe reflections where SSR has no data (off screen, behind the camera).",
+				"Open" },
+			{ "Depth of field is physically weak at wide angles",
+				"The thin-lens CoC follows the camera's field of view (60 degrees is a 21 mm lens on full frame), so the sandbox view "
+				"shows little blur even at f/1.4; narrow the field of view in the Camera/Post tab for shallow focus. Autofocus reads the "
+				"centre of the depth buffer each frame without smoothing.",
+				"Open" },
+			{ "Black-hole lensing sampled the frame with the thin-lens formula",
+				"The first lensing pass bent the rendered frame by the weak-field angle and lensed a rasterized disk, which sliced "
+				"the disk where its depth crossed the lens plane and drew the horizon sphere into the Einstein ring. Each pixel's ray is "
+				"now traced as a Schwarzschild geodesic through the hole's region, crossing a volumetric gas instead of a textured disk; "
+				"only the escaped ray's background comes from the frame.",
+				"Fixed" },
+			{ "Black-hole image cut into slices near the floor",
+				"The lensed background was looked up at the depth the pixel's unbent ray had, so where the bent ray and that depth "
+				"disagreed (near the floor, across walls behind the hole) the image was cut into slices and bands. Each bent ray is now "
+				"tested against the depth buffer along its whole path, and on in a straight line after it leaves the region.",
+				"Fixed" },
+			{ "Black-hole backgrounds are screen space",
+				"The lensed image is the rendered frame: what is off screen or hidden behind nearer surfaces cannot be seen through "
+				"the lens (a ray that leaves the screen fades to the pixel's own colour, one bent behind the camera keeps the last "
+				"surface it crossed).",
+				"Open" },
+			{ "240 FPS not reached yet",
+				"Every pass and feature can be switched off, profiled and benchmarked (docs/Profiling.md). Half-resolution reflections "
+				"and AO, deferred local lights, the colour-only sky pass, faster cluster masks and the cascade cache took the Sponza "
+				"atrium from 14 to 10 ms and the overview from 7.3 to 6.7 ms on the RTX 4070 laptop at 1080p; the frame is GPU-bound "
+				"(shadows, local lights, the reflection composite, lensing and clouds lead).",
 				"Open" },
 		} };
 	} // namespace

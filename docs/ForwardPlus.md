@@ -187,3 +187,12 @@ Frames:
 2. the cluster heatmap;
 3. a moved camera with the red quad moved in front of the green one (the order must flip), without an environment (stand-ins), jittered by (0.37, −0.21) pixels; the CPU ray cast follows the jitter;
 4. 10,000 lights, every 7th pixel compared, with pass timings printed.
+
+## Deferred local lights (Phase 23 performance work)
+
+With the depth prepass, `ForwardPlusRendererDesc::OpaqueDeferred` (SwimForwardOpaqueDeferred: the prepassed opaque program with `FORWARD_DEFERRED_LOCAL=1`) and `LocalLightsPipeline` (ForwardLocalLights.slang), a frame with `ForwardPlusFrame::DeferLocalLights` and a Storage-capable colour target is drawn in two steps:
+
+1. the opaque pass shades directional lights, ambient, IBL and emission as before and writes an eighth target, base colour + metalness (`MaterialFormat`; alpha −1 in debug views);
+2. a compute pass (`<name> local lights`, 8 x 8 threads) reconstructs each opaque pixel's position from depth and adds its cluster's point and spot lights, with shadows, to the colour target, before the transparent pass. The wave walks the union of its pixels' cluster masks (`WaveActiveBitOr`) so loop control and light loads stay uniform.
+
+The per-light work is exactly the fragment loop's, so the image is the same (animated foliage aside, captures differ in 0.4 % of pixels by more than 8/255); it runs without the helper lanes of partly covered quads and in a small, high-occupancy program. In the sandbox's Sponza view (256 lights) the opaque pass went from 3.9 ms to 1.0 ms plus 1.4 ms for the lights. `RenderSettings::DeferredLocalLights` (switch `lighting.deferred-local-lights`) turns it off. Transparent draws keep the fragment loop.

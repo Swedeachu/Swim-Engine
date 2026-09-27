@@ -11,6 +11,8 @@
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Particles/ParticleSystem.h"
 #include "Engine/Systems/Renderer/PostProcess/PostProcessor.h"
+#include "Engine/Systems/Renderer/Reflections/ReflectionProbeRenderer.h"
+#include "Engine/Systems/Renderer/Reflections/ReflectionProbes.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraph.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
@@ -38,6 +40,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -52,6 +55,7 @@ namespace Engine
 {
 	namespace S = Swim::Rhi;
 	namespace R = Swim::Render;
+	static_assert(sizeof(R::GpuReflectionProbeRecord) == R::ScreenSpaceProbeRecordBytes && R::MaxReflectionProbes == R::ScreenSpaceMaxProbes);
 
 	namespace
 	{
@@ -97,6 +101,7 @@ namespace Engine
 		bool SameSky(const R::Environment::ProceduralSky& a, const R::Environment::ProceduralSky& b)
 		{
 			return a.ZenithColor == b.ZenithColor && a.HorizonColor == b.HorizonColor && a.GroundColor == b.GroundColor &&
+				a.GroundFalloff == b.GroundFalloff &&
 				a.SunDirection == b.SunDirection && a.SunColor == b.SunColor && a.SunSharpness == b.SunSharpness &&
 				a.Intensity == b.Intensity;
 		}
@@ -118,13 +123,29 @@ namespace Engine
 		{
 			value = std::isfinite(value) ? std::clamp(value, low, high) : fallback;
 		};
+		clampFinite(Sky.GroundFalloff, 1.0f, 256.0f, 2.0f);
+		if (SkyBackgroundGround)
+		{
+			for (auto& channel : *SkyBackgroundGround)
+			{
+				clampFinite(channel, 0.0f, 1000.0f, 0.0f);
+			}
+		}
 		for (auto& a : Ambient)
 		{
 			clampFinite(a, 0.0f, 100.0f, 0.0f);
 		}
 		clampFinite(EnvironmentIntensity, 0.0f, 100.0f, 1.0f);
 		clampFinite(EnvironmentRotation, -100.0f, 100.0f, 0.0f);
+		clampFinite(EnvironmentRefreshSeconds, 0.0f, 3600.0f, 0.5f);
 		EnvironmentResolution = std::clamp(PowerOfTwoFloor(std::max(EnvironmentResolution, 16u)), 16u, 1024u);
+		ReflectionProbes.Resolution = std::clamp(PowerOfTwoFloor(std::max(ReflectionProbes.Resolution, 16u)), 16u, 512u);
+		ReflectionProbes.MaxProbes = std::clamp(ReflectionProbes.MaxProbes, 1u, Swim::Render::MaxReflectionProbes);
+		ReflectionProbes.FacesPerFrame = std::min(ReflectionProbes.FacesPerFrame, 12u);
+		ReflectionProbes.PrefilterSamples = std::clamp(ReflectionProbes.PrefilterSamples, 1u, 256u);
+		ReflectionProbes.FiltersPerFrame = std::clamp(ReflectionProbes.FiltersPerFrame, 1u, Swim::Render::MaxReflectionProbes);
+		clampFinite(ReflectionProbes.MoveThreshold, 0.0f, 100.0f, 0.05f);
+		clampFinite(ReflectionProbes.MoverRange, 0.0f, 1000.0f, 15.0f);
 		ClusterTileSize = std::clamp(ClusterTileSize, 8u, 256u);
 		ClusterSlices = std::clamp(ClusterSlices, 1u, 64u);
 		clampFinite(ClusterFar, 1.0f, 100000.0f, 200.0f);
@@ -168,9 +189,17 @@ namespace Engine
 		// Programs.
 		RuntimeComputeProgram visibilityProgram, clusterCull, clusterBounds, clusterAssign, clusterScan, sortProgram;
 		RuntimeComputeProgram environmentSky, environmentDownsample, environmentPrefilter, environmentIrradiance, environmentLut;
+		RuntimeComputeProgram environmentOverlay; // Optional: feature overlays (clouds) in the environment.
+		RuntimeComputeProgram probeResolve, probePrefilter; // Optional: reflection probes.
 		RuntimeComputeProgram postHistogram, postExposure, postBloomDown, postBloomUp, postComposite, postCompositeHdr;
 		RuntimeComputeProgram temporalResolve, ssAo, ssBlur, ssComposite, ssReflection;
 		RuntimeComputeProgram particleSimulate, particleEmit, particleCompact, particleFinalize, skinningProgram;
+		RuntimeGraphicsProgram forwardBackDepth; // Optional (screen-space reflection thickness).
+		std::unique_ptr<S::GraphicsPipeline> forwardBackDepthPipeline;
+		// Optional: deferred local lights (RenderSettings::DeferredLocalLights).
+		RuntimeGraphicsProgram forwardDeferred;
+		std::unique_ptr<S::GraphicsPipeline> forwardDeferredPipeline;
+		RuntimeComputeProgram forwardLocalLights;
 		RuntimeGraphicsProgram forwardOpaque, forwardTransparent, forwardDepth, forwardPrepassed, shadowDepth, shadowMasked, particleRender,
 			uiQuad, skyBackground, present;
 		std::unique_ptr<S::GraphicsPipeline> forwardOpaquePipeline, forwardTransparentPipeline, forwardDepthPipeline,
@@ -204,6 +233,13 @@ namespace Engine
 		std::unique_ptr<R::ShadowRenderer> shadows;
 		std::unique_ptr<R::ClusteredLightAssigner> clusters;
 		std::unique_ptr<R::EnvironmentBuilder> environmentBuilder;
+		std::unique_ptr<R::ReflectionProbeRenderer> probeRenderer; // Null when its programs are missing.
+		R::ReflectionProbes::Scheduler probeScheduler;
+		// Probe slots whose faces changed and still need prefiltering (FiltersPerFrame a
+		// frame), and the probe key each slot was last filtered for (a slot used before its
+		// first filter for its current probe would show another probe's cube).
+		std::vector<std::uint32_t> pendingFilters;
+		std::vector<std::uint64_t> filteredKey;
 		std::unique_ptr<R::ScreenSpaceEffects> screenSpace;
 		std::unique_ptr<R::TemporalAntiAliasing> temporal;
 		std::unique_ptr<R::PostProcessor> post;
@@ -214,6 +250,7 @@ namespace Engine
 		// Visibility instances (rebuilt when the page-slot count changes).
 		std::unique_ptr<R::GpuVisibility> visibility;
 		std::unique_ptr<R::GpuVisibility> shadowVisibility;
+		std::unique_ptr<R::GpuVisibility> probeVisibility; // Reflection probe capture views (own LOD history).
 		std::uint32_t visibilitySlots = 0;
 		std::map<std::uint32_t, R::StandardPbr::Parameters> routes; // Material set -> parameters.
 
@@ -221,6 +258,132 @@ namespace Engine
 		std::unique_ptr<R::ShadowAtlasAllocator> atlas;
 		std::uint32_t atlasSize = 0;
 		std::uint32_t atlasMinTile = 0;
+		// The cascade cache (RenderSettings::ShadowCascadeCache): a persistent atlas and, per
+		// (slot, cascade), the view last drawn into its tile.
+		RuntimeGraphicsProgram shadowClear;
+		std::unique_ptr<S::GraphicsPipeline> shadowClearPipeline;
+		std::unique_ptr<S::Texture> shadowAtlasTexture;
+		bool shadowAtlasWritten = false;
+		struct CachedShadowView
+		{
+			R::GpuShadowView View;
+			float CascadeFar = 0.0f;
+			std::uint64_t Frame = 0;
+			std::array<float, 3> CameraPosition{};
+			std::array<float, 3> CameraForward{};
+			std::array<float, 3> LightDirection{};
+			R::ShadowTile Tile;
+		};
+		std::map<std::pair<std::uint32_t, std::uint32_t>, CachedShadowView> shadowCache;
+		std::uint64_t shadowFrames = 0;
+		std::uint64_t lastShadowFrame = 0;
+
+		// The cascade cache: cascade 0 is drawn every frame, cascade 1 every second frame and
+		// the others every fourth (staggered). A cascade is redrawn sooner when its tile moved,
+		// the light turned, or the camera moved or turned enough to shift the cascade's slice by
+		// a few percent of its radius. A cascade kept this frame keeps the view (and split
+		// distance) its depth was drawn with, so lookups stay consistent; moving casters in far
+		// cascades lag by at most three frames. Spot and point views are drawn every frame.
+		// Returns the imported persistent atlas and fills shadowFrame's Atlas and Render.
+		R::GraphTexture PlanShadowCache(R::RenderGraph& graph, R::ShadowPlan& plan, R::ShadowFrame& shadowFrame, const RenderCamera& camera,
+			std::span<const R::ShadowCasterDesc> casters)
+		{
+			const auto size = plan.AtlasSize;
+			if (!shadowAtlasTexture || shadowAtlasTexture->GetDesc().Extent.Width != size)
+			{
+				S::TextureDesc atlasDesc;
+				atlasDesc.Extent = { size, size, 1 };
+				atlasDesc.PixelFormat = R::ShadowRenderer::AtlasFormat;
+				atlasDesc.Usage = S::TextureUsage::DepthStencilAttachment | S::TextureUsage::Sampled | S::TextureUsage::TransferSource;
+				atlasDesc.DebugName = "Shadow atlas (cached)";
+				shadowAtlasTexture = device.CreateTexture(atlasDesc);
+				if (!shadowAtlasTexture)
+				{
+					throw std::runtime_error("FrameRenderer: cannot create the cached shadow atlas");
+				}
+				shadowAtlasWritten = false;
+				shadowCache.clear();
+			}
+			++shadowFrames;
+			if (shadowFrames != lastShadowFrame + 1)
+			{
+				shadowCache.clear(); // Shadows were off for a while: nothing cached is current.
+			}
+			lastShadowFrame = shadowFrames;
+			const auto dot3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b)
+			{
+				return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+			};
+			shadowFrame.Render.assign(plan.Draws.size(), 1);
+			std::map<std::pair<std::uint32_t, std::uint32_t>, CachedShadowView> kept;
+			for (std::size_t v = 0; v < plan.Draws.size(); ++v)
+			{
+				auto& draw = plan.Draws[v];
+				if (draw.Kind != R::ShadowKind::Directional)
+				{
+					continue;
+				}
+				std::array<float, 3> lightDirection{};
+				for (const auto& caster : casters)
+				{
+					if (caster.Slot == draw.Slot)
+					{
+						lightDirection = { caster.Light.Direction[0], caster.Light.Direction[1], caster.Light.Direction[2] };
+					}
+				}
+				auto& record = plan.Records[draw.Slot];
+				const auto key = std::make_pair(draw.Slot, draw.Index);
+				const auto found = shadowCache.find(key);
+				bool refresh = found == shadowCache.end() || !shadowAtlasWritten;
+				if (!refresh)
+				{
+					const auto& cached = found->second;
+					const std::uint64_t period = draw.Index == 0 ? 1u : draw.Index == 1 ? 2u : 4u;
+					const std::array<float, 3> moved{ camera.Position[0] - cached.CameraPosition[0],
+						camera.Position[1] - cached.CameraPosition[1], camera.Position[2] - cached.CameraPosition[2] };
+					const float turn = std::acos(std::clamp(dot3(camera.Forward, cached.CameraForward), -1.0f, 1.0f));
+					// The cascade's radius, from its texel size; the slice centre sits at most its
+					// split distance away, so a turn shifts it by at most far * angle.
+					const float radius = draw.View.TexelWorldSize * float(draw.Tile.Size) * 0.5f;
+					const float shift = std::sqrt(dot3(moved, moved)) + record.CascadeFar[draw.Index] * turn;
+					refresh = shadowFrames - cached.Frame >= period || cached.Tile.X != draw.Tile.X || cached.Tile.Y != draw.Tile.Y ||
+						cached.Tile.Size != draw.Tile.Size || dot3(lightDirection, cached.LightDirection) < 0.99999f ||
+						shift > 0.05f * radius;
+				}
+				if (refresh)
+				{
+					CachedShadowView entry;
+					entry.View = plan.Views[v];
+					entry.CascadeFar = record.CascadeFar[draw.Index];
+					entry.Frame = shadowFrames;
+					entry.CameraPosition = camera.Position;
+					entry.CameraForward = camera.Forward;
+					entry.LightDirection = lightDirection;
+					entry.Tile = draw.Tile;
+					kept[key] = entry;
+				}
+				else
+				{
+					const auto& cached = found->second;
+					plan.Views[v] = cached.View;
+					draw.View = cached.View;
+					record.CascadeFar[draw.Index] = cached.CascadeFar;
+					shadowFrame.Render[v] = 0;
+					kept[key] = cached;
+				}
+			}
+			shadowCache = std::move(kept);
+			const auto atlas = graph.ImportTexture(*shadowAtlasTexture, shadowAtlasWritten ? S::ResourceState::ShaderRead : S::ResourceState::Undefined);
+			if (!shadowAtlasWritten)
+			{
+				// First use: the atlas is cleared whole and every tile is drawn this frame.
+				std::fill(shadowFrame.Render.begin(), shadowFrame.Render.end(), std::uint8_t(1));
+				shadowFrame.AtlasHoldsDepth = false;
+			}
+			shadowAtlasWritten = true;
+			shadowFrame.Atlas = atlas;
+			return atlas;
+		}
 
 		// Environment (persistent, rebuilt when the sky changes).
 		std::unique_ptr<S::Texture> prefiltered;
@@ -230,6 +393,9 @@ namespace Engine
 		std::optional<R::Environment::ProceduralSky> builtSky;
 		bool lutBuilt = false;
 		bool environmentValid = false;
+		bool environmentHadFeatures = false; // The last build included feature overlays.
+		double environmentBuiltTime = -1.0e9; // featureTime of the last build.
+		std::unordered_set<const RenderFeature*> environmentFeatureFailures;
 		static constexpr std::uint32_t LutSize = 128;
 		static constexpr std::uint32_t LutSamples = 256;
 
@@ -351,10 +517,9 @@ namespace Engine
 									  S::Format::RGBA8Unorm, *uiQuad.Program, *uiQuad.Layout, S::Format::D32Float)),
 			"world UI");
 		{
-			// The sky pass writes the seven Forward+ targets (so it can clear them) and clears depth.
-			static const std::array<S::Format, 7> formats{ R::ForwardPlusRenderer::ColorFormat, R::ForwardPlusRenderer::ObjectIdFormat,
-				R::ForwardPlusRenderer::VelocityFormat, R::ForwardPlusRenderer::NormalFormat, R::ForwardPlusRenderer::IndirectFormat,
-				R::ForwardPlusRenderer::ReflectanceFormat, R::ForwardPlusRenderer::SpecularFormat };
+			// The sky pass writes the colour target and clears depth (the opaque pass clears the
+			// other Forward+ targets: ForwardPlusTargets::ClearAuxiliary).
+			static const std::array<S::Format, 1> formats{ R::ForwardPlusRenderer::ColorFormat };
 			S::GraphicsPipelineDesc skyDesc{};
 			skyDesc.Program = skyBackground.Program.get();
 			skyDesc.Layout = skyBackground.Layout.get();
@@ -459,6 +624,25 @@ namespace Engine
 		forwardDesc.Transparent = { forwardTransparentPipeline.get(), forwardTransparent.Layout.get() };
 		forwardDesc.DepthPrepass = { forwardDepthPipeline.get(), forwardDepth.Layout.get() };
 		forwardDesc.OpaquePrepassed = { forwardPrepassedPipeline.get(), forwardPrepassed.Layout.get() };
+		if (shaders.Contains("ForwardBackDepth"))
+		{
+			forwardBackDepth = LoadDrawProgram("ForwardBackDepth", &bindlessSpace);
+			forwardBackDepthPipeline = require(device.CreateGraphicsPipeline(R::ForwardPlusRenderer::DepthPrepassPipelineDesc(
+												   *forwardBackDepth.Program, *forwardBackDepth.Layout)),
+				"Forward+ back depth");
+			forwardDesc.BackDepth = { forwardBackDepthPipeline.get(), forwardBackDepth.Layout.get() };
+		}
+		if (shaders.Contains("ForwardOpaqueDeferred") && shaders.Contains("ForwardLocalLights"))
+		{
+			forwardDeferred = LoadDrawProgram("ForwardOpaqueDeferred", &bindlessSpace);
+			forwardDeferredPipeline = require(device.CreateGraphicsPipeline(R::ForwardPlusRenderer::DeferredPipelineDesc(
+												  *forwardDeferred.Program, *forwardDeferred.Layout)),
+				"Forward+ deferred opaque");
+			forwardLocalLights = shaders.LoadCompute("ForwardLocalLights");
+			forwardDesc.OpaqueDeferred = { forwardDeferredPipeline.get(), forwardDeferred.Layout.get() };
+			forwardDesc.LocalLightsPipeline = forwardLocalLights.Pipeline.get();
+			forwardDesc.LocalLightsLayout = forwardLocalLights.Layout.get();
+		}
 		forwardDesc.SortPipeline = sortProgram.Pipeline.get();
 		forwardDesc.SortLayout = sortProgram.Layout.get();
 		forwardDesc.DrawPath = drawPath;
@@ -467,6 +651,13 @@ namespace Engine
 		R::ShadowRendererDesc shadowDesc;
 		shadowDesc.Opaque = { shadowDepthPipeline.get(), shadowDepth.Layout.get() };
 		shadowDesc.Masked = { shadowMaskedPipeline.get(), shadowMasked.Layout.get() };
+		if (shaders.Contains("ShadowClear"))
+		{
+			shadowClear = LoadDrawProgram("ShadowClear", nullptr);
+			shadowClearPipeline = require(
+				device.CreateGraphicsPipeline(R::ShadowRenderer::ClearPipelineDesc(*shadowClear.Program, *shadowClear.Layout)), "shadow clear");
+			shadowDesc.Clear = { shadowClearPipeline.get(), shadowClear.Layout.get() };
+		}
 		shadowDesc.DrawPath = drawPath;
 		shadows = std::make_unique<R::ShadowRenderer>(shadowDesc);
 
@@ -486,6 +677,11 @@ namespace Engine
 			environmentIrradiance.Space };
 		environmentDesc.BrdfLut = { environmentLut.Pipeline.get(), environmentLut.Layout.get(), environmentLut.Space };
 		environmentDesc.Sampler = linearClamp.get();
+		if (shaders.Contains("EnvironmentOverlay"))
+		{
+			environmentOverlay = shaders.LoadCompute("EnvironmentOverlay");
+			environmentDesc.Overlay = { environmentOverlay.Pipeline.get(), environmentOverlay.Layout.get(), environmentOverlay.Space };
+		}
 		environmentBuilder = std::make_unique<R::EnvironmentBuilder>(environmentDesc);
 
 		R::ScreenSpaceEffectsDesc ssDesc;
@@ -493,7 +689,19 @@ namespace Engine
 		ssDesc.Blur = { ssBlur.Pipeline.get(), ssBlur.Layout.get(), ssBlur.Space };
 		ssDesc.Composite = { ssComposite.Pipeline.get(), ssComposite.Layout.get(), ssComposite.Space };
 		ssDesc.Reflection = { ssReflection.Pipeline.get(), ssReflection.Layout.get(), ssReflection.Space };
+		ssDesc.ProbeSampler = linearClamp.get();
 		screenSpace = std::make_unique<R::ScreenSpaceEffects>(ssDesc);
+		if (shaders.Contains("ReflectionProbeResolve") && shaders.Contains("ReflectionProbePrefilter"))
+		{
+			probeResolve = shaders.LoadCompute("ReflectionProbeResolve");
+			probePrefilter = shaders.LoadCompute("ReflectionProbePrefilter");
+			R::ReflectionProbeRendererDesc probeDesc;
+			probeDesc.Resolve = { probeResolve.Pipeline.get(), probeResolve.Layout.get(), probeResolve.Space };
+			probeDesc.Downsample = { environmentDownsample.Pipeline.get(), environmentDownsample.Layout.get(), environmentDownsample.Space };
+			probeDesc.Prefilter = { probePrefilter.Pipeline.get(), probePrefilter.Layout.get(), probePrefilter.Space };
+			probeDesc.Sampler = linearClamp.get();
+			probeRenderer = std::make_unique<R::ReflectionProbeRenderer>(device, probeDesc);
+		}
 
 		temporal = std::make_unique<R::TemporalAntiAliasing>(device,
 			R::TemporalAntiAliasingDesc{ { temporalResolve.Pipeline.get(), temporalResolve.Layout.get(), temporalResolve.Space }, "TAA" });
@@ -575,6 +783,10 @@ namespace Engine
 		{
 			R::ShadowRenderer::RouteMaterial(*shadowVisibility, set, parameters);
 		}
+		if (probeVisibility)
+		{
+			R::ForwardPlusRenderer::RouteMaterial(*probeVisibility, set, parameters);
+		}
 	}
 
 	void FrameRenderer::Impl::EnsureVisibility(std::uint32_t slots)
@@ -593,6 +805,8 @@ namespace Engine
 		visibilityDesc.IndexPageSlots = slots;
 		visibilityDesc.DebugName = "Main visibility";
 		visibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
+		visibilityDesc.DebugName = "Probe visibility";
+		probeVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
 		visibilityDesc.MaterialBinCapacities = R::ShadowRenderer::VisibilityBinCapacities(desc.MaxObjects, 4096);
 		visibilityDesc.DebugName = "Shadow visibility";
 		shadowVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
@@ -600,6 +814,7 @@ namespace Engine
 		for (const auto& [set, parameters] : routes)
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*visibility, set, parameters);
+			R::ForwardPlusRenderer::RouteMaterial(*probeVisibility, set, parameters);
 			R::ShadowRenderer::RouteMaterial(*shadowVisibility, set, parameters);
 		}
 	}
@@ -719,17 +934,35 @@ namespace Engine
 				timings.clear(); // The last graph failed or was never executed.
 			}
 		}
+		// Each pass's exclusive GPU time: the step of its end timestamp (begin timestamps are
+		// written before the pass's barriers and can overlap earlier work, so summing the
+		// begin-to-end spans counts overlap twice). The last end is the frame's GPU time.
 		std::vector<RenderStats::PassTiming> passes;
 		double total = 0.0;
+		double previousEnd = 0.0;
+		bool haveEnds = true;
 		for (const auto& timing : timings)
 		{
-			if (timing.Nanoseconds)
+			haveEnds = haveEnds && timing.EndOffsetNanoseconds.has_value();
+		}
+		for (const auto& timing : timings)
+		{
+			if (haveEnds)
+			{
+				const double end = *timing.EndOffsetNanoseconds * 1.0e-6;
+				const double ms = std::max(end - previousEnd, 0.0);
+				previousEnd = std::max(previousEnd, end);
+				passes.push_back({ timing.Name, ms });
+				total = previousEnd;
+			}
+			else if (timing.Nanoseconds)
 			{
 				const double ms = *timing.Nanoseconds * 1.0e-6;
 				total += ms;
 				passes.push_back({ timing.Name, ms });
 			}
 		}
+		stats.GpuPasses = passes;
 		stats.GpuTimingsAvailable = !passes.empty();
 		stats.GpuMilliseconds = total;
 		stats.Passes = static_cast<std::uint32_t>(timings.size());
@@ -750,14 +983,26 @@ namespace Engine
 		using Clock = std::chrono::steady_clock;
 		const auto cpuStart = Clock::now();
 		auto& I = *impl;
+		// This frame's slot: its previous frame (FramesInFlight frames ago) must be complete
+		// before the slot's executor, staging and acquire semaphore are reused (GatherTimings
+		// waits for it). With two slots the GPU still renders the last frame while this one
+		// is built and recorded.
+		device.AdvanceFrameSlot();
 		auto& executor = device.GetExecutor();
 		settings.Sanitize();
-		// The previous frame must be complete before its executor, staging and acquire
-		// semaphore are reused (one submission in flight); the CPU work since BeginFrame
-		// overlapped it.
+		stats.CpuPhases.clear();
+		auto lapStart = cpuStart;
+		const auto lap = [&](const char* name)
+		{
+			const auto now = Clock::now();
+			stats.CpuPhases.push_back({ name, std::chrono::duration<double, std::milli>(now - lapStart).count() });
+			lapStart = now;
+		};
 		GatherTimings();
+		lap("Wait for the previous frame (GPU)");
 
 		auto frame = device.Acquire();
+		lap("Acquire");
 		const auto extent = device.GetExtent();
 		if (!frame.Valid || extent.Width == 0 || extent.Height == 0)
 		{
@@ -802,6 +1047,7 @@ namespace Engine
 		}
 
 		R::RenderGraph graph;
+		bool environmentRebuilt = false, environmentWithFeatures = false;
 		bool residencyImported = false, materialsImported = false, sceneImported = false, lightsImported = false;
 		bool particlesPending = false, skinningPending = false, atlasPending = false;
 		std::optional<R::GraphReadback> captureReadback;
@@ -831,6 +1077,62 @@ namespace Engine
 			const auto lightResources = I.lights->Import(graph);
 			lightsImported = true;
 
+			// The view render features see (the features themselves run further down; the
+			// environment below also asks them for their contribution).
+			RenderFeatureView featureView;
+			featureView.View = camera.View;
+			featureView.Projection = camera.Projection;
+			featureView.ViewProjection = viewProjection;
+			featureView.Position = camera.Position;
+			featureView.Forward = camera.Forward;
+			featureView.Right = camera.Right;
+			featureView.Up = camera.Up;
+			featureView.TanHalfFovY = std::tan(camera.VerticalFov * 0.5f);
+			featureView.TanHalfFovX = featureView.TanHalfFovY * camera.Aspect;
+			featureView.Width = width;
+			featureView.Height = height;
+			{
+				const auto& sun = settings.Sky.SunDirection;
+				const float length = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+				for (int c = 0; c < 3; ++c)
+				{
+					featureView.SunDirection[c] = length > 0.0f ? sun[c] / length : (c == 1 ? 1.0f : 0.0f);
+					featureView.SunColor[c] = settings.Sky.SunColor[c] * settings.Sky.Intensity;
+				}
+			}
+			const float frameSeconds = std::clamp(std::isfinite(input.DeltaTime) ? input.DeltaTime : 0.0f, 0.0f, 1.0f);
+			I.featureTime += frameSeconds;
+			featureView.Time = static_cast<float>(I.featureTime);
+			featureView.DeltaTime = frameSeconds;
+			featureView.Frame = static_cast<std::uint32_t>(I.frameIndex);
+			const auto featureServices = [this]
+			{
+				RenderFeatureContext::Services services;
+				services.LoadCompute = [this](std::string_view name) -> const RuntimeComputeProgram&
+				{
+					auto& slot = impl->featurePrograms[std::string(name)];
+					if (!slot)
+					{
+						slot = std::make_unique<RuntimeComputeProgram>(impl->shaders.LoadCompute(name));
+					}
+					return *slot;
+				};
+				services.GetSampler = [this](std::string_view kind) -> S::Sampler&
+				{
+					if (kind == "LinearRepeat")
+					{
+						return *impl->linearRepeat;
+					}
+					if (kind == "PointClamp")
+					{
+						return *impl->presentSampler;
+					}
+					return *impl->linearClamp;
+				};
+				return services;
+			};
+
+			lap("Build: Uploads and imports");
 			// --- Environment ------------------------------------------------------------
 			std::optional<R::EnvironmentGraphResources> environment;
 			std::optional<R::GraphTexture> lut;
@@ -855,13 +1157,55 @@ namespace Engine
 			if (settings.Environment)
 			{
 				I.EnsureEnvironmentTargets(settings.EnvironmentResolution);
-				const bool rebuild = !I.builtSky || !SameSky(*I.builtSky, settings.Sky) || !I.environmentValid;
+				// Features that draw into the sky (clouds) also draw into the environment; it is
+				// then re-recorded every EnvironmentRefreshSeconds from the camera, because they move.
+				std::vector<RenderFeature*> contributors;
+				if (draw3D)
+				{
+					for (const auto& feature : features)
+					{
+						if (feature && feature->Enabled && feature->ContributesToEnvironment() &&
+							!I.environmentFeatureFailures.contains(feature.get()))
+						{
+							contributors.push_back(feature.get());
+						}
+					}
+				}
+				environmentWithFeatures = !contributors.empty();
+				const bool refresh = environmentWithFeatures && settings.EnvironmentUpdates &&
+					I.featureTime - I.environmentBuiltTime >= static_cast<double>(settings.EnvironmentRefreshSeconds);
+				const bool rebuild = !I.builtSky || !SameSky(*I.builtSky, settings.Sky) || !I.environmentValid ||
+					environmentWithFeatures != I.environmentHadFeatures || refresh;
+				environmentRebuilt = rebuild;
 				R::EnvironmentTargets targets;
 				targets.Prefiltered = graph.ImportTexture(*I.prefiltered, rebuild ? ResourceState::Undefined : ResourceState::ShaderRead);
 				targets.Irradiance = graph.ImportBuffer(*I.irradiance, rebuild ? ResourceState::Undefined : ResourceState::ShaderRead);
 				if (rebuild)
 				{
-					environment = I.environmentBuilder->Record(graph, settings.Sky, I.environmentMap, targets);
+					std::vector<R::GraphTexture> overlays;
+					if (environmentWithFeatures)
+					{
+						RenderFeatureContext context(graph, RenderFeatureStage::BeforeTemporal, featureView, settings, {}, {}, featureServices());
+						for (auto* feature : contributors)
+						{
+							// A failing contribution is dropped (with one log line); the feature itself keeps running.
+							try
+							{
+								if (const auto overlay = feature->RecordEnvironment(context, I.environmentMap.SourceSize))
+								{
+									overlays.push_back(*overlay);
+								}
+							}
+							catch (const std::exception& error)
+							{
+								I.environmentFeatureFailures.insert(feature);
+								std::cerr << "[Render] Feature '" << feature->GetName() << "' dropped from the environment: " << error.what()
+										  << '\n';
+							}
+						}
+					}
+					environment = I.environmentBuilder->Record(
+						graph, settings.Sky, I.environmentMap, targets, overlays, settings.EnvironmentFeatureAmbient);
 				}
 				else
 				{
@@ -877,7 +1221,39 @@ namespace Engine
 				graph.Export(*targets.Irradiance, ResourceState::ShaderRead);
 			}
 
+			lap("Build: Environment");
 			// --- Frame targets ----------------------------------------------------------
+			// A complete set of Forward+ targets; the main view uses the viewport, reflection
+			// probe captures small squares.
+			const auto makeTargets = [&](std::uint32_t targetWidth, std::uint32_t targetHeight, const char* prefix)
+			{
+				const auto target = [&](S::Format format, S::TextureUsage usage, const char* name)
+				{
+					S::TextureDesc textureDesc;
+					textureDesc.Extent = { targetWidth, targetHeight, 1 };
+					textureDesc.PixelFormat = format;
+					textureDesc.Usage = usage;
+					const std::string debugName = std::string(prefix) + name;
+					textureDesc.DebugName = debugName;
+					return graph.CreateTexture(textureDesc);
+				};
+				const auto attachmentSampled = S::TextureUsage::ColorAttachment | S::TextureUsage::Sampled;
+				R::ForwardPlusTargets set;
+				// Storage: the deferred local lights add to it in a compute pass.
+				set.Color = target(R::ForwardPlusRenderer::ColorFormat,
+					attachmentSampled | S::TextureUsage::TransferSource | S::TextureUsage::Storage, "Scene color");
+				set.ObjectId =
+					target(R::ForwardPlusRenderer::ObjectIdFormat, attachmentSampled | S::TextureUsage::TransferSource, "Object id");
+				set.Depth = target(R::CanonicalDepthFormat, S::TextureUsage::DepthStencilAttachment | S::TextureUsage::Sampled, "Scene depth");
+				set.Velocity = target(R::ForwardPlusRenderer::VelocityFormat, attachmentSampled, "Velocity");
+				set.Normal = target(R::ForwardPlusRenderer::NormalFormat, attachmentSampled, "Normal");
+				set.Indirect = target(R::ForwardPlusRenderer::IndirectFormat, attachmentSampled, "Indirect");
+				set.Reflectance = target(R::ForwardPlusRenderer::ReflectanceFormat, attachmentSampled, "Reflectance");
+				set.Specular = target(R::ForwardPlusRenderer::SpecularFormat, attachmentSampled, "Specular");
+				set.Clear = false;			// The sky pass clears colour and depth,
+				set.ClearAuxiliary = true;	// the opaque pass every other target.
+				return set;
+			};
 			const auto target = [&](S::Format format, S::TextureUsage usage, const char* name)
 			{
 				S::TextureDesc textureDesc;
@@ -887,63 +1263,59 @@ namespace Engine
 				textureDesc.DebugName = name;
 				return graph.CreateTexture(textureDesc);
 			};
-			const auto attachmentSampled = S::TextureUsage::ColorAttachment | S::TextureUsage::Sampled;
-			R::ForwardPlusTargets targets;
-			targets.Color = target(R::ForwardPlusRenderer::ColorFormat, attachmentSampled | S::TextureUsage::TransferSource, "Scene color");
-			targets.ObjectId =
-				target(R::ForwardPlusRenderer::ObjectIdFormat, attachmentSampled | S::TextureUsage::TransferSource, "Object id");
-			targets.Depth =
-				target(R::CanonicalDepthFormat, S::TextureUsage::DepthStencilAttachment | S::TextureUsage::Sampled, "Scene depth");
-			targets.Velocity = target(R::ForwardPlusRenderer::VelocityFormat, attachmentSampled, "Velocity");
-			targets.Normal = target(R::ForwardPlusRenderer::NormalFormat, attachmentSampled, "Normal");
-			targets.Indirect = target(R::ForwardPlusRenderer::IndirectFormat, attachmentSampled, "Indirect");
-			targets.Reflectance = target(R::ForwardPlusRenderer::ReflectanceFormat, attachmentSampled, "Reflectance");
-			targets.Specular = target(R::ForwardPlusRenderer::SpecularFormat, attachmentSampled, "Specular");
-			targets.Clear = false; // The sky pass clears them.
+			R::ForwardPlusTargets targets = makeTargets(width, height, "");
+			const bool backDepthOn =
+				draw3D && settings.ScreenSpace.Reflections.Enabled && settings.ScreenSpace.Reflections.BackFaces && I.forward->SupportsBackDepth();
+			if (backDepthOn)
+			{
+				S::TextureDesc backDesc;
+				backDesc.Extent = { width, height, 1 };
+				backDesc.PixelFormat = R::CanonicalDepthFormat;
+				backDesc.Usage = S::TextureUsage::DepthStencilAttachment | S::TextureUsage::Sampled;
+				backDesc.DebugName = "Back-face depth";
+				targets.BackDepth = graph.CreateTexture(backDesc);
+			}
 
+			lap("Build: Frame targets");
 			// --- Sky background (clears every Forward+ target) ---------------------------
+			// rayRight/rayUp are the view's right and up scaled by the half-angle tangents.
+			const auto recordSky = [&](const R::ForwardPlusTargets& skyTargets, const std::array<float, 3>& rayRight,
+									   const std::array<float, 3>& rayUp, const std::array<float, 3>& rayForward,
+									   std::uint32_t skyWidth, std::uint32_t skyHeight, const char* passName = "Sky background")
 			{
 				SkyConstants sky{};
-				const float tanY = std::tan(camera.VerticalFov * 0.5f);
-				const float tanX = tanY * camera.Aspect;
 				const bool drawSky = settings.SkyBackground;
 				const auto& s = settings.Sky;
 				const auto sun = Normalized(s.SunDirection);
 				for (int c = 0; c < 3; ++c)
 				{
-					sky.RayRight[c] = camera.Right[c] * tanX;
-					sky.RayUp[c] = camera.Up[c] * tanY;
-					sky.RayForward[c] = camera.Forward[c];
+					sky.RayRight[c] = rayRight[c];
+					sky.RayUp[c] = rayUp[c];
+					sky.RayForward[c] = rayForward[c];
 					sky.Zenith[c] = drawSky ? s.ZenithColor[c] : settings.ClearColor[c];
 					sky.Horizon[c] = drawSky ? s.HorizonColor[c] : settings.ClearColor[c];
-					sky.Ground[c] = drawSky ? s.GroundColor[c] : settings.ClearColor[c];
+					sky.Ground[c] = drawSky ? (settings.SkyBackgroundGround ? (*settings.SkyBackgroundGround)[c] : s.GroundColor[c])
+											: settings.ClearColor[c];
 					sky.SunDirection[c] = sun[c];
 					sky.SunColor[c] = drawSky ? s.SunColor[c] : 0.0f;
 				}
 				sky.RayRight[3] = drawSky ? s.Intensity * settings.EnvironmentIntensity : 1.0f;
 				sky.RayUp[3] = settings.EnvironmentRotation;
 				sky.RayForward[3] = std::max(s.SunSharpness, 1.0f);
+				sky.Ground[3] = s.GroundFalloff;
 				auto* pipeline = I.skyPipeline.get();
-				auto* layout = I.skyBackground.Layout.get();
-				(void)layout;
+				const auto set = skyTargets;
 				graph.AddPass(
-					"Sky background", S::QueueType::Graphics,
+					passName, S::QueueType::Graphics,
 					[&](R::RenderGraphBuilder& b)
 					{
-						b.Write(targets.Color, ResourceState::ColorAttachment);
-						b.Write(targets.ObjectId, ResourceState::ColorAttachment);
-						b.Write(*targets.Velocity, ResourceState::ColorAttachment);
-						b.Write(*targets.Normal, ResourceState::ColorAttachment);
-						b.Write(*targets.Indirect, ResourceState::ColorAttachment);
-						b.Write(*targets.Reflectance, ResourceState::ColorAttachment);
-						b.Write(*targets.Specular, ResourceState::ColorAttachment);
-						b.Write(targets.Depth, ResourceState::DepthStencilWrite);
+						b.Write(set.Color, ResourceState::ColorAttachment);
+						b.Write(set.Depth, ResourceState::DepthStencilWrite);
 					},
-					[targets, sky, pipeline, width, height](R::RenderCommandContext& c)
+					[set, sky, pipeline, skyWidth, skyHeight](R::RenderCommandContext& c)
 					{
-						std::array<S::RenderingAttachmentDesc, 7> colors{};
-						const std::array<R::GraphTexture, 7> textures{ targets.Color, targets.ObjectId, *targets.Velocity, *targets.Normal,
-							*targets.Indirect, *targets.Reflectance, *targets.Specular };
+						std::array<S::RenderingAttachmentDesc, 1> colors{};
+						const std::array<R::GraphTexture, 1> textures{ set.Color };
 						for (std::size_t i = 0; i < colors.size(); ++i)
 						{
 							colors[i].View = &c.CreateView(textures[i]);
@@ -952,17 +1324,29 @@ namespace Engine
 						}
 						S::TextureViewDesc depthView;
 						depthView.PixelFormat = R::CanonicalDepthFormat;
-						const S::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), S::LoadOp::Clear,
-							S::StoreOp::Store, R::DepthClearValue(R::CanonicalDepthConvention), 0 };
+						const S::DepthStencilAttachmentDesc depth{ &c.CreateView(set.Depth, depthView), S::LoadOp::Clear, S::StoreOp::Store,
+							R::DepthClearValue(R::CanonicalDepthConvention), 0 };
 						auto& list = c.Commands();
-						list.BeginRendering({ colors, &depth, { width, height } });
+						list.BeginRendering({ colors, &depth, { skyWidth, skyHeight } });
 						list.BindGraphicsPipeline(*pipeline);
-						list.SetViewport({ 0, 0, float(width), float(height) });
-						list.SetScissor({ 0, 0, width, height });
+						list.SetViewport({ 0, 0, float(skyWidth), float(skyHeight) });
+						list.SetScissor({ 0, 0, skyWidth, skyHeight });
 						list.PushConstants(S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&sky, 1)));
 						list.Draw(3);
 						list.EndRendering();
 					});
+			};
+			{
+				const float tanY = std::tan(camera.VerticalFov * 0.5f);
+				const float tanX = tanY * camera.Aspect;
+				std::array<float, 3> right{};
+				std::array<float, 3> up{};
+				for (int c = 0; c < 3; ++c)
+				{
+					right[c] = camera.Right[c] * tanX;
+					up[c] = camera.Up[c] * tanY;
+				}
+				recordSky(targets, right, up, camera.Forward, width, height);
 			}
 
 			R::RenderViewDesc viewDesc;
@@ -974,8 +1358,12 @@ namespace Engine
 			stats.Rendered3D = draw3D;
 			stats.PageSlots = static_cast<std::uint32_t>(pageSlots.size());
 			std::optional<R::ForwardPlusGraphResources> forwardResources;
+			std::optional<R::ScreenSpaceFrame::ProbeInputs> probeInputs;
+			stats.ReflectionProbes = 0;
+			stats.ReflectionProbeFaces = 0;
 			if (draw3D)
 			{
+				lap("Build: Sky and scene setup");
 				// --- Shadows ------------------------------------------------------------
 				std::optional<R::ShadowGraphResources> shadowResources;
 				if (settings.Shadows && !input.ShadowCasters.empty())
@@ -1004,11 +1392,25 @@ namespace Engine
 						shadowFrame.Bindless = &I.bindless->GetTable();
 						shadowFrame.Plan = plan.get();
 						shadowFrame.ZeroUnusedCommands = R::NeedsZeroedCommands(I.drawPath);
+						std::optional<R::GraphTexture> cachedAtlas;
+						if (settings.ShadowCascadeCache && I.shadows->SupportsPersistentAtlas())
+						{
+							cachedAtlas = I.PlanShadowCache(graph, *plan, shadowFrame, camera, input.ShadowCasters);
+						}
+						else
+						{
+							I.shadowCache.clear();
+						}
 						shadowResources = I.shadows->Record(graph, shadowFrame);
+						if (cachedAtlas)
+						{
+							graph.Export(*cachedAtlas, ResourceState::ShaderRead);
+						}
 						stats.ShadowViews = plan->Stats.Views;
 					}
 				}
 
+				lap("Build: Shadows");
 				// --- Visibility and clusters --------------------------------------------
 				R::VisibilityFrameDesc visibilityFrame;
 				visibilityFrame.View = R::BuildGpuViewRecord(viewDesc);
@@ -1033,6 +1435,7 @@ namespace Engine
 				clusterView.Projection = camera.Projection;
 				const auto clusterResources = I.clusters->Record(graph, lightResources, grid, clusterView);
 
+				lap("Build: Visibility and clusters");
 				// --- Clustered Forward+ -------------------------------------------------
 				R::ForwardPlusFrame forwardFrame;
 				forwardFrame.Scene = &sceneResources;
@@ -1055,9 +1458,171 @@ namespace Engine
 				forwardFrame.View.EnvironmentIntensity = settings.EnvironmentIntensity;
 				forwardFrame.View.EnvironmentRotation = settings.EnvironmentRotation;
 				forwardFrame.View.DebugMode = settings.Debug;
+				forwardFrame.Transparent = settings.Transparent;
+				forwardFrame.DeferLocalLights = settings.DeferredLocalLights;
 				forwardResources = I.forward->Record(graph, forwardFrame, targets);
+
+				lap("Build: Forward+");
+				// --- Reflection probes (the local layer of the reflection hierarchy) --------
+				// A few cube faces per frame (the scheduler's budget) are rendered like the main
+				// view, from the probe, into small targets (lit with the global environment, so
+				// probes never see each other: no recursion), resolved into the probe atlas with
+				// their distances, and the probes that changed are prefiltered.
+				const auto& probeSettings = settings.ReflectionProbes;
+				if (I.probeRenderer && probeSettings.Enabled && !input.ReflectionProbes.empty())
+				{
+					if (I.probeRenderer->Ensure(probeSettings.Resolution, probeSettings.MaxProbes))
+					{
+						I.probeScheduler.Reset();
+						I.pendingFilters.clear();
+						I.filteredKey.assign(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
+					}
+					const auto plan = I.probeScheduler.Update(
+						input.ReflectionProbes, camera.Position, I.frameIndex + 1, I.featureTime, probeSettings, input.ReflectionMovers);
+					const auto atlases = I.probeRenderer->Import(graph);
+					const std::uint32_t size = I.probeRenderer->GetResolution();
+					for (const auto& capture : plan.Captures)
+					{
+						const auto& probe = input.ReflectionProbes[capture.Probe];
+						const float nearPlane = std::max(probe.CaptureNear, 0.01f);
+						const auto faceView = R::ReflectionProbes::CubeFaceView(capture.Face, probe.Position);
+						const auto faceProjection = R::ReflectionProbes::CubeFaceProjection(nearPlane);
+						const auto faceViewProjection = R::MultiplyRowMajor(faceProjection, faceView);
+						const auto basis = R::ReflectionProbes::CubeFace(capture.Face);
+						auto faceTargets = makeTargets(size, size, "Probe ");
+						// The view's right is the cube's mirrored axis (CubeFaceView).
+						recordSky(faceTargets, { -basis.Right[0], -basis.Right[1], -basis.Right[2] }, basis.Up, basis.Forward, size, size,
+							"Probe sky");
+
+						R::RenderViewDesc faceViewDesc;
+						faceViewDesc.ViewProjection = faceViewProjection;
+						faceViewDesc.CameraPosition = probe.Position;
+						faceViewDesc.LodScale = float(size) * 0.5f;
+						R::VisibilityFrameDesc faceVisibility;
+						faceVisibility.View = R::BuildGpuViewRecord(faceViewDesc);
+						faceVisibility.View.ExcludedObjectId = probe.OwnerObjectId; // The owner does not see itself.
+						faceVisibility.IndexPages = indexPages;
+						faceVisibility.ReadStats = false;
+						faceVisibility.ZeroUnusedCommands = R::NeedsZeroedCommands(I.drawPath);
+						const auto faceVisible = I.probeVisibility->Record(graph, sceneResources, geometryResources, faceVisibility);
+
+						R::ClusterGridDesc faceGrid = grid;
+						faceGrid.ViewportWidth = size;
+						faceGrid.ViewportHeight = size;
+						faceGrid.Near = nearPlane;
+						faceGrid.Far = std::max(settings.ClusterFar, nearPlane * 2.0f);
+						R::ClusterView faceClusterView;
+						faceClusterView.View = faceView;
+						faceClusterView.Projection = faceProjection;
+						const auto faceClusters = I.clusters->Record(graph, lightResources, faceGrid, faceClusterView);
+
+						R::ForwardPlusFrame faceFrame = forwardFrame;
+						faceFrame.Visibility = &faceVisible;
+						faceFrame.Clusters = &faceClusters;
+						faceFrame.View.ViewProjection = faceViewProjection;
+						faceFrame.View.PreviousViewProjection = faceViewProjection;
+						faceFrame.View.Jitter = { 0.0f, 0.0f };
+						faceFrame.View.CameraPosition = probe.Position;
+						faceFrame.View.CameraForward = basis.Forward;
+						faceFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
+						faceFrame.Transparent = false; // Glass is not worth a sort per captured face.
+						faceFrame.DebugName = "Probe Forward+"; // Its own rows in the GPU timings.
+						I.forward->Record(graph, faceFrame, faceTargets);
+						R::ReflectionProbeRenderer::CaptureSky captureSky;
+						if (environment && settings.SkyBackground)
+						{
+							captureSky.Environment = environment->Prefiltered;
+							captureSky.Scale = settings.EnvironmentIntensity;
+							captureSky.Rotation = settings.EnvironmentRotation;
+						}
+						I.probeRenderer->RecordResolve(
+							graph, atlases, capture.Slot, capture.Face, faceTargets.Color, faceTargets.Depth, nearPlane, captureSky);
+					}
+					// Prefilter a bounded number of probes a frame (each is 6 faces x every mip):
+					// probes not yet filtered for their current occupant first, then the ones
+					// whose faces changed longest ago.
+					I.filteredKey.resize(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
+					for (const auto slot : plan.Filter)
+					{
+						if (std::find(I.pendingFilters.begin(), I.pendingFilters.end(), slot) == I.pendingFilters.end())
+						{
+							I.pendingFilters.push_back(slot);
+						}
+					}
+					const auto keyOf = [&](std::uint32_t slot) -> std::uint64_t
+					{
+						for (const auto& active : plan.Active)
+						{
+							if (active.Slot == slot)
+							{
+								return input.ReflectionProbes[active.Probe].Key;
+							}
+						}
+						return ~std::uint64_t(0);
+					};
+					const auto slotUnfiltered = [&](std::uint32_t slot, std::uint64_t key)
+					{
+						return slot < I.filteredKey.size() && I.filteredKey[slot] != key;
+					};
+					std::stable_sort(I.pendingFilters.begin(), I.pendingFilters.end(),
+						[&](std::uint32_t a, std::uint32_t b)
+						{
+							const bool urgentA = slotUnfiltered(a, keyOf(a));
+							const bool urgentB = slotUnfiltered(b, keyOf(b));
+							return urgentA && !urgentB;
+						});
+					const std::uint32_t budget = std::max(probeSettings.FiltersPerFrame, 1u);
+					std::uint32_t filtered = 0;
+					while (!I.pendingFilters.empty() && filtered < budget)
+					{
+						const std::uint32_t slot = I.pendingFilters.front();
+						I.pendingFilters.erase(I.pendingFilters.begin());
+						if (slot >= I.filteredKey.size())
+						{
+							continue;
+						}
+						I.probeRenderer->RecordFilter(graph, atlases, slot, probeSettings.PrefilterSamples);
+						I.filteredKey[slot] = keyOf(slot);
+						++filtered;
+					}
+					graph.Export(atlases.Source, ResourceState::ShaderRead);
+					graph.Export(atlases.Prefiltered, ResourceState::ShaderRead);
+					stats.ReflectionProbeFaces = static_cast<std::uint32_t>(plan.Captures.size());
+					if (!plan.Active.empty())
+					{
+						std::vector<R::GpuReflectionProbeRecord> records;
+						for (const auto& active : plan.Active)
+						{
+							const auto& probe = input.ReflectionProbes[active.Probe];
+							if (active.Slot >= I.filteredKey.size() || I.filteredKey[active.Slot] != probe.Key)
+							{
+								continue; // Not prefiltered for this probe yet.
+							}
+							R::GpuReflectionProbeRecord record;
+							for (int c = 0; c < 3; ++c)
+							{
+								record.PositionRadius[c] = probe.Position[c];
+							}
+							record.PositionRadius[3] = std::max(probe.InfluenceRadius, 1.0e-3f);
+							record.Params[0] = std::max(probe.BlendDistance, 1.0e-3f);
+							record.Params[1] = float(active.Slot);
+							record.Params[2] = active.Age;
+							record.Params[3] = float(probe.OwnerObjectId);
+							records.push_back(record);
+						}
+						R::ScreenSpaceFrame::ProbeInputs inputs;
+						inputs.Cubes = atlases.Prefiltered;
+						inputs.Records = graph.CreateUpload(std::as_bytes(std::span(records)), "Reflection probe records", S::BufferUsage::Storage, 16);
+						inputs.ObjectId = targets.ObjectId;
+						inputs.Count = static_cast<std::uint32_t>(records.size());
+						inputs.MipCount = I.probeRenderer->GetMipCount();
+						probeInputs = inputs;
+						stats.ReflectionProbes = inputs.Count;
+					}
+				}
 			}
 
+			lap("Build: Reflection probes");
 			// --- Particles (simulation; drawn after the composite, below) ---------------
 			stats.ParticleEmitters = I.particles->GetStats().LiveEmitters;
 			std::optional<R::ParticleGraphResources> simulatedParticles;
@@ -1072,6 +1637,7 @@ namespace Engine
 				particlesPending = true;
 			}
 
+			lap("Build: Particles");
 			// --- Screen-space effects, TAA and post -------------------------------------
 			R::ScreenSpaceFrame ssFrame;
 			ssFrame.Color = targets.Color;
@@ -1090,35 +1656,22 @@ namespace Engine
 				ssFrame.Settings.Reflections.Enabled = false;
 			}
 			ssFrame.NoiseFrame = static_cast<std::uint32_t>(I.frameIndex);
+			ssFrame.BackDepth = targets.BackDepth;
+			ssFrame.Probes = probeInputs;
+			// Reflections of reflections: rays read the previous resolved frame (which holds
+			// its reflections) at the hit's reprojected position. Only with TAA, whose
+			// history it is, and Record below reuses the same import.
+			if (temporalOn && ssFrame.Settings.Reflections.Enabled && ssFrame.Settings.Reflections.History && targets.Velocity)
+			{
+				ssFrame.History = I.temporal->ImportPreviousOutput(graph, width, height);
+				if (ssFrame.History)
+				{
+					ssFrame.Velocity = *targets.Velocity;
+				}
+			}
 			const auto screen = I.screenSpace->Record(graph, ssFrame);
 
 			// Render features (gameplay-added passes) run at three stages of the frame.
-			RenderFeatureView featureView;
-			featureView.View = camera.View;
-			featureView.Projection = camera.Projection;
-			featureView.ViewProjection = viewProjection;
-			featureView.Position = camera.Position;
-			featureView.Forward = camera.Forward;
-			featureView.Right = camera.Right;
-			featureView.Up = camera.Up;
-			featureView.TanHalfFovY = std::tan(camera.VerticalFov * 0.5f);
-			featureView.TanHalfFovX = featureView.TanHalfFovY * camera.Aspect;
-			featureView.Width = width;
-			featureView.Height = height;
-			{
-				const auto& sun = settings.Sky.SunDirection;
-				const float length = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
-				for (int c = 0; c < 3; ++c)
-				{
-					featureView.SunDirection[c] = length > 0.0f ? sun[c] / length : (c == 1 ? 1.0f : 0.0f);
-					featureView.SunColor[c] = settings.Sky.SunColor[c] * settings.Sky.Intensity;
-				}
-			}
-			const float frameSeconds = std::clamp(std::isfinite(input.DeltaTime) ? input.DeltaTime : 0.0f, 0.0f, 1.0f);
-			I.featureTime += frameSeconds;
-			featureView.Time = static_cast<float>(I.featureTime);
-			featureView.DeltaTime = frameSeconds;
-			featureView.Frame = static_cast<std::uint32_t>(I.frameIndex);
 			const auto runFeatures = [&](RenderFeatureStage stage, R::GraphTexture color)
 			{
 				std::vector<RenderFeature*> ordered;
@@ -1138,29 +1691,7 @@ namespace Engine
 					{
 						return a->GetOrder() < b->GetOrder();
 					});
-				RenderFeatureContext::Services services;
-				services.LoadCompute = [this](std::string_view name) -> const RuntimeComputeProgram&
-				{
-					auto& slot = impl->featurePrograms[std::string(name)];
-					if (!slot)
-					{
-						slot = std::make_unique<RuntimeComputeProgram>(impl->shaders.LoadCompute(name));
-					}
-					return *slot;
-				};
-				services.GetSampler = [this](std::string_view kind) -> S::Sampler&
-				{
-					if (kind == "LinearRepeat")
-					{
-						return *impl->linearRepeat;
-					}
-					if (kind == "PointClamp")
-					{
-						return *impl->presentSampler;
-					}
-					return *impl->linearClamp;
-				};
-				RenderFeatureContext context(graph, stage, featureView, settings, color, targets.Depth, std::move(services));
+				RenderFeatureContext context(graph, stage, featureView, settings, color, targets.Depth, featureServices());
 				for (auto* feature : ordered)
 				{
 					// A broken feature (missing program, wrong bindings) is switched off with a
@@ -1222,6 +1753,7 @@ namespace Engine
 				}
 			}
 
+			lap("Build: Screen space, TAA, features and post");
 			// --- UI -----------------------------------------------------------------------
 			stats.UiQuads = 0;
 			if (settings.Ui && !input.Ui.empty() && input.GlyphAtlas)
@@ -1263,6 +1795,7 @@ namespace Engine
 				}
 			}
 
+			lap("Build: UI");
 			// --- Capture and presentation -------------------------------------------------
 			if (input.Capture)
 			{
@@ -1324,8 +1857,22 @@ namespace Engine
 				graph.Export(postOutput, ResourceState::ShaderRead);
 			}
 
+			lap("Build: capture and presentation");
 			const auto compiled = graph.Compile();
+			lap("Graph compile");
 			completion = executor.Execute(compiled, device.GetSubmit(frame));
+			lap("Record and submit");
+			{
+				const auto& t = executor.GetLastExecuteTimings();
+				stats.RecordPhases = { { "Executor: wait", t.Wait }, { "Executor: allocate transients", t.Allocate },
+					{ "Executor: stage uploads", t.Stage }, { "Executor: query pool", t.Queries }, { "Executor: record passes", t.Record },
+					{ "Executor: submit", t.Submit } };
+				stats.RecordPasses.clear();
+				for (const auto& pass : t.Passes)
+				{
+					stats.RecordPasses.push_back({ pass.Name, pass.Nanoseconds.value_or(0.0) * 1.0e-6 });
+				}
+			}
 		}
 		catch (...)
 		{
@@ -1384,11 +1931,18 @@ namespace Engine
 		{
 			I.builtSky = settings.Sky;
 			I.environmentValid = true;
+			if (environmentRebuilt)
+			{
+				I.environmentBuiltTime = I.featureTime;
+				I.environmentHadFeatures = environmentWithFeatures;
+			}
 		}
 		I.previousViewProjection = viewProjection;
 		++I.frameIndex;
 
+		lap("Commit uploads");
 		stats.Presented = device.Present(frame);
+		lap("Present");
 
 		if (captureReadback)
 		{
@@ -1443,6 +1997,7 @@ namespace Engine
 		{
 			return false;
 		}
+		impl->environmentFeatureFailures.erase(feature);
 		features.erase(found);
 		return true;
 	}

@@ -3,6 +3,7 @@
 #include "Engine/Systems/Text/GlyphAtlas.h"
 #include "Engine/Systems/Text/TextLayout.h"
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -35,6 +36,25 @@ namespace Swim::UI
 		float B = 0.0f;
 		float A = 0.0f; // Input is straight alpha, linear RGB. Paint output is premultiplied.
 	};
+
+	// A UiColor from display (sRGB-encoded) values, as colour pickers and design tools
+	// give them: UI colours are linear, so a dark 0.05 written directly is displayed as
+	// 0.25 (grey). Use this (or UiSrgbHex) for authored colours.
+	inline float UiSrgbToLinear(float value)
+	{
+		return value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+	}
+
+	inline UiColor UiSrgb(float r, float g, float b, float a = 1.0f)
+	{
+		return { UiSrgbToLinear(r), UiSrgbToLinear(g), UiSrgbToLinear(b), a };
+	}
+
+	// 0xRRGGBB (sRGB) with straight alpha.
+	inline UiColor UiSrgbHex(std::uint32_t rgb, float a = 1.0f)
+	{
+		return UiSrgb(float((rgb >> 16) & 0xffu) / 255.0f, float((rgb >> 8) & 0xffu) / 255.0f, float(rgb & 0xffu) / 255.0f, a);
+	}
 
 	struct UiEdges
 	{

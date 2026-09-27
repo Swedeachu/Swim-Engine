@@ -17,6 +17,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPipelineCache.h"
 
 #include <array>
+#include <map>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -84,10 +85,27 @@ namespace Swim::RhiVulkan
 		VmaVulkanFunctions AllocatorFunctions{};
 		VmaAllocator Allocator = nullptr;
 		std::atomic<std::uint32_t> SamplerCount{ 0 };
+		// Reset, reusable one-set descriptor pools by their creation signature (flags, then
+		// type/count pairs): descriptor tables created every frame reuse them instead of a
+		// vkCreateDescriptorPool/vkDestroyDescriptorPool pair each.
+		mutable std::mutex DescriptorPoolMutex;
+		mutable std::map<std::vector<std::uint32_t>, std::vector<VkDescriptorPool>> FreeDescriptorPools;
 
 		~VulkanDeviceState()
 		{
 			RetireLostVulkanDevice(*this);
+			if (Device.device != VK_NULL_HANDLE && Dispatch.vkDestroyDescriptorPool != nullptr)
+			{
+				for (auto& [signature, pools] : FreeDescriptorPools)
+				{
+					(void)signature;
+					for (const VkDescriptorPool pool : pools)
+					{
+						Dispatch.vkDestroyDescriptorPool(Device.device, pool, nullptr);
+					}
+				}
+			}
+			FreeDescriptorPools.clear();
 			DestroyVulkanPipelineCache(*this);
 			if (Allocator != nullptr)
 			{

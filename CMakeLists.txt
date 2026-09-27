@@ -490,6 +490,23 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(LensFlare SOURCE Source/Shaders/Slang/Features/LensFlare.slang)
 	swim_add_runtime_shader(VolumetricCloudsMarch SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang)
 	swim_add_runtime_shader(VolumetricCloudsComposite SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_COMPOSITE=1)
+	# The camera (Engine::DepthOfField, Engine::CameraLens, Engine::FilmSensor, CameraLook presets).
+	swim_add_runtime_shader(DepthOfFieldPrepare SOURCE Source/Shaders/Slang/Features/DepthOfField.slang DEFINES DOF_PREPARE=1)
+	swim_add_runtime_shader(DepthOfFieldGather SOURCE Source/Shaders/Slang/Features/DepthOfField.slang DEFINES DOF_GATHER=1)
+	swim_add_runtime_shader(DepthOfField SOURCE Source/Shaders/Slang/Features/DepthOfField.slang)
+	swim_add_runtime_shader(CameraLensHalation SOURCE Source/Shaders/Slang/Features/CameraLens.slang DEFINES CAMERA_LENS_HALATION=1)
+	swim_add_runtime_shader(CameraLens SOURCE Source/Shaders/Slang/Features/CameraLens.slang)
+	swim_add_runtime_shader(FilmSensor SOURCE Source/Shaders/Slang/Features/FilmSensor.slang)
+	swim_add_runtime_shader(GravitationalLensing SOURCE Source/Shaders/Slang/Features/GravitationalLensing.slang)
+	# Back-face depth (screen-space reflection thickness) from the Forward+ source.
+	swim_add_runtime_shader(ForwardBackDepth SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang DEFINES FORWARD_DEPTH_ONLY=1 FORWARD_BACK_DEPTH=1)
+	swim_add_runtime_shader(VolumetricCloudsEnvironment SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_ENVIRONMENT=1)
+	# Reflection probes (Engine/Systems/Renderer/Reflections): capture resolve and a
+	# prefilter that keeps the captured distance in alpha.
+	swim_add_runtime_shader(ReflectionProbeResolve SOURCE Source/Shaders/Slang/Reflections/ReflectionProbeResolve.slang)
+	swim_add_runtime_shader(ReflectionProbePrefilter SOURCE Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang DEFINES PREFILTER_KEEP_ALPHA=1)
+	# Folds feature contributions (the clouds above) into the environment cube.
+	swim_add_runtime_shader(EnvironmentOverlay SOURCE Source/Shaders/Slang/Environment/EnvironmentOverlay.slang)
 	swim_add_slang_program(SwimForwardDepth
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
@@ -502,6 +519,17 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_PREPASSED=1
 	)
+	swim_add_slang_program(SwimForwardOpaqueDeferred
+		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+		DEFINES FORWARD_PREPASSED=1 FORWARD_DEFERRED_LOCAL=1
+	)
+	swim_add_slang_program(SwimForwardLocalLights
+		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardLocalLights.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
 	# Shadow maps (Phase 16, items 70-72): depth-only and alpha-tested casters.
 	swim_add_slang_program(SwimShadowDepth
 		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
@@ -513,6 +541,11 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES SHADOW_ALPHA_TEST=1
+	)
+	swim_add_slang_program(SwimShadowClear
+		SOURCE Source/Shaders/Slang/Shadows/ShadowClear.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Post-processing (items 73-74): histogram, exposure, bloom and the composite.
 	swim_add_slang_program(SwimPostHistogram
@@ -668,9 +701,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			"${SwimForwardTransparent_SPIRV}" "${SwimForwardTransparent_REFLECTION}"
 			"${SwimForwardDepth_SPIRV}" "${SwimForwardDepth_REFLECTION}"
 			"${SwimForwardOpaquePrepassed_SPIRV}" "${SwimForwardOpaquePrepassed_REFLECTION}"
+			"${SwimForwardOpaqueDeferred_SPIRV}" "${SwimForwardOpaqueDeferred_REFLECTION}"
+			"${SwimForwardLocalLights_SPIRV}" "${SwimForwardLocalLights_REFLECTION}"
 			"${SwimForwardTransparentSort_SPIRV}" "${SwimForwardTransparentSort_REFLECTION}"
 			"${SwimShadowDepth_SPIRV}" "${SwimShadowDepth_REFLECTION}"
 			"${SwimShadowMasked_SPIRV}" "${SwimShadowMasked_REFLECTION}"
+			"${SwimShadowClear_SPIRV}" "${SwimShadowClear_REFLECTION}"
 			"${SwimPostHistogram_SPIRV}" "${SwimPostHistogram_REFLECTION}"
 			"${SwimPostExposure_SPIRV}" "${SwimPostExposure_REFLECTION}"
 			"${SwimPostBloomDownsample_SPIRV}" "${SwimPostBloomDownsample_REFLECTION}"
@@ -725,6 +761,7 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang
 			Source/Shaders/Slang/Environment/EnvironmentIrradiance.slang
 			Source/Shaders/Slang/Environment/EnvironmentBrdfLut.slang
+			Source/Shaders/Slang/Environment/EnvironmentOverlay.slang
 			Source/Shaders/Slang/RhiSmoke/PbrGallery.slang
 			Source/Shaders/Slang/Lights/GpuLightRecords.slang
 			Source/Shaders/Slang/RhiSmoke/GpuLightProbe.slang
@@ -739,8 +776,10 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 			Source/Shaders/Slang/ForwardPlus/ForwardPlusRecords.slang
 			Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 			Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
+			Source/Shaders/Slang/ForwardPlus/ForwardLocalLights.slang
 			Source/Shaders/Slang/Shadows/ShadowRecords.slang
 			Source/Shaders/Slang/Shadows/ShadowDepth.slang
+			Source/Shaders/Slang/Shadows/ShadowClear.slang
 			Source/Shaders/Slang/PostProcess/PostProcessRecords.slang
 			Source/Shaders/Slang/PostProcess/PostHistogram.slang
 			Source/Shaders/Slang/PostProcess/PostExposure.slang
@@ -814,6 +853,8 @@ file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.h
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.cpp
 	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.h
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.cpp
+	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/

@@ -5,6 +5,8 @@
 #include "Engine/Components/UiCanvas.h"
 #include "Engine/Input/InputSystem.h"
 #include "Engine/Runtime/SimulationClock.h"
+#include "Engine/Runtime/FrameProfiler.h"
+#include "Engine/Runtime/RenderToggles.h"
 #include "Engine/Runtime/UiRuntime.h"
 #include "Engine/Systems/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Runtime/FrameRenderer.h"
@@ -14,10 +16,12 @@
 #include "Engine/Systems/Scene/SceneCommandBuffer.h"
 #include "Engine/Systems/UI/UiTheme.h"
 #include "Game/Behaviors/BallShooter.h"
+#include "Game/Behaviors/ReflectionLabFloor.h"
 #include "Game/Scenes/Sandbox.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <sstream>
 
@@ -27,9 +31,11 @@ namespace Game
 
 	namespace
 	{
-		constexpr UiColor PanelColor{ 0.03f, 0.037f, 0.055f, 0.9f };
-		constexpr UiColor PanelBorder{ 0.2f, 0.45f, 0.95f, 0.45f };
-		constexpr UiColor AccentText{ 0.4f, 0.68f, 1.0f, 1.0f };
+		// Authored in sRGB (UI colours are linear): near-black panels, a full-strength
+		// accent border and accent text.
+		const UiColor PanelColor = UiSrgbHex(0x090c12, 0.95f);
+		const UiColor PanelBorder = UiSrgbHex(0x1f7aff, 0.85f);
+		const UiColor AccentText = UiSrgbHex(0x5ea2ff);
 
 		std::string Lower(std::string text)
 		{
@@ -112,6 +118,94 @@ namespace Game
 		return toggle;
 	}
 
+	void SandboxHud::Bind(UiNodeId node, std::function<float()> get, bool check)
+	{
+		synced.push_back({ node, std::move(get), check });
+	}
+
+	UiNodeId SandboxHud::SliderFor(UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals)
+	{
+		float* target = &value;
+		const auto slider = AddSlider(parent, label, min, max, value, decimals,
+			[target](float v)
+			{
+				*target = v;
+			});
+		Bind(
+			slider,
+			[target]
+			{
+				return *target;
+			},
+			false);
+		return slider;
+	}
+
+	UiNodeId SandboxHud::CheckFor(UiNodeId parent, const std::string& label, bool& value)
+	{
+		bool* target = &value;
+		const auto box = AddCheckbox(parent, label, value,
+			[target](bool on)
+			{
+				*target = on;
+			});
+		Bind(
+			box,
+			[target]
+			{
+				return *target ? 1.0f : 0.0f;
+			},
+			true);
+		return box;
+	}
+
+	UiNodeId SandboxHud::DropdownFor(UiNodeId parent, const std::string& label, const std::vector<std::string>& options,
+		std::function<std::uint32_t()> get, std::function<void(std::uint32_t)> set)
+	{
+		CreateLabel(*document, parent, label);
+		const auto dropdown = CreateDropdown(*document, parent, options, static_cast<std::int32_t>(get()));
+		bindings.OnValue(dropdown.Root,
+			[set = std::move(set)](float value)
+			{
+				if (value >= 0.0f)
+				{
+					set(static_cast<std::uint32_t>(value));
+				}
+			});
+		Bind(
+			dropdown.Root,
+			[get = std::move(get)]
+			{
+				return static_cast<float>(get());
+			},
+			false);
+		return dropdown.Root;
+	}
+
+	void SandboxHud::SyncControls()
+	{
+		if (!document)
+		{
+			return;
+		}
+		for (const auto& control : synced)
+		{
+			const float value = control.Get();
+			if (control.Check)
+			{
+				const auto state = value != 0.0f ? UiCheckState::Checked : UiCheckState::Unchecked;
+				if (document->GetChecked(control.Node) != state)
+				{
+					document->SetChecked(control.Node, state);
+				}
+			}
+			else if (std::abs(document->GetValue(control.Node) - value) > 1.0e-6f * std::max(1.0f, std::abs(value)))
+			{
+				document->SetValue(control.Node, value);
+			}
+		}
+	}
+
 	bool SandboxHud::Command(const std::string& command)
 	{
 		return scene->DispatchCommand(command);
@@ -165,7 +259,7 @@ namespace Game
 		style.AnchorMax = { 0.0f, 1.0f };
 		style.Pivot = { 0.0f, 0.0f };
 		style.Margin = { 12, 12, 0, 12 };
-		style.Width = UiLength::Pixels(380.0f);
+		style.Width = UiLength::Pixels(490.0f);
 		style.Flow = UiFlow::Column;
 		style.Padding = { 14, 12, 12, 12 };
 		style.Gap = 8;
@@ -185,7 +279,14 @@ namespace Game
 		}
 		CreateLabel(*document, titleRow, ui.GetFonts(), "sandbox", 16.0f);
 
-		tabs = CreateRadioGroup(*document, panel, { "Simulation", "Rendering", "Scene" }, 0, UiOrientation::Horizontal);
+		tabs = CreateRadioGroup(*document, panel, {}, -1, UiOrientation::Horizontal);
+		const std::array<const char*, 4> tabNames{ "Simulation", "Rendering", "Camera/Post", "Scene" };
+		static_assert(tabNames.size() == Sandbox::SandboxTabCount);
+		for (std::size_t i = 0; i < tabNames.size(); ++i)
+		{
+			tabOptions[i] = AddRadioOption(*document, tabs, tabNames[i]);
+		}
+		document->SetValue(tabs, 0.0f);
 		bindings.OnValue(tabs,
 			[this](float value)
 			{
@@ -204,7 +305,8 @@ namespace Game
 		}
 		BuildSimulation(sections[0]);
 		BuildRendering(sections[1]);
-		BuildScene(sections[2]);
+		BuildCamera(sections[2]);
+		BuildScene(sections[3]);
 		ShowSection(0);
 	}
 
@@ -331,57 +433,69 @@ namespace Game
 		}
 		auto& s = *render->Settings;
 		CreateHeading(*document, parent, "Features");
-		AddCheckbox(parent, "Shadows (cascades, spot, point)", s.Shadows,
-			[&s](bool on)
+		CheckFor(parent, "Shadows (cascades, spot, point)", s.Shadows);
+		CheckFor(parent, "Sky background", s.SkyBackground);
+		CheckFor(parent, "Image-based lighting", s.Environment);
+		CheckFor(parent, "Temporal anti-aliasing", s.TemporalAntiAliasing);
+		CheckFor(parent, "Ambient occlusion (GTAO)", s.ScreenSpace.AmbientOcclusion.Enabled);
+		CheckFor(parent, "Height fog", s.ScreenSpace.Fog.Enabled); // Keeps the scene's own (tropical) fog settings.
+
+		// Reflections: screen space -> local probes -> the environment (sandbox.ssr,
+		// sandbox.ssrhistory, sandbox.ssrbackfaces, sandbox.probes, sandbox.reflectdebug).
+		CreateHeading(*document, parent, "Reflections");
+		CheckFor(parent, "Screen-space reflections", s.ScreenSpace.Reflections.Enabled);
+		CheckFor(parent, "SSR history (temporal)", s.ScreenSpace.Reflections.History);
+		CheckFor(parent, "SSR back-face thickness", s.ScreenSpace.Reflections.BackFaces);
+		CheckFor(parent, "Reflection probes", s.ReflectionProbes.Enabled);
+		AddSlider(parent, "Probe faces per frame", 1.0f, 12.0f, float(s.ReflectionProbes.FacesPerFrame), 0,
+			[&s](float value)
 			{
-				s.Shadows = on;
+				s.ReflectionProbes.FacesPerFrame = static_cast<std::uint32_t>(std::lround(value));
 			});
-		AddCheckbox(parent, "Sky background", s.SkyBackground,
-			[&s](bool on)
+		DropdownFor(
+			parent, "Probe resolution (per face)", { "64", "128", "256" },
+			[&s]
 			{
-				s.SkyBackground = on;
-			});
-		AddCheckbox(parent, "Image-based lighting", s.Environment,
-			[&s](bool on)
+				return s.ReflectionProbes.Resolution >= 256u ? 2u : (s.ReflectionProbes.Resolution >= 128u ? 1u : 0u);
+			},
+			[&s](std::uint32_t value)
 			{
-				s.Environment = on;
+				s.ReflectionProbes.Resolution = 64u << std::min(value, 2u);
 			});
-		AddCheckbox(parent, "Temporal anti-aliasing", s.TemporalAntiAliasing,
-			[&s](bool on)
+		DropdownFor(
+			parent, "Reflection debug view", { "Off", "Sources (SSR / probe / environment)", "Probe age" },
+			[&s]
 			{
-				s.TemporalAntiAliasing = on;
-			});
-		AddCheckbox(parent, "Ambient occlusion (GTAO)", s.ScreenSpace.AmbientOcclusion.Enabled,
-			[&s](bool on)
+				return static_cast<std::uint32_t>(s.ScreenSpace.Reflections.Debug);
+			},
+			[&s](std::uint32_t value)
 			{
-				s.ScreenSpace.AmbientOcclusion.Enabled = on;
+				s.ScreenSpace.Reflections.Debug = static_cast<Swim::Render::ReflectionDebugView>(std::min(value, 2u));
 			});
-		AddCheckbox(parent, "Screen-space reflections", s.ScreenSpace.Reflections.Enabled,
-			[&s](bool on)
-			{
-				s.ScreenSpace.Reflections.Enabled = on;
-			});
-		AddCheckbox(parent, "Height fog", s.ScreenSpace.Fog.Enabled,
-			[&s](bool on)
-			{
-				s.ScreenSpace.Fog.Enabled = on; // Keeps the scene's own (tropical) fog settings.
-			});
+		if (sandbox && sandbox->GetLabFloor())
+		{
+			auto* floor = sandbox->GetLabFloor();
+			DropdownFor(
+				parent, "Reflection lab floor", { "Checker", "Green", "Rainbow (animated)", "Removed" },
+				[floor]
+				{
+					return static_cast<std::uint32_t>(floor->GetMode());
+				},
+				[floor](std::uint32_t value)
+				{
+					floor->SetMode(static_cast<ReflectionLabFloor::Mode>(std::min(value, 3u)));
+				});
+		}
 		// Render features added by the sandbox (Engine/Systems/Renderer/Features).
 		if (sandbox)
 		{
 			CreateHeading(*document, parent, "Atmosphere");
 			if (auto* clouds = sandbox->GetClouds())
 			{
-				AddCheckbox(parent, "Volumetric clouds", clouds->Enabled,
-					[clouds](bool on)
-					{
-						clouds->Enabled = on;
-					});
-				AddSlider(parent, "Cloud coverage", 0.0f, 1.0f, clouds->Settings.Coverage, 2,
-					[clouds](float value)
-					{
-						clouds->Settings.Coverage = value;
-					});
+				CheckFor(parent, "Volumetric clouds", clouds->Enabled);
+				SliderFor(parent, "Cloud coverage", 0.0f, 1.0f, clouds->Settings.Coverage, 2);
+				CheckFor(parent, "Clouds in reflections (environment)", clouds->Settings.Environment);
+				CheckFor(parent, "Clouds change the ambient light", s.EnvironmentFeatureAmbient);
 			}
 			if (auto* shafts = sandbox->GetSunShafts())
 			{
@@ -410,59 +524,43 @@ namespace Game
 					});
 			}
 		}
-		AddCheckbox(parent, "Bloom", s.Post.Bloom.Enabled,
-			[&s](bool on)
-			{
-				s.Post.Bloom.Enabled = on;
-			});
-		AddCheckbox(parent, "GPU particles", s.Particles,
-			[&s](bool on)
-			{
-				s.Particles = on;
-			});
+		CheckFor(parent, "GPU particles", s.Particles);
 
-		CreateHeading(*document, parent, "Tone and exposure");
-		CreateLabel(*document, parent, "Tone mapper");
-		const auto toneMapper = CreateDropdown(
-			*document, parent, { "Clamp", "Reinhard", "ACES", "PBR Neutral" }, static_cast<std::int32_t>(s.Post.ToneMap.Operator));
-		bindings.OnValue(toneMapper.Root,
-			[&s](float value)
+		if (sandbox && sandbox->GetLensing())
+		{
+			// The black hole (bookmark 9): its lens on the GravitationalLensing feature.
+			auto* lensing = sandbox->GetLensing();
+			CreateHeading(*document, parent, "Black hole");
+			CheckFor(parent, "Black hole (lensing + gas)", lensing->Enabled);
+			const auto lensSlider = [&](const std::string& label, float min, float max, int decimals, float Engine::GravitationalLensing::Lens::*field)
 			{
-				if (value >= 0.0f)
+				const auto get = [lensing, field]
 				{
-					s.Post.ToneMap.Operator = static_cast<Swim::Render::ToneMapper>(static_cast<int>(value));
-				}
-			});
-		CreateLabel(*document, parent, "Exposure");
-		const auto exposure = CreateDropdown(*document, parent, { "Manual", "Automatic" }, static_cast<std::int32_t>(s.Post.Exposure.Mode));
-		bindings.OnValue(exposure.Root,
-			[&s](float value)
-			{
-				if (value >= 0.0f)
+					return lensing->Lenses.empty() ? 0.0f : lensing->Lenses.front().*field;
+				};
+				const auto slider = AddSlider(parent, label, min, max, get(), decimals,
+					[lensing, field](float value)
+					{
+						for (auto& lens : lensing->Lenses)
+						{
+							lens.*field = value;
+						}
+					});
+				Bind(slider, get, false);
+			};
+			lensSlider("Gas density", 0.0f, 4.0f, 2, &Engine::GravitationalLensing::Lens::GasDensity);
+			lensSlider("Gas brightness", 0.0f, 12.0f, 1, &Engine::GravitationalLensing::Lens::GasBrightness);
+			lensSlider("Gas orbit speed (rad/s at 3 Rs)", 0.0f, 8.0f, 1, &Engine::GravitationalLensing::Lens::GasSpeed);
+			lensSlider("Bending strength", 0.0f, 3.0f, 2, &Engine::GravitationalLensing::Lens::Strength);
+			AddSlider(parent, "Electron-shell rings", 0.0f, 3.0f, 3.0f, 0,
+				[lensing](float value)
 				{
-					s.Post.Exposure.Mode = static_cast<Swim::Render::ExposureMode>(static_cast<int>(value));
-				}
-			});
-		AddSlider(parent, "Exposure compensation (EV)", -4.0f, 4.0f, s.Post.Exposure.Compensation, 1,
-			[&s](float value)
-			{
-				s.Post.Exposure.Compensation = value;
-			});
-		AddSlider(parent, "Manual EV100", -2.0f, 16.0f, s.Post.Exposure.ManualEv100, 1,
-			[&s](float value)
-			{
-				s.Post.Exposure.ManualEv100 = value;
-			});
-		AddSlider(parent, "Bloom intensity", 0.0f, 0.2f, s.Post.Bloom.Intensity, 3,
-			[&s](float value)
-			{
-				s.Post.Bloom.Intensity = value;
-			});
-		AddSlider(parent, "Saturation", 0.0f, 2.0f, s.Post.Grading.Saturation, 2,
-			[&s](float value)
-			{
-				s.Post.Grading.Saturation = value;
-			});
+					for (auto& lens : lensing->Lenses)
+					{
+						lens.Orbits = static_cast<std::uint32_t>(std::lround(value));
+					}
+				});
+		}
 
 		CreateHeading(*document, parent, "Sun and sky");
 		AddSlider(parent, "Sun elevation", 2.0f, 89.0f, sandbox ? sandbox->GetSunElevation() : 40.0f, 0,
@@ -481,11 +579,7 @@ namespace Game
 					sandbox->SetSunAngles(sandbox->GetSunElevation(), value);
 				}
 			});
-		AddSlider(parent, "Environment intensity", 0.0f, 3.0f, s.EnvironmentIntensity, 2,
-			[&s](float value)
-			{
-				s.EnvironmentIntensity = value;
-			});
+		SliderFor(parent, "Environment intensity", 0.0f, 3.0f, s.EnvironmentIntensity, 2);
 
 		CreateHeading(*document, parent, "Debug");
 		const auto debug = CreateDropdown(*document, parent, { "Lit", "Cluster light heatmap" }, static_cast<std::int32_t>(s.Debug));
@@ -493,6 +587,165 @@ namespace Game
 			[&s](float value)
 			{
 				s.Debug = value >= 1.0f ? Swim::Render::ForwardPlusDebugMode::ClusterHeatmap : Swim::Render::ForwardPlusDebugMode::None;
+			});
+
+		// Every profiling switch (Engine::RenderToggles: renderer passes, render features,
+		// scene parts), live; and a 240-frame capture whose summary shows below.
+		if (render->Toggles)
+		{
+			CreateHeading(*document, parent, "Profiling switches");
+			const auto row = CreateRow(*document, parent);
+			AddButton(row, "All on", "Every switch back on",
+				[this]
+				{
+					render->Toggles->Set("all", true);
+				});
+			AddButton(row, "Profile 240 frames", "Measures every CPU zone and GPU pass (also: profile <frames> [warmup] [csv])",
+				[this]
+				{
+					Command("profile 240 30");
+					profilePending = true;
+				});
+			profileLabel = CreateLabel(*document, parent, "No capture yet.");
+			Wrap(*document, profileLabel);
+			auto* toggles = render->Toggles;
+			for (const auto& toggle : toggles->List())
+			{
+				const std::string name = toggle.Name;
+				const auto box = AddCheckbox(parent, name, toggle.Get(),
+					[toggles, name](bool on)
+					{
+						toggles->Set(name, on);
+					});
+				CreateTooltip(*document, box, toggle.Description, 0.45f);
+				Bind(
+					box,
+					[toggles, name]
+					{
+						return toggles->Get(name).value_or(false) ? 1.0f : 0.0f;
+					},
+					true);
+			}
+		}
+	}
+
+	void SandboxHud::BuildCamera(UiNodeId parent)
+	{
+		if (!render->Settings)
+		{
+			return;
+		}
+		auto& s = *render->Settings;
+		auto& post = s.Post;
+
+		// Presets derive every value below from a physical camera description
+		// (Engine::CameraLook); each stays editable afterwards ("sandbox.camera <n>").
+		if (sandbox)
+		{
+			CreateHeading(*document, parent, "Camera preset");
+			std::vector<std::string> names;
+			for (std::uint32_t p = 0; p < Engine::CameraPresetCount; ++p)
+			{
+				names.emplace_back(Engine::CameraPresetName(static_cast<Engine::CameraPreset>(p)));
+			}
+			DropdownFor(
+				parent, "Look", names,
+				[this]
+				{
+					return static_cast<std::uint32_t>(sandbox->GetCameraPreset());
+				},
+				[this](std::uint32_t value)
+				{
+					if (static_cast<Engine::CameraPreset>(value) != sandbox->GetCameraPreset())
+					{
+						sandbox->ApplyCameraPreset(static_cast<Engine::CameraPreset>(std::min(value, Engine::CameraPresetCount - 1)));
+					}
+				});
+		}
+		if (auto* cameras = scene->GetCameraSystem())
+		{
+			const auto fov = AddSlider(parent, "Field of view (vertical, degrees)", 20.0f, 110.0f, cameras->GetCamera().GetFieldOfView(), 0,
+				[cameras](float value)
+				{
+					cameras->GetCamera().SetFieldOfView(value);
+				});
+			Bind(
+				fov,
+				[cameras]
+				{
+					return cameras->GetCamera().GetFieldOfView(); // The fly camera's zoom changes it too.
+				},
+				false);
+		}
+
+		if (sandbox && sandbox->GetDepthOfField())
+		{
+			auto* dof = sandbox->GetDepthOfField();
+			CreateHeading(*document, parent, "Depth of field");
+			CheckFor(parent, "Depth of field (thin lens)", dof->Enabled);
+			SliderFor(parent, "Aperture (f-number)", 0.7f, 22.0f, dof->Settings.FNumber, 1);
+			SliderFor(parent, "Focus distance (m, 0 = autofocus)", 0.0f, 60.0f, dof->Settings.FocusDistance, 1);
+			SliderFor(parent, "Anamorphic squeeze (oval bokeh)", 1.0f, 2.0f, dof->Settings.AnamorphicSqueeze, 2);
+			SliderFor(parent, "Max blur (px at 1080p)", 2.0f, 32.0f, dof->Settings.MaxBlurPixels, 0);
+		}
+		if (sandbox && sandbox->GetCameraLens())
+		{
+			auto& lens = *sandbox->GetCameraLens();
+			CreateHeading(*document, parent, "Lens");
+			CheckFor(parent, "Lens effects", lens.Enabled);
+			SliderFor(parent, "Distortion (+ barrel, - pincushion)", -0.3f, 0.3f, lens.Settings.Distortion, 3);
+			SliderFor(parent, "Fisheye", 0.0f, 1.0f, lens.Settings.Fisheye, 2);
+			SliderFor(parent, "Chromatic aberration", 0.0f, 0.02f, lens.Settings.ChromaticAberration, 4);
+			SliderFor(parent, "Corner softness (px)", 0.0f, 6.0f, lens.Settings.Softness, 2);
+			SliderFor(parent, "Vignette (cos^4 exponent)", 0.0f, 2.0f, lens.Settings.Vignette, 2);
+			SliderFor(parent, "Halation", 0.0f, 0.5f, lens.Settings.Halation, 3);
+			SliderFor(parent, "Halation threshold", 0.5f, 8.0f, lens.Settings.HalationThreshold, 2);
+			SliderFor(parent, "Filter red", 0.5f, 1.2f, lens.Settings.Filter[0], 2);
+			SliderFor(parent, "Filter green", 0.5f, 1.2f, lens.Settings.Filter[1], 2);
+			SliderFor(parent, "Filter blue", 0.5f, 1.2f, lens.Settings.Filter[2], 2);
+		}
+		if (sandbox && sandbox->GetFilmSensor())
+		{
+			auto& sensor = *sandbox->GetFilmSensor();
+			CreateHeading(*document, parent, "Sensor / film");
+			CheckFor(parent, "Grain and sharpening", sensor.Enabled);
+			SliderFor(parent, "Grain", 0.0f, 0.08f, sensor.Settings.Grain, 3);
+			SliderFor(parent, "Grain size (px at 1080p)", 0.5f, 4.0f, sensor.Settings.GrainSize, 1);
+			SliderFor(parent, "Grain colour", 0.0f, 1.0f, sensor.Settings.GrainColor, 2);
+			SliderFor(parent, "Sharpening", 0.0f, 1.0f, sensor.Settings.Sharpen, 2);
+		}
+
+		CreateHeading(*document, parent, "Exposure and bloom");
+		DropdownFor(
+			parent, "Exposure", { "Manual", "Automatic" },
+			[&post]
+			{
+				return static_cast<std::uint32_t>(post.Exposure.Mode);
+			},
+			[&post](std::uint32_t value)
+			{
+				post.Exposure.Mode = static_cast<Swim::Render::ExposureMode>(std::min(value, 1u));
+			});
+		SliderFor(parent, "Exposure compensation (EV)", -4.0f, 4.0f, post.Exposure.Compensation, 1);
+		SliderFor(parent, "Manual EV100", -2.0f, 16.0f, post.Exposure.ManualEv100, 1);
+		CheckFor(parent, "Bloom", post.Bloom.Enabled);
+		SliderFor(parent, "Bloom intensity", 0.0f, 0.2f, post.Bloom.Intensity, 3);
+		SliderFor(parent, "Bloom threshold", 0.2f, 4.0f, post.Bloom.Threshold, 2);
+
+		CreateHeading(*document, parent, "Colour and tone");
+		SliderFor(parent, "White balance temperature", -100.0f, 100.0f, post.Grading.Temperature, 0);
+		SliderFor(parent, "White balance tint", -100.0f, 100.0f, post.Grading.Tint, 0);
+		SliderFor(parent, "Contrast", 0.5f, 1.6f, post.Grading.Contrast, 2);
+		SliderFor(parent, "Saturation", 0.0f, 2.0f, post.Grading.Saturation, 2);
+		DropdownFor(
+			parent, "Tone mapper", { "Clamp", "Reinhard", "ACES", "PBR Neutral" },
+			[&post]
+			{
+				return static_cast<std::uint32_t>(post.ToneMap.Operator);
+			},
+			[&post](std::uint32_t value)
+			{
+				post.ToneMap.Operator = static_cast<Swim::Render::ToneMapper>(std::min(value, 3u));
 			});
 	}
 
@@ -635,7 +888,7 @@ namespace Game
 		style.Width = UiLength::Pixels(360.0f);
 		style.Padding = { 12, 10, 12, 10 };
 		style.Background = PanelColor;
-		style.BorderWidth = 1.0f;
+		style.BorderWidth = 1.5f;
 		style.BorderColor = PanelBorder;
 		style.CornerRadius = 8;
 		diagnostics = CreateStyledNode(*document, document->GetRoot(), style);
@@ -651,8 +904,8 @@ namespace Game
 		style.Pivot = { 0.5f, 1.0f };
 		style.Offset = { 0.0f, -10.0f };
 		style.Padding = { 12, 6, 12, 6 };
-		style.Background = { 0.03f, 0.037f, 0.055f, 0.78f };
-		style.BorderWidth = 1.0f;
+		style.Background = UiSrgbHex(0x090c12, 0.9f);
+		style.BorderWidth = 1.5f;
 		style.BorderColor = PanelBorder;
 		style.CornerRadius = 8;
 		help = CreateStyledNode(*document, document->GetRoot(), style);
@@ -719,8 +972,8 @@ namespace Game
 		if (const auto* clock = scene->GetClock())
 		{
 			SetLabelText(*document, clockLabel,
-				"Simulated " + Fixed(clock->GetSimulatedSeconds(), 1) + " s, " + std::to_string(clock->GetFixedStepCount()) + " steps @ " +
-					Fixed(1.0 / clock->GetFixedDelta(), 0) + " Hz, x" + Fixed(clock->GetTimeScale(), 2));
+				Fixed(clock->GetSimulatedSeconds(), 1) + " s  |  " + std::to_string(clock->GetFixedStepCount()) + " steps @ " +
+					Fixed(1.0 / clock->GetFixedDelta(), 0) + " Hz  |  x" + Fixed(clock->GetTimeScale(), 2));
 		}
 		if (sandbox)
 		{
@@ -844,6 +1097,12 @@ namespace Game
 			document->SetValue(bookmarkDropdown, static_cast<float>(sandbox->GetLastBookmark()));
 		}
 		bindings.Process(*document);
+		SyncControls();
+		if (profilePending && render && render->Profiler && !render->Profiler->IsCapturing())
+		{
+			profilePending = false;
+			SetLabelText(*document, profileLabel, Engine::FrameProfiler::Summary(render->Profiler->GetReport(), 6));
+		} // After Process: a value the user just edited is already stored.
 		if (sandbox)
 		{
 			// The HUD and every world canvas (info panel, zone labels) follow the UI switch.
@@ -872,7 +1131,7 @@ namespace Game
 			entityTimer = 0.0f;
 			RefreshEntities(false);
 		}
-		if (entityList && section == 2)
+		if (entityList && section == 3)
 		{
 			document->EnsureLayout();
 			entityList->Update();

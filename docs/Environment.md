@@ -6,7 +6,7 @@ This covers critical-path items **61** (environment/IBL) and **62** (the PBR ima
 Renderer/Environment
   EnvironmentMath        cube-face table, texel solid angles, Hammersley, GGX sampling,
                          split-sum BRDF integral, prefilter lod, SH9, environment rotation
-  ProceduralSky          analytic HDR sky (built-in source) + its push constants
+  ProceduralSky          analytic HDR sky (built-in source) + its push constants; GroundFalloff sets how fast the view below the horizon turns into GroundColor
   CubeImage, Image2D     CPU cube/2D images with Vulkan-exact sampling (seamless trilinear)
   EnvironmentReference   CPU definition of every GPU pass + EnvironmentProbe (the lookup)
   EnvironmentBuilder     graph-scheduled compute passes (below)
@@ -36,9 +36,12 @@ Renderer/Materials/StandardPbr   Resolve / EvaluateEnvironment / ShadeResolved (
 | `RecordMips` | `EnvironmentDownsample.slang` | mips 1.. as 2×2 box averages | one pass per mip, 6 faces |
 | `RecordFromSource` prefilter | `EnvironmentPrefilter.slang` | GGX-prefiltered cube, N = V = R, filtered importance sampling (Colbert & Křivánek) | one pass per mip, 6 faces |
 | `RecordFromSource` irradiance | `EnvironmentIrradiance.slang` | 9 × `float4` SH coefficients of irradiance / π | one 64-thread group |
+| overlays (optional) | `EnvironmentOverlay.slang` | mip 0 = mip 0 × overlay.a + overlay.rgb | one pass per overlay, 6 faces |
 | `RecordBrdfLut` | `EnvironmentBrdfLut.slang` | split-sum (A, B) LUT, height-correlated Smith | one pass |
 
-`Record(graph, sky, map)` runs sky, mips, prefilter and irradiance in order.
+`Record(graph, sky, map, targets, overlays)` runs sky, overlays, mips, prefilter and irradiance in order.
+
+- **Overlays.** An overlay is a `SourceSize` × 6·`SourceSize` RGBA16Float atlas (`OverlayDesc`; face *f* in rows *f*·size..), premultiplied, alpha = transmittance. It is folded into the sky before the mips and the prefilter, so every roughness level and the SH irradiance see it. The overlay program is optional in `EnvironmentBuilderDesc`; recording overlays without it throws. The renderer fills overlays from render features that draw into the sky (`RenderFeature::ContributesToEnvironment`): volumetric clouds show up in reflections and ambient light. While a feature contributes, the environment is re-recorded every `RenderSettings::EnvironmentRefreshSeconds` (0.5 s) from the camera position, because the clouds drift. `RenderSettings::EnvironmentFeatureAmbient` (default off) decides whether they also change the ambient light: off, `Record(..., overlaysInIrradiance = false)` records a second, clear sky cube and projects the SH irradiance from it, so bright clouds do not lift every shadow.
 
 - **External sources.** `RecordFromSource` accepts any complete source cube. For an uploaded environment, write mip 0 and call `RecordMips` first.
 - **Persistent outputs.** `EnvironmentTargets` lets callers pass imported textures or buffers in place of the transient outputs.
@@ -119,7 +122,7 @@ Set `SWIM_PBR_GALLERY_DUMP=<directory>` when running the native smoke to write e
 | `Render.Environment.Math` (9) | Face table round trips; solid angles sum to 4π; Hammersley stratification; GGX samples follow the normalized D; tangent frames; the split-sum matches brute-force directional albedo; lod mapping; rotation; SH orthonormality and exact convolution to band 2 |
 | `Render.Environment.CubeImage` (2) | Mip layout, box filter, nearest/trilinear rules, seamless edges and corners |
 | `Render.Environment.Sky/Prefilter/BrdfLut/Shading/Probe` (6) | Sky continuity and constants; prefilter preserves uniform radiance and converges to the brute-force GGX lobe; LUT texel mapping; furnace energy; `Shade` equivalence; lookup rotation, intensity and roughness lod; `StandardPbr::EnvironmentSpecularWeight` × prefiltered radiance is exactly the specular part of the split-sum IBL (item 76, the reflectance screen-space reflections are weighted by) |
-| `Render.EnvironmentBuilder` (3) | Pass and dispatch structure, push constants per face and mip, view shapes (cube, 2D array, per-face 2D), targets, culling, contract violations |
+| `Render.EnvironmentBuilder` (4) | Pass and dispatch structure, push constants per face and mip, view shapes (cube, 2D array, per-face 2D), targets, culling, contract violations; overlays run between the sky and the mips, one dispatch per face, and need the overlay program and a matching atlas |
 | `Render.PbrGallery` (1) | The CPU gallery meets the expectations; image dumps |
 | `ShaderCompiler.EnvironmentLayout` (2) | Compiled programs match their C++ contracts (it caught a `uint3` std430 padding bug before any GPU run) |
 | `RHI.Vulkan.StorageTextureCreation` | Cube-compatible storage validation |

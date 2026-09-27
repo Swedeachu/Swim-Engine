@@ -9,7 +9,8 @@ namespace Swim::Render::Environment
 	{
 		const auto d = Normalize(direction);
 		const float up = std::clamp(d[1], -1.0f, 1.0f);
-		const float blend = 1.0f - (1.0f - std::abs(up)) * (1.0f - std::abs(up));
+		const float falloff = up >= 0.0f ? 2.0f : std::max(GroundFalloff, 1.0f);
+		const float blend = 1.0f - std::pow(1.0f - std::abs(up), falloff);
 		const auto& end = up >= 0.0f ? ZenithColor : GroundColor;
 		const auto sun = Normalize(SunDirection);
 		const float lobe = std::pow(std::max(Dot(d, sun), 0.0f), SunSharpness);
@@ -42,6 +43,7 @@ namespace Swim::Render::Environment
 			constants.SunColor[c] = sky.SunColor[c];
 		}
 		constants.Zenith[3] = sky.Intensity;
+		constants.Ground[3] = sky.GroundFalloff;
 		constants.SunDirection[3] = sky.SunSharpness;
 		constants.Face = face;
 		constants.Size = size;

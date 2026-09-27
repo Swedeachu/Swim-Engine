@@ -17,6 +17,11 @@ namespace Swim::Render::Environment
 		Float3 SunDirection{ 0.15f, 0.3f, 1.0f }; // Toward the sun; normalized on use.
 		Float3 SunColor{ 12.0f, 11.0f, 9.5f };
 		float SunSharpness = 48.0f;
+		// How fast the view below the horizon turns from HorizonColor to GroundColor:
+		// blend = 1 - (1 - |d.y|)^GroundFalloff (above the horizon the exponent is 2). Large
+		// values put a floor-like ground right under the horizon, as a scene on a big
+		// ground plane sees it (reflections of the ground stay ground coloured).
+		float GroundFalloff = 2.0f;
 		float Intensity = 1.0f; // Scales everything.
 
 		Float3 Evaluate(const Float3& direction) const;
@@ -30,7 +35,7 @@ namespace Swim::Render::Environment
 	{
 		float Zenith[4];		// w: intensity.
 		float Horizon[4];		// w: unused.
-		float Ground[4];		// w: unused.
+		float Ground[4];		// w: GroundFalloff.
 		float SunDirection[4];	// Normalized; w: sharpness.
 		float SunColor[4];		// w: unused.
 		std::uint32_t Face = 0; // Layer being written.

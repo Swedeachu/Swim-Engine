@@ -193,9 +193,9 @@ SWIM_TEST("Engine.FlyCamera", "WheelScalesSpeedOnlyWhileLookingWithinLimits")
 
 SWIM_TEST("Engine.ProceduralMeshes", "EveryShapeIsClosedWoundOutwardAndTangentSpaceIsValid")
 {
-	const std::array<Meshes::MeshData, 7> shapes{ Meshes::MakeBox(), Meshes::MakePlane(2.0f, 4, 2.0f), Meshes::MakeSphere(),
-		Meshes::MakeCylinder(), Meshes::MakeCone(), Meshes::MakeTorus(), Meshes::MakeCapsule() };
-	const std::array<const char*, 7> names{ "box", "plane", "sphere", "cylinder", "cone", "torus", "capsule" };
+	const std::array<Meshes::MeshData, 8> shapes{ Meshes::MakeBox(), Meshes::MakePlane(2.0f, 4, 2.0f), Meshes::MakeSphere(),
+		Meshes::MakeCylinder(), Meshes::MakeCone(), Meshes::MakeTorus(), Meshes::MakeCapsule(), Meshes::MakeAnnulus(1.0f, 2.5f, 32, 3) };
+	const std::array<const char*, 8> names{ "box", "plane", "sphere", "cylinder", "cone", "torus", "capsule", "annulus" };
 	for (std::size_t i = 0; i < shapes.size(); ++i)
 	{
 		SWIM_CHECK_MESSAGE(IndicesInRange(shapes[i]), names[i]);
@@ -345,4 +345,69 @@ SWIM_TEST("Game.TentacleAnimator", "PaletteIsARigidChainOfEqualSegments")
 	}
 	SWIM_CHECK(difference > 1e-3f);
 	SWIM_CHECK(Game::TentacleAnimator::ComputePalette(0, height, 0.0f, 0.0f).empty());
+}
+
+SWIM_TEST("Engine.FlyCamera", "WheelZoomEasesTheFieldOfViewAndMiddleClickResetsIt")
+{
+	Camera camera;
+	camera.SetFieldOfView(60.0f);
+	FlyCameraController::Settings settings;
+	FlyCameraController::ZoomState zoom;
+
+	// Nothing happens without input.
+	FlyCameraController::ApplyZoom(camera, zoom, settings, 0.0f, false, 0.016f);
+	SWIM_CHECK_NEAR(camera.GetFieldOfView(), 60.0f, 1e-4f);
+
+	// Two notches in: the target is 1.15^2, reached smoothly (moving, never overshooting).
+	FlyCameraController::ApplyZoom(camera, zoom, settings, 2.0f, false, 0.016f);
+	const float target = settings.ZoomStep * settings.ZoomStep;
+	SWIM_CHECK_NEAR(zoom.Target, target, 1e-5f);
+	const float first = camera.GetFieldOfView();
+	SWIM_CHECK(first < 60.0f && first > 60.0f / target);
+	float previous = first;
+	for (int i = 0; i < 120; ++i)
+	{
+		FlyCameraController::ApplyZoom(camera, zoom, settings, 0.0f, false, 0.016f);
+		SWIM_CHECK(camera.GetFieldOfView() <= previous + 1e-5f);
+		previous = camera.GetFieldOfView();
+	}
+	SWIM_CHECK_NEAR(camera.GetFieldOfView(), 60.0f / target, 1e-3f);
+
+	// Zoom is clamped both ways.
+	FlyCameraController::ApplyZoom(camera, zoom, settings, 100.0f, false, 0.016f);
+	SWIM_CHECK_NEAR(zoom.Target, settings.MaxZoom, 1e-4f);
+	FlyCameraController::ApplyZoom(camera, zoom, settings, -200.0f, false, 0.016f);
+	SWIM_CHECK_NEAR(zoom.Target, settings.MinZoom, 1e-4f);
+
+	// Middle click eases back to the default view.
+	FlyCameraController::ApplyZoom(camera, zoom, settings, 0.0f, true, 0.016f);
+	SWIM_CHECK_NEAR(zoom.Target, 1.0f, 1e-6f);
+	for (int i = 0; i < 200; ++i)
+	{
+		FlyCameraController::ApplyZoom(camera, zoom, settings, 0.0f, false, 0.016f);
+	}
+	SWIM_CHECK_NEAR(camera.GetFieldOfView(), 60.0f, 1e-3f);
+
+	// A field of view set elsewhere becomes the new default.
+	camera.SetFieldOfView(75.0f);
+	FlyCameraController::ApplyZoom(camera, zoom, settings, 0.0f, false, 0.016f);
+	SWIM_CHECK_NEAR(camera.GetFieldOfView(), 75.0f, 1e-3f);
+	SWIM_CHECK_NEAR(zoom.BaseFieldOfView, 75.0f, 1e-3f);
+}
+
+SWIM_TEST("Engine.ProceduralMeshes", "TheAnnulusIsAFlatRingBetweenItsRadii")
+{
+	const auto ring = Meshes::MakeAnnulus(1.0f, 2.5f, 32, 3);
+	SWIM_CHECK_EQUAL(ring.Vertices.size(), std::size_t(33 * 4)); // A seam column for u = 1.
+	SWIM_CHECK_EQUAL(ring.Indices.size(), std::size_t(32 * 3 * 6));
+	for (const auto& vertex : ring.Vertices)
+	{
+		const float r = std::hypot(vertex.Position[0], vertex.Position[2]);
+		SWIM_CHECK(r >= 1.0f - 1e-4f && r <= 2.5f + 1e-4f);
+		SWIM_CHECK(vertex.Position[1] == 0.0f && vertex.Normal[1] == 1.0f);
+		// v runs inner -> outer.
+		SWIM_CHECK(std::abs(vertex.TexCoord0[1] - (r - 1.0f) / 1.5f) < 1e-4f);
+	}
+	SWIM_CHECK_NEAR(ring.BoundsMax()[0], 2.5f, 1e-3f);
+	SWIM_CHECK_NEAR(ring.BoundsMin()[2], -2.5f, 1e-3f);
 }

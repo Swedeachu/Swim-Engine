@@ -10,7 +10,9 @@ namespace Engine
 	// Coverage and a cumulus height profile, lit by the sun (shadow march, Beer-Lambert,
 	// powder, two-lobe phase) and the sky's ambient colors, marched at a reduced
 	// resolution and composited over the sky before TAA (which resolves the dithering).
-	// Wind scrolls the noise. Programs: VolumetricCloudsMarch, VolumetricCloudsComposite.
+	// Wind scrolls the noise. The clouds are also marched into the environment cube
+	// (reflections, ambient light) when Settings.Environment is on. Programs:
+	// VolumetricCloudsMarch, VolumetricCloudsComposite, VolumetricCloudsEnvironment.
 	class VolumetricClouds final : public RenderFeature
 	{
 	  public:
@@ -35,6 +37,8 @@ namespace Engine
 			std::uint32_t ShadowSteps = 4;					// Sun shadow steps per sample.
 			float ShadowStepLength = 70.0f;					// Meters.
 			float ResolutionScale = 0.5f;					// March resolution relative to the viewport (0.25..1).
+			bool Environment = true;						// Also draw the clouds into the environment cube.
+			std::uint32_t EnvironmentSteps = 64;			// March steps per environment texel.
 		};
 
 		SettingsData Settings;
@@ -45,7 +49,21 @@ namespace Engine
 
 		void Record(RenderFeatureContext& context) override;
 
+		bool ContributesToEnvironment() const override;
+
+		std::optional<Swim::Render::GraphTexture> RecordEnvironment(RenderFeatureContext& context, std::uint32_t faceSize) override;
+
 	  private:
+		struct Params
+		{
+			std::array<float, 4> Forward, Right, Up, Camera, SunDirection, SunColor, Layer, Wind, AmbientTop, AmbientBottom, Lighting;
+			std::uint32_t Size[4];
+			std::uint32_t Output[4];
+		};
+
+		bool Visible() const;
+		Params MakeParams(const RenderFeatureContext& context, float radianceScale) const;
+
 		std::array<float, 3> windOffset{ 0, 0, 0 };
 	};
 } // namespace Engine

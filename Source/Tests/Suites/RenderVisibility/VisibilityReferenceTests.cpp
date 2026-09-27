@@ -164,6 +164,26 @@ SWIM_TEST("Render.Visibility", "CullingCountsLiveRowsAndSkipsUndrawableOnes")
 	SWIM_CHECK_EQUAL(result.Stats.Visible, 3u);
 }
 
+SWIM_TEST("Render.Visibility", "CaptureViewsCullTheirExcludedObject")
+{
+	// A reflection probe's capture view excludes its owner (ObjectId + 1) and nothing else.
+	Scene scene;
+	const auto mesh = scene.AddMesh({ 0.0f });
+	scene.Add(mesh, 0, 0); // ObjectId 0.
+	scene.Add(mesh, 1, 1); // ObjectId 1.
+	const VisibilityBinLayout bins(std::vector<std::uint32_t>{ 16, 16 }, 1);
+	std::vector<GpuLodState> lods;
+	auto view = OrthoView();
+	SWIM_CHECK_EQUAL(view.ExcludedObjectId, 0u);
+	SWIM_CHECK_EQUAL(scene.Run(view, bins, lods).Stats.Visible, 2u);
+	view.ExcludedObjectId = 2; // Object 1.
+	const auto result = scene.Run(view, bins, lods);
+	SWIM_CHECK_EQUAL(result.Stats.Visible, 1u);
+	SWIM_CHECK_EQUAL(result.Stats.NotDrawable, 1u);
+	SWIM_REQUIRE_EQUAL(result.Bins[0].size(), 1u);
+	SWIM_CHECK_EQUAL(result.Bins[0][0].Record.InstanceRow, 0u);
+}
+
 SWIM_TEST("Render.Visibility", "ShadowCasterViewsSkipRowsThatDoNotCastShadows")
 {
 	Scene scene;

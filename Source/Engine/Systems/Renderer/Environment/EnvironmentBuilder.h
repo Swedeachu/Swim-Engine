@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace Swim::Render
@@ -25,6 +26,8 @@ namespace Swim::Render
 		EnvironmentProgram Prefilter;  // EnvironmentPrefilter.slang
 		EnvironmentProgram Irradiance; // EnvironmentIrradiance.slang
 		EnvironmentProgram BrdfLut;	   // EnvironmentBrdfLut.slang
+		// Optional (EnvironmentOverlay.slang): needed only to record overlays.
+		EnvironmentProgram Overlay;
 		// Linear min/mag/mip, clamp-to-edge: the prefilter reads the source through it.
 		Rhi::Sampler* Sampler = nullptr;
 		std::string DebugName = "Environment";
@@ -64,11 +67,19 @@ namespace Swim::Render
 		std::vector<GraphPass> RecordMips(RenderGraph& graph, GraphTexture cube) const;
 		// Prefiltered cube + SH irradiance from a complete source cube
 		// (EnvironmentSourceMipCount mips, Sampled, RGBA16Float).
-		EnvironmentGraphResources RecordFromSource(
-			RenderGraph& graph, GraphTexture source, const EnvironmentMapDesc& desc, const EnvironmentTargets& targets = {}) const;
-		// RecordSky followed by RecordFromSource.
+		// irradianceSource, when given, is the (equally complete) cube the SH irradiance is
+		// projected from instead of the source.
+		EnvironmentGraphResources RecordFromSource(RenderGraph& graph, GraphTexture source, const EnvironmentMapDesc& desc,
+			const EnvironmentTargets& targets = {}, std::optional<GraphTexture> irradianceSource = {}) const;
+		// RecordSky followed by RecordFromSource. Each overlay (OverlayDesc(desc.SourceSize):
+		// face f of the cube in rows f * size.., premultiplied rgb, alpha = transmittance) is
+		// folded into the sky's mip 0 in order, cube = cube * a + rgb, before the mips and the
+		// prefilter: features that draw into the sky (volumetric clouds) show up in
+		// reflections and ambient light. Overlays need the Overlay program. With
+		// overlaysInIrradiance false they reach only the prefiltered (specular) cube: the
+		// SH irradiance is projected from a second, clear sky cube.
 		EnvironmentGraphResources Record(RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& desc,
-			const EnvironmentTargets& targets = {}) const;
+			const EnvironmentTargets& targets = {}, std::span<const GraphTexture> overlays = {}, bool overlaysInIrradiance = true) const;
 		// The split-sum LUT (environment independent; build once and keep it). The
 		// target, when given, must be a size x size RGBA16Float Storage texture.
 		GraphTexture RecordBrdfLut(
@@ -79,12 +90,14 @@ namespace Swim::Render
 		static Rhi::TextureDesc PrefilteredCubeDesc(const EnvironmentMapDesc& desc);
 		static Rhi::TextureDesc BrdfLutDesc(std::uint32_t size);
 		static Rhi::BufferDesc IrradianceBufferDesc();
+		// A size x 6 * size RGBA16Float overlay atlas (Sampled | Storage).
+		static Rhi::TextureDesc OverlayDesc(std::uint32_t size);
 		// Throws std::invalid_argument when the sizes break the contract above.
 		static void Validate(const EnvironmentMapDesc& desc);
 
 	  private:
 		GraphTexture RecordSky(RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& desc,
-			std::vector<GraphPass>& passes) const;
+			std::vector<GraphPass>& passes, std::span<const GraphTexture> overlays = {}) const;
 
 		EnvironmentBuilderDesc desc;
 	};

@@ -57,7 +57,9 @@ namespace Swim::Render
 				continue;
 			}
 			++stats.Tested;
-			if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= inputs.Meshes.size())
+			const std::uint32_t excluded = inputs.View.ExcludedObjectId;
+			if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= inputs.Meshes.size() ||
+				(excluded != 0u && instance.ObjectId + 1u == excluded))
 			{
 				++stats.NotDrawable;
 				if (late)

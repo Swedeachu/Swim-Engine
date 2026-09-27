@@ -122,6 +122,15 @@ namespace Swim::Render
 		return texture;
 	}
 
+	Rhi::TextureDesc EnvironmentBuilder::OverlayDesc(std::uint32_t size)
+	{
+		Rhi::TextureDesc texture;
+		texture.Extent = { size, size * Environment::CubeFaceCount, 1 };
+		texture.PixelFormat = EnvironmentFormat;
+		texture.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource;
+		return texture;
+	}
+
 	Rhi::BufferDesc EnvironmentBuilder::IrradianceBufferDesc()
 	{
 		Rhi::BufferDesc buffer;
@@ -139,9 +148,24 @@ namespace Swim::Render
 	}
 
 	GraphTexture EnvironmentBuilder::RecordSky(
-		RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& map, std::vector<GraphPass>& passes) const
+		RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& map, std::vector<GraphPass>& passes,
+		std::span<const GraphTexture> overlays) const
 	{
 		Validate(map);
+		if (!overlays.empty() && (!desc.Overlay.Pipeline || !desc.Overlay.Layout))
+		{
+			throw std::invalid_argument(desc.DebugName + " overlays need the overlay program");
+		}
+		for (const auto overlay : overlays)
+		{
+			const auto& overlayDesc = graph.GetDesc(overlay);
+			if (overlayDesc.PixelFormat != EnvironmentFormat || overlayDesc.Extent.Width != map.SourceSize ||
+				overlayDesc.Extent.Height != map.SourceSize * Environment::CubeFaceCount ||
+				!HasUsage(overlayDesc.Usage, Rhi::TextureUsage::Sampled))
+			{
+				throw std::invalid_argument(desc.DebugName + " overlays must be sampled RGBA16Float source-size x 6 * source-size atlases");
+			}
+		}
 		auto sourceDesc = SourceCubeDesc(map.SourceSize);
 		const std::string sourceName = desc.DebugName + " source";
 		sourceDesc.DebugName = sourceName;
@@ -173,6 +197,39 @@ namespace Swim::Render
 					list.Dispatch(Groups(size, group), Groups(size, group), 1);
 				}
 			}));
+		for (std::size_t index = 0; index < overlays.size(); ++index)
+		{
+			const auto overlay = overlays[index];
+			const std::string label = desc.DebugName + " overlay " + std::to_string(index);
+			passes.push_back(graph.AddPass(
+				label, Rhi::QueueType::Compute,
+				[&](RenderGraphBuilder& b)
+				{
+					b.Read(overlay, S::ShaderRead);
+					b.ReadWrite(source, S::ShaderWrite, { 0, 1, 0, Environment::CubeFaceCount });
+				},
+				[program = desc.Overlay, label, source, overlay, size](RenderCommandContext& c)
+				{
+					auto& list = c.Commands();
+					list.BindComputePipeline(*program.Pipeline);
+					Rhi::TextureViewDesc overlayView;
+					overlayView.PixelFormat = EnvironmentFormat;
+					auto& overlayResource = c.CreateView(overlay, overlayView);
+					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
+					{
+						std::array<Rhi::DescriptorWrite, 2> writes{};
+						writes[0].Binding = EnvironmentOverlayBindings::Overlay;
+						writes[0].TextureResource = &overlayResource;
+						writes[1].Binding = EnvironmentOverlayBindings::Destination;
+						writes[1].TextureResource = &c.CreateView(source, FaceView(0, face));
+						list.BindDescriptorTable(program.Space, CreateTable(c, program, label, writes));
+						const std::array<std::uint32_t, 4> constants{ size, face, 0, 0 };
+						Push(list, constants);
+						constexpr auto group = EnvironmentOverlayBindings::ThreadGroupSize;
+						list.Dispatch(Groups(size, group), Groups(size, group), 1);
+					}
+				}));
+		}
 		const auto mips = RecordMips(graph, source);
 		passes.insert(passes.end(), mips.begin(), mips.end());
 		return source;
@@ -223,15 +280,22 @@ namespace Swim::Render
 	}
 
 	EnvironmentGraphResources EnvironmentBuilder::RecordFromSource(
-		RenderGraph& graph, GraphTexture source, const EnvironmentMapDesc& map, const EnvironmentTargets& targets) const
+		RenderGraph& graph, GraphTexture source, const EnvironmentMapDesc& map, const EnvironmentTargets& targets,
+		std::optional<GraphTexture> irradianceSourceInput) const
 	{
 		Validate(map);
 		const auto sourceDesc = graph.GetDesc(source);
-		if (!IsCube(sourceDesc) || sourceDesc.PixelFormat != EnvironmentFormat || !HasUsage(sourceDesc.Usage, Rhi::TextureUsage::Sampled) ||
-			sourceDesc.Extent.Width != map.SourceSize || sourceDesc.MipLevels != Environment::EnvironmentSourceMipCount(map.SourceSize))
+		const auto completeSource = [&](GraphTexture cube)
+		{
+			const auto& cubeDesc = graph.GetDesc(cube);
+			return IsCube(cubeDesc) && cubeDesc.PixelFormat == EnvironmentFormat && HasUsage(cubeDesc.Usage, Rhi::TextureUsage::Sampled) &&
+				cubeDesc.Extent.Width == map.SourceSize && cubeDesc.MipLevels == Environment::EnvironmentSourceMipCount(map.SourceSize);
+		};
+		if (!completeSource(source) || (irradianceSourceInput && !completeSource(*irradianceSourceInput)))
 		{
 			throw std::invalid_argument(desc.DebugName + " source must be a sampled RGBA16Float cube of the map's size with its mip chain");
 		}
+		const GraphTexture irradianceSource = irradianceSourceInput.value_or(source);
 
 		EnvironmentGraphResources resources;
 		resources.Source = source;
@@ -341,15 +405,15 @@ namespace Swim::Render
 			irradianceLabel, Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
 			{
-				b.Read(source, S::ShaderRead, { irradianceMip, 1, 0, Environment::CubeFaceCount });
+				b.Read(irradianceSource, S::ShaderRead, { irradianceMip, 1, 0, Environment::CubeFaceCount });
 				b.Write(resources.Irradiance, S::ShaderWrite);
 			},
-			[program = desc.Irradiance, label = irradianceLabel, source, arrayView, output = resources.Irradiance, irradianceConstants](
-				RenderCommandContext& c)
+			[program = desc.Irradiance, label = irradianceLabel, irradianceSource, arrayView, output = resources.Irradiance,
+				irradianceConstants](RenderCommandContext& c)
 			{
 				std::array<Rhi::DescriptorWrite, 2> writes{};
 				writes[0].Binding = EnvironmentIrradianceBindings::Source;
-				writes[0].TextureResource = &c.CreateView(source, arrayView);
+				writes[0].TextureResource = &c.CreateView(irradianceSource, arrayView);
 				const auto range = c.GetRange(output);
 				writes[1].Binding = EnvironmentIrradianceBindings::Output;
 				writes[1].BufferResource = range.Buffer;
@@ -365,11 +429,17 @@ namespace Swim::Render
 	}
 
 	EnvironmentGraphResources EnvironmentBuilder::Record(
-		RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& map, const EnvironmentTargets& targets) const
+		RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& map, const EnvironmentTargets& targets,
+		std::span<const GraphTexture> overlays, bool overlaysInIrradiance) const
 	{
 		std::vector<GraphPass> passes;
-		const auto source = RecordSky(graph, sky, map, passes);
-		auto resources = RecordFromSource(graph, source, map, targets);
+		const auto source = RecordSky(graph, sky, map, passes, overlays);
+		std::optional<GraphTexture> irradianceSource;
+		if (!overlays.empty() && !overlaysInIrradiance)
+		{
+			irradianceSource = RecordSky(graph, sky, map, passes);
+		}
+		auto resources = RecordFromSource(graph, source, map, targets, irradianceSource);
 		passes.insert(passes.end(), resources.Passes.begin(), resources.Passes.end());
 		resources.Passes = std::move(passes);
 		return resources;

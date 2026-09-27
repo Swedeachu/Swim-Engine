@@ -164,3 +164,7 @@ It is lit by a cascaded sun, a spot and a point light (slots 0–2) and 40 unsha
 3. **Budget:** a 1024 atlas with a second point light. The three cascades and the spot fill it, so the first point light is evicted and the second is over the one-point budget. Both are unshadowed on the GPU and CPU alike, and the image must still match.
 
 Pass timings (caster culls, depth, opaque) are printed.
+
+## Cascade cache (Phase 23 performance work)
+
+With `RenderSettings::ShadowCascadeCache` (switch `shadows.cascade-cache`) and the tile-clear program (ShadowClear.slang), the frame renderer keeps a persistent atlas (`ShadowFrame::Atlas`). Cascade 0 is drawn every frame, cascade 1 every second frame and later cascades every fourth, staggered; a cascade is redrawn sooner when its tile moved, the light turned, or the camera moved or turned enough to shift the cascade's slice by 5 % of its radius. A cascade kept this frame keeps the view and split distance its depth was drawn with, so lookups stay consistent. Only redrawn views are culled; each redrawn tile is first cleared with a full-tile triangle at the far depth (depth test Always). Spot and point views are drawn every frame. Moving casters in far cascades lag by at most three frames.

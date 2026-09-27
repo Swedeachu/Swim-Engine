@@ -24,7 +24,7 @@ struct GpuViewRecord
 	float LodPixelError;
 	float LodHysteresis;
 	uint Flags;
-	uint Reserved;
+	uint ExcludedObjectId; // GpuViewRecord::ExcludedObjectId: ObjectId + 1 culled from this view (0: none).
 };
 
 struct DrawIndexedIndirectCommand

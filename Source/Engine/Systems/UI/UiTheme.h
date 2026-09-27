@@ -16,26 +16,28 @@ namespace Swim::UI
 {
 	struct UiPalette
 	{
-		// Sleek dark mode: blue-black panels, lifted slate surfaces and an electric-blue accent.
-		UiColor Panel{ 0.043f, 0.051f, 0.071f, 0.92f };
-		UiColor Surface{ 0.09f, 0.105f, 0.14f, 1.0f };
-		UiColor SurfaceHover{ 0.13f, 0.155f, 0.21f, 1.0f };
-		UiColor SurfacePressed{ 0.06f, 0.07f, 0.1f, 1.0f };
-		UiColor Field{ 0.03f, 0.035f, 0.05f, 1.0f };
-		UiColor Border{ 0.16f, 0.19f, 0.26f, 1.0f };
-		UiColor Accent{ 0.2f, 0.52f, 1.0f, 1.0f };
-		UiColor AccentHover{ 0.35f, 0.63f, 1.0f, 1.0f };
-		UiColor AccentPressed{ 0.13f, 0.4f, 0.85f, 1.0f };
-		UiColor OnAccent{ 0.97f, 0.98f, 1.0f, 1.0f };
-		UiColor Focus{ 0.38f, 0.66f, 1.0f, 1.0f };
-		UiColor Text{ 0.9f, 0.93f, 0.98f, 1.0f };
-		UiColor TextMuted{ 0.5f, 0.56f, 0.66f, 1.0f };
-		UiColor Track{ 0.14f, 0.17f, 0.23f, 1.0f };
-		UiColor Selection{ 0.2f, 0.52f, 1.0f, 0.4f };
-		UiColor Caret{ 0.55f, 0.78f, 1.0f, 1.0f };
-		UiColor Popup{ 0.055f, 0.065f, 0.09f, 0.98f }; // Menus, dropdown lists, dialogs.
-		UiColor Tooltip{ 0.02f, 0.025f, 0.04f, 0.95f };
-		UiColor Scrim{ 0.0f, 0.0f, 0.02f, 0.55f }; // Behind modal dialogs.
+		// Dark mode, authored in sRGB (UiSrgbHex): near-black blue panels, slate surfaces a
+		// step lighter and a saturated electric-blue accent. (These used to be sRGB numbers
+		// read as linear, which displayed every "black" as mid grey and washed the accent out.)
+		UiColor Panel = UiSrgbHex(0x0a0d13, 0.96f);
+		UiColor Surface = UiSrgbHex(0x161b25);
+		UiColor SurfaceHover = UiSrgbHex(0x212938);
+		UiColor SurfacePressed = UiSrgbHex(0x0f131b);
+		UiColor Field = UiSrgbHex(0x06080c);
+		UiColor Border = UiSrgbHex(0x2a3344);
+		UiColor Accent = UiSrgbHex(0x1f7aff);
+		UiColor AccentHover = UiSrgbHex(0x4a95ff);
+		UiColor AccentPressed = UiSrgbHex(0x1560d6);
+		UiColor OnAccent = UiSrgbHex(0xffffff);
+		UiColor Focus = UiSrgbHex(0x5ea2ff);
+		UiColor Text = UiSrgbHex(0xe9eef6);
+		UiColor TextMuted = UiSrgbHex(0x8b96a8);
+		UiColor Track = UiSrgbHex(0x252d3b);
+		UiColor Selection = UiSrgbHex(0x1f7aff, 0.4f);
+		UiColor Caret = UiSrgbHex(0x8cc2ff);
+		UiColor Popup = UiSrgbHex(0x0d1118, 0.98f); // Menus, dropdown lists, dialogs.
+		UiColor Tooltip = UiSrgbHex(0x05070b, 0.96f);
+		UiColor Scrim = UiSrgbHex(0x000000, 0.6f); // Behind modal dialogs.
 	};
 
 	// Logical units; the classes of horizontal controls, swapped for vertical ones.
@@ -43,7 +45,7 @@ namespace Swim::UI
 	{
 		float CornerRadius = 7.0f;
 		float BorderWidth = 1.0f;
-		float FocusWidth = 2.0f;
+		float FocusWidth = 2.5f;
 		float Spacing = 8.0f;
 		UiEdges ButtonPadding{ 12.0f, 6.0f, 12.0f, 6.0f };
 		UiEdges FieldPadding{ 6.0f, 4.0f, 6.0f, 4.0f };
@@ -51,7 +53,7 @@ namespace Swim::UI
 		float TextSize = 16.0f;
 		float LabelTextSize = 16.0f;
 		float SliderLength = 160.0f;
-		float SliderTrack = 4.0f;
+		float SliderTrack = 6.0f;
 		float SliderThumb = 16.0f;
 		float CheckboxSize = 18.0f;
 		float ToggleWidth = 36.0f;

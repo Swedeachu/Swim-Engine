@@ -10,6 +10,25 @@
 [[vk::binding(4, 0)]] Texture2D<float> Ao;
 [[vk::binding(5, 0)]] StructuredBuffer<ScreenSpaceParams> Params;
 [[vk::binding(6, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> Output;
+[[vk::binding(7, 0)]] Texture2D<float2> Velocity;
+[[vk::binding(8, 0)]] Texture2D<float4> History;
+// Reverse-Z depth of the nearest back faces (ForwardPlusTargets::BackDepth; 0 where none);
+// a 1x1 stand-in when SsrBackDepth = 0.
+[[vk::binding(9, 0)]] Texture2D<float> BackDepth;
+
+// ScreenSpace::SelfPlaneTolerance / SelfPlaneOffset.
+static const float SelfPlaneTolerance = 0.002;
+static const float SelfPlaneOffset = 0.002;
+// ScreenSpace::FacingFade.
+static const float FacingFade = 0.05;
+// ScreenSpace::BackFaceMinThickness / OpenThickness.
+static const float BackFaceMinThickness = 0.02;
+static const float OpenThickness = 1.0e30;
+// ScreenSpace::RejectedHit: the output alpha of a ray that reached a surface whose visible
+// side faces away from it (the part it hit is not on screen; the fallback shows it).
+static const float RejectedHit = -1.0;
+// ScreenSpace::SilhouetteTolerance.
+static const float SilhouetteTolerance = 0.03;
 
 // The reflection parameters, loaded once.
 struct ReflectionParams
@@ -28,6 +47,8 @@ struct ReflectionParams
 	uint RefineSteps;
 	uint NoiseFrame;
 	bool AoEnabled;
+	bool History;
+	bool BackFaces;
 };
 
 struct MarchSample
@@ -76,9 +97,27 @@ float3 HitRadiance(ReflectionParams reflection, int3 at)
 }
 
 // ScreenSpace::FilteredHitRadiance: bilinear over the four nearest texels, each weighted
-// by 1 / (1 + luminance) and renormalized.
+// by 1 / (1 + luminance) and renormalized. With history, the texels come from the previous
+// frame's finished color at the hit moved back by the hit pixel's motion vector (so they
+// include the hit's own reflections); off that image, the current color as without.
 float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, float px, float py)
 {
+	const float width = float(view.Width);
+	const float height = float(view.Height);
+	bool fromHistory = false;
+	if (reflection.History)
+	{
+		const int2 hitPixel = int2(clamp(int(floor(px)), 0, int(view.Width) - 1), clamp(int(floor(py)), 0, int(view.Height) - 1));
+		const float2 motion = Velocity.Load(int3(hitPixel, 0));
+		const float hx = px - motion.x * width;
+		const float hy = py - motion.y * height;
+		if (hx >= 0.0 && hy >= 0.0 && hx <= width && hy <= height)
+		{
+			px = hx;
+			py = hy;
+			fromHistory = true;
+		}
+	}
 	const float ux = px - 0.5;
 	const float uy = py - 0.5;
 	const float bx = floor(ux);
@@ -94,13 +133,71 @@ float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, fl
 		const int ox = j & 1;
 		const int oy = j >> 1;
 		const int3 at = int3(clamp(int(bx) + ox, 0, maxX), clamp(int(by) + oy, 0, maxY), 0);
-		const float3 radiance = HitRadiance(reflection, at);
+		const float3 radiance = fromHistory ? max(History.Load(at).rgb, float3(0.0, 0.0, 0.0)) : HitRadiance(reflection, at);
 		const float luma = 0.2126 * radiance.r + 0.7152 * radiance.g + 0.0722 * radiance.b;
 		const float weight = (ox != 0 ? fx : 1.0 - fx) * (oy != 0 ? fy : 1.0 - fy) / (1.0 + luma);
 		sum += weight * radiance;
 		weights += weight;
 	}
 	return weights > 0.0 ? sum * (1.0 / weights) : float3(0.0, 0.0, 0.0);
+}
+
+// ScreenSpace::TraceReflection's sceneAt: the depth buffer as the march sees it (nothing at
+// the start pixel, the sky, or points on the start pixel's own tangent plane).
+float3 MarchScene(ScreenSpaceView view, int x, int y, int sx, int sy, float3 p, float3 n, float planeTolerance, out bool valid)
+{
+	valid = false;
+	if (sx == x && sy == y)
+	{
+		return float3(0.0, 0.0, 0.0);
+	}
+	bool loaded;
+	const float3 scene = ScreenSpaceLoadViewPosition(view, Depth, sx, sy, loaded);
+	valid = loaded && abs(dot(scene - p, n)) > planeTolerance;
+	return scene;
+}
+
+// ScreenSpace::SurfaceThickness: how far behind the depth buffer at (sx, sy) the surface
+// there extends, in view depth. From the back-face depth: the distance to the nearest back
+// face behind it (at least BackFaceMinThickness; OpenThickness where there is none, such
+// as the ground); without it, the constant SsrThickness.
+float SurfaceThickness(ScreenSpaceView view, ReflectionParams reflection, int sx, int sy, float frontDepth)
+{
+	if (!reflection.BackFaces)
+	{
+		return reflection.Thickness;
+	}
+	bool valid;
+	const float3 back = ScreenSpaceLoadViewPosition(view, BackDepth, sx, sy, valid);
+	if (!valid)
+	{
+		return OpenThickness;
+	}
+	return max(-back.z - frontDepth, BackFaceMinThickness);
+}
+
+// ScreenSpace::ScreenExit: the largest t in [0, 1] still on screen (0.01 px inside).
+float ScreenExit(float x0, float y0, float dx, float dy, float width, float height)
+{
+	const float inset = 0.01;
+	float t = 1.0;
+	if (dx > 0.0)
+	{
+		t = min(t, (width - inset - x0) / dx);
+	}
+	else if (dx < 0.0)
+	{
+		t = min(t, (inset - x0) / dx);
+	}
+	if (dy > 0.0)
+	{
+		t = min(t, (height - inset - y0) / dy);
+	}
+	else if (dy < 0.0)
+	{
+		t = min(t, (inset - y0) / dy);
+	}
+	return max(t, 0.0);
 }
 
 // ScreenSpace::ReflectionTexel.
@@ -143,20 +240,23 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 	const float3 q1 = rayEnd * k1;
 	const float dx = s1.x - s0.x;
 	const float dy = s1.y - s0.y;
-	const float pixelLength = sqrt(dx * dx + dy * dy);
+	const float tExit = ScreenExit(s0.x, s0.y, dx, dy, float(view.Width), float(view.Height));
+	const float pixelLength = sqrt(dx * dx + dy * dy) * tExit;
 	const uint steps = min(reflection.MaxSteps, uint(ceil(pixelLength / reflection.Stride)));
-	const float jitter = ScreenSpaceNoise(float(x) + 23.0, float(y) + 41.0, reflection.NoiseFrame);
+	const float jitter = ScreenSpaceNoise(float(x) + 23.0, float(y) + 41.0, 0u) /* Fixed per pixel: stable hits, no temporal grain. */;
 	const float width = float(view.Width);
 	const float height = float(view.Height);
 
 	// Candidates: within the thickness behind the depth buffer, or just crossed from in
 	// front to behind (a thin intersection the stride stepped over). A refined candidate
 	// that ends up far behind a closer surface is not a hit; the march goes on.
+	const float planeTolerance = SelfPlaneTolerance * -p.z + SelfPlaneOffset;
 	float previous = 0.0;
-	bool previousBehind = false;
+	float previousDepth = -p.z; // The ray's view depth at `previous`.
+	bool previousBehind = false;  // Whether the sample at `previous` was behind the depth buffer.
 	for (uint i = 1; i <= steps; ++i)
 	{
-		const float t = min((float(i) + jitter) / float(steps), 1.0);
+		const float t = min((float(i) + jitter) / float(steps), 1.0) * tExit;
 		const float sx = s0.x + dx * t;
 		const float sy = s0.y + dy * t;
 		if (!(sx >= 0.0 && sy >= 0.0 && sx < width && sy < height))
@@ -166,17 +266,17 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		const int ix = int(floor(sx));
 		const int iy = int(floor(sy));
 		const float rayDepth = RayDepthAt(q0, q1, k0, k1, t);
-		bool sceneValid = false;
-		float3 scene = float3(0.0, 0.0, 0.0);
-		if (ix != x || iy != y)
-		{
-			scene = ScreenSpaceLoadViewPosition(view, Depth, ix, iy, sceneValid);
-		}
+		bool sceneValid;
+		const float3 scene = MarchScene(view, x, y, ix, iy, p, n, planeTolerance, sceneValid);
 		const bool behind = sceneValid && rayDepth >= -scene.z;
-		const bool within = behind && rayDepth <= -scene.z + reflection.Thickness;
-		if (!within && !(behind && !previousBehind))
+		const bool within = behind && rayDepth <= -scene.z + SurfaceThickness(view, reflection, ix, iy, -scene.z);
+		// Crossed this surface's depth since the previous sample, or went behind the depth
+		// buffer after being in front of it.
+		const bool crossed = behind && (previousDepth < -scene.z || !previousBehind);
+		if (!within && !crossed)
 		{
 			previous = t;
+			previousDepth = rayDepth;
 			previousBehind = behind;
 			continue;
 		}
@@ -191,7 +291,7 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 			float3 probe = float3(0.0, 0.0, 0.0);
 			if (mx >= 0.0 && my >= 0.0 && mx < width && my < height)
 			{
-				probe = ScreenSpaceLoadViewPosition(view, Depth, int(floor(mx)), int(floor(my)), probeValid);
+				probe = MarchScene(view, x, y, int(floor(mx)), int(floor(my)), p, n, planeTolerance, probeValid);
 			}
 			const float probeDepth = RayDepthAt(q0, q1, k0, k1, mid);
 			if (probeValid && probeDepth >= -probe.z)
@@ -213,12 +313,8 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		{
 			const int rx = int(floor(fx));
 			const int ry = int(floor(fy));
-			bool refinedValid = false;
-			float3 refinedScene = float3(0.0, 0.0, 0.0);
-			if (rx != x || ry != y)
-			{
-				refinedScene = ScreenSpaceLoadViewPosition(view, Depth, rx, ry, refinedValid);
-			}
+			bool refinedValid;
+			const float3 refinedScene = MarchScene(view, x, y, rx, ry, p, n, planeTolerance, refinedValid);
 			if (refinedValid)
 			{
 				hx = rx;
@@ -234,9 +330,35 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		}
 		const float hitRayDepth = RayDepthAt(q0, q1, k0, k1, hi);
 		const float span = abs(hitRayDepth - RayDepthAt(q0, q1, k0, k1, lo));
-		if (!(hitRayDepth - hitSceneDepth <= max(reflection.Thickness, span)))
+		const float behindBy = hitRayDepth - hitSceneDepth;
+		// A grazing hit within the span must be on a surface that continues across the
+		// interval; a depth jump is a silhouette the ray passed behind.
+		const float lx = s0.x + dx * lo;
+		const float ly = s0.y + dy * lo;
+		bool loValid = false;
+		float3 loScene = float3(0.0, 0.0, 0.0);
+		if (lx >= 0.0 && ly >= 0.0 && lx < width && ly < height)
+		{
+			loScene = MarchScene(view, x, y, int(floor(lx)), int(floor(ly)), p, n, planeTolerance, loValid);
+		}
+		const bool continuous = loValid && abs(-loScene.z - hitSceneDepth) <= 2.0 * span;
+		// With back faces the surface's own thickness decides: a ray that passed behind a
+		// sphere near its silhouette (where it is thin) is not a hit, however large the step.
+		const bool accepted = reflection.BackFaces ? behindBy <= SurfaceThickness(view, reflection, hx, hy, hitSceneDepth) + span
+												   : (behindBy <= reflection.Thickness || (behindBy <= span && continuous));
+		// ScreenSpace::TraceReflection: inside a surface, but not having crossed its visible
+		// face just before (in front of the same surface): it came in through a hidden side.
+		const float loRayDepth = RayDepthAt(q0, q1, k0, k1, lo);
+		const bool crossedVisibleFace = loValid && loRayDepth < -loScene.z &&
+			abs(-loScene.z - hitSceneDepth) <= max(2.0 * span, SilhouetteTolerance * hitSceneDepth);
+		if (reflection.BackFaces && accepted && !crossedVisibleFace)
+		{
+			return float4(0.0, 0.0, 0.0, RejectedHit);
+		}
+		if (!accepted)
 		{
 			previous = t;
+			previousDepth = rayDepth;
 			previousBehind = behind;
 			continue;
 		}
@@ -244,7 +366,8 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		const float3 hitNormal = ViewNormalOf(reflection, Normal.Load(int3(hx, hy, 0)).xyz, hitNormalValid);
 		if (!hitNormalValid || dot(hitNormal, r) > 0.0)
 		{
-			return miss;
+			// The ray entered the surface from its hidden side: what it hit is off screen.
+			return reflection.BackFaces ? float4(0.0, 0.0, 0.0, RejectedHit) : miss;
 		}
 		const float k = k0 + (k1 - k0) * hi;
 		const float3 hitPoint = (q0 + (q1 - q0) * hi) / k;
@@ -256,7 +379,8 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		const float edge = min(min(u, 1.0 - u), min(w, 1.0 - w));
 		const float edgeFade = clamp(edge / reflection.EdgeFade, 0.0, 1.0);
 		const float distanceFade = clamp((reflection.MaxDistance - travelled) / (reflection.MaxDistance * reflection.DistanceFade), 0.0, 1.0);
-		const float confidence = roughnessFade * edgeFade * distanceFade;
+		const float facingFade = clamp(-dot(hitNormal, r) / FacingFade, 0.0, 1.0);
+		const float confidence = roughnessFade * edgeFade * distanceFade * facingFade;
 		if (!(confidence > 0.0))
 		{
 			return miss;
@@ -271,7 +395,11 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 void computeMain(uint3 id : SV_DispatchThreadID)
 {
 	const ScreenSpaceView view = ScreenSpaceLoadView(Params);
-	if (id.x >= view.Width || id.y >= view.Height)
+	// Half resolution: thread (x, y) traces one pixel of the 2 x 2 block at (2x, 2y), the
+	// one ScreenSpaceHalfOffset picks this frame (the composite knows which).
+	const bool half = Params[0].SsrHalf != 0u;
+	const uint2 pixel = half ? id.xy * 2u + ScreenSpaceHalfOffset(Params[0].NoiseFrame) : id.xy;
+	if (half ? (id.x >= (view.Width + 1u) / 2u || id.y >= (view.Height + 1u) / 2u) : (id.x >= view.Width || id.y >= view.Height))
 	{
 		return;
 	}
@@ -296,5 +424,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	reflection.RefineSteps = Params[0].SsrRefineSteps;
 	reflection.NoiseFrame = Params[0].NoiseFrame;
 	reflection.AoEnabled = Params[0].AoEnabled != 0u;
-	Output[id.xy] = Trace(view, reflection, int(id.x), int(id.y));
+	reflection.History = Params[0].SsrHistory != 0u;
+	reflection.BackFaces = Params[0].SsrBackDepth != 0u;
+	Output[id.xy] = Trace(view, reflection, int(min(pixel.x, view.Width - 1u)), int(min(pixel.y, view.Height - 1u)));
 }

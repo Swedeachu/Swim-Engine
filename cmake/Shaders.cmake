@@ -24,9 +24,12 @@ set(SWIM_RUNTIME_SHADER_PROGRAMS
 	"ForwardTransparent=SwimForwardTransparent"
 	"ForwardDepth=SwimForwardDepth"
 	"ForwardOpaquePrepassed=SwimForwardOpaquePrepassed"
+	"ForwardOpaqueDeferred=SwimForwardOpaqueDeferred"
+	"ForwardLocalLights=SwimForwardLocalLights"
 	"ForwardTransparentSort=SwimForwardTransparentSort"
 	"ShadowDepth=SwimShadowDepth"
 	"ShadowMasked=SwimShadowMasked"
+	"ShadowClear=SwimShadowClear"
 	"EnvironmentSky=SwimEnvironmentSky"
 	"EnvironmentDownsample=SwimEnvironmentDownsample"
 	"EnvironmentPrefilter=SwimEnvironmentPrefilter"
@@ -115,4 +118,15 @@ function(swim_configure_shaders target)
 			"$<TARGET_FILE_DIR:${target}>/Shaders/Runtime"
 		VERBATIM
 	)
+	# The POST_BUILD copy runs only when the target relinks; a shader-only change must still
+	# reach the deployed set, so this target copies on every build of ${target}.
+	add_custom_target(${target}DeployShaders
+		COMMAND "${CMAKE_COMMAND}" -E copy_directory
+			"${SWIM_RUNTIME_SHADER_DIR}"
+			"$<TARGET_FILE_DIR:${target}>/Shaders/Runtime"
+		DEPENDS SwimRuntimeShaders
+		VERBATIM
+	)
+	add_dependencies(${target}DeployShaders SwimRuntimeShaders)
+	add_dependencies(${target} ${target}DeployShaders)
 endfunction()

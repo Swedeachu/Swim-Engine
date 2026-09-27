@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/Runtime/RenderDevice.h"
 
+#include <algorithm>
+
 #include "Engine/Platform/Window.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 
@@ -39,7 +41,11 @@ namespace Engine
 		{
 			throw std::runtime_error("RenderDevice: device creation failed on " + adapterInfo->Name);
 		}
-		executor = std::make_unique<Swim::Render::RenderGraphExecutor>(*device);
+		const std::uint32_t slots = std::clamp(desc.FramesInFlight, 1u, 2u);
+		for (std::uint32_t i = 0; i < slots; ++i)
+		{
+			executors.push_back(std::make_unique<Swim::Render::RenderGraphExecutor>(*device));
+		}
 		idleTimeline = device->CreateTimeline(0);
 		headlessExtent = { desc.Width, desc.Height };
 		if (window)
@@ -54,7 +60,10 @@ namespace Engine
 			{
 				throw std::runtime_error("RenderDevice: swapchain creation failed");
 			}
-			acquired = device->CreateGpuSemaphore();
+			for (std::uint32_t i = 0; i < slots; ++i)
+			{
+				acquired.push_back(device->CreateGpuSemaphore());
+			}
 			CreatePresentSemaphores();
 		}
 	}
@@ -69,9 +78,9 @@ namespace Engine
 		{
 		}
 		ready.clear();
-		acquired.reset();
+		acquired.clear();
 		swapchain.reset();
-		executor.reset();
+		executors.clear();
 		idleTimeline.reset();
 		device.reset();
 		graphics.reset();
@@ -130,8 +139,11 @@ namespace Engine
 			const auto pixels = window->GetPixelSize();
 			extent = { pixels.Width, pixels.Height };
 		}
-		// Imported swapchain views retire with the executor's pooled resources.
-		executor->Trim();
+		// Imported swapchain views retire with the executors' pooled resources.
+		for (auto& executor : executors)
+		{
+			executor->Trim();
+		}
 		const Swim::Rhi::TimelinePoint safeAfter =
 			lastCompletion.Semaphore ? lastCompletion : Swim::Rhi::TimelinePoint{ idleTimeline.get(), 0 };
 		const bool rebuilt = swapchain->Resize(extent, safeAfter);
@@ -157,7 +169,7 @@ namespace Engine
 		{
 			return frame;
 		}
-		const auto result = swapchain->AcquireNextImage(*acquired);
+		const auto result = swapchain->AcquireNextImage(*acquired[slot]);
 		if (result.OutOfDate)
 		{
 			needsRebuild = true;
@@ -182,7 +194,7 @@ namespace Engine
 		{
 			return submit;
 		}
-		waits[0] = acquired.get();
+		waits[0] = acquired[slot].get();
 		signals[0] = ready[frame.Image].get();
 		submit.WaitSemaphores = waits;
 		submit.SignalSemaphores = signals;
@@ -207,7 +219,7 @@ namespace Engine
 
 	void RenderDevice::WaitIdle()
 	{
-		if (executor)
+		for (auto& executor : executors)
 		{
 			executor->Wait();
 		}

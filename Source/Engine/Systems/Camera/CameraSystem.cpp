@@ -24,4 +24,13 @@ namespace Engine
 		cut = false;
 		return value;
 	}
+	std::optional<glm::vec3> CameraSystem::WorldToScreen(const glm::vec3& world) const
+	{
+		return camera.WorldToScreen(world, static_cast<float>(surfaceWidth), static_cast<float>(surfaceHeight));
+	}
+
+	glm::vec3 CameraSystem::ScreenToWorld(float x, float y, float distance) const
+	{
+		return camera.ScreenToWorld(x, y, distance, static_cast<float>(surfaceWidth), static_cast<float>(surfaceHeight));
+	}
 } // namespace Engine

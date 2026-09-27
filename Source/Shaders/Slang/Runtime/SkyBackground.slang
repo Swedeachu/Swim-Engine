@@ -1,7 +1,7 @@
 // Runtime sky background (Phase 23). Runs before the Clustered Forward+ opaque pass,
-// which then loads (rather than clears) its targets: this pass clears depth (reverse-Z
-// far = 0), the object id and every screen-space target to zero, and fills the color
-// target with the procedural sky seen through each pixel, so transparent surfaces blend
+// which then loads its colour and depth and clears every other target
+// (ForwardPlusTargets::ClearAuxiliary): this pass clears depth (reverse-Z far = 0) and
+// fills the color target with the procedural sky seen through each pixel, so transparent surfaces blend
 // over the sky and screen-space effects see an empty background. The sky mirrors
 // Environment::ProceduralSky::Evaluate (EnvironmentSky.slang), rotated and scaled like
 // the image-based lighting the frame uses.
@@ -17,7 +17,7 @@ struct SkyBackgroundConstants
 	float4 RayForward;	 // w: sun sharpness.
 	float4 Zenith;		 // w: unused.
 	float4 Horizon;		 // w: unused.
-	float4 Ground;		 // w: unused.
+	float4 Ground;		 // w: ProceduralSky::GroundFalloff.
 	float4 SunDirection; // Normalized, toward the sun; w: unused.
 	float4 SunColor;	 // w: unused.
 };
@@ -33,12 +33,6 @@ struct VertexOutput
 struct FragmentOutput
 {
 	float4 Color : SV_Target0;
-	float ObjectId : SV_Target1;
-	float2 Velocity : SV_Target2;
-	float4 Normal : SV_Target3;
-	float4 Indirect : SV_Target4;
-	float4 Reflectance : SV_Target5;
-	float4 Specular : SV_Target6;
 };
 
 // gl_VertexIndex directly (SV_VulkanVertexID): the fullscreen triangle is drawn from
@@ -57,7 +51,8 @@ float3 EvaluateSky(float3 direction)
 {
 	const float3 d = normalize(direction);
 	const float up = clamp(d.y, -1.0, 1.0);
-	const float blend = 1.0 - (1.0 - abs(up)) * (1.0 - abs(up));
+	const float falloff = up >= 0.0 ? 2.0 : max(Constants.Ground.w, 1.0);
+	const float blend = 1.0 - pow(1.0 - abs(up), falloff);
 	const float3 end = up >= 0.0 ? Constants.Zenith.rgb : Constants.Ground.rgb;
 	const float lobe = pow(max(dot(d, Constants.SunDirection.xyz), 0.0), Constants.RayForward.w);
 	return (Constants.Horizon.rgb + (end - Constants.Horizon.rgb) * blend + Constants.SunColor.rgb * lobe) * Constants.RayRight.w;
@@ -69,11 +64,5 @@ FragmentOutput fragmentMain(VertexOutput input)
 	const float3 direction = Constants.RayForward.xyz + input.Ndc.x * Constants.RayRight.xyz + input.Ndc.y * Constants.RayUp.xyz;
 	FragmentOutput output;
 	output.Color = float4(EvaluateSky(EnvironmentRotateLookup(normalize(direction), Constants.RayUp.w)), 1.0);
-	output.ObjectId = 0.0;
-	output.Velocity = float2(0.0, 0.0);
-	output.Normal = float4(0.0, 0.0, 0.0, 0.0);
-	output.Indirect = float4(0.0, 0.0, 0.0, 0.0);
-	output.Reflectance = float4(0.0, 0.0, 0.0, 0.0);
-	output.Specular = float4(0.0, 0.0, 0.0, 0.0);
 	return output;
 }

@@ -309,3 +309,36 @@ SWIM_TEST("UI.Paint", "RoundedBordersImagesAndNineSlices")
 	image.SliceUv.Left = 2.0f;
 	SWIM_CHECK_THROWS(ui.SetImage(frame, image), std::invalid_argument);
 }
+
+SWIM_TEST("UI.Text", "WrappedPercentWidthLabelsPushTheirSiblingsDown")
+{
+	// A full-width wrapping label in a column (the sandbox HUD's clock line): when its text
+	// grows to two lines, the row after it must move down instead of overlapping it.
+	const auto chain = Swim::Testing::LoadTextFontChain();
+	UiDocument ui;
+	UiStyle panelStyle;
+	panelStyle.Width = UiLength::Pixels(220.0f);
+	panelStyle.Flow = UiFlow::Column;
+	panelStyle.Padding = { 10, 10, 10, 10 };
+	const auto panel = Child(ui, ui.GetRoot(), panelStyle);
+	UiStyle scrollStyle;
+	scrollStyle.Flow = UiFlow::Column;
+	scrollStyle.Width = UiLength::Percent(1.0f);
+	scrollStyle.Grow = 1.0f;
+	scrollStyle.Shrink = 1.0f;
+	const auto content = Child(ui, panel, scrollStyle);
+	UiStyle labelStyle;
+	labelStyle.TextWrap = Swim::Text::TextWrap::Word;
+	labelStyle.Width = UiLength::Percent(1.0f);
+	const auto label = Child(ui, content, labelStyle);
+	const auto row = Child(ui, content, Box(100, 20));
+	ui.SetText(label, chain, "short", 16);
+	ui.Layout({ 800, 800 });
+	ui.SetText(label, chain, "Simulated 2.8 s, 166 steps @ 60 Hz, x1.00 and then some more words", 16);
+	ui.Layout({ 800, 800 });
+	const auto labelBounds = ui.GetBounds(label);
+	SWIM_REQUIRE(ui.GetTextLayout(label) != nullptr);
+	SWIM_CHECK(ui.GetTextLayout(label)->GetLines().size() >= 2u);
+	SWIM_CHECK_NEAR(labelBounds.Height, ui.GetTextLayout(label)->GetHeight(), 1e-3f);
+	SWIM_CHECK(ui.GetBounds(row).Y >= labelBounds.Y + labelBounds.Height - 1e-3f);
+}

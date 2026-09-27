@@ -98,6 +98,10 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("reflection edge fade must be in (0, 0.5] and distance fade in (0, 1]");
 		}
+		if (static_cast<std::uint32_t>(ssr.Debug) > static_cast<std::uint32_t>(ReflectionDebugView::ProbeAge))
+		{
+			throw std::invalid_argument("unknown reflection debug view");
+		}
 	}
 
 	GpuScreenSpaceParams BuildScreenSpaceParams(const ScreenSpaceSettings& settings, const ScreenSpaceView& view, std::uint32_t width,
@@ -170,6 +174,9 @@ namespace Swim::Render
 		params.SsrDistanceFade = ssr.DistanceFade;
 		params.SsrMaxSteps = ssr.MaxSteps;
 		params.SsrRefineSteps = ssr.RefineSteps;
+		params.SsrHalf = ssr.HalfResolution ? 1u : 0u;
+		params.AoHalf = settings.AmbientOcclusion.Enabled && settings.AmbientOcclusion.HalfResolution ? 1u : 0u;
+		params.ReflectionDebug = static_cast<std::uint32_t>(ssr.Debug);
 		// Near plane: where the projected depth z_ndc = (p10 z + p11) / -z reaches 1.
 		const float nearZ = -p[11] / (p[10] + 1.0f);
 		if (ssr.Enabled && (!Finite(nearZ) || !(nearZ < 0.0f)))
@@ -561,9 +568,48 @@ namespace Swim::Render::ScreenSpace
 		return point;
 	}
 
-	std::optional<ReflectionHit> TraceReflection(
-		const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x, std::uint32_t y)
+	float ScreenExit(float x0, float y0, float dx, float dy, float width, float height)
 	{
+		constexpr float inset = 0.01f;
+		float t = 1.0f;
+		if (dx > 0.0f)
+		{
+			t = std::min(t, (width - inset - x0) / dx);
+		}
+		else if (dx < 0.0f)
+		{
+			t = std::min(t, (inset - x0) / dx);
+		}
+		if (dy > 0.0f)
+		{
+			t = std::min(t, (height - inset - y0) / dy);
+		}
+		else if (dy < 0.0f)
+		{
+			t = std::min(t, (inset - y0) / dy);
+		}
+		return std::max(t, 0.0f);
+	}
+
+	float SurfaceThickness(
+		const GpuScreenSpaceParams& params, const ScalarImage* backDepth, std::uint32_t x, std::uint32_t y, float frontDepth)
+	{
+		if (params.SsrBackDepth == 0u || !backDepth)
+		{
+			return params.SsrThickness;
+		}
+		const auto back = ViewPosition(params, float(x) + 0.5f, float(y) + 0.5f, backDepth->At(x, y));
+		if (!back)
+		{
+			return OpenThickness;
+		}
+		return std::max(-(*back)[2] - frontDepth, BackFaceMinThickness);
+	}
+
+	std::optional<ReflectionHit> TraceReflection(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal,
+		std::uint32_t x, std::uint32_t y, const ScalarImage* backDepth)
+	{
+		const bool backFaces = params.SsrBackDepth != 0u && backDepth;
 		const auto center = ViewPositionAt(params, depth, x, y);
 		const auto& encoded = normal.At(x, y);
 		const auto n3 = center ? ViewNormal(params, { encoded[0], encoded[1], encoded[2] }) : std::nullopt;
@@ -600,11 +646,15 @@ namespace Swim::Render::ScreenSpace
 		const Float3 q1 = Scale(end, k1);
 		const float dx = s1.X - s0.X;
 		const float dy = s1.Y - s0.Y;
-		const float pixelLength = std::sqrt(dx * dx + dy * dy);
-		const auto steps = std::min(params.SsrMaxSteps, static_cast<std::uint32_t>(std::ceil(pixelLength / params.SsrStride)));
-		const float jitter = InterleavedGradientNoise(float(x) + 23.0f, float(y) + 41.0f, params.NoiseFrame);
 		const float width = float(params.Width);
 		const float height = float(params.Height);
+		// The samples cover only the on-screen part of the projected ray, [0, tExit]: a ray
+		// toward the camera projects far off screen, and spreading MaxSteps over all of it
+		// left one or two samples on screen (hits then came and went with the jitter).
+		const float tExit = ScreenExit(s0.X, s0.Y, dx, dy, width, height);
+		const float pixelLength = std::sqrt(dx * dx + dy * dy) * tExit;
+		const auto steps = std::min(params.SsrMaxSteps, static_cast<std::uint32_t>(std::ceil(pixelLength / params.SsrStride)));
+		const float jitter = InterleavedGradientNoise(float(x) + 23.0f, float(y) + 41.0f, 0u) /* Fixed per pixel: no temporal grain. */;
 
 		struct Sample
 		{
@@ -636,22 +686,48 @@ namespace Swim::Render::ScreenSpace
 		// alias to the stride). Either way the hit refines by bisection and is kept only if
 		// the ray is still within the thickness there (the span of the last bisection
 		// interval, for grazing rays): a ray that passed behind a closer silhouette marches on.
+		// The depth buffer at a pixel, as seen by the march: nothing at the start pixel, the
+		// sky, or a point on the start pixel's own tangent plane (a reflected ray leaves that
+		// plane, so meeting it is depth quantization, not a hit: self-intersections showed up
+		// as grain on flat glossy faces).
+		const float planeTolerance = SelfPlaneTolerance * -p[2] + SelfPlaneOffset;
+		const auto sceneAt = [&](std::uint32_t sx, std::uint32_t sy) -> std::optional<Float3>
+		{
+			if (sx == x && sy == y)
+			{
+				return std::nullopt;
+			}
+			const auto scene = ViewPositionAt(params, depth, sx, sy);
+			if (!scene || std::abs(Dot(Subtract(*scene, p), n)) <= planeTolerance)
+			{
+				return std::nullopt;
+			}
+			return scene;
+		};
+
 		float previous = 0.0f;
-		bool previousBehind = false;
+		float previousDepth = -p[2]; // The ray's view depth at `previous`.
+		bool previousBehind = false;  // Whether the sample at `previous` was behind the depth buffer.
 		for (std::uint32_t i = 1; i <= steps; ++i)
 		{
-			const float t = std::min((float(i) + jitter) / float(steps), 1.0f);
+			const float t = std::min((float(i) + jitter) / float(steps), 1.0f) * tExit;
 			const auto sample = sampleAt(t);
 			if (!sample.Inside)
 			{
 				return std::nullopt; // Left the screen.
 			}
-			const auto scene = (sample.X == x && sample.Y == y) ? std::nullopt : ViewPositionAt(params, depth, sample.X, sample.Y);
+			const auto scene = sceneAt(sample.X, sample.Y);
 			const bool behind = scene && sample.RayDepth >= -(*scene)[2];
-			const bool within = behind && sample.RayDepth <= -(*scene)[2] + params.SsrThickness;
-			if (!within && !(behind && !previousBehind))
+			const bool within =
+				behind && sample.RayDepth <= -(*scene)[2] + SurfaceThickness(params, backDepth, sample.X, sample.Y, -(*scene)[2]);
+			// Crossed this surface's depth since the previous sample (it was in front of it
+			// there), or went behind the depth buffer after being in front of it (the surface
+			// hit in between may be too thin on screen for any sample to land on).
+			const bool crossed = behind && (previousDepth < -(*scene)[2] || !previousBehind);
+			if (!within && !crossed)
 			{
 				previous = t;
+				previousDepth = sample.RayDepth;
 				previousBehind = behind;
 				continue;
 			}
@@ -662,7 +738,7 @@ namespace Swim::Render::ScreenSpace
 			{
 				const float mid = 0.5f * (lo + hi);
 				const auto probe = sampleAt(mid);
-				const auto probeScene = probe.Inside ? ViewPositionAt(params, depth, probe.X, probe.Y) : std::nullopt;
+				const auto probeScene = probe.Inside ? sceneAt(probe.X, probe.Y) : std::nullopt;
 				if (probeScene && probe.RayDepth >= -(*probeScene)[2])
 				{
 					hi = mid;
@@ -673,7 +749,7 @@ namespace Swim::Render::ScreenSpace
 				}
 			}
 			auto hit = sampleAt(hi);
-			auto hitScene = hit.Inside && !(hit.X == x && hit.Y == y) ? ViewPositionAt(params, depth, hit.X, hit.Y) : std::nullopt;
+			auto hitScene = hit.Inside ? sceneAt(hit.X, hit.Y) : std::nullopt;
 			if (!hitScene)
 			{
 				hit = sample;
@@ -681,10 +757,39 @@ namespace Swim::Render::ScreenSpace
 				hi = t;
 				lo = previous;
 			}
-			const float span = std::abs(hit.RayDepth - sampleAt(lo).RayDepth);
-			if (!(hit.RayDepth - -(*hitScene)[2] <= std::max(params.SsrThickness, span)))
+			// On the surface: within the thickness behind it, or, for a grazing ray, within the
+			// ray's depth span over the last interval of a surface that continues across it
+			// (a depth jump there is a silhouette the ray passed behind, not a hit).
+			const auto loSample = sampleAt(lo);
+			const float span = std::abs(hit.RayDepth - loSample.RayDepth);
+			const float behindBy = hit.RayDepth - -(*hitScene)[2];
+			const auto loScene = loSample.Inside ? sceneAt(loSample.X, loSample.Y) : std::nullopt;
+			const bool continuous = loScene && std::abs((*loScene)[2] - (*hitScene)[2]) <= 2.0f * span;
+			// With back faces the surface's own thickness decides: a ray that passed behind a
+			// sphere near its silhouette (where it is thin) is not a hit, however long the step
+			// (the span rule accepted those, slicing reflected objects into bands).
+			const bool accepted = backFaces
+				? behindBy <= SurfaceThickness(params, backDepth, hit.X, hit.Y, -(*hitScene)[2]) + span
+				: (behindBy <= params.SsrThickness || (behindBy <= span && continuous));
+			// Inside a surface, but reached across a depth discontinuity (the object's
+			// silhouette): the ray entered it through a side the camera does not see.
+			// (The ray was already behind that surface before the hit: it came from inside
+			// or from behind the object, not through its visible face.)
+			const bool enteredHidden = backFaces && accepted &&
+				!(loScene && loSample.RayDepth < -(*loScene)[2] &&
+					std::abs((*loScene)[2] - (*hitScene)[2]) <= std::max(2.0f * span, SilhouetteTolerance * -(*hitScene)[2]));
+			if (enteredHidden)
+			{
+				ReflectionHit rejected;
+				rejected.X = hit.X;
+				rejected.Y = hit.Y;
+				rejected.Rejected = true;
+				return rejected;
+			}
+			if (!accepted)
 			{
 				previous = t;
+				previousDepth = sample.RayDepth;
 				previousBehind = behind;
 				continue; // Behind a closer surface, not on it.
 			}
@@ -692,7 +797,16 @@ namespace Swim::Render::ScreenSpace
 			const auto hitNormal = ViewNormal(params, { hitEncoded[0], hitEncoded[1], hitEncoded[2] });
 			if (!hitNormal || Dot(*hitNormal, r) > 0.0f)
 			{
-				return std::nullopt; // A back face.
+				// The ray entered the surface through its hidden side: what it hit is not on screen.
+				if (backFaces)
+				{
+					ReflectionHit rejected;
+					rejected.X = hit.X;
+					rejected.Y = hit.Y;
+					rejected.Rejected = true;
+					return rejected;
+				}
+				return std::nullopt;
 			}
 			const float k = k0 + (k1 - k0) * hi;
 			const Float3 point{ (q0[0] + (q1[0] - q0[0]) * hi) / k, (q0[1] + (q1[1] - q0[1]) * hi) / k,
@@ -706,7 +820,10 @@ namespace Swim::Render::ScreenSpace
 			const float edgeFade = std::clamp(edge / params.SsrEdgeFade, 0.0f, 1.0f);
 			const float distanceFade =
 				std::clamp((params.SsrMaxDistance - travelled) / (params.SsrMaxDistance * params.SsrDistanceFade), 0.0f, 1.0f);
-			const float confidence = roughnessFade * edgeFade * distanceFade;
+			// Surfaces seen edge-on by the ray fade out: near a silhouette the ray usually passed
+			// behind the object (whose far side the depth buffer does not have).
+			const float facingFade = std::clamp(-Dot(*hitNormal, r) / FacingFade, 0.0f, 1.0f);
+			const float confidence = roughnessFade * edgeFade * distanceFade * facingFade;
 			if (!(confidence > 0.0f))
 			{
 				return std::nullopt;
@@ -734,8 +851,25 @@ namespace Swim::Render::ScreenSpace
 	}
 
 	Float3 FilteredHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
-		const ScalarImage* ao, float px, float py)
+		const ScalarImage* ao, float px, float py, const ReflectionHistory& history)
 	{
+		bool fromHistory = false;
+		if (params.SsrHistory != 0u && history.Color && history.Velocity)
+		{
+			const float width = float(color.Width);
+			const float height = float(color.Height);
+			const auto hitX = static_cast<std::uint32_t>(std::clamp(int(std::floor(px)), 0, int(color.Width) - 1));
+			const auto hitY = static_cast<std::uint32_t>(std::clamp(int(std::floor(py)), 0, int(color.Height) - 1));
+			const auto& motion = history.Velocity->At(hitX, hitY);
+			const float hx = px - motion[0] * width;
+			const float hy = py - motion[1] * height;
+			if (hx >= 0.0f && hy >= 0.0f && hx <= width && hy <= height)
+			{
+				px = hx;
+				py = hy;
+				fromHistory = true;
+			}
+		}
 		const float ux = px - 0.5f;
 		const float uy = py - 0.5f;
 		const float bx = std::floor(ux);
@@ -752,7 +886,16 @@ namespace Swim::Render::ScreenSpace
 			const int oy = j >> 1;
 			const auto tx = static_cast<std::uint32_t>(std::clamp(int(bx) + ox, 0, maxX));
 			const auto ty = static_cast<std::uint32_t>(std::clamp(int(by) + oy, 0, maxY));
-			const auto radiance = HitRadiance(params, color, indirect, ao, tx, ty);
+			Float3 radiance;
+			if (fromHistory)
+			{
+				const auto& previous = history.Color->At(tx, ty);
+				radiance = { std::max(previous[0], 0.0f), std::max(previous[1], 0.0f), std::max(previous[2], 0.0f) };
+			}
+			else
+			{
+				radiance = HitRadiance(params, color, indirect, ao, tx, ty);
+			}
 			const float luma = 0.2126f * radiance[0] + 0.7152f * radiance[1] + 0.0722f * radiance[2];
 			const float weight = (ox != 0 ? fx : 1.0f - fx) * (oy != 0 ? fy : 1.0f - fy) / (1.0f + luma);
 			for (int k = 0; k < 3; ++k)
@@ -766,26 +909,31 @@ namespace Swim::Render::ScreenSpace
 	}
 
 	Float4 ReflectionTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
-		const ColorImage& indirect, const ScalarImage* ao, std::uint32_t x, std::uint32_t y)
+		const ColorImage& indirect, const ScalarImage* ao, std::uint32_t x, std::uint32_t y, const ReflectionHistory& history,
+		const ScalarImage* backDepth)
 	{
-		const auto hit = TraceReflection(params, depth, normal, x, y);
+		const auto hit = TraceReflection(params, depth, normal, x, y, backDepth);
 		if (!hit)
 		{
 			return { 0, 0, 0, 0 };
 		}
-		const auto radiance = FilteredHitRadiance(params, color, indirect, ao, hit->HitX, hit->HitY);
+		if (hit->Rejected)
+		{
+			return { 0, 0, 0, RejectedHit };
+		}
+		const auto radiance = FilteredHitRadiance(params, color, indirect, ao, hit->HitX, hit->HitY, history);
 		return { radiance[0], radiance[1], radiance[2], hit->Confidence };
 	}
 
 	ColorImage Reflections(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,
-		const ColorImage& indirect, const ScalarImage* ao)
+		const ColorImage& indirect, const ScalarImage* ao, const ReflectionHistory& history, const ScalarImage* backDepth)
 	{
 		ColorImage result(depth.Width, depth.Height);
 		for (std::uint32_t y = 0; y < depth.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < depth.Width; ++x)
 			{
-				result.At(x, y) = ReflectionTexel(params, depth, normal, color, indirect, ao, x, y);
+				result.At(x, y) = ReflectionTexel(params, depth, normal, color, indirect, ao, x, y, history, backDepth);
 			}
 		}
 		return result;
@@ -802,12 +950,28 @@ namespace Swim::Render::ScreenSpace
 				c[i] = std::max(c[i] - (1.0f - ao) * indirect[i], 0.0f);
 			}
 		}
-		if (params.SsrEnabled != 0u && reflection.Reflection[3] > 0.0f)
+		if (params.SsrEnabled != 0u || params.ProbeCount > 0u)
 		{
-			const float weight = reflection.Reflection[3] * (params.AoEnabled != 0u ? ao : 1.0f);
-			for (int i = 0; i < 3; ++i)
+			const float aoWeight = params.AoEnabled != 0u ? ao : 1.0f;
+			// The fallback: local probes (coverage Probe[3]) over the global environment (Specular).
+			Float3 fallback{ reflection.Specular[0], reflection.Specular[1], reflection.Specular[2] };
+			const float coverage = reflection.Probe[3];
+			if (coverage > 0.0f)
 			{
-				c[i] = std::max(c[i] + weight * (reflection.Reflectance[i] * reflection.Reflection[i] - reflection.Specular[i]), 0.0f);
+				for (int i = 0; i < 3; ++i)
+				{
+					fallback[i] = reflection.Specular[i] + coverage * (reflection.Reflectance[i] * reflection.Probe[i] - reflection.Specular[i]);
+					c[i] = std::max(c[i] + aoWeight * (fallback[i] - reflection.Specular[i]), 0.0f);
+				}
+			}
+			const float confidence = params.SsrEnabled != 0u ? std::max(reflection.Reflection[3], 0.0f) : 0.0f;
+			if (confidence > 0.0f)
+			{
+				const float weight = confidence * aoWeight;
+				for (int i = 0; i < 3; ++i)
+				{
+					c[i] = std::max(c[i] + weight * (reflection.Reflectance[i] * reflection.Reflection[i] - fallback[i]), 0.0f);
+				}
 			}
 		}
 		if (params.FogEnabled != 0u)
@@ -842,6 +1006,64 @@ namespace Swim::Render::ScreenSpace
 		return CompositeTexel(params, color, indirect, ao, ReflectionSample{}, depth, x, y);
 	}
 
+	float GlossyBlurRadius(const GpuScreenSpaceParams& params, float roughness)
+	{
+		const float r = std::clamp(roughness, 0.0f, 1.0f);
+		return std::min(GlossyBlurScale * r * std::sqrt(r), GlossyBlurMax) * (float(params.Height) / 1080.0f);
+	}
+
+	Float4 ResolvedReflectionTexel(const GpuScreenSpaceParams& params, const ColorImage& reflection, const ColorImage& normal,
+		const ScalarImage& depth, std::uint32_t x, std::uint32_t y)
+	{
+		const auto& centre = reflection.At(x, y);
+		const auto& encoded = normal.At(x, y);
+		const auto position = ViewPositionAt(params, depth, x, y);
+		if (!position)
+		{
+			return centre;
+		}
+		const int step = std::max(1, int(std::floor(GlossyBlurRadius(params, encoded[3]) * 0.5f + 0.5f)));
+		const float centreDepth = -(*position)[2];
+		const Float3 n{ encoded[0], encoded[1], encoded[2] };
+		Float3 radiance{ 0, 0, 0 };
+		float radianceWeight = 0.0f;
+		float confidence = 0.0f;
+		float weights = 0.0f;
+		for (int j = 0; j < 25; ++j)
+		{
+			const int ox = j % 5 - 2;
+			const int oy = j / 5 - 2;
+			const int tx = std::clamp(int(x) + ox * step, 0, int(reflection.Width) - 1);
+			const int ty = std::clamp(int(y) + oy * step, 0, int(reflection.Height) - 1);
+			const auto tapPosition = ViewPositionAt(params, depth, std::uint32_t(tx), std::uint32_t(ty));
+			if (!tapPosition || std::abs(-(*tapPosition)[2] - centreDepth) > 0.05f * centreDepth)
+			{
+				continue;
+			}
+			const auto& tapNormal = normal.At(std::uint32_t(tx), std::uint32_t(ty));
+			if (Dot(n, { tapNormal[0], tapNormal[1], tapNormal[2] }) < 0.9f)
+			{
+				continue;
+			}
+			const float w = GlossyTapWeights[std::abs(ox)] * GlossyTapWeights[std::abs(oy)];
+			const auto& tap = reflection.At(std::uint32_t(tx), std::uint32_t(ty));
+			const float tapConfidence = std::max(tap[3], 0.0f); // RejectedHit counts as a miss.
+			confidence += w * tapConfidence;
+			weights += w;
+			for (int c = 0; c < 3; ++c)
+			{
+				radiance[c] += w * tapConfidence * tap[c];
+			}
+			radianceWeight += w * tapConfidence;
+		}
+		if (!(weights > 0.0f))
+		{
+			return centre;
+		}
+		const float inverse = radianceWeight > 0.0f ? 1.0f / radianceWeight : 0.0f;
+		return { radiance[0] * inverse, radiance[1] * inverse, radiance[2] * inverse, confidence / weights };
+	}
+
 	ColorImage Composite(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect, const ScalarImage* ao,
 		const ScalarImage& depth, const ReflectionImages& reflections)
 	{
@@ -853,7 +1075,10 @@ namespace Swim::Render::ScreenSpace
 				ReflectionSample reflection;
 				if (reflections.Reflection && reflections.Reflectance && reflections.Specular)
 				{
-					reflection = { reflections.Reflection->At(x, y), reflections.Reflectance->At(x, y), reflections.Specular->At(x, y) };
+					reflection = { reflections.Normal
+									   ? ResolvedReflectionTexel(params, *reflections.Reflection, *reflections.Normal, depth, x, y)
+									   : reflections.Reflection->At(x, y),
+						reflections.Reflectance->At(x, y), reflections.Specular->At(x, y) };
 				}
 				result.At(x, y) =
 					CompositeTexel(params, color.At(x, y), indirect.At(x, y), ao ? ao->At(x, y) : 1.0f, reflection, depth.At(x, y), x, y);

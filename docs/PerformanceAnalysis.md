@@ -4,6 +4,8 @@ A code-level review of the runtime frame before desktop profiling on the RTX 407
 
 Items are ordered by expected impact. "Done" items changed in this revision; the others are the plan.
 
+**Update (2026-09-27):** measured on the RTX 4070 with the profiling switches, `profile` and `bench`; see [Profiling.md](Profiling.md) for the numbers. Done since: two frames in flight (item 1), descriptor pools, view cache and query reuse (item 2's recording cost), the sun cascade cache (item 4, far cascades), 32-pixel clusters, word-major masks and wave-scalarized deferred local lights (item 5), half-resolution GTAO and reflections (item 6), and a colour-only sky pass.
+
 ## 1. CPU and GPU frames run back to back (largest structural limit)
 
 `RenderGraphExecutor` keeps one submission in flight (its documented contract). Until this revision, `FrameRenderer::BeginFrame` waited for the previous frame's GPU work *before* the engine updated UI, gameplay, physics and render extraction. The frame time was therefore about CPU + GPU, not max(CPU, GPU).

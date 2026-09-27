@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -198,6 +199,24 @@ namespace Engine
 		virtual int GetOrder() const { return 0; }
 
 		virtual void Record(RenderFeatureContext& context) = 0;
+
+		// Environment contribution: a feature that draws into the sky (volumetric clouds)
+		// can also draw into the image-based lighting cube, so reflections and ambient
+		// light see it. When ContributesToEnvironment() is true the renderer re-records the
+		// environment every RenderSettings::EnvironmentRefreshSeconds with the view's camera
+		// as the probe, and calls RecordEnvironment for an overlay of
+		// EnvironmentBuilder::OverlayDesc(faceSize) (face f of the cube in rows
+		// f * faceSize.., premultiplied rgb in the cube's radiance units - lighting
+		// multiplies it by EnvironmentIntensity - and alpha = transmittance). The context's
+		// Color() and Depth() are not valid there. Returning nothing skips the overlay.
+		virtual bool ContributesToEnvironment() const { return false; }
+
+		virtual std::optional<Swim::Render::GraphTexture> RecordEnvironment(RenderFeatureContext& context, std::uint32_t faceSize)
+		{
+			(void)context;
+			(void)faceSize;
+			return std::nullopt;
+		}
 
 		bool Enabled = true;
 	};

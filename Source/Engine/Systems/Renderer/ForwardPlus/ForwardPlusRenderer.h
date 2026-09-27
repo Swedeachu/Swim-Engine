@@ -42,6 +42,16 @@ namespace Swim::Render
 		// lighting loop once instead of once per overlapping surface. Opaque is unused then.
 		ForwardPlusProgram DepthPrepass;
 		ForwardPlusProgram OpaquePrepassed;
+		// Optional back-face depth (SwimForwardBackDepth with DepthPrepassPipelineDesc): with
+		// it and ForwardPlusTargets::BackDepth, the Opaque bin is drawn once more keeping only
+		// back faces, so screen-space effects know how thick each visible surface is.
+		ForwardPlusProgram BackDepth;
+		// Optional deferred local lights (all or none, with the depth prepass):
+		// OpaqueDeferred is SwimForwardOpaqueDeferred with DeferredPipelineDesc, the compute
+		// program ForwardLocalLights.slang. See ForwardPlusFrame::DeferLocalLights.
+		ForwardPlusProgram OpaqueDeferred;
+		Rhi::ComputePipeline* LocalLightsPipeline = nullptr;
+		Rhi::PipelineLayout* LocalLightsLayout = nullptr;
 		Rhi::ComputePipeline* SortPipeline = nullptr; // ForwardTransparentSort.slang.
 		Rhi::PipelineLayout* SortLayout = nullptr;
 		// IndirectCount needs GraphicsCapabilities::IndirectCount; ZeroFilledIndirect
@@ -80,6 +90,14 @@ namespace Swim::Render
 		// renderer binds a 1x1 atlas and one empty record and clears ForwardViewFlagShadows.
 		const ShadowGraphResources* Shadows = nullptr;
 		ForwardPlusView View;
+		// The transparent sort and pass (off: only the opaque result; profiling).
+		bool Transparent = true;
+		// Shade the clustered local lights in a compute pass after the opaque pass instead of
+		// in its fragment stage (needs the renderer's deferred programs and a Color target with
+		// Storage usage; otherwise ignored). Same result; transparent draws keep the loop.
+		bool DeferLocalLights = false;
+		// Pass-name prefix for this frame (empty: the renderer's DebugName).
+		std::string DebugName;
 	};
 
 	// Viewport-sized render targets (the cluster grid's viewport).
@@ -111,7 +129,15 @@ namespace Swim::Render
 		//    (rgb), the part of Indirect a screen-space reflection replaces; 0 elsewhere.
 		std::optional<GraphTexture> Reflectance;
 		std::optional<GraphTexture> Specular;
+		// Optional (needs ForwardPlusRendererDesc::BackDepth): D32Float, DepthStencilAttachment:
+		// the reverse-Z depth of the nearest opaque back face per pixel (0 where none), cleared
+		// and written by a pass after the opaque one. Screen-space reflections take each
+		// surface's thickness from it (ScreenSpace::SurfaceThickness).
+		std::optional<GraphTexture> BackDepth;
 		bool Clear = true; // Clear color/id/depth first; otherwise load them.
+		// With Clear off: still clear every target but Color and Depth (the sky pass before
+		// the frame writes only those, instead of storing zeros to six more targets per pixel).
+		bool ClearAuxiliary = false;
 		std::array<float, 4> ClearColor{ 0, 0, 0, 0 };
 	};
 
@@ -140,6 +166,7 @@ namespace Swim::Render
 		static constexpr Rhi::Format IndirectFormat = Rhi::Format::RGBA16Float;	   // Item 76: ambient + IBL radiance.
 		static constexpr Rhi::Format ReflectanceFormat = Rhi::Format::RGBA16Float; // Item 76 (SSR): specular reflectance.
 		static constexpr Rhi::Format SpecularFormat = Rhi::Format::RGBA16Float;	   // Item 76 (SSR): specular IBL radiance.
+		static constexpr Rhi::Format MaterialFormat = Rhi::Format::RGBA16Float;	   // Deferred local lights: base colour, metalness.
 
 		// Pipeline state of a variant: both rasterize both faces (single-sided
 		// materials discard back faces in the shader, so mirrored transforms work),
@@ -154,8 +181,14 @@ namespace Swim::Render
 		// Opaque shading after the prepass: the Opaque state without depth writes (the
 		// GreaterEqual compare passes exactly the prepass's nearest surface).
 		static Rhi::GraphicsPipelineDesc PrepassedPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+		// The prepassed state with an eighth target (MaterialFormat) for deferred local lights.
+		static Rhi::GraphicsPipelineDesc DeferredPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
+		bool SupportsDeferredLocalLights() const { return desc.OpaqueDeferred.Pipeline != nullptr && desc.LocalLightsPipeline != nullptr; }
 
 		bool UsesDepthPrepass() const { return desc.DepthPrepass.Pipeline != nullptr; }
+
+		bool SupportsBackDepth() const { return desc.BackDepth.Pipeline != nullptr; }
 
 		// Draw capacities for GpuVisibilityDesc::MaterialBinCapacities.
 		static std::vector<std::uint32_t> VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t transparent);

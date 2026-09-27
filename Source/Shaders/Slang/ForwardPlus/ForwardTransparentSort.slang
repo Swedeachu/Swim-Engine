@@ -29,6 +29,9 @@ struct SortConstants
 [[vk::push_constant]] ConstantBuffer<SortConstants> Constants;
 
 static const uint Threads = 256;
+// Bins of up to SharedEntries draws sort in group-shared memory; larger ones in Scratch.
+static const uint SharedEntries = 1024;
+groupshared ForwardSortEntry Shared[SharedEntries];
 
 // ForwardPlus::SortDepth.
 float SortDepth(GpuDrawRecord record, ForwardView view)
@@ -38,65 +41,117 @@ float SortDepth(GpuDrawRecord record, ForwardView view)
 	return dot(center - view.CameraPosition, view.CameraForward);
 }
 
+ForwardSortEntry MakeEntry(uint i, uint count, uint firstCommand, ForwardView view)
+{
+	ForwardSortEntry entry;
+	if (i < count)
+	{
+		const GpuDrawRecord record = DrawRecords[firstCommand + i];
+		entry.Depth = SortDepth(record, view);
+		entry.InstanceRow = record.InstanceRow;
+		entry.SubmeshRow = record.SubmeshRow;
+		entry.Slot = firstCommand + i;
+	}
+	else
+	{
+		// Padding sorts last.
+		entry.Depth = -3.0e38;
+		entry.InstanceRow = 0xffffffffu;
+		entry.SubmeshRow = 0xffffffffu;
+		entry.Slot = 0xffffffffu;
+	}
+	return entry;
+}
+
+// The sort covers only the next power of two of this frame's count (not the bin's
+// capacity): an empty or small bin costs a handful of barriers, not the full network.
+// SortSize bit 31: zero-fill every command up to Capacity (draws without a count buffer).
 [shader("compute")]
 [numthreads(256, 1, 1)]
 void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 {
 	const uint slot = group.x;
+	const uint sortSize = Constants.SortSize & 0x7fffffffu;
+	const bool zeroFill = (Constants.SortSize & 0x80000000u) != 0u;
 	const uint firstCommand = Constants.FirstCommand + slot * Constants.Capacity;
-	const uint base = slot * Constants.SortSize;
+	const uint base = slot * sortSize;
 	const uint count = min(Counts[Constants.FirstBin + slot], Constants.Capacity);
 	const ForwardView view = Views[0];
-
-	for (uint i = thread.x; i < Constants.SortSize; i += Threads)
+	uint n = 1u;
+	while (n < count)
 	{
-		ForwardSortEntry entry;
-		if (i < count)
+		n <<= 1u;
+	}
+	n = min(n, sortSize);
+	const bool shared = n <= SharedEntries;
+
+	if (count > 1u)
+	{
+		if (shared)
 		{
-			const GpuDrawRecord record = DrawRecords[firstCommand + i];
-			entry.Depth = SortDepth(record, view);
-			entry.InstanceRow = record.InstanceRow;
-			entry.SubmeshRow = record.SubmeshRow;
-			entry.Slot = firstCommand + i;
+			for (uint i = thread.x; i < n; i += Threads)
+			{
+				Shared[i] = MakeEntry(i, count, firstCommand, view);
+			}
+			GroupMemoryBarrierWithGroupSync();
+			for (uint k = 2; k <= n; k <<= 1)
+			{
+				for (uint j = k >> 1; j > 0; j >>= 1)
+				{
+					for (uint i = thread.x; i < n; i += Threads)
+					{
+						const uint partner = i ^ j;
+						if (partner > i)
+						{
+							const ForwardSortEntry a = Shared[i];
+							const ForwardSortEntry b = Shared[partner];
+							const bool ascending = (i & k) == 0;
+							if (ascending ? ForwardSortsBefore(b, a) : ForwardSortsBefore(a, b))
+							{
+								Shared[i] = b;
+								Shared[partner] = a;
+							}
+						}
+					}
+					GroupMemoryBarrierWithGroupSync();
+				}
+			}
 		}
 		else
 		{
-			// Padding sorts last.
-			entry.Depth = -3.0e38;
-			entry.InstanceRow = 0xffffffffu;
-			entry.SubmeshRow = 0xffffffffu;
-			entry.Slot = 0xffffffffu;
-		}
-		Scratch[base + i] = entry;
-	}
-	AllMemoryBarrierWithGroupSync();
-
-	// Bitonic network over SortSize entries; every pair is owned by its lower index.
-	for (uint k = 2; k <= Constants.SortSize; k <<= 1)
-	{
-		for (uint j = k >> 1; j > 0; j >>= 1)
-		{
-			for (uint i = thread.x; i < Constants.SortSize; i += Threads)
+			for (uint i = thread.x; i < n; i += Threads)
 			{
-				const uint partner = i ^ j;
-				if (partner > i)
-				{
-					const ForwardSortEntry a = Scratch[base + i];
-					const ForwardSortEntry b = Scratch[base + partner];
-					const bool ascending = (i & k) == 0;
-					const bool swap = ascending ? ForwardSortsBefore(b, a) : ForwardSortsBefore(a, b);
-					if (swap)
-					{
-						Scratch[base + i] = b;
-						Scratch[base + partner] = a;
-					}
-				}
+				Scratch[base + i] = MakeEntry(i, count, firstCommand, view);
 			}
 			AllMemoryBarrierWithGroupSync();
+			// Bitonic network; every pair is owned by its lower index.
+			for (uint k = 2; k <= n; k <<= 1)
+			{
+				for (uint j = k >> 1; j > 0; j >>= 1)
+				{
+					for (uint i = thread.x; i < n; i += Threads)
+					{
+						const uint partner = i ^ j;
+						if (partner > i)
+						{
+							const ForwardSortEntry a = Scratch[base + i];
+							const ForwardSortEntry b = Scratch[base + partner];
+							const bool ascending = (i & k) == 0;
+							if (ascending ? ForwardSortsBefore(b, a) : ForwardSortsBefore(a, b))
+							{
+								Scratch[base + i] = b;
+								Scratch[base + partner] = a;
+							}
+						}
+					}
+					AllMemoryBarrierWithGroupSync();
+				}
+			}
 		}
 	}
 
-	for (uint i = thread.x; i < Constants.Capacity; i += Threads)
+	const uint written = zeroFill ? Constants.Capacity : count;
+	for (uint i = thread.x; i < written; i += Threads)
 	{
 		DrawIndexedIndirectCommand command;
 		command.IndexCount = 0;
@@ -107,7 +162,8 @@ void computeMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 		if (i < count)
 		{
 			// FirstInstance keeps naming the original draw record.
-			command = Commands[Scratch[base + i].Slot];
+			const uint source = count == 1u ? firstCommand : (shared ? Shared[i].Slot : Scratch[base + i].Slot);
+			command = Commands[source];
 		}
 		SortedCommands[slot * Constants.Capacity + i] = command;
 	}

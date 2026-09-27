@@ -3,17 +3,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "Engine/Math/Ray.h"
+
 #include <array>
+#include <optional>
 #include <cstdint>
 
 namespace Engine
 {
-	// A world ray (normalized direction).
-	struct CameraRay
-	{
-		glm::vec3 Origin{ 0.0f };
-		glm::vec3 Direction{ 0.0f, 0.0f, -1.0f };
-	};
+	// A world ray (normalized direction) through a screen point: Engine::Ray.
+	using CameraRay = Ray;
 
 	// A perspective camera in the engine's conventions: right-handed world space with
 	// +Y up, looking down its local -Z; the projection is the renderer's canonical
@@ -69,6 +68,20 @@ namespace Engine
 
 		// A ray through a pixel (top-left origin) of a width x height viewport.
 		CameraRay ScreenPointToRay(float x, float y, float width, float height) const;
+
+		// Screen <-> world (pixels, top-left origin, of a width x height viewport):
+		//  - WorldToScreen: the pixel a world point projects to, with its view depth (distance
+		//    along the camera's forward axis) in z; nothing for points at or behind the camera
+		//    plane. Points off screen still project (x or y outside the viewport).
+		//  - ScreenToWorld: the world point `distance` along the pixel's ray.
+		//  - ScreenToWorldAtDepth: the world point at view depth `depth` under the pixel (the
+		//    inverse of WorldToScreen).
+		std::optional<glm::vec3> WorldToScreen(const glm::vec3& world, float width, float height) const;
+		glm::vec3 ScreenToWorld(float x, float y, float distance, float width, float height) const;
+		glm::vec3 ScreenToWorldAtDepth(float x, float y, float depth, float width, float height) const;
+		// Pixel <-> normalized device coordinates (x right, y up, [-1, 1] across the viewport).
+		static glm::vec2 ScreenToNdc(float x, float y, float width, float height);
+		static glm::vec2 NdcToScreen(const glm::vec2& ndc, float width, float height);
 
 	  private:
 		glm::vec3 position{ 0.0f, 2.0f, 8.0f };

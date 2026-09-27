@@ -39,6 +39,21 @@ namespace Swim::Render
 		std::vector<GraphPassTiming> ReadTimings(); // Waits before reading query slots.
 		std::size_t GetPooledResourceCount() const;
 
+		// CPU time of the last Execute, by step, and each pass's recording callback (the
+		// profiler's view of what recording a frame costs on the CPU).
+		struct ExecuteTimings
+		{
+			double Wait = 0.0;		 // For the predecessor submission.
+			double Allocate = 0.0;	 // Transient resources from the pool (or new ones).
+			double Stage = 0.0;		 // Upload writers into the staging arena.
+			double Queries = 0.0;	 // Timestamp query pool.
+			double Record = 0.0;	 // Every pass callback and barrier.
+			double Submit = 0.0;	 // Flush, queue submission.
+			std::vector<GraphPassTiming> Passes; // CPU milliseconds per pass callback (Nanoseconds holds ns).
+		};
+
+		const ExecuteTimings& GetLastExecuteTimings() const { return lastTimings; }
+
 	  private:
 		Rhi::RhiObject& GetExport(std::uint64_t graph, std::uint32_t index, GraphKind kind) const;
 		void RecordBarrier(const GraphBarrier& barrier);
@@ -46,5 +61,6 @@ namespace Swim::Render
 		void StageBuffers(const CompiledRenderGraph& graph);
 		const Rhi::ReadbackSlice& GetReadbackSlice(GraphBuffer resource) const;
 		std::unique_ptr<Internal::GraphExecutionState> state;
+		ExecuteTimings lastTimings;
 	};
 } // namespace Swim::Render

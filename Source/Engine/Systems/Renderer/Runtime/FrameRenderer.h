@@ -99,6 +99,10 @@ namespace Engine
 		// Lights that want a shadow this frame (their GpuLightBuffer rows already carry
 		// ShadowIndex = Slot and LightFlags::CastsShadows).
 		std::span<const Swim::Render::ShadowCasterDesc> ShadowCasters;
+		// Local reflection probes (SceneRenderBridge gathers Engine::ReflectionProbe components).
+		std::span<const Swim::Render::ReflectionProbeDesc> ReflectionProbes;
+		// What moved this frame: the probe faces that see it are re-captured first.
+		std::span<const Swim::Render::ReflectionProbeMover> ReflectionMovers;
 		std::span<const UiDrawItem> Ui;
 		Swim::Text::GlyphAtlas* GlyphAtlas = nullptr; // Required when Ui is not empty (painting adds glyphs).
 		bool Capture = false;						  // Read the finished frame back (GetCapture).

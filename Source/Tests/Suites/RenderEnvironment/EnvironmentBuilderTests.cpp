@@ -4,6 +4,7 @@
 #include "Tests/Fixtures/RhiFrameCapture.h"
 #include "Tests/Framework/Test.h"
 
+#include <array>
 #include <cstring>
 #include <memory>
 
@@ -41,6 +42,8 @@ namespace
 				{ { EnvironmentIrradianceBindings::Source, T::SampledTexture },
 					{ EnvironmentIrradianceBindings::Output, T::StorageBuffer } });
 			schema(lutLayout, { { EnvironmentBrdfLutBindings::Destination, T::StorageTexture } });
+			schema(overlayLayout,
+				{ { EnvironmentOverlayBindings::Overlay, T::SampledTexture }, { EnvironmentOverlayBindings::Destination, T::StorageTexture } });
 			sampler = device.CreateSampler({});
 		}
 
@@ -86,8 +89,8 @@ namespace
 		}
 
 		Testing::MockDevice device;
-		Testing::MockPipelineLayout skyLayout, downsampleLayout, prefilterLayout, irradianceLayout, lutLayout;
-		Testing::MockComputePipeline skyPipeline, downsamplePipeline, prefilterPipeline, irradiancePipeline, lutPipeline;
+		Testing::MockPipelineLayout skyLayout, downsampleLayout, prefilterLayout, irradianceLayout, lutLayout, overlayLayout;
+		Testing::MockComputePipeline skyPipeline, downsamplePipeline, prefilterPipeline, irradiancePipeline, lutPipeline, overlayPipeline;
 		std::unique_ptr<Rhi::Sampler> sampler;
 		std::unique_ptr<RenderGraphExecutor> executor;
 	};
@@ -171,6 +174,79 @@ SWIM_TEST("Render.EnvironmentBuilder", "RecordsSkyMipsPrefilterAndIrradiancePass
 	SWIM_CHECK_EQUAL(view->GetDesc().BaseMipLevel, 2u);
 	SWIM_CHECK_EQUAL(view->GetDesc().ArrayLayerCount, 6u);
 	SWIM_CHECK(table->Element(EnvironmentIrradianceBindings::Output, 0) != nullptr);
+}
+
+SWIM_TEST("Render.EnvironmentBuilder", "OverlaysFoldIntoTheSkyFacesBeforeTheMips")
+{
+	EnvironmentWorld world;
+	EnvironmentMapDesc map;
+	map.SourceSize = 32;
+	map.PrefilteredSize = 16;
+	map.PrefilteredMipCount = 4;
+	map.PrefilterSampleCount = 48;
+	map.IrradianceFaceSize = 8;
+	const auto overlayDesc = EnvironmentBuilder::OverlayDesc(32);
+	SWIM_CHECK(overlayDesc.Extent.Width == 32 && overlayDesc.Extent.Height == 32 * 6);
+	SWIM_CHECK(overlayDesc.PixelFormat == Rhi::Format::RGBA16Float);
+	const auto overlayTexture = world.device.CreateTexture(overlayDesc);
+	SWIM_REQUIRE(overlayTexture != nullptr);
+
+	// Without the overlay program, overlays are a contract violation.
+	{
+		const EnvironmentBuilder plain(world.Desc());
+		RenderGraph graph;
+		const std::array overlays{ graph.ImportTexture(*overlayTexture, Rhi::ResourceState::ShaderRead) };
+		SWIM_CHECK_THROWS(plain.Record(graph, {}, map, {}, overlays), std::invalid_argument);
+	}
+
+	auto desc = world.Desc();
+	desc.Overlay = { &world.overlayPipeline, &world.overlayLayout, 0 };
+	const EnvironmentBuilder builder(desc);
+	{
+		// The atlas must match the source size.
+		auto wrongDesc = EnvironmentBuilder::OverlayDesc(16);
+		const auto wrong = world.device.CreateTexture(wrongDesc);
+		RenderGraph graph;
+		const std::array overlays{ graph.ImportTexture(*wrong, Rhi::ResourceState::ShaderRead) };
+		SWIM_CHECK_THROWS(builder.Record(graph, {}, map, {}, overlays), std::invalid_argument);
+	}
+
+	RenderGraph graph;
+	const std::array overlays{ graph.ImportTexture(*overlayTexture, Rhi::ResourceState::ShaderRead) };
+	const auto environment = builder.Record(graph, {}, map, {}, overlays);
+	// Sky + overlay + 3 mips + 4 prefilter mips + irradiance.
+	SWIM_CHECK_EQUAL(environment.Passes.size(), std::size_t(10));
+	graph.Export(environment.Prefiltered, Rhi::ResourceState::ShaderRead);
+	graph.Export(environment.Irradiance, Rhi::ResourceState::ShaderRead);
+	world.Run(graph);
+
+	// Six overlay dispatches (one per face of mip 0) between the sky and the mips.
+	const auto dispatches = world.Commands("Dispatch");
+	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(6 + 6 + 18 + 24 + 1));
+	SWIM_CHECK(dispatches[6].SourceOffset == 4 && dispatches[6].DestinationOffset == 4);
+	SWIM_CHECK(dispatches[12].SourceOffset == 2); // Mip 1.
+	const auto constants = world.Commands("PushConstants");
+	SWIM_REQUIRE_EQUAL(constants.size(), dispatches.size());
+	for (std::uint32_t face = 0; face < 6; ++face)
+	{
+		const auto overlay = EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[6 + face]);
+		SWIM_CHECK_EQUAL(overlay[0], 32u);
+		SWIM_CHECK_EQUAL(overlay[1], face);
+	}
+	SWIM_CHECK((EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[12])[0]) == 16u);
+
+	// Reflections only: a second, clear sky cube (sky + its mips) feeds the irradiance.
+	RenderGraph reflectionsOnly;
+	const std::array reflectionOverlays{ reflectionsOnly.ImportTexture(*overlayTexture, Rhi::ResourceState::ShaderRead) };
+	const auto split = builder.Record(reflectionsOnly, {}, map, {}, reflectionOverlays, false);
+	SWIM_CHECK_EQUAL(split.Passes.size(), std::size_t(10 + 4));
+	reflectionsOnly.Export(split.Prefiltered, Rhi::ResourceState::ShaderRead);
+	reflectionsOnly.Export(split.Irradiance, Rhi::ResourceState::ShaderRead);
+	world.Run(reflectionsOnly);
+	// The clear cube's last mip is below the irradiance mip, and the graph may cull it.
+	const auto splitDispatches = world.Commands("Dispatch").size();
+	SWIM_CHECK(splitDispatches >= std::size_t(6 + 6 + 18 + 6 + 12 + 24 + 1));
+	SWIM_CHECK(splitDispatches <= std::size_t(6 + 6 + 18 + 6 + 18 + 24 + 1));
 }
 
 SWIM_TEST("Render.EnvironmentBuilder", "PrefilterReadsTheWholeCubeAndWritesOneFacePerDispatch")

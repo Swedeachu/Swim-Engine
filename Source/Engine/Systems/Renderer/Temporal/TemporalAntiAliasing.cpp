@@ -115,7 +115,9 @@ namespace Swim::Render
 		resources.FrameIndex = frameIndex;
 		resources.JitterPixels = Temporal::JitterPixels(frameIndex, frame.Settings.JitterPhases);
 		const std::uint32_t target = historyValid ? 1u - latest : latest;
-		resources.History = historyValid ? graph.ImportTexture(*history[latest], S::ShaderRead) : frame.Color;
+		const bool reuseImport = historyValid && importedGraph == &graph;
+		resources.History = historyValid ? (reuseImport ? importedHistory : graph.ImportTexture(*history[latest], S::ShaderRead)) : frame.Color;
+		importedGraph = nullptr;
 		// Write defines every texel: an undefined import is enough, exported for the next frame.
 		resources.Output = graph.ImportTexture(*history[target], written[target] ? S::ShaderRead : S::Undefined);
 		graph.Export(resources.Output, S::ShaderRead);
@@ -195,5 +197,19 @@ namespace Swim::Render
 		historyValid = true;
 		++frameIndex;
 		return resources;
+	}
+
+	std::optional<GraphTexture> TemporalAntiAliasing::ImportPreviousOutput(RenderGraph& graph, std::uint32_t frameWidth, std::uint32_t frameHeight)
+	{
+		if (!historyValid || !history[latest] || frameWidth != width || frameHeight != height)
+		{
+			return std::nullopt;
+		}
+		if (importedGraph != &graph)
+		{
+			importedHistory = graph.ImportTexture(*history[latest], Rhi::ResourceState::ShaderRead);
+			importedGraph = &graph;
+		}
+		return importedHistory;
 	}
 } // namespace Swim::Render

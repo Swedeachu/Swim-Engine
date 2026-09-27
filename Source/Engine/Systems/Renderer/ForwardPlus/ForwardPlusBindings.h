@@ -55,6 +55,27 @@ namespace Swim::Render
 		static constexpr std::uint32_t MaxDraws = 65536; // Transparent capacity per page slot.
 	};
 
+	// ForwardLocalLights.slang (ForwardPlusFrame::DeferLocalLights): one thread per pixel
+	// adds the clustered local lights to the colour target after the opaque pass.
+	struct ForwardLocalLightsBindings
+	{
+		static constexpr std::uint32_t View = 0; // StructuredBuffer<ForwardView>.
+		static constexpr std::uint32_t Lights = 1;
+		static constexpr std::uint32_t LightHeader = 2;
+		static constexpr std::uint32_t ClusterGrid = 3;
+		static constexpr std::uint32_t ClusterRecords = 4;
+		static constexpr std::uint32_t ClusterIndices = 5;
+		static constexpr std::uint32_t Depth = 6;	 // Texture2D<float>: the opaque depth (depth aspect).
+		static constexpr std::uint32_t Normal = 7;	 // Texture2D<float4>: ForwardPlusTargets::Normal.
+		static constexpr std::uint32_t Material = 8; // Texture2D<float4>: base colour, metalness.
+		static constexpr std::uint32_t Color = 9;	 // RWTexture2D<float4> (rgba16f): ForwardPlusTargets::Color.
+		static constexpr std::uint32_t ShadowAtlas = 10;
+		static constexpr std::uint32_t ShadowRecords = 11;
+		static constexpr std::uint32_t ShadowViews = 12;
+		static constexpr std::uint32_t Count = 13;
+		static constexpr std::uint32_t ThreadGroupSize = 8; // 8 x 8.
+	};
+
 	// The bindless space (1) both Forward+ programs share: `textures` sampled 2D
 	// textures and `samplers` samplers, partially bound and update-after-bind.
 	inline Rhi::DescriptorSchemaDesc ForwardPlusBindlessSpace(std::uint32_t textures, std::uint32_t samplers)

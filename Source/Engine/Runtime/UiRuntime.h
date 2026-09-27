@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -80,6 +81,14 @@ namespace Engine
 
 		std::uint32_t GetCanvasCount() const { return static_cast<std::uint32_t>(canvases.size()); }
 
+		// Engine-owned overlays (the runtime console, debug tools): full-viewport screen
+		// canvases that are not part of any scene, persist across scene switches and draw
+		// above the scene's screen canvases (then by order). Hidden overlays neither draw nor
+		// take input.
+		std::uint32_t AddOverlay(std::shared_ptr<Swim::UI::UiDocument> document, std::int32_t order);
+		void SetOverlayVisible(std::uint32_t overlay, bool visible);
+		void RemoveOverlay(std::uint32_t overlay);
+
 	  private:
 		struct CanvasState
 		{
@@ -98,7 +107,17 @@ namespace Engine
 		};
 
 		void RemoveAll();
+		void SyncOverlays();
 
+		struct OverlayState
+		{
+			CanvasState Canvas;
+			bool Visible = false;
+			bool Routed = false;
+		};
+
+		std::map<std::uint32_t, OverlayState> overlays;
+		std::uint32_t nextOverlay = 1;
 		std::shared_ptr<const Swim::Text::FontCollection> fonts;
 		std::shared_ptr<const Swim::Text::FontCollection> boldFonts;
 		std::shared_ptr<const Swim::Text::FontCollection> monoFonts;

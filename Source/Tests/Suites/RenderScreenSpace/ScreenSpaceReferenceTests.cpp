@@ -938,3 +938,165 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsDoNotAliasToTheStride")
 	SWIM_CHECK(coarseHits >= fineHits * 70 / 100);
 	SWIM_CHECK(agree >= coarseHits * 97 / 100);
 }
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
+{
+	// A field of boxes seen from above with the default settings. The march jitter is fixed
+	// per pixel (it used to rotate every frame, and hits that came and went with it were
+	// grain TAA could not resolve), so the frame index changes nothing.
+	Scene::Scene field;
+	for (int z = 0; z < 6; ++z)
+	{
+		for (int x = 0; x < 6; ++x)
+		{
+			const float h = 0.3f + 1.4f * (0.5f + 0.5f * std::sin(float(x) * 1.1f) * std::cos(float(z) * 0.9f));
+			field.Boxes.push_back({ { float(x) * 0.55f - 0.2f, 0.0f, float(z) * 0.55f - 0.2f }, { float(x) * 0.55f + 0.2f, h, float(z) * 0.55f + 0.2f } });
+		}
+	}
+	constexpr std::uint32_t w = 320;
+	constexpr std::uint32_t h = 180;
+	const auto view = Scene::View({ 1.3f, 2.6f, 4.2f }, { 1.4f, 0.6f, 1.2f }, float(w) / float(h));
+	const auto inputs = Scene::Render(field, view, w, h, 0.0f);
+	ScreenSpaceSettings settings;
+	settings.AmbientOcclusion.Enabled = false;
+	settings.Reflections.Enabled = true;
+	constexpr int frames = 16;
+	std::vector<int> hits(std::size_t(w) * h, 0);
+	std::vector<std::array<float, 4>> bounds(hits.size(), { 1.0e9f, -1.0e9f, 1.0e9f, -1.0e9f });
+	for (int f = 0; f < frames; ++f)
+	{
+		const auto params = BuildScreenSpaceParams(settings, view, w, h, std::uint32_t(f));
+		for (std::uint32_t y = 0; y < h; ++y)
+		{
+			for (std::uint32_t x = 0; x < w; ++x)
+			{
+				const auto hit = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
+				if (!hit)
+				{
+					continue;
+				}
+				const std::size_t i = std::size_t(y) * w + x;
+				++hits[i];
+				auto& b = bounds[i];
+				b = { std::min(b[0], hit->HitX), std::max(b[1], hit->HitX), std::min(b[2], hit->HitY), std::max(b[3], hit->HitY) };
+			}
+		}
+	}
+	std::uint32_t any = 0, flicker = 0, jumps = 0;
+	for (std::size_t i = 0; i < hits.size(); ++i)
+	{
+		if (hits[i] == 0)
+		{
+			continue;
+		}
+		++any;
+		if (hits[i] != frames)
+		{
+			++flicker;
+		}
+		else if (bounds[i][1] - bounds[i][0] > 2.0f || bounds[i][3] - bounds[i][2] > 2.0f)
+		{
+			++jumps;
+		}
+	}
+	std::printf("             [ssr] %u pixels hit over %d frames: %u flicker, %u move more than 2 px\n", any, frames, flicker, jumps);
+	SWIM_REQUIRE(any > 9000u);
+	SWIM_CHECK_EQUAL(flicker, 0u);
+	SWIM_CHECK_EQUAL(jumps, 0u);
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsReadThePreviousFrameAtTheReprojectedHit")
+{
+	// Reflections of reflections: with history, a hit takes the previous frame's finished
+	// color (which holds that surface's own reflection) where the hit was last frame.
+	const auto scene = MirrorScene();
+	const auto view = MirrorView();
+	const auto inputs = Scene::Render(scene, view, Width, Height, 0.0f);
+	auto params = BuildScreenSpaceParams(MirrorSettings(), view, Width, Height, 0);
+	Ss::ColorImage current(Width, Height, { 0.2f, 0.2f, 0.2f, 1.0f });
+	Ss::ColorImage previous(Width, Height, { 3.0f, 1.0f, 0.5f, 1.0f });
+	Ss::VelocityImage still(Width, Height, { 0.0f, 0.0f });
+	Ss::ColorImage indirect(Width, Height, { 0, 0, 0, 0 });
+	std::uint32_t hits = 0;
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			params.SsrHistory = 0u;
+			const auto plain = Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, current, indirect, nullptr, x, y, { &previous, &still });
+			params.SsrHistory = 1u;
+			const auto withHistory =
+				Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, current, indirect, nullptr, x, y, { &previous, &still });
+			if (plain[3] > 0.0f)
+			{
+				++hits;
+				SWIM_CHECK(Near(plain[0], 0.2f, 1.0e-5f));
+				SWIM_CHECK(Near(withHistory[0], 3.0f, 1.0e-4f) && Near(withHistory[2], 0.5f, 1.0e-4f));
+				SWIM_CHECK(withHistory[3] == plain[3]); // Only the radiance changes.
+			}
+		}
+	}
+	SWIM_REQUIRE(hits > 100u);
+
+	// Motion moves the lookup; one that leaves the previous image falls back to the current color.
+	Ss::ColorImage stripes(Width, Height);
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			stripes.At(x, y) = { float(x), 0.0f, 0.0f, 1.0f };
+		}
+	}
+	Ss::VelocityImage shifted(Width, Height, { 4.0f / float(Width), 0.0f }); // Moved 4 px right since last frame.
+	Ss::VelocityImage gone(Width, Height, { 2.0f, 0.0f });					  // Came from far off screen.
+	params.SsrHistory = 1u;
+	const auto a = Ss::FilteredHitRadiance(params, current, indirect, nullptr, 50.5f, 20.5f, { &stripes, &shifted });
+	SWIM_CHECK(Near(a[0], 46.0f, 1.0e-3f));
+	const auto b = Ss::FilteredHitRadiance(params, current, indirect, nullptr, 50.5f, 20.5f, { &stripes, &gone });
+	SWIM_CHECK(Near(b[0], 0.2f, 1.0e-5f));
+}
+
+SWIM_TEST("Render.ScreenSpace.Reference", "TheGlossyResolveSoftensRoughReflectionsOnTheSameSurface")
+{
+	// A flat wall: a mirror texel stays as it is; a rough one averages its neighbours on the
+	// wall (never across a depth or normal edge), weighting radiance by confidence.
+	const auto view = Scene::View({ 0.0f, 0.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, float(Width) / float(Height));
+	Scene::Scene wall;
+	wall.Ground = false;
+	wall.Boxes.push_back({ { -10.0f, -10.0f, -1.0f }, { 10.0f, 10.0f, 0.0f } });
+	auto mirror = Scene::Render(wall, view, Width, Height, 0.0f);
+	auto rough = Scene::Render(wall, view, Width, Height, 0.62f); // A one-pixel footprint at 160 x 90.
+	const auto params = BuildScreenSpaceParams(MirrorSettings(), view, Width, Height, 0);
+	SWIM_CHECK(Ss::GlossyBlurRadius(params, 0.0f) == 0.0f);
+	SWIM_CHECK(Near(Ss::GlossyBlurRadius(params, 0.5f), 20.0f * 0.5f * std::sqrt(0.5f) * float(Height) / 1080.0f, 1.0e-5f));
+	Ss::ColorImage reflection(Width, Height, { 0.0f, 0.0f, 0.0f, 0.0f });
+	for (std::uint32_t y = 0; y < Height; ++y)
+	{
+		for (std::uint32_t x = 0; x < Width; ++x)
+		{
+			reflection.At(x, y) = (x + y) % 2 == 0 ? Ss::Float4{ 2.0f, 0.0f, 0.0f, 1.0f } : Ss::Float4{ 0.0f, 0.0f, 0.0f, 0.0f };
+		}
+	}
+	const std::uint32_t x = Width / 2, y = Height / 2;
+	// Even a mirror's one-pixel dither is smoothed (the one-pixel-step footprint)...
+	const auto sharp = Ss::ResolvedReflectionTexel(params, reflection, mirror.Normal, mirror.Depth, x, y);
+	SWIM_CHECK(Near(sharp[0], 2.0f, 1.0e-5f) && sharp[3] > 0.3f && sharp[3] < 0.7f);
+	// ...while a uniform reflection stays exactly as it is.
+	Ss::ColorImage flat(Width, Height, { 0.5f, 0.25f, 0.125f, 0.75f });
+	const auto same = Ss::ResolvedReflectionTexel(params, flat, mirror.Normal, mirror.Depth, x, y);
+	SWIM_CHECK(Near(same[0], 0.5f, 1.0e-6f) && Near(same[2], 0.125f, 1.0e-6f) && Near(same[3], 0.75f, 1.0e-6f));
+	SWIM_CHECK(Ss::GlossyBlurRadius(params, 0.62f) >= 0.5f && Ss::GlossyBlurRadius(params, 0.62f) < 1.5f);
+	const auto& tall = params;
+	const auto soft = Ss::ResolvedReflectionTexel(tall, reflection, rough.Normal, rough.Depth, x, y);
+	SWIM_CHECK(Near(soft[0], 2.0f, 1.0e-5f));   // Only hits carry radiance.
+	SWIM_CHECK(soft[3] > 0.0f && soft[3] < 1.0f); // Confidence is averaged with the misses.
+	// Across a normal edge nothing is borrowed: a lone texel whose neighbours face away keeps its value.
+	auto facing = rough.Normal;
+	for (auto& texel : facing.Texels)
+	{
+		texel = { 1.0f, 0.0f, 0.0f, 0.5f };
+	}
+	facing.At(x, y) = rough.Normal.At(x, y);
+	const auto alone = Ss::ResolvedReflectionTexel(tall, reflection, facing, rough.Depth, x, y);
+	SWIM_CHECK(alone == reflection.At(x, y));
+}

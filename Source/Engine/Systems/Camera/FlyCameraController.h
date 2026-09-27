@@ -14,6 +14,10 @@ namespace Engine
 	//   Space / Shift             move up / down (world up)
 	//   Ctrl                      boost
 	//   mouse wheel (while RMB)   scale the base speed
+	//   mouse wheel               zoom in / out (narrows or widens the field of view)
+	//   middle mouse button       reset the zoom
+	//
+	// Zoom changes ease in (exponentially, in log-zoom space) instead of snapping.
 	//
 	// It uses real time, so it keeps working while the simulation is paused, slowed or
 	// stopped; give its entity Playing | Paused | Stopped to fly in every state. An
@@ -29,6 +33,20 @@ namespace Engine
 			float MouseSensitivity = 0.1f; // Degrees per pixel.
 			float MinSpeed = 0.25f;
 			float MaxSpeed = 200.0f;
+			float ZoomStep = 1.15f;		// Zoom factor per wheel notch.
+			float MinZoom = 0.6f;		// < 1 widens the view (zoomed out).
+			float MaxZoom = 8.0f;
+			float ZoomSmoothing = 0.12f; // Seconds for the zoom to cover ~63 % of the way.
+			float MaxFieldOfView = 150.0f;
+		};
+
+		// The zoom the controller eases toward. Zoom = default field of view / field of view.
+		struct ZoomState
+		{
+			float Zoom = 1.0f;
+			float Target = 1.0f;
+			float BaseFieldOfView = 0.0f;	 // Field of view at zoom 1 (0: not captured yet).
+			float AppliedFieldOfView = 0.0f; // What the controller last set (detects outside changes).
 		};
 
 		FlyCameraController(Scene* scene, entt::entity owner);
@@ -72,9 +90,17 @@ namespace Engine
 
 		static void Apply(class Camera& camera, Settings& settings, const FrameInput& input, float dt);
 
+		// Pure zoom step used by Update (and tests): `wheel` notches (positive zooms in),
+		// `reset` returns the target to 1. Captures the camera's field of view as the base
+		// the first time, and again whenever something else changed it.
+		static void ApplyZoom(class Camera& camera, ZoomState& state, const Settings& settings, float wheel, bool reset, float dt);
+
+		const ZoomState& GetZoom() const { return zoom; }
+
 	  private:
 		Settings settings;
 		std::function<bool()> inputGate;
 		bool looking = false;
+		ZoomState zoom;
 	};
 } // namespace Engine

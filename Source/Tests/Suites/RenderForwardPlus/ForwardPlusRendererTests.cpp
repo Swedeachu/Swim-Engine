@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 using namespace Swim;
@@ -370,6 +371,89 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::ShadowViews, 0) == world.shadowViews.get());
 	SWIM_CHECK(table->Element(ForwardPlusDrawBindings::ShadowAtlas, 0) != nullptr);
 	SWIM_CHECK_EQUAL(table->ElementWrites, ForwardPlusDrawBindings::Count);
+}
+
+SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterTheOpaquePass")
+{
+	ForwardWorld world;
+	using T = Rhi::DescriptorType;
+	Rhi::DescriptorSchemaDesc local{ 0, {} };
+	for (std::uint32_t binding = 0; binding < ForwardLocalLightsBindings::Count; ++binding)
+	{
+		using B = ForwardLocalLightsBindings;
+		const auto type = binding == B::Color ? T::StorageTexture
+			: binding == B::Depth || binding == B::Normal || binding == B::Material || binding == B::ShadowAtlas
+			? T::SampledTexture
+			: T::ReadOnlyStorageBuffer;
+		local.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
+	}
+	Testing::MockPipelineLayout localLayout, depthLayout, prepassedLayout, deferredLayout;
+	localLayout.program.Interface.DescriptorSchemas = { local };
+	depthLayout.program.Interface = world.opaqueLayout.program.Interface;
+	prepassedLayout.program.Interface = world.opaqueLayout.program.Interface;
+	deferredLayout.program.Interface = world.opaqueLayout.program.Interface;
+	MockGraphicsPipeline depthPipeline, prepassedPipeline, deferredPipeline;
+	Testing::MockComputePipeline localPipeline;
+
+	auto desc = world.Desc();
+	desc.OpaqueDeferred = { &deferredPipeline, &deferredLayout };
+	desc.LocalLightsPipeline = &localPipeline;
+	desc.LocalLightsLayout = &localLayout;
+	// The deferred programs need the depth prepass.
+	SWIM_CHECK_THROWS(ForwardPlusRenderer(world.fixture.device, desc), std::invalid_argument);
+	desc.DepthPrepass = { &depthPipeline, &depthLayout };
+	desc.OpaquePrepassed = { &prepassedPipeline, &prepassedLayout };
+	const ForwardPlusRenderer renderer(world.fixture.device, desc);
+	SWIM_CHECK(renderer.SupportsDeferredLocalLights());
+	SWIM_CHECK_EQUAL(ForwardPlusRenderer::DeferredPipelineDesc(deferredLayout.program, deferredLayout).ColorFormats.size(), std::size_t(8));
+
+	for (const bool storage : { true, false })
+	{
+		RenderGraph graph;
+		ForwardPlusFrame frame;
+		world.Import(graph, frame, true);
+		frame.DeferLocalLights = true;
+		auto targets = world.Targets(graph);
+		if (storage)
+		{
+			Rhi::TextureDesc color;
+			color.Extent = { ForwardWorld::Width, ForwardWorld::Height, 1 };
+			color.PixelFormat = ForwardPlusRenderer::ColorFormat;
+			color.Usage = Rhi::TextureUsage::ColorAttachment | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource;
+			targets.Color = graph.CreateTexture(color);
+			Rhi::TextureDesc depth = color;
+			depth.PixelFormat = CanonicalDepthFormat;
+			depth.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled;
+			targets.Depth = graph.CreateTexture(depth);
+		}
+		const auto resources = renderer.Record(graph, frame, targets);
+		graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
+		// Without a storage colour target the frame stays forward (the prepassed program).
+		SWIM_CHECK_EQUAL(resources.LocalLightsPass.Index != std::numeric_limits<std::uint32_t>::max(), storage);
+		SWIM_CHECK_EQUAL(resources.Material.Index != std::numeric_limits<std::uint32_t>::max(), storage);
+		world.fixture.device.Commands->clear();
+		world.fixture.executor->Execute(graph.Compile());
+		world.fixture.executor->Wait();
+		const auto pipelines = world.Commands("BindGraphicsPipeline");
+		SWIM_REQUIRE(pipelines.size() >= 2u);
+		SWIM_CHECK(pipelines[1].Source == (storage ? static_cast<const void*>(&deferredPipeline) : &prepassedPipeline));
+		const auto computes = world.Commands("BindComputePipeline");
+		const bool localBound = std::any_of(computes.begin(), computes.end(),
+			[&](const Testing::MockCommand& command)
+			{
+				return command.Source == &localPipeline;
+			});
+		SWIM_CHECK_EQUAL(localBound, storage);
+		if (storage)
+		{
+			SWIM_CHECK(graph.GetDesc(resources.Material).PixelFormat == ForwardPlusRenderer::MaterialFormat);
+			// One 8 x 8 group per tile of the grid's viewport.
+			const auto dispatches = world.Commands("Dispatch");
+			SWIM_REQUIRE(!dispatches.empty());
+			SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, (ForwardWorld::Width + 7u) / 8u);
+			SWIM_CHECK_EQUAL(dispatches[0].DestinationOffset, (ForwardWorld::Height + 7u) / 8u);
+		}
+	}
 }
 
 SWIM_TEST("Render.ForwardPlusRenderer", "FallbacksForMissingEnvironmentAndIndirectCount")

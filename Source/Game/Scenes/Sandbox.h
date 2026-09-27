@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Systems/Renderer/Features/CameraEffects.h"
+#include "Engine/Systems/Renderer/Features/GravitationalLensing.h"
 #include "Engine/Systems/Renderer/Features/LensFlare.h"
 #include "Engine/Systems/Renderer/Features/SunShafts.h"
 #include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
@@ -19,6 +21,7 @@
 namespace Game
 {
 	class BallShooter;
+	class ReflectionLabFloor;
 
 	// The sandbox demo (Phase 23): every runtime system in one scene.
 	//
@@ -68,6 +71,8 @@ namespace Game
 		void SetSunAngles(float elevationDegrees, float azimuthDegrees);
 		// The sandbox's sky, ambient, exposure, tone map and grading (applied once at startup).
 		static void ApplyTropicalLook(Engine::RenderSettings& settings);
+		static constexpr float TropicalContrast = 1.04f;
+		static constexpr float TropicalSaturation = 1.39f;
 		// Volumetric clouds, sun shafts and a lens flare as renderer features.
 		void AddAtmosphereFeatures();
 
@@ -105,13 +110,34 @@ namespace Game
 
 		Engine::LensFlare* GetLensFlare() const { return lensFlare.get(); }
 
+		// The camera (Camera/Post tab, "sandbox.camera <preset>"): depth of field, lens and
+		// sensor features, and presets that derive them and the grading from a CameraLook.
+		Engine::DepthOfField* GetDepthOfField() const { return depthOfField.get(); }
+
+		Engine::CameraLens* GetCameraLens() const { return cameraLens.get(); }
+
+		Engine::FilmSensor* GetFilmSensor() const { return filmSensor.get(); }
+
+		void ApplyCameraPreset(Engine::CameraPreset preset);
+
+		Engine::CameraPreset GetCameraPreset() const { return cameraPreset; }
+
+		// The draggable black hole (left mouse) and the lensing feature it drives.
+		Engine::GravitationalLensing* GetLensing() const { return lensing.get(); }
+
+		entt::entity GetBlackHole() const { return blackHole; }
+
+		static glm::vec3 GetBlackHoleHome();
+
 		glm::vec3 GetSwarmMin() const { return swarmMin; }
 
 		glm::vec3 GetSwarmMax() const { return swarmMax; }
 
 		std::uint32_t GetBuildCount() const { return builds; }
 
-		// The control panel tab the HUD shows (the "sandbox.tab" command sets it).
+		// The control panel tab the HUD shows (the "sandbox.tab" command sets it):
+		// Simulation, Rendering, Camera/Post, Scene.
+		static constexpr std::uint32_t SandboxTabCount = 4;
 		void RequestTab(std::uint32_t tab) { requestedTab = tab; }
 
 		// All sandbox UI on/off: the HUD and every world canvas (C, or "sandbox.hud 0|1").
@@ -120,6 +146,15 @@ namespace Game
 		bool IsHudVisible() const { return hudVisible; }
 
 		std::uint32_t GetRequestedTab() const { return requestedTab; }
+
+		// The reflection lab (hybrid reflection regression cases) and its floor pad.
+		static glm::vec3 GetReflectionLabCenter();
+
+		ReflectionLabFloor* GetLabFloor() const { return labFloor; }
+
+		// Hides (or shows) every entity with `tag`: meshes and lights (the scene.* toggles).
+		void SetGroupShown(Engine::TagId tag, bool shown);
+		bool IsGroupShown(Engine::TagId tag) const;
 
 		// True while the UI has the pointer or keyboard (gameplay input stands back).
 		bool IsUiCapturing() const;
@@ -149,6 +184,9 @@ namespace Game
 		void BuildTentacles();
 		void BuildSponza();
 		void BuildLightSwarm();
+		void BuildReflectionLab();
+		void BuildBlackHole();
+		void RegisterProfilingToggles();
 		void BuildWorldUi();
 		void BuildHud();
 		void SpawnBallAt(const glm::vec3& position, const glm::vec3& velocity);
@@ -160,7 +198,7 @@ namespace Game
 		std::shared_ptr<Swim::UI::UiDocument> infoDocument;
 		Swim::UI::UiNodeId infoBody;
 		Swim::UI::UiNodeId infoButton;
-		float sunElevation = 38.0f;
+		float sunElevation = 62.0f; // Midday.
 		float sunAzimuth = 35.0f;
 		bool cameraPlaced = false;
 		bool rainBalls = false;
@@ -179,8 +217,17 @@ namespace Game
 		std::shared_ptr<Engine::VolumetricClouds> clouds;
 		std::shared_ptr<Engine::SunShafts> sunShafts;
 		std::shared_ptr<Engine::LensFlare> lensFlare;
+		std::shared_ptr<Engine::DepthOfField> depthOfField;
+		std::shared_ptr<Engine::CameraLens> cameraLens;
+		std::shared_ptr<Engine::FilmSensor> filmSensor;
+		std::shared_ptr<Engine::GravitationalLensing> lensing;
+		entt::entity blackHole = entt::null;
+		std::unordered_map<std::uint32_t, bool> hiddenGroups; // TagId::Value -> hidden.
+		bool swarmMotion = true;
+		Engine::CameraPreset cameraPreset = Engine::CameraPreset::Off;
 		glm::vec3 swarmMin{ 0.0f };
 		glm::vec3 swarmMax{ 0.0f };
 		std::mt19937 random{ 1234u };
+		ReflectionLabFloor* labFloor = nullptr;
 	};
 } // namespace Game
