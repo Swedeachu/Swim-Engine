@@ -23,8 +23,10 @@
 // Depth prepass (SwimForwardDepth): the opaque vertex stage and a fragment stage that only
 // rejects culled faces and alpha-masked texels, writing depth. The opaque colour pass that
 // follows it (SwimForwardOpaquePrepassed, FORWARD_PREPASSED=1) tests that depth (reverse-Z
-// GreaterOrEqual, no depth writes) with early fragment tests and never discards, so each
-// pixel is shaded once instead of once per overlapping surface.
+// GreaterOrEqual, no depth writes) with early fragment tests, so each pixel is shaded once
+// instead of once per overlapping surface. It still discards culled faces and masked
+// texels exactly like the prepass: those left no depth, so they would pass the test over
+// the surface behind them.
 #ifndef FORWARD_DEPTH_ONLY
 #define FORWARD_DEPTH_ONLY 0
 #endif
@@ -264,12 +266,15 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const StandardMaterialParameters material = Materials[input.Material];
 	// ForwardPlus::BuildFrame: the rasterizer's facing, corrected for mirroring transforms.
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
-#if !FORWARD_PREPASSED
+	// Also after the depth prepass: the prepass wrote no depth where it rejected a culled
+	// face or a masked texel, so the surface behind is there and this fragment (nearer)
+	// passes the GreaterOrEqual test. Without the discard it would be shaded over that
+	// surface, and which one wins depends on the (unordered, GPU-compacted) draw order:
+	// alpha-tested foliage flickered between its leaves and its whole card.
 	if (ForwardCullsFace(material, frontFacing))
 	{
 		discard;
 	}
-#endif
 	const SamplerState materialSampler = Samplers[NonUniformResourceIndex(material.MaterialSampler)];
 	StandardPbrTexels texels;
 	texels.BaseColor = Textures[NonUniformResourceIndex(material.BaseColorTexture)].Sample(materialSampler, input.Uv);
@@ -283,12 +288,10 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float3 tangent = normalize(input.Tangent.xyz - normal * dot(normal, input.Tangent.xyz) + float3(1.0e-20, 0.0, 0.0));
 	const float3 bitangent = cross(normal, tangent) * (input.Tangent.w < 0.0 ? -1.0 : 1.0);
 	const StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
-#if !FORWARD_PREPASSED
 	if (surface.Discard)
 	{
 		discard;
 	}
-#endif
 
 	const ClusterGrid grid = Grid[0];
 	const float3 toCamera = normalize(view.CameraPosition - input.WorldPosition);
