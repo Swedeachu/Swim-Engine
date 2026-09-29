@@ -12,7 +12,9 @@ namespace
 
 	class LifetimeObject final : public Swim::Rhi::RhiObject
 	{
+
 	public:
+
 		explicit LifetimeObject(std::uint32_t& destroyCount)
 			: destroyCount(destroyCount)
 		{
@@ -29,7 +31,9 @@ namespace
 		}
 
 	private:
+
 		std::uint32_t& destroyCount;
+
 	};
 
 }
@@ -181,6 +185,7 @@ SWIM_TEST("RHI.FrameLifetime", "SkippedAcquisitionCancelsWithoutSubmissionOrTime
 	frames->SubmitCurrent();
 	const auto previousPoint = frames->GetLastSubmittedPoint();
 	const auto skippedIndex = frames->BeginFrame().Index;
+
 	for (unsigned retry = 0; retry < 4; ++retry)
 	{
 		frames->CancelFrame();
@@ -188,6 +193,7 @@ SWIM_TEST("RHI.FrameLifetime", "SkippedAcquisitionCancelsWithoutSubmissionOrTime
 		SWIM_CHECK_EQUAL(frames->GetLastSubmittedValue(), previousPoint.Value);
 		SWIM_CHECK_EQUAL(frames->BeginFrame().Index, skippedIndex);
 	}
+
 	SWIM_CHECK_EQUAL(frames->SubmitCurrent(), previousPoint.Value + 1);
 }
 

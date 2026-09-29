@@ -5,7 +5,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanCommandCapture* capture = nullptr;
+
 	}
 
 	VulkanCommandCapture::VulkanCommandCapture()
@@ -31,6 +33,7 @@ namespace Swim::Testing
 			{
 				capture->Images.push_back(info->pImageMemoryBarriers[i]);
 			}
+
 			for (std::uint32_t i = 0; i < info->bufferMemoryBarrierCount; ++i)
 			{
 				capture->Buffers.push_back(info->pBufferMemoryBarriers[i]);
@@ -40,12 +43,15 @@ namespace Swim::Testing
 		{
 			++capture->BeginCount;
 			capture->Colors.clear();
+
 			for (std::uint32_t i = 0; i < info->colorAttachmentCount; ++i)
 			{
 				capture->Colors.push_back(info->pColorAttachments[i]);
 			}
+
 			capture->HasDepth = info->pDepthAttachment != nullptr;
 			capture->HasStencil = info->pStencilAttachment != nullptr;
+
 			if (capture->HasDepth)
 			{
 				capture->Depth = *info->pDepthAttachment;

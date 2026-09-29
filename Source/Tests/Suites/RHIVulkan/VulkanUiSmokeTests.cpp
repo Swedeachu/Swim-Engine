@@ -32,6 +32,7 @@
 
 namespace
 {
+
 #ifdef SWIM_UI_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 	namespace R = Swim::Render::Ui;
@@ -40,19 +41,24 @@ namespace
 	{
 		double total = 0.0;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		return total;
 	}
 
@@ -83,12 +89,14 @@ namespace
 		SWIM_REQUIRE(program.Program);
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), "UI quads", { &bindlessSpace, 1 } });
 		SWIM_REQUIRE(program.Layout);
+
 		for (const auto format : { Rhi::Format::RGBA8Unorm, Rhi::Format::RGBA16Float, Rhi::Format::RGBA8UnormSrgb })
 		{
 			program.Pipelines[format] =
 				device.CreateGraphicsPipeline(Render::UiRenderer::PipelineDesc(format, *program.Program, *program.Layout));
 			SWIM_REQUIRE(program.Pipelines[format]);
 		}
+
 		program.DepthPipelines[Rhi::Format::RGBA16Float] = device.CreateGraphicsPipeline(
 			Render::UiRenderer::PipelineDesc(Rhi::Format::RGBA16Float, *program.Program, *program.Layout, Rhi::Format::D32Float));
 		SWIM_REQUIRE(program.DepthPipelines[Rhi::Format::RGBA16Float]);
@@ -102,6 +110,7 @@ namespace
 	std::vector<std::uint8_t> MakeImage()
 	{
 		std::vector<std::uint8_t> texels(ImageSize * ImageSize * 4);
+
 		for (std::uint32_t y = 0; y < ImageSize; ++y)
 		{
 			for (std::uint32_t x = 0; x < ImageSize; ++x)
@@ -113,13 +122,16 @@ namespace
 				const std::array<float, 3> straight =
 					border ? std::array<float, 3>{ 0.9f, 0.8f, 0.2f } : std::array<float, 3>{ 0.1f, 0.6f, 0.9f };
 				auto* texel = &texels[(std::size_t(y) * ImageSize + x) * 4];
+
 				for (int c = 0; c < 3; ++c)
 				{
 					texel[c] = std::uint8_t(std::lround(straight[c] * a * 255.0f));
 				}
+
 				texel[3] = alpha;
 			}
 		}
+
 		return texels;
 	}
 
@@ -196,12 +208,14 @@ namespace
 		{
 			return std::abs(centre - edge) < 1.0f / 64.0f;
 		};
+
 		for (const auto& quad : quads)
 		{
 			const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
 			const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
 			const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
 			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
@@ -210,6 +224,7 @@ namespace
 					const float cy = float(y) + 0.5f;
 					const bool inX = cx > x0 - 0.1f && cx < x1 + 0.1f;
 					const bool inY = cy > y0 - 0.1f && cy < y1 + 0.1f;
+
 					if ((inY && (closeTo(cx, x0) || closeTo(cx, x1))) || (inX && (closeTo(cy, y0) || closeTo(cy, y1))))
 					{
 						ambiguous[std::size_t(y) * width + x] = true;
@@ -217,6 +232,7 @@ namespace
 				}
 			}
 		}
+
 		return ambiguous;
 	}
 
@@ -233,31 +249,38 @@ namespace
 		float tolerance, float unit, bool srgbStore)
 	{
 		Comparison result;
+
 		for (std::size_t i = 0; i < gpu.size(); ++i)
 		{
 			if (ambiguous[i])
 			{
 				continue;
 			}
+
 			++result.Compared;
 			bool outlier = false;
 			bool lit = false;
+
 			for (int c = 0; c < 4; ++c)
 			{
 				float expected = cpu.Texels[i][c];
+
 				if (srgbStore && c < 3)
 				{
 					expected = R::SrgbOetf(std::clamp(expected, 0.0f, 1.0f));
 				}
+
 				// In units of UI white (scRGB white is paper white / 80), relative above it.
 				const float error = std::abs(gpu[i][c] - expected) / std::max(unit, std::abs(expected));
 				result.Worst = std::max(result.Worst, error);
 				outlier = outlier || error > tolerance;
 				lit = lit || std::abs(expected - clear[c]) > 0.02f;
 			}
+
 			result.Outliers += outlier ? 1u : 0u;
 			result.Lit += lit ? 1u : 0u;
 		}
+
 		return result;
 	}
 #endif
@@ -353,11 +376,13 @@ namespace
 		const auto makeSampler = [&](const UiAtlasFrame& frame)
 		{
 			std::map<std::uint32_t, std::vector<std::uint8_t>> pages;
+
 			for (std::uint32_t page = 0; page < frame.Pages.size(); ++page)
 			{
 				const auto view = atlas->GetPage(page);
 				auto& rgba = pages[frame.TextureIndices[page]];
 				rgba.resize(std::size_t(view.Size) * view.Size * 4);
+
 				for (std::size_t i = 0; i < std::size_t(view.Size) * view.Size; ++i)
 				{
 					rgba[i * 4 + 0] = view.Pixels[i * 3 + 0];
@@ -366,6 +391,7 @@ namespace
 					rgba[i * 4 + 3] = 255;
 				}
 			}
+
 			const std::uint32_t pageSize = frame.PageSize;
 			const std::uint32_t imageIndex = bindless.GetIndex(imageHandle);
 			return [pages = std::move(pages), pageSize, imageIndex, &imageTexels](std::uint32_t texture, std::uint32_t, float u, float v)
@@ -374,6 +400,7 @@ namespace
 				{
 					return R::SampleBilinear(imageTexels, ImageSize, ImageSize, u, v);
 				}
+
 				const auto found = pages.find(texture);
 				return found == pages.end() ? R::Float4{ 1, 1, 1, 1 } : R::SampleBilinear(found->second, pageSize, pageSize, u, v);
 			};
@@ -406,30 +433,37 @@ namespace
 		std::uint32_t totalCompared = 0;
 		std::uint32_t totalOutliers = 0;
 		std::optional<Rhi::TimelinePoint> lastUse;
+
 		for (std::size_t t = 0; t < targets.size(); ++t)
 		{
 			const auto& target = targets[t];
+
 			if (t == 4)
 			{
 				// New glyphs land on the existing page: a partial row-band upload.
 				scene.Document.SetText(scene.Title, fonts, "Grown: xyzQWJK 42%", 18.0f);
 			}
+
 			scene.Document.Layout({ float(Width), float(Height) }, Dpi);
 			const auto& paint = scene.Document.Paint(*atlas);
 			RenderGraph graph;
 			const auto atlasFrame = atlasTextures.Update(graph, *atlas);
+
 			if (t == 0)
 			{
 				SWIM_CHECK_EQUAL(atlasFrame.UploadedRows, atlas->GetDesc().PageSize); // The initializing upload.
 			}
+
 			if (t == 4)
 			{
 				SWIM_CHECK(atlasFrame.UploadedRows > 0u && atlasFrame.UploadedRows < atlas->GetDesc().PageSize);
 			}
+
 			if (t > 0 && t < 4)
 			{
 				SWIM_CHECK_EQUAL(atlasFrame.UploadedPages, 0u); // Nothing new: nothing uploaded.
 			}
+
 			const auto sampledImage = graph.ImportTexture(*image, Rhi::ResourceState::ShaderRead);
 			Rhi::TextureDesc colorDesc;
 			colorDesc.Extent = { Width, Height, 1 };
@@ -456,11 +490,13 @@ namespace
 			const auto& quads = renderer.GetLastQuads();
 			SWIM_CHECK(renderer.GetStats().Glyphs > 20u && renderer.GetStats().Images == 9u && renderer.GetStats().Solids >= 2u);
 			std::vector<R::Float4> gpu(std::size_t(Width) * Height);
+
 			if (target.Format == Rhi::Format::RGBA16Float)
 			{
 				std::vector<std::uint16_t> halves(gpu.size() * 4);
 				SWIM_REQUIRE(
 					executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(halves))) == Rhi::ReadbackStatus::Ready);
+
 				for (std::size_t i = 0; i < gpu.size(); ++i)
 				{
 					for (int c = 0; c < 4; ++c)
@@ -473,6 +509,7 @@ namespace
 			{
 				std::vector<std::uint8_t> bytes(gpu.size() * 4);
 				SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(bytes))) == Rhi::ReadbackStatus::Ready);
+
 				for (std::size_t i = 0; i < gpu.size(); ++i)
 				{
 					for (int c = 0; c < 4; ++c)
@@ -481,6 +518,7 @@ namespace
 					}
 				}
 			}
+
 			R::Canvas canvas{ Width, Height, std::vector<R::Float4>(gpu.size(), target.Clear) };
 			R::Rasterize(canvas, quads, renderer.GetLastConstants(), makeSampler(atlasFrame));
 			const auto ambiguous = AmbiguousPixels(quads, Width, Height);
@@ -492,6 +530,7 @@ namespace
 			const float tolerance = 2.5f / 255.0f;
 			const float unit = target.Composition.Encoding == UiOutputEncoding::ScRgb ? renderer.GetLastConstants().WhiteScale : 1.0f;
 			R::Float4 clearStored = target.Clear;
+
 			if (srgbStore)
 			{
 				for (int c = 0; c < 3; ++c)
@@ -499,6 +538,7 @@ namespace
 					clearStored[c] = R::SrgbOetf(target.Clear[c]);
 				}
 			}
+
 			const auto result = Compare(gpu, canvas, ambiguous, clearStored, tolerance, unit, srgbStore);
 			std::printf("             [ui %s] %zu quads (%u glyphs): %u pixels compared, %u lit, %u outliers (worst %.2e)\n", target.Name,
 				quads.size(), renderer.GetStats().Glyphs, result.Compared, result.Lit, result.Outliers, double(result.Worst));
@@ -507,6 +547,7 @@ namespace
 			totalCompared += result.Compared;
 			totalOutliers += result.Outliers;
 		}
+
 		std::printf("             [ui] %u pixels compared over %zu frames, %u outliers\n", totalCompared, targets.size(), totalOutliers);
 
 		// Timeline-safe retirement: the atlas pages retire after the last frame that
@@ -555,13 +596,16 @@ namespace
 			wrapped.TextWrap = Text::TextWrap::Word;
 			wall.SetStyle(paragraph, wrapped);
 			std::string text;
+
 			for (int i = 0; i < 90; ++i)
 			{
 				text += "The quick brown fox jumps over the lazy dog; 0123456789. ";
 			}
+
 			wall.SetText(paragraph, fonts, text, 14.0f);
 			wall.Layout({ 1920, 1080 }, 1.5f);
 			const auto& paint = wall.Paint(*atlas);
+
 			for (int frameIndex = 0; frameIndex < 4; ++frameIndex)
 			{
 				RenderGraph graph;
@@ -582,6 +626,7 @@ namespace
 				executor.Execute(graph.Compile());
 				atlasTextures.CommitFrame();
 				executor.Wait();
+
 				if (frameIndex == 3)
 				{
 					std::printf("             [ui 1080p] %u glyph instances: draw %.3f ms\n", renderer.GetStats().Glyphs,
@@ -610,19 +655,23 @@ namespace
 		std::uint32_t width, std::uint32_t height)
 	{
 		std::vector<bool> ambiguous(std::size_t(width) * height, false);
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
 			{
 				const auto sample = R::CanvasAt(constants, float(x) + 0.5f, float(y) + 0.5f);
 				auto flag = ambiguous[std::size_t(y) * width + x]; // A std::vector<bool> proxy.
+
 				if (!sample)
 				{
 					flag = true;
 					continue;
 				}
+
 				const float ex = 0.02f * sample->FootprintX;
 				const float ey = 0.02f * sample->FootprintY;
+
 				for (const auto& quad : quads)
 				{
 					const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
@@ -631,6 +680,7 @@ namespace
 					const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
 					const bool inX = sample->X > x0 - ex && sample->X < x1 + ex;
 					const bool inY = sample->Y > y0 - ey && sample->Y < y1 + ey;
+
 					if ((inY && (std::abs(sample->X - x0) < ex || std::abs(sample->X - x1) < ex)) ||
 						(inX && (std::abs(sample->Y - y0) < ey || std::abs(sample->Y - y1) < ey)))
 					{
@@ -640,6 +690,7 @@ namespace
 				}
 			}
 		}
+
 		return ambiguous;
 	}
 #endif
@@ -761,11 +812,13 @@ namespace
 		const auto cpuSampler = [&](const UiAtlasFrame& frame)
 		{
 			std::map<std::uint32_t, std::vector<std::uint8_t>> pages;
+
 			for (std::uint32_t page = 0; page < frame.Pages.size(); ++page)
 			{
 				const auto view = atlas.GetPage(page);
 				auto& rgba = pages[frame.TextureIndices[page]];
 				rgba.resize(std::size_t(view.Size) * view.Size * 4);
+
 				for (std::size_t i = 0; i < std::size_t(view.Size) * view.Size; ++i)
 				{
 					rgba[i * 4 + 0] = view.Pixels[i * 3 + 0];
@@ -774,6 +827,7 @@ namespace
 					rgba[i * 4 + 3] = 255;
 				}
 			}
+
 			const std::uint32_t pageSize = frame.PageSize;
 			return [pages = std::move(pages), pageSize, imageIndex, &imageTexels](std::uint32_t texture, std::uint32_t, float u, float v)
 			{
@@ -781,6 +835,7 @@ namespace
 				{
 					return R::SampleBilinear(imageTexels, ImageSize, ImageSize, u, v);
 				}
+
 				const auto found = pages.find(texture);
 				return found == pages.end() ? R::Float4{ 1, 1, 1, 1 } : R::SampleBilinear(found->second, pageSize, pageSize, u, v);
 			};
@@ -788,11 +843,13 @@ namespace
 		const auto readColors = [&](const GraphReadback& readback, Rhi::Format format, std::uint32_t width, std::uint32_t height)
 		{
 			std::vector<R::Float4> texels(std::size_t(width) * height);
+
 			if (format == Rhi::Format::RGBA16Float)
 			{
 				std::vector<std::uint16_t> halves(texels.size() * 4);
 				SWIM_REQUIRE(
 					executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(halves))) == Rhi::ReadbackStatus::Ready);
+
 				for (std::size_t i = 0; i < texels.size(); ++i)
 				{
 					for (int c = 0; c < 4; ++c)
@@ -800,10 +857,13 @@ namespace
 						texels[i][c] = Smoke::HalfToFloat(halves[i * 4 + c]);
 					}
 				}
+
 				return texels;
 			}
+
 			std::vector<std::uint8_t> bytes(texels.size() * 4);
 			SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(bytes))) == Rhi::ReadbackStatus::Ready);
+
 			for (std::size_t i = 0; i < texels.size(); ++i)
 			{
 				for (int c = 0; c < 4; ++c)
@@ -811,6 +871,7 @@ namespace
 					texels[i][c] = bytes[i * 4 + c] / 255.0f;
 				}
 			}
+
 			return texels;
 		};
 
@@ -874,6 +935,7 @@ namespace
 		} };
 		std::uint32_t totalCompared = 0;
 		std::uint32_t totalOutliers = 0;
+
 		for (const auto& test : cases)
 		{
 			const auto toWorld = UI::CanvasToWorld(test.Mode, test.Placement, canvasSize, &test.Camera);
@@ -932,10 +994,12 @@ namespace
 			const auto& constants = renderer.GetLastConstants();
 			SWIM_CHECK_EQUAL(constants.Flags, UiDrawWorld);
 			R::Canvas canvas{ Width, Height, std::vector<R::Float4>(gpu.size(), clear) };
+
 			if (!test.Occluded)
 			{
 				R::RasterizeProjected(canvas, quads, constants, cpuSampler(atlasFrame));
 			}
+
 			const auto ambiguous = AmbiguousProjected(quads, constants, Width, Height);
 			// The 1:1 cases match to 2.5 LSB like screen overlays; perspective ones compare
 			// hardware derivatives (2 x 2 pixel differences) with analytic footprints, so
@@ -945,6 +1009,7 @@ namespace
 			const auto result = Compare(gpu, canvas, ambiguous, clear, tolerance, constants.WhiteScale, false);
 			std::printf("             [ui %s] %zu quads: %u pixels compared, %u lit, %u outliers (worst %.2e)\n", test.Name, quads.size(),
 				result.Compared, result.Lit, result.Outliers, double(result.Worst));
+
 			if (test.Occluded)
 			{
 				SWIM_CHECK_EQUAL(result.Lit, 0u); // Scene depth in front of the panel hides it entirely.
@@ -953,6 +1018,7 @@ namespace
 			{
 				SWIM_CHECK(result.Lit > result.Compared / (projective ? 20u : 4u));
 			}
+
 			SWIM_CHECK(result.Outliers <= result.Compared / (projective ? 33u : 100u));
 			totalCompared += result.Compared;
 			totalOutliers += result.Outliers;
@@ -982,24 +1048,29 @@ namespace
 			SWIM_CHECK(surfaceFrame.Drawn);
 			SWIM_CHECK_EQUAL(surfaceFrame.MipLevels, 9u);
 			std::vector<GraphReadback> readbacks;
+
 			for (const std::uint32_t mip : { 0u, 2u })
 			{
 				readbacks.push_back(AddTextureReadback(graph, "UI surface readback", surfaceFrame.Texture,
 					{ 0, { mip, 0 }, {}, { CanvasWidth >> mip, CanvasHeight >> mip, 1 } }));
 			}
+
 			executor.Execute(graph.Compile());
 			atlasTextures.CommitFrame();
 			surfaces.CommitFrame();
 			executor.Wait();
+
 			for (std::size_t level = 0; level < readbacks.size(); ++level)
 			{
 				const std::uint32_t mip = level == 0 ? 0u : 2u;
 				const std::uint32_t w = CanvasWidth >> mip;
 				const std::uint32_t h = CanvasHeight >> mip;
 				const auto gpu = readColors(readbacks[level], Rhi::Format::RGBA8UnormSrgb, w, h);
+
 				if (mip == 0)
 				{
 					surfaceTexels = gpu;
+
 					for (auto& texel : surfaceTexels)
 					{
 						for (int c = 0; c < 3; ++c)
@@ -1008,6 +1079,7 @@ namespace
 						}
 					}
 				}
+
 				R::QuadBuildDesc build;
 				build.DpiScale = Dpi / float(1u << mip);
 				build.AtlasPageSize = atlasFrame.PageSize;
@@ -1075,11 +1147,13 @@ namespace
 					return surfaceTexels[std::size_t(y) * CanvasWidth + std::size_t(x)];
 				};
 				R::Float4 result{};
+
 				for (int c = 0; c < 4; ++c)
 				{
 					result[c] = (texel(x0, y0)[c] * (1 - tx) + texel(x0 + 1, y0)[c] * tx) * (1 - ty) +
 						(texel(x0, y0 + 1)[c] * (1 - tx) + texel(x0 + 1, y0 + 1)[c] * tx) * ty;
 				}
+
 				return result;
 			};
 			R::RasterizeProjected(canvas, quads, constants, sampleSurface);
@@ -1108,6 +1182,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "UiRendererMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -1121,6 +1196,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunUiWorldSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

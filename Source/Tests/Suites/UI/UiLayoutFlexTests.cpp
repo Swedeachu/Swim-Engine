@@ -8,6 +8,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	UiStyle Box(float width, float height)
 	{
 		UiStyle style;
@@ -22,6 +23,7 @@ namespace
 		ui.SetStyle(id, style);
 		return id;
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Layout", "RowsGrowShrinkJustifyAndAlignChildren")
@@ -152,9 +154,11 @@ SWIM_TEST("UI.Layout", "MeasureAndPaintCachesSkipUnchangedNodes")
 	ui.SetStyle(ui.GetRoot(), rootStyle);
 	std::vector<UiNodeId> columns;
 	std::vector<UiNodeId> leaves;
+
 	for (int c = 0; c < 4; ++c)
 	{
 		columns.push_back(ui.Create(ui.GetRoot()));
+
 		for (int i = 0; i < 5; ++i)
 		{
 			auto style = Box(20, 10);
@@ -162,6 +166,7 @@ SWIM_TEST("UI.Layout", "MeasureAndPaintCachesSkipUnchangedNodes")
 			leaves.push_back(Child(ui, columns.back(), style));
 		}
 	}
+
 	Swim::Text::GlyphAtlas atlas;
 	ui.Layout({ 400, 400 });
 	SWIM_CHECK_EQUAL(ui.GetMeasuredNodeCount(), 25u); // Root, 4 columns and 20 leaves.
@@ -223,6 +228,7 @@ SWIM_TEST("UI.Text", "WrapsAlignsAndFallsBackInsideNodes")
 	SWIM_CHECK_NEAR(bounds.Height, layout->GetHeight(), 1e-3f);
 	Swim::Text::GlyphAtlas atlas;
 	const auto& quads = ui.Paint(atlas);
+
 	for (const auto& quad : quads)
 	{
 		SWIM_CHECK(quad.Kind == UiPaintKind::Glyph);
@@ -275,6 +281,7 @@ SWIM_TEST("UI.Paint", "RoundedBordersImagesAndNineSlices")
 	SWIM_CHECK(paint[0].Kind == UiPaintKind::Solid);
 	SWIM_CHECK_NEAR(paint[0].CornerRadius, 20.0f, 1e-5f); // Clamped to half the shorter side.
 	SWIM_CHECK_NEAR(paint[0].BorderColor.R, 0.5f, 1e-6f); // Premultiplied.
+
 	for (std::size_t i = 1; i < 10; ++i)
 	{
 		SWIM_CHECK(paint[i].Kind == UiPaintKind::Image);
@@ -282,6 +289,7 @@ SWIM_TEST("UI.Paint", "RoundedBordersImagesAndNineSlices")
 		SWIM_CHECK_EQUAL(paint[i].Sampler, 3u);
 		SWIM_CHECK_NEAR(paint[i].Color.A, 0.5f, 1e-6f);
 	}
+
 	// Corners keep 8 units; the centre stretches over the 80 x 40 content box.
 	SWIM_CHECK_NEAR(paint[1].Bounds.Width, 8.0f, 1e-5f);
 	SWIM_CHECK_NEAR(paint[5].Bounds.Width, 64.0f, 1e-5f);

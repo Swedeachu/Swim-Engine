@@ -74,6 +74,7 @@ namespace
 		SWIM_REQUIRE(frames);
 		std::vector<std::byte> directPixels(64 * 64 * 4);
 		std::vector<std::byte> indexedPixels(directPixels.size());
+
 		for (std::uint32_t pass = 0; pass < 2; ++pass)
 		{
 			frames->BeginFrame();
@@ -81,10 +82,12 @@ namespace
 			commands.Begin();
 			commands.BeginDebugLabel("RunTriangleSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
 			commands.Transition(*target, Rhi::ResourceState::Undefined, Rhi::ResourceState::ColorAttachment);
+
 			if (pass == 1)
 			{
 				commands.Transition(*indices, Rhi::ResourceState::HostWrite, Rhi::ResourceState::IndexBuffer);
 			}
+
 			Rhi::RenderingAttachmentDesc attachment{};
 			attachment.View = view.get();
 			attachment.Load = Rhi::LoadOp::Clear;
@@ -93,6 +96,7 @@ namespace
 			commands.BindGraphicsPipeline(*pipeline);
 			commands.SetViewport({ 0, 0, 64, 64 });
 			commands.SetScissor({ 0, 0, 64, 64 });
+
 			if (pass == 0)
 			{
 				commands.Draw(3);
@@ -102,6 +106,7 @@ namespace
 				commands.BindIndexBuffer(*indices, 0, Rhi::IndexType::Uint16);
 				commands.DrawIndexed(3);
 			}
+
 			commands.EndRendering();
 			commands.Transition(*target, Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::CopySource);
 			commands.Transition(*readback, pass == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
@@ -115,6 +120,7 @@ namespace
 			frames->Drain();
 			readback->Read(0, pass == 0 ? directPixels : indexedPixels);
 		}
+
 		const auto checkPixel = [&](std::uint32_t x, std::uint32_t y, std::byte green)
 		{
 			const std::size_t offset = (y * 64 + x) * 4;
@@ -132,10 +138,12 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TrianglePixelsAndIndexedParity", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTriangleSmoke); } });
 		}
+
 		return true;
 	}();
 

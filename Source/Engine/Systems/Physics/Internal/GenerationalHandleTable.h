@@ -10,11 +10,13 @@ namespace Engine
 	template<typename Handle, typename TValue>
 	class GenerationalHandleTable
 	{
+
 	public:
 
 		Handle Insert(TValue value)
 		{
 			std::uint32_t index = 0;
+
 			if (!freeIndices.empty())
 			{
 				index = freeIndices.back();
@@ -37,6 +39,7 @@ namespace Engine
 			{
 				return nullptr;
 			}
+
 			return &slots[handle.Index].Data;
 		}
 
@@ -46,6 +49,7 @@ namespace Engine
 			{
 				return nullptr;
 			}
+
 			return &slots[handle.Index].Data;
 		}
 
@@ -69,10 +73,12 @@ namespace Engine
 			slot.Data = TValue{};
 			slot.Occupied = false;
 			slot.Generation++;
+
 			if (slot.Generation == 0)
 			{
 				slot.Generation = 1;
 			}
+
 			freeIndices.push_back(handle.Index);
 			return true;
 		}
@@ -83,6 +89,7 @@ namespace Engine
 			for (std::uint32_t index = 0; index < slots.size(); index++)
 			{
 				Slot& slot = slots[index];
+
 				if (slot.Occupied)
 				{
 					fn(Handle{ index, slot.Generation }, slot.Data);
@@ -112,6 +119,7 @@ namespace Engine
 
 		std::vector<Slot> slots;
 		std::vector<std::uint32_t> freeIndices;
+
 	};
 
 }

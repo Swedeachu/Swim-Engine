@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU timestamps of one scheduled pass. The begin timestamp is written at the top of
 	// the pipe before the pass's barriers, so Nanoseconds can overlap the tail of earlier
 	// work; the end timestamp is written after the pass completes. EndOffsetNanoseconds
@@ -16,4 +17,5 @@ namespace Swim::Render
 		std::optional<double> Nanoseconds;
 		std::optional<double> EndOffsetNanoseconds;
 	};
+
 } // namespace Swim::Render

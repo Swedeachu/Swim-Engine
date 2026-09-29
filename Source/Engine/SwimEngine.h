@@ -27,6 +27,7 @@
 
 namespace Engine
 {
+
 	class RuntimeConsole;
 	class RuntimeConsoleOverlay;
 	class CameraSystem;
@@ -52,17 +53,23 @@ namespace Engine
 	// The renderer is Vulkan through the RHI; there is no OpenGL path and no editor.
 	class SwimEngine : public Machine
 	{
+
 	  public:
+
 		explicit SwimEngine(EngineConfig config = {});
+
 		~SwimEngine() override;
 
 		SwimEngine(const SwimEngine&) = delete;
+
 		SwimEngine& operator=(const SwimEngine&) = delete;
 
 		// Awake + Init; non-zero (after cleaning up) on failure.
 		int Start();
+
 		// Runs frames until the window closes, Quit is called or MaxFrames elapse; then Exit.
 		int Run();
+
 		// Runs exactly one frame (tests and tools). False once the engine should stop.
 		bool Tick();
 
@@ -75,9 +82,13 @@ namespace Engine
 		bool IsCameraPlacedByCommand() const { return cameraLocked; }
 
 		int Awake() override;
+
 		int Init() override;
+
 		void Update(double dt) override;
+
 		void FixedUpdate(unsigned int tickThisSecond) override;
+
 		int Exit() override;
 
 		static EngineConfigParseResult ParseStartingEngineArgs(int argc, char** argv);
@@ -147,18 +158,31 @@ namespace Engine
 		bool RequestCapture(std::filesystem::path path);
 
 	  private:
+
 		bool ValidateBackendConfiguration();
+
 		bool MakeWindow();
+
 		int InitRenderer();
+
 		void RegisterEngineCommands();
+
 		void CreateConsole();
+
 		void PrintRenderStats() const;
+
 		void RecordFrameProfile(double wallMs);
+
 		void HandleWindowEvent(const Swim::Platform::WindowEvent& event);
+
 		void UpdateSurfaceSize();
+
 		void ApplyCameraComponents();
+
 		void UpdateTextInput();
+
 		std::string GetWindowTitle() const;
+
 		std::filesystem::path FindFontRoot() const; // The asset root holding Fonts/.
 
 		EngineConfig config{};
@@ -191,6 +215,7 @@ namespace Engine
 		std::string benchRestore;
 		bool benchQuit = false;
 		void AdvanceBench();
+
 		unsigned int tickCounter{ 1 };
 		double fpsTimeAccumulator{ 0.0 };
 		int fpsFrameCounter{ 0 };
@@ -230,5 +255,7 @@ namespace Engine
 		std::unique_ptr<RuntimeConsole> console;
 		std::unique_ptr<RuntimeConsoleOverlay> consoleOverlay;
 		RenderServices renderServices{};
+
 	};
+
 } // namespace Engine

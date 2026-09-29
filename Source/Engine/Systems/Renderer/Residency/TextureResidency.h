@@ -10,6 +10,7 @@
 
 namespace Swim::Render
 {
+
 	class RenderGraph;
 
 	// A payload variant of a TextureAsset this residency can upload directly.
@@ -34,15 +35,21 @@ namespace Swim::Render
 	// device must outlive this object and supplied timelines its pending work.
 	class TextureResidency
 	{
+
 	  public:
+
 		TextureResidency(Rhi::Device& device, const TextureResidencyDesc& desc = {});
+
 		~TextureResidency();
+
 		TextureResidency(const TextureResidency&) = delete;
+
 		TextureResidency& operator=(const TextureResidency&) = delete;
 
 		// Chooses the first payload variant this residency can upload, if any
 		// (block-compressed variants only when blockCompression is set).
 		static std::optional<TexturePayloadSelection> SelectPayload(const Assets::TextureAsset& texture, bool blockCompression = true);
+
 		std::optional<TexturePayloadSelection> SelectPayloadFor(const Assets::TextureAsset& texture) const
 		{
 			return SelectPayload(texture, blockCompression);
@@ -52,29 +59,38 @@ namespace Swim::Render
 		// std::length_error when slots are exhausted and std::runtime_error when the
 		// RHI cannot create the texture or view. Nothing changes on failure.
 		GpuTextureHandle CreateTexture(const Assets::TextureAsset& texture, std::string_view debugName = {});
+
 		// Same, taking the payload's bytes over when they are already in upload layout
 		// (no CPU copy); the asset is left without them on success.
 		GpuTextureHandle CreateTexture(Assets::TextureAsset&& texture, std::string_view debugName = {});
+
 		// Same retirement rules as GeometryHeap::DestroyMesh.
 		bool DestroyTexture(GpuTextureHandle texture, Rhi::TimelinePoint lastUse = {});
 
 		// Import once per graph; throws while a previous import awaits commit/abort.
 		TextureGraphResources Import(RenderGraph& graph);
+
 		void CommitUploads(Rhi::TimelinePoint completion);
+
 		void AbortUploads();
 
 		std::size_t Collect();
+
 		void Drain();
 
 		bool IsValid(GpuTextureHandle texture) const { return textures.IsValid(texture); }
 
 		GpuUploadState GetState(GpuTextureHandle texture) const;
+
 		Rhi::Texture* GetTexture(GpuTextureHandle texture) const;
+
 		// Full-resource sampled view, created with the texture.
 		Rhi::TextureView* GetView(GpuTextureHandle texture) const;
+
 		TextureResidencyStats GetStats() const;
 
 	  private:
+
 		GpuTextureHandle CreateTexture(const Assets::TextureAsset& texture, std::string_view debugName, Assets::TextureAsset* adopt);
 
 		Rhi::Device& device;
@@ -83,5 +99,7 @@ namespace Swim::Render
 		std::vector<GpuTextureHandle> recorded;
 		bool importPending = false;
 		bool blockCompression = false;
+
 	};
+
 } // namespace Swim::Render

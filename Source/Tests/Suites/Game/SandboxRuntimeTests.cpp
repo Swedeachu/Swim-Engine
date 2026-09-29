@@ -40,6 +40,7 @@ using Engine::EngineState;
 
 namespace
 {
+
 	Swim::Tests::HeadlessEngine MakeSandbox()
 	{
 		return Swim::Tests::HeadlessEngine(
@@ -58,8 +59,10 @@ namespace
 				return hud;
 			}
 		}
+
 		return nullptr;
 	}
+
 } // namespace
 
 SWIM_TEST("Game.Sandbox", "BuildsEveryPlaygroundHeadless")
@@ -87,10 +90,12 @@ SWIM_TEST("Game.Sandbox", "BuildsEveryPlaygroundHeadless")
 
 	// Every shadowed light is one the scene meant to shadow.
 	std::size_t shadowed = 0;
+
 	for (const auto [entity, light] : registry.view<Engine::Light>().each())
 	{
 		shadowed += light.CastShadows ? 1u : 0u;
 	}
+
 	SWIM_CHECK_EQUAL(shadowed, std::size_t{ 3 });
 
 	// The HUD and the world info panel have documents.
@@ -116,6 +121,7 @@ SWIM_TEST("Game.Sandbox", "BallsFallRestAndCountImpacts")
 	SWIM_REQUIRE(engine.Tick(150)); // 2.5 s.
 	SWIM_CHECK(sandbox->GetImpacts() > 0);
 	SWIM_CHECK(sandbox->GetStrongestImpact() > 0.0f);
+
 	for (const entt::entity ball : sandbox->GetEntitiesWithTag(Game::GameTags::Spawned))
 	{
 		const float y = sandbox->GetRegistry().get<Engine::Transform>(ball).GetPosition().y;
@@ -139,6 +145,7 @@ SWIM_TEST("Game.Sandbox", "TheGroundColliderSpansTheWholeCheckeredPlane")
 	SWIM_REQUIRE(sandbox != nullptr);
 	const std::vector<glm::vec3> spots{ { 62.0f, 2.0f, 62.0f }, { -62.0f, 2.0f, -62.0f }, { 50.0f, 2.0f, -3.0f }, { 5.0f, 2.0f, -60.0f } };
 	std::vector<entt::entity> balls;
+
 	for (const auto& spot : spots)
 	{
 		const entt::entity ball = sandbox->CreateEntity("Edge probe");
@@ -146,7 +153,9 @@ SWIM_TEST("Game.Sandbox", "TheGroundColliderSpansTheWholeCheckeredPlane")
 		Game::AddSphereBody(*sandbox, ball, Engine::RigidbodyType::Dynamic, 0.5f, 1.0f);
 		balls.push_back(ball);
 	}
+
 	SWIM_REQUIRE(engine.Tick(120)); // 2 s: long enough to fall through if nothing is there.
+
 	for (const entt::entity ball : balls)
 	{
 		const float y = sandbox->GetRegistry().get<Engine::Transform>(ball).GetPosition().y;
@@ -172,13 +181,16 @@ SWIM_TEST("Game.Sandbox", "PausedWorldHoldsStillAndStopRestoresIt")
 
 	SWIM_CHECK(engine.Command("pause"));
 	std::vector<glm::vec3> positions;
+
 	for (const entt::entity ball : sandbox->GetEntitiesWithTag(Game::GameTags::Spawned))
 	{
 		positions.push_back(sandbox->GetRegistry().get<Engine::Transform>(ball).GetPosition());
 	}
+
 	SWIM_REQUIRE(engine.Tick(20));
 	SWIM_CHECK_EQUAL(sandbox->CountWithTag(Game::GameTags::Spawned), spawned); // Rain is simulation time.
 	std::size_t index = 0;
+
 	for (const entt::entity ball : sandbox->GetEntitiesWithTag(Game::GameTags::Spawned))
 	{
 		const glm::vec3 now = sandbox->GetRegistry().get<Engine::Transform>(ball).GetPosition();
@@ -315,12 +327,14 @@ SWIM_TEST("Game.Sandbox", "TheFourTabsFitInsideThePanel")
 	auto* hud = FindHud(*sandbox);
 	SWIM_REQUIRE(hud != nullptr);
 	auto& document = *hud->GetDocument();
+
 	for (const auto size : { Swim::UI::UiPoint{ 1280.0f, 720.0f }, Swim::UI::UiPoint{ 1920.0f, 1080.0f } })
 	{
 		document.Layout(size);
 		const auto panel = document.GetBounds(hud->GetPanel());
 		SWIM_CHECK(panel.Width > 0.0f);
 		float previousRight = panel.X;
+
 		for (const auto tab : hud->GetTabOptions())
 		{
 			const auto bounds = document.GetBounds(tab);
@@ -331,6 +345,7 @@ SWIM_TEST("Game.Sandbox", "TheFourTabsFitInsideThePanel")
 			previousRight = bounds.X + bounds.Width;
 		}
 	}
+
 	// Each tab shows its own section.
 	for (std::uint32_t tab = 0; tab < Game::Sandbox::SandboxTabCount; ++tab)
 	{
@@ -358,6 +373,7 @@ SWIM_TEST("Game.Sandbox", "CameraPresetsDriveTheFeaturesAndTheControlsFollow")
 	SWIM_CHECK(sandbox->GetCameraPreset() == Engine::CameraPreset::Cinematic35mm);
 	SWIM_CHECK(sandbox->GetDepthOfField()->Enabled && sandbox->GetCameraLens()->Enabled && sandbox->GetFilmSensor()->Enabled);
 	SWIM_CHECK(sandbox->GetCameraLens()->Settings.Halation > 0.0f);
+
 	if (settings)
 	{
 		SWIM_CHECK(settings->Post.Grading.Temperature > 0.0f); // Warmer than neutral.
@@ -373,11 +389,13 @@ SWIM_TEST("Game.Sandbox", "CameraPresetsDriveTheFeaturesAndTheControlsFollow")
 
 	SWIM_CHECK(engine.Command("sandbox.camera 0"));
 	SWIM_CHECK(!sandbox->GetDepthOfField()->Enabled && !sandbox->GetCameraLens()->Enabled && !sandbox->GetFilmSensor()->Enabled);
+
 	if (settings)
 	{
 		SWIM_CHECK_NEAR(settings->Post.Grading.Temperature, 0.0f, 1e-6f);
 		SWIM_CHECK_NEAR(settings->Post.Grading.Saturation, Game::Sandbox::TropicalSaturation, 1e-6f);
 	}
+
 	SWIM_CHECK(engine.Command("sandbox.dof 1.4 3"));
 	SWIM_CHECK(sandbox->GetDepthOfField()->Enabled);
 	SWIM_CHECK_NEAR(sandbox->GetDepthOfField()->Settings.FocusDistance, 3.0f, 1e-6f);
@@ -450,11 +468,13 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	const auto enabledLights = [&]
 	{
 		std::size_t count = 0;
+
 		for (const auto [entity, light] : registry.view<Engine::Light>().each())
 		{
 			(void)entity;
 			count += light.Enabled ? 1u : 0u;
 		}
+
 		return count;
 	};
 	const std::size_t before = enabledLights();
@@ -465,6 +485,7 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	SWIM_CHECK_EQUAL(enabledLights(), before);
 	SWIM_CHECK(engine.Command("render.toggles"));
 	bool rejected = false;
+
 	try
 	{
 		rejected = !engine.Command("render.toggle no.such.switch 0");
@@ -473,6 +494,7 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	{
 		rejected = true;
 	}
+
 	SWIM_CHECK(rejected);
 	SWIM_CHECK(engine.Command("profile 3 1"));
 	SWIM_REQUIRE(engine.Tick(6));
@@ -489,6 +511,7 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	{
 		std::ifstream in(csv);
 		std::string line;
+
 		while (std::getline(in, line))
 		{
 			baselineRows += line.starts_with("hall|baseline,") ? 1u : 0u;
@@ -548,11 +571,13 @@ SWIM_TEST("Game.LightSwarm", "MembersSteerTowardTargetsAndStayInTheBox")
 	glm::vec3 velocity(0.0f);
 	const glm::vec3 target(1.5f, 2.5f, 0.5f);
 	const float start = glm::length(target - position);
+
 	for (int i = 0; i < 120; ++i)
 	{
 		position = Game::LightSwarm::Step(settings, position, velocity, target, 2.0f, 1.0f / 60.0f);
 		SWIM_CHECK(glm::all(glm::greaterThanEqual(position, settings.BoxMin)) && glm::all(glm::lessThanEqual(position, settings.BoxMax)));
 	}
+
 	SWIM_CHECK(glm::length(target - position) < start * 0.5f);
 	SWIM_CHECK(glm::length(velocity) <= 2.0f + 1e-3f);
 
@@ -580,11 +605,13 @@ SWIM_TEST("Game.Sandbox", "TheLightSwarmRoamsItsBoxWhilePlayingAndFreezesWhenPau
 	const auto positions = [&]
 	{
 		std::vector<glm::vec3> result;
+
 		for (const entt::entity light : sandbox->GetEntitiesWithTag(Game::GameTags::SwarmLight))
 		{
 			SWIM_CHECK(registry.all_of<Engine::Light>(light));
 			result.push_back(registry.get<Engine::Transform>(light).GetPosition());
 		}
+
 		return result;
 	};
 	const auto before = positions();
@@ -592,18 +619,21 @@ SWIM_TEST("Game.Sandbox", "TheLightSwarmRoamsItsBoxWhilePlayingAndFreezesWhenPau
 	const auto after = positions();
 	SWIM_REQUIRE_EQUAL(before.size(), after.size());
 	std::size_t moved = 0;
+
 	for (std::size_t i = 0; i < after.size(); ++i)
 	{
 		moved += glm::length(after[i] - before[i]) > 0.05f ? 1u : 0u;
 		SWIM_CHECK(glm::all(glm::greaterThanEqual(after[i], sandbox->GetSwarmMin() - glm::vec3(1e-4f))));
 		SWIM_CHECK(glm::all(glm::lessThanEqual(after[i], sandbox->GetSwarmMax() + glm::vec3(1e-4f))));
 	}
+
 	SWIM_CHECK(moved > after.size() * 9 / 10);
 
 	SWIM_CHECK(engine.Command("pause"));
 	const auto paused = positions();
 	SWIM_REQUIRE(engine.Tick(20));
 	const auto stillPaused = positions();
+
 	for (std::size_t i = 0; i < paused.size(); ++i)
 	{
 		SWIM_CHECK(glm::length(stillPaused[i] - paused[i]) < 1e-6f);
@@ -626,11 +656,13 @@ SWIM_TEST("Game.Sandbox", "F1SwitchHidesEveryUiCanvas")
 	const auto countVisible = [&]
 	{
 		std::size_t visible = 0;
+
 		for (auto [entity, canvas] : sandbox->GetRegistry().view<Engine::UiCanvas>().each())
 		{
 			(void)entity;
 			visible += canvas.Visible ? 1u : 0u;
 		}
+
 		return visible;
 	};
 	const std::size_t total = sandbox->GetRegistry().view<Engine::UiCanvas>().size();
@@ -649,12 +681,14 @@ SWIM_TEST("Game.ModelImport", "FindSponzaPrefersTheDracoKtxGlb")
 {
 	Swim::Assets::AssetSystem assets;
 	SWIM_REQUIRE(assets.Initialize());
+
 	for (const char* path : { "Models/Sponza/sponza-ktx.model", "Models/Sponza/sponza-ktx-draco.model", "Models/Sponza/glTF/Sponza.model",
 			 "Models/Barrel/barrel.model" })
 	{
 		const auto handle = assets.Declare<Swim::Assets::ModelAsset>(path);
 		SWIM_REQUIRE(assets.Publish(handle, Swim::Assets::ModelAsset{}));
 	}
+
 	const auto path = [&](auto handle)
 	{
 		return assets.GetDatabase().FindPath(handle.GetId()).value_or(std::string());
@@ -678,6 +712,7 @@ SWIM_TEST("Game.Findings", "EveryFindingIsDocumentedWithAKnownStatus")
 	const auto findings = Game::GetFindings();
 	SWIM_CHECK(findings.size() >= 10);
 	std::set<std::string_view> titles;
+
 	for (const auto& finding : findings)
 	{
 		SWIM_CHECK(!finding.Title.empty());
@@ -700,24 +735,28 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 	// cube, smooth and brushed chrome, the orbiting chrome ball, and one area probe.
 	const auto lab = Game::Sandbox::GetReflectionLabCenter();
 	std::size_t objectProbes = 0, areaProbes = 0, labProbes = 0;
+
 	for (auto [entity, probe, transform] : registry.view<Engine::ReflectionProbe, Engine::Transform>().each())
 	{
 		objectProbes += probe.ObjectProbe ? 1u : 0u;
 		areaProbes += probe.ObjectProbe ? 0u : 1u;
 		labProbes += glm::length(transform.GetWorldPosition(registry) - lab) < 8.0f ? 1u : 0u;
 	}
+
 	SWIM_CHECK_EQUAL(labProbes, std::size_t{ 8 });		  // 6 chrome spheres, the mirror cube, the area probe.
 	SWIM_CHECK_EQUAL(objectProbes, std::size_t{ 7 + 6 }); // + the playground's six chrome balls.
 	SWIM_CHECK_EQUAL(areaProbes, std::size_t{ 2 });		  // The lab and the PBR gallery.
 	SWIM_CHECK(objectProbes + areaProbes <= 16u);		  // The sandbox's MaxProbes.
 	// The two spheres of the pair are 1 cm apart.
 	glm::vec3 a{ 0.0f }, b{ 0.0f };
+
 	for (auto [entity, transform] : registry.view<Engine::Transform>().each())
 	{
 		const auto name = sandbox->GetEntityName(entity);
 		a = name == "Lab chrome pair A" ? transform.GetWorldPosition(registry) : a;
 		b = name == "Lab chrome pair B" ? transform.GetWorldPosition(registry) : b;
 	}
+
 	SWIM_CHECK(std::abs(glm::length(a - b) - 1.01f) < 1.0e-4f);
 
 	// The floor: checker (white), green, an animated rainbow, then removed (hidden), from the
@@ -737,19 +776,23 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 	SWIM_CHECK(glm::length(after - before) > 0.05f);
 	// A full hue turn visits red, green and blue dominance.
 	int dominant[3] = { 0, 0, 0 };
+
 	for (int i = 0; i < 12; ++i)
 	{
 		const auto tint = Game::ReflectionLabFloor::TintFor(Game::ReflectionLabFloor::Mode::Rainbow, float(i) * 0.5f);
 		const int c = tint.r >= tint.g && tint.r >= tint.b ? 0 : (tint.g >= tint.b ? 1 : 2);
 		++dominant[c];
 	}
+
 	SWIM_CHECK(dominant[0] > 0 && dominant[1] > 0 && dominant[2] > 0);
 	SWIM_CHECK(engine.Command("sandbox.labfloor 3"));
 	entt::entity pad = entt::null;
+
 	for (auto [entity, renderer] : registry.view<Engine::MeshRenderer>().each())
 	{
 		pad = sandbox->GetEntityName(entity) == "Reflection lab floor" ? entity : pad;
 	}
+
 	SWIM_REQUIRE(pad != entt::null);
 	const auto flags = static_cast<std::uint32_t>(registry.get<Engine::MeshRenderer>(pad).Flags);
 	SWIM_CHECK((flags & static_cast<std::uint32_t>(Swim::Render::RenderObjectFlags::Visible)) == 0u);

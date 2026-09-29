@@ -16,6 +16,7 @@
 
 namespace Swim::Render
 {
+
 	// Per-view inputs of a Forward+ frame (BuildForwardViewRecord packs them).
 	struct ForwardPlusView
 	{
@@ -38,10 +39,12 @@ namespace Swim::Render
 	// ForwardViewFlagBrdfLut is set with an environment or hasBrdfLut.
 	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
 		bool hasEnvironment, bool hasShadows = false, bool hasBrdfLut = false);
+
 } // namespace Swim::Render
 
 namespace Swim::Render::ForwardPlus
 {
+
 	// The CPU definition of Clustered Forward+ shading (items 66-67).
 	// Shaders/Slang/ForwardPlus mirrors every function; the native Forward+ smoke
 	// compares the two pixel by pixel.
@@ -152,4 +155,5 @@ namespace Swim::Render::ForwardPlus
 	// The transparent pass's blend (premultiplied source, One / OneMinusSourceAlpha):
 	// straight-alpha `source` over `destination`.
 	Float4 Over(const Float4& source, const Float4& destination);
+
 } // namespace Swim::Render::ForwardPlus

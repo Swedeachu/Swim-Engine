@@ -12,13 +12,16 @@
 
 namespace Swim::Animation
 {
+
 	inline constexpr std::uint32_t InvalidJoint = std::numeric_limits<std::uint32_t>::max();
 
 	// Runtime skeleton built once from a SkeletonAsset and shared (read-only) by
 	// every animator and skeleton instance that uses it. Joints are parents first.
 	class Skeleton
 	{
+
 	  public:
+
 		// Throws std::invalid_argument when the asset is empty, not parents first,
 		// has duplicate joint names or more than MaxJoints joints.
 		explicit Skeleton(const Assets::SkeletonAsset& asset);
@@ -32,6 +35,7 @@ namespace Swim::Animation
 		const std::string& GetName(std::uint32_t joint) const { return names[joint]; }
 
 		std::uint32_t FindJoint(std::string_view name) const;
+
 		bool IsDescendant(std::uint32_t joint, std::uint32_t ancestor) const; // A joint is its own descendant.
 
 		const std::vector<JointPose>& GetRestPose() const { return restPose; }
@@ -41,12 +45,14 @@ namespace Swim::Animation
 		const Matrix4& GetRootTransform() const { return rootTransform; }
 
 	  private:
+
 		std::vector<std::uint32_t> parents;
 		std::vector<std::string> names;
 		std::vector<JointPose> restPose;
 		std::vector<Matrix4> inverseBind;
 		Matrix4 rootTransform = IdentityMatrix;
 		std::unordered_map<std::string, std::uint32_t> lookup;
+
 	};
 
 	// A local pose: one JointPose per skeleton joint plus the animator's morph weights.
@@ -65,7 +71,9 @@ namespace Swim::Animation
 
 		// weight for `root` and (optionally) all its descendants, 0 elsewhere.
 		static BoneMask FromJoint(const Skeleton& skeleton, std::uint32_t root, float weight = 1.0f, bool includeDescendants = true);
+
 		// This mask with `joint` (and optionally its descendants) set to weight.
 		BoneMask& Set(const Skeleton& skeleton, std::uint32_t joint, float weight, bool includeDescendants = true);
 	};
+
 } // namespace Swim::Animation

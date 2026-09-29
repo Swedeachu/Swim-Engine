@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of SwimUiQuad (vertexMain + fragmentMain).
 	struct UiRenderBindings
 	{
@@ -16,4 +17,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t BindlessSamplers = 0; // SamplerState[].
 		static constexpr std::uint32_t BindlessTextures = 1; // Texture2D<float4>[].
 	};
+
 } // namespace Swim::Render

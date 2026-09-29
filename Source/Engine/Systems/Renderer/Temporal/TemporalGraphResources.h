@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// What one TemporalAntiAliasing::Record scheduled.
 	struct TemporalGraphResources
 	{
@@ -16,4 +17,5 @@ namespace Swim::Render
 		std::array<float, 2> JitterPixels{ 0, 0 }; // The jitter this frame was expected to be rendered with.
 		std::uint64_t FrameIndex = 0;			   // Frames recorded before this one since construction.
 	};
+
 } // namespace Swim::Render

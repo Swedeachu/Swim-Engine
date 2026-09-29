@@ -6,17 +6,21 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
+
 		VulkanQueryPool& RequireQueryPool(Rhi::QueryPool& pool, const VulkanDeviceState& state,
 			std::uint32_t family, std::uint32_t first, std::uint32_t count)
 		{
 			auto* queries = dynamic_cast<VulkanQueryPool*>(&pool);
+
 			if (queries == nullptr || !queries->Matches(state, family) || !queries->Contains(first, count) ||
 				!GetVulkanTimestampInfo(state, family).IsSupported())
 			{
 				throw std::invalid_argument("Vulkan query command requires a supported same-device/family timestamp pool and valid range");
 			}
+
 			return *queries;
 		}
+
 	}
 
 	void VulkanCommandList::ResetQueries(Rhi::QueryPool& pool, std::uint32_t first, std::uint32_t count)
@@ -32,6 +36,7 @@ namespace Swim::RhiVulkan
 		RequireRecording(true);
 		auto& queries = RequireQueryPool(pool, *GetState(), GetQueueFamilyIndex(), index, 1);
 		VkPipelineStageFlags2 nativeStage = 0;
+
 		switch (stage)
 		{
 		case Rhi::TimestampStage::Begin:
@@ -43,6 +48,7 @@ namespace Swim::RhiVulkan
 		default:
 			throw std::invalid_argument("Unknown RHI timestamp stage");
 		}
+
 		GetState()->Dispatch.vkCmdWriteTimestamp2(commandBuffer, nativeStage,
 			FromNativeHandle<VkQueryPool>(queries.GetNativeHandle()), index);
 	}

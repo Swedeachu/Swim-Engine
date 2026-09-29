@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	struct SkinnedMeshTag;
 	using SkinnedMeshHandle = GpuHandle<SkinnedMeshTag>;
 	using SkinInstanceHandle = GpuSkinHandle;
@@ -36,4 +37,5 @@ namespace Swim::Render
 		std::uint32_t UploadedMeshes = 0;	// Source data uploaded this frame.
 		std::uint32_t SkippedInstances = 0; // Output mesh or source not yet in a graph.
 	};
+
 } // namespace Swim::Render

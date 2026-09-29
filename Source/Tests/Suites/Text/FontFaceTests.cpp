@@ -47,10 +47,12 @@ SWIM_TEST("Text.Font", "ShapesKerningLigaturesAndCombiningClusters")
 	SWIM_CHECK_EQUAL(ligature.Glyphs[0].Cluster, 0u);
 	const auto accent = font->Shape("e\xCC\x81", 32);
 	SWIM_REQUIRE(!accent.Glyphs.empty());
+
 	for (const auto& glyph : accent.Glyphs)
 	{
 		SWIM_CHECK_EQUAL(glyph.Cluster, 0u);
 	}
+
 	SWIM_CHECK_EQUAL(accent.MissingGlyphs, 0u);
 	const auto doubled = font->Shape("ffi", 64);
 	SWIM_CHECK_NEAR(doubled.AdvanceX, ligature.AdvanceX * 2.0f, 1e-5f);
@@ -88,6 +90,7 @@ SWIM_TEST("Text.Font", "ImmutableShapingIsConsistentAcrossThreads")
 	const auto font = LoadTextFontFixture();
 	const auto expected = font->Shape("AV ffi e\xCC\x81", 28);
 	std::vector<std::future<ShapedRun>> jobs;
+
 	for (int i = 0; i < 8; ++i)
 	{
 		jobs.push_back(std::async(std::launch::async,
@@ -96,11 +99,13 @@ SWIM_TEST("Text.Font", "ImmutableShapingIsConsistentAcrossThreads")
 				return font->Shape("AV ffi e\xCC\x81", 28);
 			}));
 	}
+
 	for (auto& job : jobs)
 	{
 		const auto run = job.get();
 		SWIM_CHECK_EQUAL(run.AdvanceX, expected.AdvanceX);
 		SWIM_REQUIRE_EQUAL(run.Glyphs.size(), expected.Glyphs.size());
+
 		for (std::size_t i = 0; i < run.Glyphs.size(); ++i)
 		{
 			SWIM_CHECK_EQUAL(run.Glyphs[i].Glyph, expected.Glyphs[i].Glyph);

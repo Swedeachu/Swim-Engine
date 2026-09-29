@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	using GeometryPayload = std::shared_ptr<const std::vector<std::byte>>;
 
 	struct GeometryMeshRecord
@@ -22,4 +23,5 @@ namespace Swim::Render::Internal
 		GeometryPayload IndexBytes;
 		GeometryPayload MeshletBytes;
 	};
+
 } // namespace Swim::Render::Internal

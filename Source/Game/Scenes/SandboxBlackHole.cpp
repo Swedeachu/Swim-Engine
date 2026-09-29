@@ -8,9 +8,12 @@
 
 namespace Game
 {
+
 	namespace
 	{
+
 		constexpr Engine::EngineState AllStates = Engine::EngineState::Playing | Engine::EngineState::Paused | Engine::EngineState::Stopped;
+
 	} // namespace
 
 	glm::vec3 Sandbox::GetBlackHoleHome()
@@ -47,4 +50,5 @@ namespace Game
 		// Lensing, the gas and dragging run in every state.
 		SetEnabledStates(blackHole, AllStates);
 	}
+
 } // namespace Game

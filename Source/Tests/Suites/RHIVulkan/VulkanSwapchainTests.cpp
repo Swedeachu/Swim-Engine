@@ -77,11 +77,13 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "DormantMinimizedAndRestoredGenerations")
 	SWIM_CHECK(!Rhi::SwapchainAcquireResult{}.HasImage());
 	SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).OutOfDate);
 	capture.Session.Suspend();
+
 	for (unsigned pump = 0; pump < 4; ++pump)
 	{
 		const auto result = capture.Session.Acquire(capture.Signal, nullptr);
 		SWIM_CHECK(result.Suspended && !result.HasImage());
 	}
+
 	SWIM_CHECK_EQUAL(capture.Acquires, 0u);
 	capture.Build();
 	SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).HasImage());
@@ -100,6 +102,7 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "TimeoutDoesNotSignalAnImageOrRequireRebuild")
 {
 	SwapchainCapture capture;
 	capture.Build();
+
 	for (VkResult result : { VK_TIMEOUT, VK_NOT_READY })
 	{
 		capture.AcquireResult = result;
@@ -108,6 +111,7 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "TimeoutDoesNotSignalAnImageOrRequireRebuild")
 		SWIM_CHECK_EQUAL(image.ImageIndex, UINT32_MAX);
 		SWIM_CHECK_THROWS(capture.Present(), std::invalid_argument);
 	}
+
 	SWIM_CHECK(capture.Timeout > 0 && capture.Timeout < UINT64_MAX);
 	capture.AcquireResult = VK_SUCCESS;
 	SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).HasImage());
@@ -144,6 +148,7 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "OutOfDateAcquireAndPresentBlockFurtherAcquisi
 	SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).OutOfDate);
 	SWIM_CHECK_EQUAL(capture.Acquires, 1u);
 	capture.AcquireResult = VK_SUCCESS;
+
 	for (VkResult status : { VK_ERROR_OUT_OF_DATE_KHR, VK_SUBOPTIMAL_KHR })
 	{
 		capture.Build();
@@ -165,11 +170,13 @@ SWIM_TEST("RHI.Vulkan.Swapchain", "RetiredGenerationCannotAcquireUntilReplacemen
 	SWIM_CHECK(!capture.Present());
 	capture.Session.RequireNoAcquiredImages();
 	capture.Session.SetImages(VK_NULL_HANDLE, 0);
+
 	for (unsigned retry = 0; retry < 3; ++retry)
 	{
 		capture.Session.Invalidate();
 		SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).OutOfDate);
 	}
+
 	SWIM_CHECK_EQUAL(capture.Acquires, 1u);
 	capture.Build(11, 2);
 	SWIM_CHECK(capture.Session.Acquire(capture.Signal, nullptr).HasImage());

@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	GpuLightBuffer::GpuLightBuffer(Rhi::Device& device, GpuLightBufferDesc desc)
 		: directionalCapacity(desc.MaxDirectionalLights), localCapacity(desc.MaxLocalLights), name(std::move(desc.DebugName)),
 		  dirty(desc.MaxDirectionalLights + desc.MaxLocalLights)
@@ -16,6 +17,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " needs room for at least one directional and one local light");
 		}
+
 		const std::uint32_t rows = directionalCapacity + localCapacity;
 		Rhi::BufferDesc lights;
 		lights.Size = std::uint64_t(rows) * sizeof(GpuLightRecord);
@@ -27,10 +29,12 @@ namespace Swim::Render
 		headerDesc.Size = sizeof(GpuLightHeader);
 		headerDesc.DebugName = headerName;
 		headerBuffer = device.CreateBuffer(headerDesc);
+
 		if (!buffer || !headerBuffer)
 		{
 			throw std::runtime_error(name + " buffers could not be created");
 		}
+
 		mirror.resize(rows);
 		rowOwners.assign(rows, UINT32_MAX);
 		header.FirstLocalRow = directionalCapacity;
@@ -50,6 +54,7 @@ namespace Swim::Render
 		{
 			return nullptr;
 		}
+
 		const auto& slot = slots[light.Index];
 		return slot.Live && slot.Generation == light.Generation ? &slot : nullptr;
 	}
@@ -65,10 +70,12 @@ namespace Swim::Render
 	bool GpuLightBuffer::Insert(std::uint32_t slot, const GpuLightRecord& record, bool directional)
 	{
 		auto& count = directional ? header.DirectionalCount : header.LocalCount;
+
 		if (count == (directional ? directionalCapacity : localCapacity))
 		{
 			return false;
 		}
+
 		WriteRow((directional ? 0 : header.FirstLocalRow) + count, record, slot);
 		++count;
 		headerDirty = true;
@@ -81,10 +88,12 @@ namespace Swim::Render
 		const bool directional = row < header.FirstLocalRow;
 		auto& count = directional ? header.DirectionalCount : header.LocalCount;
 		const std::uint32_t last = (directional ? 0 : header.FirstLocalRow) + count - 1;
+
 		if (row != last)
 		{
 			WriteRow(row, mirror[last], rowOwners[last]); // Swap the last row into the hole.
 		}
+
 		mirror[last] = {};
 		rowOwners[last] = UINT32_MAX;
 		--count;
@@ -95,11 +104,14 @@ namespace Swim::Render
 	{
 		const auto record = Lights::EncodeLight(desc);
 		const bool directional = desc.Type == LightType::Directional;
+
 		if ((directional ? header.DirectionalCount == directionalCapacity : header.LocalCount == localCapacity))
 		{
 			return std::nullopt;
 		}
+
 		std::uint32_t slot = 0;
+
 		if (!freeSlots.empty())
 		{
 			slot = freeSlots.back();
@@ -110,6 +122,7 @@ namespace Swim::Render
 			slot = static_cast<std::uint32_t>(slots.size());
 			slots.emplace_back();
 		}
+
 		auto& entry = slots[slot];
 		entry.Generation = entry.Generation + 1 == 0 ? 1 : entry.Generation + 1;
 		entry.Live = true;
@@ -124,19 +137,23 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(name + " has no free " + (desc.Type == LightType::Directional ? "directional" : "local") + " rows");
 	}
 
 	bool GpuLightBuffer::Update(GpuLightHandle light, const LightDesc& desc)
 	{
 		auto* slot = Resolve(light);
+
 		if (!slot)
 		{
 			return false;
 		}
+
 		const auto record = Lights::EncodeLight(desc);
 		const bool wasDirectional = slot->Desc.Type == LightType::Directional;
 		const bool directional = desc.Type == LightType::Directional;
+
 		if (wasDirectional == directional)
 		{
 			WriteRow(slot->Row, record, light.Index);
@@ -147,9 +164,11 @@ namespace Swim::Render
 			{
 				throw std::length_error(name + " cannot move a light into a full range");
 			}
+
 			Remove(light.Index);
 			Insert(light.Index, record, directional);
 		}
+
 		slots[light.Index].Desc = desc;
 		return true;
 	}
@@ -157,10 +176,12 @@ namespace Swim::Render
 	bool GpuLightBuffer::Release(GpuLightHandle light)
 	{
 		auto* slot = Resolve(light);
+
 		if (!slot)
 		{
 			return false;
 		}
+
 		Remove(light.Index);
 		slot->Live = false;
 		slot->Desc = {};
@@ -191,6 +212,7 @@ namespace Swim::Render
 		{
 			throw std::logic_error(name + " has an import awaiting CommitUploads/AbortUploads");
 		}
+
 		GpuLightGraphResources resources;
 		resources.Lights = graph.ImportBuffer(*buffer, Rhi::ResourceState::ShaderRead);
 		resources.Header = graph.ImportBuffer(*headerBuffer, Rhi::ResourceState::ShaderRead);
@@ -203,15 +225,18 @@ namespace Swim::Render
 		lastHeader = false;
 		auto rows = dirty.Take();
 		const bool uploadHeader = headerDirty;
+
 		try
 		{
 			if (!rows.empty())
 			{
 				auto snapshot = std::make_shared<std::vector<std::byte>>(rows.size() * sizeof(GpuLightRecord));
+
 				for (std::size_t i = 0; i < rows.size(); ++i)
 				{
 					std::memcpy(snapshot->data() + i * sizeof(GpuLightRecord), &mirror[rows[i]], sizeof(GpuLightRecord));
 				}
+
 				auto runs = BuildRecordRuns(rows);
 				lastRuns = static_cast<std::uint32_t>(runs.size());
 				lastRows = static_cast<std::uint32_t>(rows.size());
@@ -219,6 +244,7 @@ namespace Swim::Render
 				resources.UploadPass = RecordRowRunsUpload(
 					graph, name + " upload", resources.Lights, sizeof(GpuLightRecord), std::move(runs), std::move(snapshot));
 			}
+
 			if (uploadHeader)
 			{
 				resources.HeaderUploadPass =
@@ -233,11 +259,13 @@ namespace Swim::Render
 			{
 				dirty.Mark(row);
 			}
+
 			lastRows = lastRuns = 0;
 			lastBytes = 0;
 			lastHeader = false;
 			throw;
 		}
+
 		headerDirty = false;
 		recorded = std::move(rows);
 		recordedHeader = uploadHeader;
@@ -258,6 +286,7 @@ namespace Swim::Render
 		{
 			dirty.Mark(row);
 		}
+
 		headerDirty = headerDirty || recordedHeader;
 		CommitUploads();
 	}
@@ -276,4 +305,5 @@ namespace Swim::Render
 		stats.LastUploadHeader = lastHeader;
 		return stats;
 	}
+
 } // namespace Swim::Render

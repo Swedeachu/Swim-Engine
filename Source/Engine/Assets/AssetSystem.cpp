@@ -19,6 +19,7 @@ namespace Swim::Assets
 		{
 			return false;
 		}
+
 		ownerThread = std::this_thread::get_id();
 		running = true;
 		return true;
@@ -45,11 +46,14 @@ namespace Swim::Assets
 	AssetId AssetSystem::FindByContentHash(const ContentHash& contentHash) const
 	{
 		RequireOwnerThread();
+
 		if (contentHash.IsZero())
 		{
 			return {};
 		}
+
 		const auto existing = contentIndex.find(contentHash);
+
 		if (existing == contentIndex.end() || existing->second.empty())
 		{
 			return {};
@@ -64,6 +68,7 @@ namespace Swim::Assets
 	ContentHash AssetSystem::ComputeDependencyRevisionHash(AssetId root) const
 	{
 		RequireOwnerThread();
+
 		if (!root.IsValid())
 		{
 			return {};
@@ -72,20 +77,24 @@ namespace Swim::Assets
 		std::vector<AssetId> pending{ root };
 		std::unordered_set<AssetId> visited;
 		std::vector<const Record*> graph;
+
 		while (!pending.empty())
 		{
 			const AssetId id = pending.back();
 			pending.pop_back();
+
 			if (!visited.insert(id).second)
 			{
 				continue;
 			}
 
 			const auto record = records.find(id);
+
 			if (record == records.end() || !record->second.Declared)
 			{
 				return {};
 			}
+
 			graph.push_back(&record->second);
 			pending.insert(pending.end(), record->second.Dependencies.begin(), record->second.Dependencies.end());
 		}
@@ -117,11 +126,13 @@ namespace Swim::Assets
 			});
 			const std::uint64_t dependencyCount = static_cast<std::uint64_t>(dependencies.size());
 			append(&dependencyCount, sizeof(dependencyCount));
+
 			for (const AssetId dependency : dependencies)
 			{
 				append(&dependency.Value, sizeof(dependency.Value));
 			}
 		}
+
 		return ComputeContentHash(bytes);
 	}
 
@@ -130,6 +141,7 @@ namespace Swim::Assets
 		RequireOwnerThread();
 		std::vector<AssetId> result;
 		const auto existing = reverseDependencies.find(dependency);
+
 		if (existing == reverseDependencies.end())
 		{
 			return result;
@@ -158,6 +170,7 @@ namespace Swim::Assets
 		{
 			throw std::logic_error("AssetSystem is not initialized.");
 		}
+
 		if (ownerThread != std::this_thread::get_id())
 		{
 			throw std::logic_error("AssetSystem registry access must occur on its owner thread.");
@@ -168,12 +181,14 @@ namespace Swim::Assets
 	{
 		std::vector<AssetId> normalized;
 		normalized.reserve(dependencies.size());
+
 		for (AssetId dependency : dependencies)
 		{
 			if (!dependency.IsValid() || dependency == record.Id || HasDependencyPath(dependency, record.Id))
 			{
 				return false;
 			}
+
 			if (std::find(normalized.begin(), normalized.end(), dependency) == normalized.end())
 			{
 				normalized.push_back(dependency);
@@ -182,10 +197,12 @@ namespace Swim::Assets
 
 		RemoveDependencyEdges(record);
 		record.Dependencies = std::move(normalized);
+
 		for (AssetId dependency : record.Dependencies)
 		{
 			reverseDependencies[dependency].insert(record.Id);
 		}
+
 		return true;
 	}
 
@@ -194,11 +211,14 @@ namespace Swim::Assets
 		for (AssetId dependency : record.Dependencies)
 		{
 			auto reverse = reverseDependencies.find(dependency);
+
 			if (reverse == reverseDependencies.end())
 			{
 				continue;
 			}
+
 			reverse->second.erase(record.Id);
+
 			if (reverse->second.empty())
 			{
 				reverseDependencies.erase(reverse);
@@ -215,22 +235,27 @@ namespace Swim::Assets
 		{
 			const AssetId current = pending.back();
 			pending.pop_back();
+
 			if (current == target)
 			{
 				return true;
 			}
+
 			if (!visited.insert(current).second)
 			{
 				continue;
 			}
 
 			const auto record = records.find(current);
+
 			if (record == records.end() || !record->second.Declared)
 			{
 				continue;
 			}
+
 			pending.insert(pending.end(), record->second.Dependencies.begin(), record->second.Dependencies.end());
 		}
+
 		return false;
 	}
 
@@ -239,9 +264,11 @@ namespace Swim::Assets
 		if (!record.Hash.IsZero())
 		{
 			auto existing = contentIndex.find(record.Hash);
+
 			if (existing != contentIndex.end())
 			{
 				existing->second.erase(record.Id);
+
 				if (existing->second.empty())
 				{
 					contentIndex.erase(existing);
@@ -250,6 +277,7 @@ namespace Swim::Assets
 		}
 
 		record.Hash = contentHash;
+
 		if (!contentHash.IsZero())
 		{
 			contentIndex[contentHash].insert(record.Id);
@@ -266,10 +294,12 @@ namespace Swim::Assets
 		status.Dependencies = record.Dependencies;
 		status.Error = record.Error;
 		status.Declared = record.Declared;
+
 		if (const auto path = database.FindPath(record.Id))
 		{
 			status.LogicalPath = *path;
 		}
+
 		return status;
 	}
 

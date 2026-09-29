@@ -12,6 +12,7 @@
 
 namespace
 {
+
 	Engine::UiRuntime::ViewDesc MakeView()
 	{
 		Engine::Camera camera;
@@ -46,6 +47,7 @@ namespace
 		scene.AddComponent<Engine::UiCanvas>(entity, std::move(canvas));
 		return { entity, document };
 	}
+
 } // namespace
 
 SWIM_TEST("Engine.UiRuntime", "LoadsTheBundledFontsAndRejectsAMissingFolder")
@@ -105,10 +107,12 @@ SWIM_TEST("Engine.UiRuntime", "ConstantSizeBillboardsBehindTheCameraAreSkippedNo
 	Engine::Scene scene("UiRuntimeTest");
 	const auto front = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Billboard, 0, glm::vec3(0.0f, 0.0f, -5.0f));
 	const auto behind = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Billboard, 0, glm::vec3(0.0f, 0.0f, 5.0f));
+
 	for (const entt::entity entity : { front.Entity, behind.Entity })
 	{
 		scene.GetRegistry().get<Engine::UiCanvas>(entity).ConstantScreenSize = true;
 	}
+
 	ui.Sync(&scene, MakeView());
 	auto items = ui.Finish(0.0f);
 	SWIM_REQUIRE_EQUAL(items.size(), std::size_t{ 1 });

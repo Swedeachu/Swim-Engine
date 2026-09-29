@@ -4,8 +4,10 @@
 
 namespace Game
 {
+
 	namespace
 	{
+
 		constexpr std::array<Finding, 55> Items{ {
 			{ "Behaviour Exit ran twice on scene exit",
 				"InternalSceneExit called every behaviour's Exit and then DestroyAllEntities called it again. Scene exit now destroys the "
@@ -272,10 +274,12 @@ namespace Game
 				"(shadows, local lights, the reflection composite, lensing and clouds lead).",
 				"Open" },
 		} };
+
 	} // namespace
 
 	std::span<const Finding> GetFindings()
 	{
 		return Items;
 	}
+
 } // namespace Game

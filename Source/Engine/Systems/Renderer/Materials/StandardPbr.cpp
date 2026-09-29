@@ -5,6 +5,7 @@
 
 namespace Swim::Render::StandardPbr
 {
+
 	float Dot(const Float3& a, const Float3& b)
 	{
 		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -50,10 +51,12 @@ namespace Swim::Render::StandardPbr
 	Float3 EvaluateBrdf(const Surface& surface, const Float3& normal, const Float3& view, const Float3& light)
 	{
 		const float nDotL = Dot(normal, light);
+
 		if (nDotL <= 0.0f)
 		{
 			return { 0, 0, 0 };
 		}
+
 		const float nDotV = std::max(Dot(normal, view), 1.0e-4f);
 		const auto half = Normalize({ view[0] + light[0], view[1] + light[1], view[2] + light[2] });
 		const float nDotH = std::clamp(Dot(normal, half), 0.0f, 1.0f);
@@ -63,48 +66,59 @@ namespace Swim::Render::StandardPbr
 		const float metallic = std::clamp(surface.Metallic, 0.0f, 1.0f);
 		Float3 f0;
 		Float3 diffuseColor;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			f0[c] = DielectricF0 + (surface.BaseColor[c] - DielectricF0) * metallic;
 			diffuseColor[c] = surface.BaseColor[c] * (1.0f - metallic);
 		}
+
 		const auto fresnel = FresnelSchlick(f0, vDotH);
 		const float dv = DistributionGgx(nDotH, alpha) * VisibilitySmithGgxCorrelated(nDotV, nDotL, alpha);
 		Float3 result;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			const float diffuse = (1.0f - fresnel[c]) * diffuseColor[c] / Pi;
 			result[c] = (diffuse + dv * fresnel[c]) * nDotL;
 		}
+
 		return result;
 	}
 
 	std::optional<ResolvedSurface> Resolve(const Parameters& parameters, const Texels& texels, const Frame& frame)
 	{
 		const float alpha = parameters.BaseColorFactor[3] * texels.BaseColor[3];
+
 		if ((parameters.Flags & FlagAlphaMask) != 0 && alpha < parameters.AlphaCutoff)
 		{
 			return std::nullopt;
 		}
+
 		const bool flip = !frame.FrontFacing && (parameters.Flags & FlagDoubleSided) != 0;
 		const float sign = flip ? -1.0f : 1.0f;
 		ResolvedSurface surface;
 		surface.Normal = { frame.Normal[0] * sign, frame.Normal[1] * sign, frame.Normal[2] * sign };
+
 		if (texels.TangentNormal)
 		{
 			const auto& t = *texels.TangentNormal;
 			const auto n = Normalize({ t[0] * parameters.NormalScale, t[1] * parameters.NormalScale, t[2] });
+
 			for (int c = 0; c < 3; ++c)
 			{
 				surface.Normal[c] = frame.Tangent[c] * n[0] + frame.Bitangent[c] * n[1] + surface.Normal[c] * n[2];
 			}
+
 			surface.Normal = Normalize(surface.Normal);
 		}
+
 		for (int c = 0; c < 3; ++c)
 		{
 			surface.BaseColor[c] = parameters.BaseColorFactor[c] * texels.BaseColor[c];
 			surface.Emissive[c] = parameters.EmissiveFactor[c] * texels.Emissive[c];
 		}
+
 		surface.Metallic = parameters.MetallicFactor * texels.MetallicRoughness[2];
 		surface.PerceptualRoughness = parameters.RoughnessFactor * texels.MetallicRoughness[1];
 		surface.Occlusion = 1.0f + parameters.OcclusionStrength * (texels.Occlusion - 1.0f);
@@ -125,6 +139,7 @@ namespace Swim::Render::StandardPbr
 		const float nDotV = std::clamp(Dot(surface.Normal, view), 1.0e-4f, 1.0f);
 		const float fresnel = std::pow(1.0f - nDotV, 5.0f);
 		Float3 result;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			const float f0 = DielectricF0 + (surface.BaseColor[c] - DielectricF0) * metallic;
@@ -136,6 +151,7 @@ namespace Swim::Render::StandardPbr
 			const float diffuse = environment.Irradiance[c] * diffuseColor * (1.0f - singleScatter);
 			result[c] = (diffuse + specular) * surface.Occlusion;
 		}
+
 		return result;
 	}
 
@@ -146,6 +162,7 @@ namespace Swim::Render::StandardPbr
 		const float nDotV = std::clamp(Dot(surface.Normal, view), 1.0e-4f, 1.0f);
 		const float fresnel = std::pow(1.0f - nDotV, 5.0f);
 		Float3 result;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			const float f0 = DielectricF0 + (surface.BaseColor[c] - DielectricF0) * metallic;
@@ -153,6 +170,7 @@ namespace Swim::Render::StandardPbr
 			const float ks = f0 + fr * fresnel;
 			result[c] = (ks * brdfScale + brdfBias) * surface.Occlusion;
 		}
+
 		return result;
 	}
 
@@ -162,11 +180,13 @@ namespace Swim::Render::StandardPbr
 			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, lighting.View, lighting.LightDirection);
 		const auto ibl = environment ? EvaluateEnvironment(surface, lighting.View, *environment) : Float3{ 0, 0, 0 };
 		std::array<float, 4> color{ 0, 0, 0, surface.Alpha };
+
 		for (int c = 0; c < 3; ++c)
 		{
 			color[c] = brdf[c] * lighting.LightRadiance[c] + lighting.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c] +
 				surface.Emissive[c];
 		}
+
 		return color;
 	}
 
@@ -174,10 +194,13 @@ namespace Swim::Render::StandardPbr
 		const Parameters& parameters, const Texels& texels, const Frame& frame, const Lighting& lighting)
 	{
 		const auto surface = Resolve(parameters, texels, frame);
+
 		if (!surface)
 		{
 			return std::nullopt;
 		}
+
 		return ShadeResolved(*surface, lighting, nullptr);
 	}
+
 } // namespace Swim::Render::StandardPbr

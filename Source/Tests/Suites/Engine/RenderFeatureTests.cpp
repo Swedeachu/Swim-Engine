@@ -12,6 +12,7 @@
 
 namespace
 {
+
 	namespace R = Swim::Render;
 	namespace S = Swim::Rhi;
 
@@ -72,6 +73,7 @@ namespace
 		Engine::RenderSettings settings;
 		std::vector<std::string> loaded;
 	};
+
 } // namespace
 
 SWIM_TEST("Engine.RenderFeature", "ComputePassesBindByReflectedNameAndCoverTheGrid")
@@ -130,17 +132,20 @@ SWIM_TEST("Engine.RenderFeature", "ComputePassesBindByReflectedNameAndCoverTheGr
 
 	std::vector<Swim::Testing::MockCommand> dispatches;
 	std::vector<Swim::Testing::MockCommand> pushes;
+
 	for (const auto& command : *world.fixture.device.Commands)
 	{
 		if (command.Kind == "Dispatch")
 		{
 			dispatches.push_back(command);
 		}
+
 		if (command.Kind == "PushConstants")
 		{
 			pushes.push_back(command);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(1));
 	SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, 13u); // ceil(100 / 8).
 	SWIM_REQUIRE_EQUAL(pushes.size(), std::size_t(1));
@@ -202,6 +207,7 @@ SWIM_TEST("Engine.RenderFeature", "CloudsMarchIntoAnEnvironmentAtlasWhenTheyCont
 	world.fixture.executor->Execute(graph.Compile());
 	world.fixture.executor->Wait();
 	std::vector<Swim::Testing::MockCommand> dispatches;
+
 	for (const auto& command : *world.fixture.device.Commands)
 	{
 		if (command.Kind == "Dispatch")
@@ -209,6 +215,7 @@ SWIM_TEST("Engine.RenderFeature", "CloudsMarchIntoAnEnvironmentAtlasWhenTheyCont
 			dispatches.push_back(command);
 		}
 	}
+
 	// One texel per thread over the 32 x 192 atlas.
 	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(1));
 	SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, 4u);

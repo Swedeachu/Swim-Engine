@@ -13,6 +13,7 @@ namespace Pbr = Swim::Render::StandardPbr;
 
 namespace
 {
+
 	bool Near(const Env::Float4& a, const Env::Float4& b, float tolerance)
 	{
 		for (int c = 0; c < 4; ++c)
@@ -22,6 +23,7 @@ namespace
 				return false;
 			}
 		}
+
 		return true;
 	}
 
@@ -39,6 +41,7 @@ namespace
 		return Env::EnvironmentProbe(Env::ProjectIrradianceSh(source, source.GetMipCount() - 1),
 			Env::BuildPrefilteredCube(source, prefilteredSize, mips, samples), Env::BuildBrdfLut(lutSize, 128));
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuContract")
@@ -55,6 +58,7 @@ SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuCont
 	Env::CubeImage cube(4);
 	std::mt19937 random(3);
 	std::uniform_real_distribution<float> unit(0.0f, 4.0f);
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		for (auto& texel : cube.Face(0, face))
@@ -62,7 +66,9 @@ SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuCont
 			texel = { unit(random), unit(random), unit(random), 1.0f };
 		}
 	}
+
 	cube.GenerateMips();
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		for (std::uint32_t y = 0; y < 2; ++y)
@@ -78,6 +84,7 @@ SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuCont
 				}
 			}
 		}
+
 		// Point and trilinear samples at a texel center return the texel.
 		for (std::uint32_t y = 0; y < 4; ++y)
 		{
@@ -89,8 +96,10 @@ SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuCont
 			}
 		}
 	}
+
 	// Vulkan's nearest-mip rule rounds half down; trilinear blends the two mips.
 	Env::CubeImage levels(4);
+
 	for (std::uint32_t mip = 0; mip < levels.GetMipCount(); ++mip)
 	{
 		for (std::uint32_t face = 0; face < 6; ++face)
@@ -101,6 +110,7 @@ SWIM_TEST("Render.Environment.CubeImage", "LayoutMipsAndBoxFilterMatchTheGpuCont
 			}
 		}
 	}
+
 	const Env::Float3 d{ 0.3f, 0.2f, 1.0f };
 	SWIM_CHECK(levels.SampleNearest(d, 0.5f)[0] == 0.0f);
 	SWIM_CHECK(levels.SampleNearest(d, 0.51f)[0] == 1.0f);
@@ -116,6 +126,7 @@ SWIM_TEST("Render.Environment.CubeImage", "TrilinearSamplingIsSeamlessAcrossFace
 	// in each face, and at a cube corner the result is the average of the three faces.
 	Env::CubeImage cube(8, 1);
 	const std::array<float, 6> values{ 1, 2, 4, 8, 16, 32 };
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		for (auto& texel : cube.Face(0, face))
@@ -123,6 +134,7 @@ SWIM_TEST("Render.Environment.CubeImage", "TrilinearSamplingIsSeamlessAcrossFace
 			texel = { values[face], 0, 0, 1 };
 		}
 	}
+
 	SWIM_CHECK(std::abs(cube.SampleTrilinear({ 1, 0, 1 }, 0)[0] - 0.5f * (1 + 16)) < 1.0e-5f);	// +X | +Z
 	SWIM_CHECK(std::abs(cube.SampleTrilinear({ 0, 1, -1 }, 0)[0] - 0.5f * (4 + 32)) < 1.0e-5f); // +Y | -Z
 	SWIM_CHECK(std::abs(cube.SampleTrilinear({ -1, -1, 0 }, 0)[0] - 0.5f * (2 + 8)) < 1.0e-5f); // -X | -Y
@@ -142,11 +154,13 @@ SWIM_TEST("Render.Environment.Sky", "ProceduralSkyIsContinuousAndPacksItsConstan
 	Env::ProceduralSky sky;
 	const auto horizonAbove = sky.Evaluate({ 1, 1.0e-6f, 0 });
 	const auto horizonBelow = sky.Evaluate({ 1, -1.0e-6f, 0 });
+
 	for (int c = 0; c < 3; ++c)
 	{
 		SWIM_CHECK(std::abs(horizonAbove[c] - horizonBelow[c]) < 1.0e-4f);
 		SWIM_CHECK(std::abs(horizonAbove[c] - sky.HorizonColor[c]) < 1.0e-4f);
 	}
+
 	const auto zenith = sky.Evaluate({ 0, 1, 0 });
 	const auto sunLobeAtZenith = sky.SunColor[0] * std::pow(Env::Normalize(sky.SunDirection)[1], sky.SunSharpness);
 	SWIM_CHECK(std::abs(zenith[0] - (sky.ZenithColor[0] + sunLobeAtZenith)) < 1.0e-4f);
@@ -155,15 +169,18 @@ SWIM_TEST("Render.Environment.Sky", "ProceduralSkyIsContinuousAndPacksItsConstan
 	// The sun is the brightest direction.
 	const auto sun = sky.Evaluate(sky.SunDirection);
 	std::mt19937 random(5);
+
 	for (int i = 0; i < 64; ++i)
 	{
 		SWIM_CHECK(sky.Evaluate(RandomDirection(random))[0] <= sun[0]);
 	}
+
 	// Intensity scales everything; Uniform is the white furnace.
 	auto brighter = sky;
 	brighter.Intensity = 2.5f;
 	SWIM_CHECK(std::abs(brighter.Evaluate({ 0.3f, 0.2f, 0.1f })[1] - 2.5f * sky.Evaluate({ 0.3f, 0.2f, 0.1f })[1]) < 1.0e-5f);
 	const auto furnace = Env::ProceduralSky::Uniform(0.75f);
+
 	for (int i = 0; i < 16; ++i)
 	{
 		SWIM_CHECK((furnace.Evaluate(RandomDirection(random)) == Env::Float3{ 0.75f, 0.75f, 0.75f }));
@@ -190,14 +207,17 @@ SWIM_TEST("Render.Environment.Prefilter", "PrefilteringPreservesUniformRadianceA
 {
 	// A uniform environment prefilters to itself at every roughness (normalized weights).
 	const auto uniform = Env::BuildSkyCube(Env::ProceduralSky::Uniform(0.6f), 16);
+
 	for (const float roughness : { 0.0f, 0.3f, 1.0f })
 	{
 		const auto value = Env::PrefilterDirection(uniform, { 0.2f, 0.7f, -0.3f }, roughness, 32);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(value[c] - 0.6f) < 1.0e-5f);
 		}
 	}
+
 	// Roughness 0 is the lod-0 sample.
 	Env::ProceduralSky sky;
 	const auto source = Env::BuildSkyCube(sky, 32);
@@ -215,12 +235,14 @@ SWIM_TEST("Render.Environment.Prefilter", "PrefilteringPreservesUniformRadianceA
 	for (const float roughness : { 0.5f, 0.8f, 1.0f })
 	{
 		const float alpha = roughness * roughness;
+
 		for (const auto& direction : { Env::Float3{ 0, 1, 0 }, Env::Float3{ 0.15f, 0.3f, 1.0f }, Env::Float3{ 1, -0.2f, 0.1f } })
 		{
 			const auto n = Env::Normalize(direction);
 			std::array<double, 3> sum{};
 			double weight = 0.0;
 			const std::uint32_t size = source.GetSize();
+
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				for (std::uint32_t y = 0; y < size; ++y)
@@ -229,23 +251,29 @@ SWIM_TEST("Render.Environment.Prefilter", "PrefilteringPreservesUniformRadianceA
 					{
 						const auto l = Env::CubeTexelDirection(face, x, y, size);
 						const float nDotL = Env::Dot(n, l);
+
 						if (nDotL <= 0.0f)
 						{
 							continue;
 						}
+
 						const auto h = Env::Normalize({ n[0] + l[0], n[1] + l[1], n[2] + l[2] });
 						const float nDotH = Env::Dot(n, h);
 						const double pdf = Pbr::DistributionGgx(nDotH, alpha) * nDotH / (4.0 * Env::Dot(n, h));
 						const double w = pdf * nDotL * Env::CubeTexelSolidAngle(x, y, size);
+
 						for (int c = 0; c < 3; ++c)
 						{
 							sum[c] += source.Texel(0, face, x, y)[c] * w;
 						}
+
 						weight += w;
 					}
 				}
 			}
+
 			const auto estimate = Env::PrefilterDirection(source, n, roughness, 1024);
+
 			for (int c = 0; c < 3; ++c)
 			{
 				const double exact = sum[c] / weight;
@@ -295,10 +323,12 @@ SWIM_TEST("Render.Environment.Shading", "SplitSumIblConservesEnergyInTheFurnaceA
 		const auto ab = Env::IntegrateBrdf(nDotV, surface.PerceptualRoughness, 128);
 		const Pbr::EnvironmentTerms furnace{ { 1, 1, 1 }, { 1, 1, 1 }, ab[0], ab[1] };
 		const auto color = Pbr::EvaluateEnvironment(surface, view, furnace);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(color[c] - 1.0f) < 1.0e-5f);
 		}
+
 		// A white metal reflects A + B (<= 1: single scattering loses energy when rough).
 		surface.Metallic = 1.0f;
 		const auto metal = Pbr::EvaluateEnvironment(surface, view, furnace);
@@ -310,6 +340,7 @@ SWIM_TEST("Render.Environment.Shading", "SplitSumIblConservesEnergyInTheFurnaceA
 		const Pbr::EnvironmentTerms doubled{ { 2, 2, 2 }, { 2, 2, 2 }, ab[0], ab[1] };
 		SWIM_CHECK(std::abs(Pbr::EvaluateEnvironment(surface, view, doubled)[2] - 0.5f * metal[2]) < 1.0e-5f);
 	}
+
 	// Reflect mirrors about the normal.
 	const auto r = Pbr::Reflect(Pbr::Normalize({ 1, 0, 1 }), { 0, 0, 1 });
 	SWIM_CHECK(std::abs(r[0] + std::sqrt(0.5f)) < 1.0e-6f && std::abs(r[2] - std::sqrt(0.5f)) < 1.0e-6f);
@@ -336,12 +367,15 @@ SWIM_TEST("Render.Environment.Shading", "SplitSumIblConservesEnergyInTheFurnaceA
 		const Pbr::EnvironmentTerms terms{ { 0.3f, 0.3f, 0.3f }, { 0.5f, 0.4f, 0.3f }, 0.7f, 0.1f };
 		const auto withIbl = Pbr::ShadeResolved(*surface, lighting, &terms);
 		const auto ibl = Pbr::EvaluateEnvironment(*surface, lighting.View, terms);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(withIbl[c] - ((*shaded)[c] + ibl[c])) < 1.0e-5f);
 		}
+
 		SWIM_CHECK_EQUAL(withIbl[3], (*shaded)[3]);
 	}
+
 	// Alpha-masked pixels resolve to nothing.
 	Pbr::Parameters masked;
 	masked.Flags = Pbr::FlagAlphaMask;
@@ -355,12 +389,14 @@ SWIM_TEST("Render.Environment.Probe", "LookupsApplyIntensityRotationAndTheRoughn
 	// Uniform environment: every lookup returns the radiance times the intensity.
 	const auto uniform = BuildProbe(Env::ProceduralSky::Uniform(2.0f), 16, 8, 4, 32, 16);
 	std::mt19937 random(9);
+
 	for (int i = 0; i < 16; ++i)
 	{
 		Pbr::ResolvedSurface surface;
 		surface.Normal = RandomDirection(random);
 		surface.PerceptualRoughness = float(i) / 15.0f;
 		const auto terms = uniform.Lookup(surface, { 0, 0, 1 }, { 0.5f, float(i) });
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(terms.Irradiance[c] - 1.0f) < 2.0e-3f);
@@ -388,6 +424,7 @@ SWIM_TEST("Render.Environment.Probe", "LookupsApplyIntensityRotationAndTheRoughn
 	// Rougher surfaces read blurrier mips: the sun's mirror image dims as roughness grows.
 	surface.Normal = Env::Normalize({ 0.075f, 0.15f, 1.0f }); // Reflects the view toward the sun.
 	float previous = 1.0e9f;
+
 	for (const float roughness : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f })
 	{
 		surface.PerceptualRoughness = roughness;
@@ -411,26 +448,31 @@ SWIM_TEST("Render.PbrGallery", "CpuReferenceMeetsTheGalleryExpectations")
 	const auto furnaceProbe = BuildProbe(Env::ProceduralSky::Uniform(1.0f), 16, 16, 5, 32, 32);
 	const auto furnace = Gallery::Render(layout, furnaceProbe, {});
 	std::uint32_t covered = 0;
+
 	for (std::uint32_t y = 0; y < layout.Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < layout.Width; ++x)
 		{
 			const auto& pixel = furnace[std::size_t(y) * layout.Width + x];
 			const auto coverage = Gallery::Cover(layout, x, y);
+
 			if (!coverage)
 			{
 				SWIM_CHECK((pixel == Gallery::Float4{ 0, 0, 0, 0 }));
 				continue;
 			}
+
 			++covered;
 			SWIM_CHECK(pixel[0] <= 1.0005f && pixel[1] <= 1.0005f && pixel[2] <= 1.0005f);
 			SWIM_CHECK_EQUAL(pixel[3], 1.0f);
+
 			if (coverage->Sphere / layout.Columns == Gallery::WhiteDielectricRow)
 			{
 				SWIM_CHECK(std::abs(pixel[0] - 1.0f) < 2.0e-3f && std::abs(pixel[2] - 1.0f) < 2.0e-3f);
 			}
 		}
 	}
+
 	SWIM_CHECK(covered > 24u * 400u);
 	// Image dumps (SWIM_PBR_GALLERY_DUMP in the native smoke): a PFM and a 24-bit BMP.
 	const auto stem = (std::filesystem::temp_directory_path() / "swim-pbr-gallery-test").string();
@@ -448,6 +490,7 @@ SWIM_TEST("Render.PbrGallery", "CpuReferenceMeetsTheGalleryExpectations")
 	const auto peaks = [&](const std::vector<Gallery::Float4>& pixels)
 	{
 		std::vector<float> peak(layout.Spheres.size(), 0.0f);
+
 		for (std::uint32_t y = 0; y < layout.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < layout.Width; ++x)
@@ -460,20 +503,25 @@ SWIM_TEST("Render.PbrGallery", "CpuReferenceMeetsTheGalleryExpectations")
 				}
 			}
 		}
+
 		return peak;
 	};
 	const auto skyPeaks = peaks(Gallery::Render(layout, probe, lit));
+
 	for (std::uint32_t column = 1; column < layout.Columns; ++column)
 	{
 		SWIM_CHECK(skyPeaks[column] < skyPeaks[column - 1]); // Gold.
 	}
+
 	lit.LightRadiance = { 3, 3, 3 };
 	const auto image = Gallery::Render(layout, probe, lit);
 	const auto litPeaks = peaks(image);
+
 	for (std::uint32_t sphere = 0; sphere < layout.Spheres.size(); ++sphere)
 	{
 		SWIM_CHECK(litPeaks[sphere] > skyPeaks[sphere]);
 	}
+
 	// Red plastic stays red, gold stays warm.
 	const auto centerOf = [&](std::uint32_t sphere)
 	{
@@ -484,10 +532,12 @@ SWIM_TEST("Render.PbrGallery", "CpuReferenceMeetsTheGalleryExpectations")
 	SWIM_CHECK(centerOf(3)[0] > centerOf(3)[2]);
 	// Occlusion darkens the copper row relative to an unoccluded copy.
 	auto unoccluded = layout;
+
 	for (auto& sphere : unoccluded.Spheres)
 	{
 		sphere.Occlusion = 1.0f;
 	}
+
 	lit.LightRadiance = { 0, 0, 0 };
 	const auto sphere = 3 * layout.Columns + 2;
 	const auto coverage =
@@ -504,6 +554,7 @@ SWIM_TEST("Render.Environment.Shading", "SpecularWeightTimesPrefilteredRadianceI
 	// specular part of EvaluateEnvironment.
 	std::mt19937 random(76);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 	for (int i = 0; i < 200; ++i)
 	{
 		Pbr::ResolvedSurface surface;
@@ -513,16 +564,19 @@ SWIM_TEST("Render.Environment.Shading", "SpecularWeightTimesPrefilteredRadianceI
 		surface.PerceptualRoughness = unit(random);
 		surface.Occlusion = 0.3f + 0.7f * unit(random);
 		auto view = RandomDirection(random);
+
 		if (Env::Dot(view, surface.Normal) < 0.0f)
 		{
 			view = { -view[0], -view[1], -view[2] };
 		}
+
 		Pbr::EnvironmentTerms terms;
 		terms.Prefiltered = { 2.0f * unit(random), unit(random), 0.5f * unit(random) };
 		terms.BrdfScale = unit(random);
 		terms.BrdfBias = 0.2f * unit(random);
 		const auto specularOnly = Pbr::EvaluateEnvironment(surface, view, terms);
 		const auto weight = Pbr::EnvironmentSpecularWeight(surface, view, terms.BrdfScale, terms.BrdfBias);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(weight[c] >= 0.0f);

@@ -10,13 +10,16 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		const SimulationFrame& DefaultFrame()
 		{
 			static const SimulationFrame frame{};
 			return frame;
 		}
+
 	} // namespace
 
 	Scene::Scene() : Scene("UnnamedScene")
@@ -50,10 +53,12 @@ namespace Engine
 	void Scene::SetServices(SceneServices value)
 	{
 		services = std::move(value);
+
 		if (!services.Tags && !ownTags)
 		{
 			ownTags = std::make_unique<TagRegistry>();
 		}
+
 		// Behaviours created before injection cache input/camera pointers.
 		for (const entt::entity entity : SnapshotBehaviorEntities())
 		{
@@ -67,10 +72,12 @@ namespace Engine
 		{
 			return *services.Tags;
 		}
+
 		if (!ownTags)
 		{
 			const_cast<Scene*>(this)->ownTags = std::make_unique<TagRegistry>();
 		}
+
 		return *ownTags;
 	}
 
@@ -113,12 +120,15 @@ namespace Engine
 		{
 			throw std::invalid_argument("Scene::CreateEntityWithSerializedId requires a nonzero persistent ID.");
 		}
+
 		entt::entity entity = registry.create();
+
 		if (!entityIdentities.Bind(entity, id))
 		{
 			registry.destroy(entity);
 			throw std::runtime_error("Scene::CreateEntityWithSerializedId received a duplicate persistent ID.");
 		}
+
 		return entity;
 	}
 
@@ -131,10 +141,12 @@ namespace Engine
 	entt::entity Scene::FindEntityBySerializedId(SerializedEntityId id) const
 	{
 		const auto entity = entityIdentities.FindEntity(id);
+
 		if (!entity || !registry.valid(*entity))
 		{
 			return entt::null;
 		}
+
 		return *entity;
 	}
 
@@ -154,6 +166,7 @@ namespace Engine
 		{
 			auto& tf = registry.get<Transform>(entity);
 			std::vector<entt::entity> kids = tf.children;
+
 			if (destroyChildren)
 			{
 				for (auto child : kids)
@@ -169,26 +182,31 @@ namespace Engine
 					{
 						continue;
 					}
+
 					auto& ctf = registry.get<Transform>(child);
 					ctf.parent = entt::null;
 					ctf.MarkWorldDirtyOnly();
 				}
+
 				tf.children.clear();
 			}
 
 			// Recursion may have moved storage: re-fetch before unlinking.
 			auto& self = registry.get<Transform>(entity);
+
 			if (self.parent != entt::null && registry.valid(self.parent) && registry.any_of<Transform>(self.parent))
 			{
 				auto& vec = registry.get<Transform>(self.parent).children;
 				vec.erase(std::remove(vec.begin(), vec.end(), entity), vec.end());
 			}
+
 			self.parent = entt::null;
 		}
 
 		if (callExit && registry.any_of<BehaviorComponents>(entity))
 		{
 			auto& bc = registry.get<BehaviorComponents>(entity);
+
 			for (auto& b : bc.behaviors)
 			{
 				if (b && b->HasInited())
@@ -205,10 +223,12 @@ namespace Engine
 	void Scene::DestroyAllEntities(bool callExit)
 	{
 		std::vector<entt::entity> all;
+
 		for (auto [entity] : registry.storage<entt::entity>().each())
 		{
 			all.push_back(entity);
 		}
+
 		for (auto e : all)
 		{
 			if (registry.valid(e) && GetParent(e) == entt::null)
@@ -216,6 +236,7 @@ namespace Engine
 				DestroyEntity(e, callExit, true);
 			}
 		}
+
 		for (auto e : all)
 		{
 			if (registry.valid(e))
@@ -223,6 +244,7 @@ namespace Engine
 				DestroyEntity(e, callExit, true);
 			}
 		}
+
 		tagIndex.clear();
 	}
 
@@ -233,28 +255,35 @@ namespace Engine
 		{
 			return;
 		}
+
 		auto& childTf = registry.get<Transform>(child);
+
 		if (childTf.parent == parent)
 		{
 			return;
 		}
+
 		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
 		{
 			auto& vec = registry.get<Transform>(childTf.parent).children;
 			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
 		}
+
 		childTf.parent = parent;
 		registry.get<Transform>(parent).children.push_back(child);
 
 		std::vector<entt::entity> stack{ child };
+
 		while (!stack.empty())
 		{
 			const entt::entity e = stack.back();
 			stack.pop_back();
+
 			if (!registry.valid(e) || !registry.any_of<Transform>(e))
 			{
 				continue;
 			}
+
 			auto& tf = registry.get<Transform>(e);
 			tf.MarkWorldDirtyOnly();
 			stack.insert(stack.end(), tf.children.begin(), tf.children.end());
@@ -267,23 +296,29 @@ namespace Engine
 		{
 			return;
 		}
+
 		auto& childTf = registry.get<Transform>(child);
+
 		if (childTf.parent != entt::null && registry.valid(childTf.parent) && registry.any_of<Transform>(childTf.parent))
 		{
 			auto& vec = registry.get<Transform>(childTf.parent).children;
 			vec.erase(std::remove(vec.begin(), vec.end(), child), vec.end());
 		}
+
 		childTf.parent = entt::null;
 
 		std::vector<entt::entity> stack{ child };
+
 		while (!stack.empty())
 		{
 			const entt::entity e = stack.back();
 			stack.pop_back();
+
 			if (!registry.valid(e) || !registry.any_of<Transform>(e))
 			{
 				continue;
 			}
+
 			auto& tf = registry.get<Transform>(e);
 			tf.MarkWorldDirtyOnly();
 			stack.insert(stack.end(), tf.children.begin(), tf.children.end());
@@ -296,6 +331,7 @@ namespace Engine
 		{
 			return &registry.get<Transform>(e).children;
 		}
+
 		return nullptr;
 	}
 
@@ -305,20 +341,24 @@ namespace Engine
 		{
 			return registry.get<Transform>(e).parent;
 		}
+
 		return entt::null;
 	}
 
 	bool Scene::WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent)
 	{
 		entt::entity cur = newParent;
+
 		while (cur != entt::null && reg.valid(cur) && reg.any_of<Transform>(cur))
 		{
 			if (cur == child)
 			{
 				return true;
 			}
+
 			cur = reg.get<Transform>(cur).parent;
 		}
+
 		return false;
 	}
 
@@ -341,6 +381,7 @@ namespace Engine
 				return entityName->Value;
 			}
 		}
+
 		const SerializedEntityId id = GetSerializedEntityId(entity);
 		return id ? "Entity " + std::to_string(id.Value) : "Entity (untracked)";
 	}
@@ -354,6 +395,7 @@ namespace Engine
 				return entity;
 			}
 		}
+
 		return entt::null;
 	}
 
@@ -370,16 +412,20 @@ namespace Engine
 		{
 			return false;
 		}
+
 		if (!tagHooksBound)
 		{
 			registry.on_destroy<TagSet>().connect<&Scene::OnTagSetDestroyed>(*this);
 			tagHooksBound = true;
 		}
+
 		auto& set = registry.get_or_emplace<TagSet>(entity);
+
 		if (!set.Add(tag))
 		{
 			return false;
 		}
+
 		tagIndex[tag.Value].insert(entity);
 		return true;
 	}
@@ -390,15 +436,19 @@ namespace Engine
 		{
 			return false;
 		}
+
 		auto* set = registry.try_get<TagSet>(entity);
+
 		if (!set || !set->Remove(tag))
 		{
 			return false;
 		}
+
 		if (const auto it = tagIndex.find(tag.Value); it != tagIndex.end())
 		{
 			it->second.erase(entity);
 		}
+
 		return true;
 	}
 
@@ -408,6 +458,7 @@ namespace Engine
 		{
 			return false;
 		}
+
 		const auto* set = registry.try_get<TagSet>(entity);
 		return set && set->Has(tag);
 	}
@@ -420,10 +471,12 @@ namespace Engine
 	std::vector<entt::entity> Scene::GetEntitiesWithTag(TagId tag) const
 	{
 		const auto it = tagIndex.find(tag.Value);
+
 		if (it == tagIndex.end())
 		{
 			return {};
 		}
+
 		return { it->second.begin(), it->second.end() };
 	}
 
@@ -436,16 +489,19 @@ namespace Engine
 	entt::entity Scene::FindFirstWithTag(TagId tag) const
 	{
 		const auto it = tagIndex.find(tag.Value);
+
 		if (it == tagIndex.end() || it->second.empty())
 		{
 			return entt::null;
 		}
+
 		return *it->second.begin();
 	}
 
 	void Scene::OnTagSetDestroyed(entt::registry& reg, entt::entity entity)
 	{
 		const auto& set = reg.get<TagSet>(entity);
+
 		for (const TagId tag : set.Values)
 		{
 			if (const auto it = tagIndex.find(tag.Value); it != tagIndex.end())
@@ -462,10 +518,12 @@ namespace Engine
 		std::vector<entt::entity> entities;
 		const auto view = registry.view<const BehaviorComponents>();
 		entities.reserve(view.size());
+
 		for (const entt::entity entity : view)
 		{
 			entities.push_back(entity);
 		}
+
 		// Storage order changes with swaps on removal; iterate by durable creation order
 		// instead so behaviour updates are deterministic across runs.
 		std::sort(entities.begin(), entities.end(),
@@ -492,6 +550,7 @@ namespace Engine
 					transform.QueueDirtyEntity();
 				});
 		}
+
 		if (!tagHooksBound)
 		{
 			registry.on_destroy<TagSet>().connect<&Scene::OnTagSetDestroyed>(*this);
@@ -516,20 +575,25 @@ namespace Engine
 
 		const EngineState state = GetExecutionState();
 		const double realDelta = GetTime().RealDelta;
+
 		for (const entt::entity entity : SnapshotBehaviorEntities())
 		{
 			auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
+
 			if (!bc || !bc->CanExecute(state))
 			{
 				continue;
 			}
+
 			for (std::size_t i = 0; bc && i < bc->behaviors.size(); ++i)
 			{
 				Behavior* behavior = bc->behaviors[i].get();
+
 				if (!behavior)
 				{
 					continue;
 				}
+
 				behavior->InitIfNeeded();
 				behavior->Update(behavior->UsesRealTime() ? realDelta : dt);
 				bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
@@ -568,17 +632,21 @@ namespace Engine
 		for (const entt::entity entity : SnapshotBehaviorEntities())
 		{
 			auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
+
 			if (!bc)
 			{
 				continue;
 			}
+
 			for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
 			{
 				Behavior* behavior = bc->behaviors[i].get();
+
 				if (!behavior || !behavior->HasInited())
 				{
 					continue;
 				}
+
 				if (current == EngineState::Paused)
 				{
 					behavior->OnPause();
@@ -597,6 +665,7 @@ namespace Engine
 				}
 			}
 		}
+
 		OnStateChanged(previous, current);
 	}
 
@@ -608,16 +677,20 @@ namespace Engine
 		{
 			return nullptr;
 		}
+
 		if (!services.Behaviors || !services.Behaviors->Contains(behaviorName))
 		{
 			std::cerr << "Scene::EmplaceBehaviorByName | Unknown behavior: " << behaviorName << std::endl;
 			return nullptr;
 		}
+
 		std::unique_ptr<Behavior> behavior = services.Behaviors->Create(behaviorName, this, e);
+
 		if (!behavior)
 		{
 			return nullptr;
 		}
+
 		return Attach(e, std::move(behavior));
 	}
 
@@ -627,6 +700,7 @@ namespace Engine
 		{
 			return false;
 		}
+
 		auto& behaviors = registry.get<BehaviorComponents>(e).behaviors;
 		const auto oldSize = behaviors.size();
 		behaviors.erase(std::remove_if(behaviors.begin(), behaviors.end(),
@@ -636,10 +710,12 @@ namespace Engine
 								{
 									return false;
 								}
+
 								if (callExit && behavior->HasInited())
 								{
 									behavior->Exit();
 								}
+
 								return true;
 							}),
 			behaviors.end());
@@ -694,12 +770,14 @@ namespace Engine
 		if (!physicsBridge)
 		{
 			physicsBridge = std::make_unique<ScenePhysicsBridge>(physicsSystem, registry);
+
 			if (!physicsBridge->Init())
 			{
 				physicsBridge.reset();
 				throw std::runtime_error("Scene::GetOrCreatePhysicsWorld | Failed to initialize PhysicsWorld!");
 			}
 		}
+
 		return physicsBridge->GetWorld();
 	}
 
@@ -717,6 +795,7 @@ namespace Engine
 	void Scene::UpdatePhysics(PhysicsSystem& physicsSystem, float alpha)
 	{
 		(void)physicsSystem;
+
 		if (physicsBridge)
 		{
 			physicsBridge->Interpolate(std::clamp(alpha, 0.0f, 1.0f));
@@ -743,10 +822,12 @@ namespace Engine
 	void Scene::DispatchCollisionEvents()
 	{
 		PhysicsWorld* world = GetPhysicsWorld();
+
 		if (!world)
 		{
 			return;
 		}
+
 		// Copy: callbacks may create or destroy bodies through the command buffer.
 		const std::vector<CollisionEvent> events(world->GetCollisionEvents().begin(), world->GetCollisionEvents().end());
 		const auto notify = [&](entt::entity self, entt::entity other, const CollisionEvent& event, float normalSign)
@@ -755,23 +836,29 @@ namespace Engine
 			{
 				return;
 			}
+
 			auto* bc = registry.try_get<BehaviorComponents>(self);
+
 			if (!bc || !bc->CanExecute(GetExecutionState()))
 			{
 				return;
 			}
+
 			BehaviorCollision collision;
 			collision.Other = other;
 			collision.Position = event.Position;
 			collision.Normal = event.Normal * normalSign;
 			collision.Impulse = event.Impulse;
+
 			for (std::size_t i = 0; bc && i < bc->behaviors.size(); ++i)
 			{
 				Behavior* behavior = bc->behaviors[i].get();
+
 				if (!behavior || !behavior->RunCollisionCallBacks() || !behavior->HasInited())
 				{
 					continue;
 				}
+
 				switch (event.Type)
 				{
 				case CollisionEventType::Started:
@@ -784,9 +871,11 @@ namespace Engine
 					behavior->OnCollisionExit(collision);
 					break;
 				}
+
 				bc = registry.valid(self) ? registry.try_get<BehaviorComponents>(self) : nullptr;
 			}
 		};
+
 		for (const CollisionEvent& event : events)
 		{
 			const entt::entity a = FindEntityByBody(event.BodyA);
@@ -799,15 +888,19 @@ namespace Engine
 	std::optional<SceneRaycastHit> Scene::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) const
 	{
 		PhysicsWorld* world = GetPhysicsWorld();
+
 		if (!world || glm::length(direction) <= 0.0f)
 		{
 			return std::nullopt;
 		}
+
 		RaycastHit hit;
+
 		if (!world->Raycast(origin, glm::normalize(direction), maxDistance, hit))
 		{
 			return std::nullopt;
 		}
+
 		SceneRaycastHit result;
 		result.Entity = FindEntityByBody(hit.Body);
 		result.Position = hit.Position;
@@ -815,4 +908,5 @@ namespace Engine
 		result.Distance = hit.Distance;
 		return result;
 	}
+
 } // namespace Engine

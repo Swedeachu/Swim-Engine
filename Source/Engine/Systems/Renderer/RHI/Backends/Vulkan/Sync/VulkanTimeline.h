@@ -23,6 +23,7 @@ namespace Swim::RhiVulkan
 				{
 					RetireLostVulkanDevice(*DeviceState);
 				}
+
 				if (Semaphore != VK_NULL_HANDLE)
 				{
 					DeviceState->Dispatch.vkDestroySemaphore(DeviceState->Device.device, Semaphore, nullptr);
@@ -32,7 +33,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanTimeline final : public Rhi::Timeline
 		{
+
 		public:
+
 			explicit VulkanTimeline(std::shared_ptr<VulkanTimelineState> state)
 				: state(std::move(state))
 			{
@@ -47,11 +50,13 @@ namespace Swim::RhiVulkan
 			{
 				RequireVulkanDevice(*state->DeviceState);
 				std::uint64_t value = 0;
+
 				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkGetSemaphoreCounterValue(
 					state->DeviceState->Device.device, state->Semaphore, &value), "vkGetSemaphoreCounterValue") != VK_SUCCESS)
 				{
 					throw std::runtime_error("Failed to query Vulkan timeline semaphore value");
 				}
+
 				return value;
 			}
 
@@ -66,10 +71,12 @@ namespace Swim::RhiVulkan
 
 				const VkResult result = CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkWaitSemaphores(
 					state->DeviceState->Device.device, &waitInfo, timeoutNanoseconds), "vkWaitSemaphores");
+
 				if (result != VK_SUCCESS && result != VK_TIMEOUT)
 				{
 					throw std::runtime_error("Failed waiting for Vulkan synchronization");
 				}
+
 				return result == VK_SUCCESS;
 			}
 
@@ -79,7 +86,9 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanTimelineState> state;
+
 		};
 
 } // namespace Swim::RhiVulkan

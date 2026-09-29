@@ -6,7 +6,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanDescriptorCapture* capture = nullptr;
+
 	}
 
 	VulkanDescriptorCapture::VulkanDescriptorCapture()
@@ -33,20 +35,25 @@ namespace Swim::Testing
 			const VkAllocationCallbacks*, VkDescriptorSetLayout* set) -> VkResult
 		{
 			capture->SetBindings.emplace_back();
+
 			for (std::uint32_t index = 0; index < info->bindingCount; ++index)
 			{
 				capture->SetBindings.back().push_back(info->pBindings[index]);
 			}
+
 			capture->SetFlags.push_back(info->flags);
 			capture->SetBindingFlags.emplace_back();
+
 			if (const auto* flags = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo*>(info->pNext))
 			{
 				capture->SetBindingFlags.back().assign(flags->pBindingFlags, flags->pBindingFlags + flags->bindingCount);
 			}
+
 			if (capture->SetBindings.size() == capture->FailSet)
 			{
 				return VK_ERROR_OUT_OF_HOST_MEMORY;
 			}
+
 			*set = RhiVulkan::FromNativeHandle<VkDescriptorSetLayout>(capture->SetBindings.size());
 			return VK_SUCCESS;
 		};
@@ -57,10 +64,12 @@ namespace Swim::Testing
 			++capture->PoolsCreated;
 			capture->PoolSizes.assign(info->pPoolSizes, info->pPoolSizes + info->poolSizeCount);
 			capture->PoolFlags = info->flags;
+
 			if (capture->PoolResult == VK_SUCCESS)
 			{
 				*pool = RhiVulkan::FromNativeHandle<VkDescriptorPool>(capture->PoolsCreated);
 			}
+
 			return capture->PoolResult;
 		};
 		State->Dispatch.vkDestroyDescriptorPool = +[](VkDevice, VkDescriptorPool, const VkAllocationCallbacks*) { ++capture->PoolsDestroyed; };
@@ -75,16 +84,19 @@ namespace Swim::Testing
 			capture->Writes.assign(writes, writes + count);
 			capture->ImagesWritten.clear();
 			capture->BuffersWritten.clear();
+
 			for (std::uint32_t index = 0; index < count; ++index)
 			{
 				if (writes[index].pImageInfo)
 				{
 					capture->ImagesWritten.push_back(*writes[index].pImageInfo);
 				}
+
 				if (writes[index].pBufferInfo)
 				{
 					capture->BuffersWritten.push_back(*writes[index].pBufferInfo);
 				}
+
 				capture->Writes[index].pImageInfo = nullptr;
 				capture->Writes[index].pBufferInfo = nullptr;
 			}
@@ -93,10 +105,12 @@ namespace Swim::Testing
 		{
 			++capture->SamplersCreated;
 			capture->SamplerInfo = *info;
+
 			if (capture->SamplerResult == VK_SUCCESS)
 			{
 				*sampler = RhiVulkan::FromNativeHandle<VkSampler>(capture->SamplersCreated);
 			}
+
 			return capture->SamplerResult;
 		};
 		State->Dispatch.vkDestroySampler = +[](VkDevice, VkSampler, const VkAllocationCallbacks*) { ++capture->SamplersDestroyed; };

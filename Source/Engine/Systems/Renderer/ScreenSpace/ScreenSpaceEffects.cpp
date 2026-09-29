@@ -9,8 +9,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		bool HasUsage(const Rhi::TextureDesc& desc, Rhi::TextureUsage usage)
@@ -52,10 +54,12 @@ namespace Swim::Render
 			const std::array<Rhi::DescriptorWrite, Count>& writes, std::uint32_t width, std::uint32_t height)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			table->Write(writes);
 			auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 			auto& list = c.Commands();
@@ -64,11 +68,13 @@ namespace Swim::Render
 			const std::uint32_t group = ScreenSpaceThreadGroupSize;
 			list.Dispatch((width + group - 1) / group, (height + group - 1) / group, 1);
 		}
+
 	} // namespace
 
 	ScreenSpaceEffects::ScreenSpaceEffects(ScreenSpaceEffectsDesc descInput) : desc(std::move(descInput))
 	{
 		const bool partialReflection = (desc.Reflection.Pipeline == nullptr) != (desc.Reflection.Layout == nullptr);
+
 		for (const auto* program : { &desc.AmbientOcclusion, &desc.Blur, &desc.Composite })
 		{
 			if (!program->Pipeline || !program->Layout)
@@ -76,6 +82,7 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs the AO, blur and composite programs");
 			}
 		}
+
 		if (partialReflection)
 		{
 			throw std::invalid_argument(desc.DebugName + " reflection program needs both its pipeline and layout");
@@ -109,10 +116,12 @@ namespace Swim::Render
 		const auto depthDesc = graph.GetDesc(frame.Depth);
 		const auto normalDesc = graph.GetDesc(frame.Normal);
 		const auto indirectDesc = graph.GetDesc(frame.Indirect);
+
 		if (!IsPlain2D(colorDesc) || colorDesc.PixelFormat != Rhi::Format::RGBA16Float)
 		{
 			throw std::invalid_argument(name + " color must be a sampled single-sample 2D RGBA16Float texture");
 		}
+
 		const std::uint32_t width = colorDesc.Extent.Width;
 		const std::uint32_t height = colorDesc.Extent.Height;
 		const auto sameSize = [&](const Rhi::TextureDesc& other)
@@ -120,10 +129,12 @@ namespace Swim::Render
 			return IsPlain2D(other) && other.Extent.Width == width && other.Extent.Height == height;
 		};
 		const bool depthIsDepth = depthDesc.PixelFormat == Rhi::Format::D32Float;
+
 		if (!sameSize(depthDesc) || (!depthIsDepth && depthDesc.PixelFormat != Rhi::Format::R32Float))
 		{
 			throw std::invalid_argument(name + " depth must be a color-sized sampled D32Float or R32Float texture");
 		}
+
 		if (!sameSize(normalDesc) || normalDesc.PixelFormat != Rhi::Format::RGBA16Float || !sameSize(indirectDesc) ||
 			indirectDesc.PixelFormat != Rhi::Format::RGBA16Float)
 		{
@@ -136,75 +147,94 @@ namespace Swim::Render
 		const bool fog = resources.ParamsRecord.FogEnabled != 0u;
 		const bool ssr = resources.ParamsRecord.SsrEnabled != 0u;
 		const bool probes = frame.Probes && frame.Probes->Count > 0;
+
 		if (probes)
 		{
 			if (frame.Probes->Count > ScreenSpaceMaxProbes || frame.Probes->MipCount == 0)
 			{
 				throw std::invalid_argument(name + " probes: 1 .. ScreenSpaceMaxProbes records and at least one mip");
 			}
+
 			if (!desc.ProbeSampler)
 			{
 				throw std::invalid_argument(name + " probes need the probe sampler");
 			}
+
 			const auto idDesc = graph.GetDesc(frame.Probes->ObjectId);
+
 			if (!sameSize(idDesc) || idDesc.PixelFormat != Rhi::Format::R32Float)
 			{
 				throw std::invalid_argument(name + " probes need a color-sized R32Float object id");
 			}
+
 			resources.ParamsRecord.ProbeCount = frame.Probes->Count;
 			resources.ParamsRecord.ProbeMipCount = frame.Probes->MipCount;
 		}
+
 		if (ssr || probes)
 		{
 			if (ssr && !desc.Reflection.Pipeline)
 			{
 				throw std::invalid_argument(name + " reflections need the reflection program");
 			}
+
 			if (!frame.Reflectance || !frame.Specular)
 			{
 				throw std::invalid_argument(name + " reflections need the reflectance and specular inputs");
 			}
+
 			const auto reflectanceDesc = graph.GetDesc(*frame.Reflectance);
 			const auto specularDesc = graph.GetDesc(*frame.Specular);
+
 			if (!sameSize(reflectanceDesc) || reflectanceDesc.PixelFormat != Rhi::Format::RGBA16Float || !sameSize(specularDesc) ||
 				specularDesc.PixelFormat != Rhi::Format::RGBA16Float)
 			{
 				throw std::invalid_argument(name + " reflectance and specular must be color-sized sampled RGBA16Float textures");
 			}
+
 			if (ssr && frame.BackDepth)
 			{
 				const auto backDesc = graph.GetDesc(*frame.BackDepth);
+
 				if (!sameSize(backDesc) || backDesc.PixelFormat != Rhi::Format::D32Float)
 				{
 					throw std::invalid_argument(name + " back depth must be a color-sized sampled D32Float texture");
 				}
+
 				resources.ParamsRecord.SsrBackDepth = 1u;
 			}
+
 			if (ssr && frame.History && frame.Velocity)
 			{
 				const auto historyDesc = graph.GetDesc(*frame.History);
 				const auto velocityDesc = graph.GetDesc(*frame.Velocity);
+
 				if (!sameSize(historyDesc) || historyDesc.PixelFormat != Rhi::Format::RGBA16Float || !sameSize(velocityDesc) ||
 					velocityDesc.PixelFormat != Rhi::Format::RG16Float)
 				{
 					throw std::invalid_argument(name + " reflection history must be color-sized RGBA16Float and velocity RG16Float");
 				}
+
 				resources.ParamsRecord.SsrHistory = 1u;
 			}
 		}
+
 		if (!ao && !fog && !ssr && !probes)
 		{
 			resources.Output = frame.Color;
 			resources.Passthrough = true;
 			return resources;
 		}
+
 		const bool temporal = frame.ReflectionTemporal.has_value() && frame.Velocity.has_value() && (ssr || probes) &&
 			desc.ReflectionTemporal.Pipeline != nullptr;
+
 		if (temporal)
 		{
 			resources.ParamsRecord.ReflectionTemporal = 1u | (frame.ReflectionTemporal->Previous ? 2u : 0u);
 			resources.ParamsRecord.ReflectionTemporalBlend = std::clamp(frame.ReflectionTemporal->Blend, 0.01f, 1.0f);
 		}
+
 		const auto params =
 			graph.CreateUpload(std::as_bytes(std::span(&resources.ParamsRecord, 1)), name + " params", Rhi::BufferUsage::Storage, 16);
 		resources.Params = params;
@@ -213,6 +243,7 @@ namespace Swim::Render
 		const auto depthAspect = depthIsDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic;
 
 		GraphTexture visibility;
+
 		if (ao)
 		{
 			const bool halfAo = resources.ParamsRecord.AoHalf != 0u;
@@ -283,11 +314,13 @@ namespace Swim::Render
 		GraphTexture reflection;
 		GraphTexture reflectance;
 		GraphTexture specular;
+
 		if (ssr || probes)
 		{
 			reflectance = *frame.Reflectance;
 			specular = *frame.Specular;
 		}
+
 		if (ssr)
 		{
 			const bool half = resources.ParamsRecord.SsrHalf != 0u;
@@ -306,6 +339,7 @@ namespace Swim::Render
 			const bool useHistory = resources.ParamsRecord.SsrHistory != 0u;
 			const bool useBackDepth = resources.ParamsRecord.SsrBackDepth != 0u;
 			GraphTexture backDepth;
+
 			if (useBackDepth)
 			{
 				backDepth = *frame.BackDepth;
@@ -323,10 +357,12 @@ namespace Swim::Render
 				AddTextureUpload(graph, name + " back depth stand-in upload", std::as_bytes(std::span(&zero, 1)), backDepth,
 					{ 0, {}, {}, { 1, 1, 1 } });
 			}
+
 			const auto backDepthFormat = useBackDepth ? Rhi::Format::D32Float : Rhi::Format::R32Float;
 			const auto backDepthAspect = useBackDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic;
 			const auto historyTexture = useHistory ? *frame.History : color;
 			GraphTexture velocity;
+
 			if (useHistory)
 			{
 				velocity = *frame.Velocity;
@@ -344,6 +380,7 @@ namespace Swim::Render
 				AddTextureUpload(
 					graph, name + " velocity stand-in upload", std::as_bytes(std::span(zero)), velocity, { 0, {}, {}, { 1, 1, 1 } });
 			}
+
 			resources.ReflectionPass = graph.AddPass(
 				name + " reflections", Rhi::QueueType::Compute,
 				[&](RenderGraphBuilder& b)
@@ -356,10 +393,12 @@ namespace Swim::Render
 					b.Read(params, S::ShaderRead);
 					b.Read(velocity, S::ShaderRead);
 					b.Read(backDepth, S::ShaderRead);
+
 					if (useHistory)
 					{
 						b.Read(historyTexture, S::ShaderRead);
 					}
+
 					b.Write(reflection, S::ShaderWrite);
 				},
 				[program = desc.Reflection, label = name + " reflections", depth, depthFormat, depthAspect, normal, color, indirect,
@@ -387,11 +426,13 @@ namespace Swim::Render
 			const std::string standInName = name + " reflection stand-in";
 			standInDesc.DebugName = standInName;
 			reflection = graph.CreateTexture(standInDesc);
+
 			if (!probes)
 			{
 				reflectance = reflection;
 				specular = reflection;
 			}
+
 			const std::array<std::uint16_t, 4> zero{};
 			AddTextureUpload(
 				graph, name + " reflection stand-in upload", std::as_bytes(std::span(zero)), reflection, { 0, {}, {}, { 1, 1, 1 } });
@@ -403,6 +444,7 @@ namespace Swim::Render
 		GraphTexture objectId;
 		std::uint32_t probeLayers = 6u;
 		std::uint32_t probeMips = 1;
+
 		if (probes)
 		{
 			probeCubes = frame.Probes->Cubes;
@@ -423,10 +465,12 @@ namespace Swim::Render
 			cubeDesc.DebugName = cubeName;
 			probeCubes = graph.CreateTexture(cubeDesc);
 			const std::array<std::uint16_t, 4> zero{};
+
 			for (std::uint32_t face = 0; face < 6u; ++face)
 			{
 				AddTextureUpload(graph, cubeName + " upload", std::as_bytes(std::span(zero)), probeCubes, { 0, { 0, face }, {}, { 1, 1, 1 } });
 			}
+
 			const std::array<std::byte, ScreenSpaceProbeRecordBytes> record{};
 			probeRecords = graph.CreateUpload(record, name + " probe records stand-in", Rhi::BufferUsage::Storage, 16);
 			Rhi::TextureDesc idDesc;
@@ -439,6 +483,7 @@ namespace Swim::Render
 			const float zeroId = 0.0f;
 			AddTextureUpload(graph, idName + " upload", std::as_bytes(std::span(&zeroId, 1)), objectId, { 0, {}, {}, { 1, 1, 1 } });
 		}
+
 		if (!desc.ProbeSampler)
 		{
 			throw std::invalid_argument(name + " needs the probe sampler");
@@ -446,15 +491,18 @@ namespace Swim::Render
 
 		// The reflection term the temporal filter reads, or a 1x1 stand-in the composite never writes.
 		GraphTexture reflectionTerm;
+
 		if (temporal)
 		{
 			const auto& t = *frame.ReflectionTemporal;
 			const auto nextDesc = graph.GetDesc(t.Next);
+
 			if (!sameSize(nextDesc) || nextDesc.PixelFormat != Rhi::Format::RGBA16Float ||
 				(t.Previous && (!sameSize(graph.GetDesc(*t.Previous)) || graph.GetDesc(*t.Previous).PixelFormat != Rhi::Format::RGBA16Float)))
 			{
 				throw std::invalid_argument(name + " reflection history must be color-sized RGBA16Float textures");
 			}
+
 			auto termDesc = OutputDesc(width, height);
 			termDesc.Usage = Rhi::TextureUsage::Storage | Rhi::TextureUsage::Sampled;
 			const std::string termName = name + " reflection term";
@@ -489,11 +537,13 @@ namespace Swim::Render
 				b.Read(params, S::ShaderRead);
 				b.Read(reflection, S::ShaderRead);
 				b.Read(surfaceNormal, S::ShaderRead);
+
 				if (ssr || probes)
 				{
 					b.Read(reflectance, S::ShaderRead);
 					b.Read(specular, S::ShaderRead);
 				}
+
 				b.Read(probeCubes, S::ShaderRead);
 				b.Read(probeRecords, S::ShaderRead);
 				b.Read(objectId, S::ShaderRead);
@@ -528,6 +578,7 @@ namespace Swim::Render
 				completed[B::ProbeSampler].SamplerResource = probeSampler;
 				Dispatch(c, program, label, completed, width, height);
 			});
+
 		if (temporal)
 		{
 			const auto& t = *frame.ReflectionTemporal;
@@ -545,10 +596,12 @@ namespace Swim::Render
 					b.Read(output, S::ShaderRead);
 					b.Read(reflectionTerm, S::ShaderRead);
 					b.Read(velocity, S::ShaderRead);
+
 					if (t.Previous)
 					{
 						b.Read(history, S::ShaderRead);
 					}
+
 					b.Read(params, S::ShaderRead);
 					b.Write(filtered, S::ShaderWrite);
 					b.Write(next, S::ShaderWrite);
@@ -569,6 +622,8 @@ namespace Swim::Render
 				});
 			resources.Output = filtered;
 		}
+
 		return resources;
 	}
+
 } // namespace Swim::Render

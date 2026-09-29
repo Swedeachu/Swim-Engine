@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// One std430 row of the GPU Scene instance buffer (Shaders/Slang/GpuScene/
 	// GpuSceneRecords.slang mirrors it; a reflection test compares offsets). The
 	// row index is RenderObjectHandle::Index. It changes only when the object's
@@ -35,4 +36,5 @@ namespace Swim::Render
 	static_assert(offsetof(GpuInstanceRecord, MeshIndex) == 12);
 	static_assert(offsetof(GpuInstanceRecord, LocalExtents) == 16);
 	static_assert(offsetof(GpuInstanceRecord, TransformIndex) == 32);
+
 } // namespace Swim::Render

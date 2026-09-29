@@ -37,8 +37,11 @@ namespace Swim::AssetCompiler
 
 	class GltfImporter final
 	{
+
 	public:
+
 		GltfImportResult Import(const std::filesystem::path& path) const;
+
 	};
 
 }

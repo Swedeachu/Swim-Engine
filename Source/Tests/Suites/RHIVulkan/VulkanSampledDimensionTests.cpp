@@ -16,6 +16,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "EveryShapeRequiresMatchingShaderAndVa
 {
 	Testing::VulkanDescriptorCapture capture;
 	capture.State->Device.physical_device.features.imageCubeArray = VK_TRUE;
+
 	for (std::uint32_t index = 0; index < 7; ++index)
 	{
 		const auto data = Testing::MakeSampledDimensionData(index);
@@ -23,32 +24,40 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "EveryShapeRequiresMatchingShaderAndVa
 		binding.SampledDimension = data.View.Dimension;
 		binding.SampledClass = index == 4 || index == 6 ? Rhi::SampledTextureClass::Float : Rhi::SampledTextureClass::Uint;
 		RhiVulkan::VulkanTexture texture(capture.State, VK_NULL_HANDLE, data.Texture);
+
 		for (std::uint32_t invalid = 0; invalid < 6; ++invalid)
 		{
 			auto viewDesc = data.View;
+
 			if (invalid == 1)
 			{
 				viewDesc.Dimension = index == 5 ? Rhi::TextureViewDimension::Texture2DArray : Rhi::TextureViewDimension::Texture2D;
 			}
+
 			if (invalid == 2)
 			{
 				viewDesc.MipLevelCount = UINT32_MAX;
 			}
+
 			if (invalid == 3)
 			{
 				viewDesc.BaseArrayLayer = UINT32_MAX;
 			}
+
 			if (invalid == 4)
 			{
 				viewDesc.ArrayLayerCount = 0;
 			}
+
 			if (invalid == 5)
 			{
 				viewDesc.PixelFormat = Rhi::Format::R32Sint;
 			}
+
 			RhiVulkan::VulkanTextureView view(capture.State, texture, RhiVulkan::FromNativeHandle<VkImageView>(1), viewDesc);
 			Rhi::DescriptorWrite write{};
 			write.TextureResource = &view;
+
 			if (invalid == 0)
 			{
 				SWIM_CHECK_EQUAL(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write).imageLayout,
@@ -85,6 +94,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "CubeArraysAreOptionalAndLayoutsOwnThe
 SWIM_TEST("RHI.Vulkan.SampledDimensions", "FactoryRulesRejectIncompatibleNativeViews")
 {
 	using D = Rhi::TextureViewDimension;
+
 	for (std::uint32_t index = 0; index < 7; ++index)
 	{
 		auto data = Testing::MakeSampledDimensionData(index);
@@ -93,6 +103,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "FactoryRulesRejectIncompatibleNativeV
 		data.View.Dimension = static_cast<D>(255);
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanTextureView(data.Texture, data.View, true));
 	}
+
 	auto cube = Testing::MakeSampledDimensionData(6);
 	cube.View.ArrayLayerCount = 7;
 	SWIM_CHECK(!RhiVulkan::ValidateVulkanTextureView(cube.Texture, cube.View, true));
@@ -116,6 +127,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "FactoryRulesRejectIncompatibleNativeV
 SWIM_TEST("RHI.Vulkan.SampledDimensions", "InvalidDimensionsRejectBeforeNativeLayoutCreation")
 {
 	Testing::VulkanComputeCapture capture;
+
 	for (const auto type : { Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::Sampler, Rhi::DescriptorType::UniformBuffer })
 	{
 		Rhi::DescriptorSchemaDesc schema{ 0, { { 0, type, 1, Rhi::ShaderStageMask::Compute } } };
@@ -179,16 +191,19 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "DeviceFactoryEmitsNativeShapesAndReso
 	RhiVulkan::VulkanDevice device(capture.State, {}, nullptr, nullptr, nullptr);
 	const std::array nativeTypes{ VK_IMAGE_VIEW_TYPE_1D, VK_IMAGE_VIEW_TYPE_1D_ARRAY, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_IMAGE_VIEW_TYPE_3D,
 		VK_IMAGE_VIEW_TYPE_CUBE, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY };
+
 	for (std::uint32_t index = 0; index < 7; ++index)
 	{
 		const auto data = Testing::MakeSampledDimensionData(index);
 		RhiVulkan::VulkanTexture texture(capture.State, RhiVulkan::FromNativeHandle<VkImage>(50), data.Texture);
+
 		if (index == 6)
 		{
 			SWIM_CHECK(!device.CreateTextureView(texture, data.View));
 			SWIM_CHECK_EQUAL(creates, 6u);
 			capture.State->Device.physical_device.features.imageCubeArray = VK_TRUE;
 		}
+
 		auto viewDesc = data.View;
 		viewDesc.PixelFormat = Rhi::Format::Undefined;
 		auto view = device.CreateTextureView(texture, viewDesc);
@@ -200,6 +215,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "DeviceFactoryEmitsNativeShapesAndReso
 		SWIM_CHECK_EQUAL(native.subresourceRange.baseArrayLayer, data.View.BaseArrayLayer);
 		SWIM_CHECK_EQUAL(native.subresourceRange.layerCount, data.View.ArrayLayerCount);
 	}
+
 	SWIM_CHECK_EQUAL(creates, 7u);
 	SWIM_CHECK_EQUAL(destroys, creates);
 }
@@ -222,6 +238,7 @@ SWIM_TEST("RHI.Vulkan.SampledDimensions", "CompiledVariantsReachOwnedNativeLayou
 		SWIM_REQUIRE(program);
 		auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 		SWIM_REQUIRE(layout);
+
 		for (std::uint32_t index = 0; index < (cubes ? 7u : 6u); ++index)
 		{
 			SWIM_CHECK_EQUAL(layout->GetLayoutState()->Interface.DescriptorSchemas[0].Bindings[index].SampledDimension,

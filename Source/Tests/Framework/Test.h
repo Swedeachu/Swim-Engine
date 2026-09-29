@@ -52,10 +52,13 @@ namespace Swim::Testing
 	public:
 
 		void RecordFailure(const SourceLocation& location, std::string expression, std::string message);
+
 		void CountCheck();
 
 		bool HasFailures() const;
+
 		std::size_t GetCheckCount() const;
+
 		std::vector<TestFailure> GetFailures() const;
 
 	private:
@@ -87,6 +90,7 @@ namespace Swim::Testing
 		static TestRegistry& Get();
 
 		void Add(TestCase test);
+
 		const std::vector<TestCase>& GetTests() const;
 
 	private:

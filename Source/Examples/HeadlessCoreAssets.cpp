@@ -6,16 +6,19 @@
 
 namespace
 {
+
 	struct HeadlessAsset
 	{
 		int Value = 0;
 	};
+
 }
 
 int main()
 {
 	Engine::EngineConfig config{};
 	Swim::Jobs::JobSystem jobs;
+
 	if (!jobs.Initialize())
 	{
 		std::cerr << "Headless foundation: JobSystem initialization failed.\n";
@@ -23,6 +26,7 @@ int main()
 	}
 
 	Swim::Assets::AssetSystem assets;
+
 	if (!assets.Initialize())
 	{
 		std::cerr << "Headless foundation: AssetSystem initialization failed.\n";

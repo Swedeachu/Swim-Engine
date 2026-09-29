@@ -14,6 +14,7 @@ SWIM_TEST("RHI.Vulkan.ReadbackArena", "PersistentReadsInvalidateAfterCompletionA
 	auto arena = Rhi::ReadbackArena::Create(*capture.Device, { 512 });
 	SWIM_REQUIRE(arena);
 	SWIM_REQUIRE_EQUAL(capture.MapCalls, 1u);
+
 	for (unsigned iteration = 0; iteration < 3; ++iteration)
 	{
 		SWIM_REQUIRE(arena->Allocate(3));
@@ -40,6 +41,7 @@ SWIM_TEST("RHI.Vulkan.ReadbackArena", "PersistentReadsInvalidateAfterCompletionA
 		SWIM_CHECK_EQUAL(capture.Invalidations.size(), iteration + 1u);
 		SWIM_REQUIRE(arena->TryReset());
 	}
+
 	SWIM_CHECK_EQUAL(capture.MapCalls, 1u);
 	SWIM_CHECK_EQUAL(capture.UnmapCalls, 0u);
 	SWIM_CHECK_EQUAL(capture.IdleCalls, 0u);

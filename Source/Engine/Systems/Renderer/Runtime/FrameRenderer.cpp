@@ -53,12 +53,14 @@
 
 namespace Engine
 {
+
 	namespace S = Swim::Rhi;
 	namespace R = Swim::Render;
 	static_assert(sizeof(R::GpuReflectionProbeRecord) == R::ScreenSpaceProbeRecordBytes && R::MaxReflectionProbes == R::ScreenSpaceMaxProbes);
 
 	namespace
 	{
+
 		using S::ResourceState;
 
 		// Presentation push constants (Present.slang).
@@ -91,10 +93,12 @@ namespace Engine
 		std::array<float, 3> Normalized(std::array<float, 3> v)
 		{
 			const float length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
 			if (length <= 1e-12f || !std::isfinite(length))
 			{
 				return { 0, 0, -1 };
 			}
+
 			return { v[0] / length, v[1] / length, v[2] / length };
 		}
 
@@ -109,12 +113,15 @@ namespace Engine
 		std::uint32_t PowerOfTwoFloor(std::uint32_t value)
 		{
 			std::uint32_t result = 1;
+
 			while (result * 2 <= value)
 			{
 				result *= 2;
 			}
+
 			return result;
 		}
+
 	} // namespace
 
 	void RenderSettings::Sanitize()
@@ -124,6 +131,7 @@ namespace Engine
 			value = std::isfinite(value) ? std::clamp(value, low, high) : fallback;
 		};
 		clampFinite(Sky.GroundFalloff, 1.0f, 256.0f, 2.0f);
+
 		if (SkyBackgroundGround)
 		{
 			for (auto& channel : *SkyBackgroundGround)
@@ -131,10 +139,12 @@ namespace Engine
 				clampFinite(channel, 0.0f, 1000.0f, 0.0f);
 			}
 		}
+
 		for (auto& a : Ambient)
 		{
 			clampFinite(a, 0.0f, 100.0f, 0.0f);
 		}
+
 		clampFinite(EnvironmentIntensity, 0.0f, 100.0f, 1.0f);
 		clampFinite(EnvironmentRotation, -100.0f, 100.0f, 0.0f);
 		clampFinite(EnvironmentRefreshSeconds, 0.0f, 3600.0f, 0.5f);
@@ -178,6 +188,7 @@ namespace Engine
 	{
 		Impl(RenderDevice& renderDevice, Swim::Assets::AssetSystem& assets, Swim::IO::AsyncIoService& io, Swim::Jobs::JobSystem* jobs,
 			const FrameRendererDesc& desc);
+
 		~Impl();
 
 		S::Device& device;
@@ -294,6 +305,7 @@ namespace Engine
 			std::span<const R::ShadowCasterDesc> casters)
 		{
 			const auto size = plan.AtlasSize;
+
 			if (!shadowAtlasTexture || shadowAtlasTexture->GetDesc().Extent.Width != size)
 			{
 				S::TextureDesc atlasDesc;
@@ -302,18 +314,23 @@ namespace Engine
 				atlasDesc.Usage = S::TextureUsage::DepthStencilAttachment | S::TextureUsage::Sampled | S::TextureUsage::TransferSource;
 				atlasDesc.DebugName = "Shadow atlas (cached)";
 				shadowAtlasTexture = device.CreateTexture(atlasDesc);
+
 				if (!shadowAtlasTexture)
 				{
 					throw std::runtime_error("FrameRenderer: cannot create the cached shadow atlas");
 				}
+
 				shadowAtlasWritten = false;
 				shadowCache.clear();
 			}
+
 			++shadowFrames;
+
 			if (shadowFrames != lastShadowFrame + 1)
 			{
 				shadowCache.clear(); // Shadows were off for a while: nothing cached is current.
 			}
+
 			lastShadowFrame = shadowFrames;
 			const auto dot3 = [](const std::array<float, 3>& a, const std::array<float, 3>& b)
 			{
@@ -321,14 +338,18 @@ namespace Engine
 			};
 			shadowFrame.Render.assign(plan.Draws.size(), 1);
 			std::map<std::pair<std::uint32_t, std::uint32_t>, CachedShadowView> kept;
+
 			for (std::size_t v = 0; v < plan.Draws.size(); ++v)
 			{
 				auto& draw = plan.Draws[v];
+
 				if (draw.Kind != R::ShadowKind::Directional)
 				{
 					continue;
 				}
+
 				std::array<float, 3> lightDirection{};
+
 				for (const auto& caster : casters)
 				{
 					if (caster.Slot == draw.Slot)
@@ -336,10 +357,12 @@ namespace Engine
 						lightDirection = { caster.Light.Direction[0], caster.Light.Direction[1], caster.Light.Direction[2] };
 					}
 				}
+
 				auto& record = plan.Records[draw.Slot];
 				const auto key = std::make_pair(draw.Slot, draw.Index);
 				const auto found = shadowCache.find(key);
 				bool refresh = found == shadowCache.end() || !shadowAtlasWritten;
+
 				if (!refresh)
 				{
 					const auto& cached = found->second;
@@ -355,6 +378,7 @@ namespace Engine
 						cached.Tile.Size != draw.Tile.Size || dot3(lightDirection, cached.LightDirection) < 0.99999f ||
 						shift > 0.05f * radius;
 				}
+
 				if (refresh)
 				{
 					CachedShadowView entry;
@@ -377,14 +401,17 @@ namespace Engine
 					kept[key] = cached;
 				}
 			}
+
 			shadowCache = std::move(kept);
 			const auto atlas = graph.ImportTexture(*shadowAtlasTexture, shadowAtlasWritten ? S::ResourceState::ShaderRead : S::ResourceState::Undefined);
+
 			if (!shadowAtlasWritten)
 			{
 				// First use: the atlas is cleared whole and every tile is drawn this frame.
 				std::fill(shadowFrame.Render.begin(), shadowFrame.Render.end(), std::uint8_t(1));
 				shadowFrame.AtlasHoldsDepth = false;
 			}
+
 			shadowAtlasWritten = true;
 			shadowFrame.Atlas = atlas;
 			return atlas;
@@ -411,9 +438,13 @@ namespace Engine
 		std::unordered_map<std::string, std::unique_ptr<RuntimeComputeProgram>> featurePrograms; // Loaded on first use.
 
 		void Route(std::uint32_t set, const R::StandardPbr::Parameters& parameters);
+
 		void EnsureVisibility(std::uint32_t slots);
+
 		RuntimeGraphicsProgram LoadDrawProgram(std::string_view name, const S::DescriptorSchemaDesc* bindlessSpace);
+
 		S::GraphicsPipeline& GetPresentPipeline(S::Format format);
+
 		void EnsureEnvironmentTargets(std::uint32_t resolution);
 	};
 
@@ -428,11 +459,13 @@ namespace Engine
 		// wherever SWIM_FORCE_INDIRECT_FALLBACK=1 asks for it.
 		constexpr std::uint32_t SwiftShaderVendor = 0x1AE0u;
 		const char* forced = std::getenv("SWIM_FORCE_INDIRECT_FALLBACK");
+
 		if (desc.ForceIndirectFallback || renderDeviceValue.GetAdapterInfo().VendorId == SwiftShaderVendor ||
 			(forced && std::string_view(forced) == "1"))
 		{
 			drawPath = R::VisibilityDrawPath::ZeroFilledIndirect;
 		}
+
 		for (const auto name : ShaderLibrary::RequiredPrograms())
 		{
 			if (!shaders.Contains(name))
@@ -465,10 +498,12 @@ namespace Engine
 		ssBlur = shaders.LoadCompute("ScreenSpaceBlur");
 		ssComposite = shaders.LoadCompute("ScreenSpaceComposite");
 		ssReflection = shaders.LoadCompute("ScreenSpaceReflection");
+
 		if (shaders.Contains("ScreenSpaceReflectionTemporal"))
 		{
 			ssReflectionTemporal = shaders.LoadCompute("ScreenSpaceReflectionTemporal");
 		}
+
 		particleSimulate = shaders.LoadCompute("ParticleSimulate");
 		particleEmit = shaders.LoadCompute("ParticleEmit");
 		particleCompact = shaders.LoadCompute("ParticleCompact");
@@ -496,6 +531,7 @@ namespace Engine
 			{
 				throw std::runtime_error(std::string("FrameRenderer: cannot create the ") + what + " pipeline");
 			}
+
 			return pointer;
 		};
 		forwardOpaquePipeline = require(device.CreateGraphicsPipeline(R::ForwardPlusRenderer::PipelineDesc(
@@ -559,11 +595,13 @@ namespace Engine
 			repeat.MaxAnisotropy = 8.0f;
 			repeat.DebugName = "Material sampler";
 			linearRepeat = device.CreateSampler(repeat);
+
 			if (!linearRepeat)
 			{
 				repeat.EnableAnisotropy = false;
 				linearRepeat = require(device.CreateSampler(repeat), "material sampler");
 			}
+
 			S::SamplerDesc clamp{};
 			clamp.AddressU = clamp.AddressV = clamp.AddressW = S::SamplerAddressMode::ClampToEdge;
 			clamp.DebugName = "Linear clamp";
@@ -633,6 +671,7 @@ namespace Engine
 		forwardDesc.Transparent = { forwardTransparentPipeline.get(), forwardTransparent.Layout.get() };
 		forwardDesc.DepthPrepass = { forwardDepthPipeline.get(), forwardDepth.Layout.get() };
 		forwardDesc.OpaquePrepassed = { forwardPrepassedPipeline.get(), forwardPrepassed.Layout.get() };
+
 		if (shaders.Contains("ForwardBackDepth"))
 		{
 			forwardBackDepth = LoadDrawProgram("ForwardBackDepth", &bindlessSpace);
@@ -641,6 +680,7 @@ namespace Engine
 				"Forward+ back depth");
 			forwardDesc.BackDepth = { forwardBackDepthPipeline.get(), forwardBackDepth.Layout.get() };
 		}
+
 		if (shaders.Contains("ForwardOpaqueDeferred") && shaders.Contains("ForwardLocalLights"))
 		{
 			forwardDeferred = LoadDrawProgram("ForwardOpaqueDeferred", &bindlessSpace);
@@ -652,6 +692,7 @@ namespace Engine
 			forwardDesc.LocalLightsPipeline = forwardLocalLights.Pipeline.get();
 			forwardDesc.LocalLightsLayout = forwardLocalLights.Layout.get();
 		}
+
 		forwardDesc.SortPipeline = sortProgram.Pipeline.get();
 		forwardDesc.SortLayout = sortProgram.Layout.get();
 		forwardDesc.DrawPath = drawPath;
@@ -660,6 +701,7 @@ namespace Engine
 		R::ShadowRendererDesc shadowDesc;
 		shadowDesc.Opaque = { shadowDepthPipeline.get(), shadowDepth.Layout.get() };
 		shadowDesc.Masked = { shadowMaskedPipeline.get(), shadowMasked.Layout.get() };
+
 		if (shaders.Contains("ShadowClear"))
 		{
 			shadowClear = LoadDrawProgram("ShadowClear", nullptr);
@@ -667,6 +709,7 @@ namespace Engine
 				device.CreateGraphicsPipeline(R::ShadowRenderer::ClearPipelineDesc(*shadowClear.Program, *shadowClear.Layout)), "shadow clear");
 			shadowDesc.Clear = { shadowClearPipeline.get(), shadowClear.Layout.get() };
 		}
+
 		shadowDesc.DrawPath = drawPath;
 		shadows = std::make_unique<R::ShadowRenderer>(shadowDesc);
 
@@ -686,24 +729,29 @@ namespace Engine
 			environmentIrradiance.Space };
 		environmentDesc.BrdfLut = { environmentLut.Pipeline.get(), environmentLut.Layout.get(), environmentLut.Space };
 		environmentDesc.Sampler = linearClamp.get();
+
 		if (shaders.Contains("EnvironmentOverlay"))
 		{
 			environmentOverlay = shaders.LoadCompute("EnvironmentOverlay");
 			environmentDesc.Overlay = { environmentOverlay.Pipeline.get(), environmentOverlay.Layout.get(), environmentOverlay.Space };
 		}
+
 		environmentBuilder = std::make_unique<R::EnvironmentBuilder>(environmentDesc);
 
 		R::ScreenSpaceEffectsDesc ssDesc;
 		ssDesc.AmbientOcclusion = { ssAo.Pipeline.get(), ssAo.Layout.get(), ssAo.Space };
 		ssDesc.Blur = { ssBlur.Pipeline.get(), ssBlur.Layout.get(), ssBlur.Space };
 		ssDesc.Composite = { ssComposite.Pipeline.get(), ssComposite.Layout.get(), ssComposite.Space };
+
 		if (ssReflectionTemporal.Pipeline)
 		{
 			ssDesc.ReflectionTemporal = { ssReflectionTemporal.Pipeline.get(), ssReflectionTemporal.Layout.get(), ssReflectionTemporal.Space };
 		}
+
 		ssDesc.Reflection = { ssReflection.Pipeline.get(), ssReflection.Layout.get(), ssReflection.Space };
 		ssDesc.ProbeSampler = linearClamp.get();
 		screenSpace = std::make_unique<R::ScreenSpaceEffects>(ssDesc);
+
 		if (shaders.Contains("ReflectionProbeResolve") && shaders.Contains("ReflectionProbePrefilter"))
 		{
 			probeResolve = shaders.LoadCompute("ReflectionProbeResolve");
@@ -748,6 +796,7 @@ namespace Engine
 		catch (...)
 		{
 		}
+
 		if (atlasTextures)
 		{
 			atlasTextures->Drain();
@@ -760,12 +809,14 @@ namespace Engine
 		{
 			return shaders.LoadGraphics(name, { bindlessSpace, 1 });
 		}
+
 		return shaders.LoadGraphics(name);
 	}
 
 	S::GraphicsPipeline& FrameRenderer::Impl::GetPresentPipeline(S::Format format)
 	{
 		auto& pipeline = presentPipelines[format];
+
 		if (!pipeline)
 		{
 			S::GraphicsPipelineDesc presentDesc{};
@@ -777,25 +828,30 @@ namespace Engine
 			presentDesc.Raster.Cull = S::CullMode::None;
 			presentDesc.DebugName = "Present";
 			pipeline = device.CreateGraphicsPipeline(presentDesc);
+
 			if (!pipeline)
 			{
 				throw std::runtime_error("FrameRenderer: cannot create the present pipeline");
 			}
 		}
+
 		return *pipeline;
 	}
 
 	void FrameRenderer::Impl::Route(std::uint32_t set, const R::StandardPbr::Parameters& parameters)
 	{
 		routes[set] = parameters;
+
 		if (visibility)
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*visibility, set, parameters);
 		}
+
 		if (shadowVisibility)
 		{
 			R::ShadowRenderer::RouteMaterial(*shadowVisibility, set, parameters);
 		}
+
 		if (probeVisibility)
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*probeVisibility, set, parameters);
@@ -808,6 +864,7 @@ namespace Engine
 		{
 			return;
 		}
+
 		R::GpuVisibilityDesc visibilityDesc;
 		visibilityDesc.CullPipeline = visibilityProgram.Pipeline.get();
 		visibilityDesc.Layout = visibilityProgram.Layout.get();
@@ -824,6 +881,7 @@ namespace Engine
 		visibilityDesc.DebugName = "Shadow visibility";
 		shadowVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
 		visibilitySlots = slots;
+
 		for (const auto& [set, parameters] : routes)
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*visibility, set, parameters);
@@ -838,6 +896,7 @@ namespace Engine
 		{
 			return;
 		}
+
 		environmentMap = {};
 		environmentMap.SourceSize = resolution;
 		environmentMap.PrefilteredSize = std::max(resolution / 2, 16u);
@@ -847,10 +906,12 @@ namespace Engine
 		R::EnvironmentBuilder::Validate(environmentMap);
 		prefiltered = device.CreateTexture(R::EnvironmentBuilder::PrefilteredCubeDesc(environmentMap));
 		irradiance = device.CreateBuffer(R::EnvironmentBuilder::IrradianceBufferDesc());
+
 		if (!prefiltered || !irradiance)
 		{
 			throw std::runtime_error("FrameRenderer: cannot create the environment maps");
 		}
+
 		builtSky.reset();
 		environmentValid = false;
 	}
@@ -936,6 +997,7 @@ namespace Engine
 
 		// Timings of the frame that just completed (none before the first submission).
 		std::vector<R::GraphPassTiming> timings;
+
 		if (lastCompletion.Semaphore)
 		{
 			try
@@ -947,6 +1009,7 @@ namespace Engine
 				timings.clear(); // The last graph failed or was never executed.
 			}
 		}
+
 		// Each pass's exclusive GPU time: the step of its end timestamp (begin timestamps are
 		// written before the pass's barriers and can overlap earlier work, so summing the
 		// begin-to-end spans counts overlap twice). The last end is the frame's GPU time.
@@ -954,10 +1017,12 @@ namespace Engine
 		double total = 0.0;
 		double previousEnd = 0.0;
 		bool haveEnds = true;
+
 		for (const auto& timing : timings)
 		{
 			haveEnds = haveEnds && timing.EndOffsetNanoseconds.has_value();
 		}
+
 		for (const auto& timing : timings)
 		{
 			if (haveEnds)
@@ -975,6 +1040,7 @@ namespace Engine
 				passes.push_back({ timing.Name, ms });
 			}
 		}
+
 		stats.GpuPasses = passes;
 		stats.GpuTimingsAvailable = !passes.empty();
 		stats.GpuMilliseconds = total;
@@ -985,6 +1051,7 @@ namespace Engine
 				return a.Milliseconds > b.Milliseconds;
 			});
 		stats.TopPassCount = static_cast<std::uint32_t>(std::min(passes.size(), stats.TopPasses.size()));
+
 		for (std::uint32_t i = 0; i < stats.TopPassCount; ++i)
 		{
 			stats.TopPasses[i] = passes[i];
@@ -1017,27 +1084,33 @@ namespace Engine
 		auto frame = device.Acquire();
 		lap("Acquire");
 		const auto extent = device.GetExtent();
+
 		if (!frame.Valid || extent.Width == 0 || extent.Height == 0)
 		{
 			++stats.SkippedFrames;
 			stats.Presented = false;
 			return false;
 		}
+
 		const std::uint32_t width = extent.Width;
 		const std::uint32_t height = extent.Height;
 
 		const auto& camera = input.Camera;
+
 		if (camera.Cut)
 		{
 			I.reflectionHistoryValid = false;
 			I.temporal->ResetHistory();
 			I.previousViewProjection.reset();
 		}
+
 		const bool temporalOn = settings.TemporalAntiAliasing;
+
 		if (!temporalOn)
 		{
 			I.temporal->ResetHistory();
 		}
+
 		const std::array<float, 2> jitter =
 			temporalOn ? I.temporal->GetJitterNdc(settings.Temporal, width, height) : std::array<float, 2>{ 0.0f, 0.0f };
 		const auto viewProjection = R::MultiplyRowMajor(camera.Projection, camera.View);
@@ -1049,12 +1122,14 @@ namespace Engine
 		std::vector<R::ForwardPlusPageSlot> forwardSlots;
 		std::vector<R::ShadowPageSlot> shadowSlots;
 		std::vector<std::uint32_t> indexPages;
+
 		for (const auto& slot : pageSlots)
 		{
 			forwardSlots.push_back({ slot.IndexPage, slot.VertexPage });
 			shadowSlots.push_back({ slot.IndexPage, slot.VertexPage });
 			indexPages.push_back(slot.IndexPage);
 		}
+
 		if (draw3D)
 		{
 			I.EnsureVisibility(static_cast<std::uint32_t>(pageSlots.size()));
@@ -1066,6 +1141,7 @@ namespace Engine
 		bool particlesPending = false, skinningPending = false, atlasPending = false;
 		std::optional<R::GraphReadback> captureReadback;
 		S::TimelinePoint completion{};
+
 		try
 		{
 			// --- Uploads and persistent imports ---------------------------------------
@@ -1076,14 +1152,17 @@ namespace Engine
 				R::AddTextureUpload(graph, "Fallback texture", std::as_bytes(std::span(texel)), white, { 0, {}, {}, { 1, 1, 1 } });
 				graph.Export(white, ResourceState::ShaderRead);
 			}
+
 			const auto residencyResources = I.residency->Import(graph);
 			residencyImported = true;
 			const auto& geometryResources = residencyResources.Geometry;
+
 			if (I.skinning->GetStats().Instances > 0 || I.skinning->GetStats().PendingMeshes > 0)
 			{
 				I.skinning->Record(graph, geometryResources);
 				skinningPending = true;
 			}
+
 			const auto materialResources = I.materialTable->Import(graph);
 			materialsImported = true;
 			const auto sceneResources = I.scene->Import(graph);
@@ -1108,6 +1187,7 @@ namespace Engine
 			{
 				const auto& sun = settings.Sky.SunDirection;
 				const float length = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					featureView.SunDirection[c] = length > 0.0f ? sun[c] / length : (c == 1 ? 1.0f : 0.0f);
@@ -1125,10 +1205,12 @@ namespace Engine
 				services.LoadCompute = [this](std::string_view name) -> const RuntimeComputeProgram&
 				{
 					auto& slot = impl->featurePrograms[std::string(name)];
+
 					if (!slot)
 					{
 						slot = std::make_unique<RuntimeComputeProgram>(impl->shaders.LoadCompute(name));
 					}
+
 					return *slot;
 				};
 				services.GetSampler = [this](std::string_view kind) -> S::Sampler&
@@ -1137,10 +1219,12 @@ namespace Engine
 					{
 						return *impl->linearRepeat;
 					}
+
 					if (kind == "PointClamp")
 					{
 						return *impl->presentSampler;
 					}
+
 					return *impl->linearClamp;
 				};
 				return services;
@@ -1150,14 +1234,17 @@ namespace Engine
 			// --- Environment ------------------------------------------------------------
 			std::optional<R::EnvironmentGraphResources> environment;
 			std::optional<R::GraphTexture> lut;
+
 			if (!I.brdfLut)
 			{
 				I.brdfLut = device.GetDevice().CreateTexture(R::EnvironmentBuilder::BrdfLutDesc(Impl::LutSize));
+
 				if (!I.brdfLut)
 				{
 					throw std::runtime_error("FrameRenderer: cannot create the BRDF LUT");
 				}
 			}
+
 			if (!I.lutBuilt)
 			{
 				const auto target = graph.ImportTexture(*I.brdfLut, ResourceState::Undefined);
@@ -1167,13 +1254,16 @@ namespace Engine
 			{
 				lut = graph.ImportTexture(*I.brdfLut, ResourceState::ShaderRead);
 			}
+
 			graph.Export(*lut, ResourceState::ShaderRead);
+
 			if (settings.Environment)
 			{
 				I.EnsureEnvironmentTargets(settings.EnvironmentResolution);
 				// Features that draw into the sky (clouds) also draw into the environment; it is
 				// then re-recorded every EnvironmentRefreshSeconds from the camera, because they move.
 				std::vector<RenderFeature*> contributors;
+
 				if (draw3D)
 				{
 					for (const auto& feature : features)
@@ -1185,6 +1275,7 @@ namespace Engine
 						}
 					}
 				}
+
 				environmentWithFeatures = !contributors.empty();
 				const bool refresh = environmentWithFeatures && settings.EnvironmentUpdates &&
 					I.featureTime - I.environmentBuiltTime >= static_cast<double>(settings.EnvironmentRefreshSeconds);
@@ -1194,12 +1285,15 @@ namespace Engine
 				R::EnvironmentTargets targets;
 				targets.Prefiltered = graph.ImportTexture(*I.prefiltered, rebuild ? ResourceState::Undefined : ResourceState::ShaderRead);
 				targets.Irradiance = graph.ImportBuffer(*I.irradiance, rebuild ? ResourceState::Undefined : ResourceState::ShaderRead);
+
 				if (rebuild)
 				{
 					std::vector<R::GraphTexture> overlays;
+
 					if (environmentWithFeatures)
 					{
 						RenderFeatureContext context(graph, RenderFeatureStage::BeforeTemporal, featureView, settings, {}, {}, featureServices());
+
 						for (auto* feature : contributors)
 						{
 							// A failing contribution is dropped (with one log line); the feature itself keeps running.
@@ -1218,6 +1312,7 @@ namespace Engine
 							}
 						}
 					}
+
 					environment = I.environmentBuilder->Record(
 						graph, settings.Sky, I.environmentMap, targets, overlays, settings.EnvironmentFeatureAmbient);
 				}
@@ -1231,6 +1326,7 @@ namespace Engine
 					existing.PrefilteredMipCount = I.environmentMap.PrefilteredMipCount;
 					environment = existing;
 				}
+
 				graph.Export(*targets.Prefiltered, ResourceState::ShaderRead);
 				graph.Export(*targets.Irradiance, ResourceState::ShaderRead);
 			}
@@ -1280,6 +1376,7 @@ namespace Engine
 			R::ForwardPlusTargets targets = makeTargets(width, height, "");
 			const bool backDepthOn =
 				draw3D && settings.ScreenSpace.Reflections.Enabled && settings.ScreenSpace.Reflections.BackFaces && I.forward->SupportsBackDepth();
+
 			if (backDepthOn)
 			{
 				S::TextureDesc backDesc;
@@ -1301,6 +1398,7 @@ namespace Engine
 				const bool drawSky = settings.SkyBackground;
 				const auto& s = settings.Sky;
 				const auto sun = Normalized(s.SunDirection);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					sky.RayRight[c] = rayRight[c];
@@ -1313,6 +1411,7 @@ namespace Engine
 					sky.SunDirection[c] = sun[c];
 					sky.SunColor[c] = drawSky ? s.SunColor[c] : 0.0f;
 				}
+
 				sky.RayRight[3] = drawSky ? s.Intensity * settings.EnvironmentIntensity : 1.0f;
 				sky.RayUp[3] = settings.EnvironmentRotation;
 				sky.RayForward[3] = std::max(s.SunSharpness, 1.0f);
@@ -1330,12 +1429,14 @@ namespace Engine
 					{
 						std::array<S::RenderingAttachmentDesc, 1> colors{};
 						const std::array<R::GraphTexture, 1> textures{ set.Color };
+
 						for (std::size_t i = 0; i < colors.size(); ++i)
 						{
 							colors[i].View = &c.CreateView(textures[i]);
 							colors[i].Load = S::LoadOp::Clear;
 							colors[i].Clear.Value = { 0.0f, 0.0f, 0.0f, 0.0f };
 						}
+
 						S::TextureViewDesc depthView;
 						depthView.PixelFormat = R::CanonicalDepthFormat;
 						const S::DepthStencilAttachmentDesc depth{ &c.CreateView(set.Depth, depthView), S::LoadOp::Clear, S::StoreOp::Store,
@@ -1355,11 +1456,13 @@ namespace Engine
 				const float tanX = tanY * camera.Aspect;
 				std::array<float, 3> right{};
 				std::array<float, 3> up{};
+
 				for (int c = 0; c < 3; ++c)
 				{
 					right[c] = camera.Right[c] * tanX;
 					up[c] = camera.Up[c] * tanY;
 				}
+
 				recordSky(targets, right, up, camera.Forward, width, height);
 			}
 
@@ -1375,11 +1478,13 @@ namespace Engine
 			std::optional<R::ScreenSpaceFrame::ProbeInputs> probeInputs;
 			stats.ReflectionProbes = 0;
 			stats.ReflectionProbeFaces = 0;
+
 			if (draw3D)
 			{
 				lap("Build: Sky and scene setup");
 				// --- Shadows ------------------------------------------------------------
 				std::optional<R::ShadowGraphResources> shadowResources;
+
 				if (settings.Shadows && !input.ShadowCasters.empty())
 				{
 					if (!I.atlas || I.atlasSize != settings.Shadow.AtlasSize || I.atlasMinTile != settings.Shadow.MinTile)
@@ -1388,6 +1493,7 @@ namespace Engine
 						I.atlasSize = settings.Shadow.AtlasSize;
 						I.atlasMinTile = settings.Shadow.MinTile;
 					}
+
 					R::Shadows::ShadowCamera shadowCamera;
 					shadowCamera.View = camera.View;
 					shadowCamera.VerticalFov = camera.VerticalFov;
@@ -1395,6 +1501,7 @@ namespace Engine
 					shadowCamera.Near = camera.Near;
 					const auto plan =
 						std::make_shared<R::ShadowPlan>(R::PlanShadows(settings.Shadow, shadowCamera, input.ShadowCasters, *I.atlas));
+
 					if (!plan->Draws.empty())
 					{
 						R::ShadowFrame shadowFrame;
@@ -1407,6 +1514,7 @@ namespace Engine
 						shadowFrame.Plan = plan.get();
 						shadowFrame.ZeroUnusedCommands = R::NeedsZeroedCommands(I.drawPath);
 						std::optional<R::GraphTexture> cachedAtlas;
+
 						if (settings.ShadowCascadeCache && I.shadows->SupportsPersistentAtlas())
 						{
 							cachedAtlas = I.PlanShadowCache(graph, *plan, shadowFrame, camera, input.ShadowCasters);
@@ -1415,11 +1523,14 @@ namespace Engine
 						{
 							I.shadowCache.clear();
 						}
+
 						shadowResources = I.shadows->Record(graph, shadowFrame);
+
 						if (cachedAtlas)
 						{
 							graph.Export(*cachedAtlas, ResourceState::ShaderRead);
 						}
+
 						stats.ShadowViews = plan->Stats.Views;
 					}
 				}
@@ -1483,6 +1594,7 @@ namespace Engine
 				// probes never see each other: no recursion), resolved into the probe atlas with
 				// their distances, and the probes that changed are prefiltered.
 				const auto& probeSettings = settings.ReflectionProbes;
+
 				if (I.probeRenderer && probeSettings.Enabled && !input.ReflectionProbes.empty())
 				{
 					if (I.probeRenderer->Ensure(probeSettings.Resolution, probeSettings.MaxProbes))
@@ -1491,10 +1603,12 @@ namespace Engine
 						I.pendingFilters.clear();
 						I.filteredKey.assign(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
 					}
+
 					const auto plan = I.probeScheduler.Update(
 						input.ReflectionProbes, camera.Position, I.frameIndex + 1, I.featureTime, probeSettings, input.ReflectionMovers);
 					const auto atlases = I.probeRenderer->Import(graph);
 					const std::uint32_t size = I.probeRenderer->GetResolution();
+
 					for (const auto& capture : plan.Captures)
 					{
 						const auto& probe = input.ReflectionProbes[capture.Probe];
@@ -1543,19 +1657,23 @@ namespace Engine
 						faceFrame.DebugName = "Probe Forward+"; // Its own rows in the GPU timings.
 						I.forward->Record(graph, faceFrame, faceTargets);
 						R::ReflectionProbeRenderer::CaptureSky captureSky;
+
 						if (environment && settings.SkyBackground)
 						{
 							captureSky.Environment = environment->Prefiltered;
 							captureSky.Scale = settings.EnvironmentIntensity;
 							captureSky.Rotation = settings.EnvironmentRotation;
 						}
+
 						I.probeRenderer->RecordResolve(
 							graph, atlases, capture.Slot, capture.Face, faceTargets.Color, faceTargets.Depth, nearPlane, captureSky);
 					}
+
 					// Prefilter a bounded number of probes a frame (each is 6 faces x every mip):
 					// probes not yet filtered for their current occupant first, then the ones
 					// whose faces changed longest ago.
 					I.filteredKey.resize(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
+
 					for (const auto slot : plan.Filter)
 					{
 						if (std::find(I.pendingFilters.begin(), I.pendingFilters.end(), slot) == I.pendingFilters.end())
@@ -1563,6 +1681,7 @@ namespace Engine
 							I.pendingFilters.push_back(slot);
 						}
 					}
+
 					const auto keyOf = [&](std::uint32_t slot) -> std::uint64_t
 					{
 						for (const auto& active : plan.Active)
@@ -1572,6 +1691,7 @@ namespace Engine
 								return input.ReflectionProbes[active.Probe].Key;
 							}
 						}
+
 						return ~std::uint64_t(0);
 					};
 					const auto slotUnfiltered = [&](std::uint32_t slot, std::uint64_t key)
@@ -1587,36 +1707,46 @@ namespace Engine
 						});
 					const std::uint32_t budget = std::max(probeSettings.FiltersPerFrame, 1u);
 					std::uint32_t filtered = 0;
+
 					while (!I.pendingFilters.empty() && filtered < budget)
 					{
 						const std::uint32_t slot = I.pendingFilters.front();
 						I.pendingFilters.erase(I.pendingFilters.begin());
+
 						if (slot >= I.filteredKey.size())
 						{
 							continue;
 						}
+
 						I.probeRenderer->RecordFilter(graph, atlases, slot, probeSettings.PrefilterSamples);
 						I.filteredKey[slot] = keyOf(slot);
 						++filtered;
 					}
+
 					graph.Export(atlases.Source, ResourceState::ShaderRead);
 					graph.Export(atlases.Prefiltered, ResourceState::ShaderRead);
 					stats.ReflectionProbeFaces = static_cast<std::uint32_t>(plan.Captures.size());
+
 					if (!plan.Active.empty())
 					{
 						std::vector<R::GpuReflectionProbeRecord> records;
+
 						for (const auto& active : plan.Active)
 						{
 							const auto& probe = input.ReflectionProbes[active.Probe];
+
 							if (active.Slot >= I.filteredKey.size() || I.filteredKey[active.Slot] != probe.Key)
 							{
 								continue; // Not prefiltered for this probe yet.
 							}
+
 							R::GpuReflectionProbeRecord record;
+
 							for (int c = 0; c < 3; ++c)
 							{
 								record.PositionRadius[c] = probe.Position[c];
 							}
+
 							record.PositionRadius[3] = std::max(probe.InfluenceRadius, 1.0e-3f);
 							record.Params[0] = std::max(probe.BlendDistance, 1.0e-3f);
 							record.Params[1] = float(active.Slot);
@@ -1624,6 +1754,7 @@ namespace Engine
 							record.Params[3] = float(probe.OwnerObjectId);
 							records.push_back(record);
 						}
+
 						R::ScreenSpaceFrame::ProbeInputs inputs;
 						inputs.Cubes = atlases.Prefiltered;
 						inputs.Records = graph.CreateUpload(std::as_bytes(std::span(records)), "Reflection probe records", S::BufferUsage::Storage, 16);
@@ -1640,6 +1771,7 @@ namespace Engine
 			// --- Particles (simulation; drawn after the composite, below) ---------------
 			stats.ParticleEmitters = I.particles->GetStats().LiveEmitters;
 			std::optional<R::ParticleGraphResources> simulatedParticles;
+
 			if (settings.Particles && stats.ParticleEmitters > 0)
 			{
 				R::ParticleView particleView;
@@ -1664,11 +1796,13 @@ namespace Engine
 			ssFrame.View.Projection = camera.Projection;
 			ssFrame.View.Jitter = jitter;
 			ssFrame.Settings = settings.ScreenSpace;
+
 			if (!draw3D)
 			{
 				ssFrame.Settings.AmbientOcclusion.Enabled = false;
 				ssFrame.Settings.Reflections.Enabled = false;
 			}
+
 			ssFrame.NoiseFrame = static_cast<std::uint32_t>(I.frameIndex);
 			ssFrame.BackDepth = targets.BackDepth;
 			ssFrame.Probes = probeInputs;
@@ -1678,20 +1812,24 @@ namespace Engine
 			if (temporalOn && ssFrame.Settings.Reflections.Enabled && ssFrame.Settings.Reflections.History && targets.Velocity)
 			{
 				ssFrame.History = I.temporal->ImportPreviousOutput(graph, width, height);
+
 				if (ssFrame.History)
 				{
 					ssFrame.Velocity = *targets.Velocity;
 				}
 			}
+
 			if (targets.Velocity)
 			{
 				ssFrame.Velocity = *targets.Velocity;
 			}
+
 			// The temporal reflection filter: this frame writes one history texture while the
 			// other holds last frame's.
 			std::optional<R::GraphTexture> reflectionHistoryNext;
 			const bool reflectionTemporal = ssFrame.Settings.Reflections.Temporal && targets.Velocity &&
 				(ssFrame.Settings.Reflections.Enabled || probeInputs.has_value());
+
 			if (reflectionTemporal)
 			{
 				for (auto& texture : I.reflectionHistory)
@@ -1707,21 +1845,26 @@ namespace Engine
 						I.reflectionHistoryValid = false;
 					}
 				}
+
 				if (I.reflectionHistory[0] && I.reflectionHistory[1])
 				{
 					R::ScreenSpaceFrame::ReflectionHistoryInputs history;
 					const auto next = 1u - I.reflectionHistoryLatest;
+
 					if (I.reflectionHistoryValid)
 					{
 						history.Previous = graph.ImportTexture(*I.reflectionHistory[I.reflectionHistoryLatest], ResourceState::ShaderRead);
 					}
+
 					history.Next = graph.ImportTexture(*I.reflectionHistory[next], ResourceState::Undefined);
 					history.Blend = ssFrame.Settings.Reflections.TemporalBlend;
 					ssFrame.ReflectionTemporal = history;
 					reflectionHistoryNext = history.Next;
 				}
 			}
+
 			const auto screen = I.screenSpace->Record(graph, ssFrame);
+
 			if (reflectionHistoryNext && !screen.Passthrough)
 			{
 				graph.Export(*reflectionHistoryNext, ResourceState::ShaderRead);
@@ -1737,6 +1880,7 @@ namespace Engine
 			const auto runFeatures = [&](RenderFeatureStage stage, R::GraphTexture color)
 			{
 				std::vector<RenderFeature*> ordered;
+
 				for (const auto& feature : features)
 				{
 					if (feature && feature->Enabled && feature->GetStage() == stage)
@@ -1744,16 +1888,19 @@ namespace Engine
 						ordered.push_back(feature.get());
 					}
 				}
+
 				if (ordered.empty() || !draw3D)
 				{
 					return color;
 				}
+
 				std::stable_sort(ordered.begin(), ordered.end(),
 					[](const RenderFeature* a, const RenderFeature* b)
 					{
 						return a->GetOrder() < b->GetOrder();
 					});
 				RenderFeatureContext context(graph, stage, featureView, settings, color, targets.Depth, featureServices());
+
 				for (auto* feature : ordered)
 				{
 					// A broken feature (missing program, wrong bindings) is switched off with a
@@ -1768,6 +1915,7 @@ namespace Engine
 						std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
 					}
 				}
+
 				return context.Color();
 			};
 
@@ -1782,7 +1930,9 @@ namespace Engine
 				const R::ParticleRenderProgram program{ I.particleAdditive.get(), I.particleAlpha.get(), I.particleRender.Layout.get() };
 				I.particles->Draw(graph, *simulatedParticles, program, { sceneColor, targets.Depth }, I.bindless->GetTable());
 			}
+
 			R::GraphTexture resolved = sceneColor;
+
 			if (temporalOn)
 			{
 				R::TemporalFrame temporalFrame;
@@ -1809,6 +1959,7 @@ namespace Engine
 				// Display-referred features write their own RGBA8 target; the UI and the
 				// presentation then use it (it keeps the Frame target's usages).
 				const auto finalColor = runFeatures(RenderFeatureStage::AfterPostProcess, postOutput);
+
 				if (finalColor != postOutput)
 				{
 					postOutput = finalColor;
@@ -1818,22 +1969,26 @@ namespace Engine
 			lap("Build: Screen space, TAA, features and post");
 			// --- UI -----------------------------------------------------------------------
 			stats.UiQuads = 0;
+
 			if (settings.Ui && !input.Ui.empty() && input.GlyphAtlas)
 			{
 				if (I.attachedAtlas && I.attachedAtlas != input.GlyphAtlas)
 				{
 					I.atlasTextures->Release(lastCompletion);
 				}
+
 				I.attachedAtlas = input.GlyphAtlas;
 				const auto atlasFrame = I.atlasTextures->Update(graph, *input.GlyphAtlas);
 				atlasPending = true;
 				const R::UiRenderProgram program{ I.uiPipeline.get(), I.uiQuad.Layout.get(), I.uiDepthPipeline.get() };
+
 				for (const auto& item : input.Ui)
 				{
 					if (!item.Document || item.Opacity <= 0.0f)
 					{
 						continue;
 					}
+
 					auto& document = *item.Document;
 					document.EnsureLayout();
 					R::UiRenderFrame uiFrame;
@@ -1843,13 +1998,16 @@ namespace Engine
 					uiFrame.OffsetX = item.ClipFromCanvas ? 0.0f : item.OffsetX;
 					uiFrame.OffsetY = item.ClipFromCanvas ? 0.0f : item.OffsetY;
 					uiFrame.ClipFromCanvas = item.ClipFromCanvas;
+
 					if (item.ClipFromCanvas && item.DepthTest)
 					{
 						uiFrame.Depth = targets.Depth;
 					}
+
 					uiFrame.Opacity = std::clamp(item.Opacity, 0.0f, 1.0f);
 					uiFrame.Atlas = &atlasFrame;
 					uiFrame.Composition.Encoding = R::UiOutputEncoding::Srgb;
+
 					if (I.ui->Record(graph, uiFrame, program, I.bindless->GetTable()))
 					{
 						stats.UiQuads += I.ui->GetStats().Quads;
@@ -1863,6 +2021,7 @@ namespace Engine
 			{
 				captureReadback = R::AddTextureReadback(graph, "Frame capture", postOutput, { 0, {}, {}, { width, height, 1 } });
 			}
+
 			if (frame.Target)
 			{
 				const auto surface =
@@ -1884,10 +2043,12 @@ namespace Engine
 						auto& source = c.CreateView(postOutput);
 						auto& targetView = c.CreateView(surface);
 						auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, "Present source" });
+
 						if (!table)
 						{
 							throw std::runtime_error("FrameRenderer: cannot create the present descriptor table");
 						}
+
 						std::array<S::DescriptorWrite, 2> writes{};
 						writes[0].Binding = 0;
 						writes[0].TextureResource = &source;
@@ -1930,6 +2091,7 @@ namespace Engine
 					{ "Executor: stage uploads", t.Stage }, { "Executor: query pool", t.Queries }, { "Executor: record passes", t.Record },
 					{ "Executor: submit", t.Submit } };
 				stats.RecordPasses.clear();
+
 				for (const auto& pass : t.Passes)
 				{
 					stats.RecordPasses.push_back({ pass.Name, pass.Nanoseconds.value_or(0.0) * 1.0e-6 });
@@ -1942,30 +2104,37 @@ namespace Engine
 			{
 				I.residency->AbortUploads();
 			}
+
 			if (materialsImported)
 			{
 				I.materialTable->AbortUploads();
 			}
+
 			if (sceneImported)
 			{
 				I.scene->AbortUploads();
 			}
+
 			if (lightsImported)
 			{
 				I.lights->AbortUploads();
 			}
+
 			if (particlesPending)
 			{
 				I.particles->AbortFrame();
 			}
+
 			if (skinningPending)
 			{
 				I.skinning->AbortFrame();
 			}
+
 			if (atlasPending)
 			{
 				I.atlasTextures->AbortFrame();
 			}
+
 			throw;
 		}
 
@@ -1975,30 +2144,37 @@ namespace Engine
 		I.materialTable->CommitUploads();
 		I.scene->CommitUploads();
 		I.lights->CommitUploads();
+
 		if (particlesPending)
 		{
 			I.particles->CommitFrame();
 		}
+
 		if (skinningPending)
 		{
 			I.skinning->CommitFrame();
 		}
+
 		if (atlasPending)
 		{
 			I.atlasTextures->CommitFrame();
 		}
+
 		I.whiteUploaded = true;
 		I.lutBuilt = true;
+
 		if (settings.Environment)
 		{
 			I.builtSky = settings.Sky;
 			I.environmentValid = true;
+
 			if (environmentRebuilt)
 			{
 				I.environmentBuiltTime = I.featureTime;
 				I.environmentHadFeatures = environmentWithFeatures;
 			}
 		}
+
 		I.previousViewProjection = viewProjection;
 		++I.frameIndex;
 
@@ -2010,6 +2186,7 @@ namespace Engine
 		{
 			executor.Wait();
 			capture.resize(std::size_t(width) * height * 4);
+
 			if (executor.TryReadback(captureReadback->Buffer, std::as_writable_bytes(std::span(capture))) == S::ReadbackStatus::Ready)
 			{
 				captureWidth = width;
@@ -2055,10 +2232,12 @@ namespace Engine
 			{
 				return entry.get() == feature;
 			});
+
 		if (found == features.end())
 		{
 			return false;
 		}
+
 		impl->environmentFeatureFailures.erase(feature);
 		features.erase(found);
 		return true;
@@ -2070,18 +2249,23 @@ namespace Engine
 		{
 			return false;
 		}
+
 		if (path.has_parent_path())
 		{
 			std::error_code ignored;
 			std::filesystem::create_directories(path.parent_path(), ignored);
 		}
+
 		std::ofstream file(path, std::ios::binary | std::ios::trunc);
+
 		if (!file)
 		{
 			return false;
 		}
+
 		file << "P6\n" << captureWidth << ' ' << captureHeight << "\n255\n";
 		std::vector<char> row(std::size_t(captureWidth) * 3);
+
 		for (std::uint32_t y = 0; y < captureHeight; ++y)
 		{
 			for (std::uint32_t x = 0; x < captureWidth; ++x)
@@ -2091,8 +2275,11 @@ namespace Engine
 				row[x * 3 + 1] = static_cast<char>(capture[source + 1]);
 				row[x * 3 + 2] = static_cast<char>(capture[source + 2]);
 			}
+
 			file.write(row.data(), static_cast<std::streamsize>(row.size()));
 		}
+
 		return static_cast<bool>(file);
 	}
+
 } // namespace Engine

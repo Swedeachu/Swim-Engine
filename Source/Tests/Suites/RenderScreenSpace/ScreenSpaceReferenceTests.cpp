@@ -18,6 +18,7 @@ namespace Scene = Swim::Testing::ScreenSpaceScene;
 
 namespace
 {
+
 	constexpr std::uint32_t Width = 160;
 	constexpr std::uint32_t Height = 90;
 
@@ -47,11 +48,13 @@ namespace
 	Band FloorBand(const Scene::Inputs& inputs, const Ss::ScalarImage& ao, float from, float to)
 	{
 		Band band;
+
 		for (std::uint32_t y = 0; y < Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < Width; ++x)
 			{
 				const auto& hit = inputs.Hits[std::size_t(y) * Width + x];
+
 				if (hit.T > 0.0f && hit.Normal[1] > 0.5f && hit.Position[0] >= from && hit.Position[0] < to &&
 					std::abs(hit.Position[2]) < 4.0f)
 				{
@@ -61,6 +64,7 @@ namespace
 				}
 			}
 		}
+
 		return band;
 	}
 
@@ -68,6 +72,7 @@ namespace
 	{
 		return std::abs(a - b) <= tolerance;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ScreenSpace.Reference", "ParamsPackTheViewAndValidate")
@@ -83,13 +88,16 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ParamsPackTheViewAndValidate")
 		for (int c = 0; c < 4; ++c)
 		{
 			float sum = 0.0f;
+
 			for (int k = 0; k < 4; ++k)
 			{
 				sum += params.InverseProjection[r * 4 + k] * view.Projection[k * 4 + c];
 			}
+
 			SWIM_CHECK(Near(sum, r == c ? 1.0f : 0.0f, 1.0e-5f));
 		}
 	}
+
 	SWIM_CHECK(Near(params.InverseViewRows[3], 3.0f, 1.0e-5f)); // The camera position.
 	SWIM_CHECK(Near(params.InverseViewRows[7], 2.0f, 1.0e-5f) && Near(params.InverseViewRows[11], 6.0f, 1.0e-5f));
 	SWIM_CHECK(params.ViewRows[0] == view.View[0] && params.ViewRows[11] == view.View[11]);
@@ -106,6 +114,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ParamsPackTheViewAndValidate")
 		auto v = WallView();
 		edit(s, v);
 		bool threw = false;
+
 		try
 		{
 			BuildScreenSpaceParams(s, v, Width, Height, 0);
@@ -114,6 +123,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ParamsPackTheViewAndValidate")
 		{
 			threw = true;
 		}
+
 		return threw;
 	};
 	SWIM_CHECK(rejects(
@@ -213,36 +223,43 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ViewPositionsInvertTheJitteredProject
 	const auto params = BuildScreenSpaceParams(ScreenSpaceSettings{}, view, Width, Height, 0);
 	std::mt19937 random(76);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 	for (int i = 0; i < 200; ++i)
 	{
 		const Ss::Float3 point{ 8.0f * unit(random) - 4.0f, 6.0f * unit(random) - 3.0f, -0.5f - 40.0f * unit(random) };
 		std::array<float, 4> clip{};
+
 		for (int r = 0; r < 4; ++r)
 		{
 			clip[r] = view.Projection[r * 4] * point[0] + view.Projection[r * 4 + 1] * point[1] + view.Projection[r * 4 + 2] * point[2] +
 				view.Projection[r * 4 + 3];
 		}
+
 		// The jittered raster places the point at NDC + jitter.
 		const float px = (clip[0] / clip[3] + view.Jitter[0] + 1.0f) * 0.5f * Width;
 		const float py = (1.0f - (clip[1] / clip[3] + view.Jitter[1])) * 0.5f * Height;
 		const auto back = Ss::ViewPosition(params, px, py, clip[2] / clip[3]);
 		SWIM_REQUIRE(back.has_value());
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(Near((*back)[c], point[c], 2.0e-4f * std::abs(point[2])));
 		}
 	}
+
 	SWIM_CHECK(!Ss::ViewPosition(params, 10.0f, 10.0f, 0.0f).has_value()); // Sky.
 	const auto up = Ss::ViewNormal(params, { 0.0f, 3.0f, 0.0f });
 	SWIM_REQUIRE(up.has_value());
 	SWIM_CHECK(Near((*up)[0] * (*up)[0] + (*up)[1] * (*up)[1] + (*up)[2] * (*up)[2], 1.0f, 1.0e-5f));
 	SWIM_CHECK((*up)[1] > 0.5f); // The camera looks down at the floor: world up stays mostly up.
 	SWIM_CHECK(!Ss::ViewNormal(params, { 0, 0, 0 }).has_value());
+
 	for (std::uint32_t frame = 0; frame < 3; ++frame)
 	{
 		const float noise = Ss::InterleavedGradientNoise(3.0f, 4.0f, frame);
 		SWIM_CHECK(noise >= 0.0f && noise < 1.0f);
 	}
+
 	SWIM_CHECK(Ss::InterleavedGradientNoise(3.0f, 4.0f, 1) != Ss::InterleavedGradientNoise(3.0f, 4.0f, 2));
 	SWIM_CHECK(Ss::InterleavedGradientNoise(3.0f, 4.0f, 65) == Ss::InterleavedGradientNoise(3.0f, 4.0f, 1));
 }
@@ -255,6 +272,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoIsOpenOnFlatSurfacesAndDarkensTow
 	ScreenSpaceSettings settings;
 	settings.AmbientOcclusion.Radius = 1.0f;
 	Band crease, near, far, wall;
+
 	for (std::uint32_t frame = 0; frame < 4; ++frame)
 	{
 		const auto params = BuildScreenSpaceParams(settings, view, Width, Height, frame);
@@ -269,11 +287,13 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoIsOpenOnFlatSurfacesAndDarkensTow
 		add(crease, FloorBand(inputs, ao, 0.0f, 0.1f));
 		add(near, FloorBand(inputs, ao, 0.4f, 0.6f));
 		add(far, FloorBand(inputs, ao, 1.3f, 2.5f)); // Beyond the radius: nothing occludes.
+
 		for (std::uint32_t y = 0; y < Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < Width; ++x)
 			{
 				const auto& hit = inputs.Hits[std::size_t(y) * Width + x];
+
 				if (hit.T == 0.0f)
 				{
 					SWIM_CHECK(raw.At(x, y) == 1.0f && ao.At(x, y) == 1.0f); // Sky.
@@ -284,10 +304,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoIsOpenOnFlatSurfacesAndDarkensTow
 					wall.Minimum = std::min(wall.Minimum, ao.At(x, y));
 					++wall.Count;
 				}
+
 				SWIM_CHECK(ao.At(x, y) >= 0.0f && ao.At(x, y) <= 1.0f);
 			}
 		}
 	}
+
 	std::printf("             [gtao] crease %.3f (%u), 0.5 m %.3f (%u), open floor %.3f min %.3f (%u), open wall %.3f min %.3f (%u)\n",
 		crease.Mean(), crease.Count, near.Mean(), near.Count, far.Mean(), double(far.Minimum), far.Count, wall.Mean(), double(wall.Minimum),
 		wall.Count);
@@ -299,10 +321,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoIsOpenOnFlatSurfacesAndDarkensTow
 
 	// Normal-less pixels (no opaque surface) are open.
 	auto noNormals = inputs;
+
 	for (auto& texel : noNormals.Normal.Texels)
 	{
 		texel = { 0, 0, 0, 0 };
 	}
+
 	const auto params = BuildScreenSpaceParams(settings, view, Width, Height, 0);
 	const auto open = Ss::Gtao(params, noNormals.Depth, noNormals.Normal);
 	SWIM_CHECK(std::all_of(open.Texels.begin(), open.Texels.end(),
@@ -324,6 +348,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoRadiusPowerAndSliceCounts")
 	const auto linear = Ss::Blur(base, raw, inputs.Depth);
 	settings.AmbientOcclusion.Power = 2.0f;
 	const auto squared = Ss::Blur(BuildScreenSpaceParams(settings, view, Width, Height, 0), raw, inputs.Depth);
+
 	for (std::size_t i = 0; i < linear.Texels.size(); ++i)
 	{
 		SWIM_CHECK(Near(squared.Texels[i], linear.Texels[i] * linear.Texels[i], 1.0e-5f)); // Power applies after the blur.
@@ -339,6 +364,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoRadiusPowerAndSliceCounts")
 	// One to four slices agree on average (the noise rotates the single slice).
 	std::array<double, MaxAoSlices> means{};
 	settings.AmbientOcclusion.Radius = 1.0f;
+
 	for (std::uint32_t slices = 1; slices <= MaxAoSlices; ++slices)
 	{
 		settings.AmbientOcclusion.SliceCount = slices;
@@ -346,6 +372,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "GtaoRadiusPowerAndSliceCounts")
 		means[slices - 1] =
 			FloorBand(inputs, Ss::Blur(params, Ss::Gtao(params, inputs.Depth, inputs.Normal), inputs.Depth), 0.0f, 1.0f).Mean();
 	}
+
 	for (std::uint32_t i = 1; i < MaxAoSlices; ++i)
 	{
 		SWIM_CHECK(std::abs(means[i] - means[0]) < 0.04);
@@ -374,6 +401,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "BlurKeepsConstantsAndStopsAtDepthEdge
 
 	const Ss::ScalarImage constant(Width, Height, 0.6f);
 	const auto blurred = Ss::Blur(params, constant, inputs.Depth);
+
 	for (const float v : blurred.Texels)
 	{
 		SWIM_CHECK(Near(v, 0.6f, 1.0e-6f));
@@ -381,23 +409,29 @@ SWIM_TEST("Render.ScreenSpace.Reference", "BlurKeepsConstantsAndStopsAtDepthEdge
 
 	// AO 0 on the box, 1 elsewhere: floor pixels next to the box's silhouette stay 1.
 	Ss::ScalarImage split(Width, Height, 1.0f);
+
 	for (std::uint32_t i = 0; i < split.Texels.size(); ++i)
 	{
 		const auto& hit = inputs.Hits[i];
 		split.Texels[i] = hit.T > 0.0f && hit.Position[1] > 0.01f ? 0.0f : 1.0f;
 	}
+
 	const auto kept = Ss::Blur(params, split, inputs.Depth);
 	std::uint32_t edgeFloor = 0;
+
 	for (std::uint32_t y = 2; y + 2 < Height; ++y)
 	{
 		for (std::uint32_t x = 2; x + 2 < Width; ++x)
 		{
 			const auto& hit = inputs.Hits[std::size_t(y) * Width + x];
+
 			if (hit.T == 0.0f || hit.Position[1] > 0.01f || hit.Position[2] > -1.0f)
 			{
 				continue; // Only floor behind the box, where the depth jumps.
 			}
+
 			bool touchesBox = false;
+
 			for (int dy = -2; dy <= 2; ++dy)
 			{
 				for (int dx = -2; dx <= 2; ++dx)
@@ -405,6 +439,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "BlurKeepsConstantsAndStopsAtDepthEdge
 					touchesBox = touchesBox || split.At(x + dx, y + dy) == 0.0f;
 				}
 			}
+
 			if (touchesBox)
 			{
 				++edgeFloor;
@@ -412,6 +447,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "BlurKeepsConstantsAndStopsAtDepthEdge
 			}
 		}
 	}
+
 	SWIM_CHECK(edgeFloor > 20u);
 	// Sky pixels keep their value (then clamp and power).
 	Ss::ScalarImage sky(Width, Height, 1.5f);
@@ -462,6 +498,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 	settings.Fog.BaseHeight = 1.0f;
 	settings.Fog.StartDistance = 2.0f;
 	params = BuildScreenSpaceParams(settings, view, Width, Height, 0);
+
 	for (const Ss::Float3 direction : { Ss::Float3{ 0.6f, 0.8f, 0.0f }, Ss::Float3{ 0.0f, -0.6f, 0.8f }, Ss::Float3{ 1.0f, 0.0f, 0.0f },
 			 Ss::Float3{ 0.0f, 1.0e-6f, 1.0f } })
 	{
@@ -469,30 +506,37 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 		double numeric = 0.0;
 		constexpr int steps = 20000;
 		const double length = distance - settings.Fog.StartDistance;
+
 		for (int i = 0; i < steps; ++i)
 		{
 			const double t = settings.Fog.StartDistance + (i + 0.5) * length / steps;
 			const double height = camera[1] + direction[1] * t;
 			numeric += settings.Fog.Density * std::exp(-settings.Fog.HeightFalloff * (height - settings.Fog.BaseHeight)) * length / steps;
 		}
+
 		const float analytic = Ss::FogOpticalDepth(params, camera, direction, distance);
 		SWIM_CHECK(std::abs(analytic - numeric) <= 1.0e-4 * numeric + 1.0e-7);
 	}
+
 	SWIM_CHECK(Ss::FogOpticalDepth(params, camera, { 1, 0, 0 }, 1.5f) == 0.0f); // Before the start distance.
 
 	// Henyey-Greenstein: 1 when isotropic, integrates to 4 pi, peaks forward for g > 0.
 	SWIM_CHECK(Near(Ss::HenyeyGreenstein(0.0f, 0.3f), 1.0f, 1.0e-6f));
+
 	for (const float g : { -0.5f, 0.3f, 0.8f })
 	{
 		double integral = 0.0;
 		constexpr int steps = 4000;
+
 		for (int i = 0; i < steps; ++i)
 		{
 			const double mu = -1.0 + (i + 0.5) * 2.0 / steps;
 			integral += Ss::HenyeyGreenstein(g, float(mu)) * 2.0 / steps * 2.0 * std::numbers::pi;
 		}
+
 		SWIM_CHECK(std::abs(integral - 4.0 * std::numbers::pi) < 1.0e-3 * 4.0 * std::numbers::pi);
 	}
+
 	SWIM_CHECK(Ss::HenyeyGreenstein(0.6f, 1.0f) > Ss::HenyeyGreenstein(0.6f, -1.0f));
 
 	// Composite: surfaces fade toward the in-scattered color with their distance; the sky
@@ -507,6 +551,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 	params = BuildScreenSpaceParams(settings, view, Width, Height, 0);
 	const Ss::Float4 color{ 1.0f, 0.5f, 0.25f, 1.0f };
 	std::uint32_t checked = 0;
+
 	for (std::uint32_t y = 0; y < Height; y += 7)
 	{
 		for (std::uint32_t x = 0; x < Width; x += 7)
@@ -515,6 +560,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 			const auto result = Ss::CompositeTexel(params, color, { 0, 0, 0, 0 }, 1.0f, inputs.Depth.At(x, y), x, y);
 			Ss::Float3 direction{};
 			float distance = 0.0f;
+
 			if (hit.T > 0.0f)
 			{
 				direction = { (hit.Position[0] - camera[0]) / hit.T, (hit.Position[1] - camera[1]) / hit.T,
@@ -525,16 +571,20 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 			{
 				continue;
 			}
+
 			const auto fog = Ss::EvaluateFog(params, camera, direction, distance);
+
 			for (int c = 0; c < 3; ++c)
 			{
 				const float expected = color[c] * fog.Transmittance + fog.Inscatter[c] * (1.0f - fog.Transmittance);
 				SWIM_CHECK(Near(result[c], expected, 2.0e-3f * (1.0f + expected)));
 			}
+
 			SWIM_CHECK(result[3] == 1.0f);
 			++checked;
 		}
 	}
+
 	SWIM_CHECK(checked > 100u);
 	// Sky: the max distance.
 	auto skyInputs = Scene::Render(Scene::Scene{ false, 0.0f, {} }, view, Width, Height);
@@ -543,11 +593,13 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 	{
 		const auto p = *Ss::ViewPosition(params, 80.5f, 5.5f, 1.0f);
 		Ss::Float3 world{};
+
 		for (int r = 0; r < 3; ++r)
 		{
 			world[r] = params.InverseViewRows[r * 4] * p[0] + params.InverseViewRows[r * 4 + 1] * p[1] +
 				params.InverseViewRows[r * 4 + 2] * p[2] + params.InverseViewRows[r * 4 + 3] - camera[r];
 		}
+
 		const float l = std::sqrt(world[0] * world[0] + world[1] * world[1] + world[2] * world[2]);
 		return Ss::Float3{ world[0] / l, world[1] / l, world[2] / l };
 	}();
@@ -565,6 +617,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "FogMatchesItsIntegralsAndPhaseFunctio
 
 namespace
 {
+
 	// A mirror floor in front of a box: the floor between the camera and the box
 	// reflects the box's front face, the rest reflects the sky.
 	Scene::Scene MirrorScene()
@@ -602,6 +655,7 @@ namespace
 	{
 		return std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsFindTheMirrorImageAndMissTheSky")
@@ -614,32 +668,39 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsFindTheMirrorImageAndMissT
 
 	std::uint32_t visible = 0, found = 0, accurate = 0, sky = 0, skyMisses = 0, distances = 0;
 	float worst = 0.0f;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
 		{
 			const auto& hit = inputs.Hits[std::size_t(y) * Width + x];
+
 			if (hit.T == 0.0f || hit.Normal[1] < 0.5f || hit.Position[1] > 1.0e-3f)
 			{
 				continue; // Floor pixels only.
 			}
+
 			const Ss::Float3 incoming{ (hit.Position[0] - inputs.Camera[0]) / hit.T, (hit.Position[1] - inputs.Camera[1]) / hit.T,
 				(hit.Position[2] - inputs.Camera[2]) / hit.T };
 			const auto truth = Scene::Cast(scene, hit.Position, Reflect(incoming, hit.Normal));
 			const auto traced = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
+
 			if (!truth)
 			{
 				++sky;
 				skyMisses += traced ? 0u : 1u;
 				continue;
 			}
+
 			// Is the true reflected point on screen and seen directly by the camera?
 			std::array<float, 4> clip{};
+
 			for (int r = 0; r < 4; ++r)
 			{
 				clip[r] = viewProjection[r * 4] * truth->Position[0] + viewProjection[r * 4 + 1] * truth->Position[1] +
 					viewProjection[r * 4 + 2] * truth->Position[2] + viewProjection[r * 4 + 3];
 			}
+
 			const float px = (clip[0] / clip[3] + 1.0f) * 0.5f * float(Width);
 			const float py = (1.0f - clip[1] / clip[3]) * 0.5f * float(Height);
 			// Well inside the screen (the edge fade is tiny) and seen directly.
@@ -647,16 +708,21 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsFindTheMirrorImageAndMissT
 			{
 				continue;
 			}
+
 			const auto& direct = inputs.Hits[std::size_t(py) * Width + std::size_t(px)];
+
 			if (direct.T == 0.0f || Distance(direct.Position, truth->Position) > 0.05f)
 			{
 				continue;
 			}
+
 			++visible;
+
 			if (!traced)
 			{
 				continue;
 			}
+
 			++found;
 			const auto& at = inputs.Hits[std::size_t(traced->Y) * Width + traced->X];
 			const float error = Distance(at.Position, truth->Position);
@@ -666,6 +732,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsFindTheMirrorImageAndMissT
 			distances += std::abs(traced->Distance - truth->T) < 0.15f ? 1u : 0u; // The travelled distance.
 		}
 	}
+
 	std::printf("             [ssr] %u visible reflections: %u found, %u within 0.1 m (worst %.3f m); %u sky rays, %u missed\n", visible,
 		found, accurate, double(worst), sky, skyMisses);
 	SWIM_REQUIRE(visible > 200u && sky > 200u);
@@ -685,23 +752,27 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionConfidenceFadesWithRoughnes
 
 	// Pixels whose mirror ray hits with full confidence.
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> strong;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
 		{
 			const auto hit = Ss::TraceReflection(base, mirror.Depth, mirror.Normal, x, y);
+
 			if (hit && hit->Confidence == 1.0f)
 			{
 				strong.push_back({ x, y });
 			}
 		}
 	}
+
 	SWIM_REQUIRE(strong.size() > 100u);
 
 	// Roughness: half way down the fade halves the confidence; at the limit nothing is traced.
 	const float halfway = settings.Reflections.MaxRoughness - 0.5f * settings.Reflections.RoughnessFade;
 	const auto glossy = Scene::Render(scene, view, Width, Height, halfway);
 	const auto rough = Scene::Render(scene, view, Width, Height, settings.Reflections.MaxRoughness);
+
 	for (const auto& [x, y] : strong)
 	{
 		const auto hit = Ss::TraceReflection(base, glossy.Depth, glossy.Normal, x, y);
@@ -716,9 +787,11 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionConfidenceFadesWithRoughnes
 	shortSettings.Reflections.DistanceFade = 1.0f;
 	const auto shortParams = BuildScreenSpaceParams(shortSettings, view, Width, Height, 0);
 	std::uint32_t faded = 0;
+
 	for (const auto& [x, y] : strong)
 	{
 		const auto limited = Ss::TraceReflection(shortParams, mirror.Depth, mirror.Normal, x, y);
+
 		if (limited)
 		{
 			SWIM_CHECK(limited->Distance <= 1.0f + 1.0e-4f);
@@ -726,12 +799,14 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionConfidenceFadesWithRoughnes
 			++faded;
 		}
 	}
+
 	SWIM_CHECK(faded > 0u);
 
 	// Edges: a wide edge fade lowers the confidence of hits near the border and never raises it.
 	auto edgeSettings = settings;
 	edgeSettings.Reflections.EdgeFade = 0.5f;
 	const auto edgeParams = BuildScreenSpaceParams(edgeSettings, view, Width, Height, 0);
+
 	for (const auto& [x, y] : strong)
 	{
 		const auto hit = Ss::TraceReflection(edgeParams, mirror.Depth, mirror.Normal, x, y);
@@ -754,6 +829,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipT
 
 	// Sky pixels and normal-less pixels trace nothing.
 	std::uint32_t tested = 0;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -765,10 +841,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipT
 			}
 		}
 	}
+
 	SWIM_CHECK(tested > 0u);
 
 	// Flip the box's normals: every hit on it becomes a back face and is rejected.
 	std::vector<std::pair<std::uint32_t, std::uint32_t>> hits;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -779,8 +857,10 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipT
 			}
 		}
 	}
+
 	SWIM_REQUIRE(!hits.empty());
 	auto flipped = inputs.Normal;
+
 	for (auto& texel : flipped.Texels)
 	{
 		if (texel[1] < 0.5f)
@@ -788,10 +868,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipT
 			texel = { -texel[0], -texel[1], -texel[2], texel[3] };
 		}
 	}
+
 	for (const auto& [x, y] : hits)
 	{
 		const auto hit = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
 		const auto& hitNormal = inputs.Normal.At(hit->X, hit->Y);
+
 		if (hitNormal[1] < 0.5f) // The hit is on the box.
 		{
 			const auto again = Ss::TraceReflection(params, inputs.Depth, flipped, x, y);
@@ -807,6 +889,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsRejectBackFacesSkyAndClipT
 	const auto wallView = Scene::View({ 0.0f, 0.0f, 3.0f }, { 0.0f, 0.0f, 0.0f }, float(Width) / float(Height));
 	const auto wallInputs = Scene::Render(wall, wallView, Width, Height, 0.0f);
 	const auto wallParams = BuildScreenSpaceParams(MirrorSettings(), wallView, Width, Height, 0);
+
 	for (std::uint32_t y = 0; y < Height; y += 7)
 	{
 		for (std::uint32_t x = 0; x < Width; x += 7)
@@ -848,12 +931,14 @@ SWIM_TEST("Render.ScreenSpace.Reference", "CompositeReplacesTheSpecularIblWithTh
 	reflection.Specular = { 0.2f, 0.15f, 0.1f, 1.0f };
 	const float ao = 0.6f;
 	const auto out = Ss::CompositeTexel(params, color, indirect, ao, reflection, 0.5f, 10, 10);
+
 	for (int c = 0; c < 3; ++c)
 	{
 		const float afterAo = color[c] - (1.0f - ao) * indirect[c];
 		const float expected = afterAo + 0.75f * ao * (reflection.Reflectance[c] * reflection.Reflection[c] - reflection.Specular[c]);
 		SWIM_CHECK(Near(out[c], expected, 1.0e-6f));
 	}
+
 	SWIM_CHECK(out[3] == 1.0f);
 	// A miss (confidence 0) leaves the color as AO left it; reflections off ignore the inputs.
 	auto miss = reflection;
@@ -862,11 +947,13 @@ SWIM_TEST("Render.ScreenSpace.Reference", "CompositeReplacesTheSpecularIblWithTh
 	auto off = params;
 	off.SsrEnabled = 0;
 	const auto ignored = Ss::CompositeTexel(off, color, indirect, ao, reflection, 0.5f, 10, 10);
+
 	for (int c = 0; c < 3; ++c)
 	{
 		SWIM_CHECK(Near(kept[c], color[c] - (1.0f - ao) * indirect[c], 1.0e-6f));
 		SWIM_CHECK(kept[c] == ignored[c]);
 	}
+
 	// With AO off the full specular IBL is replaced; a darker reflection never goes negative.
 	auto noAo = params;
 	noAo.AoEnabled = 0;
@@ -916,6 +1003,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsDoNotAliasToTheStride")
 	const auto fineParams = BuildScreenSpaceParams(fine, view, Width, Height, 0);
 	const auto coarseParams = BuildScreenSpaceParams(coarse, view, Width, Height, 0);
 	std::uint32_t fineHits = 0, coarseHits = 0, agree = 0;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -924,12 +1012,14 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsDoNotAliasToTheStride")
 			const auto b = Ss::TraceReflection(coarseParams, inputs.Depth, inputs.Normal, x, y);
 			fineHits += a ? 1u : 0u;
 			coarseHits += b ? 1u : 0u;
+
 			if (a && b)
 			{
 				agree += std::abs(a->HitX - b->HitX) <= 1.5f && std::abs(a->HitY - b->HitY) <= 1.5f ? 1u : 0u;
 			}
 		}
 	}
+
 	std::printf("             [ssr] stride 1: %u hits, stride 4: %u hits, %u within 1.5 px\n", fineHits, coarseHits, agree);
 	SWIM_REQUIRE(fineHits > 200u);
 	// At 160 x 90 a 4-pixel stride still steps over whole faces near the ray's start
@@ -945,6 +1035,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 	// per pixel (it used to rotate every frame, and hits that came and went with it were
 	// grain TAA could not resolve), so the frame index changes nothing.
 	Scene::Scene field;
+
 	for (int z = 0; z < 6; ++z)
 	{
 		for (int x = 0; x < 6; ++x)
@@ -953,6 +1044,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 			field.Boxes.push_back({ { float(x) * 0.55f - 0.2f, 0.0f, float(z) * 0.55f - 0.2f }, { float(x) * 0.55f + 0.2f, h, float(z) * 0.55f + 0.2f } });
 		}
 	}
+
 	constexpr std::uint32_t w = 320;
 	constexpr std::uint32_t h = 180;
 	const auto view = Scene::View({ 1.3f, 2.6f, 4.2f }, { 1.4f, 0.6f, 1.2f }, float(w) / float(h));
@@ -963,18 +1055,22 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 	constexpr int frames = 16;
 	std::vector<int> hits(std::size_t(w) * h, 0);
 	std::vector<std::array<float, 4>> bounds(hits.size(), { 1.0e9f, -1.0e9f, 1.0e9f, -1.0e9f });
+
 	for (int f = 0; f < frames; ++f)
 	{
 		const auto params = BuildScreenSpaceParams(settings, view, w, h, std::uint32_t(f));
+
 		for (std::uint32_t y = 0; y < h; ++y)
 		{
 			for (std::uint32_t x = 0; x < w; ++x)
 			{
 				const auto hit = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y);
+
 				if (!hit)
 				{
 					continue;
 				}
+
 				const std::size_t i = std::size_t(y) * w + x;
 				++hits[i];
 				auto& b = bounds[i];
@@ -982,14 +1078,18 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 			}
 		}
 	}
+
 	std::uint32_t any = 0, flicker = 0, jumps = 0;
+
 	for (std::size_t i = 0; i < hits.size(); ++i)
 	{
 		if (hits[i] == 0)
 		{
 			continue;
 		}
+
 		++any;
+
 		if (hits[i] != frames)
 		{
 			++flicker;
@@ -999,6 +1099,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 			++jumps;
 		}
 	}
+
 	std::printf("             [ssr] %u pixels hit over %d frames: %u flicker, %u move more than 2 px\n", any, frames, flicker, jumps);
 	SWIM_REQUIRE(any > 9000u);
 	SWIM_CHECK_EQUAL(flicker, 0u);
@@ -1018,6 +1119,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsReadThePreviousFrameAtTheR
 	Ss::VelocityImage still(Width, Height, { 0.0f, 0.0f });
 	Ss::ColorImage indirect(Width, Height, { 0, 0, 0, 0 });
 	std::uint32_t hits = 0;
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -1027,6 +1129,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsReadThePreviousFrameAtTheR
 			params.SsrHistory = 1u;
 			const auto withHistory =
 				Ss::ReflectionTexel(params, inputs.Depth, inputs.Normal, current, indirect, nullptr, x, y, { &previous, &still });
+
 			if (plain[3] > 0.0f)
 			{
 				++hits;
@@ -1036,10 +1139,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsReadThePreviousFrameAtTheR
 			}
 		}
 	}
+
 	SWIM_REQUIRE(hits > 100u);
 
 	// Motion moves the lookup; one that leaves the previous image falls back to the current color.
 	Ss::ColorImage stripes(Width, Height);
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -1047,6 +1152,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionsReadThePreviousFrameAtTheR
 			stripes.At(x, y) = { float(x), 0.0f, 0.0f, 1.0f };
 		}
 	}
+
 	Ss::VelocityImage shifted(Width, Height, { 4.0f / float(Width), 0.0f }); // Moved 4 px right since last frame.
 	Ss::VelocityImage gone(Width, Height, { 2.0f, 0.0f });					  // Came from far off screen.
 	params.SsrHistory = 1u;
@@ -1070,6 +1176,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "TheGlossyResolveSoftensRoughReflectio
 	SWIM_CHECK(Ss::GlossyBlurRadius(params, 0.0f) == 0.0f);
 	SWIM_CHECK(Near(Ss::GlossyBlurRadius(params, 0.5f), 20.0f * 0.5f * std::sqrt(0.5f) * float(Height) / 1080.0f, 1.0e-5f));
 	Ss::ColorImage reflection(Width, Height, { 0.0f, 0.0f, 0.0f, 0.0f });
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -1077,6 +1184,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "TheGlossyResolveSoftensRoughReflectio
 			reflection.At(x, y) = (x + y) % 2 == 0 ? Ss::Float4{ 2.0f, 0.0f, 0.0f, 1.0f } : Ss::Float4{ 0.0f, 0.0f, 0.0f, 0.0f };
 		}
 	}
+
 	const std::uint32_t x = Width / 2, y = Height / 2;
 	// Even a mirror's one-pixel dither is smoothed (the one-pixel-step footprint)...
 	const auto sharp = Ss::ResolvedReflectionTexel(params, reflection, mirror.Normal, mirror.Depth, x, y);
@@ -1092,10 +1200,12 @@ SWIM_TEST("Render.ScreenSpace.Reference", "TheGlossyResolveSoftensRoughReflectio
 	SWIM_CHECK(soft[3] > 0.0f && soft[3] < 1.0f); // Confidence is averaged with the misses.
 	// Across a normal edge nothing is borrowed: a lone texel whose neighbours face away keeps its value.
 	auto facing = rough.Normal;
+
 	for (auto& texel : facing.Texels)
 	{
 		texel = { 1.0f, 0.0f, 0.0f, 0.5f };
 	}
+
 	facing.At(x, y) = rough.Normal.At(x, y);
 	const auto alone = Ss::ResolvedReflectionTexel(tall, reflection, facing, rough.Depth, x, y);
 	SWIM_CHECK(alone == reflection.At(x, y));

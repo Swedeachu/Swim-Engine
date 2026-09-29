@@ -27,8 +27,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		std::array<float, 12> WorldRows(const entt::registry& registry, const Transform& transform)
 		{
 			return Swim::Render::RenderAffine::FromColumnMajor(glm::value_ptr(transform.GetWorldMatrix(registry))).Rows;
@@ -45,6 +47,7 @@ namespace Engine
 		{
 			return std::isfinite(value) ? value : fallback;
 		}
+
 	} // namespace
 
 	SceneRenderBridge::SceneRenderBridge(FrameRenderer& rendererValue) : renderer(rendererValue)
@@ -54,6 +57,7 @@ namespace Engine
 	SceneRenderBridge::~SceneRenderBridge()
 	{
 		Detach();
+
 		for (auto& [name, mesh] : skinnedMeshes)
 		{
 			(void)name;
@@ -67,13 +71,16 @@ namespace Engine
 		{
 			return;
 		}
+
 		Detach();
 		scene = value;
 		sceneId = id;
+
 		if (!scene)
 		{
 			return;
 		}
+
 		RenderExtractorDesc desc;
 		desc.Scene = sceneId;
 		desc.ResolveMesh = [&residency = renderer.GetResidency()](Swim::Assets::AssetHandle<Swim::Assets::MeshAsset> mesh)
@@ -95,11 +102,13 @@ namespace Engine
 	void SceneRenderBridge::Detach()
 	{
 		ReleaseAll();
+
 		if (extractor)
 		{
 			extractor->ReleaseAll(renderer.GetLastCompletion());
 			extractor.reset();
 		}
+
 		scene = nullptr;
 		sceneId = 0;
 	}
@@ -111,18 +120,23 @@ namespace Engine
 			(void)entity;
 			ReleaseLight(state);
 		}
+
 		lights.clear();
+
 		for (auto& [entity, state] : emitters)
 		{
 			(void)entity;
 			renderer.GetParticles().Release(state.Handle, renderer.GetLastCompletion());
 		}
+
 		emitters.clear();
+
 		for (auto& [entity, state] : skins)
 		{
 			(void)entity;
 			ReleaseSkin(state);
 		}
+
 		skins.clear();
 		casters.clear();
 	}
@@ -130,35 +144,43 @@ namespace Engine
 	void SceneRenderBridge::ReleaseLight(LightState& state)
 	{
 		renderer.GetLights().Release(state.Handle);
+
 		if (state.Slot != UINT32_MAX && state.Slot < shadowSlots.size())
 		{
 			shadowSlots[state.Slot] = false;
 		}
+
 		state.Slot = UINT32_MAX;
 	}
 
 	void SceneRenderBridge::ReleaseSkin(SkinState& state)
 	{
 		const auto lastUse = renderer.GetLastCompletion();
+
 		if (state.Object)
 		{
 			renderer.GetScene().Destroy(state.Object, lastUse);
 		}
+
 		renderer.GetMeshes().UntrackGpuMesh(state.Output);
+
 		if (state.Instance)
 		{
 			renderer.GetSkinning().DestroyInstance(state.Instance, lastUse);
 		}
+
 		state = {};
 	}
 
 	std::uint32_t SceneRenderBridge::AllocateShadowSlot()
 	{
 		const std::uint32_t maxSlots = renderer.GetSettings().Shadow.MaxSlots;
+
 		if (shadowSlots.size() != maxSlots)
 		{
 			shadowSlots.resize(maxSlots, false);
 		}
+
 		for (std::uint32_t slot = 0; slot < maxSlots; ++slot)
 		{
 			if (!shadowSlots[slot])
@@ -167,6 +189,7 @@ namespace Engine
 				return slot;
 			}
 		}
+
 		return UINT32_MAX;
 	}
 
@@ -175,15 +198,19 @@ namespace Engine
 		casters.clear();
 		probes.clear();
 		movers.clear();
+
 		if (!scene)
 		{
 			return;
 		}
+
 		auto& registry = scene->GetRegistry();
+
 		if (extractor)
 		{
 			extraction = extractor->Extract(renderer.GetLastCompletion());
 		}
+
 		UpdateLights(registry);
 		UpdateEmitters(registry);
 		UpdateSkins(registry);
@@ -198,6 +225,7 @@ namespace Engine
 			{
 				continue;
 			}
+
 			const auto id = scene->GetSerializedEntityId(entity).Value;
 			const glm::vec3 position = transform.GetWorldPosition(registry) + probe.Offset;
 			Swim::Render::ReflectionProbeDesc desc;
@@ -212,11 +240,13 @@ namespace Engine
 			desc.Dynamic = probe.Dynamic;
 			probes.push_back(desc);
 		}
+
 		if (probes.empty())
 		{
 			lastPositions.clear();
 			return;
 		}
+
 		// Movers: mesh entities whose world position changed (a bounding sphere of the unit
 		// builtin meshes scaled by the largest axis).
 		std::erase_if(lastPositions,
@@ -224,19 +254,23 @@ namespace Engine
 			{
 				return !registry.valid(entry.first) || !registry.all_of<MeshRenderer, Transform>(entry.first);
 			});
+
 		for (auto [entity, mesh, transform] : registry.view<MeshRenderer, Transform>().each())
 		{
 			(void)mesh;
 			const glm::vec3 position = transform.GetWorldPosition(registry);
 			const std::array<float, 3> p{ position.x, position.y, position.z };
 			auto [it, inserted] = lastPositions.try_emplace(entity, p);
+
 			if (inserted)
 			{
 				continue;
 			}
+
 			const float dx = p[0] - it->second[0];
 			const float dy = p[1] - it->second[1];
 			const float dz = p[2] - it->second[2];
+
 			if (dx * dx + dy * dy + dz * dz > 1.0e-6f && movers.size() < 256u)
 			{
 				const glm::vec3 scale = transform.GetWorldScale(registry);
@@ -259,23 +293,28 @@ namespace Engine
 			const bool alive = registry.valid(it->first) && registry.all_of<Light, Transform>(it->first) &&
 							   registry.get<Light>(it->first).Enabled &&
 							   (localLights || registry.get<Light>(it->first).Kind == LightKind::Directional);
+
 			if (alive)
 			{
 				++it;
 				continue;
 			}
+
 			ReleaseLight(it->second);
 			it = lights.erase(it);
 		}
 
 		auto view = registry.view<Light, Transform>();
+
 		for (const entt::entity entity : view)
 		{
 			const auto& light = view.get<Light>(entity);
+
 			if (!light.Enabled || (!localLights && light.Kind != LightKind::Directional))
 			{
 				continue;
 			}
+
 			const auto& transform = view.get<Transform>(entity);
 			const glm::mat4& world = transform.GetWorldMatrix(registry);
 			glm::vec3 forward = -glm::vec3(world[2]);
@@ -296,6 +335,7 @@ namespace Engine
 			auto [it, inserted] = lights.try_emplace(entity);
 			LightState& state = it->second;
 			const bool wantsShadow = light.CastShadows && renderer.GetSettings().Shadows;
+
 			if (wantsShadow && state.Slot == UINT32_MAX)
 			{
 				state.Slot = AllocateShadowSlot();
@@ -305,6 +345,7 @@ namespace Engine
 				shadowSlots[state.Slot] = false;
 				state.Slot = UINT32_MAX;
 			}
+
 			if (state.Slot != UINT32_MAX)
 			{
 				desc.ShadowIndex = state.Slot;
@@ -314,15 +355,18 @@ namespace Engine
 			if (inserted || !buffer.IsValid(state.Handle))
 			{
 				const auto handle = buffer.TryCreate(desc);
+
 				if (!handle)
 				{
 					if (state.Slot != UINT32_MAX)
 					{
 						shadowSlots[state.Slot] = false;
 					}
+
 					lights.erase(it);
 					continue; // The light buffer is full.
 				}
+
 				state.Handle = *handle;
 				state.Desc = desc;
 			}
@@ -331,6 +375,7 @@ namespace Engine
 				buffer.Update(state.Handle, desc);
 				state.Desc = desc;
 			}
+
 			if (state.Slot != UINT32_MAX)
 			{
 				ShadowCasterDesc caster;
@@ -340,6 +385,7 @@ namespace Engine
 				casters.push_back(caster);
 			}
 		}
+
 		// Deterministic planner input (slot order).
 		std::sort(casters.begin(), casters.end(),
 			[](const ShadowCasterDesc& a, const ShadowCasterDesc& b)
@@ -352,6 +398,7 @@ namespace Engine
 	{
 		auto& particles = renderer.GetParticles();
 		const auto lastUse = renderer.GetLastCompletion();
+
 		for (auto it = emitters.begin(); it != emitters.end();)
 		{
 			if (registry.valid(it->first) && registry.all_of<ParticleEmitter, Transform>(it->first))
@@ -359,30 +406,37 @@ namespace Engine
 				++it;
 				continue;
 			}
+
 			particles.Release(it->second.Handle, lastUse);
 			it = emitters.erase(it);
 		}
+
 		auto view = registry.view<ParticleEmitter, Transform>();
+
 		for (const entt::entity entity : view)
 		{
 			const auto& emitter = view.get<ParticleEmitter>(entity);
 			const auto rows = WorldRows(registry, view.get<Transform>(entity));
 			auto found = emitters.find(entity);
+
 			if (found != emitters.end() && found->second.Revision != emitter.Revision)
 			{
 				particles.Release(found->second.Handle, lastUse);
 				emitters.erase(found);
 				found = emitters.end();
 			}
+
 			if (found == emitters.end())
 			{
 				try
 				{
 					const auto handle = particles.TryCreateEmitter(emitter.Desc, rows);
+
 					if (!handle)
 					{
 						continue; // No room this frame.
 					}
+
 					found = emitters.emplace(entity, EmitterState{ *handle, emitter.Revision, true }).first;
 				}
 				catch (const std::exception& error)
@@ -392,7 +446,9 @@ namespace Engine
 					continue;
 				}
 			}
+
 			particles.SetTransform(found->second.Handle, rows);
+
 			if (found->second.Emitting != emitter.Emitting)
 			{
 				particles.SetEmitting(found->second.Handle, emitter.Emitting);
@@ -407,6 +463,7 @@ namespace Engine
 		{
 			return true;
 		}
+
 		const std::array<Swim::Render::GeometrySubmesh, 1> submeshes{
 			{ { 0, static_cast<std::uint32_t>(mesh.Mesh.Indices.size()), 0, 0 } }
 		};
@@ -420,6 +477,7 @@ namespace Engine
 		desc.Submeshes = submeshes;
 		desc.Lods = lods;
 		desc.DebugName = name;
+
 		try
 		{
 			skinnedMeshes[name] = { renderer.GetSkinning().CreateSkinnedMesh(desc), mesh.JointCount };
@@ -429,6 +487,7 @@ namespace Engine
 			std::cerr << "[Render] Cannot register skinned mesh '" << name << "': " << error.what() << '\n';
 			return false;
 		}
+
 		return true;
 	}
 
@@ -443,33 +502,42 @@ namespace Engine
 		using namespace Swim::Render;
 		auto& skinning = renderer.GetSkinning();
 		auto& gpuScene = renderer.GetScene();
+
 		for (auto it = skins.begin(); it != skins.end();)
 		{
 			const bool alive = registry.valid(it->first) && registry.all_of<SkinnedMeshRenderer, Transform>(it->first) &&
 				registry.get<SkinnedMeshRenderer>(it->first).Mesh == it->second.Mesh;
+
 			if (alive)
 			{
 				++it;
 				continue;
 			}
+
 			ReleaseSkin(it->second);
 			it = skins.erase(it);
 		}
+
 		auto view = registry.view<SkinnedMeshRenderer, Transform>();
+
 		for (const entt::entity entity : view)
 		{
 			const auto& component = view.get<SkinnedMeshRenderer>(entity);
 			const auto mesh = skinnedMeshes.find(component.Mesh);
+
 			if (mesh == skinnedMeshes.end())
 			{
 				continue;
 			}
+
 			const RenderAffine world{ WorldRows(registry, view.get<Transform>(entity)) };
 			auto found = skins.find(entity);
+
 			if (found == skins.end())
 			{
 				SkinState state;
 				state.Mesh = component.Mesh;
+
 				try
 				{
 					state.Instance = skinning.CreateInstance(mesh->second.Handle);
@@ -479,6 +547,7 @@ namespace Engine
 					std::cerr << "[Render] Cannot create a skinned instance: " << error.what() << '\n';
 					continue;
 				}
+
 				state.Output = skinning.GetOutputMesh(state.Instance);
 				renderer.GetMeshes().TrackGpuMesh(state.Output);
 				RenderObjectDesc desc;
@@ -490,41 +559,49 @@ namespace Engine
 				desc.Flags = component.Flags;
 				desc.PreviousVertexOffset = skinning.GetPreviousVertexOffset(state.Instance);
 				const auto object = gpuScene.TryCreate(desc);
+
 				if (!object)
 				{
 					skinning.DestroyInstance(state.Instance, renderer.GetLastCompletion());
 					renderer.GetMeshes().UntrackGpuMesh(state.Output);
 					continue;
 				}
+
 				state.Object = *object;
 				state.MaterialSet = component.MaterialSet;
 				state.Flags = static_cast<std::uint32_t>(component.Flags);
 				found = skins.emplace(entity, std::move(state)).first;
 			}
+
 			auto& state = found->second;
 			gpuScene.SetTransform(state.Object, world);
+
 			if (state.MaterialSet != component.MaterialSet)
 			{
 				gpuScene.SetMaterialSet(state.Object, component.MaterialSet);
 				state.MaterialSet = component.MaterialSet;
 			}
+
 			if (state.Flags != static_cast<std::uint32_t>(component.Flags))
 			{
 				gpuScene.SetFlags(state.Object, component.Flags);
 				state.Flags = static_cast<std::uint32_t>(component.Flags);
 			}
+
 			if (component.PoseRevision != state.PoseRevision && component.Palette.size() == mesh->second.JointCount)
 			{
 				if (state.Previous.size() != component.Palette.size())
 				{
 					state.Previous = component.Palette;
 				}
+
 				static const std::vector<float> noWeights;
 				SkinPose pose;
 				pose.Palette = component.Palette;
 				pose.PreviousPalette = state.Previous;
 				pose.MorphWeights = noWeights;
 				pose.PreviousMorphWeights = noWeights;
+
 				try
 				{
 					skinning.SetPose(state.Instance, pose);
@@ -534,9 +611,11 @@ namespace Engine
 				{
 					std::cerr << "[Render] Invalid skin pose: " << error.what() << '\n';
 				}
+
 				state.Previous = component.Palette;
 				state.PoseRevision = component.PoseRevision;
 			}
 		}
 	}
+
 } // namespace Engine

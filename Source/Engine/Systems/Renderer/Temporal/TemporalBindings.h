@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of SwimTemporalResolve (space 0). Every input is read with Load.
 	struct TemporalResolveBindings
 	{
@@ -15,4 +16,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t ThreadGroupSize = 8; // 8 x 8 texels per group.
 		static constexpr std::uint32_t PushConstantBytes = 32;
 	};
+
 } // namespace Swim::Render

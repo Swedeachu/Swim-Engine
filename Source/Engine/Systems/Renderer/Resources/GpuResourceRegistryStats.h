@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuResourceRegistryStats
 	{
 		std::uint32_t Live = 0;
@@ -13,4 +14,5 @@ namespace Swim::Render
 		std::uint32_t ExhaustedSlots = 0; // Generation space consumed; never reused.
 		std::uint32_t MaxSlots = 0;
 	};
+
 } // namespace Swim::Render

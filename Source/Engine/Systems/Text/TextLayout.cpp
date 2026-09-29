@@ -11,8 +11,10 @@
 
 namespace Swim::Text
 {
+
 	namespace
 	{
+
 		constexpr std::size_t MaxLayoutBytes = 1024u * 1024u;
 
 		struct AlgorithmDeleter
@@ -38,11 +40,13 @@ namespace Swim::Text
 				static_cast<std::uint8_t>(desc.Wrap) <= static_cast<std::uint8_t>(TextWrap::Word) &&
 				(desc.Direction == TextDirection::Auto || desc.Direction == TextDirection::LeftToRight ||
 					desc.Direction == TextDirection::RightToLeft);
+
 			if (!valid)
 			{
 				throw std::invalid_argument("Invalid text layout description");
 			}
 		}
+
 	} // namespace
 
 	// Builds one TextLayout. Keeps per-byte face/script tables and the paragraph's
@@ -71,20 +75,24 @@ namespace Swim::Text
 		{
 			const auto& g = Graphemes();
 			std::uint32_t next = offset + 1;
+
 			while (next < Text.size() && !g[next])
 			{
 				++next;
 			}
+
 			return std::min<std::uint32_t>(next, static_cast<std::uint32_t>(Text.size()));
 		}
 
 		std::uint32_t GraphemeStartOf(std::uint32_t offset) const
 		{
 			const auto& g = Graphemes();
+
 			while (offset > 0 && !g[offset])
 			{
 				--offset;
 			}
+
 			return offset;
 		}
 
@@ -106,16 +114,19 @@ namespace Swim::Text
 		{
 			std::vector<char32_t> cluster;
 			std::uint32_t previous = FontCollection::NoPreference;
+
 			for (std::uint32_t begin = 0; begin < Text.size();)
 			{
 				const std::uint32_t end = NextGrapheme(begin);
 				cluster.clear();
+
 				for (std::uint32_t offset = begin; offset < end;)
 				{
 					const auto decoded = DecodeUtf8(Text, offset);
 					cluster.push_back(decoded.CodePoint);
 					offset += decoded.Length;
 				}
+
 				const bool separator = cluster.size() == 1 && (cluster[0] == U'\n' || cluster[0] == U'\r');
 				const std::uint32_t face = Fonts.SelectFace(cluster, separator ? FontCollection::NoPreference : previous);
 				std::fill(FaceAt.begin() + begin, FaceAt.begin() + end, face);
@@ -134,10 +145,12 @@ namespace Swim::Text
 			options.Kerning = Desc.Kerning;
 			options.Ligatures = Desc.Ligatures;
 			auto run = Fonts.GetFace(face)->Shape(std::string_view(Text).substr(begin, end - begin), Desc.Size, options);
+
 			for (auto& glyph : run.Glyphs)
 			{
 				glyph.Cluster += begin;
 			}
+
 			return run;
 		}
 
@@ -147,20 +160,24 @@ namespace Swim::Text
 		void Itemize(std::uint32_t begin, std::uint32_t end, const std::uint8_t* levels, std::uint32_t levelBase, Emit emit) const
 		{
 			std::uint32_t start = begin;
+
 			for (std::uint32_t offset = begin; offset < end; offset = NextGrapheme(offset))
 			{
 				if (offset == start)
 				{
 					continue;
 				}
+
 				const bool split = FaceAt[offset] != FaceAt[start] || ScriptAt[offset] != ScriptAt[start] ||
 					(levels && levels[offset - levelBase] != levels[start - levelBase]);
+
 				if (split)
 				{
 					emit(start, offset);
 					start = offset;
 				}
 			}
+
 			if (start < end)
 			{
 				emit(start, end);
@@ -174,10 +191,12 @@ namespace Swim::Text
 				[&](std::uint32_t begin, std::uint32_t end)
 				{
 					const auto run = Shape(begin, end, FaceAt[begin], ScriptAt[begin], paragraph.Levels[begin - paragraph.Begin]);
+
 					for (const auto& glyph : run.Glyphs)
 					{
 						Advance[GraphemeStartOf(std::clamp(glyph.Cluster, begin, end - 1))] += glyph.AdvanceX;
 					}
+
 				});
 		}
 
@@ -204,17 +223,21 @@ namespace Swim::Text
 			const auto emit = [&](std::uint32_t end, std::uint32_t next, bool hard)
 			{
 				std::uint32_t contentEnd = end;
+
 				if (contentEnd > lineStart)
 				{
 					const auto last = static_cast<std::uint32_t>(PreviousUtf8(Text, contentEnd));
+
 					if (IsLineSeparator(CodePointAt(last)))
 					{
 						contentEnd = last;
 					}
 				}
+
 				result.push_back({ lineStart, contentEnd, next, hard });
 				lineStart = next;
 			};
+
 			for (std::uint32_t offset = paragraph.Begin; offset < paragraph.End; offset = NextGrapheme(offset))
 			{
 				if (offset > lineStart && breaks[offset] == LineBreakKind::Mandatory)
@@ -223,12 +246,15 @@ namespace Swim::Text
 					width = 0.0f;
 					lastBreak = 0;
 				}
+
 				if (offset > lineStart && breaks[offset] == LineBreakKind::Allowed)
 				{
 					lastBreak = offset;
 					widthAtBreak = width;
 				}
+
 				const float advance = Advance[offset];
+
 				if (wrap && !IsHangingWhitespace(CodePointAt(offset)))
 				{
 					while (offset > lineStart && width + advance > Desc.MaxWidth)
@@ -247,8 +273,10 @@ namespace Swim::Text
 						}
 					}
 				}
+
 				width += advance;
 			}
+
 			emit(paragraph.End, paragraph.End + paragraph.SeparatorLength, true);
 			return result;
 		}
@@ -274,28 +302,35 @@ namespace Swim::Text
 		{
 			std::map<std::uint32_t, std::pair<float, float>> clusters; // Grapheme start -> [left, right].
 			float pen = penStart;
+
 			for (const auto& glyph : run.Glyphs)
 			{
 				const std::uint32_t start = GraphemeStartOf(std::clamp(glyph.Cluster, begin, end - 1));
 				auto [it, inserted] = clusters.try_emplace(start, pen, pen + glyph.AdvanceX);
+
 				if (!inserted)
 				{
 					it->second.first = std::min(it->second.first, pen);
 					it->second.second = std::max(it->second.second, pen + glyph.AdvanceX);
 				}
+
 				pen += glyph.AdvanceX;
 			}
+
 			for (auto it = clusters.begin(); it != clusters.end(); ++it)
 			{
 				const auto next = std::next(it);
 				const std::uint32_t clusterEnd = next == clusters.end() ? end : next->first;
 				std::vector<std::uint32_t> starts;
+
 				for (std::uint32_t offset = it->first; offset < clusterEnd; offset = NextGrapheme(offset))
 				{
 					starts.push_back(offset);
 				}
+
 				const float left = it->second.first;
 				const float step = (it->second.second - left) / float(starts.size());
+
 				for (std::size_t i = 0; i < starts.size(); ++i)
 				{
 					const std::size_t slot = rtl ? starts.size() - 1 - i : i;
@@ -303,10 +338,12 @@ namespace Swim::Text
 						{ starts[i], NextGrapheme(starts[i]), line, left + step * float(slot), left + step * float(slot + 1), rtl });
 				}
 			}
+
 			// Every grapheme from the first cluster on is covered above (clusters merged by
 			// HarfBuzz split their range); any before it, or a piece without glyphs, gets a
 			// zero-width stop at the piece's pen start.
 			const std::uint32_t firstCovered = clusters.empty() ? end : clusters.begin()->first;
+
 			for (std::uint32_t offset = begin; offset < firstCovered; offset = NextGrapheme(offset))
 			{
 				L.graphemes.push_back({ offset, NextGrapheme(offset), line, penStart, penStart, rtl });
@@ -327,15 +364,19 @@ namespace Swim::Text
 			FaceMetrics metrics;
 			Include(metrics, 0);
 			float pen = 0.0f;
+
 			if (range.End > range.Begin)
 			{
 				std::unique_ptr<const _SBLine, LineDeleter> sbLine(SBParagraphCreateLine(paragraph, range.Begin, range.End - range.Begin));
+
 				if (!sbLine)
 				{
 					throw std::runtime_error("SheenBidi could not create a line");
 				}
+
 				const SBRun* sbRuns = SBLineGetRunsPtr(sbLine.get());
 				const SBUInteger count = SBLineGetRunCount(sbLine.get());
+
 				for (SBUInteger r = 0; r < count; ++r)
 				{
 					const auto begin = static_cast<std::uint32_t>(sbRuns[r].offset);
@@ -347,10 +388,12 @@ namespace Swim::Text
 						{
 							pieces.emplace_back(b, e);
 						});
+
 					if ((level & 1) != 0)
 					{
 						std::reverse(pieces.begin(), pieces.end());
 					}
+
 					for (const auto& [b, e] : pieces)
 					{
 						const auto shaped = Shape(b, e, FaceAt[b], ScriptAt[b], level);
@@ -363,12 +406,14 @@ namespace Swim::Text
 						run.X = pen;
 						run.FirstGlyph = static_cast<std::uint32_t>(L.glyphs.size());
 						RecordGraphemes(shaped, b, e, pen, (level & 1) != 0, lineIndex);
+
 						for (const auto& glyph : shaped.Glyphs)
 						{
 							L.glyphs.push_back(
 								{ glyph.Glyph, run.Face, glyph.Cluster, pen + glyph.OffsetX, -glyph.OffsetY, glyph.AdvanceX });
 							pen += glyph.AdvanceX;
 						}
+
 						L.missingGlyphs += shaped.MissingGlyphs;
 						run.GlyphCount = static_cast<std::uint32_t>(L.glyphs.size()) - run.FirstGlyph;
 						run.Width = pen - run.X;
@@ -377,17 +422,21 @@ namespace Swim::Text
 					}
 				}
 			}
+
 			line.RunCount = static_cast<std::uint32_t>(L.runs.size()) - line.FirstRun;
 			// Trailing hanging whitespace takes the paragraph level (L1) and hangs at the
 			// paragraph's end: to the right in LTR paragraphs, to the left in RTL ones.
 			float trailing = 0.0f;
+
 			for (std::uint32_t offset = range.End; offset > range.Begin;)
 			{
 				const std::uint32_t start = GraphemeStartOf(static_cast<std::uint32_t>(PreviousUtf8(Text, offset)));
+
 				if (!IsHangingWhitespace(CodePointAt(start)))
 				{
 					break;
 				}
+
 				for (std::size_t g = firstGrapheme; g < L.graphemes.size(); ++g)
 				{
 					if (L.graphemes[g].Begin == start)
@@ -395,8 +444,10 @@ namespace Swim::Text
 						trailing += L.graphemes[g].Right - L.graphemes[g].Left;
 					}
 				}
+
 				offset = start;
 			}
+
 			line.Width = std::max(0.0f, pen - trailing);
 			line.X = (baseLevel & 1) != 0 ? trailing : 0.0f;
 			line.Ascent = metrics.Ascent;
@@ -413,16 +464,20 @@ namespace Swim::Text
 		void Align()
 		{
 			float widest = 0.0f;
+
 			for (const auto& line : L.lines)
 			{
 				widest = std::max(widest, line.Width);
 			}
+
 			const float box = std::isfinite(Desc.MaxWidth) ? Desc.MaxWidth : widest;
+
 			for (std::uint32_t index = 0; index < L.lines.size(); ++index)
 			{
 				auto& line = L.lines[index];
 				const bool rtl = (line.BaseLevel & 1) != 0;
 				TextAlign align = Desc.Align;
+
 				if (align == TextAlign::Start)
 				{
 					align = rtl ? TextAlign::Right : TextAlign::Left;
@@ -431,27 +486,32 @@ namespace Swim::Text
 				{
 					align = rtl ? TextAlign::Left : TextAlign::Right;
 				}
+
 				const float left = align == TextAlign::Left ? 0.0f
 					: align == TextAlign::Right				? box - line.Width
 															: (box - line.Width) * 0.5f;
 				const float shift = left - line.X;
 				line.X = left;
+
 				for (std::uint32_t r = line.FirstRun; r < line.FirstRun + line.RunCount; ++r)
 				{
 					auto& run = L.runs[r];
 					run.X += shift;
+
 					for (std::uint32_t g = run.FirstGlyph; g < run.FirstGlyph + run.GlyphCount; ++g)
 					{
 						L.glyphs[g].X += shift;
 						L.glyphs[g].Y += line.Baseline;
 					}
 				}
+
 				for (std::size_t g = LineGraphemes[index].first; g < LineGraphemes[index].second; ++g)
 				{
 					L.graphemes[g].Left += shift;
 					L.graphemes[g].Right += shift;
 				}
 			}
+
 			L.width = widest;
 			L.height = Y;
 		}
@@ -465,33 +525,40 @@ namespace Swim::Text
 				: Desc.Direction == TextDirection::RightToLeft					   ? SBLevel(1)
 																				   : SBLevel(SBLevelDefaultLTR);
 			std::unique_ptr<const _SBAlgorithm, AlgorithmDeleter> algorithm;
+
 			if (!Text.empty())
 			{
 				const SBCodepointSequence sequence{ SBStringEncodingUTF8, Text.data(), Text.size() };
 				algorithm.reset(SBAlgorithmCreate(&sequence));
+
 				if (!algorithm)
 				{
 					throw std::bad_alloc();
 				}
 			}
+
 			for (const auto& paragraph : analysis)
 			{
 				Measure(paragraph);
 				std::unique_ptr<const _SBParagraph, ParagraphDeleter> sbParagraph;
+
 				if (paragraph.End > paragraph.Begin)
 				{
 					sbParagraph.reset(SBAlgorithmCreateParagraph(
 						algorithm.get(), paragraph.Begin, paragraph.End - paragraph.Begin + paragraph.SeparatorLength, requested));
+
 					if (!sbParagraph)
 					{
 						throw std::runtime_error("SheenBidi could not analyze the paragraph");
 					}
 				}
+
 				for (const auto& range : BreakLines(paragraph))
 				{
 					EmitLine(range, sbParagraph.get(), paragraph.BaseLevel);
 				}
 			}
+
 			Align();
 			std::sort(L.graphemes.begin(), L.graphemes.end(),
 				[](const auto& a, const auto& b)
@@ -508,16 +575,21 @@ namespace Swim::Text
 		{
 			throw std::invalid_argument("Text layout needs a font collection");
 		}
+
 		ValidateDesc(desc);
+
 		if (utf8.size() > MaxLayoutBytes)
 		{
 			throw std::length_error("Text layout input exceeds 1 MiB");
 		}
+
 		text = SanitizeUtf8(utf8);
+
 		if (text.size() > MaxLayoutBytes)
 		{
 			throw std::length_error("Text layout input exceeds 1 MiB after UTF-8 replacement");
 		}
+
 		Build();
 	}
 
@@ -527,4 +599,5 @@ namespace Swim::Text
 		TextLayoutBuilder builder(*this);
 		builder.Run();
 	}
+
 } // namespace Swim::Text

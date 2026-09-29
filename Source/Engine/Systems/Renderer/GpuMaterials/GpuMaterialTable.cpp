@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	GpuMaterialTable::GpuMaterialTable(Rhi::Device& device, GpuMaterialTableDesc desc)
 		: materialTemplate(std::move(desc.Template)), recordSize(materialTemplate ? materialTemplate->GetRecordSize() : 0),
 		  capacity(desc.Capacity), name(std::move(desc.DebugName)), dirty(desc.Capacity)
@@ -14,22 +15,28 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " needs a material template and at least two rows (the fallback and one material)");
 		}
+
 		buffer = device.CreateBuffer({ std::uint64_t(capacity) * recordSize,
 			Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferDestination | Rhi::BufferUsage::TransferSource,
 			Rhi::MemoryPreference::DeviceLocal, name });
+
 		if (!buffer)
 		{
 			throw std::runtime_error(name + " buffer could not be created");
 		}
+
 		registry = std::make_unique<Registry>(GpuResourceRegistryDesc{ capacity, name });
 		// Every row starts as the defaults, so any index the GPU may read is valid.
 		mirror.resize(std::size_t(capacity) * recordSize);
 		const auto defaults = materialTemplate->GetDefaultRecord();
+
 		for (std::uint32_t row = 0; row < capacity; ++row)
 		{
 			WriteRow(row, defaults);
 		}
+
 		const auto fallback = registry->Create({}); // Row 0, never released.
+
 		if (fallback.Index != FallbackIndex)
 		{
 			throw std::logic_error(name + " fallback row is not row 0");
@@ -50,13 +57,16 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " only holds instances of template " + materialTemplate->GetName());
 		}
+
 		const auto version = instance->GetVersion();
 		const auto record = instance->GetRecord();
 		auto handle = registry->TryCreate({ std::move(instance), version });
+
 		if (handle)
 		{
 			WriteRow(handle->Index, record);
 		}
+
 		return handle;
 	}
 
@@ -66,6 +76,7 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(name + " has no free material rows");
 	}
 
@@ -113,6 +124,7 @@ namespace Swim::Render
 		{
 			throw std::logic_error(name + " has an import awaiting CommitUploads/AbortUploads");
 		}
+
 		// Pick up instance edits made since the last upload.
 		registry->ForEach(
 			[&](GpuMaterialHandle handle, Entry& entry)
@@ -122,6 +134,7 @@ namespace Swim::Render
 					entry.UploadedVersion = entry.Instance->GetVersion();
 					WriteRow(handle.Index, entry.Instance->GetRecord());
 				}
+
 			});
 
 		GpuMaterialGraphResources resources;
@@ -131,17 +144,21 @@ namespace Swim::Render
 		lastRows = lastRuns = 0;
 		lastBytes = 0;
 		auto rows = dirty.Take();
+
 		if (rows.empty())
 		{
 			return resources;
 		}
+
 		try
 		{
 			auto snapshot = std::make_shared<std::vector<std::byte>>(rows.size() * recordSize);
+
 			for (std::size_t i = 0; i < rows.size(); ++i)
 			{
 				std::memcpy(snapshot->data() + i * recordSize, mirror.data() + std::size_t(rows[i]) * recordSize, recordSize);
 			}
+
 			auto runs = BuildRecordRuns(rows);
 			lastRuns = static_cast<std::uint32_t>(runs.size());
 			lastRows = static_cast<std::uint32_t>(rows.size());
@@ -155,8 +172,10 @@ namespace Swim::Render
 			{
 				dirty.Mark(row);
 			}
+
 			throw;
 		}
+
 		recorded = std::move(rows);
 		pending = true;
 		return resources;
@@ -174,6 +193,7 @@ namespace Swim::Render
 		{
 			dirty.Mark(row);
 		}
+
 		CommitUploads();
 	}
 
@@ -191,4 +211,5 @@ namespace Swim::Render
 		stats.LastUploadBytes = lastBytes;
 		return stats;
 	}
+
 } // namespace Swim::Render

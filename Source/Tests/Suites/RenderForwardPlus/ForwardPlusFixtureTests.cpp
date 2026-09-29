@@ -12,6 +12,7 @@ namespace Fp = Swim::Render::ForwardPlus;
 
 namespace
 {
+
 	Fs::Float3 Sub(const Fs::Float3& a, const Fs::Float3& b)
 	{
 		return { a[0] - b[0], a[1] - b[1], a[2] - b[2] };
@@ -25,21 +26,26 @@ namespace
 		const auto e2 = Sub(c, a);
 		const auto p = Fs::Cross(d, e2);
 		const float det = Fs::Dot(e1, p);
+
 		if (std::abs(det) < 1.0e-12f)
 		{
 			return std::nullopt;
 		}
+
 		const auto s = Sub(o, a);
 		const float u = Fs::Dot(s, p) / det;
 		const auto q = Fs::Cross(s, e1);
 		const float v = Fs::Dot(d, q) / det;
 		const float t = Fs::Dot(e2, q) / det;
+
 		if (u < 0.0f || v < 0.0f || u + v > 1.0f || t <= 0.0f)
 		{
 			return std::nullopt;
 		}
+
 		return t;
 	}
+
 } // namespace
 
 // The analytic shapes the native Forward+ smoke ray-casts are exactly the meshes it
@@ -51,6 +57,7 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 	for (const auto& mesh : { Fs::MakeCube(), Fs::MakeQuad() })
 	{
 		SWIM_REQUIRE_EQUAL(mesh.Indices.size() % 3, std::size_t(0));
+
 		for (std::size_t i = 0; i < mesh.Indices.size(); i += 3)
 		{
 			const auto& a = mesh.Vertices[mesh.Indices[i]];
@@ -61,10 +68,12 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 			SWIM_CHECK(a.Normal == b.Normal && b.Normal == c.Normal);
 			// The tangent is dp/du on the face (along an edge of constant v).
 			const float du = b.TexCoord0[0] - a.TexCoord0[0];
+
 			if (du != 0.0f && b.TexCoord0[1] == a.TexCoord0[1])
 			{
 				const auto dp = Sub(b.Position, a.Position);
 				const float scale = 1.0f / du;
+
 				for (int k = 0; k < 3; ++k)
 				{
 					SWIM_CHECK(std::abs(dp[k] * scale * 0.5f - a.Tangent[k]) < 1.0e-6f);
@@ -72,6 +81,7 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 			}
 		}
 	}
+
 	SWIM_CHECK_EQUAL(Fs::MakeCube().Vertices.size(), std::size_t(24));
 
 	std::mt19937 random(68);
@@ -79,6 +89,7 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 	const auto cube = Fs::MakeCube();
 	const auto quad = Fs::MakeQuad();
 	std::uint32_t hits = 0;
+
 	for (int trial = 0; trial < 300; ++trial)
 	{
 		const bool mirrored = trial % 3 == 0;
@@ -94,6 +105,7 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 		const auto& mesh = isQuad ? quad : cube;
 		std::optional<float> nearest;
 		Fs::Float3 nearestNormal{};
+
 		for (std::size_t i = 0; i < mesh.Indices.size(); i += 3)
 		{
 			const auto p = [&](std::size_t k)
@@ -101,27 +113,33 @@ SWIM_TEST("Render.ForwardPlus.Fixture", "MeshesMatchTheAnalyticRayCaster")
 				return Fp::TransformPoint(transform.Current, mesh.Vertices[mesh.Indices[i + k]].Position);
 			};
 			const auto t = IntersectTriangle(origin, direction, p(0), p(1), p(2));
+
 			if (t && (!nearest || *t < *nearest))
 			{
 				nearest = t;
 				nearestNormal = Fp::TransformNormal(transform.Current, mesh.Vertices[mesh.Indices[i]].Normal);
 			}
 		}
+
 		SWIM_REQUIRE_EQUAL(cast.empty(), !nearest.has_value());
+
 		if (!nearest)
 		{
 			continue;
 		}
+
 		++hits;
 		SWIM_CHECK(std::abs(cast[0].T - *nearest) < 1.0e-4f * (1.0f + *nearest));
 		const float alignment = Fs::Dot(cast[0].Normal, nearestNormal) /
 			std::sqrt(Fs::Dot(cast[0].Normal, cast[0].Normal) * Fs::Dot(nearestNormal, nearestNormal));
 		SWIM_CHECK(alignment > 0.9999f);
 		SWIM_CHECK(cast[0].Mirrored == mirrored);
+
 		if (!isQuad)
 		{
 			SWIM_CHECK(cast[0].FrontFacing); // A closed cube is entered through a front face.
 		}
 	}
+
 	SWIM_CHECK(hits > 150u);
 }

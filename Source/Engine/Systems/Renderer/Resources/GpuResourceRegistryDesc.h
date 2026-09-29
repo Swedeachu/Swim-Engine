@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuResourceRegistryDesc
 	{
 		// Upper bound on simultaneously live + retiring slots (for example a
@@ -13,4 +14,5 @@ namespace Swim::Render
 		std::uint32_t MaxSlots = UINT32_MAX - 1;
 		std::string_view DebugName = "GpuResourceRegistry";
 	};
+
 } // namespace Swim::Render

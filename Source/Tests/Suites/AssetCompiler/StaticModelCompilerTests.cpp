@@ -64,6 +64,7 @@ SWIM_TEST("AssetCompiler.StaticModelCompiler", "EmitsARootModelAndItsMeshDepende
 
 	bool sawRoot = false;
 	bool sawMesh = false;
+
 	for (const CompiledSasset& file : compiled.Assets)
 	{
 		const SassetParseResult parsed = ParseSasset(file.Bytes);
@@ -88,17 +89,20 @@ SWIM_TEST("AssetCompiler.StaticModelCompiler", "CompiledModelRebuildsTypedHandle
 
 	const CompiledSasset* root = nullptr;
 	const CompiledSasset* meshFile = nullptr;
+
 	for (const CompiledSasset& file : compiled.Assets)
 	{
 		if (file.IsRoot)
 		{
 			root = &file;
 		}
+
 		if (file.Type == SassetAssetType::Mesh)
 		{
 			meshFile = &file;
 		}
 	}
+
 	SWIM_REQUIRE(root != nullptr);
 	SWIM_REQUIRE(meshFile != nullptr);
 

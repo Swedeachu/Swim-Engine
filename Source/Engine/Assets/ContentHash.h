@@ -17,7 +17,9 @@ namespace Swim::Assets
 		std::array<std::uint8_t, 32> Bytes{};
 
 		bool IsZero() const;
+
 		std::string ToHex() const;
+
 		static ContentHash FromHex(std::string_view text);
 
 		auto operator<=>(const ContentHash&) const = default;
@@ -37,11 +39,13 @@ namespace std
 		std::size_t operator()(const Swim::Assets::ContentHash& value) const noexcept
 		{
 			std::size_t result = 0xcbf29ce484222325ull;
+
 			for (std::uint8_t byte : value.Bytes)
 			{
 				result ^= static_cast<std::size_t>(byte);
 				result *= 0x100000001b3ull;
 			}
+
 			return result;
 		}
 	};

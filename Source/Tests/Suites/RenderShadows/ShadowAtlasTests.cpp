@@ -10,6 +10,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	bool Overlap(const ShadowTile& a, const ShadowTile& b)
 	{
 		return a.X < b.X + b.Size && b.X < a.X + a.Size && a.Y < b.Y + b.Size && b.Y < a.Y + a.Size;
@@ -19,6 +20,7 @@ namespace
 	bool Valid(const std::vector<ShadowTileAllocation>& allocations, std::uint32_t atlasSize)
 	{
 		std::vector<ShadowTile> all;
+
 		for (const auto& allocation : allocations)
 		{
 			for (const auto& tile : allocation.Tiles)
@@ -28,9 +30,11 @@ namespace
 				{
 					return false;
 				}
+
 				all.push_back(tile);
 			}
 		}
+
 		for (std::size_t i = 0; i < all.size(); ++i)
 		{
 			for (std::size_t j = i + 1; j < all.size(); ++j)
@@ -41,8 +45,10 @@ namespace
 				}
 			}
 		}
+
 		return true;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Shadows.Atlas", "PacksMixedSizesWithoutOverlap")
@@ -60,11 +66,13 @@ SWIM_TEST("Render.Shadows.Atlas", "PacksMixedSizesWithoutOverlap")
 	SWIM_CHECK(Valid(allocations, 4096));
 	SWIM_CHECK_EQUAL(allocations[0].Tiles.size(), std::size_t(3));
 	SWIM_CHECK_EQUAL(allocations[3].Tiles.size(), std::size_t(6));
+
 	for (std::size_t i = 0; i < allocations.size(); ++i)
 	{
 		SWIM_CHECK(allocations[i].Tiles.front().Size == requests[i].Size);
 		SWIM_CHECK(!allocations[i].Downgraded && !allocations[i].Reused);
 	}
+
 	// Highest priority is placed first: first-fit in Morton order puts it at the origin.
 	SWIM_CHECK((allocations[0].Tiles[0] == ShadowTile{ 0, 0, 1024 }));
 	const auto& stats = atlas.GetStats();
@@ -101,6 +109,7 @@ SWIM_TEST("Render.Shadows.Atlas", "UnchangedRequestsKeepTheirTilesAcrossFrames")
 	// Reset forgets the placement.
 	atlas.Reset();
 	const auto fourth = atlas.Allocate(requests);
+
 	for (const auto& allocation : fourth)
 	{
 		SWIM_CHECK(!allocation.Reused);
@@ -113,17 +122,21 @@ SWIM_TEST("Render.Shadows.Atlas", "FullAtlasDowngradesThenEvictsLowestPriority")
 	// 1024^2 = four 512 tiles. Six requests for 512, listed lowest priority first:
 	// the four highest priorities fill the atlas and the two lowest are evicted.
 	std::vector<ShadowTileRequest> requests;
+
 	for (std::uint64_t key = 0; key < 6; ++key)
 	{
 		requests.push_back({ key, 512, 1, float(key) });
 	}
+
 	const auto allocations = atlas.Allocate(requests);
 	SWIM_CHECK(Valid(allocations, 1024));
 	SWIM_CHECK(allocations[0].Tiles.empty() && allocations[1].Tiles.empty());
+
 	for (std::size_t i = 2; i < 6; ++i)
 	{
 		SWIM_CHECK(allocations[i].Tiles.size() == 1 && allocations[i].Tiles.front().Size == 512 && !allocations[i].Downgraded);
 	}
+
 	SWIM_CHECK_EQUAL(atlas.GetStats().Evicted, 2u);
 
 	// Lower-priority lights that still fit at a smaller size are downgraded instead.
@@ -242,12 +255,15 @@ SWIM_TEST("Render.Shadows.Atlas", "RandomFramesStayValidAndMostlyStable")
 	std::uniform_int_distribution<int> countPick(0, 2);
 	std::uniform_real_distribution<float> priority(0.0f, 1.0f);
 	std::vector<ShadowTileRequest> requests;
+
 	for (std::uint64_t key = 0; key < 40; ++key)
 	{
 		const std::uint32_t counts[3]{ 1, 4, 6 };
 		requests.push_back({ key, 1u << sizeLog(random), counts[countPick(random)], priority(random) });
 	}
+
 	std::uint32_t reused = 0;
+
 	for (int frame = 0; frame < 20; ++frame)
 	{
 		// A few lights change size or priority each frame.
@@ -255,27 +271,33 @@ SWIM_TEST("Render.Shadows.Atlas", "RandomFramesStayValidAndMostlyStable")
 		{
 			auto& request = requests[std::size_t(random() % requests.size())];
 			request.Priority = priority(random);
+
 			if (random() % 2)
 			{
 				request.Size = 1u << sizeLog(random);
 			}
 		}
+
 		const auto allocations = atlas.Allocate(requests);
 		SWIM_CHECK(Valid(allocations, 4096));
 		const auto& stats = atlas.GetStats();
 		SWIM_CHECK_EQUAL(stats.Placed + stats.Evicted, stats.Requests);
 		std::uint64_t used = 0;
+
 		for (const auto& allocation : allocations)
 		{
 			used += std::uint64_t(allocation.Tiles.size()) * (allocation.Tiles.empty() ? 0 : allocation.Tiles.front().Size) *
 				(allocation.Tiles.empty() ? 0 : allocation.Tiles.front().Size);
 		}
+
 		SWIM_CHECK_EQUAL(stats.UsedTexels, used);
+
 		if (frame > 0)
 		{
 			reused += stats.Reused;
 		}
 	}
+
 	// Most unchanged lights keep their tiles.
 	SWIM_CHECK(reused > 19u * 20u);
 }

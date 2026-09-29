@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuLightBufferDesc
 	{
 		std::uint32_t MaxDirectionalLights = 4;
@@ -23,4 +24,5 @@ namespace Swim::Render
 		std::uint64_t LastUploadBytes = 0; // Rows plus the header, when it changed.
 		bool LastUploadHeader = false;
 	};
+
 } // namespace Swim::Render

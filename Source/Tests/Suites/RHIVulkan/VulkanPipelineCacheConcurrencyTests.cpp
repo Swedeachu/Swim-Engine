@@ -11,6 +11,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct BuildGate
 	{
 		std::mutex Mutex;
@@ -21,6 +22,7 @@ namespace
 		bool TimedOut = false;
 	};
 	BuildGate* gate = nullptr;
+
 }
 
 SWIM_TEST("RHI.Vulkan.PipelineCache", "ParallelBuildsShareCacheAndExportWaitsForHostUsers")
@@ -47,6 +49,7 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "ParallelBuildsShareCacheAndExportWaitsFor
 		{
 			VkGraphicsPipelineCreateInfo info{};
 			VkPipeline pipeline = VK_NULL_HANDLE;
+
 			if (RhiVulkan::CreateCachedVulkanGraphicsPipeline(*capture.State, info, pipeline) != VK_SUCCESS)
 			{
 				++failures;
@@ -66,10 +69,12 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "ParallelBuildsShareCacheAndExportWaitsFor
 	}
 	// An exclusive cache operation cannot enter while native builds hold shares.
 	const bool exclusive = capture.State->PipelineCache.Mutex.try_lock();
+
 	if (exclusive)
 	{
 		capture.State->PipelineCache.Mutex.unlock();
 	}
+
 	std::promise<void> exportStarted;
 	auto started = exportStarted.get_future();
 	auto exporter = std::async(std::launch::async, [&]()
@@ -105,6 +110,7 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "LossObservedWhileWaitingForCacheLockPreve
 	auto worker = std::async(std::launch::async, [&]()
 	{
 		started.set_value();
+
 		try
 		{
 			capture.Device->LoadPipelineCache(capture.EncodedData());
@@ -114,6 +120,7 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "LossObservedWhileWaitingForCacheLockPreve
 		{
 			return true;
 		}
+
 	});
 	waiting.wait();
 	RhiVulkan::ObserveVulkanResult(*capture.State, VK_ERROR_DEVICE_LOST, "another worker");

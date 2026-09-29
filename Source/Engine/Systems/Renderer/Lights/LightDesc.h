@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Punctual light types (glTF KHR_lights_punctual semantics). Directional lights
 	// affect everything and stay outside clustered light lists; point and spot
 	// lights are "local": bounded by Range, and what clustered assignment bins.
@@ -46,4 +47,5 @@ namespace Swim::Render
 	{
 		return type != LightType::Directional;
 	}
+
 } // namespace Swim::Render

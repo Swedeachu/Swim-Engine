@@ -67,6 +67,7 @@ namespace
 SWIM_TEST("RHI.Vulkan.Diagnostics", "RequiredValidationNeverFallsBackToUnvalidatedExecution")
 {
 	using Rhi::ValidationMode;
+
 	for (bool layers : { false, true })
 	{
 		for (bool debugUtils : { false, true })
@@ -76,6 +77,7 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "RequiredValidationNeverFallsBackToUnvalidat
 			SWIM_CHECK_EQUAL(policy.Validation, layers && debugUtils);
 		}
 	}
+
 	SWIM_CHECK(RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, true, { true, true }).Validation);
 	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Default, false, { true, true }).Validation);
 	SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(ValidationMode::Disabled, true, { true, true }).Validation);
@@ -236,11 +238,13 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "AdapterReportsDriverPropertiesWithoutAssumi
 		std::strcpy(props->properties.deviceName, "Test GPU");
 		props->properties.apiVersion = VK_MAKE_API_VERSION(0, 1, 3, 350);
 		props->properties.driverVersion = 0x12345678;
+
 		for (std::size_t axis = 0; axis < 3; ++axis)
 		{
 			props->properties.limits.maxComputeWorkGroupCount[axis] = 65535 - static_cast<std::uint32_t>(axis);
 			props->properties.limits.maxComputeWorkGroupSize[axis] = 1024 >> axis;
 		}
+
 		props->properties.limits.maxComputeWorkGroupInvocations = 1024;
 		props->properties.limits.maxVertexInputBindings = 16;
 		props->properties.limits.maxVertexInputAttributes = 32;
@@ -248,6 +252,7 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "AdapterReportsDriverPropertiesWithoutAssumi
 		props->properties.limits.maxVertexInputAttributeOffset = 2047;
 		props->properties.vendorID = 0x1234;
 		props->properties.deviceID = 0x5678;
+
 		for (auto* item = static_cast<VkBaseOutStructure*>(props->pNext); item; item = item->pNext)
 		{
 			if (item->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES)
@@ -265,11 +270,13 @@ SWIM_TEST("RHI.Vulkan.Diagnostics", "AdapterReportsDriverPropertiesWithoutAssumi
 	SWIM_CHECK_EQUAL(info.DriverInfo, std::string("Test driver build"));
 	SWIM_CHECK_EQUAL(info.ApiVersion, std::string("1.3.350"));
 	SWIM_CHECK_EQUAL(info.DriverVersion, 0x12345678u);
+
 	for (std::size_t axis = 0; axis < 3; ++axis)
 	{
 		SWIM_CHECK_EQUAL(info.Capabilities.Compute.MaxGroupCount[axis], 65535 - static_cast<std::uint32_t>(axis));
 		SWIM_CHECK_EQUAL(info.Capabilities.Compute.MaxGroupSize[axis], 1024u >> axis);
 	}
+
 	SWIM_CHECK_EQUAL(info.Capabilities.Compute.MaxInvocations, 1024u);
 	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxBindings, 16u);
 	SWIM_CHECK_EQUAL(info.Capabilities.VertexInput.MaxAttributes, 32u);

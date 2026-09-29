@@ -7,7 +7,9 @@ namespace Engine
 
 	namespace
 	{
+
 		using Swim::Render::RenderObjectHandle;
+
 	}
 
 	RenderExtractor::RenderExtractor(
@@ -63,10 +65,12 @@ namespace Engine
 	RenderObjectHandle RenderExtractor::Find(entt::entity entity, std::uint32_t subObject) const
 	{
 		const auto found = entities.find(entity);
+
 		if (found == entities.end() || subObject >= found->second.Parts.size())
 		{
 			return {};
 		}
+
 		const auto object = found->second.Parts[subObject].Object;
 		return gpuScene.IsValid(object) ? object : RenderObjectHandle{};
 	}
@@ -77,11 +81,14 @@ namespace Engine
 		{
 			return false;
 		}
+
 		std::optional<Swim::Render::ResolvedRenderMesh> mesh;
+
 		if (resolveMesh && part.Source.Mesh)
 		{
 			mesh = resolveMesh(part.Source.Mesh);
 		}
+
 		if (mesh)
 		{
 			gpuScene.SetMesh(part.Object, mesh->Mesh, mesh->LocalBounds);
@@ -90,6 +97,7 @@ namespace Engine
 		{
 			gpuScene.SetMesh(part.Object, {}, Swim::Render::RenderBounds::Infinite());
 		}
+
 		part.MeshResolved = mesh.has_value();
 		return part.MeshResolved;
 	}
@@ -105,28 +113,34 @@ namespace Engine
 		desc.SkinIndex = renderer.SkinIndex;
 		desc.LodBias = renderer.LodBias;
 		const auto object = gpuScene.TryCreate(desc);
+
 		if (!object)
 		{
 			++stats.CapacityFailures;
 			return false;
 		}
+
 		part.Object = *object;
 		++liveObjects;
 		++stats.ObjectsCreated;
+
 		if (ResolvePart(part))
 		{
 			++stats.MeshesResolved;
 		}
+
 		return true;
 	}
 
 	void RenderExtractor::DestroyEntity(entt::entity entity, Swim::Rhi::TimelinePoint lastUse, RenderExtractionStats& stats)
 	{
 		const auto found = entities.find(entity);
+
 		if (found == entities.end())
 		{
 			return;
 		}
+
 		for (const auto& part : found->second.Parts)
 		{
 			if (gpuScene.Destroy(part.Object, lastUse))
@@ -135,6 +149,7 @@ namespace Engine
 				++stats.ObjectsDestroyed;
 			}
 		}
+
 		entities.erase(found);
 		pendingMeshes.erase(entity);
 		++stats.EntitiesDestroyed;
@@ -153,28 +168,36 @@ namespace Engine
 				--liveObjects;
 				++stats.ObjectsDestroyed;
 			}
+
 			state.Parts.pop_back();
 		}
+
 		bool unresolved = false;
+
 		for (std::size_t index = 0; index < renderer.Parts.size(); ++index)
 		{
 			if (index == state.Parts.size())
 			{
 				state.Parts.push_back({ {}, renderer.Parts[index], false });
 			}
+
 			auto& part = state.Parts[index];
+
 			if (!gpuScene.IsValid(part.Object))
 			{
 				part.Source = renderer.Parts[index];
+
 				if (!CreatePart(entity, renderer, world, part, stats))
 				{
 					unresolved = true;
 					continue;
 				}
+
 				++stats.TransformsWritten;
 				unresolved = unresolved || !part.MeshResolved;
 				continue;
 			}
+
 			const bool meshChanged = part.Source.Mesh != renderer.Parts[index].Mesh;
 			part.Source = renderer.Parts[index];
 			gpuScene.SetMaterialSet(part.Object, part.Source.MaterialSet);
@@ -183,6 +206,7 @@ namespace Engine
 			gpuScene.SetLodBias(part.Object, renderer.LodBias);
 			gpuScene.SetTransform(part.Object, world);
 			++stats.TransformsWritten;
+
 			if (meshChanged || !part.MeshResolved)
 			{
 				if (ResolvePart(part))
@@ -190,9 +214,11 @@ namespace Engine
 					++stats.MeshesResolved;
 				}
 			}
+
 			unresolved = unresolved || !part.MeshResolved;
 			++stats.ObjectsUpdated;
 		}
+
 		if (unresolved)
 		{
 			pendingMeshes.insert(entity);
@@ -210,6 +236,7 @@ namespace Engine
 		// Removals first, so a component removed and re-added this frame is rebuilt.
 		auto removed = std::move(destroyed);
 		destroyed.clear();
+
 		for (const auto entity : removed)
 		{
 			DestroyEntity(entity, lastUse, stats);
@@ -220,19 +247,23 @@ namespace Engine
 		auto order = std::move(changedOrder);
 		changedOrder.clear();
 		std::unordered_set<entt::entity> updates;
+
 		for (const auto entity : order)
 		{
 			if (!changed.erase(entity))
 			{
 				continue;
 			}
+
 			updates.insert(entity);
 			const auto* renderer = registry.valid(entity) ? registry.try_get<MeshRenderer>(entity) : nullptr;
+
 			if (!renderer)
 			{
 				DestroyEntity(entity, lastUse, stats);
 				continue;
 			}
+
 			Reconcile(entity, *renderer, lastUse, stats);
 			++stats.EntitiesChanged;
 		}
@@ -244,12 +275,16 @@ namespace Engine
 			{
 				continue; // Reconcile already wrote this frame's transform.
 			}
+
 			const auto found = entities.find(entity);
+
 			if (found == entities.end())
 			{
 				continue;
 			}
+
 			const auto world = WorldOf(entity);
+
 			for (const auto& part : found->second.Parts)
 			{
 				if (gpuScene.SetTransform(part.Object, world))
@@ -262,12 +297,14 @@ namespace Engine
 		if (refreshMeshes)
 		{
 			refreshMeshes = false;
+
 			for (auto& [entity, state] : entities)
 			{
 				for (auto& part : state.Parts)
 				{
 					part.MeshResolved = false;
 				}
+
 				pendingMeshes.insert(entity);
 			}
 		}
@@ -278,12 +315,15 @@ namespace Engine
 			const auto entity = *it;
 			auto found = entities.find(entity);
 			const auto* renderer = registry.valid(entity) ? registry.try_get<MeshRenderer>(entity) : nullptr;
+
 			if (found == entities.end() || !renderer)
 			{
 				it = pendingMeshes.erase(it);
 				continue;
 			}
+
 			bool unresolved = false;
+
 			for (auto& part : found->second.Parts)
 			{
 				if (!gpuScene.IsValid(part.Object))
@@ -293,18 +333,21 @@ namespace Engine
 						unresolved = true;
 						continue;
 					}
+
 					++stats.TransformsWritten;
 				}
 				else if (!part.MeshResolved && ResolvePart(part))
 				{
 					++stats.MeshesResolved;
 				}
+
 				if (!part.MeshResolved)
 				{
 					unresolved = true;
 					++stats.PendingMeshes;
 				}
 			}
+
 			it = unresolved ? std::next(it) : pendingMeshes.erase(it);
 		}
 
@@ -322,6 +365,7 @@ namespace Engine
 				gpuScene.Destroy(part.Object, lastUse);
 			}
 		}
+
 		entities.clear();
 		liveObjects = 0;
 		changed.clear();

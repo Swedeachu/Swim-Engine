@@ -15,10 +15,12 @@
 
 namespace
 {
+
 	struct CompileOnlyAsset
 	{
 		int Value = 0;
 	};
 
 	[[maybe_unused]] Swim::Assets::AssetHandle<CompileOnlyAsset> Handle;
+
 } // namespace

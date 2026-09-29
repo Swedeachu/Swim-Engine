@@ -15,12 +15,16 @@
 
 namespace Swim::Jobs
 {
+
 	class JobSystem;
+
 }
 
 namespace Swim::Platform
 {
+
 	class FileSystem;
+
 }
 
 namespace Swim::IO
@@ -82,22 +86,30 @@ namespace Swim::IO
 
 	namespace Detail
 	{
+
 		struct IoRequestState;
+
 	}
 
 	class ReadRequest
 	{
+
 	public:
 
 		ReadRequest() = default;
 
 		bool IsValid() const;
+
 		IoStatus GetStatus() const;
+
 		bool IsComplete() const;
+
 		bool IsCancellationRequested() const;
+
 		void RequestCancel() const;
 
 		const IoReadResult& GetResult() const;
+
 		const std::string& GetErrorMessage() const;
 
 		explicit operator bool() const { return IsValid(); }
@@ -112,22 +124,28 @@ namespace Swim::IO
 		std::shared_ptr<Detail::IoRequestState> state;
 
 		friend class AsyncIoService;
+
 	};
 
 	class AsyncIoService
 	{
+
 	public:
 
 		using CompletionCallback = std::function<void(const ReadRequest&)>;
 
 		AsyncIoService();
+
 		~AsyncIoService();
 
 		AsyncIoService(const AsyncIoService&) = delete;
+
 		AsyncIoService& operator=(const AsyncIoService&) = delete;
 
 		bool Initialize(Platform::FileSystem& fileSystem, Jobs::JobSystem& jobs);
+
 		void Shutdown(IoShutdownMode mode = IoShutdownMode::Drain);
+
 		bool IsRunning() const;
 
 		ReadRequest ReadFileAsync(
@@ -135,12 +153,14 @@ namespace Swim::IO
 			const IoReadOptions& options = {},
 			CompletionCallback completion = {}
 		);
+
 		ReadRequest ReadRangeAsync(
 			const std::filesystem::path& path,
 			IoReadRange range,
 			const IoReadOptions& options = {},
 			CompletionCallback completion = {}
 		);
+
 		ReadRequest ReadRangesAsync(
 			const std::filesystem::path& path,
 			std::span<const IoReadRange> ranges,
@@ -156,12 +176,15 @@ namespace Swim::IO
 		// Explicitly blocking entrypoints are for bootstrap, tools and tests only.
 		// Runtime asset/streaming code should use the async request path above.
 		IoReadResult ReadFileBlocking(const std::filesystem::path& path) const;
+
 		IoReadResult ReadRangeBlocking(const std::filesystem::path& path, IoReadRange range) const;
+
 		IoReadResult ReadRangesBlocking(
 			const std::filesystem::path& path,
 			std::span<const IoReadRange> ranges,
 			std::uint64_t maxCoalesceGapBytes = 0
 		) const;
+
 		Platform::MappedFile MapFileReadOnlyBlocking(const std::filesystem::path& path) const;
 
 		// Waiting is deliberately explicit and intended for bootstrap/tools/tests.
@@ -180,6 +203,7 @@ namespace Swim::IO
 
 		struct Impl;
 		std::unique_ptr<Impl> impl;
+
 	};
 
 }

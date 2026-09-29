@@ -8,9 +8,11 @@
 
 namespace Engine
 {
+
 	std::array<float, 16> ToRowMajor(const glm::mat4& matrix)
 	{
 		std::array<float, 16> rows{};
+
 		for (int row = 0; row < 4; ++row)
 		{
 			for (int column = 0; column < 4; ++column)
@@ -18,6 +20,7 @@ namespace Engine
 				rows[static_cast<std::size_t>(row * 4 + column)] = matrix[column][row];
 			}
 		}
+
 		return rows;
 	}
 
@@ -44,10 +47,12 @@ namespace Engine
 		position = eye;
 		const glm::vec3 direction = target - eye;
 		const float length = glm::length(direction);
+
 		if (length <= 1e-6f)
 		{
 			return;
 		}
+
 		const glm::vec3 forward = direction / length;
 		SetYawPitch(glm::degrees(std::atan2(-forward.x, -forward.z)), glm::degrees(std::asin(std::clamp(forward.y, -1.0f, 1.0f))));
 	}
@@ -58,6 +63,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("Camera field of view must be 1 .. 170 degrees");
 		}
+
 		fieldOfView = degrees;
 	}
 
@@ -67,6 +73,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("Camera clip planes need 0 < near < far");
 		}
+
 		nearPlane = nearValue;
 		farPlane = farValue;
 	}
@@ -132,11 +139,13 @@ namespace Engine
 	{
 		CameraRay ray;
 		ray.Origin = position;
+
 		if (width <= 0.0f || height <= 0.0f)
 		{
 			ray.Direction = GetForward();
 			return ray;
 		}
+
 		const float ndcX = 2.0f * x / width - 1.0f;
 		const float ndcY = 1.0f - 2.0f * y / height;
 		const float tanHalf = std::tan(glm::radians(fieldOfView) * 0.5f);
@@ -150,6 +159,7 @@ namespace Engine
 		{
 			return glm::vec2(0.0f);
 		}
+
 		return { 2.0f * x / width - 1.0f, 1.0f - 2.0f * y / height };
 	}
 
@@ -162,10 +172,12 @@ namespace Engine
 	{
 		const glm::vec3 view = glm::vec3(GetViewMatrix() * glm::vec4(world, 1.0f));
 		const float depth = -view.z;
+
 		if (!(depth > 1.0e-6f) || width <= 0.0f || height <= 0.0f)
 		{
 			return std::nullopt;
 		}
+
 		const float tanHalf = std::tan(glm::radians(fieldOfView) * 0.5f);
 		const glm::vec2 ndc(view.x / (depth * tanHalf * aspect), view.y / (depth * tanHalf));
 		const glm::vec2 pixel = NdcToScreen(ndc, width, height);
@@ -184,4 +196,5 @@ namespace Engine
 		const float along = glm::dot(ray.Direction, GetForward());
 		return ray.Origin + ray.Direction * (along > 1.0e-6f ? depth / along : depth);
 	}
+
 } // namespace Engine

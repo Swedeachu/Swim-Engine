@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	enum class GpuViewFlags : std::uint32_t
 	{
 		None = 0,
@@ -47,4 +48,5 @@ namespace Swim::Render
 
 	static_assert(sizeof(GpuViewRecord) == 192);
 	static_assert(offsetof(GpuViewRecord, CameraPosition) == 160);
+
 } // namespace Swim::Render

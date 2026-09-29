@@ -12,8 +12,11 @@ namespace Swim::Testing
 	struct VulkanMemoryBudgetCapture
 	{
 		explicit VulkanMemoryBudgetCapture(bool driverBudget = true);
+
 		~VulkanMemoryBudgetCapture();
+
 		VmaAllocation Allocate(std::uint64_t bytes, std::uint32_t memoryType = 0, bool dedicated = true);
+
 		void Free(VmaAllocation allocation);
 
 		std::shared_ptr<RhiVulkan::VulkanDeviceState> State = std::make_shared<RhiVulkan::VulkanDeviceState>();
@@ -27,6 +30,7 @@ namespace Swim::Testing
 		bool LoseDuringQuery = false;
 
 	private:
+
 		std::vector<VmaAllocation> allocations;
 	};
 

@@ -19,6 +19,7 @@ namespace Swim::RhiVulkan
 				{
 					throw std::invalid_argument("Vulkan buffer state requires matching creation usage");
 				}
+
 				remaining &= ~static_cast<std::uint32_t>(flag);
 				result.Stages |= stages;
 				result.Access |= access;
@@ -42,11 +43,13 @@ namespace Swim::RhiVulkan
 			VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 		add(Rhi::ResourceState::HostRead, Rhi::BufferUsage::None, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
 		add(Rhi::ResourceState::HostWrite, Rhi::BufferUsage::None, VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_WRITE_BIT);
+
 		if (remaining != 0 || (Rhi::HasAny(state, Rhi::ResourceState::HostRead) && desc.Memory != Rhi::MemoryPreference::GpuToCpu) ||
 			(Rhi::HasAny(state, Rhi::ResourceState::HostWrite) && desc.Memory != Rhi::MemoryPreference::CpuToGpu))
 		{
 			throw std::invalid_argument("Unsupported Vulkan buffer state or CPU access policy");
 		}
+
 		return result;
 	}
 
@@ -54,6 +57,7 @@ namespace Swim::RhiVulkan
 	{
 		Rhi::TextureUsage usage = Rhi::TextureUsage::None;
 		VulkanResourceState result{};
+
 		switch (static_cast<std::uint32_t>(state))
 		{
 		case static_cast<std::uint32_t>(Rhi::ResourceState::Undefined):
@@ -92,12 +96,14 @@ namespace Swim::RhiVulkan
 			usage = Rhi::TextureUsage::DepthStencilAttachment;
 			result = { VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
 				VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL };
+
 			if (Rhi::HasAny(state, Rhi::ResourceState::ShaderRead))
 			{
 				usage = usage | Rhi::TextureUsage::Sampled;
 				result.Stages |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 				result.Access |= VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
 			}
+
 			break;
 		case static_cast<std::uint32_t>(Rhi::ResourceState::DepthStencilWrite):
 		case static_cast<std::uint32_t>(Rhi::ResourceState::DepthStencilRead | Rhi::ResourceState::DepthStencilWrite):
@@ -111,6 +117,7 @@ namespace Swim::RhiVulkan
 		default:
 			throw std::invalid_argument("Unsupported or incompatible Vulkan texture state combination");
 		}
+
 		if ((Rhi::EnumAnd(desc.Usage, usage) != usage) ||
 			(Rhi::HasAny(state, Rhi::ResourceState::ColorAttachment) && Rhi::IsDepthFormat(desc.PixelFormat)) ||
 			(Rhi::HasAny(state, Rhi::ResourceState::DepthStencilRead | Rhi::ResourceState::DepthStencilWrite) &&
@@ -118,6 +125,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::invalid_argument("Vulkan texture state requires matching creation usage and format");
 		}
+
 		return result;
 	}
 

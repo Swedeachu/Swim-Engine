@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	inline constexpr std::uint32_t MaxAoSlices = 4;
 	inline constexpr std::uint32_t MaxAoSteps = 8;
 	inline constexpr std::uint32_t MaxReflectionSteps = 256;
@@ -101,4 +102,5 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for values outside the ranges above.
 	void ValidateScreenSpaceSettings(const ScreenSpaceSettings& settings);
+
 } // namespace Swim::Render

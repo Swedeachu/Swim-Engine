@@ -4,6 +4,7 @@
 
 namespace Engine
 {
+
 	TagRegistry::TagRegistry()
 	{
 		for (const std::string_view name : { "World", "Static", "Dynamic", "Physics", "Light", "Camera", "Player", "Projectile", "Trigger",
@@ -19,12 +20,15 @@ namespace Engine
 		{
 			throw std::invalid_argument("Tag names must not be empty");
 		}
+
 		const TagId tag = MakeTag(name);
 		const auto [it, inserted] = names.emplace(tag.Value, std::string(name));
+
 		if (!inserted && it->second != name)
 		{
 			throw std::logic_error("Tag '" + std::string(name) + "' collides with '" + it->second + "'");
 		}
+
 		return tag;
 	}
 
@@ -38,4 +42,5 @@ namespace Engine
 	{
 		return names.contains(tag.Value);
 	}
+
 } // namespace Engine

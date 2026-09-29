@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contracts (space 0) of the particle programs. The compute programs run
 	// 64-thread groups along x with one group row per emitter (y); the finalize pass
 	// runs one group per emitter.
@@ -49,4 +50,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t BindlessSamplers = 0; // SamplerState[].
 		static constexpr std::uint32_t BindlessTextures = 1; // Texture2D<float4>[].
 	};
+
 } // namespace Swim::Render

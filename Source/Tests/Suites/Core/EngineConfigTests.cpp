@@ -12,10 +12,12 @@ namespace
 	{
 		std::vector<char*> argv;
 		argv.reserve(args.size());
+
 		for (std::string& arg : args)
 		{
 			argv.push_back(arg.data());
 		}
+
 		return Engine::ParseEngineConfigArgs(static_cast<int>(argv.size()), argv.data());
 	}
 

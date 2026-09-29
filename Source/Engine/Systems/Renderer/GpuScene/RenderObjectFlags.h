@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Per-object flags stored in GpuInstanceRecord::Flags. The low 16 bits belong
 	// to producers; GpuScene owns the high bits and keeps them consistent.
 	enum class RenderObjectFlags : std::uint32_t
@@ -37,4 +38,5 @@ namespace Swim::Render
 	{
 		return (static_cast<std::uint32_t>(value) & static_cast<std::uint32_t>(mask)) != 0;
 	}
+
 } // namespace Swim::Render

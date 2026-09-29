@@ -9,6 +9,7 @@
 
 namespace Swim::Animation
 {
+
 	// A named attachment point: a joint plus a local offset (weapons, effects).
 	struct Socket
 	{
@@ -25,7 +26,9 @@ namespace Swim::Animation
 	// previous update's palette and morph weights for motion vectors.
 	class SkeletonInstance
 	{
+
 	  public:
+
 		explicit SkeletonInstance(std::shared_ptr<const Skeleton> skeleton);
 
 		// Moves the current palette/weights to previous (or copies the new ones there
@@ -54,6 +57,7 @@ namespace Swim::Animation
 		Matrix4 GetSocketTransform(const Socket& socket) const;
 
 	  private:
+
 		std::shared_ptr<const Skeleton> skeleton;
 		std::vector<Matrix4> model;
 		std::vector<Matrix3x4> skinning;
@@ -62,5 +66,7 @@ namespace Swim::Animation
 		std::vector<float> previousMorphWeights;
 		std::uint64_t updates = 0;
 		bool historyValid = false;
+
 	};
+
 } // namespace Swim::Animation

@@ -13,6 +13,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	// Post-processing on the mock device: imported source and output textures and the
 	// six programs with their reflected-style interfaces.
 	struct PostWorld
@@ -28,10 +29,12 @@ namespace
 			const auto schema = [](Testing::MockPipelineLayout& layout, std::initializer_list<std::pair<std::uint32_t, T>> bindings)
 			{
 				Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 				for (const auto& [binding, type] : bindings)
 				{
 					space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 				}
+
 				layout.program.Interface.DescriptorSchemas = { space };
 			};
 			schema(histogramLayout,
@@ -45,6 +48,7 @@ namespace
 			schema(upLayout,
 				{ { PostBloomUpsampleBindings::Low, T::SampledTexture }, { PostBloomUpsampleBindings::High, T::SampledTexture },
 					{ PostBloomUpsampleBindings::Destination, T::StorageTexture } });
+
 			for (auto* layout : { &compositeLayout, &compositeHdrLayout })
 			{
 				schema(*layout,
@@ -53,6 +57,7 @@ namespace
 						{ PostCompositeBindings::Params, T::ReadOnlyStorageBuffer },
 						{ PostCompositeBindings::Output, T::StorageTexture } });
 			}
+
 			Rhi::TextureDesc sourceDesc;
 			sourceDesc.Extent = { Width, Height, 1 };
 			sourceDesc.PixelFormat = Rhi::Format::RGBA16Float;
@@ -100,6 +105,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -107,12 +113,14 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
 		template <typename T> std::vector<T> Pushes() const
 		{
 			std::vector<T> result;
+
 			for (const auto& push : Commands("PushConstants"))
 			{
 				if (push.Data.size() == sizeof(T))
@@ -122,6 +130,7 @@ namespace
 					result.push_back(value);
 				}
 			}
+
 			return result;
 		}
 
@@ -131,6 +140,7 @@ namespace
 		Testing::MockComputePipeline histogramPipeline, exposurePipeline, downPipeline, upPipeline, compositePipeline, compositeHdrPipeline;
 		std::unique_ptr<Rhi::Texture> source, sdrOutput, hdrOutput;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.PostProcessor", "RecordsHistogramExposureBloomChainsAndComposite")
@@ -147,12 +157,14 @@ SWIM_TEST("Render.PostProcessor", "RecordsHistogramExposureBloomChainsAndComposi
 	SWIM_CHECK_EQUAL(resources.BloomLevels, 5u); // 32 -> 16, 8, 4, 2, 1.
 	SWIM_REQUIRE_EQUAL(resources.BloomDown.size(), std::size_t(5));
 	SWIM_REQUIRE_EQUAL(resources.BloomUp.size(), std::size_t(4));
+
 	for (std::uint32_t i = 0; i < 5; ++i)
 	{
 		const auto& level = graph.GetDesc(resources.BloomDown[i]);
 		SWIM_CHECK(level.Extent.Width == (64u >> (i + 1)) && level.Extent.Height == (32u >> (i + 1)));
 		SWIM_CHECK(level.PixelFormat == Rhi::Format::RGBA16Float);
 	}
+
 	SWIM_CHECK_EQUAL(graph.GetDesc(resources.BloomUp[0]).Extent.Width, 32u);
 	SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Histogram).Size, std::uint64_t(1024));
 	SWIM_CHECK_EQUAL(resources.ParamsRecord.BloomEnabled, 1u);
@@ -187,6 +199,7 @@ SWIM_TEST("Render.PostProcessor", "RecordsHistogramExposureBloomChainsAndComposi
 	SWIM_CHECK(downs[0].Threshold == settings.Bloom.Threshold && downs[0].Knee == settings.Bloom.Knee);
 	// 16-byte pushes: histogram, upsamples (from the smallest level up), composite.
 	std::vector<std::array<std::uint32_t, 4>> small;
+
 	for (const auto& push : world.Commands("PushConstants"))
 	{
 		if (push.Data.size() == 16)
@@ -196,6 +209,7 @@ SWIM_TEST("Render.PostProcessor", "RecordsHistogramExposureBloomChainsAndComposi
 			small.push_back(v);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(small.size(), std::size_t(6));
 	SWIM_CHECK((small[1] == std::array<std::uint32_t, 4>{ 2, 1, 4, 2 }));	  // Level 3 (4x2) <- level 4 (2x1).
 	SWIM_CHECK((small[4] == std::array<std::uint32_t, 4>{ 16, 8, 32, 16 }));  // Level 0 <- level 1.

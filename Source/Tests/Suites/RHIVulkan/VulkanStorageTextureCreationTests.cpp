@@ -17,35 +17,44 @@ SWIM_TEST("RHI.Vulkan.StorageTextureCreation", "ChecksWholeUsageCombinationAndNa
 	SWIM_CHECK_EQUAL(capture.ImageQueries, 1u);
 	SWIM_CHECK_EQUAL(capture.ImageFormat, VK_FORMAT_R32G32B32A32_SFLOAT);
 	SWIM_CHECK_EQUAL(capture.ImageUsage, static_cast<VkImageUsageFlags>(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+
 	for (std::uint32_t invalid = 0; invalid < 6; ++invalid)
 	{
 		auto bad = desc;
+
 		if (invalid == 0)
 		{
 			bad.Extent.Width = 129;
 		}
+
 		if (invalid == 1)
 		{
 			bad.Extent.Height = 129;
 		}
+
 		if (invalid == 2)
 		{
 			bad.Extent.Depth = 2;
 		}
+
 		if (invalid == 3)
 		{
 			bad.MipLevels = 9;
 		}
+
 		if (invalid == 4)
 		{
 			bad.ArrayLayers = 9;
 		}
+
 		if (invalid == 5)
 		{
 			bad.MipLevels = 8; // Native max allows eight, but a 64x32 image only has seven.
 		}
+
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, bad));
 	}
+
 	capture.ImageProperties.sampleCounts = 0;
 	SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	capture.ImageProperties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
@@ -59,18 +68,22 @@ SWIM_TEST("RHI.Vulkan.StorageTextureCreation", "FormatsMultisamplingDimensionsAn
 	Rhi::TextureDesc desc;
 	desc.Extent = { 32, 32, 1 };
 	desc.Usage = Rhi::TextureUsage::Storage;
+
 	for (auto format : { Rhi::Format::Undefined, Rhi::Format::D32Float, Rhi::Format::RGBA8UnormSrgb,
 		Rhi::Format::BC7Unorm, Rhi::Format::BGRA8Unorm })
 	{
 		desc.PixelFormat = format;
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	}
+
 	desc.PixelFormat = Rhi::Format::RGBA32Float;
+
 	for (auto dimension : { Rhi::TextureDimension::Texture1D, Rhi::TextureDimension::Texture3D })
 	{
 		desc.Dimension = dimension;
 		SWIM_CHECK(!RhiVulkan::ValidateVulkanStorageTexture(*capture.State, desc));
 	}
+
 	// Cube-compatible storage (environment maps) must be square with whole cubes of layers.
 	desc.Dimension = Rhi::TextureDimension::TextureCube;
 	desc.ArrayLayers = 5;

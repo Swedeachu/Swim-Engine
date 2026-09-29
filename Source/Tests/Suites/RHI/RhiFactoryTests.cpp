@@ -10,7 +10,9 @@ namespace
 
 	class TestGraphicsSystem final : public Swim::Rhi::GraphicsSystem
 	{
+
 	public:
+
 		std::uint32_t GetAdapterCount() const override
 		{
 			return 0;
@@ -20,6 +22,7 @@ namespace
 		{
 			std::terminate();
 		}
+
 	};
 
 	std::unique_ptr<Swim::Rhi::GraphicsSystem> CreateTestGraphicsSystem(const Swim::Rhi::GraphicsSystemDesc&)
@@ -66,6 +69,7 @@ SWIM_TEST("RHI.Factory", "PassesDiagnosticsConfigurationToSelectedBackend")
 				desc.Diagnostics->Record(Swim::Rhi::DiagnosticSeverity::Info, "factory", "received options");
 				return std::make_unique<TestGraphicsSystem>();
 			}
+
 			return nullptr;
 		}));
 	Swim::Rhi::GraphicsSystemDesc desc{};

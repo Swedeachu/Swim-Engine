@@ -14,6 +14,7 @@
 
 namespace
 {
+
 	namespace R = Swim::Render;
 	namespace S = Swim::Rhi;
 
@@ -57,6 +58,7 @@ namespace
 			auto& program = programs[name];
 			auto layout = std::make_unique<Swim::Testing::MockPipelineLayout>();
 			S::DescriptorSchemaDesc space{ 0, {} };
+
 			for (std::uint32_t i = 0; i < slots.size(); ++i)
 			{
 				S::DescriptorBindingDesc binding{ i, slots[i].Type, 1, S::ShaderStageMask::Compute };
@@ -64,6 +66,7 @@ namespace
 				space.Bindings.push_back(binding);
 				program.Bindings.push_back({ slots[i].Name, 0, i, slots[i].Type, slots[i].Format });
 			}
+
 			layout->program.Interface.DescriptorSchemas = { space };
 			layout->program.Interface.PushConstants = { { 0, 128, S::ShaderStageMask::Compute } };
 			program.Layout = std::move(layout);
@@ -114,6 +117,7 @@ namespace
 			fixture.executor->Wait();
 			std::vector<std::pair<std::string, std::uint32_t>> dispatches;
 			std::size_t next = 0;
+
 			for (const auto& command : *fixture.device.Commands)
 			{
 				if (command.Kind == "Dispatch")
@@ -122,6 +126,7 @@ namespace
 					++next;
 				}
 			}
+
 			return dispatches;
 		}
 
@@ -131,6 +136,7 @@ namespace
 		Engine::RenderFeatureView view;
 		Engine::RenderSettings settings;
 	};
+
 } // namespace
 
 SWIM_TEST("Engine.CameraEffects", "ThinLensCircleOfConfusion")
@@ -165,6 +171,7 @@ SWIM_TEST("Engine.CameraEffects", "LensGeometryFitsTheFrame")
 		const float mid = L::SourceRadius(0.5f, k1, 0.0f, 0.0f) / zoom;
 		SWIM_CHECK(k1 > 0.0f ? mid < 0.5f : mid > 0.5f);
 	}
+
 	// A full fisheye magnifies the centre and keeps the corners.
 	SWIM_CHECK(L::SourceRadius(0.2f, 0.0f, 0.0f, 1.0f) < 0.2f);
 	SWIM_CHECK(std::abs(L::FitZoom(0.0f, 0.0f, 1.0f) - 1.0f) < 1.0e-5f);
@@ -172,6 +179,7 @@ SWIM_TEST("Engine.CameraEffects", "LensGeometryFitsTheFrame")
 	for (const float k1 : { -0.3f, 0.3f })
 	{
 		float previous = 0.0f;
+
 		for (int i = 1; i <= 100; ++i)
 		{
 			const float r = float(i) / 100.0f;
@@ -190,6 +198,7 @@ SWIM_TEST("Engine.CameraEffects", "PresetsArePhysicalSubtleAndDistinct")
 	SWIM_CHECK(off.Temperature == 0.0f && off.Contrast == 1.0f && off.Saturation == 1.0f);
 
 	std::set<std::string> names;
+
 	for (std::uint32_t p = 1; p < Engine::CameraPresetCount; ++p)
 	{
 		const auto preset = static_cast<Engine::CameraPreset>(p);
@@ -209,6 +218,7 @@ SWIM_TEST("Engine.CameraEffects", "PresetsArePhysicalSubtleAndDistinct")
 		// Film has halation, digital does not.
 		SWIM_CHECK((s.Optics.Halation > 0.0f) == look.Film);
 	}
+
 	SWIM_CHECK_EQUAL(names.size(), std::size_t(Engine::CameraPresetCount - 1));
 
 	// Derived, not tabled: older and faster lenses vignette and fringe more; grain grows with ISO.
@@ -313,8 +323,10 @@ SWIM_TEST("Engine.GravitationalLensing", "GeodesicsCastTheShadowAndBendLikeEinst
 		const float expected = 2.0f / b + 15.0f * 3.14159265f / 16.0f / (b * b);
 		SWIM_CHECK(std::abs(angle - expected) < 0.06f * expected);
 	}
+
 	// Bending grows monotonically inward (no seams in the image).
 	float previous = 0.0f;
+
 	for (const float b : { 40.0f, 20.0f, 10.0f, 6.0f, 4.0f, 3.0f })
 	{
 		const auto t = trace(b);
@@ -337,35 +349,42 @@ SWIM_TEST("Engine.GravitationalLensing", "TheGasOrbitsInATorusAndRings")
 	float inPlane = 0.0f;
 	float above = 0.0f;
 	lens.Orbits = 0;
+
 	for (int i = 0; i < 64; ++i)
 	{
 		const float a = float(i) * 0.0981748f;
 		inPlane += L::GasDensityAt({ 5.0f * std::cos(a), 0.0f, 5.0f * std::sin(a) }, 0.0f, lens);
 		above += L::GasDensityAt({ 5.0f * std::cos(a), 3.0f, 5.0f * std::sin(a) }, 0.0f, lens);
 	}
+
 	SWIM_CHECK(inPlane > 0.5f);
 	SWIM_CHECK(above < 0.2f * inPlane);
 	// It flows: the field at a point changes with time, and a tilted axis tilts it.
 	float change = 0.0f;
+
 	for (int i = 0; i < 16; ++i)
 	{
 		const L::Float3 point{ 4.5f * std::cos(float(i)), 0.1f, 4.5f * std::sin(float(i)) };
 		change += std::abs(L::GasDensityAt(point, 0.0f, lens) - L::GasDensityAt(point, 0.7f, lens));
 	}
+
 	SWIM_CHECK(change > 0.05f);
 	// The rings add gas off the disk plane (on their inclined orbits).
 	lens.Orbits = 3;
 	float ringGas = 0.0f;
+
 	for (int i = 0; i < 400; ++i)
 	{
 		const float u = float(i) * 0.61803f;
 		const float v = float(i) * 0.137f;
 		const L::Float3 point{ 5.0f * std::cos(u) * std::cos(v), 5.0f * std::sin(v), 5.0f * std::sin(u) * std::cos(v) };
+
 		if (std::abs(point[1]) > 2.5f)
 		{
 			ringGas += L::GasDensityAt(point, 0.0f, lens);
 		}
 	}
+
 	SWIM_CHECK(ringGas > 0.1f);
 	lens.GasDensity = 0.0f;
 	SWIM_CHECK(L::GasDensityAt({ 5.0f, 0.0f, 0.0f }, 0.0f, lens) == 0.0f);

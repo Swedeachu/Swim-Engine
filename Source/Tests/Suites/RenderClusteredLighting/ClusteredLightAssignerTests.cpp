@@ -12,6 +12,7 @@ namespace Scene = Swim::Testing::ClusterScene;
 
 namespace
 {
+
 	struct AssignerWorld
 	{
 		AssignerWorld() : lights(fixture.device, { 2, 64, "Test lights" })
@@ -21,10 +22,12 @@ namespace
 			const auto schema = [](Testing::MockPipelineLayout& layout, std::initializer_list<std::pair<std::uint32_t, T>> bindings)
 			{
 				Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 				for (const auto& [binding, type] : bindings)
 				{
 					space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 				}
+
 				layout.program.Interface.DescriptorSchemas = { space };
 			};
 			schema(cullLayout,
@@ -48,16 +51,19 @@ namespace
 			desc.Bounds = { &boundsPipeline, &boundsLayout, 0 };
 			desc.Assign = { &assignPipeline, &assignLayout, 0 };
 			desc.Scan = { &scanPipeline, &scanLayout, 0 };
+
 			if (heatmap)
 			{
 				desc.Heatmap = { &heatmapPipeline, &heatmapLayout, 0 };
 			}
+
 			return desc;
 		}
 
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *fixture.device.Commands)
 			{
 				if (command.Kind == kind)
@@ -65,6 +71,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -86,6 +93,7 @@ namespace
 		desc.LightCapacity = 64; // Two mask words and one occupancy word per cluster.
 		return desc;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsMaskAndSummaryPasses")
@@ -100,10 +108,12 @@ SWIM_TEST("Render.ClusteredLightAssigner", "RecordsCullBoundsMaskAndSummaryPasse
 	SWIM_CHECK(!ClusteredLightAssigner(world.Desc(false)).HasHeatmap());
 
 	const auto scene = Scene::RandomScene(1, 40, 70);
+
 	for (const auto& desc : scene.Descs)
 	{
 		world.lights.Create(desc);
 	}
+
 	RenderGraph graph;
 	const auto lights = world.lights.Import(graph);
 	const auto view = Scene::Camera(1.5f);

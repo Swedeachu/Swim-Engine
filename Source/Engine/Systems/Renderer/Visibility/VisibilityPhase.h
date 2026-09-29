@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Two-phase occlusion culling (item 51). Without occlusion a view uses Single.
 	// With occlusion each frame records:
 	//   Early - draws the in-frustum objects that were visible last frame (every
@@ -20,4 +21,5 @@ namespace Swim::Render
 		Early = 1,
 		Late = 2,
 	};
+
 } // namespace Swim::Render

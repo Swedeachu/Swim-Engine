@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	ForwardViewRecord BuildForwardViewRecord(const ForwardPlusView& view, std::uint32_t materialCount, std::uint32_t prefilteredMipCount,
 		bool hasEnvironment, bool hasShadows, bool hasBrdfLut)
 	{
@@ -23,6 +24,7 @@ namespace Swim::Render
 		const auto& f = view.CameraForward;
 		const float length = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
 		const auto previous = view.PreviousViewProjection.value_or(view.ViewProjection);
+
 		if (!finite(view.ViewProjection) || !finite(previous) || !finite(view.Jitter) || !finite(view.CameraPosition) ||
 			!finite(view.CameraForward) || !finite(view.Ambient) || !(length > 1.0e-12f) || !std::isfinite(length) ||
 			!(view.EnvironmentIntensity >= 0.0f) || !std::isfinite(view.EnvironmentIntensity) || !std::isfinite(view.EnvironmentRotation) ||
@@ -37,17 +39,20 @@ namespace Swim::Render
 				"Forward+ view needs finite matrices, jitter and camera, a nonzero forward vector, nonnegative ambient and "
 				"intensity, and a known debug mode");
 		}
+
 		ForwardViewRecord record;
 		std::copy(view.ViewProjection.begin(), view.ViewProjection.end(), record.ViewProjection);
 		std::copy(previous.begin(), previous.end(), record.PreviousViewProjection);
 		record.Jitter[0] = view.Jitter[0];
 		record.Jitter[1] = view.Jitter[1];
+
 		for (int c = 0; c < 3; ++c)
 		{
 			record.CameraPosition[c] = view.CameraPosition[c];
 			record.CameraForward[c] = f[c] / length;
 			record.Ambient[c] = view.Ambient[c];
 		}
+
 		record.EnvironmentIntensity = view.EnvironmentIntensity;
 		record.EnvironmentRotation = view.EnvironmentRotation;
 		record.MaterialCount = materialCount;
@@ -57,12 +62,15 @@ namespace Swim::Render
 		record.DebugMode = static_cast<std::uint32_t>(view.DebugMode);
 		return record;
 	}
+
 } // namespace Swim::Render
 
 namespace Swim::Render::ForwardPlus
 {
+
 	namespace
 	{
+
 		float Dot(const Float3& a, const Float3& b)
 		{
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -84,6 +92,7 @@ namespace Swim::Render::ForwardPlus
 		{
 			return { rows[j], rows[4 + j], rows[8 + j] };
 		}
+
 	} // namespace
 
 	ForwardPlusBin MaterialBin(const StandardPbr::Parameters& parameters)
@@ -94,10 +103,12 @@ namespace Swim::Render::ForwardPlus
 	Float3 TransformPoint(const float (&rows)[12], const Float3& p)
 	{
 		Float3 result{};
+
 		for (int r = 0; r < 3; ++r)
 		{
 			result[r] = rows[r * 4] * p[0] + rows[r * 4 + 1] * p[1] + rows[r * 4 + 2] * p[2] + rows[r * 4 + 3];
 		}
+
 		return result;
 	}
 
@@ -112,10 +123,12 @@ namespace Swim::Render::ForwardPlus
 		const auto project = [](const float(&m)[16], const Float3& p)
 		{
 			std::array<float, 4> clip{};
+
 			for (int r = 0; r < 4; ++r)
 			{
 				clip[r] = m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3];
 			}
+
 			return Float2{ clip[0] / clip[3], clip[1] / clip[3] };
 		};
 		const auto now = project(view.ViewProjection, TransformPoint(current, local));
@@ -126,10 +139,12 @@ namespace Swim::Render::ForwardPlus
 	Float3 TransformDirection(const float (&rows)[12], const Float3& d)
 	{
 		Float3 result{};
+
 		for (int r = 0; r < 3; ++r)
 		{
 			result[r] = rows[r * 4] * d[0] + rows[r * 4 + 1] * d[1] + rows[r * 4 + 2] * d[2];
 		}
+
 		return result;
 	}
 
@@ -148,15 +163,18 @@ namespace Swim::Render::ForwardPlus
 		const auto y = Cross(c2, c0);
 		const auto z = Cross(c0, c1);
 		Float3 result{};
+
 		for (int c = 0; c < 3; ++c)
 		{
 			result[c] = x[c] * n[0] + y[c] * n[1] + z[c] * n[2];
 		}
+
 		// det * M^-T n flips with a negative determinant; undo that so the normal keeps its side.
 		if (Determinant(rows) < 0.0f)
 		{
 			result = { -result[0], -result[1], -result[2] };
 		}
+
 		return result;
 	}
 
@@ -194,10 +212,12 @@ namespace Swim::Render::ForwardPlus
 		{
 			return a.Depth > b.Depth;
 		}
+
 		if (a.InstanceRow != b.InstanceRow)
 		{
 			return a.InstanceRow < b.InstanceRow;
 		}
+
 		return a.SubmeshRow < b.SubmeshRow;
 	}
 
@@ -206,19 +226,23 @@ namespace Swim::Render::ForwardPlus
 	{
 		std::vector<ForwardSortEntry> entries;
 		entries.reserve(records.size());
+
 		for (std::size_t i = 0; i < records.size(); ++i)
 		{
 			const auto& instance = instances[records[i].InstanceRow];
 			const float depth = SortDepth(instance, transforms[instance.TransformIndex], view);
 			entries.push_back({ depth, records[i].InstanceRow, records[i].SubmeshRow, firstSlot + static_cast<std::uint32_t>(i) });
 		}
+
 		std::stable_sort(entries.begin(), entries.end(), SortsBefore);
 		std::vector<std::uint32_t> order;
 		order.reserve(entries.size());
+
 		for (const auto& entry : entries)
 		{
 			order.push_back(entry.Slot);
 		}
+
 		return order;
 	}
 
@@ -242,6 +266,7 @@ namespace Swim::Render::ForwardPlus
 		{
 			return 1.0f;
 		}
+
 		return Shadows::ShadowFactor(*inputs.Shadows, light.ShadowIndex, position, normal, toLight, CameraDepth(view, position));
 	}
 
@@ -257,15 +282,18 @@ namespace Swim::Render::ForwardPlus
 			const auto sample = Lights::EvaluateLight(light, position);
 			const auto brdf = StandardPbr::EvaluateBrdf(brdfSurface, surface.Normal, toCamera, sample.Direction);
 			const float shadow = LightShadow(inputs, view, light, position, surface.Normal, sample.Direction);
+
 			for (int c = 0; c < 3; ++c)
 			{
 				color[c] += brdf[c] * sample.Radiance[c] * shadow;
 			}
 		};
+
 		for (std::uint32_t i = 0; i < inputs.Header.DirectionalCount; ++i)
 		{
 			add(inputs.Lights[i]);
 		}
+
 		if (inputs.Grid)
 		{
 			Clustering::ForEachClusterLight(*inputs.Grid, inputs.Records, inputs.Indices,
@@ -282,12 +310,15 @@ namespace Swim::Render::ForwardPlus
 				add(inputs.Lights[inputs.Header.FirstLocalRow + i]);
 			}
 		}
+
 		const auto indirect = IndirectRadiance(inputs, view, surface, position);
 		Float4 result{};
+
 		for (int c = 0; c < 3; ++c)
 		{
 			result[c] = color[c] + indirect[c] + surface.Emissive[c];
 		}
+
 		result[3] = surface.Alpha;
 		return result;
 	}
@@ -298,16 +329,20 @@ namespace Swim::Render::ForwardPlus
 		const auto toCamera =
 			Normalize({ view.CameraPosition[0] - position[0], view.CameraPosition[1] - position[1], view.CameraPosition[2] - position[2] });
 		Float3 ibl{ 0, 0, 0 };
+
 		if ((view.Flags & ForwardViewFlagEnvironment) != 0 && inputs.Environment)
 		{
 			const auto terms = inputs.Environment->Lookup(surface, toCamera, { view.EnvironmentIntensity, view.EnvironmentRotation });
 			ibl = StandardPbr::EvaluateEnvironment(surface, toCamera, terms);
 		}
+
 		Float3 result{};
+
 		for (int c = 0; c < 3; ++c)
 		{
 			result[c] = view.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + ibl[c];
 		}
+
 		return result;
 	}
 
@@ -317,17 +352,22 @@ namespace Swim::Render::ForwardPlus
 		const auto toCamera =
 			Normalize({ view.CameraPosition[0] - position[0], view.CameraPosition[1] - position[1], view.CameraPosition[2] - position[2] });
 		SpecularTerms terms;
+
 		if ((view.Flags & ForwardViewFlagEnvironment) != 0 && inputs.Environment)
 		{
 			const auto environment = inputs.Environment->Lookup(surface, toCamera, { view.EnvironmentIntensity, view.EnvironmentRotation });
 			terms.Reflectance = StandardPbr::EnvironmentSpecularWeight(surface, toCamera, environment.BrdfScale, environment.BrdfBias);
+
 			for (int c = 0; c < 3; ++c)
 			{
 				terms.Radiance[c] = environment.Prefiltered[c] * terms.Reflectance[c];
 			}
+
 			return terms;
 		}
+
 		const auto* lut = inputs.BrdfLut ? inputs.BrdfLut : inputs.Environment ? &inputs.Environment->GetBrdfLut() : nullptr;
+
 		if ((view.Flags & ForwardViewFlagBrdfLut) != 0 && lut)
 		{
 			const float roughness = std::clamp(surface.PerceptualRoughness, StandardPbr::MinPerceptualRoughness, 1.0f);
@@ -335,6 +375,7 @@ namespace Swim::Render::ForwardPlus
 			const auto ab = lut->SampleBilinear(nDotV, roughness);
 			terms.Reflectance = StandardPbr::EnvironmentSpecularWeight(surface, toCamera, ab[0], ab[1]);
 		}
+
 		return terms;
 	}
 
@@ -351,4 +392,5 @@ namespace Swim::Render::ForwardPlus
 		return { source[0] * a + destination[0] * (1.0f - a), source[1] * a + destination[1] * (1.0f - a),
 			source[2] * a + destination[2] * (1.0f - a), a + destination[3] * (1.0f - a) };
 	}
+
 } // namespace Swim::Render::ForwardPlus

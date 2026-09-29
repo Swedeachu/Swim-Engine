@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Temporal
 {
+
 	// The CPU definition of temporal anti-aliasing (critical-path item 75).
 	// Shaders/Slang/Temporal mirrors every function, and the native TAA smoke compares
 	// the two texel by texel.
@@ -78,4 +79,5 @@ namespace Swim::Render::Temporal
 	// the same size (std::invalid_argument otherwise).
 	ColorImage Resolve(const ColorImage& current, const DepthImage& depth, const VelocityImage& velocity, const ColorImage* history,
 		const TemporalSettings& settings);
+
 } // namespace Swim::Render::Temporal

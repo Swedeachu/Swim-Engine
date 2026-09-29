@@ -7,16 +7,19 @@ namespace Swim::RhiVulkan
 		Rhi::ValidationMode mode, bool debugDefault, const VulkanValidationCapabilities& capabilities, const Rhi::ValidationChecks& checks)
 	{
 		bool requested = checks.Any();
+
 		switch (mode)
 		{
 		case Rhi::ValidationMode::Default:
 			requested |= debugDefault;
 			break;
 		case Rhi::ValidationMode::Disabled:
+
 			if (checks.Any())
 			{
 				return { false, false, false, {}, "Validation checks cannot be requested with validation disabled" };
 			}
+
 			break;
 		case Rhi::ValidationMode::IfAvailable:
 		case Rhi::ValidationMode::Required:
@@ -27,15 +30,18 @@ namespace Swim::RhiVulkan
 		}
 
 		const bool available = capabilities.LayerAvailable && (capabilities.DebugUtilsAvailable || capabilities.LayerDebugUtilsAvailable);
+
 		if ((mode == Rhi::ValidationMode::Required || checks.Any()) && !available)
 		{
 			return { false, false, false, {}, "Requested Vulkan validation needs VK_LAYER_KHRONOS_validation and VK_EXT_debug_utils" };
 		}
+
 		if (checks.Any() && (!capabilities.LayerSettingsAvailable || capabilities.LayerVersion < MinimumValidationSettingsVersion))
 		{
 			return { false, false, false, {},
 				"Explicit validation checks need VK_EXT_layer_settings and Khronos validation layer 1.4.335 or newer" };
 		}
+
 		if (checks.GpuAssisted && capabilities.LayerVersion < MinimumGpuValidationSettingsVersion)
 		{
 			return { false, false, false, {},
@@ -62,6 +68,7 @@ namespace Swim::RhiVulkan
 			{ "VK_LAYER_KHRONOS_validation", "validate_core", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1,
 				checks.GpuAssisted ? &disabled : &enabled },
 		};
+
 		if (checks.GpuAssisted)
 		{
 			// These APIs are not enabled by Swim. Keep validation for every
@@ -71,6 +78,7 @@ namespace Swim::RhiVulkan
 			{
 				settings.push_back({ "VK_LAYER_KHRONOS_validation", name, VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &disabled });
 			}
+
 			// 1.4.357 merged ray-query validation into the trace-ray setting.
 			if (layerVersion < VK_MAKE_API_VERSION(0, 1, 4, 357))
 			{
@@ -85,6 +93,7 @@ namespace Swim::RhiVulkan
 	VkPhysicalDeviceFeatures GetValidationDeviceFeatures(const Rhi::ValidationChecks& checks)
 	{
 		VkPhysicalDeviceFeatures features{};
+
 		if (checks.GpuAssisted)
 		{
 			features.fragmentStoresAndAtomics = VK_TRUE;
@@ -111,6 +120,7 @@ namespace Swim::RhiVulkan
 	{
 		VkPhysicalDeviceVulkan12Features features{};
 		features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
 		if (checks.GpuAssisted)
 		{
 			features.vulkanMemoryModel = VK_TRUE;
@@ -119,6 +129,7 @@ namespace Swim::RhiVulkan
 			features.storageBuffer8BitAccess = VK_TRUE;
 			features.shaderInt8 = VK_TRUE;
 		}
+
 		return features;
 	}
 

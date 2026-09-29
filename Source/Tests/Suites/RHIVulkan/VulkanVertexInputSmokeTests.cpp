@@ -107,6 +107,7 @@ namespace
 		SWIM_REQUIRE(frames);
 		std::vector<std::byte> directPixels(64 * 64 * 4);
 		std::vector<std::byte> indexedPixels(directPixels.size());
+
 		for (std::uint32_t pass = 0; pass < 2; ++pass)
 		{
 			frames->BeginFrame();
@@ -115,15 +116,18 @@ namespace
 			commands.BeginDebugLabel("RunVertexInputSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
 			commands.Transition(*target, pass == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource,
 				Rhi::ResourceState::ColorAttachment);
+
 			if (pass == 0)
 			{
 				commands.Transition(*vertices, Rhi::ResourceState::HostWrite, Rhi::ResourceState::VertexBuffer);
 				commands.Transition(*instances, Rhi::ResourceState::HostWrite, Rhi::ResourceState::VertexBuffer);
 			}
+
 			if (pass == 1)
 			{
 				commands.Transition(*indices, Rhi::ResourceState::HostWrite, Rhi::ResourceState::IndexBuffer);
 			}
+
 			Rhi::RenderingAttachmentDesc attachment{};
 			attachment.View = view.get();
 			attachment.Load = Rhi::LoadOp::Clear;
@@ -134,6 +138,7 @@ namespace
 			commands.BindVertexBuffer(5, *instances, 16);
 			commands.SetViewport({ 0, 0, 64, 64 });
 			commands.SetScissor({ 0, 0, 64, 64 });
+
 			if (pass == 0)
 			{
 				commands.Draw(3, 2, 1, 1);
@@ -143,6 +148,7 @@ namespace
 				commands.BindIndexBuffer(*indices, 2, Rhi::IndexType::Uint16);
 				commands.DrawIndexed(3, 2, 1, -1, 1);
 			}
+
 			commands.EndRendering();
 			commands.Transition(*target, Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::CopySource);
 			commands.Transition(*readback, pass == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
@@ -156,6 +162,7 @@ namespace
 			frames->Drain();
 			readback->Read(0, pass == 0 ? directPixels : indexedPixels);
 		}
+
 		const auto checkPixel = [&](std::uint32_t x, std::uint32_t y, std::byte red, std::byte green)
 		{
 			const std::size_t offset = (y * 64 + x) * 4;
@@ -173,10 +180,12 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "VertexBuffersIndexedAndInstancedPixels", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunVertexInputSmoke); } });
 		}
+
 		return true;
 	}();
 

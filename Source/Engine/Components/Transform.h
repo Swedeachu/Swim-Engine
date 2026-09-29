@@ -25,6 +25,7 @@ namespace Engine
 		friend class PhysicsWorld;
 
 	  private:
+
 		glm::vec3 position{ 0.0f, 0.0f, 0.0f };
 		glm::vec3 scale{ 1.0f, 1.0f, 1.0f };
 		glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f }; // Identity
@@ -64,12 +65,14 @@ namespace Engine
 		void MarkWorldDirtyOnly();
 
 		void MarkChildrenDirty();
+
 		bool QueueDirtyEntity();
 
 		// Helper: parent world rotation (TR only, no scale)
 		static glm::quat GetParentWorldRotationTR(const Transform& tf, const entt::registry& registry);
 
 	  public:
+
 		Transform() = default;
 
 		Transform(const glm::vec3& pos, const glm::vec3& scl, const glm::quat& rot = glm::quat(1.0f, 0.0f, 0.0f, 0.0f) // must be identity
@@ -196,6 +199,7 @@ namespace Engine
 		void SnapPhysicsToTarget(const entt::registry& registry) { ApplyPhysicsInterpolation(registry, 1.0f); }
 
 		bool HasPhysicsTarget() const { return physicsHasTarget; }
+
 	};
 
 } // Namespace Engine

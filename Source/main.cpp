@@ -8,13 +8,18 @@
 
 namespace
 {
+
 	class LoggingLifetime final
 	{
+
 	  public:
+
 		LoggingLifetime() { Engine::Logging::Initialize(); }
 
 		~LoggingLifetime() { Engine::Logging::Shutdown(); }
+
 	};
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -24,15 +29,18 @@ int main(int argc, char** argv)
 	try
 	{
 		auto parsedConfig = Engine::SwimEngine::ParseStartingEngineArgs(argc, argv);
+
 		if (!parsedConfig)
 		{
 			for (const std::string& error : parsedConfig.Errors)
 			{
 				std::cerr << "[Engine] " << error << '\n';
 			}
+
 			std::cerr << Engine::GetEngineConfigUsage();
 			return -1;
 		}
+
 		if (parsedConfig.Config.ShowHelp)
 		{
 			std::cout << Engine::GetEngineConfigUsage();

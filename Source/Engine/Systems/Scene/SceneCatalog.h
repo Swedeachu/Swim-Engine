@@ -32,10 +32,12 @@ namespace Engine
 			{
 				throw std::invalid_argument("Scene type name cannot be empty.");
 			}
+
 			if (!factory)
 			{
 				throw std::invalid_argument("Scene type '" + name + "' has no factory.");
 			}
+
 			if (Contains(name))
 			{
 				throw std::runtime_error("Scene type '" + name + "' is already registered.");

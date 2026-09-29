@@ -78,6 +78,7 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "ValidatedContainerBytesArePassed
 
 namespace
 {
+
 	// A 4x4 ETC1S/BasisLZ KTX2 (sRGB, three mips) written by toktx v4.1, taken from the
 	// KHR_texture_basisu Sponza GLB.
 	std::vector<std::byte> MakeEtc1sKtx2()
@@ -568,12 +569,15 @@ namespace
 			0x00,
 		};
 		std::vector<std::byte> bytes(sizeof(Bytes));
+
 		for (std::size_t i = 0; i < sizeof(Bytes); ++i)
 		{
 			bytes[i] = std::byte{ Bytes[i] };
 		}
+
 		return bytes;
 	}
+
 } // namespace
 
 SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToAnRgba8MipChain")
@@ -593,6 +597,7 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToAnRgba8M
 	SWIM_CHECK(payload.Format == Swim::Assets::TexturePayloadFormat::RGBA8SRgb);
 	SWIM_REQUIRE(payload.Mips.size() == 3);
 	std::uint64_t offset = 0;
+
 	for (std::uint32_t mip = 0; mip < 3; ++mip)
 	{
 		const std::uint32_t extent = 4u >> mip;
@@ -602,6 +607,7 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToAnRgba8M
 		SWIM_CHECK_EQUAL(payload.Mips[mip].SizeBytes, std::uint64_t(extent) * extent * 4u);
 		offset += payload.Mips[mip].SizeBytes;
 	}
+
 	SWIM_REQUIRE_EQUAL(payload.Bytes.size(), static_cast<std::size_t>(offset));
 	// ETC1S without an alpha slice decodes opaque.
 	for (std::size_t texel = 0; texel < payload.Bytes.size() / 4; ++texel)
@@ -624,6 +630,7 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToABc7MipC
 	SWIM_CHECK(payload.Container == Swim::Assets::TextureContainerFormat::NativeMipData);
 	SWIM_CHECK(payload.Format == Swim::Assets::TexturePayloadFormat::BC7SRgb);
 	SWIM_REQUIRE(payload.Mips.size() == 3);
+
 	for (std::uint32_t mip = 0; mip < 3; ++mip)
 	{
 		SWIM_CHECK_EQUAL(payload.Mips[mip].Width, 4u >> mip);
@@ -635,13 +642,16 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "BasisEtc1sIsTranscodedToABc7MipC
 			std::span(payload.Bytes).subspan(mip * 16u, 16), payload.Mips[mip].Width, payload.Mips[mip].Height);
 		SWIM_REQUIRE(decoded.size() == texels.Mips[mip].SizeBytes);
 		int worst = 0;
+
 		for (std::size_t i = 0; i < decoded.size(); ++i)
 		{
 			const int expected = std::to_integer<int>(texels.Bytes[texels.Mips[mip].OffsetBytes + i]);
 			worst = std::max(worst, std::abs(std::to_integer<int>(decoded[i]) - expected));
 		}
+
 		SWIM_CHECK(worst <= 3);
 	}
+
 	SWIM_CHECK_EQUAL(payload.Bytes.size(), std::size_t{ 48 });
 }
 
@@ -654,6 +664,7 @@ SWIM_TEST("AssetCompiler.Ktx2TextureCompiler", "CorruptBasisPayloadsFailInsteadO
 	{
 		bytes[i] = std::byte{ 0 };
 	}
+
 	const Swim::AssetCompiler::Ktx2TextureCompileResult result =
 		Swim::AssetCompiler::CompileKtx2Texture(bytes, Swim::Assets::TextureColorSpace::SRgb, Swim::Assets::TextureSemantic::Color);
 	SWIM_CHECK(!static_cast<bool>(result));

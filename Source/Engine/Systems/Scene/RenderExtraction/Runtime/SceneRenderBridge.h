@@ -22,6 +22,7 @@
 
 namespace Engine
 {
+
 	class FrameRenderer;
 	class RenderExtractor;
 	class Scene;
@@ -41,13 +42,19 @@ namespace Engine
 	// paths. Owner thread only; the renderer must outlive the bridge.
 	class SceneRenderBridge
 	{
+
 	  public:
+
 		explicit SceneRenderBridge(FrameRenderer& renderer);
+
 		~SceneRenderBridge();
+
 		SceneRenderBridge(const SceneRenderBridge&) = delete;
+
 		SceneRenderBridge& operator=(const SceneRenderBridge&) = delete;
 
 		void Attach(Scene* scene, std::uint64_t sceneId);
+
 		void Detach();
 
 		Scene* GetAttached() const { return scene; }
@@ -81,6 +88,7 @@ namespace Engine
 		std::uint32_t GetJointCount(const std::string& name) const;
 
 	  private:
+
 		struct LightState
 		{
 			Swim::Render::GpuLightHandle Handle;
@@ -114,12 +122,19 @@ namespace Engine
 		};
 
 		void UpdateLights(entt::registry& registry);
+
 		void UpdateEmitters(entt::registry& registry);
+
 		void UpdateSkins(entt::registry& registry);
+
 		void UpdateProbes(entt::registry& registry);
+
 		void ReleaseAll();
+
 		void ReleaseLight(LightState& state);
+
 		void ReleaseSkin(SkinState& state);
+
 		std::uint32_t AllocateShadowSlot();
 
 		FrameRenderer& renderer;
@@ -136,5 +151,7 @@ namespace Engine
 		std::vector<Swim::Render::ReflectionProbeDesc> probes;
 		std::vector<Swim::Render::ReflectionProbeMover> movers;
 		std::unordered_map<entt::entity, std::array<float, 3>> lastPositions;
+
 	};
+
 } // namespace Engine

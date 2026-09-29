@@ -6,8 +6,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		bool IsWorldMode(UiCanvasMode mode)
 		{
 			return mode != UiCanvasMode::Screen;
@@ -18,6 +20,7 @@ namespace Swim::UI
 			document.EnsureLayout();
 			return document.IsLayoutCurrent();
 		}
+
 	} // namespace
 
 	UiCanvasHandle UiCanvasRouter::Add(const UiCanvasDesc& desc)
@@ -26,6 +29,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("A UI canvas needs a document and a known mode");
 		}
+
 		Canvas canvas;
 		canvas.Handle = { nextHandle++ };
 		canvas.Desc = desc;
@@ -37,24 +41,29 @@ namespace Swim::UI
 	bool UiCanvasRouter::Remove(UiCanvasHandle handle)
 	{
 		auto* canvas = Find(handle);
+
 		if (!canvas)
 		{
 			return false;
 		}
+
 		if (captured == handle)
 		{
 			canvas->Desc.Document->CancelPointer();
 			captured = {};
 		}
+
 		if (hovered == handle)
 		{
 			canvas->Desc.Document->PointerLeave();
 			hovered = {};
 		}
+
 		if (focused == handle)
 		{
 			focused = {};
 		}
+
 		std::erase_if(canvases,
 			[&](const Canvas& c)
 			{
@@ -92,11 +101,14 @@ namespace Swim::UI
 	void UiCanvasRouter::SetInteractive(UiCanvasHandle handle, bool interactive)
 	{
 		auto* canvas = Find(handle);
+
 		if (!canvas)
 		{
 			throw std::invalid_argument("Unknown UI canvas");
 		}
+
 		canvas->Desc.Interactive = interactive;
+
 		if (!interactive)
 		{
 			if (captured == handle)
@@ -104,6 +116,7 @@ namespace Swim::UI
 				canvas->Desc.Document->CancelPointer();
 				captured = {};
 			}
+
 			if (hovered == handle)
 			{
 				canvas->Desc.Document->PointerLeave();
@@ -115,15 +128,18 @@ namespace Swim::UI
 	void UiCanvasRouter::SetScreenPlacement(UiCanvasHandle handle, UiPoint offset, UiPoint size)
 	{
 		auto* canvas = Find(handle);
+
 		if (!canvas || canvas->Desc.Mode != UiCanvasMode::Screen)
 		{
 			throw std::invalid_argument("SetScreenPlacement needs a screen canvas");
 		}
+
 		if (!std::isfinite(offset.X) || !std::isfinite(offset.Y) || !std::isfinite(size.X) || !std::isfinite(size.Y) || size.X < 0.0f ||
 			size.Y < 0.0f)
 		{
 			throw std::invalid_argument("UI screen placement must be finite");
 		}
+
 		canvas->Offset = offset;
 		canvas->Size = size;
 	}
@@ -131,19 +147,23 @@ namespace Swim::UI
 	void UiCanvasRouter::SetWorldPlacement(UiCanvasHandle handle, const UiMatrix3x4& canvasToWorld, UiPoint canvasSize, bool twoSided)
 	{
 		auto* canvas = Find(handle);
+
 		if (!canvas || !IsWorldMode(canvas->Desc.Mode))
 		{
 			throw std::invalid_argument("SetWorldPlacement needs a world panel, billboard or render surface canvas");
 		}
+
 		const bool finite = std::all_of(canvasToWorld.begin(), canvasToWorld.end(),
 			[](float v)
 			{
 				return std::isfinite(v);
 			});
+
 		if (!finite || !std::isfinite(canvasSize.X) || !std::isfinite(canvasSize.Y) || canvasSize.X < 0.0f || canvasSize.Y < 0.0f)
 		{
 			throw std::invalid_argument("UI world placement must be finite");
 		}
+
 		canvas->HasWorld = true;
 		canvas->CanvasToWorld = canvasToWorld;
 		canvas->CanvasSize = canvasSize;
@@ -159,23 +179,28 @@ namespace Swim::UI
 	std::vector<UiCanvasRouter::Canvas*> UiCanvasRouter::ByPriority()
 	{
 		std::vector<Canvas*> result;
+
 		for (auto& canvas : canvases)
 		{
 			result.push_back(&canvas);
 		}
+
 		std::stable_sort(result.begin(), result.end(),
 			[](const Canvas* a, const Canvas* b)
 			{
 				const bool screenA = a->Desc.Mode == UiCanvasMode::Screen;
 				const bool screenB = b->Desc.Mode == UiCanvasMode::Screen;
+
 				if (screenA != screenB)
 				{
 					return screenA;
 				}
+
 				if (screenA && a->Desc.Order != b->Desc.Order)
 				{
 					return a->Desc.Order > b->Desc.Order;
 				}
+
 				return screenA ? a->Sequence > b->Sequence : a->Sequence < b->Sequence;
 			});
 		return result;
@@ -189,8 +214,10 @@ namespace Swim::UI
 			{
 				return UiPoint{ pointer.Screen->X - canvas.Offset.X, pointer.Screen->Y - canvas.Offset.Y };
 			}
+
 			return std::nullopt;
 		}
+
 		for (const auto& hit : pointer.SurfaceHits)
 		{
 			if (hit.Canvas == canvas.Handle)
@@ -198,6 +225,7 @@ namespace Swim::UI
 				return hit.Point;
 			}
 		}
+
 		if (canvas.HasWorld && pointer.Ray)
 		{
 			if (const auto hit = IntersectCanvasPlane(*pointer.Ray, canvas.CanvasToWorld))
@@ -205,6 +233,7 @@ namespace Swim::UI
 				return hit->Point;
 			}
 		}
+
 		return std::nullopt; // Keeps the last point.
 	}
 
@@ -219,10 +248,13 @@ namespace Swim::UI
 					canvas->LastPoint = *point;
 					canvas->Desc.Document->PointerMove(*point);
 				}
+
 				return captured;
 			}
+
 			captured = {};
 		}
+
 		Canvas* target = nullptr;
 		UiPoint targetPoint;
 		// Screen canvases first, top-most first.
@@ -232,19 +264,24 @@ namespace Swim::UI
 			{
 				continue;
 			}
+
 			const UiPoint point{ pointer.Screen->X - canvas->Offset.X, pointer.Screen->Y - canvas->Offset.Y };
 			const bool bounded = canvas->Size.X > 0.0f || canvas->Size.Y > 0.0f;
 			const bool inside = !bounded || (point.X >= 0.0f && point.Y >= 0.0f && point.X < canvas->Size.X && point.Y < canvas->Size.Y);
+
 			if (!inside)
 			{
 				continue;
 			}
+
 			auto& document = *canvas->Desc.Document;
 			document.EnsureLayout();
+
 			if (!document.IsLayoutCurrent())
 			{
 				continue;
 			}
+
 			if (canvas->Desc.BlocksPointer || document.HitTest(point))
 			{
 				target = canvas;
@@ -252,6 +289,7 @@ namespace Swim::UI
 				break;
 			}
 		}
+
 		if (!target)
 		{
 			// World canvases and application surface hits, nearest first.
@@ -263,39 +301,47 @@ namespace Swim::UI
 			};
 
 			std::vector<Candidate> candidates;
+
 			for (auto& canvas : canvases)
 			{
 				if (canvas.Desc.Mode == UiCanvasMode::Screen || !canvas.Desc.Interactive || !canvas.HasWorld || !pointer.Ray)
 				{
 					continue;
 				}
+
 				if (const auto hit = IntersectCanvas(*pointer.Ray, canvas.CanvasToWorld, canvas.CanvasSize, canvas.TwoSided))
 				{
 					candidates.push_back({ &canvas, hit->Point, hit->Distance });
 				}
 			}
+
 			for (const auto& hit : pointer.SurfaceHits)
 			{
 				auto* canvas = Find(hit.Canvas);
+
 				if (canvas && canvas->Desc.Mode != UiCanvasMode::Screen && canvas->Desc.Interactive && std::isfinite(hit.Distance) &&
 					std::isfinite(hit.Point.X) && std::isfinite(hit.Point.Y))
 				{
 					candidates.push_back({ canvas, hit.Point, hit.Distance });
 				}
 			}
+
 			std::stable_sort(candidates.begin(), candidates.end(),
 				[](const Candidate& a, const Candidate& b)
 				{
 					return a.Distance < b.Distance;
 				});
+
 			for (const auto& candidate : candidates)
 			{
 				auto& document = *candidate.Target->Desc.Document;
 				document.EnsureLayout();
+
 				if (!document.IsLayoutCurrent())
 				{
 					continue;
 				}
+
 				if (candidate.Target->Desc.BlocksPointer || document.HitTest(candidate.Point))
 				{
 					target = candidate.Target;
@@ -304,7 +350,9 @@ namespace Swim::UI
 				}
 			}
 		}
+
 		const UiCanvasHandle next = target ? target->Handle : UiCanvasHandle{};
+
 		if (hovered && hovered != next)
 		{
 			if (auto* previous = Find(hovered))
@@ -312,12 +360,15 @@ namespace Swim::UI
 				previous->Desc.Document->PointerLeave();
 			}
 		}
+
 		hovered = next;
+
 		if (target)
 		{
 			target->LastPoint = targetPoint;
 			target->Desc.Document->PointerMove(targetPoint);
 		}
+
 		return hovered;
 	}
 
@@ -330,21 +381,25 @@ namespace Swim::UI
 				previous->Desc.Document->Focus({});
 			}
 		}
+
 		focused = handle;
 	}
 
 	void UiCanvasRouter::PointerDown(UiKeyModifiers modifiers)
 	{
 		auto* canvas = Find(hovered);
+
 		if (!canvas)
 		{
 			for (auto& other : canvases)
 			{
 				other.Desc.Document->DismissPopups(); // Menus close on a press in the world.
 			}
+
 			ClearFocus(); // A press outside every canvas returns the keyboard to the game.
 			return;
 		}
+
 		// A press on one canvas is a press outside every other canvas's popups.
 		for (auto& other : canvases)
 		{
@@ -353,9 +408,11 @@ namespace Swim::UI
 				other.Desc.Document->DismissPopups();
 			}
 		}
+
 		auto& document = *canvas->Desc.Document;
 		document.PointerDown(canvas->LastPoint, modifiers);
 		captured = canvas->Handle;
+
 		if (document.GetFocus())
 		{
 			SetFocused(canvas->Handle);
@@ -369,10 +426,12 @@ namespace Swim::UI
 	bool UiCanvasRouter::OpenContextMenu()
 	{
 		auto* canvas = Find(hovered);
+
 		if (!canvas || !canvas->Desc.Interactive)
 		{
 			return false;
 		}
+
 		for (auto& other : canvases)
 		{
 			if (other.Handle != canvas->Handle)
@@ -380,10 +439,12 @@ namespace Swim::UI
 				other.Desc.Document->DismissPopups();
 			}
 		}
+
 		if (!canvas->Desc.Document->OpenContextMenu(canvas->LastPoint))
 		{
 			return false;
 		}
+
 		SetFocused(canvas->Handle); // The menu takes focus at its document's next Layout.
 		return true;
 	}
@@ -400,6 +461,7 @@ namespace Swim::UI
 		{
 			canvas->Desc.Document->PointerUp(canvas->LastPoint);
 		}
+
 		captured = {};
 	}
 
@@ -409,11 +471,14 @@ namespace Swim::UI
 		{
 			canvas->Desc.Document->CancelPointer();
 		}
+
 		captured = {};
+
 		if (auto* canvas = Find(hovered))
 		{
 			canvas->Desc.Document->PointerLeave();
 		}
+
 		hovered = {};
 	}
 
@@ -428,24 +493,29 @@ namespace Swim::UI
 		if (auto* canvas = Find(focused))
 		{
 			canvas->Desc.Document->FocusNext(backwards);
+
 			if (canvas->Desc.Document->GetFocus())
 			{
 				return true;
 			}
 		}
+
 		for (auto* canvas : ByPriority())
 		{
 			if (!canvas->Desc.Interactive || !LaidOut(*canvas->Desc.Document))
 			{
 				continue;
 			}
+
 			canvas->Desc.Document->FocusNext(backwards);
+
 			if (canvas->Desc.Document->GetFocus())
 			{
 				SetFocused(canvas->Handle);
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -455,6 +525,7 @@ namespace Swim::UI
 		{
 			return canvas->Desc.Document->Navigate(direction);
 		}
+
 		for (auto* canvas : ByPriority())
 		{
 			if (canvas->Desc.Interactive && LaidOut(*canvas->Desc.Document) && canvas->Desc.Document->Navigate(direction))
@@ -463,6 +534,7 @@ namespace Swim::UI
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -471,16 +543,20 @@ namespace Swim::UI
 		if (auto* canvas = Find(focused))
 		{
 			const bool consumed = canvas->Desc.Document->KeyDown(key, modifiers);
+
 			if (!canvas->Desc.Document->GetFocus())
 			{
 				focused = {}; // Escape (or Tab past the end of an empty document) released it.
 			}
+
 			return consumed;
 		}
+
 		if (key == UiKey::Tab)
 		{
 			return FocusNext(modifiers.Shift);
 		}
+
 		return false;
 	}
 
@@ -506,6 +582,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("Unknown UI canvas");
 		}
+
 		SetFocused(handle);
 	}
 
@@ -515,6 +592,7 @@ namespace Swim::UI
 		{
 			canvas->Desc.Document->Focus({});
 		}
+
 		focused = {};
 	}
 
@@ -527,19 +605,25 @@ namespace Swim::UI
 	std::optional<UiRect> UiCanvasRouter::GetTextInputRect() const
 	{
 		const auto* canvas = Find(focused);
+
 		if (!canvas || !canvas->Desc.Document->WantsTextInput() || !canvas->Desc.Document->IsLayoutCurrent())
 		{
 			return std::nullopt;
 		}
+
 		const auto rect = canvas->Desc.Document->GetTextInputRect();
+
 		if (canvas->Desc.Mode == UiCanvasMode::Screen)
 		{
 			return UiRect{ rect.X + canvas->Offset.X, rect.Y + canvas->Offset.Y, rect.Width, rect.Height };
 		}
+
 		if (!canvas->HasWorld || !camera)
 		{
 			return std::nullopt;
 		}
+
 		return ProjectCanvasRect(ClipFromCanvas(canvas->CanvasToWorld, *camera), { camera->ViewportWidth, camera->ViewportHeight }, rect);
 	}
+
 } // namespace Swim::UI

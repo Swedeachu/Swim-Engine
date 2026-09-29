@@ -19,6 +19,7 @@ namespace Swim::ShaderCompiler
 		const auto& typeKind = descriptorArray ? parameter.DescriptorElementTypeKind : parameter.TypeKind;
 		const auto count = descriptorArray ? parameter.DescriptorArrayCount : parameter.Count;
 		const bool runtimeSized = descriptorArray && parameter.DescriptorArrayRuntimeSized;
+
 		if (descriptorArray && (parameter.Count != 1 || (count == 0 && !runtimeSized)))
 		{
 			return "Descriptor arrays require one binding and a fixed positive or runtime-sized element count: " + parameter.Name;
@@ -28,6 +29,7 @@ namespace Swim::ShaderCompiler
 		Rhi::Format storageFormat = Rhi::Format::Undefined;
 		Rhi::SampledTextureClass sampledClass = Rhi::SampledTextureClass::Float;
 		Rhi::TextureViewDimension sampledDimension = Rhi::TextureViewDimension::Texture2D;
+
 		if (typeKind == "samplerState")
 		{
 			type = Rhi::DescriptorType::Sampler;
@@ -40,10 +42,12 @@ namespace Swim::ShaderCompiler
 			stages == Rhi::ShaderStageMask::Compute && !parameter.ResourceArray && !parameter.ResourceMultisample)
 		{
 			storageFormat = GetRhiStorageTextureFormat(parameter);
+
 			if (storageFormat == Rhi::Format::Undefined)
 			{
 				return "Storage textures require an explicit supported format and matching scalar/vector type: " + parameter.Name;
 			}
+
 			type = Rhi::DescriptorType::StorageTexture;
 		}
 		else if (typeKind == "resource" && parameter.ResourceAccess == "readWrite" && stages == Rhi::ShaderStageMask::Compute &&
@@ -66,7 +70,9 @@ namespace Swim::ShaderCompiler
 						   "storage format: " +
 						parameter.Name;
 				}
+
 				type = Rhi::DescriptorType::SampledTexture;
+
 				if (parameter.ResourceShape == "texture1D")
 				{
 					sampledDimension =
@@ -125,11 +131,13 @@ namespace Swim::ShaderCompiler
 			{
 				return candidate.Space == space;
 			});
+
 		if (schema == interface.DescriptorSchemas.end())
 		{
 			interface.DescriptorSchemas.push_back({ space, {} });
 			schema = interface.DescriptorSchemas.end() - 1;
 		}
+
 		if (std::any_of(schema->Bindings.begin(), schema->Bindings.end(),
 				[&](const auto& binding)
 				{

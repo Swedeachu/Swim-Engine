@@ -10,6 +10,7 @@ using Q = Rhi::QueueType;
 
 namespace
 {
+
 	const auto noCommands = [](RenderCommandContext&)
 	{
 	};
@@ -30,6 +31,7 @@ namespace
 		d.Usage = Rhi::TextureUsage::Storage | Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
 		return d;
 	}
+
 } // namespace
 
 SWIM_TEST("RenderGraph.Compile", "RejectsReadBeforeWriteAndUninitializedExports")
@@ -253,12 +255,14 @@ SWIM_TEST("RenderGraph.Compile", "TracksEachMipAndLayerAndRejectsPartialInitiali
 		noCommands);
 	auto plan = valid.Compile();
 	SWIM_REQUIRE_EQUAL(plan.GetSchedule().size(), 2u);
+
 	for (const auto& pass : plan.GetSchedule())
 	{
 		SWIM_REQUIRE_EQUAL(pass.Barriers.size(), 1u);
 		SWIM_CHECK_EQUAL(pass.Barriers[0].Range.BaseMipLevel, 1u);
 		SWIM_CHECK_EQUAL(pass.Barriers[0].Range.BaseArrayLayer, 1u);
 	}
+
 	valid.Export(t, S::ShaderRead);
 	SWIM_CHECK_THROWS(valid.Compile(), std::invalid_argument);
 }

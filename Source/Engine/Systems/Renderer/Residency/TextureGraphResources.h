@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Textures uploaded by one TextureResidency::Import. Each is imported once
 	// (Undefined), fully written and exported to ShaderRead, so passes later in
 	// the same graph may sample it through these handles. Resident textures from
@@ -21,4 +22,5 @@ namespace Swim::Render
 		std::vector<Upload> Uploads;
 		std::uint64_t RecordedBytes = 0;
 	};
+
 } // namespace Swim::Render

@@ -59,6 +59,7 @@ namespace
 		const std::array formats{ Rhi::Format::R32Uint, Rhi::Format::R8Uint, Rhi::Format::R32Sint, Rhi::Format::RGBA8Unorm };
 		std::array<std::unique_ptr<Rhi::Texture>, 4> textures;
 		std::array<std::unique_ptr<Rhi::TextureView>, 4> views;
+
 		for (std::size_t index = 0; index < textures.size(); ++index)
 		{
 			Rhi::TextureDesc desc{};
@@ -76,6 +77,7 @@ namespace
 			views[index] = device->CreateTextureView(*textures[index], view);
 			SWIM_REQUIRE(views[index]);
 		}
+
 		auto upload =
 			device->CreateBuffer({ outputBytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Sampled upload" });
 		auto guards =
@@ -91,12 +93,14 @@ namespace
 		guards->Write(0, std::as_bytes(std::span(expected)));
 		std::array<std::unique_ptr<Rhi::DescriptorTable>, 2> tables;
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), tables.size());
+
 		for (std::size_t set = 0; set < tables.size(); ++set)
 		{
 			const auto& schema = interface.DescriptorSchemas[set];
 			tables[set] = device->CreateDescriptorTable({ layout.get(), schema.Space, 0, "Sampled table" });
 			SWIM_REQUIRE(tables[set]);
 			std::vector<Rhi::DescriptorWrite> writes;
+
 			for (const auto& binding : schema.Bindings)
 			{
 				for (std::uint32_t remaining = binding.Count; remaining > 0; --remaining)
@@ -104,6 +108,7 @@ namespace
 					Rhi::DescriptorWrite write{};
 					write.Binding = binding.Binding;
 					write.ArrayIndex = remaining - 1;
+
 					if (binding.Type == Rhi::DescriptorType::StorageBuffer)
 					{
 						write.BufferResource = output.get();
@@ -117,24 +122,30 @@ namespace
 						SWIM_REQUIRE(index < views.size());
 						write.TextureResource = views[index].get();
 					}
+
 					writes.push_back(write);
 				}
 			}
+
 			tables[set]->Write(writes);
 		}
+
 		// Declare the ring last so submitted work drains before resources retire.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Compute, 2 });
 		SWIM_REQUIRE(frames);
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			std::array<std::uint32_t, count> unsignedPixels{}, signedBits{}, colors{};
 			std::array<std::uint8_t, count> narrowPixels{};
+
 			for (std::uint32_t item = 0; item < count; ++item)
 			{
 				unsignedPixels[item] = 0xF1234567u + frame * 101 + item;
 				narrowPixels[item] = static_cast<std::uint8_t>(item + frame * 17);
 				signedBits[item] = std::bit_cast<std::uint32_t>(-123456789 - static_cast<std::int32_t>(item + frame * 103));
 				colors[item] = 0xFF000000u | ((item * 3 + frame * 13) & 255u);
+
 				if (item < active)
 				{
 					expected[item * 4] = unsignedPixels[item] + frame;
@@ -143,6 +154,7 @@ namespace
 					expected[item * 4 + 3] = colors[item] & 255u;
 				}
 			}
+
 			upload->Write(0, std::as_bytes(std::span(unsignedPixels)));
 			upload->Write(imageBytes, std::as_bytes(std::span(narrowPixels)));
 			upload->Write(imageBytes * 2, std::as_bytes(std::span(signedBits)));
@@ -151,14 +163,17 @@ namespace
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
 			commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
+
 			if (frame == 0)
 			{
 				commands.Transition(*guards, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
+
 			commands.Transition(
 				*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*guards, *output, { 0, 0, outputBytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderWrite);
+
 			for (std::uint32_t index = 0; index < textures.size(); ++index)
 			{
 				const Rhi::TextureSubresourceRange range{ 1, 1, 1, 1 };
@@ -167,11 +182,14 @@ namespace
 				commands.CopyBufferToTexture(*upload, *textures[index], { imageBytes * index, { 1, 1 }, {}, { count, 1, 1 } });
 				commands.Transition(*textures[index], Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderRead, range);
 			}
+
 			commands.BindComputePipeline(*pipeline);
+
 			for (std::size_t set = 0; set < tables.size(); ++set)
 			{
 				commands.BindDescriptorTable(interface.DescriptorSchemas[set].Space, *tables[set]);
 			}
+
 			const std::array<std::uint32_t, 4> push{ active, frame, 0, 0 };
 			commands.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(push)));
 			commands.Dispatch(count / 8, 1, 1);
@@ -184,17 +202,20 @@ namespace
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::size_t item = 0; item < actual.size(); ++item)
 			{
 				SWIM_CHECK_EQUAL(actual[item], expected[item]);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "SampledIntegerTexturesAndReadback", SWIM_TEST_LOCATION,
@@ -203,6 +224,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunSampledIntegerSmoke);
 				} });
 		}
+
 		return true;
 	}();
 

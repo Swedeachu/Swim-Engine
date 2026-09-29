@@ -21,4 +21,11 @@ AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortLambdasOnASingleLine: None
 SeparateDefinitionBlocks: Always
+KeepEmptyLinesAtTheStartOfBlocks: true
+MaxEmptyLinesToKeep: 1
 InsertNewlineAtEOF: true
+
+# scripts/format-source.py enforces blank lines around control flow and just
+
+
+# and member functions in class and struct declarations.

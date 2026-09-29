@@ -14,6 +14,7 @@
 
 namespace Engine
 {
+
 	struct RenderSettings;
 	struct RuntimeComputeProgram;
 
@@ -78,11 +79,17 @@ namespace Engine
 	//       .Dispatch(width, height);
 	class RenderFeatureComputePass
 	{
+
 	  public:
+
 		RenderFeatureComputePass& Texture(std::string_view name, Swim::Render::GraphTexture texture);
+
 		RenderFeatureComputePass& Storage(std::string_view name, Swim::Render::GraphTexture texture);
+
 		RenderFeatureComputePass& Buffer(std::string_view name, Swim::Render::GraphBuffer buffer);
+
 		RenderFeatureComputePass& StorageBuffer(std::string_view name, Swim::Render::GraphBuffer buffer);
+
 		// "LinearClamp" (the default for any name), "LinearRepeat" or "PointClamp".
 		RenderFeatureComputePass& Sampler(std::string_view name, std::string_view kind = "LinearClamp");
 
@@ -98,6 +105,7 @@ namespace Engine
 		Swim::Render::GraphPass Dispatch(std::uint32_t width, std::uint32_t height, std::uint32_t depth = 1);
 
 	  private:
+
 		friend class RenderFeatureContext;
 		enum class Kind
 		{
@@ -124,13 +132,16 @@ namespace Engine
 		const RuntimeComputeProgram& compiled;
 		std::vector<Binding> bindings;
 		std::vector<std::byte> constants;
+
 	};
 
 	// What a feature's Record sees: the graph, the view, the current scene color and
 	// depth, texture helpers and compute passes over runtime shader programs.
 	class RenderFeatureContext
 	{
+
 	  public:
+
 		struct Services
 		{
 			std::function<const RuntimeComputeProgram&(std::string_view)> LoadCompute; // Cached per program.
@@ -161,6 +172,7 @@ namespace Engine
 		// A transient texture (Sampled | Storage); size 0 = the viewport's.
 		Swim::Render::GraphTexture CreateTexture(
 			Swim::Rhi::Format format, std::uint32_t width = 0, std::uint32_t height = 0, std::string_view name = "Feature texture");
+
 		// A texture like Color() (format and size) for writing a replacement.
 		Swim::Render::GraphTexture CreateColorTarget(std::string_view name = "Feature color");
 
@@ -169,6 +181,7 @@ namespace Engine
 		RenderFeatureComputePass Compute(std::string_view program);
 
 	  private:
+
 		friend class RenderFeatureComputePass;
 		Swim::Render::RenderGraph& graph;
 		RenderFeatureStage stage;
@@ -177,6 +190,7 @@ namespace Engine
 		Swim::Render::GraphTexture color;
 		Swim::Render::GraphTexture depth;
 		Services services;
+
 	};
 
 	// A self-contained piece of the frame added from gameplay code:
@@ -190,10 +204,13 @@ namespace Engine
 	// the feature object and may be changed at any time from the owner thread.
 	class RenderFeature
 	{
+
 	  public:
+
 		virtual ~RenderFeature() = default;
 
 		virtual std::string_view GetName() const = 0;
+
 		virtual RenderFeatureStage GetStage() const = 0;
 
 		virtual int GetOrder() const { return 0; }
@@ -219,5 +236,7 @@ namespace Engine
 		}
 
 		bool Enabled = true;
+
 	};
+
 } // namespace Engine

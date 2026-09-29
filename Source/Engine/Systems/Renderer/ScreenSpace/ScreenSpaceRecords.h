@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Per-frame parameters of every screen-space program (Shaders/Slang/ScreenSpace/
 	// ScreenSpaceRecords.slang), uploaded once per Record. Matrices are row-major.
 	struct GpuScreenSpaceParams
@@ -66,4 +67,5 @@ namespace Swim::Render
 	static_assert(sizeof(GpuScreenSpaceParams) == 432);
 	static_assert(offsetof(GpuScreenSpaceParams, AoRadius) == 176 && offsetof(GpuScreenSpaceParams, FogColor) == 224);
 	static_assert(offsetof(GpuScreenSpaceParams, Projection) == 288 && offsetof(GpuScreenSpaceParams, SsrMaxSteps) == 384);
+
 } // namespace Swim::Render

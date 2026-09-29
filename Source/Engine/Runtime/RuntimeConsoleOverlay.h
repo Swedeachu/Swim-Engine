@@ -8,11 +8,14 @@
 
 namespace Swim::Input
 {
+
 	class InputSystem;
+
 }
 
 namespace Engine
 {
+
 	class UiRuntime;
 
 	// The runtime console's UI: an engine overlay (UiRuntime::AddOverlay) across the top of
@@ -27,13 +30,19 @@ namespace Engine
 	// it (runs submitted lines).
 	class RuntimeConsoleOverlay
 	{
+
 	  public:
+
 		RuntimeConsoleOverlay(UiRuntime& ui, RuntimeConsole& console);
+
 		~RuntimeConsoleOverlay();
+
 		RuntimeConsoleOverlay(const RuntimeConsoleOverlay&) = delete;
+
 		RuntimeConsoleOverlay& operator=(const RuntimeConsoleOverlay&) = delete;
 
 		void BeforeInput(const Swim::Input::InputSystem* input);
+
 		void AfterInput();
 
 		void SetOpen(bool open);
@@ -46,9 +55,11 @@ namespace Engine
 		Swim::UI::UiNodeId GetInputField() const { return field; }
 
 		void SetInputText(const std::string& text);
+
 		std::string GetInputText() const;
 
 	  private:
+
 		void RefreshScrollback();
 
 		UiRuntime& ui;
@@ -59,5 +70,7 @@ namespace Engine
 		Swim::UI::UiNodeId scrollback;
 		Swim::UI::UiNodeId field;
 		std::uint64_t shownRevision = UINT64_MAX;
+
 	};
+
 } // namespace Engine

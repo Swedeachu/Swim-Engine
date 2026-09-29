@@ -43,10 +43,12 @@
 
 namespace
 {
+
 	struct Record
 	{
 		std::unique_ptr<Swim::Rhi::Buffer> Buffer;
 	};
+
 } // namespace
 
 // Registries/GeometryHeap compile against only backend-neutral RHI + RenderGraph headers.

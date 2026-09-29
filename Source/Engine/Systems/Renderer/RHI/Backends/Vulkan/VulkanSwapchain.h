@@ -22,7 +22,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanSwapchain final : public Rhi::Swapchain
 		{
+
 		public:
+
 			VulkanSwapchain(
 				std::shared_ptr<VulkanDeviceState> state,
 				Platform::Window& window,
@@ -78,12 +80,15 @@ namespace Swim::RhiVulkan
 			bool Resize(Rhi::Extent2D requestedExtent, const Rhi::TimelinePoint& safeAfter) override;
 
 		private:
+
 			// Rebuilds the swapchain at the requested size. safeAfter is null only for
 			// the very first build (Initialize); every later rebuild is a live
 			// replacement and must prove the old images are safe to retire (see
 			// Resize/Rebuild in VulkanSwapchain.cpp for the retirement-timeline wait).
 			bool Rebuild(std::uint32_t width, std::uint32_t height, const Rhi::TimelinePoint* safeAfter);
+
 			void DestroySwapchain();
+
 			bool WaitForRetirement(const Rhi::TimelinePoint* safeAfter);
 
 			std::shared_ptr<VulkanDeviceState> state;
@@ -98,6 +103,7 @@ namespace Swim::RhiVulkan
 			Rhi::Format format = Rhi::Format::Undefined;
 			Rhi::Extent2D extent{};
 			Rhi::SwapchainColorSpace colorSpace = Rhi::SwapchainColorSpace::Undefined;
+
 		};
 
 } // namespace Swim::RhiVulkan

@@ -36,9 +36,13 @@ namespace Engine
 	{
 
 	  public:
+
 		RenderExtractor(entt::registry& registry, TransformSystem& transforms, Swim::Render::GpuScene& scene, RenderExtractorDesc desc);
+
 		~RenderExtractor();
+
 		RenderExtractor(const RenderExtractor&) = delete;
+
 		RenderExtractor& operator=(const RenderExtractor&) = delete;
 
 		// lastUse is the latest submitted GPU work that may read objects destroyed
@@ -67,6 +71,7 @@ namespace Engine
 		std::uint32_t GetLiveObjects() const { return liveObjects; }
 
 	  private:
+
 		struct Part
 		{
 			Swim::Render::RenderObjectHandle Object;
@@ -80,13 +85,18 @@ namespace Engine
 		};
 
 		void OnChanged(entt::registry& registry, entt::entity entity);
+
 		void OnDestroyed(entt::registry& registry, entt::entity entity);
 
 		void DestroyEntity(entt::entity entity, Swim::Rhi::TimelinePoint lastUse, RenderExtractionStats& stats);
+
 		void Reconcile(entt::entity entity, const MeshRenderer& renderer, Swim::Rhi::TimelinePoint lastUse, RenderExtractionStats& stats);
+
 		bool CreatePart(entt::entity entity, const MeshRenderer& renderer, const Swim::Render::RenderAffine& world, Part& part,
 			RenderExtractionStats& stats);
+
 		bool ResolvePart(Part& part);
+
 		Swim::Render::RenderAffine WorldOf(entt::entity entity) const;
 
 		entt::registry& registry;
@@ -104,6 +114,7 @@ namespace Engine
 		std::unordered_set<entt::entity> pendingMeshes; // Entities with unresolved or uncreated parts.
 		std::uint32_t liveObjects = 0;
 		bool refreshMeshes = false;
+
 	};
 
 } // namespace Engine

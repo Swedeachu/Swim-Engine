@@ -9,6 +9,7 @@ using namespace Swim::Text;
 
 namespace
 {
+
 	// Hebrew "shalom" (4 x 2 bytes) and Arabic "salam" (4 x 2 bytes).
 	constexpr const char* Shalom = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D";
 	constexpr const char* Salam = "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85";
@@ -16,6 +17,7 @@ namespace
 	std::vector<std::uint32_t> Positions(const std::vector<std::uint8_t>& flags)
 	{
 		std::vector<std::uint32_t> result;
+
 		for (std::uint32_t i = 0; i < flags.size(); ++i)
 		{
 			if (flags[i])
@@ -23,8 +25,10 @@ namespace
 				result.push_back(i);
 			}
 		}
+
 		return result;
 	}
+
 } // namespace
 
 SWIM_TEST("Text.Utf8", "DecodesSanitizesAndStepsBackwards")
@@ -47,6 +51,7 @@ SWIM_TEST("Text.Utf8", "DecodesSanitizesAndStepsBackwards")
 		SWIM_CHECK(IsValidUtf8(sanitized));
 		SWIM_CHECK_EQUAL(sanitized.size(), invalid.size() * 3); // One U+FFFD per invalid byte.
 	}
+
 	SWIM_CHECK_EQUAL(SanitizeUtf8(text), text);
 	std::string encoded;
 	AppendUtf8(encoded, U'\U0010FFFF');

@@ -19,7 +19,9 @@ namespace Swim::RhiVulkan
 
 	class VulkanCommandList final : public Rhi::CommandList
 	{
+
 	public:
+
 		VulkanCommandList(std::shared_ptr<VulkanCommandPoolState> poolState, VkCommandBuffer commandBuffer)
 			: poolState(std::move(poolState)), commandBuffer(commandBuffer)
 		{
@@ -28,36 +30,65 @@ namespace Swim::RhiVulkan
 		}
 
 		~VulkanCommandList() override;
+
 		std::uintptr_t GetNativeHandle() const override;
+
 		void Begin() override;
+
 		void End() override;
+
 		void BeginDebugLabel(std::string_view name, const std::array<float, 4>& color = { 1, 1, 1, 1 }) override;
+
 		void EndDebugLabel() override;
+
 		void InsertDebugLabel(std::string_view name, const std::array<float, 4>& color = { 1, 1, 1, 1 }) override;
+
 		void Transition(Rhi::Buffer& buffer, Rhi::ResourceState before, Rhi::ResourceState after) override;
+
 		void Transition(Rhi::Texture& texture, Rhi::ResourceState before, Rhi::ResourceState after, const Rhi::TextureSubresourceRange& range) override;
+
 		void CopyBuffer(Rhi::Buffer& source, Rhi::Buffer& destination, const Rhi::BufferCopyRegion& region) override;
+
 		void CopyTexture(Rhi::Texture& source, Rhi::Texture& destination, const Rhi::TextureCopyRegion& region) override;
+
 		void CopyBufferToTexture(Rhi::Buffer& source, Rhi::Texture& destination, const Rhi::BufferTextureCopyRegion& region) override;
+
 		void CopyTextureToBuffer(Rhi::Texture& source, Rhi::Buffer& destination, const Rhi::BufferTextureCopyRegion& region) override;
+
 		void BeginRendering(const Rhi::RenderingDesc& desc) override;
+
 		void EndRendering() override;
+
 		void BindGraphicsPipeline(Rhi::GraphicsPipeline&) override;
+
 		void BindComputePipeline(Rhi::ComputePipeline&) override;
+
 		void BindDescriptorTable(std::uint32_t, Rhi::DescriptorTable&) override;
+
 		void PushConstants(Rhi::ShaderStageMask stages, std::uint32_t offset, std::span<const std::byte> data) override;
+
 		void SetViewport(const Rhi::Viewport& viewport) override;
+
 		void SetScissor(const Rhi::ScissorRect& scissor) override;
+
 		void BindVertexBuffer(std::uint32_t, Rhi::Buffer&, std::uint64_t) override;
+
 		void BindIndexBuffer(Rhi::Buffer&, std::uint64_t, Rhi::IndexType) override;
+
 		void Draw(std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) override;
+
 		void DrawIndexed(std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t, std::uint32_t) override;
+
 		void DrawIndexedIndirect(Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
 			std::uint32_t stride = sizeof(Rhi::DrawIndexedIndirectCommand)) override;
+
 		void DrawIndexedIndirectCount(Rhi::Buffer& arguments, std::uint64_t offset, Rhi::Buffer& count, std::uint64_t countOffset,
 			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(Rhi::DrawIndexedIndirectCommand)) override;
+
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
+
 		void ResetQueries(Rhi::QueryPool&, std::uint32_t first, std::uint32_t count) override;
+
 		void WriteTimestamp(Rhi::QueryPool&, std::uint32_t, Rhi::TimestampStage stage = Rhi::TimestampStage::End) override;
 
 		VkCommandBuffer GetCommandBuffer() const
@@ -86,12 +117,17 @@ namespace Swim::RhiVulkan
 		}
 
 	private:
+
 		std::shared_ptr<VulkanCommandPoolState> poolState;
 		VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
 		void RequireRecording(bool outsideRendering = false) const;
+
 		void RequireGraphicsQueue() const;
+
 		void RequireComputeQueue() const;
+
 		void RequireImageQueue() const;
+
 		const VulkanPipelineLayoutState& RequireActivePipeline() const;
 
 		std::uint64_t generation = UINT64_MAX;
@@ -104,13 +140,18 @@ namespace Swim::RhiVulkan
 		bool viewportSet = false;
 		bool scissorSet = false;
 		void RequireDraw() const;
+
 		void RequireIndirectDraw(const Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride) const;
+
 		void RequireDescriptorTables() const;
+
 		void RequirePushConstants() const;
+
 		std::vector<VkPushConstantRange> pushConstantRanges;
 		std::vector<VkShaderStageFlags> initializedPushConstants;
 		void RequireVertexBuffers(bool indexed, std::uint32_t elementCount, std::uint32_t instanceCount,
 			std::uint32_t firstVertex, std::uint32_t firstInstance) const;
+
 		struct VertexBufferBinding
 		{
 			std::uint32_t Slot = 0;
@@ -124,6 +165,7 @@ namespace Swim::RhiVulkan
 		bool executable = false;
 		bool recording = false;
 		bool rendering = false;
+
 	};
 
 } // namespace Swim::RhiVulkan

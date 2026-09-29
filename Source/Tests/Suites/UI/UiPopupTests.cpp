@@ -10,6 +10,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::shared_ptr<UiTheme> FontTheme()
 	{
 		auto theme = std::make_shared<UiTheme>();
@@ -61,6 +62,7 @@ namespace
 			});
 		return it == paint.end() ? -1 : it - paint.begin();
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Popups", "PopupsArePlacedFlippedAndKeptInsideTheCanvasAndPaintOnTop")

@@ -15,6 +15,7 @@
 
 namespace Swim::Render
 {
+
 	class GpuVisibility;
 
 	// Visibility material bins of a shadow visibility instance.
@@ -77,18 +78,25 @@ namespace Swim::Render
 	// the view's tile. Blended materials land in the Excluded bin and cast nothing.
 	class ShadowRenderer
 	{
+
 	  public:
+
 		static constexpr Rhi::Format AtlasFormat = Rhi::Format::D32Float;
 
 		// Depth-only pipeline state: no color targets, D32Float, GreaterEqual with
 		// writes, both faces rasterized (thin and single-sided casters shadow from
 		// either side). Bias is applied when sampling, not while rendering.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
 		// The tile clear: depth test Always with writes, no colour.
 		static Rhi::GraphicsPipelineDesc ClearPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
 		bool SupportsPersistentAtlas() const { return desc.Clear.Pipeline != nullptr; }
+
 		static std::vector<std::uint32_t> VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t masked, std::uint32_t excluded = 1);
+
 		static ShadowBin MaterialBin(const StandardPbr::Parameters& parameters);
+
 		static void RouteMaterial(GpuVisibility& visibility, std::uint32_t materialSet, const StandardPbr::Parameters& parameters);
 
 		// Throws std::invalid_argument when a program is missing.
@@ -99,6 +107,9 @@ namespace Swim::Render
 		ShadowGraphResources Record(RenderGraph& graph, const ShadowFrame& frame) const;
 
 	  private:
+
 		ShadowRendererDesc desc;
+
 	};
+
 } // namespace Swim::Render

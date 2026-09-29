@@ -30,11 +30,13 @@ namespace
 		desc.Layout = layout.get();
 		desc.ColorFormats = { &format, 1 };
 		desc.DepthStencil.DepthTest = desc.DepthStencil.DepthWrite = false;
+
 		for (auto cull : { Rhi::CullMode::None, Rhi::CullMode::Back, Rhi::CullMode::None })
 		{
 			desc.Raster.Cull = cull;
 			SWIM_REQUIRE(device.CreateGraphicsPipeline(desc));
 		}
+
 		return device.GetPipelineCacheData();
 	}
 
@@ -86,11 +88,13 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PipelineCachePersistenceAndReuse", SWIM_TEST_LOCATION,
 				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunPipelineCacheSmoke); } });
 		}
+
 		return true;
 	}();
 

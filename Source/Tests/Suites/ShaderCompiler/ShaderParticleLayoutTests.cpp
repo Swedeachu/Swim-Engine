@@ -18,6 +18,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -42,16 +43,19 @@ namespace
 				return &parameter;
 			}
 		}
+
 		return nullptr;
 	}
 
 	std::map<std::string, std::uint32_t> Offsets(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		return offsets;
 	}
 
@@ -59,12 +63,15 @@ namespace
 	void CheckSpace(const Program& program, const std::map<std::uint32_t, Rhi::DescriptorType>& expected)
 	{
 		const Rhi::DescriptorSchemaDesc* schema = nullptr;
+
 		for (const auto& candidate : program.Interface.DescriptorSchemas)
 		{
 			schema = candidate.Space == 0 ? &candidate : schema;
 		}
+
 		SWIM_REQUIRE(schema != nullptr);
 		SWIM_REQUIRE_EQUAL(schema->Bindings.size(), expected.size());
+
 		for (const auto& binding : schema->Bindings)
 		{
 			SWIM_REQUIRE_MESSAGE(expected.contains(binding.Binding), "unexpected binding " + std::to_string(binding.Binding));
@@ -77,6 +84,7 @@ namespace
 	void CheckRecords(const Program& program)
 	{
 		using namespace Render;
+
 		if (const auto* particles = Parameter(program, "Particles"))
 		{
 			SWIM_CHECK_EQUAL(particles->ElementSize, std::uint32_t(sizeof(GpuParticle)));
@@ -85,6 +93,7 @@ namespace
 			SWIM_CHECK_EQUAL(offsets.at("Lifetime"), std::uint32_t(offsetof(GpuParticle, Lifetime)));
 			SWIM_CHECK_EQUAL(offsets.at("Id"), std::uint32_t(offsetof(GpuParticle, Id)));
 		}
+
 		if (const auto* emitters = Parameter(program, "Emitters"))
 		{
 			SWIM_CHECK_EQUAL(emitters->ElementSize, std::uint32_t(sizeof(GpuParticleEmitter)));
@@ -100,6 +109,7 @@ namespace
 			SWIM_CHECK_EQUAL(offsets.at("SizeTimes"), std::uint32_t(offsetof(E, SizeTimes)));
 			SWIM_CHECK_EQUAL(offsets.at("ColorValues"), std::uint32_t(offsetof(E, ColorValues)));
 		}
+
 		if (const auto* frame = Parameter(program, "Frame"))
 		{
 			SWIM_CHECK_EQUAL(frame->ElementSize, std::uint32_t(sizeof(GpuParticleFrame)));
@@ -108,11 +118,13 @@ namespace
 			SWIM_CHECK_EQUAL(offsets.at("DeltaTime"), std::uint32_t(offsetof(GpuParticleFrame, DeltaTime)));
 			SWIM_CHECK_EQUAL(offsets.at("CameraForward"), std::uint32_t(offsetof(GpuParticleFrame, CameraForward)));
 		}
+
 		if (const auto* counters = Parameter(program, "Counters"))
 		{
 			SWIM_CHECK_EQUAL(counters->ElementSize, std::uint32_t(sizeof(GpuParticleCounters)));
 		}
 	}
+
 } // namespace
 
 // The four compute programs declare exactly their ParticleProgramBindings subset with the
@@ -138,12 +150,14 @@ SWIM_TEST("ShaderCompiler.ParticleLayout", "ProgramsMatchTheBindingContractAndRe
 	CheckSpace(finalize,
 		{ { B::Frame, T::ReadOnlyStorageBuffer }, { B::Emitters, T::ReadOnlyStorageBuffer }, { B::Particles, T::ReadOnlyStorageBuffer },
 			{ B::DrawList, T::StorageBuffer }, { B::Counters, T::StorageBuffer }, { B::DrawArgs, T::StorageBuffer } });
+
 	for (const auto* program : { &simulate, &emit, &compact })
 	{
 		SWIM_CHECK((program->Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ Render::ParticleThreadGroupSize, 1, 1 }));
 		SWIM_CHECK(program->Interface.PushConstants.empty());
 		CheckRecords(*program);
 	}
+
 	SWIM_CHECK((finalize.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ Render::ParticleFinalizeGroupSize, 1, 1 }));
 	CheckRecords(finalize);
 	// The C++ binding subsets name the same bindings.
@@ -158,12 +172,15 @@ SWIM_TEST("ShaderCompiler.ParticleLayout", "ProgramsMatchTheBindingContractAndRe
 	SWIM_REQUIRE_EQUAL(render.Interface.PushConstants.size(), std::size_t(1));
 	SWIM_CHECK_EQUAL(render.Interface.PushConstants[0].Size, R::PushConstantBytes);
 	const Rhi::DescriptorSchemaDesc* bindless = nullptr;
+
 	for (const auto& schema : render.Interface.DescriptorSchemas)
 	{
 		bindless = schema.Space == R::BindlessSpace ? &schema : bindless;
 	}
+
 	SWIM_REQUIRE(bindless != nullptr);
 	SWIM_REQUIRE_EQUAL(bindless->Bindings.size(), std::size_t(2));
+
 	for (const auto& binding : bindless->Bindings)
 	{
 		SWIM_CHECK(binding.Count == 0u); // Runtime-sized.

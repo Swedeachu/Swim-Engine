@@ -16,6 +16,7 @@
 
 namespace Swim::Render
 {
+
 	struct SkinningSystemDesc
 	{
 		Rhi::ComputePipeline* Pipeline = nullptr; // SwimSkinning
@@ -88,17 +89,23 @@ namespace Swim::Render
 	// AbortFrame). The heap and device must outlive the system.
 	class SkinningSystem
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for a missing program or zero capacities and
 		// std::runtime_error when a pool cannot be created.
 		SkinningSystem(Rhi::Device& device, GeometryHeap& heap, SkinningSystemDesc desc);
+
 		~SkinningSystem();
+
 		SkinningSystem(const SkinningSystem&) = delete;
+
 		SkinningSystem& operator=(const SkinningSystem&) = delete;
 
 		// Throws std::invalid_argument for invalid data (see Skinning::BuildSource) and
 		// std::length_error when the pools or mesh slots are full.
 		SkinnedMeshHandle CreateSkinnedMesh(const SkinnedMeshDesc& desc);
+
 		// False for invalid handles or while instances of the mesh exist.
 		bool DestroySkinnedMesh(SkinnedMeshHandle mesh, Rhi::TimelinePoint lastUse = {});
 
@@ -107,6 +114,7 @@ namespace Swim::Render
 		// Creates the instance's output mesh in the heap (bind pose until first skinned).
 		// Throws std::invalid_argument for an invalid mesh and std::length_error when full.
 		SkinInstanceHandle CreateInstance(SkinnedMeshHandle mesh);
+
 		// Destroys the output mesh against lastUse. False for invalid handles.
 		bool DestroyInstance(SkinInstanceHandle instance, Rhi::TimelinePoint lastUse = {});
 
@@ -117,16 +125,21 @@ namespace Swim::Render
 		bool SetPose(SkinInstanceHandle instance, const SkinPose& pose);
 
 		GpuMeshHandle GetOutputMesh(SkinInstanceHandle instance) const;
+
 		std::uint32_t GetPreviousVertexOffset(SkinInstanceHandle instance) const; // 0 for invalid handles.
+
 		// Local bounds of the current pose (Infinite for invalid handles or no pose yet).
 		RenderBounds ComputeBounds(SkinInstanceHandle instance) const;
 
 		// Throws std::logic_error while a frame awaits CommitFrame/AbortFrame.
 		SkinningGraphResources Record(RenderGraph& graph, const GeometryGraphResources& geometry);
+
 		void CommitFrame();
+
 		void AbortFrame();
 
 		std::size_t Collect();
+
 		std::size_t Drain();
 
 		SkinningStats GetStats() const;
@@ -134,6 +147,7 @@ namespace Swim::Render
 		Rhi::Buffer& GetSourceVertexBuffer() const { return *sourceVertices; }
 
 	  private:
+
 		struct Mesh
 		{
 			GeometryRange Vertices; // In vertices.
@@ -183,5 +197,7 @@ namespace Swim::Render
 		std::vector<SkinnedMeshHandle> uploading;
 		std::vector<SkinInstanceHandle> recorded;
 		bool pending = false;
+
 	};
+
 } // namespace Swim::Render

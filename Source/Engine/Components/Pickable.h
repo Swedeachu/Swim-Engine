@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+
 	enum class PickShape : std::uint8_t
 	{
 		Sphere, // Radius, around Offset.
@@ -24,4 +25,5 @@ namespace Engine
 		glm::vec3 Offset{ 0.0f };
 		std::uint32_t Layers = 1u; // Matched against PickOptions::LayerMask.
 	};
+
 } // namespace Engine

@@ -6,7 +6,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanMappedBufferCapture* active = nullptr;
+
 	}
 
 	VulkanMappedBufferCapture::VulkanMappedBufferCapture(bool coherent)
@@ -53,10 +55,12 @@ namespace Swim::Testing
 		functions.vkMapMemory = +[](VkDevice, VkDeviceMemory memory, VkDeviceSize offset, VkDeviceSize, VkMemoryMapFlags, void** data) -> VkResult
 		{
 			++active->MapCalls;
+
 			if (active->MapResult == VK_SUCCESS)
 			{
 				*data = active->Memory.at(RhiVulkan::ToNativeHandle(memory)).data() + offset;
 			}
+
 			return active->MapResult;
 		};
 		functions.vkUnmapMemory = +[](VkDevice, VkDeviceMemory) { ++active->UnmapCalls; };

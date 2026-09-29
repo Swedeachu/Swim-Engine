@@ -7,16 +7,19 @@ namespace Swim::RhiVulkan
 		PFN_vkGetInstanceProcAddr getInstanceProcAddr)
 	{
 		const auto capabilities = QueryValidationCapabilities(getInstanceProcAddr, *state.Log);
+
 		if (!capabilities)
 		{
 			return false;
 		}
+
 #if defined(SWIM_VULKAN_VALIDATION)
 		constexpr bool debugDefault = true;
 #else
 		constexpr bool debugDefault = false;
 #endif
 		const auto policy = SelectDiagnosticsPolicy(desc.Validation, debugDefault, *capabilities, desc.Checks);
+
 		if (!policy.Valid)
 		{
 			std::string failure = std::string(policy.Failure) +
@@ -24,10 +27,12 @@ namespace Swim::RhiVulkan
 				std::to_string(VK_API_VERSION_MINOR(capabilities->LayerVersion)) + "." +
 				std::to_string(VK_API_VERSION_PATCH(capabilities->LayerVersion)) +
 				"; VK_EXT_layer_settings=" + (capabilities->LayerSettingsAvailable ? "available" : "missing");
+
 			if (desc.Validation != Rhi::ValidationMode::Disabled)
 			{
 				failure += ". Select a compatible Vulkan SDK validation layer with VK_LAYER_PATH (the GPU driver version is independent).";
 			}
+
 			state.Log->Record(Rhi::DiagnosticSeverity::Error, "ValidationRequired", failure);
 			return false;
 		}
@@ -35,11 +40,13 @@ namespace Swim::RhiVulkan
 		state.ValidationEnabled = policy.Validation;
 		state.DebugUtilsEnabled = policy.DebugUtils;
 		state.Checks = policy.Checks;
+
 		if (policy.Validation)
 		{
 			// Required after capability selection: never silently degrade if setup fails.
 			builder.enable_validation_layers(true);
 		}
+
 		if (policy.Checks.Any())
 		{
 			// vk-bootstrap adds VK_EXT_layer_settings and the create-info chain.
@@ -49,6 +56,7 @@ namespace Swim::RhiVulkan
 				builder.add_layer_setting(setting);
 			}
 		}
+
 		if (policy.DebugUtils)
 		{
 			builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
@@ -59,6 +67,7 @@ namespace Swim::RhiVulkan
 				.set_debug_messenger_type(VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
 					VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT);
 		}
+
 		state.Log->Record(Rhi::DiagnosticSeverity::Info, "Validation",
 			std::string(policy.Validation ? "Vulkan validation configured" : "Vulkan validation disabled") +
 				"; core=" + (policy.Validation && !policy.Checks.GpuAssisted ? "on" : "off") + "; synchronization=" +

@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	// What one PostProcessor::Record scheduled.
 	struct PostProcessGraphResources
 	{
@@ -22,4 +23,5 @@ namespace Swim::Render
 		GraphPass ExposurePass;
 		GraphPass CompositePass;
 	};
+
 } // namespace Swim::Render

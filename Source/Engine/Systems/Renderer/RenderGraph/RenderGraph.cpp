@@ -5,10 +5,12 @@
 
 namespace Swim::Render
 {
+
 	RenderGraph::RenderGraph()
 	{
 		static std::atomic<std::uint64_t> next{ 1 };
 		definition.Id = next.fetch_add(1, std::memory_order_relaxed);
+
 		if (!definition.Id)
 		{
 			throw std::overflow_error("RenderGraph identity exhausted");
@@ -59,6 +61,7 @@ namespace Swim::Render
 			throw std::invalid_argument(
 				"RenderGraph imports require graphics-family ownership; async ownership transfers are not scheduled");
 		}
+
 		for (const auto& r : definition.Resources)
 		{
 			if (r.Imported == &buffer)
@@ -71,6 +74,7 @@ namespace Swim::Render
 		auto& r = definition.Resources.back();
 		r.Imported = &buffer;
 		r.Initial = initial;
+
 		try
 		{
 			Internal::ValidateState(r, initial, true);
@@ -80,6 +84,7 @@ namespace Swim::Render
 			definition.Resources.pop_back();
 			throw;
 		}
+
 		return handle;
 	}
 
@@ -90,6 +95,7 @@ namespace Swim::Render
 			throw std::invalid_argument(
 				"RenderGraph imports require graphics-family ownership; async ownership transfers are not scheduled");
 		}
+
 		for (const auto& r : definition.Resources)
 		{
 			if (r.Imported == &texture)
@@ -102,6 +108,7 @@ namespace Swim::Render
 		auto& r = definition.Resources.back();
 		r.Imported = &texture;
 		r.Initial = initial;
+
 		try
 		{
 			Internal::ValidateState(r, initial, true);
@@ -111,6 +118,7 @@ namespace Swim::Render
 			definition.Resources.pop_back();
 			throw;
 		}
+
 		return handle;
 	}
 
@@ -118,15 +126,18 @@ namespace Swim::Render
 	{
 		constexpr auto allowed = Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::Vertex | Rhi::BufferUsage::Index |
 			Rhi::BufferUsage::Uniform | Rhi::BufferUsage::Storage | Rhi::BufferUsage::Indirect;
+
 		if (!desc.Size || desc.Usage == Rhi::BufferUsage::None ||
 			(static_cast<std::uint32_t>(desc.Usage) & ~static_cast<std::uint32_t>(allowed)) != 0)
 		{
 			throw std::invalid_argument("RenderGraph upload needs a size and GPU-read usage");
 		}
+
 		if (!desc.Alignment || (desc.Alignment & (desc.Alignment - 1)) != 0)
 		{
 			throw std::invalid_argument("RenderGraph upload alignment must be a power of two");
 		}
+
 		if (!writer)
 		{
 			throw std::invalid_argument("RenderGraph upload needs a writer");
@@ -183,11 +194,14 @@ namespace Swim::Render
 	void RenderGraph::ExportResource(std::uint64_t graph, std::uint32_t index, GraphKind kind, Rhi::ResourceState final)
 	{
 		const auto& r = Internal::RequireResource(definition, graph, index, kind);
+
 		if (r.Staging != Internal::GraphStaging::None)
 		{
 			throw std::invalid_argument("Staged RenderGraph buffers have fixed completion states: " + r.Name);
 		}
+
 		Internal::ValidateState(r, final);
+
 		if (r.Exported && r.Final != final)
 		{
 			throw std::invalid_argument("Conflicting RenderGraph export states");
@@ -211,6 +225,7 @@ namespace Swim::Render
 		std::function<void(RenderCommandContext&)> execute)
 	{
 		Internal::ValidateName(name);
+
 		if (!setup || !execute || (type != Rhi::QueueType::Graphics && type != Rhi::QueueType::Compute && type != Rhi::QueueType::Transfer))
 		{
 			throw std::invalid_argument("RenderGraph pass needs setup, execution and a supported type");
@@ -235,6 +250,8 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Invalid RenderGraph dependency handle");
 		}
+
 		definition.Passes[pass.Index].Dependencies.push_back(prerequisite.Index);
 	}
+
 } // namespace Swim::Render

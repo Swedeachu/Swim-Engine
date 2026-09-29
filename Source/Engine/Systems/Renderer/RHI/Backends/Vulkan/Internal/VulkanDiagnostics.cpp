@@ -10,24 +10,29 @@ namespace Swim::RhiVulkan
 		VkDebugUtilsMessageTypeFlagsEXT, const VkDebugUtilsMessengerCallbackDataEXT* data, void* userData) noexcept
 	{
 		auto* state = static_cast<VulkanDiagnosticsState*>(userData);
+
 		if (state == nullptr)
 		{
 			return VK_FALSE;
 		}
+
 		const auto level = (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0
 			? Rhi::DiagnosticSeverity::Error
 			: (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0
 				? Rhi::DiagnosticSeverity::Warning : Rhi::DiagnosticSeverity::Info;
 		const char* id = data && data->pMessageIdName ? data->pMessageIdName : "Vulkan";
 		const char* message = data && data->pMessage ? data->pMessage : "No diagnostic text supplied";
+
 		if (state->Log)
 		{
 			state->Log->Record(level, id, message);
 		}
+
 		if (state->Echo)
 		{
 			std::fprintf(stderr, "[Swim Vulkan] %s: %s\n", id, message);
 		}
+
 		// Never throw, call Vulkan, invoke arbitrary user code, or ask validation
 		// to skip the originating operation from this callback.
 		return VK_FALSE;
@@ -41,6 +46,7 @@ namespace Swim::RhiVulkan
 		{
 			return;
 		}
+
 		try
 		{
 			const std::string owned(name);
@@ -50,6 +56,7 @@ namespace Swim::RhiVulkan
 			info.objectHandle = handle;
 			info.pObjectName = owned.c_str();
 			const auto result = ObserveVulkanResult(state, state.Instance->Dispatch.vkSetDebugUtilsObjectNameEXT(state.Device.device, &info), "vkSetDebugUtilsObjectNameEXT");
+
 			if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST && state.Instance->Diagnostics.Log)
 			{
 				state.Instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Warning,

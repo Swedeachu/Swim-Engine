@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Writes the complete upload payload into mapped, write-only staging bytes.
 	// Invoked by RenderGraphExecutor::Execute before recording, once per execution
 	// of a compiled graph whose passes read the upload. Do not read the span.
@@ -31,4 +32,5 @@ namespace Swim::Render
 		std::uint64_t Alignment = 4;
 		std::string_view DebugName;
 	};
+
 } // namespace Swim::Render

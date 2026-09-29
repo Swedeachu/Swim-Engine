@@ -18,6 +18,7 @@ SWIM_TEST("Engine.Profiling", "CapturesSumPerFrameAndReportPercentiles")
 	{ std::error_code ignored; std::filesystem::remove(csv, ignored); }
 	profiler.Begin(2, 4, csv, "unit");
 	SWIM_CHECK(profiler.IsCapturing());
+
 	for (int frame = 0; frame < 6; ++frame)
 	{
 		// Warm-up frames carry a huge value that must not count.
@@ -25,13 +26,16 @@ SWIM_TEST("Engine.Profiling", "CapturesSumPerFrameAndReportPercentiles")
 		profiler.Add("cpu", "Update", base);
 		profiler.Add("gpu", "Pass", 0.5);
 		profiler.Add("gpu", "Pass", 0.25); // Same name twice in one frame: summed.
+
 		if (frame == 5)
 		{
 			profiler.Add("gpu", "Rare", 2.0);
 		}
+
 		const bool done = profiler.EndFrame();
 		SWIM_CHECK_EQUAL(done, frame == 5);
 	}
+
 	SWIM_CHECK(!profiler.IsCapturing());
 	const auto& report = profiler.GetReport();
 	SWIM_CHECK_EQUAL(report.Frames, 4u);

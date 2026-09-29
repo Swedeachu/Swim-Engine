@@ -34,12 +34,14 @@ SWIM_TEST("RHI.Vulkan.PushConstantLayout", "InvalidRangesRejectBeforeNativeCreat
 		{ 0, 4, Rhi::ShaderStageMask::None }, { 0, 4, Rhi::ShaderStageMask::Compute },
 		{ 0, 4, static_cast<Rhi::ShaderStageMask>(0x80000000u) }
 	}};
+
 	for (const auto& range : invalid)
 	{
 		auto program = capture.MakeProgram({ {}, { &range, 1 } });
 		SWIM_REQUIRE(program);
 		SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} }));
 	}
+
 	SWIM_CHECK_EQUAL(capture.LayoutsCreated, 0u);
 	const Rhi::PushConstantRange valid{ 124, 4, Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment };
 	auto program = capture.MakeProgram({ {}, { &valid, 1 } });

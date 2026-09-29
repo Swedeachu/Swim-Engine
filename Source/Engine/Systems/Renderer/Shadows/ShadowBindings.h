@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of ShadowDepth.slang (SwimShadowDepth and SwimShadowMasked).
 	// Space 0 is per shadow view and page slot; the masked variant also reads the
 	// bindless textures in space 1, defined exactly like ForwardPlusBindlessSpace so one
@@ -31,11 +32,14 @@ namespace Swim::Render
 		Rhi::DescriptorSchemaDesc space{ ShadowDepthBindings::BindlessSpace,
 			{ { ShadowDepthBindings::BindlessSamplers, Rhi::DescriptorType::Sampler, samplers, Rhi::ShaderStageMask::None },
 				{ ShadowDepthBindings::BindlessTextures, Rhi::DescriptorType::SampledTexture, textures, Rhi::ShaderStageMask::None } } };
+
 		for (auto& binding : space.Bindings)
 		{
 			binding.Stages = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute;
 			binding.PartiallyBound = binding.UpdateAfterBind = true;
 		}
+
 		return space;
 	}
+
 } // namespace Swim::Render

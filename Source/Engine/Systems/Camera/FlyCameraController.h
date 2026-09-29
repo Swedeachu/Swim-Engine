@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+
 	// The fly camera as a runtime behaviour (formerly the editor camera). Attach it to
 	// any entity; it drives the CameraSystem's main camera:
 	//
@@ -25,7 +26,9 @@ namespace Engine
 	// it.
 	class FlyCameraController : public Behavior
 	{
+
 	  public:
+
 		struct Settings
 		{
 			float MoveSpeed = 5.0f;
@@ -50,11 +53,13 @@ namespace Engine
 		};
 
 		FlyCameraController(Scene* scene, entt::entity owner);
+
 		FlyCameraController(Scene* scene, entt::entity owner, Settings settings);
 
 		int Awake() override { return 0; }
 
 		int Init() override;
+
 		void Update(double dt) override;
 
 		void FixedUpdate(unsigned int) override {}
@@ -98,9 +103,12 @@ namespace Engine
 		const ZoomState& GetZoom() const { return zoom; }
 
 	  private:
+
 		Settings settings;
 		std::function<bool()> inputGate;
 		bool looking = false;
 		ZoomState zoom;
+
 	};
+
 } // namespace Engine

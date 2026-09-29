@@ -49,11 +49,13 @@ namespace Engine
 			[&](PhysicsMaterialHandle handle, physx::PxMaterial*& material)
 			{
 				(void)handle;
+
 				if (material)
 				{
 					material->release();
 					material = nullptr;
 				}
+
 			});
 		materials.Reset();
 
@@ -84,12 +86,14 @@ namespace Engine
 		desc.filterShaderData = &filterShaderConstants;
 		desc.filterShaderDataSize = sizeof(filterShaderConstants);
 		desc.simulationEventCallback = eventCallback.get();
+
 		if (worldDesc.EnableContinuousCollisionDetection)
 		{
 			desc.flags |= physx::PxSceneFlag::eENABLE_CCD;
 		}
 
 		physx::PxScene* createdScene = physics.createScene(desc);
+
 		if (!createdScene)
 		{
 			eventCallback.reset();
@@ -110,16 +114,19 @@ namespace Engine
 		}
 
 		physx::PxMaterial* material = physics.createMaterial(desc.StaticFriction, desc.DynamicFriction, desc.Restitution);
+
 		if (!material)
 		{
 			return {};
 		}
+
 		return materials.Insert(material);
 	}
 
 	void PhysXWorldBackend::DestroyMaterial(PhysicsMaterialHandle material)
 	{
 		physx::PxMaterial* pxMaterial = nullptr;
+
 		if (materials.Remove(material, pxMaterial) && pxMaterial)
 		{
 			pxMaterial->release();
@@ -134,6 +141,7 @@ namespace Engine
 	physx::PxShape* PhysXWorldBackend::CreateInstancedShape(const ShapeRecord& record) const
 	{
 		physx::PxMaterial* const* materialPtr = materials.Get(record.Material);
+
 		if (!materialPtr || !*materialPtr)
 		{
 			return nullptr;
@@ -149,10 +157,12 @@ namespace Engine
 			case ShapeType::Box:
 			{
 				const glm::vec3 extents = desc.Box.HalfExtents;
+
 				if (!IsFiniteVec3(extents) || !(extents.x > 0.0f) || !(extents.y > 0.0f) || !(extents.z > 0.0f))
 				{
 					return nullptr;
 				}
+
 				shape = physics.createShape(physx::PxBoxGeometry(extents.x, extents.y, extents.z), **materialPtr, true);
 				break;
 			}
@@ -162,6 +172,7 @@ namespace Engine
 				{
 					return nullptr;
 				}
+
 				shape = physics.createShape(physx::PxSphereGeometry(desc.Sphere.Radius), **materialPtr, true);
 				break;
 			}
@@ -172,6 +183,7 @@ namespace Engine
 				{
 					return nullptr;
 				}
+
 				shape = physics.createShape(physx::PxCapsuleGeometry(desc.Capsule.Radius, desc.Capsule.HalfHeight), **materialPtr, true);
 				break;
 			}
@@ -192,12 +204,14 @@ namespace Engine
 		}
 
 		physx::PxTransform localPose = ToPx(desc.LocalPose);
+
 		if (desc.Type == ShapeType::Capsule)
 		{
 			// PhysX capsules are X-aligned; Swim's generic capsule is Y-up.
 			const physx::PxQuat yUp(physx::PxHalfPi, physx::PxVec3(0.0f, 0.0f, 1.0f));
 			localPose.q = localPose.q * yUp;
 		}
+
 		shape->setLocalPose(localPose);
 
 		if (desc.IsTrigger)
@@ -217,6 +231,7 @@ namespace Engine
 	ShapeHandle PhysXWorldBackend::CreateShape(const ShapeDesc& desc, PhysicsMaterialHandle material)
 	{
 		physx::PxMaterial* const* materialPtr = materials.Get(material);
+
 		if (!materialPtr || !*materialPtr || !IsValidPose(desc.LocalPose))
 		{
 			return {};
@@ -229,10 +244,12 @@ namespace Engine
 		// Validate the description now rather than at first use, so an
 		// unbuildable shape fails where the caller asked for it.
 		physx::PxShape* probe = CreateInstancedShape(record);
+
 		if (!probe)
 		{
 			return {};
 		}
+
 		probe->release();
 
 		return shapes.Insert(record);
@@ -260,6 +277,7 @@ namespace Engine
 		}
 
 		const ShapeRecord* shapeRecord = shapes.Get(desc.Shape);
+
 		if (!shapeRecord)
 		{
 			return {};
@@ -292,6 +310,7 @@ namespace Engine
 		else
 		{
 			dynamic = physics.createRigidDynamic(pose);
+
 			if (!dynamic)
 			{
 				return {};
@@ -314,6 +333,7 @@ namespace Engine
 		// Instantiate this body's own shape. Filter data is per-body state, so it
 		// must never be written onto a template that other bodies also use.
 		physx::PxShape* instancedShape = CreateInstancedShape(*shapeRecord);
+
 		if (!instancedShape)
 		{
 			ReleaseActor(actor);
@@ -355,6 +375,7 @@ namespace Engine
 			{
 				dynamic->setLinearVelocity(ToPx(desc.InitialLinearVelocity), true);
 			}
+
 			if (desc.HasInitialAngularVelocity)
 			{
 				dynamic->setAngularVelocity(ToPx(desc.InitialAngularVelocity), true);
@@ -381,6 +402,7 @@ namespace Engine
 	void PhysXWorldBackend::DestroyBody(BodyHandle body)
 	{
 		BodyRecord record{};
+
 		if (!bodies.Remove(body, record) || !record.Actor)
 		{
 			return;
@@ -410,6 +432,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || !record->Actor)
 		{
 			return false;
@@ -428,6 +451,7 @@ namespace Engine
 
 		BodyRecord* record = bodies.Get(body);
 		physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic || !dynamic->getRigidBodyFlags().isSet(physx::PxRigidBodyFlag::eKINEMATIC))
 		{
 			return false;
@@ -440,6 +464,7 @@ namespace Engine
 	bool PhysXWorldBackend::GetBodyPose(BodyHandle body, PhysicsPose& pose) const
 	{
 		const BodyRecord* record = bodies.Get(body);
+
 		if (!record || !record->Actor)
 		{
 			return false;
@@ -458,6 +483,7 @@ namespace Engine
 
 		BodyRecord* record = bodies.Get(body);
 		physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic || dynamic->getRigidBodyFlags().isSet(physx::PxRigidBodyFlag::eKINEMATIC))
 		{
 			return false;
@@ -476,6 +502,7 @@ namespace Engine
 
 		BodyRecord* record = bodies.Get(body);
 		physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic)
 		{
 			return false;
@@ -494,6 +521,7 @@ namespace Engine
 
 		BodyRecord* record = bodies.Get(body);
 		physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic)
 		{
 			return false;
@@ -507,6 +535,7 @@ namespace Engine
 	{
 		const BodyRecord* record = bodies.Get(body);
 		const physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic)
 		{
 			return false;
@@ -520,6 +549,7 @@ namespace Engine
 	{
 		const BodyRecord* record = bodies.Get(body);
 		const physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
 		if (!dynamic)
 		{
 			return false;
@@ -551,11 +581,13 @@ namespace Engine
 		}
 
 		const bool finished = scene->fetchResults(block);
+
 		if (finished)
 		{
 			simulating = false;
 			FlushPendingDestroy();
 		}
+
 		return finished;
 	}
 
@@ -609,15 +641,18 @@ namespace Engine
 		};
 
 		bool status = false;
+
 		switch (shape.Type)
 		{
 			case ShapeType::Box:
 			{
 				const glm::vec3 extents = shape.Box.HalfExtents;
+
 				if (!IsFiniteVec3(extents) || !(extents.x > 0.0f) || !(extents.y > 0.0f) || !(extents.z > 0.0f))
 				{
 					return false;
 				}
+
 				const physx::PxBoxGeometry geometry(extents.x, extents.y, extents.z);
 				status = executeSweep(geometry);
 				break;
@@ -628,6 +663,7 @@ namespace Engine
 				{
 					return false;
 				}
+
 				const physx::PxSphereGeometry geometry(shape.Sphere.Radius);
 				status = executeSweep(geometry);
 				break;
@@ -639,6 +675,7 @@ namespace Engine
 				{
 					return false;
 				}
+
 				const physx::PxQuat yUp(physx::PxHalfPi, physx::PxVec3(0.0f, 0.0f, 1.0f));
 				queryPose.q = queryPose.q * yUp;
 				const physx::PxCapsuleGeometry geometry(shape.Capsule.Radius, shape.Capsule.HalfHeight);
@@ -690,15 +727,18 @@ namespace Engine
 		};
 
 		bool status = false;
+
 		switch (shape.Type)
 		{
 			case ShapeType::Box:
 			{
 				const glm::vec3 extents = shape.Box.HalfExtents;
+
 				if (!IsFiniteVec3(extents) || !(extents.x > 0.0f) || !(extents.y > 0.0f) || !(extents.z > 0.0f))
 				{
 					return 0;
 				}
+
 				const physx::PxBoxGeometry geometry(extents.x, extents.y, extents.z);
 				status = executeOverlap(geometry);
 				break;
@@ -709,6 +749,7 @@ namespace Engine
 				{
 					return 0;
 				}
+
 				const physx::PxSphereGeometry geometry(shape.Sphere.Radius);
 				status = executeOverlap(geometry);
 				break;
@@ -720,6 +761,7 @@ namespace Engine
 				{
 					return 0;
 				}
+
 				const physx::PxQuat yUp(physx::PxHalfPi, physx::PxVec3(0.0f, 0.0f, 1.0f));
 				queryPose.q = queryPose.q * yUp;
 				const physx::PxCapsuleGeometry geometry(shape.Capsule.Radius, shape.Capsule.HalfHeight);
@@ -743,10 +785,12 @@ namespace Engine
 		std::unordered_set<std::uint64_t> emittedPairs;
 		const physx::PxU32 touchCount = buffer.getNbAnyHits();
 		std::size_t outputCount = 0;
+
 		for (physx::PxU32 i = 0; i < touchCount && outputCount < hits.size(); ++i)
 		{
 			const physx::PxOverlapHit& pxHit = buffer.getAnyHit(i);
 			const BodyHandle body = ResolveBody(pxHit.actor);
+
 			if (!body)
 			{
 				continue;
@@ -757,6 +801,7 @@ namespace Engine
 				^ (static_cast<std::uint64_t>(body.Generation) << 32u)
 				^ (static_cast<std::uint64_t>(shape.Index) << 16u)
 				^ static_cast<std::uint64_t>(shape.Generation);
+
 			if (!emittedPairs.insert(pairKey).second)
 			{
 				continue;
@@ -767,6 +812,7 @@ namespace Engine
 			output.Shape = shape;
 			output.UserData = ResolveUserData(body);
 		}
+
 		return outputCount;
 	}
 
@@ -810,6 +856,7 @@ namespace Engine
 			case ForceMode::VelocityChange: return physx::PxForceMode::eVELOCITY_CHANGE;
 			case ForceMode::Acceleration: return physx::PxForceMode::eACCELERATION;
 		}
+
 		return physx::PxForceMode::eFORCE;
 	}
 
@@ -821,6 +868,7 @@ namespace Engine
 		}
 
 		const physx::PxRigidActor* rigidActor = actor->is<physx::PxRigidActor>();
+
 		if (!rigidActor)
 		{
 			return {};
@@ -853,6 +901,7 @@ namespace Engine
 		{
 			ReleaseActor(actor);
 		}
+
 		pendingDestroy.clear();
 	}
 
@@ -866,10 +915,12 @@ namespace Engine
 		// Each body owns its shape instances, so their handle mappings die with
 		// the actor rather than lingering for the lifetime of the world.
 		const physx::PxU32 shapeCount = actor->getNbShapes();
+
 		if (shapeCount > 0)
 		{
 			std::vector<physx::PxShape*> attachedShapes(shapeCount, nullptr);
 			const physx::PxU32 written = actor->getShapes(attachedShapes.data(), shapeCount);
+
 			for (physx::PxU32 i = 0; i < written; ++i)
 			{
 				shapeHandles.erase(attachedShapes[i]);
@@ -880,6 +931,7 @@ namespace Engine
 		{
 			owner->removeActor(*actor);
 		}
+
 		actor->release();
 	}
 

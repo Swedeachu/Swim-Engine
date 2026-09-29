@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contracts of the environment programs (Shaders/Slang/Environment).
 	// Every program uses one space and 8x8 thread groups over the texels it writes,
 	// except the irradiance projection (one 64-thread group).
@@ -67,4 +68,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t ThreadGroupSize = 8;
 		static constexpr std::uint32_t PushConstantBytes = 16; // uint Size, uint SampleCount, 2 reserved.
 	};
+
 } // namespace Swim::Render

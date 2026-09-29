@@ -12,6 +12,7 @@
 // compares the GPU's histogram, exposure state, bloom levels and output with it.
 namespace Swim::Render::Post
 {
+
 	using Float3 = std::array<float, 3>;
 	using Float4 = std::array<float, 4>;
 	using Matrix3 = std::array<float, 9>; // Row-major.
@@ -116,4 +117,5 @@ namespace Swim::Render::Post
 	// The whole frame: histogram (automatic exposure), exposure, bloom, composite.
 	PostResult RunPostProcess(
 		const Image& source, const PostProcessSettings& settings, const GpuExposureState& previous, float deltaTime, bool reset);
+
 } // namespace Swim::Render::Post

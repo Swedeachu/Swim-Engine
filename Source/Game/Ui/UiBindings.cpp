@@ -5,6 +5,7 @@
 
 namespace Game
 {
+
 	using namespace Swim::UI;
 
 	void UiBindings::OnClick(UiNodeId node, std::function<void()> handler)
@@ -43,20 +44,25 @@ namespace Game
 			{
 				continue;
 			}
+
 			const auto found = clickHandlers.find(event.Node.Value);
+
 			if (found != clickHandlers.end() && found->second)
 			{
 				++clicks;
 				found->second();
 			}
 		}
+
 		for (auto& watch : values)
 		{
 			if (!document.Contains(watch.Node))
 			{
 				continue;
 			}
+
 			const float value = document.GetValue(watch.Node);
+
 			if (!watch.Seen)
 			{
 				// The first observation is the control's initial state, not a change.
@@ -69,13 +75,16 @@ namespace Game
 				watch.Handler(value);
 			}
 		}
+
 		for (auto& watch : checks)
 		{
 			if (!document.Contains(watch.Node))
 			{
 				continue;
 			}
+
 			const bool checked = document.GetChecked(watch.Node) == UiCheckState::Checked;
+
 			if (!watch.Seen)
 			{
 				// The first observation is the control's initial state, not a change.
@@ -88,13 +97,16 @@ namespace Game
 				watch.Handler(checked);
 			}
 		}
+
 		for (auto& watch : texts)
 		{
 			if (!document.Contains(watch.Node))
 			{
 				continue;
 			}
+
 			const std::string& text = document.GetText(watch.Node);
+
 			if (!watch.Seen)
 			{
 				// The first observation is the control's initial state, not a change.
@@ -112,10 +124,12 @@ namespace Game
 	void SetLabelText(UiDocument& document, UiNodeId node, const std::string& text)
 	{
 		const auto& theme = document.GetTheme();
+
 		if (!theme)
 		{
 			return;
 		}
+
 		SetLabelText(document, node, text, theme->Fonts, theme->Class(UiThemeClass::Label).TextSize);
 	}
 
@@ -126,16 +140,19 @@ namespace Game
 		{
 			return;
 		}
+
 		document.SetText(node, fonts, text, size);
 	}
 
 	UiNodeId CreateStyledNode(UiDocument& document, UiNodeId parent, const UiStyle& style, UiThemeClass paintClass)
 	{
 		const auto node = document.Create(parent);
+
 		if (paintClass != UiThemeClass::None)
 		{
 			document.SetThemeClass(node, paintClass, UiThemeApply::Paint);
 		}
+
 		document.SetStyle(node, style);
 		return node;
 	}
@@ -158,4 +175,5 @@ namespace Game
 		style.AlignItems = UiAlign::Center;
 		return CreateStyledNode(document, parent, style);
 	}
+
 } // namespace Game

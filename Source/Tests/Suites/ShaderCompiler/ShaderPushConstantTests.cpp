@@ -5,6 +5,7 @@ using namespace Swim;
 
 namespace
 {
+
 	ShaderCompiler::ShaderReflectionResult ParsePushBlock(std::string_view elementBinding)
 	{
 		return ShaderCompiler::ParseSlangReflectionJson(std::string(R"json({
@@ -13,6 +14,7 @@ namespace
 			"entryPoints":[{"name":"main","stage":"fragment"}]
 		})json");
 	}
+
 }
 
 SWIM_TEST("ShaderCompiler.PushConstants", "ByteExtentUsesUniformElementLayoutAndActualProgramStages")
@@ -50,6 +52,7 @@ SWIM_TEST("ShaderCompiler.PushConstants", "MissingMalformedAndUnalignedElementLa
 		R"json({"binding":{"kind":"uniform","offset":0,"size":6}})json",
 		R"json({"binding":{"kind":"uniform","offset":4294967292,"size":8}})json"
 	};
+
 	for (const auto json : invalid)
 	{
 		const auto parsed = ParsePushBlock(json);
@@ -78,6 +81,7 @@ SWIM_TEST("ShaderCompiler.PushConstants", "MultipleBlocksAndUnsupportedTypesDisc
 	SWIM_CHECK(converted.Interface.DescriptorSchemas.empty());
 	SWIM_CHECK(converted.Interface.PushConstants.empty());
 	parsed.Reflection.GlobalParameters.pop_back();
+
 	for (const auto kind : { "parameterBlock", "array", "resource" })
 	{
 		parsed.Reflection.GlobalParameters.back().TypeKind = kind;
@@ -86,6 +90,7 @@ SWIM_TEST("ShaderCompiler.PushConstants", "MultipleBlocksAndUnsupportedTypesDisc
 		SWIM_CHECK(converted.Interface.DescriptorSchemas.empty());
 		SWIM_CHECK(converted.Interface.PushConstants.empty());
 	}
+
 	parsed.Reflection.GlobalParameters.back() = valid;
 	parsed.Reflection.GlobalParameters.back().Count = 2;
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection));

@@ -24,15 +24,19 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		RequireGraphicsQueue();
 		RequireResource<VulkanBuffer>(buffer, GetState());
+
 		if (type != Rhi::IndexType::Uint16 && type != Rhi::IndexType::Uint32)
 		{
 			throw std::invalid_argument("Unsupported Vulkan index type");
 		}
+
 		const std::uint32_t stride = type == Rhi::IndexType::Uint16 ? 2 : 4;
+
 		if (!HasBufferUsage(buffer.GetDesc().Usage, Rhi::BufferUsage::Index) || offset >= buffer.GetDesc().Size || offset % stride != 0)
 		{
 			throw std::invalid_argument("Vulkan index binding requires index usage and an aligned in-range offset");
 		}
+
 		GetState()->Dispatch.vkCmdBindIndexBuffer(commandBuffer, FromNativeHandle<VkBuffer>(buffer.GetNativeHandle()), offset,
 			type == Rhi::IndexType::Uint16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
 		availableIndices = (buffer.GetDesc().Size - offset) / stride;
@@ -42,12 +46,15 @@ namespace Swim::RhiVulkan
 	{
 		RequireRecording();
 		RequireGraphicsQueue();
+
 		if (!rendering || graphicsPipeline == nullptr || !viewportSet || !scissorSet)
 		{
 			throw std::logic_error("Vulkan draw requires rendering, a graphics pipeline, viewport and scissor");
 		}
+
 		RequireDescriptorTables();
 		RequirePushConstants();
+
 		if (!graphicsPipeline->MatchesRendering(renderingColors, renderingDepth, renderingSamples))
 		{
 			throw std::invalid_argument("Vulkan graphics pipeline formats and samples must match the active attachments");
@@ -65,10 +72,12 @@ namespace Swim::RhiVulkan
 		std::int32_t vertexOffset, std::uint32_t firstInstance)
 	{
 		RequireDraw();
+
 		if (availableIndices == 0 || firstIndex > availableIndices || indexCount > availableIndices - firstIndex)
 		{
 			throw std::invalid_argument("Vulkan indexed draw exceeds the bound index buffer");
 		}
+
 		RequireVertexBuffers(true, indexCount, instanceCount, 0, firstInstance);
 		GetState()->Dispatch.vkCmdDrawIndexed(commandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}

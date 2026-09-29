@@ -14,6 +14,7 @@
 
 namespace Swim::Testing::ParticleScene
 {
+
 	namespace P = Render::Particles;
 	using Float2 = std::array<float, 2>;
 	using Float3 = std::array<float, 3>;
@@ -138,6 +139,7 @@ namespace Swim::Testing::ParticleScene
 		image.Ambiguous.assign(image.Texels.size(), 0);
 		const float width = float(image.Width);
 		const float height = float(image.Height);
+
 		for (const auto& batch : batches)
 		{
 			for (const auto& particle : batch.Particles)
@@ -145,29 +147,36 @@ namespace Swim::Testing::ParticleScene
 				std::array<Float3, 4> screen{}; // x, y in pixels, depth
 				std::array<Float2, 4> local{};
 				std::array<Float2, 4> uv{};
+
 				for (std::uint32_t c = 0; c < 4; ++c)
 				{
 					const auto vertex = P::BillboardCorner(frame, *batch.Emitter, particle, c);
 					std::array<float, 4> clip{};
+
 					for (int r = 0; r < 4; ++r)
 					{
 						clip[r] = frame.ViewProjection[r * 4] * vertex.Position[0] + frame.ViewProjection[r * 4 + 1] * vertex.Position[1] +
 							frame.ViewProjection[r * 4 + 2] * vertex.Position[2] + frame.ViewProjection[r * 4 + 3];
 					}
+
 					screen[c] = { (clip[0] / clip[3] + 1.0f) * 0.5f * width, (1.0f - clip[1] / clip[3]) * 0.5f * height,
 						clip[2] / clip[3] };
 					local[c] = { (c & 1u) != 0 ? 1.0f : 0.0f, (c & 2u) != 0 ? 0.0f : 1.0f };
 					uv[c] = vertex.Uv;
+
 					if (!(clip[3] > 0.0f))
 					{
 						screen[c][2] = -1.0f; // Behind the camera: never drawn.
 					}
 				}
+
 				if (screen[0][2] < 0.0f || screen[1][2] < 0.0f || screen[2][2] < 0.0f || screen[3][2] < 0.0f)
 				{
 					continue;
 				}
+
 				float minX = width, minY = height, maxX = 0.0f, maxY = 0.0f;
+
 				for (const auto& s : screen)
 				{
 					minX = std::min(minX, s[0]);
@@ -175,11 +184,13 @@ namespace Swim::Testing::ParticleScene
 					minY = std::min(minY, s[1]);
 					maxY = std::max(maxY, s[1]);
 				}
+
 				const int x0 = std::max(0, int(std::floor(minX)) - 1);
 				const int x1 = std::min(int(image.Width) - 1, int(std::ceil(maxX)) + 1);
 				const int y0 = std::max(0, int(std::floor(minY)) - 1);
 				const int y1 = std::min(int(image.Height) - 1, int(std::ceil(maxY)) + 1);
 				const std::array<std::array<int, 3>, 2> triangles{ { { 0, 1, 2 }, { 2, 1, 3 } } };
+
 				for (int y = y0; y <= y1; ++y)
 				{
 					for (int x = x0; x <= x1; ++x)
@@ -190,6 +201,7 @@ namespace Swim::Testing::ParticleScene
 						bool ambiguous = false;
 						std::array<float, 3> weights{};
 						std::array<int, 3> chosen{};
+
 						for (std::size_t ti = 0; ti < triangles.size(); ++ti)
 						{
 							const auto& t = triangles[ti];
@@ -197,10 +209,12 @@ namespace Swim::Testing::ParticleScene
 							const auto& b = screen[t[1]];
 							const auto& c = screen[t[2]];
 							const float area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
 							if (std::abs(area) < 1.0e-12f)
 							{
 								continue;
 							}
+
 							const float w0 = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
 							const float w1 = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
 							const float w2 = 1.0f - w0 - w1;
@@ -213,40 +227,50 @@ namespace Swim::Testing::ParticleScene
 							// Outer edges only: the shared diagonal (1-2) is interior to the quad.
 							const float nearest = ti == 0 ? std::min(edgeDistance(c, a, w1), edgeDistance(a, b, w2))
 														  : std::min(edgeDistance(b, c, w0), edgeDistance(c, a, w1));
+
 							if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f)
 							{
 								covered = true;
 								weights = { w0, w1, w2 };
 								chosen = t;
 							}
+
 							ambiguous = ambiguous || nearest < edgeTolerance;
 						}
+
 						const std::size_t index = std::size_t(y) * image.Width + std::size_t(x);
+
 						if (!covered)
 						{
 							image.Ambiguous[index] = image.Ambiguous[index] || ambiguous;
 							continue;
 						}
+
 						float depth = 0.0f;
 						Float2 l{ 0, 0 }, u{ 0, 0 };
+
 						for (int k = 0; k < 3; ++k)
 						{
 							depth += weights[k] * screen[chosen[k]][2];
+
 							for (int d = 0; d < 2; ++d)
 							{
 								l[d] += weights[k] * local[chosen[k]][d];
 								u[d] += weights[k] * uv[chosen[k]][d];
 							}
 						}
+
 						if (!(depth >= sceneDepth[index]))
 						{
 							continue;
 						}
+
 						image.Ambiguous[index] = image.Ambiguous[index] || ambiguous || std::abs(depth - sceneDepth[index]) < 1.0e-5f;
 						const auto texel =
 							(batch.Emitter->Flags & Render::ParticleFlagTextured) != 0 ? sample(*batch.Emitter, u) : Float4{ 1, 1, 1, 1 };
 						const auto source = P::ShadeFragment(*batch.Emitter, particle, l, texel);
 						auto& target = image.Texels[index];
+
 						if (batch.Blend == Render::ParticleBlendMode::Additive)
 						{
 							for (int c = 0; c < 3; ++c)
@@ -277,4 +301,5 @@ namespace Swim::Testing::ParticleScene
 				return P::DrawsBefore(P::ViewDepth(frame, emitter, a), a.Id, P::ViewDepth(frame, emitter, b), b.Id);
 			});
 	}
+
 } // namespace Swim::Testing::ParticleScene

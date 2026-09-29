@@ -71,6 +71,7 @@ namespace Swim::IO
 			{
 				throw std::out_of_range("IO read range overflows uint64_t");
 			}
+
 			return range.Offset + range.Size;
 		}
 
@@ -78,10 +79,12 @@ namespace Swim::IO
 		{
 			file.seekg(0, std::ios::end);
 			const std::streamoff end = file.tellg();
+
 			if (end < 0)
 			{
 				throw std::runtime_error("Failed to query file size: " + path.string());
 			}
+
 			file.seekg(0, std::ios::beg);
 			return static_cast<std::uint64_t>(end);
 		}
@@ -97,16 +100,19 @@ namespace Swim::IO
 			{
 				return;
 			}
+
 			if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::streamoff>::max()))
 			{
 				throw std::out_of_range("IO read offset exceeds streamoff range: " + path.string());
 			}
+
 			if (destination.size() > static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max()))
 			{
 				throw std::out_of_range("IO read size exceeds streamsize range: " + path.string());
 			}
 
 			file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+
 			if (!file)
 			{
 				throw std::runtime_error("Failed to seek file: " + path.string());
@@ -141,12 +147,14 @@ namespace Swim::IO
 			{
 				throw std::invalid_argument("ReadRangesBlocking requires a non-empty path");
 			}
+
 			if (ranges.empty())
 			{
 				throw std::invalid_argument("ReadRangesBlocking requires at least one range");
 			}
 
 			std::ifstream file(path, std::ios::binary);
+
 			if (!file)
 			{
 				throw std::runtime_error("Failed to open file: " + path.string());
@@ -159,17 +167,21 @@ namespace Swim::IO
 
 			std::vector<IndexedRange> sorted;
 			sorted.reserve(ranges.size());
+
 			for (std::size_t i = 0; i < ranges.size(); ++i)
 			{
 				const std::uint64_t end = CheckedEnd(ranges[i]);
+
 				if (end > result.FileSize)
 				{
 					throw std::out_of_range("IO read range exceeds file size: " + path.string());
 				}
+
 				if (ranges[i].Size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
 				{
 					throw std::out_of_range("IO read range exceeds size_t range: " + path.string());
 				}
+
 				result.Chunks[i].Range = ranges[i];
 				result.Chunks[i].Bytes.resize(static_cast<std::size_t>(ranges[i].Size));
 				sorted.push_back({ ranges[i], i });
@@ -181,10 +193,12 @@ namespace Swim::IO
 				{
 					return left.Range.Offset < right.Range.Offset;
 				}
+
 				return left.Range.Size < right.Range.Size;
 			});
 
 			std::size_t beginIndex = 0;
+
 			while (beginIndex < sorted.size())
 			{
 				const std::uint64_t mergedBegin = sorted[beginIndex].Range.Offset;
@@ -198,19 +212,23 @@ namespace Swim::IO
 					const bool overlaps = nextBegin <= mergedEnd;
 					const bool withinGap = !overlaps
 						&& nextBegin - mergedEnd <= maxCoalesceGapBytes;
+
 					if (!overlaps && !withinGap)
 					{
 						break;
 					}
+
 					mergedEnd = std::max(mergedEnd, nextEnd);
 					++endIndex;
 				}
 
 				const std::uint64_t mergedSize64 = mergedEnd - mergedBegin;
+
 				if (mergedSize64 > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))
 				{
 					throw std::out_of_range("Coalesced IO read exceeds size_t range: " + path.string());
 				}
+
 				std::vector<std::byte> merged(static_cast<std::size_t>(mergedSize64));
 				ReadExact(file, path, mergedBegin, merged);
 
@@ -289,6 +307,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("IoReadResult does not contain exactly one read chunk");
 		}
+
 		return Chunks.front().Bytes;
 	}
 
@@ -326,6 +345,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("ReadRequest result is available only after a successful read");
 		}
+
 		return state->Result;
 	}
 
@@ -335,6 +355,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("ReadRequest error state is available only after completion");
 		}
+
 		return state->ErrorMessage;
 	}
 
@@ -364,6 +385,7 @@ namespace Swim::IO
 		{
 			return true;
 		}
+
 		if (!jobs.IsRunning() || jobs.GetBlockingThreadCount() == 0)
 		{
 			return false;
@@ -382,13 +404,16 @@ namespace Swim::IO
 		{
 			return;
 		}
+
 		impl->RequireOwnerThread("Shutdown");
+
 		if (!impl->Running.exchange(false, std::memory_order_acq_rel))
 		{
 			return;
 		}
 
 		const auto requests = impl->SnapshotRequests();
+
 		if (mode == IoShutdownMode::CancelPending)
 		{
 			for (const auto& request : requests)
@@ -464,6 +489,7 @@ namespace Swim::IO
 		{
 			throw std::invalid_argument("ReadRangesAsync requires at least one range");
 		}
+
 		return ScheduleRead(
 			path,
 			std::vector<IoReadRange>(ranges.begin(), ranges.end()),
@@ -482,6 +508,7 @@ namespace Swim::IO
 	)
 	{
 		impl->RequireRunning("ScheduleRead");
+
 		if (path.empty())
 		{
 			throw std::invalid_argument("ScheduleRead requires a non-empty path");
@@ -502,10 +529,12 @@ namespace Swim::IO
 		request->Work = impl->Jobs->ScheduleBlocking([service, weakRequest = std::weak_ptr<Detail::IoRequestState>(request)]()
 		{
 			const std::shared_ptr<Detail::IoRequestState> request = weakRequest.lock();
+
 			if (!request)
 			{
 				return;
 			}
+
 			if (request->CancelRequested.load(std::memory_order_acquire))
 			{
 				request->ErrorMessage = "IO request cancelled before read";
@@ -515,6 +544,7 @@ namespace Swim::IO
 			}
 
 			request->Status.store(IoStatus::Reading, std::memory_order_release);
+
 			try
 			{
 				if (request->FullFile)
@@ -572,6 +602,7 @@ namespace Swim::IO
 		{
 			return 0;
 		}
+
 		impl->RequireOwnerThread("PumpCompletions");
 
 		std::vector<std::shared_ptr<Detail::IoRequestState>> ready;
@@ -579,6 +610,7 @@ namespace Swim::IO
 			std::lock_guard lock(impl->CompletionMutex);
 			const std::size_t count = std::min(maxCompletions, impl->Completions.size());
 			ready.reserve(count);
+
 			for (std::size_t i = 0; i < count; ++i)
 			{
 				ready.push_back(std::move(impl->Completions.front()));
@@ -589,6 +621,7 @@ namespace Swim::IO
 		for (const auto& requestState : ready)
 		{
 			impl->RemoveTracked(requestState);
+
 			if (requestState->Completion)
 			{
 				const ReadRequest request(requestState);
@@ -599,6 +632,7 @@ namespace Swim::IO
 				completion(request);
 			}
 		}
+
 		return ready.size();
 	}
 
@@ -608,6 +642,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("ReadFileBlocking requires an initialized AsyncIoService");
 		}
+
 		return ReadFullFileBlocking(*impl->FileSystem, path);
 	}
 
@@ -626,6 +661,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("ReadRangesBlocking requires an initialized AsyncIoService");
 		}
+
 		return ReadRangesBlockingImpl(path, ranges, maxCoalesceGapBytes);
 	}
 
@@ -635,6 +671,7 @@ namespace Swim::IO
 		{
 			throw std::logic_error("MapFileReadOnlyBlocking requires an initialized AsyncIoService");
 		}
+
 		return impl->FileSystem->MapFileReadOnly(path);
 	}
 
@@ -644,16 +681,19 @@ namespace Swim::IO
 		{
 			throw std::invalid_argument("Wait requires a valid ReadRequest");
 		}
+
 		if (!impl || !impl->Jobs || !impl->Jobs->IsRunning())
 		{
 			throw std::logic_error("Wait requires an initialized AsyncIoService and JobSystem");
 		}
+
 		if (!request.state->Work || !request.state->Work.IsSubmitted())
 		{
 			throw std::logic_error("ReadRequest has no submitted IO work");
 		}
 
 		impl->Jobs->Wait(request.state->Work);
+
 		if (impl->OwnerThread == std::this_thread::get_id())
 		{
 			PumpCompletions();

@@ -4,11 +4,14 @@
 
 namespace Swim::Render
 {
+
 	class RenderCommandContext;
+
 }
 
 namespace Swim::Render::Internal
 {
+
 	struct GraphPassDefinition
 	{
 		std::string Name;
@@ -18,4 +21,5 @@ namespace Swim::Render::Internal
 		std::vector<std::uint32_t> Dependencies;
 		std::function<void(RenderCommandContext&)> Execute;
 	};
+
 } // namespace Swim::Render::Internal

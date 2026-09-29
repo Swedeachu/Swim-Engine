@@ -19,6 +19,7 @@ namespace Swim::RhiVulkan
 	VulkanGraphicsPipeline::~VulkanGraphicsPipeline()
 	{
 		RetireLostVulkanDevice(*state);
+
 		if (pipeline != VK_NULL_HANDLE)
 		{
 			state->Dispatch.vkDestroyPipeline(state->Device.device, pipeline, nullptr);
@@ -32,9 +33,11 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 		}
+
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
 		auto* layout = dynamic_cast<VulkanPipelineLayout*>(desc.Layout);
 		const auto& limits = state->Device.physical_device.properties.limits;
+
 		if (program == nullptr || layout == nullptr || program->GetState() != state || layout->GetState() != state ||
 			&layout->GetProgram() != program || program->GetStages().size() != 2 ||
 			desc.ColorFormats.size() > limits.maxColorAttachments ||
@@ -49,7 +52,9 @@ namespace Swim::RhiVulkan
 		{
 			return nullptr;
 		}
+
 		const auto nativeSamples = ToVkSampleCount(desc.Samples);
+
 		if ((!desc.ColorFormats.empty() && (limits.framebufferColorSampleCounts & nativeSamples) == 0) ||
 			(Rhi::IsDepthFormat(desc.DepthStencilFormat) && (limits.framebufferDepthSampleCounts & nativeSamples) == 0) ||
 			(Rhi::HasStencil(desc.DepthStencilFormat) && (limits.framebufferStencilSampleCounts & nativeSamples) == 0))
@@ -62,6 +67,7 @@ namespace Swim::RhiVulkan
 			VkFormatProperties properties{};
 			state->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties(state->Device.physical_device.physical_device,
 				ToVkFormat(desc.DepthStencilFormat), &properties);
+
 			if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0)
 			{
 				return nullptr;
@@ -70,21 +76,26 @@ namespace Swim::RhiVulkan
 
 		std::vector<VkFormat> formats;
 		std::vector<VkPipelineColorBlendAttachmentState> blends;
+
 		try
 		{
 			for (std::size_t index = 0; index < desc.ColorFormats.size(); ++index)
 			{
 				const auto format = desc.ColorFormats[index];
+
 				if (ToVkFormat(format) == VK_FORMAT_UNDEFINED || Rhi::IsDepthFormat(format))
 				{
 					return nullptr;
 				}
+
 				formats.push_back(ToVkFormat(format));
 				const auto blend = desc.BlendAttachments.empty() ? Rhi::BlendAttachmentState{} : desc.BlendAttachments[index];
+
 				if ((static_cast<std::uint32_t>(blend.WriteMask) & ~15u) != 0)
 				{
 					return nullptr;
 				}
+
 				VkPipelineColorBlendAttachmentState native{};
 				native.blendEnable = blend.Enabled;
 				native.srcColorBlendFactor = ToVkBlendFactor(blend.SourceColor);
@@ -98,6 +109,7 @@ namespace Swim::RhiVulkan
 				if (!blends.empty())
 				{
 					const auto& first = blends.front();
+
 					if (native.blendEnable != first.blendEnable || native.srcColorBlendFactor != first.srcColorBlendFactor ||
 						native.dstColorBlendFactor != first.dstColorBlendFactor || native.colorBlendOp != first.colorBlendOp ||
 						native.srcAlphaBlendFactor != first.srcAlphaBlendFactor || native.dstAlphaBlendFactor != first.dstAlphaBlendFactor ||
@@ -106,17 +118,21 @@ namespace Swim::RhiVulkan
 						return nullptr;
 					}
 				}
+
 				VkFormatProperties properties{};
 				state->Instance->Dispatch.vkGetPhysicalDeviceFormatProperties(state->Device.physical_device.physical_device, formats.back(), &properties);
 				const auto required = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | (blend.Enabled ? VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT : 0);
+
 				if ((properties.optimalTilingFeatures & required) != static_cast<VkFormatFeatureFlags>(required))
 				{
 					return nullptr;
 				}
+
 				blends.push_back(native);
 			}
 
 			std::vector<VkPipelineShaderStageCreateInfo> stages;
+
 			for (const auto& stage : program->GetStages())
 			{
 				VkPipelineShaderStageCreateInfo native{};
@@ -126,6 +142,7 @@ namespace Swim::RhiVulkan
 				native.pName = stage.EntryPoint.c_str();
 				stages.push_back(native);
 			}
+
 			auto vertexLayout = BuildVulkanVertexInput(*state, desc.VertexBindings, desc.VertexAttributes);
 			VkPipelineVertexInputStateCreateInfo vertex{};
 			vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -193,11 +210,13 @@ namespace Swim::RhiVulkan
 			auto result = std::make_unique<VulkanGraphicsPipeline>(state, desc);
 			result->layoutState = layout->GetLayoutState();
 			result->vertexRequirements = std::move(vertexLayout.Requirements);
+
 			if (CreateCachedVulkanGraphicsPipeline(*state, info, result->pipeline) != VK_SUCCESS)
 			{
 				// Vulkan may return a partial pipeline on failure; RAII destroys it.
 				return nullptr;
 			}
+
 			SetVulkanObjectName(*state, VK_OBJECT_TYPE_PIPELINE, ToNativeHandle(result->pipeline), desc.DebugName);
 			return result;
 		}

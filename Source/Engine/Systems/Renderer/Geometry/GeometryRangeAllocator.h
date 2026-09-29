@@ -6,17 +6,21 @@
 
 namespace Swim::Render
 {
+
 	// Variable-size offset allocator for one fixed-capacity page. Best-fit by
 	// size, any nonzero alignment (vertex strides need not be powers of two), and
 	// immediate coalescing on free. It tracks bytes only; it never touches GPU
 	// memory, so callers free a range only after its last GPU use has completed.
 	class GeometryRangeAllocator
 	{
+
 	  public:
+
 		explicit GeometryRangeAllocator(std::uint64_t capacity);
 
 		// Empty when no free range fits; the allocator is unchanged on failure.
 		std::optional<GeometryRange> Allocate(std::uint64_t size, std::uint64_t alignment = 1);
+
 		// Exactly a range returned by Allocate and not yet freed; anything else throws.
 		void Free(const GeometryRange& range);
 
@@ -33,7 +37,9 @@ namespace Swim::Render
 		std::size_t GetAllocationCount() const { return allocations.size(); }
 
 	  private:
+
 		void InsertFree(std::uint64_t offset, std::uint64_t size);
+
 		void EraseFree(std::map<std::uint64_t, std::uint64_t>::iterator block);
 
 		std::uint64_t capacity;
@@ -41,5 +47,7 @@ namespace Swim::Render
 		std::map<std::uint64_t, std::uint64_t> freeByOffset;
 		std::multimap<std::uint64_t, std::uint64_t> freeBySize;
 		std::map<std::uint64_t, std::uint64_t> allocations;
+
 	};
+
 } // namespace Swim::Render

@@ -11,6 +11,7 @@ namespace R = Swim::Render::Ui;
 
 namespace
 {
+
 	UI::UiPaintQuad Solid(float x, float y, float w, float h, UI::UiColor color)
 	{
 		UI::UiPaintQuad quad;
@@ -24,6 +25,7 @@ namespace
 	{
 		return { 1, 1, 1, 1 };
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Ui.Reference", "BuildsQuadsInFramebufferPixelsAndCullsEmptyOnes")
@@ -176,6 +178,7 @@ SWIM_TEST("Render.Ui.Reference", "MsdfGlyphCoverageMatchesTheOutline")
 	const auto entry = atlas.Get(font, font->GetGlyph(U'O'));
 	const auto page = atlas.GetPage(entry.Page);
 	std::vector<std::uint8_t> rgba(std::size_t(page.Size) * page.Size * 4);
+
 	for (std::size_t i = 0; i < std::size_t(page.Size) * page.Size; ++i)
 	{
 		rgba[i * 4 + 0] = page.Pixels[i * 3 + 0];
@@ -183,6 +186,7 @@ SWIM_TEST("Render.Ui.Reference", "MsdfGlyphCoverageMatchesTheOutline")
 		rgba[i * 4 + 2] = page.Pixels[i * 3 + 2];
 		rgba[i * 4 + 3] = 255;
 	}
+
 	// Draw the glyph at 4x its atlas size.
 	UI::UiPaintQuad quad;
 	quad.Kind = UI::UiPaintKind::Glyph;
@@ -209,10 +213,12 @@ SWIM_TEST("Render.Ui.Reference", "MsdfGlyphCoverageMatchesTheOutline")
 	SWIM_CHECK_NEAR(R::ShadeQuad(quads[0], w * 0.5f, h * 0.5f, sample)[3], 0.0f, 1e-3f);
 	SWIM_CHECK_NEAR(R::ShadeQuad(quads[0], 1.5f, 1.5f, sample)[3], 0.0f, 1e-3f);
 	float stroke = 0.0f;
+
 	for (float x = 0.5f; x < w * 0.5f; x += 1.0f)
 	{
 		stroke = std::max(stroke, R::ShadeQuad(quads[0], x, h * 0.5f, sample)[3]);
 	}
+
 	SWIM_CHECK_NEAR(stroke, 1.0f, 1e-3f);
 	SWIM_CHECK_NEAR(R::Median(0.2f, 0.9f, 0.5f), 0.5f, 1e-7f);
 }

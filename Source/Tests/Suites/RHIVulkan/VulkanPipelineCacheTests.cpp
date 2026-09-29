@@ -87,41 +87,50 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "ExportErrorsAndUntrustedSizesNeverReturnP
 		Testing::VulkanPipelineCacheCapture capture;
 		SWIM_REQUIRE(capture.MakePipeline());
 		auto expected = Rhi::PipelineCacheDataStatus::Failed;
+
 		if (mode == 0)
 		{
 			capture.SizeResult = VK_ERROR_OUT_OF_HOST_MEMORY;
 		}
+
 		if (mode == 1)
 		{
 			capture.ReportedSize = SIZE_MAX;
 			expected = Rhi::PipelineCacheDataStatus::TooLarge;
 		}
+
 		if (mode == 2)
 		{
 			capture.ReportedSize = 0;
 			expected = Rhi::PipelineCacheDataStatus::Empty;
 		}
+
 		if (mode == 3)
 		{
 			capture.DataResult = VK_INCOMPLETE;
 			expected = Rhi::PipelineCacheDataStatus::Incomplete;
 		}
+
 		if (mode == 4)
 		{
 			capture.DataResult = VK_ERROR_OUT_OF_DEVICE_MEMORY;
 		}
+
 		if (mode == 5)
 		{
 			capture.WrittenSize = capture.Payload.size() + 1;
 		}
+
 		if (mode == 6)
 		{
 			capture.WrittenSize = 31;
 		}
+
 		if (mode == 7)
 		{
 			capture.Payload[0] = std::byte{99};
 		}
+
 		const auto result = capture.Device->GetPipelineCacheData();
 		SWIM_CHECK(result.Status == expected);
 		SWIM_CHECK(result.Bytes.empty());
@@ -145,6 +154,7 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "NativeLossAtCreationOrExportRaisesTypedEr
 	for (unsigned mode = 0; mode < 3; ++mode)
 	{
 		Testing::VulkanPipelineCacheCapture capture;
+
 		if (mode == 0)
 		{
 			capture.CreateResult = VK_ERROR_DEVICE_LOST;
@@ -155,6 +165,7 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "NativeLossAtCreationOrExportRaisesTypedEr
 		else
 		{
 			SWIM_REQUIRE(capture.MakePipeline());
+
 			if (mode == 1)
 			{
 				capture.SizeResult = VK_ERROR_DEVICE_LOST;
@@ -163,8 +174,10 @@ SWIM_TEST("RHI.Vulkan.PipelineCache", "NativeLossAtCreationOrExportRaisesTypedEr
 			{
 				capture.DataResult = VK_ERROR_DEVICE_LOST;
 			}
+
 			SWIM_CHECK_THROWS(capture.Device->GetPipelineCacheData(), Rhi::DeviceLostError);
 		}
+
 		const auto calls = capture.SizeCalls + capture.DataCalls;
 		SWIM_CHECK_THROWS(capture.Device->GetPipelineCacheData(), Rhi::DeviceLostError);
 		SWIM_CHECK_THROWS(capture.Device->LoadPipelineCache({}), Rhi::DeviceLostError);

@@ -9,6 +9,7 @@ namespace Swim::Testing
 	struct VulkanStorageTextureCapture : VulkanComputeCapture
 	{
 		VulkanStorageTextureCapture();
+
 		Rhi::DescriptorSchemaDesc Schema{ 1, { { 7, Rhi::DescriptorType::StorageTexture, 1,
 			Rhi::ShaderStageMask::Compute, false, false, Rhi::Format::RGBA32Float } } };
 		std::unique_ptr<RhiVulkan::VulkanShaderProgram> Program;

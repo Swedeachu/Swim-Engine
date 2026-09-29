@@ -17,10 +17,12 @@ namespace Q = Engine::RayQueries;
 
 namespace
 {
+
 	bool Near(const glm::vec3& a, const glm::vec3& b, float tolerance = 1.0e-4f)
 	{
 		return glm::length(a - b) <= tolerance;
 	}
+
 } // namespace
 
 SWIM_TEST("Engine.Picking", "RayQueriesHitPlanesSpheresBoxesCapsulesAndTriangles")

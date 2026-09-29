@@ -17,6 +17,7 @@ using Engine::EngineState;
 
 namespace
 {
+
 	// What the probes saw (shared by the scene factory and the tests).
 	struct ProbeLog
 	{
@@ -37,10 +38,12 @@ namespace
 		int Count(const std::string& event) const
 		{
 			int count = 0;
+
 			for (const auto& value : Events)
 			{
 				count += value == event ? 1 : 0;
 			}
+
 			return count;
 		}
 	};
@@ -54,7 +57,9 @@ namespace
 
 	class Probe : public Engine::Behavior
 	{
+
 	  public:
+
 		Probe(Engine::Scene* scene, entt::entity owner, ProbeLog* logValue, ProbeKind kindValue)
 			: Behavior(scene, owner), log(logValue), kind(kindValue)
 		{
@@ -118,6 +123,7 @@ namespace
 		void OnCollisionEnter(const Engine::BehaviorCollision&) override { ++log->CollisionsEntered; }
 
 	  private:
+
 		std::string Name(const char* event) const
 		{
 			const char* prefix = kind == ProbeKind::Playing ? "playing." : (kind == ProbeKind::Always ? "always." : "realtime.");
@@ -126,13 +132,16 @@ namespace
 
 		ProbeLog* log;
 		ProbeKind kind;
+
 	};
 
 	constexpr Engine::TagId CrateTag = Engine::MakeTag("Test.Crate");
 
 	class ProbeScene : public Engine::Scene
 	{
+
 	  public:
+
 		ProbeScene(const std::string& name, ProbeLog* logValue) : Scene(name), log(logValue) {}
 
 		int Awake() override
@@ -167,6 +176,7 @@ namespace
 				AddTag(crate, "Test.Crate");
 				AddTag(crate, Engine::Tags::Static);
 			}
+
 			return 0;
 		}
 
@@ -179,14 +189,19 @@ namespace
 		void OnStateChanged(EngineState previous, EngineState current) override { log->SceneTransitions.emplace_back(previous, current); }
 
 	  private:
+
 		ProbeLog* log;
+
 	};
 
 	// A second scene for switching.
 	class EmptyScene : public Engine::Scene
 	{
+
 	  public:
+
 		using Scene::Scene;
+
 	};
 
 	void RegisterProbeScenes(Engine::SceneSystem& scenes, ProbeLog& log)
@@ -199,6 +214,7 @@ namespace
 		scenes.RegisterSceneType<EmptyScene>("Empty");
 		scenes.SetStartupScene("Probe");
 	}
+
 } // namespace
 
 SWIM_TEST("Engine.SceneRuntime", "BehavioursRunTheirLifecycleOnceInOrder")

@@ -10,6 +10,7 @@ namespace Swim::Testing
 	struct VulkanDescriptorCapture : VulkanPipelineCapture
 	{
 		VulkanDescriptorCapture();
+
 		std::vector<std::vector<VkDescriptorSetLayoutBinding>> SetBindings;
 		std::vector<VkDescriptorSetLayoutCreateFlags> SetFlags;
 		std::vector<std::vector<VkDescriptorBindingFlags>> SetBindingFlags;

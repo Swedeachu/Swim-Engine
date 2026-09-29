@@ -24,6 +24,7 @@ namespace Engine
 		{
 			const BroadPhaseLayerInterface::RegisteredLayer* registeredA = layerInterface.Get(a);
 			const BroadPhaseLayerInterface::RegisteredLayer* registeredB = layerInterface.Get(b);
+
 			if (!registeredA || !registeredB || (!registeredA->IsMoving && !registeredB->IsMoving))
 			{
 				return false;

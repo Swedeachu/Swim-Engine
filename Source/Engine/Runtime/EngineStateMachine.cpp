@@ -5,12 +5,14 @@
 
 namespace Engine
 {
+
 	EngineStateMachine::EngineStateMachine(EngineState initial)
 	{
 		if (!IsSingleEngineState(initial))
 		{
 			throw std::invalid_argument("The engine starts in exactly one of Playing, Paused or Stopped");
 		}
+
 		state = initial;
 	}
 
@@ -20,11 +22,13 @@ namespace Engine
 		{
 			return false;
 		}
+
 		const EngineState previous = state;
 		state = target;
 		++transitions;
 		// Copy: a listener may subscribe or unsubscribe while being notified.
 		const auto snapshot = listeners;
+
 		for (const auto& entry : snapshot)
 		{
 			if (entry.Callback)
@@ -32,6 +36,7 @@ namespace Engine
 				entry.Callback(previous, state);
 			}
 		}
+
 		return true;
 	}
 
@@ -61,10 +66,12 @@ namespace Engine
 		{
 			return Pause();
 		}
+
 		if (state == EngineState::Paused)
 		{
 			return Resume();
 		}
+
 		return false;
 	}
 
@@ -74,6 +81,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("EngineStateMachine::Set needs Playing, Paused or Stopped");
 		}
+
 		return Transition(target);
 	}
 
@@ -94,4 +102,5 @@ namespace Engine
 			});
 		return listeners.size() != before;
 	}
+
 } // namespace Engine

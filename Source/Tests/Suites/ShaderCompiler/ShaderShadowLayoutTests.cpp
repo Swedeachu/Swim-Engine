@@ -17,6 +17,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -41,6 +42,7 @@ namespace
 				return parameter;
 			}
 		}
+
 		SWIM_FAIL("missing shader parameter " + std::string(name));
 		throw std::logic_error("unreachable");
 	}
@@ -48,10 +50,12 @@ namespace
 	std::map<std::string, std::uint32_t> Offsets(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		return offsets;
 	}
 
@@ -64,6 +68,7 @@ namespace
 				return schema;
 			}
 		}
+
 		SWIM_FAIL("missing descriptor space " + std::to_string(space));
 		throw std::logic_error("unreachable");
 	}
@@ -77,13 +82,16 @@ namespace
 				return candidate.Type;
 			}
 		}
+
 		SWIM_FAIL("missing binding " + std::to_string(binding));
 		throw std::logic_error("unreachable");
 	}
+
 } // namespace
 
 namespace
 {
+
 	void CheckShadowView(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		SWIM_CHECK_EQUAL(parameter.ElementSize, std::uint32_t(sizeof(Render::GpuShadowView)));
@@ -93,6 +101,7 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("TexelWorldSize"), std::uint32_t(offsetof(Render::GpuShadowView, TexelWorldSize)));
 		SWIM_CHECK_EQUAL(offsets.at("Perspective"), std::uint32_t(offsetof(Render::GpuShadowView, Perspective)));
 	}
+
 } // namespace
 
 // Both depth variants reflect ShadowDepthBindings with a 16-byte push block; the
@@ -105,14 +114,17 @@ SWIM_TEST("ShaderCompiler.ShadowLayout", "DepthProgramsMatchTheBindingContract")
 	const auto masked = Load(SWIM_SHADOW_MASKED_REFLECTION_PATH);
 	SWIM_CHECK_EQUAL(opaque.Interface.DescriptorSchemas.size(), std::size_t(1));
 	SWIM_CHECK_EQUAL(masked.Interface.DescriptorSchemas.size(), std::size_t(2));
+
 	for (const auto* program : { &opaque, &masked })
 	{
 		const auto& schema = Space(*program, 0);
 		SWIM_CHECK_EQUAL(schema.Bindings.size(), std::size_t(B::Count));
+
 		for (std::uint32_t binding = 0; binding < B::Count; ++binding)
 		{
 			SWIM_CHECK(TypeOf(schema, binding) == Rhi::DescriptorType::ReadOnlyStorageBuffer);
 		}
+
 		SWIM_REQUIRE_EQUAL(program->Interface.PushConstants.size(), std::size_t(1));
 		SWIM_CHECK_EQUAL(program->Interface.PushConstants[0].Size, B::PushConstantBytes);
 		CheckShadowView(Parameter(*program, "Views"));
@@ -123,10 +135,12 @@ SWIM_TEST("ShaderCompiler.ShadowLayout", "DepthProgramsMatchTheBindingContract")
 	const auto& shadowBindless = Space(masked, B::BindlessSpace).Bindings;
 	const auto& forwardBindless = Space(forward, Render::ForwardPlusDrawBindings::BindlessSpace).Bindings;
 	SWIM_REQUIRE_EQUAL(shadowBindless.size(), forwardBindless.size());
+
 	for (std::size_t i = 0; i < shadowBindless.size(); ++i)
 	{
 		SWIM_CHECK(shadowBindless[i].Binding == forwardBindless[i].Binding && shadowBindless[i].Type == forwardBindless[i].Type);
 	}
+
 	SWIM_CHECK(TypeOf(Space(masked, B::BindlessSpace), B::BindlessTextures) == Rhi::DescriptorType::SampledTexture);
 	SWIM_CHECK(TypeOf(Space(masked, B::BindlessSpace), B::BindlessSamplers) == Rhi::DescriptorType::Sampler);
 }

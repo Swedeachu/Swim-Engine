@@ -13,11 +13,13 @@ using namespace Swim::Text;
 
 namespace
 {
+
 	// A minimal parallel-for over four threads, standing in for JobSystem::ParallelFor.
 	void ThreadedFor(std::size_t count, const std::function<void(std::size_t)>& body)
 	{
 		std::atomic<std::size_t> next{ 0 };
 		std::vector<std::thread> workers;
+
 		for (int t = 0; t < 4; ++t)
 		{
 			workers.emplace_back(
@@ -27,39 +29,48 @@ namespace
 					{
 						body(i);
 					}
+
 				});
 		}
+
 		for (auto& worker : workers)
 		{
 			worker.join();
 		}
 	}
+
 } // namespace
 
 SWIM_TEST("Text.Atlas", "ParallelPrewarmPacksExactlyLikeSequentialLookups")
 {
 	const auto font = Swim::Testing::LoadTextFontFixture();
 	std::vector<std::uint32_t> glyphs;
+
 	for (const char32_t c : std::u32string(U"The quick brown fox, 0123456789 AVffi @#%"))
 	{
 		glyphs.push_back(font->GetGlyph(c));
 	}
+
 	GlyphAtlas sequential;
+
 	for (const auto glyph : glyphs)
 	{
 		sequential.Get(font, glyph);
 	}
+
 	GlyphAtlas prewarmed;
 	const auto added = prewarmed.Prewarm(font, glyphs, ThreadedFor);
 	SWIM_CHECK_EQUAL(added, sequential.GetGlyphCount());
 	SWIM_CHECK_EQUAL(prewarmed.GetGlyphCount(), sequential.GetGlyphCount());
 	SWIM_REQUIRE_EQUAL(prewarmed.GetPageCount(), sequential.GetPageCount());
+
 	for (const auto glyph : glyphs)
 	{
 		const auto a = sequential.Get(font, glyph);
 		const auto b = prewarmed.Get(font, glyph);
 		SWIM_CHECK(a.Page == b.Page && a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height);
 	}
+
 	const auto pageA = sequential.GetPage(0);
 	const auto pageB = prewarmed.GetPage(0);
 	SWIM_CHECK(std::equal(pageA.Pixels.begin(), pageA.Pixels.end(), pageB.Pixels.begin()));
@@ -109,6 +120,7 @@ SWIM_TEST("Text.Atlas", "PointOnlyContoursLeaveNoDistanceFieldArtifacts")
 	const auto page = atlas.GetPage(entry.Page);
 	// Between the stems, above the bowl, every texel is outside the glyph (median < 0.5).
 	std::uint32_t inside = 0;
+
 	for (std::uint32_t y = 0; y < 20; ++y)
 	{
 		for (std::uint32_t x = 9; x <= 19; ++x)
@@ -119,6 +131,7 @@ SWIM_TEST("Text.Atlas", "PointOnlyContoursLeaveNoDistanceFieldArtifacts")
 			inside += median >= 128 ? 1u : 0u;
 		}
 	}
+
 	SWIM_CHECK_EQUAL(inside, 0u);
 	SWIM_CHECK(entry.Width >= 26u && entry.Height >= 30u);
 }

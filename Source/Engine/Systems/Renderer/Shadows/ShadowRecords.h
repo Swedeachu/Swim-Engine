@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// What a GpuShadowRecord describes (Phase 16).
 	enum class ShadowKind : std::uint32_t
 	{
@@ -48,4 +49,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuShadowView) == 96);
+
 } // namespace Swim::Render

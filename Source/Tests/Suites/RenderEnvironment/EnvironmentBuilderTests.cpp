@@ -14,6 +14,7 @@ namespace Env = Swim::Render::Environment;
 
 namespace
 {
+
 	struct EnvironmentWorld
 	{
 		EnvironmentWorld()
@@ -24,10 +25,12 @@ namespace
 				[](Testing::MockPipelineLayout& layout, std::initializer_list<std::pair<std::uint32_t, Rhi::DescriptorType>> bindings)
 			{
 				Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 				for (const auto& [binding, type] : bindings)
 				{
 					space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 				}
+
 				layout.program.Interface.DescriptorSchemas = { space };
 			};
 			using T = Rhi::DescriptorType;
@@ -63,6 +66,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -70,6 +74,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -94,6 +99,7 @@ namespace
 		std::unique_ptr<Rhi::Sampler> sampler;
 		std::unique_ptr<RenderGraphExecutor> executor;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.EnvironmentBuilder", "RecordsSkyMipsPrefilterAndIrradiancePasses")
@@ -141,6 +147,7 @@ SWIM_TEST("Render.EnvironmentBuilder", "RecordsSkyMipsPrefilterAndIrradiancePass
 	// Push constants: the sky per face, then sizes, then the prefilter's roughness ladder.
 	const auto constants = world.Commands("PushConstants");
 	SWIM_REQUIRE_EQUAL(constants.size(), dispatches.size());
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		const auto skyConstants = EnvironmentWorld::Read<Env::ProceduralSkyConstants>(constants[face]);
@@ -148,8 +155,10 @@ SWIM_TEST("Render.EnvironmentBuilder", "RecordsSkyMipsPrefilterAndIrradiancePass
 		SWIM_CHECK_EQUAL(skyConstants.Size, 32u);
 		SWIM_CHECK_EQUAL(skyConstants.Zenith[3], 1.5f);
 	}
+
 	SWIM_CHECK((EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[6])[0]) == 16u);
 	SWIM_CHECK((EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[23])[0]) == 4u);
+
 	for (std::uint32_t mip = 0; mip < 4; ++mip)
 	{
 		for (std::uint32_t face = 0; face < 6; ++face)
@@ -163,6 +172,7 @@ SWIM_TEST("Render.EnvironmentBuilder", "RecordsSkyMipsPrefilterAndIrradiancePass
 			SWIM_CHECK_EQUAL(prefilter.SourceMipCount, 4u);
 		}
 	}
+
 	SWIM_CHECK((EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants.back())[0]) == 8u);
 
 	// The last table is the irradiance projection: a 6-layer array view of the 8x8 mip.
@@ -227,12 +237,14 @@ SWIM_TEST("Render.EnvironmentBuilder", "OverlaysFoldIntoTheSkyFacesBeforeTheMips
 	SWIM_CHECK(dispatches[12].SourceOffset == 2); // Mip 1.
 	const auto constants = world.Commands("PushConstants");
 	SWIM_REQUIRE_EQUAL(constants.size(), dispatches.size());
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		const auto overlay = EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[6 + face]);
 		SWIM_CHECK_EQUAL(overlay[0], 32u);
 		SWIM_CHECK_EQUAL(overlay[1], face);
 	}
+
 	SWIM_CHECK((EnvironmentWorld::Read<std::array<std::uint32_t, 4>>(constants[12])[0]) == 16u);
 
 	// Reflections only: a second, clear sky cube (sky + its mips) feeds the irradiance.

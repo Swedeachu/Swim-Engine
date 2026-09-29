@@ -12,6 +12,7 @@ using Assets::VertexSemantic;
 
 namespace
 {
+
 	Assets::MeshAsset TwoStreamQuad()
 	{
 		Assets::MeshAsset mesh;
@@ -20,16 +21,19 @@ namespace
 		mesh.VertexAttributes = { { VertexSemantic::Position, VertexElementFormat::Float32x3, 0, 0 },
 			{ VertexSemantic::TexCoord0, VertexElementFormat::Float32x2, 1, 0 } };
 		mesh.VertexBytes.resize(80);
+
 		for (std::size_t i = 0; i < mesh.VertexBytes.size(); ++i)
 		{
 			mesh.VertexBytes[i] = static_cast<std::byte>(i);
 		}
+
 		mesh.IndexFormat = Assets::IndexElementFormat::UInt16;
 		mesh.IndexBytes.resize(12, std::byte{ 1 });
 		mesh.Primitives = { { 0, 3, 0, 4, {} }, { 3, 3, 1, 7, {} } };
 		mesh.Lods = { { 0, 2, 1.0f }, { 1, 1, 0.25f } };
 		return mesh;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.MeshGeometryPayload", "InterleavesStreamsAndMapsPrimitivesAndLods")
@@ -38,11 +42,13 @@ SWIM_TEST("Render.MeshGeometryPayload", "InterleavesStreamsAndMapsPrimitivesAndL
 	const auto payload = BuildMeshGeometryPayload(mesh);
 	SWIM_CHECK_EQUAL(payload.VertexStride, 20u);
 	SWIM_REQUIRE_EQUAL(payload.Vertices.size(), 80u);
+
 	for (std::size_t v = 0; v < 4; ++v)
 	{
 		SWIM_CHECK(std::memcmp(payload.Vertices.data() + v * 20, mesh.VertexBytes.data() + v * 12, 12) == 0);
 		SWIM_CHECK(std::memcmp(payload.Vertices.data() + v * 20 + 12, mesh.VertexBytes.data() + 48 + v * 8, 8) == 0);
 	}
+
 	SWIM_CHECK(payload.IndexFormat == Rhi::IndexType::Uint16);
 	SWIM_CHECK(payload.Indices == mesh.IndexBytes);
 	SWIM_REQUIRE_EQUAL(payload.Submeshes.size(), 2u);

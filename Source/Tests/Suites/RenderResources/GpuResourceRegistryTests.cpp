@@ -7,6 +7,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	// Counts destruction so tests can prove deferred GPU-object lifetime.
 	struct TrackedRecord
 	{
@@ -38,6 +39,7 @@ namespace
 	};
 
 	using Registry = GpuResourceRegistry<GpuTextureTag, TrackedRecord>;
+
 } // namespace
 
 SWIM_TEST("Render.GpuResourceRegistry", "HandlesAreGenerationalAndPackRoundTrip")
@@ -168,6 +170,7 @@ SWIM_TEST("Render.GpuResourceRegistry", "ThrowingRetirementCallbackKeepsEntryPen
 							  {
 								  throw std::runtime_error("callback failure");
 							  }
+
 						  }),
 		std::runtime_error);
 	SWIM_CHECK_EQUAL(destroyed, 1);

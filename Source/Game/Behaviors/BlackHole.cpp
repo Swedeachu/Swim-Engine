@@ -9,6 +9,7 @@
 
 namespace Game
 {
+
 	BlackHole::BlackHole(Engine::Scene* sceneValue, entt::entity owner, std::shared_ptr<Engine::GravitationalLensing> lensingValue,
 		float schwarzschildRadiusValue)
 		: Behavior(sceneValue, owner), lensing(std::move(lensingValue)), schwarzschildRadius(schwarzschildRadiusValue)
@@ -24,10 +25,12 @@ namespace Game
 	{
 		auto feature = lensing.lock();
 		const auto* transform = GetTransform();
+
 		if (!feature || !transform)
 		{
 			return;
 		}
+
 		const glm::vec3 position = transform->GetWorldPosition(scene->GetRegistry());
 		auto& lens = feature->Upsert(Key());
 		lens.Position = { position.x, position.y, position.z };
@@ -35,6 +38,7 @@ namespace Game
 		// The gas disk's axis is the entity's local +Y.
 		const glm::vec3 axis = transform->GetWorldRotation(scene->GetRegistry()) * glm::vec3(0.0f, 1.0f, 0.0f);
 		lens.DiskNormal = { axis.x, axis.y, axis.z };
+
 		if (pendingGasDensity)
 		{
 			lens.GasDensity = *pendingGasDensity;
@@ -48,6 +52,7 @@ namespace Game
 		{
 			feature->Remove(Key());
 		}
+
 		return 0;
 	}
 
@@ -64,6 +69,7 @@ namespace Game
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -71,15 +77,19 @@ namespace Game
 	{
 		const auto* cameras = GetCameraSystem();
 		auto* transform = GetTransform();
+
 		if (!cameras || !transform)
 		{
 			return;
 		}
+
 		const auto hit = Engine::ScenePicking::PickAtScreen(scene->GetRegistry(), *cameras, x, y);
+
 		if (!hit || !Owns(hit->Entity))
 		{
 			return;
 		}
+
 		// The plane faces the camera through the entity's centre; the point of it under the
 		// cursor keeps its offset from the centre, so the entity stays at its depth and the
 		// grabbed spot stays under the cursor.
@@ -95,11 +105,14 @@ namespace Game
 	{
 		const auto* cameras = GetCameraSystem();
 		auto* transform = GetTransform();
+
 		if (!dragging || !cameras || !transform)
 		{
 			return;
 		}
+
 		const auto ray = cameras->ScreenPointToRay(x, y);
+
 		if (const auto hit = Engine::RayQueries::Plane(ray, planePoint, planeNormal))
 		{
 			transform->SetWorldPosition(scene->GetRegistry(), hit->Point + grabOffset);
@@ -117,21 +130,27 @@ namespace Game
 		{
 			return;
 		}
+
 		using Swim::Platform::MouseButton;
 		const auto mouse = input->GetMousePosition();
+
 		if (!dragging)
 		{
 			if (input->IsMouseButtonTriggered(MouseButton::Left) && !(inputGate && inputGate()))
 			{
 				Press(mouse.X, mouse.Y);
 			}
+
 			return;
 		}
+
 		if (!input->IsMouseButtonDown(MouseButton::Left))
 		{
 			Release();
 			return;
 		}
+
 		Move(mouse.X, mouse.Y);
 	}
+
 } // namespace Game

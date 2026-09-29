@@ -10,6 +10,7 @@ using State = AssetResidencyState;
 
 namespace
 {
+
 	Assets::MeshAsset MakeMesh(std::uint8_t seed)
 	{
 		Assets::MeshAsset mesh;
@@ -17,10 +18,12 @@ namespace
 		mesh.VertexAttributes = { { Assets::VertexSemantic::Position, Assets::VertexElementFormat::Float32x3, 0, 0 },
 			{ Assets::VertexSemantic::TexCoord0, Assets::VertexElementFormat::Float32x2, 1, 0 } };
 		mesh.VertexBytes.resize(60);
+
 		for (std::size_t i = 0; i < mesh.VertexBytes.size(); ++i)
 		{
 			mesh.VertexBytes[i] = static_cast<std::byte>(seed * 7 + i);
 		}
+
 		mesh.IndexFormat = Assets::IndexElementFormat::UInt16;
 		mesh.IndexBytes.resize(6, std::byte{ 2 });
 		mesh.Primitives = { { 0, 3, 0, 1, {} } };
@@ -37,10 +40,12 @@ namespace
 		payload.Format = Assets::TexturePayloadFormat::RGBA8UNorm;
 		payload.Mips = { { 2, 2, 1, 0, 16, 16 }, { 1, 1, 1, 16, 4, 4 } };
 		payload.Bytes.resize(20);
+
 		for (std::size_t i = 0; i < payload.Bytes.size(); ++i)
 		{
 			payload.Bytes[i] = static_cast<std::byte>(200 - i);
 		}
+
 		texture.Payloads.push_back(std::move(payload));
 		return texture;
 	}
@@ -58,6 +63,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(static_cast<bool>(built), built.Error.Message);
 		return built.Bytes;
 	}
+
 } // namespace
 
 SWIM_TEST("AssetCompiler.SassetDecode", "DecodesOffThreadAndPublishesOnTheOwnerThread")
@@ -105,6 +111,7 @@ SWIM_TEST("AssetCompiler.AssetResidency", "StreamsCookedMeshesAndTexturesThrough
 
 	std::vector<Assets::AssetHandle<Assets::MeshAsset>> meshes;
 	std::vector<Assets::MeshAsset> sources;
+
 	for (std::uint8_t i = 0; i < 4; ++i)
 	{
 		const std::string path = "Models/Stream" + std::to_string(i) + ".mesh";
@@ -115,6 +122,7 @@ SWIM_TEST("AssetCompiler.AssetResidency", "StreamsCookedMeshesAndTexturesThrough
 		meshes.push_back(handle);
 		SWIM_CHECK(service.RequestMesh(handle));
 	}
+
 	const auto texture = fixture.assets.Declare<Assets::TextureAsset>("Textures/Stream.texture");
 	const auto textureAsset = MakeTexture();
 	fixture.WriteObject(texture.GetId(), "texture.sasset",
@@ -136,6 +144,7 @@ SWIM_TEST("AssetCompiler.AssetResidency", "StreamsCookedMeshesAndTexturesThrough
 
 	fixture.UploadFrame();
 	SWIM_CHECK_EQUAL(service.GetStats().Resident, 5u);
+
 	for (std::size_t i = 0; i < meshes.size(); ++i)
 	{
 		const auto* row = fixture.geometry->GetMetadata(service.GetGpuMesh(meshes[i]));
@@ -149,6 +158,7 @@ SWIM_TEST("AssetCompiler.AssetResidency", "StreamsCookedMeshesAndTexturesThrough
 		SWIM_CHECK(std::memcmp(page.data() + base, sources[i].VertexBytes.data(), 12) == 0);
 		SWIM_CHECK(std::memcmp(page.data() + base + 12, sources[i].VertexBytes.data() + 36, 8) == 0);
 	}
+
 	auto* gpuTexture = static_cast<Testing::MockTexture*>(fixture.textures->GetTexture(service.GetGpuTexture(texture)));
 	SWIM_REQUIRE(gpuTexture != nullptr);
 	SWIM_CHECK(std::memcmp(gpuTexture->Bytes({ 1, 0 }).data(), textureAsset.Payloads[0].Bytes.data() + 16, 4) == 0);
@@ -188,11 +198,13 @@ SWIM_TEST("AssetCompiler.AssetResidency", "RejectsObjectsWithTheWrongIdentityOrT
 	service.Update();
 	SWIM_CHECK(service.GetState(late) == State::Reading);
 	SWIM_CHECK(service.ReleaseMesh(late));
+
 	for (int i = 0; i < 20; ++i)
 	{
 		fixture.io.PumpCompletions();
 		service.Update();
 	}
+
 	SWIM_CHECK(service.GetState(late) == State::Unloaded);
 	SWIM_CHECK(fixture.assets.Resolve(late) == nullptr);
 	SWIM_CHECK_EQUAL(fixture.geometry->GetStats().PendingMeshes, 0u);

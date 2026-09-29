@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract (space 0) of SwimSkinning: 64-thread groups along the
 	// instance's vertices (x), one group row per instance of the dispatch (y).
 	inline constexpr std::uint32_t SkinningThreadGroupSize = 64;
@@ -20,4 +21,5 @@ namespace Swim::Render
 		// Push constants: the first GpuSkinDispatch row of this dispatch (uint).
 		static constexpr std::uint32_t PushConstantBytes = 4;
 	};
+
 } // namespace Swim::Render

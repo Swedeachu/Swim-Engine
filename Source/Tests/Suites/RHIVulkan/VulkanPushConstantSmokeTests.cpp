@@ -97,6 +97,7 @@ namespace
 		SWIM_REQUIRE(frames);
 		std::vector<std::byte> directPixels(64 * 64 * 4);
 		std::vector<std::byte> indexedPixels(directPixels.size());
+
 		for (std::uint32_t pass = 0; pass < 4; ++pass)
 		{
 			frames->BeginFrame();
@@ -105,10 +106,12 @@ namespace
 			commands.BeginDebugLabel("Push constants: partial updates and compatible pipelines", { 0.2f, 0.6f, 0.9f, 1.0f });
 			commands.Transition(*target, pass == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource,
 				Rhi::ResourceState::ColorAttachment);
+
 			if (pass == 0)
 			{
 				commands.Transition(*indices, Rhi::ResourceState::HostWrite, Rhi::ResourceState::IndexBuffer);
 			}
+
 			commands.BindGraphicsPipeline(*pipeline);
 			DrawConstants values{ { -0.5f, 0 }, { 0.3f, 0.5f }, pass < 2 ?
 				std::array<float, 4>{ 1, 0, 0, 1 } : std::array<float, 4>{ 0, 0, 1, 1 } };
@@ -120,10 +123,12 @@ namespace
 			commands.BeginRendering({ { &attachment, 1 }, nullptr, { 64, 64 } });
 			commands.SetViewport({ 0, 0, 64, 64 });
 			commands.SetScissor({ 0, 0, 64, 64 });
+
 			if (pass % 2 != 0)
 			{
 				commands.BindIndexBuffer(*indices, 0, Rhi::IndexType::Uint16);
 			}
+
 			const auto draw = [&]
 			{
 				if (pass % 2 == 0)
@@ -159,6 +164,7 @@ namespace
 			const auto checkPixel = [&](std::uint32_t x, std::uint32_t y, std::array<std::byte, 4> expected)
 			{
 				const std::size_t offset = (y * 64 + x) * 4;
+
 				for (std::size_t channel = 0; channel < expected.size(); ++channel)
 				{
 					SWIM_CHECK_EQUAL(pixels[offset + channel], expected[channel]);
@@ -170,22 +176,26 @@ namespace
 			checkPixel(48, 32, pass < 2 ? std::array{ off, on, off, on } : std::array{ on, on, off, on });
 			checkPixel(32, 32, { off, off, off, on });
 			checkPixel(2, 2, { off, off, off, on });
+
 			if (pass % 2 != 0)
 			{
 				SWIM_CHECK(directPixels == indexedPixels);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PushConstantUpdatesAndCompatiblePipelinePixels", SWIM_TEST_LOCATION,
 				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunPushConstantSmoke); } });
 		}
+
 		return true;
 	}();
 

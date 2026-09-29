@@ -4,6 +4,7 @@
 
 namespace Engine
 {
+
 	// Makes an entity a camera (Phase 23). Each frame the engine takes the active camera
 	// with the highest Priority, if any, and puts the main camera at its entity's world
 	// transform (looking down local -Z) with these lens settings; without one the main
@@ -16,4 +17,5 @@ namespace Engine
 		std::int32_t Priority = 0;
 		bool Active = true;
 	};
+
 } // namespace Engine

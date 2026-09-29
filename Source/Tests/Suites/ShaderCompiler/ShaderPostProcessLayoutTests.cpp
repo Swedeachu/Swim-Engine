@@ -18,6 +18,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -42,6 +43,7 @@ namespace
 				return parameter;
 			}
 		}
+
 		SWIM_FAIL("missing shader parameter " + std::string(name));
 		throw std::logic_error("unreachable");
 	}
@@ -49,10 +51,12 @@ namespace
 	std::map<std::string, std::uint32_t> Offsets(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		return offsets;
 	}
 
@@ -65,6 +69,7 @@ namespace
 				return schema;
 			}
 		}
+
 		SWIM_FAIL("missing descriptor space " + std::to_string(space));
 		throw std::logic_error("unreachable");
 	}
@@ -78,23 +83,28 @@ namespace
 				return candidate.Type;
 			}
 		}
+
 		SWIM_FAIL("missing binding " + std::to_string(binding));
 		throw std::logic_error("unreachable");
 	}
+
 } // namespace
 
 namespace
 {
+
 	void CheckProgram(const Program& program, std::uint32_t pushBytes, std::uint32_t group,
 		std::initializer_list<std::pair<std::uint32_t, Rhi::DescriptorType>> bindings)
 	{
 		SWIM_REQUIRE_EQUAL(program.Interface.DescriptorSchemas.size(), std::size_t(1));
 		const auto& schema = Space(program, 0);
 		SWIM_CHECK_EQUAL(schema.Bindings.size(), bindings.size());
+
 		for (const auto& [binding, type] : bindings)
 		{
 			SWIM_CHECK(TypeOf(schema, binding) == type);
 		}
+
 		SWIM_REQUIRE_EQUAL(program.Interface.PushConstants.size(), std::size_t(1));
 		SWIM_CHECK_EQUAL(program.Interface.PushConstants[0].Size, pushBytes);
 		SWIM_CHECK((program.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ group, group, 1 }));
@@ -109,6 +119,7 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("Exposure"), std::uint32_t(offsetof(Render::GpuExposureState, Exposure)));
 		SWIM_CHECK_EQUAL(offsets.at("Valid"), std::uint32_t(offsetof(Render::GpuExposureState, Valid)));
 	}
+
 } // namespace
 
 // Every post-processing program reflects its PostProcessBindings contract: binding

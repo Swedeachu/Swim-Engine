@@ -14,10 +14,14 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	class MockGraphicsPipeline final : public Rhi::GraphicsPipeline
 	{
+
 	  public:
+
 		std::uintptr_t GetNativeHandle() const override { return 41; }
+
 	};
 
 	struct UiWorld
@@ -58,6 +62,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *bindlessFixture->device.Commands)
 			{
 				if (command.Kind == kind)
@@ -65,6 +70,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -87,10 +93,12 @@ namespace
 		quad.Rect[2] = quad.Clip[2] = x1;
 		quad.Rect[3] = quad.Clip[3] = y1;
 		quad.Uv[2] = quad.Uv[3] = 1.0f;
+
 		for (int c = 0; c < 4; ++c)
 		{
 			quad.Color[c] = c == 3 ? 1.0f : 0.25f * float(c + 1);
 		}
+
 		return quad;
 	}
 
@@ -104,6 +112,7 @@ namespace
 			const float m = 0.5f + d;
 			return { m, m + 0.05f, m - 0.05f, 1.0f };
 		}
+
 		return { u, v, 0.5f, 1.0f };
 	}
 
@@ -124,6 +133,7 @@ namespace
 		image.Texture = 2;
 		return { solid, glyph, image };
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Ui.Reference", "WorldCanvasesThroughTheScreenMappingMatchTheScreenRasterizer")
@@ -133,10 +143,12 @@ SWIM_TEST("Render.Ui.Reference", "WorldCanvasesThroughTheScreenMappingMatchTheSc
 	SWIM_CHECK_EQUAL(screen.Flags, 0u);
 	// The renderer's screen mapping is UI::ScreenClipFromCanvas.
 	const auto expected = UI::ScreenClipFromCanvas(64.0f, 32.0f);
+
 	for (int i = 0; i < 16; ++i)
 	{
 		SWIM_CHECK_NEAR(screen.ClipFromCanvas[i], expected[i], 1e-7f);
 	}
+
 	std::array<float, 16> matrix{};
 	std::copy(std::begin(screen.ClipFromCanvas), std::end(screen.ClipFromCanvas), matrix.begin());
 	const auto world = Ui::BuildCanvasDrawConstants(64, 32, settings, matrix);
@@ -147,6 +159,7 @@ SWIM_TEST("Render.Ui.Reference", "WorldCanvasesThroughTheScreenMappingMatchTheSc
 	Ui::Rasterize(a, quads, screen, Sample);
 	Ui::RasterizeProjected(b, quads, world, Sample);
 	float worst = 0.0f;
+
 	for (std::size_t i = 0; i < a.Texels.size(); ++i)
 	{
 		for (int c = 0; c < 4; ++c)
@@ -154,6 +167,7 @@ SWIM_TEST("Render.Ui.Reference", "WorldCanvasesThroughTheScreenMappingMatchTheSc
 			worst = std::max(worst, std::abs(a.Texels[i][c] - b.Texels[i][c]));
 		}
 	}
+
 	SWIM_CHECK(worst < 1e-4f); // Derivative footprints of a 1:1 mapping are one pixel.
 	const auto sample = Ui::CanvasAt(world, 10.5f, 20.5f);
 	SWIM_REQUIRE(sample.has_value());
@@ -182,14 +196,17 @@ SWIM_TEST("Render.Ui.Reference", "ProjectedCanvasesFollowPerspectiveScaleOpacity
 		Ui::Canvas canvas{ 64, 64, std::vector<Ui::Float4>(64 * 64) };
 		Ui::RasterizeProjected(canvas, std::span(&quad, 1), constants, Sample);
 		int covered = 0;
+
 		for (const auto& texel : canvas.Texels)
 		{
 			covered += texel[3] > 0.25f ? 1 : 0;
+
 			if (alpha && texel[3] > 0.0f)
 			{
 				*alpha = std::max(*alpha, texel[3]);
 			}
 		}
+
 		return covered;
 	};
 	// A 1 m panel 2 m and 4 m from the camera: a quarter of the pixels at twice the distance.

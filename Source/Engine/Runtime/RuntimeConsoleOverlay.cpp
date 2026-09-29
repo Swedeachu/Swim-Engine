@@ -8,8 +8,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		namespace UI = Swim::UI;
 		constexpr float TextSize = 15.0f;
 		constexpr std::size_t VisibleLines = 22;
@@ -20,6 +22,7 @@ namespace Engine
 			document.SetStyle(node, style);
 			return node;
 		}
+
 	} // namespace
 
 	RuntimeConsoleOverlay::RuntimeConsoleOverlay(UiRuntime& uiValue, RuntimeConsole& consoleValue) : ui(uiValue), console(consoleValue)
@@ -95,6 +98,7 @@ namespace Engine
 		console.SetOpen(open);
 		ui.SetOverlayVisible(overlay, open);
 		SetInputText("");
+
 		if (open)
 		{
 			document->Focus(field);
@@ -111,21 +115,26 @@ namespace Engine
 		{
 			return;
 		}
+
 		using Swim::Platform::KeyCode;
+
 		if (input->IsKeyTriggered(KeyCode::Grave))
 		{
 			SetOpen(!console.IsOpen());
 			return;
 		}
+
 		if (!console.IsOpen())
 		{
 			return;
 		}
+
 		if (input->IsKeyTriggered(KeyCode::Escape))
 		{
 			SetOpen(false);
 			return;
 		}
+
 		if (input->IsKeyTriggered(KeyCode::Up))
 		{
 			SetInputText(console.HistoryUp(GetInputText()));
@@ -134,6 +143,7 @@ namespace Engine
 		{
 			SetInputText(console.HistoryDown());
 		}
+
 		if (document->GetFocus() != field)
 		{
 			document->Focus(field); // Clicking the scrollback must not lose the input line.
@@ -151,6 +161,7 @@ namespace Engine
 				console.Execute(line);
 			}
 		}
+
 		if (console.IsOpen())
 		{
 			// The console key itself is text too: never keep it in the line.
@@ -161,11 +172,13 @@ namespace Engine
 				{
 					return c == '`' || c == '~';
 				});
+
 			if (text.size() != before)
 			{
 				SetInputText(text);
 			}
 		}
+
 		RefreshScrollback();
 	}
 
@@ -175,18 +188,23 @@ namespace Engine
 		{
 			return;
 		}
+
 		shownRevision = console.GetRevision();
 		const auto& lines = console.GetLines();
 		const std::size_t first = lines.size() > VisibleLines ? lines.size() - VisibleLines : 0;
 		std::string text;
+
 		for (std::size_t i = first; i < lines.size(); ++i)
 		{
 			text += lines[i];
+
 			if (i + 1 < lines.size())
 			{
 				text += '\n';
 			}
 		}
+
 		document->SetText(scrollback, ui.GetMonoFonts(), text, TextSize);
 	}
+
 } // namespace Engine

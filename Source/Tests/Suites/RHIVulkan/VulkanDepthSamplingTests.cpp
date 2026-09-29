@@ -8,6 +8,7 @@ using namespace Swim;
 
 namespace
 {
+
 	VkFormatFeatureFlags2 depthFeatures = 0;
 
 	void EnableDepth(Testing::VulkanDescriptorCapture& capture)
@@ -30,6 +31,7 @@ namespace
 		desc.ArrayLayers = 2;
 		return desc;
 	}
+
 } // namespace
 
 SWIM_TEST("RHI.Vulkan.DepthSampling", "DepthAspectViewsDescriptorsAndAttachmentTransitionsAgree")
@@ -49,6 +51,7 @@ SWIM_TEST("RHI.Vulkan.DepthSampling", "DepthAspectViewsDescriptorsAndAttachmentT
 	};
 	RhiVulkan::VulkanDevice device(capture.State, {}, nullptr, nullptr, nullptr);
 	capture.Commands->Begin();
+
 	for (const auto format : { Rhi::Format::D16Unorm, Rhi::Format::D32Float, Rhi::Format::D24UnormS8Uint, Rhi::Format::D32FloatS8Uint })
 	{
 		RhiVulkan::VulkanTexture texture(capture.State, RhiVulkan::FromNativeHandle<VkImage>(1), DepthDesc(format));
@@ -77,6 +80,7 @@ SWIM_TEST("RHI.Vulkan.DepthSampling", "DepthAspectViewsDescriptorsAndAttachmentT
 		capture.Commands->Transition(texture, Rhi::ResourceState::DepthStencilWrite, Rhi::ResourceState::ShaderRead, { 1, 1, 1, 1 });
 		SWIM_CHECK_EQUAL(capture.Images.back().newLayout, image.imageLayout);
 		SWIM_CHECK_EQUAL(capture.Images.back().subresourceRange.aspectMask, nativeAspect);
+
 		if (Rhi::HasStencil(format))
 		{
 			depth.View = view.get();
@@ -86,6 +90,7 @@ SWIM_TEST("RHI.Vulkan.DepthSampling", "DepthAspectViewsDescriptorsAndAttachmentT
 			SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write), std::invalid_argument);
 		}
 	}
+
 	capture.Commands->End();
 }
 
@@ -94,6 +99,7 @@ SWIM_TEST("RHI.Vulkan.DepthSampling", "ComparisonSamplersMapAllOperatorsAndInval
 	Testing::VulkanDescriptorCapture capture;
 	const std::array operations{ Rhi::CompareOp::Never, Rhi::CompareOp::Less, Rhi::CompareOp::Equal, Rhi::CompareOp::LessEqual,
 		Rhi::CompareOp::Greater, Rhi::CompareOp::NotEqual, Rhi::CompareOp::GreaterEqual, Rhi::CompareOp::Always };
+
 	for (std::uint32_t index = 0; index < operations.size(); ++index)
 	{
 		Rhi::SamplerDesc desc{};
@@ -105,6 +111,7 @@ SWIM_TEST("RHI.Vulkan.DepthSampling", "ComparisonSamplersMapAllOperatorsAndInval
 		SWIM_CHECK_EQUAL(capture.SamplerInfo.compareEnable, VK_TRUE);
 		SWIM_CHECK_EQUAL(capture.SamplerInfo.compareOp, static_cast<VkCompareOp>(index));
 	}
+
 	Rhi::SamplerDesc invalid{};
 	invalid.EnableComparison = true;
 	invalid.Comparison = static_cast<Rhi::CompareOp>(255);

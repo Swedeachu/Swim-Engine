@@ -16,6 +16,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -37,27 +38,33 @@ namespace
 		const auto& schema = program.Interface.DescriptorSchemas[0];
 		SWIM_CHECK_EQUAL(schema.Space, 0u);
 		SWIM_REQUIRE_EQUAL(schema.Bindings.size(), expected.size());
+
 		for (const auto& binding : schema.Bindings)
 		{
 			SWIM_REQUIRE(binding.Binding < expected.size());
 			SWIM_CHECK_MESSAGE(binding.Type == expected[binding.Binding], "binding " + std::to_string(binding.Binding));
 		}
+
 		SWIM_CHECK(program.Interface.PushConstants.empty());
 		SWIM_CHECK((program.Interface.ComputeThreadGroupSize ==
 			std::array<std::uint32_t, 3>{ Render::ScreenSpaceThreadGroupSize, Render::ScreenSpaceThreadGroupSize, 1 }));
 		// The parameter record equals GpuScreenSpaceParams.
 		const ShaderCompiler::ShaderBindingReflection* params = nullptr;
+
 		for (const auto& parameter : program.Reflection.GlobalParameters)
 		{
 			params = parameter.Name == "Params" ? &parameter : params;
 		}
+
 		SWIM_REQUIRE(params != nullptr);
 		SWIM_CHECK_EQUAL(params->ElementSize, std::uint32_t(sizeof(Render::GpuScreenSpaceParams)));
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : params->ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		using P = Render::GpuScreenSpaceParams;
 		SWIM_CHECK_EQUAL(offsets.at("ViewRows"), std::uint32_t(offsetof(P, ViewRows)));
 		SWIM_CHECK_EQUAL(offsets.at("InverseViewRows"), std::uint32_t(offsetof(P, InverseViewRows)));
@@ -83,6 +90,7 @@ namespace
 		SWIM_CHECK_EQUAL(offsets.at("ReflectionTemporalBlend"), std::uint32_t(offsetof(P, ReflectionTemporalBlend)));
 		(void)paramsBinding;
 	}
+
 } // namespace
 
 // Each screen-space program reflects its ScreenSpace*Bindings contract, runs 8 x 8 groups

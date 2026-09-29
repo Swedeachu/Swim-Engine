@@ -31,6 +31,7 @@
 
 namespace
 {
+
 #ifdef SWIM_STANDARD_MATERIAL_SMOKE_AVAILABLE
 	namespace Pbr = Swim::Render::StandardPbr;
 
@@ -60,6 +61,7 @@ namespace
 		const std::uint32_t exponent = (half >> 10) & 0x1fu;
 		const std::uint32_t mantissa = half & 0x3ffu;
 		float value = 0.0f;
+
 		if (exponent == 0)
 		{
 			value = std::ldexp(float(mantissa), -24);
@@ -72,6 +74,7 @@ namespace
 		{
 			value = std::ldexp(float(mantissa | 0x400u), int(exponent) - 25);
 		}
+
 		return sign ? -value : value;
 	}
 
@@ -168,11 +171,13 @@ namespace
 		Rhi::DescriptorSchemaDesc bindlessSpace{ 1,
 			{ { 0, Rhi::DescriptorType::Sampler, samplerCapacity, Rhi::ShaderStageMask::None },
 				{ 1, Rhi::DescriptorType::SampledTexture, textureCapacity, Rhi::ShaderStageMask::None } } };
+
 		for (auto& binding : bindlessSpace.Bindings)
 		{
 			binding.Stages = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute;
 			binding.PartiallyBound = binding.UpdateAfterBind = true;
 		}
+
 		const auto& draw = drawInterface.Interface;
 		const std::array<Rhi::ShaderStageArtifact, 2> drawStages{ { { Rhi::ShaderStageMask::Vertex, "vertexMain", drawBytes },
 			{ Rhi::ShaderStageMask::Fragment, "fragmentMain", drawBytes } } };
@@ -208,6 +213,7 @@ namespace
 				return Pbr::Float3{ std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta) };
 			};
 			std::vector<PbrCase> cases(96);
+
 			for (auto& c : cases)
 			{
 				const auto n = direction(0.0f); // +Z normal; the other vectors vary.
@@ -216,6 +222,7 @@ namespace
 				c = { { n[0], n[1], n[2] }, unit(random), { v[0], v[1], v[2] }, 0.05f + 0.95f * unit(random), { l[0], l[1], l[2] }, 0,
 					{ unit(random), unit(random), unit(random) }, 0 };
 			}
+
 			RenderGraph graph;
 			const auto input = graph.CreateUpload(std::as_bytes(std::span(cases)), "PBR cases", Rhi::BufferUsage::Storage, 16);
 			const auto output = graph.CreateBuffer({ cases.size() * 16, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource,
@@ -250,17 +257,21 @@ namespace
 			std::vector<std::array<float, 4>> results(cases.size());
 			SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(results))) == Rhi::ReadbackStatus::Ready);
 			std::uint32_t nonzero = 0;
+
 			for (std::size_t i = 0; i < cases.size(); ++i)
 			{
 				const auto& c = cases[i];
 				const auto expected = Pbr::EvaluateBrdf({ { c.BaseColor[0], c.BaseColor[1], c.BaseColor[2] }, c.Metallic, c.Roughness },
 					{ c.Normal[0], c.Normal[1], c.Normal[2] }, { c.View[0], c.View[1], c.View[2] }, { c.Light[0], c.Light[1], c.Light[2] });
+
 				for (int channel = 0; channel < 3; ++channel)
 				{
 					SWIM_CHECK(std::abs(results[i][channel] - expected[channel]) <= 1.0e-5f + 2.0e-3f * std::abs(expected[channel]));
 				}
+
 				nonzero += expected[0] > 0.0f;
 			}
+
 			SWIM_CHECK(nonzero > 60u);
 		}
 
@@ -284,6 +295,7 @@ namespace
 			};
 			std::vector<std::unique_ptr<Rhi::Texture>> textures;
 			std::vector<std::unique_ptr<Rhi::TextureView>> views;
+
 			for (std::size_t i = 0; i < specs.size(); ++i)
 			{
 				Rhi::TextureDesc desc{};
@@ -297,6 +309,7 @@ namespace
 				views.push_back(device->CreateTextureView(*textures.back(), view));
 				SWIM_REQUIRE(views.back());
 			}
+
 			Rhi::SamplerDesc samplerDesc{};
 			samplerDesc.AddressU = samplerDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
 			auto sampler = device->CreateSampler(samplerDesc);
@@ -309,29 +322,35 @@ namespace
 			BindlessResourceTable bindless(*device, bindlessDesc);
 			std::vector<std::uint32_t> textureIndex(specs.size(), BindlessResourceTable::FallbackIndex);
 			std::vector<BindlessTextureHandle> textureHandles;
+
 			for (std::size_t i = 1; i < specs.size(); ++i)
 			{
 				textureHandles.push_back(bindless.RegisterTexture(*views[i]));
 				textureIndex[i] = bindless.GetIndex(textureHandles.back());
 			}
+
 			const auto samplerHandle = bindless.RegisterSampler(*sampler);
 			const auto samplerIndex = bindless.GetIndex(samplerHandle);
 
 			// Upload the textures once, before any frame samples them through the table.
 			{
 				RenderGraph uploads;
+
 				for (std::size_t i = 0; i < textures.size(); ++i)
 				{
 					const auto texture = uploads.ImportTexture(*textures[i], S::Undefined);
 					std::array<std::uint8_t, 64> texels{};
+
 					for (std::size_t t = 0; t < 16; ++t)
 					{
 						std::memcpy(texels.data() + t * 4, specs[i].Texel.data(), 4);
 					}
+
 					AddTextureUpload(
 						uploads, "Material texture upload", std::as_bytes(std::span(texels)), texture, { 0, {}, {}, { 4, 4, 1 } });
 					uploads.Export(texture, S::ShaderRead);
 				}
+
 				executor.Execute(uploads.Compile());
 				executor.Wait();
 			}
@@ -373,6 +392,7 @@ namespace
 			masked->SetSampler("MaterialSampler", samplerIndex);
 			std::vector<std::shared_ptr<MaterialInstance>> instances{ textured, metal, normalMapped, glowing, masked };
 			std::vector<GpuMaterialHandle> handles;
+
 			for (const auto& instance : instances)
 			{
 				handles.push_back(materials.Create(instance));
@@ -410,6 +430,7 @@ namespace
 			};
 			GpuScene scene(*device, { objectCount, "Material scene" });
 			std::vector<RenderObjectHandle> objects;
+
 			for (std::uint32_t object = 0; object < objectCount; ++object)
 			{
 				const auto center = centerOf(object);
@@ -446,6 +467,7 @@ namespace
 			lighting.Ambient = { 0.05f, 0.05f, 0.05f };
 			ShadingView shadingView{};
 			std::memcpy(shadingView.ViewProjection, viewDesc.ViewProjection.data(), sizeof(shadingView.ViewProjection));
+
 			for (int c = 0; c < 3; ++c)
 			{
 				shadingView.ViewDirection[c] = lighting.View[c];
@@ -467,6 +489,7 @@ namespace
 							return specs[i];
 						}
 					}
+
 					return specs[0];
 				};
 				const auto decode = [&](std::uint32_t bindlessIndex, int channel)
@@ -476,20 +499,24 @@ namespace
 					return s.Format == Rhi::Format::RGBA8UnormSrgb && channel < 3 ? Pbr::SrgbToLinear(encoded) : encoded;
 				};
 				Pbr::Texels texels;
+
 				for (int c = 0; c < 4; ++c)
 				{
 					texels.BaseColor[c] = decode(indices.BaseColor, c);
 				}
+
 				for (int c = 0; c < 3; ++c)
 				{
 					texels.MetallicRoughness[c] = decode(indices.MetallicRoughness, c);
 					texels.Emissive[c] = decode(indices.Emissive, c);
 				}
+
 				if (indices.Normal != 0)
 				{
 					texels.TangentNormal = Pbr::Float3{ decode(indices.Normal, 0) * 2 - 1, decode(indices.Normal, 1) * 2 - 1,
 						decode(indices.Normal, 2) * 2 - 1 };
 				}
+
 				texels.Occlusion = decode(indices.Occlusion, 0);
 				return texels;
 			};
@@ -538,10 +565,12 @@ namespace
 						auto table = c.Device().CreateDescriptorTable({ drawLayout.get(), 0, 0, "Material draw table" });
 						SWIM_REQUIRE(table);
 						std::array<Rhi::DescriptorWrite, 6> writes{};
+
 						for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 						{
 							writes[binding].Binding = binding;
 						}
+
 						writes[0].BufferResource = &c.Get(sceneResources.Instances);
 						writes[1].BufferResource = &c.Get(sceneResources.Transforms);
 						writes[2].BufferResource = &c.Get(visible.DrawRecords);
@@ -587,12 +616,15 @@ namespace
 					const std::uint32_t x = std::uint32_t((wx + 12.0f) / 24.0f * float(width));
 					const std::uint32_t y = std::uint32_t((0.5f - wy / 12.0f) * float(height)); // +Y-up NDC.
 					std::array<float, 4> value{};
+
 					for (int c = 0; c < 4; ++c)
 					{
 						value[c] = HalfToFloat(pixels[(std::size_t(y) * width + x) * 4 + c]);
 					}
+
 					return value;
 				};
+
 				for (std::uint32_t object = 0; object < objectCount; ++object)
 				{
 					const auto& instance =
@@ -600,21 +632,26 @@ namespace
 					const auto expected = Pbr::Shade(ReadStandardParameters(instance), texelsOf(instance), Pbr::Frame{}, lighting);
 					const auto center = centerOf(object);
 					const auto actual = pixel(center[0] + 0.3f, center[1] + 0.2f);
+
 					if (!expected)
 					{
 						SWIM_CHECK((actual == std::array<float, 4>{ 0, 0, 0, 0 })); // Discarded: the clear color remains.
 						continue;
 					}
+
 					for (int c = 0; c < 4; ++c)
 					{
 						const float tolerance = 4.0e-3f + 1.2e-2f * std::abs((*expected)[c]);
+
 						if (std::abs(actual[c] - (*expected)[c]) > tolerance)
 						{
 							std::printf("             object %u channel %d: GPU %.5f, CPU %.5f\n", object, c, actual[c], (*expected)[c]);
 						}
+
 						SWIM_CHECK(std::abs(actual[c] - (*expected)[c]) <= tolerance);
 					}
 				}
+
 				// Between the quads nothing is drawn.
 				SWIM_CHECK((pixel(-4.0f, 0.0f) == std::array<float, 4>{ 0, 0, 0, 0 }));
 				return uploaded;
@@ -652,6 +689,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add(
@@ -661,6 +699,8 @@ namespace
 						Swim::Testing::RunValidatedVulkanSmoke(&RunStandardMaterialSmoke);
 					} });
 		}
+
 		return true;
 	}();
+
 } // namespace

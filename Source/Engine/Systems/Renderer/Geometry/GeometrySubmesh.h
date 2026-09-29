@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// One draw range of a mesh (normally one compiled MeshAsset primitive). Index
 	// and vertex offsets are relative to the mesh's own index/vertex data; the
 	// heap rebases them into absolute page offsets in GpuSubmeshRecord.
@@ -13,4 +14,5 @@ namespace Swim::Render
 		std::int32_t VertexOffset = 0;
 		std::uint32_t MaterialSlot = 0;
 	};
+
 } // namespace Swim::Render

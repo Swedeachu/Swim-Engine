@@ -31,6 +31,7 @@
 
 namespace
 {
+
 #ifdef SWIM_SCREEN_SPACE_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 	namespace Ss = Swim::Render::ScreenSpace;
@@ -42,14 +43,17 @@ namespace
 		const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
 		const auto sign = std::uint16_t((bits >> 16) & 0x8000u);
 		const std::uint32_t magnitude = bits & 0x7fffffffu;
+
 		if (magnitude >= 0x47800000u)
 		{
 			return std::uint16_t(sign | (magnitude > 0x7f800000u ? 0x7e00u : 0x7c00u));
 		}
+
 		if (magnitude < 0x38800000u)
 		{
 			return std::uint16_t(sign | std::uint16_t(std::nearbyint(std::bit_cast<float>(magnitude) * 16777216.0f)));
 		}
+
 		const std::uint32_t mantissa = magnitude & 0x7fffffu;
 		std::uint32_t half = ((((magnitude >> 23) - 127u + 15u)) << 10) | (mantissa >> 13);
 		const std::uint32_t rest = mantissa & 0x1fffu;
@@ -62,24 +66,30 @@ namespace
 		double total = 0.0;
 		bool any = false;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 				any = true;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		if (measured)
 		{
 			*measured = any;
 		}
+
 		return total;
 	}
 
@@ -88,6 +98,7 @@ namespace
 	{
 		std::vector<std::uint16_t> halves;
 		halves.reserve(image.Texels.size() * 4);
+
 		for (auto& texel : image.Texels)
 		{
 			for (auto& value : texel)
@@ -96,6 +107,7 @@ namespace
 				value = Smoke::HalfToFloat(halves.back());
 			}
 		}
+
 		return halves;
 	}
 
@@ -186,19 +198,23 @@ namespace
 			// specular IBL of that weight is part of the indirect light).
 			Ss::ColorImage color(spec.Width, spec.Height), indirect(spec.Width, spec.Height);
 			Ss::ColorImage reflectance(spec.Width, spec.Height), specular(spec.Width, spec.Height);
+
 			for (std::size_t i = 0; i < inputs.Hits.size(); ++i)
 			{
 				const auto& hit = inputs.Hits[i];
+
 				if (hit.T == 0.0f)
 				{
 					color.Texels[i] = { 0.3f, 0.5f, 0.9f, 1.0f }; // Sky.
 					continue;
 				}
+
 				const bool dark = (int(std::floor(hit.Position[0])) + int(std::floor(hit.Position[2]))) % 2 != 0;
 				const Ss::Float3 albedo = dark ? Ss::Float3{ 0.2f, 0.25f, 0.3f } : Ss::Float3{ 0.8f, 0.7f, 0.6f };
 				const float sun = std::max(0.0f, 0.5f * hit.Normal[0] + 0.8f * hit.Normal[1] + 0.33f * hit.Normal[2]) * 3.0f;
 				const float weight = hit.Normal[1] > 0.5f ? 0.04f : 0.5f;
 				const Ss::Float3 skyColor{ 0.3f, 0.5f, 0.9f };
+
 				for (int c = 0; c < 3; ++c)
 				{
 					reflectance.Texels[i][c] = weight;
@@ -206,11 +222,13 @@ namespace
 					indirect.Texels[i][c] = 0.6f * albedo[c] + specular.Texels[i][c];
 					color.Texels[i][c] = sun * albedo[c] + indirect.Texels[i][c];
 				}
+
 				color.Texels[i][3] = 1.0f;
 				indirect.Texels[i][3] = 1.0f;
 				reflectance.Texels[i][3] = 1.0f;
 				specular.Texels[i][3] = 1.0f;
 			}
+
 			const auto colorHalves = ToHalves(color);
 			const auto indirectHalves = ToHalves(indirect);
 			const auto normalHalves = ToHalves(inputs.Normal);
@@ -243,32 +261,39 @@ namespace
 			AddTextureUpload(graph, "Reflectance upload", std::as_bytes(std::span(reflectanceHalves)), *input.Reflectance, whole);
 			AddTextureUpload(graph, "Specular upload", std::as_bytes(std::span(specularHalves)), *input.Specular, whole);
 			AddTextureUpload(graph, "Depth upload", std::as_bytes(std::span(inputs.Depth.Texels)), input.Depth, whole);
+
 			if (spec.BackFaces)
 			{
 				input.BackDepth = texture(Rhi::Format::D32Float, Rhi::TextureUsage::DepthStencilAttachment, "Screen-space back depth");
 				AddTextureUpload(graph, "Back depth upload", std::as_bytes(std::span(inputs.BackDepth.Texels)), *input.BackDepth, whole);
 			}
+
 			input.View = view;
 			input.Settings = spec.Settings;
 			input.NoiseFrame = spec.NoiseFrame;
 			const auto resources = effects.Record(graph, input);
 			const auto& params = resources.ParamsRecord;
+
 			if (resources.Passthrough)
 			{
 				SWIM_CHECK(resources.Output == input.Color && !resources.CompositePass);
 				std::printf("             [screen space %s] passthrough: nothing recorded\n", spec.Name);
 				return;
 			}
+
 			std::optional<GraphReadback> rawReadback, aoReadback, reflectionReadback;
+
 			if (spec.Compare && resources.AmbientOcclusion)
 			{
 				rawReadback = AddTextureReadback(graph, "AO raw", *resources.AmbientOcclusionRaw, whole);
 				aoReadback = AddTextureReadback(graph, "AO", *resources.AmbientOcclusion, whole);
 			}
+
 			if (spec.Compare && resources.Reflection)
 			{
 				reflectionReadback = AddTextureReadback(graph, "Reflections", *resources.Reflection, whole);
 			}
+
 			const auto outputReadback = AddTextureReadback(graph, "Output", resources.Output, whole);
 			executor.Execute(graph.Compile());
 			const auto timings = executor.ReadTimings();
@@ -283,15 +308,18 @@ namespace
 			float rawWorst = 0.0f, blurWorst = 0.0f, outputWorst = 0.0f;
 			double creaseSum = 0.0, openSum = 0.0;
 			std::uint32_t creaseCount = 0, openCount = 0;
+
 			if (spec.Compare)
 			{
 				std::optional<Ss::ScalarImage> gpuAo;
+
 				if (rawReadback)
 				{
 					Ss::ScalarImage gpuRaw(spec.Width, spec.Height);
 					gpuAo.emplace(spec.Width, spec.Height);
 					read(*rawReadback, gpuRaw.Texels);
 					read(*aoReadback, gpuAo->Texels);
+
 					for (std::uint32_t y = 0; y < spec.Height; ++y)
 					{
 						for (std::uint32_t x = 0; x < spec.Width; ++x)
@@ -307,6 +335,7 @@ namespace
 							blurWorst = std::max(blurWorst, blurError);
 							blurOutliers += blurError > 1.0e-3f ? 1u : 0u;
 							const auto& hit = inputs.Hits[std::size_t(y) * spec.Width + x];
+
 							if (hit.T > 0.0f && hit.Normal[1] > 0.5f)
 							{
 								if (hit.Position[0] < -2.9f && std::abs(hit.Position[2]) < 6.0f)
@@ -322,19 +351,23 @@ namespace
 							}
 						}
 					}
+
 					SWIM_CHECK(rawOutliers <= texels / 100);
 					SWIM_CHECK(blurOutliers <= texels / 1000);
 					SWIM_REQUIRE(creaseCount > 0u && openCount > 0u);
 					SWIM_CHECK(creaseSum / creaseCount + 0.2 < openSum / openCount); // The wall's base is darker than the open floor.
 				}
+
 				// 3. Reflections over the same inputs and the GPU's visibility (a march can step to a
 				// neighbouring pixel where the CPU and GPU round differently: a small outlier budget).
 				std::optional<Ss::ColorImage> gpuReflection;
+
 				if (reflectionReadback)
 				{
 					std::vector<std::uint16_t> reflectionHalvesRead(std::size_t(texels) * 4);
 					read(*reflectionReadback, reflectionHalvesRead);
 					gpuReflection.emplace(spec.Width, spec.Height);
+
 					for (std::size_t i = 0; i < gpuReflection->Texels.size(); ++i)
 					{
 						for (int c = 0; c < 4; ++c)
@@ -342,6 +375,7 @@ namespace
 							gpuReflection->Texels[i][c] = Smoke::HalfToFloat(reflectionHalvesRead[i * 4 + c]);
 						}
 					}
+
 					for (std::uint32_t y = 0; y < spec.Height; ++y)
 					{
 						for (std::uint32_t x = 0; x < spec.Width; ++x)
@@ -351,57 +385,71 @@ namespace
 									spec.BackFaces ? &inputs.BackDepth : nullptr);
 							const auto& actual = gpuReflection->At(x, y);
 							bool mismatch = false;
+
 							for (int c = 0; c < 4; ++c)
 							{
 								mismatch = mismatch || !Close(actual[c], expected[c], 3.0e-3f, 1.0e-3f);
 							}
+
 							reflectionOutliers += mismatch ? 1u : 0u;
 							reflectionHits += actual[3] > 0.0f ? 1u : 0u;
 							cpuReflectionHits += expected[3] > 0.0f ? 1u : 0u;
 						}
 					}
+
 					SWIM_CHECK(reflectionOutliers <= texels / 50);
 					SWIM_CHECK(reflectionHits > texels / 20); // The floor reflects the wall, pillar and slab.
 				}
+
 				// 4. The composite over the GPU's visibility and reflections.
 				std::vector<std::uint16_t> raw(std::size_t(texels) * 4);
 				read(outputReadback, raw);
+
 				for (std::uint32_t y = 0; y < spec.Height; ++y)
 				{
 					for (std::uint32_t x = 0; x < spec.Width; ++x)
 					{
 						const std::size_t i = std::size_t(y) * spec.Width + x;
 						Ss::ReflectionSample reflectionSample;
+
 						if (gpuReflection)
 						{
 							reflectionSample = { Ss::ResolvedReflectionTexel(params, *gpuReflection, inputs.Normal, inputs.Depth, x, y),
 								reflectance.Texels[i], specular.Texels[i] };
 						}
+
 						const auto expected = Ss::CompositeTexel(params, color.Texels[i], indirect.Texels[i],
 							gpuAo ? gpuAo->At(x, y) : 1.0f, reflectionSample, inputs.Depth.Texels[i], x, y);
 						bool mismatch = false;
+
 						for (int c = 0; c < 4; ++c)
 						{
 							const float actual = Smoke::HalfToFloat(raw[i * 4 + c]);
 							mismatch = mismatch || !Close(actual, expected[c], 3.0e-3f, 1.0e-4f);
 							outputWorst = std::max(outputWorst, std::abs(actual - expected[c]) / std::max(std::abs(expected[c]), 1.0e-2f));
 						}
+
 						outputMismatches += mismatch ? 1u : 0u;
 					}
 				}
+
 				SWIM_CHECK(outputMismatches <= texels / 1000);
 			}
+
 			std::printf("             [screen space %s] %ux%u: AO raw worst %.2e (%u outliers), blur worst %.2e (%u), crease %.3f vs open "
 						"%.3f; output worst relative %.2e (%u mismatches)\n",
 				spec.Name, spec.Width, spec.Height, double(rawWorst), rawOutliers, double(blurWorst), blurOutliers,
 				creaseCount ? creaseSum / creaseCount : 0.0, openCount ? openSum / openCount : 0.0, double(outputWorst), outputMismatches);
+
 			if (resources.Reflection && spec.Compare)
 			{
 				std::printf("             [screen space %s] reflections: %u GPU hits vs %u CPU hits, %u outliers\n", spec.Name,
 					reflectionHits, cpuReflectionHits, reflectionOutliers);
 			}
+
 			bool measured = false;
 			const double compositeMs = PassMilliseconds(timings, "Screen space composite", &measured);
+
 			if (measured)
 			{
 				std::printf("             [screen space %s] GPU: AO %.3f ms, blur %.3f ms, reflections %.3f ms, composite %.3f ms\n",
@@ -464,6 +512,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ScreenSpaceEffectsMatchTheCpuReference", SWIM_TEST_LOCATION,
@@ -472,6 +521,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunScreenSpaceSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

@@ -15,6 +15,7 @@
 
 namespace
 {
+
 	void RunRenderGraphSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 #ifndef SWIM_RHI_TEXTURE_SPIRV_PATH
@@ -32,17 +33,20 @@ namespace
 		SWIM_REQUIRE_EQUAL(interface.Interface.DescriptorSchemas.size(), 1u);
 		const auto& schema = interface.Interface.DescriptorSchemas.front();
 		std::uint32_t textureBinding = UINT32_MAX, samplerBinding = UINT32_MAX;
+
 		for (const auto& binding : schema.Bindings)
 		{
 			if (binding.Type == Rhi::DescriptorType::SampledTexture)
 			{
 				textureBinding = binding.Binding;
 			}
+
 			if (binding.Type == Rhi::DescriptorType::Sampler)
 			{
 				samplerBinding = binding.Binding;
 			}
 		}
+
 		SWIM_REQUIRE(textureBinding != UINT32_MAX && samplerBinding != UINT32_MAX);
 
 		std::ifstream file(SWIM_RHI_TEXTURE_SPIRV_PATH, std::ios::binary | std::ios::ate);
@@ -99,6 +103,7 @@ namespace
 		auto acquired = device->CreateGpuSemaphore();
 		SWIM_REQUIRE(acquired);
 		std::vector<std::unique_ptr<Rhi::Semaphore>> ready;
+
 		for (std::uint32_t i = 0; i < swapchain->GetImageCount(); ++i)
 		{
 			ready.push_back(device->CreateGpuSemaphore());
@@ -112,6 +117,7 @@ namespace
 
 		// Declared after all imports/captured pipelines so destruction drains first.
 		RenderGraphExecutor executor(*device);
+
 		try
 		{
 			for (std::uint32_t frame = 0; frame < 4; ++frame)
@@ -238,6 +244,7 @@ namespace
 				SWIM_CHECK_EQUAL(executor.GetPooledResourceCount(), 2u);
 				std::array<std::byte, 16 * 16 * 4> pixels{};
 				readback->Read(0, pixels);
+
 				for (std::size_t i = 0; i < pixels.size(); ++i)
 				{
 					const bool full = i % 4 == 3 || (green ? i % 4 == 1 : i % 4 != 1);
@@ -246,6 +253,7 @@ namespace
 
 				const auto timings = executor.ReadTimings();
 				SWIM_REQUIRE_EQUAL(timings.size(), 4u);
+
 				for (const auto& timing : timings)
 				{
 					if (device->GetQueue(Q::Graphics).GetTimestampInfo().IsSupported())
@@ -266,26 +274,31 @@ namespace
 						platform.PumpEvents({}, {});
 						const auto logical = window->GetLogicalSize();
 						resized = logical.Width == 400 && logical.Height == 300;
+
 						if (!resized)
 						{
 							std::this_thread::sleep_for(std::chrono::milliseconds(10));
 						}
+
 					} while (!resized && std::chrono::steady_clock::now() < deadline);
 					SWIM_REQUIRE_MESSAGE(resized, "Graph window resize did not complete within five seconds");
 					const auto pixels = window->GetPixelSize();
 					SWIM_REQUIRE(swapchain->Resize({ pixels.Width, pixels.Height }, completion));
 
 					ready.clear();
+
 					for (std::uint32_t i = 0; i < swapchain->GetImageCount(); ++i)
 					{
 						ready.push_back(device->CreateGpuSemaphore());
 						SWIM_REQUIRE(ready.back());
 					}
+
 					presented.assign(swapchain->GetImageCount(), false);
 					presentPipeline = createPipeline(swapchain->GetFormat());
 					SWIM_REQUIRE(presentPipeline);
 				}
 			}
+
 			executor.Trim();
 			// Presentation waits are not covered by the render completion timeline.
 			device->GetQueue(Q::Graphics).WaitIdle();
@@ -297,12 +310,14 @@ namespace
 			device->GetQueue(Q::Graphics).WaitIdle();
 			throw;
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "RenderGraphOffscreenPostPresentAndReuse", SWIM_TEST_LOCATION,
@@ -311,6 +326,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunRenderGraphSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

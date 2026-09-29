@@ -13,8 +13,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		std::uint32_t Flags(const MaterialDesc& desc)
 		{
 			namespace Pbr = Swim::Render::StandardPbr;
@@ -29,6 +31,7 @@ namespace Engine
 		{
 			return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
 		}
+
 	} // namespace
 
 	MaterialLibrary::MaterialLibrary(Swim::Render::GpuMaterialTable& tableValue,
@@ -47,10 +50,12 @@ namespace Engine
 	void MaterialLibrary::SetRouter(Router value)
 	{
 		router = std::move(value);
+
 		if (!router)
 		{
 			return;
 		}
+
 		for (auto& [set, entry] : entries)
 		{
 			router(set, ToParameters(entry.Desc));
@@ -77,15 +82,18 @@ namespace Engine
 		const std::array<Swim::Assets::AssetHandle<Swim::Assets::TextureAsset>, 5> textures{ d.BaseColorTexture, d.MetallicRoughnessTexture,
 			d.NormalTexture, d.EmissiveTexture, d.OcclusionTexture };
 		std::array<std::uint32_t, 5> indices{};
+
 		for (std::size_t i = 0; i < textures.size(); ++i)
 		{
 			indices[i] =
 				textures[i].IsValid() ? residency.GetBindlessIndex(textures[i]) : Swim::Render::BindlessResourceTable::FallbackIndex;
 		}
+
 		if (!force && indices == entry.TextureIndices)
 		{
 			return;
 		}
+
 		entry.TextureIndices = indices;
 		auto& instance = *entry.Instance;
 		instance.SetVector("BaseColorFactor",
@@ -119,10 +127,12 @@ namespace Engine
 		Write(entry, true);
 		entry.Handle = table.Create(entry.Instance);
 		const std::uint32_t set = table.GetIndex(entry.Handle);
+
 		if (router)
 		{
 			router(set, ToParameters(desc));
 		}
+
 		entries[set] = std::move(entry);
 		return set;
 	}
@@ -139,33 +149,40 @@ namespace Engine
 				}
 			}
 		}
+
 		return Create(desc);
 	}
 
 	bool MaterialLibrary::Update(std::uint32_t materialSet, const MaterialDesc& desc)
 	{
 		const auto found = entries.find(materialSet);
+
 		if (found == entries.end())
 		{
 			return false;
 		}
+
 		const bool rebin = Flags(found->second.Desc) != Flags(desc);
 		found->second.Desc = desc;
 		Write(found->second, true);
+
 		if (rebin && router)
 		{
 			router(materialSet, ToParameters(desc));
 		}
+
 		return true;
 	}
 
 	bool MaterialLibrary::Release(std::uint32_t materialSet)
 	{
 		const auto found = entries.find(materialSet);
+
 		if (found == entries.end() || materialSet == defaultSet)
 		{
 			return false;
 		}
+
 		table.Release(found->second.Handle);
 		entries.erase(found);
 		return true;
@@ -186,6 +203,7 @@ namespace Engine
 				return set;
 			}
 		}
+
 		return 0;
 	}
 
@@ -197,4 +215,5 @@ namespace Engine
 			Write(entry, false);
 		}
 	}
+
 } // namespace Engine

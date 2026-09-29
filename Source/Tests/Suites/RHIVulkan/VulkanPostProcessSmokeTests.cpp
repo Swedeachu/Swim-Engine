@@ -30,6 +30,7 @@
 
 namespace
 {
+
 #ifdef SWIM_POST_PROCESS_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 	namespace Pp = Swim::Render::Post;
@@ -40,18 +41,22 @@ namespace
 		const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
 		const std::uint16_t sign = std::uint16_t((bits >> 16) & 0x8000u);
 		const float magnitude = std::abs(value);
+
 		if (magnitude == 0.0f)
 		{
 			return sign;
 		}
+
 		if (std::isinf(magnitude))
 		{
 			return std::uint16_t(sign | 0x7c00u);
 		}
+
 		if (magnitude < std::ldexp(1.0f, -14))
 		{
 			return std::uint16_t(sign | std::uint16_t(magnitude * 16777216.0f));
 		}
+
 		const std::uint32_t exponent = ((bits >> 23) & 0xffu) - 127u + 15u;
 		return std::uint16_t(sign | (exponent << 10) | ((bits >> 13) & 0x3ffu));
 	}
@@ -63,6 +68,7 @@ namespace
 		Pp::Image image(width, height);
 		const std::array<std::array<float, 5>, 4> disks{ { { 0.2f, 0.3f, 0.06f, 400.0f, 0.0f }, { 0.7f, 0.25f, 0.04f, 60.0f, 1.0f },
 			{ 0.5f, 0.7f, 0.1f, 8.0f, 2.0f }, { 0.85f, 0.8f, 0.02f, 1500.0f, 0.0f } } };
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -72,14 +78,17 @@ namespace
 				float r = 0.01f * std::exp2(10.0f * u) * (0.6f + 0.4f * v);
 				float g = r * (0.8f + 0.2f * std::sin(20.0f * v));
 				float b = r * (0.6f + 0.4f * u);
+
 				if (v > 0.9f && u < 0.3f)
 				{
 					r = g = b = 0.0f; // Black: the histogram's ignored bin.
 				}
+
 				for (const auto& disk : disks)
 				{
 					const float dx = (u - disk[0]) * float(width) / float(height);
 					const float dy = v - disk[1];
+
 					if (dx * dx + dy * dy < disk[2] * disk[2])
 					{
 						const std::array<float, 3> tint = disk[4] == 0.0f ? std::array<float, 3>{ 1.0f, 0.9f, 0.7f }
@@ -90,9 +99,11 @@ namespace
 						b = disk[3] * tint[2];
 					}
 				}
+
 				image.At(x, y) = Pp::RoundToHalf(Pp::Float4{ r * scale, g * scale, b * scale, 1.0f });
 			}
 		}
+
 		return image;
 	}
 
@@ -106,24 +117,30 @@ namespace
 		double total = 0.0;
 		bool any = false;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 				any = true;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		if (measured)
 		{
 			*measured = any;
 		}
+
 		return total;
 	}
 
@@ -197,6 +214,7 @@ namespace
 			const auto image = MakeScene(spec.Width, spec.Height, spec.Scale);
 			std::vector<std::uint16_t> halves;
 			halves.reserve(image.Texels.size() * 4);
+
 			for (const auto& texel : image.Texels)
 			{
 				for (const float v : texel)
@@ -204,6 +222,7 @@ namespace
 					halves.push_back(HalfBits(v));
 				}
 			}
+
 			const bool hdr = IsHdrEncoding(spec.Settings.Output.Encoding);
 			RenderGraph graph;
 			Rhi::TextureDesc sourceDesc;
@@ -226,23 +245,28 @@ namespace
 			const auto outputReadback = AddTextureReadback(graph, "Output", output, whole);
 			const auto stateReadback = AddBufferReadback(graph, "Exposure state", resources.ExposureState, 0, sizeof(GpuExposureState));
 			std::optional<GraphReadback> histogramReadback;
+
 			if (resources.Histogram)
 			{
 				histogramReadback = AddBufferReadback(graph, "Histogram", *resources.Histogram, 0, PostHistogramBins * 4);
 			}
+
 			std::vector<GraphReadback> downReadbacks, upReadbacks;
+
 			if (spec.Compare)
 			{
 				for (std::uint32_t i = 0; i < resources.BloomLevels; ++i)
 				{
 					const Rhi::BufferTextureCopyRegion level{ 0, {}, {}, { spec.Width >> (i + 1), spec.Height >> (i + 1), 1 } };
 					downReadbacks.push_back(AddTextureReadback(graph, "Bloom down", resources.BloomDown[i], level));
+
 					if (i + 1 < resources.BloomLevels)
 					{
 						upReadbacks.push_back(AddTextureReadback(graph, "Bloom up", resources.BloomUp[i], level));
 					}
 				}
 			}
+
 			executor.Execute(graph.Compile());
 			const auto timings = executor.ReadTimings();
 			const auto read = [&](const GraphReadback& readback, auto& target)
@@ -257,6 +281,7 @@ namespace
 				std::vector<std::uint16_t> raw(std::size_t(width) * height * 4);
 				read(readback, raw);
 				Pp::Image level(width, height);
+
 				for (std::size_t i = 0; i < level.Texels.size(); ++i)
 				{
 					for (int c = 0; c < 4; ++c)
@@ -264,6 +289,7 @@ namespace
 						level.Texels[i][c] = Smoke::HalfToFloat(raw[i * 4 + c]);
 					}
 				}
+
 				return level;
 			};
 
@@ -271,19 +297,23 @@ namespace
 			Pp::Histogram gpuBins{};
 			std::uint32_t binDifference = 0;
 			const auto& exposureSettings = spec.Settings.Exposure;
+
 			if (histogramReadback)
 			{
 				read(*histogramReadback, gpuBins);
 				const auto cpuBins = Pp::BuildHistogram(image, exposureSettings);
 				std::uint64_t total = 0;
+
 				for (std::uint32_t b = 0; b < PostHistogramBins; ++b)
 				{
 					total += gpuBins[b];
 					binDifference += std::uint32_t(std::abs(std::int64_t(gpuBins[b]) - std::int64_t(cpuBins[b])));
 				}
+
 				SWIM_CHECK_EQUAL(total, std::uint64_t(spec.Width) * spec.Height);
 				SWIM_CHECK(binDifference <= spec.Width * spec.Height / 1000); // Only log2 ulps at bin edges.
 			}
+
 			const auto cpuState =
 				Pp::UpdateExposure(gpuBins, exposureSettings, previousState.value_or(GpuExposureState{}), spec.DeltaTime, reset);
 			SWIM_CHECK_EQUAL(state[0].Valid, 1u);
@@ -295,18 +325,22 @@ namespace
 			std::uint32_t bloomTexels = 0, bloomMismatches = 0, compared = 0, mismatches = 0, maxStep = 0;
 			float worst = 0.0f;
 			double sumEncoded = 0.0;
+
 			if (spec.Compare)
 			{
 				// 2. Bloom, each level from the GPU's own input.
 				std::vector<Pp::Image> gpuDown, gpuUp;
+
 				for (std::uint32_t i = 0; i < resources.BloomLevels; ++i)
 				{
 					gpuDown.push_back(readLevel(downReadbacks[i], spec.Width >> (i + 1), spec.Height >> (i + 1)));
 				}
+
 				for (std::uint32_t i = 0; i < upReadbacks.size(); ++i)
 				{
 					gpuUp.push_back(readLevel(upReadbacks[i], spec.Width >> (i + 1), spec.Height >> (i + 1)));
 				}
+
 				const auto compareLevel = [&](const Pp::Image& gpu, const Pp::Image& cpu)
 				{
 					for (std::size_t t = 0; t < gpu.Texels.size(); ++t)
@@ -319,26 +353,31 @@ namespace
 					}
 				};
 				const auto& b = spec.Settings.Bloom;
+
 				for (std::uint32_t i = 0; i < gpuDown.size(); ++i)
 				{
 					const auto& from = i == 0 ? image : gpuDown[i - 1];
 					compareLevel(gpuDown[i],
 						Pp::BloomDownsample(from, spec.Width >> (i + 1), spec.Height >> (i + 1), i == 0, gpuExposure, b.Threshold, b.Knee));
 				}
+
 				for (std::uint32_t i = 0; i < gpuUp.size(); ++i)
 				{
 					const auto& low = i + 2 == gpuDown.size() ? gpuDown.back() : gpuUp[i + 1];
 					compareLevel(gpuUp[i], Pp::BloomUpsample(low, gpuDown[i]));
 				}
+
 				SWIM_CHECK(bloomMismatches <= bloomTexels / 1000);
 
 				// 3. Output, from the GPU's exposure and bloom.
 				const auto params = Pp::BuildPostParams(spec.Settings, resources.BloomLevels);
 				const Pp::Image* bloom = gpuUp.empty() ? (gpuDown.empty() ? nullptr : &gpuDown[0]) : &gpuUp[0];
 				std::vector<float> actual(std::size_t(spec.Width) * spec.Height * 4);
+
 				if (hdr)
 				{
 					const auto gpu = readLevel(outputReadback, spec.Width, spec.Height);
+
 					for (std::size_t i = 0; i < gpu.Texels.size(); ++i)
 					{
 						for (int c = 0; c < 4; ++c)
@@ -351,11 +390,13 @@ namespace
 				{
 					std::vector<std::uint8_t> bytes(actual.size());
 					read(outputReadback, bytes);
+
 					for (std::size_t i = 0; i < bytes.size(); ++i)
 					{
 						actual[i] = float(bytes[i]) / 255.0f;
 					}
 				}
+
 				for (std::uint32_t y = 0; y < spec.Height; ++y)
 				{
 					for (std::uint32_t x = 0; x < spec.Width; ++x)
@@ -364,10 +405,12 @@ namespace
 							bloom ? Pp::TentUpsample(*bloom, x, y, spec.Width, spec.Height) : Pp::Float3{ 0, 0, 0 };
 						const auto expected = Pp::CompositeTexel(params, gpuExposure, image.At(x, y), bloomValue, x, y);
 						const std::size_t index = (std::size_t(y) * spec.Width + x) * 4;
+
 						for (int c = 0; c < 4; ++c)
 						{
 							++compared;
 							const float a = actual[index + c];
+
 							if (hdr)
 							{
 								const float e = Pp::RoundToHalf(expected[c]);
@@ -381,6 +424,7 @@ namespace
 								maxStep = std::max(maxStep, step);
 								mismatches += step > 1 ? 1u : 0u;
 							}
+
 							if (c < 3)
 							{
 								sumEncoded += a;
@@ -388,8 +432,10 @@ namespace
 						}
 					}
 				}
+
 				SWIM_CHECK_EQUAL(mismatches, 0u);
 			}
+
 			std::printf(
 				"             [post %s] %ux%u: EV100 %.3f (CPU %.3f), exposure %.4g, avg log2 L %.3f; histogram bin difference %u; "
 				"%u bloom levels, %u/%u bloom mismatches; %u output values, %u mismatches, max SDR step %u, worst HDR relative %.2e; "
@@ -399,12 +445,14 @@ namespace
 				mismatches, maxStep, double(worst), compared ? sumEncoded / (double(compared) * 0.75) : 0.0);
 			bool measured = false;
 			const double compositeMs = PassMilliseconds(timings, "Post composite", &measured);
+
 			if (measured)
 			{
 				std::printf("             [post %s] GPU: histogram %.3f ms, exposure %.3f ms, bloom %.3f ms, composite %.3f ms\n",
 					spec.Name, PassMilliseconds(timings, "Post histogram"), PassMilliseconds(timings, "Post exposure"),
 					PassMilliseconds(timings, "Post bloom"), compositeMs);
 			}
+
 			previousState = state[0];
 			return state[0];
 		};
@@ -454,6 +502,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PostProcessMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -462,6 +511,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunPostProcessSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

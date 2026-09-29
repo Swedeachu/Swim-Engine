@@ -7,6 +7,7 @@
 
 namespace Swim::Text
 {
+
 	inline constexpr char32_t ReplacementCharacter = U'�';
 
 	// One decoded code point and the number of bytes it occupied. Invalid or
@@ -30,4 +31,5 @@ namespace Swim::Text
 	// breaking, shaping, carets) agrees on byte offsets.
 	std::string SanitizeUtf8(std::string_view text);
 	void AppendUtf8(std::string& out, char32_t codePoint);
+
 } // namespace Swim::Text

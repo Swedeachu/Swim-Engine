@@ -17,10 +17,12 @@ namespace
 	std::vector<std::byte> MakePayload(std::size_t size)
 	{
 		std::vector<std::byte> bytes(size);
+
 		for (std::size_t i = 0; i < bytes.size(); ++i)
 		{
 			bytes[i] = static_cast<std::byte>((i * 37 + 11) & 0xff);
 		}
+
 		return bytes;
 	}
 
@@ -28,10 +30,12 @@ namespace
 	{
 		std::ofstream file(path, std::ios::binary | std::ios::trunc);
 		SWIM_REQUIRE(static_cast<bool>(file));
+
 		if (!bytes.empty())
 		{
 			file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 		}
+
 		SWIM_CHECK(static_cast<bool>(file));
 	}
 
@@ -46,6 +50,7 @@ namespace
 		SWIM_REQUIRE(chunk.Bytes.size() == static_cast<std::size_t>(size));
 
 		bool bytesMatch = true;
+
 		for (std::size_t i = 0; i < chunk.Bytes.size(); ++i)
 		{
 			if (chunk.Bytes[i] != payload[static_cast<std::size_t>(offset) + i])
@@ -54,6 +59,7 @@ namespace
 				break;
 			}
 		}
+
 		SWIM_CHECK(bytesMatch);
 	}
 
@@ -89,6 +95,7 @@ namespace
 			{
 				io.Shutdown();
 			}
+
 			if (jobs.IsRunning())
 			{
 				jobs.Shutdown();
@@ -100,6 +107,7 @@ namespace
 		}
 
 		ScopedIoFixture(const ScopedIoFixture&) = delete;
+
 		ScopedIoFixture& operator=(const ScopedIoFixture&) = delete;
 
 		bool IsReady() const
@@ -221,6 +229,7 @@ SWIM_TEST("IO.AsyncIoService", "CoalescedBatchPreservesRequestedChunks")
 	fixture.Io().Wait(batch);
 
 	SWIM_REQUIRE(batch.GetResult().Chunks.size() == ranges.size());
+
 	for (std::size_t i = 0; i < ranges.size(); ++i)
 	{
 		CheckChunkEquals(batch.GetResult().Chunks[i], fixture.Payload(), ranges[i].Offset, ranges[i].Size);
@@ -233,6 +242,7 @@ SWIM_TEST("IO.AsyncIoService", "ConcurrentRangeReads")
 	SWIM_REQUIRE(fixture.IsReady());
 
 	std::vector<Swim::IO::ReadRequest> concurrent;
+
 	for (std::uint64_t i = 0; i < 16; ++i)
 	{
 		concurrent.push_back(fixture.Io().ReadRangeAsync(fixture.DataPath(), { i * 128, 96 }));
@@ -273,6 +283,7 @@ SWIM_TEST("IO.AsyncIoService", "CancellationBeforeDispatch")
 		{
 			std::this_thread::yield();
 		}
+
 	});
 
 	auto cancelled = fixture.Io().ReadRangeAsync(fixture.DataPath(), { 0, 128 });

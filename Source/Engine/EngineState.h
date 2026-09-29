@@ -10,6 +10,7 @@
 
 namespace Engine
 {
+
 	// Runtime simulation state. The engine is in exactly one of Playing, Paused or
 	// Stopped (EngineStateMachine); the enum is also a bit mask so behaviours and
 	// systems can declare which states they run in (BehaviorComponents).
@@ -134,18 +135,22 @@ namespace Engine
 		{
 			return EngineState::Playing;
 		}
+
 		if (token == "paused" || token == "pause")
 		{
 			return EngineState::Paused;
 		}
+
 		if (token == "stopped" || token == "stop")
 		{
 			return EngineState::Stopped;
 		}
+
 		if (token == "all")
 		{
 			return EngineState::All;
 		}
+
 		if (token == "none")
 		{
 			return EngineState::None;
@@ -153,11 +158,14 @@ namespace Engine
 
 		char* end = nullptr;
 		const unsigned long long v = std::strtoull(token.c_str(), &end, 0);
+
 		if (end != token.c_str() && *end == '\0')
 		{
 			using U = std::underlying_type_t<EngineState>;
 			return static_cast<EngineState>(static_cast<U>(v) & static_cast<U>(EngineState::All));
 		}
+
 		return EngineState::None;
 	}
+
 } // namespace Engine

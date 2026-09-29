@@ -6,10 +6,12 @@
 
 namespace Engine
 {
+
 	void SceneSystem::SetServices(SceneServices value)
 	{
 		services = std::move(value);
 		services.Behaviors = &behaviorRegistry;
+
 		for (auto& [name, loaded] : scenes)
 		{
 			(void)name;
@@ -28,10 +30,12 @@ namespace Engine
 		{
 			throw std::invalid_argument("SceneSystem: scene '" + name + "' is null.");
 		}
+
 		if (services.HasCore())
 		{
 			InjectServices(*scene);
 		}
+
 		SceneId id(nextSceneId++);
 		scenes.emplace(name, LoadedScene{ id, std::move(scene), false });
 	}
@@ -53,13 +57,16 @@ namespace Engine
 			{
 				continue;
 			}
+
 			std::shared_ptr<Scene> scene = descriptor.Create(descriptor.Name);
+
 			if (!scene)
 			{
 				std::cerr << "[SceneSystem] Scene factory '" << descriptor.Name << "' returned null.\n";
 				err = err ? err : -1;
 				continue;
 			}
+
 			AddLoaded(descriptor.Name, std::move(scene));
 		}
 
@@ -73,11 +80,13 @@ namespace Engine
 		{
 			startupSceneName = scenes.begin()->first;
 		}
+
 		if (!startupSceneName.empty() && !scenes.contains(startupSceneName))
 		{
 			std::cerr << "[SceneSystem] Startup scene '" << startupSceneName << "' is not registered.\n";
 			err = err ? err : -1;
 		}
+
 		awake = true;
 		return err;
 	}
@@ -88,11 +97,14 @@ namespace Engine
 		{
 			return 0;
 		}
+
 		auto it = scenes.find(startupSceneName);
+
 		if (it == scenes.end())
 		{
 			return -1;
 		}
+
 		return ActivateLoaded(it->second, it->first);
 	}
 
@@ -103,22 +115,27 @@ namespace Engine
 		InjectServices(*activeScene);
 
 		int err = 0;
+
 		if (!loaded.Awakened)
 		{
 			loaded.Awakened = true;
 			activeScene->InternalSceneAwake();
+
 			if (const int result = activeScene->Awake(); result != 0)
 			{
 				std::cerr << "[SceneSystem] Scene '" << name << "' failed to Awake.\n";
 				err = result;
 			}
 		}
+
 		activeScene->InternalSceneInit();
+
 		if (const int result = activeScene->Init(); result != 0)
 		{
 			std::cerr << "[SceneSystem] Scene '" << name << "' failed to Init.\n";
 			err = err ? err : result;
 		}
+
 		activeScene->InternalScenePostInit();
 		return err;
 	}
@@ -129,10 +146,12 @@ namespace Engine
 		{
 			return;
 		}
+
 		if (activeScene->Exit() != 0)
 		{
 			std::cerr << "[SceneSystem] Scene '" << activeScene->GetName() << "' failed to Exit.\n";
 		}
+
 		activeScene->InternalSceneExit();
 	}
 
@@ -193,6 +212,7 @@ namespace Engine
 		{
 			activeScene->InternalStateChanged(previous, current);
 		}
+
 		if (current == EngineState::Stopped && previous != EngineState::None)
 		{
 			RequestReload();
@@ -202,10 +222,12 @@ namespace Engine
 	void SceneSystem::SetScene(const std::string& name)
 	{
 		auto it = scenes.find(name);
+
 		if (it == scenes.end())
 		{
 			throw std::runtime_error("Scene with name '" + name + "' does not exist.");
 		}
+
 		ExitActive();
 		ActivateLoaded(it->second, it->first);
 	}
@@ -216,13 +238,16 @@ namespace Engine
 		{
 			return;
 		}
+
 		const std::string name = GetActiveSceneName();
 		ExitActive();
 		auto it = scenes.find(name);
+
 		if (it != scenes.end())
 		{
 			ActivateLoaded(it->second, it->first);
 		}
+
 		++reloadCount;
 	}
 
@@ -235,6 +260,7 @@ namespace Engine
 				return name;
 			}
 		}
+
 		return {};
 	}
 
@@ -248,11 +274,13 @@ namespace Engine
 	{
 		std::vector<std::string> names;
 		names.reserve(scenes.size());
+
 		for (const auto& [name, loaded] : scenes)
 		{
 			(void)loaded;
 			names.push_back(name);
 		}
+
 		return names;
 	}
 
@@ -262,4 +290,5 @@ namespace Engine
 		injected.Behaviors = &behaviorRegistry;
 		scene.SetServices(std::move(injected));
 	}
+
 } // namespace Engine

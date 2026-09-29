@@ -10,6 +10,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	using T = MaterialParameterType;
 
 	// A small hand-written layout: { float4 Color; float3 Emissive; float Roughness; float2 Tiling; uint BaseTexture; int Layer; uint
@@ -30,6 +31,7 @@ namespace
 		std::memcpy(&value, record.data() + offset, sizeof(value));
 		return value;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Materials", "TemplateValidatesStd430LayoutsAndNames")
@@ -48,6 +50,7 @@ SWIM_TEST("Render.Materials", "TemplateValidatesStd430LayoutsAndNames")
 		auto desc = SampleDesc();
 		edit(desc);
 		bool threw = false;
+
 		try
 		{
 			MaterialTemplate invalid(std::move(desc));
@@ -56,6 +59,7 @@ SWIM_TEST("Render.Materials", "TemplateValidatesStd430LayoutsAndNames")
 		{
 			threw = true;
 		}
+
 		return threw;
 	};
 	SWIM_CHECK(rejects(

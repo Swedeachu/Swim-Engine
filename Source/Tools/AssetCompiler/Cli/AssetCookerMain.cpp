@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 	const std::filesystem::path assetRoot = argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path("Assets");
 
 	Swim::Assets::AssetSystem assets;
+
 	if (!assets.Initialize())
 	{
 		std::cerr << "[Swim Asset Cooker] Failed to initialize AssetSystem.\n";

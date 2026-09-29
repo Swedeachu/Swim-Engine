@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// One compiled screen-space program.
 	struct ScreenSpaceProgram
 	{
@@ -95,7 +96,9 @@ namespace Swim::Render
 	// color is returned. ScreenSpaceReference.h is the CPU definition.
 	class ScreenSpaceEffects
 	{
+
 	  public:
+
 		// Throws std::invalid_argument when the AO, blur or composite program is missing.
 		explicit ScreenSpaceEffects(ScreenSpaceEffectsDesc desc);
 
@@ -105,9 +108,13 @@ namespace Swim::Render
 		ScreenSpaceGraphResources Record(RenderGraph& graph, const ScreenSpaceFrame& frame) const;
 
 		static Rhi::TextureDesc OcclusionDesc(std::uint32_t width, std::uint32_t height);
+
 		static Rhi::TextureDesc OutputDesc(std::uint32_t width, std::uint32_t height); // Also the reflection target.
 
 	  private:
+
 		ScreenSpaceEffectsDesc desc;
+
 	};
+
 } // namespace Swim::Render

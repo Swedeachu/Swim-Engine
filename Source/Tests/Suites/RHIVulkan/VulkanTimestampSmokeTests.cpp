@@ -23,15 +23,18 @@ namespace
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
 		unsigned testedQueues = 0;
+
 		for (auto type : { Rhi::QueueType::Graphics, Rhi::QueueType::Compute, Rhi::QueueType::Transfer })
 		{
 			const auto info = device->GetQueue(type).GetTimestampInfo();
+
 			if (!info.IsSupported())
 			{
 				std::fprintf(stderr, "[Swim timestamps] queue %u: timestamp lifecycle unsupported\n", static_cast<unsigned>(type));
 				SWIM_CHECK(!device->CreateQueryPool({ Rhi::QueryType::Timestamp, 2, "unsupported", type }));
 				continue;
 			}
+
 			++testedQueues;
 			auto queries = device->CreateQueryPool({ Rhi::QueryType::Timestamp, 2, "timestamp smoke", type });
 			SWIM_REQUIRE(queries);
@@ -40,10 +43,12 @@ namespace
 			auto readback = device->CreateBuffer({ byteCount, Rhi::BufferUsage::TransferDestination, Rhi::MemoryPreference::GpuToCpu, "timed readback" });
 			SWIM_REQUIRE(upload && readback);
 			std::array<std::byte, byteCount> pattern{};
+
 			for (std::size_t index = 0; index < pattern.size(); ++index)
 			{
 				pattern[index] = static_cast<std::byte>(index % 251);
 			}
+
 			upload->Write(0, pattern);
 			// Last owner declared: drain in-flight commands before buffers/pool die.
 			auto frames = Rhi::FrameContextRing::Create(*device, { type, 2 });
@@ -76,11 +81,13 @@ namespace
 					{
 						commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 					}
+
 					commands.Transition(*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead,
 						Rhi::ResourceState::CopyDestination);
 					commands.CopyBuffer(*upload, *readback, { 0, 0, byteCount });
 					commands.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
 				}
+
 				commands.WriteTimestamp(*queries, 1);
 				commands.EndDebugLabel();
 				commands.End();
@@ -90,15 +97,18 @@ namespace
 				const auto elapsed = info.ElapsedNanoseconds(results[0], results[1]);
 				SWIM_REQUIRE(elapsed.has_value());
 				SWIM_CHECK(*elapsed >= 0.0);
+
 				if (type == Rhi::QueueType::Graphics)
 				{
 					std::array<std::byte, byteCount> actual{};
 					readback->Read(0, actual);
 					SWIM_CHECK(actual == pattern);
 				}
+
 				std::fprintf(stderr, "[Swim timestamps] queue %u frame %u: %.3f ns, %u valid bits\n",
 					static_cast<unsigned>(type), frame, *elapsed, info.ValidBits);
 			}
+
 			// Reusing a completed pool must make old available results unavailable.
 			frames->BeginFrame();
 			auto& reuse = frames->CreateCommandList();
@@ -110,17 +120,20 @@ namespace
 			SWIM_REQUIRE(queries->ReadTimestamps(0, results) == Rhi::QueryReadStatus::NotReady);
 			SWIM_CHECK(!results[0].Available && !results[1].Available);
 		}
+
 		SWIM_REQUIRE_MESSAGE(testedQueues > 0, "Timestamp smoke needs at least one timestamp-capable graphics/compute family");
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TimestampReadbackAndReuse", SWIM_TEST_LOCATION,
 				+[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTimestampSmoke); } });
 		}
+
 		return true;
 	}();
 

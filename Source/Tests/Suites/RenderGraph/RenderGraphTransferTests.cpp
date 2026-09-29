@@ -13,13 +13,16 @@ using U = Rhi::BufferUsage;
 
 namespace
 {
+
 	std::vector<std::byte> Pattern(std::size_t size, unsigned seed)
 	{
 		std::vector<std::byte> bytes(size);
+
 		for (std::size_t i = 0; i < size; ++i)
 		{
 			bytes[i] = static_cast<std::byte>((i * 7 + seed) & 0xff);
 		}
+
 		return bytes;
 	}
 
@@ -36,6 +39,7 @@ namespace
 				return c.Kind == kind;
 			}));
 	}
+
 } // namespace
 
 SWIM_TEST("RenderGraph.Transfers", "UploadCopyAndReadbackRoundTripThroughExecutorArenas")
@@ -117,6 +121,7 @@ SWIM_TEST("RenderGraph.Transfers", "PartialCopiesPreserveInitializedContentsOnly
 	for (std::size_t i = 0; i < 64; ++i)
 	{
 		std::byte expected{ 0xAA };
+
 		if (i >= 16 && i < 32)
 		{
 			expected = first[i - 16];
@@ -125,8 +130,10 @@ SWIM_TEST("RenderGraph.Transfers", "PartialCopiesPreserveInitializedContentsOnly
 		{
 			expected = second[i - 40];
 		}
+
 		SWIM_CHECK(host->Bytes[i] == expected);
 	}
+
 	// The import returns to its declared resting state after the partial updates.
 	SWIM_CHECK(compiled.GetFinalBarriers().size() == 1u && compiled.GetFinalBarriers()[0].After == S::ShaderRead);
 	SWIM_CHECK_THROWS(AddBufferUpload(graph, "Out of range", Pattern(16, 0), imported, 56), std::invalid_argument);
@@ -177,10 +184,12 @@ SWIM_TEST("RenderGraph.Transfers", "WritersRunPerExecutionAndFailuresPublishNoth
 		[&](std::span<std::byte> bytes)
 		{
 			++calls;
+
 			if (fail)
 			{
 				throw std::runtime_error("writer failure");
 			}
+
 			std::fill(bytes.begin(), bytes.end(), std::byte(calls));
 		},
 		target);
@@ -270,10 +279,12 @@ SWIM_TEST("RenderGraph.Transfers", "UploadOffsetsHonorRequestedAndDescriptorAlig
 	device.adapterInfo.Capabilities.MinUniformBufferOffsetAlignment = 256;
 	RenderGraph graph;
 	std::vector<GraphBuffer> uploads;
+
 	for (unsigned i = 0; i < 3; ++i)
 	{
 		uploads.push_back(graph.CreateUpload(Pattern(20, i), "constants", U::Uniform, 16));
 	}
+
 	auto odd = graph.CreateUpload(Pattern(12, 7), "odd", U::TransferSource, 1024);
 	std::vector<std::uint64_t> offsets;
 	graph.AddPass(
@@ -284,6 +295,7 @@ SWIM_TEST("RenderGraph.Transfers", "UploadOffsetsHonorRequestedAndDescriptorAlig
 			{
 				b.Read(u, S::UniformBuffer);
 			}
+
 			b.Read(odd, S::CopySource);
 			b.SideEffect();
 		},
@@ -293,15 +305,18 @@ SWIM_TEST("RenderGraph.Transfers", "UploadOffsetsHonorRequestedAndDescriptorAlig
 			{
 				offsets.push_back(c.GetRange(u).Offset);
 			}
+
 			offsets.push_back(c.GetRange(odd).Offset);
 		});
 	RenderGraphExecutor executor(device);
 	executor.Execute(graph.Compile());
 	SWIM_REQUIRE_EQUAL(offsets.size(), 4u);
+
 	for (auto offset : offsets)
 	{
 		SWIM_CHECK_EQUAL(offset % 256, 0u);
 	}
+
 	SWIM_CHECK_EQUAL(offsets[3] % 1024, 0u);
 	SWIM_CHECK(offsets[0] != offsets[1] && offsets[1] != offsets[2]);
 }
@@ -352,6 +367,7 @@ SWIM_TEST("RenderGraph.Transfers", "TextureUploadAndReadbackUseSubresourceStates
 	executor.Wait();
 	std::vector<std::byte> pixels(64);
 	SWIM_REQUIRE(executor.TryReadback(result.Buffer, pixels) == Rhi::ReadbackStatus::Ready);
+
 	for (std::uint32_t y = 0; y < 4; ++y)
 	{
 		for (std::uint32_t x = 0; x < 4; ++x)
@@ -365,6 +381,7 @@ SWIM_TEST("RenderGraph.Transfers", "TextureUploadAndReadbackUseSubresourceStates
 			}
 		}
 	}
+
 	SWIM_CHECK_EQUAL(CountKind(*device.Commands, "CopyBufferToTexture"), 2u);
 	SWIM_CHECK_EQUAL(CountKind(*device.Commands, "CopyTextureToBuffer"), 1u);
 

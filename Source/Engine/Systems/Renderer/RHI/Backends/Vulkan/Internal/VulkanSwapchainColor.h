@@ -8,6 +8,7 @@
 
 namespace Swim::RhiVulkan
 {
+
 	struct VulkanDeviceState;
 
 	Rhi::SwapchainSupport BuildSwapchainSupport(std::span<const VkSurfaceFormatKHR> formats, bool colorSpaceEnabled);

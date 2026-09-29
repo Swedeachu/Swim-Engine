@@ -7,8 +7,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		bool IsPowerOfTwo(std::uint32_t value)
 		{
 			return value != 0 && (value & (value - 1)) == 0;
@@ -24,6 +26,7 @@ namespace Swim::Render
 			value = (value | (value >> 8)) & 0x0000ffffu;
 			return value;
 		}
+
 	} // namespace
 
 	ShadowAtlasAllocator::ShadowAtlasAllocator(std::uint32_t atlasSizeInput, std::uint32_t minTileInput)
@@ -33,6 +36,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Shadow atlas and minimum tile sizes must be powers of two with minTile <= atlasSize");
 		}
+
 		cells = atlasSize / minTile;
 		occupied.assign(std::size_t(cells) * cells, false);
 	}
@@ -42,6 +46,7 @@ namespace Swim::Render
 		const std::uint32_t x0 = tile.X / minTile;
 		const std::uint32_t y0 = tile.Y / minTile;
 		const std::uint32_t span = tile.Size / minTile;
+
 		for (std::uint32_t y = y0; y < y0 + span; ++y)
 		{
 			for (std::uint32_t x = x0; x < x0 + span; ++x)
@@ -52,6 +57,7 @@ namespace Swim::Render
 				}
 			}
 		}
+
 		return true;
 	}
 
@@ -60,6 +66,7 @@ namespace Swim::Render
 		const std::uint32_t x0 = tile.X / minTile;
 		const std::uint32_t y0 = tile.Y / minTile;
 		const std::uint32_t span = tile.Size / minTile;
+
 		for (std::uint32_t y = y0; y < y0 + span; ++y)
 		{
 			for (std::uint32_t x = x0; x < x0 + span; ++x)
@@ -74,6 +81,7 @@ namespace Swim::Render
 		const std::uint32_t x0 = tile.X / minTile;
 		const std::uint32_t y0 = tile.Y / minTile;
 		const std::uint32_t span = tile.Size / minTile;
+
 		for (std::uint32_t y = y0; y < y0 + span; ++y)
 		{
 			for (std::uint32_t x = x0; x < x0 + span; ++x)
@@ -90,19 +98,23 @@ namespace Swim::Render
 		tiles.clear();
 		const std::uint32_t perEdge = atlasSize / size;
 		const std::uint32_t slots = perEdge * perEdge;
+
 		for (std::uint32_t morton = 0; morton < slots && tiles.size() < count; ++morton)
 		{
 			const ShadowTile tile{ Compact(morton) * size, Compact(morton >> 1) * size, size };
+
 			if (IsFree(tile))
 			{
 				Mark(tile);
 				tiles.push_back(tile);
 			}
 		}
+
 		if (tiles.size() == count)
 		{
 			return true;
 		}
+
 		occupied = snapshot;
 		tiles.clear();
 		return false;
@@ -111,6 +123,7 @@ namespace Swim::Render
 	std::vector<ShadowTileAllocation> ShadowAtlasAllocator::Allocate(std::span<const ShadowTileRequest> requests)
 	{
 		std::set<std::uint64_t> keys;
+
 		for (const auto& request : requests)
 		{
 			if (!IsPowerOfTwo(request.Size) || request.Size < minTile || request.Size > atlasSize || request.Count == 0 ||
@@ -119,6 +132,7 @@ namespace Swim::Render
 				throw std::invalid_argument("Shadow tile requests need unique keys, a count and power-of-two sizes within the atlas");
 			}
 		}
+
 		std::vector<std::size_t> order(requests.size());
 		std::iota(order.begin(), order.end(), std::size_t(0));
 		std::stable_sort(order.begin(), order.end(),
@@ -128,6 +142,7 @@ namespace Swim::Render
 				{
 					return requests[a].Priority > requests[b].Priority;
 				}
+
 				return requests[a].Key < requests[b].Key;
 			});
 
@@ -142,6 +157,7 @@ namespace Swim::Render
 		{
 			const auto& request = requests[index];
 			const auto old = previous.find(request.Key);
+
 			if (old != previous.end() && old->second.Tiles.size() == request.Count && old->second.RequestedSize == request.Size &&
 				std::all_of(old->second.Tiles.begin(), old->second.Tiles.end(),
 					[&](const ShadowTile& tile)
@@ -153,6 +169,7 @@ namespace Swim::Render
 				{
 					Mark(tile);
 				}
+
 				result[index].Tiles = old->second.Tiles;
 				result[index].Reused = true;
 				result[index].Downgraded = old->second.Tiles.front().Size != request.Size;
@@ -172,28 +189,36 @@ namespace Swim::Render
 					return true;
 				}
 			}
+
 			return false;
 		};
+
 		for (std::size_t position = 0; position < order.size(); ++position)
 		{
 			const auto index = order[position];
 			auto& allocation = result[index];
+
 			if (allocation.Reused)
 			{
 				continue;
 			}
+
 			bool fits = tryPlace(requests[index], allocation);
+
 			for (std::size_t victim = order.size(); !fits && victim-- > position + 1;)
 			{
 				auto& displaced = result[order[victim]];
+
 				if (!displaced.Reused)
 				{
 					continue;
 				}
+
 				for (const auto& tile : displaced.Tiles)
 				{
 					Unmark(tile);
 				}
+
 				displaced = {};
 				fits = tryPlace(requests[index], allocation);
 			}
@@ -204,13 +229,16 @@ namespace Swim::Render
 		for (const auto index : order)
 		{
 			auto& allocation = result[index];
+
 			if (!allocation.Reused || !allocation.Downgraded)
 			{
 				continue;
 			}
+
 			const auto& request = requests[index];
 			const std::uint32_t current = allocation.Tiles.front().Size;
 			std::vector<ShadowTile> grown;
+
 			for (std::uint32_t size = request.Size; size > current; size /= 2)
 			{
 				if (TryPlace(size, request.Count, grown))
@@ -219,6 +247,7 @@ namespace Swim::Render
 					{
 						Unmark(tile);
 					}
+
 					allocation.Tiles = grown;
 					allocation.Reused = false;
 					allocation.Downgraded = size != request.Size;
@@ -228,21 +257,26 @@ namespace Swim::Render
 		}
 
 		std::map<std::uint64_t, PreviousTiles> placed;
+
 		for (std::size_t index = 0; index < requests.size(); ++index)
 		{
 			const auto& allocation = result[index];
+
 			if (allocation.Tiles.empty())
 			{
 				++stats.Evicted;
 				continue;
 			}
+
 			++stats.Placed;
 			stats.Reused += allocation.Reused ? 1u : 0u;
 			stats.Downgraded += allocation.Downgraded ? 1u : 0u;
 			stats.UsedTexels += std::uint64_t(allocation.Tiles.front().Size) * allocation.Tiles.front().Size * allocation.Tiles.size();
 			placed[requests[index].Key] = { requests[index].Size, allocation.Tiles };
 		}
+
 		previous = std::move(placed);
 		return result;
 	}
+
 } // namespace Swim::Render

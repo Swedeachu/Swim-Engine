@@ -25,10 +25,14 @@ namespace Swim::AssetCompiler
 
 	namespace
 	{
+
 		class UnsupportedSourceFeature final : public std::runtime_error
 		{
+
 		  public:
+
 			explicit UnsupportedSourceFeature(const std::string& message) : std::runtime_error(message) {}
+
 		};
 
 		std::uint32_t ToIndex(std::size_t value)
@@ -37,6 +41,7 @@ namespace Swim::AssetCompiler
 			{
 				throw std::overflow_error("glTF index exceeds Swim's 32-bit intermediate model limit");
 			}
+
 			return static_cast<std::uint32_t>(value);
 		}
 
@@ -46,6 +51,7 @@ namespace Swim::AssetCompiler
 			{
 				return std::nullopt;
 			}
+
 			return ToIndex(*value);
 		}
 
@@ -68,6 +74,7 @@ namespace Swim::AssetCompiler
 			case fastgltf::PrimitiveType::TriangleFan:
 				return SourcePrimitiveTopology::TriangleFan;
 			}
+
 			return SourcePrimitiveTopology::Triangles;
 		}
 
@@ -82,6 +89,7 @@ namespace Swim::AssetCompiler
 			case fastgltf::AlphaMode::Blend:
 				return SourceAlphaMode::Blend;
 			}
+
 			return SourceAlphaMode::Opaque;
 		}
 
@@ -126,6 +134,7 @@ namespace Swim::AssetCompiler
 			case fastgltf::Filter::LinearMipMapLinear:
 				return SourceFilter::LinearMipmapLinear;
 			}
+
 			return SourceFilter::Unspecified;
 		}
 
@@ -140,6 +149,7 @@ namespace Swim::AssetCompiler
 			case fastgltf::Wrap::ClampToEdge:
 				return SourceWrap::ClampToEdge;
 			}
+
 			return SourceWrap::Repeat;
 		}
 
@@ -150,6 +160,7 @@ namespace Swim::AssetCompiler
 				destination.clear();
 				return;
 			}
+
 			destination.assign(data, data + size);
 		}
 
@@ -184,21 +195,26 @@ namespace Swim::AssetCompiler
 			{
 				return false;
 			}
+
 			const fastgltf::BufferView& view = asset.bufferViews[bufferViewIndex];
+
 			if (view.bufferIndex >= asset.buffers.size())
 			{
 				return false;
 			}
 
 			std::vector<std::byte> bufferBytes;
+
 			if (!CopyDataSourceBytes(asset.buffers[view.bufferIndex].data, bufferBytes))
 			{
 				return false;
 			}
+
 			if (view.byteOffset > bufferBytes.size() || view.byteLength > bufferBytes.size() - view.byteOffset)
 			{
 				return false;
 			}
+
 			bytes.assign(bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset),
 				bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset + view.byteLength));
 			return true;
@@ -260,21 +276,26 @@ namespace Swim::AssetCompiler
 							   {
 								   return;
 							   }
+
 							   const auto& view = asset.bufferViews[data.bufferViewIndex];
+
 							   if (view.bufferIndex >= asset.buffers.size())
 							   {
 								   return;
 							   }
 
 							   std::vector<std::byte> bufferBytes;
+
 							   if (!CopyDataSourceBytes(asset.buffers[view.bufferIndex].data, bufferBytes))
 							   {
 								   return;
 							   }
+
 							   if (view.byteOffset > bufferBytes.size() || view.byteLength > bufferBytes.size() - view.byteOffset)
 							   {
 								   return;
 							   }
+
 							   result.EncodedBytes.assign(bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset),
 								   bufferBytes.begin() + static_cast<std::ptrdiff_t>(view.byteOffset + view.byteLength));
 						   },
@@ -295,11 +316,14 @@ namespace Swim::AssetCompiler
 								   {
 									   return;
 								   }
+
 								   const std::filesystem::path path = data.uri.fspath();
+
 								   if (!path.empty())
 								   {
 									   model.ExternalDependencies.push_back(path.generic_string());
 								   }
+
 							   },
 							   [](const auto&)
 							   {
@@ -311,6 +335,7 @@ namespace Swim::AssetCompiler
 			{
 				collect(buffer.data);
 			}
+
 			for (const fastgltf::Image& image : asset.images)
 			{
 				collect(image.data);
@@ -324,6 +349,7 @@ namespace Swim::AssetCompiler
 		Swim::Assets::AssetTransform ConvertTransform(const fastgltf::Node& node)
 		{
 			fastgltf::TRS trs{};
+
 			if (const auto* storedTrs = std::get_if<fastgltf::TRS>(&node.transform))
 			{
 				trs = *storedTrs;
@@ -360,6 +386,7 @@ namespace Swim::AssetCompiler
 					return ToIndex(attribute.accessorIndex);
 				}
 			}
+
 			return std::nullopt;
 		}
 
@@ -368,21 +395,25 @@ namespace Swim::AssetCompiler
 			bool required, Store&& store)
 		{
 			const std::optional<std::uint32_t> uniqueId = FindDracoAttributeUniqueId(compression, semantic);
+
 			if (!uniqueId.has_value())
 			{
 				if (required)
 				{
 					throw std::runtime_error("Draco primitive is missing required attribute " + std::string(semantic));
 				}
+
 				return;
 			}
 
 			const draco::PointAttribute* attribute = mesh.GetAttributeByUniqueId(*uniqueId);
+
 			if (!attribute)
 			{
 				throw std::runtime_error("Draco payload does not contain glTF attribute " + std::string(semantic) + " with unique id " +
 					std::to_string(*uniqueId));
 			}
+
 			if (attribute->num_components() != static_cast<std::int8_t>(Components))
 			{
 				throw std::runtime_error("Draco attribute " + std::string(semantic) + " has an unexpected component count");
@@ -391,10 +422,12 @@ namespace Swim::AssetCompiler
 			for (draco::PointIndex point(0); point < mesh.num_points(); ++point)
 			{
 				std::array<float, Components> value{};
+
 				if (!attribute->ConvertValue<float>(attribute->mapped_index(point), static_cast<std::int8_t>(Components), value.data()))
 				{
 					throw std::runtime_error("Could not convert Draco attribute " + std::string(semantic) + " to float data");
 				}
+
 				store(static_cast<std::size_t>(point.value()), value);
 			}
 		}
@@ -407,11 +440,14 @@ namespace Swim::AssetCompiler
 			{
 				throw std::runtime_error("glTF " + std::string(what) + " accessor index is invalid");
 			}
+
 			const auto& accessor = asset.accessors[accessorIndex];
+
 			if (accessor.count != vertexCount)
 			{
 				throw std::runtime_error("glTF " + std::string(what) + " accessor count does not match POSITION count");
 			}
+
 			fastgltf::iterateAccessorWithIndex<Value>(asset, accessor, std::forward<Store>(store));
 		}
 
@@ -420,16 +456,19 @@ namespace Swim::AssetCompiler
 		{
 			const std::size_t count = result.Vertices.size();
 			result.Targets.resize(primitive.targets.size());
+
 			for (std::size_t target = 0; target < primitive.targets.size(); ++target)
 			{
 				SourceMorphTarget& out = result.Targets[target];
 				const auto read = [&](std::string_view name, std::vector<std::array<float, 3>>& deltas)
 				{
 					const auto* attribute = primitive.findTargetAttribute(target, name);
+
 					if (attribute == primitive.targets[target].end())
 					{
 						return;
 					}
+
 					deltas.assign(count, {});
 					ReadVertexAccessor<fastgltf::math::fvec3>(asset, attribute->accessorIndex, count, "morph target " + std::string(name),
 						[&](fastgltf::math::fvec3 value, std::size_t index)
@@ -451,20 +490,24 @@ namespace Swim::AssetCompiler
 			const auto* weights = primitive.findAttribute("WEIGHTS_0");
 			const bool hasJoints = joints != primitive.attributes.end();
 			const bool hasWeights = weights != primitive.attributes.end();
+
 			if (primitive.findAttribute("JOINTS_1") != primitive.attributes.end() ||
 				primitive.findAttribute("WEIGHTS_1") != primitive.attributes.end())
 			{
 				throw UnsupportedSourceFeature(
 					"glTF primitives with more than four joint influences (JOINTS_1/WEIGHTS_1) are not supported");
 			}
+
 			if (hasJoints != hasWeights)
 			{
 				throw std::runtime_error("glTF primitive has JOINTS_0 without WEIGHTS_0 or the reverse");
 			}
+
 			if (!hasJoints)
 			{
 				return;
 			}
+
 			const std::size_t count = result.Vertices.size();
 			ReadVertexAccessor<fastgltf::math::u16vec4>(asset, joints->accessorIndex, count, "JOINTS_0",
 				[&](fastgltf::math::u16vec4 value, std::size_t index)
@@ -482,12 +525,14 @@ namespace Swim::AssetCompiler
 		SourcePrimitive ImportDracoPrimitive(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive)
 		{
 			const fastgltf::DracoCompressedPrimitive& compression = *primitive.dracoCompression;
+
 			if (primitive.type != fastgltf::PrimitiveType::Triangles)
 			{
 				throw std::runtime_error("KHR_draco_mesh_compression primitive is not TRIANGLES");
 			}
 
 			std::vector<std::byte> compressedBytes;
+
 			if (!CopyBufferViewBytes(asset, compression.bufferView, compressedBytes) || compressedBytes.empty())
 			{
 				throw std::runtime_error("Could not read KHR_draco_mesh_compression bufferView bytes");
@@ -497,15 +542,18 @@ namespace Swim::AssetCompiler
 			buffer.Init(reinterpret_cast<const char*>(compressedBytes.data()), compressedBytes.size());
 			draco::Decoder decoder;
 			auto decoded = decoder.DecodeMeshFromBuffer(&buffer);
+
 			if (!decoded.ok() || decoded.value() == nullptr)
 			{
 				const std::string detail = decoded.ok() ? "decoder returned a null mesh" : decoded.status().error_msg_string();
 				throw std::runtime_error("Draco mesh decode failed: " + detail);
 			}
+
 			std::unique_ptr<draco::Mesh> mesh = std::move(decoded).value();
 
 			const std::size_t pointCount = static_cast<std::size_t>(mesh->num_points());
 			const std::size_t faceCount = static_cast<std::size_t>(mesh->num_faces());
+
 			if (pointCount > std::numeric_limits<std::uint32_t>::max() || faceCount > std::numeric_limits<std::uint32_t>::max() / 3u)
 			{
 				throw std::overflow_error("Draco mesh exceeds Swim's 32-bit intermediate model limits");
@@ -548,6 +596,7 @@ namespace Swim::AssetCompiler
 					{
 						result.Vertices[index].Joints[i] = static_cast<std::uint16_t>(std::clamp(value[i], 0.0f, 65535.0f));
 					}
+
 					result.Vertices[index].HasSkin = true;
 				});
 			DecodeDracoAttribute<4>(*mesh, compression, "WEIGHTS_0", false,
@@ -558,19 +607,24 @@ namespace Swim::AssetCompiler
 			ImportMorphTargets(asset, primitive, result);
 
 			result.Indices.reserve(faceCount * 3u);
+
 			for (draco::FaceIndex faceIndex(0); faceIndex < mesh->num_faces(); ++faceIndex)
 			{
 				const draco::Mesh::Face& face = mesh->face(faceIndex);
+
 				for (std::size_t corner = 0; corner < 3; ++corner)
 				{
 					const std::uint32_t point = static_cast<std::uint32_t>(face[corner].value());
+
 					if (point >= pointCount)
 					{
 						throw std::runtime_error("Draco mesh face references an invalid point index");
 					}
+
 					result.Indices.push_back(point);
 				}
 			}
+
 			return result;
 		}
 
@@ -586,6 +640,7 @@ namespace Swim::AssetCompiler
 			result.MaterialIndex = ToOptionalIndex(primitive.materialIndex);
 
 			const auto* positions = primitive.findAttribute("POSITION");
+
 			if (positions == primitive.attributes.end() || positions->accessorIndex >= asset.accessors.size())
 			{
 				throw std::runtime_error("glTF primitive is missing a valid POSITION accessor");
@@ -604,10 +659,12 @@ namespace Swim::AssetCompiler
 			if (const auto* normal = primitive.findAttribute("NORMAL"); normal != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(normal->accessorIndex);
+
 				if (accessor.count != result.Vertices.size())
 				{
 					throw std::runtime_error("glTF NORMAL accessor count does not match POSITION count");
 				}
+
 				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(asset, accessor,
 					[&](fastgltf::math::fvec3 value, std::size_t index)
 					{
@@ -619,10 +676,12 @@ namespace Swim::AssetCompiler
 			if (const auto* tangent = primitive.findAttribute("TANGENT"); tangent != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(tangent->accessorIndex);
+
 				if (accessor.count != result.Vertices.size())
 				{
 					throw std::runtime_error("glTF TANGENT accessor count does not match POSITION count");
 				}
+
 				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(asset, accessor,
 					[&](fastgltf::math::fvec4 value, std::size_t index)
 					{
@@ -634,10 +693,12 @@ namespace Swim::AssetCompiler
 			if (const auto* texCoord = primitive.findAttribute("TEXCOORD_0"); texCoord != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(texCoord->accessorIndex);
+
 				if (accessor.count != result.Vertices.size())
 				{
 					throw std::runtime_error("glTF TEXCOORD_0 accessor count does not match POSITION count");
 				}
+
 				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(asset, accessor,
 					[&](fastgltf::math::fvec2 value, std::size_t index)
 					{
@@ -653,49 +714,61 @@ namespace Swim::AssetCompiler
 			{
 				throw std::runtime_error("glTF primitive did not provide generated/valid indices");
 			}
+
 			const auto& indexAccessor = asset.accessors[*primitive.indicesAccessor];
 			result.Indices.resize(indexAccessor.count);
 			fastgltf::copyFromAccessor<std::uint32_t>(asset, indexAccessor, result.Indices.data());
 			return result;
 		}
+
 	} // namespace
 
 	namespace
 	{
+
 		SourceSkin ImportSkin(const fastgltf::Asset& asset, const fastgltf::Skin& skin)
 		{
 			SourceSkin out{};
 			out.Name.assign(skin.name.begin(), skin.name.end());
+
 			for (const std::size_t joint : skin.joints)
 			{
 				if (joint >= asset.nodes.size())
 				{
 					throw std::runtime_error("glTF skin references a joint outside the node table");
 				}
+
 				out.Joints.push_back(ToIndex(joint));
 			}
+
 			if (out.Joints.empty())
 			{
 				throw std::runtime_error("glTF skin has no joints");
 			}
+
 			if (out.Joints.size() > 65536u)
 			{
 				throw UnsupportedSourceFeature("glTF skin has more joints than 16-bit joint indices can address");
 			}
+
 			out.Skeleton = ToOptionalIndex(skin.skeleton);
 			constexpr std::array<float, 16> Identity{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 			out.InverseBindMatrices.assign(out.Joints.size(), Identity);
+
 			if (skin.inverseBindMatrices.has_value())
 			{
 				if (*skin.inverseBindMatrices >= asset.accessors.size())
 				{
 					throw std::runtime_error("glTF skin inverseBindMatrices accessor index is invalid");
 				}
+
 				const auto& accessor = asset.accessors[*skin.inverseBindMatrices];
+
 				if (accessor.count < out.Joints.size())
 				{
 					throw std::runtime_error("glTF skin has fewer inverse bind matrices than joints");
 				}
+
 				fastgltf::iterateAccessorWithIndex<fastgltf::math::fmat4x4>(asset, accessor,
 					[&](const fastgltf::math::fmat4x4& matrix, std::size_t index)
 					{
@@ -703,6 +776,7 @@ namespace Swim::AssetCompiler
 						{
 							return;
 						}
+
 						for (std::size_t column = 0; column < 4; ++column)
 						{
 							for (std::size_t row = 0; row < 4; ++row)
@@ -710,8 +784,10 @@ namespace Swim::AssetCompiler
 								out.InverseBindMatrices[index][column * 4 + row] = matrix[column][row];
 							}
 						}
+
 					});
 			}
+
 			return out;
 		}
 
@@ -732,6 +808,7 @@ namespace Swim::AssetCompiler
 		{
 			SourceAnimation out{};
 			out.Name.assign(animation.name.begin(), animation.name.end());
+
 			for (const fastgltf::AnimationChannel& channel : animation.channels)
 			{
 				// A channel without a node targets an extension (e.g. KHR_animation_pointer).
@@ -739,15 +816,19 @@ namespace Swim::AssetCompiler
 				{
 					continue;
 				}
+
 				if (*channel.nodeIndex >= asset.nodes.size() || channel.samplerIndex >= animation.samplers.size())
 				{
 					throw std::runtime_error("glTF animation channel references an invalid node or sampler");
 				}
+
 				const fastgltf::AnimationSampler& sampler = animation.samplers[channel.samplerIndex];
+
 				if (sampler.inputAccessor >= asset.accessors.size() || sampler.outputAccessor >= asset.accessors.size())
 				{
 					throw std::runtime_error("glTF animation sampler accessor index is invalid");
 				}
+
 				SourceAnimationChannel result{};
 				result.Node = ToIndex(*channel.nodeIndex);
 				result.Interpolation = ConvertInterpolation(sampler.interpolation);
@@ -756,6 +837,7 @@ namespace Swim::AssetCompiler
 				result.Times.resize(input.count);
 				fastgltf::copyFromAccessor<float>(asset, input, result.Times.data());
 				const std::size_t perKey = result.Interpolation == Swim::Assets::AnimationInterpolation::CubicSpline ? 3u : 1u;
+
 				switch (channel.path)
 				{
 				case fastgltf::AnimationPath::Translation:
@@ -788,10 +870,12 @@ namespace Swim::AssetCompiler
 				case fastgltf::AnimationPath::Weights:
 				{
 					result.Path = Swim::Assets::AnimationPath::MorphWeights;
+
 					if (result.Times.empty() || output.count % (result.Times.size() * perKey) != 0)
 					{
 						throw std::runtime_error("glTF morph-weight animation output count is not a multiple of its keys");
 					}
+
 					result.Components = ToIndex(output.count / (result.Times.size() * perKey));
 					result.Values.resize(output.count);
 					fastgltf::copyFromAccessor<float>(asset, output, result.Values.data());
@@ -800,14 +884,18 @@ namespace Swim::AssetCompiler
 				default:
 					continue;
 				}
+
 				if (result.Values.size() != result.Times.size() * result.Components * perKey)
 				{
 					throw std::runtime_error("glTF animation sampler output count does not match its input keys");
 				}
+
 				out.Channels.push_back(std::move(result));
 			}
+
 			return out;
 		}
+
 	} // namespace
 
 	GltfImportResult GltfImporter::Import(const std::filesystem::path& path) const
@@ -825,6 +913,7 @@ namespace Swim::AssetCompiler
 				fastgltf::Options::DecomposeNodeMatrices | fastgltf::Options::GenerateMeshIndices;
 
 			auto dependencyFile = fastgltf::MappedGltfFile::FromPath(path);
+
 			if (!dependencyFile)
 			{
 				result.Error = { GltfImportErrorCode::FileOpenFailed, std::string(fastgltf::getErrorMessage(dependencyFile.error())) };
@@ -836,6 +925,7 @@ namespace Swim::AssetCompiler
 			// real import use independent parser instances and file mappings.
 			fastgltf::Parser dependencyParser(SupportedExtensions);
 			auto dependencyParsed = dependencyParser.loadGltf(dependencyFile.get(), path.parent_path(), static_cast<fastgltf::Options>(0));
+
 			if (dependencyParsed.error() == fastgltf::Error::None)
 			{
 				CollectExternalDependencies(dependencyParsed.get(), result.Model);
@@ -843,26 +933,32 @@ namespace Swim::AssetCompiler
 
 			fastgltf::Parser parser(SupportedExtensions);
 			auto gltfFile = fastgltf::MappedGltfFile::FromPath(path);
+
 			if (!gltfFile)
 			{
 				result.Error = { GltfImportErrorCode::FileOpenFailed, std::string(fastgltf::getErrorMessage(gltfFile.error())) };
 				return result;
 			}
+
 			auto parsed = parser.loadGltf(gltfFile.get(), path.parent_path(), Options);
+
 			if (parsed.error() != fastgltf::Error::None)
 			{
 				result.Error = { GltfImportErrorCode::ParseFailed, std::string(fastgltf::getErrorMessage(parsed.error())) };
 				return result;
 			}
+
 			const fastgltf::Asset& asset = parsed.get();
 
 			result.Model.Images.reserve(asset.images.size());
+
 			for (const fastgltf::Image& image : asset.images)
 			{
 				result.Model.Images.push_back(ImportImage(asset, image));
 			}
 
 			result.Model.Samplers.reserve(asset.samplers.size());
+
 			for (const fastgltf::Sampler& sampler : asset.samplers)
 			{
 				SourceSampler out{};
@@ -875,11 +971,13 @@ namespace Swim::AssetCompiler
 			}
 
 			result.Model.Textures.reserve(asset.textures.size());
+
 			for (const fastgltf::Texture& texture : asset.textures)
 			{
 				SourceTexture out{};
 				out.Name.assign(texture.name.begin(), texture.name.end());
 				out.SamplerIndex = ToOptionalIndex(texture.samplerIndex);
+
 				if (texture.imageIndex.has_value())
 				{
 					out.ImageIndex = ToIndex(*texture.imageIndex);
@@ -896,10 +994,12 @@ namespace Swim::AssetCompiler
 				{
 					out.ImageIndex = ToIndex(*texture.ddsImageIndex);
 				}
+
 				result.Model.Textures.push_back(std::move(out));
 			}
 
 			result.Model.Materials.reserve(asset.materials.size());
+
 			for (const fastgltf::Material& material : asset.materials)
 			{
 				SourceMaterial out{};
@@ -913,40 +1013,50 @@ namespace Swim::AssetCompiler
 				out.AlphaMode = ConvertAlphaMode(material.alphaMode);
 				out.DoubleSided = material.doubleSided;
 				out.Unlit = material.unlit;
+
 				if (material.pbrData.baseColorTexture)
 				{
 					out.BaseColorTexture = ToIndex(material.pbrData.baseColorTexture->textureIndex);
 				}
+
 				if (material.pbrData.metallicRoughnessTexture)
 				{
 					out.MetallicRoughnessTexture = ToIndex(material.pbrData.metallicRoughnessTexture->textureIndex);
 				}
+
 				if (material.normalTexture)
 				{
 					out.NormalTexture = ToIndex(material.normalTexture->textureIndex);
 				}
+
 				if (material.occlusionTexture)
 				{
 					out.OcclusionTexture = ToIndex(material.occlusionTexture->textureIndex);
 				}
+
 				if (material.emissiveTexture)
 				{
 					out.EmissiveTexture = ToIndex(material.emissiveTexture->textureIndex);
 				}
+
 				result.Model.Materials.push_back(std::move(out));
 			}
 
 			result.Model.Meshes.reserve(asset.meshes.size());
+
 			for (const fastgltf::Mesh& mesh : asset.meshes)
 			{
 				SourceMesh out{};
 				out.Name.assign(mesh.name.begin(), mesh.name.end());
 				out.Primitives.reserve(mesh.primitives.size());
+
 				for (const fastgltf::Primitive& primitive : mesh.primitives)
 				{
 					out.Primitives.push_back(ImportPrimitive(asset, primitive));
 				}
+
 				out.DefaultWeights.assign(mesh.weights.begin(), mesh.weights.end());
+
 				for (const SourcePrimitive& primitive : out.Primitives)
 				{
 					if (primitive.Targets.size() != out.Primitives.front().Targets.size())
@@ -954,10 +1064,12 @@ namespace Swim::AssetCompiler
 						throw std::runtime_error("glTF mesh primitives disagree on their morph target count");
 					}
 				}
+
 				result.Model.Meshes.push_back(std::move(out));
 			}
 
 			result.Model.Nodes.resize(asset.nodes.size());
+
 			for (std::size_t nodeIndex = 0; nodeIndex < asset.nodes.size(); ++nodeIndex)
 			{
 				const fastgltf::Node& node = asset.nodes[nodeIndex];
@@ -974,20 +1086,25 @@ namespace Swim::AssetCompiler
 					{
 						throw std::runtime_error("glTF node contains an invalid child index");
 					}
+
 					SourceNode& childNode = result.Model.Nodes[child];
+
 					if (childNode.Parent != SourceNode::InvalidNode)
 					{
 						throw std::runtime_error("glTF node has more than one parent");
 					}
+
 					childNode.Parent = ToIndex(nodeIndex);
 				}
 			}
 
 			result.Model.Skins.reserve(asset.skins.size());
+
 			for (const fastgltf::Skin& skin : asset.skins)
 			{
 				result.Model.Skins.push_back(ImportSkin(asset, skin));
 			}
+
 			for (const SourceNode& node : result.Model.Nodes)
 			{
 				if (node.SkinIndex.has_value() && *node.SkinIndex >= result.Model.Skins.size())
@@ -995,7 +1112,9 @@ namespace Swim::AssetCompiler
 					throw std::runtime_error("glTF node references a skin outside the skin table");
 				}
 			}
+
 			result.Model.Animations.reserve(asset.animations.size());
+
 			for (const fastgltf::Animation& animation : asset.animations)
 			{
 				result.Model.Animations.push_back(ImportAnimation(asset, animation));

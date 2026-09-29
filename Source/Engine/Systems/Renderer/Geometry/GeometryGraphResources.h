@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// GeometryHeap's persistent buffers imported into one graph. Pages[i] matches
 	// the page ids in GpuMeshMetadata (invalid for released dedicated pages);
 	// Submeshes holds the GpuSubmeshRecord rows referenced by metadata/LODs.
@@ -18,4 +19,5 @@ namespace Swim::Render
 		std::uint32_t RecordedMeshes = 0;
 		std::uint64_t RecordedBytes = 0;
 	};
+
 } // namespace Swim::Render

@@ -8,6 +8,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct FaultCapture;
 	FaultCapture* active = nullptr;
 
@@ -38,6 +39,7 @@ namespace
 				// Reentrant snapshot proves the native call is outside the report lock.
 				const auto report = active->State->Diagnostics->Snapshot();
 				active->ObservedPending = report.Lost && report.Fault.Status == Rhi::DeviceFaultStatus::Pending;
+
 				if (info == nullptr)
 				{
 					counts->addressInfoCount = active->Addresses;
@@ -45,14 +47,17 @@ namespace
 					counts->vendorBinarySize = 0;
 					return active->CountsResult;
 				}
+
 				active->AddressCapacity = counts->addressInfoCount;
 				active->VendorCapacity = counts->vendorInfoCount;
 				active->BinaryDisabled = counts->vendorBinarySize == 0 && info->pVendorBinaryData == nullptr;
 				std::memset(info->description, 'D', sizeof(info->description));
+
 				for (std::uint32_t index = 0; index < counts->addressInfoCount; ++index)
 				{
 					info->pAddressInfos[index] = { VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_EXT, 0x1234, 64 };
 				}
+
 				for (std::uint32_t index = 0; index < counts->vendorInfoCount; ++index)
 				{
 					auto& vendor = info->pVendorInfos[index];
@@ -60,6 +65,7 @@ namespace
 					vendor.vendorFaultCode = 0x55;
 					vendor.vendorFaultData = 0x66;
 				}
+
 				return active->DataResult;
 			};
 		}
@@ -71,6 +77,7 @@ namespace
 	};
 
 	unsigned featureCalls = 0;
+
 }
 
 SWIM_TEST("RHI.Vulkan.DeviceFault", "ExtensionAndFeatureAreOptionalAndVendorBinariesAreNeverEnabled")
@@ -83,6 +90,7 @@ SWIM_TEST("RHI.Vulkan.DeviceFault", "ExtensionAndFeatureAreOptionalAndVendorBina
 		fault->deviceFault = VK_TRUE;
 		fault->deviceFaultVendorBinary = VK_TRUE;
 	};
+
 	for (bool extension : { false, true })
 	{
 		for (bool requested : { false, true })
@@ -96,6 +104,7 @@ SWIM_TEST("RHI.Vulkan.DeviceFault", "ExtensionAndFeatureAreOptionalAndVendorBina
 			SWIM_CHECK(features.pNext == nullptr);
 		}
 	}
+
 	dispatch.vkGetPhysicalDeviceFeatures2 = +[](VkPhysicalDevice, VkPhysicalDeviceFeatures2*) {};
 	SWIM_CHECK(!RhiVulkan::QueryDeviceFaultFeatures(dispatch, VK_NULL_HANDLE, true, true).deviceFault);
 	dispatch.vkGetPhysicalDeviceFeatures2 = nullptr;
@@ -152,22 +161,27 @@ SWIM_TEST("RHI.Vulkan.DeviceFault", "UnsupportedMissingDispatchAndCaptureErrorsP
 	for (unsigned mode = 0; mode < 4; ++mode)
 	{
 		FaultCapture capture;
+
 		if (mode == 0)
 		{
 			capture.State->DeviceFaultEnabled = false;
 		}
+
 		if (mode == 1)
 		{
 			capture.State->Dispatch.vkGetDeviceFaultInfoEXT = nullptr;
 		}
+
 		if (mode == 2)
 		{
 			capture.CountsResult = VK_ERROR_OUT_OF_HOST_MEMORY;
 		}
+
 		if (mode == 3)
 		{
 			capture.DataResult = VK_ERROR_UNKNOWN;
 		}
+
 		capture.Lose();
 		const auto report = capture.State->Diagnostics->Snapshot();
 		SWIM_CHECK(report.Lost);
@@ -183,6 +197,7 @@ SWIM_TEST("RHI.Vulkan.DeviceFault", "ConcurrentFailuresProduceOneReportEvenWhenD
 	FaultCapture capture;
 	capture.State->Instance->Diagnostics.Log = std::make_shared<Rhi::DiagnosticLog>(0);
 	std::vector<std::thread> workers;
+
 	for (unsigned index = 0; index < 8; ++index)
 	{
 		workers.emplace_back([&capture]()
@@ -191,12 +206,15 @@ SWIM_TEST("RHI.Vulkan.DeviceFault", "ConcurrentFailuresProduceOneReportEvenWhenD
 			{
 				capture.Lose();
 			}
+
 		});
 	}
+
 	for (auto& worker : workers)
 	{
 		worker.join();
 	}
+
 	SWIM_CHECK_EQUAL(capture.Calls, 2u);
 	const auto report = capture.State->Diagnostics->Snapshot();
 	SWIM_CHECK(report.Fault.Status == Rhi::DeviceFaultStatus::Complete);

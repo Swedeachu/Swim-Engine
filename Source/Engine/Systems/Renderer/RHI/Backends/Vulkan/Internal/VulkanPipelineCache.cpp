@@ -10,6 +10,7 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
+
 		bool Initialize(const VulkanDeviceState& state, std::span<const std::byte> data)
 		{
 			RequireVulkanDevice(state);
@@ -22,18 +23,22 @@ namespace Swim::RhiVulkan
 			info.initialDataSize = data.size();
 			info.pInitialData = data.empty() ? nullptr : data.data();
 			const auto result = state.Dispatch.vkCreatePipelineCache(state.Device.device, &info, nullptr, &cache.Handle);
+
 			if (result != VK_SUCCESS)
 			{
 				// Output is unspecified on failure, including when the driver wrote it.
 				cache.Handle = VK_NULL_HANDLE;
 				CheckVulkanResult(state, result, "vkCreatePipelineCache");
+
 				if (state.Instance && state.Instance->Diagnostics.Log)
 				{
 					state.Instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Warning, "PipelineCache",
 						"Pipeline cache creation failed; this device will compile pipelines without a cache");
 				}
+
 				return false;
 			}
+
 			SetVulkanObjectName(state, VK_OBJECT_TYPE_PIPELINE_CACHE, ToNativeHandle(cache.Handle), "Swim pipeline cache");
 			RequireVulkanDevice(state);
 			return true;
@@ -44,6 +49,7 @@ namespace Swim::RhiVulkan
 			{
 				std::shared_lock lock(state.PipelineCache.Mutex);
 				RequireVulkanDevice(state);
+
 				if (state.PipelineCache.InitializationAttempted)
 				{
 					return;
@@ -51,11 +57,13 @@ namespace Swim::RhiVulkan
 			}
 			std::unique_lock lock(state.PipelineCache.Mutex);
 			RequireVulkanDevice(state);
+
 			if (!state.PipelineCache.InitializationAttempted)
 			{
 				Initialize(state, {});
 			}
 		}
+
 	}
 
 	Rhi::PipelineCacheLoadStatus LoadVulkanPipelineCache(const VulkanDeviceState& state, std::span<const std::byte> data)
@@ -63,16 +71,20 @@ namespace Swim::RhiVulkan
 		RequireVulkanDevice(state);
 		std::unique_lock lock(state.PipelineCache.Mutex);
 		RequireVulkanDevice(state);
+
 		if (state.PipelineCache.InitializationAttempted)
 		{
 			return Rhi::PipelineCacheLoadStatus::AlreadyInitialized;
 		}
+
 		std::span<const std::byte> nativeData;
 		const auto status = DecodeVulkanPipelineCacheData(data, state.Device.physical_device.properties, nativeData);
+
 		if (status != Rhi::PipelineCacheLoadStatus::Loaded)
 		{
 			return status;
 		}
+
 		return Initialize(state, nativeData) ? Rhi::PipelineCacheLoadStatus::Loaded : Rhi::PipelineCacheLoadStatus::Failed;
 	}
 
@@ -84,37 +96,48 @@ namespace Swim::RhiVulkan
 		std::unique_lock lock(state.PipelineCache.Mutex);
 		RequireVulkanDevice(state);
 		const auto handle = state.PipelineCache.Handle;
+
 		if (handle == VK_NULL_HANDLE)
 		{
 			return { state.PipelineCache.InitializationAttempted ? Rhi::PipelineCacheDataStatus::Failed : Rhi::PipelineCacheDataStatus::Empty, {} };
 		}
+
 		std::size_t size = 0;
 		auto result = CheckVulkanResult(state, state.Dispatch.vkGetPipelineCacheData(state.Device.device, handle, &size, nullptr), "vkGetPipelineCacheData (size)");
+
 		if (result != VK_SUCCESS)
 		{
 			return { result == VK_INCOMPLETE ? Rhi::PipelineCacheDataStatus::Incomplete : Rhi::PipelineCacheDataStatus::Failed, {} };
 		}
+
 		RequireVulkanDevice(state);
+
 		if (size > Rhi::MaxPipelineCacheDataBytes - VulkanPipelineCacheEnvelopeBytes)
 		{
 			return { Rhi::PipelineCacheDataStatus::TooLarge, {} };
 		}
+
 		if (size == 0)
 		{
 			return { Rhi::PipelineCacheDataStatus::Empty, {} };
 		}
+
 		std::vector<std::byte> bytes(size);
 		result = CheckVulkanResult(state, state.Dispatch.vkGetPipelineCacheData(state.Device.device, handle, &size, bytes.data()), "vkGetPipelineCacheData (data)");
+
 		if (result != VK_SUCCESS || size > bytes.size())
 		{
 			return { result == VK_INCOMPLETE ? Rhi::PipelineCacheDataStatus::Incomplete : Rhi::PipelineCacheDataStatus::Failed, {} };
 		}
+
 		bytes.resize(size);
 		RequireVulkanDevice(state);
+
 		if (!IsCompatibleVulkanPipelineCacheHeader(bytes, state.Device.physical_device.properties))
 		{
 			return { Rhi::PipelineCacheDataStatus::Failed, {} };
 		}
+
 		return { Rhi::PipelineCacheDataStatus::Ready, EncodeVulkanPipelineCacheData(bytes, state.Device.physical_device.properties) };
 	}
 

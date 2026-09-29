@@ -35,12 +35,14 @@ namespace Engine
 		void ReleaseJoltRuntime()
 		{
 			std::scoped_lock lock(JoltRuntimeMutex);
+
 			if (JoltRuntimeReferences == 0)
 			{
 				return;
 			}
 
 			JoltRuntimeReferences--;
+
 			if (JoltRuntimeReferences == 0)
 			{
 				JPH::UnregisterTypes();
@@ -70,6 +72,7 @@ namespace Engine
 				std::cerr << "JoltBackend::Initialize | failed to initialize Jolt runtime\n";
 				return false;
 			}
+
 			runtimeAcquired = true;
 		}
 
@@ -101,10 +104,12 @@ namespace Engine
 		}
 
 		auto world = std::make_unique<JoltWorldBackend>(*jobSystem, desc);
+
 		if (!world->Initialize())
 		{
 			return nullptr;
 		}
+
 		return world;
 	}
 

@@ -6,8 +6,10 @@
 
 namespace Swim::Assets
 {
+
 	namespace
 	{
+
 		constexpr std::array<std::byte, 12> Ktx2Identifier
 		{
 			std::byte{ 0xAB }, std::byte{ 0x4B }, std::byte{ 0x54 }, std::byte{ 0x58 },
@@ -110,10 +112,12 @@ namespace Swim::Assets
 		std::uint32_t MipDimension(std::uint32_t value, std::size_t level)
 		{
 			value = std::max<std::uint32_t>(value, 1);
+
 			for (std::size_t index = 0; index < level && value > 1; ++index)
 			{
 				value >>= 1;
 			}
+
 			return std::max<std::uint32_t>(value, 1);
 		}
 
@@ -123,8 +127,10 @@ namespace Swim::Assets
 			{
 				return false;
 			}
+
 			return size <= (static_cast<std::uint64_t>(totalSize) - offset);
 		}
+
 	}
 
 	Ktx2ParseResult ParseKtx2Metadata(std::span<const std::byte> bytes)
@@ -159,10 +165,12 @@ namespace Swim::Assets
 		{
 			return MakeError(Ktx2ErrorCode::InvalidDimensions, "KTX2 pixelWidth must be non-zero");
 		}
+
 		if (metadata.FaceCount != 1 && metadata.FaceCount != 6)
 		{
 			return MakeError(Ktx2ErrorCode::InvalidFaceCount, "KTX2 faceCount must be one or six");
 		}
+
 		if (metadata.FaceCount == 6 && pixelDepth != 0)
 		{
 			return MakeError(Ktx2ErrorCode::InvalidDimensions, "KTX2 cubemap payload cannot be three-dimensional");
@@ -172,6 +180,7 @@ namespace Swim::Assets
 		metadata.Depth = std::max<std::uint32_t>(pixelDepth, 1);
 		metadata.ArrayLayers = std::max<std::uint32_t>(layerCount, 1);
 		metadata.RequestsMipGeneration = metadata.DeclaredLevelCount == 0;
+
 		if (metadata.FaceCount == 6)
 		{
 			metadata.Dimension = TextureDimension::Cube;
@@ -190,17 +199,21 @@ namespace Swim::Assets
 		}
 
 		const std::size_t levelCount = std::max<std::size_t>(metadata.DeclaredLevelCount, 1);
+
 		if (levelCount > (std::numeric_limits<std::size_t>::max() - HeaderSize) / LevelIndexSize)
 		{
 			return MakeError(Ktx2ErrorCode::InvalidLevelIndex, "KTX2 level index size overflows the host address space");
 		}
+
 		const std::size_t levelIndexEnd = HeaderSize + levelCount * LevelIndexSize;
+
 		if (levelIndexEnd > bytes.size())
 		{
 			return MakeError(Ktx2ErrorCode::InvalidLevelIndex, "KTX2 level index is truncated");
 		}
 
 		metadata.Mips.reserve(levelCount);
+
 		for (std::size_t level = 0; level < levelCount; ++level)
 		{
 			const std::size_t offset = HeaderSize + level * LevelIndexSize;
@@ -211,14 +224,17 @@ namespace Swim::Assets
 			mip.OffsetBytes = ReadU64(bytes, offset + 0);
 			mip.SizeBytes = ReadU64(bytes, offset + 8);
 			mip.UncompressedSizeBytes = ReadU64(bytes, offset + 16);
+
 			if (!RangeFits(mip.OffsetBytes, mip.SizeBytes, bytes.size()))
 			{
 				return MakeError(Ktx2ErrorCode::InvalidLevelData, "KTX2 mip level points outside the container payload");
 			}
+
 			if (metadata.Supercompression == TextureSupercompression::None && mip.SizeBytes != mip.UncompressedSizeBytes)
 			{
 				return MakeError(Ktx2ErrorCode::InvalidLevelData, "uncompressed KTX2 mip level has mismatched compressed/uncompressed sizes");
 			}
+
 			metadata.Mips.push_back(mip);
 		}
 

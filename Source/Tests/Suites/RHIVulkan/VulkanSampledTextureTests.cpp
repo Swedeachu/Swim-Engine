@@ -27,6 +27,7 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "SignednessWidthAndFilteringAreIndepende
 		Case{ Rhi::Format::RGBA32Uint, Rhi::SampledTextureClass::Uint }, Case{ Rhi::Format::RGB10A2Uint, Rhi::SampledTextureClass::Uint },
 		Case{ Rhi::Format::R8Sint, Rhi::SampledTextureClass::Sint }, Case{ Rhi::Format::RG16Sint, Rhi::SampledTextureClass::Sint },
 		Case{ Rhi::Format::R32Sint, Rhi::SampledTextureClass::Sint }, Case{ Rhi::Format::RGBA32Sint, Rhi::SampledTextureClass::Sint } };
+
 	for (const auto& item : cases)
 	{
 		const auto format = item.Format;
@@ -54,11 +55,13 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "SignednessWidthAndFilteringAreIndepende
 		capture.FormatFeatures = 0;
 		SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanImageDescriptor(capture.State, binding, write), std::invalid_argument);
 	}
+
 	for (const auto format : { Rhi::Format::RGBA8Unorm, Rhi::Format::RGBA8Snorm, Rhi::Format::RGBA8UnormSrgb, Rhi::Format::R16Float,
 			 Rhi::Format::R32Float, Rhi::Format::BC6HSfloat, Rhi::Format::BC7Unorm })
 	{
 		SWIM_CHECK_EQUAL(Rhi::GetSampledTextureClass(format), Rhi::SampledTextureClass::Float);
 	}
+
 	for (const auto format : { Rhi::Format::Undefined, Rhi::Format::D16Unorm, Rhi::Format::D24UnormS8Uint, Rhi::Format::D32Float,
 			 Rhi::Format::D32FloatS8Uint, static_cast<Rhi::Format>(UINT16_MAX) })
 	{
@@ -116,6 +119,7 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "TypedArrayBatchRejectsMismatchWithoutPu
 SWIM_TEST("RHI.Vulkan.SampledTextures", "InvalidClassContractsRejectBeforeNativeLayouts")
 {
 	Testing::VulkanDescriptorCapture capture;
+
 	for (const auto type : { Rhi::DescriptorType::SampledTexture, Rhi::DescriptorType::UniformBuffer, Rhi::DescriptorType::Sampler })
 	{
 		for (const auto numeric :
@@ -125,6 +129,7 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "InvalidClassContractsRejectBeforeNative
 			{
 				continue;
 			}
+
 			Rhi::DescriptorSchemaDesc schema{ 0,
 				{ { 0, type, 1, Rhi::ShaderStageMask::Fragment, false, false, Rhi::Format::Undefined, numeric } } };
 			auto program = capture.MakeProgram({ { &schema, 1 } });
@@ -148,6 +153,7 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "ViewsSelectValidMipAndLayerRanges")
 	desc.ArrayLayers = 2;
 	desc.Usage = Rhi::TextureUsage::Sampled;
 	RhiVulkan::VulkanTexture texture(capture.State, VK_NULL_HANDLE, desc);
+
 	for (std::uint32_t invalid = 0; invalid < 7; ++invalid)
 	{
 		Rhi::TextureViewDesc viewDesc{};
@@ -155,33 +161,41 @@ SWIM_TEST("RHI.Vulkan.SampledTextures", "ViewsSelectValidMipAndLayerRanges")
 		viewDesc.BaseMipLevel = 1;
 		viewDesc.MipLevelCount = 3;
 		viewDesc.BaseArrayLayer = 1;
+
 		if (invalid == 1)
 		{
 			viewDesc.MipLevelCount = 0;
 		}
+
 		if (invalid == 2)
 		{
 			viewDesc.MipLevelCount = UINT32_MAX;
 		}
+
 		if (invalid == 3)
 		{
 			viewDesc.BaseMipLevel = UINT32_MAX;
 		}
+
 		if (invalid == 4)
 		{
 			viewDesc.BaseArrayLayer = 2;
 		}
+
 		if (invalid == 5)
 		{
 			viewDesc.ArrayLayerCount = 2;
 		}
+
 		if (invalid == 6)
 		{
 			viewDesc.Dimension = Rhi::TextureViewDimension::Texture2DArray;
 		}
+
 		RhiVulkan::VulkanTextureView view(capture.State, texture, RhiVulkan::FromNativeHandle<VkImageView>(1), viewDesc);
 		Rhi::DescriptorWrite write{};
 		write.TextureResource = &view;
+
 		if (invalid == 0)
 		{
 			SWIM_CHECK_EQUAL(

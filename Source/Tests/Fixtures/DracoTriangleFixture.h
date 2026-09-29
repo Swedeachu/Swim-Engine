@@ -25,6 +25,7 @@ namespace Swim::Tests
 		const int positionAttribute = builder.AddAttribute(draco::GeometryAttribute::POSITION, 3, draco::DT_FLOAT32);
 		const int normalAttribute = builder.AddAttribute(draco::GeometryAttribute::NORMAL, 3, draco::DT_FLOAT32);
 		const int texCoordAttribute = builder.AddAttribute(draco::GeometryAttribute::TEX_COORD, 2, draco::DT_FLOAT32);
+
 		if (positionAttribute < 0 || normalAttribute < 0 || texCoordAttribute < 0)
 		{
 			throw std::runtime_error("could not create Draco test attributes");
@@ -49,6 +50,7 @@ namespace Swim::Tests
 		builder.SetAttributeValuesForFace(texCoordAttribute, draco::FaceIndex(0), uv0.data(), uv1.data(), uv2.data());
 
 		std::unique_ptr<draco::Mesh> mesh = builder.Finalize();
+
 		if (!mesh)
 		{
 			throw std::runtime_error("could not finalize Draco test mesh");
@@ -58,6 +60,7 @@ namespace Swim::Tests
 		encoder.SetSpeedOptions(10, 10);
 		draco::EncoderBuffer encoded;
 		const draco::Status status = encoder.EncodeMeshToBuffer(*mesh, &encoded);
+
 		if (!status.ok())
 		{
 			throw std::runtime_error("could not encode Draco test mesh: " + status.error_msg_string());
@@ -67,6 +70,7 @@ namespace Swim::Tests
 		{
 			std::ofstream file(binaryPath, std::ios::binary | std::ios::trunc);
 			file.write(encoded.data(), static_cast<std::streamsize>(encoded.size()));
+
 			if (!file)
 			{
 				throw std::runtime_error("could not write Draco test payload");
@@ -102,6 +106,7 @@ namespace Swim::Tests
 			std::ofstream file(gltfPath, std::ios::binary | std::ios::trunc);
 			const std::string text = json.str();
 			file.write(text.data(), static_cast<std::streamsize>(text.size()));
+
 			if (!file)
 			{
 				throw std::runtime_error("could not write Draco glTF test fixture");

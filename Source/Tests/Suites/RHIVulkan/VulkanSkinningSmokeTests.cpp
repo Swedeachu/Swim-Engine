@@ -26,6 +26,7 @@
 
 namespace
 {
+
 #ifdef SWIM_SKINNING_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 
@@ -33,19 +34,24 @@ namespace
 	{
 		double total = 0.0;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		return total;
 	}
 
@@ -157,23 +163,28 @@ namespace
 		constexpr float Dt = 1.0f / 30.0f;
 		std::uint64_t comparedVertices = 0, outliers = 0, settledChecked = 0, boundsViolations = 0;
 		float worst = 0.0f, worstPrevious = 0.0f;
+
 		for (int frame = 0; frame < Frames; ++frame)
 		{
 			const float time = float(frame) * Dt;
+
 			for (Character& character : characters)
 			{
 				if (frame >= character.StopPosingAt)
 				{
 					continue;
 				}
+
 				character.Animator->Update(Dt);
 				character.Skeleton->Update(character.Animator->GetPose());
 				character.PreviousWeights = frame == 0 ? std::vector<float>{ 0.0f, 0.0f } : character.Weights;
 				character.Weights = { 0.5f + 0.5f * std::sin(6.0f * time + character.Phase), frame % 3 == 0 ? 1.0f : 0.25f };
+
 				if (frame == 0)
 				{
 					character.PreviousWeights = character.Weights;
 				}
+
 				SWIM_REQUIRE(system.SetPose(character.Handle,
 					{ character.Skeleton->GetSkinningMatrices(), character.Skeleton->GetPreviousSkinningMatrices(), character.Weights,
 						character.PreviousWeights }));
@@ -183,6 +194,7 @@ namespace
 			const auto geometry = heap.Import(graph);
 			const auto resources = system.Record(graph, geometry);
 			std::vector<std::pair<const Character*, GraphReadback>> readbacks;
+
 			for (const Character& character : characters)
 			{
 				const GpuMeshMetadata& output = *heap.GetMetadata(system.GetOutputMesh(character.Handle));
@@ -191,6 +203,7 @@ namespace
 						std::uint64_t(output.VertexOffset) * StandardVertexStride,
 						std::uint64_t(output.VertexCount) * StandardVertexStride) });
 			}
+
 			const auto completion = executor.Execute(graph.Compile());
 			executor.Wait();
 			heap.CommitUploads(completion);
@@ -198,11 +211,13 @@ namespace
 			heap.Collect();
 
 			std::uint32_t skinned = 0, settling = 0;
+
 			for (const auto& instance : resources.Instances)
 			{
 				skinned += instance.Settling ? 0u : 1u;
 				settling += instance.Settling ? 1u : 0u;
 			}
+
 			// Every posing character skins; the one that stopped settles once, then idles.
 			const std::uint32_t posing = frame < 6 ? 3u : 2u;
 			SWIM_CHECK_EQUAL(skinned, posing);
@@ -219,6 +234,7 @@ namespace
 				const auto previousPalette = stopped ? palette : character->Skeleton->GetPreviousSkinningMatrices();
 				const auto& previousWeights = stopped ? character->Weights : character->PreviousWeights;
 				const RenderBounds bounds = system.ComputeBounds(character->Handle);
+
 				for (std::size_t v = 0; v < vertexCount; ++v)
 				{
 					const GpuSkinVertex& skin = character->Source->SkinVertices[v];
@@ -229,6 +245,7 @@ namespace
 						Skinning::SkinPosition(character->Strip->Vertices[v], skin, deltas, previousPalette, previousWeights);
 					const StandardVertex& actual = gpu[v];
 					bool bad = false;
+
 					for (int c = 0; c < 3; ++c)
 					{
 						worst = std::max(worst, std::abs(actual.Position[c] - expected.Position[c]));
@@ -239,9 +256,11 @@ namespace
 						const bool inside = std::abs(actual.Position[c] - bounds.Center[c]) <= bounds.Extents[c] + 1e-4f;
 						boundsViolations += inside ? 0u : 1u;
 					}
+
 					bad = bad || actual.Tangent[3] != expected.Tangent[3] || actual.TexCoord0 != expected.TexCoord0;
 					outliers += bad ? 1u : 0u;
 					++comparedVertices;
+
 					if (stopped)
 					{
 						++settledChecked;
@@ -249,6 +268,7 @@ namespace
 				}
 			}
 		}
+
 		std::printf("             [skinning] %d frames, %llu vertices compared: %llu outliers (worst position %.2e, previous %.2e); "
 					"%llu settled vertices; %llu outside the pose bounds\n",
 			Frames, static_cast<unsigned long long>(comparedVertices), static_cast<unsigned long long>(outliers), double(worst),
@@ -263,10 +283,12 @@ namespace
 		std::vector<SkinInstanceHandle> crowd;
 		Animation::SkeletonInstance crowdSkeleton(skeleton);
 		const std::vector<float> weights{ 0.3f, 0.6f };
+
 		for (int i = 0; i < 64; ++i)
 		{
 			crowd.push_back(system.CreateInstance(denseMesh));
 		}
+
 		for (int frame = 0; frame < 3; ++frame)
 		{
 			for (const auto handle : crowd)
@@ -274,6 +296,7 @@ namespace
 				system.SetPose(
 					handle, { crowdSkeleton.GetSkinningMatrices(), crowdSkeleton.GetPreviousSkinningMatrices(), weights, weights });
 			}
+
 			RenderGraph graph;
 			const auto geometry = heap.Import(graph);
 			const auto resources = system.Record(graph, geometry);
@@ -282,6 +305,7 @@ namespace
 			heap.CommitUploads(completion);
 			system.CommitFrame();
 			heap.Collect();
+
 			if (frame == 2)
 			{
 				SWIM_CHECK_EQUAL(resources.Instances.size(), std::size_t(64));
@@ -289,15 +313,19 @@ namespace
 					PassMilliseconds(executor.ReadTimings(), "Skinning skin"));
 			}
 		}
+
 		executor.Wait();
+
 		for (const auto handle : crowd)
 		{
 			system.DestroyInstance(handle);
 		}
+
 		for (Character& character : characters)
 		{
 			system.DestroyInstance(character.Handle);
 		}
+
 		system.Drain();
 		heap.Drain();
 		executor.Trim();
@@ -307,6 +335,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuSkinningMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -315,6 +344,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunSkinningSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

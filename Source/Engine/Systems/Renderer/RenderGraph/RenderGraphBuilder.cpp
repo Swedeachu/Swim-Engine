@@ -4,11 +4,13 @@
 
 namespace Swim::Render
 {
+
 	void RenderGraphBuilder::Use(std::uint64_t graph, std::uint32_t index, GraphKind kind, GraphAccess access, Rhi::ResourceState state,
 		Rhi::TextureSubresourceRange range)
 	{
 		const auto& r = Internal::RequireResource(definition, graph, index, kind);
 		Internal::ValidateAccess(r, access, state, pass.Type);
+
 		if (r.Staging == Internal::GraphStaging::Upload && access != GraphAccess::Read)
 		{
 			throw std::invalid_argument("RenderGraph upload buffers are GPU read-only: " + r.Name);
@@ -23,6 +25,7 @@ namespace Swim::Render
 			{
 				continue;
 			}
+
 			for (auto cell : Internal::Cells(r, use.Range))
 			{
 				if (std::find(cells.begin(), cells.end(), cell) != cells.end())
@@ -71,6 +74,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Invalid RenderGraph pass dependency");
 		}
+
 		pass.Dependencies.push_back(dependency.Index);
 	}
 
@@ -78,4 +82,5 @@ namespace Swim::Render
 	{
 		pass.SideEffect = true;
 	}
+
 } // namespace Swim::Render

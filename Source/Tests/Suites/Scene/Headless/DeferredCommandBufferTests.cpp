@@ -121,6 +121,7 @@ SWIM_TEST("Scene.DeferredCommandBuffer", "ConcurrentProducersLoseNoCommands")
 		producers.emplace_back([producer, &commands, &ready]()
 		{
 			++ready;
+
 			while (ready.load() != ProducerCount)
 			{
 				std::this_thread::yield();
@@ -131,6 +132,7 @@ SWIM_TEST("Scene.DeferredCommandBuffer", "ConcurrentProducersLoseNoCommands")
 				const int value = 1000 + producer * CommandsPerProducer + command;
 				commands.Enqueue([value](TestContextState& state) { state.Values.push_back(value); });
 			}
+
 		});
 	}
 
@@ -147,6 +149,7 @@ SWIM_TEST("Scene.DeferredCommandBuffer", "ConcurrentProducersLoseNoCommands")
 	std::sort(sorted.begin(), sorted.end());
 
 	bool everyValuePresent = true;
+
 	for (int i = 0; i < ProducerCount * CommandsPerProducer; ++i)
 	{
 		if (sorted[static_cast<std::size_t>(i)] != 1000 + i)
@@ -155,5 +158,6 @@ SWIM_TEST("Scene.DeferredCommandBuffer", "ConcurrentProducersLoseNoCommands")
 			break;
 		}
 	}
+
 	SWIM_CHECK(everyValuePresent);
 }

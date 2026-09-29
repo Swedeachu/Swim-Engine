@@ -20,6 +20,7 @@ namespace Swim::Platform
 		NativeWindowHandle QueryNativeHandle(SDL_Window* window)
 		{
 			NativeWindowHandle handle{};
+
 			if (!window)
 			{
 				return handle;
@@ -35,6 +36,7 @@ namespace Swim::Platform
 			handle.Window = SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
 		#elif defined(__linux__)
 			void* waylandSurface = SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+
 			if (waylandSurface)
 			{
 				handle.Type = NativeWindowType::Wayland;
@@ -49,6 +51,7 @@ namespace Swim::Platform
 				));
 				handle.Display = SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
 			}
+
 		#endif
 
 			if (!handle.Window)
@@ -74,10 +77,12 @@ namespace Swim::Platform
 		}
 
 	#if defined(_WIN32)
+
 		if (impl->ExternalParent)
 		{
 			const NativeWindowHandle native = QueryNativeHandle(impl->Window);
 			HWND hwnd = static_cast<HWND>(native.Window);
+
 			if (hwnd && impl->OriginalWindowProc != 0)
 			{
 				RemovePropW(hwnd, L"SwimEngine.EmbeddedOriginalWindowProc");
@@ -85,15 +90,18 @@ namespace Swim::Platform
 			}
 
 			const DWORD currentThreadId = GetCurrentThreadId();
+
 			if (impl->ForegroundThreadId != 0)
 			{
 				AttachThreadInput(currentThreadId, impl->ForegroundThreadId, FALSE);
 			}
+
 			if (impl->ParentThreadId != 0)
 			{
 				AttachThreadInput(currentThreadId, impl->ParentThreadId, FALSE);
 			}
 		}
+
 	#endif
 
 		if (impl->Window)
@@ -111,6 +119,7 @@ namespace Swim::Platform
 	Extent2D Window::GetLogicalSize() const
 	{
 		Extent2D size{};
+
 		if (!impl || !impl->Window)
 		{
 			return size;
@@ -118,17 +127,20 @@ namespace Swim::Platform
 
 		int width = 0;
 		int height = 0;
+
 		if (SDL_GetWindowSize(impl->Window, &width, &height))
 		{
 			size.Width = static_cast<uint32_t>(std::max(width, 0));
 			size.Height = static_cast<uint32_t>(std::max(height, 0));
 		}
+
 		return size;
 	}
 
 	Extent2D Window::GetPixelSize() const
 	{
 		Extent2D size{};
+
 		if (!impl || !impl->Window)
 		{
 			return size;
@@ -136,11 +148,13 @@ namespace Swim::Platform
 
 		int width = 0;
 		int height = 0;
+
 		if (SDL_GetWindowSizeInPixels(impl->Window, &width, &height))
 		{
 			size.Width = static_cast<uint32_t>(std::max(width, 0));
 			size.Height = static_cast<uint32_t>(std::max(height, 0));
 		}
+
 		return size;
 	}
 
@@ -193,12 +207,14 @@ namespace Swim::Platform
 		}
 
 	#if defined(_WIN32)
+
 		if (impl->Parent.Type == NativeWindowType::Win32)
 		{
 			const NativeWindowHandle native = QueryNativeHandle(impl->Window);
 			HWND hwnd = static_cast<HWND>(native.Window);
 			HWND parentHwnd = static_cast<HWND>(impl->Parent.Window);
 			RECT rect{};
+
 			if (hwnd && parentHwnd && GetClientRect(parentHwnd, &rect))
 			{
 				const int width = std::max(1L, rect.right - rect.left);
@@ -206,6 +222,7 @@ namespace Swim::Platform
 				SetWindowPos(hwnd, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
 			}
 		}
+
 	#endif
 	}
 

@@ -15,10 +15,13 @@ namespace Engine
 	public:
 
 		explicit PhysicsSystem(std::unique_ptr<IPhysicsBackend> backend);
+
 		~PhysicsSystem() override;
 
 		int Awake() override;
+
 		int Init() override;
+
 		int Exit() override;
 
 		std::unique_ptr<PhysicsWorld> CreateWorld(const PhysicsWorldDesc& desc = {});
@@ -27,7 +30,9 @@ namespace Engine
 
 
 		float GetFixedDeltaSeconds() const { return fixedDeltaSeconds; }
+
 		void SetFixedDeltaSeconds(float dt) { fixedDeltaSeconds = dt; }
+
 		void SetDispatcherThreads(unsigned int threads) { dispatcherThreads = threads; }
 
 	private:

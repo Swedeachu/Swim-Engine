@@ -19,6 +19,7 @@ namespace Scene = Swim::Testing::ScreenSpaceScene;
 // thickness). With the back-face depth the march knows each surface's thickness.
 namespace
 {
+
 	using Float3 = Scene::Float3;
 
 	float Dot(const Float3& a, const Float3& b)
@@ -56,15 +57,18 @@ namespace
 		auto params = BuildScreenSpaceParams(settings, view, width, height, 0);
 		params.SsrBackDepth = backFaces ? 1u : 0u;
 		Tally tally;
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
 			{
 				const auto& hit = inputs.Hits[std::size_t(y) * width + x];
+
 				if (hit.T <= 0.0f || !mirror(hit.Position, hit.Normal))
 				{
 					continue;
 				}
+
 				const auto traced = Ss::TraceReflection(params, inputs.Depth, inputs.Normal, x, y, backFaces ? &inputs.BackDepth : nullptr);
 				++tally.Traced;
 				// The real reflected ray.
@@ -77,6 +81,7 @@ namespace
 					hit.Position[2] + hit.Normal[2] * 1.0e-3f };
 				const auto truth = Scene::Cast(scene, start, r);
 				bool visible = false;
+
 				if (truth)
 				{
 					const Float3 toTruth{ truth->Position[0] - inputs.Camera[0], truth->Position[1] - inputs.Camera[1],
@@ -87,25 +92,31 @@ namespace
 					// On screen (away from the edge fade) too.
 					const auto viewProjection = MultiplyRowMajor(view.Projection, view.View);
 					float clip[4];
+
 					for (int row = 0; row < 4; ++row)
 					{
 						clip[row] = viewProjection[row * 4] * truth->Position[0] + viewProjection[row * 4 + 1] * truth->Position[1] +
 							viewProjection[row * 4 + 2] * truth->Position[2] + viewProjection[row * 4 + 3];
 					}
+
 					const bool onScreen = clip[3] > 0.0f && std::abs(clip[0] / clip[3]) < 0.8f && std::abs(clip[1] / clip[3]) < 0.8f;
 					visible = onScreen && truth->T <= settings.Reflections.MaxDistance * (1.0f - settings.Reflections.DistanceFade) && seen &&
 						std::abs(seen->T - length) < 0.01f && Dot(truth->Normal, toTruth) < 0.0f;
 				}
+
 				tally.Visible += visible ? 1u : 0u;
+
 				if (!traced)
 				{
 					continue;
 				}
+
 				if (traced->Rejected)
 				{
 					++tally.Rejected;
 					continue;
 				}
+
 				const auto& reported = inputs.Hits[std::size_t(traced->Y) * width + traced->X];
 				const float tolerance = 0.12f + 0.02f * (truth ? truth->T : 0.0f);
 				const bool right = truth && reported.T > 0.0f && Distance(reported.Position, truth->Position) <= tolerance;
@@ -113,6 +124,7 @@ namespace
 				tally.Wrong += right ? 0u : 1u;
 			}
 		}
+
 		return tally;
 	}
 
@@ -122,6 +134,7 @@ namespace
 					"rejected %u\n",
 			name, now.Traced, now.Visible, old.Found, old.Wrong, now.Found, now.Wrong, now.Rejected);
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ScreenSpace.HitValidation", "NearlyTouchingChromeSpheresReflectOnlyWhatIsReallyThere")

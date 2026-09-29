@@ -152,7 +152,9 @@ A handful of small `OBJECT` libraries under the `Tests/Header Boundary` solution
 
 ### C++ formatting
 
-The root `.clang-format` uses Allman braces, tabs, and explicit braces around every `if`/`else` and loop body. Use clang-format **22 or newer**. Short control-flow bodies stay on separate lines; logical sections inside functions still need a manual spacing review.
+The root `.clang-format` uses Allman braces, tabs, and explicit braces around every `if`/`else` and loop body. Use clang-format **22 or newer**. The repository formatter also adds one blank line around control-flow blocks and just inside namespace, class, and union braces; struct braces stay tight. It adds a blank line after access labels and member function declarations in classes and structs, without spacing out fields.
+
+For a repository-wide blank-line refresh that retains existing hand-laid-out expressions, run `python scripts/format-source.py --all --spacing-only`. Add `--check` to verify that spacing without editing files.
 
 When Python and clang-format are available at configure time, CMake exposes `SwimFormat` and `SwimFormatCheck` under Tools. They operate on changed/new first-party C/C++ files relative to `HEAD`, including staged changes, and never run as part of a normal build:
 

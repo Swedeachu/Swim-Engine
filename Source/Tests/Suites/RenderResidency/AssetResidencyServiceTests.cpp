@@ -10,16 +10,19 @@ using State = AssetResidencyState;
 
 namespace
 {
+
 	Assets::MeshAsset MakeMesh(std::uint8_t seed, std::size_t vertices = 3)
 	{
 		Assets::MeshAsset mesh;
 		mesh.VertexStreams = { { 12, 0, vertices * 12 } };
 		mesh.VertexAttributes = { { Assets::VertexSemantic::Position, Assets::VertexElementFormat::Float32x3, 0, 0 } };
 		mesh.VertexBytes.resize(vertices * 12);
+
 		for (std::size_t i = 0; i < mesh.VertexBytes.size(); ++i)
 		{
 			mesh.VertexBytes[i] = static_cast<std::byte>(seed + i);
 		}
+
 		mesh.IndexFormat = Assets::IndexElementFormat::UInt32;
 		mesh.IndexBytes.resize(12);
 		mesh.Primitives = { { 0, 3, 0, 0, {} } };
@@ -46,6 +49,7 @@ namespace
 		SWIM_REQUIRE(assets.Publish(handle, std::move(asset)));
 		return handle;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.AssetResidency", "ResidentCpuAssetsStageUploadAndBecomeGpuResident")
@@ -106,12 +110,14 @@ SWIM_TEST("Render.AssetResidency", "UploadBudgetAdmitsWaitingAssetsInRequestOrde
 	desc.RetainCpuAssets = true;
 	auto& service = fixture.Service(std::move(desc));
 	std::vector<Assets::AssetHandle<Assets::MeshAsset>> meshes;
+
 	for (int i = 0; i < 4; ++i)
 	{
 		const std::string path = "Models/Budget" + std::to_string(i) + ".mesh";
 		meshes.push_back(PublishCpu(fixture.assets, path.c_str(), MakeMesh(std::uint8_t(i), 4)));
 		service.RequestMesh(meshes.back());
 	}
+
 	service.Update();
 	SWIM_CHECK(service.GetState(meshes[0]) == State::Uploading);
 	SWIM_CHECK(service.GetState(meshes[1]) == State::Uploading); // 60 < 100 admits a second.
@@ -194,12 +200,14 @@ SWIM_TEST("Render.AssetResidency", "UnsupportedGpuPayloadsFailWithoutInvalidatin
 	// Capacity exhaustion is backpressure, not failure.
 	auto& limited = fixture.Service();
 	std::vector<Assets::AssetHandle<Assets::TextureAsset>> textures;
+
 	for (int i = 0; i < 17; ++i) // The fixture's TextureResidency holds 16.
 	{
 		const std::string path = "Textures/Many" + std::to_string(i) + ".texture";
 		textures.push_back(PublishCpu(fixture.assets, path.c_str(), MakeTexture()));
 		limited.RequestTexture(textures.back());
 	}
+
 	limited.Update();
 	SWIM_CHECK(limited.GetState(textures[15]) == State::Uploading);
 	SWIM_CHECK(limited.GetState(textures[16]) == State::WaitingForGpuUpload);
@@ -236,18 +244,22 @@ SWIM_TEST("Render.AssetResidency", "ResidentTexturesBecomeBindlessExplicitlyAndR
 	desc.Bindless = &bindless;
 	auto& service = fixture.Service(std::move(desc));
 	std::vector<Assets::AssetHandle<Assets::TextureAsset>> textures;
+
 	for (int i = 0; i < 3; ++i)
 	{
 		const std::string path = "Textures/Bindless" + std::to_string(i) + ".texture";
 		textures.push_back(PublishCpu(fixture.assets, path.c_str(), MakeTexture()));
 		service.RequestTexture(textures.back());
 	}
+
 	service.Update();
+
 	for (const auto& texture : textures)
 	{
 		SWIM_CHECK(service.GetState(texture) == State::Uploading);
 		SWIM_CHECK_EQUAL(service.GetBindlessIndex(texture), BindlessResourceTable::FallbackIndex); // Not before residency.
 	}
+
 	fixture.UploadFrame();
 	auto stats = service.GetStats();
 	SWIM_CHECK_EQUAL(stats.Resident, 3u);
@@ -257,18 +269,22 @@ SWIM_TEST("Render.AssetResidency", "ResidentTexturesBecomeBindlessExplicitlyAndR
 	Assets::AssetHandle<Assets::TextureAsset> pending;
 	Assets::AssetHandle<Assets::TextureAsset> released;
 	std::uint32_t releasedIndex = 0;
+
 	for (const auto& texture : textures)
 	{
 		const auto index = service.GetBindlessIndex(texture);
+
 		if (index == BindlessResourceTable::FallbackIndex)
 		{
 			pending = texture;
 			continue;
 		}
+
 		SWIM_CHECK(elements.Table().Element(1, index) == fixture.textures->GetView(service.GetGpuTexture(texture)));
 		released = texture;
 		releasedIndex = index;
 	}
+
 	SWIM_REQUIRE(pending && released);
 
 	// The element retires with the texture; the waiting texture takes it once free.

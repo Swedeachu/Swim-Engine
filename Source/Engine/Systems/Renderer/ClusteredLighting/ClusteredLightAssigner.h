@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	// One compiled clustering program.
 	struct ClusterProgram
 	{
@@ -41,7 +42,9 @@ namespace Swim::Render
 	// separately (ClusteredLighting.slang).
 	class ClusteredLightAssigner
 	{
+
 	  public:
+
 		// Throws std::invalid_argument when a required program is missing.
 		explicit ClusteredLightAssigner(ClusteredLightAssignerDesc desc);
 
@@ -57,6 +60,9 @@ namespace Swim::Render
 		bool HasHeatmap() const { return desc.Heatmap.Pipeline != nullptr; }
 
 	  private:
+
 		ClusteredLightAssignerDesc desc;
+
 	};
+
 } // namespace Swim::Render

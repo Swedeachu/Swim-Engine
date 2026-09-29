@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// The camera particles are simulated for and drawn with.
 	struct ParticleView
 	{
@@ -33,10 +34,12 @@ namespace Swim::Render
 		float Accumulator = 0.0f; // Fractional continuous spawns carried to the next frame.
 		std::uint32_t NextId = 0; // Id of the next spawn.
 	};
+
 } // namespace Swim::Render
 
 namespace Swim::Render::Particles
 {
+
 	// The CPU definition of the GPU particle system (critical-path item 77).
 	// Shaders/Slang/Particles mirrors every function, and the native smoke compares the
 	// two particle by particle (matched by id: slot assignment is concurrent on the GPU).
@@ -107,8 +110,11 @@ namespace Swim::Render::Particles
 	// capacity are dropped, as on the GPU (which ones is then unspecified there).
 	class ReferenceEmitter
 	{
+
 	  public:
+
 		explicit ReferenceEmitter(std::uint32_t capacity);
+
 		// Simulates the live particles, then spawns emitter.SpawnCount from FirstId.
 		void Step(const GpuParticleEmitter& emitter, float deltaTime);
 
@@ -121,8 +127,11 @@ namespace Swim::Render::Particles
 		std::uint32_t Dropped() const { return dropped; }
 
 	  private:
+
 		std::uint32_t capacity;
 		std::vector<GpuParticle> particles;
 		std::uint32_t dropped = 0;
+
 	};
+
 } // namespace Swim::Render::Particles

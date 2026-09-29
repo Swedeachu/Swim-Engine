@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of ClusteredForward.slang (both variants: SwimForwardOpaque
 	// and SwimForwardTransparent). Space 0 is per page slot; space 1 is the shared
 	// bindless table (BindlessResourceTable over ForwardPlusBindlessSpace).
@@ -85,11 +86,14 @@ namespace Swim::Render
 			{ { ForwardPlusDrawBindings::BindlessSamplers, Rhi::DescriptorType::Sampler, samplers, Rhi::ShaderStageMask::None },
 				{ ForwardPlusDrawBindings::BindlessTextures, Rhi::DescriptorType::SampledTexture, textures, Rhi::ShaderStageMask::None } }
 		};
+
 		for (auto& binding : space.Bindings)
 		{
 			binding.Stages = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute;
 			binding.PartiallyBound = binding.UpdateAfterBind = true;
 		}
+
 		return space;
 	}
+
 } // namespace Swim::Render

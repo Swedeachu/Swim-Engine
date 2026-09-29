@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	struct GraphBarrier
 	{
 		std::uint32_t Resource = 0;
@@ -10,4 +11,5 @@ namespace Swim::Render
 		Rhi::ResourceState After = Rhi::ResourceState::Undefined;
 		Rhi::TextureSubresourceRange Range{};
 	};
+
 } // namespace Swim::Render

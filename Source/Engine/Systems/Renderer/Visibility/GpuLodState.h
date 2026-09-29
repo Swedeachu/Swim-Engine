@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Persistent per-row LOD history for hysteresis. Generation must match the
 	// row's current GpuInstanceRecord::Generation, so reused rows start fresh.
 	struct GpuLodState
@@ -12,4 +13,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuLodState) == 8);
+
 } // namespace Swim::Render

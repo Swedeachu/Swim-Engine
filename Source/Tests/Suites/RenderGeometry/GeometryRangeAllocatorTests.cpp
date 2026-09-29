@@ -41,12 +41,14 @@ SWIM_TEST("Render.GeometryRangeAllocator", "ExhaustionLeavesStateUnchangedAndRep
 {
 	GeometryRangeAllocator allocator(256);
 	std::vector<GeometryRange> ranges;
+
 	for (int i = 0; i < 8; ++i)
 	{
 		auto range = allocator.Allocate(32, 32);
 		SWIM_REQUIRE(range);
 		ranges.push_back(*range);
 	}
+
 	SWIM_CHECK(!allocator.Allocate(1, 1));
 	SWIM_CHECK_EQUAL(allocator.GetFreeBytes(), 0u);
 	SWIM_CHECK_EQUAL(allocator.GetFreeRangeCount(), 0u);
@@ -56,6 +58,7 @@ SWIM_TEST("Render.GeometryRangeAllocator", "ExhaustionLeavesStateUnchangedAndRep
 	{
 		allocator.Free(ranges[i]);
 	}
+
 	SWIM_CHECK_EQUAL(allocator.GetFreeBytes(), 128u);
 	SWIM_CHECK_EQUAL(allocator.GetLargestFreeRange(), 32u);
 	SWIM_CHECK_EQUAL(allocator.GetFreeRangeCount(), 4u);

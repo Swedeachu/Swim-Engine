@@ -15,14 +15,17 @@ namespace Swim::Assets
 		AssetId AssetIdFromHash(const ContentHash& hash)
 		{
 			std::uint64_t value = 0;
+
 			for (std::size_t index = 0; index < 8; ++index)
 			{
 				value = (value << 8) | hash.Bytes[index];
 			}
+
 			if (value == 0)
 			{
 				value = 1;
 			}
+
 			return AssetId{ value };
 		}
 
@@ -37,6 +40,7 @@ namespace Swim::Assets
 
 		std::string input(path);
 		std::replace(input.begin(), input.end(), '\\', '/');
+
 		if (input.front() == '/' || input.find(':') != std::string::npos)
 		{
 			throw std::invalid_argument("Asset paths must be logical relative paths.");
@@ -44,6 +48,7 @@ namespace Swim::Assets
 
 		std::vector<std::string> segments;
 		std::size_t start = 0;
+
 		while (start <= input.size())
 		{
 			const std::size_t end = input.find('/', start);
@@ -60,6 +65,7 @@ namespace Swim::Assets
 				{
 					throw std::invalid_argument("Asset path cannot escape the logical asset root.");
 				}
+
 				segments.pop_back();
 			}
 			else
@@ -68,6 +74,7 @@ namespace Swim::Assets
 				{
 					throw std::invalid_argument("Asset path contains an embedded null character.");
 				}
+
 				segments.push_back(segment);
 			}
 
@@ -75,6 +82,7 @@ namespace Swim::Assets
 			{
 				break;
 			}
+
 			start = end + 1;
 		}
 
@@ -84,14 +92,17 @@ namespace Swim::Assets
 		}
 
 		std::string normalized;
+
 		for (std::size_t index = 0; index < segments.size(); ++index)
 		{
 			if (index != 0)
 			{
 				normalized.push_back('/');
 			}
+
 			normalized += segments[index];
 		}
+
 		return normalized;
 	}
 
@@ -101,6 +112,7 @@ namespace Swim::Assets
 		std::unique_lock lock(mutex);
 
 		const auto existing = pathToId.find(normalized);
+
 		if (existing != pathToId.end())
 		{
 			return existing->second;
@@ -123,12 +135,14 @@ namespace Swim::Assets
 		std::unique_lock lock(mutex);
 
 		const auto pathIt = pathToId.find(normalized);
+
 		if (pathIt != pathToId.end() && pathIt->second != id)
 		{
 			return false;
 		}
 
 		const auto idIt = idToPath.find(id);
+
 		if (idIt != idToPath.end() && idIt->second != normalized)
 		{
 			return false;
@@ -150,12 +164,14 @@ namespace Swim::Assets
 		std::unique_lock lock(mutex);
 
 		const auto conflict = pathToId.find(normalized);
+
 		if (conflict != pathToId.end() && conflict->second != id)
 		{
 			return false;
 		}
 
 		const auto current = idToPath.find(id);
+
 		if (current != idToPath.end())
 		{
 			pathToId.erase(current->second);
@@ -171,6 +187,7 @@ namespace Swim::Assets
 		const std::string normalized = NormalizeAssetPath(path);
 		std::unique_lock lock(mutex);
 		const auto existing = pathToId.find(normalized);
+
 		if (existing == pathToId.end())
 		{
 			return false;
@@ -186,10 +203,12 @@ namespace Swim::Assets
 		const std::string normalized = NormalizeAssetPath(path);
 		std::shared_lock lock(mutex);
 		const auto existing = pathToId.find(normalized);
+
 		if (existing == pathToId.end())
 		{
 			return std::nullopt;
 		}
+
 		return existing->second;
 	}
 
@@ -197,10 +216,12 @@ namespace Swim::Assets
 	{
 		std::shared_lock lock(mutex);
 		const auto existing = idToPath.find(id);
+
 		if (existing == idToPath.end())
 		{
 			return std::nullopt;
 		}
+
 		return existing->second;
 	}
 
@@ -209,10 +230,12 @@ namespace Swim::Assets
 		std::shared_lock lock(mutex);
 		std::vector<AssetPathEntry> result;
 		result.reserve(pathToId.size());
+
 		for (const auto& [path, id] : pathToId)
 		{
 			result.push_back(AssetPathEntry{ id, path });
 		}
+
 		std::sort(result.begin(), result.end(), [](const AssetPathEntry& left, const AssetPathEntry& right)
 		{
 			return left.LogicalPath < right.LogicalPath;
@@ -241,6 +264,7 @@ namespace Swim::Assets
 		while (true)
 		{
 			const auto collision = idToPath.find(candidate);
+
 			if (collision == idToPath.end() || collision->second == normalizedPath)
 			{
 				return candidate;

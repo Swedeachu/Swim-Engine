@@ -13,6 +13,7 @@
 
 namespace
 {
+
 	void RunDepthSamplingSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 #ifndef SWIM_RHI_DEPTH_SAMPLING_SPIRV_PATH
@@ -49,6 +50,7 @@ namespace
 		SWIM_REQUIRE(pipeline);
 		std::array<std::unique_ptr<Rhi::Texture>, 2> images;
 		std::array<std::unique_ptr<Rhi::TextureView>, 2> attachments, views;
+
 		for (std::size_t index = 0; index < images.size(); ++index)
 		{
 			Rhi::TextureDesc desc{};
@@ -57,11 +59,13 @@ namespace
 			desc.Extent = { 8, 8, 1 };
 			desc.MipLevels = desc.ArrayLayers = 2;
 			images[index] = device->CreateTexture(desc);
+
 			if (!images[index] && index == 1)
 			{
 				desc.PixelFormat = Rhi::Format::D32FloatS8Uint;
 				images[index] = device->CreateTexture(desc);
 			}
+
 			SWIM_REQUIRE_MESSAGE(images[index], "Depth smoke requires sampled D32 and a supported sampled depth/stencil format");
 			Rhi::TextureViewDesc view{};
 			view.BaseMipLevel = view.BaseArrayLayer = 1;
@@ -70,7 +74,9 @@ namespace
 			views[index] = device->CreateTextureView(*images[index], view);
 			SWIM_REQUIRE(attachments[index] && views[index]);
 		}
+
 		std::array<std::unique_ptr<Rhi::Sampler>, 3> samplers;
+
 		for (std::size_t index = 0; index < samplers.size(); ++index)
 		{
 			Rhi::SamplerDesc desc{};
@@ -80,6 +86,7 @@ namespace
 			samplers[index] = device->CreateSampler(desc);
 			SWIM_REQUIRE(samplers[index]);
 		}
+
 		constexpr std::uint64_t bytes = 64 * sizeof(float);
 		auto guards = device->CreateBuffer({ bytes, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Depth guards" });
 		auto output = device->CreateBuffer(
@@ -97,12 +104,14 @@ namespace
 		writes[0].TextureResource = views[0].get();
 		writes[1].Binding = 1;
 		writes[1].TextureResource = views[1].get();
+
 		for (std::size_t index = 0; index < samplers.size(); ++index)
 		{
 			writes[index + 2].Binding = index < 2 ? 2 : 3;
 			writes[index + 2].ArrayIndex = index == 1 ? 1 : 0;
 			writes[index + 2].SamplerResource = samplers[index].get();
 		}
+
 		writes[5].Binding = 4;
 		writes[5].BufferResource = output.get();
 		table->Write(writes);
@@ -110,19 +119,23 @@ namespace
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Graphics, 2 });
 		SWIM_REQUIRE(frames);
 		const std::array clearValues{ 0.25f, 0.75f, 0.5f };
+
 		for (std::uint32_t frame = 0; frame < clearValues.size(); ++frame)
 		{
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
+
 			if (frame == 0)
 			{
 				commands.Transition(*guards, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
+
 			commands.Transition(
 				*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*guards, *output, { 0, 0, bytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderWrite);
+
 			for (std::size_t index = 0; index < images.size(); ++index)
 			{
 				const auto value = index == 0 ? clearValues[frame] : 1.0f - clearValues[frame];
@@ -132,6 +145,7 @@ namespace
 				commands.BeginRendering({ {}, &depth, { 4, 4 } });
 				commands.EndRendering();
 				commands.Transition(*images[index], Rhi::ResourceState::DepthStencilWrite, Rhi::ResourceState::ShaderRead, { 1, 1, 1, 1 });
+
 				for (std::uint32_t item = 0; item < 6; ++item)
 				{
 					const auto offset = (item * 2 + index) * 4;
@@ -140,6 +154,7 @@ namespace
 					expected[offset + 3] = static_cast<float>(item) * 0.2f > value ? 1.0f : 0.0f;
 				}
 			}
+
 			commands.BindComputePipeline(*pipeline);
 			commands.BindDescriptorTable(0, *table);
 			commands.Dispatch(2, 1, 1);
@@ -152,17 +167,20 @@ namespace
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::size_t item = 0; item < actual.size(); ++item)
 			{
 				SWIM_CHECK(std::abs(actual[item] - expected[item]) < 0.000002f);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "DepthSamplingAndComparisonReadback", SWIM_TEST_LOCATION,
@@ -171,6 +189,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunDepthSamplingSmoke);
 				} });
 		}
+
 		return true;
 	}();
 

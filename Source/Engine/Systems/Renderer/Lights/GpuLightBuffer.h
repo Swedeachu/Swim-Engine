@@ -14,6 +14,7 @@
 
 namespace Swim::Render
 {
+
 	// The persistent GPU light buffer (critical-path item 63). Lights live in two
 	// dense row ranges of one device-local GpuLightRecord buffer, directional rows
 	// first and local (point/spot) rows from FirstLocalRow, so shaders and the
@@ -32,29 +33,42 @@ namespace Swim::Render
 	// Owner thread, externally synchronized.
 	class GpuLightBuffer
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for zero capacities.
 		GpuLightBuffer(Rhi::Device& device, GpuLightBufferDesc desc);
+
 		~GpuLightBuffer();
+
 		GpuLightBuffer(const GpuLightBuffer&) = delete;
+
 		GpuLightBuffer& operator=(const GpuLightBuffer&) = delete;
 
 		// Empty when the light's range is full. Invalid descs throw std::invalid_argument.
 		std::optional<GpuLightHandle> TryCreate(const LightDesc& desc);
+
 		// As above, but a full range throws std::length_error.
 		GpuLightHandle Create(const LightDesc& desc);
+
 		// False for stale handles. Throws std::invalid_argument for invalid descs and
 		// std::length_error when a type change targets a full range (the light keeps
 		// its previous state).
 		bool Update(GpuLightHandle light, const LightDesc& desc);
+
 		bool Release(GpuLightHandle light);
+
 		bool IsValid(GpuLightHandle light) const;
+
 		const LightDesc* Find(GpuLightHandle light) const;
+
 		// The light's current buffer row (it moves when other lights are released).
 		std::optional<std::uint32_t> GetRow(GpuLightHandle light) const;
 
 		GpuLightGraphResources Import(RenderGraph& graph);
+
 		void CommitUploads();
+
 		void AbortUploads();
 
 		// The CPU mirror of the GPU contents (valid up to the header's counts).
@@ -69,6 +83,7 @@ namespace Swim::Render
 		GpuLightBufferStats GetStats() const;
 
 	  private:
+
 		struct Slot
 		{
 			std::uint32_t Generation = 0;
@@ -78,10 +93,14 @@ namespace Swim::Render
 		};
 
 		Slot* Resolve(GpuLightHandle light);
+
 		const Slot* Resolve(GpuLightHandle light) const;
+
 		// Appends a record to its range; false when full.
 		bool Insert(std::uint32_t slot, const GpuLightRecord& record, bool directional);
+
 		void Remove(std::uint32_t slot);
+
 		void WriteRow(std::uint32_t row, const GpuLightRecord& record, std::uint32_t owner);
 
 		std::uint32_t directionalCapacity;
@@ -103,5 +122,7 @@ namespace Swim::Render
 		std::uint32_t lastRuns = 0;
 		std::uint64_t lastBytes = 0;
 		bool lastHeader = false;
+
 	};
+
 } // namespace Swim::Render

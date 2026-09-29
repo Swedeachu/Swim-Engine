@@ -15,10 +15,14 @@ namespace Scene = Swim::Testing::ClusterScene;
 
 namespace
 {
+
 	class MockGraphicsPipeline final : public Rhi::GraphicsPipeline
 	{
+
 	  public:
+
 		std::uintptr_t GetNativeHandle() const override { return 15; }
+
 	};
 
 	// A Forward+ frame on the mock device: every input is an imported buffer or
@@ -36,6 +40,7 @@ namespace
 			fixture.device.CreateTextures = true;
 			using T = Rhi::DescriptorType;
 			Rhi::DescriptorSchemaDesc draw{ 0, {} };
+
 			for (std::uint32_t binding = 0; binding < ForwardPlusDrawBindings::Count; ++binding)
 			{
 				const auto type = binding == ForwardPlusDrawBindings::EnvironmentSampler ? T::Sampler
@@ -45,14 +50,17 @@ namespace
 					: T::ReadOnlyStorageBuffer;
 				draw.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment });
 			}
+
 			const auto bindless = ForwardPlusBindlessSpace(16, 4);
 			opaqueLayout.program.Interface.DescriptorSchemas = { draw, bindless };
 			transparentLayout.program.Interface.DescriptorSchemas = { draw, bindless };
 			Rhi::DescriptorSchemaDesc sort{ 0, {} };
+
 			for (std::uint32_t binding = 0; binding < ForwardTransparentSortBindings::Count; ++binding)
 			{
 				sort.Bindings.push_back({ binding, T::StorageBuffer, 1, Rhi::ShaderStageMask::Compute });
 			}
+
 			sortLayout.program.Interface.DescriptorSchemas = { sort };
 			bindlessTable = fixture.device.CreateDescriptorTable({ &opaqueLayout, 1, 0, "Bindless" });
 
@@ -60,10 +68,12 @@ namespace
 			{
 				return fixture.device.CreateBuffer({ size, usage | Rhi::BufferUsage::Storage, Rhi::MemoryPreference::DeviceLocal, "Test" });
 			};
+
 			for (auto& page : pages)
 			{
 				page = buffer(4096, Rhi::BufferUsage::Index);
 			}
+
 			commands = buffer(std::uint64_t(bins.GetTotalCapacity()) * 20, Rhi::BufferUsage::Indirect);
 			counts = buffer(std::uint64_t(bins.GetBinCount()) * 4, Rhi::BufferUsage::Indirect);
 			drawRecords = buffer(std::uint64_t(bins.GetTotalCapacity()) * 8, Rhi::BufferUsage::None);
@@ -129,10 +139,12 @@ namespace
 			scene.Instances = in(instances);
 			scene.Transforms = in(transforms);
 			geometry = {};
+
 			for (auto& page : pages)
 			{
 				geometry.Pages.push_back(in(page));
 			}
+
 			visibility = {};
 			visibility.Commands = in(commands);
 			visibility.Counts = in(counts);
@@ -156,6 +168,7 @@ namespace
 			frame.Clusters = &clusters;
 			frame.View.CameraPosition = { 0, 4, 18 };
 			frame.View.CameraForward = { 0, -2, -18 };
+
 			if (environment)
 			{
 				environmentResources = {};
@@ -195,6 +208,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *fixture.device.Commands)
 			{
 				if (command.Kind == kind)
@@ -202,6 +216,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -225,6 +240,7 @@ namespace
 		ShadowGraphResources shadowResources;
 		std::unique_ptr<Rhi::Texture> shadowAtlas;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
@@ -241,10 +257,12 @@ SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
 	SWIM_CHECK(opaque.ColorFormats[5] == Rhi::Format::RGBA16Float); // Specular reflectance (item 76, SSR).
 	SWIM_CHECK(opaque.ColorFormats[6] == Rhi::Format::RGBA16Float); // Specular IBL radiance (item 76, SSR).
 	SWIM_REQUIRE_EQUAL(opaque.BlendAttachments.size(), std::size_t(7));
+
 	for (const auto& attachment : opaque.BlendAttachments)
 	{
 		SWIM_CHECK(!attachment.Enabled);
 	}
+
 	SWIM_CHECK(opaque.DepthStencilFormat == Rhi::Format::D32Float);
 	SWIM_CHECK(opaque.DepthStencil.DepthTest && opaque.DepthStencil.DepthWrite);
 	SWIM_CHECK(opaque.DepthStencil.DepthCompare == Rhi::CompareOp::GreaterEqual); // Reverse-Z.
@@ -266,6 +284,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "PipelineStatesFollowTheBinContract")
 			transparent.BlendAttachments[i].DestinationColor == Rhi::BlendFactor::OneMinusSourceAlpha &&
 			transparent.BlendAttachments[i].SourceColor == Rhi::BlendFactor::One);
 	}
+
 	const auto& blend = transparent.BlendAttachments[0];
 	SWIM_CHECK(blend.Enabled);
 	SWIM_CHECK(blend.SourceColor == Rhi::BlendFactor::One && blend.DestinationColor == Rhi::BlendFactor::OneMinusSourceAlpha);
@@ -324,6 +343,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 	// Opaque: one count draw per page slot over the visibility commands.
 	const auto draws = world.Commands("DrawIndexedIndirectCount");
 	SWIM_REQUIRE_EQUAL(draws.size(), std::size_t(4));
+
 	for (std::uint32_t slot = 0; slot < 2; ++slot)
 	{
 		const auto bin = world.bins.GetBin(0, slot);
@@ -333,6 +353,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 		SWIM_CHECK_EQUAL(draws[slot].DestinationOffset, std::uint64_t(bin) * 4);
 		SWIM_CHECK_EQUAL(draws[slot].Size, std::uint64_t(ForwardWorld::OpaqueCapacity));
 	}
+
 	// Transparent: the sorted commands, per slot.
 	for (std::uint32_t slot = 0; slot < 2; ++slot)
 	{
@@ -343,6 +364,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "RecordsOpaqueSortAndTransparentPassesPe
 		SWIM_CHECK_EQUAL(draw.DestinationOffset, std::uint64_t(slot) * 4);
 		SWIM_CHECK_EQUAL(draw.Size, std::uint64_t(5));
 	}
+
 	// Sort: one group per slot, pushing (first bin, first command, capacity, sort size).
 	const auto dispatches = world.Commands("Dispatch");
 	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(1));
@@ -378,6 +400,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterThe
 	ForwardWorld world;
 	using T = Rhi::DescriptorType;
 	Rhi::DescriptorSchemaDesc local{ 0, {} };
+
 	for (std::uint32_t binding = 0; binding < ForwardLocalLightsBindings::Count; ++binding)
 	{
 		using B = ForwardLocalLightsBindings;
@@ -387,6 +410,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterThe
 			: T::ReadOnlyStorageBuffer;
 		local.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 	}
+
 	Testing::MockPipelineLayout localLayout, depthLayout, prepassedLayout, deferredLayout;
 	localLayout.program.Interface.DescriptorSchemas = { local };
 	depthLayout.program.Interface = world.opaqueLayout.program.Interface;
@@ -414,6 +438,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterThe
 		world.Import(graph, frame, true);
 		frame.DeferLocalLights = true;
 		auto targets = world.Targets(graph);
+
 		if (storage)
 		{
 			Rhi::TextureDesc color;
@@ -426,6 +451,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterThe
 			depth.Usage = Rhi::TextureUsage::DepthStencilAttachment | Rhi::TextureUsage::Sampled;
 			targets.Depth = graph.CreateTexture(depth);
 		}
+
 		const auto resources = renderer.Record(graph, frame, targets);
 		graph.Export(targets.Color, Rhi::ResourceState::ColorAttachment);
 		// Without a storage colour target the frame stays forward (the prepassed program).
@@ -444,6 +470,7 @@ SWIM_TEST("Render.ForwardPlusRenderer", "DefersLocalLightsToAComputePassAfterThe
 				return command.Source == &localPipeline;
 			});
 		SWIM_CHECK_EQUAL(localBound, storage);
+
 		if (storage)
 		{
 			SWIM_CHECK(graph.GetDesc(resources.Material).PixelFormat == ForwardPlusRenderer::MaterialFormat);

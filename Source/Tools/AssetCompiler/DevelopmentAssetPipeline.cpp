@@ -24,8 +24,10 @@
 
 namespace Swim::AssetCompiler
 {
+
 	namespace
 	{
+
 		// The cooked files the inspection read, by path: the load publishes them without
 		// reading any file a second time.
 		using CookedFileCache = std::unordered_map<std::string, std::vector<std::byte>>;
@@ -76,32 +78,40 @@ namespace Swim::AssetCompiler
 				{
 					return static_cast<char>(std::tolower(character));
 				});
+
 				if (value == "cooked")
 				{
 					return true;
 				}
 			}
+
 			return false;
 		}
 
 		std::vector<std::byte> ReadFile(const std::filesystem::path& path)
 		{
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
+
 			if (!file)
 			{
 				throw std::runtime_error("failed to open file: " + path.string());
 			}
+
 			const std::streamsize size = file.tellg();
+
 			if (size < 0)
 			{
 				throw std::runtime_error("failed to query file size: " + path.string());
 			}
+
 			std::vector<std::byte> bytes(static_cast<std::size_t>(size));
 			file.seekg(0, std::ios::beg);
+
 			if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()), size))
 			{
 				throw std::runtime_error("failed to read file: " + path.string());
 			}
+
 			return bytes;
 		}
 
@@ -131,6 +141,7 @@ namespace Swim::AssetCompiler
 		{
 			std::error_code error;
 			std::filesystem::create_directories(path.parent_path(), error);
+
 			if (error)
 			{
 				return false;
@@ -147,15 +158,19 @@ namespace Swim::AssetCompiler
 
 			{
 				std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+
 				if (!file)
 				{
 					return false;
 				}
+
 				if (!bytes.empty())
 				{
 					file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 				}
+
 				file.flush();
+
 				if (!file)
 				{
 					std::filesystem::remove(temporary, error);
@@ -165,9 +180,11 @@ namespace Swim::AssetCompiler
 
 			const bool destinationExists = std::filesystem::is_regular_file(path, error) && !error;
 			error.clear();
+
 			if (destinationExists)
 			{
 				std::filesystem::rename(path, backup, error);
+
 				if (error)
 				{
 					std::filesystem::remove(temporary, error);
@@ -176,14 +193,17 @@ namespace Swim::AssetCompiler
 			}
 
 			std::filesystem::rename(temporary, path, error);
+
 			if (error)
 			{
 				std::error_code cleanupError;
 				std::filesystem::remove(temporary, cleanupError);
+
 				if (destinationExists)
 				{
 					std::filesystem::rename(backup, path, cleanupError);
 				}
+
 				return false;
 			}
 
@@ -191,6 +211,7 @@ namespace Swim::AssetCompiler
 			{
 				std::filesystem::remove(backup, error);
 			}
+
 			return true;
 		}
 
@@ -200,20 +221,26 @@ namespace Swim::AssetCompiler
 		{
 			std::error_code error;
 			const std::filesystem::path root = std::filesystem::weakly_canonical(assetRoot, error);
+
 			if (error)
 			{
 				throw std::runtime_error("could not canonicalize asset root");
 			}
+
 			const std::filesystem::path absolute = std::filesystem::weakly_canonical(path, error);
+
 			if (error)
 			{
 				throw std::runtime_error("could not canonicalize source dependency: " + path.string());
 			}
+
 			const std::filesystem::path relative = std::filesystem::relative(absolute, root, error);
+
 			if (error || relative.empty())
 			{
 				throw std::runtime_error("could not make source dependency relative to asset root: " + path.string());
 			}
+
 			for (const auto& part : relative)
 			{
 				if (part == "..")
@@ -221,6 +248,7 @@ namespace Swim::AssetCompiler
 					throw std::runtime_error("source dependency escapes the asset root: " + path.string());
 				}
 			}
+
 			return relative.lexically_normal();
 		}
 
@@ -231,6 +259,7 @@ namespace Swim::AssetCompiler
 		{
 			std::set<std::string> paths;
 			paths.insert(CanonicalDependencyPath(assetRoot, source).generic_string());
+
 			for (const std::string& dependency : model.ExternalDependencies)
 			{
 				const std::filesystem::path absolute = source.parent_path() / std::filesystem::path(dependency);
@@ -239,11 +268,13 @@ namespace Swim::AssetCompiler
 
 			std::vector<Swim::Assets::SassetSourceDependency> result;
 			result.reserve(paths.size());
+
 			for (const std::string& logicalPath : paths)
 			{
 				const std::filesystem::path absolute = assetRoot / std::filesystem::path(logicalPath);
 				result.push_back({ Swim::Assets::NormalizeAssetPath(logicalPath), Swim::Assets::ComputeContentHash(ReadFile(absolute)) });
 			}
+
 			return result;
 		}
 
@@ -252,15 +283,19 @@ namespace Swim::AssetCompiler
 		{
 			std::error_code error;
 			const auto size = std::filesystem::file_size(path, error);
+
 			if (error)
 			{
 				return {};
 			}
+
 			const auto time = std::filesystem::last_write_time(path, error);
+
 			if (error)
 			{
 				return {};
 			}
+
 			std::ostringstream line;
 			line << logicalPath << '\t' << size << '\t' << time.time_since_epoch().count();
 			return line.str();
@@ -280,15 +315,19 @@ namespace Swim::AssetCompiler
 			std::span<const Swim::Assets::SassetSourceDependency> stored, const Swim::Assets::ContentHash& hash)
 		{
 			std::string stamp = hash.ToHex() + "\n";
+
 			for (const auto& dependency : stored)
 			{
 				const std::string line = SourceStampLine(dependency.LogicalPath, assetRoot / std::filesystem::path(dependency.LogicalPath));
+
 				if (line.empty())
 				{
 					return {};
 				}
+
 				stamp += line + "\n";
 			}
+
 			return stamp;
 		}
 
@@ -296,27 +335,35 @@ namespace Swim::AssetCompiler
 			const std::filesystem::path& rootSasset, std::span<const Swim::Assets::SassetSourceDependency> stored)
 		{
 			std::ifstream file(SourceStampPath(rootSasset), std::ios::binary);
+
 			if (!file)
 			{
 				return std::nullopt;
 			}
+
 			std::string hashLine;
 			std::getline(file, hashLine);
 			std::string expected;
+
 			for (const auto& dependency : stored)
 			{
 				const std::string line = SourceStampLine(dependency.LogicalPath, assetRoot / std::filesystem::path(dependency.LogicalPath));
+
 				if (line.empty())
 				{
 					return std::nullopt;
 				}
+
 				expected += line + "\n";
 			}
+
 			const std::string rest((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
 			if (rest != expected)
 			{
 				return std::nullopt;
 			}
+
 			try
 			{
 				return Swim::Assets::ContentHash::FromHex(hashLine);
@@ -331,10 +378,12 @@ namespace Swim::AssetCompiler
 			std::span<const Swim::Assets::SassetSourceDependency> stored, const Swim::Assets::ContentHash& hash)
 		{
 			const std::string stamp = BuildSourceStamp(assetRoot, stored, hash);
+
 			if (stamp.empty())
 			{
 				return;
 			}
+
 			std::ofstream file(SourceStampPath(rootSasset), std::ios::binary | std::ios::trunc);
 			file << stamp;
 		}
@@ -347,18 +396,23 @@ namespace Swim::AssetCompiler
 			{
 				return std::nullopt;
 			}
+
 			std::vector<Swim::Assets::SassetSourceDependency> current;
 			current.reserve(stored.size());
+
 			for (const auto& dependency : stored)
 			{
 				const std::filesystem::path path = assetRoot / std::filesystem::path(dependency.LogicalPath);
 				std::error_code error;
+
 				if (!std::filesystem::is_regular_file(path, error) || error)
 				{
 					return std::nullopt;
 				}
+
 				current.push_back({ dependency.LogicalPath, Swim::Assets::ComputeContentHash(ReadFile(path)) });
 			}
+
 			return ComputeSourceGraphHash(current);
 		}
 
@@ -369,6 +423,7 @@ namespace Swim::AssetCompiler
 			CookedFileCache& files)
 		{
 			std::error_code error;
+
 			if (!std::filesystem::is_regular_file(path, error) || error)
 			{
 				return false;
@@ -376,14 +431,17 @@ namespace Swim::AssetCompiler
 
 			auto bytes = ReadFile(path);
 			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
+
 			if (!parsed)
 			{
 				return false;
 			}
+
 			if (!visited.insert(parsed.Metadata.Id).second)
 			{
 				return true;
 			}
+
 			const auto dependencies = parsed.Metadata.Dependencies;
 			files[path.string()] = std::move(bytes);
 
@@ -394,6 +452,7 @@ namespace Swim::AssetCompiler
 					return false;
 				}
 			}
+
 			return true;
 		}
 
@@ -405,6 +464,7 @@ namespace Swim::AssetCompiler
 			CookInspection result;
 			result.RootSasset = RootCookedPath(assetRoot, cookedRoot, source);
 			std::error_code error;
+
 			if (!std::filesystem::is_regular_file(result.RootSasset, error) || error)
 			{
 				return result;
@@ -412,32 +472,41 @@ namespace Swim::AssetCompiler
 
 			const auto bytes = ReadFile(result.RootSasset);
 			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
+
 			if (!parsed || parsed.Metadata.Type != Swim::Assets::SassetAssetType::Model)
 			{
 				return result;
 			}
+
 			if (parsed.Metadata.CompilerProfileHash != GetStaticModelCompilerProfileHash())
 			{
 				return result;
 			}
+
 			// The sources' hash from the stamp while their sizes and times are unchanged;
 			// otherwise hashed from the files (and the stamp refreshed when they still match).
 			auto currentSourceHash = StampedSourceHash(assetRoot, result.RootSasset, parsed.Metadata.SourceDependencies);
+
 			if (!currentSourceHash.has_value() || *currentSourceHash != parsed.Metadata.SourceHash)
 			{
 				currentSourceHash = ComputeCurrentSourceHash(assetRoot, parsed.Metadata.SourceDependencies);
+
 				if (!currentSourceHash.has_value() || *currentSourceHash != parsed.Metadata.SourceHash)
 				{
 					return result;
 				}
+
 				WriteSourceStamp(assetRoot, result.RootSasset, parsed.Metadata.SourceDependencies, *currentSourceHash);
 			}
+
 			std::unordered_set<Swim::Assets::AssetId> validated;
 			CookedFileCache files;
+
 			if (!ValidateCookedGraph(result.RootSasset, cookedRoot, validated, files))
 			{
 				return result;
 			}
+
 			result.Files = std::move(files);
 			result.Current = true;
 			return result;
@@ -449,6 +518,7 @@ namespace Swim::AssetCompiler
 			const StaticModelCompileResult& compiled)
 		{
 			const CompiledSasset* root = nullptr;
+
 			for (const CompiledSasset& asset : compiled.Assets)
 			{
 				if (asset.IsRoot)
@@ -456,11 +526,13 @@ namespace Swim::AssetCompiler
 					root = &asset;
 					continue;
 				}
+
 				if (!WriteFileReplace(ObjectPath(cookedRoot, asset.Id), asset.Bytes))
 				{
 					return false;
 				}
 			}
+
 			return root && WriteFileReplace(rootPath, root->Bytes);
 		}
 
@@ -474,6 +546,7 @@ namespace Swim::AssetCompiler
 			CookedFileCache& files)
 		{
 			std::vector<std::byte> bytes;
+
 			if (const auto cached = files.find(rootPath.string()); cached != files.end())
 			{
 				bytes = std::move(cached->second);
@@ -483,12 +556,15 @@ namespace Swim::AssetCompiler
 			{
 				bytes = ReadFile(rootPath);
 			}
+
 			const auto parsed = Swim::Assets::ParseSasset(bytes, VerifyCookedHashes());
+
 			if (!parsed)
 			{
 				errorMessage = parsed.Error.Message;
 				return false;
 			}
+
 			if (loaded.contains(parsed.Metadata.Id))
 			{
 				return true;
@@ -498,11 +574,13 @@ namespace Swim::AssetCompiler
 			{
 				const std::filesystem::path dependencyPath = ObjectPath(cookedRoot, dependency);
 				std::error_code filesystemError;
+
 				if (!std::filesystem::is_regular_file(dependencyPath, filesystemError) || filesystemError)
 				{
 					errorMessage = "missing cooked dependency object " + AssetIdHex(dependency);
 					return false;
 				}
+
 				if (!LoadSassetGraph(dependencyPath, cookedRoot, assets, loaded, loadedCount, errorMessage, files))
 				{
 					return false;
@@ -510,15 +588,18 @@ namespace Swim::AssetCompiler
 			}
 
 			const auto loadedAsset = Swim::Assets::LoadSasset(assets, bytes, VerifyCookedHashes());
+
 			if (!loadedAsset)
 			{
 				errorMessage = loadedAsset.Error.Message;
 				return false;
 			}
+
 			loaded.insert(loadedAsset.Id);
 			++loadedCount;
 			return true;
 		}
+
 	}
 
 	DevelopmentAssetBootstrapResult RunDevelopmentAssetBootstrap(
@@ -527,6 +608,7 @@ namespace Swim::AssetCompiler
 	{
 		DevelopmentAssetBootstrapResult result;
 		std::error_code error;
+
 		if (!std::filesystem::exists(assetRoot, error) || error)
 		{
 			return result;
@@ -534,6 +616,7 @@ namespace Swim::AssetCompiler
 
 		const std::filesystem::path cookedRoot = assetRoot / "Cooked";
 		std::vector<std::filesystem::path> sources;
+
 		for (std::filesystem::recursive_directory_iterator iterator(assetRoot, std::filesystem::directory_options::skip_permission_denied, error), end;
 			iterator != end; iterator.increment(error))
 		{
@@ -542,22 +625,27 @@ namespace Swim::AssetCompiler
 				error.clear();
 				continue;
 			}
+
 			if (!iterator->is_regular_file(error) || error)
 			{
 				error.clear();
 				continue;
 			}
+
 			const std::filesystem::path relative = std::filesystem::relative(iterator->path(), assetRoot, error);
+
 			if (error || IsInsideCookedDirectory(relative))
 			{
 				error.clear();
 				continue;
 			}
+
 			if (IsSourceModel(iterator->path()))
 			{
 				sources.push_back(iterator->path());
 			}
 		}
+
 		std::sort(sources.begin(), sources.end());
 		result.Stats.SourcesDiscovered = sources.size();
 
@@ -566,9 +654,11 @@ namespace Swim::AssetCompiler
 		StaticModelCompiler compiler;
 		std::vector<std::filesystem::path> rootsToLoad;
 		CookedFileCache files; // What the inspections read, handed to the load.
+
 		for (const std::filesystem::path& source : sources)
 		{
 			CookInspection inspection;
+
 			try
 			{
 				inspection = InspectCooked(assetRoot, cookedRoot, source);
@@ -588,6 +678,7 @@ namespace Swim::AssetCompiler
 			}
 
 			const GltfImportResult imported = importer.Import(source);
+
 			if (!imported)
 			{
 				if (imported.Error.Code == GltfImportErrorCode::UnsupportedFeature)
@@ -595,12 +686,14 @@ namespace Swim::AssetCompiler
 					++result.Stats.SourcesSkippedUnsupported;
 					continue;
 				}
+
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Import, source, imported.Error.Message });
 				continue;
 			}
 
 			IntermediateModel optimizedModel = imported.Model;
 			const MeshOptimizationResult optimized = optimizer.Optimize(optimizedModel);
+
 			if (!optimized)
 			{
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Optimize, source, optimized.Error.Message });
@@ -608,6 +701,7 @@ namespace Swim::AssetCompiler
 			}
 
 			std::vector<Swim::Assets::SassetSourceDependency> sourceDependencies;
+
 			try
 			{
 				sourceDependencies = BuildSourceDependencies(assetRoot, source, optimizedModel);
@@ -620,6 +714,7 @@ namespace Swim::AssetCompiler
 
 			const std::string sourceLogicalPath = CanonicalDependencyPath(assetRoot, source).generic_string();
 			const StaticModelCompileResult compiled = compiler.Compile(optimizedModel, sourceLogicalPath, std::move(sourceDependencies));
+
 			if (!compiled)
 			{
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Compile, source, compiled.Error.Message });
@@ -631,13 +726,16 @@ namespace Swim::AssetCompiler
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Publish, source, "failed to publish one or more cooked .sasset files" });
 				continue;
 			}
+
 			++result.Stats.SourcesCooked;
 			rootsToLoad.push_back(inspection.RootSasset);
+
 			if (!compiled.Assets.empty())
 			{
 				// The fresh cook's sources are current: stamp them so the next start skips hashing.
 				const auto rootBytes = ReadFile(inspection.RootSasset);
 				const auto rootParsed = Swim::Assets::ParseSasset(rootBytes, false);
+
 				if (rootParsed)
 				{
 					WriteSourceStamp(assetRoot, inspection.RootSasset, rootParsed.Metadata.SourceDependencies, rootParsed.Metadata.SourceHash);
@@ -646,6 +744,7 @@ namespace Swim::AssetCompiler
 		}
 
 		std::unordered_set<Swim::Assets::AssetId> loaded;
+
 		for (const std::filesystem::path& root : rootsToLoad)
 		{
 			// The root's id and type first (its bytes are still cached; the load consumes them).
@@ -654,17 +753,20 @@ namespace Swim::AssetCompiler
 				const auto cached = files.find(root.string());
 				const auto rootBytes = cached != files.end() ? std::vector<std::byte>() : ReadFile(root);
 				const auto parsed = Swim::Assets::ParseSasset(cached != files.end() ? std::span<const std::byte>(cached->second) : std::span<const std::byte>(rootBytes), false);
+
 				if (parsed && parsed.Metadata.Type == Swim::Assets::SassetAssetType::Model)
 				{
 					rootModel = parsed.Metadata.Id;
 				}
 			}
 			std::string loadError;
+
 			if (!LoadSassetGraph(root, cookedRoot, assets, loaded, result.Stats.SassetsLoaded, loadError, files))
 			{
 				result.Errors.push_back({ DevelopmentAssetErrorStage::Load, root, std::move(loadError) });
 				continue;
 			}
+
 			if (rootModel)
 			{
 				result.RootModels.push_back(*rootModel);

@@ -26,6 +26,7 @@ namespace
 		std::array<std::unique_ptr<Rhi::Buffer>, iterations> readbacks;
 		std::array<std::unique_ptr<Rhi::Texture>, iterations> textures;
 		std::array<std::array<std::byte, 64>, iterations> expected{};
+
 		for (std::size_t index = 0; index < iterations; ++index)
 		{
 			readbacks[index] = device->CreateBuffer({ 128, Rhi::BufferUsage::TransferDestination,
@@ -36,6 +37,7 @@ namespace
 			desc.Usage = Rhi::TextureUsage::TransferSource | Rhi::TextureUsage::TransferDestination;
 			textures[index] = device->CreateTexture(desc);
 			SWIM_REQUIRE(readbacks[index] && textures[index]);
+
 			for (std::size_t byte = 0; byte < expected[index].size(); ++byte)
 			{
 				expected[index][byte] = static_cast<std::byte>((index * 43 + byte * 7) & 255);
@@ -49,6 +51,7 @@ namespace
 		frames->BeginFrame();
 		frames->CancelFrame();
 		SWIM_CHECK_EQUAL(frames->GetLastSubmittedValue(), 0ull);
+
 		for (std::size_t index = 0; index < iterations; ++index)
 		{
 			const auto slot = frames->BeginFrame().Index;
@@ -60,10 +63,12 @@ namespace
 			SWIM_CHECK_EQUAL(bufferSlice->Offset, 16ull);
 			SWIM_CHECK_EQUAL(textureSlice->Offset, 64ull);
 			SWIM_CHECK(!frames->AllocateUpload(1));
+
 			if (slotBuffers[slot] != nullptr)
 			{
 				SWIM_CHECK(slotBuffers[slot] == bufferSlice->Resource);
 			}
+
 			slotBuffers[slot] = bufferSlice->Resource;
 
 			auto& commands = frames->CreateCommandList();
@@ -85,7 +90,9 @@ namespace
 			commands.End();
 			frames->SubmitCurrent();
 		}
+
 		frames->Drain();
+
 		for (std::size_t index = 0; index < iterations; ++index)
 		{
 			std::array<std::byte, 128> actual{};
@@ -98,11 +105,13 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "UploadArenaBufferTextureAndSlotReuse",
 				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunUploadArenaSmoke); } });
 		}
+
 		return true;
 	}();
 

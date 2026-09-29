@@ -12,10 +12,15 @@ namespace Swim::Testing
 	// process-global loader or substitutes the dispatch used by desktop smokes.
 	class VulkanValidationCapture
 	{
+
 	public:
+
 		VulkanValidationCapture();
+
 		~VulkanValidationCapture();
+
 		VulkanValidationCapture(const VulkanValidationCapture&) = delete;
+
 		VulkanValidationCapture& operator=(const VulkanValidationCapture&) = delete;
 
 		std::vector<VkLayerProperties> Layers;
@@ -37,11 +42,15 @@ namespace Swim::Testing
 
 		Rhi::DiagnosticLog Log;
 		std::optional<RhiVulkan::VulkanValidationCapabilities> Query();
+
 		static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddress(VkInstance instance, const char* name);
 
 	private:
+
 		static VKAPI_ATTR VkResult VKAPI_CALL EnumerateLayers(std::uint32_t* count, VkLayerProperties* properties);
+
 		static VKAPI_ATTR VkResult VKAPI_CALL EnumerateExtensions(const char* layer, std::uint32_t* count, VkExtensionProperties* properties);
+
 	};
 
 } // namespace Swim::Testing

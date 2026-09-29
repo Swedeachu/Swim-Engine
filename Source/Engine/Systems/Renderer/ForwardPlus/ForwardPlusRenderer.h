@@ -21,6 +21,7 @@
 
 namespace Swim::Render
 {
+
 	class GpuVisibility;
 
 	// One compiled Forward+ variant (ClusteredForward.slang as SwimForwardOpaque or
@@ -157,7 +158,9 @@ namespace Swim::Render
 	// No per-object CPU light or draw list exists anywhere in the frame.
 	class ForwardPlusRenderer
 	{
+
 	  public:
+
 		static constexpr Rhi::Format ColorFormat = Rhi::Format::RGBA16Float;
 		// Float so it can be cleared (the RHI clears only float and normalized targets).
 		static constexpr Rhi::Format ObjectIdFormat = Rhi::Format::R32Float;
@@ -176,11 +179,14 @@ namespace Swim::Render
 		// writes color, indirect, reflectance and specular, premultiplied One /
 		// OneMinusSourceAlpha, and never writes depth.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(ForwardPlusBin bin, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
 		// Depth prepass: no color targets, depth test + write (canonical reverse-Z compare).
 		static Rhi::GraphicsPipelineDesc DepthPrepassPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
 		// Opaque shading after the prepass: the Opaque state without depth writes (the
 		// GreaterEqual compare passes exactly the prepass's nearest surface).
 		static Rhi::GraphicsPipelineDesc PrepassedPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
+
 		// The prepassed state with an eighth target (MaterialFormat) for deferred local lights.
 		static Rhi::GraphicsPipelineDesc DeferredPipelineDesc(Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout);
 
@@ -192,14 +198,18 @@ namespace Swim::Render
 
 		// Draw capacities for GpuVisibilityDesc::MaterialBinCapacities.
 		static std::vector<std::uint32_t> VisibilityBinCapacities(std::uint32_t opaque, std::uint32_t transparent);
+
 		// Routes a material set to its bin (ForwardPlus::MaterialBin).
 		static void RouteMaterial(GpuVisibility& visibility, std::uint32_t materialSet, const StandardPbr::Parameters& parameters);
 
 		// Throws std::invalid_argument when a program is missing. Creates the linear
 		// clamp sampler the environment lookups use.
 		ForwardPlusRenderer(Rhi::Device& device, ForwardPlusRendererDesc desc);
+
 		~ForwardPlusRenderer();
+
 		ForwardPlusRenderer(const ForwardPlusRenderer&) = delete;
+
 		ForwardPlusRenderer& operator=(const ForwardPlusRenderer&) = delete;
 
 		// Throws std::invalid_argument for missing inputs, targets that are not
@@ -211,7 +221,10 @@ namespace Swim::Render
 		Rhi::Sampler& GetEnvironmentSampler() const { return *environmentSampler; }
 
 	  private:
+
 		ForwardPlusRendererDesc desc;
 		std::unique_ptr<Rhi::Sampler> environmentSampler;
+
 	};
+
 } // namespace Swim::Render

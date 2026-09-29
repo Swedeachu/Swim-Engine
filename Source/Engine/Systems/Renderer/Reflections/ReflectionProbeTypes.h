@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// One reflection probe as the scene describes it (Engine::ReflectionProbe on an entity,
 	// gathered by SceneRenderBridge). A probe is a point the renderer captures the scene
 	// from into a small cube map (time-sliced, a few faces per frame), prefilters for every
@@ -59,4 +60,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuReflectionProbeRecord) == 32);
+
 } // namespace Swim::Render

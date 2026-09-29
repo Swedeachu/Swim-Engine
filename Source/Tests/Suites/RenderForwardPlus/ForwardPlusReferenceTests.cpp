@@ -20,6 +20,7 @@ namespace Scene = Swim::Testing::ClusterScene;
 
 namespace
 {
+
 	float Dot(const Fp::Float3& a, const Fp::Float3& b)
 	{
 		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -42,14 +43,17 @@ namespace
 		const float scale[3]{ (mirrored ? -1.0f : 1.0f) * (0.5f + 2.0f * unit(random)), 0.5f + 2.0f * unit(random),
 			0.5f + 2.0f * unit(random) };
 		GpuTransformRecord transform;
+
 		for (int row = 0; row < 3; ++row)
 		{
 			for (int column = 0; column < 3; ++column)
 			{
 				transform.Current[row * 4 + column] = r[row * 3 + column] * scale[column];
 			}
+
 			transform.Current[row * 4 + 3] = 10.0f * unit(random) - 5.0f;
 		}
+
 		return transform;
 	}
 
@@ -73,11 +77,13 @@ namespace
 		view.ViewProjection = camera.Projection;
 		// Camera position/forward from the view rows (row-major world->view).
 		const auto& v = camera.View;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			view.CameraPosition[c] = -(v[0 * 4 + c] * v[3] + v[1 * 4 + c] * v[7] + v[2 * 4 + c] * v[11]);
 			view.CameraForward[c] = -v[2 * 4 + c];
 		}
+
 		view.Ambient = { 0.03f, 0.04f, 0.05f };
 		view.EnvironmentIntensity = 0.7f;
 		view.EnvironmentRotation = 0.4f;
@@ -90,6 +96,7 @@ namespace
 		sh.Coefficients[0] = { 0.6f, 0.7f, 0.8f };
 		sh.Coefficients[1] = { 0.1f, 0.0f, -0.1f };
 		Environment::CubeImage cube(4, 3);
+
 		for (std::uint32_t mip = 0; mip < 3; ++mip)
 		{
 			for (std::uint32_t face = 0; face < 6; ++face)
@@ -100,8 +107,10 @@ namespace
 				}
 			}
 		}
+
 		return { sh, cube, Environment::BuildBrdfLut(8, 16) };
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ForwardPlus.Reference", "MaterialsRouteToTheOpaqueOrTransparentBin")
@@ -128,6 +137,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "NormalsStayPerpendicularAndOutwardUnd
 {
 	std::mt19937 random(66);
 	std::uniform_real_distribution<float> unit(-1.0f, 1.0f);
+
 	for (int trial = 0; trial < 400; ++trial)
 	{
 		const bool mirrored = trial % 2 == 1;
@@ -138,17 +148,20 @@ SWIM_TEST("Render.ForwardPlus.Reference", "NormalsStayPerpendicularAndOutwardUnd
 		const auto t0 = Pbr::Normalize({ n[1] - n[2], n[2] - n[0], n[0] - n[1] });
 		const Fp::Float3 t1{ n[1] * t0[2] - n[2] * t0[1], n[2] * t0[0] - n[0] * t0[2], n[0] * t0[1] - n[1] * t0[0] };
 		const auto normal = Fp::TransformNormal(transform.Current, n);
+
 		for (const auto& t : { t0, t1 })
 		{
 			const auto direction = Fp::TransformDirection(transform.Current, t);
 			SWIM_CHECK(std::abs(Dot(normal, direction)) < 1.0e-4f * Length(normal) * Length(direction));
 		}
+
 		// Outward stays outward: the transformed offset p + n - p has a positive component along the normal.
 		const Fp::Float3 p{ unit(random), unit(random), unit(random) };
 		const auto a = Fp::TransformPoint(transform.Current, p);
 		const auto b = Fp::TransformPoint(transform.Current, { p[0] + n[0], p[1] + n[1], p[2] + n[2] });
 		SWIM_CHECK(Dot(normal, { b[0] - a[0], b[1] - a[1], b[2] - a[2] }) > 0.0f);
 	}
+
 	// The identity is exact.
 	GpuTransformRecord identity;
 	const auto same = Fp::TransformNormal(identity.Current, { 0.0f, 0.6f, 0.8f });
@@ -178,6 +191,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "TransparentDrawsSortBackToFrontIndepe
 	constexpr std::uint32_t objects = 64;
 	std::vector<GpuInstanceRecord> instances(objects);
 	std::vector<GpuTransformRecord> transforms(objects);
+
 	for (std::uint32_t i = 0; i < objects; ++i)
 	{
 		// Pairs of objects share a position (equal depths) to exercise the tie-breaks.
@@ -187,24 +201,30 @@ SWIM_TEST("Render.ForwardPlus.Reference", "TransparentDrawsSortBackToFrontIndepe
 		t.Current[7] = 1.0f;
 		t.Current[11] = -float(i / 2) * 0.75f;
 	}
+
 	// Every object draws two submeshes.
 	std::vector<GpuDrawRecord> records;
+
 	for (std::uint32_t i = 0; i < objects; ++i)
 	{
 		records.push_back({ i, 2 * i + 1 });
 		records.push_back({ i, 2 * i });
 	}
+
 	const auto sequence = [&](const std::vector<GpuDrawRecord>& bin, std::uint32_t first)
 	{
 		std::vector<std::pair<std::uint32_t, std::uint32_t>> result;
+
 		for (const auto slot : Fp::SortTransparentDraws(bin, first, instances, transforms, view))
 		{
 			result.emplace_back(bin[slot - first].InstanceRow, bin[slot - first].SubmeshRow);
 		}
+
 		return result;
 	};
 	const auto reference = sequence(records, 100);
 	SWIM_REQUIRE_EQUAL(reference.size(), records.size());
+
 	for (std::size_t i = 1; i < reference.size(); ++i)
 	{
 		const auto& a = instances[reference[i - 1].first];
@@ -212,11 +232,13 @@ SWIM_TEST("Render.ForwardPlus.Reference", "TransparentDrawsSortBackToFrontIndepe
 		const float da = Fp::SortDepth(a, transforms[a.TransformIndex], view);
 		const float db = Fp::SortDepth(b, transforms[b.TransformIndex], view);
 		SWIM_CHECK(da >= db); // Farther first.
+
 		if (da == db)
 		{
 			SWIM_CHECK(reference[i - 1] < reference[i]); // Instance row, then submesh row.
 		}
 	}
+
 	// The GPU compaction order is arbitrary; the draw order is not.
 	for (int shuffle = 0; shuffle < 20; ++shuffle)
 	{
@@ -224,6 +246,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "TransparentDrawsSortBackToFrontIndepe
 		std::shuffle(shuffled.begin(), shuffled.end(), random);
 		SWIM_CHECK(sequence(shuffled, 7) == reference);
 	}
+
 	// Depth is the bounds center along the camera's forward axis.
 	GpuInstanceRecord probe;
 	probe.LocalCenter[2] = -1.0f;
@@ -263,6 +286,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 	std::mt19937 random(266);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 	std::uint32_t litByLocal = 0;
+
 	for (int i = 0; i < 500; ++i)
 	{
 		const float px = unit(random) * 640.0f;
@@ -273,10 +297,12 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 		const auto surface = RandomSurface(random);
 		const auto a = Fp::Shade(clustered, lit, surface, position, px, py);
 		const auto b = Fp::Shade(brute, lit, surface, position, px, py);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(a[c] - b[c]) <= 1.0e-5f + 1.0e-4f * std::abs(b[c])); // Clustered == brute force.
 		}
+
 		SWIM_CHECK(a[3] == surface.Alpha);
 
 		// Decomposition: lights + ambient + IBL + emission.
@@ -286,15 +312,18 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, toCamera, position);
 		const auto ibl = Pbr::EvaluateEnvironment(surface, toCamera, probe.Lookup(surface, toCamera, { 0.7f, 0.4f }));
 		const auto withoutIbl = Fp::Shade(brute, unlit, surface, position, px, py);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			const float expected = direct[c] + lit.Ambient[c] * surface.BaseColor[c] * surface.Occlusion + surface.Emissive[c];
 			SWIM_CHECK(std::abs(withoutIbl[c] - expected) <= 1.0e-5f + 1.0e-5f * expected);
 			SWIM_CHECK(std::abs(b[c] - (expected + ibl[c])) <= 1.0e-5f + 1.0e-5f * (expected + ibl[c]));
 		}
+
 		// Item 76: the indirect part is exactly ambient + IBL, and the rest is direct + emission.
 		const auto indirect = Fp::IndirectRadiance(brute, lit, surface, position);
 		const auto indirectUnlit = Fp::IndirectRadiance(brute, unlit, surface, position);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			const float ambient = lit.Ambient[c] * surface.BaseColor[c] * surface.Occlusion;
@@ -303,6 +332,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 			const float rest = direct[c] + surface.Emissive[c];
 			SWIM_CHECK(std::abs(b[c] - indirect[c] - rest) <= 1.0e-5f + 1.0e-4f * rest);
 		}
+
 		// Item 76 (SSR): the specular IBL is Prefiltered x reflectance and part of the
 		// indirect radiance. Without an environment a bound LUT still gives the reflectance
 		// (ForwardViewFlagBrdfLut); with neither, both are 0.
@@ -315,6 +345,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 		noProbe.BrdfLut = &probe.GetBrdfLut();
 		const auto specularLutOnly = Fp::SpecularEnvironment(noProbe, lutOnly, surface, position);
 		const auto specularNone = Fp::SpecularEnvironment(brute, unlit, surface, position);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(specular.Reflectance[c] - lutWeight[c]) <= 1.0e-6f);
@@ -324,10 +355,12 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 			SWIM_CHECK(specularLutOnly.Radiance[c] == 0.0f);
 			SWIM_CHECK(specularNone.Reflectance[c] == 0.0f && specularNone.Radiance[c] == 0.0f);
 		}
+
 		const auto directionalOnly = Lights::ShadeAllLights(scene.Rows, { 2, 0, scene.Header.FirstLocalRow, 0 },
 			{ surface.BaseColor, surface.Metallic, surface.PerceptualRoughness }, surface.Normal, toCamera, position);
 		litByLocal += direct[0] > directionalOnly[0] + 1.0e-4f ? 1u : 0u;
 	}
+
 	SWIM_CHECK(litByLocal > 25u); // Local lights matter in this scene.
 
 	// Lists are never truncated: a tiny heatmap scale (MaxLightsPerCluster) changes
@@ -339,6 +372,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 	SWIM_REQUIRE(dense.Stats.OverflowClusters > 0u);
 	SWIM_CHECK_EQUAL(dense.Stats.DroppedIndices, 0u);
 	Fp::LightingInputs complete{ scene.Rows, scene.Header, &tightGrid, dense.Records, dense.Indices, nullptr };
+
 	for (int i = 0; i < 200; ++i)
 	{
 		const float px = unit(random) * 640.0f;
@@ -347,6 +381,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadingSumsClusteredLightsAmbientEnvi
 		const auto surface = RandomSurface(random);
 		const auto some = Fp::Shade(complete, unlit, surface, position, px, py);
 		const auto all = Fp::Shade(brute, unlit, surface, position, px, py);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(some[c] - all[c]) <= 1.0e-5f + 1.0e-4f * std::abs(all[c]));
@@ -368,6 +403,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "DebugHeatmapAndPremultipliedBlending"
 	const auto grid = MakeClusterGridRecord(gridDesc, Scene::Camera(16.0f / 9.0f));
 	const auto assignment = Clustering::AssignLights(grid, scene.Rows, scene.Header);
 	std::uint32_t black = 0, magenta = 0, ramp = 0;
+
 	for (std::uint32_t y = 0; y < 180; y += 7)
 	{
 		for (std::uint32_t x = 0; x < 320; x += 7)
@@ -378,6 +414,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "DebugHeatmapAndPremultipliedBlending"
 				const auto& record = assignment.Records[ClusterIndexFor(grid, float(x) + 0.5f, float(y) + 0.5f, depth)];
 				const auto heat = Clustering::HeatmapColor(record.Count, record.RawCount, gridDesc.MaxLightsPerCluster);
 				SWIM_CHECK(color[3] == 1.0f);
+
 				if (record.RawCount == 0)
 				{
 					SWIM_CHECK((color == Fp::Float4{ 0, 0, 0, 1 }));
@@ -393,6 +430,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "DebugHeatmapAndPremultipliedBlending"
 			}
 		}
 	}
+
 	SWIM_CHECK(black > 0u && magenta > 0u && ramp > 0u);
 
 	// Over: alpha 0 keeps the destination, alpha 1 replaces it, and order matters.
@@ -526,6 +564,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowF
 	Sh::ShadowAtlasImage atlas;
 	atlas.Size = 16;
 	atlas.Depth.assign(256, 0.0f);
+
 	for (std::uint32_t y = 0; y < 16; ++y)
 	{
 		for (std::uint32_t x = 0; x < 8; ++x)
@@ -533,6 +572,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowF
 			atlas.Depth[y * 16 + x] = 0.9f; // The ground is at depth 0.5.
 		}
 	}
+
 	const std::vector<GpuShadowRecord> records{ record };
 	const std::vector<GpuShadowView> views{ shadowView };
 	const Sh::ShadowSampleInputs shadowInputs{ &atlas, records, views };
@@ -554,6 +594,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowF
 	std::mt19937 random(72);
 	std::uniform_real_distribution<float> unit(-9.0f, 9.0f);
 	std::uint32_t inShadow = 0, inLight = 0;
+
 	for (int i = 0; i < 400; ++i)
 	{
 		auto surface = RandomSurface(random);
@@ -564,25 +605,30 @@ SWIM_TEST("Render.ForwardPlus.Reference", "ShadowedLightsAreScaledByTheirShadowF
 		const float px = projected->PixelX;
 		const bool dark = px >= 2.0f && px < 6.0f;
 		const bool bright = px >= 10.0f && px < 14.0f;
+
 		if (!dark && !bright)
 		{
 			continue;
 		}
+
 		const auto result = Fp::Shade(inputs, withShadows, surface, position, 0, 0);
 		const auto expected = dark ? Fp::Shade(openInputs, withoutShadows, surface, position, 0, 0)
 								   : Fp::Shade(inputs, withoutShadows, surface, position, 0, 0);
 		const auto unshadowedFlag = Fp::Shade(ignoredInputs, withShadows, surface, position, 0, 0);
 		const auto unshadowedView = Fp::Shade(inputs, withoutShadows, surface, position, 0, 0);
 		const auto unshadowedAtlas = Fp::Shade(noAtlas, withShadows, surface, position, 0, 0);
+
 		for (int c = 0; c < 4; ++c)
 		{
 			SWIM_CHECK(std::abs(result[c] - expected[c]) <= 1.0e-6f + 1.0e-5f * std::abs(expected[c]));
 			SWIM_CHECK(unshadowedFlag[c] == unshadowedView[c] && unshadowedAtlas[c] == unshadowedView[c]);
 		}
+
 		SWIM_CHECK_EQUAL(Fp::LightShadow(inputs, withShadows, shadowed, position, surface.Normal, { 0, 1, 0 }), dark ? 0.0f : 1.0f);
 		SWIM_CHECK_EQUAL(Fp::LightShadow(inputs, withShadows, open, position, surface.Normal, { 0, 1, 0 }), 1.0f);
 		(dark ? inShadow : inLight) += 1;
 	}
+
 	SWIM_CHECK(inShadow > 50u && inLight > 50u);
 
 	// The packed view carries the flag.

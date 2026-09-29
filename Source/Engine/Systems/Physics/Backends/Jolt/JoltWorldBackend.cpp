@@ -68,15 +68,18 @@ namespace Engine
 			[&](BodyHandle handle, BodyRecord& record)
 			{
 				(void)handle;
+
 				if (!record.NativeBody.IsInvalid())
 				{
 					if (bodyInterface.IsAdded(record.NativeBody))
 					{
 						bodyInterface.RemoveBody(record.NativeBody);
 					}
+
 					bodyInterface.DestroyBody(record.NativeBody);
 					record.NativeBody = {};
 				}
+
 			});
 		bodies.Reset();
 		shapes.Reset();
@@ -152,12 +155,14 @@ namespace Engine
 	ShapeHandle JoltWorldBackend::CreateShape(const ShapeDesc& desc, PhysicsMaterialHandle material)
 	{
 		const PhysicsMaterialDesc* materialDesc = materials.Get(material);
+
 		if (!materialDesc || !IsValidPose(desc.LocalPose))
 		{
 			return {};
 		}
 
 		JPH::RefConst<JPH::Shape> nativeShape = CreateNativeShape(desc);
+
 		if (!nativeShape)
 		{
 			return {};
@@ -190,6 +195,7 @@ namespace Engine
 		}
 
 		const ShapeRecord* shapeRecord = shapes.Get(desc.Shape);
+
 		if (!shapeRecord || !shapeRecord->NativeShape)
 		{
 			return {};
@@ -212,6 +218,7 @@ namespace Engine
 		}
 
 		const JPH::ObjectLayer objectLayer = broadPhaseLayerInterface->Register(desc.Motion, desc.Collision);
+
 		if (objectLayer == JPH::cObjectLayerInvalid)
 		{
 			return {};
@@ -240,10 +247,12 @@ namespace Engine
 		settings.mLinearDamping = desc.LinearDamping;
 		settings.mAngularDamping = desc.AngularDamping;
 		settings.mAllowSleeping = true;
+
 		if (worldDesc.EnableContinuousCollisionDetection && desc.Motion == MotionType::Dynamic)
 		{
 			settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
 		}
+
 		if (desc.Motion == MotionType::Dynamic)
 		{
 			settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
@@ -252,6 +261,7 @@ namespace Engine
 
 		JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
 		JPH::Body* nativeBody = bodyInterface.CreateBody(settings);
+
 		if (!nativeBody)
 		{
 			BodyRecord removed{};
@@ -276,10 +286,12 @@ namespace Engine
 		{
 			bodyInterface.SetLinearVelocity(nativeBody->GetID(), ToJolt(desc.InitialLinearVelocity));
 		}
+
 		if (desc.HasInitialAngularVelocity)
 		{
 			bodyInterface.SetAngularVelocity(nativeBody->GetID(), ToJolt(desc.InitialAngularVelocity));
 		}
+
 		if (desc.Motion != MotionType::Static && !desc.StartAwake && bodyInterface.IsActive(nativeBody->GetID()))
 		{
 			bodyInterface.DeactivateBody(nativeBody->GetID());
@@ -291,6 +303,7 @@ namespace Engine
 	void JoltWorldBackend::DestroyBody(BodyHandle body)
 	{
 		BodyRecord record{};
+
 		if (!bodies.Remove(body, record) || record.NativeBody.IsInvalid())
 		{
 			return;
@@ -318,6 +331,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -342,6 +356,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion != MotionType::Kinematic || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -355,6 +370,7 @@ namespace Engine
 	bool JoltWorldBackend::GetBodyPose(BodyHandle body, PhysicsPose& pose) const
 	{
 		const BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -375,6 +391,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion != MotionType::Dynamic || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -405,6 +422,7 @@ namespace Engine
 		{
 			bodyInterface.DeactivateBody(record->NativeBody);
 		}
+
 		return true;
 	}
 
@@ -416,6 +434,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion == MotionType::Static || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -424,10 +443,12 @@ namespace Engine
 		JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
 		const bool wasActive = bodyInterface.IsActive(record->NativeBody);
 		bodyInterface.SetLinearVelocity(record->NativeBody, ToJolt(velocity));
+
 		if (!autowake && !wasActive && bodyInterface.IsActive(record->NativeBody))
 		{
 			bodyInterface.DeactivateBody(record->NativeBody);
 		}
+
 		return true;
 	}
 
@@ -439,6 +460,7 @@ namespace Engine
 		}
 
 		BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion == MotionType::Static || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -447,16 +469,19 @@ namespace Engine
 		JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
 		const bool wasActive = bodyInterface.IsActive(record->NativeBody);
 		bodyInterface.SetAngularVelocity(record->NativeBody, ToJolt(velocity));
+
 		if (!autowake && !wasActive && bodyInterface.IsActive(record->NativeBody))
 		{
 			bodyInterface.DeactivateBody(record->NativeBody);
 		}
+
 		return true;
 	}
 
 	bool JoltWorldBackend::GetLinearVelocity(BodyHandle body, glm::vec3& velocity) const
 	{
 		const BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion == MotionType::Static || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -469,6 +494,7 @@ namespace Engine
 	bool JoltWorldBackend::GetAngularVelocity(BodyHandle body, glm::vec3& velocity) const
 	{
 		const BodyRecord* record = bodies.Get(body);
+
 		if (!record || record->Motion == MotionType::Static || record->NativeBody.IsInvalid())
 		{
 			return false;
@@ -542,6 +568,7 @@ namespace Engine
 		JPH::RayCastResult result;
 		QueryObjectLayerFilter objectLayerFilter(*broadPhaseLayerInterface, filter);
 		QueryBodyFilter bodyFilter(*this, filter);
+
 		if (!physicsSystem.GetNarrowPhaseQuery().CastRay(ray, result, {}, objectLayerFilter, bodyFilter))
 		{
 			return false;
@@ -549,6 +576,7 @@ namespace Engine
 
 		hit.Body = ResolveBody(result.mBodyID);
 		hit.Shape = ResolveShape(hit.Body);
+
 		if (!hit.Body || !hit.Shape)
 		{
 			return false;
@@ -560,10 +588,12 @@ namespace Engine
 		hit.UserData = ResolveUserData(hit.Body);
 
 		JPH::BodyLockRead bodyLock(physicsSystem.GetBodyLockInterface(), result.mBodyID);
+
 		if (bodyLock.Succeeded())
 		{
 			hit.Normal = ToGlm(bodyLock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, hitPosition));
 		}
+
 		return true;
 	}
 
@@ -575,6 +605,7 @@ namespace Engine
 		}
 
 		JPH::RefConst<JPH::Shape> nativeShape = CreateNativeShape(shape);
+
 		if (!nativeShape)
 		{
 			return false;
@@ -591,6 +622,7 @@ namespace Engine
 		QueryObjectLayerFilter objectLayerFilter(*broadPhaseLayerInterface, filter);
 		QueryBodyFilter bodyFilter(*this, filter);
 		physicsSystem.GetNarrowPhaseQuery().CastShape(shapeCast, settings, JPH::RVec3::sZero(), collector, {}, objectLayerFilter, bodyFilter);
+
 		if (!collector.HadHit())
 		{
 			return false;
@@ -599,6 +631,7 @@ namespace Engine
 		const JPH::ShapeCastResult& result = collector.mHit;
 		hit.Body = ResolveBody(result.mBodyID2);
 		hit.Shape = ResolveShape(hit.Body);
+
 		if (!hit.Body || !hit.Shape)
 		{
 			return false;
@@ -619,6 +652,7 @@ namespace Engine
 		}
 
 		JPH::RefConst<JPH::Shape> nativeShape = CreateNativeShape(shape);
+
 		if (!nativeShape)
 		{
 			return 0;
@@ -645,6 +679,7 @@ namespace Engine
 		// contract exposes so both backends report the same hit set.
 		std::unordered_set<std::uint64_t> emittedPairs;
 		std::size_t outputCount = 0;
+
 		for (const JPH::CollideShapeResult& result : collector.mHits)
 		{
 			if (outputCount >= hits.size())
@@ -653,6 +688,7 @@ namespace Engine
 			}
 
 			const BodyHandle body = ResolveBody(result.mBodyID2);
+
 			if (!body)
 			{
 				continue;
@@ -662,6 +698,7 @@ namespace Engine
 			const std::uint64_t pairKey = (static_cast<std::uint64_t>(PackHandle(body)) << 1u)
 				^ (static_cast<std::uint64_t>(shape.Index) << 33u)
 				^ static_cast<std::uint64_t>(shape.Generation);
+
 			if (!emittedPairs.insert(pairKey).second)
 			{
 				continue;
@@ -672,6 +709,7 @@ namespace Engine
 			output.Shape = shape;
 			output.UserData = ResolveUserData(body);
 		}
+
 		return outputCount;
 	}
 
@@ -767,10 +805,12 @@ namespace Engine
 			case ShapeType::Box:
 			{
 				const glm::vec3 extents = desc.Box.HalfExtents;
+
 				if (!IsFiniteVec3(extents) || !(extents.x > 0.0f) || !(extents.y > 0.0f) || !(extents.z > 0.0f))
 				{
 					return {};
 				}
+
 				shape = new JPH::BoxShape(ToJolt(extents));
 				break;
 			}
@@ -780,6 +820,7 @@ namespace Engine
 				{
 					return {};
 				}
+
 				shape = new JPH::SphereShape(desc.Sphere.Radius);
 				break;
 			}
@@ -799,6 +840,7 @@ namespace Engine
 				{
 					shape = new JPH::CapsuleShape(desc.Capsule.HalfHeight, desc.Capsule.Radius);
 				}
+
 				break;
 			}
 			case ShapeType::ConvexMesh:
@@ -821,6 +863,7 @@ namespace Engine
 			|| std::abs(normalizedRotation.y) > 0.000001f
 			|| std::abs(normalizedRotation.z) > 0.000001f
 			|| std::abs(normalizedRotation.w - 1.0f) > 0.000001f;
+
 		if (hasLocalTranslation || hasLocalRotation)
 		{
 			shape = new JPH::RotatedTranslatedShape(
@@ -879,6 +922,7 @@ namespace Engine
 			[&](BodyHandle handle, BodyRecord& record)
 			{
 				(void)handle;
+
 				if (record.Motion != MotionType::Kinematic || !record.HasPendingKinematicTarget || record.NativeBody.IsInvalid())
 				{
 					return;
@@ -899,6 +943,7 @@ namespace Engine
 		{
 			ReleaseBody(bodyId);
 		}
+
 		pendingDestroy.clear();
 	}
 
@@ -910,10 +955,12 @@ namespace Engine
 		}
 
 		JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
+
 		if (bodyInterface.IsAdded(bodyId))
 		{
 			bodyInterface.RemoveBody(bodyId);
 		}
+
 		bodyInterface.DestroyBody(bodyId);
 	}
 
@@ -936,6 +983,7 @@ namespace Engine
 
 		const BodyHandle handleA = ResolveBody(bodyA);
 		const BodyHandle handleB = ResolveBody(bodyB);
+
 		if (!handleA || !handleB)
 		{
 			return;
@@ -945,6 +993,7 @@ namespace Engine
 		const ShapeHandle shapeB = ResolveShape(handleB);
 		const ShapeRecord* shapeRecordA = shapes.Get(shapeA);
 		const ShapeRecord* shapeRecordB = shapes.Get(shapeB);
+
 		if (!shapeRecordA || !shapeRecordB)
 		{
 			return;
@@ -981,6 +1030,7 @@ namespace Engine
 		// helper Jolt provides for exactly this purpose. Triggers never resolve
 		// contacts, so skip the work for them.
 		float impulse = 0.0f;
+
 		if (!active.IsTrigger)
 		{
 			JPH::CollisionEstimationResult estimate;
@@ -1014,6 +1064,7 @@ namespace Engine
 				event.Entered = true;
 				triggerEvents.push_back(event);
 			}
+
 			return;
 		}
 
@@ -1034,6 +1085,7 @@ namespace Engine
 		const ContactKey key = MakeContactKey(pair);
 		std::scoped_lock lock(eventMutex);
 		const auto found = activeContacts.find(key);
+
 		if (found == activeContacts.end())
 		{
 			return;
@@ -1054,6 +1106,7 @@ namespace Engine
 				event.Entered = false;
 				triggerEvents.push_back(event);
 			}
+
 			return;
 		}
 

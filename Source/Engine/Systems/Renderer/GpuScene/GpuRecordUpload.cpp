@@ -5,17 +5,21 @@
 
 namespace Swim::Render
 {
+
 	std::vector<GpuRecordRun> BuildRecordRuns(std::span<const std::uint32_t> sortedRows)
 	{
 		std::vector<GpuRecordRun> runs;
+
 		for (auto row : sortedRows)
 		{
 			if (runs.empty() || runs.back().FirstRow + runs.back().RowCount != row)
 			{
 				runs.push_back({ row, 0 });
 			}
+
 			++runs.back().RowCount;
 		}
+
 		return runs;
 	}
 
@@ -40,6 +44,7 @@ namespace Swim::Render
 				const auto source = c.GetRange(staging);
 				const auto destination = c.GetRange(target);
 				std::uint64_t packed = 0;
+
 				for (const auto& run : runs)
 				{
 					const std::uint64_t bytes = std::uint64_t(run.RowCount) * recordSize;
@@ -47,6 +52,8 @@ namespace Swim::Render
 						{ source.Offset + packed, destination.Offset + std::uint64_t(run.FirstRow) * recordSize, bytes });
 					packed += bytes;
 				}
+
 			});
 	}
+
 } // namespace Swim::Render

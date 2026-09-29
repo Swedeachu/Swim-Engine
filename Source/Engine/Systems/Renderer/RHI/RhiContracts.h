@@ -24,7 +24,9 @@
 
 namespace Swim::Platform
 {
+
 	class Window;
+
 }
 
 namespace Swim::Rhi
@@ -372,25 +374,33 @@ namespace Swim::Rhi
 	// Callers retain recorded resources until GPU completion, using frame retirement when needed.
 	class RhiObject
 	{
+
 	  public:
+
 		RhiObject() = default;
+
 		virtual ~RhiObject() = default;
 
 		RhiObject(const RhiObject&) = delete;
+
 		RhiObject& operator=(const RhiObject&) = delete;
 
 		virtual std::uintptr_t GetNativeHandle() const = 0;
+
 	};
 
 	class Buffer : public RhiObject
 	{
+
 	  public:
+
 		virtual const BufferDesc& GetDesc() const = 0;
 
 		// CPU access does not wait for GPU work. Callers own completion and must
 		// finish writes before submission; reads require HostRead + a timeline wait.
 		// Write accepts CpuToGpu, Read accepts GpuToCpu. Both maintain CPU caches.
 		virtual void Write(std::uint64_t offset, std::span<const std::byte> data) = 0;
+
 		virtual void Read(std::uint64_t offset, std::span<std::byte> data) = 0;
 
 		// Empty when persistent writes are unsupported or were not requested.
@@ -413,39 +423,57 @@ namespace Swim::Rhi
 		{
 			throw std::logic_error("Persistent buffer reads are not supported");
 		}
+
 	};
 
 	class Texture : public RhiObject
 	{
+
 	  public:
+
 		virtual const TextureDesc& GetDesc() const = 0;
+
 	};
 
 	class TextureView : public RhiObject
 	{
+
 	  public:
+
 		virtual Texture& GetTexture() const = 0;
+
 		virtual const TextureViewDesc& GetDesc() const = 0;
+
 	};
 
 	class Sampler : public RhiObject
 	{
+
 	  public:
+
 		virtual const SamplerDesc& GetDesc() const = 0;
+
 	};
 
 	class ShaderProgram : public RhiObject
 	{
+
 	  public:
+
 		virtual const ShaderProgramInterface& GetInterface() const = 0;
+
 	};
 
 	// The originating shader program must outlive the layout returned by the device.
 	class PipelineLayout : public RhiObject
 	{
+
 	  public:
+
 		virtual ShaderProgram& GetProgram() const = 0;
+
 		virtual const ShaderProgramInterface& GetInterface() const = 0;
+
 	};
 
 	class GraphicsPipeline : public RhiObject
@@ -458,9 +486,13 @@ namespace Swim::Rhi
 
 	class DescriptorTable : public RhiObject
 	{
+
 	  public:
+
 		virtual PipelineLayout& GetLayout() const = 0;
+
 		virtual std::uint32_t GetSpace() const = 0;
+
 		// Initialize every descriptor before binding, except PartiallyBound elements, which
 		// only need to be written before shaders access them. First binding freezes this
 		// table's other bindings; later resource changes use a replacement table and
@@ -480,6 +512,7 @@ namespace Swim::Rhi
 		// single-sampled 2D view of one mip/layer. Images must be in General layout
 		// at dispatch; writing a descriptor does not transition or initialize its image.
 		virtual void Write(std::span<const DescriptorWrite> writes) = 0;
+
 	};
 
 	class Semaphore : public RhiObject
@@ -488,35 +521,52 @@ namespace Swim::Rhi
 
 	class Fence : public RhiObject
 	{
+
 	  public:
+
 		virtual bool IsSignaled() const = 0;
+
 		virtual bool Wait(std::uint64_t timeoutNanoseconds = InfiniteTimeout) = 0;
+
 		virtual void Reset() = 0;
+
 	};
 
 	class Timeline : public RhiObject
 	{
+
 	  public:
+
 		virtual std::uint64_t GetCompletedValue() const = 0;
+
 		virtual bool Wait(std::uint64_t value, std::uint64_t timeoutNanoseconds = InfiniteTimeout) = 0;
+
 	};
 
 	class QueryPool : public RhiObject
 	{
+
 	  public:
+
 		virtual const QueryPoolDesc& GetDesc() const = 0;
+
 		virtual TimestampInfo GetTimestampInfo() const = 0;
+
 		// Nonblocking. Output is cleared on errors; unavailable entries have zero ticks.
 		// Before reading, prove the most recent GPU reset executed (normally wait
 		// for the writing submission's timeline/fence). Availability alone can be
 		// stale while a reset is queued. Never race reads with another reset/reuse.
 		virtual QueryReadStatus ReadTimestamps(std::uint32_t first, std::span<TimestampResult> results) = 0;
+
 	};
 
 	class CommandList : public RhiObject
 	{
+
 	  public:
+
 		virtual void Begin() = 0;
+
 		virtual void End() = 0;
 
 		// Optional GPU-tool annotations. RHI regions must balance within one command
@@ -529,26 +579,37 @@ namespace Swim::Rhi
 		virtual void InsertDebugLabel(std::string_view, const std::array<float, 4>& = { 1, 1, 1, 1 }) {}
 
 		virtual void Transition(Buffer& buffer, ResourceState before, ResourceState after) = 0;
+
 		// Texture ShaderRead selects sampled access; ShaderRead | ShaderWrite selects
 		// storage-image access in General layout, including storage-only reads.
 		// Dependent storage passes require an explicit barrier even without a state change.
 		virtual void Transition(Texture& texture, ResourceState before, ResourceState after, const TextureSubresourceRange& range = {}) = 0;
+
 		virtual void CopyBuffer(Buffer& source, Buffer& destination, const BufferCopyRegion& region) = 0;
+
 		virtual void CopyTexture(Texture& source, Texture& destination, const TextureCopyRegion& region) = 0;
+
 		virtual void CopyBufferToTexture(Buffer& source, Texture& destination, const BufferTextureCopyRegion& region) = 0;
+
 		virtual void CopyTextureToBuffer(Texture& source, Buffer& destination, const BufferTextureCopyRegion& region) = 0;
+
 		// Transitions/copies are outside rendering. Resources remain alive until
 		// submission completion. Transitions do not transfer queue-family ownership.
 		// Color-image transfers and buffer/image barriers support graphics and compute
 		// families. Compute barriers exclude attachment/present/vertex/index states.
 		// Transfer-only families support CopyBuffer. Keep each resource on one family.
 		virtual void BeginRendering(const RenderingDesc& desc) = 0;
+
 		virtual void EndRendering() = 0;
+
 		// One active graphics/compute pipeline. Binding either clears table bindings;
 		// explicitly rebind tables for the selected pipeline before draw/dispatch.
 		virtual void BindGraphicsPipeline(GraphicsPipeline& pipeline) = 0;
+
 		virtual void BindComputePipeline(ComputePipeline& pipeline) = 0;
+
 		virtual void BindDescriptorTable(std::uint32_t space, DescriptorTable& table) = 0;
+
 		// Update the active graphics/compute pipeline's reflected push-constant layout, inside
 		// or outside rendering. Data is copied during recording. Offset/size must be
 		// nonzero-size, four-byte aligned and covered by every requested stage.
@@ -557,16 +618,23 @@ namespace Swim::Rhi
 		// with an incompatible layout, initialize that layout fully. Pool reuse resets
 		// initialization. Binding a pipeline alone does not disturb pushed values.
 		virtual void PushConstants(ShaderStageMask stages, std::uint32_t offset, std::span<const std::byte> data) = 0;
+
 		virtual void SetViewport(const Viewport& viewport) = 0;
+
 		virtual void SetScissor(const ScissorRect& scissor) = 0;
+
 		// Bindings survive pipeline/rendering changes, but reset with command-pool
 		// reuse. Buffers require Vertex usage and must live until GPU completion.
 		virtual void BindVertexBuffer(std::uint32_t slot, Buffer& buffer, std::uint64_t offset) = 0;
+
 		virtual void BindIndexBuffer(Buffer& buffer, std::uint64_t offset, IndexType type) = 0;
+
 		virtual void Draw(
 			std::uint32_t vertexCount, std::uint32_t instanceCount = 1, std::uint32_t firstVertex = 0, std::uint32_t firstInstance = 0) = 0;
+
 		virtual void DrawIndexed(std::uint32_t indexCount, std::uint32_t instanceCount = 1, std::uint32_t firstIndex = 0,
 			std::int32_t vertexOffset = 0, std::uint32_t firstInstance = 0) = 0;
+
 		// GPU-generated indexed draws (same state requirements as DrawIndexed, with an index
 		// buffer and every vertex binding bound; argument contents are not validated).
 		// `arguments` needs Indirect usage and holds DrawIndexedIndirectCommand records from
@@ -575,38 +643,51 @@ namespace Swim::Rhi
 		// per-draw record index read through the instance id).
 		virtual void DrawIndexedIndirect(Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
 			std::uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
+
 		// As DrawIndexedIndirect, with the draw count read on the GPU from a uint32 at
 		// countOffset (four-byte aligned, Indirect usage, IndirectArgument state) and clamped
 		// to maxDrawCount. Requires GraphicsCapabilities::IndirectCount.
 		virtual void DrawIndexedIndirectCount(Buffer& arguments, std::uint64_t offset, Buffer& count, std::uint64_t countOffset,
 			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
+
 		// Workgroup counts, bounded per axis by Capabilities.Compute.MaxGroupCount.
 		// Zero counts are valid no-work dispatches but still require complete state.
 		// Requires a compute-capable queue, active compute pipeline and no rendering.
 		virtual void Dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) = 0;
+
 		// Query commands require recording outside rendering. Reset each slot before
 		// its first write and every reuse; synchronize prior GPU uses before reset.
 		// Keep the pool alive until all submissions using it complete.
 		virtual void ResetQueries(QueryPool& pool, std::uint32_t first, std::uint32_t count) = 0;
+
 		virtual void WriteTimestamp(QueryPool& pool, std::uint32_t index, TimestampStage stage = TimestampStage::End) = 0;
+
 	};
 
 	class CommandPool : public RhiObject
 	{
+
 	  public:
+
 		virtual std::unique_ptr<CommandList> CreateCommandList() = 0;
+
 		virtual void Reset() = 0;
+
 	};
 
 	class Queue : public RhiObject
 	{
+
 	  public:
+
 		virtual QueueType GetType() const = 0;
 
 		virtual TimestampInfo GetTimestampInfo() const { return {}; }
 
 		virtual void Submit(const SubmitDesc& desc) = 0;
+
 		virtual void WaitIdle() = 0;
+
 	};
 
 	struct SwapchainAcquireResult
@@ -622,7 +703,9 @@ namespace Swim::Rhi
 
 	class Swapchain : public RhiObject
 	{
+
 	  public:
+
 		virtual Format GetFormat() const = 0;
 
 		// Undefined until native images exist. Re-read after every successful
@@ -630,17 +713,22 @@ namespace Swim::Rhi
 		virtual SwapchainColorSpace GetColorSpace() const { return SwapchainColorSpace::Undefined; }
 
 		virtual Extent2D GetExtent() const = 0;
+
 		virtual std::uint32_t GetImageCount() const = 0;
+
 		virtual TextureView& GetImageView(std::uint32_t imageIndex) = 0;
+
 		// A result without HasImage() does not signal the supplied synchronization
 		// objects: skip submission/presentation. Pump events and retry NotReady;
 		// Resize after OutOfDate, or after a suspended window becomes drawable.
 		// Suboptimal still owns an image: consume its acquire signal and present
 		// before resizing. Acquisition waits are bounded by the backend.
 		virtual SwapchainAcquireResult AcquireNextImage(Semaphore& signalSemaphore, Fence* signalFence = nullptr) = 0;
+
 		// False requests a rebuild (out of date or suboptimal). The presentation
 		// attempt consumes ownership of the acquired image, including on false.
 		virtual bool Present(Queue& queue, std::uint32_t imageIndex, std::span<Semaphore* const> waits) = 0;
+
 		// Zero extent suspends acquisition without waiting or destroying images.
 		// Positive extent resumes/rebuilds, even when unchanged. All acquired images
 		// must first be presented; safeAfter covers every submission using old views.
@@ -650,11 +738,14 @@ namespace Swim::Rhi
 		// retry Resize before acquiring again. Surface/device loss is fatal to this
 		// object and requires recreating the surface/device, not a Resize retry.
 		virtual bool Resize(Extent2D extent, const TimelinePoint& safeAfter) = 0;
+
 	};
 
 	class Device : public RhiObject
 	{
+
 	  public:
+
 		// Retain this report across teardown. Device loss throws DeviceLostError
 		// from fallible work; noexcept naming/destruction only records the loss.
 		virtual std::shared_ptr<DeviceDiagnostics> GetDeviceDiagnostics() const { return {}; }
@@ -672,6 +763,7 @@ namespace Swim::Rhi
 		virtual PipelineCacheData GetPipelineCacheData() const { return {}; }
 
 		virtual const AdapterInfo& GetAdapterInfo() const = 0;
+
 		virtual Queue& GetQueue(QueueType type) = 0;
 
 		// Empty for unsupported backends/presentation queues; native query failures
@@ -679,33 +771,55 @@ namespace Swim::Rhi
 		virtual SwapchainSupport QuerySwapchainSupport(Platform::Window&) const { return {}; }
 
 		virtual std::unique_ptr<Swapchain> CreateSwapchain(Platform::Window& window, const SwapchainDesc& desc) = 0;
+
 		virtual std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
+
 		virtual std::unique_ptr<Texture> CreateTexture(const TextureDesc& desc) = 0;
+
 		virtual std::unique_ptr<TextureView> CreateTextureView(Texture& texture, const TextureViewDesc& desc) = 0;
+
 		virtual std::unique_ptr<Sampler> CreateSampler(const SamplerDesc& desc) = 0;
+
 		virtual std::unique_ptr<ShaderProgram> CreateShaderProgram(const ShaderProgramDesc& desc) = 0;
+
 		virtual std::unique_ptr<PipelineLayout> CreatePipelineLayout(const PipelineLayoutDesc& desc) = 0;
+
 		virtual std::unique_ptr<GraphicsPipeline> CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
+
 		virtual std::unique_ptr<ComputePipeline> CreateComputePipeline(const ComputePipelineDesc& desc) = 0;
+
 		virtual std::unique_ptr<DescriptorTable> CreateDescriptorTable(const DescriptorTableDesc& desc) = 0;
+
 		virtual std::unique_ptr<CommandPool> CreateCommandPool(QueueType queueType) = 0;
+
 		virtual std::unique_ptr<Semaphore> CreateGpuSemaphore() = 0;
+
 		virtual std::unique_ptr<Fence> CreateFence(bool signaled = false) = 0;
+
 		virtual std::unique_ptr<Timeline> CreateTimeline(std::uint64_t initialValue = 0) = 0;
+
 		virtual std::unique_ptr<QueryPool> CreateQueryPool(const QueryPoolDesc& desc) = 0;
+
 		virtual void WaitIdle() = 0;
+
 	};
 
 	class Adapter : public RhiObject
 	{
+
 	  public:
+
 		virtual const AdapterInfo& GetInfo() const = 0;
+
 		virtual std::unique_ptr<Device> CreateDevice() = 0;
+
 	};
 
 	class GraphicsSystem
 	{
+
 	  public:
+
 		virtual ~GraphicsSystem() = default;
 
 		virtual bool IsValidationEnabled() const { return false; }
@@ -715,7 +829,9 @@ namespace Swim::Rhi
 		virtual std::shared_ptr<DiagnosticLog> GetDiagnostics() const { return {}; }
 
 		virtual std::uint32_t GetAdapterCount() const = 0;
+
 		virtual Adapter& GetAdapter(std::uint32_t adapterIndex) = 0;
+
 	};
 
 } // namespace Swim::Rhi

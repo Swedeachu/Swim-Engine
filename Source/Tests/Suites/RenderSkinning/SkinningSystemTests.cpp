@@ -13,6 +13,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	// A skinning system over a small GeometryHeap on the mock device: host-backed
 	// buffers receive the graph's uploads; dispatches and push constants are recorded.
 	struct SkinningWorld
@@ -23,6 +24,7 @@ namespace
 			using T = Rhi::DescriptorType;
 			using B = SkinningBindings;
 			Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 			for (const auto& [binding, type] : { std::pair{ B::Dispatches, T::ReadOnlyStorageBuffer },
 					 std::pair{ B::SourceVertices, T::ReadOnlyStorageBuffer }, std::pair{ B::SkinVertices, T::ReadOnlyStorageBuffer },
 					 std::pair{ B::MorphDeltas, T::ReadOnlyStorageBuffer }, std::pair{ B::Palettes, T::ReadOnlyStorageBuffer },
@@ -30,6 +32,7 @@ namespace
 			{
 				space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 			}
+
 			layout.program.Interface.DescriptorSchemas = { space };
 			GeometryHeapDesc heapDesc;
 			heapDesc.VertexPageSize = vertexPageSize;
@@ -83,6 +86,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -90,6 +94,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -108,6 +113,7 @@ namespace
 
 	const std::vector<SkinMatrix> Identity(3, SkinMatrix{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 });
 	const std::vector<float> NoMorph{ 0.0f, 0.0f };
+
 } // namespace
 
 SWIM_TEST("Render.SkinningSystem", "OutputMeshesUploadSourcesAndSkinDirtyThenSettlingInstances")
@@ -215,17 +221,20 @@ SWIM_TEST("Render.SkinningSystem", "OnePassDispatchesPerOutputPage")
 	const Testing::SkinnedStrip strip;
 	const auto mesh = system.CreateSkinnedMesh(world.MeshDesc(strip));
 	std::vector<SkinInstanceHandle> handles;
+
 	for (int i = 0; i < 3; ++i)
 	{
 		handles.push_back(system.CreateInstance(mesh));
 		system.SetPose(handles.back(), Pose(Identity, Identity, NoMorph, NoMorph));
 	}
+
 	const auto frame = world.Frame(system);
 	SWIM_REQUIRE_EQUAL(frame.Instances.size(), std::size_t(3));
 	SWIM_CHECK(frame.Instances[0].Page < frame.Instances[1].Page && frame.Instances[1].Page < frame.Instances[2].Page);
 	SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(3));
 	const auto constants = world.Commands("PushConstants");
 	SWIM_REQUIRE_EQUAL(constants.size(), std::size_t(3));
+
 	for (std::uint32_t i = 0; i < 3; ++i)
 	{
 		std::uint32_t firstRow = 99;

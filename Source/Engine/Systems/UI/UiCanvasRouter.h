@@ -7,6 +7,7 @@
 
 namespace Swim::UI
 {
+
 	struct UiCanvasHandle
 	{
 		std::uint32_t Value = 0;
@@ -53,43 +54,63 @@ namespace Swim::UI
 	// Owner thread; documents must be laid out (their pointer calls re-layout on demand).
 	class UiCanvasRouter
 	{
+
 	  public:
+
 		// Throws std::invalid_argument without a document or for an unknown mode.
 		UiCanvasHandle Add(const UiCanvasDesc& desc);
+
 		bool Remove(UiCanvasHandle canvas); // Ends its hover, capture and focus.
+
 		bool Contains(UiCanvasHandle canvas) const;
+
 		UiDocument* GetDocument(UiCanvasHandle canvas) const;
+
 		void SetInteractive(UiCanvasHandle canvas, bool interactive);
 
 		// Screen canvases: canvas pixel = viewport pixel - offset, inside size (0: unbounded).
 		void SetScreenPlacement(UiCanvasHandle canvas, UiPoint offset, UiPoint size = {});
+
 		// World panels and billboards (UI::CanvasToWorld), or render surfaces shown on a flat
 		// quad: hit by pointer rays inside [0, canvasSize).
 		void SetWorldPlacement(UiCanvasHandle canvas, const UiMatrix3x4& canvasToWorld, UiPoint canvasSize, bool twoSided = true);
+
 		// The camera world canvases are seen through (projects their IME rectangles).
 		void SetCamera(const UiCameraView& camera);
 
 		// Hover and pointer moves; returns the canvas under (or capturing) the pointer.
 		UiCanvasHandle PointerMove(const UiPointer& pointer);
+
 		void PointerDown(UiKeyModifiers modifiers = {});
+
 		void PointerUp();
+
 		void CancelPointer();
+
 		bool Wheel(UiPoint delta);
 
 		// Keyboard, text and IME go to the focused canvas. Without one, Tab focuses the first
 		// interactive canvas that has focusable nodes (screen canvases first).
 		bool KeyDown(UiKey key, UiKeyModifiers modifiers = {});
+
 		void TextInput(std::string_view utf8);
+
 		void SetComposition(std::string_view utf8, std::uint32_t cursor);
+
 		// Directional navigation in the focused canvas (or the first one, as Tab).
 		bool Navigate(UiNavDirection direction);
+
 		bool FocusNext(bool backwards = false);
+
 		void Focus(UiCanvasHandle canvas); // Makes the canvas the keyboard owner (its document keeps its node focus).
+
 		void ClearFocus();				   // Blurs the focused canvas's document.
+
 		// Context menus (right button, Shift+F10, gamepad North): the menu registered under
 		// the pointer on the hovered canvas (which becomes the focused canvas), or the one of
 		// the focused canvas's focused node. False when there is none.
 		bool OpenContextMenu();
+
 		bool OpenContextMenuForFocus();
 
 		UiCanvasHandle GetHovered() const { return hovered; }
@@ -101,11 +122,13 @@ namespace Swim::UI
 		bool IsPointerOverUi() const { return static_cast<bool>(hovered) || static_cast<bool>(captured); }
 
 		bool WantsTextInput() const;
+
 		// The focused editable caret in viewport pixels (screen offset or camera projection);
 		// empty without one or for surfaces without a world placement.
 		std::optional<UiRect> GetTextInputRect() const;
 
 	  private:
+
 		struct Canvas
 		{
 			UiCanvasHandle Handle;
@@ -121,9 +144,13 @@ namespace Swim::UI
 		};
 
 		Canvas* Find(UiCanvasHandle canvas);
+
 		const Canvas* Find(UiCanvasHandle canvas) const;
+
 		std::vector<Canvas*> ByPriority(); // Screen canvases top first, then world ones in insertion order.
+
 		std::optional<UiPoint> MapCaptured(Canvas& canvas, const UiPointer& pointer) const;
+
 		void SetFocused(UiCanvasHandle canvas);
 
 		std::vector<Canvas> canvases;
@@ -133,5 +160,7 @@ namespace Swim::UI
 		UiCanvasHandle captured;
 		UiCanvasHandle focused;
 		std::optional<UiCameraView> camera;
+
 	};
+
 } // namespace Swim::UI

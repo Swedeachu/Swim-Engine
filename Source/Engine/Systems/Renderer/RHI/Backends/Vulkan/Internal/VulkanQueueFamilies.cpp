@@ -14,6 +14,7 @@ namespace Swim::RhiVulkan
 			for (std::uint32_t index = 0; index < families.size(); ++index)
 			{
 				const auto& family = families[index];
+
 				if (family.queueCount == 0 || (family.queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0)
 				{
 					continue;
@@ -30,6 +31,7 @@ namespace Swim::RhiVulkan
 			for (std::uint32_t index = 0; index < families.size(); ++index)
 			{
 				const auto& family = families[index];
+
 				if (family.queueCount == 0 || (family.queueFlags & VK_QUEUE_COMPUTE_BIT) == 0)
 				{
 					continue;
@@ -41,6 +43,7 @@ namespace Swim::RhiVulkan
 					break;
 				}
 			}
+
 			if (selection.Compute == UINT32_MAX)
 			{
 				selection.Compute = selection.Graphics;
@@ -49,6 +52,7 @@ namespace Swim::RhiVulkan
 			for (std::uint32_t index = 0; index < families.size(); ++index)
 			{
 				const auto& family = families[index];
+
 				if (family.queueCount == 0 || (family.queueFlags & VK_QUEUE_TRANSFER_BIT) == 0)
 				{
 					continue;
@@ -60,11 +64,13 @@ namespace Swim::RhiVulkan
 					break;
 				}
 			}
+
 			if (selection.Transfer == UINT32_MAX)
 			{
 				for (std::uint32_t index = 0; index < families.size(); ++index)
 				{
 					const auto& family = families[index];
+
 					if (family.queueCount > 0 &&
 						(family.queueFlags & VK_QUEUE_TRANSFER_BIT) != 0 &&
 						(family.queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0)
@@ -74,6 +80,7 @@ namespace Swim::RhiVulkan
 					}
 				}
 			}
+
 			if (selection.Transfer == UINT32_MAX)
 			{
 				selection.Transfer = selection.Compute != UINT32_MAX ? selection.Compute : selection.Graphics;

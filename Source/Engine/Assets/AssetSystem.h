@@ -22,20 +22,27 @@ namespace Swim::Assets
 
 	class AssetSystem
 	{
+
 	public:
 
 		AssetSystem() = default;
+
 		~AssetSystem();
 
 		AssetSystem(const AssetSystem&) = delete;
+
 		AssetSystem& operator=(const AssetSystem&) = delete;
 
 		bool Initialize();
+
 		void Shutdown();
+
 		bool IsRunning() const { return running; }
+
 		bool IsOwnerThread() const { return running && ownerThread == std::this_thread::get_id(); }
 
 		AssetDatabase& GetDatabase() { return database; }
+
 		const AssetDatabase& GetDatabase() const { return database; }
 
 		template<typename T>
@@ -49,12 +56,14 @@ namespace Swim::Assets
 		AssetHandle<T> Declare(AssetId id)
 		{
 			RequireOwnerThread();
+
 			if (!id.IsValid())
 			{
 				throw std::invalid_argument("Cannot declare an invalid AssetId.");
 			}
 
 			Record& record = records[id];
+
 			if (!record.Id.IsValid())
 			{
 				record.Id = id;
@@ -62,6 +71,7 @@ namespace Swim::Assets
 			}
 
 			const void* type = TypeToken<T>();
+
 			if (record.Declared && record.Type != type)
 			{
 				throw std::logic_error("AssetId is already declared with a different asset type.");
@@ -77,16 +87,19 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			const auto id = database.FindId(logicalPath);
+
 			if (!id)
 			{
 				return {};
 			}
 
 			const auto record = records.find(*id);
+
 			if (record == records.end() || !record->second.Declared || record->second.Type != TypeToken<T>())
 			{
 				return {};
 			}
+
 			return AssetHandle<T>(*id, record->second.Generation);
 		}
 
@@ -102,10 +115,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record || record->State == AssetLoadState::Loading || record->State == AssetLoadState::Resident)
 			{
 				return false;
 			}
+
 			record->State = AssetLoadState::Queued;
 			record->Error = {};
 			return true;
@@ -116,10 +131,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record || record->State == AssetLoadState::Resident || record->State == AssetLoadState::Loading)
 			{
 				return false;
 			}
+
 			record->State = AssetLoadState::Loading;
 			record->Error = {};
 			return true;
@@ -135,6 +152,7 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record)
 			{
 				return false;
@@ -144,6 +162,7 @@ namespace Swim::Assets
 			{
 				return false;
 			}
+
 			SetContentHashInternal(*record, contentHash);
 			record->Value = std::make_unique<Value<T>>(std::move(asset));
 			record->State = AssetLoadState::Resident;
@@ -156,14 +175,17 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record)
 			{
 				return false;
 			}
+
 			if (error.Code == AssetErrorCode::None)
 			{
 				error.Code = AssetErrorCode::Internal;
 			}
+
 			record->Value.reset();
 			record->State = AssetLoadState::Failed;
 			record->Error = std::move(error);
@@ -175,10 +197,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record)
 			{
 				return false;
 			}
+
 			record->Value.reset();
 			record->State = AssetLoadState::Unloaded;
 			record->Error = {};
@@ -190,6 +214,7 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record)
 			{
 				return false;
@@ -204,10 +229,12 @@ namespace Swim::Assets
 			record->Declared = false;
 			record->Type = nullptr;
 			++record->Generation;
+
 			if (record->Generation == 0)
 			{
 				record->Generation = 1;
 			}
+
 			return true;
 		}
 
@@ -224,10 +251,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record)
 			{
 				return false;
 			}
+
 			SetContentHashInternal(*record, contentHash);
 			return true;
 		}
@@ -240,10 +269,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			Record* record = FindRecord(handle);
+
 			if (!record || record->State != AssetLoadState::Resident || !record->Value)
 			{
 				return nullptr;
 			}
+
 			return &static_cast<Value<T>*>(record->Value.get())->Data;
 		}
 
@@ -254,10 +285,12 @@ namespace Swim::Assets
 		{
 			RequireOwnerThread();
 			const Record* record = FindRecord(handle);
+
 			if (!record || record->State != AssetLoadState::Resident || !record->Value)
 			{
 				return nullptr;
 			}
+
 			return &static_cast<const Value<T>*>(record->Value.get())->Data;
 		}
 
@@ -272,8 +305,11 @@ namespace Swim::Assets
 		}
 
 		AssetId FindByContentHash(const ContentHash& contentHash) const;
+
 		ContentHash ComputeDependencyRevisionHash(AssetId root) const;
+
 		std::vector<AssetId> GetDependents(AssetId dependency) const;
+
 		std::size_t GetDeclaredCount() const;
 
 	private:
@@ -321,16 +357,21 @@ namespace Swim::Assets
 			{
 				return nullptr;
 			}
+
 			const auto existing = records.find(handle.GetId());
+
 			if (existing == records.end())
 			{
 				return nullptr;
 			}
+
 			Record& record = existing->second;
+
 			if (!record.Declared || record.Generation != handle.GetGeneration() || record.Type != TypeToken<T>())
 			{
 				return nullptr;
 			}
+
 			return &record;
 		}
 
@@ -341,10 +382,15 @@ namespace Swim::Assets
 		}
 
 		void RequireOwnerThread() const;
+
 		bool SetDependenciesInternal(Record& record, std::span<const AssetId> dependencies);
+
 		void RemoveDependencyEdges(const Record& record);
+
 		bool HasDependencyPath(AssetId start, AssetId target) const;
+
 		void SetContentHashInternal(Record& record, const ContentHash& contentHash);
+
 		AssetStatus MakeStatus(const Record& record) const;
 
 		bool running = false;
@@ -353,6 +399,7 @@ namespace Swim::Assets
 		std::unordered_map<AssetId, Record> records;
 		std::unordered_map<AssetId, std::unordered_set<AssetId>> reverseDependencies;
 		std::unordered_map<ContentHash, std::unordered_set<AssetId>> contentIndex;
+
 	};
 
 }

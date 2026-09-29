@@ -8,8 +8,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		RenderToggles::Toggle Flag(std::string name, std::string description, bool& value)
 		{
 			bool* target = &value;
@@ -45,8 +47,10 @@ namespace Engine
 						*keep = *target;
 						*target = 0;
 					}
+
 				} };
 		}
+
 	} // namespace
 
 	RenderToggles::RenderToggles(FrameRenderer* rendererValue) : renderer(rendererValue)
@@ -57,6 +61,7 @@ namespace Engine
 	{
 		std::string slug;
 		bool dash = false;
+
 		for (const char c : text)
 		{
 			if (std::isalnum(static_cast<unsigned char>(c)))
@@ -65,6 +70,7 @@ namespace Engine
 				{
 					slug.push_back('-');
 				}
+
 				slug.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
 				dash = false;
 			}
@@ -73,16 +79,19 @@ namespace Engine
 				dash = true;
 			}
 		}
+
 		return slug;
 	}
 
 	std::vector<RenderToggles::Toggle> RenderToggles::BuiltIn() const
 	{
 		std::vector<Toggle> toggles;
+
 		if (!renderer)
 		{
 			return toggles;
 		}
+
 		auto& s = renderer->GetSettings();
 		toggles.push_back(Flag("lighting.ibl", "Image-based lighting (environment diffuse + specular)", s.Environment));
 		toggles.push_back(Flag("lighting.local-lights", "Every point and spot light (uploads, clusters, shading)", s.LocalLights));
@@ -118,12 +127,14 @@ namespace Engine
 				s.Post.Exposure.Mode = on ? Swim::Render::ExposureMode::Automatic : Swim::Render::ExposureMode::Manual;
 			} });
 		toggles.push_back(Flag("ui.draw", "Drawing every UI canvas (layout still runs)", s.Ui));
+
 		for (const auto& feature : renderer->GetFeatures())
 		{
 			if (!feature)
 			{
 				continue;
 			}
+
 			RenderFeature* raw = feature.get();
 			toggles.push_back({ "feature." + Slug(feature->GetName()), std::string(feature->GetName()) + " (render feature)",
 				[raw]
@@ -135,6 +146,7 @@ namespace Engine
 					raw->Enabled = on;
 				} });
 		}
+
 		return toggles;
 	}
 
@@ -154,6 +166,7 @@ namespace Engine
 				return toggle.Get();
 			}
 		}
+
 		return std::nullopt;
 	}
 
@@ -163,15 +176,18 @@ namespace Engine
 		const bool group = pattern.size() > 2 && pattern.substr(pattern.size() - 2) == ".*";
 		const std::string_view prefix = group ? pattern.substr(0, pattern.size() - 1) : pattern;
 		std::size_t changed = 0;
+
 		for (const auto& toggle : List())
 		{
 			const bool match = all || (group ? toggle.Name.starts_with(prefix) : toggle.Name == pattern);
+
 			if (match)
 			{
 				toggle.Set(on);
 				++changed;
 			}
 		}
+
 		return changed;
 	}
 
@@ -193,4 +209,5 @@ namespace Engine
 				return existing.Name.starts_with(prefix);
 			});
 	}
+
 } // namespace Engine

@@ -21,6 +21,7 @@ namespace Engine
 			transformsDirty = false;
 
 			++dirtyEpoch;
+
 			if (dirtyEpoch == 0)
 			{
 				dirtyEpoch = 1;
@@ -35,6 +36,7 @@ namespace Engine
 			}
 
 			transformsDirty = true;
+
 			if (lastQueuedEpoch == dirtyEpoch)
 			{
 				return false;
@@ -44,6 +46,7 @@ namespace Engine
 			dirtyEntities.push_back(entity);
 
 			++mutationVersion;
+
 			if (mutationVersion == 0)
 			{
 				mutationVersion = 1;
@@ -53,8 +56,11 @@ namespace Engine
 		}
 
 		bool AreAnyTransformsDirty() const { return transformsDirty; }
+
 		const std::vector<entt::entity>& GetDirtyEntities() const { return dirtyEntities; }
+
 		std::uint64_t GetMutationVersion() const { return mutationVersion; }
+
 		std::uint64_t GetDirtyEpoch() const { return dirtyEpoch; }
 
 	private:

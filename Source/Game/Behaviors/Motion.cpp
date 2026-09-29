@@ -10,6 +10,7 @@
 
 namespace Game
 {
+
 	Spin::Spin(Engine::Scene* sceneValue, entt::entity owner, glm::vec3 axisValue, float degreesPerSecond)
 		: Behavior(sceneValue, owner), axis(glm::length(axisValue) > 0.0f ? glm::normalize(axisValue) : glm::vec3(0, 1, 0)),
 		  speed(degreesPerSecond)
@@ -36,12 +37,14 @@ namespace Game
 		{
 			origin = transform->GetPosition();
 		}
+
 		return 0;
 	}
 
 	void Bob::Update(double dt)
 	{
 		time += static_cast<float>(dt);
+
 		if (auto* transform = GetTransform())
 		{
 			transform->SetPosition(origin + glm::vec3(0.0f, amplitude * std::sin(time * frequency * 6.2831853f), 0.0f));
@@ -57,6 +60,7 @@ namespace Game
 	void Orbit::Update(double dt)
 	{
 		angle += speed * static_cast<float>(dt);
+
 		if (auto* transform = GetTransform())
 		{
 			transform->SetPosition(
@@ -71,10 +75,12 @@ namespace Game
 	void Lifetime::Update(double dt)
 	{
 		remaining -= static_cast<float>(dt);
+
 		if (remaining <= 0.0f && !queued)
 		{
 			queued = true;
 			scene->GetCommandBuffer().Destroy(entity);
 		}
 	}
+
 } // namespace Game

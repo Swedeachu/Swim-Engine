@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	// Initial state of a render object. Every field can change later through the
 	// GpuScene setters; an invalid Mesh leaves the object undrawable until SetMesh.
 	struct RenderObjectDesc
@@ -23,4 +24,5 @@ namespace Swim::Render
 		// for a GPU-skinned output mesh, 0 for rigid meshes.
 		std::uint32_t PreviousVertexOffset = 0;
 	};
+
 } // namespace Swim::Render

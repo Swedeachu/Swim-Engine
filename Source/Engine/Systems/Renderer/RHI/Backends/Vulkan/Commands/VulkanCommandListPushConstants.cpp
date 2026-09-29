@@ -12,25 +12,31 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		const auto& layout = RequireActivePipeline();
 		const auto flags = ValidateVulkanPushConstantWrite(layout.PushConstants, stages, offset, data.size());
+
 		if (data.data() == nullptr)
 		{
 			throw std::invalid_argument("Push-constant data is null");
 		}
+
 		if (!CompatibleVulkanPushConstants(pushConstantRanges, layout.PushConstants))
 		{
 			std::uint32_t words = 0;
+
 			for (const auto& range : layout.PushConstants)
 			{
 				words = std::max(words, (range.offset + range.size) / 4);
 			}
+
 			// Allocate before changing state or recording the non-failing native command.
 			auto ranges = layout.PushConstants;
 			std::vector<VkShaderStageFlags> initialized(words, 0);
 			initializedPushConstants = std::move(initialized);
 			pushConstantRanges = std::move(ranges);
 		}
+
 		GetState()->Dispatch.vkCmdPushConstants(commandBuffer, layout.Layout, flags, offset,
 			static_cast<std::uint32_t>(data.size()), data.data());
+
 		for (std::size_t word = offset / 4; word < (offset + data.size()) / 4; ++word)
 		{
 			initializedPushConstants[word] |= flags;
@@ -40,14 +46,17 @@ namespace Swim::RhiVulkan
 	void VulkanCommandList::RequirePushConstants() const
 	{
 		const auto& ranges = RequireActivePipeline().PushConstants;
+
 		if (ranges.empty())
 		{
 			return;
 		}
+
 		if (!CompatibleVulkanPushConstants(pushConstantRanges, ranges))
 		{
 			throw std::logic_error("Draw/dispatch requires push constants written with a compatible layout");
 		}
+
 		for (const auto& range : ranges)
 		{
 			for (std::uint32_t word = range.offset / 4; word < (range.offset + range.size) / 4; ++word)

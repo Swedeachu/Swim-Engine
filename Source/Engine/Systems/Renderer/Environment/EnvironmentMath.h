@@ -4,6 +4,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	// The CPU definition of image-based lighting (critical-path item 61). Every
 	// function here is mirrored line for line by Shaders/Slang/Environment/
 	// EnvironmentCommon.slang; the tests compare the two and the GPU environment
@@ -89,4 +90,5 @@ namespace Swim::Render::Environment
 
 		Float3 Evaluate(const Float3& normal) const;
 	};
+
 } // namespace Swim::Render::Environment

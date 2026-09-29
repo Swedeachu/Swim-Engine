@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// PostProcessRecords.slang's ExposureState (16 bytes): the persistent auto-exposure
 	// state, written by the exposure pass every frame.
 	struct GpuExposureState
@@ -93,4 +94,5 @@ namespace Swim::Render
 	static_assert(sizeof(PostHistogramConstants) == 16 && sizeof(PostExposureConstants) == 64);
 	static_assert(sizeof(PostBloomDownsampleConstants) == 32 && sizeof(PostBloomUpsampleConstants) == 16);
 	static_assert(sizeof(PostCompositeConstants) == 16);
+
 } // namespace Swim::Render

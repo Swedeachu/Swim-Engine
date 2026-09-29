@@ -15,8 +15,10 @@ namespace Swim::RhiVulkan
 		{
 			throw std::runtime_error("Invalid Vulkan memory telemetry heap/type counts");
 		}
+
 		Rhi::MemoryBudgetSnapshot snapshot;
 		snapshot.Heaps.reserve(properties.memoryHeapCount);
+
 		for (std::uint32_t index = 0; index < properties.memoryHeapCount; ++index)
 		{
 			const auto& nativeHeap = properties.memoryHeaps[index];
@@ -34,6 +36,7 @@ namespace Swim::RhiVulkan
 			// or an internal fallback whose provenance cannot be distinguished.
 			heap.UsageBytes = heap.BlockBytes;
 			heap.BudgetBytes = (heap.CapacityBytes / 10) * 8 + (heap.CapacityBytes % 10) * 8 / 10;
+
 			if (driverBudget != nullptr && driverBudget->heapBudget[index] != 0 &&
 				driverBudget->heapBudget[index] <= heap.CapacityBytes)
 			{
@@ -41,30 +44,37 @@ namespace Swim::RhiVulkan
 				heap.UsageBytes = driverBudget->heapUsage[index];
 				heap.BudgetBytes = driverBudget->heapBudget[index];
 			}
+
 			snapshot.Heaps.push_back(heap);
 		}
+
 		for (std::uint32_t index = 0; index < properties.memoryTypeCount; ++index)
 		{
 			const auto& type = properties.memoryTypes[index];
+
 			if (type.heapIndex >= snapshot.Heaps.size())
 			{
 				throw std::runtime_error("Invalid Vulkan memory telemetry heap index");
 			}
+
 			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0)
 			{
 				snapshot.Heaps[type.heapIndex].HostVisible = true;
 			}
 		}
+
 		return snapshot;
 	}
 
 	Rhi::MemoryBudgetSnapshot QueryVulkanMemoryBudget(const VulkanDeviceState& state)
 	{
 		RequireVulkanDevice(state);
+
 		if (state.Allocator == nullptr)
 		{
 			return {};
 		}
+
 		const VkPhysicalDeviceMemoryProperties* properties = nullptr;
 		vmaGetMemoryProperties(state.Allocator, &properties);
 		std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> allocatorBudgets{};
@@ -75,6 +85,7 @@ namespace Swim::RhiVulkan
 		budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
 		const bool queryDriver = state.MemoryBudgetEnabled && state.Instance &&
 			state.Instance->Dispatch.vkGetPhysicalDeviceMemoryProperties2 != nullptr;
+
 		if (queryDriver)
 		{
 			VkPhysicalDeviceMemoryProperties2 memory{};
@@ -85,6 +96,7 @@ namespace Swim::RhiVulkan
 			state.Instance->Dispatch.vkGetPhysicalDeviceMemoryProperties2(
 				state.Device.physical_device.physical_device, &memory);
 		}
+
 		// A concurrent native failure must not turn into apparently healthy data.
 		RequireVulkanDevice(state);
 		return BuildVulkanMemoryBudgetSnapshot(*properties, allocatorBudgets, queryDriver ? &budget : nullptr);

@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// The clustered light grid (critical-path item 64): screen-space tiles of
 	// TileSize pixels times logarithmic depth slices between Near and Far. Slice k
 	// covers view depths [Near * (Far / Near)^(k / S), Near * (Far / Near)^((k + 1) / S)),
@@ -122,4 +123,5 @@ namespace Swim::Render
 	std::uint32_t ClusterIndexFor(const ClusterGridRecord& grid, float pixelX, float pixelY, float viewDepth);
 	// View depth (> 0) of a stored depth-buffer value under the grid's projection.
 	float ClusterViewDepthFromNdc(const ClusterGridRecord& grid, float ndcDepth);
+
 } // namespace Swim::Render

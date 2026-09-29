@@ -12,6 +12,7 @@ using namespace Swim::Text;
 
 namespace
 {
+
 	constexpr const char* Shalom = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D";		  // Hebrew, 8 bytes.
 	constexpr const char* Omega = "\xCE\xA9\xCE\xBC\xCE\xAD\xCE\xB3\xCE\xB1"; // Greek, 10 bytes.
 	constexpr const char* Salam = "\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85";		  // Arabic, 8 bytes.
@@ -32,6 +33,7 @@ namespace
 	{
 		return line.X + line.Width;
 	}
+
 } // namespace
 
 SWIM_TEST("Text.Layout", "SingleLineMatchesShapingAndKeepsGlyphOrigins")
@@ -43,6 +45,7 @@ SWIM_TEST("Text.Layout", "SingleLineMatchesShapingAndKeepsGlyphOrigins")
 	SWIM_CHECK_NEAR(layout.GetWidth(), shaped.AdvanceX, 1e-4f);
 	SWIM_REQUIRE_EQUAL(layout.GetGlyphs().size(), shaped.Glyphs.size());
 	float pen = 0.0f;
+
 	for (std::size_t i = 0; i < shaped.Glyphs.size(); ++i)
 	{
 		SWIM_CHECK_EQUAL(layout.GetGlyphs()[i].Glyph, shaped.Glyphs[i].Glyph);
@@ -50,6 +53,7 @@ SWIM_TEST("Text.Layout", "SingleLineMatchesShapingAndKeepsGlyphOrigins")
 		SWIM_CHECK_NEAR(layout.GetGlyphs()[i].Y, layout.GetLines()[0].Baseline, 1e-4f);
 		pen += shaped.Glyphs[i].AdvanceX;
 	}
+
 	const auto metrics = fonts->GetPrimary().GetMetrics(24);
 	SWIM_CHECK_NEAR(layout.GetLines()[0].Baseline, metrics.Ascender, 1e-4f);
 	SWIM_CHECK_NEAR(layout.GetHeight(), metrics.LineHeight, 1e-4f);
@@ -72,10 +76,12 @@ SWIM_TEST("Text.Layout", "WrapsAtOpportunitiesHangsSpacesAndBreaksLongWords")
 	SWIM_CHECK_NEAR(first.Width, face.Shape("alpha beta", 20).AdvanceX, 1e-3f);
 	SWIM_CHECK_EQUAL(layout.GetLines()[1].Begin, 11u);
 	SWIM_CHECK(layout.GetLines()[1].HardBreak);
+
 	for (const auto& line : layout.GetLines())
 	{
 		SWIM_CHECK(line.Width <= desc.MaxWidth);
 	}
+
 	SWIM_CHECK_NEAR(layout.GetLines()[1].Top, first.Height, 1e-4f);
 
 	// A word wider than the line breaks between graphemes, at least one per line.
@@ -152,24 +158,28 @@ SWIM_TEST("Text.Layout", "ReordersMixedDirectionTextPerLine")
 	const auto* runs = &layout.GetRuns()[line.FirstRun];
 	SWIM_CHECK_EQUAL(runs[0].Begin, 0u);
 	bool sawArabic = false;
+
 	for (std::uint32_t r = 0; r < line.RunCount; ++r)
 	{
 		if (r > 0)
 		{
 			SWIM_CHECK_NEAR(runs[r].X, runs[r - 1].X + runs[r - 1].Width, 1e-3f);
 		}
+
 		if ((runs[r].Level & 1) != 0)
 		{
 			sawArabic = true;
 			SWIM_CHECK_EQUAL(ScriptTagToString(runs[r].Script), std::string("Arab"));
 			// Right-to-left: later clusters are further left.
 			const auto* glyphs = &layout.GetGlyphs()[runs[r].FirstGlyph];
+
 			for (std::uint32_t g = 1; g < runs[r].GlyphCount; ++g)
 			{
 				SWIM_CHECK(glyphs[g].Cluster <= glyphs[g - 1].Cluster);
 			}
 		}
 	}
+
 	SWIM_CHECK(sawArabic);
 	SWIM_CHECK_EQUAL(runs[line.RunCount - 1].End, static_cast<std::uint32_t>(text.size()));
 
@@ -191,28 +201,35 @@ SWIM_TEST("Text.Layout", "FallsBackPerGraphemeClusterAndKeepsNeutralsInRuns")
 	SWIM_CHECK_EQUAL(layout.GetMissingGlyphs(), 0u);
 	bool greek = false;
 	bool hebrew = false;
+
 	for (const auto& run : layout.GetRuns())
 	{
 		const std::string script = ScriptTagToString(run.Script);
+
 		if (script == "Grek" && run.Face == 1)
 		{
 			greek = true;
 		}
+
 		if (script == "Hebr" && run.Face == 1 && (run.Level & 1) != 0)
 		{
 			hebrew = true;
 		}
+
 		if (script == "Latn")
 		{
 			SWIM_CHECK_EQUAL(run.Face, 0u);
 		}
 	}
+
 	SWIM_CHECK(greek);
 	SWIM_CHECK(hebrew);
+
 	for (const auto& glyph : layout.GetGlyphs())
 	{
 		SWIM_CHECK(glyph.Glyph != 0);
 	}
+
 	// The primary face alone renders .notdef for the uncovered clusters.
 	const TextLayout primaryOnly(text, Primary(), Desc(20));
 	SWIM_CHECK_EQUAL(primaryOnly.GetMissingGlyphs(), 9u); // 5 Greek + 4 Hebrew letters.
@@ -237,18 +254,21 @@ SWIM_TEST("Text.Layout", "CaretsHitTestingAndSelectionRoundTrip")
 	const float y = layout.GetLines()[0].Top + 5.0f;
 	std::uint32_t stops = 0;
 	float previousX = -1.0f;
+
 	for (std::uint32_t offset = 0; offset <= text.size(); ++offset)
 	{
 		if (!layout.IsCaretStop(offset))
 		{
 			continue;
 		}
+
 		++stops;
 		const auto caret = layout.GetCaret(offset);
 		SWIM_CHECK(caret.X > previousX);
 		previousX = caret.X;
 		SWIM_CHECK_EQUAL(layout.HitTest(caret.X + 0.1f, y), offset);
 	}
+
 	SWIM_CHECK_EQUAL(stops, 10u);		// Nine graphemes: "hello " 6, e + acute, t, e-acute; plus the end.
 	SWIM_CHECK(!layout.IsCaretStop(7)); // Inside e + combining acute.
 	SWIM_CHECK_EQUAL(layout.NextCaretStop(6), 9u);

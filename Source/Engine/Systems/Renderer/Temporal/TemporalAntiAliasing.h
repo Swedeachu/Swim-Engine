@@ -13,6 +13,7 @@
 
 namespace Swim::Render
 {
+
 	// One compiled temporal program.
 	struct TemporalProgram
 	{
@@ -45,13 +46,17 @@ namespace Swim::Render
 	// it advances the jitter sequence and makes this output the next frame's history.
 	class TemporalAntiAliasing
 	{
+
 	  public:
+
 		// Throws std::invalid_argument when the program is missing.
 		TemporalAntiAliasing(Rhi::Device& device, TemporalAntiAliasingDesc desc);
+
 		~TemporalAntiAliasing();
 
 		// The jitter the next recorded frame must be rendered with.
 		std::array<float, 2> GetJitterPixels(const TemporalSettings& settings) const;
+
 		std::array<float, 2> GetJitterNdc(const TemporalSettings& settings, std::uint32_t width, std::uint32_t height) const;
 
 		// Throws std::invalid_argument for invalid settings or inputs that break the frame
@@ -75,6 +80,7 @@ namespace Swim::Render
 		static Rhi::TextureDesc HistoryDesc(std::uint32_t width, std::uint32_t height);
 
 	  private:
+
 		Rhi::Device& device;
 		TemporalAntiAliasingDesc desc;
 		std::array<std::unique_ptr<Rhi::Texture>, 2> history;
@@ -87,5 +93,7 @@ namespace Swim::Render
 		std::uint64_t frameIndex = 0;
 		const RenderGraph* importedGraph = nullptr; // The graph importedHistory belongs to.
 		GraphTexture importedHistory{};
+
 	};
+
 } // namespace Swim::Render

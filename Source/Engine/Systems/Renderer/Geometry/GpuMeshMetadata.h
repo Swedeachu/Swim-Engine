@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuMeshLod
 	{
 		std::uint32_t FirstSubmesh = 0; // Absolute row in the submesh buffer.
@@ -58,4 +59,5 @@ namespace Swim::Render
 	static_assert(sizeof(GpuSubmeshRecord) == 16);
 	static_assert(sizeof(GpuMeshMetadata) == 192);
 	static_assert(offsetof(GpuMeshMetadata, Lods) % 16 == 0);
+
 } // namespace Swim::Render

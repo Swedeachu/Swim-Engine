@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	struct HzbExtent
 	{
 		std::uint32_t Width = 0;
@@ -22,11 +23,15 @@ namespace Swim::Render
 	// depth of the 2x2 (or clipped) footprint below it.
 	class HzbReference
 	{
+
 	  public:
+
 		static HzbReference Build(std::span<const float> depth, std::uint32_t width, std::uint32_t height, DepthConvention convention);
+
 		// Wraps mips produced elsewhere (for example read back from the GPU), checking their sizes.
 		static HzbReference FromMips(
 			std::uint32_t width, std::uint32_t height, DepthConvention convention, std::vector<std::vector<float>> mips);
+
 		// Reduces one mip from the level below it (used to check GPU mips one at a time).
 		static std::vector<float> Reduce(
 			std::span<const float> source, HzbExtent sourceExtent, HzbExtent destination, DepthConvention convention);
@@ -46,10 +51,13 @@ namespace Swim::Render
 		DepthConvention GetConvention() const { return convention; }
 
 	  private:
+
 		std::uint32_t width = 0;
 		std::uint32_t height = 0;
 		DepthConvention convention = CanonicalDepthConvention;
 		std::vector<HzbExtent> extents;
 		std::vector<std::vector<float>> mips;
+
 	};
+
 } // namespace Swim::Render

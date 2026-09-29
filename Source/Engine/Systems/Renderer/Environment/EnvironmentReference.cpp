@@ -5,9 +5,11 @@
 
 namespace Swim::Render::Environment
 {
+
 	CubeImage BuildSkyCube(const ProceduralSky& sky, std::uint32_t size)
 	{
 		CubeImage cube(size, EnvironmentSourceMipCount(size));
+
 		for (std::uint32_t face = 0; face < CubeFaceCount; ++face)
 		{
 			for (std::uint32_t y = 0; y < size; ++y)
@@ -19,6 +21,7 @@ namespace Swim::Render::Environment
 				}
 			}
 		}
+
 		cube.GenerateMips();
 		return cube;
 	}
@@ -32,14 +35,17 @@ namespace Swim::Render::Environment
 			return Float3{ texel[0], texel[1], texel[2] };
 		};
 		const auto normal = Normalize(direction);
+
 		if (perceptualRoughness <= 0.0f || sampleCount == 0)
 		{
 			return sample(normal, 0.0f);
 		}
+
 		const float roughness = std::clamp(perceptualRoughness, StandardPbr::MinPerceptualRoughness, 1.0f);
 		const float alpha = roughness * roughness;
 		Float3 sum{ 0, 0, 0 };
 		float weight = 0.0f;
+
 		for (std::uint32_t i = 0; i < sampleCount; ++i)
 		{
 			const auto local = ImportanceSampleGgx(Hammersley(i, sampleCount), alpha);
@@ -48,21 +54,26 @@ namespace Swim::Render::Environment
 			const Float3 light{ 2.0f * nDotH * half[0] - normal[0], 2.0f * nDotH * half[1] - normal[1],
 				2.0f * nDotH * half[2] - normal[2] };
 			const float nDotL = Dot(normal, light);
+
 			if (nDotL > 0.0f)
 			{
 				const float lod = PrefilterSourceLod(nDotH, alpha, sampleCount, source.GetSize(), source.GetMipCount());
 				const auto radiance = sample(light, lod);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					sum[c] += radiance[c] * nDotL;
 				}
+
 				weight += nDotL;
 			}
 		}
+
 		if (weight <= 0.0f)
 		{
 			return sample(normal, 0.0f);
 		}
+
 		return { sum[0] / weight, sum[1] / weight, sum[2] / weight };
 	}
 
@@ -70,10 +81,12 @@ namespace Swim::Render::Environment
 		const CubeImage& source, std::uint32_t size, std::uint32_t mipCount, std::uint32_t sampleCount, CubeSampling sampling)
 	{
 		CubeImage result(size, mipCount);
+
 		for (std::uint32_t mip = 0; mip < mipCount; ++mip)
 		{
 			const std::uint32_t mipSize = result.GetMipSize(mip);
 			const float roughness = PrefilterMipRoughness(mip, mipCount);
+
 			for (std::uint32_t face = 0; face < CubeFaceCount; ++face)
 			{
 				for (std::uint32_t y = 0; y < mipSize; ++y)
@@ -87,6 +100,7 @@ namespace Swim::Render::Environment
 				}
 			}
 		}
+
 		return result;
 	}
 
@@ -94,6 +108,7 @@ namespace Swim::Render::Environment
 	{
 		IrradianceSh sh;
 		const std::uint32_t size = cube.GetMipSize(mip);
+
 		for (std::uint32_t face = 0; face < CubeFaceCount; ++face)
 		{
 			for (std::uint32_t y = 0; y < size; ++y)
@@ -103,6 +118,7 @@ namespace Swim::Render::Environment
 					const auto basis = ShBasis(CubeTexelDirection(face, x, y, size));
 					const float solidAngle = CubeTexelSolidAngle(x, y, size);
 					const auto& radiance = cube.Texel(mip, face, x, y);
+
 					for (std::uint32_t i = 0; i < ShCoefficientCount; ++i)
 					{
 						for (int c = 0; c < 3; ++c)
@@ -113,6 +129,7 @@ namespace Swim::Render::Environment
 				}
 			}
 		}
+
 		for (std::uint32_t i = 0; i < ShCoefficientCount; ++i)
 		{
 			for (auto& value : sh.Coefficients[i])
@@ -120,12 +137,14 @@ namespace Swim::Render::Environment
 				value *= ShIrradianceScale(i);
 			}
 		}
+
 		return sh;
 	}
 
 	Image2D BuildBrdfLut(std::uint32_t size, std::uint32_t sampleCount)
 	{
 		Image2D lut{ size, size, std::vector<Float4>(std::size_t(size) * size) };
+
 		for (std::uint32_t y = 0; y < size; ++y)
 		{
 			for (std::uint32_t x = 0; x < size; ++x)
@@ -134,6 +153,7 @@ namespace Swim::Render::Environment
 				lut.Texels[std::size_t(y) * size + x] = { ab[0], ab[1], 0.0f, 1.0f };
 			}
 		}
+
 		return lut;
 	}
 
@@ -158,13 +178,16 @@ namespace Swim::Render::Environment
 			RotateEnvironmentLookup(reflected, lighting.Rotation), PrefilterLodForRoughness(roughness, prefiltered.GetMipCount()));
 		const auto ab = brdfLut.SampleBilinear(nDotV, roughness);
 		StandardPbr::EnvironmentTerms terms;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			terms.Irradiance[c] = diffuse[c] * lighting.Intensity;
 			terms.Prefiltered[c] = specular[c] * lighting.Intensity;
 		}
+
 		terms.BrdfScale = ab[0];
 		terms.BrdfBias = ab[1];
 		return terms;
 	}
+
 } // namespace Swim::Render::Environment

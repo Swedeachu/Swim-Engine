@@ -9,9 +9,12 @@ namespace Swim::Testing
 	struct VulkanComputeCapture : VulkanDescriptorCapture
 	{
 		VulkanComputeCapture();
+
 		std::unique_ptr<RhiVulkan::VulkanShaderProgram> MakeComputeProgram(Rhi::ShaderProgramInterfaceDesc interface = {},
 			std::array<std::uint32_t, 3> local = { 8, 4, 1 });
+
 		std::unique_ptr<RhiVulkan::VulkanComputePipeline> MakeComputePipeline(Rhi::ShaderProgramInterfaceDesc interface = {});
+
 		VkShaderStageFlagBits ComputeStage{};
 		VkShaderModule ComputeModule = VK_NULL_HANDLE;
 		VkPipelineLayout ComputeLayout = VK_NULL_HANDLE;

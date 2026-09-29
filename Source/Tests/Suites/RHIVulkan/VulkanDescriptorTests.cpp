@@ -22,36 +22,45 @@ SWIM_TEST("RHI.Vulkan.Descriptors", "SparseSpacesPreserveBindingsAndRejectInvali
 	SWIM_CHECK_EQUAL(capture.SetBindings[2][0].binding, 3u);
 	SWIM_CHECK_EQUAL(capture.SetBindings[2][1].descriptorCount, 2u);
 	SWIM_CHECK_EQUAL(capture.SetBindings[2][1].stageFlags, static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_FRAGMENT_BIT));
+
 	for (std::uint32_t invalid = 0; invalid < 6; ++invalid)
 	{
 		auto bad = schema;
+
 		if (invalid == 0)
 		{
 			bad.Bindings[0].Count = 0;
 		}
+
 		if (invalid == 1)
 		{
 			bad.Bindings[0].VariableCount = true;
 		}
+
 		if (invalid == 2)
 		{
 			bad.Bindings[0].UpdateAfterBind = true; // Needs PartiallyBound and bindless-capable devices.
 		}
+
 		if (invalid == 3)
 		{
 			bad.Bindings[0].Binding = 3;
 		}
+
 		if (invalid == 4)
 		{
 			bad.Space = 8;
 		}
+
 		if (invalid == 5)
 		{
 			bad.Bindings[0].Stages = Rhi::ShaderStageMask::Compute;
 		}
+
 		auto invalidProgram = capture.MakeProgram({ { &bad, 1 }, {} });
 		SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { invalidProgram.get(), {} }));
 	}
+
 	SWIM_CHECK_EQUAL(capture.SetBindings.size(), 3u);
 	capture.State->Device.physical_device.properties.limits.maxPerStageDescriptorSamplers = 1;
 	SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} }));

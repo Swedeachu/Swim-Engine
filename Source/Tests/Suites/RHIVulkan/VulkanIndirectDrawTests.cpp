@@ -7,6 +7,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct IndirectCall
 	{
 		VkBuffer Arguments = VK_NULL_HANDLE;
@@ -64,12 +65,14 @@ namespace
 			Commands->BeginRendering({ { &Attachment, 1 }, nullptr, { 16, 16 } });
 			Commands->SetViewport({ 0, 0, 16, 16 });
 			Commands->SetScissor({ 0, 0, 16, 16 });
+
 			if (bindIndices)
 			{
 				Commands->BindIndexBuffer(Indices, 0, Rhi::IndexType::Uint32);
 			}
 		}
 	};
+
 } // namespace
 
 SWIM_TEST("RHI.Vulkan.IndirectDraw", "IndexedIndirectForwardsArgumentsAndValidatesRanges")

@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	RenderGraphExecutor::RenderGraphExecutor(Rhi::Device& device, const RenderGraphExecutorDesc& desc)
 		: state(std::make_unique<Internal::GraphExecutionState>(device, desc))
 	{
@@ -17,6 +18,7 @@ namespace Swim::Render
 		{
 			throw std::runtime_error("RenderGraph could not create execution synchronization/command pool");
 		}
+
 		CreateInitialStaging();
 	}
 
@@ -149,14 +151,17 @@ namespace Swim::Render
 
 		std::vector<Internal::GraphPooledResource> nextPool;
 		std::vector<Rhi::RhiObject*> slots;
+
 		for (auto r : graph.allocations)
 		{
 			const auto& desc = graph.definition->Resources[r];
+
 			if (desc.Imported)
 			{
 				slots.push_back(desc.Imported);
 				continue;
 			}
+
 			if (desc.Staging != Internal::GraphStaging::None)
 			{
 				slots.push_back(nullptr); // Bound to an arena suballocation by StageBuffers.
@@ -171,6 +176,7 @@ namespace Swim::Render
 
 			Internal::GraphPooledResource entry;
 			entry.Description = desc;
+
 			if (found != state->Pool.end())
 			{
 				entry.Object = std::move(found->Object);
@@ -198,6 +204,7 @@ namespace Swim::Render
 		}
 
 		state->Pool = std::move(nextPool); // Drop incompatible old allocations, bounded by the current graph.
+
 		for (std::uint32_t r = 0; r < graph.lifetimes.size(); ++r)
 		{
 			if (graph.lifetimes[r].Allocation != GraphResourceLifetime::Unused)
@@ -205,6 +212,7 @@ namespace Swim::Render
 				state->Resources[r] = slots[graph.lifetimes[r].Allocation];
 			}
 		}
+
 		lastTimings.Allocate = ms(mark, Clock::now());
 		mark = Clock::now();
 		StageBuffers(graph); // Runs upload writers; failure leaves no published result.
@@ -223,11 +231,13 @@ namespace Swim::Render
 			}
 
 			const auto needed = static_cast<std::uint32_t>(graph.schedule.size() * 2);
+
 			if (!state->Queries || state->Queries->GetDesc().Count < needed)
 			{
 				// Room to grow, so a frame with a few more passes does not recreate it.
 				state->Queries = state->Device.CreateQueryPool({ Rhi::QueryType::Timestamp, needed + needed / 2 + 16, "RenderGraph passes" });
 			}
+
 			if (!state->Queries)
 			{
 				throw std::runtime_error("RenderGraph timestamp pool allocation failed");
@@ -237,29 +247,35 @@ namespace Swim::Render
 		lastTimings.Queries = ms(mark, Clock::now());
 		mark = Clock::now();
 		state->Commands = state->CommandPool->CreateCommandList();
+
 		if (!state->Commands)
 		{
 			throw std::runtime_error("RenderGraph command list allocation failed");
 		}
 
 		state->Recording = true;
+
 		try
 		{
 			state->Commands->Begin();
+
 			if (state->Queries)
 			{
 				state->Commands->ResetQueries(*state->Queries, 0, state->Queries->GetDesc().Count);
 			}
 
 			std::uint32_t query = 0;
+
 			for (const auto& scheduled : graph.schedule)
 			{
 				const auto& pass = graph.definition->Passes[scheduled.Pass];
 				state->Commands->BeginDebugLabel(pass.Name);
+
 				if (state->Queries)
 				{
 					state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::Begin);
 				}
+
 				for (const auto& barrier : scheduled.Barriers)
 				{
 					RecordBarrier(barrier);
@@ -275,6 +291,7 @@ namespace Swim::Render
 				{
 					state->Commands->WriteTimestamp(*state->Queries, query++, Rhi::TimestampStage::End);
 				}
+
 				state->Commands->EndDebugLabel();
 			}
 
@@ -282,16 +299,19 @@ namespace Swim::Render
 			{
 				RecordBarrier(barrier);
 			}
+
 			state->Commands->End();
 			lastTimings.Record = ms(mark, Clock::now());
 			mark = Clock::now();
 
 			const bool uploads = state->Upload && state->Upload->GetUsedBytes() != 0;
 			const bool readbacks = state->Readback && state->Readback->GetUsedBytes() != 0;
+
 			if (uploads)
 			{
 				state->Upload->Flush();
 			}
+
 			if (readbacks)
 			{
 				Rhi::ReadbackSubmission::Validate(*state->Readback);
@@ -307,10 +327,12 @@ namespace Swim::Render
 
 			++state->Submitted;
 			lastTimings.Submit = ms(mark, Clock::now());
+
 			if (readbacks)
 			{
 				Rhi::ReadbackSubmission::Commit(*state->Readback, state->Timeline, state->Submitted);
 			}
+
 			state->HasResult = true;
 			state->Recording = false;
 			return { state->Timeline.get(), state->Submitted };
@@ -330,10 +352,12 @@ namespace Swim::Render
 		}
 
 		const auto& r = Internal::RequireResource(*state->Graph.definition, graph, index, kind);
+
 		if (!r.Exported)
 		{
 			throw std::invalid_argument("Only exported RenderGraph resources may escape a pass");
 		}
+
 		if (r.Staging != Internal::GraphStaging::None)
 		{
 			throw std::invalid_argument("Staged RenderGraph readbacks are read through TryReadback: " + r.Name);
@@ -355,6 +379,7 @@ namespace Swim::Render
 	std::vector<GraphPassTiming> RenderGraphExecutor::ReadTimings()
 	{
 		Wait();
+
 		if (!state->HasResult)
 		{
 			throw std::logic_error("RenderGraph has no successful execution result");
@@ -362,6 +387,7 @@ namespace Swim::Render
 
 		std::vector<GraphPassTiming> result;
 		std::vector<Rhi::TimestampResult> ticks(state->Graph.schedule.size() * 2);
+
 		if (state->Queries && state->Queries->ReadTimestamps(0, ticks) != Rhi::QueryReadStatus::Ready)
 		{
 			throw std::runtime_error("RenderGraph timestamps unavailable after completion");
@@ -370,15 +396,18 @@ namespace Swim::Render
 		for (std::size_t i = 0; i < state->Graph.schedule.size(); ++i)
 		{
 			GraphPassTiming timing{ state->Graph.definition->Passes[state->Graph.schedule[i].Pass].Name, {}, {} };
+
 			if (state->Queries)
 			{
 				const auto info = state->Queries->GetTimestampInfo();
 				timing.Nanoseconds = info.ElapsedNanoseconds(ticks[2 * i], ticks[2 * i + 1]);
 				timing.EndOffsetNanoseconds = info.ElapsedNanoseconds(ticks[0], ticks[2 * i + 1]);
 			}
+
 			result.push_back(std::move(timing));
 		}
 
 		return result;
 	}
+
 } // namespace Swim::Render

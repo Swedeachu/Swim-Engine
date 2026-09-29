@@ -50,6 +50,7 @@ namespace Swim::Testing
 		{
 			return Name;
 		}
+
 		return Suite + "." + Name;
 	}
 
@@ -102,6 +103,7 @@ namespace Swim::Testing
 		void ReportFailure(const SourceLocation& location, const char* expression, std::string message)
 		{
 			TestContext* context = CurrentContext;
+
 			if (context == nullptr)
 			{
 				// A check outside a running test is a framework misuse, not a test
@@ -115,6 +117,7 @@ namespace Swim::Testing
 		void ReportPass()
 		{
 			TestContext* context = CurrentContext;
+
 			if (context == nullptr)
 			{
 				throw std::logic_error("Swim test check evaluated outside of a running test case");

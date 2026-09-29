@@ -19,6 +19,7 @@ namespace Ss = Swim::Testing::ShadowScene;
 
 namespace
 {
+
 	constexpr float Pi = 3.14159265f;
 
 	struct World
@@ -69,10 +70,12 @@ namespace
 		world.Plan = PlanShadows(settings, world.Camera, world.Casters, allocator);
 		world.Atlas.Size = settings.AtlasSize;
 		world.Atlas.Depth.assign(std::size_t(settings.AtlasSize) * settings.AtlasSize, 0.0f);
+
 		for (const auto& view : world.Plan.Views)
 		{
 			Ss::RenderView(world.Objects, world.Casts, view, world.Atlas);
 		}
+
 		return world;
 	}
 
@@ -106,6 +109,7 @@ namespace
 		{
 			return { -light.Direction[0], -light.Direction[1], -light.Direction[2] };
 		}
+
 		return StandardPbr::Normalize({ light.Position[0] - p[0], light.Position[1] - p[1], light.Position[2] - p[2] });
 	}
 
@@ -115,24 +119,29 @@ namespace
 		for (std::size_t index = 0; index < world.Objects.size(); ++index)
 		{
 			const auto& object = world.Objects[index];
+
 			if (!world.Casts[index] || object.Kind != Fs::Shape::Cube)
 			{
 				continue;
 			}
+
 			const auto& rows = object.Transform.Current;
 			const auto inverse = Fs::InverseLinear(rows);
 			const Sh::Float3 relative{ p[0] - rows[3], p[1] - rows[7], p[2] - rows[11] };
 			bool inside = true;
+
 			for (int r = 0; r < 3; ++r)
 			{
 				const float local = inverse[r * 3] * relative[0] + inverse[r * 3 + 1] * relative[1] + inverse[r * 3 + 2] * relative[2];
 				inside = inside && std::abs(local) < 1.0f;
 			}
+
 			if (inside)
 			{
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -143,14 +152,17 @@ namespace
 		{
 			return true;
 		}
+
 		const auto toLight = ToLight(light, p);
 		const Sh::Float3 origin{ p[0] + normal[0] * 1.0e-3f, p[1] + normal[1] * 1.0e-3f, p[2] + normal[2] * 1.0e-3f };
 		float limit = 1.0e30f;
+
 		if (light.Type != std::uint32_t(LightType::Directional))
 		{
 			const Sh::Float3 d{ light.Position[0] - p[0], light.Position[1] - p[1], light.Position[2] - p[2] };
 			limit = std::sqrt(Fs::Dot(d, d));
 		}
+
 		for (const auto& hit : Fs::CastRay(world.Objects, origin, toLight))
 		{
 			if (world.Casts[hit.Object] && hit.T < limit)
@@ -158,6 +170,7 @@ namespace
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -177,6 +190,7 @@ namespace
 		const Sh::ShadowSampleInputs inputs{ &world.Atlas, world.Plan.Records, world.Plan.Views };
 		const auto& light = world.Casters[slot].Light;
 		const Sh::Float3 up{ 0, 1, 0 };
+
 		for (float z = -extent; z <= extent; z += step)
 		{
 			for (float x = -extent; x <= extent; x += step)
@@ -184,30 +198,37 @@ namespace
 				const Sh::Float3 p{ x, 0, z };
 				const float depth = CameraDepth(world.Camera.View, p);
 				const auto viewIndex = Sh::SelectShadowView(world.Plan.Records[slot], p, depth);
+
 				if (!viewIndex || !Sh::ProjectToShadowView(world.Plan.Views[*viewIndex], p))
 				{
 					continue;
 				}
+
 				const auto toLight = ToLight(light, p);
+
 				if (Fs::Dot(toLight, up) <= 0.05f)
 				{
 					continue;
 				}
+
 				const float factor = Sh::ShadowFactor(inputs, slot, p, up, toLight, depth);
 				const auto& record = world.Plan.Records[slot];
 				// Cascade blending can mix in the next (coarser) cascade: size the margin by it.
 				std::uint32_t coarsest = *viewIndex;
+
 				if (record.Kind == static_cast<std::uint32_t>(Swim::Render::ShadowKind::Directional) &&
 					*viewIndex + 1 < record.FirstView + record.ViewCount)
 				{
 					const std::uint32_t cascade = *viewIndex - record.FirstView;
 					const float farDepth = record.CascadeFar[cascade];
 					const float nearDepth = cascade == 0 ? 0.0f : record.CascadeFar[cascade - 1];
+
 					if (depth > farDepth - record.CascadeBlend * (farDepth - nearDepth))
 					{
 						coarsest = *viewIndex + 1;
 					}
 				}
+
 				const auto& view = world.Plan.Views[coarsest];
 				const Sh::Float3 d{ p[0] - light.Position[0], p[1] - light.Position[1], p[2] - light.Position[2] };
 				const float texel = view.TexelWorldSize * (view.Perspective ? std::sqrt(Fs::Dot(d, d)) : 1.0f);
@@ -219,6 +240,7 @@ namespace
 				const float margin = 2.0f * float(record.PcfRadius + 1) * texel / nDotL + lift * std::sqrt(1.0f - nDotL * nDotL) / nDotL;
 				const bool center = Occluded(world, light, p, up);
 				bool uniform = true;
+
 				for (int oz = -1; oz <= 1 && uniform; ++oz)
 				{
 					for (int ox = -1; ox <= 1 && uniform; ++ox)
@@ -226,20 +248,25 @@ namespace
 						uniform = Occluded(world, light, { x + ox * margin, 0, z + oz * margin }, up) == center;
 					}
 				}
+
 				if (!uniform)
 				{
 					tally.Partial += factor > 0.0f && factor < 1.0f ? 1u : 0u;
 					continue;
 				}
+
 				if (factor != (center ? 0.0f : 1.0f))
 				{
 					++tally.Wrong;
 				}
+
 				(center ? tally.Shadowed : tally.Lit) += 1;
 			}
 		}
+
 		return tally;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Shadows.Sampling", "CascadedSunShadowsMatchRayCastVisibility")
@@ -271,9 +298,11 @@ SWIM_TEST("Render.Shadows.Sampling", "PointShadowsMatchRayCastVisibilityOnEveryF
 	SWIM_CHECK(tally.Lit > 1000u);
 	// The ground around the light is seen through the -Y face and four side faces.
 	std::uint32_t faces = 0;
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		bool used = false;
+
 		for (float z = -10.0f; z <= 10.0f && !used; z += 0.5f)
 		{
 			for (float x = -10.0f; x <= 10.0f && !used; x += 0.5f)
@@ -281,8 +310,10 @@ SWIM_TEST("Render.Shadows.Sampling", "PointShadowsMatchRayCastVisibilityOnEveryF
 				used = Sh::PointShadowFace({ x - 3.0f, -3.0f, z + 2.5f }) == face;
 			}
 		}
+
 		faces += used ? 1u : 0u;
 	}
+
 	SWIM_CHECK_EQUAL(faces, 5u);
 }
 
@@ -294,30 +325,37 @@ SWIM_TEST("Render.Shadows.Sampling", "LitCasterSurfacesHaveNoAcne")
 	// by that light: normal-offset and slope bias keep self-shadowing out.
 	const auto& transform = world.Objects[1].Transform.Current;
 	std::uint32_t samples = 0, acne = 0;
+
 	for (std::uint32_t slot = 0; slot < 3; ++slot)
 	{
 		const auto& light = world.Casters[slot].Light;
+
 		for (const auto& face : Fs::CubeFaces)
 		{
 			const auto normal = StandardPbr::Normalize(ForwardPlus::TransformNormal(transform, face[0]));
 			const auto bitangent = Fs::Cross(face[0], face[1]);
+
 			for (float u = -0.8f; u <= 0.8f; u += 0.1f)
 			{
 				for (float v = -0.8f; v <= 0.8f; v += 0.1f)
 				{
 					Sh::Float3 local{};
+
 					for (int c = 0; c < 3; ++c)
 					{
 						local[c] = face[0][c] + face[1][c] * u + bitangent[c] * v;
 					}
+
 					const Sh::Float3 p{ transform[0] * local[0] + transform[1] * local[1] + transform[2] * local[2] + transform[3],
 						transform[4] * local[0] + transform[5] * local[1] + transform[6] * local[2] + transform[7],
 						transform[8] * local[0] + transform[9] * local[1] + transform[10] * local[2] + transform[11] };
 					const auto toLight = ToLight(light, p);
+
 					if (Fs::Dot(normal, toLight) < 0.2f || Occluded(world, light, p, normal))
 					{
 						continue;
 					}
+
 					++samples;
 					const float factor = Sh::ShadowFactor(inputs, slot, p, normal, toLight, CameraDepth(world.Camera.View, p));
 					acne += factor < 1.0f ? 1u : 0u;
@@ -325,6 +363,7 @@ SWIM_TEST("Render.Shadows.Sampling", "LitCasterSurfacesHaveNoAcne")
 			}
 		}
 	}
+
 	SWIM_CHECK(samples > 400u);
 	SWIM_CHECK_EQUAL(acne, 0u);
 }

@@ -23,6 +23,7 @@ namespace Swim::RhiVulkan
 				{
 					RetireLostVulkanDevice(*DeviceState);
 				}
+
 				if (Pool != VK_NULL_HANDLE)
 				{
 					DeviceState->Dispatch.vkDestroyCommandPool(DeviceState->Device.device, Pool, nullptr);

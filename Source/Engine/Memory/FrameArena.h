@@ -11,6 +11,7 @@ namespace Swim::Memory
 
 	class FrameArena
 	{
+
 	public:
 
 		explicit FrameArena(std::size_t defaultBlockSizeBytes = 1024 * 1024)
@@ -42,14 +43,18 @@ namespace Swim::Memory
 		}
 
 		std::uint64_t GetFrameIndex() const { return frameIndex; }
+
 		ArenaStats GetStats() const { return arena.GetStats(); }
+
 		LinearArena& GetArena() { return arena; }
+
 		const LinearArena& GetArena() const { return arena; }
 
 	private:
 
 		LinearArena arena;
 		std::uint64_t frameIndex = 0;
+
 	};
 
 }

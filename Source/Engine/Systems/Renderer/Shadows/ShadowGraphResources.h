@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	// One ShadowRenderer::Record. Lighting samples Atlas (D32Float, ShaderRead after
 	// the depth pass) through Records (one GpuShadowRecord per slot) and Views (one
 	// GpuShadowView per tile).
@@ -22,4 +23,5 @@ namespace Swim::Render
 		std::uint32_t RecordCount = 0;
 		std::uint32_t RenderedViews = 0; // Views culled and drawn this frame (the rest were cached).
 	};
+
 } // namespace Swim::Render

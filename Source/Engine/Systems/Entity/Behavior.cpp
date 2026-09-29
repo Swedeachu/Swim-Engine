@@ -7,12 +7,14 @@
 
 namespace Engine
 {
+
 	Behavior::Behavior(Scene* sceneValue, entt::entity owner) : scene(sceneValue), entity(owner)
 	{
 		if (scene == nullptr || entity == entt::null)
 		{
 			throw std::runtime_error("Behavior requires a valid Scene and entt::entity.");
 		}
+
 		RefreshFieldCache();
 	}
 
@@ -32,4 +34,5 @@ namespace Engine
 	{
 		return scene->GetTime();
 	}
+
 } // namespace Engine

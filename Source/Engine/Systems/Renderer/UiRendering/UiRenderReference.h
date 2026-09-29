@@ -14,6 +14,7 @@
 // with an exact CPU rasterization.
 namespace Swim::Render::Ui
 {
+
 	using Float4 = std::array<float, 4>;
 
 	struct QuadBuildDesc
@@ -112,4 +113,5 @@ namespace Swim::Render::Ui
 	// Bilinear, clamp-to-edge sampling of a tightly packed RGBA8 UNORM image with
 	// Vulkan's texel-centre convention.
 	Float4 SampleBilinear(std::span<const std::uint8_t> rgba, std::uint32_t width, std::uint32_t height, float u, float v);
+
 } // namespace Swim::Render::Ui

@@ -68,17 +68,20 @@ namespace
 			Rhi::MemoryPreference::GpuToCpu, "Scoped compute readback" });
 		SWIM_REQUIRE(input && output && parameters && readback);
 		std::array<std::unique_ptr<Rhi::DescriptorTable>, 2> tables;
+
 		for (std::size_t index = 0; index < tables.size(); ++index)
 		{
 			const auto& schema = interface.DescriptorSchemas[index];
 			tables[index] = device->CreateDescriptorTable({ layout.get(), schema.Space });
 			SWIM_REQUIRE(tables[index]);
 			std::vector<Rhi::DescriptorWrite> writes;
+
 			for (const auto& binding : schema.Bindings)
 			{
 				SWIM_REQUIRE_EQUAL(binding.Stages, Rhi::ShaderStageMask::Compute);
 				Rhi::DescriptorWrite write;
 				write.Binding = binding.Binding;
+
 				switch (binding.Type)
 				{
 				case Rhi::DescriptorType::ReadOnlyStorageBuffer: write.BufferResource = input.get(); break;
@@ -86,10 +89,13 @@ namespace
 				case Rhi::DescriptorType::UniformBuffer: write.BufferResource = parameters.get(); break;
 				default: throw std::runtime_error("Unexpected scoped compute descriptor type");
 				}
+
 				writes.push_back(write);
 			}
+
 			tables[index]->Write(writes);
 		}
+
 		// Resources stay on one compute-capable family. Drain before host writes
 		// and retain the frame ring last so exceptions cannot destroy live resources.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Compute, 2 });
@@ -97,12 +103,14 @@ namespace
 		std::array<std::uint32_t, count> source{};
 		std::array<std::uint32_t, count> actual{};
 		const auto rw = Rhi::ResourceState::ShaderRead | Rhi::ResourceState::ShaderWrite;
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			for (std::uint32_t index = 0; index < count; ++index)
 			{
 				source[index] = frame * 101 + index;
 			}
+
 			const std::array<std::uint32_t, 4> uniform{ active, 3 + frame, 7 + frame, 0 };
 			input->Write(0, std::as_bytes(std::span(source)));
 			parameters->Write(0, std::as_bytes(std::span(uniform)));
@@ -115,10 +123,12 @@ namespace
 			commands.CopyBuffer(*input, *output, { 0, 0, bytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, rw);
 			commands.BindComputePipeline(*pipeline);
+
 			for (std::size_t index = 0; index < tables.size(); ++index)
 			{
 				commands.BindDescriptorTable(interface.DescriptorSchemas[index].Space, *tables[index]);
 			}
+
 			std::array<std::uint32_t, 4> push{ active, 0, 11 + frame, 0 };
 			commands.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(push)));
 			commands.Dispatch(8, 1, 1);
@@ -134,22 +144,26 @@ namespace
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::uint32_t index = 0; index < count; ++index)
 			{
 				SWIM_CHECK_EQUAL(actual[index], index < active ? source[index] * uniform[1] + uniform[2] + push[2] : source[index]);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ScopedComputeDescriptorsAndReadback",
 				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunScopedDescriptorSmoke); } });
 		}
+
 		return true;
 	}();
 

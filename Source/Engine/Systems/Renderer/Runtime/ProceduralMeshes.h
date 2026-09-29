@@ -10,6 +10,7 @@
 
 namespace Engine::ProceduralMeshes
 {
+
 	// CPU geometry in the renderer's StandardVertex layout (48 bytes: position, normal,
 	// tangent with the bitangent sign in w, uv), one triangle list, counter-clockwise
 	// front faces seen from outside, +Y up. UV origin is the top left (v grows down).
@@ -19,9 +20,13 @@ namespace Engine::ProceduralMeshes
 		std::vector<std::uint32_t> Indices;
 
 		std::uint32_t AddVertex(const std::array<float, 3>& position, const std::array<float, 3>& normal, const std::array<float, 2>& uv);
+
 		void AddTriangle(std::uint32_t a, std::uint32_t b, std::uint32_t c);
+
 		void AddQuad(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d); // a b c d counter-clockwise.
+
 		std::array<float, 3> BoundsMin() const;
+
 		std::array<float, 3> BoundsMax() const;
 	};
 
@@ -65,4 +70,5 @@ namespace Engine::ProceduralMeshes
 
 	SkinnedMeshData MakeSkinnedColumn(
 		float radius = 0.2f, float height = 2.0f, std::uint32_t joints = 4, std::uint32_t segments = 16, std::uint32_t ringsPerJoint = 4);
+
 } // namespace Engine::ProceduralMeshes

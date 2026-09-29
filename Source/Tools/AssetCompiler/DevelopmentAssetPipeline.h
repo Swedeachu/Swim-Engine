@@ -9,7 +9,9 @@
 
 namespace Swim::Assets
 {
+
 	class AssetSystem;
+
 }
 
 namespace Swim::AssetCompiler

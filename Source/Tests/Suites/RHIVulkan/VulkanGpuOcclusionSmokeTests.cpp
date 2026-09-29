@@ -30,6 +30,7 @@
 
 namespace
 {
+
 #ifdef SWIM_GPU_OCCLUSION_SMOKE_AVAILABLE
 	std::vector<std::byte> ReadProgram(const char* path)
 	{
@@ -54,6 +55,7 @@ namespace
 	std::set<std::uint32_t> DrawnRows(const Swim::Render::VisibilityReferenceResult& result)
 	{
 		std::set<std::uint32_t> rows;
+
 		for (const auto& bin : result.Bins)
 		{
 			for (const auto& draw : bin)
@@ -61,6 +63,7 @@ namespace
 				rows.insert(draw.Record.InstanceRow);
 			}
 		}
+
 		return rows;
 	}
 #endif
@@ -177,6 +180,7 @@ namespace
 			constexpr float wallHalf = 12.0f;
 			constexpr float center = 18.75f;
 			GpuScene scene(*device, { side * side + 1, "Occlusion scene" });
+
 			for (std::uint32_t j = 0; j < side; ++j)
 			{
 				for (std::uint32_t i = 0; i < side; ++i)
@@ -190,6 +194,7 @@ namespace
 					scene.Create(desc);
 				}
 			}
+
 			const auto wallAt = [&](float x)
 			{
 				RenderAffine transform;
@@ -265,6 +270,7 @@ namespace
 							b.Read(vertexPage, S::ShaderRead);
 							b.Read(indexPage, S::IndexBuffer);
 							b.Read(viewUpload, S::ShaderRead);
+
 							if (first)
 							{
 								b.Write(target, S::ColorAttachment);
@@ -275,16 +281,19 @@ namespace
 								b.ReadWrite(target, S::ColorAttachment);
 								b.ReadWrite(depth, S::DepthStencilWrite);
 							}
+
 						},
 						[&, visible, first](RenderCommandContext& c)
 						{
 							auto table = c.Device().CreateDescriptorTable({ drawLayout.get(), drawSpace, 0, "Occlusion draw table" });
 							SWIM_REQUIRE(table);
 							std::array<Rhi::DescriptorWrite, 5> writes{};
+
 							for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 							{
 								writes[binding].Binding = binding;
 							}
+
 							writes[0].BufferResource = &c.Get(sceneResources.Instances);
 							writes[1].BufferResource = &c.Get(sceneResources.Transforms);
 							writes[2].BufferResource = &c.Get(visible.DrawRecords);
@@ -334,11 +343,13 @@ namespace
 				const auto lateCounts = AddBufferReadback(graph, "Late counts", late.Counts, 0, sizeof(std::uint32_t));
 				const auto image = AddTextureReadback(graph, "Image readback", target, { 0, {}, {}, { size, size, 1 } });
 				std::vector<GraphReadback> mipReadbacks;
+
 				for (std::uint32_t mip = 0; mip < hzb.MipCount; ++mip)
 				{
 					mipReadbacks.push_back(AddTextureReadback(
 						graph, "HZB readback", hzb.Pyramid, { 0, { mip, 0 }, {}, { hzbMips[mip].Width, hzbMips[mip].Height, 1 } }));
 				}
+
 				const auto completion = executor.Execute(graph.Compile());
 				scene.CommitUploads();
 				heap.CommitUploads(completion);
@@ -364,6 +375,7 @@ namespace
 				std::vector<std::uint8_t> pixels(std::size_t(size) * size * 4);
 				read(image, std::as_writable_bytes(std::span(pixels)));
 				std::vector<std::vector<float>> mips;
+
 				for (std::uint32_t mip = 0; mip < hzb.MipCount; ++mip)
 				{
 					mips.emplace_back(std::size_t(hzbMips[mip].Width) * hzbMips[mip].Height);
@@ -374,24 +386,29 @@ namespace
 				// mip 0 only holds clear, grid or wall depths.
 				const float gridDepth = (0.0f - 10.0f + 100.0f) / 99.9f;
 				const float wallDepth = (5.0f - 10.0f + 100.0f) / 99.9f;
+
 				for (const float value : mips[0])
 				{
 					SWIM_CHECK(value == 0.0f || std::abs(value - gridDepth) < 1.0e-5f || std::abs(value - wallDepth) < 1.0e-5f);
 				}
+
 				for (std::uint32_t mip = 1; mip < hzb.MipCount; ++mip)
 				{
 					SWIM_CHECK(mips[mip] == HzbReference::Reduce(mips[mip - 1], hzbMips[mip - 1], hzbMips[mip], DepthConvention::ReverseZ));
 				}
+
 				const auto gpuHzb = HzbReference::FromMips(size, size, DepthConvention::ReverseZ, mips);
 
 				// The CPU definition over the same rows and the GPU's own HZB.
 				std::vector<GpuInstanceRecord> instances;
 				std::vector<GpuTransformRecord> transforms;
+
 				for (std::uint32_t row = 0; row < sceneResources.RowCount; ++row)
 				{
 					instances.push_back(scene.GetInstanceRow(row));
 					transforms.push_back(scene.GetTransformRow(row));
 				}
+
 				std::vector<GpuMeshMetadata> meshes(quad.Index + 1);
 				meshes[quad.Index] = quadMeta;
 				const auto quadSubmeshes = heap.GetSubmeshes(quad);
@@ -412,16 +429,19 @@ namespace
 				const auto gpuRows = [&](const std::vector<GpuDrawRecord>& records, std::uint32_t count)
 				{
 					std::set<std::uint32_t> rows;
+
 					for (std::uint32_t slot = 0; slot < std::min(count, capacity); ++slot)
 					{
 						rows.insert(records[slot].InstanceRow);
 					}
+
 					return rows;
 				};
 				const auto drawnEarly = gpuRows(earlyDraws, earlyCount);
 				const auto drawnLate = gpuRows(lateDraws, lateCount);
 				SWIM_CHECK(drawnEarly == DrawnRows(expectedEarly));
 				SWIM_CHECK(drawnLate == DrawnRows(expectedLate));
+
 				for (const auto row : drawnLate)
 				{
 					SWIM_CHECK(!drawnEarly.contains(row)); // Never drawn twice.
@@ -435,31 +455,39 @@ namespace
 					return std::uint32_t(p[0]) | (std::uint32_t(p[1]) << 8) | (std::uint32_t(p[2]) << 16);
 				};
 				std::set<std::uint32_t> drawnIds;
+
 				for (const auto row : drawnEarly)
 				{
 					drawnIds.insert(instances[row].ObjectId);
 				}
+
 				for (const auto row : drawnLate)
 				{
 					drawnIds.insert(instances[row].ObjectId);
 				}
+
 				std::uint32_t samples = 0;
+
 				for (std::uint32_t id = 0; id < side * side; ++id)
 				{
 					const float wx = float(id % side) * spacing - 0.5f;
 					const float wy = float(id / side) * spacing - 0.5f;
 					const float px = (wx - (center - 20.0f)) / 40.0f * float(size);
 					const float py = (0.5f - (wy - center) / 40.0f) * float(size); // +Y-up NDC.
+
 					if (px < 0.0f || py < 0.0f || px >= float(size) || py >= float(size))
 					{
 						continue;
 					}
+
 					const bool behindWall = std::abs(wx - wallX) < wallHalf && std::abs(wy - center) < wallHalf;
 					SWIM_CHECK_EQUAL(decode(std::uint32_t(px), std::uint32_t(py)), (behindWall ? side * side : id) + 1);
 					++samples;
 				}
+
 				SWIM_CHECK(samples > 200u);
 				std::uint32_t strays = 0;
+
 				for (std::uint32_t y = 0; y < size; ++y)
 				{
 					for (std::uint32_t x = 0; x < size; ++x)
@@ -468,6 +496,7 @@ namespace
 						strays += value != 0 && !drawnIds.contains(value - 1);
 					}
 				}
+
 				SWIM_CHECK_EQUAL(strays, 0u);
 				revealed = lateStats.Visible;
 				return std::array<std::uint32_t, 3>{ earlyStats.Visible, lateStats.Visible, lateStats.Occluded };
@@ -516,6 +545,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add(
@@ -525,6 +555,8 @@ namespace
 						Swim::Testing::RunValidatedVulkanSmoke(&RunGpuOcclusionSmoke);
 					} });
 		}
+
 		return true;
 	}();
+
 } // namespace

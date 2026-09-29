@@ -37,6 +37,7 @@
 
 namespace
 {
+
 	// Development builds read loose assets (and cook into Assets/Cooked) straight from the
 	// repository, so there is one cooked cache and nothing to copy or sync: an explicit
 	// --assets wins, then the repository's Assets/ folder (SWIM_DEVELOPMENT_ASSET_ROOT),
@@ -47,30 +48,37 @@ namespace
 		{
 			return std::filesystem::path(requested);
 		}
+
 #ifdef SWIM_DEVELOPMENT_ASSET_ROOT
 		std::error_code error;
 		// The literal is UTF-8 (/utf-8 on MSVC): keep non-ASCII repository paths intact.
 		const std::string_view literal = SWIM_DEVELOPMENT_ASSET_ROOT;
 		const std::filesystem::path development(std::u8string(literal.begin(), literal.end()));
+
 		if (std::filesystem::is_directory(development, error))
 		{
 			return development;
 		}
+
 #endif
 		return {};
 	}
+
 } // namespace
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		int ReportLifecycleFailure(std::string_view phase, std::string_view systemName, int result)
 		{
 			if (result != 0)
 			{
 				std::cerr << "[Engine] " << phase << " failed for " << systemName << " with code " << result << ".\n";
 			}
+
 			return result;
 		}
 
@@ -106,6 +114,7 @@ namespace Engine
 			case Swim::AssetCompiler::DevelopmentAssetErrorStage::Load:
 				return "load";
 			}
+
 			return "unknown";
 		}
 #endif
@@ -114,6 +123,7 @@ namespace Engine
 		{
 			return { v.x, v.y, v.z };
 		}
+
 	} // namespace
 
 	SwimEngine::SwimEngine(EngineConfig configValue) : config(std::move(configValue)), stateMachine(EngineState::Playing)
@@ -155,16 +165,19 @@ namespace Engine
 			std::cerr << "[Engine] Graphics backend '" << ToString(graphicsBackend) << "' has no RHI implementation yet; use vulkan.\n";
 			return false;
 		}
+
 		if (physicsBackend == PhysicsBackend::Auto)
 		{
 			std::cerr << "[Engine] Physics backend '" << ToString(config.Physics) << "' is not compiled into this build.\n";
 			return false;
 		}
+
 		if (!IsSingleEngineState(config.InitialState))
 		{
 			std::cerr << "[Engine] The initial state must be playing, paused or stopped.\n";
 			return false;
 		}
+
 		return true;
 	}
 
@@ -174,19 +187,24 @@ namespace Engine
 		{
 			return -1;
 		}
+
 		started = true;
 		const int awakeResult = Awake();
+
 		if (awakeResult != 0)
 		{
 			Exit();
 			return awakeResult;
 		}
+
 		const int initResult = Init();
+
 		if (initResult != 0)
 		{
 			Exit();
 			return initResult;
 		}
+
 		running = true;
 		return 0;
 	}
@@ -219,11 +237,13 @@ namespace Engine
 		platformDesc.ApplicationName = "Swim Engine";
 		platformDesc.Headless = config.Present == PresentMode::Headless;
 		platformDesc.AssetRoot = ResolveAssetRoot(config.AssetRoot);
+
 		if (!platformSystem->Initialize(platformDesc))
 		{
 			std::cerr << "[Engine] Platform initialization failed.\n";
 			return false;
 		}
+
 		if (config.Present == PresentMode::Headless)
 		{
 			surfaceWidth = config.Window.Width;
@@ -233,19 +253,23 @@ namespace Engine
 		}
 
 		Swim::Platform::WindowDesc windowDesc = config.Window;
+
 		if (windowDesc.ExternalParent.IsValid())
 		{
 			std::cout << "[Engine] Ignoring ExternalParent window embedding; the external editor transport is archived.\n";
 			windowDesc.ExternalParent = {};
 		}
+
 		windowDesc.Title = GetWindowTitle();
 		windowDesc.GraphicsSupport = Swim::Platform::WindowGraphicsSupport::Vulkan;
 		engineWindow = platformSystem->GetWindowSystem().Create(windowDesc);
+
 		if (!engineWindow)
 		{
 			std::cerr << "[Engine] Window creation failed.\n";
 			return false;
 		}
+
 		engineWindow->Show();
 		UpdateSurfaceSize();
 		minimized = engineWindow->IsMinimized();
@@ -259,14 +283,17 @@ namespace Engine
 		const auto& files = platformSystem->GetFileSystem();
 		const std::array<std::filesystem::path, 3> candidates{ files.GetAssetRoot(), files.GetExecutableDirectory() / "Assets",
 			std::filesystem::current_path() / "Assets" };
+
 		for (const auto& candidate : candidates)
 		{
 			std::error_code error;
+
 			if (std::filesystem::is_regular_file(candidate / "Fonts" / "DejaVuSans.ttf", error))
 			{
 				return candidate;
 			}
 		}
+
 		return candidates.front();
 	}
 
@@ -275,6 +302,7 @@ namespace Engine
 		jobSystem = std::make_unique<Swim::Jobs::JobSystem>();
 		Swim::Jobs::JobSystemDesc jobDesc{};
 		jobDesc.BlockingThreads = 1;
+
 		if (!jobSystem->Initialize(jobDesc))
 		{
 			std::cerr << "[Engine] Failed to initialize JobSystem.\n";
@@ -282,6 +310,7 @@ namespace Engine
 		}
 
 		ioSystem = std::make_unique<Swim::IO::AsyncIoService>();
+
 		if (!ioSystem->Initialize(platformSystem->GetFileSystem(), *jobSystem))
 		{
 			std::cerr << "[Engine] Failed to initialize AsyncIoService.\n";
@@ -289,6 +318,7 @@ namespace Engine
 		}
 
 		assetSystem = std::make_unique<Swim::Assets::AssetSystem>();
+
 		if (!assetSystem->Initialize())
 		{
 			std::cerr << "[Engine] Failed to initialize AssetSystem.\n";
@@ -299,6 +329,7 @@ namespace Engine
 		{
 			const std::filesystem::path assetRoot = platformSystem->GetFileSystem().GetAssetRoot();
 			std::error_code error;
+
 			if (std::filesystem::is_directory(assetRoot, error))
 			{
 				std::cout << "[Assets] Development asset root: " << assetRoot.string() << '\n';
@@ -311,6 +342,7 @@ namespace Engine
 						  << ", skipped unsupported: " << bootstrap.Stats.SourcesSkippedUnsupported
 						  << ", root models loaded: " << bootstrap.Stats.RootModelsLoaded
 						  << ", loaded .sasset files: " << bootstrap.Stats.SassetsLoaded << ".\n";
+
 				for (const auto& failure : bootstrap.Errors)
 				{
 					std::cerr << "[Assets] [" << DevelopmentAssetErrorStageName(failure.Stage) << "] " << failure.SourcePath.string()
@@ -343,11 +375,14 @@ namespace Engine
 		default:
 			return -1;
 		}
+
 		physicsSystem->SetFixedDeltaSeconds(static_cast<float>(clock.GetFixedDelta()));
+
 		if (const int result = physicsSystem->Awake(); result != 0)
 		{
 			return ReportLifecycleFailure("Awake", "PhysicsSystem", result);
 		}
+
 		if (const int result = physicsSystem->Init(); result != 0)
 		{
 			return ReportLifecycleFailure("Init", "PhysicsSystem", result);
@@ -405,6 +440,7 @@ namespace Engine
 			return GetFPS();
 		};
 		sceneSystem->SetServices(std::move(services));
+
 		if (!config.StartupScene.empty())
 		{
 			sceneSystem->SetStartupScene(config.StartupScene);
@@ -417,10 +453,12 @@ namespace Engine
 			[this](EngineState previous, EngineState current)
 			{
 				clock.SetPaused(current != EngineState::Playing);
+
 				if (current == EngineState::Stopped)
 				{
 					clock.ResetAccumulator();
 				}
+
 				sceneSystem->OnEngineStateChanged(previous, current);
 				std::cout << "[Engine] State " << ToString(previous) << " -> " << ToString(current) << '\n';
 			});
@@ -429,6 +467,7 @@ namespace Engine
 		{
 			return ReportLifecycleFailure("Awake", "SceneSystem", result);
 		}
+
 		if (const int result = sceneSystem->Init(); result != 0)
 		{
 			return ReportLifecycleFailure("Init", "SceneSystem", result);
@@ -447,6 +486,7 @@ namespace Engine
 		}
 
 		RegisterEngineCommands();
+
 		for (const auto& command : config.StartupCommands)
 		{
 			if (!commandRegistry->ParseAndDispatch(command))
@@ -454,6 +494,7 @@ namespace Engine
 				std::cerr << "[Engine] Unknown startup command: " << command << '\n';
 			}
 		}
+
 		return 0;
 	}
 
@@ -483,12 +524,14 @@ namespace Engine
 #endif
 			};
 			rendererDesc.ShaderRoot = ShaderLibrary::FindRoot(files.GetExecutableDirectory(), fallbacks);
+
 			if (rendererDesc.ShaderRoot.empty())
 			{
 				std::cerr << "[Render] No runtime shaders found next to the executable (Shaders/Runtime). Build the SwimEngine target, or "
 							 "set SWIM_SHADER_DIR.\n";
 				return -1;
 			}
+
 			frameRenderer = std::make_unique<FrameRenderer>(*renderDevice, *assetSystem, *ioSystem, jobSystem.get(), rendererDesc);
 			renderBridge = std::make_unique<SceneRenderBridge>(*frameRenderer);
 			uiRuntime = std::make_unique<UiRuntime>(FindFontRoot());
@@ -517,10 +560,12 @@ namespace Engine
 			std::cout << "[Render] no renderer\n";
 			return;
 		}
+
 		const auto& s = frameRenderer->GetStats();
 		std::cout << "[Render] frame " << s.Frame << ": " << s.Width << "x" << s.Height << ", CPU " << s.CpuMilliseconds << " ms, GPU "
 				  << (s.GpuTimingsAvailable ? std::to_string(s.GpuMilliseconds) + " ms" : std::string("n/a")) << " (" << s.Passes
 				  << " passes), probes " << s.ReflectionProbes << " active / " << s.ReflectionProbeFaces << " faces captured\n";
+
 		for (std::uint32_t i = 0; i < s.TopPassCount; ++i)
 		{
 			std::cout << "[Render]   " << s.TopPasses[i].Name << ": " << s.TopPasses[i].Milliseconds << " ms\n";
@@ -533,6 +578,7 @@ namespace Engine
 		{
 			return;
 		}
+
 		console = std::make_unique<RuntimeConsole>(*commandRegistry);
 		consoleOverlay = std::make_unique<RuntimeConsoleOverlay>(*uiRuntime, *console);
 	}
@@ -564,6 +610,7 @@ namespace Engine
 			[this](const std::vector<std::string>& arguments)
 			{
 				std::uint32_t steps = 1;
+
 				if (!arguments.empty())
 				{
 					try
@@ -574,10 +621,12 @@ namespace Engine
 					{
 					}
 				}
+
 				if (stateMachine.IsPlaying())
 				{
 					stateMachine.Pause();
 				}
+
 				clock.Step(steps);
 			});
 		commands.Register("timescale",
@@ -593,6 +642,7 @@ namespace Engine
 					{
 					}
 				}
+
 			});
 		commands.Register("scene",
 			[this](const std::vector<std::string>& arguments)
@@ -601,6 +651,7 @@ namespace Engine
 				{
 					sceneSystem->RequestScene(arguments.front());
 				}
+
 			});
 		commands.Register("reload",
 			[this](const std::vector<std::string>&)
@@ -617,6 +668,7 @@ namespace Engine
 			{
 				// camera <eye x y z> [<target x y z>]
 				std::array<float, 6> values{ 0, 0, 0, 0, 0, 0 };
+
 				try
 				{
 					for (std::size_t i = 0; i < std::min<std::size_t>(arguments.size(), values.size()); ++i)
@@ -628,8 +680,10 @@ namespace Engine
 				{
 					return;
 				}
+
 				auto& camera = cameraSystem->GetCamera();
 				const glm::vec3 eye{ values[0], values[1], values[2] };
+
 				if (arguments.size() >= 6)
 				{
 					camera.LookAt(eye, { values[3], values[4], values[5] });
@@ -638,6 +692,7 @@ namespace Engine
 				{
 					camera.SetPosition(eye);
 				}
+
 				cameraSystem->RequestCameraCut();
 				cameraLocked = true;
 			});
@@ -656,8 +711,10 @@ namespace Engine
 					{
 						statsInterval = 0;
 					}
+
 					return;
 				}
+
 				PrintRenderStats();
 			});
 		// profile <frames> [warmup] [csv path] [label] [quit]: measures every CPU zone, renderer
@@ -694,15 +751,19 @@ namespace Engine
 				{
 					return;
 				}
+
 				const std::string filter = arguments.empty() ? std::string() : arguments[0];
+
 				for (const auto& toggle : renderToggles->List())
 				{
 					if (!filter.empty() && toggle.Name.find(filter) == std::string::npos)
 					{
 						continue;
 					}
+
 					std::cout << "[Toggle] " << (toggle.Get() ? "on  " : "off ") << toggle.Name << "  - " << toggle.Description << '\n';
 				}
+
 			});
 		commands.Register("render.toggle",
 			[this](const std::vector<std::string>& arguments)
@@ -711,7 +772,9 @@ namespace Engine
 				{
 					throw std::invalid_argument("usage: render.toggle <name|group.*|all> [0|1]");
 				}
+
 				bool on = true;
+
 				if (arguments.size() > 1)
 				{
 					on = arguments[1] != "0" && arguments[1] != "off" && arguments[1] != "false";
@@ -720,11 +783,14 @@ namespace Engine
 				{
 					on = !*current;
 				}
+
 				const auto changed = renderToggles->Set(arguments[0], on);
+
 				if (changed == 0)
 				{
 					throw std::invalid_argument("no render toggle matches " + arguments[0] + " (see render.toggles)");
 				}
+
 				std::cout << "[Toggle] " << arguments[0] << " -> " << (on ? "on" : "off") << " (" << changed << ")\n";
 			});
 		// render.set [<knob> <value>]: the numeric quality knobs of the render settings, live
@@ -736,6 +802,7 @@ namespace Engine
 				{
 					throw std::invalid_argument("render.set needs the renderer");
 				}
+
 				auto& s = *renderServices.Settings;
 				auto& ssr = s.ScreenSpace.Reflections;
 				auto& ao = s.ScreenSpace.AmbientOcclusion;
@@ -776,19 +843,23 @@ namespace Engine
 					{ "probes.idle", nullptr, &probes.IdleRefreshFrames },
 					{ "probes.samples", nullptr, &probes.PrefilterSamples },
 				};
+
 				if (arguments.size() < 2)
 				{
 					for (const auto& knob : knobs)
 					{
 						std::cout << "[Set] " << knob.Name << " = " << (knob.F ? *knob.F : static_cast<float>(*knob.U)) << "\n";
 					}
+
 					return;
 				}
+
 				for (const auto& knob : knobs)
 				{
 					if (arguments[0] == knob.Name)
 					{
 						const float value = std::stof(arguments[1]);
+
 						if (knob.F)
 						{
 							*knob.F = value;
@@ -797,12 +868,14 @@ namespace Engine
 						{
 							*knob.U = static_cast<std::uint32_t>(std::max(0.0f, value));
 						}
+
 						ssr.HalfResolution = ssrHalf != 0u;
 						ao.HalfResolution = aoHalf != 0u;
 						std::cout << "[Set] " << knob.Name << " -> " << value << "\n";
 						return;
 					}
 				}
+
 				throw std::invalid_argument("unknown render knob " + arguments[0] + " (render.set lists them)");
 			});
 		// bench <csv> <frames> <warmup> <ablate|base> <scenario>[|<scenario>...] [quit]
@@ -817,6 +890,7 @@ namespace Engine
 				{
 					throw std::invalid_argument("usage: bench <csv> <frames> <warmup> <ablate|base> <label=cmd;cmd|label=cmd> [quit]");
 				}
+
 				benchCsv = arguments[0];
 				benchFrames = static_cast<std::uint32_t>(std::max(1, std::stoi(arguments[1])));
 				benchWarmup = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
@@ -824,6 +898,7 @@ namespace Engine
 				// The scenario list may have been split on spaces: join the rest.
 				std::string scenarios;
 				benchQuit = false;
+
 				for (std::size_t i = 4; i < arguments.size(); ++i)
 				{
 					if (i + 1 == arguments.size() && arguments[i] == "quit")
@@ -831,32 +906,40 @@ namespace Engine
 						benchQuit = true;
 						break;
 					}
+
 					scenarios += (scenarios.empty() ? "" : " ") + arguments[i];
 				}
+
 				benchSteps.clear();
 				benchNext = 0;
 				std::size_t start = 0;
+
 				while (start <= scenarios.size())
 				{
 					const auto end = std::min(scenarios.find('|', start), scenarios.size());
 					const std::string scenario = scenarios.substr(start, end - start);
 					start = end + 1;
+
 					if (scenario.empty())
 					{
 						continue;
 					}
+
 					const auto equals = scenario.find('=');
 					const std::string label = equals == std::string::npos ? scenario : scenario.substr(0, equals);
 					std::string setup = equals == std::string::npos ? std::string() : scenario.substr(equals + 1);
 					// Commands separated by ';' run one after another.
 					std::size_t from = 0;
+
 					while (from <= setup.size())
 					{
 						const auto to = std::min(setup.find(';', from), setup.size());
 						benchSteps.push_back({ setup.substr(from, to - from), "", "" });
 						from = to + 1;
 					}
+
 					benchSteps.push_back({ "", label + "|baseline", "" });
+
 					if (ablate && renderToggles)
 					{
 						for (const auto& toggle : renderToggles->List())
@@ -865,11 +948,13 @@ namespace Engine
 							{
 								continue; // Already off in this scenario.
 							}
+
 							benchSteps.push_back({ "render.toggle " + toggle.Name + " 0", label + "|-" + toggle.Name,
 								"render.toggle " + toggle.Name + " 1" });
 						}
 					}
 				}
+
 				std::cout << "[Bench] " << benchSteps.size() << " steps\n";
 			});
 		commands.Register("quit",
@@ -885,6 +970,7 @@ namespace Engine
 		{
 			return false;
 		}
+
 		pendingCapture = std::move(path);
 		return true;
 	}
@@ -895,11 +981,14 @@ namespace Engine
 		{
 			return;
 		}
+
 		if (inputSystem)
 		{
 			inputSystem->ProcessWindowEvent(event);
 		}
+
 		using Swim::Platform::WindowEventType;
+
 		switch (event.Type)
 		{
 		case WindowEventType::CloseRequested:
@@ -929,13 +1018,16 @@ namespace Engine
 		{
 			return;
 		}
+
 		const Swim::Platform::Extent2D size = engineWindow->GetPixelSize();
 		surfaceWidth = size.Width;
 		surfaceHeight = size.Height;
+
 		if (cameraSystem && surfaceWidth && surfaceHeight)
 		{
 			cameraSystem->SetSurfaceSize(surfaceWidth, surfaceHeight);
 		}
+
 		if (renderDevice)
 		{
 			renderDevice->RequestResize(surfaceWidth, surfaceHeight);
@@ -945,30 +1037,37 @@ namespace Engine
 	void SwimEngine::ApplyCameraComponents()
 	{
 		const auto& scene = sceneSystem->GetActiveScene();
+
 		if (!scene)
 		{
 			return;
 		}
+
 		auto& registry = scene->GetRegistry();
 		const CameraComponent* best = nullptr;
 		entt::entity bestEntity = entt::null;
+
 		for (const auto [entity, component, transform] : registry.view<CameraComponent, Transform>().each())
 		{
 			(void)transform;
+
 			if (component.Active && (!best || component.Priority > best->Priority))
 			{
 				best = &component;
 				bestEntity = entity;
 			}
 		}
+
 		if (!best)
 		{
 			return;
 		}
+
 		auto& camera = cameraSystem->GetCamera();
 		const auto& transform = registry.get<Transform>(bestEntity);
 		camera.SetPosition(transform.GetWorldPosition(registry));
 		camera.SetRotation(transform.GetWorldRotation(registry));
+
 		try
 		{
 			camera.SetFieldOfView(best->FieldOfView);
@@ -985,12 +1084,16 @@ namespace Engine
 		{
 			return;
 		}
+
 		const bool wants = uiRuntime->GetInputFrame().WantsTextInput;
+
 		if (wants == textInputActive)
 		{
 			return;
 		}
+
 		auto& windows = platformSystem->GetWindowSystem();
+
 		if (wants)
 		{
 			windows.StartTextInput(*engineWindow);
@@ -999,6 +1102,7 @@ namespace Engine
 		{
 			windows.StopTextInput(*engineWindow);
 		}
+
 		textInputActive = wants;
 	}
 
@@ -1007,6 +1111,7 @@ namespace Engine
 		while (running && Tick())
 		{
 		}
+
 		return Exit();
 	}
 
@@ -1016,32 +1121,40 @@ namespace Engine
 		{
 			return false;
 		}
+
 		const auto tickStart = std::chrono::steady_clock::now();
+
 		if (haveLastTick)
 		{
 			// The whole previous frame, start to start (what the frame rate is).
 			profiler.Add("frame", "Frame (wall, start to start)", std::chrono::duration<double, std::milli>(tickStart - lastTickStart).count());
 		}
+
 		lastTickStart = tickStart;
 		haveLastTick = true;
+
 		if (profiler.EndFrame())
 		{
 			const auto& report = profiler.GetReport();
 			std::cout << FrameProfiler::Summary(report, benchSteps.empty() ? 12 : 4);
+
 			if (quitAfterProfile)
 			{
 				running = false;
 				return false;
 			}
 		}
+
 		if (!benchSteps.empty() && !profiler.IsCapturing())
 		{
 			AdvanceBench();
+
 			if (!running)
 			{
 				return false;
 			}
 		}
+
 		std::optional<FrameProfiler::Scope> eventsScope;
 		eventsScope.emplace(profiler, "Platform events");
 		platformSystem->PumpEvents(
@@ -1055,9 +1168,11 @@ namespace Engine
 				{
 					return;
 				}
+
 				inputSystem->ProcessInputEvent(event);
 			});
 		eventsScope.reset();
+
 		if (!running)
 		{
 			return false;
@@ -1066,10 +1181,12 @@ namespace Engine
 		// Wall-clock delta (or a fixed one for deterministic runs).
 		const auto now = std::chrono::steady_clock::now();
 		double realDelta = config.FixedFrameDelta > 0.0 ? config.FixedFrameDelta : 0.0;
+
 		if (config.FixedFrameDelta <= 0.0)
 		{
 			realDelta = havePreviousTime ? std::chrono::duration<double>(now - previousTime).count() : 1.0 / 60.0;
 		}
+
 		previousTime = now;
 		havePreviousTime = true;
 
@@ -1081,10 +1198,12 @@ namespace Engine
 
 		{
 			FrameProfiler::Scope scope(profiler, "Jobs and IO completions");
+
 			if (jobSystem && jobSystem->IsRunning())
 			{
 				jobSystem->RunMainThreadJobs();
 			}
+
 			if (ioSystem && ioSystem->IsRunning())
 			{
 				ioSystem->PumpCompletions();
@@ -1094,19 +1213,24 @@ namespace Engine
 			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tickStart).count());
 
 		++totalFrames;
+
 		if (statsInterval != 0 && totalFrames % statsInterval == 0)
 		{
 			PrintRenderStats();
 		}
+
 		fpsTimeAccumulator += realDelta;
 		++fpsFrameCounter;
+
 		if (fpsTimeAccumulator >= 1.0)
 		{
 			fps = static_cast<int>(static_cast<double>(fpsFrameCounter) / fpsTimeAccumulator);
+
 			if (ownsWindow && engineWindow)
 			{
 				engineWindow->SetTitle(GetWindowTitle() + " | " + std::to_string(fps) + " FPS");
 			}
+
 			fpsTimeAccumulator = 0.0;
 			fpsFrameCounter = 0;
 		}
@@ -1115,6 +1239,7 @@ namespace Engine
 		{
 			running = false;
 		}
+
 		return running;
 	}
 
@@ -1128,37 +1253,46 @@ namespace Engine
 		Scene* scene = activeScene.get();
 
 		zone.emplace(profiler, "Renderer begin frame (collect)");
+
 		if (frameRenderer)
 		{
 			frameRenderer->BeginFrame();
 		}
+
 		zone.emplace(profiler, "UI sync and input");
 
 		// Camera aspect and the UI view (canvases route this frame's input before gameplay
 		// reads it, so behaviours can see whether the UI took the pointer).
 		auto& camera = cameraSystem->GetCamera();
+
 		if (surfaceWidth && surfaceHeight)
 		{
 			camera.SetAspect(static_cast<float>(surfaceWidth) / static_cast<float>(surfaceHeight));
 		}
+
 		UiRuntime::ViewDesc uiView;
 		uiView.Camera.View = camera.GetViewRowMajor();
 		uiView.Camera.Projection = camera.GetProjectionRowMajor();
 		uiView.Camera.ViewportWidth = static_cast<float>(surfaceWidth);
 		uiView.Camera.ViewportHeight = static_cast<float>(surfaceHeight);
 		uiView.DpiScale = engineWindow ? engineWindow->GetDpiScale() : 1.0f;
+
 		if (uiRuntime)
 		{
 			uiRuntime->Sync(scene, uiView);
+
 			if (consoleOverlay)
 			{
 				consoleOverlay->BeforeInput(engineWindow ? inputSystem.get() : nullptr);
 			}
+
 			uiRuntime->ApplyInput(engineWindow ? inputSystem.get() : nullptr, static_cast<float>(realDelta));
+
 			if (consoleOverlay)
 			{
 				consoleOverlay->AfterInput();
 			}
+
 			UpdateTextInput();
 		}
 
@@ -1169,7 +1303,9 @@ namespace Engine
 			FixedUpdate(tickCounter);
 			tickCounter = tickCounter % 1000 + 1;
 		}
+
 		zone.emplace(profiler, "Physics interpolation");
+
 		if (scene && physicsSystem && scene->GetPhysicsWorld())
 		{
 			scene->UpdatePhysics(*physicsSystem, static_cast<float>(currentFrame.Alpha));
@@ -1187,21 +1323,26 @@ namespace Engine
 			{
 				uiRuntime->Finish(static_cast<float>(realDelta));
 			}
+
 			return;
 		}
+
 		if (renderBridge->GetAttached() != scene)
 		{
 			renderBridge->Attach(scene, sceneSystem->GetActiveSceneId().GetValue());
 		}
+
 		zone.emplace(profiler, "Render bridge (extraction, lights, probes)");
 		renderBridge->Update();
 
 		zone.emplace(profiler, "UI layout and paint");
 		std::span<const UiDrawItem> ui;
+
 		if (uiRuntime)
 		{
 			ui = uiRuntime->Finish(static_cast<float>(realDelta));
 		}
+
 		zone.reset();
 
 		RenderFrameInput input;
@@ -1226,6 +1367,7 @@ namespace Engine
 		input.GlyphAtlas = uiRuntime ? &uiRuntime->GetAtlas() : nullptr;
 		const bool finalFrame = config.MaxFrames != 0 && totalFrames + 1 >= config.MaxFrames;
 		input.Capture = !pendingCapture.empty() || (finalFrame && !config.CapturePath.empty());
+
 		try
 		{
 			const auto renderStart = std::chrono::steady_clock::now();
@@ -1233,9 +1375,11 @@ namespace Engine
 			profiler.Add("cpu", "Render (renderer CPU total)",
 				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count());
 			RecordFrameProfile(0.0);
+
 			if (rendered && input.Capture)
 			{
 				const auto path = !pendingCapture.empty() ? pendingCapture : std::filesystem::path(config.CapturePath);
+
 				if (frameRenderer->WriteCapture(path))
 				{
 					std::cout << "[Render] Captured " << frameRenderer->GetCaptureWidth() << "x" << frameRenderer->GetCaptureHeight()
@@ -1245,6 +1389,7 @@ namespace Engine
 				{
 					std::cerr << "[Render] Could not write the capture to " << path.string() << '\n';
 				}
+
 				pendingCapture.clear();
 			}
 		}
@@ -1263,6 +1408,7 @@ namespace Engine
 		}
 		FrameProfiler::Scope scope(profiler, "Physics step");
 		const auto& scene = sceneSystem->GetActiveScene();
+
 		if (scene && physicsSystem)
 		{
 			scene->FixedUpdatePhysics(*physicsSystem, static_cast<float>(currentFrame.FixedDelta));
@@ -1277,6 +1423,7 @@ namespace Engine
 			{
 				return;
 			}
+
 			try
 			{
 				commandRegistry->ParseAndDispatch(line);
@@ -1288,10 +1435,12 @@ namespace Engine
 		};
 		run(benchRestore);
 		benchRestore.clear();
+
 		while (benchNext < benchSteps.size())
 		{
 			const auto step = benchSteps[benchNext++];
 			run(step.Command);
+
 			if (!step.Label.empty())
 			{
 				benchRestore = step.Restore;
@@ -1300,9 +1449,11 @@ namespace Engine
 				return;
 			}
 		}
+
 		std::cout << "[Bench] done: " << benchCsv.string() << '\n';
 		benchSteps.clear();
 		benchNext = 0;
+
 		if (benchQuit)
 		{
 			running = false;
@@ -1315,25 +1466,32 @@ namespace Engine
 		{
 			return;
 		}
+
 		const auto& stats = frameRenderer->GetStats();
+
 		for (const auto& phase : stats.CpuPhases)
 		{
 			profiler.Add("render", phase.Name, phase.Milliseconds);
 		}
+
 		for (const auto& phase : stats.RecordPhases)
 		{
 			profiler.Add("render", phase.Name, phase.Milliseconds);
 		}
+
 		for (const auto& pass : stats.RecordPasses)
 		{
 			profiler.Add("record", pass.Name, pass.Milliseconds);
 		}
+
 		double gpu = 0.0;
+
 		for (const auto& pass : stats.GpuPasses)
 		{
 			profiler.Add("gpu", pass.Name, pass.Milliseconds);
 			gpu += pass.Milliseconds;
 		}
+
 		if (stats.GpuTimingsAvailable)
 		{
 			profiler.Add("frame", "GPU (first begin to last end)", gpu);
@@ -1346,6 +1504,7 @@ namespace Engine
 		{
 			return 0;
 		}
+
 		started = false;
 		running = false;
 		int firstError = 0;
@@ -1363,6 +1522,7 @@ namespace Engine
 		{
 			ioSystem->Shutdown(Swim::IO::IoShutdownMode::Drain);
 		}
+
 		if (jobSystem && jobSystem->IsRunning())
 		{
 			jobSystem->RunMainThreadJobs();
@@ -1375,14 +1535,17 @@ namespace Engine
 		{
 			renderDevice->WaitIdle();
 		}
+
 		if (renderBridge)
 		{
 			renderBridge->Detach(); // Before the scenes (and their registries) go.
 		}
+
 		if (sceneSystem)
 		{
 			record("SceneSystem", sceneSystem->Exit());
 		}
+
 		renderBridge.reset();
 		renderToggles.reset();
 		consoleOverlay.reset();
@@ -1396,16 +1559,19 @@ namespace Engine
 		{
 			assetSystem->Shutdown();
 		}
+
 		assetSystem.reset();
 
 		if (physicsSystem)
 		{
 			record("PhysicsSystem", physicsSystem->Exit());
 		}
+
 		physicsSystem.reset();
 		commandRegistry.reset();
 		inputSystem.reset();
 		ioSystem.reset();
+
 		if (jobSystem)
 		{
 			jobSystem->Shutdown(Swim::Jobs::JobShutdownMode::Drain);
@@ -1413,10 +1579,13 @@ namespace Engine
 		}
 
 		engineWindow.reset();
+
 		if (platformSystem)
 		{
 			platformSystem->Shutdown();
 		}
+
 		return firstError;
 	}
+
 } // namespace Engine

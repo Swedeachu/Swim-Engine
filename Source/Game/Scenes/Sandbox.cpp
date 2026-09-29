@@ -41,8 +41,10 @@
 
 namespace Game
 {
+
 	namespace
 	{
+
 		constexpr float Pi = 3.14159265358979f;
 		constexpr Engine::EngineState AllStates = Engine::EngineState::Playing | Engine::EngineState::Paused | Engine::EngineState::Stopped;
 
@@ -104,16 +106,19 @@ namespace Game
 			gradient.Colors = { from, to, to, to };
 			return gradient;
 		}
+
 	} // namespace
 
 	int Sandbox::Awake()
 	{
 		auto& tags = GetTagRegistry();
+
 		for (const char* name : { "Game.PbrGallery", "Game.InstanceHall", "Game.PhysicsToy", "Game.Glass", "Game.Emissive", "Game.Tentacle",
 				 "Game.Spawned", "Game.Sponza", "Game.SwarmLight" })
 		{
 			tags.Register(name);
 		}
+
 		// Console commands (usable from --exec for scripted runs and captures).
 		if (auto* commands = GetServices().Commands; commands && !commandsRegistered)
 		{
@@ -146,6 +151,7 @@ namespace Game
 					{
 						shooter->Fire();
 					}
+
 				});
 			commands->Register("sandbox.tab",
 				[this, number](const std::vector<std::string>& arguments)
@@ -169,9 +175,11 @@ namespace Game
 					{
 						return;
 					}
+
 					auto& transform = GetRegistry().get<Engine::Transform>(blackHole);
 					transform.SetWorldPosition(GetRegistry(),
 						glm::vec3(std::stof(arguments[0]), std::stof(arguments[1]), std::stof(arguments[2])));
+
 					if (arguments.size() >= 4)
 					{
 						if (auto* hole = GetBehavior<Game::BlackHole>(blackHole))
@@ -179,6 +187,7 @@ namespace Game
 							hole->SetGasDensity(std::max(0.0f, std::stof(arguments[3])));
 						}
 					}
+
 				});
 			commands->Register("sandbox.dof",
 				[this, number](const std::vector<std::string>& arguments)
@@ -192,6 +201,7 @@ namespace Game
 						depthOfField->Settings.FocusDistance =
 							arguments.size() > 1 ? std::max(std::strtof(arguments[1].c_str(), nullptr), 0.0f) : 0.0f;
 					}
+
 				});
 			commands->Register("sandbox.clouds",
 				[this, number](const std::vector<std::string>& arguments)
@@ -202,6 +212,7 @@ namespace Game
 						clouds->Enabled = coverage > 0.0f;
 						clouds->Settings.Coverage = coverage;
 					}
+
 				});
 			// Clouds in the environment cube (reflections, ambient light) on/off.
 			commands->Register("sandbox.cloudenv",
@@ -211,6 +222,7 @@ namespace Game
 					{
 						clouds->Settings.Environment = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			// The reflection lab's floor: 0 checker, 1 green, 2 rainbow (animated), 3 removed.
 			commands->Register("sandbox.labfloor",
@@ -221,6 +233,7 @@ namespace Game
 						labFloor->SetMode(static_cast<ReflectionLabFloor::Mode>(
 							static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 3.0f))));
 					}
+
 				});
 			// Local reflection probes on/off, and the reflection debug view (0 off, 1 sources, 2 probe age).
 			commands->Register("sandbox.probes",
@@ -230,6 +243,7 @@ namespace Game
 					{
 						render->Settings->ReflectionProbes.Enabled = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			commands->Register("sandbox.reflectdebug",
 				[this, number](const std::vector<std::string>& arguments)
@@ -239,6 +253,7 @@ namespace Game
 						render->Settings->ScreenSpace.Reflections.Debug = static_cast<Swim::Render::ReflectionDebugView>(
 							static_cast<std::uint32_t>(std::clamp(number(arguments, 0.0f), 0.0f, 2.0f)));
 					}
+
 				});
 			// Screen-space reflection thickness from the back faces (1) or the constant (0).
 			commands->Register("sandbox.ssrbackfaces",
@@ -248,6 +263,7 @@ namespace Game
 					{
 						render->Settings->ScreenSpace.Reflections.BackFaces = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			// Whether the clouds in the environment also change the ambient light.
 			commands->Register("sandbox.cloudambient",
@@ -257,19 +273,23 @@ namespace Game
 					{
 						render->Settings->EnvironmentFeatureAmbient = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			commands->Register("sandbox.sunfx",
 				[this, number](const std::vector<std::string>& arguments)
 				{
 					const bool on = number(arguments, 1.0f) != 0.0f;
+
 					if (sunShafts)
 					{
 						sunShafts->Enabled = on;
 					}
+
 					if (lensFlare)
 					{
 						lensFlare->Enabled = on;
 					}
+
 				});
 			// Screen-space reflections and height fog on/off (A/B comparisons from the command line).
 			commands->Register("sandbox.ssr",
@@ -279,6 +299,7 @@ namespace Game
 					{
 						render->Settings->ScreenSpace.Reflections.Enabled = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			commands->Register("sandbox.ssrhistory",
 				[this, number](const std::vector<std::string>& arguments)
@@ -287,6 +308,7 @@ namespace Game
 					{
 						render->Settings->ScreenSpace.Reflections.History = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			// Exposure: sandbox.exposure 0 = manual (Manual EV100), 1 = automatic.
 			commands->Register("sandbox.exposure",
@@ -297,6 +319,7 @@ namespace Game
 						render->Settings->Post.Exposure.Mode =
 							number(arguments, 1.0f) != 0.0f ? Swim::Render::ExposureMode::Automatic : Swim::Render::ExposureMode::Manual;
 					}
+
 				});
 			commands->Register("sandbox.fog",
 				[this, number](const std::vector<std::string>& arguments)
@@ -305,6 +328,7 @@ namespace Game
 					{
 						render->Settings->ScreenSpace.Fog.Enabled = number(arguments, 1.0f) != 0.0f;
 					}
+
 				});
 			commands->Register("sandbox.hud",
 				[this, number](const std::vector<std::string>& arguments)
@@ -327,8 +351,10 @@ namespace Game
 					catch (...)
 					{
 					}
+
 				});
 		}
+
 		return 0;
 	}
 
@@ -345,10 +371,12 @@ namespace Game
 	bool Sandbox::GoToBookmark(std::uint32_t index)
 	{
 		auto* cameras = GetCameraSystem();
+
 		if (!cameras || index >= Bookmarks.size())
 		{
 			return false;
 		}
+
 		cameras->GetCamera().LookAt(Bookmarks[index].Eye, Bookmarks[index].Target);
 		cameras->RequestCameraCut(); // No motion-vector smear across the jump.
 		cameraPlaced = true;		 // Keep the view if the scene rebuilds.
@@ -371,26 +399,34 @@ namespace Game
 	{
 		palette = {};
 		auto* render = GetRenderServices();
+
 		if (!render || !render->HasRenderer())
 		{
 			return; // Headless (tests): entities without GPU meshes.
 		}
+
 		palette.HasRenderer = true;
+
 		for (std::size_t i = 0; i < palette.Meshes.size(); ++i)
 		{
 			palette.Meshes[i] = render->Meshes->Get(static_cast<Engine::BuiltinMesh>(i));
 		}
+
 		palette.Ground = render->Meshes->Find("SandboxGround");
+
 		if (!palette.Ground.IsValid())
 		{
 			palette.Ground = render->Meshes->Register("SandboxGround", Engine::ProceduralMeshes::MakePlane(GroundSize, 13, GroundSize * 0.5f));
 		}
+
 		auto checker = render->Meshes->FindTexture("SandboxChecker");
+
 		if (!checker.IsValid())
 		{
 			// Warm coral-sand tiles (the tropical look).
 			checker = render->Meshes->RegisterChecker("SandboxChecker", 256, 2, { 240, 222, 184, 255 }, { 212, 188, 146, 255 });
 		}
+
 		Engine::MaterialDesc ground;
 		ground.Name = "Sandbox ground";
 		ground.BaseColor = { 0.78f, 0.76f, 0.72f, 1.0f };
@@ -403,10 +439,12 @@ namespace Game
 		bool transparent, float alpha)
 	{
 		auto* render = GetRenderServices();
+
 		if (!render || !render->HasRenderer())
 		{
 			return 0;
 		}
+
 		return Material(*render->Materials, name, color, metallic, roughness, emissive,
 			transparent ? Engine::MaterialBlend::Transparent : Engine::MaterialBlend::Opaque, alpha);
 	}
@@ -514,6 +552,7 @@ namespace Game
 		filmSensor = std::make_shared<Engine::FilmSensor>();
 		lensing = std::make_shared<Engine::GravitationalLensing>();
 		auto* render = GetRenderServices();
+
 		if (render && render->Renderer)
 		{
 			render->Renderer->AddFeature(clouds);
@@ -547,8 +586,10 @@ namespace Game
 			{
 				ApplyTropicalLook(*render->Settings);
 			}
+
 			AddAtmosphereFeatures();
 		}
+
 		impacts = 0;
 		strongestImpact = 0.0f;
 		rainTimer = 0.0f;
@@ -577,11 +618,13 @@ namespace Game
 	{
 		using Flags = Swim::Render::RenderObjectFlags;
 		auto& registry = GetRegistry();
+
 		for (const entt::entity entity : GetEntitiesWithTag(tag))
 		{
 			if (auto* mesh = registry.try_get<Engine::MeshRenderer>(entity))
 			{
 				const bool visible = (static_cast<std::uint32_t>(mesh->Flags) & static_cast<std::uint32_t>(Flags::Visible)) != 0;
+
 				if (visible != shown)
 				{
 					registry.patch<Engine::MeshRenderer>(entity,
@@ -592,11 +635,13 @@ namespace Game
 						});
 				}
 			}
+
 			if (auto* light = registry.try_get<Engine::Light>(entity))
 			{
 				light->Enabled = shown;
 			}
 		}
+
 		hiddenGroups[tag.Value] = !shown;
 	}
 
@@ -611,10 +656,12 @@ namespace Game
 		// scene.* switches (render.toggle, the panel's Profiling section): hide a part of the
 		// sandbox - its meshes, and its lights - to measure what it costs.
 		auto* render = GetRenderServices();
+
 		if (!render || !render->Toggles)
 		{
 			return;
 		}
+
 		hiddenGroups.clear();
 		const auto group = [&](const std::string& name, const std::string& description, Engine::TagId tag)
 		{
@@ -645,10 +692,12 @@ namespace Game
 			[this](bool on)
 			{
 				swarmMotion = on;
+
 				if (swarmController != entt::null)
 				{
 					SetEnabledStates(swarmController, on ? Engine::EngineState::Playing : Engine::EngineState::None);
 				}
+
 			} });
 	}
 
@@ -658,6 +707,7 @@ namespace Game
 		{
 			render->Toggles->Unregister("scene.");
 		}
+
 		infoDocument.reset();
 		infoBody = {};
 		cameraRig = entt::null;
@@ -674,6 +724,7 @@ namespace Game
 	void Sandbox::OnStateChanged(Engine::EngineState previous, Engine::EngineState current)
 	{
 		(void)previous;
+
 		if (current == Engine::EngineState::Stopped)
 		{
 			rainBalls = false;
@@ -688,6 +739,7 @@ namespace Game
 			cameras->RequestCameraCut();
 			cameraPlaced = true;
 		}
+
 		cameraRig = CreateEntity("Camera rig");
 		AddComponent<Engine::Transform>(cameraRig, Engine::Transform());
 		AddTag(cameraRig, Engine::Tags::Camera);
@@ -729,21 +781,26 @@ namespace Game
 		swarmMax = SponzaCenter + glm::vec3(9.9f, 9.4f, 3.9f);
 		auto* render = GetRenderServices();
 		auto* assets = GetServices().Assets;
+
 		if (!render || !render->HasRenderer() || !assets)
 		{
 			return;
 		}
+
 		const std::vector<Engine::TagId> tags{ GameTags::Sponza, Engine::Tags::Static, Engine::Tags::Environment };
+
 		if (!sponza.Valid() && !sponzaSearched)
 		{
 			sponzaSearched = true;
 			// The optimized GLB (Draco meshes, KTX2/Basis textures transcoded by the cooker).
 			const auto model = FindSponzaModel(*assets);
+
 			if (!model.IsValid())
 			{
 				std::cout << "[Sandbox] No cooked Sponza found. Put sponza-ktx-draco.glb (or sponza-ktx.glb) in "
 							 "Assets/Models/Sponza/; it is cooked on the next start. Cooked models loaded:";
 				std::size_t models = 0;
+
 				for (const auto& entry : assets->GetDatabase().Snapshot())
 				{
 					if (entry.LogicalPath.size() > 6 && entry.LogicalPath.ends_with(".model"))
@@ -752,19 +809,23 @@ namespace Game
 						++models;
 					}
 				}
+
 				std::cout << (models ? "\n" : " none (see the [Assets] lines above for cook errors).\n");
 				return;
 			}
+
 			ModelPlacement placement;
 			placement.Position = SponzaCenter;
 			placement.TargetLength = SponzaLength;
 			placement.Tags = tags;
 			sponza = SpawnCookedModel(*this, *render, *assets, model, "Sponza", placement);
+
 			if (!sponza.Valid())
 			{
 				std::cout << "[Sandbox] The cooked Sponza has no usable geometry.\n";
 				return;
 			}
+
 			std::cout << "[Sandbox] Sponza: " << sponza.Parts.size() << " material groups, " << sponza.Triangles << " triangles, "
 					  << sponza.Textures << " textures.\n";
 		}
@@ -772,6 +833,7 @@ namespace Game
 		{
 			sponza.Entities = RespawnModel(*this, sponza, tags);
 		}
+
 		if (sponza.Valid())
 		{
 			// The lights roam the atrium and its arcades: the building's interior between the
@@ -800,6 +862,7 @@ namespace Game
 		constexpr std::uint32_t HueBuckets = 16;
 		std::array<std::uint32_t, HueBuckets> orbMaterials{};
 		std::array<glm::vec3, HueBuckets> hues{};
+
 		for (std::uint32_t h = 0; h < HueBuckets; ++h)
 		{
 			const float hue = static_cast<float>(h) / static_cast<float>(HueBuckets);
@@ -808,9 +871,11 @@ namespace Game
 			hues[h] = glm::mix(glm::vec3(1.0f), rgb, 0.85f); // Mostly saturated, a touch of white.
 			orbMaterials[h] = Mat("Swarm orb " + std::to_string(h), hues[h], 0.0f, 0.4f, hues[h] * 14.0f);
 		}
+
 		std::mt19937 colors(0xC0FFEEu);
 		std::uniform_int_distribution<std::uint32_t> pick(0, HueBuckets - 1);
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 		for (std::uint32_t i = 0; i < SwarmLightCount; ++i)
 		{
 			const std::uint32_t h = pick(colors);
@@ -838,6 +903,7 @@ namespace Game
 		const float el = glm::radians(sunElevation);
 		const float az = glm::radians(sunAzimuth);
 		const glm::vec3 towardSun{ std::cos(el) * std::sin(az), std::sin(el), std::cos(el) * std::cos(az) };
+
 		if (IsValid(sun))
 		{
 			if (auto* transform = GetRegistry().try_get<Engine::Transform>(sun))
@@ -845,6 +911,7 @@ namespace Game
 				transform->SetRotation(LookRotation(-towardSun));
 			}
 		}
+
 		if (auto* render = GetRenderServices(); render && render->Settings)
 		{
 			render->Settings->Sky.SunDirection = { towardSun.x, towardSun.y, towardSun.z };
@@ -853,7 +920,9 @@ namespace Game
 			const float warmth = 1.0f - std::clamp((sunElevation - 5.0f) / 40.0f, 0.0f, 1.0f);
 			render->Settings->Sky.SunColor = { 16.0f, 15.2f - 4.5f * warmth, 13.6f - 8.0f * warmth };
 		}
+
 		const float sunIntensity = 9.0f * std::clamp(std::sin(el) * 1.6f, 0.15f, 1.0f);
+
 		if (IsValid(sun))
 		{
 			if (auto* light = GetRegistry().try_get<Engine::Light>(sun))
@@ -911,6 +980,7 @@ namespace Game
 		// Coloured point lights orbiting the instance hall (clustered, unshadowed).
 		const std::array<glm::vec3, 6> colors{ glm::vec3(1.0f, 0.25f, 0.2f), glm::vec3(0.25f, 1.0f, 0.35f), glm::vec3(0.25f, 0.45f, 1.0f),
 			glm::vec3(1.0f, 0.85f, 0.2f), glm::vec3(0.9f, 0.3f, 1.0f), glm::vec3(0.2f, 1.0f, 1.0f) };
+
 		for (int i = 0; i < 12; ++i)
 		{
 			const auto& color = colors[static_cast<std::size_t>(i) % colors.size()];
@@ -935,6 +1005,7 @@ namespace Game
 		constexpr int columns = 7;
 		constexpr int rows = 4;
 		const glm::vec3 base = SrgbColor(230, 190, 120);
+
 		for (int r = 0; r < rows; ++r)
 		{
 			for (int c = 0; c < columns; ++c)
@@ -950,6 +1021,7 @@ namespace Game
 						{ GameTags::PbrGallery, Engine::Tags::Static } });
 			}
 		}
+
 		// A backdrop wall.
 		const entt::entity wall = SpawnMesh(*this,
 			{ "Gallery wall", palette.Mesh(Engine::BuiltinMesh::Cube), Mat("Gallery wall", SrgbColor(60, 64, 72), 0.0f, 0.9f),
@@ -974,6 +1046,7 @@ namespace Game
 			Mat("Hall steel", SrgbColor(170, 175, 185), 1.0f, 0.35f), Mat("Hall copper", SrgbColor(215, 120, 80), 1.0f, 0.3f),
 			Mat("Hall ivory", SrgbColor(225, 220, 205), 0.0f, 0.5f), Mat("Hall teal", SrgbColor(40, 150, 150), 0.0f, 0.4f),
 			Mat("Hall graphite", SrgbColor(35, 36, 40), 0.0f, 0.25f) };
+
 		for (int z = 0; z < side; ++z)
 		{
 			for (int x = 0; x < side; ++x)
@@ -987,6 +1060,7 @@ namespace Game
 						HallCenter + glm::vec3(fx * 0.55f, height * 0.5f, fz * 0.55f), { 0.4f, height, 0.4f }, glm::quat(1, 0, 0, 0),
 						Swim::Render::RenderObjectFlags::Default | Swim::Render::RenderObjectFlags::Static,
 						{ GameTags::InstanceHall, Engine::Tags::Static } });
+
 				if ((x * 7 + z * 3) % 29 == 0)
 				{
 					EmplaceBehavior<Spin>(cube, glm::vec3(0, 1, 0), 45.0f + 10.0f * static_cast<float>(x % 5));
@@ -1000,6 +1074,7 @@ namespace Game
 		const std::array<std::pair<const char*, glm::vec3>, 4> glass{ { { "Red glass", { 0.9f, 0.15f, 0.12f } },
 			{ "Green glass", { 0.15f, 0.85f, 0.3f } }, { "Blue glass", { 0.15f, 0.35f, 0.95f } },
 			{ "Amber glass", { 0.95f, 0.65f, 0.1f } } } };
+
 		for (std::size_t i = 0; i < glass.size(); ++i)
 		{
 			SpawnMesh(*this,
@@ -1009,8 +1084,10 @@ namespace Game
 					glm::angleAxis(0.25f * static_cast<float>(i), glm::vec3(0, 1, 0)), Swim::Render::RenderObjectFlags::Visible,
 					{ GameTags::Glass } });
 		}
+
 		const std::array<std::pair<const char*, glm::vec3>, 3> emissive{ { { "Ember ring", { 6.0f, 2.2f, 0.4f } },
 			{ "Ice ring", { 0.6f, 3.5f, 7.0f } }, { "Violet ring", { 4.5f, 0.8f, 6.0f } } } };
+
 		for (std::size_t i = 0; i < emissive.size(); ++i)
 		{
 			const entt::entity ring = SpawnMesh(*this,
@@ -1030,9 +1107,11 @@ namespace Game
 		// A five-level box pyramid.
 		constexpr float size = 0.8f;
 		int index = 0;
+
 		for (int level = 0; level < 5; ++level)
 		{
 			const int count = 5 - level;
+
 			for (int i = 0; i < count; ++i)
 			{
 				const float x = (static_cast<float>(i) - static_cast<float>(count - 1) * 0.5f) * (size + 0.02f);
@@ -1043,6 +1122,7 @@ namespace Game
 				AddBoxBody(*this, box, Engine::RigidbodyType::Dynamic, glm::vec3(0.5f), 4.0f);
 			}
 		}
+
 		// A ramp and a few capsules and spheres to knock around.
 		const glm::quat tilt = glm::angleAxis(glm::radians(-18.0f), glm::vec3(1, 0, 0));
 		const entt::entity ramp = SpawnMesh(*this,
@@ -1050,6 +1130,7 @@ namespace Game
 				PhysicsCenter + glm::vec3(-5.5f, 1.0f, -1.0f), { 2.5f, 0.3f, 6.0f }, tilt, Swim::Render::RenderObjectFlags::Default,
 				{ GameTags::PhysicsToy, Engine::Tags::Static } });
 		AddBoxBody(*this, ramp, Engine::RigidbodyType::Static, glm::vec3(0.5f));
+
 		for (int i = 0; i < 4; ++i)
 		{
 			const entt::entity capsule = SpawnMesh(*this,
@@ -1060,6 +1141,7 @@ namespace Game
 					{ GameTags::PhysicsToy, Engine::Tags::Dynamic } });
 			AddCapsuleBody(*this, capsule, Engine::RigidbodyType::Dynamic, 0.25f, 0.25f, 1.5f);
 		}
+
 		for (int i = 0; i < 6; ++i)
 		{
 			const entt::entity ball = SpawnMesh(*this,
@@ -1178,11 +1260,14 @@ namespace Game
 		auto* render = GetRenderServices();
 		constexpr std::uint32_t joints = 5;
 		constexpr float height = 2.6f;
+
 		if (render && render->Bridge && !render->Bridge->HasSkinnedMesh("Tentacle"))
 		{
 			render->Bridge->RegisterSkinnedMesh("Tentacle", Engine::ProceduralMeshes::MakeSkinnedColumn(0.22f, height, joints, 20, 5));
 		}
+
 		const std::uint32_t material = Mat("Tentacle", SrgbColor(170, 60, 120), 0.1f, 0.35f, glm::vec3(0.05f, 0.0f, 0.03f));
+
 		for (int i = 0; i < 6; ++i)
 		{
 			const float angle = static_cast<float>(i) * (2.0f * Pi / 6.0f) + 0.3f;
@@ -1201,10 +1286,12 @@ namespace Game
 	void Sandbox::BuildWorldUi()
 	{
 		auto* render = GetRenderServices();
+
 		if (!render || !render->Ui)
 		{
 			return;
 		}
+
 		auto& ui = *render->Ui;
 		// The info panel: a world-space document facing the start camera.
 		infoDocument = ui.CreateDocument();
@@ -1248,6 +1335,7 @@ namespace Game
 			{ "Physics playground", PhysicsCenter + glm::vec3(0.0f, 5.2f, 0.0f) },
 			{ "Particles + GPU skinning", FountainCenter + glm::vec3(0.0f, 4.4f, 0.0f) },
 			{ "Glass + emission", { -10.5f, 4.0f, 4.0f } } } };
+
 		for (const auto& [text, position] : zones)
 		{
 			using namespace Swim::UI;
@@ -1279,10 +1367,12 @@ namespace Game
 	void Sandbox::BuildHud()
 	{
 		auto* render = GetRenderServices();
+
 		if (!render || !render->Ui)
 		{
 			return;
 		}
+
 		const entt::entity hud = CreateEntity("HUD");
 		auto* behavior = EmplaceBehavior<SandboxHud>(hud);
 		SetEnabledStates(hud, AllStates);
@@ -1323,6 +1413,7 @@ namespace Game
 	void Sandbox::SpawnBalls(std::uint32_t count)
 	{
 		std::uniform_real_distribution<float> spread(-2.5f, 2.5f);
+
 		for (std::uint32_t i = 0; i < count; ++i)
 		{
 			SpawnBallAt(PhysicsCenter + glm::vec3(spread(random), 7.0f + 0.4f * static_cast<float>(i), spread(random)),
@@ -1333,12 +1424,14 @@ namespace Game
 	entt::entity Sandbox::SpawnPrimitive(Engine::BuiltinMesh mesh)
 	{
 		glm::vec3 position = PhysicsCenter + glm::vec3(0.0f, 6.0f, 2.0f);
+
 		if (const auto* cameras = GetCameraSystem())
 		{
 			const auto& camera = cameras->GetCamera();
 			position = camera.GetPosition() + camera.GetForward() * 4.0f;
 			position.y = std::max(position.y, 1.0f);
 		}
+
 		std::uniform_real_distribution<float> hue(0.0f, 1.0f);
 		const float h = hue(random);
 		const glm::vec3 color{ 0.5f + 0.5f * std::cos(6.2831f * h), 0.5f + 0.5f * std::cos(6.2831f * (h + 0.33f)),
@@ -1348,6 +1441,7 @@ namespace Game
 			{ "Spawned " + std::string(mesh == Engine::BuiltinMesh::Cube ? "cube" : "shape"), palette.Mesh(mesh), material, position,
 				glm::vec3(0.8f), glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default,
 				{ GameTags::Spawned, Engine::Tags::Dynamic } });
+
 		switch (mesh)
 		{
 		case Engine::BuiltinMesh::Sphere:
@@ -1360,6 +1454,7 @@ namespace Game
 			AddBoxBody(*this, entity, Engine::RigidbodyType::Dynamic, glm::vec3(0.5f), 2.0f);
 			break;
 		}
+
 		++spawned;
 		return entity;
 	}
@@ -1370,11 +1465,14 @@ namespace Game
 		{
 			return;
 		}
+
 		rainTimer += static_cast<float>(dt);
+
 		while (rainTimer >= 0.15f)
 		{
 			rainTimer -= 0.15f;
 			SpawnBalls(1);
 		}
 	}
+
 } // namespace Game

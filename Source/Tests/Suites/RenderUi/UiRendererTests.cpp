@@ -12,10 +12,14 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	class MockGraphicsPipeline final : public Rhi::GraphicsPipeline
 	{
+
 	  public:
+
 		std::uintptr_t GetNativeHandle() const override { return 31; }
+
 	};
 
 	// A mock device, a bindless table and the UI program's layout (space 0: the quad
@@ -57,6 +61,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *bindlessFixture->device.Commands)
 			{
 				if (command.Kind == kind)
@@ -64,6 +69,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -75,6 +81,7 @@ namespace
 		Testing::MockPipelineLayout renderLayout;
 		MockGraphicsPipeline pipeline;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.Ui.AtlasTextures", "UploadsWholePagesOnceThenOnlyChangedRows")
@@ -106,14 +113,17 @@ SWIM_TEST("Render.Ui.AtlasTextures", "UploadsWholePagesOnceThenOnlyChangedRows")
 	const auto view = atlas.GetPage(0);
 	const auto& bytes = gpuPage->Bytes({});
 	bool same = true;
+
 	for (std::size_t texel = 0; texel < std::size_t(view.Size) * view.Size; ++texel)
 	{
 		for (int c = 0; c < 3; ++c)
 		{
 			same = same && std::to_integer<std::uint8_t>(bytes[texel * 4 + c]) == view.Pixels[texel * 3 + c];
 		}
+
 		same = same && std::to_integer<std::uint8_t>(bytes[texel * 4 + 3]) == 255u;
 	}
+
 	SWIM_CHECK(same);
 
 	// Nothing new: no upload. A new glyph: only its shelf's rows.
@@ -209,20 +219,24 @@ SWIM_TEST("Render.Ui.Renderer", "RecordsOneInstancedDrawWithBindlessTablesAndCon
 	const auto& quads = renderer.GetLastQuads();
 	SWIM_CHECK_EQUAL(quads[0].Kind, UiQuadSolid);
 	SWIM_CHECK_NEAR(quads[0].Radius, 4.0f, 1e-6f);
+
 	for (std::size_t i = 1; i < quads.size(); ++i)
 	{
 		SWIM_CHECK_EQUAL(quads[i].Kind, UiQuadGlyph);
 		SWIM_CHECK_EQUAL(quads[i].Texture, atlasFrame.TextureIndices[0]);
 		SWIM_CHECK_EQUAL(quads[i].Sampler, atlasFrame.SamplerIndex);
 	}
+
 	// The upload precedes the draw (the pass declares the page as a sampled read).
 	std::size_t upload = 0, draw = 0, index = 0;
+
 	for (const auto& command : *world.Device().Commands)
 	{
 		upload = command.Kind == "CopyBufferToTexture" ? index : upload;
 		draw = command.Kind == "Draw" ? index : draw;
 		++index;
 	}
+
 	SWIM_CHECK(upload < draw);
 }
 

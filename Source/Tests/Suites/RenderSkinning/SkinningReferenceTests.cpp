@@ -12,6 +12,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	constexpr float Pi = 3.14159265358979f;
 
 	SkinMatrix Affine(const Animation::JointPose& pose)
@@ -34,6 +35,7 @@ namespace
 		const GpuSkinVertex& skin = source.SkinVertices[vertex];
 		return std::span(source.MorphDeltas).subspan(skin.MorphFirst, skin.MorphCount);
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Skinning.Reference", "BindPoseIdentityRigidAndBlendedJoints")
@@ -42,6 +44,7 @@ SWIM_TEST("Render.Skinning.Reference", "BindPoseIdentityRigidAndBlendedJoints")
 	const SkinnedSource source = Skinning::BuildSource(strip.Vertices, strip.Influences, strip.Targets, Testing::SkinnedStrip::JointCount);
 	const std::vector<SkinMatrix> identity(3, SkinMatrix{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 });
 	const std::vector<float> noMorph{ 0.0f, 0.0f };
+
 	for (std::size_t v = 0; v < strip.Vertices.size(); ++v)
 	{
 		const StandardVertex out = Skinning::SkinVertex(strip.Vertices[v], source.SkinVertices[v], DeltasOf(source, v), identity, noMorph);
@@ -84,10 +87,12 @@ SWIM_TEST("Render.Skinning.Reference", "MorphTargetsApplyInBindSpaceBeforeSkinni
 	const SkinnedSource source = Skinning::BuildSource(strip.Vertices, strip.Influences, strip.Targets, Testing::SkinnedStrip::JointCount);
 	// Only non-zero deltas are stored: the bulge touches the middle rings, the normal target the top ring.
 	std::size_t expected = 0;
+
 	for (std::size_t v = 0; v < strip.Vertices.size(); ++v)
 	{
 		expected += (strip.Bulge[v] != std::array<float, 3>{ 0, 0, 0 }) + (strip.TopNormals[v] != std::array<float, 3>{ 0, 0, 0 });
 	}
+
 	SWIM_CHECK_EQUAL(source.MorphDeltas.size(), expected);
 	SWIM_CHECK(source.MorphDeltas.size() < strip.Vertices.size() * 2);
 
@@ -97,6 +102,7 @@ SWIM_TEST("Render.Skinning.Reference", "MorphTargetsApplyInBindSpaceBeforeSkinni
 	const std::vector<SkinMatrix> up(3, Affine(lifted));
 	const std::vector<float> weights{ 0.5f, 1.0f };
 	const std::vector<float> previousWeights{ 0.0f, 0.0f };
+
 	for (std::size_t v = 0; v < strip.Vertices.size(); ++v)
 	{
 		const auto& base = strip.Vertices[v].Position;
@@ -154,27 +160,33 @@ SWIM_TEST("Render.Skinning.Reference", "BoundsContainEverySkinnedVertexOfRandomP
 	Animation::SkeletonInstance instance(skeleton);
 	std::mt19937 random(78);
 	std::uniform_real_distribution<float> angle(-Pi, Pi), weight(-0.5f, 1.5f), scale(0.5f, 2.0f);
+
 	for (int trial = 0; trial < 50; ++trial)
 	{
 		Animation::AnimationPose pose = Animation::MakeRestPose(*skeleton);
+
 		for (auto& joint : pose.Joints)
 		{
 			joint.Rotation = Animation::FromAxisAngle({ angle(random), angle(random), angle(random) }, angle(random));
 			joint.Scale = { scale(random), scale(random), scale(random) };
 		}
+
 		instance.Update(pose);
 		const std::vector<float> weights{ weight(random), weight(random) };
 		const RenderBounds bounds = Skinning::ComputeBounds(source.Bounds, instance.GetSkinningMatrices(), weights);
+
 		for (std::size_t v = 0; v < strip.Vertices.size(); ++v)
 		{
 			const auto p = Skinning::SkinPosition(
 				strip.Vertices[v], source.SkinVertices[v], DeltasOf(source, v), instance.GetSkinningMatrices(), weights);
+
 			for (int axis = 0; axis < 3; ++axis)
 			{
 				SWIM_CHECK(std::abs(p[axis] - bounds.Center[axis]) <= bounds.Extents[axis] + 1e-4f);
 			}
 		}
 	}
+
 	// At rest the bounds are the mesh's own box.
 	instance.Update(Animation::MakeRestPose(*skeleton));
 	const RenderBounds rest = Skinning::ComputeBounds(source.Bounds, instance.GetSkinningMatrices(), std::vector<float>{ 0.0f, 0.0f });

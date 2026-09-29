@@ -14,13 +14,16 @@
 
 namespace Swim::Tests
 {
+
 	// A real SwimEngine without a GPU (--headless --no-render) at a fixed 60 Hz frame
 	// delta: platform, jobs, IO, assets, input, commands, state machine, clock, physics,
 	// scene system and the UI runtime all run; only the renderer is absent. Scenes are
 	// registered through `registerScenes` before Start.
 	class HeadlessEngine
 	{
+
 	  public:
+
 		explicit HeadlessEngine(const std::function<void(Engine::SceneSystem&)>& registerScenes, std::string startupScene = {},
 			Engine::EngineState initialState = Engine::EngineState::Playing, std::vector<std::string> startupCommands = {})
 		{
@@ -56,6 +59,7 @@ namespace Swim::Tests
 					return false;
 				}
 			}
+
 			return true;
 		}
 
@@ -66,7 +70,10 @@ namespace Swim::Tests
 		template <typename T> T* SceneAs() { return dynamic_cast<T*>(engine->GetSceneSystem()->GetActiveScene().get()); }
 
 	  private:
+
 		std::unique_ptr<Engine::SwimEngine> engine;
 		int startResult = -1;
+
 	};
+
 } // namespace Swim::Tests

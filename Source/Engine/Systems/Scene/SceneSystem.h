@@ -19,6 +19,7 @@
 
 namespace Engine
 {
+
 	// Owns the loaded scenes, the scene/behaviour type catalogs and the active scene.
 	//
 	// Lifecycle of a scene: Awake once (when first activated), then Init each time it
@@ -32,7 +33,9 @@ namespace Engine
 	// requested from inside a behaviour or a UI callback.
 	class SceneSystem : public Machine
 	{
+
 	  public:
+
 		using SceneFactory = SceneCatalog::Factory;
 
 		// Services shared with every scene. The behaviour registry is always this
@@ -67,6 +70,7 @@ namespace Engine
 			{
 				throw std::runtime_error("Scene instance with name '" + name + "' is already registered.");
 			}
+
 			auto scene = std::make_shared<T>(std::forward<Args>(args)...);
 			T& ref = *scene;
 			AddLoaded(name, std::move(scene));
@@ -74,11 +78,16 @@ namespace Engine
 		}
 
 		int Awake() override;
+
 		int Init() override;
+
 		// Applies deferred scene switches/resets and starts transform tracking.
 		void BeginFrame();
+
 		void Update(double dt) override;
+
 		void FixedUpdate(unsigned int tickThisSecond) override;
+
 		int Exit() override;
 
 		// Engine state transition (from the EngineStateMachine).
@@ -103,7 +112,9 @@ namespace Engine
 		SceneId GetActiveSceneId() const { return activeSceneId; }
 
 		std::string GetActiveSceneName() const;
+
 		SceneId FindSceneId(std::string_view name) const;
+
 		std::vector<std::string> GetSceneNames() const;
 
 		std::uint64_t GetReloadCount() const { return reloadCount; }
@@ -111,6 +122,7 @@ namespace Engine
 		bool DispatchCommand(std::string_view command) const { return services.DispatchCommand && services.DispatchCommand(command); }
 
 	  private:
+
 		struct LoadedScene
 		{
 			SceneId Id;
@@ -119,8 +131,11 @@ namespace Engine
 		};
 
 		void AddLoaded(const std::string& name, std::shared_ptr<Scene> scene);
+
 		void InjectServices(Scene& scene);
+
 		int ActivateLoaded(LoadedScene& loaded, const std::string& name);
+
 		void ExitActive();
 
 		std::map<std::string, LoadedScene> scenes;
@@ -138,5 +153,7 @@ namespace Engine
 		bool awake = false;
 
 		SceneServices services{};
+
 	};
+
 } // namespace Engine

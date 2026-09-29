@@ -22,6 +22,7 @@ SWIM_TEST("Input.Frame", "SimulationAndPresentationReadTheSamePublishedSnapshot"
 		SWIM_CHECK_EQUAL(input.GetMousePositionDelta().X, 3.0f);
 		SWIM_CHECK_EQUAL(input.GetMousePositionDelta().Y, -2.0f);
 	}
+
 	input.AdvanceFrame();
 	SWIM_CHECK(input.IsKeyDown(Platform::KeyCode::W));
 	SWIM_CHECK(!input.IsKeyTriggered(Platform::KeyCode::W));

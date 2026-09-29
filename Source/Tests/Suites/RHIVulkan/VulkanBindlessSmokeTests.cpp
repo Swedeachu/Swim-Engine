@@ -60,11 +60,13 @@ namespace
 		Rhi::DescriptorSchemaDesc shared{ 1,
 			{ { 0, Rhi::DescriptorType::Sampler, samplerCapacity, Rhi::ShaderStageMask::Compute },
 				{ 1, Rhi::DescriptorType::SampledTexture, textureCapacity, Rhi::ShaderStageMask::Compute } } };
+
 		for (auto& binding : shared.Bindings)
 		{
 			binding.Stages = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute;
 			binding.PartiallyBound = binding.UpdateAfterBind = true;
 		}
+
 		const Rhi::ShaderStageArtifact stage{ Rhi::ShaderStageMask::Compute, "computeMain", bytecode };
 		auto program = device->CreateShaderProgram(
 			{ { &stage, 1 }, { interface.DescriptorSchemas, interface.PushConstants, interface.ComputeThreadGroupSize }, "Bindless" });
@@ -86,6 +88,7 @@ namespace
 			device->CreateBuffer({ sizeof(texels), Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, "Bindless texels" });
 		SWIM_REQUIRE(staging);
 		staging->Write(0, std::as_bytes(std::span(texels)));
+
 		for (std::size_t index = 0; index < textures.size(); ++index)
 		{
 			Rhi::TextureDesc desc{};
@@ -99,6 +102,7 @@ namespace
 			views[index] = device->CreateTextureView(*textures[index], view);
 			SWIM_REQUIRE(views[index]);
 		}
+
 		Rhi::SamplerDesc nearestDesc{};
 		nearestDesc.MinFilter = nearestDesc.MagFilter = nearestDesc.MipFilter = Rhi::Filter::Nearest;
 		nearestDesc.AddressU = nearestDesc.AddressV = Rhi::SamplerAddressMode::ClampToEdge;
@@ -128,6 +132,7 @@ namespace
 		constexpr std::size_t dispatches = 5;
 		std::array<std::unique_ptr<Rhi::Buffer>, dispatches> lookups, results, readbacks;
 		std::array<std::unique_ptr<Rhi::DescriptorTable>, dispatches> tables;
+
 		for (std::size_t index = 0; index < dispatches; ++index)
 		{
 			lookups[index] =
@@ -162,9 +167,11 @@ namespace
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
+
 			if (upload)
 			{
 				commands.Transition(*staging, S::HostWrite, S::CopySource);
+
 				for (std::size_t index = 0; index < textures.size(); ++index)
 				{
 					commands.Transition(*textures[index], S::Undefined, S::CopyDestination);
@@ -172,6 +179,7 @@ namespace
 					commands.Transition(*textures[index], S::CopyDestination, S::ShaderRead);
 				}
 			}
+
 			commands.Transition(*lookups[slot], S::HostWrite, S::ShaderRead);
 			commands.Transition(*results[slot], S::Undefined, S::ShaderRead | S::ShaderWrite);
 			commands.BindComputePipeline(*pipeline);
@@ -193,6 +201,7 @@ namespace
 		{
 			std::array<float, 4> actual{};
 			readbacks[slot]->Read(row * 16, std::as_writable_bytes(std::span(actual)));
+
 			for (std::size_t channel = 0; channel < 4; ++channel)
 			{
 				const float first = texels[texture][channel] / 255.0f;
@@ -258,10 +267,12 @@ namespace
 		{
 			SWIM_CHECK(bindless.Release(handle, last));
 		}
+
 		for (auto handle : { nearest, nearest, linear })
 		{
 			SWIM_CHECK(samplerCache.Release(handle, last));
 		}
+
 		// Elements point back at the fallbacks before the samplers are destroyed.
 		SWIM_CHECK_EQUAL(bindless.Collect(), 6u);
 		SWIM_CHECK_EQUAL(samplerCache.Collect(), 2u);
@@ -275,6 +286,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "BindlessTableTimelineSafeReuse", SWIM_TEST_LOCATION,
@@ -283,6 +295,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunBindlessSmoke);
 				} });
 		}
+
 		return true;
 	}();
 

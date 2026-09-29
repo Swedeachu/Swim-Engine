@@ -23,7 +23,9 @@ namespace Swim::RhiVulkan
 
 	class VulkanAdapter final : public Rhi::Adapter
 	{
+
 	  public:
+
 		VulkanAdapter(std::shared_ptr<VulkanInstanceState> instance, vkb::PhysicalDevice physicalDevice, QueueFamilySelection queueFamilies)
 			: instance(std::move(instance)), physicalDevice(std::move(physicalDevice)), queueFamilies(queueFamilies),
 			  info(BuildAdapterInfo(this->instance->Dispatch, this->physicalDevice))
@@ -60,6 +62,7 @@ namespace Swim::RhiVulkan
 
 			std::vector<vkb::CustomQueueDescription> queueDescriptions;
 			std::vector<std::uint32_t> uniqueFamilies;
+
 			for (std::uint32_t family : { queueFamilies.Graphics, queueFamilies.Compute, queueFamilies.Transfer })
 			{
 				if (std::find(uniqueFamilies.begin(), uniqueFamilies.end(), family) == uniqueFamilies.end())
@@ -74,17 +77,22 @@ namespace Swim::RhiVulkan
 			auto faultFeatures = QueryDeviceFaultFeatures(instance->Dispatch, selectedDevice.physical_device,
 				HasExtension(extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME), instance->RequestDeviceFaultDiagnostics);
 			const bool faultEnabled = faultFeatures.deviceFault != VK_FALSE;
+
 			if (faultEnabled)
 			{
 				selectedDevice.enable_extension_if_present(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 			}
+
 			vkb::DeviceBuilder builder{ selectedDevice };
 			builder.custom_queue_setup(queueDescriptions);
+
 			if (faultEnabled)
 			{
 				builder.add_pNext(&faultFeatures);
 			}
+
 			auto deviceResult = builder.build();
+
 			if (!deviceResult)
 			{
 				if (instance->Diagnostics.Log)
@@ -92,10 +100,12 @@ namespace Swim::RhiVulkan
 					instance->Diagnostics.Log->Record(Rhi::DiagnosticSeverity::Error, "VulkanDeviceCreation",
 						deviceResult.error().message() + "; native result=" + std::to_string(deviceResult.vk_result()));
 				}
+
 				if (deviceResult.vk_result() == VK_ERROR_DEVICE_LOST)
 				{
 					throw Rhi::DeviceLostError();
 				}
+
 				return nullptr;
 			}
 
@@ -121,15 +131,18 @@ namespace Swim::RhiVulkan
 			indexingProperties.pNext = &deviceState->DescriptorIndexing;
 			instance->Dispatch.vkGetPhysicalDeviceProperties2(deviceState->Device.physical_device.physical_device, &indexingProperties);
 			deviceState->DescriptorIndexing.pNext = nullptr;
+
 			if (deviceState->MemoryBudgetEnabled)
 			{
 				allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 			}
+
 			allocatorInfo.physicalDevice = deviceState->Device.physical_device.physical_device;
 			allocatorInfo.device = deviceState->Device.device;
 			allocatorInfo.instance = deviceState->Instance->Instance.instance;
 			allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
 			allocatorInfo.pVulkanFunctions = &deviceState->AllocatorFunctions;
+
 			if (CheckVulkanResult(*deviceState, vmaCreateAllocator(&allocatorInfo, &deviceState->Allocator), "vmaCreateAllocator") !=
 				VK_SUCCESS)
 			{
@@ -142,6 +155,7 @@ namespace Swim::RhiVulkan
 			deviceState->Dispatch.vkGetDeviceQueue(deviceState->Device.device, queueFamilies.Graphics, 0, &graphicsQueueHandle);
 			deviceState->Dispatch.vkGetDeviceQueue(deviceState->Device.device, queueFamilies.Compute, 0, &computeQueueHandle);
 			deviceState->Dispatch.vkGetDeviceQueue(deviceState->Device.device, queueFamilies.Transfer, 0, &transferQueueHandle);
+
 			if (graphicsQueueHandle == VK_NULL_HANDLE || computeQueueHandle == VK_NULL_HANDLE || transferQueueHandle == VK_NULL_HANDLE)
 			{
 				return nullptr;
@@ -149,10 +163,12 @@ namespace Swim::RhiVulkan
 
 			SetVulkanObjectName(*deviceState, VK_OBJECT_TYPE_DEVICE, ToNativeHandle(deviceState->Device.device), "Swim device");
 			SetVulkanObjectName(*deviceState, VK_OBJECT_TYPE_QUEUE, ToNativeHandle(graphicsQueueHandle), "Swim graphics/present queue");
+
 			if (computeQueueHandle != graphicsQueueHandle)
 			{
 				SetVulkanObjectName(*deviceState, VK_OBJECT_TYPE_QUEUE, ToNativeHandle(computeQueueHandle), "Swim compute queue");
 			}
+
 			if (transferQueueHandle != graphicsQueueHandle && transferQueueHandle != computeQueueHandle)
 			{
 				SetVulkanObjectName(*deviceState, VK_OBJECT_TYPE_QUEUE, ToNativeHandle(transferQueueHandle), "Swim transfer queue");
@@ -163,6 +179,7 @@ namespace Swim::RhiVulkan
 			deviceState->PresentationQueueMutex = graphicsQueueMutex;
 			auto computeQueueMutex = computeQueueHandle == graphicsQueueHandle ? graphicsQueueMutex : std::make_shared<std::mutex>();
 			std::shared_ptr<std::mutex> transferQueueMutex;
+
 			if (transferQueueHandle == graphicsQueueHandle)
 			{
 				transferQueueMutex = graphicsQueueMutex;
@@ -190,10 +207,12 @@ namespace Swim::RhiVulkan
 		}
 
 	  private:
+
 		std::shared_ptr<VulkanInstanceState> instance;
 		vkb::PhysicalDevice physicalDevice{};
 		QueueFamilySelection queueFamilies{};
 		Rhi::AdapterInfo info{};
+
 	};
 
 } // namespace Swim::RhiVulkan

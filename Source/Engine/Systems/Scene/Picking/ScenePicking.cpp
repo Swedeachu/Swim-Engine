@@ -11,14 +11,17 @@
 
 namespace Engine::ScenePicking
 {
+
 	std::vector<PickHit> PickAll(const entt::registry& registry, const Ray& inputRay, const PickOptions& options)
 	{
 		std::vector<PickHit> hits;
 		const float length = glm::length(inputRay.Direction);
+
 		if (!(length > 0.0f))
 		{
 			return hits;
 		}
+
 		const Ray ray{ inputRay.Origin, inputRay.Direction / length };
 		const auto consider = [&](entt::entity entity, const std::optional<RayHit>& hit)
 		{
@@ -26,21 +29,26 @@ namespace Engine::ScenePicking
 			{
 				return;
 			}
+
 			const auto existing = std::find_if(hits.begin(), hits.end(),
 				[entity](const PickHit& h)
 				{
 					return h.Entity == entity;
 				});
+
 			if (existing != hits.end())
 			{
 				if (hit->T < existing->Distance)
 				{
 					*existing = { entity, hit->T, hit->Point, hit->Normal };
 				}
+
 				return;
 			}
+
 			hits.push_back({ entity, hit->T, hit->Point, hit->Normal });
 		};
+
 		if (options.Pickables)
 		{
 			for (auto [entity, pickable, transform] : registry.view<Pickable, Transform>().each())
@@ -49,11 +57,13 @@ namespace Engine::ScenePicking
 				{
 					continue;
 				}
+
 				const glm::mat4 world = glm::translate(transform.GetWorldMatrix(registry), pickable.Offset);
 				consider(entity, pickable.Shape == PickShape::Sphere ? RayQueries::TransformedSphere(ray, world, pickable.Radius)
 																	 : RayQueries::Box(ray, world, pickable.HalfExtents));
 			}
 		}
+
 		if (options.Colliders && (options.LayerMask & 1u) != 0u)
 		{
 			for (auto [entity, body, transform] : registry.view<Rigidbody, Transform>().each())
@@ -62,8 +72,10 @@ namespace Engine::ScenePicking
 				{
 					continue; // A Pickable replaces the collider shape.
 				}
+
 				const glm::mat4& world = transform.GetWorldMatrix(registry);
 				const auto& collider = body.collider;
+
 				switch (collider.type)
 				{
 				case ColliderType::Sphere: consider(entity, RayQueries::TransformedSphere(ray, world, collider.sphere.radius)); break;
@@ -75,6 +87,7 @@ namespace Engine::ScenePicking
 				}
 			}
 		}
+
 		std::sort(hits.begin(), hits.end(),
 			[](const PickHit& a, const PickHit& b)
 			{
@@ -86,10 +99,12 @@ namespace Engine::ScenePicking
 	std::optional<PickHit> PickClosest(const entt::registry& registry, const Ray& ray, const PickOptions& options)
 	{
 		const auto hits = PickAll(registry, ray, options);
+
 		if (hits.empty())
 		{
 			return std::nullopt;
 		}
+
 		return hits.front();
 	}
 
@@ -98,4 +113,5 @@ namespace Engine::ScenePicking
 	{
 		return PickClosest(registry, cameras.ScreenPointToRay(x, y), options);
 	}
+
 } // namespace Engine::ScenePicking

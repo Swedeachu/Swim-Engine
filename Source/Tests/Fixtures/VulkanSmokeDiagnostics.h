@@ -41,18 +41,22 @@ namespace Swim::Testing
 		{
 			return {};
 		}
+
 		if (profile == "sync")
 		{
 			return { true, false };
 		}
+
 		if (profile == "gpu")
 		{
 			return { false, true };
 		}
+
 		if (profile == "all")
 		{
 			return { true, true };
 		}
+
 		throw std::invalid_argument("SWIM_RHI_VALIDATION must be core, sync, gpu or all");
 	}
 
@@ -69,6 +73,7 @@ namespace Swim::Testing
 		{
 			std::cerr << "[RHI diagnostic] " << message.Id << ": " << message.Text << '\n';
 		}
+
 		std::cerr << "[RHI validation] warnings=" << snapshot.Warnings << " errors=" << snapshot.Errors << " dropped=" << snapshot.Dropped
 				  << '\n';
 	}
@@ -83,6 +88,7 @@ namespace Swim::Testing
 		desc.Checks = ParseVulkanSmokeChecks(profile ? profile : "core");
 		std::cerr << "[RHI validation request] synchronization=" << desc.Checks.Synchronization
 				  << " gpu-assisted=" << desc.Checks.GpuAssisted << '\n';
+
 		try
 		{
 			run(desc);
@@ -92,6 +98,7 @@ namespace Swim::Testing
 			PrintVulkanSmokeDiagnostics(desc.Diagnostics->Snapshot());
 			throw;
 		}
+
 		// The inner function has destroyed resources, device, and instance. Include
 		// teardown diagnostics, not just the messages observed before GPU draining.
 		const auto snapshot = desc.Diagnostics->Snapshot();
@@ -101,10 +108,12 @@ namespace Swim::Testing
 			{
 				return IsExpectedVulkanSmokeAdvisory(message, desc.Checks);
 			});
+
 		if (expected != 0)
 		{
 			std::cerr << "[RHI validation] expected descriptor-limit startup advisories=" << expected << '\n';
 		}
+
 		SWIM_REQUIRE_MESSAGE(HasCleanVulkanSmokeDiagnostics(snapshot, desc.Checks),
 			"Vulkan smoke emitted unexpected validation warnings/errors or lost diagnostics (including teardown)");
 	}

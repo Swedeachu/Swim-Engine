@@ -45,6 +45,7 @@
 
 namespace
 {
+
 #ifdef SWIM_FORWARD_PLUS_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 
@@ -102,24 +103,30 @@ namespace
 		double total = 0.0;
 		bool any = false;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 				any = true;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		if (measured)
 		{
 			*measured = any;
 		}
+
 		return total;
 	}
 
@@ -213,6 +220,7 @@ namespace
 		};
 		std::vector<std::unique_ptr<Rhi::Texture>> textures;
 		std::vector<std::unique_ptr<Rhi::TextureView>> views;
+
 		for (const auto& spec : specs)
 		{
 			Rhi::TextureDesc desc{};
@@ -226,6 +234,7 @@ namespace
 			views.push_back(device->CreateTextureView(*textures.back(), view));
 			SWIM_REQUIRE(views.back());
 		}
+
 		Rhi::SamplerDesc samplerDesc{};
 		samplerDesc.AddressU = samplerDesc.AddressV = Rhi::SamplerAddressMode::Repeat;
 		auto sampler = device->CreateSampler(samplerDesc);
@@ -238,26 +247,32 @@ namespace
 		BindlessResourceTable bindless(*device, bindlessDesc);
 		std::vector<std::uint32_t> textureIndex(specs.size(), BindlessResourceTable::FallbackIndex);
 		std::vector<BindlessTextureHandle> textureHandles;
+
 		for (std::size_t i = 1; i < specs.size(); ++i)
 		{
 			textureHandles.push_back(bindless.RegisterTexture(*views[i]));
 			textureIndex[i] = bindless.GetIndex(textureHandles.back());
 		}
+
 		const auto samplerHandle = bindless.RegisterSampler(*sampler);
 		const auto samplerIndex = bindless.GetIndex(samplerHandle);
 		{
 			RenderGraph uploads;
+
 			for (std::size_t i = 0; i < textures.size(); ++i)
 			{
 				const auto texture = uploads.ImportTexture(*textures[i], Rhi::ResourceState::Undefined);
 				std::array<std::uint8_t, 64> texels{};
+
 				for (std::size_t t = 0; t < 16; ++t)
 				{
 					std::memcpy(texels.data() + t * 4, specs[i].Texel.data(), 4);
 				}
+
 				AddTextureUpload(uploads, "Texture upload", std::as_bytes(std::span(texels)), texture, { 0, {}, {}, { 4, 4, 1 } });
 				uploads.Export(texture, Rhi::ResourceState::ShaderRead);
 			}
+
 			executor.Execute(uploads.Compile());
 			executor.Wait();
 		}
@@ -267,28 +282,34 @@ namespace
 			const auto decode = [&](std::uint32_t bindlessIndex, int channel)
 			{
 				const TextureSpec* spec = &specs[0];
+
 				for (std::size_t i = 1; i < specs.size(); ++i)
 				{
 					spec = textureIndex[i] == bindlessIndex ? &specs[i] : spec;
 				}
+
 				const float encoded = float(spec->Texel[channel]) / 255.0f;
 				return spec->Format == Rhi::Format::RGBA8UnormSrgb && channel < 3 ? Pbr::SrgbToLinear(encoded) : encoded;
 			};
 			Pbr::Texels texels;
+
 			for (int c = 0; c < 4; ++c)
 			{
 				texels.BaseColor[c] = decode(indices.BaseColor, c);
 			}
+
 			for (int c = 0; c < 3; ++c)
 			{
 				texels.MetallicRoughness[c] = decode(indices.MetallicRoughness, c);
 				texels.Emissive[c] = decode(indices.Emissive, c);
 			}
+
 			if (indices.Normal != 0)
 			{
 				texels.TangentNormal =
 					Pbr::Float3{ decode(indices.Normal, 0) * 2 - 1, decode(indices.Normal, 1) * 2 - 1, decode(indices.Normal, 2) * 2 - 1 };
 			}
+
 			texels.Occlusion = decode(indices.Occlusion, 0);
 			return texels;
 		};
@@ -331,6 +352,7 @@ namespace
 		instances[5]->SetTexture("EmissiveTexture", textureIndex[5]);
 		instances[5]->SetVector("EmissiveFactor", std::array<float, 3>{ 0.4f, 0.4f, 0.4f });
 		std::vector<GpuMaterialHandle> materialHandles;
+
 		for (const auto& instance : instances)
 		{
 			materialHandles.push_back(materials.Create(instance));
@@ -372,15 +394,19 @@ namespace
 		{
 			Fs::Mesh deformed = Fs::MakeCube();
 			const auto count = deformed.Vertices.size();
+
 			for (std::size_t v = 0; v < count; ++v)
 			{
 				auto previous = deformed.Vertices[v];
+
 				for (int c = 0; c < 3; ++c)
 				{
 					previous.Position[c] += deformedShift[c];
 				}
+
 				deformed.Vertices.push_back(previous);
 			}
+
 			return upload(deformed, "Deformed cube");
 		}();
 		bool deformedCube = false;
@@ -421,6 +447,7 @@ namespace
 		std::vector<Fs::Object> objects;
 		GpuScene scene(*device, { 32, "Forward+ scene" });
 		std::vector<RenderObjectHandle> handles;
+
 		for (std::uint32_t i = 0; i < placements.size(); ++i)
 		{
 			const auto& p = placements[i];
@@ -435,6 +462,7 @@ namespace
 			desc.ObjectId = i;
 			handles.push_back(scene.Create(desc));
 		}
+
 		const auto materialOf = [&](std::uint32_t object) -> const MaterialInstance&
 		{
 			return *instances[placements[object].Material];
@@ -448,6 +476,7 @@ namespace
 		visibilityDesc.MaxMaterialSets = 16;
 		visibilityDesc.MaterialBinCapacities = ForwardPlusRenderer::VisibilityBinCapacities(64, 16);
 		GpuVisibility visibility(*device, visibilityDesc);
+
 		for (std::size_t i = 0; i < materialHandles.size(); ++i)
 		{
 			ForwardPlusRenderer::RouteMaterial(visibility, materials.GetIndex(materialHandles[i]), ReadStandardParameters(*instances[i]));
@@ -478,6 +507,7 @@ namespace
 			sun.Color = { 1.0f, 0.95f, 0.85f };
 			lights.Create(sun);
 		}
+
 		for (int i = 0; i < 300; ++i)
 		{
 			lights.Create(localLight(1.0f));
@@ -546,11 +576,13 @@ namespace
 			const auto lightResources = lights.Import(graph);
 			std::optional<EnvironmentGraphResources> environment;
 			std::optional<GraphTexture> lut;
+
 			if (spec.Environment)
 			{
 				environment = environmentPrograms.Builder->Record(graph, sky, map);
 				lut = environmentPrograms.Builder->RecordBrdfLut(graph, lutSize, lutSamples);
 			}
+
 			VisibilityFrameDesc visibilityFrame;
 			visibilityFrame.View = BuildGpuViewRecord(viewDesc);
 			visibilityFrame.IndexPages = { pageSlot.IndexPage };
@@ -629,6 +661,7 @@ namespace
 			std::optional<Smoke::CubeReadback> prefilteredReadback;
 			std::optional<GraphReadback> irradianceReadback;
 			std::optional<GraphReadback> lutReadback;
+
 			if (environment)
 			{
 				prefilteredReadback = Smoke::AddCubeReadback(graph, environment->Prefiltered, map.PrefilteredSize, map.PrefilteredMipCount);
@@ -636,6 +669,7 @@ namespace
 					AddBufferReadback(graph, "Irradiance", environment->Irradiance, 0, EnvironmentIrradianceBindings::OutputBytes);
 				lutReadback = AddTextureReadback(graph, "LUT", *lut, { 0, {}, {}, { lutSize, lutSize, 1 } });
 			}
+
 			const auto completion = executor.Execute(graph.Compile());
 			lastCompletion = completion;
 			scene.CommitUploads();
@@ -677,13 +711,16 @@ namespace
 			read(indicesReadback, clusterIndices);
 			read(statsReadback, stats);
 			std::optional<Env::EnvironmentProbe> probe;
+
 			if (environment)
 			{
 				probe.emplace(Smoke::ReadIrradiance(executor, *irradianceReadback), Smoke::ReadCube(executor, *prefilteredReadback),
 					Smoke::ReadImage(executor, *lutReadback, lutSize, lutSize));
 			}
+
 			FrameResult result;
 			result.Overflow = stats[0].OverflowClusters;
+
 			if (spec.ExpectExact)
 			{
 				SWIM_CHECK_EQUAL(stats[0].OverflowClusters, 0u);
@@ -695,32 +732,41 @@ namespace
 			const auto& range = bins.GetRange(bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Transparent), 0));
 			std::vector<GpuInstanceRecord> instanceRows;
 			std::vector<GpuTransformRecord> transformRows;
+
 			for (std::uint32_t row = 0; row < scene.GetStats().RowCount; ++row)
 			{
 				instanceRows.push_back(scene.GetInstanceRow(row));
 			}
+
 			std::uint32_t maxTransform = 0;
+
 			for (const auto& row : instanceRows)
 			{
 				maxTransform = std::max(maxTransform, row.TransformIndex + 1);
 			}
+
 			for (std::uint32_t row = 0; row < maxTransform; ++row)
 			{
 				transformRows.push_back(scene.GetTransformRow(row));
 			}
+
 			std::map<std::uint32_t, GpuTransformRecord> transformOf; // ObjectId -> its transform row.
+
 			for (const auto& row : instanceRows)
 			{
 				transformOf[row.ObjectId] = transformRows[row.TransformIndex];
 			}
+
 			const std::uint32_t transparentCount = sortedCount[0];
 			SWIM_CHECK_EQUAL(transparentCount, 5u); // Frustum-visible transparent quads (the culled one is culled per pixel).
 			const std::span<const GpuDrawRecord> transparentRecords(drawRecords.data() + range.First, transparentCount);
 			const auto expectedOrder =
 				Fp::SortTransparentDraws(transparentRecords, range.First, instanceRows, transformRows, forward.ViewRecord);
+
 			for (std::uint32_t i = 0; i < forward.TransparentCapacity; ++i)
 			{
 				const auto& command = sorted[i];
+
 				if (i >= transparentCount)
 				{
 					// Zero-filled only where the draw has no count buffer (the sort skips it otherwise).
@@ -728,8 +774,10 @@ namespace
 					{
 						SWIM_CHECK(command.IndexCount == 0 && command.InstanceCount == 0);
 					}
+
 					continue;
 				}
+
 				SWIM_CHECK_EQUAL(command.FirstInstance, expectedOrder[i]);
 				SWIM_CHECK_EQUAL(command.IndexCount, 6u);
 				SWIM_CHECK_EQUAL(command.InstanceCount, 1u);
@@ -742,10 +790,12 @@ namespace
 			Fp::LightingInputs inputs{ lights.GetRecords(), lights.GetHeader(), &grid, clusterRecords, clusterIndices,
 				probe ? &*probe : nullptr };
 			std::vector<std::uint32_t> drawRank(objects.size(), 0);
+
 			for (std::uint32_t i = 0; i < result.SortedObjects.size(); ++i)
 			{
 				drawRank[result.SortedObjects[i]] = i + 1;
 			}
+
 			struct PixelTruth
 			{
 				std::uint32_t Signature = 0; // Opaque object/face and transparent layers.
@@ -754,6 +804,7 @@ namespace
 				std::vector<Fs::Hit> Layers; // In draw order.
 			};
 			std::vector<PixelTruth> truth(std::size_t(width) * height);
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
@@ -766,37 +817,45 @@ namespace
 					const Fs::Float3 direction{ through[0] - spec.Eye[0], through[1] - spec.Eye[1], through[2] - spec.Eye[2] };
 					auto& pixel = truth[std::size_t(y) * width + x];
 					std::vector<Fs::Hit> layers;
+
 					for (const auto& hit : Fs::CastRay(objects, spec.Eye, direction))
 					{
 						const auto& instance = materialOf(hit.Object);
 						const auto parameters = ReadStandardParameters(instance);
 						const auto frameAxes = Fp::BuildFrame(hit.Normal, hit.Tangent, hit.FrontFacing != hit.Mirrored, hit.Mirrored);
+
 						if (Fp::CullsFace(parameters, frameAxes.FrontFacing) || !Pbr::Resolve(parameters, texelsOf(instance), frameAxes))
 						{
 							continue; // Culled or alpha-masked: the ray continues.
 						}
+
 						if (Fp::MaterialBin(parameters) == ForwardPlusBin::Transparent)
 						{
 							layers.push_back(hit);
 							continue;
 						}
+
 						pixel.Opaque = hit;
 						pixel.Id = hit.Object + 1;
 						pixel.Signature = (hit.Object + 1) * 8 + hit.Face;
 						break;
 					}
+
 					std::sort(layers.begin(), layers.end(),
 						[&](const Fs::Hit& a, const Fs::Hit& b)
 						{
 							return drawRank[a.Object] < drawRank[b.Object];
 						});
+
 					for (const auto& layer : layers)
 					{
 						pixel.Signature |= 1u << (16 + layer.Object);
 					}
+
 					pixel.Layers = std::move(layers);
 				}
 			}
+
 			const auto surfaceOf = [&](const Fs::Hit& hit)
 			{
 				const auto& instance = materialOf(hit.Object);
@@ -819,6 +878,7 @@ namespace
 			double errorSum = 0.0;
 			float worst = 0.0f;
 			std::uint32_t maskedSeen = 0;
+
 			for (std::uint32_t y = 1; y + 1 < height; ++y)
 			{
 				for (std::uint32_t x = 1; x + 1 < width; ++x)
@@ -828,6 +888,7 @@ namespace
 					const auto gpuId = static_cast<std::uint32_t>(ids[index]);
 					maskedSeen += gpuId == 5u ? 1u : 0u; // Object 4 (masked) + 1.
 					bool interior = true;
+
 					for (int dy = -1; dy <= 1 && interior; ++dy)
 					{
 						for (int dx = -1; dx <= 1 && interior; ++dx)
@@ -835,10 +896,12 @@ namespace
 							interior = truth[std::size_t(int(y) + dy) * width + std::size_t(int(x) + dx)].Signature == pixel.Signature;
 						}
 					}
+
 					if (!interior)
 					{
 						continue;
 					}
+
 					++idInterior;
 					idMismatch += gpuId != pixel.Id ? 1u : 0u;
 					// Motion vectors: ForwardPlus::MotionVector of the surface point this pixel sees.
@@ -849,10 +912,12 @@ namespace
 						const Fs::Float3 relative{ pixel.Opaque->Position[0] - transform.Current[3],
 							pixel.Opaque->Position[1] - transform.Current[7], pixel.Opaque->Position[2] - transform.Current[11] };
 						Fs::Float3 local{};
+
 						for (int r = 0; r < 3; ++r)
 						{
 							local[r] = inverse[r * 3] * relative[0] + inverse[r * 3 + 1] * relative[1] + inverse[r * 3 + 2] * relative[2];
 						}
+
 						const bool deformed = deformedCube && pixel.Opaque->Object == 1;
 						const Fs::Float3 previousLocal = deformed
 							? Fs::Float3{ local[0] + deformedShift[0], local[1] + deformedShift[1], local[2] + deformedShift[2] }
@@ -861,6 +926,7 @@ namespace
 							Fp::MotionVector(forward.ViewRecord, transform.Current, transform.Previous, local, previousLocal);
 						deformedCompared += deformed ? 1u : 0u;
 						bool outlier = false;
+
 						for (int c = 0; c < 2; ++c)
 						{
 							const float actual = Smoke::HalfToFloat(velocityHalves[index * 2 + c]);
@@ -868,17 +934,21 @@ namespace
 							velocityWorst = std::max(velocityWorst, error);
 							outlier = outlier || error > 1.0e-4f + 2.0e-3f * std::abs(motion[c]);
 						}
+
 						++velocityCompared;
 						velocityOutliers += outlier ? 1u : 0u;
 						moving += std::abs(motion[0]) + std::abs(motion[1]) > 1.0e-3f ? 1u : 0u;
 					}
+
 					if (index % spec.PixelStride != 0)
 					{
 						continue;
 					}
+
 					const float px = float(x) + 0.5f;
 					const float py = float(y) + 0.5f;
 					Fp::Float4 expected{ 0, 0, 0, 0 };
+
 					if (pixel.Opaque)
 					{
 						if (spec.Debug == ForwardPlusDebugMode::ClusterHeatmap)
@@ -890,24 +960,30 @@ namespace
 							const auto color = shade(*pixel.Opaque, px, py);
 							expected = { color[0], color[1], color[2], 1.0f };
 						}
+
 						++comparedPerObject[pixel.Opaque->Object];
 					}
+
 					if (spec.Debug == ForwardPlusDebugMode::ClusterHeatmap && !pixel.Layers.empty())
 					{
 						continue; // The heatmap covers opaque pixels only.
 					}
+
 					auto reversed = expected;
 					std::vector<Fp::Float4> layerColors;
+
 					for (const auto& layer : pixel.Layers)
 					{
 						layerColors.push_back(shade(layer, px, py));
 						expected = Fp::Over(layerColors.back(), expected);
 						++comparedPerObject[layer.Object];
 					}
+
 					for (auto it = layerColors.rbegin(); it != layerColors.rend(); ++it)
 					{
 						reversed = Fp::Over(*it, reversed);
 					}
+
 					if (pixel.Opaque)
 					{
 						// Normal + roughness as resolved; indirect radiance times every layer's transmittance
@@ -918,10 +994,12 @@ namespace
 							: Fp::IndirectRadiance(inputs, forward.ViewRecord, surface, pixel.Opaque->Position);
 						// Item 76 (SSR): the specular reflectance and IBL radiance, scaled the same way.
 						auto specular = Fp::SpecularEnvironment(inputs, forward.ViewRecord, surface, pixel.Opaque->Position);
+
 						if (spec.Debug == ForwardPlusDebugMode::ClusterHeatmap)
 						{
 							specular = {};
 						}
+
 						for (const auto& layer : layerColors)
 						{
 							for (int c = 0; c < 3; ++c)
@@ -931,13 +1009,16 @@ namespace
 								specular.Radiance[c] *= 1.0f - layer[3];
 							}
 						}
+
 						bool normalOutlier = false, indirectOutlier = false, specularOutlier = false;
+
 						for (int c = 0; c < 4; ++c)
 						{
 							const float expectedNormal = c < 3 ? surface.Normal[c] : surface.PerceptualRoughness;
 							const float error = std::abs(Smoke::HalfToFloat(normalHalves[index * 4 + c]) - expectedNormal);
 							normalWorst = std::max(normalWorst, error);
 							normalOutlier = normalOutlier || error > 0.02f;
+
 							if (c < 3)
 							{
 								const float actualIndirect = Smoke::HalfToFloat(indirectHalves[index * 4 + c]);
@@ -950,40 +1031,50 @@ namespace
 									std::abs(actualSpecular - specular.Radiance[c]) > 0.01f + 0.03f * specular.Radiance[c];
 							}
 						}
+
 						++surfaceCompared;
 						normalOutliers += normalOutlier ? 1u : 0u;
 						indirectOutliers += indirectOutlier ? 1u : 0u;
 						specularOutliers += specularOutlier ? 1u : 0u;
 					}
+
 					std::array<float, 4> actual{};
+
 					for (int c = 0; c < 4; ++c)
 					{
 						actual[c] = Smoke::HalfToFloat(colorHalves[index * 4 + c]);
 					}
+
 					float pixelError = 0.0f;
 					bool outlier = false;
+
 					for (int c = 0; c < 4; ++c)
 					{
 						const float error = RelativeError(actual[c], expected[c]);
 						pixelError = std::max(pixelError, error);
 						outlier = outlier || std::abs(actual[c] - expected[c]) > 0.01f + 0.03f * std::abs(expected[c]);
 					}
+
 					++compared;
 					outliers += outlier ? 1u : 0u;
 					errorSum += pixelError;
 					worst = std::max(worst, pixelError);
+
 					if (pixel.Layers.size() >= 2)
 					{
 						++layered;
 						float gap = 0.0f;
+
 						for (int c = 0; c < 3; ++c)
 						{
 							gap = std::max(gap, std::abs(reversed[c] - expected[c]));
 						}
+
 						orderSensitive += gap > 0.05f ? 1u : 0u;
 					}
 				}
 			}
+
 			const double mean = compared ? errorSum / compared : 0.0;
 			std::printf("             [forward+ %s] %u interior pixels, %u id mismatches; %u compared, %u outliers, mean %.2e, worst %.2e; "
 						"%u layered (%u order-sensitive); %u clusters overflowing\n",
@@ -995,12 +1086,14 @@ namespace
 			SWIM_CHECK(normalOutliers <= surfaceCompared / 200);
 			SWIM_CHECK(indirectOutliers <= surfaceCompared / 200);
 			SWIM_CHECK(specularOutliers <= surfaceCompared / 200);
+
 			if (velocityCompared)
 			{
 				std::printf("             [forward+ %s] velocity: %u compared (%u moving, %u deformed), %u outliers, worst %.2e\n",
 					spec.Name, velocityCompared, moving, deformedCompared, velocityOutliers, double(velocityWorst));
 				SWIM_CHECK(velocityOutliers <= velocityCompared / 500);
 			}
+
 			result.MovingPixels = moving;
 			result.DeformedPixels = deformedCompared;
 			SWIM_CHECK(idInterior > width * height / 2);
@@ -1009,12 +1102,14 @@ namespace
 			SWIM_CHECK(compared > 0u);
 			SWIM_CHECK(outliers <= compared / 200);
 			SWIM_CHECK(mean < (spec.Debug == ForwardPlusDebugMode::ClusterHeatmap ? 1.0e-2 : 5.0e-3));
+
 			if (spec.PixelStride == 1 && spec.Debug == ForwardPlusDebugMode::None)
 			{
 				for (const std::uint32_t object : { 0u, 1u, 2u, 3u, 5u })
 				{
 					SWIM_CHECK(comparedPerObject[object] > 100u); // Every visible opaque object was compared.
 				}
+
 				SWIM_CHECK(layered > 100u);
 				SWIM_CHECK(orderSensitive > 50u);		 // The order is observable, and the GPU's matched.
 				SWIM_CHECK(comparedPerObject[10] == 0u); // Single-sided, facing away.
@@ -1023,6 +1118,7 @@ namespace
 			// Pass timings (GPU timestamps when the queue supports them).
 			bool measured = false;
 			const double clusterMs = PassMilliseconds(timings, "Clusters", &measured);
+
 			if (measured)
 			{
 				std::printf("             [forward+ %s] %u lights: clusters %.3f ms, opaque %.3f ms, sort %.3f ms, transparent %.3f ms\n",
@@ -1030,6 +1126,7 @@ namespace
 					PassMilliseconds(timings, "Forward+ transparent sort"),
 					PassMilliseconds(timings, "Forward+ transparent") - PassMilliseconds(timings, "Forward+ transparent sort"));
 			}
+
 			return result;
 		};
 
@@ -1073,6 +1170,7 @@ namespace
 		{
 			lights.Create(localLight(1.4f));
 		}
+
 		frame({ "10k lights", eye, target, true, ForwardPlusDebugMode::None, { 0.02f, 0.02f, 0.03f }, 7, false, { 0.0f, 0.0f } });
 
 		scene.Collect();
@@ -1152,6 +1250,7 @@ namespace
 		std::mt19937 random(690);
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 		std::vector<GpuLightHandle> handles;
+
 		for (const auto& scenario : { Scenario{ "empty", Layout::Uniform, 0 }, Scenario{ "uniform", Layout::Uniform, 1000 },
 				 Scenario{ "uniform", Layout::Uniform, 10000 }, Scenario{ "uniform", Layout::Uniform, 32768 },
 				 Scenario{ "off-screen", Layout::OffScreen, 10000 }, Scenario{ "dense", Layout::Dense, 10000 } })
@@ -1160,7 +1259,9 @@ namespace
 			{
 				SWIM_CHECK(lights.Release(handle));
 			}
+
 			handles.clear();
+
 			for (std::uint32_t i = 0; i < scenario.Count; ++i)
 			{
 				LightDesc desc;
@@ -1169,6 +1270,7 @@ namespace
 				desc.Intensity = 1.0f + 5.0f * unit(random);
 				desc.OuterConeAngle = 0.3f + 1.2f * unit(random);
 				desc.InnerConeAngle = desc.OuterConeAngle * 0.5f * unit(random);
+
 				if (scenario.Shape == Layout::Uniform)
 				{
 					desc.Position = { 120 * unit(random) - 60, 22 * unit(random) - 2, 165 * unit(random) - 150 };
@@ -1184,6 +1286,7 @@ namespace
 					desc.Position = { 4 * unit(random) - 2, 4 * unit(random), 4 * unit(random) - 2 };
 					desc.Range = 3.0f + 3.0f * unit(random);
 				}
+
 				handles.push_back(lights.Create(desc));
 			}
 
@@ -1191,6 +1294,7 @@ namespace
 			std::vector<GraphPassTiming> timings;
 			auto scenarioGrid = gridDesc;
 			scenarioGrid.LightCapacity = std::max(32u, scenario.Count); // The bitmasks address every light.
+
 			for (int repeat = 0; repeat < 3; ++repeat)
 			{
 				RenderGraph graph;
@@ -1211,10 +1315,12 @@ namespace
 			const auto rows = lights.GetRecords();
 			const auto& header = lights.GetHeader();
 			std::uint32_t visible = 0;
+
 			for (std::uint32_t i = 0; i < header.LocalCount; ++i)
 			{
 				visible += Cl::CullLight(grid, rows[header.FirstLocalRow + i]).Radius >= 0.0f ? 1u : 0u;
 			}
+
 			SWIM_CHECK(
 				std::uint32_t(std::abs(int(stats.VisibleLights) - int(visible))) <= std::max(2u, visible / 1000)); // Grazing spheres.
 			SWIM_CHECK_EQUAL(stats.ClusterCount, layout.ClusterCount);
@@ -1222,16 +1328,19 @@ namespace
 			SWIM_CHECK_EQUAL(stats.DroppedIndices, 0u);
 			SWIM_CHECK(stats.OverflowClusters <= stats.NonEmptyClusters && stats.NonEmptyClusters <= stats.ClusterCount);
 			SWIM_CHECK((stats.OverflowClusters > 0) == (stats.MaxRawLightsPerCluster > gridDesc.MaxLightsPerCluster));
+
 			if (scenario.Count == 0 || scenario.Shape == Layout::OffScreen)
 			{
 				SWIM_CHECK_EQUAL(stats.VisibleLights, 0u);
 				SWIM_CHECK_EQUAL(stats.RequestedIndices, 0u);
 				SWIM_CHECK_EQUAL(stats.NonEmptyClusters, 0u);
 			}
+
 			if (scenario.Shape == Layout::Dense)
 			{
 				SWIM_CHECK(stats.OverflowClusters > 0u);
 			}
+
 			if (scenario.Shape == Layout::Uniform && scenario.Count > 0)
 			{
 				SWIM_CHECK(stats.VisibleLights > 0u);
@@ -1242,6 +1351,7 @@ namespace
 			std::printf("             [clusters GPU] %-10s %5u lights: %5u visible, %7u indices (%u dropped), %4u overflowing, max %5u",
 				scenario.Name, scenario.Count, stats.VisibleLights, stats.WrittenIndices, stats.DroppedIndices, stats.OverflowClusters,
 				stats.MaxRawLightsPerCluster);
+
 			if (measured)
 			{
 				std::printf("; cull %.3f, bounds %.3f, count %.3f, scan %.3f, write %.3f = %.3f ms",
@@ -1249,8 +1359,10 @@ namespace
 					PassMilliseconds(timings, "Clusters count"), PassMilliseconds(timings, "Clusters scan"),
 					PassMilliseconds(timings, "Clusters write"), total);
 			}
+
 			std::printf("\n");
 		}
+
 		executor.Trim();
 #endif
 	}
@@ -1258,6 +1370,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClusteredForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -1272,6 +1385,8 @@ namespace
 						Swim::Testing::RunValidatedVulkanSmoke(&RunClusteredLightingBenchmark);
 					} });
 		}
+
 		return true;
 	}();
+
 } // namespace

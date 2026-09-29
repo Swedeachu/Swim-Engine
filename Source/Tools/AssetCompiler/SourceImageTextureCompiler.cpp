@@ -21,8 +21,10 @@
 
 namespace Swim::AssetCompiler
 {
+
 	namespace
 	{
+
 		SourceImageTextureCompileResult MakeError(SourceImageTextureCompileErrorCode code, std::string message)
 		{
 			SourceImageTextureCompileResult result;
@@ -42,11 +44,14 @@ namespace Swim::AssetCompiler
 			{
 				return false;
 			}
+
 			const std::uint64_t pixelCount = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height);
+
 			if (pixelCount > std::numeric_limits<std::size_t>::max() / 4u)
 			{
 				return false;
 			}
+
 			byteCount = static_cast<std::size_t>(pixelCount * 4u);
 			return true;
 		}
@@ -72,6 +77,7 @@ namespace Swim::AssetCompiler
 				nullptr,
 				STBI_rgb_alpha
 			);
+
 			if (!decoded)
 			{
 				const char* reason = stbi_failure_reason();
@@ -80,6 +86,7 @@ namespace Swim::AssetCompiler
 			}
 
 			std::size_t byteCount = 0;
+
 			if (!TryGetRgba8ByteCount(width, height, byteCount))
 			{
 				stbi_image_free(decoded);
@@ -105,7 +112,9 @@ namespace Swim::AssetCompiler
 				error = "WebP source image is empty";
 				return false;
 			}
+
 			const auto* encoded = reinterpret_cast<const std::uint8_t*>(bytes.data());
+
 			if (!WebPGetInfo(encoded, bytes.size(), &width, &height))
 			{
 				error = "libwebp could not parse source image metadata";
@@ -113,12 +122,15 @@ namespace Swim::AssetCompiler
 			}
 
 			std::size_t byteCount = 0;
+
 			if (!TryGetRgba8ByteCount(width, height, byteCount) || width > std::numeric_limits<int>::max() / 4)
 			{
 				error = "decoded WebP dimensions overflow RGBA8 storage";
 				return false;
 			}
+
 			rgba.resize(byteCount);
+
 			if (!WebPDecodeRGBAInto(
 				encoded,
 				bytes.size(),
@@ -129,6 +141,7 @@ namespace Swim::AssetCompiler
 				error = "libwebp failed to decode source image to RGBA8";
 				return false;
 			}
+
 			return true;
 		}
 
@@ -188,14 +201,17 @@ namespace Swim::AssetCompiler
 
 					float accumulated[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
 					std::uint32_t sampleCount = 0;
+
 					for (std::uint32_t sourceY = sourceYBegin; sourceY < sourceYEnd; ++sourceY)
 					{
 						for (std::uint32_t sourceX = sourceXBegin; sourceX < sourceXEnd; ++sourceX)
 						{
 							const std::size_t sourceOffset = (static_cast<std::size_t>(sourceY) * sourceWidth + sourceX) * 4u;
+
 							for (std::size_t channel = 0; channel < 4; ++channel)
 							{
 								float value = ByteToFloat(source[sourceOffset + channel]);
+
 								if (srgbColor && channel < 3)
 								{
 									value = SrgbToLinear(value);
@@ -204,13 +220,16 @@ namespace Swim::AssetCompiler
 								{
 									value = value * 2.0f - 1.0f;
 								}
+
 								accumulated[channel] += value;
 							}
+
 							++sampleCount;
 						}
 					}
 
 					const float inverseSampleCount = 1.0f / static_cast<float>(sampleCount);
+
 					for (float& value : accumulated)
 					{
 						value *= inverseSampleCount;
@@ -222,6 +241,7 @@ namespace Swim::AssetCompiler
 							accumulated[0] * accumulated[0] +
 							accumulated[1] * accumulated[1] +
 							accumulated[2] * accumulated[2];
+
 						if (lengthSquared > 0.000001f)
 						{
 							const float inverseLength = 1.0f / std::sqrt(lengthSquared);
@@ -238,9 +258,11 @@ namespace Swim::AssetCompiler
 					}
 
 					const std::size_t destinationOffset = (static_cast<std::size_t>(y) * destinationWidth + x) * 4u;
+
 					for (std::size_t channel = 0; channel < 4; ++channel)
 					{
 						float value = accumulated[channel];
+
 						if (srgbColor && channel < 3)
 						{
 							value = LinearToSrgb(value);
@@ -249,6 +271,7 @@ namespace Swim::AssetCompiler
 						{
 							value = value * 0.5f + 0.5f;
 						}
+
 						destination[destinationOffset + channel] = FloatToByte(value);
 					}
 				}
@@ -273,6 +296,7 @@ namespace Swim::AssetCompiler
 				{
 					return false;
 				}
+
 				const std::uint64_t offset = static_cast<std::uint64_t>(payload.Bytes.size());
 				payload.Mips.push_back({
 					currentWidth,
@@ -297,8 +321,10 @@ namespace Swim::AssetCompiler
 				currentWidth = nextWidth;
 				currentHeight = nextHeight;
 			}
+
 			return true;
 		}
+
 	}
 
 	SourceImageMimeType DetectSourceImageMimeType(std::span<const std::byte> bytes, SourceImageMimeType hint)
@@ -328,24 +354,29 @@ namespace Swim::AssetCompiler
 		{
 			return SourceImageMimeType::Png;
 		}
+
 		if (HasPrefix(bytes, JpegMagic))
 		{
 			return SourceImageMimeType::Jpeg;
 		}
+
 		if (HasPrefix(bytes, Ktx2Magic))
 		{
 			return SourceImageMimeType::Ktx2;
 		}
+
 		if (bytes.size() >= 12 &&
 			std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
 			std::memcmp(bytes.data() + 8, "WEBP", 4) == 0)
 		{
 			return SourceImageMimeType::WebP;
 		}
+
 		if (bytes.size() >= 4 && std::memcmp(bytes.data(), "DDS ", 4) == 0)
 		{
 			return SourceImageMimeType::Dds;
 		}
+
 		return SourceImageMimeType::Unknown;
 	}
 
@@ -357,6 +388,7 @@ namespace Swim::AssetCompiler
 		CookedTextureEncoding encoding)
 	{
 		mimeType = DetectSourceImageMimeType(bytes, mimeType);
+
 		if (mimeType != SourceImageMimeType::Png && mimeType != SourceImageMimeType::Jpeg && mimeType != SourceImageMimeType::WebP)
 		{
 			return MakeError(SourceImageTextureCompileErrorCode::UnsupportedSource, "source texture is not PNG, JPEG, or WebP");
@@ -369,10 +401,12 @@ namespace Swim::AssetCompiler
 		const bool decoded = mimeType == SourceImageMimeType::WebP
 			? DecodeWebPRgba8(bytes, rgba, width, height, decodeError)
 			: DecodeStbRgba8(bytes, rgba, width, height, decodeError);
+
 		if (!decoded)
 		{
 			return MakeError(SourceImageTextureCompileErrorCode::InvalidData, std::move(decodeError));
 		}
+
 		if (static_cast<std::uint64_t>(width) > std::numeric_limits<std::uint32_t>::max() ||
 			static_cast<std::uint64_t>(height) > std::numeric_limits<std::uint32_t>::max())
 		{
@@ -394,10 +428,12 @@ namespace Swim::AssetCompiler
 			? Swim::Assets::TexturePayloadFormat::RGBA8SRgb
 			: Swim::Assets::TexturePayloadFormat::RGBA8UNorm;
 		payload.Supercompression = Swim::Assets::TextureSupercompression::None;
+
 		if (!BuildMipChain(std::move(rgba), result.Asset.Width, result.Asset.Height, colorSpace, semantic, payload))
 		{
 			return MakeError(SourceImageTextureCompileErrorCode::Overflow, "generated source-image mip chain exceeds TextureAsset payload limits");
 		}
+
 		if (encoding == CookedTextureEncoding::Bc7)
 		{
 			// The mips are filtered in RGBA8 (sRGB-correct, normals renormalized), then each
@@ -407,6 +443,7 @@ namespace Swim::AssetCompiler
 			bc7.Format = colorSpace == Swim::Assets::TextureColorSpace::SRgb ? Swim::Assets::TexturePayloadFormat::BC7SRgb
 																			  : Swim::Assets::TexturePayloadFormat::BC7UNorm;
 			bc7.Supercompression = Swim::Assets::TextureSupercompression::None;
+
 			for (const auto& mip : payload.Mips)
 			{
 				const auto blocks = EncodeRgba8ToBc7(
@@ -416,8 +453,10 @@ namespace Swim::AssetCompiler
 				bc7.Bytes.insert(bc7.Bytes.end(), blocks.begin(), blocks.end());
 				bc7.Mips.push_back({ mip.Width, mip.Height, 1, offset, blocks.size(), blocks.size() });
 			}
+
 			payload = std::move(bc7);
 		}
+
 		result.Asset.Payloads.push_back(std::move(payload));
 		return result;
 	}

@@ -39,6 +39,7 @@ namespace Swim::Memory
 			marker = other.marker;
 			other.arena = nullptr;
 		}
+
 		return *this;
 	}
 

@@ -85,6 +85,7 @@ namespace
 		}
 
 		ScopedAssetRoot(const ScopedAssetRoot&) = delete;
+
 		ScopedAssetRoot& operator=(const ScopedAssetRoot&) = delete;
 
 		const std::filesystem::path& Path() const
@@ -157,10 +158,12 @@ SWIM_TEST("AssetCompiler.DevelopmentAssetPipeline", "UnchangedSourcesSkipTheCook
 	// The cook left a source stamp (sizes and times of the sources with their hash) next to
 	// the cooked root, so later starts skip re-hashing unchanged sources.
 	bool stamped = false;
+
 	for (const auto& entry : std::filesystem::recursive_directory_iterator(root.Path() / "Cooked"))
 	{
 		stamped = stamped || entry.path().extension() == ".stamp";
 	}
+
 	SWIM_CHECK(stamped);
 
 	const ModelAsset* model = assets.Resolve(modelHandle);

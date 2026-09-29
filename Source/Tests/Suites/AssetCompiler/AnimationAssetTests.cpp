@@ -20,6 +20,7 @@
 
 namespace
 {
+
 	using namespace Swim::Assets;
 	using namespace Swim::AssetCompiler;
 
@@ -40,6 +41,7 @@ namespace
 				return &asset;
 			}
 		}
+
 		return nullptr;
 	}
 
@@ -75,6 +77,7 @@ namespace
 		SWIM_REQUIRE_MESSAGE(static_cast<bool>(compiled), compiled.Error.Message);
 		return compiled;
 	}
+
 } // namespace
 
 SWIM_TEST("AssetCompiler.GltfImporter", "ImportsSkinsInfluencesMorphTargetsAndAnimations")
@@ -91,6 +94,7 @@ SWIM_TEST("AssetCompiler.GltfImporter", "ImportsSkinsInfluencesMorphTargetsAndAn
 	SWIM_CHECK_EQUAL(skin.Joints[1], 2u);
 	SWIM_CHECK_EQUAL(skin.Joints[2], 1u);
 	SWIM_CHECK(skin.Skeleton == std::optional<std::uint32_t>(1));
+
 	for (std::size_t joint = 0; joint < 3; ++joint)
 	{
 		SWIM_CHECK(skin.InverseBindMatrices[joint] == Swim::Testing::SkinnedGltfFixture::InverseBind(joint));
@@ -102,6 +106,7 @@ SWIM_TEST("AssetCompiler.GltfImporter", "ImportsSkinsInfluencesMorphTargetsAndAn
 	SWIM_CHECK_EQUAL(mesh.DefaultWeights[0], 0.5f);
 	const SourcePrimitive& primitive = mesh.Primitives[0];
 	SWIM_REQUIRE_EQUAL(primitive.Vertices.size(), std::size_t{ 4 });
+
 	for (std::size_t v = 0; v < 4; ++v)
 	{
 		const SourceVertex& vertex = primitive.Vertices[v];
@@ -109,6 +114,7 @@ SWIM_TEST("AssetCompiler.GltfImporter", "ImportsSkinsInfluencesMorphTargetsAndAn
 		SWIM_CHECK(vertex.Joints == Swim::Testing::SkinnedGltfFixture::Joints[v]);
 		SWIM_CHECK(vertex.Weights == Swim::Testing::SkinnedGltfFixture::Weights[v]);
 	}
+
 	SWIM_REQUIRE_EQUAL(primitive.Targets.size(), std::size_t{ 1 });
 	SWIM_REQUIRE_EQUAL(primitive.Targets[0].Position.size(), std::size_t{ 4 });
 	SWIM_CHECK(primitive.Targets[0].Normal.empty());
@@ -186,6 +192,7 @@ SWIM_TEST("AssetCompiler.StaticModelCompiler", "SkeletonsAreParentsFirstAndSkinJ
 	// Vertex 3 had no weight: bound fully to skin joint 0 (Head).
 	SWIM_CHECK_EQUAL(skin[3].Joints[0], std::uint16_t{ 2 });
 	SWIM_CHECK_EQUAL(skin[3].Weights[0], 1.0f);
+
 	for (const PackedSkin& influences : skin)
 	{
 		const float sum = influences.Weights[0] + influences.Weights[1] + influences.Weights[2] + influences.Weights[3];
@@ -222,11 +229,13 @@ SWIM_TEST("AssetCompiler.StaticModelCompiler", "AnimationsBecomeNameBoundClipsRe
 	// skeleton list, animations and morph weights as typed handles.
 	AssetSystem assets;
 	SWIM_REQUIRE(assets.Initialize());
+
 	for (const CompiledSasset& file : compiled.Assets)
 	{
 		const SassetLoadResult loaded = LoadSasset(assets, file.Bytes);
 		SWIM_REQUIRE_MESSAGE(static_cast<bool>(loaded), loaded.Error.Message);
 	}
+
 	const ModelAsset* model = assets.Resolve(assets.Find<ModelAsset>(compiled.RootLogicalPath));
 	SWIM_REQUIRE(model != nullptr);
 	SWIM_REQUIRE_EQUAL(model->Skeletons.size(), std::size_t{ 1 });

@@ -7,8 +7,10 @@
 
 namespace Swim::Render::Shadows
 {
+
 	namespace
 	{
+
 		float Dot(const Float3& a, const Float3& b)
 		{
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -30,12 +32,15 @@ namespace Swim::Render::Shadows
 		{
 			const Float3 d{ v[0] - view[3], v[1] - view[7], v[2] - view[11] };
 			Float3 world{};
+
 			for (int c = 0; c < 3; ++c)
 			{
 				world[c] = view[c] * d[0] + view[4 + c] * d[1] + view[8 + c] * d[2];
 			}
+
 			return world;
 		}
+
 	} // namespace
 
 	std::vector<float> CascadeSplits(float nearDepth, float farDepth, std::uint32_t count, float lambda)
@@ -44,7 +49,9 @@ namespace Swim::Render::Shadows
 		{
 			throw std::invalid_argument("Cascade splits need 0 < near < far, 1..MaxShadowCascades cascades and lambda in [0, 1]");
 		}
+
 		std::vector<float> splits(count + 1);
+
 		for (std::uint32_t i = 0; i <= count; ++i)
 		{
 			const float t = float(i) / float(count);
@@ -52,6 +59,7 @@ namespace Swim::Render::Shadows
 			const float uniform = nearDepth + (farDepth - nearDepth) * t;
 			splits[i] = lambda * logarithmic + (1.0f - lambda) * uniform;
 		}
+
 		splits.front() = nearDepth;
 		splits.back() = farDepth;
 		return splits;
@@ -63,6 +71,7 @@ namespace Swim::Render::Shadows
 		const float k2 = tanHalf * tanHalf * (1.0f + camera.Aspect * camera.Aspect); // (corner distance / depth)^2.
 		float center = (sliceFar + sliceNear) * (1.0f + k2) * 0.5f;
 		float radius = 0.0f;
+
 		if (center >= sliceFar)
 		{
 			center = sliceFar;
@@ -72,6 +81,7 @@ namespace Swim::Render::Shadows
 		{
 			radius = std::sqrt((sliceFar - center) * (sliceFar - center) + sliceFar * sliceFar * k2);
 		}
+
 		return { ViewToWorld(camera.View, { 0.0f, 0.0f, -center }), radius };
 	}
 
@@ -91,12 +101,14 @@ namespace Swim::Render::Shadows
 		{
 			throw std::invalid_argument("Cascades need a resolution, a light direction and a nonnegative caster extension");
 		}
+
 		const auto splits = CascadeSplits(camera.Near, settings.MaxDistance, settings.Count, settings.SplitLambda);
 		const auto lightView = LookAlong({ 0, 0, 0 }, lightDirection);
 		const Float3 right{ lightView[0], lightView[1], lightView[2] };
 		const Float3 up{ lightView[4], lightView[5], lightView[6] };
 		const auto forward = Normalize(lightDirection);
 		std::vector<CascadeView> cascades;
+
 		for (std::uint32_t i = 0; i < settings.Count; ++i)
 		{
 			CascadeView cascade;
@@ -114,6 +126,7 @@ namespace Swim::Render::Shadows
 			cascade.ViewProjection = MultiplyRowMajor(projection, lightView);
 			cascades.push_back(cascade);
 		}
+
 		return cascades;
 	}
 
@@ -136,10 +149,12 @@ namespace Swim::Render::Shadows
 			{ 0, 0, -1 } } };
 		const auto projection = PerspectiveReverseZRowMajor(PointShadowFov, 1.0f, nearPlane);
 		std::array<Matrix, 6> faces{};
+
 		for (std::size_t face = 0; face < 6; ++face)
 		{
 			faces[face] = MultiplyRowMajor(projection, LookAlong(position, directions[face]));
 		}
+
 		return faces;
 	}
 
@@ -148,14 +163,17 @@ namespace Swim::Render::Shadows
 		const float ax = std::abs(d[0]);
 		const float ay = std::abs(d[1]);
 		const float az = std::abs(d[2]);
+
 		if (ax >= ay && ax >= az)
 		{
 			return d[0] >= 0.0f ? 0u : 1u;
 		}
+
 		if (ay >= az)
 		{
 			return d[1] >= 0.0f ? 2u : 3u;
 		}
+
 		return d[2] >= 0.0f ? 4u : 5u;
 	}
 
@@ -163,21 +181,26 @@ namespace Swim::Render::Shadows
 	{
 		const auto& m = view.ViewProjection;
 		float clip[4]{};
+
 		for (int r = 0; r < 4; ++r)
 		{
 			clip[r] = m[r * 4] * p[0] + m[r * 4 + 1] * p[1] + m[r * 4 + 2] * p[2] + m[r * 4 + 3];
 		}
+
 		if (!(clip[3] > 1.0e-6f))
 		{
 			return std::nullopt;
 		}
+
 		const float x = clip[0] / clip[3];
 		const float y = clip[1] / clip[3];
 		const float z = clip[2] / clip[3];
+
 		if (!(std::abs(x) <= 1.0f) || !(std::abs(y) <= 1.0f) || !(z >= 0.0f) || !(z <= 1.0f))
 		{
 			return std::nullopt;
 		}
+
 		return ShadowProjection{ view.AtlasRect[0] + (x * 0.5f + 0.5f) * view.AtlasRect[2],
 			view.AtlasRect[1] + (0.5f - y * 0.5f) * view.AtlasRect[3], z };
 	}
@@ -187,6 +210,7 @@ namespace Swim::Render::Shadows
 		switch (static_cast<ShadowKind>(record.Kind))
 		{
 		case ShadowKind::Directional:
+
 			for (std::uint32_t i = 0; i < std::min(record.ViewCount, MaxShadowCascades); ++i)
 			{
 				if (cameraViewDepth < record.CascadeFar[i])
@@ -194,14 +218,17 @@ namespace Swim::Render::Shadows
 					return record.FirstView + i;
 				}
 			}
+
 			return std::nullopt;
 		case ShadowKind::Spot:
 			return record.ViewCount > 0 ? std::optional<std::uint32_t>(record.FirstView) : std::nullopt;
 		case ShadowKind::Point:
+
 			if (record.ViewCount < 6)
 			{
 				return std::nullopt;
 			}
+
 			return record.FirstView +
 				PointShadowFace({ position[0] - record.LightPosition[0], position[1] - record.LightPosition[1],
 					position[2] - record.LightPosition[2] });
@@ -213,22 +240,26 @@ namespace Swim::Render::Shadows
 	float SampleShadowView(const ShadowAtlasImage& atlas, const GpuShadowRecord& record, const GpuShadowView& view, const Float3& shifted)
 	{
 		const auto projected = ProjectToShadowView(view, shifted);
+
 		if (!projected)
 		{
 			return 1.0f;
 		}
+
 		const int x0 = int(view.AtlasRect[0]);
 		const int y0 = int(view.AtlasRect[1]);
 		const int x1 = x0 + int(view.AtlasRect[2]) - 1;
 		const int y1 = y0 + int(view.AtlasRect[3]) - 1;
 		const float receiver = projected->Depth + record.DepthBias;
 		const int radius = int(record.PcfRadius);
+
 		if (radius == 0)
 		{
 			const auto tx = std::uint32_t(std::clamp(int(std::floor(projected->PixelX)), x0, x1));
 			const auto ty = std::uint32_t(std::clamp(int(std::floor(projected->PixelY)), y0, y1));
 			return receiver >= atlas.At(tx, ty) ? 1.0f : 0.0f;
 		}
+
 		const float ux = projected->PixelX - 0.5f;
 		const float uy = projected->PixelY - 0.5f;
 		const float bx = std::floor(ux);
@@ -237,14 +268,17 @@ namespace Swim::Render::Shadows
 		const float fy = uy - by;
 		float lit = 0.0f;
 		int hits = 0;
+
 		for (int dy = -radius; dy <= radius + 1; ++dy)
 		{
 			const float wy = dy == -radius ? 1.0f - fy : (dy == radius + 1 ? fy : 1.0f);
 			const auto ty = std::uint32_t(std::clamp(int(by) + dy, y0, y1));
+
 			for (int dx = -radius; dx <= radius + 1; ++dx)
 			{
 				const float wx = dx == -radius ? 1.0f - fx : (dx == radius + 1 ? fx : 1.0f);
 				const auto tx = std::uint32_t(std::clamp(int(bx) + dx, x0, x1));
+
 				if (receiver >= atlas.At(tx, ty))
 				{
 					lit += wx * wy;
@@ -252,12 +286,15 @@ namespace Swim::Render::Shadows
 				}
 			}
 		}
+
 		// Exactly 0 or 1 when every tap agrees (the weights need not sum to exactly 1 in float).
 		const int taps = (2 * radius + 2) * (2 * radius + 2);
+
 		if (hits == 0 || hits == taps)
 		{
 			return hits == 0 ? 0.0f : 1.0f;
 		}
+
 		const float width = float(2 * radius + 1);
 		return std::clamp(lit / (width * width), 0.0f, 1.0f);
 	}
@@ -269,12 +306,15 @@ namespace Swim::Render::Shadows
 		{
 			return 1.0f;
 		}
+
 		const auto& record = inputs.Records[shadowIndex];
 		const auto viewIndex = SelectShadowView(record, position, cameraViewDepth);
+
 		if (!viewIndex || *viewIndex >= inputs.Views.size())
 		{
 			return 1.0f;
 		}
+
 		const float nDotL = std::clamp(Dot(normal, toLight), 0.0f, 1.0f);
 		// Wider PCF kernels compare texels farther from the receiver: scale the offset.
 		const float bias = (record.NormalBias + record.SlopeBias * (1.0f - nDotL)) * float(record.PcfRadius + 1u);
@@ -282,6 +322,7 @@ namespace Swim::Render::Shadows
 		{
 			return Float3{ position[0] + normal[0] * offset, position[1] + normal[1] * offset, position[2] + normal[2] * offset };
 		};
+
 		if (static_cast<ShadowKind>(record.Kind) == ShadowKind::Directional)
 		{
 			const std::uint32_t cascade = *viewIndex - record.FirstView;
@@ -291,19 +332,24 @@ namespace Swim::Render::Shadows
 			const float t = band > 0.0f ? std::clamp((cameraViewDepth - (farDepth - band)) / band, 0.0f, 1.0f) : 0.0f;
 			const auto& view = inputs.Views[*viewIndex];
 			const float lit = SampleShadowView(*inputs.Atlas, record, view, offsetBy(view.TexelWorldSize * bias));
+
 			if (t <= 0.0f)
 			{
 				return lit;
 			}
+
 			const std::uint32_t count = std::min(record.ViewCount, MaxShadowCascades);
 			float next = 1.0f;
+
 			if (cascade + 1 < count && *viewIndex + 1 < inputs.Views.size())
 			{
 				const auto& nextView = inputs.Views[*viewIndex + 1];
 				next = SampleShadowView(*inputs.Atlas, record, nextView, offsetBy(nextView.TexelWorldSize * bias));
 			}
+
 			return lit + (next - lit) * t;
 		}
+
 		const auto& view = inputs.Views[*viewIndex];
 		const Float3 fromLight{ position[0] - record.LightPosition[0], position[1] - record.LightPosition[1],
 			position[2] - record.LightPosition[2] };
@@ -312,10 +358,13 @@ namespace Swim::Render::Shadows
 		// The offset can cross into another cube face (all faces share TexelWorldSize):
 		// select again with the shifted point.
 		const auto shiftedIndex = SelectShadowView(record, shifted, cameraViewDepth);
+
 		if (!shiftedIndex || *shiftedIndex >= inputs.Views.size())
 		{
 			return 1.0f;
 		}
+
 		return SampleShadowView(*inputs.Atlas, record, inputs.Views[*shiftedIndex], shifted);
 	}
+
 } // namespace Swim::Render::Shadows

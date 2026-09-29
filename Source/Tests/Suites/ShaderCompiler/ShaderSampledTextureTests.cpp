@@ -27,6 +27,7 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "NumericClassesConvertForGlobalsLoca
 {
 	const std::array scalars{ "float32", "uint32", "int32" };
 	const std::array classes{ Rhi::SampledTextureClass::Float, Rhi::SampledTextureClass::Uint, Rhi::SampledTextureClass::Sint };
+
 	for (std::size_t index = 0; index < scalars.size(); ++index)
 	{
 		for (bool local : { false, true })
@@ -64,37 +65,46 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "UnsupportedScalarShapeAndResultWidt
 		SWIM_CHECK(converted.Interface.DescriptorSchemas.empty());
 		SWIM_CHECK((converted.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{}));
 	}
+
 	const auto parsed = ParseSampled("int32", false, false);
 	SWIM_REQUIRE(parsed);
+
 	for (std::uint32_t invalid = 0; invalid < 6; ++invalid)
 	{
 		auto reflection = parsed.Reflection;
 		auto& image = reflection.GlobalParameters[0];
+
 		if (invalid == 0)
 		{
 			image.ResourceArray = true;
 			image.ResourceShape = "texture3D";
 		}
+
 		if (invalid == 1)
 		{
 			image.ResourceMultisample = true;
 		}
+
 		if (invalid == 2)
 		{
 			image.ResourceShape = "unknownTexture";
 		}
+
 		if (invalid == 3)
 		{
 			image.ResourceComponentCount = 0;
 		}
+
 		if (invalid == 4)
 		{
 			image.ResourceComponentCount = 5;
 		}
+
 		if (invalid == 5)
 		{
 			image.ResourceAccess = "readWrite";
 		}
+
 		const auto result = ShaderCompiler::BuildRhiShaderInterface(reflection);
 		SWIM_CHECK(!result);
 		SWIM_CHECK(result.Interface.DescriptorSchemas.empty());
@@ -153,22 +163,27 @@ SWIM_TEST("ShaderCompiler.SampledTextures", "SampledSpirvDoesNotConstrainViewsTo
 	SWIM_REQUIRE(file);
 	SWIM_REQUIRE_EQUAL(words[0], 0x07230203u);
 	unsigned sampledTypes = 0;
+
 	for (std::size_t offset = 5; offset < words.size();)
 	{
 		const auto count = words[offset] >> 16;
 		const auto opcode = words[offset] & 0xffffu;
 		SWIM_REQUIRE(count != 0 && count <= words.size() - offset);
+
 		if (opcode == 25) // OpTypeImage: Sampled operand 1 means a sampled image.
 		{
 			SWIM_REQUIRE(count >= 9);
+
 			if (words[offset + 7] == 1)
 			{
 				++sampledTypes;
 				SWIM_CHECK_EQUAL(words[offset + 8], 0u); // ImageFormat Unknown
 			}
 		}
+
 		offset += count;
 	}
+
 	SWIM_CHECK_EQUAL(sampledTypes, 3u); // float, uint, int
 }
 

@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU records of the UI renderer (Shaders/Slang/Ui/UiRecords.slang).
 
 	// GpuUiQuad::Kind.
@@ -55,4 +56,5 @@ namespace Swim::Render
 
 	static_assert(sizeof(GpuUiDrawConstants) == 96);
 	static_assert(offsetof(GpuUiDrawConstants, TargetSize) == 64 && offsetof(GpuUiDrawConstants, Flags) == 80);
+
 } // namespace Swim::Render

@@ -9,6 +9,7 @@
 
 namespace Game
 {
+
 	// The reflection lab's floor pad, whose look changes at run time so the chrome around it
 	// proves that reflections follow the real scene (local probes re-capture it) rather than
 	// a fixed environment colour:
@@ -22,7 +23,9 @@ namespace Game
 	// the Rendering tab.
 	class ReflectionLabFloor : public Engine::Behavior
 	{
+
 	  public:
+
 		enum class Mode : std::uint32_t
 		{
 			Checker = 0,
@@ -37,6 +40,7 @@ namespace Game
 		ReflectionLabFloor(Engine::Scene* scene, entt::entity owner, std::uint32_t materialSet, Engine::MaterialDesc material);
 
 		int Init() override;
+
 		void Update(double dt) override;
 
 		bool UsesRealTime() const override { return true; }
@@ -52,6 +56,7 @@ namespace Game
 		static glm::vec3 TintFor(Mode mode, float time);
 
 	  private:
+
 		void Apply();
 
 		std::uint32_t materialSet;
@@ -60,5 +65,7 @@ namespace Game
 		float time = 0.0f;
 		glm::vec3 tint{ 1.0f };
 		bool visible = true;
+
 	};
+
 } // namespace Game

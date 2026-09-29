@@ -15,6 +15,7 @@ namespace Swim::RhiVulkan
 	VulkanShaderProgram::~VulkanShaderProgram()
 	{
 		RetireLostVulkanDevice(*state);
+
 		for (const auto& stage : stages)
 		{
 			if (stage.Module != VK_NULL_HANDLE)
@@ -31,16 +32,19 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 		}
+
 		if (!state || desc.Stages.empty() || desc.Stages.size() > 2)
 		{
 			return nullptr;
 		}
+
 		auto program = std::make_unique<VulkanShaderProgram>(std::move(state));
 		program->interface.DescriptorSchemas.assign(desc.Interface.DescriptorSchemas.begin(), desc.Interface.DescriptorSchemas.end());
 		program->interface.PushConstants.assign(desc.Interface.PushConstants.begin(), desc.Interface.PushConstants.end());
 		program->interface.ComputeThreadGroupSize = desc.Interface.ComputeThreadGroupSize;
 		program->stages.resize(desc.Stages.size());
 		std::uint32_t seenStages = 0;
+
 		for (std::size_t index = 0; index < desc.Stages.size(); ++index)
 		{
 			const auto& source = desc.Stages[index];
@@ -53,14 +57,17 @@ namespace Swim::RhiVulkan
 			{
 				return nullptr;
 			}
+
 			seenStages |= bit;
 			// Public byte spans need not be aligned; Vulkan requires aligned uint32_t words.
 			std::vector<std::uint32_t> words(source.Bytecode.size() / sizeof(std::uint32_t));
 			std::memcpy(words.data(), source.Bytecode.data(), source.Bytecode.size());
+
 			if (words[0] != 0x07230203 || words[1] < 0x00010000 || words[1] > 0x00010600 || words[3] == 0 || words[4] != 0)
 			{
 				return nullptr;
 			}
+
 			auto& stage = program->stages[index];
 			stage.Stage = source.Stage == Rhi::ShaderStageMask::Vertex ? VK_SHADER_STAGE_VERTEX_BIT :
 				source.Stage == Rhi::ShaderStageMask::Fragment ? VK_SHADER_STAGE_FRAGMENT_BIT : VK_SHADER_STAGE_COMPUTE_BIT;
@@ -70,14 +77,17 @@ namespace Swim::RhiVulkan
 			info.codeSize = source.Bytecode.size();
 			info.pCode = words.data();
 			const auto createResult = program->state->Dispatch.vkCreateShaderModule(program->state->Device.device, &info, nullptr, &stage.Module);
+
 			if (createResult != VK_SUCCESS)
 			{
 				stage.Module = VK_NULL_HANDLE;
 				CheckVulkanResult(*program->state, createResult, "vkCreateShaderModule");
 				return nullptr;
 			}
+
 			SetVulkanObjectName(*program->state, VK_OBJECT_TYPE_SHADER_MODULE, ToNativeHandle(stage.Module), desc.DebugName);
 		}
+
 		return program;
 	}
 

@@ -7,6 +7,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	RenderObjectDesc MakeObject(std::uint32_t id, float x = 0.0f)
 	{
 		RenderObjectDesc desc;
@@ -27,6 +28,7 @@ namespace
 	{
 		return rows[3];
 	}
+
 } // namespace
 
 SWIM_TEST("Render.GpuScene", "CreatedObjectsGetStableRowsAndLandOnTheGpuThroughOneImport")
@@ -82,10 +84,12 @@ SWIM_TEST("Render.GpuScene", "OnlyTouchedRowsUploadAndTransformChangesNeverTouch
 	Testing::GpuSceneFixture fixture;
 	auto& scene = *fixture.scene;
 	std::vector<RenderObjectHandle> objects;
+
 	for (std::uint32_t i = 0; i < 10; ++i)
 	{
 		objects.push_back(scene.Create(MakeObject(i, float(i))));
 	}
+
 	fixture.Upload();
 
 	// Rows 2, 3 and 7 move: two runs, transforms only.
@@ -162,10 +166,12 @@ SWIM_TEST("Render.GpuScene", "DestroyedRowsGoDeadAtOnceAndAreReusedOnlyAfterThei
 	auto& scene = *fixture.scene;
 	Testing::MockTimeline timeline;
 	std::vector<RenderObjectHandle> objects;
+
 	for (std::uint32_t i = 0; i < 4; ++i)
 	{
 		objects.push_back(scene.Create(MakeObject(i)));
 	}
+
 	SWIM_CHECK(!scene.TryCreate(MakeObject(9)));
 	SWIM_CHECK_THROWS(scene.Create(MakeObject(9)), std::length_error);
 	fixture.Upload();

@@ -13,6 +13,7 @@ namespace Ta = Swim::Render::Temporal;
 
 namespace
 {
+
 	bool Near(float a, float b, float tolerance = 1.0e-6f)
 	{
 		return std::abs(a - b) <= tolerance;
@@ -34,10 +35,12 @@ namespace
 	float Mean(const std::vector<float>& values)
 	{
 		float sum = 0.0f;
+
 		for (const float v : values)
 		{
 			sum += v;
 		}
+
 		return sum / float(values.size());
 	}
 
@@ -45,12 +48,15 @@ namespace
 	{
 		const float mean = Mean(values);
 		float sum = 0.0f;
+
 		for (const float v : values)
 		{
 			sum += (v - mean) * (v - mean);
 		}
+
 		return std::sqrt(sum / float(values.size()));
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Temporal.Reference", "HaltonJitterCoversThePixelAndRepeats")
@@ -64,6 +70,7 @@ SWIM_TEST("Render.Temporal.Reference", "HaltonJitterCoversThePixelAndRepeats")
 	const auto first = Ta::JitterPixels(0, 8);
 	SWIM_CHECK(first[0] == 0.0f && Near(first[1], 1.0f / 3.0f - 0.5f));
 	float sumX = 0.0f, sumY = 0.0f;
+
 	for (std::uint64_t frame = 0; frame < 8; ++frame)
 	{
 		const auto jitter = Ta::JitterPixels(frame, 8);
@@ -72,14 +79,17 @@ SWIM_TEST("Render.Temporal.Reference", "HaltonJitterCoversThePixelAndRepeats")
 		sumX += jitter[0];
 		sumY += jitter[1];
 	}
+
 	SWIM_CHECK(std::abs(sumX / 8.0f) < 0.07f && std::abs(sumY / 8.0f) < 0.07f); // Centred on the pixel.
 	// Eight phases cover each quarter of the pixel.
 	int quadrants[4]{};
+
 	for (std::uint64_t frame = 0; frame < 8; ++frame)
 	{
 		const auto jitter = Ta::JitterPixels(frame, 8);
 		++quadrants[(jitter[0] >= 0.0f ? 1 : 0) + (jitter[1] >= 0.0f ? 2 : 0)];
 	}
+
 	SWIM_CHECK(quadrants[0] > 0 && quadrants[1] > 0 && quadrants[2] > 0 && quadrants[3] > 0);
 
 	SWIM_CHECK((Ta::JitterPixels(5, 0) == Ta::Float2{ 0.0f, 0.0f }));
@@ -112,6 +122,7 @@ SWIM_TEST("Render.Temporal.Reference", "ColorSpaceClippingAndSampling")
 	SWIM_CHECK(Near(flat[0], 1.0f, 1.0e-5f) && Near(flat[2], 1.0f, 1.0e-5f)); // A flat box clips to its point.
 
 	Ta::ColorImage image(4, 2);
+
 	for (std::uint32_t y = 0; y < 2; ++y)
 	{
 		for (std::uint32_t x = 0; x < 4; ++x)
@@ -119,6 +130,7 @@ SWIM_TEST("Render.Temporal.Reference", "ColorSpaceClippingAndSampling")
 			image.At(x, y) = { float(x), float(y) * 10.0f, 1.0f, 1.0f };
 		}
 	}
+
 	const auto centre = Ta::SampleBilinear(image, { 2.5f / 4.0f, 0.5f / 2.0f });
 	SWIM_CHECK(centre[0] == 2.0f && centre[1] == 0.0f);
 	const auto between = Ta::SampleBilinear(image, { 2.0f / 4.0f, 1.0f / 2.0f });
@@ -132,10 +144,12 @@ SWIM_TEST("Render.Temporal.Reference", "ColorSpaceClippingAndSampling")
 SWIM_TEST("Render.Temporal.Reference", "NeighborhoodDilatesVelocityToTheNearestTexel")
 {
 	Frame frame(5, 5);
+
 	for (auto& texel : frame.Color.Texels)
 	{
 		texel = { 0.2f, 0.2f, 0.2f, 1.0f };
 	}
+
 	frame.Color.At(2, 2) = { 1.0f, 0.0f, 0.0f, 1.0f };
 	frame.Depth.At(3, 1) = 0.8f; // Nearest in (2, 2)'s neighborhood.
 	frame.Velocity.At(3, 1) = { 0.25f, -0.125f };
@@ -147,12 +161,14 @@ SWIM_TEST("Render.Temporal.Reference", "NeighborhoodDilatesVelocityToTheNearestT
 	// The variance box lies within min/max and contains the mean.
 	const auto grey = Ta::RgbToYCoCg({ 0.2f, 0.2f, 0.2f });
 	const auto red = Ta::RgbToYCoCg({ 1.0f, 0.0f, 0.0f });
+
 	for (int c = 0; c < 3; ++c)
 	{
 		const float mean = (8.0f * grey[c] + red[c]) / 9.0f;
 		SWIM_CHECK(n.Minimum[c] >= std::min(grey[c], red[c]) - 1.0e-6f && n.Maximum[c] <= std::max(grey[c], red[c]) + 1.0e-6f);
 		SWIM_CHECK(n.Minimum[c] <= mean + 1.0e-6f && n.Maximum[c] >= mean - 1.0e-6f);
 	}
+
 	// Clamped at the corner: the texel counts itself several times.
 	const auto corner = Ta::Gather(frame.Color, frame.Depth, frame.Velocity, 0, 0, 1.0f);
 	SWIM_CHECK(Near(corner.Minimum[0], grey[0]) && Near(corner.Maximum[0], grey[0]));
@@ -167,6 +183,7 @@ SWIM_TEST("Render.Temporal.Reference", "StaticEdgeConvergesToItsCoverage")
 	{
 		Frame frame(width, height);
 		const auto jitter = Ta::JitterPixels(index, phases);
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -175,22 +192,26 @@ SWIM_TEST("Render.Temporal.Reference", "StaticEdgeConvergesToItsCoverage")
 				frame.Color.At(x, y) = { v, v, v, 1.0f };
 			}
 		}
+
 		return frame;
 	};
 	TemporalSettings settings;
 	const auto run = [&](std::uint32_t phases, std::vector<float>& raw, std::vector<float>& resolved)
 	{
 		std::optional<Ta::ColorImage> history;
+
 		for (std::uint64_t index = 0; index < 96; ++index)
 		{
 			const auto frame = render(index, phases);
 			auto output = Ta::Resolve(frame.Color, frame.Depth, frame.Velocity, history ? &*history : nullptr, settings);
+
 			if (index >= 64)
 			{
 				raw.push_back(frame.Color.At(10, 1)[0]);
 				resolved.push_back(output.At(10, 1)[0]);
 				SWIM_CHECK(output.At(5, 1)[0] == 1.0f && output.At(15, 1)[0] == 0.0f); // Flat regions are exact.
 			}
+
 			history = std::move(output);
 		}
 	};
@@ -220,6 +241,7 @@ SWIM_TEST("Render.Temporal.Reference", "MotionVectorsAndClippingPreventGhosting"
 	const auto render = [&](int left, float speed)
 	{
 		Frame frame(width, height);
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -230,12 +252,14 @@ SWIM_TEST("Render.Temporal.Reference", "MotionVectorsAndClippingPreventGhosting"
 				frame.Velocity.At(x, y) = inside ? Ta::Float2{ speed / float(width), 0.0f } : Ta::Float2{ 0.0f, 0.0f };
 			}
 		}
+
 		return frame;
 	};
 	const auto run = [&](const TemporalSettings& settings, bool motionVectors, float& trail, float& inside)
 	{
 		std::optional<Ta::ColorImage> history;
 		int left = 4;
+
 		for (int frameIndex = 0; frameIndex < 12; ++frameIndex, left += 3)
 		{
 			const auto frame = render(left, motionVectors ? 3.0f : 0.0f);
@@ -263,11 +287,13 @@ SWIM_TEST("Render.Temporal.Reference", "MotionVectorsAndClippingPreventGhosting"
 SWIM_TEST("Render.Temporal.Reference", "ResetsOffscreenReprojectionAndValidation")
 {
 	Frame frame(8, 8);
+
 	for (std::uint32_t i = 0; i < 64; ++i)
 	{
 		const float v = float(i) / 64.0f;
 		frame.Color.Texels[i] = { v, 1.0f - v, 0.5f, 0.3f };
 	}
+
 	frame.Color.At(3, 3) = { NAN, 2.0f, -1.0f, 1.0f };
 	Ta::ColorImage history(8, 8);
 	std::fill(history.Texels.begin(), history.Texels.end(), Ta::Float4{ 9.0f, 9.0f, 9.0f, 1.0f });
@@ -287,6 +313,7 @@ SWIM_TEST("Render.Temporal.Reference", "ResetsOffscreenReprojectionAndValidation
 	std::fill(frame.Velocity.Texels.begin(), frame.Velocity.Texels.end(), Ta::Float2{ 0.0f, 0.0f });
 	settings.Feedback = 1.0f;
 	const auto current = Ta::Resolve(frame.Color, frame.Depth, frame.Velocity, &history, settings);
+
 	for (std::size_t i = 0; i < current.Texels.size(); ++i)
 	{
 		for (int c = 0; c < 4; ++c)
@@ -294,6 +321,7 @@ SWIM_TEST("Render.Temporal.Reference", "ResetsOffscreenReprojectionAndValidation
 			SWIM_CHECK(Near(current.Texels[i][c], fresh.Texels[i][c], 1.0e-6f));
 		}
 	}
+
 	settings.Feedback = 0.1f;
 	const auto blended = Ta::Resolve(frame.Color, frame.Depth, frame.Velocity, &history, settings);
 	SWIM_CHECK(blended.At(5, 5)[0] > fresh.At(5, 5)[0]); // Pulled toward the (clipped) bright history...

@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	struct UiRenderSurfaceHandle
 	{
 		std::uint32_t Index = 0;
@@ -70,20 +71,29 @@ namespace Swim::Render
 	// thread, externally synchronized.
 	class UiRenderSurfaces
 	{
+
 	  public:
+
 		// Throws std::runtime_error when the sampler cannot be created.
 		UiRenderSurfaces(Rhi::Device& device, BindlessResourceTable& bindless, std::string debugName = "UI surfaces");
+
 		~UiRenderSurfaces();
+
 		UiRenderSurfaces(const UiRenderSurfaces&) = delete;
+
 		UiRenderSurfaces& operator=(const UiRenderSurfaces&) = delete;
 
 		// Throws std::invalid_argument for an empty/oversized extent, a depth or unknown format
 		// or too many mips, std::length_error when the bindless table is full and
 		// std::runtime_error when the texture cannot be created.
 		UiRenderSurfaceHandle Create(const UiRenderSurfaceDesc& desc);
+
 		bool IsValid(UiRenderSurfaceHandle surface) const;
+
 		bool Release(UiRenderSurfaceHandle surface, Rhi::TimelinePoint lastUse = {});
+
 		std::size_t Collect();
+
 		std::size_t Drain();
 
 		// Imports the surface and, when its content changed, records one UiRenderer pass per
@@ -91,7 +101,9 @@ namespace Swim::Render
 		// std::logic_error for a second Record of the same surface before CommitFrame.
 		UiSurfaceFrame Record(RenderGraph& graph, UiRenderSurfaceHandle surface, UiRenderer& renderer, const UiRenderProgram& program,
 			Rhi::DescriptorTable& bindlessTable, const UiSurfaceContent& content);
+
 		void CommitFrame();
+
 		void AbortFrame();
 
 		UiRenderSurfacesStats GetStats() const;
@@ -101,6 +113,7 @@ namespace Swim::Render
 		static std::vector<UI::UiPaintQuad> PanelPaint(const UiSurfaceFrame& frame, UI::UiPoint canvasSize);
 
 	  private:
+
 		struct Surface
 		{
 			UiRenderSurfaceDesc Desc;
@@ -123,6 +136,7 @@ namespace Swim::Render
 		};
 
 		Surface* Find(UiRenderSurfaceHandle handle);
+
 		const Surface* Find(UiRenderSurfaceHandle handle) const;
 
 		Rhi::Device& device;
@@ -136,5 +150,7 @@ namespace Swim::Render
 		std::uint64_t skipped = 0;
 		std::uint64_t pendingDrawn = 0;
 		std::uint64_t pendingSkipped = 0;
+
 	};
+
 } // namespace Swim::Render

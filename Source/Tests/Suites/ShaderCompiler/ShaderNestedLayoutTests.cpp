@@ -10,6 +10,7 @@ using namespace Swim;
 
 namespace
 {
+
 	ShaderCompiler::ShaderReflectionResult Parse(const std::string& parameter)
 	{
 		return ShaderCompiler::ParseSlangReflectionJson("{\"parameters\":[" + parameter +
@@ -36,6 +37,7 @@ namespace
 	}
 
 	const std::string Sampler = R"({"name":"Sampler","binding":{"kind":"descriptorTableSlot","index":3},"type":{"kind":"samplerState"}})";
+
 } // namespace
 
 SWIM_TEST("ShaderCompiler.NestedLayouts", "RelativeStructAndSetOffsetsResolveOnce")
@@ -94,6 +96,7 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "MalformedLayoutsAndArithmeticOverflow
 		SWIM_CHECK(parsed.Reflection.GlobalParameters[0].HasUnsupportedBindingLayout);
 		Reject(parsed.Reflection);
 	}
+
 	for (const auto binding : { R"({"kind":"descriptorTableSlot","index":0,"count":0})",
 			 R"({"kind":"descriptorTableSlot","index":0,"space":-1})", R"({"kind":"subElementRegisterSpace","index":4294967295})" })
 	{
@@ -152,6 +155,7 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "PinnedSlangNestedBlocksPreserveNamesU
 	SWIM_CHECK_EQUAL(child.Size, 16u);
 	SWIM_REQUIRE_EQUAL(child.UniformFields.size(), 1u);
 	SWIM_CHECK_EQUAL(child.UniformFields[0].Name, "Settings.Child.Bias");
+
 	for (std::size_t i = 0; i < 2; ++i)
 	{
 		const auto& schema = result.Interface.DescriptorSchemas[i];
@@ -163,6 +167,7 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "PinnedSlangNestedBlocksPreserveNamesU
 		SWIM_CHECK_EQUAL(schema.Bindings[1].Count, 2u);
 		SWIM_CHECK_EQUAL(schema.Bindings[2].SampledClass, Rhi::SampledTextureClass::Uint);
 	}
+
 	SWIM_CHECK_EQUAL(result.Interface.DescriptorSchemas[2].Space, 5u);
 	SWIM_CHECK_EQUAL(result.Interface.DescriptorSchemas[2].Bindings[0].Type, Rhi::DescriptorType::StorageBuffer);
 }
@@ -185,10 +190,12 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ResolvedCoordinatesMatchActualSpirvDe
 	SWIM_REQUIRE(file);
 	SWIM_REQUIRE_EQUAL(words[0], 0x07230203u);
 	std::map<std::uint32_t, std::uint32_t> sets, bindings;
+
 	for (std::size_t i = 5; i < words.size();)
 	{
 		const auto count = words[i] >> 16;
 		SWIM_REQUIRE(count > 0 && count <= words.size() - i);
+
 		if ((words[i] & 0xffffu) == 71 && count == 4)
 		{
 			if (words[i + 2] == 33)
@@ -200,14 +207,18 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ResolvedCoordinatesMatchActualSpirvDe
 				sets[words[i + 1]] = words[i + 3];
 			}
 		}
+
 		i += count;
 	}
+
 	std::set<std::pair<std::uint32_t, std::uint32_t>> native, reflected;
+
 	for (const auto& [id, binding] : bindings)
 	{
 		SWIM_REQUIRE(sets.contains(id));
 		native.emplace(sets.at(id), binding);
 	}
+
 	for (const auto& schema : result.Interface.DescriptorSchemas)
 	{
 		for (const auto& binding : schema.Bindings)
@@ -215,6 +226,7 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "ResolvedCoordinatesMatchActualSpirvDe
 			reflected.emplace(schema.Space, binding.Binding);
 		}
 	}
+
 	SWIM_CHECK(native == reflected);
 }
 #endif
@@ -237,6 +249,7 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "PinnedSlangEntryBlockKeepsFragmentVis
 	SWIM_CHECK_EQUAL(material.Space, 4u);
 	SWIM_REQUIRE_EQUAL(material.Bindings.size(), 3u);
 	SWIM_CHECK_EQUAL(material.Bindings[0].Type, Rhi::DescriptorType::UniformBuffer);
+
 	for (const auto& binding : material.Bindings)
 	{
 		SWIM_CHECK_EQUAL(binding.Stages, Rhi::ShaderStageMask::Fragment);
@@ -247,14 +260,17 @@ SWIM_TEST("ShaderCompiler.NestedLayouts", "PinnedSlangEntryBlockKeepsFragmentVis
 SWIM_TEST("ShaderCompiler.NestedLayouts", "ExcessiveNestingAndMalformedGlobalScopesCannotDisappear")
 {
 	std::string nested = Sampler;
+
 	for (int depth = 0; depth < 66; ++depth)
 	{
 		nested =
 			R"({"name":"Nested","binding":{"kind":"descriptorTableSlot","index":0},"type":{"kind":"struct","fields":[)" + nested + "]}}";
 	}
+
 	const auto parsed = Parse(nested);
 	SWIM_REQUIRE(parsed);
 	Reject(parsed.Reflection);
+
 	for (const auto scope :
 		{ R"({"kind":"none","parameters":[3]})", R"({"kind":"none","parameters":{}})", R"({"kind":"constantBuffer","parameters":[]})",
 			R"({"kind":"none","binding":{"kind":"descriptorTableSlot","index":0},"parameters":[]})", "null" })

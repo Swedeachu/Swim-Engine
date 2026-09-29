@@ -9,6 +9,7 @@
 
 namespace Swim::UI
 {
+
 	enum class UiShortcutModifier : std::uint8_t
 	{
 		Control, // Windows, Linux.
@@ -54,13 +55,16 @@ namespace Swim::UI
 	// (Start/StopTextInput, SetTextInputArea) stay with the application.
 	class UiInputBridge
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for a non-positive scale, wheel step, threshold or
 		// repeat timing.
 		explicit UiInputBridge(UiInputBridgeDesc desc = {});
 
 		// One screen document; pointer positions in framebuffer pixels.
 		UiInputFrame Apply(const Input::InputSystem& input, UiDocument& document, float deltaSeconds = 0.0f);
+
 		// Every canvas: the mouse is a viewport point and, with a camera, a world ray through
 		// it (world panels, billboards); surfaceHits are the application's mesh hits on
 		// render-surface canvases for this pointer.
@@ -68,7 +72,9 @@ namespace Swim::UI
 			std::span<const UiSurfaceHit> surfaceHits = {}, float deltaSeconds = 0.0f);
 
 	  private:
+
 		template <typename Target> UiInputFrame Run(const Input::InputSystem& input, Target& target, float deltaSeconds);
+
 		std::optional<UiNavDirection> GamepadDirection(const Input::InputSystem& input) const;
 
 		UiInputBridgeDesc desc;
@@ -78,5 +84,7 @@ namespace Swim::UI
 		std::optional<UiNavDirection> heldDirection;
 		float heldSeconds = 0.0f;
 		float nextRepeat = 0.0f;
+
 	};
+
 } // namespace Swim::UI

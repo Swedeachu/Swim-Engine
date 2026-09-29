@@ -8,6 +8,7 @@
 
 namespace Game
 {
+
 	ReflectionLabFloor::ReflectionLabFloor(Engine::Scene* sceneValue, entt::entity owner, std::uint32_t materialSetValue,
 		Engine::MaterialDesc materialValue)
 		: Behavior(sceneValue, owner), materialSet(materialSetValue), material(std::move(materialValue))
@@ -49,6 +50,7 @@ namespace Game
 	void ReflectionLabFloor::Update(double dt)
 	{
 		time += static_cast<float>(dt);
+
 		if (mode == Mode::Rainbow)
 		{
 			Apply();
@@ -60,6 +62,7 @@ namespace Game
 		tint = TintFor(mode, time);
 		const bool shouldShow = mode != Mode::Removed;
 		auto& registry = scene->GetRegistry();
+
 		if (shouldShow != visible && registry.valid(entity) && registry.all_of<Engine::MeshRenderer>(entity))
 		{
 			// patch: the render extractor sees the flag change.
@@ -72,11 +75,14 @@ namespace Game
 				});
 			visible = shouldShow;
 		}
+
 		auto* render = scene->GetRenderServices();
+
 		if (render && render->Materials && materialSet != 0)
 		{
 			material.BaseColor = { tint.r, tint.g, tint.b, 1.0f };
 			render->Materials->Update(materialSet, material);
 		}
 	}
+
 } // namespace Game

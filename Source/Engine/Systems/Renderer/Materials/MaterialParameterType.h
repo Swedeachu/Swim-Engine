@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Types a material parameter record may contain (one std430 struct per material).
 	// Texture and sampler parameters are uint fields holding BindlessResourceTable
 	// indices; reflection marks them by name (a "Texture" or "Sampler" suffix).
@@ -61,4 +62,5 @@ namespace Swim::Render
 	}
 
 	std::string_view MaterialParameterTypeName(MaterialParameterType type);
+
 } // namespace Swim::Render

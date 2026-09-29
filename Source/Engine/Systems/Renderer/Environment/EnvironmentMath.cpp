@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	Float3 Normalize(const Float3& value)
 	{
 		const float length = std::sqrt(Dot(value, value));
@@ -56,24 +57,29 @@ namespace Swim::Render::Environment
 		const float ax = std::abs(d[0]);
 		const float ay = std::abs(d[1]);
 		const float az = std::abs(d[2]);
+
 		if (ax >= ay && ax >= az)
 		{
 			return d[0] >= 0.0f ? CubeCoordinate{ 0, -d[2] / ax, -d[1] / ax } : CubeCoordinate{ 1, d[2] / ax, -d[1] / ax };
 		}
+
 		if (ay >= az)
 		{
 			return d[1] >= 0.0f ? CubeCoordinate{ 2, d[0] / ay, d[2] / ay } : CubeCoordinate{ 3, d[0] / ay, -d[2] / ay };
 		}
+
 		return d[2] >= 0.0f ? CubeCoordinate{ 4, d[0] / az, -d[1] / az } : CubeCoordinate{ 5, -d[0] / az, -d[1] / az };
 	}
 
 	namespace
 	{
+
 		// Solid angle of the face region [-1, x] x [-1, y] up to a constant.
 		float AreaElement(float x, float y)
 		{
 			return std::atan2(x * y, std::sqrt(x * x + y * y + 1.0f));
 		}
+
 	} // namespace
 
 	float CubeTexelSolidAngle(std::uint32_t x, std::uint32_t y, std::uint32_t size)
@@ -111,10 +117,12 @@ namespace Swim::Render::Environment
 		const auto tangent = Normalize(Cross(up, normal));
 		const auto bitangent = Cross(normal, tangent);
 		Float3 result;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			result[c] = tangent[c] * value[0] + bitangent[c] * value[1] + normal[c] * value[2];
 		}
+
 		return result;
 	}
 
@@ -126,6 +134,7 @@ namespace Swim::Render::Environment
 		const Float3 view{ std::sqrt(1.0f - nDotV * nDotV), 0.0f, nDotV };
 		float a = 0.0f;
 		float b = 0.0f;
+
 		for (std::uint32_t i = 0; i < sampleCount; ++i)
 		{
 			const auto half = ImportanceSampleGgx(Hammersley(i, sampleCount), alpha);
@@ -133,6 +142,7 @@ namespace Swim::Render::Environment
 			const Float3 light{ 2.0f * vDotH * half[0] - view[0], 2.0f * vDotH * half[1] - view[1], 2.0f * vDotH * half[2] - view[2] };
 			const float nDotL = light[2];
 			const float nDotH = half[2];
+
 			if (nDotL > 0.0f && nDotH > 0.0f && vDotH > 0.0f)
 			{
 				// f * N.L / pdf with f = D * Vis * F and pdf = D * N.H / (4 V.H).
@@ -143,6 +153,7 @@ namespace Swim::Render::Environment
 				b += fresnel * weight;
 			}
 		}
+
 		return { a / float(sampleCount), b / float(sampleCount) };
 	}
 
@@ -192,6 +203,7 @@ namespace Swim::Render::Environment
 	{
 		const auto basis = ShBasis(normal);
 		Float3 result{ 0, 0, 0 };
+
 		for (std::uint32_t i = 0; i < ShCoefficientCount; ++i)
 		{
 			for (int c = 0; c < 3; ++c)
@@ -199,10 +211,13 @@ namespace Swim::Render::Environment
 				result[c] += Coefficients[i][c] * basis[i];
 			}
 		}
+
 		for (auto& value : result)
 		{
 			value = std::max(value, 0.0f);
 		}
+
 		return result;
 	}
+
 } // namespace Swim::Render::Environment

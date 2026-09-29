@@ -8,6 +8,7 @@
 
 namespace Game
 {
+
 	LightSwarm::LightSwarm(Engine::Scene* sceneValue, entt::entity owner, Settings value)
 		: Behavior(sceneValue, owner), settings(value), random(value.Seed)
 	{
@@ -31,10 +32,12 @@ namespace Game
 		entry.Target = RandomPoint();
 		entry.Speed = speed(random);
 		entry.Velocity = glm::vec3(unit(random), unit(random), unit(random)) * entry.Speed * 0.5f;
+
 		if (auto* transform = scene->GetRegistry().try_get<Engine::Transform>(member))
 		{
 			transform->SetPosition(glm::clamp(transform->GetPosition(), settings.BoxMin, settings.BoxMax));
 		}
+
 		members.push_back(entry);
 	}
 
@@ -63,6 +66,7 @@ namespace Game
 				velocity[axis] = -std::abs(velocity[axis]);
 			}
 		}
+
 		return position;
 	}
 
@@ -72,21 +76,27 @@ namespace Game
 		{
 			return;
 		}
+
 		const float step = static_cast<float>(std::min(dt, 0.1));
 		auto& registry = scene->GetRegistry();
+
 		for (auto& member : members)
 		{
 			auto* transform = registry.valid(member.Entity) ? registry.try_get<Engine::Transform>(member.Entity) : nullptr;
+
 			if (!transform)
 			{
 				continue;
 			}
+
 			const glm::vec3 position = Step(settings, transform->GetPosition(), member.Velocity, member.Target, member.Speed, step);
 			transform->SetPosition(position);
+
 			if (glm::length(member.Target - position) < settings.ArriveRadius)
 			{
 				member.Target = RandomPoint();
 			}
 		}
 	}
+
 } // namespace Game

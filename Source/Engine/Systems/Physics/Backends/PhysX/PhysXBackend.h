@@ -16,11 +16,15 @@ namespace Engine
 	public:
 
 		PhysXBackend() = default;
+
 		~PhysXBackend() override;
 
 		bool Initialize(unsigned int workerThreads) override;
+
 		void Shutdown() override;
+
 		std::unique_ptr<IPhysicsWorldBackend> CreateWorld(const PhysicsWorldDesc& desc) override;
+
 		const char* GetName() const override { return "PhysX"; }
 
 	private:

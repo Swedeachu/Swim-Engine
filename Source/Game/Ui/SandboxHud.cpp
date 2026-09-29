@@ -27,10 +27,12 @@
 
 namespace Game
 {
+
 	using namespace Swim::UI;
 
 	namespace
 	{
+
 		// Authored in sRGB (UI colours are linear): near-black panels, a full-strength
 		// accent border and accent text.
 		const UiColor PanelColor = UiSrgbHex(0x090c12, 0.95f);
@@ -61,6 +63,7 @@ namespace Game
 			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, value);
 			return buffer;
 		}
+
 	} // namespace
 
 	SandboxHud::SandboxHud(Engine::Scene* sceneValue, entt::entity owner) : Behavior(sceneValue, owner)
@@ -80,10 +83,12 @@ namespace Game
 	UiNodeId SandboxHud::AddButton(UiNodeId parent, const std::string& text, const std::string& tooltip, std::function<void()> onClick)
 	{
 		const auto button = CreateButton(*document, parent, text);
+
 		if (!tooltip.empty())
 		{
 			CreateTooltip(*document, button, tooltip, 0.45f);
 		}
+
 		bindings.OnClick(button, std::move(onClick));
 		return button;
 	}
@@ -171,6 +176,7 @@ namespace Game
 				{
 					set(static_cast<std::uint32_t>(value));
 				}
+
 			});
 		Bind(
 			dropdown.Root,
@@ -188,12 +194,15 @@ namespace Game
 		{
 			return;
 		}
+
 		for (const auto& control : synced)
 		{
 			const float value = control.Get();
+
 			if (control.Check)
 			{
 				const auto state = value != 0.0f ? UiCheckState::Checked : UiCheckState::Unchecked;
+
 				if (document->GetChecked(control.Node) != state)
 				{
 					document->SetChecked(control.Node, state);
@@ -215,10 +224,12 @@ namespace Game
 	{
 		sandbox = dynamic_cast<Sandbox*>(scene);
 		render = scene->GetRenderServices();
+
 		if (!render || !render->Ui)
 		{
 			return 0; // Headless without a UI runtime.
 		}
+
 		document = render->Ui->CreateDocument();
 		UiStyle rootStyle;
 		rootStyle.Flow = UiFlow::Overlay;
@@ -243,8 +254,10 @@ namespace Game
 					{
 						shooter->Fire();
 					}
+
 				});
 		}
+
 		RefreshStatus();
 		RefreshDiagnostics();
 		return 0;
@@ -282,10 +295,12 @@ namespace Game
 		tabs = CreateRadioGroup(*document, panel, {}, -1, UiOrientation::Horizontal);
 		const std::array<const char*, 4> tabNames{ "Simulation", "Rendering", "Camera/Post", "Scene" };
 		static_assert(tabNames.size() == Sandbox::SandboxTabCount);
+
 		for (std::size_t i = 0; i < tabNames.size(); ++i)
 		{
 			tabOptions[i] = AddRadioOption(*document, tabs, tabNames[i]);
 		}
+
 		document->SetValue(tabs, 0.0f);
 		bindings.OnValue(tabs,
 			[this](float value)
@@ -299,10 +314,12 @@ namespace Game
 		scrollStyle.Width = UiLength::Percent(1.0f);
 		scrollStyle.MinSize = { 0.0f, 80.0f };
 		const auto scroll = CreateScrollArea(*document, panel, scrollStyle, true);
+
 		for (auto& node : sections)
 		{
 			node = CreateSection(scroll.Viewport);
 		}
+
 		BuildSimulation(sections[0]);
 		BuildRendering(sections[1]);
 		BuildCamera(sections[2]);
@@ -313,6 +330,7 @@ namespace Game
 	void SandboxHud::ShowSection(std::uint32_t index)
 	{
 		section = std::min<std::uint32_t>(index, static_cast<std::uint32_t>(sections.size() - 1));
+
 		for (std::uint32_t i = 0; i < sections.size(); ++i)
 		{
 			auto style = document->GetStyle(sections[i]);
@@ -357,10 +375,12 @@ namespace Game
 		CreateHeading(*document, parent, "Camera");
 		Wrap(*document, CreateLabel(*document, parent, "View (keys 1-7; the camera flies in every state)"));
 		std::vector<std::string> views;
+
 		for (std::uint32_t i = 0; i < Sandbox::GetBookmarkCount(); ++i)
 		{
 			views.emplace_back(Sandbox::GetBookmarkName(i));
 		}
+
 		const auto bookmarks = CreateDropdown(*document, parent, views, 0);
 		bookmarkDropdown = bookmarks.Root;
 		bindings.OnValue(bookmarks.Root,
@@ -371,6 +391,7 @@ namespace Game
 				{
 					sandbox->GoToBookmark(static_cast<std::uint32_t>(value));
 				}
+
 			});
 
 		CreateHeading(*document, parent, "Physics playground");
@@ -382,6 +403,7 @@ namespace Game
 				{
 					shooter->Fire();
 				}
+
 			});
 		AddButton(balls, "Drop 10 balls", "Drop ten balls onto the pyramid",
 			[this]
@@ -390,6 +412,7 @@ namespace Game
 				{
 					sandbox->SpawnBalls(10);
 				}
+
 			});
 		AddToggle(parent, "Rain balls", sandbox && sandbox->GetRainBalls(),
 			[this](bool on)
@@ -398,6 +421,7 @@ namespace Game
 				{
 					sandbox->SetRainBalls(on);
 				}
+
 			});
 		ballLabel = CreateLabel(*document, parent, "-");
 		Wrap(*document, ballLabel);
@@ -431,6 +455,7 @@ namespace Game
 		{
 			return;
 		}
+
 		auto& s = *render->Settings;
 		CreateHeading(*document, parent, "Features");
 		CheckFor(parent, "Shadows (cascades, spot, point)", s.Shadows);
@@ -472,6 +497,7 @@ namespace Game
 			{
 				s.ScreenSpace.Reflections.Debug = static_cast<Swim::Render::ReflectionDebugView>(std::min(value, 2u));
 			});
+
 		if (sandbox && sandbox->GetLabFloor())
 		{
 			auto* floor = sandbox->GetLabFloor();
@@ -486,10 +512,12 @@ namespace Game
 					floor->SetMode(static_cast<ReflectionLabFloor::Mode>(std::min(value, 3u)));
 				});
 		}
+
 		// Render features added by the sandbox (Engine/Systems/Renderer/Features).
 		if (sandbox)
 		{
 			CreateHeading(*document, parent, "Atmosphere");
+
 			if (auto* clouds = sandbox->GetClouds())
 			{
 				CheckFor(parent, "Volumetric clouds", clouds->Enabled);
@@ -497,6 +525,7 @@ namespace Game
 				CheckFor(parent, "Clouds in reflections (environment)", clouds->Settings.Environment);
 				CheckFor(parent, "Clouds change the ambient light", s.EnvironmentFeatureAmbient);
 			}
+
 			if (auto* shafts = sandbox->GetSunShafts())
 			{
 				AddCheckbox(parent, "Sun shafts (god rays)", shafts->Enabled,
@@ -510,6 +539,7 @@ namespace Game
 						shafts->Settings.Intensity = value;
 					});
 			}
+
 			if (auto* flare = sandbox->GetLensFlare())
 			{
 				AddCheckbox(parent, "Lens flare", flare->Enabled,
@@ -524,6 +554,7 @@ namespace Game
 					});
 			}
 		}
+
 		CheckFor(parent, "GPU particles", s.Particles);
 
 		if (sandbox && sandbox->GetLensing())
@@ -545,6 +576,7 @@ namespace Game
 						{
 							lens.*field = value;
 						}
+
 					});
 				Bind(slider, get, false);
 			};
@@ -559,6 +591,7 @@ namespace Game
 					{
 						lens.Orbits = static_cast<std::uint32_t>(std::lround(value));
 					}
+
 				});
 		}
 
@@ -570,6 +603,7 @@ namespace Game
 				{
 					sandbox->SetSunAngles(value, sandbox->GetSunAzimuth());
 				}
+
 			});
 		AddSlider(parent, "Sun azimuth", 0.0f, 360.0f, sandbox ? sandbox->GetSunAzimuth() : 200.0f, 0,
 			[this](float value)
@@ -578,6 +612,7 @@ namespace Game
 				{
 					sandbox->SetSunAngles(sandbox->GetSunElevation(), value);
 				}
+
 			});
 		SliderFor(parent, "Environment intensity", 0.0f, 3.0f, s.EnvironmentIntensity, 2);
 
@@ -609,6 +644,7 @@ namespace Game
 			profileLabel = CreateLabel(*document, parent, "No capture yet.");
 			Wrap(*document, profileLabel);
 			auto* toggles = render->Toggles;
+
 			for (const auto& toggle : toggles->List())
 			{
 				const std::string name = toggle.Name;
@@ -635,6 +671,7 @@ namespace Game
 		{
 			return;
 		}
+
 		auto& s = *render->Settings;
 		auto& post = s.Post;
 
@@ -644,10 +681,12 @@ namespace Game
 		{
 			CreateHeading(*document, parent, "Camera preset");
 			std::vector<std::string> names;
+
 			for (std::uint32_t p = 0; p < Engine::CameraPresetCount; ++p)
 			{
 				names.emplace_back(Engine::CameraPresetName(static_cast<Engine::CameraPreset>(p)));
 			}
+
 			DropdownFor(
 				parent, "Look", names,
 				[this]
@@ -660,8 +699,10 @@ namespace Game
 					{
 						sandbox->ApplyCameraPreset(static_cast<Engine::CameraPreset>(std::min(value, Engine::CameraPresetCount - 1)));
 					}
+
 				});
 		}
+
 		if (auto* cameras = scene->GetCameraSystem())
 		{
 			const auto fov = AddSlider(parent, "Field of view (vertical, degrees)", 20.0f, 110.0f, cameras->GetCamera().GetFieldOfView(), 0,
@@ -688,6 +729,7 @@ namespace Game
 			SliderFor(parent, "Anamorphic squeeze (oval bokeh)", 1.0f, 2.0f, dof->Settings.AnamorphicSqueeze, 2);
 			SliderFor(parent, "Max blur (px at 1080p)", 2.0f, 32.0f, dof->Settings.MaxBlurPixels, 0);
 		}
+
 		if (sandbox && sandbox->GetCameraLens())
 		{
 			auto& lens = *sandbox->GetCameraLens();
@@ -704,6 +746,7 @@ namespace Game
 			SliderFor(parent, "Filter green", 0.5f, 1.2f, lens.Settings.Filter[1], 2);
 			SliderFor(parent, "Filter blue", 0.5f, 1.2f, lens.Settings.Filter[2], 2);
 		}
+
 		if (sandbox && sandbox->GetFilmSensor())
 		{
 			auto& sensor = *sandbox->GetFilmSensor();
@@ -783,28 +826,34 @@ namespace Game
 			[this](float value)
 			{
 				const auto index = static_cast<std::int64_t>(value);
+
 				if (index < 0 || static_cast<std::size_t>(index) >= listedEntities.size())
 				{
 					SetLabelText(*document, entityDetails, "Select an entity.");
 					return;
 				}
+
 				const entt::entity selected = listedEntities[static_cast<std::size_t>(index)];
 				std::ostringstream text;
 				text << scene->GetEntityName(selected) << "  (id " << scene->GetSerializedEntityId(selected).Value << ")";
+
 				if (const auto* tags = scene->GetTags(selected))
 				{
 					text << "\nTags:";
+
 					for (const auto tag : tags->Values)
 					{
 						const auto name = scene->GetTagRegistry().GetName(tag);
 						text << ' ' << (name.empty() ? std::string_view("?") : name);
 					}
 				}
+
 				if (const auto* transform = scene->GetRegistry().try_get<Engine::Transform>(selected))
 				{
 					const glm::vec3 p = transform->GetWorldPosition(scene->GetRegistry());
 					text << "\nPosition: " << Fixed(p.x, 2) << ", " << Fixed(p.y, 2) << ", " << Fixed(p.z, 2);
 				}
+
 				SetLabelText(*document, entityDetails, text.str());
 			});
 		entityDetails = CreateLabel(*document, parent, "Select an entity.");
@@ -819,32 +868,40 @@ namespace Game
 			[this]
 			{
 				const auto index = static_cast<std::int64_t>(document->GetValue(entityList->GetRoot()));
+
 				if (index < 0 || static_cast<std::size_t>(index) >= listedEntities.size() || !scene->GetCameraSystem())
 				{
 					return;
 				}
+
 				const entt::entity selected = listedEntities[static_cast<std::size_t>(index)];
+
 				if (const auto* transform = scene->GetRegistry().try_get<Engine::Transform>(selected))
 				{
 					const glm::vec3 target = transform->GetWorldPosition(scene->GetRegistry());
 					scene->GetCameraSystem()->GetCamera().LookAt(target + glm::vec3(0.0f, 2.5f, 6.0f), target);
 					scene->GetCameraSystem()->RequestCameraCut();
 				}
+
 			});
 		AddButton(row, "Delete", "Destroy the selected entity (and its children)",
 			[this]
 			{
 				const auto index = static_cast<std::int64_t>(document->GetValue(entityList->GetRoot()));
+
 				if (index < 0 || static_cast<std::size_t>(index) >= listedEntities.size())
 				{
 					return;
 				}
+
 				const entt::entity selected = listedEntities[static_cast<std::size_t>(index)];
+
 				if (scene->HasTag(selected, Engine::Tags::Ui) || scene->HasTag(selected, Engine::Tags::Camera))
 				{
 					SetLabelText(*document, entityDetails, "The camera and UI entities are protected.");
 					return;
 				}
+
 				scene->GetCommandBuffer().Destroy(selected);
 				entityTimer = 1.0f; // Refresh next frame.
 			});
@@ -857,12 +914,14 @@ namespace Game
 		const std::array<std::pair<const char*, Engine::BuiltinMesh>, 5> kinds{ { { "Cube", Engine::BuiltinMesh::Cube },
 			{ "Sphere", Engine::BuiltinMesh::Sphere }, { "Capsule", Engine::BuiltinMesh::Capsule }, { "Torus", Engine::BuiltinMesh::Torus },
 			{ "Cone", Engine::BuiltinMesh::Cone } } };
+
 		for (std::size_t i = 0; i < kinds.size(); ++i)
 		{
 			if (i == 3)
 			{
 				AddMenuSeparator(*document, spawnMenu);
 			}
+
 			spawnItems[i] = AddMenuItem(*document, spawnMenu, kinds[i].first);
 			const auto kind = kinds[i].second;
 			bindings.OnClick(spawnItems[i],
@@ -873,6 +932,7 @@ namespace Game
 						sandbox->SpawnPrimitive(kind);
 						entityTimer = 1.0f;
 					}
+
 				});
 		}
 	}
@@ -926,34 +986,42 @@ namespace Game
 		{
 			return;
 		}
+
 		using Swim::Platform::KeyCode;
+
 		if (input->IsKeyTriggered(KeyCode::P))
 		{
 			Command(scene->GetEngineState() == Engine::EngineState::Paused ? "resume" : "pause");
 		}
+
 		if (input->IsKeyTriggered(KeyCode::N))
 		{
 			Command("step");
 		}
+
 		// C: every sandbox UI surface (panel, diagnostics, help bar, world panels and
 		// labels) on/off; V: only the control panel; X: only the diagnostics.
 		if (input->IsKeyTriggered(KeyCode::C) && sandbox)
 		{
 			sandbox->SetHudVisible(!sandbox->IsHudVisible());
 		}
+
 		if (input->IsKeyTriggered(KeyCode::V))
 		{
 			panelVisible = !panelVisible;
 			SetPanelVisible(panel, panelVisible);
 		}
+
 		if (input->IsKeyTriggered(KeyCode::X))
 		{
 			diagnosticsVisible = !diagnosticsVisible;
 			SetPanelVisible(diagnostics, diagnosticsVisible);
 		}
+
 		// 1 .. 5: camera bookmarks.
 		constexpr KeyCode bookmarkKeys[] = { KeyCode::Num1, KeyCode::Num2, KeyCode::Num3, KeyCode::Num4, KeyCode::Num5, KeyCode::Num6,
 			KeyCode::Num7 };
+
 		for (std::uint32_t i = 0; i < std::size(bookmarkKeys) && sandbox; ++i)
 		{
 			if (input->IsKeyTriggered(bookmarkKeys[i]))
@@ -969,12 +1037,14 @@ namespace Game
 		SetLabelText(*document, stateLabel, "State: " + std::string(Engine::ToString(state)));
 		SetLabelText(*document, pauseButton, state == Engine::EngineState::Paused ? "Resume" : "Pause", document->GetTheme()->Fonts,
 			document->GetTheme()->Class(UiThemeClass::Button).TextSize);
+
 		if (const auto* clock = scene->GetClock())
 		{
 			SetLabelText(*document, clockLabel,
 				Fixed(clock->GetSimulatedSeconds(), 1) + " s  |  " + std::to_string(clock->GetFixedStepCount()) + " steps @ " +
 					Fixed(1.0 / clock->GetFixedDelta(), 0) + " Hz  |  x" + Fixed(clock->GetTimeScale(), 2));
 		}
+
 		if (sandbox)
 		{
 			const auto* shooter = sandbox->GetShooter();
@@ -991,20 +1061,24 @@ namespace Game
 		{
 			return;
 		}
+
 		std::ostringstream text;
 		text << "FPS " << scene->GetFPS();
+
 		if (render->Stats)
 		{
 			const auto& s = *render->Stats;
 			text << "   " << s.Width << "x" << s.Height << "\n";
 			text << "CPU " << Fixed(s.CpuMilliseconds, 2) << " ms   GPU ";
 			text << (s.GpuTimingsAvailable ? Fixed(s.GpuMilliseconds, 2) + " ms" : std::string("n/a")) << "  (" << s.Passes << " passes)\n";
+
 			for (std::uint32_t i = 0; i < std::min<std::uint32_t>(s.TopPassCount, 4); ++i)
 			{
 				std::string name = s.TopPasses[i].Name.substr(0, 26);
 				name.resize(26, ' ');
 				text << "  " << name << Fixed(s.TopPasses[i].Milliseconds, 2) << " ms\n";
 			}
+
 			text << "Objects " << s.RenderObjects << "   materials " << s.Materials << "\n";
 			text << "Lights " << s.DirectionalLights << " dir + " << s.LocalLights << " local\n";
 			text << "Shadow views " << s.ShadowViews << " (" << s.ShadowCasters << " casters)\n";
@@ -1012,12 +1086,15 @@ namespace Game
 			text << "UI quads " << s.UiQuads << "   page slots " << s.PageSlots << "\n";
 			text << "Meshes " << s.ResidentMeshes << "   textures " << s.ResidentTextures << "   pending " << s.PendingAssets << "\n";
 		}
+
 		text << "Entities " << scene->GetEntityCount() << "   physics steps " << scene->GetPhysicsStepCount() << "\n";
 		text << "State " << Engine::ToString(scene->GetEngineState());
+
 		if (const auto* clock = scene->GetClock())
 		{
 			text << "   x" << Fixed(clock->GetTimeScale(), 2);
 		}
+
 		SetLabelText(*document, diagnosticsText, text.str(), render->Ui->GetMonoFonts(), 13.0f);
 	}
 
@@ -1027,12 +1104,15 @@ namespace Game
 		{
 			return;
 		}
+
 		std::ostringstream text;
 		text << "State: " << Engine::ToString(scene->GetEngineState()) << "    FPS: " << scene->GetFPS() << "\n";
+
 		if (render->Stats)
 		{
 			text << render->Stats->RenderObjects << " GPU scene objects, " << render->Stats->LocalLights << " clustered lights\n";
 		}
+
 		text << "Physics impacts: " << sandbox->GetImpacts() << "\n";
 		text << "This panel is UI in the world: depth-tested and clickable.";
 		SetLabelText(*sandbox->GetInfoDocument(), sandbox->GetInfoBody(), text.str(), render->Ui->GetFonts(), 20.0f);
@@ -1044,30 +1124,37 @@ namespace Game
 		{
 			return;
 		}
+
 		std::vector<entt::entity> entities;
 		std::vector<std::string> names;
 		const auto& registry = scene->GetRegistry();
+
 		for (const auto [entityId, name] : registry.view<Engine::EntityName>().each())
 		{
 			if (!filter.empty() && Lower(name.Value).find(filter) == std::string::npos)
 			{
 				continue;
 			}
+
 			entities.push_back(entityId);
 		}
+
 		std::sort(entities.begin(), entities.end(),
 			[&](entt::entity a, entt::entity b)
 			{
 				return scene->GetSerializedEntityId(a).Value < scene->GetSerializedEntityId(b).Value;
 			});
+
 		for (const auto e : entities)
 		{
 			names.push_back(scene->GetEntityName(e));
 		}
+
 		if (!force && names == listedNames)
 		{
 			return;
 		}
+
 		listedEntities = std::move(entities);
 		listedNames = std::move(names);
 		entityList->SetItemCount(static_cast<std::uint32_t>(listedNames.size()));
@@ -1083,7 +1170,9 @@ namespace Game
 		{
 			return;
 		}
+
 		Shortcuts();
+
 		if (sandbox && sandbox->GetRequestedTab() != UINT32_MAX)
 		{
 			// Set the radio and show the section directly: the bindings do not report a
@@ -1092,33 +1181,41 @@ namespace Game
 			ShowSection(sandbox->GetRequestedTab());
 			sandbox->RequestTab(UINT32_MAX);
 		}
+
 		if (sandbox && bookmarkDropdown && document->GetValue(bookmarkDropdown) != static_cast<float>(sandbox->GetLastBookmark()))
 		{
 			document->SetValue(bookmarkDropdown, static_cast<float>(sandbox->GetLastBookmark()));
 		}
+
 		bindings.Process(*document);
 		SyncControls();
+
 		if (profilePending && render && render->Profiler && !render->Profiler->IsCapturing())
 		{
 			profilePending = false;
 			SetLabelText(*document, profileLabel, Engine::FrameProfiler::Summary(render->Profiler->GetReport(), 6));
 		} // After Process: a value the user just edited is already stored.
+
 		if (sandbox)
 		{
 			// The HUD and every world canvas (info panel, zone labels) follow the UI switch.
 			const bool visible = sandbox->IsHudVisible();
+
 			for (auto [canvasEntity, canvas] : scene->GetRegistry().view<Engine::UiCanvas>().each())
 			{
 				(void)canvasEntity;
 				canvas.Visible = visible;
 			}
 		}
+
 		if (sandbox && sandbox->GetInfoDocument())
 		{
 			infoBindings.Process(*sandbox->GetInfoDocument());
 		}
+
 		refreshTimer += static_cast<float>(dt);
 		entityTimer += static_cast<float>(dt);
+
 		if (refreshTimer >= 0.2f)
 		{
 			refreshTimer = 0.0f;
@@ -1126,15 +1223,18 @@ namespace Game
 			RefreshDiagnostics();
 			RefreshInfoPanel();
 		}
+
 		if (entityTimer >= 1.0f)
 		{
 			entityTimer = 0.0f;
 			RefreshEntities(false);
 		}
+
 		if (entityList && section == 3)
 		{
 			document->EnsureLayout();
 			entityList->Update();
 		}
 	}
+
 } // namespace Game

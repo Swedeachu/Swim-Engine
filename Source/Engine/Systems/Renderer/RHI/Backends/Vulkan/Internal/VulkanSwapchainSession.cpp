@@ -43,6 +43,7 @@ namespace Swim::RhiVulkan
 		RequireVulkanDevice(*state);
 		auto* semaphore = dynamic_cast<VulkanSemaphore*>(&signal);
 		auto* fence = signalFence ? dynamic_cast<VulkanFence*>(signalFence) : nullptr;
+
 		if (semaphore == nullptr || semaphore->GetState().get() != state.get() ||
 			(signalFence != nullptr && (fence == nullptr || fence->GetState().get() != state.get())))
 		{
@@ -50,6 +51,7 @@ namespace Swim::RhiVulkan
 		}
 
 		Rhi::SwapchainAcquireResult result{};
+
 		if (suspended || needsResize)
 		{
 			result.Suspended = suspended;
@@ -64,35 +66,42 @@ namespace Swim::RhiVulkan
 		const VkResult nativeResult = state->Dispatch.vkAcquireNextImageKHR(
 			state->Device.device, swapchain, acquireTimeout, semaphore->GetSemaphore(),
 			fence ? fence->GetFence() : VK_NULL_HANDLE, &imageIndex);
+
 		if (nativeResult == VK_TIMEOUT || nativeResult == VK_NOT_READY)
 		{
 			result.NotReady = true;
 			return result;
 		}
+
 		if (nativeResult == VK_ERROR_OUT_OF_DATE_KHR)
 		{
 			Invalidate();
 			result.OutOfDate = true;
 			return result;
 		}
+
 		if (nativeResult != VK_SUCCESS && nativeResult != VK_SUBOPTIMAL_KHR)
 		{
 			Invalidate();
 			CheckVulkanResult(*state, nativeResult, "vkAcquireNextImageKHR");
 			throw std::runtime_error("Failed to acquire Vulkan swapchain image: " + std::to_string(nativeResult));
 		}
+
 		if (imageIndex >= acquired.size() || acquired[imageIndex])
 		{
 			Invalidate();
 			throw std::runtime_error("Vulkan returned an invalid or already acquired swapchain image");
 		}
+
 		acquired[imageIndex] = true;
 		result.ImageIndex = imageIndex;
 		result.Suboptimal = nativeResult == VK_SUBOPTIMAL_KHR;
+
 		if (result.Suboptimal)
 		{
 			Invalidate();
 		}
+
 		return result;
 	}
 
@@ -101,27 +110,34 @@ namespace Swim::RhiVulkan
 	{
 		RequireVulkanDevice(*state);
 		auto* vulkanQueue = dynamic_cast<VulkanQueue*>(&queue);
+
 		if (vulkanQueue == nullptr || vulkanQueue->GetState().get() != state.get() ||
 			vulkanQueue->GetFamilyIndex() != state->QueueFamilies.Graphics)
 		{
 			throw std::invalid_argument("Vulkan presentation requires the same-device graphics/present queue");
 		}
+
 		if (imageIndex >= acquired.size() || !acquired[imageIndex])
 		{
 			throw std::invalid_argument("Vulkan presentation requires a currently acquired image");
 		}
+
 		std::vector<VkSemaphore> waitSemaphores;
 		waitSemaphores.reserve(waits.size());
+
 		for (Rhi::Semaphore* wait : waits)
 		{
 			auto* semaphore = dynamic_cast<VulkanSemaphore*>(wait);
+
 			if (semaphore == nullptr || semaphore->GetState().get() != state.get() ||
 				std::find(waitSemaphores.begin(), waitSemaphores.end(), semaphore->GetSemaphore()) != waitSemaphores.end())
 			{
 				throw std::invalid_argument("Vulkan presentation requires unique same-device semaphores");
 			}
+
 			waitSemaphores.push_back(semaphore->GetSemaphore());
 		}
+
 		VkPresentInfoKHR info{};
 		info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 		info.waitSemaphoreCount = static_cast<std::uint32_t>(waitSemaphores.size());
@@ -134,17 +150,20 @@ namespace Swim::RhiVulkan
 		RequireVulkanDevice(*state);
 		const VkResult result = state->Dispatch.vkQueuePresentKHR(vulkanQueue->GetQueue(), &info);
 		acquired[imageIndex] = false;
+
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
 		{
 			Invalidate();
 			return false;
 		}
+
 		if (result != VK_SUCCESS)
 		{
 			Invalidate();
 			CheckVulkanResult(*state, result, "vkQueuePresentKHR");
 			throw std::runtime_error("Failed to present Vulkan swapchain image: " + std::to_string(result));
 		}
+
 		return !needsResize;
 	}
 

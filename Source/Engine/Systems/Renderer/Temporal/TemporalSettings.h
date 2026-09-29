@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Temporal anti-aliasing (critical-path item 75). TemporalReference.h defines each value.
 	struct TemporalSettings
 	{
@@ -21,4 +22,5 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for values outside the ranges above.
 	void ValidateTemporalSettings(const TemporalSettings& settings);
+
 } // namespace Swim::Render

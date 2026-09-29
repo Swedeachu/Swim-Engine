@@ -7,6 +7,7 @@ namespace Swim::RhiVulkan
 	VkImageAspectFlags GetVulkanTextureViewAspect(Rhi::Format format, Rhi::TextureAspect aspect)
 	{
 		const auto available = GetImageAspectMask(format);
+
 		switch (aspect)
 		{
 		case Rhi::TextureAspect::Automatic:
@@ -25,6 +26,7 @@ namespace Swim::RhiVulkan
 	bool ValidateVulkanTextureView(const Rhi::TextureDesc& texture, const Rhi::TextureViewDesc& view, bool cubeArrays)
 	{
 		const auto format = view.PixelFormat == Rhi::Format::Undefined ? texture.PixelFormat : view.PixelFormat;
+
 		if (GetVulkanTextureViewAspect(format, view.Aspect) == 0 || format != texture.PixelFormat ||
 			ToVkFormat(format) == VK_FORMAT_UNDEFINED || view.MipLevelCount == 0 || view.ArrayLayerCount == 0 ||
 			view.BaseMipLevel >= texture.MipLevels || view.MipLevelCount > texture.MipLevels - view.BaseMipLevel ||
@@ -32,13 +34,16 @@ namespace Swim::RhiVulkan
 		{
 			return false;
 		}
+
 		if (texture.Samples != Rhi::SampleCount::X1 && view.Dimension != Rhi::TextureViewDimension::Texture2D &&
 			view.Dimension != Rhi::TextureViewDimension::Texture2DArray)
 		{
 			return false;
 		}
+
 		using Rhi::TextureDimension;
 		using Rhi::TextureViewDimension;
+
 		switch (view.Dimension)
 		{
 		case TextureViewDimension::Texture1D:

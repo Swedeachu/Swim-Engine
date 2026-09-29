@@ -16,6 +16,7 @@ namespace Engine
 		SceneId() = default;
 
 		bool IsValid() const { return value != 0; }
+
 		explicit operator bool() const { return IsValid(); }
 
 		std::uint64_t GetValue() const { return value; }

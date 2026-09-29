@@ -16,14 +16,17 @@
 
 namespace Swim::Render
 {
+
 	class AssetResidencyService;
 	class GpuMaterialTable;
 	class MaterialInstance;
 	class MaterialTemplate;
+
 } // namespace Swim::Render
 
 namespace Engine
 {
+
 	enum class MaterialBlend : std::uint8_t
 	{
 		Opaque,
@@ -59,11 +62,14 @@ namespace Engine
 	// through the routing callback. Owner thread only.
 	class MaterialLibrary
 	{
+
 	  public:
+
 		using Router = std::function<void(std::uint32_t materialSet, const Swim::Render::StandardPbr::Parameters& parameters)>;
 
 		MaterialLibrary(Swim::Render::GpuMaterialTable& table, std::shared_ptr<const Swim::Render::MaterialTemplate> materialTemplate,
 			Swim::Render::AssetResidencyService& residency, std::uint32_t samplerIndex);
+
 		~MaterialLibrary();
 
 		// The router is called for every existing and future set (and again on changes).
@@ -71,11 +77,16 @@ namespace Engine
 
 		// Returns the material set index (the GPU Scene's MaterialSet).
 		std::uint32_t Create(const MaterialDesc& desc);
+
 		// The set named desc.Name when one exists (scenes re-run Init on reload), else Create.
 		std::uint32_t GetOrCreate(const MaterialDesc& desc);
+
 		bool Update(std::uint32_t materialSet, const MaterialDesc& desc);
+
 		bool Release(std::uint32_t materialSet);
+
 		const MaterialDesc* Find(std::uint32_t materialSet) const;
+
 		// The set created with this name (0, the fallback row, when none).
 		std::uint32_t FindByName(std::string_view name) const;
 
@@ -89,6 +100,7 @@ namespace Engine
 		static Swim::Render::StandardPbr::Parameters ToParameters(const MaterialDesc& desc);
 
 	  private:
+
 		struct Entry
 		{
 			MaterialDesc Desc;
@@ -106,5 +118,7 @@ namespace Engine
 		Router router;
 		std::unordered_map<std::uint32_t, Entry> entries;
 		std::uint32_t defaultSet = 0;
+
 	};
+
 } // namespace Engine

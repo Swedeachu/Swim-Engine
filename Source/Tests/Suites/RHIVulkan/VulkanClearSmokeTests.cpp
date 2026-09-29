@@ -49,16 +49,19 @@ namespace
 		SWIM_REQUIRE(swapchain);
 		std::array<std::unique_ptr<Rhi::Semaphore>, 2> acquired;
 		std::vector<std::unique_ptr<Rhi::Semaphore>> presentReady;
+
 		for (auto& semaphore : acquired)
 		{
 			semaphore = device->CreateGpuSemaphore();
 			SWIM_REQUIRE(semaphore);
 		}
+
 		for (std::uint32_t index = 0; index < swapchain->GetImageCount(); ++index)
 		{
 			presentReady.push_back(device->CreateGpuSemaphore());
 			SWIM_REQUIRE(presentReady.back());
 		}
+
 		// Declared last so GPU work drains before resources unwind on failure.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Graphics, 2 });
 		SWIM_REQUIRE(frames);
@@ -86,6 +89,7 @@ namespace
 		frames->Drain();
 		std::array<std::byte, byteCount> pixels{};
 		readback->Read(0, pixels);
+
 		for (std::size_t index = 0; index < pixels.size(); index += 4)
 		{
 			SWIM_CHECK(pixels[index] == std::byte{ 255 } && pixels[index + 1] == std::byte{ 0 } &&
@@ -93,10 +97,12 @@ namespace
 		}
 
 		std::array<std::byte, byteCount> pattern{};
+
 		for (std::size_t index = 0; index < pattern.size(); ++index)
 		{
 			pattern[index] = static_cast<std::byte>((index * 37) & 255);
 		}
+
 		upload->Write(0, pattern);
 		frames->BeginFrame();
 		auto& transfer = frames->CreateCommandList();
@@ -136,24 +142,30 @@ namespace
 		SWIM_CHECK(pixels == pattern);
 
 		auto& queue = device->GetQueue(Rhi::QueueType::Graphics);
+
 		try
 		{
 			unsigned presented = 0;
 			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
 			while (presented < 6 && std::chrono::steady_clock::now() < deadline)
 			{
 				platform.PumpEvents({}, {});
 				auto& context = frames->BeginFrame();
 				const auto image = swapchain->AcquireNextImage(*acquired[context.Index]);
+
 				if (!image.HasImage())
 				{
 					frames->CancelFrame();
+
 					if (image.OutOfDate || image.Suspended)
 					{
 						const auto size = window->GetPixelSize();
+
 						if (swapchain->Resize({ size.Width, size.Height }, frames->GetLastSubmittedPoint()))
 						{
 							presentReady.clear();
+
 							for (std::uint32_t index = 0; index < swapchain->GetImageCount(); ++index)
 							{
 								presentReady.push_back(device->CreateGpuSemaphore());
@@ -161,9 +173,11 @@ namespace
 							}
 						}
 					}
+
 					std::this_thread::sleep_for(std::chrono::milliseconds(10));
 					continue;
 				}
+
 				auto& backbuffer = swapchain->GetImageView(image.ImageIndex);
 				auto& commands = frames->CreateCommandList();
 				commands.Begin();
@@ -185,11 +199,13 @@ namespace
 				submit.WaitSemaphores = waits;
 				submit.SignalSemaphores = signals;
 				frames->SubmitCurrent(submit);
+
 				if (swapchain->Present(queue, image.ImageIndex, signals))
 				{
 					++presented;
 				}
 			}
+
 			SWIM_REQUIRE_MESSAGE(presented == 6, "Clear smoke failed to complete six stable presentations within ten seconds");
 			frames->Drain();
 			// Render timeline completion does not retire WSI semaphore waits.
@@ -208,10 +224,12 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClearTransferAndPresent", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunClearAndTransferSmoke); } });
 		}
+
 		return true;
 	}();
 

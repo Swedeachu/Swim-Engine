@@ -50,6 +50,7 @@ namespace Swim::Jobs
 			{
 				return Task ? static_cast<const enki::ICompletable*>(Task.get()) : static_cast<const enki::ICompletable*>(Pinned.get());
 			}
+
 #else
 			std::function<void()> FallbackExecute;
 			std::atomic<bool> FallbackComplete{ false };
@@ -180,6 +181,7 @@ namespace Swim::Jobs
 			}
 
 			state->Active.store(true, std::memory_order_release);
+
 			for (const auto& childWeak : state->Children)
 			{
 				if (auto child = childWeak.lock())
@@ -198,6 +200,7 @@ namespace Swim::Jobs
 				{
 					return false;
 				}
+
 #if SWIM_JOBS_USE_ENKITS
 				return state->GetCompletable()->GetIsComplete();
 #else
@@ -215,6 +218,7 @@ namespace Swim::Jobs
 		void RequestCancelOutstanding()
 		{
 			const auto outstanding = SnapshotOutstanding();
+
 			for (const auto& state : outstanding)
 			{
 				if (state)
@@ -236,6 +240,7 @@ namespace Swim::Jobs
 				% static_cast<std::uint32_t>(BlockingThreadNumbers.size());
 			return BlockingThreadNumbers[index];
 		}
+
 #else
 		void ExecuteFallbackGraph(const std::shared_ptr<Detail::JobState>& state)
 		{
@@ -256,6 +261,7 @@ namespace Swim::Jobs
 			{
 				state->FallbackExecute();
 			}
+
 			state->FallbackComplete.store(true, std::memory_order_release);
 
 			for (const auto& childWeak : state->Children)
@@ -266,6 +272,7 @@ namespace Swim::Jobs
 				}
 			}
 		}
+
 #endif
 	};
 
@@ -285,6 +292,7 @@ namespace Swim::Jobs
 		{
 			return false;
 		}
+
 #if SWIM_JOBS_USE_ENKITS
 		return state->GetCompletable()->GetIsComplete();
 #else
@@ -347,6 +355,7 @@ namespace Swim::Jobs
 
 		impl->BlockingLoops.clear();
 		impl->BlockingThreadNumbers.clear();
+
 		for (std::uint32_t i = 0; i < desc.BlockingThreads; ++i)
 		{
 			// enkiTS thread 0 is the caller/main thread, followed by the reserved
@@ -354,6 +363,7 @@ namespace Swim::Jobs
 			// threads. Compute workers occupy the first internal range, so blocking
 			// lanes are the final internally-created threads.
 			const std::uint32_t threadNumber = 1 + desc.ExternalThreads + impl->WorkerThreads + i;
+
 			if (threadNumber >= totalSchedulerThreads)
 			{
 				impl->Scheduler.WaitforAllAndShutdown();
@@ -361,12 +371,14 @@ namespace Swim::Jobs
 				impl->BlockingThreadNumbers.clear();
 				return false;
 			}
+
 			auto loop = std::make_unique<Impl::BlockingLoopTask>(impl->Scheduler);
 			loop->threadNum = threadNumber;
 			impl->BlockingThreadNumbers.push_back(threadNumber);
 			impl->Scheduler.AddPinnedTask(loop.get());
 			impl->BlockingLoops.push_back(std::move(loop));
 		}
+
 #endif
 
 		impl->Running = true;
@@ -430,6 +442,7 @@ namespace Swim::Jobs
 	JobHandle JobSystem::CreateJob(JobFunction function, JobPriority priority)
 	{
 		impl->RequireRunning("CreateJob");
+
 		if (!function)
 		{
 			throw std::invalid_argument("CreateJob requires a callable");
@@ -449,6 +462,7 @@ namespace Swim::Jobs
 					function(workerIndex);
 				}
 			}
+
 		});
 		state->Task->m_Priority = ToEnkiPriority(priority);
 #else
@@ -473,10 +487,12 @@ namespace Swim::Jobs
 	)
 	{
 		impl->RequireRunning("CreateParallelFor");
+
 		if (!function)
 		{
 			throw std::invalid_argument("CreateParallelFor requires a callable");
 		}
+
 		if (itemCount > std::numeric_limits<std::uint32_t>::max())
 		{
 			throw std::overflow_error("CreateParallelFor currently supports at most UINT32_MAX items");
@@ -499,6 +515,7 @@ namespace Swim::Jobs
 			{
 				return;
 			}
+
 			if (auto locked = weakState.lock())
 			{
 				if (!locked->CancelRequested.load(std::memory_order_acquire))
@@ -507,6 +524,7 @@ namespace Swim::Jobs
 					function(range.start, range.end, workerIndex);
 				}
 			}
+
 		});
 		state->Task->m_MinRange = minRange;
 		state->Task->m_Priority = ToEnkiPriority(priority);
@@ -529,6 +547,7 @@ namespace Swim::Jobs
 	JobHandle JobSystem::CreateMainThreadJob(std::function<void()> function, JobPriority priority)
 	{
 		impl->RequireRunning("CreateMainThreadJob");
+
 		if (!function)
 		{
 			throw std::invalid_argument("CreateMainThreadJob requires a callable");
@@ -548,6 +567,7 @@ namespace Swim::Jobs
 					function();
 				}
 			}
+
 		});
 		state->Pinned->m_Priority = ToEnkiPriority(priority);
 #else
@@ -567,10 +587,12 @@ namespace Swim::Jobs
 	JobHandle JobSystem::CreateBlockingJob(std::function<void()> function, JobPriority priority)
 	{
 		impl->RequireRunning("CreateBlockingJob");
+
 		if (!function)
 		{
 			throw std::invalid_argument("CreateBlockingJob requires a callable");
 		}
+
 		if (impl->Desc.BlockingThreads == 0)
 		{
 			throw std::logic_error("CreateBlockingJob requires JobSystemDesc::BlockingThreads > 0");
@@ -591,6 +613,7 @@ namespace Swim::Jobs
 					function();
 				}
 			}
+
 		});
 		state->Pinned->m_Priority = ToEnkiPriority(priority);
 #else
@@ -612,14 +635,17 @@ namespace Swim::Jobs
 		impl->RequireRunning("AddDependency");
 		ValidateHandle(job, "AddDependency");
 		ValidateHandle(dependency, "AddDependency");
+
 		if (job.state == dependency.state)
 		{
 			throw std::invalid_argument("A job cannot depend on itself");
 		}
+
 		if (job.IsSubmitted() || dependency.IsSubmitted())
 		{
 			throw std::logic_error("Job dependencies must be wired before the graph is submitted");
 		}
+
 		if (DependsTransitivelyOn(dependency.state, job.state))
 		{
 			throw std::logic_error("Job dependency would create a cycle");
@@ -645,10 +671,12 @@ namespace Swim::Jobs
 	{
 		impl->RequireRunning("Submit");
 		ValidateHandle(root, "Submit");
+
 		if (!root.state->Parents.empty())
 		{
 			throw std::logic_error("Submit accepts graph roots only; dependent jobs are released automatically");
 		}
+
 		if (root.IsSubmitted())
 		{
 			throw std::logic_error("Job graph root was already submitted");
@@ -656,6 +684,7 @@ namespace Swim::Jobs
 
 		impl->TrackGraph(root.state);
 #if SWIM_JOBS_USE_ENKITS
+
 		if (root.state->Task)
 		{
 			impl->Scheduler.AddTaskSetToPipe(root.state->Task.get());
@@ -664,6 +693,7 @@ namespace Swim::Jobs
 		{
 			impl->Scheduler.AddPinnedTask(root.state->Pinned.get());
 		}
+
 #else
 		impl->ExecuteFallbackGraph(root.state);
 #endif
@@ -672,13 +702,16 @@ namespace Swim::Jobs
 	void JobSystem::Submit(const TaskGroup& roots)
 	{
 		impl->RequireRunning("Submit");
+
 		for (const JobHandle& root : roots.jobs)
 		{
 			ValidateHandle(root, "Submit");
+
 			if (!root.state->Parents.empty())
 			{
 				throw std::logic_error("TaskGroup submission contains a non-root job");
 			}
+
 			if (root.IsSubmitted())
 			{
 				throw std::logic_error("TaskGroup submission contains an already-submitted root");
@@ -693,6 +726,7 @@ namespace Swim::Jobs
 		for (const JobHandle& root : roots.jobs)
 		{
 #if SWIM_JOBS_USE_ENKITS
+
 			if (root.state->Task)
 			{
 				impl->Scheduler.AddTaskSetToPipe(root.state->Task.get());
@@ -701,6 +735,7 @@ namespace Swim::Jobs
 			{
 				impl->Scheduler.AddPinnedTask(root.state->Pinned.get());
 			}
+
 #else
 			impl->ExecuteFallbackGraph(root.state);
 #endif
@@ -732,17 +767,21 @@ namespace Swim::Jobs
 	{
 		impl->RequireRunning("Wait");
 		ValidateHandle(job, "Wait");
+
 		if (!job.IsSubmitted())
 		{
 			throw std::logic_error("Cannot wait for a job graph that has not been submitted");
 		}
+
 #if SWIM_JOBS_USE_ENKITS
 		impl->Scheduler.WaitforTask(job.state->GetCompletable());
 #else
+
 		if (!job.IsComplete())
 		{
 			throw std::logic_error("Offline JobSystem fallback cannot make progress on an incomplete graph");
 		}
+
 #endif
 		impl->CollectCompleted();
 	}
@@ -763,19 +802,23 @@ namespace Swim::Jobs
 		// blocking-lane loops alive for the lifetime of the scheduler. Instead wait
 		// only for submitted Swim job wrappers captured by this snapshot.
 		const auto outstanding = impl->SnapshotOutstanding();
+
 		for (const auto& state : outstanding)
 		{
 			if (!state || !state->Active.load(std::memory_order_acquire))
 			{
 				continue;
 			}
+
 #if SWIM_JOBS_USE_ENKITS
 			impl->Scheduler.WaitforTask(state->GetCompletable());
 #else
+
 			if (!state->FallbackComplete.load(std::memory_order_acquire))
 			{
 				throw std::logic_error("Offline JobSystem fallback cannot make progress on an incomplete graph");
 			}
+
 #endif
 		}
 
@@ -793,6 +836,7 @@ namespace Swim::Jobs
 		{
 			return;
 		}
+
 		JobHandle job = CreateParallelFor(itemCount, minItemsPerTask, std::move(function), priority);
 		Submit(job);
 		Wait(job);
@@ -828,6 +872,7 @@ namespace Swim::Jobs
 		return impl->Scheduler.RegisterExternalTaskThread();
 #else
 		std::uint32_t current = impl->FallbackExternalThreadsRegistered.load(std::memory_order_acquire);
+
 		while (current < impl->Desc.ExternalThreads)
 		{
 			if (impl->FallbackExternalThreadsRegistered.compare_exchange_weak(
@@ -839,6 +884,7 @@ namespace Swim::Jobs
 				return true;
 			}
 		}
+
 		return false;
 #endif
 	}
@@ -850,6 +896,7 @@ namespace Swim::Jobs
 		impl->Scheduler.DeRegisterExternalTaskThread();
 #else
 		std::uint32_t current = impl->FallbackExternalThreadsRegistered.load(std::memory_order_acquire);
+
 		while (current > 0)
 		{
 			if (impl->FallbackExternalThreadsRegistered.compare_exchange_weak(
@@ -861,6 +908,7 @@ namespace Swim::Jobs
 				break;
 			}
 		}
+
 #endif
 	}
 

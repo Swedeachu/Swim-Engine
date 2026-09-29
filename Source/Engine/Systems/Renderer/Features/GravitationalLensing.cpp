@@ -6,8 +6,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		using Float3 = GravitationalLensing::Float3;
 
 		Float3 Add(const Float3& a, const Float3& b) { return { a[0] + b[0], a[1] + b[1], a[2] + b[2] }; }
@@ -82,6 +84,7 @@ namespace Engine
 		{
 			return 0.67f * ValueNoise(p) + 0.33f * ValueNoise(Add(Scale(p, 2.03f), { 11.7f, 11.7f, 11.7f }));
 		}
+
 	} // namespace
 
 	GravitationalLensing::Lens& GravitationalLensing::Upsert(std::uint64_t owner)
@@ -93,6 +96,7 @@ namespace Engine
 				return lens;
 			}
 		}
+
 		Lenses.push_back({});
 		Lenses.back().Owner = owner;
 		return Lenses.back();
@@ -127,19 +131,23 @@ namespace Engine
 		Trace trace;
 		Float3 x = origin;
 		Float3 v = Normalize(direction);
+
 		for (; trace.Steps < MaxSteps; ++trace.Steps)
 		{
 			const float r = std::sqrt(Dot(x, x));
+
 			if (r < rs)
 			{
 				trace.Captured = true;
 				break;
 			}
+
 			if (r > region * 1.0001f && Dot(x, v) > 0.0f)
 			{
 				trace.Escaped = true;
 				break;
 			}
+
 			const float ds = std::max(0.14f * (r - 0.5f * rs), 0.02f * rs);
 			const Float3 a1 = Acceleration(x, v, rs);
 			const Float3 xm = Add(x, Scale(v, 0.5f * ds));
@@ -148,6 +156,7 @@ namespace Engine
 			x = Add(x, Scale(vm, ds));
 			v = Normalize(Add(v, Scale(a2, ds)));
 		}
+
 		trace.Direction = v;
 		return trace;
 	}
@@ -156,10 +165,12 @@ namespace Engine
 	{
 		const float outer = lens.GasRadius;
 		const float r = std::sqrt(Dot(p, p));
+
 		if (r < 1.2f || r > outer)
 		{
 			return 0.0f;
 		}
+
 		const Float3 axis = Normalize(lens.DiskNormal);
 		const Float3 e1 = Normalize(std::abs(axis[1]) < 0.9f ? Cross(axis, { 0, 1, 0 }) : Cross(axis, { 1, 0, 0 }));
 		const Float3 e2 = Cross(axis, e1);
@@ -178,6 +189,7 @@ namespace Engine
 			density += envelope * turbulence;
 		}
 		const std::uint32_t rings = std::min(lens.Orbits, 3u);
+
 		for (std::uint32_t k = 0; k < rings; ++k)
 		{
 			const float azimuth = float(k) * 2.0943951f;
@@ -189,10 +201,12 @@ namespace Engine
 			const float rho = std::sqrt(Dot(radialVector, radialVector));
 			const float tube = 0.35f + 0.1f * float(k);
 			const float falloff = std::exp(-((rho - radius) * (rho - radius) + z * z) / (tube * tube));
+
 			if (falloff < 1.0e-3f)
 			{
 				continue;
 			}
+
 			const float omega = 2.2f * lens.GasSpeed * std::pow(radius / 3.0f, -1.5f) * (k == 1u ? -1.0f : 1.0f);
 			const Float3 q = RotateAbout(p, ringAxis, -omega * time);
 			const Float3 f1 =
@@ -203,16 +217,19 @@ namespace Engine
 				std::clamp(Fbm(Add(Scale(q, 1.5f), { float(k) * 13.0f, float(k) * 13.0f, float(k) * 13.0f })) * 1.5f - 0.3f, 0.0f, 1.0f);
 			density += falloff * (0.25f + 0.6f * stream + 1.6f * clumps);
 		}
+
 		return density * lens.GasDensity;
 	}
 
 	void GravitationalLensing::Record(RenderFeatureContext& context)
 	{
 		const auto& view = context.View();
+
 		if (Lenses.empty() || view.Width == 0 || view.Height == 0)
 		{
 			return;
 		}
+
 		struct LensRecord
 		{
 			float PositionRadius[4];
@@ -234,21 +251,26 @@ namespace Engine
 
 		static_assert(sizeof(Params) == 96 + 64 * MaxLenses);
 		std::uint32_t count = 0;
+
 		for (const auto& lens : Lenses)
 		{
 			if (count == MaxLenses)
 			{
 				break;
 			}
+
 			if (!(lens.SchwarzschildRadius > 0.0f) || !std::isfinite(lens.SchwarzschildRadius))
 			{
 				continue;
 			}
+
 			auto& record = params.Lenses[count++];
+
 			for (int c = 0; c < 3; ++c)
 			{
 				record.PositionRadius[c] = lens.Position[c];
 			}
+
 			record.PositionRadius[3] = lens.SchwarzschildRadius;
 			record.Params[0] = std::clamp(lens.Strength, 0.0f, 10.0f);
 			record.Params[1] = std::clamp(lens.Reach, 4.0f, 200.0f);
@@ -259,15 +281,18 @@ namespace Engine
 			record.Gas[2] = float(std::min(lens.Orbits, 3u));
 			const Float3 normal = Normalize(lens.DiskNormal);
 			const bool valid = std::isfinite(normal[0]) && Dot(normal, normal) > 0.5f;
+
 			for (int c = 0; c < 3; ++c)
 			{
 				record.Normal[c] = valid ? normal[c] : (c == 1 ? 1.0f : 0.0f);
 			}
 		}
+
 		if (count == 0)
 		{
 			return;
 		}
+
 		for (int c = 0; c < 3; ++c)
 		{
 			params.Forward[c] = view.Forward[c];
@@ -275,6 +300,7 @@ namespace Engine
 			params.Up[c] = view.Up[c];
 			params.Camera[c] = view.Position[c];
 		}
+
 		params.Forward[3] = view.TanHalfFovX;
 		params.Right[3] = view.TanHalfFovY;
 		params.Up[3] = std::max(view.Projection[11], 1.0e-4f);
@@ -296,4 +322,5 @@ namespace Engine
 			.Dispatch(view.Width, view.Height);
 		context.SetColor(output);
 	}
+
 } // namespace Engine

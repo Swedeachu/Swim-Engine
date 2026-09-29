@@ -3,9 +3,11 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GraphPooledResource
 	{
 		GraphResource Description;
 		std::unique_ptr<Rhi::RhiObject> Object;
 	};
+
 } // namespace Swim::Render::Internal

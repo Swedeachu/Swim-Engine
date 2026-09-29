@@ -11,6 +11,7 @@ namespace Swim::RhiVulkan
 	struct VulkanPipelineLayoutState
 	{
 		~VulkanPipelineLayoutState();
+
 		std::shared_ptr<VulkanDeviceState> Device;
 		Rhi::ShaderProgramInterface Interface;
 		Rhi::ShaderStageMask ProgramStages = Rhi::ShaderStageMask::None;

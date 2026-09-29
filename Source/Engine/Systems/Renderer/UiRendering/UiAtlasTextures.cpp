@@ -5,13 +5,16 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		// RGB8 atlas rows -> RGBA8 (alpha 1), tightly packed.
 		std::vector<std::byte> ExpandRows(const Text::AtlasPageView& page, std::uint32_t y, std::uint32_t rows)
 		{
 			std::vector<std::byte> bytes(std::size_t(page.Size) * rows * 4);
 			const std::size_t first = std::size_t(y) * page.Size;
+
 			for (std::size_t texel = 0; texel < std::size_t(page.Size) * rows; ++texel)
 			{
 				const std::size_t source = (first + texel) * 3;
@@ -20,8 +23,10 @@ namespace Swim::Render
 				bytes[texel * 4 + 2] = std::byte(page.Pixels[source + 2]);
 				bytes[texel * 4 + 3] = std::byte(0xFF);
 			}
+
 			return bytes;
 		}
+
 	} // namespace
 
 	UiAtlasTextures::UiAtlasTextures(Rhi::Device& deviceInput, BindlessResourceTable& table, UiAtlasTexturesDesc descInput)
@@ -31,6 +36,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " needs 1 .. 4096 pages");
 		}
+
 		Rhi::SamplerDesc samplerDesc{};
 		samplerDesc.MinFilter = samplerDesc.MagFilter = Rhi::Filter::Linear;
 		samplerDesc.MipFilter = Rhi::Filter::Nearest;
@@ -38,10 +44,12 @@ namespace Swim::Render
 		samplerDesc.MaxLod = 0.0f;
 		samplerDesc.DebugName = desc.DebugName;
 		sampler = device.CreateSampler(samplerDesc);
+
 		if (!sampler)
 		{
 			throw std::runtime_error(desc.DebugName + " sampler could not be created");
 		}
+
 		samplerHandle = bindless.RegisterSampler(*sampler);
 	}
 
@@ -51,6 +59,7 @@ namespace Swim::Render
 		{
 			bindless.Release(page.Handle);
 		}
+
 		bindless.Release(samplerHandle);
 	}
 
@@ -64,23 +73,29 @@ namespace Swim::Render
 		textureDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
 		textureDesc.DebugName = name;
 		page.Texture = device.CreateTexture(textureDesc);
+
 		if (!page.Texture)
 		{
 			throw std::runtime_error(name + " could not be created");
 		}
+
 		Rhi::TextureViewDesc viewDesc;
 		viewDesc.PixelFormat = Rhi::Format::RGBA8Unorm;
 		viewDesc.DebugName = name;
 		page.View = device.CreateTextureView(*page.Texture, viewDesc);
+
 		if (!page.View)
 		{
 			throw std::runtime_error(name + " view could not be created");
 		}
+
 		const auto handle = bindless.TryRegisterTexture(*page.View);
+
 		if (!handle)
 		{
 			throw std::length_error(desc.DebugName + ": the bindless table is full");
 		}
+
 		page.Handle = *handle;
 		return page;
 	}
@@ -91,24 +106,31 @@ namespace Swim::Render
 		{
 			throw std::logic_error(desc.DebugName + " has a frame awaiting CommitFrame/AbortFrame");
 		}
+
 		if (attached && attached != &atlas)
 		{
 			throw std::logic_error(desc.DebugName + " is attached to another glyph atlas; Release it first");
 		}
+
 		const std::uint32_t count = atlas.GetPageCount();
+
 		if (count > desc.MaxPages)
 		{
 			throw std::length_error(desc.DebugName + " exceeds its page budget");
 		}
+
 		attached = &atlas;
 		UiAtlasFrame frame;
 		frame.SamplerIndex = bindless.GetIndex(samplerHandle);
 		frame.PageSize = atlas.GetDesc().PageSize;
+
 		while (pages.size() < count)
 		{
 			pages.push_back(CreatePage(static_cast<std::uint32_t>(pages.size()), frame.PageSize));
 		}
+
 		pendingBytes = 0;
+
 		for (std::uint32_t index = 0; index < count; ++index)
 		{
 			auto& page = pages[index];
@@ -120,6 +142,7 @@ namespace Swim::Render
 			frame.TextureIndices.push_back(bindless.GetIndex(page.Handle));
 			std::uint32_t y = 0;
 			std::uint32_t rows = 0;
+
 			if (!page.Initialized)
 			{
 				rows = view.Size; // An initializing whole-page write.
@@ -130,6 +153,7 @@ namespace Swim::Render
 				y = changed.Y;
 				rows = changed.Height;
 			}
+
 			if (rows > 0)
 			{
 				const auto bytes = ExpandRows(view, y, rows);
@@ -141,9 +165,11 @@ namespace Swim::Render
 				frame.UploadedRows += rows;
 				frame.UploadedBytes += bytes.size();
 			}
+
 			page.PendingRevision = view.Revision;
 			page.Pending = true;
 		}
+
 		pendingBytes = frame.UploadedBytes;
 		pending = true;
 		return frame;
@@ -160,6 +186,7 @@ namespace Swim::Render
 				page.Pending = false;
 			}
 		}
+
 		uploadedBytes += pendingBytes;
 		pendingBytes = 0;
 		pending = false;
@@ -171,6 +198,7 @@ namespace Swim::Render
 		{
 			page.Pending = false;
 		}
+
 		pendingBytes = 0;
 		pending = false;
 	}
@@ -181,11 +209,13 @@ namespace Swim::Render
 		{
 			throw std::logic_error(desc.DebugName + " cannot release while a frame is pending");
 		}
+
 		for (auto& page : pages)
 		{
 			bindless.Release(page.Handle, lastUse);
 			retired.push_back({ std::move(page.Texture), std::move(page.View), lastUse });
 		}
+
 		pages.clear();
 		attached = nullptr;
 	}
@@ -212,6 +242,7 @@ namespace Swim::Render
 				throw std::runtime_error(desc.DebugName + " timed out waiting for retiring pages");
 			}
 		}
+
 		return Collect();
 	}
 
@@ -224,4 +255,5 @@ namespace Swim::Render
 	{
 		return { static_cast<std::uint32_t>(pages.size()), static_cast<std::uint32_t>(retired.size()), uploadedBytes };
 	}
+
 } // namespace Swim::Render

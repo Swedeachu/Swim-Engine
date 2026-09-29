@@ -11,6 +11,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	struct LightWorld
 	{
 		explicit LightWorld(std::uint32_t directional = 2, std::uint32_t local = 8)
@@ -67,10 +68,12 @@ namespace
 				const auto gpu = GpuRow(row);
 				SWIM_CHECK(std::memcmp(&gpu, &rows[row], sizeof(gpu)) == 0);
 			};
+
 			for (std::uint32_t i = 0; i < header.DirectionalCount; ++i)
 			{
 				same(i);
 			}
+
 			for (std::uint32_t i = 0; i < header.LocalCount; ++i)
 			{
 				same(header.FirstLocalRow + i);
@@ -96,6 +99,7 @@ namespace
 		desc.Intensity = intensity;
 		return desc;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.GpuLights", "LightsPackDenselyByTypeAndUploadOnlyChangedRows")
@@ -223,18 +227,22 @@ SWIM_TEST("Render.GpuLights", "RandomChurnKeepsRangesDenseAndTheGpuCopyExact")
 	std::mt19937 random(163);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 	std::vector<GpuLightHandle> live;
+
 	for (int step = 0; step < 40; ++step)
 	{
 		for (int op = 0; op < 12; ++op)
 		{
 			const float choice = unit(random);
+
 			if (choice < 0.45f || live.empty())
 			{
 				LightDesc desc = unit(random) < 0.1f ? Sun(unit(random)) : Point(unit(random) * 10, unit(random));
+
 				if (desc.Type == LightType::Point && unit(random) < 0.5f)
 				{
 					desc.Type = LightType::Spot;
 				}
+
 				if (auto handle = world.lights.TryCreate(desc))
 				{
 					live.push_back(*handle);
@@ -249,6 +257,7 @@ SWIM_TEST("Render.GpuLights", "RandomChurnKeepsRangesDenseAndTheGpuCopyExact")
 			else
 			{
 				const auto index = std::size_t(unit(random) * float(live.size())) % live.size();
+
 				try
 				{
 					SWIM_CHECK(world.lights.Update(live[index], unit(random) < 0.1f ? Sun(2.0f) : Point(unit(random) * 10, 3.0f)));
@@ -258,10 +267,12 @@ SWIM_TEST("Render.GpuLights", "RandomChurnKeepsRangesDenseAndTheGpuCopyExact")
 				}
 			}
 		}
+
 		// Rows are dense, distinct and each owned by exactly one live light.
 		const auto& header = world.lights.GetHeader();
 		SWIM_CHECK_EQUAL(header.DirectionalCount + header.LocalCount, std::uint32_t(live.size()));
 		std::set<std::uint32_t> rows;
+
 		for (const auto handle : live)
 		{
 			const auto row = world.lights.GetRow(handle);
@@ -273,6 +284,7 @@ SWIM_TEST("Render.GpuLights", "RandomChurnKeepsRangesDenseAndTheGpuCopyExact")
 			SWIM_CHECK(std::memcmp(&world.lights.GetRecords()[*row], &expected, sizeof(GpuLightRecord)) == 0);
 			rows.insert(*row);
 		}
+
 		SWIM_CHECK_EQUAL(rows.size(), live.size());
 		world.Frame();
 		world.CheckGpuMatchesMirror();

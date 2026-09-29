@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+
 	enum class LightKind : std::uint8_t
 	{
 		Directional, // Everywhere, along the entity's forward (-Z).
@@ -31,4 +32,5 @@ namespace Engine
 		float ShadowPriority = 0.0f; // Larger wins the shadow budgets and atlas space.
 		bool Enabled = true;
 	};
+
 } // namespace Engine

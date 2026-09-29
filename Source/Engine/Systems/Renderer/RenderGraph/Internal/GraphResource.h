@@ -5,6 +5,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	// Staged buffers are suballocated from executor-owned arenas instead of
 	// being pooled transient objects or caller-owned imports.
 	enum class GraphStaging : std::uint8_t
@@ -34,4 +35,5 @@ namespace Swim::Render::Internal
 		// Imports and staged buffers own their physical storage outside the pool.
 		bool Poolable() const { return !Imported && Staging == GraphStaging::None; }
 	};
+
 } // namespace Swim::Render::Internal

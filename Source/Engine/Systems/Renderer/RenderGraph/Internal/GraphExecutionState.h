@@ -8,6 +8,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GraphExecutionState
 	{
 		GraphExecutionState(Rhi::Device& device, const RenderGraphExecutorDesc& desc) : Device(device), Desc(desc) {}
@@ -32,4 +33,5 @@ namespace Swim::Render::Internal
 		bool Recording = false;
 		bool HasResult = false;
 	};
+
 } // namespace Swim::Render::Internal

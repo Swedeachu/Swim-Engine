@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Post-processing controls (critical-path items 73-74). Every effect can be turned
 	// off: manual exposure skips the histogram, disabled bloom records no bloom passes,
 	// and default grading values are the identity.
@@ -103,4 +104,5 @@ namespace Swim::Render
 	{
 		return encoding != OutputEncoding::Srgb;
 	}
+
 } // namespace Swim::Render

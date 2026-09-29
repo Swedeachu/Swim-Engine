@@ -16,6 +16,7 @@ namespace Scene = Swim::Testing::ParticleScene;
 
 namespace
 {
+
 	bool Near(float a, float b, float tolerance)
 	{
 		return std::abs(a - b) <= tolerance;
@@ -31,6 +32,7 @@ namespace
 	{
 		return PackParticleEmitter(desc, transform, 0, spawn, firstId);
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Particles.Reference", "RandomStreamsAreDeterministicUniformAndIndependent")
@@ -38,6 +40,7 @@ SWIM_TEST("Render.Particles.Reference", "RandomStreamsAreDeterministicUniformAnd
 	double sum = 0.0, product = 0.0;
 	std::array<std::uint32_t, 10> buckets{};
 	constexpr std::uint32_t Count = 100000;
+
 	for (std::uint32_t id = 0; id < Count; ++id)
 	{
 		const float a = P::Random(id, 7, 0);
@@ -48,12 +51,15 @@ SWIM_TEST("Render.Particles.Reference", "RandomStreamsAreDeterministicUniformAnd
 		product += (a - 0.5) * (b - 0.5);
 		++buckets[std::min(9u, std::uint32_t(a * 10.0f))];
 	}
+
 	SWIM_CHECK(std::abs(sum / Count - 0.5) < 0.005);
 	SWIM_CHECK(std::abs(product / Count) < 0.002); // Streams are uncorrelated.
+
 	for (const auto bucket : buckets)
 	{
 		SWIM_CHECK(bucket > Count / 10 * 95 / 100 && bucket < Count / 10 * 105 / 100);
 	}
+
 	SWIM_CHECK(P::Random(5, 1, 0) != P::Random(5, 2, 0)); // Seeds differ.
 	SWIM_CHECK_EQUAL(P::Hash(0u), 129708002u);			  // The published PCG hash.
 }
@@ -65,10 +71,12 @@ SWIM_TEST("Render.Particles.Reference", "EmissionScheduleCountsRateBurstsCyclesA
 	desc.Capacity = 1000;
 	ParticleEmitterClock clock;
 	std::uint32_t total = 0;
+
 	for (int frame = 0; frame < 60; ++frame)
 	{
 		total += P::AdvanceEmission(desc, clock, 1.0f / 60.0f);
 	}
+
 	SWIM_CHECK(total == 9u || total == 10u); // 10 per second, fractions carried.
 	SWIM_CHECK_EQUAL(clock.NextId, total);
 	SWIM_CHECK(Near(clock.Time, 1.0f, 1.0e-4f));
@@ -81,17 +89,21 @@ SWIM_TEST("Render.Particles.Reference", "EmissionScheduleCountsRateBurstsCyclesA
 	once.Bursts = { { 0.0f, 7 }, { 0.3f, 5 } };
 	ParticleEmitterClock onceClock;
 	std::vector<std::uint32_t> perFrame;
+
 	for (int frame = 0; frame < 10; ++frame)
 	{
 		perFrame.push_back(P::AdvanceEmission(once, onceClock, 0.1f));
 	}
+
 	SWIM_CHECK_EQUAL(perFrame[0], 17u); // 10 continuous + the burst at 0.
 	SWIM_CHECK_EQUAL(perFrame[3], 15u); // 10 continuous + the burst at 0.3.
 	std::uint32_t after = 0;
+
 	for (int frame = 5; frame < 10; ++frame)
 	{
 		after += perFrame[std::size_t(frame)];
 	}
+
 	SWIM_CHECK(after <= 1u); // Only float rounding of the last fraction may remain.
 
 	// Looping: bursts fire every cycle, also when one frame spans several cycles.
@@ -128,6 +140,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 	const auto local = Pack(desc);
 	const P::Float3 axis{ std::sqrt(0.5f), std::sqrt(0.5f), 0.0f };
 	float widest = 0.0f;
+
 	for (std::uint32_t id = 0; id < 2000; ++id)
 	{
 		const auto p = P::SpawnParticle(local, id);
@@ -145,6 +158,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 		SWIM_CHECK(p.Position[0] == 0.0f && p.Position[1] == 0.0f && p.Position[2] == 0.0f); // Point shape.
 		SWIM_CHECK(p.Size == P::SpawnParticle(local, id).Size);								 // Deterministic.
 	}
+
 	SWIM_CHECK(widest <= 0.4f + 1.0e-3f && widest > 0.35f); // Fills the cone, never leaves it.
 
 	// Sphere: inside the ball, uniform in volume (mean r^3 = R^3 / 2).
@@ -153,6 +167,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 	sphere.ShapeExtent = { 2.0f, 0.0f, 0.0f };
 	const auto sphereRecord = Pack(sphere);
 	double cubes = 0.0;
+
 	for (std::uint32_t id = 0; id < 4000; ++id)
 	{
 		const auto p = P::SpawnParticle(sphereRecord, id);
@@ -160,6 +175,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 		SWIM_CHECK(r <= 2.0f + 1.0e-4f);
 		cubes += double(r) * r * r;
 	}
+
 	SWIM_CHECK(std::abs(cubes / 4000.0 / 8.0 - 0.5) < 0.03);
 
 	// Box: inside the half extents.
@@ -167,6 +183,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 	box.Shape = ParticleShape::Box;
 	box.ShapeExtent = { 1.0f, 0.5f, 0.25f };
 	const auto boxRecord = Pack(box);
+
 	for (std::uint32_t id = 0; id < 1000; ++id)
 	{
 		const auto p = P::SpawnParticle(boxRecord, id);
@@ -179,6 +196,7 @@ SWIM_TEST("Render.Particles.Reference", "SpawnsFollowTheirRangesConeAndShapes")
 	auto localBox = box;
 	localBox.Space = ParticleSpace::Local;
 	const auto localRecord = PackParticleEmitter(localBox, turned, 0, 0, 0);
+
 	for (std::uint32_t id = 0; id < 50; ++id)
 	{
 		const auto a = P::SpawnParticle(world, id);
@@ -205,6 +223,7 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 	p.AngularVelocity = 3.0f;
 	const float dt = 0.01f;
 	float x = 0.0f, y = 0.0f, vy = 5.0f;
+
 	for (int step = 0; step < 50; ++step)
 	{
 		SWIM_REQUIRE(P::SimulateParticle(emitter, dt, p));
@@ -212,6 +231,7 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 		y += vy * dt;
 		x += 2.0f * dt;
 	}
+
 	SWIM_CHECK(Near(p.Position[0], x, 1.0e-4f) && Near(p.Position[1], y, 1.0e-4f) && Near(p.Velocity[1], vy, 1.0e-4f));
 	SWIM_CHECK(Near(p.Rotation, 1.5f, 1.0e-4f) && Near(p.Age, 0.5f, 1.0e-5f));
 	// Death: a step reaching the lifetime leaves the particle untouched.
@@ -229,10 +249,12 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 	GpuParticle d;
 	d.Lifetime = 10.0f;
 	d.Velocity[2] = 1.0f;
+
 	for (int step = 0; step < 10; ++step)
 	{
 		P::SimulateParticle(dragEmitter, 0.1f, d);
 	}
+
 	SWIM_CHECK(Near(d.Velocity[2], std::pow(0.8f, 10.0f), 1.0e-5f));
 
 	// Collision: never below the ground; bounces lose restitution and friction.
@@ -248,6 +270,7 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 	b.Velocity[0] = 1.0f;
 	// The first three bounces: each leaves the ground at restitution x the impact speed.
 	std::vector<float> rebounds;
+
 	for (int iteration = 0; iteration < 2000 && rebounds.size() < 3; ++iteration)
 	{
 		const float vxBefore = b.Velocity[0];
@@ -255,6 +278,7 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 		const float impact = (b.Velocity[1] - 10.0f * step); // Vertical speed after gravity, before the contact.
 		SWIM_REQUIRE(P::SimulateParticle(bounceEmitter, step, b));
 		SWIM_CHECK(b.Position[1] >= 0.5f);
+
 		if (b.Velocity[1] > 0.0f && b.Position[1] == 0.5f)
 		{
 			SWIM_CHECK(Near(b.Velocity[1], -impact * 0.5f, 1.0e-5f));
@@ -262,6 +286,7 @@ SWIM_TEST("Render.Particles.Reference", "SimulationIntegratesDiesAndBounces")
 			rebounds.push_back(b.Velocity[1]);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(rebounds.size(), std::size_t(3));
 	SWIM_CHECK(rebounds[1] < rebounds[0] && rebounds[2] < rebounds[1]); // Each bounce is lower.
 }
@@ -307,6 +332,7 @@ SWIM_TEST("Render.Particles.Reference", "CurvesGradientsFlipbooksAndBillboards")
 	p.Rotation = 0.3f;
 	const float size = P::ParticleSize(emitter, p);
 	std::array<P::BillboardVertex, 4> corners{};
+
 	for (std::uint32_t c = 0; c < 4; ++c)
 	{
 		corners[c] = P::BillboardCorner(frame, emitter, p, c);
@@ -315,6 +341,7 @@ SWIM_TEST("Render.Particles.Reference", "CurvesGradientsFlipbooksAndBillboards")
 		const float along = offset[0] * frame.CameraForward[0] + offset[1] * frame.CameraForward[1] + offset[2] * frame.CameraForward[2];
 		SWIM_CHECK(Near(along, 0.0f, 1.0e-5f)); // In the plane facing the camera.
 	}
+
 	// Corner 3 (top right) minus corner 2 (top left) is the rotated camera right.
 	const float edge[3] = { corners[3].Position[0] - corners[2].Position[0], corners[3].Position[1] - corners[2].Position[1],
 		corners[3].Position[2] - corners[2].Position[2] };
@@ -345,26 +372,31 @@ SWIM_TEST("Render.Particles.Reference", "ReferenceEmitterReachesSteadyStateAndDr
 	ParticleEmitterClock clock;
 	P::ReferenceEmitter pool(desc.Capacity);
 	std::uint32_t emitted = 0;
+
 	for (int frame = 0; frame < 180; ++frame)
 	{
 		const auto spawn = P::AdvanceEmission(desc, clock, 1.0f / 60.0f);
 		emitted += spawn;
 		pool.Step(PackParticleEmitter(desc, Scene::Translation(0, 0, 0), 0, spawn, clock.NextId - spawn), 1.0f / 60.0f);
+
 		for (const auto& p : pool.Particles())
 		{
 			SWIM_CHECK(p.Age < p.Lifetime && p.Position[1] >= 0.0f);
 		}
 	}
+
 	// Rate x mean lifetime = 120 x 1.1 = 132 live on average.
 	const auto live = pool.Particles().size();
 	std::printf("             [particles] fountain steady state: %zu live of %u emitted\n", live, emitted);
 	SWIM_CHECK(live > 100u && live < 170u);
 	SWIM_CHECK_EQUAL(pool.Dropped(), 0u);
 	std::set<std::uint32_t> ids;
+
 	for (const auto& p : pool.Particles())
 	{
 		ids.insert(p.Id);
 	}
+
 	SWIM_CHECK_EQUAL(ids.size(), live);
 
 	// A tiny pool drops what does not fit.
@@ -388,6 +420,7 @@ SWIM_TEST("Render.Particles.Reference", "PackingAndFramesValidate")
 	const auto plain = BuildParticleFrame(view, 0.0f, 0, 0);
 	const float point[4] = { 0.5f, 1.0f, -2.0f, 1.0f };
 	std::array<float, 4> a{}, b{};
+
 	for (int r = 0; r < 4; ++r)
 	{
 		for (int c = 0; c < 4; ++c)
@@ -396,6 +429,7 @@ SWIM_TEST("Render.Particles.Reference", "PackingAndFramesValidate")
 			b[r] += plain.ViewProjection[r * 4 + c] * point[c];
 		}
 	}
+
 	SWIM_CHECK(Near(a[0] / a[3] - b[0] / b[3], 0.01f, 1.0e-5f) && Near(a[1] / a[3] - b[1] / b[3], -0.02f, 1.0e-5f));
 	const float rightDotForward = frame.CameraRight[0] * frame.CameraForward[0] + frame.CameraRight[1] * frame.CameraForward[1] +
 		frame.CameraRight[2] * frame.CameraForward[2];
@@ -412,6 +446,7 @@ SWIM_TEST("Render.Particles.Reference", "PackingAndFramesValidate")
 		auto d = Scene::Fountain();
 		edit(d);
 		bool threw = false;
+
 		try
 		{
 			ValidateParticleEmitterDesc(d);
@@ -420,6 +455,7 @@ SWIM_TEST("Render.Particles.Reference", "PackingAndFramesValidate")
 		{
 			threw = true;
 		}
+
 		return threw;
 	};
 	SWIM_CHECK(!rejects(

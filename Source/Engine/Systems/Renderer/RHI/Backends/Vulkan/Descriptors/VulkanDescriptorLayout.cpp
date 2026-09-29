@@ -15,10 +15,12 @@ namespace Swim::RhiVulkan
 		{
 			RetireLostVulkanDevice(*Device);
 		}
+
 		if (Layout != VK_NULL_HANDLE)
 		{
 			Device->Dispatch.vkDestroyPipelineLayout(Device->Device.device, Layout, nullptr);
 		}
+
 		for (const auto set : Sets)
 		{
 			if (set != VK_NULL_HANDLE)
@@ -51,10 +53,12 @@ namespace Swim::RhiVulkan
 	VkShaderStageFlags ToVkDescriptorStages(Rhi::ShaderStageMask stages)
 	{
 		const auto mask = static_cast<std::uint32_t>(stages);
+
 		if (mask == 0 || (mask & ~7u) != 0)
 		{
 			throw std::invalid_argument("Descriptors require explicit vertex/fragment/compute visibility");
 		}
+
 		return ((mask & 1u) ? VK_SHADER_STAGE_VERTEX_BIT : 0) | ((mask & 2u) ? VK_SHADER_STAGE_FRAGMENT_BIT : 0) |
 			((mask & 4u) ? VK_SHADER_STAGE_COMPUTE_BIT : 0);
 	}
@@ -68,6 +72,7 @@ namespace Swim::RhiVulkan
 				return &schema;
 			}
 		}
+
 		return nullptr;
 	}
 
@@ -85,6 +90,7 @@ namespace Swim::RhiVulkan
 		{
 			return true;
 		}
+
 		const auto* left = FindDescriptorSchema(a, space);
 		const auto* right = FindDescriptorSchema(b, space);
 		return left && right && left->Bindings.size() == right->Bindings.size() &&
@@ -93,6 +99,7 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
+
 		using Counts = std::array<std::uint64_t, 5>;
 
 		std::size_t GetLimitSlot(VkDescriptorType type)
@@ -115,12 +122,14 @@ namespace Swim::RhiVulkan
 				{
 					return false;
 				}
+
 				explicitIds.push_back(space.Space);
 				auto reflected = std::find_if(schemas.begin(), schemas.end(),
 					[&](const auto& schema)
 					{
 						return schema.Space == space.Space;
 					});
+
 				if (reflected != schemas.end())
 				{
 					for (const auto& binding : reflected->Bindings)
@@ -130,6 +139,7 @@ namespace Swim::RhiVulkan
 							{
 								return candidate.Binding == binding.Binding;
 							});
+
 						if (found == space.Bindings.end() || found->Type != binding.Type || found->SampledClass != binding.SampledClass ||
 							found->SampledDimension != binding.SampledDimension ||
 							found->StorageTextureFormat != binding.StorageTextureFormat ||
@@ -140,6 +150,7 @@ namespace Swim::RhiVulkan
 							return false;
 						}
 					}
+
 					reflected->Bindings = space.Bindings;
 				}
 				else
@@ -147,8 +158,10 @@ namespace Swim::RhiVulkan
 					schemas.push_back(space);
 				}
 			}
+
 			return true;
 		}
+
 	} // namespace
 
 	bool CreateDescriptorLayouts(VulkanPipelineLayoutState& layout, std::span<const Rhi::DescriptorSchemaDesc> explicitSpaces)
@@ -158,10 +171,12 @@ namespace Swim::RhiVulkan
 		const auto& indexing = device.DescriptorIndexing;
 		auto& schemas = layout.Interface.DescriptorSchemas;
 		std::vector<std::uint32_t> explicitIds;
+
 		if (!MergeExplicitSpaces(schemas, explicitSpaces, explicitIds))
 		{
 			return false;
 		}
+
 		std::sort(schemas.begin(), schemas.end(),
 			[](const auto& a, const auto& b)
 			{
@@ -185,15 +200,18 @@ namespace Swim::RhiVulkan
 		const Counts bindStageLimits{ indexing.maxPerStageDescriptorUpdateAfterBindSamplers,
 			indexing.maxPerStageDescriptorUpdateAfterBindSampledImages, indexing.maxPerStageDescriptorUpdateAfterBindUniformBuffers,
 			indexing.maxPerStageDescriptorUpdateAfterBindStorageBuffers, indexing.maxPerStageDescriptorUpdateAfterBindStorageImages };
+
 		try
 		{
 			for (std::size_t index = 0; index < schemas.size(); ++index)
 			{
 				auto& schema = schemas[index];
+
 				if (schema.Space >= limits.maxBoundDescriptorSets || (index > 0 && schema.Space == schemas[index - 1].Space))
 				{
 					return false;
 				}
+
 				const bool explicitSpace = std::find(explicitIds.begin(), explicitIds.end(), schema.Space) != explicitIds.end();
 				std::sort(schema.Bindings.begin(), schema.Bindings.end(),
 					[](const auto& a, const auto& b)
@@ -206,6 +224,7 @@ namespace Swim::RhiVulkan
 						return binding.UpdateAfterBind;
 					});
 				anyUpdateAfterBind = anyUpdateAfterBind || setUpdateAfterBind;
+
 				for (std::size_t bindingIndex = 0; bindingIndex < schema.Bindings.size(); ++bindingIndex)
 				{
 					const auto& binding = schema.Bindings[bindingIndex];
@@ -219,6 +238,7 @@ namespace Swim::RhiVulkan
 					{
 						return false;
 					}
+
 					if (binding.Type == Rhi::DescriptorType::SampledTexture
 							? (!Rhi::IsSampledTextureDimension(binding.SampledDimension) ||
 								  (binding.SampledDimension == Rhi::TextureViewDimension::TextureCubeArray &&
@@ -227,6 +247,7 @@ namespace Swim::RhiVulkan
 					{
 						return false;
 					}
+
 					const auto type = ToVkDescriptorType(binding.Type);
 					ToVkDescriptorStages(binding.Stages);
 					// Explicit (shared) spaces may be visible to stages this program lacks.
@@ -243,10 +264,12 @@ namespace Swim::RhiVulkan
 					{
 						return false;
 					}
+
 					const std::size_t slot = GetLimitSlot(type);
 					const auto accumulate = [&](Counts& totals, std::array<Counts, 3>& perStage)
 					{
 						totals[slot] += binding.Count;
+
 						for (std::size_t stage = 0; stage < perStage.size(); ++stage)
 						{
 							if ((static_cast<std::uint32_t>(binding.Stages) & (1u << stage)) != 0)
@@ -255,13 +278,16 @@ namespace Swim::RhiVulkan
 							}
 						}
 					};
+
 					if (!setUpdateAfterBind)
 					{
 						accumulate(plainTotals, plainStage);
 					}
+
 					accumulate(allTotals, allStage);
 				}
 			}
+
 			const auto withinLimits = [](const Counts& totals, const std::array<Counts, 3>& perStage, const Counts& totalLimit,
 										  const Counts& stageLimit, std::uint64_t stageResources)
 			{
@@ -272,6 +298,7 @@ namespace Swim::RhiVulkan
 						return false;
 					}
 				}
+
 				for (const auto& counts : perStage)
 				{
 					for (std::size_t slot = 0; slot < counts.size(); ++slot)
@@ -281,30 +308,37 @@ namespace Swim::RhiVulkan
 							return false;
 						}
 					}
+
 					if (counts[1] + counts[2] + counts[3] + counts[4] > stageResources)
 					{
 						return false;
 					}
 				}
+
 				return true;
 			};
+
 			if (!withinLimits(plainTotals, plainStage, totalLimits, stageLimits, limits.maxPerStageResources) ||
 				(anyUpdateAfterBind &&
 					!withinLimits(allTotals, allStage, bindTotalLimits, bindStageLimits, indexing.maxPerStageUpdateAfterBindResources)))
 			{
 				return false;
 			}
+
 			if (schemas.empty())
 			{
 				return true;
 			}
+
 			layout.Sets.resize(static_cast<std::size_t>(schemas.back().Space) + 1, VK_NULL_HANDLE);
 			layout.UpdateAfterBindSets.assign(layout.Sets.size(), false);
+
 			for (std::uint32_t space = 0; space < layout.Sets.size(); ++space)
 			{
 				std::vector<VkDescriptorSetLayoutBinding> bindings;
 				std::vector<VkDescriptorBindingFlags> flags;
 				bool updateAfterBind = false;
+
 				if (const auto* schema = FindDescriptorSchema(layout, space))
 				{
 					for (const auto& binding : schema->Bindings)
@@ -312,19 +346,23 @@ namespace Swim::RhiVulkan
 						bindings.push_back({ binding.Binding, ToVkDescriptorType(binding.Type), binding.Count,
 							ToVkDescriptorStages(binding.Stages), nullptr });
 						VkDescriptorBindingFlags bindingFlags = 0;
+
 						if (binding.PartiallyBound)
 						{
 							bindingFlags |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
 						}
+
 						if (binding.UpdateAfterBind)
 						{
 							bindingFlags |=
 								VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
 							updateAfterBind = true;
 						}
+
 						flags.push_back(bindingFlags);
 					}
 				}
+
 				VkDescriptorSetLayoutBindingFlagsCreateInfo flagInfo{};
 				flagInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
 				flagInfo.bindingCount = static_cast<std::uint32_t>(flags.size());
@@ -342,20 +380,25 @@ namespace Swim::RhiVulkan
 				{
 					info.pNext = &flagInfo;
 				}
+
 				if (updateAfterBind)
 				{
 					info.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 				}
+
 				layout.UpdateAfterBindSets[space] = updateAfterBind;
 				VkDescriptorSetLayoutSupport support{};
 				support.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT;
 				device.Dispatch.vkGetDescriptorSetLayoutSupport(device.Device.device, &info, &support);
+
 				if (!support.supported)
 				{
 					return false;
 				}
+
 				const auto createResult =
 					device.Dispatch.vkCreateDescriptorSetLayout(device.Device.device, &info, nullptr, &layout.Sets[space]);
+
 				if (createResult != VK_SUCCESS)
 				{
 					layout.Sets[space] = VK_NULL_HANDLE;
@@ -368,6 +411,7 @@ namespace Swim::RhiVulkan
 		{
 			return false;
 		}
+
 		return true;
 	}
 

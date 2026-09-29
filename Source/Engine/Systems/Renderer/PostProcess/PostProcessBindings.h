@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contracts of Shaders/Slang/PostProcess. Every program uses space 0.
 
 	inline constexpr std::uint32_t PostHistogramBins = 256; // Bin 0 = black (ignored), bins 1..255 cover the log range.
@@ -52,4 +53,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t ThreadGroupSize = 8;
 		static constexpr std::uint32_t PushConstantBytes = sizeof(PostCompositeConstants);
 	};
+
 } // namespace Swim::Render

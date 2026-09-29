@@ -14,10 +14,12 @@ namespace Engine
 	template<typename Context>
 	class DeferredCommandBuffer
 	{
+
 	private:
 
 		class Command
 		{
+
 		public:
 
 			template<typename Func>
@@ -26,9 +28,11 @@ namespace Engine
 			{}
 
 			Command(Command&&) noexcept = default;
+
 			Command& operator=(Command&&) noexcept = default;
 
 			Command(const Command&) = delete;
+
 			Command& operator=(const Command&) = delete;
 
 			void Invoke(Context& context)
@@ -41,6 +45,7 @@ namespace Engine
 			struct CommandConcept
 			{
 				virtual ~CommandConcept() = default;
+
 				virtual void Invoke(Context& context) = 0;
 			};
 
@@ -69,8 +74,11 @@ namespace Engine
 		DeferredCommandBuffer() = default;
 
 		DeferredCommandBuffer(const DeferredCommandBuffer&) = delete;
+
 		DeferredCommandBuffer& operator=(const DeferredCommandBuffer&) = delete;
+
 		DeferredCommandBuffer(DeferredCommandBuffer&&) = delete;
+
 		DeferredCommandBuffer& operator=(DeferredCommandBuffer&&) = delete;
 
 		template<typename Func>
@@ -88,6 +96,7 @@ namespace Engine
 			std::vector<Command> commands;
 			{
 				std::lock_guard<std::mutex> lock(mutex);
+
 				if (flushing)
 				{
 					throw std::logic_error("DeferredCommandBuffer cannot be flushed recursively.");

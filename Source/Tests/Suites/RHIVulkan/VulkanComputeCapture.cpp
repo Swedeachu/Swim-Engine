@@ -5,7 +5,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanComputeCapture* capture = nullptr;
+
 	}
 
 	VulkanComputeCapture::VulkanComputeCapture()
@@ -16,12 +18,14 @@ namespace Swim::Testing
 		State->QueueProperties[1].queueFlags = VK_QUEUE_COMPUTE_BIT;
 		State->QueueProperties[2].queueFlags = VK_QUEUE_TRANSFER_BIT;
 		auto& limits = State->Device.physical_device.properties.limits;
+
 		for (std::size_t axis = 0; axis < 3; ++axis)
 		{
 			State->QueueProperties[axis].queueCount = 1;
 			limits.maxComputeWorkGroupSize[axis] = 64;
 			limits.maxComputeWorkGroupCount[axis] = 64 - static_cast<std::uint32_t>(axis);
 		}
+
 		limits.maxComputeWorkGroupInvocations = 128;
 		State->Dispatch.vkCreateComputePipelines = +[](VkDevice, VkPipelineCache cache, std::uint32_t,
 			const VkComputePipelineCreateInfo* info, const VkAllocationCallbacks*, VkPipeline* pipeline) -> VkResult

@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Initial staging reservations. Zero creates arenas lazily. The executor grows
 	// an arena only between submissions, after waiting for its previous execution,
 	// to the smallest power of two that holds the current graph's staged buffers.
@@ -12,4 +13,5 @@ namespace Swim::Render
 		std::uint64_t UploadCapacity = 0;
 		std::uint64_t ReadbackCapacity = 0;
 	};
+
 } // namespace Swim::Render

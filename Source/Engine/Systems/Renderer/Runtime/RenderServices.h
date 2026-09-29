@@ -2,6 +2,7 @@
 
 namespace Engine
 {
+
 	class FrameProfiler;
 	class FrameRenderer;
 	class MaterialLibrary;
@@ -28,4 +29,5 @@ namespace Engine
 
 		bool HasRenderer() const { return Renderer && Meshes && Materials && Settings; }
 	};
+
 } // namespace Engine

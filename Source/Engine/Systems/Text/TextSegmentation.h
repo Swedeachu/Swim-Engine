@@ -9,6 +9,7 @@
 
 namespace Swim::Text
 {
+
 	enum class LineBreakKind : std::uint8_t
 	{
 		None,	  // No break may occur before this byte.
@@ -67,4 +68,5 @@ namespace Swim::Text
 	// ISO 15924 tag helpers ("Arab" <-> 0x41726162).
 	std::uint32_t MakeScriptTag(std::string_view code);
 	std::string ScriptTagToString(std::uint32_t tag);
+
 } // namespace Swim::Text

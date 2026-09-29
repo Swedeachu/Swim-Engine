@@ -10,6 +10,7 @@
 // planes (dragging), spheres, boxes and triangles.
 namespace Engine
 {
+
 	// A ray: Origin + t * Direction for t >= 0. Direction is normalized by the helpers that
 	// build rays (Camera::ScreenPointToRay); the intersection functions accept any non-zero
 	// direction and report t in its units (Distance = t * |Direction|).
@@ -30,6 +31,7 @@ namespace Engine
 
 	namespace RayQueries
 	{
+
 		// The plane through `point` with normal `normal` (either side); nothing when the ray
 		// is parallel to it or the plane is behind the origin.
 		std::optional<RayHit> Plane(const Ray& ray, const glm::vec3& point, const glm::vec3& normal);
@@ -48,5 +50,7 @@ namespace Engine
 		std::optional<RayHit> Triangle(const Ray& ray, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c);
 		// The ray parameter (clamped to >= 0) of the point on the ray closest to `point`.
 		float ClosestT(const Ray& ray, const glm::vec3& point);
+
 	} // namespace RayQueries
+
 } // namespace Engine

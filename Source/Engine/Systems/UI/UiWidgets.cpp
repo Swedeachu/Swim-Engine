@@ -7,8 +7,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		const UiTheme& ThemeOf(const UiDocument& document)
 		{
 			return *document.GetTheme();
@@ -17,10 +19,12 @@ namespace Swim::UI
 		std::shared_ptr<const Text::FontCollection> ThemeFonts(const UiDocument& document)
 		{
 			const auto& fonts = ThemeOf(document).Fonts;
+
 			if (!fonts)
 			{
 				throw std::logic_error("Themed UI text needs UiTheme::Fonts");
 			}
+
 			return fonts;
 		}
 
@@ -43,6 +47,7 @@ namespace Swim::UI
 			document.SetThemeClass(node, UiThemeClass::Label);
 			return node;
 		}
+
 	} // namespace
 
 	UiNodeId CreatePanel(UiDocument& document, UiNodeId parent, UiFlow flow)
@@ -102,10 +107,12 @@ namespace Swim::UI
 		control.Parts.Track = box;
 		control.Parts.Mark = mark;
 		control.Parts.Mixed = mixed;
+
 		if (!label.empty())
 		{
 			control.Parts.Label = ThemedLabel(document, root, std::move(label));
 		}
+
 		document.SetControl(root, control);
 		document.SetThemeClass(root, UiThemeClass::Checkbox);
 		document.SetThemeClass(box, UiThemeClass::CheckBox);
@@ -129,10 +136,12 @@ namespace Swim::UI
 		control.Check = on ? UiCheckState::Checked : UiCheckState::Unchecked;
 		control.Parts.Track = track;
 		control.Parts.Thumb = knob;
+
 		if (!label.empty())
 		{
 			control.Parts.Label = ThemedLabel(document, root, std::move(label));
 		}
+
 		document.SetControl(root, control);
 		document.SetThemeClass(root, UiThemeClass::Toggle);
 		document.SetThemeClass(track, UiThemeClass::ToggleTrack);
@@ -150,15 +159,18 @@ namespace Swim::UI
 			row.Gap = ThemeOf(document).Metrics.Spacing;
 			parent = CreateStyled(document, parent, row);
 		}
+
 		UiStyle overlay;
 		overlay.Flow = UiFlow::Overlay;
 		const auto root = CreateStyled(document, parent, overlay);
 		const auto track = document.Create(root);
 		std::vector<std::pair<UiNodeId, float>> ticks;
+
 		for (std::uint32_t i = 0; desc.Ticks >= 2 && i < desc.Ticks; ++i)
 		{
 			ticks.emplace_back(document.Create(root), desc.Min + (desc.Max - desc.Min) * float(i) / float(desc.Ticks - 1));
 		}
+
 		const auto fill = document.Create(root);
 		const auto thumb = document.Create(root);
 		UiControl control;
@@ -173,6 +185,7 @@ namespace Swim::UI
 		control.Parts.Track = track;
 		control.Parts.Fill = fill;
 		control.Parts.Thumb = thumb;
+
 		if (desc.ShowValue)
 		{
 			const auto label = document.Create(parent);
@@ -183,6 +196,7 @@ namespace Swim::UI
 			document.SetThemeClass(label, UiThemeClass::SliderValue);
 			control.Parts.Label = label;
 			control.LabelDecimals = std::clamp(desc.Decimals, 0, 9);
+
 			if (desc.EditableValue)
 			{
 				auto field = document.GetStyle(label);
@@ -194,14 +208,17 @@ namespace Swim::UI
 				document.SetEditable(label, true, options);
 			}
 		}
+
 		document.SetControl(root, control);
 		document.SetThemeClass(root, UiThemeClass::Slider);
 		document.SetThemeClass(track, UiThemeClass::SliderTrack);
+
 		for (const auto& [tick, value] : ticks)
 		{
 			document.SetPartRole(tick, root, UiPartRole::Tick, value);
 			document.SetThemeClass(tick, UiThemeClass::SliderTick);
 		}
+
 		document.SetThemeClass(fill, UiThemeClass::SliderFill);
 		document.SetThemeClass(thumb, UiThemeClass::SliderThumb);
 		return root;
@@ -228,6 +245,7 @@ namespace Swim::UI
 		document.SetControl(root, control);
 		document.SetThemeClass(root, UiThemeClass::ScrollBar);
 		document.SetThemeClass(thumb, UiThemeClass::ScrollThumb);
+
 		for (const auto button : { decrement, increment })
 		{
 			if (button)
@@ -235,6 +253,7 @@ namespace Swim::UI
 				document.SetThemeClass(button, UiThemeClass::ScrollButton);
 			}
 		}
+
 		return root;
 	}
 
@@ -249,6 +268,7 @@ namespace Swim::UI
 		root.AlignItems = UiAlign::Stretch;
 		area.Root = CreateStyled(document, parent, root);
 		UiNodeId row = area.Root;
+
 		if (!overlay)
 		{
 			UiStyle rowStyle;
@@ -258,6 +278,7 @@ namespace Swim::UI
 			rowStyle.Shrink = 1.0f;
 			row = CreateStyled(document, area.Root, rowStyle);
 		}
+
 		UiStyle viewport;
 		viewport.Clip = true;
 		viewport.Grow = 1.0f;
@@ -273,28 +294,34 @@ namespace Swim::UI
 			{
 				return;
 			}
+
 			auto style = document.GetStyle(bar);
 			style.Absolute = true;
 			style.AnchorMin = isVertical ? UiPoint{ 1.0f, 0.0f } : UiPoint{ 0.0f, 1.0f };
 			style.AnchorMax = isVertical ? UiPoint{ 1.0f, 1.0f } : UiPoint{ 1.0f, 1.0f };
 			style.Pivot = isVertical ? UiPoint{ 1.0f, 0.0f } : UiPoint{ 0.0f, 1.0f };
+
 			if (vertical && horizontal)
 			{
 				(isVertical ? style.Margin.Bottom : style.Margin.Right) = thickness;
 			}
+
 			document.SetStyle(bar, style);
 		};
+
 		if (vertical)
 		{
 			barDesc.Orientation = UiOrientation::Vertical;
 			area.Vertical = CreateScrollBar(document, row, area.Viewport, barDesc);
 			place(area.Vertical, true);
 		}
+
 		if (horizontal)
 		{
 			barDesc.Orientation = UiOrientation::Horizontal;
 			area.Horizontal = CreateScrollBar(document, area.Root, area.Viewport, barDesc);
 			place(area.Horizontal, false);
+
 			if (!overlay && vertical)
 			{
 				auto style = document.GetStyle(area.Horizontal);
@@ -302,6 +329,7 @@ namespace Swim::UI
 				document.SetStyle(area.Horizontal, style);
 			}
 		}
+
 		return area;
 	}
 
@@ -332,21 +360,26 @@ namespace Swim::UI
 	{
 		auto field = style;
 		field.Clip = true;
+
 		if (!options.Multiline)
 		{
 			field.TextWrap = Text::TextWrap::None;
 		}
+
 		const auto node = CreateStyled(document, parent, field);
 		document.SetText(node, std::move(fonts), {}, size);
 		document.SetEditable(node, true, options);
 		return node;
 	}
+
 } // namespace Swim::UI
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		UiNodeId Styled(UiDocument& document, UiNodeId parent, const UiStyle& style)
 		{
 			const auto node = document.Create(parent);
@@ -357,10 +390,12 @@ namespace Swim::UI
 		std::shared_ptr<const Text::FontCollection> Fonts(const UiDocument& document)
 		{
 			const auto& fonts = document.GetTheme()->Fonts;
+
 			if (!fonts)
 			{
 				throw std::logic_error("Themed UI text needs UiTheme::Fonts");
 			}
+
 			return fonts;
 		}
 
@@ -395,6 +430,7 @@ namespace Swim::UI
 			document.SetThemeClass(area.Root, UiThemeClass::Popup);
 			return { area.Root, area.Viewport, area.Vertical };
 		}
+
 	} // namespace
 
 	UiNodeId CreateRadioGroup(
@@ -409,10 +445,12 @@ namespace Swim::UI
 		control.Orientation = orientation;
 		control.Value = -1.0f;
 		document.SetControl(group, control);
+
 		for (const auto& option : options)
 		{
 			AddRadioOption(document, group, option);
 		}
+
 		document.SetValue(group, float(selected));
 		return group;
 	}
@@ -428,12 +466,14 @@ namespace Swim::UI
 		overlay.AlignItems = UiAlign::Center;
 		const auto circle = Styled(document, row, overlay);
 		const auto dot = document.Create(circle);
+
 		if (!label.empty())
 		{
 			const auto text = document.Create(row);
 			document.SetText(text, Fonts(document), std::move(label), TextSize(document, UiThemeClass::Label));
 			document.SetThemeClass(text, UiThemeClass::Label);
 		}
+
 		document.SetPartRole(row, group, UiPartRole::Option, float(document.GetOptionCount(group)));
 		document.SetThemeClass(row, UiThemeClass::RadioOption);
 		document.SetThemeClass(circle, UiThemeClass::RadioCircle);
@@ -456,10 +496,12 @@ namespace Swim::UI
 		document.SetControl(area.Root, control);
 		document.SetThemeClass(area.Root, UiThemeClass::ListView, UiThemeApply::Paint); // The caller's size stays.
 		UiListView list{ area.Root, area.Viewport, area.Vertical };
+
 		for (const auto& item : items)
 		{
 			AddListItem(document, list, item);
 		}
+
 		document.SetValue(list.Root, float(selected));
 		return list;
 	}
@@ -496,10 +538,12 @@ namespace Swim::UI
 		document.SetThemeClass(dropdown.Root, UiThemeClass::Dropdown);
 		document.SetThemeClass(dropdown.Label, UiThemeClass::Label, UiThemeApply::Text);
 		document.SetThemeClass(dropdown.Arrow, UiThemeClass::DropdownArrow);
+
 		for (const auto& option : options)
 		{
 			AddDropdownOption(document, dropdown, option);
 		}
+
 		document.SetValue(dropdown.Root, float(selected));
 		return dropdown;
 	}
@@ -578,12 +622,14 @@ namespace Swim::UI
 		dialog.AlignItems = UiAlign::Stretch;
 		modal.Dialog = Styled(document, modal.Root, dialog);
 		document.SetThemeClass(modal.Dialog, UiThemeClass::Dialog);
+
 		if (!title.empty())
 		{
 			modal.Title = document.Create(modal.Dialog);
 			document.SetText(modal.Title, Fonts(document), std::move(title), TextSize(document, UiThemeClass::DialogTitle));
 			document.SetThemeClass(modal.Title, UiThemeClass::DialogTitle);
 		}
+
 		UiStyle content;
 		content.Flow = UiFlow::Column;
 		content.Gap = document.GetTheme()->Metrics.Spacing;
@@ -617,11 +663,13 @@ namespace Swim::UI
 		{
 			desc.ItemHeight = document.GetTheme()->Metrics.ControlHeight;
 		}
+
 		if (!std::isfinite(desc.ItemHeight) || desc.ItemHeight <= 0.0f ||
 			double(desc.ItemCount) * double(desc.ItemHeight) > double(1000000.0f) || desc.Overscan > 1024)
 		{
 			throw std::invalid_argument("A virtual list needs a positive item height, at most 1,000,000 units long in total");
 		}
+
 		list = CreateListView(document, parent, desc.Style);
 		UiStyle contentStyle;
 		contentStyle.AlignSelf = UiAlign::Stretch;
@@ -640,6 +688,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("A virtual list is at most 1,000,000 units long");
 		}
+
 		desc.ItemCount = count;
 		auto contentStyle = document.GetStyle(content);
 		contentStyle.Height = UiLength::Pixels(float(count) * desc.ItemHeight);
@@ -665,6 +714,7 @@ namespace Swim::UI
 		{
 			viewport = document.GetBounds(list.Viewport).Height;
 		}
+
 		const float extent = desc.ItemHeight;
 		const float total = float(desc.ItemCount) * extent;
 		const float scroll = std::clamp(document.GetScroll(list.Viewport).Y, 0.0f, std::max(0.0f, total - viewport));
@@ -674,9 +724,11 @@ namespace Swim::UI
 		bool changed = false;
 		std::vector<std::size_t> free;
 		std::vector<bool> shown(std::size_t(std::max<std::int64_t>(0, last - first)), false);
+
 		for (std::size_t i = 0; i < rows.size(); ++i)
 		{
 			const auto index = rows[i].Index;
+
 			if (index >= first && index < last && !shown[std::size_t(index - first)])
 			{
 				shown[std::size_t(index - first)] = true;
@@ -686,13 +738,16 @@ namespace Swim::UI
 				free.push_back(i);
 			}
 		}
+
 		for (auto index = first; index < last; ++index)
 		{
 			if (shown[std::size_t(index - first)])
 			{
 				continue;
 			}
+
 			std::size_t slot = 0;
+
 			if (!free.empty())
 			{
 				slot = free.back();
@@ -710,6 +765,7 @@ namespace Swim::UI
 				document.SetThemeClass(rows.back().Node, UiThemeClass::MenuItem, UiThemeApply::Paint | UiThemeApply::Text);
 				slot = rows.size() - 1;
 			}
+
 			auto& row = rows[slot];
 			auto style = document.GetStyle(row.Node);
 			style.Visible = true;
@@ -718,16 +774,20 @@ namespace Swim::UI
 			document.SetStyle(row.Node, style);
 			document.SetPartRole(row.Node, list.Root, UiPartRole::Option, float(index));
 			row.Index = index;
+
 			if (desc.Bind)
 			{
 				desc.Bind(document, row.Node, std::uint32_t(index));
 			}
+
 			++binds;
 			changed = true;
 		}
+
 		for (const auto slot : free)
 		{
 			auto& row = rows[slot];
+
 			if (document.GetStyle(row.Node).Visible || row.Index >= 0)
 			{
 				auto style = document.GetStyle(row.Node);
@@ -738,6 +798,7 @@ namespace Swim::UI
 				changed = true;
 			}
 		}
+
 		return changed;
 	}
 
@@ -759,6 +820,8 @@ namespace Swim::UI
 				return row.Node;
 			}
 		}
+
 		return {};
 	}
+
 } // namespace Swim::UI

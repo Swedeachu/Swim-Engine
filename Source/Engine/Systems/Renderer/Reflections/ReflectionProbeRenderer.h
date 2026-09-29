@@ -10,6 +10,7 @@
 
 namespace Swim::Render
 {
+
 	// ReflectionProbeResolve.slang.
 	struct ReflectionProbeResolveBindings
 	{
@@ -49,7 +50,9 @@ namespace Swim::Render
 	// definition of the math.
 	class ReflectionProbeRenderer
 	{
+
 	  public:
+
 		ReflectionProbeRenderer(Rhi::Device& device, ReflectionProbeRendererDesc desc);
 
 		// (Re)creates the atlases when the size or slot count changes; true when recreated
@@ -73,6 +76,7 @@ namespace Swim::Render
 		// Resolution^2) into cube `slot`, face `face`, mip 0 of the source atlas.
 		GraphPass RecordResolve(RenderGraph& graph, const Atlases& atlases, std::uint32_t slot, std::uint32_t face, GraphTexture color,
 			GraphTexture depth, float nearPlane, const CaptureSky& sky = {}) const;
+
 		// Rebuilds the source mips of cube `slot` and its prefiltered cube.
 		void RecordFilter(RenderGraph& graph, const Atlases& atlases, std::uint32_t slot, std::uint32_t sampleCount) const;
 
@@ -85,6 +89,7 @@ namespace Swim::Render
 		static Rhi::TextureDesc AtlasDesc(std::uint32_t resolution, std::uint32_t maxProbes);
 
 	  private:
+
 		Rhi::Device& device;
 		ReflectionProbeRendererDesc desc;
 		std::unique_ptr<Rhi::Texture> source;
@@ -93,5 +98,7 @@ namespace Swim::Render
 		std::uint32_t maxProbes = 0;
 		std::uint32_t mipCount = 0;
 		bool initialized = false;
+
 	};
+
 } // namespace Swim::Render

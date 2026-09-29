@@ -15,6 +15,7 @@
 
 namespace Engine
 {
+
 	// A reflected descriptor of a runtime program, by its Slang parameter name.
 	struct RuntimeBinding
 	{
@@ -52,7 +53,9 @@ namespace Engine
 	// computeMain. Failures throw std::runtime_error naming the program and file.
 	class ShaderLibrary
 	{
+
 	  public:
+
 		ShaderLibrary(Swim::Rhi::Device& device, std::filesystem::path root);
 
 		const std::filesystem::path& GetRoot() const { return root; }
@@ -60,6 +63,7 @@ namespace Engine
 		bool Contains(std::string_view name) const;
 
 		RuntimeComputeProgram LoadCompute(std::string_view name) const;
+
 		// explicitSpaces replaces reflected spaces (the shared bindless space).
 		RuntimeGraphicsProgram LoadGraphics(
 			std::string_view name, std::span<const Swim::Rhi::DescriptorSchemaDesc> explicitSpaces = {}) const;
@@ -74,10 +78,13 @@ namespace Engine
 		static std::span<const std::string_view> RequiredPrograms();
 
 	  private:
+
 		struct Loaded;
 		Loaded Load(std::string_view name) const;
 
 		Swim::Rhi::Device& device;
 		std::filesystem::path root;
+
 	};
+
 } // namespace Engine

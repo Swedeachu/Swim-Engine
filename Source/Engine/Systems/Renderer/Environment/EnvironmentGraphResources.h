@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// Output of EnvironmentBuilder::RecordFromSource. Shaders read the prefiltered
 	// cube (TextureCube, all mips) and the irradiance buffer (9 float4) as ShaderRead;
 	// the BRDF LUT is recorded separately (EnvironmentBuilder::RecordBrdfLut).
@@ -20,4 +21,5 @@ namespace Swim::Render
 		std::uint32_t PrefilteredMipCount = 0;
 		std::vector<GraphPass> Passes; // Sky and mip passes (when recorded), prefilter mips, irradiance.
 	};
+
 } // namespace Swim::Render

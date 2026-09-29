@@ -12,6 +12,7 @@
 
 namespace Swim::Render
 {
+
 	// SwimUiQuad built by UiRenderer::PipelineDesc for the target's format; its layout's
 	// space 1 is the shared bindless space. DepthPipeline (PipelineDesc with D32Float) is
 	// needed only by frames with Depth.
@@ -69,7 +70,9 @@ namespace Swim::Render
 	// CPU definition of every rule.
 	class UiRenderer
 	{
+
 	  public:
+
 		// Premultiplied One / OneMinusSourceAlpha on color and alpha, no culling. With a depth
 		// format (D32Float): the canonical reverse-Z test (GreaterEqual), no depth writes.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout,
@@ -94,9 +97,12 @@ namespace Swim::Render
 		const UiRenderStats& GetStats() const { return stats; }
 
 	  private:
+
 		UiRendererDesc desc;
 		std::vector<GpuUiQuad> lastQuads;
 		GpuUiDrawConstants lastConstants;
 		UiRenderStats stats;
+
 	};
+
 } // namespace Swim::Render

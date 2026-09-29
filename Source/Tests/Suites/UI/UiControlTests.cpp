@@ -9,6 +9,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::shared_ptr<UiTheme> FontTheme()
 	{
 		auto theme = std::make_shared<UiTheme>();
@@ -48,6 +49,7 @@ namespace
 				return quad.Node == node;
 			});
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Controls", "CheckboxesToggleByPointerKeysAndActivationAndShowTheirState")
@@ -377,6 +379,7 @@ SWIM_TEST("UI.Navigation", "TabIndexOrdersFocusAndNegativeIndicesAreSkipped")
 {
 	UiDocument ui;
 	std::vector<UiNodeId> nodes;
+
 	for (const int index : { 0, 2, -1, 1, 0 })
 	{
 		auto style = Box(20, 20);
@@ -386,13 +389,16 @@ SWIM_TEST("UI.Navigation", "TabIndexOrdersFocusAndNegativeIndicesAreSkipped")
 		nodes.push_back(ui.Create(ui.GetRoot()));
 		ui.SetStyle(nodes.back(), style);
 	}
+
 	ui.Layout({ 100, 200 });
 	const std::vector<UiNodeId> expected{ nodes[3], nodes[1], nodes[0], nodes[4] };
+
 	for (const auto node : expected)
 	{
 		ui.FocusNext();
 		SWIM_CHECK(ui.GetFocus() == node);
 	}
+
 	ui.FocusNext();
 	SWIM_CHECK(ui.GetFocus() == nodes[3]); // Wraps.
 	ui.FocusNext(true);
@@ -413,15 +419,18 @@ SWIM_TEST("UI.Navigation", "DirectionsMoveFocusSpatiallyAndControlsKeepTheirAxis
 	row.Flow = UiFlow::Row;
 	row.Gap = 10;
 	std::vector<std::vector<UiNodeId>> cells(2);
+
 	for (auto& line : cells)
 	{
 		const auto container = ui.Create(ui.GetRoot());
 		ui.SetStyle(container, row);
+
 		for (int i = 0; i < 3; ++i)
 		{
 			line.push_back(CreateButton(ui, container, "Cell"));
 		}
 	}
+
 	const auto field = CreateTextField(ui, ui.GetRoot());
 	ui.Layout({ 600, 400 });
 	SWIM_CHECK(ui.Navigate(UiNavDirection::Down)); // No focus: the first in tab order.
@@ -471,6 +480,7 @@ SWIM_TEST("UI.Controls", "SliderValueLabelsTickMarksAndScrollBarStepButtonsThatR
 	const float travel = theme->Metrics.SliderLength - thumb;
 	std::vector<float> ticks;
 	UiState tickState = UiState::None;
+
 	for (auto node = UiNodeId{ slider.Value + 1 }; ui.Contains(node) && ticks.size() < 8; node = UiNodeId{ node.Value + 1 })
 	{
 		if (ui.GetThemeClass(node) == UiThemeClass::SliderTick)
@@ -480,11 +490,14 @@ SWIM_TEST("UI.Controls", "SliderValueLabelsTickMarksAndScrollBarStepButtonsThatR
 			tickState = ui.GetState(node);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(ticks.size(), std::size_t(3));
+
 	for (std::size_t i = 0; i < ticks.size(); ++i)
 	{
 		SWIM_CHECK_NEAR(ticks[i], thumb * 0.5f + travel * 0.5f * float(i), 1e-4f);
 	}
+
 	SWIM_CHECK(!HasState(tickState, UiState::Hovered));
 	// Input and code both update the label.
 	ui.Focus(slider);

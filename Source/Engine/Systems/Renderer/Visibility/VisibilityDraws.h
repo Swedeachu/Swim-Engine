@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// How a view issues GpuVisibility's indirect commands.
 	enum class VisibilityDrawPath : std::uint8_t
 	{
@@ -33,4 +34,5 @@ namespace Swim::Render
 	// the phase's VisibilityGraphResources buffers declared as IndirectArgument reads.
 	void DrawVisibilityBin(Rhi::CommandList& list, Rhi::Buffer& commands, Rhi::Buffer& counts, const VisibilityBinLayout& bins,
 		std::uint32_t bin, VisibilityDrawPath path);
+
 } // namespace Swim::Render

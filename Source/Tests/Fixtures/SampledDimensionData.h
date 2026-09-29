@@ -53,6 +53,7 @@ namespace Swim::Testing
 		std::array<std::uint32_t, 256> pixels{};
 		const auto data = MakeSampledDimensionData(image);
 		std::size_t offset = 0;
+
 		for (std::uint32_t layer = 0; layer < data.View.ArrayLayerCount; ++layer)
 		{
 			for (std::uint32_t z = 0; z < data.CopyExtent.Depth; ++z)
@@ -67,6 +68,7 @@ namespace Swim::Testing
 				}
 			}
 		}
+
 		return pixels;
 	}
 

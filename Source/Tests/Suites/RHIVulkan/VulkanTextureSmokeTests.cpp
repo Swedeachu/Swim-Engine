@@ -38,6 +38,7 @@ namespace
 					return binding.Binding;
 				}
 			}
+
 			throw std::runtime_error("Texture smoke reflection is missing a required resource");
 		};
 		const auto textureBinding = findBinding(Rhi::DescriptorType::SampledTexture);
@@ -89,11 +90,13 @@ namespace
 		auto upload = device->CreateBuffer({ 32, Rhi::BufferUsage::TransferSource, Rhi::MemoryPreference::CpuToGpu, {} });
 		SWIM_REQUIRE(upload);
 		std::array<std::uint8_t, 32> patterns{};
+
 		for (std::size_t index = 0; index < 16; ++index)
 		{
 			patterns[index] = texels[index];
 			patterns[index + 16] = texels[(index + 8) % 16];
 		}
+
 		upload->Write(0, std::as_bytes(std::span(patterns)));
 		std::array<std::unique_ptr<Rhi::Texture>, 2> textures;
 		std::array<std::unique_ptr<Rhi::TextureView>, 2> views;
@@ -102,6 +105,7 @@ namespace
 		textureDesc.PixelFormat = format;
 		textureDesc.Extent = { 2, 2, 1 };
 		textureDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+
 		for (std::size_t index = 0; index < textures.size(); ++index)
 		{
 			textures[index] = device->CreateTexture(textureDesc);
@@ -116,6 +120,7 @@ namespace
 			writes[1].SamplerResource = sampler.get();
 			tables[index]->Write(writes);
 		}
+
 		Rhi::TextureDesc targetDesc{};
 		targetDesc.PixelFormat = format;
 		targetDesc.Extent = { 16, 16, 1 };
@@ -128,16 +133,19 @@ namespace
 		// Drain before any referenced tables, views, textures or sampler unwind.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Graphics, 2 });
 		SWIM_REQUIRE(frames);
+
 		for (std::uint32_t pass = 0; pass < 2; ++pass)
 		{
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
 			commands.BeginDebugLabel("RunTextureSmoke: commands", { 0.2f, 0.6f, 0.9f, 1.0f });
+
 			if (pass == 0)
 			{
 				commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
+
 			commands.Transition(*textures[pass], Rhi::ResourceState::Undefined, Rhi::ResourceState::CopyDestination);
 			Rhi::BufferTextureCopyRegion copy{};
 			copy.BufferOffset = pass * 16;
@@ -167,12 +175,14 @@ namespace
 			frames->Drain();
 			std::array<std::byte, 16 * 16 * 4> pixels{};
 			readback->Read(0, pixels);
+
 			for (std::size_t y = 0; y < 16; ++y)
 			{
 				for (std::size_t x = 0; x < 16; ++x)
 				{
 					const auto source = pass * 16 + ((y / 8) * 2 + x / 8) * 4;
 					const auto destination = (y * 16 + x) * 4;
+
 					for (std::size_t channel = 0; channel < 4; ++channel)
 					{
 						SWIM_CHECK(pixels[destination + channel] == static_cast<std::byte>(patterns[source + channel]));
@@ -180,16 +190,19 @@ namespace
 				}
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ReflectedTexturesAndTableReplacement", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunTextureSmoke); } });
 		}
+
 		return true;
 	}();
 

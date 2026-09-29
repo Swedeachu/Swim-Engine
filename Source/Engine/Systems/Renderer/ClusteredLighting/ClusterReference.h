@@ -10,6 +10,7 @@
 
 namespace Swim::Render::Clustering
 {
+
 	// The CPU definition of clustered light assignment (items 64-65, 68). The
 	// Shaders/Slang/ClusteredLighting programs mirror every function; the native
 	// clustered smoke compares them cluster by cluster.
@@ -73,19 +74,24 @@ namespace Swim::Render::Clustering
 		std::uint32_t cluster, Visit&& visit)
 	{
 		const auto& record = records[cluster];
+
 		if (record.Count == 0)
 		{
 			return;
 		}
+
 		const std::uint32_t occupancyWords = ClusterOccupancyWords(grid);
+
 		for (std::uint32_t o = 0; o < occupancyWords; ++o)
 		{
 			std::uint32_t occupancy = words[record.Offset + o];
+
 			while (occupancy != 0)
 			{
 				const std::uint32_t w = o * 32u + static_cast<std::uint32_t>(std::countr_zero(occupancy));
 				occupancy &= occupancy - 1u;
 				std::uint32_t mask = words[record.Offset + occupancyWords + w];
+
 				while (mask != 0)
 				{
 					visit(w * 32u + static_cast<std::uint32_t>(std::countr_zero(mask)));
@@ -112,4 +118,5 @@ namespace Swim::Render::Clustering
 	// The heatmap of one depth-buffer pixel: its cluster's color, transparent past Far.
 	std::array<float, 4> HeatmapPixel(
 		const ClusterGridRecord& grid, std::span<const ClusterRecord> records, float pixelX, float pixelY, float ndcDepth);
+
 } // namespace Swim::Render::Clustering

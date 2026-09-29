@@ -6,22 +6,27 @@
 
 namespace Swim::Render
 {
+
 	void ValidateUiCompositionSettings(const UiCompositionSettings& settings)
 	{
 		const bool valid = static_cast<std::uint32_t>(settings.Encoding) <= static_cast<std::uint32_t>(UiOutputEncoding::ScRgb) &&
 			std::isfinite(settings.PaperWhiteNits) && settings.PaperWhiteNits > 0.0f && settings.PaperWhiteNits <= 10000.0f &&
 			std::isfinite(settings.LinearScale) && settings.LinearScale >= 0.0f && settings.LinearScale <= 65504.0f;
+
 		if (!valid)
 		{
 			throw std::invalid_argument("Invalid UI composition settings");
 		}
 	}
+
 } // namespace Swim::Render
 
 namespace Swim::Render::Ui
 {
+
 	namespace
 	{
+
 		float Saturate(float value)
 		{
 			return std::clamp(value, 0.0f, 1.0f);
@@ -31,6 +36,7 @@ namespace Swim::Render::Ui
 		{
 			return { color[0] * factor, color[1] * factor, color[2] * factor, color[3] * factor };
 		}
+
 	} // namespace
 
 	std::vector<GpuUiQuad> BuildQuads(std::span<const UI::UiPaintQuad> paint, const QuadBuildDesc& desc, QuadBuildStats* stats)
@@ -39,10 +45,12 @@ namespace Swim::Render::Ui
 		{
 			throw std::invalid_argument("UI quad build needs a positive DPI scale and a finite offset");
 		}
+
 		QuadBuildStats local;
 		std::vector<GpuUiQuad> quads;
 		quads.reserve(paint.size());
 		const float s = desc.DpiScale;
+
 		for (const auto& source : paint)
 		{
 			GpuUiQuad quad;
@@ -58,11 +66,13 @@ namespace Swim::Render::Ui
 			quad.Clip[3] = (c.Y + c.Height) * s + desc.OffsetY;
 			const bool empty = std::max(quad.Rect[0], quad.Clip[0]) >= std::min(quad.Rect[2], quad.Clip[2]) ||
 				std::max(quad.Rect[1], quad.Clip[1]) >= std::min(quad.Rect[3], quad.Clip[3]);
+
 			if (empty)
 			{
 				++local.Culled;
 				continue;
 			}
+
 			quad.Uv[0] = source.Uv.X;
 			quad.Uv[1] = source.Uv.Y;
 			quad.Uv[2] = source.Uv.X + source.Uv.Width;
@@ -71,6 +81,7 @@ namespace Swim::Render::Ui
 			quad.Color[1] = source.Color.G;
 			quad.Color[2] = source.Color.B;
 			quad.Color[3] = source.Color.A;
+
 			switch (source.Kind)
 			{
 			case UI::UiPaintKind::Glyph:
@@ -80,6 +91,7 @@ namespace Swim::Render::Ui
 					++local.Culled;
 					continue;
 				}
+
 				quad.Kind = UiQuadGlyph;
 				quad.Texture = desc.AtlasTextures[source.AtlasPage];
 				quad.Sampler = desc.AtlasSampler;
@@ -106,12 +118,15 @@ namespace Swim::Render::Ui
 				++local.Solids;
 				break;
 			}
+
 			quads.push_back(quad);
 		}
+
 		if (stats)
 		{
 			*stats = local;
 		}
+
 		return quads;
 	}
 
@@ -130,6 +145,7 @@ namespace Swim::Render::Ui
 		const std::array<float, 16>& clipFromCanvas, float opacity)
 	{
 		ValidateUiCompositionSettings(settings);
+
 		if (!std::isfinite(opacity) || opacity < 0.0f || opacity > 1.0f ||
 			!std::all_of(clipFromCanvas.begin(), clipFromCanvas.end(),
 				[](float v)
@@ -139,6 +155,7 @@ namespace Swim::Render::Ui
 		{
 			throw std::invalid_argument("UI draw constants need a finite canvas matrix and an opacity in [0, 1]");
 		}
+
 		GpuUiDrawConstants constants;
 		std::copy(clipFromCanvas.begin(), clipFromCanvas.end(), constants.ClipFromCanvas);
 		constants.Flags = UiDrawWorld;
@@ -146,6 +163,7 @@ namespace Swim::Render::Ui
 		constants.TargetSize[0] = float(width);
 		constants.TargetSize[1] = float(height);
 		constants.Encoding = static_cast<std::uint32_t>(settings.Encoding);
+
 		switch (settings.Encoding)
 		{
 		case UiOutputEncoding::Linear:
@@ -161,6 +179,7 @@ namespace Swim::Render::Ui
 			constants.WhiteScale = 1.0f;
 			break;
 		}
+
 		return constants;
 	}
 
@@ -202,15 +221,18 @@ namespace Swim::Render::Ui
 		const float y0 = std::max(q.Rect[1], q.Clip[1]);
 		const float x1 = std::min(q.Rect[2], q.Clip[2]);
 		const float y1 = std::min(q.Rect[3], q.Clip[3]);
+
 		if (!(px >= x0 && px < x1 && py >= y0 && py < y1))
 		{
 			return {};
 		}
+
 		const Float4 color{ q.Color[0], q.Color[1], q.Color[2], q.Color[3] };
 		const float width = std::max(q.Rect[2] - q.Rect[0], 1e-6f);
 		const float height = std::max(q.Rect[3] - q.Rect[1], 1e-6f);
 		const float u = q.Uv[0] + (px - q.Rect[0]) / width * (q.Uv[2] - q.Uv[0]);
 		const float v = q.Uv[1] + (py - q.Rect[1]) / height * (q.Uv[3] - q.Uv[1]);
+
 		if (q.Kind == UiQuadGlyph)
 		{
 			const auto msd = sample(q.Texture, q.Sampler, u, v);
@@ -220,15 +242,18 @@ namespace Swim::Render::Ui
 			const float coverage = Saturate(range * (Median(msd[0], msd[1], msd[2]) - 0.5f) + 0.5f);
 			return Scale(color, coverage);
 		}
+
 		if (q.Kind == UiQuadImage)
 		{
 			const auto texel = sample(q.Texture, q.Sampler, u, v);
 			return { texel[0] * color[0], texel[1] * color[1], texel[2] * color[2], texel[3] * color[3] };
 		}
+
 		if (q.Radius <= 0.0f && q.Border <= 0.0f)
 		{
 			return color;
 		}
+
 		const float cx = (q.Rect[0] + q.Rect[2]) * 0.5f;
 		const float cy = (q.Rect[1] + q.Rect[3]) * 0.5f;
 		const float hx = width * 0.5f;
@@ -236,10 +261,12 @@ namespace Swim::Render::Ui
 		const float radius = std::min(q.Radius, std::min(hx, hy));
 		const float ramp = footprint ? std::max(0.5f * (footprint->CanvasX + footprint->CanvasY), 1e-6f) : 1.0f;
 		const float outer = Saturate(0.5f - RoundedBoxDistance(px, py, cx, cy, hx, hy, radius) / ramp);
+
 		if (q.Border <= 0.0f)
 		{
 			return Scale(color, outer);
 		}
+
 		const float ix = std::max(hx - q.Border, 0.0f);
 		const float iy = std::max(hy - q.Border, 0.0f);
 		const float fill = ix > 0.0f && iy > 0.0f
@@ -247,10 +274,12 @@ namespace Swim::Render::Ui
 			: 0.0f;
 		const Float4 border{ q.BorderColor[0], q.BorderColor[1], q.BorderColor[2], q.BorderColor[3] };
 		Float4 result{};
+
 		for (int c = 0; c < 4; ++c)
 		{
 			result[c] = border[c] * (outer - fill) + color[c] * fill;
 		}
+
 		return result;
 	}
 
@@ -258,16 +287,20 @@ namespace Swim::Render::Ui
 	{
 		const Float4 p = Scale(color, constants.Opacity);
 		const auto encoding = static_cast<UiOutputEncoding>(constants.Encoding);
+
 		if (encoding == UiOutputEncoding::Linear || encoding == UiOutputEncoding::ScRgb)
 		{
 			return { p[0] * constants.WhiteScale, p[1] * constants.WhiteScale, p[2] * constants.WhiteScale, p[3] };
 		}
+
 		if (p[3] <= 0.0f)
 		{
 			return {};
 		}
+
 		const std::array<float, 3> straight{ p[0] / p[3], p[1] / p[3], p[2] / p[3] };
 		std::array<float, 3> encoded{};
+
 		if (encoding == UiOutputEncoding::Srgb)
 		{
 			for (int c = 0; c < 3; ++c)
@@ -278,11 +311,13 @@ namespace Swim::Render::Ui
 		else
 		{
 			const auto wide = Rec709ToRec2020({ std::max(straight[0], 0.0f), std::max(straight[1], 0.0f), std::max(straight[2], 0.0f) });
+
 			for (int c = 0; c < 3; ++c)
 			{
 				encoded[c] = PqOetf(wide[c] * constants.WhiteScale);
 			}
 		}
+
 		return { encoded[0] * p[3], encoded[1] * p[3], encoded[2] * p[3], p[3] };
 	}
 
@@ -301,15 +336,18 @@ namespace Swim::Render::Ui
 			const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
 			const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
 			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+
 			if (x0 >= x1 || y0 >= y1)
 			{
 				continue;
 			}
+
 			// Pixel centres x + 0.5 in [x0, x1).
 			const int first = std::max(0, int(std::ceil(x0 - 0.5f)));
 			const int last = std::min(int(canvas.Width), int(std::ceil(x1 - 0.5f)));
 			const int top = std::max(0, int(std::ceil(y0 - 0.5f)));
 			const int bottom = std::min(int(canvas.Height), int(std::ceil(y1 - 0.5f)));
+
 			for (int y = top; y < bottom; ++y)
 			{
 				for (int x = first; x < last; ++x)
@@ -335,17 +373,21 @@ namespace Swim::Render::Ui
 			const float a0 = m[0] - nx * m[12], b0 = m[1] - nx * m[13], c0 = m[3] - nx * m[15];
 			const float a1 = m[4] - ny * m[12], b1 = m[5] - ny * m[13], c1 = m[7] - ny * m[15];
 			const float det = a0 * b1 - a1 * b0;
+
 			if (!(std::abs(det) > 1e-20f))
 			{
 				return std::nullopt;
 			}
+
 			const float cx = (-c0 * b1 + c1 * b0) / det;
 			const float cy = (-a0 * c1 + a1 * c0) / det;
 			const float w = m[12] * cx + m[13] * cy + m[15];
+
 			if (!(w > 0.0f) || !std::isfinite(cx) || !std::isfinite(cy))
 			{
 				return std::nullopt;
 			}
+
 			return std::array<float, 2>{ cx, cy };
 		};
 		const auto centre = point(px, py);
@@ -353,10 +395,12 @@ namespace Swim::Render::Ui
 		const auto right = point(px + 0.5f, py);
 		const auto up = point(px, py - 0.5f);
 		const auto down = point(px, py + 0.5f);
+
 		if (!centre || !left || !right || !up || !down)
 		{
 			return std::nullopt;
 		}
+
 		CanvasSample sample;
 		sample.X = (*centre)[0];
 		sample.Y = (*centre)[1];
@@ -370,6 +414,7 @@ namespace Swim::Render::Ui
 	{
 		// Canvas point and footprint per target pixel, shared by every quad.
 		std::vector<std::optional<CanvasSample>> samples(std::size_t(canvas.Width) * canvas.Height);
+
 		for (std::uint32_t y = 0; y < canvas.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < canvas.Width; ++x)
@@ -377,25 +422,31 @@ namespace Swim::Render::Ui
 				samples[std::size_t(y) * canvas.Width + x] = CanvasAt(constants, float(x) + 0.5f, float(y) + 0.5f);
 			}
 		}
+
 		for (const auto& quad : quads)
 		{
 			const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
 			const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
 			const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
 			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+
 			if (x0 >= x1 || y0 >= y1)
 			{
 				continue;
 			}
+
 			const float du = (quad.Uv[2] - quad.Uv[0]) / std::max(quad.Rect[2] - quad.Rect[0], 1e-6f);
 			const float dv = (quad.Uv[3] - quad.Uv[1]) / std::max(quad.Rect[3] - quad.Rect[1], 1e-6f);
+
 			for (std::size_t i = 0; i < samples.size(); ++i)
 			{
 				const auto& s = samples[i];
+
 				if (!s || !(s->X >= x0 && s->X < x1 && s->Y >= y0 && s->Y < y1))
 				{
 					continue;
 				}
+
 				Footprint footprint;
 				footprint.CanvasX = s->FootprintX;
 				footprint.CanvasY = s->FootprintY;
@@ -427,10 +478,13 @@ namespace Swim::Render::Ui
 		const auto c = texel(x0, y0 + 1);
 		const auto d = texel(x0 + 1, y0 + 1);
 		Float4 result{};
+
 		for (int k = 0; k < 4; ++k)
 		{
 			result[k] = (a[k] * (1.0f - tx) + b[k] * tx) * (1.0f - ty) + (c[k] * (1.0f - tx) + d[k] * tx) * ty;
 		}
+
 		return result;
 	}
+
 } // namespace Swim::Render::Ui

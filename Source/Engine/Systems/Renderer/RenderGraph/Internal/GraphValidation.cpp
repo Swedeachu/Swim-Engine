@@ -2,6 +2,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	void ValidateName(std::string_view name)
 	{
 		if (name.empty() || name.find('\0') != std::string_view::npos)
@@ -16,18 +17,21 @@ namespace Swim::Render::Internal
 		{
 			throw std::invalid_argument("Invalid or foreign RenderGraph resource handle");
 		}
+
 		return graph.Resources[index];
 	}
 
 	void ValidateState(const GraphResource& r, Rhi::ResourceState state, bool allowUndefined)
 	{
 		using S = Rhi::ResourceState;
+
 		if (state == S::Undefined)
 		{
 			if (allowUndefined)
 			{
 				return;
 			}
+
 			throw std::invalid_argument("RenderGraph Undefined is only an initial state");
 		}
 
@@ -41,10 +45,12 @@ namespace Swim::Render::Internal
 				{
 					return;
 				}
+
 				if (Rhi::EnumAnd(r.Buffer.Usage, usage) != usage)
 				{
 					throw std::invalid_argument("RenderGraph buffer state requires matching usage: " + r.Name);
 				}
+
 				remaining &= ~static_cast<std::uint32_t>(flag);
 			};
 
@@ -65,11 +71,13 @@ namespace Swim::Render::Internal
 			{
 				throw std::invalid_argument("RenderGraph unsupported buffer state or host access: " + r.Name);
 			}
+
 			return;
 		}
 
 		using U = Rhi::TextureUsage;
 		U usage = U::None;
+
 		if (state == S::Common)
 		{
 		}
@@ -105,6 +113,7 @@ namespace Swim::Render::Internal
 		{
 			throw std::invalid_argument("RenderGraph unsupported texture state: " + r.Name);
 		}
+
 		if (Rhi::EnumAnd(r.Texture.Usage, usage) != usage ||
 			(Rhi::HasAny(state, S::ColorAttachment) && Rhi::IsDepthFormat(r.Texture.PixelFormat)) ||
 			(Rhi::HasAny(state, S::DepthStencilRead | S::DepthStencilWrite) && !Rhi::IsDepthFormat(r.Texture.PixelFormat)))
@@ -121,11 +130,13 @@ namespace Swim::Render::Internal
 		// ShaderRead|ShaderWrite is also the RHI's read-only storage-image layout.
 		const bool storageRead = r.Kind == GraphKind::Texture && state == (S::ShaderRead | S::ShaderWrite);
 		const bool writes = Rhi::HasAny(state, S::CopyDestination | S::ShaderWrite | S::ColorAttachment | S::DepthStencilWrite | S::Common);
+
 		if ((access == GraphAccess::Read && writes && !storageRead) || (access != GraphAccess::Read && !writes) || state == S::Present ||
 			Rhi::HasAny(state, S::HostRead | S::HostWrite))
 		{
 			throw std::invalid_argument("RenderGraph access/state mismatch: " + r.Name);
 		}
+
 		// ReadWrite + CopyDestination is a partial copy that preserves the bytes or
 		// texels it does not overwrite; it therefore requires initialized contents.
 		if (access == GraphAccess::ReadWrite && r.Kind == GraphKind::Buffer && state != S::CopyDestination &&
@@ -133,10 +144,12 @@ namespace Swim::Render::Internal
 		{
 			throw std::invalid_argument("RenderGraph read/write buffers need a state with shader read access");
 		}
+
 		if (type == Rhi::QueueType::Transfer && state != S::CopySource && state != S::CopyDestination)
 		{
 			throw std::invalid_argument("RenderGraph transfer passes require copy states");
 		}
+
 		if (type == Rhi::QueueType::Compute &&
 			Rhi::HasAny(state, S::ColorAttachment | S::DepthStencilRead | S::DepthStencilWrite | S::VertexBuffer | S::IndexBuffer))
 		{
@@ -150,24 +163,30 @@ namespace Swim::Render::Internal
 		{
 			return { 0, 1, 0, 1 };
 		}
+
 		const auto& d = r.Texture;
+
 		if (range.BaseMipLevel >= d.MipLevels || range.BaseArrayLayer >= d.ArrayLayers)
 		{
 			throw std::invalid_argument("RenderGraph subresource base is out of range");
 		}
+
 		if (range.MipLevelCount == UINT32_MAX)
 		{
 			range.MipLevelCount = d.MipLevels - range.BaseMipLevel;
 		}
+
 		if (range.ArrayLayerCount == UINT32_MAX)
 		{
 			range.ArrayLayerCount = d.ArrayLayers - range.BaseArrayLayer;
 		}
+
 		if (!range.MipLevelCount || !range.ArrayLayerCount || range.MipLevelCount > d.MipLevels - range.BaseMipLevel ||
 			range.ArrayLayerCount > d.ArrayLayers - range.BaseArrayLayer)
 		{
 			throw std::invalid_argument("RenderGraph subresource count is out of range");
 		}
+
 		return range;
 	}
 
@@ -177,11 +196,14 @@ namespace Swim::Render::Internal
 		{
 			return 1;
 		}
+
 		const auto count = std::uint64_t(r.Texture.MipLevels) * r.Texture.ArrayLayers;
+
 		if (!count || count > UINT32_MAX)
 		{
 			throw std::invalid_argument("RenderGraph invalid subresource count");
 		}
+
 		return static_cast<std::uint32_t>(count);
 	}
 
@@ -191,7 +213,9 @@ namespace Swim::Render::Internal
 		{
 			return { 0 };
 		}
+
 		std::vector<std::uint32_t> result;
+
 		for (std::uint32_t layer = range.BaseArrayLayer; layer < range.BaseArrayLayer + range.ArrayLayerCount; ++layer)
 		{
 			for (std::uint32_t mip = range.BaseMipLevel; mip < range.BaseMipLevel + range.MipLevelCount; ++mip)
@@ -199,6 +223,7 @@ namespace Swim::Render::Internal
 				result.push_back(layer * r.Texture.MipLevels + mip);
 			}
 		}
+
 		return result;
 	}
 
@@ -208,15 +233,18 @@ namespace Swim::Render::Internal
 		{
 			return false;
 		}
+
 		if (a.Kind == GraphKind::Buffer)
 		{
 			return a.Buffer.Size == b.Buffer.Size && a.Buffer.Usage == b.Buffer.Usage && a.Buffer.Memory == b.Buffer.Memory &&
 				a.Buffer.PersistentMap == b.Buffer.PersistentMap;
 		}
+
 		const auto& x = a.Texture;
 		const auto& y = b.Texture;
 		return x.Dimension == y.Dimension && x.Extent.Width == y.Extent.Width && x.Extent.Height == y.Extent.Height &&
 			x.Extent.Depth == y.Extent.Depth && x.PixelFormat == y.PixelFormat && x.Usage == y.Usage && x.MipLevels == y.MipLevels &&
 			x.ArrayLayers == y.ArrayLayers && x.Samples == y.Samples;
 	}
+
 } // namespace Swim::Render::Internal

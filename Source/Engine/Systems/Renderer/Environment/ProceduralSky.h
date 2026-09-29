@@ -5,6 +5,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	// An analytic HDR sky (item 61's built-in environment source): a zenith-horizon
 	// gradient above the horizon, a horizon-ground gradient below it and a smooth
 	// sun lobe, SunColor * max(dot(d, sun), 0)^SunSharpness. Everything is linear
@@ -46,4 +47,5 @@ namespace Swim::Render::Environment
 	static_assert(sizeof(ProceduralSkyConstants) == 96);
 
 	ProceduralSkyConstants MakeProceduralSkyConstants(const ProceduralSky& sky, std::uint32_t face, std::uint32_t size);
+
 } // namespace Swim::Render::Environment

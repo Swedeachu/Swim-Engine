@@ -6,6 +6,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GpuSamplerRecord
 	{
 		std::unique_ptr<Rhi::Sampler> Sampler;
@@ -14,4 +15,5 @@ namespace Swim::Render::Internal
 		BindlessSamplerHandle Bindless;
 		Rhi::TimelinePoint LastUse; // Latest last use reported by any releasing holder.
 	};
+
 } // namespace Swim::Render::Internal

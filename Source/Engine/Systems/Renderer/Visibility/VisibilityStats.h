@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU visibility counters (one std430 array of 20 uint32). Read asynchronously
 	// through VisibilityGraphResources::StatsReadback; never needed for correctness.
 	// Every live row lands in exactly one bucket per phase:
@@ -28,4 +29,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(VisibilityStats) == 80);
+
 } // namespace Swim::Render

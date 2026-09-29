@@ -5,6 +5,7 @@
 
 namespace Game
 {
+
 	// What building the Phase 22/23 runtime found (fixed issues, workarounds and open
 	// limitations), shown in the sandbox's Findings tab and recorded in
 	// docs/EngineRuntime.md. Keep the two in sync.
@@ -16,4 +17,5 @@ namespace Game
 	};
 
 	std::span<const Finding> GetFindings();
+
 } // namespace Game

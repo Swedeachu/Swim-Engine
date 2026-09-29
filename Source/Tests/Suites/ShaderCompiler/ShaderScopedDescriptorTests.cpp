@@ -67,6 +67,7 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "EveryDuplicateSlotRejectsEvenAcro
 		auto reflection = Graphics();
 		auto binding = Descriptor(3, 1);
 		reflection.EntryPoints[0].Parameters.push_back(binding);
+
 		if (mode == 0)
 		{
 			reflection.GlobalParameters.push_back(binding);
@@ -75,8 +76,10 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "EveryDuplicateSlotRejectsEvenAcro
 		{
 			reflection.EntryPoints[mode - 1].Parameters.push_back(binding);
 		}
+
 		RequireFailure(reflection);
 	}
+
 	auto reflection = Graphics();
 	reflection.EntryPoints[0].Parameters.push_back(Descriptor(3, 1));
 	reflection.EntryPoints[1].Parameters.push_back(Descriptor(3, 2));
@@ -96,6 +99,7 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "NestedScopeContainersAndMalformed
 		SWIM_REQUIRE(parsed);
 		RequireFailure(parsed.Reflection);
 	}
+
 	for (const auto binding : { R"json({"binding":{"kind":"descriptorTableSlot","index":0,"count":"2"}})json",
 			 R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":-1}})json",
 			 R"json({"binding":{"kind":"descriptorTableSlot","index":0,"space":4294967296}})json",
@@ -124,6 +128,7 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "StageIoIsIgnoredButUniformAndUnkn
 	]}}]})json");
 	SWIM_REQUIRE(parsed);
 	SWIM_CHECK(ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection));
+
 	for (auto kind : { "uniform", "pushConstantBuffer", "unknown", "" })
 	{
 		auto reflection = parsed.Reflection;
@@ -168,12 +173,14 @@ SWIM_TEST("ShaderCompiler.ScopedDescriptors", "ComputeDescriptorsReuseAllSupport
 	SWIM_REQUIRE_EQUAL(result.Interface.DescriptorSchemas.size(), 1u);
 	const auto& bindings = result.Interface.DescriptorSchemas[0].Bindings;
 	SWIM_REQUIRE_EQUAL(bindings.size(), types.size());
+
 	for (std::size_t index = 0; index < types.size(); ++index)
 	{
 		SWIM_CHECK_EQUAL(bindings[index].Type, types[index]);
 		SWIM_CHECK_EQUAL(bindings[index].Binding, index);
 		SWIM_CHECK_EQUAL(bindings[index].Stages, Rhi::ShaderStageMask::Compute);
 	}
+
 	SWIM_CHECK_EQUAL(bindings.back().StorageTextureFormat, Rhi::Format::RGBA32Float);
 	reflection.EntryPoints[0].Stage = ShaderCompiler::ShaderStage::Fragment;
 	RequireFailure(reflection);

@@ -66,6 +66,7 @@ namespace
 		std::array<std::unique_ptr<Rhi::Texture>, 3> textures;
 		std::array<std::unique_ptr<Rhi::TextureView>, 3> views;
 		std::array<Rhi::DescriptorWrite, 3> writes{};
+
 		for (std::size_t index = 0; index < textures.size(); ++index)
 		{
 			Rhi::TextureDesc desc;
@@ -82,6 +83,7 @@ namespace
 				{ Rhi::TextureViewDimension::Texture2D, formats[index], 1, 1, 1, 1, "Storage smoke view" });
 			SWIM_REQUIRE(views[index]);
 			bool found = false;
+
 			for (const auto& binding : interface.DescriptorSchemas[0].Bindings)
 			{
 				if (binding.StorageTextureFormat == formats[index])
@@ -90,9 +92,11 @@ namespace
 					found = true;
 				}
 			}
+
 			SWIM_REQUIRE(found);
 			writes[index].TextureResource = views[index].get();
 		}
+
 		auto table = device->CreateDescriptorTable({ layout.get(), interface.DescriptorSchemas[0].Space });
 		SWIM_REQUIRE(table);
 		table->Write(writes);
@@ -104,18 +108,21 @@ namespace
 		const std::array<float, 4> guardFloat{ 31, 32, 33, 34 };
 		const std::uint32_t guardUint = 83;
 		const std::int32_t guardInt = -79;
+
 		for (std::size_t pixel = 0; pixel < pixels; ++pixel)
 		{
 			std::memcpy(initial.data() + offsets[0] + pixel * 16, guardFloat.data(), 16);
 			std::memcpy(initial.data() + offsets[1] + pixel * 4, &guardUint, 4);
 			std::memcpy(initial.data() + offsets[2] + pixel * 4, &guardInt, 4);
 		}
+
 		// All image work stays on this family. Last owner drains before resources
 		// are destroyed on failure; each frame drains before host upload reuse.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Compute, 2 });
 		SWIM_REQUIRE(frames);
 		const Rhi::TextureSubresourceRange range{ 1, 1, 1, 1 };
 		const auto rw = Rhi::ResourceState::ShaderRead | Rhi::ResourceState::ShaderWrite;
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			upload->Write(0, initial);
@@ -124,6 +131,7 @@ namespace
 			commands.Begin();
 			commands.BeginDebugLabel("Typed storage images: upload, dependent passes, readback");
 			commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
+
 			for (std::size_t index = 0; index < textures.size(); ++index)
 			{
 				commands.Transition(*textures[index], frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource,
@@ -131,30 +139,36 @@ namespace
 				commands.CopyBufferToTexture(*upload, *textures[index], { offsets[index], { 1, 1 }, {}, { width, height, 1 } });
 				commands.Transition(*textures[index], Rhi::ResourceState::CopyDestination, rw, range);
 			}
+
 			commands.BindComputePipeline(*pipeline);
 			commands.BindDescriptorTable(interface.DescriptorSchemas[0].Space, *table);
 			std::array<std::uint32_t, 6> constants{ width, height, width - 2, height - 2, frame * 23, 0 };
 			commands.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(constants)));
 			commands.Dispatch(2, 2, 1);
+
 			for (auto& texture : textures)
 			{
 				commands.Transition(*texture, rw, rw, range);
 			}
+
 			constants[5] = 1;
 			commands.PushConstants(Rhi::ShaderStageMask::Compute, 20, std::as_bytes(std::span(constants).subspan(5)));
 			commands.Dispatch(2, 2, 1);
 			commands.Transition(*readback, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::HostRead, Rhi::ResourceState::CopyDestination);
+
 			for (std::size_t index = 0; index < textures.size(); ++index)
 			{
 				commands.Transition(*textures[index], rw, Rhi::ResourceState::CopySource, range);
 				commands.CopyTextureToBuffer(*textures[index], *readback, { offsets[index], { 1, 1 }, {}, { width, height, 1 } });
 			}
+
 			commands.Transition(*readback, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::HostRead);
 			commands.EndDebugLabel();
 			commands.End();
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, actual);
+
 			for (std::uint32_t pixel = 0; pixel < pixels; ++pixel)
 			{
 				const auto x = pixel % width;
@@ -174,17 +188,20 @@ namespace
 				SWIM_CHECK_EQUAL(intValue, active ? -static_cast<std::int32_t>(value) - 7 : guardInt);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TypedStorageTexturesAndSubresourceReadback",
 				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunStorageTextureSmoke); } });
 		}
+
 		return true;
 	}();
 

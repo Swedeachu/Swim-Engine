@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU records of the particle system (Shaders/Slang/Particles/ParticleRecords.slang).
 
 	// One pool slot. Lifetime 0 marks a free slot.
@@ -96,4 +97,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuParticleFrame) == 128);
+
 } // namespace Swim::Render

@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	struct BindlessTableDesc
 	{
 		// Any pipeline layout that defines Space through PipelineLayoutDesc::DescriptorSpaces
@@ -23,4 +24,5 @@ namespace Swim::Render
 		Rhi::Sampler* FallbackSampler = nullptr;
 		std::string DebugName = "Bindless resources";
 	};
+
 } // namespace Swim::Render

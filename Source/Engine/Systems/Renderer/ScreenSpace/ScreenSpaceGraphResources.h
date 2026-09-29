@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// What one ScreenSpaceEffects::Record scheduled.
 	struct ScreenSpaceGraphResources
 	{
@@ -22,4 +23,5 @@ namespace Swim::Render
 		GpuScreenSpaceParams ParamsRecord;
 		bool Passthrough = false; // AO, reflections and fog all off: nothing was recorded.
 	};
+
 } // namespace Swim::Render

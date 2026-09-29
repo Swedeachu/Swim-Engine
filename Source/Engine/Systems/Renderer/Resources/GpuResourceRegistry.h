@@ -14,6 +14,7 @@
 
 namespace Swim::Render
 {
+
 	// Generational registry for persistent renderer resources with timeline-safe
 	// retirement. Release invalidates the handle immediately, but the record (and
 	// any RHI objects it owns) stays alive until the supplied timeline point
@@ -58,6 +59,7 @@ namespace Swim::Render
 		std::optional<Handle> TryCreate(Record record)
 		{
 			std::uint32_t index = 0;
+
 			if (!freeSlots.empty())
 			{
 				index = freeSlots.front();
@@ -83,10 +85,12 @@ namespace Swim::Render
 		Handle Create(Record record)
 		{
 			auto handle = TryCreate(std::move(record));
+
 			if (!handle)
 			{
 				throw std::length_error(name + " has no free GPU resource slots");
 			}
+
 			return *handle;
 		}
 
@@ -106,6 +110,7 @@ namespace Swim::Render
 			{
 				return *record;
 			}
+
 			throw std::invalid_argument(name + " handle is invalid, stale or released");
 		}
 
@@ -118,6 +123,7 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument("GpuResourceRegistry retirement value needs a timeline");
 			}
+
 			if (!IsValid(handle))
 			{
 				return false;
@@ -140,15 +146,18 @@ namespace Swim::Render
 		{
 			std::size_t retired = 0;
 			std::size_t i = 0;
+
 			try
 			{
 				for (; i < pending.size(); ++i)
 				{
 					auto& entry = pending[i];
+
 					if (!IsComplete(entry.LastUse))
 					{
 						continue;
 					}
+
 					onRetired(entry.Released, entry.Data);
 					FinishRetirement(entry);
 					entry.Released = {}; // Marks the entry for removal.
@@ -160,6 +169,7 @@ namespace Swim::Render
 				RemoveRetired();
 				throw;
 			}
+
 			RemoveRetired();
 			return retired;
 		}
@@ -183,6 +193,7 @@ namespace Swim::Render
 					throw std::runtime_error(name + " retirement wait failed");
 				}
 			}
+
 			return CollectRetired(std::forward<OnRetired>(onRetired));
 		}
 
@@ -256,6 +267,7 @@ namespace Swim::Render
 				[[maybe_unused]] Record discarded = std::move(entry.Data); // Destroy owned GPU objects now.
 			}
 			auto& slot = slots[entry.Released.Index];
+
 			if (slot.Generation == 0)
 			{
 				slot.State = SlotState::Exhausted;
@@ -285,4 +297,5 @@ namespace Swim::Render
 		std::uint32_t exhausted = 0;
 		std::string name;
 	};
+
 } // namespace Swim::Render

@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// One std430 row of the GPU Scene transform buffer: this frame's and the
 	// previous frame's world transform as row-major 3x4 affine rows (three float4
 	// each). Previous feeds motion vectors and history reprojection; for an object
@@ -15,4 +16,5 @@ namespace Swim::Render
 
 	static_assert(sizeof(GpuTransformRecord) == 96);
 	static_assert(offsetof(GpuTransformRecord, Previous) == 48);
+
 } // namespace Swim::Render

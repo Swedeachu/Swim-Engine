@@ -7,8 +7,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		bool Finite(float value)
 		{
 			return std::isfinite(value);
@@ -23,81 +25,102 @@ namespace Swim::Render
 		{
 			return AllFinite(color) && color[0] >= 0.0f && color[1] >= 0.0f && color[2] >= 0.0f;
 		}
+
 	} // namespace
 
 	void ValidateScreenSpaceSettings(const ScreenSpaceSettings& settings)
 	{
 		const auto& ao = settings.AmbientOcclusion;
+
 		if (!Finite(ao.Radius) || ao.Radius <= 0.0f)
 		{
 			throw std::invalid_argument("AO radius must be finite and positive");
 		}
+
 		if (!Finite(ao.Falloff) || ao.Falloff <= 0.0f || ao.Falloff > 1.0f)
 		{
 			throw std::invalid_argument("AO falloff must be in (0, 1]");
 		}
+
 		if (!Finite(ao.Power) || ao.Power <= 0.0f || ao.Power > 8.0f)
 		{
 			throw std::invalid_argument("AO power must be in (0, 8]");
 		}
+
 		if (!Finite(ao.MaxRadiusPixels) || ao.MaxRadiusPixels < 1.0f || ao.MaxRadiusPixels > 256.0f)
 		{
 			throw std::invalid_argument("AO max radius must be 1 .. 256 pixels");
 		}
+
 		if (ao.SliceCount < 1 || ao.SliceCount > MaxAoSlices || ao.StepCount < 1 || ao.StepCount > MaxAoSteps)
 		{
 			throw std::invalid_argument("AO slice count must be 1 .. MaxAoSlices and step count 1 .. MaxAoSteps");
 		}
+
 		if (!Finite(ao.BlurDepthTolerance) || ao.BlurDepthTolerance <= 0.0f || ao.BlurDepthTolerance > 1.0f)
 		{
 			throw std::invalid_argument("AO blur depth tolerance must be in (0, 1]");
 		}
+
 		const auto& fog = settings.Fog;
+
 		if (!Finite(fog.Density) || fog.Density < 0.0f || !Finite(fog.HeightFalloff) || fog.HeightFalloff < 0.0f || !Finite(fog.BaseHeight))
 		{
 			throw std::invalid_argument("fog density and height falloff must be finite and non-negative, and the base height finite");
 		}
+
 		if (!NonNegative(fog.Color) || !NonNegative(fog.SunColor))
 		{
 			throw std::invalid_argument("fog colors must be finite and non-negative");
 		}
+
 		const float sunLength = std::sqrt(fog.SunDirection[0] * fog.SunDirection[0] + fog.SunDirection[1] * fog.SunDirection[1] +
 			fog.SunDirection[2] * fog.SunDirection[2]);
+
 		if (!AllFinite(fog.SunDirection) || !(sunLength > 1.0e-6f))
 		{
 			throw std::invalid_argument("fog sun direction must be finite and non-zero");
 		}
+
 		if (!Finite(fog.Anisotropy) || fog.Anisotropy < -0.95f || fog.Anisotropy > 0.95f)
 		{
 			throw std::invalid_argument("fog anisotropy must be in [-0.95, 0.95]");
 		}
+
 		if (!Finite(fog.StartDistance) || fog.StartDistance < 0.0f || !Finite(fog.MaxDistance) || fog.MaxDistance <= fog.StartDistance)
 		{
 			throw std::invalid_argument("fog start distance must be >= 0 and below a finite max distance");
 		}
+
 		const auto& ssr = settings.Reflections;
+
 		if (!Finite(ssr.MaxDistance) || ssr.MaxDistance <= 0.0f || !Finite(ssr.Thickness) || ssr.Thickness <= 0.0f)
 		{
 			throw std::invalid_argument("reflection max distance and thickness must be finite and positive");
 		}
+
 		if (!Finite(ssr.Stride) || ssr.Stride < 1.0f || ssr.Stride > 64.0f)
 		{
 			throw std::invalid_argument("reflection stride must be 1 .. 64 pixels");
 		}
+
 		if (ssr.MaxSteps < 1 || ssr.MaxSteps > MaxReflectionSteps || ssr.RefineSteps > MaxReflectionRefineSteps)
 		{
 			throw std::invalid_argument("reflection steps must be 1 .. MaxReflectionSteps and refine steps 0 .. MaxReflectionRefineSteps");
 		}
+
 		if (!Finite(ssr.MaxRoughness) || ssr.MaxRoughness <= 0.0f || ssr.MaxRoughness > 1.0f || !Finite(ssr.RoughnessFade) ||
 			ssr.RoughnessFade <= 0.0f || ssr.RoughnessFade > ssr.MaxRoughness)
 		{
 			throw std::invalid_argument("reflection max roughness must be in (0, 1] and its fade in (0, max roughness]");
 		}
+
 		if (!Finite(ssr.EdgeFade) || ssr.EdgeFade <= 0.0f || ssr.EdgeFade > 0.5f || !Finite(ssr.DistanceFade) || ssr.DistanceFade <= 0.0f ||
 			ssr.DistanceFade > 1.0f)
 		{
 			throw std::invalid_argument("reflection edge fade must be in (0, 0.5] and distance fade in (0, 1]");
 		}
+
 		if (static_cast<std::uint32_t>(ssr.Debug) > static_cast<std::uint32_t>(ReflectionDebugView::ProbeAge))
 		{
 			throw std::invalid_argument("unknown reflection debug view");
@@ -108,25 +131,32 @@ namespace Swim::Render
 		std::uint32_t height, std::uint32_t noiseFrame)
 	{
 		ValidateScreenSpaceSettings(settings);
+
 		if (!width || !height)
 		{
 			throw std::invalid_argument("screen-space effects need a non-empty viewport");
 		}
+
 		if (!AllFinite(view.Jitter))
 		{
 			throw std::invalid_argument("screen-space jitter must be finite");
 		}
+
 		const auto& p = view.Projection;
+
 		if (p[12] != 0.0f || p[13] != 0.0f || p[14] != -1.0f || p[15] != 0.0f || !(p[0] > 0.0f))
 		{
 			throw std::invalid_argument("screen-space effects need a perspective projection (row 3 = 0, 0, -1, 0)");
 		}
+
 		const auto inverseProjection = ScreenSpace::Inverse(view.Projection);
 		const auto inverseView = ScreenSpace::Inverse(view.View);
+
 		if (!inverseProjection || !inverseView)
 		{
 			throw std::invalid_argument("screen-space view and projection must be finite and invertible");
 		}
+
 		GpuScreenSpaceParams params;
 		std::copy(inverseProjection->begin(), inverseProjection->end(), params.InverseProjection);
 		std::copy(view.View.begin(), view.View.begin() + 12, params.ViewRows);
@@ -150,12 +180,14 @@ namespace Swim::Render
 		params.FogEnabled = fog.Enabled ? 1u : 0u;
 		const float sunLength = std::sqrt(fog.SunDirection[0] * fog.SunDirection[0] + fog.SunDirection[1] * fog.SunDirection[1] +
 			fog.SunDirection[2] * fog.SunDirection[2]);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			params.FogColor[c] = fog.Color[c];
 			params.FogSunColor[c] = fog.SunColor[c];
 			params.FogSunDirection[c] = fog.SunDirection[c] / sunLength;
 		}
+
 		params.FogDensity = fog.Density;
 		params.FogHeightFalloff = fog.HeightFalloff;
 		params.FogBaseHeight = fog.BaseHeight;
@@ -179,19 +211,24 @@ namespace Swim::Render
 		params.ReflectionDebug = static_cast<std::uint32_t>(ssr.Debug);
 		// Near plane: where the projected depth z_ndc = (p10 z + p11) / -z reaches 1.
 		const float nearZ = -p[11] / (p[10] + 1.0f);
+
 		if (ssr.Enabled && (!Finite(nearZ) || !(nearZ < 0.0f)))
 		{
 			throw std::invalid_argument("screen-space reflections need a projection whose near plane is in front of the camera");
 		}
+
 		params.SsrNearZ = Finite(nearZ) && nearZ < 0.0f ? nearZ : -1.0e-3f;
 		return params;
 	}
+
 } // namespace Swim::Render
 
 namespace Swim::Render::ScreenSpace
 {
+
 	namespace
 	{
+
 		constexpr float Pi = std::numbers::pi_v<float>;
 
 		float Dot(const Float3& a, const Float3& b)
@@ -228,10 +265,12 @@ namespace Swim::Render::ScreenSpace
 		Float3 TransformPoint(const float (&rows)[12], const Float3& p)
 		{
 			Float3 result{};
+
 			for (int r = 0; r < 3; ++r)
 			{
 				result[r] = rows[r * 4] * p[0] + rows[r * 4 + 1] * p[1] + rows[r * 4 + 2] * p[2] + rows[r * 4 + 3];
 			}
+
 			return result;
 		}
 
@@ -239,6 +278,7 @@ namespace Swim::Render::ScreenSpace
 		{
 			return ViewPosition(params, float(x) + 0.5f, float(y) + 0.5f, depth.At(x, y));
 		}
+
 	} // namespace
 
 	std::optional<std::array<float, 16>> Inverse(const std::array<float, 16>& m)
@@ -251,12 +291,15 @@ namespace Swim::Render::ScreenSpace
 		{
 			return std::nullopt;
 		}
+
 		// Cofactor expansion in double precision.
 		std::array<double, 16> a{};
+
 		for (int i = 0; i < 16; ++i)
 		{
 			a[i] = m[i];
 		}
+
 		std::array<double, 16> inv{};
 		inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15] + a[9] * a[7] * a[14] + a[13] * a[6] * a[11] -
 			a[13] * a[7] * a[10];
@@ -292,19 +335,24 @@ namespace Swim::Render::ScreenSpace
 			a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
 		const double det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
 		double scale = 0.0;
+
 		for (const double v : a)
 		{
 			scale = std::max(scale, std::abs(v));
 		}
+
 		if (!std::isfinite(det) || std::abs(det) <= 1.0e-12 * scale * scale * scale * scale)
 		{
 			return std::nullopt;
 		}
+
 		std::array<float, 16> result{};
+
 		for (int i = 0; i < 16; ++i)
 		{
 			result[i] = float(inv[i] / det);
 		}
+
 		return result;
 	}
 
@@ -320,19 +368,23 @@ namespace Swim::Render::ScreenSpace
 		{
 			return std::nullopt;
 		}
+
 		const float ndcX = 2.0f * px / float(params.Width) - 1.0f - params.Jitter[0];
 		const float ndcY = 1.0f - 2.0f * py / float(params.Height) - params.Jitter[1];
 		const std::array<float, 4> ndc{ ndcX, ndcY, depth, 1.0f };
 		std::array<float, 4> clip{};
+
 		for (int r = 0; r < 4; ++r)
 		{
 			clip[r] = params.InverseProjection[r * 4] * ndc[0] + params.InverseProjection[r * 4 + 1] * ndc[1] +
 				params.InverseProjection[r * 4 + 2] * ndc[2] + params.InverseProjection[r * 4 + 3] * ndc[3];
 		}
+
 		if (!(std::abs(clip[3]) > 1.0e-20f))
 		{
 			return std::nullopt;
 		}
+
 		const float inverseW = 1.0f / clip[3];
 		return Float3{ clip[0] * inverseW, clip[1] * inverseW, clip[2] * inverseW };
 	}
@@ -340,16 +392,20 @@ namespace Swim::Render::ScreenSpace
 	std::optional<Float3> ViewNormal(const GpuScreenSpaceParams& params, const Float3& worldNormal)
 	{
 		Float3 n{};
+
 		for (int r = 0; r < 3; ++r)
 		{
 			n[r] = params.ViewRows[r * 4] * worldNormal[0] + params.ViewRows[r * 4 + 1] * worldNormal[1] +
 				params.ViewRows[r * 4 + 2] * worldNormal[2];
 		}
+
 		const float length = Length(n);
+
 		if (!(length > 1.0e-6f))
 		{
 			return std::nullopt;
 		}
+
 		return Scale(n, 1.0f / length);
 	}
 
@@ -359,24 +415,29 @@ namespace Swim::Render::ScreenSpace
 		const auto center = ViewPositionAt(params, depth, x, y);
 		const auto& encoded = normal.At(x, y);
 		const auto n3 = center ? ViewNormal(params, { encoded[0], encoded[1], encoded[2] }) : std::nullopt;
+
 		if (!center || !n3 || !(-(*center)[2] > 0.0f))
 		{
 			return 1.0f;
 		}
+
 		const Float3 p = *center;
 		const Float3 normalV = *n3;
 		const Float3 v = Scale(p, -1.0f / Length(p));
 		const float radiusPixels = std::min(params.AoRadius * params.AoRadiusToPixels / -p[2], params.AoMaxRadiusPixels);
+
 		if (radiusPixels < 1.0f)
 		{
 			return 1.0f;
 		}
+
 		const float noise = InterleavedGradientNoise(float(x), float(y), params.NoiseFrame);
 		const float stepNoise = InterleavedGradientNoise(float(x) + 17.0f, float(y) + 29.0f, params.NoiseFrame);
 		const float falloffRange = params.AoRadius * params.AoFalloff;
 		const std::uint32_t slices = params.AoSliceCount;
 		const std::uint32_t steps = params.AoStepCount;
 		float visibility = 0.0f;
+
 		for (std::uint32_t slice = 0; slice < slices; ++slice)
 		{
 			const float phi = (float(slice) + noise) * Pi / float(slices);
@@ -388,47 +449,60 @@ namespace Swim::Render::ScreenSpace
 			const Float3 axis = Scale(axisRaw, 1.0f / Length(axisRaw));
 			const Float3 projected = Subtract(normalV, Scale(axis, Dot(normalV, axis)));
 			const float projectedLength = Length(projected);
+
 			if (!(projectedLength > 1.0e-6f))
 			{
 				continue;
 			}
+
 			const float cosN = std::clamp(Dot(projected, v) / projectedLength, -1.0f, 1.0f);
 			const float n = (Dot(projected, ortho) < 0.0f ? -1.0f : 1.0f) * std::acos(cosN);
 			const float lowPositive = std::cos(n + 0.5f * Pi);
 			const float lowNegative = std::cos(n - 0.5f * Pi);
 			float horizonPositive = lowPositive;
 			float horizonNegative = lowNegative;
+
 			for (std::uint32_t step = 0; step < steps; ++step)
 			{
 				const float t = (float(step) + stepNoise) / float(steps) * radiusPixels;
+
 				for (int side = 0; side < 2; ++side)
 				{
 					const float sign = side == 0 ? 1.0f : -1.0f;
 					const float sx = std::floor(float(x) + 0.5f + sign * dx * t);
 					const float sy = std::floor(float(y) + 0.5f + sign * dy * t);
+
 					if (sx < 0.0f || sy < 0.0f || sx >= float(params.Width) || sy >= float(params.Height))
 					{
 						continue;
 					}
+
 					const auto ix = static_cast<std::uint32_t>(sx);
 					const auto iy = static_cast<std::uint32_t>(sy);
+
 					if (ix == x && iy == y)
 					{
 						continue;
 					}
+
 					const auto samplePosition = ViewPositionAt(params, depth, ix, iy);
+
 					if (!samplePosition)
 					{
 						continue;
 					}
+
 					const Float3 delta = Subtract(*samplePosition, p);
 					const float distance = Length(delta);
+
 					if (!(distance > 1.0e-6f))
 					{
 						continue;
 					}
+
 					const float cosSample = Dot(delta, v) / distance;
 					const float weight = std::clamp((params.AoRadius - distance) / falloffRange, 0.0f, 1.0f);
+
 					if (side == 0)
 					{
 						horizonPositive = std::max(horizonPositive, lowPositive + (cosSample - lowPositive) * weight);
@@ -439,6 +513,7 @@ namespace Swim::Render::ScreenSpace
 					}
 				}
 			}
+
 			float h1 = std::acos(std::clamp(horizonPositive, -1.0f, 1.0f));
 			float h0 = -std::acos(std::clamp(horizonNegative, -1.0f, 1.0f));
 			h1 = n + std::min(h1 - n, 0.5f * Pi);
@@ -448,6 +523,7 @@ namespace Swim::Render::ScreenSpace
 			const float arc0 = (cosN + 2.0f * h0 * sinN - std::cos(2.0f * h0 - n)) * 0.25f;
 			visibility += projectedLength * (arc0 + arc1);
 		}
+
 		// Unclamped: single slices of open surfaces can exceed 1, and clamping before the blur
 		// would bias them down.
 		return std::max(visibility / float(slices), 0.0f);
@@ -456,6 +532,7 @@ namespace Swim::Render::ScreenSpace
 	ScalarImage Gtao(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal)
 	{
 		ScalarImage result(depth.Width, depth.Height);
+
 		for (std::uint32_t y = 0; y < depth.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < depth.Width; ++x)
@@ -463,6 +540,7 @@ namespace Swim::Render::ScreenSpace
 				result.At(x, y) = GtaoTexel(params, depth, normal, x, y);
 			}
 		}
+
 		return result;
 	}
 
@@ -473,40 +551,49 @@ namespace Swim::Render::ScreenSpace
 			return std::pow(std::clamp(value, 0.0f, 1.0f), params.AoPower);
 		};
 		const auto center = ViewPositionAt(params, depth, x, y);
+
 		if (!center)
 		{
 			return finish(ao.At(x, y));
 		}
+
 		const float centerDepth = -(*center)[2];
 		const float tolerance = params.AoBlurDepthTolerance * std::abs(centerDepth);
 		float sum = 0.0f;
 		float weights = 0.0f;
+
 		for (int dy = -2; dy <= 2; ++dy)
 		{
 			for (int dx = -2; dx <= 2; ++dx)
 			{
 				const int sx = int(x) + dx;
 				const int sy = int(y) + dy;
+
 				if (sx < 0 || sy < 0 || sx >= int(params.Width) || sy >= int(params.Height))
 				{
 					continue;
 				}
+
 				const auto position = ViewPositionAt(params, depth, std::uint32_t(sx), std::uint32_t(sy));
+
 				if (!position)
 				{
 					continue;
 				}
+
 				const float weight = std::max(0.0f, 1.0f - std::abs(-(*position)[2] - centerDepth) / tolerance);
 				sum += weight * ao.At(std::uint32_t(sx), std::uint32_t(sy));
 				weights += weight;
 			}
 		}
+
 		return finish(weights > 0.0f ? sum / weights : ao.At(x, y));
 	}
 
 	ScalarImage Blur(const GpuScreenSpaceParams& params, const ScalarImage& ao, const ScalarImage& depth)
 	{
 		ScalarImage result(ao.Width, ao.Height);
+
 		for (std::uint32_t y = 0; y < ao.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < ao.Width; ++x)
@@ -514,6 +601,7 @@ namespace Swim::Render::ScreenSpace
 				result.At(x, y) = BlurTexel(params, ao, depth, x, y);
 			}
 		}
+
 		return result;
 	}
 
@@ -523,6 +611,7 @@ namespace Swim::Render::ScreenSpace
 		{
 			return 0.0f;
 		}
+
 		const float startHeight = camera[1] + direction[1] * params.FogStartDistance;
 		const float length = distance - params.FogStartDistance;
 		const float density =
@@ -545,21 +634,25 @@ namespace Swim::Render::ScreenSpace
 		sample.Transmittance = std::exp(-FogOpticalDepth(params, camera, direction, distance));
 		const Float3 sun{ params.FogSunDirection[0], params.FogSunDirection[1], params.FogSunDirection[2] };
 		const float phase = HenyeyGreenstein(params.FogAnisotropy, -Dot(sun, direction));
+
 		for (int c = 0; c < 3; ++c)
 		{
 			sample.Inscatter[c] = params.FogColor[c] + params.FogSunColor[c] * phase;
 		}
+
 		return sample;
 	}
 
 	ScreenPoint ProjectToScreen(const GpuScreenSpaceParams& params, const Float3& view)
 	{
 		std::array<float, 4> clip{};
+
 		for (int r = 0; r < 4; ++r)
 		{
 			clip[r] = params.Projection[r * 4] * view[0] + params.Projection[r * 4 + 1] * view[1] + params.Projection[r * 4 + 2] * view[2] +
 				params.Projection[r * 4 + 3];
 		}
+
 		const float inverseW = 1.0f / clip[3];
 		ScreenPoint point;
 		point.X = (clip[0] * inverseW + 1.0f + params.Jitter[0]) * 0.5f * float(params.Width);
@@ -572,6 +665,7 @@ namespace Swim::Render::ScreenSpace
 	{
 		constexpr float inset = 0.01f;
 		float t = 1.0f;
+
 		if (dx > 0.0f)
 		{
 			t = std::min(t, (width - inset - x0) / dx);
@@ -580,6 +674,7 @@ namespace Swim::Render::ScreenSpace
 		{
 			t = std::min(t, (inset - x0) / dx);
 		}
+
 		if (dy > 0.0f)
 		{
 			t = std::min(t, (height - inset - y0) / dy);
@@ -588,6 +683,7 @@ namespace Swim::Render::ScreenSpace
 		{
 			t = std::min(t, (inset - y0) / dy);
 		}
+
 		return std::max(t, 0.0f);
 	}
 
@@ -598,11 +694,14 @@ namespace Swim::Render::ScreenSpace
 		{
 			return params.SsrThickness;
 		}
+
 		const auto back = ViewPosition(params, float(x) + 0.5f, float(y) + 0.5f, backDepth->At(x, y));
+
 		if (!back)
 		{
 			return OpenThickness;
 		}
+
 		return std::max(-(*back)[2] - frontDepth, BackFaceMinThickness);
 	}
 
@@ -613,15 +712,19 @@ namespace Swim::Render::ScreenSpace
 		const auto center = ViewPositionAt(params, depth, x, y);
 		const auto& encoded = normal.At(x, y);
 		const auto n3 = center ? ViewNormal(params, { encoded[0], encoded[1], encoded[2] }) : std::nullopt;
+
 		if (!center || !n3 || !(-(*center)[2] > 0.0f))
 		{
 			return std::nullopt;
 		}
+
 		const float roughness = encoded[3];
+
 		if (!(roughness < params.SsrMaxRoughness))
 		{
 			return std::nullopt;
 		}
+
 		const float roughnessFade = std::clamp((params.SsrMaxRoughness - roughness) / params.SsrRoughnessFade, 0.0f, 1.0f);
 		const Float3 p = *center;
 		const Float3 n = *n3;
@@ -629,14 +732,17 @@ namespace Swim::Render::ScreenSpace
 		const Float3 reflectedRaw = Subtract(v, Scale(n, 2.0f * Dot(v, n)));
 		const Float3 r = Scale(reflectedRaw, 1.0f / Length(reflectedRaw));
 		float rayLength = params.SsrMaxDistance;
+
 		if (p[2] + r[2] * rayLength > params.SsrNearZ)
 		{
 			rayLength = (params.SsrNearZ - p[2]) / r[2]; // Clipped to the near plane.
 		}
+
 		if (!(rayLength > 0.0f))
 		{
 			return std::nullopt;
 		}
+
 		const Float3 end{ p[0] + r[0] * rayLength, p[1] + r[1] * rayLength, p[2] + r[2] * rayLength };
 		const auto s0 = ProjectToScreen(params, p);
 		const auto s1 = ProjectToScreen(params, end);
@@ -669,10 +775,12 @@ namespace Swim::Render::ScreenSpace
 			Sample sample;
 			const float sx = s0.X + dx * t;
 			const float sy = s0.Y + dy * t;
+
 			if (!(sx >= 0.0f && sy >= 0.0f && sx < width && sy < height))
 			{
 				return sample;
 			}
+
 			sample.Inside = true;
 			sample.X = static_cast<std::uint32_t>(std::floor(sx));
 			sample.Y = static_cast<std::uint32_t>(std::floor(sy));
@@ -697,25 +805,31 @@ namespace Swim::Render::ScreenSpace
 			{
 				return std::nullopt;
 			}
+
 			const auto scene = ViewPositionAt(params, depth, sx, sy);
+
 			if (!scene || std::abs(Dot(Subtract(*scene, p), n)) <= planeTolerance)
 			{
 				return std::nullopt;
 			}
+
 			return scene;
 		};
 
 		float previous = 0.0f;
 		float previousDepth = -p[2]; // The ray's view depth at `previous`.
 		bool previousBehind = false;  // Whether the sample at `previous` was behind the depth buffer.
+
 		for (std::uint32_t i = 1; i <= steps; ++i)
 		{
 			const float t = std::min((float(i) + jitter) / float(steps), 1.0f) * tExit;
 			const auto sample = sampleAt(t);
+
 			if (!sample.Inside)
 			{
 				return std::nullopt; // Left the screen.
 			}
+
 			const auto scene = sceneAt(sample.X, sample.Y);
 			const bool behind = scene && sample.RayDepth >= -(*scene)[2];
 			const bool within =
@@ -724,6 +838,7 @@ namespace Swim::Render::ScreenSpace
 			// there), or went behind the depth buffer after being in front of it (the surface
 			// hit in between may be too thin on screen for any sample to land on).
 			const bool crossed = behind && (previousDepth < -(*scene)[2] || !previousBehind);
+
 			if (!within && !crossed)
 			{
 				previous = t;
@@ -731,14 +846,17 @@ namespace Swim::Render::ScreenSpace
 				previousBehind = behind;
 				continue;
 			}
+
 			// Bisect (previous, t] toward the first sample behind the depth buffer.
 			float lo = previous;
 			float hi = t;
+
 			for (std::uint32_t k = 0; k < params.SsrRefineSteps; ++k)
 			{
 				const float mid = 0.5f * (lo + hi);
 				const auto probe = sampleAt(mid);
 				const auto probeScene = probe.Inside ? sceneAt(probe.X, probe.Y) : std::nullopt;
+
 				if (probeScene && probe.RayDepth >= -(*probeScene)[2])
 				{
 					hi = mid;
@@ -748,8 +866,10 @@ namespace Swim::Render::ScreenSpace
 					lo = mid;
 				}
 			}
+
 			auto hit = sampleAt(hi);
 			auto hitScene = hit.Inside ? sceneAt(hit.X, hit.Y) : std::nullopt;
+
 			if (!hitScene)
 			{
 				hit = sample;
@@ -757,6 +877,7 @@ namespace Swim::Render::ScreenSpace
 				hi = t;
 				lo = previous;
 			}
+
 			// On the surface: within the thickness behind it, or, for a grazing ray, within the
 			// ray's depth span over the last interval of a surface that continues across it
 			// (a depth jump there is a silhouette the ray passed behind, not a hit).
@@ -778,6 +899,7 @@ namespace Swim::Render::ScreenSpace
 			const bool enteredHidden = backFaces && accepted &&
 				!(loScene && loSample.RayDepth < -(*loScene)[2] &&
 					std::abs((*loScene)[2] - (*hitScene)[2]) <= std::max(2.0f * span, SilhouetteTolerance * -(*hitScene)[2]));
+
 			if (enteredHidden)
 			{
 				ReflectionHit rejected;
@@ -786,6 +908,7 @@ namespace Swim::Render::ScreenSpace
 				rejected.Rejected = true;
 				return rejected;
 			}
+
 			if (!accepted)
 			{
 				previous = t;
@@ -793,8 +916,10 @@ namespace Swim::Render::ScreenSpace
 				previousBehind = behind;
 				continue; // Behind a closer surface, not on it.
 			}
+
 			const auto& hitEncoded = normal.At(hit.X, hit.Y);
 			const auto hitNormal = ViewNormal(params, { hitEncoded[0], hitEncoded[1], hitEncoded[2] });
+
 			if (!hitNormal || Dot(*hitNormal, r) > 0.0f)
 			{
 				// The ray entered the surface through its hidden side: what it hit is not on screen.
@@ -806,8 +931,10 @@ namespace Swim::Render::ScreenSpace
 					rejected.Rejected = true;
 					return rejected;
 				}
+
 				return std::nullopt;
 			}
+
 			const float k = k0 + (k1 - k0) * hi;
 			const Float3 point{ (q0[0] + (q1[0] - q0[0]) * hi) / k, (q0[1] + (q1[1] - q0[1]) * hi) / k,
 				(q0[2] + (q1[2] - q0[2]) * hi) / k };
@@ -824,12 +951,15 @@ namespace Swim::Render::ScreenSpace
 			// behind the object (whose far side the depth buffer does not have).
 			const float facingFade = std::clamp(-Dot(*hitNormal, r) / FacingFade, 0.0f, 1.0f);
 			const float confidence = roughnessFade * edgeFade * distanceFade * facingFade;
+
 			if (!(confidence > 0.0f))
 			{
 				return std::nullopt;
 			}
+
 			return ReflectionHit{ hit.X, hit.Y, hitX, hitY, travelled, confidence };
 		}
+
 		return std::nullopt;
 	}
 
@@ -838,15 +968,18 @@ namespace Swim::Render::ScreenSpace
 	{
 		const auto& c = color.At(x, y);
 		Float3 radiance{ c[0], c[1], c[2] };
+
 		if (params.AoEnabled != 0u && ao)
 		{
 			const float occlusion = ao->At(x, y);
 			const auto& i = indirect.At(x, y);
+
 			for (int k = 0; k < 3; ++k)
 			{
 				radiance[k] = std::max(radiance[k] - (1.0f - occlusion) * i[k], 0.0f);
 			}
 		}
+
 		return radiance;
 	}
 
@@ -854,6 +987,7 @@ namespace Swim::Render::ScreenSpace
 		const ScalarImage* ao, float px, float py, const ReflectionHistory& history)
 	{
 		bool fromHistory = false;
+
 		if (params.SsrHistory != 0u && history.Color && history.Velocity)
 		{
 			const float width = float(color.Width);
@@ -863,6 +997,7 @@ namespace Swim::Render::ScreenSpace
 			const auto& motion = history.Velocity->At(hitX, hitY);
 			const float hx = px - motion[0] * width;
 			const float hy = py - motion[1] * height;
+
 			if (hx >= 0.0f && hy >= 0.0f && hx <= width && hy <= height)
 			{
 				px = hx;
@@ -870,6 +1005,7 @@ namespace Swim::Render::ScreenSpace
 				fromHistory = true;
 			}
 		}
+
 		const float ux = px - 0.5f;
 		const float uy = py - 0.5f;
 		const float bx = std::floor(ux);
@@ -880,6 +1016,7 @@ namespace Swim::Render::ScreenSpace
 		const int maxY = int(color.Height) - 1;
 		Float3 sum{ 0, 0, 0 };
 		float weights = 0.0f;
+
 		for (int j = 0; j < 4; ++j)
 		{
 			const int ox = j & 1;
@@ -887,6 +1024,7 @@ namespace Swim::Render::ScreenSpace
 			const auto tx = static_cast<std::uint32_t>(std::clamp(int(bx) + ox, 0, maxX));
 			const auto ty = static_cast<std::uint32_t>(std::clamp(int(by) + oy, 0, maxY));
 			Float3 radiance;
+
 			if (fromHistory)
 			{
 				const auto& previous = history.Color->At(tx, ty);
@@ -896,14 +1034,18 @@ namespace Swim::Render::ScreenSpace
 			{
 				radiance = HitRadiance(params, color, indirect, ao, tx, ty);
 			}
+
 			const float luma = 0.2126f * radiance[0] + 0.7152f * radiance[1] + 0.0722f * radiance[2];
 			const float weight = (ox != 0 ? fx : 1.0f - fx) * (oy != 0 ? fy : 1.0f - fy) / (1.0f + luma);
+
 			for (int k = 0; k < 3; ++k)
 			{
 				sum[k] += weight * radiance[k];
 			}
+
 			weights += weight;
 		}
+
 		const float inverse = weights > 0.0f ? 1.0f / weights : 0.0f;
 		return { sum[0] * inverse, sum[1] * inverse, sum[2] * inverse };
 	}
@@ -913,14 +1055,17 @@ namespace Swim::Render::ScreenSpace
 		const ScalarImage* backDepth)
 	{
 		const auto hit = TraceReflection(params, depth, normal, x, y, backDepth);
+
 		if (!hit)
 		{
 			return { 0, 0, 0, 0 };
 		}
+
 		if (hit->Rejected)
 		{
 			return { 0, 0, 0, RejectedHit };
 		}
+
 		const auto radiance = FilteredHitRadiance(params, color, indirect, ao, hit->HitX, hit->HitY, history);
 		return { radiance[0], radiance[1], radiance[2], hit->Confidence };
 	}
@@ -929,6 +1074,7 @@ namespace Swim::Render::ScreenSpace
 		const ColorImage& indirect, const ScalarImage* ao, const ReflectionHistory& history, const ScalarImage* backDepth)
 	{
 		ColorImage result(depth.Width, depth.Height);
+
 		for (std::uint32_t y = 0; y < depth.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < depth.Width; ++x)
@@ -936,6 +1082,7 @@ namespace Swim::Render::ScreenSpace
 				result.At(x, y) = ReflectionTexel(params, depth, normal, color, indirect, ao, x, y, history, backDepth);
 			}
 		}
+
 		return result;
 	}
 
@@ -943,6 +1090,7 @@ namespace Swim::Render::ScreenSpace
 		const ReflectionSample& reflection, float depth, std::uint32_t x, std::uint32_t y)
 	{
 		Float3 c{ color[0], color[1], color[2] };
+
 		if (params.AoEnabled != 0u)
 		{
 			for (int i = 0; i < 3; ++i)
@@ -950,12 +1098,14 @@ namespace Swim::Render::ScreenSpace
 				c[i] = std::max(c[i] - (1.0f - ao) * indirect[i], 0.0f);
 			}
 		}
+
 		if (params.SsrEnabled != 0u || params.ProbeCount > 0u)
 		{
 			const float aoWeight = params.AoEnabled != 0u ? ao : 1.0f;
 			// The fallback: local probes (coverage Probe[3]) over the global environment (Specular).
 			Float3 fallback{ reflection.Specular[0], reflection.Specular[1], reflection.Specular[2] };
 			const float coverage = reflection.Probe[3];
+
 			if (coverage > 0.0f)
 			{
 				for (int i = 0; i < 3; ++i)
@@ -964,16 +1114,20 @@ namespace Swim::Render::ScreenSpace
 					c[i] = std::max(c[i] + aoWeight * (fallback[i] - reflection.Specular[i]), 0.0f);
 				}
 			}
+
 			const float confidence = params.SsrEnabled != 0u ? std::max(reflection.Reflection[3], 0.0f) : 0.0f;
+
 			if (confidence > 0.0f)
 			{
 				const float weight = confidence * aoWeight;
+
 				for (int i = 0; i < 3; ++i)
 				{
 					c[i] = std::max(c[i] + weight * (reflection.Reflectance[i] * reflection.Reflection[i] - fallback[i]), 0.0f);
 				}
 			}
 		}
+
 		if (params.FogEnabled != 0u)
 		{
 			const Float3 camera{ params.InverseViewRows[3], params.InverseViewRows[7], params.InverseViewRows[11] };
@@ -981,15 +1135,18 @@ namespace Swim::Render::ScreenSpace
 			const float py = float(y) + 0.5f;
 			// The sky is fogged along its view ray (through the near plane) at the max distance.
 			const auto view = ViewPosition(params, px, py, depth > 0.0f ? depth : 1.0f);
+
 			if (view)
 			{
 				const Float3 delta = Subtract(TransformPoint(params.InverseViewRows, *view), camera);
 				const float length = Length(delta);
+
 				if (length > 1.0e-6f)
 				{
 					const Float3 direction = Scale(delta, 1.0f / length);
 					const float distance = depth > 0.0f ? std::min(length, params.FogMaxDistance) : params.FogMaxDistance;
 					const auto fog = EvaluateFog(params, camera, direction, distance);
+
 					for (int i = 0; i < 3; ++i)
 					{
 						c[i] = c[i] * fog.Transmittance + fog.Inscatter[i] * (1.0f - fog.Transmittance);
@@ -997,6 +1154,7 @@ namespace Swim::Render::ScreenSpace
 				}
 			}
 		}
+
 		return { c[0], c[1], c[2], color[3] };
 	}
 
@@ -1018,10 +1176,12 @@ namespace Swim::Render::ScreenSpace
 		const auto& centre = reflection.At(x, y);
 		const auto& encoded = normal.At(x, y);
 		const auto position = ViewPositionAt(params, depth, x, y);
+
 		if (!position)
 		{
 			return centre;
 		}
+
 		const int step = std::max(1, int(std::floor(GlossyBlurRadius(params, encoded[3]) * 0.5f + 0.5f)));
 		const float centreDepth = -(*position)[2];
 		const Float3 n{ encoded[0], encoded[1], encoded[2] };
@@ -1029,6 +1189,7 @@ namespace Swim::Render::ScreenSpace
 		float radianceWeight = 0.0f;
 		float confidence = 0.0f;
 		float weights = 0.0f;
+
 		for (int j = 0; j < 25; ++j)
 		{
 			const int ox = j % 5 - 2;
@@ -1036,30 +1197,38 @@ namespace Swim::Render::ScreenSpace
 			const int tx = std::clamp(int(x) + ox * step, 0, int(reflection.Width) - 1);
 			const int ty = std::clamp(int(y) + oy * step, 0, int(reflection.Height) - 1);
 			const auto tapPosition = ViewPositionAt(params, depth, std::uint32_t(tx), std::uint32_t(ty));
+
 			if (!tapPosition || std::abs(-(*tapPosition)[2] - centreDepth) > 0.05f * centreDepth)
 			{
 				continue;
 			}
+
 			const auto& tapNormal = normal.At(std::uint32_t(tx), std::uint32_t(ty));
+
 			if (Dot(n, { tapNormal[0], tapNormal[1], tapNormal[2] }) < 0.9f)
 			{
 				continue;
 			}
+
 			const float w = GlossyTapWeights[std::abs(ox)] * GlossyTapWeights[std::abs(oy)];
 			const auto& tap = reflection.At(std::uint32_t(tx), std::uint32_t(ty));
 			const float tapConfidence = std::max(tap[3], 0.0f); // RejectedHit counts as a miss.
 			confidence += w * tapConfidence;
 			weights += w;
+
 			for (int c = 0; c < 3; ++c)
 			{
 				radiance[c] += w * tapConfidence * tap[c];
 			}
+
 			radianceWeight += w * tapConfidence;
 		}
+
 		if (!(weights > 0.0f))
 		{
 			return centre;
 		}
+
 		const float inverse = radianceWeight > 0.0f ? 1.0f / radianceWeight : 0.0f;
 		return { radiance[0] * inverse, radiance[1] * inverse, radiance[2] * inverse, confidence / weights };
 	}
@@ -1068,11 +1237,13 @@ namespace Swim::Render::ScreenSpace
 		const ScalarImage& depth, const ReflectionImages& reflections)
 	{
 		ColorImage result(color.Width, color.Height);
+
 		for (std::uint32_t y = 0; y < color.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < color.Width; ++x)
 			{
 				ReflectionSample reflection;
+
 				if (reflections.Reflection && reflections.Reflectance && reflections.Specular)
 				{
 					reflection = { reflections.Normal
@@ -1080,10 +1251,13 @@ namespace Swim::Render::ScreenSpace
 									   : reflections.Reflection->At(x, y),
 						reflections.Reflectance->At(x, y), reflections.Specular->At(x, y) };
 				}
+
 				result.At(x, y) =
 					CompositeTexel(params, color.At(x, y), indirect.At(x, y), ao ? ao->At(x, y) : 1.0f, reflection, depth.At(x, y), x, y);
 			}
 		}
+
 		return result;
 	}
+
 } // namespace Swim::Render::ScreenSpace

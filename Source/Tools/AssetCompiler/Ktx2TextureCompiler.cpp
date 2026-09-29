@@ -10,16 +10,20 @@
 
 namespace Swim::AssetCompiler
 {
+
 	namespace
 	{
+
 		// KTX2 header fields (little endian) the Basis check needs.
 		std::uint32_t ReadU32(std::span<const std::byte> bytes, std::size_t offset)
 		{
 			std::uint32_t value = 0;
+
 			for (std::size_t i = 0; i < 4; ++i)
 			{
 				value |= static_cast<std::uint32_t>(bytes[offset + i]) << (8 * i);
 			}
+
 			return value;
 		}
 
@@ -28,15 +32,19 @@ namespace Swim::AssetCompiler
 		bool IsBasisUniversal(std::span<const std::byte> bytes)
 		{
 			constexpr std::size_t HeaderBytes = 80;
+
 			if (bytes.size() < HeaderBytes || ReadU32(bytes, 12) != 0u)
 			{
 				return false;
 			}
+
 			constexpr std::uint32_t BasisLz = 1;
+
 			if (ReadU32(bytes, 44) == BasisLz)
 			{
 				return true;
 			}
+
 			// DFD: dfdTotalSize (u32), then the basic block; its colour model is byte 8 of the block.
 			const std::uint32_t dfdOffset = ReadU32(bytes, 48);
 			constexpr std::uint32_t ColorModelUastc = 166;
@@ -69,16 +77,20 @@ namespace Swim::AssetCompiler
 			{
 				return Fail(Swim::Assets::Ktx2ErrorCode::InvalidLevelData, "Basis KTX2 texture is larger than 4 GiB");
 			}
+
 			basist::ktx2_transcoder transcoder;
+
 			if (!transcoder.init(bytes.data(), static_cast<std::uint32_t>(bytes.size())))
 			{
 				return Fail(Swim::Assets::Ktx2ErrorCode::InvalidLevelData, "Basis KTX2 header or level index is invalid");
 			}
+
 			if (transcoder.get_faces() != 1 || transcoder.get_layers() > 1 || !transcoder.is_ldr())
 			{
 				return Fail(Swim::Assets::Ktx2ErrorCode::InvalidDimensions,
 					"only single-layer 2D LDR Basis KTX2 textures are supported (no cube maps, arrays or HDR)");
 			}
+
 			if (!transcoder.start_transcoding())
 			{
 				return Fail(Swim::Assets::Ktx2ErrorCode::InvalidLevelData,
@@ -103,48 +115,59 @@ namespace Swim::AssetCompiler
 			payload.Format = bc7 ? (srgb ? PF::BC7SRgb : PF::BC7UNorm) : (srgb ? PF::RGBA8SRgb : PF::RGBA8UNorm);
 			payload.Supercompression = Swim::Assets::TextureSupercompression::None;
 			const std::uint32_t levels = std::max(1u, transcoder.get_levels());
+
 			for (std::uint32_t level = 0; level < levels; ++level)
 			{
 				basist::ktx2_image_level_info info{};
+
 				if (!transcoder.get_image_level_info(info, level, 0, 0))
 				{
 					return Fail(
 						Swim::Assets::Ktx2ErrorCode::InvalidLevelIndex, "Basis KTX2 level " + std::to_string(level) + " is missing");
 				}
+
 				const std::uint32_t width = std::max(1u, asset.Width >> level);
 				const std::uint32_t height = std::max(1u, asset.Height >> level);
+
 				if (info.m_orig_width != width || info.m_orig_height != height)
 				{
 					return Fail(Swim::Assets::Ktx2ErrorCode::InvalidDimensions,
 						"Basis KTX2 level " + std::to_string(level) + " is not a regular mip chain level");
 				}
+
 				const std::uint64_t size = bc7 ? GetBc7Bytes(width, height) : std::uint64_t(width) * height * 4u;
 				const std::uint32_t units = bc7 ? static_cast<std::uint32_t>(size / 16u) : width * height;
 				const std::uint64_t offset = payload.Bytes.size();
 				payload.Bytes.resize(static_cast<std::size_t>(offset + size));
+
 				if (!transcoder.transcode_image_level(level, 0, 0, payload.Bytes.data() + offset, units,
 						bc7 ? basist::transcoder_texture_format::cTFBC7_RGBA : basist::transcoder_texture_format::cTFRGBA32))
 				{
 					return Fail(Swim::Assets::Ktx2ErrorCode::InvalidLevelData,
 						"Basis KTX2 level " + std::to_string(level) + " failed to transcode");
 				}
+
 				payload.Mips.push_back({ width, height, 1, offset, size, size });
 			}
+
 			asset.Payloads.push_back(std::move(payload));
 			return result;
 		}
+
 	} // namespace
 
 	Ktx2TextureCompileResult CompileKtx2Texture(std::span<const std::byte> bytes, Swim::Assets::TextureColorSpace colorSpace,
 		Swim::Assets::TextureSemantic semantic, CookedTextureEncoding encoding)
 	{
 		const Swim::Assets::Ktx2ParseResult parsed = Swim::Assets::ParseKtx2Metadata(bytes);
+
 		if (!parsed)
 		{
 			Ktx2TextureCompileResult result;
 			result.Error = parsed.Error;
 			return result;
 		}
+
 		if (IsBasisUniversal(bytes))
 		{
 			return TranscodeBasis(bytes, semantic, encoding);

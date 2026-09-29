@@ -6,8 +6,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		constexpr auto UploadUsages = Rhi::BufferUsage::TransferSource | Rhi::BufferUsage::Vertex | Rhi::BufferUsage::Index |
 			Rhi::BufferUsage::Uniform | Rhi::BufferUsage::Storage | Rhi::BufferUsage::Indirect;
 		constexpr std::uint64_t MinimumStagingCapacity = 64 * 1024;
@@ -18,6 +20,7 @@ namespace Swim::Render
 			{
 				throw std::overflow_error("RenderGraph staging size overflow");
 			}
+
 			return a + b;
 		}
 
@@ -25,32 +28,39 @@ namespace Swim::Render
 		std::uint64_t StagingCapacity(std::uint64_t bound, std::uint64_t reservation)
 		{
 			const auto wanted = std::max({ bound, reservation, MinimumStagingCapacity });
+
 			if (wanted > (UINT64_MAX >> 1) + 1)
 			{
 				throw std::overflow_error("RenderGraph staging capacity overflow");
 			}
+
 			return std::bit_ceil(wanted);
 		}
 
 		std::unique_ptr<Rhi::UploadArena> CreateUpload(Rhi::Device& device, std::uint64_t capacity)
 		{
 			auto arena = Rhi::UploadArena::Create(device, { capacity, UploadUsages, "RenderGraph upload staging" });
+
 			if (!arena)
 			{
 				throw std::runtime_error("RenderGraph upload staging allocation failed");
 			}
+
 			return arena;
 		}
 
 		std::unique_ptr<Rhi::ReadbackArena> CreateReadback(Rhi::Device& device, std::uint64_t capacity)
 		{
 			auto arena = Rhi::ReadbackArena::Create(device, { capacity, "RenderGraph readback staging" });
+
 			if (!arena)
 			{
 				throw std::runtime_error("RenderGraph readback staging allocation failed");
 			}
+
 			return arena;
 		}
+
 	} // namespace
 
 	void RenderGraphExecutor::CreateInitialStaging()
@@ -59,6 +69,7 @@ namespace Swim::Render
 		{
 			state->Upload = CreateUpload(state->Device, state->Desc.UploadCapacity);
 		}
+
 		if (state->Desc.ReadbackCapacity)
 		{
 			state->Readback = CreateReadback(state->Device, state->Desc.ReadbackCapacity);
@@ -77,6 +88,7 @@ namespace Swim::Render
 		{
 			s.Upload->Reset();
 		}
+
 		if (s.Readback && !s.Readback->TryReset())
 		{
 			throw std::logic_error("RenderGraph readback staging is still in flight");
@@ -90,14 +102,18 @@ namespace Swim::Render
 		std::vector<std::uint32_t> readbacks;
 		std::uint64_t uploadBound = 0;
 		std::uint64_t readbackBound = 0;
+
 		for (std::uint32_t r = 0; r < resources.size(); ++r)
 		{
 			const auto& resource = resources[r];
+
 			if (resource.Staging == Internal::GraphStaging::None || graph.lifetimes[r].First == GraphResourceLifetime::Unused)
 			{
 				continue;
 			}
+
 			const auto bytes = CheckedAdd(resource.Buffer.Size, std::max(resource.Alignment, padding));
+
 			if (resource.Staging == Internal::GraphStaging::Upload)
 			{
 				uploads.push_back(r);
@@ -114,24 +130,30 @@ namespace Swim::Render
 		const auto allocateUploads = [&]
 		{
 			uploadBytes.clear();
+
 			for (auto r : uploads)
 			{
 				auto slice = s.Upload->Allocate(resources[r].Buffer.Size, resources[r].Alignment);
+
 				if (!slice)
 				{
 					s.Upload->Reset();
 					return false;
 				}
+
 				s.Ranges[r] = { slice->Resource, slice->Offset, resources[r].Buffer.Size };
 				uploadBytes.push_back(slice->Bytes);
 			}
+
 			return true;
 		};
+
 		if (!uploads.empty() && (!s.Upload || !allocateUploads()))
 		{
 			// Grow only here: the previous batch is complete and no slice survives.
 			s.Upload.reset();
 			s.Upload = CreateUpload(s.Device, StagingCapacity(uploadBound, s.Desc.UploadCapacity));
+
 			if (!allocateUploads())
 			{
 				throw std::logic_error("RenderGraph upload staging bound was insufficient");
@@ -143,23 +165,29 @@ namespace Swim::Render
 			for (auto r : readbacks)
 			{
 				auto slice = s.Readback->Allocate(resources[r].Buffer.Size, resources[r].Alignment);
+
 				if (!slice)
 				{
 					if (!s.Readback->TryReset())
 					{
 						throw std::logic_error("RenderGraph readback staging reset failed");
 					}
+
 					return false;
 				}
+
 				s.Ranges[r] = { &slice->GetBuffer(), slice->GetOffset(), slice->GetSize() };
 				s.ReadbackSlices[r] = *slice;
 			}
+
 			return true;
 		};
+
 		if (!readbacks.empty() && (!s.Readback || !allocateReadbacks()))
 		{
 			s.Readback.reset();
 			s.Readback = CreateReadback(s.Device, StagingCapacity(readbackBound, s.Desc.ReadbackCapacity));
+
 			if (!allocateReadbacks())
 			{
 				throw std::logic_error("RenderGraph readback staging bound was insufficient");
@@ -188,11 +216,14 @@ namespace Swim::Render
 		{
 			throw std::logic_error("RenderGraph has no successful execution result");
 		}
+
 		const auto& r = Internal::RequireResource(*state->Graph.definition, resource.Graph, resource.Index, GraphKind::Buffer);
+
 		if (r.Staging != Internal::GraphStaging::Readback)
 		{
 			throw std::invalid_argument("RenderGraph resource is not a readback buffer: " + r.Name);
 		}
+
 		return state->ReadbackSlices[resource.Index];
 	}
 
@@ -218,4 +249,5 @@ namespace Swim::Render
 	{
 		return state->Readback ? state->Readback->GetCapacity() : 0;
 	}
+
 } // namespace Swim::Render

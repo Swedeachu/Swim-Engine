@@ -16,6 +16,7 @@
 
 namespace Engine
 {
+
 	// Every runtime rendering switch (Phase 23). The FrameRenderer reads it each frame;
 	// the sandbox control panel edits it live. Invalid values are clamped by Sanitize.
 	struct RenderSettings
@@ -130,4 +131,5 @@ namespace Engine
 		std::vector<PassTiming> RecordPhases;
 		std::vector<PassTiming> RecordPasses;
 	};
+
 } // namespace Engine

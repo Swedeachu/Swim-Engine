@@ -14,6 +14,7 @@
 
 namespace Swim::UI
 {
+
 	struct UiPoint
 	{
 		float X = 0.0f;
@@ -582,45 +583,72 @@ namespace Swim::UI
 	// Single-thread owner. The atlas passed to Paint must outlive its paint list.
 	class UiDocument final
 	{
+
 	  public:
+
 		UiDocument();
+
 		~UiDocument();
+
 		UiDocument(const UiDocument&) = delete;
+
 		UiDocument& operator=(const UiDocument&) = delete;
 
 		UiNodeId GetRoot() const;
+
 		UiNodeId Create(UiNodeId parent);
+
 		bool Remove(UiNodeId node); // Removes descendants; root removal returns false.
+
 		bool Contains(UiNodeId node) const;
+
 		void Reparent(UiNodeId node, UiNodeId parent); // Appends in paint/tab order; rejects cycles.
+
 		// Paint-only changes (colors, corner radius, border) keep the cached layout.
 		void SetStyle(UiNodeId node, const UiStyle& style);
+
 		const UiStyle& GetStyle(UiNodeId node) const;
+
 		// Paragraph text: bidi, script itemization, cluster fallback through the
 		// collection, and the style's alignment/wrapping/line spacing. Invalid UTF-8 is
 		// replaced with U+FFFD. A null collection clears the text.
 		void SetText(UiNodeId node, std::shared_ptr<const Text::FontCollection> fonts, std::string text, float size,
 			const UiTextOptions& options = {});
+
 		// One face, no fallback (compatibility overload).
 		void SetText(UiNodeId node, std::shared_ptr<const Text::FontFace> face, std::string text, float size,
 			Text::TextDirection direction = Text::TextDirection::Auto);
+
 		const std::string& GetText(UiNodeId node) const;
+
 		// The node's current paragraph layout, in content-box coordinates (null without text).
 		const Text::TextLayout* GetTextLayout(UiNodeId node) const;
+
 		void SetImage(UiNodeId node, const UiImage& image);
+
 		void ClearImage(UiNodeId node);
+
 		void SetScroll(UiNodeId node, UiPoint offset); // Clamped to content on the next Layout.
+
 		UiPoint GetScroll(UiNodeId node) const;
+
 		void Layout(UiPoint framebufferSize, float dpiScale = 1.0f);
+
 		UiRect GetBounds(UiNodeId node) const; // Requires Layout after mutations.
+
 		bool IsLayoutCurrent() const;		   // False after a mutation until the next Layout.
+
 		std::uint64_t GetLayoutRevision() const;
+
 		// Nodes measured (not served from the measure cache) by the last Layout.
 		std::uint32_t GetMeasuredNodeCount() const;
+
 		// Rebuilds only the paint of nodes whose content, placement or atlas changed.
 		const std::vector<UiPaintQuad>& Paint(Text::GlyphAtlas& atlas); // Requires current Layout.
+
 		// Nodes whose paint was rebuilt by the last Paint.
 		std::uint32_t GetRepaintedNodeCount() const;
+
 		// Generates the atlas entries of every glyph the laid-out document shows, with
 		// distance fields built through parallelFor (for example JobSystem::ParallelFor),
 		// so a following Paint only looks glyphs up. Requires current Layout. Returns the
@@ -631,28 +659,42 @@ namespace Swim::UI
 		// consumers may mutate the document safely after DrainEvents(). HitTest requires a
 		// current Layout; the pointer methods lay out again with the last canvas when needed.
 		UiNodeId HitTest(UiPoint framebufferPoint) const;
+
 		void PointerMove(UiPoint framebufferPoint);
+
 		void PointerDown(UiPoint framebufferPoint, UiKeyModifiers modifiers = {});
+
 		void PointerUp(UiPoint framebufferPoint);
+
 		void CancelPointer(); // Platform focus loss / pointer cancellation.
+
 		// Scrolls the innermost clipped, scrollable node under the point; true if it moved.
 		bool Wheel(UiPoint framebufferPoint, UiPoint delta);
+
 		// The pointer left this document (another canvas took it): hover ends. A pressed
 		// node keeps its capture until PointerUp/CancelPointer.
 		void PointerLeave();
+
 		void Focus(UiNodeId node); // Empty clears focus; unavailable targets are rejected.
+
 		// Tab order (see UiStyle::TabIndex); wraps around.
 		void FocusNext(bool backwards = false);
+
 		// Moves focus to the nearest focusable node in a direction (keyboard arrows,
 		// gamepad D-pad); without focus, focuses the first node in tab order. False when
 		// nothing lies that way (no wrap-around).
 		bool Navigate(UiNavDirection direction);
+
 		// Arrow keys that the focused node does not use navigate (default on).
 		void SetArrowNavigation(bool enabled);
+
 		// Enter/Space/gamepad A: toggles checkboxes and toggles, clicks anything else.
 		void ActivateFocused();
+
 		UiNodeId GetFocus() const;
+
 		std::vector<UiEvent> DrainEvents();
+
 		// Lays the document out again with the last canvas when it changed since the last
 		// Layout (no-op before the first Layout).
 		void EnsureLayout();
@@ -663,21 +705,29 @@ namespace Swim::UI
 		// The value is clamped and snapped. Kind None removes the behaviour. Throws
 		// std::invalid_argument for an invalid range, step, parts or scroll target.
 		void SetControl(UiNodeId node, const UiControl& control);
+
 		const UiControl& GetControl(UiNodeId node) const;
+
 		// From code: clamped and snapped, no events. Scroll bars set their target's offset;
 		// selection owners take the selected index (-1: none), clamped to the options.
 		void SetValue(UiNodeId node, float value);
+
 		float GetValue(UiNodeId node) const;
+
 		void SetChecked(UiNodeId node, UiCheckState state); // From code: no events.
+
 		UiCheckState GetChecked(UiNodeId node) const;
+
 		// Registers an extra part: slider Tick marks at `value` (direct children of the
 		// slider), or Options of a selection owner at the integral index `value` (inside a
 		// radio group or list view, anywhere for a dropdown; the node becomes an Option
 		// control: hit-testable, never focusable). Registering an index again moves it (virtual
 		// rows); UiPartRole::None releases it. Throws std::invalid_argument otherwise.
 		void SetPartRole(UiNodeId part, UiNodeId control, UiPartRole role, float value = 0.0f);
+
 		// The option node showing an index of a selection owner (empty when not bound).
 		UiNodeId FindOption(UiNodeId owner, std::uint32_t index) const;
+
 		std::uint32_t GetOptionCount(UiNodeId owner) const; // ItemCount, else the registered options.
 
 		// --- Popups: menus, dropdown lists, tooltips, modal dialogs. ---
@@ -687,23 +737,33 @@ namespace Swim::UI
 		// replaces its description. Throws std::invalid_argument for a node that is not a
 		// child of the root, or an unknown anchor.
 		void OpenPopup(UiNodeId popup, const UiPopupDesc& desc = {});
+
 		bool ClosePopup(UiNodeId popup); // Also closes every popup opened after it.
+
 		void CloseAllPopups();
+
 		bool IsPopupOpen(UiNodeId popup) const;
+
 		UiNodeId GetTopPopup() const;
+
 		// Tooltips: after the pointer rests on target (or a descendant) for delaySeconds
 		// (through Update), tooltip opens below the pointer; leaving, pressing or scrolling
 		// closes it. An empty tooltip removes the registration.
 		void SetTooltip(UiNodeId target, UiNodeId tooltip, float delaySeconds = 0.5f);
+
 		// Context menus: OpenContextMenu opens the menu registered on the node under the
 		// point (or its nearest ancestor) at the point; OpenContextMenuForFocus opens the
 		// focused node's (or its ancestors') below it. False when there is none.
 		void SetContextMenu(UiNodeId target, UiNodeId menu);
+
 		bool OpenContextMenu(UiPoint framebufferPoint);
+
 		bool OpenContextMenuForFocus();
+
 		// Closes the light-dismiss popups, as a press outside all of them would (a press on
 		// another canvas: UiCanvasRouter calls it).
 		void DismissPopups();
+
 		// Adjusts the scroll of clipped ancestors so the node's bounds are visible. Requires
 		// a current Layout; the new offsets apply at the next Layout.
 		void ScrollIntoView(UiNodeId node);
@@ -711,23 +771,33 @@ namespace Swim::UI
 		// --- Visual states and theming. ---
 		// Rules applied after the theme class's rules (per-node overrides).
 		void SetStateRules(UiNodeId node, std::vector<UiStateRule> rules);
+
 		const std::vector<UiStateRule>& GetStateRules(UiNodeId node) const;
+
 		UiState GetState(UiNodeId node) const;
+
 		// The paint the node is drawn with, as of the last Paint or Update.
 		const UiResolvedVisual& GetVisual(UiNodeId node) const;
+
 		// The document theme (a default dark theme without fonts initially). Changing it
 		// re-applies every themed node. Null is rejected.
 		void SetTheme(std::shared_ptr<const UiTheme> theme);
+
 		const std::shared_ptr<const UiTheme>& GetTheme() const;
+
 		// Themes a node now and on every SetTheme (UiThemeClass::None unthemes it, keeping
 		// its current style).
 		void SetThemeClass(UiNodeId node, UiThemeClass themeClass, UiThemeApply apply = UiThemeApply::All);
+
 		UiThemeClass GetThemeClass(UiNodeId node) const;
+
 		// Advances paint transitions, toggle knobs and overlay scroll bar fades by seconds
 		// and resolves visual states. True while anything is still animating. Knob motion
 		// needs a Layout afterwards (IsLayoutCurrent turns false).
 		bool Update(float seconds);
+
 		bool IsAnimating() const;
+
 		// Changes whenever Paint's output changed (render surfaces redraw only then).
 		std::uint64_t GetPaintRevision() const;
 
@@ -735,29 +805,43 @@ namespace Swim::UI
 		// Editable nodes are focusable and hit-testable; they need text fonts. Carets move
 		// by grapheme clusters, words (Control) and lines; Shift extends the selection.
 		void SetEditable(UiNodeId node, bool editable, const UiTextEditOptions& options = {});
+
 		bool IsEditable(UiNodeId node) const;
+
 		UiTextSelection GetSelection(UiNodeId node) const;
+
 		void SetSelection(UiNodeId node, UiTextSelection selection); // Snapped to caret stops.
+
 		// Routes to the focused node: editing and caret keys for editable nodes, Tab focus
 		// traversal and Enter/Space activation otherwise. True when consumed.
 		bool KeyDown(UiKey key, UiKeyModifiers modifiers = {});
+
 		// Committed text from the platform (after IME composition). Replaces the selection.
 		void TextInput(std::string_view utf8);
+
 		// IME preedit shown at the caret (underlined), not part of GetText(); empty ends
 		// it. cursor is a byte offset in the preedit text.
 		void SetComposition(std::string_view utf8, std::uint32_t cursor);
+
 		const std::string& GetComposition() const;
+
 		void SetClipboard(UiClipboard clipboard);
+
 		// True while an editable node has focus: start platform text input.
 		bool WantsTextInput() const;
+
 		// The caret rectangle of the focused editable node in framebuffer pixels (IME
 		// candidate window placement); empty otherwise. Requires current Layout.
 		UiRect GetTextInputRect() const;
+
 		// Caret blink phase; the application owns the timing.
 		void SetCaretVisible(bool visible);
 
 	  private:
+
 		struct Impl;
 		std::unique_ptr<Impl> impl;
+
 	};
+
 } // namespace Swim::UI

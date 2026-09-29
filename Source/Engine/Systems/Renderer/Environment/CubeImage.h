@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	using Float4 = std::array<float, 4>;
 
 	// A CPU cube map with a mip chain: RGBA float texels, per mip then per face, rows
@@ -14,8 +15,11 @@ namespace Swim::Render::Environment
 	// against, and it holds GPU results read back for comparison.
 	class CubeImage
 	{
+
 	  public:
+
 		CubeImage() = default;
+
 		// Size must be a power of two; mipCount 0 means the full chain down to 1x1.
 		CubeImage(std::uint32_t size, std::uint32_t mipCount = 0);
 
@@ -26,12 +30,16 @@ namespace Swim::Render::Environment
 		std::uint32_t GetMipSize(std::uint32_t mip) const;
 
 		Float4& Texel(std::uint32_t mip, std::uint32_t face, std::uint32_t x, std::uint32_t y);
+
 		const Float4& Texel(std::uint32_t mip, std::uint32_t face, std::uint32_t x, std::uint32_t y) const;
+
 		std::span<Float4> Face(std::uint32_t mip, std::uint32_t face);
+
 		std::span<const Float4> Face(std::uint32_t mip, std::uint32_t face) const;
 
 		// Point sample: the nearest mip (Vulkan rule: ceil(lod + 0.5) - 1) and the texel containing the direction.
 		Float4 SampleNearest(const Float3& direction, float lod) const;
+
 		// Trilinear sample with Vulkan's seamless cube filtering: bilinear footprints
 		// that leave a face fetch the adjacent face's edge texels, and a corner texel
 		// is the average of the three texels meeting there; linear between mips.
@@ -45,13 +53,16 @@ namespace Swim::Render::Environment
 		Float4 FetchSeamless(std::uint32_t mip, std::uint32_t face, int x, int y) const;
 
 	  private:
+
 		Float4 SampleBilinear(std::uint32_t mip, const CubeCoordinate& coordinate) const;
+
 		Float4 FetchAcrossEdge(std::uint32_t mip, std::uint32_t face, int x, int y) const;
 
 		std::uint32_t size = 0;
 		std::uint32_t mipCount = 0;
 		std::vector<std::size_t> mipOffsets;
 		std::vector<Float4> texels;
+
 	};
 
 	std::uint32_t FullCubeMipCount(std::uint32_t size);
@@ -72,4 +83,5 @@ namespace Swim::Render::Environment
 		// Bilinear with clamp-to-edge at normalized coordinates (texel centers at (i + 0.5) / size).
 		Float4 SampleBilinear(float u, float v) const;
 	};
+
 } // namespace Swim::Render::Environment

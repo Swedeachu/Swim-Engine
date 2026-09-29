@@ -63,6 +63,7 @@ namespace Engine
 		}
 
 		std::unique_ptr<IPhysicsWorldBackend> worldBackend = backend->CreateWorld(desc);
+
 		if (!worldBackend)
 		{
 			return nullptr;

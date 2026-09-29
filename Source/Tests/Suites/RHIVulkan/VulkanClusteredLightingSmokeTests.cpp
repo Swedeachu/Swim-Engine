@@ -34,6 +34,7 @@
 
 namespace
 {
+
 #ifdef SWIM_CLUSTERED_SMOKE_AVAILABLE
 	// Mirrors ClusteredLightProbe.slang's ClusterProbeSample (std430, 80 bytes).
 	struct ProbeSample
@@ -141,6 +142,7 @@ namespace
 		GpuLightBuffer lights(*device, { 4, 2048, "Clustered smoke lights" });
 		auto scene = Scene::RandomScene(0, 1500, 164);
 		std::vector<GpuLightHandle> handles;
+
 		for (int i = 0; i < 2; ++i)
 		{
 			LightDesc sun;
@@ -149,6 +151,7 @@ namespace
 			sun.Intensity = 0.7f;
 			lights.Create(sun);
 		}
+
 		for (const auto& desc : scene.Descs)
 		{
 			handles.push_back(lights.Create(desc));
@@ -178,6 +181,7 @@ namespace
 			depthDesc.DebugName = "Synthetic depth";
 			const auto depth = graph.CreateTexture(depthDesc);
 			std::vector<float> depthTexels(std::size_t(width) * height);
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
@@ -186,12 +190,14 @@ namespace
 					depthTexels[std::size_t(y) * width + x] = x < 16 ? 0.0f : grid.DepthParams[1] / viewDepth;
 				}
 			}
+
 			AddTextureUpload(graph, "Depth upload", std::as_bytes(std::span(depthTexels)), depth, { 0, {}, {}, { width, height, 1 } });
 			const auto heatmapTexture = assigner.RecordHeatmap(graph, clusters, depth);
 
 			// Probe samples at random pixels and depths.
 			constexpr std::uint32_t sampleCount = 1024;
 			std::vector<ProbeSample> samples(sampleCount);
+
 			for (auto& s : samples)
 			{
 				const float px = unit(random) * float(width);
@@ -203,6 +209,7 @@ namespace
 				s = { { world[0], world[1], world[2] }, unit(random), { n[0], n[1], n[2] }, 0.1f + 0.9f * unit(random),
 					{ v[0], v[1], v[2] }, d, { unit(random), unit(random), unit(random) }, 0, { px, py }, { 0, 0 } };
 			}
+
 			const auto sampleUpload = graph.CreateUpload(std::as_bytes(std::span(samples)), "Probe samples", Rhi::BufferUsage::Storage, 16);
 			const auto results = graph.CreateBuffer({ sampleCount * 32, Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource,
 				Rhi::MemoryPreference::DeviceLocal, "Probe results" });
@@ -225,11 +232,13 @@ namespace
 					const std::array<GraphBuffer, 7> buffers{ clusters.Grid, lightResources.Lights, lightResources.Header, clusters.Records,
 						clusters.Indices, sampleUpload, results };
 					std::array<Rhi::DescriptorWrite, 7> writes{};
+
 					for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 					{
 						const auto range = c.GetRange(buffers[binding]);
 						writes[binding] = { binding, 0, range.Buffer, nullptr, nullptr, range.Offset, range.Size };
 					}
+
 					table->Write(writes);
 					auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 					const std::array<std::uint32_t, 4> constants{ sampleCount, 0, 0, 0 };
@@ -280,11 +289,13 @@ namespace
 			const auto rows = lights.GetRecords();
 			std::vector<Cl::ViewLight> viewLights(header.LocalCount);
 			std::uint32_t cullDifferences = 0;
+
 			for (std::uint32_t i = 0; i < header.LocalCount; ++i)
 			{
 				const auto expected = Cl::CullLight(grid, rows[header.FirstLocalRow + i]);
 				const auto& actual = gpuViewLights[i];
 				viewLights[i] = { { actual[0], actual[1], actual[2] }, actual[3] };
+
 				if ((expected.Radius >= 0.0f) != (actual[3] >= 0.0f))
 				{
 					++cullDifferences; // Allowed only when the sphere grazes the volume.
@@ -293,18 +304,23 @@ namespace
 					SWIM_CHECK(std::abs(gap) < 1.0e-3f * (1.0f + sphere.Radius));
 					continue;
 				}
+
 				for (int c = 0; c < 3; ++c)
 				{
 					SWIM_CHECK(std::abs(actual[c] - expected.Center[c]) < 1.0e-4f * (1.0f + std::abs(expected.Center[c])));
 				}
+
 				SWIM_CHECK(actual[3] < 0.0f || std::abs(actual[3] - expected.Radius) < 1.0e-5f * (1.0f + expected.Radius));
 			}
+
 			std::vector<Cl::Aabb> gpuAabbs(clusterCount);
+
 			for (std::uint32_t c = 0; c < clusterCount; ++c)
 			{
 				const auto& b = gpuBounds[c];
 				gpuAabbs[c] = { { b[0], b[1], b[2] }, { b[4], b[5], b[6] } };
 				const auto expected = Cl::ClusterBounds(grid, c);
+
 				for (int k = 0; k < 3; ++k)
 				{
 					SWIM_CHECK(std::abs(gpuAabbs[c].Min[k] - expected.Min[k]) < 1.0e-4f * (1.0f + std::abs(expected.Min[k])));
@@ -318,6 +334,7 @@ namespace
 			Cl::ClusterAssignment gpuAssignment;
 			gpuAssignment.Records = gpuRecords;
 			gpuAssignment.Indices = gpuIndices;
+
 			for (std::uint32_t c = 0; c < clusterCount; ++c)
 			{
 				const auto& actual = gpuRecords[c];
@@ -327,15 +344,18 @@ namespace
 				const auto gpuList = Cl::ClusterLightList(gpuAssignment, grid, c);
 				const auto cpuList = Cl::ClusterLightList(reference, grid, c);
 				SWIM_CHECK_EQUAL(std::uint32_t(gpuList.size()), actual.Count);
+
 				if (actual.RawCount == expected.RawCount && gpuList == cpuList)
 				{
 					continue;
 				}
+
 				++listDifferences;
 				// Every light in only one of the lists grazes the cluster within float rounding.
 				std::set<std::uint32_t> onlyOne;
 				std::set_symmetric_difference(
 					gpuList.begin(), gpuList.end(), cpuList.begin(), cpuList.end(), std::inserter(onlyOne, onlyOne.begin()));
+
 				for (const auto light : onlyOne)
 				{
 					const auto& v = viewLights[light];
@@ -343,11 +363,13 @@ namespace
 					SWIM_CHECK(std::abs(gap) < 1.0e-3f * (1.0f + v.Radius));
 				}
 			}
+
 			SWIM_CHECK(listDifferences <= clusterCount / 200); // Grazing contacts only.
 			SWIM_CHECK_EQUAL(gpuStats.ClusterCount, clusterCount);
 			SWIM_CHECK_EQUAL(gpuStats.VisibleLights, reference.Stats.VisibleLights);
 			SWIM_CHECK_EQUAL(gpuStats.DroppedIndices, 0u);
 			SWIM_CHECK_EQUAL(gpuStats.WrittenIndices, gpuStats.RequestedIndices);
+
 			if (listDifferences == 0)
 			{
 				SWIM_CHECK(std::memcmp(&gpuStats, &reference.Stats, sizeof(ClusterStats)) == 0);
@@ -355,6 +377,7 @@ namespace
 
 			// 3. Clustered shading equals brute force (when nothing was truncated) and the CPU model.
 			std::uint32_t lit = 0;
+
 			for (std::uint32_t i = 0; i < sampleCount; ++i)
 			{
 				const auto& s = samples[i];
@@ -368,19 +391,23 @@ namespace
 					{ s.View[0], s.View[1], s.View[2] }, { s.Position[0], s.Position[1], s.Position[2] });
 				const auto cluster = static_cast<std::uint32_t>(clustered[3]);
 				SWIM_REQUIRE(cluster < clusterCount);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					SWIM_CHECK(std::abs(brute[c] - cpu[c]) <= 1.0e-4f + 2.0e-3f * std::abs(cpu[c]));
 					SWIM_CHECK(std::abs(clustered[c] - brute[c]) <= 1.0e-4f + 1.0e-3f * std::abs(brute[c])); // Complete lists.
 				}
+
 				lit += brute[0] > 0.0f ? 1u : 0u;
 			}
+
 			SWIM_CHECK(lit > sampleCount / 4);
 
 			// 4. The heatmap against HeatmapPixel over the GPU's records.
 			std::uint32_t heatmapDifferences = 0;
 			std::uint32_t magenta = 0;
 			std::uint32_t colored = 0;
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
@@ -389,19 +416,23 @@ namespace
 						Cl::HeatmapPixel(grid, gpuRecords, float(x) + 0.5f, float(y) + 0.5f, depthTexels[std::size_t(y) * width + x]);
 					const auto* actual = &gpuHeatmap[(std::size_t(y) * width + x) * 4];
 					bool same = true;
+
 					for (int c = 0; c < 4; ++c)
 					{
 						same = same && std::abs(int(actual[c]) - int(std::lround(expected[c] * 255.0f))) <= 1;
 					}
+
 					heatmapDifferences += same ? 0u : 1u; // Slice-boundary pixels may pick the neighbor cluster.
 					magenta += actual[0] == 255 && actual[1] == 0 && actual[2] == 255 ? 1u : 0u;
 					colored += actual[3] != 0 ? 1u : 0u;
+
 					if (x < 16)
 					{
 						SWIM_CHECK(actual[3] == 0); // Sky.
 					}
 				}
 			}
+
 			SWIM_CHECK(heatmapDifferences <= width * height / 200);
 			SWIM_CHECK(colored > width * height / 4);
 
@@ -442,6 +473,7 @@ namespace
 			desc.Position[2] -= 3.0f;
 			SWIM_CHECK(lights.Update(handles[i], desc));
 		}
+
 		auto resized = gridDesc;
 		resized.ViewportWidth = 800;
 		resized.ViewportHeight = 450;
@@ -453,6 +485,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ClusteredLightingMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -461,6 +494,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunClusteredLightingSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

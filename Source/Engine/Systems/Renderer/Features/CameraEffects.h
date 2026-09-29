@@ -17,10 +17,13 @@
 // features and the grading, so presets are data, not hand-tuned effect values.
 namespace Engine
 {
+
 	// Thin-lens depth of field. Programs: DepthOfFieldPrepare, DepthOfFieldGather, DepthOfField.
 	class DepthOfField final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float FNumber = 2.8f;			// Aperture N (>= 0.7): smaller is a shallower focus.
@@ -47,14 +50,18 @@ namespace Engine
 		// The focal length (metres) of a lens giving a vertical half field of view whose
 		// tangent is tanHalfFovY on a sensor sensorHeightMm tall.
 		static float FocalLength(float tanHalfFovY, float sensorHeightMm);
+
 		// Signed thin-lens CoC diameter on the sensor (metres): < 0 in front of the focus.
 		static float CircleOfConfusion(float focalLength, float fNumber, float focus, float distance);
+
 	};
 
 	// The lens glass. Programs: CameraLensHalation, CameraLens.
 	class CameraLens final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float Distortion = 0.0f;		   // k1 of the radial polynomial: > 0 barrel, < 0 pincushion.
@@ -85,16 +92,21 @@ namespace Engine
 
 		// Whether any setting changes the image (else Record adds nothing).
 		bool Active() const;
+
 		// The output radius (1 = half-diagonal) -> source radius mapping of CameraLens.slang
 		// before the zoom, and the zoom that maps the corners onto the frame's corners.
 		static float SourceRadius(float r, float k1, float k2, float fisheye);
+
 		static float FitZoom(float k1, float k2, float fisheye);
+
 	};
 
 	// The sensor or film. Program: FilmSensor.
 	class FilmSensor final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float Sharpen = 0.0f;	 // 0..1, contrast-adaptive.
@@ -116,6 +128,7 @@ namespace Engine
 		void Record(RenderFeatureContext& context) override;
 
 		bool Active() const { return Settings.Sharpen > 0.0f || Settings.Grain > 0.0f; }
+
 	};
 
 	enum class CameraPreset : std::uint32_t
@@ -169,4 +182,5 @@ namespace Engine
 	// Applies derived settings to the features (any may be null) and the grading.
 	void ApplyCameraLook(const CameraLookSettings& settings, DepthOfField* dof, CameraLens* lens, FilmSensor* sensor,
 		Swim::Render::ColorGradingSettings& grading);
+
 } // namespace Engine

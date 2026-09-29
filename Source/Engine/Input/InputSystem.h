@@ -21,60 +21,85 @@ namespace Swim::Input
 
 	class InputSystem
 	{
+
 	public:
 
 		void Reset();
+
 		// Publish once after event pumping, before fixed/update consumers read this frame.
 		void AdvanceFrame();
 
 		void ProcessInputEvent(const Platform::InputEvent& event);
+
 		void ProcessWindowEvent(const Platform::WindowEvent& event);
 
 		bool IsKeyDown(Platform::KeyCode key) const;
+
 		bool IsKeyTriggered(Platform::KeyCode key) const;
+
 		bool IsKeyReleased(Platform::KeyCode key) const;
 
 		bool IsScanCodeDown(Platform::ScanCode scanCode) const;
+
 		bool IsScanCodeTriggered(Platform::ScanCode scanCode) const;
+
 		bool IsScanCodeReleased(Platform::ScanCode scanCode) const;
 
 		bool IsMouseButtonDown(Platform::MouseButton button) const;
+
 		bool IsMouseButtonTriggered(Platform::MouseButton button) const;
+
 		bool IsMouseButtonReleased(Platform::MouseButton button) const;
 
 		bool IsShiftDown() const;
+
 		bool IsControlDown() const;
+
 		bool IsAltDown() const;
 
 		float GetMouseScrollDelta() const { return mouseWheelDelta; }
+
 		Platform::Float2 GetMousePosition() const { return mousePosition; }
+
 		Platform::Float2 GetMousePositionDelta() const { return mouseDelta; }
 
 		bool HasFocus() const { return hasFocus; }
+
 		Platform::Extent2D GetWindowSize() const { return windowSize; }
 
 		const std::vector<std::string>& GetTextInput() const { return textInput; }
+
 		// Every key press of the frame in event order, including operating-system key
 		// repeats (IsKeyTriggered reports only the first press). For text editing.
 		const std::vector<Platform::KeyCode>& GetKeyPresses() const { return keyPresses; }
+
 		// Key presses and committed text interleaved in event order (typing "ab" and
 		// pressing Left in one frame must not move the caret before the text arrives).
 		const std::vector<TextEditEvent>& GetTextEditEvents() const { return textEditEvents; }
+
 		// True when the platform reported an IME composition update this frame; the
 		// composition (possibly empty, which ends it) is then GetTextComposition().
 		bool HasTextCompositionUpdate() const { return textCompositionUpdated; }
+
 		const std::string& GetTextComposition() const { return textComposition; }
+
 		int GetTextCompositionStart() const { return textCompositionStart; }
+
 		int GetTextCompositionLength() const { return textCompositionLength; }
 
 		bool IsGamepadConnected(Platform::InputDeviceId device) const;
+
 		bool IsGamepadButtonDown(Platform::InputDeviceId device, Platform::GamepadButton button) const;
+
 		bool IsGamepadButtonTriggered(Platform::InputDeviceId device, Platform::GamepadButton button) const;
+
 		bool IsGamepadButtonReleased(Platform::InputDeviceId device, Platform::GamepadButton button) const;
+
 		float GetGamepadAxis(Platform::InputDeviceId device, Platform::GamepadAxis axis) const;
 
 		float GetActionValue(InputAction action, const InputMap& map,
 			Platform::InputDeviceId gamepadDevice = 0) const;
+
 		bool IsActionDown(InputAction action, const InputMap& map,
 			Platform::InputDeviceId gamepadDevice = 0) const;
 

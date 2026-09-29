@@ -18,7 +18,9 @@ namespace Swim::RhiVulkan
 			std::scoped_lock lock(*state->PresentationQueueMutex);
 			ObserveVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(state->PresentationQueue), "vkQueueWaitIdle (swapchain teardown)");
 		}
+
 		DestroySwapchain();
+
 		if (surface != VK_NULL_HANDLE)
 		{
 			Platform::Internal::DestroyVulkanSurface(
@@ -37,10 +39,12 @@ namespace Swim::RhiVulkan
 		Rhi::Semaphore& signalSemaphore, Rhi::Fence* signalFence)
 	{
 		const auto size = window.GetPixelSize();
+
 		if (window.IsMinimized() || size.Width == 0 || size.Height == 0)
 		{
 			session.Suspend();
 		}
+
 		return session.Acquire(signalSemaphore, signalFence);
 	}
 
@@ -56,6 +60,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::runtime_error("Failed to resize Vulkan swapchain; retry Resize before acquiring");
 		}
+
 		return !session.IsSuspended();
 	}
 
@@ -63,29 +68,35 @@ namespace Swim::RhiVulkan
 	{
 		RequireVulkanDevice(*state);
 		const auto pixelSize = window.GetPixelSize();
+
 		if (width == 0 || height == 0 || window.IsMinimized() || pixelSize.Width == 0 || pixelSize.Height == 0)
 		{
 			session.Suspend();
 			return true;
 		}
+
 		// The native surface can become zero-sized before SDL delivers its event.
 		VkSurfaceCapabilitiesKHR capabilities{};
 		const auto capabilitiesResult = state->Instance->Dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 			state->Device.physical_device.physical_device, surface, &capabilities);
+
 		if (capabilitiesResult != VK_SUCCESS)
 		{
 			session.Invalidate();
 			CheckVulkanResult(*state, capabilitiesResult, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 			return false;
 		}
+
 		if (capabilities.currentExtent.width == 0 || capabilities.currentExtent.height == 0 ||
 			capabilities.maxImageExtent.width == 0 || capabilities.maxImageExtent.height == 0)
 		{
 			session.Suspend();
 			return true;
 		}
+
 		session.RequireNoAcquiredImages();
 		std::optional<Rhi::SwapchainSurfaceFormat> selected;
+
 		try
 		{
 			selected = SelectSwapchainFormat(QueryVulkanSwapchainSupport(*state, surface), desc);
@@ -95,6 +106,7 @@ namespace Swim::RhiVulkan
 			session.Invalidate();
 			throw;
 		}
+
 		if (!selected)
 		{
 			// Selection failed before oldSwapchain retirement. Preserve its images,
@@ -102,13 +114,16 @@ namespace Swim::RhiVulkan
 			session.Invalidate();
 			return false;
 		}
+
 		const bool replaceExisting = swapchain.swapchain != VK_NULL_HANDLE;
+
 		if (replaceExisting && !WaitForRetirement(safeAfter))
 		{
 			return false;
 		}
 
 		vkb::SwapchainBuilder builder{ state->Device, surface };
+
 		if (replaceExisting)
 		{
 			builder.set_old_swapchain(swapchain);
@@ -138,6 +153,7 @@ namespace Swim::RhiVulkan
 		// never be acquired from, or passed as oldSwapchain on a later retry.
 		// Retirement was completed before build, so release it on both paths.
 		DestroySwapchain();
+
 		if (!swapchainResult)
 		{
 			CheckVulkanResult(*state, swapchainResult.vk_result(), "vk-bootstrap swapchain build");
@@ -152,35 +168,44 @@ namespace Swim::RhiVulkan
 			DestroySwapchain();
 			return false;
 		}
+
 		SetVulkanObjectName(*state, VK_OBJECT_TYPE_SWAPCHAIN_KHR, ToNativeHandle(swapchain.swapchain), "Swim swapchain");
+
 		try
 		{
 			auto imagesResult = swapchain.get_images();
+
 			if (!imagesResult)
 			{
 				DestroySwapchain();
 				CheckVulkanResult(*state, imagesResult.vk_result(), "vkGetSwapchainImagesKHR");
 				return false;
 			}
+
 			auto viewsResult = swapchain.get_image_views();
+
 			if (!viewsResult)
 			{
 				DestroySwapchain();
 				CheckVulkanResult(*state, viewsResult.vk_result(), "vk-bootstrap swapchain image views");
 				return false;
 			}
+
 			auto newImages = std::move(imagesResult).value();
 			imageViews = std::move(viewsResult).value();
+
 			if (newImages.empty() || newImages.size() != imageViews.size())
 			{
 				DestroySwapchain();
 				return false;
 			}
+
 			format = selected->PixelFormat;
 			colorSpace = selected->ColorSpace;
 			extent = { swapchain.extent.width, swapchain.extent.height };
 			textures.reserve(newImages.size());
 			views.reserve(newImages.size());
+
 			for (std::size_t index = 0; index < newImages.size(); ++index)
 			{
 				Rhi::TextureDesc textureDesc{};
@@ -198,6 +223,7 @@ namespace Swim::RhiVulkan
 				views.push_back(std::make_unique<VulkanTextureView>(
 					state, *textures.back(), imageViews[index], viewDesc));
 			}
+
 			session.SetImages(swapchain.swapchain, static_cast<std::uint32_t>(views.size()));
 			return true;
 		}
@@ -217,11 +243,13 @@ namespace Swim::RhiVulkan
 		colorSpace = Rhi::SwapchainColorSpace::Undefined;
 		views.clear();
 		textures.clear();
+
 		if (!imageViews.empty() && swapchain.swapchain != VK_NULL_HANDLE)
 		{
 			swapchain.destroy_image_views(imageViews);
 			imageViews.clear();
 		}
+
 		if (swapchain.swapchain != VK_NULL_HANDLE)
 		{
 			vkb::destroy_swapchain(swapchain);

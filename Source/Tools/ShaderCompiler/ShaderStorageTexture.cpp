@@ -30,6 +30,7 @@ namespace Swim::ShaderCompiler
 			{ "rgba8ui", Rhi::Format::RGBA8Uint, "uint32", 4 },
 			{ "rgba8i", Rhi::Format::RGBA8Sint, "int32", 4 }
 		}};
+
 		for (const auto& format : formats)
 		{
 			if (parameter.ResourceFormat == format.Name && parameter.ResourceScalarType == format.Scalar &&
@@ -38,6 +39,7 @@ namespace Swim::ShaderCompiler
 				return format.Format;
 			}
 		}
+
 		return Rhi::Format::Undefined;
 	}
 

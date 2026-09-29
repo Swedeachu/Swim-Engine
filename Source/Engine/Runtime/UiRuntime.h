@@ -18,16 +18,21 @@
 
 namespace Swim::Input
 {
+
 	class InputSystem;
+
 }
 
 namespace Swim::Text
 {
+
 	class FontCollection;
+
 }
 
 namespace Engine
 {
+
 	class Scene;
 
 	// The runtime side of retained UI (Phase 23): the fonts (Assets/Fonts), the theme
@@ -39,10 +44,13 @@ namespace Engine
 	// animations and builds the frame renderer's UI draw list. Owner thread only.
 	class UiRuntime
 	{
+
 	  public:
+
 		// Loads DejaVuSans(-Bold/Mono).ttf from <assetRoot>/Fonts; throws
 		// std::runtime_error when the regular face is missing.
 		explicit UiRuntime(const std::filesystem::path& assetRoot);
+
 		~UiRuntime();
 
 		const std::shared_ptr<const Swim::Text::FontCollection>& GetFonts() const { return fonts; }
@@ -68,8 +76,10 @@ namespace Engine
 
 		// 1. Mirror the scene's canvases and lay them out (null scene: remove every canvas).
 		void Sync(Scene* scene, const ViewDesc& view);
+
 		// 2. Route one accepted input frame (after InputSystem::AdvanceFrame).
 		const Swim::UI::UiInputFrame& ApplyInput(const Swim::Input::InputSystem* input, float deltaSeconds);
+
 		// 3. After the scene updated: re-layout changed documents, animate, and build the
 		//    draw list (world canvases first, then screen overlays by order).
 		std::span<const UiDrawItem> Finish(float deltaSeconds);
@@ -86,10 +96,13 @@ namespace Engine
 		// above the scene's screen canvases (then by order). Hidden overlays neither draw nor
 		// take input.
 		std::uint32_t AddOverlay(std::shared_ptr<Swim::UI::UiDocument> document, std::int32_t order);
+
 		void SetOverlayVisible(std::uint32_t overlay, bool visible);
+
 		void RemoveOverlay(std::uint32_t overlay);
 
 	  private:
+
 		struct CanvasState
 		{
 			Swim::UI::UiCanvasHandle Handle;
@@ -107,6 +120,7 @@ namespace Engine
 		};
 
 		void RemoveAll();
+
 		void SyncOverlays();
 
 		struct OverlayState
@@ -131,5 +145,7 @@ namespace Engine
 		std::unordered_map<entt::entity, CanvasState> canvases;
 		std::uint64_t sequence = 0;
 		std::vector<UiDrawItem> drawList;
+
 	};
+
 } // namespace Engine

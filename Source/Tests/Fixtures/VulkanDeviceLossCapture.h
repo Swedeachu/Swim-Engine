@@ -9,7 +9,9 @@ namespace Swim::Testing
 	struct VulkanDeviceLossCapture : VulkanDescriptorCapture
 	{
 		VulkanDeviceLossCapture();
+
 		~VulkanDeviceLossCapture();
+
 		std::unique_ptr<RhiVulkan::VulkanDevice> Device;
 		VkResult HostResult = VK_SUCCESS;
 		std::uint32_t HostCalls = 0;

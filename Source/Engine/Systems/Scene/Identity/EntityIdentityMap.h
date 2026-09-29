@@ -14,6 +14,7 @@ namespace Engine
 
 	class EntityIdentityMap
 	{
+
 	public:
 
 		SerializedEntityId Assign(entt::entity entity)
@@ -47,12 +48,14 @@ namespace Engine
 			}
 
 			const auto existingEntity = entityToId.find(entity);
+
 			if (existingEntity != entityToId.end())
 			{
 				return existingEntity->second == id;
 			}
 
 			const auto existingId = idToEntity.find(id);
+
 			if (existingId != idToEntity.end())
 			{
 				return existingId->second == entity;
@@ -60,20 +63,24 @@ namespace Engine
 
 			entityToId.emplace(entity, id);
 			idToEntity.emplace(id, entity);
+
 			if (id.Value >= nextValue)
 			{
 				nextValue = id.Value + 1;
+
 				if (nextValue == 0)
 				{
 					nextValue = 1;
 				}
 			}
+
 			return true;
 		}
 
 		bool Forget(entt::entity entity)
 		{
 			const auto existing = entityToId.find(entity);
+
 			if (existing == entityToId.end())
 			{
 				return false;
@@ -87,20 +94,24 @@ namespace Engine
 		std::optional<SerializedEntityId> FindId(entt::entity entity) const
 		{
 			const auto existing = entityToId.find(entity);
+
 			if (existing == entityToId.end())
 			{
 				return std::nullopt;
 			}
+
 			return existing->second;
 		}
 
 		std::optional<entt::entity> FindEntity(SerializedEntityId id) const
 		{
 			const auto existing = idToEntity.find(id);
+
 			if (existing == idToEntity.end())
 			{
 				return std::nullopt;
 			}
+
 			return existing->second;
 		}
 

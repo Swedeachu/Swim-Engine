@@ -40,6 +40,7 @@ namespace
 					return binding.Binding;
 				}
 			}
+
 			throw std::runtime_error("Compute reflection is missing a buffer binding");
 		};
 		std::ifstream file(SWIM_RHI_COMPUTE_SPIRV_PATH, std::ios::binary | std::ios::ate);
@@ -90,12 +91,14 @@ namespace
 		std::array<std::uint32_t, elementCount> source{};
 		std::array<std::uint32_t, elementCount> actual{};
 		const auto readWrite = Rhi::ResourceState::ShaderRead | Rhi::ResourceState::ShaderWrite;
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			for (std::uint32_t index = 0; index < elementCount; ++index)
 			{
 				source[index] = index * 17 + frame * 101;
 			}
+
 			input->Write(0, std::as_bytes(std::span(source)));
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
@@ -129,23 +132,27 @@ namespace
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::uint32_t index = 0; index < elementCount; ++index)
 			{
 				const auto expected = index < activeCount ? source[index] * 8 + 18 : source[index];
 				SWIM_CHECK_EQUAL(actual[index], expected);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ComputeStoragePassesAndReadback",
 				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunComputeSmoke); } });
 		}
+
 		return true;
 	}();
 

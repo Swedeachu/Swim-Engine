@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	Rhi::CommandList& RenderCommandContext::Commands() const
 	{
 		return *state.Commands;
@@ -27,24 +28,30 @@ namespace Swim::Render
 		// requested cell must be covered by some use. (Enumerating cells per use was O(n^2)
 		// on large arrays - a probe atlas has hundreds of subresources.)
 		const auto& uses = definition.Passes[pass].Uses;
+
 		for (const auto& use : uses)
 		{
 			if (use.Resource != index)
 			{
 				continue;
 			}
+
 			if (r.Kind == GraphKind::Buffer)
 			{
 				return *state.Resources[index];
 			}
+
 			const auto u = Internal::NormalizeRange(r, use.Range);
+
 			if (range.BaseMipLevel >= u.BaseMipLevel && range.BaseMipLevel + range.MipLevelCount <= u.BaseMipLevel + u.MipLevelCount &&
 				range.BaseArrayLayer >= u.BaseArrayLayer && range.BaseArrayLayer + range.ArrayLayerCount <= u.BaseArrayLayer + u.ArrayLayerCount)
 			{
 				return *state.Resources[index];
 			}
 		}
+
 		std::vector<bool> covered(Internal::CellCount(r), false);
+
 		for (const auto& use : uses)
 		{
 			if (use.Resource == index)
@@ -55,6 +62,7 @@ namespace Swim::Render
 				}
 			}
 		}
+
 		for (const auto cell : Internal::Cells(r, range))
 		{
 			if (!covered[cell])
@@ -69,21 +77,25 @@ namespace Swim::Render
 	Rhi::Buffer& RenderCommandContext::Get(GraphBuffer r) const
 	{
 		auto& buffer = static_cast<Rhi::Buffer&>(GetResource(r.Graph, r.Index, GraphKind::Buffer, {}));
+
 		if (state.Graph.definition->Resources[r.Index].Staging != Internal::GraphStaging::None)
 		{
 			throw std::invalid_argument(
 				"Staged RenderGraph buffers are suballocated; use GetRange: " + state.Graph.definition->Resources[r.Index].Name);
 		}
+
 		return buffer;
 	}
 
 	GraphBufferRange RenderCommandContext::GetRange(GraphBuffer r) const
 	{
 		auto& buffer = static_cast<Rhi::Buffer&>(GetResource(r.Graph, r.Index, GraphKind::Buffer, {}));
+
 		if (state.Ranges[r.Index].Buffer)
 		{
 			return state.Ranges[r.Index];
 		}
+
 		return { &buffer, 0, buffer.GetDesc().Size };
 	}
 
@@ -97,6 +109,7 @@ namespace Swim::Render
 		auto& texture = Get(resource, { desc.BaseMipLevel, desc.MipLevelCount, desc.BaseArrayLayer, desc.ArrayLayerCount });
 
 		auto view = state.Device.CreateTextureView(texture, desc);
+
 		if (!view)
 		{
 			throw std::runtime_error("RenderGraph texture view allocation failed");
@@ -115,4 +128,5 @@ namespace Swim::Render
 		state.Retained.push_back(std::move(object));
 		return *state.Retained.back();
 	}
+
 } // namespace Swim::Render

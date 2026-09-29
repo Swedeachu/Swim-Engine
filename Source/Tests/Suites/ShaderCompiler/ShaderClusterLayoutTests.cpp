@@ -17,6 +17,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -41,6 +42,7 @@ namespace
 				return parameter;
 			}
 		}
+
 		SWIM_FAIL("missing shader parameter " + std::string(name));
 		throw std::logic_error("unreachable");
 	}
@@ -48,10 +50,12 @@ namespace
 	std::map<std::string, std::uint32_t> Offsets(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		return offsets;
 	}
 
@@ -60,13 +64,16 @@ namespace
 		SWIM_CHECK((program.Interface.ComputeThreadGroupSize ==
 			std::array<std::uint32_t, 3>{ group, group == Render::ClusterHeatmapBindings::ThreadGroupSize ? group : 1u, 1 }));
 		SWIM_CHECK_EQUAL(program.Interface.PushConstants.size(), std::size_t(pushBytes ? 1 : 0));
+
 		if (pushBytes)
 		{
 			SWIM_CHECK_EQUAL(program.Interface.PushConstants[0].Size, pushBytes);
 		}
+
 		SWIM_REQUIRE_EQUAL(program.Interface.DescriptorSchemas.size(), 1u);
 		SWIM_CHECK_EQUAL(program.Interface.DescriptorSchemas[0].Bindings.size(), bindingCount);
 	}
+
 } // namespace
 
 // The clustering records in ClusterGrid.slang equal the C++ ones, and every program's
@@ -107,6 +114,7 @@ SWIM_TEST("ShaderCompiler.ClusterLayout", "ClusterRecordsAndProgramsMatchTheirCp
 	CheckBindings(Load(SWIM_CLUSTER_BOUNDS_REFLECTION_PATH), Render::ClusterBoundsBindings::ThreadGroupSize, 0, 2);
 	const auto heatmap = Load(SWIM_CLUSTER_HEATMAP_REFLECTION_PATH);
 	CheckBindings(heatmap, Render::ClusterHeatmapBindings::ThreadGroupSize, 0, 4);
+
 	for (const auto& binding : heatmap.Interface.DescriptorSchemas[0].Bindings)
 	{
 		if (binding.Binding == Render::ClusterHeatmapBindings::Output)

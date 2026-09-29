@@ -9,7 +9,9 @@
 
 namespace
 {
+
 	[[maybe_unused]] Swim::AssetCompiler::IntermediateModel Model;
 	[[maybe_unused]] Swim::AssetCompiler::GltfImporter Importer;
 	[[maybe_unused]] Swim::AssetCompiler::MeshOptimizer Optimizer;
+
 }

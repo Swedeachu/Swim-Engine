@@ -5,6 +5,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	Float3 ProceduralSky::Evaluate(const Float3& direction) const
 	{
 		const auto d = Normalize(direction);
@@ -15,10 +16,12 @@ namespace Swim::Render::Environment
 		const auto sun = Normalize(SunDirection);
 		const float lobe = std::pow(std::max(Dot(d, sun), 0.0f), SunSharpness);
 		Float3 result;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			result[c] = (HorizonColor[c] + (end[c] - HorizonColor[c]) * blend + SunColor[c] * lobe) * Intensity;
 		}
+
 		return result;
 	}
 
@@ -34,6 +37,7 @@ namespace Swim::Render::Environment
 	{
 		ProceduralSkyConstants constants{};
 		const auto sun = Normalize(sky.SunDirection);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			constants.Zenith[c] = sky.ZenithColor[c];
@@ -42,6 +46,7 @@ namespace Swim::Render::Environment
 			constants.SunDirection[c] = sun[c];
 			constants.SunColor[c] = sky.SunColor[c];
 		}
+
 		constants.Zenith[3] = sky.Intensity;
 		constants.Ground[3] = sky.GroundFalloff;
 		constants.SunDirection[3] = sky.SunSharpness;
@@ -49,4 +54,5 @@ namespace Swim::Render::Environment
 		constants.Size = size;
 		return constants;
 	}
+
 } // namespace Swim::Render::Environment

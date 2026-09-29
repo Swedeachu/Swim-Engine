@@ -17,8 +17,10 @@
 
 namespace Swim::Text
 {
+
 	namespace
 	{
+
 		void ValidateSize(float size)
 		{
 			if (!std::isfinite(size) || size <= 0.0f || size > 16384.0f)
@@ -90,6 +92,7 @@ namespace Swim::Text
 						{
 							b.Shape.contours.back().addEdge(msdfgen::EdgeHolder(b.Current, b.Point(to)));
 						}
+
 						b.Current = b.Point(to);
 					});
 			};
@@ -114,14 +117,17 @@ namespace Swim::Text
 					});
 			};
 			const int error = FT_Outline_Decompose(&outline, &callbacks, &builder);
+
 			if (builder.Error)
 			{
 				std::rethrow_exception(builder.Error);
 			}
+
 			if (error != 0)
 			{
 				throw std::runtime_error("Unable to decompose glyph outline");
 			}
+
 			builder.Close();
 			// Fonts may carry point-only contours (anchor or phantom points left by subsetting
 			// or hinting tools): they have no area and no edges, and an empty contour in the
@@ -133,10 +139,12 @@ namespace Swim::Text
 				});
 			builder.Shape.normalize();
 			builder.Shape.orientContours();
+
 			if (!builder.Shape.validate())
 			{
 				throw std::runtime_error("Invalid MSDF outline");
 			}
+
 			return std::move(builder.Shape);
 		}
 
@@ -144,24 +152,29 @@ namespace Swim::Text
 		std::vector<std::uint8_t> EncodeTopDown(const msdfgen::Bitmap<float, 3>& bitmap, std::uint32_t width, std::uint32_t height)
 		{
 			std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * height * 3);
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
 				{
 					const float* sample = bitmap(static_cast<int>(x), static_cast<int>(height - y - 1));
+
 					for (std::uint32_t c = 0; c < 3; ++c)
 					{
 						if (!std::isfinite(sample[c]))
 						{
 							throw std::runtime_error("MSDF generation produced a non-finite distance");
 						}
+
 						pixels[(static_cast<std::size_t>(y) * width + x) * 3 + c] =
 							static_cast<std::uint8_t>(std::lround(std::clamp(sample[c], 0.0f, 1.0f) * 255.0f));
 					}
 				}
 			}
+
 			return pixels;
 		}
+
 	} // namespace
 
 	struct FontFace::Impl
@@ -178,10 +191,12 @@ namespace Swim::Text
 			{
 				hb_font_destroy(Font);
 			}
+
 			if (Face)
 			{
 				FT_Done_Face(Face);
 			}
+
 			if (Library)
 			{
 				FT_Done_FreeType(Library);
@@ -196,18 +211,22 @@ namespace Swim::Text
 		{
 			throw std::invalid_argument("Invalid font bytes or collection index");
 		}
+
 		impl->Bytes.assign(bytes.begin(), bytes.end());
+
 		if (FT_Init_FreeType(&impl->Library) != 0 ||
 			FT_New_Memory_Face(impl->Library, reinterpret_cast<const FT_Byte*>(impl->Bytes.data()),
 				static_cast<FT_Long>(impl->Bytes.size()), static_cast<FT_Long>(faceIndex), &impl->Face) != 0)
 		{
 			throw std::invalid_argument("FreeType could not load the font face");
 		}
+
 		if (!FT_IS_SCALABLE(impl->Face) || !FT_IS_SFNT(impl->Face) || impl->Face->units_per_EM == 0 ||
 			FT_Select_Charmap(impl->Face, FT_ENCODING_UNICODE) != 0)
 		{
 			throw std::invalid_argument("Text requires a scalable Unicode OpenType font");
 		}
+
 		hb_blob_t* blob = hb_blob_create(reinterpret_cast<const char*>(impl->Bytes.data()), static_cast<unsigned>(impl->Bytes.size()),
 			HB_MEMORY_MODE_READONLY, nullptr, nullptr);
 		hb_face_t* face = hb_face_create(blob, faceIndex);
@@ -217,6 +236,7 @@ namespace Swim::Text
 		hb_ot_font_set_funcs(impl->Font);
 		hb_font_set_scale(impl->Font, impl->Face->units_per_EM, impl->Face->units_per_EM);
 		hb_font_make_immutable(impl->Font);
+
 		if (hb_face_get_glyph_count(hb_font_get_face(impl->Font)) == 0)
 		{
 			throw std::invalid_argument("HarfBuzz could not load the font face");
@@ -243,28 +263,34 @@ namespace Swim::Text
 	{
 		ShapedRun result;
 		result.Metrics = GetMetrics(size);
+
 		if (utf8.size() > 1024u * 1024u || options.Script.size() > 4 || options.Language.size() > 128)
 		{
 			throw std::invalid_argument("Text run or shaping properties exceed their limits");
 		}
+
 		if (options.Direction != TextDirection::Auto && options.Direction != TextDirection::LeftToRight &&
 			options.Direction != TextDirection::RightToLeft)
 		{
 			throw std::invalid_argument("Invalid horizontal text direction");
 		}
+
 		std::unique_ptr<hb_buffer_t, decltype(&hb_buffer_destroy)> buffer(hb_buffer_create(), hb_buffer_destroy);
 		hb_buffer_set_cluster_level(buffer.get(), HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
 		hb_buffer_set_language(buffer.get(),
 			hb_language_from_string(options.Language.empty() ? "und" : options.Language.data(),
 				options.Language.empty() ? 3 : static_cast<int>(options.Language.size())));
+
 		if (!options.Script.empty())
 		{
 			hb_buffer_set_script(buffer.get(), hb_script_from_string(options.Script.data(), static_cast<int>(options.Script.size())));
 		}
+
 		if (options.Direction != TextDirection::Auto)
 		{
 			hb_buffer_set_direction(buffer.get(), options.Direction == TextDirection::RightToLeft ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
 		}
+
 		hb_buffer_add_utf8(buffer.get(), utf8.empty() ? "" : utf8.data(), static_cast<int>(utf8.size()), 0, static_cast<int>(utf8.size()));
 		hb_buffer_guess_segment_properties(buffer.get());
 		const unsigned kerning = options.Kerning ? 1u : 0u;
@@ -275,10 +301,12 @@ namespace Swim::Text
 			{ HB_TAG('c', 'l', 'i', 'g'), ligatures, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
 		};
 		hb_shape(impl->Font, buffer.get(), features, static_cast<unsigned>(std::size(features)));
+
 		if (!hb_buffer_allocation_successful(buffer.get()))
 		{
 			throw std::bad_alloc();
 		}
+
 		result.Direction =
 			hb_buffer_get_direction(buffer.get()) == HB_DIRECTION_RTL ? TextDirection::RightToLeft : TextDirection::LeftToRight;
 		unsigned count = 0;
@@ -286,6 +314,7 @@ namespace Swim::Text
 		const auto* positions = hb_buffer_get_glyph_positions(buffer.get(), nullptr);
 		const float scale = size / impl->Face->units_per_EM;
 		result.Glyphs.reserve(count);
+
 		for (unsigned i = 0; i < count; ++i)
 		{
 			result.Glyphs.push_back({ glyphs[i].codepoint, glyphs[i].cluster, positions[i].x_advance * scale,
@@ -293,6 +322,7 @@ namespace Swim::Text
 			result.AdvanceX += result.Glyphs.back().AdvanceX;
 			result.MissingGlyphs += glyphs[i].codepoint == 0 ? 1u : 0u;
 		}
+
 		return result;
 	}
 
@@ -304,10 +334,12 @@ namespace Swim::Text
 			// FreeType's glyph slot is per face: only outline extraction is serialized.
 			// Distance-field generation below runs concurrently (GlyphAtlas::Prewarm).
 			std::lock_guard lock(impl->Mutex);
+
 			if (glyph >= static_cast<std::uint32_t>(impl->Face->num_glyphs))
 			{
 				throw std::out_of_range("Glyph index is outside the font");
 			}
+
 			// Size at units-per-em without hinting also preserves fractional coordinates
 			// in variable fonts, unlike FT_LOAD_NO_SCALE's integer font units.
 			if (FT_Set_Char_Size(impl->Face, 0, impl->Face->units_per_EM * 64L, 72, 72) != 0 ||
@@ -316,10 +348,12 @@ namespace Swim::Text
 			{
 				throw std::runtime_error("Unable to load glyph outline");
 			}
+
 			if (impl->Face->glyph->outline.n_points == 0)
 			{
 				return result; // Spaces advance but consume no atlas texels.
 			}
+
 			shape = BuildShape(impl->Face->glyph->outline, static_cast<double>(emSize) / (64.0 * impl->Face->units_per_EM));
 		}
 		const auto bounds = shape.getBounds();
@@ -328,11 +362,13 @@ namespace Swim::Text
 		const double bottom = std::floor(bounds.b - padding);
 		const double right = std::ceil(bounds.r + padding);
 		const double top = std::ceil(bounds.t + padding);
+
 		if (!std::isfinite(left + bottom + right + top) || right <= left || top <= bottom || right - left > maxDimension ||
 			top - bottom > maxDimension)
 		{
 			throw std::length_error("Glyph exceeds the atlas page size");
 		}
+
 		result.Width = static_cast<std::uint32_t>(right - left);
 		result.Height = static_cast<std::uint32_t>(top - bottom);
 		result.Left = static_cast<float>(left);
@@ -345,4 +381,5 @@ namespace Swim::Text
 		result.Pixels = EncodeTopDown(bitmap, result.Width, result.Height);
 		return result;
 	}
+
 } // namespace Swim::Text

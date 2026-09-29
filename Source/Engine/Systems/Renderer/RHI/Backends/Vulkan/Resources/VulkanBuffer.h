@@ -15,7 +15,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanBuffer final : public Rhi::Buffer
 		{
+
 		public:
+
 			VulkanBuffer(
 				std::shared_ptr<VulkanDeviceState> state,
 				VkBuffer buffer,
@@ -34,11 +36,17 @@ namespace Swim::RhiVulkan
 			}
 
 			~VulkanBuffer() override;
+
 			void Write(std::uint64_t offset, std::span<const std::byte> data) override;
+
 			void Read(std::uint64_t offset, std::span<std::byte> data) override;
+
 			std::span<std::byte> GetMappedWriteSpan() override;
+
 			void FlushMappedWrites(std::uint64_t offset, std::uint64_t size) override;
+
 			std::span<const std::byte> GetMappedReadSpan() override;
+
 			void InvalidateMappedReads(std::uint64_t offset, std::uint64_t size) override;
 
 			std::uintptr_t GetNativeHandle() const override
@@ -57,12 +65,14 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			VkBuffer buffer = VK_NULL_HANDLE;
 			VmaAllocation allocation = nullptr;
 			std::string debugName;
 			Rhi::BufferDesc desc{};
 			std::byte* mappedData = nullptr;
+
 		};
 
 } // namespace Swim::RhiVulkan

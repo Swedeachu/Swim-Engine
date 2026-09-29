@@ -8,6 +8,7 @@
 
 namespace Engine
 {
+
 	class FrameRenderer;
 
 	// Every switch that removes a slice of the frame, by name, for profiling and A/B checks
@@ -18,7 +19,9 @@ namespace Engine
 	// exactly what was there (budgets and intervals a switch zeroes are remembered).
 	class RenderToggles
 	{
+
 	  public:
+
 		struct Toggle
 		{
 			std::string Name;		 // "group.name", lower case.
@@ -32,18 +35,22 @@ namespace Engine
 
 		// Built-in, feature and registered toggles, in that order.
 		std::vector<Toggle> List() const;
+
 		std::optional<bool> Get(std::string_view name) const;
+
 		// Sets one toggle, a group ("shadows.*") or everything ("all"); the number changed.
 		std::size_t Set(std::string_view pattern, bool on);
 
 		// Scenes add their own (replacing one of the same name) and remove them on exit.
 		void Register(Toggle toggle);
+
 		void Unregister(std::string_view prefix);
 
 		// "Volumetric clouds" -> "volumetric-clouds".
 		static std::string Slug(std::string_view text);
 
 	  private:
+
 		std::vector<Toggle> BuiltIn() const;
 
 		FrameRenderer* renderer;
@@ -55,5 +62,7 @@ namespace Engine
 			unsigned SpotShadows = 16;
 			unsigned PointShadows = 2;
 		} saved;
+
 	};
+
 } // namespace Engine

@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	void ValidatePostProcessSettings(const PostProcessSettings& settings)
 	{
 		const auto finite = [](std::initializer_list<float> values)
@@ -37,17 +38,21 @@ namespace Swim::Render
 		const bool tone = std::isfinite(t.WhitePoint) && t.WhitePoint >= 1.0f && static_cast<std::uint32_t>(t.Operator) <= 3u;
 		const bool output = finite({ o.PaperWhiteNits, o.PeakNits }) && static_cast<std::uint32_t>(o.Encoding) <= 2u &&
 			o.PaperWhiteNits > 0.0f && o.PeakNits >= o.PaperWhiteNits && o.PeakNits <= 10000.0f;
+
 		if (!exposure || !bloom || !grading || !tone || !output)
 		{
 			throw std::invalid_argument("Post-process settings are out of range (see PostProcessSettings.h)");
 		}
 	}
+
 } // namespace Swim::Render
 
 namespace Swim::Render::Post
 {
+
 	namespace
 	{
+
 		constexpr Float3 LuminanceWeights{ 0.2126f, 0.7152f, 0.0722f };
 
 		float Saturate(float v)
@@ -64,6 +69,7 @@ namespace Swim::Render::Post
 		Matrix3 Multiply(const Matrix3& a, const Matrix3& b)
 		{
 			Matrix3 r{};
+
 			for (int i = 0; i < 3; ++i)
 			{
 				for (int j = 0; j < 3; ++j)
@@ -71,6 +77,7 @@ namespace Swim::Render::Post
 					r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
 				}
 			}
+
 			return r;
 		}
 
@@ -98,6 +105,7 @@ namespace Swim::Render::Post
 		{
 			return { (a[0] + b[0] + c[0] + d[0]) * 0.25f, (a[1] + b[1] + c[1] + d[1]) * 0.25f, (a[2] + b[2] + c[2] + d[2]) * 0.25f };
 		}
+
 	} // namespace
 
 	const Float4& Image::Clamped(int x, int y) const
@@ -113,10 +121,12 @@ namespace Swim::Render::Post
 		{
 			return value;
 		}
+
 		const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
 		const std::uint32_t sign = bits & 0x80000000u;
 		std::uint32_t magnitude = bits & 0x7fffffffu;
 		std::uint32_t half = 0;
+
 		if (magnitude >= 0x477ff000u) // >= 65520 rounds to infinity.
 		{
 			half = 0x7c00u;
@@ -133,15 +143,18 @@ namespace Swim::Render::Post
 			std::uint32_t mantissa = magnitude & 0x7fffffu;
 			half = (exponent << 10) | (mantissa >> 13);
 			const std::uint32_t rest = mantissa & 0x1fffu;
+
 			if (rest > 0x1000u || (rest == 0x1000u && (half & 1u)))
 			{
 				++half; // May carry into the exponent (and up to infinity), which is correct.
 			}
 		}
+
 		// Back to float.
 		const std::uint32_t e = (half >> 10) & 0x1fu;
 		const std::uint32_t m = half & 0x3ffu;
 		float result = 0.0f;
+
 		if (e == 0)
 		{
 			result = float(m) / 16777216.0f;
@@ -154,6 +167,7 @@ namespace Swim::Render::Post
 		{
 			result = std::bit_cast<float>(((e - 15u + 127u) << 23) | (m << 13));
 		}
+
 		return sign ? -result : result;
 	}
 
@@ -170,10 +184,12 @@ namespace Swim::Render::Post
 	std::uint32_t HistogramBin(float luminance, float minLog2, float inverseLog2Range)
 	{
 		const float l = std::log2(luminance);
+
 		if (!(l >= minLog2))
 		{
 			return 0;
 		}
+
 		const float t = Saturate((l - minLog2) * inverseLog2Range);
 		return std::min(static_cast<std::uint32_t>(t * 254.0f) + 1u, PostHistogramBins - 1);
 	}
@@ -182,10 +198,12 @@ namespace Swim::Render::Post
 	{
 		Histogram bins{};
 		const float inverse = 1.0f / (settings.MaxLog2Luminance - settings.MinLog2Luminance);
+
 		for (const auto& texel : source.Texels)
 		{
 			++bins[HistogramBin(Luminance(Rgb(texel)), settings.MinLog2Luminance, inverse)];
 		}
+
 		return bins;
 	}
 
@@ -198,15 +216,18 @@ namespace Swim::Render::Post
 	{
 		const float range = settings.MaxLog2Luminance - settings.MinLog2Luminance;
 		float total = 0.0f;
+
 		for (std::uint32_t b = 1; b < PostHistogramBins; ++b)
 		{
 			total += float(histogram[b]);
 		}
+
 		const float low = total * settings.LowPercentile;
 		const float high = total * settings.HighPercentile;
 		float cumulative = 0.0f;
 		float weight = 0.0f;
 		float sum = 0.0f;
+
 		for (std::uint32_t b = 1; b < PostHistogramBins; ++b)
 		{
 			const float count = float(histogram[b]);
@@ -215,10 +236,12 @@ namespace Swim::Render::Post
 			sum += w * BinLog2Luminance(b, settings.MinLog2Luminance, range);
 			cumulative += count;
 		}
+
 		if (!(weight > 0.0f))
 		{
 			return false;
 		}
+
 		average = sum / weight;
 		return true;
 	}
@@ -239,6 +262,7 @@ namespace Swim::Render::Post
 		const bool snap = reset || previous.Valid == 0;
 		GpuExposureState state;
 		float target = 0.0f;
+
 		if (settings.Mode == ExposureMode::Manual)
 		{
 			state.AverageLog2Luminance = snap ? 0.0f : previous.AverageLog2Luminance;
@@ -248,12 +272,15 @@ namespace Swim::Render::Post
 		else
 		{
 			float average = 0.0f;
+
 			if (!AverageLog2Luminance(histogram, settings, average))
 			{
 				average = snap ? std::log2(0.18f) : previous.AverageLog2Luminance;
 			}
+
 			state.AverageLog2Luminance = average;
 			target = std::clamp(Ev100FromAverageLog2(average) - settings.Compensation, settings.MinEv100, settings.MaxEv100);
+
 			if (snap)
 			{
 				state.Ev100 = target;
@@ -264,6 +291,7 @@ namespace Swim::Render::Post
 				state.Ev100 = previous.Ev100 + (target - previous.Ev100) * (1.0f - std::exp(-deltaTime * speed));
 			}
 		}
+
 		state.Exposure = ExposureFromEv100(state.Ev100);
 		state.Valid = 1;
 		return state;
@@ -272,10 +300,12 @@ namespace Swim::Render::Post
 	std::uint32_t BloomLevelCount(std::uint32_t width, std::uint32_t height, std::uint32_t requested)
 	{
 		std::uint32_t levels = 0;
+
 		while (levels < requested && levels < 31 && (width >> (levels + 1)) >= 1 && (height >> (levels + 1)) >= 1)
 		{
 			++levels;
 		}
+
 		return levels;
 	}
 
@@ -292,6 +322,7 @@ namespace Swim::Render::Post
 		const Image& source, std::uint32_t width, std::uint32_t height, bool first, float exposure, float threshold, float knee)
 	{
 		Image result(width, height);
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -315,26 +346,32 @@ namespace Swim::Render::Post
 					Average4(g, h, l, m) };
 				constexpr std::array<float, 5> weights{ 0.5f, 0.125f, 0.125f, 0.125f, 0.125f };
 				Float3 sum{ 0, 0, 0 };
+
 				if (first)
 				{
 					float total = 0.0f;
+
 					for (int n = 0; n < 5; ++n)
 					{
 						for (auto& v : groups[n])
 						{
 							v *= exposure;
 						}
+
 						const float w = weights[n] / (1.0f + Luminance(groups[n]));
 						total += w;
+
 						for (int ch = 0; ch < 3; ++ch)
 						{
 							sum[ch] += groups[n][ch] * w;
 						}
 					}
+
 					for (auto& v : sum)
 					{
 						v /= total;
 					}
+
 					sum = BloomThreshold(sum, threshold, knee);
 				}
 				else
@@ -347,9 +384,11 @@ namespace Swim::Render::Post
 						}
 					}
 				}
+
 				result.At(x, y) = RoundToHalf(Float4{ sum[0], sum[1], sum[2], 1.0f });
 			}
 		}
+
 		return result;
 	}
 
@@ -366,28 +405,34 @@ namespace Swim::Render::Post
 		const int x0 = int(fx0) - 1;
 		const int y0 = int(fy0) - 1;
 		Float3 sum{ 0, 0, 0 };
+
 		for (int j = 0; j < 4; ++j)
 		{
 			Float3 row{ 0, 0, 0 };
+
 			for (int i = 0; i < 4; ++i)
 			{
 				const auto& t = low.Clamped(x0 + i, y0 + j);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					row[c] += t[c] * wx[i];
 				}
 			}
+
 			for (int c = 0; c < 3; ++c)
 			{
 				sum[c] += row[c] * wy[j];
 			}
 		}
+
 		return sum;
 	}
 
 	Image BloomUpsample(const Image& low, const Image& high)
 	{
 		Image result(high.Width, high.Height);
+
 		for (std::uint32_t y = 0; y < high.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < high.Width; ++x)
@@ -397,6 +442,7 @@ namespace Swim::Render::Post
 				result.At(x, y) = RoundToHalf(Float4{ h[0] + tent[0], h[1] + tent[1], h[2] + tent[2], 1.0f });
 			}
 		}
+
 		return result;
 	}
 
@@ -406,6 +452,7 @@ namespace Swim::Render::Post
 		{
 			return { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 		}
+
 		// Linear Rec.709 <-> LMS (CAT02-based) and the CIE daylight locus, as in Unity's post stack.
 		constexpr Matrix3 linearToLms{ 3.90405e-1f, 5.49941e-1f, 8.92632e-3f, 7.08416e-2f, 9.63172e-1f, 1.35775e-3f, 2.31082e-2f,
 			1.28021e-1f, 9.36245e-1f };
@@ -433,17 +480,20 @@ namespace Swim::Render::Post
 		GpuPostParams params;
 		const auto& g = settings.Grading;
 		const auto wb = WhiteBalanceMatrix(g.Temperature, g.Tint);
+
 		for (int r = 0; r < 3; ++r)
 		{
 			for (int c = 0; c < 3; ++c)
 			{
 				params.WhiteBalance[r * 4 + c] = wb[r * 3 + c];
 			}
+
 			params.WhiteBalance[r * 4 + 3] = 0.0f;
 			params.SlopeContrast[r] = g.Slope[r];
 			params.OffsetSaturation[r] = g.Offset[r];
 			params.PowerBloom[r] = g.Power[r];
 		}
+
 		params.SlopeContrast[3] = g.Contrast;
 		params.OffsetSaturation[3] = g.Saturation;
 		const bool bloom = settings.Bloom.Enabled && bloomLevels > 0;
@@ -468,21 +518,27 @@ namespace Swim::Render::Post
 		{
 			return color;
 		}
+
 		Float3 c{};
+
 		for (int r = 0; r < 3; ++r)
 		{
 			c[r] = p.WhiteBalance[r * 4] * color[0] + p.WhiteBalance[r * 4 + 1] * color[1] + p.WhiteBalance[r * 4 + 2] * color[2];
 		}
+
 		for (int i = 0; i < 3; ++i)
 		{
 			c[i] = 0.18f * std::pow(std::max(c[i], 0.0f) / 0.18f, p.SlopeContrast[3]);
 			c[i] = std::pow(std::max(c[i] * p.SlopeContrast[i] + p.OffsetSaturation[i], 0.0f), p.PowerBloom[i]);
 		}
+
 		const float l = Luminance(c);
+
 		for (int i = 0; i < 3; ++i)
 		{
 			c[i] = std::max(l + (c[i] - l) * p.OffsetSaturation[3], 0.0f);
 		}
+
 		return c;
 	}
 
@@ -490,11 +546,13 @@ namespace Swim::Render::Post
 	{
 		Float3 r{};
 		const float w2 = whitePoint * whitePoint;
+
 		for (int i = 0; i < 3; ++i)
 		{
 			const float x = std::max(color[i], 0.0f);
 			r[i] = Saturate(x * (1.0f + x / w2) / (1.0f + x));
 		}
+
 		return r;
 	}
 
@@ -503,12 +561,14 @@ namespace Swim::Render::Post
 		constexpr Matrix3 input{ 0.59719f, 0.35458f, 0.04823f, 0.07600f, 0.90834f, 0.01566f, 0.02840f, 0.13383f, 0.83777f };
 		constexpr Matrix3 output{ 1.60475f, -0.53108f, -0.07367f, -0.10208f, 1.10813f, -0.00605f, -0.00327f, -0.07276f, 1.07602f };
 		auto v = Multiply(input, Float3{ std::max(color[0], 0.0f), std::max(color[1], 0.0f), std::max(color[2], 0.0f) });
+
 		for (auto& x : v)
 		{
 			const float a = x * (x + 0.0245786f) - 0.000090537f;
 			const float b = x * (0.983729f * x + 0.4329510f) + 0.238081f;
 			x = a / b;
 		}
+
 		v = Multiply(output, v);
 		return { Saturate(v[0]), Saturate(v[1]), Saturate(v[2]) };
 	}
@@ -520,26 +580,34 @@ namespace Swim::Render::Post
 		Float3 c{ std::max(color[0], 0.0f), std::max(color[1], 0.0f), std::max(color[2], 0.0f) };
 		const float x = std::min(c[0], std::min(c[1], c[2]));
 		const float offset = x < 0.08f ? x - 6.25f * x * x : 0.04f;
+
 		for (auto& v : c)
 		{
 			v -= offset;
 		}
+
 		const float peak = std::max(c[0], std::max(c[1], c[2]));
+
 		if (peak < startCompression)
 		{
 			return c;
 		}
+
 		constexpr float d = 1.0f - startCompression;
 		const float newPeak = 1.0f - d * d / (peak + d - startCompression);
+
 		for (auto& v : c)
 		{
 			v *= newPeak / peak;
 		}
+
 		const float g = 1.0f - 1.0f / (desaturation * (peak - newPeak) + 1.0f);
+
 		for (auto& v : c)
 		{
 			v = v * (1.0f - g) + newPeak * g;
 		}
+
 		return c;
 	}
 
@@ -597,6 +665,7 @@ namespace Swim::Render::Post
 		const GpuPostParams& p, float exposure, const Float4& source, const Float3& bloom, std::uint32_t x, std::uint32_t y)
 	{
 		Float3 c{ source[0] * exposure, source[1] * exposure, source[2] * exposure };
+
 		if (p.BloomEnabled != 0)
 		{
 			for (int i = 0; i < 3; ++i)
@@ -604,8 +673,10 @@ namespace Swim::Render::Post
 				c[i] += bloom[i] * p.PowerBloom[3];
 			}
 		}
+
 		c = Grade(p, c);
 		const auto op = static_cast<ToneMapper>(p.ToneMapper);
+
 		if (p.Encoding == static_cast<std::uint32_t>(OutputEncoding::Srgb))
 		{
 			const auto t = ToneMap(op, c, p.WhitePoint);
@@ -613,15 +684,18 @@ namespace Swim::Render::Post
 			return { Saturate(SrgbOetf(Saturate(t[0])) + noise), Saturate(SrgbOetf(Saturate(t[1])) + noise),
 				Saturate(SrgbOetf(Saturate(t[2])) + noise), Saturate(source[3]) };
 		}
+
 		// HDR: tone map relative to the display peak, in units of paper white.
 		const float headroom = p.PeakNits / p.PaperWhiteNits;
 		auto t = ToneMap(op, Float3{ c[0] / headroom, c[1] / headroom, c[2] / headroom }, p.WhitePoint);
 		const Float3 nits{ t[0] * headroom * p.PaperWhiteNits, t[1] * headroom * p.PaperWhiteNits, t[2] * headroom * p.PaperWhiteNits };
+
 		if (p.Encoding == static_cast<std::uint32_t>(OutputEncoding::Hdr10))
 		{
 			const auto wide = Rec709ToRec2020(nits);
 			return { PqOetf(wide[0]), PqOetf(wide[1]), PqOetf(wide[2]), source[3] };
 		}
+
 		return { nits[0] / 80.0f, nits[1] / 80.0f, nits[2] / 80.0f, source[3] };
 	}
 
@@ -630,43 +704,55 @@ namespace Swim::Render::Post
 	{
 		ValidatePostProcessSettings(settings);
 		PostResult result;
+
 		if (settings.Exposure.Mode == ExposureMode::Automatic)
 		{
 			result.Bins = BuildHistogram(source, settings.Exposure);
 		}
+
 		result.State = UpdateExposure(result.Bins, settings.Exposure, previous, deltaTime, reset);
 		const std::uint32_t levels = settings.Bloom.Enabled ? BloomLevelCount(source.Width, source.Height, settings.Bloom.MipCount) : 0u;
+
 		for (std::uint32_t i = 0; i < levels; ++i)
 		{
 			const auto& from = i == 0 ? source : result.Down.back();
 			result.Down.push_back(BloomDownsample(from, source.Width >> (i + 1), source.Height >> (i + 1), i == 0, result.State.Exposure,
 				settings.Bloom.Threshold, settings.Bloom.Knee));
 		}
+
 		result.Up.resize(levels);
+
 		if (levels > 0)
 		{
 			result.Up[levels - 1] = result.Down[levels - 1];
+
 			for (std::uint32_t i = levels - 1; i-- > 0;)
 			{
 				result.Up[i] = BloomUpsample(result.Up[i + 1], result.Down[i]);
 			}
 		}
+
 		result.Params = BuildPostParams(settings, levels);
 		result.Output = Image(source.Width, source.Height);
 		const bool sdr = settings.Output.Encoding == OutputEncoding::Srgb;
+
 		for (std::uint32_t y = 0; y < source.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < source.Width; ++x)
 			{
 				const Float3 bloom = levels > 0 ? TentUpsample(result.Up[0], x, y, source.Width, source.Height) : Float3{ 0, 0, 0 };
 				auto texel = CompositeTexel(result.Params, result.State.Exposure, source.At(x, y), bloom, x, y);
+
 				for (auto& v : texel)
 				{
 					v = sdr ? std::round(v * 255.0f) / 255.0f : RoundToHalf(v);
 				}
+
 				result.Output.At(x, y) = texel;
 			}
 		}
+
 		return result;
 	}
+
 } // namespace Swim::Render::Post

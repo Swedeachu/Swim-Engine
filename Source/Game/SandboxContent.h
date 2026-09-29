@@ -15,11 +15,14 @@
 
 namespace Engine
 {
+
 	class Scene;
+
 }
 
 namespace Game
 {
+
 	// A renderable entity: Transform + MeshRenderer (+ name and tags).
 	struct MeshSpawn
 	{
@@ -58,6 +61,7 @@ namespace Game
 	// Game tags (registered on first use by the scene's TagRegistry).
 	namespace GameTags
 	{
+
 		inline constexpr Engine::TagId PbrGallery = Engine::MakeTag("Game.PbrGallery");
 		inline constexpr Engine::TagId InstanceHall = Engine::MakeTag("Game.InstanceHall");
 		inline constexpr Engine::TagId PhysicsToy = Engine::MakeTag("Game.PhysicsToy");
@@ -69,5 +73,7 @@ namespace Game
 		inline constexpr Engine::TagId SwarmLight = Engine::MakeTag("Game.SwarmLight");
 		inline constexpr Engine::TagId ReflectionLab = Engine::MakeTag("Game.ReflectionLab");
 		inline constexpr Engine::TagId BlackHole = Engine::MakeTag("Game.BlackHole");
+
 	} // namespace GameTags
+
 } // namespace Game

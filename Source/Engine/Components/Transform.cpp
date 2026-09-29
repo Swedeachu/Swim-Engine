@@ -25,10 +25,12 @@ namespace Engine
 		if (!transformSystem || QueueDirtyEntity())
 		{
 			++worldVersion;
+
 			if (worldVersion == 0)
 			{
 				worldVersion = 1;
 			}
+
 			MarkChildrenDirty();
 		}
 	}
@@ -40,10 +42,12 @@ namespace Engine
 		if (!transformSystem || QueueDirtyEntity())
 		{
 			++worldVersion;
+
 			if (worldVersion == 0)
 			{
 				worldVersion = 1;
 			}
+
 			MarkChildrenDirty();
 		}
 	}
@@ -89,6 +93,7 @@ namespace Engine
 		}
 
 		const float len2 = glm::dot(q, q);
+
 		if (!std::isfinite(len2) || len2 <= 0.0f)
 		{
 			return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);

@@ -58,10 +58,12 @@ namespace Swim::Platform::Internal
 	{
 		Uint32 count = 0;
 		const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
+
 		if (!extensions || count == 0)
 		{
 			return {};
 		}
+
 		return { extensions, static_cast<std::size_t>(count) };
 	}
 
@@ -82,6 +84,7 @@ namespace Swim::Platform::Internal
 		std::uintptr_t& surface)
 	{
 		SDL_Window* sdlWindow = WindowAccess::GetSdlWindow(window);
+
 		if (!sdlWindow)
 		{
 			return false;
@@ -92,6 +95,7 @@ namespace Swim::Platform::Internal
 		// back inside the platform layer. Value-initialization is the null handle
 		// for both the pointer and the 64-bit non-dispatchable representations.
 		VkSurfaceKHR vkSurface{};
+
 		if (!SDL_Vulkan_CreateSurface(
 			sdlWindow,
 			FromOpaqueHandle<VkInstance>(instance),

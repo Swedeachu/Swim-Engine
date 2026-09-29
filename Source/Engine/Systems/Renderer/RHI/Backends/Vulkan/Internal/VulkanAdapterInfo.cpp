@@ -92,6 +92,7 @@ namespace Swim::RhiVulkan
 		for (std::uint32_t heapIndex = 0; heapIndex < memoryProperties.memoryHeapCount; ++heapIndex)
 		{
 			const auto& heap = memoryProperties.memoryHeaps[heapIndex];
+
 			if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
 			{
 				info.DedicatedVideoMemory += heap.size;
@@ -114,11 +115,13 @@ namespace Swim::RhiVulkan
 		capabilities.Queues.AsyncCompute = physicalDevice.has_separate_compute_queue();
 
 		capabilities.MaxPushConstantBytes = limits.maxPushConstantsSize;
+
 		for (std::size_t axis = 0; axis < 3; ++axis)
 		{
 			capabilities.Compute.MaxGroupCount[axis] = limits.maxComputeWorkGroupCount[axis];
 			capabilities.Compute.MaxGroupSize[axis] = limits.maxComputeWorkGroupSize[axis];
 		}
+
 		capabilities.Compute.MaxInvocations = limits.maxComputeWorkGroupInvocations;
 		capabilities.MaxColorAttachments = limits.maxColorAttachments;
 		capabilities.MaxSamples = GetMaximumSampleCount(
@@ -126,6 +129,7 @@ namespace Swim::RhiVulkan
 		capabilities.SubgroupSize = subgroupProperties.subgroupSize;
 		capabilities.MinUniformBufferOffsetAlignment = limits.minUniformBufferOffsetAlignment;
 		capabilities.MinStorageBufferOffsetAlignment = limits.minStorageBufferOffsetAlignment;
+
 		for (const auto& family : physicalDevice.get_queue_families())
 		{
 			if (family.queueCount > 0 && family.timestampValidBits > 0 && family.timestampValidBits <= 64 &&
@@ -135,6 +139,7 @@ namespace Swim::RhiVulkan
 				capabilities.TimestampQueries = true;
 			}
 		}
+
 		if (capabilities.TimestampQueries)
 		{
 			capabilities.TimestampFrequency = static_cast<std::uint64_t>(
@@ -191,10 +196,12 @@ namespace Swim::RhiVulkan
 		text << info.Name << "; Vulkan " << info.ApiVersion << "; driver " << info.DriverName
 			<< " (" << info.DriverInfo << "), raw version " << info.DriverVersion
 			<< "; vendor/device " << std::hex << info.VendorId << "/" << info.DeviceId;
+
 		if (diagnostics.Log)
 		{
 			diagnostics.Log->Record(Rhi::DiagnosticSeverity::Info, "Adapter", text.str());
 		}
+
 		if (diagnostics.Echo)
 		{
 			std::fprintf(stderr, "[Swim Vulkan] %s\n", text.str().c_str());

@@ -32,15 +32,19 @@ namespace Swim::Input
 
 	class InputMap
 	{
+
 	public:
 
 		void AddBinding(const InputBinding& binding) { bindings.push_back(binding); }
+
 		void Clear() { bindings.clear(); }
+
 		const std::vector<InputBinding>& GetBindings() const { return bindings; }
 
 	private:
 
 		std::vector<InputBinding> bindings;
+
 	};
 
 }

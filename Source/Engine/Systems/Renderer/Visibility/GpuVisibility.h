@@ -11,6 +11,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU-driven visibility and draw generation (critical-path items 49, 51-55, 57).
 	// One compute pass per view (per phase) reads every GPU Scene row and, without
 	// any CPU round trip:
@@ -29,14 +30,20 @@ namespace Swim::Render
 	// per graph, so the early and late phases of a frame share them.
 	class GpuVisibility
 	{
+
 	  public:
+
 		GpuVisibility(Rhi::Device& device, GpuVisibilityDesc desc);
+
 		~GpuVisibility();
+
 		GpuVisibility(const GpuVisibility&) = delete;
+
 		GpuVisibility& operator=(const GpuVisibility&) = delete;
 
 		// Routes a GPU Scene material set to a material bin (uploaded with the next Record).
 		void SetMaterialBin(std::uint32_t materialSet, std::uint32_t materialBin);
+
 		std::uint32_t GetMaterialBin(std::uint32_t materialSet) const;
 
 		VisibilityGraphResources Record(RenderGraph& graph, const GpuSceneGraphResources& scene, const GeometryGraphResources& geometry,
@@ -47,6 +54,7 @@ namespace Swim::Render
 		std::uint32_t GetMaxObjects() const { return maxObjects; }
 
 	  private:
+
 		struct PersistentImports
 		{
 			std::uint64_t Graph = 0;
@@ -72,5 +80,7 @@ namespace Swim::Render
 		bool materialBinsDirty = true;
 		bool historyInitialized = false;
 		std::string name;
+
 	};
+
 } // namespace Swim::Render

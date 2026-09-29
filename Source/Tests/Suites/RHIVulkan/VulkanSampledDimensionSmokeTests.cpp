@@ -57,6 +57,7 @@ namespace
 		const std::uint32_t imageCount = cubes ? 7 : 6;
 		std::array<std::unique_ptr<Rhi::Texture>, 7> textures;
 		std::array<std::unique_ptr<Rhi::TextureView>, 7> views;
+
 		for (std::uint32_t index = 0; index < imageCount; ++index)
 		{
 			const auto data = Testing::MakeSampledDimensionData(index);
@@ -65,6 +66,7 @@ namespace
 			views[index] = device->CreateTextureView(*textures[index], data.View);
 			SWIM_REQUIRE(views[index]);
 		}
+
 		Rhi::SamplerDesc samplerDesc{};
 		samplerDesc.MinFilter = samplerDesc.MagFilter = samplerDesc.MipFilter = Rhi::Filter::Nearest;
 		auto sampler = device->CreateSampler(samplerDesc);
@@ -87,6 +89,7 @@ namespace
 		auto table = device->CreateDescriptorTable({ layout.get(), 0, 0, "Dimension table" });
 		SWIM_REQUIRE(table);
 		std::vector<Rhi::DescriptorWrite> writes;
+
 		for (std::uint32_t index = 0; index < imageCount; ++index)
 		{
 			Rhi::DescriptorWrite write{};
@@ -94,6 +97,7 @@ namespace
 			write.TextureResource = views[index].get();
 			writes.push_back(write);
 		}
+
 		Rhi::DescriptorWrite samplerWrite{};
 		samplerWrite.Binding = 7;
 		samplerWrite.SamplerResource = sampler.get();
@@ -106,6 +110,7 @@ namespace
 		// The ring drains before any referenced resource is destroyed.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Compute, 2 });
 		SWIM_REQUIRE(frames);
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			for (std::uint32_t index = 0; index < imageCount; ++index)
@@ -113,6 +118,7 @@ namespace
 				const auto pixels = Testing::SampledDimensionPixels(frame, index);
 				upload->Write(imageBytes * index, std::as_bytes(std::span(pixels)));
 			}
+
 			for (std::uint32_t item = 0; item < 12; ++item)
 			{
 				for (std::uint32_t index = 0; index < imageCount; ++index)
@@ -122,18 +128,22 @@ namespace
 						Testing::SampledDimensionValue(frame, index, layer, item % 4, index < 2 ? 0 : item / 4, index == 3 ? item % 3 : 0);
 				}
 			}
+
 			frames->BeginFrame();
 			auto& commands = frames->CreateCommandList();
 			commands.Begin();
 			commands.Transition(*upload, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
+
 			if (frame == 0)
 			{
 				commands.Transition(*guards, Rhi::ResourceState::HostWrite, Rhi::ResourceState::CopySource);
 			}
+
 			commands.Transition(
 				*output, frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::CopySource, Rhi::ResourceState::CopyDestination);
 			commands.CopyBuffer(*guards, *output, { 0, 0, outputBytes });
 			commands.Transition(*output, Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderWrite);
+
 			for (std::uint32_t index = 0; index < imageCount; ++index)
 			{
 				const auto data = Testing::MakeSampledDimensionData(index);
@@ -141,13 +151,16 @@ namespace
 				commands.Transition(*textures[index], frame == 0 ? Rhi::ResourceState::Undefined : Rhi::ResourceState::ShaderRead,
 					Rhi::ResourceState::CopyDestination, range);
 				const auto layerBytes = data.CopyExtent.Width * data.CopyExtent.Height * data.CopyExtent.Depth * sizeof(std::uint32_t);
+
 				for (std::uint32_t layer = 0; layer < data.View.ArrayLayerCount; ++layer)
 				{
 					commands.CopyBufferToTexture(*upload, *textures[index],
 						{ imageBytes * index + layerBytes * layer, { 1, data.View.BaseArrayLayer + layer }, {}, data.CopyExtent });
 				}
+
 				commands.Transition(*textures[index], Rhi::ResourceState::CopyDestination, Rhi::ResourceState::ShaderRead, range);
 			}
+
 			commands.BindComputePipeline(*pipeline);
 			commands.BindDescriptorTable(0, *table);
 			commands.Dispatch(4, 1, 1);
@@ -160,17 +173,20 @@ namespace
 			frames->SubmitCurrent();
 			frames->Drain();
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::size_t item = 0; item < actual.size(); ++item)
 			{
 				SWIM_CHECK_EQUAL(actual[item], expected[item]);
 			}
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "SampledDimensionsAndReadback", SWIM_TEST_LOCATION,
@@ -179,6 +195,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunSampledDimensionSmoke);
 				} });
 		}
+
 		return true;
 	}();
 

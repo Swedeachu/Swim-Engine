@@ -11,8 +11,10 @@
 
 namespace Swim::AssetCompiler
 {
+
 	namespace
 	{
+
 		static_assert(std::is_trivially_copyable_v<SourceVertex>);
 		static_assert(offsetof(SourceVertex, Position) == 0);
 
@@ -38,6 +40,7 @@ namespace Swim::AssetCompiler
 		void RecalculateBounds(SourcePrimitive& primitive)
 		{
 			primitive.Bounds = {};
+
 			for (const SourceVertex& vertex : primitive.Vertices)
 			{
 				for (std::size_t axis = 0; axis < vertex.Position.size(); ++axis)
@@ -47,6 +50,7 @@ namespace Swim::AssetCompiler
 				}
 			}
 		}
+
 	}
 
 	MeshOptimizationResult MeshOptimizer::Optimize(IntermediateModel& model, const MeshOptimizationOptions& options) const
@@ -59,9 +63,11 @@ namespace Swim::AssetCompiler
 		for (std::size_t meshIndex = 0; meshIndex < model.Meshes.size(); ++meshIndex)
 		{
 			const SourceMesh& mesh = model.Meshes[meshIndex];
+
 			for (std::size_t primitiveIndex = 0; primitiveIndex < mesh.Primitives.size(); ++primitiveIndex)
 			{
 				const SourcePrimitive& primitive = mesh.Primitives[primitiveIndex];
+
 				if (!IsTrianglePrimitive(primitive) || primitive.Indices.empty())
 				{
 					continue;
@@ -83,6 +89,7 @@ namespace Swim::AssetCompiler
 		}
 
 		MeshOptimizationResult result;
+
 		for (SourceMesh& mesh : model.Meshes)
 		{
 			for (SourcePrimitive& primitive : mesh.Primitives)

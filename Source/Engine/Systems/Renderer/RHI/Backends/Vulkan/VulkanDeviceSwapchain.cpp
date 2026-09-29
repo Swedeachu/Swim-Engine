@@ -3,15 +3,20 @@
 
 namespace Swim::RhiVulkan
 {
+
 	namespace
 	{
+
 		class WindowSurface
 		{
+
 		public:
+
 			WindowSurface(const VulkanDeviceState& state, Platform::Window& window)
 				: instance(ToNativeHandle(state.Instance->Instance.instance))
 			{
 				RequireVulkanDevice(state);
+
 				if (!Platform::Internal::CreateVulkanSurface(window, instance, handle))
 				{
 					throw std::runtime_error("Failed to create Vulkan window surface");
@@ -27,14 +32,20 @@ namespace Swim::RhiVulkan
 			}
 
 			WindowSurface(const WindowSurface&) = delete;
+
 			WindowSurface& operator=(const WindowSurface&) = delete;
+
 			VkSurfaceKHR Get() const { return FromNativeHandle<VkSurfaceKHR>(handle); }
+
 			void Release() { handle = 0; }
 
 		private:
+
 			std::uintptr_t instance = 0;
 			std::uintptr_t handle = 0;
+
 		};
+
 	}
 
 	Rhi::SwapchainSupport VulkanDevice::QuerySwapchainSupport(Platform::Window& window) const
@@ -52,12 +63,15 @@ namespace Swim::RhiVulkan
 		{
 			return nullptr;
 		}
+
 		auto result = std::make_unique<VulkanSwapchain>(state, window, surface.Get(), desc);
 		surface.Release();
+
 		if (!result->Initialize())
 		{
 			return nullptr;
 		}
+
 		return result;
 	}
 

@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// How UI colors (premultiplied linear Rec.709, 1.0 = UI white) reach the target.
 	// UI is composited after tone mapping, never through it.
 	enum class UiOutputEncoding : std::uint32_t
@@ -33,4 +34,5 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for an unknown encoding or an out-of-range value.
 	void ValidateUiCompositionSettings(const UiCompositionSettings& settings);
+
 } // namespace Swim::Render

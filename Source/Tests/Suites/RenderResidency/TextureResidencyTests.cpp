@@ -13,6 +13,7 @@ using Assets::TexturePayloadFormat;
 
 namespace
 {
+
 	// A 4x2 texture with a full mip chain (4x2, 2x1, 1x1) in one payload.
 	Assets::TextureAsset MakeTexture(TexturePayloadFormat format = TexturePayloadFormat::RGBA8UNorm, std::uint32_t texel = 4)
 	{
@@ -22,17 +23,21 @@ namespace
 		Assets::TexturePayloadVariant payload;
 		payload.Format = format;
 		std::uint64_t offset = 0;
+
 		for (auto [w, h] : { std::pair{ 4u, 2u }, std::pair{ 2u, 1u }, std::pair{ 1u, 1u } })
 		{
 			const std::uint64_t size = std::uint64_t(w) * h * texel;
 			payload.Mips.push_back({ w, h, 1, offset, size, size });
 			offset += size + 3; // Unaligned source offsets are repacked.
 		}
+
 		payload.Bytes.resize(static_cast<std::size_t>(offset));
+
 		for (std::size_t i = 0; i < payload.Bytes.size(); ++i)
 		{
 			payload.Bytes[i] = static_cast<std::byte>(i * 3 + 1);
 		}
+
 		texture.Payloads.push_back(std::move(payload));
 		return texture;
 	}
@@ -41,14 +46,17 @@ namespace
 	{
 		RenderGraph graph;
 		auto resources = residency.Import(graph);
+
 		if (out)
 		{
 			*out = resources;
 		}
+
 		const auto completion = executor.Execute(graph.Compile());
 		residency.CommitUploads(completion);
 		return completion;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.TextureResidency", "SelectsUncompressedNativePayloadsOnly")
@@ -108,6 +116,7 @@ SWIM_TEST("Render.TextureResidency", "UploadsEveryMipThroughTheGraphAndBecomesRe
 
 	auto* texture = static_cast<Testing::MockTexture*>(residency.GetTexture(handle));
 	const auto& payload = asset.Payloads[0];
+
 	for (std::uint32_t mip = 0; mip < 3; ++mip)
 	{
 		const auto& expected = payload.Mips[mip];
@@ -115,6 +124,7 @@ SWIM_TEST("Render.TextureResidency", "UploadsEveryMipThroughTheGraphAndBecomesRe
 		SWIM_REQUIRE_EQUAL(actual.size(), std::size_t(expected.SizeBytes));
 		SWIM_CHECK(std::memcmp(actual.data(), payload.Bytes.data() + expected.OffsetBytes, actual.size()) == 0);
 	}
+
 	// The graph leaves the texture sampled-ready.
 	SWIM_CHECK(device.Commands->back().Kind == "TransitionTexture" && device.Commands->back().After == Rhi::ResourceState::ShaderRead);
 
@@ -189,6 +199,7 @@ SWIM_TEST("Render.TextureResidency", "AbortRecommitsAndDestructionWaitsForGpuUse
 
 namespace
 {
+
 	// An 8x4 BC7 texture, full chain (8x4, 4x2, 2x1, 1x1): 2 x 1 blocks, then one block per
 	// level, laid out the way the cooker writes it (in order, 16-byte aligned).
 	Assets::TextureAsset MakeBc7Texture()
@@ -199,19 +210,24 @@ namespace
 		Assets::TexturePayloadVariant payload;
 		payload.Format = TexturePayloadFormat::BC7SRgb;
 		std::uint64_t offset = 0;
+
 		for (auto [w, h, size] : { std::tuple{ 8u, 4u, 32ull }, std::tuple{ 4u, 2u, 16ull }, std::tuple{ 2u, 1u, 16ull }, std::tuple{ 1u, 1u, 16ull } })
 		{
 			payload.Mips.push_back({ w, h, 1, offset, size, size });
 			offset += size;
 		}
+
 		payload.Bytes.resize(static_cast<std::size_t>(offset));
+
 		for (std::size_t i = 0; i < payload.Bytes.size(); ++i)
 		{
 			payload.Bytes[i] = static_cast<std::byte>(i * 7 + 5);
 		}
+
 		texture.Payloads.push_back(std::move(payload));
 		return texture;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.TextureResidency", "Bc7ChainsUploadBlockRowsWhereTheDeviceSamplesThem")
@@ -243,12 +259,14 @@ SWIM_TEST("Render.TextureResidency", "Bc7ChainsUploadBlockRowsWhereTheDeviceSamp
 	Upload(residency, executor);
 	auto* texture = static_cast<Testing::MockTexture*>(residency.GetTexture(handle));
 	const auto& payload = expected.Payloads[0];
+
 	for (std::uint32_t mip = 0; mip < 4; ++mip)
 	{
 		const auto& actual = texture->Bytes({ mip, 0 });
 		SWIM_REQUIRE_EQUAL(actual.size(), std::size_t(payload.Mips[mip].SizeBytes));
 		SWIM_CHECK(std::memcmp(actual.data(), payload.Bytes.data() + payload.Mips[mip].OffsetBytes, actual.size()) == 0);
 	}
+
 	executor.Wait();
 	residency.Collect();
 	SWIM_CHECK(residency.GetState(handle) == GpuUploadState::Resident);

@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// A square shadow-map tile in atlas pixels.
 	struct ShadowTile
 	{
@@ -57,7 +58,9 @@ namespace Swim::Render
 	// All tiles of a request share one size and are placed or evicted together.
 	class ShadowAtlasAllocator
 	{
+
 	  public:
+
 		// Throws std::invalid_argument unless both sizes are powers of two and minTile <= atlasSize.
 		ShadowAtlasAllocator(std::uint32_t atlasSize, std::uint32_t minTile);
 
@@ -76,9 +79,13 @@ namespace Swim::Render
 		void Reset() { previous.clear(); }
 
 	  private:
+
 		bool IsFree(const ShadowTile& tile) const;
+
 		void Mark(const ShadowTile& tile);
+
 		void Unmark(const ShadowTile& tile);
+
 		bool TryPlace(std::uint32_t size, std::uint32_t count, std::vector<ShadowTile>& tiles);
 
 		std::uint32_t atlasSize;
@@ -94,5 +101,7 @@ namespace Swim::Render
 
 		std::map<std::uint64_t, PreviousTiles> previous;
 		ShadowAtlasStats stats;
+
 	};
+
 } // namespace Swim::Render

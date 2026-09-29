@@ -59,10 +59,12 @@ namespace Swim::Assets
 		void CompressBlock(std::array<std::uint32_t, 8>& state, const std::byte* block)
 		{
 			std::array<std::uint32_t, 64> words{};
+
 			for (std::size_t index = 0; index < 16; ++index)
 			{
 				words[index] = LoadBigEndian32(block + index * 4);
 			}
+
 			for (std::size_t index = 16; index < words.size(); ++index)
 			{
 				const std::uint32_t s0 = std::rotr(words[index - 15], 7) ^ std::rotr(words[index - 15], 18) ^ (words[index - 15] >> 3);
@@ -114,14 +116,17 @@ namespace Swim::Assets
 			{
 				return static_cast<std::uint8_t>(character - '0');
 			}
+
 			if (character >= 'a' && character <= 'f')
 			{
 				return static_cast<std::uint8_t>(character - 'a' + 10);
 			}
+
 			if (character >= 'A' && character <= 'F')
 			{
 				return static_cast<std::uint8_t>(character - 'A' + 10);
 			}
+
 			throw std::invalid_argument("ContentHash contains a non-hexadecimal character.");
 		}
 
@@ -146,6 +151,7 @@ namespace Swim::Assets
 			result[index * 2] = Digits[Bytes[index] >> 4];
 			result[index * 2 + 1] = Digits[Bytes[index] & 0x0f];
 		}
+
 		return result;
 	}
 
@@ -157,6 +163,7 @@ namespace Swim::Assets
 		}
 
 		ContentHash result{};
+
 		for (std::size_t index = 0; index < result.Bytes.size(); ++index)
 		{
 			result.Bytes[index] = static_cast<std::uint8_t>(
@@ -164,6 +171,7 @@ namespace Swim::Assets
 				HexValue(text[index * 2 + 1])
 			);
 		}
+
 		return result;
 	}
 
@@ -178,29 +186,36 @@ namespace Swim::Assets
 		// Full blocks straight from the input; only the tail is copied into the padded block(s)
 		// (the input used to be copied whole and padded byte by byte).
 		const std::size_t fullBlocks = bytes.size() / 64;
+
 		for (std::size_t block = 0; block < fullBlocks; ++block)
 		{
 			CompressBlock(state, bytes.data() + block * 64);
 		}
+
 		std::array<std::byte, 128> tail{};
 		const std::size_t remainder = bytes.size() - fullBlocks * 64;
+
 		if (remainder > 0)
 		{
 			std::memcpy(tail.data(), bytes.data() + fullBlocks * 64, remainder);
 		}
+
 		tail[remainder] = std::byte{ 0x80 };
 		const std::size_t tailSize = remainder < 56 ? 64 : 128;
 		const std::uint64_t bitLength = static_cast<std::uint64_t>(bytes.size()) * 8ull;
+
 		for (int i = 0; i < 8; ++i)
 		{
 			tail[tailSize - 1 - i] = std::byte{ static_cast<std::uint8_t>((bitLength >> (8 * i)) & 0xffu) };
 		}
+
 		for (std::size_t offset = 0; offset < tailSize; offset += 64)
 		{
 			CompressBlock(state, tail.data() + offset);
 		}
 
 		ContentHash result{};
+
 		for (std::size_t word = 0; word < state.size(); ++word)
 		{
 			result.Bytes[word * 4] = static_cast<std::uint8_t>((state[word] >> 24) & 0xffu);
@@ -208,6 +223,7 @@ namespace Swim::Assets
 			result.Bytes[word * 4 + 2] = static_cast<std::uint8_t>((state[word] >> 8) & 0xffu);
 			result.Bytes[word * 4 + 3] = static_cast<std::uint8_t>(state[word] & 0xffu);
 		}
+
 		return result;
 	}
 

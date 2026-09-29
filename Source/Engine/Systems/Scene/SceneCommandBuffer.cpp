@@ -53,6 +53,7 @@ namespace Engine
 			{
 				owningScene.AddTag(entity, tag);
 			}
+
 		});
 	}
 
@@ -64,6 +65,7 @@ namespace Engine
 			{
 				owningScene.RemoveTag(entity, tag);
 			}
+
 		});
 	}
 
@@ -75,6 +77,7 @@ namespace Engine
 			{
 				owningScene.SetEntityName(entity, name);
 			}
+
 		});
 	}
 

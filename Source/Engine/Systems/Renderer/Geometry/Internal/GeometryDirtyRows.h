@@ -5,6 +5,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	// Deduplicated set of CPU-mirror rows awaiting upload.
 	struct GeometryDirtyRows
 	{
@@ -36,11 +37,14 @@ namespace Swim::Render::Internal
 			auto rows = std::move(Rows);
 			Rows.clear();
 			std::sort(rows.begin(), rows.end());
+
 			for (auto row : rows)
 			{
 				Flags[row] = false;
 			}
+
 			return rows;
 		}
 	};
+
 } // namespace Swim::Render::Internal

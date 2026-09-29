@@ -5,9 +5,12 @@
 
 namespace Swim::Render
 {
+
 	class CompiledRenderGraph
 	{
+
 	  public:
+
 		std::span<const GraphScheduledPass> GetSchedule() const { return schedule; }
 
 		std::span<const GraphResourceLifetime> GetLifetimes() const { return lifetimes; }
@@ -19,6 +22,7 @@ namespace Swim::Render
 		std::string Dump() const;
 
 	  private:
+
 		friend class RenderGraph;
 		friend class RenderGraphExecutor;
 		friend class RenderCommandContext;
@@ -28,5 +32,7 @@ namespace Swim::Render
 		std::vector<GraphBarrier> finalBarriers;
 		std::vector<std::uint32_t> allocations;
 		std::vector<std::vector<std::uint32_t>> dependencies;
+
 	};
+
 } // namespace Swim::Render

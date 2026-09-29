@@ -6,11 +6,14 @@
 
 namespace Swim::Jobs
 {
+
 	class JobSystem;
+
 }
 
 namespace Swim::Animation
 {
+
 	// One animated character: its state machine and the posed skeleton it drives.
 	struct AnimatedSkeleton
 	{
@@ -25,4 +28,5 @@ namespace Swim::Animation
 	// Without one (or with a stopped one) it runs serially on the caller.
 	void UpdateAnimations(
 		std::span<const AnimatedSkeleton> characters, float dt, Jobs::JobSystem* jobs = nullptr, std::size_t minPerTask = 8);
+
 } // namespace Swim::Animation

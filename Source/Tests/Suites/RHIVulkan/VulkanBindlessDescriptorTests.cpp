@@ -11,6 +11,7 @@ using namespace Swim;
 
 namespace
 {
+
 	constexpr auto AllStages = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment | Rhi::ShaderStageMask::Compute;
 
 	// Runtime-sized reflected arrays (Count 0) as the compiled bindless smoke shader produces them.
@@ -25,10 +26,12 @@ namespace
 	{
 		Rhi::DescriptorSchemaDesc space{ 1,
 			{ { 0, Rhi::DescriptorType::Sampler, samplers, AllStages }, { 1, Rhi::DescriptorType::SampledTexture, textures, AllStages } } };
+
 		for (auto& binding : space.Bindings)
 		{
 			binding.PartiallyBound = binding.UpdateAfterBind = true;
 		}
+
 		return space;
 	}
 
@@ -43,6 +46,7 @@ namespace
 		indexing.maxDescriptorSetUpdateAfterBindStorageImages = indexing.maxPerStageDescriptorUpdateAfterBindStorageImages = 64;
 		indexing.maxPerStageUpdateAfterBindResources = 8192;
 	}
+
 } // namespace
 
 SWIM_TEST("RHI.Vulkan.Bindless", "ExplicitSpacesSizeRuntimeArraysAndSetUpdateAfterBindFlags")
@@ -84,6 +88,7 @@ SWIM_TEST("RHI.Vulkan.Bindless", "ExplicitSpacesSizeRuntimeArraysAndSetUpdateAft
 		auto bad = shared;
 		std::vector<Rhi::DescriptorSchemaDesc> spaces{ bad };
 		auto& binding = spaces[0].Bindings[1];
+
 		switch (invalid)
 		{
 		case 0:
@@ -114,6 +119,7 @@ SWIM_TEST("RHI.Vulkan.Bindless", "ExplicitSpacesSizeRuntimeArraysAndSetUpdateAft
 			spaces.push_back(spaces[0]);
 			break; // Duplicate explicit space.
 		}
+
 		SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {}, spaces }));
 	}
 
@@ -219,16 +225,20 @@ SWIM_TEST("RHI.Vulkan.Bindless", "CompiledUnboundedArraysReflectAsRuntimeSizedBi
 	const auto& interface = converted.Interface;
 	SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 2u);
 	const auto* space = &interface.DescriptorSchemas[0];
+
 	if (space->Space != 1)
 	{
 		space = &interface.DescriptorSchemas[1];
 	}
+
 	SWIM_REQUIRE_EQUAL(space->Bindings.size(), 2u);
+
 	for (const auto& binding : space->Bindings)
 	{
 		SWIM_CHECK_EQUAL(binding.Count, 0u);
 		SWIM_CHECK_EQUAL(binding.Stages, Rhi::ShaderStageMask::Compute);
 	}
+
 	Testing::VulkanComputeCapture capture;
 	EnableBindless(capture);
 	auto program = capture.MakeComputeProgram(

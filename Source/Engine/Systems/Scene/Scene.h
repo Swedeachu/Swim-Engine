@@ -31,41 +31,56 @@
 
 namespace Swim::Platform
 {
+
 	class FileSystem;
+
 }
 
 namespace Swim::Jobs
 {
+
 	class JobSystem;
+
 }
 
 namespace Swim::IO
 {
+
 	class AsyncIoService;
+
 }
 
 namespace Swim::Assets
 {
+
 	class AssetSystem;
+
 }
 
 namespace Swim::Memory
 {
+
 	class FrameArena;
+
 }
 
 namespace Swim::Input
 {
+
 	class InputSystem;
+
 }
 
 namespace Swim::Commands
 {
+
 	class CommandRegistry;
+
 }
 
 namespace Engine
 {
+
 	class PhysicsSystem;
 	class CameraSystem;
 	class SceneCommandBuffer;
@@ -118,9 +133,13 @@ namespace Engine
 	// UiCanvas components); the scene itself knows nothing about the renderer.
 	class Scene : public Machine, public std::enable_shared_from_this<Scene>
 	{
+
 	  public:
+
 		Scene();
+
 		explicit Scene(const std::string& name);
+
 		~Scene() override;
 
 		int Awake() override { return 0; }
@@ -140,31 +159,48 @@ namespace Engine
 
 		// --- Called by SceneSystem ---
 		void InternalSceneAwake();
+
 		void InternalSceneInit();
+
 		void InternalScenePostInit();
+
 		void InternalSceneUpdate(double dt);
+
 		void InternalScenePostUpdate(double dt);
+
 		void InternalFixedUpdate(unsigned int tickThisSecond);
+
 		void InternalFixedPostUpdate(unsigned int tickThisSecond);
+
 		void InternalSceneExit();
+
 		void InternalStateChanged(EngineState previous, EngineState current);
 
 		// --- Entities ---
 		entt::entity CreateEntity();
+
 		entt::entity CreateEntity(std::string_view name);
+
 		entt::entity CreateEntityWithSerializedId(SerializedEntityId id);
+
 		SerializedEntityId GetSerializedEntityId(entt::entity entity) const;
+
 		entt::entity FindEntityBySerializedId(SerializedEntityId id) const;
 
 		bool IsValid(entt::entity entity) const { return registry.valid(entity); }
 
 		void DestroyEntity(entt::entity entity, bool callExit = true, bool destroyChildren = true);
+
 		void DestroyAllEntities(bool callExit = true);
+
 		std::size_t GetEntityCount() const;
 
 		void SetParent(entt::entity child, entt::entity parent);
+
 		void RemoveParent(entt::entity child);
+
 		std::vector<entt::entity>* GetChildren(entt::entity e);
+
 		entt::entity GetParent(entt::entity e) const;
 
 		const std::string& GetName() const { return name; }
@@ -175,18 +211,27 @@ namespace Engine
 
 		// --- Names and tags ---
 		void SetEntityName(entt::entity entity, std::string_view value);
+
 		// The EntityName, else "Entity <durable id>".
 		std::string GetEntityName(entt::entity entity) const;
+
 		entt::entity FindByName(std::string_view value) const;
 
 		TagId AddTag(entt::entity entity, std::string_view tag); // Registers the name.
+
 		bool AddTag(entt::entity entity, TagId tag);
+
 		bool RemoveTag(entt::entity entity, TagId tag);
+
 		bool HasTag(entt::entity entity, TagId tag) const;
+
 		const TagSet* GetTags(entt::entity entity) const;
+
 		// Entities with a tag, in no particular order (a snapshot: safe to mutate while iterating).
 		std::vector<entt::entity> GetEntitiesWithTag(TagId tag) const;
+
 		std::size_t CountWithTag(TagId tag) const;
+
 		entt::entity FindFirstWithTag(TagId tag) const;
 
 		template <typename Func> void ForEachWithTag(TagId tag, Func&& func)
@@ -214,6 +259,7 @@ namespace Engine
 		RenderServices* GetRenderServices() const { return services.Render; }
 
 		EngineState GetEngineState() const;
+
 		// The state behaviours run under this frame: the engine state, except that a single
 		// step taken while paused (SimulationFrame::Stepped) runs as Playing.
 		EngineState GetExecutionState() const;
@@ -255,6 +301,7 @@ namespace Engine
 			static_assert(!std::is_pointer_v<T>, "AddComponent should not take a pointer type");
 
 			using EmplaceResult = decltype(registry.emplace<T>(entity, std::move(component)));
+
 			if constexpr (std::is_void_v<EmplaceResult>)
 			{
 				registry.emplace<T>(entity, std::move(component));
@@ -272,6 +319,7 @@ namespace Engine
 			static_assert(std::is_constructible_v<T, Args&&...>, "T must be constructible with the provided arguments");
 
 			using EmplaceResult = decltype(registry.emplace<T>(entity, std::forward<Args>(args)...));
+
 			if constexpr (std::is_void_v<EmplaceResult>)
 			{
 				registry.emplace<T>(entity, std::forward<Args>(args)...);
@@ -297,6 +345,7 @@ namespace Engine
 			if constexpr (std::is_same_v<T, BehaviorComponents>)
 			{
 				auto& bc = registry.get<BehaviorComponents>(entity);
+
 				for (auto& b : bc.behaviors)
 				{
 					if (b && b->HasInited())
@@ -334,11 +383,14 @@ namespace Engine
 			{
 				return nullptr;
 			}
+
 			const auto* bc = registry.try_get<BehaviorComponents>(entity);
+
 			if (!bc)
 			{
 				return nullptr;
 			}
+
 			for (const auto& behavior : bc->behaviors)
 			{
 				if (auto* typed = dynamic_cast<T*>(behavior.get()))
@@ -346,16 +398,19 @@ namespace Engine
 					return typed;
 				}
 			}
+
 			return nullptr;
 		}
 
 		template <typename T> void RemoveBehavior(entt::entity entity, bool callExit = true)
 		{
 			static_assert(std::is_base_of_v<Behavior, T>, "RemoveBehavior<T> requires T to derive from Behavior");
+
 			if (!registry.valid(entity) || !registry.any_of<BehaviorComponents>(entity))
 			{
 				return;
 			}
+
 			auto& vec = registry.get<BehaviorComponents>(entity).behaviors;
 			vec.erase(std::remove_if(vec.begin(), vec.end(),
 						  [&](std::unique_ptr<Behavior>& b)
@@ -366,32 +421,41 @@ namespace Engine
 								  {
 									  b->Exit();
 								  }
+
 								  return true;
 							  }
+
 							  return false;
 						  }),
 				vec.end());
 		}
 
 		Behavior* EmplaceBehaviorByName(entt::entity e, const std::string& behaviorName);
+
 		bool RemoveBehaviorByName(entt::entity e, const std::string& behaviorName, bool callExit = true);
+
 		void RefreshBehaviorFieldCacheForEntity(entt::entity e);
 
 		void SetEnabledStates(entt::entity entity, EngineState states);
+
 		void AddEnabledStates(entt::entity entity, EngineState states);
+
 		void RemoveEnabledStates(entt::entity entity, EngineState states);
 
 		// Calls method on every behaviour that can run in the current state.
 		template <typename Func, typename... Args> void ForEachBehavior(Func method, Args&&... args)
 		{
 			const EngineState state = GetExecutionState();
+
 			for (const entt::entity entity : SnapshotBehaviorEntities())
 			{
 				auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
+
 				if (!bc || !bc->CanExecute(state))
 				{
 					continue;
 				}
+
 				for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
 				{
 					if (Behavior* behavior = bc->behaviors[i].get())
@@ -406,25 +470,31 @@ namespace Engine
 		template <typename Func, typename... Args> void ForEachInitializedBehavior(Func method, Args&&... args)
 		{
 			const EngineState state = GetExecutionState();
+
 			for (const entt::entity entity : SnapshotBehaviorEntities())
 			{
 				auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
+
 				if (!bc || !bc->CanExecute(state))
 				{
 					continue;
 				}
+
 				// Index loop: a behaviour may add another to its own entity.
 				for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
 				{
 					Behavior* behavior = bc->behaviors[i].get();
+
 					if (!behavior)
 					{
 						continue;
 					}
+
 					behavior->InitIfNeeded();
 					(behavior->*method)(args...);
 					// The callback may have destroyed components; re-fetch.
 					bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
+
 					if (!bc)
 					{
 						break;
@@ -435,21 +505,27 @@ namespace Engine
 
 		// --- Physics ---
 		PhysicsWorld* GetPhysicsWorld() const;
+
 		PhysicsWorld& GetOrCreatePhysicsWorld(PhysicsSystem& physicsSystem);
 
 		ScenePhysicsBridge* GetPhysicsBridge() const { return physicsBridge.get(); }
 
 		// Interpolates dynamic bodies between fixed steps (alpha from the SimulationFrame).
 		void UpdatePhysics(PhysicsSystem& physicsSystem, float alpha);
+
 		// One fixed physics step of dt seconds, then collision callbacks to behaviours.
 		void FixedUpdatePhysics(PhysicsSystem& physicsSystem, float dt);
+
 		void DestroyPhysicsWorld();
+
 		std::optional<SceneRaycastHit> Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) const;
+
 		entt::entity FindEntityByBody(BodyHandle body) const;
 
 		std::uint64_t GetPhysicsStepCount() const { return physicsSteps; }
 
 	  protected:
+
 		std::string name;
 		entt::registry registry;
 
@@ -459,6 +535,7 @@ namespace Engine
 			{
 				throw std::runtime_error("Scene '" + name + "' is missing a required engine service.");
 			}
+
 			return system;
 		}
 
@@ -472,9 +549,13 @@ namespace Engine
 		}
 
 	  private:
+
 		std::vector<entt::entity> SnapshotBehaviorEntities() const;
+
 		void DispatchCollisionEvents();
+
 		void OnTagSetDestroyed(entt::registry& reg, entt::entity entity);
+
 		bool WouldCreateCycle(const entt::registry& reg, entt::entity child, entt::entity newParent);
 
 		template <typename T> void OnComponentConstruct(entt::registry& reg, entt::entity entity);
@@ -490,5 +571,7 @@ namespace Engine
 		std::unique_ptr<SceneCommandBuffer> sceneCommandBuffer;
 		std::unique_ptr<ScenePhysicsBridge> physicsBridge;
 		std::uint64_t physicsSteps = 0;
+
 	};
+
 } // namespace Engine

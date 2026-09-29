@@ -15,7 +15,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanCommandPool final : public Rhi::CommandPool
 		{
+
 		public:
+
 			explicit VulkanCommandPool(std::shared_ptr<VulkanCommandPoolState> state)
 				: state(std::move(state))
 			{
@@ -38,27 +40,33 @@ namespace Swim::RhiVulkan
 				allocateInfo.commandBufferCount = 1;
 
 				VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+
 				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkAllocateCommandBuffers(
 					state->DeviceState->Device.device, &allocateInfo, &commandBuffer), "vkAllocateCommandBuffers") != VK_SUCCESS)
 				{
 					return nullptr;
 				}
+
 				return std::make_unique<VulkanCommandList>(state, commandBuffer);
 			}
 
 			void Reset() override
 			{
 				RequireVulkanDevice(*state->DeviceState);
+
 				if (CheckVulkanResult(*state->DeviceState, state->DeviceState->Dispatch.vkResetCommandPool(
 					state->DeviceState->Device.device, state->Pool, 0), "vkResetCommandPool") != VK_SUCCESS)
 				{
 					throw std::runtime_error("Failed to reset Vulkan command pool");
 				}
+
 				++state->Generation;
 			}
 
 		private:
+
 			std::shared_ptr<VulkanCommandPoolState> state;
+
 		};
 
 } // namespace Swim::RhiVulkan

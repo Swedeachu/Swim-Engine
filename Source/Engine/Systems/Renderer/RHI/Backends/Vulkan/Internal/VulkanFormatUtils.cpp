@@ -11,26 +11,32 @@ namespace Swim::RhiVulkan
 			{
 				return 64;
 			}
+
 			if ((counts & VK_SAMPLE_COUNT_32_BIT) != 0)
 			{
 				return 32;
 			}
+
 			if ((counts & VK_SAMPLE_COUNT_16_BIT) != 0)
 			{
 				return 16;
 			}
+
 			if ((counts & VK_SAMPLE_COUNT_8_BIT) != 0)
 			{
 				return 8;
 			}
+
 			if ((counts & VK_SAMPLE_COUNT_4_BIT) != 0)
 			{
 				return 4;
 			}
+
 			if ((counts & VK_SAMPLE_COUNT_2_BIT) != 0)
 			{
 				return 2;
 			}
+
 			return 1;
 		}
 
@@ -167,80 +173,99 @@ namespace Swim::RhiVulkan
 		VkBufferUsageFlags ToVkBufferUsage(Rhi::BufferUsage usage)
 		{
 			VkBufferUsageFlags result = 0;
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::TransferSource))
 			{
 				result |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::TransferDestination))
 			{
 				result |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::Vertex))
 			{
 				result |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::Index))
 			{
 				result |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::Uniform))
 			{
 				result |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::Storage))
 			{
 				result |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::Indirect))
 			{
 				result |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::ShaderDeviceAddress))
 			{
 				result |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::AccelerationStructureStorage))
 			{
 				result |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
 			}
+
 			if (HasBufferUsage(usage, Rhi::BufferUsage::AccelerationStructureBuildInput))
 			{
 				result |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 			}
+
 			return result;
 		}
 
 		VkImageUsageFlags ToVkImageUsage(Rhi::TextureUsage usage)
 		{
 			VkImageUsageFlags result = 0;
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::TransferSource))
 			{
 				result |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::TransferDestination))
 			{
 				result |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::Sampled))
 			{
 				result |= VK_IMAGE_USAGE_SAMPLED_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::Storage))
 			{
 				result |= VK_IMAGE_USAGE_STORAGE_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::ColorAttachment))
 			{
 				result |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::DepthStencilAttachment))
 			{
 				result |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 			}
+
 			if (HasTextureUsage(usage, Rhi::TextureUsage::TransientAttachment))
 			{
 				result |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
 			}
+
 			return result;
 		}
 
@@ -252,10 +277,12 @@ namespace Swim::RhiVulkan
 			}
 
 			VkImageAspectFlags result = VK_IMAGE_ASPECT_DEPTH_BIT;
+
 			if (Rhi::HasStencil(format))
 			{
 				result |= VK_IMAGE_ASPECT_STENCIL_BIT;
 			}
+
 			return result;
 		}
 
@@ -294,18 +321,22 @@ namespace Swim::RhiVulkan
 			{
 				return false;
 			}
+
 			if (ToVkFormat(desc.PixelFormat) == VK_FORMAT_UNDEFINED)
 			{
 				return false;
 			}
+
 			if (desc.Samples != Rhi::SampleCount::X1 && desc.MipLevels != 1)
 			{
 				return false;
 			}
+
 			if (Rhi::IsDepthFormat(desc.PixelFormat) && HasTextureUsage(desc.Usage, Rhi::TextureUsage::ColorAttachment))
 			{
 				return false;
 			}
+
 			if (!Rhi::IsDepthFormat(desc.PixelFormat) && HasTextureUsage(desc.Usage, Rhi::TextureUsage::DepthStencilAttachment))
 			{
 				return false;

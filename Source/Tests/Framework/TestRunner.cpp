@@ -60,6 +60,7 @@ namespace Swim::Testing
 		{
 			std::string escaped;
 			escaped.reserve(text.size());
+
 			for (const char character : text)
 			{
 				switch (character)
@@ -72,6 +73,7 @@ namespace Swim::Testing
 				default: escaped += character; break;
 				}
 			}
+
 			return escaped;
 		}
 
@@ -92,10 +94,12 @@ namespace Swim::Testing
 		{
 			std::string text = std::string(failure.Location.File) + "(" + std::to_string(failure.Location.Line) + "): ";
 			text += failure.Expression;
+
 			if (!failure.Message.empty())
 			{
 				text += " -- " + failure.Message;
 			}
+
 			return text;
 		}
 
@@ -108,6 +112,7 @@ namespace Swim::Testing
 			Detail::SetCurrentContext(&context);
 
 			const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+
 			try
 			{
 				test.Function();
@@ -124,6 +129,7 @@ namespace Swim::Testing
 			{
 				context.RecordFailure(test.Location, "unhandled non-standard exception", std::string{});
 			}
+
 			const std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
 			Detail::SetCurrentContext(nullptr);
@@ -140,12 +146,14 @@ namespace Swim::Testing
 			double totalMilliseconds)
 		{
 			std::ofstream report(path, std::ios::trunc);
+
 			if (!report)
 			{
 				return false;
 			}
 
 			std::size_t failureCount = 0;
+
 			for (const TestResult& result : results)
 			{
 				if (!result.Passed())
@@ -172,10 +180,12 @@ namespace Swim::Testing
 				}
 
 				report << ">\n";
+
 				for (const TestFailure& failure : result.Failures)
 				{
 					report << "\t\t<failure message=\"" << EscapeXml(FormatFailure(failure)) << "\" />\n";
 				}
+
 				report << "\t</testcase>\n";
 			}
 
@@ -314,6 +324,7 @@ namespace Swim::Testing
 			else if (StartsWith(argument, "--shuffle="))
 			{
 				result.Options.Shuffle = true;
+
 				if (!TryParseSeed(argument.substr(std::string_view("--shuffle=").size()), result.Options.Seed))
 				{
 					result.Errors.emplace_back("--shuffle expects an unsigned integer seed: " + std::string(argument));
@@ -364,6 +375,7 @@ namespace Swim::Testing
 
 		std::vector<const TestCase*> selected;
 		selected.reserve(registered.size());
+
 		for (const TestCase& test : registered)
 		{
 			const std::string identifier = test.GetId();
@@ -371,6 +383,7 @@ namespace Swim::Testing
 			const bool included = options.IncludePatterns.empty()
 				|| std::any_of(options.IncludePatterns.begin(), options.IncludePatterns.end(),
 					[&](const std::string& pattern) { return MatchesPattern(pattern, identifier); });
+
 			if (!included)
 			{
 				continue;
@@ -378,6 +391,7 @@ namespace Swim::Testing
 
 			const bool excluded = std::any_of(options.ExcludePatterns.begin(), options.ExcludePatterns.end(),
 				[&](const std::string& pattern) { return MatchesPattern(pattern, identifier); });
+
 			if (excluded)
 			{
 				continue;
@@ -394,14 +408,17 @@ namespace Swim::Testing
 		if (options.ListSuites)
 		{
 			std::set<std::string> suites;
+
 			for (const TestCase* test : selected)
 			{
 				suites.insert(test->Suite);
 			}
+
 			for (const std::string& suite : suites)
 			{
 				std::cout << suite << '\n';
 			}
+
 			return 0;
 		}
 
@@ -411,6 +428,7 @@ namespace Swim::Testing
 			{
 				std::cout << test->GetId() << '\n';
 			}
+
 			return 0;
 		}
 
@@ -429,6 +447,7 @@ namespace Swim::Testing
 		}
 
 		std::set<std::string> suiteNames;
+
 		for (const TestCase* test : selected)
 		{
 			suiteNames.insert(test->Suite);
@@ -436,14 +455,17 @@ namespace Swim::Testing
 
 		std::cout << "[swim-tests] Running " << selected.size() << " case(s) from "
 			<< suiteNames.size() << " suite(s)";
+
 		if (options.Repeat > 1)
 		{
 			std::cout << ", repeated " << options.Repeat << " time(s)";
 		}
+
 		if (options.Shuffle)
 		{
 			std::cout << ", shuffled with seed " << options.Seed;
 		}
+
 		std::cout << ".\n";
 
 		std::vector<TestResult> results;
@@ -460,6 +482,7 @@ namespace Swim::Testing
 			for (const TestCase* test : selected)
 			{
 				const std::string identifier = test->GetId();
+
 				if (options.Verbose)
 				{
 					std::cout << "[ RUN      ] " << identifier << '\n';
@@ -483,10 +506,12 @@ namespace Swim::Testing
 					{
 						std::cout << "[ RUN      ] " << identifier << '\n';
 					}
+
 					for (const TestFailure& failure : result.Failures)
 					{
 						std::cout << "             " << FormatFailure(failure) << '\n';
 					}
+
 					std::cout << "[  FAILED  ] " << identifier
 						<< " (" << result.DurationMilliseconds << " ms)\n";
 					failedIdentifiers.push_back(identifier);
@@ -516,6 +541,7 @@ namespace Swim::Testing
 		{
 			std::cout << "[  PASSED  ] " << (results.size() - failedIdentifiers.size()) << " case(s).\n";
 			std::cout << "[  FAILED  ] " << failedIdentifiers.size() << " case(s):\n";
+
 			for (const std::string& identifier : failedIdentifiers)
 			{
 				std::cout << "[  FAILED  ]   " << identifier << '\n';
@@ -539,12 +565,14 @@ namespace Swim::Testing
 	int RunTests(int argc, char** argv)
 	{
 		const OptionParseResult parsed = ParseRunnerOptions(argc, argv);
+
 		if (!parsed.IsValid())
 		{
 			for (const std::string& error : parsed.Errors)
 			{
 				std::cerr << "[swim-tests] " << error << '\n';
 			}
+
 			std::cerr << '\n';
 			PrintRunnerUsage();
 			return 2;

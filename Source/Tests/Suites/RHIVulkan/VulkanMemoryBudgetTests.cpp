@@ -17,6 +17,7 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "RealAllocatorCountersTrackAllocationFreeAn
 	auto deviceAllocation = capture.Allocate(4096);
 	auto hostAllocation = capture.Allocate(8192, 1);
 	const auto allocated = capture.Device->GetMemoryBudgetSnapshot();
+
 	for (unsigned index = 0; index < 2; ++index)
 	{
 		const auto& heap = allocated.Heaps[index];
@@ -30,6 +31,7 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "RealAllocatorCountersTrackAllocationFreeAn
 		SWIM_CHECK_EQUAL(heap.UsageBytes, capture.Driver.heapUsage[index]);
 		SWIM_CHECK_EQUAL(heap.BudgetBytes, capture.Driver.heapBudget[index]);
 	}
+
 	capture.Free(deviceAllocation);
 	capture.Free(hostAllocation);
 	const auto freed = capture.Device->GetMemoryBudgetSnapshot();
@@ -86,6 +88,7 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "InvalidDriverBudgetsFallBackPerHeapWithout
 {
 	Testing::VulkanMemoryBudgetCapture capture;
 	capture.Allocate(4096);
+
 	for (auto invalid : { 0ull, (1ull << 30) + 1 })
 	{
 		capture.Driver.heapBudget[0] = invalid;
@@ -96,6 +99,7 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "InvalidDriverBudgetsFallBackPerHeapWithout
 		SWIM_CHECK_EQUAL(snapshot.Heaps[0].BudgetBytes, (1ull << 30) * 8 / 10);
 		SWIM_CHECK(snapshot.Heaps[1].Source == Rhi::MemoryBudgetSource::DriverEstimate);
 	}
+
 	capture.State->Instance->Dispatch.vkGetPhysicalDeviceMemoryProperties2 = nullptr;
 	const auto calls = capture.DriverCalls.load();
 	const auto fallback = capture.Device->GetMemoryBudgetSnapshot();
@@ -130,17 +134,21 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "HeapConversionIsBoundedAndFallbackArithmet
 	properties.memoryHeapCount = VK_MAX_MEMORY_HEAPS;
 	properties.memoryTypeCount = VK_MAX_MEMORY_TYPES;
 	std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> budgets{};
+
 	for (std::uint32_t index = 0; index < VK_MAX_MEMORY_HEAPS; ++index)
 	{
 		properties.memoryHeaps[index].size = UINT64_MAX;
 		budgets[index].statistics.blockBytes = UINT64_MAX;
 	}
+
 	for (std::uint32_t index = 0; index < VK_MAX_MEMORY_TYPES; ++index)
 	{
 		properties.memoryTypes[index] = { VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, index % VK_MAX_MEMORY_HEAPS };
 	}
+
 	const auto snapshot = RhiVulkan::BuildVulkanMemoryBudgetSnapshot(properties, budgets, nullptr);
 	SWIM_REQUIRE_EQUAL(snapshot.Heaps.size(), std::size_t(VK_MAX_MEMORY_HEAPS));
+
 	for (const auto& heap : snapshot.Heaps)
 	{
 		SWIM_CHECK(heap.HostVisible);
@@ -148,6 +156,7 @@ SWIM_TEST("RHI.Vulkan.MemoryBudget", "HeapConversionIsBoundedAndFallbackArithmet
 		SWIM_CHECK_EQUAL(heap.GetHeadroomBytes(), 0u);
 		SWIM_CHECK(heap.IsOverBudget());
 	}
+
 	SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanMemoryBudgetSnapshot(properties, {}, nullptr), std::runtime_error);
 	properties.memoryHeapCount = VK_MAX_MEMORY_HEAPS + 1;
 	SWIM_CHECK_THROWS(RhiVulkan::BuildVulkanMemoryBudgetSnapshot(properties, budgets, nullptr), std::runtime_error);

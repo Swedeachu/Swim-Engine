@@ -9,6 +9,7 @@
 
 namespace Swim::Animation
 {
+
 	// Morph weight slots of an animator: each channel names the mesh node a
 	// MorphWeights track targets and owns Count consecutive pose weights.
 	struct MorphChannel
@@ -23,15 +24,20 @@ namespace Swim::Animation
 		std::vector<MorphChannel> Channels;
 
 		std::uint32_t GetWeightCount() const;
+
 		std::uint32_t GetOffset(std::uint32_t channel) const;
+
 		std::uint32_t FindChannel(std::string_view target) const; // InvalidJoint when absent.
+
 		std::vector<float> GetDefaultWeights() const;
 	};
 
 	// A validated clip ready for sampling (shared, read-only).
 	class AnimationClip
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for tracks the .sasset reader would reject.
 		explicit AnimationClip(Assets::AnimationClipAsset asset);
 
@@ -44,7 +50,9 @@ namespace Swim::Animation
 		const std::vector<Assets::AnimationEvent>& GetEvents() const { return asset.Events; }
 
 	  private:
+
 		Assets::AnimationClipAsset asset;
+
 	};
 
 	// Where each track of a clip writes for one skeleton + morph layout. Tracks
@@ -83,4 +91,5 @@ namespace Swim::Animation
 
 	// base += weight x mask x delta (rotation: base * slerp(identity, delta, w)).
 	void AddPose(AnimationPose& base, const AnimationPose& delta, float weight, const BoneMask* mask = nullptr);
+
 } // namespace Swim::Animation

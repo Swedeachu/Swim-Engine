@@ -24,6 +24,7 @@ SWIM_TEST("RHI.Vulkan.DescriptorArrays", "BufferElementsRequireCompleteInitializ
 	RhiVulkan::VulkanBuffer buffer(capture.State, RhiVulkan::FromNativeHandle<VkBuffer>(1), nullptr,
 		{ 256, Rhi::BufferUsage::Storage, Rhi::MemoryPreference::DeviceLocal, {} });
 	std::array<Rhi::DescriptorWrite, 3> writes{};
+
 	for (std::uint32_t index = 0; index < writes.size(); ++index)
 	{
 		writes[index].Binding = 9;
@@ -32,6 +33,7 @@ SWIM_TEST("RHI.Vulkan.DescriptorArrays", "BufferElementsRequireCompleteInitializ
 		writes[index].BufferOffset = index * 16;
 		writes[index].BufferRange = 16;
 	}
+
 	capture.Commands->Begin();
 	capture.Commands->BindComputePipeline(*pipeline);
 	table->Write({ &writes[2], 1 });
@@ -144,21 +146,25 @@ SWIM_TEST("RHI.Vulkan.DescriptorArrays", "CompiledReflectionCreatesExactNativeAr
 	SWIM_REQUIRE(layout);
 	SWIM_REQUIRE_EQUAL(capture.SetBindings.size(), 2u);
 	std::uint32_t total = 0;
+
 	for (const auto& schema : interface.DescriptorSchemas)
 	{
 		auto table = RhiVulkan::VulkanDescriptorTable::Create(capture.State, { layout.get(), schema.Space, 0, {} });
 		SWIM_REQUIRE(table);
 		SWIM_CHECK(!table->IsComplete());
+
 		for (const auto& binding : capture.SetBindings[schema.Space])
 		{
 			SWIM_CHECK_EQUAL(binding.descriptorCount, 2u);
 			SWIM_CHECK_EQUAL(binding.stageFlags, static_cast<VkShaderStageFlags>(VK_SHADER_STAGE_COMPUTE_BIT));
 		}
+
 		for (const auto& pool : capture.PoolSizes)
 		{
 			total += pool.descriptorCount;
 		}
 	}
+
 	SWIM_CHECK_EQUAL(total, 12u);
 }
 #endif

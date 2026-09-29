@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// One compiled post-processing program.
 	struct PostProgram
 	{
@@ -48,10 +49,13 @@ namespace Swim::Render
 	// PostProcessReference.h is the CPU definition of every pass.
 	class PostProcessor
 	{
+
 	  public:
+
 		// Throws std::invalid_argument when a program is missing, std::runtime_error when
 		// the exposure state buffer cannot be created.
 		PostProcessor(Rhi::Device& device, PostProcessorDesc desc);
+
 		~PostProcessor();
 
 		// Throws std::invalid_argument for invalid settings, a negative or non-finite
@@ -66,8 +70,11 @@ namespace Swim::Render
 		static Rhi::TextureDesc BloomLevelDesc(std::uint32_t width, std::uint32_t height);
 
 	  private:
+
 		PostProcessorDesc desc;
 		std::unique_ptr<Rhi::Buffer> exposureState;
 		bool historyValid = false;
+
 	};
+
 } // namespace Swim::Render

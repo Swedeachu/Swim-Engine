@@ -14,14 +14,17 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		RequireGraphicsQueue();
 		RequireResource<VulkanBuffer>(buffer, GetState());
+
 		if (slot >= GetState()->Device.physical_device.properties.limits.maxVertexInputBindings ||
 			!HasBufferUsage(buffer.GetDesc().Usage, Rhi::BufferUsage::Vertex) ||
 			offset >= buffer.GetDesc().Size || buffer.GetNativeHandle() == 0)
 		{
 			throw std::invalid_argument("Vertex binding requires a valid slot, vertex buffer and in-range offset");
 		}
+
 		const VertexBufferBinding replacement{ slot, offset, buffer.GetDesc().Size - offset };
 		auto existing = std::find_if(vertexBuffers.begin(), vertexBuffers.end(), [&](const auto& item) { return item.Slot == slot; });
+
 		if (existing == vertexBuffers.end())
 		{
 			// Allocate bookkeeping before recording the non-failing native command.
@@ -31,6 +34,7 @@ namespace Swim::RhiVulkan
 		{
 			*existing = replacement;
 		}
+
 		const auto native = FromNativeHandle<VkBuffer>(buffer.GetNativeHandle());
 		const VkDeviceSize nativeOffset = offset;
 		GetState()->Dispatch.vkCmdBindVertexBuffers(commandBuffer, slot, 1, &native, &nativeOffset);
@@ -43,18 +47,22 @@ namespace Swim::RhiVulkan
 		{
 			const auto binding = std::find_if(vertexBuffers.begin(), vertexBuffers.end(),
 				[&](const auto& item) { return item.Slot == requirement.Slot; });
+
 			if (binding == vertexBuffers.end() || binding->Offset % requirement.Alignment != 0 ||
 				binding->Bytes < requirement.ElementBytes)
 			{
 				throw std::invalid_argument("Draw requires every vertex attribute binding with aligned, sufficient storage");
 			}
+
 			const bool perInstance = requirement.Rate == Rhi::VertexInputRate::Instance;
+
 			if (elementCount == 0 || instanceCount == 0 || (indexed && !perInstance) || requirement.Stride == 0)
 			{
 				// Index contents and signed base-vertex effects remain caller-owned.
 				// Do not map/read back index buffers merely to validate a draw.
 				continue;
 			}
+
 			const std::uint64_t first = perInstance ? firstInstance : firstVertex;
 			const std::uint64_t count = perInstance ? instanceCount : elementCount;
 			const auto last = first + count - 1;

@@ -46,12 +46,15 @@ namespace Swim::Rhi
 			{
 				return std::nullopt;
 			}
+
 			const std::uint64_t mask = ValidBits == 64 ? UINT64_MAX : (std::uint64_t{ 1 } << ValidBits) - 1;
 			const double elapsed = static_cast<double>((end.Ticks - begin.Ticks) & mask) * NanosecondsPerTick;
+
 			if (!std::isfinite(elapsed))
 			{
 				return std::nullopt;
 			}
+
 			return elapsed;
 		}
 	};

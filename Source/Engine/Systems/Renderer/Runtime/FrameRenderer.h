@@ -17,31 +17,42 @@
 
 namespace Swim::Assets
 {
+
 	class AssetSystem;
+
 }
 
 namespace Swim::IO
 {
+
 	class AsyncIoService;
+
 }
 
 namespace Swim::Jobs
 {
+
 	class JobSystem;
+
 }
 
 namespace Swim::Text
 {
+
 	class GlyphAtlas;
+
 }
 
 namespace Swim::UI
 {
+
 	class UiDocument;
+
 }
 
 namespace Swim::Render
 {
+
 	class AssetResidencyService;
 	class BindlessResourceTable;
 	class GeometryHeap;
@@ -51,10 +62,12 @@ namespace Swim::Render
 	class ParticleSystem;
 	class SkinningSystem;
 	class TextureResidency;
+
 } // namespace Swim::Render
 
 namespace Engine
 {
+
 	class MaterialLibrary;
 	class MeshLibrary;
 	class RenderDevice;
@@ -148,12 +161,17 @@ namespace Engine
 	// Owner thread only.
 	class FrameRenderer
 	{
+
 	  public:
+
 		// Throws std::runtime_error when a shader program is missing.
 		FrameRenderer(RenderDevice& device, Swim::Assets::AssetSystem& assets, Swim::IO::AsyncIoService& io, Swim::Jobs::JobSystem* jobs,
 			const FrameRendererDesc& desc);
+
 		~FrameRenderer();
+
 		FrameRenderer(const FrameRenderer&) = delete;
+
 		FrameRenderer& operator=(const FrameRenderer&) = delete;
 
 		RenderSettings& GetSettings() { return settings; }
@@ -165,19 +183,28 @@ namespace Engine
 		RenderDevice& GetRenderDevice() const { return device; }
 
 		MeshLibrary& GetMeshes() const;
+
 		MaterialLibrary& GetMaterials() const;
+
 		Swim::Render::GpuScene& GetScene() const;
+
 		Swim::Render::GpuLightBuffer& GetLights() const;
+
 		Swim::Render::ParticleSystem& GetParticles() const;
+
 		Swim::Render::SkinningSystem& GetSkinning() const;
+
 		Swim::Render::BindlessResourceTable& GetBindless() const;
+
 		Swim::Render::AssetResidencyService& GetResidency() const;
+
 		Swim::Render::GeometryHeap& GetGeometry() const;
 
 		// The last submitted frame (the lastUse of anything released now).
 		Swim::Rhi::TimelinePoint GetLastCompletion() const { return lastCompletion; }
 
 		void BeginFrame();
+
 		// False when the frame was skipped (minimized, swapchain rebuilding, zero size).
 		bool Render(const RenderFrameInput& input);
 
@@ -194,6 +221,7 @@ namespace Engine
 		// Render features (RenderFeature.h): gameplay-owned passes recorded every frame at
 		// their stage. Adding the same object twice is ignored; programs load on first use.
 		void AddFeature(std::shared_ptr<RenderFeature> feature);
+
 		bool RemoveFeature(const RenderFeature* feature);
 
 		const std::vector<std::shared_ptr<RenderFeature>>& GetFeatures() const { return features; }
@@ -207,10 +235,12 @@ namespace Engine
 					return typed;
 				}
 			}
+
 			return nullptr;
 		}
 
 	  private:
+
 		void GatherTimings(); // Waits for the previous submission and reads its pass timings.
 
 		struct Impl;
@@ -223,5 +253,7 @@ namespace Engine
 		std::vector<std::uint8_t> capture;
 		std::uint32_t captureWidth = 0;
 		std::uint32_t captureHeight = 0;
+
 	};
+
 } // namespace Engine

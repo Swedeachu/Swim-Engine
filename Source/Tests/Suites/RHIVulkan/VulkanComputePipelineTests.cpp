@@ -57,6 +57,7 @@ SWIM_TEST("RHI.Vulkan.ComputePipeline", "LocalSizeBoundsAndProductCannotOverflow
 		auto layout = RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} });
 		return RhiVulkan::VulkanComputePipeline::Create(capture.State, { program.get(), layout.get(), {}, {} });
 	};
+
 	for (std::size_t axis = 0; axis < 3; ++axis)
 	{
 		std::array<std::uint32_t, 3> size{ 1, 1, 1 };
@@ -65,14 +66,17 @@ SWIM_TEST("RHI.Vulkan.ComputePipeline", "LocalSizeBoundsAndProductCannotOverflow
 		size[axis] = 65;
 		SWIM_CHECK(!create(size));
 	}
+
 	SWIM_CHECK(create({ 64, 2, 1 }) != nullptr);
 	SWIM_CHECK(!create({ 64, 2, 2 }));
 	auto& limits = capture.State->Device.physical_device.properties.limits;
 	limits.maxComputeWorkGroupInvocations = UINT32_MAX;
+
 	for (auto& size : limits.maxComputeWorkGroupSize)
 	{
 		size = UINT32_MAX;
 	}
+
 	SWIM_CHECK(!create({ 65536, 65536, 1 }));
 	SWIM_CHECK(!create({ UINT32_MAX, UINT32_MAX, UINT32_MAX }));
 	SWIM_CHECK(create({ UINT32_MAX, 1, 1 }) != nullptr);

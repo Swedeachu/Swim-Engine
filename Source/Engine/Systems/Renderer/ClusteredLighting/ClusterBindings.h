@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contracts of the clustered lighting programs
 	// (Shaders/Slang/ClusteredLighting). Every program uses one space; Grid is a
 	// one-element StructuredBuffer<ClusterGridRecord>.
@@ -55,4 +56,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t Output = 3; // RWTexture2D<float4> (rgba8).
 		static constexpr std::uint32_t ThreadGroupSize = 8;
 	};
+
 } // namespace Swim::Render

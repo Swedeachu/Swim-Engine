@@ -9,6 +9,7 @@
 
 namespace Swim::Text
 {
+
 	enum class TextDirection : std::uint8_t
 	{
 		Auto,
@@ -57,19 +58,27 @@ namespace Swim::Text
 	// platform font dependency. Const operations are safe to call from jobs.
 	class FontFace final
 	{
+
 	  public:
+
 		explicit FontFace(std::span<const std::byte> bytes, std::uint32_t faceIndex = 0);
+
 		~FontFace();
+
 		FontFace(const FontFace&) = delete;
+
 		FontFace& operator=(const FontFace&) = delete;
 
 		FontMetrics GetMetrics(float size) const;
+
 		std::uint32_t GetGlyph(char32_t codePoint) const;
+
 		// Shapes one horizontal script/direction run. The caller owns paragraph
 		// bidi segmentation and fallback. Invalid UTF-8 becomes U+FFFD in HarfBuzz.
 		ShapedRun Shape(std::string_view utf8, float size, const ShapeOptions& options = {}) const;
 
 	  private:
+
 		friend class GlyphAtlas;
 		struct Impl;
 
@@ -83,6 +92,9 @@ namespace Swim::Text
 		};
 
 		GlyphBitmap Rasterize(std::uint32_t glyph, float emSize, float range, std::uint32_t maxDimension) const;
+
 		std::unique_ptr<Impl> impl;
+
 	};
+
 } // namespace Swim::Text

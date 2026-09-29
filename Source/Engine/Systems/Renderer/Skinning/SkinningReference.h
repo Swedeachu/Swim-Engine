@@ -10,6 +10,7 @@
 
 namespace Swim::Render
 {
+
 	// Up to four joint influences of one vertex. Weights should sum to 1 (the asset
 	// compiler normalizes them); zero weights are skipped.
 	struct SkinInfluence
@@ -51,6 +52,7 @@ namespace Swim::Render
 
 	namespace Skinning
 	{
+
 		// Validates and packs influences and morph targets (throws std::invalid_argument
 		// for mismatched counts, joints >= jointCount or non-finite data). Morph deltas
 		// whose nine components are all zero are dropped.
@@ -77,5 +79,7 @@ namespace Swim::Render
 		{
 			return static_cast<std::uint16_t>((skin.Joints[slot / 2] >> ((slot % 2) * 16)) & 0xffffu);
 		}
+
 	} // namespace Skinning
+
 } // namespace Swim::Render

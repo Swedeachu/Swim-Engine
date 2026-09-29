@@ -10,8 +10,10 @@
 // owner, and keys go to the owner. A dropdown's options live in a popup (Parts.Popup).
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		// Rows a page key moves when neither the item extent nor the viewport is known.
 		constexpr std::int32_t DefaultPageRows = 10;
 		constexpr std::uint32_t MaxItemCount = 1u << 24;
@@ -20,6 +22,7 @@ namespace Swim::UI
 		{
 			return std::isfinite(value) ? static_cast<std::int32_t>(std::lround(value)) : -1;
 		}
+
 	} // namespace
 
 	std::uint32_t UiDocument::Impl::OptionCount(const Node& owner) const
@@ -28,7 +31,9 @@ namespace Swim::UI
 		{
 			return owner.Control.ItemCount;
 		}
+
 		std::uint32_t count = 0;
+
 		for (const auto option : owner.Options)
 		{
 			if (Nodes.contains(option.Value) && Get(option).PartOf == owner.Id && Get(option).Role == UiPartRole::Option)
@@ -36,6 +41,7 @@ namespace Swim::UI
 				++count;
 			}
 		}
+
 		return count;
 	}
 
@@ -45,17 +51,20 @@ namespace Swim::UI
 		{
 			return {};
 		}
+
 		for (const auto option : owner.Options)
 		{
 			if (Nodes.contains(option.Value))
 			{
 				const auto& node = Get(option);
+
 				if (node.PartOf == owner.Id && node.Role == UiPartRole::Option && Index(node.PartValue) == index)
 				{
 					return option;
 				}
 			}
 		}
+
 		return {};
 	}
 
@@ -73,31 +82,39 @@ namespace Swim::UI
 	void UiDocument::Impl::SyncOwner(Node& owner)
 	{
 		auto& c = owner.Control;
+
 		if (c.Kind != UiControlKind::Dropdown || !c.Parts.Label || !Nodes.contains(c.Parts.Label.Value))
 		{
 			return;
 		}
+
 		auto& label = Get(c.Parts.Label);
 		const auto option = OptionFor(owner, Index(c.Value));
+
 		if (!label.Fonts || !option)
 		{
 			return; // No choice (or an unbound virtual row): the label keeps its text (a placeholder).
 		}
+
 		// The option's own text, else its first descendant with text.
 		const std::string* text = nullptr;
 		std::vector<UiNodeId> pending{ option };
+
 		while (!pending.empty() && !text)
 		{
 			const auto id = pending.front();
 			pending.erase(pending.begin());
 			const auto& node = Get(id);
+
 			if (!node.TextContents.empty())
 			{
 				text = &node.TextContents;
 				break;
 			}
+
 			pending.insert(pending.end(), node.Children.begin(), node.Children.end());
 		}
+
 		if (text && label.TextContents != *text)
 		{
 			label.TextContents = *text;
@@ -111,44 +128,53 @@ namespace Swim::UI
 	bool UiDocument::Impl::SelectOption(Node& owner, std::int32_t index, bool commit)
 	{
 		auto& c = owner.Control;
+
 		if (c.ReadOnly)
 		{
 			return false;
 		}
+
 		const auto count = static_cast<std::int32_t>(OptionCount(owner));
 		index = count == 0 ? -1 : std::clamp(index, -1, count - 1);
 		const bool changed = index != Index(c.Value);
+
 		if (changed)
 		{
 			c.Value = static_cast<float>(index);
 			MarkSubtreeVisualDirty(owner.Id);
 			SyncOwner(owner);
 			Events.push_back({ UiEventKind::ValueChanged, owner.Id, c.Value });
+
 			if (commit)
 			{
 				Events.push_back({ UiEventKind::ValueCommitted, owner.Id, c.Value });
 			}
 		}
+
 		if (index >= 0)
 		{
 			RevealOption(owner, index);
 		}
+
 		return changed;
 	}
 
 	void UiDocument::Impl::RevealOption(Node& owner, std::int32_t index)
 	{
 		const auto& c = owner.Control;
+
 		if (index < 0 || !c.ScrollTarget || !Nodes.contains(c.ScrollTarget.Value))
 		{
 			return;
 		}
+
 		auto& target = Get(c.ScrollTarget);
 		const bool horizontal = c.Kind == UiControlKind::ListView && c.Orientation == UiOrientation::Horizontal;
 		const UiRect inner = Internal::ContentBox(target.Bounds, target.Style.Padding);
 		const float viewport = horizontal ? inner.Width : inner.Height;
 		float start = 0.0f;
 		float length = 0.0f;
+
 		if (c.ItemExtent > 0.0f)
 		{
 			start = static_cast<float>(index) * c.ItemExtent;
@@ -157,17 +183,21 @@ namespace Swim::UI
 		else
 		{
 			const auto option = OptionFor(owner, index);
+
 			if (!option || !Get(option).Active)
 			{
 				return;
 			}
+
 			const auto& bounds = Get(option).Bounds;
 			// Bounds are laid out with the current scroll: content = bounds - inner + scroll.
 			start = horizontal ? bounds.X - inner.X + target.ArrangedScroll.X : bounds.Y - inner.Y + target.ArrangedScroll.Y;
 			length = horizontal ? bounds.Width : bounds.Height;
 		}
+
 		float& scroll = horizontal ? target.Scroll.X : target.Scroll.Y;
 		float wanted = scroll;
+
 		if (start < wanted)
 		{
 			wanted = start;
@@ -176,6 +206,7 @@ namespace Swim::UI
 		{
 			wanted = start + length - viewport;
 		}
+
 		if (wanted != scroll)
 		{
 			scroll = std::max(0.0f, wanted); // Clamped to the content by the next Layout.
@@ -186,10 +217,12 @@ namespace Swim::UI
 	void UiDocument::Impl::ToggleDropdown(Node& owner)
 	{
 		auto& c = owner.Control;
+
 		if (c.Kind != UiControlKind::Dropdown || !c.Parts.Popup || !Nodes.contains(c.Parts.Popup.Value))
 		{
 			return;
 		}
+
 		if (IsDropdownOpen(owner))
 		{
 			for (std::size_t i = 0; i < Popups.size(); ++i)
@@ -200,12 +233,15 @@ namespace Swim::UI
 					break;
 				}
 			}
+
 			return;
 		}
+
 		if (c.ReadOnly)
 		{
 			return;
 		}
+
 		DismissForOpen(owner.Id, c.Parts.Popup);
 		UiPopupDesc desc;
 		desc.Anchor = owner.Id;
@@ -231,12 +267,16 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& owner = Get(option.PartOf);
+
 		if (!IsSelectionOwner(owner) || !Available(owner.Id))
 		{
 			return;
 		}
+
 		SelectOption(owner, Index(option.PartValue), true);
+
 		if (owner.Control.Kind == UiControlKind::Dropdown && IsDropdownOpen(owner))
 		{
 			ToggleDropdown(owner); // Closes.
@@ -248,19 +288,24 @@ namespace Swim::UI
 		auto& c = owner.Control;
 		const auto count = static_cast<std::int32_t>(OptionCount(owner));
 		const auto value = Index(c.Value);
+
 		if (c.Kind == UiControlKind::Dropdown)
 		{
 			const bool open = IsDropdownOpen(owner);
+
 			if (key == UiKey::Enter || key == UiKey::Space)
 			{
 				if (open && owner.Highlight >= 0 && owner.Highlight < count)
 				{
 					SelectOption(owner, owner.Highlight, true);
 				}
+
 				ToggleDropdown(owner);
 				return true;
 			}
+
 			std::int32_t next = open ? owner.Highlight : value;
+
 			switch (key)
 			{
 			case UiKey::Up:
@@ -278,31 +323,40 @@ namespace Swim::UI
 			default:
 				return false;
 			}
+
 			if (count == 0)
 			{
 				return true;
 			}
+
 			next = std::clamp(next, 0, count - 1);
+
 			if (open)
 			{
 				if (next != owner.Highlight)
 				{
 					owner.Highlight = next;
+
 					if (c.Parts.Popup && Nodes.contains(c.Parts.Popup.Value))
 					{
 						MarkSubtreeVisualDirty(c.Parts.Popup);
 					}
 				}
+
 				RevealOption(owner, next);
 				return true;
 			}
+
 			SelectOption(owner, next, true);
 			return true;
 		}
+
 		const bool horizontal = c.Orientation == UiOrientation::Horizontal;
+
 		if (c.Kind == UiControlKind::RadioGroup)
 		{
 			std::int32_t delta = 0;
+
 			switch (key)
 			{
 			case UiKey::Left:
@@ -321,30 +375,37 @@ namespace Swim::UI
 				return true;
 			case UiKey::Space:
 			case UiKey::Enter:
+
 				if (value < 0 && count > 0)
 				{
 					SelectOption(owner, 0, true);
 					return true;
 				}
+
 				return false; // Activation (a Click).
 			default:
 				return false;
 			}
+
 			if (count > 0)
 			{
 				// Wraps around, like platform radio groups.
 				const auto next = value < 0 ? (delta > 0 ? 0 : count - 1) : (value + delta + count) % count;
 				SelectOption(owner, next, true);
 			}
+
 			return true;
 		}
+
 		// List views.
 		std::int32_t page = DefaultPageRows;
+
 		if (c.ScrollTarget && Nodes.contains(c.ScrollTarget.Value))
 		{
 			const auto& target = Get(c.ScrollTarget);
 			const UiRect inner = Internal::ContentBox(target.Bounds, target.Style.Padding);
 			float extent = c.ItemExtent;
+
 			if (extent <= 0.0f)
 			{
 				if (const auto option = OptionFor(owner, std::max(0, value)); option && Get(option).Active)
@@ -352,14 +413,17 @@ namespace Swim::UI
 					extent = horizontal ? Get(option).Bounds.Width : Get(option).Bounds.Height;
 				}
 			}
+
 			if (extent > 0.0f)
 			{
 				page = std::max(1, static_cast<std::int32_t>((horizontal ? inner.Width : inner.Height) / extent));
 			}
 		}
+
 		std::int32_t next = value;
 		const auto previousKey = horizontal ? UiKey::Left : UiKey::Up;
 		const auto nextKey = horizontal ? UiKey::Right : UiKey::Down;
+
 		if (key == previousKey)
 		{
 			next = value < 0 ? 0 : value - 1;
@@ -390,16 +454,19 @@ namespace Swim::UI
 			{
 				Events.push_back({ UiEventKind::Submit, owner.Id, c.Value });
 			}
+
 			return true;
 		}
 		else
 		{
 			return false; // The cross axis navigates.
 		}
+
 		if (count > 0)
 		{
 			SelectOption(owner, std::clamp(next, 0, count - 1), true);
 		}
+
 		return true;
 	}
 
@@ -409,37 +476,47 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& slider = Get(label.PartOf);
+
 		if (slider.Control.Kind != UiControlKind::Slider || slider.Control.Parts.Label != label.Id)
 		{
 			return;
 		}
+
 		// Plain decimal numbers, surrounding spaces and a leading '+' allowed; anything else
 		// restores the displayed value.
 		std::string_view text = label.TextContents;
+
 		while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
 		{
 			text.remove_prefix(1);
 		}
+
 		while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
 		{
 			text.remove_suffix(1);
 		}
+
 		if (!text.empty() && text.front() == '+')
 		{
 			text.remove_prefix(1);
 		}
+
 		float parsed = 0.0f;
 		const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+
 		if (!text.empty() && result.ec == std::errc{} && result.ptr == text.data() + text.size() && std::isfinite(parsed) &&
 			!slider.Control.ReadOnly && Available(slider.Id))
 		{
 			ChangeValue(slider, parsed, true);
 		}
+
 		// Reformat (also when the value did not change, or the text was rejected).
 		const auto keep = label.TextContents;
 		label.TextContents.clear();
 		SyncValueLabel(slider, true);
+
 		if (label.TextContents.empty())
 		{
 			label.TextContents = keep; // Not a formatted label (no decimals or fonts).
@@ -457,20 +534,25 @@ namespace Swim::UI
 				{
 					std::erase(impl->Get(part.PartOf).Options, partId);
 				}
+
 				part.Control.Kind = UiControlKind::None;
 				impl->ClearUnavailable();
 			}
+
 			part.PartOf = {};
 			part.Role = UiPartRole::None;
 			impl->MarkLayoutDirty(partId);
 			impl->MarkSubtreeVisualDirty(partId);
 		};
+
 		if (role == UiPartRole::None)
 		{
 			release();
 			return;
 		}
+
 		auto& control = impl->Get(controlId);
+
 		if (role == UiPartRole::Option)
 		{
 			const auto isDescendant = [&]
@@ -482,6 +564,7 @@ namespace Swim::UI
 						return true;
 					}
 				}
+
 				return false;
 			}();
 			const auto kind = control.Control.Kind;
@@ -494,14 +577,17 @@ namespace Swim::UI
 				throw std::invalid_argument("Options are nodes without another control, inside a radio group or list view (or anywhere "
 											"for a dropdown), at integral indices");
 			}
+
 			if (part.Role == UiPartRole::Option && part.PartOf == controlId && part.PartValue == value)
 			{
 				return;
 			}
+
 			if (part.Role != UiPartRole::None)
 			{
 				release();
 			}
+
 			part.PartOf = controlId;
 			part.Role = role;
 			part.PartValue = value;
@@ -510,27 +596,34 @@ namespace Swim::UI
 			control.Options.push_back(partId);
 			impl->MarkLayoutDirty(partId);
 			impl->MarkSubtreeVisualDirty(partId);
+
 			if (Index(control.Control.Value) == Index(value))
 			{
 				impl->SyncOwner(control);
 			}
+
 			return;
 		}
+
 		if (role != UiPartRole::Tick || control.Control.Kind != UiControlKind::Slider || part.Parent != controlId || !std::isfinite(value))
 		{
 			throw std::invalid_argument("SetPartRole registers slider tick marks (direct children) at finite values, and options");
 		}
+
 		if (part.Role == UiPartRole::Option)
 		{
 			release();
 		}
+
 		part.PartOf = controlId;
 		part.Role = role;
 		part.PartValue = value;
+
 		if (part.ThemeClass != UiThemeClass::None)
 		{
 			impl->ApplyTheme(part);
 		}
+
 		impl->MarkLayoutDirty(partId);
 	}
 
@@ -546,4 +639,5 @@ namespace Swim::UI
 	{
 		return impl->OptionCount(impl->Get(owner));
 	}
+
 } // namespace Swim::UI

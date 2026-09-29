@@ -41,7 +41,9 @@ namespace Swim::Rhi
 	// Retain this object past graphics-system destruction to inspect teardown too.
 	class DiagnosticLog
 	{
+
 	  public:
+
 		explicit DiagnosticLog(std::size_t capacity = 256) : capacity(std::min(capacity, std::size_t{ 4096 })) {}
 
 		void Record(DiagnosticSeverity severity, std::string_view id, std::string_view text) noexcept
@@ -54,14 +56,17 @@ namespace Swim::Rhi
 			{
 				++errors;
 			}
+
 			try
 			{
 				std::scoped_lock lock(mutex);
+
 				if (messages.size() >= capacity)
 				{
 					++dropped;
 					return;
 				}
+
 				messages.push_back({ severity, std::string(id.substr(0, 256)), std::string(text.substr(0, 8192)) });
 			}
 			catch (...)
@@ -77,12 +82,14 @@ namespace Swim::Rhi
 		}
 
 	  private:
+
 		const std::size_t capacity;
 		mutable std::mutex mutex;
 		std::vector<DiagnosticMessage> messages;
 		std::atomic<std::uint64_t> warnings{ 0 };
 		std::atomic<std::uint64_t> errors{ 0 };
 		std::atomic<std::uint64_t> dropped{ 0 };
+
 	};
 
 	enum class ValidationMode : std::uint8_t

@@ -19,21 +19,25 @@ SWIM_TEST("ShaderCompiler.LightLayout", "GpuLightRecordsMatchTheCppRecords")
 	const ShaderCompiler::ShaderBindingReflection* lights = nullptr;
 	const ShaderCompiler::ShaderBindingReflection* header = nullptr;
 	const ShaderCompiler::ShaderBindingReflection* samples = nullptr;
+
 	for (const auto& parameter : parsed.Reflection.GlobalParameters)
 	{
 		lights = parameter.Name == "Lights" ? &parameter : lights;
 		header = parameter.Name == "Header" ? &parameter : header;
 		samples = parameter.Name == "Samples" ? &parameter : samples;
 	}
+
 	SWIM_REQUIRE(lights != nullptr && header != nullptr && samples != nullptr);
 	SWIM_CHECK_EQUAL(lights->ElementSize, std::uint32_t(sizeof(Render::GpuLightRecord)));
 	SWIM_CHECK_EQUAL(header->ElementSize, std::uint32_t(sizeof(Render::GpuLightHeader)));
 	SWIM_CHECK_EQUAL(samples->ElementSize, 64u);
 	std::map<std::string, std::uint32_t> fields;
+
 	for (const auto& field : lights->ElementFields)
 	{
 		fields[field.Name] = field.Offset;
 	}
+
 	SWIM_CHECK_EQUAL(fields.at("Position"), std::uint32_t(offsetof(Render::GpuLightRecord, Position)));
 	SWIM_CHECK_EQUAL(fields.at("Range"), std::uint32_t(offsetof(Render::GpuLightRecord, Range)));
 	SWIM_CHECK_EQUAL(fields.at("Direction"), std::uint32_t(offsetof(Render::GpuLightRecord, Direction)));
@@ -45,10 +49,12 @@ SWIM_TEST("ShaderCompiler.LightLayout", "GpuLightRecordsMatchTheCppRecords")
 	SWIM_CHECK_EQUAL(fields.at("ShadowIndex"), std::uint32_t(offsetof(Render::GpuLightRecord, ShadowIndex)));
 	SWIM_CHECK_EQUAL(fields.at("Flags"), std::uint32_t(offsetof(Render::GpuLightRecord, Flags)));
 	std::map<std::string, std::uint32_t> headerFields;
+
 	for (const auto& field : header->ElementFields)
 	{
 		headerFields[field.Name] = field.Offset;
 	}
+
 	SWIM_CHECK_EQUAL(headerFields.at("DirectionalCount"), std::uint32_t(offsetof(Render::GpuLightHeader, DirectionalCount)));
 	SWIM_CHECK_EQUAL(headerFields.at("LocalCount"), std::uint32_t(offsetof(Render::GpuLightHeader, LocalCount)));
 	SWIM_CHECK_EQUAL(headerFields.at("FirstLocalRow"), std::uint32_t(offsetof(Render::GpuLightHeader, FirstLocalRow)));

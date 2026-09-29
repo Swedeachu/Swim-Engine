@@ -9,8 +9,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using Assets::VertexElementFormat;
 
 		std::uint32_t FormatBytes(VertexElementFormat format)
@@ -50,6 +52,7 @@ namespace Swim::Render
 		}
 
 		static_assert(sizeof(Assets::MeshletDesc) == 16 && std::is_trivially_copyable_v<Assets::MeshletDesc>);
+
 	} // namespace
 
 	GeometryMeshDesc MeshGeometryPayload::Describe(std::string_view debugName) const
@@ -78,15 +81,19 @@ namespace Swim::Render
 		MeshGeometryPayload payload;
 		std::uint64_t vertexCount = 0;
 		std::vector<std::uint32_t> streamBase;
+
 		for (std::size_t s = 0; s < mesh.VertexStreams.size(); ++s)
 		{
 			const auto& stream = mesh.VertexStreams[s];
+
 			if (!stream.StrideBytes || stream.DataSizeBytes % stream.StrideBytes != 0 || stream.DataOffsetBytes > mesh.VertexBytes.size() ||
 				stream.DataSizeBytes > mesh.VertexBytes.size() - stream.DataOffsetBytes)
 			{
 				throw std::invalid_argument("MeshAsset vertex stream exceeds its vertex bytes or has an invalid stride");
 			}
+
 			const auto count = stream.DataSizeBytes / stream.StrideBytes;
+
 			if (s == 0)
 			{
 				vertexCount = count;
@@ -95,13 +102,17 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument("MeshAsset vertex streams disagree on the vertex count");
 			}
+
 			streamBase.push_back(payload.VertexStride);
+
 			if (payload.VertexStride > UINT32_MAX - stream.StrideBytes)
 			{
 				throw std::invalid_argument("MeshAsset packed vertex stride overflows");
 			}
+
 			payload.VertexStride += stream.StrideBytes;
 		}
+
 		if (!vertexCount)
 		{
 			throw std::invalid_argument("MeshAsset has no vertices");
@@ -115,6 +126,7 @@ namespace Swim::Render
 		};
 
 		std::vector<PackedAttribute> attributes;
+
 		for (const auto& attribute : mesh.VertexAttributes)
 		{
 			if (attribute.StreamIndex >= mesh.VertexStreams.size() ||
@@ -123,9 +135,11 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument("MeshAsset vertex attribute lies outside its stream");
 			}
+
 			attributes.push_back({ streamBase[attribute.StreamIndex] + attribute.OffsetBytes, std::uint32_t(attribute.Semantic),
 				std::uint32_t(attribute.Format) });
 		}
+
 		std::sort(attributes.begin(), attributes.end(),
 			[](const PackedAttribute& a, const PackedAttribute& b)
 			{
@@ -133,25 +147,30 @@ namespace Swim::Render
 			});
 		std::uint32_t layout = 2166136261u;
 		Hash(layout, payload.VertexStride);
+
 		for (const auto& attribute : attributes)
 		{
 			Hash(layout, attribute.Offset);
 			Hash(layout, attribute.Semantic);
 			Hash(layout, attribute.Format);
 		}
+
 		payload.VertexLayout = layout ? layout : 1;
 
 		// Interleave: one stream is a straight copy; several are packed per vertex.
 		payload.Vertices.resize(static_cast<std::size_t>(vertexCount * payload.VertexStride));
+
 		for (std::size_t s = 0; s < mesh.VertexStreams.size(); ++s)
 		{
 			const auto& stream = mesh.VertexStreams[s];
 			const auto* source = mesh.VertexBytes.data() + stream.DataOffsetBytes;
+
 			if (mesh.VertexStreams.size() == 1)
 			{
 				std::memcpy(payload.Vertices.data(), source, static_cast<std::size_t>(stream.DataSizeBytes));
 				break;
 			}
+
 			for (std::uint64_t v = 0; v < vertexCount; ++v)
 			{
 				std::memcpy(payload.Vertices.data() + v * payload.VertexStride + streamBase[s], source + v * stream.StrideBytes,
@@ -166,12 +185,15 @@ namespace Swim::Render
 		{
 			payload.Submeshes.push_back({ primitive.FirstIndex, primitive.IndexCount, primitive.VertexOffset, primitive.MaterialSlot });
 		}
+
 		if (!mesh.Lods.empty() && mesh.Primitives.empty())
 		{
 			throw std::invalid_argument("MeshAsset LODs need primitives");
 		}
+
 		// The asset's screen-coverage threshold becomes the LOD selection metric.
 		const auto lodCount = std::min<std::size_t>(mesh.Lods.size(), GpuMeshMetadata::MaxLods);
+
 		for (std::size_t i = 0; i < lodCount; ++i)
 		{
 			payload.Lods.push_back({ mesh.Lods[i].FirstPrimitive, mesh.Lods[i].PrimitiveCount, mesh.Lods[i].ScreenCoverage });
@@ -186,10 +208,12 @@ namespace Swim::Render
 			const std::uint64_t vertexOffset = Align16(descriptorOffset + descriptorBytes);
 			const std::uint64_t triangleOffset = Align16(vertexOffset + mesh.MeshletVertexBytes.size());
 			const std::uint64_t total = triangleOffset + mesh.MeshletTriangleBytes.size();
+
 			if (total > UINT32_MAX)
 			{
 				throw std::invalid_argument("MeshAsset meshlet payload exceeds 4 GiB");
 			}
+
 			header.DescriptorOffset = static_cast<std::uint32_t>(descriptorOffset);
 			header.VertexIndexOffset = static_cast<std::uint32_t>(vertexOffset);
 			header.VertexIndexBytes = static_cast<std::uint32_t>(mesh.MeshletVertexBytes.size());
@@ -198,16 +222,21 @@ namespace Swim::Render
 			payload.Meshlets.resize(static_cast<std::size_t>(total));
 			std::memcpy(payload.Meshlets.data(), &header, sizeof(header));
 			std::memcpy(payload.Meshlets.data() + descriptorOffset, mesh.Meshlets.data(), static_cast<std::size_t>(descriptorBytes));
+
 			if (!mesh.MeshletVertexBytes.empty())
 			{
 				std::memcpy(payload.Meshlets.data() + vertexOffset, mesh.MeshletVertexBytes.data(), mesh.MeshletVertexBytes.size());
 			}
+
 			if (!mesh.MeshletTriangleBytes.empty())
 			{
 				std::memcpy(payload.Meshlets.data() + triangleOffset, mesh.MeshletTriangleBytes.data(), mesh.MeshletTriangleBytes.size());
 			}
+
 			payload.MeshletCount = header.MeshletCount;
 		}
+
 		return payload;
 	}
+
 } // namespace Swim::Render

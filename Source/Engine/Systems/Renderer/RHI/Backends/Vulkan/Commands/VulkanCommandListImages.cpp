@@ -25,16 +25,20 @@ namespace Swim::RhiVulkan
 		RequireImageQueue();
 		const auto graphicsOnly = Rhi::ResourceState::ColorAttachment | Rhi::ResourceState::DepthStencilRead |
 			Rhi::ResourceState::DepthStencilWrite | Rhi::ResourceState::Present;
+
 		if (poolState->FamilyIndex != GetState()->QueueFamilies.Graphics && Rhi::HasAny(before | after, graphicsOnly))
 		{
 			throw std::invalid_argument("Compute image barriers cannot use attachment or presentation states");
 		}
+
 		auto& native = RequireResource<VulkanTexture>(texture, GetState());
+
 		if (after == Rhi::ResourceState::Undefined ||
 			((before == Rhi::ResourceState::Present || after == Rhi::ResourceState::Present) && !native.IsSwapchainImage()))
 		{
 			throw std::invalid_argument("Undefined is source-only; Present requires a swapchain image");
 		}
+
 		const auto source = GetTextureState(texture.GetDesc(), before);
 		const auto destination = GetTextureState(texture.GetDesc(), after);
 		VkImageMemoryBarrier2 barrier{};
@@ -64,6 +68,7 @@ namespace Swim::RhiVulkan
 		RequireResource<VulkanTexture>(destination, GetState());
 		const auto& sourceDesc = source.GetDesc();
 		const auto& destinationDesc = destination.GetDesc();
+
 		if (&source == &destination || sourceDesc.PixelFormat != destinationDesc.PixelFormat ||
 			sourceDesc.Dimension != destinationDesc.Dimension || sourceDesc.Samples != destinationDesc.Samples ||
 			!HasTextureUsage(sourceDesc.Usage, Rhi::TextureUsage::TransferSource) ||
@@ -71,6 +76,7 @@ namespace Swim::RhiVulkan
 		{
 			throw std::invalid_argument("Vulkan image copy requires distinct matching textures with transfer usage");
 		}
+
 		GetColorTexelBytes(sourceDesc.PixelFormat);
 		ValidateCopyExtent(sourceDesc, region.Source, region.SourceOffset, region.Extent);
 		ValidateCopyExtent(destinationDesc, region.Destination, region.DestinationOffset, region.Extent);
@@ -91,11 +97,13 @@ namespace Swim::RhiVulkan
 		RequireImageQueue();
 		RequireResource<VulkanBuffer>(source, GetState());
 		RequireResource<VulkanTexture>(destination, GetState());
+
 		if (!HasBufferUsage(source.GetDesc().Usage, Rhi::BufferUsage::TransferSource) ||
 			!HasTextureUsage(destination.GetDesc().Usage, Rhi::TextureUsage::TransferDestination))
 		{
 			throw std::invalid_argument("Vulkan upload requires transfer source/destination usage");
 		}
+
 		const auto copy = GetBufferImageCopy(source.GetDesc(), destination.GetDesc(), region);
 		GetState()->Dispatch.vkCmdCopyBufferToImage(commandBuffer, FromNativeHandle<VkBuffer>(source.GetNativeHandle()),
 			FromNativeHandle<VkImage>(destination.GetNativeHandle()), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
@@ -107,11 +115,13 @@ namespace Swim::RhiVulkan
 		RequireImageQueue();
 		RequireResource<VulkanTexture>(source, GetState());
 		RequireResource<VulkanBuffer>(destination, GetState());
+
 		if (!HasTextureUsage(source.GetDesc().Usage, Rhi::TextureUsage::TransferSource) ||
 			!HasBufferUsage(destination.GetDesc().Usage, Rhi::BufferUsage::TransferDestination))
 		{
 			throw std::invalid_argument("Vulkan readback requires transfer source/destination usage");
 		}
+
 		const auto copy = GetBufferImageCopy(destination.GetDesc(), source.GetDesc(), region);
 		GetState()->Dispatch.vkCmdCopyImageToBuffer(commandBuffer, FromNativeHandle<VkImage>(source.GetNativeHandle()),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, FromNativeHandle<VkBuffer>(destination.GetNativeHandle()), 1, &copy);

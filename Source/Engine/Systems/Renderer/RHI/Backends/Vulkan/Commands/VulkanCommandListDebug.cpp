@@ -9,6 +9,7 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
+
 		std::string ValidateLabel(std::string_view name, const std::array<float, 4>& color)
 		{
 			if (name.empty() || name.find('\0') != std::string_view::npos ||
@@ -16,6 +17,7 @@ namespace Swim::RhiVulkan
 			{
 				throw std::invalid_argument("RHI debug labels require a name and finite normalized RGBA color");
 			}
+
 			return std::string(name);
 		}
 
@@ -24,16 +26,19 @@ namespace Swim::RhiVulkan
 			return state.Instance && state.Instance->Diagnostics.DebugUtilsEnabled &&
 				state.Instance->Dispatch.vkCmdBeginDebugUtilsLabelEXT && state.Instance->Dispatch.vkCmdEndDebugUtilsLabelEXT;
 		}
+
 	}
 
 	void VulkanCommandList::BeginDebugLabel(std::string_view name, const std::array<float, 4>& color)
 	{
 		RequireRecording();
 		const auto owned = ValidateLabel(name, color);
+
 		if (debugLabelDepth == UINT32_MAX)
 		{
 			throw std::logic_error("RHI debug label nesting overflow");
 		}
+
 		if (HasLabelRegions(*GetState()))
 		{
 			VkDebugUtilsLabelEXT info{};
@@ -42,20 +47,24 @@ namespace Swim::RhiVulkan
 			std::copy(color.begin(), color.end(), info.color);
 			GetState()->Instance->Dispatch.vkCmdBeginDebugUtilsLabelEXT(commandBuffer, &info);
 		}
+
 		++debugLabelDepth;
 	}
 
 	void VulkanCommandList::EndDebugLabel()
 	{
 		RequireRecording();
+
 		if (debugLabelDepth == 0)
 		{
 			throw std::logic_error("RHI debug label region stack is empty");
 		}
+
 		if (HasLabelRegions(*GetState()))
 		{
 			GetState()->Instance->Dispatch.vkCmdEndDebugUtilsLabelEXT(commandBuffer);
 		}
+
 		--debugLabelDepth;
 	}
 
@@ -64,6 +73,7 @@ namespace Swim::RhiVulkan
 		RequireRecording();
 		const auto owned = ValidateLabel(name, color);
 		const auto& state = *GetState();
+
 		if (state.Instance && state.Instance->Diagnostics.DebugUtilsEnabled && state.Instance->Dispatch.vkCmdInsertDebugUtilsLabelEXT)
 		{
 			VkDebugUtilsLabelEXT info{};

@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// GeometryHeap-ready form of a compiled MeshAsset: vertex streams interleaved
 	// into one packed stride, primitives as submeshes, LODs as submesh ranges and
 	// meshlets packed behind a GpuMeshletPayloadHeader. Index bytes are copied so
@@ -32,4 +33,5 @@ namespace Swim::Render
 	// LOD or meshlet tables. Meshes with more than GpuMeshMetadata::MaxLods LODs
 	// keep their finest MaxLods levels.
 	MeshGeometryPayload BuildMeshGeometryPayload(const Assets::MeshAsset& mesh);
+
 } // namespace Swim::Render

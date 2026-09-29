@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuSceneStats
 	{
 		std::uint32_t LiveObjects = 0;
@@ -19,4 +20,5 @@ namespace Swim::Render
 		std::uint64_t TotalUploadBytes = 0;
 		std::uint64_t Frame = 0; // Imports so far.
 	};
+
 } // namespace Swim::Render

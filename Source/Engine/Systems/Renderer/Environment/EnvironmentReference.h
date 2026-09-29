@@ -5,6 +5,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	// CPU references of the GPU environment passes (EnvironmentBuilder) and of the
 	// shader-side lookup (EnvironmentLighting.slang). The native smokes feed them the
 	// GPU's own inputs (read back) so each stage is compared in isolation.
@@ -49,7 +50,9 @@ namespace Swim::Render::Environment
 	// the intensity. Mirrors EnvironmentLookup in EnvironmentLighting.slang.
 	class EnvironmentProbe
 	{
+
 	  public:
+
 		EnvironmentProbe(IrradianceSh irradiance, CubeImage prefiltered, Image2D brdfLut);
 
 		StandardPbr::EnvironmentTerms Lookup(
@@ -62,8 +65,11 @@ namespace Swim::Render::Environment
 		const Image2D& GetBrdfLut() const { return brdfLut; }
 
 	  private:
+
 		IrradianceSh irradiance;
 		CubeImage prefiltered;
 		Image2D brdfLut;
+
 	};
+
 } // namespace Swim::Render::Environment

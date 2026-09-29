@@ -11,6 +11,7 @@
 
 namespace Swim::Text
 {
+
 	enum class TextAlign : std::uint8_t
 	{
 		Start, // Left in left-to-right paragraphs, right in right-to-left ones.
@@ -116,8 +117,11 @@ namespace Swim::Text
 	// (edge contexts are not shared across a soft break).
 	class TextLayout final
 	{
+
 	  public:
+
 		TextLayout() = default;
+
 		// Throws std::invalid_argument for a null collection or invalid desc,
 		// std::length_error above 1 MiB.
 		TextLayout(std::string_view utf8, std::shared_ptr<const FontCollection> fonts, const TextLayoutDesc& desc);
@@ -142,23 +146,36 @@ namespace Swim::Text
 
 		// --- Caret and editing queries (offsets are grapheme boundaries of GetText()). ---
 		bool IsCaretStop(std::uint32_t offset) const;
+
 		std::uint32_t GetLineIndex(std::uint32_t offset) const; // Downstream affinity at soft breaks.
+
 		TextCaret GetCaret(std::uint32_t offset) const;
+
 		// The nearest caret stop to a point in layout space.
 		std::uint32_t HitTest(float x, float y) const;
+
 		// One rectangle per contiguous visual piece of [begin, end), line height tall.
 		std::vector<TextRect> GetSelectionRects(std::uint32_t begin, std::uint32_t end) const;
+
 		std::uint32_t NextCaretStop(std::uint32_t offset) const;
+
 		std::uint32_t PreviousCaretStop(std::uint32_t offset) const;
+
 		std::uint32_t NextWord(std::uint32_t offset) const;		// Start of the next word.
+
 		std::uint32_t PreviousWord(std::uint32_t offset) const; // Start of this or the previous word.
+
 		std::uint32_t LineStart(std::uint32_t offset) const;
+
 		std::uint32_t LineEnd(std::uint32_t offset) const;
+
 		// Vertical movement keeping a preferred x; returns the offset unchanged on the first/last line.
 		std::uint32_t LineAbove(std::uint32_t offset, float x) const;
+
 		std::uint32_t LineBelow(std::uint32_t offset, float x) const;
 
 	  private:
+
 		// Visual extent of one grapheme cluster in its line.
 		struct Grapheme
 		{
@@ -171,9 +188,13 @@ namespace Swim::Text
 		};
 
 		void Build();
+
 		const Grapheme* FindGrapheme(std::uint32_t offset) const; // The grapheme starting at offset.
+
 		float CaretX(std::uint32_t line, std::uint32_t offset) const;
+
 		std::uint32_t HitTestLine(std::uint32_t line, float x) const;
+
 		std::uint32_t ClampOffset(std::uint32_t offset) const;
 
 		std::string text;
@@ -189,5 +210,7 @@ namespace Swim::Text
 		std::uint32_t missingGlyphs = 0;
 
 		friend struct TextLayoutBuilder;
+
 	};
+
 } // namespace Swim::Text

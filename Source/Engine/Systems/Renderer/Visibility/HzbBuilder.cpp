@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	HzbBuilder::HzbBuilder(HzbBuilderDesc desc)
 		: pipeline(desc.ReducePipeline), layout(desc.Layout), space(desc.Space), name(std::move(desc.DebugName))
 	{
@@ -21,13 +22,16 @@ namespace Swim::Render
 		using S = Rhi::ResourceState;
 		const auto depthDesc = graph.GetDesc(depth); // A copy: creating the pyramid may reallocate the graph's resource list.
 		const bool depthFormat = Rhi::IsDepthFormat(depthDesc.PixelFormat);
+
 		if (depthDesc.Dimension != Rhi::TextureDimension::Texture2D || depthDesc.ArrayLayers != 1 ||
 			depthDesc.Samples != Rhi::SampleCount::X1 || (!depthFormat && depthDesc.PixelFormat != Rhi::Format::R32Float) ||
 			(static_cast<std::uint32_t>(depthDesc.Usage) & static_cast<std::uint32_t>(Rhi::TextureUsage::Sampled)) == 0)
 		{
 			throw std::invalid_argument(name + " source must be a sampled single-sample 2D depth or R32Float texture");
 		}
+
 		const auto mips = ComputeHzbMips(depthDesc.Extent.Width, depthDesc.Extent.Height);
+
 		if (mips.empty())
 		{
 			throw std::invalid_argument(name + " source must be larger than 1x1");
@@ -47,6 +51,7 @@ namespace Swim::Render
 		hzb.Pyramid = graph.CreateTexture(pyramidDesc);
 
 		const std::uint32_t farthestIsMax = convention == DepthConvention::Forward ? 1u : 0u;
+
 		for (std::uint32_t mip = 0; mip < hzb.MipCount; ++mip)
 		{
 			const auto source = mip == 0 ? depth : hzb.Pyramid;
@@ -74,15 +79,18 @@ namespace Swim::Render
 					{
 						b.Read(hzb.Pyramid, S::ShaderRead, sourceRange);
 					}
+
 					b.Write(hzb.Pyramid, S::ShaderWrite, destinationRange);
 				},
 				[=, pipeline = pipeline, layout = layout, space = space, pyramid = hzb.Pyramid, label = name](RenderCommandContext& c)
 				{
 					auto table = c.Device().CreateDescriptorTable({ layout, space, 0, label + " table" });
+
 					if (!table)
 					{
 						throw std::runtime_error(label + " descriptor table could not be created");
 					}
+
 					std::array<Rhi::DescriptorWrite, 2> writes{};
 					writes[0].Binding = HzbBindings::Source;
 					writes[0].TextureResource = &c.CreateView(source, sourceView);
@@ -98,6 +106,8 @@ namespace Swim::Render
 					list.Dispatch((constants[2] + group - 1) / group, (constants[3] + group - 1) / group, 1);
 				}));
 		}
+
 		return hzb;
 	}
+
 } // namespace Swim::Render

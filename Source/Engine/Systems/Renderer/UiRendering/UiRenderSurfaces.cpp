@@ -5,12 +5,15 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		std::uint32_t FullChain(std::uint32_t width, std::uint32_t height)
 		{
 			return static_cast<std::uint32_t>(std::bit_width(std::max(width, height)));
 		}
+
 	} // namespace
 
 	UiRenderSurfaces::UiRenderSurfaces(Rhi::Device& deviceInput, BindlessResourceTable& table, std::string name)
@@ -22,10 +25,12 @@ namespace Swim::Render
 		samplerDesc.AddressU = samplerDesc.AddressV = samplerDesc.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
 		samplerDesc.DebugName = debugName;
 		sampler = device.CreateSampler(samplerDesc);
+
 		if (!sampler)
 		{
 			throw std::runtime_error(debugName + " sampler could not be created");
 		}
+
 		samplerHandle = bindless.RegisterSampler(*sampler);
 	}
 
@@ -38,6 +43,7 @@ namespace Swim::Render
 				bindless.Release(surface.Handle);
 			}
 		}
+
 		bindless.Release(samplerHandle);
 	}
 
@@ -47,6 +53,7 @@ namespace Swim::Render
 		{
 			return nullptr;
 		}
+
 		auto& surface = surfaces[handle.Index];
 		return surface.Texture && surface.Generation == handle.Generation ? &surface : nullptr;
 	}
@@ -63,6 +70,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(debugName + ": a surface needs 1 .. 16384 pixels, a color format and at most a full mip chain");
 		}
+
 		Surface surface;
 		surface.Desc = desc;
 		surface.Mips = desc.MipLevels == 0 ? FullChain(desc.Width, desc.Height) : desc.MipLevels;
@@ -74,24 +82,30 @@ namespace Swim::Render
 		textureDesc.MipLevels = surface.Mips;
 		textureDesc.DebugName = desc.DebugName;
 		surface.Texture = device.CreateTexture(textureDesc);
+
 		if (!surface.Texture)
 		{
 			throw std::runtime_error(desc.DebugName + " could not be created");
 		}
+
 		Rhi::TextureViewDesc viewDesc;
 		viewDesc.PixelFormat = desc.Format;
 		viewDesc.MipLevelCount = surface.Mips;
 		viewDesc.DebugName = desc.DebugName;
 		surface.View = device.CreateTextureView(*surface.Texture, viewDesc);
+
 		if (!surface.View)
 		{
 			throw std::runtime_error(desc.DebugName + " view could not be created");
 		}
+
 		const auto handle = bindless.TryRegisterTexture(*surface.View);
+
 		if (!handle)
 		{
 			throw std::length_error(debugName + ": the bindless table is full");
 		}
+
 		surface.Handle = *handle;
 		// Reuse a free slot (its generation moves on) or append one.
 		for (std::uint32_t index = 0; index < surfaces.size(); ++index)
@@ -103,6 +117,7 @@ namespace Swim::Render
 				return { index, surfaces[index].Generation };
 			}
 		}
+
 		surface.Generation = 1;
 		surfaces.push_back(std::move(surface));
 		return { static_cast<std::uint32_t>(surfaces.size() - 1), 1 };
@@ -116,10 +131,12 @@ namespace Swim::Render
 	bool UiRenderSurfaces::Release(UiRenderSurfaceHandle handle, Rhi::TimelinePoint lastUse)
 	{
 		auto* surface = Find(handle);
+
 		if (!surface)
 		{
 			return false;
 		}
+
 		bindless.Release(surface->Handle, lastUse);
 		retired.push_back({ std::move(surface->Texture), std::move(surface->View), lastUse });
 		surface->Pending.reset();
@@ -148,6 +165,7 @@ namespace Swim::Render
 				throw std::runtime_error(debugName + " timed out waiting for retiring surfaces");
 			}
 		}
+
 		return Collect();
 	}
 
@@ -155,18 +173,22 @@ namespace Swim::Render
 		const UiRenderProgram& program, Rhi::DescriptorTable& bindlessTable, const UiSurfaceContent& content)
 	{
 		auto* surface = Find(handle);
+
 		if (!surface)
 		{
 			throw std::invalid_argument(debugName + ": invalid surface");
 		}
+
 		if (surface->Recorded)
 		{
 			throw std::logic_error(debugName + ": a surface was recorded twice in one frame");
 		}
+
 		if (!std::isfinite(content.DpiScale) || content.DpiScale <= 0.0f)
 		{
 			throw std::invalid_argument(debugName + " needs a positive DPI scale");
 		}
+
 		UiSurfaceFrame frame;
 		frame.TextureIndex = bindless.GetIndex(surface->Handle);
 		frame.SamplerIndex = bindless.GetIndex(samplerHandle);
@@ -176,11 +198,13 @@ namespace Swim::Render
 		graph.Export(frame.Texture, Rhi::ResourceState::ShaderRead);
 		surface->Recorded = true;
 		const bool changed = content.Force || !surface->Initialized || content.PaintRevision != surface->Revision;
+
 		if (!changed)
 		{
 			++pendingSkipped;
 			return frame;
 		}
+
 		for (std::uint32_t mip = 0; mip < surface->Mips; ++mip)
 		{
 			UiRenderFrame draw;
@@ -195,6 +219,7 @@ namespace Swim::Render
 			draw.ClearColor = content.ClearColor;
 			renderer.Record(graph, draw, program, bindlessTable);
 		}
+
 		surface->Pending = content.PaintRevision;
 		frame.Drawn = true;
 		++pendingDrawn;
@@ -211,8 +236,10 @@ namespace Swim::Render
 				surface.Initialized = true;
 				surface.Pending.reset();
 			}
+
 			surface.Recorded = false;
 		}
+
 		drawn += pendingDrawn;
 		skipped += pendingSkipped;
 		pendingDrawn = pendingSkipped = 0;
@@ -225,16 +252,19 @@ namespace Swim::Render
 			surface.Pending.reset();
 			surface.Recorded = false;
 		}
+
 		pendingDrawn = pendingSkipped = 0;
 	}
 
 	UiRenderSurfacesStats UiRenderSurfaces::GetStats() const
 	{
 		UiRenderSurfacesStats stats;
+
 		for (const auto& surface : surfaces)
 		{
 			stats.Surfaces += surface.Texture ? 1u : 0u;
 		}
+
 		stats.Retiring = static_cast<std::uint32_t>(retired.size());
 		stats.DrawnSurfaces = drawn;
 		stats.SkippedSurfaces = skipped;
@@ -253,4 +283,5 @@ namespace Swim::Render
 		quad.Sampler = frame.SamplerIndex;
 		return { quad };
 	}
+
 } // namespace Swim::Render

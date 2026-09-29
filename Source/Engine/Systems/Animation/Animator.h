@@ -10,6 +10,7 @@
 
 namespace Swim::Animation
 {
+
 	enum class AnimatorParameterType : std::uint8_t
 	{
 		Float,
@@ -123,15 +124,21 @@ namespace Swim::Animation
 	// workers concurrently (see AnimationUpdate.h).
 	class Animator
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for a null skeleton, no layers, out-of-range
 		// state indices, unknown condition parameters or masks of the wrong size.
 		explicit Animator(AnimatorDesc desc);
 
 		bool SetFloat(std::string_view name, float value);
+
 		bool SetBool(std::string_view name, bool value);
+
 		bool SetTrigger(std::string_view name);
+
 		bool ResetTrigger(std::string_view name);
+
 		std::optional<float> GetParameter(std::string_view name) const;
 
 		// Starts a state directly, fading from the current one over `crossfade`.
@@ -140,6 +147,7 @@ namespace Swim::Animation
 		void SetSpeed(float speed) { globalSpeed = speed; }
 
 		void SetLayerWeight(std::uint32_t layer, float weight);
+
 		// Manual morph weight (applied after every layer); nullopt returns control to clips.
 		void SetMorphWeightOverride(std::uint32_t weight, std::optional<float> value);
 
@@ -162,11 +170,15 @@ namespace Swim::Animation
 		bool IsInTransition(std::uint32_t layer) const { return layers[layer].Source.has_value(); }
 
 		float GetTransitionProgress(std::uint32_t layer) const;
+
 		float GetStateTime(std::uint32_t layer) const; // Clip seconds of the current state.
+
 		float GetNormalizedTime(std::uint32_t layer) const;
+
 		std::uint32_t FindState(std::uint32_t layer, std::string_view name) const;
 
 	  private:
+
 		struct Playing
 		{
 			std::uint32_t State = 0;
@@ -191,16 +203,27 @@ namespace Swim::Animation
 		};
 
 		Parameter* FindParameter(std::string_view name);
+
 		const Parameter* FindParameter(std::string_view name) const;
+
 		float Duration(std::uint32_t layer, std::uint32_t state) const;
+
 		float LocalTime(std::uint32_t layer, const Playing& playing) const;
+
 		void Start(std::uint32_t layer, std::uint32_t state, float crossfade, float normalizedStart);
+
 		void Advance(std::uint32_t layer, Playing& playing, float dt, float weight);
+
 		bool Evaluate(const AnimatorTransitionDesc& transition, const LayerRuntime& runtime, std::uint32_t layer) const;
+
 		void SampleLayer(std::uint32_t layer, AnimationPose& out, AnimationPose* reference);
+
 		void SampleState(std::uint32_t layer, std::uint32_t state, float time, AnimationPose& out) const;
+
 		JointPose RootAt(std::uint32_t state, float unwrapped) const;
+
 		void ExtractRootMotion();
+
 		void EvaluatePose();
 
 		AnimatorDesc desc;
@@ -217,5 +240,7 @@ namespace Swim::Animation
 		RootMotionDelta rootMotion;
 		std::uint32_t rootJoint = 0;
 		float globalSpeed = 1.0f;
+
 	};
+
 } // namespace Swim::Animation

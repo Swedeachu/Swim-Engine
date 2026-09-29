@@ -8,8 +8,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 		constexpr auto EnvironmentFormat = Rhi::Format::RGBA16Float;
 
@@ -34,10 +36,12 @@ namespace Swim::Render
 			std::span<const Rhi::DescriptorWrite> writes)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			table->Write(writes);
 			return static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 		}
@@ -56,6 +60,7 @@ namespace Swim::Render
 		{
 			list.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(&constants, 1)));
 		}
+
 	} // namespace
 
 	EnvironmentBuilder::EnvironmentBuilder(EnvironmentBuilderDesc descInput) : desc(std::move(descInput))
@@ -67,6 +72,7 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs all five environment pipelines and layouts");
 			}
 		}
+
 		if (!desc.Sampler)
 		{
 			throw std::invalid_argument(desc.DebugName + " needs the prefilter sampler");
@@ -76,18 +82,22 @@ namespace Swim::Render
 	void EnvironmentBuilder::Validate(const EnvironmentMapDesc& map)
 	{
 		using Environment::IsPowerOfTwo;
+
 		if (!IsPowerOfTwo(map.SourceSize) || map.SourceSize < 16 || !IsPowerOfTwo(map.PrefilteredSize) || map.PrefilteredSize < 4)
 		{
 			throw std::invalid_argument("Environment cube sizes must be powers of two (source >= 16, prefiltered >= 4)");
 		}
+
 		if (map.PrefilteredMipCount < 2 || map.PrefilteredMipCount > Environment::FullCubeMipCount(map.PrefilteredSize))
 		{
 			throw std::invalid_argument("Environment prefiltered cube needs 2..full-chain mips");
 		}
+
 		if (map.PrefilterSampleCount == 0 || map.PrefilterSampleCount > 4096)
 		{
 			throw std::invalid_argument("Environment prefilter sample count must be 1..4096");
 		}
+
 		if (!IsPowerOfTwo(map.IrradianceFaceSize) || map.IrradianceFaceSize < 4 || map.IrradianceFaceSize > map.SourceSize)
 		{
 			throw std::invalid_argument("Environment irradiance face size must be a power of two in 4..source size");
@@ -152,13 +162,16 @@ namespace Swim::Render
 		std::span<const GraphTexture> overlays) const
 	{
 		Validate(map);
+
 		if (!overlays.empty() && (!desc.Overlay.Pipeline || !desc.Overlay.Layout))
 		{
 			throw std::invalid_argument(desc.DebugName + " overlays need the overlay program");
 		}
+
 		for (const auto overlay : overlays)
 		{
 			const auto& overlayDesc = graph.GetDesc(overlay);
+
 			if (overlayDesc.PixelFormat != EnvironmentFormat || overlayDesc.Extent.Width != map.SourceSize ||
 				overlayDesc.Extent.Height != map.SourceSize * Environment::CubeFaceCount ||
 				!HasUsage(overlayDesc.Usage, Rhi::TextureUsage::Sampled))
@@ -166,16 +179,19 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " overlays must be sampled RGBA16Float source-size x 6 * source-size atlases");
 			}
 		}
+
 		auto sourceDesc = SourceCubeDesc(map.SourceSize);
 		const std::string sourceName = desc.DebugName + " source";
 		sourceDesc.DebugName = sourceName;
 		const auto source = graph.CreateTexture(sourceDesc);
 		const std::uint32_t size = map.SourceSize;
 		std::array<Environment::ProceduralSkyConstants, Environment::CubeFaceCount> constants{};
+
 		for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 		{
 			constants[face] = Environment::MakeProceduralSkyConstants(sky, face, size);
 		}
+
 		passes.push_back(graph.AddPass(
 			desc.DebugName + " sky", Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
@@ -186,6 +202,7 @@ namespace Swim::Render
 			{
 				auto& list = c.Commands();
 				list.BindComputePipeline(*program.Pipeline);
+
 				for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 				{
 					Rhi::DescriptorWrite write{};
@@ -196,7 +213,9 @@ namespace Swim::Render
 					constexpr auto group = EnvironmentSkyBindings::ThreadGroupSize;
 					list.Dispatch(Groups(size, group), Groups(size, group), 1);
 				}
+
 			}));
+
 		for (std::size_t index = 0; index < overlays.size(); ++index)
 		{
 			const auto overlay = overlays[index];
@@ -215,6 +234,7 @@ namespace Swim::Render
 					Rhi::TextureViewDesc overlayView;
 					overlayView.PixelFormat = EnvironmentFormat;
 					auto& overlayResource = c.CreateView(overlay, overlayView);
+
 					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 					{
 						std::array<Rhi::DescriptorWrite, 2> writes{};
@@ -228,8 +248,10 @@ namespace Swim::Render
 						constexpr auto group = EnvironmentOverlayBindings::ThreadGroupSize;
 						list.Dispatch(Groups(size, group), Groups(size, group), 1);
 					}
+
 				}));
 		}
+
 		const auto mips = RecordMips(graph, source);
 		passes.insert(passes.end(), mips.begin(), mips.end());
 		return source;
@@ -238,6 +260,7 @@ namespace Swim::Render
 	std::vector<GraphPass> EnvironmentBuilder::RecordMips(RenderGraph& graph, GraphTexture cube) const
 	{
 		const auto cubeDesc = graph.GetDesc(cube); // A copy: later graph calls may reallocate.
+
 		if (!IsCube(cubeDesc) || cubeDesc.PixelFormat != EnvironmentFormat ||
 			!HasUsage(cubeDesc.Usage, Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage) ||
 			cubeDesc.MipLevels > Environment::FullCubeMipCount(cubeDesc.Extent.Width))
@@ -245,7 +268,9 @@ namespace Swim::Render
 			throw std::invalid_argument(
 				desc.DebugName + " mips need a square power-of-two RGBA16Float cube with Sampled and Storage usage");
 		}
+
 		std::vector<GraphPass> passes;
+
 		for (std::uint32_t mip = 1; mip < cubeDesc.MipLevels; ++mip)
 		{
 			const std::uint32_t size = std::max(cubeDesc.Extent.Width >> mip, 1u);
@@ -262,6 +287,7 @@ namespace Swim::Render
 				{
 					auto& list = c.Commands();
 					list.BindComputePipeline(*program.Pipeline);
+
 					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 					{
 						std::array<Rhi::DescriptorWrite, 2> writes{};
@@ -274,8 +300,10 @@ namespace Swim::Render
 						constexpr auto group = EnvironmentDownsampleBindings::ThreadGroupSize;
 						list.Dispatch(Groups(size, group), Groups(size, group), 1);
 					}
+
 				}));
 		}
+
 		return passes;
 	}
 
@@ -291,10 +319,12 @@ namespace Swim::Render
 			return IsCube(cubeDesc) && cubeDesc.PixelFormat == EnvironmentFormat && HasUsage(cubeDesc.Usage, Rhi::TextureUsage::Sampled) &&
 				cubeDesc.Extent.Width == map.SourceSize && cubeDesc.MipLevels == Environment::EnvironmentSourceMipCount(map.SourceSize);
 		};
+
 		if (!completeSource(source) || (irradianceSourceInput && !completeSource(*irradianceSourceInput)))
 		{
 			throw std::invalid_argument(desc.DebugName + " source must be a sampled RGBA16Float cube of the map's size with its mip chain");
 		}
+
 		const GraphTexture irradianceSource = irradianceSourceInput.value_or(source);
 
 		EnvironmentGraphResources resources;
@@ -304,14 +334,17 @@ namespace Swim::Render
 		resources.PrefilteredSize = map.PrefilteredSize;
 		resources.PrefilteredMipCount = map.PrefilteredMipCount;
 		auto prefilteredDesc = PrefilteredCubeDesc(map);
+
 		if (targets.Prefiltered)
 		{
 			const auto target = graph.GetDesc(*targets.Prefiltered);
+
 			if (!IsCube(target) || target.PixelFormat != EnvironmentFormat || target.Extent.Width != map.PrefilteredSize ||
 				target.MipLevels != map.PrefilteredMipCount || !HasUsage(target.Usage, Rhi::TextureUsage::Storage))
 			{
 				throw std::invalid_argument(desc.DebugName + " prefiltered target does not match the map desc");
 			}
+
 			resources.Prefiltered = *targets.Prefiltered;
 		}
 		else
@@ -320,14 +353,17 @@ namespace Swim::Render
 			prefilteredDesc.DebugName = name;
 			resources.Prefiltered = graph.CreateTexture(prefilteredDesc);
 		}
+
 		if (targets.Irradiance)
 		{
 			const auto target = graph.GetDesc(*targets.Irradiance);
+
 			if (target.Size < EnvironmentIrradianceBindings::OutputBytes ||
 				(static_cast<std::uint32_t>(target.Usage) & static_cast<std::uint32_t>(Rhi::BufferUsage::Storage)) == 0)
 			{
 				throw std::invalid_argument(desc.DebugName + " irradiance target must be a storage buffer of at least 144 bytes");
 			}
+
 			resources.Irradiance = *targets.Irradiance;
 		}
 		else
@@ -344,15 +380,18 @@ namespace Swim::Render
 		cubeView.PixelFormat = EnvironmentFormat;
 		cubeView.MipLevelCount = sourceDesc.MipLevels;
 		cubeView.ArrayLayerCount = Environment::CubeFaceCount;
+
 		for (std::uint32_t mip = 0; mip < map.PrefilteredMipCount; ++mip)
 		{
 			const std::uint32_t size = std::max(map.PrefilteredSize >> mip, 1u);
 			std::array<EnvironmentPrefilterConstants, Environment::CubeFaceCount> constants{};
+
 			for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 			{
 				constants[face] = { face, size, Environment::PrefilterMipRoughness(mip, map.PrefilteredMipCount), map.PrefilterSampleCount,
 					map.SourceSize, sourceDesc.MipLevels, {} };
 			}
+
 			const std::string label = desc.DebugName + " prefilter mip " + std::to_string(mip);
 			resources.Passes.push_back(graph.AddPass(
 				label, Rhi::QueueType::Compute,
@@ -367,6 +406,7 @@ namespace Swim::Render
 					auto& list = c.Commands();
 					list.BindComputePipeline(*program.Pipeline);
 					auto& sourceView = c.CreateView(source, cubeView);
+
 					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 					{
 						std::array<Rhi::DescriptorWrite, 3> writes{};
@@ -381,19 +421,23 @@ namespace Swim::Render
 						constexpr auto group = EnvironmentPrefilterBindings::ThreadGroupSize;
 						list.Dispatch(Groups(size, group), Groups(size, group), 1);
 					}
+
 				}));
 		}
 
 		// Irradiance: one group projects the six faces of the chosen source mip.
 		std::uint32_t irradianceMip = 0;
+
 		while ((map.SourceSize >> irradianceMip) > map.IrradianceFaceSize)
 		{
 			++irradianceMip;
 		}
+
 		if (irradianceMip >= sourceDesc.MipLevels)
 		{
 			throw std::invalid_argument(desc.DebugName + " irradiance face size is below the source chain");
 		}
+
 		Rhi::TextureViewDesc arrayView;
 		arrayView.Dimension = Rhi::TextureViewDimension::Texture2DArray;
 		arrayView.PixelFormat = EnvironmentFormat;
@@ -435,10 +479,12 @@ namespace Swim::Render
 		std::vector<GraphPass> passes;
 		const auto source = RecordSky(graph, sky, map, passes, overlays);
 		std::optional<GraphTexture> irradianceSource;
+
 		if (!overlays.empty() && !overlaysInIrradiance)
 		{
 			irradianceSource = RecordSky(graph, sky, map, passes);
 		}
+
 		auto resources = RecordFromSource(graph, source, map, targets, irradianceSource);
 		passes.insert(passes.end(), resources.Passes.begin(), resources.Passes.end());
 		resources.Passes = std::move(passes);
@@ -452,16 +498,20 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " BRDF LUT needs a size in 4..1024 and 1..65536 samples");
 		}
+
 		GraphTexture lut;
+
 		if (target)
 		{
 			const auto targetDesc = graph.GetDesc(*target);
+
 			if (targetDesc.Dimension != Rhi::TextureDimension::Texture2D || targetDesc.Extent.Width != size ||
 				targetDesc.Extent.Height != size || targetDesc.PixelFormat != EnvironmentFormat ||
 				!HasUsage(targetDesc.Usage, Rhi::TextureUsage::Storage))
 			{
 				throw std::invalid_argument(desc.DebugName + " BRDF LUT target must be a size x size RGBA16Float storage texture");
 			}
+
 			lut = *target;
 		}
 		else
@@ -471,6 +521,7 @@ namespace Swim::Render
 			lutDesc.DebugName = name;
 			lut = graph.CreateTexture(lutDesc);
 		}
+
 		const std::array<std::uint32_t, 4> constants{ size, sampleCount, 0, 0 };
 		graph.AddPass(
 			desc.DebugName + " BRDF LUT", Rhi::QueueType::Compute,
@@ -494,4 +545,5 @@ namespace Swim::Render
 			});
 		return lut;
 	}
+
 } // namespace Swim::Render

@@ -8,8 +8,10 @@
 
 namespace Swim::Render::Skinning
 {
+
 	namespace
 	{
+
 		using Float3 = std::array<float, 3>;
 
 		bool Finite(const Float3& v)
@@ -26,23 +28,29 @@ namespace Swim::Render::Skinning
 		SkinMatrix Blend(const GpuSkinVertex& skin, std::span<const SkinMatrix> palette)
 		{
 			SkinMatrix blended{};
+
 			for (std::uint32_t slot = 0; slot < 4; ++slot)
 			{
 				const float w = skin.Weights[slot];
+
 				if (w == 0.0f)
 				{
 					continue;
 				}
+
 				const std::uint16_t joint = Joint(skin, slot);
+
 				if (joint >= palette.size())
 				{
 					throw std::out_of_range("skinned vertex joint is outside the palette");
 				}
+
 				for (std::size_t k = 0; k < 12; ++k)
 				{
 					blended[k] += w * palette[joint][k];
 				}
 			}
+
 			return blended;
 		}
 
@@ -71,10 +79,12 @@ namespace Swim::Render::Skinning
 		Float3 Normalized(const Float3& v, const Float3& fallback)
 		{
 			const float lengthSquared = Dot(v, v);
+
 			if (!(lengthSquared > 1e-30f))
 			{
 				return fallback;
 			}
+
 			const float inverse = 1.0f / std::sqrt(lengthSquared);
 			return { v[0] * inverse, v[1] * inverse, v[2] * inverse };
 		}
@@ -85,9 +95,11 @@ namespace Swim::Render::Skinning
 			position = source.Position;
 			normal = source.Normal;
 			tangent = { source.Tangent[0], source.Tangent[1], source.Tangent[2] };
+
 			for (const GpuMorphDelta& delta : deltas)
 			{
 				const float w = Weight(weights, delta.Target);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					position[c] += w * delta.Position[c];
@@ -96,6 +108,7 @@ namespace Swim::Render::Skinning
 				}
 			}
 		}
+
 	} // namespace
 
 	SkinnedSource BuildSource(std::span<const StandardVertex> vertices, std::span<const SkinInfluence> influences,
@@ -105,10 +118,12 @@ namespace Swim::Render::Skinning
 		{
 			throw std::invalid_argument("skinned mesh needs one influence per vertex");
 		}
+
 		if (jointCount == 0 || jointCount > 65536)
 		{
 			throw std::invalid_argument("skinned mesh needs 1 .. 65536 joints");
 		}
+
 		for (const SkinnedMorphTarget& target : targets)
 		{
 			for (const auto* stream : { &target.Positions, &target.Normals, &target.Tangents })
@@ -119,6 +134,7 @@ namespace Swim::Render::Skinning
 				}
 			}
 		}
+
 		SkinnedSource source;
 		source.SkinVertices.resize(vertices.size());
 		SkinnedBoundsData& bounds = source.Bounds;
@@ -130,30 +146,38 @@ namespace Swim::Render::Skinning
 			jointCount, { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() });
 		bounds.MorphReach.assign(std::size_t(jointCount) * targets.size(), 0.0f);
 		const Float3 zero{ 0, 0, 0 };
+
 		for (std::size_t v = 0; v < vertices.size(); ++v)
 		{
 			if (!Finite(vertices[v].Position))
 			{
 				throw std::invalid_argument("skinned mesh vertex position is not finite");
 			}
+
 			const SkinInfluence& influence = influences[v];
 			GpuSkinVertex& skin = source.SkinVertices[v];
+
 			for (std::uint32_t slot = 0; slot < 4; ++slot)
 			{
 				const float w = influence.Weights[slot];
+
 				if (!std::isfinite(w) || w < 0.0f)
 				{
 					throw std::invalid_argument("skin weights must be finite and non-negative");
 				}
+
 				if (w > 0.0f && influence.Joints[slot] >= jointCount)
 				{
 					throw std::invalid_argument(
 						"skin influence joint " + std::to_string(influence.Joints[slot]) + " is outside the skeleton");
 				}
+
 				skin.Weights[slot] = w;
 				skin.Joints[slot / 2] |= std::uint32_t(w > 0.0f ? influence.Joints[slot] : 0u) << ((slot % 2) * 16);
 			}
+
 			skin.MorphFirst = static_cast<std::uint32_t>(source.MorphDeltas.size());
+
 			for (std::uint32_t t = 0; t < targets.size(); ++t)
 			{
 				GpuMorphDelta delta;
@@ -161,19 +185,23 @@ namespace Swim::Render::Skinning
 				const Float3 p = targets[t].Positions.empty() ? zero : targets[t].Positions[v];
 				const Float3 n = targets[t].Normals.empty() ? zero : targets[t].Normals[v];
 				const Float3 tan = targets[t].Tangents.empty() ? zero : targets[t].Tangents[v];
+
 				if (!Finite(p) || !Finite(n) || !Finite(tan))
 				{
 					throw std::invalid_argument("morph target delta is not finite");
 				}
+
 				if (p == zero && n == zero && tan == zero)
 				{
 					continue;
 				}
+
 				std::copy(p.begin(), p.end(), delta.Position);
 				std::copy(n.begin(), n.end(), delta.Normal);
 				std::copy(tan.begin(), tan.end(), delta.Tangent);
 				source.MorphDeltas.push_back(delta);
 				const float reach = std::sqrt(Dot(p, p));
+
 				for (std::uint32_t slot = 0; slot < 4; ++slot)
 				{
 					if (skin.Weights[slot] > 0.0f)
@@ -183,12 +211,15 @@ namespace Swim::Render::Skinning
 					}
 				}
 			}
+
 			skin.MorphCount = static_cast<std::uint32_t>(source.MorphDeltas.size()) - skin.MorphFirst;
+
 			for (std::uint32_t slot = 0; slot < 4; ++slot)
 			{
 				if (skin.Weights[slot] > 0.0f)
 				{
 					const std::uint16_t joint = Joint(skin, slot);
+
 					for (int axis = 0; axis < 3; ++axis)
 					{
 						bounds.JointMin[joint][axis] = std::min(bounds.JointMin[joint][axis], vertices[v].Position[axis]);
@@ -197,6 +228,7 @@ namespace Swim::Render::Skinning
 				}
 			}
 		}
+
 		return source;
 	}
 
@@ -230,27 +262,35 @@ namespace Swim::Render::Skinning
 		{
 			throw std::invalid_argument("skinned bounds need one matrix per joint");
 		}
+
 		Float3 min{ std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
 		Float3 max{ -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
+
 		for (std::uint32_t joint = 0; joint < data.JointCount; ++joint)
 		{
 			if (!(data.JointMin[joint][0] <= data.JointMax[joint][0]))
 			{
 				continue; // Moves nothing.
 			}
+
 			float reach = 0.0f;
+
 			for (std::uint32_t t = 0; t < data.MorphTargetCount; ++t)
 			{
 				reach += std::abs(Weight(morphWeights, t)) * data.MorphReach[std::size_t(t) * data.JointCount + joint];
 			}
+
 			for (int corner = 0; corner < 8; ++corner)
 			{
 				Float3 p{};
+
 				for (int axis = 0; axis < 3; ++axis)
 				{
 					p[axis] = (corner >> axis) & 1 ? data.JointMax[joint][axis] + reach : data.JointMin[joint][axis] - reach;
 				}
+
 				const Float3 q = Point(palette[joint], p);
+
 				for (int axis = 0; axis < 3; ++axis)
 				{
 					min[axis] = std::min(min[axis], q[axis]);
@@ -258,6 +298,8 @@ namespace Swim::Render::Skinning
 				}
 			}
 		}
+
 		return RenderBounds::FromMinMax(min, max);
 	}
+
 } // namespace Swim::Render::Skinning

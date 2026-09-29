@@ -7,6 +7,7 @@
 
 namespace Swim::ShaderCompiler
 {
+
 	struct ShaderMaterialLayoutResult
 	{
 		Render::MaterialTemplateDesc Desc;
@@ -23,4 +24,5 @@ namespace Swim::ShaderCompiler
 	// rejected, as is a missing binding. The runtime never sees Slang or JSON types.
 	ShaderMaterialLayoutResult BuildMaterialTemplateDesc(
 		const ShaderReflection& reflection, std::string_view bindingName, std::string templateName);
+
 } // namespace Swim::ShaderCompiler

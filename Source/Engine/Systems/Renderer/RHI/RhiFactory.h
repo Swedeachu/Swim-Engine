@@ -13,7 +13,9 @@ namespace Swim::Rhi
 
 	class GraphicsFactory
 	{
+
 	public:
+
 		bool Register(GraphicsApi api, GraphicsSystemCreateFunction createFunction)
 		{
 			if (api == GraphicsApi::Count || createFunction == nullptr)
@@ -22,6 +24,7 @@ namespace Swim::Rhi
 			}
 
 			auto& slot = createFunctions[ToIndex(api)];
+
 			if (slot != nullptr)
 			{
 				return false;
@@ -39,6 +42,7 @@ namespace Swim::Rhi
 			}
 
 			auto& slot = createFunctions[ToIndex(api)];
+
 			if (slot == nullptr)
 			{
 				return false;
@@ -59,16 +63,19 @@ namespace Swim::Rhi
 			{
 				return nullptr;
 			}
+
 			return createFunctions[ToIndex(api)](desc);
 		}
 
 	private:
+
 		static constexpr std::size_t ToIndex(GraphicsApi api)
 		{
 			return static_cast<std::size_t>(api);
 		}
 
 		std::array<GraphicsSystemCreateFunction, static_cast<std::size_t>(GraphicsApi::Count)> createFunctions{};
+
 	};
 
 } // namespace Swim::Rhi

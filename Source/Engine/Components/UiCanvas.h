@@ -8,6 +8,7 @@
 
 namespace Engine
 {
+
 	// A retained UI document shown by an entity (Phase 23): a screen overlay, or a panel /
 	// billboard placed in the world by the entity's Transform. The UI runtime routes input
 	// to it (pointer, keyboard, text, gamepad navigation), lays it out, animates it and
@@ -37,4 +38,5 @@ namespace Engine
 		std::int32_t Order = 0; // Screen canvases: higher on top.
 		bool Visible = true;
 	};
+
 } // namespace Engine

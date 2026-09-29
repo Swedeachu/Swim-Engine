@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Local-space axis-aligned bounds of a render object's mesh, as center and
 	// half extents. Culling transforms them with the object's current transform.
 	struct RenderBounds
@@ -19,18 +20,22 @@ namespace Swim::Render
 		static RenderBounds FromMinMax(const std::array<float, 3>& min, const std::array<float, 3>& max)
 		{
 			RenderBounds bounds;
+
 			for (int axis = 0; axis < 3; ++axis)
 			{
 				if (!(min[axis] <= max[axis]))
 				{
 					return Infinite();
 				}
+
 				bounds.Center[axis] = (min[axis] + max[axis]) * 0.5f;
 				bounds.Extents[axis] = (max[axis] - min[axis]) * 0.5f;
 			}
+
 			return bounds;
 		}
 
 		bool operator==(const RenderBounds&) const = default;
 	};
+
 } // namespace Swim::Render

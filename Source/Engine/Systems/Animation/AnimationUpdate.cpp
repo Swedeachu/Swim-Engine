@@ -6,19 +6,23 @@
 
 namespace Swim::Animation
 {
+
 	namespace
 	{
+
 		void UpdateOne(const AnimatedSkeleton& character, float dt)
 		{
 			if (character.Controller)
 			{
 				character.Controller->Update(dt);
+
 				if (character.Instance)
 				{
 					character.Instance->Update(character.Controller->GetPose());
 				}
 			}
 		}
+
 	} // namespace
 
 	void UpdateAnimations(std::span<const AnimatedSkeleton> characters, float dt, Jobs::JobSystem* jobs, std::size_t minPerTask)
@@ -29,8 +33,10 @@ namespace Swim::Animation
 			{
 				UpdateOne(character, dt);
 			}
+
 			return;
 		}
+
 		jobs->ParallelFor(characters.size(), std::max<std::size_t>(minPerTask, 1),
 			[characters, dt](std::size_t begin, std::size_t end, std::uint32_t)
 			{
@@ -38,6 +44,8 @@ namespace Swim::Animation
 				{
 					UpdateOne(characters[index], dt);
 				}
+
 			});
 	}
+
 } // namespace Swim::Animation

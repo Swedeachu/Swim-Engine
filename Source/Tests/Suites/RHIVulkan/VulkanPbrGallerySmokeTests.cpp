@@ -21,6 +21,7 @@
 
 namespace
 {
+
 #ifdef SWIM_PBR_GALLERY_SMOKE_AVAILABLE
 	// Mirrors PbrGallery.slang's records (std430).
 	struct GalleryView
@@ -119,6 +120,7 @@ namespace
 		const std::uint32_t width = galleryLayout.Width;
 		const std::uint32_t height = galleryLayout.Height;
 		std::vector<GallerySphere> spheres;
+
 		for (const auto& sphere : galleryLayout.Spheres)
 		{
 			spheres.push_back({ { sphere.CenterX, sphere.CenterY, sphere.Radius, 0 },
@@ -151,11 +153,13 @@ namespace
 			const auto lut = programs.Builder->RecordBrdfLut(graph, lutSize, lutSamples);
 			GalleryView view{};
 			const auto light = Env::Normalize(spec.Frame.LightDirection);
+
 			for (int c = 0; c < 3; ++c)
 			{
 				view.LightDirection[c] = light[c];
 				view.LightRadiance[c] = spec.Frame.LightRadiance[c];
 			}
+
 			view.Intensity = spec.Frame.Environment.Intensity;
 			view.Rotation = spec.Frame.Environment.Rotation;
 			view.PrefilteredMipCount = map.PrefilteredMipCount;
@@ -182,10 +186,12 @@ namespace
 					auto table = c.Device().CreateDescriptorTable({ layout.get(), 0, 0, "Gallery table" });
 					SWIM_REQUIRE(table);
 					std::array<Rhi::DescriptorWrite, 6> writes{};
+
 					for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 					{
 						writes[binding].Binding = binding;
 					}
+
 					const auto sphereRange = c.GetRange(sphereUpload);
 					writes[0].BufferResource = sphereRange.Buffer;
 					writes[0].BufferOffset = sphereRange.Offset;
@@ -242,35 +248,44 @@ namespace
 			std::uint32_t worstY = 0;
 			std::vector<float> peak(spheres.size(), 0.0f);
 			std::vector<Gallery::Float4> difference(actual.size(), Gallery::Float4{ 0, 0, 0, 1 });
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
 				{
 					const std::size_t index = std::size_t(y) * width + x;
 					const auto coverage = Gallery::Cover(galleryLayout, x, y);
+
 					if (!coverage)
 					{
 						// Background, away from any silhouette, keeps the clear color.
 						bool nearEdge = false;
+
 						for (const auto& sphere : galleryLayout.Spheres)
 						{
 							const float dx = float(x) + 0.5f - sphere.CenterX;
 							const float dy = float(y) + 0.5f - sphere.CenterY;
 							nearEdge = nearEdge || std::sqrt(dx * dx + dy * dy) < sphere.Radius + 1.0f;
 						}
+
 						if (!nearEdge)
 						{
 							SWIM_CHECK((actual[index] == Gallery::Float4{ 0, 0, 0, 0 }));
 						}
+
 						continue;
 					}
+
 					peak[coverage->Sphere] = std::max(peak[coverage->Sphere], Gallery::Luminance(actual[index]));
+
 					if (coverage->EdgeDistance < 1.0f)
 					{
 						continue;
 					}
+
 					++compared;
 					bool bad = false;
+
 					for (int c = 0; c < 3; ++c)
 					{
 						const float error = std::abs(actual[index][c] - expected[index][c]);
@@ -278,6 +293,7 @@ namespace
 						sumError += relative;
 						bad = bad || error > 0.01f + 0.03f * std::abs(expected[index][c]);
 						difference[index][c] = error * 10.0f;
+
 						if (relative > worst)
 						{
 							worst = relative;
@@ -285,10 +301,12 @@ namespace
 							worstY = y;
 						}
 					}
+
 					mismatched += bad ? 1u : 0u;
 					SWIM_CHECK(std::abs(actual[index][3] - 1.0f) < 1.0e-3f);
 				}
 			}
+
 			const double meanError = sumError / double(3 * std::max(compared, 1u));
 			const std::size_t worstIndex = std::size_t(worstY) * width + worstX;
 			std::printf("             [gallery %s] %u pixels compared, %u outside tolerance, mean relative error %.2e, worst %.2e at "
@@ -307,12 +325,15 @@ namespace
 					for (std::uint32_t x = 0; x < width; ++x)
 					{
 						const auto coverage = Gallery::Cover(galleryLayout, x, y);
+
 						if (!coverage || coverage->EdgeDistance < 1.0f)
 						{
 							continue;
 						}
+
 						const auto& pixel = actual[std::size_t(y) * width + x];
 						SWIM_CHECK(pixel[0] <= 1.01f && pixel[1] <= 1.01f && pixel[2] <= 1.01f);
+
 						if (coverage->Sphere / galleryLayout.Columns == Gallery::WhiteDielectricRow)
 						{
 							SWIM_CHECK(std::abs(pixel[0] - 1.0f) < 0.01f && std::abs(pixel[1] - 1.0f) < 0.01f &&
@@ -338,6 +359,7 @@ namespace
 				std::printf("             [gallery %s] images written to %s-*.{pfm,bmp}\n", spec.Name, stem.c_str());
 			}
 		}
+
 		executor.Trim();
 #endif
 	}
@@ -345,6 +367,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "PbrGalleryMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -353,6 +376,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunPbrGallerySmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

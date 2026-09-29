@@ -10,6 +10,7 @@
 
 namespace Swim::Render::Shadows
 {
+
 	// The CPU definition of the shadow views and of shadow sampling (Phase 16, items
 	// 70-72). Shaders/Slang/Shadows/ShadowRecords.slang mirrors ShadowFactor line for
 	// line; the native shadow smoke compares GPU shadow maps and lit images with it.
@@ -129,4 +130,5 @@ namespace Swim::Render::Shadows
 	// Unknown or None records, points outside every view and missing atlases are lit.
 	float ShadowFactor(const ShadowSampleInputs& inputs, std::uint32_t shadowIndex, const Float3& position, const Float3& normal,
 		const Float3& toLight, float cameraViewDepth);
+
 } // namespace Swim::Render::Shadows

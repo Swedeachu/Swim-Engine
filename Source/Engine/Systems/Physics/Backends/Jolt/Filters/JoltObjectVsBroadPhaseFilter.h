@@ -24,6 +24,7 @@ namespace Engine
 		bool ShouldCollide(JPH::ObjectLayer layer, JPH::BroadPhaseLayer broadPhaseLayer) const override
 		{
 			const BroadPhaseLayerInterface::RegisteredLayer* registeredLayer = layerInterface.Get(layer);
+
 			if (!registeredLayer)
 			{
 				return false;

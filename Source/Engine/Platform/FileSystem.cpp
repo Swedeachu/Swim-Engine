@@ -28,10 +28,12 @@ namespace Swim::Platform
 	bool FileSystem::Initialize(const FileSystemDesc& desc)
 	{
 		const char* basePath = SDL_GetBasePath();
+
 		if (!basePath)
 		{
 			return false;
 		}
+
 		executableDirectory = PathFromUtf8(basePath);
 
 		assetRoot = desc.AssetRootOverride.empty()
@@ -45,10 +47,12 @@ namespace Swim::Platform
 		else
 		{
 			char* prefPath = SDL_GetPrefPath(desc.OrganizationName.c_str(), desc.ApplicationName.c_str());
+
 			if (!prefPath)
 			{
 				return false;
 			}
+
 			userDataRoot = PathFromUtf8(prefPath);
 			SDL_free(prefPath);
 		}
@@ -76,12 +80,14 @@ namespace Swim::Platform
 	std::vector<std::byte> FileSystem::ReadFileBlocking(const std::filesystem::path& path) const
 	{
 		std::ifstream file(path, std::ios::binary | std::ios::ate);
+
 		if (!file)
 		{
 			throw std::runtime_error("Failed to open file: " + path.string());
 		}
 
 		const std::streamsize size = file.tellg();
+
 		if (size < 0)
 		{
 			throw std::runtime_error("Failed to query file size: " + path.string());
@@ -89,20 +95,24 @@ namespace Swim::Platform
 
 		std::vector<std::byte> bytes(static_cast<size_t>(size));
 		file.seekg(0, std::ios::beg);
+
 		if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()), size))
 		{
 			throw std::runtime_error("Failed to read file: " + path.string());
 		}
+
 		return bytes;
 	}
 
 	MappedFile FileSystem::MapFileReadOnly(const std::filesystem::path& path) const
 	{
 		MappedFile mapped;
+
 		if (!mapped.OpenReadOnly(path))
 		{
 			throw std::runtime_error("Failed to memory-map file: " + path.string());
 		}
+
 		return mapped;
 	}
 

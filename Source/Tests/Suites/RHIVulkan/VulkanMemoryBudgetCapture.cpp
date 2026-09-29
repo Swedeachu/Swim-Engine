@@ -8,7 +8,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanMemoryBudgetCapture* active = nullptr;
+
 	}
 
 	VulkanMemoryBudgetCapture::VulkanMemoryBudgetCapture(bool driverBudget)
@@ -39,11 +41,13 @@ namespace Swim::Testing
 			++active->DriverCalls;
 			properties->memoryProperties = active->Properties;
 			auto* budget = static_cast<VkPhysicalDeviceMemoryBudgetPropertiesEXT*>(properties->pNext);
+
 			if (budget != nullptr)
 			{
 				SWIM_CHECK_EQUAL(budget->sType, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
 				*budget = active->Driver;
 			}
+
 			if (active->LoseDuringQuery)
 			{
 				RhiVulkan::ObserveVulkanResult(*active->State, VK_ERROR_DEVICE_LOST, "concurrent loss");
@@ -103,10 +107,12 @@ namespace Swim::Testing
 	VulkanMemoryBudgetCapture::~VulkanMemoryBudgetCapture()
 	{
 		RhiVulkan::RetireLostVulkanDevice(*State);
+
 		for (auto allocation : allocations)
 		{
 			vmaFreeMemory(State->Allocator, allocation);
 		}
+
 		vmaDestroyAllocator(State->Allocator);
 		State->Allocator = nullptr;
 	}

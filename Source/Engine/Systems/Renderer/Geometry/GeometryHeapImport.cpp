@@ -8,8 +8,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		struct UploadChunk
@@ -49,6 +51,7 @@ namespace Swim::Render
 					{
 						std::memcpy(bytes.data() + chunk.StagingOffset, chunk.Bytes->data(), chunk.Bytes->size());
 					}
+
 				});
 			return graph.AddPass(
 				label, Rhi::QueueType::Transfer,
@@ -61,11 +64,13 @@ namespace Swim::Render
 				{
 					const auto source = c.GetRange(staging);
 					const auto destination = c.GetRange(page);
+
 					for (const auto& chunk : *chunks)
 					{
 						c.Commands().CopyBuffer(*source.Buffer, *destination.Buffer,
 							{ source.Offset + chunk.StagingOffset, destination.Offset + chunk.DestinationOffset, chunk.Bytes->size() });
 					}
+
 				});
 		}
 
@@ -76,15 +81,18 @@ namespace Swim::Render
 		{
 			auto snapshot = std::make_shared<std::vector<Row>>();
 			std::vector<RowRun> runs;
+
 			for (auto row : rows)
 			{
 				if (runs.empty() || runs.back().FirstRow + runs.back().RowCount != row)
 				{
 					runs.push_back({ row, 0, snapshot->size() * sizeof(Row) });
 				}
+
 				++runs.back().RowCount;
 				snapshot->push_back(mirror[row]);
 			}
+
 			const auto bytes = snapshot->size() * sizeof(Row);
 			const auto staging = graph.CreateUpload({ bytes, Rhi::BufferUsage::TransferSource, 16, label + " staging" },
 				[snapshot](std::span<std::byte> destination)
@@ -103,14 +111,17 @@ namespace Swim::Render
 				{
 					const auto source = c.GetRange(staging);
 					const auto destination = c.GetRange(target);
+
 					for (const auto& run : runs)
 					{
 						c.Commands().CopyBuffer(*source.Buffer, *destination.Buffer,
 							{ source.Offset + run.StagingOffset, destination.Offset + std::uint64_t(run.FirstRow) * sizeof(Row),
 								std::uint64_t(run.RowCount) * sizeof(Row) });
 					}
+
 				});
 		}
+
 	} // namespace
 
 	GeometryGraphResources GeometryHeap::Import(RenderGraph& graph)
@@ -122,6 +133,7 @@ namespace Swim::Render
 
 		GeometryGraphResources resources;
 		resources.Pages.resize(pages.size());
+
 		for (std::uint32_t p = 0; p < pages.size(); ++p)
 		{
 			if (pages[p].Buffer)
@@ -131,6 +143,7 @@ namespace Swim::Render
 				resources.Pages[p] = graph.ImportBuffer(*pages[p].Buffer, GetRestingState(pages[p].Stream));
 			}
 		}
+
 		resources.Metadata = graph.ImportBuffer(*metadataBuffer, S::ShaderRead);
 		resources.Submeshes = graph.ImportBuffer(*submeshBuffer, S::ShaderRead);
 
@@ -141,6 +154,7 @@ namespace Swim::Render
 			{
 				return;
 			}
+
 			auto& upload = uploads[allocation.Page];
 			upload.StagingBytes = AlignUp(upload.StagingBytes, 4);
 			upload.Chunks.push_back({ bytes, upload.StagingBytes, allocation.Range.Offset });
@@ -158,6 +172,7 @@ namespace Swim::Render
 					stage(record.Meshlet, record.MeshletBytes);
 					recorded.push_back(handle);
 				}
+
 			});
 
 		// Graph declarations validate before any heap state changes.
@@ -169,6 +184,7 @@ namespace Swim::Render
 
 		auto rows = dirtyMetadata.Take();
 		auto submeshRowIds = dirtySubmeshes.Take();
+
 		try
 		{
 			if (!rows.empty())
@@ -176,6 +192,7 @@ namespace Swim::Render
 				resources.UploadPasses.push_back(
 					RecordRowUpload(graph, name + " upload metadata", resources.Metadata, metadata, rows, resources.RecordedBytes));
 			}
+
 			if (!submeshRowIds.empty())
 			{
 				resources.UploadPasses.push_back(RecordRowUpload(
@@ -188,10 +205,12 @@ namespace Swim::Render
 			{
 				dirtyMetadata.Mark(row);
 			}
+
 			for (auto row : submeshRowIds)
 			{
 				dirtySubmeshes.Mark(row);
 			}
+
 			throw;
 		}
 
@@ -199,6 +218,7 @@ namespace Swim::Render
 		{
 			meshes.Get(handle)->State = GeometryResidency::Recorded;
 		}
+
 		recordedMeshes = std::move(recorded);
 		recordedRows = std::move(rows);
 		recordedSubmeshRows = std::move(submeshRowIds);
@@ -213,10 +233,12 @@ namespace Swim::Render
 		{
 			return;
 		}
+
 		if (!completion.Semaphore)
 		{
 			throw std::invalid_argument("GeometryHeap upload commit needs the graph's completion point");
 		}
+
 		for (auto handle : recordedMeshes)
 		{
 			if (auto* record = meshes.Get(handle))
@@ -229,6 +251,7 @@ namespace Swim::Render
 				record->MeshletBytes.reset();
 			}
 		}
+
 		recordedMeshes.clear();
 		recordedRows.clear();
 		recordedSubmeshRows.clear();
@@ -244,17 +267,21 @@ namespace Swim::Render
 				record->State = GeometryResidency::PendingUpload;
 			}
 		}
+
 		for (auto row : recordedRows)
 		{
 			dirtyMetadata.Mark(row);
 		}
+
 		for (auto row : recordedSubmeshRows)
 		{
 			dirtySubmeshes.Mark(row);
 		}
+
 		recordedMeshes.clear();
 		recordedRows.clear();
 		recordedSubmeshRows.clear();
 		importPending = false;
 	}
+
 } // namespace Swim::Render

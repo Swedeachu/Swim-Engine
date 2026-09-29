@@ -32,6 +32,7 @@
 
 namespace
 {
+
 #ifdef SWIM_PARTICLE_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 	namespace P = Swim::Render::Particles;
@@ -41,19 +42,24 @@ namespace
 	{
 		double total = 0.0;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		return total;
 	}
 
@@ -70,6 +76,7 @@ namespace
 	std::vector<std::array<std::uint8_t, 4>> MakeAtlas()
 	{
 		std::vector<std::array<std::uint8_t, 4>> texels(AtlasWidth * AtlasHeight);
+
 		for (std::uint32_t y = 0; y < AtlasHeight; ++y)
 		{
 			for (std::uint32_t x = 0; x < AtlasWidth; ++x)
@@ -82,6 +89,7 @@ namespace
 					std::uint8_t(120 + (cell % 3) * 60), std::uint8_t(std::lround(255.0f * fade)) };
 			}
 		}
+
 		return texels;
 	}
 
@@ -103,10 +111,12 @@ namespace
 		};
 		const auto a = texel(x0, y0), b = texel(x0 + 1, y0), c = texel(x0, y0 + 1), d = texel(x0 + 1, y0 + 1);
 		Scene::Float4 result{};
+
 		for (int k = 0; k < 4; ++k)
 		{
 			result[k] = (a[k] * (1 - tx) + b[k] * tx) * (1 - ty) + (c[k] * (1 - tx) + d[k] * tx) * ty;
 		}
+
 		return result;
 	}
 
@@ -240,6 +250,7 @@ namespace
 			system.CreateEmitter(Scene::Smoke(), Scene::Translation(1.5f, 1.0f, 0.0f)),
 			system.CreateEmitter(sparks, Scene::Translation(0.0f, 0.5f, 1.0f)) };
 		std::map<std::uint32_t, P::ReferenceEmitter> mirrors;
+
 		for (const auto handle : handles)
 		{
 			mirrors.emplace(handle.Index, P::ReferenceEmitter(system.GetRange(handle)->second));
@@ -268,6 +279,7 @@ namespace
 		std::uint32_t totalIdMismatches = 0, totalFieldOutliers = 0, totalCompared = 0, sortInversions = 0, sortedChecked = 0;
 		std::uint32_t pixelOutliers = 0, pixelsCompared = 0, pixelsLit = 0, hiddenBehindScene = 0;
 		float worstField = 0.0f;
+
 		for (int frameIndex = 0; frameIndex < Frames; ++frameIndex)
 		{
 			// The smoke's emitter drifts: local-space particles follow it.
@@ -282,6 +294,7 @@ namespace
 			const auto drawListReadback = AddBufferReadback(graph, "Draw list", *resources.DrawList, 0, std::uint64_t(pool.size()) * 4);
 			const auto argsReadback = AddBufferReadback(graph, "Draw arguments", *resources.DrawArgs, 0, 8 * 20);
 			std::optional<GraphReadback> colorReadback;
+
 			if (drawFrame)
 			{
 				const auto color = graph.CreateTexture(colorDesc);
@@ -309,6 +322,7 @@ namespace
 				SWIM_REQUIRE(system.Draw(graph, resources, renderProgram, { color, depth }, bindless.GetTable()).has_value());
 				colorReadback = AddTextureReadback(graph, "Particle color", color, { 0, {}, {}, { width, height, 1 } });
 			}
+
 			executor.Execute(graph.Compile());
 			system.CommitFrame();
 			const auto timings = executor.ReadTimings();
@@ -327,12 +341,14 @@ namespace
 
 			std::vector<Scene::DrawBatch> batches;
 			std::uint32_t frameMismatches = 0, frameOutliers = 0, frameCompared = 0;
+
 			for (const auto& entry : resources.Emitters)
 			{
 				const auto& record = entry.Record;
 				auto& mirror = mirrors.at(record.Row);
 				mirror.Step(record, dt);
 				std::map<std::uint32_t, GpuParticle> gpu;
+
 				for (std::uint32_t slot = record.FirstSlot; slot < record.FirstSlot + record.Capacity; ++slot)
 				{
 					if (pool[slot].Lifetime > 0.0f)
@@ -340,16 +356,20 @@ namespace
 						gpu[pool[slot].Id] = pool[slot];
 					}
 				}
+
 				// 1. The live particles, matched by id (slot assignment is concurrent).
 				std::uint32_t matched = 0;
+
 				for (const auto& expected : mirror.Particles())
 				{
 					const auto found = gpu.find(expected.Id);
+
 					if (found == gpu.end())
 					{
 						++frameMismatches;
 						continue;
 					}
+
 					++matched;
 					const auto& actual = found->second;
 					bool outlier = false;
@@ -358,17 +378,20 @@ namespace
 						worstField = std::max(worstField, std::abs(a - e) / (std::abs(e) + 1.0f));
 						outlier = outlier || !Close(a, e, relative, absolute);
 					};
+
 					for (int c = 0; c < 3; ++c)
 					{
 						compare(actual.Position[c], expected.Position[c], 1.0e-4f, 1.0e-4f);
 						compare(actual.Velocity[c], expected.Velocity[c], 1.0e-4f, 1.0e-4f);
 					}
+
 					compare(actual.Age, expected.Age, 1.0e-5f, 1.0e-6f);
 					compare(actual.Lifetime, expected.Lifetime, 1.0e-5f, 1.0e-6f);
 					compare(actual.Size, expected.Size, 1.0e-5f, 1.0e-6f);
 					compare(actual.Rotation, expected.Rotation, 1.0e-4f, 1.0e-4f);
 					frameOutliers += outlier ? 1u : 0u;
 				}
+
 				frameMismatches += std::uint32_t(gpu.size()) - matched;
 				frameCompared += std::uint32_t(mirror.Particles().size());
 				// 2. Counters, draw list and indirect arguments.
@@ -378,6 +401,7 @@ namespace
 				SWIM_CHECK_EQUAL(counter.Dropped, 0u);
 				SWIM_CHECK(args[record.Row * 5] == 6u && args[record.Row * 5 + 1] == counter.Alive && args[record.Row * 5 + 2] == 0u);
 				std::vector<GpuParticle> drawn;
+
 				for (std::uint32_t i = 0; i < counter.Alive; ++i)
 				{
 					const auto slot = drawList[record.FirstSlot + i];
@@ -385,11 +409,14 @@ namespace
 					SWIM_CHECK(pool[slot].Lifetime > 0.0f);
 					drawn.push_back(pool[slot]);
 				}
+
 				std::vector<std::uint32_t> ids;
+
 				for (const auto& p : drawn)
 				{
 					ids.push_back(p.Id);
 				}
+
 				std::sort(ids.begin(), ids.end());
 				SWIM_CHECK(std::adjacent_find(ids.begin(), ids.end()) == ids.end()); // Each live slot once.
 				// 3. Blended emitters draw back to front (depths from the GPU's own positions).
@@ -404,18 +431,23 @@ namespace
 							P::DrawsBefore(after, drawn[i].Id, before, drawn[i - 1].Id) && std::abs(after - before) > 1.0e-5f ? 1u : 0u;
 					}
 				}
+
 				// Continue from the GPU's state, so every frame compares one step.
 				std::vector<GpuParticle> live;
+
 				for (const auto& [id, particle] : gpu)
 				{
 					live.push_back(particle);
 				}
+
 				mirror.Assign(std::move(live));
 				batches.push_back({ &entry.Record, entry.Blend, std::move(drawn) });
 			}
+
 			totalIdMismatches += frameMismatches;
 			totalFieldOutliers += frameOutliers;
 			totalCompared += frameCompared;
+
 			if (frameIndex % 10 == 9)
 			{
 				std::printf("             [particles frame %d] %u particles: %u id mismatches, %u field outliers\n", frameIndex,
@@ -429,26 +461,32 @@ namespace
 				std::vector<std::uint16_t> halves(std::size_t(width) * height * 4);
 				read(*colorReadback, halves);
 				std::vector<std::size_t> order(batches.size());
+
 				for (std::size_t i = 0; i < order.size(); ++i)
 				{
 					order[i] = i;
 				}
+
 				std::stable_sort(order.begin(), order.end(),
 					[&](std::size_t a, std::size_t b)
 					{
 						const auto& ea = resources.Emitters[a];
 						const auto& eb = resources.Emitters[b];
+
 						if (ea.Blend != eb.Blend)
 						{
 							return ea.Blend == ParticleBlendMode::Additive;
 						}
+
 						return ea.Blend == ParticleBlendMode::AlphaBlend && ea.OriginDepth > eb.OriginDepth;
 					});
 				std::vector<Scene::DrawBatch> ordered;
+
 				for (const auto index : order)
 				{
 					ordered.push_back(batches[index]);
 				}
+
 				Scene::Image expected{ width, height, std::vector<Scene::Float4>(std::size_t(width) * height, clearColor), {} };
 				std::vector<float> depthPlane(expected.Texels.size(), sceneDepth);
 				Scene::Rasterize(expected, depthPlane, resources.FrameRecord, ordered,
@@ -463,30 +501,37 @@ namespace
 					{
 						return SampleAtlas(atlasTexels, uv);
 					});
+
 				for (std::size_t i = 0; i < expected.Texels.size(); ++i)
 				{
 					if (expected.Ambiguous[i] || unoccluded.Ambiguous[i])
 					{
 						continue;
 					}
+
 					++pixelsCompared;
 					bool outlier = false;
 					bool lit = false;
+
 					for (int c = 0; c < 4; ++c)
 					{
 						const float actual = Smoke::HalfToFloat(halves[i * 4 + c]);
 						outlier = outlier || !Close(actual, expected.Texels[i][c], 0.01f, 0.01f);
 						lit = lit || std::abs(expected.Texels[i][c] - clearColor[c]) > 0.01f;
 					}
+
 					pixelsLit += lit ? 1u : 0u;
 					bool hidden = false;
+
 					for (int c = 0; c < 4; ++c)
 					{
 						hidden = hidden || std::abs(unoccluded.Texels[i][c] - expected.Texels[i][c]) > 0.01f;
 					}
+
 					hiddenBehindScene += hidden ? 1u : 0u;
 					pixelOutliers += outlier ? 1u : 0u;
 				}
+
 				std::printf(
 					"             [particles draw] %u pixels compared (%u lit, %u with particles behind the scene depth), %u outliers\n",
 					pixelsCompared, pixelsLit, hiddenBehindScene, pixelOutliers);
@@ -500,6 +545,7 @@ namespace
 					PassMilliseconds(timings, "Particles draw"));
 			}
 		}
+
 		std::printf(
 			"             [particles] %d frames, %u particle-steps: %u id mismatches, %u field outliers (worst %.2e); %u sorted pairs, "
 			"%u inversions\n",
@@ -511,10 +557,12 @@ namespace
 
 		// Timing: 60,000 additive particles.
 		executor.Wait();
+
 		for (const auto handle : handles)
 		{
 			system.Release(handle); // Nothing in flight after the wait.
 		}
+
 		system.Collect();
 		auto mist = Scene::Fountain();
 		mist.Capacity = 60000;
@@ -523,6 +571,7 @@ namespace
 		mist.LifetimeMin = 0.2f;
 		mist.LifetimeMax = 0.3f;
 		system.CreateEmitter(mist);
+
 		for (int frameIndex = 0; frameIndex < 6; ++frameIndex)
 		{
 			RenderGraph graph;
@@ -553,6 +602,7 @@ namespace
 			executor.Execute(graph.Compile());
 			system.CommitFrame();
 			executor.Wait();
+
 			if (frameIndex == 5)
 			{
 				const auto timings = executor.ReadTimings();
@@ -563,6 +613,7 @@ namespace
 					PassMilliseconds(timings, "Particles draw"));
 			}
 		}
+
 		executor.Wait();
 		system.Drain();
 		executor.Trim();
@@ -572,6 +623,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuParticlesMatchTheCpuReference", SWIM_TEST_LOCATION,
@@ -580,6 +632,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunParticleSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

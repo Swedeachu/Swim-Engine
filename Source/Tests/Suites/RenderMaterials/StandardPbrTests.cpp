@@ -10,6 +10,7 @@ namespace Pbr = Swim::Render::StandardPbr;
 
 namespace
 {
+
 	bool Near(float a, float b, float tolerance)
 	{
 		return std::abs(a - b) <= tolerance;
@@ -26,21 +27,26 @@ namespace
 		Pbr::Float3 sum{ 0, 0, 0 };
 		const float dTheta = 0.5f * Pbr::Pi / float(steps);
 		const float dPhi = 2.0f * Pbr::Pi / float(steps);
+
 		for (int i = 0; i < steps; ++i)
 		{
 			const float theta = (float(i) + 0.5f) * dTheta;
+
 			for (int j = 0; j < steps; ++j)
 			{
 				const float phi = (float(j) + 0.5f) * dPhi;
 				const auto value = Pbr::EvaluateBrdf(surface, { 0, 0, 1 }, view, Direction(theta, phi));
+
 				for (int c = 0; c < 3; ++c)
 				{
 					sum[c] += value[c] * std::sin(theta) * dTheta * dPhi;
 				}
 			}
 		}
+
 		return sum;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.StandardPbr", "SrgbTransferFunctionsRoundTripAndMatchTheStandard")
@@ -49,6 +55,7 @@ SWIM_TEST("Render.StandardPbr", "SrgbTransferFunctionsRoundTripAndMatchTheStanda
 	SWIM_CHECK(Near(Pbr::SrgbToLinear(1.0f), 1.0f, 1e-6f));
 	SWIM_CHECK(Near(Pbr::SrgbToLinear(0.5f), 0.2140411f, 1e-6f));
 	SWIM_CHECK(Near(Pbr::SrgbToLinear(0.04045f), 0.04045f / 12.92f, 1e-7f)); // Linear segment.
+
 	for (int i = 0; i <= 255; ++i)
 	{
 		const float encoded = float(i) / 255.0f;
@@ -64,13 +71,16 @@ SWIM_TEST("Render.StandardPbr", "GgxIsNormalizedAndFresnelHitsItsLimits")
 		double integral = 0.0;
 		const int steps = 20000;
 		const double dTheta = 0.5 * Pbr::Pi / steps;
+
 		for (int i = 0; i < steps; ++i)
 		{
 			const double theta = (i + 0.5) * dTheta;
 			integral += Pbr::DistributionGgx(float(std::cos(theta)), alpha) * std::cos(theta) * std::sin(theta) * dTheta * 2.0 * Pbr::Pi;
 		}
+
 		SWIM_CHECK(std::abs(integral - 1.0) < 2e-3);
 	}
+
 	const auto f = Pbr::FresnelSchlick({ 0.04f, 0.5f, 1.0f }, 1.0f);
 	SWIM_CHECK(Near(f[0], 0.04f, 1e-7f) && Near(f[1], 0.5f, 1e-7f) && Near(f[2], 1.0f, 1e-7f));
 	const auto grazing = Pbr::FresnelSchlick({ 0.04f, 0.04f, 0.04f }, 0.0f);
@@ -83,6 +93,7 @@ SWIM_TEST("Render.StandardPbr", "BrdfIsReciprocalBoundedAndZeroBelowTheHorizon")
 {
 	std::mt19937 random(3);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 	for (int i = 0; i < 200; ++i)
 	{
 		Pbr::Surface surface{ { unit(random), unit(random), unit(random) }, unit(random), unit(random) };
@@ -90,12 +101,14 @@ SWIM_TEST("Render.StandardPbr", "BrdfIsReciprocalBoundedAndZeroBelowTheHorizon")
 		const auto light = Direction(unit(random) * 1.5f, unit(random) * 6.28f);
 		const auto forward = Pbr::EvaluateBrdf(surface, { 0, 0, 1 }, view, light);
 		const auto reverse = Pbr::EvaluateBrdf(surface, { 0, 0, 1 }, light, view);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			// f(v, l) cos(l) / cos(l) == f(l, v) cos(v) / cos(v).
 			SWIM_CHECK(Near(forward[c] / light[2], reverse[c] / view[2], 1e-3f * std::max(1.0f, forward[c] / light[2])));
 		}
 	}
+
 	const auto below = Pbr::EvaluateBrdf({}, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0.6f, -0.8f });
 	SWIM_CHECK(below[0] == 0.0f && below[1] == 0.0f && below[2] == 0.0f);
 
@@ -109,6 +122,7 @@ SWIM_TEST("Render.StandardPbr", "BrdfIsReciprocalBoundedAndZeroBelowTheHorizon")
 			SWIM_CHECK(albedo[0] > 0.3f);
 		}
 	}
+
 	// Metals have no diffuse lobe: a black metal reflects only its (black) F0 plus Fresnel.
 	const auto metal = Pbr::EvaluateBrdf({ { 0, 0, 0 }, 1.0f, 1.0f }, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 });
 	SWIM_CHECK(Near(metal[0], 0.0f, 1e-6f));

@@ -13,8 +13,10 @@
 
 namespace Swim::Text
 {
+
 	namespace
 	{
+
 		constexpr std::size_t MaxSegmentedBytes = 1024u * 1024u;
 
 		void InitializeUnibreak()
@@ -35,6 +37,7 @@ namespace Swim::Text
 			{
 				throw std::length_error("Text segmentation input exceeds 1 MiB");
 			}
+
 			if (!IsValidUtf8(utf8))
 			{
 				throw std::invalid_argument("Text segmentation requires valid UTF-8 (use SanitizeUtf8)");
@@ -46,11 +49,13 @@ namespace Swim::Text
 		template <typename Fill> std::vector<char> Breaks(std::string_view utf8, std::string_view language, Fill fill)
 		{
 			std::vector<char> breaks(utf8.size());
+
 			if (!utf8.empty())
 			{
 				const std::string lang(language);
 				fill(reinterpret_cast<const utf8_t*>(utf8.data()), utf8.size(), lang.empty() ? nullptr : lang.c_str(), breaks.data());
 			}
+
 			return breaks;
 		}
 
@@ -63,15 +68,18 @@ namespace Swim::Text
 		{
 			void operator()(const _SBParagraph* paragraph) const { SBParagraphRelease(paragraph); }
 		};
+
 	} // namespace
 
 	TextBoundaries FindTextBoundaries(std::string_view utf8, std::string_view language)
 	{
 		RequireSegmentable(utf8);
+
 		if (language.size() > 128)
 		{
 			throw std::invalid_argument("Text language tag exceeds 128 bytes");
 		}
+
 		InitializeUnibreak();
 		const auto n = utf8.size();
 		TextBoundaries result;
@@ -83,6 +91,7 @@ namespace Swim::Text
 		const auto graphemes = Breaks(utf8, language, set_graphemebreaks_utf8);
 		const auto words = Breaks(utf8, language, set_wordbreaks_utf8);
 		const auto lines = Breaks(utf8, language, set_linebreaks_utf8);
+
 		for (std::size_t i = 0; i + 1 < n; ++i)
 		{
 			result.Grapheme[i + 1] = graphemes[i] == GRAPHEMEBREAK_BREAK ? 1 : 0;
@@ -91,12 +100,14 @@ namespace Swim::Text
 				: lines[i] == LINEBREAK_ALLOWBREAK					  ? LineBreakKind::Allowed
 																	  : LineBreakKind::None;
 		}
+
 		// The end of text is always a (mandatory) break; a text ending with a newline
 		// then starts an empty final line, which layout handles separately.
 		if (n > 0)
 		{
 			result.LineBreak[n] = LineBreakKind::Mandatory;
 		}
+
 		return result;
 	}
 
@@ -104,17 +115,22 @@ namespace Swim::Text
 	{
 		RequireSegmentable(utf8);
 		std::vector<ScriptSpan> spans;
+
 		if (utf8.empty())
 		{
 			return spans;
 		}
+
 		const SBCodepointSequence sequence{ SBStringEncodingUTF8, utf8.data(), utf8.size() };
 		const SBScriptLocatorRef locator = SBScriptLocatorCreate();
+
 		if (!locator)
 		{
 			throw std::bad_alloc();
 		}
+
 		SBScriptLocatorLoadCodepoints(locator, &sequence);
+
 		while (SBScriptLocatorMoveNext(locator))
 		{
 			const auto* agent = SBScriptLocatorGetAgent(locator);
@@ -122,6 +138,7 @@ namespace Swim::Text
 			span.Begin = static_cast<std::uint32_t>(agent->offset);
 			span.End = static_cast<std::uint32_t>(agent->offset + agent->length);
 			span.Tag = SBScriptGetUnicodeTag(agent->script);
+
 			if (!spans.empty() && spans.back().Tag == span.Tag && spans.back().End == span.Begin)
 			{
 				spans.back().End = span.End;
@@ -131,6 +148,7 @@ namespace Swim::Text
 				spans.push_back(span);
 			}
 		}
+
 		SBScriptLocatorRelease(locator);
 		return spans;
 	}
@@ -138,23 +156,28 @@ namespace Swim::Text
 	std::vector<BidiParagraph> AnalyzeBidi(std::string_view utf8, TextDirection direction)
 	{
 		RequireSegmentable(utf8);
+
 		if (direction != TextDirection::Auto && direction != TextDirection::LeftToRight && direction != TextDirection::RightToLeft)
 		{
 			throw std::invalid_argument("Invalid paragraph direction");
 		}
+
 		const SBLevel requested = direction == TextDirection::LeftToRight ? SBLevel(0)
 			: direction == TextDirection::RightToLeft					  ? SBLevel(1)
 																		  : SBLevel(SBLevelDefaultLTR);
 		std::vector<BidiParagraph> paragraphs;
 		const std::size_t n = utf8.size();
+
 		if (n > 0)
 		{
 			const SBCodepointSequence sequence{ SBStringEncodingUTF8, utf8.data(), n };
 			std::unique_ptr<const _SBAlgorithm, AlgorithmDeleter> algorithm(SBAlgorithmCreate(&sequence));
+
 			if (!algorithm)
 			{
 				throw std::bad_alloc();
 			}
+
 			for (std::size_t offset = 0; offset < n;)
 			{
 				SBUInteger length = 0;
@@ -162,10 +185,12 @@ namespace Swim::Text
 				SBAlgorithmGetParagraphBoundary(algorithm.get(), offset, n - offset, &length, &separator);
 				std::unique_ptr<const _SBParagraph, ParagraphDeleter> paragraph(
 					SBAlgorithmCreateParagraph(algorithm.get(), offset, length, requested));
+
 				if (!paragraph || length == 0)
 				{
 					throw std::runtime_error("SheenBidi could not analyze the paragraph");
 				}
+
 				BidiParagraph result;
 				result.Begin = static_cast<std::uint32_t>(offset);
 				result.End = static_cast<std::uint32_t>(offset + length - separator);
@@ -177,6 +202,7 @@ namespace Swim::Text
 				offset += length;
 			}
 		}
+
 		if (n == 0 || paragraphs.back().SeparatorLength > 0)
 		{
 			BidiParagraph empty;
@@ -187,6 +213,7 @@ namespace Swim::Text
 																	  : paragraphs.back().BaseLevel;
 			paragraphs.push_back(std::move(empty));
 		}
+
 		return paragraphs;
 	}
 
@@ -207,6 +234,7 @@ namespace Swim::Text
 		{
 			return 0;
 		}
+
 		return (std::uint32_t(std::uint8_t(code[0])) << 24) | (std::uint32_t(std::uint8_t(code[1])) << 16) |
 			(std::uint32_t(std::uint8_t(code[2])) << 8) | std::uint32_t(std::uint8_t(code[3]));
 	}
@@ -217,6 +245,8 @@ namespace Swim::Text
 		{
 			return {};
 		}
+
 		return { char(tag >> 24), char((tag >> 16) & 0xFF), char((tag >> 8) & 0xFF), char(tag & 0xFF) };
 	}
+
 } // namespace Swim::Text

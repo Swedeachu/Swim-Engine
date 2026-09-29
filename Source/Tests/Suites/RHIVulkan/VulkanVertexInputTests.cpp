@@ -37,19 +37,23 @@ SWIM_TEST("RHI.Vulkan.VertexInput", "InvalidBindingsAndLocationsNeverCreateNativ
 	Testing::VulkanPipelineCapture capture;
 	const std::array<Rhi::VertexBindingDesc, 1> binding{{ { 0, 16 } }};
 	const std::array<Rhi::VertexAttributeDesc, 1> attribute{{ { 0, 0, Rhi::Format::RGBA32Float, 0 } }};
+
 	for (auto bad : { Rhi::VertexBindingDesc{ 32, 16 }, { 0, 2049 }, { 0, 16, static_cast<Rhi::VertexInputRate>(255) } })
 	{
 		SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, { &bad, 1 }, attribute));
 	}
+
 	const std::array duplicates{ binding[0], binding[0] };
 	SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, duplicates, attribute));
 	const std::array duplicateLocations{ attribute[0], attribute[0] };
 	SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, binding, duplicateLocations));
+
 	for (auto bad : { Rhi::VertexAttributeDesc{ 32, 0, Rhi::Format::RGBA32Float, 0 },
 		{ 0, 2, Rhi::Format::RGBA32Float, 0 }, { 0, 0, Rhi::Format::R8Unorm, 2048 } })
 	{
 		SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, binding, { &bad, 1 }));
 	}
+
 	SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, {}, attribute));
 	SWIM_CHECK_EQUAL(capture.PipelinesCreated, 0u);
 }
@@ -59,12 +63,14 @@ SWIM_TEST("RHI.Vulkan.VertexInput", "FormatsAlignmentAndRecordExtentsAreValidate
 	Testing::VulkanPipelineCapture capture;
 	Rhi::VertexBindingDesc binding{ 0, 16 };
 	Rhi::VertexAttributeDesc attribute{ 0, 0, Rhi::Format::RGBA32Float, 0 };
+
 	for (auto format : { Rhi::Format::Undefined, Rhi::Format::D32Float, Rhi::Format::BC1RGBAUnorm,
 		Rhi::Format::RGBA8UnormSrgb, static_cast<Rhi::Format>(65535) })
 	{
 		attribute.DataFormat = format;
 		SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, { &binding, 1 }, { &attribute, 1 }));
 	}
+
 	attribute.DataFormat = Rhi::Format::RG32Float;
 	attribute.Offset = 2;
 	SWIM_CHECK(!capture.MakePipeline(Rhi::Format::RGBA8Unorm, { &binding, 1 }, { &attribute, 1 }));
@@ -100,6 +106,7 @@ SWIM_TEST("RHI.Vulkan.VertexInput", "ZeroStridePackedFormatsAndUnusedBindings")
 {
 	Testing::VulkanPipelineCapture capture;
 	const std::array<Rhi::VertexBindingDesc, 2> bindings{{ { 0, 0 }, { 7, 64 } }};
+
 	for (auto format : { Rhi::Format::RGB10A2Unorm, Rhi::Format::BGR10A2Unorm, Rhi::Format::RGBA16Float,
 		Rhi::Format::R8Uint, Rhi::Format::RG16Snorm })
 	{
@@ -109,6 +116,7 @@ SWIM_TEST("RHI.Vulkan.VertexInput", "ZeroStridePackedFormatsAndUnusedBindings")
 		SWIM_CHECK_EQUAL(pipeline->GetVertexRequirements().size(), 1u);
 		SWIM_CHECK_EQUAL(pipeline->GetVertexRequirements()[0].Stride, 0u);
 	}
+
 	auto generated = capture.MakePipeline();
 	SWIM_REQUIRE(generated);
 	SWIM_CHECK(generated->GetVertexRequirements().empty());

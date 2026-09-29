@@ -21,6 +21,7 @@ namespace Swim::Platform
 			handle = std::exchange(other.handle, nullptr);
 			lastError = std::move(other.lastError);
 		}
+
 		return *this;
 	}
 
@@ -34,6 +35,7 @@ namespace Swim::Platform
 		Close();
 		const std::u8string utf8Path = path.u8string();
 		handle = SDL_LoadObject(reinterpret_cast<const char*>(utf8Path.c_str()));
+
 		if (!handle)
 		{
 			lastError = SDL_GetError();

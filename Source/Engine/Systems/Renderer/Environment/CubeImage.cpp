@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Environment
 {
+
 	bool IsPowerOfTwo(std::uint32_t value)
 	{
 		return value != 0 && (value & (value - 1)) == 0;
@@ -28,18 +29,23 @@ namespace Swim::Render::Environment
 		{
 			throw std::invalid_argument("CubeImage size must be a power of two");
 		}
+
 		mipCount = mipCountInput == 0 ? FullCubeMipCount(size) : mipCountInput;
+
 		if (mipCount > FullCubeMipCount(size))
 		{
 			throw std::invalid_argument("CubeImage mip count exceeds the chain");
 		}
+
 		std::size_t offset = 0;
+
 		for (std::uint32_t mip = 0; mip < mipCount; ++mip)
 		{
 			mipOffsets.push_back(offset);
 			const std::size_t mipSize = GetMipSize(mip);
 			offset += mipSize * mipSize * CubeFaceCount;
 		}
+
 		texels.assign(offset, Float4{ 0, 0, 0, 0 });
 	}
 
@@ -103,14 +109,17 @@ namespace Swim::Render::Environment
 		const int mipSize = static_cast<int>(GetMipSize(mip));
 		const bool insideX = x >= 0 && x < mipSize;
 		const bool insideY = y >= 0 && y < mipSize;
+
 		if (insideX && insideY)
 		{
 			return Texel(mip, face, std::uint32_t(x), std::uint32_t(y));
 		}
+
 		if (insideX || insideY)
 		{
 			return FetchAcrossEdge(mip, face, x, y);
 		}
+
 		// Corner: the average of the three texels that meet there.
 		const int cx = std::clamp(x, 0, mipSize - 1);
 		const int cy = std::clamp(y, 0, mipSize - 1);
@@ -118,10 +127,12 @@ namespace Swim::Render::Environment
 		const auto b = FetchAcrossEdge(mip, face, x, cy);
 		const auto c = FetchAcrossEdge(mip, face, cx, y);
 		Float4 result{};
+
 		for (int channel = 0; channel < 4; ++channel)
 		{
 			result[channel] = (a[channel] + b[channel] + c[channel]) / 3.0f;
 		}
+
 		return result;
 	}
 
@@ -141,12 +152,14 @@ namespace Swim::Render::Environment
 		const auto t01 = FetchSeamless(mip, coordinate.Face, x0, y0 + 1);
 		const auto t11 = FetchSeamless(mip, coordinate.Face, x0 + 1, y0 + 1);
 		Float4 result{};
+
 		for (int c = 0; c < 4; ++c)
 		{
 			const float top = t00[c] * (1.0f - wu) + t10[c] * wu;
 			const float bottom = t01[c] * (1.0f - wu) + t11[c] * wu;
 			result[c] = top * (1.0f - wv) + bottom * wv;
 		}
+
 		return result;
 	}
 
@@ -158,16 +171,20 @@ namespace Swim::Render::Environment
 		const auto high = std::min(low + 1, mipCount - 1);
 		const float weight = clamped - float(low);
 		const auto a = SampleBilinear(low, coordinate);
+
 		if (weight == 0.0f || high == low)
 		{
 			return a;
 		}
+
 		const auto b = SampleBilinear(high, coordinate);
 		Float4 result{};
+
 		for (int c = 0; c < 4; ++c)
 		{
 			result[c] = a[c] * (1.0f - weight) + b[c] * weight;
 		}
+
 		return result;
 	}
 
@@ -176,6 +193,7 @@ namespace Swim::Render::Environment
 		for (std::uint32_t mip = 1; mip < mipCount; ++mip)
 		{
 			const std::uint32_t mipSize = GetMipSize(mip);
+
 			for (std::uint32_t face = 0; face < CubeFaceCount; ++face)
 			{
 				for (std::uint32_t y = 0; y < mipSize; ++y)
@@ -183,21 +201,25 @@ namespace Swim::Render::Environment
 					for (std::uint32_t x = 0; x < mipSize; ++x)
 					{
 						Float4 sum{};
+
 						for (std::uint32_t dy = 0; dy < 2; ++dy)
 						{
 							for (std::uint32_t dx = 0; dx < 2; ++dx)
 							{
 								const auto& source = Texel(mip - 1, face, x * 2 + dx, y * 2 + dy);
+
 								for (int c = 0; c < 4; ++c)
 								{
 									sum[c] += source[c];
 								}
 							}
 						}
+
 						for (auto& value : sum)
 						{
 							value *= 0.25f;
 						}
+
 						Texel(mip, face, x, y) = sum;
 					}
 				}
@@ -226,12 +248,15 @@ namespace Swim::Render::Environment
 		const auto y0 = clampY(fv);
 		const auto y1 = clampY(fv + 1.0f);
 		Float4 result{};
+
 		for (int c = 0; c < 4; ++c)
 		{
 			const float top = At(x0, y0)[c] * (1.0f - wu) + At(x1, y0)[c] * wu;
 			const float bottom = At(x0, y1)[c] * (1.0f - wu) + At(x1, y1)[c] * wu;
 			result[c] = top * (1.0f - wv) + bottom * wv;
 		}
+
 		return result;
 	}
+
 } // namespace Swim::Render::Environment

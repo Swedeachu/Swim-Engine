@@ -10,8 +10,10 @@
 
 namespace Swim::RhiVulkan
 {
+
 	namespace
 	{
+
 		using Rhi::Format;
 		using Rhi::SwapchainColorSpace;
 		// Order is deterministic, independent of driver enumeration order.
@@ -28,16 +30,19 @@ namespace Swim::RhiVulkan
 		void RequireQuerySuccess(const VulkanDeviceState& state, VkResult result, const char* operation)
 		{
 			CheckVulkanResult(state, result, operation);
+
 			if (result != VK_SUCCESS)
 			{
 				throw std::runtime_error(std::string(operation) + " failed: " + std::to_string(result));
 			}
 		}
+
 	}
 
 	VkSurfaceFormatKHR ToVkSurfaceFormat(const Rhi::SwapchainSurfaceFormat& format)
 	{
 		VkColorSpaceKHR colorSpace;
+
 		switch (format.ColorSpace)
 		{
 		case SwapchainColorSpace::SrgbNonlinear:
@@ -52,6 +57,7 @@ namespace Swim::RhiVulkan
 		default:
 			throw std::invalid_argument("Undefined swapchain color space");
 		}
+
 		return { ToVkFormat(format.PixelFormat), colorSpace };
 	}
 
@@ -65,12 +71,14 @@ namespace Swim::RhiVulkan
 	{
 		Rhi::SwapchainSupport support{};
 		support.PresentationSupported = true;
+
 		for (const auto& pair : SupportedPairs)
 		{
 			if (pair.IsHdr() && !colorSpaceEnabled)
 			{
 				continue;
 			}
+
 			for (const auto& native : formats)
 			{
 				if (MatchesSwapchainFormat(pair, native.format, native.colorSpace))
@@ -80,6 +88,7 @@ namespace Swim::RhiVulkan
 				}
 			}
 		}
+
 		return support;
 	}
 
@@ -91,43 +100,55 @@ namespace Swim::RhiVulkan
 		VkBool32 supported = VK_FALSE;
 		RequireQuerySuccess(state, dispatch.vkGetPhysicalDeviceSurfaceSupportKHR(
 			physicalDevice, state.QueueFamilies.Graphics, surface, &supported), "vkGetPhysicalDeviceSurfaceSupportKHR");
+
 		if (!supported)
 		{
 			return {};
 		}
+
 		// Re-enumerate on VK_INCOMPLETE; never select from a truncated snapshot.
 		// Bound both allocation and retries for a changing/broken surface driver.
 		for (unsigned attempt = 0; attempt < 4; ++attempt)
 		{
 			std::uint32_t count = 0;
 			const auto countResult = dispatch.vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &count, nullptr);
+
 			if (countResult == VK_INCOMPLETE)
 			{
 				continue;
 			}
+
 			RequireQuerySuccess(state, countResult, "vkGetPhysicalDeviceSurfaceFormatsKHR (count)");
+
 			if (count > 4096)
 			{
 				throw std::runtime_error("Unreasonable Vulkan surface format count");
 			}
+
 			if (count == 0)
 			{
 				return BuildSwapchainSupport({}, state.Instance->SwapchainColorSpaceEnabled);
 			}
+
 			std::vector<VkSurfaceFormatKHR> formats(count);
 			const auto result = dispatch.vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &count, formats.data());
+
 			if (result == VK_INCOMPLETE)
 			{
 				continue;
 			}
+
 			RequireQuerySuccess(state, result, "vkGetPhysicalDeviceSurfaceFormatsKHR (data)");
+
 			if (count > formats.size())
 			{
 				throw std::runtime_error("Vulkan surface format count exceeded capacity");
 			}
+
 			formats.resize(count);
 			return BuildSwapchainSupport(formats, state.Instance->SwapchainColorSpaceEnabled);
 		}
+
 		throw std::runtime_error("Vulkan surface format enumeration did not stabilize");
 	}
 
@@ -139,31 +160,39 @@ namespace Swim::RhiVulkan
 		{
 			throw std::invalid_argument("Invalid swapchain color mode");
 		}
+
 		if (!support.PresentationSupported)
 		{
 			return {};
 		}
+
 		const bool hdr = desc.ColorMode != Rhi::SwapchainColorMode::Sdr && support.SupportsHdr();
+
 		if (!hdr && desc.ColorMode == Rhi::SwapchainColorMode::RequireHdr)
 		{
 			return {};
 		}
+
 		std::optional<Rhi::SwapchainSurfaceFormat> fallback;
+
 		for (const auto& pair : support.Formats)
 		{
 			if (pair.IsHdr() != hdr)
 			{
 				continue;
 			}
+
 			if (pair.PixelFormat == desc.PreferredFormat)
 			{
 				return pair;
 			}
+
 			if (!fallback)
 			{
 				fallback = pair;
 			}
 		}
+
 		return fallback;
 	}
 

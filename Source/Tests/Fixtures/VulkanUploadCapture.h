@@ -12,6 +12,7 @@ namespace Swim::Testing
 	struct VulkanUploadCapture
 	{
 		explicit VulkanUploadCapture(bool coherent = false);
+
 		~VulkanUploadCapture();
 
 		std::shared_ptr<RhiVulkan::VulkanDeviceState> State = std::make_shared<RhiVulkan::VulkanDeviceState>();

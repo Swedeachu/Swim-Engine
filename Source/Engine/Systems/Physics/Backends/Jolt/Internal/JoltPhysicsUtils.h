@@ -19,9 +19,11 @@ namespace Engine::JoltPhysicsDetail
 
 	namespace BroadPhaseLayers
 	{
+
 		static constexpr JPH::BroadPhaseLayer NonMoving(0);
 		static constexpr JPH::BroadPhaseLayer Moving(1);
 		static constexpr JPH::uint Count = 2;
+
 	}
 
 	bool IsFiniteVec3(const glm::vec3& value);

@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	CompiledRenderGraph RenderGraph::Compile() const
 	{
 		using namespace Internal;
@@ -22,6 +23,7 @@ namespace Swim::Render
 		std::vector<std::vector<std::uint32_t>> inputs(passCount);
 		std::vector<bool> live(passCount, false);
 		std::vector<std::vector<GraphHazard>> hazards;
+
 		for (const auto& r : definition.Resources)
 		{
 			hazards.emplace_back(CellCount(r));
@@ -49,6 +51,7 @@ namespace Swim::Render
 			for (const auto& use : pass.Uses)
 			{
 				const auto& r = definition.Resources[use.Resource];
+
 				if (r.Imported && use.Access != GraphAccess::Read)
 				{
 					live[p] = true;
@@ -66,6 +69,7 @@ namespace Swim::Render
 							throw std::invalid_argument("RenderGraph read before write: pass '" + pass.Name + "', resource '" + r.Name +
 								"', subresource " + std::to_string(cell));
 						}
+
 						add(inputs[p], hazard.Writer);
 					}
 
@@ -93,6 +97,7 @@ namespace Swim::Render
 			{
 				continue;
 			}
+
 			for (const auto& hazard : hazards[r])
 			{
 				if (hazard.Writer != unused)
@@ -111,13 +116,16 @@ namespace Swim::Render
 		std::vector<std::vector<std::uint32_t>> successors(passCount);
 		std::vector<std::uint32_t> indegree(passCount);
 		std::priority_queue<std::uint32_t, std::vector<std::uint32_t>, std::greater<>> ready;
+
 		for (std::uint32_t p = 0; p < passCount; ++p)
 		{
 			indegree[p] = static_cast<std::uint32_t>(edges[p].size());
+
 			for (auto dependency : edges[p])
 			{
 				successors[dependency].push_back(p);
 			}
+
 			if (!indegree[p])
 			{
 				ready.push(p);
@@ -125,11 +133,13 @@ namespace Swim::Render
 		}
 
 		std::vector<std::uint32_t> order;
+
 		while (!ready.empty())
 		{
 			const auto p = ready.top();
 			ready.pop();
 			order.push_back(p);
+
 			for (auto next : successors[p])
 			{
 				if (!--indegree[next])
@@ -142,6 +152,7 @@ namespace Swim::Render
 		if (order.size() != passCount)
 		{
 			std::string names;
+
 			for (std::uint32_t p = 0; p < passCount; ++p)
 			{
 				if (indegree[p])
@@ -149,12 +160,14 @@ namespace Swim::Render
 					names += " '" + definition.Passes[p].Name + "'";
 				}
 			}
+
 			throw std::invalid_argument("RenderGraph dependency cycle involving:" + names);
 		}
 
 		// Only data producers and explicit prerequisites keep dead work alive. WAR
 		// and WAW ordering edges alone do not keep overwritten transient writes.
 		std::vector<std::uint32_t> stack;
+
 		for (std::uint32_t p = 0; p < passCount; ++p)
 		{
 			if (live[p])
@@ -167,6 +180,7 @@ namespace Swim::Render
 		{
 			const auto p = stack.back();
 			stack.pop_back();
+
 			for (auto input : inputs[p])
 			{
 				if (!live[input])
@@ -186,27 +200,33 @@ namespace Swim::Render
 		}
 
 		result.lifetimes.resize(resourceCount);
+
 		for (std::uint32_t position = 0; position < result.schedule.size(); ++position)
 		{
 			for (const auto& use : definition.Passes[result.schedule[position].Pass].Uses)
 			{
 				auto& life = result.lifetimes[use.Resource];
+
 				if (life.First == unused)
 				{
 					life.First = position;
 				}
+
 				life.Last = position;
 			}
 		}
+
 		for (std::uint32_t r = 0; r < resourceCount; ++r)
 		{
 			if (definition.Resources[r].Exported)
 			{
 				auto& life = result.lifetimes[r];
+
 				if (life.First == unused)
 				{
 					life.First = 0;
 				}
+
 				life.Last = static_cast<std::uint32_t>(result.schedule.size());
 			}
 		}
@@ -220,16 +240,20 @@ namespace Swim::Render
 			});
 
 		std::vector<std::uint32_t> slotLast;
+
 		for (auto r : resources)
 		{
 			auto& life = result.lifetimes[r];
+
 			if (life.First == unused)
 			{
 				continue;
 			}
+
 			for (std::uint32_t slot = 0; slot < result.allocations.size(); ++slot)
 			{
 				const auto& candidate = definition.Resources[result.allocations[slot]];
+
 				if (candidate.Poolable() && definition.Resources[r].Poolable() && slotLast[slot] < life.First &&
 					Compatible(candidate, definition.Resources[r]))
 				{
@@ -237,17 +261,20 @@ namespace Swim::Render
 					break;
 				}
 			}
+
 			if (life.Allocation == unused)
 			{
 				life.Allocation = static_cast<std::uint32_t>(result.allocations.size());
 				result.allocations.push_back(r);
 				slotLast.push_back(0);
 			}
+
 			slotLast[life.Allocation] = life.Last;
 		}
 
 		std::vector<std::vector<Rhi::ResourceState>> states;
 		std::vector<std::vector<bool>> writeHazards;
+
 		for (auto r : result.allocations)
 		{
 			states.emplace_back(CellCount(definition.Resources[r]), definition.Resources[r].Initial);
@@ -260,15 +287,19 @@ namespace Swim::Render
 		{
 			const auto slot = result.lifetimes[r].Allocation;
 			auto& before = states[slot][cell];
+
 			if (before != after || writeHazards[slot][cell] || writes)
 			{
 				Rhi::TextureSubresourceRange range{ 0, 1, 0, 1 };
+
 				if (definition.Resources[r].Kind == GraphKind::Texture)
 				{
 					range = { cell % definition.Resources[r].Texture.MipLevels, 1, cell / definition.Resources[r].Texture.MipLevels, 1 };
 				}
+
 				barriers.push_back({ r, before, after, range });
 			}
+
 			before = after;
 			writeHazards[slot][cell] = writes;
 		};
@@ -283,18 +314,23 @@ namespace Swim::Render
 				}
 			}
 		}
+
 		for (std::uint32_t r = 0; r < resourceCount; ++r)
 		{
 			const auto& resource = definition.Resources[r];
+
 			if (result.lifetimes[r].First == unused || (!resource.Exported && !resource.Imported))
 			{
 				continue;
 			}
+
 			const auto final = resource.Exported ? resource.Final : resource.Initial;
+
 			if (final == Rhi::ResourceState::Undefined)
 			{
 				throw std::invalid_argument("An initially undefined imported resource needs an explicit export state: " + resource.Name);
 			}
+
 			for (std::uint32_t cell = 0; cell < CellCount(resource); ++cell)
 			{
 				transition(r, cell, final, false, result.finalBarriers);
@@ -303,4 +339,5 @@ namespace Swim::Render
 
 		return result;
 	}
+
 } // namespace Swim::Render

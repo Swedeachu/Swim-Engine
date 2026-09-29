@@ -13,7 +13,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanGraphicsSystem final : public Rhi::GraphicsSystem
 		{
+
 		public:
+
 			VulkanGraphicsSystem(
 				std::shared_ptr<VulkanInstanceState> instance,
 				std::vector<std::unique_ptr<VulkanAdapter>> adapters)
@@ -47,8 +49,10 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanInstanceState> instance;
 			std::vector<std::unique_ptr<VulkanAdapter>> adapters;
+
 		};
 
 } // namespace Swim::RhiVulkan

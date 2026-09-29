@@ -73,6 +73,7 @@ namespace
 			GpuScene scene(*device, { count, "Smoke GPU scene" });
 			std::vector<RenderObjectHandle> objects;
 			objects.reserve(count);
+
 			for (std::uint32_t i = 0; i < count; ++i)
 			{
 				RenderObjectDesc desc;
@@ -132,16 +133,19 @@ namespace
 				SWIM_REQUIRE(
 					executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(actual))) == Rhi::ReadbackStatus::Ready);
 				std::uint32_t mismatches = 0;
+
 				for (std::uint32_t row = 0; row < rows; ++row)
 				{
 					const auto& instance = scene.GetInstanceRow(row);
 					const auto& current = actual[std::size_t(row) * 2];
 					const auto& previous = actual[std::size_t(row) * 2 + 1];
+
 					if ((instance.Flags & std::uint32_t(RenderObjectFlags::Live)) == 0)
 					{
 						mismatches += current[3] != -1.0f || previous[3] != -1.0f;
 						continue;
 					}
+
 					const auto& transform = scene.GetTransformRow(instance.TransformIndex);
 					const std::array<float, 3> center{ instance.LocalCenter[0], instance.LocalCenter[1], instance.LocalCenter[2] };
 					RenderAffine now;
@@ -153,12 +157,15 @@ namespace
 					const std::uint32_t required =
 						std::uint32_t(RenderObjectFlags::Live | RenderObjectFlags::HasMesh | RenderObjectFlags::Visible);
 					const float drawable = (instance.Flags & required) == required ? 1.0f : 0.0f;
+
 					for (int axis = 0; axis < 3; ++axis)
 					{
 						mismatches += std::abs(current[axis] - a[axis]) > 1.0e-3f || std::abs(previous[axis] - b[axis]) > 1.0e-3f;
 					}
+
 					mismatches += current[3] != drawable || previous[3] != float(instance.ObjectId);
 				}
+
 				SWIM_CHECK_EQUAL(mismatches, 0u);
 				return resources;
 			};
@@ -171,15 +178,19 @@ namespace
 			{
 				scene.SetTransform(objects[i], RenderAffine::Translation(float(i), -5.0f, 2.0f));
 			}
+
 			Rhi::TimelinePoint none{};
+
 			for (std::uint32_t i = 50; i < count; i += 1000)
 			{
 				SWIM_CHECK(scene.Destroy(objects[i], none));
 			}
+
 			for (std::uint32_t i = 7; i < 50 * 97; i += 97)
 			{
 				scene.SetFlags(objects[i], RenderObjectFlags::CastShadows);
 			}
+
 			frame(1000 * sizeof(GpuTransformRecord) + 150 * sizeof(GpuInstanceRecord));
 
 			// Frame 3: no edits; the 1000 moved objects settle (Previous = Current).
@@ -200,6 +211,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuSceneHundredThousandObjectsDirtyUploads", SWIM_TEST_LOCATION,
@@ -208,6 +220,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGpuSceneSmoke);
 				} });
 		}
+
 		return true;
 	}();
 

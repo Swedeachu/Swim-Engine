@@ -13,6 +13,7 @@
 
 namespace Swim::Testing::ClusterScene
 {
+
 	using Float3 = std::array<float, 3>;
 
 	// Right-handed look-at, row-major world -> view (the camera looks down -Z).
@@ -58,6 +59,7 @@ namespace Swim::Testing::ClusterScene
 		scene.Header.FirstLocalRow = std::max(directional, 1u);
 		scene.Header.LocalCapacity = local;
 		scene.Rows.resize(scene.Header.FirstLocalRow + local);
+
 		for (std::uint32_t i = 0; i < directional; ++i)
 		{
 			Render::LightDesc desc;
@@ -66,6 +68,7 @@ namespace Swim::Testing::ClusterScene
 			desc.Intensity = 0.5f + unit(random);
 			scene.Rows[i] = Render::Lights::EncodeLight(desc);
 		}
+
 		for (std::uint32_t i = 0; i < local; ++i)
 		{
 			Render::LightDesc desc;
@@ -80,6 +83,7 @@ namespace Swim::Testing::ClusterScene
 			scene.Rows[scene.Header.FirstLocalRow + i] = Render::Lights::EncodeLight(desc);
 			scene.Descs.push_back(desc);
 		}
+
 		return scene;
 	}
 
@@ -97,6 +101,7 @@ namespace Swim::Testing::ClusterScene
 	{
 		Float3 t{ v[0] - grid.ViewRows[0][3], v[1] - grid.ViewRows[1][3], v[2] - grid.ViewRows[2][3] };
 		Float3 world{ 0, 0, 0 };
+
 		for (int column = 0; column < 3; ++column)
 		{
 			for (int row = 0; row < 3; ++row)
@@ -104,6 +109,8 @@ namespace Swim::Testing::ClusterScene
 				world[column] += grid.ViewRows[row][column] * t[row];
 			}
 		}
+
 		return world;
 	}
+
 } // namespace Swim::Testing::ClusterScene

@@ -28,6 +28,7 @@
 
 namespace
 {
+
 #ifdef SWIM_TEMPORAL_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 	namespace Ta = Swim::Render::Temporal;
@@ -38,14 +39,17 @@ namespace
 		const std::uint32_t bits = std::bit_cast<std::uint32_t>(value);
 		const auto sign = std::uint16_t((bits >> 16) & 0x8000u);
 		const std::uint32_t magnitude = bits & 0x7fffffffu;
+
 		if (magnitude >= 0x47800000u) // >= 65536, infinity or NaN.
 		{
 			return std::uint16_t(sign | (magnitude > 0x7f800000u ? 0x7e00u : 0x7c00u));
 		}
+
 		if (magnitude < 0x38800000u) // Below 2^-14: subnormal (value * 2^24 is exact in float).
 		{
 			return std::uint16_t(sign | std::uint16_t(std::nearbyint(std::bit_cast<float>(magnitude) * 16777216.0f)));
 		}
+
 		const std::uint32_t mantissa = magnitude & 0x7fffffu;
 		std::uint32_t half = ((((magnitude >> 23) - 127u + 15u)) << 10) | (mantissa >> 13);
 		const std::uint32_t rest = mantissa & 0x1fffu;
@@ -58,24 +62,30 @@ namespace
 		double total = 0.0;
 		bool any = false;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 				any = true;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		if (measured)
 		{
 			*measured = any;
 		}
+
 		return total;
 	}
 
@@ -100,6 +110,7 @@ namespace
 		Inputs inputs{ Ta::ColorImage(width, height), Ta::DepthImage(width, height), Ta::VelocityImage(width, height), {}, {} };
 		const float left = float(width) * 0.2f + rectangleSpeed[0] * float(frame);
 		const float top = float(height) * 0.3f + rectangleSpeed[1] * float(frame);
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -109,6 +120,7 @@ namespace
 				Ta::Float4 color{};
 				float depth = 0.05f;
 				Ta::Float2 motion{ -pan / float(width), 0.0f };
+
 				if (sx >= left && sx < left + float(width) * 0.15f && sy >= top && sy < top + float(height) * 0.2f)
 				{
 					color = { 40.0f, 24.0f, 6.0f, 1.0f };
@@ -122,24 +134,29 @@ namespace
 					const float level = 0.05f * std::exp2(5.0f * float(x) / float(width));
 					color = dark ? Ta::Float4{ level * 0.1f, level * 0.12f, level * 0.15f, 1.0f }
 								 : Ta::Float4{ level, level * 0.9f, level * 0.7f, 1.0f };
+
 					if (y >= height - 4)
 					{
 						color = { -0.5f, 0.25f, -1.0f, 1.0f }; // Sanitized to zero by both sides.
 					}
 				}
+
 				for (int c = 0; c < 4; ++c)
 				{
 					inputs.ColorHalves.push_back(FloatToHalf(color[c]));
 					inputs.Color.At(x, y)[c] = Smoke::HalfToFloat(inputs.ColorHalves.back());
 				}
+
 				for (int c = 0; c < 2; ++c)
 				{
 					inputs.VelocityHalves.push_back(FloatToHalf(motion[c]));
 					inputs.Velocity.At(x, y)[c] = Smoke::HalfToFloat(inputs.VelocityHalves.back());
 				}
+
 				inputs.Depth.At(x, y) = depth;
 			}
 		}
+
 		return inputs;
 	}
 
@@ -226,6 +243,7 @@ namespace
 			std::vector<std::uint16_t> raw(std::size_t(spec.Width) * spec.Height * 4);
 			SWIM_REQUIRE(executor.TryReadback(readback.Buffer, std::as_writable_bytes(std::span(raw))) == Rhi::ReadbackStatus::Ready);
 			Ta::ColorImage output(spec.Width, spec.Height);
+
 			for (std::size_t i = 0; i < output.Texels.size(); ++i)
 			{
 				for (int c = 0; c < 4; ++c)
@@ -237,9 +255,11 @@ namespace
 			std::uint32_t compared = 0, mismatches = 0, historyTexels = 0;
 			float worst = 0.0f;
 			double meanChange = 0.0; // Mean |output - current| / (1 + current): how much history contributed.
+
 			if (spec.Compare)
 			{
 				const Ta::ColorImage* history = resources.HistoryValid ? &*previous : nullptr;
+
 				for (std::uint32_t y = 0; y < spec.Height; ++y)
 				{
 					for (std::uint32_t x = 0; x < spec.Width; ++x)
@@ -247,12 +267,14 @@ namespace
 						const auto expected = Ta::ResolveTexel(inputs.Color, inputs.Depth, inputs.Velocity, history, settings, x, y);
 						const auto& actual = output.At(x, y);
 						bool mismatch = false;
+
 						for (int c = 0; c < 4; ++c)
 						{
 							++compared;
 							mismatch = mismatch || !Close(actual[c], expected[c], 3.0e-3f, 1.0e-4f);
 							worst = std::max(worst, std::abs(actual[c] - expected[c]) / std::max(std::abs(expected[c]), 1.0e-2f));
 						}
+
 						mismatches += mismatch ? 1u : 0u;
 						const auto current = Ta::Sanitize(inputs.Color.At(x, y));
 						const float change = std::abs(actual[0] - current[0]) / (1.0f + current[0]);
@@ -260,8 +282,10 @@ namespace
 						historyTexels += change > 1.0e-3f ? 1u : 0u;
 					}
 				}
+
 				meanChange /= double(spec.Width) * spec.Height;
 				SWIM_CHECK(mismatches <= spec.Width * spec.Height / 1000);
+
 				if (resources.HistoryValid)
 				{
 					SWIM_CHECK(historyTexels > spec.Width * spec.Height / 10); // History visibly contributes...
@@ -271,26 +295,31 @@ namespace
 					SWIM_CHECK_EQUAL(historyTexels, 0u); // ...and is ignored without it.
 				}
 			}
+
 			std::printf("             [taa %s] %ux%u, jitter (%.3f, %.3f), history %s: %u values, %u texel mismatches, worst relative "
 						"%.2e; %u texels from history, mean change %.3e\n",
 				spec.Name, spec.Width, spec.Height, double(jitter[0]), double(jitter[1]), resources.HistoryValid ? "yes" : "no", compared,
 				mismatches, double(worst), historyTexels, meanChange);
 			bool measured = false;
 			const double resolveMs = PassMilliseconds(timings, "TAA resolve", &measured);
+
 			if (measured)
 			{
 				std::printf("             [taa %s] GPU: resolve %.3f ms\n", spec.Name, resolveMs);
 			}
+
 			previous = std::move(output);
 		};
 
 		constexpr std::uint32_t width = 256;
 		constexpr std::uint32_t height = 144;
 		frame({ "first", width, height, Rhi::Format::D32Float, false, true });
+
 		for (int i = 0; i < 6; ++i)
 		{
 			frame({ "moving", width, height, Rhi::Format::D32Float, true, true });
 		}
+
 		taa.ResetHistory();
 		frame({ "reset", width, height, Rhi::Format::D32Float, false, true });
 		frame({ "after reset", width, height, Rhi::Format::D32Float, true, true });
@@ -306,6 +335,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TemporalAntiAliasingMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -314,6 +344,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunTemporalSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

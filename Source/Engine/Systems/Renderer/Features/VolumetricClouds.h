@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+
 	// Ray-marched volumetric clouds in a horizontal layer: procedural fBm density shaped by
 	// Coverage and a cumulus height profile, lit by the sun (shadow march, Beer-Lambert,
 	// powder, two-lobe phase) and the sky's ambient colors, marched at a reduced
@@ -15,7 +16,9 @@ namespace Engine
 	// VolumetricCloudsMarch, VolumetricCloudsComposite, VolumetricCloudsEnvironment.
 	class VolumetricClouds final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float Coverage = 0.42f;		   // 0 (clear) .. 1 (overcast).
@@ -54,6 +57,7 @@ namespace Engine
 		std::optional<Swim::Render::GraphTexture> RecordEnvironment(RenderFeatureContext& context, std::uint32_t faceSize) override;
 
 	  private:
+
 		struct Params
 		{
 			std::array<float, 4> Forward, Right, Up, Camera, SunDirection, SunColor, Layer, Wind, AmbientTop, AmbientBottom, Lighting;
@@ -62,8 +66,11 @@ namespace Engine
 		};
 
 		bool Visible() const;
+
 		Params MakeParams(const RenderFeatureContext& context, float radianceScale) const;
 
 		std::array<float, 3> windOffset{ 0, 0, 0 };
+
 	};
+
 } // namespace Engine

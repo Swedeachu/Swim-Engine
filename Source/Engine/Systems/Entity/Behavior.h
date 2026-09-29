@@ -9,11 +9,14 @@
 
 namespace Swim::Input
 {
+
 	class InputSystem;
+
 }
 
 namespace Engine
 {
+
 	class Scene;
 	class CameraSystem;
 	class Transform;
@@ -43,8 +46,11 @@ namespace Engine
 	// default). Mutate the scene through GetScene().GetCommandBuffer() while iterating.
 	class Behavior : public Machine
 	{
+
 	  public:
+
 		Behavior(Scene* scene, entt::entity owner);
+
 		~Behavior() override = default;
 
 		bool HasInited() const { return hasInited; }
@@ -101,11 +107,14 @@ namespace Engine
 		const SimulationFrame& GetTime() const;
 
 	  protected:
+
 		Scene* scene = nullptr;
 		entt::entity entity = entt::null;
 		Swim::Input::InputSystem* input = nullptr;
 		CameraSystem* cameraSystem = nullptr;
 		bool runCollisionCallBacks = false;
 		bool hasInited = false;
+
 	};
+
 } // namespace Engine

@@ -9,8 +9,10 @@
 // UiStyle::TransitionSeconds when the state changes.
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		bool SameColor(const UiColor& a, const UiColor& b)
 		{
 			return a.R == b.R && a.G == b.G && a.B == b.B && a.A == b.A;
@@ -54,32 +56,39 @@ namespace Swim::UI
 			{
 				visual.Background = *rule.Background;
 			}
+
 			if (rule.BorderColor)
 			{
 				visual.BorderColor = *rule.BorderColor;
 			}
+
 			if (rule.TextColor)
 			{
 				visual.TextColor = *rule.TextColor;
 			}
+
 			if (rule.BorderWidth)
 			{
 				visual.BorderWidth = *rule.BorderWidth;
 			}
+
 			if (rule.CornerRadius)
 			{
 				visual.CornerRadius = *rule.CornerRadius;
 			}
+
 			if (rule.Opacity)
 			{
 				visual.Opacity = *rule.Opacity;
 			}
+
 			if (rule.Image)
 			{
 				visual.HasImage = true;
 				visual.Image = *rule.Image;
 				visual.ImageTint = rule.Image->Tint;
 			}
+
 			if (rule.ImageTint)
 			{
 				visual.ImageTint = *rule.ImageTint;
@@ -90,6 +99,7 @@ namespace Swim::UI
 		{
 			return HasState(state, rule.When) && (state & rule.Unless) == UiState::None;
 		}
+
 	} // namespace
 
 	UiNodeId UiDocument::Impl::StateOwner(UiNodeId id) const
@@ -101,55 +111,68 @@ namespace Swim::UI
 				return current;
 			}
 		}
+
 		return {};
 	}
 
 	UiState UiDocument::Impl::ComputeState(UiNodeId id) const
 	{
 		UiState state = UiState::None;
+
 		if (const auto owner = StateOwner(id))
 		{
 			if (owner == Hover)
 			{
 				state = state | UiState::Hovered;
 			}
+
 			if (owner == Pressed)
 			{
 				state = state | UiState::Pressed;
 			}
+
 			if (owner == Focused)
 			{
 				state = state | UiState::Focused;
 			}
+
 			if (owner == Dragging)
 			{
 				state = state | UiState::Dragging;
 			}
+
 			const auto& control = Get(owner).Control;
+
 			if (control.Kind == UiControlKind::Option)
 			{
 				// Checked while selected; Focused while its owner is focused and it is the
 				// selection (or, in an open dropdown, the highlight keys move).
 				const auto& option = Get(owner);
+
 				if (option.PartOf && Nodes.contains(option.PartOf.Value) && IsSelectionOwner(Get(option.PartOf)))
 				{
 					const auto& group = Get(option.PartOf);
 					const auto index = static_cast<std::int32_t>(std::lround(option.PartValue));
 					const auto selected =
 						std::isfinite(group.Control.Value) ? static_cast<std::int32_t>(std::lround(group.Control.Value)) : -1;
+
 					if (index == selected)
 					{
 						state = state | UiState::Checked;
 					}
+
 					const bool open = IsDropdownOpen(group);
+
 					if ((open && group.Highlight == index) || (!open && group.Id == Focused && index == selected))
 					{
 						state = state | UiState::Focused;
 					}
+
 					if (group.Control.ReadOnly)
 					{
 						state = state | UiState::ReadOnly;
 					}
+
 					if (!Available(group.Id))
 					{
 						state = state | UiState::Disabled;
@@ -166,16 +189,19 @@ namespace Swim::UI
 				{
 					state = state | UiState::Mixed;
 				}
+
 				if (control.ReadOnly)
 				{
 					state = state | UiState::ReadOnly;
 				}
 			}
 		}
+
 		if (!Available(id))
 		{
 			state = state | UiState::Disabled;
 		}
+
 		return state;
 	}
 
@@ -190,11 +216,13 @@ namespace Swim::UI
 		visual.CornerRadius = s.CornerRadius;
 		visual.Opacity = s.Opacity;
 		visual.HasImage = node.HasImage;
+
 		if (node.HasImage)
 		{
 			visual.Image = node.Image;
 			visual.ImageTint = node.Image.Tint;
 		}
+
 		if (node.ThemeClass != UiThemeClass::None && HasApply(node.ThemeApply, UiThemeApply::Paint))
 		{
 			for (const auto& rule : Classes[static_cast<std::size_t>(node.ThemeClass)].Rules)
@@ -205,6 +233,7 @@ namespace Swim::UI
 				}
 			}
 		}
+
 		for (const auto& rule : node.Rules)
 		{
 			if (Matches(state, rule))
@@ -212,6 +241,7 @@ namespace Swim::UI
 				Apply(visual, rule.Visual);
 			}
 		}
+
 		return visual;
 	}
 
@@ -221,13 +251,16 @@ namespace Swim::UI
 		{
 			const auto state = ComputeState(node.Id);
 			const bool stateChanged = state != node.LastState;
+
 			if (!stateChanged && !node.VisualDirty && node.HasVisual)
 			{
 				continue;
 			}
+
 			node.LastState = state;
 			node.VisualDirty = false;
 			const auto target = ResolveTarget(node, state);
+
 			if (!node.HasVisual)
 			{
 				node.Visual = target;
@@ -235,11 +268,14 @@ namespace Swim::UI
 				node.PaintDirty = true;
 				continue;
 			}
+
 			const auto& goal = node.Transitioning ? node.TransitionTo : node.Visual;
+
 			if (SameVisual(goal, target))
 			{
 				continue;
 			}
+
 			// State changes ease; style, rule and theme changes snap.
 			if (stateChanged && node.Style.TransitionSeconds > 0.0f)
 			{
@@ -258,6 +294,7 @@ namespace Swim::UI
 				node.Visual = target;
 				node.Transitioning = false;
 			}
+
 			node.PaintDirty = true;
 		}
 	}
@@ -265,12 +302,14 @@ namespace Swim::UI
 	bool UiDocument::Impl::AdvanceTransitions(float seconds)
 	{
 		bool animating = false;
+
 		for (auto& [key, node] : Nodes)
 		{
 			if (!node.Transitioning)
 			{
 				continue;
 			}
+
 			node.TransitionElapsed += seconds;
 			const float t = node.TransitionDuration > 0.0f ? std::min(1.0f, node.TransitionElapsed / node.TransitionDuration) : 1.0f;
 			const float e = t * t * (3.0f - 2.0f * t); // Smoothstep.
@@ -284,6 +323,7 @@ namespace Swim::UI
 			node.Visual.CornerRadius = Mix(a.CornerRadius, b.CornerRadius, e);
 			node.Visual.Opacity = Mix(a.Opacity, b.Opacity, e);
 			node.PaintDirty = true;
+
 			if (t >= 1.0f)
 			{
 				node.Visual = b;
@@ -294,6 +334,7 @@ namespace Swim::UI
 				animating = true;
 			}
 		}
+
 		return animating;
 	}
 
@@ -303,9 +344,11 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& node = Get(id);
 		node.VisualDirty = true;
 		node.PaintDirty = true;
+
 		for (const auto child : node.Children)
 		{
 			MarkSubtreeVisualDirty(child);
@@ -318,6 +361,7 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		const auto& themed = Classes[static_cast<std::size_t>(node.ThemeClass)];
 		const auto& from = themed.Style;
 		UiStyle style = node.Style;
@@ -325,6 +369,7 @@ namespace Swim::UI
 		const Node* control = IsControl(node) ? &node : (node.PartOf && Nodes.contains(node.PartOf.Value) ? &Get(node.PartOf) : nullptr);
 		const bool vertical =
 			control && control->Control.Orientation == UiOrientation::Vertical && node.Role != UiPartRole::Label; // Text stays horizontal.
+
 		if (HasApply(node.ThemeApply, UiThemeApply::Layout))
 		{
 			style.Width = vertical ? from.Height : from.Width;
@@ -335,6 +380,7 @@ namespace Swim::UI
 				vertical ? UiEdges{ from.Padding.Top, from.Padding.Left, from.Padding.Bottom, from.Padding.Right } : from.Padding;
 			style.Gap = from.Gap;
 		}
+
 		if (HasApply(node.ThemeApply, UiThemeApply::Paint))
 		{
 			style.Background = from.Background;
@@ -347,14 +393,17 @@ namespace Swim::UI
 			style.Opacity = from.Opacity;
 			style.TransitionSeconds = from.TransitionSeconds;
 		}
+
 		const bool paintOnly = Internal::OnlyPaintChanged(node.Style, style);
 		node.Style = style;
 		node.VisualDirty = true;
 		node.PaintDirty = true;
+
 		if (!paintOnly)
 		{
 			MarkLayoutDirty(node.Id);
 		}
+
 		if (HasApply(node.ThemeApply, UiThemeApply::Text) && node.Fonts && Theme->Fonts &&
 			(node.Fonts != Theme->Fonts || node.FontSize != themed.TextSize))
 		{
@@ -373,6 +422,7 @@ namespace Swim::UI
 		{
 			Internal::ValidateVisual(rule.Visual);
 		}
+
 		auto& node = impl->Get(id);
 		node.Rules = std::move(rules);
 		node.VisualDirty = true;
@@ -400,9 +450,11 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("A UI document needs a theme");
 		}
+
 		auto classes = theme->Build(); // Validates before anything changes.
 		impl->Theme = std::move(theme);
 		impl->Classes = std::move(classes);
+
 		for (auto& [key, node] : impl->Nodes)
 		{
 			if (node.ThemeClass != UiThemeClass::None)
@@ -410,6 +462,7 @@ namespace Swim::UI
 				impl->ApplyTheme(node);
 			}
 		}
+
 		impl->ClearUnavailable();
 	}
 
@@ -425,6 +478,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("Invalid UI theme class");
 		}
+
 		auto& node = impl->Get(id);
 		node.ThemeClass = themeClass;
 		node.ThemeApply = themeClass == UiThemeClass::None ? UiThemeApply::None : apply;
@@ -445,6 +499,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("UI update needs 0 .. 3600 seconds");
 		}
+
 		impl->ResolveVisuals();
 		const bool transitions = impl->AdvanceTransitions(seconds);
 		const bool controls = impl->AnimateControls(seconds);
@@ -459,24 +514,29 @@ namespace Swim::UI
 		{
 			return true; // A tooltip delay is running.
 		}
+
 		for (const auto& [key, node] : impl->Nodes)
 		{
 			if (node.Transitioning)
 			{
 				return true;
 			}
+
 			const auto& c = node.Control;
+
 			if (c.Kind == UiControlKind::Toggle && node.Knob != (c.Check == UiCheckState::Checked ? 1.0f : 0.0f) &&
 				!(impl->Dragging == node.Id && impl->DragMoved))
 			{
 				return true;
 			}
+
 			if (c.Kind == UiControlKind::ScrollBar && c.Visibility == UiScrollBarVisibility::Overlay && !node.ControlHidden &&
 				node.ControlOpacity > 0.0f && (node.ControlOpacity < 1.0f || node.ScrollActivity <= c.FadeDelaySeconds + c.FadeSeconds))
 			{
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -484,4 +544,5 @@ namespace Swim::UI
 	{
 		return impl->PaintRevision;
 	}
+
 } // namespace Swim::UI

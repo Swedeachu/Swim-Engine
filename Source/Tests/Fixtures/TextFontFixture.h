@@ -13,13 +13,16 @@
 
 namespace Swim::Testing
 {
+
 	inline std::shared_ptr<const Text::FontFace> LoadFontFile(const char* path)
 	{
 		std::ifstream stream(path, std::ios::binary);
+
 		if (!stream)
 		{
 			throw std::runtime_error(std::string("Missing font fixture ") + path);
 		}
+
 		std::vector<char> bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 		return std::make_shared<Text::FontFace>(std::as_bytes(std::span(bytes)));
 	}
@@ -42,4 +45,5 @@ namespace Swim::Testing
 		return std::make_shared<const Text::FontCollection>(
 			std::vector<std::shared_ptr<const Text::FontFace>>{ LoadTextFontFixture(), LoadTextFallbackFontFixture() });
 	}
+
 } // namespace Swim::Testing

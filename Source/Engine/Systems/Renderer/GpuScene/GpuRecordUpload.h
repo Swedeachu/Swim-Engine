@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// A contiguous range of rows copied by one CopyBuffer.
 	struct GpuRecordRun
 	{
@@ -24,4 +25,5 @@ namespace Swim::Render
 	// preserving partial copies. One staging allocation serves every run.
 	GraphPass RecordRowRunsUpload(RenderGraph& graph, const std::string& label, GraphBuffer target, std::uint32_t recordSize,
 		std::vector<GpuRecordRun> runs, std::shared_ptr<const std::vector<std::byte>> snapshot);
+
 } // namespace Swim::Render

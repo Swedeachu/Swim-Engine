@@ -10,8 +10,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		constexpr std::array<std::string_view, 38> RequiredProgramNames{ "Present", "SkyBackground", "GpuVisibility", "ClusterLightCull",
 			"ClusterBounds", "ClusterAssign", "ClusterScan", "ForwardOpaque", "ForwardTransparent", "ForwardDepth",
 			"ForwardOpaquePrepassed", "ForwardTransparentSort", "ShadowDepth", "ShadowMasked", "EnvironmentSky", "EnvironmentDownsample",
@@ -23,24 +25,31 @@ namespace Engine
 		std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
 		{
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
+
 			if (!file)
 			{
 				throw std::runtime_error("ShaderLibrary: cannot open " + path.string());
 			}
+
 			const auto size = file.tellg();
+
 			if (size <= 0)
 			{
 				throw std::runtime_error("ShaderLibrary: empty shader " + path.string());
 			}
+
 			std::vector<std::byte> bytes(static_cast<std::size_t>(size));
 			file.seekg(0);
 			file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+
 			if (!file)
 			{
 				throw std::runtime_error("ShaderLibrary: cannot read " + path.string());
 			}
+
 			return bytes;
 		}
+
 	} // namespace
 
 	struct ShaderLibrary::Loaded
@@ -73,15 +82,19 @@ namespace Engine
 		Loaded loaded;
 		loaded.Bytes = ReadBytes(spirv);
 		const auto reflection = Swim::ShaderCompiler::LoadSlangReflectionJson(reflectionPath);
+
 		if (!reflection)
 		{
 			throw std::runtime_error("ShaderLibrary: " + std::string(name) + " reflection: " + reflection.Error);
 		}
+
 		auto converted = Swim::ShaderCompiler::BuildRhiShaderInterface(reflection.Reflection);
+
 		if (!converted)
 		{
 			throw std::runtime_error("ShaderLibrary: " + std::string(name) + " interface: " + converted.Error);
 		}
+
 		loaded.Interface = std::move(converted.Interface);
 		// Name every descriptor the interface declares (global and entry-point parameters).
 		const auto nameBinding = [&](const Swim::ShaderCompiler::ShaderBindingReflection& parameter)
@@ -90,12 +103,14 @@ namespace Engine
 			{
 				return; // Push constants and uniforms are not descriptors.
 			}
+
 			for (const auto& schema : loaded.Interface.DescriptorSchemas)
 			{
 				if (schema.Space != parameter.Space)
 				{
 					continue;
 				}
+
 				for (const auto& binding : schema.Bindings)
 				{
 					if (binding.Binding == parameter.Index)
@@ -106,10 +121,12 @@ namespace Engine
 				}
 			}
 		};
+
 		for (const auto& parameter : reflection.Reflection.GlobalParameters)
 		{
 			nameBinding(parameter);
 		}
+
 		for (const auto& entry : reflection.Reflection.EntryPoints)
 		{
 			for (const auto& parameter : entry.Parameters)
@@ -117,6 +134,7 @@ namespace Engine
 				nameBinding(parameter);
 			}
 		}
+
 		return loaded;
 	}
 
@@ -128,20 +146,26 @@ namespace Engine
 		RuntimeComputeProgram program;
 		program.Program = device.CreateShaderProgram({ { &stage, 1 },
 			{ loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants, loaded.Interface.ComputeThreadGroupSize }, label });
+
 		if (!program.Program)
 		{
 			throw std::runtime_error("ShaderLibrary: cannot create compute program " + label);
 		}
+
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), label });
+
 		if (!program.Layout)
 		{
 			throw std::runtime_error("ShaderLibrary: cannot create the layout of " + label);
 		}
+
 		program.Pipeline = device.CreateComputePipeline({ program.Program.get(), program.Layout.get(), {}, label });
+
 		if (!program.Pipeline)
 		{
 			throw std::runtime_error("ShaderLibrary: cannot create the pipeline of " + label);
 		}
+
 		program.Space = loaded.Interface.DescriptorSchemas.empty() ? 0u : loaded.Interface.DescriptorSchemas.front().Space;
 		program.Bindings = loaded.Names;
 		program.ThreadGroupSize = loaded.Interface.ComputeThreadGroupSize;
@@ -158,15 +182,19 @@ namespace Engine
 		RuntimeGraphicsProgram program;
 		program.Program =
 			device.CreateShaderProgram({ stages, { loaded.Interface.DescriptorSchemas, loaded.Interface.PushConstants }, label });
+
 		if (!program.Program)
 		{
 			throw std::runtime_error("ShaderLibrary: cannot create graphics program " + label);
 		}
+
 		program.Layout = device.CreatePipelineLayout({ program.Program.get(), label, explicitSpaces });
+
 		if (!program.Layout)
 		{
 			throw std::runtime_error("ShaderLibrary: cannot create the layout of " + label);
 		}
+
 		return program;
 	}
 
@@ -178,14 +206,17 @@ namespace Engine
 		{
 			return !directory.empty() && std::filesystem::is_regular_file(directory / "ForwardOpaque.spv", error);
 		};
+
 		if (const char* overridden = std::getenv("SWIM_SHADER_DIR"); overridden && *overridden)
 		{
 			return holds(overridden) ? std::filesystem::path(overridden) : std::filesystem::path{};
 		}
+
 		if (const auto deployed = executableDirectory / "Shaders" / "Runtime"; holds(deployed))
 		{
 			return deployed;
 		}
+
 		for (const auto& fallback : fallbacks)
 		{
 			if (holds(fallback))
@@ -193,6 +224,7 @@ namespace Engine
 				return fallback;
 			}
 		}
+
 		return {};
 	}
 
@@ -200,4 +232,5 @@ namespace Engine
 	{
 		return RequiredProgramNames;
 	}
+
 } // namespace Engine

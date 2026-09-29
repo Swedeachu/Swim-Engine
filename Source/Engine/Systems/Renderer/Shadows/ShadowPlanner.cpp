@@ -10,8 +10,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		bool IsPowerOfTwo(std::uint32_t value)
 		{
 			return value != 0 && (value & (value - 1)) == 0;
@@ -42,6 +44,7 @@ namespace Swim::Render
 			view.Perspective = perspective ? 1u : 0u;
 			return view;
 		}
+
 	} // namespace
 
 	ShadowPlan PlanShadows(const ShadowSettings& settings, const Shadows::ShadowCamera& camera, std::span<const ShadowCasterDesc> casters,
@@ -53,10 +56,13 @@ namespace Swim::Render
 			throw std::invalid_argument(
 				"Shadow settings must match the atlas and have slots, 1..MaxShadowCascades cascades and a near plane");
 		}
+
 		std::set<std::uint32_t> slots;
+
 		for (const auto& caster : casters)
 		{
 			const auto resolution = caster.Resolution;
+
 			if (caster.Slot >= settings.MaxSlots || !slots.insert(caster.Slot).second || caster.Light.ShadowIndex != caster.Slot ||
 				(caster.Light.Flags & static_cast<std::uint32_t>(LightFlags::CastsShadows)) == 0 ||
 				(resolution != 0 && (!IsPowerOfTwo(resolution) || resolution > settings.AtlasSize)))
@@ -81,11 +87,13 @@ namespace Swim::Render
 				{
 					return casters[a].Priority > casters[b].Priority;
 				}
+
 				return casters[a].Slot < casters[b].Slot;
 			});
 		std::uint32_t directional = 0, spot = 0, point = 0;
 		std::vector<std::size_t> accepted;
 		std::vector<ShadowTileRequest> requests;
+
 		for (const auto index : order)
 		{
 			const auto& caster = casters[index];
@@ -94,20 +102,24 @@ namespace Swim::Render
 			const auto limit = kind == ShadowKind::Directional ? settings.MaxDirectionalShadows
 				: kind == ShadowKind::Spot					   ? settings.MaxSpotShadows
 															   : settings.MaxPointShadows;
+
 			if (used >= limit)
 			{
 				++plan.Stats.OverBudget;
 				continue;
 			}
+
 			++used;
 			const std::uint32_t fallback = kind == ShadowKind::Directional ? settings.CascadeResolution
 				: kind == ShadowKind::Spot								   ? settings.SpotResolution
 																		   : settings.PointResolution;
 			const std::uint32_t size = std::clamp(caster.Resolution ? caster.Resolution : fallback, settings.MinTile, settings.AtlasSize);
+
 			if (!IsPowerOfTwo(size))
 			{
 				throw std::invalid_argument("Shadow resolutions must be powers of two");
 			}
+
 			const std::uint32_t count = kind == ShadowKind::Directional ? settings.Cascades.Count : kind == ShadowKind::Spot ? 1u : 6u;
 			requests.push_back({ caster.Slot, size, count, caster.Priority });
 			accepted.push_back(index);
@@ -128,13 +140,16 @@ namespace Swim::Render
 			{
 				return casters[accepted[a]].Slot < casters[accepted[b]].Slot;
 			});
+
 		for (const auto a : bySlot)
 		{
 			const auto& allocation = allocations[a];
+
 			if (allocation.Tiles.empty())
 			{
 				continue;
 			}
+
 			const auto& caster = casters[accepted[a]];
 			const auto& light = caster.Light;
 			const auto kind = KindOf(light);
@@ -147,10 +162,12 @@ namespace Swim::Render
 			record.SlopeBias = settings.SlopeBias;
 			record.DepthBias = settings.DepthBias;
 			record.CascadeBlend = kind == ShadowKind::Directional ? settings.CascadeBlend : 0.0f;
+
 			for (int c = 0; c < 3; ++c)
 			{
 				record.LightPosition[c] = light.Position[c];
 			}
+
 			const std::uint32_t size = allocation.Tiles.front().Size;
 			const auto add = [&](const Shadows::Matrix& viewProjection, float texelWorldSize, bool perspective, std::uint32_t index,
 								 const Shadows::Float3& lodCenter)
@@ -168,10 +185,12 @@ namespace Swim::Render
 				plan.Draws.push_back(draw);
 			};
 			const Shadows::Float3 position{ light.Position[0], light.Position[1], light.Position[2] };
+
 			if (kind == ShadowKind::Directional)
 			{
 				const Shadows::Float3 direction{ light.Direction[0], light.Direction[1], light.Direction[2] };
 				const auto cascades = Shadows::ComputeCascades(camera, direction, settings.Cascades, size);
+
 				for (std::uint32_t i = 0; i < cascades.size(); ++i)
 				{
 					record.CascadeFar[i] = cascades[i].Far;
@@ -186,13 +205,16 @@ namespace Swim::Render
 			else
 			{
 				const auto faces = Shadows::PointShadowViewProjections(position, settings.Near);
+
 				for (std::uint32_t face = 0; face < 6; ++face)
 				{
 					add(faces[face], 2.0f / float(size), true, face, position);
 				}
 			}
 		}
+
 		plan.Stats.Views = static_cast<std::uint32_t>(plan.Views.size());
 		return plan;
 	}
+
 } // namespace Swim::Render

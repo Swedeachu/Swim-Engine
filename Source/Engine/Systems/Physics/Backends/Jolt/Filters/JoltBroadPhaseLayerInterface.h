@@ -30,6 +30,7 @@ namespace Engine
 		{
 			const LayerKey key{ collision.Layer, collision.Mask, motion != MotionType::Static };
 			const auto found = registeredLayerLookup.find(key);
+
 			if (found != registeredLayerLookup.end())
 			{
 				return found->second;
@@ -79,6 +80,7 @@ namespace Engine
 					return "INVALID";
 			}
 		}
+
 #endif
 
 	private:

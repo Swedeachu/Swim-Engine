@@ -251,10 +251,12 @@ namespace Swim::Platform
 			event.Y = y;
 
 			SDL_Window* window = SDL_GetWindowFromID(windowId);
+
 			if (window)
 			{
 				int width = 0;
 				int height = 0;
+
 				if (SDL_GetWindowSize(window, &width, &height))
 				{
 					event.LogicalSize = {
@@ -291,6 +293,7 @@ namespace Swim::Platform
 		LRESULT CALLBACK EmbeddedChildWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			WNDPROC originalWindowProc = reinterpret_cast<WNDPROC>(GetPropW(hwnd, EmbeddedOriginalWindowProcProperty));
+
 			if (!originalWindowProc)
 			{
 				return DefWindowProcW(hwnd, message, wParam, lParam);
@@ -318,6 +321,7 @@ namespace Swim::Platform
 		ExternalParentAttachment AttachToExternalParent(SDL_Window* window, const NativeWindowHandle& parent)
 		{
 			ExternalParentAttachment result{};
+
 			if (!window || parent.Type != NativeWindowType::Win32 || !parent.Window)
 			{
 				return result;
@@ -326,6 +330,7 @@ namespace Swim::Platform
 			const SDL_PropertiesID properties = SDL_GetWindowProperties(window);
 			HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
 			HWND parentHwnd = static_cast<HWND>(parent.Window);
+
 			if (!hwnd || !parentHwnd)
 			{
 				return result;
@@ -333,6 +338,7 @@ namespace Swim::Platform
 
 			SetLastError(ERROR_SUCCESS);
 			HWND previousParent = SetParent(hwnd, parentHwnd);
+
 			if (!previousParent && GetLastError() != ERROR_SUCCESS)
 			{
 				return result;
@@ -346,6 +352,7 @@ namespace Swim::Platform
 					AttachThreadInput(currentThreadId, result.ForegroundThreadId, FALSE);
 					result.ForegroundThreadId = 0;
 				}
+
 				if (result.ParentThreadId != 0)
 				{
 					AttachThreadInput(currentThreadId, result.ParentThreadId, FALSE);
@@ -354,6 +361,7 @@ namespace Swim::Platform
 			};
 
 			const DWORD parentThreadId = GetWindowThreadProcessId(parentHwnd, nullptr);
+
 			if (parentThreadId != 0 && parentThreadId != currentThreadId &&
 				AttachThreadInput(currentThreadId, parentThreadId, TRUE))
 			{
@@ -363,6 +371,7 @@ namespace Swim::Platform
 			if (HWND foreground = GetForegroundWindow())
 			{
 				const DWORD foregroundThreadId = GetWindowThreadProcessId(foreground, nullptr);
+
 				if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId &&
 					foregroundThreadId != parentThreadId &&
 					AttachThreadInput(currentThreadId, foregroundThreadId, TRUE))
@@ -382,6 +391,7 @@ namespace Swim::Platform
 				GWLP_WNDPROC,
 				reinterpret_cast<LONG_PTR>(EmbeddedChildWindowProc)
 			);
+
 			if (originalWindowProc == 0 && GetLastError() != ERROR_SUCCESS)
 			{
 				detachInputThreads();
@@ -394,9 +404,11 @@ namespace Swim::Platform
 				detachInputThreads();
 				return result;
 			}
+
 			result.OriginalWindowProc = static_cast<std::uintptr_t>(originalWindowProc);
 
 			RECT rect{};
+
 			if (!GetClientRect(parentHwnd, &rect))
 			{
 				RemovePropW(hwnd, EmbeddedOriginalWindowProcProperty);
@@ -451,6 +463,7 @@ namespace Swim::Platform
 	std::unique_ptr<Window> WindowSystem::Create(const WindowDesc& desc)
 	{
 		SDL_PropertiesID properties = SDL_CreateProperties();
+
 		if (properties == 0)
 		{
 			std::cerr << "Failed to allocate SDL window properties: " << SDL_GetError() << '\n';
@@ -493,12 +506,14 @@ namespace Swim::Platform
 		{
 		#if defined(_WIN32)
 			const ExternalParentAttachment attachment = AttachToExternalParent(sdlWindow, desc.ExternalParent);
+
 			if (desc.ExternalParent.Type != NativeWindowType::Win32 || !attachment.Success)
 			{
 				std::cerr << "Failed to attach SDL3 window to the external Win32 parent.\n";
 				SDL_DestroyWindow(sdlWindow);
 				return nullptr;
 			}
+
 			windowImpl->ExternalParent = true;
 			windowImpl->Parent = desc.ExternalParent;
 			windowImpl->ParentThreadId = attachment.ParentThreadId;
@@ -517,6 +532,7 @@ namespace Swim::Platform
 	void WindowSystem::PumpEvents(const WindowEventHandler& windowHandler, const InputEventHandler& inputHandler)
 	{
 		SDL_Event event{};
+
 		while (SDL_PollEvent(&event))
 		{
 			switch (event.type)
@@ -644,6 +660,7 @@ namespace Swim::Platform
 				case SDL_EVENT_GAMEPAD_ADDED:
 				{
 					const SDL_JoystickID id = event.gdevice.which;
+
 					if (!impl->Gamepads.contains(id))
 					{
 						if (SDL_Gamepad* gamepad = SDL_OpenGamepad(id))
@@ -662,6 +679,7 @@ namespace Swim::Platform
 				{
 					const SDL_JoystickID id = event.gdevice.which;
 					auto found = impl->Gamepads.find(id);
+
 					if (found != impl->Gamepads.end())
 					{
 						SDL_CloseGamepad(found->second);
@@ -708,22 +726,26 @@ namespace Swim::Platform
 		std::vector<DisplayInfo> result;
 		int count = 0;
 		SDL_DisplayID* displays = SDL_GetDisplays(&count);
+
 		if (!displays)
 		{
 			return result;
 		}
 
 		result.reserve(static_cast<size_t>(std::max(count, 0)));
+
 		for (int i = 0; i < count; ++i)
 		{
 			DisplayInfo info{};
 			info.Id = static_cast<uint32_t>(displays[i]);
+
 			if (const char* name = SDL_GetDisplayName(displays[i]))
 			{
 				info.Name = name;
 			}
 
 			SDL_Rect bounds{};
+
 			if (SDL_GetDisplayBounds(displays[i], &bounds))
 			{
 				info.X = bounds.x;
@@ -771,6 +793,7 @@ namespace Swim::Platform
 	bool WindowSystem::SetGamepadRumble(InputDeviceId device, float lowFrequency, float highFrequency, uint32_t durationMilliseconds)
 	{
 		auto it = impl->Gamepads.find(static_cast<SDL_JoystickID>(device));
+
 		if (it == impl->Gamepads.end() || !it->second)
 		{
 			return false;

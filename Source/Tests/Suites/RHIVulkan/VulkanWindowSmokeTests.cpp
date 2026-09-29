@@ -26,10 +26,12 @@ namespace
 		do
 		{
 			platform.PumpEvents({}, {});
+
 			if (ready())
 			{
 				return;
 			}
+
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		} while (Clock::now() < deadline);
 		SWIM_REQUIRE_MESSAGE(false, "Window manager did not complete the requested lifecycle transition within five seconds");
@@ -56,11 +58,14 @@ namespace
 		swapchainDesc.ColorMode = colorMode;
 		const auto initialSupport = device->QuerySwapchainSupport(*window);
 		SWIM_REQUIRE(initialSupport.PresentationSupported && !initialSupport.Formats.empty());
+
 		if (colorMode == Rhi::SwapchainColorMode::RequireHdr)
 		{
 			SWIM_REQUIRE_MESSAGE(initialSupport.SupportsHdr(), "Strict HDR smoke requires HDR enabled for this desktop window");
 		}
+
 		std::cerr << "[RHI surface] HDR advertised=" << initialSupport.SupportsHdr() << '\n';
+
 		if (!initialSupport.SupportsHdr())
 		{
 			auto strict = swapchainDesc;
@@ -77,11 +82,13 @@ namespace
 		SWIM_CHECK_EQUAL(swapchain->GetImageCount(), 0u);
 		SWIM_CHECK(swapchain->GetColorSpace() == Rhi::SwapchainColorSpace::Undefined);
 		std::array<std::unique_ptr<Rhi::Semaphore>, 2> acquired;
+
 		for (auto& semaphore : acquired)
 		{
 			semaphore = device->CreateGpuSemaphore();
 			SWIM_REQUIRE(semaphore);
 		}
+
 		std::vector<std::unique_ptr<Rhi::Semaphore>> presentReady;
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Graphics, 2 });
 		SWIM_REQUIRE(frames);
@@ -90,10 +97,12 @@ namespace
 		auto rebuild = [&]
 		{
 			const auto size = window->GetPixelSize();
+
 			if (!swapchain->Resize({ size.Width, size.Height }, frames->GetLastSubmittedPoint()))
 			{
 				return false;
 			}
+
 			const auto support = device->QuerySwapchainSupport(*window);
 			const Rhi::SwapchainSurfaceFormat selected{ swapchain->GetFormat(), swapchain->GetColorSpace() };
 			SWIM_CHECK(std::find(support.Formats.begin(), support.Formats.end(), selected) != support.Formats.end());
@@ -103,17 +112,20 @@ namespace
 			// Resize retires the old generation before these presentation waits are
 			// destroyed. A changed image count gets a fresh per-image semaphore set.
 			presentReady.clear();
+
 			for (std::uint32_t index = 0; index < swapchain->GetImageCount(); ++index)
 			{
 				presentReady.push_back(device->CreateGpuSemaphore());
 				SWIM_REQUIRE(presentReady.back());
 			}
+
 			return true;
 		};
 
 		auto checkSuspended = [&]
 		{
 			const auto submitted = frames->GetLastSubmittedValue();
+
 			for (unsigned pump = 0; pump < 4; ++pump)
 			{
 				platform.PumpEvents({}, {});
@@ -122,6 +134,7 @@ namespace
 				SWIM_CHECK(result.Suspended && !result.HasImage());
 				frames->CancelFrame();
 			}
+
 			SWIM_CHECK_EQUAL(frames->GetLastSubmittedValue(), submitted);
 		};
 
@@ -129,21 +142,26 @@ namespace
 		{
 			const auto deadline = Clock::now() + std::chrono::seconds(10);
 			unsigned rendered = 0;
+
 			while (rendered < 6 && Clock::now() < deadline)
 			{
 				platform.PumpEvents({}, {});
 				auto& frame = frames->BeginFrame();
 				const auto image = swapchain->AcquireNextImage(*acquired[frame.Index]);
+
 				if (!image.HasImage())
 				{
 					frames->CancelFrame();
+
 					if (image.OutOfDate || image.Suspended)
 					{
 						rebuild();
 					}
+
 					std::this_thread::sleep_for(std::chrono::milliseconds(10));
 					continue;
 				}
+
 				auto& view = swapchain->GetImageView(image.ImageIndex);
 				auto& commands = frames->CreateCommandList();
 				commands.Begin();
@@ -180,6 +198,7 @@ namespace
 					++rendered;
 				}
 			}
+
 			SWIM_REQUIRE_MESSAGE(rendered == 6, "Swapchain failed to resume presentation within ten seconds");
 		};
 
@@ -190,6 +209,7 @@ namespace
 			PumpUntil(platform, [&] { return !window->IsMinimized(); });
 			PumpUntil(platform, rebuild);
 			drawFrames();
+
 			for (Platform::Extent2D size : { Platform::Extent2D{ 480, 270 }, { 256, 384 }, { 320, 240 } })
 			{
 				window->SetSize(size);
@@ -214,6 +234,7 @@ namespace
 				PumpUntil(platform, rebuild);
 				drawFrames();
 			}
+
 			frames->Drain();
 			queue.WaitIdle();
 		}
@@ -240,11 +261,13 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "HdrNegotiationResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunHdrWindowLifecycleSmoke); } });
 			Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ResizeMinimizeRestore", SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunWindowLifecycleSmoke); } });
 		}
+
 		return true;
 	}();
 

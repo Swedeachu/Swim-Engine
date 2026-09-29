@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// What GpuScene::Import declared in a graph. Instances/Transforms are imported
 	// in ShaderRead and remain there after the upload passes, so later passes can
 	// read them directly (for example culling). RowCount bounds valid rows.
@@ -19,4 +20,5 @@ namespace Swim::Render
 		std::uint32_t UploadRuns = 0;
 		std::uint64_t UploadBytes = 0;
 	};
+
 } // namespace Swim::Render

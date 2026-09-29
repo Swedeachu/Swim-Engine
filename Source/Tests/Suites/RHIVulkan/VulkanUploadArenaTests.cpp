@@ -20,6 +20,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "PersistentMappingSurvivesWritesFlushesAndRe
 	SWIM_REQUIRE_EQUAL(capture.Flushes.size(), 1u);
 	SWIM_CHECK_EQUAL(capture.Flushes[0].offset % 256, 0ull);
 	SWIM_CHECK_EQUAL(capture.Flushes[0].size, 256ull);
+
 	for (unsigned iteration = 0; iteration < 8; ++iteration)
 	{
 		arena->Reset();
@@ -28,6 +29,7 @@ SWIM_TEST("RHI.Vulkan.UploadArena", "PersistentMappingSurvivesWritesFlushesAndRe
 		SWIM_CHECK(slice->Bytes.data() == mapped);
 		arena->Flush();
 	}
+
 	// Compatibility Write uses the same mapping and maintains caches itself.
 	first->Resource->Write(4, pattern);
 	SWIM_CHECK(std::equal(pattern.begin(), pattern.end(), mapped + 4));

@@ -11,9 +11,11 @@ namespace Swim::RhiVulkan
 
 	namespace
 	{
+
 		std::uint32_t AttributeAlignment(Rhi::Format format)
 		{
 			using Rhi::Format;
+
 			switch (format)
 			{
 			case Format::R8Unorm: case Format::R8Snorm: case Format::R8Uint: case Format::R8Sint:
@@ -36,6 +38,7 @@ namespace Swim::RhiVulkan
 				throw std::invalid_argument("Vertex attributes require a supported uncompressed linear color format");
 			}
 		}
+
 	}
 
 	VulkanVertexInputLayout BuildVulkanVertexInput(const VulkanDeviceState& state,
@@ -43,11 +46,14 @@ namespace Swim::RhiVulkan
 	{
 		RequireVulkanDevice(state);
 		const auto& limits = state.Device.physical_device.properties.limits;
+
 		if (bindings.size() > limits.maxVertexInputBindings || attributes.size() > limits.maxVertexInputAttributes)
 		{
 			throw std::invalid_argument("Vertex layout exceeds device binding/attribute limits");
 		}
+
 		VulkanVertexInputLayout result;
+
 		for (const auto& binding : bindings)
 		{
 			if (binding.Slot >= limits.maxVertexInputBindings || binding.Stride > limits.maxVertexInputBindingStride ||
@@ -56,37 +62,46 @@ namespace Swim::RhiVulkan
 			{
 				throw std::invalid_argument("Invalid or duplicate vertex binding");
 			}
+
 			result.Bindings.push_back({ binding.Slot, binding.Stride,
 				binding.Rate == Rhi::VertexInputRate::Vertex ? VK_VERTEX_INPUT_RATE_VERTEX : VK_VERTEX_INPUT_RATE_INSTANCE });
 		}
+
 		for (const auto& attribute : attributes)
 		{
 			const auto binding = std::find_if(bindings.begin(), bindings.end(),
 				[&](const auto& item) { return item.Slot == attribute.Slot; });
+
 			if (binding == bindings.end() || attribute.Location >= limits.maxVertexInputAttributes ||
 				attribute.Offset > limits.maxVertexInputAttributeOffset ||
 				std::any_of(result.Attributes.begin(), result.Attributes.end(), [&](const auto& other) { return other.location == attribute.Location; }))
 			{
 				throw std::invalid_argument("Vertex attribute has an invalid/duplicate location, offset or missing binding");
 			}
+
 			const auto alignment = AttributeAlignment(attribute.DataFormat);
 			const auto bytes = GetColorTexelBytes(attribute.DataFormat);
 			const auto end = static_cast<std::uint64_t>(attribute.Offset) + bytes;
+
 			if (attribute.Offset % alignment != 0 || binding->Stride % alignment != 0 ||
 				(binding->Stride != 0 && end > binding->Stride))
 			{
 				throw std::invalid_argument("Vertex attributes must be aligned and fit the binding stride");
 			}
+
 			const auto format = ToVkFormat(attribute.DataFormat);
 			VkFormatProperties properties{};
 			state.Instance->Dispatch.vkGetPhysicalDeviceFormatProperties(state.Device.physical_device.physical_device, format, &properties);
+
 			if ((properties.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) == 0)
 			{
 				throw std::invalid_argument("Device does not support this vertex attribute format");
 			}
+
 			result.Attributes.push_back({ attribute.Location, attribute.Slot, format, attribute.Offset });
 			auto requirement = std::find_if(result.Requirements.begin(), result.Requirements.end(),
 				[&](const auto& item) { return item.Slot == attribute.Slot; });
+
 			if (requirement == result.Requirements.end())
 			{
 				result.Requirements.push_back({ binding->Slot, binding->Stride, binding->Rate, end, alignment });
@@ -97,6 +112,7 @@ namespace Swim::RhiVulkan
 				requirement->Alignment = std::max(requirement->Alignment, alignment);
 			}
 		}
+
 		return result;
 	}
 

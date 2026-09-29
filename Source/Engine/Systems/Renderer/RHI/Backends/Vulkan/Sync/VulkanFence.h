@@ -14,7 +14,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanFence final : public Rhi::Fence
 		{
+
 		public:
+
 			VulkanFence(std::shared_ptr<VulkanDeviceState> state, VkFence fence)
 				: state(std::move(state)), fence(fence)
 			{
@@ -23,6 +25,7 @@ namespace Swim::RhiVulkan
 			~VulkanFence() override
 			{
 				RetireLostVulkanDevice(*state);
+
 				if (fence != VK_NULL_HANDLE)
 				{
 					state->Dispatch.vkDestroyFence(state->Device.device, fence, nullptr);
@@ -38,10 +41,12 @@ namespace Swim::RhiVulkan
 			{
 				RequireVulkanDevice(*state);
 				const auto result = CheckVulkanResult(*state, state->Dispatch.vkGetFenceStatus(state->Device.device, fence), "vkGetFenceStatus");
+
 				if (result != VK_SUCCESS && result != VK_NOT_READY)
 				{
 					throw std::runtime_error("Failed to query Vulkan fence");
 				}
+
 				return result == VK_SUCCESS;
 			}
 
@@ -50,16 +55,19 @@ namespace Swim::RhiVulkan
 				RequireVulkanDevice(*state);
 				const VkResult result = CheckVulkanResult(*state, state->Dispatch.vkWaitForFences(
 					state->Device.device, 1, &fence, VK_TRUE, timeoutNanoseconds), "vkWaitForFences");
+
 				if (result != VK_SUCCESS && result != VK_TIMEOUT)
 				{
 					throw std::runtime_error("Failed waiting for Vulkan synchronization");
 				}
+
 				return result == VK_SUCCESS;
 			}
 
 			void Reset() override
 			{
 				RequireVulkanDevice(*state);
+
 				if (CheckVulkanResult(*state, state->Dispatch.vkResetFences(state->Device.device, 1, &fence), "vkResetFences") != VK_SUCCESS)
 				{
 					throw std::runtime_error("Failed to reset Vulkan fence");
@@ -77,8 +85,10 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			VkFence fence = VK_NULL_HANDLE;
+
 		};
 
 } // namespace Swim::RhiVulkan

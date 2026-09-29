@@ -11,6 +11,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::size_t Count(const std::vector<UiEvent>& events, UiEventKind kind, UiNodeId node)
 	{
 		return std::count_if(events.begin(), events.end(),
@@ -119,6 +120,7 @@ namespace
 		theme->Fonts = Swim::Testing::LoadTextFontChain();
 		return theme;
 	}
+
 } // namespace
 
 SWIM_TEST("UiInput.Bridge", "RoutesPointerKeysTextCompositionAndFocusLoss")

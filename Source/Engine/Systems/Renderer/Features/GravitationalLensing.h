@@ -8,6 +8,7 @@
 
 namespace Engine
 {
+
 	// Black holes as a render feature: per pixel, the light ray is traced backward through
 	// each hole's region as a Schwarzschild null geodesic (a = -1.5 R_s h^2 x / r^5), so the
 	// shadow, the lensed sky and scene, Einstein rings and the photon ring come out of one
@@ -18,7 +19,9 @@ namespace Engine
 	// Program: GravitationalLensing.
 	class GravitationalLensing final : public RenderFeature
 	{
+
 	  public:
+
 		static constexpr std::uint32_t MaxLenses = 4;	// GravitationalLensing.slang MaxLenses.
 		static constexpr std::uint32_t MaxSteps = 240;	// Geodesic steps per ray.
 		static constexpr float GasStep = 0.4f;			// Largest step inside the gas (R_s).
@@ -44,6 +47,7 @@ namespace Engine
 
 		// The lens `owner` keeps (created on first use), and its removal.
 		Lens& Upsert(std::uint64_t owner);
+
 		void Remove(std::uint64_t owner);
 
 		std::string_view GetName() const override { return "Gravitational lensing"; }
@@ -56,8 +60,10 @@ namespace Engine
 
 		// The photon-capture impact parameter (3 sqrt 3 / 2) R_s: the radius of the shadow.
 		static float ShadowRadius(float schwarzschildRadius);
+
 		// The weak-field deflection angle (radians) at impact parameter b: 2 R_s / b.
 		static float Deflection(float schwarzschildRadius, float impact);
+
 		// The Einstein ring's angular radius for a source at infinity: sqrt(2 R_s / D).
 		static float EinsteinAngle(float schwarzschildRadius, float lensDistance);
 
@@ -73,8 +79,11 @@ namespace Engine
 		};
 
 		static Trace TraceRay(const Float3& origin, const Float3& direction, float schwarzschildRadius, float region);
+
 		// The gas density at `position` (relative to the hole, in R_s) at `time` (the shader's
 		// Gas(...).Density).
 		static float GasDensityAt(const Float3& position, float time, const Lens& lens);
+
 	};
+
 } // namespace Engine

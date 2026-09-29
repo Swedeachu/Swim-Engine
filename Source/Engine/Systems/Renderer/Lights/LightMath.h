@@ -9,6 +9,7 @@
 
 namespace Swim::Render::Lights
 {
+
 	// The CPU definition of punctual lighting (critical-path item 63). Shaders/Slang/
 	// Lights/GpuLightRecords.slang mirrors every function; the native light smoke
 	// compares the two over thousands of lights.
@@ -57,4 +58,5 @@ namespace Swim::Render::Lights
 	// lighting (items 64-66) must reproduce.
 	Float3 ShadeAllLights(std::span<const GpuLightRecord> rows, const GpuLightHeader& header, const StandardPbr::Surface& surface,
 		const Float3& normal, const Float3& view, const Float3& position);
+
 } // namespace Swim::Render::Lights

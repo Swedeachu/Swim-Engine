@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of Shaders/Slang/GpuScene/HzbReduce.slang.
 	struct HzbBindings
 	{
@@ -30,15 +31,20 @@ namespace Swim::Render
 	// TextureUsage::Sampled, or an R32Float copy). HzbReference is the CPU definition.
 	class HzbBuilder
 	{
+
 	  public:
+
 		explicit HzbBuilder(HzbBuilderDesc desc);
 
 		HzbGraphResources Record(RenderGraph& graph, GraphTexture depth, DepthConvention convention = CanonicalDepthConvention) const;
 
 	  private:
+
 		Rhi::ComputePipeline* pipeline;
 		Rhi::PipelineLayout* layout;
 		std::uint32_t space;
 		std::string name;
+
 	};
+
 } // namespace Swim::Render

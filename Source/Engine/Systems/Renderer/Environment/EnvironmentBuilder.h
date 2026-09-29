@@ -11,6 +11,7 @@
 
 namespace Swim::Render
 {
+
 	// One compiled environment program.
 	struct EnvironmentProgram
 	{
@@ -58,19 +59,24 @@ namespace Swim::Render
 	// CPU definition of every pass.
 	class EnvironmentBuilder
 	{
+
 	  public:
+
 		explicit EnvironmentBuilder(EnvironmentBuilderDesc desc);
 
 		// A transient source cube holding the sky: mip 0 evaluated per texel, then RecordMips.
 		GraphTexture RecordSky(RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& desc) const;
+
 		// Fills mips 1.. of a cube (Sampled | Storage, RGBA16Float) from its mip 0 by 2x2 box filtering.
 		std::vector<GraphPass> RecordMips(RenderGraph& graph, GraphTexture cube) const;
+
 		// Prefiltered cube + SH irradiance from a complete source cube
 		// (EnvironmentSourceMipCount mips, Sampled, RGBA16Float).
 		// irradianceSource, when given, is the (equally complete) cube the SH irradiance is
 		// projected from instead of the source.
 		EnvironmentGraphResources RecordFromSource(RenderGraph& graph, GraphTexture source, const EnvironmentMapDesc& desc,
 			const EnvironmentTargets& targets = {}, std::optional<GraphTexture> irradianceSource = {}) const;
+
 		// RecordSky followed by RecordFromSource. Each overlay (OverlayDesc(desc.SourceSize):
 		// face f of the cube in rows f * size.., premultiplied rgb, alpha = transmittance) is
 		// folded into the sky's mip 0 in order, cube = cube * a + rgb, before the mips and the
@@ -80,6 +86,7 @@ namespace Swim::Render
 		// SH irradiance is projected from a second, clear sky cube.
 		EnvironmentGraphResources Record(RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& desc,
 			const EnvironmentTargets& targets = {}, std::span<const GraphTexture> overlays = {}, bool overlaysInIrradiance = true) const;
+
 		// The split-sum LUT (environment independent; build once and keep it). The
 		// target, when given, must be a size x size RGBA16Float Storage texture.
 		GraphTexture RecordBrdfLut(
@@ -87,18 +94,26 @@ namespace Swim::Render
 
 		// Descriptors of the transient resources the builder creates.
 		static Rhi::TextureDesc SourceCubeDesc(std::uint32_t size);
+
 		static Rhi::TextureDesc PrefilteredCubeDesc(const EnvironmentMapDesc& desc);
+
 		static Rhi::TextureDesc BrdfLutDesc(std::uint32_t size);
+
 		static Rhi::BufferDesc IrradianceBufferDesc();
+
 		// A size x 6 * size RGBA16Float overlay atlas (Sampled | Storage).
 		static Rhi::TextureDesc OverlayDesc(std::uint32_t size);
+
 		// Throws std::invalid_argument when the sizes break the contract above.
 		static void Validate(const EnvironmentMapDesc& desc);
 
 	  private:
+
 		GraphTexture RecordSky(RenderGraph& graph, const Environment::ProceduralSky& sky, const EnvironmentMapDesc& desc,
 			std::vector<GraphPass>& passes, std::span<const GraphTexture> overlays = {}) const;
 
 		EnvironmentBuilderDesc desc;
+
 	};
+
 } // namespace Swim::Render

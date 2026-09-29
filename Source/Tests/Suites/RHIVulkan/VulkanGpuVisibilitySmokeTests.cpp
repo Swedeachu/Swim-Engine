@@ -31,6 +31,7 @@
 
 namespace
 {
+
 #ifdef SWIM_GPU_VISIBILITY_SMOKE_AVAILABLE
 	std::vector<std::byte> ReadBytes(const char* path)
 	{
@@ -147,6 +148,7 @@ namespace
 			constexpr std::uint32_t side = 64;
 			GpuScene scene(*device, { side * side, "Visibility scene" });
 			std::vector<RenderObjectHandle> objects;
+
 			for (std::uint32_t j = 0; j < side; ++j)
 			{
 				for (std::uint32_t i = 0; i < side; ++i)
@@ -225,10 +227,12 @@ namespace
 						auto table = c.Device().CreateDescriptorTable({ drawLayout.get(), drawSpace, 0, "GPU-driven draw table" });
 						SWIM_REQUIRE(table);
 						std::array<Rhi::DescriptorWrite, 5> writes{};
+
 						for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 						{
 							writes[binding].Binding = binding;
 						}
+
 						writes[0].BufferResource = &c.Get(sceneResources.Instances);
 						writes[1].BufferResource = &c.Get(sceneResources.Transforms);
 						writes[2].BufferResource = &c.Get(visible.DrawRecords);
@@ -249,10 +253,12 @@ namespace
 						commands.SetViewport({ 0, 0, float(size), float(size) });
 						commands.SetScissor({ 0, 0, size, size });
 						commands.BindIndexBuffer(c.Get(indexPage), 0, Rhi::IndexType::Uint32);
+
 						for (std::uint32_t bin = 0; bin < bins.GetBinCount(); ++bin)
 						{
 							DrawVisibilityBin(commands, c.Get(visible.Commands), c.Get(visible.Counts), bins, bin, path);
 						}
+
 						commands.EndRendering();
 					});
 				const auto capacity = bins.GetTotalCapacity();
@@ -289,11 +295,13 @@ namespace
 				// limit) uses a copy of the LOD history so both see the same history.
 				std::vector<GpuInstanceRecord> instances;
 				std::vector<GpuTransformRecord> transforms;
+
 				for (std::uint32_t row = 0; row < sceneResources.RowCount; ++row)
 				{
 					instances.push_back(scene.GetInstanceRow(row));
 					transforms.push_back(scene.GetTransformRow(row));
 				}
+
 				std::vector<GpuMeshMetadata> meshes(quad.Index + 1);
 				meshes[quad.Index] = quadMeta;
 				const auto quadSubmeshes = heap.GetSubmeshes(quad);
@@ -316,6 +324,7 @@ namespace
 				SWIM_CHECK(stats.LodCounts[0] > 0 && stats.LodCounts[1] > 0);
 
 				std::map<std::uint32_t, std::uint32_t> drawn; // Object id -> instance row.
+
 				for (std::uint32_t bin = 0; bin < bins.GetBinCount(); ++bin)
 				{
 					const auto& range = bins.GetRange(bin);
@@ -324,12 +333,15 @@ namespace
 					SWIM_CHECK_EQUAL(written, std::uint32_t(expected.Bins[bin].size()));
 					using Key = std::tuple<std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t, std::int32_t>;
 					std::set<Key> allowed;
+
 					for (const auto& draw : candidates.Bins[bin])
 					{
 						allowed.insert({ draw.Record.InstanceRow, draw.Record.SubmeshRow, draw.Command.IndexCount, draw.Command.FirstIndex,
 							draw.Command.VertexOffset });
 					}
+
 					std::set<Key> seen;
+
 					for (std::uint32_t slot = 0; slot < written; ++slot)
 					{
 						const auto& command = commands[range.First + slot];
@@ -342,10 +354,12 @@ namespace
 						SWIM_CHECK(seen.insert(key).second);
 						drawn.emplace(instances[record.InstanceRow].ObjectId, record.InstanceRow);
 					}
+
 					if (range.Capacity >= candidates.Bins[bin].size())
 					{
 						SWIM_CHECK(seen == allowed); // Unclamped bins hold exactly the expected set.
 					}
+
 					if (NeedsZeroedCommands(path))
 					{
 						// The fallback issues every slot: the unwritten ones must draw nothing.
@@ -364,6 +378,7 @@ namespace
 					return std::uint32_t(p[0]) | (std::uint32_t(p[1]) << 8) | (std::uint32_t(p[2]) << 16);
 				};
 				std::uint32_t checkedSamples = 0;
+
 				for (const auto& [id, row] : drawn)
 				{
 					const auto& transform = transforms[instances[row].TransformIndex];
@@ -377,15 +392,19 @@ namespace
 					const float px = (cx / cw * 0.5f + 0.5f) * float(size);
 					// RHI NDC is +Y up (the Vulkan viewport is flipped), so framebuffer row 0 is NDC y = +1.
 					const float py = (0.5f - cy / cw * 0.5f) * float(size);
+
 					if (px < 0.0f || py < 0.0f || px >= float(size) || py >= float(size))
 					{
 						continue;
 					}
+
 					SWIM_CHECK_EQUAL(decode(std::uint32_t(px), std::uint32_t(py)), id + 1);
 					++checkedSamples;
 				}
+
 				SWIM_CHECK(checkedSamples > 100);
 				std::uint32_t strays = 0;
+
 				for (std::uint32_t y = 0; y < size; ++y)
 				{
 					for (std::uint32_t x = 0; x < size; ++x)
@@ -394,6 +413,7 @@ namespace
 						strays += value != 0 && !drawn.contains(value - 1);
 					}
 				}
+
 				SWIM_CHECK_EQUAL(strays, 0u);
 			};
 
@@ -405,6 +425,7 @@ namespace
 			{
 				scene.SetFlags(objects[1040 + i], RenderObjectFlags::CastShadows);
 			}
+
 			scene.Destroy(objects[1100]);
 			scene.Destroy(objects[1101]);
 			scene.SetTransform(objects[1102], RenderAffine::Translation(1000.0f, 0.0f, 0.0f));
@@ -430,6 +451,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuVisibilityCullsBinsAndDrawsIndirect", SWIM_TEST_LOCATION,
@@ -438,6 +460,7 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGpuVisibilitySmoke);
 				} });
 		}
+
 		return true;
 	}();
 

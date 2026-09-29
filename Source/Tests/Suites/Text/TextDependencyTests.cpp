@@ -57,10 +57,12 @@ SWIM_TEST("Text.Dependencies", "HarfBuzzSegmentsAndShapesUtf8")
 	unsigned int count = 0;
 	const hb_glyph_info_t* glyphs = hb_buffer_get_glyph_infos(buffer, &count);
 	SWIM_REQUIRE_EQUAL(count, 3u);
+
 	for (unsigned int i = 0; i < count; ++i)
 	{
 		SWIM_CHECK_EQUAL(glyphs[i].codepoint, 0u);
 	}
+
 	SWIM_CHECK_EQUAL(glyphs[1].cluster, 1u);
 	SWIM_CHECK_EQUAL(glyphs[2].cluster, 2u);
 	hb_buffer_destroy(buffer);

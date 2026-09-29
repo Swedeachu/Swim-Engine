@@ -52,6 +52,7 @@ namespace Engine
 
 		const std::size_t workerSlots = GetRenderParallelWorkerSlots(jobs);
 		const std::size_t minChunk = std::max<std::size_t>(minItemsPerChunk, 1);
+
 		if (workerSlots <= 1 || itemCount < std::max(minChunk, RenderCpuJobConfig::MinParallelItemCount))
 		{
 			func(0, itemCount, 0);

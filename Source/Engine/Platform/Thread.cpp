@@ -15,12 +15,14 @@ namespace Swim::Platform
 	bool SetCurrentThreadName(std::string_view name)
 	{
 	#if defined(_WIN32)
+
 		if (name.empty())
 		{
 			return false;
 		}
 
 		int required = MultiByteToWideChar(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+
 		if (required <= 0)
 		{
 			return false;
@@ -50,6 +52,7 @@ namespace Swim::Platform
 	#elif defined(__linux__)
 		cpu_set_t cpuSet;
 		CPU_ZERO(&cpuSet);
+
 		for (uint32_t cpu = 0; cpu < 64; ++cpu)
 		{
 			if ((affinityMask & (uint64_t{ 1 } << cpu)) != 0)
@@ -57,6 +60,7 @@ namespace Swim::Platform
 				CPU_SET(cpu, &cpuSet);
 			}
 		}
+
 		return pthread_setaffinity_np(pthread_self(), sizeof(cpuSet), &cpuSet) == 0;
 	#else
 		(void)affinityMask;

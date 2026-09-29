@@ -10,8 +10,10 @@ using namespace Swim;
 
 namespace
 {
+
 	constexpr RhiVulkan::VulkanValidationCapabilities Available{ true, true, true, RhiVulkan::MinimumGpuValidationSettingsVersion };
 	constexpr std::array<Rhi::ValidationChecks, 3> Requests{ { { true, false }, { false, true }, { true, true } } };
+
 } // namespace
 
 SWIM_TEST("RHI.Vulkan.ValidationSettings", "ExplicitChecksRequireSupportInEveryRequestMode")
@@ -23,32 +25,39 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "ExplicitChecksRequireSupportInEveryR
 			const auto policy = RhiVulkan::SelectDiagnosticsPolicy(mode, false, Available, checks);
 			SWIM_CHECK(policy.Valid && policy.Validation && policy.DebugUtils);
 			SWIM_CHECK(policy.Checks == checks);
+
 			for (unsigned missing = 0; missing < 4; ++missing)
 			{
 				auto caps = Available;
+
 				if (missing == 0)
 				{
 					caps.LayerAvailable = false;
 				}
+
 				if (missing == 1)
 				{
 					caps.DebugUtilsAvailable = false;
 				}
+
 				if (missing == 2)
 				{
 					caps.LayerSettingsAvailable = false;
 				}
+
 				if (missing == 3)
 				{
 					caps.LayerVersion = (checks.GpuAssisted ? RhiVulkan::MinimumGpuValidationSettingsVersion
 															: RhiVulkan::MinimumValidationSettingsVersion) -
 						1;
 				}
+
 				const auto failed = RhiVulkan::SelectDiagnosticsPolicy(mode, true, caps, checks);
 				SWIM_CHECK(!failed.Valid && !failed.Validation && !failed.Checks.Any());
 				SWIM_CHECK(failed.Failure && failed.Failure[0] != '\0');
 			}
 		}
+
 		SWIM_CHECK(!RhiVulkan::SelectDiagnosticsPolicy(Rhi::ValidationMode::Disabled, true, Available, checks).Valid);
 	}
 }
@@ -70,6 +79,7 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "ModernBoolSettingsRetainValuesAcross
 {
 	const auto sync = RhiVulkan::GetVulkanValidationSettings({ true, false });
 	const auto gpu = RhiVulkan::GetVulkanValidationSettings({ false, true });
+
 	for (const auto& settings : { sync, gpu })
 	{
 		for (const auto& setting : settings)
@@ -79,11 +89,13 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "ModernBoolSettingsRetainValuesAcross
 			SWIM_CHECK_EQUAL(setting.valueCount, 1u);
 			SWIM_REQUIRE(setting.pValues);
 		}
+
 		SWIM_CHECK_EQUAL(std::string(settings[0].pSettingName), std::string("validate_sync"));
 		SWIM_CHECK_EQUAL(std::string(settings[1].pSettingName), std::string("gpuav_enable"));
 		SWIM_CHECK_EQUAL(std::string(settings[2].pSettingName), std::string("syncval_submit_time_validation"));
 		SWIM_CHECK_EQUAL(*static_cast<const VkBool32*>(settings[2].pValues), VK_TRUE);
 	}
+
 	SWIM_CHECK_EQUAL(*static_cast<const VkBool32*>(sync[0].pValues), VK_TRUE);
 	SWIM_CHECK_EQUAL(*static_cast<const VkBool32*>(sync[1].pValues), VK_FALSE);
 	SWIM_CHECK_EQUAL(*static_cast<const VkBool32*>(gpu[0].pValues), VK_FALSE);
@@ -123,6 +135,7 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "GpuPassConfiguresOnlyEnabledApisAndK
 			SWIM_CHECK_EQUAL(*static_cast<const VkBool32*>(settings[3].pValues) != VK_FALSE, !checks.GpuAssisted);
 			const auto expected = checks.GpuAssisted ? (version < VK_MAKE_API_VERSION(0, 1, 4, 357) ? 7u : 6u) : 4u;
 			SWIM_REQUIRE_EQUAL(settings.size(), expected);
+
 			for (std::size_t index = 4; index < settings.size(); ++index)
 			{
 				const std::string_view name(settings[index].pSettingName);
@@ -156,33 +169,41 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "SmokeAllowsOnlyTheReviewedGpuDescrip
 	SWIM_CHECK(Testing::HasCleanVulkanSmokeDiagnostics(snapshot, { false, true }));
 	SWIM_CHECK(!Testing::HasCleanVulkanSmokeDiagnostics(snapshot, {}));
 	SWIM_CHECK(!Testing::HasCleanVulkanSmokeDiagnostics(snapshot, { true, false }));
+
 	for (unsigned mutation = 0; mutation < 6; ++mutation)
 	{
 		auto invalid = snapshot;
+
 		if (mutation == 0)
 		{
 			invalid.Messages[0].Text += "Disabling shader instrumentation";
 		}
+
 		if (mutation == 1)
 		{
 			invalid.Messages[0].Id = "VUID-Test";
 		}
+
 		if (mutation == 2)
 		{
 			invalid.Messages[0].Text = "GPU validation is disabled";
 		}
+
 		if (mutation == 3)
 		{
 			++invalid.Warnings;
 		}
+
 		if (mutation == 4)
 		{
 			++invalid.Errors;
 		}
+
 		if (mutation == 5)
 		{
 			++invalid.Dropped;
 		}
+
 		SWIM_CHECK(!Testing::HasCleanVulkanSmokeDiagnostics(invalid, { false, true }));
 	}
 }
@@ -190,6 +211,7 @@ SWIM_TEST("RHI.Vulkan.ValidationSettings", "SmokeAllowsOnlyTheReviewedGpuDescrip
 SWIM_TEST("RHI.Vulkan.ValidationSettings", "InstanceSetupAndPublicReportingPreserveExactChecks")
 {
 	Testing::VulkanValidationCapture capture;
+
 	for (const auto& checks : Requests)
 	{
 		auto instance = std::make_shared<RhiVulkan::VulkanInstanceState>();

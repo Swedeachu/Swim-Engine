@@ -16,6 +16,7 @@
 
 namespace Game
 {
+
 	BallShooter::BallShooter(Engine::Scene* sceneValue, entt::entity owner) : Behavior(sceneValue, owner)
 	{
 	}
@@ -23,14 +24,17 @@ namespace Game
 	void BallShooter::Update(double dt)
 	{
 		cooldown -= static_cast<float>(dt);
+
 		if (!input)
 		{
 			return;
 		}
+
 		using Swim::Platform::KeyCode;
 		// F only (held = repeat fire); the mouse buttons belong to the UI and the camera.
 		const bool gated = inputGate && inputGate();
 		const bool key = input->IsKeyDown(KeyCode::F) && cooldown <= 0.0f;
+
 		if (!gated && key)
 		{
 			Fire();
@@ -42,16 +46,19 @@ namespace Game
 	{
 		auto* render = scene->GetRenderServices();
 		auto* cameras = scene->GetCameraSystem();
+
 		if (!cameras)
 		{
 			return;
 		}
+
 		const auto& camera = cameras->GetCamera();
 		const glm::vec3 forward = camera.GetForward();
 		const glm::vec3 position = camera.GetPosition() + forward * 1.2f;
 		// Headless (no renderer): the ball still simulates, without a GPU mesh.
 		std::uint32_t material = 0;
 		Engine::MeshLibrary::MeshHandle mesh;
+
 		if (render && render->HasRenderer())
 		{
 			static const std::array<glm::vec3, 6> colors{ SrgbColor(240, 90, 60), SrgbColor(250, 200, 60), SrgbColor(80, 200, 120),
@@ -61,6 +68,7 @@ namespace Game
 				Material(*render->Materials, "Ball " + std::to_string(fired % colors.size()), color, fired % 3 == 0 ? 1.0f : 0.0f, 0.25f);
 			mesh = render->Meshes->Get(Engine::BuiltinMesh::Sphere);
 		}
+
 		++fired;
 		scene->GetCommandBuffer().Create(
 			[position, forward, speed, material, mesh](Engine::Scene& owner, entt::entity ball)
@@ -92,4 +100,5 @@ namespace Game
 			sandbox->RecordImpact(collision.Impulse);
 		}
 	}
+
 } // namespace Game

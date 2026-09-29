@@ -10,8 +10,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using Assets::AssetErrorCode;
 		using State = AssetResidencyState;
 
@@ -33,17 +35,22 @@ namespace Swim::Render
 		std::uint64_t TextureUploadBytes(const TextureResidency& residency, const Assets::TextureAsset& texture)
 		{
 			const auto selection = residency.SelectPayloadFor(texture);
+
 			if (!selection)
 			{
 				return 0;
 			}
+
 			std::uint64_t bytes = 0;
+
 			for (const auto& mip : texture.Payloads[selection->Payload].Mips)
 			{
 				bytes += mip.SizeBytes;
 			}
+
 			return bytes;
 		}
+
 	} // namespace
 
 	AssetResidencyService::AssetResidencyService(Assets::AssetSystem& assets, IO::AsyncIoService& io, Jobs::JobSystem* jobs,
@@ -64,11 +71,13 @@ namespace Swim::Render
 			{
 				request.Read.RequestCancel();
 			}
+
 			if (request.State == State::Decoding && request.Decode && jobs)
 			{
 				abandoned.push_back(request.Decode);
 			}
 		}
+
 		for (const auto& job : abandoned)
 		{
 			try
@@ -87,18 +96,22 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		const auto id = handle.GetId();
+
 		if (auto existing = requests.find(id); existing != requests.end())
 		{
 			if (existing->second.State != State::Failed)
 			{
 				return true;
 			}
+
 			requests.erase(existing); // Retry a failed request from the start.
 		}
 
 		Request request;
 		request.Kind = kind;
+
 		if constexpr (std::is_same_v<T, Assets::MeshAsset>)
 		{
 			request.MeshAsset = handle;
@@ -107,7 +120,9 @@ namespace Swim::Render
 		{
 			request.TextureAsset = handle;
 		}
+
 		request.Sequence = nextSequence++;
+
 		if (assets.Resolve(handle))
 		{
 			request.State = State::WaitingForGpuUpload; // The CPU asset is already published.
@@ -117,6 +132,7 @@ namespace Swim::Render
 			request.State = State::Queued;
 			assets.Queue(handle);
 		}
+
 		requests.emplace(id, std::move(request));
 		return true;
 	}
@@ -134,10 +150,12 @@ namespace Swim::Render
 	template <typename T> const AssetResidencyService::Request* AssetResidencyService::FindRequest(Assets::AssetHandle<T> handle) const
 	{
 		const auto found = requests.find(handle.GetId());
+
 		if (found == requests.end())
 		{
 			return nullptr;
 		}
+
 		const bool matches = WithHandle(found->second,
 			[&](auto stored)
 			{
@@ -149,6 +167,7 @@ namespace Swim::Render
 				{
 					return false;
 				}
+
 			});
 		return matches ? &found->second : nullptr;
 	}
@@ -161,10 +180,12 @@ namespace Swim::Render
 			[&](auto handle)
 			{
 				const auto status = assets.GetStatus(handle);
+
 				if (status.State == Assets::AssetLoadState::Queued || status.State == Assets::AssetLoadState::Loading)
 				{
 					assets.Unload(handle);
 				}
+
 			});
 	}
 
@@ -177,10 +198,12 @@ namespace Swim::Render
 			ResetCpuState(request);
 			break;
 		case State::Decoding:
+
 			if (request.Decode)
 			{
 				abandoned.push_back(request.Decode); // The slot keeps its bytes alive.
 			}
+
 			ResetCpuState(request);
 			break;
 		case State::Queued:
@@ -188,6 +211,7 @@ namespace Swim::Render
 			break;
 		case State::Uploading:
 		case State::Resident:
+
 			if (request.Kind == Kind::Mesh)
 			{
 				geometry.DestroyMesh(request.Mesh, lastUse);
@@ -200,8 +224,10 @@ namespace Swim::Render
 					desc.Bindless->Release(request.Bindless, lastUse);
 					request.Bindless = {};
 				}
+
 				textures.DestroyTexture(request.Texture, lastUse);
 			}
+
 			break;
 		default:
 			break;
@@ -211,10 +237,12 @@ namespace Swim::Render
 	template <typename T> bool AssetResidencyService::ReleaseAsset(Assets::AssetHandle<T> handle, Rhi::TimelinePoint lastUse)
 	{
 		const auto* found = FindRequest(handle);
+
 		if (!found)
 		{
 			return false;
 		}
+
 		auto& request = requests.at(handle.GetId());
 		ReleaseRequest(request, lastUse); // May throw for recorded uploads; the request stays.
 		requests.erase(handle.GetId());
@@ -247,6 +275,7 @@ namespace Swim::Render
 		request.Read = {};
 		request.Decode = {};
 		request.Slot.reset();
+
 		if (failCpuAsset)
 		{
 			WithHandle(request,
@@ -276,31 +305,38 @@ namespace Swim::Render
 	{
 		std::uint32_t reading = 0;
 		std::vector<Request*> queued;
+
 		for (auto& [id, request] : requests)
 		{
 			reading += request.State == State::Reading;
+
 			if (request.State == State::Queued)
 			{
 				queued.push_back(&request);
 			}
 		}
+
 		std::sort(queued.begin(), queued.end(),
 			[](const Request* a, const Request* b)
 			{
 				return a->Sequence < b->Sequence;
 			});
+
 		for (auto* request : queued)
 		{
 			if (reading >= desc.MaxConcurrentReads)
 			{
 				break;
 			}
+
 			const auto path = desc.ResolveCookedPath ? desc.ResolveCookedPath(IdOf(*request)) : std::filesystem::path{};
+
 			if (path.empty())
 			{
 				Fail(*request, AssetErrorCode::NotFound, "no cooked .sasset path is known for this asset");
 				continue;
 			}
+
 			try
 			{
 				request->Read = io.ReadFileAsync(path);
@@ -310,6 +346,7 @@ namespace Swim::Render
 				Fail(*request, AssetErrorCode::Io, error.what());
 				continue;
 			}
+
 			request->State = State::Reading;
 			WithHandle(*request,
 				[&](auto handle)
@@ -323,11 +360,14 @@ namespace Swim::Render
 	void AssetResidencyService::PollReads()
 	{
 		std::uint32_t decoding = 0;
+
 		for (auto& [id, request] : requests)
 		{
 			decoding += request.State == State::Decoding;
 		}
+
 		std::vector<Request*> completed;
+
 		for (auto& [id, request] : requests)
 		{
 			if (request.State == State::Reading && request.Read.IsComplete())
@@ -335,28 +375,34 @@ namespace Swim::Render
 				completed.push_back(&request);
 			}
 		}
+
 		std::sort(completed.begin(), completed.end(),
 			[](const Request* a, const Request* b)
 			{
 				return a->Sequence < b->Sequence;
 			});
+
 		for (auto* request : completed)
 		{
 			const auto status = request->Read.GetStatus();
+
 			if (status != IO::IoStatus::Succeeded)
 			{
 				const auto code = status == IO::IoStatus::Cancelled ? AssetErrorCode::Cancelled : AssetErrorCode::Io;
 				Fail(*request, code, request->Read.GetErrorMessage());
 				continue;
 			}
+
 			if (decoding >= desc.MaxConcurrentDecodes)
 			{
 				continue; // Stays Reading (complete) until a decode slot frees up.
 			}
+
 			totals.BytesRead += request->Read.GetResult().GetSingleBuffer().size();
 			request->Slot = std::make_shared<Internal::AssetDecodeSlot>();
 			request->State = State::Decoding;
 			++decoding;
+
 			if (jobs)
 			{
 				// The job owns shared references to the read bytes and the result slot,
@@ -382,6 +428,7 @@ namespace Swim::Render
 			{
 				continue;
 			}
+
 			auto result = std::move(request.Slot->Result);
 			request.Slot.reset();
 			request.Decode = {};
@@ -399,35 +446,43 @@ namespace Swim::Render
 			Fail(request, code, result.Error.Message);
 			return;
 		}
+
 		const auto& metadata = result.Decoded.Metadata;
 		const auto expected = request.Kind == Kind::Mesh ? Assets::SassetAssetType::Mesh : Assets::SassetAssetType::Texture;
+
 		if (metadata.Id != IdOf(request) || metadata.Type != expected)
 		{
 			Fail(request, AssetErrorCode::InvalidData, "cooked object does not contain the requested asset id and type");
 			return;
 		}
+
 		const auto published = Assets::PublishSasset(assets, std::move(result.Decoded));
+
 		if (!published)
 		{
 			Fail(request, AssetErrorCode::InvalidData, published.Error.Message);
 			return;
 		}
+
 		request.State = State::WaitingForGpuUpload;
 	}
 
 	bool AssetResidencyService::StageOne(Request& request, std::uint64_t& bytes)
 	{
 		const auto label = assets.GetDatabase().FindPath(IdOf(request)).value_or(std::string{});
+
 		try
 		{
 			if (request.Kind == Kind::Mesh)
 			{
 				const auto* mesh = assets.Resolve(request.MeshAsset);
+
 				if (!mesh)
 				{
 					Fail(request, AssetErrorCode::Internal, "mesh asset is no longer resident before GPU staging", false);
 					return false;
 				}
+
 				const auto payload = BuildMeshGeometryPayload(*mesh);
 				request.Mesh = geometry.CreateMesh(payload.Describe(label));
 				request.MeshBounds = RenderBounds::FromMinMax(mesh->Bounds.Min, mesh->Bounds.Max); // Kept after the CPU copy unloads.
@@ -436,11 +491,13 @@ namespace Swim::Render
 			else
 			{
 				auto* texture = assets.Resolve(request.TextureAsset);
+
 				if (!texture)
 				{
 					Fail(request, AssetErrorCode::Internal, "texture asset is no longer resident before GPU staging", false);
 					return false;
 				}
+
 				bytes = TextureUploadBytes(textures, *texture);
 				// Without retained CPU assets the texture unloads right after this, so the
 				// residency takes its payload bytes over instead of copying them.
@@ -464,6 +521,7 @@ namespace Swim::Render
 		}
 
 		request.State = State::Uploading;
+
 		if (!desc.RetainCpuAssets)
 		{
 			// GPU residency owns a copy now; CPU validity is independent of it.
@@ -473,12 +531,14 @@ namespace Swim::Render
 					assets.Unload(handle);
 				});
 		}
+
 		return true;
 	}
 
 	void AssetResidencyService::StageUploads()
 	{
 		std::vector<Request*> waiting;
+
 		for (auto& [id, request] : requests)
 		{
 			if (request.State == State::WaitingForGpuUpload)
@@ -486,19 +546,23 @@ namespace Swim::Render
 				waiting.push_back(&request);
 			}
 		}
+
 		std::sort(waiting.begin(), waiting.end(),
 			[](const Request* a, const Request* b)
 			{
 				return a->Sequence < b->Sequence;
 			});
 		std::uint64_t staged = 0;
+
 		for (auto* request : waiting)
 		{
 			if (staged && staged >= desc.UploadBudgetBytes)
 			{
 				break;
 			}
+
 			std::uint64_t bytes = 0;
+
 			if (StageOne(*request, bytes))
 			{
 				staged += std::max<std::uint64_t>(bytes, 1);
@@ -508,6 +572,7 @@ namespace Swim::Render
 				break; // Capacity backpressure keeps FIFO order.
 			}
 		}
+
 		totals.BytesStagedLastUpdate = staged;
 		totals.BytesStaged += staged;
 	}
@@ -516,6 +581,7 @@ namespace Swim::Render
 	{
 		geometry.Collect();
 		textures.Collect();
+
 		for (auto& [id, request] : requests)
 		{
 			if (request.State == State::Resident && request.Kind == Kind::Texture && !request.Bindless && !request.BindlessRejected)
@@ -523,14 +589,18 @@ namespace Swim::Render
 				RegisterBindless(request); // Retry after the table was full.
 				continue;
 			}
+
 			if (request.State != State::Uploading)
 			{
 				continue;
 			}
+
 			const auto state = request.Kind == Kind::Mesh ? geometry.GetResidency(request.Mesh) : textures.GetState(request.Texture);
+
 			if (state == GpuUploadState::Resident)
 			{
 				request.State = State::Resident;
+
 				if (request.Kind == Kind::Texture)
 				{
 					RegisterBindless(request);
@@ -549,15 +619,18 @@ namespace Swim::Render
 		{
 			return;
 		}
+
 		// A rejected view leaves the texture Resident (still usable through
 		// GetGpuTexture) on the fallback element, with the reason in GetError.
 		auto* view = textures.GetView(request.Texture);
+
 		try
 		{
 			if (!view)
 			{
 				throw std::logic_error("resident texture has no view");
 			}
+
 			if (auto handle = desc.Bindless->TryRegisterTexture(*view))
 			{
 				request.Bindless = *handle;
@@ -574,6 +647,7 @@ namespace Swim::Render
 	{
 		GpuResidencyGraphResources resources;
 		resources.Geometry = geometry.Import(graph);
+
 		try
 		{
 			resources.Textures = textures.Import(graph);
@@ -583,6 +657,7 @@ namespace Swim::Render
 			geometry.AbortUploads();
 			throw;
 		}
+
 		return resources;
 	}
 
@@ -625,10 +700,12 @@ namespace Swim::Render
 	std::optional<ResolvedRenderMesh> AssetResidencyService::ResolveRenderMesh(Assets::AssetHandle<Assets::MeshAsset> mesh) const
 	{
 		const auto* request = FindRequest(mesh);
+
 		if (!request || request->State != State::Resident)
 		{
 			return std::nullopt;
 		}
+
 		return ResolvedRenderMesh{ request->Mesh, request->MeshBounds };
 	}
 
@@ -648,6 +725,7 @@ namespace Swim::Render
 	{
 		auto stats = totals;
 		stats.AbandonedDecodes = static_cast<std::uint32_t>(abandoned.size());
+
 		for (const auto& [id, request] : requests)
 		{
 			switch (request.State)
@@ -669,6 +747,7 @@ namespace Swim::Render
 				break;
 			case State::Resident:
 				++stats.Resident;
+
 				if (request.Kind == Kind::Texture && desc.Bindless)
 				{
 					if (request.Bindless)
@@ -680,6 +759,7 @@ namespace Swim::Render
 						++stats.BindlessPending;
 					}
 				}
+
 				break;
 			case State::Failed:
 				++stats.Failed;
@@ -688,6 +768,8 @@ namespace Swim::Render
 				break;
 			}
 		}
+
 		return stats;
 	}
+
 } // namespace Swim::Render

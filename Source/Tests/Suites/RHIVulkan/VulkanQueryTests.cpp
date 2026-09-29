@@ -11,6 +11,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct QueryCapture;
 	QueryCapture* current = nullptr;
 
@@ -81,10 +82,12 @@ namespace
 				current->Stride = stride;
 				current->Flags = flags;
 				auto* results = static_cast<std::array<std::uint64_t, 2>*>(data);
+
 				for (std::uint32_t index = 0; index < count; ++index)
 				{
 					results[index] = current->Payload[index];
 				}
+
 				return current->ReadResult;
 			};
 		}
@@ -94,6 +97,7 @@ namespace
 			return RhiVulkan::VulkanQueryPool::Create(State, { Rhi::QueryType::Timestamp, 4, "timings", queue });
 		}
 	};
+
 }
 
 SWIM_TEST("RHI.Vulkan.Queries", "PoolCreationOwnsNameAndDestroysOnlySuccessfulNativeObjects")
@@ -129,11 +133,13 @@ SWIM_TEST("RHI.Vulkan.Queries", "CapabilitiesArePerFamilyAndRejectUnsupportedRes
 	SWIM_CHECK(capture.Create(Rhi::QueueType::Compute));
 	capture.State->QueueFamilies.Transfer = 0;
 	SWIM_CHECK(capture.Create(Rhi::QueueType::Transfer));
+
 	for (auto bits : { 0u, 65u })
 	{
 		capture.State->QueueProperties[0].timestampValidBits = bits;
 		SWIM_CHECK(!capture.Create());
 	}
+
 	capture.State->QueueProperties[0].timestampValidBits = 64;
 	capture.State->Device.physical_device.properties.limits.timestampPeriod = 0.0f;
 	SWIM_CHECK(!capture.Create());
@@ -146,10 +152,12 @@ SWIM_TEST("RHI.Vulkan.Queries", "InvalidPoolDescriptionsNeverReachDriver")
 {
 	QueryCapture capture;
 	SWIM_CHECK(!RhiVulkan::VulkanQueryPool::Create(capture.State, {}));
+
 	for (auto type : { Rhi::QueryType::Occlusion, Rhi::QueryType::PipelineStatistics, static_cast<Rhi::QueryType>(255) })
 	{
 		SWIM_CHECK(!RhiVulkan::VulkanQueryPool::Create(capture.State, { type, 2, {} }));
 	}
+
 	SWIM_CHECK(!capture.Create(static_cast<Rhi::QueueType>(255)));
 	SWIM_CHECK(!RhiVulkan::VulkanQueryPool::Create({}, { Rhi::QueryType::Timestamp, 2, {} }));
 	SWIM_CHECK_EQUAL(capture.Creates, 0u);

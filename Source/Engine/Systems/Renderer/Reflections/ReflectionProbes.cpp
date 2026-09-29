@@ -7,8 +7,10 @@
 
 namespace Swim::Render::ReflectionProbes
 {
+
 	namespace
 	{
+
 		float Dot(const Float3& a, const Float3& b)
 		{
 			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -30,6 +32,7 @@ namespace Swim::Render::ReflectionProbes
 			const auto d = Sub(a, b);
 			return std::sqrt(Dot(d, d));
 		}
+
 	} // namespace
 
 	FaceBasis CubeFace(std::uint32_t face)
@@ -79,6 +82,7 @@ namespace Swim::Render::ReflectionProbes
 		{
 			return DistanceSky;
 		}
+
 		return std::min(nearPlane / depth * std::sqrt(1.0f + ndcX * ndcX + ndcY * ndcY), DistanceSky);
 	}
 
@@ -89,10 +93,12 @@ namespace Swim::Render::ReflectionProbes
 		float secondWeight = 0.0f;
 		float firstShare = 0.0f;
 		float secondShare = 0.0f;
+
 		for (std::size_t i = 0; i < records.size(); ++i)
 		{
 			const auto& record = records[i];
 			const float owner = record.Params[3];
+
 			if (owner != 0.0f)
 			{
 				if (owner == pixelObjectId)
@@ -100,17 +106,22 @@ namespace Swim::Render::ReflectionProbes
 					// The pixel's own object probe, exclusively.
 					return { static_cast<std::int32_t>(i), -1, 1.0f, 0.0f, 1.0f };
 				}
+
 				continue;
 			}
+
 			const Float3 centre{ record.PositionRadius[0], record.PositionRadius[1], record.PositionRadius[2] };
 			const float radius = record.PositionRadius[3];
 			const float d = Distance(position, centre);
 			const float weight = std::clamp((radius - d) / std::max(record.Params[0], 1.0e-3f), 0.0f, 1.0f);
+
 			if (!(weight > 0.0f))
 			{
 				continue;
 			}
+
 			const float share = weight / (d / std::max(radius, 1.0e-3f) + 0.05f);
+
 			if (weight > firstWeight || (weight == firstWeight && share > firstShare))
 			{
 				selection.Second = selection.First;
@@ -127,10 +138,12 @@ namespace Swim::Render::ReflectionProbes
 				secondShare = share;
 			}
 		}
+
 		if (selection.First < 0)
 		{
 			return selection;
 		}
+
 		const float total = firstShare + (selection.Second >= 0 ? secondShare : 0.0f);
 		selection.FirstShare = total > 0.0f ? firstShare / total : 1.0f;
 		selection.SecondShare = selection.Second >= 0 && total > 0.0f ? secondShare / total : 0.0f;
@@ -155,6 +168,7 @@ namespace Swim::Render::ReflectionProbes
 		};
 		float t = 0.0f;
 		bool wasBeyond = false;
+
 		for (std::uint32_t i = 0; i < ParallaxSteps; ++i)
 		{
 			const Float3 x = at(t);
@@ -166,12 +180,15 @@ namespace Swim::Render::ReflectionProbes
 			const float dt =
 				std::clamp(std::max(ParallaxTexels * texelAngle, ParallaxMinAngle) * length / std::max(across, 0.02f), ParallaxMinStep, ParallaxReach * 0.125f);
 			const float next = t + dt;
+
 			if (next > ParallaxReach)
 			{
 				break;
 			}
+
 			float nextLength = 0.0f;
 			const bool beyond = excess(next, nextLength) >= 0.0f;
+
 			if (!beyond || wasBeyond)
 			{
 				// Only a transition from in front to beyond can be a crossing.
@@ -179,26 +196,32 @@ namespace Swim::Render::ReflectionProbes
 				t = next;
 				continue;
 			}
+
 			float lo = t;
 			float hi = next;
+
 			for (std::uint32_t k = 0; k < ParallaxRefineSteps; ++k)
 			{
 				const float mid = 0.5f * (lo + hi);
 				float midLength = 0.0f;
 				(excess(mid, midLength) >= 0.0f ? hi : lo) = mid;
 			}
+
 			float hitLength = 0.0f;
 			const float over = excess(hi, hitLength);
+
 			if (over <= ParallaxThickness(hitLength, hi - lo))
 			{
 				const auto hit = Normalize(at(hi));
 				return Dot(hit, hit) > 0.0f ? hit : direction;
 			}
+
 			// The ray went behind an occluder (the captured distance jumps at its silhouette):
 			// not a crossing; keep marching until it comes out and crosses something real.
 			wasBeyond = true;
 			t = next;
 		}
+
 		return direction; // Nothing within reach: the sky, along the ray.
 	}
 
@@ -221,31 +244,37 @@ namespace Swim::Render::ReflectionProbes
 	{
 		Plan plan;
 		const auto slotCount = std::clamp(settings.MaxProbes, 1u, MaxReflectionProbes);
+
 		if (slots.size() != slotCount)
 		{
 			slots.assign(slotCount, {});
 		}
+
 		if (!settings.Enabled)
 		{
 			for (auto& slot : slots)
 			{
 				slot = {};
 			}
+
 			return plan;
 		}
 
 		// Rank the probes: priority / (1 + distance to the camera); the best MaxProbes keep slots.
 		std::vector<std::pair<float, std::uint32_t>> ranked;
+
 		for (std::uint32_t i = 0; i < probes.size(); ++i)
 		{
 			const float rank = std::max(probes[i].Priority, 1.0e-3f) / (1.0f + Distance(probes[i].Position, camera));
 			ranked.push_back({ rank, i });
 		}
+
 		std::stable_sort(ranked.begin(), ranked.end(),
 			[](const auto& a, const auto& b)
 			{
 				return a.first > b.first;
 			});
+
 		if (ranked.size() > slotCount)
 		{
 			ranked.resize(slotCount);
@@ -254,6 +283,7 @@ namespace Swim::Render::ReflectionProbes
 		// Keep the slots of probes still present; release the others; then place new probes.
 		std::vector<std::int32_t> slotOf(probes.size(), -1);
 		std::vector<bool> kept(slots.size(), false);
+
 		for (const auto& [rank, index] : ranked)
 		{
 			for (std::uint32_t s = 0; s < slots.size(); ++s)
@@ -266,6 +296,7 @@ namespace Swim::Render::ReflectionProbes
 				}
 			}
 		}
+
 		for (std::uint32_t s = 0; s < slots.size(); ++s)
 		{
 			if (!kept[s])
@@ -273,12 +304,14 @@ namespace Swim::Render::ReflectionProbes
 				slots[s] = {};
 			}
 		}
+
 		for (const auto& [rank, index] : ranked)
 		{
 			if (slotOf[index] >= 0)
 			{
 				continue;
 			}
+
 			for (std::uint32_t s = 0; s < slots.size(); ++s)
 			{
 				if (!slots[s].Used)
@@ -299,6 +332,7 @@ namespace Swim::Render::ReflectionProbes
 			FaceCapture Capture;
 		};
 		std::vector<Candidate> candidates;
+
 		for (const auto& [rank, index] : ranked)
 		{
 			const auto s = static_cast<std::uint32_t>(slotOf[index]);
@@ -310,6 +344,7 @@ namespace Swim::Render::ReflectionProbes
 				{
 					return f == 0;
 				});
+
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				float urgency = 0.0f;
@@ -326,8 +361,10 @@ namespace Swim::Render::ReflectionProbes
 							return true;
 						}
 					}
+
 					return false;
 				};
+
 				if (slot.FaceFrame[face] == 0)
 				{
 					urgency = 1000.0f;
@@ -348,18 +385,21 @@ namespace Swim::Render::ReflectionProbes
 				{
 					urgency = 0.0f;
 				}
+
 				if (urgency > 0.0f)
 				{
 					candidates.push_back({ urgency * rank, { s, face, index } });
 				}
 			}
 		}
+
 		std::stable_sort(candidates.begin(), candidates.end(),
 			[](const Candidate& a, const Candidate& b)
 			{
 				return a.Urgency > b.Urgency;
 			});
 		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, 12u), candidates.size());
+
 		for (std::size_t i = 0; i < budget; ++i)
 		{
 			const auto& capture = candidates[i].Capture;
@@ -368,17 +408,20 @@ namespace Swim::Render::ReflectionProbes
 			slot.FaceFrame[capture.Face] = frame;
 			slot.FaceTime[capture.Face] = time;
 			slot.FacePosition[capture.Face] = probes[capture.Probe].Position;
+
 			if (std::find(plan.Filter.begin(), plan.Filter.end(), capture.Slot) == plan.Filter.end())
 			{
 				plan.Filter.push_back(capture.Slot);
 			}
 		}
+
 		std::sort(plan.Filter.begin(), plan.Filter.end());
 
 		for (const auto& [rank, index] : ranked)
 		{
 			const auto s = static_cast<std::uint32_t>(slotOf[index]);
 			const auto& slot = slots[s];
+
 			if (std::any_of(slot.FaceFrame.begin(), slot.FaceFrame.end(),
 					[](std::uint64_t f)
 					{
@@ -387,9 +430,11 @@ namespace Swim::Render::ReflectionProbes
 			{
 				continue; // Not every face captured yet.
 			}
+
 			const double oldest = *std::min_element(slot.FaceTime.begin(), slot.FaceTime.end());
 			plan.Active.push_back({ s, index, static_cast<float>(std::max(time - oldest, 0.0)) });
 		}
+
 		std::sort(plan.Active.begin(), plan.Active.end(),
 			[](const ActiveProbe& a, const ActiveProbe& b)
 			{
@@ -397,4 +442,5 @@ namespace Swim::Render::ReflectionProbes
 			});
 		return plan;
 	}
+
 } // namespace Swim::Render::ReflectionProbes

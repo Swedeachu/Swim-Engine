@@ -4,6 +4,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GeometryAllocation
 	{
 		std::uint32_t Page = GpuMeshMetadata::InvalidPage;
@@ -11,4 +12,5 @@ namespace Swim::Render::Internal
 
 		bool IsValid() const { return Page != GpuMeshMetadata::InvalidPage; }
 	};
+
 } // namespace Swim::Render::Internal

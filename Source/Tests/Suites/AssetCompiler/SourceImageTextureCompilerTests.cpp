@@ -148,11 +148,13 @@ SWIM_TEST("AssetCompiler.SourceImageTextureCompiler", "PngCooksToABc7MipChainByD
 	// The blocks decode to the RGBA8 chain's texels (two or three colours per block are
 	// exact in BC7 up to a small endpoint rounding).
 	const auto& texels = rgba.Asset.Payloads[0];
+
 	for (std::size_t mip = 0; mip < 2; ++mip)
 	{
 		const auto decoded = DecodeBc7ToRgba8(std::span(payload.Bytes).subspan(payload.Mips[mip].OffsetBytes, 16),
 			payload.Mips[mip].Width, payload.Mips[mip].Height);
 		SWIM_REQUIRE(decoded.size() == texels.Mips[mip].SizeBytes);
+
 		for (std::size_t i = 0; i < decoded.size(); ++i)
 		{
 			const int expected = std::to_integer<int>(texels.Bytes[texels.Mips[mip].OffsetBytes + i]);
@@ -169,6 +171,7 @@ SWIM_TEST("AssetCompiler.SourceImageTextureCompiler", "Bc7EncodingKeepsAGradient
 	constexpr std::uint32_t Width = 13;
 	constexpr std::uint32_t Height = 7;
 	std::vector<std::byte> rgba(Width * Height * 4);
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		for (std::uint32_t x = 0; x < Width; ++x)
@@ -180,16 +183,20 @@ SWIM_TEST("AssetCompiler.SourceImageTextureCompiler", "Bc7EncodingKeepsAGradient
 			texel[3] = std::byte(x < 6 ? 0 : 255);
 		}
 	}
+
 	const auto blocks = EncodeRgba8ToBc7(rgba, Width, Height);
 	SWIM_REQUIRE_EQUAL(blocks.size(), static_cast<std::size_t>(GetBc7Bytes(Width, Height)));
 	SWIM_CHECK_EQUAL(blocks.size(), std::size_t{ 4 * 2 * 16 });
 	const auto decoded = DecodeBc7ToRgba8(blocks, Width, Height);
 	int worst = 0;
+
 	for (std::size_t i = 0; i < decoded.size(); ++i)
 	{
 		worst = std::max(worst, std::abs(std::to_integer<int>(decoded[i]) - std::to_integer<int>(rgba[i])));
 	}
+
 	SWIM_CHECK(worst <= 12);
+
 	for (std::uint32_t y = 0; y < Height; ++y)
 	{
 		SWIM_CHECK_EQUAL(std::to_integer<int>(decoded[(y * Width + 2) * 4 + 3]), 0);

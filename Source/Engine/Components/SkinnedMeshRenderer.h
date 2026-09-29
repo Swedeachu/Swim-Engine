@@ -10,6 +10,7 @@
 
 namespace Engine
 {
+
 	// A GPU-skinned mesh instance on an entity (Phase 23). Mesh names a skinned mesh
 	// registered with the render bridge (SceneRenderBridge::RegisterSkinnedMesh). Each
 	// frame the bridge uploads Palette (JointCount row-major 3x4 matrices: joint model
@@ -24,4 +25,5 @@ namespace Engine
 		std::vector<std::array<float, 12>> Palette;
 		std::uint64_t PoseRevision = 0;
 	};
+
 } // namespace Engine

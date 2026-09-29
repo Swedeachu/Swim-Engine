@@ -53,6 +53,7 @@ namespace Swim::Rhi
 					return true;
 				}
 			}
+
 			return false;
 		}
 	};

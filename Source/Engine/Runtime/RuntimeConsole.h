@@ -11,6 +11,7 @@
 
 namespace Engine
 {
+
 	// The runtime console's model: runs lines through the engine's CommandRegistry, keeps a
 	// scrollback (the echoed command, whatever it printed to stdout/stderr, and errors) and a
 	// command history navigated like a shell (Up: older, Down: newer, then back to what was
@@ -18,10 +19,15 @@ namespace Engine
 	// testable headless; RuntimeConsoleOverlay draws it and feeds it keys.
 	class RuntimeConsole
 	{
+
 	  public:
+
 		explicit RuntimeConsole(Swim::Commands::CommandRegistry& registry, std::size_t maxLines = 400, std::size_t maxHistory = 64);
+
 		~RuntimeConsole();
+
 		RuntimeConsole(const RuntimeConsole&) = delete;
+
 		RuntimeConsole& operator=(const RuntimeConsole&) = delete;
 
 		bool IsOpen() const { return open; }
@@ -34,11 +40,14 @@ namespace Engine
 		// Returns false for an unknown command, a parse error or a command that threw (the
 		// scrollback says which).
 		bool Execute(std::string_view line);
+
 		void Print(std::string_view text); // Split into lines.
+
 		void Clear();
 
 		// History navigation. `current` is the text being edited (kept to return to).
 		std::string HistoryUp(std::string_view current);
+
 		std::string HistoryDown();
 
 		const std::deque<std::string>& GetLines() const { return lines; }
@@ -49,6 +58,7 @@ namespace Engine
 		std::uint64_t GetRevision() const { return revision; }
 
 	  private:
+
 		Swim::Commands::CommandRegistry& registry;
 		std::size_t maxLines;
 		std::size_t maxHistory;
@@ -58,5 +68,7 @@ namespace Engine
 		std::string draft;
 		std::uint64_t revision = 0;
 		bool open = false;
+
 	};
+
 } // namespace Engine

@@ -11,6 +11,7 @@ using namespace Swim;
 
 namespace
 {
+
 	const ShaderCompiler::ShaderBindingReflection* FindParameter(const ShaderCompiler::ShaderReflection& reflection, std::string_view name)
 	{
 		for (const auto& parameter : reflection.GlobalParameters)
@@ -20,18 +21,22 @@ namespace
 				return &parameter;
 			}
 		}
+
 		return nullptr;
 	}
 
 	std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> Fields(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::pair<std::uint32_t, std::uint32_t>> fields;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			fields[field.Name] = { field.Offset, field.Size };
 		}
+
 		return fields;
 	}
+
 } // namespace
 
 SWIM_TEST("ShaderCompiler.StructuredElements", "StructElementsReportFlattenedFieldOffsetsAndStride")
@@ -141,6 +146,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "VisibilityProgramMatchesItsCppContra
 		{ "Stats", B::Stats, 0 },
 		{ "OcclusionHistory", B::OcclusionHistory, 0 },
 	};
+
 	for (const auto& item : expected)
 	{
 		const auto* parameter = FindParameter(parsed.Reflection, item.Name);
@@ -183,11 +189,13 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "VisibilityProgramMatchesItsCppContra
 	SWIM_CHECK_EQUAL(hzb->Index, B::Hzb);
 	SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
 	std::uint32_t found = 0;
+
 	for (const auto& binding : converted.Interface.DescriptorSchemas[0].Bindings)
 	{
 		found += binding.Binding == B::Hzb && binding.Type == Rhi::DescriptorType::SampledTexture;
 		found += binding.Binding == B::OcclusionHistory && binding.Type == Rhi::DescriptorType::StorageBuffer;
 	}
+
 	SWIM_CHECK_EQUAL(found, 2u);
 	SWIM_CHECK_EQUAL(converted.Interface.DescriptorSchemas[0].Bindings.size(), std::size_t(B::Count));
 }
@@ -210,6 +218,7 @@ SWIM_TEST("ShaderCompiler.GpuSceneLayout", "HzbReduceProgramMatchesItsCppContrac
 	SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
 	const auto& bindings = converted.Interface.DescriptorSchemas[0].Bindings;
 	SWIM_REQUIRE_EQUAL(bindings.size(), 2u);
+
 	for (const auto& binding : bindings)
 	{
 		if (binding.Binding == B::Source)
@@ -288,12 +297,14 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialProgramBuildsItsTemp
 	const auto builtIn = Render::StandardMaterialTemplateDesc();
 	SWIM_CHECK_EQUAL(builtIn.RecordSize, layout.Desc.RecordSize);
 	SWIM_REQUIRE_EQUAL(builtIn.Parameters.size(), layout.Desc.Parameters.size());
+
 	for (std::size_t i = 0; i < builtIn.Parameters.size(); ++i)
 	{
 		SWIM_CHECK_EQUAL(builtIn.Parameters[i].Name, layout.Desc.Parameters[i].Name);
 		SWIM_CHECK(builtIn.Parameters[i].Type == layout.Desc.Parameters[i].Type);
 		SWIM_CHECK_EQUAL(builtIn.Parameters[i].Offset, layout.Desc.Parameters[i].Offset);
 	}
+
 	const auto materialTemplate = std::make_shared<const Render::MaterialTemplate>(std::move(layout.Desc));
 	using T = Render::MaterialParameterType;
 	const auto expect = [&](const char* name, T type, std::uint32_t offset)
@@ -337,6 +348,7 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialSmokeProgramsMatchTh
 	const auto converted = ShaderCompiler::BuildRhiShaderInterface(draw.Reflection);
 	SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 	std::uint32_t runtimeSized = 0;
+
 	for (const auto& schema : converted.Interface.DescriptorSchemas)
 	{
 		for (const auto& binding : schema.Bindings)
@@ -344,6 +356,7 @@ SWIM_TEST("ShaderCompiler.MaterialLayout", "StandardMaterialSmokeProgramsMatchTh
 			runtimeSized += schema.Space == 1 && binding.Count == 0;
 		}
 	}
+
 	SWIM_CHECK_EQUAL(runtimeSized, 2u);
 
 	const auto probe = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_STANDARD_PBR_REFLECTION_PATH);

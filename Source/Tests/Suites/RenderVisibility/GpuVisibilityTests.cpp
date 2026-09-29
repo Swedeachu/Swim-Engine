@@ -18,6 +18,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	bool HasIndirect(const Rhi::Buffer& buffer)
 	{
 		return (static_cast<std::uint32_t>(buffer.GetDesc().Usage) & static_cast<std::uint32_t>(Rhi::BufferUsage::Indirect)) != 0;
@@ -28,6 +29,7 @@ namespace
 	{
 		using B = GpuVisibilityBindings;
 		Rhi::DescriptorSchemaDesc schema{ 0, {} };
+
 		for (std::uint32_t binding = B::Instances; binding < B::Count; ++binding)
 		{
 			const bool writable = binding >= B::LodState;
@@ -36,6 +38,7 @@ namespace
 												: Rhi::DescriptorType::ReadOnlyStorageBuffer;
 			schema.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 		}
+
 		layout.program.Interface.DescriptorSchemas = { schema };
 	}
 
@@ -82,10 +85,12 @@ namespace
 			scene.scene->CommitUploads();
 			geometry->CommitUploads(completion);
 			scene.executor->Wait();
+
 			if (out)
 			{
 				*out = resources;
 			}
+
 			return scene.CopyCount() - copiesBefore;
 		}
 
@@ -95,6 +100,7 @@ namespace
 		std::unique_ptr<GeometryHeap> geometry;
 		std::size_t passes = 0;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.GpuVisibility", "RecordsClearCullAndReadbackWithPersistentStateUploadedOnlyWhenNeeded")
@@ -162,10 +168,12 @@ SWIM_TEST("Render.GpuVisibility", "RejectsInvalidConfigurationsAndFrames")
 	auto visibility = world.Make(2);
 	SWIM_CHECK_THROWS(visibility.SetMaterialBin(8, 0), std::out_of_range);
 	SWIM_CHECK_THROWS(visibility.SetMaterialBin(0, 2), std::out_of_range);
+
 	for (int i = 0; i < 3; ++i)
 	{
 		world.scene.scene->Create({});
 	}
+
 	VisibilityFrameDesc frame;
 	RenderGraph graph;
 	const auto sceneResources = world.scene.scene->Import(graph);
@@ -267,21 +275,26 @@ SWIM_TEST("Render.GpuVisibility", "EarlyAndLatePhasesShareHistoryAndTheLatePhase
 
 	// Push constants: phase and HZB size for the late pass; the early pass has no HZB.
 	std::vector<std::array<std::uint32_t, 8>> cullConstants;
+
 	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
 	{
 		const auto& command = (*world.scene.device.Commands)[i];
+
 		if (command.Kind == "PushConstants" && command.Data.size() == GpuVisibilityBindings::PushConstantBytes)
 		{
 			cullConstants.emplace_back();
 			std::memcpy(cullConstants.back().data(), command.Data.data(), command.Data.size());
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(cullConstants.size(), 2u);
 	std::size_t dispatches = 0;
+
 	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
 	{
 		dispatches += (*world.scene.device.Commands)[i].Kind == "Dispatch";
 	}
+
 	SWIM_CHECK_EQUAL(dispatches, 8u); // Early cull, six HZB mips (40x24 -> 1x1), late cull.
 	SWIM_CHECK_EQUAL(cullConstants[0][4], std::uint32_t(VisibilityPhase::Early));
 	SWIM_CHECK_EQUAL(cullConstants[0][7], 0u);
@@ -331,12 +344,14 @@ SWIM_TEST("Render.GpuVisibility", "NoIndirectCountFallbackZeroesCommandsAndDraws
 	const auto* commands = world.scene.device.LastDescriptorTable->Element(GpuVisibilityBindings::Commands, 0);
 	SWIM_REQUIRE(commands != nullptr);
 	std::uint32_t commandClears = 0;
+
 	for (std::size_t i = logBefore; i < world.scene.device.Commands->size(); ++i)
 	{
 		const auto& command = (*world.scene.device.Commands)[i];
 		commandClears += command.Kind == "CopyBuffer" && command.Destination == commands &&
 			command.Size == 72u * sizeof(Rhi::DrawIndexedIndirectCommand);
 	}
+
 	SWIM_CHECK_EQUAL(commandClears, 1u);
 	const auto& bytes = static_cast<const Testing::MockMappedBuffer*>(commands)->Bytes;
 	// The mock cull writes nothing: every slot stays a zero-instance draw.

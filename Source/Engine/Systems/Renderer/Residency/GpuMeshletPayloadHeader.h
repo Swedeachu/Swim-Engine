@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Leading record of a converted mesh's meshlet payload in a GeometryHeap
 	// meshlet page. Offsets are bytes from the start of this header; each
 	// section starts on a 16-byte boundary. Descriptors are Assets::MeshletDesc
@@ -19,4 +20,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuMeshletPayloadHeader) == 32);
+
 } // namespace Swim::Render

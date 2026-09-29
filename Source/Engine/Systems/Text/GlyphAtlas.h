@@ -9,6 +9,7 @@
 
 namespace Swim::Text
 {
+
 	inline constexpr std::uint32_t NoAtlasPage = std::numeric_limits<std::uint32_t>::max();
 
 	struct GlyphAtlasDesc
@@ -53,9 +54,13 @@ namespace Swim::Text
 	// GPU upload and timeline retirement belong to the consumer, not this cache.
 	class GlyphAtlas
 	{
+
 	  public:
+
 		explicit GlyphAtlas(const GlyphAtlasDesc& desc = {});
+
 		GlyphAtlas(const GlyphAtlas&) = delete;
+
 		GlyphAtlas& operator=(const GlyphAtlas&) = delete;
 
 		// Keeps the face alive; throws length_error when the fixed budget is full.
@@ -73,8 +78,11 @@ namespace Swim::Text
 		// glyphs packed before it. Returns the number of glyphs added.
 		std::size_t Prewarm(
 			const std::shared_ptr<const FontFace>& face, std::span<const std::uint32_t> glyphs, const ParallelFor& parallelFor = {});
+
 		bool Contains(const FontFace& face, std::uint32_t glyph) const;
+
 		AtlasPageView GetPage(std::uint32_t page) const;
+
 		// The rows written after the page had `sinceRevision` (a consumer's last
 		// uploaded revision): the union of every later glyph's rows. Everything outside
 		// is unchanged since then. Throws std::out_of_range for an unknown page or a
@@ -88,6 +96,7 @@ namespace Swim::Text
 		const GlyphAtlasDesc& GetDesc() const { return desc; }
 
 	  private:
+
 		struct Key
 		{
 			const FontFace* Face = nullptr;
@@ -121,5 +130,7 @@ namespace Swim::Text
 		GlyphAtlasDesc desc;
 		std::vector<Page> pages;
 		std::unordered_map<Key, Entry, KeyHash> glyphs;
+
 	};
+
 } // namespace Swim::Text

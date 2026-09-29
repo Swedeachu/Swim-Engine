@@ -12,6 +12,7 @@
 
 namespace Engine
 {
+
 	class CameraSystem;
 	class Scene;
 
@@ -38,6 +39,7 @@ namespace Engine
 	// physics world or renderer needed, so they work while paused, in tools and in tests.
 	namespace ScenePicking
 	{
+
 		// Every hit (one per entity, its nearest), nearest first.
 		std::vector<PickHit> PickAll(const entt::registry& registry, const Ray& ray, const PickOptions& options = {});
 		// The nearest hit.
@@ -45,5 +47,7 @@ namespace Engine
 		// The ray through a pixel of the render surface (top-left origin), then PickClosest.
 		std::optional<PickHit> PickAtScreen(
 			const entt::registry& registry, const CameraSystem& cameras, float x, float y, const PickOptions& options = {});
+
 	} // namespace ScenePicking
+
 } // namespace Engine

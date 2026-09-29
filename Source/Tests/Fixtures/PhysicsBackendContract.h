@@ -121,6 +121,7 @@ namespace Engine::Tests
 		}
 
 		PhysicsContractWorld(const PhysicsContractWorld&) = delete;
+
 		PhysicsContractWorld& operator=(const PhysicsContractWorld&) = delete;
 
 		PhysicsWorld& Get()
@@ -129,11 +130,17 @@ namespace Engine::Tests
 		}
 
 		PhysicsMaterialHandle Material() const { return material; }
+
 		ShapeHandle FloorShape() const { return floorShape; }
+
 		ShapeHandle SphereShape() const { return sphereShape; }
+
 		ShapeHandle CapsuleShape() const { return capsuleShape; }
+
 		BodyHandle Floor() const { return floor; }
+
 		BodyHandle Dynamic() const { return dynamicBody; }
+
 		BodyHandle Kinematic() const { return kinematicBody; }
 
 	private:
@@ -308,19 +315,23 @@ namespace Engine::Tests
 		SWIM_REQUIRE(world.GetBodyPose(fixture.Dynamic(), beforeGravity));
 
 		bool sawCollisionStart = false;
+
 		for (int i = 0; i < 120 && !sawCollisionStart; ++i)
 		{
 			StepPhysics(world, 1.0f / 60.0f);
+
 			for (const CollisionEvent& event : world.GetCollisionEvents())
 			{
 				const bool expectedPair = (event.BodyA == fixture.Floor() && event.BodyB == fixture.Dynamic())
 					|| (event.BodyA == fixture.Dynamic() && event.BodyB == fixture.Floor());
+
 				if (expectedPair && event.Type == CollisionEventType::Started)
 				{
 					sawCollisionStart = true;
 				}
 			}
 		}
+
 		SWIM_CHECK(sawCollisionStart);
 
 		PhysicsPose afterGravity{};
@@ -384,9 +395,11 @@ namespace Engine::Tests
 
 		bool sawTriggerEnter = false;
 		bool sawTriggerExit = false;
+
 		for (int i = 0; i < 120 && !sawTriggerExit; ++i)
 		{
 			StepPhysics(world, 1.0f / 60.0f);
+
 			for (const TriggerEvent& event : world.GetTriggerEvents())
 			{
 				if (event.TriggerBody == triggerBody && event.OtherBody == triggerMover)
@@ -514,10 +527,12 @@ namespace Engine::Tests
 		// A non-blocking fetch must eventually complete the step rather than
 		// spinning forever, so a bounded poll loop has to terminate.
 		bool completed = false;
+
 		for (int attempt = 0; attempt < 4096 && !completed; ++attempt)
 		{
 			completed = world.FetchResults(false);
 		}
+
 		SWIM_CHECK(completed);
 		SWIM_CHECK(!world.IsSimulationInFlight());
 
@@ -536,9 +551,11 @@ namespace Engine::Tests
 
 			bool sawPersisted = false;
 			bool sawStarted = false;
+
 			for (int i = 0; i < 240; ++i)
 			{
 				StepPhysics(world, 1.0f / 60.0f);
+
 				for (const CollisionEvent& event : world.GetCollisionEvents())
 				{
 					sawStarted = sawStarted || event.Type == CollisionEventType::Started;
@@ -558,9 +575,11 @@ namespace Engine::Tests
 
 		bool sawPersisted = false;
 		float strongestImpulse = 0.0f;
+
 		for (int i = 0; i < 240; ++i)
 		{
 			StepPhysics(world, 1.0f / 60.0f);
+
 			for (const CollisionEvent& event : world.GetCollisionEvents())
 			{
 				sawPersisted = sawPersisted || event.Type == CollisionEventType::Persisted;
@@ -579,9 +598,11 @@ namespace Engine::Tests
 		const BodyHandle removed = verbose.Dynamic();
 		world.DestroyBody(removed);
 		SWIM_CHECK(!world.IsBodyValid(removed));
+
 		for (int i = 0; i < 10; ++i)
 		{
 			StepPhysics(world, 1.0f / 60.0f);
+
 			for (const CollisionEvent& event : world.GetCollisionEvents())
 			{
 				SWIM_CHECK(event.BodyA != removed && event.BodyB != removed);

@@ -10,18 +10,22 @@
 
 namespace Engine
 {
+
 	RenderDevice::RenderDevice(const RenderDeviceDesc& desc) : window(desc.Window), vsync(desc.VSync)
 	{
 		Swim::Rhi::GraphicsSystemDesc systemDesc;
 		systemDesc.Validation = desc.Validation ? Swim::Rhi::ValidationMode::IfAvailable : Swim::Rhi::ValidationMode::Disabled;
 		systemDesc.EchoDiagnostics = true;
 		graphics = Swim::RhiVulkan::CreateGraphicsSystem(systemDesc);
+
 		if (!graphics || graphics->GetAdapterCount() == 0)
 		{
 			throw std::runtime_error("RenderDevice: no Vulkan adapter is available");
 		}
+
 		// The first adapter with bindless descriptors (the renderer's hard requirement).
 		std::uint32_t chosen = UINT32_MAX;
+
 		for (std::uint32_t i = 0; i < graphics->GetAdapterCount(); ++i)
 		{
 			if (graphics->GetAdapter(i).GetInfo().Capabilities.BindlessDescriptors)
@@ -30,24 +34,31 @@ namespace Engine
 				break;
 			}
 		}
+
 		if (chosen == UINT32_MAX)
 		{
 			throw std::runtime_error("RenderDevice: no adapter supports bindless descriptors");
 		}
+
 		auto& adapter = graphics->GetAdapter(chosen);
 		adapterInfo = &adapter.GetInfo();
 		device = adapter.CreateDevice();
+
 		if (!device)
 		{
 			throw std::runtime_error("RenderDevice: device creation failed on " + adapterInfo->Name);
 		}
+
 		const std::uint32_t slots = std::clamp(desc.FramesInFlight, 1u, 2u);
+
 		for (std::uint32_t i = 0; i < slots; ++i)
 		{
 			executors.push_back(std::make_unique<Swim::Render::RenderGraphExecutor>(*device));
 		}
+
 		idleTimeline = device->CreateTimeline(0);
 		headlessExtent = { desc.Width, desc.Height };
+
 		if (window)
 		{
 			Swim::Rhi::SwapchainDesc swapchainDesc;
@@ -56,14 +67,17 @@ namespace Engine
 			swapchainDesc.ImageCount = 3;
 			swapchainDesc.Vsync = vsync;
 			swapchain = device->CreateSwapchain(*window, swapchainDesc);
+
 			if (!swapchain)
 			{
 				throw std::runtime_error("RenderDevice: swapchain creation failed");
 			}
+
 			for (std::uint32_t i = 0; i < slots; ++i)
 			{
 				acquired.push_back(device->CreateGpuSemaphore());
 			}
+
 			CreatePresentSemaphores();
 		}
 	}
@@ -77,6 +91,7 @@ namespace Engine
 		catch (...)
 		{
 		}
+
 		ready.clear();
 		acquired.clear();
 		swapchain.reset();
@@ -100,10 +115,12 @@ namespace Engine
 	void RenderDevice::CreatePresentSemaphores()
 	{
 		ready.clear();
+
 		for (std::uint32_t i = 0; i < swapchain->GetImageCount(); ++i)
 		{
 			ready.push_back(device->CreateGpuSemaphore());
 		}
+
 		presented.assign(swapchain->GetImageCount(), false);
 	}
 
@@ -125,8 +142,10 @@ namespace Engine
 			{
 				headlessExtent = { width, height };
 			}
+
 			return;
 		}
+
 		requestedExtent = { width, height };
 		resizeRequested = true;
 	}
@@ -134,23 +153,28 @@ namespace Engine
 	bool RenderDevice::Rebuild()
 	{
 		Swim::Rhi::Extent2D extent = requestedExtent;
+
 		if (!resizeRequested && window)
 		{
 			const auto pixels = window->GetPixelSize();
 			extent = { pixels.Width, pixels.Height };
 		}
+
 		// Imported swapchain views retire with the executors' pooled resources.
 		for (auto& executor : executors)
 		{
 			executor->Trim();
 		}
+
 		const Swim::Rhi::TimelinePoint safeAfter =
 			lastCompletion.Semaphore ? lastCompletion : Swim::Rhi::TimelinePoint{ idleTimeline.get(), 0 };
 		const bool rebuilt = swapchain->Resize(extent, safeAfter);
+
 		if (!rebuilt)
 		{
 			return false; // Suspended (zero extent) or failed: retry next frame.
 		}
+
 		resizeRequested = false;
 		needsRebuild = false;
 		CreatePresentSemaphores();
@@ -160,25 +184,31 @@ namespace Engine
 	RenderDevice::Frame RenderDevice::Acquire()
 	{
 		Frame frame;
+
 		if (!swapchain)
 		{
 			frame.Valid = true;
 			return frame;
 		}
+
 		if ((resizeRequested || needsRebuild) && !Rebuild())
 		{
 			return frame;
 		}
+
 		const auto result = swapchain->AcquireNextImage(*acquired[slot]);
+
 		if (result.OutOfDate)
 		{
 			needsRebuild = true;
 			return frame;
 		}
+
 		if (!result.HasImage())
 		{
 			return frame;
 		}
+
 		frame.Valid = true;
 		frame.Image = result.ImageIndex;
 		frame.Target = &swapchain->GetImageView(result.ImageIndex).GetTexture();
@@ -190,10 +220,12 @@ namespace Engine
 	Swim::Rhi::SubmitDesc RenderDevice::GetSubmit(const Frame& frame)
 	{
 		Swim::Rhi::SubmitDesc submit{};
+
 		if (!swapchain || !frame.Valid || frame.Image == UINT32_MAX)
 		{
 			return submit;
 		}
+
 		waits[0] = acquired[slot].get();
 		signals[0] = ready[frame.Image].get();
 		submit.WaitSemaphores = waits;
@@ -207,13 +239,16 @@ namespace Engine
 		{
 			return true;
 		}
+
 		const std::array<Swim::Rhi::Semaphore*, 1> presentWaits{ ready[frame.Image].get() };
 		const bool ok = swapchain->Present(device->GetQueue(Swim::Rhi::QueueType::Graphics), frame.Image, presentWaits);
 		presented[frame.Image] = true;
+
 		if (!ok || frame.Suboptimal)
 		{
 			needsRebuild = true;
 		}
+
 		return ok;
 	}
 
@@ -223,10 +258,12 @@ namespace Engine
 		{
 			executor->Wait();
 		}
+
 		if (device)
 		{
 			// Presentation waits are not covered by the render completion timeline.
 			device->GetQueue(Swim::Rhi::QueueType::Graphics).WaitIdle();
 		}
 	}
+
 } // namespace Engine

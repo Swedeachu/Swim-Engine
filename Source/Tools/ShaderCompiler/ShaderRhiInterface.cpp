@@ -15,11 +15,14 @@ namespace Swim::ShaderCompiler
 			result.Error = std::move(message);
 			return result;
 		};
+
 		if (reflection.HasUnsupportedGlobalScopeLayout || (!reflection.GlobalScopeKind.empty() && reflection.GlobalScopeKind != "none"))
 		{
 			return fail("Unsupported global scope layout; use explicitly bound parameter groups");
 		}
+
 		Rhi::ShaderStageMask stages = Rhi::ShaderStageMask::None;
+
 		for (const auto& entry : reflection.EntryPoints)
 		{
 			if ((entry.Stage == ShaderStage::Vertex &&
@@ -29,6 +32,7 @@ namespace Swim::ShaderCompiler
 			{
 				return fail("Shader reflection requires at most one entry point per graphics stage");
 			}
+
 			if (entry.Stage == ShaderStage::Vertex)
 			{
 				stages = stages | Rhi::ShaderStageMask::Vertex;
@@ -47,6 +51,7 @@ namespace Swim::ShaderCompiler
 				{
 					return fail("Compute requires three fixed positive local-size dimensions");
 				}
+
 				stages = Rhi::ShaderStageMask::Compute;
 				result.Interface.ComputeThreadGroupSize = entry.ThreadGroupSize;
 			}
@@ -55,10 +60,12 @@ namespace Swim::ShaderCompiler
 				return fail("RHI reflection requires graphics stages or one compute entry point");
 			}
 		}
+
 		if (stages == Rhi::ShaderStageMask::None)
 		{
 			return fail("Shader reflection has no supported entry points");
 		}
+
 		for (const auto& parameter : reflection.GlobalParameters)
 		{
 			if (parameter.BindingKind == "pushConstantBuffer")
@@ -69,50 +76,60 @@ namespace Swim::ShaderCompiler
 				{
 					return fail("Push constants require one aligned, sized global constant buffer: " + parameter.Name);
 				}
+
 				// Whole-block byte extent comes from Slang; no C++ packing guesses.
 				result.Interface.PushConstants.push_back({ parameter.Offset, parameter.Size, stages });
 				continue;
 			}
+
 			if (auto error = AppendRhiDescriptorBinding(parameter, stages, result.Interface); !error.empty())
 			{
 				return fail(std::move(error));
 			}
 		}
+
 		for (const auto& entry : reflection.EntryPoints)
 		{
 			if (entry.HasUnsupportedScopeLayout || (!entry.ScopeKind.empty() && entry.ScopeKind != "none"))
 			{
 				return fail("Entry-point scope containers require a nested layout conversion: " + entry.Name);
 			}
+
 			const auto visibility = entry.Stage == ShaderStage::Vertex ? Rhi::ShaderStageMask::Vertex
 				: entry.Stage == ShaderStage::Fragment				   ? Rhi::ShaderStageMask::Fragment
 																	   : Rhi::ShaderStageMask::Compute;
+
 			for (const auto& parameter : entry.Parameters)
 			{
 				if (parameter.HasUnsupportedBindingLayout)
 				{
 					return fail("Unsupported entry-point binding layout: " + entry.Name + "." + parameter.Name);
 				}
+
 				if (parameter.BindingKind == "descriptorTableSlot")
 				{
 					if (auto error = AppendRhiDescriptorBinding(parameter, visibility, result.Interface); !error.empty())
 					{
 						return fail(entry.Name + ": " + error);
 					}
+
 					continue;
 				}
+
 				// Only stage IO is ignored. Uniform bytes, implicit scope containers,
 				// nested resources and entry-local push blocks must never disappear.
 				const bool valueType = parameter.TypeKind == "scalar" || parameter.TypeKind == "vector" || parameter.TypeKind == "matrix" ||
 					parameter.TypeKind == "struct";
 				const bool varying = parameter.BindingKind == "varyingInput" || parameter.BindingKind == "varyingOutput" ||
 					(parameter.BindingKind.empty() && parameter.SemanticName.starts_with("SV_"));
+
 				if (!valueType || !varying)
 				{
 					return fail("Unsupported entry-point parameter: " + entry.Name + "." + parameter.Name);
 				}
 			}
 		}
+
 		return result;
 	}
 

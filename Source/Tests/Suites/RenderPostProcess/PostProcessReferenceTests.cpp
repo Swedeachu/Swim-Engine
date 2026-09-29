@@ -12,13 +12,16 @@ namespace Pp = Swim::Render::Post;
 
 namespace
 {
+
 	Pp::Image Uniform(std::uint32_t width, std::uint32_t height, const Pp::Float4& value)
 	{
 		Pp::Image image(width, height);
+
 		for (auto& texel : image.Texels)
 		{
 			texel = value;
 		}
+
 		return image;
 	}
 
@@ -26,6 +29,7 @@ namespace
 	{
 		return std::abs(a - b) <= tolerance;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.PostProcess.Reference", "RoundToHalfIsBinary16RoundToNearestEven")
@@ -46,6 +50,7 @@ SWIM_TEST("Render.PostProcess.Reference", "RoundToHalfIsBinary16RoundToNearestEv
 	SWIM_CHECK(std::isnan(Pp::RoundToHalf(std::numeric_limits<float>::quiet_NaN())));
 	std::mt19937 random(73);
 	std::uniform_real_distribution<float> unit(-100.0f, 100.0f);
+
 	for (int i = 0; i < 1000; ++i)
 	{
 		const float v = unit(random);
@@ -60,6 +65,7 @@ SWIM_TEST("Render.PostProcess.Reference", "ToneMappersAreMonotonicBoundedAndMatc
 	for (const auto op : { ToneMapper::Clamp, ToneMapper::Reinhard, ToneMapper::Aces, ToneMapper::PbrNeutral })
 	{
 		float previous = -1.0f;
+
 		for (float x = 0.0f; x <= 64.0f; x = x < 1.0f ? x + 0.01f : x * 1.05f)
 		{
 			const auto y = Pp::ToneMap(op, { x, x, x }, 4.0f);
@@ -67,11 +73,13 @@ SWIM_TEST("Render.PostProcess.Reference", "ToneMappersAreMonotonicBoundedAndMatc
 			SWIM_CHECK(Near(y[0], y[1], 1.0e-3f) && Near(y[1], y[2], 1.0e-3f)); // Grey stays grey (ACES fit rows sum to 1 +- 1e-5).
 			previous = y[0];
 		}
+
 		const auto zero = Pp::ToneMap(op, { 0, 0, 0 }, 4.0f);
 		SWIM_CHECK(zero[0] <= 1.0e-4f);
 		const auto negative = Pp::ToneMap(op, { -1, -2, -3 }, 4.0f);
 		SWIM_CHECK(negative[0] >= 0.0f && negative[1] >= 0.0f && negative[2] >= 0.0f);
 	}
+
 	// Reinhard: the white point maps to 1.
 	SWIM_CHECK(Near(Pp::ToneMapReinhard({ 4, 4, 4 }, 4.0f)[0], 1.0f, 1.0e-6f));
 	SWIM_CHECK(Pp::ToneMapReinhard({ 3.9f, 0, 0 }, 4.0f)[0] < 1.0f);
@@ -96,19 +104,23 @@ SWIM_TEST("Render.PostProcess.Reference", "OutputTransferFunctionsMatchTheirStan
 	SWIM_CHECK(Near(Pp::SrgbOetf(0.0031308f), 0.04045f, 1.0e-5f));
 	SWIM_CHECK_EQUAL(Pp::SrgbOetf(0.0f), 0.0f);
 	SWIM_CHECK(Near(Pp::SrgbOetf(1.0f), 1.0f, 1.0e-6f));
+
 	for (float v = 0.0f; v <= 1.0f; v += 0.01f)
 	{
 		SWIM_CHECK(Near(Pp::SrgbEotf(Pp::SrgbOetf(v)), v, 1.0e-5f));
 	}
+
 	// ST 2084: 10,000 nits -> 1, 100 nits -> 0.5081, black -> c1^m2.
 	SWIM_CHECK(Near(Pp::PqOetf(10000.0f), 1.0f, 1.0e-6f));
 	SWIM_CHECK(Near(Pp::PqOetf(100.0f), 0.508078f, 2.0e-5f));
 	SWIM_CHECK(Near(Pp::PqOetf(1000.0f), 0.751827f, 2.0e-5f));
 	SWIM_CHECK(Pp::PqOetf(0.0f) < 1.0e-6f);
+
 	for (const float nits : { 0.1f, 1.0f, 80.0f, 203.0f, 1000.0f, 4000.0f })
 	{
 		SWIM_CHECK(Near(Pp::PqEotf(Pp::PqOetf(nits)), nits, nits * 1.0e-3f));
 	}
+
 	// BT.709 -> BT.2020 keeps white and luminance-neutral grey.
 	const auto white = Pp::Rec709ToRec2020({ 1, 1, 1 });
 	SWIM_CHECK(Near(white[0], 1.0f, 1.0e-5f) && Near(white[1], 1.0f, 1.0e-5f) && Near(white[2], 1.0f, 1.0e-5f));
@@ -116,6 +128,7 @@ SWIM_TEST("Render.PostProcess.Reference", "OutputTransferFunctionsMatchTheirStan
 	SWIM_CHECK(red[0] < 1.0f && red[1] > 0.0f); // 709 red lies inside the 2020 gamut.
 	// Interleaved gradient noise stays in [0, 1) and averages to 1/2.
 	double sum = 0.0;
+
 	for (std::uint32_t y = 0; y < 64; ++y)
 	{
 		for (std::uint32_t x = 0; x < 64; ++x)
@@ -125,6 +138,7 @@ SWIM_TEST("Render.PostProcess.Reference", "OutputTransferFunctionsMatchTheirStan
 			sum += n;
 		}
 	}
+
 	SWIM_CHECK(std::abs(sum / 4096.0 - 0.5) < 0.02);
 }
 
@@ -141,10 +155,12 @@ SWIM_TEST("Render.PostProcess.Reference", "GradingDefaultsAreTheIdentityAndEachS
 	const auto identity = Pp::WhiteBalanceMatrix(0.0f, 0.0f);
 	SWIM_CHECK((identity == Pp::Matrix3{ 1, 0, 0, 0, 1, 0, 0, 0, 1 }));
 	const auto nearIdentity = Pp::WhiteBalanceMatrix(0.001f, 0.0f);
+
 	for (int i = 0; i < 9; ++i)
 	{
 		SWIM_CHECK(Near(nearIdentity[i], identity[i], 2.0e-3f)); // The fitted matrices invert each other closely.
 	}
+
 	settings.Grading.Temperature = 50.0f;
 	params = Pp::BuildPostParams(settings, 0);
 	SWIM_CHECK_EQUAL(params.GradingEnabled, 1u);
@@ -201,6 +217,7 @@ SWIM_TEST("Render.PostProcess.Reference", "HistogramBinsCoverTheLogRangeWithABla
 	SWIM_CHECK_EQUAL(Pp::HistogramBin(1.0e30f, e.MinLog2Luminance, inverse), 255u);
 	SWIM_CHECK_EQUAL(Pp::HistogramBin(std::numeric_limits<float>::infinity(), e.MinLog2Luminance, inverse), 255u);
 	std::uint32_t previous = 0;
+
 	for (float l = std::ldexp(1.0f, -12); l < 4096.0f; l *= 1.01f)
 	{
 		const auto bin = Pp::HistogramBin(l, e.MinLog2Luminance, inverse);
@@ -209,18 +226,23 @@ SWIM_TEST("Render.PostProcess.Reference", "HistogramBinsCoverTheLogRangeWithABla
 		SWIM_CHECK(std::abs(Pp::BinLog2Luminance(bin, e.MinLog2Luminance, 24.0f) - std::log2(l)) <= 24.0f / 254.0f * 0.5f + 1.0e-4f);
 		previous = bin;
 	}
+
 	Pp::Image image(16, 8);
+
 	for (std::size_t i = 0; i < image.Texels.size(); ++i)
 	{
 		const float v = float(i) / 16.0f;
 		image.Texels[i] = { v, v, v, 1.0f };
 	}
+
 	const auto bins = Pp::BuildHistogram(image, e);
 	std::uint32_t total = 0;
+
 	for (const auto n : bins)
 	{
 		total += n;
 	}
+
 	SWIM_CHECK_EQUAL(total, 128u);
 	SWIM_CHECK_EQUAL(bins[0], 1u); // The black pixel.
 }
@@ -238,6 +260,7 @@ SWIM_TEST("Render.PostProcess.Reference", "AverageLuminanceHonorsPercentilesAndI
 		SWIM_REQUIRE(Pp::AverageLog2Luminance(bins, e, average));
 		SWIM_CHECK(std::abs(average - std::log2(l)) <= 24.0f / 508.0f + 1.0e-4f);
 	}
+
 	// 90 % at 0.1 and 10 % at 1000: a 50-90 % window drops the bright outliers.
 	Pp::Histogram bins{};
 	const float inverse = 1.0f / 24.0f;
@@ -296,10 +319,12 @@ SWIM_TEST("Render.PostProcess.Reference", "ExposureSnapsAdaptsAndClamps")
 	SWIM_CHECK(std::abs(next.Ev100 - first.Ev100) > std::abs(down.Ev100 - target));
 	// Many frames converge; reset snaps immediately.
 	auto state = first;
+
 	for (int i = 0; i < 300; ++i)
 	{
 		state = Pp::UpdateExposure(brightScene, e, state, 1.0f / 60.0f, false);
 	}
+
 	SWIM_CHECK(Near(state.Ev100, target, 1.0e-3f));
 	SWIM_CHECK_EQUAL(Pp::UpdateExposure(dim, e, state, 1.0f / 60.0f, true).Ev100, first.Ev100);
 	// Zero delta time holds the previous value.
@@ -336,17 +361,22 @@ SWIM_TEST("Render.PostProcess.Reference", "BloomFiltersPreserveConstantsAndThres
 	// Constant in, constant out (the weights sum to 1), for any level size.
 	const auto flat = Uniform(13, 9, { 2.0f, 1.0f, 0.5f, 1.0f });
 	const auto down = Pp::BloomDownsample(flat, 6, 4, false, 1.0f, 0.0f, 0.5f);
+
 	for (const auto& t : down.Texels)
 	{
 		SWIM_CHECK(t[0] == 2.0f && t[1] == 1.0f && t[2] == 0.5f && t[3] == 1.0f);
 	}
+
 	// First level: exposure, Karis (constant stays constant), threshold 0 keeps bright texels.
 	const auto first = Pp::BloomDownsample(flat, 6, 4, true, 0.5f, 0.0f, 0.5f);
+
 	for (const auto& t : first.Texels)
 	{
 		SWIM_CHECK(Near(t[0], 1.0f, 1.0e-3f) && Near(t[1], 0.5f, 1.0e-3f) && Near(t[2], 0.25f, 1.0e-3f));
 	}
+
 	const auto up = Pp::BloomUpsample(down, Uniform(12, 8, { 1.0f, 1.0f, 1.0f, 1.0f }));
+
 	for (const auto& t : up.Texels)
 	{
 		SWIM_CHECK(Near(t[0], 3.0f, 2.0e-3f) && Near(t[1], 2.0f, 2.0e-3f) && Near(t[2], 1.5f, 2.0e-3f));
@@ -355,6 +385,7 @@ SWIM_TEST("Render.PostProcess.Reference", "BloomFiltersPreserveConstantsAndThres
 	// Threshold: zero well below, continuous through the knee, ~(b - t) / b far above.
 	SWIM_CHECK(Pp::BloomThreshold({ 0.4f, 0.4f, 0.4f }, 1.0f, 0.5f)[0] == 0.0f);
 	float previous = 0.0f;
+
 	for (float b = 0.0f; b < 4.0f; b += 0.01f)
 	{
 		const float v = Pp::BloomThreshold({ b, b * 0.5f, 0.0f }, 1.0f, 0.5f)[0];
@@ -362,6 +393,7 @@ SWIM_TEST("Render.PostProcess.Reference", "BloomFiltersPreserveConstantsAndThres
 		SWIM_CHECK(v - previous < 0.02f); // No jumps.
 		previous = v;
 	}
+
 	SWIM_CHECK(Near(Pp::BloomThreshold({ 10, 10, 10 }, 1.0f, 0.5f)[0], 9.0f, 1.0e-3f));
 
 	// Karis averaging tames a single firefly compared with the plain filter.
@@ -377,6 +409,7 @@ SWIM_TEST("Render.PostProcess.Reference", "BloomFiltersPreserveConstantsAndThres
 SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEncoding")
 {
 	Pp::Image image(32, 16);
+
 	for (std::uint32_t y = 0; y < 16; ++y)
 	{
 		for (std::uint32_t x = 0; x < 32; ++x)
@@ -385,6 +418,7 @@ SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEnc
 			image.At(x, y) = { v, Pp::RoundToHalf(v * 0.5f), Pp::RoundToHalf(0.1f), 1.0f };
 		}
 	}
+
 	image.At(20, 8) = { 200.0f, 150.0f, 100.0f, 1.0f };
 	PostProcessSettings settings;
 	const auto sdr = Pp::RunPostProcess(image, settings, {}, 1.0f / 60.0f, true);
@@ -394,11 +428,14 @@ SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEnc
 	SWIM_CHECK_EQUAL(sdr.Params.BloomEnabled, 1u);
 	SWIM_CHECK(Near(sdr.Params.PowerBloom[3], settings.Bloom.Intensity / 4.0f, 1.0e-9f));
 	std::uint32_t pixels = 0;
+
 	for (const auto n : sdr.Bins)
 	{
 		pixels += n;
 	}
+
 	SWIM_CHECK_EQUAL(pixels, 32u * 16u);
+
 	for (const auto& t : sdr.Output.Texels)
 	{
 		for (const float v : t)
@@ -406,6 +443,7 @@ SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEnc
 			SWIM_CHECK(v >= 0.0f && v <= 1.0f && v * 255.0f == std::round(v * 255.0f));
 		}
 	}
+
 	// The bright pixel blooms into its neighbors.
 	settings.Bloom.Enabled = false;
 	const auto noBloom = Pp::RunPostProcess(image, settings, {}, 1.0f / 60.0f, true);
@@ -415,6 +453,7 @@ SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEnc
 	settings.Output.Dither = false;
 	const auto flat = Pp::RunPostProcess(image, settings, {}, 1.0f / 60.0f, true);
 	double drift = 0.0;
+
 	for (std::size_t i = 0; i < flat.Output.Texels.size(); ++i)
 	{
 		for (int c = 0; c < 3; ++c)
@@ -424,6 +463,7 @@ SWIM_TEST("Render.PostProcess.Reference", "FullFramesComposeEveryStageForEachEnc
 			drift += d;
 		}
 	}
+
 	SWIM_CHECK(std::abs(drift) / double(flat.Output.Texels.size() * 3) < 0.5 / 255.0);
 
 	// HDR: with Clamp tone mapping and exposure 1, scene value 1 is paper white.

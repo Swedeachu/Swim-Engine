@@ -7,8 +7,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		bool HasUsage(const Rhi::TextureDesc& desc, Rhi::TextureUsage usage)
@@ -21,6 +23,7 @@ namespace Swim::Render
 			return desc.Dimension == Rhi::TextureDimension::Texture2D && desc.ArrayLayers == 1 && desc.Samples == Rhi::SampleCount::X1 &&
 				HasUsage(desc, Rhi::TextureUsage::Sampled);
 		}
+
 	} // namespace
 
 	TemporalAntiAliasing::TemporalAntiAliasing(Rhi::Device& deviceInput, TemporalAntiAliasingDesc descInput)
@@ -63,23 +66,28 @@ namespace Swim::Render
 		const auto colorDesc = graph.GetDesc(frame.Color); // Copies: creating resources may reallocate the graph's list.
 		const auto depthDesc = graph.GetDesc(frame.Depth);
 		const auto velocityDesc = graph.GetDesc(frame.Velocity);
+
 		if (!IsPlain2D(colorDesc) || colorDesc.PixelFormat != Rhi::Format::RGBA16Float)
 		{
 			throw std::invalid_argument(name + " color must be a sampled single-sample 2D RGBA16Float texture");
 		}
+
 		const auto sameSize = [&](const Rhi::TextureDesc& other)
 		{
 			return other.Extent.Width == colorDesc.Extent.Width && other.Extent.Height == colorDesc.Extent.Height;
 		};
 		const bool depthIsDepth = depthDesc.PixelFormat == Rhi::Format::D32Float;
+
 		if (!IsPlain2D(depthDesc) || !sameSize(depthDesc) || (!depthIsDepth && depthDesc.PixelFormat != Rhi::Format::R32Float))
 		{
 			throw std::invalid_argument(name + " depth must be a color-sized sampled D32Float or R32Float texture");
 		}
+
 		if (!IsPlain2D(velocityDesc) || !sameSize(velocityDesc) || velocityDesc.PixelFormat != Rhi::Format::RG16Float)
 		{
 			throw std::invalid_argument(name + " velocity must be a color-sized sampled RG16Float texture");
 		}
+
 		const std::uint32_t frameWidth = colorDesc.Extent.Width;
 		const std::uint32_t frameHeight = colorDesc.Extent.Height;
 
@@ -93,17 +101,21 @@ namespace Swim::Render
 					retired.push_back(std::move(texture));
 				}
 			}
+
 			auto historyDesc = HistoryDesc(frameWidth, frameHeight);
+
 			for (std::uint32_t i = 0; i < 2; ++i)
 			{
 				const std::string debugName = name + (i == 0 ? " history A" : " history B");
 				historyDesc.DebugName = debugName;
 				history[i] = device.CreateTexture(historyDesc);
+
 				if (!history[i])
 				{
 					throw std::runtime_error(name + " history textures could not be created");
 				}
 			}
+
 			written = { false, false };
 			width = frameWidth;
 			height = frameHeight;
@@ -144,10 +156,12 @@ namespace Swim::Render
 				b.Read(color, S::ShaderRead);
 				b.Read(depth, S::ShaderRead);
 				b.Read(velocity, S::ShaderRead);
+
 				if (separateHistory)
 				{
 					b.Read(past, S::ShaderRead);
 				}
+
 				b.Write(output, S::ShaderWrite);
 			},
 			[program = desc.Resolve, label = name + " resolve", color, depth, velocity, past, output, depthIsDepth, constants, release](
@@ -157,6 +171,7 @@ namespace Swim::Render
 				{
 					c.Retain(std::move(texture)); // Kept alive until this graph's GPU work completes.
 				}
+
 				release->clear();
 				using B = TemporalResolveBindings;
 				const auto view = [&](GraphTexture texture, Rhi::Format format, Rhi::TextureAspect aspect = Rhi::TextureAspect::Automatic)
@@ -173,15 +188,19 @@ namespace Swim::Render
 				writes[B::Velocity].TextureResource = view(velocity, Rhi::Format::RG16Float);
 				writes[B::History].TextureResource = view(past, Rhi::Format::RGBA16Float);
 				writes[B::Output].TextureResource = view(output, Rhi::Format::RGBA16Float);
+
 				for (std::uint32_t binding = 0; binding < B::Count; ++binding)
 				{
 					writes[binding].Binding = binding;
 				}
+
 				auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 				if (!table)
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
+
 				table->Write(writes);
 				auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 				auto& list = c.Commands();
@@ -205,11 +224,14 @@ namespace Swim::Render
 		{
 			return std::nullopt;
 		}
+
 		if (importedGraph != &graph)
 		{
 			importedHistory = graph.ImportTexture(*history[latest], Rhi::ResourceState::ShaderRead);
 			importedGraph = &graph;
 		}
+
 		return importedHistory;
 	}
+
 } // namespace Swim::Render

@@ -10,13 +10,16 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	std::vector<std::byte> Pattern(std::size_t size, unsigned seed)
 	{
 		std::vector<std::byte> bytes(size);
+
 		for (std::size_t i = 0; i < size; ++i)
 		{
 			bytes[i] = static_cast<std::byte>((i * 5 + seed * 31 + 1) & 0xff);
 		}
+
 		return bytes;
 	}
 
@@ -72,14 +75,17 @@ namespace
 	{
 		RenderGraph graph;
 		auto imported = heap.Import(graph);
+
 		if (resources)
 		{
 			*resources = imported;
 		}
+
 		const auto completion = executor.Execute(graph.Compile());
 		heap.CommitUploads(completion);
 		return completion;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.GeometryHeap", "CreatesStableMetadataRowsInSharedPages")
@@ -363,6 +369,7 @@ SWIM_TEST("Render.GeometryHeap", "ReportsFragmentationAcrossPages")
 	desc.VertexPageSize = 256;
 	GeometryHeap heap(device, desc);
 	std::vector<GpuMeshHandle> meshes;
+
 	for (unsigned i = 0; i < 4; ++i)
 	{
 		GeometryMeshDesc mesh;
@@ -371,6 +378,7 @@ SWIM_TEST("Render.GeometryHeap", "ReportsFragmentationAcrossPages")
 		mesh.Vertices = vertices;
 		meshes.push_back(heap.CreateMesh(mesh));
 	}
+
 	SWIM_CHECK_EQUAL(heap.GetStats().Vertex.Pages, 1u);
 	SWIM_CHECK_EQUAL(heap.GetStats().Vertex.FreeBytes, 0u);
 	SWIM_CHECK_EQUAL(heap.GetStats().Vertex.Fragmentation, 0.0);

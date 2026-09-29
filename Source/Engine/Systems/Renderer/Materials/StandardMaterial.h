@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// The engine's built-in metallic-roughness material (items 58-60). Its record is
 	// Shaders/Slang/Materials/StandardMaterialParameters.slang; the tests prove this
 	// hand-written layout equals the compiled shader's reflection, so the runtime
@@ -32,4 +33,5 @@ namespace Swim::Render
 	// Decodes an instance of the standard template (throws for other layouts).
 	StandardPbr::Parameters ReadStandardParameters(const MaterialInstance& instance);
 	StandardMaterialTextures ReadStandardTextures(const MaterialInstance& instance);
+
 } // namespace Swim::Render

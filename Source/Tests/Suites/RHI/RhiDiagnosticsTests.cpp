@@ -29,6 +29,7 @@ SWIM_TEST("RHI.Diagnostics", "ConcurrentCallbacksKeepCountsWhenStorageIsFull")
 {
 	Rhi::DiagnosticLog log(32);
 	std::array<std::thread, 4> workers;
+
 	for (unsigned index = 0; index < workers.size(); ++index)
 	{
 		workers[index] = std::thread([&, index]
@@ -37,12 +38,15 @@ SWIM_TEST("RHI.Diagnostics", "ConcurrentCallbacksKeepCountsWhenStorageIsFull")
 			{
 				log.Record(index % 2 ? Rhi::DiagnosticSeverity::Error : Rhi::DiagnosticSeverity::Warning, "concurrent", "message");
 			}
+
 		});
 	}
+
 	for (auto& worker : workers)
 	{
 		worker.join();
 	}
+
 	const auto snapshot = log.Snapshot();
 	SWIM_CHECK_EQUAL(snapshot.Messages.size(), 32u);
 	SWIM_CHECK_EQUAL(snapshot.Warnings, 500u);

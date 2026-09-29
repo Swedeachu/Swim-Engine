@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	struct UiAtlasTexturesDesc
 	{
 		std::uint32_t MaxPages = 256;
@@ -49,30 +50,41 @@ namespace Swim::Render
 	// Destroy only after the GPU finished every submission that sampled the pages.
 	class UiAtlasTextures
 	{
+
 	  public:
+
 		// Throws std::runtime_error when the sampler cannot be created and
 		// std::invalid_argument for an invalid desc.
 		UiAtlasTextures(Rhi::Device& device, BindlessResourceTable& bindless, UiAtlasTexturesDesc desc = {});
+
 		~UiAtlasTextures();
+
 		UiAtlasTextures(const UiAtlasTextures&) = delete;
+
 		UiAtlasTextures& operator=(const UiAtlasTextures&) = delete;
 
 		// Throws std::logic_error while a frame awaits CommitFrame/AbortFrame or when
 		// `atlas` is not the attached one (Release first), std::length_error beyond
 		// MaxPages or a full bindless table, std::runtime_error on texture creation failure.
 		UiAtlasFrame Update(RenderGraph& graph, const Text::GlyphAtlas& atlas);
+
 		void CommitFrame();
+
 		void AbortFrame();
 
 		// Detaches the atlas. Throws std::logic_error while a frame is pending.
 		void Release(Rhi::TimelinePoint lastUse);
+
 		std::size_t Collect();
+
 		std::size_t Drain(); // Waits for every retiring page.
 
 		std::uint32_t GetSamplerIndex() const;
+
 		UiAtlasTexturesStats GetStats() const;
 
 	  private:
+
 		struct Page
 		{
 			std::unique_ptr<Rhi::Texture> Texture;
@@ -104,5 +116,7 @@ namespace Swim::Render
 		std::uint64_t uploadedBytes = 0;
 		std::uint64_t pendingBytes = 0;
 		bool pending = false;
+
 	};
+
 } // namespace Swim::Render

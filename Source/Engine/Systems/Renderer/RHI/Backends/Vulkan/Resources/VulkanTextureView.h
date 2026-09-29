@@ -15,7 +15,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanTextureView final : public Rhi::TextureView
 		{
+
 		public:
+
 			VulkanTextureView(
 				std::shared_ptr<VulkanDeviceState> state,
 				VulkanTexture& texture,
@@ -36,6 +38,7 @@ namespace Swim::RhiVulkan
 			~VulkanTextureView() override
 			{
 				RetireLostVulkanDevice(*state);
+
 				if (ownsView && view != VK_NULL_HANDLE)
 				{
 					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
@@ -63,12 +66,14 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			VulkanTexture& texture;
 			VkImageView view = VK_NULL_HANDLE;
 			bool ownsView = false;
 			std::string debugName;
 			Rhi::TextureViewDesc desc{};
+
 		};
 
 } // namespace Swim::RhiVulkan

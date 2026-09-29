@@ -29,7 +29,9 @@ namespace Swim::Testing
 	// Cooked objects written through WriteObject are resolved by AssetId.
 	class ResidencyServiceFixture
 	{
+
 	  public:
+
 		explicit ResidencyServiceFixture(const std::string& name, bool useJobs = true)
 			: root(std::filesystem::temp_directory_path() / ("SwimResidency_" + name))
 		{
@@ -73,6 +75,7 @@ namespace Swim::Testing
 		}
 
 		ResidencyServiceFixture(const ResidencyServiceFixture&) = delete;
+
 		ResidencyServiceFixture& operator=(const ResidencyServiceFixture&) = delete;
 
 		Render::AssetResidencyService& Service(Render::AssetResidencyDesc desc = {})
@@ -85,6 +88,7 @@ namespace Swim::Testing
 					return found == objects.end() ? std::filesystem::path{} : found->second;
 				};
 			}
+
 			service = std::make_unique<Render::AssetResidencyService>(
 				assets, io, useJobSystem ? &jobs : nullptr, *geometry, *textures, std::move(desc));
 			return *service;
@@ -105,16 +109,20 @@ namespace Swim::Testing
 		bool UpdateUntil(const std::function<bool()>& done, std::chrono::milliseconds timeout = std::chrono::seconds(10))
 		{
 			const auto deadline = std::chrono::steady_clock::now() + timeout;
+
 			while (std::chrono::steady_clock::now() < deadline)
 			{
 				io.PumpCompletions();
 				service->Update();
+
 				if (done())
 				{
 					return true;
 				}
+
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
+
 			return false;
 		}
 
@@ -144,6 +152,7 @@ namespace Swim::Testing
 		std::unordered_map<Assets::AssetId, std::filesystem::path> objects;
 		std::filesystem::path root;
 		bool useJobSystem = true;
+
 	};
 
 } // namespace Swim::Testing

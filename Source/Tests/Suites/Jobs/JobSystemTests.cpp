@@ -40,6 +40,7 @@ namespace
 		}
 
 		ScopedJobSystem(const ScopedJobSystem&) = delete;
+
 		ScopedJobSystem& operator=(const ScopedJobSystem&) = delete;
 
 		bool IsInitialized() const
@@ -104,9 +105,11 @@ SWIM_TEST("Jobs.JobSystem", "ParallelForCoversEveryElement")
 		{
 			values[i] = static_cast<int>(i);
 		}
+
 	});
 
 	bool everyElementWritten = true;
+
 	for (std::size_t i = 0; i < values.size(); ++i)
 	{
 		if (values[i] != static_cast<int>(i))
@@ -115,6 +118,7 @@ SWIM_TEST("Jobs.JobSystem", "ParallelForCoversEveryElement")
 			break;
 		}
 	}
+
 	SWIM_CHECK(everyElementWritten);
 }
 
@@ -221,6 +225,7 @@ SWIM_TEST("Jobs.JobSystem", "ExternalThreadsRegisterIntoReservedSlots")
 	std::thread external([&]()
 	{
 		registered = jobs.RegisterCurrentExternalThread();
+
 		if (!registered)
 		{
 			return;
@@ -251,10 +256,12 @@ SWIM_TEST("Jobs.JobSystem", "ExternalThreadRegistrationFailsWithoutReservedSlots
 	std::thread external([&]()
 	{
 		registered = jobs.RegisterCurrentExternalThread();
+
 		if (registered)
 		{
 			jobs.UnregisterCurrentExternalThread();
 		}
+
 	});
 	external.join();
 

@@ -11,8 +11,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 		using B = ParticleSimulationBindings;
 
@@ -40,11 +42,14 @@ namespace Swim::Render
 			const std::array<std::uint32_t, Count>& bindings, std::uint32_t x, std::uint32_t y, std::uint32_t z)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			std::array<Rhi::DescriptorWrite, Count> writes{};
+
 			for (std::size_t i = 0; i < Count; ++i)
 			{
 				const auto range = c.GetRange(*set.Buffers[bindings[i]]);
@@ -53,6 +58,7 @@ namespace Swim::Render
 				writes[i].BufferOffset = range.Offset;
 				writes[i].BufferRange = range.Size;
 			}
+
 			table->Write(writes);
 			auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 			auto& list = c.Commands();
@@ -60,6 +66,7 @@ namespace Swim::Render
 			list.BindDescriptorTable(0, retained);
 			list.Dispatch(x, y, z);
 		}
+
 	} // namespace
 
 	Rhi::GraphicsPipelineDesc ParticleSystem::PipelineDesc(
@@ -72,10 +79,12 @@ namespace Swim::Render
 		static constexpr std::array<Rhi::BlendAttachmentState, 1> AlphaBlend{ Rhi::BlendAttachmentState{ true, Rhi::BlendFactor::One,
 			Rhi::BlendFactor::OneMinusSourceAlpha, Rhi::BlendOp::Add, Rhi::BlendFactor::One, Rhi::BlendFactor::OneMinusSourceAlpha,
 			Rhi::BlendOp::Add, Rhi::ColorWriteMask::All } };
+
 		if (blend != ParticleBlendMode::Additive && blend != ParticleBlendMode::AlphaBlend)
 		{
 			throw std::invalid_argument("Unknown particle blend mode");
 		}
+
 		Rhi::GraphicsPipelineDesc pipeline{};
 		pipeline.Program = &program;
 		pipeline.Layout = &layout;
@@ -101,19 +110,23 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs the simulate, emit, compact and finalize programs");
 			}
 		}
+
 		if (desc.Capacity < 1 || desc.Capacity > MaxCapacity || desc.MaxEmitters < 1 || desc.MaxEmitters > 65535)
 		{
 			throw std::invalid_argument(desc.DebugName + " needs 1 .. MaxCapacity slots and 1 .. 65535 emitters");
 		}
+
 		capacity = desc.Capacity;
 		const auto storage = Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferDestination | Rhi::BufferUsage::TransferSource;
 		const auto make = [&](std::uint64_t size, Rhi::BufferUsage usage, const std::string& label)
 		{
 			auto buffer = device.CreateBuffer({ size, usage, Rhi::MemoryPreference::DeviceLocal, label });
+
 			if (!buffer)
 			{
 				throw std::runtime_error(label + " could not be created");
 			}
+
 			return buffer;
 		};
 		particles = make(std::uint64_t(capacity) * sizeof(GpuParticle), storage, desc.DebugName + " pool");
@@ -139,13 +152,16 @@ namespace Swim::Render
 				const Range range{ it->First, count };
 				it->First += count;
 				it->Count -= count;
+
 				if (it->Count == 0)
 				{
 					freeRanges.erase(it);
 				}
+
 				return range;
 			}
 		}
+
 		return std::nullopt;
 	}
 
@@ -163,9 +179,11 @@ namespace Swim::Render
 			it->Count += next->Count;
 			freeRanges.erase(next);
 		}
+
 		if (it != freeRanges.begin())
 		{
 			auto previous = it - 1;
+
 			if (previous->First + previous->Count == it->First)
 			{
 				previous->Count += it->Count;
@@ -178,24 +196,30 @@ namespace Swim::Render
 		const ParticleEmitterDesc& emitterDesc, const std::array<float, 12>& transform)
 	{
 		PackParticleEmitter(emitterDesc, transform, 0, 0, 0); // Validates both.
+
 		if (registry->GetStats().Live + registry->GetStats().Retiring >= desc.MaxEmitters)
 		{
 			return std::nullopt;
 		}
+
 		const auto range = Allocate(emitterDesc.Capacity);
+
 		if (!range)
 		{
 			return std::nullopt;
 		}
+
 		Emitter emitter;
 		emitter.Desc = emitterDesc;
 		emitter.Transform = transform;
 		emitter.Slots = *range;
 		auto handle = registry->TryCreate(std::move(emitter));
+
 		if (!handle)
 		{
 			Free(*range);
 		}
+
 		return handle;
 	}
 
@@ -205,6 +229,7 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(desc.DebugName + " has no free emitter row or pool range for this capacity");
 	}
 
@@ -216,10 +241,12 @@ namespace Swim::Render
 	bool ParticleSystem::SetTransform(ParticleEmitterHandle handle, const std::array<float, 12>& transform)
 	{
 		auto* emitter = registry->Get(handle);
+
 		if (!emitter)
 		{
 			return false;
 		}
+
 		if (!std::all_of(transform.begin(), transform.end(),
 				[](float v)
 				{
@@ -228,6 +255,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " emitter transform must be finite");
 		}
+
 		emitter->Transform = transform;
 		return true;
 	}
@@ -235,10 +263,12 @@ namespace Swim::Render
 	bool ParticleSystem::SetEmitting(ParticleEmitterHandle handle, bool emitting)
 	{
 		auto* emitter = registry->Get(handle);
+
 		if (!emitter)
 		{
 			return false;
 		}
+
 		emitter->Emitting = emitting;
 		return true;
 	}
@@ -272,6 +302,7 @@ namespace Swim::Render
 		{
 			throw std::logic_error(desc.DebugName + " has a frame awaiting CommitFrame/AbortFrame");
 		}
+
 		try
 		{
 			return RecordSimulation(graph, view, deltaTime);
@@ -297,6 +328,7 @@ namespace Swim::Render
 				live.push_back(handle);
 			});
 		std::sort(live.begin(), live.end());
+
 		if (live.empty())
 		{
 			return resources;
@@ -306,11 +338,13 @@ namespace Swim::Render
 		std::uint32_t maxSpawn = 0;
 		std::uint32_t maxCapacity = 0;
 		std::vector<ParticleEmitterHandle> resets;
+
 		for (const auto handle : live)
 		{
 			auto& emitter = *registry->Get(handle);
 			emitter.SavedClock = emitter.Clock;
 			std::uint32_t spawn = 0;
+
 			if (emitter.Emitting)
 			{
 				spawn = Particles::AdvanceEmission(emitter.Desc, emitter.Clock, deltaTime);
@@ -319,6 +353,7 @@ namespace Swim::Render
 			{
 				emitter.Clock.Time += deltaTime;
 			}
+
 			auto record = PackParticleEmitter(emitter.Desc, emitter.Transform, emitter.Slots.First, spawn, emitter.Clock.NextId - spawn);
 			record.Row = handle.Index;
 			maxSpawn = std::max(maxSpawn, record.SpawnCount);
@@ -329,14 +364,17 @@ namespace Swim::Render
 			entry.Blend = emitter.Desc.Blend;
 			records.push_back(record);
 			resources.Emitters.push_back(entry);
+
 			if (emitter.NeedsReset)
 			{
 				resets.push_back(handle);
 			}
 		}
+
 		const auto count = static_cast<std::uint32_t>(records.size());
 		resources.FrameRecord = BuildParticleFrame(view, deltaTime, count, maxSpawn);
 		const auto& frameRecord = resources.FrameRecord;
+
 		for (auto& entry : resources.Emitters)
 		{
 			const auto& t = entry.Record.Transform;
@@ -373,6 +411,7 @@ namespace Swim::Render
 
 		// New ranges start empty: free slots, a full free list and fresh counters.
 		resetInFlight = resets;
+
 		for (const auto handle : resets)
 		{
 			const auto& emitter = *registry->Get(handle);
@@ -394,6 +433,7 @@ namespace Swim::Render
 						const auto slot = static_cast<std::uint32_t>(first + i);
 						std::memcpy(bytes.data() + i * 4, &slot, 4);
 					}
+
 				},
 				free, std::uint64_t(first) * 4);
 			const GpuParticleCounters fresh{ slots, 0, 0, 0 };
@@ -401,12 +441,15 @@ namespace Swim::Render
 				std::uint64_t(handle.Index) * sizeof(GpuParticleCounters));
 			registry->Get(handle)->NeedsReset = false;
 		}
+
 		resources.InitializedEmitters = static_cast<std::uint32_t>(resets.size());
+
 		if (!quadIndicesReady)
 		{
 			AddBufferUpload(graph, name + " quad indices", std::as_bytes(std::span(QuadIndices)), indices);
 			quadIndicesInFlight = true;
 		}
+
 		pending = true; // From here on only passes are declared; CommitFrame/AbortFrame settles the frame.
 
 		constexpr std::uint32_t group = ParticleThreadGroupSize;
@@ -476,10 +519,12 @@ namespace Swim::Render
 			{
 				emitter.SavedClock = emitter.Clock; // AbortFrame never rewinds past a committed frame.
 			});
+
 		if (quadIndicesInFlight)
 		{
 			quadIndicesReady = true;
 		}
+
 		quadIndicesInFlight = false;
 		resetInFlight.clear();
 		pending = false;
@@ -492,6 +537,7 @@ namespace Swim::Render
 			{
 				emitter.Clock = emitter.SavedClock;
 			});
+
 		for (const auto handle : resetInFlight)
 		{
 			if (auto* emitter = registry->Get(handle))
@@ -499,6 +545,7 @@ namespace Swim::Render
 				emitter->NeedsReset = true;
 			}
 		}
+
 		quadIndicesInFlight = false;
 		resetInFlight.clear();
 		pending = false;
@@ -508,22 +555,27 @@ namespace Swim::Render
 		const ParticleRenderProgram& program, const ParticleDrawTargets& targets, Rhi::DescriptorTable& bindless) const
 	{
 		const auto& name = desc.DebugName;
+
 		if (!program.Additive || !program.AlphaBlend || !program.Layout)
 		{
 			throw std::invalid_argument(name + " draw needs both pipelines and their layout");
 		}
+
 		const auto colorDesc = graph.GetDesc(targets.Color);
 		const auto depthDesc = graph.GetDesc(targets.Depth);
+
 		if (colorDesc.PixelFormat != ColorFormat || !HasUsage(colorDesc.Usage, Rhi::TextureUsage::ColorAttachment) ||
 			depthDesc.PixelFormat != Rhi::Format::D32Float || !HasUsage(depthDesc.Usage, Rhi::TextureUsage::DepthStencilAttachment) ||
 			colorDesc.Extent.Width != depthDesc.Extent.Width || colorDesc.Extent.Height != depthDesc.Extent.Height)
 		{
 			throw std::invalid_argument(name + " draw needs same-sized RGBA16Float color and D32Float depth attachments");
 		}
+
 		if (frame.Emitters.empty() || !frame.Frame)
 		{
 			return std::nullopt;
 		}
+
 		// Additive emitters first (order independent), then blended ones back to front.
 		std::vector<std::uint32_t> order(frame.Emitters.size());
 		std::iota(order.begin(), order.end(), 0u);
@@ -532,19 +584,23 @@ namespace Swim::Render
 			{
 				const auto& ea = frame.Emitters[a];
 				const auto& eb = frame.Emitters[b];
+
 				if (ea.Blend != eb.Blend)
 				{
 					return ea.Blend == ParticleBlendMode::Additive;
 				}
+
 				return ea.Blend == ParticleBlendMode::AlphaBlend && ea.OriginDepth > eb.OriginDepth;
 			});
 		std::vector<std::pair<std::uint32_t, std::uint32_t>> draws; // (emitter index, row)
 		std::vector<ParticleBlendMode> blends;
+
 		for (const auto index : order)
 		{
 			draws.push_back({ index, frame.Emitters[index].Record.Row });
 			blends.push_back(frame.Emitters[index].Blend);
 		}
+
 		const std::uint32_t width = colorDesc.Extent.Width;
 		const std::uint32_t height = colorDesc.Extent.Height;
 		const auto frameBuffer = *frame.Frame;
@@ -572,13 +628,16 @@ namespace Swim::Render
 			{
 				using R = ParticleRenderBindings;
 				auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+
 				if (!table)
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
+
 				std::array<Rhi::DescriptorWrite, R::Count> writes{};
 				const std::array<std::pair<std::uint32_t, GraphBuffer>, R::Count> buffers{ { { R::Frame, frameBuffer },
 					{ R::Emitters, emitterBuffer }, { R::Particles, pool }, { R::DrawList, drawListBuffer } } };
+
 				for (std::size_t i = 0; i < buffers.size(); ++i)
 				{
 					const auto range = c.GetRange(buffers[i].second);
@@ -587,6 +646,7 @@ namespace Swim::Render
 					writes[i].BufferOffset = range.Offset;
 					writes[i].BufferRange = range.Size;
 				}
+
 				table->Write(writes);
 				auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 				std::array<Rhi::RenderingAttachmentDesc, 1> colors{};
@@ -603,6 +663,7 @@ namespace Swim::Render
 				list.BindIndexBuffer(c.Get(indices), 0, Rhi::IndexType::Uint32);
 				auto& argumentBuffer = c.Get(args);
 				std::optional<ParticleBlendMode> bound;
+
 				for (std::size_t i = 0; i < draws.size(); ++i)
 				{
 					if (bound != blends[i])
@@ -612,11 +673,13 @@ namespace Swim::Render
 						list.BindDescriptorTable(R::BindlessSpace, *bindlessTable);
 						bound = blends[i];
 					}
+
 					const std::uint32_t emitter = draws[i].first;
 					list.PushConstants(
 						Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&emitter, 1)));
 					list.DrawIndexedIndirect(argumentBuffer, std::uint64_t(draws[i].second) * CommandBytes, 1);
 				}
+
 				list.EndRendering();
 			});
 	}
@@ -624,10 +687,12 @@ namespace Swim::Render
 	std::optional<std::pair<std::uint32_t, std::uint32_t>> ParticleSystem::GetRange(ParticleEmitterHandle handle) const
 	{
 		const auto* emitter = registry->Get(handle);
+
 		if (!emitter)
 		{
 			return std::nullopt;
 		}
+
 		return std::pair{ emitter->Slots.First, emitter->Slots.Count };
 	}
 
@@ -638,12 +703,15 @@ namespace Swim::Render
 		stats.LiveEmitters = static_cast<std::uint32_t>(registryStats.Live);
 		stats.RetiringEmitters = static_cast<std::uint32_t>(registryStats.Retiring);
 		std::uint32_t freeSlots = 0;
+
 		for (const auto& range : freeRanges)
 		{
 			freeSlots += range.Count;
 			stats.LargestFreeRange = std::max(stats.LargestFreeRange, range.Count);
 		}
+
 		stats.AllocatedSlots = capacity - freeSlots;
 		return stats;
 	}
+
 } // namespace Swim::Render

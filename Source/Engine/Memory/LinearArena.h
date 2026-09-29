@@ -27,14 +27,19 @@ namespace Swim::Memory
 
 	class LinearArena
 	{
+
 	public:
 
 		explicit LinearArena(std::size_t defaultBlockSizeBytes = 64 * 1024);
+
 		~LinearArena();
 
 		LinearArena(const LinearArena&) = delete;
+
 		LinearArena& operator=(const LinearArena&) = delete;
+
 		LinearArena(LinearArena&&) noexcept;
+
 		LinearArena& operator=(LinearArena&&) noexcept;
 
 		void* Allocate(std::size_t sizeBytes, std::size_t alignment = alignof(std::max_align_t));
@@ -43,6 +48,7 @@ namespace Swim::Memory
 		T* AllocateArray(std::size_t count = 1)
 		{
 			static_assert(!std::is_void_v<T>);
+
 			if (count == 0)
 			{
 				return nullptr;
@@ -64,16 +70,20 @@ namespace Swim::Memory
 		}
 
 		ArenaMarker GetMarker() const;
+
 		void Rewind(ArenaMarker marker);
+
 		void Reset();
 
 		std::size_t GetDefaultBlockSize() const;
+
 		ArenaStats GetStats() const;
 
 	private:
 
 		struct Impl;
 		std::unique_ptr<Impl> impl;
+
 	};
 
 }

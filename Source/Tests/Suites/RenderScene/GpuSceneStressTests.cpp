@@ -16,6 +16,7 @@ SWIM_TEST("Render.GpuSceneStress", "HundredThousandObjectsUploadOnlyDirtyRows")
 	std::vector<RenderObjectHandle> objects;
 	objects.reserve(count);
 	const auto createStart = std::chrono::steady_clock::now();
+
 	for (std::uint32_t i = 0; i < count; ++i)
 	{
 		RenderObjectDesc desc;
@@ -26,6 +27,7 @@ SWIM_TEST("Render.GpuSceneStress", "HundredThousandObjectsUploadOnlyDirtyRows")
 		desc.ObjectId = i;
 		objects.push_back(scene.Create(desc));
 	}
+
 	const auto initial = fixture.Upload();
 	const auto createEnd = std::chrono::steady_clock::now();
 	SWIM_CHECK_EQUAL(initial.RowCount, count);
@@ -36,16 +38,19 @@ SWIM_TEST("Render.GpuSceneStress", "HundredThousandObjectsUploadOnlyDirtyRows")
 	// Frames with 1% of objects moving (strided, so no two are adjacent) and a few
 	// material changes: bytes and runs scale with the changes, not the scene.
 	std::chrono::steady_clock::duration steady{};
+
 	for (std::uint32_t frame = 1; frame <= 3; ++frame)
 	{
 		for (std::uint32_t i = frame; i < count; i += 100)
 		{
 			scene.SetTransform(objects[i], RenderAffine::Translation(float(i), float(frame), 0.0f));
 		}
+
 		for (std::uint32_t i = 0; i < 10; ++i)
 		{
 			scene.SetMaterialSet(objects[i * 7919], 1000 + frame);
 		}
+
 		const auto start = std::chrono::steady_clock::now();
 		const auto uploaded = fixture.Upload();
 		steady += std::chrono::steady_clock::now() - start;
@@ -56,6 +61,7 @@ SWIM_TEST("Render.GpuSceneStress", "HundredThousandObjectsUploadOnlyDirtyRows")
 		SWIM_CHECK_EQUAL(uploaded.UploadBytes, std::uint64_t(transformRows) * 96 + 10 * 64);
 		SWIM_CHECK(uploaded.UploadBytes * 50 < initial.UploadBytes);
 	}
+
 	SWIM_CHECK(fixture.GpuMatchesMirror());
 
 	// A static frame after everything settles costs nothing.

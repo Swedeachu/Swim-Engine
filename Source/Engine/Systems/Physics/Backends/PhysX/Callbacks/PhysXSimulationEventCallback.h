@@ -43,6 +43,7 @@ namespace Engine
 			{
 				return;
 			}
+
 			// A body destroyed since the last step still gets its lost-touch pairs reported,
 			// but the actor pointer is already released: it must not be dereferenced (even
 			// PxActor::is<> is a virtual call). Its handle is gone on our side anyway.
@@ -53,6 +54,7 @@ namespace Engine
 
 			const BodyHandle bodyA = owner.ResolveBody(pairHeader.actors[0]);
 			const BodyHandle bodyB = owner.ResolveBody(pairHeader.actors[1]);
+
 			if (!bodyA || !bodyB)
 			{
 				return;
@@ -70,6 +72,7 @@ namespace Engine
 				{
 					continue;
 				}
+
 				event.ShapeA = owner.ResolveShape(pair.shapes[0]);
 				event.ShapeB = owner.ResolveShape(pair.shapes[1]);
 
@@ -93,6 +96,7 @@ namespace Engine
 				if (event.Type != CollisionEventType::Ended && pair.contactCount > 0)
 				{
 					physx::PxContactPairPoint point{};
+
 					if (pair.extractContacts(&point, 1) > 0)
 					{
 						event.Position = PhysXWorldBackend::ToGlm(point.position);
@@ -115,6 +119,7 @@ namespace Engine
 			for (physx::PxU32 i = 0; i < count; ++i)
 			{
 				const physx::PxTriggerPair& pair = pairs[i];
+
 				if ((pair.flags & physx::PxTriggerPairFlag::eREMOVED_SHAPE_TRIGGER)
 					|| (pair.flags & physx::PxTriggerPairFlag::eREMOVED_SHAPE_OTHER))
 				{
@@ -123,6 +128,7 @@ namespace Engine
 
 				const bool entered = pair.status == physx::PxPairFlag::eNOTIFY_TOUCH_FOUND;
 				const bool exited = pair.status == physx::PxPairFlag::eNOTIFY_TOUCH_LOST;
+
 				if (!entered && !exited)
 				{
 					continue;

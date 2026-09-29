@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	struct TextureResidencyStats
 	{
 		std::uint32_t PendingTextures = 0;
@@ -13,4 +14,5 @@ namespace Swim::Render
 		std::uint64_t PendingUploadBytes = 0;
 		std::uint64_t ResidentBytes = 0; // Tightly packed texel bytes of resident textures.
 	};
+
 } // namespace Swim::Render

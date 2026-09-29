@@ -11,6 +11,7 @@ namespace Pbr = Swim::Render::StandardPbr;
 
 namespace
 {
+
 	LightDesc Spot(float inner, float outer, float range = 10.0f)
 	{
 		LightDesc desc;
@@ -27,6 +28,7 @@ namespace
 	{
 		return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Lights", "EncodingValidatesDescsAndPacksTheGpuRecord")
@@ -106,6 +108,7 @@ SWIM_TEST("Render.Lights", "AttenuationFollowsTheInverseSquareLawAndReachesZeroA
 	SWIM_CHECK_EQUAL(L::RangeAttenuation(150.0f, inverseRange2), 0.0f);
 	// Monotonically decreasing and continuous up to the range.
 	float previous = 1.0e9f;
+
 	for (int i = 1; i <= 100; ++i)
 	{
 		const float d = 0.1f * float(i);
@@ -113,6 +116,7 @@ SWIM_TEST("Render.Lights", "AttenuationFollowsTheInverseSquareLawAndReachesZeroA
 		SWIM_CHECK(a <= previous);
 		previous = a;
 	}
+
 	SWIM_CHECK(previous < 1.0e-6f);
 	// The distance clamp keeps the light finite at its position.
 	SWIM_CHECK_EQUAL(L::RangeAttenuation(0.0f, inverseRange2), 1.0f / L::MinDistanceSquared);
@@ -171,6 +175,7 @@ SWIM_TEST("Render.Lights", "BoundingSpheresContainEveryLitPointAndSpotSpheresAre
 	std::mt19937 random(63);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 	std::normal_distribution<float> normal(0.0f, 1.0f);
+
 	for (int trial = 0; trial < 64; ++trial)
 	{
 		LightDesc desc;
@@ -189,16 +194,19 @@ SWIM_TEST("Render.Lights", "BoundingSpheresContainEveryLitPointAndSpotSpheresAre
 			const float r = desc.Range * std::cbrt(unit(random));
 			const auto d = Pbr::Normalize({ normal(random), normal(random), normal(random) });
 			const L::Float3 point{ desc.Position[0] + d[0] * r, desc.Position[1] + d[1] * r, desc.Position[2] + d[2] * r };
+
 			if (L::EvaluateLight(record, point).Radiance[0] <= 0.0f)
 			{
 				continue;
 			}
+
 			const float dx = point[0] - sphere.Center[0];
 			const float dy = point[1] - sphere.Center[1];
 			const float dz = point[2] - sphere.Center[2];
 			SWIM_CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) <= sphere.Radius * 1.0001f + 1.0e-5f);
 		}
 	}
+
 	// A narrow spot's sphere is much smaller than its range sphere; a hemisphere spot's is the range sphere.
 	const auto narrow = L::LightBoundingSphere(L::EncodeLight(Spot(0.1f, 0.2f, 10.0f)));
 	SWIM_CHECK(std::abs(narrow.Radius - 10.0f / (2.0f * std::cos(0.2f))) < 1.0e-4f);

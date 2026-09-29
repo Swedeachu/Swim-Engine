@@ -11,6 +11,7 @@
 
 namespace Swim::Testing
 {
+
 	// A small skinned, morphing, animated glTF written to a scratch file:
 	//
 	//   node 0 "Armature" (translation 0,0,1; not a joint)
@@ -29,7 +30,9 @@ namespace Swim::Testing
 	// on Hip, cubic-spline morph weights on Body, linear scale on Armature.
 	class SkinnedGltfFixture
 	{
+
 	  public:
+
 		// Vertex i uses skin joints JointsOf(i) with weights WeightsOf(i).
 		static constexpr std::array<std::array<std::uint16_t, 4>, 4> Joints{ { { 2, 1, 0, 0 }, { 1, 0, 0, 0 }, { 0, 1, 2, 0 },
 			{ 2, 0, 0, 0 } } };
@@ -52,6 +55,7 @@ namespace Swim::Testing
 		}
 
 		SkinnedGltfFixture(const SkinnedGltfFixture&) = delete;
+
 		SkinnedGltfFixture& operator=(const SkinnedGltfFixture&) = delete;
 
 		const std::filesystem::path& Path() const { return path; }
@@ -63,6 +67,7 @@ namespace Swim::Testing
 		}
 
 	  private:
+
 		struct View
 		{
 			std::size_t Offset = 0;
@@ -73,6 +78,7 @@ namespace Swim::Testing
 		{
 			static constexpr char Alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 			std::string out;
+
 			for (std::size_t i = 0; i < bytes.size(); i += 3)
 			{
 				const std::uint32_t b0 = bytes[i];
@@ -84,6 +90,7 @@ namespace Swim::Testing
 				out += i + 1 < bytes.size() ? Alphabet[(triple >> 6) & 63] : '=';
 				out += i + 2 < bytes.size() ? Alphabet[triple & 63] : '=';
 			}
+
 			return out;
 		}
 
@@ -93,6 +100,7 @@ namespace Swim::Testing
 			{
 				buffer.push_back(0);
 			}
+
 			View view{ buffer.size(), values.size() * sizeof(T) };
 			buffer.resize(buffer.size() + view.Length);
 			std::memcpy(buffer.data() + view.Offset, values.data(), view.Length);
@@ -106,6 +114,7 @@ namespace Swim::Testing
 			std::vector<float> deltas;
 			std::vector<std::uint16_t> joints;
 			std::vector<float> weights;
+
 			for (std::size_t v = 0; v < 4; ++v)
 			{
 				positions.insert(positions.end(), Positions[v].begin(), Positions[v].end());
@@ -113,13 +122,16 @@ namespace Swim::Testing
 				joints.insert(joints.end(), Joints[v].begin(), Joints[v].end());
 				weights.insert(weights.end(), Weights[v].begin(), Weights[v].end());
 			}
+
 			std::vector<std::uint16_t> indices{ 0, 1, 2, 0, 2, 3 };
 			std::vector<float> inverseBinds;
+
 			for (std::size_t joint = 0; joint < 3; ++joint)
 			{
 				const auto matrix = InverseBind(joint);
 				inverseBinds.insert(inverseBinds.end(), matrix.begin(), matrix.end());
 			}
+
 			const std::vector<float> times{ 0.0f, 1.0f };
 			// Spine rotation: identity -> 90 degrees about z.
 			const float h = 0.70710678f;
@@ -186,5 +198,7 @@ namespace Swim::Testing
 		}
 
 		std::filesystem::path path;
+
 	};
+
 } // namespace Swim::Testing

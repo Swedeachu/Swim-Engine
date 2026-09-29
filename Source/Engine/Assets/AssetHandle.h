@@ -13,14 +13,17 @@ namespace Swim::Assets
 	template<typename T>
 	class AssetHandle
 	{
+
 	public:
 
 		AssetHandle() = default;
 
 		bool IsValid() const { return id.IsValid() && generation != 0; }
+
 		explicit operator bool() const { return IsValid(); }
 
 		AssetId GetId() const { return id; }
+
 		std::uint32_t GetGeneration() const { return generation; }
 
 		auto operator<=>(const AssetHandle&) const = default;
@@ -36,6 +39,7 @@ namespace Swim::Assets
 		std::uint32_t generation = 0;
 
 		friend class AssetSystem;
+
 	};
 
 }

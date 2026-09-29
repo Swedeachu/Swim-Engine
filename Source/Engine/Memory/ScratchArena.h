@@ -9,18 +9,25 @@ namespace Swim::Memory
 
 	class ScratchScope
 	{
+
 	public:
 
 		ScratchScope();
+
 		explicit ScratchScope(LinearArena& arena);
+
 		~ScratchScope();
 
 		ScratchScope(const ScratchScope&) = delete;
+
 		ScratchScope& operator=(const ScratchScope&) = delete;
+
 		ScratchScope(ScratchScope&& other) noexcept;
+
 		ScratchScope& operator=(ScratchScope&& other) noexcept;
 
 		LinearArena& GetArena() { return *arena; }
+
 		const LinearArena& GetArena() const { return *arena; }
 
 	private:
@@ -29,6 +36,7 @@ namespace Swim::Memory
 
 		LinearArena* arena = nullptr;
 		ArenaMarker marker{};
+
 	};
 
 }

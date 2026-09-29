@@ -7,6 +7,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct VertexDrawCapture : Testing::VulkanPipelineCapture
 	{
 		RhiVulkan::VulkanTexture Target{ State, VK_NULL_HANDLE, { Rhi::TextureDimension::Texture2D, { 16, 16, 1 },
@@ -47,6 +48,7 @@ namespace
 			Commands->BindVertexBuffer(5, Instances, 8);
 		}
 	};
+
 }
 
 SWIM_TEST("RHI.Vulkan.VertexDraw", "BindingsForwardSparseSlotBufferAndOffset")

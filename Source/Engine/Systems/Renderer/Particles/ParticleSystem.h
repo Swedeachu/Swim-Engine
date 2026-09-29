@@ -12,6 +12,7 @@
 
 namespace Swim::Render
 {
+
 	struct ParticleComputeProgram
 	{
 		Rhi::ComputePipeline* Pipeline = nullptr;
@@ -71,7 +72,9 @@ namespace Swim::Render
 	// AbortFrame to rewind emission clocks and redo range resets).
 	class ParticleSystem
 	{
+
 	  public:
+
 		static constexpr Rhi::Format ColorFormat = Rhi::Format::RGBA16Float;
 		static constexpr std::uint32_t MaxCapacity = 1u << 24;
 
@@ -83,25 +86,35 @@ namespace Swim::Render
 		// Throws std::invalid_argument when a program is missing or the capacity is not
 		// 1 .. MaxCapacity, and std::runtime_error when a buffer cannot be created.
 		ParticleSystem(Rhi::Device& device, ParticleSystemDesc desc);
+
 		~ParticleSystem();
+
 		ParticleSystem(const ParticleSystem&) = delete;
+
 		ParticleSystem& operator=(const ParticleSystem&) = delete;
 
 		// Empty when every row is taken or no free range fits the capacity. Throws
 		// std::invalid_argument for an invalid desc or transform.
 		std::optional<ParticleEmitterHandle> TryCreateEmitter(
 			const ParticleEmitterDesc& desc, const std::array<float, 12>& transform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 });
+
 		// As above, but a full system throws std::length_error.
 		ParticleEmitterHandle CreateEmitter(
 			const ParticleEmitterDesc& desc, const std::array<float, 12>& transform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 });
+
 		bool IsValid(ParticleEmitterHandle emitter) const;
+
 		// False for invalid handles; throws std::invalid_argument for a non-finite transform.
 		bool SetTransform(ParticleEmitterHandle emitter, const std::array<float, 12>& transform);
+
 		// Stops emission (the clock keeps running, so bursts do not repeat) or resumes it.
 		bool SetEmitting(ParticleEmitterHandle emitter, bool emitting);
+
 		// Invalidates the handle now; its pool range is reused after lastUse completes.
 		bool Release(ParticleEmitterHandle emitter, Rhi::TimelinePoint lastUse = {});
+
 		std::size_t Collect();
+
 		std::size_t Drain();
 
 		// Advances every live emitter by deltaTime and records the four compute passes.
@@ -109,7 +122,9 @@ namespace Swim::Render
 		// frame awaits CommitFrame/AbortFrame, and std::invalid_argument for an invalid
 		// view or delta time.
 		ParticleGraphResources Simulate(RenderGraph& graph, const ParticleView& view, float deltaTime);
+
 		void CommitFrame();
+
 		void AbortFrame();
 
 		// Records the draw pass for a Simulate of the same graph (nothing without
@@ -138,6 +153,7 @@ namespace Swim::Render
 		Rhi::Buffer& GetDrawArgumentBuffer() const { return *drawArgs; }
 
 	  private:
+
 		struct Range
 		{
 			std::uint32_t First = 0;
@@ -158,7 +174,9 @@ namespace Swim::Render
 		using Registry = GpuResourceRegistry<ParticleEmitterTag, Emitter>;
 
 		ParticleGraphResources RecordSimulation(RenderGraph& graph, const ParticleView& view, float deltaTime);
+
 		std::optional<Range> Allocate(std::uint32_t count);
+
 		void Free(Range range);
 
 		ParticleSystemDesc desc;
@@ -170,5 +188,7 @@ namespace Swim::Render
 		bool quadIndicesReady = false;
 		bool quadIndicesInFlight = false;
 		bool pending = false;
+
 	};
+
 } // namespace Swim::Render

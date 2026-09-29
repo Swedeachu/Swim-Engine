@@ -14,6 +14,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct ExpectedBinding
 	{
 		Rhi::DescriptorType Type;
@@ -31,10 +32,12 @@ namespace
 		auto converted = ShaderCompiler::BuildRhiShaderInterface(parsed.Reflection);
 		SWIM_REQUIRE_MESSAGE(converted, converted.Error);
 		const auto& interface = converted.Interface;
+
 		if (groupX != 0)
 		{
 			SWIM_CHECK((interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{ groupX, groupY, 1 }));
 		}
+
 		if (pushBytes != 0)
 		{
 			SWIM_REQUIRE_EQUAL(interface.PushConstants.size(), 1u);
@@ -44,25 +47,31 @@ namespace
 		{
 			SWIM_CHECK(interface.PushConstants.empty());
 		}
+
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 1u);
 		const auto& bindings = interface.DescriptorSchemas[0].Bindings;
 		SWIM_REQUIRE_EQUAL(bindings.size(), expected.size());
+
 		for (const auto& binding : bindings)
 		{
 			const auto found = expected.find(binding.Binding);
 			SWIM_REQUIRE(found != expected.end());
 			SWIM_CHECK(binding.Type == found->second.Type);
+
 			if (binding.Type == Rhi::DescriptorType::SampledTexture)
 			{
 				SWIM_CHECK(binding.SampledDimension == found->second.Dimension);
 			}
+
 			if (binding.Type == Rhi::DescriptorType::StorageTexture)
 			{
 				SWIM_CHECK(binding.StorageTextureFormat == found->second.StorageFormat);
 			}
 		}
+
 		return interface;
 	}
+
 } // namespace
 
 // Every environment program's bindings, thread groups and push constants match EnvironmentBindings.h.
@@ -100,10 +109,12 @@ SWIM_TEST("ShaderCompiler.EnvironmentLayout", "PbrGalleryProgramMatchesItsSmokeL
 	const auto parsed = ShaderCompiler::LoadSlangReflectionJson(SWIM_RHI_PBR_GALLERY_REFLECTION_PATH);
 	SWIM_REQUIRE_MESSAGE(parsed, parsed.Error);
 	std::map<std::string, std::uint32_t> sizes;
+
 	for (const auto& parameter : parsed.Reflection.GlobalParameters)
 	{
 		sizes[parameter.Name] = parameter.ElementSize;
 	}
+
 	SWIM_CHECK_EQUAL(sizes.at("Spheres"), 48u);
 	SWIM_CHECK_EQUAL(sizes.at("Views"), 64u);
 }

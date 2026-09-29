@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// The Phase 11 "no hidden upload" state machine for one requested asset:
 	// Unloaded -> Queued -> Reading -> Decoding -> WaitingForGpuUpload ->
 	// Uploading -> Resident, or Failed with an Assets::AssetError. Decoding covers
@@ -19,4 +20,5 @@ namespace Swim::Render
 		Resident,
 		Failed
 	};
+
 } // namespace Swim::Render

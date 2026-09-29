@@ -4,13 +4,16 @@
 
 namespace Engine
 {
+
 	// An analytic lens flare of the sun (glare, starburst, chromatic ghosts and a halo),
 	// added to the HDR scene before exposure and bloom so it blooms with the frame. Its
 	// visibility is measured from the frame (sky taps around the sun), so occluders and
 	// clouds fade it without a query. Program: LensFlare.
 	class LensFlare final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float Intensity = 0.25f;	// Overall strength (relative to the sun's color).
@@ -37,5 +40,7 @@ namespace Engine
 		int GetOrder() const override { return 20; }
 
 		void Record(RenderFeatureContext& context) override;
+
 	};
+
 } // namespace Engine

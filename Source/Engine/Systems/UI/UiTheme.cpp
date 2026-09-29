@@ -5,8 +5,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		UiColor WithAlpha(UiColor color, float alpha)
 		{
 			color.A = alpha;
@@ -44,6 +46,7 @@ namespace Swim::UI
 		{
 			return UiLength::Pixels(value);
 		}
+
 	} // namespace
 
 	UiClassStyle UiTheme::Class(UiThemeClass themeClass) const
@@ -57,6 +60,7 @@ namespace Swim::UI
 		s.SelectionColor = p.Selection;
 		s.CaretColor = p.Caret;
 		c.TextSize = m.TextSize;
+
 		switch (themeClass)
 		{
 		case UiThemeClass::Panel:
@@ -336,29 +340,36 @@ namespace Swim::UI
 		default:
 			break;
 		}
+
 		if (Customize)
 		{
 			Customize(themeClass, c);
 		}
+
 		return c;
 	}
 
 	std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> UiTheme::Build() const
 	{
 		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> classes;
+
 		for (std::size_t i = 0; i < classes.size(); ++i)
 		{
 			classes[i] = Class(static_cast<UiThemeClass>(i));
 			Internal::ValidateStyle(classes[i].Style);
+
 			if (!std::isfinite(classes[i].TextSize) || classes[i].TextSize <= 0.0f || classes[i].TextSize > 16384.0f)
 			{
 				throw std::invalid_argument("Invalid UI theme text size");
 			}
+
 			for (const auto& rule : classes[i].Rules)
 			{
 				Internal::ValidateVisual(rule.Visual);
 			}
 		}
+
 		return classes;
 	}
+
 } // namespace Swim::UI

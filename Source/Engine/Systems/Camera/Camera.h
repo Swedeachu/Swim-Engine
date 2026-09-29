@@ -11,6 +11,7 @@
 
 namespace Engine
 {
+
 	// A world ray (normalized direction) through a screen point: Engine::Ray.
 	using CameraRay = Ray;
 
@@ -20,7 +21,9 @@ namespace Engine
 	// need a finite range (light clusters, shadows, fog).
 	class Camera
 	{
+
 	  public:
+
 		void SetPosition(const glm::vec3& value) { position = value; }
 
 		const glm::vec3& GetPosition() const { return position; }
@@ -54,16 +57,21 @@ namespace Engine
 		float GetAspect() const { return aspect; }
 
 		glm::vec3 GetForward() const;
+
 		glm::vec3 GetRight() const;
+
 		glm::vec3 GetUp() const;
 
 		// World -> view (rigid) and view -> clip (reverse-Z, infinite far), column-major glm.
 		glm::mat4 GetViewMatrix() const;
+
 		glm::mat4 GetProjectionMatrix() const;
 
 		// The same as row-major float[16] (clip = dot(row, float4(p, 1))), the renderer's layout.
 		std::array<float, 16> GetViewRowMajor() const;
+
 		std::array<float, 16> GetProjectionRowMajor() const;
+
 		std::array<float, 16> GetViewProjectionRowMajor() const;
 
 		// A ray through a pixel (top-left origin) of a width x height viewport.
@@ -77,13 +85,18 @@ namespace Engine
 		//  - ScreenToWorldAtDepth: the world point at view depth `depth` under the pixel (the
 		//    inverse of WorldToScreen).
 		std::optional<glm::vec3> WorldToScreen(const glm::vec3& world, float width, float height) const;
+
 		glm::vec3 ScreenToWorld(float x, float y, float distance, float width, float height) const;
+
 		glm::vec3 ScreenToWorldAtDepth(float x, float y, float depth, float width, float height) const;
+
 		// Pixel <-> normalized device coordinates (x right, y up, [-1, 1] across the viewport).
 		static glm::vec2 ScreenToNdc(float x, float y, float width, float height);
+
 		static glm::vec2 NdcToScreen(const glm::vec2& ndc, float width, float height);
 
 	  private:
+
 		glm::vec3 position{ 0.0f, 2.0f, 8.0f };
 		glm::quat rotation{ 1.0f, 0.0f, 0.0f, 0.0f };
 		float yaw = 0.0f;
@@ -92,8 +105,10 @@ namespace Engine
 		float nearPlane = 0.1f;
 		float farPlane = 500.0f;
 		float aspect = 16.0f / 9.0f;
+
 	};
 
 	// Row-major float[16] of a column-major glm matrix.
 	std::array<float, 16> ToRowMajor(const glm::mat4& matrix);
+
 } // namespace Engine

@@ -8,8 +8,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		std::uint32_t Groups(std::uint32_t count, std::uint32_t group)
@@ -32,10 +34,12 @@ namespace Swim::Render
 			RenderCommandContext& c, const ClusterProgram& program, const std::string& label, std::span<const Rhi::DescriptorWrite> writes)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			table->Write(writes);
 			auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 			auto& list = c.Commands();
@@ -51,6 +55,7 @@ namespace Swim::Render
 			buffer.DebugName = name;
 			return buffer;
 		}
+
 	} // namespace
 
 	ClusteredLightAssigner::ClusteredLightAssigner(ClusteredLightAssignerDesc descInput) : desc(std::move(descInput))
@@ -62,6 +67,7 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs the cull, bounds, assign and scan programs");
 			}
 		}
+
 		if ((desc.Heatmap.Pipeline == nullptr) != (desc.Heatmap.Layout == nullptr))
 		{
 			throw std::invalid_argument(desc.DebugName + " heatmap needs both a pipeline and a layout");
@@ -74,10 +80,12 @@ namespace Swim::Render
 		ClusterGraphResources resources;
 		resources.GridRecord = MakeClusterGridRecord(gridDesc, view);
 		resources.Layout = ComputeClusterGridLayout(gridDesc);
+
 		if (lights.RowCount <= lights.FirstLocalRow)
 		{
 			throw std::invalid_argument(desc.DebugName + " needs a light buffer with local rows");
 		}
+
 		resources.LocalLightCapacity = lights.RowCount - lights.FirstLocalRow;
 		const std::uint32_t clusters = resources.Layout.ClusterCount;
 		const std::uint32_t localCount = lights.LocalCount;
@@ -88,10 +96,12 @@ namespace Swim::Render
 			graph.CreateBuffer(StorageBuffer(std::uint64_t(resources.LocalLightCapacity) * 16, desc.DebugName + " view lights"));
 		resources.Bounds = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * 32, desc.DebugName + " bounds"));
 		resources.Records = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * sizeof(ClusterRecord), desc.DebugName + " records"));
+
 		if (localCount > std::uint64_t(ClusterMaskWords(resources.GridRecord)) * 32u)
 		{
 			throw std::invalid_argument(desc.DebugName + ": more local lights than the grid's LightCapacity");
 		}
+
 		const std::uint64_t blockWords = ClusterBlockWords(resources.GridRecord);
 		resources.Indices = graph.CreateBuffer(StorageBuffer(std::uint64_t(clusters) * blockWords * 4, desc.DebugName + " light masks"));
 		resources.Stats = graph.CreateBuffer(StorageBuffer(sizeof(ClusterStats), desc.DebugName + " stats"));
@@ -195,10 +205,12 @@ namespace Swim::Render
 		{
 			throw std::logic_error(desc.DebugName + " has no heatmap program");
 		}
+
 		const auto depthDesc = graph.GetDesc(depth);
 		const std::uint32_t width = clusters.GridRecord.Limits[0];
 		const std::uint32_t height = clusters.GridRecord.Limits[1];
 		const bool depthFormat = depthDesc.PixelFormat == Rhi::Format::D32Float;
+
 		if (depthDesc.Dimension != Rhi::TextureDimension::Texture2D || depthDesc.Samples != Rhi::SampleCount::X1 ||
 			(!depthFormat && depthDesc.PixelFormat != Rhi::Format::R32Float) || depthDesc.Extent.Width != width ||
 			depthDesc.Extent.Height != height ||
@@ -206,6 +218,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " heatmap needs a sampled viewport-sized D32Float or R32Float depth texture");
 		}
+
 		Rhi::TextureDesc heatmapDesc;
 		heatmapDesc.Extent = { width, height, 1 };
 		heatmapDesc.PixelFormat = Rhi::Format::RGBA8Unorm;
@@ -242,4 +255,5 @@ namespace Swim::Render
 			});
 		return heatmap;
 	}
+
 } // namespace Swim::Render

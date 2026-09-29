@@ -4,6 +4,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	enum class GeometryStream : std::uint8_t
 	{
 		Vertex,
@@ -18,4 +19,5 @@ namespace Swim::Render::Internal
 		std::unique_ptr<Rhi::Buffer> Buffer; // Null after a dedicated page retires.
 		std::optional<GeometryRangeAllocator> Allocator;
 	};
+
 } // namespace Swim::Render::Internal

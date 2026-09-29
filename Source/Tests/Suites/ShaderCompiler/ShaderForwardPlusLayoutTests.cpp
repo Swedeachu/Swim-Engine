@@ -16,6 +16,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct Program
 	{
 		ShaderCompiler::ShaderReflection Reflection;
@@ -40,6 +41,7 @@ namespace
 				return parameter;
 			}
 		}
+
 		SWIM_FAIL("missing shader parameter " + std::string(name));
 		throw std::logic_error("unreachable");
 	}
@@ -47,10 +49,12 @@ namespace
 	std::map<std::string, std::uint32_t> Offsets(const ShaderCompiler::ShaderBindingReflection& parameter)
 	{
 		std::map<std::string, std::uint32_t> offsets;
+
 		for (const auto& field : parameter.ElementFields)
 		{
 			offsets[field.Name] = field.Offset;
 		}
+
 		return offsets;
 	}
 
@@ -63,6 +67,7 @@ namespace
 				return schema;
 			}
 		}
+
 		SWIM_FAIL("missing descriptor space " + std::to_string(space));
 		throw std::logic_error("unreachable");
 	}
@@ -76,9 +81,11 @@ namespace
 				return candidate.Type;
 			}
 		}
+
 		SWIM_FAIL("missing binding " + std::to_string(binding));
 		throw std::logic_error("unreachable");
 	}
+
 } // namespace
 
 // Both Forward+ variants reflect the same bindings (so one bindless table and the
@@ -89,14 +96,17 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "DrawProgramsMatchTheBindingContra
 	using B = Render::ForwardPlusDrawBindings;
 	const auto opaque = Load(SWIM_FORWARD_OPAQUE_REFLECTION_PATH);
 	const auto transparent = Load(SWIM_FORWARD_TRANSPARENT_REFLECTION_PATH);
+
 	for (const auto* program : { &opaque, &transparent })
 	{
 		SWIM_REQUIRE_EQUAL(program->Interface.DescriptorSchemas.size(), std::size_t(2));
 		const auto& draw = Space(*program, 0);
 		SWIM_CHECK_EQUAL(draw.Bindings.size(), std::size_t(B::Count));
+
 		for (std::uint32_t binding = 0; binding < B::Count; ++binding)
 		{
 			const auto type = TypeOf(draw, binding);
+
 			if (binding == B::EnvironmentSampler)
 			{
 				SWIM_CHECK(type == Rhi::DescriptorType::Sampler);
@@ -110,6 +120,7 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "DrawProgramsMatchTheBindingContra
 				SWIM_CHECK(type == Rhi::DescriptorType::ReadOnlyStorageBuffer);
 			}
 		}
+
 		const auto& bindless = Space(*program, B::BindlessSpace);
 		SWIM_CHECK(TypeOf(bindless, B::BindlessSamplers) == Rhi::DescriptorType::Sampler);
 		SWIM_CHECK(TypeOf(bindless, B::BindlessTextures) == Rhi::DescriptorType::SampledTexture);
@@ -133,10 +144,12 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "DrawProgramsMatchTheBindingContra
 		SWIM_CHECK_EQUAL(Parameter(*program, "Materials").ElementSize, 80u);
 		SWIM_CHECK_EQUAL(Parameter(*program, "Grid").ElementSize, 128u);
 	}
+
 	// Identical space-0 bindings in both variants.
 	const auto& a = Space(opaque, 0).Bindings;
 	const auto& b = Space(transparent, 0).Bindings;
 	SWIM_REQUIRE_EQUAL(a.size(), b.size());
+
 	for (std::size_t i = 0; i < a.size(); ++i)
 	{
 		SWIM_CHECK(a[i].Binding == b[i].Binding && a[i].Type == b[i].Type && a[i].Count == b[i].Count);
@@ -153,14 +166,17 @@ SWIM_TEST("ShaderCompiler.ForwardPlusLayout", "TransparentSortMatchesItsBindingC
 	SWIM_REQUIRE_EQUAL(sort.Interface.DescriptorSchemas.size(), std::size_t(1));
 	const auto& schema = sort.Interface.DescriptorSchemas[0];
 	SWIM_CHECK_EQUAL(schema.Bindings.size(), std::size_t(B::Count));
+
 	for (const auto binding : { B::Scratch, B::SortedCommands, B::SortedCounts })
 	{
 		SWIM_CHECK(TypeOf(schema, binding) == Rhi::DescriptorType::StorageBuffer);
 	}
+
 	for (const auto binding : { B::Commands, B::DrawRecords, B::Counts, B::Instances, B::Transforms, B::View })
 	{
 		SWIM_CHECK(TypeOf(schema, binding) == Rhi::DescriptorType::ReadOnlyStorageBuffer);
 	}
+
 	const auto& scratch = Parameter(sort, "Scratch");
 	SWIM_CHECK_EQUAL(scratch.ElementSize, std::uint32_t(sizeof(Render::ForwardSortEntry)));
 	const auto offsets = Offsets(scratch);

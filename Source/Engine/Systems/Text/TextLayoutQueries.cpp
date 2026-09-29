@@ -7,13 +7,16 @@
 
 namespace Swim::Text
 {
+
 	std::uint32_t TextLayout::ClampOffset(std::uint32_t offset) const
 	{
 		offset = std::min<std::uint32_t>(offset, static_cast<std::uint32_t>(text.size()));
+
 		while (offset > 0 && (boundaries.Grapheme.empty() || !boundaries.Grapheme[offset]))
 		{
 			--offset;
 		}
+
 		return offset;
 	}
 
@@ -28,6 +31,7 @@ namespace Swim::Text
 		{
 			return 0;
 		}
+
 		offset = ClampOffset(offset);
 		// The last line that begins at or before the offset: a soft break belongs to the
 		// following line (downstream affinity); a hard break's separator to the line before.
@@ -62,6 +66,7 @@ namespace Swim::Text
 				return g->RightToLeft ? g->Right : g->Left;
 			}
 		}
+
 		if (offset > line.Begin)
 		{
 			const auto it = std::lower_bound(graphemes.begin(), graphemes.end(), offset,
@@ -69,25 +74,30 @@ namespace Swim::Text
 				{
 					return grapheme.Begin < value;
 				});
+
 			if (it != graphemes.begin())
 			{
 				const auto& before = *std::prev(it);
+
 				if (before.Line == lineIndex)
 				{
 					return before.RightToLeft ? before.Left : before.Right;
 				}
 			}
 		}
+
 		return (line.BaseLevel & 1) != 0 ? line.X + line.Width : line.X;
 	}
 
 	TextCaret TextLayout::GetCaret(std::uint32_t offset) const
 	{
 		TextCaret caret;
+
 		if (lines.empty())
 		{
 			return caret;
 		}
+
 		offset = ClampOffset(offset);
 		caret.Line = GetLineIndex(offset);
 		const auto& line = lines[caret.Line];
@@ -108,19 +118,23 @@ namespace Swim::Text
 		const std::uint32_t last = line.HardBreak || lineIndex + 1 == lines.size() ? line.End : ClampOffset(line.End - 1);
 		std::uint32_t best = line.Begin;
 		float bestDistance = std::numeric_limits<float>::infinity();
+
 		for (std::uint32_t offset = line.Begin;; offset = NextCaretStop(offset))
 		{
 			const float distance = std::abs(CaretX(lineIndex, offset) - x);
+
 			if (distance < bestDistance)
 			{
 				bestDistance = distance;
 				best = offset;
 			}
+
 			if (offset >= last || offset >= text.size())
 			{
 				break;
 			}
 		}
+
 		return std::min(best, std::max(last, line.Begin));
 	}
 
@@ -130,7 +144,9 @@ namespace Swim::Text
 		{
 			return 0;
 		}
+
 		std::uint32_t lineIndex = static_cast<std::uint32_t>(lines.size() - 1);
+
 		for (std::uint32_t i = 0; i < lines.size(); ++i)
 		{
 			if (y < lines[i].Top + lines[i].Height)
@@ -139,6 +155,7 @@ namespace Swim::Text
 				break;
 			}
 		}
+
 		return HitTestLine(lineIndex, x);
 	}
 
@@ -147,22 +164,28 @@ namespace Swim::Text
 		std::vector<TextRect> rects;
 		begin = ClampOffset(begin);
 		end = ClampOffset(end);
+
 		if (begin > end)
 		{
 			std::swap(begin, end);
 		}
+
 		if (begin == end)
 		{
 			return rects;
 		}
+
 		for (std::uint32_t lineIndex = GetLineIndex(begin); lineIndex < lines.size(); ++lineIndex)
 		{
 			const auto& line = lines[lineIndex];
+
 			if (line.Begin >= end && lineIndex != GetLineIndex(begin))
 			{
 				break;
 			}
+
 			std::vector<std::pair<float, float>> spans;
+
 			for (auto it = std::lower_bound(graphemes.begin(), graphemes.end(), std::max(begin, line.Begin),
 					 [](const Grapheme& grapheme, std::uint32_t value)
 					 {
@@ -175,7 +198,9 @@ namespace Swim::Text
 					spans.emplace_back(it->Left, it->Right);
 				}
 			}
+
 			std::sort(spans.begin(), spans.end());
+
 			for (const auto& [left, right] : spans)
 			{
 				if (!rects.empty() && rects.back().Y == line.Top && std::abs(rects.back().X + rects.back().Width - left) < 1e-3f)
@@ -188,16 +213,19 @@ namespace Swim::Text
 				}
 			}
 		}
+
 		return rects;
 	}
 
 	std::uint32_t TextLayout::NextCaretStop(std::uint32_t offset) const
 	{
 		offset = ClampOffset(offset);
+
 		if (offset >= text.size())
 		{
 			return static_cast<std::uint32_t>(text.size());
 		}
+
 		do
 		{
 			++offset;
@@ -208,10 +236,12 @@ namespace Swim::Text
 	std::uint32_t TextLayout::PreviousCaretStop(std::uint32_t offset) const
 	{
 		offset = ClampOffset(offset);
+
 		if (offset == 0)
 		{
 			return 0;
 		}
+
 		return ClampOffset(offset - 1);
 	}
 
@@ -227,15 +257,19 @@ namespace Swim::Text
 			return std::min(from, n);
 		};
 		offset = ClampOffset(offset);
+
 		if (offset >= n)
 		{
 			return n;
 		}
+
 		std::uint32_t result = nextBoundary(offset);
+
 		while (result < n && IsHangingWhitespace(DecodeUtf8(text, result).CodePoint))
 		{
 			result = nextBoundary(result);
 		}
+
 		return result;
 	}
 
@@ -250,15 +284,19 @@ namespace Swim::Text
 			return from;
 		};
 		offset = ClampOffset(offset);
+
 		if (offset == 0)
 		{
 			return 0;
 		}
+
 		std::uint32_t result = previousBoundary(offset);
+
 		while (result > 0 && IsHangingWhitespace(DecodeUtf8(text, result).CodePoint))
 		{
 			result = previousBoundary(result);
 		}
+
 		return result;
 	}
 
@@ -273,12 +311,15 @@ namespace Swim::Text
 		{
 			return 0;
 		}
+
 		const auto index = GetLineIndex(offset);
 		const auto& line = lines[index];
+
 		if (line.HardBreak || index + 1 == lines.size() || line.End == line.Begin)
 		{
 			return line.End;
 		}
+
 		// A soft line's end is displayed on the next line; stop before its hanging space.
 		return std::max(line.Begin, PreviousCaretStop(line.End));
 	}
@@ -294,4 +335,5 @@ namespace Swim::Text
 		const auto index = GetLineIndex(offset);
 		return lines.empty() || index + 1 >= lines.size() ? ClampOffset(offset) : HitTestLine(index + 1, x);
 	}
+
 } // namespace Swim::Text

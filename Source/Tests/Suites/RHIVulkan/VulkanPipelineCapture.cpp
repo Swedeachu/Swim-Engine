@@ -6,7 +6,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanPipelineCapture* capture = nullptr;
+
 	}
 
 	VulkanPipelineCapture::VulkanPipelineCapture()
@@ -34,10 +36,12 @@ namespace Swim::Testing
 		State->Dispatch.vkCreateShaderModule = +[](VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule* module) -> VkResult
 		{
 			++capture->ModulesCreated;
+
 			if (capture->ModulesCreated == capture->FailModule)
 			{
 				return VK_ERROR_OUT_OF_HOST_MEMORY;
 			}
+
 			*module = RhiVulkan::FromNativeHandle<VkShaderModule>(capture->ModulesCreated);
 			return VK_SUCCESS;
 		};
@@ -45,15 +49,19 @@ namespace Swim::Testing
 		State->Dispatch.vkCreatePipelineLayout = +[](VkDevice, const VkPipelineLayoutCreateInfo* info, const VkAllocationCallbacks*, VkPipelineLayout* layout) -> VkResult
 		{
 			capture->PushConstantRanges.clear();
+
 			for (std::uint32_t index = 0; index < info->pushConstantRangeCount; ++index)
 			{
 				capture->PushConstantRanges.push_back(info->pPushConstantRanges[index]);
 			}
+
 			++capture->LayoutsCreated;
+
 			if (capture->LayoutResult == VK_SUCCESS)
 			{
 				*layout = RhiVulkan::FromNativeHandle<VkPipelineLayout>(capture->LayoutsCreated);
 			}
+
 			return capture->LayoutResult;
 		};
 		State->Dispatch.vkCmdPushConstants = +[](VkCommandBuffer, VkPipelineLayout layout, VkShaderStageFlags stages,
@@ -75,21 +83,26 @@ namespace Swim::Testing
 			capture->VertexBindings.clear();
 			capture->VertexAttributes.clear();
 			const auto& vertex = *info->pVertexInputState;
+
 			for (std::uint32_t index = 0; index < vertex.vertexBindingDescriptionCount; ++index)
 			{
 				capture->VertexBindings.push_back(vertex.pVertexBindingDescriptions[index]);
 			}
+
 			for (std::uint32_t index = 0; index < vertex.vertexAttributeDescriptionCount; ++index)
 			{
 				capture->VertexAttributes.push_back(vertex.pVertexAttributeDescriptions[index]);
 			}
+
 			capture->Topology = info->pInputAssemblyState->topology;
 			capture->Winding = info->pRasterizationState->frontFace;
 			capture->DepthState = *info->pDepthStencilState;
+
 			if (info->pColorBlendState->attachmentCount != 0)
 			{
 				capture->Blend = info->pColorBlendState->pAttachments[0];
 			}
+
 			capture->DynamicStates.assign(info->pDynamicState->pDynamicStates,
 				info->pDynamicState->pDynamicStates + info->pDynamicState->dynamicStateCount);
 			return capture->PipelineResult;

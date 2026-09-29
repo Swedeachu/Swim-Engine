@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// The camera the screen-space inputs were rendered with.
 	struct ScreenSpaceView
 	{
@@ -24,10 +25,12 @@ namespace Swim::Render
 	// the camera.
 	GpuScreenSpaceParams BuildScreenSpaceParams(const ScreenSpaceSettings& settings, const ScreenSpaceView& view, std::uint32_t width,
 		std::uint32_t height, std::uint32_t noiseFrame);
+
 } // namespace Swim::Render
 
 namespace Swim::Render::ScreenSpace
 {
+
 	// The CPU definition of the screen-space effects (critical-path item 76).
 	// Shaders/Slang/ScreenSpace mirrors every function, and the native smoke compares
 	// the two texel by texel.
@@ -255,4 +258,5 @@ namespace Swim::Render::ScreenSpace
 
 	ColorImage Composite(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect, const ScalarImage* ao,
 		const ScalarImage& depth, const ReflectionImages& reflections = {});
+
 } // namespace Swim::Render::ScreenSpace

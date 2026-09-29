@@ -13,6 +13,7 @@ namespace Env = Swim::Render::Environment;
 
 namespace
 {
+
 	float Dot(const RP::Float3& a, const RP::Float3& b)
 	{
 		return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -39,6 +40,7 @@ namespace
 		desc.Dynamic = dynamic;
 		return desc;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ReflectionProbes", "CaptureViewsSeeTheCubeTexelsTheyFill")
@@ -48,6 +50,7 @@ SWIM_TEST("Render.ReflectionProbes", "CaptureViewsSeeTheCubeTexelsTheyFill")
 	constexpr std::uint32_t size = 8;
 	const RP::Float3 origin{ 1.0f, 2.0f, -3.0f };
 	const auto projection = RP::CubeFaceProjection(0.1f);
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		const auto view = RP::CubeFaceView(face, origin);
@@ -58,6 +61,7 @@ SWIM_TEST("Render.ReflectionProbes", "CaptureViewsSeeTheCubeTexelsTheyFill")
 		const RP::Float3 z{ view[8], view[9], view[10] };
 		const RP::Float3 xy{ x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0] };
 		SWIM_CHECK(std::abs(Dot(xy, z) - 1.0f) < 1.0e-6f);
+
 		for (std::uint32_t ty = 0; ty < size; ++ty)
 		{
 			for (std::uint32_t tx = 0; tx < size; ++tx)
@@ -65,11 +69,13 @@ SWIM_TEST("Render.ReflectionProbes", "CaptureViewsSeeTheCubeTexelsTheyFill")
 				const auto d = Env::CubeTexelDirection(face, tx, ty, size);
 				const std::array<float, 4> p{ origin[0] + d[0] * 5.0f, origin[1] + d[1] * 5.0f, origin[2] + d[2] * 5.0f, 1.0f };
 				float clip[4];
+
 				for (int r = 0; r < 4; ++r)
 				{
 					clip[r] = viewProjection[r * 4] * p[0] + viewProjection[r * 4 + 1] * p[1] + viewProjection[r * 4 + 2] * p[2] +
 						viewProjection[r * 4 + 3];
 				}
+
 				SWIM_REQUIRE(clip[3] > 0.0f);
 				const float px = (clip[0] / clip[3] * 0.5f + 0.5f) * float(size);
 				const float py = (0.5f - clip[1] / clip[3] * 0.5f) * float(size);
@@ -81,6 +87,7 @@ SWIM_TEST("Render.ReflectionProbes", "CaptureViewsSeeTheCubeTexelsTheyFill")
 			}
 		}
 	}
+
 	SWIM_CHECK_EQUAL(RP::CaptureDistance(0.0f, 0.1f, 0.0f, 0.0f), RP::DistanceSky);
 }
 
@@ -160,10 +167,12 @@ SWIM_TEST("Render.ReflectionProbes", "ParallaxCorrectionFindsWhatTheSurfaceReall
 		[](const RP::Float3& d)
 		{
 			const float angle = std::acos(std::clamp(d[1], -1.0f, 1.0f)) * 57.2957795f;
+
 			if (angle >= 18.0f && angle <= 26.0f)
 			{
 				return 1.2f;
 			}
+
 			return d[1] > 1.0e-3f ? 30.0f / d[1] : RP::DistanceSky;
 		});
 	const float ceiling = 1.0f / std::sqrt(901.0f);
@@ -183,6 +192,7 @@ SWIM_TEST("Render.ReflectionProbes", "ParallaxCorrectionFindsWhatTheSurfaceReall
 		const auto wallJittered = RP::ParallaxDirection(position, direction, probe, wall, jitter);
 		SWIM_CHECK(std::abs(wallJittered[0] - 4.0f * expected) < 1.0e-2f);
 	}
+
 	// The sky (far away) leaves the direction unchanged.
 	const auto sky = RP::ParallaxDirection(position, direction, probe,
 		[](const RP::Float3&)
@@ -207,19 +217,23 @@ SWIM_TEST("Render.ReflectionProbes", "FacesThatSeeMovingObjectsAreRecapturedFirs
 	std::vector<ReflectionProbeDesc> probes{ Probe(10, { 0, 1, 0 }) };
 	const RP::Float3 camera{ 0, 2, 5 };
 	std::uint64_t frame = 1;
+
 	for (; frame <= 12; ++frame)
 	{
 		(void)scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings);
 	}
+
 	// A ball rolling past the -Z side: the -Z face (5) goes next, every frame it moves,
 	// ahead of the round-robin refresh of staler faces.
 	const std::vector<ReflectionProbeMover> movers{ { { 0.3f, 1.0f, -3.0f }, 0.5f } };
+
 	for (int i = 0; i < 3; ++i)
 	{
 		const auto plan = scheduler.Update(probes, camera, frame++, double(frame) / 60.0, settings, movers);
 		SWIM_REQUIRE_EQUAL(plan.Captures.size(), 1u);
 		SWIM_CHECK_EQUAL(plan.Captures[0].Face, 5u);
 	}
+
 	// Out of range, or the probe's own object (at its centre), changes nothing.
 	settings.MoverRange = 1.0f;
 	auto plan = scheduler.Update(probes, camera, frame++, 1.0, settings, movers);
@@ -244,17 +258,20 @@ SWIM_TEST("Render.ReflectionProbes", "TheSchedulerTimeSlicesFacesWithinTheBudget
 	// New probes fill first, two faces a frame; a probe is active only once all six faces exist.
 	std::uint64_t frame = 1;
 	std::uint32_t captured = 0;
+
 	for (; frame <= 6; ++frame)
 	{
 		const auto plan = scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings);
 		SWIM_CHECK(plan.Captures.size() <= 2u);
 		captured += static_cast<std::uint32_t>(plan.Captures.size());
 		SWIM_CHECK(plan.Filter.size() <= 2u);
+
 		if (frame < 6)
 		{
 			SWIM_CHECK(plan.Active.size() < 2u);
 		}
 	}
+
 	SWIM_CHECK_EQUAL(captured, 12u);
 	auto plan = scheduler.Update(probes, camera, frame++, 7.0 / 60.0, settings);
 	SWIM_CHECK_EQUAL(plan.Active.size(), 2u);
@@ -263,11 +280,13 @@ SWIM_TEST("Render.ReflectionProbes", "TheSchedulerTimeSlicesFacesWithinTheBudget
 	{
 		plan = scheduler.Update(probes, camera, frame++, double(frame) / 60.0, settings);
 		SWIM_CHECK_EQUAL(plan.Captures.size(), 2u);
+
 		for (const auto& capture : plan.Captures)
 		{
 			SWIM_CHECK_EQUAL(capture.Probe, 0u);
 		}
 	}
+
 	// The static probe moving is re-captured with priority.
 	probes[1].Position = { 5, 1, 1 };
 	plan = scheduler.Update(probes, camera, frame++, 1.0, settings);
@@ -282,19 +301,23 @@ SWIM_TEST("Render.ReflectionProbes", "TheSchedulerTimeSlicesFacesWithinTheBudget
 	SWIM_CHECK_EQUAL(scheduler.GetUsedSlots(), 2u);
 	SWIM_REQUIRE_EQUAL(plan.Captures.size(), 2u);
 	SWIM_CHECK_EQUAL(plan.Captures[0].Probe, 1u); // The new probe's missing faces come first.
+
 	for (const auto& active : plan.Active)
 	{
 		SWIM_CHECK_EQUAL(active.Probe, 0u);
 	}
+
 	// More probes than slots: the nearest (by priority / distance) win.
 	probes.push_back(Probe(40, { 0, 2, 4 }));
 	plan = scheduler.Update(probes, camera, frame++, 2.1, settings);
 	SWIM_CHECK_EQUAL(scheduler.GetUsedSlots(), 2u);
 	bool nearestPlaced = false;
+
 	for (const auto& capture : plan.Captures)
 	{
 		nearestPlaced = nearestPlaced || capture.Probe == 2u;
 	}
+
 	SWIM_CHECK(nearestPlaced);
 	// Disabled: nothing is captured or active.
 	settings.Enabled = false;

@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// A readback staging buffer and the transfer pass that initializes it. Read the
 	// bytes through RenderGraphExecutor::TryReadback/TryGetReadback after execution.
 	struct GraphReadback
@@ -10,4 +11,5 @@ namespace Swim::Render
 		GraphBuffer Buffer;
 		GraphPass Pass;
 	};
+
 } // namespace Swim::Render

@@ -24,23 +24,29 @@ namespace Swim::Rhi
 
 	class ReadbackSlice
 	{
+
 	public:
+
 		ReadbackSlice() = default;
 
 		Buffer& GetBuffer() const
 		{
 			const auto current = batch.lock();
+
 			if (!current)
 			{
 				throw std::invalid_argument("Readback slice is empty or expired");
 			}
+
 			return *current->Resource;
 		}
 
 		std::uint64_t GetOffset() const { return offset; }
+
 		std::uint64_t GetSize() const { return size; }
 
 	private:
+
 		friend class ReadbackArena;
 
 		struct Batch
@@ -56,6 +62,7 @@ namespace Swim::Rhi
 		std::weak_ptr<Batch> batch;
 		std::uint64_t offset = 0;
 		std::uint64_t size = 0;
+
 	};
 
 	// One externally synchronized host owner and one completion lifetime per batch.
@@ -64,23 +71,29 @@ namespace Swim::Rhi
 	// waits for the GPU. Returned spans remain valid only until reset/destruction.
 	class ReadbackArena
 	{
+
 	public:
+
 		static std::unique_ptr<ReadbackArena> Create(Device& device, const ReadbackArenaDesc& desc)
 		{
 			if (desc.Capacity == 0 || desc.Capacity > std::numeric_limits<std::size_t>::max())
 			{
 				return nullptr;
 			}
+
 			auto buffer = device.CreateBuffer({ desc.Capacity, BufferUsage::TransferDestination,
 				MemoryPreference::GpuToCpu, desc.DebugName, true });
+
 			if (!buffer || buffer->GetMappedReadSpan().size() != desc.Capacity)
 			{
 				return nullptr;
 			}
+
 			return std::unique_ptr<ReadbackArena>(new ReadbackArena(std::move(buffer)));
 		}
 
 		ReadbackArena(const ReadbackArena&) = delete;
+
 		ReadbackArena& operator=(const ReadbackArena&) = delete;
 
 		std::optional<ReadbackSlice> Allocate(std::uint64_t size, std::uint64_t alignment = 4)
@@ -89,18 +102,22 @@ namespace Swim::Rhi
 			{
 				throw std::logic_error("Reset the completed readback batch before allocating again");
 			}
+
 			if (size == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0)
 			{
 				throw std::invalid_argument("Readback allocation requires nonzero size and power-of-two alignment");
 			}
+
 			buffer->GetMappedReadSpan(); // Recheck backend health without reading memory.
 			alignment = std::max(alignment, std::uint64_t(4));
 			const std::uint64_t padding = (alignment - (used & (alignment - 1))) & (alignment - 1);
 			const std::uint64_t remaining = GetCapacity() - used;
+
 			if (padding > remaining || size > remaining - padding)
 			{
 				return std::nullopt;
 			}
+
 			const std::uint64_t offset = used + padding;
 			used = offset + size;
 			return ReadbackSlice(batch, offset, size);
@@ -111,23 +128,29 @@ namespace Swim::Rhi
 		ReadbackStatus TryGetData(const ReadbackSlice& slice, std::span<const std::byte>& data)
 		{
 			data = {};
+
 			if (slice.batch.lock() != batch)
 			{
 				throw std::invalid_argument("Readback slice does not belong to this live batch");
 			}
+
 			buffer->GetMappedReadSpan();
+
 			if (!timeline)
 			{
 				return ReadbackStatus::NotSubmitted;
 			}
+
 			if (timeline->GetCompletedValue() < completionValue)
 			{
 				return ReadbackStatus::NotReady;
 			}
+
 			if (!invalidated)
 			{
 				buffer->InvalidateMappedReads(0, used);
 			}
+
 			const auto mapped = buffer->GetMappedReadSpan();
 			data = mapped.subspan(static_cast<std::size_t>(slice.offset), static_cast<std::size_t>(slice.size));
 			invalidated = true;
@@ -141,12 +164,15 @@ namespace Swim::Rhi
 			{
 				throw std::invalid_argument("Readback destination must match the slice size");
 			}
+
 			std::span<const std::byte> data;
 			const auto status = TryGetData(slice, data);
+
 			if (status == ReadbackStatus::Ready)
 			{
 				std::memcpy(destination.data(), data.data(), data.size());
 			}
+
 			return status;
 		}
 
@@ -155,10 +181,12 @@ namespace Swim::Rhi
 		bool TryReset()
 		{
 			buffer->GetMappedReadSpan();
+
 			if (timeline && timeline->GetCompletedValue() < completionValue)
 			{
 				return false;
 			}
+
 			auto replacement = std::make_shared<ReadbackSlice::Batch>();
 			replacement->Resource = buffer.get();
 			batch = std::move(replacement);
@@ -170,9 +198,11 @@ namespace Swim::Rhi
 		}
 
 		std::uint64_t GetCapacity() const { return buffer->GetDesc().Size; }
+
 		std::uint64_t GetUsedBytes() const { return used; }
 
 	private:
+
 		friend class FrameContextRing;
 		friend class ReadbackSubmission;
 
@@ -188,6 +218,7 @@ namespace Swim::Rhi
 			{
 				throw std::logic_error("Frame submission requires a nonempty unsubmitted readback batch");
 			}
+
 			buffer->GetMappedReadSpan();
 		}
 
@@ -203,6 +234,7 @@ namespace Swim::Rhi
 		std::uint64_t completionValue = 0;
 		std::uint64_t used = 0;
 		bool invalidated = false;
+
 	};
 
 	// Binds readback batches to a queue submission performed by an owner other
@@ -213,7 +245,9 @@ namespace Swim::Rhi
 	// even if the arena is destroyed early.
 	class ReadbackSubmission
 	{
+
 	public:
+
 		static void Validate(const ReadbackArena& arena)
 		{
 			arena.ValidateSubmission();
@@ -228,6 +262,7 @@ namespace Swim::Rhi
 		{
 			arena.CommitSubmission(timeline, value);
 		}
+
 	};
 
 } // namespace Swim::Rhi

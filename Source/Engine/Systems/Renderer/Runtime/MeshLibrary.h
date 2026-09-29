@@ -16,17 +16,22 @@
 
 namespace Swim::Assets
 {
+
 	class AssetSystem;
+
 }
 
 namespace Swim::Render
 {
+
 	class AssetResidencyService;
 	class GeometryHeap;
+
 } // namespace Swim::Render
 
 namespace Engine
 {
+
 	// The built-in procedural meshes (unit sizes, centered on the origin).
 	enum class BuiltinMesh : std::uint8_t
 	{
@@ -47,7 +52,9 @@ namespace Engine
 	// path. Owner thread only.
 	class MeshLibrary
 	{
+
 	  public:
+
 		MeshLibrary(Swim::Assets::AssetSystem& assets, Swim::Render::AssetResidencyService& residency, Swim::Render::GeometryHeap& heap);
 
 		using MeshHandle = Swim::Assets::AssetHandle<Swim::Assets::MeshAsset>;
@@ -57,7 +64,9 @@ namespace Engine
 
 		// Publishes (or replaces) "Procedural/<name>" and requests residency.
 		MeshHandle Register(std::string_view name, const ProceduralMeshes::MeshData& mesh);
+
 		MeshHandle Find(std::string_view name) const;
+
 		// A cooked mesh already declared in the AssetSystem (for example by the development
 		// asset bootstrap); requests residency. Invalid when unknown.
 		MeshHandle Load(std::string_view logicalPath);
@@ -65,7 +74,9 @@ namespace Engine
 		// Textures: procedural RGBA8 images (mips generated) and cooked ones.
 		TextureHandle RegisterTexture(
 			std::string_view name, std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb = true);
+
 		TextureHandle FindTexture(std::string_view name) const;
+
 		// A two-colour checkerboard (cells x cells squares).
 		TextureHandle RegisterChecker(
 			std::string_view name, std::uint32_t size, std::uint32_t cells, std::array<std::uint8_t, 4> a, std::array<std::uint8_t, 4> b);
@@ -81,9 +92,11 @@ namespace Engine
 		};
 
 		std::vector<PageSlot> CollectPageSlots(bool* conflict = nullptr) const;
+
 		// GPU meshes created outside residency (skinned outputs) that draws may use; their
 		// pages join CollectPageSlots.
 		void TrackGpuMesh(Swim::Render::GpuMeshHandle mesh);
+
 		void UntrackGpuMesh(Swim::Render::GpuMeshHandle mesh);
 
 		std::uint32_t GetRequestedMeshCount() const { return static_cast<std::uint32_t>(meshes.size()); }
@@ -95,6 +108,7 @@ namespace Engine
 		std::uint32_t GetResidentTextureCount() const;
 
 	  private:
+
 		Swim::Assets::AssetSystem& assets;
 		Swim::Render::AssetResidencyService& residency;
 		Swim::Render::GeometryHeap& heap;
@@ -102,8 +116,10 @@ namespace Engine
 		std::unordered_map<std::string, MeshHandle> meshes;		 // By logical path.
 		std::unordered_map<std::string, TextureHandle> textures; // By logical path.
 		std::vector<Swim::Render::GpuMeshHandle> extraMeshes;
+
 	};
 
 	// A full RGBA8 mip chain (box filtered; sRGB images are filtered in linear space).
 	Swim::Assets::TextureAsset MakeTextureAsset(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb);
+
 } // namespace Engine

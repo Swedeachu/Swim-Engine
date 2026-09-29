@@ -7,6 +7,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct TextureMipUpload
 	{
 		Rhi::Extent3D Extent{};
@@ -26,4 +27,5 @@ namespace Swim::Render::Internal
 		std::shared_ptr<const std::vector<std::byte>> Bytes;
 		std::vector<TextureMipUpload> Mips;
 	};
+
 } // namespace Swim::Render::Internal

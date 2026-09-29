@@ -7,6 +7,7 @@
 
 namespace Game
 {
+
 	void Register(Engine::SceneSystem& scenes)
 	{
 		// Behaviours constructible by name (commands, data-driven spawning).
@@ -15,9 +16,11 @@ namespace Game
 		scenes.RegisterBehaviorType<Projectile>("Projectile");
 
 		scenes.RegisterSceneType<Sandbox>("Sandbox");
+
 		if (scenes.GetStartupScene().empty())
 		{
 			scenes.SetStartupScene("Sandbox");
 		}
 	}
+
 } // namespace Game

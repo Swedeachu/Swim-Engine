@@ -6,8 +6,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		std::string StagingName(std::string_view pass, std::string_view suffix)
@@ -34,56 +36,69 @@ namespace Swim::Render
 		bool ValidateTextureRegion(const Rhi::TextureDesc& desc, const Rhi::BufferTextureCopyRegion& region)
 		{
 			const auto& sub = region.Subresource;
+
 			if (sub.MipLevel >= desc.MipLevels || sub.ArrayLayer >= desc.ArrayLayers || desc.Samples != Rhi::SampleCount::X1)
 			{
 				throw std::invalid_argument("RenderGraph texture transfer needs a single-sample subresource in range");
 			}
+
 			const std::uint32_t extent[3] = { MipExtent(desc.Extent.Width, sub.MipLevel), MipExtent(desc.Extent.Height, sub.MipLevel),
 				MipExtent(desc.Extent.Depth, sub.MipLevel) };
 			const std::int32_t offset[3] = { region.TextureOffset.X, region.TextureOffset.Y, region.TextureOffset.Z };
 			const std::uint32_t size[3] = { region.Extent.Width, region.Extent.Height, region.Extent.Depth };
 			bool whole = true;
+
 			for (int axis = 0; axis < 3; ++axis)
 			{
 				if (offset[axis] < 0 || !size[axis] || std::uint64_t(offset[axis]) + size[axis] > extent[axis])
 				{
 					throw std::invalid_argument("RenderGraph texture transfer region exceeds its subresource");
 				}
+
 				whole = whole && offset[axis] == 0 && size[axis] == extent[axis];
 			}
+
 			return whole;
 		}
 
 		std::uint64_t TexelAlignment(const Rhi::TextureDesc& desc)
 		{
 			const auto texel = Rhi::GetTransferBlockInfo(desc.PixelFormat).Bytes;
+
 			if (!texel || !std::has_single_bit(texel))
 			{
 				throw std::invalid_argument(
 					"RenderGraph texture transfers need a power-of-two-texel color, BC or D32Float format");
 			}
+
 			return std::max<std::uint64_t>(4, texel);
 		}
+
 	} // namespace
 
 	std::uint64_t GetTextureCopyBytes(const Rhi::TextureDesc& texture, const Rhi::BufferTextureCopyRegion& region)
 	{
 		const auto block = Rhi::GetTransferBlockInfo(texture.PixelFormat);
+
 		if (!block.Bytes)
 		{
 			throw std::invalid_argument("RenderGraph texture transfers need an uncompressed color, BC or D32Float format");
 		}
+
 		std::uint64_t bytes = block.Bytes;
 		const std::uint64_t counts[3] = { (std::uint64_t(region.Extent.Width) + block.Width - 1) / block.Width,
 			(std::uint64_t(region.Extent.Height) + block.Height - 1) / block.Height, region.Extent.Depth };
+
 		for (std::uint64_t size : counts)
 		{
 			if (!size || bytes > UINT64_MAX / size)
 			{
 				throw std::invalid_argument("RenderGraph texture transfer byte count is empty or overflows");
 			}
+
 			bytes *= size;
 		}
+
 		return bytes;
 	}
 
@@ -100,6 +115,7 @@ namespace Swim::Render
 			[&](RenderGraphBuilder& b)
 			{
 				b.Read(staging, S::CopySource);
+
 				if (whole)
 				{
 					b.Write(destination, S::CopyDestination);
@@ -108,6 +124,7 @@ namespace Swim::Render
 				{
 					b.ReadWrite(destination, S::CopyDestination);
 				}
+
 			},
 			[=](RenderCommandContext& c)
 			{
@@ -136,10 +153,12 @@ namespace Swim::Render
 		const auto& desc = graph.GetDesc(destination);
 		const bool whole = ValidateTextureRegion(desc, region);
 		const auto alignment = TexelAlignment(desc);
+
 		if (data.size() != GetTextureCopyBytes(desc, region))
 		{
 			throw std::invalid_argument("RenderGraph texture upload data must be tightly packed for its region");
 		}
+
 		const auto staging = graph.CreateUpload(data, StagingName(name, " staging"), Rhi::BufferUsage::TransferSource, alignment);
 		const Rhi::TextureSubresourceRange range{ region.Subresource.MipLevel, 1, region.Subresource.ArrayLayer, 1 };
 		return graph.AddPass(
@@ -147,6 +166,7 @@ namespace Swim::Render
 			[&](RenderGraphBuilder& b)
 			{
 				b.Read(staging, S::CopySource);
+
 				if (whole)
 				{
 					b.Write(destination, S::CopyDestination, range);
@@ -155,6 +175,7 @@ namespace Swim::Render
 				{
 					b.ReadWrite(destination, S::CopyDestination, range);
 				}
+
 			},
 			[=](RenderCommandContext& c)
 			{
@@ -214,4 +235,5 @@ namespace Swim::Render
 			});
 		return result;
 	}
+
 } // namespace Swim::Render

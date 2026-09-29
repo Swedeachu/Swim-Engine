@@ -4,13 +4,16 @@
 
 namespace Engine
 {
+
 	// Screen-space sun shafts ("god rays"): bright sky around the sun is blurred radially
 	// toward the sun's screen position and added to the HDR scene before exposure and
 	// bloom. Geometry and clouds in front of the sun block the shafts because the mask only
 	// keeps sky pixels brighter than Threshold. Programs: SunShaftsMask, SunShaftsComposite.
 	class SunShafts final : public RenderFeature
 	{
+
 	  public:
+
 		struct SettingsData
 		{
 			float Intensity = 0.025f;	// Scales the sun's radiance.
@@ -33,5 +36,7 @@ namespace Engine
 		int GetOrder() const override { return 10; }
 
 		void Record(RenderFeatureContext& context) override;
+
 	};
+
 } // namespace Engine

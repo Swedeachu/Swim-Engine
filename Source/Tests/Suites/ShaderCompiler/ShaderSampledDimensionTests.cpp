@@ -21,6 +21,7 @@ SWIM_TEST("ShaderCompiler.SampledDimensions", "ShapesClassesScopesAndDescriptorA
 		Shape{ "textureCube", false, D::TextureCube }, Shape{ "textureCube", true, D::TextureCubeArray } };
 	const std::array scalars{ "float32", "uint32", "int32" };
 	const std::array classes{ Rhi::SampledTextureClass::Float, Rhi::SampledTextureClass::Uint, Rhi::SampledTextureClass::Sint };
+
 	for (const auto& shape : shapes)
 	{
 		for (std::size_t scalar = 0; scalar < scalars.size(); ++scalar)
@@ -60,6 +61,7 @@ SWIM_TEST("ShaderCompiler.SampledDimensions", "PinnedSlangVariantsPreserveViewSh
 	using D = Rhi::TextureViewDimension;
 	const std::array dimensions{ D::Texture1D, D::Texture1DArray, D::Texture2DArray, D::Texture3D, D::TextureCube, D::Texture2D,
 		D::TextureCubeArray };
+
 	for (bool cubes : { false, true })
 	{
 		const auto parsed = ShaderCompiler::LoadSlangReflectionJson(
@@ -73,6 +75,7 @@ SWIM_TEST("ShaderCompiler.SampledDimensions", "PinnedSlangVariantsPreserveViewSh
 		SWIM_REQUIRE_EQUAL(converted.Interface.DescriptorSchemas.size(), 1u);
 		const auto& bindings = converted.Interface.DescriptorSchemas[0].Bindings;
 		SWIM_REQUIRE_EQUAL(bindings.size(), cubes ? 9u : 8u);
+
 		for (std::size_t index = 0; index < (cubes ? 7u : 6u); ++index)
 		{
 			const auto binding = std::find_if(bindings.begin(), bindings.end(),
@@ -108,32 +111,39 @@ SWIM_TEST("ShaderCompiler.SampledDimensions", "SpirvDeclaresCubeArrayCapabilityO
 		bool cubeType = false;
 		bool lineCapability = false;
 		bool entryName = false;
+
 		for (std::size_t offset = 5; offset < words.size();)
 		{
 			const auto count = words[offset] >> 16;
 			const auto opcode = words[offset] & 0xFFFFu;
+
 			if (count == 0 || count > words.size() - offset)
 			{
 				valid = false;
 				break;
 			}
+
 			if (opcode == 17 && count == 2) // OpCapability
 			{
 				cubeCapability |= words[offset + 1] == 45; // SampledCubeArray
 				lineCapability |= words[offset + 1] == 43; // Sampled1D
 			}
+
 			if (opcode == 25 && count >= 9) // OpTypeImage: Dim=Cube, Arrayed=1, Sampled=1
 			{
 				cubeType |= words[offset + 3] == 3 && words[offset + 5] == 1 && words[offset + 7] == 1;
 			}
+
 			if (opcode == 15 && count >= 4) // OpEntryPoint
 			{
 				const auto* begin = reinterpret_cast<const char*>(words.data() + offset + 3);
 				const auto* end = begin + (count - 3) * 4;
 				entryName |= std::string_view(begin, static_cast<std::size_t>(std::find(begin, end, '\0') - begin)) == "computeMain";
 			}
+
 			offset += count;
 		}
+
 		SWIM_CHECK(valid);
 		SWIM_CHECK(entryName);
 		SWIM_CHECK(lineCapability);

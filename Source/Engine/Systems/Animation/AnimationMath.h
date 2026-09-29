@@ -4,6 +4,7 @@
 
 namespace Swim::Animation
 {
+
 	// Small value types for joint poses. Quaternions are (x, y, z, w); matrices are
 	// column-major 4x4 (glTF order), skinning matrices row-major 3x4 (the GPU layout
 	// of Render::RenderAffine: three float4 rows).
@@ -82,4 +83,5 @@ namespace Swim::Animation
 	Vec3 TransformPoint(const Matrix3x4& rows, const Vec3& p);
 	Vec3 TransformDirection(const Matrix3x4& rows, const Vec3& v);
 	float MaxColumnScale(const Matrix3x4& rows);
+
 } // namespace Swim::Animation

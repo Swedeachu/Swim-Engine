@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Compact generational identity for a persistent renderer resource. Index is
 	// the dense, shader-visible slot (metadata row, bindless element); Generation
 	// rejects stale handles after release. Handles never own or point at objects.
@@ -50,4 +51,5 @@ namespace Swim::Render
 	// Image and sampler identities are independent, so any pair can be combined.
 	using BindlessTextureHandle = GpuHandle<BindlessTextureTag>;
 	using BindlessSamplerHandle = GpuHandle<BindlessSamplerTag>;
+
 } // namespace Swim::Render

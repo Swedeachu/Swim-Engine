@@ -24,6 +24,7 @@ namespace Swim::Platform
 
 		SDL_InitFlags flags = SDL_INIT_EVENTS | SDL_INIT_GAMEPAD;
 		bool initializedSdl = false;
+
 		if (!headless)
 		{
 			flags |= SDL_INIT_VIDEO;
@@ -49,6 +50,7 @@ namespace Swim::Platform
 		fileSystemDesc.OrganizationName = desc.OrganizationName;
 		fileSystemDesc.ApplicationName = desc.ApplicationName;
 		fileSystemDesc.AssetRootOverride = desc.AssetRoot;
+
 		if (!fileSystem->Initialize(fileSystemDesc))
 		{
 			fileSystem.reset();

@@ -2,12 +2,14 @@
 
 namespace Engine
 {
+
 	void CameraSystem::SetSurfaceSize(std::uint32_t width, std::uint32_t height)
 	{
 		if (width == 0 || height == 0)
 		{
 			return; // Minimized: keep the last aspect.
 		}
+
 		surfaceWidth = width;
 		surfaceHeight = height;
 		camera.SetAspect(static_cast<float>(width) / static_cast<float>(height));
@@ -33,4 +35,5 @@ namespace Engine
 	{
 		return camera.ScreenToWorld(x, y, distance, static_cast<float>(surfaceWidth), static_cast<float>(surfaceHeight));
 	}
+
 } // namespace Engine

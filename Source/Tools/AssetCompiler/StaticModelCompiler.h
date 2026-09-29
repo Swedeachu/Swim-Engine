@@ -67,9 +67,12 @@ namespace Swim::AssetCompiler
 
 	class StaticModelCompiler
 	{
+
 	  public:
+
 		StaticModelCompileResult Compile(const IntermediateModel& model, std::string_view sourceLogicalPath,
 			std::vector<Swim::Assets::SassetSourceDependency> sourceDependencies) const;
+
 	};
 
 } // namespace Swim::AssetCompiler

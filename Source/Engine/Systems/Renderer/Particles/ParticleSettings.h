@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	inline constexpr std::uint32_t MaxParticleCurveKeys = 4;
 	// Alpha-blended emitters are sorted back to front in one workgroup, so their
 	// capacity is bounded by its shared memory.
@@ -108,4 +109,5 @@ namespace Swim::Render
 
 	// Throws std::invalid_argument for values outside the ranges above.
 	void ValidateParticleEmitterDesc(const ParticleEmitterDesc& desc);
+
 } // namespace Swim::Render

@@ -34,6 +34,7 @@ namespace
 		}
 
 		ScopedGltfFixture(const ScopedGltfFixture&) = delete;
+
 		ScopedGltfFixture& operator=(const ScopedGltfFixture&) = delete;
 
 		const std::filesystem::path& Path() const

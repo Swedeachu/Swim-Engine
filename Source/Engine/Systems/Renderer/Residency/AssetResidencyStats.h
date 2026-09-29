@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	struct AssetResidencyStats
 	{
 		std::uint32_t Queued = 0;
@@ -19,4 +20,5 @@ namespace Swim::Render
 		std::uint64_t BytesStagedLastUpdate = 0;
 		std::uint64_t BytesStaged = 0; // Total bytes handed to GPU residency.
 	};
+
 } // namespace Swim::Render

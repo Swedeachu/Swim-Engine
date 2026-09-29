@@ -14,6 +14,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	// TAA on the mock device: imported color, depth and velocity inputs and the
 	// resolve program with its reflected-style interface.
 	struct TemporalWorld
@@ -28,12 +29,14 @@ namespace
 			using T = Rhi::DescriptorType;
 			using B = TemporalResolveBindings;
 			Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 			for (const auto& [binding, type] : { std::pair{ B::Current, T::SampledTexture }, std::pair{ B::Depth, T::SampledTexture },
 					 std::pair{ B::Velocity, T::SampledTexture }, std::pair{ B::History, T::SampledTexture },
 					 std::pair{ B::Output, T::StorageTexture } })
 			{
 				space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 			}
+
 			layout.program.Interface.DescriptorSchemas = { space };
 			Resize(Width, Height, Rhi::Format::D32Float);
 		}
@@ -82,6 +85,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -89,6 +93,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -116,6 +121,7 @@ namespace
 		Testing::MockComputePipeline pipeline;
 		std::unique_ptr<Rhi::Texture> color, depth, velocity;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.TemporalAntiAliasing", "ResolvesIntoPingPongHistoryAndAdvancesTheJitter")
@@ -171,6 +177,7 @@ SWIM_TEST("Render.TemporalAntiAliasing", "ResolvesIntoPingPongHistoryAndAdvances
 
 	// Frames 1 and 2: last frame's output is the history, and the two textures alternate.
 	const Rhi::Texture* secondOutput = nullptr;
+
 	for (int i = 0; i < 2; ++i)
 	{
 		RenderGraph graph;
@@ -181,6 +188,7 @@ SWIM_TEST("Render.TemporalAntiAliasing", "ResolvesIntoPingPongHistoryAndAdvances
 		const auto* history = &world.Bound(B::History).GetTexture();
 		const auto* output = &world.Bound(B::Output).GetTexture();
 		SWIM_CHECK(history != output);
+
 		if (i == 0)
 		{
 			SWIM_CHECK(history == firstOutput);

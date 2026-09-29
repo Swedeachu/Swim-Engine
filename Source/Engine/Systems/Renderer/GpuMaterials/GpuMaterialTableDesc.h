@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuMaterialTableDesc
 	{
 		// Every registered instance must use exactly this template.
@@ -27,4 +28,5 @@ namespace Swim::Render
 		std::uint32_t LastUploadRuns = 0;
 		std::uint64_t LastUploadBytes = 0;
 	};
+
 } // namespace Swim::Render

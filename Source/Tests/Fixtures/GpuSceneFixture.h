@@ -55,26 +55,31 @@ namespace Swim::Testing
 		bool GpuMatchesMirror() const
 		{
 			const auto rows = scene->GetStats().RowCount;
+
 			for (std::uint32_t row = 0; row < rows; ++row)
 			{
 				const auto instance = GpuInstance(row);
 				const auto transform = GpuTransform(row);
+
 				if (std::memcmp(&instance, &scene->GetInstanceRow(row), sizeof(instance)) != 0 ||
 					std::memcmp(&transform, &scene->GetTransformRow(row), sizeof(transform)) != 0)
 				{
 					return false;
 				}
 			}
+
 			return true;
 		}
 
 		std::size_t CopyCount() const
 		{
 			std::size_t copies = 0;
+
 			for (const auto& command : *device.Commands)
 			{
 				copies += command.Kind == "CopyBuffer";
 			}
+
 			return copies;
 		}
 

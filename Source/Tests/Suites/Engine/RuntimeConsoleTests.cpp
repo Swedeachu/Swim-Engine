@@ -10,6 +10,7 @@
 
 namespace
 {
+
 	Engine::UiRuntime::ViewDesc View()
 	{
 		Engine::Camera camera;
@@ -20,6 +21,7 @@ namespace
 		view.Camera.ViewportHeight = 720.0f;
 		return view;
 	}
+
 } // namespace
 
 SWIM_TEST("Engine.RuntimeConsole", "RunsCommandsCapturesOutputAndReportsErrors")

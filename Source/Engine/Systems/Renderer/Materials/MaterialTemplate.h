@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	struct MaterialParameterDesc
 	{
 		std::string Name;
@@ -33,7 +34,9 @@ namespace Swim::Render
 	// are created.
 	class MaterialTemplate
 	{
+
 	  public:
+
 		// Throws std::invalid_argument for an empty name, a record size that is zero or
 		// not a multiple of 16, duplicate or empty parameter names, misaligned (std430)
 		// offsets, or parameters that overlap or leave the record.
@@ -50,7 +53,9 @@ namespace Swim::Render
 
 		// Template defaults copied into every new instance.
 		void SetDefault(std::string_view parameter, std::span<const float> values);
+
 		void SetDefault(std::string_view parameter, std::uint32_t value);
+
 		void SetDefault(std::string_view parameter, std::int32_t value);
 
 		std::span<const std::byte> GetDefaultRecord() const { return defaults; }
@@ -58,15 +63,20 @@ namespace Swim::Render
 		// Shared typed write used by templates and instances; throws
 		// std::invalid_argument for unknown names or mismatched types/component counts.
 		void Write(std::span<std::byte> record, std::string_view parameter, std::span<const float> values) const;
+
 		void Write(std::span<std::byte> record, std::string_view parameter, std::uint32_t value) const;
+
 		void Write(std::span<std::byte> record, std::string_view parameter, std::int32_t value) const;
 
 	  private:
+
 		const MaterialParameterDesc& Require(std::string_view parameter) const;
 
 		std::string name;
 		std::uint32_t recordSize = 0;
 		std::vector<MaterialParameterDesc> parameters;
 		std::vector<std::byte> defaults;
+
 	};
+
 } // namespace Swim::Render

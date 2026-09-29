@@ -14,6 +14,7 @@
 // replacement. Behaviour lives in the document, so widgets work on any canvas.
 namespace Swim::UI
 {
+
 	// Themed helpers. Those that show text throw std::logic_error when the document's
 	// theme has no fonts.
 	UiNodeId CreatePanel(UiDocument& document, UiNodeId parent, UiFlow flow = UiFlow::Column);
@@ -155,13 +156,17 @@ namespace Swim::UI
 	// and scrolling behave as for CreateListView (UiControl::ItemCount/ItemExtent).
 	class UiVirtualList
 	{
+
 	  public:
+
 		UiVirtualList(UiDocument& document, UiNodeId parent, UiVirtualListDesc desc);
 
 		// Binds the rows the viewport shows (with the scroll offset and viewport of the last
 		// Layout). Call after Layout; true when rows changed (Layout again before Paint).
 		bool Update();
+
 		void SetItemCount(std::uint32_t count); // Clamps the selection; rebinds every row.
+
 		void Refresh();							// Rebinds every row (the items changed).
 
 		UiNodeId GetRoot() const { return list.Root; }
@@ -171,11 +176,13 @@ namespace Swim::UI
 		std::uint32_t GetItemCount() const { return desc.ItemCount; }
 
 		std::uint32_t GetBoundRowCount() const;		 // Rows showing an item.
+
 		UiNodeId FindRow(std::uint32_t index) const; // The row showing index (empty when not bound).
 
 		std::uint64_t GetBindCount() const { return binds; }
 
 	  private:
+
 		UiDocument& document;
 		UiVirtualListDesc desc;
 		UiListView list;
@@ -190,6 +197,7 @@ namespace Swim::UI
 		std::vector<Row> rows;
 		std::uint64_t binds = 0;
 		float viewport = 0.0f;
+
 	};
 
 	// Unthemed helpers with explicit fonts and styles.
@@ -200,4 +208,5 @@ namespace Swim::UI
 	UiNodeId CreateScrollView(UiDocument& document, UiNodeId parent, const UiStyle& style);
 	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, float size,
 		const UiTextEditOptions& options = {}, const UiStyle& style = {});
+
 } // namespace Swim::UI

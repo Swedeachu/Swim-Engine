@@ -12,6 +12,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	// Reverse-Z infinite perspective (as the renderer's cameras), row-major.
 	UiMatrix4 Perspective(float fovY, float aspect, float nearPlane = 0.1f)
 	{
@@ -99,6 +100,7 @@ namespace
 				return event.Kind == kind && event.Node == node;
 			});
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Canvas", "ScreenCanvasesMapPixelsToClipSpaceWithTheRhiConvention")
@@ -204,6 +206,7 @@ SWIM_TEST("UI.Canvas", "BillboardsFaceTheCameraAndCanKeepAConstantScreenSize")
 	placement.Billboard = UiBillboardMode::Spherical;
 	placement.ConstantScreenSize = true;
 	placement.Transform = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+
 	for (const float distance : { 5.0f, 40.0f })
 	{
 		const auto view = Camera({ 0, 0, distance }, Perspective(1.5707963f, 800.0f / 600.0f));
@@ -237,6 +240,7 @@ SWIM_TEST("UI.Canvas", "ScreenRaysRoundTripProjectionForPerspectiveAndOrthograph
 		const UiPoint size{ 300, 200 };
 		const auto m = CanvasToWorld(UiCanvasMode::WorldPanel, placement, size);
 		const auto clip = ClipFromCanvas(m, camera);
+
 		for (const UiPoint point : { UiPoint{ 10, 20 }, UiPoint{ 150, 100 }, UiPoint{ 290, 190 } })
 		{
 			const auto pixel = ProjectCanvasPoint(clip, { 800, 600 }, point);
@@ -249,6 +253,7 @@ SWIM_TEST("UI.Canvas", "ScreenRaysRoundTripProjectionForPerspectiveAndOrthograph
 			SWIM_CHECK(hit->FrontFacing);
 		}
 	}
+
 	// The viewport center of a perspective camera looks straight down -Z from the eye.
 	const auto camera = Camera({ 1, 2, 10 }, Perspective(1.2f, 800.0f / 600.0f));
 	const auto ray = ScreenRay(camera, { 400, 300 });
@@ -398,12 +403,14 @@ SWIM_TEST("UI.CanvasRouter", "KeyboardTextAndImeGoToTheFocusedCanvasAndProjectTh
 	world.SetTheme(theme);
 	const auto screenField = CreateTextField(screen, screen.GetRoot());
 	const auto worldField = CreateTextField(world, world.GetRoot());
+
 	for (auto* document : { &screen, &world })
 	{
 		auto style = document->GetStyle(document == &screen ? screenField : worldField);
 		style.Width = UiLength::Pixels(200);
 		document->SetStyle(document == &screen ? screenField : worldField, style);
 	}
+
 	screen.Layout({ 800, 600 });
 	world.Layout({ 400, 200 });
 	UiCanvasRouter router;

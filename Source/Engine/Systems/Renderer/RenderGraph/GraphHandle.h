@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Handles are local to one graph definition, never native RHI pointers.
 	enum class GraphKind : std::uint8_t
 	{
@@ -29,4 +30,5 @@ namespace Swim::Render
 		Write,
 		ReadWrite
 	};
+
 } // namespace Swim::Render

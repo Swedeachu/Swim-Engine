@@ -28,8 +28,10 @@
 
 namespace Game
 {
+
 	namespace
 	{
+
 		namespace Assets = Swim::Assets;
 
 		// MaterialTemplateAsset::FeatureMask bits written by the static model compiler.
@@ -78,48 +80,61 @@ namespace Game
 			{
 				return std::nullopt;
 			}
+
 			VertexLayout layout;
 			layout.Stride = mesh.VertexStreams.front().StrideBytes;
+
 			for (const auto& attribute : mesh.VertexAttributes)
 			{
 				if (attribute.StreamIndex != 0)
 				{
 					continue;
 				}
+
 				switch (attribute.Semantic)
 				{
 				case Assets::VertexSemantic::Position:
+
 					if (attribute.Format == Assets::VertexElementFormat::Float32x3)
 					{
 						layout.Position = attribute.OffsetBytes;
 					}
+
 					break;
 				case Assets::VertexSemantic::Normal:
+
 					if (attribute.Format == Assets::VertexElementFormat::Float32x3)
 					{
 						layout.Normal = attribute.OffsetBytes;
 					}
+
 					break;
 				case Assets::VertexSemantic::Tangent:
+
 					if (attribute.Format == Assets::VertexElementFormat::Float32x4)
 					{
 						layout.Tangent = attribute.OffsetBytes;
 					}
+
 					break;
 				case Assets::VertexSemantic::TexCoord0:
+
 					if (attribute.Format == Assets::VertexElementFormat::Float32x2)
 					{
 						layout.TexCoord = attribute.OffsetBytes;
 					}
+
 					break;
 				default:
 					break;
 				}
 			}
+
 			if (!layout.Position)
 			{
 				return std::nullopt;
 			}
+
 			return layout;
 		}
 
@@ -130,6 +145,7 @@ namespace Game
 			{
 				return fallback;
 			}
+
 			std::array<float, N> value{};
 			std::memcpy(value.data(), vertex + *offset, sizeof(float) * N);
 			return value;
@@ -143,6 +159,7 @@ namespace Game
 				std::memcpy(&value, mesh.IndexBytes.data() + index * sizeof(std::uint16_t), sizeof(value));
 				return value;
 			}
+
 			std::uint32_t value = 0;
 			std::memcpy(&value, mesh.IndexBytes.data() + index * sizeof(std::uint32_t), sizeof(value));
 			return value;
@@ -157,6 +174,7 @@ namespace Game
 					return &parameter;
 				}
 			}
+
 			return nullptr;
 		}
 
@@ -169,6 +187,7 @@ namespace Game
 					return binding.Texture;
 				}
 			}
+
 			return {};
 		}
 
@@ -179,6 +198,7 @@ namespace Game
 			Engine::ProceduralMeshes::MeshData Mesh;
 			bool HasTangents = true;
 		};
+
 	} // namespace
 
 	Assets::AssetHandle<Assets::ModelAsset> FindCookedModel(const Assets::AssetSystem& assets, const std::vector<std::string>& keywords,
@@ -187,36 +207,47 @@ namespace Game
 		Assets::AssetHandle<Assets::ModelAsset> best;
 		int bestScore = std::numeric_limits<int>::min();
 		std::string bestPath;
+
 		for (const auto& entry : assets.GetDatabase().Snapshot())
 		{
 			const std::string path = Lower(entry.LogicalPath);
+
 			if (!EndsWith(path, ".model"))
 			{
 				continue;
 			}
+
 			bool matches = true;
+
 			for (const auto& keyword : keywords)
 			{
 				matches = matches && path.find(Lower(keyword)) != std::string::npos;
 			}
+
 			if (!matches)
 			{
 				continue;
 			}
+
 			const auto handle = assets.Find<Assets::ModelAsset>(entry.LogicalPath);
+
 			if (!handle.IsValid() || !assets.Resolve(handle))
 			{
 				continue;
 			}
+
 			int score = 0;
+
 			for (std::size_t i = 0; i < prefer.size(); ++i)
 			{
 				score += path.find(Lower(prefer[i])) != std::string::npos ? static_cast<int>(100 * (prefer.size() - i)) : 0;
 			}
+
 			for (const auto& keyword : avoid)
 			{
 				score -= path.find(Lower(keyword)) != std::string::npos ? 1000 : 0;
 			}
+
 			// Deterministic among equals: the shortest, then alphabetically first path.
 			if (score > bestScore ||
 				(score == bestScore && (path.size() < bestPath.size() || (path.size() == bestPath.size() && path < bestPath))))
@@ -226,6 +257,7 @@ namespace Game
 				bestPath = path;
 			}
 		}
+
 		return best;
 	}
 
@@ -238,11 +270,14 @@ namespace Game
 		Assets::AssetHandle<Assets::ModelAsset> modelHandle, std::string_view name, const ModelPlacement& placement)
 	{
 		ImportedModel result;
+
 		if (!render.HasRenderer())
 		{
 			return result;
 		}
+
 		const Assets::ModelAsset* model = modelHandle.IsValid() ? assets.Resolve(modelHandle) : nullptr;
+
 		if (!model)
 		{
 			return result;
@@ -256,12 +291,15 @@ namespace Game
 			{
 				return *world[node];
 			}
+
 			glm::mat4 matrix = ToMatrix(model->Nodes[node].LocalTransform);
 			const std::uint32_t parent = model->Nodes[node].Parent;
+
 			if (parent != Assets::ModelNode::InvalidNode && parent < model->Nodes.size() && parent != node)
 			{
 				matrix = self(parent, self) * matrix;
 			}
+
 			world[node] = matrix;
 			return matrix;
 		};
@@ -270,19 +308,24 @@ namespace Game
 		std::map<std::uint64_t, Group> groups; // By material asset id (0: no material).
 		glm::vec3 boundsMin(std::numeric_limits<float>::max());
 		glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
+
 		for (std::uint32_t nodeIndex = 0; nodeIndex < model->Nodes.size(); ++nodeIndex)
 		{
 			const auto& node = model->Nodes[nodeIndex];
 			const Assets::MeshAsset* mesh = node.Mesh.IsValid() ? assets.Resolve(node.Mesh) : nullptr;
+
 			if (!mesh)
 			{
 				continue;
 			}
+
 			const auto layout = ReadLayout(*mesh);
+
 			if (!layout || mesh->VertexBytes.empty() || mesh->IndexBytes.empty())
 			{
 				continue;
 			}
+
 			const glm::mat4 nodeWorld = worldOf(nodeIndex, worldOf);
 			const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(nodeWorld)));
 			const bool mirrored = glm::determinant(glm::mat3(nodeWorld)) < 0.0f;
@@ -294,23 +337,29 @@ namespace Game
 			// The finest LOD's primitives (all of them when the mesh has no LOD table).
 			std::uint32_t first = 0;
 			std::uint32_t count = static_cast<std::uint32_t>(mesh->Primitives.size());
+
 			if (!mesh->Lods.empty())
 			{
 				first = std::min<std::uint32_t>(mesh->Lods.front().FirstPrimitive, count);
 				count = std::min<std::uint32_t>(mesh->Lods.front().PrimitiveCount, count - first);
 			}
+
 			for (std::uint32_t p = first; p < first + count; ++p)
 			{
 				const auto& primitive = mesh->Primitives[p];
+
 				if (primitive.IndexCount < 3 || static_cast<std::size_t>(primitive.FirstIndex) + primitive.IndexCount > indexCount)
 				{
 					continue;
 				}
+
 				Assets::AssetHandle<Assets::MaterialInstanceAsset> material;
+
 				if (primitive.MaterialSlot < node.Materials.size())
 				{
 					material = node.Materials[primitive.MaterialSlot];
 				}
+
 				const std::uint64_t key = material.IsValid() ? material.GetId().Value : 0;
 				auto& group = groups[key];
 				group.Material = material;
@@ -320,18 +369,22 @@ namespace Game
 				remap.reserve(primitive.IndexCount);
 				std::vector<std::uint32_t> triangle;
 				triangle.reserve(3);
+
 				for (std::uint32_t i = 0; i < primitive.IndexCount; ++i)
 				{
 					const std::int64_t source =
 						static_cast<std::int64_t>(ReadIndex(*mesh, primitive.FirstIndex + i)) + primitive.VertexOffset;
+
 					if (source < 0 || static_cast<std::size_t>(source) >= vertexCount)
 					{
 						triangle.clear();
 						i += 2 - (i % 3); // Skip the rest of this triangle.
 						continue;
 					}
+
 					const auto vertexIndex = static_cast<std::uint32_t>(source);
 					auto found = remap.find(vertexIndex);
+
 					if (found == remap.end())
 					{
 						const std::byte* vertex =
@@ -345,6 +398,7 @@ namespace Game
 						glm::vec3 n3 = normalMatrix * glm::vec3(normal[0], normal[1], normal[2]);
 						n3 = glm::dot(n3, n3) > 1e-20f ? glm::normalize(n3) : glm::vec3(0, 1, 0);
 						glm::vec3 t3 = glm::mat3(nodeWorld) * glm::vec3(tangent[0], tangent[1], tangent[2]);
+
 						if (glm::dot(t3, t3) > 1e-20f)
 						{
 							t3 = glm::normalize(t3);
@@ -353,6 +407,7 @@ namespace Game
 						{
 							group.HasTangents = false;
 						}
+
 						boundsMin = glm::min(boundsMin, p3);
 						boundsMax = glm::max(boundsMax, p3);
 
@@ -364,19 +419,23 @@ namespace Game
 						out.Vertices.push_back(v);
 						found = remap.emplace(vertexIndex, static_cast<std::uint32_t>(out.Vertices.size() - 1)).first;
 					}
+
 					triangle.push_back(found->second);
+
 					if (triangle.size() == 3)
 					{
 						if (mirrored)
 						{
 							std::swap(triangle[1], triangle[2]);
 						}
+
 						out.Indices.insert(out.Indices.end(), triangle.begin(), triangle.end());
 						triangle.clear();
 					}
 				}
 			}
 		}
+
 		if (groups.empty() || boundsMin.x > boundsMax.x)
 		{
 			return result;
@@ -392,6 +451,7 @@ namespace Game
 			glm::scale(glm::mat4(1.0f), glm::vec3(scale)) * glm::translate(glm::mat4(1.0f), -pivot);
 		result.BoundsMin = glm::vec3(std::numeric_limits<float>::max());
 		result.BoundsMax = glm::vec3(std::numeric_limits<float>::lowest());
+
 		for (int corner = 0; corner < 8; ++corner)
 		{
 			const glm::vec3 local((corner & 1) ? boundsMax.x : boundsMin.x, (corner & 2) ? boundsMax.y : boundsMin.y,
@@ -406,13 +466,16 @@ namespace Game
 		auto& residency = render.Renderer->GetResidency();
 		std::unordered_set<std::uint64_t> requestedTextures;
 		std::uint32_t groupIndex = 0;
+
 		for (auto& [key, group] : groups)
 		{
 			const std::string groupName = std::string(name) + "/" + std::to_string(groupIndex++);
+
 			if (group.Mesh.Indices.size() < 3)
 			{
 				continue;
 			}
+
 			result.Triangles += static_cast<std::uint32_t>(group.Mesh.Indices.size() / 3);
 
 			// Material.
@@ -420,28 +483,34 @@ namespace Game
 			desc.Name = groupName;
 			desc.Roughness = 1.0f;
 			desc.Metallic = 1.0f;
+
 			if (const auto* material = group.Material.IsValid() ? assets.Resolve(group.Material) : nullptr)
 			{
 				if (const auto* p = FindParameter(*material, "BaseColorFactor"))
 				{
 					desc.BaseColor = p->Value;
 				}
+
 				if (const auto* p = FindParameter(*material, "EmissiveFactor"))
 				{
 					desc.Emissive = { p->Value[0], p->Value[1], p->Value[2] };
 				}
+
 				if (const auto* p = FindParameter(*material, "MetallicFactor"))
 				{
 					desc.Metallic = p->Value[0];
 				}
+
 				if (const auto* p = FindParameter(*material, "RoughnessFactor"))
 				{
 					desc.Roughness = p->Value[0];
 				}
+
 				if (const auto* p = FindParameter(*material, "AlphaCutoff"))
 				{
 					desc.AlphaCutoff = p->Value[0];
 				}
+
 				if (const auto* materialTemplate = material->Template.IsValid() ? assets.Resolve(material->Template) : nullptr)
 				{
 					desc.DoubleSided = (materialTemplate->FeatureMask & FeatureDoubleSided) != 0;
@@ -449,11 +518,13 @@ namespace Game
 						: (materialTemplate->FeatureMask & FeatureAlphaMask) != 0		  ? Engine::MaterialBlend::Masked
 																						  : Engine::MaterialBlend::Opaque;
 				}
+
 				desc.BaseColorTexture = FindTexture(*material, "BaseColorTexture");
 				desc.MetallicRoughnessTexture = FindTexture(*material, "MetallicRoughnessTexture");
 				desc.NormalTexture = FindTexture(*material, "NormalTexture");
 				desc.OcclusionTexture = FindTexture(*material, "OcclusionTexture");
 				desc.EmissiveTexture = FindTexture(*material, "EmissiveTexture");
+
 				for (const auto& texture : { desc.BaseColorTexture, desc.MetallicRoughnessTexture, desc.NormalTexture,
 						 desc.OcclusionTexture, desc.EmissiveTexture })
 				{
@@ -462,27 +533,33 @@ namespace Game
 						residency.RequestTexture(texture);
 					}
 				}
+
 				++result.Materials;
 			}
+
 			if (desc.Blend == Engine::MaterialBlend::Masked)
 			{
 				desc.DoubleSided = true; // Foliage and fabric cards are seen from both sides.
 			}
+
 			const std::uint32_t materialSet = materials.GetOrCreate(desc);
 
 			// Mesh (registered once; a scene reload reuses it).
 			auto meshHandle = meshes.Find(groupName);
+
 			if (!meshHandle.IsValid())
 			{
 				if (!group.HasTangents)
 				{
 					Engine::ProceduralMeshes::GenerateTangents(group.Mesh);
 				}
+
 				meshHandle = meshes.Register(groupName, group.Mesh);
 			}
 
 			result.Parts.push_back({ groupName, meshHandle, materialSet });
 		}
+
 		result.Textures = static_cast<std::uint32_t>(requestedTextures.size());
 		result.Position = glm::vec3(placeMatrix[3]);
 		result.Rotation = rotation;
@@ -495,6 +572,7 @@ namespace Game
 	{
 		std::vector<entt::entity> entities;
 		entities.reserve(model.Parts.size());
+
 		for (const auto& part : model.Parts)
 		{
 			const entt::entity entity = scene.CreateEntity(part.Name);
@@ -503,12 +581,16 @@ namespace Game
 			renderer.Parts.push_back({ part.Mesh, part.MaterialSet });
 			renderer.Flags = Swim::Render::RenderObjectFlags::Default | Swim::Render::RenderObjectFlags::Static;
 			scene.AddComponent<Engine::MeshRenderer>(entity, std::move(renderer));
+
 			for (const auto tag : tags)
 			{
 				scene.AddTag(entity, tag);
 			}
+
 			entities.push_back(entity);
 		}
+
 		return entities;
 	}
+
 } // namespace Game

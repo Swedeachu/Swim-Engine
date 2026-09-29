@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// A bin's slice of the indirect command and draw-record buffers (in draws).
 	// Bin index = materialBin * pageSlotCount + indexPageSlot.
 	struct VisibilityBinRange
@@ -12,4 +13,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(VisibilityBinRange) == 8);
+
 } // namespace Swim::Render

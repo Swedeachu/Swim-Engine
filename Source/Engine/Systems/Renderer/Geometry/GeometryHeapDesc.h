@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GeometryHeapDesc
 	{
 		// Device-local page sizes per stream. A mesh stream larger than its page
@@ -17,4 +18,5 @@ namespace Swim::Render
 		std::uint32_t MaxPages = 256;		// Across all streams, including dedicated pages.
 		std::string_view DebugName = "GeometryHeap";
 	};
+
 } // namespace Swim::Render

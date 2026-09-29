@@ -9,15 +9,19 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	std::vector<std::unique_ptr<Testing::MockTextureView>> MakeViews(Testing::MockTexture& texture, std::size_t count)
 	{
 		std::vector<std::unique_ptr<Testing::MockTextureView>> views;
+
 		for (std::size_t i = 0; i < count; ++i)
 		{
 			views.push_back(std::make_unique<Testing::MockTextureView>(texture, Rhi::TextureViewDesc{}));
 		}
+
 		return views;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Bindless", "FallbacksOccupyElementZeroAndRegistrationWritesImmediately")
@@ -144,9 +148,11 @@ SWIM_TEST("Render.Bindless", "ConstructionValidatesTheBindlessSpace")
 
 	auto& bindings = fixture.layout.program.Interface.DescriptorSchemas[0].Bindings;
 	const auto original = bindings;
+
 	for (int invalid = 0; invalid < 5; ++invalid)
 	{
 		bindings = original;
+
 		switch (invalid)
 		{
 		case 0:
@@ -165,8 +171,10 @@ SWIM_TEST("Render.Bindless", "ConstructionValidatesTheBindlessSpace")
 			bindings.push_back({ 2, Rhi::DescriptorType::UniformBuffer, 1, Rhi::ShaderStageMask::Fragment });
 			break;
 		}
+
 		SWIM_CHECK_THROWS(BindlessResourceTable(fixture.device, fixture.Desc()), std::invalid_argument);
 	}
+
 	bindings = original;
 	fixture.device.FailDescriptorTable = true;
 	SWIM_CHECK_THROWS(BindlessResourceTable(fixture.device, fixture.Desc()), std::runtime_error);

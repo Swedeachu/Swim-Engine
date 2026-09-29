@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	struct HzbGraphResources;
 
 	struct VisibilityFrameDesc
@@ -29,4 +30,5 @@ namespace Swim::Render
 		// command buffer per phase; see VisibilityDraws.h.
 		bool ZeroUnusedCommands = false;
 	};
+
 } // namespace Swim::Render

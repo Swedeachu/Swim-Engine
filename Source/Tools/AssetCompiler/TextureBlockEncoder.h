@@ -7,6 +7,7 @@
 
 namespace Swim::AssetCompiler
 {
+
 	// How the cooker stores native mip chains. BC7 (4 x 4 blocks, 16 bytes: a quarter of
 	// RGBA8) is what cooked models use; RGBA8 remains for tools and tests that inspect
 	// texels.
@@ -29,4 +30,5 @@ namespace Swim::AssetCompiler
 
 	// Decodes BC7 blocks back to RGBA8 (tests and diagnostics).
 	std::vector<std::byte> DecodeBc7ToRgba8(std::span<const std::byte> blocks, std::uint32_t width, std::uint32_t height);
+
 } // namespace Swim::AssetCompiler

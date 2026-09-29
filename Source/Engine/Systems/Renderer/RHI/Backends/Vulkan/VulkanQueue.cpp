@@ -25,9 +25,11 @@ namespace Swim::RhiVulkan
 			commandInfos.reserve(desc.CommandLists.size());
 			std::unordered_set<VkCommandBuffer> submittedCommands;
 			submittedCommands.reserve(desc.CommandLists.size());
+
 			for (Rhi::CommandList* commandList : desc.CommandLists)
 			{
 				auto* vulkanCommandList = dynamic_cast<VulkanCommandList*>(commandList);
+
 				if (vulkanCommandList == nullptr || vulkanCommandList->GetState().get() != state.get() ||
 					vulkanCommandList->GetQueueFamilyIndex() != familyIndex || !vulkanCommandList->IsExecutable())
 				{
@@ -48,9 +50,11 @@ namespace Swim::RhiVulkan
 
 			std::vector<VkSemaphoreSubmitInfo> waitInfos;
 			waitInfos.reserve(desc.WaitSemaphores.size() + desc.WaitTimelines.size());
+
 			for (Rhi::Semaphore* semaphore : desc.WaitSemaphores)
 			{
 				auto* vulkanSemaphore = dynamic_cast<VulkanSemaphore*>(semaphore);
+
 				if (vulkanSemaphore == nullptr || vulkanSemaphore->GetState().get() != state.get())
 				{
 					throw std::invalid_argument("Vulkan queue submission requires same-device Vulkan semaphores");
@@ -62,9 +66,11 @@ namespace Swim::RhiVulkan
 				waitInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 				waitInfos.push_back(waitInfo);
 			}
+
 			for (const Rhi::TimelinePoint& point : desc.WaitTimelines)
 			{
 				auto* timeline = dynamic_cast<VulkanTimeline*>(point.Semaphore);
+
 				if (timeline == nullptr || timeline->GetState()->DeviceState.get() != state.get())
 				{
 					throw std::invalid_argument("Vulkan queue timeline waits must belong to the same Vulkan device");
@@ -80,9 +86,11 @@ namespace Swim::RhiVulkan
 
 			std::vector<VkSemaphoreSubmitInfo> signalInfos;
 			signalInfos.reserve(desc.SignalSemaphores.size() + desc.SignalTimelines.size());
+
 			for (Rhi::Semaphore* semaphore : desc.SignalSemaphores)
 			{
 				auto* vulkanSemaphore = dynamic_cast<VulkanSemaphore*>(semaphore);
+
 				if (vulkanSemaphore == nullptr || vulkanSemaphore->GetState().get() != state.get())
 				{
 					throw std::invalid_argument("Vulkan queue submission requires same-device Vulkan semaphores");
@@ -94,9 +102,11 @@ namespace Swim::RhiVulkan
 				signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 				signalInfos.push_back(signalInfo);
 			}
+
 			for (const Rhi::TimelinePoint& point : desc.SignalTimelines)
 			{
 				auto* timeline = dynamic_cast<VulkanTimeline*>(point.Semaphore);
+
 				if (timeline == nullptr || timeline->GetState()->DeviceState.get() != state.get())
 				{
 					throw std::invalid_argument("Vulkan queue timeline signals must belong to the same Vulkan device");
@@ -111,13 +121,16 @@ namespace Swim::RhiVulkan
 			}
 
 			VkFence completionFence = VK_NULL_HANDLE;
+
 			if (desc.CompletionFence != nullptr)
 			{
 				auto* fence = dynamic_cast<VulkanFence*>(desc.CompletionFence);
+
 				if (fence == nullptr || fence->GetState().get() != state.get())
 				{
 					throw std::invalid_argument("Vulkan queue submission requires a same-device Vulkan completion fence");
 				}
+
 				completionFence = fence->GetFence();
 			}
 
@@ -132,10 +145,12 @@ namespace Swim::RhiVulkan
 
 			std::scoped_lock lock(*submissionMutex);
 			RequireVulkanDevice(*state);
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence), "vkQueueSubmit2") != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed to submit work to Vulkan queue");
 			}
+
 			for (Rhi::CommandList* commandList : desc.CommandLists)
 			{
 				static_cast<VulkanCommandList*>(commandList)->MarkSubmitted();
@@ -147,6 +162,7 @@ namespace Swim::RhiVulkan
 			RequireVulkanDevice(*state);
 			std::scoped_lock lock(*submissionMutex);
 			RequireVulkanDevice(*state);
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(queue), "vkQueueWaitIdle") != VK_SUCCESS)
 			{
 				throw std::runtime_error("Failed waiting for Vulkan queue idle");

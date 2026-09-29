@@ -31,6 +31,7 @@ namespace Engine
 			}
 
 			const float lengthSquared = value.x * value.x + value.y * value.y + value.z * value.z + value.w * value.w;
+
 			if (!(lengthSquared > 0.0f) || !std::isfinite(lengthSquared))
 			{
 				return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -82,6 +83,7 @@ namespace Engine
 		}
 
 		world = physicsSystem.CreateWorld(worldDesc);
+
 		if (!world || !world->IsValid())
 		{
 			world.reset();
@@ -164,6 +166,7 @@ namespace Engine
 
 		const glm::vec3 scale = glm::abs(transform.GetWorldScale(registry));
 		const auto resourcesIt = bodyResources.find(entity);
+
 		if (rigidbody.body && world->IsBodyValid(rigidbody.body) && !rigidbody.dirty && resourcesIt != bodyResources.end() &&
 			!ScaleChanged(resourcesIt->second.Scale, scale))
 		{
@@ -184,31 +187,37 @@ namespace Engine
 		case ColliderType::Box:
 		{
 			shapeDesc.Box.HalfExtents = rigidbody.collider.box.halfExtents * scale;
+
 			if (!(shapeDesc.Box.HalfExtents.x > 0.0f) || !(shapeDesc.Box.HalfExtents.y > 0.0f) || !(shapeDesc.Box.HalfExtents.z > 0.0f))
 			{
 				return;
 			}
+
 			break;
 		}
 		case ColliderType::Sphere:
 		{
 			const float uniformScale = std::max(scale.x, std::max(scale.y, scale.z));
 			shapeDesc.Sphere.Radius = rigidbody.collider.sphere.radius * uniformScale;
+
 			if (!(shapeDesc.Sphere.Radius > 0.0f) || !std::isfinite(shapeDesc.Sphere.Radius))
 			{
 				return;
 			}
+
 			break;
 		}
 		case ColliderType::Capsule:
 		{
 			shapeDesc.Capsule.Radius = rigidbody.collider.capsule.radius * std::max(scale.x, scale.z);
 			shapeDesc.Capsule.HalfHeight = rigidbody.collider.capsule.halfHeight * scale.y;
+
 			if (!(shapeDesc.Capsule.Radius > 0.0f) || !(shapeDesc.Capsule.HalfHeight >= 0.0f) || !std::isfinite(shapeDesc.Capsule.Radius) ||
 				!std::isfinite(shapeDesc.Capsule.HalfHeight))
 			{
 				return;
 			}
+
 			break;
 		}
 		case ColliderType::ConvexMesh:
@@ -222,12 +231,14 @@ namespace Engine
 		}
 
 		const PhysicsMaterialHandle material = world->CreateMaterial(PhysicsMaterialDesc{});
+
 		if (!material)
 		{
 			return;
 		}
 
 		const ShapeHandle shape = world->CreateShape(shapeDesc, material);
+
 		if (!shape)
 		{
 			world->DestroyMaterial(material);
@@ -251,6 +262,7 @@ namespace Engine
 		bodyDesc.UserData = 0;
 
 		const BodyHandle body = world->CreateBody(bodyDesc);
+
 		if (!body)
 		{
 			world->DestroyShape(shape);
@@ -271,6 +283,7 @@ namespace Engine
 		{
 			bodyEntities.erase(rigidbody.body);
 		}
+
 		if (world && rigidbody.body)
 		{
 			world->DestroyBody(rigidbody.body);
@@ -278,6 +291,7 @@ namespace Engine
 		}
 
 		const auto resourcesIt = bodyResources.find(entity);
+
 		if (resourcesIt != bodyResources.end())
 		{
 			if (world)
@@ -285,6 +299,7 @@ namespace Engine
 				world->DestroyShape(resourcesIt->second.Shape);
 				world->DestroyMaterial(resourcesIt->second.Material);
 			}
+
 			bodyResources.erase(resourcesIt);
 		}
 
@@ -305,11 +320,13 @@ namespace Engine
 			{
 				const auto resourcesIt = bodyResources.find(entity);
 				const glm::vec3 scale = glm::abs(transform.GetWorldScale(registry));
+
 				if (!rigidbody.body || !world->IsBodyValid(rigidbody.body) || rigidbody.dirty || resourcesIt == bodyResources.end() ||
 					ScaleChanged(resourcesIt->second.Scale, scale))
 				{
 					CreateOrRebuildBody(entity, transform, rigidbody);
 				}
+
 			});
 
 		registry.view<Transform, Rigidbody>().each(
@@ -329,10 +346,12 @@ namespace Engine
 					{
 						world->SetLinearVelocity(rigidbody.body, rigidbody.initialLinearVelocity, true);
 					}
+
 					if (rigidbody.hasInitialAngularVelocity)
 					{
 						world->SetAngularVelocity(rigidbody.body, rigidbody.initialAngularVelocity, true);
 					}
+
 					rigidbody.ClearInitialVelocities();
 				}
 
@@ -344,6 +363,7 @@ namespace Engine
 				{
 					world->SetKinematicTarget(rigidbody.body, GetPoseFromTransform(entity, transform));
 				}
+
 			});
 	}
 
@@ -379,6 +399,7 @@ namespace Engine
 				}
 
 				PhysicsPose pose{};
+
 				if (!world->GetBodyPose(rigidbody.body, pose))
 				{
 					return;
@@ -435,6 +456,7 @@ namespace Engine
 		}
 
 		Rigidbody& rigidbody = registry.get<Rigidbody>(entity);
+
 		if (rigidbody.type == RigidbodyType::Dynamic && rigidbody.body)
 		{
 			world->AddForce(rigidbody.body, force, mode, autowake);
@@ -449,6 +471,7 @@ namespace Engine
 		}
 
 		Rigidbody& rigidbody = registry.get<Rigidbody>(entity);
+
 		if (rigidbody.body)
 		{
 			world->SetLinearVelocity(rigidbody.body, velocity, autowake);
@@ -463,6 +486,7 @@ namespace Engine
 		}
 
 		Rigidbody& rigidbody = registry.get<Rigidbody>(entity);
+
 		if (rigidbody.body)
 		{
 			world->SetAngularVelocity(rigidbody.body, velocity, autowake);

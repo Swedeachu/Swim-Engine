@@ -4,8 +4,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		using Internal::Intersect;
 		using Internal::Premultiply;
 
@@ -58,6 +60,7 @@ namespace Swim::UI
 			{
 				return box;
 			}
+
 			const float scale = std::min(box.Width / image.Size.X, box.Height / image.Size.Y);
 			const float width = image.Size.X * scale;
 			const float height = image.Size.Y * scale;
@@ -79,6 +82,7 @@ namespace Swim::UI
 			base.Sampler = image.Sampler;
 			const auto& slice = image.Slice;
 			const bool sliced = slice.Left > 0.0f || slice.Top > 0.0f || slice.Right > 0.0f || slice.Bottom > 0.0f;
+
 			if (!sliced)
 			{
 				base.Bounds = dest;
@@ -86,6 +90,7 @@ namespace Swim::UI
 				emit(base);
 				return;
 			}
+
 			const float sx =
 				slice.Left + slice.Right > dest.Width && slice.Left + slice.Right > 0.0f ? dest.Width / (slice.Left + slice.Right) : 1.0f;
 			const float sy =
@@ -95,6 +100,7 @@ namespace Swim::UI
 			const auto& uv = image.Uv;
 			const float us[4] = { uv.X, uv.X + image.SliceUv.Left, uv.X + uv.Width - image.SliceUv.Right, uv.X + uv.Width };
 			const float vs[4] = { uv.Y, uv.Y + image.SliceUv.Top, uv.Y + uv.Height - image.SliceUv.Bottom, uv.Y + uv.Height };
+
 			for (int row = 0; row < 3; ++row)
 			{
 				for (int column = 0; column < 3; ++column)
@@ -102,6 +108,7 @@ namespace Swim::UI
 					auto quad = base;
 					quad.Bounds = { xs[column], ys[row], xs[column + 1] - xs[column], ys[row + 1] - ys[row] };
 					quad.Uv = { us[column], vs[row], us[column + 1] - us[column], vs[row + 1] - vs[row] };
+
 					if (quad.Bounds.Width > 0.0f && quad.Bounds.Height > 0.0f)
 					{
 						emit(quad);
@@ -109,6 +116,7 @@ namespace Swim::UI
 				}
 			}
 		}
+
 	} // namespace
 
 	void UiDocument::Impl::BuildPaint(Node& node, Text::GlyphAtlas& atlas)
@@ -124,10 +132,12 @@ namespace Swim::UI
 		const auto& s = node.Style;
 		const auto& v = node.Visual;
 		const float opacity = node.EffectiveOpacity;
+
 		if (opacity <= 0.0f)
 		{
 			return;
 		}
+
 		const auto color = [&](const UiColor& straight)
 		{
 			return Fade(Premultiply(straight), opacity);
@@ -140,25 +150,31 @@ namespace Swim::UI
 
 		const UiRect content = Internal::ContentBox(node.Bounds, s.Padding);
 		const UiRect clip = s.Clip ? Intersect(node.Clip, content) : node.Clip;
+
 		if (clip.Width <= 0.0f || clip.Height <= 0.0f)
 		{
 			return;
 		}
+
 		const UiPoint origin{ content.X - node.Scroll.X, content.Y - node.Scroll.Y };
+
 		if (v.HasImage)
 		{
 			AddImage(
 				node.Id, v.Image, color(v.ImageTint), FitImage(v.Image, { origin.X, origin.Y, content.Width, content.Height }), clip, emit);
 		}
+
 		if (!node.TextLayout)
 		{
 			return;
 		}
+
 		const auto& layout = *node.TextLayout;
 		const bool focusedEditor = node.Editable && node.Id == Focused;
 		const bool composing = IsComposing(node);
 		const auto selectionBegin = std::min(node.Selection.Anchor, node.Selection.Caret);
 		const auto selectionEnd = std::max(node.Selection.Anchor, node.Selection.Caret);
+
 		if (focusedEditor && !composing && selectionBegin != selectionEnd)
 		{
 			for (const auto& rect : layout.GetSelectionRects(selectionBegin, selectionEnd))
@@ -166,30 +182,36 @@ namespace Swim::UI
 				emit(SolidQuad(node.Id, { origin.X + rect.X, origin.Y + rect.Y, rect.Width, rect.Height }, clip, color(s.SelectionColor)));
 			}
 		}
+
 		if (v.TextColor.A > 0.0f)
 		{
 			const UiColor text = color(v.TextColor);
+
 			for (const auto& glyph : layout.GetGlyphs())
 			{
 				const auto entry = atlas.Get(node.Fonts->GetFace(glyph.Face), glyph.Glyph);
+
 				if (entry.Page != Text::NoAtlasPage)
 				{
 					emit(GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip, text));
 				}
 			}
 		}
+
 		if (composing)
 		{
 			// Underline the preedit text.
 			const auto begin = node.Selection.Caret;
 			const auto end = begin + static_cast<std::uint32_t>(Composition.size());
 			const float thickness = std::max(1.0f, node.FontSize / 16.0f);
+
 			for (const auto& rect : layout.GetSelectionRects(begin, end))
 			{
 				emit(SolidQuad(node.Id, { origin.X + rect.X, origin.Y + rect.Y + rect.Height - thickness, rect.Width, thickness }, clip,
 					color(v.TextColor)));
 			}
 		}
+
 		if (focusedEditor && CaretVisible && (composing || selectionBegin == selectionEnd))
 		{
 			const std::uint32_t offset = composing
@@ -207,13 +229,16 @@ namespace Swim::UI
 		impl->RequireLayout();
 		// Unique glyphs per face, in first-use order (deterministic packing).
 		std::vector<std::pair<std::shared_ptr<const Text::FontFace>, std::vector<std::uint32_t>>> perFace;
+
 		for (const auto id : impl->Order)
 		{
 			const auto& node = impl->Get(id);
+
 			if (!node.TextLayout || (node.Style.TextColor.A <= 0.0f && node.Visual.TextColor.A <= 0.0f))
 			{
 				continue;
 			}
+
 			for (const auto& glyph : node.TextLayout->GetGlyphs())
 			{
 				const auto& face = node.Fonts->GetFace(glyph.Face);
@@ -222,52 +247,64 @@ namespace Swim::UI
 					{
 						return candidate.first == face;
 					});
+
 				if (entry == perFace.end())
 				{
 					perFace.push_back({ face, {} });
 					entry = std::prev(perFace.end());
 				}
+
 				if (!atlas.Contains(*face, glyph.Glyph))
 				{
 					entry->second.push_back(glyph.Glyph);
 				}
 			}
 		}
+
 		std::size_t added = 0;
+
 		for (const auto& [face, glyphs] : perFace)
 		{
 			added += atlas.Prewarm(face, glyphs, parallelFor);
 		}
+
 		return added;
 	}
 
 	const std::vector<UiPaintQuad>& UiDocument::Paint(Text::GlyphAtlas& atlas)
 	{
 		impl->RequireLayout();
+
 		if (impl->PaintAtlas != &atlas)
 		{
 			for (auto& [id, node] : impl->Nodes)
 			{
 				node.PaintDirty = true;
 			}
+
 			impl->PaintAtlas = &atlas;
 		}
+
 		impl->ResolveVisuals();
 		const auto previousCount = impl->Quads.size();
 		impl->Quads.clear();
 		impl->RepaintedNodes = 0;
+
 		for (const auto id : impl->Order)
 		{
 			auto& node = impl->Get(id);
 			// Opacity multiplies down the tree; hidden scroll bars hide their parts.
 			float opacity = node.ControlHidden ? 0.0f : node.Visual.Opacity * node.ControlOpacity;
+
 			if (node.Parent && impl->Nodes.contains(node.Parent.Value))
 			{
 				opacity *= impl->Get(node.Parent).EffectiveOpacity;
 			}
+
 			node.EffectiveOpacity = opacity;
 			const bool moved = !Internal::SameRect(node.PaintedBounds, node.Bounds) || !Internal::SameRect(node.PaintedClip, node.Clip) ||
 				node.PaintedScroll.X != node.Scroll.X || node.PaintedScroll.Y != node.Scroll.Y || node.PaintedOpacity != opacity;
+
 			if (node.PaintDirty || moved)
 			{
 				impl->BuildPaint(node, atlas);
@@ -278,13 +315,17 @@ namespace Swim::UI
 				node.PaintedOpacity = opacity;
 				++impl->RepaintedNodes;
 			}
+
 			impl->Quads.insert(impl->Quads.end(), node.Paint.begin(), node.Paint.end());
 		}
+
 		if (impl->RepaintedNodes > 0 || impl->Quads.size() != previousCount || impl->PaintedLayoutRevision != impl->Revision)
 		{
 			++impl->PaintRevision;
 			impl->PaintedLayoutRevision = impl->Revision;
 		}
+
 		return impl->Quads;
 	}
+
 } // namespace Swim::UI

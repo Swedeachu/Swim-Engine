@@ -6,12 +6,14 @@
 
 namespace Swim::Text
 {
+
 	FontCollection::FontCollection(std::vector<std::shared_ptr<const FontFace>> chain) : faces(std::move(chain))
 	{
 		if (faces.empty() || faces.size() > MaxFaces)
 		{
 			throw std::invalid_argument("A font collection needs 1 .. 64 faces");
 		}
+
 		for (const auto& face : faces)
 		{
 			if (!face)
@@ -63,6 +65,7 @@ namespace Swim::Text
 	bool FontCollection::Covers(std::uint32_t index, std::span<const char32_t> cluster) const
 	{
 		const auto& face = *faces.at(index);
+
 		for (const char32_t c : cluster)
 		{
 			if (!IsIgnorable(c) && face.GetGlyph(c) == 0)
@@ -70,6 +73,7 @@ namespace Swim::Text
 				return false;
 			}
 		}
+
 		return true;
 	}
 
@@ -79,10 +83,12 @@ namespace Swim::Text
 		{
 			return preferred < faces.size() ? preferred : 0;
 		}
+
 		if (preferred < faces.size() && IsNeutral(cluster.front()) && Covers(preferred, cluster))
 		{
 			return preferred;
 		}
+
 		for (std::uint32_t index = 0; index < faces.size(); ++index)
 		{
 			if (Covers(index, cluster))
@@ -90,6 +96,8 @@ namespace Swim::Text
 				return index;
 			}
 		}
+
 		return 0;
 	}
+
 } // namespace Swim::Text

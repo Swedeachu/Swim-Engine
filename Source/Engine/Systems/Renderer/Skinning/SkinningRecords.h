@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// GPU skinning records (critical-path item 78), std430 structured-buffer rows
 	// mirrored by Shaders/Slang/Skinning/SkinningRecords.slang (a reflection test
 	// compares every offset).
@@ -50,4 +51,5 @@ namespace Swim::Render
 	static_assert(offsetof(GpuMorphDelta, Normal) == 16);
 	static_assert(sizeof(GpuSkinDispatch) == 48);
 	static_assert(offsetof(GpuSkinDispatch, SourceMorph) == 32);
+
 } // namespace Swim::Render

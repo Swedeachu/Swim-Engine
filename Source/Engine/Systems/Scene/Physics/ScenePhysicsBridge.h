@@ -21,22 +21,31 @@ namespace Engine
 	public:
 
 		ScenePhysicsBridge(PhysicsSystem& physicsSystem, entt::registry& registry, PhysicsWorldDesc desc = {});
+
 		~ScenePhysicsBridge();
 
 		bool Init();
 
 		PhysicsWorld& GetWorld() { return *world; }
+
 		const PhysicsWorld& GetWorld() const { return *world; }
 
 		void PreSimulateSync(float dt);
+
 		void Step(float dt);
+
 		void FetchResults(bool block = true);
+
 		void PostSimulateSync();
+
 		void Interpolate(float alpha);
 
 		bool HasBody(entt::entity entity) const;
+
 		void AddForce(entt::entity entity, const glm::vec3& force, ForceMode mode = ForceMode::Force, bool autowake = true);
+
 		void SetLinearVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);
+
 		void SetAngularVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);
 
 		// The entity whose Rigidbody owns a body (collision events, ray casts); null for
@@ -61,10 +70,13 @@ namespace Engine
 		bool initialized = false;
 
 		void OnRigidbodyConstruct(entt::registry& reg, entt::entity entity);
+
 		void OnRigidbodyDestroy(entt::registry& reg, entt::entity entity);
+
 		void OnTransformDestroy(entt::registry& reg, entt::entity entity);
 
 		void CreateOrRebuildBody(entt::entity entity, Transform& transform, Rigidbody& rigidbody);
+
 		void DestroyEntityBody(entt::entity entity, Rigidbody& rigidbody);
 
 		PhysicsPose GetPoseFromTransform(entt::entity entity, Transform& transform) const;

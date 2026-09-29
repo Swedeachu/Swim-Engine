@@ -15,10 +15,12 @@ using Swim::Testing::LoadTextFontFixture;
 
 namespace
 {
+
 	std::uint8_t Median(const std::uint8_t* p)
 	{
 		return std::max(std::min(p[0], p[1]), std::min(std::max(p[0], p[1]), p[2]));
 	}
+
 } // namespace
 
 SWIM_TEST("Text.Atlas", "CachesGlyphsAndKeepsPagesStableAcrossGrowth")
@@ -37,12 +39,15 @@ SWIM_TEST("Text.Atlas", "CachesGlyphsAndKeepsPagesStableAcrossGrowth")
 	const auto space = atlas.Get(font, font->GetGlyph(U' '));
 	SWIM_CHECK_EQUAL(space.Page, NoAtlasPage);
 	SWIM_CHECK_EQUAL(atlas.GetPage(0).Revision, revision);
+
 	for (char32_t c = U'B'; c <= U'Z'; ++c)
 	{
 		atlas.Get(font, font->GetGlyph(c));
 	}
+
 	SWIM_CHECK(atlas.GetPageCount() > 1);
 	const auto after = atlas.GetPage(0);
+
 	for (std::uint32_t y = a.Y; y < a.Y + a.Height; ++y)
 	{
 		for (std::uint32_t x = a.X; x < a.X + a.Width; ++x)
@@ -54,6 +59,7 @@ SWIM_TEST("Text.Atlas", "CachesGlyphsAndKeepsPagesStableAcrossGrowth")
 			}
 		}
 	}
+
 	SWIM_CHECK_THROWS(atlas.GetPage(atlas.GetPageCount()), std::out_of_range);
 }
 
@@ -63,6 +69,7 @@ SWIM_TEST("Text.Atlas", "BudgetFailuresDoNotCorruptCachedGlyphs")
 	GlyphAtlas atlas({ 32, 1, 20, 2 });
 	const auto first = atlas.Get(font, font->GetGlyph(U'W'));
 	bool full = false;
+
 	for (char32_t c = U'A'; c < U'Z'; ++c)
 	{
 		try
@@ -75,6 +82,7 @@ SWIM_TEST("Text.Atlas", "BudgetFailuresDoNotCorruptCachedGlyphs")
 			break;
 		}
 	}
+
 	SWIM_REQUIRE(full);
 	SWIM_CHECK_EQUAL(atlas.GetPageCount(), 1u);
 	const auto current = atlas.Get(font, font->GetGlyph(U'W'));
@@ -112,48 +120,59 @@ SWIM_TEST("Text.Atlas", "DistanceSignsAndTopDownOrientationMatchFreeTypeCoverage
 	SWIM_REQUIRE_EQUAL(FT_Init_FreeType(&library), 0);
 	FT_Face reference = nullptr;
 	const auto loadError = FT_New_Face(library, SWIM_TEXT_FONT_FIXTURE_PATH, 0, &reference);
+
 	if (loadError != 0)
 	{
 		FT_Done_FreeType(library);
 		SWIM_FAIL("Cannot load reference font");
 		return;
 	}
+
 	FT_Set_Pixel_Sizes(reference, 0, 48);
 	std::size_t compared = 0;
 	std::size_t mismatches = 0;
+
 	for (const char32_t c : { U'L', U'O', U'A', U'g' })
 	{
 		const auto glyph = atlas.Get(font, font->GetGlyph(c));
 		const auto page = atlas.GetPage(glyph.Page);
 		const int error = FT_Load_Char(reference, c, FT_LOAD_NO_HINTING | FT_LOAD_RENDER);
 		SWIM_CHECK_EQUAL(error, 0);
+
 		if (error != 0)
 		{
 			continue;
 		}
+
 		const auto& bitmap = reference->glyph->bitmap;
+
 		for (unsigned y = 0; y < bitmap.rows; ++y)
 		{
 			for (unsigned x = 0; x < bitmap.width; ++x)
 			{
 				const auto coverage = bitmap.buffer[y * bitmap.pitch + x];
+
 				if (coverage > 16 && coverage < 239)
 				{
 					continue; // Ignore antialiasing at the contour.
 				}
+
 				const int gx = static_cast<int>(x) + reference->glyph->bitmap_left - static_cast<int>(std::lround(glyph.Left * 48));
 				const int gy = static_cast<int>(y) - reference->glyph->bitmap_top + static_cast<int>(std::lround(glyph.Top * 48));
+
 				if (gx < 0 || gy < 0 || gx >= static_cast<int>(glyph.Width) || gy >= static_cast<int>(glyph.Height))
 				{
 					++mismatches;
 					continue;
 				}
+
 				const auto* pixel = page.Pixels.data() + ((glyph.Y + gy) * page.Size + glyph.X + gx) * 3;
 				mismatches += (Median(pixel) > 127) != (coverage > 127) ? 1u : 0u;
 				++compared;
 			}
 		}
 	}
+
 	FT_Done_Face(reference);
 	FT_Done_FreeType(library);
 	SWIM_CHECK(compared > 1500);
@@ -172,15 +191,18 @@ SWIM_TEST("Text.Atlas", "ChangedRowsCoverEveryWriteSinceARevision")
 	// Fill the first shelf and start the next: a consumer at revision 1 needs both bands.
 	std::uint32_t lowest = first.Y;
 	std::uint32_t highest = first.Y + first.Height;
+
 	for (char32_t c = U'a'; c <= U'z'; ++c)
 	{
 		const auto glyph = atlas.Get(font, font->GetGlyph(c));
+
 		if (glyph.Page == 0)
 		{
 			lowest = std::min(lowest, glyph.Y);
 			highest = std::max(highest, glyph.Y + glyph.Height);
 		}
 	}
+
 	const auto page = atlas.GetPage(0);
 	SWIM_CHECK(page.Revision > 2);
 	const auto since = atlas.GetChangedRows(0, 1);

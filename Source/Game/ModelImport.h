@@ -16,17 +16,22 @@
 
 namespace Swim::Assets
 {
+
 	class AssetSystem;
+
 }
 
 namespace Engine
 {
+
 	class Scene;
 	struct RenderServices;
+
 } // namespace Engine
 
 namespace Game
 {
+
 	// Finds a cooked model (a ".model" root loaded by the development asset bootstrap)
 	// whose logical path contains every keyword (case-insensitive). Among matches, paths
 	// containing a `prefer` keyword win (earlier keywords rank higher) and paths containing
@@ -91,4 +96,5 @@ namespace Game
 	// Creates the entities of an already imported model again (after a scene reset): no
 	// CPU geometry work, the meshes and materials are already registered.
 	std::vector<entt::entity> RespawnModel(Engine::Scene& scene, const ImportedModel& model, const std::vector<Engine::TagId>& tags);
+
 } // namespace Game

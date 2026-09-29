@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contract of the culling program (Shaders/Slang/GpuScene/
 	// GpuVisibility.slang), all in one space. The program and its layout come
 	// from the caller's compiled shader; GpuVisibility never loads shaders.
@@ -45,4 +46,5 @@ namespace Swim::Render
 		std::uint32_t IndexPageSlots = 1; // Index pages one frame can draw from.
 		std::string DebugName = "GPU visibility";
 	};
+
 } // namespace Swim::Render

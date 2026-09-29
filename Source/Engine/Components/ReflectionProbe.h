@@ -4,6 +4,7 @@
 
 namespace Engine
 {
+
 	// A local reflection probe on an entity (the middle layer of the reflection hierarchy:
 	// screen-space reflections, then probes, then the global environment). The renderer
 	// captures the scene around the entity's world position (+ Offset) into a small cube map
@@ -31,4 +32,5 @@ namespace Engine
 		float Priority = 1.0f;
 		glm::vec3 Offset{ 0.0f };
 	};
+
 } // namespace Engine

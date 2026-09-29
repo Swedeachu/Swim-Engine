@@ -7,6 +7,7 @@ int main(int argc, char** argv)
 	(void)argv;
 
 	Swim::Platform::PlatformSystem platform;
+
 	if (!platform.Initialize())
 	{
 		return 1;
@@ -20,12 +21,14 @@ int main(int argc, char** argv)
 	desc.HighPixelDensity = true;
 
 	auto window = platform.GetWindowSystem().Create(desc);
+
 	if (!window)
 	{
 		return 2;
 	}
 
 	bool running = true;
+
 	while (running)
 	{
 		platform.PumpEvents(
@@ -35,6 +38,7 @@ int main(int argc, char** argv)
 				{
 					running = false;
 				}
+
 			},
 			[](const Swim::Platform::InputEvent& event)
 			{

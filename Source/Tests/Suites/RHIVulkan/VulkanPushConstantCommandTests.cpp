@@ -7,6 +7,7 @@ using namespace Swim;
 
 namespace
 {
+
 	constexpr auto both = Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment;
 
 	struct PushConstantCapture : Testing::VulkanPipelineCapture
@@ -37,6 +38,7 @@ namespace
 			Commands->SetScissor({ 0, 0, 16, 16 });
 		}
 	};
+
 }
 
 SWIM_TEST("RHI.Vulkan.PushConstantCommand", "UpdatesCopyBytesWithNonzeroOffsetAndUnalignedHostPointer")

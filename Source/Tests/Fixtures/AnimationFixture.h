@@ -11,6 +11,7 @@
 
 namespace Swim::Testing
 {
+
 	// A three-joint chain along +y: Root (origin) -> Mid (y = 1) -> Tip (y = 2 in
 	// model space). Inverse bind matrices invert the rest pose, so the rest
 	// skinning palette is the identity.
@@ -19,6 +20,7 @@ namespace Swim::Testing
 		Assets::SkeletonAsset asset;
 		asset.RootTransform[14] = rootZ;
 		const char* names[] = { "Root", "Mid", "Tip" };
+
 		for (std::uint32_t joint = 0; joint < 3; ++joint)
 		{
 			Assets::SkeletonJoint out;
@@ -30,6 +32,7 @@ namespace Swim::Testing
 			out.InverseBind[14] = -rootZ;
 			asset.Joints.push_back(out);
 		}
+
 		return asset;
 	}
 
@@ -46,11 +49,13 @@ namespace Swim::Testing
 		track.Path = Assets::AnimationPath::Rotation;
 		track.Components = 4;
 		track.Times = std::move(times);
+
 		for (const float angle : degrees)
 		{
 			const Animation::Quat q = Animation::FromAxisAngle(axis, angle * 3.14159265358979f / 180.0f);
 			track.Values.insert(track.Values.end(), q.begin(), q.end());
 		}
+
 		return track;
 	}
 
@@ -109,4 +114,5 @@ namespace Swim::Testing
 		const float d = std::abs(Animation::Dot(Animation::Normalize(a), Animation::Normalize(b)));
 		return 2.0f * std::acos(d > 1.0f ? 1.0f : d);
 	}
+
 } // namespace Swim::Testing

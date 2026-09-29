@@ -54,6 +54,7 @@ namespace Swim::RhiVulkan
 			{
 				vkb::destroy_instance(Instance);
 			}
+
 			if (LoaderAcquired)
 			{
 				Platform::Internal::ReleaseVulkanLoader();
@@ -94,23 +95,28 @@ namespace Swim::RhiVulkan
 		~VulkanDeviceState()
 		{
 			RetireLostVulkanDevice(*this);
+
 			if (Device.device != VK_NULL_HANDLE && Dispatch.vkDestroyDescriptorPool != nullptr)
 			{
 				for (auto& [signature, pools] : FreeDescriptorPools)
 				{
 					(void)signature;
+
 					for (const VkDescriptorPool pool : pools)
 					{
 						Dispatch.vkDestroyDescriptorPool(Device.device, pool, nullptr);
 					}
 				}
 			}
+
 			FreeDescriptorPools.clear();
 			DestroyVulkanPipelineCache(*this);
+
 			if (Allocator != nullptr)
 			{
 				vmaDestroyAllocator(Allocator);
 			}
+
 			if (Device.device != VK_NULL_HANDLE)
 			{
 				vkb::destroy_device(Device);

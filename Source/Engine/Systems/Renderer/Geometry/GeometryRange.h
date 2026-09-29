@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// A byte range inside one GeometryHeap page.
 	struct GeometryRange
 	{
@@ -11,4 +12,5 @@ namespace Swim::Render
 
 		bool operator==(const GeometryRange&) const = default;
 	};
+
 } // namespace Swim::Render

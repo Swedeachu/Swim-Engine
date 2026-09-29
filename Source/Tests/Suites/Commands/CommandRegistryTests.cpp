@@ -30,10 +30,12 @@ SWIM_TEST("Commands.Registry", "MalformedCommandsNeverInvokeHandlers")
 	Swim::Commands::CommandRegistry registry;
 	int calls = 0;
 	registry.Register("run", [&](const auto&) { ++calls; });
+
 	for (const auto* invalid : { "", "  ", "()", "(run", "run)", "(run))", "run (arg)", "run \"unterminated", "unknown" })
 	{
 		SWIM_CHECK(!registry.ParseAndDispatch(invalid));
 	}
+
 	SWIM_CHECK(!registry.ParseAndDispatch(std::string_view("run\0x", 5)));
 	SWIM_CHECK_EQUAL(calls, 0);
 }

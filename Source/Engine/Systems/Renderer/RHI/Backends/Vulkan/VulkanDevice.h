@@ -41,7 +41,9 @@ namespace Swim::RhiVulkan
 
 	class VulkanDevice final : public Rhi::Device
 	{
+
 	  public:
+
 		VulkanDevice(std::shared_ptr<VulkanDeviceState> state, Rhi::AdapterInfo adapterInfo, std::unique_ptr<VulkanQueue> graphicsQueue,
 			std::unique_ptr<VulkanQueue> computeQueue, std::unique_ptr<VulkanQueue> transferQueue)
 			: state(std::move(state)), adapterInfo(std::move(adapterInfo)), graphicsQueue(std::move(graphicsQueue)),
@@ -75,15 +77,18 @@ namespace Swim::RhiVulkan
 			case Rhi::QueueType::Transfer:
 				return *transferQueue;
 			}
+
 			return *graphicsQueue;
 		}
 
 		Rhi::SwapchainSupport QuerySwapchainSupport(Platform::Window& window) const override;
+
 		std::unique_ptr<Rhi::Swapchain> CreateSwapchain(Platform::Window& window, const Rhi::SwapchainDesc& desc) override;
 
 		std::unique_ptr<Rhi::Buffer> CreateBuffer(const Rhi::BufferDesc& desc) override
 		{
 			RequireVulkanDevice(*state);
+
 			if (desc.Size == 0 || desc.Usage == Rhi::BufferUsage::None ||
 				(desc.PersistentMap &&
 					((desc.Memory != Rhi::MemoryPreference::CpuToGpu && desc.Memory != Rhi::MemoryPreference::GpuToCpu) ||
@@ -93,6 +98,7 @@ namespace Swim::RhiVulkan
 			}
 
 			const VkBufferUsageFlags usage = ToVkBufferUsage(desc.Usage);
+
 			if (usage == 0)
 			{
 				return nullptr;
@@ -105,6 +111,7 @@ namespace Swim::RhiVulkan
 			createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 			VmaAllocationCreateInfo allocationInfo{};
+
 			switch (desc.Memory)
 			{
 			case Rhi::MemoryPreference::DeviceLocal:
@@ -126,9 +133,11 @@ namespace Swim::RhiVulkan
 			{
 				allocationInfo.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
 			}
+
 			VmaAllocationInfo mappedInfo{};
 			VkBuffer buffer = VK_NULL_HANDLE;
 			VmaAllocation allocation = nullptr;
+
 			if (CheckVulkanResult(*state,
 					vmaCreateBuffer(state->Allocator, &createInfo, &allocationInfo, &buffer, &allocation, &mappedInfo),
 					"vmaCreateBuffer") != VK_SUCCESS)
@@ -141,6 +150,7 @@ namespace Swim::RhiVulkan
 				vmaDestroyBuffer(state->Allocator, buffer, allocation);
 				return nullptr;
 			}
+
 			try
 			{
 				if (!desc.DebugName.empty())
@@ -148,6 +158,7 @@ namespace Swim::RhiVulkan
 					const std::string debugName(desc.DebugName);
 					vmaSetAllocationName(state->Allocator, allocation, debugName.c_str());
 				}
+
 				RequireVulkanDevice(*state);
 				return std::make_unique<VulkanBuffer>(
 					state, buffer, allocation, desc, desc.PersistentMap ? mappedInfo.pMappedData : nullptr);
@@ -162,6 +173,7 @@ namespace Swim::RhiVulkan
 		std::unique_ptr<Rhi::Texture> CreateTexture(const Rhi::TextureDesc& desc) override
 		{
 			RequireVulkanDevice(*state);
+
 			if (!ValidateTextureDesc(desc) || !ValidateVulkanStorageTexture(*state, desc) ||
 				!ValidateVulkanSampledDepthTexture(*state, desc))
 			{
@@ -181,6 +193,7 @@ namespace Swim::RhiVulkan
 			createInfo.usage = ToVkImageUsage(desc.Usage);
 			createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 			createInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
 			if (createInfo.usage == 0)
 			{
 				return nullptr;
@@ -191,6 +204,7 @@ namespace Swim::RhiVulkan
 
 			VkImage image = VK_NULL_HANDLE;
 			VmaAllocation allocation = nullptr;
+
 			if (CheckVulkanResult(*state, vmaCreateImage(state->Allocator, &createInfo, &allocationInfo, &image, &allocation, nullptr),
 					"vmaCreateImage") != VK_SUCCESS)
 			{
@@ -202,6 +216,7 @@ namespace Swim::RhiVulkan
 				const std::string debugName(desc.DebugName);
 				vmaSetAllocationName(state->Allocator, allocation, debugName.c_str());
 			}
+
 			return std::make_unique<VulkanTexture>(state, image, desc, allocation);
 		}
 
@@ -209,6 +224,7 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 			auto* vulkanTexture = dynamic_cast<VulkanTexture*>(&texture);
+
 			if (vulkanTexture == nullptr || vulkanTexture->GetState().get() != state.get())
 			{
 				return nullptr;
@@ -216,6 +232,7 @@ namespace Swim::RhiVulkan
 
 			const Rhi::TextureDesc& textureDesc = vulkanTexture->GetDesc();
 			const Rhi::Format viewFormat = desc.PixelFormat == Rhi::Format::Undefined ? textureDesc.PixelFormat : desc.PixelFormat;
+
 			if (!ValidateVulkanTextureView(textureDesc, desc, state->Device.physical_device.features.imageCubeArray != VK_FALSE))
 			{
 				return nullptr;
@@ -239,13 +256,16 @@ namespace Swim::RhiVulkan
 				[&]
 				{
 					VkImageView created = VK_NULL_HANDLE;
+
 					if (CheckVulkanResult(*state, state->Dispatch.vkCreateImageView(state->Device.device, &createInfo, nullptr, &created),
 							"vkCreateImageView") != VK_SUCCESS)
 					{
 						return VkImageView(VK_NULL_HANDLE);
 					}
+
 					return created;
 				});
+
 			if (view == VK_NULL_HANDLE)
 			{
 				return nullptr;
@@ -296,6 +316,7 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 			std::uint32_t familyIndex = UINT32_MAX;
+
 			switch (queueType)
 			{
 			case Rhi::QueueType::Graphics:
@@ -308,6 +329,7 @@ namespace Swim::RhiVulkan
 				familyIndex = state->QueueFamilies.Transfer;
 				break;
 			}
+
 			if (familyIndex == UINT32_MAX)
 			{
 				return nullptr;
@@ -319,6 +341,7 @@ namespace Swim::RhiVulkan
 			createInfo.queueFamilyIndex = familyIndex;
 
 			VkCommandPool commandPool = VK_NULL_HANDLE;
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkCreateCommandPool(state->Device.device, &createInfo, nullptr, &commandPool),
 					"vkCreateCommandPool") != VK_SUCCESS)
 			{
@@ -339,11 +362,13 @@ namespace Swim::RhiVulkan
 			createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
 			VkSemaphore semaphore = VK_NULL_HANDLE;
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkCreateSemaphore(state->Device.device, &createInfo, nullptr, &semaphore),
 					"vkCreateSemaphore") != VK_SUCCESS)
 			{
 				return nullptr;
 			}
+
 			SetVulkanObjectName(*state, VK_OBJECT_TYPE_SEMAPHORE, ToNativeHandle(semaphore), "Swim binary semaphore");
 			return std::make_unique<VulkanSemaphore>(state, semaphore);
 		}
@@ -356,11 +381,13 @@ namespace Swim::RhiVulkan
 			createInfo.flags = signaled ? VK_FENCE_CREATE_SIGNALED_BIT : 0;
 
 			VkFence fence = VK_NULL_HANDLE;
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkCreateFence(state->Device.device, &createInfo, nullptr, &fence),
 					"vkCreateFence") != VK_SUCCESS)
 			{
 				return nullptr;
 			}
+
 			SetVulkanObjectName(*state, VK_OBJECT_TYPE_FENCE, ToNativeHandle(fence), "Swim fence");
 			return std::make_unique<VulkanFence>(state, fence);
 		}
@@ -378,6 +405,7 @@ namespace Swim::RhiVulkan
 			createInfo.pNext = &typeInfo;
 
 			VkSemaphore semaphore = VK_NULL_HANDLE;
+
 			if (CheckVulkanResult(*state, state->Dispatch.vkCreateSemaphore(state->Device.device, &createInfo, nullptr, &semaphore),
 					"vkCreateSemaphore") != VK_SUCCESS)
 			{
@@ -400,11 +428,13 @@ namespace Swim::RhiVulkan
 		void WaitIdle() override { WaitForVulkanDeviceIdle(*state); }
 
 	  private:
+
 		std::shared_ptr<VulkanDeviceState> state;
 		Rhi::AdapterInfo adapterInfo;
 		std::unique_ptr<VulkanQueue> graphicsQueue;
 		std::unique_ptr<VulkanQueue> computeQueue;
 		std::unique_ptr<VulkanQueue> transferQueue;
+
 	};
 
 } // namespace Swim::RhiVulkan

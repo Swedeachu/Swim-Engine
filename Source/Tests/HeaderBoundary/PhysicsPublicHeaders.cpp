@@ -7,6 +7,7 @@
 
 namespace
 {
+
 	Engine::BodyHandle Body;
 	Engine::ShapeHandle Shape;
 	Engine::PhysicsMaterialHandle Material;
@@ -21,4 +22,5 @@ namespace
 	Engine::OverlapHit OverlapHit;
 	Engine::CollisionEvent CollisionEvent;
 	Engine::TriggerEvent TriggerEvent;
+
 }

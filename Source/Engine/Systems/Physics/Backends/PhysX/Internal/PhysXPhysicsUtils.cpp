@@ -79,6 +79,7 @@ namespace Engine::PhysXPhysicsDetail
 			const bool reportPersisted = constantBlock != nullptr
 				&& constantBlockSize >= sizeof(PhysXFilterShaderConstants)
 				&& static_cast<const PhysXFilterShaderConstants*>(constantBlock)->ReportPersistedContacts != 0u;
+
 			if (reportPersisted)
 			{
 				pairFlags |= physx::PxPairFlag::eNOTIFY_TOUCH_PERSISTS;

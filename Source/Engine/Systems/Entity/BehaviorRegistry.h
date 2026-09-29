@@ -19,6 +19,7 @@ namespace Engine
 
 	class BehaviorRegistry
 	{
+
 	public:
 
 		using Factory = std::function<std::unique_ptr<Behavior>(Scene* scene, entt::entity owner)>;
@@ -53,10 +54,12 @@ namespace Engine
 			{
 				throw std::invalid_argument("Behavior type name cannot be empty.");
 			}
+
 			if (!factory)
 			{
 				throw std::invalid_argument("Behavior type '" + name + "' has no factory.");
 			}
+
 			if (Contains(name))
 			{
 				throw std::runtime_error("Behavior type '" + name + "' is already registered.");
@@ -73,6 +76,7 @@ namespace Engine
 		std::unique_ptr<Behavior> Create(std::string_view name, Scene* scene, entt::entity owner) const
 		{
 			const Descriptor* descriptor = Find(name);
+
 			if (!descriptor)
 			{
 				return nullptr;

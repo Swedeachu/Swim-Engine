@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	// A persistent device-local buffer of fixed-size records with a CPU mirror
 	// and dirty-row tracking. Import uploads only rows edited since the last
 	// import, batched into contiguous runs, as one staged transfer pass; the
@@ -39,9 +40,11 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument(this->name + " needs at least one row");
 			}
+
 			buffer = device.CreateBuffer({ std::uint64_t(capacity) * sizeof(Record),
 				Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferDestination | Rhi::BufferUsage::TransferSource,
 				Rhi::MemoryPreference::DeviceLocal, this->name });
+
 			if (!buffer)
 			{
 				throw std::runtime_error(this->name + " buffer could not be created");
@@ -70,20 +73,25 @@ namespace Swim::Render
 			{
 				throw std::logic_error(name + " has an import awaiting CommitUploads/AbortUploads");
 			}
+
 			ImportResult result;
 			result.Buffer = graph.ImportBuffer(*buffer, Rhi::ResourceState::ShaderRead);
 			auto rows = dirty.Take();
+
 			if (rows.empty())
 			{
 				return result;
 			}
+
 			try
 			{
 				auto snapshot = std::make_shared<std::vector<std::byte>>(rows.size() * sizeof(Record));
+
 				for (std::size_t i = 0; i < rows.size(); ++i)
 				{
 					std::memcpy(snapshot->data() + i * sizeof(Record), &mirror[rows[i]], sizeof(Record));
 				}
+
 				auto runs = BuildRecordRuns(rows);
 				result.Runs = static_cast<std::uint32_t>(runs.size());
 				result.Rows = static_cast<std::uint32_t>(rows.size());
@@ -97,8 +105,10 @@ namespace Swim::Render
 				{
 					dirty.Mark(row);
 				}
+
 				throw;
 			}
+
 			recorded = std::move(rows);
 			pending = true;
 			return result;
@@ -116,6 +126,7 @@ namespace Swim::Render
 			{
 				dirty.Mark(row);
 			}
+
 			Commit();
 		}
 
@@ -127,4 +138,5 @@ namespace Swim::Render
 		std::string name;
 		bool pending = false;
 	};
+
 } // namespace Swim::Render

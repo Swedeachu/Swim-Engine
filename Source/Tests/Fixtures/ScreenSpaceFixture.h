@@ -14,6 +14,7 @@
 
 namespace Swim::Testing::ScreenSpaceScene
 {
+
 	using Float3 = std::array<float, 3>;
 	namespace Ss = Render::ScreenSpace;
 
@@ -44,10 +45,12 @@ namespace Swim::Testing::ScreenSpaceScene
 		const float b = offset[0] * direction[0] + offset[1] * direction[1] + offset[2] * direction[2];
 		const float c = offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2] - sphere.Radius * sphere.Radius;
 		const float discriminant = b * b - c;
+
 		if (discriminant < 0.0f)
 		{
 			return std::nullopt;
 		}
+
 		const float root = std::sqrt(discriminant);
 		return std::pair<float, float>{ -b - root, -b + root };
 	}
@@ -69,10 +72,12 @@ namespace Swim::Testing::ScreenSpaceScene
 				best = Hit{ t, { origin[0] + direction[0] * t, origin[1] + direction[1] * t, origin[2] + direction[2] * t }, normal };
 			}
 		};
+
 		if (scene.Ground && std::abs(direction[1]) > 1.0e-8f)
 		{
 			consider((scene.GroundHeight - origin[1]) / direction[1], { 0, origin[1] > scene.GroundHeight ? 1.0f : -1.0f, 0 });
 		}
+
 		for (const auto& box : scene.Boxes)
 		{
 			float enter = -std::numeric_limits<float>::infinity();
@@ -80,6 +85,7 @@ namespace Swim::Testing::ScreenSpaceScene
 			int axis = -1;
 			float sign = 0.0f;
 			bool miss = false;
+
 			for (int a = 0; a < 3 && !miss; ++a)
 			{
 				if (std::abs(direction[a]) < 1.0e-12f)
@@ -87,22 +93,27 @@ namespace Swim::Testing::ScreenSpaceScene
 					miss = origin[a] < box.Min[a] || origin[a] > box.Max[a];
 					continue;
 				}
+
 				float t0 = (box.Min[a] - origin[a]) / direction[a];
 				float t1 = (box.Max[a] - origin[a]) / direction[a];
 				float faceSign = -1.0f;
+
 				if (t0 > t1)
 				{
 					std::swap(t0, t1);
 					faceSign = 1.0f;
 				}
+
 				if (t0 > enter)
 				{
 					enter = t0;
 					axis = a;
 					sign = faceSign;
 				}
+
 				exit = std::min(exit, t1);
 			}
+
 			if (!miss && axis >= 0 && enter <= exit)
 			{
 				Float3 normal{ 0, 0, 0 };
@@ -110,19 +121,23 @@ namespace Swim::Testing::ScreenSpaceScene
 				consider(enter, normal);
 			}
 		}
+
 		for (const auto& sphere : scene.Spheres)
 		{
 			const auto span = SphereSpan(sphere, origin, direction);
+
 			if (!span)
 			{
 				continue;
 			}
+
 			const float t = span->first > 1.0e-4f ? span->first : span->second;
 			const Float3 p{ origin[0] + direction[0] * t, origin[1] + direction[1] * t, origin[2] + direction[2] * t };
 			const float sign = span->first > 1.0e-4f ? 1.0f : -1.0f; // Inside: the far wall faces back in.
 			consider(t, { sign * (p[0] - sphere.Centre[0]) / sphere.Radius, sign * (p[1] - sphere.Centre[1]) / sphere.Radius,
 							sign * (p[2] - sphere.Centre[2]) / sphere.Radius });
 		}
+
 		return best;
 	}
 
@@ -138,6 +153,7 @@ namespace Swim::Testing::ScreenSpaceScene
 				best = t;
 			}
 		};
+
 		for (const auto& sphere : scene.Spheres)
 		{
 			if (const auto span = SphereSpan(sphere, origin, direction))
@@ -145,11 +161,13 @@ namespace Swim::Testing::ScreenSpaceScene
 				consider(span->second);
 			}
 		}
+
 		for (const auto& box : scene.Boxes)
 		{
 			float enter = -std::numeric_limits<float>::infinity();
 			float exit = std::numeric_limits<float>::infinity();
 			bool miss = false;
+
 			for (int a = 0; a < 3 && !miss; ++a)
 			{
 				if (std::abs(direction[a]) < 1.0e-12f)
@@ -157,16 +175,19 @@ namespace Swim::Testing::ScreenSpaceScene
 					miss = origin[a] < box.Min[a] || origin[a] > box.Max[a];
 					continue;
 				}
+
 				const float t0 = (box.Min[a] - origin[a]) / direction[a];
 				const float t1 = (box.Max[a] - origin[a]) / direction[a];
 				enter = std::max(enter, std::min(t0, t1));
 				exit = std::min(exit, std::max(t0, t1));
 			}
+
 			if (!miss && enter <= exit)
 			{
 				consider(exit);
 			}
 		}
+
 		return best;
 	}
 
@@ -189,6 +210,7 @@ namespace Swim::Testing::ScreenSpaceScene
 		Inputs inputs{ Ss::ScalarImage(width, height), Ss::ColorImage(width, height), Ss::ScalarImage(width, height),
 			std::vector<Hit>(std::size_t(width) * height), {} };
 		inputs.Camera = { inverseView[3], inverseView[7], inverseView[11] };
+
 		for (std::uint32_t y = 0; y < height; ++y)
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -196,42 +218,53 @@ namespace Swim::Testing::ScreenSpaceScene
 				const float ndcX = 2.0f * (float(x) + 0.5f) / float(width) - 1.0f - view.Jitter[0];
 				const float ndcY = 1.0f - 2.0f * (float(y) + 0.5f) / float(height) - view.Jitter[1];
 				std::array<float, 4> near{};
+
 				for (int r = 0; r < 4; ++r)
 				{
 					near[r] = inverse[r * 4] * ndcX + inverse[r * 4 + 1] * ndcY + inverse[r * 4 + 2] + inverse[r * 4 + 3];
 				}
+
 				const Float3 point{ near[0] / near[3], near[1] / near[3], near[2] / near[3] };
 				const Float3 raw{ point[0] - inputs.Camera[0], point[1] - inputs.Camera[1], point[2] - inputs.Camera[2] };
 				const float length = std::sqrt(raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]);
 				const Float3 direction{ raw[0] / length, raw[1] / length, raw[2] / length };
+
 				if (const auto back = NearestBackFace(scene, inputs.Camera, direction))
 				{
 					const Float3 b{ inputs.Camera[0] + direction[0] * *back, inputs.Camera[1] + direction[1] * *back,
 						inputs.Camera[2] + direction[2] * *back };
 					std::array<float, 4> clip{};
+
 					for (int r = 0; r < 4; ++r)
 					{
 						clip[r] = viewProjection[r * 4] * b[0] + viewProjection[r * 4 + 1] * b[1] + viewProjection[r * 4 + 2] * b[2] +
 							viewProjection[r * 4 + 3];
 					}
+
 					inputs.BackDepth.At(x, y) = clip[2] / clip[3];
 				}
+
 				const auto hit = Cast(scene, inputs.Camera, direction);
+
 				if (!hit)
 				{
 					continue; // Sky: depth 0, normal 0.
 				}
+
 				std::array<float, 4> clip{};
+
 				for (int r = 0; r < 4; ++r)
 				{
 					clip[r] = viewProjection[r * 4] * hit->Position[0] + viewProjection[r * 4 + 1] * hit->Position[1] +
 						viewProjection[r * 4 + 2] * hit->Position[2] + viewProjection[r * 4 + 3];
 				}
+
 				inputs.Depth.At(x, y) = clip[2] / clip[3];
 				inputs.Normal.At(x, y) = { hit->Normal[0], hit->Normal[1], hit->Normal[2], roughness };
 				inputs.Hits[std::size_t(y) * width + x] = *hit;
 			}
 		}
+
 		return inputs;
 	}
 
@@ -242,4 +275,5 @@ namespace Swim::Testing::ScreenSpaceScene
 		view.Projection = Render::PerspectiveReverseZRowMajor(verticalFov, aspect, 0.1f);
 		return view;
 	}
+
 } // namespace Swim::Testing::ScreenSpaceScene

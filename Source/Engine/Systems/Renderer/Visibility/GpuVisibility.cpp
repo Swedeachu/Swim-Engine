@@ -12,8 +12,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 		using B = GpuVisibilityBindings;
 
@@ -41,6 +43,7 @@ namespace Swim::Render
 					c.Commands().CopyBuffer(*source.Buffer, *destination.Buffer, { source.Offset, destination.Offset, size });
 				});
 		}
+
 	} // namespace
 
 	GpuVisibility::GpuVisibility(Rhi::Device& device, GpuVisibilityDesc desc)
@@ -51,6 +54,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " needs the culling pipeline/layout, object capacity and a material-set table");
 		}
+
 		constexpr auto usage = Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferDestination;
 		materialBinBuffer = device.CreateBuffer(
 			{ materialBins.size() * sizeof(std::uint32_t), usage, Rhi::MemoryPreference::DeviceLocal, name + " material bins" });
@@ -65,6 +69,7 @@ namespace Swim::Render
 		const auto nullName = name + " null HZB";
 		nullDesc.DebugName = nullName;
 		nullHzb = device.CreateTexture(nullDesc);
+
 		if (!materialBinBuffer || !lodStateBuffer || !occlusionHistoryBuffer || !nullHzb)
 		{
 			throw std::runtime_error(name + " buffers could not be created");
@@ -79,6 +84,7 @@ namespace Swim::Render
 		{
 			throw std::out_of_range(name + " material set or bin is out of range");
 		}
+
 		if (materialBins[materialSet] != materialBin)
 		{
 			materialBins[materialSet] = materialBin;
@@ -98,10 +104,12 @@ namespace Swim::Render
 		{
 			return imports;
 		}
+
 		imports.Graph = graphId;
 		imports.MaterialTable = graph.ImportBuffer(*materialBinBuffer, S::ShaderRead);
 		imports.LodState = graph.ImportBuffer(*lodStateBuffer, S::ShaderRead);
 		imports.OcclusionHistory = graph.ImportBuffer(*occlusionHistoryBuffer, S::ShaderRead);
+
 		if (!historyInitialized)
 		{
 			RecordPersistentUpload(
@@ -119,6 +127,7 @@ namespace Swim::Render
 		{
 			imports.NullHzb = graph.ImportTexture(*nullHzb, S::ShaderRead);
 		}
+
 		return imports;
 	}
 
@@ -129,16 +138,20 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " frame lists more index pages than page slots");
 		}
+
 		if (scene.RowCount > maxObjects)
 		{
 			throw std::length_error(name + " LOD history is smaller than the GPU Scene row count");
 		}
+
 		const bool late = frame.Phase == VisibilityPhase::Late;
 		const bool forwardDepth = (frame.View.Flags & std::uint32_t(GpuViewFlags::ForwardDepth)) != 0;
+
 		if (late && (!frame.Hzb || frame.Hzb->MipCount == 0 || (frame.Hzb->Convention == DepthConvention::Forward) != forwardDepth))
 		{
 			throw std::invalid_argument(name + " late phase needs this frame's HZB built with the view's depth convention");
 		}
+
 		if (frame.Phase != VisibilityPhase::Single && frame.Phase != VisibilityPhase::Early && !late)
 		{
 			throw std::invalid_argument(name + " unknown visibility phase");
@@ -184,10 +197,12 @@ namespace Swim::Render
 				b.Read(zeroUpload, S::CopySource);
 				b.Write(resources.Counts, S::CopyDestination);
 				b.Write(resources.Stats, S::CopyDestination);
+
 				if (zeroCommands)
 				{
 					b.Write(resources.Commands, S::CopyDestination);
 				}
+
 			},
 			[zeroUpload, counts = resources.Counts, stats = resources.Stats, commands = resources.Commands, countBytes, commandBytes](
 				RenderCommandContext& c)
@@ -195,10 +210,12 @@ namespace Swim::Render
 				const auto source = c.GetRange(zeroUpload);
 				c.Commands().CopyBuffer(*source.Buffer, c.Get(counts), { source.Offset, 0, countBytes });
 				c.Commands().CopyBuffer(*source.Buffer, c.Get(stats), { source.Offset + countBytes, 0, sizeof(VisibilityStats) });
+
 				if (commandBytes != 0)
 				{
 					c.Commands().CopyBuffer(*source.Buffer, c.Get(commands), { source.Offset, 0, commandBytes });
 				}
+
 			});
 
 		// Persistent state: material-bin table when edited, histories once.
@@ -208,6 +225,7 @@ namespace Swim::Render
 		const auto occlusion = persistent.OcclusionHistory;
 		const auto hzbTexture = late ? frame.Hzb->Pyramid : persistent.NullHzb;
 		const auto hzbMips = late ? frame.Hzb->MipCount : 1u;
+
 		if (materialBinsDirty)
 		{
 			std::vector<std::byte> bytes(materialBins.size() * sizeof(std::uint32_t));
@@ -233,6 +251,7 @@ namespace Swim::Render
 				b.Read(ranges, S::ShaderRead);
 				b.Read(pageTable, S::ShaderRead);
 				b.ReadWrite(lodState, S::ShaderRead | S::ShaderWrite);
+
 				if (zeroCommands)
 				{
 					b.ReadWrite(resources.Commands, S::ShaderRead | S::ShaderWrite); // Keeps the zeroed slots.
@@ -241,6 +260,7 @@ namespace Swim::Render
 				{
 					b.Write(resources.Commands, S::ShaderWrite);
 				}
+
 				b.Write(resources.DrawRecords, S::ShaderWrite);
 				b.ReadWrite(resources.Counts, S::ShaderRead | S::ShaderWrite);
 				b.ReadWrite(resources.Stats, S::ShaderRead | S::ShaderWrite);
@@ -252,10 +272,12 @@ namespace Swim::Render
 				counts = resources.Counts, stats = resources.Stats, label = name](RenderCommandContext& c)
 			{
 				auto table = c.Device().CreateDescriptorTable({ layout, space, 0, label + " table" });
+
 				if (!table)
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
+
 				std::array<Rhi::DescriptorWrite, B::Count> writes{};
 				const auto whole = [&](std::uint32_t binding, GraphBuffer buffer)
 				{
@@ -297,11 +319,14 @@ namespace Swim::Render
 				list.PushConstants(Rhi::ShaderStageMask::Compute, 0, std::as_bytes(std::span(constants)));
 				list.Dispatch((constants[0] + B::ThreadGroupSize - 1) / B::ThreadGroupSize, 1, 1);
 			});
+
 		if (frame.ReadStats)
 		{
 			resources.StatsReadback = AddBufferReadback(graph, name + " stats readback", resources.Stats, 0, sizeof(VisibilityStats));
 		}
+
 		materialBinsDirty = false;
 		return resources;
 	}
+
 } // namespace Swim::Render

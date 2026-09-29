@@ -14,11 +14,14 @@
 
 namespace Engine
 {
+
 	struct RenderServices;
+
 }
 
 namespace Game
 {
+
 	class Sandbox;
 
 	// The sandbox's screen UI (one screen canvas on the HUD entity), running in every
@@ -39,10 +42,13 @@ namespace Game
 	// diagnostics, help bar, world panels and labels), V the panel only, X the diagnostics only.
 	class SandboxHud : public Engine::Behavior
 	{
+
 	  public:
+
 		SandboxHud(Engine::Scene* scene, entt::entity owner);
 
 		int Init() override;
+
 		void Update(double dt) override;
 
 		bool UsesRealTime() const override { return true; }
@@ -65,34 +71,58 @@ namespace Game
 		void SyncControls();
 
 	  private:
+
 		Swim::UI::UiNodeId CreateSection(Swim::UI::UiNodeId parent);
+
 		Swim::UI::UiNodeId AddButton(
 			Swim::UI::UiNodeId parent, const std::string& text, const std::string& tooltip, std::function<void()> onClick);
+
 		Swim::UI::UiNodeId AddSlider(Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float value, int decimals,
 			std::function<void(float)> onChange);
+
 		Swim::UI::UiNodeId AddCheckbox(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
+
 		Swim::UI::UiNodeId AddToggle(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
+
 		// Controls bound both ways to a value: edits write it, SyncControls shows changes made elsewhere.
 		Swim::UI::UiNodeId SliderFor(
 			Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals);
+
 		Swim::UI::UiNodeId CheckFor(Swim::UI::UiNodeId parent, const std::string& label, bool& value);
+
 		Swim::UI::UiNodeId DropdownFor(Swim::UI::UiNodeId parent, const std::string& label, const std::vector<std::string>& options,
 			std::function<std::uint32_t()> get, std::function<void(std::uint32_t)> set);
+
 		void Bind(Swim::UI::UiNodeId node, std::function<float()> get, bool check);
+
 		void BuildCamera(Swim::UI::UiNodeId parent);
+
 		void BuildPanel();
+
 		void BuildSimulation(Swim::UI::UiNodeId parent);
+
 		void BuildRendering(Swim::UI::UiNodeId parent);
+
 		void BuildScene(Swim::UI::UiNodeId parent);
+
 		void BuildDiagnostics();
+
 		void BuildHelp();
+
 		void ShowSection(std::uint32_t index);
+
 		void RefreshStatus();
+
 		void RefreshDiagnostics();
+
 		void RefreshInfoPanel();
+
 		void RefreshEntities(bool force);
+
 		void Shortcuts();
+
 		bool Command(const std::string& command);
+
 		void SetPanelVisible(Swim::UI::UiNodeId node, bool visible);
 
 		Sandbox* sandbox = nullptr;
@@ -147,5 +177,7 @@ namespace Game
 		float entityTimer = 0.0f;
 		bool panelVisible = true;
 		bool diagnosticsVisible = true;
+
 	};
+
 } // namespace Game

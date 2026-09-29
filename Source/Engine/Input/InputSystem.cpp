@@ -96,9 +96,11 @@ namespace Swim::Input
 			{
 				const bool down = event.Type == InputEventType::KeyDown;
 				const size_t keyIndex = ToIndex(event.Key);
+
 				if (keyIndex > 0 && keyIndex < keyState.size())
 				{
 					keyState[keyIndex].Deferred = down;
+
 					if (down)
 					{
 						deferredKeyPresses.push_back(event.Key);
@@ -107,10 +109,12 @@ namespace Swim::Input
 				}
 
 				const size_t scanCodeIndex = ToIndex(event.PhysicalKey);
+
 				if (scanCodeIndex > 0 && scanCodeIndex < scanCodeState.size())
 				{
 					scanCodeState[scanCodeIndex].Deferred = down;
 				}
+
 				break;
 			}
 
@@ -118,10 +122,12 @@ namespace Swim::Input
 			case InputEventType::MouseButtonUp:
 			{
 				const size_t index = ToIndex(event.Mouse);
+
 				if (index > 0 && index < mouseButtonState.size())
 				{
 					mouseButtonState[index].Deferred = event.Type == InputEventType::MouseButtonDown;
 				}
+
 				mousePosition = event.Position;
 				break;
 			}
@@ -137,11 +143,13 @@ namespace Swim::Input
 				break;
 
 			case InputEventType::TextInput:
+
 				if (!event.Text.empty())
 				{
 					deferredTextInput.push_back(event.Text);
 					deferredTextEditEvents.push_back({ KeyCode::Unknown, event.Text, false });
 				}
+
 				break;
 
 			case InputEventType::TextEditing:
@@ -164,10 +172,12 @@ namespace Swim::Input
 			{
 				auto& gamepad = gamepads[event.Device];
 				const size_t index = ToIndex(event.Gamepad);
+
 				if (index > 0 && index < gamepad.Buttons.size())
 				{
 					gamepad.Buttons[index].Deferred = event.Type == InputEventType::GamepadButtonDown;
 				}
+
 				break;
 			}
 
@@ -175,10 +185,12 @@ namespace Swim::Input
 			{
 				auto& gamepad = gamepads[event.Device];
 				const size_t index = ToIndex(event.Axis);
+
 				if (index > 0 && index < gamepad.DeferredAxes.size())
 				{
 					gamepad.DeferredAxes[index] = std::clamp(event.AxisValue, -1.0f, 1.0f);
 				}
+
 				break;
 			}
 		}
@@ -281,6 +293,7 @@ namespace Swim::Input
 	bool InputSystem::IsGamepadButtonDown(Platform::InputDeviceId device, Platform::GamepadButton button) const
 	{
 		auto it = gamepads.find(device);
+
 		if (it == gamepads.end())
 		{
 			return false;
@@ -293,6 +306,7 @@ namespace Swim::Input
 	bool InputSystem::IsGamepadButtonTriggered(Platform::InputDeviceId device, Platform::GamepadButton button) const
 	{
 		auto it = gamepads.find(device);
+
 		if (it == gamepads.end())
 		{
 			return false;
@@ -306,6 +320,7 @@ namespace Swim::Input
 	bool InputSystem::IsGamepadButtonReleased(Platform::InputDeviceId device, Platform::GamepadButton button) const
 	{
 		auto it = gamepads.find(device);
+
 		if (it == gamepads.end())
 		{
 			return false;
@@ -319,6 +334,7 @@ namespace Swim::Input
 	float InputSystem::GetGamepadAxis(Platform::InputDeviceId device, Platform::GamepadAxis axis) const
 	{
 		auto it = gamepads.find(device);
+
 		if (it == gamepads.end())
 		{
 			return 0.0f;
@@ -343,31 +359,39 @@ namespace Swim::Input
 			switch (binding.Type)
 			{
 				case InputBindingType::Key:
+
 					if (IsKeyDown(binding.Key))
 					{
 						value += binding.Scale;
 					}
+
 					break;
 
 				case InputBindingType::ScanCode:
+
 					if (IsScanCodeDown(binding.PhysicalKey))
 					{
 						value += binding.Scale;
 					}
+
 					break;
 
 				case InputBindingType::MouseButton:
+
 					if (IsMouseButtonDown(binding.Mouse))
 					{
 						value += binding.Scale;
 					}
+
 					break;
 
 				case InputBindingType::GamepadButton:
+
 					if (IsGamepadButtonDown(gamepadDevice, binding.Gamepad))
 					{
 						value += binding.Scale;
 					}
+
 					break;
 
 				case InputBindingType::GamepadAxis:
@@ -408,11 +432,13 @@ namespace Swim::Input
 		for (auto& [device, gamepad] : gamepads)
 		{
 			(void)device;
+
 			for (auto& button : gamepad.Buttons)
 			{
 				button.Current = false;
 				button.Deferred = false;
 			}
+
 			gamepad.Axes.fill(0.0f);
 			gamepad.DeferredAxes.fill(0.0f);
 		}

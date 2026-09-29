@@ -11,8 +11,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		constexpr std::array<Rhi::Format, 7> OpaqueFormats{ ForwardPlusRenderer::ColorFormat, ForwardPlusRenderer::ObjectIdFormat,
@@ -62,10 +64,12 @@ namespace Swim::Render
 		std::uint32_t NextPowerOfTwo(std::uint32_t value)
 		{
 			std::uint32_t result = 1;
+
 			while (result < value)
 			{
 				result <<= 1;
 			}
+
 			return result;
 		}
 
@@ -102,6 +106,7 @@ namespace Swim::Render
 			{
 				b.Read(buffer, S::ShaderRead);
 			}
+
 			b.Read(inputs.Prefiltered, S::ShaderRead);
 			b.Read(inputs.BrdfLut, S::ShaderRead);
 			b.Read(inputs.ShadowAtlas, S::ShaderRead);
@@ -114,10 +119,12 @@ namespace Swim::Render
 					b.Read(page, state);
 				}
 			};
+
 			for (const auto page : inputs.VertexPages)
 			{
 				once(page, S::ShaderRead);
 			}
+
 			for (const auto page : inputs.IndexPages)
 			{
 				once(page, S::IndexBuffer);
@@ -143,13 +150,16 @@ namespace Swim::Render
 			shadowView.Aspect = inputs.ShadowAtlasIsDepth ? Rhi::TextureAspect::Depth : Rhi::TextureAspect::Automatic;
 			auto& shadowAtlas = c.CreateView(inputs.ShadowAtlas, shadowView);
 			std::vector<Rhi::DescriptorTable*> tables;
+
 			for (std::size_t slot = 0; slot < inputs.VertexPages.size(); ++slot)
 			{
 				auto table = c.Device().CreateDescriptorTable({ &layout, 0, 0, label });
+
 				if (!table)
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
+
 				std::array<Rhi::DescriptorWrite, B::Count> writes{ BufferWrite(c, B::Instances, inputs.Instances),
 					BufferWrite(c, B::Transforms, inputs.Transforms), BufferWrite(c, B::DrawRecords, inputs.DrawRecords),
 					BufferWrite(c, B::Vertices, inputs.VertexPages[slot]), BufferWrite(c, B::View, inputs.View),
@@ -170,6 +180,7 @@ namespace Swim::Render
 				table->Write(writes);
 				tables.push_back(&static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table))));
 			}
+
 			return tables;
 		}
 
@@ -177,12 +188,14 @@ namespace Swim::Render
 			std::uint32_t height, const std::string& what)
 		{
 			const auto& desc = graph.GetDesc(target);
+
 			if (desc.Dimension != Rhi::TextureDimension::Texture2D || desc.PixelFormat != format || desc.Samples != Rhi::SampleCount::X1 ||
 				desc.Extent.Width != width || desc.Extent.Height != height || desc.ArrayLayers != 1 || !HasUsage(desc.Usage, usage))
 			{
 				throw std::invalid_argument(what + " must be a single-sample viewport-sized 2D attachment of the documented format");
 			}
 		}
+
 	} // namespace
 
 	Rhi::GraphicsPipelineDesc ForwardPlusRenderer::PipelineDesc(
@@ -196,6 +209,7 @@ namespace Swim::Render
 		pipeline.DepthStencil.DepthCompare = DepthCompareOp(CanonicalDepthConvention);
 		pipeline.Raster.Cull = Rhi::CullMode::None;
 		pipeline.Raster.Winding = Rhi::FrontFace::CounterClockwise;
+
 		if (bin == ForwardPlusBin::Opaque)
 		{
 			pipeline.ColorFormats = OpaqueFormats;
@@ -214,6 +228,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Unknown Forward+ bin");
 		}
+
 		return pipeline;
 	}
 
@@ -250,6 +265,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Forward+ bins need nonzero capacities and at most MaxDraws transparent draws per page slot");
 		}
+
 		return { opaque, transparent };
 	}
 
@@ -265,21 +281,27 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " needs the opaque, transparent and sort programs");
 		}
+
 		const bool prepass = desc.DepthPrepass.Pipeline && desc.DepthPrepass.Layout;
 		const bool prepassed = desc.OpaquePrepassed.Pipeline && desc.OpaquePrepassed.Layout;
+
 		if (prepass != prepassed || (!prepass && (desc.DepthPrepass.Pipeline || desc.OpaquePrepassed.Pipeline)))
 		{
 			throw std::invalid_argument(desc.DebugName + " depth prepass needs both the depth and the prepassed opaque programs");
 		}
+
 		const bool deferred = desc.OpaqueDeferred.Pipeline && desc.OpaqueDeferred.Layout && desc.LocalLightsPipeline && desc.LocalLightsLayout;
+
 		if ((desc.OpaqueDeferred.Pipeline || desc.OpaqueDeferred.Layout || desc.LocalLightsPipeline || desc.LocalLightsLayout) &&
 			(!deferred || !prepass))
 		{
 			throw std::invalid_argument(desc.DebugName + " deferred local lights need both programs and the depth prepass");
 		}
+
 		Rhi::SamplerDesc sampler{};
 		sampler.AddressU = sampler.AddressV = sampler.AddressW = Rhi::SamplerAddressMode::ClampToEdge;
 		environmentSampler = device.CreateSampler(sampler);
+
 		if (!environmentSampler)
 		{
 			throw std::runtime_error(desc.DebugName + " environment sampler could not be created");
@@ -293,6 +315,7 @@ namespace Swim::Render
 	{
 		// A frame may name its passes (probe captures: "Probe Forward+ opaque" and so on).
 		const std::string name = frame.DebugName.empty() ? desc.DebugName : frame.DebugName;
+
 		if (!frame.Scene || !frame.Geometry || !frame.Visibility || !frame.Visibility->Bins || !frame.Materials || !frame.Bindless ||
 			!frame.Lights || !frame.Clusters || frame.PageSlots.empty() || (frame.Environment && !frame.BrdfLut))
 		{
@@ -300,13 +323,17 @@ namespace Swim::Render
 				" frame needs the scene, geometry, visibility, materials, bindless table, lights, clusters, "
 				"page slots and (with an environment) a BRDF LUT");
 		}
+
 		const auto slots = static_cast<std::uint32_t>(frame.PageSlots.size());
 		const auto& bins = *frame.Visibility->Bins;
+
 		if (bins.GetMaterialBins() != ForwardPlusBinCount || bins.GetPageSlots() != slots)
 		{
 			throw std::invalid_argument(name + " needs ForwardPlusBinCount material bins over exactly the frame's page slots");
 		}
+
 		DrawInputs inputs;
+
 		for (const auto& slot : frame.PageSlots)
 		{
 			if (slot.IndexPage >= frame.Geometry->Pages.size() || slot.VertexPage >= frame.Geometry->Pages.size() ||
@@ -314,6 +341,7 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument(name + " page slot names a missing GeometryHeap page");
 			}
+
 			inputs.IndexPages.push_back(frame.Geometry->Pages[slot.IndexPage]);
 			inputs.VertexPages.push_back(frame.Geometry->Pages[slot.VertexPage]);
 		}
@@ -334,6 +362,7 @@ namespace Swim::Render
 				ValidateTarget(graph, *supplied, format, Rhi::TextureUsage::ColorAttachment, width, height, name + " " + label + " target");
 				return *supplied;
 			}
+
 			Rhi::TextureDesc attachmentDesc;
 			attachmentDesc.Extent = { width, height, 1 };
 			attachmentDesc.PixelFormat = format;
@@ -352,14 +381,17 @@ namespace Swim::Render
 		const auto transparentBin = static_cast<std::uint32_t>(ForwardPlusBin::Transparent) * slots;
 		const auto& firstRange = bins.GetRange(transparentBin);
 		const std::uint32_t capacity = firstRange.Capacity;
+
 		for (std::uint32_t slot = 0; slot < slots; ++slot)
 		{
 			const auto& range = bins.GetRange(transparentBin + slot);
+
 			if (range.Capacity != capacity || range.First != firstRange.First + slot * capacity)
 			{
 				throw std::invalid_argument(name + " transparent bins must be consecutive with equal capacities");
 			}
 		}
+
 		if (!capacity || capacity > ForwardTransparentSortBindings::MaxDraws)
 		{
 			throw std::invalid_argument(name + " transparent capacity must be 1 .. ForwardTransparentSortBindings::MaxDraws per page slot");
@@ -397,10 +429,12 @@ namespace Swim::Render
 			cube.DebugName = cubeName;
 			inputs.Prefiltered = graph.CreateTexture(cube);
 			const std::array<std::byte, 8> texel{};
+
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				AddTextureUpload(graph, cubeName + " upload", texel, inputs.Prefiltered, { 0, { 0, face }, {}, { 1, 1, 1 } });
 			}
+
 			if (frame.BrdfLut)
 			{
 				inputs.BrdfLut = *frame.BrdfLut; // Item 76: the specular reflectance still uses it.
@@ -417,6 +451,7 @@ namespace Swim::Render
 				AddTextureUpload(graph, lutName + " upload", texel, inputs.BrdfLut, { 0, {}, {}, { 1, 1, 1 } });
 			}
 		}
+
 		// Shadows or stand-ins (never sampled: the view flag is clear).
 		if (frame.Shadows)
 		{
@@ -442,6 +477,7 @@ namespace Swim::Render
 			const std::array<std::byte, 4> texel{};
 			AddTextureUpload(graph, atlasName + " upload", texel, inputs.ShadowAtlas, { 0, {}, {}, { 1, 1, 1 } });
 		}
+
 		inputs.Instances = frame.Scene->Instances;
 		inputs.Transforms = frame.Scene->Transforms;
 		inputs.DrawRecords = frame.Visibility->DrawRecords;
@@ -462,6 +498,7 @@ namespace Swim::Render
 		// 0. Depth prepass (optional): lays down the nearest opaque depth so the shading
 		// pass below runs its lighting once per pixel.
 		const bool prepass = desc.DepthPrepass.Pipeline != nullptr;
+
 		if (prepass)
 		{
 			resources.DepthPrepass = graph.AddPass(
@@ -471,6 +508,7 @@ namespace Swim::Render
 					DeclareDrawReads(b, inputs);
 					b.Read(commands, S::IndirectArgument);
 					b.Read(counts, S::IndirectArgument);
+
 					if (targets.Clear)
 					{
 						b.Write(targets.Depth, S::DepthStencilWrite);
@@ -479,6 +517,7 @@ namespace Swim::Render
 					{
 						b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 					}
+
 				},
 				[program = desc.DepthPrepass, label = name + " depth prepass", inputs, targets, commands, counts, bins, path, bindless,
 					sampler, slots, width, height](RenderCommandContext& c)
@@ -496,6 +535,7 @@ namespace Swim::Render
 					list.SetScissor({ 0, 0, width, height });
 					auto& commandBuffer = c.Get(commands);
 					auto& countBuffer = c.Get(counts);
+
 					for (std::uint32_t slot = 0; slot < slots; ++slot)
 					{
 						list.BindDescriptorTable(0, *tables[slot]);
@@ -504,6 +544,7 @@ namespace Swim::Render
 						DrawVisibilityBin(list, commandBuffer, countBuffer, bins,
 							bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
 					}
+
 					list.EndRendering();
 				});
 		}
@@ -515,12 +556,15 @@ namespace Swim::Render
 			{
 				throw std::invalid_argument(name + " back depth needs the back-depth program");
 			}
+
 			const auto backDepthTarget = *targets.BackDepth;
 			const auto& backDesc = graph.GetDesc(backDepthTarget);
+
 			if (backDesc.PixelFormat != CanonicalDepthFormat || backDesc.Extent.Width != width || backDesc.Extent.Height != height)
 			{
 				throw std::invalid_argument(name + " back depth must be a viewport-sized D32Float target");
 			}
+
 			resources.BackDepthPass = graph.AddPass(
 				name + " back depth", Rhi::QueueType::Graphics,
 				[&](RenderGraphBuilder& b)
@@ -545,6 +589,7 @@ namespace Swim::Render
 					list.SetScissor({ 0, 0, width, height });
 					auto& commandBuffer = c.Get(commands);
 					auto& countBuffer = c.Get(counts);
+
 					for (std::uint32_t slot = 0; slot < slots; ++slot)
 					{
 						list.BindDescriptorTable(0, *tables[slot]);
@@ -553,6 +598,7 @@ namespace Swim::Render
 						DrawVisibilityBin(list, commandBuffer, countBuffer, bins,
 							bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
 					}
+
 					list.EndRendering();
 				});
 		}
@@ -563,6 +609,7 @@ namespace Swim::Render
 			HasUsage(graph.GetDesc(targets.Depth).Usage, Rhi::TextureUsage::Sampled) &&
 			HasUsage(graph.GetDesc(normal).Usage, Rhi::TextureUsage::Sampled);
 		GraphTexture material;
+
 		if (deferLocal)
 		{
 			Rhi::TextureDesc materialDesc;
@@ -574,6 +621,7 @@ namespace Swim::Render
 			material = graph.CreateTexture(materialDesc);
 			resources.Material = material;
 		}
+
 		resources.Velocity = velocity;
 		resources.Normal = normal;
 		resources.Indirect = indirect;
@@ -586,6 +634,7 @@ namespace Swim::Render
 				DeclareDrawReads(b, inputs);
 				b.Read(commands, S::IndirectArgument);
 				b.Read(counts, S::IndirectArgument);
+
 				if (targets.Clear)
 				{
 					b.Write(targets.Color, S::ColorAttachment);
@@ -595,10 +644,12 @@ namespace Swim::Render
 					b.Write(indirect, S::ColorAttachment);
 					b.Write(reflectance, S::ColorAttachment);
 					b.Write(specular, S::ColorAttachment);
+
 					if (deferLocal)
 					{
 						b.Write(material, S::ColorAttachment);
 					}
+
 					if (prepass)
 					{
 						b.ReadWrite(targets.Depth, S::DepthStencilWrite);
@@ -617,10 +668,12 @@ namespace Swim::Render
 					b.Write(indirect, S::ColorAttachment);
 					b.Write(reflectance, S::ColorAttachment);
 					b.Write(specular, S::ColorAttachment);
+
 					if (deferLocal)
 					{
 						b.Write(material, S::ColorAttachment);
 					}
+
 					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
 				else
@@ -632,12 +685,15 @@ namespace Swim::Render
 					b.ReadWrite(indirect, S::ColorAttachment);
 					b.ReadWrite(reflectance, S::ColorAttachment);
 					b.ReadWrite(specular, S::ColorAttachment);
+
 					if (deferLocal)
 					{
 						b.Write(material, S::ColorAttachment);
 					}
+
 					b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 				}
+
 			},
 			[program = deferLocal ? desc.OpaqueDeferred : (prepass ? desc.OpaquePrepassed : desc.Opaque), prepass, deferLocal,
 				label = name + " opaque", inputs, targets, velocity, normal, indirect, reflectance, specular, material, commands, counts,
@@ -662,11 +718,13 @@ namespace Swim::Render
 				colors[5].Load = auxiliaryLoad;
 				colors[6].View = &c.CreateView(specular);
 				colors[6].Load = auxiliaryLoad;
+
 				if (deferLocal)
 				{
 					colors[7].View = &c.CreateView(material);
 					colors[7].Load = Rhi::LoadOp::Clear;
 				}
+
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
 				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), prepass ? Rhi::LoadOp::Load : load,
@@ -678,6 +736,7 @@ namespace Swim::Render
 				list.SetScissor({ 0, 0, width, height });
 				auto& commandBuffer = c.Get(commands);
 				auto& countBuffer = c.Get(counts);
+
 				for (std::uint32_t slot = 0; slot < slots; ++slot)
 				{
 					list.BindDescriptorTable(0, *tables[slot]);
@@ -686,6 +745,7 @@ namespace Swim::Render
 					DrawVisibilityBin(list, commandBuffer, countBuffer, bins,
 						bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
 				}
+
 				list.EndRendering();
 			});
 
@@ -701,6 +761,7 @@ namespace Swim::Render
 					{
 						b.Read(buffer, S::ShaderRead);
 					}
+
 					b.Read(targets.Depth, S::ShaderRead);
 					b.Read(normal, S::ShaderRead);
 					b.Read(material, S::ShaderRead);
@@ -712,10 +773,12 @@ namespace Swim::Render
 				{
 					using B = ForwardLocalLightsBindings;
 					auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+
 					if (!table)
 					{
 						throw std::runtime_error(label + " descriptor table could not be created");
 					}
+
 					const auto texture = [&](std::uint32_t binding, GraphTexture handle, Rhi::Format format,
 											 Rhi::TextureAspect aspect = Rhi::TextureAspect::Automatic)
 					{
@@ -751,6 +814,7 @@ namespace Swim::Render
 		{
 			return resources;
 		}
+
 		// 2. Sort the transparent bins.
 		resources.SortScratch = graph.CreateBuffer(StorageBuffer(
 			std::uint64_t(slots) * resources.SortSize * sizeof(ForwardSortEntry), Rhi::BufferUsage::None, name + " sort scratch"));
@@ -778,10 +842,12 @@ namespace Swim::Render
 			{
 				using B = ForwardTransparentSortBindings;
 				auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+
 				if (!table)
 				{
 					throw std::runtime_error(label + " descriptor table could not be created");
 				}
+
 				const std::array<Rhi::DescriptorWrite, B::Count> writes{ BufferWrite(c, B::Commands, commands),
 					BufferWrite(c, B::DrawRecords, inputs.DrawRecords), BufferWrite(c, B::Counts, counts),
 					BufferWrite(c, B::Instances, inputs.Instances), BufferWrite(c, B::Transforms, inputs.Transforms),
@@ -823,10 +889,12 @@ namespace Swim::Render
 				colors[1].View = &c.CreateView(indirect);
 				colors[2].View = &c.CreateView(reflectance);
 				colors[3].View = &c.CreateView(specular);
+
 				for (auto& color : colors)
 				{
 					color.Load = Rhi::LoadOp::Load;
 				}
+
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = CanonicalDepthFormat;
 				const Rhi::DepthStencilAttachmentDesc depth{ &c.CreateView(targets.Depth, depthView), Rhi::LoadOp::Load,
@@ -838,12 +906,14 @@ namespace Swim::Render
 				list.SetScissor({ 0, 0, width, height });
 				auto& sorted = c.Get(r.SortedCommands);
 				auto& sortedCounts = c.Get(r.SortedCounts);
+
 				for (std::uint32_t slot = 0; slot < slots; ++slot)
 				{
 					list.BindDescriptorTable(0, *tables[slot]);
 					list.BindDescriptorTable(ForwardPlusDrawBindings::BindlessSpace, *bindless);
 					list.BindIndexBuffer(c.Get(inputs.IndexPages[slot]), 0, Rhi::IndexType::Uint32);
 					const std::uint64_t offset = std::uint64_t(slot) * capacity * CommandBytes;
+
 					if (path == VisibilityDrawPath::IndirectCount)
 					{
 						list.DrawIndexedIndirectCount(sorted, offset, sortedCounts, std::uint64_t(slot) * sizeof(std::uint32_t), capacity);
@@ -853,8 +923,10 @@ namespace Swim::Render
 						list.DrawIndexedIndirect(sorted, offset, capacity); // The sort zero-fills unused slots.
 					}
 				}
+
 				list.EndRendering();
 			});
 		return resources;
 	}
+
 } // namespace Swim::Render

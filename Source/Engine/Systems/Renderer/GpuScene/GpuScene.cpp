@@ -5,8 +5,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		constexpr auto ProducerMask = static_cast<std::uint32_t>(RenderObjectFlags::ProducerMask);
 		constexpr auto LiveBit = static_cast<std::uint32_t>(RenderObjectFlags::Live);
 		constexpr auto HasMeshBit = static_cast<std::uint32_t>(RenderObjectFlags::HasMesh);
@@ -34,6 +36,7 @@ namespace Swim::Render
 		{
 			return std::memcmp(rows, transform.Rows.data(), sizeof(float) * 12) == 0;
 		}
+
 	} // namespace
 
 	GpuScene::GpuScene(Rhi::Device& device, GpuSceneDesc desc)
@@ -47,10 +50,12 @@ namespace Swim::Render
 	std::optional<RenderObjectHandle> GpuScene::TryCreate(const RenderObjectDesc& desc)
 	{
 		const auto handle = objects.TryCreate({ frame });
+
 		if (!handle)
 		{
 			return std::nullopt;
 		}
+
 		rowCount = std::max(rowCount, handle->Index + 1);
 		auto& instance = instances.Edit(handle->Index);
 		instance = {};
@@ -76,6 +81,7 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(name + " has no free render object rows");
 	}
 
@@ -85,6 +91,7 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		objects.Release(object, lastUse);
 		instances.Edit(object.Index) = {}; // Dead row: Flags and Generation are zero.
 		return true;
@@ -98,16 +105,21 @@ namespace Swim::Render
 	bool GpuScene::SetTransform(RenderObjectHandle object, const RenderAffine& transform)
 	{
 		auto* record = objects.Get(object);
+
 		if (!record)
 		{
 			return false;
 		}
+
 		const auto& current = transforms.Get(object.Index);
+
 		if (SameAffine(current.Current, transform))
 		{
 			return true;
 		}
+
 		auto& row = transforms.Edit(object.Index);
+
 		if (record->TransformFrame != frame)
 		{
 			// First move this frame: what the GPU drew last frame becomes Previous.
@@ -115,6 +127,7 @@ namespace Swim::Render
 			record->TransformFrame = frame;
 			moved.push_back(object);
 		}
+
 		std::copy(transform.Rows.begin(), transform.Rows.end(), row.Current);
 		return true;
 	}
@@ -125,12 +138,15 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		const auto& current = instances.Get(object.Index);
 		const auto meshIndex = mesh ? mesh.Index : GpuInstanceRecord::InvalidIndex;
+
 		if (current.MeshIndex == meshIndex && current.MeshGeneration == (mesh ? mesh.Generation : 0) && SameBounds(current, localBounds))
 		{
 			return true;
 		}
+
 		auto& row = EditInstance(object);
 		WriteMesh(row, mesh);
 		WriteBounds(row, localBounds);
@@ -143,10 +159,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (!SameBounds(instances.Get(object.Index), localBounds))
 		{
 			WriteBounds(EditInstance(object), localBounds);
 		}
+
 		return true;
 	}
 
@@ -156,10 +174,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (instances.Get(object.Index).MaterialSet != materialSet)
 		{
 			EditInstance(object).MaterialSet = materialSet;
 		}
+
 		return true;
 	}
 
@@ -169,12 +189,15 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		const auto current = instances.Get(object.Index).Flags;
 		const auto updated = (current & ~ProducerMask) | (static_cast<std::uint32_t>(flags) & ProducerMask);
+
 		if (updated != current)
 		{
 			EditInstance(object).Flags = updated;
 		}
+
 		return true;
 	}
 
@@ -184,10 +207,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (instances.Get(object.Index).ObjectId != objectId)
 		{
 			EditInstance(object).ObjectId = objectId;
 		}
+
 		return true;
 	}
 
@@ -197,10 +222,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (instances.Get(object.Index).SkinIndex != skinIndex)
 		{
 			EditInstance(object).SkinIndex = skinIndex;
 		}
+
 		return true;
 	}
 
@@ -210,10 +237,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (instances.Get(object.Index).PreviousVertexOffset != vertices)
 		{
 			EditInstance(object).PreviousVertexOffset = vertices;
 		}
+
 		return true;
 	}
 
@@ -223,10 +252,12 @@ namespace Swim::Render
 		{
 			return false;
 		}
+
 		if (instances.Get(object.Index).LodBias != lodBias)
 		{
 			EditInstance(object).LodBias = lodBias;
 		}
+
 		return true;
 	}
 
@@ -245,17 +276,21 @@ namespace Swim::Render
 		for (auto object : settling)
 		{
 			const auto* record = objects.Get(object);
+
 			if (!record || record->TransformFrame == frame)
 			{
 				continue; // Destroyed, or moved again this frame (Previous already updated).
 			}
+
 			const auto& row = transforms.Get(object.Index);
+
 			if (std::memcmp(row.Previous, row.Current, sizeof(row.Current)) != 0)
 			{
 				auto& edited = transforms.Edit(object.Index);
 				std::copy(std::begin(edited.Current), std::end(edited.Current), edited.Previous);
 			}
 		}
+
 		settling.clear();
 	}
 
@@ -265,10 +300,12 @@ namespace Swim::Render
 		{
 			throw std::logic_error(name + " has uploads awaiting CommitUploads/AbortUploads");
 		}
+
 		Settle();
 		GpuSceneGraphResources resources;
 		auto instanceImport = instances.Import(graph);
 		GpuRecordBuffer<GpuTransformRecord>::ImportResult transformImport;
+
 		try
 		{
 			transformImport = transforms.Import(graph);
@@ -278,9 +315,11 @@ namespace Swim::Render
 			instances.Abort();
 			throw;
 		}
+
 		resources.Instances = instanceImport.Buffer;
 		resources.Transforms = transformImport.Buffer;
 		resources.RowCount = rowCount;
+
 		for (auto* pass : { &instanceImport.Pass, &transformImport.Pass })
 		{
 			if (*pass)
@@ -288,6 +327,7 @@ namespace Swim::Render
 				resources.UploadPasses.push_back(**pass);
 			}
 		}
+
 		resources.InstanceRows = instanceImport.Rows;
 		resources.TransformRows = transformImport.Rows;
 		resources.UploadRuns = instanceImport.Runs + transformImport.Runs;
@@ -299,11 +339,13 @@ namespace Swim::Render
 		last.LastUploadBytes = resources.UploadBytes;
 		totalBytes += resources.UploadBytes;
 		importPending = !resources.UploadPasses.empty();
+
 		if (!importPending)
 		{
 			instances.Commit();
 			transforms.Commit();
 		}
+
 		// The frame ends here: objects moved this frame settle during the next import.
 		settling = std::move(moved);
 		moved.clear();
@@ -350,4 +392,5 @@ namespace Swim::Render
 		stats.Frame = frame - 1;
 		return stats;
 	}
+
 } // namespace Swim::Render

@@ -4,13 +4,16 @@
 
 namespace Swim::Animation
 {
+
 	Quat Normalize(const Quat& q)
 	{
 		const float length = std::sqrt(Dot(q, q));
+
 		if (!(length > 1e-20f))
 		{
 			return IdentityQuat;
 		}
+
 		const float inverse = 1.0f / length;
 		return { q[0] * inverse, q[1] * inverse, q[2] * inverse, q[3] * inverse };
 	}
@@ -33,10 +36,12 @@ namespace Swim::Animation
 	Quat Inverse(const Quat& q)
 	{
 		const float lengthSquared = Dot(q, q);
+
 		if (!(lengthSquared > 1e-30f))
 		{
 			return IdentityQuat;
 		}
+
 		const Quat c = Conjugate(q);
 		return { c[0] / lengthSquared, c[1] / lengthSquared, c[2] / lengthSquared, c[3] / lengthSquared };
 	}
@@ -61,15 +66,18 @@ namespace Swim::Animation
 	{
 		float cosine = Dot(a, b);
 		Quat target = b;
+
 		if (cosine < 0.0f)
 		{
 			cosine = -cosine;
 			target = { -b[0], -b[1], -b[2], -b[3] };
 		}
+
 		if (cosine > 0.9995f)
 		{
 			return Nlerp(a, target, t);
 		}
+
 		const float angle = std::acos(std::clamp(cosine, -1.0f, 1.0f));
 		const float sine = std::sin(angle);
 		const float wa = std::sin((1.0f - t) * angle) / sine;
@@ -81,10 +89,12 @@ namespace Swim::Animation
 	Quat FromAxisAngle(const Vec3& axis, float radians)
 	{
 		const float length = Length(axis);
+
 		if (!(length > 1e-20f))
 		{
 			return IdentityQuat;
 		}
+
 		const float s = std::sin(radians * 0.5f) / length;
 		return { axis[0] * s, axis[1] * s, axis[2] * s, std::cos(radians * 0.5f) };
 	}
@@ -122,18 +132,22 @@ namespace Swim::Animation
 	Matrix4 Multiply(const Matrix4& a, const Matrix4& b)
 	{
 		Matrix4 result{};
+
 		for (int column = 0; column < 4; ++column)
 		{
 			for (int row = 0; row < 4; ++row)
 			{
 				float sum = 0.0f;
+
 				for (int k = 0; k < 4; ++k)
 				{
 					sum += a[k * 4 + row] * b[column * 4 + k];
 				}
+
 				result[column * 4 + row] = sum;
 			}
 		}
+
 		return result;
 	}
 
@@ -146,6 +160,7 @@ namespace Swim::Animation
 	Matrix3x4 ToAffineRows(const Matrix4& m)
 	{
 		Matrix3x4 rows{};
+
 		for (int row = 0; row < 3; ++row)
 		{
 			for (int column = 0; column < 4; ++column)
@@ -153,6 +168,7 @@ namespace Swim::Animation
 				rows[row * 4 + column] = m[column * 4 + row];
 			}
 		}
+
 		return rows;
 	}
 
@@ -171,10 +187,13 @@ namespace Swim::Animation
 	float MaxColumnScale(const Matrix3x4& r)
 	{
 		float largest = 0.0f;
+
 		for (int column = 0; column < 3; ++column)
 		{
 			largest = std::max(largest, Length({ r[column], r[4 + column], r[8 + column] }));
 		}
+
 		return largest;
 	}
+
 } // namespace Swim::Animation

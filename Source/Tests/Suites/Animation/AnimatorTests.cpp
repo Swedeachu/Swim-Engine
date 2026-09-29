@@ -13,6 +13,7 @@ using Swim::Testing::AngleBetween;
 
 namespace
 {
+
 	constexpr float Pi = 3.14159265358979f;
 
 	AnimatorDesc SingleState(std::shared_ptr<const AnimationClip> clip, float speed = 1.0f, bool loop = true, float start = 0.0f)
@@ -29,12 +30,15 @@ namespace
 	std::size_t CountEvents(const Animator& animator, const char* name)
 	{
 		std::size_t count = 0;
+
 		for (const AnimatorEvent& event : animator.GetEvents())
 		{
 			count += event.Name == name ? 1u : 0u;
 		}
+
 		return count;
 	}
+
 } // namespace
 
 SWIM_TEST("Animation.Animator", "StateMachineTransitionsCrossfadesTriggersAndExitTimes")
@@ -209,6 +213,7 @@ SWIM_TEST("Animation.Update", "JobifiedUpdatesEqualTheSerialOnes")
 	build(serialAnimators, serialInstances);
 	build(parallelAnimators, parallelInstances);
 	std::vector<AnimatedSkeleton> serial, parallel;
+
 	for (std::size_t index = 0; index < Count; ++index)
 	{
 		serial.push_back({ &serialAnimators[index], &serialInstances[index] });
@@ -217,20 +222,25 @@ SWIM_TEST("Animation.Update", "JobifiedUpdatesEqualTheSerialOnes")
 
 	Swim::Jobs::JobSystem jobs;
 	SWIM_REQUIRE(jobs.Initialize({ 3, 0, 0 }));
+
 	for (int frame = 0; frame < 10; ++frame)
 	{
 		UpdateAnimations(serial, 1.0f / 30.0f);
 		UpdateAnimations(parallel, 1.0f / 30.0f, &jobs, 2);
 	}
+
 	jobs.Shutdown();
+
 	for (std::size_t index = 0; index < Count; ++index)
 	{
 		const auto a = serialInstances[index].GetSkinningMatrices();
 		const auto b = parallelInstances[index].GetSkinningMatrices();
+
 		for (std::size_t joint = 0; joint < a.size(); ++joint)
 		{
 			SWIM_CHECK(a[joint] == b[joint]);
 		}
+
 		SWIM_CHECK_EQUAL(serialInstances[index].GetUpdateCount(), std::uint64_t{ 10 });
 	}
 }

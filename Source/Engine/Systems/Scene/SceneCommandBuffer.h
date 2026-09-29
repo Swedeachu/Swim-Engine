@@ -17,6 +17,7 @@ namespace Engine
 
 	class SceneCommandBuffer
 	{
+
 	public:
 
 		explicit SceneCommandBuffer(Scene& scene)
@@ -24,13 +25,19 @@ namespace Engine
 		{}
 
 		SceneCommandBuffer(const SceneCommandBuffer&) = delete;
+
 		SceneCommandBuffer& operator=(const SceneCommandBuffer&) = delete;
+
 		SceneCommandBuffer(SceneCommandBuffer&&) = delete;
+
 		SceneCommandBuffer& operator=(SceneCommandBuffer&&) = delete;
 
 		std::size_t Flush();
+
 		void Clear();
+
 		std::size_t GetPendingCount() const { return commands.GetPendingCount(); }
+
 		bool IsFlushing() const { return commands.IsFlushing(); }
 
 		// Queue a custom scene mutation. Commands queued while Flush() is running
@@ -62,6 +69,7 @@ namespace Engine
 		}
 
 		void Create();
+
 		void Destroy(entt::entity entity, bool callExit = true, bool destroyChildren = true);
 
 		template<typename T, typename... Args>
@@ -131,7 +139,9 @@ namespace Engine
 
 		// Tags and names resolve at flush time (the entity may still be pending).
 		void AddTag(entt::entity entity, TagId tag);
+
 		void RemoveTag(entt::entity entity, TagId tag);
+
 		void SetName(entt::entity entity, std::string name);
 
 		template<typename... BehaviorTypes>

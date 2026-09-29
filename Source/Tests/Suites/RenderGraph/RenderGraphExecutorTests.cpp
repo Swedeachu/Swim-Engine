@@ -71,6 +71,7 @@ SWIM_TEST("RenderGraph.Execute", "FailedRecordOrSubmitDoesNotAdvanceCompletionAn
 			{
 				throw std::runtime_error("record failure");
 			}
+
 		});
 	graph.Export(buffer, S::ShaderRead);
 	RenderGraphExecutor executor(device);

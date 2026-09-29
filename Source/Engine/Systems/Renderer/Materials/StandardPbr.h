@@ -5,6 +5,7 @@
 
 namespace Swim::Render::StandardPbr
 {
+
 	// The CPU definition of the standard metallic-roughness material (critical-path
 	// item 60). Shaders/Slang/Materials/StandardPbr.slang mirrors every function
 	// line for line; the tests and native smokes compare the two.
@@ -141,4 +142,5 @@ namespace Swim::Render::StandardPbr
 	// discards it: Resolve followed by ShadeResolved without IBL.
 	std::optional<std::array<float, 4>> Shade(
 		const Parameters& parameters, const Texels& texels, const Frame& frame, const Lighting& lighting);
+
 } // namespace Swim::Render::StandardPbr

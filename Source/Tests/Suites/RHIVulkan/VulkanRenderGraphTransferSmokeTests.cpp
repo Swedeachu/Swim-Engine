@@ -11,13 +11,16 @@
 
 namespace
 {
+
 	std::vector<std::byte> Bytes(std::size_t size, std::uint32_t seed)
 	{
 		std::vector<std::byte> result(size);
+
 		for (std::size_t i = 0; i < size; ++i)
 		{
 			result[i] = static_cast<std::byte>((i * 13 + seed * 29 + 1) & 0xff);
 		}
+
 		return result;
 	}
 
@@ -51,16 +54,19 @@ namespace
 
 		RenderGraphExecutor executor(*device);
 		std::vector<std::byte> persistentShadow(persistentBytes);
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			RenderGraph graph;
 			auto imported = graph.ImportBuffer(*persistent, frame ? S::ShaderRead : S::Undefined);
+
 			if (frame == 0)
 			{
 				const auto initial = Bytes(persistentBytes, 100);
 				AddBufferUpload(graph, "Initialize persistent", initial, imported);
 				persistentShadow = initial;
 			}
+
 			const auto patch = Bytes(64 + frame * 16, frame);
 			const std::uint64_t patchOffset = 256 * (frame + 1);
 			AddBufferUpload(graph, "Patch persistent", patch, imported, patchOffset);
@@ -101,6 +107,7 @@ namespace
 
 			std::vector<std::byte> pixels(base.size());
 			SWIM_REQUIRE(executor.TryReadback(textureResult.Buffer, pixels) == Rhi::ReadbackStatus::Ready);
+
 			for (std::uint32_t y = 0; y < 8; ++y)
 			{
 				for (std::uint32_t x = 0; x < 16; ++x)
@@ -113,11 +120,13 @@ namespace
 					}
 				}
 			}
+
 			if (frame >= 2)
 			{
 				SWIM_CHECK(executor.GetUploadCapacity() >= 256u * 1024u);
 			}
 		}
+
 		executor.Trim();
 	}
 
@@ -149,6 +158,7 @@ namespace
 			std::vector<GpuMeshHandle> meshes;
 			std::vector<std::vector<std::byte>> vertices;
 			std::vector<std::vector<std::byte>> indices;
+
 			for (std::uint32_t round = 0; round < 3; ++round)
 			{
 				for (std::uint32_t i = 0; i < 4; ++i)
@@ -166,6 +176,7 @@ namespace
 				RenderGraph graph;
 				auto resources = heap.Import(graph);
 				std::vector<GraphReadback> checks;
+
 				for (std::size_t m = meshes.size() - 4; m < meshes.size(); ++m)
 				{
 					const auto* row = heap.GetMetadata(meshes[m]);
@@ -174,6 +185,7 @@ namespace
 					checks.push_back(AddBufferReadback(
 						graph, "Verify indices", resources.Pages[row->IndexPage], std::uint64_t(row->FirstIndex) * 2, indices[m].size()));
 				}
+
 				auto metadataCheck = AddBufferReadback(graph, "Verify metadata", resources.Metadata,
 					std::uint64_t(meshes.back().Index) * sizeof(GpuMeshMetadata), sizeof(GpuMeshMetadata));
 				const auto completion = executor.Execute(graph.Compile());
@@ -189,6 +201,7 @@ namespace
 					SWIM_REQUIRE(executor.TryReadback(checks[c].Buffer, actual) == Rhi::ReadbackStatus::Ready);
 					SWIM_CHECK(actual == expected);
 				}
+
 				GpuMeshMetadata row;
 				SWIM_REQUIRE(
 					executor.TryReadback(metadataCheck.Buffer, std::as_writable_bytes(std::span(&row, 1))) == Rhi::ReadbackStatus::Ready);
@@ -198,6 +211,7 @@ namespace
 				// Retire the oldest mesh of this round after the completed submission.
 				heap.DestroyMesh(meshes[meshes.size() - 4], completion);
 			}
+
 			heap.Collect();
 			SWIM_CHECK_EQUAL(heap.GetStats().RetiringMeshes, 0u);
 			SWIM_CHECK_EQUAL(heap.GetStats().Vertex.Pages, 1u);
@@ -225,19 +239,23 @@ namespace
 		// partial blocks, written the way the cooker lays them out.
 		RenderGraphExecutor executor(*device);
 		const bool bc = device->GetAdapterInfo().Capabilities.BcTextureCompression;
+
 		for (const auto format : { Assets::TexturePayloadFormat::RGBA8UNorm, Assets::TexturePayloadFormat::BC7SRgb })
 		{
 			const bool bc7 = format == Assets::TexturePayloadFormat::BC7SRgb;
+
 			if (bc7 && !bc)
 			{
 				continue;
 			}
+
 			Assets::TextureAsset asset;
 			asset.Width = 16;
 			asset.Height = 8;
 			Assets::TexturePayloadVariant payload;
 			payload.Format = format;
 			std::uint64_t offset = 0;
+
 			for (std::uint32_t mip = 0; mip < 5; ++mip)
 			{
 				const std::uint32_t w = std::max(1u, 16u >> mip);
@@ -246,6 +264,7 @@ namespace
 				payload.Mips.push_back({ w, h, 1, offset, size, size });
 				offset += size;
 			}
+
 			payload.Bytes = Bytes(static_cast<std::size_t>(offset), 77);
 			asset.Payloads.push_back(payload);
 
@@ -255,6 +274,7 @@ namespace
 			const auto uploads = residency.Import(graph);
 			SWIM_REQUIRE_EQUAL(uploads.Uploads.size(), 1u);
 			std::vector<GraphReadback> readbacks;
+
 			for (std::uint32_t mip = 0; mip < 5; ++mip)
 			{
 				Rhi::BufferTextureCopyRegion region{};
@@ -262,11 +282,13 @@ namespace
 				region.Extent = { payload.Mips[mip].Width, payload.Mips[mip].Height, 1 };
 				readbacks.push_back(AddTextureReadback(graph, "Read residency mip", uploads.Uploads[0].Graph, region));
 			}
+
 			const auto completion = executor.Execute(graph.Compile());
 			residency.CommitUploads(completion);
 			executor.Wait();
 			residency.Collect();
 			SWIM_CHECK(residency.GetState(handle) == GpuUploadState::Resident);
+
 			for (std::uint32_t mip = 0; mip < 5; ++mip)
 			{
 				std::vector<std::byte> actual(static_cast<std::size_t>(payload.Mips[mip].SizeBytes));
@@ -274,15 +296,18 @@ namespace
 				SWIM_CHECK(std::equal(
 					actual.begin(), actual.end(), payload.Bytes.begin() + static_cast<std::ptrdiff_t>(payload.Mips[mip].OffsetBytes)));
 			}
+
 			SWIM_CHECK(residency.DestroyTexture(handle, completion));
 			residency.Drain();
 		}
+
 		executor.Trim();
 	}
 
 	[[maybe_unused]] const bool registeredTextures = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "TextureResidencyMipChainUploadAndRetirement", SWIM_TEST_LOCATION,
@@ -291,12 +316,14 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunTextureResidencySmoke);
 				} });
 		}
+
 		return true;
 	}();
 
 	[[maybe_unused]] const bool registeredGeometry = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GeometryHeapPagedUploadAndRetirement", SWIM_TEST_LOCATION,
@@ -305,12 +332,14 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGeometryHeapSmoke);
 				} });
 		}
+
 		return true;
 	}();
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "RenderGraphStagedTransfersAndReadback", SWIM_TEST_LOCATION,
@@ -319,6 +348,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGraphTransferSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

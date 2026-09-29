@@ -8,8 +8,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		UiVec3 Add(UiVec3 a, UiVec3 b)
 		{
 			return { a.X + b.X, a.Y + b.Y, a.Z + b.Z };
@@ -43,10 +45,12 @@ namespace Swim::UI
 		std::optional<UiVec3> Normalize(UiVec3 a)
 		{
 			const float length = Length(a);
+
 			if (!(length > 1e-12f) || !std::isfinite(length))
 			{
 				return std::nullopt;
 			}
+
 			return Scale(a, 1.0f / length);
 		}
 
@@ -89,10 +93,12 @@ namespace Swim::UI
 		std::array<float, 4> Apply(const UiMatrix4& m, const std::array<float, 4>& v)
 		{
 			std::array<float, 4> r{};
+
 			for (int row = 0; row < 4; ++row)
 			{
 				r[row] = m[row * 4] * v[0] + m[row * 4 + 1] * v[1] + m[row * 4 + 2] * v[2] + m[row * 4 + 3] * v[3];
 			}
+
 			return r;
 		}
 
@@ -104,12 +110,15 @@ namespace Swim::UI
 			const float a0 = p[0] - nx * p[12], b0 = p[1] - nx * p[13], c0 = (p[2] - nx * p[14]) * z + (p[3] - nx * p[15]);
 			const float a1 = p[4] - ny * p[12], b1 = p[5] - ny * p[13], c1 = (p[6] - ny * p[14]) * z + (p[7] - ny * p[15]);
 			const float det = a0 * b1 - a1 * b0;
+
 			if (std::abs(det) < 1e-20f)
 			{
 				return std::nullopt;
 			}
+
 			return UiVec3{ (-c0 * b1 + c1 * b0) / det, (-a0 * c1 + a1 * c0) / det, z };
 		}
+
 	} // namespace
 
 	void ValidatePlacement(const UiWorldPlacement& p)
@@ -120,6 +129,7 @@ namespace Swim::UI
 			Finite(std::array{ p.UpAxis.X, p.UpAxis.Y, p.UpAxis.Z }) && Length(p.UpAxis) > 1e-6f &&
 			std::isfinite(p.ScreenPixelsPerCanvasPixel) && p.ScreenPixelsPerCanvasPixel > 0.0f && std::isfinite(p.FadeStart) &&
 			std::isfinite(p.FadeEnd) && p.FadeStart >= 0.0f && p.FadeEnd >= 0.0f;
+
 		if (!valid)
 		{
 			throw std::invalid_argument("Invalid UI world placement");
@@ -129,18 +139,22 @@ namespace Swim::UI
 	UiMatrix4 Multiply(const UiMatrix4& a, const UiMatrix4& b)
 	{
 		UiMatrix4 r{};
+
 		for (int row = 0; row < 4; ++row)
 		{
 			for (int column = 0; column < 4; ++column)
 			{
 				float sum = 0.0f;
+
 				for (int k = 0; k < 4; ++k)
 				{
 					sum += a[row * 4 + k] * b[k * 4 + column];
 				}
+
 				r[row * 4 + column] = sum;
 			}
 		}
+
 		return r;
 	}
 
@@ -166,28 +180,34 @@ namespace Swim::UI
 	UiMatrix3x4 CanvasToWorld(UiCanvasMode mode, const UiWorldPlacement& p, UiPoint size, const UiCameraView* camera)
 	{
 		ValidatePlacement(p);
+
 		if (!std::isfinite(size.X) || !std::isfinite(size.Y) || size.X < 0.0f || size.Y < 0.0f)
 		{
 			throw std::invalid_argument("UI canvas size must be finite and non-negative");
 		}
+
 		if (mode != UiCanvasMode::WorldPanel && mode != UiCanvasMode::Billboard)
 		{
 			throw std::invalid_argument("CanvasToWorld is for world panels and billboards");
 		}
+
 		UiVec3 right;
 		UiVec3 up;
 		UiVec3 front;
 		float scale = p.UnitsPerPixel;
 		const UiVec3 anchor = Column(p.Transform, 3);
+
 		if (mode == UiCanvasMode::WorldPanel)
 		{
 			right = Column(p.Transform, 0);
 			up = Column(p.Transform, 1);
 			const auto normal = Normalize(Cross(right, up));
+
 			if (!normal)
 			{
 				throw std::invalid_argument("UI world panel transform is degenerate");
 			}
+
 			front = *normal;
 		}
 		else
@@ -196,6 +216,7 @@ namespace Swim::UI
 			{
 				throw std::invalid_argument("UI billboards need the camera");
 			}
+
 			ValidateCamera(*camera);
 			const auto& view = camera->View;
 			const UiVec3 cameraRight = ViewRow(view, 0);
@@ -203,6 +224,7 @@ namespace Swim::UI
 			const UiVec3 cameraBack = ViewRow(view, 2);
 			const UiVec3 toCamera = Sub(CameraPosition(view), anchor);
 			const UiVec3 axis = *Normalize(p.UpAxis);
+
 			switch (p.Billboard)
 			{
 			case UiBillboardMode::ScreenAligned:
@@ -213,10 +235,12 @@ namespace Swim::UI
 			case UiBillboardMode::Cylindrical:
 			{
 				auto flat = Normalize(Sub(toCamera, Scale(axis, Dot(toCamera, axis))));
+
 				if (!flat)
 				{
 					flat = Normalize(Sub(cameraBack, Scale(axis, Dot(cameraBack, axis)))); // Camera on the axis.
 				}
+
 				front = flat.value_or(cameraBack);
 				up = axis;
 				right = Normalize(Cross(up, front)).value_or(cameraRight);
@@ -231,18 +255,22 @@ namespace Swim::UI
 				break;
 			}
 			}
+
 			if (p.ConstantScreenSize)
 			{
 				const auto& proj = camera->Projection;
 				const auto viewPosition = Apply(view, { anchor.X, anchor.Y, anchor.Z, 1.0f });
 				const float w = proj[12] * viewPosition[0] + proj[13] * viewPosition[1] + proj[14] * viewPosition[2] + proj[15];
+
 				if (!(std::abs(proj[5]) > 1e-12f) || !(w > 0.0f))
 				{
 					throw std::invalid_argument("Constant-size UI billboards need a valid projection and an anchor in front of the camera");
 				}
+
 				scale = p.ScreenPixelsPerCanvasPixel * 2.0f * w / (std::abs(proj[5]) * camera->ViewportHeight);
 			}
 		}
+
 		const float scaleRight = mode == UiCanvasMode::WorldPanel ? scale : scale / std::max(Length(right), 1e-30f);
 		const float scaleUp = mode == UiCanvasMode::WorldPanel ? scale : scale / std::max(Length(up), 1e-30f);
 		const UiVec3 pixelRight = Scale(right, scaleRight);
@@ -268,6 +296,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("UI screen canvas needs a positive target size and a finite offset");
 		}
+
 		// Clip space is +Y up; canvas pixels are +Y down.
 		return { 2.0f / width, 0, 0, 2.0f * offsetX / width - 1.0f, 0, -2.0f / height, 0, 1.0f - 2.0f * offsetY / height, 0, 0, 0, 0, 0, 0,
 			0, 1 };
@@ -280,10 +309,12 @@ namespace Swim::UI
 		const float ny = 1.0f - 2.0f * pixel.Y / camera.ViewportHeight;
 		const auto nearPoint = Unproject(camera.Projection, nx, ny, -1.0f);
 		const auto farPoint = Unproject(camera.Projection, nx, ny, -2.0f);
+
 		if (!nearPoint || !farPoint)
 		{
 			throw std::invalid_argument("UI screen ray needs an invertible projection");
 		}
+
 		// Extrapolated to view depth 0: the eye for perspective, the view plane for
 		// orthographic projections.
 		const UiVec3 direction = Sub(*farPoint, *nearPoint);
@@ -306,6 +337,7 @@ namespace Swim::UI
 		{
 			return std::nullopt;
 		}
+
 		// origin + x * right + y * down = ray.Origin + t * ray.Direction.
 		const UiVec3 a = Column(m, 0);
 		const UiVec3 b = Column(m, 1);
@@ -313,17 +345,21 @@ namespace Swim::UI
 		const UiVec3 rhs = Sub(ray.Origin, Column(m, 3));
 		const float det = Dot(a, Cross(b, d));
 		const float scale = Length(a) * Length(b) * Length(d);
+
 		if (!(std::abs(det) > 1e-7f * scale) || scale <= 0.0f)
 		{
 			return std::nullopt; // Parallel (or degenerate).
 		}
+
 		const float x = Dot(rhs, Cross(b, d)) / det;
 		const float y = Dot(a, Cross(rhs, d)) / det;
 		const float t = Dot(a, Cross(b, rhs)) / det;
+
 		if (!(t >= 0.0f))
 		{
 			return std::nullopt;
 		}
+
 		const UiVec3 normal = Cross(a, Scale(b, -1.0f)); // Towards viewers of the front face.
 		return UiCanvasHit{ { x, y }, t, Dot(ray.Direction, normal) < 0.0f };
 	}
@@ -331,21 +367,25 @@ namespace Swim::UI
 	std::optional<UiCanvasHit> IntersectCanvas(const UiRay& ray, const UiMatrix3x4& m, UiPoint size, bool twoSided)
 	{
 		const auto hit = IntersectCanvasPlane(ray, m);
+
 		if (!hit || hit->Point.X < 0.0f || hit->Point.Y < 0.0f || hit->Point.X >= size.X || hit->Point.Y >= size.Y ||
 			(!twoSided && !hit->FrontFacing))
 		{
 			return std::nullopt;
 		}
+
 		return hit;
 	}
 
 	std::optional<UiPoint> ProjectCanvasPoint(const UiMatrix4& m, UiPoint viewport, UiPoint point)
 	{
 		const auto clip = Apply(m, { point.X, point.Y, 0.0f, 1.0f });
+
 		if (!(clip[3] > 1e-12f))
 		{
 			return std::nullopt;
 		}
+
 		const float nx = clip[0] / clip[3];
 		const float ny = clip[1] / clip[3];
 		return UiPoint{ (nx + 1.0f) * 0.5f * viewport.X, (1.0f - ny) * 0.5f * viewport.Y };
@@ -357,19 +397,23 @@ namespace Swim::UI
 		float y0 = x0;
 		float x1 = -x0;
 		float y1 = -x0;
+
 		for (const UiPoint corner : { UiPoint{ rect.X, rect.Y }, UiPoint{ rect.X + rect.Width, rect.Y },
 				 UiPoint{ rect.X, rect.Y + rect.Height }, UiPoint{ rect.X + rect.Width, rect.Y + rect.Height } })
 		{
 			const auto projected = ProjectCanvasPoint(m, viewport, corner);
+
 			if (!projected)
 			{
 				return std::nullopt;
 			}
+
 			x0 = std::min(x0, projected->X);
 			y0 = std::min(y0, projected->Y);
 			x1 = std::max(x1, projected->X);
 			y1 = std::max(y1, projected->Y);
 		}
+
 		return UiRect{ x0, y0, x1 - x0, y1 - y0 };
 	}
 
@@ -379,6 +423,7 @@ namespace Swim::UI
 		{
 			return 1.0f;
 		}
+
 		return std::clamp((placement.FadeEnd - distance) / (placement.FadeEnd - placement.FadeStart), 0.0f, 1.0f);
 	}
 
@@ -387,4 +432,5 @@ namespace Swim::UI
 		const UiVec3 point = TransformPoint(m, { pivot.X * size.X, pivot.Y * size.Y, 0.0f });
 		return Length(Sub(point, CameraPosition(view)));
 	}
+
 } // namespace Swim::UI

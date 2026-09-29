@@ -6,29 +6,35 @@
 
 namespace Swim::Render
 {
+
 	ClusterGridLayout ComputeClusterGridLayout(const ClusterGridDesc& desc)
 	{
 		if (desc.ViewportWidth == 0 || desc.ViewportHeight == 0 || desc.TileSize == 0 || desc.SliceCount == 0)
 		{
 			throw std::invalid_argument("Cluster grid needs a viewport, a tile size and at least one slice");
 		}
+
 		if (!(desc.Near > 0.0f) || !(desc.Far > desc.Near) || !std::isfinite(desc.Far))
 		{
 			throw std::invalid_argument("Cluster grid needs 0 < Near < Far (finite)");
 		}
+
 		if (desc.MaxLightsPerCluster == 0 || desc.LightCapacity == 0 || desc.LightCapacity > MaxClusterLights)
 		{
 			throw std::invalid_argument("Cluster grid needs non-zero light limits");
 		}
+
 		ClusterGridLayout layout;
 		layout.TilesX = (desc.ViewportWidth + desc.TileSize - 1) / desc.TileSize;
 		layout.TilesY = (desc.ViewportHeight + desc.TileSize - 1) / desc.TileSize;
 		layout.Slices = desc.SliceCount;
 		const std::uint64_t clusters = std::uint64_t(layout.TilesX) * layout.TilesY * layout.Slices;
+
 		if (clusters > MaxClusterCount)
 		{
 			throw std::invalid_argument("Cluster grid has more than MaxClusterCount clusters");
 		}
+
 		layout.ClusterCount = static_cast<std::uint32_t>(clusters);
 		const float logRatio = std::log(desc.Far / desc.Near);
 		layout.SliceScale = float(layout.Slices) / logRatio;
@@ -40,16 +46,21 @@ namespace Swim::Render
 	{
 		const auto layout = ComputeClusterGridLayout(desc);
 		const auto& p = view.Projection;
+
 		if (p[14] != -1.0f || p[15] != 0.0f || p[0] == 0.0f || p[5] == 0.0f)
 		{
 			throw std::invalid_argument("Cluster grids need a perspective projection (clip.w = -z)");
 		}
+
 		const auto& v = view.View;
+
 		if (v[12] != 0.0f || v[13] != 0.0f || v[14] != 0.0f || v[15] != 1.0f)
 		{
 			throw std::invalid_argument("Cluster view matrices must be affine");
 		}
+
 		ClusterGridRecord record;
+
 		for (int row = 0; row < 3; ++row)
 		{
 			for (int column = 0; column < 4; ++column)
@@ -57,6 +68,7 @@ namespace Swim::Render
 				record.ViewRows[row][column] = v[row * 4 + column];
 			}
 		}
+
 		record.Projection[0] = p[0];
 		record.Projection[1] = p[5];
 		record.Projection[2] = p[2];
@@ -103,4 +115,5 @@ namespace Swim::Render
 	{
 		return grid.DepthParams[1] / (ndcDepth + grid.DepthParams[0]);
 	}
+
 } // namespace Swim::Render

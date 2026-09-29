@@ -5,7 +5,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanDeviceLossCapture* active = nullptr;
+
 	}
 
 	VulkanDeviceLossCapture::VulkanDeviceLossCapture()

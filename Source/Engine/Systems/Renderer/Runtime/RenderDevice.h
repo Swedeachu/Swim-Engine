@@ -12,11 +12,14 @@
 
 namespace Swim::Platform
 {
+
 	class Window;
+
 }
 
 namespace Engine
 {
+
 	struct RenderDeviceDesc
 	{
 		// The window to present to; null renders headless (offscreen, no swapchain).
@@ -39,11 +42,16 @@ namespace Engine
 	// skips the frame and is rebuilt at the next Acquire.
 	class RenderDevice
 	{
+
 	  public:
+
 		// Throws std::runtime_error when no suitable device (bindless descriptors) exists.
 		explicit RenderDevice(const RenderDeviceDesc& desc);
+
 		~RenderDevice();
+
 		RenderDevice(const RenderDevice&) = delete;
+
 		RenderDevice& operator=(const RenderDevice&) = delete;
 
 		Swim::Rhi::Device& GetDevice() const { return *device; }
@@ -62,11 +70,13 @@ namespace Engine
 		const Swim::Rhi::GraphicsCapabilities& GetCapabilities() const { return adapterInfo->Capabilities; }
 
 		bool IsValidationEnabled() const;
+
 		std::uint64_t GetValidationErrorCount() const;
 
 		bool IsHeadless() const { return swapchain == nullptr; }
 
 		Swim::Rhi::Format GetSwapchainFormat() const;
+
 		// The size frames are rendered at (swapchain extent or headless size).
 		Swim::Rhi::Extent2D GetExtent() const;
 
@@ -84,8 +94,10 @@ namespace Engine
 
 		// Headless always succeeds with no target. Invalid while minimized or rebuilding.
 		Frame Acquire();
+
 		// The synchronization of the frame's submission (valid until the next Acquire).
 		Swim::Rhi::SubmitDesc GetSubmit(const Frame& frame);
+
 		// Presents the acquired image; false requests a rebuild.
 		bool Present(const Frame& frame);
 
@@ -95,7 +107,9 @@ namespace Engine
 		void WaitIdle();
 
 	  private:
+
 		bool Rebuild();
+
 		void CreatePresentSemaphores();
 
 		std::unique_ptr<Swim::Rhi::GraphicsSystem> graphics;
@@ -120,5 +134,7 @@ namespace Engine
 		bool resizeRequested = false;
 		bool needsRebuild = false;
 		bool vsync = true;
+
 	};
+
 } // namespace Engine

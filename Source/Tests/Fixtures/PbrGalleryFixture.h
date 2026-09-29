@@ -17,6 +17,7 @@
 
 namespace Swim::Testing::PbrGallery
 {
+
 	namespace Env = Render::Environment;
 	namespace Pbr = Render::StandardPbr;
 	using Float4 = std::array<float, 4>;
@@ -70,9 +71,11 @@ namespace Swim::Testing::PbrGallery
 		layout.Rows = static_cast<std::uint32_t>(Materials().size());
 		layout.Width = cell * columns;
 		layout.Height = cell * layout.Rows;
+
 		for (std::uint32_t row = 0; row < layout.Rows; ++row)
 		{
 			const auto& material = Materials()[row];
+
 			for (std::uint32_t column = 0; column < columns; ++column)
 			{
 				Sphere sphere;
@@ -86,6 +89,7 @@ namespace Swim::Testing::PbrGallery
 				layout.Spheres.push_back(sphere);
 			}
 		}
+
 		return layout;
 	}
 
@@ -110,17 +114,20 @@ namespace Swim::Testing::PbrGallery
 	{
 		const float px = float(x) + 0.5f;
 		const float py = float(y) + 0.5f;
+
 		for (std::uint32_t index = 0; index < layout.Spheres.size(); ++index)
 		{
 			const auto& sphere = layout.Spheres[index];
 			const float ox = (px - sphere.CenterX) / sphere.Radius;
 			const float oy = (sphere.CenterY - py) / sphere.Radius;
 			const float r2 = ox * ox + oy * oy;
+
 			if (r2 < 1.0f)
 			{
 				return Coverage{ index, ox, oy, r2, (1.0f - std::sqrt(r2)) * sphere.Radius };
 			}
 		}
+
 		return std::nullopt;
 	}
 
@@ -153,6 +160,7 @@ namespace Swim::Testing::PbrGallery
 	inline std::vector<Float4> Render(const Layout& layout, const Env::EnvironmentProbe& probe, const Frame& frame)
 	{
 		std::vector<Float4> image(std::size_t(layout.Width) * layout.Height, Float4{ 0, 0, 0, 0 });
+
 		for (std::uint32_t y = 0; y < layout.Height; ++y)
 		{
 			for (std::uint32_t x = 0; x < layout.Width; ++x)
@@ -163,6 +171,7 @@ namespace Swim::Testing::PbrGallery
 				}
 			}
 		}
+
 		return image;
 	}
 
@@ -178,6 +187,7 @@ namespace Swim::Testing::PbrGallery
 		std::ofstream pfm(stem + ".pfm", std::ios::binary | std::ios::trunc);
 		const std::string header = "PF\n" + std::to_string(width) + " " + std::to_string(height) + "\n-1.0\n";
 		pfm.write(header.data(), std::streamsize(header.size()));
+
 		for (std::uint32_t row = height; row-- > 0;) // PFM stores rows bottom to top.
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
@@ -185,6 +195,7 @@ namespace Swim::Testing::PbrGallery
 				pfm.write(reinterpret_cast<const char*>(image[std::size_t(row) * width + x].data()), 3 * sizeof(float));
 			}
 		}
+
 		pfm.close();
 
 		std::ofstream bmp(stem + ".bmp", std::ios::binary | std::ios::trunc);
@@ -214,11 +225,13 @@ namespace Swim::Testing::PbrGallery
 		put32(0);
 		put32(0);
 		std::vector<char> row(rowBytes, 0);
+
 		for (std::uint32_t y = height; y-- > 0;) // BMP stores rows bottom to top.
 		{
 			for (std::uint32_t x = 0; x < width; ++x)
 			{
 				const auto& p = image[std::size_t(y) * width + x];
+
 				for (int c = 0; c < 3; ++c)
 				{
 					const float mapped = std::max(p[c], 0.0f) / (1.0f + std::max(p[c], 0.0f));
@@ -226,9 +239,12 @@ namespace Swim::Testing::PbrGallery
 						static_cast<char>(static_cast<std::uint8_t>(std::lround(Pbr::LinearToSrgb(mapped) * 255.0f)));
 				}
 			}
+
 			bmp.write(row.data(), std::streamsize(row.size()));
 		}
+
 		bmp.close();
 		return pfm.good() && bmp.good();
 	}
+
 } // namespace Swim::Testing::PbrGallery

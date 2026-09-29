@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// A GPU-resident mesh ready to be referenced by render objects, with the
 	// local bounds its instances cull against.
 	struct ResolvedRenderMesh
@@ -11,4 +12,5 @@ namespace Swim::Render
 		GpuMeshHandle Mesh{};
 		RenderBounds LocalBounds = RenderBounds::Infinite();
 	};
+
 } // namespace Swim::Render

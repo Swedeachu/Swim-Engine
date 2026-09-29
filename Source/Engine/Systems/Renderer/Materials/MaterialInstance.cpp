@@ -5,8 +5,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		bool IsUint(MaterialParameterType type)
 		{
 			return type == MaterialParameterType::Uint;
@@ -36,6 +38,7 @@ namespace Swim::Render
 		{
 			return type == MaterialParameterType::Float;
 		}
+
 	} // namespace
 
 	MaterialInstance::MaterialInstance(std::shared_ptr<const MaterialTemplate> materialTemplate)
@@ -45,6 +48,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument("Material instance needs a template");
 		}
+
 		const auto defaults = this->materialTemplate->GetDefaultRecord();
 		record.assign(defaults.begin(), defaults.end());
 	}
@@ -52,16 +56,19 @@ namespace Swim::Render
 	const MaterialParameterDesc& MaterialInstance::Require(std::string_view parameter, bool (*accepts)(MaterialParameterType)) const
 	{
 		const auto* found = materialTemplate->FindParameter(parameter);
+
 		if (!found)
 		{
 			throw std::invalid_argument(
 				"Material template " + materialTemplate->GetName() + " has no parameter '" + std::string(parameter) + "'");
 		}
+
 		if (!accepts(found->Type))
 		{
 			throw std::invalid_argument("Material parameter '" + found->Name + "' is a " +
 				std::string(MaterialParameterTypeName(found->Type)) + "; wrong accessor");
 		}
+
 		return *found;
 	}
 
@@ -144,4 +151,5 @@ namespace Swim::Render
 		std::memcpy(&value, record.data() + target.Offset, sizeof(value));
 		return value;
 	}
+
 } // namespace Swim::Render

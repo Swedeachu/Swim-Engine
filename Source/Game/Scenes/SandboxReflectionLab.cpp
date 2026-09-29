@@ -11,8 +11,10 @@
 
 namespace Game
 {
+
 	namespace
 	{
+
 		// An object probe: captured from the entity's centre without the entity, used only by it.
 		Engine::ReflectionProbe ObjectProbe(float priority = 1.0f)
 		{
@@ -21,6 +23,7 @@ namespace Game
 			probe.Priority = priority;
 			return probe;
 		}
+
 	} // namespace
 
 	glm::vec3 Sandbox::GetReflectionLabCenter()
@@ -48,21 +51,27 @@ namespace Game
 		floorDesc.Roughness = 0.45f;
 		std::uint32_t floorMaterial = 0;
 		Engine::MeshLibrary::MeshHandle padMesh;
+
 		if (auto* render = GetRenderServices(); render && render->HasRenderer())
 		{
 			padMesh = render->Meshes->Find("ReflectionLabPad");
+
 			if (!padMesh.IsValid())
 			{
 				padMesh = render->Meshes->Register("ReflectionLabPad", Engine::ProceduralMeshes::MakePlane(12.0f, 4, 12.0f));
 			}
+
 			auto tiles = render->Meshes->FindTexture("ReflectionLabTiles");
+
 			if (!tiles.IsValid())
 			{
 				tiles = render->Meshes->RegisterChecker("ReflectionLabTiles", 128, 2, { 245, 245, 245, 255 }, { 22, 22, 26, 255 });
 			}
+
 			floorDesc.BaseColorTexture = tiles;
 			floorMaterial = render->Materials->GetOrCreate(floorDesc);
 		}
+
 		const entt::entity pad = SpawnMesh(*this, { "Reflection lab floor", padMesh, floorMaterial, lab + glm::vec3(0.0f, 0.004f, 0.0f),
 													  glm::vec3(1.0f), glm::quat(1, 0, 0, 0), flags, tags });
 		labFloor = EmplaceBehavior<ReflectionLabFloor>(pad, floorMaterial, floorDesc);
@@ -101,12 +110,14 @@ namespace Game
 		// Behind the lab camera (the "Reflection lab" view): only reflections show it.
 		const std::uint32_t red = Mat("Lab red stripe", SrgbColor(220, 30, 40), 0.0f, 0.5f);
 		const std::uint32_t white = Mat("Lab white stripe", SrgbColor(235, 235, 235), 0.0f, 0.5f);
+
 		for (int i = 0; i < 6; ++i)
 		{
 			SpawnMesh(*this, { "Lab column " + std::to_string(i + 1), cube, i % 2 ? white : red,
 								 lab + glm::vec3(0.0f, 0.25f + 0.5f * static_cast<float>(i), 7.5f), { 1.2f, 0.5f, 1.2f }, glm::quat(1, 0, 0, 0),
 								 flags, tags });
 		}
+
 		// An area probe for the pad and anything in the lab without its own probe.
 		const entt::entity area = CreateEntity("Reflection lab probe");
 		AddComponent<Engine::Transform>(area, Engine::Transform(lab + glm::vec3(0.0f, 1.2f, 0.0f), glm::vec3(1.0f)));
@@ -117,4 +128,5 @@ namespace Game
 		AddComponent<Engine::ReflectionProbe>(area, areaProbe);
 		AddTag(area, GameTags::ReflectionLab);
 	}
+
 } // namespace Game

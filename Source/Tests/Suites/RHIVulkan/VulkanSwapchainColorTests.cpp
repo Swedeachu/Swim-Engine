@@ -13,6 +13,7 @@ using namespace Swim;
 
 namespace
 {
+
 	constexpr VkSurfaceFormatKHR Sdr{ VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR };
 	constexpr VkSurfaceFormatKHR Pq{ VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
 	constexpr VkSurfaceFormatKHR BgrPq{ VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT };
@@ -63,17 +64,21 @@ namespace
 				VkSurfaceKHR surface, std::uint32_t* count, VkSurfaceFormatKHR* formats) -> VkResult
 			{
 				active->WrongSurface |= surface != active->Surface;
+
 				if (!formats)
 				{
 					++active->CountCalls;
 					*count = active->CountOverride ? active->CountOverride : static_cast<std::uint32_t>(active->Formats.size());
 					return active->CountResult;
 				}
+
 				++active->DataCalls;
+
 				if (active->DataCalls <= active->IncompleteDataCalls)
 				{
 					return VK_INCOMPLETE;
 				}
+
 				const auto size = active->Shrink ? 1u : static_cast<std::uint32_t>(active->Formats.size());
 				*count = std::min(*count, size);
 				std::copy_n(active->Formats.data(), *count, formats);
@@ -86,6 +91,7 @@ namespace
 			return RhiVulkan::QueryVulkanSwapchainSupport(State, Surface);
 		}
 	};
+
 }
 
 SWIM_TEST("RHI.Vulkan.SwapchainColor", "SdrDefaultNeverSelectsAdvertisedHdr")
@@ -263,6 +269,7 @@ SWIM_TEST("RHI.Vulkan.SwapchainColor", "DeviceLossIsTypedStickyAndStopsNativeQue
 	for (unsigned stage = 0; stage < 3; ++stage)
 	{
 		SurfaceCapture capture;
+
 		if (stage == 0)
 		{
 			capture.SupportResult = VK_ERROR_DEVICE_LOST;
@@ -275,6 +282,7 @@ SWIM_TEST("RHI.Vulkan.SwapchainColor", "DeviceLossIsTypedStickyAndStopsNativeQue
 		{
 			capture.DataResult = VK_ERROR_DEVICE_LOST;
 		}
+
 		SWIM_CHECK_THROWS(capture.Query(), Rhi::DeviceLostError);
 		SWIM_CHECK(capture.State.Diagnostics->IsLost());
 		const auto calls = capture.SupportCalls + capture.CountCalls + capture.DataCalls;

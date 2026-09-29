@@ -10,8 +10,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 
 		constexpr std::uint64_t HistogramBytes = std::uint64_t(PostHistogramBins) * sizeof(std::uint32_t);
@@ -44,10 +46,12 @@ namespace Swim::Render
 			const std::array<Rhi::DescriptorWrite, Count>& writes, const Constants& constants, std::uint32_t groupsX, std::uint32_t groupsY)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			table->Write(writes);
 			auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 			auto& list = c.Commands();
@@ -66,6 +70,7 @@ namespace Swim::Render
 		{
 			return (static_cast<std::uint32_t>(desc.Usage) & static_cast<std::uint32_t>(usage)) != 0;
 		}
+
 	} // namespace
 
 	PostProcessor::PostProcessor(Rhi::Device& device, PostProcessorDesc descInput) : desc(std::move(descInput))
@@ -78,8 +83,10 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs every post-processing program");
 			}
 		}
+
 		exposureState = device.CreateBuffer({ sizeof(GpuExposureState), Rhi::BufferUsage::Storage | Rhi::BufferUsage::TransferSource,
 			Rhi::MemoryPreference::DeviceLocal, desc.DebugName + " exposure state" });
+
 		if (!exposureState)
 		{
 			throw std::runtime_error(desc.DebugName + " exposure state buffer could not be created");
@@ -102,19 +109,23 @@ namespace Swim::Render
 		const auto& name = desc.DebugName;
 		const auto& settings = frame.Settings;
 		ValidatePostProcessSettings(settings);
+
 		if (!std::isfinite(frame.DeltaTime) || frame.DeltaTime < 0.0f)
 		{
 			throw std::invalid_argument(name + " delta time must be finite and non-negative");
 		}
+
 		const auto sourceDesc = graph.GetDesc(frame.Source); // Copies: creating resources may reallocate the graph's list.
 		const auto outputDesc = graph.GetDesc(frame.Output);
 		const bool hdr = IsHdrEncoding(settings.Output.Encoding);
 		const auto outputFormat = hdr ? Rhi::Format::RGBA16Float : Rhi::Format::RGBA8Unorm;
+
 		if (sourceDesc.Dimension != Rhi::TextureDimension::Texture2D || sourceDesc.PixelFormat != Rhi::Format::RGBA16Float ||
 			sourceDesc.ArrayLayers != 1 || sourceDesc.Samples != Rhi::SampleCount::X1 || !HasUsage(sourceDesc, Rhi::TextureUsage::Sampled))
 		{
 			throw std::invalid_argument(name + " source must be a sampled single-sample 2D RGBA16Float texture");
 		}
+
 		if (outputDesc.Dimension != Rhi::TextureDimension::Texture2D || outputDesc.PixelFormat != outputFormat ||
 			outputDesc.Extent.Width != sourceDesc.Extent.Width || outputDesc.Extent.Height != sourceDesc.Extent.Height ||
 			outputDesc.ArrayLayers != 1 || !HasUsage(outputDesc, Rhi::TextureUsage::Storage))
@@ -122,6 +133,7 @@ namespace Swim::Render
 			throw std::invalid_argument(
 				name + " output must be a source-sized Storage texture: RGBA8Unorm for sRGB output, RGBA16Float for HDR10/scRGB");
 		}
+
 		const std::uint32_t width = sourceDesc.Extent.Width;
 		const std::uint32_t height = sourceDesc.Extent.Height;
 		const bool automatic = settings.Exposure.Mode == ExposureMode::Automatic;
@@ -140,6 +152,7 @@ namespace Swim::Render
 		// 1. Histogram (automatic exposure only).
 		GraphBuffer histogram;
 		const std::vector<std::byte> zeros(HistogramBytes);
+
 		if (automatic)
 		{
 			histogram = graph.CreateBuffer(
@@ -203,6 +216,7 @@ namespace Swim::Render
 
 		// 3. Bloom.
 		const std::uint32_t levels = resources.BloomLevels;
+
 		for (std::uint32_t i = 0; i < levels; ++i)
 		{
 			const std::uint32_t levelWidth = width >> (i + 1);
@@ -232,9 +246,11 @@ namespace Swim::Render
 						Groups(constants.DestinationHeight, B::ThreadGroupSize));
 				});
 		}
+
 		if (levels >= 2)
 		{
 			resources.BloomUp.resize(levels - 1);
+
 			for (std::uint32_t i = levels - 1; i-- > 0;)
 			{
 				const auto low = i + 1 == levels - 1 ? resources.BloomDown[levels - 1] : resources.BloomUp[i + 1];
@@ -271,6 +287,7 @@ namespace Swim::Render
 		GraphTexture bloom;
 		std::uint32_t bloomWidth = 1;
 		std::uint32_t bloomHeight = 1;
+
 		if (levels > 0)
 		{
 			bloom = levels >= 2 ? resources.BloomUp[0] : resources.BloomDown[0];
@@ -289,6 +306,7 @@ namespace Swim::Render
 			const std::array<std::byte, 8> texel{};
 			AddTextureUpload(graph, standInName + " upload", texel, bloom, { 0, {}, {}, { 1, 1, 1 } });
 		}
+
 		const auto output = frame.Output;
 		const auto params = resources.Params;
 		const PostCompositeConstants compositeConstants{ width, height, bloomWidth, bloomHeight };
@@ -315,4 +333,5 @@ namespace Swim::Render
 		historyValid = true;
 		return resources;
 	}
+
 } // namespace Swim::Render

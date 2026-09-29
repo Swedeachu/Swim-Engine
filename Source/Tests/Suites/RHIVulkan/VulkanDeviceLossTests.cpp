@@ -7,11 +7,13 @@ using namespace Swim;
 SWIM_TEST("RHI.Vulkan.DeviceLoss", "NormalStatusesAndRecoverableFailuresDoNotMarkDeviceLost")
 {
 	Testing::VulkanDeviceLossCapture capture;
+
 	for (auto result : { VK_SUCCESS, VK_TIMEOUT, VK_NOT_READY, VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR,
 		VK_ERROR_SURFACE_LOST_KHR, VK_ERROR_OUT_OF_DEVICE_MEMORY })
 	{
 		SWIM_CHECK_EQUAL(RhiVulkan::CheckVulkanResult(*capture.State, result, "normal"), result);
 	}
+
 	RhiVulkan::VulkanFence fence(capture.State, VK_NULL_HANDLE);
 	auto timeline = capture.Device->CreateTimeline(0);
 	capture.HostResult = VK_NOT_READY;
@@ -32,6 +34,7 @@ SWIM_TEST("RHI.Vulkan.DeviceLoss", "FenceTimelineQueueAndDeviceWaitsRaiseTypedLo
 {
 	const char* operations[] = { "vkGetFenceStatus", "vkWaitForFences", "vkResetFences", "vkGetSemaphoreCounterValue",
 		"vkWaitSemaphores", "vkDeviceWaitIdle", "vkQueueWaitIdle", "vkResetCommandPool" };
+
 	for (unsigned operation = 0; operation < 8; ++operation)
 	{
 		Testing::VulkanDeviceLossCapture capture;

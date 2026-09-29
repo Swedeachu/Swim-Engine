@@ -15,16 +15,21 @@ namespace Sh = Swim::Render::Shadows;
 
 namespace
 {
+
 	class MockGraphicsPipeline final : public Rhi::GraphicsPipeline
 	{
+
 	  public:
+
 		std::uintptr_t GetNativeHandle() const override { return 16; }
+
 	};
 
 	void DeclareCullingInterface(Testing::MockPipelineLayout& layout)
 	{
 		using B = GpuVisibilityBindings;
 		Rhi::DescriptorSchemaDesc schema{ 0, {} };
+
 		for (std::uint32_t binding = B::Instances; binding < B::Count; ++binding)
 		{
 			const bool writable = binding >= B::LodState;
@@ -33,6 +38,7 @@ namespace
 												: Rhi::DescriptorType::ReadOnlyStorageBuffer;
 			schema.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 		}
+
 		layout.program.Interface.DescriptorSchemas = { schema };
 	}
 
@@ -60,10 +66,12 @@ namespace
 			fixture.device.CreateTextures = true;
 			DeclareCullingInterface(cullLayout);
 			Rhi::DescriptorSchemaDesc draw{ 0, {} };
+
 			for (std::uint32_t binding = 0; binding < ShadowDepthBindings::Count; ++binding)
 			{
 				draw.Bindings.push_back({ binding, Rhi::DescriptorType::ReadOnlyStorageBuffer, 1, Rhi::ShaderStageMask::Vertex });
 			}
+
 			opaqueLayout.program.Interface.DescriptorSchemas = { draw };
 			opaqueLayout.program.Interface.PushConstants = pushRanges;
 			maskedLayout.program.Interface.DescriptorSchemas = { draw, ShadowBindlessSpace(16, 4) };
@@ -75,10 +83,12 @@ namespace
 				return fixture.device.CreateBuffer(
 					{ size, Rhi::BufferUsage::Storage | Rhi::BufferUsage::Index, Rhi::MemoryPreference::DeviceLocal, "Test" });
 			};
+
 			for (auto& page : pages)
 			{
 				page = buffer(4096);
 			}
+
 			instances = buffer(16 * 64);
 			transforms = buffer(16 * 96);
 			metadata = buffer(4096);
@@ -127,10 +137,12 @@ namespace
 			scene.Transforms = in(transforms);
 			scene.RowCount = 3;
 			geometry = {};
+
 			for (auto& page : pages)
 			{
 				geometry.Pages.push_back(in(page));
 			}
+
 			geometry.Metadata = in(metadata);
 			geometry.Submeshes = in(submeshes);
 			materialResources = { in(materials), std::nullopt, 4, 80 };
@@ -155,6 +167,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *fixture.device.Commands)
 			{
 				if (command.Kind == kind)
@@ -162,6 +175,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -183,6 +197,7 @@ namespace
 		GeometryGraphResources geometry;
 		GpuMaterialGraphResources materialResources;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.ShadowRenderer", "PipelineStateAndMaterialRouting")
@@ -259,6 +274,7 @@ SWIM_TEST("Render.ShadowRenderer", "CullsEveryViewThenDrawsBothVariantsIntoEachT
 	SWIM_REQUIRE_EQUAL(scissors.size(), std::size_t(7 * 2));
 	SWIM_REQUIRE_EQUAL(indexBuffers.size(), draws.size());
 	std::vector<std::array<std::uint32_t, 4>> depthConstants;
+
 	for (const auto& push : world.Commands("PushConstants"))
 	{
 		if (push.Data.size() == ShadowDepthBindings::PushConstantBytes)
@@ -268,16 +284,20 @@ SWIM_TEST("Render.ShadowRenderer", "CullsEveryViewThenDrawsBothVariantsIntoEachT
 			depthConstants.push_back(constants);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(depthConstants.size(), draws.size());
+
 	for (std::uint32_t v = 0; v < 7; ++v)
 	{
 		const auto& tile = world.plan.Draws[v].Tile;
+
 		for (std::uint32_t variant = 0; variant < 2; ++variant)
 		{
 			const auto& viewport = viewports[v * 2 + variant];
 			SWIM_CHECK(viewport.SourceOffset == tile.X && viewport.DestinationOffset == tile.Y && viewport.Size == tile.Size);
 			const auto& scissor = scissors[v * 2 + variant];
 			SWIM_CHECK(scissor.SourceOffset == tile.X && scissor.DestinationOffset == tile.Y && scissor.Size == tile.Size);
+
 			for (std::uint32_t slot = 0; slot < 2; ++slot)
 			{
 				const std::size_t i = (v * 2 + variant) * 2 + slot;
@@ -292,16 +312,19 @@ SWIM_TEST("Render.ShadowRenderer", "CullsEveryViewThenDrawsBothVariantsIntoEachT
 				SWIM_CHECK_EQUAL(depthConstants[i][1], 4u); // Material rows.
 			}
 		}
+
 		if (v > 0)
 		{
 			SWIM_CHECK(draws[v * 4].Source != draws[(v - 1) * 4].Source); // ...distinct per view.
 		}
 	}
+
 	// Pipelines alternate opaque, masked per view; only the masked variant binds bindless.
 	const auto pipelines = world.Commands("BindGraphicsPipeline");
 	SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(14));
 	SWIM_CHECK(pipelines[0].Source == &world.opaquePipeline && pipelines[1].Source == &world.maskedPipeline);
 	std::uint32_t bindlessBinds = 0;
+
 	for (const auto& bind : world.Commands("BindDescriptorTable"))
 	{
 		if (bind.SourceOffset == ShadowDepthBindings::BindlessSpace)
@@ -310,6 +333,7 @@ SWIM_TEST("Render.ShadowRenderer", "CullsEveryViewThenDrawsBothVariantsIntoEachT
 			++bindlessBinds;
 		}
 	}
+
 	SWIM_CHECK_EQUAL(bindlessBinds, 7u * 2u);
 
 	// The last table: view 6, masked, slot 1.
@@ -371,6 +395,7 @@ SWIM_TEST("Render.ShadowRenderer", "APersistentAtlasRedrawsOnlyTheFlaggedTilesAf
 	SWIM_CHECK(pipelines[0].Source == &clearPipeline && pipelines[1].Source == &world.opaquePipeline);
 	// The views keep their buffer index (push constant 0).
 	std::vector<std::uint32_t> viewIndices;
+
 	for (const auto& push : world.Commands("PushConstants"))
 	{
 		if (push.Data.size() == ShadowDepthBindings::PushConstantBytes)
@@ -380,6 +405,7 @@ SWIM_TEST("Render.ShadowRenderer", "APersistentAtlasRedrawsOnlyTheFlaggedTilesAf
 			viewIndices.push_back(index);
 		}
 	}
+
 	SWIM_REQUIRE_EQUAL(viewIndices.size(), std::size_t(8));
 	SWIM_CHECK(viewIndices.front() == 0u && viewIndices.back() == 3u);
 	const auto viewports = world.Commands("SetViewport");

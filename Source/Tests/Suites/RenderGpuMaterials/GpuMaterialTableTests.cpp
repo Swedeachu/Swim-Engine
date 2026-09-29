@@ -9,6 +9,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	struct MaterialWorld
 	{
 		explicit MaterialWorld(std::uint32_t capacity = 8)
@@ -67,6 +68,7 @@ namespace
 
 	constexpr std::uint32_t RoughnessOffset = 32;
 	constexpr std::uint32_t NormalTextureOffset = 56;
+
 } // namespace
 
 SWIM_TEST("Render.GpuMaterials", "RowsUploadOnlyWhenInstancesChangeAndRowZeroIsTheFallback")

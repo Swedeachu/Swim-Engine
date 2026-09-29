@@ -8,6 +8,7 @@
 
 namespace Swim::Render
 {
+
 	// Outputs of one GpuVisibility::Record. Draw each bin with
 	// DrawIndexedIndirectCount(Commands, range.First * 20, Counts, bin * 4, range.Capacity)
 	// after declaring Commands and Counts as IndirectArgument reads, binding the
@@ -23,4 +24,5 @@ namespace Swim::Render
 		const VisibilityBinLayout* Bins = nullptr;
 		VisibilityPhase Phase = VisibilityPhase::Single;
 	};
+
 } // namespace Swim::Render

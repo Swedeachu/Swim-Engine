@@ -9,6 +9,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::shared_ptr<UiTheme> FontTheme()
 	{
 		auto theme = std::make_shared<UiTheme>();
@@ -34,6 +35,7 @@ namespace
 				return quad.Node == node;
 			});
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Widgets", "ButtonsFollowHoverPressAndFocusThroughTheThemeWithoutRelayout")

@@ -16,10 +16,14 @@ namespace Scene = Swim::Testing::ParticleScene;
 
 namespace
 {
+
 	class MockGraphicsPipeline final : public Rhi::GraphicsPipeline
 	{
+
 	  public:
+
 		std::uintptr_t GetNativeHandle() const override { return 21; }
+
 	};
 
 	// A particle system on the mock device: host-backed buffers receive the graph's
@@ -39,10 +43,12 @@ namespace
 									Rhi::ShaderStageMask stages = Rhi::ShaderStageMask::Compute)
 			{
 				Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 				for (const auto& [binding, type] : bindings)
 				{
 					space.Bindings.push_back({ binding, type, 1, stages });
 				}
+
 				layout.program.Interface.DescriptorSchemas = { space };
 			};
 			schema(simulateLayout,
@@ -100,6 +106,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -107,6 +114,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -124,6 +132,7 @@ namespace
 		MockGraphicsPipeline additivePipeline, alphaPipeline;
 		std::unique_ptr<Rhi::Texture> color, depth;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.ParticleSystem", "RecordsFourComputePassesAndResetsNewRangesOnce")
@@ -240,18 +249,22 @@ SWIM_TEST("Render.ParticleSystem", "DrawsAdditiveFirstThenBlendedEmittersBackToF
 	const auto constants = world.Commands("PushConstants");
 	SWIM_REQUIRE_EQUAL(constants.size(), std::size_t(3));
 	std::array<std::uint32_t, 3> rows{};
+
 	for (int i = 0; i < 3; ++i)
 	{
 		std::memcpy(&rows[std::size_t(i)], constants[std::size_t(i)].Data.data(), 4);
 	}
+
 	// Push constants name the emitter's entry in this frame's records (row order).
 	SWIM_CHECK(rows[0] == 1u && rows[1] == 2u && rows[2] == 0u);
 	SWIM_CHECK_EQUAL(world.Commands("BindIndexBuffer").size(), std::size_t(1));
 	bool boundBindless = false;
+
 	for (const auto& command : world.Commands("BindDescriptorTable"))
 	{
 		boundBindless = boundBindless || (command.Source == &bindless && command.SourceOffset == ParticleRenderBindings::BindlessSpace);
 	}
+
 	SWIM_CHECK(boundBindless);
 	SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, ParticleRenderBindings::Count);
 

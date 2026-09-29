@@ -11,6 +11,7 @@
 
 namespace Swim::Testing
 {
+
 	// A square tube along +y from y = 0 to y = 2 (Rings rings of four vertices, each
 	// vertex duplicated per face for flat normals, so 8 per ring), skinned to the
 	// chain skeleton of AnimationFixture.h: Root below y = 0.5, Mid around y = 1 and
@@ -30,15 +31,18 @@ namespace Swim::Testing
 		explicit SkinnedStrip(std::uint32_t rings = 9, float halfWidth = 0.25f)
 		{
 			const std::array<std::array<float, 2>, 4> corners{ { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } } };
+
 			for (std::uint32_t ring = 0; ring < rings; ++ring)
 			{
 				const float y = 2.0f * float(ring) / float(rings - 1);
+
 				for (std::uint32_t face = 0; face < 4; ++face)
 				{
 					// Face normal between corners face and face + 1.
 					const auto& a = corners[face];
 					const auto& b = corners[(face + 1) % 4];
 					const float nx = (a[0] + b[0]) * 0.5f, nz = (a[1] + b[1]) * 0.5f;
+
 					for (const auto* corner : { &a, &b })
 					{
 						Render::StandardVertex v;
@@ -55,6 +59,7 @@ namespace Swim::Testing
 					}
 				}
 			}
+
 			for (std::uint32_t ring = 0; ring + 1 < rings; ++ring)
 			{
 				for (std::uint32_t face = 0; face < 4; ++face)
@@ -63,6 +68,7 @@ namespace Swim::Testing
 					Indices.insert(Indices.end(), { a, b, d, a, d, c });
 				}
 			}
+
 			Targets[0].Positions = Bulge;
 			Targets[1].Normals = TopNormals;
 		}
@@ -70,6 +76,7 @@ namespace Swim::Testing
 		static Render::SkinInfluence InfluenceAt(float y)
 		{
 			Render::SkinInfluence influence;
+
 			if (y <= 0.5f)
 			{
 				influence.Joints = { 0, 0, 0, 0 };
@@ -82,6 +89,7 @@ namespace Swim::Testing
 				const float t = lower ? (y - 0.5f) / 0.5f : (y - 1.0f) / 0.5f;
 				influence.Joints = { std::uint16_t(lower ? 1 : 2), std::uint16_t(lower ? 0 : 1), 0, 0 };
 				influence.Weights = { t, 1.0f - t, 0, 0 };
+
 				if (t < 0.5f)
 				{
 					std::swap(influence.Joints[0], influence.Joints[1]);
@@ -93,6 +101,7 @@ namespace Swim::Testing
 				influence.Joints = { 2, 0, 0, 0 };
 				influence.Weights = { 1, 0, 0, 0 };
 			}
+
 			return influence;
 		}
 
@@ -114,4 +123,5 @@ namespace Swim::Testing
 	{
 		return { matrices.begin(), matrices.end() };
 	}
+
 } // namespace Swim::Testing

@@ -18,6 +18,7 @@
 
 namespace
 {
+
 	// Critical-path item 61 on a real device. Three environments are built on the
 	// GPU by EnvironmentBuilder (default sky, a white furnace, then a brighter sky
 	// with the sun moved) and every stage is compared with its CPU definition fed the
@@ -65,6 +66,7 @@ namespace
 		moved.SunSharpness = 24.0f;
 		moved.Intensity = 2.0f;
 		const std::array<Env::ProceduralSky, 3> skies{ Env::ProceduralSky{}, Env::ProceduralSky::Uniform(0.75f), moved };
+
 		for (std::size_t frame = 0; frame < skies.size(); ++frame)
 		{
 			const auto& sky = skies[frame];
@@ -88,6 +90,7 @@ namespace
 
 			// 1. Sky: every mip-0 texel is the sky at its center (half-float storage).
 			float worstSky = 0.0f;
+
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				for (std::uint32_t y = 0; y < map.SourceSize; ++y)
@@ -96,22 +99,27 @@ namespace
 					{
 						const auto expected = sky.Evaluate(Env::CubeTexelDirection(face, x, y, map.SourceSize));
 						const auto& actual = source.Texel(0, face, x, y);
+
 						for (int c = 0; c < 3; ++c)
 						{
 							worstSky = std::max(worstSky, Smoke::RelativeError(actual[c], expected[c], 1.0e-3f));
 						}
+
 						SWIM_CHECK_EQUAL(actual[3], 1.0f);
 					}
 				}
 			}
+
 			std::printf("             [environment %zu] sky worst relative error %.2e\n", frame, worstSky);
 			SWIM_CHECK(worstSky < 3.0e-3f);
 
 			// 2. Mips: the box filter of the GPU mip above.
 			float worstMip = 0.0f;
+
 			for (std::uint32_t mip = 1; mip < sourceMips; ++mip)
 			{
 				const std::uint32_t size = source.GetMipSize(mip);
+
 				for (std::uint32_t face = 0; face < 6; ++face)
 				{
 					for (std::uint32_t y = 0; y < size; ++y)
@@ -130,6 +138,7 @@ namespace
 					}
 				}
 			}
+
 			std::printf("             [environment %zu] mip worst relative error %.2e\n", frame, worstMip);
 			SWIM_CHECK(worstMip < 2.0e-3f);
 
@@ -139,10 +148,12 @@ namespace
 			float worstPrefilter = 0.0f;
 			double sumPrefilter = 0.0;
 			std::size_t countPrefilter = 0;
+
 			for (std::uint32_t mip = 0; mip < map.PrefilteredMipCount; ++mip)
 			{
 				const std::uint32_t size = prefiltered.GetMipSize(mip);
 				float worstInMip = 0.0f;
+
 				for (std::uint32_t face = 0; face < 6; ++face)
 				{
 					for (std::uint32_t y = 0; y < size; ++y)
@@ -151,12 +162,14 @@ namespace
 						{
 							const auto& actual = prefiltered.Texel(mip, face, x, y);
 							const auto& expected = expectedPrefiltered.Texel(mip, face, x, y);
+
 							for (int c = 0; c < 3; ++c)
 							{
 								const float error = Smoke::RelativeError(actual[c], expected[c], 0.01f);
 								worstInMip = std::max(worstInMip, error);
 								sumPrefilter += error;
 								++countPrefilter;
+
 								if (furnace)
 								{
 									SWIM_CHECK(std::abs(actual[c] - 0.75f) < 1.0e-3f);
@@ -165,10 +178,12 @@ namespace
 						}
 					}
 				}
+
 				std::printf("             [environment %zu] prefiltered mip %u (roughness %.2f) worst relative error %.2e\n", frame, mip,
 					Env::PrefilterMipRoughness(mip, map.PrefilteredMipCount), worstInMip);
 				worstPrefilter = std::max(worstPrefilter, worstInMip);
 			}
+
 			const double meanPrefilter = sumPrefilter / double(countPrefilter);
 			std::printf("             [environment %zu] prefiltered mean relative error %.2e\n", frame, meanPrefilter);
 			SWIM_CHECK(worstPrefilter < 0.05f);
@@ -176,13 +191,16 @@ namespace
 
 			// 4. Irradiance: the CPU projection of the GPU's mip; then evaluated.
 			std::uint32_t irradianceMip = 0;
+
 			while ((map.SourceSize >> irradianceMip) > map.IrradianceFaceSize)
 			{
 				++irradianceMip;
 			}
+
 			const auto expectedIrradiance = Env::ProjectIrradianceSh(source, irradianceMip);
 			const float scale = std::max({ std::abs(expectedIrradiance.Coefficients[0][0]), std::abs(expectedIrradiance.Coefficients[0][1]),
 				std::abs(expectedIrradiance.Coefficients[0][2]) });
+
 			for (std::uint32_t i = 0; i < 9; ++i)
 			{
 				for (int c = 0; c < 3; ++c)
@@ -190,16 +208,20 @@ namespace
 					SWIM_CHECK(std::abs(irradiance.Coefficients[i][c] - expectedIrradiance.Coefficients[i][c]) < 5.0e-3f * scale);
 				}
 			}
+
 			std::mt19937 random(61 + std::uint32_t(frame));
 			std::normal_distribution<float> normal(0.0f, 1.0f);
+
 			for (int i = 0; i < 64; ++i)
 			{
 				const auto n = Env::Normalize({ normal(random), normal(random), normal(random) });
 				const auto actual = irradiance.Evaluate(n);
 				const auto expected = expectedIrradiance.Evaluate(n);
+
 				for (int c = 0; c < 3; ++c)
 				{
 					SWIM_CHECK(Smoke::RelativeError(actual[c], expected[c], 0.01f * scale) < 1.0e-2f);
+
 					if (furnace)
 					{
 						SWIM_CHECK(std::abs(actual[c] - 0.75f) < 5.0e-3f);
@@ -210,17 +232,21 @@ namespace
 			// 5. BRDF LUT.
 			const auto expectedLut = Env::BuildBrdfLut(lutSize, lutSamples);
 			float worstLut = 0.0f;
+
 			for (std::size_t i = 0; i < expectedLut.Texels.size(); ++i)
 			{
 				for (int c = 0; c < 2; ++c)
 				{
 					worstLut = std::max(worstLut, std::abs(gpuLut.Texels[i][c] - expectedLut.Texels[i][c]));
 				}
+
 				SWIM_CHECK_EQUAL(gpuLut.Texels[i][3], 1.0f);
 			}
+
 			std::printf("             [environment %zu] BRDF LUT worst absolute error %.2e\n", frame, worstLut);
 			SWIM_CHECK(worstLut < 3.0e-3f);
 		}
+
 		executor.Trim();
 #endif
 	}
@@ -228,6 +254,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "EnvironmentMapsMatchTheirCpuReferences", SWIM_TEST_LOCATION,
@@ -236,6 +263,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunEnvironmentSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

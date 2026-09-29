@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuSceneDesc
 	{
 		// Live plus retiring objects. Instance and transform buffers are allocated
@@ -11,4 +12,5 @@ namespace Swim::Render
 		std::uint32_t MaxObjects = 16384;
 		std::string DebugName = "GPU scene";
 	};
+
 } // namespace Swim::Render

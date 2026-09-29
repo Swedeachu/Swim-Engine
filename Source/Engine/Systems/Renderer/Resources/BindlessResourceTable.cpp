@@ -6,8 +6,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		const Rhi::DescriptorBindingDesc* FindBinding(const Rhi::DescriptorSchemaDesc& schema, std::uint32_t binding)
 		{
 			const auto found = std::find_if(schema.Bindings.begin(), schema.Bindings.end(),
@@ -26,6 +28,7 @@ namespace Swim::Render
 					(binding->SampledClass == Rhi::SampledTextureClass::Float &&
 						binding->SampledDimension == Rhi::TextureViewDimension::Texture2D));
 		}
+
 	} // namespace
 
 	BindlessResourceTable::BindlessResourceTable(Rhi::Device& device, const BindlessTableDesc& desc)
@@ -36,6 +39,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(name + " needs a layout, distinct bindings and fallback texture/sampler");
 		}
+
 		const auto& schemas = desc.Layout->GetInterface().DescriptorSchemas;
 		const auto schema = std::find_if(schemas.begin(), schemas.end(),
 			[&](const auto& candidate)
@@ -55,17 +59,21 @@ namespace Swim::Render
 		samplers =
 			std::make_unique<SamplerRegistry>(GpuResourceRegistryDesc{ FindBinding(*schema, samplerBinding)->Count, name + " samplers" });
 		table = device.CreateDescriptorTable({ desc.Layout, space, 0, name });
+
 		if (!table)
 		{
 			throw std::runtime_error(name + " descriptor table could not be created");
 		}
+
 		// The fallbacks take element 0 permanently; they are never released.
 		const auto texture = textures->Create({ fallbackTexture });
 		const auto sampler = samplers->Create({ fallbackSampler });
+
 		if (texture.Index != FallbackIndex || sampler.Index != FallbackIndex)
 		{
 			throw std::logic_error(name + " fallback elements must occupy index 0");
 		}
+
 		WriteTexture(FallbackIndex, *fallbackTexture);
 		WriteSampler(FallbackIndex, *fallbackSampler);
 	}
@@ -95,10 +103,12 @@ namespace Swim::Render
 	std::optional<BindlessTextureHandle> BindlessResourceTable::TryRegisterTexture(Rhi::TextureView& view)
 	{
 		const auto handle = textures->TryCreate({ &view });
+
 		if (!handle)
 		{
 			return std::nullopt;
 		}
+
 		try
 		{
 			WriteTexture(handle->Index, view);
@@ -109,16 +119,19 @@ namespace Swim::Render
 			textures->Release(*handle);
 			throw;
 		}
+
 		return handle;
 	}
 
 	std::optional<BindlessSamplerHandle> BindlessResourceTable::TryRegisterSampler(Rhi::Sampler& sampler)
 	{
 		const auto handle = samplers->TryCreate({ &sampler });
+
 		if (!handle)
 		{
 			return std::nullopt;
 		}
+
 		try
 		{
 			WriteSampler(handle->Index, sampler);
@@ -128,6 +141,7 @@ namespace Swim::Render
 			samplers->Release(*handle);
 			throw;
 		}
+
 		return handle;
 	}
 
@@ -137,6 +151,7 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(name + " has no free texture elements");
 	}
 
@@ -146,6 +161,7 @@ namespace Swim::Render
 		{
 			return *handle;
 		}
+
 		throw std::length_error(name + " has no free sampler elements");
 	}
 
@@ -218,4 +234,5 @@ namespace Swim::Render
 		return { textureStats.Live, textureStats.Retiring, textureStats.MaxSlots, samplerStats.Live, samplerStats.Retiring,
 			samplerStats.MaxSlots, descriptorWrites };
 	}
+
 } // namespace Swim::Render

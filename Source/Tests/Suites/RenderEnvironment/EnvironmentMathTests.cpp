@@ -12,6 +12,7 @@ namespace Pbr = Swim::Render::StandardPbr;
 
 namespace
 {
+
 	float Length(const Env::Float3& v)
 	{
 		return std::sqrt(Env::Dot(v, v));
@@ -27,6 +28,7 @@ namespace
 	template <typename F> Env::CubeImage CubeOf(std::uint32_t size, F&& f)
 	{
 		Env::CubeImage cube(size, 1);
+
 		for (std::uint32_t face = 0; face < Env::CubeFaceCount; ++face)
 		{
 			for (std::uint32_t y = 0; y < size; ++y)
@@ -38,18 +40,22 @@ namespace
 				}
 			}
 		}
+
 		return cube;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Environment.Math", "CubeFaceTableRoundTripsEveryTexelAndFollowsTheVulkanAxes")
 {
 	// Face centers are the six axes in layer order +X, -X, +Y, -Y, +Z, -Z.
 	const std::array<Env::Float3, 6> axes{ { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } } };
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		SWIM_CHECK((Env::CubeFaceDirection(face, 0, 0) == axes[face]));
 	}
+
 	// Vulkan's table: +X face, s grows toward -Z and t toward -Y; +Y face, t grows toward +Z.
 	SWIM_CHECK((Env::CubeFaceDirection(0, 1, 1) == Env::Float3{ 1, -1, -1 }));
 	SWIM_CHECK((Env::CubeFaceDirection(2, 1, 1) == Env::Float3{ 1, 1, 1 }));
@@ -75,6 +81,7 @@ SWIM_TEST("Render.Environment.Math", "CubeFaceTableRoundTripsEveryTexelAndFollow
 			}
 		}
 	}
+
 	// Ties prefer X, then Y.
 	SWIM_CHECK_EQUAL(Env::DirectionToCube({ 1, 1, 1 }).Face, 0u);
 	SWIM_CHECK_EQUAL(Env::DirectionToCube({ 0, -1, 1 }).Face, 3u);
@@ -85,6 +92,7 @@ SWIM_TEST("Render.Environment.Math", "TexelSolidAnglesAreExactAndSumToFourPi")
 	for (const std::uint32_t size : { 1u, 2u, 5u, 16u, 64u })
 	{
 		double sum = 0.0;
+
 		for (std::uint32_t y = 0; y < size; ++y)
 		{
 			for (std::uint32_t x = 0; x < size; ++x)
@@ -94,8 +102,10 @@ SWIM_TEST("Render.Environment.Math", "TexelSolidAnglesAreExactAndSumToFourPi")
 				sum += solidAngle;
 			}
 		}
+
 		SWIM_CHECK(std::abs(sum * 6.0 - 4.0 * double(Env::Pi)) < 2.0e-5);
 	}
+
 	// A small texel matches the differential form dA / (1 + s^2 + t^2)^1.5; corners are smallest.
 	const std::uint32_t size = 128;
 	const float s = 2.0f * (40.5f / float(size)) - 1.0f;
@@ -114,6 +124,7 @@ SWIM_TEST("Render.Environment.Math", "HammersleyPointsAreTheRadicalInverseSequen
 	SWIM_CHECK((Env::Hammersley(5, 8) == Env::Float2{ 0.625f, 0.625f }));
 	// For n = 2^k the second coordinates are a permutation of i / n: perfectly stratified.
 	std::set<float> seen;
+
 	for (std::uint32_t i = 0; i < 256; ++i)
 	{
 		const auto point = Env::Hammersley(i, 256);
@@ -122,6 +133,7 @@ SWIM_TEST("Render.Environment.Math", "HammersleyPointsAreTheRadicalInverseSequen
 		SWIM_CHECK(scaled == std::floor(scaled));
 		seen.insert(point[1]);
 	}
+
 	SWIM_CHECK_EQUAL(seen.size(), std::size_t(256));
 }
 
@@ -132,6 +144,7 @@ SWIM_TEST("Render.Environment.Math", "GgxImportanceSamplesFollowTheNormalizedDis
 		constexpr std::uint32_t count = 8192;
 		constexpr int bins = 8;
 		std::array<float, bins> histogram{};
+
 		for (std::uint32_t i = 0; i < count; ++i)
 		{
 			const auto h = Env::ImportanceSampleGgx(Env::Hammersley(i, count), alpha);
@@ -139,23 +152,28 @@ SWIM_TEST("Render.Environment.Math", "GgxImportanceSamplesFollowTheNormalizedDis
 			SWIM_CHECK(h[2] > 0.0f);
 			histogram[std::min(int(h[2] * bins), bins - 1)] += 1.0f / float(count);
 		}
+
 		// P(cos(theta_h) in bin) = integral of D(mu) mu 2 pi dmu over the bin: the
 		// sampler's pdf is D(h) cos(theta_h), and D is normalized (the bins sum to 1).
 		float total = 0.0f;
+
 		for (int bin = 0; bin < bins; ++bin)
 		{
 			double expected = 0.0;
 			constexpr int steps = 4000;
 			const double low = double(bin) / bins;
 			const double width = 1.0 / bins / steps;
+
 			for (int step = 0; step < steps; ++step)
 			{
 				const double mu = low + (step + 0.5) * width;
 				expected += Pbr::DistributionGgx(float(mu), alpha) * mu * 2.0 * Pbr::Pi * width;
 			}
+
 			total += float(expected);
 			SWIM_CHECK(std::abs(histogram[bin] - float(expected)) < 2.0e-3f + 0.01f * float(expected));
 		}
+
 		SWIM_CHECK(std::abs(total - 1.0f) < 2.0e-3f);
 	}
 }
@@ -164,10 +182,12 @@ SWIM_TEST("Render.Environment.Math", "TangentFrameCarriesZToTheNormalAndPreserve
 {
 	std::mt19937 random(61);
 	std::vector<Env::Float3> normals{ { 0, 0, 1 }, { 0, 0, -1 }, { 1, 0, 0 }, { 0, 0.9995f, 0.0316f } };
+
 	for (int i = 0; i < 64; ++i)
 	{
 		normals.push_back(RandomDirection(random));
 	}
+
 	for (auto normal : normals)
 	{
 		normal = Env::Normalize(normal);
@@ -197,9 +217,11 @@ SWIM_TEST("Render.Environment.Math", "SplitSumBrdfMatchesTheBruteForceDirectiona
 			constexpr int steps = 384;
 			const double dTheta = 0.5 * Pbr::Pi / steps;
 			const double dPhi = 2.0 * Pbr::Pi / steps;
+
 			for (int i = 0; i < steps; ++i)
 			{
 				const double theta = (i + 0.5) * dTheta;
+
 				for (int j = 0; j < steps; ++j)
 				{
 					const double phi = (j + 0.5) * dPhi;
@@ -214,22 +236,26 @@ SWIM_TEST("Render.Environment.Math", "SplitSumBrdfMatchesTheBruteForceDirectiona
 					bias += f * std::pow(1.0 - vDotH, 5.0);
 				}
 			}
+
 			const auto ab = Env::IntegrateBrdf(nDotV, roughness, 4096);
 			SWIM_CHECK(ab[0] >= 0.0f && ab[1] >= 0.0f && ab[0] + ab[1] <= 1.0001f);
 			SWIM_CHECK(std::abs((ab[0] + ab[1]) - float(full)) < 0.015f);
 			SWIM_CHECK(std::abs(ab[1] - float(bias)) < 0.01f);
 		}
 	}
+
 	// A near-mirror at normal incidence reflects almost everything; albedo falls with roughness.
 	const auto mirror = Env::IntegrateBrdf(0.95f, 0.0f, 1024);
 	SWIM_CHECK(mirror[0] + mirror[1] > 0.97f);
 	float previous = 2.0f;
+
 	for (const float roughness : { 0.2f, 0.4f, 0.6f, 0.8f, 1.0f })
 	{
 		const auto ab = Env::IntegrateBrdf(0.5f, roughness, 1024);
 		SWIM_CHECK(ab[0] + ab[1] < previous);
 		previous = ab[0] + ab[1];
 	}
+
 	// Inputs clamp like the direct BRDF.
 	SWIM_CHECK((Env::IntegrateBrdf(0.0f, 0.5f, 64) == Env::IntegrateBrdf(1.0e-4f, 0.5f, 64)));
 	SWIM_CHECK((Env::IntegrateBrdf(0.5f, 0.0f, 64) == Env::IntegrateBrdf(0.5f, Pbr::MinPerceptualRoughness, 64)));
@@ -248,6 +274,7 @@ SWIM_TEST("Render.Environment.Math", "PrefilterLodsFollowTheSampleFootprintAndTh
 
 	// Rougher lobes and rarer samples read blurrier mips; the result stays in the chain.
 	float previous = -1.0f;
+
 	for (const float alpha : { 0.05f, 0.2f, 0.5f, 1.0f })
 	{
 		const float lod = Env::PrefilterSourceLod(0.9f, alpha, 64, 128, 6);
@@ -255,6 +282,7 @@ SWIM_TEST("Render.Environment.Math", "PrefilterLodsFollowTheSampleFootprintAndTh
 		SWIM_CHECK(lod >= 0.0f && lod <= 5.0f);
 		previous = lod;
 	}
+
 	SWIM_CHECK(Env::PrefilterSourceLod(0.9f, 0.5f, 16, 128, 6) > Env::PrefilterSourceLod(0.9f, 0.5f, 256, 128, 6));
 	SWIM_CHECK_EQUAL(Env::PrefilterSourceLod(1.0f, 0.01f, 64, 128, 6), 0.0f); // A sharp peak reads mip 0.
 	// Alpha = 1: D = 1 / pi, so the sample solid angle is 4 pi / count exactly.
@@ -267,16 +295,19 @@ SWIM_TEST("Render.Environment.Math", "EnvironmentRotationTurnsLookupsAroundY")
 	const auto rotated = Env::RotateEnvironmentLookup({ 1, 0, 0 }, 0.5f * Pbr::Pi);
 	SWIM_CHECK(std::abs(rotated[0]) < 1.0e-6f && std::abs(rotated[1]) < 1.0e-6f && std::abs(rotated[2] - 1.0f) < 1.0e-6f);
 	std::mt19937 random(7);
+
 	for (int i = 0; i < 32; ++i)
 	{
 		const auto d = RandomDirection(random);
 		SWIM_CHECK((Env::RotateEnvironmentLookup(d, 0.0f) == d));
 		const auto once = Env::RotateEnvironmentLookup(Env::RotateEnvironmentLookup(d, 0.4f), 0.9f);
 		const auto both = Env::RotateEnvironmentLookup(d, 1.3f);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(once[c] - both[c]) < 1.0e-5f);
 		}
+
 		SWIM_CHECK(std::abs(Length(both) - 1.0f) < 1.0e-5f);
 		SWIM_CHECK_EQUAL(both[1], d[1]);
 	}
@@ -287,6 +318,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 	// Orthonormality under the exact cube quadrature.
 	const std::uint32_t size = 32;
 	std::array<std::array<double, 9>, 9> gram{};
+
 	for (std::uint32_t face = 0; face < 6; ++face)
 	{
 		for (std::uint32_t y = 0; y < size; ++y)
@@ -295,6 +327,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 			{
 				const auto basis = Env::ShBasis(Env::CubeTexelDirection(face, x, y, size));
 				const double w = Env::CubeTexelSolidAngle(x, y, size);
+
 				for (int i = 0; i < 9; ++i)
 				{
 					for (int j = 0; j < 9; ++j)
@@ -305,6 +338,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 			}
 		}
 	}
+
 	for (int i = 0; i < 9; ++i)
 	{
 		for (int j = 0; j < 9; ++j)
@@ -312,6 +346,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 			SWIM_CHECK(std::abs(gram[i][j] - (i == j ? 1.0 : 0.0)) < 2.0e-3);
 		}
 	}
+
 	SWIM_CHECK_EQUAL(Env::ShIrradianceScale(0), 1.0f);
 	SWIM_CHECK_EQUAL(Env::ShIrradianceScale(3), 2.0f / 3.0f);
 	SWIM_CHECK_EQUAL(Env::ShIrradianceScale(8), 0.25f);
@@ -338,6 +373,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 															return Env::Float3{ v, v, v };
 														}),
 		0);
+
 	for (int i = 0; i < 48; ++i)
 	{
 		const auto n = RandomDirection(random);
@@ -356,10 +392,12 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 			return Env::Float3{ v, v, v };
 		});
 	const auto hemisphere = Env::ProjectIrradianceSh(cube, 0);
+
 	for (int i = 0; i < 16; ++i)
 	{
 		const auto n = RandomDirection(random);
 		double exact = 0.0;
+
 		for (std::uint32_t face = 0; face < 6; ++face)
 		{
 			for (std::uint32_t y = 0; y < size; ++y)
@@ -371,6 +409,7 @@ SWIM_TEST("Render.Environment.Math", "ShBasisIsOrthonormalAndIrradianceIsExactUp
 				}
 			}
 		}
+
 		exact /= Pbr::Pi;
 		SWIM_CHECK(std::abs(hemisphere.Evaluate(n)[0] - float(exact)) < 0.035f);
 	}

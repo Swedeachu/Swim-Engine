@@ -29,10 +29,12 @@ namespace Swim::Memory
 			{
 				throw std::invalid_argument("LinearArena alignment must be a non-zero power of two");
 			}
+
 			if (value > std::numeric_limits<std::size_t>::max() - (alignment - 1))
 			{
 				throw std::bad_alloc();
 			}
+
 			return (value + alignment - 1) & ~(alignment - 1);
 		}
 
@@ -84,6 +86,7 @@ namespace Swim::Memory
 			const std::size_t alignment = std::max(minimumAlignment, MinimumBlockAlignment);
 			const std::size_t capacity = AlignUp(std::max(DefaultBlockSize, minimumSize), alignment);
 			void* memory = AllocateBacking(capacity, alignment);
+
 			if (!memory)
 			{
 				throw std::bad_alloc();
@@ -123,6 +126,7 @@ namespace Swim::Memory
 		{
 			return nullptr;
 		}
+
 		if (!IsPowerOfTwo(alignment))
 		{
 			throw std::invalid_argument("LinearArena alignment must be a non-zero power of two");
@@ -132,6 +136,7 @@ namespace Swim::Memory
 		{
 			throw std::bad_alloc();
 		}
+
 		const std::size_t minimumBlockSize = sizeBytes + alignment - 1;
 
 		if (impl->Blocks.empty())
@@ -142,12 +147,14 @@ namespace Swim::Memory
 		for (std::size_t blockIndex = impl->ActiveBlock; blockIndex < impl->Blocks.size(); ++blockIndex)
 		{
 			auto& block = impl->Blocks[blockIndex];
+
 			if (block.Alignment < alignment)
 			{
 				continue;
 			}
 
 			const std::size_t alignedOffset = AlignUp(block.Offset, alignment);
+
 			if (alignedOffset <= block.Capacity && sizeBytes <= block.Capacity - alignedOffset)
 			{
 				impl->ActiveBlock = blockIndex;
@@ -174,6 +181,7 @@ namespace Swim::Memory
 		{
 			return ArenaMarker{ 0, 0, impl->Generation };
 		}
+
 		return ArenaMarker{
 			impl->ActiveBlock,
 			impl->Blocks[impl->ActiveBlock].Offset,
@@ -187,18 +195,22 @@ namespace Swim::Memory
 		{
 			throw std::logic_error("LinearArena marker belongs to an earlier reset generation");
 		}
+
 		if (impl->Blocks.empty())
 		{
 			if (marker.BlockIndex != 0 || marker.Offset != 0)
 			{
 				throw std::out_of_range("LinearArena marker is outside the arena");
 			}
+
 			return;
 		}
+
 		if (marker.BlockIndex >= impl->Blocks.size() || marker.BlockIndex > impl->ActiveBlock)
 		{
 			throw std::out_of_range("LinearArena marker is outside the arena");
 		}
+
 		if (marker.Offset > impl->Blocks[marker.BlockIndex].Offset)
 		{
 			throw std::out_of_range("LinearArena marker cannot rewind forward");
@@ -208,10 +220,12 @@ namespace Swim::Memory
 		{
 			impl->Blocks[blockIndex].Offset = 0;
 		}
+
 		impl->Blocks[marker.BlockIndex].Offset = marker.Offset;
 		impl->ActiveBlock = marker.BlockIndex;
 
 		impl->UsedBytes = 0;
+
 		for (const auto& block : impl->Blocks)
 		{
 			impl->UsedBytes += block.Offset;
@@ -224,9 +238,11 @@ namespace Swim::Memory
 		{
 			block.Offset = 0;
 		}
+
 		impl->ActiveBlock = 0;
 		impl->UsedBytes = 0;
 		++impl->Generation;
+
 		if (impl->Generation == 0)
 		{
 			impl->Generation = 1;

@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 
+from cpp_spacing import cpp_spacing
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXTENSIONS = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 
@@ -22,18 +24,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check without changing files")
     parser.add_argument("--all", action="store_true", help="Select all maintained C/C++ source")
+    parser.add_argument("--spacing-only", action="store_true", help="Apply only the repository blank-line policy")
     parser.add_argument("--base-ref", default="HEAD", help="Compare tracked files to this Git revision")
     parser.add_argument("--clang-format", default="clang-format", help="clang-format 22+ executable")
     args = parser.parse_args()
 
-    executable = shutil.which(args.clang_format)
-    if not executable:
-        parser.error("clang-format 22 or newer is required for the repository style")
+    executable = None
+    if not args.spacing_only:
+        executable = shutil.which(args.clang_format)
+        if not executable:
+            parser.error("clang-format 22 or newer is required for the repository style")
 
-    version = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True)
-    match = re.search(r"version (\d+)", version.stdout)
-    if not match or int(match[1]) < 22:
-        parser.error("clang-format 22 or newer is required for the repository style")
+        version = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True)
+        match = re.search(r"version (\d+)", version.stdout)
+        if not match or int(match[1]) < 22:
+            parser.error("clang-format 22 or newer is required for the repository style")
 
     if args.all:
         names = git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "Source")
@@ -53,15 +58,26 @@ def main() -> int:
         if path.is_relative_to(ROOT / "Source") and path.is_file() and path.suffix.lower() in EXTENSIONS:
             files.append(path)
 
-    failed = False
+    changed = []
     for path in files:
-        options = ["--dry-run", "--Werror"] if args.check else ["-i"]
-        result = subprocess.run([executable, "--style=file", *options, str(path)])
-        failed |= result.returncode != 0
+        original = path.read_text(encoding="utf-8")
+        if args.spacing_only:
+            formatted = cpp_spacing(original)
+        else:
+            result = subprocess.run(
+                [executable, "--style=file", str(path)], check=True, capture_output=True, text=True, encoding="utf-8"
+            )
+            formatted = cpp_spacing(result.stdout)
+        if formatted != original.replace("\r\n", "\n"):
+            changed.append(path)
+            if not args.check:
+                path.write_text(formatted, encoding="utf-8", newline="\n")
 
     action = "Checked" if args.check else "Formatted"
-    print(f"{action} {len(files)} first-party C/C++ file(s).", flush=True)
-    return 1 if failed else 0
+    for path in changed:
+        print(f"{'Needs formatting' if args.check else 'Formatted'}: {path.relative_to(ROOT)}")
+    print(f"{action} {len(files)} first-party C/C++ file(s); {len(changed)} changed.", flush=True)
+    return int(args.check and bool(changed))
 
 
 if __name__ == "__main__":

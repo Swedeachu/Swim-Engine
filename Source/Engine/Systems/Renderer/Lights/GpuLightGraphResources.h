@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// One GpuLightBuffer::Import. Both buffers are ShaderRead after the upload passes:
 	// Lights holds RowCount GpuLightRecords (directional rows first, local rows from
 	// FirstLocalRow), Header one GpuLightHeader with the live counts.
@@ -20,4 +21,5 @@ namespace Swim::Render
 		std::uint32_t FirstLocalRow = 0;
 		std::uint32_t RowCount = 0;
 	};
+
 } // namespace Swim::Render

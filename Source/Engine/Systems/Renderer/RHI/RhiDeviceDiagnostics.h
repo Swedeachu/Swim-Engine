@@ -16,10 +16,13 @@ namespace Swim::Rhi
 
 	class DeviceLostError : public std::runtime_error
 	{
+
 	public:
+
 		DeviceLostError() : std::runtime_error("RHI device lost; inspect device diagnostics and recreate the device")
 		{
 		}
+
 	};
 
 	enum class DeviceFaultStatus : std::uint8_t
@@ -58,7 +61,9 @@ namespace Swim::Rhi
 	// observing thread collects optional native fault data. No reset/recovery API.
 	class DeviceDiagnostics
 	{
+
 	public:
+
 		explicit DeviceDiagnostics(bool faultReportingEnabled = false)
 			: faultReportingEnabled(faultReportingEnabled)
 		{
@@ -81,15 +86,19 @@ namespace Swim::Rhi
 		bool TryRecordLoss(std::string_view name, std::int32_t result) noexcept
 		{
 			std::scoped_lock lock(mutex);
+
 			if (IsLost())
 			{
 				return false;
 			}
+
 			operationLength = std::min(name.size(), operation.size());
+
 			if (operationLength != 0)
 			{
 				std::copy_n(name.data(), operationLength, operation.data());
 			}
+
 			nativeResult = result;
 			fault.Status = DeviceFaultStatus::Pending;
 			lost.store(true, std::memory_order_release);
@@ -99,6 +108,7 @@ namespace Swim::Rhi
 		void CompleteFaultCapture(DeviceFaultDetails details) noexcept
 		{
 			std::scoped_lock lock(mutex);
+
 			if (IsLost() && fault.Status == DeviceFaultStatus::Pending)
 			{
 				fault = std::move(details);
@@ -113,6 +123,7 @@ namespace Swim::Rhi
 		}
 
 	private:
+
 		bool retirementAttempted = false;
 		std::int32_t retirementResult = 0;
 		const bool faultReportingEnabled;
@@ -122,6 +133,7 @@ namespace Swim::Rhi
 		std::size_t operationLength = 0;
 		std::int32_t nativeResult = 0;
 		DeviceFaultDetails fault;
+
 	};
 
 } // namespace Swim::Rhi

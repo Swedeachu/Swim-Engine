@@ -44,6 +44,7 @@
 
 namespace
 {
+
 #ifdef SWIM_SHADOW_SMOKE_AVAILABLE
 	namespace Smoke = Swim::Testing::EnvironmentSmoke;
 
@@ -69,6 +70,7 @@ namespace
 		program.Program =
 			device.CreateShaderProgram({ stages, { programInterface.DescriptorSchemas, programInterface.PushConstants }, label });
 		SWIM_REQUIRE(program.Program);
+
 		if (bindlessSpace)
 		{
 			program.Layout = device.CreatePipelineLayout({ program.Program.get(), label, { bindlessSpace, 1 } });
@@ -77,6 +79,7 @@ namespace
 		{
 			program.Layout = device.CreatePipelineLayout({ program.Program.get(), label });
 		}
+
 		SWIM_REQUIRE(program.Layout);
 		program.Pipeline = device.CreateGraphicsPipeline(pipelineDesc(*program.Program, *program.Layout));
 		SWIM_REQUIRE_MESSAGE(program.Pipeline, std::string(label) + " pipeline");
@@ -95,24 +98,30 @@ namespace
 		double total = 0.0;
 		bool any = false;
 		double previousEnd = 0.0;
+
 		for (const auto& timing : timings)
 		{
 			if (!timing.EndOffsetNanoseconds)
 			{
 				continue;
 			}
+
 			const double end = *timing.EndOffsetNanoseconds;
+
 			if (timing.Name.starts_with(prefix))
 			{
 				total += std::max(end - previousEnd, 0.0) * 1.0e-6;
 				any = true;
 			}
+
 			previousEnd = std::max(previousEnd, end);
 		}
+
 		if (measured)
 		{
 			*measured = any;
 		}
+
 		return total;
 	}
 
@@ -220,6 +229,7 @@ namespace
 			{ 250, 250, 250, 76 } } };
 		std::vector<std::unique_ptr<Rhi::Texture>> textures;
 		std::vector<std::unique_ptr<Rhi::TextureView>> views;
+
 		for (std::size_t i = 0; i < texelSpecs.size(); ++i)
 		{
 			Rhi::TextureDesc desc{};
@@ -233,6 +243,7 @@ namespace
 			views.push_back(device->CreateTextureView(*textures.back(), view));
 			SWIM_REQUIRE(views.back());
 		}
+
 		Rhi::SamplerDesc samplerDesc{};
 		auto sampler = device->CreateSampler(samplerDesc);
 		SWIM_REQUIRE(sampler);
@@ -244,26 +255,32 @@ namespace
 		BindlessResourceTable bindless(*device, bindlessDesc);
 		std::vector<BindlessTextureHandle> textureHandles;
 		std::vector<std::uint32_t> textureIndex{ BindlessResourceTable::FallbackIndex };
+
 		for (std::size_t i = 1; i < texelSpecs.size(); ++i)
 		{
 			textureHandles.push_back(bindless.RegisterTexture(*views[i]));
 			textureIndex.push_back(bindless.GetIndex(textureHandles.back()));
 		}
+
 		const auto samplerHandle = bindless.RegisterSampler(*sampler);
 		const auto samplerIndex = bindless.GetIndex(samplerHandle);
 		{
 			RenderGraph uploads;
+
 			for (std::size_t i = 0; i < textures.size(); ++i)
 			{
 				const auto texture = uploads.ImportTexture(*textures[i], Rhi::ResourceState::Undefined);
 				std::array<std::uint8_t, 64> texels{};
+
 				for (std::size_t t = 0; t < 16; ++t)
 				{
 					std::memcpy(texels.data() + t * 4, texelSpecs[i].data(), 4);
 				}
+
 				AddTextureUpload(uploads, "Texture upload", std::as_bytes(std::span(texels)), texture, { 0, {}, {}, { 4, 4, 1 } });
 				uploads.Export(texture, Rhi::ResourceState::ShaderRead);
 			}
+
 			executor.Execute(uploads.Compile());
 			executor.Wait();
 		}
@@ -271,16 +288,20 @@ namespace
 		{
 			const auto indices = ReadStandardTextures(instance);
 			std::size_t spec = 0;
+
 			for (std::size_t i = 1; i < textureIndex.size(); ++i)
 			{
 				spec = textureIndex[i] == indices.BaseColor ? i : spec;
 			}
+
 			Pbr::Texels texels;
+
 			for (int c = 0; c < 4; ++c)
 			{
 				const float encoded = float(texelSpecs[spec][c]) / 255.0f;
 				texels.BaseColor[c] = c < 3 ? Pbr::SrgbToLinear(encoded) : encoded;
 			}
+
 			return texels;
 		};
 
@@ -295,10 +316,12 @@ namespace
 			instance->SetFloat("RoughnessFactor", roughness);
 			instance->SetUint("Flags", flags);
 			instance->SetSampler("MaterialSampler", samplerIndex);
+
 			if (texture != 0)
 			{
 				instance->SetTexture("BaseColorTexture", textureIndex[texture]);
 			}
+
 			return instance;
 		};
 		std::vector<std::shared_ptr<MaterialInstance>> instances{
@@ -310,6 +333,7 @@ namespace
 			material({ 0.9f, 0.8f, 0.2f, 1.0f }, 0.5f, 0, 0),										   // 5 floating non-caster.
 		};
 		std::vector<GpuMaterialHandle> materialHandles;
+
 		for (const auto& instance : instances)
 		{
 			materialHandles.push_back(materials.Create(instance));
@@ -372,6 +396,7 @@ namespace
 		std::vector<bool> casts; // What the CPU shadow maps contain.
 		GpuScene scene(*device, { 16, "Shadow scene" });
 		std::vector<RenderObjectHandle> handles;
+
 		for (std::uint32_t i = 0; i < placements.size(); ++i)
 		{
 			const auto& p = placements[i];
@@ -407,6 +432,7 @@ namespace
 		};
 		auto visibility = makeVisibility(ForwardPlusRenderer::VisibilityBinCapacities(32, 16), "Main visibility");
 		auto shadowVisibility = makeVisibility(ShadowRenderer::VisibilityBinCapacities(32, 16), "Shadow visibility");
+
 		for (std::size_t i = 0; i < materialHandles.size(); ++i)
 		{
 			const auto set = materials.GetIndex(materialHandles[i]);
@@ -435,14 +461,17 @@ namespace
 		shadowed[2].Intensity = 25.0f;
 		shadowed[2].Range = 15.0f;
 		shadowed[2].Color = { 1.0f, 0.8f, 0.6f };
+
 		for (std::uint32_t slot = 0; slot < shadowed.size(); ++slot)
 		{
 			shadowed[slot].ShadowIndex = slot;
 			shadowed[slot].Flags = LightFlags::CastsShadows;
 			lights.Create(shadowed[slot]);
 		}
+
 		std::mt19937 random(700);
 		std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 		for (int i = 0; i < 40; ++i)
 		{
 			LightDesc fill;
@@ -598,22 +627,27 @@ namespace
 			cpuAtlas.Size = atlasSize;
 			cpuAtlas.Depth.assign(gpuAtlas.Depth.size(), 0.0f);
 			std::vector<std::uint32_t> signature(gpuAtlas.Depth.size(), 0);
+
 			for (const auto& view : plan.Views)
 			{
 				Ss::RenderView(objects, casts, view, cpuAtlas, &signature);
 			}
+
 			std::uint32_t texelInterior = 0, texelMismatch = 0, texelCovered = 0;
 			std::array<std::uint32_t, 8> objectTexels{};
 			float worstDepth = 0.0f;
+
 			for (const auto& draw : plan.Draws)
 			{
 				const auto& tile = draw.Tile;
+
 				for (std::uint32_t y = tile.Y + 1; y + 1 < tile.Y + tile.Size; ++y)
 				{
 					for (std::uint32_t x = tile.X + 1; x + 1 < tile.X + tile.Size; ++x)
 					{
 						const std::size_t index = std::size_t(y) * atlasSize + x;
 						bool interior = true;
+
 						for (int dy = -1; dy <= 1 && interior; ++dy)
 						{
 							for (int dx = -1; dx <= 1 && interior; ++dx)
@@ -621,16 +655,19 @@ namespace
 								interior = signature[std::size_t(int(y) + dy) * atlasSize + std::size_t(int(x) + dx)] == signature[index];
 							}
 						}
+
 						if (!interior)
 						{
 							continue;
 						}
+
 						++texelInterior;
 						const float expected = cpuAtlas.Depth[index];
 						const float actual = gpuAtlas.Depth[index];
 						const float error = std::abs(actual - expected);
 						worstDepth = std::max(worstDepth, error / std::max(expected, 1.0e-3f));
 						texelMismatch += error > 1.0e-5f + 1.0e-4f * expected ? 1u : 0u;
+
 						if (signature[index] != 0)
 						{
 							++texelCovered;
@@ -639,6 +676,7 @@ namespace
 					}
 				}
 			}
+
 			std::printf(
 				"             [shadows %s] %zu views, atlas %u: %u interior texels (%u covered), %u mismatches, worst relative %.2e; "
 				"texels per object %u %u %u %u %u %u\n",
@@ -666,6 +704,7 @@ namespace
 			};
 
 			std::vector<PixelTruth> truth(std::size_t(width) * height);
+
 			for (std::uint32_t y = 0; y < height; ++y)
 			{
 				for (std::uint32_t x = 0; x < width; ++x)
@@ -673,29 +712,35 @@ namespace
 					const auto through = Scene::ViewToWorld(grid, Scene::ViewPoint(grid, float(x) + 0.5f, float(y) + 0.5f, 1.0f));
 					const Fs::Float3 direction{ through[0] - eye[0], through[1] - eye[1], through[2] - eye[2] };
 					auto& pixel = truth[std::size_t(y) * width + x];
+
 					for (const auto& hit : Fs::CastRay(objects, eye, direction))
 					{
 						const auto& instance = *instances[placements[hit.Object].Material];
 						const auto parameters = ReadStandardParameters(instance);
 						const auto axes = Fp::BuildFrame(hit.Normal, hit.Tangent, hit.FrontFacing != hit.Mirrored, hit.Mirrored);
+
 						if (Fp::CullsFace(parameters, axes.FrontFacing) || !Pbr::Resolve(parameters, texelsOf(instance), axes))
 						{
 							continue;
 						}
+
 						if (Fp::MaterialBin(parameters) == ForwardPlusBin::Transparent)
 						{
 							pixel.Layers.push_back(hit);
 							pixel.Signature |= 1u << (16 + hit.Object);
 							continue;
 						}
+
 						pixel.Opaque = hit;
 						pixel.Id = hit.Object + 1;
 						pixel.Signature |= (hit.Object + 1) * 8 + hit.Face;
 						break;
 					}
+
 					std::reverse(pixel.Layers.begin(), pixel.Layers.end()); // Back to front (one glass quad here).
 				}
 			}
+
 			const auto shade = [&](const Fp::LightingInputs& lighting, const Fs::Hit& hit, float px, float py)
 			{
 				const auto& instance = *instances[placements[hit.Object].Material];
@@ -708,6 +753,7 @@ namespace
 			std::uint32_t interior = 0, idMismatch = 0, compared = 0, outliers = 0;
 			double errorSum = 0.0;
 			float worst = 0.0f;
+
 			for (std::uint32_t y = 1; y + 1 < height; ++y)
 			{
 				for (std::uint32_t x = 1; x + 1 < width; ++x)
@@ -715,6 +761,7 @@ namespace
 					const std::size_t index = std::size_t(y) * width + x;
 					const auto& pixel = truth[index];
 					bool same = true;
+
 					for (int dy = -1; dy <= 1 && same; ++dy)
 					{
 						for (int dx = -1; dx <= 1 && same; ++dx)
@@ -722,45 +769,55 @@ namespace
 							same = truth[std::size_t(int(y) + dy) * width + std::size_t(int(x) + dx)].Signature == pixel.Signature;
 						}
 					}
+
 					if (!same)
 					{
 						continue;
 					}
+
 					++interior;
 					idMismatch += static_cast<std::uint32_t>(ids[index]) != pixel.Id ? 1u : 0u;
 					const float px = float(x) + 0.5f;
 					const float py = float(y) + 0.5f;
 					Fp::Float4 expected{ 0, 0, 0, 0 };
+
 					if (pixel.Opaque)
 					{
 						const auto color = shade(inputs, *pixel.Opaque, px, py);
 						expected = { color[0], color[1], color[2], 1.0f };
 						const auto lit = shade(unshadowedInputs, *pixel.Opaque, px, py);
 						float gap = 0.0f;
+
 						for (int c = 0; c < 3; ++c)
 						{
 							gap = std::max(gap, lit[c] - color[c]);
 						}
+
 						result.Shadowed += gap > 0.05f ? 1u : 0u;
 					}
+
 					for (const auto& layer : pixel.Layers)
 					{
 						expected = Fp::Over(shade(inputs, layer, px, py), expected);
 					}
+
 					float pixelError = 0.0f;
 					bool outlier = false;
+
 					for (int c = 0; c < 4; ++c)
 					{
 						const float actual = Smoke::HalfToFloat(colorHalves[index * 4 + c]);
 						pixelError = std::max(pixelError, RelativeError(actual, expected[c]));
 						outlier = outlier || std::abs(actual - expected[c]) > 0.01f + 0.03f * std::abs(expected[c]);
 					}
+
 					++compared;
 					outliers += outlier ? 1u : 0u;
 					errorSum += pixelError;
 					worst = std::max(worst, pixelError);
 				}
 			}
+
 			const double mean = compared ? errorSum / compared : 0.0;
 			const auto& stats = plan.Stats;
 			std::printf("             [shadows %s] %u interior pixels, %u id mismatches; %u compared, %u outliers, mean %.2e, worst %.2e; "
@@ -774,12 +831,14 @@ namespace
 
 			bool measured = false;
 			const double depthMs = PassMilliseconds(timings, "Shadows depth", &measured);
+
 			if (measured)
 			{
 				std::printf("             [shadows %s] GPU: caster culls %.3f ms, depth %.3f ms (%zu views), forward opaque %.3f ms\n",
 					spec.Name, PassMilliseconds(timings, "Shadow visibility"), depthMs, plan.Views.size(),
 					PassMilliseconds(timings, "Forward+ opaque"));
 			}
+
 			return result;
 		};
 
@@ -832,6 +891,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ShadowedForwardPlusMatchesTheCpuReference", SWIM_TEST_LOCATION,
@@ -840,6 +900,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunShadowSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

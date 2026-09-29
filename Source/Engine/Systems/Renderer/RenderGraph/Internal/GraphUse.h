@@ -4,6 +4,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GraphUse
 	{
 		std::uint32_t Resource = 0;
@@ -11,4 +12,5 @@ namespace Swim::Render::Internal
 		Rhi::ResourceState State = Rhi::ResourceState::Undefined;
 		Rhi::TextureSubresourceRange Range{};
 	};
+
 } // namespace Swim::Render::Internal

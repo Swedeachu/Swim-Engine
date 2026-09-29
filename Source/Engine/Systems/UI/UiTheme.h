@@ -14,6 +14,7 @@
 // state rules (UiDocument::SetStateRules), applied after the class's.
 namespace Swim::UI
 {
+
 	struct UiPalette
 	{
 		// Dark mode, authored in sRGB (UiSrgbHex): near-black blue panels, slate surfaces a
@@ -84,7 +85,9 @@ namespace Swim::UI
 
 	class UiTheme
 	{
+
 	  public:
+
 		UiPalette Palette;
 		UiMetrics Metrics;
 		// Fonts of themed text (labels, buttons, text fields); null leaves text unthemed and
@@ -100,5 +103,7 @@ namespace Swim::UI
 		// Every class, as UiDocument::SetTheme caches them. Throws std::invalid_argument
 		// when a class's style is invalid (UiDocument::SetStyle's validation).
 		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> Build() const;
+
 	};
+
 } // namespace Swim::UI

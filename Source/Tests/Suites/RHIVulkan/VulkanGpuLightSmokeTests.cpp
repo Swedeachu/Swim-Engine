@@ -24,6 +24,7 @@
 
 namespace
 {
+
 #ifdef SWIM_RHI_GPU_LIGHT_PROBE_SPIRV_PATH
 	// Mirrors GpuLightProbe.slang's LightProbeSample (std430, 64 bytes).
 	struct ProbeSample
@@ -101,6 +102,7 @@ namespace
 		{
 			LightDesc desc;
 			desc.Color = { 0.2f + unit(random), 0.2f + unit(random), 0.2f + unit(random) };
+
 			if (directional)
 			{
 				desc.Type = LightType::Directional;
@@ -108,6 +110,7 @@ namespace
 				desc.Intensity = 0.5f + unit(random);
 				return desc;
 			}
+
 			desc.Type = unit(random) < 0.5f ? LightType::Point : LightType::Spot;
 			desc.Position = { 40 * unit(random) - 20, 10 * unit(random), 40 * unit(random) - 20 };
 			desc.Direction = randomDirection();
@@ -118,10 +121,12 @@ namespace
 			return desc;
 		};
 		std::vector<GpuLightHandle> handles;
+
 		for (int i = 0; i < 2; ++i)
 		{
 			handles.push_back(lights.Create(randomLight(true)));
 		}
+
 		for (int i = 0; i < 2000; ++i)
 		{
 			handles.push_back(lights.Create(randomLight(false)));
@@ -130,6 +135,7 @@ namespace
 		// Sample points on and above a 40 x 40 m floor with assorted materials.
 		constexpr std::uint32_t sampleCount = 512;
 		std::vector<ProbeSample> samples(sampleCount);
+
 		for (auto& s : samples)
 		{
 			const auto n = StandardPbr::Normalize({ 0.3f * normal(random), 1.0f, 0.3f * normal(random) });
@@ -161,10 +167,12 @@ namespace
 					auto table = c.Device().CreateDescriptorTable({ layout.get(), 0, 0, "Light probe table" });
 					SWIM_REQUIRE(table);
 					std::array<Rhi::DescriptorWrite, 4> writes{};
+
 					for (std::uint32_t binding = 0; binding < writes.size(); ++binding)
 					{
 						writes[binding].Binding = binding;
 					}
+
 					writes[0].BufferResource = &c.Get(resources.Lights);
 					writes[1].BufferResource = &c.Get(resources.Header);
 					const auto range = c.GetRange(sampleUpload);
@@ -191,6 +199,7 @@ namespace
 			const auto& header = lights.GetHeader();
 			float worst = 0.0f;
 			std::uint32_t lit = 0;
+
 			for (std::uint32_t i = 0; i < sampleCount; ++i)
 			{
 				const auto& s = samples[i];
@@ -201,15 +210,18 @@ namespace
 				const auto expected =
 					Lights::ShadeAllLights(lights.GetRecords(), header, surface, { s.Normal[0], s.Normal[1], s.Normal[2] },
 						{ s.View[0], s.View[1], s.View[2] }, { s.Position[0], s.Position[1], s.Position[2] });
+
 				for (int c = 0; c < 3; ++c)
 				{
 					const float error = std::abs(actual[i][c] - expected[c]);
 					worst = std::max(worst, error / (std::abs(expected[c]) + 1.0e-3f));
 					SWIM_CHECK(error <= 1.0e-4f + 2.0e-3f * std::abs(expected[c]));
 				}
+
 				SWIM_CHECK_EQUAL(actual[i][3], float(header.DirectionalCount + header.LocalCount));
 				lit += expected[0] > 0.0f ? 1u : 0u;
 			}
+
 			const auto stats = lights.GetStats();
 			std::printf("             [lights %s] %u directional + %u local, uploaded %u rows in %u runs (%llu bytes, header %d), "
 						"worst relative error %.2e, %u/%u samples lit\n",
@@ -227,12 +239,14 @@ namespace
 
 		// 2. Churn.
 		std::uint32_t moved = 0;
+
 		for (int i = 0; i < 300; ++i)
 		{
 			const auto index = 2 + std::size_t(unit(random) * float(handles.size() - 2)) % (handles.size() - 2);
 			SWIM_CHECK(lights.Release(handles[index]));
 			handles.erase(handles.begin() + std::ptrdiff_t(index));
 		}
+
 		for (int i = 0; i < 200; ++i)
 		{
 			const auto index = 2 + std::size_t(unit(random) * float(handles.size() - 2)) % (handles.size() - 2);
@@ -240,15 +254,19 @@ namespace
 			moved += toDirectional ? 1u : 0u;
 			SWIM_CHECK(lights.Update(handles[index], randomLight(toDirectional)));
 		}
+
 		for (int i = 0; i < 100; ++i)
 		{
 			handles.push_back(lights.Create(randomLight(false)));
 		}
+
 		std::uint32_t directionalLights = 0;
+
 		for (const auto handle : handles)
 		{
 			directionalLights += lights.Find(handle)->Type == LightType::Directional ? 1u : 0u;
 		}
+
 		SWIM_CHECK_EQUAL(lights.GetHeader().DirectionalCount, directionalLights);
 		SWIM_CHECK_EQUAL(lights.GetHeader().LocalCount, std::uint32_t(handles.size()) - directionalLights);
 		SWIM_CHECK(directionalLights > 2u);
@@ -268,6 +286,7 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "GpuLightBufferMatchesBruteForceShading", SWIM_TEST_LOCATION,
@@ -276,6 +295,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGpuLightSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

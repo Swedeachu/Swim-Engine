@@ -30,10 +30,12 @@ namespace Swim::Testing
 			Rhi::DescriptorSchemaDesc space{ 1,
 				{ { 0, Rhi::DescriptorType::Sampler, samplers, Rhi::ShaderStageMask::Fragment },
 					{ 1, Rhi::DescriptorType::SampledTexture, textures, Rhi::ShaderStageMask::Fragment } } };
+
 			for (auto& binding : space.Bindings)
 			{
 				binding.PartiallyBound = binding.UpdateAfterBind = true;
 			}
+
 			return space;
 		}
 

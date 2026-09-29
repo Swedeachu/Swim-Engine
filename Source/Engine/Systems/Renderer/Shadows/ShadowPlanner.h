@@ -11,6 +11,7 @@
 
 namespace Swim::Render
 {
+
 	// Shadow quality and cost controls (Phase 16, items 70-72).
 	struct ShadowSettings
 	{
@@ -88,4 +89,5 @@ namespace Swim::Render
 	// of another size than the settings.
 	ShadowPlan PlanShadows(const ShadowSettings& settings, const Shadows::ShadowCamera& camera, std::span<const ShadowCasterDesc> casters,
 		ShadowAtlasAllocator& atlas);
+
 } // namespace Swim::Render

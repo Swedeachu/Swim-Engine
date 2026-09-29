@@ -10,6 +10,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::shared_ptr<UiTheme> FontTheme()
 	{
 		auto theme = std::make_shared<UiTheme>();
@@ -46,6 +47,7 @@ namespace
 		style.Height = UiLength::Pixels(height);
 		return style;
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Selection", "RadioGroupsSelectByPointerAndWrappingArrowsAndShowTheChoice")
@@ -135,10 +137,12 @@ SWIM_TEST("UI.Selection", "ListViewsSelectRevealAndSubmitWithKeysAndScrollBars")
 	UiDocument ui;
 	ui.SetTheme(FontTheme());
 	std::vector<std::string> items;
+
 	for (int i = 0; i < 30; ++i)
 	{
 		items.push_back("Item " + std::to_string(i));
 	}
+
 	const auto list = CreateListView(ui, ui.GetRoot(), Box(200, 140), items);
 	SWIM_CHECK_EQUAL(ui.GetOptionCount(list.Root), 30u);
 	SWIM_CHECK_NEAR(ui.GetValue(list.Root), -1.0f, 0.0f);
@@ -157,6 +161,7 @@ SWIM_TEST("UI.Selection", "ListViewsSelectRevealAndSubmitWithKeysAndScrollBars")
 	{
 		SWIM_CHECK(ui.KeyDown(UiKey::Down));
 	}
+
 	SWIM_CHECK_NEAR(ui.GetValue(list.Root), 9.0f, 0.0f);
 	ui.Layout({ 400, 400 });
 	const auto nine = ui.GetBounds(ui.FindOption(list.Root, 9));
@@ -291,10 +296,12 @@ SWIM_TEST("UI.Selection", "LongDropdownListsScrollTheHighlightIntoView")
 	UiDocument ui;
 	ui.SetTheme(FontTheme());
 	std::vector<std::string> options;
+
 	for (int i = 0; i < 40; ++i)
 	{
 		options.push_back("Option " + std::to_string(i));
 	}
+
 	const auto dropdown = CreateDropdown(ui, ui.GetRoot(), options, 35);
 	ui.Layout({ 400, 1000 });
 	ui.ActivateFocused(); // Nothing focused: no-op.

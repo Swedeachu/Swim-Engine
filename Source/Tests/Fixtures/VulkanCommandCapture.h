@@ -11,6 +11,7 @@ namespace Swim::Testing
 	struct VulkanCommandCapture
 	{
 		VulkanCommandCapture();
+
 		~VulkanCommandCapture();
 
 		std::shared_ptr<RhiVulkan::VulkanDeviceState> State;

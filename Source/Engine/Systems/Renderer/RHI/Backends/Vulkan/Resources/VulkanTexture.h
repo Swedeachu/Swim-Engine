@@ -19,7 +19,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanTexture final : public Rhi::Texture
 		{
+
 		public:
+
 			VulkanTexture(
 				std::shared_ptr<VulkanDeviceState> state,
 				VkImage image,
@@ -38,12 +40,15 @@ namespace Swim::RhiVulkan
 			~VulkanTexture() override
 			{
 				RetireLostVulkanDevice(*state);
+
 				for (const auto& [key, view] : views)
 				{
 					(void)key;
 					state->Dispatch.vkDestroyImageView(state->Device.device, view, nullptr);
 				}
+
 				views.clear();
+
 				if (image != VK_NULL_HANDLE && allocation != nullptr)
 				{
 					vmaDestroyImage(state->Allocator, image, allocation);
@@ -77,6 +82,7 @@ namespace Swim::RhiVulkan
 			template <typename Create> VkImageView GetOrCreateView(const ViewKey& key, Create&& create)
 			{
 				std::lock_guard lock(viewMutex);
+
 				for (const auto& [existing, view] : views)
 				{
 					if (existing == key)
@@ -84,15 +90,19 @@ namespace Swim::RhiVulkan
 						return view;
 					}
 				}
+
 				const VkImageView view = create();
+
 				if (view != VK_NULL_HANDLE)
 				{
 					views.emplace_back(key, view);
 				}
+
 				return view;
 			}
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			VkImage image = VK_NULL_HANDLE;
 			VmaAllocation allocation = nullptr;
@@ -100,6 +110,7 @@ namespace Swim::RhiVulkan
 			Rhi::TextureDesc desc{};
 			std::mutex viewMutex;
 			std::vector<std::pair<ViewKey, VkImageView>> views;
+
 		};
 
 } // namespace Swim::RhiVulkan

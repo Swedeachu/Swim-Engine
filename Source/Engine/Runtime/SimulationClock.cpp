@@ -6,6 +6,7 @@
 
 namespace Engine
 {
+
 	SimulationClock::SimulationClock()
 	{
 		follows.fill(true);
@@ -17,6 +18,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("Fixed simulation rate must be 1 .. 1000 Hz");
 		}
+
 		fixedDelta = 1.0 / hertz;
 	}
 
@@ -26,12 +28,14 @@ namespace Engine
 		{
 			throw std::invalid_argument("Time scale must be 0 .. 100");
 		}
+
 		timeScale = scale;
 	}
 
 	void SimulationClock::SetPaused(bool value)
 	{
 		paused = value;
+
 		if (!paused)
 		{
 			pendingSteps = 0;
@@ -52,6 +56,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("Maximum frame delta must be positive");
 		}
+
 		maxFrameDelta = seconds;
 	}
 
@@ -61,6 +66,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("At least one fixed step per frame is required");
 		}
+
 		maxFixedSteps = steps;
 	}
 
@@ -70,6 +76,7 @@ namespace Engine
 		{
 			throw std::invalid_argument("Unknown simulation domain");
 		}
+
 		follows[static_cast<std::size_t>(domain)] = value;
 	}
 
@@ -83,16 +90,19 @@ namespace Engine
 		SimulationFrame frame;
 		frame.FixedDelta = fixedDelta;
 		frame.Frame = ++frameCount;
+
 		if (!std::isfinite(realDelta) || realDelta < 0.0)
 		{
 			realDelta = 0.0;
 		}
+
 		frame.RealDelta = std::min(realDelta, maxFrameDelta);
 		real += frame.RealDelta;
 
 		if (paused)
 		{
 			frame.Paused = true;
+
 			if (pendingSteps > 0)
 			{
 				--pendingSteps;
@@ -107,12 +117,14 @@ namespace Engine
 			{
 				frame.Alpha = std::clamp(accumulator / fixedDelta, 0.0, 1.0);
 			}
+
 			return frame;
 		}
 
 		frame.ScaledDelta = frame.RealDelta * timeScale;
 		accumulator += frame.ScaledDelta;
 		std::uint32_t steps = static_cast<std::uint32_t>(std::floor(accumulator / fixedDelta));
+
 		if (steps > maxFixedSteps)
 		{
 			// Keep the simulation responsive: drop what the frame cannot catch up on.
@@ -121,6 +133,7 @@ namespace Engine
 			accumulator -= excess;
 			steps = maxFixedSteps;
 		}
+
 		accumulator -= double(steps) * fixedDelta;
 		accumulator = std::max(accumulator, 0.0);
 		frame.FixedSteps = steps;
@@ -134,4 +147,5 @@ namespace Engine
 	{
 		return FollowsSimulation(domain) ? frame.ScaledDelta : frame.RealDelta;
 	}
+
 } // namespace Engine

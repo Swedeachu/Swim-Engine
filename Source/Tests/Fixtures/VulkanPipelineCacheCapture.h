@@ -12,7 +12,9 @@ namespace Swim::Testing
 	struct VulkanPipelineCacheCapture : VulkanPipelineCapture
 	{
 		VulkanPipelineCacheCapture();
+
 		~VulkanPipelineCacheCapture();
+
 		std::vector<std::byte> EncodedData() const;
 
 		std::unique_ptr<RhiVulkan::VulkanDevice> Device;

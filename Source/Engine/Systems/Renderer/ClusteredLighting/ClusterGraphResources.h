@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// One ClusteredLightAssigner::Record. Every buffer is transient and ShaderRead
 	// once the passes have run: shading reads Grid, Records and Indices (plus the
 	// light buffer); ViewLights, Bounds and Stats serve diagnostics and tests.
@@ -22,4 +23,5 @@ namespace Swim::Render
 		std::uint32_t LocalLightCapacity = 0;
 		std::vector<GraphPass> Passes; // Cull, bounds, masks, summary.
 	};
+
 } // namespace Swim::Render

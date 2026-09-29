@@ -4,10 +4,12 @@
 
 namespace Swim::Render::Internal
 {
+
 	struct GraphDefinition
 	{
 		std::uint64_t Id = 0;
 		std::vector<GraphResource> Resources;
 		std::vector<GraphPassDefinition> Passes;
 	};
+
 } // namespace Swim::Render::Internal

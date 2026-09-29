@@ -10,6 +10,7 @@
 
 namespace Engine
 {
+
 	// Per-frame timing zones and a capture over many frames (the `profile` console command).
 	//
 	// Each frame, code records named durations in milliseconds: CPU zones the engine times
@@ -21,13 +22,17 @@ namespace Engine
 	// a CSV and a text summary. UI-free and renderer-free, so it is testable headless.
 	class FrameProfiler
 	{
+
 	  public:
+
 		using Clock = std::chrono::steady_clock;
 
 		// Times its lifetime into zone `name` (category "cpu").
 		class Scope
 		{
+
 		  public:
+
 			Scope(FrameProfiler& profiler, std::string_view name) : profiler(&profiler), name(name), start(Clock::now()) {}
 
 			~Scope()
@@ -36,18 +41,22 @@ namespace Engine
 			}
 
 			Scope(const Scope&) = delete;
+
 			Scope& operator=(const Scope&) = delete;
 
 		  private:
+
 			FrameProfiler* profiler;
 			std::string_view name;
 			Clock::time_point start;
+
 		};
 
 		void Add(std::string_view category, std::string_view name, double milliseconds);
 
 		// Starts a capture: `warmup` frames are skipped, then `frames` are measured.
 		void Begin(std::uint32_t warmup, std::uint32_t frames, std::filesystem::path csv = {}, std::string label = {});
+
 		bool IsCapturing() const { return capturing; }
 
 		// Ends the current frame. Returns true on the frame the capture completed.
@@ -80,6 +89,7 @@ namespace Engine
 
 		// CSV: label,category,name,frames,per_frame_ms,mean_ms,min_ms,p50_ms,p95_ms,p99_ms,max_ms
 		static std::string ToCsv(const Report& report, bool header = true);
+
 		// The costliest `top` zones of each category.
 		static std::string Summary(const Report& report, std::size_t top = 12);
 
@@ -87,6 +97,7 @@ namespace Engine
 		const std::unordered_map<std::string, double>& GetFrame() const { return frame; }
 
 	  private:
+
 		std::unordered_map<std::string, double> frame; // "category\x1fname" -> ms.
 		std::unordered_map<std::string, std::vector<double>> samples;
 		std::uint32_t warmupLeft = 0;
@@ -96,5 +107,7 @@ namespace Engine
 		std::filesystem::path csvPath;
 		std::string label;
 		Report report;
+
 	};
+
 } // namespace Engine

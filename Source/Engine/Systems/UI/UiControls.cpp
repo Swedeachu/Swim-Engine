@@ -9,8 +9,10 @@
 // (pointer, wheel, keys, activation), never by the platform.
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		bool Finite(float value)
 		{
 			return std::isfinite(value);
@@ -45,6 +47,7 @@ namespace Swim::UI
 		// Held scroll bar step buttons repeat after this delay, at this interval.
 		constexpr float StepRepeatDelay = 0.4f;
 		constexpr float StepRepeatInterval = 0.05f;
+
 	} // namespace
 
 	float UiDocument::Impl::CheckValue(UiCheckState state) const
@@ -58,12 +61,15 @@ namespace Swim::UI
 		{
 			value = control.Min;
 		}
+
 		value = std::clamp(value, control.Min, control.Max);
+
 		if (control.Step > 0.0f)
 		{
 			value = control.Min + std::round((value - control.Min) / control.Step) * control.Step;
 			value = std::clamp(value, control.Min, control.Max);
 		}
+
 		return value;
 	}
 
@@ -83,10 +89,12 @@ namespace Swim::UI
 			c.MinThumbLength <= Internal::MaxLogical && Finite(c.FadeDelaySeconds) && c.FadeDelaySeconds >= 0.0f &&
 			c.FadeDelaySeconds <= 60.0f && Finite(c.FadeSeconds) && c.FadeSeconds >= 0.0f && c.FadeSeconds <= 60.0f &&
 			c.LabelDecimals >= -1 && c.LabelDecimals <= 9;
+
 		if (!valid)
 		{
 			throw std::invalid_argument("Invalid UI control");
 		}
+
 		const auto isDescendant = [&](UiNodeId id, UiNodeId ancestor)
 		{
 			for (auto current = Get(id).Parent; current; current = Get(current).Parent)
@@ -96,49 +104,59 @@ namespace Swim::UI
 					return true;
 				}
 			}
+
 			return false;
 		};
 		const auto& parts = c.Parts;
+
 		for (const auto part :
 			{ parts.Track, parts.Fill, parts.Thumb, parts.Mark, parts.Mixed, parts.Label, parts.Decrement, parts.Increment })
 		{
 			// A slider's value label may be anywhere (it only displays the value).
 			const bool anywhere = part == parts.Label && c.Kind == UiControlKind::Slider;
+
 			if (part && (!Nodes.contains(part.Value) || (!anywhere && !isDescendant(part, node.Id)) || part == node.Id))
 			{
 				throw std::invalid_argument("UI control parts must be descendants of the control");
 			}
 		}
+
 		const auto directChild = [&](UiNodeId part)
 		{
 			return !part || Get(part).Parent == node.Id;
 		};
+
 		if (c.Kind == UiControlKind::Slider && (!directChild(parts.Track) || !directChild(parts.Fill) || !directChild(parts.Thumb)))
 		{
 			throw std::invalid_argument("Slider track, fill and thumb must be children of the slider");
 		}
+
 		if (c.ScrollTarget && c.Kind != UiControlKind::ScrollBar &&
 			((c.Kind != UiControlKind::ListView && c.Kind != UiControlKind::Dropdown) || !Nodes.contains(c.ScrollTarget.Value) ||
 				c.ScrollTarget == node.Id))
 		{
 			throw std::invalid_argument("Only scroll bars, list views and dropdowns have a scroll target");
 		}
+
 		if (parts.Popup && (c.Kind != UiControlKind::Dropdown || !Nodes.contains(parts.Popup.Value) || Get(parts.Popup).Parent != Root))
 		{
 			throw std::invalid_argument("A dropdown's popup must be a child of the UI root");
 		}
+
 		if (c.Kind == UiControlKind::ScrollBar)
 		{
 			if (!directChild(parts.Thumb) || !directChild(parts.Decrement) || !directChild(parts.Increment))
 			{
 				throw std::invalid_argument("A scroll bar's thumb and step buttons must be its children");
 			}
+
 			if (c.ScrollTarget &&
 				(!Nodes.contains(c.ScrollTarget.Value) || c.ScrollTarget == node.Id || isDescendant(c.ScrollTarget, node.Id)))
 			{
 				throw std::invalid_argument("A scroll bar's target must be another node outside the bar");
 			}
 		}
+
 		if (c.Kind == UiControlKind::Toggle && parts.Thumb && (!parts.Track || Get(parts.Thumb).Parent != parts.Track))
 		{
 			throw std::invalid_argument("A toggle's knob (Thumb) must be a child of its Track");
@@ -154,18 +172,23 @@ namespace Swim::UI
 	void UiDocument::Impl::SyncValueLabel(Node& control, bool force)
 	{
 		const auto& c = control.Control;
+
 		if (c.Kind != UiControlKind::Slider || c.LabelDecimals < 0 || !c.Parts.Label || !Nodes.contains(c.Parts.Label.Value))
 		{
 			return;
 		}
+
 		auto& label = Get(c.Parts.Label);
+
 		if (!label.Fonts || (!force && label.Editable && label.Id == Focused))
 		{
 			return; // Typing into an editable value is not overwritten.
 		}
+
 		char buffer[64];
 		const float shown = std::abs(c.Value) < 0.5f * std::pow(10.0f, -float(c.LabelDecimals)) ? 0.0f : c.Value; // No "-0".
 		std::snprintf(buffer, sizeof(buffer), "%.*f", int(c.LabelDecimals), double(shown));
+
 		if (label.TextContents != buffer)
 		{
 			label.TextContents = buffer;
@@ -204,6 +227,7 @@ namespace Swim::UI
 		{
 			return std::nullopt;
 		}
+
 		const auto& owner = Get(part.PartOf);
 		const auto& c = owner.Control;
 		const bool horizontal = Horizontal(c);
@@ -211,18 +235,21 @@ namespace Swim::UI
 		{
 			return id && Nodes.contains(id.Value) ? Get(id).Desired : UiPoint{};
 		};
+
 		if (c.Kind == UiControlKind::Slider && part.Parent == owner.Id)
 		{
 			const UiPoint thumb = partSize(c.Parts.Thumb);
 			const float range = c.Max - c.Min;
 			const float t = range > 0.0f ? (c.Value - c.Min) / range : 0.0f;
 			const float tick = range > 0.0f ? std::clamp((part.PartValue - c.Min) / range, 0.0f, 1.0f) : 0.0f;
+
 			if (horizontal)
 			{
 				const float travel = std::max(0.0f, inner.Width - thumb.X);
 				const float start = t * travel;
 				const float center = start + thumb.X * 0.5f;
 				const float thickness = part.Desired.Y;
+
 				switch (part.Role)
 				{
 				case UiPartRole::Tick:
@@ -238,10 +265,12 @@ namespace Swim::UI
 					return std::nullopt;
 				}
 			}
+
 			const float travel = std::max(0.0f, inner.Height - thumb.Y);
 			const float start = (1.0f - t) * travel; // Min at the bottom.
 			const float center = start + thumb.Y * 0.5f;
 			const float thickness = part.Desired.X;
+
 			switch (part.Role)
 			{
 			case UiPartRole::Tick:
@@ -257,6 +286,7 @@ namespace Swim::UI
 				return std::nullopt;
 			}
 		}
+
 		if (c.Kind == UiControlKind::ScrollBar && part.Parent == owner.Id &&
 			(part.Role == UiPartRole::Decrement || part.Role == UiPartRole::Increment))
 		{
@@ -264,12 +294,14 @@ namespace Swim::UI
 			const float along = part.Role == UiPartRole::Decrement ? 0.0f : std::max(0.0f, Length(inner, horizontal) - cross);
 			return horizontal ? UiRect{ along, 0.0f, cross, inner.Height } : UiRect{ 0.0f, along, inner.Width, cross };
 		}
+
 		if (c.Kind == UiControlKind::ScrollBar && part.Parent == owner.Id && part.Role == UiPartRole::Thumb)
 		{
 			const auto [trackStart, track] = ScrollTrack(owner, inner);
 			float viewport = track;
 			float maximum = 0.0f;
 			float offset = 0.0f;
+
 			if (c.ScrollTarget && Nodes.contains(c.ScrollTarget.Value))
 			{
 				const auto& target = Get(c.ScrollTarget);
@@ -277,33 +309,42 @@ namespace Swim::UI
 				maximum = horizontal ? target.MaxScroll.X : target.MaxScroll.Y;
 				offset = horizontal ? target.Scroll.X : target.Scroll.Y;
 			}
+
 			float length = track;
+
 			if (maximum > 0.0f && viewport + maximum > 0.0f)
 			{
 				length = std::clamp(track * viewport / (viewport + maximum), std::min(c.MinThumbLength, track), track);
 			}
+
 			const float position = trackStart + (maximum > 0.0f ? std::clamp(offset / maximum, 0.0f, 1.0f) * (track - length) : 0.0f);
 			return horizontal ? UiRect{ position, 0.0f, length, inner.Height } : UiRect{ 0.0f, position, inner.Width, length };
 		}
+
 		if (c.Kind == UiControlKind::Toggle && part.Role == UiPartRole::Thumb && part.Parent == c.Parts.Track)
 		{
 			const UiPoint knob = part.Desired;
+
 			if (horizontal)
 			{
 				return UiRect{ owner.Knob * std::max(0.0f, inner.Width - knob.X), (inner.Height - knob.Y) * 0.5f, knob.X, knob.Y };
 			}
+
 			return UiRect{ (inner.Width - knob.X) * 0.5f, (1.0f - owner.Knob) * std::max(0.0f, inner.Height - knob.Y), knob.X, knob.Y };
 		}
+
 		return std::nullopt;
 	}
 
 	void UiDocument::Impl::ReArrange(Node& node, UiRect bounds)
 	{
 		const auto begin = std::find(Order.begin(), Order.end(), node.Id);
+
 		if (begin == Order.end() || !node.Parent)
 		{
 			return;
 		}
+
 		const auto isInside = [&](UiNodeId id)
 		{
 			for (auto current = Get(id).Parent; current; current = Get(current).Parent)
@@ -313,13 +354,16 @@ namespace Swim::UI
 					return true;
 				}
 			}
+
 			return false;
 		};
 		auto end = std::next(begin);
+
 		while (end != Order.end() && isInside(*end))
 		{
 			++end;
 		}
+
 		std::vector<UiNodeId> tail(end, Order.end());
 		Order.erase(begin, Order.end());
 		const auto& parent = Get(node.Parent);
@@ -334,47 +378,59 @@ namespace Swim::UI
 		// Arrange visits bars and targets in document order, so a bar placed before its
 		// target saw last frame's extent. Refresh every bar now that all targets are final.
 		const std::vector<UiNodeId> order = Order;
+
 		for (const auto id : order)
 		{
 			auto& bar = Get(id);
+
 			if (bar.Control.Kind != UiControlKind::ScrollBar || !bar.Active)
 			{
 				continue;
 			}
+
 			auto& c = bar.Control;
 			const bool horizontal = Horizontal(c);
 			float maximum = 0.0f;
 			float offset = 0.0f;
+
 			if (c.ScrollTarget && Nodes.contains(c.ScrollTarget.Value))
 			{
 				const auto& target = Get(c.ScrollTarget);
 				maximum = horizontal ? target.MaxScroll.X : target.MaxScroll.Y;
 				offset = horizontal ? target.Scroll.X : target.Scroll.Y;
 			}
+
 			if (offset != c.Value || maximum != c.Max)
 			{
 				bar.ScrollActivity = 0.0f; // Overlay bars reappear while scrolling.
 			}
+
 			c.Min = 0.0f;
 			c.Max = maximum;
 			c.Value = offset;
 			const bool hidden = c.Visibility != UiScrollBarVisibility::Always && maximum <= 0.0f;
+
 			if (hidden != bar.ControlHidden)
 			{
 				bar.ControlHidden = hidden;
 				MarkSubtreeVisualDirty(bar.Id);
 			}
+
 			if (c.Parts.Thumb && Nodes.contains(c.Parts.Thumb.Value))
 			{
 				auto& thumb = Get(c.Parts.Thumb);
+
 				if (thumb.Parent != bar.Id || !thumb.Style.Visible)
 				{
 					continue;
 				}
+
 				const UiRect inner = Internal::ContentBox(bar.Bounds, bar.Style.Padding);
+
 				if (const auto rect = PartGeometry(thumb, inner))
 				{
 					const UiRect placed{ rect->X + inner.X - bar.Scroll.X, rect->Y + inner.Y - bar.Scroll.Y, rect->Width, rect->Height };
+
 					if (!Internal::SameRect(placed, thumb.Bounds))
 					{
 						ReArrange(thumb, placed);
@@ -394,33 +450,40 @@ namespace Swim::UI
 		auto& c = node.Control;
 		value = ClampValue(c, value);
 		const bool changed = value != c.Value;
+
 		if (changed)
 		{
 			c.Value = value;
+
 			if (c.Kind == UiControlKind::ScrollBar && c.ScrollTarget && Nodes.contains(c.ScrollTarget.Value))
 			{
 				auto& target = Get(c.ScrollTarget);
 				(Horizontal(c) ? target.Scroll.X : target.Scroll.Y) = value;
 				node.ScrollActivity = 0.0f;
 			}
+
 			MarkControlDirty(node);
 			SyncValueLabel(node);
 			Events.push_back({ UiEventKind::ValueChanged, node.Id, value });
 		}
+
 		if (commit && changed)
 		{
 			Events.push_back({ UiEventKind::ValueCommitted, node.Id, value });
 		}
+
 		return changed;
 	}
 
 	void UiDocument::Impl::Toggle(Node& node)
 	{
 		auto& c = node.Control;
+
 		if (c.ReadOnly || (c.Kind != UiControlKind::Checkbox && c.Kind != UiControlKind::Toggle))
 		{
 			return;
 		}
+
 		c.Check = c.Check == UiCheckState::Checked ? UiCheckState::Unchecked : UiCheckState::Checked;
 		MarkControlDirty(node);
 		const float value = CheckValue(c.Check);
@@ -436,18 +499,22 @@ namespace Swim::UI
 		DragMoved = false;
 		DragStart = axis;
 		PressValue = c.Kind == UiControlKind::Checkbox || c.Kind == UiControlKind::Toggle ? CheckValue(c.Check) : c.Value;
+
 		if (c.ReadOnly)
 		{
 			return false;
 		}
+
 		const auto thumbBounds = [&]() -> std::optional<UiRect>
 		{
 			if (c.Parts.Thumb && Nodes.contains(c.Parts.Thumb.Value) && Get(c.Parts.Thumb).Active)
 			{
 				return Get(c.Parts.Thumb).Bounds;
 			}
+
 			return std::nullopt;
 		};
+
 		if (c.Kind == UiControlKind::ScrollBar)
 		{
 			// Step buttons: one step now, repeats while held (Update).
@@ -464,6 +531,7 @@ namespace Swim::UI
 				}
 			}
 		}
+
 		switch (c.Kind)
 		{
 		case UiControlKind::Slider:
@@ -473,12 +541,14 @@ namespace Swim::UI
 			const float thumbStart = thumb ? Along(*thumb, horizontal) : axis;
 			const float thumbLength = thumb ? Length(*thumb, horizontal) : 0.0f;
 			const bool onThumb = thumb && axis >= thumbStart && axis < thumbStart + thumbLength;
+
 			if (onThumb)
 			{
 				DragGrab = axis - thumbStart;
 				Dragging = node.Id;
 				return true;
 			}
+
 			if (c.TrackClick == UiTrackClick::Page)
 			{
 				const float page = c.PageStep > 0.0f ? c.PageStep
@@ -487,13 +557,16 @@ namespace Swim::UI
 					: (c.Max - c.Min) * 0.1f;
 				// Towards the pointer; vertical sliders grow upwards.
 				bool increase = axis >= thumbStart + thumbLength * 0.5f;
+
 				if (c.Kind == UiControlKind::Slider && !horizontal)
 				{
 					increase = !increase;
 				}
+
 				ChangeValue(node, c.Value + (increase ? page : -page), true);
 				return true;
 			}
+
 			DragGrab = thumbLength * 0.5f;
 			Dragging = node.Id;
 			DragMoved = true;
@@ -520,14 +593,17 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& node = Get(Dragging);
 		auto& c = node.Control;
 		const bool horizontal = Horizontal(c);
 		const float axis = Axis(node, logical);
+
 		if (std::abs(axis - DragStart) > KnobDragThreshold)
 		{
 			DragMoved = true;
 		}
+
 		switch (c.Kind)
 		{
 		case UiControlKind::Slider:
@@ -537,10 +613,12 @@ namespace Swim::UI
 			const float travel = std::max(0.0f, Length(inner, horizontal) - Length(thumb, horizontal));
 			float t = travel > 0.0f ? (axis - DragGrab - Along(inner, horizontal)) / travel : 0.0f;
 			t = std::clamp(t, 0.0f, 1.0f);
+
 			if (!horizontal)
 			{
 				t = 1.0f - t;
 			}
+
 			ChangeValue(node, c.Min + t * (c.Max - c.Min), false);
 			break;
 		}
@@ -550,6 +628,7 @@ namespace Swim::UI
 			{
 				break;
 			}
+
 			const UiRect inner = Internal::ContentBox(node.Bounds, node.Style.Padding);
 			const auto [trackStart, trackLength] = ScrollTrack(node, inner);
 			const float thumbLength = Length(Get(c.Parts.Thumb).Bounds, horizontal);
@@ -566,20 +645,24 @@ namespace Swim::UI
 			{
 				break;
 			}
+
 			const auto& track = Get(c.Parts.Track);
 			const UiRect inner = Internal::ContentBox(track.Bounds, track.Style.Padding);
 			const float knob = Length(Get(c.Parts.Thumb).Desired, horizontal);
 			const float travel = std::max(0.0f, Length(inner, horizontal) - knob);
 			float t = travel > 0.0f ? std::clamp((axis - DragGrab - Along(inner, horizontal)) / travel, 0.0f, 1.0f) : node.Knob;
+
 			if (!horizontal)
 			{
 				t = 1.0f - t;
 			}
+
 			if (t != node.Knob)
 			{
 				node.Knob = t;
 				Dirty = true;
 			}
+
 			break;
 		}
 		default:
@@ -594,15 +677,18 @@ namespace Swim::UI
 			Dragging = {};
 			return;
 		}
+
 		auto& node = Get(Dragging);
 		Dragging = {};
 		MarkSubtreeVisualDirty(node.Id);
 		auto& c = node.Control;
+
 		if (c.Kind == UiControlKind::Toggle)
 		{
 			if (DragMoved && commit && !c.ReadOnly)
 			{
 				const auto state = node.Knob >= 0.5f ? UiCheckState::Checked : UiCheckState::Unchecked;
+
 				if (state != c.Check)
 				{
 					c.Check = state;
@@ -610,10 +696,13 @@ namespace Swim::UI
 					Events.push_back({ UiEventKind::ValueChanged, node.Id, value });
 					Events.push_back({ UiEventKind::ValueCommitted, node.Id, value });
 				}
+
 				MarkControlDirty(node); // The knob eases (or snaps) to the final state.
 			}
+
 			return;
 		}
+
 		if (commit && c.Value != PressValue)
 		{
 			Events.push_back({ UiEventKind::ValueCommitted, node.Id, c.Value });
@@ -626,21 +715,27 @@ namespace Swim::UI
 		{
 			Stepping = {};
 		}
+
 		const bool dragged = Dragging == node.Id;
 		const bool moved = DragMoved;
+
 		if (dragged)
 		{
 			EndDrag(true);
 		}
+
 		const auto kind = node.Control.Kind;
+
 		if (inside && (kind == UiControlKind::Checkbox || (kind == UiControlKind::Toggle && !(dragged && moved))))
 		{
 			Toggle(node);
 		}
+
 		if (kind == UiControlKind::Option)
 		{
 			OptionPressed(node, inside);
 		}
+
 		if (inside && kind == UiControlKind::Dropdown)
 		{
 			ToggleDropdown(node);
@@ -650,19 +745,23 @@ namespace Swim::UI
 	bool UiDocument::Impl::ControlKey(Node& node, UiKey key)
 	{
 		auto& c = node.Control;
+
 		if (IsSelectionOwner(node))
 		{
 			return !c.ReadOnly && OwnerKey(node, key);
 		}
+
 		if (c.ReadOnly || (c.Kind != UiControlKind::Slider && c.Kind != UiControlKind::ScrollBar))
 		{
 			return false;
 		}
+
 		const bool horizontal = Horizontal(c);
 		const bool slider = c.Kind == UiControlKind::Slider;
 		const float range = c.Max - c.Min;
 		const float step = c.Step > 0.0f ? c.Step : slider ? range * 0.01f : ScrollBarLineStep;
 		float page = c.PageStep;
+
 		if (page <= 0.0f)
 		{
 			page = slider ? range * 0.1f
@@ -670,8 +769,10 @@ namespace Swim::UI
 				? Length(Internal::ContentBox(Get(c.ScrollTarget).Bounds, Get(c.ScrollTarget).Style.Padding), horizontal)
 				: ScrollBarLineStep;
 		}
+
 		// Sliders grow right and up; scroll bars scroll towards larger offsets right and down.
 		float delta = 0.0f;
+
 		switch (key)
 		{
 		case UiKey::Left:
@@ -701,10 +802,12 @@ namespace Swim::UI
 		default:
 			return false;
 		}
+
 		if (delta == 0.0f)
 		{
 			return false; // The cross axis navigates.
 		}
+
 		ChangeValue(node, c.Value + delta, true);
 		return true;
 	}
@@ -712,74 +815,91 @@ namespace Swim::UI
 	bool UiDocument::Impl::ControlWheel(Node& node, UiPoint delta)
 	{
 		auto& c = node.Control;
+
 		if (c.ReadOnly)
 		{
 			return false;
 		}
+
 		if (c.Kind == UiControlKind::ScrollBar)
 		{
 			const float amount = Horizontal(c) && delta.X != 0.0f ? delta.X : delta.Y;
 			return ChangeValue(node, c.Value + amount, true);
 		}
+
 		if (c.Kind == UiControlKind::Slider && delta.Y != 0.0f)
 		{
 			const float step = c.Step > 0.0f ? c.Step : (c.Max - c.Min) * 0.01f;
 			return ChangeValue(node, c.Value + (delta.Y < 0.0f ? step : -step), true); // Wheel up increases.
 		}
+
 		return false;
 	}
 
 	bool UiDocument::Impl::AnimateControls(float seconds)
 	{
 		bool animating = false;
+
 		if (Stepping && (Stepping != Pressed || !Nodes.contains(Stepping.Value)))
 		{
 			Stepping = {}; // Released or cancelled.
 		}
+
 		if (Stepping)
 		{
 			StepHeld += seconds;
+
 			while (StepHeld >= NextStep)
 			{
 				StepScrollBar(Get(Stepping), StepDirection);
 				NextStep += StepRepeatInterval;
 			}
+
 			animating = true;
 		}
+
 		for (auto& [key, node] : Nodes)
 		{
 			auto& c = node.Control;
+
 			if (c.Kind == UiControlKind::Toggle && !(Dragging == node.Id && DragMoved))
 			{
 				const float target = c.Check == UiCheckState::Checked ? 1.0f : 0.0f;
+
 				if (node.Knob != target)
 				{
 					float duration = node.Style.TransitionSeconds;
+
 					if (c.Parts.Thumb && Nodes.contains(c.Parts.Thumb.Value))
 					{
 						duration = Get(c.Parts.Thumb).Style.TransitionSeconds;
 					}
+
 					const float stepSize = duration > MinimumKnobSeconds ? seconds / duration : 1.0f;
 					node.Knob = node.Knob < target ? std::min(target, node.Knob + stepSize) : std::max(target, node.Knob - stepSize);
 					Dirty = true;
 					animating = animating || node.Knob != target;
 				}
 			}
+
 			if (c.Kind == UiControlKind::ScrollBar && c.Visibility == UiScrollBarVisibility::Overlay)
 			{
 				const bool held = Hover == node.Id || Dragging == node.Id;
 				node.ScrollActivity = held ? 0.0f : node.ScrollActivity + seconds;
 				float opacity = 1.0f;
+
 				if (node.ScrollActivity > c.FadeDelaySeconds)
 				{
 					opacity =
 						c.FadeSeconds > 0.0f ? std::max(0.0f, 1.0f - (node.ScrollActivity - c.FadeDelaySeconds) / c.FadeSeconds) : 0.0f;
 				}
+
 				if (opacity != node.ControlOpacity)
 				{
 					node.ControlOpacity = opacity;
 					node.PaintDirty = true;
 				}
+
 				animating = animating || (!node.ControlHidden && opacity > 0.0f);
 			}
 			else
@@ -787,6 +907,7 @@ namespace Swim::UI
 				node.ControlOpacity = 1.0f;
 			}
 		}
+
 		return animating;
 	}
 
@@ -795,6 +916,7 @@ namespace Swim::UI
 		auto& node = impl->Get(id);
 		impl->ValidateControl(node, control);
 		const auto& old = node.Control.Parts;
+
 		for (const auto part : { old.Track, old.Fill, old.Thumb, old.Mark, old.Mixed, old.Label, old.Decrement, old.Increment })
 		{
 			if (part && impl->Nodes.contains(part.Value) && impl->Get(part).PartOf == id)
@@ -805,16 +927,20 @@ namespace Swim::UI
 				impl->MarkLayoutDirty(part);
 			}
 		}
+
 		if (impl->Dragging == id)
 		{
 			impl->Dragging = {};
 		}
+
 		if (impl->Stepping == id)
 		{
 			impl->Stepping = {};
 		}
+
 		const bool wasOwner = impl->IsSelectionOwner(node);
 		node.Control = control;
+
 		if (impl->IsSelectionOwner(node))
 		{
 			const auto count = impl->OptionCount(node);
@@ -824,11 +950,13 @@ namespace Swim::UI
 		else
 		{
 			node.Control.Value = impl->ClampValue(control, control.Value);
+
 			if (wasOwner)
 			{
 				node.Options.clear(); // The options stay registered to nothing; they no longer select.
 			}
 		}
+
 		node.Knob = control.Check == UiCheckState::Checked ? 1.0f : 0.0f;
 		node.ControlHidden = false;
 		node.ControlOpacity = 1.0f;
@@ -837,6 +965,7 @@ namespace Swim::UI
 			{ control.Parts.Fill, UiPartRole::Fill }, { control.Parts.Thumb, UiPartRole::Thumb }, { control.Parts.Mark, UiPartRole::Mark },
 			{ control.Parts.Mixed, UiPartRole::Mixed }, { control.Parts.Label, UiPartRole::Label },
 			{ control.Parts.Decrement, UiPartRole::Decrement }, { control.Parts.Increment, UiPartRole::Increment } };
+
 		for (const auto& [part, role] : roles)
 		{
 			if (part)
@@ -847,6 +976,7 @@ namespace Swim::UI
 				impl->MarkLayoutDirty(part);
 			}
 		}
+
 		// A themed control's axes follow its orientation.
 		for (const auto& [part, role] : roles)
 		{
@@ -855,10 +985,12 @@ namespace Swim::UI
 				impl->ApplyTheme(impl->Get(part));
 			}
 		}
+
 		if (node.ThemeClass != UiThemeClass::None)
 		{
 			impl->ApplyTheme(node);
 		}
+
 		impl->SyncValueLabel(node);
 		impl->SyncOwner(node);
 		impl->MarkLayoutDirty(id);
@@ -875,24 +1007,29 @@ namespace Swim::UI
 	{
 		auto& node = impl->Get(id);
 		auto& c = node.Control;
+
 		switch (c.Kind)
 		{
 		case UiControlKind::Slider:
 			value = impl->ClampValue(c, value);
+
 			if (value != c.Value)
 			{
 				c.Value = value;
 				impl->MarkControlDirty(node);
 				impl->SyncValueLabel(node);
 			}
+
 			break;
 		case UiControlKind::ScrollBar:
+
 			if (c.ScrollTarget && impl->Nodes.contains(c.ScrollTarget.Value))
 			{
 				auto scroll = GetScroll(c.ScrollTarget);
 				(c.Orientation == UiOrientation::Horizontal ? scroll.X : scroll.Y) = std::isfinite(value) ? value : 0.0f;
 				SetScroll(c.ScrollTarget, scroll); // Clamped by the next Layout, which syncs the bar.
 			}
+
 			break;
 		case UiControlKind::Checkbox:
 		case UiControlKind::Toggle:
@@ -905,12 +1042,14 @@ namespace Swim::UI
 			const auto count = static_cast<float>(impl->OptionCount(node));
 			value = std::isfinite(value) ? std::round(value) : -1.0f;
 			value = count > 0.0f ? std::clamp(value, -1.0f, count - 1.0f) : std::clamp(value, -1.0f, float(1u << 24) - 1.0f);
+
 			if (value != c.Value)
 			{
 				c.Value = value;
 				impl->MarkControlDirty(node);
 				impl->SyncOwner(node);
 			}
+
 			break;
 		}
 		default:
@@ -922,15 +1061,18 @@ namespace Swim::UI
 	{
 		const auto& node = impl->Get(id);
 		const auto& c = node.Control;
+
 		if (c.Kind == UiControlKind::Checkbox || c.Kind == UiControlKind::Toggle)
 		{
 			return impl->CheckValue(c.Check);
 		}
+
 		if (c.Kind == UiControlKind::ScrollBar && c.ScrollTarget && impl->Nodes.contains(c.ScrollTarget.Value))
 		{
 			const auto scroll = impl->Get(c.ScrollTarget).Scroll;
 			return c.Orientation == UiOrientation::Horizontal ? scroll.X : scroll.Y;
 		}
+
 		return c.Value;
 	}
 
@@ -938,22 +1080,27 @@ namespace Swim::UI
 	{
 		auto& node = impl->Get(id);
 		auto& c = node.Control;
+
 		if (c.Kind != UiControlKind::Checkbox && c.Kind != UiControlKind::Toggle)
 		{
 			throw std::invalid_argument("SetChecked needs a checkbox or toggle");
 		}
+
 		if (static_cast<std::uint8_t>(state) > static_cast<std::uint8_t>(UiCheckState::Mixed) ||
 			(c.Kind == UiControlKind::Toggle && state == UiCheckState::Mixed))
 		{
 			throw std::invalid_argument("Invalid check state for this control");
 		}
+
 		if (state != c.Check)
 		{
 			c.Check = state;
+
 			if (impl->Dragging != id)
 			{
 				node.Knob = state == UiCheckState::Checked ? 1.0f : 0.0f; // From code: no easing.
 			}
+
 			impl->MarkControlDirty(node);
 		}
 	}
@@ -962,4 +1109,5 @@ namespace Swim::UI
 	{
 		return impl->Get(id).Control.Check;
 	}
+
 } // namespace Swim::UI

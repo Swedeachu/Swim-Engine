@@ -12,20 +12,25 @@ namespace Swim::Testing
 
 	class TemporaryPipelineCacheFile
 	{
+
 	public:
+
 		TemporaryPipelineCacheFile()
 		{
 			static std::atomic<unsigned> sequence{ 0 };
 			const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+
 			for (unsigned attempt = 0; attempt < 16; ++attempt)
 			{
 				directory = std::filesystem::temp_directory_path() /
 					("swim-pipeline-cache-" + std::to_string(stamp) + "-" + std::to_string(sequence++));
+
 				if (std::filesystem::create_directory(directory))
 				{
 					return;
 				}
 			}
+
 			throw std::runtime_error("Could not create pipeline cache test directory");
 		}
 
@@ -40,6 +45,7 @@ namespace Swim::Testing
 			std::ofstream file(directory / "pipelines.cache", std::ios::binary | std::ios::trunc);
 			file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
 			file.close();
+
 			if (!file)
 			{
 				throw std::runtime_error("Could not save test pipeline cache");
@@ -52,7 +58,9 @@ namespace Swim::Testing
 		}
 
 	private:
+
 		std::filesystem::path directory;
+
 	};
 
 } // namespace Swim::Testing

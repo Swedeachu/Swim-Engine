@@ -10,6 +10,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	UiStyle Box(float width, float height)
 	{
 		UiStyle style;
@@ -26,6 +27,7 @@ namespace
 				return event.Kind == kind && event.Node == node;
 			});
 	}
+
 } // namespace
 
 SWIM_TEST("UI.Layout", "MeasuresStackPaddingMarginsAndDpiInLogicalUnits")

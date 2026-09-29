@@ -8,12 +8,14 @@ int main()
 	desc.ApplicationName = "Swim Headless Platform Smoke";
 
 	Swim::Platform::PlatformSystem platform;
+
 	if (!platform.Initialize(desc))
 	{
 		return 1;
 	}
 
 	const auto& fileSystem = platform.GetFileSystem();
+
 	if (fileSystem.GetExecutableDirectory().empty() || fileSystem.GetCacheRoot().empty())
 	{
 		return 2;

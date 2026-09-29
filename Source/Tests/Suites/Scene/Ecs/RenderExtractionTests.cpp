@@ -12,6 +12,7 @@ using Swim::Render::RenderObjectFlags;
 
 namespace
 {
+
 	// Stand-in for Engine::Transform: the test writes world poses directly and
 	// queues the entity in the TransformSystem exactly like Transform::MarkDirty.
 	struct TestPose
@@ -32,10 +33,12 @@ namespace
 			{
 				++resolveCalls;
 				const auto found = resident.find(mesh.GetId());
+
 				if (found == resident.end())
 				{
 					return std::nullopt;
 				}
+
 				return found->second;
 			};
 			desc.WorldTransform = [](const entt::registry& registry, entt::entity entity)
@@ -113,6 +116,7 @@ namespace
 		std::uint32_t resolveCalls = 0;
 		std::uint32_t spawned = 0;
 	};
+
 } // namespace
 
 SWIM_TEST("Scene.RenderExtraction", "MeshRenderersBecomeStableRenderObjectsKeyedByEntityAndPart")
@@ -166,10 +170,12 @@ SWIM_TEST("Scene.RenderExtraction", "TransformDirtyListDrivesTransformOnlyUpdate
 	ExtractionWorld world;
 	world.MakeResident(1, { 0, 1 });
 	std::vector<entt::entity> entities;
+
 	for (int i = 0; i < 8; ++i)
 	{
 		entities.push_back(world.Spawn(float(i), { { world.Mesh(1) } }));
 	}
+
 	world.Frame();
 
 	world.Move(entities[3], 30.0f);
@@ -269,10 +275,12 @@ SWIM_TEST("Scene.RenderExtraction", "SceneUnloadRetiresEverythingAndFullScenesRe
 	world.MakeResident(1, { 0, 1 });
 	Testing::MockTimeline timeline;
 	std::vector<entt::entity> entities;
+
 	for (int i = 0; i < 4; ++i)
 	{
 		entities.push_back(world.Spawn(float(i), { { world.Mesh(1) } }));
 	}
+
 	auto stats = world.Frame();
 	SWIM_CHECK_EQUAL(stats.ObjectsCreated, 3u);
 	SWIM_CHECK_EQUAL(stats.CapacityFailures, 2u); // Reconcile and the pending retry in the same call.
@@ -315,10 +323,12 @@ SWIM_TEST("Scene.RenderExtraction", "HundredThousandEntitiesExtractDirtyOnly")
 	world.MakeResident(1, { 0, 1 });
 	std::vector<entt::entity> entities;
 	entities.reserve(count);
+
 	for (std::uint32_t i = 0; i < count; ++i)
 	{
 		entities.push_back(world.Spawn(float(i), { { world.Mesh(1), i % 32 } }));
 	}
+
 	const auto start = std::chrono::steady_clock::now();
 	const auto initial = world.Frame();
 	const auto initialTime = std::chrono::steady_clock::now() - start;
@@ -326,12 +336,14 @@ SWIM_TEST("Scene.RenderExtraction", "HundredThousandEntitiesExtractDirtyOnly")
 	SWIM_CHECK_EQUAL(world.lastUpload.UploadBytes, std::uint64_t(count) * (64 + 96));
 
 	std::chrono::steady_clock::duration dirtyTime{};
+
 	for (std::uint32_t frame = 1; frame <= 3; ++frame)
 	{
 		for (std::uint32_t i = frame; i < count; i += 100)
 		{
 			world.Move(entities[i], float(i) + float(frame) * 0.5f);
 		}
+
 		const auto frameStart = std::chrono::steady_clock::now();
 		const auto stats = world.Frame();
 		dirtyTime += std::chrono::steady_clock::now() - frameStart;
@@ -340,6 +352,7 @@ SWIM_TEST("Scene.RenderExtraction", "HundredThousandEntitiesExtractDirtyOnly")
 		SWIM_CHECK_EQUAL(world.lastUpload.InstanceRows, 0u);
 		SWIM_CHECK_EQUAL(world.lastUpload.TransformRows, frame == 1 ? 1000u : 2000u);
 	}
+
 	SWIM_CHECK(world.scene.GpuMatchesMirror());
 	std::printf("             [Extraction stress] 100k initial extract+upload %.1f ms, 1%% dirty frame avg %.2f ms (mock device)\n",
 		std::chrono::duration<double, std::milli>(initialTime).count(), std::chrono::duration<double, std::milli>(dirtyTime).count() / 3.0);

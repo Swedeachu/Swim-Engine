@@ -12,6 +12,7 @@ namespace Swim::Assets
 		std::uint64_t Value = 0;
 
 		constexpr bool IsValid() const { return Value != 0; }
+
 		explicit constexpr operator bool() const { return IsValid(); }
 
 		auto operator<=>(const AssetId&) const = default;

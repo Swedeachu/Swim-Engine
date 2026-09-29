@@ -15,6 +15,7 @@ namespace Scene = Swim::Testing::ClusterScene;
 
 namespace
 {
+
 	ClusterGridDesc Desc(std::uint32_t width = 1280, std::uint32_t height = 720)
 	{
 		ClusterGridDesc desc;
@@ -39,13 +40,16 @@ namespace
 		for (int c = 0; c < 3; ++c)
 		{
 			const float slack = epsilon * (1.0f + std::abs(p[c]));
+
 			if (p[c] < box.Min[c] - slack || p[c] > box.Max[c] + slack)
 			{
 				return false;
 			}
 		}
+
 		return true;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.ClusterGrid", "LayoutRoundsTilesUpAndValidatesTheDesc")
@@ -153,6 +157,7 @@ SWIM_TEST("Render.ClusterGrid", "SlicesAreLogarithmicAndDepthDecodesFromTheDepth
 	SWIM_CHECK(std::abs(ClusterSliceNearDepth(grid, 0) - 0.1f) < 1.0e-6f);
 	SWIM_CHECK(std::abs(ClusterSliceNearDepth(grid, 16) - 60.0f) < 1.0e-3f);
 	const float ratio = ClusterSliceNearDepth(grid, 1) / ClusterSliceNearDepth(grid, 0);
+
 	for (std::uint32_t k = 1; k < 16; ++k)
 	{
 		const float near = ClusterSliceNearDepth(grid, k);
@@ -160,6 +165,7 @@ SWIM_TEST("Render.ClusterGrid", "SlicesAreLogarithmicAndDepthDecodesFromTheDepth
 		SWIM_CHECK_EQUAL(ClusterSliceForDepth(grid, near * 1.001f), k);
 		SWIM_CHECK_EQUAL(ClusterSliceForDepth(grid, near * 0.999f), k - 1);
 	}
+
 	SWIM_CHECK_EQUAL(ClusterSliceForDepth(grid, 0.01f), 0u); // Nearer than Near: slice 0.
 	SWIM_CHECK_EQUAL(ClusterSliceForDepth(grid, 0.0f), 0u);
 	SWIM_CHECK_EQUAL(ClusterSliceForDepth(grid, 1000.0f), 15u); // Beyond Far: the last slice.
@@ -170,14 +176,17 @@ SWIM_TEST("Render.ClusterGrid", "SlicesAreLogarithmicAndDepthDecodesFromTheDepth
 		const float reverse = grid.DepthParams[1] / depth; // near / d.
 		SWIM_CHECK(std::abs(ClusterViewDepthFromNdc(grid, reverse) - depth) < 1.0e-4f * depth);
 	}
+
 	ClusterView forward = Scene::Camera(16.0f / 9.0f);
 	forward.Projection = PerspectiveRowMajor(1.0f, 16.0f / 9.0f, 0.1f, 100.0f);
 	const auto forwardGrid = MakeClusterGridRecord(Desc(), forward);
+
 	for (const float depth : { 0.5f, 3.0f, 40.0f })
 	{
 		const float clipZ = forward.Projection[10] * -depth + forward.Projection[11];
 		SWIM_CHECK(std::abs(ClusterViewDepthFromNdc(forwardGrid, clipZ / depth) - depth) < 1.0e-3f * depth);
 	}
+
 	SWIM_CHECK(!(ClusterViewDepthFromNdc(grid, 0.0f) <= 60.0f)); // The reverse-Z clear value is infinitely far.
 }
 
@@ -187,6 +196,7 @@ SWIM_TEST("Render.ClusterGrid", "ClusterBoundsContainTheirPixelsAndTileTheVolume
 	SWIM_CHECK(grid.Dimensions[0] == 16u && grid.Dimensions[1] == 10u);
 	std::mt19937 random(64);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
 	for (int i = 0; i < 4000; ++i)
 	{
 		const float px = unit(random) * 1000.0f;
@@ -197,6 +207,7 @@ SWIM_TEST("Render.ClusterGrid", "ClusterBoundsContainTheirPixelsAndTileTheVolume
 		SWIM_CHECK(Contains(Cl::ClusterBounds(grid, cluster), Scene::ViewPoint(grid, px, py, depth), 1.0e-4f));
 		SWIM_CHECK(Contains(Cl::VolumeBounds(grid), Scene::ViewPoint(grid, px, py, depth), 1.0e-4f));
 	}
+
 	// Index layout: x fastest, then y (top row first), then slice.
 	SWIM_CHECK_EQUAL(ClusterIndexFor(grid, 1.0f, 1.0f, 0.05f), 0u);
 	SWIM_CHECK_EQUAL(ClusterIndexFor(grid, 999.0f, 1.0f, 0.05f), 15u);
@@ -242,6 +253,7 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 	std::mt19937 random(66);
 	std::uniform_real_distribution<float> unit(0.0f, 1.0f);
 	std::uint32_t litPoints = 0;
+
 	for (int i = 0; i < 3000; ++i)
 	{
 		const float px = unit(random) * 1280.0f;
@@ -251,6 +263,7 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 		const auto lights = Cl::ClusterLightList(assignment, grid, ClusterIndexFor(grid, px, py, depth));
 		const std::set<std::uint32_t> list(lights.begin(), lights.end());
 		bool lit = false;
+
 		for (std::uint32_t light = 0; light < scene.Header.LocalCount; ++light)
 		{
 			if (Lights::EvaluateLight(scene.Rows[scene.Header.FirstLocalRow + light], world).Radiance[0] > 0.0f)
@@ -259,6 +272,7 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 				lit = true;
 			}
 		}
+
 		litPoints += lit ? 1u : 0u;
 		StandardPbr::Surface surface;
 		surface.BaseColor = { 0.7f, 0.5f, 0.3f };
@@ -268,11 +282,13 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 		const Cl::Float3 view = StandardPbr::Normalize({ unit(random) - 0.5f, 0.5f, 1.0f });
 		const auto brute = Lights::ShadeAllLights(scene.Rows, scene.Header, surface, normal, view, world);
 		const auto clustered = Cl::ShadeClustered(assignment, grid, scene.Rows, scene.Header, surface, normal, view, world, px, py, depth);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			SWIM_CHECK(std::abs(clustered[c] - brute[c]) <= 1.0e-5f + 1.0e-4f * std::abs(brute[c]));
 		}
 	}
+
 	SWIM_CHECK(litPoints > 300u);
 
 	// Each cluster owns one block (occupancy words, then mask words); the occupancy bits
@@ -281,12 +297,14 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 	const std::uint32_t occupancyWords = ClusterOccupancyWords(grid);
 	SWIM_CHECK_EQUAL(assignment.Indices.size(), std::size_t(grid.Dimensions[3]) * block);
 	std::uint32_t total = 0;
+
 	for (std::uint32_t c = 0; c < grid.Dimensions[3]; ++c)
 	{
 		const auto& record = assignment.Records[c];
 		SWIM_CHECK_EQUAL(record.Offset, c * block);
 		SWIM_CHECK_EQUAL(record.Count, record.RawCount);
 		std::uint32_t bits = 0;
+
 		for (std::uint32_t w = 0; w < ClusterMaskWords(grid); ++w)
 		{
 			const std::uint32_t mask = assignment.Indices[record.Offset + occupancyWords + w];
@@ -294,12 +312,14 @@ SWIM_TEST("Render.ClusteredLights", "AssignmentIsConservativeAndClusteredShading
 			const bool occupied = (assignment.Indices[record.Offset + w / 32] >> (w % 32) & 1u) != 0;
 			SWIM_CHECK(occupied == (mask != 0));
 		}
+
 		SWIM_CHECK_EQUAL(bits, record.Count);
 		const auto list = Cl::ClusterLightList(assignment, grid, c);
 		SWIM_CHECK_EQUAL(std::uint32_t(list.size()), record.Count);
 		SWIM_CHECK(std::is_sorted(list.begin(), list.end()));
 		total += record.Count;
 	}
+
 	SWIM_CHECK_EQUAL(total, assignment.Stats.WrittenIndices);
 	SWIM_CHECK_EQUAL(assignment.Stats.RequestedIndices, assignment.Stats.WrittenIndices);
 
@@ -326,20 +346,25 @@ SWIM_TEST("Render.ClusteredLights", "DenseSwarmsAreNeverTruncated")
 	SWIM_CHECK(assignment.Stats.MaxRawLightsPerCluster > 256u); // Far more than the old per-cluster cap.
 	SWIM_CHECK(assignment.Stats.OverflowClusters > 0u);			// Above the heatmap scale, nothing dropped.
 	std::uint32_t checked = 0;
+
 	for (std::uint32_t c = 0; c < grid.Dimensions[3]; c += 7)
 	{
 		std::vector<std::uint32_t> expected;
+
 		for (std::uint32_t i = 0; i < scene.Header.LocalCount; ++i)
 		{
 			const auto& light = assignment.ViewLights[i];
+
 			if (Cl::SphereIntersectsAabb(light.Center, light.Radius, assignment.Bounds[c]))
 			{
 				expected.push_back(i);
 			}
 		}
+
 		SWIM_CHECK(Cl::ClusterLightList(assignment, grid, c) == expected);
 		checked += expected.empty() ? 0u : 1u;
 	}
+
 	SWIM_CHECK(checked > 50u);
 
 	// More lights than the masks address is rejected instead of silently dropped.

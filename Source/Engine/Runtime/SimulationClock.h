@@ -5,6 +5,7 @@
 
 namespace Engine
 {
+
 	// Systems that advance with simulated time. Each either follows the simulation
 	// (frozen while paused, scaled by the time scale) or runs on real time.
 	enum class SimulationDomain : std::uint8_t
@@ -41,7 +42,9 @@ namespace Engine
 	//                     (GetDroppedSeconds) instead of growing without bound
 	class SimulationClock
 	{
+
 	  public:
+
 		SimulationClock();
 
 		// Throws std::invalid_argument outside 1 .. 1000 Hz.
@@ -65,13 +68,16 @@ namespace Engine
 
 		// Limits (both throw std::invalid_argument when not positive).
 		void SetMaxFrameDelta(double seconds);
+
 		void SetMaxFixedSteps(std::uint32_t steps);
 
 		// Whether a domain follows pause/time scale (true by default for every domain).
 		void SetFollowsSimulation(SimulationDomain domain, bool follows);
+
 		bool FollowsSimulation(SimulationDomain domain) const;
 
 		SimulationFrame Advance(double realDelta);
+
 		// The delta a domain should integrate this frame.
 		double GetDelta(SimulationDomain domain, const SimulationFrame& frame) const;
 
@@ -89,6 +95,7 @@ namespace Engine
 		std::uint64_t GetFrameCount() const { return frameCount; }
 
 	  private:
+
 		double fixedDelta = 1.0 / 60.0;
 		double timeScale = 1.0;
 		double maxFrameDelta = 0.25;
@@ -102,5 +109,7 @@ namespace Engine
 		double dropped = 0.0;
 		std::uint64_t fixedStepCount = 0;
 		std::uint64_t frameCount = 0;
+
 	};
+
 } // namespace Engine

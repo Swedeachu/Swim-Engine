@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	class BindlessResourceTable;
 
 	struct AssetResidencyDesc
@@ -27,4 +28,5 @@ namespace Swim::Render
 		// element) and released with the texture's lastUse. Must outlive the service.
 		BindlessResourceTable* Bindless = nullptr;
 	};
+
 } // namespace Swim::Render

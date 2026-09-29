@@ -11,6 +11,7 @@ using namespace Swim::UI;
 
 namespace
 {
+
 	std::size_t Count(const std::vector<UiEvent>& events, UiEventKind kind)
 	{
 		return std::count_if(events.begin(), events.end(),
@@ -54,6 +55,7 @@ namespace
 			SWIM_CHECK(Ui.KeyDown(key, modifiers));
 		}
 	};
+
 } // namespace
 
 SWIM_TEST("UI.Edit", "TypesMovesByClustersWordsAndLinesAndDeletes")
@@ -169,11 +171,13 @@ SWIM_TEST("UI.Edit", "ClipboardAndCompositionStayOutOfCommittedTextUntilCommitte
 	const auto& paint = ui.Paint(atlas);
 	std::size_t glyphs = 0;
 	std::size_t solids = 0;
+
 	for (const auto& quad : paint)
 	{
 		glyphs += quad.Kind == UiPaintKind::Glyph ? 1 : 0;
 		solids += quad.Kind == UiPaintKind::Solid ? 1 : 0;
 	}
+
 	SWIM_CHECK_EQUAL(glyphs, 10u);		 // 8 committed letters + 2 preedit.
 	SWIM_CHECK_EQUAL(solids, 2u);		 // Underline and caret.
 	SWIM_CHECK(ui.KeyDown(UiKey::Left)); // The IME owns keys while composing.
@@ -230,10 +234,12 @@ SWIM_TEST("UI.Edit", "PointerPlacesAndDragsSelectionAndCaretScrollsIntoView")
 	SWIM_CHECK_NEAR(ui.GetScroll(field.Node).X, 0.0f, 1e-4f);
 	ui.SetCaretVisible(false);
 	std::size_t solids = 0;
+
 	for (const auto& quad : ui.Paint(atlas))
 	{
 		solids += quad.Kind == UiPaintKind::Solid ? 1 : 0;
 	}
+
 	SWIM_CHECK_EQUAL(solids, 0u);
 	ui.SetEditable(field.Node, false);
 	SWIM_CHECK(!ui.GetFocus()); // Not focusable any more (the style is not).

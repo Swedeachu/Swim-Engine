@@ -9,6 +9,7 @@
 
 namespace Swim::Render
 {
+
 	struct ParticleEmitterTag;
 	using ParticleEmitterHandle = GpuHandle<ParticleEmitterTag>;
 
@@ -41,4 +42,5 @@ namespace Swim::Render
 		std::optional<GraphPass> FinalizePass;
 		std::uint32_t InitializedEmitters = 0; // Emitters whose pool range was reset this frame.
 	};
+
 } // namespace Swim::Render

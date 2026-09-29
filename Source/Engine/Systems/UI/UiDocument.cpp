@@ -6,8 +6,10 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		std::atomic<std::uint64_t> nextNodeId{ 1 };
 
 		bool Finite(UiPoint point)
@@ -30,6 +32,7 @@ namespace Swim::UI
 			case UiUnit::Percent:
 				return InRange(length.Value, 0.0f, 1.0f);
 			}
+
 			return false;
 		}
 
@@ -70,6 +73,7 @@ namespace Swim::UI
 
 	namespace Internal
 	{
+
 		void ValidateImage(const UiImage& image)
 		{
 			const bool valid = InRange(image.Size.X, 0.0f, Internal::MaxLogical) && InRange(image.Size.Y, 0.0f, Internal::MaxLogical) &&
@@ -79,6 +83,7 @@ namespace Swim::UI
 				InRange(image.Uv.Height, -Internal::MaxLogical, Internal::MaxLogical) && IsValidEdges(image.Slice) &&
 				IsValidEdges(image.SliceUv, 1.0f) && IsValidColor(image.Tint) &&
 				static_cast<std::uint8_t>(image.Fit) <= static_cast<std::uint8_t>(UiImageFit::Contain);
+
 			if (!valid)
 			{
 				throw std::invalid_argument("Invalid UI image");
@@ -94,11 +99,13 @@ namespace Swim::UI
 					throw std::invalid_argument("Invalid UI state rule color");
 				}
 			}
+
 			if ((v.BorderWidth && !InRange(*v.BorderWidth, 0.0f, MaxLogical)) ||
 				(v.CornerRadius && !InRange(*v.CornerRadius, 0.0f, MaxLogical)) || (v.Opacity && !InRange(*v.Opacity, 0.0f, 1.0f)))
 			{
 				throw std::invalid_argument("Invalid UI state rule value");
 			}
+
 			if (v.Image)
 			{
 				ValidateImage(*v.Image);
@@ -115,6 +122,7 @@ namespace Swim::UI
 				InRange(s.CornerRadius, 0.0f, MaxLogical) && InRange(s.BorderWidth, 0.0f, MaxLogical) && IsValidColor(s.BorderColor) &&
 				IsValidColor(s.TextColor) && InRange(s.LineSpacing, 0.25f, 8.0f) && IsValidColor(s.SelectionColor) &&
 				IsValidColor(s.CaretColor) && InRange(s.Opacity, 0.0f, 1.0f) && InRange(s.TransitionSeconds, 0.0f, 60.0f);
+
 			if (!valid)
 			{
 				throw std::invalid_argument("Invalid UI style");
@@ -146,6 +154,7 @@ namespace Swim::UI
 				a.Visible == b.Visible && a.Enabled == b.Enabled && a.HitTest == b.HitTest && a.Focusable == b.Focusable &&
 				a.TextAlign == b.TextAlign && a.TextWrap == b.TextWrap && a.LineSpacing == b.LineSpacing;
 		}
+
 	} // namespace Internal
 
 	bool UiRect::Contains(UiPoint point) const
@@ -164,20 +173,24 @@ namespace Swim::UI
 	std::size_t UiDocument::Impl::Depth(UiNodeId id) const
 	{
 		std::size_t depth = 0;
+
 		for (; id; id = Get(id).Parent)
 		{
 			++depth;
 		}
+
 		return depth;
 	}
 
 	std::size_t UiDocument::Impl::Height(UiNodeId id) const
 	{
 		std::size_t height = 1;
+
 		for (const auto child : Get(id).Children)
 		{
 			height = std::max(height, 1 + Height(child));
 		}
+
 		return height;
 	}
 
@@ -187,14 +200,17 @@ namespace Swim::UI
 		{
 			return false;
 		}
+
 		for (; id; id = Get(id).Parent)
 		{
 			const auto& style = Get(id).Style;
+
 			if (!style.Visible || !style.Enabled)
 			{
 				return false;
 			}
 		}
+
 		return true;
 	}
 
@@ -203,31 +219,38 @@ namespace Swim::UI
 		if (Focused && (!Available(Focused) || !IsFocusable(Get(Focused))))
 		{
 			Events.push_back({ UiEventKind::Blur, Focused });
+
 			if (Nodes.contains(Focused.Value))
 			{
 				MarkPaintDirty(Focused);
 			}
+
 			Focused = {};
 			Composition.clear();
 		}
+
 		if (Pressed && (!Available(Pressed) || !IsHitTestable(Get(Pressed))))
 		{
 			if (Dragging == Pressed && Nodes.contains(Dragging.Value))
 			{
 				EndDrag(true);
 			}
+
 			Events.push_back({ UiEventKind::Cancel, Pressed });
 			Pressed = {};
 		}
+
 		if (Dragging && (!Nodes.contains(Dragging.Value) || Dragging != Pressed))
 		{
 			Dragging = {};
 		}
+
 		if (Hover && (!Available(Hover) || !IsHitTestable(Get(Hover))))
 		{
 			Events.push_back({ UiEventKind::Leave, Hover });
 			Hover = {};
 		}
+
 		if (Selecting && (!Nodes.contains(Selecting.Value) || Selecting != Pressed))
 		{
 			Selecting = {};
@@ -240,27 +263,33 @@ namespace Swim::UI
 		{
 			Erase(child);
 		}
+
 		Nodes.erase(id.Value);
 	}
 
 	void UiDocument::Impl::MarkLayoutDirty(UiNodeId id)
 	{
 		Dirty = true;
+
 		if (!id || !Nodes.contains(id.Value))
 		{
 			return;
 		}
+
 		auto& node = Get(id);
 		node.MeasureDirty = true;
 		node.PaintDirty = true;
 		node.VisualDirty = true;
+
 		for (auto parent = node.Parent; parent; parent = Get(parent).Parent)
 		{
 			auto& ancestor = Get(parent);
+
 			if (ancestor.SubtreeDirty)
 			{
 				break; // Already propagated above.
 			}
+
 			ancestor.SubtreeDirty = true;
 		}
 	}
@@ -295,15 +324,18 @@ namespace Swim::UI
 	UiNodeId UiDocument::Create(UiNodeId parent)
 	{
 		auto& parentNode = impl->Get(parent);
+
 		if (impl->Nodes.size() >= Internal::MaxNodes || impl->Depth(parent) >= Internal::MaxDepth)
 		{
 			throw std::length_error("UI document node or hierarchy depth limit reached");
 		}
+
 		Impl::Node node;
 		node.Id = { nextNodeId.fetch_add(1, std::memory_order_relaxed) };
 		node.Parent = parent;
 		const auto id = node.Id;
 		parentNode.Children.push_back(id);
+
 		try
 		{
 			impl->Nodes.emplace(id.Value, std::move(node));
@@ -313,6 +345,7 @@ namespace Swim::UI
 			parentNode.Children.pop_back();
 			throw;
 		}
+
 		impl->MarkLayoutDirty(parent);
 		return id;
 	}
@@ -328,6 +361,7 @@ namespace Swim::UI
 		{
 			return false;
 		}
+
 		const auto parent = impl->Get(id).Parent;
 		std::erase(impl->Get(parent).Children, id);
 		impl->Erase(id);
@@ -336,10 +370,12 @@ namespace Swim::UI
 			{
 				return !impl->Nodes.contains(entry.Node.Value);
 			});
+
 		if (impl->TooltipShown && !impl->Nodes.contains(impl->TooltipShown.Value))
 		{
 			impl->TooltipShown = {};
 		}
+
 		impl->ClearUnavailable();
 		impl->MarkLayoutDirty(parent);
 		return true;
@@ -349,10 +385,12 @@ namespace Swim::UI
 	{
 		auto& node = impl->Get(id);
 		auto& target = impl->Get(parent);
+
 		if (id == impl->Root)
 		{
 			throw std::invalid_argument("Cannot reparent the UI root");
 		}
+
 		for (auto ancestor = parent; ancestor; ancestor = impl->Get(ancestor).Parent)
 		{
 			if (ancestor == id)
@@ -360,14 +398,17 @@ namespace Swim::UI
 				throw std::invalid_argument("UI reparent would create a cycle");
 			}
 		}
+
 		if (impl->Depth(parent) + impl->Height(id) > Internal::MaxDepth)
 		{
 			throw std::length_error("UI hierarchy depth limit reached");
 		}
+
 		if (node.Parent == parent)
 		{
 			return;
 		}
+
 		const auto previous = node.Parent;
 		target.Children.push_back(id);
 		std::erase(impl->Get(previous).Children, id);
@@ -383,12 +424,14 @@ namespace Swim::UI
 		auto& node = impl->Get(id);
 		const bool paintOnly = Internal::OnlyPaintChanged(node.Style, style);
 		node.Style = style;
+
 		if (paintOnly)
 		{
 			node.PaintDirty = true;
 			node.VisualDirty = true;
 			return;
 		}
+
 		impl->MarkLayoutDirty(id);
 		impl->ClearUnavailable();
 	}
@@ -402,29 +445,34 @@ namespace Swim::UI
 		UiNodeId id, std::shared_ptr<const Text::FontCollection> fonts, std::string text, float size, const UiTextOptions& options)
 	{
 		auto& node = impl->Get(id);
+
 		if (fonts)
 		{
 			if (text.size() > 1024u * 1024u)
 			{
 				throw std::length_error("UI text exceeds 1 MiB");
 			}
+
 			if (!std::isfinite(size) || size <= 0.0f || size > 16384.0f || options.Language.size() > 128 ||
 				(options.Direction != Text::TextDirection::Auto && options.Direction != Text::TextDirection::LeftToRight &&
 					options.Direction != Text::TextDirection::RightToLeft))
 			{
 				throw std::invalid_argument("Invalid UI text size or options");
 			}
+
 			text = Text::SanitizeUtf8(text);
 		}
 		else
 		{
 			text.clear();
 		}
+
 		if (node.Fonts == fonts && node.TextContents == text && node.FontSize == size && node.TextOptions.Direction == options.Direction &&
 			node.TextOptions.Language == options.Language)
 		{
 			return;
 		}
+
 		node.Fonts = std::move(fonts);
 		node.TextContents = std::move(text);
 		node.FontSize = size;
@@ -432,10 +480,12 @@ namespace Swim::UI
 		node.TextLayout.reset();
 		node.MeasureLayout.reset();
 		node.Selection = impl->ClampSelection(node, node.Selection);
+
 		if (node.Id == impl->Focused)
 		{
 			impl->Composition.clear();
 		}
+
 		impl->MarkLayoutDirty(id);
 	}
 
@@ -469,6 +519,7 @@ namespace Swim::UI
 	void UiDocument::ClearImage(UiNodeId id)
 	{
 		auto& node = impl->Get(id);
+
 		if (node.HasImage)
 		{
 			node.HasImage = false;
@@ -482,6 +533,7 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("UI scroll offset must be finite");
 		}
+
 		impl->Get(id).Scroll = offset;
 		impl->Dirty = true; // Arrangement only; measurement is unaffected.
 	}
@@ -498,10 +550,12 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("Invalid UI canvas or DPI scale");
 		}
+
 		if (!impl->Dirty && framebufferSize.X == impl->Framebuffer.X && framebufferSize.Y == impl->Framebuffer.Y && dpiScale == impl->Dpi)
 		{
 			return;
 		}
+
 		impl->Dirty = true;
 		impl->Framebuffer = framebufferSize;
 		impl->Dpi = dpiScale;
@@ -517,39 +571,48 @@ namespace Swim::UI
 			node.Clip = {};
 			node.Active = false;
 		}
+
 		if (root.Style.Visible)
 		{
 			impl->Arrange(root, { 0, 0, logical.X, logical.Y }, { 0, 0, logical.X, logical.Y }, true);
 			impl->SyncScrollBars();
 			impl->PlacePopups();
 		}
+
 		impl->Dirty = false;
 		++impl->Revision;
 		// Popups opened with FocusFirst take focus once they are laid out (focus changes may
 		// close popups, so the stack is re-read each step).
 		bool focused = false;
+
 		for (std::size_t i = 0; i < impl->Popups.size(); ++i)
 		{
 			auto& entry = impl->Popups[i];
 			const auto popup = entry.Node;
+
 			if (entry.PendingReveal)
 			{
 				entry.PendingReveal = false;
 				const auto anchor = entry.Desc.Anchor;
+
 				if (anchor && impl->Nodes.contains(anchor.Value) && impl->Get(anchor).Control.Kind == UiControlKind::Dropdown)
 				{
 					auto& owner = impl->Get(anchor);
 					impl->RevealOption(owner, owner.Highlight);
 				}
 			}
+
 			if (!impl->Popups[i].PendingFocus)
 			{
 				continue;
 			}
+
 			impl->Popups[i].PendingFocus = false;
+
 			for (const auto id : impl->TabOrder())
 			{
 				const auto index = impl->PopupIndexOf(id);
+
 				if (index && impl->Popups[*index].Node == popup)
 				{
 					Focus(id);
@@ -558,10 +621,12 @@ namespace Swim::UI
 				}
 			}
 		}
+
 		if (!focused && impl->Focused && !impl->InputAllowed(impl->Focused))
 		{
 			Focus({}); // A modal opened without anything to focus: nothing below it keeps focus.
 		}
+
 		if (impl->Dirty)
 		{
 			Layout(framebufferSize, dpiScale); // Focus changes that relayout (editable text).
@@ -600,4 +665,5 @@ namespace Swim::UI
 		result.swap(impl->Events);
 		return result;
 	}
+
 } // namespace Swim::UI

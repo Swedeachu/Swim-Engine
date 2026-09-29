@@ -6,9 +6,11 @@
 
 namespace Swim::Render
 {
+
 	TextureGraphResources TextureResidency::Import(RenderGraph& graph)
 	{
 		using S = Rhi::ResourceState;
+
 		if (importPending)
 		{
 			throw std::logic_error(name + " has uploads awaiting CommitUploads/AbortUploads");
@@ -23,6 +25,7 @@ namespace Swim::Render
 				{
 					return;
 				}
+
 				// One staging suballocation and one pass per texture, writing every
 				// mip in full, then exported for sampling later in this graph.
 				const auto target = graph.ImportTexture(*record.Texture, S::Undefined);
@@ -39,14 +42,17 @@ namespace Swim::Render
 					[&](RenderGraphBuilder& b)
 					{
 						b.Read(staging, S::CopySource);
+
 						for (std::uint32_t mip = 0; mip < mips.size(); ++mip)
 						{
 							b.Write(target, S::CopyDestination, { mip, 1, 0, 1 });
 						}
+
 					},
 					[staging, target, mips](RenderCommandContext& c)
 					{
 						const auto source = c.GetRange(staging);
+
 						for (std::uint32_t mip = 0; mip < mips.size(); ++mip)
 						{
 							Rhi::BufferTextureCopyRegion region;
@@ -55,6 +61,7 @@ namespace Swim::Render
 							region.Extent = mips[mip].Extent;
 							c.Commands().CopyBufferToTexture(*source.Buffer, c.Get(target, { mip, 1, 0, 1 }), region);
 						}
+
 					});
 				graph.Export(target, S::ShaderRead);
 				resources.Uploads.push_back({ handle, target, pass });
@@ -66,8 +73,10 @@ namespace Swim::Render
 		{
 			textures.Get(handle)->State = GpuUploadState::Recorded;
 		}
+
 		recorded = std::move(pending);
 		importPending = !recorded.empty();
 		return resources;
 	}
+
 } // namespace Swim::Render

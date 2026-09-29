@@ -56,6 +56,7 @@ namespace Engine::JoltPhysicsDetail
 				case MotionType::Kinematic:
 					return JPH::EMotionType::Kinematic;
 			}
+
 			return JPH::EMotionType::Static;
 		}
 

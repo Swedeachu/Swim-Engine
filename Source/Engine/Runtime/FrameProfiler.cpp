@@ -9,8 +9,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		constexpr char Separator = '\x1f';
 
 		double Percentile(const std::vector<double>& sorted, double p)
@@ -19,6 +21,7 @@ namespace Engine
 			{
 				return 0.0;
 			}
+
 			const double index = p * double(sorted.size() - 1);
 			const auto low = static_cast<std::size_t>(std::floor(index));
 			const auto high = std::min(low + 1, sorted.size() - 1);
@@ -31,17 +34,22 @@ namespace Engine
 			{
 				return std::string(text);
 			}
+
 			std::string quoted = "\"";
+
 			for (const char c : text)
 			{
 				if (c == '"')
 				{
 					quoted += '"';
 				}
+
 				quoted += c;
 			}
+
 			return quoted + '"';
 		}
+
 	} // namespace
 
 	void FrameProfiler::Add(std::string_view category, std::string_view name, double milliseconds)
@@ -50,6 +58,7 @@ namespace Engine
 		{
 			return;
 		}
+
 		std::string key;
 		key.reserve(category.size() + name.size() + 1);
 		key.append(category).push_back(Separator);
@@ -71,6 +80,7 @@ namespace Engine
 	bool FrameProfiler::EndFrame()
 	{
 		bool completed = false;
+
 		if (capturing)
 		{
 			if (warmupLeft > 0)
@@ -84,7 +94,9 @@ namespace Engine
 				{
 					samples[key].push_back(ms);
 				}
+
 				++measured;
+
 				if (--framesLeft == 0)
 				{
 					capturing = false;
@@ -92,6 +104,7 @@ namespace Engine
 					report = {};
 					report.Label = label;
 					report.Frames = measured;
+
 					for (auto& [key, values] : samples)
 					{
 						std::sort(values.begin(), values.end());
@@ -101,10 +114,12 @@ namespace Engine
 						zone.Name = split == std::string::npos ? std::string() : key.substr(split + 1);
 						zone.Frames = static_cast<std::uint32_t>(values.size());
 						double total = 0.0;
+
 						for (const double v : values)
 						{
 							total += v;
 						}
+
 						zone.Mean = total / double(values.size());
 						zone.PerFrame = total / double(measured);
 						zone.Min = values.front();
@@ -114,6 +129,7 @@ namespace Engine
 						zone.P99 = Percentile(values, 0.99);
 						report.Zones.push_back(std::move(zone));
 					}
+
 					std::sort(report.Zones.begin(), report.Zones.end(),
 						[](const ZoneStats& a, const ZoneStats& b)
 						{
@@ -121,15 +137,19 @@ namespace Engine
 							{
 								return a.Category < b.Category;
 							}
+
 							return a.PerFrame > b.PerFrame;
 						});
+
 					if (!csvPath.empty())
 					{
 						std::error_code error;
+
 						if (csvPath.has_parent_path())
 						{
 							std::filesystem::create_directories(csvPath.parent_path(), error);
 						}
+
 						const bool exists = std::filesystem::exists(csvPath, error);
 						std::ofstream out(csvPath, std::ios::app);
 						out << ToCsv(report, !exists);
@@ -137,6 +157,7 @@ namespace Engine
 				}
 			}
 		}
+
 		frame.clear();
 		return completed;
 	}
@@ -150,23 +171,28 @@ namespace Engine
 				return &zone;
 			}
 		}
+
 		return nullptr;
 	}
 
 	std::string FrameProfiler::ToCsv(const Report& report, bool header)
 	{
 		std::ostringstream out;
+
 		if (header)
 		{
 			out << "label,category,name,frames,per_frame_ms,mean_ms,min_ms,p50_ms,p95_ms,p99_ms,max_ms\n";
 		}
+
 		char buffer[256];
+
 		for (const auto& zone : report.Zones)
 		{
 			std::snprintf(buffer, sizeof(buffer), ",%u,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n", zone.Frames, zone.PerFrame, zone.Mean, zone.Min,
 				zone.P50, zone.P95, zone.P99, zone.Max);
 			out << Csv(report.Label) << ',' << Csv(zone.Category) << ',' << Csv(zone.Name) << buffer;
 		}
+
 		return out.str();
 	}
 
@@ -176,16 +202,20 @@ namespace Engine
 		out << "[Profile] " << (report.Label.empty() ? std::string("capture") : report.Label) << ": " << report.Frames << " frames\n";
 		std::map<std::string, std::size_t> shown;
 		char buffer[256];
+
 		for (const auto& zone : report.Zones)
 		{
 			if (shown[zone.Category]++ >= top)
 			{
 				continue;
 			}
+
 			std::snprintf(buffer, sizeof(buffer), "[Profile]   %-6s %-44.44s %8.3f ms  (p95 %7.3f, max %7.3f, %u frames)\n", zone.Category.c_str(),
 				zone.Name.c_str(), zone.PerFrame, zone.P95, zone.Max, zone.Frames);
 			out << buffer;
 		}
+
 		return out.str();
 	}
+
 } // namespace Engine

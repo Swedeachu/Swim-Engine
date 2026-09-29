@@ -18,16 +18,20 @@ namespace Swim::RhiVulkan
 		{
 			RequireComputeQueue();
 			const auto unsupported = Rhi::ResourceState::VertexBuffer | Rhi::ResourceState::IndexBuffer;
+
 			if ((static_cast<std::uint32_t>(before | after) & static_cast<std::uint32_t>(unsupported)) != 0)
 			{
 				throw std::invalid_argument("Compute-family buffer barriers cannot use vertex/index input states");
 			}
 		}
+
 		RequireResource<VulkanBuffer>(buffer, GetState());
+
 		if (after == Rhi::ResourceState::Undefined)
 		{
 			throw std::invalid_argument("Cannot transition a Vulkan buffer to Undefined");
 		}
+
 		const auto source = GetBufferState(buffer.GetDesc(), before);
 		const auto destination = GetBufferState(buffer.GetDesc(), after);
 		VkBufferMemoryBarrier2 barrier{};
@@ -54,6 +58,7 @@ namespace Swim::RhiVulkan
 		RequireResource<VulkanBuffer>(destination, GetState());
 		const auto& sourceDesc = source.GetDesc();
 		const auto& destinationDesc = destination.GetDesc();
+
 		if (!HasBufferUsage(sourceDesc.Usage, Rhi::BufferUsage::TransferSource) ||
 			!HasBufferUsage(destinationDesc.Usage, Rhi::BufferUsage::TransferDestination) || region.Size == 0 ||
 			region.SourceOffset > sourceDesc.Size || region.Size > sourceDesc.Size - region.SourceOffset ||
@@ -61,11 +66,13 @@ namespace Swim::RhiVulkan
 		{
 			throw std::invalid_argument("Vulkan buffer copy requires transfer usage and nonempty in-bounds ranges");
 		}
+
 		if (&source == &destination && region.SourceOffset < region.DestinationOffset + region.Size &&
 			region.DestinationOffset < region.SourceOffset + region.Size)
 		{
 			throw std::invalid_argument("Vulkan buffer copy ranges must not overlap");
 		}
+
 		const VkBufferCopy copy{ region.SourceOffset, region.DestinationOffset, region.Size };
 		GetState()->Dispatch.vkCmdCopyBuffer(commandBuffer, FromNativeHandle<VkBuffer>(source.GetNativeHandle()),
 			FromNativeHandle<VkBuffer>(destination.GetNativeHandle()), 1, &copy);

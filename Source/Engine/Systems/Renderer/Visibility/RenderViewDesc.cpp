@@ -4,14 +4,17 @@
 
 namespace Swim::Render
 {
+
 	GpuViewRecord BuildGpuViewRecord(const RenderViewDesc& desc)
 	{
 		GpuViewRecord view;
 		const auto& m = desc.ViewProjection;
+
 		for (int i = 0; i < 16; ++i)
 		{
 			view.ViewProjection[i] = m[i];
 		}
+
 		const auto row = [&](int r, int c)
 		{
 			return m[r * 4 + c];
@@ -25,10 +28,12 @@ namespace Swim::Render
 			{ row(2, 0), row(2, 1), row(2, 2), row(2, 3) },													// z >= 0
 			{ row(3, 0) - row(2, 0), row(3, 1) - row(2, 1), row(3, 2) - row(2, 2), row(3, 3) - row(2, 3) }, // z <= w
 		};
+
 		for (int p = 0; p < 6; ++p)
 		{
 			const float length = std::sqrt(planes[p][0] * planes[p][0] + planes[p][1] * planes[p][1] + planes[p][2] * planes[p][2]);
 			float* out = view.FrustumPlanes + p * 4;
+
 			if (length < 1.0e-12f)
 			{
 				// Degenerate (for example the far plane of an infinite projection): never culls.
@@ -36,19 +41,23 @@ namespace Swim::Render
 				out[3] = 1.0f;
 				continue;
 			}
+
 			for (int c = 0; c < 4; ++c)
 			{
 				out[c] = planes[p][c] / length;
 			}
 		}
+
 		for (int i = 0; i < 3; ++i)
 		{
 			view.CameraPosition[i] = desc.CameraPosition[i];
 		}
+
 		view.LodScale = desc.LodScale;
 		view.LodPixelError = desc.LodPixelError;
 		view.LodHysteresis = desc.LodHysteresis;
 		view.Flags = desc.Flags;
+
 		if (desc.Depth == DepthConvention::Forward)
 		{
 			view.Flags |= std::uint32_t(GpuViewFlags::ForwardDepth);
@@ -57,24 +66,29 @@ namespace Swim::Render
 		{
 			view.Flags &= ~std::uint32_t(GpuViewFlags::ForwardDepth);
 		}
+
 		return view;
 	}
 
 	std::array<float, 16> MultiplyRowMajor(const std::array<float, 16>& a, const std::array<float, 16>& b)
 	{
 		std::array<float, 16> result{};
+
 		for (int r = 0; r < 4; ++r)
 		{
 			for (int c = 0; c < 4; ++c)
 			{
 				float sum = 0.0f;
+
 				for (int k = 0; k < 4; ++k)
 				{
 					sum += a[r * 4 + k] * b[k * 4 + c];
 				}
+
 				result[r * 4 + c] = sum;
 			}
 		}
+
 		return result;
 	}
 
@@ -123,4 +137,5 @@ namespace Swim::Render
 		m[14] = -1.0f;
 		return m;
 	}
+
 } // namespace Swim::Render

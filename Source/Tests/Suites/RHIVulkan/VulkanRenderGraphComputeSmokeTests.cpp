@@ -13,6 +13,7 @@
 
 namespace
 {
+
 	void RunGraphComputeSmoke(const Swim::Rhi::GraphicsSystemDesc& graphicsDesc)
 	{
 #ifndef SWIM_RHI_COMPUTE_SPIRV_PATH
@@ -31,17 +32,20 @@ namespace
 		SWIM_REQUIRE_EQUAL(interface.DescriptorSchemas.size(), 1u);
 		const auto& schema = interface.DescriptorSchemas[0];
 		std::uint32_t inputBinding = UINT32_MAX, outputBinding = UINT32_MAX;
+
 		for (const auto& binding : schema.Bindings)
 		{
 			if (binding.Type == Rhi::DescriptorType::ReadOnlyStorageBuffer)
 			{
 				inputBinding = binding.Binding;
 			}
+
 			if (binding.Type == Rhi::DescriptorType::StorageBuffer)
 			{
 				outputBinding = binding.Binding;
 			}
 		}
+
 		SWIM_REQUIRE(inputBinding != UINT32_MAX && outputBinding != UINT32_MAX);
 
 		std::ifstream file(SWIM_RHI_COMPUTE_SPIRV_PATH, std::ios::binary | std::ios::ate);
@@ -79,14 +83,17 @@ namespace
 		SWIM_REQUIRE(input && readback);
 
 		RenderGraphExecutor executor(*device);
+
 		for (std::uint32_t frame = 0; frame < 4; ++frame)
 		{
 			executor.Wait();
 			std::array<std::uint32_t, count> source{}, actual{};
+
 			for (std::uint32_t i = 0; i < count; ++i)
 			{
 				source[i] = i * 17 + frame * 101;
 			}
+
 			input->Write(0, std::as_bytes(std::span(source)));
 
 			RenderGraph graph;
@@ -163,18 +170,22 @@ namespace
 			executor.Wait();
 
 			readback->Read(0, std::as_writable_bytes(std::span(actual)));
+
 			for (std::uint32_t i = 0; i < count; ++i)
 			{
 				SWIM_CHECK_EQUAL(actual[i], i < active ? source[i] * 8 + 18 : source[i]);
 			}
+
 			SWIM_CHECK_EQUAL(executor.GetPooledResourceCount(), 1u);
 		}
+
 #endif
 	}
 
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "RenderGraphComputeStorageAndReadback", SWIM_TEST_LOCATION,
@@ -183,6 +194,8 @@ namespace
 					Swim::Testing::RunValidatedVulkanSmoke(&RunGraphComputeSmoke);
 				} });
 		}
+
 		return true;
 	}();
+
 } // namespace

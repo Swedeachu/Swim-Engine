@@ -65,21 +65,25 @@ SWIM_TEST("RHI.Vulkan.StorageTextureCommand", "RejectsUnsupportedStatesFamiliesA
 	RhiVulkan::VulkanBuffer buffer(capture.State, VK_NULL_HANDLE, nullptr, { 128, Rhi::BufferUsage::TransferDestination });
 	capture.Pool->FamilyIndex = 1;
 	capture.Commands->Begin();
+
 	for (auto state : { Rhi::ResourceState::ColorAttachment, Rhi::ResourceState::DepthStencilRead,
 		Rhi::ResourceState::DepthStencilWrite, Rhi::ResourceState::Present })
 	{
 		SWIM_CHECK_THROWS(capture.Commands->Transition(texture, state, Rhi::ResourceState::ShaderWrite, {}), std::invalid_argument);
 		SWIM_CHECK_THROWS(capture.Commands->Transition(texture, Rhi::ResourceState::ShaderWrite, state, {}), std::invalid_argument);
 	}
+
 	Rhi::BufferTextureCopyRegion region{};
 	region.Extent = { 16, 16, 1 };
 	SWIM_CHECK_THROWS(capture.Commands->CopyTextureToBuffer(texture, buffer, region), std::invalid_argument);
+
 	for (auto family : { 2u, 99u })
 	{
 		capture.Pool->FamilyIndex = family;
 		SWIM_CHECK_THROWS(capture.Commands->Transition(texture, Rhi::ResourceState::Undefined, Rhi::ResourceState::ShaderWrite, {}), std::logic_error);
 		SWIM_CHECK_THROWS(capture.Commands->CopyTextureToBuffer(texture, buffer, region), std::logic_error);
 	}
+
 	SWIM_CHECK(capture.Images.empty());
 	SWIM_CHECK_EQUAL(capture.CopyCount, 0u);
 	capture.Pool->FamilyIndex = 1;

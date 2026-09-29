@@ -19,6 +19,7 @@ namespace Swim::Platform
 
 	namespace Internal
 	{
+
 		struct WindowAccess
 		{
 			static SDL_Window* GetSdlWindow(Window& window)
@@ -26,6 +27,7 @@ namespace Swim::Platform
 				return window.impl ? window.impl->Window : nullptr;
 			}
 		};
+
 	}
 
 }

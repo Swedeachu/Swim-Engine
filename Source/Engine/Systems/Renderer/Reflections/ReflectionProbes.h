@@ -14,6 +14,7 @@
 // are captured each frame.
 namespace Swim::Render::ReflectionProbes
 {
+
 	using Float3 = std::array<float, 3>;
 
 	// The axes of a cube face in the renderer's cube convention (Environment::
@@ -124,7 +125,9 @@ namespace Swim::Render::ReflectionProbes
 
 	class Scheduler
 	{
+
 	  public:
+
 		// Urgency of a face: a probe with faces never captured first (x 1000), then faces of
 		// a dynamic probe that see something that moved this frame (`movers` within
 		// MoverRange inside the face's frustum: 300 + frames since capture), then faces of a
@@ -140,6 +143,7 @@ namespace Swim::Render::ReflectionProbes
 		std::uint32_t GetUsedSlots() const;
 
 	  private:
+
 		struct Slot
 		{
 			bool Used = false;
@@ -151,5 +155,7 @@ namespace Swim::Render::ReflectionProbes
 		};
 
 		std::vector<Slot> slots;
+
 	};
+
 } // namespace Swim::Render::ReflectionProbes

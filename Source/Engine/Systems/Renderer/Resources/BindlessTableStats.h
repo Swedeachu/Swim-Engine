@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	struct BindlessTableStats
 	{
 		std::uint32_t LiveTextures = 0; // Including the permanent fallback element.
@@ -13,4 +14,5 @@ namespace Swim::Render
 		std::uint32_t SamplerCapacity = 0;
 		std::uint64_t DescriptorWrites = 0; // Elements written, fallback rewrites included.
 	};
+
 } // namespace Swim::Render

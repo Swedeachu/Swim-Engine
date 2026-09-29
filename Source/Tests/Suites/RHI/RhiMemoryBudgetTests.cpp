@@ -20,6 +20,7 @@ SWIM_TEST("RHI.MemoryBudget", "HeadroomSaturatesWithoutHidingOverBudgetUsage")
 {
 	Rhi::MemoryHeapBudget heap;
 	heap.BudgetBytes = 100;
+
 	for (auto usage : { 0ull, 50ull, 100ull, 101ull, std::numeric_limits<unsigned long long>::max() })
 	{
 		heap.UsageBytes = usage;

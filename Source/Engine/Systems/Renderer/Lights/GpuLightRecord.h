@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// One light as shaders read it (std430, 64 bytes; Shaders/Slang/Lights/
 	// GpuLightRecords.slang mirrors it). EncodeLight fills it from a LightDesc.
 	struct GpuLightRecord
@@ -42,4 +43,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(GpuLightHeader) == 32);
+
 } // namespace Swim::Render

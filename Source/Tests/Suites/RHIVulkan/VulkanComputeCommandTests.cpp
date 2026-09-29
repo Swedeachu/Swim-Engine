@@ -7,6 +7,7 @@ using namespace Swim;
 
 namespace
 {
+
 	struct ComputeCommands : Testing::VulkanComputeCapture
 	{
 		Rhi::DescriptorSchemaDesc Schema{ 1, { { 7, Rhi::DescriptorType::StorageBuffer, 1, Rhi::ShaderStageMask::Compute } } };
@@ -44,6 +45,7 @@ namespace
 			Commands->PushConstants(Rhi::ShaderStageMask::Compute, 0, Data);
 		}
 	};
+
 }
 
 SWIM_TEST("RHI.Vulkan.ComputeCommand", "RequiresCompleteBindingsAndConstantsAndForwardsComputeBindPoint")
@@ -154,12 +156,14 @@ SWIM_TEST("RHI.Vulkan.ComputeCommand", "PoolReuseAndQueueCapabilitiesAndDeviceLo
 	capture.Commands->Begin();
 	SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);
 	capture.Bind();
+
 	for (auto family : { 2u, 99u })
 	{
 		capture.Pool->FamilyIndex = family;
 		SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);
 		SWIM_CHECK_THROWS(capture.Commands->BindComputePipeline(*capture.Pipeline), std::logic_error);
 	}
+
 	capture.Pool->FamilyIndex = 1;
 	capture.State->QueueProperties[1].queueCount = 0;
 	SWIM_CHECK_THROWS(capture.Commands->Dispatch(1, 1, 1), std::logic_error);

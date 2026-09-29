@@ -5,6 +5,7 @@ using namespace Swim;
 
 namespace
 {
+
 	Rhi::TextureDesc TextureDesc()
 	{
 		Rhi::TextureDesc desc;
@@ -20,6 +21,7 @@ namespace
 	{
 		return { Rhi::TextureViewDimension::Texture2D, Rhi::Format::RGBA32Float, 1, 1, 1, 1, {} };
 	}
+
 }
 
 SWIM_TEST("RHI.Vulkan.StorageTexture", "NativeLayoutPoolFormatOwnershipAndDescriptorLimits")
@@ -54,6 +56,7 @@ SWIM_TEST("RHI.Vulkan.StorageTexture", "NativeLayoutPoolFormatOwnershipAndDescri
 SWIM_TEST("RHI.Vulkan.StorageTexture", "LayoutRejectsMissingUnsupportedFormatsAndGraphicsWrites")
 {
 	Testing::VulkanStorageTextureCapture capture;
+
 	for (auto format : { Rhi::Format::Undefined, Rhi::Format::BGRA8Unorm, Rhi::Format::RGBA8UnormSrgb,
 		Rhi::Format::D32Float, Rhi::Format::BC7Unorm, Rhi::Format::RG16Float })
 	{
@@ -61,6 +64,7 @@ SWIM_TEST("RHI.Vulkan.StorageTexture", "LayoutRejectsMissingUnsupportedFormatsAn
 		auto program = capture.MakeComputeProgram({ { &capture.Schema, 1 }, {} });
 		SWIM_CHECK(!RhiVulkan::VulkanPipelineLayout::Create(capture.State, { program.get(), {} }));
 	}
+
 	capture.Schema.Bindings[0].StorageTextureFormat = Rhi::Format::RGBA32Float;
 	capture.Schema.Bindings[0].Stages = Rhi::ShaderStageMask::Fragment;
 	auto graphics = capture.MakeProgram({ { &capture.Schema, 1 }, {} });
@@ -104,50 +108,62 @@ SWIM_TEST("RHI.Vulkan.StorageTexture", "BadViewsFormatsUsagesAndFeaturesNeverPub
 	Testing::VulkanStorageTextureCapture capture;
 	capture.CreateTable();
 	SWIM_REQUIRE(capture.Table);
+
 	for (std::uint32_t invalid = 0; invalid < 11; ++invalid)
 	{
 		auto desc = TextureDesc();
 		auto viewDesc = ViewDesc();
+
 		if (invalid == 0)
 		{
 			desc.Usage = Rhi::TextureUsage::Sampled;
 		}
+
 		if (invalid == 1)
 		{
 			desc.Samples = Rhi::SampleCount::X2;
 		}
+
 		if (invalid == 2)
 		{
 			viewDesc.Dimension = Rhi::TextureViewDimension::Texture2DArray;
 		}
+
 		if (invalid == 3)
 		{
 			viewDesc.MipLevelCount = 2;
 		}
+
 		if (invalid == 4)
 		{
 			viewDesc.ArrayLayerCount = 2;
 		}
+
 		if (invalid == 5)
 		{
 			viewDesc.PixelFormat = Rhi::Format::RGBA32Uint;
 		}
+
 		if (invalid == 6)
 		{
 			viewDesc.BaseMipLevel = desc.MipLevels;
 		}
+
 		if (invalid == 7)
 		{
 			viewDesc.BaseArrayLayer = desc.ArrayLayers;
 		}
+
 		if (invalid == 8)
 		{
 			desc.PixelFormat = Rhi::Format::R32Float;
 		}
+
 		if (invalid == 9)
 		{
 			desc.Dimension = Rhi::TextureDimension::Texture3D;
 		}
+
 		RhiVulkan::VulkanTexture texture(capture.State, VK_NULL_HANDLE, desc);
 		RhiVulkan::VulkanTextureView view(capture.State, texture, RhiVulkan::FromNativeHandle<VkImageView>(invalid == 10 ? 0 : 2), viewDesc);
 		Rhi::DescriptorWrite write{};
@@ -155,6 +171,7 @@ SWIM_TEST("RHI.Vulkan.StorageTexture", "BadViewsFormatsUsagesAndFeaturesNeverPub
 		write.TextureResource = &view;
 		SWIM_CHECK_THROWS(capture.Table->Write({ &write, 1 }), std::invalid_argument);
 	}
+
 	RhiVulkan::VulkanTexture texture(capture.State, VK_NULL_HANDLE, TextureDesc());
 	RhiVulkan::VulkanTextureView view(capture.State, texture, RhiVulkan::FromNativeHandle<VkImageView>(2), ViewDesc());
 	Rhi::DescriptorWrite write{};
@@ -174,11 +191,13 @@ SWIM_TEST("RHI.Vulkan.StorageTexture", "MixedBatchForeignResourceAndDeviceLossAr
 	RhiVulkan::VulkanTexture texture(capture.State, VK_NULL_HANDLE, TextureDesc());
 	RhiVulkan::VulkanTextureView view(capture.State, texture, RhiVulkan::FromNativeHandle<VkImageView>(2), ViewDesc());
 	std::array<Rhi::DescriptorWrite, 2> writes{};
+
 	for (auto& write : writes)
 	{
 		write.Binding = 7;
 		write.TextureResource = &view;
 	}
+
 	writes[1].BufferOffset = 4;
 	SWIM_CHECK_THROWS(capture.Table->Write(writes), std::invalid_argument);
 	SWIM_CHECK_EQUAL(capture.Updates, 0u);

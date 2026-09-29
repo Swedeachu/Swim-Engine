@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Byte accounting for one stream's pages. Fragmentation is
 	// 1 - LargestFreeRange / FreeBytes (zero when nothing, or one block, is free).
 	struct GeometryPoolStats
@@ -33,4 +34,5 @@ namespace Swim::Render
 		std::uint64_t SubmeshRowsAllocated = 0;
 		std::uint64_t SubmeshRowCapacity = 0;
 	};
+
 } // namespace Swim::Render

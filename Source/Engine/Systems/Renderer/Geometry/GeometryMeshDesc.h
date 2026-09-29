@@ -5,6 +5,7 @@
 
 namespace Swim::Render
 {
+
 	// Compiled mesh payload handed to GeometryHeap::CreateMesh. Bytes are copied at
 	// creation, so the spans may be released immediately (for example after a
 	// .sasset chunk is decoded). VertexLayout is the caller's packed-format id;
@@ -25,4 +26,5 @@ namespace Swim::Render
 		std::uint32_t MeshletCount = 0;
 		std::string_view DebugName;
 	};
+
 } // namespace Swim::Render

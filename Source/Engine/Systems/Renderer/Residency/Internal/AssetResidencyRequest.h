@@ -13,6 +13,7 @@
 
 namespace Swim::Render::Internal
 {
+
 	enum class ResidencyAssetKind : std::uint8_t
 	{
 		Mesh,
@@ -43,4 +44,5 @@ namespace Swim::Render::Internal
 		bool BindlessRejected = false;	// The RHI refused the view; Error explains why.
 		Assets::AssetError Error;
 	};
+
 } // namespace Swim::Render::Internal

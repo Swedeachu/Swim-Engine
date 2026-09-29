@@ -10,6 +10,7 @@
 
 namespace Engine
 {
+
 	// The engine renders through the modern RHI only. Vulkan is the one implemented
 	// backend today; D3D12/Metal are reserved names that fail at startup until their
 	// RHI backends exist.
@@ -118,4 +119,5 @@ namespace Engine
 
 	// One line per option, for --help.
 	std::string GetEngineConfigUsage();
+
 } // namespace Engine

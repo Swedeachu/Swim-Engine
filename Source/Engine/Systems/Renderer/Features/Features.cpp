@@ -10,8 +10,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		using Float4 = std::array<float, 4>;
 
 		Float4 Vec(const std::array<float, 3>& v, float w)
@@ -27,6 +29,7 @@ namespace Engine
 			{
 				return 0.0f;
 			}
+
 			const float outside = std::max({ -projected[0], projected[0] - 1.0f, -projected[1], projected[1] - 1.0f, 0.0f });
 			return std::clamp(1.0f - outside / std::max(margin, 1.0e-3f), 0.0f, 1.0f);
 		}
@@ -35,6 +38,7 @@ namespace Engine
 		{
 			return std::max(1u, static_cast<std::uint32_t>(std::lround(float(size) * std::clamp(scale, 0.25f, 1.0f))));
 		}
+
 	} // namespace
 
 	void SunShafts::Record(RenderFeatureContext& context)
@@ -42,6 +46,7 @@ namespace Engine
 		const auto& view = context.View();
 		const auto sun = view.ProjectDirection(view.SunDirection);
 		const float fade = ScreenFade(sun, Settings.EdgeFade) * std::clamp(view.SunDirection[1] * 8.0f + 0.2f, 0.0f, 1.0f);
+
 		if (fade <= 0.0f || Settings.Intensity <= 0.0f)
 		{
 			return;
@@ -91,6 +96,7 @@ namespace Engine
 		const auto& view = context.View();
 		const auto sun = view.ProjectDirection(view.SunDirection);
 		const float fade = ScreenFade(sun, Settings.EdgeFade) * std::clamp(view.SunDirection[1] * 8.0f + 0.2f, 0.0f, 1.0f);
+
 		if (fade <= 0.0f || Settings.Intensity <= 0.0f)
 		{
 			return;
@@ -152,14 +158,17 @@ namespace Engine
 	void VolumetricClouds::Record(RenderFeatureContext& context)
 	{
 		const auto& view = context.View();
+
 		for (int c = 0; c < 3; ++c)
 		{
 			windOffset[c] = std::fmod(windOffset[c] + Settings.Wind[c] * view.DeltaTime, 1.0e6f);
 		}
+
 		if (!Visible())
 		{
 			return;
 		}
+
 		const std::uint32_t width = Scaled(view.Width, Settings.ResolutionScale);
 		const std::uint32_t height = Scaled(view.Height, Settings.ResolutionScale);
 		auto params = MakeParams(context, 1.0f);
@@ -201,6 +210,7 @@ namespace Engine
 		{
 			return std::nullopt;
 		}
+
 		// The cube is in sky radiance units and lighting multiplies it by
 		// EnvironmentIntensity, which the clouds' own lighting already includes.
 		const float intensity = context.Settings().EnvironmentIntensity;
@@ -218,4 +228,5 @@ namespace Engine
 		context.Compute("VolumetricCloudsEnvironment").Buffer("Params", buffer).Storage("Clouds", clouds).Dispatch(faceSize, faceSize * 6u);
 		return clouds;
 	}
+
 } // namespace Engine

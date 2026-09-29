@@ -15,15 +15,19 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		std::shared_ptr<const Swim::Text::FontFace> LoadFace(const std::filesystem::path& path)
 		{
 			std::ifstream stream(path, std::ios::binary);
+
 			if (!stream)
 			{
 				return nullptr;
 			}
+
 			std::vector<char> bytes((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 			return std::make_shared<Swim::Text::FontFace>(std::as_bytes(std::span(bytes)));
 		}
@@ -36,16 +40,19 @@ namespace Engine
 			theme->Metrics.TransitionSeconds = 0.08f;
 			return theme;
 		}
+
 	} // namespace
 
 	UiRuntime::UiRuntime(const std::filesystem::path& resourceRoot)
 	{
 		const auto directory = resourceRoot / "Fonts";
 		auto regular = LoadFace(directory / "DejaVuSans.ttf");
+
 		if (!regular)
 		{
 			throw std::runtime_error("UiRuntime: missing font " + (directory / "DejaVuSans.ttf").string());
 		}
+
 		auto bold = LoadFace(directory / "DejaVuSans-Bold.ttf");
 		auto mono = LoadFace(directory / "DejaVuSansMono.ttf");
 		fonts = Swim::Text::FontCollection::Single(regular);
@@ -61,14 +68,17 @@ namespace Engine
 	UiRuntime::~UiRuntime()
 	{
 		RemoveAll();
+
 		for (auto& [id, overlay] : overlays)
 		{
 			(void)id;
+
 			if (overlay.Routed)
 			{
 				router.Remove(overlay.Canvas.Handle);
 			}
 		}
+
 		overlays.clear();
 	}
 
@@ -86,24 +96,29 @@ namespace Engine
 			(void)entity;
 			router.Remove(state.Handle);
 		}
+
 		canvases.clear();
 	}
 
 	void UiRuntime::Sync(Scene* sceneValue, const ViewDesc& viewValue)
 	{
 		namespace UI = Swim::UI;
+
 		if (sceneValue != scene)
 		{
 			RemoveAll();
 			scene = sceneValue;
 		}
+
 		view = viewValue;
 		router.SetCamera(view.Camera);
+
 		if (!scene)
 		{
 			SyncOverlays();
 			return;
 		}
+
 		auto& registry = scene->GetRegistry();
 		// Drop canvases whose entity, component or document went away (or were hidden).
 		for (auto it = canvases.begin(); it != canvases.end();)
@@ -111,11 +126,13 @@ namespace Engine
 			const auto* component = registry.valid(it->first) ? registry.try_get<UiCanvas>(it->first) : nullptr;
 			const bool keep =
 				component && component->Visible && component->Document == it->second.Document && component->Mode == it->second.Mode;
+
 			if (keep)
 			{
 				++it;
 				continue;
 			}
+
 			router.Remove(it->second.Handle);
 			it = canvases.erase(it);
 		}
@@ -123,19 +140,25 @@ namespace Engine
 		const float viewportWidth = std::max(view.Camera.ViewportWidth, 1.0f);
 		const float viewportHeight = std::max(view.Camera.ViewportHeight, 1.0f);
 		auto canvasView = registry.view<UiCanvas>();
+
 		for (const entt::entity entity : canvasView)
 		{
 			const auto& component = canvasView.get<UiCanvas>(entity);
+
 			if (!component.Visible || !component.Document)
 			{
 				continue;
 			}
+
 			const bool world = component.Mode == UI::UiCanvasMode::WorldPanel || component.Mode == UI::UiCanvasMode::Billboard;
+
 			if (!world && component.Mode != UI::UiCanvasMode::Screen)
 			{
 				continue; // Render surfaces are not mirrored by the runtime (yet).
 			}
+
 			auto found = canvases.find(entity);
+
 			if (found == canvases.end())
 			{
 				UI::UiCanvasDesc desc;
@@ -151,10 +174,12 @@ namespace Engine
 				state.Sequence = ++sequence;
 				found = canvases.emplace(entity, std::move(state)).first;
 			}
+
 			auto& state = found->second;
 			state.Culled = false;
 			state.Order = component.Order;
 			state.DepthTest = component.DepthTest;
+
 			if (!world)
 			{
 				const UI::UiPoint size{ component.Size.X > 0.0f ? component.Size.X : viewportWidth - component.Offset.X,
@@ -169,6 +194,7 @@ namespace Engine
 				state.LayoutSize = { std::max(component.Size.X, 1.0f), std::max(component.Size.Y, 1.0f) };
 				state.DpiScale = 1.0f;
 				UI::UiWorldPlacement placement;
+
 				if (const auto* transform = registry.try_get<Transform>(entity))
 				{
 					const glm::mat4& m = transform->GetWorldMatrix(registry);
@@ -181,6 +207,7 @@ namespace Engine
 						}
 					}
 				}
+
 				placement.Pivot = component.Pivot;
 				placement.UnitsPerPixel = component.UnitsPerPixel > 0.0f ? component.UnitsPerPixel : 0.0025f;
 				placement.Billboard = component.Billboard;
@@ -189,6 +216,7 @@ namespace Engine
 				placement.FadeStart = component.FadeStart;
 				placement.FadeEnd = component.FadeEnd;
 				state.Placement = placement;
+
 				try
 				{
 					state.CanvasToWorld = UI::CanvasToWorld(component.Mode, placement, state.LayoutSize, &view.Camera);
@@ -201,9 +229,11 @@ namespace Engine
 					state.Culled = true;
 				}
 			}
+
 			router.SetInteractive(state.Handle, component.Interactive && !state.Culled);
 			state.Document->Layout(state.LayoutSize, state.DpiScale);
 		}
+
 		SyncOverlays();
 	}
 
@@ -230,14 +260,17 @@ namespace Engine
 	void UiRuntime::RemoveOverlay(std::uint32_t overlay)
 	{
 		const auto found = overlays.find(overlay);
+
 		if (found == overlays.end())
 		{
 			return;
 		}
+
 		if (found->second.Routed)
 		{
 			router.Remove(found->second.Canvas.Handle);
 		}
+
 		overlays.erase(found);
 	}
 
@@ -246,10 +279,12 @@ namespace Engine
 		namespace UI = Swim::UI;
 		const float viewportWidth = std::max(view.Camera.ViewportWidth, 1.0f);
 		const float viewportHeight = std::max(view.Camera.ViewportHeight, 1.0f);
+
 		for (auto& [id, overlay] : overlays)
 		{
 			(void)id;
 			auto& state = overlay.Canvas;
+
 			if (!overlay.Visible || !state.Document)
 			{
 				if (overlay.Routed)
@@ -257,8 +292,10 @@ namespace Engine
 					router.Remove(state.Handle);
 					overlay.Routed = false;
 				}
+
 				continue;
 			}
+
 			if (!overlay.Routed)
 			{
 				UI::UiCanvasDesc desc;
@@ -271,6 +308,7 @@ namespace Engine
 				state.Sequence = ++sequence;
 				overlay.Routed = true;
 			}
+
 			state.LayoutSize = { viewportWidth, viewportHeight };
 			state.DpiScale = view.DpiScale;
 			state.Offset = {};
@@ -288,10 +326,12 @@ namespace Engine
 			{
 				return entry.second.Routed;
 			});
+
 		if (input && (!canvases.empty() || overlayShown))
 		{
 			inputFrame = bridge.Apply(*input, router, &view.Camera, {}, deltaSeconds);
 		}
+
 		return inputFrame;
 	}
 
@@ -301,6 +341,7 @@ namespace Engine
 		drawList.clear();
 		std::vector<const CanvasState*> ordered;
 		ordered.reserve(canvases.size());
+
 		for (auto& [entity, state] : canvases)
 		{
 			(void)entity;
@@ -308,10 +349,13 @@ namespace Engine
 			state.Document->Layout(state.LayoutSize, state.DpiScale);
 			ordered.push_back(&state);
 		}
+
 		std::vector<CanvasState*> overlayStates;
+
 		for (auto& [id, overlay] : overlays)
 		{
 			(void)id;
+
 			if (overlay.Routed)
 			{
 				overlay.Canvas.Document->Update(std::max(deltaSeconds, 0.0f));
@@ -319,6 +363,7 @@ namespace Engine
 				overlayStates.push_back(&overlay.Canvas);
 			}
 		}
+
 		std::stable_sort(overlayStates.begin(), overlayStates.end(),
 			[](const CanvasState* a, const CanvasState* b)
 			{
@@ -329,25 +374,31 @@ namespace Engine
 			{
 				const bool aWorld = a->Mode != UI::UiCanvasMode::Screen;
 				const bool bWorld = b->Mode != UI::UiCanvasMode::Screen;
+
 				if (aWorld != bWorld)
 				{
 					return aWorld; // World canvases first (under the overlays).
 				}
+
 				if (a->Order != b->Order)
 				{
 					return a->Order < b->Order;
 				}
+
 				return a->Sequence < b->Sequence;
 			});
+
 		for (const CanvasState* state : ordered)
 		{
 			if (state->Culled)
 			{
 				continue;
 			}
+
 			UiDrawItem item;
 			item.Document = state->Document.get();
 			item.DpiScale = state->DpiScale;
+
 			if (state->Mode == UI::UiCanvasMode::Screen)
 			{
 				item.OffsetX = state->Offset.X;
@@ -362,8 +413,10 @@ namespace Engine
 					UI::CanvasDistance(state->CanvasToWorld, state->LayoutSize, state->Placement.Pivot, view.Camera.View);
 				item.Opacity = UI::CanvasFade(state->Placement, distance);
 			}
+
 			drawList.push_back(item);
 		}
+
 		for (const CanvasState* state : overlayStates)
 		{
 			UiDrawItem item;
@@ -371,6 +424,8 @@ namespace Engine
 			item.DpiScale = state->DpiScale;
 			drawList.push_back(item);
 		}
+
 		return drawList;
 	}
+
 } // namespace Engine

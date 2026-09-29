@@ -11,12 +11,14 @@ using Swim::Testing::AngleBetween;
 
 namespace
 {
+
 	constexpr float Pi = 3.14159265358979f;
 
 	bool Near(const Vec3& a, const Vec3& b, float tolerance = 1e-5f)
 	{
 		return std::abs(a[0] - b[0]) <= tolerance && std::abs(a[1] - b[1]) <= tolerance && std::abs(a[2] - b[2]) <= tolerance;
 	}
+
 } // namespace
 
 SWIM_TEST("Animation.Math", "QuaternionsSlerpComposeAndMatchMatrices")
@@ -39,10 +41,12 @@ SWIM_TEST("Animation.Math", "QuaternionsSlerpComposeAndMatchMatrices")
 	child.Rotation = FromAxisAngle({ 1, 0, 0 }, 0.3f);
 	const Matrix4 composed = ToMatrix(Compose(parent, child));
 	const Matrix4 product = Multiply(ToMatrix(parent), ToMatrix(child));
+
 	for (std::size_t index = 0; index < 16; ++index)
 	{
 		SWIM_CHECK_NEAR(composed[index], product[index], 1e-5f);
 	}
+
 	const Vec3 point{ 0.5f, -1.0f, 2.0f };
 	SWIM_CHECK(Near(TransformPoint(ToAffineRows(product), point), TransformPoint(product, point)));
 	SWIM_CHECK_NEAR(MaxColumnScale(ToAffineRows(product)), 2.0f, 1e-5f);
@@ -105,6 +109,7 @@ SWIM_TEST("Animation.Clip", "SamplesStepLinearCubicAndClampsOutsideItsKeys")
 	cubic.Components = 3;
 	cubic.Times = { 0.0f, 2.0f };
 	cubic.Values = { 0, 0, 0, /*v0*/ 0, 0, 0, /*out0*/ 1, 0, 0, /*in1*/ -1, 0, 0, /*v1*/ 3, 0, 0, /*out1*/ 0, 0, 0 };
+
 	for (const float t : { 0.25f, 0.5f, 0.8f })
 	{
 		SampleTrack(cubic, t * 2.0f, out);
@@ -206,6 +211,7 @@ SWIM_TEST("Animation.SkeletonInstance", "BuildsSkinningPalettesHistoryAndSockets
 			SWIM_CHECK_NEAR(matrix[index], IdentityAffine[index], 1e-6f);
 		}
 	}
+
 	SWIM_CHECK(Near(TransformPoint(instance.GetModelTransforms()[2], { 0, 0, 0 }), { 0, 2, 0.5f }));
 
 	AnimationPose pose = MakeRestPose(*skeleton);

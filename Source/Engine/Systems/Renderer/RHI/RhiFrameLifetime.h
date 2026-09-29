@@ -25,7 +25,9 @@ namespace Swim::Rhi
 
 	class FrameContextRing
 	{
+
 	public:
+
 		struct FrameContext
 		{
 			std::uint32_t Index = 0;
@@ -37,6 +39,7 @@ namespace Swim::Rhi
 			}
 
 		private:
+
 			friend class FrameContextRing;
 
 			std::vector<std::shared_ptr<Buffer>> readbackBuffers;
@@ -54,6 +57,7 @@ namespace Swim::Rhi
 			}
 
 			auto timeline = device.CreateTimeline(0);
+
 			if (!timeline)
 			{
 				return nullptr;
@@ -61,17 +65,21 @@ namespace Swim::Rhi
 
 			std::vector<FrameContext> contexts;
 			contexts.resize(desc.FrameCount);
+
 			for (std::uint32_t index = 0; index < desc.FrameCount; ++index)
 			{
 				contexts[index].Index = index;
 				contexts[index].commandPool = device.CreateCommandPool(desc.Queue);
+
 				if (!contexts[index].commandPool)
 				{
 					return nullptr;
 				}
+
 				if (desc.Upload.Capacity != 0)
 				{
 					contexts[index].uploadArena = UploadArena::Create(device, desc.Upload);
+
 					if (!contexts[index].uploadArena)
 					{
 						return nullptr;
@@ -95,6 +103,7 @@ namespace Swim::Rhi
 		}
 
 		FrameContextRing(const FrameContextRing&) = delete;
+
 		FrameContextRing& operator=(const FrameContextRing&) = delete;
 
 		FrameContext& BeginFrame()
@@ -107,6 +116,7 @@ namespace Swim::Rhi
 			CollectCompleted();
 
 			FrameContext& context = contexts[nextContextIndex];
+
 			if (context.CompletionValue != 0 && timeline->GetCompletedValue() < context.CompletionValue)
 			{
 				if (!timeline->Wait(context.CompletionValue))
@@ -119,10 +129,12 @@ namespace Swim::Rhi
 			context.retiredObjects.clear();
 			context.readbackBuffers.clear();
 			context.commandPool->Reset();
+
 			if (context.uploadArena)
 			{
 				context.uploadArena->Reset();
 			}
+
 			context.CompletionValue = 0;
 
 			currentContext = &context;
@@ -140,6 +152,7 @@ namespace Swim::Rhi
 			{
 				throw std::logic_error("Only an active empty RHI frame can be canceled");
 			}
+
 			nextContextIndex = currentContext->Index;
 			currentContext = nullptr;
 		}
@@ -164,6 +177,7 @@ namespace Swim::Rhi
 			}
 
 			auto commandList = currentContext->commandPool->CreateCommandList();
+
 			if (!commandList)
 			{
 				throw std::runtime_error("Failed to allocate an RHI frame command list");
@@ -186,8 +200,10 @@ namespace Swim::Rhi
 			{
 				throw std::overflow_error("RHI frame timeline exhausted");
 			}
+
 			const std::uint64_t signalValue = nextSignalValue;
 			std::vector<TimelinePoint> signals(desc.SignalTimelines.begin(), desc.SignalTimelines.end());
+
 			for (const TimelinePoint& signal : signals)
 			{
 				if (signal.Semaphore == timeline.get())
@@ -195,35 +211,43 @@ namespace Swim::Rhi
 					throw std::invalid_argument("Frame timeline signaling is owned by FrameContextRing");
 				}
 			}
+
 			signals.push_back({ timeline.get(), signalValue });
 
 			std::vector<std::shared_ptr<Buffer>> retainedReadbacks;
 			retainedReadbacks.reserve(readbacks.size());
+
 			for (std::size_t index = 0; index < readbacks.size(); ++index)
 			{
 				auto* arena = readbacks[index];
+
 				if (arena == nullptr || std::find(readbacks.begin(), readbacks.begin() + index, arena) != readbacks.begin() + index)
 				{
 					throw std::invalid_argument("Readback batches must be non-null and unique within a submission");
 				}
+
 				arena->ValidateSubmission();
 				retainedReadbacks.push_back(arena->buffer);
 			}
 
 			SubmitDesc submit = desc;
 			submit.SignalTimelines = signals;
+
 			if (currentContext->uploadArena)
 			{
 				currentContext->uploadArena->Flush();
 			}
+
 			queue.Submit(submit);
 			// All potentially allocating validation/bookkeeping happened before
 			// submission. Committing successful GPU work must not throw.
 			currentContext->readbackBuffers = std::move(retainedReadbacks);
+
 			for (auto* arena : readbacks)
 			{
 				arena->CommitSubmission(timeline, signalValue);
 			}
+
 			++nextSignalValue;
 
 			currentContext->CompletionValue = signalValue;
@@ -241,6 +265,7 @@ namespace Swim::Rhi
 
 			std::vector<CommandList*> commandLists;
 			commandLists.reserve(currentContext->commandLists.size());
+
 			for (const auto& commandList : currentContext->commandLists)
 			{
 				commandLists.push_back(commandList.get());
@@ -255,10 +280,12 @@ namespace Swim::Rhi
 		void Retire(std::unique_ptr<ObjectType>&& object)
 		{
 			static_assert(std::is_base_of_v<RhiObject, ObjectType>, "Frame retirement requires an RHI object");
+
 			if (!object)
 			{
 				return;
 			}
+
 			if (currentContext == nullptr)
 			{
 				throw std::logic_error("Frame-scoped RHI retirement requires an active frame context");
@@ -271,14 +298,17 @@ namespace Swim::Rhi
 		void RetireAt(std::uint64_t completionValue, std::unique_ptr<ObjectType>&& object)
 		{
 			static_assert(std::is_base_of_v<RhiObject, ObjectType>, "Frame retirement requires an RHI object");
+
 			if (!object)
 			{
 				return;
 			}
+
 			if (completionValue > lastSubmittedValue)
 			{
 				throw std::invalid_argument("Cannot retire an RHI object against an unscheduled frame timeline value");
 			}
+
 			if (completionValue == 0 || completionValue <= timeline->GetCompletedValue())
 			{
 				return;
@@ -304,10 +334,12 @@ namespace Swim::Rhi
 		void Drain()
 		{
 			std::uint64_t drainValue = lastSubmittedValue;
+
 			for (const DeferredObject& object : deferredObjects)
 			{
 				drainValue = std::max(drainValue, object.CompletionValue);
 			}
+
 			if (drainValue != 0 && timeline->GetCompletedValue() < drainValue)
 			{
 				if (!timeline->Wait(drainValue))
@@ -321,12 +353,15 @@ namespace Swim::Rhi
 				context.commandLists.clear();
 				context.retiredObjects.clear();
 				context.readbackBuffers.clear();
+
 				if (context.uploadArena)
 				{
 					context.uploadArena->Reset();
 				}
+
 				context.CompletionValue = 0;
 			}
+
 			deferredObjects.clear();
 			currentContext = nullptr;
 		}
@@ -352,12 +387,14 @@ namespace Swim::Rhi
 		}
 
 	private:
+
 		UploadArena& CurrentUploadArena()
 		{
 			if (currentContext == nullptr || !currentContext->uploadArena)
 			{
 				throw std::logic_error("Upload allocation requires an active frame with upload storage enabled");
 			}
+
 			return *currentContext->uploadArena;
 		}
 
@@ -383,6 +420,7 @@ namespace Swim::Rhi
 		std::uint32_t nextContextIndex = 0;
 		std::uint64_t nextSignalValue = 1;
 		std::uint64_t lastSubmittedValue = 0;
+
 	};
 
 } // namespace Swim::Rhi

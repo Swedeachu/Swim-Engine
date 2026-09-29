@@ -5,6 +5,7 @@ using namespace Swim;
 
 namespace
 {
+
 	ShaderCompiler::ShaderReflection ComputeReflection()
 	{
 		ShaderCompiler::ShaderReflection reflection;
@@ -21,11 +22,13 @@ namespace
 		reflection.GlobalParameters.push_back(buffer);
 		return reflection;
 	}
+
 }
 
 SWIM_TEST("ShaderCompiler.Compute", "ReadWriteBuffersAndLocalSizeAreOwnedByConvertedInterface")
 {
 	auto reflection = ComputeReflection();
+
 	for (const auto shape : { "structuredBuffer", "byteAddressBuffer" })
 	{
 		reflection.GlobalParameters[0].ResourceShape = shape;
@@ -40,6 +43,7 @@ SWIM_TEST("ShaderCompiler.Compute", "ReadWriteBuffersAndLocalSizeAreOwnedByConve
 		SWIM_CHECK_EQUAL(schema.Bindings[0].Type, Rhi::DescriptorType::StorageBuffer);
 		SWIM_CHECK_EQUAL(schema.Bindings[0].Stages, Rhi::ShaderStageMask::Compute);
 	}
+
 	reflection.GlobalParameters[0].ResourceAccess = "read";
 	const auto converted = ShaderCompiler::BuildRhiShaderInterface(reflection);
 	SWIM_REQUIRE(converted);
@@ -57,6 +61,7 @@ SWIM_TEST("ShaderCompiler.Compute", "MixedEntriesAndMissingFixedLocalSizeFailWit
 		SWIM_CHECK(converted.Interface.DescriptorSchemas.empty());
 		SWIM_CHECK((converted.Interface.ComputeThreadGroupSize == std::array<std::uint32_t, 3>{}));
 	}
+
 	for (auto stage : { ShaderCompiler::ShaderStage::Compute, ShaderCompiler::ShaderStage::Vertex })
 	{
 		auto reflection = ComputeReflection();
@@ -69,11 +74,13 @@ SWIM_TEST("ShaderCompiler.Compute", "UnsupportedWritesAndGraphicsStoresStillReje
 {
 	auto reflection = ComputeReflection();
 	const auto valid = reflection;
+
 	for (const auto access : { "append", "write", "unknown" })
 	{
 		reflection.GlobalParameters[0].ResourceAccess = access;
 		SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
 	}
+
 	reflection = valid;
 	reflection.GlobalParameters[0].ResourceShape = "texture2D";
 	SWIM_CHECK(!ShaderCompiler::BuildRhiShaderInterface(reflection));
@@ -109,11 +116,13 @@ SWIM_TEST("ShaderCompiler.Compute", "CompiledSlangReflectionSuppliesBindingsCons
 	const auto& schema = converted.Interface.DescriptorSchemas[0];
 	SWIM_CHECK_EQUAL(schema.Space, 1u);
 	SWIM_REQUIRE_EQUAL(schema.Bindings.size(), 2u);
+
 	for (const auto& binding : schema.Bindings)
 	{
 		SWIM_CHECK_EQUAL(binding.Stages, Rhi::ShaderStageMask::Compute);
 		SWIM_CHECK_EQUAL(binding.Type, binding.Binding == 3 ? Rhi::DescriptorType::ReadOnlyStorageBuffer : Rhi::DescriptorType::StorageBuffer);
 	}
+
 	SWIM_REQUIRE_EQUAL(converted.Interface.PushConstants.size(), 1u);
 	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Offset, 0u);
 	SWIM_CHECK_EQUAL(converted.Interface.PushConstants[0].Size, 24u);

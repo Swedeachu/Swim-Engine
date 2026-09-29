@@ -7,14 +7,18 @@
 
 namespace Swim::Render
 {
+
 	// Bounded binning: every (material bin, index-page slot) pair owns a fixed
 	// slice of the command buffer, so one DrawIndexedIndirectCount per bin draws
 	// it with a single pipeline and index buffer. Draws beyond a bin's capacity
 	// are dropped and counted (VisibilityStats::Dropped), never written elsewhere.
 	class VisibilityBinLayout
 	{
+
 	  public:
+
 		VisibilityBinLayout() = default;
+
 		// capacities[materialBin] draws per page slot; pageSlots >= 1.
 		VisibilityBinLayout(std::span<const std::uint32_t> materialBinCapacities, std::uint32_t pageSlots);
 
@@ -33,9 +37,12 @@ namespace Swim::Render
 		const std::vector<VisibilityBinRange>& GetRanges() const { return ranges; }
 
 	  private:
+
 		std::vector<VisibilityBinRange> ranges;
 		std::uint32_t materialBins = 0;
 		std::uint32_t pageSlots = 0;
 		std::uint32_t totalCapacity = 0;
+
 	};
+
 } // namespace Swim::Render

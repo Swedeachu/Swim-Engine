@@ -7,31 +7,39 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		bool Finite(UiPoint point)
 		{
 			return std::isfinite(point.X) && std::isfinite(point.Y);
 		}
+
 	} // namespace
 
 	UiNodeId UiDocument::HitTest(UiPoint framebufferPoint) const
 	{
 		impl->RequireLayout();
+
 		if (!Finite(framebufferPoint))
 		{
 			return {};
 		}
+
 		const UiPoint point{ framebufferPoint.X / impl->Dpi, framebufferPoint.Y / impl->Dpi };
+
 		for (auto it = impl->Order.rbegin(); it != impl->Order.rend(); ++it)
 		{
 			const auto& node = impl->Get(*it);
+
 			if (node.Active && impl->IsHitTestable(node) && node.Bounds.Contains(point) && node.Clip.Contains(point))
 			{
 				// Under an open modal, nodes below it do not take input (the scrim blocks).
 				return impl->InputAllowed(node.Id) ? node.Id : UiNodeId{};
 			}
 		}
+
 		return {};
 	}
 
@@ -46,27 +54,34 @@ namespace Swim::UI
 	void UiDocument::PointerMove(UiPoint point)
 	{
 		EnsureLayout();
+
 		if (Finite(point))
 		{
 			impl->LastPointer = { point.X / impl->Dpi, point.Y / impl->Dpi };
 			impl->HasPointer = true;
 		}
+
 		const auto hit = HitTest(point);
+
 		if (hit != impl->Hover)
 		{
 			if (impl->Hover)
 			{
 				impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
 			}
+
 			impl->Hover = hit;
+
 			if (hit)
 			{
 				impl->Events.push_back({ UiEventKind::Enter, hit });
 				// Hovering an option of an open dropdown moves its highlight.
 				const auto& node = impl->Get(hit);
+
 				if (node.Control.Kind == UiControlKind::Option && node.PartOf && impl->Nodes.contains(node.PartOf.Value))
 				{
 					auto& owner = impl->Get(node.PartOf);
+
 					if (impl->IsDropdownOpen(owner))
 					{
 						owner.Highlight = static_cast<std::int32_t>(std::lround(node.PartValue));
@@ -75,12 +90,14 @@ namespace Swim::UI
 				}
 			}
 		}
+
 		// Drag selection and control drags continue outside the node's bounds.
 		if (impl->Selecting && impl->Selecting == impl->Pressed && Finite(point))
 		{
 			auto& node = impl->Get(impl->Selecting);
 			impl->SetCaret(node, impl->TextHit(node, { point.X / impl->Dpi, point.Y / impl->Dpi }), true);
 		}
+
 		if (impl->Dragging && Finite(point))
 		{
 			impl->ControlPointerMove({ point.X / impl->Dpi, point.Y / impl->Dpi });
@@ -90,6 +107,7 @@ namespace Swim::UI
 	void UiDocument::PointerLeave()
 	{
 		impl->HasPointer = false;
+
 		if (impl->Hover)
 		{
 			impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
@@ -102,20 +120,25 @@ namespace Swim::UI
 		PointerMove(point);
 		CancelPointer();
 		impl->HideTooltip(true);
+
 		if (!impl->Popups.empty() && Finite(point))
 		{
 			const auto open = impl->Popups.size();
 			impl->LightDismiss({ point.X / impl->Dpi, point.Y / impl->Dpi });
+
 			if (impl->Popups.size() != open)
 			{
 				PointerMove(point); // What lay under the closed popups.
 			}
 		}
+
 		impl->Pressed = impl->Hover;
 		UiNodeId focus;
+
 		if (impl->Pressed)
 		{
 			const auto& pressed = impl->Get(impl->Pressed);
+
 			if (impl->IsFocusable(pressed))
 			{
 				focus = impl->Pressed;
@@ -136,23 +159,28 @@ namespace Swim::UI
 						break;
 					}
 				}
+
 				if (!focus && impl->PopupIndexOf(impl->Pressed))
 				{
 					focus = impl->Focused; // Pressing a popup's background or bar keeps focus.
 				}
 			}
 		}
+
 		Focus(focus);
+
 		if (impl->Pressed)
 		{
 			impl->Events.push_back({ UiEventKind::Press, impl->Pressed });
 			auto& node = impl->Get(impl->Pressed);
+
 			if (node.Editable && node.Fonts)
 			{
 				impl->EndComposition();
 				impl->SetCaret(node, impl->TextHit(node, { point.X / impl->Dpi, point.Y / impl->Dpi }), modifiers.Shift);
 				impl->Selecting = node.Id;
 			}
+
 			if (impl->IsControl(node) && Finite(point))
 			{
 				impl->ControlPointerDown(node, { point.X / impl->Dpi, point.Y / impl->Dpi });
@@ -164,15 +192,18 @@ namespace Swim::UI
 	{
 		PointerMove(point);
 		impl->Selecting = {};
+
 		if (impl->Pressed)
 		{
 			if (impl->IsControl(impl->Get(impl->Pressed)))
 			{
 				impl->ControlPointerUp(impl->Get(impl->Pressed), impl->Pressed == impl->Hover);
 			}
+
 			impl->Events.push_back({ UiEventKind::Release, impl->Pressed });
 			const auto pressed = impl->Pressed;
 			impl->Pressed = {};
+
 			if (pressed == impl->Hover)
 			{
 				impl->Events.push_back({ UiEventKind::Click, pressed });
@@ -184,10 +215,12 @@ namespace Swim::UI
 	void UiDocument::CancelPointer()
 	{
 		impl->Selecting = {};
+
 		if (impl->Dragging)
 		{
 			impl->EndDrag(true); // Keeps (and commits) the value reached so far.
 		}
+
 		if (impl->Pressed)
 		{
 			impl->Events.push_back({ UiEventKind::Cancel, impl->Pressed });
@@ -199,10 +232,12 @@ namespace Swim::UI
 	{
 		EnsureLayout();
 		impl->RequireLayout();
+
 		if (!Finite(framebufferPoint) || !Finite(delta))
 		{
 			return false;
 		}
+
 		const UiPoint point{ framebufferPoint.X / impl->Dpi, framebufferPoint.Y / impl->Dpi };
 		impl->HideTooltip(true);
 		// Scroll bars under the pointer scroll their target; a focused slider under the
@@ -211,24 +246,30 @@ namespace Swim::UI
 		{
 			auto& node = impl->Get(hit);
 			const auto kind = node.Control.Kind;
+
 			if (kind == UiControlKind::ScrollBar || (kind == UiControlKind::Slider && impl->Focused == hit))
 			{
 				return impl->ControlWheel(node, delta);
 			}
 		}
+
 		for (auto it = impl->Order.rbegin(); it != impl->Order.rend(); ++it)
 		{
 			auto& node = impl->Get(*it);
+
 			if (!node.Active || !node.Style.Clip || !node.Bounds.Contains(point) || !node.Clip.Contains(point))
 			{
 				continue;
 			}
+
 			if (!impl->InputAllowed(node.Id))
 			{
 				return false; // Below a modal.
 			}
+
 			const UiPoint target{ std::clamp(node.Scroll.X + delta.X, 0.0f, node.MaxScroll.X),
 				std::clamp(node.Scroll.Y + delta.Y, 0.0f, node.MaxScroll.Y) };
+
 			if (target.X != node.Scroll.X || target.Y != node.Scroll.Y)
 			{
 				node.Scroll = target;
@@ -236,6 +277,7 @@ namespace Swim::UI
 				return true;
 			}
 		}
+
 		return false;
 	}
 
@@ -245,39 +287,48 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("UI focus target is unavailable");
 		}
+
 		if (id == impl->Focused)
 		{
 			return;
 		}
+
 		// Focus leaving a dropdown closes its list (unless it moves into the list).
 		if (impl->Focused && impl->Get(impl->Focused).Control.Kind == UiControlKind::Dropdown &&
 			impl->IsDropdownOpen(impl->Get(impl->Focused)))
 		{
 			const auto popup = impl->Get(impl->Focused).Control.Parts.Popup;
 			const auto into = impl->PopupIndexOf(id);
+
 			if (!into || impl->Popups[*into].Node != popup)
 			{
 				impl->ToggleDropdown(impl->Get(impl->Focused));
 			}
 		}
+
 		const auto previous = impl->Focused;
 		impl->Composition.clear();
+
 		if (impl->Focused)
 		{
 			impl->Events.push_back({ UiEventKind::Blur, impl->Focused });
 			impl->MarkPaintDirty(impl->Focused);
+
 			if (impl->Get(impl->Focused).Editable)
 			{
 				impl->MarkLayoutDirty(impl->Focused); // Drops any displayed preedit text.
 			}
 		}
+
 		impl->Focused = id;
+
 		if (id)
 		{
 			impl->Events.push_back({ UiEventKind::Focus, id });
 			impl->MarkPaintDirty(id);
 			impl->Get(id).RevealCaret = impl->Get(id).Editable;
 		}
+
 		// An editable slider value applies when it loses focus.
 		if (previous && impl->Nodes.contains(previous.Value) && impl->Get(previous).Editable)
 		{
@@ -288,24 +339,29 @@ namespace Swim::UI
 	std::vector<UiNodeId> UiDocument::Impl::TabOrder() const
 	{
 		std::vector<UiNodeId> candidates;
+
 		for (auto id : Order)
 		{
 			const auto& node = Get(id);
+
 			if (node.Active && IsFocusable(node) && node.Style.TabIndex >= 0 && InputAllowed(id))
 			{
 				candidates.push_back(id);
 			}
 		}
+
 		// Positive indices first in ascending order, then 0 in document order.
 		std::stable_sort(candidates.begin(), candidates.end(),
 			[&](UiNodeId a, UiNodeId b)
 			{
 				const auto ia = Get(a).Style.TabIndex;
 				const auto ib = Get(b).Style.TabIndex;
+
 				if ((ia > 0) != (ib > 0))
 				{
 					return ia > 0;
 				}
+
 				return ia > 0 && ia < ib;
 			});
 		return candidates;
@@ -316,11 +372,13 @@ namespace Swim::UI
 		EnsureLayout();
 		impl->RequireLayout();
 		const auto candidates = impl->TabOrder();
+
 		if (candidates.empty())
 		{
 			Focus({});
 			return;
 		}
+
 		const auto current = std::find(candidates.begin(), candidates.end(), impl->Focused);
 		const auto index = static_cast<std::size_t>(current - candidates.begin());
 		const auto next = current == candidates.end()
@@ -334,15 +392,18 @@ namespace Swim::UI
 		EnsureLayout();
 		impl->RequireLayout();
 		const auto candidates = impl->TabOrder();
+
 		if (candidates.empty())
 		{
 			return false;
 		}
+
 		if (!impl->Focused || std::find(candidates.begin(), candidates.end(), impl->Focused) == candidates.end())
 		{
 			Focus(candidates.front());
 			return true;
 		}
+
 		const auto from = impl->Get(impl->Focused).Bounds;
 		// Directions stay in the focused node's layer (the page, or one popup).
 		const auto layer = impl->PopupIndexOf(impl->Focused);
@@ -350,12 +411,14 @@ namespace Swim::UI
 		const float sign = direction == UiNavDirection::Right || direction == UiNavDirection::Down ? 1.0f : -1.0f;
 		UiNodeId best;
 		float bestScore = std::numeric_limits<float>::infinity();
+
 		for (const auto id : candidates)
 		{
 			if (id == impl->Focused || impl->PopupIndexOf(id) != layer)
 			{
 				continue;
 			}
+
 			const auto to = impl->Get(id).Bounds;
 			// Distance along the direction between facing edges (centers break ties for
 			// overlapping boxes), and the gap across it (0 when the boxes overlap).
@@ -365,10 +428,12 @@ namespace Swim::UI
 			const float toHigh = toLow + (horizontal ? to.Width : to.Height);
 			const float fromCenter = (fromLow + fromHigh) * 0.5f;
 			const float toCenter = (toLow + toHigh) * 0.5f;
+
 			if ((toCenter - fromCenter) * sign <= 0.5f)
 			{
 				continue;
 			}
+
 			const float primary = std::max(0.0f, sign > 0.0f ? toLow - fromHigh : fromLow - toHigh);
 			const float crossLowA = horizontal ? from.Y : from.X;
 			const float crossHighA = crossLowA + (horizontal ? from.Height : from.Width);
@@ -376,16 +441,19 @@ namespace Swim::UI
 			const float crossHighB = crossLowB + (horizontal ? to.Height : to.Width);
 			const float cross = std::max({ 0.0f, crossLowB - crossHighA, crossLowA - crossHighB });
 			const float score = primary + 2.0f * cross + 0.001f * std::abs(toCenter - fromCenter);
+
 			if (score < bestScore)
 			{
 				bestScore = score;
 				best = id;
 			}
 		}
+
 		if (!best)
 		{
 			return false;
 		}
+
 		Focus(best);
 		return true;
 	}
@@ -401,19 +469,23 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& node = impl->Get(impl->Focused);
 		const auto kind = node.Control.Kind;
+
 		if (kind == UiControlKind::Checkbox || kind == UiControlKind::Toggle)
 		{
 			impl->Toggle(node);
 			impl->CloseOnActivate(node.Id);
 			return;
 		}
+
 		if (kind == UiControlKind::Dropdown)
 		{
 			impl->ToggleDropdown(node);
 			return;
 		}
+
 		const auto focused = impl->Focused;
 		impl->Events.push_back({ UiEventKind::Click, focused });
 		impl->CloseOnActivate(focused);
@@ -431,51 +503,64 @@ namespace Swim::UI
 			FocusNext(modifiers.Shift);
 			return true;
 		}
+
 		const bool composing = impl->Focused && impl->Get(impl->Focused).Editable && !impl->Composition.empty();
+
 		if (key == UiKey::Escape && !composing)
 		{
 			// Escape dismisses the tooltip, then the top popup that allows it.
 			const bool tooltip = static_cast<bool>(impl->TooltipShown);
 			impl->HideTooltip(true);
+
 			if (!impl->Popups.empty() && impl->Popups.back().Desc.CloseOnEscape)
 			{
 				impl->ClosePopupsFrom(impl->Popups.size() - 1);
 				return true;
 			}
+
 			if (tooltip)
 			{
 				return true;
 			}
 		}
+
 		if (!impl->Focused)
 		{
 			return false;
 		}
+
 		auto& node = impl->Get(impl->Focused);
+
 		if (node.Editable && node.Fonts)
 		{
 			const bool submit = key == UiKey::Enter && !node.EditOptions.Multiline;
 			const bool consumed = impl->EditKey(node, key, modifiers);
+
 			if (submit)
 			{
 				impl->CommitValueLabel(node); // An editable slider value applies on Enter.
 			}
+
 			return consumed;
 		}
+
 		if (impl->IsControl(node) && impl->ControlKey(node, key))
 		{
 			return true;
 		}
+
 		if (key == UiKey::Enter || key == UiKey::Space)
 		{
 			ActivateFocused();
 			return true;
 		}
+
 		if (key == UiKey::Escape)
 		{
 			Focus({});
 			return true;
 		}
+
 		if (impl->ArrowNavigation)
 		{
 			switch (key)
@@ -492,6 +577,7 @@ namespace Swim::UI
 				break;
 			}
 		}
+
 		return false;
 	}
 
@@ -501,11 +587,14 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& node = impl->Get(impl->Focused);
+
 		if (!node.Editable || !node.Fonts)
 		{
 			return;
 		}
+
 		impl->EndComposition();
 		impl->ReplaceSelection(node, utf8);
 	}
@@ -516,11 +605,14 @@ namespace Swim::UI
 		{
 			return;
 		}
+
 		auto& node = impl->Get(impl->Focused);
+
 		if (!node.Editable || !node.Fonts)
 		{
 			return;
 		}
+
 		auto text = Text::SanitizeUtf8(utf8);
 		// Line breaks never enter a single-line field, not even as preedit.
 		if (!node.EditOptions.Multiline)
@@ -531,14 +623,17 @@ namespace Swim::UI
 					return c == '\n' || c == '\r';
 				});
 		}
+
 		if (!text.empty() && node.Selection.Anchor != node.Selection.Caret)
 		{
 			impl->ReplaceSelection(node, {}); // Composition replaces the selection.
 		}
+
 		if (text == impl->Composition && cursor == impl->CompositionCursor)
 		{
 			return;
 		}
+
 		impl->Composition = std::move(text);
 		impl->CompositionCursor = std::min<std::uint32_t>(cursor, static_cast<std::uint32_t>(impl->Composition.size()));
 		node.RevealCaret = true;
@@ -563,15 +658,19 @@ namespace Swim::UI
 	UiRect UiDocument::GetTextInputRect() const
 	{
 		impl->RequireLayout();
+
 		if (!WantsTextInput())
 		{
 			return {};
 		}
+
 		const auto& node = impl->Get(impl->Focused);
+
 		if (!node.TextLayout)
 		{
 			return {};
 		}
+
 		const auto offset = impl->IsComposing(node)
 			? node.Selection.Caret + std::min<std::uint32_t>(impl->CompositionCursor, static_cast<std::uint32_t>(impl->Composition.size()))
 			: node.Selection.Caret;
@@ -590,4 +689,5 @@ namespace Swim::UI
 			impl->MarkPaintDirty(impl->Focused);
 		}
 	}
+
 } // namespace Swim::UI

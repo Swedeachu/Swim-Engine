@@ -26,15 +26,20 @@ namespace Swim::RhiVulkan
 		{
 			RequireVulkanDevice(*state);
 		}
+
 		auto* program = dynamic_cast<VulkanShaderProgram*>(desc.Program);
+
 		if (program == nullptr || program->GetState() != state)
 		{
 			return nullptr;
 		}
+
 		auto result = std::make_unique<VulkanPipelineLayout>(std::move(state), *program);
+
 		try
 		{
 			VkShaderStageFlags stages = 0;
+
 			for (const auto& stage : program->GetStages())
 			{
 				stages |= stage.Stage;
@@ -42,6 +47,7 @@ namespace Swim::RhiVulkan
 					stage.Stage == VK_SHADER_STAGE_FRAGMENT_BIT ? Rhi::ShaderStageMask::Fragment : Rhi::ShaderStageMask::Compute;
 				result->layoutState->ProgramStages = result->layoutState->ProgramStages | mask;
 			}
+
 			result->layoutState->PushConstants = BuildVulkanPushConstantRanges(*result->state,
 				result->layoutState->Interface.PushConstants, stages);
 		}
@@ -49,10 +55,12 @@ namespace Swim::RhiVulkan
 		{
 			return nullptr;
 		}
+
 		if (!CreateDescriptorLayouts(*result->layoutState, desc.DescriptorSpaces))
 		{
 			return nullptr;
 		}
+
 		VkPipelineLayoutCreateInfo info{};
 		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		info.setLayoutCount = static_cast<std::uint32_t>(result->layoutState->Sets.size());
@@ -60,17 +68,21 @@ namespace Swim::RhiVulkan
 		info.pushConstantRangeCount = static_cast<std::uint32_t>(result->layoutState->PushConstants.size());
 		info.pPushConstantRanges = result->layoutState->PushConstants.data();
 		const auto createResult = result->state->Dispatch.vkCreatePipelineLayout(result->state->Device.device, &info, nullptr, &result->layoutState->Layout);
+
 		if (createResult != VK_SUCCESS)
 		{
 			result->layoutState->Layout = VK_NULL_HANDLE;
 			CheckVulkanResult(*result->state, createResult, "vkCreatePipelineLayout");
 			return nullptr;
 		}
+
 		SetVulkanObjectName(*result->state, VK_OBJECT_TYPE_PIPELINE_LAYOUT, ToNativeHandle(result->layoutState->Layout), desc.DebugName);
+
 		for (VkDescriptorSetLayout set : result->layoutState->Sets)
 		{
 			SetVulkanObjectName(*result->state, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, ToNativeHandle(set), desc.DebugName);
 		}
+
 		return result;
 	}
 

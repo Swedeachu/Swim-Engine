@@ -16,6 +16,7 @@
 // is +Y up; canvas pixels are +Y down with the origin at the top left.
 namespace Swim::UI
 {
+
 	using UiMatrix4 = std::array<float, 16>;
 	using UiMatrix3x4 = std::array<float, 12>; // Affine: the first three rows of a 4x4.
 
@@ -122,4 +123,5 @@ namespace Swim::UI
 	float CanvasFade(const UiWorldPlacement& placement, float distance);
 	// Distance from the camera to the canvas's origin (the pivot point).
 	float CanvasDistance(const UiMatrix3x4& canvasToWorld, UiPoint canvasSize, UiPoint pivot, const UiMatrix4& view);
+
 } // namespace Swim::UI

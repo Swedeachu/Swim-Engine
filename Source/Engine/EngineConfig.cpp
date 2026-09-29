@@ -8,8 +8,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		std::string Lower(std::string_view value)
 		{
 			std::string out(value);
@@ -24,6 +26,7 @@ namespace Engine
 		bool ParseGraphicsBackend(std::string_view value, GraphicsBackend& backend)
 		{
 			const std::string v = Lower(value);
+
 			if (v == "auto")
 			{
 				backend = GraphicsBackend::Auto;
@@ -44,12 +47,14 @@ namespace Engine
 			{
 				return false;
 			}
+
 			return true;
 		}
 
 		bool ParsePhysicsBackend(std::string_view value, PhysicsBackend& backend)
 		{
 			const std::string v = Lower(value);
+
 			if (v == "auto")
 			{
 				backend = PhysicsBackend::Auto;
@@ -66,6 +71,7 @@ namespace Engine
 			{
 				return false;
 			}
+
 			return true;
 		}
 
@@ -84,6 +90,7 @@ namespace Engine
 			{
 				return false;
 			}
+
 			const std::string text(value);
 			char* end = nullptr;
 			result = std::strtod(text.c_str(), &end);
@@ -93,26 +100,31 @@ namespace Engine
 		bool ParseBool(std::string_view value, bool& result)
 		{
 			const std::string v = Lower(value);
+
 			if (v == "on" || v == "true" || v == "1" || v == "yes")
 			{
 				result = true;
 				return true;
 			}
+
 			if (v == "off" || v == "false" || v == "0" || v == "no")
 			{
 				result = false;
 				return true;
 			}
+
 			return false;
 		}
 
 		bool ParseInitialState(std::string_view value, EngineState& state)
 		{
 			const EngineState parsed = ParseEngineStateToken(std::string(value));
+
 			if (!IsSingleEngineState(parsed))
 			{
 				return false;
 			}
+
 			state = parsed;
 			return true;
 		}
@@ -126,7 +138,9 @@ namespace Engine
 			{
 				return false;
 			}
+
 			const std::string_view rest = argument.substr(name.size());
+
 			if (rest.empty())
 			{
 				if (index + 1 < argc && std::string_view(argv[index + 1]).rfind("--", 0) != 0)
@@ -139,16 +153,20 @@ namespace Engine
 					value = {};
 					hasValue = false;
 				}
+
 				return true;
 			}
+
 			if (rest.front() != '=')
 			{
 				return false;
 			}
+
 			value = rest.substr(1);
 			hasValue = true;
 			return true;
 		}
+
 	} // namespace
 
 	GraphicsBackend ResolveGraphicsBackend(GraphicsBackend backend)
@@ -167,6 +185,7 @@ namespace Engine
 		case PhysicsBackend::Jolt:
 			return joltAvailable ? PhysicsBackend::Jolt : PhysicsBackend::Auto;
 		}
+
 		return PhysicsBackend::Auto;
 	}
 
@@ -183,6 +202,7 @@ namespace Engine
 		case GraphicsBackend::Metal:
 			return "Metal";
 		}
+
 		return "Unknown";
 	}
 
@@ -197,6 +217,7 @@ namespace Engine
 		case PhysicsBackend::Jolt:
 			return "Jolt";
 		}
+
 		return "Unknown";
 	}
 
@@ -209,6 +230,7 @@ namespace Engine
 		case PresentMode::Headless:
 			return "Headless";
 		}
+
 		return "Unknown";
 	}
 
@@ -279,6 +301,7 @@ namespace Engine
 			{
 				std::uint64_t pixels = 0;
 				const bool width = argument.rfind("--width", 0) == 0;
+
 				if (!hasValue || !ParseUnsigned(value, pixels) || pixels < 16 || pixels > 16384)
 				{
 					fail(width ? "Invalid --width value (16..16384)." : "Invalid --height value (16..16384).");
@@ -297,6 +320,7 @@ namespace Engine
 				const std::size_t x = hasValue ? value.find_first_of("xX") : std::string_view::npos;
 				std::uint64_t w = 0;
 				std::uint64_t h = 0;
+
 				if (x == std::string_view::npos || !ParseUnsigned(value.substr(0, x), w) || !ParseUnsigned(value.substr(x + 1), h) ||
 					w < 16 || h < 16 || w > 16384 || h > 16384)
 				{
@@ -360,6 +384,7 @@ namespace Engine
 			else if (Option(argument, "--frames-in-flight", i, argc, argv, value, hasValue))
 			{
 				std::uint64_t frames = 0;
+
 				if (!hasValue || !ParseUnsigned(value, frames) || frames < 1 || frames > 2)
 				{
 					fail("Invalid --frames-in-flight value (1 or 2).");
@@ -409,6 +434,7 @@ namespace Engine
 			else if (Option(argument, "--parent-hwnd", i, argc, argv, value, hasValue))
 			{
 				std::uint64_t nativeValue = 0;
+
 				if (!hasValue || !ParseUnsigned(value, nativeValue) || nativeValue == 0)
 				{
 					fail("Invalid --parent-hwnd value.");
@@ -429,11 +455,13 @@ namespace Engine
 		{
 			result.Errors.emplace_back("--capture needs rendering (drop --no-render).");
 		}
+
 		if (!config.CapturePath.empty() && config.MaxFrames == 0)
 		{
 			// A capture without a frame budget captures after the first few frames.
 			config.MaxFrames = 60;
 		}
+
 		return result;
 	}
 
@@ -461,4 +489,5 @@ namespace Engine
 			<< "  --parent-hwnd=<handle>              Embed in a native parent window (Windows)\n";
 		return out.str();
 	}
+
 } // namespace Engine

@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Explicit GPU upload state of a persistent renderer resource, separate from
 	// CPU asset validity: PendingUpload (bytes staged on the CPU) -> Recorded
 	// (upload passes added to a graph, awaiting commit/abort) -> Uploading
@@ -15,4 +16,5 @@ namespace Swim::Render
 		Uploading,
 		Resident
 	};
+
 } // namespace Swim::Render

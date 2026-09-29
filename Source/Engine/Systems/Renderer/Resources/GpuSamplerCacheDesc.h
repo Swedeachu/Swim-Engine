@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	struct GpuSamplerCacheDesc
 	{
 		// Distinct samplers alive or retiring at once. Keep well below the device's
@@ -11,4 +12,5 @@ namespace Swim::Render
 		std::uint32_t MaxSamplers = 256;
 		std::string DebugName = "GPU samplers";
 	};
+
 } // namespace Swim::Render

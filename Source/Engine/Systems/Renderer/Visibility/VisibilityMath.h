@@ -13,6 +13,7 @@
 
 namespace Swim::Render::VisibilityMath
 {
+
 	// The CPU statement of the rules GpuVisibility.slang implements; the CPU
 	// reference and the tests use these, the shader mirrors them line for line.
 
@@ -27,18 +28,22 @@ namespace Swim::Render::VisibilityMath
 	{
 		Sphere sphere;
 		const float* m = transform.Current;
+
 		for (int r = 0; r < 3; ++r)
 		{
 			sphere.Center[r] = m[r * 4] * instance.LocalCenter[0] + m[r * 4 + 1] * instance.LocalCenter[1] +
 				m[r * 4 + 2] * instance.LocalCenter[2] + m[r * 4 + 3];
 		}
+
 		const float* e = instance.LocalExtents;
 		sphere.Unbounded = std::max({ e[0], e[1], e[2] }) >= RenderBounds::Unbounded * 0.5f;
 		float scale = 0.0f;
+
 		for (int c = 0; c < 3; ++c)
 		{
 			scale = std::max(scale, std::sqrt(m[c] * m[c] + m[4 + c] * m[4 + c] + m[8 + c] * m[8 + c]));
 		}
+
 		sphere.Radius = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]) * scale;
 		return sphere;
 	}
@@ -49,14 +54,17 @@ namespace Swim::Render::VisibilityMath
 		{
 			return true;
 		}
+
 		for (int p = 0; p < 6; ++p)
 		{
 			const float* plane = view.FrustumPlanes + p * 4;
+
 			if (plane[0] * sphere.Center[0] + plane[1] * sphere.Center[1] + plane[2] * sphere.Center[2] + plane[3] < -sphere.Radius)
 			{
 				return false;
 			}
 		}
+
 		return true;
 	}
 
@@ -80,14 +88,17 @@ namespace Swim::Render::VisibilityMath
 	inline std::uint32_t SelectLod(const GpuMeshMetadata& mesh, float errorScale, float threshold)
 	{
 		std::uint32_t lod = 0;
+
 		for (std::uint32_t i = 1; i < LodCount(mesh); ++i)
 		{
 			if (mesh.Lods[i].Error * errorScale > threshold)
 			{
 				break;
 			}
+
 			lod = i;
 		}
+
 		return lod;
 	}
 
@@ -96,18 +107,22 @@ namespace Swim::Render::VisibilityMath
 		const GpuMeshMetadata& mesh, float errorScale, float threshold, float hysteresis, bool hasHistory, std::uint32_t previous)
 	{
 		const auto desired = SelectLod(mesh, errorScale, threshold);
+
 		if (!hasHistory || previous >= LodCount(mesh))
 		{
 			return desired;
 		}
+
 		if (desired > previous)
 		{
 			return std::max(previous, SelectLod(mesh, errorScale, threshold * (1.0f - hysteresis)));
 		}
+
 		if (desired < previous)
 		{
 			return std::min(previous, SelectLod(mesh, errorScale, threshold * (1.0f + hysteresis)));
 		}
+
 		return previous;
 	}
 
@@ -118,6 +133,7 @@ namespace Swim::Render::VisibilityMath
 		{
 			return { mesh.FirstSubmesh, mesh.SubmeshCount };
 		}
+
 		return { mesh.Lods[lod].FirstSubmesh, mesh.Lods[lod].SubmeshCount };
 	}
 
@@ -146,6 +162,7 @@ namespace Swim::Render::VisibilityMath
 		{
 			return false;
 		}
+
 		const DepthConvention convention = ViewDepthConvention(view);
 		const bool reverse = convention == DepthConvention::ReverseZ;
 		const float* m = view.ViewProjection;
@@ -156,6 +173,7 @@ namespace Swim::Render::VisibilityMath
 		float maxX = -3.0e38f;
 		float maxY = -3.0e38f;
 		float nearest = reverse ? -3.0e38f : 3.0e38f;
+
 		for (std::uint32_t i = 0; i < 8; ++i)
 		{
 			const float px = sphere.Center[0] + ((i & 1u) != 0 ? sphere.Radius : -sphere.Radius);
@@ -165,15 +183,19 @@ namespace Swim::Render::VisibilityMath
 			const float cy = m[4] * px + m[5] * py + m[6] * pz + m[7];
 			const float cz = m[8] * px + m[9] * py + m[10] * pz + m[11];
 			const float cw = m[12] * px + m[13] * py + m[14] * pz + m[15];
+
 			if (cw <= 1.0e-5f)
 			{
 				return false;
 			}
+
 			const float z = cz / cw;
+
 			if (reverse ? z > 1.0f : z < 0.0f)
 			{
 				return false; // In front of the near plane.
 			}
+
 			const float sx = (cx / cw * 0.5f + 0.5f) * width;
 			const float sy = (0.5f - cy / cw * 0.5f) * height; // +Y-up NDC: row 0 is the top.
 			minX = std::min(minX, sx);
@@ -182,20 +204,25 @@ namespace Swim::Render::VisibilityMath
 			maxY = std::max(maxY, sy);
 			nearest = reverse ? std::max(nearest, z) : std::min(nearest, z);
 		}
+
 		if (maxX < 0.0f || maxY < 0.0f || minX >= width || minY >= height)
 		{
 			return false;
 		}
+
 		const std::uint32_t x0 = std::uint32_t(std::floor(std::max(minX, 0.0f)));
 		const std::uint32_t y0 = std::uint32_t(std::floor(std::max(minY, 0.0f)));
 		const std::uint32_t x1 = std::uint32_t(std::floor(std::min(maxX, width - 1.0f)));
 		const std::uint32_t y1 = std::uint32_t(std::floor(std::min(maxY, height - 1.0f)));
 		std::uint32_t level = 1;
+
 		while (level < hzb.MipCount && (((x1 >> level) - (x0 >> level)) > 1u || ((y1 >> level) - (y0 >> level)) > 1u))
 		{
 			++level;
 		}
+
 		float farthest = reverse ? 3.0e38f : -3.0e38f;
+
 		for (std::uint32_t ty = y0 >> level; ty <= (y1 >> level); ++ty)
 		{
 			for (std::uint32_t tx = x0 >> level; tx <= (x1 >> level); ++tx)
@@ -204,6 +231,8 @@ namespace Swim::Render::VisibilityMath
 				farthest = reverse ? std::min(farthest, value) : std::max(farthest, value);
 			}
 		}
+
 		return reverse ? farthest > nearest : farthest < nearest;
 	}
+
 } // namespace Swim::Render::VisibilityMath

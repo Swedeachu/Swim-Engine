@@ -5,8 +5,10 @@
 
 namespace Engine
 {
+
 	namespace
 	{
+
 		std::uint32_t Half(std::uint32_t size)
 		{
 			return std::max(1u, (size + 1u) / 2u);
@@ -24,6 +26,7 @@ namespace Engine
 			return t <= 7000.0f ? -4.6070e9f / (t * t * t) + 2.9678e6f / (t * t) + 0.09911e3f / t + 0.244063f
 								: -2.0064e9f / (t * t * t) + 1.9018e6f / (t * t) + 0.24748e3f / t + 0.237040f;
 		}
+
 	} // namespace
 
 	// --- Depth of field -------------------------------------------------------------------
@@ -42,10 +45,12 @@ namespace Engine
 	void DepthOfField::Record(RenderFeatureContext& context)
 	{
 		const auto& view = context.View();
+
 		if (view.Width == 0 || view.Height == 0 || !(Settings.MaxBlurPixels > 0.0f))
 		{
 			return;
 		}
+
 		struct Constants
 		{
 			float Lens[4];
@@ -109,10 +114,12 @@ namespace Engine
 		float source = r * (1.0f + k1 * r * r + k2 * r * r * r * r);
 		const float f = Clamp01(fisheye);
 		const float maxAngle = f * 1.35f;
+
 		if (maxAngle > 1.0e-3f)
 		{
 			source = source + (std::tan(std::min(r, 1.1f) * maxAngle) / std::tan(maxAngle) - source) * f;
 		}
+
 		return source;
 	}
 
@@ -133,10 +140,12 @@ namespace Engine
 	void CameraLens::Record(RenderFeatureContext& context)
 	{
 		const auto& view = context.View();
+
 		if (view.Width == 0 || view.Height == 0 || !Active())
 		{
 			return;
 		}
+
 		struct Constants
 		{
 			float Distortion[4];
@@ -160,11 +169,13 @@ namespace Engine
 		constants.Optics[1] = std::clamp(s.Softness, 0.0f, 8.0f);
 		constants.Optics[2] = std::clamp(s.Vignette, 0.0f, 4.0f);
 		const float halation = std::clamp(s.Halation, 0.0f, 4.0f);
+
 		for (int c = 0; c < 3; ++c)
 		{
 			constants.Halation[c] = std::max(s.HalationTint[c], 0.0f) * halation;
 			constants.Filter[c] = std::max(s.Filter[c], 0.0f);
 		}
+
 		constants.Halation[3] = std::max(s.HalationThreshold, 1.0e-3f);
 		constants.Filter[3] = std::clamp(s.HalationStretch, 1.0f, 4.0f);
 		constants.View[0] = view.TanHalfFovX;
@@ -201,10 +212,12 @@ namespace Engine
 	void FilmSensor::Record(RenderFeatureContext& context)
 	{
 		const auto& view = context.View();
+
 		if (view.Width == 0 || view.Height == 0 || !Active())
 		{
 			return;
 		}
+
 		struct Constants
 		{
 			float Params[4];
@@ -237,6 +250,7 @@ namespace Engine
 		case CameraPreset::Vintage: return "Vintage";
 		case CameraPreset::NeutralPhotoreal: return "Neutral photoreal";
 		}
+
 		return "Unknown";
 	}
 
@@ -244,6 +258,7 @@ namespace Engine
 	{
 		CameraLook look;
 		look.Enabled = preset != CameraPreset::Off;
+
 		switch (preset)
 		{
 		case CameraPreset::Off: break;
@@ -297,16 +312,19 @@ namespace Engine
 			look.Sharpening = 0.1f;
 			break;
 		}
+
 		return look;
 	}
 
 	CameraLookSettings DeriveCameraLook(const CameraLook& look)
 	{
 		CameraLookSettings out;
+
 		if (!look.Enabled)
 		{
 			return out; // Everything off, neutral grading.
 		}
+
 		const float age = Clamp01(look.LensAge);
 		const float squeeze = std::clamp(look.AnamorphicSqueeze, 1.0f, 3.0f);
 		const float anamorphic = squeeze - 1.0f;
@@ -355,18 +373,22 @@ namespace Engine
 			dof->Enabled = settings.DepthOfFieldEnabled;
 			dof->Settings = settings.Focus;
 		}
+
 		if (lens)
 		{
 			lens->Enabled = settings.LensEnabled;
 			lens->Settings = settings.Optics;
 		}
+
 		if (sensor)
 		{
 			sensor->Enabled = settings.SensorEnabled;
 			sensor->Settings = settings.Film;
 		}
+
 		grading.Temperature = settings.Temperature;
 		grading.Contrast = settings.Contrast;
 		grading.Saturation = settings.Saturation;
 	}
+
 } // namespace Engine

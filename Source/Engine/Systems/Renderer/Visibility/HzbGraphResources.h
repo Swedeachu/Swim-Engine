@@ -7,6 +7,7 @@
 
 namespace Swim::Render
 {
+
 	// Output of HzbBuilder::Record: a transient R32Float pyramid whose mip i is depth
 	// level i + 1 (see HzbPyramid.h). Later passes read every mip as ShaderRead.
 	struct HzbGraphResources
@@ -18,4 +19,5 @@ namespace Swim::Render
 		DepthConvention Convention = CanonicalDepthConvention;
 		std::vector<GraphPass> Passes; // One reduction pass per mip.
 	};
+
 } // namespace Swim::Render

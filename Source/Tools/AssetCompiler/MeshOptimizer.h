@@ -55,8 +55,11 @@ namespace Swim::AssetCompiler
 
 	class MeshOptimizer
 	{
+
 	public:
+
 		MeshOptimizationResult Optimize(IntermediateModel& model, const MeshOptimizationOptions& options = {}) const;
+
 	};
 
 }

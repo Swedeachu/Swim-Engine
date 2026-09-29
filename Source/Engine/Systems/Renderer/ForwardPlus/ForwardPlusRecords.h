@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	// Visibility material bins Clustered Forward+ draws (GpuVisibility routes each
 	// material set with SetMaterialBin; unmapped sets land in bin 0).
 	enum class ForwardPlusBin : std::uint32_t
@@ -63,4 +64,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(ForwardSortEntry) == 16);
+
 } // namespace Swim::Render

@@ -17,6 +17,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	constexpr auto Drawable = RenderObjectFlags::Live | RenderObjectFlags::HasMesh | RenderObjectFlags::Visible;
 
 	// Camera at (0, 0, 10) looking down -Z with a 20x20 orthographic window.
@@ -49,11 +50,13 @@ namespace
 			mesh.SubmeshCount = static_cast<std::uint32_t>(errors.size());
 			mesh.LodCount = explicitLods ? static_cast<std::uint32_t>(errors.size()) : 0;
 			mesh.Generation = 1;
+
 			for (std::uint32_t i = 0; i < errors.size(); ++i)
 			{
 				mesh.Lods[i] = { mesh.FirstSubmesh + i, 1, errors[i], 0 };
 				Submeshes.push_back({ 100 * (i + 1), 3 * (i + 1), std::int32_t(10 * i), i });
 			}
+
 			Meshes.push_back(mesh);
 			return static_cast<std::uint32_t>(Meshes.size() - 1);
 		}
@@ -89,12 +92,15 @@ namespace
 	std::uint32_t Total(const VisibilityReferenceResult& result)
 	{
 		std::uint32_t draws = 0;
+
 		for (const auto& bin : result.Bins)
 		{
 			draws += static_cast<std::uint32_t>(bin.size());
 		}
+
 		return draws;
 	}
+
 } // namespace
 
 SWIM_TEST("Render.Visibility", "ViewPlanesComeFromTheViewProjectionForBothProjections")
@@ -251,10 +257,12 @@ SWIM_TEST("Render.Visibility", "DrawsAreBinnedByMaterialAndIndexPageWithBoundedC
 	const auto pageThree = scene.AddMesh({ 0.0f }, 3);
 	const auto pageNine = scene.AddMesh({ 0.0f }, 9);
 	const auto multi = scene.AddMesh({ 0.0f, 0.0f }, 0, false); // LodCount 0: every submesh draws.
+
 	for (int i = 0; i < 4; ++i)
 	{
 		scene.Add(pageZero, float(i), 0, 0);
 	}
+
 	scene.Add(pageZero, 0, 1, 1);  // Material bin 1.
 	scene.Add(pageThree, 1, 1, 1); // Bin 1, page slot 1.
 	scene.Add(pageNine, 2, 1, 0);  // Page not listed.
@@ -280,6 +288,7 @@ SWIM_TEST("Render.Visibility", "DrawsAreBinnedByMaterialAndIndexPageWithBoundedC
 
 	// Commands carry the submesh draw range; FirstInstance is the slot within the bin.
 	const auto& draws = result.Bins[bins.GetBin(1, 0)];
+
 	for (std::uint32_t slot = 0; slot < draws.size(); ++slot)
 	{
 		const auto& draw = draws[slot];
@@ -290,6 +299,7 @@ SWIM_TEST("Render.Visibility", "DrawsAreBinnedByMaterialAndIndexPageWithBoundedC
 		SWIM_CHECK_EQUAL(draw.Command.FirstIndex, submesh.FirstIndex);
 		SWIM_CHECK_EQUAL(draw.Command.VertexOffset, submesh.VertexOffset);
 	}
+
 	SWIM_CHECK_EQUAL(draws[1].Record.SubmeshRow, scene.Meshes[multi].FirstSubmesh);
 	SWIM_CHECK_EQUAL(draws[2].Record.SubmeshRow, scene.Meshes[multi].FirstSubmesh + 1);
 	SWIM_CHECK_THROWS(VisibilityBinLayout(std::vector<std::uint32_t>{}, 1), std::invalid_argument);
@@ -305,6 +315,7 @@ SWIM_TEST("Render.Visibility", "HundredThousandObjectBenchmarkKeepsStatisticsCon
 	const auto mesh = scene.AddMesh({ 0.0f, 1.0f, 4.0f });
 	constexpr std::uint32_t width = 400;
 	constexpr std::uint32_t height = 250;
+
 	for (std::uint32_t j = 0; j < height; ++j)
 	{
 		for (std::uint32_t i = 0; i < width; ++i)
@@ -314,6 +325,7 @@ SWIM_TEST("Render.Visibility", "HundredThousandObjectBenchmarkKeepsStatisticsCon
 			scene.Add(mesh, float(i) - 200.0f, float(j) - 125.0f, row % 7 == 0 ? 1u : 0u, flags, 0.4f);
 		}
 	}
+
 	const VisibilityBinLayout bins(std::vector<std::uint32_t>{ 100000, 16 }, 1);
 	const auto view = OrthoView(4.0f);
 	std::vector<GpuLodState> lods;
@@ -328,10 +340,12 @@ SWIM_TEST("Render.Visibility", "HundredThousandObjectBenchmarkKeepsStatisticsCon
 	SWIM_CHECK_EQUAL(stats.FrustumCulled + stats.NotDrawable + stats.Visible, stats.Tested);
 	SWIM_CHECK(stats.Visible > 400u && stats.FrustumCulled > 90000u && stats.NotDrawable > 0u);
 	std::uint32_t lodTotal = 0;
+
 	for (const auto count : stats.LodCounts)
 	{
 		lodTotal += count;
 	}
+
 	SWIM_CHECK_EQUAL(lodTotal, stats.Visible);
 	SWIM_CHECK_EQUAL(stats.Draws + stats.Dropped, stats.Visible); // One submesh per LOD, one index page.
 	SWIM_CHECK(stats.Dropped > 0u);

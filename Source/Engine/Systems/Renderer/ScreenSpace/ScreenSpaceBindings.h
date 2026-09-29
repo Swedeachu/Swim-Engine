@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Descriptor contracts (space 0) of the four screen-space programs. Every texture is
 	// read with Load; all run 8 x 8 groups and take no push constants.
 	inline constexpr std::uint32_t ScreenSpaceThreadGroupSize = 8;
@@ -83,4 +84,5 @@ namespace Swim::Render
 		static constexpr std::uint32_t HistoryOut = 7; // RWTexture2D<float4> rgba16f: this frame's filtered term.
 		static constexpr std::uint32_t Count = 8;
 	};
+
 } // namespace Swim::Render

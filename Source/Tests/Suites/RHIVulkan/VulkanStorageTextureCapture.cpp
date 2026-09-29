@@ -5,7 +5,9 @@ namespace Swim::Testing
 
 	namespace
 	{
+
 		VulkanStorageTextureCapture* capture = nullptr;
+
 	}
 
 	VulkanStorageTextureCapture::VulkanStorageTextureCapture()

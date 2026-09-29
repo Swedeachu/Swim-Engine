@@ -13,6 +13,7 @@
 
 namespace
 {
+
 	// GPU-assisted validation instruments every load, store and atomic through an access
 	// chain into a Uniform or StorageBuffer descriptor, and warns
 	// (GPUAV-Compile-time-general-buffer) when one module has more than 75. The native
@@ -25,10 +26,12 @@ namespace
 		std::ifstream file(path, std::ios::binary);
 		const std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 		std::vector<std::uint32_t> words(bytes.size() / 4);
+
 		if (!words.empty())
 		{
 			std::memcpy(words.data(), bytes.data(), words.size() * 4);
 		}
+
 		return words;
 	}
 
@@ -40,14 +43,17 @@ namespace
 		std::unordered_map<std::uint32_t, std::uint32_t> storage; // Variable -> storage class.
 		std::unordered_map<std::uint32_t, std::uint32_t> chains;  // Access chain -> base.
 		std::vector<std::uint32_t> pointers;
+
 		for (std::size_t at = 5; at < words.size();)
 		{
 			const std::uint32_t count = words[at] >> 16;
 			const std::uint32_t opcode = words[at] & 0xffffu;
+
 			if (count == 0 || at + count > words.size())
 			{
 				break;
 			}
+
 			if (opcode == OpVariable && count >= 4)
 			{
 				storage[words[at + 2]] = words[at + 3];
@@ -68,24 +74,31 @@ namespace
 			{
 				pointers.push_back(words[at + 3]);
 			}
+
 			at += count;
 		}
+
 		std::uint32_t accesses = 0;
+
 		for (auto pointer : pointers)
 		{
 			if (!chains.contains(pointer))
 			{
 				continue;
 			}
+
 			for (int depth = 0; depth < 64 && chains.contains(pointer); ++depth)
 			{
 				pointer = chains.at(pointer);
 			}
+
 			const auto found = storage.find(pointer);
 			accesses += found != storage.end() && (found->second == Uniform || found->second == StorageBuffer) ? 1u : 0u;
 		}
+
 		return accesses;
 	}
+
 } // namespace
 
 SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstrumentationWarning")
@@ -135,6 +148,7 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 	};
 
 	std::uint32_t total = 0;
+
 	for (const auto& program : programs)
 	{
 		const auto words = ReadWords(program.Path);
@@ -145,6 +159,7 @@ SWIM_TEST("ShaderCompiler.GpuAvBudget", "RendererProgramsStayBelowTheGpuAvInstru
 		SWIM_CHECK_MESSAGE(accesses <= GpuAvGeneralBufferLimit,
 			std::string(program.Name) + " would trigger GPUAV-Compile-time-general-buffer under GPU-assisted validation");
 	}
+
 	SWIM_CHECK_MESSAGE(total > 0u, "no buffer accesses counted: the counter is broken");
 }
 #endif

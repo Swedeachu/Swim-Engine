@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// The modern renderer's canonical depth convention (the item 50 gate): clip depth
 	// is in [0, 1] and reversed, so the near plane maps to 1 and the far plane (or
 	// infinity) to 0. Depth buffers use D32Float, clear to 0 and pass GreaterEqual.
@@ -48,4 +49,5 @@ namespace Swim::Render
 	{
 		return convention == DepthConvention::ReverseZ ? depth > reference : depth < reference;
 	}
+
 } // namespace Swim::Render

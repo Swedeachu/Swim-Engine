@@ -20,6 +20,7 @@
 
 namespace Game
 {
+
 	class BallShooter;
 	class ReflectionLabFloor;
 
@@ -41,13 +42,19 @@ namespace Game
 	// The fly camera works in every state: hold the right mouse button + WASD.
 	class Sandbox : public Engine::Scene
 	{
+
 	  public:
+
 		using Engine::Scene::Scene;
 
 		int Awake() override;
+
 		int Init() override;
+
 		void Update(double dt) override;
+
 		int Exit() override;
+
 		void OnStateChanged(Engine::EngineState previous, Engine::EngineState current) override;
 
 		// Physics playground.
@@ -65,12 +72,15 @@ namespace Game
 
 		// A dynamic primitive dropped in front of the camera (or at the playground).
 		entt::entity SpawnPrimitive(Engine::BuiltinMesh mesh);
+
 		BallShooter* GetShooter() const;
 
 		// Lighting.
 		void SetSunAngles(float elevationDegrees, float azimuthDegrees);
+
 		// The sandbox's sky, ambient, exposure, tone map and grading (applied once at startup).
 		static void ApplyTropicalLook(Engine::RenderSettings& settings);
+
 		static constexpr float TropicalContrast = 1.04f;
 		static constexpr float TropicalSaturation = 1.39f;
 		// Volumetric clouds, sun shafts and a lens flare as renderer features.
@@ -91,7 +101,9 @@ namespace Game
 
 		// Camera bookmarks (one per playground); false without a camera or out of range.
 		static std::uint32_t GetBookmarkCount();
+
 		static const char* GetBookmarkName(std::uint32_t index);
+
 		bool GoToBookmark(std::uint32_t index);
 
 		std::uint32_t GetLastBookmark() const { return lastBookmark; }
@@ -154,12 +166,14 @@ namespace Game
 
 		// Hides (or shows) every entity with `tag`: meshes and lights (the scene.* toggles).
 		void SetGroupShown(Engine::TagId tag, bool shown);
+
 		bool IsGroupShown(Engine::TagId tag) const;
 
 		// True while the UI has the pointer or keyboard (gameplay input stands back).
 		bool IsUiCapturing() const;
 
 	  private:
+
 		struct Palette
 		{
 			std::array<Engine::MeshLibrary::MeshHandle, static_cast<std::size_t>(Engine::BuiltinMesh::Count)> Meshes{};
@@ -171,24 +185,42 @@ namespace Game
 		};
 
 		void LoadPalette();
+
 		std::uint32_t Mat(const std::string& name, const glm::vec3& color, float metallic, float roughness,
 			const glm::vec3& emissive = glm::vec3(0.0f), bool transparent = false, float alpha = 1.0f);
+
 		void BuildCamera();
+
 		void BuildGround();
+
 		void BuildLighting();
+
 		void BuildPbrGallery();
+
 		void BuildInstanceHall();
+
 		void BuildGlassAndEmissive();
+
 		void BuildPhysicsPlayground();
+
 		void BuildParticles();
+
 		void BuildTentacles();
+
 		void BuildSponza();
+
 		void BuildLightSwarm();
+
 		void BuildReflectionLab();
+
 		void BuildBlackHole();
+
 		void RegisterProfilingToggles();
+
 		void BuildWorldUi();
+
 		void BuildHud();
+
 		void SpawnBallAt(const glm::vec3& position, const glm::vec3& velocity);
 
 		Palette palette;
@@ -229,5 +261,7 @@ namespace Game
 		glm::vec3 swarmMax{ 0.0f };
 		std::mt19937 random{ 1234u };
 		ReflectionLabFloor* labFloor = nullptr;
+
 	};
+
 } // namespace Game

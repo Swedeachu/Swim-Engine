@@ -14,6 +14,7 @@ using namespace Swim::Render;
 
 namespace
 {
+
 	// Screen-space effects on the mock device: imported inputs and the four programs
 	// with their reflected-style interfaces.
 	struct ScreenSpaceWorld
@@ -29,10 +30,12 @@ namespace
 			const auto schema = [](Testing::MockPipelineLayout& layout, std::initializer_list<std::pair<std::uint32_t, T>> bindings)
 			{
 				Rhi::DescriptorSchemaDesc space{ 0, {} };
+
 				for (const auto& [binding, type] : bindings)
 				{
 					space.Bindings.push_back({ binding, type, 1, Rhi::ShaderStageMask::Compute });
 				}
+
 				layout.program.Interface.DescriptorSchemas = { space };
 			};
 			schema(aoLayout,
@@ -137,6 +140,7 @@ namespace
 		std::vector<Testing::MockCommand> Commands(const std::string& kind) const
 		{
 			std::vector<Testing::MockCommand> result;
+
 			for (const auto& command : *device.Commands)
 			{
 				if (command.Kind == kind)
@@ -144,6 +148,7 @@ namespace
 					result.push_back(command);
 				}
 			}
+
 			return result;
 		}
 
@@ -162,6 +167,7 @@ namespace
 		std::unique_ptr<Rhi::Texture> color, depth, normal, indirect, reflectance, specular, history, velocity, backDepth, objectId, probeCubes;
 		std::unique_ptr<Rhi::Sampler> sampler;
 	};
+
 } // namespace
 
 SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEnabled")
@@ -188,11 +194,13 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEna
 		world.Run(graph, resources.Output);
 		const auto dispatches = world.Commands("Dispatch");
 		SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(3));
+
 		for (const auto& dispatch : dispatches)
 		{
 			SWIM_CHECK_EQUAL(dispatch.SourceOffset, 8u);	  // 64 / 8
 			SWIM_CHECK_EQUAL(dispatch.DestinationOffset, 5u); // ceil(36 / 8)
 		}
+
 		const auto pipelines = world.Commands("BindComputePipeline");
 		SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(3));
 		SWIM_CHECK(pipelines[0].Source == &world.aoPipeline && pipelines[1].Source == &world.blurPipeline &&
@@ -439,6 +447,7 @@ SWIM_TEST("Render.ScreenSpaceEffects", "TheTemporalReflectionFilterRunsAfterTheC
 		owned.push_back(world.device.CreateTexture(desc));
 		return graph.ImportTexture(*owned.back(), Rhi::ResourceState::ShaderRead);
 	};
+
 	for (const bool previous : { false, true })
 	{
 		ScreenSpaceSettings settings;
@@ -449,10 +458,12 @@ SWIM_TEST("Render.ScreenSpaceEffects", "TheTemporalReflectionFilterRunsAfterTheC
 		ScreenSpaceFrame::ReflectionHistoryInputs history;
 		history.Next = texture(graph, Rhi::Format::RGBA16Float);
 		history.Blend = 0.25f;
+
 		if (previous)
 		{
 			history.Previous = texture(graph, Rhi::Format::RGBA16Float);
 		}
+
 		frame.ReflectionTemporal = history;
 		const auto resources = effects.Record(graph, frame);
 		// Bit 0: the composite writes the term; bit 1: last frame's history is read.
@@ -468,6 +479,7 @@ SWIM_TEST("Render.ScreenSpaceEffects", "TheTemporalReflectionFilterRunsAfterTheC
 		SWIM_CHECK_EQUAL(world.Bound(R::Term).GetTexture().GetDesc().Extent.Width, ScreenSpaceWorld::Width);
 		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, R::Count);
 	}
+
 	// Without it: no pass, the flags stay clear and the composite's term is a 1x1 stand-in.
 	{
 		ScreenSpaceSettings settings;

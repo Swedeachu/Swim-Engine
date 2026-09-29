@@ -4,6 +4,7 @@
 
 namespace Swim::Render
 {
+
 	MaterialTemplateDesc StandardMaterialTemplateDesc()
 	{
 		using T = MaterialParameterType;
@@ -47,22 +48,26 @@ namespace Swim::Render
 
 	namespace
 	{
+
 		void RequireStandard(const MaterialInstance& instance)
 		{
 			const auto& materialTemplate = instance.GetTemplate();
 			const auto expected = StandardMaterialTemplateDesc();
 			bool same = materialTemplate.GetRecordSize() == expected.RecordSize &&
 				materialTemplate.GetParameters().size() == expected.Parameters.size();
+
 			for (std::size_t i = 0; same && i < expected.Parameters.size(); ++i)
 			{
 				const auto* parameter = materialTemplate.FindParameter(expected.Parameters[i].Name);
 				same = parameter && parameter->Type == expected.Parameters[i].Type && parameter->Offset == expected.Parameters[i].Offset;
 			}
+
 			if (!same)
 			{
 				throw std::invalid_argument("Material " + materialTemplate.GetName() + " does not use the standard material layout");
 			}
 		}
+
 	} // namespace
 
 	StandardPbr::Parameters ReadStandardParameters(const MaterialInstance& instance)
@@ -87,4 +92,5 @@ namespace Swim::Render
 		return { instance.GetUint("BaseColorTexture"), instance.GetUint("MetallicRoughnessTexture"), instance.GetUint("NormalTexture"),
 			instance.GetUint("OcclusionTexture"), instance.GetUint("EmissiveTexture"), instance.GetUint("MaterialSampler") };
 	}
+
 } // namespace Swim::Render

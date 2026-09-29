@@ -6,11 +6,14 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		std::optional<Rhi::Format> ToRhiFormat(Assets::TexturePayloadFormat format)
 		{
 			using F = Assets::TexturePayloadFormat;
+
 			switch (format)
 			{
 			case F::R8UNorm:
@@ -46,6 +49,7 @@ namespace Swim::Render
 		{
 			return !point.Semaphore || point.Semaphore->GetCompletedValue() >= point.Value;
 		}
+
 	} // namespace
 
 	TextureResidency::TextureResidency(Rhi::Device& device, const TextureResidencyDesc& desc)
@@ -71,20 +75,25 @@ namespace Swim::Render
 		{
 			return std::nullopt;
 		}
+
 		for (std::size_t i = 0; i < texture.Payloads.size(); ++i)
 		{
 			const auto& payload = texture.Payloads[i];
+
 			if (payload.Container != Assets::TextureContainerFormat::NativeMipData ||
 				payload.Supercompression != Assets::TextureSupercompression::None)
 			{
 				continue;
 			}
+
 			const auto format = ToRhiFormat(payload.Format);
+
 			if (format && (blockCompression || !Rhi::IsBlockCompressed(*format)))
 			{
 				return TexturePayloadSelection{ i, *format };
 			}
 		}
+
 		return std::nullopt;
 	}
 
@@ -102,21 +111,27 @@ namespace Swim::Render
 		const Assets::TextureAsset& texture, std::string_view debugName, Assets::TextureAsset* adopt)
 	{
 		const auto selection = SelectPayload(texture, blockCompression);
+
 		if (!selection)
 		{
 			throw std::invalid_argument(name + ": texture has no native-mip 2D payload this device can sample");
 		}
+
 		const auto& payload = texture.Payloads[selection->Payload];
 		const auto block = Rhi::GetTransferBlockInfo(selection->Format);
+
 		if (!texture.Width || !texture.Height || payload.Mips.empty())
 		{
 			throw std::invalid_argument(name + ": texture needs an extent and at least one mip");
 		}
+
 		std::uint32_t maxMips = 1;
+
 		for (auto extent = std::max(texture.Width, texture.Height); extent > 1; extent >>= 1)
 		{
 			++maxMips;
 		}
+
 		if (payload.Mips.size() > maxMips)
 		{
 			throw std::invalid_argument(name + ": texture has more mips than its extent allows");
@@ -129,24 +144,29 @@ namespace Swim::Render
 		// its own bytes: adopted when the caller hands the asset over, else copied once.
 		bool inPlace = true;
 		std::uint64_t packed = 0;
+
 		for (std::uint32_t mip = 0; mip < payload.Mips.size(); ++mip)
 		{
 			const auto& source = payload.Mips[mip];
 			const std::uint32_t width = std::max(1u, texture.Width >> mip);
 			const std::uint32_t height = std::max(1u, texture.Height >> mip);
 			const std::uint64_t size = Rhi::GetTransferRegionBytes(selection->Format, width, height, 1);
+
 			if (source.Width != width || source.Height != height || source.Depth != 1 || source.SizeBytes != size ||
 				source.OffsetBytes > payload.Bytes.size() || size > payload.Bytes.size() - source.OffsetBytes)
 			{
 				throw std::invalid_argument(name + ": texture mip " + std::to_string(mip) + " is not a tightly packed chain level");
 			}
+
 			const std::uint64_t offset = (packed + record.Alignment - 1) / record.Alignment * record.Alignment;
 			inPlace = inPlace && source.OffsetBytes == offset;
 			packed = offset + size;
 			record.Mips.push_back({ { width, height, 1 }, offset, size });
 			record.TexelBytes += size;
 		}
+
 		const auto stats = textures.GetStats();
+
 		if (!stats.FreeSlots && stats.SlotHighWater >= stats.MaxSlots)
 		{
 			throw std::length_error(name + " has no free texture slots");
@@ -160,21 +180,26 @@ namespace Swim::Render
 		desc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination | Rhi::TextureUsage::TransferSource;
 		desc.DebugName = label;
 		record.Texture = device.CreateTexture(desc);
+
 		if (!record.Texture)
 		{
 			throw std::runtime_error(name + ": texture creation failed");
 		}
+
 		Rhi::TextureViewDesc view;
 		view.PixelFormat = selection->Format;
 		view.MipLevelCount = desc.MipLevels;
 		view.DebugName = label;
 		record.View = device.CreateTextureView(*record.Texture, view);
+
 		if (!record.View)
 		{
 			throw std::runtime_error(name + ": texture view creation failed");
 		}
+
 		// Last, after every failure point: an adopted payload must stay with the asset on failure.
 		std::shared_ptr<std::vector<std::byte>> bytes;
+
 		if (inPlace && adopt)
 		{
 			bytes = std::make_shared<std::vector<std::byte>>(std::move(adopt->Payloads[selection->Payload].Bytes));
@@ -187,6 +212,7 @@ namespace Swim::Render
 		else
 		{
 			bytes = std::make_shared<std::vector<std::byte>>(static_cast<std::size_t>(packed));
+
 			for (std::uint32_t mip = 0; mip < payload.Mips.size(); ++mip)
 			{
 				std::memcpy(bytes->data() + record.Mips[mip].Offset, payload.Bytes.data() + payload.Mips[mip].OffsetBytes,
@@ -197,24 +223,29 @@ namespace Swim::Render
 		record.Bytes = std::move(bytes);
 
 		auto handle = textures.TryCreate(std::move(record));
+
 		if (!handle)
 		{
 			throw std::logic_error(name + " texture slot disappeared after its capacity check");
 		}
+
 		return *handle;
 	}
 
 	bool TextureResidency::DestroyTexture(GpuTextureHandle texture, Rhi::TimelinePoint lastUse)
 	{
 		auto* record = textures.Get(texture);
+
 		if (!record)
 		{
 			return false;
 		}
+
 		if (record->State == GpuUploadState::Recorded)
 		{
 			throw std::logic_error(name + " texture upload is recorded; commit or abort it before destruction");
 		}
+
 		if (record->State == GpuUploadState::Uploading && !IsComplete(record->Upload))
 		{
 			if (!lastUse.Semaphore)
@@ -226,6 +257,7 @@ namespace Swim::Render
 				lastUse.Value = std::max(lastUse.Value, record->Upload.Value);
 			}
 		}
+
 		return textures.Release(texture, lastUse);
 	}
 
@@ -235,10 +267,12 @@ namespace Swim::Render
 		{
 			return;
 		}
+
 		if (!completion.Semaphore)
 		{
 			throw std::invalid_argument(name + " upload commit needs the graph's completion point");
 		}
+
 		for (auto handle : recorded)
 		{
 			if (auto* record = textures.Get(handle))
@@ -248,6 +282,7 @@ namespace Swim::Render
 				record->Bytes.reset(); // The executor already copied the mips into staging.
 			}
 		}
+
 		recorded.clear();
 		importPending = false;
 	}
@@ -261,6 +296,7 @@ namespace Swim::Render
 				record->State = GpuUploadState::PendingUpload;
 			}
 		}
+
 		recorded.clear();
 		importPending = false;
 	}
@@ -277,6 +313,7 @@ namespace Swim::Render
 					record.Upload = {};
 					++changed;
 				}
+
 			});
 		return changed + textures.CollectRetired();
 	}
@@ -291,6 +328,7 @@ namespace Swim::Render
 				{
 					throw std::runtime_error("TextureResidency upload wait failed");
 				}
+
 			});
 		textures.Drain();
 		Collect();
@@ -340,8 +378,10 @@ namespace Swim::Render
 				default:
 					break;
 				}
+
 			});
 		stats.RetiringTextures = textures.GetStats().Retiring;
 		return stats;
 	}
+
 } // namespace Swim::Render

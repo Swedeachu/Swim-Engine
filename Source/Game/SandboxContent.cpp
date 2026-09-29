@@ -8,6 +8,7 @@
 
 namespace Game
 {
+
 	entt::entity SpawnMesh(Engine::Scene& scene, const MeshSpawn& spawn)
 	{
 		const entt::entity entity = scene.CreateEntity(spawn.Name);
@@ -16,15 +17,18 @@ namespace Game
 		renderer.Parts.push_back({ spawn.Mesh, spawn.Material });
 		renderer.Flags = spawn.Flags;
 		scene.AddComponent<Engine::MeshRenderer>(entity, std::move(renderer));
+
 		for (const auto tag : spawn.Tags)
 		{
 			scene.AddTag(entity, tag);
 		}
+
 		return entity;
 	}
 
 	namespace
 	{
+
 		Engine::Rigidbody MakeBody(Engine::RigidbodyType type, float mass)
 		{
 			Engine::Rigidbody body;
@@ -33,6 +37,7 @@ namespace Game
 			body.useGravity = type == Engine::RigidbodyType::Dynamic;
 			return body;
 		}
+
 	} // namespace
 
 	void AddBoxBody(Engine::Scene& scene, entt::entity entity, Engine::RigidbodyType type, const glm::vec3& halfExtents, float mass)
@@ -86,4 +91,5 @@ namespace Game
 		desc.DoubleSided = blend == Engine::MaterialBlend::Transparent;
 		return materials.GetOrCreate(desc);
 	}
+
 } // namespace Game

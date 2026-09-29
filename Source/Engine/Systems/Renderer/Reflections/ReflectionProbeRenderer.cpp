@@ -10,8 +10,10 @@
 
 namespace Swim::Render
 {
+
 	namespace
 	{
+
 		using S = Rhi::ResourceState;
 		constexpr auto AtlasFormat = Rhi::Format::RGBA16Float;
 
@@ -34,10 +36,12 @@ namespace Swim::Render
 			std::span<const Rhi::DescriptorWrite> writes)
 		{
 			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+
 			if (!table)
 			{
 				throw std::runtime_error(label + " descriptor table could not be created");
 			}
+
 			table->Write(writes);
 			return static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 		}
@@ -60,6 +64,7 @@ namespace Swim::Render
 		};
 
 		static_assert(sizeof(ResolveConstants) == ReflectionProbeResolveBindings::PushConstantBytes);
+
 	} // namespace
 
 	ReflectionProbeRenderer::ReflectionProbeRenderer(Rhi::Device& deviceValue, ReflectionProbeRendererDesc descValue)
@@ -72,6 +77,7 @@ namespace Swim::Render
 				throw std::invalid_argument(desc.DebugName + " needs the resolve, downsample and prefilter programs");
 			}
 		}
+
 		if (!desc.Sampler)
 		{
 			throw std::invalid_argument(desc.DebugName + " needs a sampler");
@@ -96,10 +102,12 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + " needs a power-of-two resolution in 16..512 and 1..16 probes");
 		}
+
 		if (source && size == resolution && probes == maxProbes)
 		{
 			return false;
 		}
+
 		auto sourceDesc = AtlasDesc(size, probes);
 		const std::string sourceName = desc.DebugName + " source";
 		sourceDesc.DebugName = sourceName;
@@ -108,10 +116,12 @@ namespace Swim::Render
 		prefilteredDesc.DebugName = prefilteredName;
 		source = device.CreateTexture(sourceDesc);
 		prefiltered = device.CreateTexture(prefilteredDesc);
+
 		if (!source || !prefiltered)
 		{
 			throw std::runtime_error(desc.DebugName + ": cannot create the probe atlases");
 		}
+
 		resolution = size;
 		maxProbes = probes;
 		mipCount = sourceDesc.MipLevels;
@@ -125,6 +135,7 @@ namespace Swim::Render
 		{
 			throw std::logic_error(desc.DebugName + ": Ensure before Import");
 		}
+
 		Atlases atlases;
 		{
 			Rhi::TextureDesc cubeDesc;
@@ -137,6 +148,7 @@ namespace Swim::Render
 			cubeDesc.DebugName = cubeName;
 			atlases.EnvironmentStandIn = graph.CreateTexture(cubeDesc);
 			const std::array<std::uint16_t, 4> zero{};
+
 			for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 			{
 				AddTextureUpload(graph, cubeName + " upload", std::as_bytes(std::span(zero)), atlases.EnvironmentStandIn,
@@ -146,6 +158,7 @@ namespace Swim::Render
 		const auto state = initialized ? S::ShaderRead : S::Undefined;
 		atlases.Source = graph.ImportTexture(*source, state);
 		atlases.Prefiltered = graph.ImportTexture(*prefiltered, state);
+
 		if (!initialized)
 		{
 			// Every face of every mip of both atlases starts defined (sky distance, black), so
@@ -167,6 +180,7 @@ namespace Swim::Render
 			const float zeroDepth = 0.0f;
 			const auto colorStandIn = standIn(AtlasFormat, std::as_bytes(std::span(zeroColor)), "Reflection probe clear color");
 			const auto depthStandIn = standIn(Rhi::Format::R32Float, std::as_bytes(std::span(&zeroDepth, 1)), "Reflection probe clear depth");
+
 			for (const auto atlas : { atlases.Source, atlases.Prefiltered })
 			{
 				graph.AddPass(
@@ -195,9 +209,11 @@ namespace Swim::Render
 						cubeView.PixelFormat = AtlasFormat;
 						cubeView.ArrayLayerCount = Environment::CubeFaceCount;
 						auto& environmentResource = c.CreateView(environment, cubeView);
+
 						for (std::uint32_t mip = 0; mip < mips; ++mip)
 						{
 							const std::uint32_t mipSize = std::max(size >> mip, 1u);
+
 							for (std::uint32_t layer = 0; layer < layers; ++layer)
 							{
 								std::array<Rhi::DescriptorWrite, 5> writes{};
@@ -220,10 +236,13 @@ namespace Swim::Render
 								list.Dispatch(Groups(mipSize, group), Groups(mipSize, group), 1);
 							}
 						}
+
 					});
 			}
+
 			initialized = true;
 		}
+
 		return atlases;
 	}
 
@@ -234,13 +253,16 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + ": slot or face out of range");
 		}
+
 		const auto& colorDesc = graph.GetDesc(color);
 		const auto& depthDesc = graph.GetDesc(depth);
+
 		if (colorDesc.Extent.Width != resolution || colorDesc.Extent.Height != resolution || colorDesc.PixelFormat != AtlasFormat ||
 			depthDesc.Extent.Width != resolution || depthDesc.PixelFormat != Rhi::Format::D32Float)
 		{
 			throw std::invalid_argument(desc.DebugName + ": a capture must be Resolution^2 RGBA16Float color with D32Float depth");
 		}
+
 		const std::uint32_t layer = slot * Environment::CubeFaceCount + face;
 		const auto target = atlases.Source;
 		const auto environment = sky.Environment.value_or(atlases.EnvironmentStandIn);
@@ -302,6 +324,7 @@ namespace Swim::Render
 		{
 			throw std::invalid_argument(desc.DebugName + ": slot out of range");
 		}
+
 		const std::uint32_t base = slot * Environment::CubeFaceCount;
 		const auto source = atlases.Source;
 		const auto destination = atlases.Prefiltered;
@@ -321,6 +344,7 @@ namespace Swim::Render
 				{
 					auto& list = c.Commands();
 					list.BindComputePipeline(*program.Pipeline);
+
 					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 					{
 						std::array<Rhi::DescriptorWrite, 2> writes{};
@@ -333,8 +357,10 @@ namespace Swim::Render
 						constexpr auto group = EnvironmentDownsampleBindings::ThreadGroupSize;
 						list.Dispatch(Groups(size, group), Groups(size, group), 1);
 					}
+
 				});
 		}
+
 		// Prefiltered mips: GGX per roughness, alpha = the captured distance.
 		Rhi::TextureViewDesc cubeView;
 		cubeView.Dimension = Rhi::TextureViewDimension::TextureCube;
@@ -356,9 +382,11 @@ namespace Swim::Render
 				auto& list = c.Commands();
 				list.BindComputePipeline(*program.Pipeline);
 				auto& sourceView = c.CreateView(source, cubeView);
+
 				for (std::uint32_t mip = 0; mip < mips; ++mip)
 				{
 					const std::uint32_t mipSize = std::max(size >> mip, 1u);
+
 					for (std::uint32_t face = 0; face < Environment::CubeFaceCount; ++face)
 					{
 						std::array<Rhi::DescriptorWrite, 3> writes{};
@@ -376,6 +404,8 @@ namespace Swim::Render
 						list.Dispatch(Groups(mipSize, group), Groups(mipSize, group), 1);
 					}
 				}
+
 			});
 	}
+
 } // namespace Swim::Render

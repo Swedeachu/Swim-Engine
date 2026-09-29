@@ -14,7 +14,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanQueue final : public Rhi::Queue
 		{
+
 		public:
+
 			VulkanQueue(
 				std::shared_ptr<VulkanDeviceState> state,
 				Rhi::QueueType type,
@@ -60,15 +62,19 @@ namespace Swim::RhiVulkan
 			}
 
 			Rhi::TimestampInfo GetTimestampInfo() const override;
+
 			void Submit(const Rhi::SubmitDesc& desc) override;
+
 			void WaitIdle() override;
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			Rhi::QueueType type = Rhi::QueueType::Graphics;
 			VkQueue queue = VK_NULL_HANDLE;
 			std::uint32_t familyIndex = 0;
 			std::shared_ptr<std::mutex> submissionMutex;
+
 		};
 
 } // namespace Swim::RhiVulkan

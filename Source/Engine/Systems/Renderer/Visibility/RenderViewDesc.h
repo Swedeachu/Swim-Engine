@@ -6,6 +6,7 @@
 
 namespace Swim::Render
 {
+
 	// Inputs for BuildGpuViewRecord. ViewProjection is row-major (clip = M * p) and
 	// maps visible depth to [0, 1], which holds for both conventional and reverse-Z
 	// projections; an infinite far plane yields an always-passing far plane.
@@ -33,4 +34,5 @@ namespace Swim::Render
 	std::array<float, 16> OrthographicReverseZRowMajor(float left, float right, float bottom, float top, float nearPlane, float farPlane);
 	// Infinite far plane: depth = near / distance, which tends to 0.
 	std::array<float, 16> PerspectiveReverseZRowMajor(float verticalFov, float aspect, float nearPlane);
+
 } // namespace Swim::Render

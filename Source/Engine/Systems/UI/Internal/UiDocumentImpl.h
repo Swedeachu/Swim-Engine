@@ -15,8 +15,10 @@
 
 namespace Swim::UI
 {
+
 	namespace Internal
 	{
+
 		constexpr float MaxLogical = 1000000.0f;
 		constexpr std::size_t MaxDepth = 256;
 		constexpr std::size_t MaxNodes = 65536;
@@ -52,6 +54,7 @@ namespace Swim::UI
 		void ValidateImage(const UiImage& image);
 		// True when the two styles differ only in paint properties.
 		bool OnlyPaintChanged(const UiStyle& before, const UiStyle& after);
+
 	} // namespace Internal
 
 	struct UiDocument::Impl
@@ -192,7 +195,9 @@ namespace Swim::UI
 		const Node& Get(UiNodeId id) const { return Nodes.at(id.Value); }
 
 		void RequireLayout() const;
+
 		std::size_t Depth(UiNodeId id) const;
+
 		std::size_t Height(UiNodeId id) const;
 
 		bool IsControl(const Node& node) const { return node.Control.Kind != UiControlKind::None; }
@@ -216,10 +221,14 @@ namespace Swim::UI
 		}
 
 		bool Available(UiNodeId id) const;
+
 		void ClearUnavailable();
+
 		void Erase(UiNodeId id);
+
 		// Measure invalidation of a node and its ancestors (and a pending Layout).
 		void MarkLayoutDirty(UiNodeId id);
+
 		void MarkPaintDirty(UiNodeId id);
 
 		// --- Text (UiLayout.cpp) ---
@@ -229,13 +238,17 @@ namespace Swim::UI
 		bool IsComposing(const Node& node) const { return node.Id == Focused && node.Editable && !Composition.empty(); }
 
 		std::shared_ptr<const Text::TextLayout> BuildTextLayout(const Node& node, float box) const;
+
 		// A layout of the current display text for editing queries between Layouts.
 		const Text::TextLayout& EditLayout(Node& node);
 
 		// --- Layout (UiLayout.cpp) ---
 		UiPoint Measure(Node& node, UiPoint available, float wrap);
+
 		void Arrange(Node& node, UiRect bounds, UiRect clip, bool enabled);
+
 		void ArrangeChildren(Node& node, const UiRect& inner, UiPoint& extent, std::vector<std::pair<UiNodeId, UiRect>>& placed);
+
 		void RevealCaret(Node& node, const UiRect& inner);
 
 		// --- Paint (UiPaint.cpp) ---
@@ -243,31 +256,50 @@ namespace Swim::UI
 
 		// --- Controls (UiControls.cpp) ---
 		void ValidateControl(const Node& node, const UiControl& control) const;
+
 		float ClampValue(const UiControl& control, float value) const;
+
 		// The rectangle (relative to the parent's content box) of a placed part, if any.
 		std::optional<UiRect> PartGeometry(const Node& part, const UiRect& parentInner) const;
+
 		// Refreshes scroll bars from their targets after an Arrange (values, thumbs,
 		// visibility), re-arranging thumbs that moved.
 		void SyncScrollBars();
+
 		void ReArrange(Node& node, UiRect bounds);
+
 		bool ControlPointerDown(Node& control, UiPoint logical);
+
 		void ControlPointerMove(UiPoint logical);
+
 		void ControlPointerUp(Node& control, bool inside);
+
 		void EndDrag(bool commit);
+
 		bool ControlKey(Node& control, UiKey key);
+
 		bool ControlWheel(Node& control, UiPoint delta);
+
 		// Input changes: clamps/snaps, emits ValueChanged (and ValueCommitted when commit).
 		bool ChangeValue(Node& control, float value, bool commit);
+
 		void Toggle(Node& control);
+
 		float CheckValue(UiCheckState state) const;
+
 		void MarkControlDirty(Node& control);
+
 		// An editable label keeps the typed text while focused unless forced.
 		void SyncValueLabel(Node& control, bool force = false);
+
 		// A scroll bar's thumb track along its axis (after its step buttons), relative to its
 		// content box: start and length.
 		std::pair<float, float> ScrollTrack(const Node& bar, const UiRect& inner) const;
+
 		void StepScrollBar(Node& bar, float direction);
+
 		bool AnimateControls(float seconds);
+
 		float Axis(const Node& control, UiPoint logical) const; // Pointer position along the control's axis.
 
 		// --- Selection owners (UiSelection.cpp) ---
@@ -278,42 +310,68 @@ namespace Swim::UI
 		}
 
 		std::uint32_t OptionCount(const Node& owner) const;
+
 		UiNodeId OptionFor(const Node& owner, std::int32_t index) const;
+
 		// Input selection: clamps to [-1, count - 1]; ValueChanged (+ ValueCommitted) when changed.
 		bool SelectOption(Node& owner, std::int32_t index, bool commit);
+
 		void SyncOwner(Node& owner); // Dropdown label text and option visuals.
+
 		void RevealOption(Node& owner, std::int32_t index);
+
 		bool OwnerKey(Node& owner, UiKey key);
+
 		void OptionPressed(Node& option, bool inside);
+
 		void ToggleDropdown(Node& owner);
+
 		bool IsDropdownOpen(const Node& owner) const;
+
 		void CommitValueLabel(Node& label);
 
 		// --- Popups (UiPopups.cpp) ---
 		std::optional<std::size_t> PopupIndexOf(UiNodeId id) const; // The open popup containing a node.
+
 		std::optional<std::size_t> TopModal() const;
+
 		bool InputAllowed(UiNodeId id) const; // Outside a modal's reach: false.
+
 		void ShowPopup(Node& node, bool visible);
+
 		void ClosePopupsFrom(std::size_t index);
+
 		void PlacePopups();
+
 		void MoveToTop(UiNodeId id); // Moves a subtree's Order range to the end (painted last).
+
 		// Closes light-dismiss popups that do not contain the point (or their anchor).
 		void LightDismiss(UiPoint logical);
+
 		void CloseOnActivate(UiNodeId activated);
+
 		// Before a popup opens: closes the light-dismiss popups above the one holding its
 		// anchor (unrelated menus and lists), and the tooltip.
 		void DismissForOpen(UiNodeId anchor, UiNodeId opening);
+
 		void UpdateTooltips(float seconds);
+
 		void HideTooltip(bool suppress);
 
 		// --- Visual states and theme (UiVisuals.cpp) ---
 		UiNodeId StateOwner(UiNodeId id) const;
+
 		UiState ComputeState(UiNodeId id) const;
+
 		UiResolvedVisual ResolveTarget(const Node& node, UiState state) const;
+
 		// Resolves every node whose state or style changed; starts transitions.
 		void ResolveVisuals();
+
 		bool AdvanceTransitions(float seconds);
+
 		void ApplyTheme(Node& node);
+
 		void MarkSubtreeVisualDirty(UiNodeId id);
 
 		// --- Navigation (UiInput.cpp) ---
@@ -321,10 +379,16 @@ namespace Swim::UI
 
 		// --- Editing (UiEditing.cpp) ---
 		UiTextSelection ClampSelection(Node& node, UiTextSelection selection);
+
 		void ReplaceSelection(Node& node, std::string_view text);
+
 		void SetCaret(Node& node, std::uint32_t caret, bool extend);
+
 		bool EditKey(Node& node, UiKey key, UiKeyModifiers modifiers);
+
 		std::uint32_t TextHit(Node& node, UiPoint logical);
+
 		void EndComposition();
 	};
+
 } // namespace Swim::UI

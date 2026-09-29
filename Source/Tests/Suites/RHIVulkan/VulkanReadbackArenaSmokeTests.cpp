@@ -26,6 +26,7 @@ namespace
 		std::array<Rhi::ReadbackSlice, 2> bufferResults;
 		std::array<Rhi::ReadbackSlice, 2> textureResults;
 		std::array<std::array<std::byte, 64>, 2> expected{};
+
 		for (std::size_t slot = 0; slot < arenas.size(); ++slot)
 		{
 			arenas[slot] = Rhi::ReadbackArena::Create(*device, { 128 });
@@ -36,6 +37,7 @@ namespace
 			textures[slot] = device->CreateTexture(desc);
 			SWIM_REQUIRE(arenas[slot] && textures[slot]);
 		}
+
 		auto checkResults = [&](std::size_t slot)
 		{
 			std::array<std::byte, 32> bytes{};
@@ -50,9 +52,11 @@ namespace
 		// Declared last: GPU work drains before textures/arenas unwind on failure.
 		auto frames = Rhi::FrameContextRing::Create(*device, { Rhi::QueueType::Graphics, 2, { 128 } });
 		SWIM_REQUIRE(frames);
+
 		for (unsigned iteration = 0; iteration < 6; ++iteration)
 		{
 			const auto slot = frames->BeginFrame().Index;
+
 			if (iteration >= 2)
 			{
 				// Beginning this frame has reused commands/uploads. The old CPU
@@ -61,10 +65,12 @@ namespace
 				SWIM_REQUIRE(arenas[slot]->TryReset());
 				SWIM_CHECK_THROWS(bufferResults[slot].GetBuffer(), std::invalid_argument);
 			}
+
 			for (std::size_t byte = 0; byte < expected[slot].size(); ++byte)
 			{
 				expected[slot][byte] = static_cast<std::byte>((iteration * 41 + byte * 13) & 255);
 			}
+
 			SWIM_REQUIRE(frames->AllocateUpload(3));
 			auto uploadBuffer = frames->WriteUpload(std::span(expected[slot]).first(32), 16);
 			auto uploadTexture = frames->WriteUpload(expected[slot], 64);
@@ -104,6 +110,7 @@ namespace
 			std::array batches{ arenas[slot].get() };
 			frames->SubmitCurrent(batches);
 		}
+
 		frames->Drain();
 		checkResults(0);
 		checkResults(1);
@@ -112,11 +119,13 @@ namespace
 	[[maybe_unused]] const bool registered = []
 	{
 		const char* enabled = std::getenv("SWIM_RUN_RHI_SMOKE");
+
 		if (enabled != nullptr && std::string_view(enabled) == "1")
 		{
 			Swim::Testing::TestRegistry::Get().Add({ "RHI.Vulkan.Smoke", "ReadbackArenaBufferTextureAndRetainedResults",
 				SWIM_TEST_LOCATION, +[] { Swim::Testing::RunValidatedVulkanSmoke(&RunReadbackArenaSmoke); } });
 		}
+
 		return true;
 	}();
 

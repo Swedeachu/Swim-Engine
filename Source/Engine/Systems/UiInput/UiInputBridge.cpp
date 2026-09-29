@@ -8,11 +8,14 @@
 
 namespace Swim::UI
 {
+
 	namespace
 	{
+
 		std::optional<UiKey> ToUiKey(Platform::KeyCode key)
 		{
 			using K = Platform::KeyCode;
+
 			switch (key)
 			{
 			case K::Left:
@@ -75,10 +78,12 @@ namespace Swim::UI
 		std::uint32_t CodePointsToBytes(const std::string& text, int codePoints)
 		{
 			std::size_t offset = 0;
+
 			for (int i = 0; i < codePoints && offset < text.size(); ++i)
 			{
 				offset += Text::DecodeUtf8(text, offset).Length;
 			}
+
 			return static_cast<std::uint32_t>(std::min(offset, text.size()));
 		}
 
@@ -136,10 +141,12 @@ namespace Swim::UI
 			{
 				UiPointer pointer;
 				pointer.Screen = point;
+
 				if (Camera)
 				{
 					pointer.Ray = ScreenRay(*Camera, point);
 				}
+
 				pointer.SurfaceHits = Hits;
 				Router.PointerMove(pointer);
 			}
@@ -178,6 +185,7 @@ namespace Swim::UI
 
 			bool WantsTextInput() const { return Router.WantsTextInput(); }
 		};
+
 	} // namespace
 
 	UiInputBridge::UiInputBridge(UiInputBridgeDesc descInput) : desc(descInput)
@@ -198,34 +206,43 @@ namespace Swim::UI
 		{
 			return std::nullopt;
 		}
+
 		const auto device = *desc.Gamepad;
 		using B = Platform::GamepadButton;
+
 		if (input.IsGamepadButtonDown(device, B::DpadUp))
 		{
 			return UiNavDirection::Up;
 		}
+
 		if (input.IsGamepadButtonDown(device, B::DpadDown))
 		{
 			return UiNavDirection::Down;
 		}
+
 		if (input.IsGamepadButtonDown(device, B::DpadLeft))
 		{
 			return UiNavDirection::Left;
 		}
+
 		if (input.IsGamepadButtonDown(device, B::DpadRight))
 		{
 			return UiNavDirection::Right;
 		}
+
 		const float x = input.GetGamepadAxis(device, Platform::GamepadAxis::LeftX);
 		const float y = input.GetGamepadAxis(device, Platform::GamepadAxis::LeftY); // Positive down (SDL).
+
 		if (std::max(std::abs(x), std::abs(y)) < desc.StickThreshold)
 		{
 			return std::nullopt;
 		}
+
 		if (std::abs(x) >= std::abs(y))
 		{
 			return x < 0.0f ? UiNavDirection::Left : UiNavDirection::Right;
 		}
+
 		return y < 0.0f ? UiNavDirection::Up : UiNavDirection::Down;
 	}
 
@@ -235,18 +252,22 @@ namespace Swim::UI
 		{
 			throw std::invalid_argument("UI input bridge needs a non-negative frame time");
 		}
+
 		UiInputFrame frame;
+
 		if (!input.HasFocus())
 		{
 			if (hadFocus)
 			{
 				target.LoseFocus();
 			}
+
 			hadFocus = false;
 			hasPointer = false;
 			heldDirection.reset();
 			return frame;
 		}
+
 		hadFocus = true;
 
 		UiKeyModifiers modifiers;
@@ -259,26 +280,33 @@ namespace Swim::UI
 		const auto mouse = input.GetMousePosition();
 		const UiPoint pointer{ mouse.X * desc.FramebufferScale, mouse.Y * desc.FramebufferScale };
 		constexpr bool alwaysMove = std::is_same_v<Target, RouterTarget>; // World canvases move under a still mouse.
+
 		if (alwaysMove || !hasPointer || pointer.X != lastPointer.X || pointer.Y != lastPointer.Y)
 		{
 			target.Move(pointer);
 			lastPointer = pointer;
 			hasPointer = true;
 		}
+
 		frame.PointerOverUi = target.Over();
+
 		if (input.IsMouseButtonTriggered(Platform::MouseButton::Left))
 		{
 			target.Down(modifiers);
 		}
+
 		if (input.IsMouseButtonReleased(Platform::MouseButton::Left))
 		{
 			target.Up();
 		}
+
 		if (input.IsMouseButtonTriggered(Platform::MouseButton::Right) && target.ContextMenu())
 		{
 			frame.ContextMenuOpened = true;
 		}
+
 		const float wheel = input.GetMouseScrollDelta();
+
 		if (wheel != 0.0f && std::isfinite(wheel))
 		{
 			// A positive wheel delta scrolls up, towards smaller offsets.
@@ -292,6 +320,7 @@ namespace Swim::UI
 				target.TextInput(event.Text);
 				continue;
 			}
+
 			if (event.Key == Platform::KeyCode::F10 && modifiers.Shift && target.HasFocus())
 			{
 				// Shift+F10: the focused node's context menu.
@@ -300,22 +329,28 @@ namespace Swim::UI
 					frame.ContextMenuOpened = true;
 					++frame.KeysConsumed;
 				}
+
 				continue;
 			}
+
 			const auto mapped = ToUiKey(event.Key);
+
 			if (!mapped)
 			{
 				continue;
 			}
+
 			if (!target.HasFocus() && !(*mapped == UiKey::Tab && desc.TabStartsNavigation))
 			{
 				continue;
 			}
+
 			if (target.KeyDown(*mapped, modifiers))
 			{
 				++frame.KeysConsumed;
 			}
 		}
+
 		if (input.HasTextCompositionUpdate())
 		{
 			const auto& composition = input.GetTextComposition();
@@ -331,6 +366,7 @@ namespace Swim::UI
 			const auto device = *desc.Gamepad;
 			const auto direction = GamepadDirection(input);
 			bool fire = false;
+
 			if (direction != heldDirection)
 			{
 				heldDirection = direction;
@@ -341,12 +377,14 @@ namespace Swim::UI
 			else if (direction)
 			{
 				heldSeconds += deltaSeconds;
+
 				if (heldSeconds >= nextRepeat)
 				{
 					fire = true;
 					nextRepeat = heldSeconds + desc.RepeatIntervalSeconds;
 				}
 			}
+
 			if (fire)
 			{
 				// A text field would keep arrows for its caret; the pad always leaves it.
@@ -354,30 +392,36 @@ namespace Swim::UI
 					target.HasFocus() && !target.FocusedEditable() ? target.KeyDown(ArrowKey(*direction), {}) : target.Navigate(*direction);
 				frame.KeysConsumed += consumed ? 1u : 0u;
 			}
+
 			if (target.HasFocus())
 			{
 				if (input.IsGamepadButtonTriggered(device, B::South))
 				{
 					frame.KeysConsumed += target.KeyDown(UiKey::Enter, {}) ? 1u : 0u;
 				}
+
 				if (input.IsGamepadButtonTriggered(device, B::East))
 				{
 					frame.KeysConsumed += target.KeyDown(UiKey::Escape, {}) ? 1u : 0u;
 				}
+
 				if (input.IsGamepadButtonTriggered(device, B::North) && target.ContextMenuForFocus())
 				{
 					frame.ContextMenuOpened = true;
 					++frame.KeysConsumed;
 				}
 			}
+
 			if (input.IsGamepadButtonTriggered(device, B::LeftShoulder) || input.IsGamepadButtonTriggered(device, B::RightShoulder))
 			{
 				UiKeyModifiers shift;
 				shift.Shift = input.IsGamepadButtonTriggered(device, B::LeftShoulder);
 				frame.KeysConsumed += target.KeyDown(UiKey::Tab, shift) ? 1u : 0u;
 			}
+
 			frame.GamepadCaptured = target.HasFocus();
 		}
+
 		frame.KeyboardCaptured = target.HasFocus();
 		frame.WantsTextInput = target.WantsTextInput();
 		return frame;
@@ -395,4 +439,5 @@ namespace Swim::UI
 		RouterTarget target{ router, camera, surfaceHits };
 		return Run(input, target, deltaSeconds);
 	}
+
 } // namespace Swim::UI

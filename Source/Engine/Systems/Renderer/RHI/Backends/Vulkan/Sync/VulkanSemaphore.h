@@ -13,7 +13,9 @@ namespace Swim::RhiVulkan
 
 		class VulkanSemaphore final : public Rhi::Semaphore
 		{
+
 		public:
+
 			VulkanSemaphore(std::shared_ptr<VulkanDeviceState> state, VkSemaphore semaphore)
 				: state(std::move(state)), semaphore(semaphore)
 			{
@@ -22,6 +24,7 @@ namespace Swim::RhiVulkan
 			~VulkanSemaphore() override
 			{
 				RetireLostVulkanDevice(*state);
+
 				if (semaphore != VK_NULL_HANDLE)
 				{
 					state->Dispatch.vkDestroySemaphore(state->Device.device, semaphore, nullptr);
@@ -44,8 +47,10 @@ namespace Swim::RhiVulkan
 			}
 
 		private:
+
 			std::shared_ptr<VulkanDeviceState> state;
 			VkSemaphore semaphore = VK_NULL_HANDLE;
+
 		};
 
 } // namespace Swim::RhiVulkan

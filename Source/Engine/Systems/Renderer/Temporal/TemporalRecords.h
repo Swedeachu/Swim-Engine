@@ -3,6 +3,7 @@
 
 namespace Swim::Render
 {
+
 	// Push constants of SwimTemporalResolve (Shaders/Slang/Temporal/TemporalRecords.slang).
 	struct TemporalResolveConstants
 	{
@@ -15,4 +16,5 @@ namespace Swim::Render
 	};
 
 	static_assert(sizeof(TemporalResolveConstants) == 32);
+
 } // namespace Swim::Render

@@ -16,6 +16,7 @@
 
 namespace Swim::Render
 {
+
 	struct VisibilityReferenceInputs
 	{
 		std::span<const GpuInstanceRecord> Instances; // RowCount rows.
@@ -51,4 +52,5 @@ namespace Swim::Render
 		const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState, std::vector<std::uint32_t>& occlusionHistory);
 	// Single phase only (no occlusion history involved).
 	VisibilityReferenceResult RunVisibilityReference(const VisibilityReferenceInputs& inputs, std::vector<GpuLodState>& lodState);
+
 } // namespace Swim::Render
