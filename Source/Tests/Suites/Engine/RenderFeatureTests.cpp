@@ -7,6 +7,8 @@
 #include "Tests/Framework/Test.h"
 
 #include <array>
+#include <chrono>
+#include <fstream>
 #include <cstring>
 #include <stdexcept>
 
@@ -220,4 +222,70 @@ SWIM_TEST("Engine.RenderFeature", "CloudsMarchIntoAnEnvironmentAtlasWhenTheyCont
 	SWIM_REQUIRE_EQUAL(dispatches.size(), std::size_t(1));
 	SWIM_CHECK_EQUAL(dispatches[0].SourceOffset, 4u);
 	SWIM_CHECK_EQUAL(dispatches[0].DestinationOffset, 24u);
+}
+
+SWIM_TEST("Engine.ShaderLibrary", "GeneratedCatalogAndCustomProgramsUseTheSameArtifactRegistration")
+{
+	Swim::Testing::MockDevice device;
+	Engine::ShaderLibrary shaders(device, std::filesystem::path(SWIM_RUNTIME_SHADER_DIR));
+	SWIM_CHECK(!Engine::ShaderLibrary::RequiredPrograms().empty());
+
+	for (const auto name : Engine::ShaderLibrary::RequiredPrograms())
+	{
+		SWIM_CHECK(shaders.Contains(name));
+	}
+
+	shaders.Register({ "GameHistogram", "PostHistogram.spv", "PostHistogram.reflection.json" });
+	SWIM_CHECK(shaders.Contains("GameHistogram"));
+	SWIM_CHECK_THROWS(shaders.Register({ "GameHistogram", "PostHistogram.spv", "PostHistogram.reflection.json" }), std::invalid_argument);
+	SWIM_CHECK_THROWS(shaders.Register({ "../BadName", "x.spv", "x.json" }), std::invalid_argument);
+	SWIM_CHECK(!shaders.Contains("NeverRegistered"));
+	SWIM_CHECK_THROWS(shaders.LoadCompute("NeverRegistered"), std::runtime_error);
+}
+
+SWIM_TEST("Engine.ShaderLibrary", "ParsedArtifactsStayCachedUntilExplicitInvalidation")
+{
+	struct Directory
+	{
+		std::filesystem::path Root;
+
+		~Directory()
+		{
+			std::error_code error;
+			std::filesystem::remove_all(Root, error);
+		}
+	};
+
+	Directory temporary{ std::filesystem::temp_directory_path() /
+		("SwimShaderCache_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())) };
+	SWIM_REQUIRE(std::filesystem::create_directory(temporary.Root));
+	const std::filesystem::path originals(SWIM_RUNTIME_SHADER_DIR);
+	std::filesystem::copy_file(originals / "PostHistogram.spv", temporary.Root / "test.spv");
+	std::filesystem::copy_file(originals / "PostHistogram.reflection.json", temporary.Root / "test.json");
+	Swim::Testing::MockDevice device;
+	Engine::ShaderLibrary shaders(device, temporary.Root);
+	shaders.Register({ "TemporaryHistogram", "test.spv", "test.json" });
+	const auto failure = [&]
+	{
+		try
+		{
+			shaders.LoadCompute("TemporaryHistogram");
+		}
+		catch (const std::runtime_error& error)
+		{
+			return std::string(error.what());
+		}
+
+		return std::string();
+	};
+
+	// The mock rejects GPU creation, after real reflection parsing/conversion succeeds.
+	SWIM_CHECK(failure().find("cannot create compute program") != std::string::npos);
+	{
+		std::ofstream broken(temporary.Root / "test.json");
+		broken << "invalid json";
+	}
+	SWIM_CHECK(failure().find("cannot create compute program") != std::string::npos);
+	shaders.Invalidate("TemporaryHistogram");
+	SWIM_CHECK(failure().find("reflection:") != std::string::npos);
 }

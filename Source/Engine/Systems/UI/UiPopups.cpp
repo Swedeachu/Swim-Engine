@@ -113,7 +113,7 @@ namespace Swim::UI
 				TooltipShown = {};
 			}
 
-			Events.push_back({ UiEventKind::PopupClosed, entry.Node });
+			QueueEvent({ UiEventKind::PopupClosed, entry.Node });
 			ClearUnavailable(); // Blurs focus inside the popup, cancels presses on it.
 
 			if (focusInside || (!Focused && entry.PriorFocus))
@@ -126,7 +126,7 @@ namespace Swim::UI
 				if (target && Nodes.contains(target.Value) && Available(target) && IsFocusable(Get(target)) && InputAllowed(target))
 				{
 					Focused = target;
-					Events.push_back({ UiEventKind::Focus, target });
+					QueueEvent({ UiEventKind::Focus, target });
 					MarkPaintDirty(target);
 				}
 			}
@@ -417,7 +417,7 @@ namespace Swim::UI
 			});
 		Popups.push_back({ tooltip, desc, Focused, false });
 		ShowPopup(node, true);
-		Events.push_back({ UiEventKind::PopupOpened, tooltip });
+		QueueEvent({ UiEventKind::PopupOpened, tooltip });
 		TooltipShown = tooltip;
 	}
 
@@ -454,7 +454,7 @@ namespace Swim::UI
 		impl->Popups.push_back({ id, desc, prior, desc.FocusFirst });
 		impl->ShowPopup(node, true);
 		impl->MarkLayoutDirty(id); // Placed again with the new description.
-		impl->Events.push_back({ UiEventKind::PopupOpened, id });
+		impl->QueueEvent({ UiEventKind::PopupOpened, id });
 	}
 
 	bool UiDocument::ClosePopup(UiNodeId id)
@@ -577,7 +577,7 @@ namespace Swim::UI
 			return false;
 		}
 
-		impl->Events.push_back({ UiEventKind::ContextMenu, target });
+		impl->QueueEvent({ UiEventKind::ContextMenu, target });
 		UiPopupDesc desc;
 		desc.Side = UiPopupSide::AtPoint;
 		desc.Point = point;
@@ -600,7 +600,7 @@ namespace Swim::UI
 
 			if (menu && impl->Nodes.contains(menu.Value))
 			{
-				impl->Events.push_back({ UiEventKind::ContextMenu, current });
+				impl->QueueEvent({ UiEventKind::ContextMenu, current });
 				UiPopupDesc desc;
 				desc.Anchor = impl->Focused;
 				desc.Side = UiPopupSide::Below;

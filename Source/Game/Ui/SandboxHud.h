@@ -3,7 +3,6 @@
 #include "Engine/Systems/Entity/Behavior.h"
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Engine/Systems/UI/UiWidgets.h"
-#include "Game/Ui/UiBindings.h"
 
 #include <array>
 #include <cstdint>
@@ -49,6 +48,8 @@ namespace Game
 
 		int Init() override;
 
+		int Exit() override;
+
 		void Update(double dt) override;
 
 		bool UsesRealTime() const override { return true; }
@@ -85,8 +86,7 @@ namespace Game
 		Swim::UI::UiNodeId AddToggle(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
 
 		// Controls bound both ways to a value: edits write it, SyncControls shows changes made elsewhere.
-		Swim::UI::UiNodeId SliderFor(
-			Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals);
+		Swim::UI::UiNodeId SliderFor(Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals);
 
 		Swim::UI::UiNodeId CheckFor(Swim::UI::UiNodeId parent, const std::string& label, bool& value);
 
@@ -128,8 +128,8 @@ namespace Game
 		Sandbox* sandbox = nullptr;
 		Engine::RenderServices* render = nullptr;
 		std::shared_ptr<Swim::UI::UiDocument> document;
-		UiBindings bindings;
-		UiBindings infoBindings;
+		std::weak_ptr<Swim::UI::UiDocument> infoDocument;
+		Swim::UI::UiNodeId infoButton;
 
 		Swim::UI::UiNodeId panel;
 		Swim::UI::UiNodeId tabs;

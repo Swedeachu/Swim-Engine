@@ -49,3 +49,5 @@ Phase 22 removed OpenGL and the editor. Phase 23 replaced the transitional rende
 | Archived | Replaced by / status |
 | --- | --- |
 | `Game/Ui/SandboxHudFindingsTab.cpp` (the sandbox panel's Findings tab) | The findings stay in `Source/Game/Findings.cpp` and [docs/EngineRuntime.md](../docs/EngineRuntime.md#findings) only; the panel has three tabs. |
+
+All archived source, shader and CMake files now end in `.txt`. They are history only, never compiled or included. The active CMake configure rejects any target source inside this archive.

@@ -400,7 +400,7 @@ namespace Swim::UI
 		bool FocusFirst = true;		  // Focus its first focusable node on open.
 	};
 
-	enum class UiThemeClass : std::uint8_t
+	enum class UiThemeClass : std::uint32_t
 	{
 		None,
 		Panel,
@@ -581,6 +581,8 @@ namespace Swim::UI
 
 	// Retained document independent of Scene, Transform, SDL and any renderer.
 	// Single-thread owner. The atlas passed to Paint must outlive its paint list.
+	class UiWidgetRegistry;
+
 	class UiDocument final
 	{
 
@@ -595,6 +597,10 @@ namespace Swim::UI
 		UiDocument& operator=(const UiDocument&) = delete;
 
 		UiNodeId GetRoot() const;
+
+		UiWidgetRegistry& GetWidgets();
+
+		const UiWidgetRegistry& GetWidgets() const;
 
 		UiNodeId Create(UiNodeId parent);
 
@@ -636,7 +642,7 @@ namespace Swim::UI
 
 		UiRect GetBounds(UiNodeId node) const; // Requires Layout after mutations.
 
-		bool IsLayoutCurrent() const;		   // False after a mutation until the next Layout.
+		bool IsLayoutCurrent() const; // False after a mutation until the next Layout.
 
 		std::uint64_t GetLayoutRevision() const;
 
@@ -655,8 +661,8 @@ namespace Swim::UI
 		// number of glyphs added.
 		std::size_t PrewarmGlyphs(Text::GlyphAtlas& atlas, const Text::GlyphAtlas::ParallelFor& parallelFor = {});
 
-		// Input uses framebuffer pixels. Returned events are queued, not callbacks:
-		// consumers may mutate the document safely after DrainEvents(). HitTest requires a
+		// Input uses framebuffer pixels. Events and callbacks are deferred until input
+		// routing ends; callbacks may mutate the document safely. HitTest requires a
 		// current Layout; the pointer methods lay out again with the last canvas when needed.
 		UiNodeId HitTest(UiPoint framebufferPoint) const;
 
@@ -694,6 +700,27 @@ namespace Swim::UI
 		UiNodeId GetFocus() const;
 
 		std::vector<UiEvent> DrainEvents();
+
+		// One handler per node and event kind; an empty handler unregisters it. The document
+		// owns handlers and removes them with their node. Setters from code stay silent.
+		void On(UiNodeId node, UiEventKind kind, std::function<void(const UiEvent&)> handler);
+
+		void OnClick(UiNodeId node, std::function<void()> handler);
+
+		void OnValue(UiNodeId node, std::function<void(float)> handler);
+
+		void OnChecked(UiNodeId node, std::function<void(bool)> handler);
+
+		void OnText(UiNodeId node, std::function<void(const std::string&)> handler);
+
+		void ClearCallbacks(UiNodeId node);
+
+		void ClearCallbacks();
+
+		// Called automatically by UiRuntime after routing input and by Update for standalone
+		// documents. New events produced by a callback wait for the next dispatch. DrainEvents
+		// is an independent polling API and cannot steal callback notifications.
+		void DispatchCallbacks();
 
 		// Lays the document out again with the last canvas when it changed since the last
 		// Layout (no-op before the first Layout).

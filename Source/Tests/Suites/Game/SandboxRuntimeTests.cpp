@@ -15,15 +15,12 @@
 #include "Engine/Systems/Renderer/Runtime/RenderServices.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Game/ModelImport.h"
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Components/Light.h"
-#include "Game/Findings.h"
 #include "Game/Game.h"
 #include "Game/SandboxContent.h"
 #include "Game/Scenes/Sandbox.h"
 #include "Game/Ui/SandboxHud.h"
-#include "Game/Ui/UiBindings.h"
 #include "Engine/Runtime/UiRuntime.h"
 #include "Engine/Systems/UI/UiWidgets.h"
 #include "Tests/Framework/Test.h"
@@ -502,7 +499,10 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	// bench: a baseline and one capture per switch turned off alone, restored after.
 	const auto csv = std::filesystem::temp_directory_path() /
 		("swim-bench-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".csv");
-	{ std::error_code ignored; std::filesystem::remove(csv, ignored); }
+	{
+		std::error_code ignored;
+		std::filesystem::remove(csv, ignored);
+	}
 	SWIM_CHECK(engine.Command("bench " + csv.string() + " 2 0 ablate hall=sandbox.view 2"));
 	const std::size_t switches = engine->GetRenderServices().Toggles->List().size();
 	SWIM_REQUIRE(engine.Tick(static_cast<std::uint32_t>(4 * (switches + 2))));
@@ -521,45 +521,10 @@ SWIM_TEST("Game.Sandbox", "SceneProfilingSwitchesHideTheirParts")
 	SWIM_CHECK(baselineRows > 0);
 	SWIM_CHECK(swarmRows > 0);
 	SWIM_CHECK(sandbox->IsGroupShown(Game::GameTags::SwarmLight)); // Restored.
-	{ std::error_code ignored; std::filesystem::remove(csv, ignored); }
-}
-
-SWIM_TEST("Game.UiBindings", "HandlersSeeChangesButNotTheInitialState")
-{
-	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
-	auto document = ui.CreateDocument();
-	Swim::UI::UiSliderDesc desc;
-	desc.Min = 0.0f;
-	desc.Max = 10.0f;
-	desc.Value = 3.0f;
-	const auto slider = Swim::UI::CreateSlider(*document, document->GetRoot(), desc);
-	const auto box = Swim::UI::CreateCheckbox(*document, document->GetRoot(), "Box", Swim::UI::UiCheckState::Checked);
-
-	Game::UiBindings bindings;
-	std::vector<float> values;
-	std::vector<bool> checks;
-	bindings.OnValue(slider,
-		[&](float value)
-		{
-			values.push_back(value);
-		});
-	bindings.OnChecked(box,
-		[&](bool checked)
-		{
-			checks.push_back(checked);
-		});
-	bindings.Process(*document);
-	SWIM_CHECK(values.empty());
-	SWIM_CHECK(checks.empty());
-
-	document->SetValue(slider, 7.0f);
-	document->SetChecked(box, Swim::UI::UiCheckState::Unchecked);
-	bindings.Process(*document);
-	bindings.Process(*document); // No change: no second call.
-	SWIM_REQUIRE_EQUAL(values.size(), std::size_t{ 1 });
-	SWIM_CHECK_NEAR(values[0], 7.0f, 1e-6f);
-	SWIM_REQUIRE_EQUAL(checks.size(), std::size_t{ 1 });
-	SWIM_CHECK(!checks[0]);
+	{
+		std::error_code ignored;
+		std::filesystem::remove(csv, ignored);
+	}
 }
 
 SWIM_TEST("Game.LightSwarm", "MembersSteerTowardTargetsAndStayInTheBox")
@@ -675,51 +640,6 @@ SWIM_TEST("Game.Sandbox", "F1SwitchHidesEveryUiCanvas")
 	SWIM_CHECK(engine.Command("sandbox.hud 1"));
 	SWIM_REQUIRE(engine.Tick(1));
 	SWIM_CHECK_EQUAL(countVisible(), total);
-}
-
-SWIM_TEST("Game.ModelImport", "FindSponzaPrefersTheDracoKtxGlb")
-{
-	Swim::Assets::AssetSystem assets;
-	SWIM_REQUIRE(assets.Initialize());
-
-	for (const char* path : { "Models/Sponza/sponza-ktx.model", "Models/Sponza/sponza-ktx-draco.model", "Models/Sponza/glTF/Sponza.model",
-			 "Models/Barrel/barrel.model" })
-	{
-		const auto handle = assets.Declare<Swim::Assets::ModelAsset>(path);
-		SWIM_REQUIRE(assets.Publish(handle, Swim::Assets::ModelAsset{}));
-	}
-
-	const auto path = [&](auto handle)
-	{
-		return assets.GetDatabase().FindPath(handle.GetId()).value_or(std::string());
-	};
-	const auto sponza = Game::FindSponzaModel(assets);
-	SWIM_REQUIRE(sponza.IsValid());
-	SWIM_CHECK_EQUAL(path(sponza), std::string("Models/Sponza/sponza-ktx-draco.model"));
-	// Keyword filtering, preference order and avoidance.
-	const auto plain = Game::FindCookedModel(assets, { "sponza" }, { "gltf/sponza" }, { "ktx" });
-	SWIM_REQUIRE(plain.IsValid());
-	SWIM_CHECK_EQUAL(path(plain), std::string("Models/Sponza/glTF/Sponza.model"));
-	const auto ktxOnly = Game::FindCookedModel(assets, { "sponza", "ktx" }, {}, { "draco" });
-	SWIM_REQUIRE(ktxOnly.IsValid());
-	SWIM_CHECK_EQUAL(path(ktxOnly), std::string("Models/Sponza/sponza-ktx.model"));
-	SWIM_CHECK(!Game::FindCookedModel(assets, { "helmet" }).IsValid());
-	assets.Shutdown();
-}
-
-SWIM_TEST("Game.Findings", "EveryFindingIsDocumentedWithAKnownStatus")
-{
-	const auto findings = Game::GetFindings();
-	SWIM_CHECK(findings.size() >= 10);
-	std::set<std::string_view> titles;
-
-	for (const auto& finding : findings)
-	{
-		SWIM_CHECK(!finding.Title.empty());
-		SWIM_CHECK(!finding.Detail.empty());
-		SWIM_CHECK(finding.Status == "Fixed" || finding.Status == "Workaround" || finding.Status == "Open");
-		SWIM_CHECK(titles.insert(finding.Title).second);
-	}
 }
 
 SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")

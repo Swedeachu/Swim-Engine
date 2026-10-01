@@ -29,7 +29,7 @@ namespace Engine
 
 } // namespace Engine
 
-namespace Game
+namespace Engine
 {
 
 	// Finds a cooked model (a ".model" root loaded by the development asset bootstrap)
@@ -38,10 +38,6 @@ namespace Game
 	// an `avoid` keyword lose. Invalid when nothing matches.
 	Swim::Assets::AssetHandle<Swim::Assets::ModelAsset> FindCookedModel(const Swim::Assets::AssetSystem& assets,
 		const std::vector<std::string>& keywords, const std::vector<std::string>& prefer = {}, const std::vector<std::string>& avoid = {});
-
-	// The sandbox's Sponza: the Draco + KTX2/Basis GLB (smallest: Draco meshes, ETC1S
-	// textures the cooker transcodes), then the KTX2/Basis GLB, then a glTF Sponza.
-	Swim::Assets::AssetHandle<Swim::Assets::ModelAsset> FindSponzaModel(const Swim::Assets::AssetSystem& assets);
 
 	struct ModelPlacement
 	{
@@ -97,4 +93,4 @@ namespace Game
 	// CPU geometry work, the meshes and materials are already registered.
 	std::vector<entt::entity> RespawnModel(Engine::Scene& scene, const ImportedModel& model, const std::vector<Engine::TagId>& tags);
 
-} // namespace Game
+} // namespace Engine

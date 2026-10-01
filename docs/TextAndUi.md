@@ -7,7 +7,7 @@ Critical-path item **79** (Phase 20). Checkpoints:
 - **2026-09-25 — controls, themes and canvases:** checkboxes, toggles, sliders (ticks, value labels) and scroll bars (step buttons, auto/overlay visibility) as document behaviour; visual states with per-state rules, eased transitions and image skins; document themes; Tab order, spatial and gamepad navigation; canvas placement (screen, render surface, world panel, billboard) with ray-cast input, pointer capture and one keyboard owner across canvases (`UiCanvasRouter`); world-space drawing (a canvas-to-clip matrix, derivative-based coverage and MSDF ranges, depth testing, canvas fade) and render surfaces with re-rasterized mip chains; a second native smoke; and a glyph-atlas fix for point-only contours.
 - **2026-09-25 — popups and selection controls (this document's current state):** a popup layer in `UiDocument` (placement with flipping and clamping, stacking, light dismiss, Escape, close-on-activate, modal input scoping), menus, context menus, tooltips and modal dialogs; radio groups, list views, dropdowns and virtualized lists as selection owners; slider values edited by typing; context-menu input in the bridge and router. The UI widget set is complete for the engine assembly phase.
 
-Item 79 stays **open** until the native smokes have passed on the desktop and the runtime draws its UI through them. Sandbox migration and the scene-side canvas component wait for the modern renderer to present frames (item 56); the legacy text/UI remains active.
+The assembled runtime now uses the retained UI with scene-side canvases and modern rendering. The 2026-09-30 API cleanup adds document callbacks, registered widgets and extensible theme classes; see the final section below. Legacy text/UI is archived as text only.
 
 ## Module map
 
@@ -387,3 +387,63 @@ In the container both smokes passed on a source-built SwiftShader with 0 outlier
 - [HarfBuzz buffer properties](https://harfbuzz.github.io/setting-buffer-properties.html), [clusters](https://harfbuzz.github.io/clusters.html)
 - [msdfgen](https://github.com/Chlumsky/msdfgen) (median, screen pixel range)
 - [SDL3 text input](https://wiki.libsdl.org/SDL3/SDL_SetTextInputArea)
+
+## Document callbacks and widget registration (2026-09-30)
+
+The engine owns interaction callbacks. There is no `Game/Ui` binding manager, watcher polling or gameplay `Process` call. `UiRuntime::ApplyInput` finishes routing input, then dispatches callbacks before gameplay updates; standalone documents dispatch through `Update`. One handler per node and event kind is retained with the node and released on removal. Handlers can replace themselves, remove nodes or change document state. Events created by a handler are deferred to a subsequent dispatch. Programmatic setters do not call interaction handlers, preventing feedback loops. `DrainEvents` remains independent for standalone consumers; managed runtime documents discard their polling history after dispatch.
+
+```cpp
+using namespace Swim::UI;
+
+const auto play = CreateButton(document, document.GetRoot(), "Play");
+document.OnClick(play, [&] { StartGame(); });
+
+const auto volume = CreateSlider(document, document.GetRoot(), UiSliderDesc{ 0.0f, 1.0f, 0.8f });
+document.OnValue(volume, [&](float value) { SetMasterVolume(value); });
+```
+
+`UiWidget` is an optional light reference for chained callbacks and common properties:
+
+```cpp
+auto play = CreateWidget(document, document.GetRoot(), "Button", UiButtonDesc{ "Play" });
+play.OnClick([&] { StartGame(); });
+```
+
+Every document starts with a `UiWidgetRegistry`. Engine helpers delegate to that registry, including typed composite results such as `UiDropdown`, `UiModal` and `UiScrollArea`. Private builders live in `Internal/UiWidgetBuilders.h`; gameplay needs only the public headers. Virtual lists compose the registered list-view widgets. Custom widgets use the same registration mechanism and retain their own options type:
+
+```cpp
+struct HealthBarDesc
+{
+    float Maximum = 100.0f;
+    float Current = 100.0f;
+};
+
+document.GetWidgets().Register<HealthBarDesc>("HealthBar",
+    [](UiDocument& document, UiNodeId parent, const HealthBarDesc& health)
+    {
+        UiSliderDesc desc;
+        desc.Max = health.Maximum;
+        desc.Value = health.Current;
+        return CreateSlider(document, parent, desc);
+    });
+
+auto health = CreateWidget(document, document.GetRoot(), "HealthBar", HealthBarDesc{});
+```
+
+Names are unique within the document's registry. Unknown widgets, wrong options/result types and unknown parents throw before invoking a factory. Composite widgets can be created with `document.GetWidgets().Create<UiDropdown>("Dropdown", document, parent, UiDropdownDesc{ ... })`.
+
+Themes use registered class builders rather than a closed switch or fixed style array. `RegisterClass("Game.ScoreBadge", builder)` returns a stable ID; `FindClass` retrieves it, and `ReplaceClass` explicitly replaces an existing class builder. Builders receive the theme's palette and metrics, so custom classes respond to theme changes. Set the theme on the document after editing its registration or palette. Replacing a document's theme with one missing a class in use is rejected before changing its state. Default classes, state rules, per-node overrides and `Customize` remain supported.
+
+```cpp
+auto theme = std::make_shared<UiTheme>(*document.GetTheme());
+const auto badge = theme->RegisterClass("Game.ScoreBadge",
+    [](const UiTheme& theme, UiClassStyle& style)
+    {
+        style.Style.Background = theme.Palette.Accent;
+        style.Style.Padding = { 8, 4, 8, 4 };
+    });
+document.SetTheme(theme);
+document.SetThemeClass(scoreLabel, badge);
+```
+
+Callbacks capturing gameplay objects must be cleared when those objects leave while the document remains. The sandbox HUD clears its callbacks in `Exit`, and the console overlay does so on destruction. `ClearCallbacks(node)` and `ClearCallbacks()` support those boundaries.

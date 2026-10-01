@@ -143,11 +143,11 @@ namespace Swim::UI
 			c.Value = static_cast<float>(index);
 			MarkSubtreeVisualDirty(owner.Id);
 			SyncOwner(owner);
-			Events.push_back({ UiEventKind::ValueChanged, owner.Id, c.Value });
+			QueueEvent({ UiEventKind::ValueChanged, owner.Id, c.Value });
 
 			if (commit)
 			{
-				Events.push_back({ UiEventKind::ValueCommitted, owner.Id, c.Value });
+				QueueEvent({ UiEventKind::ValueCommitted, owner.Id, c.Value });
 			}
 		}
 
@@ -255,7 +255,7 @@ namespace Swim::UI
 			});
 		Popups.push_back({ c.Parts.Popup, desc, Focused, false, true });
 		ShowPopup(Get(c.Parts.Popup), true);
-		Events.push_back({ UiEventKind::PopupOpened, c.Parts.Popup });
+		QueueEvent({ UiEventKind::PopupOpened, c.Parts.Popup });
 		owner.Highlight = std::max(0, Index(c.Value));
 		MarkSubtreeVisualDirty(c.Parts.Popup);
 		RevealOption(owner, owner.Highlight);
@@ -452,7 +452,7 @@ namespace Swim::UI
 		{
 			if (value >= 0)
 			{
-				Events.push_back({ UiEventKind::Submit, owner.Id, c.Value });
+				QueueEvent({ UiEventKind::Submit, owner.Id, c.Value });
 			}
 
 			return true;

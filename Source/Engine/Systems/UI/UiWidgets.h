@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Engine/Systems/UI/UiTheme.h"
+#include "Engine/Systems/UI/UiWidgetRegistry.h"
 
 #include <functional>
 #include <string>
@@ -167,7 +168,7 @@ namespace Swim::UI
 
 		void SetItemCount(std::uint32_t count); // Clamps the selection; rebinds every row.
 
-		void Refresh();							// Rebinds every row (the items changed).
+		void Refresh(); // Rebinds every row (the items changed).
 
 		UiNodeId GetRoot() const { return list.Root; }
 
@@ -175,7 +176,7 @@ namespace Swim::UI
 
 		std::uint32_t GetItemCount() const { return desc.ItemCount; }
 
-		std::uint32_t GetBoundRowCount() const;		 // Rows showing an item.
+		std::uint32_t GetBoundRowCount() const; // Rows showing an item.
 
 		UiNodeId FindRow(std::uint32_t index) const; // The row showing index (empty when not bound).
 
@@ -208,5 +209,174 @@ namespace Swim::UI
 	UiNodeId CreateScrollView(UiDocument& document, UiNodeId parent, const UiStyle& style);
 	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, float size,
 		const UiTextEditOptions& options = {}, const UiStyle& style = {});
+
+	// Sets a node's text (theme label size and fonts unless given) only when it changed.
+	void SetLabelText(UiDocument& document, UiNodeId node, const std::string& text);
+	void SetLabelText(UiDocument& document, UiNodeId node, const std::string& text,
+		const std::shared_ptr<const Swim::Text::FontCollection>& fonts, float size);
+
+	// A node with an explicit style and the theme's paint of a class (the theme's layout
+	// fields would otherwise override the style's sizes).
+	UiNodeId CreateStyledNode(UiDocument& document, UiNodeId parent, const UiStyle& style, UiThemeClass paintClass = UiThemeClass::None);
+	// A small section heading.
+	UiNodeId CreateHeading(UiDocument& document, UiNodeId parent, const std::string& text);
+	// A horizontal row container.
+	UiNodeId CreateRow(UiDocument& document, UiNodeId parent, float gap = 6.0f);
+
+	struct UiPanelDesc
+	{
+		UiFlow Flow = UiFlow::Column;
+	};
+
+	struct UiLabelDesc
+	{
+		std::string Text;
+		std::shared_ptr<const Text::FontCollection> Fonts;
+		float Size = 16.0f;
+		UiStyle Style;
+		bool Themed = true;
+	};
+
+	struct UiButtonDesc
+	{
+		std::string Label;
+	};
+
+	struct UiTextFieldDesc
+	{
+		UiTextEditOptions Options;
+		std::shared_ptr<const Text::FontCollection> Fonts;
+		float Size = 16.0f;
+		UiStyle Style;
+		bool Themed = true;
+	};
+
+	struct UiCheckboxDesc
+	{
+		std::string Label;
+		UiCheckState State = UiCheckState::Unchecked;
+	};
+
+	struct UiToggleDesc
+	{
+		std::string Label;
+		bool On = false;
+	};
+
+	struct UiScrollBarWidgetDesc
+	{
+		UiNodeId Target;
+		UiScrollBarDesc Options;
+	};
+
+	struct UiScrollAreaDesc
+	{
+		UiStyle Style;
+		bool Vertical = true;
+		bool Horizontal = false;
+		UiScrollBarVisibility Visibility = UiScrollBarVisibility::Auto;
+		bool StepButtons = false;
+	};
+
+	struct UiImageDesc
+	{
+		UiImage Image;
+		UiStyle Style;
+	};
+
+	struct UiRadioGroupDesc
+	{
+		std::vector<std::string> Options;
+		std::int32_t Selected = -1;
+		UiOrientation Orientation = UiOrientation::Vertical;
+	};
+
+	struct UiListViewDesc
+	{
+		UiStyle Style;
+		std::vector<std::string> Items;
+		std::int32_t Selected = -1;
+	};
+
+	struct UiDropdownDesc
+	{
+		std::vector<std::string> Options;
+		std::int32_t Selected = -1;
+		std::string Placeholder;
+	};
+
+	struct UiMenuDesc
+	{
+	};
+
+	struct UiTooltipDesc
+	{
+		std::string Text;
+		float DelaySeconds = 0.5f;
+	};
+
+	struct UiModalDesc
+	{
+		std::string Title;
+	};
+
+	// A lightweight widget reference for readable callbacks and common property changes.
+	// It does not own the document; keep it only while the document lives.
+	class UiWidget
+	{
+
+	  public:
+
+		UiWidget(UiDocument& document, UiNodeId node) : document(document), node(node) {}
+
+		UiNodeId GetNode() const { return node; }
+
+		UiWidget& OnClick(std::function<void()> handler)
+		{
+			document.OnClick(node, std::move(handler));
+			return *this;
+		}
+
+		UiWidget& OnValue(std::function<void(float)> handler)
+		{
+			document.OnValue(node, std::move(handler));
+			return *this;
+		}
+
+		UiWidget& OnChecked(std::function<void(bool)> handler)
+		{
+			document.OnChecked(node, std::move(handler));
+			return *this;
+		}
+
+		UiWidget& OnText(std::function<void(const std::string&)> handler)
+		{
+			document.OnText(node, std::move(handler));
+			return *this;
+		}
+
+		UiWidget& SetStyle(const UiStyle& style)
+		{
+			document.SetStyle(node, style);
+			return *this;
+		}
+
+		UiWidget& SetValue(float value)
+		{
+			document.SetValue(node, value);
+			return *this;
+		}
+
+	  private:
+
+		UiDocument& document;
+		UiNodeId node;
+
+	};
+
+	template <class Options> UiWidget CreateWidget(UiDocument& document, UiNodeId parent, std::string_view name, const Options& options)
+	{
+		return UiWidget(document, document.GetWidgets().Create(name, document, parent, options));
+	}
 
 } // namespace Swim::UI

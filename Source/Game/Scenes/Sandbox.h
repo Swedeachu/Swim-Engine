@@ -9,7 +9,7 @@
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/UI/UiDocument.h"
-#include "Game/ModelImport.h"
+#include "Engine/Systems/Scene/ModelImporter/ModelImport.h"
 
 #include <glm/glm.hpp>
 
@@ -35,7 +35,7 @@ namespace Game
 	//   physics playground    a box pyramid, a ramp, capsules and spheres; fire balls with the
 	//                         left mouse button or F, or rain them from the panel
 	//   UI                    the control panel (simulation, rendering, scene browser,
-	//                         findings), a diagnostics overlay, a world-space info panel and
+	//                         help), a diagnostics overlay, a world-space info panel and
 	//                         billboard zone labels
 	//
 	// Everything is built in Init, so Stop (which reloads the scene) restores it exactly.
@@ -111,7 +111,7 @@ namespace Game
 		// The Sponza backdrop (when a cooked Sponza exists) and the light swarm in its atrium.
 		bool IsSponzaLoaded() const { return sponza.Valid(); }
 
-		const ImportedModel& GetSponza() const { return sponza; }
+		const Engine::ImportedModel& GetSponza() const { return sponza; }
 
 		entt::entity GetSwarmController() const { return swarmController; }
 
@@ -150,6 +150,7 @@ namespace Game
 		// The control panel tab the HUD shows (the "sandbox.tab" command sets it):
 		// Simulation, Rendering, Camera/Post, Scene.
 		static constexpr std::uint32_t SandboxTabCount = 4;
+
 		void RequestTab(std::uint32_t tab) { requestedTab = tab; }
 
 		// All sandbox UI on/off: the HUD and every world canvas (C, or "sandbox.hud 0|1").
@@ -243,7 +244,7 @@ namespace Game
 		bool commandsRegistered = false;
 		bool hudVisible = true;
 		std::uint32_t lastBookmark = 0;
-		ImportedModel sponza;
+		Engine::ImportedModel sponza;
 		bool sponzaSearched = false;
 		entt::entity swarmController = entt::null;
 		std::shared_ptr<Engine::VolumetricClouds> clouds;

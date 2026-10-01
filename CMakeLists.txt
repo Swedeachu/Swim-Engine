@@ -42,6 +42,7 @@ project(SwimEngine C CXX)
 include(cmake/SolutionLayout.cmake)
 include(cmake/Formatting.cmake)
 include(cmake/Tests.cmake)
+include(cmake/ArchiveBoundary.cmake)
 
 option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
 option(SWIM_ENABLE_PCH "Use Swim Engine's existing PCH.h" ON)
@@ -375,6 +376,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	# The modern renderer's culling/draw-generation program (not yet loaded by the
 	# engine runtime; the visibility smoke and layout tests consume it).
 	swim_add_slang_program(SwimGpuVisibility
+		RUNTIME_NAME GpuVisibility
+		REQUIRED
 		SOURCE Source/Shaders/Slang/GpuScene/GpuVisibility.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -397,32 +400,44 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimHzbReduce
+		RUNTIME_NAME HzbReduce
+		REQUIRED
 		SOURCE Source/Shaders/Slang/GpuScene/HzbReduce.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Environment / image-based lighting programs (item 61) and the PBR gallery (item 62).
 	swim_add_slang_program(SwimEnvironmentSky
+		RUNTIME_NAME EnvironmentSky
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Environment/EnvironmentSky.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimEnvironmentDownsample
+		RUNTIME_NAME EnvironmentDownsample
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Environment/EnvironmentDownsample.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimEnvironmentPrefilter
+		RUNTIME_NAME EnvironmentPrefilter
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimEnvironmentIrradiance
+		RUNTIME_NAME EnvironmentIrradiance
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Environment/EnvironmentIrradiance.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimEnvironmentBrdfLut
+		RUNTIME_NAME EnvironmentBrdfLut
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Environment/EnvironmentBrdfLut.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -440,26 +455,35 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	)
 	# Clustered light assignment (items 64-65, 68) and its shading probe.
 	swim_add_slang_program(SwimClusterLightCull
+		RUNTIME_NAME ClusterLightCull
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterLightCull.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimClusterBounds
+		RUNTIME_NAME ClusterBounds
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterBounds.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimClusterAssign
+		RUNTIME_NAME ClusterAssign
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterAssign.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimClusterScan
+		RUNTIME_NAME ClusterScan
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterScan.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimClusterHeatmap
+		RUNTIME_NAME ClusterHeatmap
 		SOURCE Source/Shaders/Slang/ClusteredLighting/ClusterHeatmap.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -472,11 +496,15 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	# Clustered Forward+ (items 66-67): one source compiled as the opaque and the
 	# transparent variant, plus the transparent back-to-front sort.
 	swim_add_slang_program(SwimForwardOpaque
+		RUNTIME_NAME ForwardOpaque
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimForwardTransparent
+		RUNTIME_NAME ForwardTransparent
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -508,77 +536,101 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	# Folds feature contributions (the clouds above) into the environment cube.
 	swim_add_runtime_shader(EnvironmentOverlay SOURCE Source/Shaders/Slang/Environment/EnvironmentOverlay.slang)
 	swim_add_slang_program(SwimForwardDepth
+		RUNTIME_NAME ForwardDepth
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_DEPTH_ONLY=1
 	)
 	swim_add_slang_program(SwimForwardOpaquePrepassed
+		RUNTIME_NAME ForwardOpaquePrepassed
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_PREPASSED=1
 	)
 	swim_add_slang_program(SwimForwardOpaqueDeferred
+		RUNTIME_NAME ForwardOpaqueDeferred
 		SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES FORWARD_PREPASSED=1 FORWARD_DEFERRED_LOCAL=1
 	)
 	swim_add_slang_program(SwimScreenSpaceReflectionTemporal
+		RUNTIME_NAME ScreenSpaceReflectionTemporal
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflectionTemporal.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimForwardLocalLights
+		RUNTIME_NAME ForwardLocalLights
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardLocalLights.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Shadow maps (Phase 16, items 70-72): depth-only and alpha-tested casters.
 	swim_add_slang_program(SwimShadowDepth
+		RUNTIME_NAME ShadowDepth
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimShadowMasked
+		RUNTIME_NAME ShadowMasked
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Shadows/ShadowDepth.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 		DEFINES SHADOW_ALPHA_TEST=1
 	)
 	swim_add_slang_program(SwimShadowClear
+		RUNTIME_NAME ShadowClear
 		SOURCE Source/Shaders/Slang/Shadows/ShadowClear.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Post-processing (items 73-74): histogram, exposure, bloom and the composite.
 	swim_add_slang_program(SwimPostHistogram
+		RUNTIME_NAME PostHistogram
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostHistogram.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimPostExposure
+		RUNTIME_NAME PostExposure
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostExposure.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimPostBloomDownsample
+		RUNTIME_NAME PostBloomDownsample
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostBloomDownsample.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimPostBloomUpsample
+		RUNTIME_NAME PostBloomUpsample
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostBloomUpsample.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimPostComposite
+		RUNTIME_NAME PostComposite
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostComposite.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimPostCompositeHdr
+		RUNTIME_NAME PostCompositeHdr
+		REQUIRED
 		SOURCE Source/Shaders/Slang/PostProcess/PostComposite.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -586,70 +638,96 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	)
 	# Temporal anti-aliasing (item 75).
 	swim_add_slang_program(SwimTemporalResolve
+		RUNTIME_NAME TemporalResolve
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Temporal/TemporalResolve.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Screen-space ambient occlusion, reflections and fog (item 76).
 	swim_add_slang_program(SwimScreenSpaceAo
+		RUNTIME_NAME ScreenSpaceAo
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceAo.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimScreenSpaceBlur
+		RUNTIME_NAME ScreenSpaceBlur
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceBlur.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimScreenSpaceComposite
+		RUNTIME_NAME ScreenSpaceComposite
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimScreenSpaceReflection
+		RUNTIME_NAME ScreenSpaceReflection
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ScreenSpace/ScreenSpaceReflection.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# GPU particles (item 77).
 	swim_add_slang_program(SwimParticleSimulate
+		RUNTIME_NAME ParticleSimulate
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Particles/ParticleSimulate.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimParticleEmit
+		RUNTIME_NAME ParticleEmit
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Particles/ParticleEmit.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimParticleCompact
+		RUNTIME_NAME ParticleCompact
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Particles/ParticleCompact.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimParticleFinalize
+		RUNTIME_NAME ParticleFinalize
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Particles/ParticleFinalize.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimParticleRender
+		RUNTIME_NAME ParticleRender
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Particles/ParticleRender.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# Retained UI and text quads (item 79).
 	swim_add_slang_program(SwimUiQuad
+		RUNTIME_NAME UiQuad
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Ui/UiQuad.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	# GPU skinning and morph targets (item 78).
 	swim_add_slang_program(SwimSkinning
+		RUNTIME_NAME Skinning
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Skinning/Skinning.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimForwardTransparentSort
+		RUNTIME_NAME ForwardTransparentSort
+		REQUIRED
 		SOURCE Source/Shaders/Slang/ForwardPlus/ForwardTransparentSort.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -662,11 +740,15 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	# Runtime-only programs (Phase 23): presentation onto the swapchain and the sky
 	# background drawn before Clustered Forward+.
 	swim_add_slang_program(SwimRuntimePresent
+		RUNTIME_NAME Present
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Runtime/Present.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
 	swim_add_slang_program(SwimRuntimeSkyBackground
+		RUNTIME_NAME SkyBackground
+		REQUIRED
 		SOURCE Source/Shaders/Slang/Runtime/SkyBackground.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
@@ -1076,7 +1158,7 @@ endif()
 
 # Runtime third-party dependencies (EnTT, spdlog). The legacy OpenGL loader (glad),
 # nlohmann/json, stb, zstd and the Basis transcoder left with the legacy renderer
-# (Phase 22); their old rules live in Deprecated/cmake/LegacyDependencies.cmake.
+# (Phase 22); their old rules live in Deprecated/cmake/LegacyDependencies.cmake.txt.
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}")
 include(cmake/Dependencies.cmake)
@@ -1196,7 +1278,7 @@ set_property(
 	PROPERTY VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
-target_include_directories(SwimEngine PRIVATE
+target_include_directories(SwimEngine PRIVATE ${CMAKE_BINARY_DIR}/Generated
 	${CMAKE_SOURCE_DIR}/Source
 	${CMAKE_SOURCE_DIR}/Source/Engine/Utility
 )

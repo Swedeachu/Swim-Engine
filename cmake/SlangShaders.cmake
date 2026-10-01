@@ -8,8 +8,8 @@ include_guard(GLOBAL)
 # <name>_DEPFILE. SPIR-V programs also expose <name>_SPIRV for compatibility.
 function(swim_add_slang_program name)
 	cmake_parse_arguments(SWIM_SLANG_PROGRAM
-		""
-		"SOURCE;OUTPUT_DIRECTORY;OUTPUT_NAME;TARGET;PROFILE;ENTRY_POINT;DEPFILE_DIRECTORY"
+		"REQUIRED"
+		"SOURCE;OUTPUT_DIRECTORY;OUTPUT_NAME;TARGET;PROFILE;ENTRY_POINT;DEPFILE_DIRECTORY;RUNTIME_NAME"
 		"INCLUDE_DIRECTORIES;DEFINES"
 		${ARGN}
 	)
@@ -134,6 +134,10 @@ function(swim_add_slang_program name)
 		COMMAND_EXPAND_LISTS
 	)
 
+	if(SWIM_SLANG_PROGRAM_RUNTIME_NAME)
+		swim_register_runtime_shader("${SWIM_SLANG_PROGRAM_RUNTIME_NAME}" "${name}" "${SWIM_SLANG_PROGRAM_REQUIRED}")
+	endif()
+
 	set(${name}_OUTPUT "${SWIM_SLANG_PROGRAM_OUTPUT}" PARENT_SCOPE)
 	set(${name}_REFLECTION "${SWIM_SLANG_PROGRAM_REFLECTION}" PARENT_SCOPE)
 	set(${name}_DEPFILE "${SWIM_SLANG_PROGRAM_DEPFILE}" PARENT_SCOPE)
@@ -142,35 +146,49 @@ function(swim_add_slang_program name)
 	endif()
 endfunction()
 
-# swim_add_runtime_shader(<RuntimeName> SOURCE <file.slang> [DEFINES ...])
-#
-# The one call a new runtime program needs (render features, gameplay passes): it
-# compiles the Slang source like every engine program (spirv_1_5, the shared include
-# root) and stages it into the runtime shader set as <RuntimeName>.spv +
-# <RuntimeName>.reflection.json, where ShaderLibrary and RenderFeatureContext::Compute
-# find it by name.
+
+# Shared registry for engine and gameplay shader artifacts. A name is an identifier,
+# not a filesystem path; duplicates fail at configure time instead of racing copies.
+function(swim_register_runtime_shader name program required)
+	if(NOT name MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+		message(FATAL_ERROR "Invalid runtime shader name: ${name}")
+	endif()
+	if(TARGET SwimRuntimeShaders)
+		message(FATAL_ERROR "Register runtime shaders before defining/deploying SwimRuntimeShaders")
+	endif()
+	get_property(names GLOBAL PROPERTY SWIM_RUNTIME_SHADER_NAMES)
+	if(name IN_LIST names)
+		message(FATAL_ERROR "Duplicate runtime shader name: ${name}")
+	endif()
+	set_property(GLOBAL APPEND PROPERTY SWIM_RUNTIME_SHADER_NAMES "${name}")
+	set_property(GLOBAL APPEND PROPERTY SWIM_RUNTIME_SHADER_PROGRAMS "${name}=${program}")
+	if(required)
+		set_property(GLOBAL APPEND PROPERTY SWIM_REQUIRED_RUNTIME_SHADERS "${name}")
+	endif()
+endfunction()
+
+# Gameplay/features: one declaration compiles, registers and deploys both artifacts.
+# REQUIRED is opt-in; optional feature programs do not gate the base renderer.
 function(swim_add_runtime_shader name)
-	cmake_parse_arguments(SWIM_RUNTIME_SHADER "" "SOURCE" "DEFINES" ${ARGN})
+	cmake_parse_arguments(SWIM_RUNTIME_SHADER "REQUIRED" "SOURCE;ENTRY_POINT" "DEFINES;INCLUDE_DIRECTORIES" ${ARGN})
 	if(NOT SWIM_RUNTIME_SHADER_SOURCE)
 		message(FATAL_ERROR "swim_add_runtime_shader(${name}) needs SOURCE")
 	endif()
 	set(program "Swim${name}")
-	if(SWIM_RUNTIME_SHADER_DEFINES)
-		swim_add_slang_program(${program}
-			SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
-			PROFILE spirv_1_5
-			INCLUDE_DIRECTORIES Source/Shaders/Slang
-			DEFINES ${SWIM_RUNTIME_SHADER_DEFINES}
-		)
-	else()
-		swim_add_slang_program(${program}
-			SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
-			PROFILE spirv_1_5
-			INCLUDE_DIRECTORIES Source/Shaders/Slang
-		)
+	set(required "")
+	if(SWIM_RUNTIME_SHADER_REQUIRED)
+		set(required REQUIRED)
 	endif()
+	swim_add_slang_program(${program}
+		SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
+		RUNTIME_NAME "${name}"
+		${required}
+		PROFILE spirv_1_5
+		ENTRY_POINT "${SWIM_RUNTIME_SHADER_ENTRY_POINT}"
+		INCLUDE_DIRECTORIES Source/Shaders/Slang ${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}
+		DEFINES ${SWIM_RUNTIME_SHADER_DEFINES}
+	)
 	set(${program}_SPIRV "${${program}_SPIRV}" PARENT_SCOPE)
 	set(${program}_REFLECTION "${${program}_REFLECTION}" PARENT_SCOPE)
-	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADERS "${name}=${program}")
 	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADER_FILES "${${program}_SPIRV}" "${${program}_REFLECTION}")
 endfunction()

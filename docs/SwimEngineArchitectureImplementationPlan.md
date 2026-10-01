@@ -12,6 +12,8 @@
 
 ---
 
+**2026-09-30 cleanup:** cooked-model instantiation moved to the engine scene system; document-owned UI callbacks replaced gameplay bindings; built-in and custom widgets share a typed factory registry; themes support named class builders; runtime shader deployment and required-program diagnostics derive from build registration; parsed shader artifacts are cached; archived code is `.txt` history with a CMake exclusion guard. See [EngineCleanup-2026-09-30.md](EngineCleanup-2026-09-30.md) for API examples and validation.
+
 ## Current implementation snapshot — 2026-09-25
 
 This section is the short authoritative status summary for the current repository. Detailed historical checkpoints remain below because they explain why particular contracts exist, but this snapshot should be read first when deciding what to work on next.
@@ -46,7 +48,7 @@ The critical-path ladder for these steps is [35.9](#359-engine-assembly-and-game
 - **Latest checkpoint — Phases 22 and 23, the assembled runtime (2026-09-25):** OpenGL and the editor are gone; the engine state, clock, tags and behaviours are rebuilt; the modern renderer and UI run the sandbox demo. The full repository layout is delivered with the retired code under `Deprecated/`.
   - **Phase 22:** OpenGL renderer, GL dependencies and `--graphics=opengl` removed. The editor removed (gizmos, gizmo behaviours, editor camera, the `Editing` state, editor commands). `EngineStateMachine`, `SimulationClock`, `TagId`/`TagSet`/`TagRegistry` with the scene tag index, the behaviour lifecycle with state masks and state hooks, and `FlyCameraController` as a runtime behaviour.
   - **Phase 23:** `RenderDevice`, `FrameRenderer`, `ShaderLibrary`, `MeshLibrary`/`ProceduralMeshes`, `MaterialLibrary`, `SceneRenderBridge`, `UiRuntime`; the components `Light`, `ParticleEmitter`, `SkinnedMeshRenderer`, `UiCanvas` and `CameraComponent`; new `Present` and `SkyBackground` programs; SDL offscreen headless mode; the `Game::Sandbox` demo with its HUD, world UI, playgrounds, camera bookmarks, diagnostics and findings. `VulkanRenderer`, the pools, the legacy text/UI, `SceneBVH` and the legacy shaders are archived.
-  - **Tests:** `Engine.StateMachine`, `Engine.SimulationClock`, `Engine.SceneRuntime` and `Game.Sandbox` run a real headless engine (`--no-render`); `Engine.UiRuntime`, `Engine.Camera`/`FlyCamera`, `Engine.ProceduralMeshes`, `Game.TentacleAnimator` and `Game.Findings`. The verifier now checks the Phase 22/23 layout and the findings/doc sync.
+  - **Tests:** `Engine.StateMachine`, `Engine.SimulationClock`, `Engine.SceneRuntime` and `Game.Sandbox` run a real headless engine (`--no-render`); `Engine.UiRuntime`, `Engine.Camera`/`FlyCamera`, `Engine.ProceduralMeshes`, `Game.TentacleAnimator` and `Engine.ModelImport`. The verifier checks the Phase 22/23 layout; historical findings are documentation only.
   - **Validation:** Linux GCC 13 Debug: every `SwimTests` case passes, the verifier passes, and headless SwiftShader captures of the sandbox are recorded in [Phase 22/23 validation](validation/Phase22-23-2026-09-25.md).
   - **Next:** desktop runs under the four validation profiles (RTX 4070, Windows and Linux), 1080p budgets, then the open [findings](EngineRuntime.md#findings) and Phase 24.
 - **Previous checkpoint — item 79, popups and selection controls (2026-09-25):** the controls the previous checkpoint left out are implemented; the UI widget set is complete for the assembly phase. Item 79 stays open for the desktop smokes and the runtime wiring (Phase 23).

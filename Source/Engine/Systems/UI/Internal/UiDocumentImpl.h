@@ -5,6 +5,7 @@
 
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Engine/Systems/UI/UiTheme.h"
+#include "Engine/Systems/UI/UiWidgetRegistry.h"
 
 #include <algorithm>
 #include <array>
@@ -82,6 +83,7 @@ namespace Swim::UI
 			float PreferredCaretX = std::numeric_limits<float>::quiet_NaN();
 			bool RevealCaret = false;
 			// Control behaviour (UiControls.cpp).
+			std::unordered_map<UiEventKind, std::function<void(const UiEvent&)>> Callbacks;
 			UiControl Control;
 			UiNodeId PartOf; // The control this node is a part of.
 			UiPartRole Role = UiPartRole::None;
@@ -134,6 +136,7 @@ namespace Swim::UI
 		};
 
 		std::unordered_map<std::uint64_t, Node> Nodes;
+		UiWidgetRegistry Widgets;
 		UiNodeId Root;
 		UiNodeId Hover;
 		UiNodeId Pressed;
@@ -148,6 +151,11 @@ namespace Swim::UI
 		std::vector<UiNodeId> Order;
 		std::vector<UiPaintQuad> Quads;
 		std::vector<UiEvent> Events;
+		std::vector<UiEvent> CallbackEvents;
+		bool DispatchingCallbacks = false;
+
+		void QueueEvent(UiEvent event);
+
 		const Text::GlyphAtlas* PaintAtlas = nullptr;
 		std::uint64_t PaintRevision = 0;
 		std::uint64_t PaintedLayoutRevision = 0;
@@ -184,7 +192,7 @@ namespace Swim::UI
 		UiNodeId TooltipShown;
 		// Theme.
 		std::shared_ptr<const UiTheme> Theme;
-		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> Classes;
+		std::unordered_map<UiThemeClass, UiClassStyle> Classes;
 		std::string Composition;
 		std::uint32_t CompositionCursor = 0;
 		UiClipboard Clipboard;

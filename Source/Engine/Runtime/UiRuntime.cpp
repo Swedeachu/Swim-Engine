@@ -302,7 +302,7 @@ namespace Engine
 				desc.Document = state.Document.get();
 				desc.Mode = UI::UiCanvasMode::Screen;
 				desc.Interactive = true;
-				desc.BlocksPointer = false; // Only its visible nodes (HitTest) take the pointer.
+				desc.BlocksPointer = false;			// Only its visible nodes (HitTest) take the pointer.
 				desc.Order = state.Order + 1000000; // Above every scene canvas.
 				state.Handle = router.Add(desc);
 				state.Sequence = ++sequence;
@@ -320,6 +320,7 @@ namespace Engine
 
 	const Swim::UI::UiInputFrame& UiRuntime::ApplyInput(const Swim::Input::InputSystem* input, float deltaSeconds)
 	{
+		namespace UI = Swim::UI;
 		inputFrame = {};
 		const bool overlayShown = std::any_of(overlays.begin(), overlays.end(),
 			[](const auto& entry)
@@ -330,6 +331,39 @@ namespace Engine
 		if (input && (!canvases.empty() || overlayShown))
 		{
 			inputFrame = bridge.Apply(*input, router, &view.Camera, {}, deltaSeconds);
+		}
+
+		// Keep documents alive and finish routing before gameplay callbacks mutate UI/scene
+		// state. A document shared by multiple canvases is dispatched only once.
+		std::vector<std::shared_ptr<UI::UiDocument>> documents;
+		const auto collect = [&](const std::shared_ptr<UI::UiDocument>& document)
+		{
+			if (std::find(documents.begin(), documents.end(), document) == documents.end())
+			{
+				documents.push_back(document);
+			}
+		};
+
+		for (const auto& [entity, state] : canvases)
+		{
+			(void)entity;
+			collect(state.Document);
+		}
+
+		for (const auto& [id, overlay] : overlays)
+		{
+			(void)id;
+
+			if (overlay.Routed)
+			{
+				collect(overlay.Canvas.Document);
+			}
+		}
+
+		for (const auto& document : documents)
+		{
+			document->DispatchCallbacks();
+			document->DrainEvents(); // Managed documents use callbacks; do not retain polling history.
 		}
 
 		return inputFrame;

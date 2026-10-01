@@ -733,7 +733,7 @@ def check_modern_cmake_dependency_compatibility(failures: list[str]) -> None:
 
     # Phase 22/23 retired the legacy renderer and its third-party stack (GLAD/OpenGL,
     # zstd, Basis Universal, nlohmann/json, stb, the legacy font/ImGui helpers). Their
-    # CMake lives in Deprecated/cmake/LegacyDependencies.cmake for reference only.
+    # CMake lives in Deprecated/cmake/LegacyDependencies.cmake.txt for reference only.
     for retired in ("SwimZstd", "SwimBasisTranscoder", "SwimGlad", "SwimJson", "glad_add_library", "nlohmann_json"):
         if retired in dependency_text:
             fail(f"runtime dependency list regained a retired legacy dependency: {retired}", failures)
@@ -742,8 +742,8 @@ def check_modern_cmake_dependency_compatibility(failures: list[str]) -> None:
             fail(f"runtime dependency list is missing: {fragment}", failures)
     if (ROOT / "cmake" / "LegacyDependencies.cmake").exists():
         fail("cmake/LegacyDependencies.cmake must stay archived under Deprecated/cmake", failures)
-    if not (ROOT / "Deprecated" / "cmake" / "LegacyDependencies.cmake").is_file():
-        fail("archived Deprecated/cmake/LegacyDependencies.cmake is missing", failures)
+    if not (ROOT / "Deprecated" / "cmake" / "LegacyDependencies.cmake.txt").is_file():
+        fail("archived Deprecated/cmake/LegacyDependencies.cmake.txt is missing", failures)
 
 
 def check_windows_compile_contract_and_warning_hygiene(failures: list[str]) -> None:
@@ -2456,13 +2456,13 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
         if not (scene_root / "Identity" / name).is_file():
             fail(f"active scene identity contract is missing: {name}", failures)
     required_serialization_files = (
-        "SceneSerializer.h",
-        "SceneSerializer.cpp",
-        "SceneStorage.h",
-        "SceneStorage.cpp",
-        "SceneToolingBridge.h",
-        "SceneSyncTracker.h",
-        "SceneSyncTracker.cpp",
+        "SceneSerializer.h.txt",
+        "SceneSerializer.cpp.txt",
+        "SceneStorage.h.txt",
+        "SceneStorage.cpp.txt",
+        "SceneToolingBridge.h.txt",
+        "SceneSyncTracker.h.txt",
+        "SceneSyncTracker.cpp.txt",
     )
     for file_name in required_serialization_files:
         if not (serialization_root / file_name).is_file():
@@ -3020,7 +3020,7 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
             if not build_file.is_file():
                 continue
             build_code = re.sub(r"#[^\n]*", "", build_file.read_text(encoding="utf-8", errors="ignore"))
-            if "Deprecated" in build_code:
+            if "Deprecated" in build_code and build_file.name != "ArchiveBoundary.cmake":
                 fail(
                     f"build system references the deprecated shader archive: {build_file.relative_to(ROOT)}",
                     failures,
@@ -3558,6 +3558,9 @@ def check_include_case_and_sandbox_assets(failures: list[str]) -> None:
         fail("Assets/Models/Sponza/sponza-ktx-draco.glb is missing (the sandbox's Sponza source)", failures)
 
 def check_retirement_boundaries(failures: list[str]) -> None:
+    for path in (ROOT / "Deprecated").rglob("*"):
+        if path.is_file() and path.suffix.lower() not in {".txt", ".md"}:
+            fail(f"archived history must be a text file: {path.relative_to(ROOT)}", failures)
     retired_types = re.compile(
         r"\b(?:InputManager|CommandSystem|SystemManager|EditorIpcBridge|SceneSerializer|SceneStorage|SceneSyncTracker|SceneToolingBridge"
         r"|VulkanRenderer|OpenGLRenderer|MeshPool|MaterialPool|TexturePool|FontPool|EditorCamera|CubeMapController)\b"
@@ -4093,13 +4096,6 @@ def check_phase22_23_runtime(failures: list[str]) -> None:
     ):
         check_suite_is_compiled(suite, file_name, failures)
 
-    sync_script = ROOT / "scripts" / "sync-findings-doc.py"
-    if sync_script.is_file():
-        result = subprocess.run([sys.executable, str(sync_script), "--check"], capture_output=True, text=True)
-        if result.returncode != 0:
-            fail("docs/EngineRuntime.md findings differ from Source/Game/Findings.cpp (run scripts/sync-findings-doc.py)", failures)
-    else:
-        fail("scripts/sync-findings-doc.py is missing", failures)
 
 
 def main() -> int:

@@ -1,6 +1,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/UiCanvas.h"
 #include "Engine/Runtime/UiRuntime.h"
+#include "Engine/Systems/UI/UiWidgets.h"
 #include "Engine/Systems/Camera/Camera.h"
 #include "Engine/Systems/Renderer/Runtime/FrameRenderer.h"
 #include "Engine/Systems/Scene/Scene.h"
@@ -129,4 +130,28 @@ SWIM_TEST("Engine.UiRuntime", "ConstantSizeBillboardsBehindTheCameraAreSkippedNo
 	items = ui.Finish(0.0f);
 	SWIM_REQUIRE_EQUAL(items.size(), std::size_t{ 1 });
 	SWIM_CHECK(items[0].Document == behind.Document);
+}
+
+SWIM_TEST("Engine.UiRuntime", "WidgetCallbacksDispatchAfterRoutingWithoutGameplayPolling")
+{
+	Engine::UiRuntime ui{ std::filesystem::path(SWIM_TEST_ASSET_ROOT) };
+	Engine::Scene scene("UiCallbacksTest");
+	const auto canvas = AddCanvas(scene, ui, Swim::UI::UiCanvasMode::Screen, 0, glm::vec3(0.0f));
+	auto& document = *canvas.Document;
+	const auto button = Swim::UI::CreateButton(document, document.GetRoot(), "Play");
+	int clicks = 0;
+	document.OnClick(button,
+		[&]
+		{
+			++clicks;
+		});
+	ui.Sync(&scene, MakeView());
+	document.Focus(button);
+	document.ActivateFocused();
+	SWIM_CHECK_EQUAL(clicks, 0);
+	ui.ApplyInput(nullptr, 0.016f);
+	SWIM_CHECK_EQUAL(clicks, 1);
+	ui.Finish(0.016f);
+	SWIM_CHECK_EQUAL(clicks, 1);
+	SWIM_CHECK(document.DrainEvents().empty());
 }

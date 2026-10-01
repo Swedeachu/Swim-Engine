@@ -89,7 +89,7 @@ namespace Game
 			CreateTooltip(*document, button, tooltip, 0.45f);
 		}
 
-		bindings.OnClick(button, std::move(onClick));
+		document->OnClick(button, std::move(onClick));
 		return button;
 	}
 
@@ -105,21 +105,21 @@ namespace Game
 		desc.Decimals = decimals;
 		desc.EditableValue = true;
 		const auto slider = CreateSlider(*document, parent, desc);
-		bindings.OnValue(slider, std::move(onChange));
+		document->OnValue(slider, std::move(onChange));
 		return slider;
 	}
 
 	UiNodeId SandboxHud::AddCheckbox(UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange)
 	{
 		const auto box = CreateCheckbox(*document, parent, label, value ? UiCheckState::Checked : UiCheckState::Unchecked);
-		bindings.OnChecked(box, std::move(onChange));
+		document->OnChecked(box, std::move(onChange));
 		return box;
 	}
 
 	UiNodeId SandboxHud::AddToggle(UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange)
 	{
 		const auto toggle = CreateToggle(*document, parent, label, value);
-		bindings.OnChecked(toggle, std::move(onChange));
+		document->OnChecked(toggle, std::move(onChange));
 		return toggle;
 	}
 
@@ -169,7 +169,7 @@ namespace Game
 	{
 		CreateLabel(*document, parent, label);
 		const auto dropdown = CreateDropdown(*document, parent, options, static_cast<std::int32_t>(get()));
-		bindings.OnValue(dropdown.Root,
+		document->OnValue(dropdown.Root,
 			[set = std::move(set)](float value)
 			{
 				if (value >= 0.0f)
@@ -247,7 +247,9 @@ namespace Game
 
 		if (sandbox && sandbox->GetInfoDocument() && sandbox->GetInfoButton())
 		{
-			infoBindings.OnClick(sandbox->GetInfoButton(),
+			infoDocument = sandbox->GetInfoDocument();
+			infoButton = sandbox->GetInfoButton();
+			sandbox->GetInfoDocument()->OnClick(infoButton,
 				[this]
 				{
 					if (auto* shooter = sandbox->GetShooter())
@@ -260,6 +262,21 @@ namespace Game
 
 		RefreshStatus();
 		RefreshDiagnostics();
+		return 0;
+	}
+
+	int SandboxHud::Exit()
+	{
+		if (document)
+		{
+			document->ClearCallbacks();
+		}
+
+		if (const auto info = infoDocument.lock(); info && info->Contains(infoButton))
+		{
+			info->ClearCallbacks(infoButton);
+		}
+
 		return 0;
 	}
 
@@ -302,7 +319,7 @@ namespace Game
 		}
 
 		document->SetValue(tabs, 0.0f);
-		bindings.OnValue(tabs,
+		document->OnValue(tabs,
 			[this](float value)
 			{
 				ShowSection(static_cast<std::uint32_t>(std::max(value, 0.0f)));
@@ -383,7 +400,7 @@ namespace Game
 
 		const auto bookmarks = CreateDropdown(*document, parent, views, 0);
 		bookmarkDropdown = bookmarks.Root;
-		bindings.OnValue(bookmarks.Root,
+		document->OnValue(bookmarks.Root,
 			[this](float value)
 			{
 				// Ignore the echo of a view chosen elsewhere (keys, commands).
@@ -436,12 +453,12 @@ namespace Game
 		CreateLabel(*document, resetModal.Content, "Every spawned object is removed and the scene is rebuilt.");
 		resetCancel = AddModalButton(*document, resetModal, "Cancel");
 		resetConfirm = AddModalButton(*document, resetModal, "Reset");
-		bindings.OnClick(resetCancel,
+		document->OnClick(resetCancel,
 			[this]
 			{
 				document->ClosePopup(resetModal.Root);
 			});
-		bindings.OnClick(resetConfirm,
+		document->OnClick(resetConfirm,
 			[this]
 			{
 				document->ClosePopup(resetModal.Root);
@@ -563,7 +580,8 @@ namespace Game
 			auto* lensing = sandbox->GetLensing();
 			CreateHeading(*document, parent, "Black hole");
 			CheckFor(parent, "Black hole (lensing + gas)", lensing->Enabled);
-			const auto lensSlider = [&](const std::string& label, float min, float max, int decimals, float Engine::GravitationalLensing::Lens::*field)
+			const auto lensSlider =
+				[&](const std::string& label, float min, float max, int decimals, float Engine::GravitationalLensing::Lens::* field)
 			{
 				const auto get = [lensing, field]
 				{
@@ -618,7 +636,7 @@ namespace Game
 
 		CreateHeading(*document, parent, "Debug");
 		const auto debug = CreateDropdown(*document, parent, { "Lit", "Cluster light heatmap" }, static_cast<std::int32_t>(s.Debug));
-		bindings.OnValue(debug.Root,
+		document->OnValue(debug.Root,
 			[&s](float value)
 			{
 				s.Debug = value >= 1.0f ? Swim::Render::ForwardPlusDebugMode::ClusterHeatmap : Swim::Render::ForwardPlusDebugMode::None;
@@ -806,7 +824,7 @@ namespace Game
 			style.Width = UiLength::Pixels(250.0f);
 			document->SetStyle(filterField, style);
 		}
-		bindings.OnText(filterField,
+		document->OnText(filterField,
 			[this](const std::string& text)
 			{
 				filter = Lower(text);
@@ -822,7 +840,7 @@ namespace Game
 			SetLabelText(doc, row, index < listedNames.size() ? listedNames[index] : std::string());
 		};
 		entityList = std::make_unique<UiVirtualList>(*document, parent, std::move(desc));
-		bindings.OnValue(entityList->GetRoot(),
+		document->OnValue(entityList->GetRoot(),
 			[this](float value)
 			{
 				const auto index = static_cast<std::int64_t>(value);
@@ -924,7 +942,7 @@ namespace Game
 
 			spawnItems[i] = AddMenuItem(*document, spawnMenu, kinds[i].first);
 			const auto kind = kinds[i].second;
-			bindings.OnClick(spawnItems[i],
+			document->OnClick(spawnItems[i],
 				[this, kind]
 				{
 					if (sandbox)
@@ -1175,8 +1193,7 @@ namespace Game
 
 		if (sandbox && sandbox->GetRequestedTab() != UINT32_MAX)
 		{
-			// Set the radio and show the section directly: the bindings do not report a
-			// value that was already set before their first poll.
+			// Programmatic setters stay silent; update the visible section directly.
 			document->SetValue(tabs, static_cast<float>(sandbox->GetRequestedTab()));
 			ShowSection(sandbox->GetRequestedTab());
 			sandbox->RequestTab(UINT32_MAX);
@@ -1187,14 +1204,13 @@ namespace Game
 			document->SetValue(bookmarkDropdown, static_cast<float>(sandbox->GetLastBookmark()));
 		}
 
-		bindings.Process(*document);
 		SyncControls();
 
 		if (profilePending && render && render->Profiler && !render->Profiler->IsCapturing())
 		{
 			profilePending = false;
 			SetLabelText(*document, profileLabel, Engine::FrameProfiler::Summary(render->Profiler->GetReport(), 6));
-		} // After Process: a value the user just edited is already stored.
+		}
 
 		if (sandbox)
 		{
@@ -1206,11 +1222,6 @@ namespace Game
 				(void)canvasEntity;
 				canvas.Visible = visible;
 			}
-		}
-
-		if (sandbox && sandbox->GetInfoDocument())
-		{
-			infoBindings.Process(*sandbox->GetInfoDocument());
 		}
 
 		refreshTimer += static_cast<float>(dt);

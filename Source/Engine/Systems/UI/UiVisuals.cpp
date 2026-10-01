@@ -225,7 +225,7 @@ namespace Swim::UI
 
 		if (node.ThemeClass != UiThemeClass::None && HasApply(node.ThemeApply, UiThemeApply::Paint))
 		{
-			for (const auto& rule : Classes[static_cast<std::size_t>(node.ThemeClass)].Rules)
+			for (const auto& rule : Classes.at(node.ThemeClass).Rules)
 			{
 				if (Matches(state, rule))
 				{
@@ -362,7 +362,7 @@ namespace Swim::UI
 			return;
 		}
 
-		const auto& themed = Classes[static_cast<std::size_t>(node.ThemeClass)];
+		const auto& themed = Classes.at(node.ThemeClass);
 		const auto& from = themed.Style;
 		UiStyle style = node.Style;
 		// Class styles describe horizontal controls; vertical ones swap axes.
@@ -452,6 +452,17 @@ namespace Swim::UI
 		}
 
 		auto classes = theme->Build(); // Validates before anything changes.
+
+		for (const auto& [key, node] : impl->Nodes)
+		{
+			(void)key;
+
+			if (!classes.contains(node.ThemeClass))
+			{
+				throw std::invalid_argument("Replacement UI theme is missing a node's class");
+			}
+		}
+
 		impl->Theme = std::move(theme);
 		impl->Classes = std::move(classes);
 
@@ -473,8 +484,7 @@ namespace Swim::UI
 
 	void UiDocument::SetThemeClass(UiNodeId id, UiThemeClass themeClass, UiThemeApply apply)
 	{
-		if (static_cast<std::uint8_t>(themeClass) >= static_cast<std::uint8_t>(UiThemeClass::Count) ||
-			static_cast<std::uint8_t>(apply) > static_cast<std::uint8_t>(UiThemeApply::All))
+		if (!impl->Classes.contains(themeClass) || static_cast<std::uint8_t>(apply) > static_cast<std::uint8_t>(UiThemeApply::All))
 		{
 			throw std::invalid_argument("Invalid UI theme class");
 		}
@@ -500,6 +510,7 @@ namespace Swim::UI
 			throw std::invalid_argument("UI update needs 0 .. 3600 seconds");
 		}
 
+		DispatchCallbacks();
 		impl->ResolveVisuals();
 		const bool transitions = impl->AdvanceTransitions(seconds);
 		const bool controls = impl->AnimateControls(seconds);

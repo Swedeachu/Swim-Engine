@@ -168,7 +168,7 @@ namespace Swim::UI
 		node.RevealCaret = true;
 		MarkLayoutDirty(node.Id);
 		node.Selection = ClampSelection(node, node.Selection);
-		Events.push_back({ UiEventKind::TextChanged, node.Id });
+		QueueEvent({ UiEventKind::TextChanged, node.Id });
 	}
 
 	bool UiDocument::Impl::EditKey(Node& node, UiKey key, UiKeyModifiers modifiers)
@@ -268,7 +268,7 @@ namespace Swim::UI
 			}
 			else
 			{
-				Events.push_back({ UiEventKind::Submit, node.Id });
+				QueueEvent({ UiEventKind::Submit, node.Id });
 			}
 
 			return true;

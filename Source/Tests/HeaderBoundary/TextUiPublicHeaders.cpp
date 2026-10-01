@@ -13,6 +13,7 @@
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Engine/Systems/UI/UiTheme.h"
 #include "Engine/Systems/UI/UiWidgets.h"
+#include "Engine/Systems/UI/UiWidgetRegistry.h"
 #include "Engine/Systems/UiInput/UiInputBridge.h"
 
 #include <type_traits>

@@ -16,13 +16,6 @@ namespace Engine
 		constexpr float TextSize = 15.0f;
 		constexpr std::size_t VisibleLines = 22;
 
-		UI::UiNodeId CreateStyledNode(UI::UiDocument& document, UI::UiNodeId parent, const UI::UiStyle& style)
-		{
-			const auto node = document.Create(parent);
-			document.SetStyle(node, style);
-			return node;
-		}
-
 	} // namespace
 
 	RuntimeConsoleOverlay::RuntimeConsoleOverlay(UiRuntime& uiValue, RuntimeConsole& consoleValue) : ui(uiValue), console(consoleValue)
@@ -45,7 +38,7 @@ namespace Engine
 		panelStyle.BorderWidth = 2.0f;
 		panelStyle.BorderColor = UI::UiSrgbHex(0x1f7aff, 0.9f);
 		panelStyle.HitTest = true; // Clicks on the console never reach the game.
-		panel = CreateStyledNode(*document, document->GetRoot(), panelStyle);
+		panel = UI::CreateStyledNode(*document, document->GetRoot(), panelStyle);
 
 		UI::UiStyle scrollStyle;
 		scrollStyle.Width = UI::UiLength::Percent(1.0f);
@@ -58,7 +51,7 @@ namespace Engine
 		rowStyle.Gap = 6;
 		rowStyle.Width = UI::UiLength::Percent(1.0f);
 		rowStyle.AlignItems = UI::UiAlign::Center;
-		const auto row = CreateStyledNode(*document, panel, rowStyle);
+		const auto row = UI::CreateStyledNode(*document, panel, rowStyle);
 		UI::UiStyle promptStyle;
 		promptStyle.TextColor = UI::UiSrgbHex(0x5ea2ff);
 		UI::CreateLabel(*document, row, ui.GetMonoFonts(), ">", TextSize, promptStyle);
@@ -71,6 +64,17 @@ namespace Engine
 		document->SetStyle(field, fieldStyle);
 		document->SetText(field, ui.GetMonoFonts(), "", TextSize);
 		document->SetArrowNavigation(false); // Up/Down walk the history instead.
+		document->On(field, UI::UiEventKind::Submit,
+			[this](const UI::UiEvent&)
+			{
+				if (console.IsOpen())
+				{
+					const std::string line = GetInputText();
+					SetInputText("");
+					console.Execute(line);
+				}
+
+			});
 
 		overlay = ui.AddOverlay(document, 100);
 		RefreshScrollback();
@@ -78,6 +82,7 @@ namespace Engine
 
 	RuntimeConsoleOverlay::~RuntimeConsoleOverlay()
 	{
+		document->ClearCallbacks(field);
 		ui.RemoveOverlay(overlay);
 	}
 
@@ -152,15 +157,8 @@ namespace Engine
 
 	void RuntimeConsoleOverlay::AfterInput()
 	{
-		for (const auto& event : document->DrainEvents())
-		{
-			if (event.Kind == UI::UiEventKind::Submit && event.Node == field && console.IsOpen())
-			{
-				const std::string line = GetInputText();
-				SetInputText("");
-				console.Execute(line);
-			}
-		}
+		document->DispatchCallbacks();
+		document->DrainEvents();
 
 		if (console.IsOpen())
 		{

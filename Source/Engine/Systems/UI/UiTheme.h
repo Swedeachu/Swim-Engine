@@ -2,7 +2,9 @@
 
 #include "Engine/Systems/UI/UiDocument.h"
 
-#include <array>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -88,6 +90,18 @@ namespace Swim::UI
 
 	  public:
 
+		using ClassBuilder = std::function<void(const UiTheme&, UiClassStyle&)>;
+
+		UiTheme();
+
+		// Stable named IDs: custom classes work across theme copies and replacements.
+		// Duplicate names, IDs or empty builders are rejected. ReplaceClass is explicit.
+		UiThemeClass RegisterClass(std::string name, ClassBuilder builder);
+
+		void ReplaceClass(UiThemeClass themeClass, ClassBuilder builder);
+
+		UiThemeClass FindClass(std::string_view name) const;
+
 		UiPalette Palette;
 		UiMetrics Metrics;
 		// Fonts of themed text (labels, buttons, text fields); null leaves text unthemed and
@@ -102,7 +116,12 @@ namespace Swim::UI
 
 		// Every class, as UiDocument::SetTheme caches them. Throws std::invalid_argument
 		// when a class's style is invalid (UiDocument::SetStyle's validation).
-		std::array<UiClassStyle, static_cast<std::size_t>(UiThemeClass::Count)> Build() const;
+		std::unordered_map<UiThemeClass, UiClassStyle> Build() const;
+
+	  private:
+
+		std::unordered_map<UiThemeClass, ClassBuilder> builders;
+		std::unordered_map<std::string, UiThemeClass> names;
 
 	};
 

@@ -218,7 +218,7 @@ namespace Swim::UI
 	{
 		if (Focused && (!Available(Focused) || !IsFocusable(Get(Focused))))
 		{
-			Events.push_back({ UiEventKind::Blur, Focused });
+			QueueEvent({ UiEventKind::Blur, Focused });
 
 			if (Nodes.contains(Focused.Value))
 			{
@@ -236,7 +236,7 @@ namespace Swim::UI
 				EndDrag(true);
 			}
 
-			Events.push_back({ UiEventKind::Cancel, Pressed });
+			QueueEvent({ UiEventKind::Cancel, Pressed });
 			Pressed = {};
 		}
 
@@ -247,7 +247,7 @@ namespace Swim::UI
 
 		if (Hover && (!Available(Hover) || !IsHitTestable(Get(Hover))))
 		{
-			Events.push_back({ UiEventKind::Leave, Hover });
+			QueueEvent({ UiEventKind::Leave, Hover });
 			Hover = {};
 		}
 
@@ -315,6 +315,16 @@ namespace Swim::UI
 	}
 
 	UiDocument::~UiDocument() = default;
+
+	UiWidgetRegistry& UiDocument::GetWidgets()
+	{
+		return impl->Widgets;
+	}
+
+	const UiWidgetRegistry& UiDocument::GetWidgets() const
+	{
+		return impl->Widgets;
+	}
 
 	UiNodeId UiDocument::GetRoot() const
 	{

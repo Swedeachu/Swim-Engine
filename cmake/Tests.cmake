@@ -340,7 +340,7 @@ function(swim_configure_tests)
 		set_source_files_properties(${SWIM_TEST_FIXTURE_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
 	endif()
 
-	target_include_directories(SwimTests PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimTests PRIVATE ${CMAKE_BINARY_DIR}/Generated ${CMAKE_SOURCE_DIR}/Source)
 	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE
 			SWIM_TEXT_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf"

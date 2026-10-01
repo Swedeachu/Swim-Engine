@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unordered_map>
 
 namespace Engine
 {
@@ -45,6 +46,16 @@ namespace Engine
 		std::unique_ptr<Swim::Rhi::PipelineLayout> Layout;
 	};
 
+	struct RuntimeShaderDesc
+	{
+		std::string Name;
+		std::filesystem::path Bytecode;
+		std::filesystem::path Reflection;
+		std::string ComputeEntry = "computeMain";
+		std::string VertexEntry = "vertexMain";
+		std::string FragmentEntry = "fragmentMain";
+	};
+
 	// Loads the engine's precompiled Slang programs at runtime (Phase 23): each program is
 	// <root>/<Name>.spv plus its <Name>.reflection.json sidecar, produced at build time by
 	// swim_add_slang_program and deployed next to the executable (Shaders/Runtime). The
@@ -59,6 +70,14 @@ namespace Engine
 		ShaderLibrary(Swim::Rhi::Device& device, std::filesystem::path root);
 
 		const std::filesystem::path& GetRoot() const { return root; }
+
+		// Built-ins are registered from the build catalog. Custom programs use exactly the
+		// same runtime path. Relative artifact paths are resolved against GetRoot().
+		void Register(RuntimeShaderDesc desc);
+
+		// Invalidates parsed CPU artifacts for a future load; existing GPU programs keep
+		// their lifetime. Call after changing shader files, at an idle application boundary.
+		void Invalidate(std::string_view name);
 
 		bool Contains(std::string_view name) const;
 
@@ -80,10 +99,12 @@ namespace Engine
 	  private:
 
 		struct Loaded;
-		Loaded Load(std::string_view name) const;
+		const Loaded& Load(std::string_view name) const;
 
 		Swim::Rhi::Device& device;
 		std::filesystem::path root;
+		std::unordered_map<std::string, RuntimeShaderDesc> registrations;
+		mutable std::unordered_map<std::string, std::shared_ptr<const Loaded>> loadedPrograms;
 
 	};
 

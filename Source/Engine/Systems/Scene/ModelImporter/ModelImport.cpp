@@ -1,4 +1,4 @@
-#include "Game/ModelImport.h"
+#include "Engine/Systems/Scene/ModelImporter/ModelImport.h"
 
 #include "Engine/Assets/AssetSystem.h"
 #include "Engine/Assets/MaterialAsset.h"
@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace Game
+namespace Engine
 {
 
 	namespace
@@ -259,11 +259,6 @@ namespace Game
 		}
 
 		return best;
-	}
-
-	Assets::AssetHandle<Assets::ModelAsset> FindSponzaModel(const Assets::AssetSystem& assets)
-	{
-		return FindCookedModel(assets, { "sponza" }, { "sponza-ktx-draco", "sponza-ktx", "gltf/sponza" });
 	}
 
 	ImportedModel SpawnCookedModel(Engine::Scene& scene, Engine::RenderServices& render, Assets::AssetSystem& assets,
@@ -593,4 +588,4 @@ namespace Game
 		return entities;
 	}
 
-} // namespace Game
+} // namespace Engine

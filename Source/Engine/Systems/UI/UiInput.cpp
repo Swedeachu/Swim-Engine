@@ -67,14 +67,14 @@ namespace Swim::UI
 		{
 			if (impl->Hover)
 			{
-				impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
+				impl->QueueEvent({ UiEventKind::Leave, impl->Hover });
 			}
 
 			impl->Hover = hit;
 
 			if (hit)
 			{
-				impl->Events.push_back({ UiEventKind::Enter, hit });
+				impl->QueueEvent({ UiEventKind::Enter, hit });
 				// Hovering an option of an open dropdown moves its highlight.
 				const auto& node = impl->Get(hit);
 
@@ -110,7 +110,7 @@ namespace Swim::UI
 
 		if (impl->Hover)
 		{
-			impl->Events.push_back({ UiEventKind::Leave, impl->Hover });
+			impl->QueueEvent({ UiEventKind::Leave, impl->Hover });
 			impl->Hover = {};
 		}
 	}
@@ -171,7 +171,7 @@ namespace Swim::UI
 
 		if (impl->Pressed)
 		{
-			impl->Events.push_back({ UiEventKind::Press, impl->Pressed });
+			impl->QueueEvent({ UiEventKind::Press, impl->Pressed });
 			auto& node = impl->Get(impl->Pressed);
 
 			if (node.Editable && node.Fonts)
@@ -200,13 +200,13 @@ namespace Swim::UI
 				impl->ControlPointerUp(impl->Get(impl->Pressed), impl->Pressed == impl->Hover);
 			}
 
-			impl->Events.push_back({ UiEventKind::Release, impl->Pressed });
+			impl->QueueEvent({ UiEventKind::Release, impl->Pressed });
 			const auto pressed = impl->Pressed;
 			impl->Pressed = {};
 
 			if (pressed == impl->Hover)
 			{
-				impl->Events.push_back({ UiEventKind::Click, pressed });
+				impl->QueueEvent({ UiEventKind::Click, pressed });
 				impl->CloseOnActivate(pressed);
 			}
 		}
@@ -223,7 +223,7 @@ namespace Swim::UI
 
 		if (impl->Pressed)
 		{
-			impl->Events.push_back({ UiEventKind::Cancel, impl->Pressed });
+			impl->QueueEvent({ UiEventKind::Cancel, impl->Pressed });
 			impl->Pressed = {};
 		}
 	}
@@ -311,7 +311,7 @@ namespace Swim::UI
 
 		if (impl->Focused)
 		{
-			impl->Events.push_back({ UiEventKind::Blur, impl->Focused });
+			impl->QueueEvent({ UiEventKind::Blur, impl->Focused });
 			impl->MarkPaintDirty(impl->Focused);
 
 			if (impl->Get(impl->Focused).Editable)
@@ -324,7 +324,7 @@ namespace Swim::UI
 
 		if (id)
 		{
-			impl->Events.push_back({ UiEventKind::Focus, id });
+			impl->QueueEvent({ UiEventKind::Focus, id });
 			impl->MarkPaintDirty(id);
 			impl->Get(id).RevealCaret = impl->Get(id).Editable;
 		}
@@ -487,7 +487,7 @@ namespace Swim::UI
 		}
 
 		const auto focused = impl->Focused;
-		impl->Events.push_back({ UiEventKind::Click, focused });
+		impl->QueueEvent({ UiEventKind::Click, focused });
 		impl->CloseOnActivate(focused);
 	}
 

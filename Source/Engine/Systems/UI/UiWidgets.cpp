@@ -1,4 +1,6 @@
 #include "Engine/Systems/UI/UiWidgets.h"
+#include "Engine/Systems/UI/Internal/UiWidgetBuilders.h"
+#include "Engine/Systems/UI/UiWidgetRegistry.h"
 
 #include <algorithm>
 #include <cmath>
@@ -50,7 +52,7 @@ namespace Swim::UI
 
 	} // namespace
 
-	UiNodeId CreatePanel(UiDocument& document, UiNodeId parent, UiFlow flow)
+	UiNodeId Internal::BuildPanel(UiDocument& document, UiNodeId parent, UiFlow flow)
 	{
 		UiStyle style;
 		style.Flow = flow;
@@ -59,12 +61,12 @@ namespace Swim::UI
 		return node;
 	}
 
-	UiNodeId CreateLabel(UiDocument& document, UiNodeId parent, std::string text)
+	UiNodeId Internal::BuildLabel(UiDocument& document, UiNodeId parent, std::string text)
 	{
 		return ThemedLabel(document, parent, std::move(text));
 	}
 
-	UiNodeId CreateButton(UiDocument& document, UiNodeId parent, std::string label)
+	UiNodeId Internal::BuildButton(UiDocument& document, UiNodeId parent, std::string label)
 	{
 		UiStyle style;
 		style.TextAlign = Text::TextAlign::Center;
@@ -77,7 +79,7 @@ namespace Swim::UI
 		return node;
 	}
 
-	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, const UiTextEditOptions& options)
+	UiNodeId Internal::BuildTextField(UiDocument& document, UiNodeId parent, const UiTextEditOptions& options)
 	{
 		UiStyle style;
 		style.Clip = true;
@@ -89,7 +91,7 @@ namespace Swim::UI
 		return node;
 	}
 
-	UiNodeId CreateCheckbox(UiDocument& document, UiNodeId parent, std::string label, UiCheckState state)
+	UiNodeId Internal::BuildCheckbox(UiDocument& document, UiNodeId parent, std::string label, UiCheckState state)
 	{
 		UiStyle row;
 		row.Flow = UiFlow::Row;
@@ -121,7 +123,7 @@ namespace Swim::UI
 		return root;
 	}
 
-	UiNodeId CreateToggle(UiDocument& document, UiNodeId parent, std::string label, bool on)
+	UiNodeId Internal::BuildToggle(UiDocument& document, UiNodeId parent, std::string label, bool on)
 	{
 		UiStyle row;
 		row.Flow = UiFlow::Row;
@@ -149,7 +151,7 @@ namespace Swim::UI
 		return root;
 	}
 
-	UiNodeId CreateSlider(UiDocument& document, UiNodeId parent, const UiSliderDesc& desc)
+	UiNodeId Internal::BuildSlider(UiDocument& document, UiNodeId parent, const UiSliderDesc& desc)
 	{
 		if (desc.ShowValue)
 		{
@@ -224,7 +226,7 @@ namespace Swim::UI
 		return root;
 	}
 
-	UiNodeId CreateScrollBar(UiDocument& document, UiNodeId parent, UiNodeId target, const UiScrollBarDesc& desc)
+	UiNodeId Internal::BuildScrollBar(UiDocument& document, UiNodeId parent, UiNodeId target, const UiScrollBarDesc& desc)
 	{
 		UiStyle bar;
 		bar.Flow = UiFlow::Overlay;
@@ -257,7 +259,7 @@ namespace Swim::UI
 		return root;
 	}
 
-	UiScrollArea CreateScrollArea(UiDocument& document, UiNodeId parent, const UiStyle& rootStyle, bool vertical, bool horizontal,
+	UiScrollArea Internal::BuildScrollArea(UiDocument& document, UiNodeId parent, const UiStyle& rootStyle, bool vertical, bool horizontal,
 		UiScrollBarVisibility visibility, bool stepButtons)
 	{
 		UiScrollArea area;
@@ -333,29 +335,29 @@ namespace Swim::UI
 		return area;
 	}
 
-	UiNodeId CreateLabel(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, std::string text,
-		float size, const UiStyle& style)
+	UiNodeId Internal::BuildLabel(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts,
+		std::string text, float size, const UiStyle& style)
 	{
 		const auto node = CreateStyled(document, parent, style);
 		document.SetText(node, std::move(fonts), std::move(text), size);
 		return node;
 	}
 
-	UiNodeId CreateImage(UiDocument& document, UiNodeId parent, const UiImage& image, const UiStyle& style)
+	UiNodeId Internal::BuildImage(UiDocument& document, UiNodeId parent, const UiImage& image, const UiStyle& style)
 	{
 		const auto node = CreateStyled(document, parent, style);
 		document.SetImage(node, image);
 		return node;
 	}
 
-	UiNodeId CreateScrollView(UiDocument& document, UiNodeId parent, const UiStyle& style)
+	UiNodeId Internal::BuildScrollView(UiDocument& document, UiNodeId parent, const UiStyle& style)
 	{
 		auto clipped = style;
 		clipped.Clip = true;
 		return CreateStyled(document, parent, clipped);
 	}
 
-	UiNodeId CreateTextField(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, float size,
+	UiNodeId Internal::BuildTextField(UiDocument& document, UiNodeId parent, std::shared_ptr<const Text::FontCollection> fonts, float size,
 		const UiTextEditOptions& options, const UiStyle& style)
 	{
 		auto field = style;
@@ -433,7 +435,7 @@ namespace Swim::UI
 
 	} // namespace
 
-	UiNodeId CreateRadioGroup(
+	UiNodeId Internal::BuildRadioGroup(
 		UiDocument& document, UiNodeId parent, const std::vector<std::string>& options, std::int32_t selected, UiOrientation orientation)
 	{
 		UiStyle style;
@@ -481,7 +483,7 @@ namespace Swim::UI
 		return row;
 	}
 
-	UiListView CreateListView(
+	UiListView Internal::BuildListView(
 		UiDocument& document, UiNodeId parent, const UiStyle& rootStyle, const std::vector<std::string>& items, std::int32_t selected)
 	{
 		const auto area = CreateScrollArea(document, parent, rootStyle, true, false, UiScrollBarVisibility::Auto, false);
@@ -511,7 +513,7 @@ namespace Swim::UI
 		return TextOption(document, list.Viewport, list.Root, std::move(text));
 	}
 
-	UiDropdown CreateDropdown(
+	UiDropdown Internal::BuildDropdown(
 		UiDocument& document, UiNodeId parent, const std::vector<std::string>& options, std::int32_t selected, std::string placeholder)
 	{
 		UiDropdown dropdown;
@@ -553,7 +555,7 @@ namespace Swim::UI
 		return TextOption(document, dropdown.List.Items, dropdown.Root, std::move(text));
 	}
 
-	UiPopupList CreateMenu(UiDocument& document)
+	UiPopupList Internal::BuildMenu(UiDocument& document)
 	{
 		return PopupList(document);
 	}
@@ -590,7 +592,7 @@ namespace Swim::UI
 		document.OpenPopup(menu.Root, desc);
 	}
 
-	UiNodeId CreateTooltip(UiDocument& document, UiNodeId target, std::string text, float delaySeconds)
+	UiNodeId Internal::BuildTooltip(UiDocument& document, UiNodeId target, std::string text, float delaySeconds)
 	{
 		UiStyle style;
 		style.Visible = false;
@@ -603,7 +605,7 @@ namespace Swim::UI
 		return tooltip;
 	}
 
-	UiModal CreateModal(UiDocument& document, std::string title)
+	UiModal Internal::BuildModal(UiDocument& document, std::string title)
 	{
 		UiModal modal;
 		UiStyle scrim;
@@ -822,6 +824,61 @@ namespace Swim::UI
 		}
 
 		return {};
+	}
+
+	void SetLabelText(UiDocument& document, UiNodeId node, const std::string& text)
+	{
+		const auto& theme = document.GetTheme();
+
+		if (!theme)
+		{
+			return;
+		}
+
+		SetLabelText(document, node, text, theme->Fonts, theme->Class(UiThemeClass::Label).TextSize);
+	}
+
+	void SetLabelText(UiDocument& document, UiNodeId node, const std::string& text,
+		const std::shared_ptr<const Swim::Text::FontCollection>& fonts, float size)
+	{
+		if (!document.Contains(node) || !fonts || document.GetText(node) == text)
+		{
+			return;
+		}
+
+		document.SetText(node, fonts, text, size);
+	}
+
+	UiNodeId CreateStyledNode(UiDocument& document, UiNodeId parent, const UiStyle& style, UiThemeClass paintClass)
+	{
+		const auto node = document.Create(parent);
+
+		if (paintClass != UiThemeClass::None)
+		{
+			document.SetThemeClass(node, paintClass, UiThemeApply::Paint);
+		}
+
+		document.SetStyle(node, style);
+		return node;
+	}
+
+	UiNodeId CreateHeading(UiDocument& document, UiNodeId parent, const std::string& text)
+	{
+		const auto label = CreateLabel(document, parent, text);
+		auto style = document.GetStyle(label);
+		style.TextColor = UiSrgbHex(0x6fadff); // Authored in sRGB.
+		style.Margin.Top = 6.0f;
+		document.SetStyle(label, style);
+		return label;
+	}
+
+	UiNodeId CreateRow(UiDocument& document, UiNodeId parent, float gap)
+	{
+		UiStyle style;
+		style.Flow = UiFlow::Row;
+		style.Gap = gap;
+		style.AlignItems = UiAlign::Center;
+		return CreateStyledNode(document, parent, style);
 	}
 
 } // namespace Swim::UI

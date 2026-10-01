@@ -27,10 +27,9 @@
 #include "Game/Behaviors/LightSwarm.h"
 #include "Game/Behaviors/Motion.h"
 #include "Game/Behaviors/TentacleAnimator.h"
-#include "Game/ModelImport.h"
+#include "Engine/Systems/Scene/ModelImporter/ModelImport.h"
 #include "Game/SandboxContent.h"
 #include "Game/Ui/SandboxHud.h"
-#include "Game/Ui/UiBindings.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -177,8 +176,8 @@ namespace Game
 					}
 
 					auto& transform = GetRegistry().get<Engine::Transform>(blackHole);
-					transform.SetWorldPosition(GetRegistry(),
-						glm::vec3(std::stof(arguments[0]), std::stof(arguments[1]), std::stof(arguments[2])));
+					transform.SetWorldPosition(
+						GetRegistry(), glm::vec3(std::stof(arguments[0]), std::stof(arguments[1]), std::stof(arguments[2])));
 
 					if (arguments.size() >= 4)
 					{
@@ -416,7 +415,8 @@ namespace Game
 
 		if (!palette.Ground.IsValid())
 		{
-			palette.Ground = render->Meshes->Register("SandboxGround", Engine::ProceduralMeshes::MakePlane(GroundSize, 13, GroundSize * 0.5f));
+			palette.Ground =
+				render->Meshes->Register("SandboxGround", Engine::ProceduralMeshes::MakePlane(GroundSize, 13, GroundSize * 0.5f));
 		}
 
 		auto checker = render->Meshes->FindTexture("SandboxChecker");
@@ -499,7 +499,7 @@ namespace Game
 		reflections.MaxSteps = 128;
 		// A quarter of the rays (the reflection was the costliest pass after the lights).
 		reflections.HalfResolution = true;
-		reflections.Temporal = true; // Settles the half-resolution pattern, jitter and probe refreshes.
+		reflections.Temporal = true;								 // Settles the half-resolution pattern, jitter and probe refreshes.
 		settings.ScreenSpace.AmbientOcclusion.HalfResolution = true; // Likewise the AO (TAA gathers the block).
 		reflections.DistanceFade = 0.15f;
 		reflections.EdgeFade = 0.05f; // Close up, most hits are near the screen edge.
@@ -509,7 +509,7 @@ namespace Game
 		// three cube faces a frame at 128 x 128.
 		settings.ReflectionProbes.MaxProbes = 16;
 		settings.ReflectionProbes.FacesPerFrame = 6; // Faces that see moving objects go first (ReflectionMovers).
-		settings.ReflectionProbes.Resolution = 256; // Flat mirrors show the probe 1:1.
+		settings.ReflectionProbes.Resolution = 256;	 // Flat mirrors show the probe 1:1.
 		// Idle faces (no mover in view) refresh every 30 frames; faces that see movers still
 		// update every frame the budget allows.
 		settings.ReflectionProbes.IdleRefreshFrames = 30;
@@ -631,7 +631,8 @@ namespace Game
 						[shown](Engine::MeshRenderer& renderer)
 						{
 							renderer.Flags = shown ? (renderer.Flags | Flags::Visible)
-												   : static_cast<Flags>(static_cast<std::uint32_t>(renderer.Flags) & ~static_cast<std::uint32_t>(Flags::Visible));
+												   : static_cast<Flags>(static_cast<std::uint32_t>(renderer.Flags) &
+														 ~static_cast<std::uint32_t>(Flags::Visible));
 						});
 				}
 			}
@@ -793,7 +794,7 @@ namespace Game
 		{
 			sponzaSearched = true;
 			// The optimized GLB (Draco meshes, KTX2/Basis textures transcoded by the cooker).
-			const auto model = FindSponzaModel(*assets);
+			const auto model = Engine::FindCookedModel(*assets, { "sponza" }, { "sponza-ktx-draco", "sponza-ktx", "gltf/sponza" });
 
 			if (!model.IsValid())
 			{
@@ -814,7 +815,7 @@ namespace Game
 				return;
 			}
 
-			ModelPlacement placement;
+			Engine::ModelPlacement placement;
 			placement.Position = SponzaCenter;
 			placement.TargetLength = SponzaLength;
 			placement.Tags = tags;

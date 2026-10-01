@@ -464,12 +464,12 @@ namespace Swim::UI
 
 			MarkControlDirty(node);
 			SyncValueLabel(node);
-			Events.push_back({ UiEventKind::ValueChanged, node.Id, value });
+			QueueEvent({ UiEventKind::ValueChanged, node.Id, value });
 		}
 
 		if (commit && changed)
 		{
-			Events.push_back({ UiEventKind::ValueCommitted, node.Id, value });
+			QueueEvent({ UiEventKind::ValueCommitted, node.Id, value });
 		}
 
 		return changed;
@@ -487,8 +487,8 @@ namespace Swim::UI
 		c.Check = c.Check == UiCheckState::Checked ? UiCheckState::Unchecked : UiCheckState::Checked;
 		MarkControlDirty(node);
 		const float value = CheckValue(c.Check);
-		Events.push_back({ UiEventKind::ValueChanged, node.Id, value });
-		Events.push_back({ UiEventKind::ValueCommitted, node.Id, value });
+		QueueEvent({ UiEventKind::ValueChanged, node.Id, value });
+		QueueEvent({ UiEventKind::ValueCommitted, node.Id, value });
 	}
 
 	bool UiDocument::Impl::ControlPointerDown(Node& node, UiPoint logical)
@@ -693,8 +693,8 @@ namespace Swim::UI
 				{
 					c.Check = state;
 					const float value = CheckValue(state);
-					Events.push_back({ UiEventKind::ValueChanged, node.Id, value });
-					Events.push_back({ UiEventKind::ValueCommitted, node.Id, value });
+					QueueEvent({ UiEventKind::ValueChanged, node.Id, value });
+					QueueEvent({ UiEventKind::ValueCommitted, node.Id, value });
 				}
 
 				MarkControlDirty(node); // The knob eases (or snaps) to the final state.
@@ -705,7 +705,7 @@ namespace Swim::UI
 
 		if (commit && c.Value != PressValue)
 		{
-			Events.push_back({ UiEventKind::ValueCommitted, node.Id, c.Value });
+			QueueEvent({ UiEventKind::ValueCommitted, node.Id, c.Value });
 		}
 	}
 

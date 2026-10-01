@@ -10,55 +10,31 @@ include_guard(GLOBAL)
 # SwimEngine deploys the directory as <exe dir>/Shaders/Runtime (ShaderLibrary's
 # default root); SwimTests reads it through SWIM_RUNTIME_SHADER_DIR. The retired
 # Vulkan/OpenGL legacy shader groups are archived under Deprecated/Shaders.
-set(SWIM_RUNTIME_SHADER_PROGRAMS
-	"Present=SwimRuntimePresent"
-	"SkyBackground=SwimRuntimeSkyBackground"
-	"GpuVisibility=SwimGpuVisibility"
-	"HzbReduce=SwimHzbReduce"
-	"ClusterLightCull=SwimClusterLightCull"
-	"ClusterBounds=SwimClusterBounds"
-	"ClusterAssign=SwimClusterAssign"
-	"ClusterScan=SwimClusterScan"
-	"ClusterHeatmap=SwimClusterHeatmap"
-	"ForwardOpaque=SwimForwardOpaque"
-	"ForwardTransparent=SwimForwardTransparent"
-	"ForwardDepth=SwimForwardDepth"
-	"ForwardOpaquePrepassed=SwimForwardOpaquePrepassed"
-	"ForwardOpaqueDeferred=SwimForwardOpaqueDeferred"
-	"ForwardLocalLights=SwimForwardLocalLights"
-	"ScreenSpaceReflectionTemporal=SwimScreenSpaceReflectionTemporal"
-	"ForwardTransparentSort=SwimForwardTransparentSort"
-	"ShadowDepth=SwimShadowDepth"
-	"ShadowMasked=SwimShadowMasked"
-	"ShadowClear=SwimShadowClear"
-	"EnvironmentSky=SwimEnvironmentSky"
-	"EnvironmentDownsample=SwimEnvironmentDownsample"
-	"EnvironmentPrefilter=SwimEnvironmentPrefilter"
-	"EnvironmentIrradiance=SwimEnvironmentIrradiance"
-	"EnvironmentBrdfLut=SwimEnvironmentBrdfLut"
-	"PostHistogram=SwimPostHistogram"
-	"PostExposure=SwimPostExposure"
-	"PostBloomDownsample=SwimPostBloomDownsample"
-	"PostBloomUpsample=SwimPostBloomUpsample"
-	"PostComposite=SwimPostComposite"
-	"PostCompositeHdr=SwimPostCompositeHdr"
-	"TemporalResolve=SwimTemporalResolve"
-	"ScreenSpaceAo=SwimScreenSpaceAo"
-	"ScreenSpaceBlur=SwimScreenSpaceBlur"
-	"ScreenSpaceComposite=SwimScreenSpaceComposite"
-	"ScreenSpaceReflection=SwimScreenSpaceReflection"
-	"ParticleSimulate=SwimParticleSimulate"
-	"ParticleEmit=SwimParticleEmit"
-	"ParticleCompact=SwimParticleCompact"
-	"ParticleFinalize=SwimParticleFinalize"
-	"ParticleRender=SwimParticleRender"
-	"Skinning=SwimSkinning"
-	"UiQuad=SwimUiQuad"
-)
-
 # Defines SwimRuntimeShaders (the staged set) once.
 function(swim_define_runtime_shader_set)
-	if(TARGET SwimRuntimeShaders OR SWIM_OFFLINE_DEPENDENCY_STUBS)
+	if(TARGET SwimRuntimeShaders)
+		return()
+	endif()
+	get_property(SWIM_RUNTIME_SHADER_PROGRAMS GLOBAL PROPERTY SWIM_RUNTIME_SHADER_PROGRAMS)
+	get_property(SWIM_REQUIRED_RUNTIME_SHADERS GLOBAL PROPERTY SWIM_REQUIRED_RUNTIME_SHADERS)
+	list(LENGTH SWIM_RUNTIME_SHADER_PROGRAMS SWIM_PROGRAM_COUNT)
+	list(LENGTH SWIM_REQUIRED_RUNTIME_SHADERS SWIM_REQUIRED_COUNT)
+	set(SWIM_CATALOG "#pragma once\n#include <array>\n#include <string_view>\nnamespace Engine::Internal {\n")
+	string(APPEND SWIM_CATALOG "inline constexpr std::array<std::string_view, ${SWIM_PROGRAM_COUNT}> RuntimeProgramNames{\n")
+	foreach(SWIM_ENTRY IN LISTS SWIM_RUNTIME_SHADER_PROGRAMS)
+		string(REPLACE "=" ";" SWIM_PAIR "${SWIM_ENTRY}")
+		list(GET SWIM_PAIR 0 SWIM_RUNTIME_NAME)
+		string(APPEND SWIM_CATALOG "\t\"${SWIM_RUNTIME_NAME}\",\n")
+	endforeach()
+	string(APPEND SWIM_CATALOG "};\ninline constexpr std::array<std::string_view, ${SWIM_REQUIRED_COUNT}> RequiredProgramNames{\n")
+	foreach(SWIM_RUNTIME_NAME IN LISTS SWIM_REQUIRED_RUNTIME_SHADERS)
+		string(APPEND SWIM_CATALOG "\t\"${SWIM_RUNTIME_NAME}\",\n")
+	endforeach()
+	string(APPEND SWIM_CATALOG "};\n}\n")
+	file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Generated/Engine")
+	file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/Generated/Engine/RuntimeShaderCatalog.h" CONTENT "${SWIM_CATALOG}" @ONLY)
+
+	if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		return()
 	endif()
 	if(NOT DEFINED SwimForwardOpaque_SPIRV)
@@ -66,10 +42,6 @@ function(swim_define_runtime_shader_set)
 			"The runtime shader set needs the Slang programs defined with SWIM_ENABLE_VULKAN_RHI and SWIM_BUILD_SHADER_COMPILER."
 		)
 	endif()
-
-	# Programs added with swim_add_runtime_shader (SlangShaders.cmake) join the set.
-	get_property(SWIM_EXTRA_RUNTIME_SHADERS GLOBAL PROPERTY SWIM_EXTRA_RUNTIME_SHADERS)
-	list(APPEND SWIM_RUNTIME_SHADER_PROGRAMS ${SWIM_EXTRA_RUNTIME_SHADERS})
 
 	set(SWIM_RUNTIME_SHADER_ROOT "${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet")
 	set(SWIM_RUNTIME_SHADER_OUTPUTS "")
@@ -101,6 +73,7 @@ function(swim_define_runtime_shader_set)
 endfunction()
 
 function(swim_configure_shaders target)
+	swim_define_runtime_shader_set()
 	if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		return()
 	endif()
