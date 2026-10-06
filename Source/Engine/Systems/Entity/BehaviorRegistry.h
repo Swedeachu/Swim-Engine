@@ -3,6 +3,7 @@
 #include <entt/entt.hpp>
 
 #include "Behavior.h"
+#include "BehaviorTraits.h"
 
 #include <functional>
 #include <memory>
@@ -30,6 +31,7 @@ namespace Engine
 			std::string Name;
 			Factory Create;
 			Matcher Matches;
+			BehaviorTraits Traits; // The phases instances join (Register<T> derives them from T).
 		};
 
 		template<typename T>
@@ -44,11 +46,13 @@ namespace Engine
 				[](const Behavior& behavior)
 			{
 				return dynamic_cast<const T*>(&behavior) != nullptr;
-			}
+			},
+				BehaviorTraitsOf<T>()
 			);
 		}
 
-		void Register(std::string name, Factory factory, Matcher matcher = {})
+		// A factory of unknown type joins every phase unless traits say otherwise.
+		void Register(std::string name, Factory factory, Matcher matcher = {}, BehaviorTraits traits = BehaviorTraits::All())
 		{
 			if (name.empty())
 			{
@@ -65,7 +69,7 @@ namespace Engine
 				throw std::runtime_error("Behavior type '" + name + "' is already registered.");
 			}
 
-			descriptors.push_back({ std::move(name), std::move(factory), std::move(matcher) });
+			descriptors.push_back({ std::move(name), std::move(factory), std::move(matcher), traits });
 		}
 
 		bool Contains(std::string_view name) const
@@ -93,8 +97,6 @@ namespace Engine
 
 		const std::vector<Descriptor>& GetDescriptors() const { return descriptors; }
 
-	private:
-
 		const Descriptor* Find(std::string_view name) const
 		{
 			for (const Descriptor& descriptor : descriptors)
@@ -107,6 +109,8 @@ namespace Engine
 
 			return nullptr;
 		}
+
+	private:
 
 		std::vector<Descriptor> descriptors;
 

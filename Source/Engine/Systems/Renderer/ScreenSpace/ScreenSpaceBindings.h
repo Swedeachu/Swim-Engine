@@ -11,6 +11,10 @@ namespace Swim::Render
 	// Reflections/ReflectionProbeTypes.h) in a cube array of 6 layers per probe.
 	inline constexpr std::uint32_t ScreenSpaceMaxProbes = 16;
 	inline constexpr std::uint32_t ScreenSpaceProbeRecordBytes = 32;
+	// The composite's planar inputs: at most this many GpuPlanarReflectionRecords (128 bytes each,
+	// Reflections/PlanarReflectionTypes.h) over a 2D-array atlas, a layer each.
+	inline constexpr std::uint32_t ScreenSpaceMaxPlanar = 8;
+	inline constexpr std::uint32_t ScreenSpacePlanarRecordBytes = 128;
 
 	struct ScreenSpaceAoBindings // SwimScreenSpaceAo: GTAO visibility per pixel.
 	{
@@ -69,7 +73,10 @@ namespace Swim::Render
 		// RWTexture2D<float4> rgba16f: the reflection term (rgb) and its weight in the colour (a) for
 		// the temporal reflection filter (a 1x1 stand-in without it).
 		static constexpr std::uint32_t ReflectionTermOut = 14;
-		static constexpr std::uint32_t Count = 15;
+		// Planar reflections (PlanarCount > 0; 1x1 stand-ins otherwise):
+		static constexpr std::uint32_t PlanarAtlas = 15;   // Texture2DArray<float4>: captures (alpha: distance from the capture).
+		static constexpr std::uint32_t PlanarRecords = 16; // StructuredBuffer<GpuPlanarReflectionRecord>.
+		static constexpr std::uint32_t Count = 17;
 	};
 
 	struct ScreenSpaceReflectionTemporalBindings // SwimScreenSpaceReflectionTemporal: filters the reflection term over time.

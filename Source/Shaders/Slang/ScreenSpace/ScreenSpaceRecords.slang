@@ -50,7 +50,7 @@ struct ScreenSpaceParams
 	uint SsrHalf;
 	uint ReflectionTemporal;
 	float ReflectionTemporalBlend;
-	uint Reserved5;
+	uint PlanarCount; // Active planar reflection records (composite).
 	uint Reserved6;
 };
 

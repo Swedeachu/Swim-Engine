@@ -68,9 +68,6 @@ namespace Game
 		// The tab buttons (Simulation, Rendering, Camera/Post, Scene).
 		const std::array<Swim::UI::UiNodeId, 4>& GetTabOptions() const { return tabOptions; }
 
-		// Sets every bound control from the state it edits (after console commands or presets).
-		void SyncControls();
-
 	  private:
 
 		Swim::UI::UiNodeId CreateSection(Swim::UI::UiNodeId parent);
@@ -85,15 +82,20 @@ namespace Game
 
 		Swim::UI::UiNodeId AddToggle(Swim::UI::UiNodeId parent, const std::string& label, bool value, std::function<void(bool)> onChange);
 
-		// Controls bound both ways to a value: edits write it, SyncControls shows changes made elsewhere.
+		// Controls bound both ways (UiDocument::BindValue): edits write the state, and changes made
+		// elsewhere (console commands, presets) show up on their own.
+		Swim::UI::UiNodeId BoundSlider(Swim::UI::UiNodeId parent, const std::string& label, float min, float max, int decimals,
+			std::function<float()> get, std::function<void(float)> set);
+
+		Swim::UI::UiNodeId BoundCheckbox(
+			Swim::UI::UiNodeId parent, const std::string& label, std::function<bool()> get, std::function<void(bool)> set);
+
 		Swim::UI::UiNodeId SliderFor(Swim::UI::UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals);
 
 		Swim::UI::UiNodeId CheckFor(Swim::UI::UiNodeId parent, const std::string& label, bool& value);
 
 		Swim::UI::UiNodeId DropdownFor(Swim::UI::UiNodeId parent, const std::string& label, const std::vector<std::string>& options,
 			std::function<std::uint32_t()> get, std::function<void(std::uint32_t)> set);
-
-		void Bind(Swim::UI::UiNodeId node, std::function<float()> get, bool check);
 
 		void BuildCamera(Swim::UI::UiNodeId parent);
 
@@ -136,14 +138,6 @@ namespace Game
 		std::array<Swim::UI::UiNodeId, 4> sections{};
 		std::array<Swim::UI::UiNodeId, 4> tabOptions{};
 
-		struct SyncedControl
-		{
-			Swim::UI::UiNodeId Node;
-			std::function<float()> Get;
-			bool Check = false;
-		};
-
-		std::vector<SyncedControl> synced;
 		Swim::UI::UiNodeId profileLabel;
 		bool profilePending = false;
 		std::uint32_t section = 0;

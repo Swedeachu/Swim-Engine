@@ -2,11 +2,13 @@
 // the indirect radiance, reflections in place of the specular IBL, then fog. Bindings
 // follow ScreenSpaceCompositeBindings.
 //
-// Reflections are a hierarchy: the screen-space hit where one was found (weighted by its
-// confidence), else the local reflection probes around the surface (ReflectionProbes::
-// Select, with parallax correction from the captured distances), else the global
-// environment the forward pass already wrote (Specular). Each layer replaces the next
-// by its weight, so the transitions are blends, not switches.
+// Reflections are a hierarchy: the planar reflection of a mirror that has one (exact, from a
+// capture through the mirror), the screen-space hit where one was found (weighted by its
+// confidence; over a planar reflection only as far as its SSR preference says), else the
+// local reflection probes around the surface (ReflectionProbes::Select, with parallax
+// correction from the captured distances), else the global environment the forward pass
+// already wrote (Specular). Each layer replaces the next by its weight, so the transitions
+// are blends, not switches.
 #include "ScreenSpace/ScreenSpaceRecords.slang"
 
 [[vk::binding(0, 0)]] Texture2D<float4> Color;
@@ -34,6 +36,129 @@ struct ReflectionProbeRecord
 // otherwise): rgb = what replaced the specular IBL this frame, a = the weight it entered the
 // colour with (AO times the fog transmittance); ScreenSpaceReflectionTemporal.slang filters it.
 [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> ReflectionTermOut;
+
+// Planar reflections (PlanarCount > 0; 1x1 stand-ins otherwise): PlanarReflectionRenderer's
+// atlas (a layer per capture; alpha: the distance from the capture position) and the active
+// GpuPlanarReflectionRecords, largest reflector first.
+struct PlanarReflectionRecord
+{
+	float4 ViewProjection[4]; // World -> capture clip rows.
+	float4 Plane;			  // xyz: normal; w: n . p of the plane.
+	float4 Camera;			  // xyz: capture position; w: owner ObjectId + 1 (0: any surface on the plane).
+	float4 Atlas;			  // x: layer; y, z: the capture's share of the layer; w: SSR preference.
+	float4 Params;			  // x: plane tolerance; y: min normal cosine; z, w: roughness fade start, end.
+};
+
+[[vk::binding(15, 0)]] Texture2DArray<float4> PlanarAtlas;
+[[vk::binding(16, 0)]] StructuredBuffer<PlanarReflectionRecord> PlanarRecords;
+
+// PlanarReflections::LookupIterations.
+static const uint PlanarLookupIterations = 2;
+
+// PlanarReflections::ProjectToCapture: (u, v) and clip w (> 0 in front).
+float3 PlanarProject(PlanarReflectionRecord record, float3 world)
+{
+	const float4 p = float4(world, 1.0);
+	const float x = dot(record.ViewProjection[0], p);
+	const float y = dot(record.ViewProjection[1], p);
+	const float w = dot(record.ViewProjection[3], p);
+	if (!(w > 1.0e-6))
+	{
+		return float3(-1.0, -1.0, w);
+	}
+	return float3(x / w * 0.5 + 0.5, 0.5 - y / w * 0.5, w);
+}
+
+// The capture's share of its layer, clamped half a texel inside (bilinear never reads outside).
+float4 PlanarFetch(PlanarReflectionRecord record, float2 uv, float2 atlasSize)
+{
+	const float2 share = record.Atlas.yz;
+	const float2 halfTexel = 0.5 / atlasSize;
+	const float2 at = clamp(uv * share, halfTexel, share - halfTexel);
+	return PlanarAtlas.SampleLevel(ProbeSampler, float3(at, record.Atlas.x), 0.0);
+}
+
+// PlanarReflections::LookupUv: start where the surface point projects (exact for a current
+// mirror capture), then refine the ray length with the captured distances (a camera that
+// moved since the capture, curved surfaces). Alpha: the portal edge fade (2 texels).
+float4 SamplePlanar(PlanarReflectionRecord record, float3 position, float3 direction, float2 atlasSize)
+{
+	const float3 camera = record.Camera.xyz;
+	const float3 start = PlanarProject(record, position);
+	if (!(start.z > 0.0))
+	{
+		return float4(0.0, 0.0, 0.0, 0.0);
+	}
+	float2 uv = start.xy;
+	float3 hit = camera + normalize(position - camera) * PlanarFetch(record, uv, atlasSize).a;
+	float t = max(dot(hit - position, direction), 0.0);
+	for (uint i = 0; i < PlanarLookupIterations; ++i)
+	{
+		const float3 q = position + direction * t;
+		const float3 projected = PlanarProject(record, q);
+		if (!(projected.z > 0.0))
+		{
+			break;
+		}
+		uv = projected.xy;
+		hit = camera + normalize(q - camera) * PlanarFetch(record, uv, atlasSize).a;
+		t = max(dot(hit - position, direction), 0.0);
+	}
+	const float3 end = PlanarProject(record, position + direction * t);
+	if (end.z > 0.0)
+	{
+		uv = end.xy;
+	}
+	const float2 texels = record.Atlas.yz * atlasSize;
+	const float2 inside = min(uv, 1.0 - uv) * texels;
+	const float edge = saturate(min(inside.x, inside.y) * 0.5);
+	return float4(max(PlanarFetch(record, uv, atlasSize).rgb, float3(0.0, 0.0, 0.0)), edge);
+}
+
+// The planar reflection of a pixel: the first record that matches it (by object for sphere
+// caps, by plane for flat reflectors), weighted by how well its normal agrees, its roughness
+// and the portal edges. ssrPreference: how much a confident screen-space hit may replace it.
+float4 PlanarReflection(uint count, float3 world, float3 n, float3 r, float roughness, float pixelObject, out float ssrPreference)
+{
+	ssrPreference = 1.0;
+	uint width;
+	uint height;
+	uint layers;
+	PlanarAtlas.GetDimensions(width, height, layers);
+	const float2 atlasSize = float2(float(width), float(height));
+	for (uint i = 0; i < count; ++i)
+	{
+		const PlanarReflectionRecord record = PlanarRecords[i];
+		const float owner = record.Camera.w;
+		if (owner != 0.0)
+		{
+			if (owner != pixelObject)
+			{
+				continue;
+			}
+		}
+		else if (abs(dot(record.Plane.xyz, world) - record.Plane.w) > record.Params.x)
+		{
+			continue;
+		}
+		const float facing = dot(n, record.Plane.xyz);
+		const float minCosine = record.Params.y;
+		if (!(facing > minCosine))
+		{
+			continue;
+		}
+		const float normalWeight = saturate((facing - minCosine) / max((1.0 - minCosine) * 0.5, 1.0e-4));
+		const float roughnessWeight = 1.0 - smoothstep(record.Params.z, record.Params.w, roughness);
+		if (!(normalWeight * roughnessWeight > 0.0))
+		{
+			continue;
+		}
+		const float4 sampled = SamplePlanar(record, world, r, atlasSize);
+		ssrPreference = record.Atlas.w;
+		return float4(sampled.rgb, sampled.a * normalWeight * roughnessWeight);
+	}
+	return float4(0.0, 0.0, 0.0, 0.0);
+}
 
 // ReflectionProbes::ParallaxSteps / ParallaxRefineSteps / ParallaxReach.
 static const uint ProbeParallaxSteps = 96;
@@ -373,7 +498,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	bool reflective = false;
 	const bool ssrEnabled = Params[0].SsrEnabled != 0u;
 	float4 reflectionTerm = float4(0.0, 0.0, 0.0, 0.0); // Weight 0: nothing to filter.
-	if (ssrEnabled || Params[0].ProbeCount > 0u)
+	const uint planarCount = Params[0].PlanarCount;
+	if (ssrEnabled || Params[0].ProbeCount > 0u || planarCount > 0u)
 	{
 		const float3 reflectance = Reflectance.Load(at).rgb;
 		const float3 specular = Specular.Load(at).rgb;
@@ -383,19 +509,18 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		// the remaining few percent come from the global environment instead.
 		const float4 reflection = ssrEnabled ? ResolvedReflection(view, int(id.x), int(id.y)) : float4(0.0, 0.0, 0.0, 0.0);
 		const float confidence = max(reflection.a, 0.0);
-		// The fallback: local probes over the global environment (Specular).
-		float3 fallback = specular;
-		float probeCoverage = 0.0;
-		float probeAge = 0.0;
-		int probeSlot = -1;
+		// The surface (shared by the planar lookup and the probes).
 		const uint probeCount = Params[0].ProbeCount;
 		const float depth = Depth.Load(at);
-		if (probeCount > 0u && reflective && depth > 0.0 && (confidence < 0.97 || debug != 0u))
+		const float4 encoded = Normal.Load(at);
+		bool surface = false;
+		float3 world = float3(0.0, 0.0, 0.0);
+		float3 r = float3(0.0, 0.0, 1.0);
+		if (reflective && depth > 0.0 && dot(encoded.xyz, encoded.xyz) > 1.0e-6)
 		{
 			bool valid;
 			const float3 viewPosition = ScreenSpaceViewPosition(view, float(id.x) + 0.5, float(id.y) + 0.5, depth, valid);
-			const float4 encoded = Normal.Load(at);
-			if (valid && dot(encoded.xyz, encoded.xyz) > 1.0e-6)
+			if (valid)
 			{
 				float4 inverseView[3];
 				for (uint row = 0; row < 3; ++row)
@@ -403,36 +528,58 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 					inverseView[row] = Params[0].InverseViewRows[row];
 				}
 				const float4 p = float4(viewPosition, 1.0);
-				const float3 world = float3(dot(inverseView[0], p), dot(inverseView[1], p), dot(inverseView[2], p));
+				world = float3(dot(inverseView[0], p), dot(inverseView[1], p), dot(inverseView[2], p));
 				const float3 camera = float3(inverseView[0].w, inverseView[1].w, inverseView[2].w);
-				const float3 n = normalize(encoded.xyz);
-				const float3 v = normalize(world - camera);
-				const float3 r = reflect(v, n);
-				const ProbeSelection selection = SelectProbes(probeCount, world, ObjectId.Load(at));
-				if (selection.First >= 0)
-				{
-					const float lod = saturate(encoded.w) * float(max(Params[0].ProbeMipCount, 1u) - 1u);
-					const ReflectionProbeRecord first = ProbeRecords[selection.First];
-					// The probe atlas's texel angle: faces are 4 << (mips - 1) texels over 90 degrees.
-					const float texelAngle = 1.5707963 / float(4u << (max(Params[0].ProbeMipCount, 1u) - 1u));
-					const float4 firstSample = SampleProbe(first, world, r, lod, texelAngle);
-					float3 probe = selection.FirstShare * firstSample.rgb;
-
-					if (selection.Second >= 0)
-					{
-						const float4 secondSample = SampleProbe(ProbeRecords[selection.Second], world, r, lod, texelAngle);
-						probe += selection.SecondShare * secondSample.rgb;
-					}
-					probeCoverage = selection.Coverage;
-					probeAge = first.Params.z;
-					probeSlot = int(first.Params.y);
-					fallback = lerp(specular, reflectance * probe, probeCoverage);
-				}
+				r = reflect(normalize(world - camera), normalize(encoded.xyz));
+				surface = true;
 			}
 		}
-		// The reflection term: the screen-space hit over the fallback by its confidence, then
-		// (optionally) filtered over time, replacing the specular IBL Forward+ added.
-		const float3 reflected = confidence > 0.0 ? lerp(fallback, reflectance * reflection.rgb, confidence) : fallback;
+		// Planar reflections: exact for the mirrors (and sphere caps) that have one.
+		float planarWeight = 0.0;
+		float3 planarRadiance = float3(0.0, 0.0, 0.0);
+		float ssrPreference = 1.0;
+		const float pixelObject = (probeCount > 0u || planarCount > 0u) ? ObjectId.Load(at) : 0.0;
+		if (planarCount > 0u && surface)
+		{
+			const float4 planar = PlanarReflection(planarCount, world, normalize(encoded.xyz), r, saturate(encoded.w), pixelObject, ssrPreference);
+			planarWeight = planar.a;
+			planarRadiance = planar.rgb;
+		}
+		// The fallback: local probes over the global environment (Specular).
+		float3 fallback = specular;
+		float probeCoverage = 0.0;
+		float probeAge = 0.0;
+		int probeSlot = -1;
+		if (probeCount > 0u && surface && (confidence < 0.97 || debug != 0u) && (planarWeight < 0.999 || debug != 0u))
+		{
+			const ProbeSelection selection = SelectProbes(probeCount, world, pixelObject);
+			if (selection.First >= 0)
+			{
+				const float lod = saturate(encoded.w) * float(max(Params[0].ProbeMipCount, 1u) - 1u);
+				const ReflectionProbeRecord first = ProbeRecords[selection.First];
+				// The probe atlas's texel angle: faces are 4 << (mips - 1) texels over 90 degrees.
+				const float texelAngle = 1.5707963 / float(4u << (max(Params[0].ProbeMipCount, 1u) - 1u));
+				const float4 firstSample = SampleProbe(first, world, r, lod, texelAngle);
+				float3 probe = selection.FirstShare * firstSample.rgb;
+
+				if (selection.Second >= 0)
+				{
+					const float4 secondSample = SampleProbe(ProbeRecords[selection.Second], world, r, lod, texelAngle);
+					probe += selection.SecondShare * secondSample.rgb;
+				}
+				probeCoverage = selection.Coverage;
+				probeAge = first.Params.z;
+				probeSlot = int(first.Params.y);
+				fallback = lerp(specular, reflectance * probe, probeCoverage);
+			}
+		}
+		// The reflection term: the planar reflection replaces the fallback; the screen-space hit
+		// goes over it by its confidence (over a planar reflection, only as far as the planar
+		// texels are coarser than the screen's: its SSR preference). It is then (optionally)
+		// filtered over time, replacing the specular IBL Forward+ added.
+		const float ssrShare = confidence * (planarWeight > 0.0 ? ssrPreference : 1.0);
+		const float3 base = planarWeight > 0.0 ? lerp(fallback, reflectance * planarRadiance, planarWeight) : fallback;
+		const float3 reflected = ssrShare > 0.0 ? lerp(base, reflectance * reflection.rgb, ssrShare) : base;
 		c = max(c + ao * (reflected - specular), float3(0.0, 0.0, 0.0));
 		if (debug == 0u)
 		{
@@ -440,11 +587,13 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		}
 		if (debug == 1u)
 		{
+			// Sources: SSR red, probes green, the environment blue, planar yellow.
 			debugColor = float3(confidence, (1.0 - confidence) * probeCoverage, (1.0 - confidence) * (1.0 - probeCoverage));
 			if (ssrEnabled && Reflection.Load(Params[0].SsrHalf != 0u ? int3(at.xy / 2, 0) : at).a < 0.0)
 			{
 				debugColor = lerp(debugColor, float3(1.0, 0.0, 1.0), 0.6);
 			}
+			debugColor = lerp(debugColor, float3(1.0, 0.85, 0.0), planarWeight * (1.0 - ssrShare));
 		}
 		else if (debug == 2u)
 		{

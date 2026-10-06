@@ -1,6 +1,7 @@
 #include "Engine/Systems/UI/Internal/UiDocumentImpl.h"
 #include "Engine/Systems/Text/Utf8.h"
 
+#include <algorithm>
 #include <atomic>
 #include <stdexcept>
 
@@ -233,7 +234,7 @@ namespace Swim::UI
 		{
 			if (Dragging == Pressed && Nodes.contains(Dragging.Value))
 			{
-				EndDrag(true);
+				CancelCapture();
 			}
 
 			QueueEvent({ UiEventKind::Cancel, Pressed });
@@ -279,7 +280,7 @@ namespace Swim::UI
 		auto& node = Get(id);
 		node.MeasureDirty = true;
 		node.PaintDirty = true;
-		node.VisualDirty = true;
+		MarkVisualDirty(node);
 
 		for (auto parent = node.Parent; parent; parent = Get(parent).Parent)
 		{
@@ -300,12 +301,13 @@ namespace Swim::UI
 		{
 			auto& node = Get(id);
 			node.PaintDirty = true;
-			node.VisualDirty = true;
+			MarkVisualDirty(node);
 		}
 	}
 
 	UiDocument::UiDocument() : impl(std::make_unique<Impl>())
 	{
+		impl->Owner = this;
 		impl->Root = { nextNodeId.fetch_add(1, std::memory_order_relaxed) };
 		Impl::Node root;
 		root.Id = impl->Root;
@@ -315,16 +317,6 @@ namespace Swim::UI
 	}
 
 	UiDocument::~UiDocument() = default;
-
-	UiWidgetRegistry& UiDocument::GetWidgets()
-	{
-		return impl->Widgets;
-	}
-
-	const UiWidgetRegistry& UiDocument::GetWidgets() const
-	{
-		return impl->Widgets;
-	}
 
 	UiNodeId UiDocument::GetRoot() const
 	{
@@ -438,7 +430,7 @@ namespace Swim::UI
 		if (paintOnly)
 		{
 			node.PaintDirty = true;
-			node.VisualDirty = true;
+			impl->MarkVisualDirty(node);
 			return;
 		}
 
@@ -585,7 +577,7 @@ namespace Swim::UI
 		if (root.Style.Visible)
 		{
 			impl->Arrange(root, { 0, 0, logical.X, logical.Y }, { 0, 0, logical.X, logical.Y }, true);
-			impl->SyncScrollBars();
+			impl->NotifyArranged(); // Controls that follow other nodes (scroll bars and their targets).
 			impl->PlacePopups();
 		}
 
@@ -600,15 +592,15 @@ namespace Swim::UI
 			auto& entry = impl->Popups[i];
 			const auto popup = entry.Node;
 
-			if (entry.PendingReveal)
+			if (entry.PendingNotify)
 			{
-				entry.PendingReveal = false;
+				entry.PendingNotify = false;
 				const auto anchor = entry.Desc.Anchor;
 
-				if (anchor && impl->Nodes.contains(anchor.Value) && impl->Get(anchor).Control.Kind == UiControlKind::Dropdown)
+				if (auto* behavior = anchor && impl->Nodes.contains(anchor.Value) ? impl->Get(anchor).Behavior.get() : nullptr)
 				{
-					auto& owner = impl->Get(anchor);
-					impl->RevealOption(owner, owner.Highlight);
+					auto context = impl->Context(anchor);
+					behavior->OnPopupLaidOut(context, popup); // A dropdown reveals its highlight.
 				}
 			}
 
@@ -674,6 +666,11 @@ namespace Swim::UI
 		std::vector<UiEvent> result;
 		result.swap(impl->Events);
 		return result;
+	}
+
+	void UiDocument::DiscardEvents()
+	{
+		impl->Events.clear();
 	}
 
 } // namespace Swim::UI

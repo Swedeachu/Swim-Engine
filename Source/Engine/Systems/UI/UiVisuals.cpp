@@ -1,5 +1,6 @@
 #include "Engine/Systems/UI/Internal/UiDocumentImpl.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -141,59 +142,10 @@ namespace Swim::UI
 				state = state | UiState::Dragging;
 			}
 
-			const auto& control = Get(owner).Control;
-
-			if (control.Kind == UiControlKind::Option)
+			// The control adds its own flags (Checked, Mixed, ReadOnly; options their owner's selection).
+			if (const auto& behavior = Get(owner).Behavior)
 			{
-				// Checked while selected; Focused while its owner is focused and it is the
-				// selection (or, in an open dropdown, the highlight keys move).
-				const auto& option = Get(owner);
-
-				if (option.PartOf && Nodes.contains(option.PartOf.Value) && IsSelectionOwner(Get(option.PartOf)))
-				{
-					const auto& group = Get(option.PartOf);
-					const auto index = static_cast<std::int32_t>(std::lround(option.PartValue));
-					const auto selected =
-						std::isfinite(group.Control.Value) ? static_cast<std::int32_t>(std::lround(group.Control.Value)) : -1;
-
-					if (index == selected)
-					{
-						state = state | UiState::Checked;
-					}
-
-					const bool open = IsDropdownOpen(group);
-
-					if ((open && group.Highlight == index) || (!open && group.Id == Focused && index == selected))
-					{
-						state = state | UiState::Focused;
-					}
-
-					if (group.Control.ReadOnly)
-					{
-						state = state | UiState::ReadOnly;
-					}
-
-					if (!Available(group.Id))
-					{
-						state = state | UiState::Disabled;
-					}
-				}
-			}
-			else if (control.Kind != UiControlKind::None)
-			{
-				if (control.Check == UiCheckState::Checked)
-				{
-					state = state | UiState::Checked;
-				}
-				else if (control.Check == UiCheckState::Mixed)
-				{
-					state = state | UiState::Mixed;
-				}
-
-				if (control.ReadOnly)
-				{
-					state = state | UiState::ReadOnly;
-				}
+				state = state | behavior->GetStateFlags(Context(owner));
 			}
 		}
 
@@ -247,6 +199,19 @@ namespace Swim::UI
 
 	void UiDocument::Impl::ResolveVisuals()
 	{
+		// Nothing a state depends on changed since the last pass: every node is current.
+		if (!VisualsDirty && ResolvedHover == Hover && ResolvedPressed == Pressed && ResolvedFocused == Focused &&
+			ResolvedDragging == Dragging)
+		{
+			return;
+		}
+
+		VisualsDirty = false;
+		ResolvedHover = Hover;
+		ResolvedPressed = Pressed;
+		ResolvedFocused = Focused;
+		ResolvedDragging = Dragging;
+
 		for (auto& [key, node] : Nodes)
 		{
 			const auto state = ComputeState(node.Id);
@@ -285,6 +250,7 @@ namespace Swim::UI
 				node.TransitionTo = target;
 				node.TransitionElapsed = 0.0f;
 				node.TransitionDuration = node.Style.TransitionSeconds;
+				TransitioningCount += node.Transitioning ? 0u : 1u;
 				node.Transitioning = true;
 				node.Visual.HasImage = target.HasImage;
 				node.Visual.Image = target.Image;
@@ -292,6 +258,7 @@ namespace Swim::UI
 			else
 			{
 				node.Visual = target;
+				TransitioningCount -= node.Transitioning ? 1u : 0u;
 				node.Transitioning = false;
 			}
 
@@ -302,6 +269,13 @@ namespace Swim::UI
 	bool UiDocument::Impl::AdvanceTransitions(float seconds)
 	{
 		bool animating = false;
+
+		if (TransitioningCount == 0)
+		{
+			return false; // Idle frames skip the node walk.
+		}
+
+		TransitioningCount = 0;
 
 		for (auto& [key, node] : Nodes)
 		{
@@ -332,6 +306,7 @@ namespace Swim::UI
 			else
 			{
 				animating = true;
+				++TransitioningCount; // Recounted every pass (removed nodes drop out).
 			}
 		}
 
@@ -346,7 +321,7 @@ namespace Swim::UI
 		}
 
 		auto& node = Get(id);
-		node.VisualDirty = true;
+		MarkVisualDirty(node);
 		node.PaintDirty = true;
 
 		for (const auto child : node.Children)
@@ -396,7 +371,7 @@ namespace Swim::UI
 
 		const bool paintOnly = Internal::OnlyPaintChanged(node.Style, style);
 		node.Style = style;
-		node.VisualDirty = true;
+		MarkVisualDirty(node);
 		node.PaintDirty = true;
 
 		if (!paintOnly)
@@ -425,7 +400,7 @@ namespace Swim::UI
 
 		auto& node = impl->Get(id);
 		node.Rules = std::move(rules);
-		node.VisualDirty = true;
+		impl->MarkVisualDirty(node);
 	}
 
 	const std::vector<UiStateRule>& UiDocument::GetStateRules(UiNodeId id) const
@@ -492,7 +467,7 @@ namespace Swim::UI
 		auto& node = impl->Get(id);
 		node.ThemeClass = themeClass;
 		node.ThemeApply = themeClass == UiThemeClass::None ? UiThemeApply::None : apply;
-		node.VisualDirty = true;
+		impl->MarkVisualDirty(node);
 		node.PaintDirty = true;
 		impl->ApplyTheme(node);
 		impl->ClearUnavailable();
@@ -511,6 +486,7 @@ namespace Swim::UI
 		}
 
 		DispatchCallbacks();
+		impl->PullBindings(); // After dispatch: edits were pushed, now show changes made elsewhere.
 		impl->ResolveVisuals();
 		const bool transitions = impl->AdvanceTransitions(seconds);
 		const bool controls = impl->AnimateControls(seconds);
@@ -526,23 +502,22 @@ namespace Swim::UI
 			return true; // A tooltip delay is running.
 		}
 
-		for (const auto& [key, node] : impl->Nodes)
+		if (impl->TransitioningCount > 0)
 		{
-			if (node.Transitioning)
+			for (const auto& [key, node] : impl->Nodes)
 			{
-				return true;
+				if (node.Transitioning)
+				{
+					return true;
+				}
 			}
+		}
 
-			const auto& c = node.Control;
+		for (const auto id : impl->UpdatedControls)
+		{
+			const auto* node = impl->Find(id);
 
-			if (c.Kind == UiControlKind::Toggle && node.Knob != (c.Check == UiCheckState::Checked ? 1.0f : 0.0f) &&
-				!(impl->Dragging == node.Id && impl->DragMoved))
-			{
-				return true;
-			}
-
-			if (c.Kind == UiControlKind::ScrollBar && c.Visibility == UiScrollBarVisibility::Overlay && !node.ControlHidden &&
-				node.ControlOpacity > 0.0f && (node.ControlOpacity < 1.0f || node.ScrollActivity <= c.FadeDelaySeconds + c.FadeSeconds))
+			if (node && node->Behavior && node->Behavior->IsAnimating(impl->Context(id)))
 			{
 				return true;
 			}

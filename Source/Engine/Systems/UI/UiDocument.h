@@ -265,9 +265,10 @@ namespace Swim::UI
 		UiImage Image;
 	};
 
-	// Behaviour the document implements for a node (critical-path item 79 controls).
-	// Controls are ordinary nodes: they get pointer, wheel and keyboard input through the
-	// document only, so they work the same on screen and world-space canvases.
+	// The built-in control types (UiControlRegistry names "Button", "Checkbox", ...). A
+	// control's behaviour lives in its own class (Widgets/Ui<Name>.h, a UiControlBehavior)
+	// registered by name; the document only routes generic interactions to it. Custom marks a
+	// control attached by type name or instance (UiDocument::SetControl overloads).
 	enum class UiControlKind : std::uint8_t
 	{
 		None,
@@ -283,7 +284,11 @@ namespace Swim::UI
 		Dropdown,	// Activation opens Parts.Popup below it; Up/Down select while closed and
 					// highlight while open; Enter commits the highlight; the Label shows the choice.
 		Option,		// A choice of an owner (set by SetPartRole): hit-testable, not focusable.
+		Custom,		// Any other registered or instance-attached control (GetControlBehavior).
 	};
+
+	// The registered type name of a built-in kind ("" for None and Custom).
+	std::string_view UiControlTypeName(UiControlKind kind);
 
 	enum class UiOrientation : std::uint8_t
 	{
@@ -343,6 +348,10 @@ namespace Swim::UI
 		UiNodeId Popup; // Dropdown: its option list, a popup (a child of the root).
 	};
 
+	// The data every control shares (value, range, check state, parts, ...). Built-in
+	// controls read the fields they document; custom controls may use Min/Max/Value/Step for
+	// a value (UiDocument::SetValue/OnValue work for them) and keep anything else in their
+	// own UiControlBehavior instance.
 	struct UiControl
 	{
 		UiControlKind Kind = UiControlKind::None;
@@ -579,10 +588,11 @@ namespace Swim::UI
 		std::function<void(std::string_view)> Write;
 	};
 
+	class UiControlBehavior;
+	class UiControlContext;
+
 	// Retained document independent of Scene, Transform, SDL and any renderer.
 	// Single-thread owner. The atlas passed to Paint must outlive its paint list.
-	class UiWidgetRegistry;
-
 	class UiDocument final
 	{
 
@@ -597,10 +607,6 @@ namespace Swim::UI
 		UiDocument& operator=(const UiDocument&) = delete;
 
 		UiNodeId GetRoot() const;
-
-		UiWidgetRegistry& GetWidgets();
-
-		const UiWidgetRegistry& GetWidgets() const;
 
 		UiNodeId Create(UiNodeId parent);
 
@@ -701,6 +707,9 @@ namespace Swim::UI
 
 		std::vector<UiEvent> DrainEvents();
 
+		// Drops the polling history without handing it out (keeps its capacity).
+		void DiscardEvents();
+
 		// One handler per node and event kind; an empty handler unregisters it. The document
 		// owns handlers and removes them with their node. Setters from code stay silent.
 		void On(UiNodeId node, UiEventKind kind, std::function<void(const UiEvent&)> handler);
@@ -713,9 +722,25 @@ namespace Swim::UI
 
 		void OnText(UiNodeId node, std::function<void(const std::string&)> handler);
 
+		// Drops handlers and value bindings (both capture gameplay state): call where the
+		// captured objects go away while the document stays.
 		void ClearCallbacks(UiNodeId node);
 
 		void ClearCallbacks();
+
+		// --- Value bindings. ---
+		// Two-way: input changes call set (with the dispatched callbacks), and every Update
+		// shows get()'s value when it changed elsewhere (no events). Gameplay never tracks
+		// which control shows which value: bind once, the document keeps them in sync. The
+		// binding goes with its node (or Unbind). Checkboxes and toggles read and write 0/1.
+		void BindValue(UiNodeId node, std::function<float()> get, std::function<void(float)> set);
+
+		// Binds to a variable that outlives the document (settings, gameplay state).
+		void BindValue(UiNodeId node, float& value);
+
+		void BindChecked(UiNodeId node, bool& value);
+
+		void Unbind(UiNodeId node);
 
 		// Called automatically by UiRuntime after routing input and by Update for standalone
 		// documents. New events produced by a callback wait for the next dispatch. DrainEvents
@@ -727,11 +752,31 @@ namespace Swim::UI
 		void EnsureLayout();
 
 		// --- Controls (critical-path item 79). ---
-		// Makes a node a control: it becomes hit-testable (and focusable, except scroll
-		// bars without Style.Focusable); parts must be descendants (see UiControlParts).
-		// The value is clamped and snapped. Kind None removes the behaviour. Throws
+		// Makes a node a control: it becomes hit-testable (and focusable unless its behaviour
+		// says otherwise); parts must be descendants (see UiControlParts). control.Kind picks a
+		// built-in type (Custom keeps the node's current behaviour and replaces its data). The
+		// value is clamped and snapped. Kind None removes the behaviour. Throws
 		// std::invalid_argument for an invalid range, step, parts or scroll target.
 		void SetControl(UiNodeId node, const UiControl& control);
+
+		// Attaches the control type registered under `type` (UiControlRegistry: the built-in
+		// names or a gameplay control) with its data.
+		void SetControl(UiNodeId node, std::string_view type, const UiControl& control = {});
+
+		// Attaches a control instance (a behaviour that is not registered by name).
+		void SetControl(UiNodeId node, std::unique_ptr<UiControlBehavior> behavior, const UiControl& control = {});
+
+		// Attaches a new T and returns it: document.AttachControl<HealthBar>(node).
+		template <class T> T& AttachControl(UiNodeId node, const UiControl& control = {})
+		{
+			auto behavior = std::make_unique<T>();
+			T& typed = *behavior;
+			SetControl(node, std::move(behavior), control);
+			return typed;
+		}
+
+		// The node's control behaviour (null when it is not a control).
+		UiControlBehavior* GetControlBehavior(UiNodeId node) const;
 
 		const UiControl& GetControl(UiNodeId node) const;
 
@@ -865,6 +910,8 @@ namespace Swim::UI
 		void SetCaretVisible(bool visible);
 
 	  private:
+
+		friend class UiControlContext;
 
 		struct Impl;
 		std::unique_ptr<Impl> impl;

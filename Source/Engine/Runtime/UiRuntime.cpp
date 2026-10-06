@@ -334,8 +334,10 @@ namespace Engine
 		}
 
 		// Keep documents alive and finish routing before gameplay callbacks mutate UI/scene
-		// state. A document shared by multiple canvases is dispatched only once.
-		std::vector<std::shared_ptr<UI::UiDocument>> documents;
+		// state. A document shared by multiple canvases is dispatched only once. The list is
+		// a reused member (no per-frame allocation once warm), emptied after dispatch.
+		auto& documents = dispatchScratch;
+		documents.clear();
 		const auto collect = [&](const std::shared_ptr<UI::UiDocument>& document)
 		{
 			if (std::find(documents.begin(), documents.end(), document) == documents.end())
@@ -360,12 +362,13 @@ namespace Engine
 			}
 		}
 
-		for (const auto& document : documents)
+		for (std::size_t i = 0; i < documents.size(); ++i)
 		{
-			document->DispatchCallbacks();
-			document->DrainEvents(); // Managed documents use callbacks; do not retain polling history.
+			documents[i]->DispatchCallbacks();
+			documents[i]->DiscardEvents(); // Managed documents use callbacks; do not retain polling history.
 		}
 
+		documents.clear();
 		return inputFrame;
 	}
 
@@ -373,8 +376,8 @@ namespace Engine
 	{
 		namespace UI = Swim::UI;
 		drawList.clear();
-		std::vector<const CanvasState*> ordered;
-		ordered.reserve(canvases.size());
+		auto& ordered = orderedScratch;
+		ordered.clear();
 
 		for (auto& [entity, state] : canvases)
 		{
@@ -384,7 +387,8 @@ namespace Engine
 			ordered.push_back(&state);
 		}
 
-		std::vector<CanvasState*> overlayStates;
+		auto& overlayStates = overlayScratch;
+		overlayStates.clear();
 
 		for (auto& [id, overlay] : overlays)
 		{

@@ -1,7 +1,8 @@
-# Reflections: screen space, local probes, environment
+# Reflections: planar, screen space, local probes, environment
 
-Specular reflections come from three layers, each covering what the one before cannot see:
+Specular reflections come from four layers, each covering what the one before cannot see:
 
+0. **Planar reflections** (`Engine/Systems/Renderer/Reflections/PlanarReflections*`, see below): sharp, current captures for the flat faces of mirrors (the mirror cube) and the camera-facing cap of chrome spheres, where SSR has nothing on screen to return.
 1. **Screen-space reflections** ([ScreenSpace.md](ScreenSpace.md#reflections-screenspacereflectionslang--screenspacereflectiontexel)): exact, sharp and dynamic, but they can only return what the camera sees.
 2. **Local reflection probes** (`Engine/Systems/Renderer/Reflections`): cube captures of the scene around a point, parallax-corrected with their stored distances. They cover what is off screen, behind the camera or hidden.
 3. **The global environment** (the procedural sky with the volumetric clouds folded in, [Environment.md](Environment.md)): everything else.
@@ -50,10 +51,28 @@ Only `FacesPerFrame` faces are captured each frame (the sandbox uses 6). A ball 
 4. Nothing is jittered. Earlier fixed steps left stair steps, and per-pixel jitter left a hatch pattern TAA did not remove. Flat mirrors (the mirror cube) show the probe almost 1:1, so both showed up there.
 5. A ray that crosses nothing within reach keeps its own direction (the sky).
 
+## Planar reflections
+
+A `PlanarReflector` component (`Engine/Components/PlanarReflector.h`: `Shape` Box/Plane/Sphere, `PlaneHalfExtents`, `Radius`, `Quality`, `Priority`) marks an object; `SceneRenderBridge` gathers them into `RenderFrameInput::PlanarReflectors`. In the reflection lab the mirror cube (Box, priority 2) and two chrome spheres carry one.
+
+**Planning** (`PlanarReflections::Planner`, CPU, allocation-free once warm):
+- **Candidates.** Boxes contribute their six faces, planes one, spheres their camera-facing cap (a disc of normals within `SphereMinCosine` of the axis to the camera).
+- **Culling.** Back-facing faces, faces outside the camera frustum, faces smaller than `MinScreenFraction` of the screen height and faces whose mirror ray at the centre stays on screen (dot with the view direction above `SsrHandoff`: SSR shows those at full resolution) are dropped before anything is rendered.
+- **Sharing.** Faces within `PlaneAngleTolerance`/`PlaneDistanceTolerance` merge into one capture (coplanar mirrors, floor tiles): the reflected camera is offset to the nearest member and the lookup's distance refinement corrects the rest.
+- **Capture view.** The camera mirrored in the plane looks along the plane normal through the reflector's visible portal (clipped to the camera frustum, grown by `PortalMargin`) with an off-axis, reverse-Z, infinite projection whose near plane is the mirror (+2 mm). Texel density on the mirror is uniform and no texel is spent outside it. Spheres capture from their centre towards the camera.
+- **LOD.** Resolution is the portal's foreshortened screen footprint × `ResolutionScale` × `Quality`, clamped to `MinResolution .. AtlasResolution` and quantised to 8, so distant reflectors shrink smoothly; a record stores `1 − density` as the SSR preference so low-resolution captures hand off to SSR where SSR hits.
+- **Caching.** Slots (atlas layers, `MaxPlanes`) follow reflector keys with LRU reuse. At most `CapturesPerFrame` re-render, most urgent first: new, moved, portal no longer covered, size changed by more than 20 %, the camera moved more than `MotionTolerance` capture texels, a mover inside the capture frustum, or older than `MaxAgeSeconds`. Everything else reuses its capture and is reprojected.
+
+**Rendering** (`PlanarReflectionRenderer`): captures render through the ordinary scene path with their own GPU visibility (frustum = the capture, far plane = `CullDistance`, the owner excluded by `ExcludedObjectId`) at coarse LODs, then `PlanarReflectionResolve.slang` writes colour and the distance from the capture position into a persistent RGBA16F 2D-array atlas.
+
+**Shading** (`ScreenSpaceComposite.slang`, `SamplePlanar`; CPU: `PlanarReflections::LookupUv`): a pixel on a record's plane (within the tolerance, normal cosine, owner and roughness fade) projects its mirror ray into the capture, then refines the hit twice with the stored distances, which corrects camera motion since the capture and sphere curvature. Its weight is blended with SSR by the SSR preference; probes and the environment fill whatever remains. The Sources debug view shows planar pixels in yellow.
+
+**Controls.** `RenderSettings::PlanarReflections` (`PlanarReflectionSettings`), `render.set planar.planes|atlas|captures|scale|min-screen|ssr-handoff|motion|max-age|cull`, the `reflections.planar` toggle, `sandbox.planar 0|1` and the HUD checkbox. Stats: `PlanarReflections` (records), `PlanarCaptures` (re-renders this frame), `PlanarCandidates`.
+
 ## Debug views
 
 `ReflectionSettings::Debug` (`sandbox.reflectdebug`, or the Rendering tab):
-- **Sources:** SSR is red, rejected SSR (hidden side) magenta, probes green, the environment blue. Non-reflective pixels are dimmed grey.
+- **Sources:** planar is yellow, SSR is red, rejected SSR (hidden side) magenta, probes green, the environment blue. Non-reflective pixels are dimmed grey.
 - **Probe age:** a hue per probe slot × its coverage, darkened as its oldest face ages (0 → 4 s).
 
 ## Cost (RTX 4070, 1080p, the reflection lab)
@@ -62,6 +81,7 @@ GPU 12.1 ms with 15 active probes and 3 faces captured per frame, against 11.9 m
 
 ## Tests
 
+- `Render.PlanarReflections` (5): lookup against the analytic mirror ray and reprojection after camera motion; culling (back-facing, tiny, SSR-friendly); coplanar sharing and footprint sizing; capture reuse until motion, movers or age; sphere caps.
 - `Render.ReflectionProbes` (5): faces that see movers go first (frustum test, range, the owner ignored); face bases, views and projections; capture distances; selection and blending; parallax against a wall and a sphere; an occluder in front of a far wall; a ray passing behind a near object; jitter independence; scheduler budgets, slots, moved and dynamic probes.
 - `Render.ScreenSpace.HitValidation` (3).
 - `Render.ScreenSpaceEffects.BackFaceDepthAndProbesReachTheirPasses`.

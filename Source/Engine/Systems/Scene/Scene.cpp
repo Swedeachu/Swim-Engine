@@ -6,7 +6,9 @@
 #include "Engine/Systems/Physics/PhysicsSystem.h"
 #include "Engine/Systems/Scene/SceneCommandBuffer.h"
 
+#include <algorithm>
 #include <iostream>
+#include <stdexcept>
 
 namespace Engine
 {
@@ -29,6 +31,20 @@ namespace Engine
 	Scene::Scene(const std::string& sceneName)
 		: name(sceneName), registry(), sceneCommandBuffer(std::make_unique<SceneCommandBuffer>(*this))
 	{
+		// Every way a behaviour's storage goes (DestroyEntity, RemoveComponent, registry
+		// clears) takes it off the run lists first.
+		registry.on_destroy<BehaviorComponents>().connect<&Scene::OnBehaviorsDestroyed>(*this);
+	}
+
+	void Scene::OnBehaviorsDestroyed(entt::registry& reg, entt::entity entity)
+	{
+		for (auto& behavior : reg.get<BehaviorComponents>(entity).behaviors)
+		{
+			if (behavior)
+			{
+				behaviorScheduler.Remove(*behavior);
+			}
+		}
 	}
 
 	Scene::~Scene()
@@ -60,10 +76,11 @@ namespace Engine
 		}
 
 		// Behaviours created before injection cache input/camera pointers.
-		for (const entt::entity entity : SnapshotBehaviorEntities())
-		{
-			RefreshBehaviorFieldCacheForEntity(entity);
-		}
+		behaviorScheduler.ForEach(
+			[](Behavior& behavior)
+			{
+				behavior.RefreshFieldCache();
+			});
 	}
 
 	TagRegistry& Scene::GetTagRegistry() const
@@ -513,27 +530,6 @@ namespace Engine
 
 	// --- Lifecycle ------------------------------------------------------------------
 
-	std::vector<entt::entity> Scene::SnapshotBehaviorEntities() const
-	{
-		std::vector<entt::entity> entities;
-		const auto view = registry.view<const BehaviorComponents>();
-		entities.reserve(view.size());
-
-		for (const entt::entity entity : view)
-		{
-			entities.push_back(entity);
-		}
-
-		// Storage order changes with swaps on removal; iterate by durable creation order
-		// instead so behaviour updates are deterministic across runs.
-		std::sort(entities.begin(), entities.end(),
-			[this](entt::entity a, entt::entity b)
-			{
-				return GetSerializedEntityId(a).Value < GetSerializedEntityId(b).Value;
-			});
-		return entities;
-	}
-
 	void Scene::InternalSceneAwake()
 	{
 		if (!transformHooksBound)
@@ -572,33 +568,7 @@ namespace Engine
 	{
 		// Apply the previous frame's deferred mutations in one deterministic FIFO batch.
 		GetCommandBuffer().Flush();
-
-		const EngineState state = GetExecutionState();
-		const double realDelta = GetTime().RealDelta;
-
-		for (const entt::entity entity : SnapshotBehaviorEntities())
-		{
-			auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-
-			if (!bc || !bc->CanExecute(state))
-			{
-				continue;
-			}
-
-			for (std::size_t i = 0; bc && i < bc->behaviors.size(); ++i)
-			{
-				Behavior* behavior = bc->behaviors[i].get();
-
-				if (!behavior)
-				{
-					continue;
-				}
-
-				behavior->InitIfNeeded();
-				behavior->Update(behavior->UsesRealTime() ? realDelta : dt);
-				bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-			}
-		}
+		behaviorScheduler.RunUpdate(GetExecutionState(), dt, GetTime().RealDelta);
 	}
 
 	void Scene::InternalScenePostUpdate(double dt)
@@ -608,7 +578,7 @@ namespace Engine
 
 	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
 	{
-		ForEachInitializedBehavior(&Behavior::FixedUpdate, tickThisSecond);
+		behaviorScheduler.RunFixedUpdate(GetExecutionState(), tickThisSecond);
 	}
 
 	void Scene::InternalFixedPostUpdate(unsigned int tickThisSecond)
@@ -629,42 +599,32 @@ namespace Engine
 
 	void Scene::InternalStateChanged(EngineState previous, EngineState current)
 	{
-		for (const entt::entity entity : SnapshotBehaviorEntities())
-		{
-			auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-
-			if (!bc)
+		behaviorScheduler.ForEach(
+			[&](Behavior& behavior)
 			{
-				continue;
-			}
-
-			for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
-			{
-				Behavior* behavior = bc->behaviors[i].get();
-
-				if (!behavior || !behavior->HasInited())
+				if (!behavior.HasInited())
 				{
-					continue;
+					return;
 				}
 
 				if (current == EngineState::Paused)
 				{
-					behavior->OnPause();
+					behavior.OnPause();
 				}
 				else if (current == EngineState::Stopped)
 				{
-					behavior->OnStop();
+					behavior.OnStop();
 				}
 				else if (current == EngineState::Playing && previous == EngineState::Paused)
 				{
-					behavior->OnResume();
+					behavior.OnResume();
 				}
 				else if (current == EngineState::Playing)
 				{
-					behavior->OnPlay();
+					behavior.OnPlay();
 				}
-			}
-		}
+
+			});
 
 		OnStateChanged(previous, current);
 	}
@@ -678,20 +638,22 @@ namespace Engine
 			return nullptr;
 		}
 
-		if (!services.Behaviors || !services.Behaviors->Contains(behaviorName))
+		const auto* descriptor = services.Behaviors ? services.Behaviors->Find(behaviorName) : nullptr;
+
+		if (!descriptor)
 		{
 			std::cerr << "Scene::EmplaceBehaviorByName | Unknown behavior: " << behaviorName << std::endl;
 			return nullptr;
 		}
 
-		std::unique_ptr<Behavior> behavior = services.Behaviors->Create(behaviorName, this, e);
+		std::unique_ptr<Behavior> behavior = descriptor->Create(this, e);
 
 		if (!behavior)
 		{
 			return nullptr;
 		}
 
-		return Attach(e, std::move(behavior));
+		return Attach(e, std::move(behavior), descriptor->Traits);
 	}
 
 	bool Scene::RemoveBehaviorByName(entt::entity e, const std::string& behaviorName, bool callExit)
@@ -716,6 +678,7 @@ namespace Engine
 									behavior->Exit();
 								}
 
+								behaviorScheduler.Remove(*behavior);
 								return true;
 							}),
 			behaviors.end());
@@ -741,9 +704,20 @@ namespace Engine
 
 	void Scene::SetEnabledStates(entt::entity entity, EngineState states)
 	{
-		if (registry.valid(entity))
+		if (!registry.valid(entity))
 		{
-			registry.get_or_emplace<BehaviorComponents>(entity).SetEnabledStates(states);
+			return;
+		}
+
+		auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
+		bc.SetEnabledStates(states);
+
+		for (auto& behavior : bc.behaviors)
+		{
+			if (behavior)
+			{
+				behaviorScheduler.SetEnabledStates(*behavior, bc.GetEnabledStates());
+			}
 		}
 	}
 
@@ -751,7 +725,7 @@ namespace Engine
 	{
 		if (registry.valid(entity))
 		{
-			registry.get_or_emplace<BehaviorComponents>(entity).AddEnabledStates(states);
+			SetEnabledStates(entity, registry.get_or_emplace<BehaviorComponents>(entity).GetEnabledStates() | states);
 		}
 	}
 
@@ -759,7 +733,7 @@ namespace Engine
 	{
 		if (registry.valid(entity))
 		{
-			registry.get_or_emplace<BehaviorComponents>(entity).RemoveEnabledStates(states);
+			SetEnabledStates(entity, registry.get_or_emplace<BehaviorComponents>(entity).GetEnabledStates() & ~states);
 		}
 	}
 
@@ -828,18 +802,12 @@ namespace Engine
 			return;
 		}
 
-		// Copy: callbacks may create or destroy bodies through the command buffer.
-		const std::vector<CollisionEvent> events(world->GetCollisionEvents().begin(), world->GetCollisionEvents().end());
+		const EngineState state = GetExecutionState();
 		const auto notify = [&](entt::entity self, entt::entity other, const CollisionEvent& event, float normalSign)
 		{
-			if (!registry.valid(self))
-			{
-				return;
-			}
+			auto* bc = registry.valid(self) ? registry.try_get<BehaviorComponents>(self) : nullptr;
 
-			auto* bc = registry.try_get<BehaviorComponents>(self);
-
-			if (!bc || !bc->CanExecute(GetExecutionState()))
+			if (!bc || !bc->CanExecute(state))
 			{
 				return;
 			}
@@ -872,12 +840,31 @@ namespace Engine
 					break;
 				}
 
+				// The callback may have destroyed components; re-fetch.
 				bc = registry.valid(self) ? registry.try_get<BehaviorComponents>(self) : nullptr;
 			}
 		};
 
-		for (const CollisionEvent& event : events)
+		// Index loop over the world's own event list (no copy). A callback that destroys an
+		// entity directly can append "ended" events (the backend reports the lost contacts),
+		// so the list is re-read every step and those are dispatched too.
+		for (std::size_t i = 0;; ++i)
 		{
+			world = GetPhysicsWorld();
+
+			if (!world)
+			{
+				break;
+			}
+
+			const auto events = world->GetCollisionEvents();
+
+			if (i >= events.size())
+			{
+				break;
+			}
+
+			const CollisionEvent event = events[i];
 			const entt::entity a = FindEntityByBody(event.BodyA);
 			const entt::entity b = FindEntityByBody(event.BodyB);
 			notify(a, b, event, 1.0f);

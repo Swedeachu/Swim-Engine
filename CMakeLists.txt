@@ -533,6 +533,9 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	# prefilter that keeps the captured distance in alpha.
 	swim_add_runtime_shader(ReflectionProbeResolve SOURCE Source/Shaders/Slang/Reflections/ReflectionProbeResolve.slang)
 	swim_add_runtime_shader(ReflectionProbePrefilter SOURCE Source/Shaders/Slang/Environment/EnvironmentPrefilter.slang DEFINES PREFILTER_KEEP_ALPHA=1)
+	# Planar reflections (Engine/Systems/Renderer/Reflections/PlanarReflectionRenderer): resolves a
+	# capture into its atlas layer with the distances the composite's lookup marches with.
+	swim_add_runtime_shader(PlanarReflectionResolve SOURCE Source/Shaders/Slang/Reflections/PlanarReflectionResolve.slang)
 	# Folds feature contributions (the clouds above) into the environment cube.
 	swim_add_runtime_shader(EnvironmentOverlay SOURCE Source/Shaders/Slang/Environment/EnvironmentOverlay.slang)
 	swim_add_slang_program(SwimForwardDepth

@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/Environment/ProceduralSky.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusRecords.h"
 #include "Engine/Systems/Renderer/PostProcess/PostProcessSettings.h"
+#include "Engine/Systems/Renderer/Reflections/PlanarReflectionTypes.h"
 #include "Engine/Systems/Renderer/Reflections/ReflectionProbeTypes.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceSettings.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
@@ -45,6 +46,11 @@ namespace Engine
 		// Local reflection probes (RenderFrameInput::ReflectionProbes): the layer between
 		// screen-space reflections and the global environment.
 		Swim::Render::ReflectionProbeSettings ReflectionProbes{};
+
+		// Planar reflections (RenderFrameInput::PlanarReflectors): sharp, current mirrors on top
+		// of the hierarchy, captured at a fraction of their screen size, shared between
+		// coplanar faces and re-rendered only when they need it.
+		Swim::Render::PlanarReflectionSettings PlanarReflections{};
 
 		// Shadows.
 		bool Shadows = true;
@@ -110,6 +116,9 @@ namespace Engine
 		bool Rendered3D = false; // False until the first mesh is GPU-resident.
 		std::uint32_t ReflectionProbes = 0;		// Probes shading used this frame.
 		std::uint32_t ReflectionProbeFaces = 0; // Probe cube faces captured this frame.
+		std::uint32_t PlanarReflections = 0;	// Planar reflections shading used this frame.
+		std::uint32_t PlanarCaptures = 0;		// Planar captures rendered this frame.
+		std::uint32_t PlanarCandidates = 0;		// Reflector faces considered (before culling and merging).
 		bool Presented = false;
 		std::uint64_t SkippedFrames = 0; // Minimized, out-of-date swapchain.
 

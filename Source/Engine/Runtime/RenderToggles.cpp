@@ -114,6 +114,7 @@ namespace Engine
 		toggles.push_back(Flag("screen.ssr-back-faces", "The back-face depth pass (SSR thickness)", s.ScreenSpace.Reflections.BackFaces));
 		toggles.push_back(Flag("screen.fog", "Height fog", s.ScreenSpace.Fog.Enabled));
 		toggles.push_back(Flag("reflections.probes", "Local reflection probes (captures, filtering, lookups)", s.ReflectionProbes.Enabled));
+		toggles.push_back(Flag("reflections.planar", "Planar reflections (mirror captures and lookups)", s.PlanarReflections.Enabled));
 		toggles.push_back(Flag("temporal.taa", "Temporal anti-aliasing", s.TemporalAntiAliasing));
 		toggles.push_back(Flag("effects.particles", "GPU particles (simulation and drawing)", s.Particles));
 		toggles.push_back(Flag("post.bloom", "Bloom (down and up chains)", s.Post.Bloom.Enabled));

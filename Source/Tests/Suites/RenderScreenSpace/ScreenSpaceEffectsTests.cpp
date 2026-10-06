@@ -65,7 +65,9 @@ namespace
 					{ ScreenSpaceCompositeBindings::ProbeSampler, T::Sampler },
 					{ ScreenSpaceCompositeBindings::ProbeRecords, T::ReadOnlyStorageBuffer },
 					{ ScreenSpaceCompositeBindings::ObjectId, T::SampledTexture },
-					{ ScreenSpaceCompositeBindings::ReflectionTermOut, T::StorageTexture } });
+					{ ScreenSpaceCompositeBindings::ReflectionTermOut, T::StorageTexture },
+					{ ScreenSpaceCompositeBindings::PlanarAtlas, T::SampledTexture },
+					{ ScreenSpaceCompositeBindings::PlanarRecords, T::ReadOnlyStorageBuffer } });
 			using R = ScreenSpaceReflectionBindings;
 			schema(reflectionLayout,
 				{ { R::Depth, T::SampledTexture }, { R::Normal, T::SampledTexture }, { R::Color, T::SampledTexture },
@@ -229,8 +231,8 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsAoBlurAndCompositeOrOnlyWhatIsEna
 		SWIM_CHECK(!resources.AmbientOcclusion && !resources.AmbientOcclusionPass && resources.CompositePass);
 		world.Run(graph, resources.Output);
 		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(1));
-		// The AO and reflection stand-ins, the six faces of the probe cube stand-in and the object id stand-in.
-		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(2 + 6 + 1));
+		// The AO and reflection stand-ins, the six faces of the probe cube stand-in, the object id and planar atlas stand-ins.
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(2 + 6 + 1 + 1));
 		SWIM_CHECK_EQUAL(world.Bound(C::Ao).GetTexture().GetDesc().Extent.Width, 1u);
 		// Reflections off: one 1x1 stand-in fills the reflection, reflectance and specular slots.
 		SWIM_CHECK_EQUAL(world.Bound(C::Reflection).GetTexture().GetDesc().Extent.Width, 1u);
@@ -427,8 +429,8 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		const auto pipelines = world.Commands("BindComputePipeline");
 		SWIM_REQUIRE_EQUAL(pipelines.size(), std::size_t(2));
 		SWIM_CHECK(pipelines[0].Source == &world.reflectionPipeline && pipelines[1].Source == &world.compositePipeline);
-		// The AO, velocity and back-depth stand-ins, the probe cube's six faces and the object id.
-		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(3 + 6 + 1));
+		// The AO, velocity and back-depth stand-ins, the probe cube's six faces, the object id and the planar atlas.
+		SWIM_CHECK_EQUAL(world.Commands("CopyBufferToTexture").size(), std::size_t(3 + 6 + 1 + 1));
 	}
 }
 

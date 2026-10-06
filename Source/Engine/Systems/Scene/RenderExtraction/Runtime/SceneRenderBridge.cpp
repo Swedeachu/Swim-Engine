@@ -3,6 +3,7 @@
 #include "Engine/Components/Light.h"
 #include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/ParticleEmitter.h"
+#include "Engine/Components/PlanarReflector.h"
 #include "Engine/Components/ReflectionProbe.h"
 #include "Engine/Components/SkinnedMeshRenderer.h"
 #include "Engine/Components/Transform.h"
@@ -197,6 +198,7 @@ namespace Engine
 	{
 		casters.clear();
 		probes.clear();
+		planars.clear();
 		movers.clear();
 
 		if (!scene)
@@ -241,43 +243,59 @@ namespace Engine
 			probes.push_back(desc);
 		}
 
-		if (probes.empty())
+		for (auto [entity, reflector, transform] : registry.view<PlanarReflector, Transform>().each())
 		{
-			lastPositions.clear();
-			return;
-		}
-
-		// Movers: mesh entities whose world position changed (a bounding sphere of the unit
-		// builtin meshes scaled by the largest axis).
-		std::erase_if(lastPositions,
-			[&registry](const auto& entry)
-			{
-				return !registry.valid(entry.first) || !registry.all_of<MeshRenderer, Transform>(entry.first);
-			});
-
-		for (auto [entity, mesh, transform] : registry.view<MeshRenderer, Transform>().each())
-		{
-			(void)mesh;
-			const glm::vec3 position = transform.GetWorldPosition(registry);
-			const std::array<float, 3> p{ position.x, position.y, position.z };
-			auto [it, inserted] = lastPositions.try_emplace(entity, p);
-
-			if (inserted)
+			if (!reflector.Enabled)
 			{
 				continue;
 			}
 
-			const float dx = p[0] - it->second[0];
-			const float dy = p[1] - it->second[1];
-			const float dz = p[2] - it->second[2];
+			const auto id = scene->GetSerializedEntityId(entity).Value;
+			const glm::mat4& world = transform.GetWorldMatrix(registry);
+			Swim::Render::PlanarReflectorDesc desc;
+			desc.Key = id;
+			// The same durable id RenderExtractor gives the entity's render objects, + 1.
+			desc.OwnerObjectId = static_cast<std::uint32_t>(id & 0xffffffu) + 1u;
+			desc.Shape = reflector.Kind == PlanarReflector::Shape::Plane
+				? Swim::Render::PlanarReflectorShape::Plane
+				: (reflector.Kind == PlanarReflector::Shape::Sphere ? Swim::Render::PlanarReflectorShape::Sphere
+																	: Swim::Render::PlanarReflectorShape::Box);
 
-			if (dx * dx + dy * dy + dz * dz > 1.0e-6f && movers.size() < 256u)
+			for (int r = 0; r < 3; ++r)
 			{
-				const glm::vec3 scale = transform.GetWorldScale(registry);
-				const float radius = 0.87f * std::max({ std::abs(scale.x), std::abs(scale.y), std::abs(scale.z) });
-				movers.push_back({ p, radius });
-				it->second = p;
+				for (int c = 0; c < 4; ++c)
+				{
+					desc.World[static_cast<std::size_t>(r * 4 + c)] = world[c][r];
+				}
 			}
+
+			desc.PlaneHalfExtents = { reflector.PlaneHalfExtents.x, reflector.PlaneHalfExtents.y };
+			desc.Radius = reflector.Radius;
+			desc.Quality = reflector.Quality;
+			desc.Priority = reflector.Priority;
+			planars.push_back(desc);
+		}
+
+		if (probes.empty() && planars.empty())
+		{
+			return;
+		}
+
+		// Movers: mesh entities whose transform changed this frame - the transform system's
+		// dirty list, so a still scene costs nothing (no per-frame walk of every mesh, no
+		// position cache). Bounding spheres of the unit builtin meshes scaled by the largest axis.
+		for (const entt::entity entity : scene->GetTransformSystem().GetDirtyEntities())
+		{
+			if (movers.size() >= 256u || !registry.valid(entity) || !registry.all_of<MeshRenderer, Transform>(entity))
+			{
+				continue;
+			}
+
+			const auto& transform = registry.get<Transform>(entity);
+			const glm::vec3 position = transform.GetWorldPosition(registry);
+			const glm::vec3 scale = transform.GetWorldScale(registry);
+			const float radius = 0.87f * std::max({ std::abs(scale.x), std::abs(scale.y), std::abs(scale.z) });
+			movers.push_back({ { position.x, position.y, position.z }, radius });
 		}
 	}
 

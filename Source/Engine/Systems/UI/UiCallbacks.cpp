@@ -1,5 +1,6 @@
 #include "Engine/Systems/UI/Internal/UiDocumentImpl.h"
 
+#include <functional>
 #include <stdexcept>
 
 namespace Swim::UI
@@ -10,7 +11,15 @@ namespace Swim::UI
 		Events.push_back(event);
 		const auto found = Nodes.find(event.Node.Value);
 
-		if (found != Nodes.end() && found->second.Callbacks.contains(event.Kind))
+		if (found == Nodes.end())
+		{
+			return;
+		}
+
+		// Handlers and value bindings both run at dispatch.
+		const auto& node = found->second;
+
+		if (node.Callbacks.contains(event.Kind) || (event.Kind == UiEventKind::ValueChanged && node.Binding))
 		{
 			CallbackEvents.push_back(event);
 		}
@@ -27,7 +36,7 @@ namespace Swim::UI
 
 		if (handler)
 		{
-			callbacks[kind] = std::move(handler);
+			callbacks[kind] = std::make_shared<const std::function<void(const UiEvent&)>>(std::move(handler));
 		}
 		else
 		{
@@ -99,7 +108,9 @@ namespace Swim::UI
 
 	void UiDocument::ClearCallbacks(UiNodeId node)
 	{
-		impl->Get(node).Callbacks.clear();
+		auto& target = impl->Get(node);
+		target.Callbacks.clear();
+		target.Binding.reset(); // Bindings capture gameplay state too.
 	}
 
 	void UiDocument::ClearCallbacks()
@@ -108,9 +119,11 @@ namespace Swim::UI
 		{
 			(void)id;
 			node.Callbacks.clear();
+			node.Binding.reset();
 		}
 
 		impl->CallbackEvents.clear();
+		impl->BoundNodes.clear();
 	}
 
 	void UiDocument::DispatchCallbacks()
@@ -123,31 +136,50 @@ namespace Swim::UI
 		struct DispatchGuard
 		{
 			bool& Active;
+			std::vector<UiEvent>& Scratch;
 
-			~DispatchGuard() { Active = false; }
+			~DispatchGuard()
+			{
+				Active = false;
+				Scratch.clear(); // Keeps its capacity for the next dispatch.
+			}
 		};
 
+		// Events created by handlers go to the (now empty) queue for the next dispatch.
 		impl->DispatchingCallbacks = true;
-		DispatchGuard guard{ impl->DispatchingCallbacks };
-		std::vector<UiEvent> events;
-		events.swap(impl->CallbackEvents);
+		impl->DispatchScratch.clear();
+		impl->DispatchScratch.swap(impl->CallbackEvents);
+		DispatchGuard guard{ impl->DispatchingCallbacks, impl->DispatchScratch };
 
-		for (const auto& event : events)
+		for (std::size_t i = 0; i < impl->DispatchScratch.size(); ++i)
 		{
-			const auto node = impl->Nodes.find(event.Node.Value);
+			const UiEvent event = impl->DispatchScratch[i];
+			auto* node = impl->Find(event.Node);
 
-			if (node == impl->Nodes.end())
+			if (!node)
 			{
 				continue;
 			}
 
-			const auto found = node->second.Callbacks.find(event.Kind);
-
-			if (found != node->second.Callbacks.end())
+			// The bound value first, so a handler reading it sees the new value.
+			if (event.Kind == UiEventKind::ValueChanged && node->Binding)
 			{
-				// Copy before invoking: the handler can replace itself or erase its node.
+				impl->PushBinding(event);
+				node = impl->Find(event.Node);
+
+				if (!node)
+				{
+					continue;
+				}
+			}
+
+			const auto found = node->Callbacks.find(event.Kind);
+
+			if (found != node->Callbacks.end())
+			{
+				// Hold the handler (a reference count, not a copy): it may replace itself or erase its node.
 				const auto handler = found->second;
-				handler(event);
+				(*handler)(event);
 			}
 		}
 	}

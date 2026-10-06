@@ -2,6 +2,7 @@
 #include "Engine/Systems/Text/Utf8.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -75,18 +76,11 @@ namespace Swim::UI
 			if (hit)
 			{
 				impl->QueueEvent({ UiEventKind::Enter, hit });
-				// Hovering an option of an open dropdown moves its highlight.
-				const auto& node = impl->Get(hit);
 
-				if (node.Control.Kind == UiControlKind::Option && node.PartOf && impl->Nodes.contains(node.PartOf.Value))
+				if (auto* behavior = impl->Get(hit).Behavior.get())
 				{
-					auto& owner = impl->Get(node.PartOf);
-
-					if (impl->IsDropdownOpen(owner))
-					{
-						owner.Highlight = static_cast<std::int32_t>(std::lround(node.PartValue));
-						impl->MarkSubtreeVisualDirty(owner.Control.Parts.Popup);
-					}
+					auto context = impl->Context(hit);
+					behavior->OnPointerEnter(context);
 				}
 			}
 		}
@@ -98,9 +92,14 @@ namespace Swim::UI
 			impl->SetCaret(node, impl->TextHit(node, { point.X / impl->Dpi, point.Y / impl->Dpi }), true);
 		}
 
-		if (impl->Dragging && Finite(point))
+		// The captured control follows the pointer anywhere until release.
+		if (impl->Dragging && impl->Dragging == impl->Pressed && Finite(point))
 		{
-			impl->ControlPointerMove({ point.X / impl->Dpi, point.Y / impl->Dpi });
+			if (auto* behavior = impl->Get(impl->Dragging).Behavior.get())
+			{
+				auto context = impl->Context(impl->Dragging);
+				behavior->OnPointerDrag(context, { { point.X / impl->Dpi, point.Y / impl->Dpi }, {} });
+			}
 		}
 	}
 
@@ -139,14 +138,16 @@ namespace Swim::UI
 		{
 			const auto& pressed = impl->Get(impl->Pressed);
 
+			// An unfocusable control may hand focus to another node (options focus their owner).
+			const auto target = pressed.Behavior ? pressed.Behavior->GetFocusTarget(impl->Context(impl->Pressed)) : UiNodeId{};
+
 			if (impl->IsFocusable(pressed))
 			{
 				focus = impl->Pressed;
 			}
-			else if (pressed.Control.Kind == UiControlKind::Option && pressed.PartOf && impl->Available(pressed.PartOf) &&
-				impl->IsFocusable(impl->Get(pressed.PartOf)) && impl->InputAllowed(pressed.PartOf))
+			else if (target && impl->Available(target) && impl->IsFocusable(impl->Get(target)) && impl->InputAllowed(target))
 			{
-				focus = pressed.PartOf; // Options focus their owner.
+				focus = target;
 			}
 			else
 			{
@@ -181,9 +182,16 @@ namespace Swim::UI
 				impl->Selecting = node.Id;
 			}
 
-			if (impl->IsControl(node) && Finite(point))
+			if (node.Behavior && Finite(point))
 			{
-				impl->ControlPointerDown(node, { point.X / impl->Dpi, point.Y / impl->Dpi });
+				auto context = impl->Context(node.Id);
+				const auto response = node.Behavior->OnPointerDown(context, { { point.X / impl->Dpi, point.Y / impl->Dpi }, modifiers });
+
+				if (response == UiPointerResponse::Capture && impl->Pressed == node.Id)
+				{
+					impl->Dragging = node.Id;
+					impl->MarkSubtreeVisualDirty(node.Id);
+				}
 			}
 		}
 	}
@@ -195,9 +203,18 @@ namespace Swim::UI
 
 		if (impl->Pressed)
 		{
-			if (impl->IsControl(impl->Get(impl->Pressed)))
+			if (auto* behavior = impl->Get(impl->Pressed).Behavior.get())
 			{
-				impl->ControlPointerUp(impl->Get(impl->Pressed), impl->Pressed == impl->Hover);
+				const bool captured = impl->Dragging == impl->Pressed;
+
+				if (captured)
+				{
+					impl->Dragging = {};
+					impl->MarkSubtreeVisualDirty(impl->Pressed);
+				}
+
+				auto context = impl->Context(impl->Pressed);
+				behavior->OnPointerUp(context, impl->Pressed == impl->Hover, captured);
 			}
 
 			impl->QueueEvent({ UiEventKind::Release, impl->Pressed });
@@ -215,16 +232,19 @@ namespace Swim::UI
 	void UiDocument::CancelPointer()
 	{
 		impl->Selecting = {};
-
-		if (impl->Dragging)
-		{
-			impl->EndDrag(true); // Keeps (and commits) the value reached so far.
-		}
+		impl->CancelCapture(); // The captured control keeps (and commits) the value reached so far.
 
 		if (impl->Pressed)
 		{
-			impl->QueueEvent({ UiEventKind::Cancel, impl->Pressed });
+			const auto pressed = impl->Pressed;
+			impl->QueueEvent({ UiEventKind::Cancel, pressed });
 			impl->Pressed = {};
+
+			if (auto* behavior = impl->Get(pressed).Behavior.get())
+			{
+				auto context = impl->Context(pressed);
+				behavior->OnPointerCancel(context, false);
+			}
 		}
 	}
 
@@ -240,16 +260,18 @@ namespace Swim::UI
 
 		const UiPoint point{ framebufferPoint.X / impl->Dpi, framebufferPoint.Y / impl->Dpi };
 		impl->HideTooltip(true);
-		// Scroll bars under the pointer scroll their target; a focused slider under the
-		// pointer steps its value. Anything else scrolls the innermost clipped node.
+		// A control under the pointer that wants the wheel takes it (scroll bars; sliders while
+		// focused). Anything else scrolls the innermost clipped node.
 		if (const auto hit = HitTest(framebufferPoint))
 		{
-			auto& node = impl->Get(hit);
-			const auto kind = node.Control.Kind;
-
-			if (kind == UiControlKind::ScrollBar || (kind == UiControlKind::Slider && impl->Focused == hit))
+			if (auto* behavior = impl->Get(hit).Behavior.get())
 			{
-				return impl->ControlWheel(node, delta);
+				auto context = impl->Context(hit);
+
+				if (behavior->WantsWheel(context))
+				{
+					return behavior->OnWheel(context, delta);
+				}
 			}
 		}
 
@@ -293,16 +315,13 @@ namespace Swim::UI
 			return;
 		}
 
-		// Focus leaving a dropdown closes its list (unless it moves into the list).
-		if (impl->Focused && impl->Get(impl->Focused).Control.Kind == UiControlKind::Dropdown &&
-			impl->IsDropdownOpen(impl->Get(impl->Focused)))
+		// The control losing focus reacts first (a dropdown closes its list unless focus moves into it).
+		if (impl->Focused)
 		{
-			const auto popup = impl->Get(impl->Focused).Control.Parts.Popup;
-			const auto into = impl->PopupIndexOf(id);
-
-			if (!into || impl->Popups[*into].Node != popup)
+			if (auto* behavior = impl->Get(impl->Focused).Behavior.get())
 			{
-				impl->ToggleDropdown(impl->Get(impl->Focused));
+				auto context = impl->Context(impl->Focused);
+				behavior->OnBlur(context, id);
 			}
 		}
 
@@ -329,10 +348,16 @@ namespace Swim::UI
 			impl->Get(id).RevealCaret = impl->Get(id).Editable;
 		}
 
-		// An editable slider value applies when it loses focus.
+		// An editable part of a control (a slider's typed value) applies when it loses focus.
 		if (previous && impl->Nodes.contains(previous.Value) && impl->Get(previous).Editable)
 		{
-			impl->CommitValueLabel(impl->Get(previous));
+			const auto owner = impl->Get(previous).PartOf;
+
+			if (auto* control = owner && impl->Nodes.contains(owner.Value) ? impl->Get(owner).Behavior.get() : nullptr)
+			{
+				auto context = impl->Context(owner);
+				control->OnPartCommit(context, previous);
+			}
 		}
 	}
 
@@ -470,23 +495,24 @@ namespace Swim::UI
 			return;
 		}
 
-		auto& node = impl->Get(impl->Focused);
-		const auto kind = node.Control.Kind;
-
-		if (kind == UiControlKind::Checkbox || kind == UiControlKind::Toggle)
-		{
-			impl->Toggle(node);
-			impl->CloseOnActivate(node.Id);
-			return;
-		}
-
-		if (kind == UiControlKind::Dropdown)
-		{
-			impl->ToggleDropdown(node);
-			return;
-		}
-
 		const auto focused = impl->Focused;
+
+		if (auto* behavior = impl->Get(focused).Behavior.get())
+		{
+			auto context = impl->Context(focused);
+
+			switch (behavior->OnActivate(context))
+			{
+			case UiActivation::Handled:
+				impl->CloseOnActivate(focused);
+				return;
+			case UiActivation::KeepOpen:
+				return;
+			case UiActivation::Click:
+				break;
+			}
+		}
+
 		impl->QueueEvent({ UiEventKind::Click, focused });
 		impl->CloseOnActivate(focused);
 	}
@@ -536,17 +562,27 @@ namespace Swim::UI
 			const bool submit = key == UiKey::Enter && !node.EditOptions.Multiline;
 			const bool consumed = impl->EditKey(node, key, modifiers);
 
-			if (submit)
+			if (submit && node.PartOf && impl->Nodes.contains(node.PartOf.Value))
 			{
-				impl->CommitValueLabel(node); // An editable slider value applies on Enter.
+				// An editable part of a control (a slider's typed value) applies on Enter.
+				if (auto* control = impl->Get(node.PartOf).Behavior.get())
+				{
+					auto context = impl->Context(node.PartOf);
+					control->OnPartCommit(context, node.Id);
+				}
 			}
 
 			return consumed;
 		}
 
-		if (impl->IsControl(node) && impl->ControlKey(node, key))
+		if (node.Behavior)
 		{
-			return true;
+			auto context = impl->Context(node.Id);
+
+			if (node.Behavior->OnKey(context, key, modifiers))
+			{
+				return true;
+			}
 		}
 
 		if (key == UiKey::Enter || key == UiKey::Space)

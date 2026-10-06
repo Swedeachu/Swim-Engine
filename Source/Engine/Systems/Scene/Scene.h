@@ -10,6 +10,7 @@
 #include "Engine/Machine.h"
 #include "Engine/Runtime/SimulationClock.h"
 #include "Engine/Systems/Entity/BehaviorComponents.h"
+#include "Engine/Systems/Entity/BehaviorScheduler.h"
 
 #include "Engine/Systems/Physics/PhysicsWorld.h"
 #include "Physics/ScenePhysicsBridge.h"
@@ -234,10 +235,34 @@ namespace Engine
 
 		entt::entity FindFirstWithTag(TagId tag) const;
 
+		// Calls func(entity) for every entity with the tag. Safe to add/remove tags or destroy
+		// entities from func: it walks a snapshot kept in a reused scratch buffer (nested
+		// calls stack their ranges), so iterating allocates nothing once warm.
 		template <typename Func> void ForEachWithTag(TagId tag, Func&& func)
 		{
-			for (const entt::entity entity : GetEntitiesWithTag(tag))
+			const auto found = tagIndex.find(tag.Value);
+
+			if (found == tagIndex.end() || found->second.empty())
 			{
+				return;
+			}
+
+			const std::size_t begin = tagScratch.size();
+			tagScratch.insert(tagScratch.end(), found->second.begin(), found->second.end());
+			const std::size_t end = tagScratch.size();
+
+			struct Restore
+			{
+				std::vector<entt::entity>& Scratch;
+				std::size_t Size;
+
+				~Restore() { Scratch.resize(Size); }
+			} restore{ tagScratch, begin };
+
+			for (std::size_t i = begin; i < end; ++i)
+			{
+				const entt::entity entity = tagScratch[i];
+
 				if (registry.valid(entity))
 				{
 					func(entity);
@@ -365,8 +390,9 @@ namespace Engine
 		template <typename T> T* AddBehavior(entt::entity entity, T&& behavior)
 		{
 			static_assert(std::is_base_of_v<Behavior, std::remove_reference_t<T>>, "AddBehavior<T> requires T to derive from Behavior");
-			auto uptr = std::make_unique<std::remove_reference_t<T>>(std::forward<T>(behavior));
-			return Attach(entity, std::move(uptr));
+			using Type = std::remove_reference_t<T>;
+			auto uptr = std::make_unique<Type>(std::forward<T>(behavior));
+			return Attach(entity, std::move(uptr), BehaviorTraitsOf<Type>());
 		}
 
 		// Constructs T(scene, entity, args...) in place and adds it.
@@ -374,7 +400,7 @@ namespace Engine
 		{
 			static_assert(std::is_base_of_v<Behavior, T>, "EmplaceBehavior<T> requires T to derive from Behavior");
 			auto uptr = std::make_unique<T>(this, entity, std::forward<Args>(args)...);
-			return Attach(entity, std::move(uptr));
+			return Attach(entity, std::move(uptr), BehaviorTraitsOf<T>());
 		}
 
 		template <typename T> T* GetBehavior(entt::entity entity) const
@@ -422,6 +448,7 @@ namespace Engine
 									  b->Exit();
 								  }
 
+								  behaviorScheduler.Remove(*b);
 								  return true;
 							  }
 
@@ -442,66 +469,31 @@ namespace Engine
 
 		void RemoveEnabledStates(entt::entity entity, EngineState states);
 
-		// Calls method on every behaviour that can run in the current state.
+		// Calls method on every behaviour that can run in the current state (attach order).
 		template <typename Func, typename... Args> void ForEachBehavior(Func method, Args&&... args)
 		{
-			const EngineState state = GetExecutionState();
-
-			for (const entt::entity entity : SnapshotBehaviorEntities())
-			{
-				auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-
-				if (!bc || !bc->CanExecute(state))
+			behaviorScheduler.ForEachIn(GetExecutionState(),
+				[&](Behavior& behavior)
 				{
-					continue;
-				}
-
-				for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
-				{
-					if (Behavior* behavior = bc->behaviors[i].get())
-					{
-						(behavior->*method)(args...);
-					}
-				}
-			}
+					(behavior.*method)(args...);
+				});
 		}
 
 		// As ForEachBehavior, initializing behaviours on their first call.
 		template <typename Func, typename... Args> void ForEachInitializedBehavior(Func method, Args&&... args)
 		{
-			const EngineState state = GetExecutionState();
-
-			for (const entt::entity entity : SnapshotBehaviorEntities())
-			{
-				auto* bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-
-				if (!bc || !bc->CanExecute(state))
+			behaviorScheduler.ForEachIn(GetExecutionState(),
+				[&](Behavior& behavior)
 				{
-					continue;
-				}
-
-				// Index loop: a behaviour may add another to its own entity.
-				for (std::size_t i = 0; i < bc->behaviors.size(); ++i)
-				{
-					Behavior* behavior = bc->behaviors[i].get();
-
-					if (!behavior)
-					{
-						continue;
-					}
-
-					behavior->InitIfNeeded();
-					(behavior->*method)(args...);
-					// The callback may have destroyed components; re-fetch.
-					bc = registry.valid(entity) ? registry.try_get<BehaviorComponents>(entity) : nullptr;
-
-					if (!bc)
-					{
-						break;
-					}
-				}
-			}
+					behavior.InitIfNeeded();
+					(behavior.*method)(args...);
+				});
 		}
+
+		// Attached behaviours (all states), for diagnostics and tests.
+		std::size_t GetBehaviorCount() const { return behaviorScheduler.GetCount(); }
+
+		std::size_t GetUpdatingBehaviorCount() const { return behaviorScheduler.GetUpdateCount(); }
 
 		// --- Physics ---
 		PhysicsWorld* GetPhysicsWorld() const;
@@ -539,20 +531,21 @@ namespace Engine
 			return system;
 		}
 
-		template <typename T> T* Attach(entt::entity entity, std::unique_ptr<T> uptr)
+		template <typename T> T* Attach(entt::entity entity, std::unique_ptr<T> uptr, BehaviorTraits traits)
 		{
 			T* raw = uptr.get();
 			auto& bc = registry.get_or_emplace<BehaviorComponents>(entity);
 			bc.Add(std::move(uptr));
+			behaviorScheduler.Add(*raw, bc.GetEnabledStates(), traits);
 			raw->Awake();
 			return raw;
 		}
 
 	  private:
 
-		std::vector<entt::entity> SnapshotBehaviorEntities() const;
-
 		void DispatchCollisionEvents();
+
+		void OnBehaviorsDestroyed(entt::registry& reg, entt::entity entity);
 
 		void OnTagSetDestroyed(entt::registry& reg, entt::entity entity);
 
@@ -571,6 +564,8 @@ namespace Engine
 		std::unique_ptr<SceneCommandBuffer> sceneCommandBuffer;
 		std::unique_ptr<ScenePhysicsBridge> physicsBridge;
 		std::uint64_t physicsSteps = 0;
+		BehaviorScheduler behaviorScheduler;
+		std::vector<entt::entity> tagScratch; // ForEachWithTag snapshots (reused).
 
 	};
 

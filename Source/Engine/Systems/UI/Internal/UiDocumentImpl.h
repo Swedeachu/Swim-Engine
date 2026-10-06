@@ -3,13 +3,14 @@
 // Private state of UiDocument, shared by its implementation units (tree/API,
 // layout, paint, input and editing). Not part of the public UI contract.
 
+#include "Engine/Systems/UI/UiControlBehavior.h"
 #include "Engine/Systems/UI/UiDocument.h"
 #include "Engine/Systems/UI/UiTheme.h"
-#include "Engine/Systems/UI/UiWidgetRegistry.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <unordered_map>
 #include <vector>
@@ -82,21 +83,27 @@ namespace Swim::UI
 			UiTextSelection Selection;
 			float PreferredCaretX = std::numeric_limits<float>::quiet_NaN();
 			bool RevealCaret = false;
-			// Control behaviour (UiControls.cpp).
-			std::unordered_map<UiEventKind, std::function<void(const UiEvent&)>> Callbacks;
+			// Callbacks (UiCallbacks.cpp) and the value binding (UiBindings.cpp).
+			// Shared so dispatch can hold a handler while it replaces itself (no copy of the function).
+			std::unordered_map<UiEventKind, std::shared_ptr<const std::function<void(const UiEvent&)>>> Callbacks;
+			struct ValueBinding
+			{
+				std::function<float()> Get;
+				std::function<void(float)> Set;
+			};
+			std::unique_ptr<ValueBinding> Binding;
+			// Control (UiControlHost.cpp): the shared data and the behaviour that reacts to input.
 			UiControl Control;
+			std::unique_ptr<UiControlBehavior> Behavior;
 			UiNodeId PartOf; // The control this node is a part of.
 			UiPartRole Role = UiPartRole::None;
 			float PartValue = 0.0f;		   // Slider ticks: the marked value. Options: their index.
 			std::vector<UiNodeId> Options; // Selection owners: registered option nodes.
-			std::int32_t Highlight = -1;   // Open dropdowns: the option keys move to.
 			UiNodeId Tooltip;
 			float TooltipDelay = 0.5f;
 			UiNodeId ContextMenu;
-			float Knob = 0.0f;			 // Toggle: displayed knob position 0 .. 1 (eases towards the state).
-			float ScrollActivity = 1e9f; // Overlay scroll bars: seconds since the last activity.
-			bool ControlHidden = false;	 // Auto/overlay scroll bar without overflow: not painted, not hit.
-			float ControlOpacity = 1.0f; // Overlay scroll bar fade.
+			bool ControlHidden = false;	 // Set by the control (auto scroll bar without overflow): not painted, not hit.
+			float ControlOpacity = 1.0f; // Set by the control (overlay scroll bar fade).
 			// Theme and visual states (UiVisuals.cpp).
 			UiThemeClass ThemeClass = UiThemeClass::None;
 			UiThemeApply ThemeApply = UiThemeApply::None;
@@ -136,12 +143,13 @@ namespace Swim::UI
 		};
 
 		std::unordered_map<std::uint64_t, Node> Nodes;
-		UiWidgetRegistry Widgets;
+		UiDocument* Owner = nullptr; // Control contexts reach the document through it.
 		UiNodeId Root;
 		UiNodeId Hover;
 		UiNodeId Pressed;
 		UiNodeId Focused;
 		UiNodeId Selecting; // Editable node under a pointer drag selection.
+		UiNodeId Dragging;	// The control holding the pointer capture (UiPointerResponse::Capture).
 		UiPoint Framebuffer;
 		float Dpi = 1.0f;
 		bool Dirty = true;
@@ -152,6 +160,7 @@ namespace Swim::UI
 		std::vector<UiPaintQuad> Quads;
 		std::vector<UiEvent> Events;
 		std::vector<UiEvent> CallbackEvents;
+		std::vector<UiEvent> DispatchScratch; // Reused by DispatchCallbacks.
 		bool DispatchingCallbacks = false;
 
 		void QueueEvent(UiEvent event);
@@ -159,18 +168,17 @@ namespace Swim::UI
 		const Text::GlyphAtlas* PaintAtlas = nullptr;
 		std::uint64_t PaintRevision = 0;
 		std::uint64_t PaintedLayoutRevision = 0;
-		// Control pointer drag (UiControls.cpp).
-		UiNodeId Dragging;		 // The control under a thumb/knob drag.
-		float DragGrab = 0.0f;	 // Pointer minus thumb start along the axis (logical units).
-		float DragStart = 0.0f;	 // Pointer position along the axis at press.
-		float PressValue = 0.0f; // Value (or check state) at press.
-		bool DragMoved = false;
-		// Scroll bar step button held down (repeats in Update).
-		UiNodeId Stepping;
-		float StepDirection = 0.0f;
-		float StepHeld = 0.0f;
-		float NextStep = 0.0f;
 		bool ArrowNavigation = true;
+		// Controls whose behaviour asked for OnUpdate / OnArranged, and nodes with a value
+		// binding: the per-frame loops walk these, never every node.
+		std::vector<UiNodeId> UpdatedControls;
+		std::vector<UiNodeId> ArrangedControls;
+		std::vector<UiNodeId> BoundNodes;
+		// Visual states: ResolveVisuals does nothing on frames where no node's state inputs
+		// changed (no dirty node, same hover/press/focus/capture).
+		bool VisualsDirty = true;
+		UiNodeId ResolvedHover, ResolvedPressed, ResolvedFocused, ResolvedDragging;
+		std::uint32_t TransitioningCount = 0; // Nodes easing a state change.
 
 		// Popups, bottom to top.
 		struct PopupEntry
@@ -179,7 +187,7 @@ namespace Swim::UI
 			UiPopupDesc Desc;
 			UiNodeId PriorFocus;
 			bool PendingFocus = false;
-			bool PendingReveal = false; // Dropdown lists: scroll the highlight into view once laid out.
+			bool PendingNotify = false; // The anchor control opened it: OnPopupLaidOut after the next Layout.
 		};
 
 		std::vector<PopupEntry> Popups;
@@ -202,13 +210,27 @@ namespace Swim::UI
 
 		const Node& Get(UiNodeId id) const { return Nodes.at(id.Value); }
 
+		Node* Find(UiNodeId id)
+		{
+			const auto found = Nodes.find(id.Value);
+			return found == Nodes.end() ? nullptr : &found->second;
+		}
+
+		const Node* Find(UiNodeId id) const
+		{
+			const auto found = Nodes.find(id.Value);
+			return found == Nodes.end() ? nullptr : &found->second;
+		}
+
+		UiControlContext Context(UiNodeId id) const { return UiControlContext(*Owner, id); }
+
 		void RequireLayout() const;
 
 		std::size_t Depth(UiNodeId id) const;
 
 		std::size_t Height(UiNodeId id) const;
 
-		bool IsControl(const Node& node) const { return node.Control.Kind != UiControlKind::None; }
+		bool IsControl(const Node& node) const { return node.Behavior != nullptr; }
 
 		bool IsHitTestable(const Node& node) const
 		{
@@ -218,8 +240,7 @@ namespace Swim::UI
 		bool IsFocusable(const Node& node) const
 		{
 			return !node.ControlHidden &&
-				(node.Style.Focusable || node.Editable ||
-					(IsControl(node) && node.Control.Kind != UiControlKind::ScrollBar && node.Control.Kind != UiControlKind::Option));
+				(node.Style.Focusable || node.Editable || (node.Behavior && node.Behavior->IsFocusable()));
 		}
 
 		// Hit-testable, focusable, editable or a control: the owner of descendants' states.
@@ -238,6 +259,12 @@ namespace Swim::UI
 		void MarkLayoutDirty(UiNodeId id);
 
 		void MarkPaintDirty(UiNodeId id);
+
+		void MarkVisualDirty(Node& node)
+		{
+			node.VisualDirty = true;
+			VisualsDirty = true;
+		}
 
 		// --- Text (UiLayout.cpp) ---
 		// The displayed text: committed text with the IME preedit at the caret.
@@ -262,81 +289,43 @@ namespace Swim::UI
 		// --- Paint (UiPaint.cpp) ---
 		void BuildPaint(Node& node, Text::GlyphAtlas& atlas);
 
-		// --- Controls (UiControls.cpp) ---
-		void ValidateControl(const Node& node, const UiControl& control) const;
+		// --- Controls (UiControlHost.cpp): generic plumbing; behaviour lives in the controls ---
+		// Validates and applies a control (behaviour + data) to a node; a null behaviour removes it.
+		void ApplyControl(UiNodeId id, std::unique_ptr<UiControlBehavior> behavior, const UiControl& control);
 
-		float ClampValue(const UiControl& control, float value) const;
+		void ValidateControl(const Node& node, const UiControlBehavior& behavior, const UiControl& control) const;
+
+		void DetachControl(Node& node);
+
+		// Input changes: clamps through the behaviour, emits ValueChanged (and ValueCommitted when commit).
+		bool ChangeValue(Node& control, float value, bool commit);
+
+		void MarkControlDirty(Node& control);
 
 		// The rectangle (relative to the parent's content box) of a placed part, if any.
 		std::optional<UiRect> PartGeometry(const Node& part, const UiRect& parentInner) const;
 
-		// Refreshes scroll bars from their targets after an Arrange (values, thumbs,
-		// visibility), re-arranging thumbs that moved.
-		void SyncScrollBars();
+		// After an Arrange: OnArranged of the controls that asked (scroll bars follow targets).
+		void NotifyArranged();
 
 		void ReArrange(Node& node, UiRect bounds);
 
-		bool ControlPointerDown(Node& control, UiPoint logical);
+		void PlacePartNow(UiNodeId part);
 
-		void ControlPointerMove(UiPoint logical);
-
-		void ControlPointerUp(Node& control, bool inside);
-
-		void EndDrag(bool commit);
-
-		bool ControlKey(Node& control, UiKey key);
-
-		bool ControlWheel(Node& control, UiPoint delta);
-
-		// Input changes: clamps/snaps, emits ValueChanged (and ValueCommitted when commit).
-		bool ChangeValue(Node& control, float value, bool commit);
-
-		void Toggle(Node& control);
-
-		float CheckValue(UiCheckState state) const;
-
-		void MarkControlDirty(Node& control);
-
-		// An editable label keeps the typed text while focused unless forced.
-		void SyncValueLabel(Node& control, bool force = false);
-
-		// A scroll bar's thumb track along its axis (after its step buttons), relative to its
-		// content box: start and length.
-		std::pair<float, float> ScrollTrack(const Node& bar, const UiRect& inner) const;
-
-		void StepScrollBar(Node& bar, float direction);
+		// Ends a pointer capture: the behaviour keeps and commits what it reached.
+		void CancelCapture();
 
 		bool AnimateControls(float seconds);
 
-		float Axis(const Node& control, UiPoint logical) const; // Pointer position along the control's axis.
+		// Value bindings: pulls bound values into their controls (UiBindings.cpp).
+		void PullBindings();
 
-		// --- Selection owners (UiSelection.cpp) ---
-		bool IsSelectionOwner(const Node& node) const
-		{
-			return node.Control.Kind == UiControlKind::RadioGroup || node.Control.Kind == UiControlKind::ListView ||
-				node.Control.Kind == UiControlKind::Dropdown;
-		}
+		void PushBinding(const UiEvent& event);
 
+		// --- Options (selection owners) ---
 		std::uint32_t OptionCount(const Node& owner) const;
 
 		UiNodeId OptionFor(const Node& owner, std::int32_t index) const;
-
-		// Input selection: clamps to [-1, count - 1]; ValueChanged (+ ValueCommitted) when changed.
-		bool SelectOption(Node& owner, std::int32_t index, bool commit);
-
-		void SyncOwner(Node& owner); // Dropdown label text and option visuals.
-
-		void RevealOption(Node& owner, std::int32_t index);
-
-		bool OwnerKey(Node& owner, UiKey key);
-
-		void OptionPressed(Node& option, bool inside);
-
-		void ToggleDropdown(Node& owner);
-
-		bool IsDropdownOpen(const Node& owner) const;
-
-		void CommitValueLabel(Node& label);
 
 		// --- Popups (UiPopups.cpp) ---
 		std::optional<std::size_t> PopupIndexOf(UiNodeId id) const; // The open popup containing a node.
@@ -348,6 +337,10 @@ namespace Swim::UI
 		void ShowPopup(Node& node, bool visible);
 
 		void ClosePopupsFrom(std::size_t index);
+
+		// Opens (or moves to the top) a popup; notifyAnchor: the anchor control's OnPopupLaidOut
+		// runs after the next Layout.
+		void OpenPopupEntry(UiNodeId id, const UiPopupDesc& desc, bool notifyAnchor);
 
 		void PlacePopups();
 

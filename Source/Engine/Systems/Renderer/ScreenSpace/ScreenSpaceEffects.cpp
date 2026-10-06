@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <stdexcept>
@@ -147,6 +148,30 @@ namespace Swim::Render
 		const bool fog = resources.ParamsRecord.FogEnabled != 0u;
 		const bool ssr = resources.ParamsRecord.SsrEnabled != 0u;
 		const bool probes = frame.Probes && frame.Probes->Count > 0;
+		const bool planar = frame.Planar && frame.Planar->Count > 0;
+
+		if (planar)
+		{
+			if (frame.Planar->Count > ScreenSpaceMaxPlanar)
+			{
+				throw std::invalid_argument(name + " planar reflections: 1 .. ScreenSpaceMaxPlanar records");
+			}
+
+			const auto idDesc = graph.GetDesc(frame.Planar->ObjectId);
+			const auto atlasDesc = graph.GetDesc(frame.Planar->Atlas);
+
+			if (!sameSize(idDesc) || idDesc.PixelFormat != Rhi::Format::R32Float || atlasDesc.PixelFormat != Rhi::Format::RGBA16Float)
+			{
+				throw std::invalid_argument(name + " planar reflections need a color-sized R32Float object id and an RGBA16Float atlas");
+			}
+
+			if (!desc.ProbeSampler)
+			{
+				throw std::invalid_argument(name + " planar reflections need the probe sampler");
+			}
+
+			resources.ParamsRecord.PlanarCount = frame.Planar->Count;
+		}
 
 		if (probes)
 		{
@@ -171,7 +196,7 @@ namespace Swim::Render
 			resources.ParamsRecord.ProbeMipCount = frame.Probes->MipCount;
 		}
 
-		if (ssr || probes)
+		if (ssr || probes || planar)
 		{
 			if (ssr && !desc.Reflection.Pipeline)
 			{
@@ -219,14 +244,14 @@ namespace Swim::Render
 			}
 		}
 
-		if (!ao && !fog && !ssr && !probes)
+		if (!ao && !fog && !ssr && !probes && !planar)
 		{
 			resources.Output = frame.Color;
 			resources.Passthrough = true;
 			return resources;
 		}
 
-		const bool temporal = frame.ReflectionTemporal.has_value() && frame.Velocity.has_value() && (ssr || probes) &&
+		const bool temporal = frame.ReflectionTemporal.has_value() && frame.Velocity.has_value() && (ssr || probes || planar) &&
 			desc.ReflectionTemporal.Pipeline != nullptr;
 
 		if (temporal)
@@ -315,7 +340,7 @@ namespace Swim::Render
 		GraphTexture reflectance;
 		GraphTexture specular;
 
-		if (ssr || probes)
+		if (ssr || probes || planar)
 		{
 			reflectance = *frame.Reflectance;
 			specular = *frame.Specular;
@@ -427,7 +452,7 @@ namespace Swim::Render
 			standInDesc.DebugName = standInName;
 			reflection = graph.CreateTexture(standInDesc);
 
-			if (!probes)
+			if (!probes && !planar)
 			{
 				reflectance = reflection;
 				specular = reflection;
@@ -479,9 +504,43 @@ namespace Swim::Render
 			idDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
 			const std::string idName = name + " object id stand-in";
 			idDesc.DebugName = idName;
-			objectId = graph.CreateTexture(idDesc);
-			const float zeroId = 0.0f;
-			AddTextureUpload(graph, idName + " upload", std::as_bytes(std::span(&zeroId, 1)), objectId, { 0, {}, {}, { 1, 1, 1 } });
+
+			if (planar)
+			{
+				objectId = frame.Planar->ObjectId; // Sphere caps match their owner through it.
+			}
+			else
+			{
+				objectId = graph.CreateTexture(idDesc);
+				const float zeroId = 0.0f;
+				AddTextureUpload(graph, idName + " upload", std::as_bytes(std::span(&zeroId, 1)), objectId, { 0, {}, {}, { 1, 1, 1 } });
+			}
+		}
+
+		// Planar inputs, or a 1x1 one-layer stand-in and one zero record (PlanarCount = 0).
+		GraphTexture planarAtlas;
+		GraphBuffer planarRecords;
+		std::uint32_t planarLayers = 1u;
+
+		if (planar)
+		{
+			planarAtlas = frame.Planar->Atlas;
+			planarRecords = frame.Planar->Records;
+			planarLayers = graph.GetDesc(planarAtlas).ArrayLayers;
+		}
+		else
+		{
+			Rhi::TextureDesc atlasDesc;
+			atlasDesc.Extent = { 1, 1, 1 };
+			atlasDesc.PixelFormat = Rhi::Format::RGBA16Float;
+			atlasDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::TransferDestination;
+			const std::string atlasName = name + " planar stand-in";
+			atlasDesc.DebugName = atlasName;
+			planarAtlas = graph.CreateTexture(atlasDesc);
+			const std::array<std::uint16_t, 4> zero{};
+			AddTextureUpload(graph, atlasName + " upload", std::as_bytes(std::span(zero)), planarAtlas, { 0, {}, {}, { 1, 1, 1 } });
+			const std::array<std::byte, ScreenSpacePlanarRecordBytes> record{};
+			planarRecords = graph.CreateUpload(record, name + " planar records stand-in", Rhi::BufferUsage::Storage, 16);
 		}
 
 		if (!desc.ProbeSampler)
@@ -538,7 +597,7 @@ namespace Swim::Render
 				b.Read(reflection, S::ShaderRead);
 				b.Read(surfaceNormal, S::ShaderRead);
 
-				if (ssr || probes)
+				if (ssr || probes || planar)
 				{
 					b.Read(reflectance, S::ShaderRead);
 					b.Read(specular, S::ShaderRead);
@@ -547,12 +606,14 @@ namespace Swim::Render
 				b.Read(probeCubes, S::ShaderRead);
 				b.Read(probeRecords, S::ShaderRead);
 				b.Read(objectId, S::ShaderRead);
+				b.Read(planarAtlas, S::ShaderRead);
+				b.Read(planarRecords, S::ShaderRead);
 				b.Write(output, S::ShaderWrite);
 				b.Write(reflectionTerm, S::ShaderWrite);
 			},
 			[program = desc.Composite, label = name + " composite", color, indirect, visibility, depth, depthFormat, depthAspect, params,
 				output, reflection, reflectance, specular, surfaceNormal, probeCubes, probeRecords, objectId, reflectionTerm, probeLayers,
-				probeMips, probeSampler = desc.ProbeSampler, width, height](RenderCommandContext& c)
+				probeMips, planarAtlas, planarRecords, planarLayers, probeSampler = desc.ProbeSampler, width, height](RenderCommandContext& c)
 			{
 				using B = ScreenSpaceCompositeBindings;
 				const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Color, color, Rhi::Format::RGBA16Float),
@@ -565,7 +626,8 @@ namespace Swim::Render
 					TextureWrite(c, B::Normal, surfaceNormal, Rhi::Format::RGBA16Float), Rhi::DescriptorWrite{},
 					Rhi::DescriptorWrite{}, BufferWrite(c, B::ProbeRecords, probeRecords),
 					TextureWrite(c, B::ObjectId, objectId, Rhi::Format::R32Float),
-					TextureWrite(c, B::ReflectionTermOut, reflectionTerm, Rhi::Format::RGBA16Float) };
+					TextureWrite(c, B::ReflectionTermOut, reflectionTerm, Rhi::Format::RGBA16Float), Rhi::DescriptorWrite{},
+					BufferWrite(c, B::PlanarRecords, planarRecords) };
 				auto completed = writes;
 				Rhi::TextureViewDesc cubeView;
 				cubeView.Dimension = Rhi::TextureViewDimension::TextureCubeArray;
@@ -576,6 +638,12 @@ namespace Swim::Render
 				completed[B::ProbeCubes].TextureResource = &c.CreateView(probeCubes, cubeView);
 				completed[B::ProbeSampler].Binding = B::ProbeSampler;
 				completed[B::ProbeSampler].SamplerResource = probeSampler;
+				Rhi::TextureViewDesc planarView;
+				planarView.Dimension = Rhi::TextureViewDimension::Texture2DArray;
+				planarView.PixelFormat = Rhi::Format::RGBA16Float;
+				planarView.ArrayLayerCount = planarLayers;
+				completed[B::PlanarAtlas].Binding = B::PlanarAtlas;
+				completed[B::PlanarAtlas].TextureResource = &c.CreateView(planarAtlas, planarView);
 				Dispatch(c, program, label, completed, width, height);
 			});
 

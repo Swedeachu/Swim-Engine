@@ -23,6 +23,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <sstream>
 
 namespace Game
@@ -123,44 +124,57 @@ namespace Game
 		return toggle;
 	}
 
-	void SandboxHud::Bind(UiNodeId node, std::function<float()> get, bool check)
+	UiNodeId SandboxHud::BoundSlider(UiNodeId parent, const std::string& label, float min, float max, int decimals,
+		std::function<float()> get, std::function<void(float)> set)
 	{
-		synced.push_back({ node, std::move(get), check });
+		CreateLabel(*document, parent, label);
+		UiSliderDesc desc;
+		desc.Min = min;
+		desc.Max = max;
+		desc.ShowValue = true;
+		desc.Decimals = decimals;
+		desc.EditableValue = true;
+		const auto slider = CreateSlider(*document, parent, desc);
+		// Two-way: edits call set; changes made elsewhere (console, presets, the fly camera's
+		// zoom) show up on the document's next Update. Nothing to keep in sync by hand.
+		document->BindValue(slider, std::move(get), std::move(set));
+		return slider;
+	}
+
+	UiNodeId SandboxHud::BoundCheckbox(UiNodeId parent, const std::string& label, std::function<bool()> get, std::function<void(bool)> set)
+	{
+		const auto box = CreateCheckbox(*document, parent, label);
+		document->BindValue(
+			box,
+			[get = std::move(get)]
+			{
+				return get() ? 1.0f : 0.0f;
+			},
+			[set = std::move(set)](float value)
+			{
+				set(value == 1.0f);
+			});
+		return box;
 	}
 
 	UiNodeId SandboxHud::SliderFor(UiNodeId parent, const std::string& label, float min, float max, float& value, int decimals)
 	{
-		float* target = &value;
-		const auto slider = AddSlider(parent, label, min, max, value, decimals,
-			[target](float v)
-			{
-				*target = v;
-			});
-		Bind(
-			slider,
-			[target]
-			{
-				return *target;
-			},
-			false);
+		CreateLabel(*document, parent, label);
+		UiSliderDesc desc;
+		desc.Min = min;
+		desc.Max = max;
+		desc.ShowValue = true;
+		desc.Decimals = decimals;
+		desc.EditableValue = true;
+		const auto slider = CreateSlider(*document, parent, desc);
+		document->BindValue(slider, value);
 		return slider;
 	}
 
 	UiNodeId SandboxHud::CheckFor(UiNodeId parent, const std::string& label, bool& value)
 	{
-		bool* target = &value;
-		const auto box = AddCheckbox(parent, label, value,
-			[target](bool on)
-			{
-				*target = on;
-			});
-		Bind(
-			box,
-			[target]
-			{
-				return *target ? 1.0f : 0.0f;
-			},
-			true);
+		const auto box = CreateCheckbox(*document, parent, label);
+		document->BindChecked(box, value);
 		return box;
 	}
 
@@ -168,8 +182,13 @@ namespace Game
 		std::function<std::uint32_t()> get, std::function<void(std::uint32_t)> set)
 	{
 		CreateLabel(*document, parent, label);
-		const auto dropdown = CreateDropdown(*document, parent, options, static_cast<std::int32_t>(get()));
-		document->OnValue(dropdown.Root,
+		const auto dropdown = CreateDropdown(*document, parent, options);
+		document->BindValue(
+			dropdown.Root,
+			[get = std::move(get)]
+			{
+				return static_cast<float>(get());
+			},
 			[set = std::move(set)](float value)
 			{
 				if (value >= 0.0f)
@@ -178,41 +197,7 @@ namespace Game
 				}
 
 			});
-		Bind(
-			dropdown.Root,
-			[get = std::move(get)]
-			{
-				return static_cast<float>(get());
-			},
-			false);
 		return dropdown.Root;
-	}
-
-	void SandboxHud::SyncControls()
-	{
-		if (!document)
-		{
-			return;
-		}
-
-		for (const auto& control : synced)
-		{
-			const float value = control.Get();
-
-			if (control.Check)
-			{
-				const auto state = value != 0.0f ? UiCheckState::Checked : UiCheckState::Unchecked;
-
-				if (document->GetChecked(control.Node) != state)
-				{
-					document->SetChecked(control.Node, state);
-				}
-			}
-			else if (std::abs(document->GetValue(control.Node) - value) > 1.0e-6f * std::max(1.0f, std::abs(value)))
-			{
-				document->SetValue(control.Node, value);
-			}
-		}
 	}
 
 	bool SandboxHud::Command(const std::string& command)
@@ -489,6 +474,7 @@ namespace Game
 		CheckFor(parent, "SSR history (temporal)", s.ScreenSpace.Reflections.History);
 		CheckFor(parent, "SSR back-face thickness", s.ScreenSpace.Reflections.BackFaces);
 		CheckFor(parent, "Reflection probes", s.ReflectionProbes.Enabled);
+		CheckFor(parent, "Planar reflections (mirrors, chrome caps)", s.PlanarReflections.Enabled);
 		AddSlider(parent, "Probe faces per frame", 1.0f, 12.0f, float(s.ReflectionProbes.FacesPerFrame), 0,
 			[&s](float value)
 			{
@@ -583,11 +569,12 @@ namespace Game
 			const auto lensSlider =
 				[&](const std::string& label, float min, float max, int decimals, float Engine::GravitationalLensing::Lens::* field)
 			{
-				const auto get = [lensing, field]
-				{
-					return lensing->Lenses.empty() ? 0.0f : lensing->Lenses.front().*field;
-				};
-				const auto slider = AddSlider(parent, label, min, max, get(), decimals,
+				BoundSlider(
+					parent, label, min, max, decimals,
+					[lensing, field]
+					{
+						return lensing->Lenses.empty() ? 0.0f : lensing->Lenses.front().*field;
+					},
 					[lensing, field](float value)
 					{
 						for (auto& lens : lensing->Lenses)
@@ -596,7 +583,6 @@ namespace Game
 						}
 
 					});
-				Bind(slider, get, false);
 			};
 			lensSlider("Gas density", 0.0f, 4.0f, 2, &Engine::GravitationalLensing::Lens::GasDensity);
 			lensSlider("Gas brightness", 0.0f, 12.0f, 1, &Engine::GravitationalLensing::Lens::GasBrightness);
@@ -666,19 +652,17 @@ namespace Game
 			for (const auto& toggle : toggles->List())
 			{
 				const std::string name = toggle.Name;
-				const auto box = AddCheckbox(parent, name, toggle.Get(),
+				const auto box = BoundCheckbox(
+					parent, name,
+					[toggles, name]
+					{
+						return toggles->Get(name).value_or(false);
+					},
 					[toggles, name](bool on)
 					{
 						toggles->Set(name, on);
 					});
 				CreateTooltip(*document, box, toggle.Description, 0.45f);
-				Bind(
-					box,
-					[toggles, name]
-					{
-						return toggles->Get(name).value_or(false) ? 1.0f : 0.0f;
-					},
-					true);
 			}
 		}
 	}
@@ -723,18 +707,16 @@ namespace Game
 
 		if (auto* cameras = scene->GetCameraSystem())
 		{
-			const auto fov = AddSlider(parent, "Field of view (vertical, degrees)", 20.0f, 110.0f, cameras->GetCamera().GetFieldOfView(), 0,
-				[cameras](float value)
-				{
-					cameras->GetCamera().SetFieldOfView(value);
-				});
-			Bind(
-				fov,
+			BoundSlider(
+				parent, "Field of view (vertical, degrees)", 20.0f, 110.0f, 0,
 				[cameras]
 				{
 					return cameras->GetCamera().GetFieldOfView(); // The fly camera's zoom changes it too.
 				},
-				false);
+				[cameras](float value)
+				{
+					cameras->GetCamera().SetFieldOfView(value);
+				});
 		}
 
 		if (sandbox && sandbox->GetDepthOfField())
@@ -1203,8 +1185,6 @@ namespace Game
 		{
 			document->SetValue(bookmarkDropdown, static_cast<float>(sandbox->GetLastBookmark()));
 		}
-
-		SyncControls();
 
 		if (profilePending && render && render->Profiler && !render->Profiler->IsCapturing())
 		{

@@ -9,9 +9,11 @@
 namespace Engine
 {
 
-	// The behaviours of one entity and the engine states they run in. Behaviours are
-	// the OOP scripting layer (player controllers, cameras, managers); bulk simulation
-	// (physics, rendering, particles) stays data-driven.
+	// The behaviours of one entity (ownership) and the engine states they run in. Behaviours
+	// are the OOP scripting layer (player controllers, cameras, managers); bulk simulation
+	// (physics, rendering, particles) stays data-driven. The scene runs them from its
+	// BehaviorScheduler lists, never by walking these components: attach through
+	// Scene::EmplaceBehavior/AddBehavior and change masks through Scene::SetEnabledStates.
 	struct BehaviorComponents
 	{
 		std::vector<std::unique_ptr<Behavior>> behaviors;
@@ -26,6 +28,19 @@ namespace Engine
 
 		BehaviorComponents& operator=(BehaviorComponents&&) noexcept = default;
 
+		EngineState GetEnabledStates() const { return enabledStates; }
+
+		bool IsEnabledIn(EngineState state) const { return HasAnyEngineStates(enabledStates, state); }
+
+		// Whether the behaviours run while the engine is in `current` (one state).
+		bool CanExecute(EngineState current) const { return IsEnabledIn(current); }
+
+	  private:
+
+		EngineState enabledStates = EngineState::Playing;
+
+		friend class Scene;
+
 		void Add(std::unique_ptr<Behavior> behavior) { behaviors.emplace_back(std::move(behavior)); }
 
 		// Exactly the states these behaviours run in (default: Playing). A camera
@@ -35,15 +50,6 @@ namespace Engine
 		void AddEnabledStates(EngineState states) { enabledStates |= states; }
 
 		void RemoveEnabledStates(EngineState states) { enabledStates &= ~states; }
-
-		EngineState GetEnabledStates() const { return enabledStates; }
-
-		bool IsEnabledIn(EngineState state) const { return HasAnyEngineStates(enabledStates, state); }
-
-		// Whether the behaviours run while the engine is in `current` (one state).
-		bool CanExecute(EngineState current) const { return IsEnabledIn(current); }
-
-		EngineState enabledStates = EngineState::Playing;
 	};
 
 } // namespace Engine

@@ -3,6 +3,7 @@
 #include "Engine/Systems/Renderer/Lights/LightDesc.h"
 #include "Engine/Systems/Renderer/Particles/ParticleGraphResources.h"
 #include "Engine/Systems/Renderer/Particles/ParticleSettings.h"
+#include "Engine/Systems/Renderer/Reflections/PlanarReflectionTypes.h"
 #include "Engine/Systems/Renderer/Reflections/ReflectionProbeTypes.h"
 #include "Engine/Systems/Renderer/Skinning/SkinningGraphResources.h"
 #include "Engine/Systems/Renderer/Resources/GpuHandle.h"
@@ -67,8 +68,12 @@ namespace Engine
 		// This frame's reflection probes (Engine::ReflectionProbe on entities with a Transform).
 		std::span<const Swim::Render::ReflectionProbeDesc> GetReflectionProbes() const { return probes; }
 
-		// Mesh entities that moved since the last frame (bounding spheres), while any probe
-		// exists: the renderer re-captures the probe faces that see them first.
+		// This frame's planar reflectors (Engine::PlanarReflector on entities with a Transform).
+		std::span<const Swim::Render::PlanarReflectorDesc> GetPlanarReflectors() const { return planars; }
+
+		// Mesh entities that moved this frame (bounding spheres, from the transform system's
+		// dirty list), while any probe or planar reflector exists: the renderer re-captures the
+		// probe faces and planar captures that see them first.
 		std::span<const Swim::Render::ReflectionProbeMover> GetReflectionMovers() const { return movers; }
 
 		const RenderExtractionStats& GetExtractionStats() const { return extraction; }
@@ -149,8 +154,8 @@ namespace Engine
 		std::vector<bool> shadowSlots;
 		std::vector<Swim::Render::ShadowCasterDesc> casters;
 		std::vector<Swim::Render::ReflectionProbeDesc> probes;
+		std::vector<Swim::Render::PlanarReflectorDesc> planars;
 		std::vector<Swim::Render::ReflectionProbeMover> movers;
-		std::unordered_map<entt::entity, std::array<float, 3>> lastPositions;
 
 	};
 

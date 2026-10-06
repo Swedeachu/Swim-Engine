@@ -7,14 +7,14 @@ Critical-path item **79** (Phase 20). Checkpoints:
 - **2026-09-25 — controls, themes and canvases:** checkboxes, toggles, sliders (ticks, value labels) and scroll bars (step buttons, auto/overlay visibility) as document behaviour; visual states with per-state rules, eased transitions and image skins; document themes; Tab order, spatial and gamepad navigation; canvas placement (screen, render surface, world panel, billboard) with ray-cast input, pointer capture and one keyboard owner across canvases (`UiCanvasRouter`); world-space drawing (a canvas-to-clip matrix, derivative-based coverage and MSDF ranges, depth testing, canvas fade) and render surfaces with re-rasterized mip chains; a second native smoke; and a glyph-atlas fix for point-only contours.
 - **2026-09-25 — popups and selection controls (this document's current state):** a popup layer in `UiDocument` (placement with flipping and clamping, stacking, light dismiss, Escape, close-on-activate, modal input scoping), menus, context menus, tooltips and modal dialogs; radio groups, list views, dropdowns and virtualized lists as selection owners; slider values edited by typing; context-menu input in the bridge and router. The UI widget set is complete for the engine assembly phase.
 
-The assembled runtime now uses the retained UI with scene-side canvases and modern rendering. The 2026-09-30 API cleanup adds document callbacks, registered widgets and extensible theme classes; see the final section below. Legacy text/UI is archived as text only.
+The assembled runtime now uses the retained UI with scene-side canvases and modern rendering. The 2026-09-30 API cleanup added document callbacks and extensible theme classes; the 2026-10-06 cleanup makes every control a registered `UiControlBehavior` in its own file, adds value bindings and lets gameplay register controls the same way (final section). Legacy text/UI is archived as text only.
 
 ## Module map
 
 | Path | Role | Depends on |
 | --- | --- | --- |
 | `Systems/Text` | `FontFace`, `FontCollection`, `GlyphAtlas`, `TextSegmentation`, `TextLayout`, `Utf8` | FreeType, HarfBuzz, msdfgen, SheenBidi, libunibreak (private) |
-| `Systems/UI` | `UiDocument` (tree/API, layout, paint, input, editing, controls, selection, popups and visual-state units), `UiTheme`, `UiWidgets`, `UiCanvas` (placement math), `UiCanvasRouter` (multi-canvas input) | Text |
+| `Systems/UI` | `UiDocument` (tree/API, layout, paint, input, editing, control host, bindings, popups and visual-state units), `UiControlBehavior`/`UiControlRegistry`, `Widgets/` (one unit per control type), `UiTheme`, `UiWidgets`, `UiCanvas` (placement math), `UiCanvasRouter` (multi-canvas input) | Text |
 | `Systems/UiInput` | `UiInputBridge`: `Input::InputSystem` frame → a `UiDocument` or a `UiCanvasRouter` (mouse, keys, text, IME, gamepad) | UI, Input |
 | `Renderer/UiRendering` | `UiRenderer` (screen and world canvases), `UiAtlasTextures`, `UiRenderSurfaces`, `UiRenderReference` (`Ui::` CPU definition), records/bindings/settings | RenderGraph, RHI contract, Resources, UI/Text headers |
 | `Shaders/Slang/Ui` | `UiRecords.slang`, `UiQuad.slang` (`SwimUiQuad`) | — |
@@ -92,7 +92,7 @@ Pointer input is still in framebuffer pixels; `PointerDown` takes modifiers (Shi
 
 ### Controls
 
-A control is behaviour the document implements for an ordinary node (`SetControl(node, UiControl)`); its parts are ordinary descendant nodes listed in `UiControl::Parts`. Controls take input only through the document (pointer, wheel, keys, activation), never from the platform, so they behave the same on a screen overlay and on a world-space canvas. A control node is hit-testable and focusable (scroll bars only with `Style.Focusable`); parts are not, so presses anywhere on a checkbox's label or a slider's track reach the control.
+A control is a registered behaviour (`UiControlBehavior`, see the final section) attached to an ordinary node (`SetControl(node, "Slider", UiControl)`); its parts are ordinary descendant nodes listed in `UiControl::Parts`. Controls take input only through the document (pointer, wheel, keys, activation), never from the platform, so they behave the same on a screen overlay and on a world-space canvas. A control node is hit-testable and focusable (scroll bars only with `Style.Focusable`); parts are not, so presses anywhere on a checkbox's label or a slider's track reach the control.
 
 | Kind | Input | Parts |
 | --- | --- | --- |
@@ -388,7 +388,7 @@ In the container both smokes passed on a source-built SwiftShader with 0 outlier
 - [msdfgen](https://github.com/Chlumsky/msdfgen) (median, screen pixel range)
 - [SDL3 text input](https://wiki.libsdl.org/SDL3/SDL_SetTextInputArea)
 
-## Document callbacks and widget registration (2026-09-30)
+## Controls, widgets and bindings (2026-10-06)
 
 The engine owns interaction callbacks. There is no `Game/Ui` binding manager, watcher polling or gameplay `Process` call. `UiRuntime::ApplyInput` finishes routing input, then dispatches callbacks before gameplay updates; standalone documents dispatch through `Update`. One handler per node and event kind is retained with the node and released on removal. Handlers can replace themselves, remove nodes or change document state. Events created by a handler are deferred to a subsequent dispatch. Programmatic setters do not call interaction handlers, preventing feedback loops. `DrainEvents` remains independent for standalone consumers; managed runtime documents discard their polling history after dispatch.
 
@@ -399,38 +399,49 @@ const auto play = CreateButton(document, document.GetRoot(), "Play");
 document.OnClick(play, [&] { StartGame(); });
 
 const auto volume = CreateSlider(document, document.GetRoot(), UiSliderDesc{ 0.0f, 1.0f, 0.8f });
-document.OnValue(volume, [&](float value) { SetMasterVolume(value); });
+document.BindValue(volume, settings.MasterVolume); // Pulled every Update, pushed on input.
+document.BindChecked(vsyncBox, settings.VSync);
 ```
 
-`UiWidget` is an optional light reference for chained callbacks and common properties:
+**Bindings** replace hand-written state sync. `BindValue(node, float&)`, `BindChecked(node, bool&)` and `BindValue(node, get, set)` keep a control and a value in sync both ways: the document pulls the value in `Update` (only bound nodes are visited; unchanged values cost a compare) and pushes input changes at dispatch. `Unbind(node)` or `ClearCallbacks` drops them.
+
+**Every control type is a `UiControlBehavior`** in its own file under `Systems/UI/Widgets/` (`UiButton`, `UiCheckbox`, `UiToggle`, `UiSlider`, `UiScrollBar`, `UiRadioGroup`, `UiListView`, `UiDropdown`, `UiMenu`, `UiTooltip`, `UiModal`, `UiBasicWidgets`; selection owners share `UiSelection`). The generic document units (`UiInput`, `UiControlHost`, `UiVisuals`, `UiPopups`) only call virtual hooks; there is no `switch` over control kinds. `UiControlKind` remains as a coarse tag for built-ins (`Custom` for everything else); the type name (`UiControlTypeName`, `GetControlBehavior(node)->GetTypeName()`) is the identity.
+
+The document tracks hover, press, focus and pointer capture; a behaviour asks its `UiControlContext` (`IsHovered`, `IsPressed`, `IsFocused`, `IsDragging`, geometry, scroll, options, popups) and changes things through it (`ChangeValue`, `Commit`, `ChangeCheck`, `Emit`, `Invalidate*`, `SetText`, `OpenPopup`). Hooks: `OnPointerDown` (returns `Ignore`, `Handled` or `Capture`), `OnPointerDrag`, `OnPointerUp`, `OnPointerCancel`, `OnPointerEnter`, `OnKey`, `OnActivate` (`Click`, `Handled`, `KeepOpen`), `OnWheel`, `OnBlur`, `OnPartCommit`, `PlacePart` (geometry roles), `OnArranged`, `OnUpdate`/`IsAnimating` (only controls that `WantsUpdates`/`WantsArranged` are visited), `ClampValue`/`SetValue`/`GetValue`/`SetChecked`, `GetStateFlags` and capability queries (`OwnsOptions`, `AcceptsTicks`, `UsesScrollTarget`, `UsesPopup`, …).
+
+`UiControlRegistry::Global()` maps names to factories (plain function pointers) and optional default builders. Built-ins register themselves on first use; gameplay registers the same way, from its own file:
 
 ```cpp
-auto play = CreateWidget(document, document.GetRoot(), "Button", UiButtonDesc{ "Play" });
-play.OnClick([&] { StartGame(); });
-```
-
-Every document starts with a `UiWidgetRegistry`. Engine helpers delegate to that registry, including typed composite results such as `UiDropdown`, `UiModal` and `UiScrollArea`. Private builders live in `Internal/UiWidgetBuilders.h`; gameplay needs only the public headers. Virtual lists compose the registered list-view widgets. Custom widgets use the same registration mechanism and retain their own options type:
-
-```cpp
-struct HealthBarDesc
+class KnobControl final : public UiControlBehavior
 {
-    float Maximum = 100.0f;
-    float Current = 100.0f;
+  public:
+	UiPointerResponse OnPointerDown(UiControlContext& context, const UiPointerInput& pointer) override
+	{
+		grabY = pointer.Position.Y;
+		start = context.Control().Value;
+		return UiPointerResponse::Capture; // Drags reach this control until release.
+	}
+	void OnPointerDrag(UiControlContext& context, const UiPointerInput& pointer) override
+	{
+		context.ChangeValue(start + (grabY - pointer.Position.Y) * 0.01f, false);
+	}
+	void OnPointerUp(UiControlContext& context, bool, bool) override { context.Commit(start); }
+
+  private:
+	float grabY = 0.0f, start = 0.0f;
 };
 
-document.GetWidgets().Register<HealthBarDesc>("HealthBar",
-    [](UiDocument& document, UiNodeId parent, const HealthBarDesc& health)
-    {
-        UiSliderDesc desc;
-        desc.Max = health.Maximum;
-        desc.Value = health.Current;
-        return CreateSlider(document, parent, desc);
-    });
+UiNodeId BuildKnob(UiDocument& document, UiNodeId parent); // Creates the node(s), SetControl(node, "Game.Knob", control).
+SWIM_UI_WIDGET(KnobControl, "Game.Knob", BuildKnob);       // Or SWIM_UI_CONTROL(Type, Name) without a builder.
 
-auto health = CreateWidget(document, document.GetRoot(), "HealthBar", HealthBarDesc{});
+auto knob = CreateWidget(document, parent, "Game.Knob"); // UiWidget: a non-owning (document, node) handle.
+knob.OnValue([&](float v) { SetGain(v); });
+document.SetControl(otherNode, "Game.Knob", control); // Or attach to any node.
 ```
 
-Names are unique within the document's registry. Unknown widgets, wrong options/result types and unknown parents throw before invoking a factory. Composite widgets can be created with `document.GetWidgets().Create<UiDropdown>("Dropdown", document, parent, UiDropdownDesc{ ... })`.
+`UiWidget` exposes `OnClick`, `OnValue`, `OnChecked`, `OnText`, `Bind`, `SetValue`, `SetText`, `SetEnabled`, `SetVisible` and `SetTooltip` without templates. Unknown type names throw `std::invalid_argument` before anything is created; duplicate registrations throw too. The typed `Create*` helpers (`CreateDropdown`, `CreateModal`, `CreateScrollArea`, …) remain for code that wants the part handles.
+
+Cost: callbacks are shared, so dispatch copies no `std::function`; visual resolution skips documents whose state did not change; `Update` visits only bound, updating or transitioning nodes; `Layout` visits only controls that want `OnArranged`.
 
 Themes use registered class builders rather than a closed switch or fixed style array. `RegisterClass("Game.ScoreBadge", builder)` returns a stable ID; `FindClass` retrieves it, and `ReplaceClass` explicitly replaces an existing class builder. Builders receive the theme's palette and metrics, so custom classes respond to theme changes. Set the theme on the document after editing its registration or palette. Replacing a document's theme with one missing a class in use is rejected before changing its state. Default classes, state rules, per-node overrides and `Customize` remain supported.
 

@@ -244,6 +244,15 @@ namespace Game
 					}
 
 				});
+			commands->Register("sandbox.planar",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->PlanarReflections.Enabled = number(arguments, 1.0f) != 0.0f;
+					}
+
+				});
 			commands->Register("sandbox.reflectdebug",
 				[this, number](const std::vector<std::string>& arguments)
 				{
@@ -513,6 +522,11 @@ namespace Game
 		// Idle faces (no mover in view) refresh every 30 frames; faces that see movers still
 		// update every frame the budget allows.
 		settings.ReflectionProbes.IdleRefreshFrames = 30;
+		// Planar reflections (the mirror cube, the lab's chrome caps): at most two captures a
+		// frame at half their on-screen size; still views re-render four times a second.
+		settings.PlanarReflections.Enabled = true;
+		settings.PlanarReflections.CapturesPerFrame = 2;
+		settings.PlanarReflections.ResolutionScale = 0.5f;
 		// 32-pixel light clusters: shorter light lists for the 256-light swarm (measured: the
 		// Forward+ pass -0.6 ms in the atrium; the mask pass is word-major and cheap).
 		settings.ClusterTileSize = 32;

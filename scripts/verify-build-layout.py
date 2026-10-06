@@ -1209,10 +1209,23 @@ def check_phase20_controls_and_canvases(failures: list[str]) -> None:
     math and multi-canvas input live in Systems/UI, which stays independent of the
     renderer, scene, platform and input modules (world-space drawing is UiRendering's)."""
     ui = ROOT / "Source/Engine/Systems/UI"
-    for relative in ("UiControls.cpp", "UiVisuals.cpp", "UiTheme.h", "UiTheme.cpp", "UiWidgets.cpp", "UiCanvas.h", "UiCanvas.cpp",
-                     "UiCanvasRouter.h", "UiCanvasRouter.cpp", "UiPopups.cpp", "UiSelection.cpp"):
+    for relative in ("UiControlHost.cpp", "UiControlBehavior.h", "UiControlRegistry.h", "UiControlRegistry.cpp", "UiBindings.cpp",
+                     "UiVisuals.cpp", "UiTheme.h", "UiTheme.cpp", "UiWidgets.h", "UiWidgets.cpp", "UiCanvas.h", "UiCanvas.cpp",
+                     "UiCanvasRouter.h", "UiCanvasRouter.cpp", "UiPopups.cpp"):
         if not (ui / relative).is_file():
             fail(f"UI controls/canvas unit is missing: Systems/UI/{relative}", failures)
+    # Every control is its own unit (behaviour + builder) registered by name; the document's
+    # generic plumbing never switches on a control kind.
+    for widget in ("UiButton", "UiCheckbox", "UiToggle", "UiSlider", "UiScrollBar", "UiSelection", "UiRadioGroup", "UiListView",
+                   "UiDropdown", "UiMenu", "UiTooltip", "UiModal", "UiBasicWidgets"):
+        for suffix in (".h", ".cpp"):
+            if not (ui / "Widgets" / (widget + suffix)).is_file():
+                fail(f"UI widget unit is missing: Systems/UI/Widgets/{widget}{suffix}", failures)
+    for generic in ("UiControlHost.cpp", "UiInput.cpp", "UiVisuals.cpp", "UiDocument.cpp", "UiPopups.cpp", "UiLayout.cpp"):
+        path = ui / generic
+        if path.is_file() and re.search(r"UiControlKind::(Button|Checkbox|Toggle|Slider|ScrollBar|RadioGroup|ListView|Dropdown)\b",
+                                        path.read_text(encoding="utf-8")):
+            fail(f"generic UI plumbing switches on a built-in control kind again: Systems/UI/{generic}", failures)
     for path in ui.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in SOURCE_SUFFIXES:
             continue
@@ -1230,7 +1243,7 @@ def check_phase20_controls_and_canvases(failures: list[str]) -> None:
                      "RadioGroup,", "ListView,", "Dropdown,"):
         if fragment not in header:
             fail(f"UiDocument is missing the popup/selection contract: {fragment}", failures)
-    widgets = (ui / "UiWidgets.h").read_text(encoding="utf-8") if (ui / "UiWidgets.h").is_file() else ""
+    widgets = "".join(path.read_text(encoding="utf-8") for path in sorted((ui / "Widgets").glob("*.h"))) if (ui / "Widgets").is_dir() else ""
     for fragment in ("CreateRadioGroup(", "CreateListView(", "CreateDropdown(", "CreateMenu(", "CreateTooltip(", "CreateModal(",
                      "class UiVirtualList", "EditableValue"):
         if fragment not in widgets:
@@ -2399,16 +2412,23 @@ def check_phase5_scene_architecture(failures: list[str]) -> None:
             fail(f"explicit behavior registration seam is missing: {fragment}", failures)
     check_suite_is_compiled("Scene/Ecs", "BehaviorRegistryTests.cpp", failures)
 
-    # Playing-mode performance invariants: initialization shares the behavior pass,
-    # and high-churn spatial updates batch duplicate BVH ancestor work.
+    # Playing-mode performance invariants: behaviours run from the scheduler's dense
+    # per-phase lists (initialization shares the pass; no per-frame entity snapshot,
+    # sort or allocation), and high-churn spatial updates batch duplicate BVH ancestor work.
+    scheduler_source = (ROOT / "Source" / "Engine" / "Systems" / "Entity" / "BehaviorScheduler.cpp")
+    scheduler_text = scheduler_source.read_text(encoding="utf-8", errors="ignore") if scheduler_source.is_file() else ""
     for fragment in (
         "void ForEachInitializedBehavior",
-        "behavior->InitIfNeeded()",
-        "behavior->Update(behavior->UsesRealTime() ? realDelta : dt)",
-        "ForEachInitializedBehavior(&Behavior::FixedUpdate, tickThisSecond)",
+        "behaviorScheduler.RunUpdate(GetExecutionState(), dt, GetTime().RealDelta)",
+        "behaviorScheduler.RunFixedUpdate(GetExecutionState(), tickThisSecond)",
     ):
         if fragment not in scene_header and fragment not in scene_source:
-            fail(f"scene behavior update regained a duplicate initialization traversal: {fragment}", failures)
+            fail(f"scene behavior update no longer runs from the behavior scheduler: {fragment}", failures)
+    for fragment in ("behavior.InitIfNeeded();", "behavior.Update(delta);", "behavior.FixedUpdate(tick);"):
+        if fragment not in scheduler_text:
+            fail(f"the behavior scheduler lost its single initialize-and-run pass: {fragment}", failures)
+    if "SnapshotBehaviorEntities" in scene_header or "SnapshotBehaviorEntities" in scene_source:
+        fail("scene behavior update regained the per-frame entity snapshot (SnapshotBehaviorEntities)", failures)
     if "ForEachBehavior(&Behavior::InitIfNeeded);\n\t\tForEachBehavior(&Behavior::Update" in scene_source:
         fail("Scene Update performs two full BehaviorComponents traversals instead of fusing initialization with update", failures)
 

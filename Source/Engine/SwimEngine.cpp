@@ -808,6 +808,7 @@ namespace Engine
 				auto& ao = s.ScreenSpace.AmbientOcclusion;
 				auto& shadow = s.Shadow;
 				auto& probes = s.ReflectionProbes;
+				auto& planar = s.PlanarReflections;
 				std::uint32_t ssrHalf = ssr.HalfResolution ? 1u : 0u;
 				std::uint32_t aoHalf = ao.HalfResolution ? 1u : 0u;
 				struct Knob
@@ -842,6 +843,15 @@ namespace Engine
 					{ "probes.filters", nullptr, &probes.FiltersPerFrame },
 					{ "probes.idle", nullptr, &probes.IdleRefreshFrames },
 					{ "probes.samples", nullptr, &probes.PrefilterSamples },
+					{ "planar.planes", nullptr, &planar.MaxPlanes },
+					{ "planar.atlas", nullptr, &planar.AtlasResolution },
+					{ "planar.captures", nullptr, &planar.CapturesPerFrame },
+					{ "planar.scale", &planar.ResolutionScale },
+					{ "planar.min-screen", &planar.MinScreenFraction },
+					{ "planar.ssr-handoff", &planar.SsrHandoff },
+					{ "planar.motion", &planar.MotionTolerance },
+					{ "planar.max-age", &planar.MaxAgeSeconds },
+					{ "planar.cull", &planar.CullDistance },
 				};
 
 				if (arguments.size() < 2)
@@ -1363,6 +1373,7 @@ namespace Engine
 		input.ShadowCasters = renderBridge->GetShadowCasters();
 		input.ReflectionProbes = renderBridge->GetReflectionProbes();
 		input.ReflectionMovers = renderBridge->GetReflectionMovers();
+		input.PlanarReflectors = renderBridge->GetPlanarReflectors();
 		input.Ui = ui;
 		input.GlyphAtlas = uiRuntime ? &uiRuntime->GetAtlas() : nullptr;
 		const bool finalFrame = config.MaxFrames != 0 && totalFrames + 1 >= config.MaxFrames;

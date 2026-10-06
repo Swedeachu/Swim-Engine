@@ -63,6 +63,18 @@ namespace Swim::Render
 			std::uint32_t MipCount = 1;
 		};
 		std::optional<ProbeInputs> Probes;
+		// Optional: planar reflections (PlanarReflectionRenderer's atlas and the active
+		// GpuPlanarReflectionRecords). They replace the probes and the environment on the mirrors
+		// they cover, and SSR only where their texels are coarser than the screen's. Works with
+		// SSR off too.
+		struct PlanarInputs
+		{
+			GraphTexture Atlas;		 // RGBA16Float 2D array, Sampled.
+			GraphBuffer Records;	 // Count GpuPlanarReflectionRecords.
+			GraphTexture ObjectId;	 // ForwardPlusTargets::ObjectId (sphere caps match their owner).
+			std::uint32_t Count = 0; // 1 .. ScreenSpaceMaxPlanar.
+		};
+		std::optional<PlanarInputs> Planar;
 		// Optional (needs ScreenSpaceEffectsDesc::ReflectionTemporal and Velocity): the temporal
 		// reflection filter. After the composite, the reflection term (what replaced the specular
 		// IBL) is blended with last frame's filtered term at the reprojected position, clamped to

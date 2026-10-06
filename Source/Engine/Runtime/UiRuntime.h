@@ -145,6 +145,10 @@ namespace Engine
 		std::unordered_map<entt::entity, CanvasState> canvases;
 		std::uint64_t sequence = 0;
 		std::vector<UiDrawItem> drawList;
+		// Per-frame scratch lists, reused (cleared, never shrunk).
+		std::vector<std::shared_ptr<Swim::UI::UiDocument>> dispatchScratch;
+		std::vector<const CanvasState*> orderedScratch;
+		std::vector<CanvasState*> overlayScratch;
 
 	};
 

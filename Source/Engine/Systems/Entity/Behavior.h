@@ -7,6 +7,8 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include <cstdint>
+
 namespace Swim::Input
 {
 
@@ -44,6 +46,10 @@ namespace Engine
 	//
 	// Which states a behaviour runs in is its BehaviorComponents mask (Playing by
 	// default). Mutate the scene through GetScene().GetCommandBuffer() while iterating.
+	//
+	// The scene runs behaviours from dense per-phase lists (BehaviorScheduler) in attach
+	// order. Only the hooks a type overrides cost anything: a behaviour without Update is not
+	// in the per-frame list at all. UsesRealTime is read once, when the behaviour is attached.
 	class Behavior : public Machine
 	{
 
@@ -114,6 +120,28 @@ namespace Engine
 		CameraSystem* cameraSystem = nullptr;
 		bool runCollisionCallBacks = false;
 		bool hasInited = false;
+
+	  private:
+
+		friend class BehaviorScheduler;
+
+		static constexpr std::uint32_t NoSlot = UINT32_MAX;
+
+		// Where the scheduler lists this behaviour (all, update, fixed update). Never copied:
+		// a copied or moved behaviour starts unscheduled.
+		struct SchedulerLink
+		{
+			std::uint32_t Slots[3] = { NoSlot, NoSlot, NoSlot };
+			bool Scheduled = false;
+
+			SchedulerLink() = default;
+
+			SchedulerLink(const SchedulerLink&) {}
+
+			SchedulerLink& operator=(const SchedulerLink&) { return *this; }
+		};
+
+		SchedulerLink link;
 
 	};
 

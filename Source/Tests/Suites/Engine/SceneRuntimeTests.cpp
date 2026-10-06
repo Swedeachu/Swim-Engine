@@ -548,3 +548,194 @@ SWIM_TEST("Engine.SceneRuntime", "ScaledCollidersRestOnTheirSurfaceAndInitialVel
 	const float y = scene.GetRegistry().get<Engine::Transform>(resting).GetPosition().y;
 	SWIM_CHECK_NEAR(y, 0.2f, 0.03f);
 }
+
+namespace
+{
+
+	struct SchedulerCounts
+	{
+		int Updates = 0;
+		int Fixed = 0;
+		int Inits = 0;
+		std::vector<std::string> Order;
+	};
+
+	class UpdatingBehavior : public Engine::Behavior
+	{
+
+	  public:
+
+		UpdatingBehavior(Engine::Scene* scene, entt::entity owner, SchedulerCounts* countsValue, std::string nameValue)
+			: Behavior(scene, owner), counts(countsValue), name(std::move(nameValue))
+		{
+		}
+
+		int Init() override
+		{
+			++counts->Inits;
+			return 0;
+		}
+
+		void Update(double) override
+		{
+			++counts->Updates;
+			counts->Order.push_back(name);
+
+			if (victim != entt::null)
+			{
+				GetScene().DestroyEntity(victim); // Removes a later behaviour mid-run.
+				victim = entt::null;
+			}
+
+			if (spawnOnce)
+			{
+				spawnOnce = false;
+				const entt::entity spawned = GetScene().CreateEntity("Spawned");
+				GetScene().EmplaceBehavior<UpdatingBehavior>(spawned, counts, std::string("spawned"));
+			}
+		}
+
+		entt::entity victim = entt::null;
+		bool spawnOnce = false;
+
+	  private:
+
+		SchedulerCounts* counts;
+		std::string name;
+
+	};
+
+	class FixedOnlyBehavior : public Engine::Behavior
+	{
+
+	  public:
+
+		FixedOnlyBehavior(Engine::Scene* scene, entt::entity owner, SchedulerCounts* countsValue) : Behavior(scene, owner), counts(countsValue)
+		{
+		}
+
+		void FixedUpdate(unsigned int) override { ++counts->Fixed; }
+
+	  private:
+
+		SchedulerCounts* counts;
+
+	};
+
+	// Reacts to hooks only (collisions, state changes): never listed for Update or
+	// FixedUpdate, yet initialized before its first hook.
+	class PassiveBehavior : public Engine::Behavior
+	{
+
+	  public:
+
+		using Behavior::Behavior;
+
+		int Init() override
+		{
+			++inits;
+			return 0;
+		}
+
+		int inits = 0;
+
+	};
+
+} // namespace
+
+SWIM_TEST("Engine.SceneRuntime", "BehaviourSchedulerListsOnlyOverriddenPhases")
+{
+	static_assert(Engine::BehaviorTraitsOf<UpdatingBehavior>().Update && !Engine::BehaviorTraitsOf<UpdatingBehavior>().FixedUpdate);
+	static_assert(!Engine::BehaviorTraitsOf<FixedOnlyBehavior>().Update && Engine::BehaviorTraitsOf<FixedOnlyBehavior>().FixedUpdate);
+	static_assert(!Engine::BehaviorTraitsOf<PassiveBehavior>().Update && !Engine::BehaviorTraitsOf<PassiveBehavior>().FixedUpdate);
+
+	SchedulerCounts counts;
+	Engine::Scene scene("Scheduler");
+	const entt::entity a = scene.CreateEntity("A");
+	scene.EmplaceBehavior<UpdatingBehavior>(a, &counts, std::string("a"));
+	scene.EmplaceBehavior<FixedOnlyBehavior>(a, &counts);
+	auto* passive = scene.EmplaceBehavior<PassiveBehavior>(a);
+
+	SWIM_CHECK_EQUAL(scene.GetBehaviorCount(), std::size_t{ 3 });
+	SWIM_CHECK_EQUAL(scene.GetUpdatingBehaviorCount(), std::size_t{ 1 });
+
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	scene.InternalFixedUpdate(0);
+	SWIM_CHECK_EQUAL(counts.Updates, 1);
+	SWIM_CHECK_EQUAL(counts.Fixed, 1);
+	SWIM_CHECK_EQUAL(counts.Inits, 1);
+	SWIM_CHECK_EQUAL(passive->inits, 1);
+	SWIM_CHECK(passive->HasInited());
+
+	// Paused: the default mask (Playing) keeps them idle; enabling Paused through the scene
+	// updates the run lists in place.
+	scene.SetEnabledStates(a, EngineState::None);
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	SWIM_CHECK_EQUAL(counts.Updates, 1);
+	scene.SetEnabledStates(a, EngineState::Playing);
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	SWIM_CHECK_EQUAL(counts.Updates, 2);
+}
+
+SWIM_TEST("Engine.SceneRuntime", "BehaviourSchedulerSurvivesStructuralChangesMidRun")
+{
+	SchedulerCounts counts;
+	Engine::Scene scene("Scheduler");
+	const entt::entity first = scene.CreateEntity("First");
+	const entt::entity second = scene.CreateEntity("Second");
+	const entt::entity third = scene.CreateEntity("Third");
+	auto* killer = scene.EmplaceBehavior<UpdatingBehavior>(first, &counts, std::string("first"));
+	scene.EmplaceBehavior<UpdatingBehavior>(second, &counts, std::string("second"));
+	scene.EmplaceBehavior<UpdatingBehavior>(third, &counts, std::string("third"));
+	killer->victim = second;
+	killer->spawnOnce = true;
+
+	// "second" is destroyed by "first" before its turn; "spawned" joins from the next run.
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	SWIM_REQUIRE_EQUAL(counts.Order.size(), std::size_t{ 2 });
+	SWIM_CHECK_EQUAL(counts.Order[0], std::string("first"));
+	SWIM_CHECK_EQUAL(counts.Order[1], std::string("third"));
+	SWIM_CHECK_EQUAL(scene.GetBehaviorCount(), std::size_t{ 3 });
+
+	counts.Order.clear();
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	SWIM_REQUIRE_EQUAL(counts.Order.size(), std::size_t{ 3 });
+	SWIM_CHECK_EQUAL(counts.Order[2], std::string("spawned"));
+
+	// Removing the component (and destroying entities) takes behaviours off the lists.
+	SWIM_CHECK(scene.RemoveComponent<Engine::BehaviorComponents>(third));
+	scene.DestroyEntity(first);
+	counts.Order.clear();
+	scene.InternalSceneUpdate(1.0 / 60.0);
+	SWIM_REQUIRE_EQUAL(counts.Order.size(), std::size_t{ 1 });
+	SWIM_CHECK_EQUAL(counts.Order[0], std::string("spawned"));
+	SWIM_CHECK_EQUAL(scene.GetBehaviorCount(), std::size_t{ 1 });
+}
+
+SWIM_TEST("Engine.SceneRuntime", "ForEachWithTagToleratesNestedCallsAndTagChanges")
+{
+	Engine::Scene scene("Tags");
+	constexpr Engine::TagId tag = Engine::MakeTag("Test.Nested");
+
+	for (int i = 0; i < 4; ++i)
+	{
+		scene.AddTag(scene.CreateEntity(), "Test.Nested");
+	}
+
+	int outer = 0;
+	int inner = 0;
+	scene.ForEachWithTag(tag,
+		[&](entt::entity entity)
+		{
+			++outer;
+			scene.ForEachWithTag(tag,
+				[&](entt::entity)
+				{
+					++inner;
+				});
+			scene.RemoveTag(entity, tag); // The snapshot keeps the outer walk intact.
+		});
+	SWIM_CHECK_EQUAL(outer, 4);
+	SWIM_CHECK_EQUAL(inner, 4 + 3 + 2 + 1);
+	SWIM_CHECK_EQUAL(scene.CountWithTag(tag), std::size_t{ 0 });
+}

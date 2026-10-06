@@ -11,6 +11,8 @@
 #include "Engine/Systems/Renderer/Materials/StandardMaterial.h"
 #include "Engine/Systems/Renderer/Particles/ParticleSystem.h"
 #include "Engine/Systems/Renderer/PostProcess/PostProcessor.h"
+#include "Engine/Systems/Renderer/Reflections/PlanarReflectionRenderer.h"
+#include "Engine/Systems/Renderer/Reflections/PlanarReflections.h"
 #include "Engine/Systems/Renderer/Reflections/ReflectionProbeRenderer.h"
 #include "Engine/Systems/Renderer/Reflections/ReflectionProbes.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
@@ -156,6 +158,23 @@ namespace Engine
 		ReflectionProbes.FiltersPerFrame = std::clamp(ReflectionProbes.FiltersPerFrame, 1u, Swim::Render::MaxReflectionProbes);
 		clampFinite(ReflectionProbes.MoveThreshold, 0.0f, 100.0f, 0.05f);
 		clampFinite(ReflectionProbes.MoverRange, 0.0f, 1000.0f, 15.0f);
+		auto& planar = PlanarReflections;
+		planar.MaxPlanes = std::clamp(planar.MaxPlanes, 1u, Swim::Render::MaxPlanarReflections);
+		planar.AtlasResolution = std::clamp(PowerOfTwoFloor(std::max(planar.AtlasResolution, 64u)), 64u, 2048u);
+		planar.MinResolution = std::clamp(planar.MinResolution, 8u, planar.AtlasResolution);
+		planar.CapturesPerFrame = std::min(planar.CapturesPerFrame, Swim::Render::MaxPlanarReflections);
+		clampFinite(planar.ResolutionScale, 0.05f, 4.0f, 0.5f);
+		clampFinite(planar.MinScreenFraction, 0.0f, 1.0f, 0.04f);
+		clampFinite(planar.SsrHandoff, -1.0f, 1.0f, 0.85f);
+		clampFinite(planar.PlaneAngleTolerance, 0.0f, 0.5f, 0.035f);
+		clampFinite(planar.PlaneDistanceTolerance, 0.0f, 10.0f, 0.05f);
+		clampFinite(planar.MotionTolerance, 0.0f, 1000.0f, 3.0f);
+		clampFinite(planar.MaxAgeSeconds, 0.0f, 3600.0f, 0.25f);
+		clampFinite(planar.SphereMinCosine, 0.5f, 0.999f, 0.9f);
+		clampFinite(planar.RoughnessFadeStart, 0.0f, 1.0f, 0.15f);
+		clampFinite(planar.RoughnessFadeEnd, planar.RoughnessFadeStart, 1.0f, 0.35f);
+		clampFinite(planar.PortalMargin, 0.0f, 2.0f, 0.1f);
+		clampFinite(planar.CullDistance, 1.0f, 100000.0f, 150.0f);
 		ClusterTileSize = std::clamp(ClusterTileSize, 8u, 256u);
 		ClusterSlices = std::clamp(ClusterSlices, 1u, 64u);
 		clampFinite(ClusterFar, 1.0f, 100000.0f, 200.0f);
@@ -202,6 +221,7 @@ namespace Engine
 		RuntimeComputeProgram environmentSky, environmentDownsample, environmentPrefilter, environmentIrradiance, environmentLut;
 		RuntimeComputeProgram environmentOverlay; // Optional: feature overlays (clouds) in the environment.
 		RuntimeComputeProgram probeResolve, probePrefilter; // Optional: reflection probes.
+		RuntimeComputeProgram planarResolve;				// Optional: planar reflections.
 		RuntimeComputeProgram postHistogram, postExposure, postBloomDown, postBloomUp, postComposite, postCompositeHdr;
 		RuntimeComputeProgram temporalResolve, ssAo, ssBlur, ssComposite, ssReflection, ssReflectionTemporal;
 		RuntimeComputeProgram particleSimulate, particleEmit, particleCompact, particleFinalize, skinningProgram;
@@ -251,6 +271,8 @@ namespace Engine
 		// first filter for its current probe would show another probe's cube).
 		std::vector<std::uint32_t> pendingFilters;
 		std::vector<std::uint64_t> filteredKey;
+		std::unique_ptr<R::PlanarReflectionRenderer> planarRenderer; // Null when its program is missing.
+		R::PlanarReflections::Planner planarPlanner;
 		std::unique_ptr<R::ScreenSpaceEffects> screenSpace;
 		std::unique_ptr<R::TemporalAntiAliasing> temporal;
 		std::unique_ptr<R::PostProcessor> post;
@@ -262,6 +284,7 @@ namespace Engine
 		std::unique_ptr<R::GpuVisibility> visibility;
 		std::unique_ptr<R::GpuVisibility> shadowVisibility;
 		std::unique_ptr<R::GpuVisibility> probeVisibility; // Reflection probe capture views (own LOD history).
+		std::unique_ptr<R::GpuVisibility> planarVisibility; // Planar reflection captures (own LOD history).
 		std::uint32_t visibilitySlots = 0;
 		std::map<std::uint32_t, R::StandardPbr::Parameters> routes; // Material set -> parameters.
 
@@ -764,6 +787,15 @@ namespace Engine
 			probeRenderer = std::make_unique<R::ReflectionProbeRenderer>(device, probeDesc);
 		}
 
+		if (shaders.Contains("PlanarReflectionResolve"))
+		{
+			planarResolve = shaders.LoadCompute("PlanarReflectionResolve");
+			R::PlanarReflectionRendererDesc planarDesc;
+			planarDesc.Resolve = { planarResolve.Pipeline.get(), planarResolve.Layout.get(), planarResolve.Space };
+			planarDesc.Sampler = linearClamp.get();
+			planarRenderer = std::make_unique<R::PlanarReflectionRenderer>(device, planarDesc);
+		}
+
 		temporal = std::make_unique<R::TemporalAntiAliasing>(device,
 			R::TemporalAntiAliasingDesc{ { temporalResolve.Pipeline.get(), temporalResolve.Layout.get(), temporalResolve.Space }, "TAA" });
 
@@ -856,6 +888,11 @@ namespace Engine
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*probeVisibility, set, parameters);
 		}
+
+		if (planarVisibility)
+		{
+			R::ForwardPlusRenderer::RouteMaterial(*planarVisibility, set, parameters);
+		}
 	}
 
 	void FrameRenderer::Impl::EnsureVisibility(std::uint32_t slots)
@@ -877,6 +914,8 @@ namespace Engine
 		visibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
 		visibilityDesc.DebugName = "Probe visibility";
 		probeVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
+		visibilityDesc.DebugName = "Planar visibility";
+		planarVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
 		visibilityDesc.MaterialBinCapacities = R::ShadowRenderer::VisibilityBinCapacities(desc.MaxObjects, 4096);
 		visibilityDesc.DebugName = "Shadow visibility";
 		shadowVisibility = std::make_unique<R::GpuVisibility>(device, visibilityDesc);
@@ -886,6 +925,7 @@ namespace Engine
 		{
 			R::ForwardPlusRenderer::RouteMaterial(*visibility, set, parameters);
 			R::ForwardPlusRenderer::RouteMaterial(*probeVisibility, set, parameters);
+			R::ForwardPlusRenderer::RouteMaterial(*planarVisibility, set, parameters);
 			R::ShadowRenderer::RouteMaterial(*shadowVisibility, set, parameters);
 		}
 	}
@@ -1476,8 +1516,12 @@ namespace Engine
 			stats.PageSlots = static_cast<std::uint32_t>(pageSlots.size());
 			std::optional<R::ForwardPlusGraphResources> forwardResources;
 			std::optional<R::ScreenSpaceFrame::ProbeInputs> probeInputs;
+			std::optional<R::ScreenSpaceFrame::PlanarInputs> planarInputs;
 			stats.ReflectionProbes = 0;
 			stats.ReflectionProbeFaces = 0;
+			stats.PlanarReflections = 0;
+			stats.PlanarCaptures = 0;
+			stats.PlanarCandidates = 0;
 
 			if (draw3D)
 			{
@@ -1765,6 +1809,122 @@ namespace Engine
 						stats.ReflectionProbes = inputs.Count;
 					}
 				}
+
+				// --- Planar reflections (the sharp top of the reflection hierarchy) ----------
+				// A few captures per frame (the planner's budget), each a small Forward+ render from
+				// the camera mirrored in the reflector, through it as a window: the off-axis frustum
+				// spans only the reflector's visible portal and its near plane is the mirror, so GPU
+				// visibility culls everything else (and the reflector itself) at coarse LODs. The
+				// captures land in a persistent atlas the composite reprojects until they are re-rendered.
+				const auto& planarSettings = settings.PlanarReflections;
+
+				if (I.planarRenderer && planarSettings.Enabled && !input.PlanarReflectors.empty())
+				{
+					if (I.planarRenderer->Ensure(planarSettings.AtlasResolution, planarSettings.MaxPlanes))
+					{
+						I.planarPlanner.Reset();
+					}
+
+					R::PlanarReflections::ViewCamera planarCamera;
+					planarCamera.ViewProjection = viewProjection;
+					planarCamera.Position = camera.Position;
+					planarCamera.Forward = camera.Forward;
+					planarCamera.VerticalFov = camera.VerticalFov;
+					planarCamera.ViewportWidth = float(width);
+					planarCamera.ViewportHeight = float(height);
+					const auto& plan = I.planarPlanner.Update(
+						input.PlanarReflectors, planarCamera, I.frameIndex + 1, I.featureTime, planarSettings, input.ReflectionMovers);
+					stats.PlanarCandidates = plan.Candidates;
+
+					if (!plan.Captures.empty() || !plan.Records.empty())
+					{
+						const auto atlas = I.planarRenderer->Import(graph);
+
+						for (const auto& capture : plan.Captures)
+						{
+							auto captureTargets = makeTargets(capture.Width, capture.Height, "Planar ");
+							// Sky rays of the off-axis view: forward shifted to the window's centre.
+							const auto& f = capture.FrustumScale;
+							std::array<float, 3> rayRight{}, rayUp{}, rayForward{};
+
+							for (int c = 0; c < 3; ++c)
+							{
+								rayRight[c] = capture.Right[c] / f[0];
+								rayUp[c] = capture.Up[c] / f[1];
+								rayForward[c] = capture.Forward[c] + capture.Right[c] * (f[2] / f[0]) + capture.Up[c] * (f[3] / f[1]);
+							}
+
+							recordSky(captureTargets, rayRight, rayUp, rayForward, capture.Width, capture.Height, "Planar sky");
+
+							R::RenderViewDesc captureViewDesc;
+							captureViewDesc.ViewProjection = capture.ViewProjection;
+							captureViewDesc.CameraPosition = capture.Position;
+							captureViewDesc.LodScale = capture.LodScale;
+							R::VisibilityFrameDesc captureVisibility;
+							captureVisibility.View = R::BuildGpuViewRecord(captureViewDesc);
+							captureVisibility.View.ExcludedObjectId = capture.ExcludedObjectId; // The mirror does not see itself.
+
+							// The (degenerate, infinite) far plane becomes the reflection's cull distance.
+							for (int c = 0; c < 4; ++c)
+							{
+								captureVisibility.View.FrustumPlanes[4 * 4 + c] = capture.CullPlane[c];
+							}
+
+							captureVisibility.IndexPages = indexPages;
+							captureVisibility.ReadStats = false;
+							captureVisibility.ZeroUnusedCommands = R::NeedsZeroedCommands(I.drawPath);
+							const auto captureVisible = I.planarVisibility->Record(graph, sceneResources, geometryResources, captureVisibility);
+
+							R::ClusterGridDesc captureGrid = grid;
+							captureGrid.ViewportWidth = capture.Width;
+							captureGrid.ViewportHeight = capture.Height;
+							captureGrid.Near = capture.NearClip;
+							captureGrid.Far = std::max(std::min(settings.ClusterFar, planarSettings.CullDistance), capture.NearClip * 2.0f);
+							R::ClusterView captureClusterView;
+							captureClusterView.View = capture.View;
+							captureClusterView.Projection = capture.Projection;
+							const auto captureClusters = I.clusters->Record(graph, lightResources, captureGrid, captureClusterView);
+
+							R::ForwardPlusFrame captureFrame = forwardFrame;
+							captureFrame.Visibility = &captureVisible;
+							captureFrame.Clusters = &captureClusters;
+							captureFrame.View.ViewProjection = capture.ViewProjection;
+							captureFrame.View.PreviousViewProjection = capture.ViewProjection;
+							captureFrame.View.Jitter = { 0.0f, 0.0f };
+							captureFrame.View.CameraPosition = capture.Position;
+							captureFrame.View.CameraForward = capture.Forward;
+							captureFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
+							captureFrame.Transparent = false;		  // No sort per capture.
+							captureFrame.DebugName = "Planar Forward+"; // Its own rows in the GPU timings.
+							I.forward->Record(graph, captureFrame, captureTargets);
+							R::ReflectionProbeCaptureSky captureSky;
+
+							if (environment && settings.SkyBackground)
+							{
+								captureSky.Environment = environment->Prefiltered;
+								captureSky.Scale = settings.EnvironmentIntensity;
+								captureSky.Rotation = settings.EnvironmentRotation;
+							}
+
+							I.planarRenderer->RecordResolve(graph, atlas, capture, captureTargets.Color, captureTargets.Depth, captureSky);
+						}
+
+						graph.Export(atlas.Texture, ResourceState::ShaderRead);
+						stats.PlanarCaptures = static_cast<std::uint32_t>(plan.Captures.size());
+
+						if (!plan.Records.empty())
+						{
+							R::ScreenSpaceFrame::PlanarInputs inputs;
+							inputs.Atlas = atlas.Texture;
+							inputs.Records = graph.CreateUpload(
+								std::as_bytes(std::span(plan.Records)), "Planar reflection records", S::BufferUsage::Storage, 16);
+							inputs.ObjectId = targets.ObjectId;
+							inputs.Count = static_cast<std::uint32_t>(plan.Records.size());
+							planarInputs = inputs;
+							stats.PlanarReflections = inputs.Count;
+						}
+					}
+				}
 			}
 
 			lap("Build: Reflection probes");
@@ -1806,6 +1966,7 @@ namespace Engine
 			ssFrame.NoiseFrame = static_cast<std::uint32_t>(I.frameIndex);
 			ssFrame.BackDepth = targets.BackDepth;
 			ssFrame.Probes = probeInputs;
+			ssFrame.Planar = planarInputs;
 			// Reflections of reflections: rays read the previous resolved frame (which holds
 			// its reflections) at the hit's reprojected position. Only with TAA, whose
 			// history it is, and Record below reuses the same import.
@@ -1828,7 +1989,7 @@ namespace Engine
 			// other holds last frame's.
 			std::optional<R::GraphTexture> reflectionHistoryNext;
 			const bool reflectionTemporal = ssFrame.Settings.Reflections.Temporal && targets.Velocity &&
-				(ssFrame.Settings.Reflections.Enabled || probeInputs.has_value());
+				(ssFrame.Settings.Reflections.Enabled || probeInputs.has_value() || planarInputs.has_value());
 
 			if (reflectionTemporal)
 			{

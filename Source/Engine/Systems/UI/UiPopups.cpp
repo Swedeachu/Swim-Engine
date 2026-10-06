@@ -1,5 +1,6 @@
 #include "Engine/Systems/UI/Internal/UiDocumentImpl.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 // Popups (critical-path item 79): menus, dropdown lists, tooltips and modal dialogs are
@@ -421,40 +422,45 @@ namespace Swim::UI
 		TooltipShown = tooltip;
 	}
 
-	void UiDocument::OpenPopup(UiNodeId id, const UiPopupDesc& desc)
+	void UiDocument::Impl::OpenPopupEntry(UiNodeId id, const UiPopupDesc& desc, bool notifyAnchor)
 	{
-		auto& node = impl->Get(id);
+		auto& node = Get(id);
 
-		if (node.Parent != impl->Root)
+		if (node.Parent != Root)
 		{
 			throw std::invalid_argument("A popup must be a child of the UI root");
 		}
 
-		if ((desc.Anchor && !impl->Nodes.contains(desc.Anchor.Value)) || !std::isfinite(desc.Point.X) || !std::isfinite(desc.Point.Y) ||
+		if ((desc.Anchor && !Nodes.contains(desc.Anchor.Value)) || !std::isfinite(desc.Point.X) || !std::isfinite(desc.Point.Y) ||
 			!std::isfinite(desc.Offset.X) || !std::isfinite(desc.Offset.Y) ||
 			static_cast<std::uint8_t>(desc.Side) > static_cast<std::uint8_t>(UiPopupSide::Center))
 		{
 			throw std::invalid_argument("Invalid UI popup description");
 		}
 
-		impl->DismissForOpen(desc.Anchor, id);
-		UiNodeId prior = impl->Focused;
-		const auto existing = std::find_if(impl->Popups.begin(), impl->Popups.end(),
-			[&](const Impl::PopupEntry& entry)
+		DismissForOpen(desc.Anchor, id);
+		UiNodeId prior = Focused;
+		const auto existing = std::find_if(Popups.begin(), Popups.end(),
+			[&](const PopupEntry& entry)
 			{
 				return entry.Node == id;
 			});
 
-		if (existing != impl->Popups.end())
+		if (existing != Popups.end())
 		{
 			prior = existing->PriorFocus;
-			impl->Popups.erase(existing);
+			Popups.erase(existing);
 		}
 
-		impl->Popups.push_back({ id, desc, prior, desc.FocusFirst });
-		impl->ShowPopup(node, true);
-		impl->MarkLayoutDirty(id); // Placed again with the new description.
-		impl->QueueEvent({ UiEventKind::PopupOpened, id });
+		Popups.push_back({ id, desc, prior, desc.FocusFirst, notifyAnchor });
+		ShowPopup(node, true);
+		MarkLayoutDirty(id); // Placed again with the new description.
+		QueueEvent({ UiEventKind::PopupOpened, id });
+	}
+
+	void UiDocument::OpenPopup(UiNodeId id, const UiPopupDesc& desc)
+	{
+		impl->OpenPopupEntry(id, desc, false);
 	}
 
 	bool UiDocument::ClosePopup(UiNodeId id)
