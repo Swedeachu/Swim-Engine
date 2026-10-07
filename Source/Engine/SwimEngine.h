@@ -231,6 +231,11 @@ namespace Engine
 		std::uint32_t surfaceWidth{ 1280 };
 		std::uint32_t surfaceHeight{ 720 };
 		std::filesystem::path pendingCapture;
+		// capture.sequence: consecutive frames written as <prefix>_<n>.ppm (frame-by-frame debugging).
+		std::string captureSequencePrefix;
+		std::uint64_t captureSequenceStart = 0; // The first frame (totalFrames) to capture.
+		std::uint32_t captureSequenceCount = 0;
+		std::uint32_t captureSequenceDone = 0;
 
 		std::unique_ptr<Swim::Platform::PlatformSystem> platformSystem;
 		std::unique_ptr<Swim::Platform::Window> engineWindow;

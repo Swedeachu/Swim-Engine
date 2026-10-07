@@ -51,7 +51,7 @@ struct ScreenSpaceParams
 	uint ReflectionTemporal;
 	float ReflectionTemporalBlend;
 	uint PlanarCount; // Active planar reflection records (composite).
-	uint Reserved6;
+	float SsrMaxFootprint; // ReflectionSettings::MaxFootprint (0: off).
 };
 
 static const float ScreenSpacePi = 3.14159265358979;

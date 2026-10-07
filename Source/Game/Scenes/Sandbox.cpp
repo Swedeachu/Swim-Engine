@@ -515,7 +515,7 @@ namespace Game
 		// 20 m default those rays faded out and fell back to the environment, which showed
 		// as a fuzzy inner "ball" of sky colour inside the reflection.
 		reflections.MaxDistance = 70.0f;
-		reflections.MaxSteps = 128;
+		reflections.MaxSteps = 96; // Planar captures and probes cover the long mirror rays.
 		// Checkerboard: half the rays, every pixel traced every second frame (half-rate
 		// screen-space reflections). Mirrors and the chrome spheres' caps come from planar
 		// captures, so SSR is mostly what those miss. `sandbox.ssrhalf 0` traces every pixel.
@@ -538,20 +538,23 @@ namespace Game
 		settings.ReflectionProbes.FacesPerFrame = 16;
 		settings.ReflectionProbes.Resolution = 128;
 		settings.ReflectionProbes.MoverRange = 10.0f; // Movers farther away are a few texels in a probe.
+		settings.ReflectionProbes.CullDistance = 60.0f; // The lab's probes skip Sponza (70 m away).
 		// Idle faces (nothing moving in view) refresh every 30 frames.
 		settings.ReflectionProbes.IdleRefreshFrames = 30;
 		// Planar reflections (the mirror cube, every chrome sphere's cap): full rate - every
 		// visible capture re-renders every frame (nothing is reprojected from an older frame),
-		// at three capture texels per four screen pixels, jittered with the camera so TAA
-		// anti-aliases them (no supersampling).
+		// at one capture texel per two screen pixels (a quarter of the pixels), magnified
+		// through the composite's Catmull-Rom filter and jittered with the camera so TAA
+		// anti-aliases them. At this density the 512 atlas holds any capture up close.
 		auto& planar = settings.PlanarReflections;
 		planar.Enabled = true;
 		planar.MaxPlanes = 12; // Every reflector in the lab at once (no slot thrashing between them).
-		planar.AtlasResolution = 1024;
+		planar.AtlasResolution = 512;
 		planar.CapturesPerFrame = 12;
 		planar.MaxAgeSeconds = 0.0f;
-		planar.ResolutionScale = 0.75f;
+		planar.ResolutionScale = 0.5f;
 		planar.Supersample = 1;
+		planar.CullDistance = 80.0f;
 		// 32-pixel light clusters: shorter light lists for the 256-light swarm (measured: the
 		// Forward+ pass -0.6 ms in the atrium; the mask pass is word-major and cheap).
 		settings.ClusterTileSize = 32;

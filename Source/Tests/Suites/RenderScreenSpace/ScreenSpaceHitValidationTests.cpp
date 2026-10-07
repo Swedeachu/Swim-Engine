@@ -54,6 +54,9 @@ namespace
 		settings.Reflections.MaxDistance = 70.0f; // The sandbox's settings.
 		settings.Reflections.MaxSteps = 128;
 		settings.Reflections.Thickness = 0.1f;
+		// Hit finding only: the footprint fade (curved surfaces hand minified reflections to
+		// the probes) is a separate policy, checked in Render.ScreenSpace.Reference.
+		settings.Reflections.MaxFootprint = 0.0f;
 		auto params = BuildScreenSpaceParams(settings, view, width, height, 0);
 		params.SsrBackDepth = backFaces ? 1u : 0u;
 		Tally tally;

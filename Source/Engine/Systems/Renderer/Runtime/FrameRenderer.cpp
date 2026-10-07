@@ -158,6 +158,7 @@ namespace Engine
 		ReflectionProbes.FiltersPerFrame = std::clamp(ReflectionProbes.FiltersPerFrame, 1u, Swim::Render::MaxReflectionProbes);
 		clampFinite(ReflectionProbes.MoveThreshold, 0.0f, 100.0f, 0.05f);
 		clampFinite(ReflectionProbes.MoverRange, 0.0f, 1000.0f, 15.0f);
+		clampFinite(ReflectionProbes.CullDistance, 0.0f, 100000.0f, 100.0f);
 		auto& planar = PlanarReflections;
 		planar.MaxPlanes = std::clamp(planar.MaxPlanes, 1u, Swim::Render::MaxPlanarReflections);
 		planar.AtlasResolution = std::clamp(PowerOfTwoFloor(std::max(planar.AtlasResolution, 64u)), 64u, 2048u);
@@ -1727,6 +1728,22 @@ namespace Engine
 						R::VisibilityFrameDesc faceVisibility;
 						faceVisibility.View = R::BuildGpuViewRecord(faceViewDesc);
 						faceVisibility.View.ExcludedObjectId = probe.OwnerObjectId; // The owner does not see itself.
+
+						// Geometry beyond CullDistance along the face is a few texels in a probe: the
+						// (infinite) far plane becomes the cull distance, and the face draws a fraction
+						// of a large scene (a probe face's cost is its geometry, not its pixels).
+						if (probeSettings.CullDistance > 0.0f)
+						{
+							const auto& f = basis.Forward;
+							const float along = f[0] * probe.Position[0] + f[1] * probe.Position[1] + f[2] * probe.Position[2];
+							const std::array<float, 4> far{ -f[0], -f[1], -f[2], along + probeSettings.CullDistance };
+
+							for (int c = 0; c < 4; ++c)
+							{
+								faceVisibility.View.FrustumPlanes[4 * 4 + c] = far[static_cast<std::size_t>(c)];
+							}
+						}
+
 						faceVisibility.IndexPages = indexPages;
 						faceVisibility.ReadStats = false;
 						faceVisibility.ZeroUnusedCommands = R::NeedsZeroedCommands(I.drawPath);
@@ -1752,6 +1769,7 @@ namespace Engine
 						faceFrame.View.CameraForward = basis.Forward;
 						faceFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
 						faceFrame.Transparent = false; // Glass is not worth a sort per captured face.
+						faceFrame.DepthPrepass = false; // One geometry pass: small targets, cheap overdraw.
 						faceFrame.DebugName = "Probe Forward+"; // Its own rows in the GPU timings.
 						I.forward->Record(graph, faceFrame, faceTargets);
 						R::ReflectionProbeRenderer::CaptureSky captureSky;
@@ -1954,6 +1972,7 @@ namespace Engine
 							captureFrame.View.CameraForward = capture.Forward;
 							captureFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
 							captureFrame.Transparent = false;		  // No sort per capture.
+							captureFrame.DepthPrepass = false;		  // One geometry pass (below screen resolution).
 							captureFrame.DebugName = "Planar Forward+"; // Its own rows in the GPU timings.
 							I.forward->Record(graph, captureFrame, captureTargets);
 							R::ReflectionProbeCaptureSky captureSky;

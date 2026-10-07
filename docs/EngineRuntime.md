@@ -129,6 +129,7 @@ Engine commands (for `--exec` and the command registry):
 | `timescale <x>` | Set the simulation time scale |
 | `scene <name>`, `reload` | Switch scenes, or reset the active one, at the next frame |
 | `capture [file.ppm]` | Capture the next rendered frame |
+| `capture.sequence <prefix> <after> <count>` | Capture `count` consecutive frames, starting `after` frames from now, as `<prefix>_000.ppm`, ... (frame-to-frame artefacts: ghosting, shimmer) |
 | `camera ex ey ez [tx ty tz]` | Place the main camera (scenes stop moving it) |
 | `render.stats [n]` | Print the renderer's frame stats (every n frames) |
 | `render.toggles [filter]`, `render.toggle <name\|group.*\|all> [0\|1]` | List or flip the profiling switches (every pass, feature and scene part; docs/Profiling.md) |

@@ -136,6 +136,19 @@ namespace Swim::Render::ScreenSpace
 		bool Rejected = false;	 // Reached a surface from its hidden side (RejectedHit); X, Y are that surface.
 	};
 
+	// How far a pixel's world normal turns to its neighbours on the same surface (view depth
+	// within 5 %): the largest |n(neighbour) - n| of the four, about the angle per pixel.
+	float NormalTurnPerPixel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x,
+		std::uint32_t y);
+	// How many pixels at the hit one pixel's reflection covers: (surface depth x pixel angle +
+	// travelled x (pixel angle + 2 x normal turn)) / (hit depth x pixel angle), the pixel
+	// angle 2 / (P11 x Height). About 1 for a flat mirror; large on a sphere's rim, which
+	// minifies what it reflects.
+	float ReflectionFootprint(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x,
+		std::uint32_t y, float surfaceDepth, float hitDepth, float travelled);
+	// clamp(2 - footprint / SsrMaxFootprint, 0, 1) (1 with SsrMaxFootprint = 0).
+	float FootprintFade(const GpuScreenSpaceParams& params, float footprint);
+
 	// The march, in order:
 	//  1. the pixel's view position and normal (sky or normal-less pixels, and those at
 	//     or above SsrMaxRoughness, miss);
@@ -157,7 +170,7 @@ namespace Swim::Render::ScreenSpace
 	//     there; otherwise it passed behind a closer surface and the march goes on;
 	//  5. a hit whose normal faces along the ray (a back face) is rejected;
 	//  6. confidence = roughness fade x screen-edge fade (exact hit position) x distance fade
-	//     x facing fade (FacingFade).
+	//     x facing fade (FacingFade) x footprint fade (FootprintFade).
 	// The largest t in [0, 1] at which (x0, y0) + t (dx, dy) is still on screen (0.01 px
 	// inside the edges): the march samples only [0, tExit].
 	float ScreenExit(float x0, float y0, float dx, float dy, float width, float height);

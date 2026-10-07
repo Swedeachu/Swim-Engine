@@ -29,6 +29,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <optional>
 #include <cmath>
 #include <filesystem>
@@ -663,6 +664,22 @@ namespace Engine
 			{
 				RequestCapture(arguments.empty() ? std::filesystem::path("capture.ppm") : std::filesystem::path(arguments.front()));
 			});
+		// capture.sequence <prefix> <after frames> <count>: captures `count` consecutive frames,
+		// starting `after frames` from now, as <prefix>_000.ppm, <prefix>_001.ppm, ... (temporal
+		// artefacts - ghosting, jitter - are only visible frame to frame).
+		commands.Register("capture.sequence",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.size() < 3)
+				{
+					throw std::invalid_argument("usage: capture.sequence <prefix> <after frames> <count>");
+				}
+
+				captureSequencePrefix = arguments[0];
+				captureSequenceStart = totalFrames + static_cast<std::uint64_t>(std::max(0, std::stoi(arguments[1])));
+				captureSequenceCount = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
+				captureSequenceDone = 0;
+			});
 		commands.Register("camera",
 			[this](const std::vector<std::string>& arguments)
 			{
@@ -843,6 +860,7 @@ namespace Engine
 					{ "probes.filters", nullptr, &probes.FiltersPerFrame },
 					{ "probes.idle", nullptr, &probes.IdleRefreshFrames },
 					{ "probes.samples", nullptr, &probes.PrefilterSamples },
+					{ "probes.cull", &probes.CullDistance },
 					{ "planar.planes", nullptr, &planar.MaxPlanes },
 					{ "planar.atlas", nullptr, &planar.AtlasResolution },
 					{ "planar.captures", nullptr, &planar.CapturesPerFrame },
@@ -1378,6 +1396,14 @@ namespace Engine
 		input.PlanarReflectors = renderBridge->GetPlanarReflectors();
 		input.Ui = ui;
 		input.GlyphAtlas = uiRuntime ? &uiRuntime->GetAtlas() : nullptr;
+
+		if (captureSequenceDone < captureSequenceCount && totalFrames >= captureSequenceStart && pendingCapture.empty())
+		{
+			char name[32];
+			std::snprintf(name, sizeof(name), "_%03u.ppm", captureSequenceDone++);
+			pendingCapture = captureSequencePrefix + name;
+		}
+
 		const bool finalFrame = config.MaxFrames != 0 && totalFrames + 1 >= config.MaxFrames;
 		input.Capture = !pendingCapture.empty() || (finalFrame && !config.CapturePath.empty());
 

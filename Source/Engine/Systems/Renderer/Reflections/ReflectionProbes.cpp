@@ -331,8 +331,10 @@ namespace Swim::Render::ReflectionProbes
 			float Urgency;
 			FaceCapture Capture;
 			bool SeesMover;
+			bool Changed;
 		};
 		std::vector<Candidate> candidates;
+		std::vector<std::size_t> chosen;
 
 		for (const auto& [rank, index] : ranked)
 		{
@@ -402,7 +404,7 @@ namespace Swim::Render::ReflectionProbes
 
 				if (urgency > 0.0f)
 				{
-					candidates.push_back({ changed ? urgency : urgency * rank, { s, face, index }, moving });
+					candidates.push_back({ changed ? urgency : urgency * rank, { s, face, index }, moving, changed });
 				}
 			}
 		}
@@ -413,8 +415,53 @@ namespace Swim::Render::ReflectionProbes
 				return a.Urgency > b.Urgency;
 			});
 		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, MaxFacesPerFrame), candidates.size());
+		// A quarter of the budget (from four faces a frame) is kept for faces whose content did
+		// not change (the idle refresh: animated materials, lighting, and faces whose first
+		// capture came before the scene was there), so a busy scene - movers in view of many
+		// probes - can never starve them: the probes' still faces once kept their first, empty
+		// capture for good, which showed as plain sky and ground in the lower half of chrome
+		// spheres. Faces never captured go before everything.
+		std::size_t idleReserve = std::min<std::size_t>(budget / 4u,
+			static_cast<std::size_t>(std::count_if(candidates.begin(), candidates.end(),
+				[](const Candidate& c)
+				{
+					return !c.Changed;
+				})));
+		std::size_t changedLeft = budget - idleReserve;
+		chosen.clear();
 
-		for (std::size_t i = 0; i < budget; ++i)
+		for (std::size_t i = 0; i < candidates.size() && chosen.size() < budget; ++i)
+		{
+			const auto& c = candidates[i];
+			const bool fresh = slots[c.Capture.Slot].FaceFrame[c.Capture.Face] == 0;
+
+			if (c.Changed && !fresh && changedLeft == 0)
+			{
+				continue;
+			}
+
+			if (fresh || c.Changed)
+			{
+				changedLeft -= changedLeft > 0 ? 1u : 0u;
+				idleReserve -= changedLeft == 0 && fresh && idleReserve > 0 ? 1u : 0u;
+			}
+			else if (idleReserve > 0)
+			{
+				--idleReserve;
+			}
+			else if (changedLeft > 0)
+			{
+				--changedLeft; // An idle face past its reserve takes a changed face's turn.
+			}
+			else
+			{
+				continue;
+			}
+
+			chosen.push_back(i);
+		}
+
+		for (const auto i : chosen)
 		{
 			const auto& capture = candidates[i].Capture;
 			plan.Captures.push_back(capture);

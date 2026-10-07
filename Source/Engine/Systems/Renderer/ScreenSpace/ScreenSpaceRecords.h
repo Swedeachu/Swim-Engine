@@ -61,7 +61,7 @@ namespace Swim::Render
 		std::uint32_t ReflectionTemporal = 0;
 		float ReflectionTemporalBlend = 0.3f; // Weight of this frame's term, (0, 1].
 		std::uint32_t PlanarCount = 0; // Active planar reflection records (ScreenSpaceFrame::Planar).
-		std::uint32_t Reserved6 = 0;
+		float SsrMaxFootprint = 0.0f; // ReflectionSettings::MaxFootprint (0: off).
 	};
 
 	static_assert(sizeof(GpuScreenSpaceParams) == 432);

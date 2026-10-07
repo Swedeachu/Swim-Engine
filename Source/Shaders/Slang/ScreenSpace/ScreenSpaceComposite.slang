@@ -78,6 +78,39 @@ float4 PlanarFetch(PlanarReflectionRecord record, float2 uv, float2 atlasSize)
 	return PlanarAtlas.SampleLevel(ProbeSampler, float3(at, record.Atlas.x), 0.0);
 }
 
+// The capture's colour through a Catmull-Rom filter (9 bilinear taps): captures are rendered
+// below screen resolution (PlanarReflectionSettings::ResolutionScale) and magnified, and the
+// bicubic keeps that magnification smooth without the bilinear's blur and blockiness.
+float3 PlanarFetchSmooth(PlanarReflectionRecord record, float2 uv, float2 atlasSize)
+{
+	const float2 share = record.Atlas.yz;
+	const float2 halfTexel = 0.5 / atlasSize;
+	const float2 samplePosition = uv * share * atlasSize;
+	const float2 texel1 = floor(samplePosition - 0.5) + 0.5;
+	const float2 f = samplePosition - texel1;
+	const float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+	const float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+	const float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+	const float2 w3 = f * f * (-0.5 + 0.5 * f);
+	const float2 w12 = w1 + w2;
+	const float2 texel0 = (texel1 - 1.0) / atlasSize;
+	const float2 texel3 = (texel1 + 2.0) / atlasSize;
+	const float2 texel12 = (texel1 + w2 / w12) / atlasSize;
+	const float2 positions[3] = { clamp(texel0, halfTexel, share - halfTexel), clamp(texel12, halfTexel, share - halfTexel),
+		clamp(texel3, halfTexel, share - halfTexel) };
+	const float2 weights[3] = { w0, w12, w3 };
+	float3 sum = float3(0.0, 0.0, 0.0);
+	for (int y = 0; y < 3; ++y)
+	{
+		for (int x = 0; x < 3; ++x)
+		{
+			const float w = weights[x].x * weights[y].y;
+			sum += w * PlanarAtlas.SampleLevel(ProbeSampler, float3(positions[x].x, positions[y].y, record.Atlas.x), 0.0).rgb;
+		}
+	}
+	return max(sum, float3(0.0, 0.0, 0.0));
+}
+
 // PlanarReflections::LookupUv: start where the surface point projects (exact for a current
 // mirror capture), then refine the ray length with the captured distances (a camera that
 // moved since the capture, curved surfaces). Alpha: the portal edge fade (2 texels).
@@ -112,7 +145,7 @@ float4 SamplePlanar(PlanarReflectionRecord record, float3 position, float3 direc
 	const float2 texels = record.Atlas.yz * atlasSize;
 	const float2 inside = min(uv, 1.0 - uv) * texels;
 	const float edge = saturate(min(inside.x, inside.y) * 0.5);
-	return float4(max(PlanarFetch(record, uv, atlasSize).rgb, float3(0.0, 0.0, 0.0)), edge);
+	return float4(PlanarFetchSmooth(record, uv, atlasSize), edge);
 }
 
 // The planar reflection of a pixel: the first record that matches it (by object for sphere
@@ -540,6 +573,28 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 				surface = true;
 			}
 		}
+		// How fast the reflected direction turns per screen pixel: the view ray's step plus twice
+		// the normal's (ScreenSpace::NormalTurnPerPixel; curved surfaces).
+		float normalTurn = 0.0;
+		float reflectionSpread = 0.0;
+		if (surface)
+		{
+			bool centreValid;
+			const float centreDepth = -ScreenSpaceViewPosition(view, float(id.x) + 0.5, float(id.y) + 0.5, depth, centreValid).z;
+			const int2 offsets[4] = { int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1) };
+			for (int i = 0; i < 4; ++i)
+			{
+				const int2 there = clamp(int2(id.xy) + offsets[i], int2(0, 0), int2(int(view.Width), int(view.Height)) - 1);
+				bool thereValid;
+				const float3 position = ScreenSpaceLoadViewPosition(view, Depth, there.x, there.y, thereValid);
+				if (thereValid && abs(-position.z - centreDepth) <= 0.05 * centreDepth)
+				{
+					normalTurn = max(normalTurn, length(Normal.Load(int3(there, 0)).xyz - encoded.xyz));
+				}
+			}
+			const float pixelAngle = 2.0 / max(Params[0].Projection[1].y * float(view.Height), 1.0e-6);
+			reflectionSpread = pixelAngle + 2.0 * normalTurn;
+		}
 		// Planar reflections: exact for the mirrors (and sphere caps) that have one.
 		float planarWeight = 0.0;
 		float3 planarRadiance = float3(0.0, 0.0, 0.0);
@@ -561,10 +616,17 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			const ProbeSelection selection = SelectProbes(probeCount, world, pixelObject);
 			if (selection.First >= 0)
 			{
-				const float lod = saturate(encoded.w) * float(max(Params[0].ProbeMipCount, 1u) - 1u);
 				const ReflectionProbeRecord first = ProbeRecords[selection.First];
 				// The probe atlas's texel angle: faces are 4 << (mips - 1) texels over 90 degrees.
+				const float mips = float(max(Params[0].ProbeMipCount, 1u) - 1u);
 				const float texelAngle = 1.5707963 / float(4u << (max(Params[0].ProbeMipCount, 1u) - 1u));
+				// The mip: the roughness's, or the one whose texels match how far the reflected
+				// direction turns per screen pixel (a sphere's rim minifies its surroundings:
+				// sampling the sharp mip there shimmered with the jitter).
+				// One mip short of the full footprint: TAA averages the rest without the haze a
+				// fully matched (pre-blurred) mip gave the rims.
+				const float footprintLod = log2(max(reflectionSpread / texelAngle, 1.0)) - 1.0;
+				const float lod = min(max(saturate(encoded.w) * mips, footprintLod), mips);
 				const float4 firstSample = SampleProbe(first, world, r, lod, texelAngle);
 				float3 probe = selection.FirstShare * firstSample.rgb;
 
@@ -590,11 +652,13 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		c = max(c + ao * (reflected - specular), float3(0.0, 0.0, 0.0));
 		if (debug == 0u)
 		{
-			// The planar share is exact and current every frame: the temporal filter leaves it
-			// alone (reprojecting a mirror's image by the mirror's own motion would drag the old
-			// image along: a double image while the camera moves).
-			const float planarShare = planarWeight * (1.0 - ssrShare);
-			reflectionTerm = float4(reflected, ao * (1.0 - planarShare));
+			// Only the screen-space share is filtered over time (it is traced one pixel in two and
+			// jittered); planar reflections and probes are current and stable on their own, and
+			// reprojecting them by the surface's motion dragged old images along (double images,
+			// trails on spheres reflecting moving things). Curved surfaces, whose reflections move
+			// far faster than the surface, are left alone too.
+			const float curved = saturate(normalTurn * 50.0);
+			reflectionTerm = float4(reflected, ao * ssrShare * (1.0 - curved));
 		}
 		if (debug == 1u)
 		{

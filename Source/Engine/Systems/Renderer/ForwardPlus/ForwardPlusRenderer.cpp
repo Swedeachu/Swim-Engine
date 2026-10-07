@@ -497,7 +497,7 @@ namespace Swim::Render
 
 		// 0. Depth prepass (optional): lays down the nearest opaque depth so the shading
 		// pass below runs its lighting once per pixel.
-		const bool prepass = desc.DepthPrepass.Pipeline != nullptr;
+		const bool prepass = desc.DepthPrepass.Pipeline != nullptr && frame.DepthPrepass;
 
 		if (prepass)
 		{

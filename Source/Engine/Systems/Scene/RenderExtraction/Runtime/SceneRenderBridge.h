@@ -156,6 +156,9 @@ namespace Engine
 		std::vector<Swim::Render::ReflectionProbeDesc> probes;
 		std::vector<Swim::Render::PlanarReflectorDesc> planars;
 		std::vector<Swim::Render::ReflectionProbeMover> movers;
+		// The world transform each dirty mesh entity had when last seen: a transform rewritten
+		// without moving (physics syncing a resting body every step) is not a mover.
+		std::unordered_map<entt::entity, std::array<float, 12>> moverTransforms;
 
 	};
 

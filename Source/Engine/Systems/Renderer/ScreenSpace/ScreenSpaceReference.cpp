@@ -121,6 +121,11 @@ namespace Swim::Render
 			throw std::invalid_argument("reflection edge fade must be in (0, 0.5] and distance fade in (0, 1]");
 		}
 
+		if (!Finite(ssr.MaxFootprint) || ssr.MaxFootprint < 0.0f)
+		{
+			throw std::invalid_argument("reflection max footprint must be finite and >= 0");
+		}
+
 		if (static_cast<std::uint32_t>(ssr.Debug) > static_cast<std::uint32_t>(ReflectionDebugView::ProbeAge))
 		{
 			throw std::invalid_argument("unknown reflection debug view");
@@ -204,6 +209,7 @@ namespace Swim::Render
 		params.SsrRoughnessFade = ssr.RoughnessFade;
 		params.SsrEdgeFade = ssr.EdgeFade;
 		params.SsrDistanceFade = ssr.DistanceFade;
+		params.SsrMaxFootprint = ssr.MaxFootprint;
 		params.SsrMaxSteps = ssr.MaxSteps;
 		params.SsrRefineSteps = ssr.RefineSteps;
 		params.SsrHalf = ssr.HalfResolution ? 1u : 0u;
@@ -705,6 +711,63 @@ namespace Swim::Render::ScreenSpace
 		return std::max(-(*back)[2] - frontDepth, BackFaceMinThickness);
 	}
 
+	float NormalTurnPerPixel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x,
+		std::uint32_t y)
+	{
+		const auto& centre = normal.At(x, y);
+		const auto here = ViewPositionAt(params, depth, x, y);
+
+		if (!here)
+		{
+			return 0.0f;
+		}
+
+		const float centreDepth = -(*here)[2];
+		float turn = 0.0f;
+		constexpr int Offsets[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+
+		for (const auto& offset : Offsets)
+		{
+			const int nx = int(x) + offset[0];
+			const int ny = int(y) + offset[1];
+
+			if (nx < 0 || ny < 0 || nx >= int(params.Width) || ny >= int(params.Height))
+			{
+				continue;
+			}
+
+			const auto there = ViewPositionAt(params, depth, std::uint32_t(nx), std::uint32_t(ny));
+
+			if (!there || std::abs(-(*there)[2] - centreDepth) > 0.05f * centreDepth)
+			{
+				continue; // Another surface: not this one's curvature.
+			}
+
+			const auto& n = normal.At(std::uint32_t(nx), std::uint32_t(ny));
+			const float dx = n[0] - centre[0];
+			const float dy = n[1] - centre[1];
+			const float dz = n[2] - centre[2];
+			turn = std::max(turn, std::sqrt(dx * dx + dy * dy + dz * dz));
+		}
+
+		return turn;
+	}
+
+	float ReflectionFootprint(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, std::uint32_t x,
+		std::uint32_t y, float surfaceDepth, float hitDepth, float travelled)
+	{
+		// A pixel's angle (at the view centre) and how fast its reflected ray turns from one
+		// pixel to the next: the view ray's own step plus twice the normal's.
+		const float pixelAngle = 2.0f / std::max(params.Projection[5] * float(params.Height), 1.0e-6f);
+		const float spread = pixelAngle + 2.0f * NormalTurnPerPixel(params, depth, normal, x, y);
+		return (surfaceDepth * pixelAngle + travelled * spread) / std::max(hitDepth * pixelAngle, 1.0e-9f);
+	}
+
+	float FootprintFade(const GpuScreenSpaceParams& params, float footprint)
+	{
+		return params.SsrMaxFootprint > 0.0f ? std::clamp(2.0f - footprint / params.SsrMaxFootprint, 0.0f, 1.0f) : 1.0f;
+	}
+
 	std::optional<ReflectionHit> TraceReflection(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal,
 		std::uint32_t x, std::uint32_t y, const ScalarImage* backDepth)
 	{
@@ -950,7 +1013,8 @@ namespace Swim::Render::ScreenSpace
 			// Surfaces seen edge-on by the ray fade out: near a silhouette the ray usually passed
 			// behind the object (whose far side the depth buffer does not have).
 			const float facingFade = std::clamp(-Dot(*hitNormal, r) / FacingFade, 0.0f, 1.0f);
-			const float confidence = roughnessFade * edgeFade * distanceFade * facingFade;
+			const float footprintFade = FootprintFade(params, ReflectionFootprint(params, depth, normal, x, y, -p[2], -point[2], travelled));
+			const float confidence = roughnessFade * edgeFade * distanceFade * facingFade * footprintFade;
 
 			if (!(confidence > 0.0f))
 			{

@@ -40,6 +40,9 @@ namespace Swim::Render
 		std::uint32_t FacesPerFrame = 2;  // Cube faces captured per frame (0 .. MaxFacesPerFrame): the cost bound.
 		float MoveThreshold = 0.05f;	  // A probe that moved this far is re-captured with priority.
 		float MoverRange = 15.0f;		  // Movers farther than this from a probe do not raise its faces' urgency.
+		// Geometry farther than this along a face is culled from its capture (a few texels at
+		// probe resolution; 0: no limit). Most of a probe face's cost is the geometry it draws.
+		float CullDistance = 100.0f;
 		std::uint32_t PrefilterSamples = 32;
 		std::uint32_t FiltersPerFrame = 2; // Probes prefiltered per frame (each: 6 faces x every mip); the rest wait their turn.
 		// Dynamic faces that see no mover (and whose probe did not move) are refreshed once

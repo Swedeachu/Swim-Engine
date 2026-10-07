@@ -131,6 +131,7 @@ namespace Engine
 		}
 
 		emitters.clear();
+		moverTransforms.clear();
 
 		for (auto& [entity, state] : skins)
 		{
@@ -292,6 +293,32 @@ namespace Engine
 			}
 
 			const auto& transform = registry.get<Transform>(entity);
+			const glm::mat4& world = transform.GetWorldMatrix(registry);
+			std::array<float, 12> current{};
+
+			for (int r = 0; r < 3; ++r)
+			{
+				for (int c = 0; c < 4; ++c)
+				{
+					current[static_cast<std::size_t>(r * 4 + c)] = world[c][r];
+				}
+			}
+
+			// Moved (or turned) by more than a tenth of a millimetre since it was last seen.
+			auto [last, inserted] = moverTransforms.try_emplace(entity, current);
+			bool moved = inserted;
+
+			for (std::size_t i = 0; i < current.size() && !moved; ++i)
+			{
+				moved = std::abs(current[i] - last->second[i]) > 1.0e-4f;
+			}
+
+			if (!moved)
+			{
+				continue;
+			}
+
+			last->second = current;
 			const glm::vec3 position = transform.GetWorldPosition(registry);
 			const glm::vec3 scale = transform.GetWorldScale(registry);
 			const float radius = 0.87f * std::max({ std::abs(scale.x), std::abs(scale.y), std::abs(scale.z) });

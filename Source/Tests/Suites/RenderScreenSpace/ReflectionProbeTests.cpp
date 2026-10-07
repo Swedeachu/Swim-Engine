@@ -4,7 +4,9 @@
 #include "Tests/Framework/Test.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string>
 #include <vector>
 
 using namespace Swim::Render;
@@ -329,4 +331,48 @@ SWIM_TEST("Render.ReflectionProbes", "TheSchedulerTimeSlicesFacesWithinTheBudget
 	plan = scheduler.Update(probes, camera, frame++, 3.0, settings);
 	SWIM_CHECK(plan.Captures.empty() && plan.Active.empty());
 	SWIM_CHECK_EQUAL(scheduler.GetUsedSlots(), 0u);
+}
+
+// Movers in view of every probe, all the time (an orbiting object in a room of chrome balls):
+// their faces go round robin, and a quarter of the budget still refreshes the still faces,
+// which would otherwise keep their first capture forever.
+SWIM_TEST("Render.ReflectionProbes", "StillFacesAreNotStarvedByConstantMovers")
+{
+	RP::Scheduler scheduler;
+	ReflectionProbeSettings settings;
+	settings.MaxProbes = 4;
+	settings.FacesPerFrame = 4;
+	settings.IdleRefreshFrames = 8;
+	std::vector<ReflectionProbeDesc> probes{ Probe(1, { 0, 1, 0 }), Probe(2, { 3, 1, 0 }), Probe(3, { 6, 1, 0 }), Probe(4, { 9, 1, 0 }) };
+	const RP::Float3 camera{ 4, 2, 6 };
+	// One mover beside each probe (+Z): every probe has a face that sees one every frame.
+	const std::vector<ReflectionProbeMover> movers{ { { 0, 1, 2 }, 0.3f }, { { 3, 1, 2 }, 0.3f }, { { 6, 1, 2 }, 0.3f }, { { 9, 1, 2 }, 0.3f } };
+	std::uint64_t frame = 1;
+
+	for (; frame <= 6; ++frame) // 24 new faces, four a frame.
+	{
+		(void)scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings, movers);
+	}
+
+	std::array<std::array<std::uint64_t, 6>, 4> last{};
+
+	for (; frame <= 6 + 120; ++frame)
+	{
+		const auto plan = scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings, movers);
+		SWIM_CHECK(plan.Captures.size() <= 4u);
+
+		for (const auto& capture : plan.Captures)
+		{
+			last[capture.Probe][capture.Face] = frame;
+		}
+	}
+
+	for (std::uint32_t probe = 0; probe < 4; ++probe)
+	{
+		for (std::uint32_t face = 0; face < 6; ++face)
+		{
+			// Every face was captured again in the last 60 frames (still faces included).
+			SWIM_CHECK_MESSAGE(last[probe][face] + 60 > frame, "probe " + std::to_string(probe) + " face " + std::to_string(face));
+		}
+	}
 }

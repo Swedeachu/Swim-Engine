@@ -1052,6 +1052,7 @@ SWIM_TEST("Render.ScreenSpace.Reference", "ReflectionHitsAreStableAcrossFrames")
 	ScreenSpaceSettings settings;
 	settings.AmbientOcclusion.Enabled = false;
 	settings.Reflections.Enabled = true;
+	settings.Reflections.MaxFootprint = 0.0f; // The march's own stability (the footprint fade is tested below).
 	constexpr int frames = 16;
 	std::vector<int> hits(std::size_t(w) * h, 0);
 	std::vector<std::array<float, 4>> bounds(hits.size(), { 1.0e9f, -1.0e9f, 1.0e9f, -1.0e9f });
@@ -1235,4 +1236,65 @@ SWIM_TEST("Render.ScreenSpace.Reference", "OnlyReflectiveHitsReadTheHistory")
 	params.SsrHistory = 0u;
 	const auto off = Ss::FilteredHitRadiance(params, color, indirect, nullptr, 4.0f, 4.0f, { &previous, &velocity, &metal });
 	SWIM_CHECK_NEAR(off[0], 1.0f, 1e-5f);
+}
+
+// One pixel's reflection covers about one pixel at the hit on a flat mirror, many on a
+// sphere's rim (it minifies what it reflects): those hits fade out (MaxFootprint) and the
+// prefiltered probe takes over, instead of one sparse ray per pixel shimmering with the jitter.
+SWIM_TEST("Render.ScreenSpace.Reference", "MinifiedReflectionsOnCurvedSurfacesFadeOut")
+{
+	GpuScreenSpaceParams params{};
+	params.Width = 64;
+	params.Height = 64;
+	params.Projection[5] = 1.0f / std::tan(0.5f); // About a 57-degree vertical field of view.
+	params.SsrMaxFootprint = 3.0f;
+	const float pixelAngle = 2.0f / (params.Projection[5] * float(params.Height));
+	// Flat: the normal does not turn; a mirror 5 m away reflecting something 5 m behind it.
+	const float flat = (5.0f * pixelAngle + 5.0f * pixelAngle) / (10.0f * pixelAngle);
+	SWIM_CHECK_NEAR(flat, 1.0f, 1e-5f);
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(params, flat), 1.0f);
+	// Up to MaxFootprint nothing fades; it is gone at twice that; off with 0.
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(params, 3.0f), 1.0f);
+	SWIM_CHECK_NEAR(Ss::FootprintFade(params, 4.5f), 0.5f, 1e-6f);
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(params, 6.0f), 0.0f);
+	params.SsrMaxFootprint = 0.0f;
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(params, 50.0f), 1.0f);
+	params.SsrMaxFootprint = 3.0f;
+
+	// The measured turn: a normal image bending by 0.1 rad per pixel along x (a sphere's rim)
+	// on a flat depth plane, against a flat normal image.
+	Ss::ScalarImage depth(64, 64, 0.0f);
+	Ss::ColorImage curved(64, 64, { 0.0f, 0.0f, 1.0f, 0.0f });
+	const Ss::ColorImage straight(64, 64, { 0.0f, 0.0f, 1.0f, 0.0f });
+
+	for (std::uint32_t y = 0; y < 64; ++y)
+	{
+		for (std::uint32_t x = 0; x < 64; ++x)
+		{
+			const float a = 0.1f * float(x);
+			curved.At(x, y) = { std::sin(a), 0.0f, std::cos(a), 0.0f };
+		}
+	}
+
+	// The images' pixels need view positions: a 64 x 64 view, every pixel at depth 0.5.
+	ScreenSpaceSettings settings;
+	settings.Reflections.Enabled = true;
+	const auto view = Scene::View({ 0.0f, 0.0f, 5.0f }, { 0.0f, 0.0f, 0.0f }, 1.0f);
+	auto full = BuildScreenSpaceParams(settings, view, 64, 64, 0);
+	full.SsrMaxFootprint = 3.0f;
+
+	for (auto& d : depth.Texels)
+	{
+		d = 0.5f;
+	}
+
+	SWIM_CHECK_NEAR(Ss::NormalTurnPerPixel(full, depth, curved, 32, 32), 2.0f * std::sin(0.05f), 1e-3f);
+	SWIM_CHECK_EQUAL(Ss::NormalTurnPerPixel(full, depth, straight, 32, 32), 0.0f);
+	// The surface 2 m away, its reflection hitting something 4 m further and 6 m deep.
+	const float onRim = Ss::ReflectionFootprint(full, depth, curved, 32, 32, 2.0f, 6.0f, 4.0f);
+	const float onFlat = Ss::ReflectionFootprint(full, depth, straight, 32, 32, 2.0f, 6.0f, 4.0f);
+	SWIM_CHECK_NEAR(onFlat, 1.0f, 1e-4f);
+	SWIM_CHECK(onRim > 6.0f);
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(full, onRim), 0.0f);
+	SWIM_CHECK_EQUAL(Ss::FootprintFade(full, onFlat), 1.0f);
 }

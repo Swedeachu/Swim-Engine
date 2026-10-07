@@ -97,6 +97,9 @@ namespace Swim::Render
 		// in its fragment stage (needs the renderer's deferred programs and a Color target with
 		// Storage usage; otherwise ignored). Same result; transparent draws keep the loop.
 		bool DeferLocalLights = false;
+		// Draw the renderer's depth prepass (when it has one). Small views whose cost is the
+		// geometry, not the shading (reflection captures), skip it: one geometry pass, not two.
+		bool DepthPrepass = true;
 		// Pass-name prefix for this frame (empty: the renderer's DebugName).
 		std::string DebugName;
 	};

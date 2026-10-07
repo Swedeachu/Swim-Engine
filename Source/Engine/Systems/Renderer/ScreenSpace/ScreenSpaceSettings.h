@@ -75,6 +75,12 @@ namespace Swim::Render
 		float RoughnessFade = 0.2f;	   // Confidence ramps to 0 over this roughness range below MaxRoughness, (0, MaxRoughness].
 		float EdgeFade = 0.1f;		   // Hits within this fraction of the screen edge fade out, (0, 0.5].
 		float DistanceFade = 0.25f;	   // Hits in the last fraction of MaxDistance fade out, (0, 1].
+		// Hits fade out where one screen pixel's reflection covers more than this many pixels
+		// at the hit (ScreenSpace::ReflectionFootprint: curved surfaces such as a chrome
+		// sphere's lower rim minify what they reflect): one ray per pixel then samples the hit
+		// image sparsely and the reflection shimmers as the jitter moves the rays. The
+		// prefiltered probe, sampled at a matching mip, takes over (fully at twice this). 0: off.
+		float MaxFootprint = 3.0f;
 		// Hits read the previous frame's finished color (reflections of reflections) when the
 		// renderer has one (TAA on); off: the current frame's color.
 		bool History = true;

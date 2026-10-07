@@ -55,6 +55,7 @@ struct ReflectionParams
 	float EdgeFade;
 	float DistanceFade;
 	float NearZ;
+	float MaxFootprint;
 	uint MaxSteps;
 	uint RefineSteps;
 	uint NoiseFrame;
@@ -221,6 +222,43 @@ float ScreenExit(float x0, float y0, float dx, float dy, float width, float heig
 		t = min(t, (inset - y0) / dy);
 	}
 	return max(t, 0.0);
+}
+
+// ScreenSpace::NormalTurnPerPixel: the largest normal change to a neighbour on the same surface.
+float NormalTurnPerPixel(ScreenSpaceView view, int x, int y, float3 centre, float centreDepth)
+{
+	const int2 offsets[4] = { int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1) };
+	float turn = 0.0;
+	for (int i = 0; i < 4; ++i)
+	{
+		const int2 at = int2(x, y) + offsets[i];
+		if (at.x < 0 || at.y < 0 || at.x >= int(view.Width) || at.y >= int(view.Height))
+		{
+			continue;
+		}
+		bool valid;
+		const float3 there = ScreenSpaceLoadViewPosition(view, Depth, at.x, at.y, valid);
+		if (!valid || abs(-there.z - centreDepth) > 0.05 * centreDepth)
+		{
+			continue;
+		}
+		turn = max(turn, length(Normal.Load(int3(at, 0)).xyz - centre));
+	}
+	return turn;
+}
+
+// ScreenSpace::ReflectionFootprint and FootprintFade.
+float FootprintFade(ScreenSpaceView view, ReflectionParams reflection, int x, int y, float3 worldNormal, float surfaceDepth, float hitDepth,
+	float travelled)
+{
+	if (!(reflection.MaxFootprint > 0.0))
+	{
+		return 1.0;
+	}
+	const float pixelAngle = 2.0 / max(reflection.Projection[1].y * float(view.Height), 1.0e-6);
+	const float spread = pixelAngle + 2.0 * NormalTurnPerPixel(view, x, y, worldNormal, surfaceDepth);
+	const float footprint = (surfaceDepth * pixelAngle + travelled * spread) / max(hitDepth * pixelAngle, 1.0e-9);
+	return clamp(2.0 - footprint / reflection.MaxFootprint, 0.0, 1.0);
 }
 
 // ScreenSpace::ReflectionTexel.
@@ -403,7 +441,8 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 		const float edgeFade = clamp(edge / reflection.EdgeFade, 0.0, 1.0);
 		const float distanceFade = clamp((reflection.MaxDistance - travelled) / (reflection.MaxDistance * reflection.DistanceFade), 0.0, 1.0);
 		const float facingFade = clamp(-dot(hitNormal, r) / FacingFade, 0.0, 1.0);
-		const float confidence = roughnessFade * edgeFade * distanceFade * facingFade;
+		const float footprintFade = FootprintFade(view, reflection, x, y, encoded.xyz, -p.z, -hitPoint.z, travelled);
+		const float confidence = roughnessFade * edgeFade * distanceFade * facingFade * footprintFade;
 		if (!(confidence > 0.0))
 		{
 			return miss;
@@ -443,6 +482,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	reflection.EdgeFade = Params[0].SsrEdgeFade;
 	reflection.DistanceFade = Params[0].SsrDistanceFade;
 	reflection.NearZ = Params[0].SsrNearZ;
+	reflection.MaxFootprint = Params[0].SsrMaxFootprint;
 	reflection.MaxSteps = Params[0].SsrMaxSteps;
 	reflection.RefineSteps = Params[0].SsrRefineSteps;
 	reflection.NoiseFrame = Params[0].NoiseFrame;
