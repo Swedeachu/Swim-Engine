@@ -110,9 +110,9 @@ SWIM_TEST("ShaderCompiler.ScreenSpaceLayout", "ProgramsMatchTheBindingContract")
 		Render::ScreenSpaceCompositeBindings::Params);
 	CheckProgram(Load(SWIM_SCREEN_SPACE_REFLECTION_REFLECTION_PATH),
 		{ T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::ReadOnlyStorageBuffer,
-			T::StorageTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture },
+			T::StorageTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture, T::SampledTexture },
 		Render::ScreenSpaceReflectionBindings::Params);
 	static_assert(Render::ScreenSpaceAoBindings::Count == 4 && Render::ScreenSpaceBlurBindings::Count == 4 &&
-		Render::ScreenSpaceCompositeBindings::Count == 17 && Render::ScreenSpaceReflectionBindings::Count == 10);
+		Render::ScreenSpaceCompositeBindings::Count == 17 && Render::ScreenSpaceReflectionBindings::Count == 11);
 }
 #endif

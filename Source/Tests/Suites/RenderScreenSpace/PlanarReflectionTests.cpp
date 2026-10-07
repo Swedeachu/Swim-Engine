@@ -163,7 +163,7 @@ SWIM_TEST("Render.PlanarReflections", "LookupMatchesTheMirrorRayAndReprojectsAft
 	SWIM_CHECK(checked > 20);
 }
 
-SWIM_TEST("Render.PlanarReflections", "CullsBackFacingTinyAndScreenSpaceFriendlyReflectors")
+SWIM_TEST("Render.PlanarReflections", "CullsBackFacingAndTinyReflectorsAndHandsOnlyFarOnesToSsr")
 {
 	PlanarReflectionSettings settings;
 	const std::vector<PlanarReflectorDesc> reflectors{ Floor() };
@@ -179,9 +179,26 @@ SWIM_TEST("Render.PlanarReflections", "CullsBackFacingTinyAndScreenSpaceFriendly
 		SWIM_CHECK(plan.Captures.empty());
 	}
 	{
-		PR::Planner planner; // Grazing: the mirror ray stays on screen, where SSR shows it.
+		// Grazing, the mirror ray on screen: still captured, and SSR never replaces a near
+		// mirror's planar reflection (its SSR preference is 0).
+		PR::Planner planner;
 		const auto& plan = planner.Update(reflectors, Camera({ 0.0f, 0.3f, 6.0f }, { 0.0f, 0.0f, -20.0f }), 1, 0.0, settings);
-		SWIM_CHECK(plan.Captures.empty());
+		SWIM_REQUIRE_EQUAL(plan.Records.size(), std::size_t{ 1 });
+		SWIM_CHECK_EQUAL(plan.Records[0].Atlas[3], 0.0f);
+	}
+	{
+		// The far LOD: the preference rises smoothly from 0 at SsrFallbackScreenFraction to 1
+		// at MinScreenFraction, where the reflector is culled.
+		SWIM_CHECK_EQUAL(PR::SsrPreference(settings.SsrFallbackScreenFraction, settings), 0.0f);
+		SWIM_CHECK_EQUAL(PR::SsrPreference(1.0f, settings), 0.0f);
+		SWIM_CHECK_NEAR(PR::SsrPreference(settings.MinScreenFraction, settings), 1.0f, 1e-6f);
+		const float middle = PR::SsrPreference(0.5f * (settings.MinScreenFraction + settings.SsrFallbackScreenFraction), settings);
+		SWIM_CHECK(middle > 0.2f && middle < 0.8f);
+		// 80 m away the 4 m mirror is small on screen: a confident SSR hit takes over in part.
+		PR::Planner planner;
+		const auto& plan = planner.Update(reflectors, Camera({ 0.0f, 16.0f, 80.0f }, { 0.0f, 0.0f, 0.0f }), 1, 0.0, settings);
+		SWIM_REQUIRE_EQUAL(plan.Records.size(), std::size_t{ 1 });
+		SWIM_CHECK(plan.Records[0].Atlas[3] > 0.0f);
 	}
 	{
 		PR::Planner planner; // Behind the camera.
@@ -216,7 +233,7 @@ SWIM_TEST("Render.PlanarReflections", "CoplanarFacesShareOneCaptureSizedByTheirS
 
 SWIM_TEST("Render.PlanarReflections", "CapturesAreReusedUntilMotionMoversOrAgeCallForThem")
 {
-	PlanarReflectionSettings settings;
+	PlanarReflectionSettings settings; // Reuse on: the default (MaxAgeSeconds 0) re-renders every frame.
 	settings.MaxAgeSeconds = 0.5f;
 	const std::vector<PlanarReflectorDesc> reflectors{ Floor() };
 	const auto camera = Camera({ 0.0f, 2.0f, 5.0f }, { 0.0f, 0.0f, 0.0f });
@@ -233,14 +250,20 @@ SWIM_TEST("Render.PlanarReflections", "CapturesAreReusedUntilMotionMoversOrAgeCa
 
 	// Something moving in the reflection, a big camera move, or age: re-rendered.
 	const ReflectionProbeMover mover{ { 0.0f, 1.0f, -2.0f }, 0.5f };
-	SWIM_CHECK_EQUAL(planner.Update(reflectors, camera, 4, 0.3, settings, std::span(&mover, 1)).Captures.size(), std::size_t{ 1 });
-	SWIM_CHECK_EQUAL(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 5, 0.35, settings).Captures.size(),
+	const auto& moving = planner.Update(reflectors, camera, 4, 0.3, settings, std::span(&mover, 1));
+	SWIM_CHECK_EQUAL(moving.Captures.size(), std::size_t{ 1 });
+	SWIM_CHECK_EQUAL(moving.DynamicCaptures, 1u);
+	// It left (or stopped): one more capture, so the reflection does not keep showing it.
+	SWIM_CHECK_EQUAL(planner.Update(reflectors, camera, 5, 0.31, settings).Captures.size(), std::size_t{ 1 });
+	SWIM_CHECK(planner.Update(reflectors, camera, 6, 0.32, settings).Captures.empty());
+	SWIM_CHECK_EQUAL(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 7, 0.35, settings).Captures.size(),
 		std::size_t{ 1 });
-	SWIM_CHECK(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 6, 0.4, settings).Captures.empty());
-	SWIM_CHECK_EQUAL(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 7, 1.0, settings).Captures.size(),
+	SWIM_CHECK(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 8, 0.4, settings).Captures.empty());
+	SWIM_CHECK_EQUAL(planner.Update(reflectors, Camera({ 1.0f, 2.5f, 5.0f }, { 0.0f, 0.0f, 0.0f }), 9, 1.0, settings).Captures.size(),
 		std::size_t{ 1 });
 
-	// The budget: three separate mirrors, one capture a frame, the rest wait their turn.
+	// The budget: three separate mirrors, new (changed content), one capture a frame, the
+	// rest wait their turn.
 	settings.CapturesPerFrame = 1;
 	PR::Planner budgeted;
 	const std::vector<PlanarReflectorDesc> three{ Box(1, { -2.0f, 0.5f, 0.0f }), Box(2, { 0.0f, 0.5f, -1.0f }), Box(3, { 2.0f, 0.5f, -2.0f }) };
@@ -270,6 +293,19 @@ SWIM_TEST("Render.PlanarReflections", "SphereCapsLookFromTheCentreTowardsTheCame
 	SWIM_CHECK_EQUAL(capture.Width, capture.Height);
 	SWIM_CHECK(capture.NearClip > 0.5f);
 	SWIM_CHECK_EQUAL(plan.Records[0].Camera[3], 10.0f); // Matched by object.
+	// Sized so a texel turns no more than a screen pixel at the cap's centre, rendered
+	// supersampled (an integer factor, within MaxRenderResolution).
+	SWIM_CHECK(capture.Width >= settings.MinResolution);
+	SWIM_CHECK_EQUAL(capture.RenderWidth, capture.Width * settings.Supersample);
+	SWIM_CHECK_EQUAL(capture.RenderHeight, capture.Height * settings.Supersample);
+	PR::Capture big;
+	big.Width = 1024;
+	big.Height = 512;
+	PlanarReflectionSettings capped;
+	capped.MaxRenderResolution = 1536;
+	PR::Finish(big, capped);
+	SWIM_CHECK_EQUAL(big.RenderWidth, 1024u); // 2048 would exceed the cap: rendered as stored.
+	SWIM_CHECK_EQUAL(big.RenderHeight, 512u);
 	// The cap's centre reflects straight back towards the camera: the middle of the capture.
 	const auto uv = PR::LookupUv(plan.Records[0], { 0.0f, 0.0f, 0.5f }, { 0.0f, 0.0f, 1.0f },
 		[](const std::array<float, 2>&)
@@ -278,4 +314,84 @@ SWIM_TEST("Render.PlanarReflections", "SphereCapsLookFromTheCentreTowardsTheCame
 		});
 	SWIM_CHECK_NEAR(uv[0], 0.5f, 1e-3f);
 	SWIM_CHECK_NEAR(uv[1], 0.5f, 1e-3f);
+}
+
+// A rotated, scaled mirror cube (the lab's): each visible face's capture maps its points to
+// exactly what the true mirror ray sees (a wall facing the face), and by default every
+// visible capture re-renders every frame (full-rate reflections, never reprojected).
+SWIM_TEST("Render.PlanarReflections", "RotatedBoxFacesReflectExactlyAndRenderEveryFrame")
+{
+	const float angle = 0.35f;
+	const float c = std::cos(angle) * 1.5f;
+	const float s = std::sin(angle) * 1.5f;
+	PlanarReflectorDesc box;
+	box.Key = 4;
+	box.OwnerObjectId = 5;
+	box.Shape = PlanarReflectorShape::Box;
+	// Rotation about +Y (columns: local X, Y, Z axes) times 1.5, centred at (2.6, 0.75, -1.2).
+	box.World = { c, 0.0f, s, 2.6f, 0.0f, 1.5f, 0.0f, 0.75f, -s, 0.0f, c, -1.2f };
+	const std::vector<PlanarReflectorDesc> reflectors{ box };
+	PlanarReflectionSettings settings;
+	PR::Planner planner;
+	const auto camera = Camera({ -1.0f, 1.6f, 4.0f }, { 2.6f, 0.75f, -1.2f });
+	const auto& plan = planner.Update(reflectors, camera, 1, 0.0, settings);
+	SWIM_REQUIRE(plan.Captures.size() >= 2u); // Two side faces (and the top) face the camera.
+	int checked = 0;
+
+	for (std::size_t i = 0; i < plan.Captures.size(); ++i)
+	{
+		const auto capture = plan.Captures[i];
+		const auto* found = &plan.Records.front();
+
+		for (const auto& candidate : plan.Records)
+		{
+			found = candidate.Atlas[0] == float(capture.Slot) ? &candidate : found;
+		}
+
+		const auto& record = *found;
+		SWIM_REQUIRE_EQUAL(record.Atlas[0], float(capture.Slot));
+		const F3 n{ record.Plane[0], record.Plane[1], record.Plane[2] };
+		const float d = record.Plane[3];
+		// A wall parallel to the face, 5 m in front of it.
+		const auto wall = [&](const F3& origin, const F3& direction)
+		{
+			const float along = Dot(direction, n);
+			return along > 1.0e-4f ? (d + 5.0f - Dot(origin, n)) / along : PR::DistanceSky;
+		};
+		const auto distance = [&](const std::array<float, 2>& uv)
+		{
+			return wall(capture.Position, CaptureRay(capture, uv));
+		};
+		// Points across the face (its centre plane through the box centre offset along n).
+		const F3 centre = Add({ 2.6f, 0.75f, -1.2f }, Mul(n, 0.75f));
+		const F3 u = Normalize(Cross(n, std::abs(n[1]) > 0.9f ? F3{ 1.0f, 0.0f, 0.0f } : F3{ 0.0f, 1.0f, 0.0f }));
+		const F3 v = Cross(n, u);
+
+		for (float a = -0.6f; a <= 0.6f; a += 0.3f)
+		{
+			for (float b = -0.6f; b <= 0.6f; b += 0.3f)
+			{
+				const F3 p = Add(centre, Add(Mul(u, a), Mul(v, b)));
+				const auto projected = PR::ProjectToCapture(record, p);
+
+				if (!(projected[2] > 0.0f) || projected[0] < 0.02f || projected[0] > 0.98f || projected[1] < 0.02f || projected[1] > 0.98f)
+				{
+					continue; // Outside the visible portal.
+				}
+
+				const F3 r = Reflect(Normalize(Sub(p, camera.Position)), n);
+				const float t = wall(p, r);
+				const F3 truth = Add(p, Mul(r, t));
+				const auto uv = PR::LookupUv(record, p, r, distance);
+				const F3 ray = CaptureRay(capture, uv);
+				const F3 seen = Add(capture.Position, Mul(ray, wall(capture.Position, ray)));
+				SWIM_CHECK_MESSAGE(Distance(seen, truth) < 0.02f, "face " + std::to_string(i));
+				++checked;
+			}
+		}
+	}
+
+	SWIM_CHECK(checked > 10);
+	// The same view next frame: every visible capture again (MaxAgeSeconds 0: full rate).
+	SWIM_CHECK_EQUAL(planner.Update(reflectors, camera, 2, 1.0 / 60.0, settings).Captures.size(), plan.Records.size());
 }

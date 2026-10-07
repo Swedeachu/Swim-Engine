@@ -177,17 +177,24 @@ namespace Swim::Render::ScreenSpace
 	// The radiance around an exact hit position (pixels): the four nearest texels'
 	// HitRadiance, bilinearly weighted and divided by 1 + luminance (so a single bright
 	// texel cannot flicker through the reflection), then renormalized.
-	// With history (params.SsrHistory = 1 and both images), the four texels come instead
-	// from the previous frame's finished color at the hit position moved back by the hit
-	// pixel's motion vector (UV now - UV before, times the size), unmodified (it already
-	// holds AO and the hit's own reflections: reflections of reflections); a position off
-	// that image uses the current color as without history.
+	// With history (params.SsrHistory = 1 and both images), reflective hits blend in, by
+	// HistoryShare of their reflectance, the same filter over the previous frame's finished
+	// color at the hit position moved back by the hit pixel's motion vector (UV now - UV
+	// before, times the size), unmodified (it already holds AO and the hit's own reflections:
+	// reflections of reflections); a position off that image uses the current color only.
+	// Non-reflective hits always use the current color: it is exact, and a frame-old image of
+	// them shows what moved away (a ghost). Without a Reflectance image every hit is reflective.
 	using VelocityImage = Plane<Float2>;
 	struct ReflectionHistory
 	{
 		const ColorImage* Color = nullptr;
 		const VelocityImage* Velocity = nullptr;
+		const ColorImage* Reflectance = nullptr; // ForwardPlusTargets::Reflectance.
 	};
+
+	// The share of a hit's radiance read from the history: smoothstep(0.1, 0.5) of its
+	// reflectance's luminance (0 for dielectrics, 1 for metals).
+	float HistoryShare(const Float3& reflectance);
 
 	Float3 FilteredHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
 		const ScalarImage* ao, float px, float py, const ReflectionHistory& history = {});

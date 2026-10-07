@@ -37,7 +37,7 @@ namespace Swim::Render
 		bool Enabled = true;
 		std::uint32_t Resolution = 128;	  // Face size (power of two, 16 .. 512).
 		std::uint32_t MaxProbes = 8;	  // Slots of the probe atlas (1 .. MaxReflectionProbes).
-		std::uint32_t FacesPerFrame = 2;  // Cube faces captured per frame (0 .. 12): the cost bound.
+		std::uint32_t FacesPerFrame = 2;  // Cube faces captured per frame (0 .. MaxFacesPerFrame): the cost bound.
 		float MoveThreshold = 0.05f;	  // A probe that moved this far is re-captured with priority.
 		float MoverRange = 15.0f;		  // Movers farther than this from a probe do not raise its faces' urgency.
 		std::uint32_t PrefilterSamples = 32;
@@ -49,6 +49,7 @@ namespace Swim::Render
 	};
 
 	inline constexpr std::uint32_t MaxReflectionProbes = 16;
+	inline constexpr std::uint32_t MaxFacesPerFrame = 24;
 
 	// GPU row of one active probe (Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang).
 	struct GpuReflectionProbeRecord

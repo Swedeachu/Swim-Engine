@@ -41,9 +41,12 @@ namespace Swim::Render::PlanarReflections
 	// One capture to render this frame.
 	struct Capture
 	{
-		std::uint32_t Slot = 0; // Atlas layer.
-		std::uint32_t Width = 0;
+		std::uint32_t Slot = 0;	 // Atlas layer.
+		std::uint32_t Width = 0; // Stored size (the atlas region).
 		std::uint32_t Height = 0;
+		// Rendered size (>= the stored size: supersampled, averaged down by the resolve).
+		std::uint32_t RenderWidth = 0;
+		std::uint32_t RenderHeight = 0;
 		Matrix View{};
 		Matrix Projection{};	 // Off-axis, reverse-Z, infinite far.
 		Matrix ViewProjection{};
@@ -64,8 +67,9 @@ namespace Swim::Render::PlanarReflections
 		std::vector<Capture> Captures;					 // This frame's re-renders, most urgent first.
 		std::vector<GpuPlanarReflectionRecord> Records; // What shading uses (captured slots), largest first.
 		std::uint32_t Candidates = 0;					 // Reflector faces considered.
-		std::uint32_t Culled = 0;						 // Rejected: back-facing, off screen, too small or left to SSR.
+		std::uint32_t Culled = 0;						 // Rejected: back-facing, off screen or too small.
 		std::uint32_t Groups = 0;						 // Shared planes after merging.
+		std::uint32_t DynamicCaptures = 0;				 // Captures re-rendered because their content changed.
 	};
 
 	// The mirror image of p in the plane n . x = d.
@@ -91,6 +95,17 @@ namespace Swim::Render::PlanarReflections
 
 	inline constexpr std::uint32_t LookupIterations = 2;
 	inline constexpr float DistanceSky = 10000.0f;
+	// The widest half angle of a sphere cap's capture (radians; perspective stays usable).
+	inline constexpr float SphereMaxHalfAngle = 1.3f;
+
+	// How much a confident screen-space hit may replace a reflector's planar reflection: 0
+	// while it covers at least SsrFallbackScreenFraction of the screen height, rising smoothly
+	// to 1 at MinScreenFraction (where it is culled). The far LOD of the hierarchy.
+	float SsrPreference(float screenFraction, const PlanarReflectionSettings& settings);
+
+	// The rendered size of a capture: its stored size times Supersample (1 .. 4), lowered so
+	// the longer side stays within MaxRenderResolution (never below the stored size).
+	void Finish(Capture& capture, const PlanarReflectionSettings& settings);
 
 	class Planner
 	{
@@ -98,11 +113,13 @@ namespace Swim::Render::PlanarReflections
 	  public:
 
 		// Builds this frame's plan (a reference valid until the next Update). Reflectors are
-		// expanded into faces, culled (facing, frustum, size, SSR handoff), coplanar faces
-		// merged into shared captures, sized by their screen footprint (LOD) and given slots;
-		// at most CapturesPerFrame re-render, most urgent first: new, moved, resized, the
-		// camera moved more than MotionTolerance texels, a mover inside the capture, or older
-		// than MaxAgeSeconds. Allocation-free once warm.
+		// expanded into faces, culled (facing, frustum, size), coplanar faces merged into shared
+		// captures, sized by their screen footprint (LOD) and given slots. Up to
+		// CapturesPerFrame re-render, most urgent first: changed content (new, the reflector
+		// moved, the portal outgrew the capture, a mover inside the old or the new view, or a
+		// mover that was inside at the last capture: it left, and the capture must lose it),
+		// then the camera moved more than MotionTolerance texels, the LOD changed, or older than
+		// MaxAgeSeconds (0: every frame). Allocation-free once warm.
 		const Plan& Update(std::span<const PlanarReflectorDesc> reflectors, const ViewCamera& camera, std::uint64_t frame, double time,
 			const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers = {});
 
@@ -151,11 +168,13 @@ namespace Swim::Render::PlanarReflections
 			float Tolerance = 0.0f;
 			float MinCosine = 0.0f;
 			float TexelAngle = 0.0f;
-			float Density = 1.0f; // Capture texels per screen pixel.
-			float Distance = 0.0f; // Camera to the mirror (planes) or the sphere centre.
+			float Density = 1.0f;		 // Capture texels per screen pixel.
+			float ScreenFraction = 0.0f; // The reflector's screen extent / viewport height (LOD).
+			float Distance = 0.0f;		 // Camera to the mirror (planes) or the sphere centre.
 			std::uint32_t Owner = 0;
 			std::uint64_t Key = 0;
 			std::array<Float3, 4> Portal{}; // Plane groups: the captured window's corners (world).
+			std::array<Float4, 6> Frustum{}; // The capture's view (far: CullPlane).
 		};
 
 		struct Slot
@@ -166,8 +185,8 @@ namespace Swim::Render::PlanarReflections
 			std::uint64_t LastSeen = 0;
 			double CaptureTime = 0.0;
 			Float3 CaptureCamera{}; // The real camera position at capture.
+			bool SawMover = false;	 // Something moving was inside at the last capture.
 			Wanted State;			 // What the atlas layer holds.
-			std::array<Float4, 6> Frustum{};
 		};
 
 		void AddPlane(const PlanarReflectorDesc& reflector, std::uint32_t face, const Float3& center, const Float3& halfU,
@@ -179,15 +198,27 @@ namespace Swim::Render::PlanarReflections
 
 		Wanted Describe(const Group& group, const ViewCamera& camera, const PlanarReflectionSettings& settings);
 
+		// How urgently a slot needs `wanted` re-rendered (0: its capture is still good);
+		// `dynamic`: because its content changed (the dynamic budget), not just aged.
 		float Urgency(const Slot& slot, const Wanted& wanted, const ViewCamera& camera, double time,
-			const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers) const;
+			const PlanarReflectionSettings& settings, bool moverInside, bool& dynamic) const;
+
+		// A mover inside the view (its frustum, far: CullPlane), within `range` of the reflector.
+		static bool SeesMover(const Wanted& view, std::span<const ReflectionProbeMover> movers, float range);
 
 		std::array<Float4, 6> cameraFrustum{};
 		std::vector<Candidate> candidates;
 		std::vector<std::uint32_t> order;
 		std::vector<Group> groups;
 		std::vector<Wanted> wanted;
-		std::vector<std::pair<float, std::uint32_t>> urgent;
+		struct Urgent
+		{
+			float Urgency = 0.0f;
+			std::uint32_t Group = 0;
+			bool Dynamic = false;
+			bool MoverInside = false;
+		};
+		std::vector<Urgent> urgent;
 		std::vector<Float3> clipA;
 		std::vector<Float3> clipB;
 		std::vector<Slot> slots;

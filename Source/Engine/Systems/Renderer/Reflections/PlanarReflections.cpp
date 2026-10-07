@@ -176,6 +176,22 @@ namespace Swim::Render::PlanarReflections
 
 	} // namespace
 
+	float SsrPreference(float screenFraction, const PlanarReflectionSettings& settings)
+	{
+		const float start = std::max(settings.MinScreenFraction, 0.0f);
+		const float end = std::max(settings.SsrFallbackScreenFraction, start + 1.0e-4f);
+		return 1.0f - SmoothStep(start, end, screenFraction);
+	}
+
+	void Finish(Capture& capture, const PlanarReflectionSettings& settings)
+	{
+		const std::uint32_t longest = std::max({ capture.Width, capture.Height, 1u });
+		const std::uint32_t fits = std::max(settings.MaxRenderResolution / longest, 1u);
+		const std::uint32_t scale = std::clamp(std::min(settings.Supersample, fits), 1u, 4u);
+		capture.RenderWidth = capture.Width * scale;
+		capture.RenderHeight = capture.Height * scale;
+	}
+
 	Float3 ReflectPoint(const Float3& p, const Float3& n, float d)
 	{
 		return Sub(p, Mul(n, 2.0f * (Dot(n, p) - d)));
@@ -287,20 +303,10 @@ namespace Swim::Render::PlanarReflections
 		const float tanHalf = std::tan(std::max(camera.VerticalFov, 1.0e-3f) * 0.5f);
 		const float pixels = radius * camera.ViewportHeight / (distance * tanHalf);
 
-		// Back-facing (or edge-on), off screen, or too small to be worth a capture.
+		// Back-facing (or edge-on), off screen, or too small to be worth a capture (far: the
+		// SSR and probe LOD). Nothing else hands a mirror to SSR: where it is captured, the
+		// capture is the reflection.
 		if (Dot(normal, toCamera) <= 0.02f || !InCameraFrustum(center, radius) || pixels < settings.MinScreenFraction * camera.ViewportHeight)
-		{
-			++plan.Culled;
-			return;
-		}
-
-		// Where the mirror ray at the centre goes: staying in front of the camera (on screen),
-		// screen-space reflections show it at full resolution.
-		const Float3 view = Mul(toCamera, -1.0f / distance);
-		const Float3 mirror = Sub(view, Mul(normal, 2.0f * Dot(view, normal)));
-		const float onScreen = Dot(mirror, Normalize(camera.Forward, { 0.0f, 0.0f, -1.0f }));
-
-		if (onScreen > settings.SsrHandoff)
 		{
 			++plan.Culled;
 			return;
@@ -317,7 +323,7 @@ namespace Swim::Render::PlanarReflections
 		candidate.Pixels = pixels;
 		candidate.Quality = std::clamp(reflector.Quality, 0.1f, 4.0f);
 		candidate.Priority = std::max(reflector.Priority, 0.0f);
-		candidate.Score = pixels * candidate.Priority * (1.0f - 0.5f * SmoothStep(0.0f, settings.SsrHandoff, onScreen));
+		candidate.Score = pixels * candidate.Priority;
 		candidates.push_back(candidate);
 	}
 
@@ -350,8 +356,7 @@ namespace Swim::Render::PlanarReflections
 		candidate.Pixels = pixels;
 		candidate.Quality = std::clamp(reflector.Quality, 0.1f, 4.0f);
 		candidate.Priority = std::max(reflector.Priority, 0.0f);
-		// Only the central cap reflects through the capture: weigh by its share.
-		candidate.Score = pixels * candidate.Priority * (1.0f - std::clamp(settings.SphereMinCosine, 0.0f, 1.0f) * 0.5f);
+		candidate.Score = pixels * candidate.Priority;
 		candidates.push_back(candidate);
 	}
 
@@ -374,14 +379,22 @@ namespace Swim::Render::PlanarReflections
 			const Float3 toCamera = Sub(camera.Position, c);
 			const float distance = Length(toCamera);
 			const Float3 f = Mul(toCamera, 1.0f / distance);
-			const float cosine = std::clamp(settings.SphereMinCosine, 0.5f, 0.999f);
 			// Mirror rays of the cap deviate up to twice its normal angle, plus the spread of
-			// view directions across the sphere.
-			const float alpha = std::min(2.0f * std::acos(cosine) + std::asin(std::min(first.Radius / distance, 0.99f)) + 0.08f, 1.2f);
+			// view directions across the sphere. The capture's half angle is capped at
+			// SphereMaxHalfAngle, and with it the cap: a smaller one is matched rather than
+			// letting rays run off the capture's edge.
+			const float spread = std::asin(std::min(first.Radius / distance, 0.99f)) + 0.06f;
+			const float widest = std::cos(std::max((SphereMaxHalfAngle - spread) * 0.5f, 0.05f));
+			const float cosine = std::clamp(std::max(settings.SphereMinCosine, widest), 0.5f, 0.999f);
+			const float alpha = std::min(2.0f * std::acos(cosine) + spread, SphereMaxHalfAngle);
 			const float ta = std::tan(alpha);
 			const Float3 u = Normalize(Cross(f, { 0.0f, 1.0f, 0.0f }), Normalize(Cross(f, { 1.0f, 0.0f, 0.0f })));
 			const Float3 v = Cross(u, f);
-			const auto size = Quantize(first.Pixels * settings.ResolutionScale * first.Quality, minimum, atlas);
+			// Near the cap's centre the reflected direction turns twice as fast as the normal: 2 / R
+			// radians per screen pixel for a sphere R pixels in radius, against 2 tan(alpha) / size
+			// per capture texel. ResolutionScale = 1 matches them (no magnified texels).
+			const float matched = ta * 0.5f * first.Pixels;
+			const auto size = Quantize(matched * settings.ResolutionScale * first.Quality, minimum, atlas);
 			view.Width = size;
 			view.Height = size;
 			view.Position = c;
@@ -400,9 +413,11 @@ namespace Swim::Render::PlanarReflections
 			wanted.Tolerance = 1.0e9f; // Matched by object, not by plane.
 			wanted.MinCosine = cosine;
 			wanted.TexelAngle = 2.0f * ta / float(size);
-			wanted.Density = float(size) / std::max(first.Pixels, 1.0f);
+			wanted.Density = float(size) / std::max(matched, 1.0f);
+			wanted.ScreenFraction = first.Pixels / std::max(camera.ViewportHeight, 1.0f);
 			wanted.Distance = distance;
 			wanted.Valid = true;
+			Finish(view, settings);
 			return wanted;
 		}
 
@@ -500,15 +515,36 @@ namespace Swim::Render::PlanarReflections
 		wanted.MinCosine = 0.95f; // Planes match exactly; normal maps may tilt a little.
 		wanted.TexelAngle = ((right - left) / h) / float(view.Width);
 		wanted.Density = std::min(float(view.Width) / std::max(screenU, 1.0f), float(view.Height) / std::max(screenV, 1.0f));
+		// The LOD measure: the reflector's own screen size (not just its visible window).
+		wanted.ScreenFraction = first.Pixels / std::max(camera.ViewportHeight, 1.0f);
 		wanted.Distance = h;
 		wanted.Portal = { corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1) };
 		wanted.Valid = true;
+		Finish(view, settings);
 		return wanted;
 	}
 
-	float Planner::Urgency(const Slot& slot, const Wanted& w, const ViewCamera& camera, double time,
-		const PlanarReflectionSettings& settings, std::span<const ReflectionProbeMover> movers) const
+	bool Planner::SeesMover(const Wanted& view, std::span<const ReflectionProbeMover> movers, float range)
 	{
+		for (const auto& mover : movers)
+		{
+			// Within range of the reflector (the capture position is NearClip behind it) and in the view.
+			const float distance = Length(Sub(mover.Center, view.View.Position)) - view.View.NearClip - mover.Radius;
+
+			if (distance < range && SphereInside(view.Frustum, mover.Center, mover.Radius))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	float Planner::Urgency(const Slot& slot, const Wanted& w, const ViewCamera& camera, double time,
+		const PlanarReflectionSettings& settings, bool moverInside, bool& dynamic) const
+	{
+		dynamic = true;
+
 		if (!slot.Captured)
 		{
 			return 1.0e6f;
@@ -545,6 +581,21 @@ namespace Swim::Render::PlanarReflections
 			}
 		}
 
+		// Something moves inside the view (the capture would show it where it was), or was
+		// inside at the last capture (it left, or stopped: one more capture shows it as it
+		// is, so no ghost stays behind). The longer it waited, the sooner it goes.
+		if (moverInside || slot.SawMover)
+		{
+			urgency += 300.0f + float(std::max(time - slot.CaptureTime, 0.0)) * 1000.0f;
+		}
+
+		if (urgency > 0.0f)
+		{
+			return urgency;
+		}
+
+		dynamic = false;
+
 		// LOD changed by more than a fifth (hysteresis: no flicker between two sizes).
 		const auto changed = [](std::uint32_t a, std::uint32_t b)
 		{
@@ -574,16 +625,6 @@ namespace Swim::Render::PlanarReflections
 			urgency += 10.0f + texels;
 		}
 
-		// Something moved inside the capture's view.
-		for (const auto& mover : movers)
-		{
-			if (SphereInside(slot.Frustum, mover.Center, mover.Radius))
-			{
-				urgency += 300.0f;
-				break;
-			}
-		}
-
 		const float age = float(time - slot.CaptureTime);
 
 		if (age > settings.MaxAgeSeconds)
@@ -602,6 +643,7 @@ namespace Swim::Render::PlanarReflections
 		plan.Candidates = 0;
 		plan.Culled = 0;
 		plan.Groups = 0;
+		plan.DynamicCaptures = 0;
 
 		if (!settings.Enabled || reflectors.empty())
 		{
@@ -804,32 +846,45 @@ namespace Swim::Render::PlanarReflections
 			auto& slot = slots[chosen];
 			slot.LastSeen = frame;
 			w.View.Slot = chosen;
-			const float urgency = Urgency(slot, w, camera, time, settings, movers);
+			w.Frustum = FrustumPlanes(w.View.ViewProjection);
+			w.Frustum[5] = w.View.CullPlane;
+			// Movers in the view as it would be captured now, or in the one the layer holds.
+			const float range = std::max(settings.MoverRange, 0.0f);
+			const bool moverInside = SeesMover(w, movers, range) || (slot.Captured && SeesMover(slot.State, movers, range));
+			bool dynamic = false;
+			const float urgency = Urgency(slot, w, camera, time, settings, moverInside, dynamic);
 
 			if (urgency > 0.0f)
 			{
 				// Bigger reflectors first among equally urgent ones.
-				urgent.emplace_back(urgency * (1.0f + groups[gi].Score / std::max(camera.ViewportHeight, 1.0f)), gi);
+				urgent.push_back({ urgency * (1.0f + groups[gi].Score / std::max(camera.ViewportHeight, 1.0f)), gi, dynamic, moverInside });
 			}
 		}
 
 		std::sort(urgent.begin(), urgent.end(),
-			[](const auto& a, const auto& b)
+			[](const Urgent& a, const Urgent& b)
 			{
-				return a.first > b.first;
+				return a.Urgency > b.Urgency;
 			});
-		const std::size_t budget = std::min<std::size_t>(urgent.size(), settings.CapturesPerFrame);
+		// Changed content sorts first (its urgency dominates), then the rest, within one budget.
+		std::uint32_t left = settings.CapturesPerFrame;
 
-		for (std::size_t i = 0; i < budget; ++i)
+		for (const auto& u : urgent)
 		{
-			const auto& w = wanted[urgent[i].second];
+			if (left == 0)
+			{
+				break;
+			}
+
+			--left;
+			plan.DynamicCaptures += u.Dynamic ? 1u : 0u;
+			const auto& w = wanted[u.Group];
 			auto& slot = slots[w.View.Slot];
 			slot.Captured = true;
 			slot.CaptureTime = time;
 			slot.CaptureCamera = camera.Position;
+			slot.SawMover = SeesMover(w, movers, std::max(settings.MoverRange, 0.0f));
 			slot.State = w;
-			slot.Frustum = FrustumPlanes(w.View.ViewProjection);
-			slot.Frustum[5] = w.View.CullPlane;
 			plan.Captures.push_back(w.View);
 		}
 
@@ -865,8 +920,9 @@ namespace Swim::Render::PlanarReflections
 			record.Atlas[0] = float(w.View.Slot);
 			record.Atlas[1] = float(s.View.Width) / atlas;
 			record.Atlas[2] = float(s.View.Height) / atlas;
-			// Where its texels are coarser than the screen's, a confident screen-space hit wins.
-			record.Atlas[3] = std::clamp(1.0f - s.Density, 0.0f, 1.0f);
+			// The far LOD: only reflectors that became small on screen hand over to a confident
+			// screen-space hit (gradually, completely where they are about to be culled).
+			record.Atlas[3] = SsrPreference(w.ScreenFraction, settings);
 			record.Params[0] = std::min(s.Tolerance, 1.0e9f);
 			record.Params[1] = s.MinCosine;
 			record.Params[2] = settings.RoughnessFadeStart;

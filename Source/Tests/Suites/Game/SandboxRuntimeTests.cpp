@@ -11,6 +11,7 @@
 #include "Engine/Components/Pickable.h"
 #include "Game/Behaviors/LightSwarm.h"
 #include "Game/Behaviors/ReflectionLabFloor.h"
+#include "Engine/Components/PlanarReflector.h"
 #include "Engine/Components/ReflectionProbe.h"
 #include "Engine/Systems/Renderer/Runtime/RenderServices.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
@@ -652,7 +653,7 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 	auto& registry = sandbox->GetRegistry();
 
 	// Every regression case is there: the touching pair, the ball on the floor, the mirror
-	// cube, smooth and brushed chrome, the orbiting chrome ball, and one area probe.
+	// cube, two more polished chrome balls, the orbiting chrome ball, and one area probe.
 	const auto lab = Game::Sandbox::GetReflectionLabCenter();
 	std::size_t objectProbes = 0, areaProbes = 0, labProbes = 0;
 
@@ -667,6 +668,17 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 	SWIM_CHECK_EQUAL(objectProbes, std::size_t{ 7 + 6 }); // + the playground's six chrome balls.
 	SWIM_CHECK_EQUAL(areaProbes, std::size_t{ 2 });		  // The lab and the PBR gallery.
 	SWIM_CHECK(objectProbes + areaProbes <= 16u);		  // The sandbox's MaxProbes.
+	// Planar reflectors: the mirror cube and every chrome ball (their camera-facing caps).
+	std::size_t planars = 0, labPlanars = 0;
+
+	for (auto [entity, reflector, transform] : registry.view<Engine::PlanarReflector, Engine::Transform>().each())
+	{
+		++planars;
+		labPlanars += glm::length(transform.GetWorldPosition(registry) - lab) < 8.0f ? 1u : 0u;
+	}
+
+	SWIM_CHECK_EQUAL(labPlanars, std::size_t{ 7 });
+	SWIM_CHECK_EQUAL(planars, std::size_t{ 7 + 6 });
 	// The two spheres of the pair are 1 cm apart.
 	glm::vec3 a{ 0.0f }, b{ 0.0f };
 

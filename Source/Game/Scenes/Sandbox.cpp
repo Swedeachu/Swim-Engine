@@ -6,6 +6,7 @@
 #include "Engine/Components/Light.h"
 #include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/ParticleEmitter.h"
+#include "Engine/Components/PlanarReflector.h"
 #include "Engine/Components/ReflectionProbe.h"
 #include "Game/Behaviors/BlackHole.h"
 #include "Game/Behaviors/ReflectionLabFloor.h"
@@ -309,6 +310,15 @@ namespace Game
 					}
 
 				});
+			commands->Register("sandbox.ssrhalf",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->ScreenSpace.Reflections.HalfResolution = number(arguments, 1.0f) != 0.0f;
+					}
+
+				});
 			commands->Register("sandbox.ssrhistory",
 				[this, number](const std::vector<std::string>& arguments)
 				{
@@ -506,27 +516,42 @@ namespace Game
 		// as a fuzzy inner "ball" of sky colour inside the reflection.
 		reflections.MaxDistance = 70.0f;
 		reflections.MaxSteps = 128;
-		// A quarter of the rays (the reflection was the costliest pass after the lights).
+		// Checkerboard: half the rays, every pixel traced every second frame (half-rate
+		// screen-space reflections). Mirrors and the chrome spheres' caps come from planar
+		// captures, so SSR is mostly what those miss. `sandbox.ssrhalf 0` traces every pixel.
 		reflections.HalfResolution = true;
-		reflections.Temporal = true;								 // Settles the half-resolution pattern, jitter and probe refreshes.
+		// Settles the checkerboard and the march's noise; the filter clips its history to this
+		// frame's neighbourhood and leaves planar reflections alone, so nothing trails.
+		reflections.Temporal = true;
 		settings.ScreenSpace.AmbientOcclusion.HalfResolution = true; // Likewise the AO (TAA gathers the block).
 		reflections.DistanceFade = 0.15f;
 		reflections.EdgeFade = 0.05f; // Close up, most hits are near the screen edge.
 		// Only used without the back-face depth (each surface's real thickness otherwise).
 		reflections.Thickness = 0.1f;
-		// Local reflection probes (chrome balls, the gallery, the reflection lab): up to 16,
-		// three cube faces a frame at 128 x 128.
+		// Local reflection probes (chrome balls, the gallery, the reflection lab): up to 16 at
+		// 128 x 128 a face (the planar captures show the spheres' caps and the mirror's faces;
+		// probes the rims and what is behind), 16 faces a frame. Faces whose content changes
+		// (a mover in view or just left, a moving probe) go round robin, oldest first: in the
+		// lab every one of them is re-captured at least every second frame (half rate), and
+		// every probe captured in a frame is filtered in that frame.
 		settings.ReflectionProbes.MaxProbes = 16;
-		settings.ReflectionProbes.FacesPerFrame = 6; // Faces that see moving objects go first (ReflectionMovers).
-		settings.ReflectionProbes.Resolution = 256;	 // Flat mirrors show the probe 1:1.
-		// Idle faces (no mover in view) refresh every 30 frames; faces that see movers still
-		// update every frame the budget allows.
+		settings.ReflectionProbes.FacesPerFrame = 16;
+		settings.ReflectionProbes.Resolution = 128;
+		settings.ReflectionProbes.MoverRange = 10.0f; // Movers farther away are a few texels in a probe.
+		// Idle faces (nothing moving in view) refresh every 30 frames.
 		settings.ReflectionProbes.IdleRefreshFrames = 30;
-		// Planar reflections (the mirror cube, the lab's chrome caps): at most two captures a
-		// frame at half their on-screen size; still views re-render four times a second.
-		settings.PlanarReflections.Enabled = true;
-		settings.PlanarReflections.CapturesPerFrame = 2;
-		settings.PlanarReflections.ResolutionScale = 0.5f;
+		// Planar reflections (the mirror cube, every chrome sphere's cap): full rate - every
+		// visible capture re-renders every frame (nothing is reprojected from an older frame),
+		// at three capture texels per four screen pixels, jittered with the camera so TAA
+		// anti-aliases them (no supersampling).
+		auto& planar = settings.PlanarReflections;
+		planar.Enabled = true;
+		planar.MaxPlanes = 12; // Every reflector in the lab at once (no slot thrashing between them).
+		planar.AtlasResolution = 1024;
+		planar.CapturesPerFrame = 12;
+		planar.MaxAgeSeconds = 0.0f;
+		planar.ResolutionScale = 0.75f;
+		planar.Supersample = 1;
 		// 32-pixel light clusters: shorter light lists for the 256-light swarm (measured: the
 		// Forward+ pass -0.6 ms in the atrium; the mask pass is word-major and cheap).
 		settings.ClusterTileSize = 32;
@@ -1161,14 +1186,18 @@ namespace Game
 		{
 			const entt::entity ball = SpawnMesh(*this,
 				{ "Toy sphere " + std::to_string(i + 1), palette.Mesh(Engine::BuiltinMesh::Sphere),
-					Mat("Toy sphere", SrgbColor(230, 230, 235), 1.0f, 0.15f),
+					Mat("Toy sphere", SrgbColor(230, 230, 235), 1.0f, 0.03f),
 					PhysicsCenter + glm::vec3(3.0f + 0.9f * static_cast<float>(i % 3), 0.45f, -1.5f + 1.2f * static_cast<float>(i / 3)),
 					glm::vec3(0.9f), glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default,
 					{ GameTags::PhysicsToy, Engine::Tags::Dynamic } });
 			AddSphereBody(*this, ball, Engine::RigidbodyType::Dynamic, 0.5f, 3.0f);
 			// Chrome: an object probe shows the floor, the other balls and whatever is behind the
-			// camera (screen-space reflections alone cannot).
+			// camera (screen-space reflections alone cannot); a planar capture the sharp, current
+			// reflection across the cap that faces the camera.
 			AddComponent<Engine::ReflectionProbe>(ball, Engine::ReflectionProbe{});
+			Engine::PlanarReflector cap;
+			cap.Kind = Engine::PlanarReflector::Shape::Sphere;
+			AddComponent<Engine::PlanarReflector>(ball, cap);
 		}
 	}
 

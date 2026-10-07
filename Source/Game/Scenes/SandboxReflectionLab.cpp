@@ -47,7 +47,7 @@ namespace Game
 		// The reflection regression cases of the hybrid reflection work (SSR -> local probes ->
 		// environment), side by side on a floor pad whose look changes at run time
 		// (ReflectionLabFloor): two chrome spheres 1 cm apart, a chrome sphere 5 mm above the
-		// floor, a mirror cube with coloured balls beside it, smooth and brushed chrome, a
+		// floor, a mirror cube with coloured balls beside it, two more polished chrome spheres, a
 		// chrome sphere orbiting the lab and a coloured block orbiting it the other way, and a
 		// striped column behind the lab camera that only reflections show.
 		const glm::vec3 lab = GetReflectionLabCenter();
@@ -88,20 +88,20 @@ namespace Game
 		labFloor = EmplaceBehavior<ReflectionLabFloor>(pad, floorMaterial, floorDesc);
 
 		const std::uint32_t chrome = Mat("Lab chrome", { 0.95f, 0.93f, 0.90f }, 1.0f, 0.02f);
-		const std::uint32_t brushed = Mat("Lab brushed chrome", { 0.95f, 0.93f, 0.90f }, 1.0f, 0.32f);
+		// Every chrome sphere: its object probe (the whole sphere of directions) and a planar
+		// capture of the cap that faces the camera (sharp and current every frame).
 		const auto chromeSphere = [&](const std::string& name, const glm::vec3& position, std::uint32_t material, float priority = 1.0f)
 		{
 			const entt::entity e = SpawnMesh(*this, { name, sphere, material, position, glm::vec3(1.0f), glm::quat(1, 0, 0, 0), flags, tags });
 			AddComponent<Engine::ReflectionProbe>(e, ObjectProbe(priority));
+			AddComponent<Engine::PlanarReflector>(e, Planar(Engine::PlanarReflector::Shape::Sphere, priority));
 			return e;
 		};
 		// Two chrome spheres almost touching (1 cm apart) - screenshot 3.
 		chromeSphere("Lab chrome pair A", lab + glm::vec3(-2.505f, 0.5f, 0.0f), chrome);
 		chromeSphere("Lab chrome pair B", lab + glm::vec3(-1.495f, 0.5f, 0.0f), chrome);
-		// A chrome sphere 5 mm above the floor: the tiles under it must show as tiles. Its
-		// camera-facing cap is a planar reflection (what is behind the camera, sharp and current).
-		const entt::entity onFloor = chromeSphere("Lab chrome on floor", lab + glm::vec3(0.4f, 0.505f, 1.6f), chrome, 1.5f);
-		AddComponent<Engine::PlanarReflector>(onFloor, Planar(Engine::PlanarReflector::Shape::Sphere));
+		// A chrome sphere 5 mm above the floor: the tiles under it must show as tiles.
+		chromeSphere("Lab chrome on floor", lab + glm::vec3(0.4f, 0.505f, 1.6f), chrome, 1.5f);
 		// A mirror cube with coloured balls beside it - screenshots 1 and 2 (sliced balls).
 		const entt::entity mirror = SpawnMesh(*this, { "Lab mirror cube", cube, chrome, lab + glm::vec3(2.6f, 0.75f, -1.2f), glm::vec3(1.5f),
 														glm::angleAxis(0.35f, glm::vec3(0, 1, 0)), flags, tags });
@@ -112,10 +112,10 @@ namespace Game
 							 lab + glm::vec3(1.55f, 0.45f, -0.05f), glm::vec3(0.9f), glm::quat(1, 0, 0, 0), flags, tags });
 		SpawnMesh(*this, { "Lab yellow ball", sphere, Mat("Lab yellow", SrgbColor(245, 200, 40), 0.0f, 0.3f),
 							 lab + glm::vec3(3.6f, 0.4f, 0.1f), glm::vec3(0.8f), glm::quat(1, 0, 0, 0), flags, tags });
-		// Smooth and brushed chrome side by side.
-		const entt::entity smooth = chromeSphere("Lab smooth chrome", lab + glm::vec3(-0.9f, 0.5f, -1.9f), chrome);
-		AddComponent<Engine::PlanarReflector>(smooth, Planar(Engine::PlanarReflector::Shape::Sphere));
-		chromeSphere("Lab brushed chrome", lab + glm::vec3(0.4f, 0.5f, -1.9f), brushed);
+		// Two more polished chrome spheres side by side (the right one was brushed, 0.32
+		// roughness: it read as fogged next to the mirrors).
+		chromeSphere("Lab smooth chrome", lab + glm::vec3(-0.9f, 0.5f, -1.9f), chrome);
+		chromeSphere("Lab polished chrome", lab + glm::vec3(0.4f, 0.5f, -1.9f), chrome);
 		// Moving: a chrome sphere orbiting the lab, a coloured block orbiting the other way.
 		const entt::entity orbiter = chromeSphere("Lab orbiting chrome", lab + glm::vec3(4.2f, 0.6f, 0.0f), chrome);
 		EmplaceBehavior<Orbit>(orbiter, lab, 4.2f, 0.6f, 0.35f, 0.0f);

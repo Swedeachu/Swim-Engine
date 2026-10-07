@@ -1210,3 +1210,29 @@ SWIM_TEST("Render.ScreenSpace.Reference", "TheGlossyResolveSoftensRoughReflectio
 	const auto alone = Ss::ResolvedReflectionTexel(tall, reflection, facing, rough.Depth, x, y);
 	SWIM_CHECK(alone == reflection.At(x, y));
 }
+
+// Reflections of reflections read the previous frame only at reflective hits: a diffuse
+// surface's frame-old image would still show what moved away from it (a ghost in the mirror).
+SWIM_TEST("Render.ScreenSpace.Reference", "OnlyReflectiveHitsReadTheHistory")
+{
+	GpuScreenSpaceParams params{};
+	params.SsrHistory = 1u;
+	const Ss::ColorImage color(8, 8, { 1.0f, 0.0f, 0.0f, 1.0f });
+	const Ss::ColorImage indirect(8, 8, { 0.0f, 0.0f, 0.0f, 0.0f });
+	const Ss::ColorImage previous(8, 8, { 0.0f, 0.0f, 3.0f, 1.0f }); // Last frame: something blue stood there.
+	const Ss::VelocityImage velocity(8, 8, { 0.0f, 0.0f });
+	const Ss::ColorImage diffuse(8, 8, { 0.04f, 0.04f, 0.04f, 0.0f });
+	const Ss::ColorImage metal(8, 8, { 0.9f, 0.9f, 0.9f, 0.0f });
+	SWIM_CHECK_EQUAL(Ss::HistoryShare({ 0.04f, 0.04f, 0.04f }), 0.0f);
+	SWIM_CHECK_EQUAL(Ss::HistoryShare({ 0.9f, 0.9f, 0.9f }), 1.0f);
+
+	const auto onDiffuse = Ss::FilteredHitRadiance(params, color, indirect, nullptr, 4.0f, 4.0f, { &previous, &velocity, &diffuse });
+	SWIM_CHECK_NEAR(onDiffuse[0], 1.0f, 1e-5f); // This frame's colour: no ghost.
+	SWIM_CHECK_NEAR(onDiffuse[2], 0.0f, 1e-5f);
+	const auto onMetal = Ss::FilteredHitRadiance(params, color, indirect, nullptr, 4.0f, 4.0f, { &previous, &velocity, &metal });
+	SWIM_CHECK_NEAR(onMetal[2], 3.0f, 1e-4f); // The finished frame, with the hit's own reflections.
+	SWIM_CHECK_NEAR(onMetal[0], 0.0f, 1e-5f);
+	params.SsrHistory = 0u;
+	const auto off = Ss::FilteredHitRadiance(params, color, indirect, nullptr, 4.0f, 4.0f, { &previous, &velocity, &metal });
+	SWIM_CHECK_NEAR(off[0], 1.0f, 1e-5f);
+}

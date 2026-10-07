@@ -151,6 +151,9 @@ namespace Swim::Render::ReflectionProbes
 			std::array<std::uint64_t, 6> FaceFrame{};	   // 0: never captured.
 			std::array<double, 6> FaceTime{};
 			std::array<Float3, 6> FacePosition{};
+			// The face saw a mover when it was last captured: it is captured once more after the
+			// mover left its view (or stopped), so the probe does not keep showing it there.
+			std::array<bool, 6> FaceSawMover{};
 			std::uint64_t LastSeen = 0;
 		};
 

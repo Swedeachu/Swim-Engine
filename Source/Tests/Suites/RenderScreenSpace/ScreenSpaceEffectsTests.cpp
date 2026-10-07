@@ -73,7 +73,7 @@ namespace
 				{ { R::Depth, T::SampledTexture }, { R::Normal, T::SampledTexture }, { R::Color, T::SampledTexture },
 					{ R::Indirect, T::SampledTexture }, { R::Ao, T::SampledTexture }, { R::Params, T::ReadOnlyStorageBuffer },
 					{ R::Output, T::StorageTexture }, { R::Velocity, T::SampledTexture }, { R::History, T::SampledTexture },
-					{ R::BackDepth, T::SampledTexture } });
+					{ R::BackDepth, T::SampledTexture }, { R::Reflectance, T::SampledTexture } });
 			const auto make = [&](Rhi::Format format, Rhi::TextureUsage usage)
 			{
 				Rhi::TextureDesc desc;
@@ -376,7 +376,7 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		SWIM_CHECK_EQUAL(world.device.LastDescriptorTable->ElementWrites, C::Count);
 	}
 
-	// Half resolution: a quarter-size reflection texture (rounded up), flagged for the composite.
+	// Checkerboard: a half-width reflection texture (rounded up), every row, flagged for the composite.
 	{
 		ScreenSpaceSettings settings;
 		settings.Reflections.Enabled = true;
@@ -387,7 +387,7 @@ SWIM_TEST("Render.ScreenSpaceEffects", "RecordsReflectionsBetweenTheBlurAndTheCo
 		SWIM_REQUIRE(resources.Reflection && resources.ReflectionPass);
 		SWIM_CHECK_EQUAL(resources.ParamsRecord.SsrHalf, 1u);
 		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Width, (ScreenSpaceWorld::Width + 1u) / 2u);
-		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Height, (ScreenSpaceWorld::Height + 1u) / 2u);
+		SWIM_CHECK_EQUAL(graph.GetDesc(*resources.Reflection).Extent.Height, ScreenSpaceWorld::Height);
 		world.Run(graph, resources.Output);
 		SWIM_CHECK_EQUAL(world.Commands("Dispatch").size(), std::size_t(4));
 	}

@@ -13,7 +13,7 @@ namespace Swim::Render
 	inline constexpr std::uint32_t ScreenSpaceProbeRecordBytes = 32;
 	// The composite's planar inputs: at most this many GpuPlanarReflectionRecords (128 bytes each,
 	// Reflections/PlanarReflectionTypes.h) over a 2D-array atlas, a layer each.
-	inline constexpr std::uint32_t ScreenSpaceMaxPlanar = 8;
+	inline constexpr std::uint32_t ScreenSpaceMaxPlanar = 12;
 	inline constexpr std::uint32_t ScreenSpacePlanarRecordBytes = 128;
 
 	struct ScreenSpaceAoBindings // SwimScreenSpaceAo: GTAO visibility per pixel.
@@ -50,7 +50,9 @@ namespace Swim::Render
 		static constexpr std::uint32_t History = 8;	 // Texture2D<float4> rgba16f: TAA's previous output.
 		// ForwardPlusTargets::BackDepth (SsrBackDepth = 1): each surface's thickness; a 1x1 stand-in without.
 		static constexpr std::uint32_t BackDepth = 9;
-		static constexpr std::uint32_t Count = 10;
+		// Texture2D<float4>: ForwardPlusTargets::Reflectance (only reflective hits read the history).
+		static constexpr std::uint32_t Reflectance = 10;
+		static constexpr std::uint32_t Count = 11;
 	};
 
 	struct ScreenSpaceCompositeBindings // SwimScreenSpaceComposite: AO on indirect light, reflections, then fog.

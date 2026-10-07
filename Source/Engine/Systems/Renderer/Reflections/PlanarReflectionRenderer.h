@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace Swim::Render
@@ -18,10 +19,24 @@ namespace Swim::Render
 		static constexpr std::uint32_t Depth = 1;		// Texture2D<float>: its reverse-Z depth (D32Float depth aspect).
 		static constexpr std::uint32_t Destination = 2; // RWTexture2D<float4> rgba16f: one atlas layer.
 		static constexpr std::uint32_t Environment = 3; // TextureCube<float4>: the global environment (sky with clouds).
-		static constexpr std::uint32_t Sampler = 4;		// SamplerState: linear clamp.
+		static constexpr std::uint32_t Sampler = 4;		// SamplerState: linear clamp with mips.
+		// The capture's surface (reflections of reflections, CaptureShading.slang):
+		static constexpr std::uint32_t Normal = 5;		// Texture2D<float4>: world normal + roughness.
+		static constexpr std::uint32_t Reflectance = 6; // Texture2D<float4>: split-sum specular reflectance.
+		static constexpr std::uint32_t Specular = 7;	// Texture2D<float4>: specular IBL radiance.
+		static constexpr std::uint32_t ObjectId = 8;	// Texture2D<float>: ObjectId + 1.
+		static constexpr std::uint32_t ProbeCubes = 9;	// TextureCubeArray<float4>: prefiltered probes (1x1 stand-in without).
+		static constexpr std::uint32_t ProbeRecords = 10; // StructuredBuffer<GpuReflectionProbeRecord>.
+		static constexpr std::uint32_t Count = 11;
 		static constexpr std::uint32_t ThreadGroupSize = 8;
-		static constexpr std::uint32_t PushConstantBytes = 96;
+		static constexpr std::uint32_t PushConstantBytes = 128;
+		static constexpr std::uint32_t MaxSupersample = 4;
 	};
+
+	// One capture's Forward+ targets (RenderWidth x RenderHeight) and the probes its reflective
+	// texels reflect (ReflectionProbeRenderer.h).
+	using PlanarCaptureTargets = ReflectionCaptureTargets;
+	using PlanarCaptureProbes = ReflectionCaptureProbes;
 
 	struct PlanarReflectionRendererDesc
 	{
@@ -51,15 +66,20 @@ namespace Swim::Render
 		{
 			GraphTexture Texture;
 			GraphTexture EnvironmentStandIn; // A black 1x1 cube bound when no environment is given.
+			GraphTexture ProbeStandIn;		 // A black 1x1 cube array bound without probes.
+			GraphBuffer ProbeRecordStandIn;	 // One zero record.
 		};
 
 		// Imports the atlas (once per graph); a fresh one is cleared first. Export it as
 		// ShaderRead after the last use.
 		Atlas Import(RenderGraph& graph);
 
-		// Resolves a capture (color RGBA16Float and depth D32Float, Width x Height) into its layer.
-		GraphPass RecordResolve(RenderGraph& graph, const Atlas& atlas, const PlanarReflections::Capture& capture, GraphTexture color,
-			GraphTexture depth, const ReflectionProbeCaptureSky& sky = {}) const;
+		// Resolves a capture (its targets RenderWidth x RenderHeight, an integer multiple of
+		// Width x Height) into its layer: supersampled texels averaged down, reflective texels
+		// given their probe's reflection when `probes` are given.
+		GraphPass RecordResolve(RenderGraph& graph, const Atlas& atlas, const PlanarReflections::Capture& capture,
+			const PlanarCaptureTargets& targets, const ReflectionProbeCaptureSky& sky = {},
+			const std::optional<PlanarCaptureProbes>& probes = std::nullopt) const;
 
 		std::uint32_t GetResolution() const { return resolution; }
 

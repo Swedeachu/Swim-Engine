@@ -983,71 +983,106 @@ namespace Swim::Render::ScreenSpace
 		return radiance;
 	}
 
+	namespace
+	{
+
+		// The four nearest texels of the current colour (HitRadiance) or of the previous frame's
+		// (`previous`), bilinearly weighted and divided by 1 + luminance, renormalized.
+		Float3 BilinearHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
+			const ScalarImage* ao, float px, float py, const ColorImage* previous)
+		{
+			const float ux = px - 0.5f;
+			const float uy = py - 0.5f;
+			const float bx = std::floor(ux);
+			const float by = std::floor(uy);
+			const float fx = ux - bx;
+			const float fy = uy - by;
+			const int maxX = int(color.Width) - 1;
+			const int maxY = int(color.Height) - 1;
+			Float3 sum{ 0, 0, 0 };
+			float weights = 0.0f;
+
+			for (int j = 0; j < 4; ++j)
+			{
+				const int ox = j & 1;
+				const int oy = j >> 1;
+				const auto tx = static_cast<std::uint32_t>(std::clamp(int(bx) + ox, 0, maxX));
+				const auto ty = static_cast<std::uint32_t>(std::clamp(int(by) + oy, 0, maxY));
+				Float3 radiance;
+
+				if (previous)
+				{
+					const auto& texel = previous->At(tx, ty);
+					radiance = { std::max(texel[0], 0.0f), std::max(texel[1], 0.0f), std::max(texel[2], 0.0f) };
+				}
+				else
+				{
+					radiance = HitRadiance(params, color, indirect, ao, tx, ty);
+				}
+
+				const float luma = 0.2126f * radiance[0] + 0.7152f * radiance[1] + 0.0722f * radiance[2];
+				const float weight = (ox != 0 ? fx : 1.0f - fx) * (oy != 0 ? fy : 1.0f - fy) / (1.0f + luma);
+
+				for (int k = 0; k < 3; ++k)
+				{
+					sum[k] += weight * radiance[k];
+				}
+
+				weights += weight;
+			}
+
+			const float inverse = weights > 0.0f ? 1.0f / weights : 0.0f;
+			return { sum[0] * inverse, sum[1] * inverse, sum[2] * inverse };
+		}
+
+	} // namespace
+
+	float HistoryShare(const Float3& reflectance)
+	{
+		const float luma = 0.2126f * reflectance[0] + 0.7152f * reflectance[1] + 0.0722f * reflectance[2];
+		const float t = std::clamp((luma - 0.1f) / 0.4f, 0.0f, 1.0f);
+		return t * t * (3.0f - 2.0f * t);
+	}
+
 	Float3 FilteredHitRadiance(const GpuScreenSpaceParams& params, const ColorImage& color, const ColorImage& indirect,
 		const ScalarImage* ao, float px, float py, const ReflectionHistory& history)
 	{
-		bool fromHistory = false;
+		const auto current = BilinearHitRadiance(params, color, indirect, ao, px, py, nullptr);
 
-		if (params.SsrHistory != 0u && history.Color && history.Velocity)
+		if (params.SsrHistory == 0u || !history.Color || !history.Velocity)
 		{
-			const float width = float(color.Width);
-			const float height = float(color.Height);
-			const auto hitX = static_cast<std::uint32_t>(std::clamp(int(std::floor(px)), 0, int(color.Width) - 1));
-			const auto hitY = static_cast<std::uint32_t>(std::clamp(int(std::floor(py)), 0, int(color.Height) - 1));
-			const auto& motion = history.Velocity->At(hitX, hitY);
-			const float hx = px - motion[0] * width;
-			const float hy = py - motion[1] * height;
-
-			if (hx >= 0.0f && hy >= 0.0f && hx <= width && hy <= height)
-			{
-				px = hx;
-				py = hy;
-				fromHistory = true;
-			}
+			return current;
 		}
 
-		const float ux = px - 0.5f;
-		const float uy = py - 0.5f;
-		const float bx = std::floor(ux);
-		const float by = std::floor(uy);
-		const float fx = ux - bx;
-		const float fy = uy - by;
-		const int maxX = int(color.Width) - 1;
-		const int maxY = int(color.Height) - 1;
-		Float3 sum{ 0, 0, 0 };
-		float weights = 0.0f;
+		const float width = float(color.Width);
+		const float height = float(color.Height);
+		const auto hitX = static_cast<std::uint32_t>(std::clamp(int(std::floor(px)), 0, int(color.Width) - 1));
+		const auto hitY = static_cast<std::uint32_t>(std::clamp(int(std::floor(py)), 0, int(color.Height) - 1));
+		float share = 1.0f;
 
-		for (int j = 0; j < 4; ++j)
+		if (history.Reflectance)
 		{
-			const int ox = j & 1;
-			const int oy = j >> 1;
-			const auto tx = static_cast<std::uint32_t>(std::clamp(int(bx) + ox, 0, maxX));
-			const auto ty = static_cast<std::uint32_t>(std::clamp(int(by) + oy, 0, maxY));
-			Float3 radiance;
-
-			if (fromHistory)
-			{
-				const auto& previous = history.Color->At(tx, ty);
-				radiance = { std::max(previous[0], 0.0f), std::max(previous[1], 0.0f), std::max(previous[2], 0.0f) };
-			}
-			else
-			{
-				radiance = HitRadiance(params, color, indirect, ao, tx, ty);
-			}
-
-			const float luma = 0.2126f * radiance[0] + 0.7152f * radiance[1] + 0.0722f * radiance[2];
-			const float weight = (ox != 0 ? fx : 1.0f - fx) * (oy != 0 ? fy : 1.0f - fy) / (1.0f + luma);
-
-			for (int k = 0; k < 3; ++k)
-			{
-				sum[k] += weight * radiance[k];
-			}
-
-			weights += weight;
+			const auto& r = history.Reflectance->At(hitX, hitY);
+			share = HistoryShare({ r[0], r[1], r[2] });
 		}
 
-		const float inverse = weights > 0.0f ? 1.0f / weights : 0.0f;
-		return { sum[0] * inverse, sum[1] * inverse, sum[2] * inverse };
+		if (!(share > 0.0f))
+		{
+			return current;
+		}
+
+		const auto& motion = history.Velocity->At(hitX, hitY);
+		const float hx = px - motion[0] * width;
+		const float hy = py - motion[1] * height;
+
+		if (!(hx >= 0.0f && hy >= 0.0f && hx <= width && hy <= height))
+		{
+			return current;
+		}
+
+		const auto previous = BilinearHitRadiance(params, color, indirect, ao, hx, hy, history.Color);
+		return { current[0] + (previous[0] - current[0]) * share, current[1] + (previous[1] - current[1]) * share,
+			current[2] + (previous[2] - current[2]) * share };
 	}
 
 	Float4 ReflectionTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, const ColorImage& normal, const ColorImage& color,

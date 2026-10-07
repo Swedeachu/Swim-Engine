@@ -15,6 +15,18 @@
 // Reverse-Z depth of the nearest back faces (ForwardPlusTargets::BackDepth; 0 where none);
 // a 1x1 stand-in when SsrBackDepth = 0.
 [[vk::binding(9, 0)]] Texture2D<float> BackDepth;
+// ForwardPlusTargets::Reflectance: which hits carry reflections of their own (only those read
+// the history: everything else is exact, and current, in Color).
+[[vk::binding(10, 0)]] Texture2D<float4> Reflectance;
+
+// ScreenSpace::HistoryShare: the share of a hit's radiance read from the previous frame (its
+// reflections of reflections), by its specular reflectance (luminance): 0 for dielectrics
+// (their few percent of reflection are not worth a frame of lag, and a frame-old image of a
+// diffuse surface shows what moved away from it), 1 for metals.
+float HistoryShare(float3 reflectance)
+{
+	return smoothstep(0.1, 0.5, dot(reflectance, float3(0.2126, 0.7152, 0.0722)));
+}
 
 // ScreenSpace::SelfPlaneTolerance / SelfPlaneOffset.
 static const float SelfPlaneTolerance = 0.002;
@@ -96,28 +108,10 @@ float3 HitRadiance(ReflectionParams reflection, int3 at)
 	return radiance;
 }
 
-// ScreenSpace::FilteredHitRadiance: bilinear over the four nearest texels, each weighted
-// by 1 / (1 + luminance) and renormalized. With history, the texels come from the previous
-// frame's finished color at the hit moved back by the hit pixel's motion vector (so they
-// include the hit's own reflections); off that image, the current color as without.
-float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, float px, float py)
+// Bilinear over the four nearest texels of the current colour (fromHistory = false) or of the
+// previous frame's (true), each weighted by 1 / (1 + luminance) and renormalized.
+float3 BilinearHitRadiance(ScreenSpaceView view, ReflectionParams reflection, float px, float py, bool fromHistory)
 {
-	const float width = float(view.Width);
-	const float height = float(view.Height);
-	bool fromHistory = false;
-	if (reflection.History)
-	{
-		const int2 hitPixel = int2(clamp(int(floor(px)), 0, int(view.Width) - 1), clamp(int(floor(py)), 0, int(view.Height) - 1));
-		const float2 motion = Velocity.Load(int3(hitPixel, 0));
-		const float hx = px - motion.x * width;
-		const float hy = py - motion.y * height;
-		if (hx >= 0.0 && hy >= 0.0 && hx <= width && hy <= height)
-		{
-			px = hx;
-			py = hy;
-			fromHistory = true;
-		}
-	}
 	const float ux = px - 0.5;
 	const float uy = py - 0.5;
 	const float bx = floor(ux);
@@ -140,6 +134,35 @@ float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, fl
 		weights += weight;
 	}
 	return weights > 0.0 ? sum * (1.0 / weights) : float3(0.0, 0.0, 0.0);
+}
+
+// ScreenSpace::FilteredHitRadiance: the current colour at the hit (exact: it is this frame's).
+// With history, reflective hits (HistoryShare) blend in the previous frame's finished colour
+// at the hit moved back by the hit pixel's motion vector, which includes the hit's own
+// reflections (reflections of reflections); off that image, the current colour only.
+float3 FilteredHitRadiance(ScreenSpaceView view, ReflectionParams reflection, float px, float py)
+{
+	const float3 current = BilinearHitRadiance(view, reflection, px, py, false);
+	if (!reflection.History)
+	{
+		return current;
+	}
+	const float width = float(view.Width);
+	const float height = float(view.Height);
+	const int2 hitPixel = int2(clamp(int(floor(px)), 0, int(view.Width) - 1), clamp(int(floor(py)), 0, int(view.Height) - 1));
+	const float share = HistoryShare(Reflectance.Load(int3(hitPixel, 0)).rgb);
+	if (!(share > 0.0))
+	{
+		return current;
+	}
+	const float2 motion = Velocity.Load(int3(hitPixel, 0));
+	const float hx = px - motion.x * width;
+	const float hy = py - motion.y * height;
+	if (!(hx >= 0.0 && hy >= 0.0 && hx <= width && hy <= height))
+	{
+		return current;
+	}
+	return lerp(current, BilinearHitRadiance(view, reflection, hx, hy, true), share);
 }
 
 // ScreenSpace::TraceReflection's sceneAt: the depth buffer as the march sees it (nothing at
@@ -395,11 +418,11 @@ float4 Trace(ScreenSpaceView view, ReflectionParams reflection, int x, int y)
 void computeMain(uint3 id : SV_DispatchThreadID)
 {
 	const ScreenSpaceView view = ScreenSpaceLoadView(Params);
-	// Half resolution: thread (x, y) traces one pixel of the 2 x 2 block at (2x, 2y), the
-	// one ScreenSpaceHalfOffset picks this frame (the composite knows which).
+	// Checkerboard: thread (x, y) traces one pixel of the pair at (2x, y), the column
+	// ScreenSpaceCheckerColumn picks this frame (the composite knows which).
 	const bool half = Params[0].SsrHalf != 0u;
-	const uint2 pixel = half ? id.xy * 2u + ScreenSpaceHalfOffset(Params[0].NoiseFrame) : id.xy;
-	if (half ? (id.x >= (view.Width + 1u) / 2u || id.y >= (view.Height + 1u) / 2u) : (id.x >= view.Width || id.y >= view.Height))
+	const uint2 pixel = half ? uint2(id.x * 2u + ScreenSpaceCheckerColumn(Params[0].NoiseFrame, id.y), id.y) : id.xy;
+	if (half ? (id.x >= (view.Width + 1u) / 2u || id.y >= view.Height) : (id.x >= view.Width || id.y >= view.Height))
 	{
 		return;
 	}

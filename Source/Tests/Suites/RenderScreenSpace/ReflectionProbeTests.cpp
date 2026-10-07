@@ -234,11 +234,16 @@ SWIM_TEST("Render.ReflectionProbes", "FacesThatSeeMovingObjectsAreRecapturedFirs
 		SWIM_CHECK_EQUAL(plan.Captures[0].Face, 5u);
 	}
 
-	// Out of range, or the probe's own object (at its centre), changes nothing.
+	// The mover leaves the face's view (here: out of range): the face is captured once more,
+	// so the probe stops showing it where it was (no ghost); then it waits its turn again.
 	settings.MoverRange = 1.0f;
 	auto plan = scheduler.Update(probes, camera, frame++, 1.0, settings, movers);
 	SWIM_REQUIRE_EQUAL(plan.Captures.size(), 1u);
+	SWIM_CHECK_EQUAL(plan.Captures[0].Face, 5u);
+	plan = scheduler.Update(probes, camera, frame++, 1.05, settings, movers);
+	SWIM_REQUIRE_EQUAL(plan.Captures.size(), 1u);
 	SWIM_CHECK(plan.Captures[0].Face != 5u);
+	// The probe's own object (at its centre) changes nothing.
 	settings.MoverRange = 15.0f;
 	const std::vector<ReflectionProbeMover> owner{ { { 0.0f, 1.0f, 0.0f }, 0.5f } };
 	plan = scheduler.Update(probes, camera, frame++, 1.1, settings, owner);

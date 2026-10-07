@@ -350,7 +350,7 @@ namespace Swim::Render
 		{
 			const bool half = resources.ParamsRecord.SsrHalf != 0u;
 			const std::uint32_t traceWidth = half ? (width + 1u) / 2u : width;
-			const std::uint32_t traceHeight = half ? (height + 1u) / 2u : height;
+			const std::uint32_t traceHeight = height; // Checkerboard: every row, every second column.
 			auto reflectionDesc = OutputDesc(traceWidth, traceHeight);
 			const std::string reflectionName = name + " reflections";
 			reflectionDesc.DebugName = reflectionName;
@@ -418,6 +418,7 @@ namespace Swim::Render
 					b.Read(params, S::ShaderRead);
 					b.Read(velocity, S::ShaderRead);
 					b.Read(backDepth, S::ShaderRead);
+					b.Read(reflectance, S::ShaderRead);
 
 					if (useHistory)
 					{
@@ -427,8 +428,8 @@ namespace Swim::Render
 					b.Write(reflection, S::ShaderWrite);
 				},
 				[program = desc.Reflection, label = name + " reflections", depth, depthFormat, depthAspect, normal, color, indirect,
-					visibility, params, reflection, velocity, historyTexture, backDepth, backDepthFormat, backDepthAspect, traceWidth,
-					traceHeight](RenderCommandContext& c)
+					visibility, params, reflection, velocity, historyTexture, backDepth, backDepthFormat, backDepthAspect, reflectance,
+					traceWidth, traceHeight](RenderCommandContext& c)
 				{
 					using B = ScreenSpaceReflectionBindings;
 					const std::array<Rhi::DescriptorWrite, B::Count> writes{ TextureWrite(c, B::Depth, depth, depthFormat, depthAspect),
@@ -439,7 +440,8 @@ namespace Swim::Render
 						TextureWrite(c, B::Output, reflection, Rhi::Format::RGBA16Float),
 						TextureWrite(c, B::Velocity, velocity, Rhi::Format::RG16Float),
 						TextureWrite(c, B::History, historyTexture, Rhi::Format::RGBA16Float),
-						TextureWrite(c, B::BackDepth, backDepth, backDepthFormat, backDepthAspect) };
+						TextureWrite(c, B::BackDepth, backDepth, backDepthFormat, backDepthAspect),
+						TextureWrite(c, B::Reflectance, reflectance, Rhi::Format::RGBA16Float) };
 					Dispatch(c, program, label, writes, traceWidth, traceHeight);
 				});
 		}

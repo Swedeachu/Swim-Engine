@@ -4,7 +4,7 @@
 //
 // Reflections are a hierarchy: the planar reflection of a mirror that has one (exact, from a
 // capture through the mirror), the screen-space hit where one was found (weighted by its
-// confidence; over a planar reflection only as far as its SSR preference says), else the
+// confidence; over a planar reflection only for reflectors small on screen), else the
 // local reflection probes around the surface (ReflectionProbes::Select, with parallax
 // correction from the captured distances), else the global environment the forward pass
 // already wrote (Specular). Each layer replaces the next by its weight, so the transitions
@@ -328,15 +328,16 @@ static const float GlossyTapWeights[3] = { 1.0, 0.6065307, 0.1353353 };
 
 // ScreenSpace::ResolvedReflectionTexel: a 5 x 5 Gaussian over taps on the same surface,
 // its step growing with the roughness.
-// Half-resolution reflections (SsrHalf): the same filter over the traced texels around the
-// pixel, each weighted by where its traced pixel lies (a Gaussian in full-resolution pixels)
-// and kept only on the pixel's own surface (depth and normal as above). 3 x 3 texels for
-// sharp surfaces, 5 x 5 for rough ones.
+// Checkerboard reflections (SsrHalf): the same filter over the traced texels around the
+// pixel (every row traced one pixel in two, alternating: ScreenSpaceCheckerColumn), each
+// weighted by where its traced pixel lies (a Gaussian in full-resolution pixels) and kept
+// only on the pixel's own surface (depth and normal as above). The pixel's own trace (when it
+// was traced this frame) and its closest neighbours dominate sharp surfaces; rough ones
+// reach two texels further.
 float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 {
-	const int2 halfSize = int2((int(view.Width) + 1) / 2, (int(view.Height) + 1) / 2);
-	const int2 centreTexel = int2(x, y) / 2;
-	const int2 offset = int2(ScreenSpaceHalfOffset(Params[0].NoiseFrame));
+	const int traceWidth = (int(view.Width) + 1) / 2;
+	const uint frame = Params[0].NoiseFrame;
 	const float4 encoded = Normal.Load(int3(x, y, 0));
 	bool valid;
 	const float3 position = ScreenSpaceLoadViewPosition(view, Depth, x, y, valid);
@@ -346,9 +347,10 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 	}
 	const float r = clamp(encoded.w, 0.0, 1.0);
 	const float radius = min(GlossyBlurScale * r * sqrt(r), GlossyBlurMax) * (float(view.Height) / 1080.0);
-	const float sigma = max(1.0, floor(radius * 0.5 + 0.5));
+	const float sigma = max(0.75, floor(radius * 0.5 + 0.5));
 	const float inverseTwoSigma2 = 0.5 / (sigma * sigma);
 	const int reach = sigma > 1.5 ? 2 : 1;
+	const int step = int(max(1.0, floor(sigma * 0.5 + 0.5)));
 	const float centreDepth = -position.z;
 	float3 radiance = float3(0.0, 0.0, 0.0);
 	float radianceWeight = 0.0;
@@ -356,10 +358,14 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 	float weights = 0.0;
 	for (int oy = -reach; oy <= reach; ++oy)
 	{
+		const int row = clamp(y + oy * step, 0, int(view.Height) - 1);
+		const int column = int(ScreenSpaceCheckerColumn(frame, uint(row)));
+		// The traced texel of this row nearest the pixel, and its neighbours along the row.
+		const int nearest = (x - column + 1) / 2;
 		for (int ox = -reach; ox <= reach; ++ox)
 		{
-			const int2 texel = clamp(centreTexel + int2(ox, oy) * int(max(1.0, floor(sigma * 0.5 + 0.5))), int2(0, 0), halfSize - 1);
-			const int2 source = min(texel * 2 + offset, int2(int(view.Width), int(view.Height)) - 1);
+			const int tx = clamp(nearest + ox * step, 0, traceWidth - 1);
+			const int2 source = int2(min(tx * 2 + column, int(view.Width) - 1), row);
 			bool tapValid;
 			const float3 tapPosition = ScreenSpaceLoadViewPosition(view, Depth, source.x, source.y, tapValid);
 			if (!tapValid || abs(-tapPosition.z - centreDepth) > 0.05 * centreDepth)
@@ -372,7 +378,7 @@ float4 ResolvedHalfReflection(ScreenSpaceView view, int x, int y)
 			}
 			const float2 d = float2(source - int2(x, y));
 			const float w = exp(-dot(d, d) * inverseTwoSigma2);
-			const float4 tap = Reflection.Load(int3(texel, 0));
+			const float4 tap = Reflection.Load(int3(tx, row, 0));
 			const float tapConfidence = max(tap.a, 0.0); // ScreenSpace::RejectedHit counts as a miss.
 			confidence += w * tapConfidence;
 			weights += w;
@@ -574,22 +580,27 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 			}
 		}
 		// The reflection term: the planar reflection replaces the fallback; the screen-space hit
-		// goes over it by its confidence (over a planar reflection, only as far as the planar
-		// texels are coarser than the screen's: its SSR preference). It is then (optionally)
-		// filtered over time, replacing the specular IBL Forward+ added.
-		const float ssrShare = confidence * (planarWeight > 0.0 ? ssrPreference : 1.0);
+		// goes over it by its confidence, but over a planar reflection only as far as its SSR
+		// preference allows (0 unless the reflector is small on screen: the far LOD), in
+		// proportion to the planar weight (the rim of a sphere cap blends towards plain SSR).
+		// It is then (optionally) filtered over time, replacing the specular IBL Forward+ added.
+		const float ssrShare = confidence * lerp(1.0, ssrPreference, planarWeight);
 		const float3 base = planarWeight > 0.0 ? lerp(fallback, reflectance * planarRadiance, planarWeight) : fallback;
 		const float3 reflected = ssrShare > 0.0 ? lerp(base, reflectance * reflection.rgb, ssrShare) : base;
 		c = max(c + ao * (reflected - specular), float3(0.0, 0.0, 0.0));
 		if (debug == 0u)
 		{
-			reflectionTerm = float4(reflected, ao);
+			// The planar share is exact and current every frame: the temporal filter leaves it
+			// alone (reprojecting a mirror's image by the mirror's own motion would drag the old
+			// image along: a double image while the camera moves).
+			const float planarShare = planarWeight * (1.0 - ssrShare);
+			reflectionTerm = float4(reflected, ao * (1.0 - planarShare));
 		}
 		if (debug == 1u)
 		{
 			// Sources: SSR red, probes green, the environment blue, planar yellow.
 			debugColor = float3(confidence, (1.0 - confidence) * probeCoverage, (1.0 - confidence) * (1.0 - probeCoverage));
-			if (ssrEnabled && Reflection.Load(Params[0].SsrHalf != 0u ? int3(at.xy / 2, 0) : at).a < 0.0)
+			if (ssrEnabled && Reflection.Load(Params[0].SsrHalf != 0u ? int3(at.x / 2, at.y, 0) : at).a < 0.0)
 			{
 				debugColor = lerp(debugColor, float3(1.0, 0.0, 1.0), 0.6);
 			}

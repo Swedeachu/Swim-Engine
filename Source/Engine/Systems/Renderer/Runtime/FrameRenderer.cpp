@@ -153,7 +153,7 @@ namespace Engine
 		EnvironmentResolution = std::clamp(PowerOfTwoFloor(std::max(EnvironmentResolution, 16u)), 16u, 1024u);
 		ReflectionProbes.Resolution = std::clamp(PowerOfTwoFloor(std::max(ReflectionProbes.Resolution, 16u)), 16u, 512u);
 		ReflectionProbes.MaxProbes = std::clamp(ReflectionProbes.MaxProbes, 1u, Swim::Render::MaxReflectionProbes);
-		ReflectionProbes.FacesPerFrame = std::min(ReflectionProbes.FacesPerFrame, 12u);
+		ReflectionProbes.FacesPerFrame = std::min(ReflectionProbes.FacesPerFrame, Swim::Render::MaxFacesPerFrame);
 		ReflectionProbes.PrefilterSamples = std::clamp(ReflectionProbes.PrefilterSamples, 1u, 256u);
 		ReflectionProbes.FiltersPerFrame = std::clamp(ReflectionProbes.FiltersPerFrame, 1u, Swim::Render::MaxReflectionProbes);
 		clampFinite(ReflectionProbes.MoveThreshold, 0.0f, 100.0f, 0.05f);
@@ -163,18 +163,21 @@ namespace Engine
 		planar.AtlasResolution = std::clamp(PowerOfTwoFloor(std::max(planar.AtlasResolution, 64u)), 64u, 2048u);
 		planar.MinResolution = std::clamp(planar.MinResolution, 8u, planar.AtlasResolution);
 		planar.CapturesPerFrame = std::min(planar.CapturesPerFrame, Swim::Render::MaxPlanarReflections);
-		clampFinite(planar.ResolutionScale, 0.05f, 4.0f, 0.5f);
-		clampFinite(planar.MinScreenFraction, 0.0f, 1.0f, 0.04f);
-		clampFinite(planar.SsrHandoff, -1.0f, 1.0f, 0.85f);
+		clampFinite(planar.ResolutionScale, 0.05f, 4.0f, 1.0f);
+		clampFinite(planar.MinScreenFraction, 0.0f, 1.0f, 0.03f);
+		clampFinite(planar.SsrFallbackScreenFraction, planar.MinScreenFraction, 1.0f, 0.1f);
+		planar.Supersample = std::clamp(planar.Supersample, 1u, 4u);
+		planar.MaxRenderResolution = std::clamp(planar.MaxRenderResolution, planar.AtlasResolution, 4096u);
 		clampFinite(planar.PlaneAngleTolerance, 0.0f, 0.5f, 0.035f);
 		clampFinite(planar.PlaneDistanceTolerance, 0.0f, 10.0f, 0.05f);
-		clampFinite(planar.MotionTolerance, 0.0f, 1000.0f, 3.0f);
-		clampFinite(planar.MaxAgeSeconds, 0.0f, 3600.0f, 0.25f);
-		clampFinite(planar.SphereMinCosine, 0.5f, 0.999f, 0.9f);
+		clampFinite(planar.MotionTolerance, 0.0f, 1000.0f, 0.25f);
+		clampFinite(planar.MaxAgeSeconds, 0.0f, 3600.0f, 0.0f);
+		clampFinite(planar.SphereMinCosine, 0.5f, 0.999f, 0.75f);
 		clampFinite(planar.RoughnessFadeStart, 0.0f, 1.0f, 0.15f);
 		clampFinite(planar.RoughnessFadeEnd, planar.RoughnessFadeStart, 1.0f, 0.35f);
 		clampFinite(planar.PortalMargin, 0.0f, 2.0f, 0.1f);
 		clampFinite(planar.CullDistance, 1.0f, 100000.0f, 150.0f);
+		clampFinite(planar.MoverRange, 0.0f, 100000.0f, 25.0f);
 		ClusterTileSize = std::clamp(ClusterTileSize, 8u, 256u);
 		ClusterSlices = std::clamp(ClusterSlices, 1u, 64u);
 		clampFinite(ClusterFar, 1.0f, 100000.0f, 200.0f);
@@ -1652,6 +1655,57 @@ namespace Engine
 						input.ReflectionProbes, camera.Position, I.frameIndex + 1, I.featureTime, probeSettings, input.ReflectionMovers);
 					const auto atlases = I.probeRenderer->Import(graph);
 					const std::uint32_t size = I.probeRenderer->GetResolution();
+					I.filteredKey.resize(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
+					// The records of the probes whose prefiltered cubes are current (filtered for
+					// their present occupant): what shading samples.
+					const auto activeRecords = [&]
+					{
+						std::vector<R::GpuReflectionProbeRecord> records;
+
+						for (const auto& active : plan.Active)
+						{
+							const auto& probe = input.ReflectionProbes[active.Probe];
+
+							if (active.Slot >= I.filteredKey.size() || I.filteredKey[active.Slot] != probe.Key)
+							{
+								continue; // Not prefiltered for this probe yet.
+							}
+
+							R::GpuReflectionProbeRecord record;
+
+							for (int c = 0; c < 3; ++c)
+							{
+								record.PositionRadius[c] = probe.Position[c];
+							}
+
+							record.PositionRadius[3] = std::max(probe.InfluenceRadius, 1.0e-3f);
+							record.Params[0] = std::max(probe.BlendDistance, 1.0e-3f);
+							record.Params[1] = float(active.Slot);
+							record.Params[2] = active.Age;
+							record.Params[3] = float(probe.OwnerObjectId);
+							records.push_back(record);
+						}
+
+						return records;
+					};
+					// Reflective surfaces inside this frame's captures reflect the probes as they
+					// stand (before this frame's filters): reflections of reflections, one frame behind.
+					std::optional<R::ReflectionCaptureProbes> captureProbes;
+
+					if (!plan.Captures.empty())
+					{
+						const auto previous = activeRecords();
+
+						if (!previous.empty())
+						{
+							R::ReflectionCaptureProbes probes;
+							probes.Records = graph.CreateUpload(
+								std::as_bytes(std::span(previous)), "Reflection probe capture records", S::BufferUsage::Storage, 16);
+							probes.Count = static_cast<std::uint32_t>(previous.size());
+							probes.MipCount = I.probeRenderer->GetMipCount();
+							captureProbes = probes;
+						}
+					}
 
 					for (const auto& capture : plan.Captures)
 					{
@@ -1709,14 +1763,20 @@ namespace Engine
 							captureSky.Rotation = settings.EnvironmentRotation;
 						}
 
+						R::ReflectionCaptureTargets resolveTargets;
+						resolveTargets.Color = faceTargets.Color;
+						resolveTargets.Depth = faceTargets.Depth;
+						resolveTargets.Normal = *faceTargets.Normal;
+						resolveTargets.Reflectance = *faceTargets.Reflectance;
+						resolveTargets.Specular = *faceTargets.Specular;
+						resolveTargets.ObjectId = faceTargets.ObjectId;
 						I.probeRenderer->RecordResolve(
-							graph, atlases, capture.Slot, capture.Face, faceTargets.Color, faceTargets.Depth, nearPlane, captureSky);
+							graph, atlases, capture.Slot, capture.Face, resolveTargets, probe.Position, nearPlane, captureSky, captureProbes);
 					}
 
 					// Prefilter a bounded number of probes a frame (each is 6 faces x every mip):
 					// probes not yet filtered for their current occupant first, then the ones
 					// whose faces changed longest ago.
-					I.filteredKey.resize(I.probeRenderer->GetMaxProbes(), ~std::uint64_t(0));
 
 					for (const auto slot : plan.Filter)
 					{
@@ -1749,7 +1809,10 @@ namespace Engine
 							const bool urgentB = slotUnfiltered(b, keyOf(b));
 							return urgentA && !urgentB;
 						});
-					const std::uint32_t budget = std::max(probeSettings.FiltersPerFrame, 1u);
+					// Every probe captured this frame is filtered this frame (a captured face that waits
+					// for its filter shows the old content: a moving object lags, or doubles across
+					// faces filtered at different times), plus FiltersPerFrame of any backlog.
+					const auto budget = static_cast<std::uint32_t>(std::max<std::size_t>(probeSettings.FiltersPerFrame, 1u) + plan.Filter.size());
 					std::uint32_t filtered = 0;
 
 					while (!I.pendingFilters.empty() && filtered < budget)
@@ -1771,34 +1834,10 @@ namespace Engine
 					graph.Export(atlases.Prefiltered, ResourceState::ShaderRead);
 					stats.ReflectionProbeFaces = static_cast<std::uint32_t>(plan.Captures.size());
 
-					if (!plan.Active.empty())
+					const auto records = activeRecords();
+
+					if (!records.empty())
 					{
-						std::vector<R::GpuReflectionProbeRecord> records;
-
-						for (const auto& active : plan.Active)
-						{
-							const auto& probe = input.ReflectionProbes[active.Probe];
-
-							if (active.Slot >= I.filteredKey.size() || I.filteredKey[active.Slot] != probe.Key)
-							{
-								continue; // Not prefiltered for this probe yet.
-							}
-
-							R::GpuReflectionProbeRecord record;
-
-							for (int c = 0; c < 3; ++c)
-							{
-								record.PositionRadius[c] = probe.Position[c];
-							}
-
-							record.PositionRadius[3] = std::max(probe.InfluenceRadius, 1.0e-3f);
-							record.Params[0] = std::max(probe.BlendDistance, 1.0e-3f);
-							record.Params[1] = float(active.Slot);
-							record.Params[2] = active.Age;
-							record.Params[3] = float(probe.OwnerObjectId);
-							records.push_back(record);
-						}
-
 						R::ScreenSpaceFrame::ProbeInputs inputs;
 						inputs.Cubes = atlases.Prefiltered;
 						inputs.Records = graph.CreateUpload(std::as_bytes(std::span(records)), "Reflection probe records", S::BufferUsage::Storage, 16);
@@ -1839,10 +1878,25 @@ namespace Engine
 					if (!plan.Captures.empty() || !plan.Records.empty())
 					{
 						const auto atlas = I.planarRenderer->Import(graph);
+						// Reflective surfaces inside the captures reflect the probes (this frame's).
+						std::optional<R::PlanarCaptureProbes> captureProbes;
+
+						if (probeInputs)
+						{
+							R::PlanarCaptureProbes probes;
+							probes.Cubes = probeInputs->Cubes;
+							probes.Records = probeInputs->Records;
+							probes.Count = probeInputs->Count;
+							probes.MipCount = probeInputs->MipCount;
+							captureProbes = probes;
+						}
 
 						for (const auto& capture : plan.Captures)
 						{
-							auto captureTargets = makeTargets(capture.Width, capture.Height, "Planar ");
+							// Rendered supersampled (RenderWidth x RenderHeight), averaged down by the resolve.
+							const std::uint32_t renderWidth = capture.RenderWidth;
+							const std::uint32_t renderHeight = capture.RenderHeight;
+							auto captureTargets = makeTargets(renderWidth, renderHeight, "Planar ");
 							// Sky rays of the off-axis view: forward shifted to the window's centre.
 							const auto& f = capture.FrustumScale;
 							std::array<float, 3> rayRight{}, rayUp{}, rayForward{};
@@ -1854,11 +1908,12 @@ namespace Engine
 								rayForward[c] = capture.Forward[c] + capture.Right[c] * (f[2] / f[0]) + capture.Up[c] * (f[3] / f[1]);
 							}
 
-							recordSky(captureTargets, rayRight, rayUp, rayForward, capture.Width, capture.Height, "Planar sky");
+							recordSky(captureTargets, rayRight, rayUp, rayForward, renderWidth, renderHeight, "Planar sky");
 
 							R::RenderViewDesc captureViewDesc;
 							captureViewDesc.ViewProjection = capture.ViewProjection;
 							captureViewDesc.CameraPosition = capture.Position;
+							// LODs follow the stored texels (what the reflection shows), not the supersampling.
 							captureViewDesc.LodScale = capture.LodScale;
 							R::VisibilityFrameDesc captureVisibility;
 							captureVisibility.View = R::BuildGpuViewRecord(captureViewDesc);
@@ -1876,8 +1931,8 @@ namespace Engine
 							const auto captureVisible = I.planarVisibility->Record(graph, sceneResources, geometryResources, captureVisibility);
 
 							R::ClusterGridDesc captureGrid = grid;
-							captureGrid.ViewportWidth = capture.Width;
-							captureGrid.ViewportHeight = capture.Height;
+							captureGrid.ViewportWidth = renderWidth;
+							captureGrid.ViewportHeight = renderHeight;
 							captureGrid.Near = capture.NearClip;
 							captureGrid.Far = std::max(std::min(settings.ClusterFar, planarSettings.CullDistance), capture.NearClip * 2.0f);
 							R::ClusterView captureClusterView;
@@ -1890,7 +1945,11 @@ namespace Engine
 							captureFrame.Clusters = &captureClusters;
 							captureFrame.View.ViewProjection = capture.ViewProjection;
 							captureFrame.View.PreviousViewProjection = capture.ViewProjection;
-							captureFrame.View.Jitter = { 0.0f, 0.0f };
+							// The camera's TAA jitter, as the same sub-texel offset of the capture: captures
+							// re-rendered every frame then follow the jitter sequence and TAA anti-aliases
+							// the reflection (a capture has no TAA of its own).
+							captureFrame.View.Jitter = { jitter[0] * float(width) / float(renderWidth),
+								jitter[1] * float(height) / float(renderHeight) };
 							captureFrame.View.CameraPosition = capture.Position;
 							captureFrame.View.CameraForward = capture.Forward;
 							captureFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
@@ -1906,7 +1965,14 @@ namespace Engine
 								captureSky.Rotation = settings.EnvironmentRotation;
 							}
 
-							I.planarRenderer->RecordResolve(graph, atlas, capture, captureTargets.Color, captureTargets.Depth, captureSky);
+							R::PlanarCaptureTargets resolveTargets;
+							resolveTargets.Color = captureTargets.Color;
+							resolveTargets.Depth = captureTargets.Depth;
+							resolveTargets.Normal = *captureTargets.Normal;
+							resolveTargets.Reflectance = *captureTargets.Reflectance;
+							resolveTargets.Specular = *captureTargets.Specular;
+							resolveTargets.ObjectId = captureTargets.ObjectId;
+							I.planarRenderer->RecordResolve(graph, atlas, capture, resolveTargets, captureSky, captureProbes);
 						}
 
 						graph.Export(atlas.Texture, ResourceState::ShaderRead);

@@ -330,6 +330,7 @@ namespace Swim::Render::ReflectionProbes
 		{
 			float Urgency;
 			FaceCapture Capture;
+			bool SeesMover;
 		};
 		std::vector<Candidate> candidates;
 
@@ -348,6 +349,11 @@ namespace Swim::Render::ReflectionProbes
 			for (std::uint32_t face = 0; face < 6; ++face)
 			{
 				float urgency = 0.0f;
+				// Faces whose content changed (never captured, or a mover in view or just left)
+				// are ranked by how long they waited only, not by the probe's rank: they go round
+				// robin, so with FacesPerFrame at least half of them, every one is refreshed at
+				// least every second frame (a far probe is never starved by a near one).
+				bool changed = false;
 				const auto seesMover = [&]
 				{
 					for (const auto& mover : movers)
@@ -365,17 +371,25 @@ namespace Swim::Render::ReflectionProbes
 					return false;
 				};
 
+				const bool moving = probe.Dynamic && seesMover();
+
 				if (slot.FaceFrame[face] == 0)
 				{
-					urgency = 1000.0f;
+					urgency = 1.0e6f;
+					changed = true;
 				}
-				else if (probe.Dynamic && slot.FaceFrame[face] != frame && seesMover())
+				else if (probe.Dynamic && slot.FaceFrame[face] != frame && (slot.FaceSawMover[face] || moving))
 				{
-					urgency = 300.0f + float(frame - slot.FaceFrame[face]);
+					// A mover in view, or one that was at the last capture (it left: one more
+					// capture removes it). The longer a face waited, the sooner it goes.
+					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]);
+					changed = true;
 				}
 				else if (Distance(slot.FacePosition[face], probe.Position) > settings.MoveThreshold)
 				{
-					urgency = 100.0f + float(frame - slot.FaceFrame[face]);
+					// The probe moved (an orbiting chrome ball's object probe): changed content too.
+					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]);
+					changed = true;
 				}
 				else if (probe.Dynamic && frame - slot.FaceFrame[face] >= settings.IdleRefreshFrames)
 				{
@@ -388,7 +402,7 @@ namespace Swim::Render::ReflectionProbes
 
 				if (urgency > 0.0f)
 				{
-					candidates.push_back({ urgency * rank, { s, face, index } });
+					candidates.push_back({ changed ? urgency : urgency * rank, { s, face, index }, moving });
 				}
 			}
 		}
@@ -398,7 +412,7 @@ namespace Swim::Render::ReflectionProbes
 			{
 				return a.Urgency > b.Urgency;
 			});
-		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, 12u), candidates.size());
+		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, MaxFacesPerFrame), candidates.size());
 
 		for (std::size_t i = 0; i < budget; ++i)
 		{
@@ -408,6 +422,7 @@ namespace Swim::Render::ReflectionProbes
 			slot.FaceFrame[capture.Face] = frame;
 			slot.FaceTime[capture.Face] = time;
 			slot.FacePosition[capture.Face] = probes[capture.Probe].Position;
+			slot.FaceSawMover[capture.Face] = candidates[i].SeesMover;
 
 			if (std::find(plan.Filter.begin(), plan.Filter.end(), capture.Slot) == plan.Filter.end())
 			{

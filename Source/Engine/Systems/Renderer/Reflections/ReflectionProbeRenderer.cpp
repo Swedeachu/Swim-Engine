@@ -61,7 +61,49 @@ namespace Swim::Render
 			float EnvironmentScale = 1.0f;
 			float EnvironmentRotation = 0.0f;
 			std::uint32_t Reserved = 0;
+			float Position[4] = {}; // The probe (capture) position.
+			std::uint32_t ProbeCount = 0;
+			std::uint32_t ProbeMips = 1;
+			std::uint32_t Reserved0 = 0;
+			std::uint32_t Reserved1 = 0;
 		};
+
+		Rhi::TextureViewDesc CubeArrayView(std::uint32_t layers, std::uint32_t mips)
+		{
+			Rhi::TextureViewDesc view;
+			view.Dimension = Rhi::TextureViewDimension::TextureCubeArray;
+			view.PixelFormat = AtlasFormat;
+			view.MipLevelCount = mips;
+			view.ArrayLayerCount = layers;
+			return view;
+		}
+
+		Rhi::TextureViewDesc View(Rhi::Format format, Rhi::TextureAspect aspect = Rhi::TextureAspect::Automatic)
+		{
+			Rhi::TextureViewDesc view;
+			view.PixelFormat = format;
+			view.Aspect = aspect;
+			return view;
+		}
+
+		Rhi::DescriptorWrite Write(std::uint32_t binding, Rhi::TextureView& view)
+		{
+			Rhi::DescriptorWrite write{};
+			write.Binding = binding;
+			write.TextureResource = &view;
+			return write;
+		}
+
+		Rhi::DescriptorWrite BufferWrite(RenderCommandContext& c, std::uint32_t binding, GraphBuffer buffer)
+		{
+			const auto range = c.GetRange(buffer);
+			Rhi::DescriptorWrite write{};
+			write.Binding = binding;
+			write.BufferResource = range.Buffer;
+			write.BufferOffset = range.Offset;
+			write.BufferRange = range.Size;
+			return write;
+		}
 
 		static_assert(sizeof(ResolveConstants) == ReflectionProbeResolveBindings::PushConstantBytes);
 
@@ -155,6 +197,9 @@ namespace Swim::Render
 					{ 0, { 0, face }, {}, { 1, 1, 1 } });
 			}
 		}
+		const std::array<std::byte, 32> zeroRecord{};
+		atlases.ProbeRecordStandIn =
+			graph.CreateUpload(zeroRecord, desc.DebugName + " record stand-in", Rhi::BufferUsage::Storage, 16);
 		const auto state = initialized ? S::ShaderRead : S::Undefined;
 		atlases.Source = graph.ImportTexture(*source, state);
 		atlases.Prefiltered = graph.ImportTexture(*prefiltered, state);
@@ -190,11 +235,12 @@ namespace Swim::Render
 						b.Read(colorStandIn, S::ShaderRead);
 						b.Read(depthStandIn, S::ShaderRead);
 						b.Read(atlases.EnvironmentStandIn, S::ShaderRead);
+						b.Read(atlases.ProbeRecordStandIn, S::ShaderRead);
 						b.Write(atlas, S::ShaderWrite);
 					},
 					[program = desc.Resolve, label = desc.DebugName + " clear", atlas, colorStandIn, depthStandIn,
-						environment = atlases.EnvironmentStandIn, sampler = desc.Sampler, layers, mips = mipCount,
-						size = resolution](RenderCommandContext& c)
+						environment = atlases.EnvironmentStandIn, records = atlases.ProbeRecordStandIn, sampler = desc.Sampler, layers,
+						mips = mipCount, size = resolution](RenderCommandContext& c)
 					{
 						auto& list = c.Commands();
 						list.BindComputePipeline(*program.Pipeline);
@@ -209,6 +255,7 @@ namespace Swim::Render
 						cubeView.PixelFormat = AtlasFormat;
 						cubeView.ArrayLayerCount = Environment::CubeFaceCount;
 						auto& environmentResource = c.CreateView(environment, cubeView);
+						auto& probeResource = c.CreateView(environment, CubeArrayView(Environment::CubeFaceCount, 1));
 
 						for (std::uint32_t mip = 0; mip < mips; ++mip)
 						{
@@ -216,7 +263,14 @@ namespace Swim::Render
 
 							for (std::uint32_t layer = 0; layer < layers; ++layer)
 							{
-								std::array<Rhi::DescriptorWrite, 5> writes{};
+								using B = ReflectionProbeResolveBindings;
+								std::array<Rhi::DescriptorWrite, B::Count> writes{};
+								writes[B::Normal] = Write(B::Normal, colorResource);
+								writes[B::Reflectance] = Write(B::Reflectance, colorResource);
+								writes[B::Specular] = Write(B::Specular, colorResource);
+								writes[B::ObjectId] = Write(B::ObjectId, depthResource);
+								writes[B::ProbeCubes] = Write(B::ProbeCubes, probeResource);
+								writes[B::ProbeRecords] = BufferWrite(c, B::ProbeRecords, records);
 								writes[0].Binding = ReflectionProbeResolveBindings::Color;
 								writes[0].TextureResource = &colorResource;
 								writes[1].Binding = ReflectionProbeResolveBindings::Depth;
@@ -247,26 +301,38 @@ namespace Swim::Render
 	}
 
 	GraphPass ReflectionProbeRenderer::RecordResolve(RenderGraph& graph, const Atlases& atlases, std::uint32_t slot, std::uint32_t face,
-		GraphTexture color, GraphTexture depth, float nearPlane, const CaptureSky& sky) const
+		const ReflectionCaptureTargets& targets, const std::array<float, 3>& position, float nearPlane, const CaptureSky& sky,
+		const std::optional<ReflectionCaptureProbes>& probes) const
 	{
 		if (slot >= maxProbes || face >= Environment::CubeFaceCount)
 		{
 			throw std::invalid_argument(desc.DebugName + ": slot or face out of range");
 		}
 
-		const auto& colorDesc = graph.GetDesc(color);
-		const auto& depthDesc = graph.GetDesc(depth);
-
-		if (colorDesc.Extent.Width != resolution || colorDesc.Extent.Height != resolution || colorDesc.PixelFormat != AtlasFormat ||
-			depthDesc.Extent.Width != resolution || depthDesc.PixelFormat != Rhi::Format::D32Float)
+		const auto matches = [&](GraphTexture texture, Rhi::Format format)
 		{
-			throw std::invalid_argument(desc.DebugName + ": a capture must be Resolution^2 RGBA16Float color with D32Float depth");
+			const auto& d = graph.GetDesc(texture);
+			return d.Extent.Width == resolution && d.Extent.Height == resolution && d.PixelFormat == format;
+		};
+
+		if (!matches(targets.Color, AtlasFormat) || !matches(targets.Depth, Rhi::Format::D32Float) ||
+			!matches(targets.Normal, Rhi::Format::RGBA16Float) || !matches(targets.Reflectance, Rhi::Format::RGBA16Float) ||
+			!matches(targets.Specular, Rhi::Format::RGBA16Float) || !matches(targets.ObjectId, Rhi::Format::R32Float))
+		{
+			throw std::invalid_argument(desc.DebugName + ": a capture must be Resolution^2 Forward+ targets (RGBA16Float color, D32Float depth)");
 		}
 
 		const std::uint32_t layer = slot * Environment::CubeFaceCount + face;
 		const auto target = atlases.Source;
 		const auto environment = sky.Environment.value_or(atlases.EnvironmentStandIn);
 		const std::uint32_t environmentMips = graph.GetDesc(environment).MipLevels;
+		// The probes reflective texels reflect: the prefiltered atlas as it stands (this frame's
+		// filters come after the captures).
+		const bool useProbes = probes.has_value() && probes->Count > 0;
+		const auto probeRecords = useProbes ? probes->Records : atlases.ProbeRecordStandIn;
+		const auto probeCubes = useProbes ? probes->Cubes.value_or(atlases.Prefiltered) : atlases.EnvironmentStandIn;
+		const std::uint32_t probeLayers = graph.GetDesc(probeCubes).ArrayLayers;
+		const std::uint32_t probeMips = useProbes ? graph.GetDesc(probeCubes).MipLevels : 1u;
 		ResolveConstants constants;
 		constants.Size = resolution;
 		constants.Near = nearPlane;
@@ -274,45 +340,59 @@ namespace Swim::Render
 		constants.Environment = sky.Environment ? 1u : 0u;
 		constants.EnvironmentScale = sky.Scale;
 		constants.EnvironmentRotation = sky.Rotation;
+		constants.Position[0] = position[0];
+		constants.Position[1] = position[1];
+		constants.Position[2] = position[2];
+		constants.ProbeCount = useProbes ? probes->Count : 0u;
+		constants.ProbeMips = probeMips;
 		const std::string label = desc.DebugName + " resolve";
 		return graph.AddPass(
 			label, Rhi::QueueType::Compute,
 			[&](RenderGraphBuilder& b)
 			{
-				b.Read(color, S::ShaderRead);
-				b.Read(depth, S::ShaderRead);
+				b.Read(targets.Color, S::ShaderRead);
+				b.Read(targets.Depth, S::ShaderRead);
+				b.Read(targets.Normal, S::ShaderRead);
+				b.Read(targets.Reflectance, S::ShaderRead);
+				b.Read(targets.Specular, S::ShaderRead);
+				b.Read(targets.ObjectId, S::ShaderRead);
 				b.Read(environment, S::ShaderRead);
+				b.Read(probeRecords, S::ShaderRead);
+
+				if (probeCubes != environment)
+				{
+					b.Read(probeCubes, S::ShaderRead);
+				}
+
 				b.Write(target, S::ShaderWrite, { 0, 1, layer, 1 });
 			},
-			[program = desc.Resolve, sampler = desc.Sampler, label, color, depth, environment, environmentMips, target, layer,
-				size = resolution, constants](RenderCommandContext& c)
+			[program = desc.Resolve, sampler = desc.Sampler, label, targets, environment, environmentMips, probeCubes, probeRecords, probeLayers,
+				probeMips, target, layer, size = resolution, constants](RenderCommandContext& c)
 			{
-				std::array<Rhi::DescriptorWrite, 5> writes{};
-				Rhi::TextureViewDesc colorView;
-				colorView.PixelFormat = AtlasFormat;
-				Rhi::TextureViewDesc depthView;
-				depthView.PixelFormat = Rhi::Format::D32Float;
-				depthView.Aspect = Rhi::TextureAspect::Depth;
-				writes[0].Binding = ReflectionProbeResolveBindings::Color;
-				writes[0].TextureResource = &c.CreateView(color, colorView);
-				writes[1].Binding = ReflectionProbeResolveBindings::Depth;
-				writes[1].TextureResource = &c.CreateView(depth, depthView);
-				writes[2].Binding = ReflectionProbeResolveBindings::Destination;
-				writes[2].TextureResource = &c.CreateView(target, FaceView(0, layer));
+				using B = ReflectionProbeResolveBindings;
+				std::array<Rhi::DescriptorWrite, B::Count> writes{};
+				writes[B::Color] = Write(B::Color, c.CreateView(targets.Color, View(AtlasFormat)));
+				writes[B::Depth] = Write(B::Depth, c.CreateView(targets.Depth, View(Rhi::Format::D32Float, Rhi::TextureAspect::Depth)));
+				writes[B::Destination] = Write(B::Destination, c.CreateView(target, FaceView(0, layer)));
 				Rhi::TextureViewDesc cubeView;
 				cubeView.Dimension = Rhi::TextureViewDimension::TextureCube;
 				cubeView.PixelFormat = AtlasFormat;
 				cubeView.MipLevelCount = environmentMips;
 				cubeView.ArrayLayerCount = Environment::CubeFaceCount;
-				writes[3].Binding = ReflectionProbeResolveBindings::Environment;
-				writes[3].TextureResource = &c.CreateView(environment, cubeView);
-				writes[4].Binding = ReflectionProbeResolveBindings::Sampler;
-				writes[4].SamplerResource = sampler;
+				writes[B::Environment] = Write(B::Environment, c.CreateView(environment, cubeView));
+				writes[B::Sampler].Binding = B::Sampler;
+				writes[B::Sampler].SamplerResource = sampler;
+				writes[B::Normal] = Write(B::Normal, c.CreateView(targets.Normal, View(Rhi::Format::RGBA16Float)));
+				writes[B::Reflectance] = Write(B::Reflectance, c.CreateView(targets.Reflectance, View(Rhi::Format::RGBA16Float)));
+				writes[B::Specular] = Write(B::Specular, c.CreateView(targets.Specular, View(Rhi::Format::RGBA16Float)));
+				writes[B::ObjectId] = Write(B::ObjectId, c.CreateView(targets.ObjectId, View(Rhi::Format::R32Float)));
+				writes[B::ProbeCubes] = Write(B::ProbeCubes, c.CreateView(probeCubes, CubeArrayView(probeLayers, probeMips)));
+				writes[B::ProbeRecords] = BufferWrite(c, B::ProbeRecords, probeRecords);
 				auto& list = c.Commands();
 				list.BindComputePipeline(*program.Pipeline);
 				list.BindDescriptorTable(program.Space, Table(c, program, label, writes));
 				Push(list, constants);
-				constexpr auto group = ReflectionProbeResolveBindings::ThreadGroupSize;
+				constexpr auto group = B::ThreadGroupSize;
 				list.Dispatch(Groups(size, group), Groups(size, group), 1);
 			});
 	}

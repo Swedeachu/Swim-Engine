@@ -81,9 +81,10 @@ namespace Swim::Render
 		// Surface thickness from the back-face depth (ForwardPlusTargets::BackDepth, one more
 		// depth-only draw of the opaque scene) when the renderer supports it; off: Thickness.
 		bool BackFaces = true;
-		// Trace one pixel of every 2 x 2 block (rotating through the block each frame) and
-		// resolve the full frame with a depth- and normal-aware filter in the composite: a
-		// quarter of the rays. TAA gathers the four positions over four frames.
+		// Checkerboard: trace one pixel of every horizontal pair (alternating by row and by
+		// frame) and resolve the full frame with a depth- and normal-aware filter in the
+		// composite: half the rays, and every pixel traced every second frame (a 2 x 2 rotation
+		// left each pixel up to three frames old: reflections stuttered behind moving objects).
 		bool HalfResolution = false;
 		// Blend the reflection term (screen space over probes over the environment) with last
 		// frame's at the reprojected position (FrameRenderer keeps the history; needs motion

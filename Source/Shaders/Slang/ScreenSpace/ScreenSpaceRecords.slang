@@ -64,6 +64,14 @@ uint2 ScreenSpaceHalfOffset(uint frame)
 	return uint2(k == 1u || k == 2u ? 1u : 0u, k == 1u || k == 3u ? 1u : 0u);
 }
 
+// Checkerboard reflections (SsrHalf): the column (0 or 1) of each 1 x 2 pair in row y traced
+// this frame, alternating by row and by frame, so every pixel is traced every second frame
+// (half the rays, never more than one frame old).
+uint ScreenSpaceCheckerColumn(uint frame, uint y)
+{
+	return (y + frame) & 1u;
+}
+
 // The parameters one program uses, loaded once: GPU-assisted validation instruments
 // every storage-buffer load.
 struct ScreenSpaceView

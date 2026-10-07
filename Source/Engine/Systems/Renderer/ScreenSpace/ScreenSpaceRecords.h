@@ -55,7 +55,7 @@ namespace Swim::Render
 		std::uint32_t ProbeCount = 0;	   // Active GpuReflectionProbeRecords.
 		std::uint32_t ProbeMipCount = 1;   // Prefiltered probe atlas mips.
 		std::uint32_t ReflectionDebug = 0; // ReflectionDebugView.
-		std::uint32_t SsrHalf = 0; // 1: the reflection texture is half size (ReflectionSettings::HalfResolution).
+		std::uint32_t SsrHalf = 0; // 1: checkerboard, the reflection texture half as wide (ReflectionSettings::HalfResolution).
 		// The temporal reflection filter: bit 0 writes this frame's reflection term, bit 1
 		// blends last frame's in (ScreenSpaceFrame::ReflectionTemporal).
 		std::uint32_t ReflectionTemporal = 0;
