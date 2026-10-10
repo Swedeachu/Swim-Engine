@@ -52,7 +52,7 @@ namespace Swim::Render
 	};
 
 	inline constexpr std::uint32_t MaxReflectionProbes = 16;
-	inline constexpr std::uint32_t MaxFacesPerFrame = 24;
+	inline constexpr std::uint32_t MaxFacesPerFrame = 32;
 
 	// GPU row of one active probe (Shaders/Slang/ScreenSpace/ScreenSpaceComposite.slang).
 	struct GpuReflectionProbeRecord

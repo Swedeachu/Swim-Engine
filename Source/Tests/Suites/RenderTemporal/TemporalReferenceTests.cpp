@@ -284,6 +284,60 @@ SWIM_TEST("Render.Temporal.Reference", "MotionVectorsAndClippingPreventGhosting"
 	SWIM_CHECK(looseTrail > 1.0f);
 }
 
+// A reflection moving over a still mirror (a chrome ball reflecting the orbiting block): the
+// surface does not move, so its velocity is zero and reprojection keeps last frame's
+// reflection where it was. On a busy neighbourhood (the ball's rim) the clip box lets it
+// through: a trail of old copies. Marked reactive (alpha 2 + reactivity, as the composite
+// writes it), the pixel trusts history less and the trail is gone within a frame or two.
+SWIM_TEST("Render.Temporal.Reference", "ReactivePixelsDropMovedReflections")
+{
+	constexpr std::uint32_t width = 64, height = 16;
+	const auto render = [&](int left, float alpha)
+	{
+		Frame frame(width, height);
+
+		for (std::uint32_t y = 0; y < height; ++y)
+		{
+			for (std::uint32_t x = 0; x < width; ++x)
+			{
+				// A busy background: alternating columns (the minified checkerboard on a rim).
+				const bool inside = int(x) >= left && int(x) < left + 4 && y >= 6 && y < 10;
+				const float stripe = (x % 2u) == 0u ? 0.9f : 0.1f;
+				frame.Color.At(x, y) = inside ? Ta::Float4{ 1.2f, 0.3f, 0.1f, alpha } : Ta::Float4{ stripe, stripe, stripe, alpha };
+			}
+		}
+
+		return frame; // Velocity zero everywhere: the mirror stands still.
+	};
+	const auto trailAfter = [&](float alpha)
+	{
+		TemporalSettings settings;
+		settings.ClipGamma = 2.0f; // A loose box, as on a busy rim.
+		std::optional<Ta::ColorImage> history;
+		int left = 4;
+		float trail = 0.0f;
+
+		for (int frameIndex = 0; frameIndex < 10; ++frameIndex, left += 2)
+		{
+			const auto frame = render(left, alpha);
+			auto output = Ta::Resolve(frame.Color, frame.Depth, frame.Velocity, history ? &*history : nullptr, settings);
+			// Just behind the block: covered last frame, the background now, its box spanning both. Redness
+			// (red minus green) is the old block left there.
+			const auto at = output.At(std::uint32_t(left - 1), 8);
+			trail = at[0] - at[1];
+			SWIM_CHECK(Near(output.At(0, 0)[3], 1.0f));
+			history = std::move(output);
+		}
+
+		return trail;
+	};
+	const float plain = trailAfter(1.0f);
+	const float reactive = trailAfter(3.0f); // Fully reactive.
+	SWIM_CHECK_MESSAGE(plain > 0.15f, "trail without the reactive mark " + std::to_string(plain));
+	SWIM_CHECK_MESSAGE(reactive < 0.5f * plain, "reactive trail " + std::to_string(reactive));
+	SWIM_CHECK(Ta::Reactive(1.0f) == 0.0f && Ta::Reactive(2.25f) == 0.25f && Ta::Reactive(0.3f) == 0.0f && Ta::Reactive(9.0f) == 1.0f);
+}
+
 SWIM_TEST("Render.Temporal.Reference", "ResetsOffscreenReprojectionAndValidation")
 {
 	Frame frame(8, 8);

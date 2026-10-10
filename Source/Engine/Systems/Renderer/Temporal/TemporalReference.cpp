@@ -19,6 +19,16 @@ namespace Swim::Render
 			throw std::invalid_argument("TAA clip gamma must be in [0.25, 8]");
 		}
 
+		if (!std::isfinite(settings.ReactiveFeedback) || settings.ReactiveFeedback <= 0.0f || settings.ReactiveFeedback > 1.0f)
+		{
+			throw std::invalid_argument("TAA reactive feedback must be in (0, 1]");
+		}
+
+		if (!std::isfinite(settings.ReactiveClipGamma) || settings.ReactiveClipGamma < 0.25f || settings.ReactiveClipGamma > 8.0f)
+		{
+			throw std::invalid_argument("TAA reactive clip gamma must be in [0.25, 8]");
+		}
+
 		if (settings.JitterPhases > MaxJitterPhases)
 		{
 			throw std::invalid_argument("TAA jitter phases must be 0 .. MaxJitterPhases");
@@ -205,7 +215,11 @@ namespace Swim::Render::Temporal
 	Float4 ResolveTexel(const ColorImage& current, const DepthImage& depth, const VelocityImage& velocity, const ColorImage* history,
 		const TemporalSettings& settings, std::uint32_t x, std::uint32_t y)
 	{
-		const auto n = Gather(current, depth, velocity, x, y, settings.ClipGamma);
+		// Reactive pixels (the composite's alpha 2 + reactivity) trust history less.
+		const float reactive = Reactive(current.At(x, y)[3]);
+		const float feedback = settings.Feedback + (std::max(settings.ReactiveFeedback, settings.Feedback) - settings.Feedback) * reactive;
+		const float clipGamma = settings.ClipGamma + (std::min(settings.ReactiveClipGamma, settings.ClipGamma) - settings.ClipGamma) * reactive;
+		const auto n = Gather(current, depth, velocity, x, y, clipGamma);
 		const Float2 uv{ (float(x) + 0.5f) / float(current.Width), (float(y) + 0.5f) / float(current.Height) };
 		const Float2 previous{ uv[0] - n.Velocity[0], uv[1] - n.Velocity[1] };
 		const bool onScreen = previous[0] >= 0.0f && previous[0] <= 1.0f && previous[1] >= 0.0f && previous[1] <= 1.0f;
@@ -217,8 +231,8 @@ namespace Swim::Render::Temporal
 
 		const auto clipped = YCoCgToRgb(ClipToBox(RgbToYCoCg(Sanitize(SampleBilinear(*history, previous))), n.Minimum, n.Maximum));
 		const Float3 past{ std::max(clipped[0], 0.0f), std::max(clipped[1], 0.0f), std::max(clipped[2], 0.0f) };
-		const float currentWeight = settings.Feedback / (1.0f + Luminance(n.Center));
-		const float pastWeight = (1.0f - settings.Feedback) / (1.0f + Luminance(past));
+		const float currentWeight = feedback / (1.0f + Luminance(n.Center));
+		const float pastWeight = (1.0f - feedback) / (1.0f + Luminance(past));
 		const float inverseTotal = 1.0f / (currentWeight + pastWeight);
 		Float4 result{ 0, 0, 0, 1.0f };
 

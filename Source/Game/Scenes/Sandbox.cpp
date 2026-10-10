@@ -529,28 +529,35 @@ namespace Game
 		// Only used without the back-face depth (each surface's real thickness otherwise).
 		reflections.Thickness = 0.1f;
 		// Local reflection probes (chrome balls, the gallery, the reflection lab): up to 16 at
-		// 128 x 128 a face (the planar captures show the spheres' caps and the mirror's faces;
-		// probes the rims and what is behind), 16 faces a frame. Faces whose content changes
-		// (a mover in view or just left, a moving probe) go round robin, oldest first: in the
-		// lab every one of them is re-captured at least every second frame (half rate), and
-		// every probe captured in a frame is filtered in that frame.
+		// 256 x 256 a face, 32 faces a frame. A chrome ball's own probe is its whole reflection
+		// - one source, captured from its centre and parallax-corrected with the stored
+		// distances - instead of a planar cap in the middle and the probe around it, which
+		// showed a passing object twice (two captures from different frames) and stepped
+		// where the probe lagged. A probe's changed faces (a mover in view or just left, a
+		// moving probe) are captured together in one frame, the balls large on screen every
+		// frame and the rest at no less than about half rate; every probe captured in a frame
+		// is filtered in that frame. 256 matches the old planar cap's sharpness on a ball a
+		// few hundred pixels across.
 		settings.ReflectionProbes.MaxProbes = 16;
-		settings.ReflectionProbes.FacesPerFrame = 16;
-		settings.ReflectionProbes.Resolution = 128;
+		settings.ReflectionProbes.FacesPerFrame = 32; // The lab's changing faces peak near 28.
+		settings.ReflectionProbes.Resolution = 256;
+		// A moving probe (the orbiting ball's) is re-captured whenever it moved at all: at 5 cm
+		// (the default) the orbiting ball's reflection updated every second frame.
+		settings.ReflectionProbes.MoveThreshold = 0.001f;
 		settings.ReflectionProbes.MoverRange = 10.0f; // Movers farther away are a few texels in a probe.
 		settings.ReflectionProbes.CullDistance = 60.0f; // The lab's probes skip Sponza (70 m away).
 		// Idle faces (nothing moving in view) refresh every 30 frames.
 		settings.ReflectionProbes.IdleRefreshFrames = 30;
-		// Planar reflections (the mirror cube, every chrome sphere's cap): full rate - every
+		// Planar reflections (the mirror cube's faces; chrome balls use their probe): full rate - every
 		// visible capture re-renders every frame (nothing is reprojected from an older frame),
 		// at one capture texel per two screen pixels (a quarter of the pixels), magnified
 		// through the composite's Catmull-Rom filter and jittered with the camera so TAA
 		// anti-aliases them. At this density the 512 atlas holds any capture up close.
 		auto& planar = settings.PlanarReflections;
 		planar.Enabled = true;
-		planar.MaxPlanes = 12; // Every reflector in the lab at once (no slot thrashing between them).
+		planar.MaxPlanes = 6; // The mirror cube's faces (at most three face the camera) and spares.
 		planar.AtlasResolution = 512;
-		planar.CapturesPerFrame = 12;
+		planar.CapturesPerFrame = 6;
 		planar.MaxAgeSeconds = 0.0f;
 		planar.ResolutionScale = 0.5f;
 		planar.Supersample = 1;
@@ -1194,13 +1201,9 @@ namespace Game
 					glm::vec3(0.9f), glm::quat(1, 0, 0, 0), Swim::Render::RenderObjectFlags::Default,
 					{ GameTags::PhysicsToy, Engine::Tags::Dynamic } });
 			AddSphereBody(*this, ball, Engine::RigidbodyType::Dynamic, 0.5f, 3.0f);
-			// Chrome: an object probe shows the floor, the other balls and whatever is behind the
-			// camera (screen-space reflections alone cannot); a planar capture the sharp, current
-			// reflection across the cap that faces the camera.
+			// Chrome: the ball's own probe is its whole reflection - the floor, the other balls and
+			// whatever is behind the camera (screen-space reflections alone cannot).
 			AddComponent<Engine::ReflectionProbe>(ball, Engine::ReflectionProbe{});
-			Engine::PlanarReflector cap;
-			cap.Kind = Engine::PlanarReflector::Shape::Sphere;
-			AddComponent<Engine::PlanarReflector>(ball, cap);
 		}
 	}
 

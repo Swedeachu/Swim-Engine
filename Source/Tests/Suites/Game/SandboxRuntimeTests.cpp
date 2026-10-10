@@ -668,7 +668,7 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 	SWIM_CHECK_EQUAL(objectProbes, std::size_t{ 7 + 6 }); // + the playground's six chrome balls.
 	SWIM_CHECK_EQUAL(areaProbes, std::size_t{ 2 });		  // The lab and the PBR gallery.
 	SWIM_CHECK(objectProbes + areaProbes <= 16u);		  // The sandbox's MaxProbes.
-	// Planar reflectors: the mirror cube and every chrome ball (their camera-facing caps).
+	// Planar reflectors: the mirror cube only (a chrome ball's probe is its whole reflection).
 	std::size_t planars = 0, labPlanars = 0;
 
 	for (auto [entity, reflector, transform] : registry.view<Engine::PlanarReflector, Engine::Transform>().each())
@@ -677,8 +677,8 @@ SWIM_TEST("Game.Sandbox", "TheReflectionLabHasProbesAndADynamicFloor")
 		labPlanars += glm::length(transform.GetWorldPosition(registry) - lab) < 8.0f ? 1u : 0u;
 	}
 
-	SWIM_CHECK_EQUAL(labPlanars, std::size_t{ 7 });
-	SWIM_CHECK_EQUAL(planars, std::size_t{ 7 + 6 });
+	SWIM_CHECK_EQUAL(labPlanars, std::size_t{ 1 });
+	SWIM_CHECK_EQUAL(planars, std::size_t{ 1 });
 	// The two spheres of the pair are 1 cm apart.
 	glm::vec3 a{ 0.0f }, b{ 0.0f };
 

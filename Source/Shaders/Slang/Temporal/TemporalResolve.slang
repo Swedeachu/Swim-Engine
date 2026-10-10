@@ -19,6 +19,11 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	{
 		return;
 	}
+	// Reactive pixels (Temporal::Reactive) trust history less: a larger current weight and a
+	// tighter clip box.
+	const float reactive = TemporalReactive(Current.Load(int3(id.xy, 0)).a);
+	const float feedback = lerp(Constants.Feedback, max(Constants.ReactiveFeedback, Constants.Feedback), reactive);
+	const float clipGamma = lerp(Constants.ClipGamma, min(Constants.ReactiveClipGamma, Constants.ClipGamma), reactive);
 	// Temporal::Gather: 3 x 3, clamped, row by row; the first nearest texel wins ties.
 	float3 sum = float3(0.0, 0.0, 0.0);
 	float3 sumSquares = float3(0.0, 0.0, 0.0);
@@ -52,8 +57,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	}
 	const float3 mean = sum / 9.0;
 	const float3 sigma = sqrt(max(sumSquares / 9.0 - mean * mean, float3(0.0, 0.0, 0.0)));
-	const float3 low = max(mean - Constants.ClipGamma * sigma, minimum);
-	const float3 high = min(mean + Constants.ClipGamma * sigma, maximum);
+	const float3 low = max(mean - clipGamma * sigma, minimum);
+	const float3 high = min(mean + clipGamma * sigma, maximum);
 
 	// Temporal::ResolveTexel.
 	const float2 uv = float2((float(id.x) + 0.5) / float(width), (float(id.y) + 0.5) / float(height));
@@ -67,8 +72,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	const float4 sampled = TemporalSampleBilinear(History, width, height, previous);
 	const float3 clipped = TemporalYCoCgToRgb(TemporalClipToBox(TemporalRgbToYCoCg(TemporalSanitize(sampled)), low, high));
 	const float3 past = max(clipped, float3(0.0, 0.0, 0.0));
-	const float currentWeight = Constants.Feedback / (1.0 + TemporalLuminance(center));
-	const float pastWeight = (1.0 - Constants.Feedback) / (1.0 + TemporalLuminance(past));
+	const float currentWeight = feedback / (1.0 + TemporalLuminance(center));
+	const float pastWeight = (1.0 - feedback) / (1.0 + TemporalLuminance(past));
 	const float inverseTotal = 1.0 / (currentWeight + pastWeight);
 	Output[id.xy] = float4((center * currentWeight + past * pastWeight) * inverseTotal, 1.0);
 }

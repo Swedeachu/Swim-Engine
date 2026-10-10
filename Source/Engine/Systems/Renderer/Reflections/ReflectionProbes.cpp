@@ -168,6 +168,8 @@ namespace Swim::Render::ReflectionProbes
 		};
 		float t = 0.0f;
 		bool wasBeyond = false;
+		bool hasHidden = false;
+		Float3 hidden = direction;
 
 		for (std::uint32_t i = 0; i < ParallaxSteps; ++i)
 		{
@@ -218,11 +220,20 @@ namespace Swim::Render::ReflectionProbes
 
 			// The ray went behind an occluder (the captured distance jumps at its silhouette):
 			// not a crossing; keep marching until it comes out and crosses something real.
+			// Close behind it, the occluder is kept in case nothing real follows.
+			if (!hasHidden && over <= ParallaxHidden(hitLength))
+			{
+				hidden = Normalize(at(hi));
+				hasHidden = Dot(hidden, hidden) > 0.0f;
+			}
+
 			wasBeyond = true;
 			t = next;
 		}
 
-		return direction; // Nothing within reach: the sky, along the ray.
+		// Nothing crossed within reach: a side of the occluder the probe does not see, or else
+		// the sky, along the ray.
+		return hasHidden ? hidden : direction;
 	}
 
 	void Scheduler::Reset()
@@ -335,6 +346,10 @@ namespace Swim::Render::ReflectionProbes
 		};
 		std::vector<Candidate> candidates;
 		std::vector<std::size_t> chosen;
+		// Changed faces wait in proportion to how large their probe is on screen (its rank
+		// against the best one, 0.5 .. 1): the balls up close refresh every frame, the far
+		// ones at no less than about half that rate.
+		const float bestRank = ranked.empty() ? 1.0f : std::max(ranked.front().first, 1.0e-6f);
 
 		for (const auto& [rank, index] : ranked)
 		{
@@ -342,6 +357,7 @@ namespace Swim::Render::ReflectionProbes
 			auto& slot = slots[s];
 			slot.LastSeen = frame;
 			const auto& probe = probes[index];
+			const float screenWeight = 0.5f + 0.5f * std::min(rank / bestRank, 1.0f);
 			const bool incomplete = std::any_of(slot.FaceFrame.begin(), slot.FaceFrame.end(),
 				[](std::uint64_t f)
 				{
@@ -384,13 +400,13 @@ namespace Swim::Render::ReflectionProbes
 				{
 					// A mover in view, or one that was at the last capture (it left: one more
 					// capture removes it). The longer a face waited, the sooner it goes.
-					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]);
+					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]) * screenWeight;
 					changed = true;
 				}
 				else if (Distance(slot.FacePosition[face], probe.Position) > settings.MoveThreshold)
 				{
 					// The probe moved (an orbiting chrome ball's object probe): changed content too.
-					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]);
+					urgency = 1.0e4f + 100.0f * float(frame - slot.FaceFrame[face]) * screenWeight;
 					changed = true;
 				}
 				else if (probe.Dynamic && frame - slot.FaceFrame[face] >= settings.IdleRefreshFrames)
@@ -415,28 +431,76 @@ namespace Swim::Render::ReflectionProbes
 				return a.Urgency > b.Urgency;
 			});
 		const auto budget = std::min<std::size_t>(std::min(settings.FacesPerFrame, MaxFacesPerFrame), candidates.size());
-		// A quarter of the budget (from four faces a frame) is kept for faces whose content did
+		// An eighth of the budget (at least one face from four a frame) is kept for faces whose content did
 		// not change (the idle refresh: animated materials, lighting, and faces whose first
 		// capture came before the scene was there), so a busy scene - movers in view of many
 		// probes - can never starve them: the probes' still faces once kept their first, empty
 		// capture for good, which showed as plain sky and ground in the lower half of chrome
 		// spheres. Faces never captured go before everything.
-		std::size_t idleReserve = std::min<std::size_t>(budget / 4u,
+		std::size_t idleReserve = std::min<std::size_t>(std::max<std::size_t>(budget / 8u, budget >= 4u ? 1u : 0u),
 			static_cast<std::size_t>(std::count_if(candidates.begin(), candidates.end(),
 				[](const Candidate& c)
 				{
 					return !c.Changed;
 				})));
 		std::size_t changedLeft = budget - idleReserve;
+		const std::size_t changedBudget = changedLeft;
 		chosen.clear();
+		std::vector<bool> taken(candidates.size(), false);
 
 		for (std::size_t i = 0; i < candidates.size() && chosen.size() < budget; ++i)
 		{
+			if (taken[i])
+			{
+				continue;
+			}
+
 			const auto& c = candidates[i];
 			const bool fresh = slots[c.Capture.Slot].FaceFrame[c.Capture.Face] == 0;
 
 			if (c.Changed && !fresh && changedLeft == 0)
 			{
+				continue;
+			}
+
+			if (c.Changed && !fresh)
+			{
+				// A probe's changed faces are captured together, in one frame. Faces captured
+				// on different frames showed a moving object at two times: across a cube seam
+				// the orbiting block appeared twice, or cut in sections, in the chrome spheres.
+				// A probe whose changed faces do not fit what is left waits for a frame they do
+				// (the round robin brings it to the front). Only a group larger than the whole
+				// budget for changed faces is split (oldest faces first): the budget stays a bound.
+				std::vector<std::size_t> group;
+
+				for (std::size_t j = i; j < candidates.size(); ++j)
+				{
+					const auto& other = candidates[j];
+
+					if (!taken[j] && other.Changed && other.Capture.Slot == c.Capture.Slot &&
+						slots[other.Capture.Slot].FaceFrame[other.Capture.Face] != 0)
+					{
+						group.push_back(j);
+						taken[j] = true; // Chosen below, or waiting as a whole.
+					}
+				}
+
+				if (group.size() > changedLeft && group.size() <= changedBudget && !chosen.empty())
+				{
+					continue;
+				}
+
+				for (const auto j : group)
+				{
+					if (changedLeft == 0)
+					{
+						break;
+					}
+
+					chosen.push_back(j);
+					--changedLeft;
+				}
+
 				continue;
 			}
 

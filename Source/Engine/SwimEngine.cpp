@@ -680,6 +680,26 @@ namespace Engine
 				captureSequenceCount = static_cast<std::uint32_t>(std::max(0, std::stoi(arguments[2])));
 				captureSequenceDone = 0;
 			});
+		// after <frames> <command...>: runs a console line that many frames from now (time
+		// freezes and resumes, toggles mid-sequence: "timescale 0" then "after 40 timescale 1"
+		// holds a moving object in place while the reflections settle).
+		commands.Register("after",
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.size() < 2)
+				{
+					throw std::invalid_argument("usage: after <frames> <command...>");
+				}
+
+				std::string line;
+
+				for (std::size_t i = 1; i < arguments.size(); ++i)
+				{
+					line += (i > 1 ? " " : "") + arguments[i];
+				}
+
+				deferredCommands.push_back({ totalFrames + static_cast<std::uint64_t>(std::max(0, std::stoi(arguments[0]))), line });
+			});
 		commands.Register("camera",
 			[this](const std::vector<std::string>& arguments)
 			{
@@ -1172,6 +1192,28 @@ namespace Engine
 			{
 				running = false;
 				return false;
+			}
+		}
+
+		// Deferred console lines (the `after` command) whose frame has come, in order.
+		for (std::size_t i = 0; i < deferredCommands.size();)
+		{
+			if (deferredCommands[i].first > totalFrames)
+			{
+				++i;
+				continue;
+			}
+
+			const std::string line = deferredCommands[i].second;
+			deferredCommands.erase(deferredCommands.begin() + static_cast<std::ptrdiff_t>(i));
+
+			try
+			{
+				commandRegistry->ParseAndDispatch(line);
+			}
+			catch (const std::exception& error)
+			{
+				std::cerr << "[Console] after: " << error.what() << '\n';
 			}
 		}
 

@@ -139,6 +139,8 @@ namespace Swim::Render
 		constants.Height = frameHeight;
 		constants.Feedback = frame.Settings.Feedback;
 		constants.ClipGamma = frame.Settings.ClipGamma;
+		constants.ReactiveFeedback = frame.Settings.ReactiveFeedback;
+		constants.ReactiveClipGamma = frame.Settings.ReactiveClipGamma;
 		constants.HistoryValid = historyValid ? 1u : 0u;
 
 		auto release = std::make_shared<std::vector<std::unique_ptr<Rhi::Texture>>>(std::move(retired));

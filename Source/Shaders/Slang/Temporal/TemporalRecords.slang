@@ -8,10 +8,17 @@ struct TemporalResolveConstants
 	float Feedback;
 	float ClipGamma;
 	uint HistoryValid;
+	float ReactiveFeedback;
+	float ReactiveClipGamma;
 	uint Reserved0;
-	uint Reserved1;
-	uint Reserved2;
 };
+
+// Temporal::Reactive: the composite marks reactive pixels in the colour's alpha as 2 + reactivity
+// (ScreenSpaceComposite.slang); any other alpha (1 from Forward+, blended particles) is 0.
+float TemporalReactive(float alpha)
+{
+	return alpha >= 1.5 ? saturate(alpha - 2.0) : 0.0;
+}
 
 // Temporal::Luminance (Rec. 709).
 float TemporalLuminance(float3 rgb)

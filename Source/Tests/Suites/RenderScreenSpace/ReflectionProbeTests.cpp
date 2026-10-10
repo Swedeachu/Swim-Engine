@@ -180,6 +180,27 @@ SWIM_TEST("Render.ReflectionProbes", "ParallaxCorrectionFindsWhatTheSurfaceReall
 	const float ceiling = 1.0f / std::sqrt(901.0f);
 	SWIM_CHECK(std::abs(behind[0] - ceiling) < 5.0e-3f);
 	SWIM_CHECK(std::abs(behind[1] - 30.0f * ceiling) < 1.0e-3f);
+	// A ray that hits a side of an object the probe cannot see, with only sky beyond: the
+	// object's front face at x = 2 covers the directions within 0.2 rad of +x. The ray from
+	// (0, 1.5, 0) enters those directions at x ~ 2.5, half a metre behind the face, and
+	// leaves them into the sky. It takes the object (where it went behind it), not the sky
+	// along the ray, which cut bright slices through the orbiting block in chrome balls.
+	const float downLength = std::sqrt(1.16f);
+	const RP::Float3 down{ 1.0f / downLength, -0.4f / downLength, 0.0f };
+	const auto side = RP::ParallaxDirection({ 0.0f, 1.5f, 0.0f }, down, probe,
+		[](const RP::Float3& d)
+		{
+			return std::acos(std::clamp(d[0], -1.0f, 1.0f)) < 0.2f ? 2.0f / d[0] : RP::DistanceSky;
+		});
+	SWIM_CHECK(std::acos(std::clamp(side[0], -1.0f, 1.0f)) < 0.21f);
+	SWIM_CHECK(side[1] > 0.15f); // Where the ray entered the object's directions (from above).
+	// The same object far behind the ray's path (more than ParallaxHidden): passed, the sky.
+	const auto passed = RP::ParallaxDirection({ 0.0f, 1.5f, 0.0f }, down, probe,
+		[](const RP::Float3& d)
+		{
+			return std::acos(std::clamp(d[0], -1.0f, 1.0f)) < 0.2f ? 0.5f / d[0] : RP::DistanceSky;
+		});
+	SWIM_CHECK(passed[0] * down[0] + passed[1] * down[1] + passed[2] * down[2] > 0.999f);
 	// The same at any probe resolution (the steps follow the texel angle).
 	for (const float jitter : { RP::ProbeTexelAngle(64), RP::ProbeTexelAngle(256), RP::ProbeTexelAngle(512) })
 	{
@@ -374,5 +395,147 @@ SWIM_TEST("Render.ReflectionProbes", "StillFacesAreNotStarvedByConstantMovers")
 			// Every face was captured again in the last 60 frames (still faces included).
 			SWIM_CHECK_MESSAGE(last[probe][face] + 60 > frame, "probe " + std::to_string(probe) + " face " + std::to_string(face));
 		}
+	}
+}
+
+// A mover across a cube seam (seen by two faces of each probe): a probe's changed faces are
+// captured in the same frame, never split across frames - faces captured at different times
+// showed the mover twice, or cut in sections, in chrome balls.
+SWIM_TEST("Render.ReflectionProbes", "AProbesChangedFacesAreCapturedTogether")
+{
+	RP::Scheduler scheduler;
+	ReflectionProbeSettings settings;
+	settings.MaxProbes = 3;
+	settings.FacesPerFrame = 3; // Room for one probe's pair at a time (the reserve takes the rest).
+	settings.IdleRefreshFrames = 1000;
+	std::vector<ReflectionProbeDesc> probes{ Probe(1, { 0, 1, 0 }), Probe(2, { 20, 1, 0 }), Probe(3, { 40, 1, 0 }) };
+	const RP::Float3 camera{ 20, 2, 6 };
+	// Each mover sits on the diagonal between a probe's +X and +Z faces.
+	const std::vector<ReflectionProbeMover> movers{ { { 2, 1, 2 }, 0.3f }, { { 22, 1, 2 }, 0.3f }, { { 42, 1, 2 }, 0.3f } };
+	std::uint64_t frame = 1;
+
+	for (; frame <= 6; ++frame) // 18 new faces.
+	{
+		(void)scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings, movers);
+	}
+
+	std::array<std::uint32_t, 3> captured{};
+
+	for (; frame <= 6 + 30; ++frame)
+	{
+		const auto plan = scheduler.Update(probes, camera, frame, double(frame) / 60.0, settings, movers);
+		std::array<std::uint32_t, 3> faces{};
+
+		for (const auto& capture : plan.Captures)
+		{
+			++faces[capture.Probe];
+		}
+
+		for (std::uint32_t probe = 0; probe < 3; ++probe)
+		{
+			// Both faces that see the mover, or neither.
+			SWIM_CHECK_MESSAGE(faces[probe] == 0u || faces[probe] == 2u, "frame " + std::to_string(frame) + " probe " + std::to_string(probe) +
+					" faces " + std::to_string(faces[probe]));
+			captured[probe] += faces[probe] != 0u ? 1u : 0u;
+		}
+	}
+
+	// One probe's pair fits a frame. The probe nearest the camera (largest on screen) goes
+	// about every second frame, the far ones at no less than about half its rate.
+	SWIM_CHECK(captured[1] >= 14u);
+	SWIM_CHECK(captured[0] >= 7u && captured[2] >= 7u);
+	SWIM_CHECK(captured[1] > captured[0] && captured[1] > captured[2]);
+}
+
+// The sandbox's reflection lab, as the scheduler sees it: six chrome balls, the mirror cube and
+// the area probe, the playground's six toy balls and the gallery probe far away, the orange
+// block and a chrome ball orbiting the lab, at the sandbox's budget (32 faces, 10 m mover
+// range, 1 mm move threshold). Every lab ball's faces that see a mover are refreshed every
+// frame: the reflected block must not step, or show where it was a frame or two ago.
+SWIM_TEST("Render.ReflectionProbes", "TheLabsBallsRefreshWhatMovesEveryFrame")
+{
+	RP::Scheduler scheduler;
+	ReflectionProbeSettings settings;
+	settings.MaxProbes = 16;
+	settings.FacesPerFrame = 32;
+	settings.MoverRange = 10.0f;
+	settings.IdleRefreshFrames = 30;
+	settings.MoveThreshold = 0.001f;
+	const RP::Float3 lab{ -22.0f, 0.0f, 16.0f };
+	const auto at = [&](float x, float y, float z)
+	{
+		return RP::Float3{ lab[0] + x, y, lab[2] + z };
+	};
+	std::vector<ReflectionProbeDesc> probes{ Probe(1, at(-2.505f, 0.5f, 0.0f)), Probe(2, at(-1.495f, 0.5f, 0.0f)), Probe(3, at(0.4f, 0.505f, 1.6f)),
+		Probe(4, at(2.6f, 0.75f, -1.2f)), Probe(5, at(-0.9f, 0.5f, -1.9f)), Probe(6, at(0.4f, 0.5f, -1.9f)), Probe(7, at(4.2f, 0.6f, 0.0f)),
+		Probe(8, at(0.0f, 1.2f, 0.0f)) };
+
+	for (std::uint64_t i = 0; i < 6; ++i)
+	{
+		probes.push_back(Probe(20 + i, { 30.0f + float(i), 0.45f, -20.0f }));
+	}
+
+	probes.push_back(Probe(40, { 0.0f, 2.0f, -40.0f }));
+
+	for (auto& probe : probes)
+	{
+		probe.OwnerObjectId = probe.Key < 8 || (probe.Key >= 20 && probe.Key < 26) ? std::uint32_t(probe.Key) : 0u;
+	}
+
+	const RP::Float3 camera{ -20.0f, 0.9f, 17.0f };
+	std::array<std::uint64_t, 7> lastMoverCapture{};
+	std::array<std::uint64_t, 7> worstGap{};
+	std::uint64_t frame = 1;
+
+	for (; frame <= 600; ++frame)
+	{
+		const double time = double(frame) / 60.0;
+		const float block = 1.3f - 0.5f * float(time);
+		const float ball = 0.35f * float(time);
+		probes[6].Position = at(4.2f * std::cos(ball), 0.6f, 4.2f * std::sin(ball));
+		const std::vector<ReflectionProbeMover> movers{ { at(3.0f * std::cos(block), 1.0f, 3.0f * std::sin(block)), 0.52f },
+			{ probes[6].Position, 0.5f } };
+		const auto plan = scheduler.Update(probes, camera, frame, time, settings, movers);
+		SWIM_CHECK(plan.Captures.size() <= 32u);
+
+		if (frame < 30)
+		{
+			continue; // Every probe's first capture.
+		}
+
+		// Lab balls (and the cube) with a mover in range and in view of a face: captured this frame?
+		for (std::uint32_t p = 0; p < 7; ++p)
+		{
+			bool sees = false;
+
+			for (const auto& mover : movers)
+			{
+				const RP::Float3 offset{ mover.Center[0] - probes[p].Position[0], mover.Center[1] - probes[p].Position[1],
+					mover.Center[2] - probes[p].Position[2] };
+				const float distance = std::sqrt(Dot(offset, offset));
+				sees = sees || (distance > mover.Radius && distance - mover.Radius < settings.MoverRange);
+			}
+
+			sees = sees || p == 6; // The orbiting ball's own probe moves.
+			const bool captured = std::any_of(plan.Captures.begin(), plan.Captures.end(),
+				[&](const RP::FaceCapture& c)
+				{
+					return c.Probe == p;
+				});
+
+			if (captured || lastMoverCapture[p] == 0)
+			{
+				lastMoverCapture[p] = frame;
+			}
+			else if (sees)
+			{
+				worstGap[p] = std::max(worstGap[p], frame - lastMoverCapture[p]);
+			}
+		}
+	}
+
+	for (std::uint32_t p = 0; p < 7; ++p)
+	{
+		SWIM_CHECK_MESSAGE(worstGap[p] == 0u, "lab probe " + std::to_string(p) + " skipped up to " + std::to_string(worstGap[p]) + " frames");
 	}
 }

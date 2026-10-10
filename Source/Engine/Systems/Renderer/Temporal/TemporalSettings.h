@@ -13,6 +13,14 @@ namespace Swim::Render
 		// Half-size of the variance clipping box in standard deviations, [0.25, 8]. Smaller
 		// rejects more history (less ghosting, more flicker).
 		float ClipGamma = 1.25f;
+		// Reactive pixels (FSR2's reactive mask): pixels whose shading changes without the
+		// surface moving - mirror reflections on curved objects, which the composite marks
+		// (TemporalReactive) - trust history less. At full reactivity the current frame
+		// weighs ReactiveFeedback, (0, 1] (never less than Feedback), and the clip box shrinks
+		// to ReactiveClipGamma, [0.25, 8] (never more than ClipGamma). Reprojecting by the surface's motion (zero for
+		// a still chrome ball) kept moved objects' old reflections: ghosts and duplicates.
+		float ReactiveFeedback = 0.8f;
+		float ReactiveClipGamma = 0.5f;
 		// Length of the Halton(2, 3) jitter sequence, 0 .. MaxJitterPhases. 0 renders
 		// without jitter (history still smooths motion, no sub-pixel coverage).
 		std::uint32_t JitterPhases = 8;

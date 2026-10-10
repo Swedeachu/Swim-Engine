@@ -222,9 +222,9 @@ float4 PostCompositeTexel(PostParams p, float exposure, float4 source, float3 bl
 	if (p.Encoding == PostEncodingHdr10)
 	{
 		const float3 wide = PostRec709ToRec2020(nits);
-		return float4(PostPqOetf(wide.x), PostPqOetf(wide.y), PostPqOetf(wide.z), source.w);
+		return float4(PostPqOetf(wide.x), PostPqOetf(wide.y), PostPqOetf(wide.z), saturate(source.w));
 	}
-	return float4(nits / 80.0, source.w);
+	return float4(nits / 80.0, saturate(source.w)); // The scene's alpha can carry TAA's reactivity (above 1).
 }
 
 #endif

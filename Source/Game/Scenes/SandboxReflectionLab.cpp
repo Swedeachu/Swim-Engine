@@ -26,7 +26,7 @@ namespace Game
 		}
 
 		// A planar reflector: the sharp, current reflection of what faces it (the probe stays
-		// the fallback for the rest: a sphere's rim, the faces seen edge-on).
+		// the fallback for the rest: the faces seen edge-on).
 		Engine::PlanarReflector Planar(Engine::PlanarReflector::Shape shape, float priority = 1.0f)
 		{
 			Engine::PlanarReflector reflector;
@@ -88,13 +88,12 @@ namespace Game
 		labFloor = EmplaceBehavior<ReflectionLabFloor>(pad, floorMaterial, floorDesc);
 
 		const std::uint32_t chrome = Mat("Lab chrome", { 0.95f, 0.93f, 0.90f }, 1.0f, 0.02f);
-		// Every chrome sphere: its object probe (the whole sphere of directions) and a planar
-		// capture of the cap that faces the camera (sharp and current every frame).
+		// Every chrome sphere: its object probe, the whole reflection from one source (a planar
+		// cap in the middle and the probe around it disagreed about moving objects).
 		const auto chromeSphere = [&](const std::string& name, const glm::vec3& position, std::uint32_t material, float priority = 1.0f)
 		{
 			const entt::entity e = SpawnMesh(*this, { name, sphere, material, position, glm::vec3(1.0f), glm::quat(1, 0, 0, 0), flags, tags });
 			AddComponent<Engine::ReflectionProbe>(e, ObjectProbe(priority));
-			AddComponent<Engine::PlanarReflector>(e, Planar(Engine::PlanarReflector::Shape::Sphere, priority));
 			return e;
 		};
 		// Two chrome spheres almost touching (1 cm apart) - screenshot 3.

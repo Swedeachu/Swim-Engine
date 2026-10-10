@@ -1185,10 +1185,62 @@ namespace Swim::Render::ScreenSpace
 		return result;
 	}
 
+	float ReactiveTexel(const ReflectionSample& reflection, float confidence)
+	{
+		const auto smoothstep = [](float edge0, float edge1, float v)
+		{
+			const float t = std::clamp((v - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+			return t * t * (3.0f - 2.0f * t);
+		};
+		const float luminance = 0.2126f * reflection.Reflectance[0] + 0.7152f * reflection.Reflectance[1] + 0.0722f * reflection.Reflectance[2];
+
+		if (!reflection.Surface || !(luminance > 0.02f))
+		{
+			return 0.0f;
+		}
+
+		const float mirror = smoothstep(0.25f, 0.6f, luminance) * (1.0f - smoothstep(0.05f, 0.2f, std::clamp(reflection.Roughness, 0.0f, 1.0f)));
+		return mirror * (1.0f - confidence) * reflection.Interior;
+	}
+
+	float InteriorTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, std::uint32_t x, std::uint32_t y)
+	{
+		const auto centre = ViewPosition(params, float(x) + 0.5f, float(y) + 0.5f, depth.At(x, y));
+
+		if (!centre)
+		{
+			return 0.0f;
+		}
+
+		const float centreDepth = -(*centre)[2];
+		const int offsets[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+
+		for (const auto& o : offsets)
+		{
+			const int nx = int(x) + o[0];
+			const int ny = int(y) + o[1];
+
+			if (nx < 0 || ny < 0 || nx >= int(depth.Width) || ny >= int(depth.Height))
+			{
+				return 0.0f;
+			}
+
+			const auto there = ViewPosition(params, float(nx) + 0.5f, float(ny) + 0.5f, depth.At(std::uint32_t(nx), std::uint32_t(ny)));
+
+			if (!there || std::abs(-(*there)[2] - centreDepth) > 0.05f * centreDepth)
+			{
+				return 0.0f;
+			}
+		}
+
+		return 1.0f;
+	}
+
 	Float4 CompositeTexel(const GpuScreenSpaceParams& params, const Float4& color, const Float4& indirect, float ao,
 		const ReflectionSample& reflection, float depth, std::uint32_t x, std::uint32_t y)
 	{
 		Float3 c{ color[0], color[1], color[2] };
+		float reactive = 0.0f;
 
 		if (params.AoEnabled != 0u)
 		{
@@ -1215,6 +1267,7 @@ namespace Swim::Render::ScreenSpace
 			}
 
 			const float confidence = params.SsrEnabled != 0u ? std::max(reflection.Reflection[3], 0.0f) : 0.0f;
+			reactive = depth > 0.0f ? ReactiveTexel(reflection, confidence) : 0.0f;
 
 			if (confidence > 0.0f)
 			{
@@ -1254,7 +1307,7 @@ namespace Swim::Render::ScreenSpace
 			}
 		}
 
-		return { c[0], c[1], c[2], color[3] };
+		return { c[0], c[1], c[2], reactive > 0.0f && params.ReflectionDebug == 0u ? 2.0f + reactive : color[3] };
 	}
 
 	Float4 CompositeTexel(const GpuScreenSpaceParams& params, const Float4& color, const Float4& indirect, float ao, float depth,

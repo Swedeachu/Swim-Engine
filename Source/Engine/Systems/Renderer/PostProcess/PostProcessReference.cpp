@@ -693,10 +693,10 @@ namespace Swim::Render::Post
 		if (p.Encoding == static_cast<std::uint32_t>(OutputEncoding::Hdr10))
 		{
 			const auto wide = Rec709ToRec2020(nits);
-			return { PqOetf(wide[0]), PqOetf(wide[1]), PqOetf(wide[2]), source[3] };
+			return { PqOetf(wide[0]), PqOetf(wide[1]), PqOetf(wide[2]), Saturate(source[3]) };
 		}
 
-		return { nits[0] / 80.0f, nits[1] / 80.0f, nits[2] / 80.0f, source[3] };
+		return { nits[0] / 80.0f, nits[1] / 80.0f, nits[2] / 80.0f, Saturate(source[3]) };
 	}
 
 	PostResult RunPostProcess(

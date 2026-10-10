@@ -195,6 +195,8 @@ namespace Engine
 		Temporal.JitterPhases = std::min(Temporal.JitterPhases, Swim::Render::MaxJitterPhases);
 		clampFinite(Temporal.Feedback, 0.01f, 1.0f, 0.1f);
 		clampFinite(Temporal.ClipGamma, 0.25f, 8.0f, 1.25f);
+		clampFinite(Temporal.ReactiveFeedback, 0.01f, 1.0f, 0.8f);
+		clampFinite(Temporal.ReactiveClipGamma, 0.25f, 8.0f, 0.5f);
 		clampFinite(Post.Exposure.Compensation, -10.0f, 10.0f, 0.0f);
 		clampFinite(Post.Bloom.Intensity, 0.0f, 1.0f, 0.04f);
 		clampFinite(Post.Bloom.Threshold, 0.0f, 100.0f, 1.0f);
@@ -317,6 +319,13 @@ namespace Engine
 		// read in turn; invalid after a cut, a resize or a frame without the filter.
 		std::array<std::unique_ptr<S::Texture>, 2> reflectionHistory;
 		std::uint32_t reflectionHistoryLatest = 0;
+		// Screen-space reflections of reflections: last frame's finished screen-space colour
+		// (before TAA), read at reflective hits. TAA's own history accumulates many frames, so
+		// reading it at a hit showed a moving object's trail - and every bounce between chrome
+		// balls added another, older copy.
+		std::array<std::unique_ptr<S::Texture>, 2> ssrColorHistory;
+		std::uint32_t ssrColorLatest = 0;
+		bool ssrColorValid = false;
 		bool reflectionHistoryValid = false;
 		std::uint64_t shadowFrames = 0;
 		std::uint64_t lastShadowFrame = 0;
@@ -1144,6 +1153,7 @@ namespace Engine
 		if (camera.Cut)
 		{
 			I.reflectionHistoryValid = false;
+			I.ssrColorValid = false;
 			I.temporal->ResetHistory();
 			I.previousViewProjection.reset();
 		}
@@ -1725,6 +1735,9 @@ namespace Engine
 						faceViewDesc.ViewProjection = faceViewProjection;
 						faceViewDesc.CameraPosition = probe.Position;
 						faceViewDesc.LodScale = float(size) * 0.5f;
+						// Every face and probe is its own view: LODs chosen without the shared row
+						// history, which the other views (other faces, other probes) last wrote.
+						faceViewDesc.Flags = std::uint32_t(R::GpuViewFlags::ResetLodHistory);
 						R::VisibilityFrameDesc faceVisibility;
 						faceVisibility.View = R::BuildGpuViewRecord(faceViewDesc);
 						faceVisibility.View.ExcludedObjectId = probe.OwnerObjectId; // The owner does not see itself.
@@ -1933,6 +1946,12 @@ namespace Engine
 							captureViewDesc.CameraPosition = capture.Position;
 							// LODs follow the stored texels (what the reflection shows), not the supersampling.
 							captureViewDesc.LodScale = capture.LodScale;
+							// One LOD history serves every capture of the frame, each from its own
+							// view: hysteresis against the last capture's choice made the terrain's
+							// LOD flip from frame to frame, and its coarse chunks rose through the
+							// lab's floor pad in sections (sand patches flickering in the spheres'
+							// lower halves). Each capture picks its LODs from its own view only.
+							captureViewDesc.Flags = std::uint32_t(R::GpuViewFlags::ResetLodHistory);
 							R::VisibilityFrameDesc captureVisibility;
 							captureVisibility.View = R::BuildGpuViewRecord(captureViewDesc);
 							captureVisibility.View.ExcludedObjectId = capture.ExcludedObjectId; // The mirror does not see itself.
@@ -1963,11 +1982,12 @@ namespace Engine
 							captureFrame.Clusters = &captureClusters;
 							captureFrame.View.ViewProjection = capture.ViewProjection;
 							captureFrame.View.PreviousViewProjection = capture.ViewProjection;
-							// The camera's TAA jitter, as the same sub-texel offset of the capture: captures
-							// re-rendered every frame then follow the jitter sequence and TAA anti-aliases
-							// the reflection (a capture has no TAA of its own).
-							captureFrame.View.Jitter = { jitter[0] * float(width) / float(renderWidth),
-								jitter[1] * float(height) / float(renderHeight) };
+							// No jitter: a capture texel covers several screen pixels once a curved
+							// mirror magnifies it, so a sub-texel jitter became a visible wobble of
+							// distant (small) reflected objects that TAA cannot reproject (its motion
+							// follows the mirror, not the reflection). The Catmull-Rom fetch smooths
+							// the texels instead.
+							captureFrame.View.Jitter = { 0.0f, 0.0f };
 							captureFrame.View.CameraPosition = capture.Position;
 							captureFrame.View.CameraForward = capture.Forward;
 							captureFrame.View.DebugMode = R::ForwardPlusDebugMode::None;
@@ -2052,17 +2072,29 @@ namespace Engine
 			ssFrame.BackDepth = targets.BackDepth;
 			ssFrame.Probes = probeInputs;
 			ssFrame.Planar = planarInputs;
-			// Reflections of reflections: rays read the previous resolved frame (which holds
-			// its reflections) at the hit's reprojected position. Only with TAA, whose
-			// history it is, and Record below reuses the same import.
-			if (temporalOn && ssFrame.Settings.Reflections.Enabled && ssFrame.Settings.Reflections.History && targets.Velocity)
-			{
-				ssFrame.History = I.temporal->ImportPreviousOutput(graph, width, height);
+			// Reflections of reflections: rays read last frame's finished screen-space colour
+			// (which holds its reflections, before TAA) at the hit's reprojected position.
+			const bool ssrColorHistory =
+				ssFrame.Settings.Reflections.Enabled && ssFrame.Settings.Reflections.History && targets.Velocity.has_value();
 
-				if (ssFrame.History)
+			for (auto& texture : I.ssrColorHistory)
+			{
+				if (ssrColorHistory && (!texture || texture->GetDesc().Extent.Width != width || texture->GetDesc().Extent.Height != height))
 				{
-					ssFrame.Velocity = *targets.Velocity;
+					S::TextureDesc historyDesc;
+					historyDesc.Extent = { width, height, 1 };
+					historyDesc.PixelFormat = S::Format::RGBA16Float;
+					historyDesc.Usage = S::TextureUsage::Sampled | S::TextureUsage::TransferDestination;
+					historyDesc.DebugName = "Reflection colour history";
+					texture = I.device.CreateTexture(historyDesc);
+					I.ssrColorValid = false;
 				}
+			}
+
+			if (ssrColorHistory && I.ssrColorValid)
+			{
+				ssFrame.History = graph.ImportTexture(*I.ssrColorHistory[I.ssrColorLatest], ResourceState::ShaderRead);
+				ssFrame.Velocity = *targets.Velocity;
 			}
 
 			if (targets.Velocity)
@@ -2120,6 +2152,34 @@ namespace Engine
 			else
 			{
 				I.reflectionHistoryValid = false;
+			}
+
+			// Keep this frame's finished screen-space colour for next frame's reflections.
+			if (ssrColorHistory && I.ssrColorHistory[0] && I.ssrColorHistory[1] && graph.GetDesc(screen.Output).PixelFormat == S::Format::RGBA16Float)
+			{
+				const auto next = 1u - I.ssrColorLatest;
+				const auto source = screen.Output;
+				const auto destination = graph.ImportTexture(*I.ssrColorHistory[next], ResourceState::Undefined);
+				graph.AddPass(
+					"Reflection colour history", S::QueueType::Graphics,
+					[&](R::RenderGraphBuilder& b)
+					{
+						b.Read(source, ResourceState::CopySource);
+						b.Write(destination, ResourceState::CopyDestination);
+					},
+					[source, destination, width, height](R::RenderCommandContext& c)
+					{
+						S::TextureCopyRegion region;
+						region.Extent = { width, height, 1 };
+						c.Commands().CopyTexture(c.Get(source), c.Get(destination), region);
+					});
+				graph.Export(destination, ResourceState::ShaderRead);
+				I.ssrColorLatest = next;
+				I.ssrColorValid = true;
+			}
+			else
+			{
+				I.ssrColorValid = false;
 			}
 
 			// Render features (gameplay-added passes) run at three stages of the frame.

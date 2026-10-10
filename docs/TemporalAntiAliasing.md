@@ -6,7 +6,7 @@ Forward+ renders each frame with a different sub-pixel jitter and writes a motio
 
 ```text
 Renderer/Temporal
-  TemporalSettings          Feedback, ClipGamma, JitterPhases + validation
+  TemporalSettings          Feedback, ClipGamma, ReactiveFeedback, ReactiveClipGamma, JitterPhases + validation
   TemporalRecords           TemporalResolveConstants (32 B push constants)
   TemporalBindings          descriptor contract of SwimTemporalResolve
   TemporalReference         CPU definition of the jitter and the resolve (Temporal::)
@@ -62,12 +62,15 @@ For every texel:
 2. **Reprojection.** `previousUv = uv − velocity`. If there is no history, or `previousUv` leaves [0, 1]², the output is the current color.
 3. **History.** A clamp-to-edge bilinear sample of the last output, made of four `Load`s. The CPU uses the same weights exactly.
 4. **Clipping.** The history is moved toward the centre of the box `[mean ± ClipGamma × σ] ∩ [min, max]` in YCoCg until it lies inside. Clipping, unlike clamping, keeps the history's hue. Negative results are clamped to 0.
-5. **Blend.** The current color gets weight `Feedback / (1 + L)` and the history `(1 − Feedback) / (1 + L_history)`, with Rec. 709 luminance L. These weights keep bright, single-frame samples from dominating HDR edges. Alpha is 1.
+5. **Reactive pixels** (FSR2's reactive mask). The screen-space composite writes 2 + reactivity into the current color's alpha for mirror-like reflections, whose shading changes while the surface stands still (`Temporal::Reactive`; any other alpha is 0 reactivity). There, `Feedback` moves towards `max(ReactiveFeedback, Feedback)` and `ClipGamma` towards `min(ReactiveClipGamma, ClipGamma)` in proportion; the clip box of step 4 uses that gamma. Reprojecting a still chrome ball by its zero motion kept a moved object's old reflection on busy rims. The composite computes those reflections at the pixel centre, independent of the jitter, and marks only mirror interiors (silhouettes keep full TAA), so they need almost no history.
+6. **Blend.** The current color gets weight `Feedback / (1 + L)` and the history `(1 − Feedback) / (1 + L_history)`, with Rec. 709 luminance L. These weights keep bright, single-frame samples from dominating HDR edges. Alpha is 1.
 
 | Setting | Default | Range | Effect |
 | --- | --- | --- | --- |
 | `Feedback` | 0.1 | (0, 1] | weight of the current frame; 1 disables accumulation |
 | `ClipGamma` | 1.25 | [0.25, 8] | box half-size in standard deviations; smaller rejects more history (less ghosting, more flicker) |
+| `ReactiveFeedback` | 0.8 | (0, 1] | the current frame's weight at full reactivity (never below `Feedback`) |
+| `ReactiveClipGamma` | 0.5 | [0.25, 8] | the box half-size at full reactivity (never above `ClipGamma`) |
 | `JitterPhases` | 8 | 0 .. 64 | Halton sequence length; 0 disables jitter |
 
 ## History

@@ -239,7 +239,22 @@ namespace Swim::Render::ScreenSpace
 		// The local probe fallback (the composite's ReflectionProbes::Select + SampleProbe):
 		// blended probe radiance (rgb) and its coverage (a; 0 without probes).
 		Float4 Probe{ 0, 0, 0, 0 };
+		// The surface (a valid depth and normal) and its roughness (the normal target's w):
+		// mirror-like pixels are marked reactive for TAA (Reactive).
+		bool Surface = false;
+		float Roughness = 1.0f;
+		// 1 inside a surface (InteriorTexel), 0 at its silhouette: only interiors are reactive.
+		float Interior = 1.0f;
 	};
+
+	// How reactive (Temporal::Reactive) a reflective pixel is: mirror-like (reflectance
+	// luminance smoothstep(0.25, 0.6), roughness 1 - smoothstep(0.05, 0.2)) times the share
+	// the screen-space hit leaves. The composite writes 2 + this into the colour's alpha.
+	float ReactiveTexel(const ReflectionSample& reflection, float confidence);
+
+	// 1 when all four neighbours of (x, y) are valid surface texels within 5 % of its view
+	// depth (the composite's continuity test), else 0.
+	float InteriorTexel(const GpuScreenSpaceParams& params, const ScalarImage& depth, std::uint32_t x, std::uint32_t y);
 
 	// One output texel: color - (1 - ao) * indirect (clamped at 0) when AO is on; then the
 	// reflection hierarchy (with SSR on or probes present): the fallback F = specular +

@@ -79,11 +79,24 @@ namespace Swim::Render::ReflectionProbes
 	// the captured surface (within ParallaxThickness): a ray passing behind an occluder, as
 	// the probe sees it, also goes "beyond" - at the occluder's silhouette, far behind its
 	// surface - and marches on instead of stopping there. A ray that crosses nothing within
-	// ParallaxReach keeps its own direction (the sky). Fixed or jittered sample spacings left
-	// stair steps and noise on flat mirrors, which show the probe 1:1.
+	// ParallaxReach keeps its own direction: the sky. When it went behind something first, the
+	// composite takes the environment there, not the probe, whose texel in that direction
+	// shows the occluder (a second copy of it). Unless it went behind an occluder
+	// within ParallaxHidden of its surface: then it most likely hit a side of that object the
+	// probe cannot see, and takes the occluder's direction (the first such silhouette). The
+	// sky along the ray cut bright slices through nearby objects, a moving one most visibly.
+	// Fixed or jittered sample spacings left stair steps and noise on flat mirrors, which
+	// show the probe 1:1.
 	inline float ParallaxThickness(float length, float interval)
 	{
 		return 0.08f * length + 2.0f * interval + 0.02f;
+	}
+
+	// How far behind an occluder's captured surface a ray may pass and still count as hitting
+	// a side of it the probe does not see (an object's assumed depth, at `length` from the probe).
+	inline float ParallaxHidden(float length)
+	{
+		return 0.35f * length + 0.1f;
 	}
 
 	inline constexpr std::uint32_t ParallaxSteps = 96;

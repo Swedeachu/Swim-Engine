@@ -418,6 +418,12 @@ namespace
 								reflectance.Texels[i], specular.Texels[i] };
 						}
 
+						// The surface and its roughness, for the reactive mark in the alpha.
+						const auto& normal = inputs.Normal.Texels[i];
+						reflectionSample.Surface = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2] > 1.0e-6f;
+						reflectionSample.Roughness = normal[3];
+						reflectionSample.Interior = Ss::InteriorTexel(params, inputs.Depth, x, y);
+
 						const auto expected = Ss::CompositeTexel(params, color.Texels[i], indirect.Texels[i],
 							gpuAo ? gpuAo->At(x, y) : 1.0f, reflectionSample, inputs.Depth.Texels[i], x, y);
 						bool mismatch = false;

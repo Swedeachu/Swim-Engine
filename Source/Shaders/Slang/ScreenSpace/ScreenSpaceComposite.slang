@@ -54,6 +54,13 @@ struct PlanarReflectionRecord
 
 // PlanarReflections::LookupIterations.
 static const uint PlanarLookupIterations = 2;
+// The widest footprint (capture texels per pixel) the planar prefilter covers; the sphere cap
+// fades to the probe before minification gets that strong.
+static const float PlanarMaxFootprint = 8.0;
+// How far minification goes before the curved-mirror prefilter starts, as a footprint scale:
+// the blur on the balls' outer parts starts at three times the footprint it used to (sharper
+// further out; TAA, with less history on reactive pixels, averages the rest).
+static const float ReflectionBlurDelay = 3.0;
 
 // PlanarReflections::ProjectToCapture: (u, v) and clip w (> 0 in front).
 float3 PlanarProject(PlanarReflectionRecord record, float3 world)
@@ -113,8 +120,8 @@ float3 PlanarFetchSmooth(PlanarReflectionRecord record, float2 uv, float2 atlasS
 
 // PlanarReflections::LookupUv: start where the surface point projects (exact for a current
 // mirror capture), then refine the ray length with the captured distances (a camera that
-// moved since the capture, curved surfaces). Alpha: the portal edge fade (2 texels).
-float4 SamplePlanar(PlanarReflectionRecord record, float3 position, float3 direction, float2 atlasSize)
+// moved since the capture, curved surfaces). Alpha: the capture border fade (beyond the filter).
+float4 SamplePlanar(PlanarReflectionRecord record, float3 position, float3 direction, float2 atlasSize, float spread)
 {
 	const float3 camera = record.Camera.xyz;
 	const float3 start = PlanarProject(record, position);
@@ -144,14 +151,47 @@ float4 SamplePlanar(PlanarReflectionRecord record, float3 position, float3 direc
 	}
 	const float2 texels = record.Atlas.yz * atlasSize;
 	const float2 inside = min(uv, 1.0 - uv) * texels;
-	const float edge = saturate(min(inside.x, inside.y) * 0.5);
-	return float4(PlanarFetchSmooth(record, uv, atlasSize), edge);
+	float3 radiance = PlanarFetchSmooth(record, uv, atlasSize);
+	float footprint = 1.0;
+	// Prefiltered by the pixel's footprint (PlanarFootprintTexels): where a curved mirror
+	// minifies the capture (a sphere cap towards its rim), one sample per pixel picked a
+	// different texel with every jitter step - shimmer TAA had to average, and averaged
+	// moving reflections into trails. A box of the footprint (4 bilinear taps) is stable
+	// on its own; below ReflectionBlurDelay texels the bicubic alone keeps them sharp.
+	if (spread > 0.0 && t > 0.0)
+	{
+		float3 side = cross(direction, abs(direction.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0));
+		side = normalize(side);
+		const float3 apart = PlanarProject(record, position + normalize(direction + side * spread) * t);
+		if (apart.z > 0.0)
+		{
+			footprint = clamp(length((apart.xy - uv) * texels), 1.0, PlanarMaxFootprint);
+			// From ReflectionBlurDelay texels, full a further ReflectionBlurDelay on.
+			const float blur = saturate((footprint - ReflectionBlurDelay) / ReflectionBlurDelay);
+			if (blur > 0.0)
+			{
+				const float2 offset = 0.35 * footprint / texels;
+				const float3 box = 0.25 * (PlanarFetch(record, uv + float2(offset.x, offset.y), atlasSize).rgb +
+								  PlanarFetch(record, uv + float2(-offset.x, offset.y), atlasSize).rgb +
+								  PlanarFetch(record, uv + float2(offset.x, -offset.y), atlasSize).rgb +
+								  PlanarFetch(record, uv + float2(-offset.x, -offset.y), atlasSize).rgb);
+				radiance = lerp(radiance, max(box, float3(0.0, 0.0, 0.0)), blur);
+			}
+		}
+	}
+	// A sphere cap's capture border fades over a few texels beyond the filter's reach: near
+	// it the distance refinement clamps to the edge and the taps run out of the image, which
+	// left a dotted line where caps meet their probe. A flat mirror's capture ends at the
+	// mirror's own edge (its pixels project inside exactly): 2 texels.
+	const float border = min(inside.x, inside.y);
+	const float edge = record.Camera.w != 0.0 ? smoothstep(0.0, 1.0, (border - 1.0 - 0.5 * footprint) / 6.0) : saturate(border * 0.5);
+	return float4(radiance, edge);
 }
 
 // The planar reflection of a pixel: the first record that matches it (by object for sphere
 // caps, by plane for flat reflectors), weighted by how well its normal agrees, its roughness
 // and the portal edges. ssrPreference: how much a confident screen-space hit may replace it.
-float4 PlanarReflection(uint count, float3 world, float3 n, float3 r, float roughness, float pixelObject, out float ssrPreference)
+float4 PlanarReflection(uint count, float3 world, float3 n, float3 r, float roughness, float pixelObject, float spread, out float ssrPreference)
 {
 	ssrPreference = 1.0;
 	uint width;
@@ -186,7 +226,7 @@ float4 PlanarReflection(uint count, float3 world, float3 n, float3 r, float roug
 		{
 			continue;
 		}
-		const float4 sampled = SamplePlanar(record, world, r, atlasSize);
+		const float4 sampled = SamplePlanar(record, world, r, atlasSize, spread);
 		ssrPreference = record.Atlas.w;
 		return float4(sampled.rgb, sampled.a * normalWeight * roughnessWeight);
 	}
@@ -199,6 +239,23 @@ static const float ProbeParallaxTexels = 3.0;
 static const float ProbeParallaxMinStep = 0.01;
 static const uint ProbeParallaxRefineSteps = 5;
 static const float ProbeParallaxReach = 40.0;
+
+// Whether the pixel's object has a reflection probe of its own.
+bool HasObjectProbe(uint count, float pixelObject)
+{
+	if (pixelObject == 0.0)
+	{
+		return false;
+	}
+	for (uint i = 0; i < count; ++i)
+	{
+		if (ProbeRecords[i].Params.w == pixelObject)
+		{
+			return true;
+		}
+	}
+	return false;
+}
 
 // ReflectionProbes::Select.
 struct ProbeSelection
@@ -274,23 +331,77 @@ ProbeSelection SelectProbes(uint count, float3 position, float pixelObject)
 	return selection;
 }
 
+// The captured distances of the four probe texels around direction d (a gather without the
+// gather extension): d is snapped to the 2 x 2 texel centres around it on its cube face, and
+// each centre is read exactly (a bilinear read at a texel's centre is that texel).
+float4 ProbeTexelDistances(float3 d, float slot)
+{
+	const float size = float(4u << (max(Params[0].ProbeMipCount, 1u) - 1u));
+	const float3 a = abs(d);
+	float3 major;
+	float3 sAxis;
+	float3 tAxis;
+	if (a.x >= a.y && a.x >= a.z)
+	{
+		major = float3(sign(d.x), 0.0, 0.0);
+		sAxis = float3(0.0, 0.0, 1.0);
+		tAxis = float3(0.0, 1.0, 0.0);
+	}
+	else if (a.y >= a.z)
+	{
+		major = float3(0.0, sign(d.y), 0.0);
+		sAxis = float3(1.0, 0.0, 0.0);
+		tAxis = float3(0.0, 0.0, 1.0);
+	}
+	else
+	{
+		major = float3(0.0, 0.0, sign(d.z));
+		sAxis = float3(1.0, 0.0, 0.0);
+		tAxis = float3(0.0, 1.0, 0.0);
+	}
+	const float ma = max(dot(a, abs(major)), 1.0e-6);
+	// Face coordinates in [0, size]: texel centres sit at i + 0.5 on every face, whichever
+	// way the face's axes point, so snapping needs no orientation.
+	const float2 st = (float2(dot(d, sAxis), dot(d, tAxis)) / ma * 0.5 + 0.5) * size;
+	const float2 base = clamp(floor(st - 0.5), float2(0.0, 0.0), float2(size - 2.0, size - 2.0)) + 0.5;
+	float4 result;
+	for (uint i = 0u; i < 4u; ++i)
+	{
+		const float2 centre = (base + float2(float(i & 1u), float(i >> 1u))) / size * 2.0 - 1.0;
+		const float3 direction = major + sAxis * centre.x + tAxis * centre.y;
+		result[i] = ProbeCubes.SampleLevel(ProbeSampler, float4(direction, slot), 0.0).a;
+	}
+	return result;
+}
+
 // How far offset + direction * t lies beyond the captured surface in its direction (>= 0:
 // on or beyond); `length` receives its distance from the probe.
 float ProbeExcess(float slot, float3 offset, float3 direction, float t, out float length)
 {
 	const float3 x = offset + direction * t;
 	length = sqrt(dot(x, x));
-	return length > 0.0 ? length - ProbeCubes.SampleLevel(ProbeSampler, float4(x / length, slot), 0.0).a : -1.0;
+	if (!(length > 0.0))
+	{
+		return -1.0;
+	}
+	// The nearest of the four texels around the direction, not their bilinear blend: at a
+	// silhouette the blend of a near object and the sky is a surface that is not there, and
+	// rays crossing it drew a dotted outline of the object beside its reflection.
+	const float4 distances = ProbeTexelDistances(x / length, slot);
+	return length - min(min(distances.x, distances.y), min(distances.z, distances.w));
 }
 
 // ReflectionProbes::ParallaxDirection (with ParallaxThickness), then the prefiltered radiance there.
 // Alpha: 1 where the ray found the surface it hits (or passed in front of everything the probe
-// captured), 0 where it ended behind a nearer surface as the probe sees it (diagnostics).
+// captured, or hit a side of an occluder the probe does not see), 0 where it ended behind a
+// nearer surface as the probe sees it: the probe does not know what is there.
 float4 SampleProbe(ReflectionProbeRecord record, float3 position, float3 direction, float lod, float texelAngle)
 {
 	const float slot = record.Params.y;
 	const float3 offset = position - record.PositionRadius.xyz;
 	float3 found = direction;
+	float3 hidden = direction;
+	bool hasHidden = false;
 	float t = 0.0;
 	bool wasBeyond = false;
 	bool resolved = false;
@@ -334,18 +445,53 @@ float4 SampleProbe(ReflectionProbeRecord record, float3 position, float3 directi
 		}
 		float hitLength;
 		const float over = ProbeExcess(slot, offset, direction, hi, hitLength);
-		if (over <= 0.08 * hitLength + 2.0 * (hi - lo) + 0.02)
+		// A hit on a silhouette texel (its four distances far apart: half object, half what
+		// is behind) is not trusted: whether a ray grazes it depends on where its steps land,
+		// which left a dotted line of object colour beside nearby objects' reflections. The
+		// ray marches on, to what is behind or (crossing nothing) to the environment.
+		const float4 around = ProbeTexelDistances((offset + direction * hi) / max(hitLength, 1.0e-6), slot);
+		// Likewise a crossing entered from the side: a step before it, the ray still looked at
+		// something much farther away (it grazed the object's outline rather than meeting its
+		// face from in front), which drew the object's edge as a dotted line on the sky.
+		// (The farthest of the four texels there: the nearest, which ProbeExcess takes, is
+		// already the object's.)
+		const float3 loPoint = offset + direction * lo;
+		const float4 behind = ProbeTexelDistances(loPoint / max(sqrt(dot(loPoint, loPoint)), 1.0e-6), slot);
+		const bool grazing = max(max(behind.x, behind.y), max(behind.z, behind.w)) > 1.5 * hitLength;
+		const bool silhouette = grazing ||
+			max(max(around.x, around.y), max(around.z, around.w)) > 1.5 * min(min(around.x, around.y), min(around.z, around.w));
+		if (over <= 0.08 * hitLength + 2.0 * (hi - lo) + 0.02 && !silhouette)
 		{
 			const float3 hit = offset + direction * hi;
 			found = hitLength > 0.0 ? hit / hitLength : direction;
 			resolved = true;
 			break;
 		}
-		// Behind an occluder (as the probe sees it): march on.
+		// Behind an occluder (as the probe sees it): march on, keeping the occluder in case
+		// nothing real follows (ParallaxHidden: a side of it the probe does not see).
+		if (!hasHidden && over <= 0.35 * hitLength + 0.1 && hitLength > 0.0)
+		{
+			hidden = (offset + direction * hi) / hitLength;
+			hasHidden = true;
+		}
 		wasBeyond = true;
 		t = next;
 	}
-	const float confidence = resolved || !wasBeyond ? 1.0 : 0.0;
+	if (!resolved && hasHidden)
+	{
+		found = hidden;
+	}
+	// 0: the ray crossed nothing within reach, yet the probe sees something nearer than that
+	// along it - whether the ray went behind it or passed in front of it (as the probe sees
+	// it), it missed it, and the probe's texel along the ray shows that object: a second,
+	// undisplaced copy of a nearby object beside the parallax-corrected one. What the ray
+	// reaches is not in the probe; the composite takes the environment for that share.
+	float confidence = 1.0;
+	if (!resolved && !hasHidden)
+	{
+		const float4 along = ProbeTexelDistances(direction, slot);
+		confidence = min(min(along.x, along.y), min(along.z, along.w)) >= ProbeParallaxReach ? 1.0 : 0.0;
+	}
 	return float4(max(ProbeCubes.SampleLevel(ProbeSampler, float4(found, slot), lod).rgb, float3(0.0, 0.0, 0.0)), confidence);
 }
 
@@ -537,6 +683,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	bool reflective = false;
 	const bool ssrEnabled = Params[0].SsrEnabled != 0u;
 	float4 reflectionTerm = float4(0.0, 0.0, 0.0, 0.0); // Weight 0: nothing to filter.
+	float reactive = 0.0; // For TAA (Temporal::Reactive): how much this pixel's history is distrusted.
 	const uint planarCount = Params[0].PlanarCount;
 	if (ssrEnabled || Params[0].ProbeCount > 0u || planarCount > 0u)
 	{
@@ -547,7 +694,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		// (all but cancelled out of the result) skips its probe lookups (the parallax marches);
 		// the remaining few percent come from the global environment instead.
 		const float4 reflection = ssrEnabled ? ResolvedReflection(view, int(id.x), int(id.y)) : float4(0.0, 0.0, 0.0, 0.0);
-		const float confidence = max(reflection.a, 0.0);
+		float confidence = max(reflection.a, 0.0);
 		// The surface (shared by the planar lookup and the probes).
 		const uint probeCount = Params[0].ProbeCount;
 		const float depth = Depth.Load(at);
@@ -555,6 +702,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		bool surface = false;
 		float3 world = float3(0.0, 0.0, 0.0);
 		float3 r = float3(0.0, 0.0, 1.0);
+		float3 viewDirection = float3(0.0, 0.0, 1.0);
 		if (reflective && depth > 0.0 && dot(encoded.xyz, encoded.xyz) > 1.0e-6)
 		{
 			bool valid;
@@ -569,7 +717,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 				const float4 p = float4(viewPosition, 1.0);
 				world = float3(dot(inverseView[0], p), dot(inverseView[1], p), dot(inverseView[2], p));
 				const float3 camera = float3(inverseView[0].w, inverseView[1].w, inverseView[2].w);
-				r = reflect(normalize(world - camera), normalize(encoded.xyz));
+				viewDirection = normalize(world - camera);
+				r = reflect(viewDirection, normalize(encoded.xyz));
 				surface = true;
 			}
 		}
@@ -577,32 +726,77 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		// the normal's (ScreenSpace::NormalTurnPerPixel; curved surfaces).
 		float normalTurn = 0.0;
 		float reflectionSpread = 0.0;
+		// 1 inside a surface (all four neighbours continuous with it), 0 at its silhouette.
+		float interior = 0.0;
 		if (surface)
 		{
 			bool centreValid;
 			const float centreDepth = -ScreenSpaceViewPosition(view, float(id.x) + 0.5, float(id.y) + 0.5, depth, centreValid).z;
 			const int2 offsets[4] = { int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1) };
+			float3 neighbours[4];
+			bool continuous[4];
+			uint count = 0u;
 			for (int i = 0; i < 4; ++i)
 			{
 				const int2 there = clamp(int2(id.xy) + offsets[i], int2(0, 0), int2(int(view.Width), int(view.Height)) - 1);
 				bool thereValid;
 				const float3 position = ScreenSpaceLoadViewPosition(view, Depth, there.x, there.y, thereValid);
-				if (thereValid && abs(-position.z - centreDepth) <= 0.05 * centreDepth)
+				continuous[i] = thereValid && any(there != int2(id.xy)) && abs(-position.z - centreDepth) <= 0.05 * centreDepth;
+				neighbours[i] = Normal.Load(int3(there, 0)).xyz;
+				if (continuous[i])
 				{
-					normalTurn = max(normalTurn, length(Normal.Load(int3(there, 0)).xyz - encoded.xyz));
+					normalTurn = max(normalTurn, length(neighbours[i] - encoded.xyz));
+					++count;
 				}
 			}
 			const float pixelAngle = 2.0 / max(Params[0].Projection[1].y * float(view.Height), 1.0e-6);
 			reflectionSpread = pixelAngle + 2.0 * normalTurn;
+			interior = count == 4u ? 1.0 : 0.0;
+			// The normal at the pixel's centre, not at the jittered sample: the reflection then
+			// does not move with the TAA jitter (on a ball the normal turns by up to several
+			// probe texels per pixel), so mirror pixels need no history - the source of the
+			// after-images of moving objects (TemporalSettings::ReactiveFeedback). The
+			// sample sits Jitter * size / 2 pixels off the centre; the normal's gradient comes
+			// from the neighbours, which carry the same offset.
+			const float2 offset = float2(view.Jitter.x * float(view.Width), -view.Jitter.y * float(view.Height)) * 0.5;
+			const float3 gradientX = continuous[0] && continuous[1] ? 0.5 * (neighbours[0] - neighbours[1])
+				: (continuous[0] ? neighbours[0] - encoded.xyz : (continuous[1] ? encoded.xyz - neighbours[1] : float3(0.0, 0.0, 0.0)));
+			const float3 gradientY = continuous[2] && continuous[3] ? 0.5 * (neighbours[2] - neighbours[3])
+				: (continuous[2] ? neighbours[2] - encoded.xyz : (continuous[3] ? encoded.xyz - neighbours[3] : float3(0.0, 0.0, 0.0)));
+			const float3 centred = encoded.xyz + gradientX * offset.x + gradientY * offset.y;
+			if (dot(centred, centred) > 1.0e-6)
+			{
+				r = reflect(viewDirection, normalize(centred));
+			}
 		}
 		// Planar reflections: exact for the mirrors (and sphere caps) that have one.
 		float planarWeight = 0.0;
 		float3 planarRadiance = float3(0.0, 0.0, 0.0);
 		float ssrPreference = 1.0;
 		const float pixelObject = (probeCount > 0u || planarCount > 0u) ? ObjectId.Load(at) : 0.0;
+		// Objects with a reflection probe of their own (chrome balls, the mirror cube) take no
+		// screen-space reflection: their planar cap and probe see everything around them,
+		// prefiltered and stable. On their curved surfaces the half-rate, jittered SSR
+		// flickered (the fuzz at the bottom of the balls) and disagreed with the probe beside
+		// it (double images where the two met).
+		if (surface && HasObjectProbe(probeCount, pixelObject))
+		{
+			confidence = 0.0;
+		}
+		// Mirror-like pixels are reactive (FSR2's reactive mask): their reflection changes while
+		// the surface stands still, so TAA's reprojection by the surface's motion kept moved
+		// objects' old reflections (ghosts and duplicates on the balls' curved rims).
+		if (surface)
+		{
+			const float mirror = smoothstep(0.25, 0.6, dot(reflectance, float3(0.2126, 0.7152, 0.0722))) *
+				(1.0 - smoothstep(0.05, 0.2, saturate(encoded.w)));
+			// Inside the mirror only: its silhouette (and the jitter's coverage of it) still needs
+			// TAA's history to stay anti-aliased.
+			reactive = mirror * (1.0 - confidence) * interior;
+		}
 		if (planarCount > 0u && surface)
 		{
-			const float4 planar = PlanarReflection(planarCount, world, normalize(encoded.xyz), r, saturate(encoded.w), pixelObject, ssrPreference);
+			const float4 planar = PlanarReflection(planarCount, world, normalize(encoded.xyz), r, saturate(encoded.w), pixelObject, reflectionSpread, ssrPreference);
 			planarWeight = planar.a;
 			planarRadiance = planar.rgb;
 		}
@@ -625,17 +819,22 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 				// sampling the sharp mip there shimmered with the jitter).
 				// One mip short of the full footprint: TAA averages the rest without the haze a
 				// fully matched (pre-blurred) mip gave the rims.
-				const float footprintLod = log2(max(reflectionSpread / texelAngle, 1.0)) - 1.0;
+				const float footprintLod = log2(max(reflectionSpread / (texelAngle * ReflectionBlurDelay), 1.0)) - 1.0;
 				const float lod = min(max(saturate(encoded.w) * mips, footprintLod), mips);
+				// Each probe counts by its confidence; what no probe knows (behind an occluder as
+				// the probes see it) falls back to the environment (Specular).
 				const float4 firstSample = SampleProbe(first, world, r, lod, texelAngle);
-				float3 probe = selection.FirstShare * firstSample.rgb;
+				float known = selection.FirstShare * firstSample.a;
+				float3 probe = known * firstSample.rgb;
 
 				if (selection.Second >= 0)
 				{
 					const float4 secondSample = SampleProbe(ProbeRecords[selection.Second], world, r, lod, texelAngle);
-					probe += selection.SecondShare * secondSample.rgb;
+					known += selection.SecondShare * secondSample.a;
+					probe += selection.SecondShare * secondSample.a * secondSample.rgb;
 				}
-				probeCoverage = selection.Coverage;
+				probe = known > 0.0 ? probe / known : float3(0.0, 0.0, 0.0);
+				probeCoverage = selection.Coverage * known;
 				probeAge = first.Params.z;
 				probeSlot = int(first.Params.y);
 				fallback = lerp(specular, reflectance * probe, probeCoverage);
@@ -720,7 +919,8 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 		const float grey = dot(c, float3(0.2126, 0.7152, 0.0722));
 		c = reflective ? debugColor : float3(grey, grey, grey) * 0.15;
 	}
-	Output[id.xy] = float4(c, color.a);
+	// The reactivity rides in the alpha as 2 + reactivity (Temporal::Reactive); else unchanged.
+	Output[id.xy] = float4(c, reactive > 0.0 && debug == 0u ? 2.0 + reactive : color.a);
 	if (Params[0].ReflectionTemporal != 0u)
 	{
 		ReflectionTermOut[id.xy] = reflectionTerm;

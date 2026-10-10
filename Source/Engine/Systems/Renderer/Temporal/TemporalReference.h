@@ -43,6 +43,12 @@ namespace Swim::Render::Temporal
 	Float2 JitterNdc(std::uint64_t frameIndex, std::uint32_t phases, std::uint32_t width, std::uint32_t height);
 
 	float Luminance(const Float3& rgb); // Rec. 709.
+	// The reactivity a pixel's colour alpha carries: 2 + reactivity from the screen-space
+	// composite (mirror reflections on curved objects), else 0 (1 from Forward+, particles).
+	inline float Reactive(float alpha)
+	{
+		return alpha >= 1.5f ? (alpha - 2.0f < 0.0f ? 0.0f : (alpha - 2.0f > 1.0f ? 1.0f : alpha - 2.0f)) : 0.0f;
+	}
 	Float3 RgbToYCoCg(const Float3& rgb);
 	Float3 YCoCgToRgb(const Float3& ycocg);
 	// Non-finite channels become 0, negative ones are clamped to 0.

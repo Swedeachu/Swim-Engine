@@ -236,6 +236,8 @@ namespace Engine
 		std::uint64_t captureSequenceStart = 0; // The first frame (totalFrames) to capture.
 		std::uint32_t captureSequenceCount = 0;
 		std::uint32_t captureSequenceDone = 0;
+		// after <frames> <command...>: console lines run at a later frame (totalFrames), in order.
+		std::vector<std::pair<std::uint64_t, std::string>> deferredCommands;
 
 		std::unique_ptr<Swim::Platform::PlatformSystem> platformSystem;
 		std::unique_ptr<Swim::Platform::Window> engineWindow;

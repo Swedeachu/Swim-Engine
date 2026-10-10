@@ -474,8 +474,8 @@ namespace Game
 		CheckFor(parent, "SSR history (temporal)", s.ScreenSpace.Reflections.History);
 		CheckFor(parent, "SSR back-face thickness", s.ScreenSpace.Reflections.BackFaces);
 		CheckFor(parent, "Reflection probes", s.ReflectionProbes.Enabled);
-		CheckFor(parent, "Planar reflections (mirrors, chrome caps)", s.PlanarReflections.Enabled);
-		AddSlider(parent, "Probe faces per frame", 1.0f, 12.0f, float(s.ReflectionProbes.FacesPerFrame), 0,
+		CheckFor(parent, "Planar reflections (mirrors)", s.PlanarReflections.Enabled);
+		AddSlider(parent, "Probe faces per frame", 1.0f, 32.0f, float(s.ReflectionProbes.FacesPerFrame), 0,
 			[&s](float value)
 			{
 				s.ReflectionProbes.FacesPerFrame = static_cast<std::uint32_t>(std::lround(value));
