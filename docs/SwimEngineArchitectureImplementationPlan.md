@@ -45,21 +45,21 @@ The UI widget set is complete (below). The work that follows is ordered; each st
 
 The critical-path ladder for these steps is [35.9](#359-engine-assembly-and-gameplay-next-in-this-order).
 
-### Swim Client consumer work (decided 2026-11-22)
+### Library packaging and platform additions (decided 2026-11-22)
 
-The engine's first external consumer is **Swim Client** (sibling repo `SwimClient`), which links the engine and Tungsten statically into one executable. Its plan sets the order and scope of the remaining engine work and overrides the order of steps 3–5 above where they differ. Read `../SwimClient/docs/02-SwimEngineWork.md` (item IDs `E-01` … `E-15`) and track progress in `../SwimClient/docs/Checklist.md`; tick the matching boxes in this document as items land.
+The engine is a library that games link. This work comes before steps 3–5 above, and the audio and gameplay API steps follow it directly; asset streaming work is pulled in as games need it.
 
-Work that plan adds beyond what this document already lists:
-
-- [ ] **Static library target `Swim::Engine`** usable through `add_subdirectory` from another project, sandbox as a separate executable linking it, no `CMAKE_SOURCE_DIR` assumptions (extends §32.10 and §35 item 87). Static only: the engine never ships as a DLL.
-- [ ] **Dependencies on the latest stable versions, overridable by a parent project** (one shared version with Tungsten): EnTT 3.13 → 4.x, glm → 1.0.3+, spdlog → 1.17+, and the rest reviewed at the same time.
+- [ ] **Static library target `Swim::Engine`** usable through `add_subdirectory` from another project, with the sandbox as a separate executable that links it and no `CMAKE_SOURCE_DIR` assumptions (extends §32.10 and §35 item 87). Static only: the engine never ships as a DLL.
+- [ ] **Dependencies on the latest stable versions, overridable by a parent project**, so a game that also links other libraries can pin one shared version of each: EnTT 3.13 → 4.x, glm → 1.0.3+, spdlog → 1.17+, and the rest reviewed at the same time. The C runtime setting is taken from the top-level project when embedded.
 - [ ] **Window modes**: windowed, borderless and exclusive fullscreen, display enumeration, cursor capture and relative mouse mode, with commands for a fullscreen toggle.
 - [ ] **Switchable anti-aliasing**: Off, FXAA, SMAA 1x and the existing TAA, a standalone sharpening pass, and non-temporal fallbacks so no pass depends on TAA.
-- [ ] **Render presets including an esports preset**: post passes removed from the graph when bypassed, tone map + output transform + UI composite in a single final pass.
+- [ ] **Render presets including a competitive low-latency preset**: post passes removed from the graph when bypassed; tone map, output transform and UI composite in a single final pass.
 - [ ] **Low-latency present**: present-mode and frame-cap settings, vendor latency extensions where available, late input sampling.
-- [ ] **Typed console variables with metadata and a saved config file**, input rebinding with persistence (part of Phase 25).
+- [ ] **Typed console variables with metadata and a saved config file**; input rebinding with persistence (part of Phase 25).
+- [ ] **External render features** can own persistent GPU buffers and add indirect draws to the depth, shadow, opaque and transparent passes, with HZB occlusion available to them.
+- [ ] **Runtime-built texture arrays, async texture loading, hot reload**, and **runtime shader compilation with reflected parameters** exposed as console variables.
 
-Audio (Phase 21) is implemented as the subset described there: device, voices, streaming, 3D, buses, sound groups, events and callbacks. The longer DSP list waits. Development sound files are read from a path in `build/<preset>/DevPaths.cfg`, never from the repository.
+Audio (Phase 21) is implemented first as a core subset: device, voices, streaming, 3D, buses, sound groups, events and callbacks. The longer DSP list waits. Development sound files are read from a path in `build/<preset>/DevPaths.cfg`, never from the repository.
 
 - **Latest checkpoint — Phases 22 and 23, the assembled runtime (2026-09-25):** OpenGL and the editor are gone; the engine state, clock, tags and behaviours are rebuilt; the modern renderer and UI run the sandbox demo. The full repository layout is delivered with the retired code under `Deprecated/`.
   - **Phase 22:** OpenGL renderer, GL dependencies and `--graphics=opengl` removed. The editor removed (gizmos, gizmo behaviours, editor camera, the `Editing` state, editor commands). `EngineStateMachine`, `SimulationClock`, `TagId`/`TagSet`/`TagRegistry` with the scene tag index, the behaviour lifecycle with state masks and state hooks, and `FlyCameraController` as a runtime behaviour.
