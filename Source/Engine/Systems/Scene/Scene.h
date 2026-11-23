@@ -8,11 +8,13 @@
 #include "Engine/Components/Tags.h"
 #include "Engine/EngineState.h"
 #include "Engine/Machine.h"
+#include "Engine/Runtime/EventBus.h"
 #include "Engine/Runtime/SimulationClock.h"
 #include "Engine/Systems/Entity/BehaviorComponents.h"
 #include "Engine/Systems/Entity/BehaviorScheduler.h"
 
 #include "Engine/Systems/Physics/PhysicsWorld.h"
+#include "Engine/Systems/Scene/SceneTimers.h"
 #include "Physics/ScenePhysicsBridge.h"
 
 #include <algorithm>
@@ -69,6 +71,7 @@ namespace Swim::Input
 {
 
 	class InputSystem;
+	class ActionMap;
 
 }
 
@@ -83,6 +86,7 @@ namespace Engine
 {
 
 	class PhysicsSystem;
+	class AudioSystem;
 	class CameraSystem;
 	class SceneCommandBuffer;
 	class BehaviorRegistry;
@@ -107,7 +111,10 @@ namespace Engine
 		TagRegistry* Tags = nullptr;
 		PhysicsSystem* Physics = nullptr;
 		// Presentation (optional).
+		AudioSystem* Audio = nullptr;
 		Swim::Input::InputSystem* Input = nullptr;
+		// Named, rebindable actions and input contexts (bindings persist in the user config).
+		Swim::Input::ActionMap* Actions = nullptr;
 		CameraSystem* Camera = nullptr;
 		RenderServices* Render = nullptr;
 		// Tools (optional). Scenes may register their own console commands (from Awake).
@@ -116,6 +123,25 @@ namespace Engine
 		std::function<int()> GetFPS;
 
 		bool HasCore() const { return Files && Jobs && IO && Assets && FrameMemory && State && Time; }
+	};
+
+	// Physics events as the scene's event bus publishes them (Scene::GetEvents()), for code
+	// outside behaviours. Collisions are published per contact pair once; triggers on enter and exit.
+	struct SceneCollisionEvent
+	{
+		CollisionEventType Type = CollisionEventType::Started;
+		entt::entity A = entt::null;
+		entt::entity B = entt::null;
+		glm::vec3 Position{ 0.0f };
+		glm::vec3 Normal{ 0.0f, 1.0f, 0.0f }; // From A toward B.
+		float Impulse = 0.0f;
+	};
+
+	struct SceneTriggerEvent
+	{
+		bool Entered = true; // False: exited.
+		entt::entity Trigger = entt::null;
+		entt::entity Other = entt::null;
 	};
 
 	// Result of a physics ray cast resolved to the entity that owns the body.
@@ -282,6 +308,9 @@ namespace Engine
 		CameraSystem* GetCameraSystem() const { return services.Camera; }
 
 		RenderServices* GetRenderServices() const { return services.Render; }
+
+		// Null when the engine runs without audio.
+		AudioSystem* GetAudio() const { return services.Audio; }
 
 		EngineState GetEngineState() const;
 
@@ -512,6 +541,26 @@ namespace Engine
 
 		std::optional<SceneRaycastHit> Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) const;
 
+		std::optional<SceneRaycastHit> Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+			CollisionLayer filter) const;
+
+		// The first entity a ray hits (entt::null for none).
+		entt::entity RaycastEntity(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, CollisionLayer filter = {}) const;
+
+		// Entities whose bodies overlap a sphere / an oriented box (each entity once).
+		std::vector<entt::entity> OverlapSphere(const glm::vec3& center, float radius, CollisionLayer filter = {}) const;
+
+		std::vector<entt::entity> OverlapBox(const glm::vec3& center, const glm::vec3& halfExtents,
+			const glm::quat& rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f), CollisionLayer filter = {}) const;
+
+		// --- Events and timers ---
+		// Typed events for gameplay, UI and the physics events above; subscriptions are
+		// removable tokens (EventSubscription).
+		EventBus& GetEvents() { return events; }
+
+		// Delays, repeating timers and coroutines on scene time (Behavior::After etc. own theirs).
+		SceneTimers& GetTimers() { return timers; }
+
 		entt::entity FindEntityByBody(BodyHandle body) const;
 
 		std::uint64_t GetPhysicsStepCount() const { return physicsSteps; }
@@ -544,6 +593,23 @@ namespace Engine
 	  private:
 
 		void DispatchCollisionEvents();
+
+		void DispatchTriggerEvents();
+
+		std::vector<entt::entity> Overlap(const ShapeDesc& shape, const PhysicsPose& pose, CollisionLayer filter) const;
+
+		void NotifyTrigger(entt::entity self, const BehaviorTrigger& trigger, int phase);
+
+		struct TriggerPair
+		{
+			entt::entity Trigger = entt::null;
+			entt::entity Other = entt::null;
+			std::uint32_t Count = 0; // Overlapping shape pairs.
+		};
+
+		std::vector<TriggerPair> activeTriggers;
+		EventBus events;
+		SceneTimers timers;
 
 		void OnBehaviorsDestroyed(entt::registry& reg, entt::entity entity);
 

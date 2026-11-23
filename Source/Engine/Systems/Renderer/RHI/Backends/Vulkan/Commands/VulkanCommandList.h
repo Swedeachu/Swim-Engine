@@ -85,6 +85,12 @@ namespace Swim::RhiVulkan
 		void DrawIndexedIndirectCount(Rhi::Buffer& arguments, std::uint64_t offset, Rhi::Buffer& count, std::uint64_t countOffset,
 			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(Rhi::DrawIndexedIndirectCommand)) override;
 
+		void DrawIndirect(Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
+			std::uint32_t stride = sizeof(Rhi::DrawIndirectCommand)) override;
+
+		void DrawIndirectCount(Rhi::Buffer& arguments, std::uint64_t offset, Rhi::Buffer& count, std::uint64_t countOffset,
+			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(Rhi::DrawIndirectCommand)) override;
+
 		void Dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
 
 		void ResetQueries(Rhi::QueryPool&, std::uint32_t first, std::uint32_t count) override;
@@ -142,6 +148,8 @@ namespace Swim::RhiVulkan
 		void RequireDraw() const;
 
 		void RequireIndirectDraw(const Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride) const;
+
+		void RequireNonIndexedIndirectDraw(const Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride) const;
 
 		void RequireDescriptorTables() const;
 

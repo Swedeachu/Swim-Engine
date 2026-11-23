@@ -18,13 +18,13 @@ set(SIMDJSON_BUILD_STATIC_LIB OFF CACHE BOOL "" FORCE)
 CPMAddPackage(
 	NAME swim_simdjson_source
 	GITHUB_REPOSITORY simdjson/simdjson
-	GIT_TAG v3.12.3
+	GIT_TAG v5.3.0
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
 
 if(NOT TARGET simdjson::simdjson)
-	message(FATAL_ERROR "simdjson v3.12.3 did not provide simdjson::simdjson")
+	message(FATAL_ERROR "simdjson v5.3.0 did not provide simdjson::simdjson")
 endif()
 swim_set_solution_folder(simdjson "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/simdjson")
 
@@ -35,17 +35,19 @@ set(FASTGLTF_ENABLE_GLTF_RS OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_ASSIMP OFF CACHE BOOL "" FORCE)
 set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
 set(FASTGLTF_ENABLE_CPP_MODULES OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_DOWNLOAD_SIMDJSON OFF CACHE BOOL "" FORCE)
 
 CPMAddPackage(
 	NAME swim_fastgltf_source
 	GITHUB_REPOSITORY spnda/fastgltf
-	GIT_TAG v0.9.0
+	GIT_TAG v1.0.1
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
 
 if(NOT TARGET fastgltf::fastgltf)
-	message(FATAL_ERROR "fastgltf v0.9.0 did not provide fastgltf::fastgltf")
+	message(FATAL_ERROR "fastgltf v1.0.1 did not provide fastgltf::fastgltf")
 endif()
 swim_set_solution_folder(fastgltf "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/fastgltf")
 
@@ -58,13 +60,13 @@ set(MESHOPT_WERROR OFF CACHE BOOL "" FORCE)
 CPMAddPackage(
 	NAME swim_meshoptimizer_source
 	GITHUB_REPOSITORY zeux/meshoptimizer
-	GIT_TAG v1.1
+	GIT_TAG v1.3
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
 
 if(NOT TARGET meshoptimizer)
-	message(FATAL_ERROR "meshoptimizer v1.1 did not provide meshoptimizer")
+	message(FATAL_ERROR "meshoptimizer v1.3 did not provide meshoptimizer")
 endif()
 swim_set_solution_folder(meshoptimizer "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/meshoptimizer")
 
@@ -87,7 +89,7 @@ set(DRACO_DEBUG_COMPILER_WARNINGS OFF CACHE BOOL "" FORCE)
 
 set(SWIM_SAVED_ASSET_COMPILER_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/Draco")
-# Draco 1.5.7 still calls the removed FindPythonInterp module. Keep OLD policy
+# Draco 1.5.9 still calls the removed FindPythonInterp module. Keep OLD policy
 # behavior scoped to this third-party directory only so CMake 4.x can configure
 # the pinned dependency without emitting a project-level developer warning.
 if(POLICY CMP0148)
@@ -97,7 +99,7 @@ endif()
 CPMAddPackage(
 	NAME draco_source
 	GITHUB_REPOSITORY google/draco
-	GIT_TAG 1.5.7
+	GIT_TAG 1.5.9
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
@@ -112,13 +114,13 @@ if(TARGET draco::draco)
 elseif(TARGET draco)
 	set(SWIM_ASSET_COMPILER_DRACO_TARGET draco)
 else()
-	message(FATAL_ERROR "Draco 1.5.7 did not provide a decoder library target")
+	message(FATAL_ERROR "Draco 1.5.9 did not provide a decoder library target")
 endif()
 if(TARGET draco)
 	swim_set_solution_folder(draco "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/Draco")
 endif()
 
-# Draco 1.5.7's draco::draco alias does not reliably publish the include roots
+# Draco 1.5.9's draco::draco alias does not reliably publish the include roots
 # needed by consumers when embedded with add_subdirectory/CPM. In particular,
 # public headers live below <source>/src while draco/draco_features.h is
 # generated below the top-level binary directory. Keep that quirk behind a
@@ -127,10 +129,10 @@ endif()
 set(SWIM_ASSET_COMPILER_DRACO_SOURCE_INCLUDE_DIR "${draco_source_SOURCE_DIR}/src")
 set(SWIM_ASSET_COMPILER_DRACO_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}")
 if(NOT EXISTS "${SWIM_ASSET_COMPILER_DRACO_SOURCE_INCLUDE_DIR}/draco/compression/decode.h")
-	message(FATAL_ERROR "Draco 1.5.7 source include root is missing draco/compression/decode.h")
+	message(FATAL_ERROR "Draco 1.5.9 source include root is missing draco/compression/decode.h")
 endif()
 if(NOT EXISTS "${SWIM_ASSET_COMPILER_DRACO_GENERATED_INCLUDE_DIR}/draco/draco_features.h")
-	message(FATAL_ERROR "Draco 1.5.7 did not generate draco/draco_features.h in the expected build root")
+	message(FATAL_ERROR "Draco 1.5.9 did not generate draco/draco_features.h in the expected build root")
 endif()
 
 add_library(SwimAssetCompilerDraco INTERFACE)
@@ -148,7 +150,7 @@ if(NOT DEFINED stb_source_SOURCE_DIR OR NOT EXISTS "${stb_source_SOURCE_DIR}/stb
 	CPMAddPackage(
 		NAME stb_source
 		GITHUB_REPOSITORY nothings/stb
-		GIT_TAG 2dfbe86
+		GIT_TAG 6b5799b
 		DOWNLOAD_ONLY YES
 		UPDATE_DISCONNECTED YES
 	)
@@ -186,7 +188,7 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler/WebP")
 CPMAddPackage(
 	NAME webp_source
 	GITHUB_REPOSITORY webmproject/libwebp
-	GIT_TAG v1.5.0
+	GIT_TAG v1.6.0
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
@@ -212,7 +214,7 @@ if(TARGET WebP::webp)
 elseif(TARGET webp)
 	set(SWIM_ASSET_COMPILER_WEBP_TARGET webp)
 else()
-	message(FATAL_ERROR "libwebp v1.5.0 did not provide a WebP decoder target")
+	message(FATAL_ERROR "libwebp v1.6.0 did not provide a WebP decoder target")
 endif()
 
 # Basis Universal transcoder (compiler-only): the cooker transcodes KHR_texture_basisu
@@ -222,12 +224,12 @@ endif()
 CPMAddPackage(
 	NAME swim_basis_universal_source
 	GITHUB_REPOSITORY BinomialLLC/basis_universal
-	GIT_TAG v1_60_snapshot_final
+	GIT_TAG v2_50
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 )
 if(NOT EXISTS "${swim_basis_universal_source_SOURCE_DIR}/transcoder/basisu_transcoder.cpp")
-	message(FATAL_ERROR "basis_universal v1_60_snapshot_final is missing transcoder/basisu_transcoder.cpp")
+	message(FATAL_ERROR "basis_universal v2_50 is missing transcoder/basisu_transcoder.cpp")
 endif()
 add_library(SwimAssetCompilerBasisTranscoder STATIC
 	"${swim_basis_universal_source_SOURCE_DIR}/transcoder/basisu_transcoder.cpp"
@@ -258,9 +260,10 @@ swim_set_solution_folder(SwimAssetCompilerBasisTranscoder "${SWIM_SOLUTION_FOLDE
 set(SWIM_BASIS_ENCODER_SOURCES
 	basisu_backend.cpp basisu_basis_file.cpp basisu_comp.cpp basisu_enc.cpp basisu_etc.cpp basisu_frontend.cpp
 	basisu_gpu_texture.cpp basisu_pvrtc1_4.cpp basisu_resampler.cpp basisu_resample_filters.cpp basisu_ssim.cpp
-	basisu_uastc_enc.cpp basisu_bc7enc.cpp jpgd.cpp basisu_kernels_sse.cpp basisu_opencl.cpp pvpngreader.cpp
-	basisu_uastc_hdr_4x4_enc.cpp basisu_astc_hdr_6x6_enc.cpp basisu_astc_hdr_common.cpp
-	3rdparty/android_astc_decomp.cpp 3rdparty/tinyexr.cpp
+	basisu_uastc_enc.cpp basisu_bc7e_scalar.cpp basisu_dds_export.cpp basisu_bc7enc.cpp jpgd.cpp basisu_kernels_sse.cpp
+	basisu_bc15_spmd.cpp basisu_bc15_spmd_sse.cpp basisu_opencl.cpp pvpngreader.cpp basisu_uastc_hdr_4x4_enc.cpp
+	basisu_astc_hdr_6x6_enc.cpp basisu_astc_hdr_common.cpp basisu_astc_ldr_common.cpp basisu_astc_ldr_encode.cpp
+	basisu_astc_ldr_fencode.cpp basisu_xbc7_encode.cpp basisu_tinyexr.cpp 3rdparty/android_astc_decomp.cpp
 )
 list(TRANSFORM SWIM_BASIS_ENCODER_SOURCES PREPEND "${swim_basis_universal_source_SOURCE_DIR}/encoder/")
 add_library(SwimAssetCompilerBasisEncoder STATIC ${SWIM_BASIS_ENCODER_SOURCES})
@@ -294,7 +297,7 @@ target_link_libraries(SwimAssetCompilerDependencies INTERFACE
 swim_set_solution_folder(SwimAssetCompilerDependencies "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Asset Compiler")
 
 # CPM cache entries are immutable input. The explicit simdjson target above is
-# important because fastgltf v0.9.0 otherwise file(DOWNLOAD)s simdjson into its
+# important because fastgltf v1.0.1 otherwise file(DOWNLOAD)s simdjson into its
 # source tree during configure.
 function(swim_assert_asset_compiler_dependency_clean dependency_name source_dir)
 	if(NOT EXISTS "${source_dir}/.git")

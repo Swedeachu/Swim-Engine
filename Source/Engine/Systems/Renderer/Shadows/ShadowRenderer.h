@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine/Systems/Renderer/ForwardPlus/ExternalGeometry.h"
 #include "Engine/Systems/Renderer/Geometry/GeometryGraphResources.h"
 #include "Engine/Systems/Renderer/GpuMaterials/GpuMaterialGraphResources.h"
 #include "Engine/Systems/Renderer/GpuScene/GpuSceneGraphResources.h"
@@ -69,6 +70,8 @@ namespace Swim::Render
 		std::optional<GraphTexture> Atlas;
 		std::vector<std::uint8_t> Render; // Per Plan->Draws (empty: all); only with Atlas.
 		bool AtlasHoldsDepth = true;	  // False the first time: the atlas is cleared whole, not loaded.
+		// Draws added to every rendered view's tile after the engine's casters.
+		std::vector<ExternalGeometryDraws> External;
 	};
 
 	// Renders every tile of a ShadowPlan into one D32Float atlas (Phase 16, items 70-72).

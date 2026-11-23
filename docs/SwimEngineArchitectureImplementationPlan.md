@@ -49,15 +49,15 @@ The critical-path ladder for these steps is [35.9](#359-engine-assembly-and-game
 
 The engine is a library that games link. This work comes before steps 3–5 above, and the audio and gameplay API steps follow it directly; asset streaming work is pulled in as games need it.
 
-- [ ] **Static library target `Swim::Engine`** usable through `add_subdirectory` from another project, with the sandbox as a separate executable that links it and no `CMAKE_SOURCE_DIR` assumptions (extends §32.10 and §35 item 87). Static only: the engine never ships as a DLL.
-- [ ] **Dependencies on the latest stable versions, overridable by a parent project**, so a game that also links other libraries can pin one shared version of each: EnTT 3.13 → 4.x, glm → 1.0.3+, spdlog → 1.17+, and the rest reviewed at the same time. The C runtime setting is taken from the top-level project when embedded.
-- [ ] **Window modes**: windowed, borderless and exclusive fullscreen, display enumeration, cursor capture and relative mouse mode, with commands for a fullscreen toggle.
-- [ ] **Switchable anti-aliasing**: Off, FXAA, SMAA 1x and the existing TAA, a standalone sharpening pass, and non-temporal fallbacks so no pass depends on TAA.
-- [ ] **Render presets including a competitive low-latency preset**: post passes removed from the graph when bypassed; tone map, output transform and UI composite in a single final pass.
-- [ ] **Low-latency present**: present-mode and frame-cap settings, vendor latency extensions where available, late input sampling.
-- [ ] **Typed console variables with metadata and a saved config file**; input rebinding with persistence (part of Phase 25).
-- [ ] **External render features** can own persistent GPU buffers and add indirect draws to the depth, shadow, opaque and transparent passes, with HZB occlusion available to them.
-- [ ] **Runtime-built texture arrays, async texture loading, hot reload**, and **runtime shader compilation with reflected parameters** exposed as console variables.
+- [x] **Static library target `Swim::Engine`** usable through `add_subdirectory` from another project, with the sandbox as a separate executable that links it and no `CMAKE_SOURCE_DIR` assumptions (extends §32.10 and §35 item 87). Static only: the engine never ships as a DLL.
+- [x] **Dependencies on the latest stable versions, overridable by a parent project**, so a game that also links other libraries can pin one shared version of each: EnTT 3.13 → 4.x, glm → 1.0.3+, spdlog → 1.17+, and the rest reviewed at the same time. The C runtime setting is taken from the top-level project when embedded.
+- [x] **Window modes**: windowed, borderless and exclusive fullscreen, display enumeration, cursor capture and relative mouse mode, with commands for a fullscreen toggle.
+- [x] **Switchable anti-aliasing**: Off, FXAA, SMAA 1x and the existing TAA, a standalone sharpening pass, and non-temporal fallbacks so no pass depends on TAA. *(`RenderSettings::AntiAliasing` / `Sharpening`, cvars `render_aa` and `render_sharpen`; `Shaders/Slang/PostProcess/ScreenAntiAliasing.slang` runs on the display-referred frame before the UI. The morphological mode computes its coverage analytically (32-pixel run search), with no area or search lookup textures. Without TAA, jitter is off and screen-space and feature noise use a fixed seed (`RenderFeatureView::Temporal`).)*
+- [ ] **Render presets including a competitive low-latency preset**: post passes removed from the graph when bypassed; tone map, output transform and UI composite in a single final pass. *(Presets done: `render_preset quality|balanced|competitive|custom` (`Engine/Runtime/RenderQuality`) sets `render_aa`, `render_sharpen`, `render_bloom`, `render_cinematic` and `video_low_latency`. A hand change switches the preset to custom. Features that return `IsCinematic()` true are left out of the graph. Still open: the single final pass.)*
+- [ ] **Low-latency present**: present-mode and frame-cap settings, vendor latency extensions where available, late input sampling. Present mode (`video_present_mode` auto/vsync/mailbox/immediate, switched live), the frame cap (`video_fps_max`, precise sleep), the CPU fallback limiter (`video_low_latency`: input is sampled after the GPU finishes the queued frames), input sampled after both waits, and frame time / latency / queued frames / present mode in `FramePacing::GetStats()`, the sandbox overlay and `video_pacing_stats` are done (`Runtime/FramePacing.h`). The vendor extensions (`VK_NV_low_latency2`, `VK_AMD_anti_lag`) are pending.
+- [x] **Typed console variables with metadata and a saved config file**; input rebinding with persistence (part of Phase 25).
+- [x] **External render features** can own persistent GPU buffers and add indirect draws to the depth, shadow, opaque and transparent passes, with HZB occlusion available to them. Indirect draws in those passes, streamed persistent buffers (`StreamingBuffer`: range allocation, budgeted uploads, incremental defragmentation) and two-phase occlusion against the prepass HZB (`UsesOcclusion`/`CullGeometry`) are done ([RenderFeatures.md](RenderFeatures.md#drawing-geometry-into-the-engine-passes)). The engine's own scene objects are not yet occlusion-culled.
+- [x] **Runtime-built texture arrays, async texture loading, hot reload**, and **runtime shader compilation with reflected parameters** exposed as console variables. Texture arrays with layer replacement, background loading and file hot reload are done (`TextureArray`, [RenderFeatures.md](RenderFeatures.md#drawing-geometry-into-the-engine-passes)). *(Runtime shader compilation 2026-11-23: `ShaderHotReload` watches every runtime program's source and includes, recompiles a changed one with the pinned `slangc` in a child process on its own thread, caches the result by a content hash, and `FrameRenderer::ReplaceProgram` swaps feature programs and pipelines in, retiring the old ones after the GPU is done with them; a failed compile keeps the old program and prints the compiler output. `[Tweak(min, max)]` push-constant fields (`Tweak.slang`) become `shader_<program>_<field>` console variables through `ShaderTweaks`. Development builds only: the build writes the compiler and a source manifest to `DevPaths.cfg`.)*
 
 Audio (Phase 21) is implemented first as a core subset: device, voices, streaming, 3D, buses, sound groups, events and callbacks. The longer DSP list waits. Development sound files are read from a path in `build/<preset>/DevPaths.cfg`, never from the repository.
 
@@ -914,38 +914,38 @@ Rules:
 
 | Dependency | Pin / source | Owning target/layer | Shipping runtime? | Notes |
 | --- | --- | --- | --- | --- |
-| SDL3 | `release-3.4.14` | `Swim::Platform`, `Swim::Input` | yes | Private implementation dependency for platform/input. |
-| mimalloc | `v3.4.5` | process allocator / `Swim::Memory` | yes | Final executable owns allocator override. |
+| SDL3 | `release-3.4.20` | `Swim::Platform`, `Swim::Input` | yes | Private implementation dependency for platform/input. |
+| mimalloc | `v3.7.0` | process allocator / `Swim::Memory` | yes | Final executable owns allocator override (`swim_configure_engine_executable`). |
 | enkiTS | `v1.12` | `Swim::Jobs` | yes | Private scheduler implementation. |
-| simdjson | `v3.12.3` | fastgltf implementation dependency inside `Swim::AssetCompilerDependencies` | no* | Established before fastgltf so fastgltf never mutates its cached checkout with fallback downloads. |
-| fastgltf | `v0.9.0` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | glTF/GLB structure and extension metadata only. `*` Dev auto-cook may link the compiler into a development executable. |
-| Draco | `1.5.7` | `Swim::AssetCompilerDraco` -> `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Compiler-side `KHR_draco_mesh_compression` mesh decode only. The Swim adapter owns Draco 1.5.7's source/generated include-root quirk (`<source>/src` plus generated `draco_features.h`) so consumers never depend on package layout directly; glTF bitstream mode is enabled and unrelated point-cloud/tool/plugin builds are disabled. |
-| meshoptimizer | `v1.1` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Offline vertex/index optimization. |
-| libwebp | `v1.5.0` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Source `EXT_texture_webp` decode only; command-line utilities/mux/extras are disabled. |
-| stb | commit `2dfbe86` | compiler image decode; legacy loose texture/font compatibility | transitional | Compiler handles PNG/JPEG source decode. Runtime stb remains only for compatibility paths not yet moved to compiled assets. |
-| Basis Universal transcoder | `v1_60_snapshot_final` | `Swim::BasisTranscoder` in legacy/runtime texture residency | yes, intentional transitional | Only the transcoder TU is built; encoder/tools are omitted. Remove from runtime once platform-native cooked texture variants are authoritative. |
+| simdjson | `v5.3.0` | fastgltf implementation dependency inside `Swim::AssetCompilerDependencies` | no* | Established before fastgltf so fastgltf never mutates its cached checkout with fallback downloads. |
+| fastgltf | `v1.0.1` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | glTF/GLB structure and extension metadata only. fastgltf fetches its own pinned single-file simdutf into the build tree. `*` Dev auto-cook may link the compiler into a development executable. |
+| Draco | `1.5.9` | `Swim::AssetCompilerDraco` -> `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Compiler-side `KHR_draco_mesh_compression` mesh decode only. The Swim adapter owns Draco's source/generated include-root quirk (`<source>/src` plus generated `draco_features.h`) so consumers never depend on package layout directly; glTF bitstream mode is enabled and unrelated point-cloud/tool/plugin builds are disabled. |
+| meshoptimizer | `v1.3` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Offline vertex/index optimization. |
+| libwebp | `v1.6.0` | `Swim::AssetCompilerDependencies` -> `SwimAssetCompiler` | no* | Source `EXT_texture_webp` decode only; command-line utilities/mux/extras are disabled. |
+| stb | commit `6b5799b` | compiler image decode; legacy loose texture/font compatibility | transitional | Compiler handles PNG/JPEG source decode. Runtime stb remains only for compatibility paths not yet moved to compiled assets. |
+| Basis Universal transcoder | `v2_50` | `Swim::BasisTranscoder` in legacy/runtime texture residency | yes, intentional transitional | Only the transcoder TU is built; encoder/tools are omitted. Remove from runtime once platform-native cooked texture variants are authoritative. |
 | zstd | `v1.4.9` | runtime asset/package + `Swim::BasisTranscoder` | yes | Runtime `.sasset`/texture decompression and universal KTX2 support. |
-| spdlog | `v1.15.3` | process logging | yes | Static console + timestamped file logging. |
-| GLM | `1.0.0` | engine math | yes | Header-only target. |
-| EnTT | `v3.13.2` | scene/ECS implementation | yes | Header-only target; backend types must not leak into ECS contracts. |
+| spdlog | `v1.17.0` | process logging | yes | Static console + timestamped file logging. Public engine dependency. |
+| GLM | `1.0.3` | engine math | yes | Public engine dependency. |
+| EnTT | `v4.0.0` | scene/ECS implementation | yes | Header-only public engine dependency, built with `ENTT_USE_ATOMIC`; backend types must not leak into ECS contracts. |
 | nlohmann/json | `3.10.4` single header + SHA-256 | editable config/tool/legacy scene interchange | yes while those paths use it | Verified release header avoids Windows path/cache issues. |
 | GLAD | `v2.0.8` generated loader | legacy OpenGL backend | yes while legacy backend ships | Must eventually live only in the OpenGL implementation target. |
 | OpenGL | Windows/system API | legacy OpenGL backend | yes while legacy backend ships | No source-import responsibility. |
 | Vulkan-Headers | system Vulkan SDK | `Swim::RhiVulkan` | yes | Header/API definitions are private to the Vulkan implementation target. The modern backend does not link the Vulkan loader directly. |
-| volk | `1.4.350` | `Swim::RhiVulkan` | yes | Namespaced static meta-loader/dispatch tables so the modern backend can coexist temporarily with the legacy directly-linked Vulkan path without symbol collisions. |
-| vk-bootstrap | `v1.4.350` | `Swim::RhiVulkan` | yes | Instance, physical-device, logical-device, and queue bootstrap only; Swim still owns required feature/adapter policy. |
-| PhysX | `107.3-omni-and-physx-5.6.1` | `Swim::PhysicsPhysX` | yes | External CPU-only backend; implementation types stay private to the backend target. |
-| Jolt Physics | `v5.6.0` | `Swim::PhysicsJolt` | yes | CPM source build, static library, single-precision positions; Jolt compute/GPU/sample/tool paths are disabled and implementation types stay private to the backend target. |
-| FreeType | `VER-2-14-3` | `Swim::TextDependencies` -> text/UI module (item 79) | yes, once the text module ships | Font faces, metrics and outlines. zlib/bzip2/PNG/Brotli/HarfBuzz integration disabled. |
-| HarfBuzz | `14.5.0` single-file `src/harfbuzz.cc` | `SwimHarfBuzz` -> `Swim::TextDependencies` | yes, once the text module ships | Unicode shaping with built-in Unicode data; no FreeType/ICU/GLib interop. |
-| msdfgen | `v1.13` core | `Swim::TextDependencies` | yes, once the text module ships | Glyph MSDF generation from Swim-built shapes. msdf-atlas-gen is not pinned: atlas packing is planned in Swim; revisit if that proves insufficient. |
+| volk | `vulkan-sdk-1.4.363.0` | `Swim::RhiVulkan` | yes | Namespaced static meta-loader/dispatch tables so the modern backend can coexist temporarily with the legacy directly-linked Vulkan path without symbol collisions. |
+| vk-bootstrap | `v1.4.368` | `Swim::RhiVulkan` | yes | Instance, physical-device, logical-device, and queue bootstrap only; Swim still owns required feature/adapter policy. |
+| PhysX | `110.3-omni-and-physx-5.9.1` | `Swim::PhysicsPhysX` | yes | External CPU-only backend; implementation types stay private to the backend target. |
+| Jolt Physics | `v5.7.0` | `Swim::PhysicsJolt` | yes | CPM source build, static library, single-precision positions; Jolt compute/GPU/sample/tool paths are disabled and implementation types stay private to the backend target. |
+| FreeType | `VER-2-15-0` | `Swim::TextDependencies` -> text/UI module (item 79) | yes, once the text module ships | Font faces, metrics and outlines. zlib/bzip2/PNG/Brotli/HarfBuzz integration disabled. |
+| HarfBuzz | `15.2.0` single-file `src/harfbuzz.cc` | `SwimHarfBuzz` -> `Swim::TextDependencies` | yes, once the text module ships | Unicode shaping with built-in Unicode data; no FreeType/ICU/GLib interop. |
+| msdfgen | `v1.13.1` core | `Swim::TextDependencies` | yes, once the text module ships | Glyph MSDF generation from Swim-built shapes. msdf-atlas-gen is not pinned: atlas packing is planned in Swim; revisit if that proves insufficient. |
 | SheenBidi | `v3.0.0` unity TU (`Source/SheenBidi.c`) | `SwimSheenBidi` -> `Swim::TextDependencies` | yes, once the text module ships | Unicode Bidirectional Algorithm (paragraphs, levels, per-line L1–L2 runs) and UAX #24 script runs, over UTF-8 byte offsets. Apache-2.0. |
-| libunibreak | `libunibreak_8_0` library sources (Makefile.am set) | `SwimUnibreak` -> `Swim::TextDependencies` | yes, once the text module ships | UAX #14 line breaking and UAX #29 grapheme/word boundaries (Unicode 17). zlib licence. |
-| Slang compiler SDK | `2026.16.1` official release ZIP + SHA-256 | `SwimSlangCompiler` build tool -> `Swim::ShaderCompiler` metadata tooling | no | Build-only `slangc`; emits SPIR-V, reflection JSON, and depfiles. Slang implementation libraries/types are not linked into runtime or exposed by public shader metadata headers. |
+| libunibreak | `libunibreak_8_0_1` library sources (Makefile.am set) | `SwimUnibreak` -> `Swim::TextDependencies` | yes, once the text module ships | UAX #14 line breaking and UAX #29 grapheme/word boundaries (Unicode 17). zlib licence. |
+| Slang compiler SDK | `2026.22.1` official release ZIP + SHA-256 | `SwimSlangCompiler` build tool -> `Swim::ShaderCompiler` metadata tooling | no | Build-only `slangc`; emits SPIR-V, reflection JSON, and depfiles. Slang implementation libraries/types are not linked into runtime or exposed by public shader metadata headers. |
 
 `no*` means the normal compiled-asset runtime does not need the dependency; a development build with in-process auto-cooking may intentionally include the asset compiler.
 
-Build/tool dependencies are separate from linked engine libraries: CMake requires `3.25+`; CPM.cmake is pinned to `0.40.8`; Git is used for immutable dependency-cache validation and PhysX worktree setup; Python 3 is required by GLAD/PhysX upstream generation; Slang `2026.16.1` is fetched as a hash-verified compiler SDK for deterministic `.slang` -> SPIR-V/GLSL/reflection builds. The old first-party DXC/HLSL shader path is retired. These tools do not become runtime library dependencies.
+Build/tool dependencies are separate from linked engine libraries: CMake requires `3.25+`; CPM.cmake is pinned to `0.40.8`; Git is used for immutable dependency-cache validation and PhysX worktree setup; Python 3 is required by GLAD/PhysX upstream generation; Slang `2026.22.1` is fetched as a hash-verified compiler SDK for deterministic `.slang` -> SPIR-V/GLSL/reflection builds. The old first-party DXC/HLSL shader path is retired. These tools do not become runtime library dependencies.
 
 ### 4.3 Build graph and CMake invariants
 
@@ -2230,12 +2230,12 @@ Create:
 - [ ] `CameraComponent` or reusable Camera data;
 - [ ] `RenderView`/`ViewDesc`;
 - [x] per-view frustum; *(OpenGL and Vulkan traversal own independent Frustum instances; BVH queries consume the supplied instance/revision.)*
-- [ ] current/previous view-projection;
+- [x] current/previous view-projection; *(`RenderFeatureView::ViewProjection`/`PreviousViewProjection`, unjittered; the previous one equals the current on a cut or the first frame.)*
 - [ ] viewport/scissor;
-- [ ] jitter;
-- [ ] exposure;
+- [x] jitter; *(`RenderFeatureView::Jitter`, NDC, zero with TAA off.)*
+- [ ] exposure; *(Auto exposure stays GPU-resident; a camera cut snaps it to the new view.)*
 - [ ] layer/mask policy;
-- [ ] camera-cut/history-reset flag.
+- [x] camera-cut/history-reset flag. *(`RenderCamera::Cut` (from `CameraSystem::RequestCameraCut`, the `camera` and `camera.cut` commands) resets TAA, reflection and SSR history, motion vectors, auto exposure and the main view's LOD/occlusion history (`GpuViewFlags::CameraCut`), and reaches features as `RenderFeatureView::Cut`. Ambient occlusion has no temporal history to reset.)*
 
 This naturally supports game view, editor view, shadows, portals, mirrors, cubemap capture, and multiple windows.
 
@@ -2648,10 +2648,10 @@ Use this to validate or generate matching C++ schemas.
 - [ ] variants are declared by material/shader templates;
 - [ ] use Slang interfaces/generics where they reduce preprocessor complexity;
 - [ ] do not compile every theoretical boolean combination;
-- [ ] hash source include graph + compiler version + options + features;
-- [ ] compile cache by content hash;
+- [x] hash source include graph + compiler version + options + features; *(development hot reload: the command line (compiler path, options, defines) and every file of the depfile's include graph)*
+- [x] compile cache by content hash; *(`<cache root>/Shaders/<program>-<hash>.spv`; the build itself still relies on CMake depfiles)*
 - [ ] shipping builds do not compile shaders during frames;
-- [ ] dev hot reload compiles asynchronously and swaps pipelines after safe retirement.
+- [x] dev hot reload compiles asynchronously and swaps pipelines after safe retirement. *(2026-11-23, `ShaderHotReload` + `FrameRenderer::ReplaceProgram`: render-feature compute and geometry programs; programs the engine's own passes hold are reported and apply after a restart.)*
 
 ### RHI-facing shader artifact
 
@@ -4483,18 +4483,18 @@ Use miniaudio behind a Swim API (miniaudio types never cross the public boundary
 
 ### Core runtime
 
-- [ ] audio device (default and explicit, hot change and loss, null device for tests and headless);
-- [ ] sound asset vs playing voice (handles, generations; voices never own assets);
-- [ ] one-shot/looping, start offset, fade in/out, scheduled start (sample-accurate);
-- [ ] streaming (music, ambience, dialogue) with async decode/stream jobs; small sounds fully decoded;
-- [ ] listener/source 3D audio: attenuation curves (inverse, linear, log, custom), cones, Doppler, pitch/pan/spread, distance-based low-pass (air absorption);
-- [ ] priorities, virtual voices and voice stealing under a voice budget;
-- [ ] audio thread fed by a lock-free command queue; no allocation, locks or asset loads on the audio thread.
+- [x] audio device (default and explicit, hot change and loss, null device for tests and headless); *(2026-11-23: `Engine::AudioSystem` (`Systems/Audio`), miniaudio 0.11.26 private to one translation unit. `audio_device` / `audio_devices`; a lost device is reopened; `--audio=device|null|off`; headless uses the null output, which still advances voices.)*
+- [x] sound asset vs playing voice (handles, generations; voices never own assets); *(`SoundHandle` registers a path lazily; `VoiceHandle` = slot + generation.)*
+- [ ] one-shot/looping, start offset, fade in/out, scheduled start (sample-accurate); *(Done except the sample-accurate scheduled start.)*
+- [x] streaming (music, ambience, dialogue) with async decode/stream jobs; small sounds fully decoded; *(`SoundLoad::Auto` streams files over 1 MB; decoded sounds are cached by path; both load on miniaudio's job thread.)*
+- [ ] listener/source 3D audio: attenuation curves (inverse, linear, log, custom), cones, Doppler, pitch/pan/spread, distance-based low-pass (air absorption); *(Done: inverse/linear/exponential attenuation, Doppler, pitch, pan, a listener that follows the camera. Open: custom curves, cones, spread, air absorption.)*
+- [ ] priorities, virtual voices and voice stealing under a voice budget; *(Priorities and stealing under `audio_max_voices` are done; virtual voices are open.)*
+- [x] audio thread fed by a lock-free command queue; no allocation, locks or asset loads on the audio thread. *(An SPSC queue feeds a worker thread that owns the backend objects; finished and marker events return the same way. The device callback only mixes. Sound objects are created on the worker, never on the device thread.)*
 
 ### Mixing: buses, groups and snapshots
 
-- [ ] **Bus graph:** master ← music/SFX/ambience/UI/voice (user-defined), each with volume, mute, solo, an effect chain and sends (e.g. to a reverb return bus).
-- [ ] **Sound groups:** a named group of sounds with shared volume, pitch and effects, **instance limits** (per group, per emitter; oldest/quietest/farthest stealing), cooldowns and priority. Groups carry categories for occlusion and ducking.
+- [ ] *(Volume per bus done: master, music, world, players, ambient and ui, plus `AddBus`, each with a saved `audio_volume_<bus>`. Mute/solo/effects/sends open.)* **Bus graph:** master ← music/SFX/ambience/UI/voice (user-defined), each with volume, mute, solo, an effect chain and sends (e.g. to a reverb return bus).
+- [x] *(`SoundGroupDesc`: random, random-no-repeat, sequence; volume/pitch variation; instance limit (oldest stopped); cooldown; priority; * and ? file patterns expanded on first play.)* **Sound groups:** a named group of sounds with shared volume, pitch and effects, **instance limits** (per group, per emitter; oldest/quietest/farthest stealing), cooldowns and priority. Groups carry categories for occlusion and ducking.
 - [ ] **Containers** (what an event plays): random (weighted, avoid repeats), sequence, switch (by a parameter such as surface material), blend (by a continuous parameter such as speed), layered.
 - [ ] **Snapshots/mix states:** blended bus volumes and effect parameters (underwater, paused, menu, slow motion); **sidechain ducking** (dialogue ducks music).
 - [ ] **Parameter smoothing:** every volume, pitch and effect parameter ramps per block (no zipper noise); automation from gameplay parameters (RTPC-style).
@@ -4514,8 +4514,8 @@ Every effect is a Swim node usable on a voice, a group or a bus, with smoothed p
 ### Callbacks from physics and gameplay
 
 - [ ] **Physics contacts:** collision begin/persist/end and trigger events from the generic physics layer (PhysX and Jolt alike) map to sound events: impact volume and pitch from the impulse and relative speed; switch containers by surface-material pair; rolling/sliding loops driven by contact velocity; per-body cooldowns and rate limits so a stack of boxes does not spam voices.
-- [ ] **Gameplay events:** named events (`PlayEvent("Footstep", entity, params)`) from behaviours, animation events (item 78 footsteps) and UI events (button hover/click sounds from the widget theme); events attach to entities and follow their transforms.
-- [ ] **Callbacks back to gameplay:** voice finished, loop point, marker/cue reached, beat/bar for music.
+- [ ] *(`MapEvent` / `PlayEvent`, the `SoundEmitter` behaviour, and UI sounds through `UiDocument::SetObserver` are done; animation events are open.)* **Gameplay events:** named events (`PlayEvent("Footstep", entity, params)`) from behaviours, animation events (item 78 footsteps) and UI events (button hover/click sounds from the widget theme); events attach to entities and follow their transforms.
+- [ ] **Callbacks back to gameplay:** voice finished, loop point, marker/cue reached, beat/bar for music. *(Voice finished and timeline markers done: `PlayParams::OnFinished` / `Markers` + `OnMarker`, delivered in `AudioSystem::Update`.)*
 - [ ] Events are data (assets) so sound design changes do not need code.
 
 ### Assets, tools and tests
@@ -4523,7 +4523,7 @@ Every effect is a Swim node usable on a voice, a group or a bus, with smoothed p
 - [ ] audio assets participate in the same AssetId/dependency model (compressed sources cooked to runtime formats; streaming flags; loudness normalization metadata);
 - [ ] debug overlay: active voices, stolen voices, bus meters, occlusion rays, 3D gizmos for emitters (drawn by the debug renderer, not an editor);
 - [ ] tests on the null device with offline rendering: deterministic DSP golden buffers (filter responses, reverb tail energy, delay taps), voice limits and stealing, snapshot blending, contact-to-event mapping;
-- [ ] sandbox audio playground (Phase 23 scene): impacts with material switches, a reverb zone, an occluding wall, a radio with static, music ducking under dialogue.
+- [ ] sandbox audio playground (Phase 23 scene): impacts with material switches, a reverb zone, an occluding wall, a radio with static, music ducking under dialogue. *(Core part done: ball impacts pick soft/hard groups by impulse, a looping emitter orbits the physics playground (pan and Doppler), panel clicks and hovers play sounds, and a trigger zone starts an ambient loop. The DSP parts are open. The sounds come from `devaudio:/`.)*
 
 ---
 
@@ -4579,7 +4579,7 @@ A single scene that shows where every system stands, driven by a UI built with t
   - [ ] still open: physics backend and gravity, a light spawner, cascade/resolution/bias controls and cascade debug view, an IBL map dropdown, wireframe/overdraw views, entity context menus.
 - [ ] **Physics playground:** throwable/stackable bodies, a ramp and a domino run, triggers, per-body inspection through the UI, PhysX and Jolt switchable.
   - [x] delivered: a box pyramid, a ramp with capsules, spheres and cubes, ball drop/rain/fire, spawnable shapes, impact counting from collision callbacks; `--physics` selects PhysX or Jolt at launch.
-  - [ ] still open: a domino run, triggers, per-body inspection, switching backends at run time.
+  - [ ] still open: a domino run, per-body inspection, switching backends at run time. *(Triggers done 2026-11-23: a sound zone over the ball drop area counts the balls inside through `OnTriggerEnter/Exit` and plays a loop while it is occupied.)*
 - [x] **Rendering playground:** PBR material spheres, a hall of instances for culling/LOD, animated skinned characters, particle emitters, transparent objects, emissive objects with bloom.
 - [x] **World-space UI:** an in-world terminal panel and a billboard label, interactive through the ray-cast router.
 - [x] **Camera:** the same movable fly camera as today (a behaviour), camera bookmarks, and pause not affecting it.
@@ -4628,7 +4628,7 @@ Checklist (to be expanded when scheduled):
 - [ ] API inventory and a gap list per domain;
 - [ ] facades and handle types;
 - [ ] action-based input;
-- [ ] behaviour lifecycle, timers/coroutines and event subscriptions;
+- [x] behaviour lifecycle, timers/coroutines and event subscriptions; *(2026-11-23. Triggers: `OnTriggerEnter/Stay/Exit` with `BehaviorTrigger`. Bus events: `SceneCollisionEvent` / `SceneTriggerEvent` on `Scene::GetEvents()`, a typed `EventBus` (`Runtime/EventBus.h`) whose `EventSubscription` tokens remove themselves. Timers: `SceneTimers` (`After`, `Every`, `When`) plus `SceneTask` coroutines (`co_await Wait/NextFrame/WaitUntil`); a behaviour owns its own through `Behavior::After/Every/When/StartCoroutine`. Queries: `Scene::RaycastEntity`, `OverlapSphere`, `OverlapBox`. UI: named nodes (`UiDocument::SetName/Find`, name-addressed `OnClick/OnValue/OnChecked/BindValue/BindChecked`) and `UiDocument::SetObserver`. Sandbox: the sound zone.)*
 - [ ] examples: a small game built only on the gameplay API.
 
 ---
@@ -5203,7 +5203,7 @@ This is the recommended order for actual implementation. Do not skip ahead to a 
 77. [x] GPU particles. *(2026-09-24: `Renderer/Particles` + `Shaders/Slang/Particles`; [GPU particles](Particles.md). Mesh/trail rendering and emitter assets remain Phase 19 follow-ups. Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe.)*
 78. [x] animation/skinning/morphs. *(2026-09-24: glTF skins/animations/morphs, `.sasset` skeleton and clip types, `Systems/Animation`, `Renderer/Skinning` + `Shaders/Slang/Skinning`, Forward+ previous-position motion vectors; [Animation and skinning](Animation.md). Native smoke passes all four profiles on the RTX 4070 and on Mesa lavapipe; 64 × 1,032-vertex skinning 0.054–0.074 ms. Engine wiring remains item 56.)*
 79. [ ] runtime UI + HarfBuzz/FreeType/MSDF. *(Later on 2026-09-25: popups (menus, context menus, tooltips, modal dialogs), radio groups, list views, dropdowns, virtual lists and editable slider values; 778 Linux cases pass ([record](validation/Item79-Popups-2026-09-25.md)). 2026-09-24: font faces, run shaping, MSDF atlas and retained UI foundation. 2026-09-25: fallback chains, bidi/script/line-break paragraph layout, carets and IME editing, flex/anchor/aspect layout with caches, images and rounded/bordered solids, the Input → UI bridge and `Renderer/UiRendering` — one-draw RenderGraph UI pass, atlas residency, SDR/HDR composition, CPU reference ([record](validation/Item79-2026-09-25.md)). Later on 2026-09-25: themed checkboxes, toggles, sliders and scroll bars with visual states, transitions and skins; Tab/spatial/gamepad navigation; screen, render-surface, world-panel and billboard canvases with ray-cast input, capture and one focus owner; world drawing with depth, canvas fade and surface mips; a second native smoke; 765 Linux cases pass ([record](validation/Item79-Controls-2026-09-25.md)). 2026-09-25, Phase 23: the `UiCanvas` component, `UiRuntime` and the sandbox HUD and world UI run in the engine. Open: both UI smokes on the desktop under the validation profiles; world UI sorted and fogged among transparents; render-surface canvases in the runtime. See [Text and retained UI](TextAndUi.md).)*
-80. [ ] miniaudio audio system. *(Scheduled after the engine assembly and streaming work: item 95 and Phase 21.)*
+80. [x] miniaudio audio system. *(2026-11-23: the core subset of Phase 21, `Engine::AudioSystem`.)* *(Scheduled after the engine assembly and streaming work: item 95 and Phase 21.)*
 81. [ ] `.spack` streaming/residency budgets/eviction.
 
 ### 35.8 Compatibility and hardening

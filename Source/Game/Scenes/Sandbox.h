@@ -5,6 +5,7 @@
 #include "Engine/Systems/Renderer/Features/LensFlare.h"
 #include "Engine/Systems/Renderer/Features/SunShafts.h"
 #include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
+#include "Game/Features/BoxField.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Scene/Scene.h"
@@ -58,9 +59,12 @@ namespace Game
 		void OnStateChanged(Engine::EngineState previous, Engine::EngineState current) override;
 
 		// Physics playground.
-		void RecordImpact(float impulse);
+		void RecordImpact(float impulse, const glm::vec3& position);
 
 		std::uint64_t GetImpacts() const { return impacts; }
+
+		// Balls inside the sound zone (trigger demo).
+		std::uint32_t GetZoneOccupants() const { return zoneOccupants; }
 
 		float GetStrongestImpact() const { return strongestImpact; }
 
@@ -216,6 +220,12 @@ namespace Game
 
 		void BuildBlackHole();
 
+		void BuildAudioPlayground();
+
+		void BuildTriggerZone();
+
+		void PlayImpactSound(float impulse, const glm::vec3& position);
+
 		void RegisterProfilingToggles();
 
 		void BuildWorldUi();
@@ -239,6 +249,8 @@ namespace Game
 		std::uint64_t impacts = 0;
 		float strongestImpact = 0.0f;
 		std::uint64_t spawned = 0;
+		std::uint32_t zoneOccupants = 0;
+		Engine::EventSubscription zoneSubscription;
 		std::uint32_t builds = 0;
 		std::uint32_t requestedTab = UINT32_MAX;
 		bool commandsRegistered = false;
@@ -254,6 +266,7 @@ namespace Game
 		std::shared_ptr<Engine::CameraLens> cameraLens;
 		std::shared_ptr<Engine::FilmSensor> filmSensor;
 		std::shared_ptr<Engine::GravitationalLensing> lensing;
+		std::shared_ptr<BoxField> boxField;
 		entt::entity blackHole = entt::null;
 		std::unordered_map<std::uint32_t, bool> hiddenGroups; // TagId::Value -> hidden.
 		bool swarmMotion = true;

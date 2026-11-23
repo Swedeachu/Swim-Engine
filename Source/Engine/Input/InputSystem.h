@@ -97,6 +97,12 @@ namespace Swim::Input
 
 		float GetGamepadAxis(Platform::InputDeviceId device, Platform::GamepadAxis axis) const;
 
+		// Across every connected gamepad (single-player games that accept any pad).
+		bool IsAnyGamepadButtonDown(Platform::GamepadButton button) const;
+
+		// The value with the largest magnitude across every connected gamepad.
+		float GetAnyGamepadAxis(Platform::GamepadAxis axis) const;
+
 		float GetActionValue(InputAction action, const InputMap& map,
 			Platform::InputDeviceId gamepadDevice = 0) const;
 

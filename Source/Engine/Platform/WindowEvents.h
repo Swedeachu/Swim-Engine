@@ -22,7 +22,11 @@ namespace Swim::Platform
 		MouseEntered,
 		MouseLeft,
 		DisplayChanged,
-		DpiScaleChanged
+		DpiScaleChanged,
+		// Entered or left fullscreen (Window::GetMode has the new mode).
+		ModeChanged,
+		// A display was connected, disconnected or changed its desktop mode.
+		DisplaysChanged
 	};
 
 	struct WindowEvent

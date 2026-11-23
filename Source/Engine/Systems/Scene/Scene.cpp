@@ -7,6 +7,7 @@
 #include "Engine/Systems/Scene/SceneCommandBuffer.h"
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <stdexcept>
 
@@ -573,7 +574,7 @@ namespace Engine
 
 	void Scene::InternalScenePostUpdate(double dt)
 	{
-		(void)dt;
+		timers.Tick(dt);
 	}
 
 	void Scene::InternalFixedUpdate(unsigned int tickThisSecond)
@@ -595,6 +596,8 @@ namespace Engine
 		DestroyAllEntities(true);
 		GetCommandBuffer().Clear();
 		DestroyPhysicsWorld();
+		activeTriggers.clear();
+		timers.Clear();
 	}
 
 	void Scene::InternalStateChanged(EngineState previous, EngineState current)
@@ -786,6 +789,7 @@ namespace Engine
 		physicsBridge->PostSimulateSync();
 		++physicsSteps;
 		DispatchCollisionEvents();
+		DispatchTriggerEvents();
 	}
 
 	entt::entity Scene::FindEntityByBody(BodyHandle body) const
@@ -869,10 +873,191 @@ namespace Engine
 			const entt::entity b = FindEntityByBody(event.BodyB);
 			notify(a, b, event, 1.0f);
 			notify(b, a, event, -1.0f);
+			this->events.Publish(SceneCollisionEvent{ event.Type, a, b, event.Position, event.Normal, event.Impulse });
+		}
+	}
+
+	void Scene::NotifyTrigger(entt::entity self, const BehaviorTrigger& trigger, int phase)
+	{
+		auto* bc = registry.valid(self) ? registry.try_get<BehaviorComponents>(self) : nullptr;
+		const EngineState state = GetExecutionState();
+
+		if (!bc || !bc->CanExecute(state))
+		{
+			return;
+		}
+
+		for (std::size_t i = 0; bc && i < bc->behaviors.size(); ++i)
+		{
+			Behavior* behavior = bc->behaviors[i].get();
+
+			if (!behavior || !behavior->RunCollisionCallBacks() || !behavior->HasInited())
+			{
+				continue;
+			}
+
+			if (phase == 0)
+			{
+				behavior->OnTriggerEnter(trigger);
+			}
+			else if (phase == 1)
+			{
+				behavior->OnTriggerStay(trigger);
+			}
+			else
+			{
+				behavior->OnTriggerExit(trigger);
+			}
+
+			bc = registry.valid(self) ? registry.try_get<BehaviorComponents>(self) : nullptr;
+		}
+	}
+
+	void Scene::DispatchTriggerEvents()
+	{
+		PhysicsWorld* world = GetPhysicsWorld();
+
+		if (!world)
+		{
+			return;
+		}
+
+		const auto dispatch = [&](const TriggerPair& pair, int phase)
+		{
+			const BehaviorTrigger trigger{ pair.Trigger, pair.Other };
+			NotifyTrigger(pair.Trigger, trigger, phase);
+			NotifyTrigger(pair.Other, trigger, phase);
+
+			if (phase != 1)
+			{
+				events.Publish(SceneTriggerEvent{ phase == 0, pair.Trigger, pair.Other });
+			}
+		};
+
+		// Copied: callbacks may destroy bodies, which can report more events.
+		const auto reported = world->GetTriggerEvents();
+		const std::vector<TriggerEvent> triggerEvents(reported.begin(), reported.end());
+		std::vector<std::size_t> entered;
+
+		for (const auto& event : triggerEvents)
+		{
+			const TriggerPair key{ FindEntityByBody(event.TriggerBody), FindEntityByBody(event.OtherBody), 0 };
+
+			if (key.Trigger == entt::null || key.Other == entt::null)
+			{
+				continue;
+			}
+
+			auto found = std::find_if(activeTriggers.begin(), activeTriggers.end(),
+				[&](const TriggerPair& pair)
+				{
+					return pair.Trigger == key.Trigger && pair.Other == key.Other;
+				});
+
+			if (event.Entered)
+			{
+				// Compound bodies overlap through several shapes: one Enter per entity pair.
+				if (found != activeTriggers.end())
+				{
+					++found->Count;
+					continue;
+				}
+
+				activeTriggers.push_back({ key.Trigger, key.Other, 1 });
+				entered.push_back(activeTriggers.size() - 1);
+				dispatch(activeTriggers.back(), 0);
+			}
+			else if (found != activeTriggers.end() && --found->Count == 0)
+			{
+				const TriggerPair pair = *found;
+				activeTriggers.erase(found);
+				dispatch(pair, 2);
+			}
+		}
+
+		// Stay for overlaps older than this step; pairs whose entity is gone end here (a
+		// destroyed body may not report its exit).
+		for (std::size_t i = 0; i < activeTriggers.size();)
+		{
+			const TriggerPair pair = activeTriggers[i];
+
+			if (!registry.valid(pair.Trigger) || !registry.valid(pair.Other))
+			{
+				activeTriggers.erase(activeTriggers.begin() + static_cast<std::ptrdiff_t>(i));
+				dispatch(pair, 2);
+				continue;
+			}
+
+			if (std::find(entered.begin(), entered.end(), i) == entered.end())
+			{
+				dispatch(pair, 1);
+			}
+
+			++i;
 		}
 	}
 
 	std::optional<SceneRaycastHit> Scene::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance) const
+	{
+		return Raycast(origin, direction, maxDistance, CollisionLayer{});
+	}
+
+	entt::entity Scene::RaycastEntity(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, CollisionLayer filter) const
+	{
+		const auto hit = Raycast(origin, direction, maxDistance, filter);
+		return hit ? hit->Entity : entt::entity{ entt::null };
+	}
+
+	std::vector<entt::entity> Scene::OverlapSphere(const glm::vec3& center, float radius, CollisionLayer filter) const
+	{
+		ShapeDesc shape;
+		shape.Type = ShapeType::Sphere;
+		shape.Sphere.Radius = radius;
+		PhysicsPose pose;
+		pose.Position = center;
+		return Overlap(shape, pose, filter);
+	}
+
+	std::vector<entt::entity> Scene::OverlapBox(const glm::vec3& center, const glm::vec3& halfExtents, const glm::quat& rotation,
+		CollisionLayer filter) const
+	{
+		ShapeDesc shape;
+		shape.Type = ShapeType::Box;
+		shape.Box.HalfExtents = halfExtents;
+		PhysicsPose pose;
+		pose.Position = center;
+		pose.Rotation = rotation;
+		return Overlap(shape, pose, filter);
+	}
+
+	std::vector<entt::entity> Scene::Overlap(const ShapeDesc& shape, const PhysicsPose& pose, CollisionLayer filter) const
+	{
+		std::vector<entt::entity> result;
+		PhysicsWorld* world = GetPhysicsWorld();
+
+		if (!world)
+		{
+			return result;
+		}
+
+		std::array<OverlapHit, 256> hits{};
+		const auto count = world->Overlap(shape, pose, hits, filter);
+
+		for (std::size_t i = 0; i < std::min(count, hits.size()); ++i)
+		{
+			const auto entity = FindEntityByBody(hits[i].Body);
+
+			if (entity != entt::null && std::find(result.begin(), result.end(), entity) == result.end())
+			{
+				result.push_back(entity);
+			}
+		}
+
+		return result;
+	}
+
+	std::optional<SceneRaycastHit> Scene::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance,
+		CollisionLayer filter) const
 	{
 		PhysicsWorld* world = GetPhysicsWorld();
 
@@ -883,7 +1068,7 @@ namespace Engine
 
 		RaycastHit hit;
 
-		if (!world->Raycast(origin, glm::normalize(direction), maxDistance, hit))
+		if (!world->Raycast(origin, glm::normalize(direction), maxDistance, hit, filter))
 		{
 			return std::nullopt;
 		}

@@ -46,6 +46,7 @@ namespace Engine
 		MaterialBlend Blend = MaterialBlend::Opaque;
 		float AlphaCutoff = 0.5f;
 		bool DoubleSided = false;
+		bool PointSampled = false; // Nearest texel filtering (pixel art); mips still blend.
 		float OcclusionStrength = 1.0f;
 		float NormalScale = 1.0f;
 		Swim::Assets::AssetHandle<Swim::Assets::TextureAsset> BaseColorTexture;
@@ -68,7 +69,7 @@ namespace Engine
 		using Router = std::function<void(std::uint32_t materialSet, const Swim::Render::StandardPbr::Parameters& parameters)>;
 
 		MaterialLibrary(Swim::Render::GpuMaterialTable& table, std::shared_ptr<const Swim::Render::MaterialTemplate> materialTemplate,
-			Swim::Render::AssetResidencyService& residency, std::uint32_t samplerIndex);
+			Swim::Render::AssetResidencyService& residency, std::uint32_t samplerIndex, std::uint32_t pointSamplerIndex);
 
 		~MaterialLibrary();
 
@@ -91,6 +92,9 @@ namespace Engine
 		std::uint32_t FindByName(std::string_view name) const;
 
 		std::uint32_t GetDefault() const { return defaultSet; }
+
+		// Bindless sampler indices materials use (repeat addressing, linear or point filtered).
+		std::uint32_t GetSamplerIndex(bool pointSampled) const { return pointSampled ? pointSampler : sampler; }
 
 		std::uint32_t GetCount() const { return static_cast<std::uint32_t>(entries.size()); }
 
@@ -115,6 +119,7 @@ namespace Engine
 		std::shared_ptr<const Swim::Render::MaterialTemplate> materialTemplate;
 		Swim::Render::AssetResidencyService& residency;
 		std::uint32_t sampler = 0;
+		std::uint32_t pointSampler = 0;
 		Router router;
 		std::unordered_map<std::uint32_t, Entry> entries;
 		std::uint32_t defaultSet = 0;

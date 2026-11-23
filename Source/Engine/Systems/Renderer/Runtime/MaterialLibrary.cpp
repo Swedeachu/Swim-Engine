@@ -36,8 +36,9 @@ namespace Engine
 
 	MaterialLibrary::MaterialLibrary(Swim::Render::GpuMaterialTable& tableValue,
 		std::shared_ptr<const Swim::Render::MaterialTemplate> templateValue, Swim::Render::AssetResidencyService& residencyValue,
-		std::uint32_t samplerIndex)
-		: table(tableValue), materialTemplate(std::move(templateValue)), residency(residencyValue), sampler(samplerIndex)
+		std::uint32_t samplerIndex, std::uint32_t pointSamplerIndex)
+		: table(tableValue), materialTemplate(std::move(templateValue)), residency(residencyValue), sampler(samplerIndex),
+		  pointSampler(pointSamplerIndex)
 	{
 		MaterialDesc fallback;
 		fallback.Name = "Default";
@@ -108,7 +109,7 @@ namespace Engine
 		instance.SetFloat("OcclusionStrength", Finite(d.OcclusionStrength, 1, 0, 1));
 		instance.SetFloat("AlphaCutoff", Finite(d.AlphaCutoff, 0.5f, 0, 1));
 		instance.SetUint("Flags", Flags(d));
-		instance.SetSampler("MaterialSampler", sampler);
+		instance.SetSampler("MaterialSampler", d.PointSampled ? pointSampler : sampler);
 		// A texture that is not resident yet samples the white fallback (element 0), which
 		// the shader treats as "no texture" for the base color and occlusion.
 		instance.SetTexture("BaseColorTexture", indices[0]);

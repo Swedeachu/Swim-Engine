@@ -112,8 +112,8 @@ namespace Swim::AssetCompiler
 		{
 			for (std::uint32_t bx = 0; bx < columns; ++bx)
 			{
-				basisu::color_rgba texels[16];
-				basisu::unpack_bc7(blocks.data() + (std::size_t(by) * columns + bx) * 16, texels);
+				basist::color_rgba texels[16];
+				basist::bc7u::unpack_bc7(blocks.data() + (std::size_t(by) * columns + bx) * 16, texels);
 
 				for (std::uint32_t i = 0; i < 16; ++i)
 				{

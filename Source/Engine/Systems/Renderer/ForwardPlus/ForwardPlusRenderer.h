@@ -1,6 +1,8 @@
 #pragma once
 #include "Engine/Systems/Renderer/ClusteredLighting/ClusterGraphResources.h"
+#include <functional>
 #include "Engine/Systems/Renderer/Environment/EnvironmentGraphResources.h"
+#include "Engine/Systems/Renderer/ForwardPlus/ExternalGeometry.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusBindings.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusGraphResources.h"
 #include "Engine/Systems/Renderer/ForwardPlus/ForwardPlusReference.h"
@@ -102,6 +104,13 @@ namespace Swim::Render
 		bool DepthPrepass = true;
 		// Pass-name prefix for this frame (empty: the renderer's DebugName).
 		std::string DebugName;
+		// Draws added to the depth prepass, opaque and transparent passes after the
+		// renderer's own. Opaque external draws turn DeferLocalLights off for the frame (their
+		// pipelines target the seven forward targets).
+		std::vector<ExternalGeometryDraws> External;
+		// Called once between the depth prepass and the opaque pass with the prepass depth
+		// (empty when no prepass ran); passes it records run before the opaque pass.
+		std::function<void(RenderGraph& graph, std::optional<GraphTexture> prepassDepth)> BeforeOpaque;
 	};
 
 	// Viewport-sized render targets (the cluster grid's viewport).

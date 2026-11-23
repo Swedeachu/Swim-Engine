@@ -17,12 +17,12 @@ function(swim_add_slang_program name)
 	if(NOT SWIM_SLANG_PROGRAM_SOURCE)
 		message(FATAL_ERROR "swim_add_slang_program(${name}) requires SOURCE")
 	endif()
-	if(NOT SWIM_SLANG_AVAILABLE OR NOT TARGET SwimSlangCompiler)
+	if(NOT TARGET SwimSlangCompiler)
 		message(FATAL_ERROR "swim_add_slang_program(${name}) requires the pinned Slang compiler SDK")
 	endif()
 
 	if(NOT IS_ABSOLUTE "${SWIM_SLANG_PROGRAM_SOURCE}")
-		set(SWIM_SLANG_PROGRAM_SOURCE "${CMAKE_SOURCE_DIR}/${SWIM_SLANG_PROGRAM_SOURCE}")
+		set(SWIM_SLANG_PROGRAM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${SWIM_SLANG_PROGRAM_SOURCE}")
 	endif()
 	if(NOT EXISTS "${SWIM_SLANG_PROGRAM_SOURCE}")
 		message(FATAL_ERROR "Slang source does not exist: ${SWIM_SLANG_PROGRAM_SOURCE}")
@@ -89,7 +89,7 @@ function(swim_add_slang_program name)
 	set(SWIM_SLANG_PROGRAM_INCLUDE_ARGS "")
 	foreach(SWIM_INCLUDE_DIRECTORY IN LISTS SWIM_SLANG_PROGRAM_INCLUDE_DIRECTORIES)
 		if(NOT IS_ABSOLUTE "${SWIM_INCLUDE_DIRECTORY}")
-			set(SWIM_INCLUDE_DIRECTORY "${CMAKE_SOURCE_DIR}/${SWIM_INCLUDE_DIRECTORY}")
+			set(SWIM_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${SWIM_INCLUDE_DIRECTORY}")
 		endif()
 		list(APPEND SWIM_SLANG_PROGRAM_INCLUDE_ARGS -I "${SWIM_INCLUDE_DIRECTORY}")
 	endforeach()
@@ -167,14 +167,103 @@ function(swim_register_runtime_shader name program required)
 	endif()
 endfunction()
 
+# The source manifest of every runtime shader, for the development shader hot reload: one
+# line per program, tab separated: name, source, entry point, include directories and
+# defines (both '|' separated), the build's depfile. Written at the end of the configure
+# step (so programs an application adds after the engine are included) to
+# SWIM_RUNTIME_SHADER_SOURCE_MANIFEST; DevPaths.cfg points the engine at it.
+set(SWIM_RUNTIME_SHADER_SOURCE_MANIFEST "${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeShaderSources.txt"
+	CACHE INTERNAL "Runtime shader source manifest")
+
+function(swim_write_runtime_shader_sources)
+	get_property(lines GLOBAL PROPERTY SWIM_RUNTIME_SHADER_SOURCE_LINES)
+	set(content "")
+	foreach(line IN LISTS lines)
+		string(APPEND content "${line}\n")
+	endforeach()
+	set(path "${SWIM_RUNTIME_SHADER_SOURCE_MANIFEST}")
+	set(previous "")
+	if(EXISTS "${path}")
+		file(READ "${path}" previous)
+	endif()
+	if(NOT previous STREQUAL content)
+		file(WRITE "${path}" "${content}")
+	endif()
+endfunction()
+
+function(swim_record_runtime_shader_source name source entry includes defines depfile)
+	if(NOT IS_ABSOLUTE "${source}")
+		set(source "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+	endif()
+	set(include_list "${SWIM_ENGINE_SOURCE_DIR}/Source/Shaders/Slang")
+	foreach(directory IN LISTS includes)
+		if(NOT IS_ABSOLUTE "${directory}")
+			set(directory "${CMAKE_CURRENT_SOURCE_DIR}/${directory}")
+		endif()
+		list(APPEND include_list "${directory}")
+	endforeach()
+	string(REPLACE ";" "|" include_text "${include_list}")
+	string(REPLACE ";" "|" define_text "${defines}")
+	set_property(GLOBAL APPEND PROPERTY SWIM_RUNTIME_SHADER_SOURCE_LINES
+		"${name}\t${source}\t${entry}\t${include_text}\t${define_text}\t${depfile}")
+	get_property(scheduled GLOBAL PROPERTY SWIM_RUNTIME_SHADER_SOURCES_SCHEDULED)
+	if(NOT scheduled)
+		set_property(GLOBAL PROPERTY SWIM_RUNTIME_SHADER_SOURCES_SCHEDULED TRUE)
+		cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL swim_write_runtime_shader_sources)
+	endif()
+endfunction()
+
 # Gameplay/features: one declaration compiles, registers and deploys both artifacts.
 # REQUIRED is opt-in; optional feature programs do not gate the base renderer.
+# An application that adds the engine with add_subdirectory calls it afterwards from
+# its own CMakeLists (SOURCE relative to that directory): the engine's catalog is
+# already generated then, so the program is staged into the same runtime set, deployed
+# with it, and found by ShaderLibrary by name (<Name>.spv beside the built-ins).
 function(swim_add_runtime_shader name)
 	cmake_parse_arguments(SWIM_RUNTIME_SHADER "REQUIRED" "SOURCE;ENTRY_POINT" "DEFINES;INCLUDE_DIRECTORIES" ${ARGN})
 	if(NOT SWIM_RUNTIME_SHADER_SOURCE)
 		message(FATAL_ERROR "swim_add_runtime_shader(${name}) needs SOURCE")
 	endif()
 	set(program "Swim${name}")
+	if(TARGET SwimRuntimeShaders)
+		if(NOT name MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+			message(FATAL_ERROR "Invalid runtime shader name: ${name}")
+		endif()
+		get_property(names GLOBAL PROPERTY SWIM_RUNTIME_SHADER_NAMES)
+		get_property(late GLOBAL PROPERTY SWIM_LATE_RUNTIME_SHADER_NAMES)
+		if(name IN_LIST names OR name IN_LIST late)
+			message(FATAL_ERROR "Duplicate runtime shader name: ${name}")
+		endif()
+		set_property(GLOBAL APPEND PROPERTY SWIM_LATE_RUNTIME_SHADER_NAMES "${name}")
+		swim_add_slang_program(${program}
+			SOURCE "${SWIM_RUNTIME_SHADER_SOURCE}"
+			PROFILE spirv_1_5
+			ENTRY_POINT "${SWIM_RUNTIME_SHADER_ENTRY_POINT}"
+			INCLUDE_DIRECTORIES "${SWIM_ENGINE_SOURCE_DIR}/Source/Shaders/Slang" ${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}
+			DEFINES ${SWIM_RUNTIME_SHADER_DEFINES}
+		)
+		if(DEFINED SWIM_RUNTIME_SHADER_DIR AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+			set(staged_spv "${SWIM_RUNTIME_SHADER_DIR}/${name}.spv")
+			set(staged_json "${SWIM_RUNTIME_SHADER_DIR}/${name}.reflection.json")
+			add_custom_command(
+				OUTPUT "${staged_spv}" "${staged_json}"
+				COMMAND "${CMAKE_COMMAND}" -E make_directory "${SWIM_RUNTIME_SHADER_DIR}"
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${program}_SPIRV}" "${staged_spv}"
+				COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${${program}_REFLECTION}" "${staged_json}"
+				DEPENDS "${${program}_SPIRV}" "${${program}_REFLECTION}"
+				COMMENT "Staging runtime shader ${name}"
+				VERBATIM
+			)
+			add_custom_target(${program}Stage DEPENDS "${staged_spv}" "${staged_json}")
+			swim_set_solution_folder(${program}Stage "${SWIM_SOLUTION_FOLDER_TOOLS}")
+			add_dependencies(SwimRuntimeShaders ${program}Stage)
+		endif()
+		swim_record_runtime_shader_source("${name}" "${SWIM_RUNTIME_SHADER_SOURCE}" "${SWIM_RUNTIME_SHADER_ENTRY_POINT}"
+			"${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}" "${SWIM_RUNTIME_SHADER_DEFINES}" "${${program}_DEPFILE}")
+		set(${program}_SPIRV "${${program}_SPIRV}" PARENT_SCOPE)
+		set(${program}_REFLECTION "${${program}_REFLECTION}" PARENT_SCOPE)
+		return()
+	endif()
 	set(required "")
 	if(SWIM_RUNTIME_SHADER_REQUIRED)
 		set(required REQUIRED)
@@ -185,9 +274,11 @@ function(swim_add_runtime_shader name)
 		${required}
 		PROFILE spirv_1_5
 		ENTRY_POINT "${SWIM_RUNTIME_SHADER_ENTRY_POINT}"
-		INCLUDE_DIRECTORIES Source/Shaders/Slang ${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}
+		INCLUDE_DIRECTORIES "${SWIM_ENGINE_SOURCE_DIR}/Source/Shaders/Slang" ${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}
 		DEFINES ${SWIM_RUNTIME_SHADER_DEFINES}
 	)
+	swim_record_runtime_shader_source("${name}" "${SWIM_RUNTIME_SHADER_SOURCE}" "${SWIM_RUNTIME_SHADER_ENTRY_POINT}"
+		"${SWIM_RUNTIME_SHADER_INCLUDE_DIRECTORIES}" "${SWIM_RUNTIME_SHADER_DEFINES}" "${${program}_DEPFILE}")
 	set(${program}_SPIRV "${${program}_SPIRV}" PARENT_SCOPE)
 	set(${program}_REFLECTION "${${program}_REFLECTION}" PARENT_SCOPE)
 	set_property(GLOBAL APPEND PROPERTY SWIM_EXTRA_RUNTIME_SHADER_FILES "${${program}_SPIRV}" "${${program}_REFLECTION}")

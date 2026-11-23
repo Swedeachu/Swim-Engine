@@ -25,19 +25,29 @@ endif()
 # the start of every clean/soft build, both of which also refresh the Visual
 # Studio solution. After editing CMake files, re-run a build script (or
 # `cmake --preset windows-vs`) rather than relying on the IDE to regenerate.
-if(CMAKE_GENERATOR MATCHES "^Ninja" OR CMAKE_GENERATOR MATCHES "^Visual Studio ")
-	set(CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL
-		"Swim build scripts configure explicitly; suppress automatic CMake regeneration" FORCE)
+#
+# When the engine is embedded with add_subdirectory(), the top project owns the
+# generator policy, the C runtime and the debug ABI below; the engine inherits them.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+	if(CMAKE_GENERATOR MATCHES "^Ninja" OR CMAKE_GENERATOR MATCHES "^Visual Studio ")
+		set(CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL
+			"Swim build scripts configure explicitly; suppress automatic CMake regeneration" FORCE)
+	endif()
+
+	# The legacy x64 project used /MT in both Debug and Release. Set this before
+	# project()/dependencies so every CMake-built static dependency shares the ABI.
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+	set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+		"$<$<CONFIG:Debug,Release,RelWithDebInfo>:ProgramDatabase>"
+	)
 endif()
 
-# The legacy x64 project used /MT in both Debug and Release. Set this before
-# project()/dependencies so every CMake-built static dependency shares the ABI.
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
-set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
-	"$<$<CONFIG:Debug,Release,RelWithDebInfo>:ProgramDatabase>"
-)
-
 project(SwimEngine C CXX)
+
+# Engine helper functions (shader compilation, runtime shader deployment) resolve
+# engine files through these, so they also work when called from an embedding project.
+set(SWIM_ENGINE_SOURCE_DIR "${PROJECT_SOURCE_DIR}" CACHE INTERNAL "Swim Engine source root")
+set(SWIM_ENGINE_BINARY_DIR "${PROJECT_BINARY_DIR}" CACHE INTERNAL "Swim Engine binary root")
 
 include(cmake/SolutionLayout.cmake)
 include(cmake/Formatting.cmake)
@@ -45,6 +55,7 @@ include(cmake/Tests.cmake)
 include(cmake/ArchiveBoundary.cmake)
 
 option(SWIM_WARNINGS_AS_ERRORS "Treat Swim Engine warnings as errors" OFF)
+set(SWIM_DEV_AUDIO_ROOT "" CACHE PATH "Development sound folder, mounted read-only as devaudio:/ (written to DevPaths.cfg)")
 option(SWIM_ENABLE_PCH "Use Swim Engine's existing PCH.h" ON)
 option(SWIM_OFFLINE_DEPENDENCY_STUBS "Configure without downloading dependencies (build-layout verification only)" OFF)
 
@@ -52,16 +63,20 @@ option(SWIM_OFFLINE_DEPENDENCY_STUBS "Configure without downloading dependencies
 # soft rebuild can reuse exactly the dependency revisions already downloaded.
 # The clean-build scripts remove this directory deliberately before configuring.
 if(NOT DEFINED CPM_SOURCE_CACHE OR CPM_SOURCE_CACHE STREQUAL "")
-	set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cache/cpm" CACHE PATH
+	set(CPM_SOURCE_CACHE "${PROJECT_SOURCE_DIR}/.cache/cpm" CACHE PATH
 		"Shared source cache for CPM-managed Swim Engine dependencies")
 endif()
 set(CPM_USE_NAMED_CACHE_DIRECTORIES ON CACHE BOOL
 	"Keep CPM dependency cache directories human-readable" FORCE)
 
-# The SwimEngine executable (runtime + sandbox game). Phase 23 made it cross-platform:
-# it renders only through the modern RHI (Vulkan) and builds on Windows and Linux.
-# Turn it off for foundation-only configures (module tests without the runtime).
-option(SWIM_BUILD_ENGINE "Build the SwimEngine runtime executable (Source/Engine + Source/Game)" ON)
+# The engine runtime is the static library Swim::Engine (Source/Engine); the sandbox
+# game (Source/Game + main.cpp) is the SwimEngine executable that links it. Phase 23 made
+# both cross-platform: they render only through the modern RHI (Vulkan) and build on
+# Windows and Linux. Turn SWIM_BUILD_ENGINE off for foundation-only configures (module
+# tests without the runtime). The sandbox, examples and tests default on only when the
+# engine is the top project.
+option(SWIM_BUILD_ENGINE "Build the Swim::Engine runtime library (Source/Engine)" ON)
+option(SWIM_BUILD_SANDBOX "Build the SwimEngine sandbox executable (Source/Game)" ${PROJECT_IS_TOP_LEVEL})
 if(WIN32 AND MSVC)
 	set(SWIM_ENABLE_PHYSX_BACKEND_DEFAULT ON)
 else()
@@ -69,13 +84,13 @@ else()
 endif()
 option(SWIM_ENABLE_PHYSX_BACKEND "Compile the PhysX physics backend" ${SWIM_ENABLE_PHYSX_BACKEND_DEFAULT})
 option(SWIM_ENABLE_JOLT_BACKEND "Compile the Jolt physics backend" ON)
-option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ON)
-option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ON)
+option(SWIM_BUILD_PLATFORM_EXAMPLE "Build the cross-platform HelloWindow platform smoke test" ${PROJECT_IS_TOP_LEVEL})
+option(SWIM_BUILD_FOUNDATION_TESTS "Build platform/input foundation tests" ${PROJECT_IS_TOP_LEVEL})
 option(SWIM_BUILD_ASSET_COMPILER "Build offline asset compiler/import modules" ON)
 option(SWIM_BUILD_SHADER_COMPILER "Build Slang shader compiler/reflection tooling" ON)
 option(SWIM_ENABLE_VULKAN_RHI "Compile the modern Vulkan RHI backend" ON)
 option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)
-option(SWIM_DEPLOY_ASSETS "Copy Assets/ next to SwimEngine after each build (packaged runs); development builds read the repository's Assets/ directly" OFF)
+option(SWIM_DEPLOY_ASSETS "Copy the engine Assets/ next to each engine executable after each build (packaged runs); development builds read the repository's Assets/ directly" OFF)
 
 if(SWIM_BUILD_ENGINE AND NOT SWIM_ENABLE_PHYSX_BACKEND AND NOT SWIM_ENABLE_JOLT_BACKEND)
 	message(FATAL_ERROR
@@ -95,7 +110,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # release-style MSVC CRT/STL ABI settings. Apply those ABI switches to CMake
 # dependencies too, otherwise a Debug-built C++ static library can emit
 # _ITERATOR_DEBUG_LEVEL=2 mismatch records while Swim Engine expects 0.
-if(MSVC)
+if(MSVC AND PROJECT_IS_TOP_LEVEL)
 	add_compile_definitions(
 		$<$<CONFIG:Debug>:NDEBUG>
 		$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:_ITERATOR_DEBUG_LEVEL=0>
@@ -105,7 +120,7 @@ if(MSVC)
 	)
 endif()
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if(PROJECT_IS_TOP_LEVEL AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 	set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
@@ -130,6 +145,8 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/enkiTS")
 include(cmake/JobDependencies.cmake)
 set(CMAKE_FOLDER "${SWIM_SAVED_CMAKE_FOLDER}")
 unset(SWIM_SAVED_CMAKE_FOLDER)
+
+include(cmake/AudioDependencies.cmake)
 
 set(SWIM_SAVED_CMAKE_FOLDER "${CMAKE_FOLDER}")
 set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3")
@@ -175,29 +192,31 @@ unset(SWIM_SAVED_CMAKE_FOLDER)
 #     that module's sources, exactly mirroring what the module's own
 #     target_link_libraries() used to declare.
 file(GLOB_RECURSE SWIM_PLATFORM_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Platform/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Platform/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Platform/*.h
 )
 
 # In-process commands are independent of platform input, file IO, and Machine.
 set(SWIM_COMMANDS_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Commands/CommandRegistry.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Commands/ConsoleVariable.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Commands/ConsoleVariable.cpp
 )
 
 file(GLOB_RECURSE SWIM_INPUT_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Input/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Input/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Input/*.h
 )
 
 file(GLOB_RECURSE SWIM_MEMORY_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Memory/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Memory/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Memory/*.h
 )
 
 file(GLOB_RECURSE SWIM_ASSET_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Assets/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Assets/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Assets/*.h
 )
 
 # Source-format importers are tooling dependencies, not runtime asset
@@ -213,14 +232,14 @@ endif()
 
 if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	file(GLOB_RECURSE SWIM_ASSET_COMPILER_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/*.h
+		${PROJECT_SOURCE_DIR}/Source/Tools/AssetCompiler/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Tools/AssetCompiler/*.h
 	)
 
 	# The asset compiler is one module with two build outputs: a library every
 	# consumer links, and the thin standalone cooker front end under Cli/. Only
 	# the front end owns a main(), so it must stay out of the library archive.
-	set(SWIM_ASSET_COOKER_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp)
+	set(SWIM_ASSET_COOKER_SOURCES ${PROJECT_SOURCE_DIR}/Source/Tools/AssetCompiler/Cli/AssetCookerMain.cpp)
 	list(FILTER SWIM_ASSET_COMPILER_SOURCES EXCLUDE REGEX "/Source/Tools/AssetCompiler/Cli/")
 
 	# SwimAssets is no longer its own target (see "Engine module source
@@ -232,10 +251,10 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 	# duplicate-symbol link error within the same binary.
 	add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})
 	add_library(Swim::AssetCompiler ALIAS SwimAssetCompiler)
-	target_include_directories(SwimAssetCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimAssetCompiler PUBLIC ${PROJECT_SOURCE_DIR}/Source)
 	target_link_libraries(SwimAssetCompiler PRIVATE Swim::AssetCompilerDependencies)
 	target_compile_features(SwimAssetCompiler PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})
 	swim_set_solution_folder(SwimAssetCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
 
 	if(MSVC)
@@ -246,9 +265,9 @@ if(SWIM_BUILD_ASSET_COMPILER AND SWIM_ASSET_COMPILER_DEPENDENCIES_AVAILABLE)
 
 	add_executable(SwimAssetCooker ${SWIM_ASSET_COOKER_SOURCES})
 	target_link_libraries(SwimAssetCooker PRIVATE Swim::AssetCompiler)
-	target_include_directories(SwimAssetCooker PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimAssetCooker PRIVATE ${PROJECT_SOURCE_DIR}/Source)
 	target_compile_features(SwimAssetCooker PRIVATE cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_COOKER_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES ${SWIM_ASSET_COOKER_SOURCES})
 	swim_set_solution_folder(SwimAssetCooker "${SWIM_SOLUTION_FOLDER_TOOLS}")
 endif()
 
@@ -265,19 +284,19 @@ endif()
 
 if(SWIM_BUILD_SHADER_COMPILER AND SWIM_SHADER_COMPILER_DEPENDENCIES_AVAILABLE)
 	file(GLOB_RECURSE SWIM_SHADER_COMPILER_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.h
+		${PROJECT_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Tools/ShaderCompiler/*.h
 	)
 
 	add_library(SwimShaderCompiler STATIC ${SWIM_SHADER_COMPILER_SOURCES})
 	add_library(Swim::ShaderCompiler ALIAS SwimShaderCompiler)
-	target_include_directories(SwimShaderCompiler PUBLIC ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimShaderCompiler PUBLIC ${PROJECT_SOURCE_DIR}/Source)
 	# Swim::Rhi was a header-only interface target providing nothing beyond the
-	# ${CMAKE_SOURCE_DIR}/Source include dir already set above, so it no longer
+	# ${PROJECT_SOURCE_DIR}/Source include dir already set above, so it no longer
 	# needs to exist as its own target (see "Engine module source discovery").
 	target_link_libraries(SwimShaderCompiler PRIVATE simdjson::simdjson)
 	target_compile_features(SwimShaderCompiler PUBLIC cxx_std_20)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_SHADER_COMPILER_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES ${SWIM_SHADER_COMPILER_SOURCES})
 	swim_set_solution_folder(SwimShaderCompiler "${SWIM_SOLUTION_FOLDER_TOOLS}")
 
 	if(MSVC)
@@ -526,6 +545,12 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(CameraLens SOURCE Source/Shaders/Slang/Features/CameraLens.slang)
 	swim_add_runtime_shader(FilmSensor SOURCE Source/Shaders/Slang/Features/FilmSensor.slang)
 	swim_add_runtime_shader(GravitationalLensing SOURCE Source/Shaders/Slang/Features/GravitationalLensing.slang)
+	# Non-temporal anti-aliasing and sharpening (RenderSettings::AntiAliasing / Sharpening).
+	swim_add_runtime_shader(ScreenAaFxaa SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=0)
+	swim_add_runtime_shader(ScreenAaEdges SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=1)
+	swim_add_runtime_shader(ScreenAaWeights SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=2)
+	swim_add_runtime_shader(ScreenAaBlend SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=3)
+	swim_add_runtime_shader(ScreenSharpen SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=4)
 	# Back-face depth (screen-space reflection thickness) from the Forward+ source.
 	swim_add_runtime_shader(ForwardBackDepth SOURCE Source/Shaders/Slang/ForwardPlus/ClusteredForward.slang DEFINES FORWARD_DEPTH_ONLY=1 FORWARD_BACK_DEPTH=1)
 	swim_add_runtime_shader(VolumetricCloudsEnvironment SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_ENVIRONMENT=1)
@@ -911,50 +936,50 @@ endif()
 # includes a native backend or scene/ECS header; only Residency/ reaches Assets,
 # IO and Jobs.
 file(GLOB_RECURSE SWIM_RENDER_GRAPH_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RenderGraph/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Resources/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Geometry/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuScene/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Visibility/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Materials/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/GpuMaterials/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Environment/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Lights/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ClusteredLighting/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Shadows/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ForwardPlus/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/PostProcess/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Temporal/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/ScreenSpace/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Particles/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Skinning/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Reflections/*.h
 )
 
 # EnTT -> GPU Scene extraction (Scene/RenderExtraction, excluding its Runtime/
 # adapters, which need the full Transform/Scene runtime). SwimEngine compiles it
 # through its own glob; SwimTests adds it wherever EnTT is available.
 file(GLOB SWIM_SCENE_RENDER_EXTRACTION_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Scene/RenderExtraction/*.h
 )
 
 # CPU animation runtime (Systems/Animation): skeletons, clip sampling, pose
@@ -962,8 +987,8 @@ file(GLOB SWIM_SCENE_RENDER_EXTRACTION_SOURCES
 # It reaches only Assets' plain asset structs and Jobs; nothing renderer- or
 # scene-specific. SwimEngine compiles it through its own Source/Engine glob.
 file(GLOB_RECURSE SWIM_ANIMATION_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Animation/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Animation/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Animation/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Animation/*.h
 )
 
 # Item 79 text/UI runtime. Third-party headers stay in Text implementation
@@ -976,46 +1001,46 @@ set(SWIM_RENDER_UI_SOURCES "")
 set(SWIM_UI_INPUT_SOURCES "")
 if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 	file(GLOB_RECURSE SWIM_TEXT_UI_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Text/*.h
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UI/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Text/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Text/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/UI/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/UI/*.h
 	)
 	file(GLOB_RECURSE SWIM_RENDER_UI_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/UiRendering/*.h
 	)
 	file(GLOB_RECURSE SWIM_UI_INPUT_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/UiInput/*.h
 	)
 endif()
 
 # Residency/ connects Assets + async IO + Jobs to the GPU residency layers, so it
 # is compiled only where those foundation sources are (never with offline stubs).
 file(GLOB_RECURSE SWIM_RENDER_RESIDENCY_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/Residency/*.h
 )
 
 file(GLOB_RECURSE SWIM_JOB_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/Jobs/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/Jobs/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/Jobs/*.h
 )
 
 file(GLOB_RECURSE SWIM_IO_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/IO/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/IO/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/IO/*.h
 )
 
 set(SWIM_CORE_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/EngineConfig.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/EngineConfig.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/EngineState.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/EngineConfig.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/EngineConfig.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/EngineState.h
 )
 
 # Swim::Rhi used to be a header-only INTERFACE target that existed only to
-# carry these three files' include path -- ${CMAKE_SOURCE_DIR}/Source, which
+# carry these three files' include path -- ${PROJECT_SOURCE_DIR}/Source, which
 # every consumer below already sets directly. It is not re-declared: the RHI
 # contract headers are picked up automatically wherever Source/Engine/... is
 # globbed (SwimEngine's own source list, for example), same as any other
@@ -1032,8 +1057,8 @@ if(SWIM_ENABLE_VULKAN_RHI AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	unset(SWIM_SAVED_CMAKE_FOLDER)
 
 	file(GLOB_RECURSE SWIM_VULKAN_RHI_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Renderer/RHI/Backends/Vulkan/*.h
 	)
 	set(SWIM_VULKAN_RHI_AVAILABLE TRUE)
 
@@ -1062,8 +1087,8 @@ endif()
 set(SWIM_PHYSICS_SOURCES "")
 if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	file(GLOB_RECURSE SWIM_PHYSICS_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/*.h
 	)
 	list(FILTER SWIM_PHYSICS_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/Backends/")
 endif()
@@ -1082,8 +1107,8 @@ if(SWIM_ENABLE_JOLT_BACKEND AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
 	unset(SWIM_SAVED_CMAKE_FOLDER)
 
 	file(GLOB_RECURSE SWIM_JOLT_BACKEND_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/Jolt/*.h
 	)
 	set(SWIM_JOLT_BACKEND_AVAILABLE TRUE)
 	# Whichever target compiles ${SWIM_JOLT_BACKEND_SOURCES} links Swim::Jolt
@@ -1100,22 +1125,22 @@ endif()
 if(SWIM_BUILD_PLATFORM_EXAMPLE)
 	add_executable(SwimHelloWindow EXCLUDE_FROM_ALL Source/Examples/HelloWindow.cpp ${SWIM_PLATFORM_SOURCES})
 	target_link_libraries(SwimHelloWindow PRIVATE ${SWIM_SDL3_TARGET})
-	target_include_directories(SwimHelloWindow PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimHelloWindow PRIVATE ${PROJECT_SOURCE_DIR}/Source)
 	target_compile_definitions(SwimHelloWindow PRIVATE
 		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
 		$<$<PLATFORM_ID:Windows>:NOMINMAX>
 	)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES Source/Examples/HelloWindow.cpp ${SWIM_PLATFORM_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES Source/Examples/HelloWindow.cpp ${SWIM_PLATFORM_SOURCES})
 	swim_set_solution_folder(SwimHelloWindow "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 
 	add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL Source/Examples/HeadlessPlatform.cpp ${SWIM_PLATFORM_SOURCES})
 	target_link_libraries(SwimHeadlessPlatform PRIVATE ${SWIM_SDL3_TARGET})
-	target_include_directories(SwimHeadlessPlatform PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimHeadlessPlatform PRIVATE ${PROJECT_SOURCE_DIR}/Source)
 	target_compile_definitions(SwimHeadlessPlatform PRIVATE
 		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
 		$<$<PLATFORM_ID:Windows>:NOMINMAX>
 	)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES Source/Examples/HeadlessPlatform.cpp ${SWIM_PLATFORM_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES Source/Examples/HeadlessPlatform.cpp ${SWIM_PLATFORM_SOURCES})
 	swim_set_solution_folder(SwimHeadlessPlatform "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
@@ -1128,12 +1153,12 @@ if(SWIM_BUILD_FOUNDATION_TESTS)
 		${SWIM_ASSET_SOURCES}
 	)
 	target_link_libraries(SwimHeadlessCoreAssets PRIVATE Swim::Mimalloc Swim::EnkiTS)
-	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimHeadlessCoreAssets PRIVATE ${PROJECT_SOURCE_DIR}/Source)
 	target_compile_definitions(SwimHeadlessCoreAssets PRIVATE
 		SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
 		SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
 	)
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES
 		Source/Examples/HeadlessCoreAssets.cpp
 		${SWIM_CORE_SOURCES}
 		${SWIM_MEMORY_SOURCES}
@@ -1170,8 +1195,8 @@ unset(SWIM_SAVED_CMAKE_FOLDER)
 
 if(SWIM_ENABLE_PHYSX_BACKEND)
 	file(GLOB_RECURSE SWIM_PHYSX_BACKEND_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.cpp
-		${CMAKE_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.h
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.cpp
+		${PROJECT_SOURCE_DIR}/Source/Engine/Systems/Physics/Backends/PhysX/*.h
 	)
 	set(SWIM_PHYSX_BACKEND_AVAILABLE TRUE)
 	# Whichever target compiles ${SWIM_PHYSX_BACKEND_SOURCES} links Swim::PhysX
@@ -1206,9 +1231,9 @@ endif()
 # needs to be added directly to SwimEngine's own sources instead is decided
 # below, once we know whether AssetCompiler will actually be linked.
 file(GLOB_RECURSE SWIM_ENGINE_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Engine/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Engine/*.h
-	${CMAKE_SOURCE_DIR}/Source/Engine/*.hpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Engine/*.h
+	${PROJECT_SOURCE_DIR}/Source/Engine/*.hpp
 )
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Physics/")
 list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")
@@ -1232,58 +1257,39 @@ endif()
 
 # The sandbox game: scenes, behaviours and UI panels (Source/Game).
 file(GLOB_RECURSE SWIM_GAME_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Game/*.cpp
-	${CMAKE_SOURCE_DIR}/Source/Game/*.h
-	${CMAKE_SOURCE_DIR}/Source/Game/*.hpp
+	${PROJECT_SOURCE_DIR}/Source/Game/*.cpp
+	${PROJECT_SOURCE_DIR}/Source/Game/*.h
+	${PROJECT_SOURCE_DIR}/Source/Game/*.hpp
 )
 
 file(GLOB_RECURSE SWIM_SHADER_SOURCES
-	${CMAKE_SOURCE_DIR}/Source/Shaders/*.slang
+	${PROJECT_SOURCE_DIR}/Source/Shaders/*.slang
 )
 
 set_source_files_properties(${SWIM_SHADER_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
 
-add_executable(SwimEngine
-	Source/main.cpp
+add_library(SwimEngineRuntime STATIC
 	${SWIM_ENGINE_SOURCES}
-	${SWIM_GAME_SOURCES}
 	${SWIM_SHADER_SOURCES}
 )
-
-# The final process owns the general allocator override. On Windows Swim uses
-# the static /MT CRT, matching mimalloc's static override contract; the object
-# target is preferred over an archive so malloc/free/new/delete resolve here.
-if(SWIM_MEMORY_USE_MIMALLOC AND TARGET mimalloc-obj)
-	target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)
-endif()
-
-set_property(TARGET SwimEngine PROPERTY EXPORT_COMPILE_COMMANDS ON)
-set_target_properties(SwimEngine PROPERTIES
-	OUTPUT_NAME "Swim Engine"
-)
+add_library(Swim::Engine ALIAS SwimEngineRuntime)
+swim_set_solution_folder(SwimEngineRuntime "Engine")
+set_property(TARGET SwimEngineRuntime PROPERTY EXPORT_COMPILE_COMMANDS ON)
+target_compile_features(SwimEngineRuntime PUBLIC cxx_std_20)
 
 # Exactly mirror the physical Source/... directory tree in generated Visual
 # Studio filters, matching Tungsten's generated-solution workflow.
-source_group(TREE ${CMAKE_SOURCE_DIR} FILES
-	${CMAKE_SOURCE_DIR}/Source/main.cpp
+source_group(TREE ${PROJECT_SOURCE_DIR} FILES
 	${SWIM_ENGINE_SOURCES}
-	${SWIM_GAME_SOURCES}
 	${SWIM_SHADER_SOURCES}
 )
 
-set_property(
-	DIRECTORY ${CMAKE_SOURCE_DIR}
-	PROPERTY VS_STARTUP_PROJECT SwimEngine
-)
-
-set_property(
-	TARGET SwimEngine
-	PROPERTY VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-
-target_include_directories(SwimEngine PRIVATE ${CMAKE_BINARY_DIR}/Generated
-	${CMAKE_SOURCE_DIR}/Source
-	${CMAKE_SOURCE_DIR}/Source/Engine/Utility
+target_include_directories(SwimEngineRuntime
+	PUBLIC
+		${PROJECT_SOURCE_DIR}/Source
+	PRIVATE
+		${PROJECT_BINARY_DIR}/Generated
+		${PROJECT_SOURCE_DIR}/Source/Engine/Utility
 )
 
 set(SWIM_DEV_ASSET_AUTOCOOK_ENABLED OFF)
@@ -1293,145 +1299,218 @@ endif()
 
 # Assets was excluded from SWIM_ENGINE_SOURCES above specifically to avoid a
 # duplicate-symbol link error against Swim::AssetCompiler's embedded copy.
-# When AssetCompiler is not going to be linked, SwimEngine needs its own
+# When AssetCompiler is not going to be linked, the runtime needs its own
 # compile of Assets instead.
 if(NOT SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
-	target_sources(SwimEngine PRIVATE ${SWIM_ASSET_SOURCES})
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_ASSET_SOURCES})
+	target_sources(SwimEngineRuntime PRIVATE ${SWIM_ASSET_SOURCES})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES ${SWIM_ASSET_SOURCES})
 endif()
 
-target_compile_definitions(SwimEngine PRIVATE
-	_CONSOLE
-	UNICODE
-	_UNICODE
-	_CRT_SECURE_NO_WARNINGS
-	$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
-	$<$<PLATFORM_ID:Windows>:NOMINMAX>
-	$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
-	$<$<CONFIG:Debug>:_SWIM_DEBUG>
-	$<$<AND:$<CONFIG:Debug>,$<CXX_COMPILER_ID:MSVC>>:_ITERATOR_DEBUG_LEVEL=0>
-	SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
-	$<$<NOT:$<BOOL:${SWIM_DEPLOY_ASSETS}>>:SWIM_DEVELOPMENT_ASSET_ROOT="${CMAKE_SOURCE_DIR}/Assets">
-	SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
-	SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
-	# Module-level compile definitions that used to be PRIVATE to the module's
-	# own now-retired target (SwimMemory, SwimJobs, SwimRhiVulkan); their
-	# sources compile as part of SwimEngine now, so the definitions move here.
-	SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
-	SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
+# Feature switches are public: engine headers and code that embeds the engine must
+# see the same configuration the runtime was compiled with.
+target_compile_definitions(SwimEngineRuntime
+	PUBLIC
+		$<$<CONFIG:Debug>:_SWIM_DEBUG>
+		SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
+		SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
+		SWIM_MEMORY_USE_MIMALLOC=$<BOOL:${SWIM_MEMORY_USE_MIMALLOC}>
+		SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>
+	PRIVATE
+		UNICODE
+		_UNICODE
+		_CRT_SECURE_NO_WARNINGS
+		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+		$<$<PLATFORM_ID:Windows>:NOMINMAX>
+		$<$<PLATFORM_ID:Windows>:VK_USE_PLATFORM_WIN32_KHR>
+		SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>
+		$<$<NOT:$<BOOL:${SWIM_DEPLOY_ASSETS}>>:SWIM_DEVELOPMENT_ASSET_ROOT="${PROJECT_SOURCE_DIR}/Assets">
 )
 if(SWIM_VULKAN_RHI_AVAILABLE)
-	target_compile_definitions(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
+	target_compile_definitions(SwimEngineRuntime PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS})
 endif()
 
-if(SWIM_ENABLE_PCH)
-	target_sources(SwimEngine PRIVATE ${CMAKE_SOURCE_DIR}/Source/Engine/Utility/PCH.cpp)
-	target_precompile_headers(SwimEngine PRIVATE
-		"$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/Source/Engine/Utility/PCH.h>"
-	)
-endif()
-
-if(MSVC)
-	target_compile_options(SwimEngine PRIVATE
-		/MP
-		/utf-8
-		/W3
-		/sdl
-		/permissive-
-		/external:anglebrackets
-		/external:W0
-		/wd4100
-		/wd4244
-		/wd4702
-		"$<$<CONFIG:Debug>:/U_DEBUG>"
-		"$<$<CONFIG:Release>:/Oi>"
-		"$<$<CONFIG:Release>:/Gy>"
-	)
-
-	if(SWIM_ENABLE_PCH AND CMAKE_GENERATOR MATCHES "^Visual Studio ")
-		target_compile_options(SwimEngine PRIVATE
-			"$<$<COMPILE_LANGUAGE:CXX>:/Fp$(IntDir)cmake_pch.pch>"
+# Compile options shared by the runtime library and the sandbox executable.
+function(swim_apply_engine_compile_options target)
+	if(MSVC)
+		target_compile_options(${target} PRIVATE
+			/MP
+			/utf-8
+			/W3
+			/sdl
+			/permissive-
+			/external:anglebrackets
+			/external:W0
+			/wd4100
+			/wd4244
+			/wd4702
+			"$<$<CONFIG:Release>:/Oi>"
+			"$<$<CONFIG:Release>:/Gy>"
+		)
+		if(SWIM_ENABLE_PCH AND CMAKE_GENERATOR MATCHES "^Visual Studio ")
+			target_compile_options(${target} PRIVATE
+				"$<$<COMPILE_LANGUAGE:CXX>:/Fp$(IntDir)cmake_pch.pch>"
+			)
+		endif()
+		if(SWIM_WARNINGS_AS_ERRORS)
+			target_compile_options(${target} PRIVATE /WX)
+		endif()
+	else()
+		target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter)
+		if(SWIM_WARNINGS_AS_ERRORS)
+			target_compile_options(${target} PRIVATE -Werror)
+		endif()
+	endif()
+	if(SWIM_ENABLE_PCH)
+		target_precompile_headers(${target} PRIVATE
+			"$<$<COMPILE_LANGUAGE:CXX>:${SWIM_ENGINE_SOURCE_DIR}/Source/Engine/Utility/PCH.h>"
 		)
 	endif()
+endfunction()
 
-	target_link_options(SwimEngine PRIVATE
-		/SUBSYSTEM:CONSOLE
-		"$<$<CONFIG:Release>:/DEBUG:FULL>"
-		"$<$<CONFIG:Release>:/OPT:REF>"
-		"$<$<CONFIG:Release>:/OPT:ICF>"
-	)
-
-	if(SWIM_WARNINGS_AS_ERRORS)
-		target_compile_options(SwimEngine PRIVATE /WX)
-	endif()
-else()
-	target_compile_options(SwimEngine PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter)
-	if(SWIM_WARNINGS_AS_ERRORS)
-		target_compile_options(SwimEngine PRIVATE -Werror)
-	endif()
+swim_apply_engine_compile_options(SwimEngineRuntime)
+if(SWIM_ENABLE_PCH)
+	target_sources(SwimEngineRuntime PRIVATE ${PROJECT_SOURCE_DIR}/Source/Engine/Utility/PCH.cpp)
 endif()
 
 if(SWIM_DEV_ASSET_AUTOCOOK_ENABLED)
-	target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::AssetCompiler)
 endif()
 
 # The runtime ShaderLibrary reads Slang reflection sidecars through the shader
 # tool library (reflection JSON -> RHI program interface); Slang itself is not linked.
 if(TARGET SwimShaderCompiler)
-	target_link_libraries(SwimEngine PRIVATE Swim::ShaderCompiler)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::ShaderCompiler)
 endif()
 
-# Third-party dependencies that used to be PRIVATE to a module's own
-# now-retired target (SDL3/Platform, mimalloc/Memory, enkiTS/Jobs) move
-# directly onto SwimEngine, since that module's sources compile as part of
-# SwimEngine's own translation units now. Swim::Core/Memory/Assets/Jobs/IO/
-# Platform/Input/Commands/Physics no longer exist as separate targets to link.
+# glm, EnTT and spdlog appear in public engine headers. Everything else stays private;
+# CMake still carries those static archives to the final link.
 find_package(Threads REQUIRED)
-target_link_libraries(SwimEngine PRIVATE
-	${SWIM_SDL3_TARGET}
-	Swim::Mimalloc
-	Swim::EnkiTS
-	spdlog::spdlog
-	glm::glm
-	EnTT::EnTT
-	Threads::Threads
+target_link_libraries(SwimEngineRuntime
+	PUBLIC
+		glm::glm
+		EnTT::EnTT
+		spdlog::spdlog
+	PRIVATE
+		${SWIM_SDL3_TARGET}
+		Swim::Mimalloc
+		Swim::EnkiTS
+		Threads::Threads
 )
 
+if(SWIM_AUDIO_AVAILABLE)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::Miniaudio)
+	target_compile_definitions(SwimEngineRuntime PRIVATE SWIM_AUDIO_MINIAUDIO=1)
+endif()
+
 if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
-	target_link_libraries(SwimEngine PRIVATE Swim::TextDependencies)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::TextDependencies)
 endif()
 
 if(SWIM_VULKAN_RHI_AVAILABLE)
-	target_link_libraries(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
+	target_link_libraries(SwimEngineRuntime PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})
 endif()
 if(SWIM_PHYSX_BACKEND_AVAILABLE)
-	target_link_libraries(SwimEngine PRIVATE Swim::PhysX)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::PhysX)
 	if(TARGET SwimPhysXBuild)
-		add_dependencies(SwimEngine SwimPhysXBuild)
+		add_dependencies(SwimEngineRuntime SwimPhysXBuild)
 	endif()
 endif()
 if(SWIM_JOLT_BACKEND_AVAILABLE)
-	target_link_libraries(SwimEngine PRIVATE Swim::Jolt)
+	target_link_libraries(SwimEngineRuntime PRIVATE Swim::Jolt)
 endif()
 
-# Runtime shaders (Shaders/Runtime next to the executable). The UI fonts are assets
-# (Assets/Fonts) and come with the asset root like every other asset.
+# Runtime shaders: the engine's staged set (Generated/Shaders/RuntimeSet) and the
+# generated catalog header ShaderLibrary compiles against.
 include(cmake/Shaders.cmake)
-swim_configure_shaders(SwimEngine)
+swim_define_runtime_shader_set()
 
-if(NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
-	# Loose development assets: the engine reads the repository's Assets/ folder directly
+# Prepares an executable that hosts the engine: the process-wide allocator override,
+# the runtime shader set next to the executable and, for packaged runs, the engine
+# assets. Call it once for every executable that links Swim::Engine.
+function(swim_configure_engine_executable target)
+	# The final process owns the general allocator override. On Windows Swim uses
+	# the static /MT CRT, matching mimalloc's static override contract; the object
+	# target is preferred over an archive so malloc/free/new/delete resolve here.
+	if(TARGET mimalloc-obj AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS)
+		target_sources(${target} PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)
+	endif()
+
+	swim_configure_shaders(${target})
+
+	# Machine-specific development paths (Key=Value) next to the executable; the engine
+	# reads them at startup (Engine/Platform/DevPaths.h). Never shipped.
+	if(NOT SWIM_DEPLOY_ASSETS)
+		set(dev_paths "DevAudioRoot=${SWIM_DEV_AUDIO_ROOT}\n")
+		if(TARGET SwimSlangCompiler)
+			string(APPEND dev_paths "SlangCompiler=$<TARGET_FILE:SwimSlangCompiler>\nShaderSources=${SWIM_RUNTIME_SHADER_SOURCE_MANIFEST}\n")
+		endif()
+		file(GENERATE OUTPUT "$<TARGET_FILE_DIR:${target}>/DevPaths.cfg" CONTENT "${dev_paths}")
+	endif()
+
+	# Loose development assets: the engine reads its repository Assets/ folder directly
 	# (SWIM_DEVELOPMENT_ASSET_ROOT) and cooks into Assets/Cooked there, so nothing is
 	# copied. SWIM_DEPLOY_ASSETS copies them next to the executable for a packaged run.
-	if(SWIM_DEPLOY_ASSETS AND EXISTS "${CMAKE_SOURCE_DIR}/Assets")
-		add_custom_command(TARGET SwimEngine POST_BUILD
-			COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_FILE_DIR:SwimEngine>/Assets"
+	if(SWIM_DEPLOY_ASSETS AND NOT SWIM_OFFLINE_DEPENDENCY_STUBS AND EXISTS "${SWIM_ENGINE_SOURCE_DIR}/Assets")
+		add_custom_command(TARGET ${target} POST_BUILD
+			COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_FILE_DIR:${target}>/Assets"
 			COMMAND "${CMAKE_COMMAND}" -E copy_directory
-				"${CMAKE_SOURCE_DIR}/Assets"
-				"$<TARGET_FILE_DIR:SwimEngine>/Assets"
+				"${SWIM_ENGINE_SOURCE_DIR}/Assets"
+				"$<TARGET_FILE_DIR:${target}>/Assets"
 			VERBATIM
 		)
 	endif()
+endfunction()
+
+if(SWIM_BUILD_SANDBOX)
+	# The sandbox's own programs, declared the way an application embedding the engine
+	# declares them (after the engine's runtime set exists).
+	swim_add_runtime_shader(BoxFieldGenerate SOURCE Source/Game/Shaders/BoxFieldCompute.slang DEFINES BOX_GENERATE=1)
+	swim_add_runtime_shader(BoxFieldReset SOURCE Source/Game/Shaders/BoxFieldCompute.slang DEFINES BOX_RESET=1)
+	swim_add_runtime_shader(BoxFieldCull SOURCE Source/Game/Shaders/BoxFieldCompute.slang)
+	swim_add_runtime_shader(BoxFieldLateCull SOURCE Source/Game/Shaders/BoxFieldCompute.slang DEFINES BOX_LATE=1)
+	swim_add_runtime_shader(BoxField SOURCE Source/Game/Shaders/BoxField.slang)
+	swim_add_runtime_shader(BoxFieldDepth SOURCE Source/Game/Shaders/BoxField.slang DEFINES BOX_DEPTH_ONLY=1)
+	swim_add_runtime_shader(BoxFieldShadow SOURCE Source/Game/Shaders/BoxField.slang DEFINES BOX_SHADOW=1)
+	add_executable(SwimEngine
+		Source/main.cpp
+		${SWIM_GAME_SOURCES}
+	)
+	target_link_libraries(SwimEngine PRIVATE Swim::Engine)
+	set_property(TARGET SwimEngine PROPERTY EXPORT_COMPILE_COMMANDS ON)
+	set_target_properties(SwimEngine PROPERTIES
+		OUTPUT_NAME "Swim Engine"
+	)
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES
+		${PROJECT_SOURCE_DIR}/Source/main.cpp
+		${SWIM_GAME_SOURCES}
+	)
+	set_property(
+		DIRECTORY ${PROJECT_SOURCE_DIR}
+		PROPERTY VS_STARTUP_PROJECT SwimEngine
+	)
+	set_property(
+		TARGET SwimEngine
+		PROPERTY VS_DEBUGGER_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+	)
+	target_include_directories(SwimEngine PRIVATE ${PROJECT_SOURCE_DIR}/Source/Engine/Utility)
+	target_compile_definitions(SwimEngine PRIVATE
+		_CONSOLE
+		UNICODE
+		_UNICODE
+		_CRT_SECURE_NO_WARNINGS
+		$<$<PLATFORM_ID:Windows>:WIN32_LEAN_AND_MEAN>
+		$<$<PLATFORM_ID:Windows>:NOMINMAX>
+	)
+	swim_apply_engine_compile_options(SwimEngine)
+	if(MSVC)
+		target_link_options(SwimEngine PRIVATE
+			/SUBSYSTEM:CONSOLE
+			"$<$<CONFIG:Release>:/DEBUG:FULL>"
+			"$<$<CONFIG:Release>:/OPT:REF>"
+			"$<$<CONFIG:Release>:/OPT:ICF>"
+		)
+	endif()
+	swim_configure_engine_executable(SwimEngine)
 endif()
 
 # The full configure has the widest dependency surface (EnTT, GLM, the physics

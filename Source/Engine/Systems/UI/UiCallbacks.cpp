@@ -126,6 +126,96 @@ namespace Swim::UI
 		impl->BoundNodes.clear();
 	}
 
+	void UiDocument::SetObserver(std::function<void(const UiEvent&)> observer)
+	{
+		impl->Observer = std::move(observer);
+	}
+
+	void UiDocument::SetName(UiNodeId node, std::string name)
+	{
+		std::erase_if(impl->Names,
+			[&](const auto& entry)
+			{
+				return entry.second == node;
+			});
+
+		if (!name.empty())
+		{
+			impl->Names[std::move(name)] = node;
+		}
+	}
+
+	UiNodeId UiDocument::Find(std::string_view name) const
+	{
+		const auto found = impl->Names.find(std::string(name));
+		return found != impl->Names.end() && impl->Find(found->second) ? found->second : UiNodeId{};
+	}
+
+	bool UiDocument::OnClick(std::string_view name, std::function<void()> handler)
+	{
+		const auto node = Find(name);
+
+		if (!impl->Find(node))
+		{
+			return false;
+		}
+
+		OnClick(node, std::move(handler));
+		return true;
+	}
+
+	bool UiDocument::OnValue(std::string_view name, std::function<void(float)> handler)
+	{
+		const auto node = Find(name);
+
+		if (!impl->Find(node))
+		{
+			return false;
+		}
+
+		OnValue(node, std::move(handler));
+		return true;
+	}
+
+	bool UiDocument::OnChecked(std::string_view name, std::function<void(bool)> handler)
+	{
+		const auto node = Find(name);
+
+		if (!impl->Find(node))
+		{
+			return false;
+		}
+
+		OnChecked(node, std::move(handler));
+		return true;
+	}
+
+	bool UiDocument::BindValue(std::string_view name, float& value)
+	{
+		const auto node = Find(name);
+
+		if (!impl->Find(node))
+		{
+			return false;
+		}
+
+		BindValue(node, value);
+		return true;
+	}
+
+	bool UiDocument::BindChecked(std::string_view name, bool& value)
+	{
+		const auto node = Find(name);
+
+		if (!impl->Find(node))
+		{
+			return false;
+		}
+
+		BindChecked(node, value);
+		return true;
+	}
+
 	void UiDocument::DispatchCallbacks()
 	{
 		if (impl->DispatchingCallbacks)
@@ -159,6 +249,17 @@ namespace Swim::UI
 			if (!node)
 			{
 				continue;
+			}
+
+			if (impl->Observer)
+			{
+				impl->Observer(event);
+				node = impl->Find(event.Node);
+
+				if (!node)
+				{
+					continue;
+				}
 			}
 
 			// The bound value first, so a handler reading it sees the new value.

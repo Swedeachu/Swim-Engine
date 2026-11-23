@@ -69,4 +69,59 @@ namespace Swim::RhiVulkan
 			FromNativeHandle<VkBuffer>(counter.GetNativeHandle()), countOffset, maxDrawCount, stride);
 	}
 
+	void VulkanCommandList::RequireNonIndexedIndirectDraw(
+		const Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride) const
+	{
+		RequireDraw();
+		RequireVertexBuffers(false, 0, 0, 0, 0);
+		const auto& desc = arguments.GetDesc();
+		constexpr std::uint64_t record = sizeof(Rhi::DrawIndirectCommand);
+
+		if (!HasBufferUsage(desc.Usage, Rhi::BufferUsage::Indirect) || offset % 4 != 0 || stride < record || stride % 4 != 0)
+		{
+			throw std::invalid_argument(
+				"Indirect draw arguments need Indirect usage, a four-byte aligned offset and a stride of at least 16 bytes");
+		}
+
+		const auto& limits = GetState()->Device.physical_device.properties.limits;
+
+		if (drawCount > limits.maxDrawIndirectCount ||
+			(drawCount > 0 &&
+				(offset > desc.Size || (desc.Size - offset < record) || (drawCount - 1) > (desc.Size - offset - record) / stride)))
+		{
+			throw std::invalid_argument("Indirect draw arguments exceed the buffer or the device draw-count limit");
+		}
+	}
+
+	void VulkanCommandList::DrawIndirect(Rhi::Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount, std::uint32_t stride)
+	{
+		const auto& native = RequireResource<VulkanBuffer>(arguments, GetState());
+		RequireNonIndexedIndirectDraw(native, offset, drawCount, stride);
+
+		if (drawCount == 0)
+		{
+			return;
+		}
+
+		GetState()->Dispatch.vkCmdDrawIndirect(commandBuffer, FromNativeHandle<VkBuffer>(native.GetNativeHandle()), offset, drawCount, stride);
+	}
+
+	void VulkanCommandList::DrawIndirectCount(Rhi::Buffer& arguments, std::uint64_t offset, Rhi::Buffer& count, std::uint64_t countOffset,
+		std::uint32_t maxDrawCount, std::uint32_t stride)
+	{
+		const auto& native = RequireResource<VulkanBuffer>(arguments, GetState());
+		const auto& counter = RequireResource<VulkanBuffer>(count, GetState());
+		RequireNonIndexedIndirectDraw(native, offset, maxDrawCount, stride);
+		const auto& countDesc = counter.GetDesc();
+
+		if (!HasBufferUsage(countDesc.Usage, Rhi::BufferUsage::Indirect) || countOffset % 4 != 0 || countOffset > countDesc.Size ||
+			countDesc.Size - countOffset < sizeof(std::uint32_t))
+		{
+			throw std::invalid_argument("Indirect draw count needs Indirect usage and an in-range four-byte aligned uint32");
+		}
+
+		GetState()->Dispatch.vkCmdDrawIndirectCount(commandBuffer, FromNativeHandle<VkBuffer>(native.GetNativeHandle()), offset,
+			FromNativeHandle<VkBuffer>(counter.GetNativeHandle()), countOffset, maxDrawCount, stride);
+	}
+
 } // namespace Swim::RhiVulkan

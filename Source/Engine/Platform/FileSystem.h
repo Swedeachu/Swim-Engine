@@ -2,8 +2,10 @@
 
 #include "MappedFile.h"
 #include <filesystem>
+#include <map>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Swim::Platform
@@ -42,6 +44,10 @@ namespace Swim::Platform
 
 		MappedFile MapFileReadOnly(const std::filesystem::path& path) const;
 
+		// A machine-specific development path from DevPaths.cfg next to the executable
+		// (Key=Value lines, written by the build); empty when the file or key is missing.
+		std::filesystem::path GetDevPath(std::string_view key) const;
+
 	private:
 
 		std::filesystem::path executableDirectory;
@@ -49,6 +55,7 @@ namespace Swim::Platform
 		std::filesystem::path userDataRoot;
 		std::filesystem::path cacheRoot;
 		std::filesystem::path temporaryRoot;
+		std::map<std::string, std::filesystem::path, std::less<>> devPaths;
 
 	};
 

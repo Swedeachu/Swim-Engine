@@ -4,11 +4,12 @@ include_guard(GLOBAL)
 # is compiled once by swim_add_slang_program (CMakeLists.txt, next to the native
 # smokes that validate the same programs) and staged here under its runtime name:
 #
-#   ${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.spv
-#   ${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.reflection.json
+#   ${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.spv
+#   ${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet/<Name>.reflection.json
 #
-# SwimEngine deploys the directory as <exe dir>/Shaders/Runtime (ShaderLibrary's
-# default root); SwimTests reads it through SWIM_RUNTIME_SHADER_DIR. The retired
+# swim_configure_shaders(<executable>) deploys the directory as <exe dir>/Shaders/Runtime
+# (ShaderLibrary's default root) for the sandbox and for any project embedding the
+# engine; SwimTests reads it through SWIM_RUNTIME_SHADER_DIR. The retired
 # Vulkan/OpenGL legacy shader groups are archived under Deprecated/Shaders.
 # Defines SwimRuntimeShaders (the staged set) once.
 function(swim_define_runtime_shader_set)
@@ -31,8 +32,8 @@ function(swim_define_runtime_shader_set)
 		string(APPEND SWIM_CATALOG "\t\"${SWIM_RUNTIME_NAME}\",\n")
 	endforeach()
 	string(APPEND SWIM_CATALOG "};\n}\n")
-	file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Generated/Engine")
-	file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/Generated/Engine/RuntimeShaderCatalog.h" CONTENT "${SWIM_CATALOG}" @ONLY)
+	file(MAKE_DIRECTORY "${SWIM_ENGINE_BINARY_DIR}/Generated/Engine")
+	file(CONFIGURE OUTPUT "${SWIM_ENGINE_BINARY_DIR}/Generated/Engine/RuntimeShaderCatalog.h" CONTENT "${SWIM_CATALOG}" @ONLY)
 
 	if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 		return()
@@ -43,7 +44,7 @@ function(swim_define_runtime_shader_set)
 		)
 	endif()
 
-	set(SWIM_RUNTIME_SHADER_ROOT "${CMAKE_BINARY_DIR}/Generated/Shaders/RuntimeSet")
+	set(SWIM_RUNTIME_SHADER_ROOT "${SWIM_ENGINE_BINARY_DIR}/Generated/Shaders/RuntimeSet")
 	set(SWIM_RUNTIME_SHADER_OUTPUTS "")
 	set(SWIM_RUNTIME_SHADER_SOURCES "")
 	foreach(SWIM_ENTRY IN LISTS SWIM_RUNTIME_SHADER_PROGRAMS)
@@ -78,13 +79,12 @@ function(swim_configure_shaders target)
 		return()
 	endif()
 
-	if(NOT SWIM_BUILD_SHADER_COMPILER OR NOT SWIM_SLANG_AVAILABLE OR NOT TARGET SwimSlangCompiler)
+	if(NOT TARGET SwimRuntimeShaders)
 		message(FATAL_ERROR
 			"First-party shaders require the pinned Slang compiler. Enable SWIM_BUILD_SHADER_COMPILER."
 		)
 	endif()
 
-	swim_define_runtime_shader_set()
 	add_dependencies(${target} SwimRuntimeShaders)
 	add_custom_command(TARGET ${target} POST_BUILD
 		COMMAND "${CMAKE_COMMAND}" -E copy_directory

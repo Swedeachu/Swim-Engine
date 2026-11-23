@@ -27,6 +27,23 @@ namespace Engine
 		Swim::Rhi::Format StorageFormat = Swim::Rhi::Format::Undefined; // StorageTexture only.
 	};
 
+	// A push-constant field marked [Tweak(min, max)] (Tweak.slang).
+	struct RuntimeTweak
+	{
+		enum class Kind : std::uint8_t
+		{
+			Float,
+			Int,
+			Uint,
+		};
+
+		std::string Name;
+		std::uint32_t Offset = 0; // Bytes into the push constants.
+		Kind Type = Kind::Float;
+		double Min = 0.0;
+		double Max = 1.0;
+	};
+
 	// A compiled compute program and the objects it owns.
 	struct RuntimeComputeProgram
 	{
@@ -36,6 +53,7 @@ namespace Engine
 		std::uint32_t Space = 0;			  // The first reflected descriptor space.
 		std::vector<RuntimeBinding> Bindings; // Every descriptor, named (render features bind by name).
 		std::array<std::uint32_t, 3> ThreadGroupSize{ 1, 1, 1 };
+		std::vector<RuntimeTweak> Tweaks;
 	};
 
 	// A compiled vertex + fragment program and its layout; pipelines are created by the
@@ -44,6 +62,7 @@ namespace Engine
 	{
 		std::unique_ptr<Swim::Rhi::ShaderProgram> Program;
 		std::unique_ptr<Swim::Rhi::PipelineLayout> Layout;
+		std::vector<RuntimeBinding> Bindings; // Every reflected descriptor, named.
 	};
 
 	struct RuntimeShaderDesc
@@ -73,6 +92,9 @@ namespace Engine
 
 		// Built-ins are registered from the build catalog. Custom programs use exactly the
 		// same runtime path. Relative artifact paths are resolved against GetRoot().
+		// A name that was never registered still loads when <root>/<Name>.spv and its
+		// reflection sidecar exist (programs an application added with
+		// swim_add_runtime_shader after the engine's catalog was generated).
 		void Register(RuntimeShaderDesc desc);
 
 		// Invalidates parsed CPU artifacts for a future load; existing GPU programs keep
@@ -80,6 +102,16 @@ namespace Engine
 		void Invalidate(std::string_view name);
 
 		bool Contains(std::string_view name) const;
+
+		// The registration of a program (registered or found by name), if any.
+		std::optional<RuntimeShaderDesc> Find(std::string_view name) const;
+
+		// Registers a program or replaces its registration (new artifacts for a name), and
+		// invalidates its parsed artifacts. GPU programs already created keep theirs.
+		void Replace(RuntimeShaderDesc desc);
+
+		// True while the program's parsed artifacts are cached (it was loaded and not invalidated).
+		bool IsLoaded(std::string_view name) const;
 
 		RuntimeComputeProgram LoadCompute(std::string_view name) const;
 
@@ -101,9 +133,12 @@ namespace Engine
 		struct Loaded;
 		const Loaded& Load(std::string_view name) const;
 
+		const RuntimeShaderDesc* Describe(std::string_view name) const;
+
 		Swim::Rhi::Device& device;
 		std::filesystem::path root;
 		std::unordered_map<std::string, RuntimeShaderDesc> registrations;
+		mutable std::unordered_map<std::string, RuntimeShaderDesc> discovered;
 		mutable std::unordered_map<std::string, std::shared_ptr<const Loaded>> loadedPrograms;
 
 	};

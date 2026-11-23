@@ -89,7 +89,8 @@ namespace Swim::Render
 
 		using Stream = Internal::GeometryStream;
 
-		Internal::GeometryAllocation Allocate(Stream stream, std::uint64_t size, std::uint64_t alignment, std::string_view name);
+		Internal::GeometryAllocation Allocate(
+			Stream stream, std::uint64_t size, std::uint64_t alignment, std::string_view name, std::uint32_t partner = UINT32_MAX);
 
 		void Free(const Internal::GeometryAllocation& allocation);
 

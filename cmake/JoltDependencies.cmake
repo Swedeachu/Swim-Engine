@@ -15,7 +15,7 @@ endif()
 CPMAddPackage(
 	NAME jolt_source
 	GITHUB_REPOSITORY jrouwe/JoltPhysics
-	GIT_TAG v5.6.0
+	GIT_TAG v5.7.0
 	SOURCE_SUBDIR Build
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES

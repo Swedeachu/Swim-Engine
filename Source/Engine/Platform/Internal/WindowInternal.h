@@ -10,6 +10,7 @@ namespace Swim::Platform
 	{
 		SDL_Window* Window = nullptr;
 		bool ExternalWindow = false;
+		bool CaptureMouse = true;
 		bool ExternalParent = false;
 		NativeWindowHandle Parent{};
 		uint32_t ParentThreadId = 0;
@@ -19,6 +20,10 @@ namespace Swim::Platform
 
 	namespace Internal
 	{
+
+		// SDL window property: relative mouse mode requested by the application (kept
+		// across focus changes, which release the mode itself).
+		inline constexpr const char* RelativeMouseRequestedProperty = "Swim.RelativeMouseRequested";
 
 		struct WindowAccess
 		{

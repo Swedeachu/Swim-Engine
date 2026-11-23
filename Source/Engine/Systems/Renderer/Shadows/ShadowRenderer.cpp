@@ -185,6 +185,7 @@ namespace Swim::Render
 			GraphBuffer DrawRecords;
 			ShadowTile Tile;
 			std::uint32_t ViewIndex = 0; // Into the views buffer.
+			std::array<float, 16> ViewProjection{};
 		};
 		std::vector<DrawView> drawViews;
 
@@ -204,6 +205,7 @@ namespace Swim::Render
 			resources.Visibility.push_back(frame.Visibility->Record(graph, *frame.Scene, *frame.Geometry, visibilityFrame));
 			const auto& visibility = resources.Visibility.back();
 			drawViews.push_back({ visibility.Commands, visibility.Counts, visibility.DrawRecords, draw.Tile, static_cast<std::uint32_t>(v) });
+			std::copy(std::begin(draw.View.ViewProjection), std::end(draw.View.ViewProjection), drawViews.back().ViewProjection.begin());
 		}
 
 		resources.RenderedViews = static_cast<std::uint32_t>(drawViews.size());
@@ -220,6 +222,16 @@ namespace Swim::Render
 		const auto viewsBuffer = resources.Views;
 		const auto atlasTexture = resources.Atlas;
 		const auto atlasSize = plan.AtlasSize;
+		std::vector<ExternalGeometryDraws> external;
+
+		for (const auto& draws : frame.External)
+		{
+			if ((draws.Passes & ExternalGeometryPassBit(ExternalGeometryPass::Shadow)) != 0)
+			{
+				external.push_back(draws);
+			}
+		}
+
 		resources.DepthPass = graph.AddPass(
 			name + " depth", Rhi::QueueType::Graphics,
 			[&](RenderGraphBuilder& b)
@@ -256,6 +268,24 @@ namespace Swim::Render
 					once(page, S::IndexBuffer);
 				}
 
+				for (const auto& draws : external)
+				{
+					for (const auto buffer : draws.Buffers)
+					{
+						b.Read(buffer, S::ShaderRead);
+					}
+
+					for (const auto buffer : draws.IndirectBuffers)
+					{
+						b.Read(buffer, S::IndirectArgument);
+					}
+
+					for (const auto texture : draws.Textures)
+					{
+						b.Read(texture, S::ShaderRead);
+					}
+				}
+
 				if (loadAtlas)
 				{
 					b.ReadWrite(atlasTexture, S::DepthStencilWrite);
@@ -269,7 +299,7 @@ namespace Swim::Render
 			[programs = std::array<ShadowProgram, 2>{ desc.Opaque, desc.Masked }, clear = desc.Clear, persistent, loadAtlas,
 				label = name + " depth",
 				drawViews, bins, vertexPages, indexPages, instances, transforms, viewsBuffer, materials, materialCount, atlasTexture,
-				atlasSize, path = desc.DrawPath, bindless = frame.Bindless](RenderCommandContext& c)
+				atlasSize, path = desc.DrawPath, bindless = frame.Bindless, external](RenderCommandContext& c)
 			{
 				Rhi::TextureViewDesc depthView;
 				depthView.PixelFormat = AtlasFormat;
@@ -327,6 +357,48 @@ namespace Swim::Render
 							list.PushConstants(PushStages(*program.Layout), 0, std::as_bytes(std::span(constants)));
 							list.BindIndexBuffer(c.Get(indexPages[slot]), 0, Rhi::IndexType::Uint32);
 							DrawVisibilityBin(list, commands, counts, bins, bins.GetBin(variant, slot), path);
+						}
+					}
+
+					if (external.empty())
+					{
+						continue;
+					}
+
+					ExternalDrawContext context{ c };
+					context.Pass = ExternalGeometryPass::Shadow;
+					context.Width = atlasSize;
+					context.Height = atlasSize;
+					context.Bindless = bindless;
+					context.ShadowView = view.ViewIndex;
+					context.ShadowViewProjection = view.ViewProjection;
+					context.FrameTable = [&](Rhi::PipelineLayout& layout) -> Rhi::DescriptorTable&
+					{
+						auto table = c.Device().CreateDescriptorTable({ &layout, 0, 0, label + " external" });
+
+						if (!table)
+						{
+							throw std::runtime_error(label + " external descriptor table could not be created");
+						}
+
+						using B = ShadowDepthBindings;
+						const std::array<Rhi::DescriptorWrite, B::Count> writes{ BufferWrite(c, B::Instances, instances),
+							BufferWrite(c, B::Transforms, transforms), BufferWrite(c, B::DrawRecords, view.DrawRecords),
+							BufferWrite(c, B::Vertices, vertexPages.front()), BufferWrite(c, B::Views, viewsBuffer),
+							BufferWrite(c, B::Materials, materials) };
+						table->Write(writes);
+						return static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
+					};
+
+					for (const auto& draws : external)
+					{
+						const auto& tile = view.Tile;
+						list.SetViewport({ float(tile.X), float(tile.Y), float(tile.Size), float(tile.Size), 0.0f, 1.0f });
+						list.SetScissor({ std::int32_t(tile.X), std::int32_t(tile.Y), tile.Size, tile.Size });
+
+						if (draws.Draw)
+						{
+							draws.Draw(context);
 						}
 					}
 				}

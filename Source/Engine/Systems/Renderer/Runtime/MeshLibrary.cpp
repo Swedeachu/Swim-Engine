@@ -59,7 +59,8 @@ namespace Engine
 
 	} // namespace
 
-	Swim::Assets::TextureAsset MakeTextureAsset(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb)
+	Swim::Assets::TextureAsset MakeTextureAsset(
+		std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb, bool mips)
 	{
 		using namespace Swim::Assets;
 
@@ -106,7 +107,7 @@ namespace Engine
 
 			payload.Mips.push_back(mip);
 
-			if (w == 1 && h == 1)
+			if (!mips || (w == 1 && h == 1))
 			{
 				break;
 			}
@@ -162,16 +163,56 @@ namespace Engine
 	MeshLibrary::MeshHandle MeshLibrary::Register(std::string_view name, const ProceduralMeshes::MeshData& mesh)
 	{
 		const std::string path = ProceduralPath(name);
-		auto handle = assets.Declare<Swim::Assets::MeshAsset>(path);
+		auto& slot = meshes[path];
+
+		// A resident asset is never re-uploaded, so every registration publishes its own asset
+		// and a replaced one is retired once the GPU is done with it.
+		if (slot.IsValid())
+		{
+			released.push_back(slot);
+		}
+
+		const std::string assetPath = path + "#" + std::to_string(revision++);
+		auto handle = assets.Declare<Swim::Assets::MeshAsset>(assetPath);
 
 		if (!assets.Publish(handle, ProceduralMeshes::ToMeshAsset(mesh)))
 		{
-			throw std::runtime_error("MeshLibrary: cannot publish " + path);
+			throw std::runtime_error("MeshLibrary: cannot publish " + assetPath);
 		}
 
 		residency.RequestMesh(handle);
-		meshes[path] = handle;
+		slot = handle;
 		return handle;
+	}
+
+	void MeshLibrary::Unregister(std::string_view name)
+	{
+		const auto found = meshes.find(ProceduralPath(name));
+
+		if (found != meshes.end())
+		{
+			released.push_back(found->second);
+			meshes.erase(found);
+		}
+	}
+
+	void MeshLibrary::FlushReleases(Swim::Rhi::TimelinePoint lastUse)
+	{
+		for (const auto& handle : released)
+		{
+			residency.ReleaseMesh(handle, lastUse);
+			assets.Forget(handle);
+		}
+
+		released.clear();
+
+		for (const auto& handle : releasedTextures)
+		{
+			residency.ReleaseTexture(handle, lastUse);
+			assets.Forget(handle);
+		}
+
+		releasedTextures.clear();
 	}
 
 	MeshLibrary::MeshHandle MeshLibrary::Find(std::string_view name) const
@@ -202,18 +243,28 @@ namespace Engine
 	}
 
 	MeshLibrary::TextureHandle MeshLibrary::RegisterTexture(
-		std::string_view name, std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb)
+		std::string_view name, std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb, bool mips)
 	{
 		const std::string path = ProceduralPath(name);
-		auto handle = assets.Declare<Swim::Assets::TextureAsset>(path);
+		auto& slot = textures[path];
 
-		if (!assets.Publish(handle, MakeTextureAsset(width, height, rgba8, srgb)))
+		// As with meshes, a replacement is a new asset; materials pointing at the old one keep
+		// it until they are updated and the GPU is done with it.
+		if (slot.IsValid())
 		{
-			throw std::runtime_error("MeshLibrary: cannot publish texture " + path);
+			releasedTextures.push_back(slot);
+		}
+
+		const std::string assetPath = path + "#" + std::to_string(revision++);
+		auto handle = assets.Declare<Swim::Assets::TextureAsset>(assetPath);
+
+		if (!assets.Publish(handle, MakeTextureAsset(width, height, rgba8, srgb, mips)))
+		{
+			throw std::runtime_error("MeshLibrary: cannot publish texture " + assetPath);
 		}
 
 		residency.RequestTexture(handle);
-		textures[path] = handle;
+		slot = handle;
 		return handle;
 	}
 
@@ -246,6 +297,16 @@ namespace Engine
 	bool MeshLibrary::IsResident(MeshHandle mesh) const
 	{
 		return residency.GetState(mesh) == Swim::Render::AssetResidencyState::Resident;
+	}
+
+	bool MeshLibrary::IsResident(TextureHandle texture) const
+	{
+		return residency.GetState(texture) == Swim::Render::AssetResidencyState::Resident;
+	}
+
+	std::uint32_t MeshLibrary::GetBindlessIndex(TextureHandle texture) const
+	{
+		return residency.GetBindlessIndex(texture);
 	}
 
 	std::uint32_t MeshLibrary::GetResidentMeshCount() const

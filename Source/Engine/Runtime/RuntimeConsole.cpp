@@ -45,9 +45,19 @@ namespace Engine
 			{
 				std::string text = "Commands:";
 
-				for (const auto& name : registry.GetNames())
+				for (const auto& info : registry.GetCommandInfos())
 				{
-					text += "\n  " + name;
+					text += "\n  " + info.Name;
+
+					if (!info.Usage.empty())
+					{
+						text += " " + info.Usage;
+					}
+
+					if (!info.Description.empty())
+					{
+						text += "  - " + info.Description;
+					}
 				}
 
 				Print(text);

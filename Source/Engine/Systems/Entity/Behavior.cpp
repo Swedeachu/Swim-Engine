@@ -35,4 +35,39 @@ namespace Engine
 		return scene->GetTime();
 	}
 
+	SceneTimers::Owner Behavior::OwnedTimersToken()
+	{
+		if (!ownedTimersToken)
+		{
+			ownedTimersToken = std::make_shared<int>(0);
+		}
+
+		return ownedTimersToken;
+	}
+
+	TimerHandle Behavior::After(double seconds, std::function<void()> callback)
+	{
+		return scene->GetTimers().After(seconds, std::move(callback), OwnedTimersToken());
+	}
+
+	TimerHandle Behavior::Every(double interval, std::function<void()> callback)
+	{
+		return scene->GetTimers().Every(interval, std::move(callback), OwnedTimersToken());
+	}
+
+	TimerHandle Behavior::When(std::function<bool()> predicate, std::function<void()> callback)
+	{
+		return scene->GetTimers().When(std::move(predicate), std::move(callback), OwnedTimersToken());
+	}
+
+	TimerHandle Behavior::StartCoroutine(SceneTask task)
+	{
+		return scene->GetTimers().Start(std::move(task), OwnedTimersToken());
+	}
+
+	bool Behavior::CancelTimer(TimerHandle timer)
+	{
+		return scene->GetTimers().Cancel(timer);
+	}
+
 } // namespace Engine

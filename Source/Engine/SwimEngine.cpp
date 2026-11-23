@@ -3,8 +3,15 @@
 #include "Engine/Runtime/RuntimeConsoleOverlay.h"
 
 #include "Engine/Components/CameraComponent.h"
+#include "Engine/Input/InputNames.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Runtime/UiRuntime.h"
+#include "Engine/Runtime/FramePacing.h"
+#include "Engine/Systems/Audio/AudioSystem.h"
+#include "Engine/Runtime/RenderQuality.h"
+#include "Engine/Runtime/ShaderHotReload.h"
+#include "Engine/Runtime/ShaderTweaks.h"
+#include "Engine/Runtime/WindowSettings.h"
 #include "Engine/Systems/Camera/CameraSystem.h"
 #include "Engine/Systems/Renderer/Runtime/FrameRenderer.h"
 #include "Engine/Systems/Renderer/Runtime/MaterialLibrary.h"
@@ -234,8 +241,8 @@ namespace Engine
 	bool SwimEngine::MakeWindow()
 	{
 		Swim::Platform::PlatformDesc platformDesc{};
-		platformDesc.OrganizationName = "Swim Services";
-		platformDesc.ApplicationName = "Swim Engine";
+		platformDesc.OrganizationName = config.OrganizationName;
+		platformDesc.ApplicationName = config.ApplicationName;
 		platformDesc.Headless = config.Present == PresentMode::Headless;
 		platformDesc.AssetRoot = ResolveAssetRoot(config.AssetRoot);
 
@@ -355,6 +362,7 @@ namespace Engine
 
 		inputSystem = std::make_unique<Swim::Input::InputSystem>();
 		inputSystem->Reset();
+		actionMap = std::make_unique<Swim::Input::ActionMap>();
 		commandRegistry = std::make_unique<Swim::Commands::CommandRegistry>();
 
 		switch (physicsBackend)
@@ -416,6 +424,21 @@ namespace Engine
 		renderServices.Toggles = renderToggles.get();
 		renderServices.Profiler = &profiler;
 
+		if (config.Audio != AudioOutput::Off)
+		{
+			const auto& files = platformSystem->GetFileSystem();
+			AudioSystemDesc audioDesc;
+			audioDesc.Output = config.Present == PresentMode::Headless ? AudioOutput::Null : config.Audio;
+			audioDesc.AssetRoot = files.GetAssetRoot();
+			audioSystem = std::make_unique<AudioSystem>(audioDesc, commandRegistry.get());
+
+			// Development sounds outside the repository (DevPaths.cfg DevAudioRoot).
+			if (const auto devAudio = files.GetDevPath("DevAudioRoot"); !devAudio.empty())
+			{
+				audioSystem->MountRoot("devaudio", devAudio);
+			}
+		}
+
 		// Scenes consume every service above, so they come last.
 		SceneServices services;
 		services.Files = &platformSystem->GetFileSystem();
@@ -429,8 +452,10 @@ namespace Engine
 		services.Tags = &tagRegistry;
 		services.Physics = physicsSystem.get();
 		services.Input = inputSystem.get();
+		services.Actions = actionMap.get();
 		services.Camera = cameraSystem.get();
 		services.Render = &renderServices;
+		services.Audio = audioSystem.get();
 		services.Commands = commandRegistry.get();
 		services.DispatchCommand = [commands = commandRegistry.get()](std::string_view command)
 		{
@@ -487,15 +512,44 @@ namespace Engine
 		}
 
 		RegisterEngineCommands();
+		windowSettings = std::make_unique<WindowSettings>(*commandRegistry, platformSystem->GetWindowSystem(), engineWindow.get(), config.Window);
+		framePacing = std::make_unique<FramePacing>(*commandRegistry);
+		renderQuality = std::make_unique<RenderQuality>(*commandRegistry);
+
+		if (renderDevice)
+		{
+			framePacing->SetDevice(renderDevice.get());
+			renderServices.Pacing = &framePacing->GetStats();
+		}
+
+		if (renderServices.Settings)
+		{
+			renderQuality->SetSettings(renderServices.Settings);
+		}
+
+		if (const auto path = GetUserConfigPath(); !path.empty() && commandRegistry->ExecuteFile(path))
+		{
+			std::cout << "[Config] Loaded " << path.string() << '\n';
+		}
+
+		commandRegistry->MarkConfigSaved();
 
 		for (const auto& command : config.StartupCommands)
 		{
-			if (!commandRegistry->ParseAndDispatch(command))
+			try
 			{
-				std::cerr << "[Engine] Unknown startup command: " << command << '\n';
+				if (!commandRegistry->ParseAndDispatch(command))
+				{
+					std::cerr << "[Engine] Unknown startup command: " << command << '\n';
+				}
+			}
+			catch (const std::exception& error)
+			{
+				std::cerr << "[Engine] Startup command failed: " << error.what() << '\n';
 			}
 		}
 
+		commandRegistry->SetStartupComplete();
 		return 0;
 	}
 
@@ -543,11 +597,49 @@ namespace Engine
 			return -1;
 		}
 
+		if (!shaderTweaks)
+		{
+			shaderTweaks = std::make_unique<ShaderTweaks>(*commandRegistry);
+		}
+
+		frameRenderer->SetConstantsOverride(
+			[tweaks = shaderTweaks.get()](std::string_view program, const RuntimeComputeProgram& compiled, std::span<std::byte> constants)
+			{
+				tweaks->Apply(program, compiled, constants);
+			});
+
+		// Development: recompile changed runtime shaders (DevPaths.cfg names the compiler and sources).
+		if (const auto& files = platformSystem->GetFileSystem(); !files.GetDevPath("SlangCompiler").empty())
+		{
+			ShaderHotReloadDesc reloadDesc;
+			reloadDesc.Compiler = files.GetDevPath("SlangCompiler");
+			reloadDesc.Sources = files.GetDevPath("ShaderSources");
+			reloadDesc.CacheRoot = files.GetCacheRoot() / "Shaders";
+			shaderHotReload = std::make_unique<ShaderHotReload>(reloadDesc, *commandRegistry, *frameRenderer);
+		}
+
 		renderServices.Renderer = frameRenderer.get();
 		renderServices.Meshes = &frameRenderer->GetMeshes();
 		renderServices.Materials = &frameRenderer->GetMaterials();
 		renderServices.Settings = &frameRenderer->GetSettings();
+
+		if (const auto* budget = commandRegistry ? commandRegistry->FindVariable("render_upload_budget_mb") : nullptr)
+		{
+			renderServices.Settings->StreamingUploadBudget = std::uint64_t(budget->GetInt()) << 20;
+		}
 		renderServices.Stats = &frameRenderer->GetStats();
+
+		if (renderQuality)
+		{
+			renderQuality->SetSettings(renderServices.Settings);
+		}
+
+		if (framePacing)
+		{
+			framePacing->SetDevice(renderDevice.get());
+			renderServices.Pacing = &framePacing->GetStats();
+		}
+
 		renderServices.Bridge = renderBridge.get();
 		renderServices.Ui = uiRuntime.get();
 		CreateConsole();
@@ -587,6 +679,17 @@ namespace Engine
 	void SwimEngine::RegisterEngineCommands()
 	{
 		auto& commands = *commandRegistry;
+		commands
+			.AddInt("render_upload_budget_mb", 16, 1, 1024, "Megabytes streaming buffers upload per frame", "Video/Rendering",
+				Swim::Commands::VariableFlags::Saved)
+			.Subscribe(
+				[this](const Swim::Commands::ConsoleVariable& variable)
+				{
+					if (renderServices.Settings)
+					{
+						renderServices.Settings->StreamingUploadBudget = std::uint64_t(variable.GetInt()) << 20;
+					}
+				});
 		commands.Register("play",
 			[this](const std::vector<std::string>&)
 			{
@@ -699,6 +802,12 @@ namespace Engine
 				}
 
 				deferredCommands.push_back({ totalFrames + static_cast<std::uint64_t>(std::max(0, std::stoi(arguments[0]))), line });
+			});
+		// camera.cut: drop temporal history on the next frame (as a teleport would).
+		commands.Register("camera.cut",
+			[this](const std::vector<std::string>&)
+			{
+				cameraSystem->RequestCameraCut();
 			});
 		commands.Register("camera",
 			[this](const std::vector<std::string>& arguments)
@@ -1012,6 +1121,246 @@ namespace Engine
 			{
 				Quit();
 			});
+		RegisterInputCommands();
+		commands.Register({ "exec", "Runs every line of a config file", "Console", "<file>" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.empty())
+				{
+					throw std::invalid_argument("usage: exec <file>");
+				}
+
+				std::filesystem::path path(arguments[0]);
+
+				if (path.is_relative() && !std::filesystem::exists(path))
+				{
+					path = platformSystem->GetFileSystem().GetUserDataRoot() / path;
+				}
+
+				if (!commandRegistry->ExecuteFile(path))
+				{
+					throw std::invalid_argument("cannot read " + path.string());
+				}
+			});
+		commands.Register({ "config_save", "Writes the saved settings to the user config file now", "Console", "[file]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				const auto path = arguments.empty() ? GetUserConfigPath() : std::filesystem::path(arguments[0]);
+
+				if (path.empty() || !commandRegistry->SaveConfig(path))
+				{
+					throw std::invalid_argument("could not write the config file");
+				}
+
+				if (arguments.empty())
+				{
+					commandRegistry->MarkConfigSaved();
+				}
+
+				std::cout << "[Config] Saved " << path.string() << '\n';
+			});
+		commands.Register({ "cvar_list", "Lists console variables and their values", "Console", "[filter]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				const std::string filter = arguments.empty() ? std::string() : arguments[0];
+
+				for (const auto* variable : commandRegistry->GetVariables())
+				{
+					const auto& desc = variable->GetDesc();
+
+					if (!filter.empty() && variable->GetName().find(filter) == std::string::npos &&
+						desc.Category.find(filter) == std::string::npos)
+					{
+						continue;
+					}
+
+					std::cout << variable->GetName() << " = " << Swim::Commands::CommandRegistry::QuoteArgument(variable->ToString())
+							  << (variable->IsDefault() ? "" : " *") << (variable->IsRestartPending() ? " (restart)" : "") << "  ["
+							  << desc.Category << "] " << desc.Description << '\n';
+				}
+			});
+		commands.Register({ "cvar_reset", "Resets a console variable (or all) to its default", "Console", "<name|all>" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.empty())
+				{
+					throw std::invalid_argument("usage: cvar_reset <name|all>");
+				}
+
+				if (arguments[0] == "all")
+				{
+					for (auto* variable : commandRegistry->GetVariables())
+					{
+						if (!Swim::Commands::HasFlag(variable->GetDesc().Flags, Swim::Commands::VariableFlags::ReadOnly))
+						{
+							variable->Reset();
+						}
+					}
+
+					return;
+				}
+
+				auto* variable = commandRegistry->FindVariable(arguments[0]);
+
+				if (!variable)
+				{
+					throw std::invalid_argument("no console variable " + arguments[0]);
+				}
+
+				variable->Reset();
+			});
+	}
+
+	void SwimEngine::RegisterInputCommands()
+	{
+		using Swim::Commands::VariableFlags;
+		auto& commands = *commandRegistry;
+		auto& actions = *actionMap;
+		actions.SetChangedCallback(
+			[this]()
+			{
+				commandRegistry->MarkConfigDirty();
+			});
+		commands.SetConfigWriter("bindings",
+			[this](std::string& out)
+			{
+				actionMap->WriteConfig(out);
+			});
+
+		auto& sensitivity = commands.AddFloat("mouse_sensitivity", 1.0, 0.01, 50.0, "Multiplier on raw mouse motion for looking",
+			"Controls/Mouse", VariableFlags::Saved);
+		auto& invert = commands.AddBool("mouse_invert_y", false, "Inverts vertical mouse look", "Controls/Mouse", VariableFlags::Saved);
+		actions.SetMouseSensitivity(sensitivity.GetFloat());
+		actions.SetInvertMouseY(invert.GetBool());
+		sensitivity.Subscribe(
+			[this](const Swim::Commands::ConsoleVariable& variable)
+			{
+				actionMap->SetMouseSensitivity(variable.GetFloat());
+			});
+		invert.Subscribe(
+			[this](const Swim::Commands::ConsoleVariable& variable)
+			{
+				actionMap->SetInvertMouseY(variable.GetBool());
+			});
+
+		Swim::Input::ActionDesc fullscreen;
+		fullscreen.Name = "toggle_fullscreen";
+		fullscreen.Description = "Switches between windowed and fullscreen";
+		fullscreen.Category = "Controls/Window";
+		fullscreen.Command = "fullscreen_toggle";
+		fullscreen.DefaultBindings.push_back({});
+		fullscreen.DefaultBindings.back().Type = Swim::Input::InputBindingType::ScanCode;
+		fullscreen.DefaultBindings.back().PhysicalKey = Swim::Platform::ScanCode::F11;
+		actions.RegisterAction(std::move(fullscreen));
+
+		commands.Register({ "bind", "Shows or replaces the inputs of an action", "Controls", "<action> [none | <input>...]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				actionMap->ExecuteBind(arguments);
+			});
+		commands.Register({ "bind_add", "Adds an input to an action", "Controls", "<action> <input>" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				Swim::Input::InputBinding binding;
+				const auto action = arguments.size() == 2 ? actionMap->FindAction(arguments[0]) : Swim::Input::InvalidAction;
+
+				if (action == Swim::Input::InvalidAction || !Swim::Input::ParseBinding(arguments[1], binding))
+				{
+					throw std::invalid_argument("usage: bind_add <action> <input>");
+				}
+
+				actionMap->AddBinding(action, binding);
+			});
+		commands.Register({ "unbind", "Removes one input (or all inputs) from an action", "Controls", "<action> [input]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				const auto action = arguments.empty() ? Swim::Input::InvalidAction : actionMap->FindAction(arguments[0]);
+
+				if (action == Swim::Input::InvalidAction)
+				{
+					throw std::invalid_argument("usage: unbind <action> [input]");
+				}
+
+				Swim::Input::InputBinding binding;
+
+				if (arguments.size() < 2)
+				{
+					actionMap->SetBindings(action, {});
+				}
+				else if (Swim::Input::ParseBinding(arguments[1], binding))
+				{
+					actionMap->RemoveBinding(action, binding);
+				}
+				else
+				{
+					throw std::invalid_argument("unknown input " + arguments[1]);
+				}
+			});
+		commands.Register({ "bind_list", "Lists actions and their inputs", "Controls", "[filter]" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				for (Swim::Input::ActionId id = 0; id < actionMap->GetActionCount(); ++id)
+				{
+					const auto& desc = actionMap->GetDesc(id);
+
+					if (!arguments.empty() && desc.Name.find(arguments[0]) == std::string::npos &&
+						desc.Category.find(arguments[0]) == std::string::npos)
+					{
+						continue;
+					}
+
+					std::string line = desc.Name + " =";
+
+					for (const auto& binding : actionMap->GetBindings(id))
+					{
+						line += " " + Swim::Input::FormatBinding(binding);
+					}
+
+					std::cout << line << (actionMap->HasDefaultBindings(id) ? "" : " *") << "  [" << desc.Category << "] " << desc.Description
+							  << '\n';
+				}
+			});
+		commands.Register({ "bind_reset", "Restores the default inputs of an action (or all)", "Controls", "<action|all>" },
+			[this](const std::vector<std::string>& arguments)
+			{
+				if (arguments.empty())
+				{
+					throw std::invalid_argument("usage: bind_reset <action|all>");
+				}
+
+				if (arguments[0] == "all")
+				{
+					actionMap->ResetAllBindings();
+					return;
+				}
+
+				const auto action = actionMap->FindAction(arguments[0]);
+
+				if (action == Swim::Input::InvalidAction)
+				{
+					throw std::invalid_argument("no input action " + arguments[0]);
+				}
+
+				actionMap->ResetBindings(action);
+			});
+	}
+
+	std::filesystem::path SwimEngine::GetUserConfigPath() const
+	{
+		if (config.UserConfigFile.empty() || !platformSystem)
+		{
+			return {};
+		}
+
+		const std::filesystem::path file(config.UserConfigFile);
+
+		if (file.is_absolute())
+		{
+			return file;
+		}
+
+		const auto& root = platformSystem->GetFileSystem().GetUserDataRoot();
+		return root.empty() ? std::filesystem::path() : root / file;
 	}
 
 	bool SwimEngine::RequestCapture(std::filesystem::path path)
@@ -1055,6 +1404,7 @@ namespace Engine
 		case WindowEventType::Resized:
 		case WindowEventType::PixelSizeChanged:
 		case WindowEventType::DpiScaleChanged:
+		case WindowEventType::ModeChanged:
 			UpdateSurfaceSize();
 			break;
 		default:
@@ -1227,6 +1577,13 @@ namespace Engine
 			}
 		}
 
+		if (framePacing)
+		{
+			// Frame cap and GPU wait before input, so input is sampled as late as possible.
+			FrameProfiler::Scope pacingScope(profiler, "Frame pacing");
+			framePacing->BeginFrame();
+		}
+
 		std::optional<FrameProfiler::Scope> eventsScope;
 		eventsScope.emplace(profiler, "Platform events");
 		platformSystem->PumpEvents(
@@ -1236,7 +1593,7 @@ namespace Engine
 			},
 			[this](const Swim::Platform::InputEvent& event)
 			{
-				if (!inputSystem || !engineWindow || (event.Window != 0 && event.Window != engineWindow->GetId()))
+				if (!inputSystem || !engineWindow || !config.PlatformInput || (event.Window != 0 && event.Window != engineWindow->GetId()))
 				{
 					return;
 				}
@@ -1263,6 +1620,19 @@ namespace Engine
 		havePreviousTime = true;
 
 		inputSystem->AdvanceFrame();
+		actionMap->SetContextActive(actionMap->GetTextContext(), textInputActive || (console && console->IsOpen()));
+		actionMap->Update(*inputSystem,
+			[this](std::string_view line)
+			{
+				try
+				{
+					commandRegistry->ParseAndDispatch(line);
+				}
+				catch (const std::exception& error)
+				{
+					std::cerr << "[Input] " << line << ": " << error.what() << '\n';
+				}
+			});
 		frameArena.BeginFrame(totalFrames + 1);
 		currentFrame = clock.Advance(realDelta);
 
@@ -1387,6 +1757,22 @@ namespace Engine
 		sceneSystem->Update(currentFrame.ScaledDelta);
 		zone.emplace(profiler, "Camera components");
 		ApplyCameraComponents();
+
+		if (audioSystem)
+		{
+			zone.emplace(profiler, "Audio");
+			AudioListener listener;
+			listener.Position = camera.GetPosition();
+			listener.Forward = camera.GetForward();
+			listener.Up = camera.GetUp();
+			audioSystem->Update(realDelta, listener);
+		}
+
+		if (shaderHotReload)
+		{
+			shaderHotReload->Update();
+		}
+
 		zone.reset();
 
 		if (!frameRenderer)
@@ -1453,6 +1839,12 @@ namespace Engine
 		{
 			const auto renderStart = std::chrono::steady_clock::now();
 			const bool rendered = frameRenderer->Render(input);
+
+			if (framePacing)
+			{
+				framePacing->EndFrame();
+			}
+
 			profiler.Add("cpu", "Render (renderer CPU total)",
 				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - renderStart).count());
 			RecordFrameProfile(0.0);
@@ -1589,6 +1981,23 @@ namespace Engine
 		started = false;
 		running = false;
 		int firstError = 0;
+
+		// Before scenes exit: their variables are still registered and get saved.
+		if (commandRegistry && commandRegistry->IsConfigDirty())
+		{
+			if (const auto path = GetUserConfigPath(); !path.empty())
+			{
+				if (commandRegistry->SaveConfig(path))
+				{
+					commandRegistry->MarkConfigSaved();
+				}
+				else
+				{
+					std::cerr << "[Config] Could not write " << path.string() << '\n';
+				}
+			}
+		}
+
 		const auto record = [&firstError](std::string_view name, int result)
 		{
 			if (result != 0)
@@ -1633,6 +2042,17 @@ namespace Engine
 		console.reset();
 		uiRuntime.reset();
 		renderServices = {};
+		if (framePacing)
+		{
+			framePacing->SetDevice(nullptr);
+		}
+
+		if (renderQuality)
+		{
+			renderQuality->SetSettings(nullptr);
+		}
+
+		shaderHotReload.reset();
 		frameRenderer.reset();
 		renderDevice.reset();
 
@@ -1649,7 +2069,13 @@ namespace Engine
 		}
 
 		physicsSystem.reset();
+		windowSettings.reset();
+		framePacing.reset();
+		renderQuality.reset();
+		shaderTweaks.reset();
+		audioSystem.reset();
 		commandRegistry.reset();
+		actionMap.reset();
 		inputSystem.reset();
 		ioSystem.reset();
 

@@ -5,6 +5,7 @@
 #include "Engine/EngineConfig.h"
 #include "Engine/EngineState.h"
 #include "Engine/IO/AsyncIoService.h"
+#include "Engine/Input/ActionMap.h"
 #include "Engine/Input/InputSystem.h"
 #include "Engine/Jobs/JobSystem.h"
 #include "Engine/Machine.h"
@@ -36,6 +37,12 @@ namespace Engine
 	class SceneRenderBridge;
 	class SceneSystem;
 	class UiRuntime;
+	class WindowSettings;
+	class FramePacing;
+	class AudioSystem;
+	class RenderQuality;
+	class ShaderHotReload;
+	class ShaderTweaks;
 
 	// The engine runtime (Phase 22/23). Owns the platform window, the core services
 	// (jobs, async IO, assets, frame memory, input, commands), the engine state machine
@@ -118,9 +125,21 @@ namespace Engine
 
 		Swim::Input::InputSystem* GetInputSystem() { return inputSystem.get(); }
 
+		// Rebindable actions (bind/unbind/bind_list/bind_reset; saved in the user config).
+		Swim::Input::ActionMap* GetActions() { return actionMap.get(); }
+
 		Swim::Commands::CommandRegistry* GetCommandRegistry() { return commandRegistry.get(); }
 
 		RuntimeConsole* GetConsole() { return console.get(); }
+
+		// window_mode / window_display / window_resolution and fullscreen_toggle.
+		WindowSettings* GetWindowSettings() { return windowSettings.get(); }
+
+		// video_present_mode / video_fps_max / video_low_latency and the pacing statistics.
+		FramePacing* GetFramePacing() { return framePacing.get(); }
+
+		// Null with --audio=off.
+		AudioSystem* GetAudio() { return audioSystem.get(); }
 
 		RuntimeConsoleOverlay* GetConsoleOverlay() { return consoleOverlay.get(); }
 
@@ -154,6 +173,10 @@ namespace Engine
 
 		bool IsMinimized() const { return minimized; }
 
+		// The user config file (EngineConfig::UserConfigFile under the user-data root);
+		// empty when disabled.
+		std::filesystem::path GetUserConfigPath() const;
+
 		// Saves the next rendered frame (binary PPM). False without a renderer.
 		bool RequestCapture(std::filesystem::path path);
 
@@ -166,6 +189,8 @@ namespace Engine
 		int InitRenderer();
 
 		void RegisterEngineCommands();
+
+		void RegisterInputCommands();
 
 		void CreateConsole();
 
@@ -249,12 +274,19 @@ namespace Engine
 		// Destroyed in reverse dependency order by Exit (scenes before the renderer and
 		// its services).
 		std::unique_ptr<Swim::Input::InputSystem> inputSystem;
+		std::unique_ptr<Swim::Input::ActionMap> actionMap;
 		std::unique_ptr<Swim::Commands::CommandRegistry> commandRegistry;
+		std::unique_ptr<WindowSettings> windowSettings;
+		std::unique_ptr<FramePacing> framePacing;
+		std::unique_ptr<AudioSystem> audioSystem;
+		std::unique_ptr<RenderQuality> renderQuality;
+		std::unique_ptr<ShaderTweaks> shaderTweaks;
 		std::unique_ptr<SceneSystem> sceneSystem;
 		std::unique_ptr<CameraSystem> cameraSystem;
 		std::unique_ptr<PhysicsSystem> physicsSystem;
 		std::unique_ptr<RenderDevice> renderDevice;
 		std::unique_ptr<FrameRenderer> frameRenderer;
+		std::unique_ptr<ShaderHotReload> shaderHotReload; // Development builds with DevPaths.cfg.
 		std::unique_ptr<RenderToggles> renderToggles;
 		std::unique_ptr<SceneRenderBridge> renderBridge;
 		std::unique_ptr<UiRuntime> uiRuntime;

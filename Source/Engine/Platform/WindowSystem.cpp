@@ -188,6 +188,53 @@ namespace Swim::Platform
 				case SDL_SCANCODE_F11: return ScanCode::F11;
 				case SDL_SCANCODE_F12: return ScanCode::F12;
 				case SDL_SCANCODE_GRAVE: return ScanCode::Grave;
+				case SDL_SCANCODE_MINUS: return ScanCode::Minus;
+				case SDL_SCANCODE_EQUALS: return ScanCode::Equals;
+				case SDL_SCANCODE_LEFTBRACKET: return ScanCode::LeftBracket;
+				case SDL_SCANCODE_RIGHTBRACKET: return ScanCode::RightBracket;
+				case SDL_SCANCODE_BACKSLASH: return ScanCode::Backslash;
+				case SDL_SCANCODE_SEMICOLON: return ScanCode::Semicolon;
+				case SDL_SCANCODE_APOSTROPHE: return ScanCode::Apostrophe;
+				case SDL_SCANCODE_COMMA: return ScanCode::Comma;
+				case SDL_SCANCODE_PERIOD: return ScanCode::Period;
+				case SDL_SCANCODE_SLASH: return ScanCode::Slash;
+				case SDL_SCANCODE_CAPSLOCK: return ScanCode::CapsLock;
+				case SDL_SCANCODE_LGUI: return ScanCode::LeftSuper;
+				case SDL_SCANCODE_RGUI: return ScanCode::RightSuper;
+				case SDL_SCANCODE_APPLICATION: return ScanCode::Menu;
+				case SDL_SCANCODE_PRINTSCREEN: return ScanCode::PrintScreen;
+				case SDL_SCANCODE_SCROLLLOCK: return ScanCode::ScrollLock;
+				case SDL_SCANCODE_PAUSE: return ScanCode::Pause;
+				case SDL_SCANCODE_NUMLOCKCLEAR: return ScanCode::NumLock;
+				case SDL_SCANCODE_KP_0: return ScanCode::Keypad0;
+				case SDL_SCANCODE_KP_1: return ScanCode::Keypad1;
+				case SDL_SCANCODE_KP_2: return ScanCode::Keypad2;
+				case SDL_SCANCODE_KP_3: return ScanCode::Keypad3;
+				case SDL_SCANCODE_KP_4: return ScanCode::Keypad4;
+				case SDL_SCANCODE_KP_5: return ScanCode::Keypad5;
+				case SDL_SCANCODE_KP_6: return ScanCode::Keypad6;
+				case SDL_SCANCODE_KP_7: return ScanCode::Keypad7;
+				case SDL_SCANCODE_KP_8: return ScanCode::Keypad8;
+				case SDL_SCANCODE_KP_9: return ScanCode::Keypad9;
+				case SDL_SCANCODE_KP_DIVIDE: return ScanCode::KeypadDivide;
+				case SDL_SCANCODE_KP_MULTIPLY: return ScanCode::KeypadMultiply;
+				case SDL_SCANCODE_KP_MINUS: return ScanCode::KeypadMinus;
+				case SDL_SCANCODE_KP_PLUS: return ScanCode::KeypadPlus;
+				case SDL_SCANCODE_KP_ENTER: return ScanCode::KeypadEnter;
+				case SDL_SCANCODE_KP_PERIOD: return ScanCode::KeypadPeriod;
+				case SDL_SCANCODE_F13: return ScanCode::F13;
+				case SDL_SCANCODE_F14: return ScanCode::F14;
+				case SDL_SCANCODE_F15: return ScanCode::F15;
+				case SDL_SCANCODE_F16: return ScanCode::F16;
+				case SDL_SCANCODE_F17: return ScanCode::F17;
+				case SDL_SCANCODE_F18: return ScanCode::F18;
+				case SDL_SCANCODE_F19: return ScanCode::F19;
+				case SDL_SCANCODE_F20: return ScanCode::F20;
+				case SDL_SCANCODE_F21: return ScanCode::F21;
+				case SDL_SCANCODE_F22: return ScanCode::F22;
+				case SDL_SCANCODE_F23: return ScanCode::F23;
+				case SDL_SCANCODE_F24: return ScanCode::F24;
+				case SDL_SCANCODE_NONUSBACKSLASH: return ScanCode::NonUsBackslash;
 				default: return ScanCode::Unknown;
 			}
 		}
@@ -476,6 +523,50 @@ namespace Swim::Platform
 		SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, desc.Resizable);
 		SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, desc.HighPixelDensity);
 		SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_HIDDEN_BOOLEAN, desc.Hidden);
+		SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_MAXIMIZED_BOOLEAN, desc.Maximized && desc.Mode == WindowMode::Windowed);
+
+		SDL_DisplayID display = static_cast<SDL_DisplayID>(desc.Display);
+
+		if (desc.DisplayIndex != 0)
+		{
+			int count = 0;
+
+			if (SDL_DisplayID* displays = SDL_GetDisplays(&count))
+			{
+				if (desc.DisplayIndex <= static_cast<uint32_t>(count))
+				{
+					display = displays[desc.DisplayIndex - 1];
+				}
+				else
+				{
+					std::cerr << "Display " << desc.DisplayIndex << " does not exist (" << count << " connected); using the default.\n";
+				}
+
+				SDL_free(displays);
+			}
+		}
+
+		// Showing maximized always activates, so a window that must not take focus is sized
+		// to the display's usable area instead.
+		SDL_Rect usable{};
+		const bool fillUsable = !desc.Activate && desc.Maximized && desc.Mode == WindowMode::Windowed && !desc.ExternalWindow.IsValid() &&
+			SDL_GetDisplayUsableBounds(display != 0 ? display : SDL_GetPrimaryDisplay(), &usable);
+
+		if (fillUsable)
+		{
+			constexpr int TitleBar = 32;
+			SDL_SetBooleanProperty(properties, SDL_PROP_WINDOW_CREATE_MAXIMIZED_BOOLEAN, false);
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, usable.x);
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, usable.y + TitleBar);
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, usable.w);
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, usable.h - TitleBar);
+		}
+		else if (display != 0 && !desc.ExternalWindow.IsValid())
+		{
+			const Sint64 centered = static_cast<Sint64>(SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, centered);
+			SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, centered);
+		}
 
 		if (desc.GraphicsSupport == WindowGraphicsSupport::Vulkan)
 		{
@@ -489,6 +580,8 @@ namespace Swim::Platform
 			return nullptr;
 		}
 
+		SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, desc.Activate ? "1" : "0");
+		SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, desc.Activate ? "1" : "0");
 		SDL_Window* sdlWindow = SDL_CreateWindowWithProperties(properties);
 		SDL_DestroyProperties(properties);
 
@@ -501,6 +594,20 @@ namespace Swim::Platform
 		auto windowImpl = std::make_unique<Window::Impl>();
 		windowImpl->Window = sdlWindow;
 		windowImpl->ExternalWindow = desc.ExternalWindow.IsValid();
+		windowImpl->CaptureMouse = desc.CaptureMouse;
+
+		// The decoration size is only known once the window exists; refit so the whole frame sits
+		// inside the usable area like a maximized window.
+		int top = 0;
+		int left = 0;
+		int bottom = 0;
+		int right = 0;
+
+		if (fillUsable && SDL_GetWindowBordersSize(sdlWindow, &top, &left, &bottom, &right))
+		{
+			SDL_SetWindowPosition(sdlWindow, usable.x + left, usable.y + top);
+			SDL_SetWindowSize(sdlWindow, usable.w - left - right, usable.h - top - bottom);
+		}
 
 		if (desc.ExternalParent.IsValid())
 		{
@@ -526,7 +633,14 @@ namespace Swim::Platform
 		#endif
 		}
 
-		return std::unique_ptr<Window>(new Window(std::move(windowImpl)));
+		auto window = std::unique_ptr<Window>(new Window(std::move(windowImpl)));
+
+		if (desc.Mode != WindowMode::Windowed && !window->IsExternal())
+		{
+			window->SetMode(desc.Mode, &desc.FullscreenMode);
+		}
+
+		return window;
 	}
 
 	void WindowSystem::PumpEvents(const WindowEventHandler& windowHandler, const InputEventHandler& inputHandler)
@@ -572,11 +686,41 @@ namespace Swim::Platform
 					if (windowHandler) { windowHandler(MakeWindowEvent(WindowEventType::Maximized, event.window.windowID)); }
 					break;
 				case SDL_EVENT_WINDOW_FOCUS_GAINED:
-					if (windowHandler) { windowHandler(MakeWindowEvent(WindowEventType::FocusGained, event.window.windowID)); }
-					break;
 				case SDL_EVENT_WINDOW_FOCUS_LOST:
-					if (windowHandler) { windowHandler(MakeWindowEvent(WindowEventType::FocusLost, event.window.windowID)); }
+				{
+					const bool gained = event.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+
+					if (SDL_Window* window = SDL_GetWindowFromID(event.window.windowID))
+					{
+						const bool requested =
+							SDL_GetBooleanProperty(SDL_GetWindowProperties(window), Internal::RelativeMouseRequestedProperty, false);
+
+						if (requested)
+						{
+							SDL_SetWindowRelativeMouseMode(window, gained);
+						}
+					}
+
+					if (windowHandler)
+					{
+						windowHandler(MakeWindowEvent(gained ? WindowEventType::FocusGained : WindowEventType::FocusLost, event.window.windowID));
+					}
+
 					break;
+				}
+				case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+				case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+					if (windowHandler) { windowHandler(MakeWindowEvent(WindowEventType::ModeChanged, event.window.windowID)); }
+					break;
+				case SDL_EVENT_DISPLAY_ADDED:
+				case SDL_EVENT_DISPLAY_REMOVED:
+				case SDL_EVENT_DISPLAY_DESKTOP_MODE_CHANGED:
+				{
+					WindowEvent displays{};
+					displays.Type = WindowEventType::DisplaysChanged;
+					if (windowHandler) { windowHandler(displays); }
+					break;
+				}
 				case SDL_EVENT_WINDOW_MOUSE_ENTER:
 					if (windowHandler) { windowHandler(MakeWindowEvent(WindowEventType::MouseEntered, event.window.windowID)); }
 					break;
@@ -758,6 +902,26 @@ namespace Swim::Platform
 
 			const float contentScale = SDL_GetDisplayContentScale(displays[i]);
 			info.ContentScale = contentScale > 0.0f ? contentScale : 1.0f;
+			info.Primary = displays[i] == SDL_GetPrimaryDisplay();
+
+			if (const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(displays[i]))
+			{
+				info.DesktopMode = { static_cast<uint32_t>(std::max(desktop->w, 0)), static_cast<uint32_t>(std::max(desktop->h, 0)),
+					desktop->refresh_rate, desktop->pixel_density };
+			}
+
+			int modeCount = 0;
+
+			if (SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(displays[i], &modeCount))
+			{
+				for (int m = 0; m < modeCount; ++m)
+				{
+					info.Modes.push_back({ static_cast<uint32_t>(std::max(modes[m]->w, 0)), static_cast<uint32_t>(std::max(modes[m]->h, 0)),
+						modes[m]->refresh_rate, modes[m]->pixel_density });
+				}
+
+				SDL_free(modes);
+			}
 			result.push_back(std::move(info));
 		}
 

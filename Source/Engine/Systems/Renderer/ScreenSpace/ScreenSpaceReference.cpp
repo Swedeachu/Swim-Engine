@@ -340,14 +340,16 @@ namespace Swim::Render::ScreenSpace
 		inv[15] =
 			a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
 		const double det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
-		double scale = 0.0;
+		// Relative to the Hadamard bound, so large translations do not count as singular.
+		double bound = 1.0;
 
-		for (const double v : a)
+		for (int column = 0; column < 4; ++column)
 		{
-			scale = std::max(scale, std::abs(v));
+			const double* c = &a[column * 4];
+			bound *= std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + c[3] * c[3]);
 		}
 
-		if (!std::isfinite(det) || std::abs(det) <= 1.0e-12 * scale * scale * scale * scale)
+		if (!std::isfinite(det) || std::abs(det) <= 1.0e-12 * bound)
 		{
 			return std::nullopt;
 		}

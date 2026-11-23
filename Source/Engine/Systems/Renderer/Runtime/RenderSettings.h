@@ -18,6 +18,16 @@
 namespace Engine
 {
 
+	// How the frame is anti-aliased. Fxaa and Smaa1x run on the display-referred frame after
+	// tone mapping (no history, no jitter, nothing smears); Taa resolves jittered history.
+	enum class AntiAliasingMode : std::uint8_t
+	{
+		Off,
+		Fxaa,
+		Smaa1x,
+		Taa,
+	};
+
 	// Every runtime rendering switch (Phase 23). The FrameRenderer reads it each frame;
 	// the sandbox control panel edits it live. Invalid values are clamped by Sanitize.
 	struct RenderSettings
@@ -76,10 +86,17 @@ namespace Engine
 
 		// Effects.
 		bool Particles = true;
-		bool TemporalAntiAliasing = true;
+		bool TemporalAntiAliasing = true; // Taa only (false: no anti-aliasing while Taa is chosen).
+		AntiAliasingMode AntiAliasing = AntiAliasingMode::Taa;
+		float Sharpening = 0.0f; // Contrast-adaptive sharpening after anti-aliasing, 0..1 (0 = off).
+		bool CinematicEffects = true; // Off: render features with IsCinematic() are skipped.
 		Swim::Render::TemporalSettings Temporal{};
 		Swim::Render::ScreenSpaceSettings ScreenSpace{};
 		Swim::Render::PostProcessSettings Post{};
+
+		// Bytes a StreamingBuffer uploads per frame (render features pass it to Import;
+		// the console variable render_upload_budget_mb).
+		std::uint64_t StreamingUploadBudget = 16ull << 20;
 
 		// Overlays.
 		bool Ui = true;

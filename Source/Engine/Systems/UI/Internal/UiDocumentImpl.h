@@ -162,6 +162,8 @@ namespace Swim::UI
 		std::vector<UiEvent> CallbackEvents;
 		std::vector<UiEvent> DispatchScratch; // Reused by DispatchCallbacks.
 		bool DispatchingCallbacks = false;
+		std::function<void(const UiEvent&)> Observer;
+		std::unordered_map<std::string, UiNodeId> Names;
 
 		void QueueEvent(UiEvent event);
 

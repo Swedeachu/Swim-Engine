@@ -32,7 +32,7 @@ function(swim_add_header_boundary TARGET_NAME)
 	endif()
 
 	target_include_directories(${TARGET_NAME} PRIVATE
-		${CMAKE_SOURCE_DIR}/Source
+		${PROJECT_SOURCE_DIR}/Source
 		${SWIM_BOUNDARY_INCLUDE}
 	)
 	target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
@@ -45,7 +45,7 @@ function(swim_add_header_boundary TARGET_NAME)
 		target_compile_options(${TARGET_NAME} PRIVATE /utf-8 /W3 /permissive-)
 	endif()
 
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES ${SWIM_BOUNDARY_SOURCE})
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES ${SWIM_BOUNDARY_SOURCE})
 	swim_set_solution_folder(${TARGET_NAME} "${SWIM_SOLUTION_FOLDER_TESTS}/Header Boundary")
 endfunction()
 
@@ -54,8 +54,8 @@ function(swim_collect_test_suite_sources OUT_VARIABLE)
 	set(COLLECTED "")
 	foreach(SUITE_DIRECTORY ${ARGN})
 		file(GLOB_RECURSE GROUP_SOURCES
-			${CMAKE_SOURCE_DIR}/Source/Tests/Suites/${SUITE_DIRECTORY}/*.cpp
-			${CMAKE_SOURCE_DIR}/Source/Tests/Suites/${SUITE_DIRECTORY}/*.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Suites/${SUITE_DIRECTORY}/*.cpp
+			${PROJECT_SOURCE_DIR}/Source/Tests/Suites/${SUITE_DIRECTORY}/*.h
 		)
 		list(APPEND COLLECTED ${GROUP_SOURCES})
 	endforeach()
@@ -94,7 +94,7 @@ function(swim_configure_tests)
 	# compile directly into whichever real binary needs them -- see
 	# CMakeLists.txt's "Engine module source discovery"). Neither gate needs a
 	# LINK any more: both public headers only ever needed the default
-	# ${CMAKE_SOURCE_DIR}/Source include dir that swim_add_header_boundary()
+	# ${PROJECT_SOURCE_DIR}/Source include dir that swim_add_header_boundary()
 	# already sets, and an OBJECT library like this one never actually links,
 	# so RhiVulkanPublicHeaders.cpp taking the address of
 	# Swim::RhiVulkan::CreateGraphicsSystem only needs the declaration.
@@ -142,11 +142,11 @@ function(swim_configure_tests)
 	# --- The single test program -------------------------------------------
 
 	set(SWIM_TEST_FRAMEWORK_SOURCES
-		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/Test.h
-		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/Test.cpp
-		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/TestRunner.h
-		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/TestRunner.cpp
-		${CMAKE_SOURCE_DIR}/Source/Tests/Framework/TestMain.cpp
+		${PROJECT_SOURCE_DIR}/Source/Tests/Framework/Test.h
+		${PROJECT_SOURCE_DIR}/Source/Tests/Framework/Test.cpp
+		${PROJECT_SOURCE_DIR}/Source/Tests/Framework/TestRunner.h
+		${PROJECT_SOURCE_DIR}/Source/Tests/Framework/TestRunner.cpp
+		${PROJECT_SOURCE_DIR}/Source/Tests/Framework/TestMain.cpp
 	)
 
 	# Foundation suites that remain fully buildable even when dependency stubs are
@@ -229,7 +229,7 @@ function(swim_configure_tests)
 	if(TARGET SwimAssetCompiler)
 		swim_collect_test_suite_sources(SWIM_ASSET_COMPILER_SUITES AssetCompiler)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_ASSET_COMPILER_SUITES})
-		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/DracoTriangleFixture.h)
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/DracoTriangleFixture.h)
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::AssetCompiler Swim::AssetCompilerDraco)
 	endif()
 
@@ -283,14 +283,14 @@ function(swim_configure_tests)
 	if(SWIM_VULKAN_RHI_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_VULKAN_RHI_SUITES RHIVulkan)
 		list(APPEND SWIM_TEST_FIXTURE_SOURCES
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanComputeCapture.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanStorageTextureCapture.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/SampledDimensionData.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanSmokeDiagnostics.h
-			${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/VulkanValidationCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanCommandCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanPipelineCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanDescriptorCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanComputeCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanStorageTextureCapture.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/SampledDimensionData.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanSmokeDiagnostics.h
+			${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/VulkanValidationCapture.h
 		)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_VULKAN_RHI_SUITES})
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})
@@ -302,7 +302,7 @@ function(swim_configure_tests)
 	if(SWIM_PHYSX_BACKEND_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_PHYSX_SUITES Physics/PhysX)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_PHYSX_SUITES})
-		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_PHYSX_BACKEND_SOURCES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::PhysX)
 		if(TARGET SwimPhysXBuild)
@@ -313,7 +313,7 @@ function(swim_configure_tests)
 	if(SWIM_JOLT_BACKEND_AVAILABLE)
 		swim_collect_test_suite_sources(SWIM_JOLT_SUITES Physics/Jolt)
 		list(APPEND SWIM_TEST_SUITE_SOURCES ${SWIM_JOLT_SUITES})
-		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
+		list(APPEND SWIM_TEST_FIXTURE_SOURCES ${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/PhysicsBackendContract.h)
 		list(APPEND SWIM_TEST_MODULE_SOURCES ${SWIM_JOLT_BACKEND_SOURCES})
 		list(APPEND SWIM_TEST_LINK_LIBRARIES Swim::Jolt)
 	endif()
@@ -340,11 +340,11 @@ function(swim_configure_tests)
 		set_source_files_properties(${SWIM_TEST_FIXTURE_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
 	endif()
 
-	target_include_directories(SwimTests PRIVATE ${CMAKE_BINARY_DIR}/Generated ${CMAKE_SOURCE_DIR}/Source)
+	target_include_directories(SwimTests PRIVATE ${PROJECT_BINARY_DIR}/Generated ${PROJECT_SOURCE_DIR}/Source)
 	if(SWIM_TEXT_DEPENDENCIES_AVAILABLE)
 		target_compile_definitions(SwimTests PRIVATE
-			SWIM_TEXT_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf"
-			SWIM_TEXT_FALLBACK_FONT_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFallbackFixture.ttf")
+			SWIM_TEXT_FONT_FIXTURE_PATH="${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFixture.ttf"
+			SWIM_TEXT_FALLBACK_FONT_FIXTURE_PATH="${PROJECT_SOURCE_DIR}/Source/Tests/Fixtures/Fonts/SwimTextFallbackFixture.ttf")
 	endif()
 	target_compile_features(SwimTests PRIVATE cxx_std_20)
 	target_link_libraries(SwimTests PRIVATE ${SWIM_TEST_LINK_LIBRARIES})
@@ -364,7 +364,7 @@ function(swim_configure_tests)
 			SWIM_ENABLE_DEV_ASSET_AUTOCOOK=0
 			SWIM_ENABLE_PHYSX_BACKEND=$<BOOL:${SWIM_PHYSX_BACKEND_AVAILABLE}>
 			SWIM_ENABLE_JOLT_BACKEND=$<BOOL:${SWIM_JOLT_BACKEND_AVAILABLE}>
-			SWIM_TEST_ASSET_ROOT="${CMAKE_SOURCE_DIR}/Assets"
+			SWIM_TEST_ASSET_ROOT="${PROJECT_SOURCE_DIR}/Assets"
 			$<$<CONFIG:Debug>:_SWIM_DEBUG>
 		)
 	endif()
@@ -525,7 +525,7 @@ function(swim_configure_tests)
 		endif()
 	endif()
 
-	source_group(TREE ${CMAKE_SOURCE_DIR} FILES
+	source_group(TREE ${PROJECT_SOURCE_DIR} FILES
 		${SWIM_TEST_FRAMEWORK_SOURCES}
 		${SWIM_TEST_FIXTURE_SOURCES}
 		${SWIM_TEST_SUITE_SOURCES}
@@ -533,7 +533,7 @@ function(swim_configure_tests)
 	)
 	swim_set_solution_folder(SwimTests "${SWIM_SOLUTION_FOLDER_TESTS}")
 
-	set_property(TARGET SwimTests PROPERTY VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+	set_property(TARGET SwimTests PROPERTY VS_DEBUGGER_WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 	list(LENGTH SWIM_TEST_SUITE_SOURCES SWIM_TEST_SUITE_SOURCE_COUNT)
 	message(STATUS "Swim tests: SwimTests compiles ${SWIM_TEST_SUITE_SOURCE_COUNT} suite source file(s)")

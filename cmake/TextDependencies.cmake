@@ -39,7 +39,7 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/FreeType")
 CPMAddPackage(
 	NAME swim_freetype_source
 	GITHUB_REPOSITORY freetype/freetype
-	GIT_TAG VER-2-14-3
+	GIT_TAG VER-2-15-0
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 	OPTIONS "SKIP_INSTALL_ALL ON"
@@ -59,14 +59,14 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/HarfBuzz")
 CPMAddPackage(
 	NAME swim_harfbuzz_source
 	GITHUB_REPOSITORY harfbuzz/harfbuzz
-	GIT_TAG 14.5.0
+	GIT_TAG 15.2.0
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 )
 
 set(SWIM_HARFBUZZ_SOURCE "${swim_harfbuzz_source_SOURCE_DIR}/src/harfbuzz.cc")
 if(NOT EXISTS "${SWIM_HARFBUZZ_SOURCE}")
-	message(FATAL_ERROR "HarfBuzz 14.5.0 source is missing src/harfbuzz.cc" ${SWIM_TEXT_DEPENDENCY_HINT})
+	message(FATAL_ERROR "HarfBuzz 15.2.0 source is missing src/harfbuzz.cc" ${SWIM_TEXT_DEPENDENCY_HINT})
 endif()
 add_library(SwimHarfBuzz STATIC EXCLUDE_FROM_ALL "${SWIM_HARFBUZZ_SOURCE}")
 target_include_directories(SwimHarfBuzz SYSTEM PUBLIC "${swim_harfbuzz_source_SOURCE_DIR}/src")
@@ -90,7 +90,7 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/msdfgen")
 CPMAddPackage(
 	NAME swim_msdfgen_source
 	GITHUB_REPOSITORY Chlumsky/msdfgen
-	GIT_TAG v1.13
+	GIT_TAG v1.13.1
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
@@ -129,7 +129,7 @@ set(CMAKE_FOLDER "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/Text/libunibreak")
 CPMAddPackage(
 	NAME swim_unibreak_source
 	GITHUB_REPOSITORY adah1972/libunibreak
-	GIT_TAG libunibreak_8_0
+	GIT_TAG libunibreak_8_0_1
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 )
@@ -162,7 +162,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")
 
 if(NOT TARGET msdfgen::msdfgen-core)
-	message(FATAL_ERROR "msdfgen v1.13 did not provide msdfgen::msdfgen-core" ${SWIM_TEXT_DEPENDENCY_HINT})
+	message(FATAL_ERROR "msdfgen v1.13.1 did not provide msdfgen::msdfgen-core" ${SWIM_TEXT_DEPENDENCY_HINT})
 endif()
 # msdfgen pins its own MSVC runtime (the Debug CRT in Debug). Swim links one
 # runtime everywhere (CMAKE_MSVC_RUNTIME_LIBRARY), so follow it instead.

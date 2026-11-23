@@ -221,7 +221,7 @@ foreach(SWIM_PHYSX_CONFIG IN ITEMS checked release)
 		PhysXExtensions_static_64.lib
 		PhysXCooking_static_64.lib
 		PhysXCharacterKinematic_static_64.lib
-		PhysXVehicle2_static_64.lib
+		PhysXVehicle_static_64.lib
 		PhysXPvdSDK_static_64.lib
 	)
 		file(GLOB_RECURSE SWIM_PHYSX_LIBRARY_CANDIDATES

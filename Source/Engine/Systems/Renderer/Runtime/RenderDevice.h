@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -102,7 +103,21 @@ namespace Engine
 		bool Present(const Frame& frame);
 
 		// Records the frame's completion (the safe point of a swapchain rebuild).
-		void SetLastCompletion(Swim::Rhi::TimelinePoint completion) { lastCompletion = completion; }
+		void SetLastCompletion(Swim::Rhi::TimelinePoint completion);
+
+		Swim::Rhi::TimelinePoint GetLastCompletion() const { return lastCompletion; }
+
+		// Submitted frames the GPU has not finished.
+		std::uint32_t GetQueuedFrames();
+
+		// Blocks until the GPU has finished every submitted frame (frame pacing); false on timeout.
+		bool WaitForQueuedFrames(std::uint64_t timeoutNanoseconds);
+
+		// The present mode from the next frame on (the swapchain is rebuilt); headless ignores it.
+		void SetPresentMode(Swim::Rhi::PresentMode mode);
+
+		// What the swapchain presents with (Fifo headless).
+		Swim::Rhi::PresentMode GetPresentMode() const;
 
 		void WaitIdle();
 
@@ -125,6 +140,7 @@ namespace Engine
 		std::array<Swim::Rhi::Semaphore*, 1> waits{};
 		std::array<Swim::Rhi::Semaphore*, 1> signals{};
 		Swim::Rhi::TimelinePoint lastCompletion{};
+		std::deque<Swim::Rhi::TimelinePoint> queued; // Submitted, maybe unfinished.
 		// Already-signalled (value 0) retirement point for swapchain rebuilds before the first
 		// submission: Resize needs a same-device timeline even when nothing is in flight
 		// (Windows sends a resize before the first frame on DPI-scaled displays).

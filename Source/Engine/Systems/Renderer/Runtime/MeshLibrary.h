@@ -3,6 +3,7 @@
 #include "Engine/Assets/AssetHandle.h"
 #include "Engine/Assets/MeshAsset.h"
 #include "Engine/Assets/TextureAsset.h"
+#include "Engine/Systems/Renderer/RHI/RhiContracts.h"
 #include "Engine/Systems/Renderer/Resources/GpuHandle.h"
 #include "Engine/Systems/Renderer/Runtime/ProceduralMeshes.h"
 
@@ -67,13 +68,21 @@ namespace Engine
 
 		MeshHandle Find(std::string_view name) const;
 
+		// Drops a registered procedural mesh. Its GPU data is retired by the next
+		// FlushReleases, after every submission that may still draw it.
+		void Unregister(std::string_view name);
+
+		// Retires unregistered meshes once `lastUse` completes (the renderer calls it at frame start).
+		void FlushReleases(Swim::Rhi::TimelinePoint lastUse);
+
 		// A cooked mesh already declared in the AssetSystem (for example by the development
 		// asset bootstrap); requests residency. Invalid when unknown.
 		MeshHandle Load(std::string_view logicalPath);
 
-		// Textures: procedural RGBA8 images (mips generated) and cooked ones.
-		TextureHandle RegisterTexture(
-			std::string_view name, std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb = true);
+		// Textures: procedural RGBA8 images (mips generated unless `mips` is false, which keeps
+		// thin cut-out details intact at a distance) and cooked ones.
+		TextureHandle RegisterTexture(std::string_view name, std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8,
+			bool srgb = true, bool mips = true);
 
 		TextureHandle FindTexture(std::string_view name) const;
 
@@ -82,6 +91,11 @@ namespace Engine
 			std::string_view name, std::uint32_t size, std::uint32_t cells, std::array<std::uint8_t, 4> a, std::array<std::uint8_t, 4> b);
 
 		bool IsResident(MeshHandle mesh) const;
+
+		bool IsResident(TextureHandle texture) const;
+
+		// The texture's bindless index (for UI images and custom draws); the fallback element until resident.
+		std::uint32_t GetBindlessIndex(TextureHandle texture) const;
 
 		// The (index page, vertex page) of every resident mesh this library requested, in
 		// first-seen index-page order; one entry per index page.
@@ -116,10 +130,14 @@ namespace Engine
 		std::unordered_map<std::string, MeshHandle> meshes;		 // By logical path.
 		std::unordered_map<std::string, TextureHandle> textures; // By logical path.
 		std::vector<Swim::Render::GpuMeshHandle> extraMeshes;
+		std::vector<MeshHandle> released;
+		std::vector<TextureHandle> releasedTextures;
+		std::uint64_t revision = 0;
 
 	};
 
 	// A full RGBA8 mip chain (box filtered; sRGB images are filtered in linear space).
-	Swim::Assets::TextureAsset MakeTextureAsset(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb);
+	Swim::Assets::TextureAsset MakeTextureAsset(
+		std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba8, bool srgb, bool mips = true);
 
 } // namespace Engine

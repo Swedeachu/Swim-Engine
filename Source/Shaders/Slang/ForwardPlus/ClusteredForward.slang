@@ -8,15 +8,8 @@
 // pulled from the slot's GeometryHeap vertex page as StandardVertex (12 floats).
 // Each pixel: StandardPbrResolve -> every directional light + its cluster's local
 // lights, each times its shadow factor (Shadows/ShadowRecords.slang) + ambient +
-// optional IBL + emission. Mirrors ForwardPlus::Shade; bindings follow
-// ForwardPlusDrawBindings.
-#include "ClusteredLighting/ClusteredLighting.slang"
-#include "Environment/EnvironmentLighting.slang"
-#include "ForwardPlus/ForwardPlusRecords.slang"
-#include "GpuScene/GpuSceneRecords.slang"
-#include "GpuScene/VisibilityRecords.slang"
-#include "Shadows/ShadowRecords.slang"
-
+// optional IBL + emission. Mirrors ForwardPlus::Shade; bindings and lighting come from
+// ForwardFrame.slang (ForwardPlusDrawBindings).
 #ifndef FORWARD_TRANSPARENT
 #define FORWARD_TRANSPARENT 0
 #endif
@@ -45,116 +38,7 @@
 #ifndef FORWARD_DEFERRED_LOCAL
 #define FORWARD_DEFERRED_LOCAL 0
 #endif
-
-[[vk::binding(0, 0)]] StructuredBuffer<GpuInstanceRecord> Instances;
-[[vk::binding(1, 0)]] StructuredBuffer<GpuTransformRecord> Transforms;
-[[vk::binding(2, 0)]] StructuredBuffer<GpuDrawRecord> DrawRecords;
-[[vk::binding(3, 0)]] StructuredBuffer<float> Vertices;
-[[vk::binding(4, 0)]] StructuredBuffer<ForwardView> Views;
-[[vk::binding(5, 0)]] StructuredBuffer<StandardMaterialParameters> Materials;
-[[vk::binding(6, 0)]] StructuredBuffer<GpuLightRecord> Lights;
-[[vk::binding(7, 0)]] StructuredBuffer<GpuLightHeader> LightHeader;
-[[vk::binding(8, 0)]] StructuredBuffer<ClusterGrid> Grid;
-[[vk::binding(9, 0)]] StructuredBuffer<ClusterRecord> ClusterRecords;
-[[vk::binding(10, 0)]] StructuredBuffer<uint> ClusterIndices;
-[[vk::binding(11, 0)]] StructuredBuffer<float4> EnvironmentIrradiance;
-[[vk::binding(12, 0)]] TextureCube<float4> EnvironmentPrefiltered;
-[[vk::binding(13, 0)]] Texture2D<float4> EnvironmentBrdfLut;
-[[vk::binding(14, 0)]] SamplerState EnvironmentSampler;
-[[vk::binding(15, 0)]] Texture2D<float> ShadowAtlas;
-[[vk::binding(16, 0)]] StructuredBuffer<GpuShadowRecord> ShadowRecords;
-[[vk::binding(17, 0)]] StructuredBuffer<GpuShadowView> ShadowViews;
-[[vk::binding(0, 1)]] SamplerState Samplers[];
-[[vk::binding(1, 1)]] Texture2D<float4> Textures[];
-
-// ForwardPlus::LightShadow.
-float ForwardLightShadow(ForwardView view, GpuLightRecord light, float3 position, float3 normal, float3 toLight)
-{
-	if ((view.Flags & ForwardViewFlagShadows) == 0 || light.ShadowIndex == GpuLightNoShadow || (light.Flags & GpuLightFlagCastsShadows) == 0)
-	{
-		return 1.0;
-	}
-	const float cameraDepth = dot(position - view.CameraPosition, view.CameraForward);
-	return ShadowFactor(ShadowAtlas, ShadowRecords, ShadowViews, light.ShadowIndex, position, normal, toLight, cameraDepth);
-}
-
-// The direct term of ForwardPlus::Shade: directional lights and the cluster's list, shadowed.
-float3 ForwardDirect(ForwardView view, ClusterGrid grid, StandardPbrSurface surface, float3 toCamera, float3 position, float pixelX,
-	float pixelY, float viewDepth)
-{
-	const GpuLightHeader header = LightHeader[0];
-	const ClusterRecord record = ClusterRecords[ClusterIndexFor(grid, pixelX, pixelY, viewDepth)];
-	// One loop over the directional lights, then the cluster's list: a single call site
-	// keeps the shadow lookup inlined once (GPU-assisted validation instruments every
-	// storage-buffer access and flags shaders with too many).
-	// Local lights come from the cluster's bitmask: occupancy words name the non-zero mask
-	// words, and each set bit is a light (increasing index order, never truncated).
-	float3 sum = float3(0.0, 0.0, 0.0);
-	const uint occupancyWords = (FORWARD_DEFERRED_LOCAL == 0 && record.Count != 0) ? ClusterOccupancyWords(grid) : 0u;
-	uint nextOccupancy = 0;
-	uint occupancy = 0;
-	uint occupancyBase = 0;
-	uint mask = 0;
-	uint maskBase = 0;
-	uint directional = 0;
-	[loop]
-	for (;;)
-	{
-		uint row;
-		if (directional < header.DirectionalCount)
-		{
-			row = directional;
-			++directional;
-		}
-		else
-		{
-			if (mask == 0)
-			{
-				while (occupancy == 0 && nextOccupancy < occupancyWords)
-				{
-					occupancy = ClusterIndices[record.Offset + nextOccupancy];
-					occupancyBase = nextOccupancy * 32u;
-					++nextOccupancy;
-				}
-				if (occupancy == 0)
-				{
-					break;
-				}
-				const uint word = occupancyBase + firstbitlow(occupancy);
-				occupancy &= occupancy - 1u;
-				mask = ClusterIndices[record.Offset + occupancyWords + word];
-				maskBase = word * 32u;
-			}
-			row = header.FirstLocalRow + maskBase + firstbitlow(mask);
-			mask &= mask - 1u;
-		}
-		const GpuLightRecord light = Lights[row];
-		// Clusters are conservative: a local light out of range contributes exactly zero, so
-		// it is skipped before its direction, spot cone, BRDF and shadow are evaluated.
-		if (light.Type != GpuLightTypeDirectional)
-		{
-			const float3 delta = light.Position - position;
-			if (dot(delta, delta) * light.InverseRangeSquared >= 1.0)
-			{
-				continue;
-			}
-		}
-		const GpuLightSample sample = GpuLightEvaluate(light, position);
-		if (all(sample.Radiance <= float3(0.0, 0.0, 0.0)))
-		{
-			continue;
-		}
-		const float3 brdf = StandardPbrEvaluateBrdf(surface.BaseColor, surface.Metallic, surface.PerceptualRoughness, surface.Normal,
-			toCamera, sample.Direction);
-		// Facing away (zero BRDF): no shadow lookup (its PCF taps are the costliest part).
-		if (all(brdf <= float3(0.0, 0.0, 0.0)))
-		{
-			continue;
-		}
-		sum += brdf * sample.Radiance * ForwardLightShadow(view, light, position, surface.Normal, sample.Direction);
-	}
-	return sum;
-}
+#include "ForwardPlus/ForwardFrame.slang"
 
 struct VertexOutput
 {
@@ -263,6 +147,7 @@ struct ShadedPixel
 ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 {
 	const ForwardView view = Views[0];
+	const ClusterGrid grid = Grid[0];
 	const StandardMaterialParameters material = Materials[input.Material];
 	// ForwardPlus::BuildFrame: the rasterizer's facing, corrected for mirroring transforms.
 	const bool frontFacing = rasterFrontFacing != (input.Mirrored != 0u);
@@ -293,35 +178,12 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 		discard;
 	}
 
-	const ClusterGrid grid = Grid[0];
-	const float3 toCamera = normalize(view.CameraPosition - input.WorldPosition);
-	const float viewDepth = -dot(grid.ViewRow2, float4(input.WorldPosition, 1.0));
-	const float3 direct = ForwardDirect(view, grid, surface, toCamera, input.WorldPosition, input.Position.x, input.Position.y, viewDepth);
-	float3 ibl = float3(0.0, 0.0, 0.0);
+	const ForwardLighting lit = ForwardLightSurface(view, grid, surface, input.WorldPosition, input.Position.xy);
 	ShadedPixel pixel;
-	pixel.Specular = float3(0.0, 0.0, 0.0);
-	if ((view.Flags & ForwardViewFlagEnvironment) != 0)
-	{
-		const StandardPbrEnvironment environment = EnvironmentLookup(EnvironmentIrradiance, EnvironmentPrefiltered, view.PrefilteredMipCount,
-			EnvironmentBrdfLut, EnvironmentSampler, view.EnvironmentIntensity, view.EnvironmentRotation, surface, toCamera);
-		ibl = StandardPbrEvaluateEnvironment(surface, toCamera, environment);
-		pixel.Reflectance = StandardPbrEnvironmentSpecularWeight(surface, toCamera, environment.BrdfScale, environment.BrdfBias);
-		pixel.Specular = environment.Prefiltered * pixel.Reflectance;
-	}
-	else if ((view.Flags & ForwardViewFlagBrdfLut) != 0)
-	{
-		// A LUT without an environment (item 76): the reflectance screen-space reflections use.
-		const float roughness = clamp(surface.PerceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
-		const float nDotV = clamp(dot(surface.Normal, toCamera), 1.0e-4, 1.0);
-		const float2 ab = EnvironmentBrdfLut.SampleLevel(EnvironmentSampler, float2(nDotV, roughness), 0.0).rg;
-		pixel.Reflectance = StandardPbrEnvironmentSpecularWeight(surface, toCamera, ab.x, ab.y);
-	}
-	else
-	{
-		pixel.Reflectance = float3(0.0, 0.0, 0.0);
-	}
-	pixel.Indirect = view.Ambient * surface.BaseColor * surface.Occlusion + ibl;
-	pixel.Color = float4(direct + pixel.Indirect + surface.Emissive, surface.Alpha);
+	pixel.Specular = lit.Specular;
+	pixel.Reflectance = lit.Reflectance;
+	pixel.Indirect = lit.Indirect;
+	pixel.Color = float4(lit.Radiance, surface.Alpha);
 	pixel.Normal = surface.Normal;
 	pixel.Roughness = surface.PerceptualRoughness;
 	pixel.BaseColor = surface.BaseColor;
@@ -330,6 +192,7 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	pixel.Debug = float4(0.0, 0.0, 0.0, 1.0);
 	if (pixel.UseDebug)
 	{
+		const float viewDepth = -dot(grid.ViewRow2, float4(input.WorldPosition, 1.0));
 		const ClusterRecord record = ClusterRecords[ClusterIndexFor(grid, input.Position.x, input.Position.y, viewDepth)];
 		const float4 heat = ClusterHeatmapColor(record.Count, record.RawCount, grid.Limits.z);
 		pixel.Debug = heat.a > 0.0 ? heat : float4(0.0, 0.0, 0.0, 1.0);

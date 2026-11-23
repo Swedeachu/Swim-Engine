@@ -1039,8 +1039,7 @@ namespace Engine
 				bodyB,
 				manifold,
 				estimate,
-				settings.mCombinedFriction,
-				settings.mCombinedRestitution);
+				settings);
 
 			for (const float contactImpulse : estimate.mContactImpulse)
 			{

@@ -134,7 +134,8 @@ namespace Swim::Render
 		}
 	}
 
-	Internal::GeometryAllocation GeometryHeap::Allocate(Stream stream, std::uint64_t size, std::uint64_t alignment, std::string_view label)
+	Internal::GeometryAllocation GeometryHeap::Allocate(
+		Stream stream, std::uint64_t size, std::uint64_t alignment, std::string_view label, std::uint32_t partner)
 	{
 		const bool dedicated = size > PageSize(stream);
 
@@ -144,7 +145,7 @@ namespace Swim::Render
 			{
 				auto& page = pages[p];
 
-				if (page.Buffer && !page.Dedicated && page.Stream == stream)
+				if (page.Buffer && !page.Dedicated && page.Stream == stream && page.Partner == partner)
 				{
 					if (auto range = page.Allocator->Allocate(size, alignment))
 					{
@@ -186,6 +187,7 @@ namespace Swim::Render
 		Internal::GeometryPage page;
 		page.Stream = stream;
 		page.Dedicated = dedicated;
+		page.Partner = partner;
 		page.Buffer = std::move(buffer);
 		page.Allocator.emplace(capacity);
 		const auto range = page.Allocator->Allocate(size, alignment);
@@ -321,7 +323,7 @@ namespace Swim::Render
 
 			if (indexCount)
 			{
-				record.Index = Allocate(Stream::Index, mesh.Indices.size(), 4, "index");
+				record.Index = Allocate(Stream::Index, mesh.Indices.size(), 4, "index", record.Vertex.Page);
 			}
 
 			if (mesh.MeshletCount)

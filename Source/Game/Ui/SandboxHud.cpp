@@ -6,6 +6,8 @@
 #include "Engine/Input/InputSystem.h"
 #include "Engine/Runtime/SimulationClock.h"
 #include "Engine/Runtime/FrameProfiler.h"
+#include "Engine/Runtime/FramePacing.h"
+#include "Engine/Systems/Audio/AudioSystem.h"
 #include "Engine/Runtime/RenderToggles.h"
 #include "Engine/Runtime/UiRuntime.h"
 #include "Engine/Systems/Camera/CameraSystem.h"
@@ -216,6 +218,23 @@ namespace Game
 		}
 
 		document = render->Ui->CreateDocument();
+
+		if (auto* audio = scene->GetAudio())
+		{
+			// Interface sounds for every control of the panel (groups from the audio playground).
+			document->SetObserver(
+				[audio](const Swim::UI::UiEvent& event)
+				{
+					if (event.Kind == Swim::UI::UiEventKind::Click)
+					{
+						audio->PlayEvent("ui.activate");
+					}
+					else if (event.Kind == Swim::UI::UiEventKind::Enter)
+					{
+						audio->PlayEvent("ui.hover");
+					}
+				});
+		}
 		UiStyle rootStyle;
 		rootStyle.Flow = UiFlow::Overlay;
 		document->SetStyle(document->GetRoot(), rootStyle);
@@ -1087,6 +1106,14 @@ namespace Game
 			text << "Meshes " << s.ResidentMeshes << "   textures " << s.ResidentTextures << "   pending " << s.PendingAssets << "\n";
 		}
 
+		if (render->Pacing)
+		{
+			const auto& pacing = *render->Pacing;
+			const char* modes[] = { "auto", "vsync", "mailbox", "immediate" };
+			text << "Present " << modes[static_cast<int>(pacing.PresentMode) & 3] << "   latency " << Fixed(pacing.LatencyMilliseconds, 1)
+				 << " ms   queued " << pacing.QueuedFrames << "\n";
+		}
+
 		text << "Entities " << scene->GetEntityCount() << "   physics steps " << scene->GetPhysicsStepCount() << "\n";
 		text << "State " << Engine::ToString(scene->GetEngineState());
 
@@ -1113,7 +1140,7 @@ namespace Game
 			text << render->Stats->RenderObjects << " GPU scene objects, " << render->Stats->LocalLights << " clustered lights\n";
 		}
 
-		text << "Physics impacts: " << sandbox->GetImpacts() << "\n";
+		text << "Physics impacts: " << sandbox->GetImpacts() << ", balls in the sound zone: " << sandbox->GetZoneOccupants() << "\n";
 		text << "This panel is UI in the world: depth-tested and clickable.";
 		SetLabelText(*sandbox->GetInfoDocument(), sandbox->GetInfoBody(), text.str(), render->Ui->GetFonts(), 20.0f);
 	}

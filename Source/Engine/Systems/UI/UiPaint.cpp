@@ -186,6 +186,24 @@ namespace Swim::UI
 		if (v.TextColor.A > 0.0f)
 		{
 			const UiColor text = color(v.TextColor);
+			const auto& spans = node.TextOptions.Colors;
+			const auto glyphColor = [&](std::uint32_t cluster)
+			{
+				const auto after = std::upper_bound(spans.begin(), spans.end(), cluster,
+					[](std::uint32_t offset, const UiTextColorSpan& span)
+					{
+						return offset < span.Begin;
+					});
+
+				if (after == spans.begin())
+				{
+					return text;
+				}
+
+				UiColor straight = std::prev(after)->Color;
+				straight.A *= v.TextColor.A;
+				return color(straight);
+			};
 
 			for (const auto& glyph : layout.GetGlyphs())
 			{
@@ -193,7 +211,8 @@ namespace Swim::UI
 
 				if (entry.Page != Text::NoAtlasPage)
 				{
-					emit(GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip, text));
+					emit(GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip,
+						spans.empty() ? text : glyphColor(glyph.Cluster)));
 				}
 			}
 		}

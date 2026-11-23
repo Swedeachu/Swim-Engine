@@ -79,6 +79,10 @@ namespace Swim::RhiVulkan
 
 			bool Resize(Rhi::Extent2D requestedExtent, const Rhi::TimelinePoint& safeAfter) override;
 
+			void SetPresentMode(Rhi::PresentMode mode) override { desc.Mode = mode; }
+
+			Rhi::PresentMode GetPresentMode() const override;
+
 		private:
 
 			// Rebuilds the swapchain at the requested size. safeAfter is null only for

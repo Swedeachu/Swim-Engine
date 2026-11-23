@@ -15,7 +15,9 @@ namespace Swim::Input
 		ScanCode,
 		MouseButton,
 		GamepadButton,
-		GamepadAxis
+		GamepadAxis,
+		// Vertical wheel: Scale > 0 = up, < 0 = down; active for the frame it scrolls.
+		MouseWheel
 	};
 
 	struct InputBinding

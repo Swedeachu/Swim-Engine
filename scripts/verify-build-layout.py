@@ -167,7 +167,7 @@ def check_build_workflow(failures: list[str]) -> None:
         'include(cmake/SolutionLayout.cmake)',
         "# --- Engine module source discovery",
         "file(GLOB_RECURSE SWIM_ENGINE_SOURCES",
-        'source_group(TREE ${CMAKE_SOURCE_DIR} FILES',
+        'source_group(TREE ${PROJECT_SOURCE_DIR} FILES',
         'add_executable(SwimHelloWindow EXCLUDE_FROM_ALL',
         'add_executable(SwimHeadlessPlatform EXCLUDE_FROM_ALL',
         '"${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/SDL3"',
@@ -205,7 +205,7 @@ def check_build_workflow(failures: list[str]) -> None:
         fail("PhysX build orchestration is not grouped under Third Party/PhysX", failures)
 
     required_cache_fragments = (
-        'set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cache/cpm"',
+        'set(CPM_SOURCE_CACHE "${PROJECT_SOURCE_DIR}/.cache/cpm"',
         'set(CPM_USE_NAMED_CACHE_DIRECTORIES ON',
     )
     for fragment in required_cache_fragments:
@@ -225,7 +225,7 @@ def check_build_workflow(failures: list[str]) -> None:
 
     required_sdl_fragments = (
         'GITHUB_REPOSITORY libsdl-org/SDL',
-        'GIT_TAG release-3.4.14',
+        'GIT_TAG release-3.4.20',
         'UPDATE_DISCONNECTED YES',
         'set(SDL_AUDIO OFF',
         'set(SDL_CAMERA OFF',
@@ -572,21 +572,21 @@ def check_preserved_build_contract(failures: list[str]) -> None:
         '$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:_ITERATOR_DEBUG_LEVEL=0>',
         '$<$<CONFIG:Debug>:_SWIM_DEBUG>',
         '$<$<CONFIG:Debug>:/U_DEBUG>',
-        'target_precompile_headers(SwimEngine',
+        'target_precompile_headers(${target}',
     )
     for fragment in required_root_fragments:
         if fragment not in cmake_text:
             fail(f"legacy x64 build contract is missing from CMakeLists.txt: {fragment}", failures)
 
     required_physx_fragments = (
-        '107.3-omni-and-physx-5.6.1',
+        '110.3-omni-and-physx-5.9.1',
         'GIT_CONFIG',
         '"filter.lfs.process="',
         '"filter.lfs.required=false"',
         'config --local',
         'reset --hard HEAD',
         'clean -ffdx',
-        'SWIM_PHYSX_SHORT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/build/.px"',
+        'SWIM_PHYSX_SHORT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/build/.px"',
         '-DSWIM_PHYSX_SHORT_SOURCE_DIR=${SWIM_PHYSX_SHORT_SOURCE_DIR}',
         'IMPORTED_LOCATION_DEBUG "${SWIM_PHYSX_CHECKED_DIR}',
         'IMPORTED_LOCATION_RELEASE "${SWIM_PHYSX_RELEASE_DIR}',
@@ -633,10 +633,10 @@ def check_preserved_build_contract(failures: list[str]) -> None:
             fail(f"retired DXC/PRE_BUILD shader path is still active: {forbidden}", failures)
 
     required_dependency_contract_fragments = (
-        'NAME glm_source',
+        'NAME glm',
         'add_library(SwimGlm INTERFACE)',
         'add_library(glm::glm ALIAS SwimGlm)',
-        'NAME entt_source',
+        'NAME entt',
         'add_library(SwimEnTT INTERFACE)',
         'add_library(EnTT::EnTT ALIAS SwimEnTT)',
         'function(swim_assert_cached_git_dependency_clean dependency_name source_dir)',
@@ -720,8 +720,8 @@ def check_preserved_build_contract(failures: list[str]) -> None:
             )
 
     pins = (
-        'GIT_TAG 1.0.0',
-        'GIT_TAG v3.13.2',
+        'GIT_TAG 1.0.3',
+        'GIT_TAG v4.0.0',
     )
     for fragment in pins:
         if fragment not in dependency_contract_text:
@@ -737,7 +737,7 @@ def check_modern_cmake_dependency_compatibility(failures: list[str]) -> None:
     for retired in ("SwimZstd", "SwimBasisTranscoder", "SwimGlad", "SwimJson", "glad_add_library", "nlohmann_json"):
         if retired in dependency_text:
             fail(f"runtime dependency list regained a retired legacy dependency: {retired}", failures)
-    for fragment in ("NAME entt_source", "add_library(EnTT::EnTT ALIAS SwimEnTT)"):
+    for fragment in ("NAME entt", "add_library(EnTT::EnTT ALIAS SwimEnTT)"):
         if fragment not in dependency_text:
             fail(f"runtime dependency list is missing: {fragment}", failures)
     if (ROOT / "cmake" / "LegacyDependencies.cmake").exists():
@@ -827,7 +827,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
     required_foundation_fragments = (
         "file(GLOB_RECURSE SWIM_PLATFORM_SOURCES",
         "file(GLOB_RECURSE SWIM_INPUT_SOURCES",
-        "target_link_libraries(SwimEngine PRIVATE",
+        "target_link_libraries(SwimEngineRuntime",
         "${SWIM_SDL3_TARGET}",
     )
     for fragment in required_foundation_fragments:
@@ -890,7 +890,7 @@ def check_foundation_architecture_boundaries(failures: list[str]) -> None:
             )
 
     platform_compile_definition_block = re.search(
-        r"target_compile_definitions\(SwimEngine PRIVATE(?P<body>.*?)\n\)",
+        r"target_compile_definitions\(SwimEngineRuntime\b(?P<body>.*?)\n\)",
         cmake_text,
         re.DOTALL,
     )
@@ -1067,9 +1067,9 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
     dependency_text = dependency_path.read_text(encoding="utf-8", errors="ignore")
     for fragment in (
         "GITHUB_REPOSITORY freetype/freetype",
-        "GIT_TAG VER-2-14-3",
+        "GIT_TAG VER-2-15-0",
         "GITHUB_REPOSITORY harfbuzz/harfbuzz",
-        "GIT_TAG 14.5.0",
+        "GIT_TAG 15.2.0",
         "src/harfbuzz.cc",
         "GITHUB_REPOSITORY Chlumsky/msdfgen",
         "GIT_TAG v1.13",
@@ -1103,7 +1103,7 @@ def check_phase20_text_dependencies(failures: list[str]) -> None:
                         ("Text", "TextSegmentationTests.cpp"), ("Text", "TextLayoutTests.cpp"), ("UI", "UiLayoutFlexTests.cpp"),
                         ("UI", "UiTextEditTests.cpp")):
         check_suite_is_compiled(group, name, failures)
-    for fragment in ("SWIM_TEXT_UI_SOURCES", "target_link_libraries(SwimEngine PRIVATE Swim::TextDependencies)"):
+    for fragment in ("SWIM_TEXT_UI_SOURCES", "target_link_libraries(SwimEngineRuntime PRIVATE Swim::TextDependencies)"):
         if fragment not in cmake_text:
             fail(f"text/UI runtime build wiring is missing: {fragment}", failures)
     for fragment in ("${SWIM_TEXT_UI_SOURCES}", "SwimTextUiPublicHeaders", "SWIM_TEXT_FONT_FIXTURE_PATH"):
@@ -1276,7 +1276,7 @@ def check_phase3_job_architecture(failures: list[str]) -> None:
 
     for fragment in (
         "file(GLOB_RECURSE SWIM_JOB_SOURCES",
-        "target_link_libraries(SwimEngine PRIVATE",
+        "target_link_libraries(SwimEngineRuntime",
         "Swim::EnkiTS",
         "SWIM_JOBS_USE_ENKITS=$<BOOL:${SWIM_JOBS_USE_ENKITS}>",
     ):
@@ -1462,7 +1462,7 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
 
     for fragment in (
         "GITHUB_REPOSITORY microsoft/mimalloc",
-        "GIT_TAG v3.4.5",
+        "GIT_TAG v3.7.0",
         "MI_OVERRIDE ON",
         "MI_BUILD_SHARED OFF",
         "MI_BUILD_STATIC ON",
@@ -1479,7 +1479,7 @@ def check_phase3_memory_architecture(failures: list[str]) -> None:
         "file(GLOB_RECURSE SWIM_MEMORY_SOURCES",
         "Swim::Mimalloc",
         "SWIM_MEMORY_USE_MIMALLOC",
-        "target_sources(SwimEngine PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)",
+        "target_sources(${target} PRIVATE $<TARGET_OBJECTS:mimalloc-obj>)",
     ):
         if fragment not in cmake_text:
             fail(f"Phase 3 memory CMake boundary is missing: {fragment}", failures)
@@ -1611,7 +1611,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
 
     for fragment in (
         "file(GLOB_RECURSE SWIM_ASSET_SOURCES",
-        "target_sources(SwimEngine PRIVATE ${SWIM_ASSET_SOURCES})",
+        "target_sources(SwimEngineRuntime PRIVATE ${SWIM_ASSET_SOURCES})",
         "add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL",
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Assets/")',
         "add_library(SwimAssetCompiler STATIC ${SWIM_ASSET_COMPILER_SOURCES} ${SWIM_ASSET_SOURCES})",
@@ -1785,7 +1785,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         'list(FILTER SWIM_ASSET_COMPILER_SOURCES EXCLUDE REGEX "/Source/Tools/AssetCompiler/Cli/")',
         'option(SWIM_ENABLE_DEV_ASSET_AUTOCOOK "Scan/cook loose source assets at engine startup (development only)" ON)',
         "SWIM_ENABLE_DEV_ASSET_AUTOCOOK=$<BOOL:${SWIM_DEV_ASSET_AUTOCOOK_ENABLED}>",
-        "target_link_libraries(SwimEngine PRIVATE Swim::AssetCompiler)",
+        "target_link_libraries(SwimEngineRuntime PRIVATE Swim::AssetCompiler)",
     )
     for fragment in required_asset_compiler_cmake_fragments:
         if fragment not in cmake_text:
@@ -1793,18 +1793,18 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
 
     required_asset_compiler_dependency_fragments = (
         "GITHUB_REPOSITORY simdjson/simdjson",
-        "GIT_TAG v3.12.3",
+        "GIT_TAG v5.3.0",
         "TARGET simdjson::simdjson",
         "GITHUB_REPOSITORY spnda/fastgltf",
-        "GIT_TAG v0.9.0",
+        "GIT_TAG v1.0.1",
         "TARGET fastgltf::fastgltf",
         "GITHUB_REPOSITORY zeux/meshoptimizer",
-        "GIT_TAG v1.1",
+        "GIT_TAG v1.3",
         "TARGET meshoptimizer",
         "GITHUB_REPOSITORY nothings/stb",
-        "GIT_TAG 2dfbe86",
+        "GIT_TAG 6b5799b",
         "GITHUB_REPOSITORY google/draco",
-        "GIT_TAG 1.5.7",
+        "GIT_TAG 1.5.9",
         "DRACO_GLTF_BITSTREAM ON",
         "DRACO_POINT_CLOUD_COMPRESSION OFF",
         "SWIM_ASSET_COMPILER_DRACO_TARGET",
@@ -1824,7 +1824,7 @@ def check_phase4_asset_architecture(failures: list[str]) -> None:
         "Swim::AssetCompilerDraco",
         "${SWIM_ASSET_COMPILER_WEBP_TARGET}",
         "GITHUB_REPOSITORY webmproject/libwebp",
-        "GIT_TAG v1.5.0",
+        "GIT_TAG v1.6.0",
         "WEBP_BUILD_CWEBP OFF",
         "WEBP_BUILD_DWEBP OFF",
         "MESHOPT_BUILD_GLTFPACK OFF",
@@ -2878,7 +2878,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
 
         # Concrete SDK dependencies now belong to the final consumer, while
         # source/header checks above enforce the generic physics API boundary.
-        engine_links = re.findall(r"target_link_libraries\(SwimEngine\s+([^\)]*)\)", cmake_text, re.DOTALL)
+        engine_links = re.findall(r"target_link_libraries\(SwimEngineRuntime\s+([^\)]*)\)", cmake_text, re.DOTALL)
         link_text = "\n".join(engine_links)
         for fragment in ("Swim::PhysX", "Swim::Jolt", "glm::glm"):
             if fragment not in link_text:
@@ -2918,7 +2918,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
     math_dependencies_path = ROOT / "cmake" / "MathDependencies.cmake"
     if math_dependencies_path.is_file():
         math_text = math_dependencies_path.read_text(encoding="utf-8", errors="ignore")
-        for fragment in ("GITHUB_REPOSITORY g-truc/glm", "GIT_TAG 1.0.0", "add_library(glm::glm ALIAS SwimGlm)"):
+        for fragment in ("GITHUB_REPOSITORY g-truc/glm", "GIT_TAG 1.0.3", "add_library(glm::glm ALIAS SwimGlm)"):
             if fragment not in math_text:
                 fail(f"cross-platform GLM foundation dependency is missing: {fragment}", failures)
 
@@ -2928,7 +2928,7 @@ def check_phase6_physics_architecture(failures: list[str]) -> None:
     else:
         jolt_dependency_text = jolt_dependencies_path.read_text(encoding="utf-8", errors="ignore")
         for fragment in (
-            "GITHUB_REPOSITORY jrouwe/JoltPhysics", "GIT_TAG v5.6.0",
+            "GITHUB_REPOSITORY jrouwe/JoltPhysics", "GIT_TAG v5.7.0",
             "SOURCE_SUBDIR Build", '"JPH_BUILD_SHARED_LIBS OFF"', '"DOUBLE_PRECISION OFF"',
             '"JPH_USE_DX12 OFF"', '"JPH_USE_VK OFF"', '"JPH_USE_MTL OFF"',
             '"JPH_USE_CPU_COMPUTE OFF"', "TARGET Jolt::Jolt",
@@ -3001,12 +3001,12 @@ def check_phase7_shader_architecture(failures: list[str]) -> None:
             fail(f"Slang shader/compiler CMake boundary is missing: {fragment}", failures)
 
     for fragment in (
-        'set(SWIM_SLANG_VERSION "2026.16.1"',
+        'set(SWIM_SLANG_VERSION "2026.22.1"',
         'EXPECTED_HASH "SHA256=${SWIM_SLANG_ARCHIVE_SHA256}"',
         'slang-${SWIM_SLANG_VERSION}-windows-x86_64.zip',
-        '0fd3e6a9a5d05ed4cdd000d467f1ffb5d9701b827e83bfb428902a45c37ef8a5',
+        'e72344f7b0323cec8b039c534caaf4680e7ba629489fc796ea4c7f7adb7deb68',
         'slang-${SWIM_SLANG_VERSION}-linux-x86_64-glibc-2.27.zip',
-        '95eb246e758131545915406e5ac9e41ecd29a6bc1f83ae0b112d31e390fc9d33',
+        'f993992794078ad1386b3acd9bc755eb36407d0994b7e7aee21f8f94f89150a9',
         'add_executable(SwimSlangCompiler IMPORTED GLOBAL)',
     ):
         if fragment not in deps_text:
@@ -3268,9 +3268,9 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
 
     for fragment in (
         'GITHUB_REPOSITORY zeux/volk',
-        'GIT_TAG 1.4.350',
+        'GIT_TAG vulkan-sdk-1.4.363.0',
         'GITHUB_REPOSITORY charles-lunarg/vk-bootstrap',
-        'GIT_TAG v1.4.350',
+        'GIT_TAG v1.4.368',
         'VOLK_NAMESPACE ON',
         'VK_BOOTSTRAP_TEST OFF',
     ):
@@ -3282,7 +3282,7 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
         'file(GLOB_RECURSE SWIM_VULKAN_RHI_SOURCES',
         'set(SWIM_VULKAN_RHI_PRIVATE_LIBS',
         'set(SWIM_VULKAN_RHI_PRIVATE_DEFINITIONS',
-        'target_link_libraries(SwimEngine PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})',
+        'target_link_libraries(SwimEngineRuntime PRIVATE ${SWIM_VULKAN_RHI_PRIVATE_LIBS})',
         'list(APPEND SWIM_ENGINE_SOURCES ${SWIM_VULKAN_RHI_SOURCES})',
         'list(FILTER SWIM_ENGINE_SOURCES EXCLUDE REGEX "/Source/Engine/Systems/Renderer/RHI/Backends/")',
     ):
@@ -3325,7 +3325,7 @@ def check_phase9_vulkan_rhi_architecture(failures: list[str]) -> None:
 
     for fragment in (
         'GITHUB_REPOSITORY GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator',
-        'GIT_TAG v3.4.0',
+        'GIT_TAG v3.5.0',
         'GPUOpen::VulkanMemoryAllocator',
     ):
         if fragment not in dependency_text and fragment not in cmake_text:
@@ -3475,7 +3475,7 @@ def check_runtime_logging_contract(failures: list[str]) -> None:
     log_source = log_source_path.read_text(encoding="utf-8", errors="ignore")
     for fragment in (
         "GITHUB_REPOSITORY gabime/spdlog",
-        "GIT_TAG v1.15.3",
+        "GIT_TAG v1.17.0",
         "add_library(spdlog::spdlog ALIAS SwimSpdlog)",
     ):
         if fragment not in dependencies_text:

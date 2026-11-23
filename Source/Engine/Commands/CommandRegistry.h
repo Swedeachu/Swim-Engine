@@ -1,6 +1,10 @@
 #pragma once
 
+#include "ConsoleVariable.h"
+
 #include <algorithm>
+#include <filesystem>
+#include <memory>
 #include <charconv>
 #include <functional>
 #include <stdexcept>
@@ -15,15 +19,46 @@
 namespace Swim::Commands
 {
 
-	// In-process commands. This service owns no transport or per-frame lifecycle.
+	struct CommandDesc
+	{
+		std::string Name;
+		std::string Description;
+		// Slash-separated grouping for listings, for example "Video/Display".
+		std::string Category;
+		// Argument summary shown by help, for example "<name> [value]".
+		std::string Usage;
+	};
+
+	// A listing entry: a command, or a variable (Variable non-null).
+	struct CommandInfo
+	{
+		std::string Name;
+		std::string Description;
+		std::string Category;
+		std::string Usage;
+		const ConsoleVariable* Variable = nullptr;
+	};
+
+	// In-process commands and typed console variables. This service owns no transport or
+	// per-frame lifecycle.
+	//
+	// A variable is dispatched like a command: "name" prints it, "name value" sets it.
+	// Config files are plain console lines ("name value", "bind ..."), so --exec and
+	// ExecuteFile run the same text that SaveConfig writes. A config line naming a
+	// variable that is not registered yet is kept and applied when that variable
+	// registers, and kept on save, so settings of modules that load late survive.
 	class CommandRegistry
 	{
 
 	public:
 
 		using Callback = std::function<void(const std::vector<std::string>&)>;
+		using ChangeListener = std::function<void(const ConsoleVariable&)>;
+		using ConfigWriter = std::function<void(std::string& out)>;
 
 		void Register(std::string name, Callback callback);
+
+		void Register(CommandDesc desc, Callback callback);
 
 		// A command with typed arguments: "name 1 2.5 on text" -> callback(int, float, bool,
 		// std::string). Supported: integers, floating point, bool (1/0, true/false, on/off)
@@ -31,11 +66,46 @@ namespace Swim::Commands
 		// extra or unparsable ones throw std::invalid_argument naming the command's usage.
 		template <typename... Args, typename F> void RegisterTyped(std::string name, F callback);
 
-		// Every registered name, sorted (the console's "help").
+		// Registers a variable. Registering a name that already is a variable returns the
+		// existing one with its value kept (scenes may register on every load); a name
+		// taken by a command throws std::invalid_argument. A pending config value for the
+		// name is applied before this returns.
+		ConsoleVariable& RegisterVariable(VariableDesc desc);
+
+		ConsoleVariable& AddBool(std::string name, bool defaultValue, std::string description, std::string category = {},
+			VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable& AddInt(std::string name, int64_t defaultValue, int64_t min, int64_t max, std::string description,
+			std::string category = {}, VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable& AddFloat(std::string name, double defaultValue, double min, double max, std::string description,
+			std::string category = {}, VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable& AddEnum(std::string name, std::vector<std::string> choices, uint32_t defaultIndex, std::string description,
+			std::string category = {}, VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable& AddString(std::string name, std::string defaultValue, std::string description, std::string category = {},
+			VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable& AddColor(std::string name, VariableColor defaultValue, std::string description, std::string category = {},
+			VariableFlags flags = VariableFlags::None);
+
+		ConsoleVariable* FindVariable(std::string_view name);
+
+		const ConsoleVariable* FindVariable(std::string_view name) const;
+
+		// Every variable, sorted by name.
+		std::vector<ConsoleVariable*> GetVariables() const;
+
+		// Every command and variable with metadata, sorted by name (settings UI, tools).
+		std::vector<CommandInfo> GetCommandInfos() const;
+
+		// Every registered name (commands and variables), sorted (the console's "help").
 		std::vector<std::string> GetNames() const;
 
-		bool Contains(std::string_view name) const { return callbacks.contains(std::string(name)); }
+		bool Contains(std::string_view name) const;
 
+		// Removes a command or a variable (references to the variable dangle afterwards).
 		bool Unregister(std::string_view name);
 
 		void Clear();
@@ -43,6 +113,43 @@ namespace Swim::Commands
 		bool Dispatch(std::string_view name, const std::vector<std::string>& args) const;
 
 		bool ParseAndDispatch(std::string_view command) const;
+
+		// Runs every line of a config file. Blank lines and lines starting with "//" or "#"
+		// are skipped; a line for an unknown name is kept as a pending value (see the class
+		// comment); a failing line is reported on stderr and skipped. False when the file
+		// cannot be read.
+		bool ExecuteFile(const std::filesystem::path& path);
+
+		// Runs one config line with ExecuteFile's rules.
+		void ExecuteConfigLine(std::string_view line);
+
+		// Writes every variable carrying `flags` whose value differs from its default, the
+		// pending values of unregistered variables, then every config writer's lines
+		// (bindings and the like). Atomic (written next to the target, then renamed).
+		bool SaveConfig(const std::filesystem::path& path, VariableFlags flags = VariableFlags::Saved) const;
+
+		// Adds lines to SaveConfig under a key (replaces the writer of the same key).
+		void SetConfigWriter(std::string key, ConfigWriter writer);
+
+		void RemoveConfigWriter(std::string_view key);
+
+		// True after a saved variable changed or MarkConfigDirty, until MarkConfigSaved.
+		bool IsConfigDirty() const { return configDirty; }
+
+		void MarkConfigDirty() { configDirty = true; }
+
+		void MarkConfigSaved() { configDirty = false; }
+
+		// From now on RequiresRestart variables latch changes instead of applying them.
+		void SetStartupComplete();
+
+		// Called after any variable changes (after the variable's own subscribers).
+		ConsoleVariable::SubscriptionId SubscribeVariableChanges(ChangeListener listener);
+
+		void UnsubscribeVariableChanges(ConsoleVariable::SubscriptionId id);
+
+		// Quotes a token for a console line when it needs quoting (spaces, quotes, empty).
+		static std::string QuoteArgument(std::string_view text);
 
 		template <typename T> static bool ParseArgument(const std::string& text, T& value)
 		{
@@ -102,7 +209,17 @@ namespace Swim::Commands
 
 		static bool Tokenize(std::string_view command, std::vector<std::string>& tokens);
 
+		void OnVariableChanged(const ConsoleVariable& variable);
+
 		std::unordered_map<std::string, Callback> callbacks;
+		std::unordered_map<std::string, CommandDesc> descriptions;
+		std::unordered_map<std::string, std::unique_ptr<ConsoleVariable>> variables;
+		std::unordered_map<std::string, std::string> pendingValues;
+		std::vector<std::pair<std::string, ConfigWriter>> configWriters;
+		std::vector<std::pair<ConsoleVariable::SubscriptionId, ChangeListener>> changeListeners;
+		ConsoleVariable::SubscriptionId nextListener = 1;
+		bool startupComplete = false;
+		bool configDirty = false;
 
 	};
 

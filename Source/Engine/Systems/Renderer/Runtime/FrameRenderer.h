@@ -2,6 +2,7 @@
 
 #include "Engine/Systems/Renderer/Runtime/RenderFeature.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
+#include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
 #include "Engine/Systems/Renderer/Shadows/ShadowPlanner.h"
 
 #include "Engine/Systems/Renderer/RHI/RhiContracts.h"
@@ -9,6 +10,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -87,7 +89,9 @@ namespace Engine
 		float Aspect = 16.0f / 9.0f;
 		float Near = 0.1f;
 		float Far = 500.0f; // Bounds clustering and shadows only.
-		// Discontinuity (teleport, scene change): drop temporal history.
+		// Discontinuity (teleport, replay or scene change): drop temporal history (TAA,
+		// reflections, motion vectors, auto exposure snaps to the new view) and tell features
+		// through RenderFeatureView::Cut.
 		bool Cut = false;
 	};
 
@@ -227,6 +231,18 @@ namespace Engine
 		bool RemoveFeature(const RenderFeature* feature);
 
 		const std::vector<std::shared_ptr<RenderFeature>>& GetFeatures() const { return features; }
+
+		// Replaces a runtime program's artifacts (a recompiled shader). Applied at the start of
+		// the next Render: loaded feature compute and geometry programs and their pipelines are
+		// rebuilt from the new artifacts, and the old ones destroyed once the GPU finished the
+		// frames that used them. When that fails the old ones stay and done gets the error
+		// (empty on success). A program not loaded yet uses the new artifacts when first
+		// loaded; one an engine pass loaded keeps its program until restart (done says so).
+		void ReplaceProgram(RuntimeShaderDesc desc, std::function<void(std::string_view error)> done = {});
+
+		// Called before every feature compute dispatch of a program with [Tweak] push-constant
+		// fields, with the program and its push constants to rewrite. Empty: none.
+		void SetConstantsOverride(std::function<void(std::string_view, const RuntimeComputeProgram&, std::span<std::byte>)> callback);
 
 		template <typename T> T* FindFeature() const
 		{

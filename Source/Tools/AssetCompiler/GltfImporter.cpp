@@ -45,7 +45,7 @@ namespace Swim::AssetCompiler
 			return static_cast<std::uint32_t>(value);
 		}
 
-		std::optional<std::uint32_t> ToOptionalIndex(const fastgltf::Optional<std::size_t>& value)
+		std::optional<std::uint32_t> ToOptionalIndex(const fastgltf::optional<std::size_t>& value)
 		{
 			if (!value.has_value())
 			{
@@ -112,7 +112,7 @@ namespace Swim::AssetCompiler
 			}
 		}
 
-		SourceFilter ConvertFilter(const fastgltf::Optional<fastgltf::Filter>& filter)
+		SourceFilter ConvertFilter(const fastgltf::optional<fastgltf::Filter>& filter)
 		{
 			if (!filter.has_value())
 			{
@@ -267,7 +267,7 @@ namespace Swim::AssetCompiler
 
 			std::visit(fastgltf::visitor{ [&](const fastgltf::sources::URI& data)
 						   {
-							   const std::filesystem::path path = data.uri.fspath();
+							   const std::filesystem::path path = data.uri->fspath();
 							   result.ExternalPath = path.generic_string();
 						   },
 						   [&](const fastgltf::sources::BufferView& data)
@@ -312,12 +312,12 @@ namespace Swim::AssetCompiler
 			{
 				std::visit(fastgltf::visitor{ [&](const fastgltf::sources::URI& data)
 							   {
-								   if (!data.uri.isLocalPath())
+								   if (!data.uri->isLocalPath())
 								   {
 									   return;
 								   }
 
-								   const std::filesystem::path path = data.uri.fspath();
+								   const std::filesystem::path path = data.uri->fspath();
 
 								   if (!path.empty())
 								   {
@@ -462,7 +462,7 @@ namespace Swim::AssetCompiler
 				SourceMorphTarget& out = result.Targets[target];
 				const auto read = [&](std::string_view name, std::vector<std::array<float, 3>>& deltas)
 				{
-					const auto* attribute = primitive.findTargetAttribute(target, name);
+					const auto attribute = primitive.findTargetAttribute(target, name);
 
 					if (attribute == primitive.targets[target].end())
 					{
@@ -486,8 +486,8 @@ namespace Swim::AssetCompiler
 		// rather than silently dropped.
 		void ImportSkinAttributes(const fastgltf::Asset& asset, const fastgltf::Primitive& primitive, SourcePrimitive& result)
 		{
-			const auto* joints = primitive.findAttribute("JOINTS_0");
-			const auto* weights = primitive.findAttribute("WEIGHTS_0");
+			const auto joints = primitive.findAttribute("JOINTS_0");
+			const auto weights = primitive.findAttribute("WEIGHTS_0");
 			const bool hasJoints = joints != primitive.attributes.end();
 			const bool hasWeights = weights != primitive.attributes.end();
 
@@ -639,7 +639,7 @@ namespace Swim::AssetCompiler
 			result.Topology = ConvertTopology(primitive.type);
 			result.MaterialIndex = ToOptionalIndex(primitive.materialIndex);
 
-			const auto* positions = primitive.findAttribute("POSITION");
+			const auto positions = primitive.findAttribute("POSITION");
 
 			if (positions == primitive.attributes.end() || positions->accessorIndex >= asset.accessors.size())
 			{
@@ -656,7 +656,7 @@ namespace Swim::AssetCompiler
 					ExpandBounds(result.Bounds, vertex.Position);
 				});
 
-			if (const auto* normal = primitive.findAttribute("NORMAL"); normal != primitive.attributes.end())
+			if (const auto normal = primitive.findAttribute("NORMAL"); normal != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(normal->accessorIndex);
 
@@ -673,7 +673,7 @@ namespace Swim::AssetCompiler
 					});
 			}
 
-			if (const auto* tangent = primitive.findAttribute("TANGENT"); tangent != primitive.attributes.end())
+			if (const auto tangent = primitive.findAttribute("TANGENT"); tangent != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(tangent->accessorIndex);
 
@@ -690,7 +690,7 @@ namespace Swim::AssetCompiler
 					});
 			}
 
-			if (const auto* texCoord = primitive.findAttribute("TEXCOORD_0"); texCoord != primitive.attributes.end())
+			if (const auto texCoord = primitive.findAttribute("TEXCOORD_0"); texCoord != primitive.attributes.end())
 			{
 				const auto& accessor = asset.accessors.at(texCoord->accessorIndex);
 

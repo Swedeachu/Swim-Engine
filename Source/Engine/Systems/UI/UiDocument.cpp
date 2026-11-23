@@ -472,6 +472,12 @@ namespace Swim::UI
 		if (node.Fonts == fonts && node.TextContents == text && node.FontSize == size && node.TextOptions.Direction == options.Direction &&
 			node.TextOptions.Language == options.Language)
 		{
+			if (node.TextOptions.Colors != options.Colors)
+			{
+				node.TextOptions.Colors = options.Colors;
+				impl->MarkPaintDirty(id);
+			}
+
 			return;
 		}
 

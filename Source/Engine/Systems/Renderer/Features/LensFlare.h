@@ -35,6 +35,8 @@ namespace Engine
 
 		std::string_view GetName() const override { return "Lens flare"; }
 
+		bool IsCinematic() const override { return true; }
+
 		RenderFeatureStage GetStage() const override { return RenderFeatureStage::BeforePostProcess; }
 
 		int GetOrder() const override { return 20; }

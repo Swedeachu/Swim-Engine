@@ -315,6 +315,40 @@ namespace Engine
 					config.Window.Height = static_cast<std::uint32_t>(pixels);
 				}
 			}
+			else if (argument == "--no-activate")
+			{
+				config.Window.Activate = false;
+			}
+			else if (Option(argument, "--input", i, argc, argv, value, hasValue))
+			{
+				if (hasValue && (value == "none" || value == "all"))
+				{
+					config.PlatformInput = value == "all";
+					config.Window.CaptureMouse = config.PlatformInput;
+				}
+				else
+				{
+					fail("Invalid --input value. Expected none or all.");
+				}
+			}
+			else if (Option(argument, "--display", i, argc, argv, value, hasValue))
+			{
+				std::uint64_t index = 0;
+
+				if (hasValue && value == "primary")
+				{
+					config.Window.DisplayIndex = 0;
+					config.Window.Display = 0;
+				}
+				else if (!hasValue || !ParseUnsigned(value, index) || index < 1 || index > 64)
+				{
+					fail("Invalid --display value. Expected 'primary' or a monitor number from 1.");
+				}
+				else
+				{
+					config.Window.DisplayIndex = static_cast<std::uint32_t>(index);
+				}
+			}
 			else if (Option(argument, "--size", i, argc, argv, value, hasValue))
 			{
 				const std::size_t x = hasValue ? value.find_first_of("xX") : std::string_view::npos;
@@ -335,6 +369,25 @@ namespace Engine
 			else if (argument == "--no-vsync")
 			{
 				config.VSync = false;
+			}
+			else if (Option(argument, "--audio", i, argc, argv, value, hasValue))
+			{
+				if (value == "device" || value == "on")
+				{
+					config.Audio = AudioOutput::Device;
+				}
+				else if (value == "null")
+				{
+					config.Audio = AudioOutput::Null;
+				}
+				else if (value == "off")
+				{
+					config.Audio = AudioOutput::Off;
+				}
+				else
+				{
+					fail("Invalid --audio value. Expected device, null or off.");
+				}
 			}
 			else if (Option(argument, "--vsync", i, argc, argv, value, hasValue))
 			{
@@ -431,6 +484,36 @@ namespace Engine
 					config.StartupCommands.emplace_back(value);
 				}
 			}
+			else if (Option(argument, "--window-mode", i, argc, argv, value, hasValue))
+			{
+				if (value == "windowed")
+				{
+					config.Window.Mode = Swim::Platform::WindowMode::Windowed;
+				}
+				else if (value == "borderless")
+				{
+					config.Window.Mode = Swim::Platform::WindowMode::Borderless;
+				}
+				else if (value == "exclusive")
+				{
+					config.Window.Mode = Swim::Platform::WindowMode::ExclusiveFullscreen;
+				}
+				else
+				{
+					fail("Invalid --window-mode value. Expected windowed, borderless or exclusive.");
+				}
+			}
+			else if (Option(argument, "--config", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("--config requires a file name or none.");
+				}
+				else
+				{
+					config.UserConfigFile = value == "none" ? std::string() : std::string(value);
+				}
+			}
 			else if (Option(argument, "--parent-hwnd", i, argc, argv, value, hasValue))
 			{
 				std::uint64_t nativeValue = 0;
@@ -475,7 +558,11 @@ namespace Engine
 			<< "  --scene=<name>                      Startup scene\n"
 			<< "  --assets=<dir>                      Loose-asset root (default: the repository's Assets/)\n"
 			<< "  --width=<px> --height=<px>          Window size (or --size=<W>x<H>)\n"
+			<< "  --display=<n|primary>               Monitor to open on, numbered from 1\n"
+			<< "  --no-activate                       Open the window without taking focus\n"
+			<< "  --input=<all|none>                  none: ignore OS keyboard and mouse, never capture the cursor\n"
 			<< "  --vsync=on|off, --no-vsync          Present with/without vsync\n"
+			<< "  --audio=device|null|off             Audio output (null: no device, voices still advance)\n"
 			<< "  --validation[=on|off]               GPU validation layers\n"
 			<< "  --fixed-rate=<hz>                   Fixed simulation rate (default 60)\n"
 			<< "  --time-scale=<scale>                Initial simulation time scale\n"
@@ -486,6 +573,8 @@ namespace Engine
 			<< "  --capture=<file.ppm>                Save the last frame (implies --frames=60)\n"
 			<< "  --fixed-delta=<seconds>             Deterministic frame delta\n"
 			<< "  --exec=<command>                    Run an engine command after startup (repeatable)\n"
+			<< "  --window-mode=windowed|borderless|exclusive  Initial window mode\n"
+			<< "  --config=<file>|none                User config file under the user-data root (default config.cfg)\n"
 			<< "  --parent-hwnd=<handle>              Embed in a native parent window (Windows)\n";
 		return out.str();
 	}

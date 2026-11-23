@@ -23,17 +23,17 @@ if(NOT TARGET simdjson::simdjson)
 	CPMAddPackage(
 		NAME swim_simdjson_source
 		GITHUB_REPOSITORY simdjson/simdjson
-		GIT_TAG v3.12.3
+		GIT_TAG v5.3.0
 		EXCLUDE_FROM_ALL YES
 		UPDATE_DISCONNECTED YES
 	)
 
 	if(NOT TARGET simdjson::simdjson)
-		message(FATAL_ERROR "simdjson v3.12.3 did not provide simdjson::simdjson")
+		message(FATAL_ERROR "simdjson v5.3.0 did not provide simdjson::simdjson")
 	endif()
 endif()
 
-set(SWIM_SLANG_VERSION "2026.16.1" CACHE INTERNAL "Pinned Slang compiler version")
+set(SWIM_SLANG_VERSION "2026.22.1" CACHE INTERNAL "Pinned Slang compiler version")
 set(SWIM_SLANG_CACHE_ROOT
 	"${CPM_SOURCE_CACHE}/slang_sdk/${SWIM_SLANG_VERSION}"
 	CACHE INTERNAL "Pinned Slang SDK cache root")
@@ -41,18 +41,18 @@ set(SWIM_SLANG_CACHE_ROOT
 if(WIN32)
 	if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
 		set(SWIM_SLANG_ARCHIVE_NAME "slang-${SWIM_SLANG_VERSION}-windows-aarch64.zip")
-		set(SWIM_SLANG_ARCHIVE_SHA256 "315a18a2ee56803bf558778d91481b47cefb51df14207342afdc9a4d9166c588")
+		set(SWIM_SLANG_ARCHIVE_SHA256 "7c50b36af8428533f524604d10cf84936dbd94d8536940d0611cb754ad4bea7c")
 	else()
 		set(SWIM_SLANG_ARCHIVE_NAME "slang-${SWIM_SLANG_VERSION}-windows-x86_64.zip")
-		set(SWIM_SLANG_ARCHIVE_SHA256 "0fd3e6a9a5d05ed4cdd000d467f1ffb5d9701b827e83bfb428902a45c37ef8a5")
+		set(SWIM_SLANG_ARCHIVE_SHA256 "e72344f7b0323cec8b039c534caaf4680e7ba629489fc796ea4c7f7adb7deb68")
 	endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 	if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
 		set(SWIM_SLANG_ARCHIVE_NAME "slang-${SWIM_SLANG_VERSION}-linux-aarch64-glibc-2.28.zip")
-		set(SWIM_SLANG_ARCHIVE_SHA256 "fea76008e3d6f527028991b5effdaacab70619b8270e8cbad031746a6c152708")
+		set(SWIM_SLANG_ARCHIVE_SHA256 "31f5d557c7ad6880d29b5fc0eac15e7b37ecfb748a1ea0fb27277ec9ddd36cea")
 	else()
 		set(SWIM_SLANG_ARCHIVE_NAME "slang-${SWIM_SLANG_VERSION}-linux-x86_64-glibc-2.27.zip")
-		set(SWIM_SLANG_ARCHIVE_SHA256 "95eb246e758131545915406e5ac9e41ecd29a6bc1f83ae0b112d31e390fc9d33")
+		set(SWIM_SLANG_ARCHIVE_SHA256 "f993992794078ad1386b3acd9bc755eb36407d0994b7e7aee21f8f94f89150a9")
 	endif()
 else()
 	message(STATUS

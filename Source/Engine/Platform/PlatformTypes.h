@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Swim::Platform
 {
@@ -39,6 +40,15 @@ namespace Swim::Platform
 		bool IsValid() const { return Type != NativeWindowType::None && Window != nullptr; }
 	};
 
+	// A fullscreen video mode. Width/Height are in pixels; RefreshRate 0 = any.
+	struct DisplayModeDesc
+	{
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+		float RefreshRate = 0.0f;
+		float PixelDensity = 1.0f;
+	};
+
 	struct DisplayInfo
 	{
 		uint32_t Id = 0;
@@ -47,6 +57,10 @@ namespace Swim::Platform
 		int32_t Y = 0;
 		Extent2D Size{};
 		float ContentScale = 1.0f;
+		bool Primary = false;
+		DisplayModeDesc DesktopMode{};
+		// Exclusive fullscreen modes, largest first (empty when the platform offers none).
+		std::vector<DisplayModeDesc> Modes;
 	};
 
 }

@@ -4,6 +4,7 @@
 #include <SDL3/SDL_properties.h>
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 
 #if defined(_WIN32)
@@ -242,6 +243,138 @@ namespace Swim::Platform
 	bool Window::Restore()
 	{
 		return impl && impl->Window && SDL_RestoreWindow(impl->Window);
+	}
+
+	bool Window::SetMode(WindowMode mode, const DisplayModeDesc* fullscreenMode)
+	{
+		if (!impl || !impl->Window || IsExternal())
+		{
+			return false;
+		}
+
+		SDL_Window* window = impl->Window;
+
+		if (mode == WindowMode::Windowed)
+		{
+			SDL_SetWindowFullscreen(window, false);
+			return true;
+		}
+
+		if (mode == WindowMode::ExclusiveFullscreen)
+		{
+			SDL_DisplayID display = SDL_GetDisplayForWindow(window);
+			display = display ? display : SDL_GetPrimaryDisplay();
+			SDL_DisplayMode closest{};
+			const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(display);
+			const bool wantsDesktop = !fullscreenMode || fullscreenMode->Width == 0 || fullscreenMode->Height == 0;
+			const int width = wantsDesktop ? (desktop ? desktop->w : 0) : static_cast<int>(fullscreenMode->Width);
+			const int height = wantsDesktop ? (desktop ? desktop->h : 0) : static_cast<int>(fullscreenMode->Height);
+			const float refresh = wantsDesktop ? (desktop ? desktop->refresh_rate : 0.0f) : fullscreenMode->RefreshRate;
+
+			if (width > 0 && height > 0 && SDL_GetClosestFullscreenDisplayMode(display, width, height, refresh, true, &closest) &&
+				SDL_SetWindowFullscreenMode(window, &closest) && SDL_SetWindowFullscreen(window, true))
+			{
+				return true;
+			}
+
+			std::cerr << "[Platform] Exclusive fullscreen is unavailable (" << SDL_GetError() << "); using borderless.\n";
+		}
+
+		SDL_SetWindowFullscreenMode(window, nullptr);
+		const bool ok = SDL_SetWindowFullscreen(window, true);
+		return ok && mode == WindowMode::Borderless;
+	}
+
+	WindowMode Window::GetMode() const
+	{
+		if (!impl || !impl->Window || (SDL_GetWindowFlags(impl->Window) & SDL_WINDOW_FULLSCREEN) == 0)
+		{
+			return WindowMode::Windowed;
+		}
+
+		return SDL_GetWindowFullscreenMode(impl->Window) ? WindowMode::ExclusiveFullscreen : WindowMode::Borderless;
+	}
+
+	uint32_t Window::GetDisplay() const
+	{
+		return impl && impl->Window ? static_cast<uint32_t>(SDL_GetDisplayForWindow(impl->Window)) : 0;
+	}
+
+	bool Window::MoveToDisplay(uint32_t displayId)
+	{
+		if (!impl || !impl->Window || IsExternal())
+		{
+			return false;
+		}
+
+		const SDL_DisplayID display = displayId ? static_cast<SDL_DisplayID>(displayId) : SDL_GetPrimaryDisplay();
+
+		if (display == SDL_GetDisplayForWindow(impl->Window))
+		{
+			return true;
+		}
+
+		const WindowMode mode = GetMode();
+
+		if (mode != WindowMode::Windowed)
+		{
+			SDL_SetWindowFullscreen(impl->Window, false);
+		}
+
+		const bool moved = SDL_SetWindowPosition(impl->Window, static_cast<int>(SDL_WINDOWPOS_CENTERED_DISPLAY(display)),
+			static_cast<int>(SDL_WINDOWPOS_CENTERED_DISPLAY(display)));
+		SDL_SyncWindow(impl->Window);
+
+		if (mode != WindowMode::Windowed)
+		{
+			SetMode(mode);
+		}
+
+		return moved;
+	}
+
+	void Window::SetCursorVisible(bool visible)
+	{
+		if (visible)
+		{
+			SDL_ShowCursor();
+		}
+		else
+		{
+			SDL_HideCursor();
+		}
+	}
+
+	void Window::SetCursorConfined(bool confined)
+	{
+		if (impl && impl->Window && (impl->CaptureMouse || !confined))
+		{
+			SDL_SetWindowMouseGrab(impl->Window, confined);
+		}
+	}
+
+	bool Window::SetRelativeMouseMode(bool enabled)
+	{
+		if (!impl || !impl->Window || (enabled && !impl->CaptureMouse))
+		{
+			return false;
+		}
+
+		SDL_SetBooleanProperty(SDL_GetWindowProperties(impl->Window), Internal::RelativeMouseRequestedProperty, enabled);
+
+		// Applied now only while focused; WindowSystem re-applies it on focus changes.
+		if (enabled && !IsFocused())
+		{
+			return true;
+		}
+
+		return SDL_SetWindowRelativeMouseMode(impl->Window, enabled);
+	}
+
+	bool Window::IsRelativeMouseModeRequested() const
+	{
+		return impl && impl->Window &&
+			SDL_GetBooleanProperty(SDL_GetWindowProperties(impl->Window), Internal::RelativeMouseRequestedProperty, false);
 	}
 
 }

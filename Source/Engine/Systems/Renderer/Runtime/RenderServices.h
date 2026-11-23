@@ -10,6 +10,7 @@ namespace Engine
 	class RenderToggles;
 	class SceneRenderBridge;
 	class UiRuntime;
+	struct FramePacingStats;
 	struct RenderSettings;
 	struct RenderStats;
 
@@ -26,6 +27,7 @@ namespace Engine
 		UiRuntime* Ui = nullptr;			  // Theme, fonts, the UI input frame.
 		RenderToggles* Toggles = nullptr;	  // Profiling switches (every pass, feature and scene part).
 		FrameProfiler* Profiler = nullptr;	  // Per-frame CPU zones and GPU passes (the `profile` command).
+		const FramePacingStats* Pacing = nullptr; // Present mode, frame cap and latency (FramePacing).
 
 		bool HasRenderer() const { return Renderer && Meshes && Materials && Settings; }
 	};

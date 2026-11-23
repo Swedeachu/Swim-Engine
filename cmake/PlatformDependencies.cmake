@@ -28,7 +28,7 @@ set(SDL_TRAY OFF CACHE BOOL "" FORCE)
 CPMAddPackage(
 	NAME sdl3_source
 	GITHUB_REPOSITORY libsdl-org/SDL
-	GIT_TAG release-3.4.14
+	GIT_TAG release-3.4.20
 	EXCLUDE_FROM_ALL YES
 	UPDATE_DISCONNECTED YES
 )
@@ -40,5 +40,5 @@ elseif(TARGET SDL3::SDL3)
 elseif(TARGET SDL3-static)
 	set(SWIM_SDL3_TARGET SDL3-static)
 else()
-	message(FATAL_ERROR "SDL3 3.4.14 did not provide an expected CMake target")
+	message(FATAL_ERROR "SDL3 3.4.20 did not provide an expected CMake target")
 endif()

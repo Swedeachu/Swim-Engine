@@ -27,7 +27,7 @@ endif()
 CPMAddPackage(
 	NAME swim_physx_source
 	GITHUB_REPOSITORY NVIDIA-Omniverse/PhysX
-	GIT_TAG 107.3-omni-and-physx-5.6.1
+	GIT_TAG 110.3-omni-and-physx-5.9.1
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 	# PhysX's tag contains a few files whose Git-LFS attributes do not match
@@ -125,7 +125,7 @@ if(NOT SWIM_PHYSX_STATUS_RESULT EQUAL 0 OR NOT SWIM_PHYSX_STATUS_OUTPUT STREQUAL
 	endif()
 endif()
 
-set(SWIM_PHYSX_STAGE_DIR "${CMAKE_BINARY_DIR}/_deps/physx-stage")
+set(SWIM_PHYSX_STAGE_DIR "${PROJECT_BINARY_DIR}/_deps/physx-stage")
 set(SWIM_PHYSX_CHECKED_DIR "${SWIM_PHYSX_STAGE_DIR}/checked")
 set(SWIM_PHYSX_RELEASE_DIR "${SWIM_PHYSX_STAGE_DIR}/release")
 
@@ -135,7 +135,7 @@ set(SWIM_PHYSX_RELEASE_DIR "${SWIM_PHYSX_STAGE_DIR}/release")
 # detached Git worktree at build/.px. The worktree shares Git objects with the
 # pinned cache checkout, keeps MSBuild paths below MAX_PATH, and contains every
 # NVIDIA-generated compiler/bin artifact outside the dependency source cache.
-set(SWIM_PHYSX_SHORT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/build/.px" CACHE PATH
+set(SWIM_PHYSX_SHORT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/build/.px" CACHE PATH
 	"Short generated PhysX Git worktree used while generating/building PhysX")
 
 set(SWIM_PHYSX_LIBRARY_NAMES
@@ -145,7 +145,7 @@ set(SWIM_PHYSX_LIBRARY_NAMES
 	PhysXExtensions_static_64.lib
 	PhysXCooking_static_64.lib
 	PhysXCharacterKinematic_static_64.lib
-	PhysXVehicle2_static_64.lib
+	PhysXVehicle_static_64.lib
 	PhysXPvdSDK_static_64.lib
 )
 
@@ -169,7 +169,7 @@ ExternalProject_Add(SwimPhysXBuild
 		-DSWIM_PHYSX_SOURCE_DIR=<SOURCE_DIR>
 		-DSWIM_PHYSX_SHORT_SOURCE_DIR=${SWIM_PHYSX_SHORT_SOURCE_DIR}
 		-DSWIM_PHYSX_STAGE_DIR=${SWIM_PHYSX_STAGE_DIR}
-		-P "${CMAKE_SOURCE_DIR}/cmake/BuildPhysX.cmake"
+		-P "${PROJECT_SOURCE_DIR}/cmake/BuildPhysX.cmake"
 	INSTALL_COMMAND ""
 	BUILD_BYPRODUCTS ${SWIM_PHYSX_BYPRODUCTS}
 	USES_TERMINAL_BUILD YES
@@ -192,7 +192,7 @@ swim_add_physx_import(SwimPhysXCore PhysX_static_64.lib)
 swim_add_physx_import(SwimPhysXExtensions PhysXExtensions_static_64.lib)
 swim_add_physx_import(SwimPhysXCooking PhysXCooking_static_64.lib)
 swim_add_physx_import(SwimPhysXCharacterKinematic PhysXCharacterKinematic_static_64.lib)
-swim_add_physx_import(SwimPhysXVehicle2 PhysXVehicle2_static_64.lib)
+swim_add_physx_import(SwimPhysXVehicle PhysXVehicle_static_64.lib)
 swim_add_physx_import(SwimPhysXPvdSDK PhysXPvdSDK_static_64.lib)
 
 add_library(SwimPhysX INTERFACE)
@@ -208,7 +208,7 @@ target_link_libraries(SwimPhysX INTERFACE
 	SwimPhysXExtensions
 	SwimPhysXCooking
 	SwimPhysXCharacterKinematic
-	SwimPhysXVehicle2
+	SwimPhysXVehicle
 	$<$<NOT:$<CONFIG:Release>>:SwimPhysXPvdSDK>
 	ws2_32
 )

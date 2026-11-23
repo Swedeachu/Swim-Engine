@@ -3,10 +3,12 @@
 #include "Tools/ShaderCompiler/ShaderReflection.h"
 #include "Engine/RuntimeShaderCatalog.h"
 #include "Tools/ShaderCompiler/ShaderRhiInterface.h"
+#include "Tools/ShaderCompiler/ShaderTweaks.h"
 
 #include <array>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace Engine
@@ -50,6 +52,7 @@ namespace Engine
 		std::vector<std::byte> Bytes;
 		Swim::Rhi::ShaderProgramInterface Interface;
 		std::vector<RuntimeBinding> Names;
+		std::vector<RuntimeTweak> Tweaks;
 	};
 
 	ShaderLibrary::ShaderLibrary(Swim::Rhi::Device& deviceValue, std::filesystem::path rootValue)
@@ -95,18 +98,67 @@ namespace Engine
 		loadedPrograms.erase(std::string(name));
 	}
 
+	std::optional<RuntimeShaderDesc> ShaderLibrary::Find(std::string_view name) const
+	{
+		const auto* desc = Describe(name);
+		return desc ? std::optional<RuntimeShaderDesc>(*desc) : std::nullopt;
+	}
+
+	void ShaderLibrary::Replace(RuntimeShaderDesc desc)
+	{
+		const std::string name = desc.Name;
+		registrations.erase(name);
+		discovered.erase(name);
+		Invalidate(name);
+		Register(std::move(desc));
+	}
+
+	bool ShaderLibrary::IsLoaded(std::string_view name) const
+	{
+		return loadedPrograms.contains(std::string(name));
+	}
+
+	const RuntimeShaderDesc* ShaderLibrary::Describe(std::string_view name) const
+	{
+		const std::string key(name);
+
+		if (const auto found = registrations.find(key); found != registrations.end())
+		{
+			return &found->second;
+		}
+
+		if (const auto found = discovered.find(key); found != discovered.end())
+		{
+			return &found->second;
+		}
+
+		if (key.empty() || key.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos)
+		{
+			return nullptr;
+		}
+
+		std::error_code error;
+		RuntimeShaderDesc desc{ key, root / (key + ".spv"), root / (key + ".reflection.json") };
+
+		if (!std::filesystem::is_regular_file(desc.Bytecode, error) || !std::filesystem::is_regular_file(desc.Reflection, error))
+		{
+			return nullptr;
+		}
+
+		return &discovered.emplace(key, std::move(desc)).first->second;
+	}
+
 	bool ShaderLibrary::Contains(std::string_view name) const
 	{
-		const auto found = registrations.find(std::string(name));
+		const auto* desc = Describe(name);
 
-		if (found == registrations.end())
+		if (!desc)
 		{
 			return false;
 		}
 
 		std::error_code error;
-		return std::filesystem::is_regular_file(found->second.Bytecode, error) &&
-			std::filesystem::is_regular_file(found->second.Reflection, error);
+		return std::filesystem::is_regular_file(desc->Bytecode, error) && std::filesystem::is_regular_file(desc->Reflection, error);
 	}
 
 	const ShaderLibrary::Loaded& ShaderLibrary::Load(std::string_view name) const
@@ -118,18 +170,28 @@ namespace Engine
 			return *cached->second;
 		}
 
-		const auto found = registrations.find(key);
+		const auto* desc = Describe(key);
 
-		if (found == registrations.end())
+		if (!desc)
 		{
 			throw std::runtime_error("ShaderLibrary: unregistered program " + key);
 		}
 
-		const auto& spirv = found->second.Bytecode;
-		const auto& reflectionPath = found->second.Reflection;
+		const auto& spirv = desc->Bytecode;
+		const auto& reflectionPath = desc->Reflection;
 		Loaded loaded;
 		loaded.Bytes = ReadBytes(spirv);
-		const auto reflection = Swim::ShaderCompiler::LoadSlangReflectionJson(reflectionPath);
+		std::ifstream reflectionFile(reflectionPath, std::ios::binary);
+
+		if (!reflectionFile)
+		{
+			throw std::runtime_error("ShaderLibrary: cannot open " + reflectionPath.string());
+		}
+
+		std::ostringstream reflectionText;
+		reflectionText << reflectionFile.rdbuf();
+		const auto json = reflectionText.str();
+		const auto reflection = Swim::ShaderCompiler::ParseSlangReflectionJson(json);
 
 		if (!reflection)
 		{
@@ -183,6 +245,14 @@ namespace Engine
 			}
 		}
 
+		for (auto& tweak : Swim::ShaderCompiler::FindSlangTweaks(json))
+		{
+			const auto type = tweak.ScalarType == "float32" ? RuntimeTweak::Kind::Float
+				: tweak.ScalarType == "int32"				? RuntimeTweak::Kind::Int
+															: RuntimeTweak::Kind::Uint;
+			loaded.Tweaks.push_back({ std::move(tweak.Name), tweak.Offset, type, tweak.Min, tweak.Max });
+		}
+
 		const auto cached = std::make_shared<const Loaded>(std::move(loaded));
 		loadedPrograms.emplace(key, cached);
 		return *cached;
@@ -192,7 +262,7 @@ namespace Engine
 	{
 		const auto& loaded = Load(name);
 		const std::string label(name);
-		const Swim::Rhi::ShaderStageArtifact stage{ Swim::Rhi::ShaderStageMask::Compute, registrations.at(std::string(name)).ComputeEntry,
+		const Swim::Rhi::ShaderStageArtifact stage{ Swim::Rhi::ShaderStageMask::Compute, Describe(name)->ComputeEntry,
 			loaded.Bytes };
 		RuntimeComputeProgram program;
 		program.Program = device.CreateShaderProgram({ { &stage, 1 },
@@ -220,6 +290,7 @@ namespace Engine
 		program.Space = loaded.Interface.DescriptorSchemas.empty() ? 0u : loaded.Interface.DescriptorSchemas.front().Space;
 		program.Bindings = loaded.Names;
 		program.ThreadGroupSize = loaded.Interface.ComputeThreadGroupSize;
+		program.Tweaks = loaded.Tweaks;
 		return program;
 	}
 
@@ -229,8 +300,8 @@ namespace Engine
 		const auto& loaded = Load(name);
 		const std::string label(name);
 		const std::array<Swim::Rhi::ShaderStageArtifact, 2> stages{
-			{ { Swim::Rhi::ShaderStageMask::Vertex, registrations.at(std::string(name)).VertexEntry, loaded.Bytes },
-				{ Swim::Rhi::ShaderStageMask::Fragment, registrations.at(std::string(name)).FragmentEntry, loaded.Bytes } }
+			{ { Swim::Rhi::ShaderStageMask::Vertex, Describe(name)->VertexEntry, loaded.Bytes },
+				{ Swim::Rhi::ShaderStageMask::Fragment, Describe(name)->FragmentEntry, loaded.Bytes } }
 		};
 		RuntimeGraphicsProgram program;
 		program.Program =
@@ -248,6 +319,7 @@ namespace Engine
 			throw std::runtime_error("ShaderLibrary: cannot create the layout of " + label);
 		}
 
+		program.Bindings = loaded.Names;
 		return program;
 	}
 

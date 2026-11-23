@@ -1,4 +1,5 @@
 #include "Thread.h"
+#include <SDL3/SDL_timer.h>
 #include <algorithm>
 #include <string>
 
@@ -68,4 +69,8 @@ namespace Swim::Platform
 	#endif
 	}
 
+	void SleepPrecise(uint64_t nanoseconds)
+	{
+		SDL_DelayPrecise(nanoseconds);
+	}
 }

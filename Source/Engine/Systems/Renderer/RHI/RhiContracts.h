@@ -231,6 +231,14 @@ namespace Swim::Rhi
 		std::string_view DebugName;
 	};
 
+	enum class PresentMode : std::uint8_t
+	{
+		Auto,	   // SwapchainDesc::Vsync decides: Fifo, or Mailbox then Immediate.
+		Fifo,	   // Vsync: waits for the display, never tears.
+		Mailbox,   // No tearing, newest frame wins (Immediate, then Fifo where unsupported).
+		Immediate, // Lowest latency, may tear (Mailbox, then Fifo where unsupported).
+	};
+
 	struct SwapchainDesc
 	{
 		// Preference within the requested color mode; HDR defaults to 10-bit PQ,
@@ -239,6 +247,7 @@ namespace Swim::Rhi
 		std::uint32_t ImageCount = 3;
 		bool Vsync = true;
 		SwapchainColorMode ColorMode = SwapchainColorMode::Sdr;
+		PresentMode Mode = PresentMode::Auto;
 	};
 
 	// Tightly packed indexed-draw arguments as the GPU reads them (Vulkan/D3D12 layout).
@@ -252,6 +261,17 @@ namespace Swim::Rhi
 	};
 
 	static_assert(sizeof(DrawIndexedIndirectCommand) == 20);
+
+	// Tightly packed non-indexed draw arguments (Vulkan/D3D12 layout), for vertex pulling.
+	struct DrawIndirectCommand
+	{
+		std::uint32_t VertexCount = 0;
+		std::uint32_t InstanceCount = 0;
+		std::uint32_t FirstVertex = 0;
+		std::uint32_t FirstInstance = 0;
+	};
+
+	static_assert(sizeof(DrawIndirectCommand) == 16);
 
 	struct BufferCopyRegion
 	{
@@ -650,6 +670,31 @@ namespace Swim::Rhi
 		virtual void DrawIndexedIndirectCount(Buffer& arguments, std::uint64_t offset, Buffer& count, std::uint64_t countOffset,
 			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(DrawIndexedIndirectCommand)) = 0;
 
+		// Non-indexed GPU-generated draws (DrawIndirectCommand records, stride at least 16);
+		// otherwise the same rules as the indexed forms. Backends without them throw.
+		virtual void DrawIndirect(Buffer& arguments, std::uint64_t offset, std::uint32_t drawCount,
+			std::uint32_t stride = sizeof(DrawIndirectCommand))
+		{
+			(void)arguments;
+			(void)offset;
+			(void)drawCount;
+			(void)stride;
+			throw std::logic_error("DrawIndirect is not supported by this backend");
+		}
+
+		// Requires GraphicsCapabilities::IndirectCount.
+		virtual void DrawIndirectCount(Buffer& arguments, std::uint64_t offset, Buffer& count, std::uint64_t countOffset,
+			std::uint32_t maxDrawCount, std::uint32_t stride = sizeof(DrawIndirectCommand))
+		{
+			(void)arguments;
+			(void)offset;
+			(void)count;
+			(void)countOffset;
+			(void)maxDrawCount;
+			(void)stride;
+			throw std::logic_error("DrawIndirectCount is not supported by this backend");
+		}
+
 		// Workgroup counts, bounded per axis by Capabilities.Compute.MaxGroupCount.
 		// Zero counts are valid no-work dispatches but still require complete state.
 		// Requires a compute-capable queue, active compute pipeline and no rendering.
@@ -738,6 +783,12 @@ namespace Swim::Rhi
 		// retry Resize before acquiring again. Surface/device loss is fatal to this
 		// object and requires recreating the surface/device, not a Resize retry.
 		virtual bool Resize(Extent2D extent, const TimelinePoint& safeAfter) = 0;
+
+		// The present mode wanted from the next Resize on.
+		virtual void SetPresentMode(PresentMode mode) { (void)mode; }
+
+		// The mode the current swapchain presents with (never Auto).
+		virtual PresentMode GetPresentMode() const { return PresentMode::Fifo; }
 
 	};
 

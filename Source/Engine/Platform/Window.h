@@ -20,6 +20,15 @@ namespace Swim::Platform
 		Vulkan
 	};
 
+	// Borderless is a desktop-sized window over the whole display (no video mode change);
+	// ExclusiveFullscreen switches the display's video mode where the platform allows it.
+	enum class WindowMode : uint8_t
+	{
+		Windowed,
+		Borderless,
+		ExclusiveFullscreen
+	};
+
 	struct WindowDesc
 	{
 		std::string Title = "Swim";
@@ -28,7 +37,21 @@ namespace Swim::Platform
 		bool Resizable = true;
 		bool HighPixelDensity = true;
 		bool Hidden = false;
+		// Windowed mode: open maximized, filling the work area (title bar and task bar stay visible).
+		bool Maximized = false;
 		WindowGraphicsSupport GraphicsSupport = WindowGraphicsSupport::None;
+		WindowMode Mode = WindowMode::Windowed;
+		// Display to open on (DisplayInfo::Id); 0 = the primary display.
+		uint32_t Display = 0;
+		// False: the window opens without taking focus from the active application.
+		bool Activate = true;
+		// False: relative mouse mode and cursor confinement requests are ignored.
+		bool CaptureMouse = true;
+		// 1-based position in the system's display list; when set it overrides Display.
+		// Out of range falls back to Display.
+		uint32_t DisplayIndex = 0;
+		// Video mode for ExclusiveFullscreen; zero size = the display's desktop mode.
+		DisplayModeDesc FullscreenMode{};
 		NativeWindowHandle ExternalWindow{};
 		NativeWindowHandle ExternalParent{};
 	};
@@ -73,6 +96,32 @@ namespace Swim::Platform
 		bool Minimize();
 
 		bool Restore();
+
+		// Switches the window mode. For ExclusiveFullscreen, `mode` picks the closest video
+		// mode the display offers (null or zero size = the desktop mode). Falls back to
+		// Borderless and returns false when exclusive fullscreen is unavailable. The
+		// swapchain follows through the usual PixelSizeChanged event.
+		bool SetMode(WindowMode mode, const DisplayModeDesc* fullscreenMode = nullptr);
+
+		WindowMode GetMode() const;
+
+		// The display holding most of the window (DisplayInfo::Id), 0 if unknown.
+		uint32_t GetDisplay() const;
+
+		// Moves the window to a display (centered when windowed) and keeps its mode.
+		bool MoveToDisplay(uint32_t displayId);
+
+		void SetCursorVisible(bool visible);
+
+		// Keeps the pointer inside the window while it has focus.
+		void SetCursorConfined(bool confined);
+
+		// Hides the cursor and reports unaccelerated motion deltas (InputEvent::Delta) for
+		// camera look. Released while the window is unfocused and restored when focus
+		// returns, as long as it stays requested.
+		bool SetRelativeMouseMode(bool enabled);
+
+		bool IsRelativeMouseModeRequested() const;
 
 	private:
 

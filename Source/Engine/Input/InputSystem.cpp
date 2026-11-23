@@ -344,6 +344,51 @@ namespace Swim::Input
 		return index > 0 && index < it->second.Axes.size() ? it->second.Axes[index] : 0.0f;
 	}
 
+	bool InputSystem::IsAnyGamepadButtonDown(Platform::GamepadButton button) const
+	{
+		const size_t index = ToIndex(button);
+
+		if (index == 0 || index >= static_cast<size_t>(Platform::GamepadButton::Count))
+		{
+			return false;
+		}
+
+		for (const auto& [device, gamepad] : gamepads)
+		{
+			(void)device;
+
+			if (gamepad.Buttons[index].Current)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	float InputSystem::GetAnyGamepadAxis(Platform::GamepadAxis axis) const
+	{
+		const size_t index = ToIndex(axis);
+		float best = 0.0f;
+
+		if (index == 0 || index >= static_cast<size_t>(Platform::GamepadAxis::Count))
+		{
+			return best;
+		}
+
+		for (const auto& [device, gamepad] : gamepads)
+		{
+			(void)device;
+
+			if (std::abs(gamepad.Axes[index]) > std::abs(best))
+			{
+				best = gamepad.Axes[index];
+			}
+		}
+
+		return best;
+	}
+
 	float InputSystem::GetActionValue(InputAction action, const InputMap& map,
 		Platform::InputDeviceId gamepadDevice) const
 	{
@@ -396,6 +441,15 @@ namespace Swim::Input
 
 				case InputBindingType::GamepadAxis:
 					value += GetGamepadAxis(gamepadDevice, binding.Axis) * binding.Scale;
+					break;
+
+				case InputBindingType::MouseWheel:
+
+					if (mouseWheelDelta * binding.Scale > 0.0f)
+					{
+						value += 1.0f;
+					}
+
 					break;
 			}
 		}

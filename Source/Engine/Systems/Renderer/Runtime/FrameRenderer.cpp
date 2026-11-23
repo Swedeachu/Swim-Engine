@@ -36,11 +36,15 @@
 #include "Engine/Systems/Renderer/UiRendering/UiRenderer.h"
 #include "Engine/Systems/Renderer/Visibility/DepthConvention.h"
 #include "Engine/Systems/Renderer/Visibility/GpuVisibility.h"
+#include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
 #include "Engine/Systems/Renderer/Visibility/VisibilityDraws.h"
 #include "Engine/Systems/UI/UiDocument.h"
 
 #include <algorithm>
+#include <utility>
+#include <map>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <chrono>
@@ -124,6 +128,64 @@ namespace Engine
 			return result;
 		}
 
+		// FXAA or the morphological edges/weights/blend chain, then sharpening, on the
+		// display-referred frame (RGBA8 sRGB-encoded, ScreenAntiAliasing.slang).
+		R::GraphTexture RecordScreenAntiAliasing(R::RenderGraph& graph, const RenderFeatureView& view, const RenderSettings& settings,
+			R::GraphTexture color, RenderFeatureContext::Services services)
+		{
+			struct Constants
+			{
+				std::uint32_t Size[2];
+				float InvSize[2];
+				float Threshold;
+				float Strength;
+				std::uint32_t Reserved[2];
+			} constants{};
+
+			static_assert(sizeof(Constants) == 32);
+			constants.Size[0] = view.Width;
+			constants.Size[1] = view.Height;
+			constants.InvSize[0] = 1.0f / float(std::max(view.Width, 1u));
+			constants.InvSize[1] = 1.0f / float(std::max(view.Height, 1u));
+			constants.Strength = settings.Sharpening;
+			RenderFeatureContext context(graph, RenderFeatureStage::AfterPostProcess, view, settings, color, color, std::move(services));
+			const auto width = view.Width;
+			const auto height = view.Height;
+
+			if (settings.AntiAliasing == AntiAliasingMode::Fxaa)
+			{
+				constants.Threshold = 0.125f;
+				const auto output = context.CreateColorTarget("FXAA");
+				context.Compute("ScreenAaFxaa").Texture("Color", color).Sampler("LinearClamp").Storage("Output", output).Constants(constants).Dispatch(width, height);
+				color = output;
+			}
+			else if (settings.AntiAliasing == AntiAliasingMode::Smaa1x)
+			{
+				constants.Threshold = 0.1f;
+				const auto edges = context.CreateTexture(S::Format::RGBA8Unorm, width, height, "AA edges");
+				const auto weights = context.CreateTexture(S::Format::RGBA16Float, width, height, "AA weights");
+				const auto output = context.CreateColorTarget("Morphological AA");
+				context.Compute("ScreenAaEdges").Texture("Color", color).Storage("Edges", edges).Constants(constants).Dispatch(width, height);
+				context.Compute("ScreenAaWeights").Texture("Edges", edges).Storage("Weights", weights).Constants(constants).Dispatch(width, height);
+				context.Compute("ScreenAaBlend")
+					.Texture("Color", color)
+					.Texture("Weights", weights)
+					.Storage("Output", output)
+					.Constants(constants)
+					.Dispatch(width, height);
+				color = output;
+			}
+
+			if (settings.Sharpening > 0.0f)
+			{
+				const auto output = context.CreateColorTarget("Sharpen");
+				context.Compute("ScreenSharpen").Texture("Color", color).Storage("Output", output).Constants(constants).Dispatch(width, height);
+				color = output;
+			}
+
+			return color;
+		}
+
 	} // namespace
 
 	void RenderSettings::Sanitize()
@@ -132,6 +194,7 @@ namespace Engine
 		{
 			value = std::isfinite(value) ? std::clamp(value, low, high) : fallback;
 		};
+		clampFinite(Sharpening, 0.0f, 1.0f, 0.0f);
 		clampFinite(Sky.GroundFalloff, 1.0f, 256.0f, 2.0f);
 
 		if (SkyBackgroundGround)
@@ -247,9 +310,10 @@ namespace Engine
 		// Shared resources.
 		std::unique_ptr<S::Texture> whiteTexture;
 		std::unique_ptr<S::TextureView> whiteView;
-		std::unique_ptr<S::Sampler> linearRepeat, linearClamp, presentSampler;
+		std::unique_ptr<S::Sampler> linearRepeat, pointRepeat, linearClamp, presentSampler;
 		std::unique_ptr<R::BindlessResourceTable> bindless;
 		std::uint32_t materialSampler = 0;
+		std::uint32_t pointMaterialSampler = 0;
 		bool whiteUploaded = false;
 
 		// Residency and scene.
@@ -472,6 +536,203 @@ namespace Engine
 		std::uint64_t frameIndex = 0;
 		double featureTime = 0.0;
 		std::unordered_map<std::string, std::unique_ptr<RuntimeComputeProgram>> featurePrograms; // Loaded on first use.
+		// Feature geometry programs: space 0 is the pass's frame schema (the union of the
+		// engine programs' own), space 1 the shared bindless space.
+		std::array<S::DescriptorSchemaDesc, 2> geometryForwardSpaces;
+		std::array<S::DescriptorSchemaDesc, 2> geometryShadowSpaces;
+		std::map<std::pair<std::string, bool>, std::unique_ptr<RuntimeGraphicsProgram>> geometryPrograms; // (name, shadow).
+		std::map<std::tuple<std::string, std::uint32_t, bool, std::uint32_t>, std::unique_ptr<S::GraphicsPipeline>> geometryPipelines;
+		RuntimeComputeProgram hzbProgram; // Loaded with the first feature that uses occlusion.
+		std::unique_ptr<R::HzbBuilder> hzbBuilder;
+
+		struct PendingProgram
+		{
+			RuntimeShaderDesc Desc;
+			std::function<void(std::string_view)> Done;
+		};
+
+		std::vector<PendingProgram> pendingPrograms; // ReplaceProgram, applied by ApplyPrograms.
+
+		// Replaced programs, destroyed once the last frame that could use them completed.
+		struct RetiredPrograms
+		{
+			S::TimelinePoint After;
+			std::vector<std::unique_ptr<RuntimeComputeProgram>> Compute;
+			std::vector<std::unique_ptr<RuntimeGraphicsProgram>> Graphics;
+			std::vector<std::unique_ptr<S::GraphicsPipeline>> Pipelines;
+		};
+
+		std::vector<RetiredPrograms> retiredPrograms;
+
+		void CollectPrograms()
+		{
+			std::erase_if(retiredPrograms,
+				[](const RetiredPrograms& retired)
+				{
+					return !retired.After.Semaphore || retired.After.Semaphore->GetCompletedValue() >= retired.After.Value;
+				});
+		}
+		std::function<void(std::string_view, const RuntimeComputeProgram&, std::span<std::byte>)> overrideConstants;
+
+		RenderFeatureGeometryPipeline GetGeometryPipeline(
+			std::string_view name, RenderGeometryPass pass, bool prepassed, const RenderGeometryState& state)
+		{
+			const bool shadow = pass == RenderGeometryPass::Shadow;
+			auto& program = geometryPrograms[{ std::string(name), shadow }];
+
+			if (!program)
+			{
+				const auto& spaces = shadow ? geometryShadowSpaces : geometryForwardSpaces;
+				program = std::make_unique<RuntimeGraphicsProgram>(shaders.LoadGraphics(name, spaces));
+			}
+
+			prepassed = prepassed && pass == RenderGeometryPass::Opaque;
+			auto& pipeline =
+				geometryPipelines[{ std::string(name), static_cast<std::uint32_t>(pass), prepassed, static_cast<std::uint32_t>(state.Cull) }];
+
+			if (!pipeline)
+			{
+				pipeline = CreateGeometryPipeline(name, *program, pass, prepassed, state.Cull);
+			}
+
+			return { pipeline.get(), program.get() };
+		}
+
+		std::unique_ptr<S::GraphicsPipeline> CreateGeometryPipeline(
+			std::string_view name, const RuntimeGraphicsProgram& program, RenderGeometryPass pass, bool prepassed, S::CullMode cull)
+		{
+			auto& p = *program.Program;
+			auto& l = *program.Layout;
+			S::GraphicsPipelineDesc desc;
+
+			switch (pass)
+			{
+			case RenderGeometryPass::DepthPrepass:
+				desc = R::ForwardPlusRenderer::DepthPrepassPipelineDesc(p, l);
+				break;
+			case RenderGeometryPass::Opaque:
+				desc = prepassed ? R::ForwardPlusRenderer::PrepassedPipelineDesc(p, l)
+								 : R::ForwardPlusRenderer::PipelineDesc(R::ForwardPlusBin::Opaque, p, l);
+				break;
+			case RenderGeometryPass::Transparent:
+				desc = R::ForwardPlusRenderer::PipelineDesc(R::ForwardPlusBin::Transparent, p, l);
+				break;
+			default:
+				desc = R::ShadowRenderer::PipelineDesc(p, l);
+				break;
+			}
+
+			desc.Raster.Cull = cull;
+			const std::string label = "Feature " + std::string(name);
+			desc.DebugName = label;
+			auto pipeline = device.CreateGraphicsPipeline(desc);
+
+			if (!pipeline)
+			{
+				throw std::runtime_error("FrameRenderer: cannot create the pipeline of feature program " + std::string(name));
+			}
+
+			return pipeline;
+		}
+
+		// Before recording a frame; after is the last submission (the old programs' last use).
+		void ApplyPrograms(S::TimelinePoint after)
+		{
+			auto pending = std::move(pendingPrograms);
+			pendingPrograms.clear();
+
+			for (auto& item : pending)
+			{
+				const std::string name = item.Desc.Name;
+				std::string error;
+				const bool compute = featurePrograms.contains(name) && featurePrograms.at(name);
+				bool graphics = false;
+
+				for (const auto& [key, program] : geometryPrograms)
+				{
+					graphics = graphics || (key.first == name && program);
+				}
+
+				if (!compute && !graphics && shaders.IsLoaded(name))
+				{
+					error = "it is used by an engine pass; the change applies after a restart";
+				}
+				else
+				{
+					const auto previous = shaders.Find(name);
+
+					try
+					{
+						shaders.Replace(item.Desc);
+						std::unique_ptr<RuntimeComputeProgram> freshCompute;
+						std::map<bool, std::unique_ptr<RuntimeGraphicsProgram>> freshGraphics;
+						std::map<std::tuple<std::string, std::uint32_t, bool, std::uint32_t>, std::unique_ptr<S::GraphicsPipeline>> freshPipelines;
+
+						if (compute)
+						{
+							freshCompute = std::make_unique<RuntimeComputeProgram>(shaders.LoadCompute(name));
+						}
+
+						for (const auto& [key, program] : geometryPrograms)
+						{
+							if (key.first == name && program)
+							{
+								const auto& spaces = key.second ? geometryShadowSpaces : geometryForwardSpaces;
+								freshGraphics[key.second] = std::make_unique<RuntimeGraphicsProgram>(shaders.LoadGraphics(name, spaces));
+							}
+						}
+
+						for (const auto& [key, pipeline] : geometryPipelines)
+						{
+							const auto pass = static_cast<RenderGeometryPass>(std::get<1>(key));
+							const auto program = freshGraphics.find(pass == RenderGeometryPass::Shadow);
+
+							if (std::get<0>(key) == name && pipeline && program != freshGraphics.end())
+							{
+								freshPipelines[key] = CreateGeometryPipeline(
+									name, *program->second, pass, std::get<2>(key), static_cast<S::CullMode>(std::get<3>(key)));
+							}
+						}
+
+						RetiredPrograms retired;
+						retired.After = after;
+
+						if (freshCompute)
+						{
+							retired.Compute.push_back(std::exchange(featurePrograms[name], std::move(freshCompute)));
+						}
+
+						for (auto& [shadow, program] : freshGraphics)
+						{
+							retired.Graphics.push_back(std::exchange(geometryPrograms[{ name, shadow }], std::move(program)));
+						}
+
+						for (auto& [key, pipeline] : freshPipelines)
+						{
+							retired.Pipelines.push_back(std::exchange(geometryPipelines[key], std::move(pipeline)));
+						}
+
+						retiredPrograms.push_back(std::move(retired));
+
+						environmentValid = false;
+					}
+					catch (const std::exception& failure)
+					{
+						error = failure.what();
+
+						if (previous)
+						{
+							shaders.Replace(*previous);
+						}
+					}
+				}
+
+				if (item.Done)
+				{
+					item.Done(error);
+				}
+			}
+		}
 
 		void Route(std::uint32_t set, const R::StandardPbr::Parameters& parameters);
 
@@ -598,6 +859,41 @@ namespace Engine
 									  S::Format::RGBA8Unorm, *uiQuad.Program, *uiQuad.Layout, S::Format::D32Float)),
 			"world UI");
 		{
+			// Feature geometry programs share the frame tables of the engine passes they draw in.
+			const auto frameSpace = [](std::initializer_list<const S::PipelineLayout*> layouts)
+			{
+				S::DescriptorSchemaDesc space{ 0, {} };
+
+				for (const auto* layout : layouts)
+				{
+					for (const auto& schema : layout->GetInterface().DescriptorSchemas)
+					{
+						for (const auto& binding : schema.Bindings)
+						{
+							if (schema.Space == 0 &&
+								std::none_of(space.Bindings.begin(), space.Bindings.end(),
+									[&](const auto& known)
+									{
+										return known.Binding == binding.Binding;
+									}))
+							{
+								space.Bindings.push_back(binding);
+							}
+						}
+					}
+				}
+
+				for (auto& binding : space.Bindings)
+				{
+					binding.Stages = S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment;
+				}
+
+				return space;
+			};
+			geometryForwardSpaces = { frameSpace({ forwardOpaque.Layout.get(), forwardTransparent.Layout.get() }), bindlessSpace };
+			geometryShadowSpaces = { frameSpace({ shadowDepth.Layout.get(), shadowMasked.Layout.get() }), shadowSpace };
+		}
+		{
 			// The sky pass writes the colour target and clears depth (the opaque pass clears the
 			// other Forward+ targets: ForwardPlusTargets::ClearAuxiliary).
 			static const std::array<S::Format, 1> formats{ R::ForwardPlusRenderer::ColorFormat };
@@ -638,6 +934,12 @@ namespace Engine
 				linearRepeat = require(device.CreateSampler(repeat), "material sampler");
 			}
 
+			S::SamplerDesc point{};
+			point.MinFilter = point.MagFilter = S::Filter::Nearest;
+			point.MaxLod = 4.0f; // Pixel-art tiles stop blending into their atlas neighbours.
+			point.DebugName = "Point material sampler";
+			pointRepeat = require(device.CreateSampler(point), "point material sampler");
+
 			S::SamplerDesc clamp{};
 			clamp.AddressU = clamp.AddressV = clamp.AddressW = S::SamplerAddressMode::ClampToEdge;
 			clamp.DebugName = "Linear clamp";
@@ -656,6 +958,7 @@ namespace Engine
 		bindlessDesc.DebugName = "Runtime bindless";
 		bindless = std::make_unique<R::BindlessResourceTable>(device, bindlessDesc);
 		materialSampler = bindless->GetIndex(bindless->RegisterSampler(*linearRepeat));
+		pointMaterialSampler = bindless->GetIndex(bindless->RegisterSampler(*pointRepeat));
 
 		// --- Residency -------------------------------------------------------------
 		R::GeometryHeapDesc heapDesc;
@@ -676,7 +979,7 @@ namespace Engine
 		materialTemplate = R::CreateStandardMaterialTemplate();
 		materialTable = std::make_unique<R::GpuMaterialTable>(
 			device, R::GpuMaterialTableDesc{ materialTemplate, desc.MaxMaterials, "Runtime materials" });
-		materials = std::make_unique<MaterialLibrary>(*materialTable, materialTemplate, *residency, materialSampler);
+		materials = std::make_unique<MaterialLibrary>(*materialTable, materialTemplate, *residency, materialSampler, pointMaterialSampler);
 		meshes = std::make_unique<MeshLibrary>(assets, *residency, *geometry);
 
 		scene = std::make_unique<R::GpuScene>(device, R::GpuSceneDesc{ desc.MaxObjects, "Runtime scene" });
@@ -1039,6 +1342,8 @@ namespace Engine
 		impl->particles->Collect();
 		impl->skinning->Collect();
 		impl->atlasTextures->Collect();
+		impl->CollectPrograms();
+		impl->meshes->FlushReleases(lastCompletion);
 		impl->residency->Update();
 		impl->materials->Update();
 	}
@@ -1134,6 +1439,11 @@ namespace Engine
 		GatherTimings();
 		lap("Wait for the previous frame (GPU)");
 
+		if (!impl->pendingPrograms.empty())
+		{
+			impl->ApplyPrograms(lastCompletion);
+		}
+
 		auto frame = device.Acquire();
 		lap("Acquire");
 		const auto extent = device.GetExtent();
@@ -1150,15 +1460,18 @@ namespace Engine
 
 		const auto& camera = input.Camera;
 
+		const bool cut = camera.Cut || !I.previousViewProjection;
+
 		if (camera.Cut)
 		{
 			I.reflectionHistoryValid = false;
 			I.ssrColorValid = false;
 			I.temporal->ResetHistory();
+			I.post->ResetExposureHistory();
 			I.previousViewProjection.reset();
 		}
 
-		const bool temporalOn = settings.TemporalAntiAliasing;
+		const bool temporalOn = settings.TemporalAntiAliasing && settings.AntiAliasing == AntiAliasingMode::Taa;
 
 		if (!temporalOn)
 		{
@@ -1253,6 +1566,10 @@ namespace Engine
 			featureView.Time = static_cast<float>(I.featureTime);
 			featureView.DeltaTime = frameSeconds;
 			featureView.Frame = static_cast<std::uint32_t>(I.frameIndex);
+			featureView.PreviousViewProjection = I.previousViewProjection.value_or(viewProjection);
+			featureView.Jitter = jitter;
+			featureView.Cut = cut;
+			featureView.Temporal = temporalOn;
 			const auto featureServices = [this]
 			{
 				RenderFeatureContext::Services services;
@@ -1281,7 +1598,83 @@ namespace Engine
 
 					return *impl->linearClamp;
 				};
+				services.Device = &impl->device;
+				services.GetGeometryPipeline = [this](std::string_view name, RenderGeometryPass pass, bool prepassed,
+												   const RenderGeometryState& state)
+				{
+					return impl->GetGeometryPipeline(name, pass, prepassed, state);
+				};
+				services.OverrideConstants = impl->overrideConstants;
 				return services;
+			};
+
+			// Features that draw into the geometry passes prepare once per frame, after the
+			// shadow plan (they cull against its tiles) and before any geometry pass.
+			struct GeometryShared
+			{
+				RenderFeatureView View;
+				RenderFeatureContext::Services Services;
+			};
+
+			std::vector<R::ExternalGeometryDraws> geometryDraws;
+			std::vector<RenderFeatureShadowView> geometryShadowViews;
+			bool geometryPrepared = false;
+			const auto prepareGeometry = [&]
+			{
+				geometryPrepared = true;
+				auto services = featureServices();
+				services.ShadowViews = geometryShadowViews;
+				RenderFeatureContext context(graph, RenderFeatureStage::BeforeTemporal, featureView, settings, {}, {}, services);
+				services.ShadowViews = {};
+				const auto shared = std::make_shared<const GeometryShared>(GeometryShared{ featureView, std::move(services) });
+
+				for (const auto& feature : features)
+				{
+					const auto passes = feature && feature->Enabled ? feature->GetGeometryPasses() & RenderGeometryAllPasses : 0u;
+
+					if (passes == 0)
+					{
+						continue;
+					}
+
+					try
+					{
+						auto resources = feature->PrepareGeometry(context);
+						R::ExternalGeometryDraws draws;
+						draws.Passes = passes;
+						draws.Buffers = std::move(resources.Buffers);
+						draws.IndirectBuffers = std::move(resources.IndirectBuffers);
+						draws.Textures = std::move(resources.Textures);
+						draws.Draw = [feature, shared, passes](R::ExternalDrawContext& draw)
+						{
+							if (!feature->Enabled)
+							{
+								return;
+							}
+
+							// Only depth this feature wrote itself counts as prepassed.
+							auto local = draw;
+							local.DepthPrepassed = draw.DepthPrepassed && (passes & RenderGeometryPassBit(RenderGeometryPass::DepthPrepass)) != 0;
+							RenderFeatureDrawContext drawContext(local, shared->View, shared->Services);
+
+							try
+							{
+								feature->DrawGeometry(drawContext);
+							}
+							catch (const std::exception& error)
+							{
+								feature->Enabled = false;
+								std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
+							}
+						};
+						geometryDraws.push_back(std::move(draws));
+					}
+					catch (const std::exception& error)
+					{
+						feature->Enabled = false;
+						std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
+					}
+				}
 			};
 
 			lap("Build: Uploads and imports");
@@ -1523,6 +1916,7 @@ namespace Engine
 			R::RenderViewDesc viewDesc;
 			viewDesc.ViewProjection = viewProjection;
 			viewDesc.CameraPosition = camera.Position;
+			viewDesc.Flags = camera.Cut ? std::uint32_t(R::GpuViewFlags::CameraCut) : 0u;
 
 			stats.ShadowViews = 0;
 			stats.ShadowCasters = static_cast<std::uint32_t>(input.ShadowCasters.size());
@@ -1582,6 +1976,19 @@ namespace Engine
 							I.shadowCache.clear();
 						}
 
+						for (std::size_t v = 0; v < plan->Draws.size(); ++v)
+						{
+							RenderFeatureShadowView view;
+							view.Index = static_cast<std::uint32_t>(v);
+							std::copy(std::begin(plan->Draws[v].View.ViewProjection), std::end(plan->Draws[v].View.ViewProjection),
+								view.ViewProjection.begin());
+							view.Rendered = shadowFrame.Render.empty() || shadowFrame.Render[v] != 0;
+							geometryShadowViews.push_back(view);
+						}
+
+						prepareGeometry();
+						shadowFrame.External = geometryDraws;
+
 						shadowResources = I.shadows->Record(graph, shadowFrame);
 
 						if (cachedAtlas)
@@ -1591,6 +1998,11 @@ namespace Engine
 
 						stats.ShadowViews = plan->Stats.Views;
 					}
+				}
+
+				if (!geometryPrepared)
+				{
+					prepareGeometry();
 				}
 
 				lap("Build: Shadows");
@@ -1643,6 +2055,76 @@ namespace Engine
 				forwardFrame.View.DebugMode = settings.Debug;
 				forwardFrame.Transparent = settings.Transparent;
 				forwardFrame.DeferLocalLights = settings.DeferredLocalLights;
+				forwardFrame.External = geometryDraws;
+
+				const auto occludes = [](const std::shared_ptr<RenderFeature>& feature)
+				{
+					return feature && feature->Enabled && (feature->GetGeometryPasses() & RenderGeometryAllPasses) != 0 && feature->UsesOcclusion();
+				};
+
+				if (std::any_of(features.begin(), features.end(), occludes))
+				{
+					forwardFrame.BeforeOpaque = [&](R::RenderGraph& g, std::optional<R::GraphTexture> depth)
+					{
+						RenderFeatureOcclusion occlusion;
+						occlusion.ViewProjection = viewProjection;
+						occlusion.Width = width;
+						occlusion.Height = height;
+
+						if (depth)
+						{
+							if (!I.hzbBuilder)
+							{
+								I.hzbProgram = I.shaders.LoadCompute("HzbReduce");
+								R::HzbBuilderDesc hzbDesc;
+								hzbDesc.ReducePipeline = I.hzbProgram.Pipeline.get();
+								hzbDesc.Layout = I.hzbProgram.Layout.get();
+								hzbDesc.Space = I.hzbProgram.Space;
+								hzbDesc.DebugName = "Feature HZB";
+								I.hzbBuilder = std::make_unique<R::HzbBuilder>(hzbDesc);
+							}
+
+							const auto hzb = I.hzbBuilder->Record(g, *depth);
+							occlusion.Pyramid = hzb.Pyramid;
+							occlusion.Width = hzb.Width;
+							occlusion.Height = hzb.Height;
+							occlusion.MipCount = hzb.MipCount;
+						}
+						else
+						{
+							S::TextureDesc standIn;
+							standIn.Extent = { 1, 1, 1 };
+							standIn.PixelFormat = S::Format::R32Float;
+							standIn.Usage = S::TextureUsage::Sampled | S::TextureUsage::TransferDestination;
+							standIn.DebugName = "No HZB";
+							occlusion.Pyramid = g.CreateTexture(standIn);
+							constexpr float nothing = 0.0f;
+							R::AddTextureUpload(g, "No HZB", std::as_bytes(std::span(&nothing, 1)), occlusion.Pyramid, { 0, {}, {}, { 1, 1, 1 } });
+						}
+
+						auto services = featureServices();
+						RenderFeatureContext context(g, RenderFeatureStage::BeforeTemporal, featureView, settings, {}, {}, services);
+
+						for (const auto& feature : features)
+						{
+							if (!occludes(feature))
+							{
+								continue;
+							}
+
+							try
+							{
+								feature->CullGeometry(context, occlusion);
+							}
+							catch (const std::exception& error)
+							{
+								feature->Enabled = false;
+								std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
+							}
+						}
+					};
+				}
+
 				forwardResources = I.forward->Record(graph, forwardFrame, targets);
 
 				lap("Build: Forward+");
@@ -1773,6 +2255,8 @@ namespace Engine
 						const auto faceClusters = I.clusters->Record(graph, lightResources, faceGrid, faceClusterView);
 
 						R::ForwardPlusFrame faceFrame = forwardFrame;
+						faceFrame.External.clear(); // Feature geometry is culled for the main view only.
+						faceFrame.BeforeOpaque = {};
 						faceFrame.Visibility = &faceVisible;
 						faceFrame.Clusters = &faceClusters;
 						faceFrame.View.ViewProjection = faceViewProjection;
@@ -1978,6 +2462,8 @@ namespace Engine
 							const auto captureClusters = I.clusters->Record(graph, lightResources, captureGrid, captureClusterView);
 
 							R::ForwardPlusFrame captureFrame = forwardFrame;
+							captureFrame.External.clear(); // Feature geometry is culled for the main view only.
+							captureFrame.BeforeOpaque = {};
 							captureFrame.Visibility = &captureVisible;
 							captureFrame.Clusters = &captureClusters;
 							captureFrame.View.ViewProjection = capture.ViewProjection;
@@ -2068,7 +2554,8 @@ namespace Engine
 				ssFrame.Settings.Reflections.Enabled = false;
 			}
 
-			ssFrame.NoiseFrame = static_cast<std::uint32_t>(I.frameIndex);
+			// Without a temporal resolve a moving noise pattern only crawls: hold it still.
+			ssFrame.NoiseFrame = temporalOn ? static_cast<std::uint32_t>(I.frameIndex) : 0u;
 			ssFrame.BackDepth = targets.BackDepth;
 			ssFrame.Probes = probeInputs;
 			ssFrame.Planar = planarInputs;
@@ -2189,7 +2676,7 @@ namespace Engine
 
 				for (const auto& feature : features)
 				{
-					if (feature && feature->Enabled && feature->GetStage() == stage)
+					if (feature && feature->Enabled && feature->GetStage() == stage && (settings.CinematicEffects || !feature->IsCinematic()))
 					{
 						ordered.push_back(feature.get());
 					}
@@ -2261,6 +2748,13 @@ namespace Engine
 			postFrame.Settings.Output.Encoding = R::OutputEncoding::Srgb;
 			postFrame.DeltaTime = std::clamp(std::isfinite(input.DeltaTime) ? input.DeltaTime : 0.0f, 0.0f, 1.0f);
 			I.post->Record(graph, postFrame);
+
+			if (draw3D && (settings.AntiAliasing == AntiAliasingMode::Fxaa || settings.AntiAliasing == AntiAliasingMode::Smaa1x ||
+							  settings.Sharpening > 0.0f))
+			{
+				postOutput = RecordScreenAntiAliasing(graph, featureView, settings, postOutput, featureServices());
+			}
+
 			{
 				// Display-referred features write their own RGBA8 target; the UI and the
 				// presentation then use it (it keeps the Frame target's usages).
@@ -2521,6 +3015,17 @@ namespace Engine
 		stats.CpuMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - cpuStart).count();
 		(void)pageConflict;
 		return true;
+	}
+
+	void FrameRenderer::ReplaceProgram(RuntimeShaderDesc desc, std::function<void(std::string_view error)> done)
+	{
+		impl->pendingPrograms.push_back({ std::move(desc), std::move(done) });
+	}
+
+	void FrameRenderer::SetConstantsOverride(
+		std::function<void(std::string_view, const RuntimeComputeProgram&, std::span<std::byte>)> callback)
+	{
+		impl->overrideConstants = std::move(callback);
 	}
 
 	void FrameRenderer::AddFeature(std::shared_ptr<RenderFeature> feature)

@@ -135,16 +135,30 @@ namespace Swim::RhiVulkan
 			.set_desired_min_image_count(std::max(2u, desc.ImageCount))
 			.set_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
-		if (desc.Vsync)
+		auto mode = desc.Mode;
+
+		if (mode == Rhi::PresentMode::Auto)
 		{
-			builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR);
+			mode = desc.Vsync ? Rhi::PresentMode::Fifo : Rhi::PresentMode::Mailbox;
 		}
-		else
+
+		switch (mode)
 		{
+		case Rhi::PresentMode::Immediate:
+			builder
+				.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
+				.add_fallback_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
+				.add_fallback_present_mode(VK_PRESENT_MODE_FIFO_KHR);
+			break;
+		case Rhi::PresentMode::Mailbox:
 			builder
 				.set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
 				.add_fallback_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
 				.add_fallback_present_mode(VK_PRESENT_MODE_FIFO_KHR);
+			break;
+		default:
+			builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR);
+			break;
 		}
 
 		session.Invalidate();
@@ -254,6 +268,19 @@ namespace Swim::RhiVulkan
 		{
 			vkb::destroy_swapchain(swapchain);
 			swapchain = {};
+		}
+	}
+
+	Rhi::PresentMode VulkanSwapchain::GetPresentMode() const
+	{
+		switch (swapchain.present_mode)
+		{
+		case VK_PRESENT_MODE_IMMEDIATE_KHR:
+			return Rhi::PresentMode::Immediate;
+		case VK_PRESENT_MODE_MAILBOX_KHR:
+			return Rhi::PresentMode::Mailbox;
+		default:
+			return Rhi::PresentMode::Fifo;
 		}
 	}
 

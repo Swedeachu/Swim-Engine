@@ -23,25 +23,29 @@ endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
-set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
-set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
-set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
-CPMAddPackage(
-	NAME spdlog_source
-	GITHUB_REPOSITORY gabime/spdlog
-	GIT_TAG v1.15.3
-	EXCLUDE_FROM_ALL YES
-	UPDATE_DISCONNECTED YES
-)
+# A parent project may declare spdlog, EnTT and the other shared libraries first; its
+# targets are then used as they are and nothing here changes how they were built.
 if(NOT TARGET spdlog::spdlog)
-	message(FATAL_ERROR "spdlog v1.15.3 did not provide spdlog::spdlog")
+	set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+	set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+	CPMAddPackage(
+		NAME spdlog
+		GITHUB_REPOSITORY gabime/spdlog
+		GIT_TAG v1.17.0
+		EXCLUDE_FROM_ALL YES
+		UPDATE_DISCONNECTED YES
+	)
+	if(NOT TARGET spdlog::spdlog)
+		message(FATAL_ERROR "spdlog v1.17.0 did not provide spdlog::spdlog")
+	endif()
+	swim_set_solution_folder(spdlog "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/spdlog")
 endif()
-swim_set_solution_folder(spdlog "${SWIM_SOLUTION_FOLDER_THIRD_PARTY}/spdlog")
 
 
 function(swim_assert_cached_git_dependency_clean dependency_name source_dir)
@@ -76,29 +80,33 @@ if(NOT TARGET glm::glm)
 	message(FATAL_ERROR "glm::glm foundation dependency was not initialized")
 endif()
 
-CPMAddPackage(
-	NAME entt_source
-	GITHUB_REPOSITORY skypjack/entt
-	GIT_TAG v3.13.2
-	DOWNLOAD_ONLY YES
-	UPDATE_DISCONNECTED YES
-)
-add_library(SwimEnTT INTERFACE)
-target_include_directories(SwimEnTT SYSTEM INTERFACE
-	"${entt_source_SOURCE_DIR}/src"
-)
-add_library(EnTT::EnTT ALIAS SwimEnTT)
+if(NOT TARGET EnTT::EnTT)
+	CPMAddPackage(
+		NAME entt
+		GITHUB_REPOSITORY skypjack/entt
+		GIT_TAG v4.0.0
+		DOWNLOAD_ONLY YES
+		UPDATE_DISCONNECTED YES
+	)
+	add_library(SwimEnTT INTERFACE)
+	target_include_directories(SwimEnTT SYSTEM INTERFACE
+		"${entt_SOURCE_DIR}/src"
+	)
+	# Atomic type-index generation keeps EnTT's type ids safe to create from job threads.
+	target_compile_definitions(SwimEnTT INTERFACE ENTT_USE_ATOMIC)
+	add_library(EnTT::EnTT ALIAS SwimEnTT)
+endif()
 
 if(SWIM_ENABLE_PHYSX_BACKEND)
 	include(cmake/PhysX.cmake)
 endif()
 
 foreach(SWIM_CACHED_GIT_DEPENDENCY IN ITEMS
-	mimalloc_source
+	mimalloc
 	sdl3_source
-	glm_source
-	entt_source
-	spdlog_source
+	glm
+	entt
+	spdlog
 	swim_physx_source
 )
 	set(SWIM_CACHED_GIT_SOURCE_VARIABLE "${SWIM_CACHED_GIT_DEPENDENCY}_SOURCE_DIR")

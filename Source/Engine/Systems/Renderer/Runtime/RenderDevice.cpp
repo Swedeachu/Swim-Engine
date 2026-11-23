@@ -181,6 +181,58 @@ namespace Engine
 		return true;
 	}
 
+	void RenderDevice::SetLastCompletion(Swim::Rhi::TimelinePoint completion)
+	{
+		lastCompletion = completion;
+
+		if (completion.Semaphore)
+		{
+			queued.push_back(completion);
+		}
+	}
+
+	std::uint32_t RenderDevice::GetQueuedFrames()
+	{
+		while (!queued.empty() && queued.front().Semaphore->GetCompletedValue() >= queued.front().Value)
+		{
+			queued.pop_front();
+		}
+
+		return static_cast<std::uint32_t>(queued.size());
+	}
+
+	bool RenderDevice::WaitForQueuedFrames(std::uint64_t timeoutNanoseconds)
+	{
+		if (GetQueuedFrames() == 0)
+		{
+			return true;
+		}
+
+		const auto last = queued.back();
+
+		if (!last.Semaphore->Wait(last.Value, timeoutNanoseconds))
+		{
+			return false;
+		}
+
+		queued.clear();
+		return true;
+	}
+
+	void RenderDevice::SetPresentMode(Swim::Rhi::PresentMode mode)
+	{
+		if (swapchain)
+		{
+			swapchain->SetPresentMode(mode);
+			needsRebuild = true;
+		}
+	}
+
+	Swim::Rhi::PresentMode RenderDevice::GetPresentMode() const
+	{
+		return swapchain ? swapchain->GetPresentMode() : Swim::Rhi::PresentMode::Fifo;
+	}
+
 	RenderDevice::Frame RenderDevice::Acquire()
 	{
 		Frame frame;

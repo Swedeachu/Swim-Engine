@@ -175,7 +175,7 @@ namespace Engine
 		params.Size[0] = width;
 		params.Size[1] = height;
 		params.Size[2] = std::clamp(Settings.Steps, 4u, 256u);
-		params.Size[3] = view.Frame;
+		params.Size[3] = view.Temporal ? view.Frame : 0u;
 		params.Output[0] = view.Width;
 		params.Output[1] = view.Height;
 

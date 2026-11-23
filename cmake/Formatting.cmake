@@ -6,16 +6,16 @@ set(SWIM_FORMAT_BASE_REF "HEAD" CACHE STRING "Git revision used by SwimFormat/Sw
 
 if(SWIM_CLANG_FORMAT_EXECUTABLE AND Python3_Interpreter_FOUND)
 	add_custom_target(SwimFormat
-		COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/format-source.py"
+		COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/format-source.py"
 			--clang-format "${SWIM_CLANG_FORMAT_EXECUTABLE}" --base-ref "${SWIM_FORMAT_BASE_REF}"
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+		WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
 		COMMENT "Formatting changed first-party C/C++ sources"
 		VERBATIM
 	)
 	add_custom_target(SwimFormatCheck
-		COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/format-source.py"
+		COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/scripts/format-source.py"
 			--clang-format "${SWIM_CLANG_FORMAT_EXECUTABLE}" --base-ref "${SWIM_FORMAT_BASE_REF}" --check
-		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+		WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
 		COMMENT "Checking changed first-party C/C++ formatting and braces"
 		VERBATIM
 	)

@@ -13,15 +13,15 @@ if(SWIM_OFFLINE_DEPENDENCY_STUBS)
 endif()
 
 CPMAddPackage(
-	NAME glm_source
+	NAME glm
 	GITHUB_REPOSITORY g-truc/glm
-	GIT_TAG 1.0.0
+	GIT_TAG 1.0.3
 	DOWNLOAD_ONLY YES
 	UPDATE_DISCONNECTED YES
 )
 
 add_library(SwimGlm INTERFACE)
 target_include_directories(SwimGlm SYSTEM INTERFACE
-	"${glm_source_SOURCE_DIR}"
+	"${glm_SOURCE_DIR}"
 )
 add_library(glm::glm ALIAS SwimGlm)

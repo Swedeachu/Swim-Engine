@@ -2,6 +2,7 @@
 
 #include "Engine/EngineState.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Systems/Audio/AudioSystem.h"
 
 #include <cstdint>
 #include <string>
@@ -46,14 +47,28 @@ namespace Engine
 		PresentMode Present{ PresentMode::Window };
 		// One of Playing, Paused or Stopped.
 		EngineState InitialState{ EngineState::Playing };
+		// Name the per-user folders (settings, caches) are created under; set these to the
+		// application's own names so it does not share the user-data root of other games.
+		std::string OrganizationName{ "Swim Services" };
+		std::string ApplicationName{ "Swim Engine" };
+		// The user config file (saved console variables and input bindings), relative to the
+		// user-data root unless absolute. Loaded after startup, before --exec commands, and
+		// written on exit when a saved setting changed. Empty: no config file (--config=none).
+		std::string UserConfigFile{ "config.cfg" };
 		// Overrides the application's startup scene when non-empty.
 		std::string StartupScene;
 		// Loose-asset root (--assets). Empty: the repository's Assets/ folder in development
 		// builds (SWIM_DEVELOPMENT_ASSET_ROOT) when it exists, else <exe dir>/Assets.
 		std::string AssetRoot;
 
+		// --audio=device|null|off. Headless runs use the null output unless audio is off.
+		AudioOutput Audio{ AudioOutput::Device };
+
 		// False: no GPU at all (simulation, UI logic and tests only; --no-render).
 		bool Render{ true };
+		// False (--input=none): keyboard and mouse from the OS are ignored and the cursor is
+		// never captured; only input the application injects drives it (automated runs).
+		bool PlatformInput{ true };
 		// Off by default (mailbox, else immediate): the frame rate is not capped at the
 		// display's refresh. --vsync=on presents FIFO.
 		bool VSync{ false };
@@ -113,6 +128,8 @@ namespace Engine
 	//   --headless  --no-render               --frames=<n>
 	//   --capture=<file.ppm>                  --fixed-delta=<seconds>
 	//   --exec=<command>                      (repeatable; runs after startup)
+	//   --config=<file>|none                  User config file (default config.cfg)
+	//   --window-mode=windowed|borderless|exclusive
 	//   --parent-hwnd=<handle>               (Windows embedding)
 	// Every value form also accepts "--name value". Unknown arguments are errors.
 	EngineConfigParseResult ParseEngineConfigArgs(int argc, char** argv);

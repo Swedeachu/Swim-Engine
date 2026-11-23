@@ -1,8 +1,11 @@
 #include "Engine/Systems/Renderer/Visibility/HzbBuilder.h"
+
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 #include "Engine/Systems/Renderer/Visibility/HzbPyramid.h"
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <stdexcept>
 
 namespace Swim::Render
@@ -44,6 +47,18 @@ namespace Swim::Render
 		hzb.Convention = convention;
 		Rhi::TextureDesc pyramidDesc;
 		pyramidDesc.Extent = { mips[0].Width, mips[0].Height, 1 };
+
+		// Mips round up (odd edges are kept) while image mips round down: when the two chains
+		// differ, the image is padded to powers of two so every mip holds its rounded-up size.
+		for (std::uint32_t mip = 0; mip < mips.size(); ++mip)
+		{
+			if (std::max(mips[0].Width >> mip, 1u) != mips[mip].Width || std::max(mips[0].Height >> mip, 1u) != mips[mip].Height)
+			{
+				pyramidDesc.Extent = { std::bit_ceil(mips[0].Width), std::bit_ceil(mips[0].Height), 1 };
+				break;
+			}
+		}
+
 		pyramidDesc.PixelFormat = Rhi::Format::R32Float;
 		pyramidDesc.Usage = Rhi::TextureUsage::Sampled | Rhi::TextureUsage::Storage | Rhi::TextureUsage::TransferSource;
 		pyramidDesc.MipLevels = hzb.MipCount;

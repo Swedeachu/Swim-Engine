@@ -78,7 +78,7 @@ namespace Engine
 		constants.Size[2] = halfWidth;
 		constants.Size[3] = halfHeight;
 		constants.Params[0] = std::clamp(Settings.Samples, 8u, 128u);
-		constants.Params[1] = view.Frame;
+		constants.Params[1] = view.Temporal ? view.Frame : 0u;
 
 		const auto half = context.CreateTexture(Swim::Rhi::Format::RGBA16Float, halfWidth, halfHeight, "Depth of field half");
 		context.Compute("DepthOfFieldPrepare")

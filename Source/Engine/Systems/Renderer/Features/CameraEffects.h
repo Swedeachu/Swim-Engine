@@ -41,6 +41,8 @@ namespace Engine
 
 		std::string_view GetName() const override { return "Depth of field"; }
 
+		bool IsCinematic() const override { return true; }
+
 		RenderFeatureStage GetStage() const override { return RenderFeatureStage::BeforePostProcess; }
 
 		int GetOrder() const override { return 20; }
@@ -84,6 +86,8 @@ namespace Engine
 
 		std::string_view GetName() const override { return "Camera lens"; }
 
+		bool IsCinematic() const override { return true; }
+
 		RenderFeatureStage GetStage() const override { return RenderFeatureStage::BeforePostProcess; }
 
 		int GetOrder() const override { return 30; }
@@ -120,6 +124,8 @@ namespace Engine
 		FilmSensor() { Enabled = false; }
 
 		std::string_view GetName() const override { return "Film sensor"; }
+
+		bool IsCinematic() const override { return true; }
 
 		RenderFeatureStage GetStage() const override { return RenderFeatureStage::AfterPostProcess; }
 

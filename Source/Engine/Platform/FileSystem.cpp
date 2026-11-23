@@ -25,6 +25,12 @@ namespace Swim::Platform
 
 	}
 
+	std::filesystem::path FileSystem::GetDevPath(std::string_view key) const
+	{
+		const auto found = devPaths.find(key);
+		return found == devPaths.end() ? std::filesystem::path{} : found->second;
+	}
+
 	bool FileSystem::Initialize(const FileSystemDesc& desc)
 	{
 		const char* basePath = SDL_GetBasePath();
@@ -59,6 +65,28 @@ namespace Swim::Platform
 
 		cacheRoot = userDataRoot / "Cache";
 		temporaryRoot = std::filesystem::temp_directory_path() / "SwimEngine";
+
+		devPaths.clear();
+
+		if (std::ifstream file(executableDirectory / "DevPaths.cfg"); file)
+		{
+			std::string line;
+
+			while (std::getline(file, line))
+			{
+				while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+				{
+					line.pop_back();
+				}
+
+				const auto equals = line.find('=');
+
+				if (equals != std::string::npos && equals > 0 && equals + 1 < line.size() && line[0] != '#')
+				{
+					devPaths[line.substr(0, equals)] = PathFromUtf8(line.c_str() + equals + 1);
+				}
+			}
+		}
 
 		std::error_code error;
 		std::filesystem::create_directories(userDataRoot, error);

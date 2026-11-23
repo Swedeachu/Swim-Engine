@@ -184,6 +184,70 @@ namespace Swim::Render
 			return tables;
 		}
 
+		void DeclareExternal(RenderGraphBuilder& b, const std::vector<ExternalGeometryDraws>& external, ExternalGeometryPass pass)
+		{
+			for (const auto& draws : external)
+			{
+				if ((draws.Passes & ExternalGeometryPassBit(pass)) == 0)
+				{
+					continue;
+				}
+
+				for (const auto buffer : draws.Buffers)
+				{
+					b.Read(buffer, S::ShaderRead);
+				}
+
+				for (const auto buffer : draws.IndirectBuffers)
+				{
+					b.Read(buffer, S::IndirectArgument);
+				}
+
+				for (const auto texture : draws.Textures)
+				{
+					b.Read(texture, S::ShaderRead);
+				}
+			}
+		}
+
+		void RunExternal(RenderCommandContext& c, const std::vector<ExternalGeometryDraws>& external, ExternalGeometryPass pass,
+			bool prepassed, const DrawInputs& inputs, Rhi::Sampler& sampler, Rhi::DescriptorTable* bindless, std::uint32_t width,
+			std::uint32_t height, const std::string& label)
+		{
+			if (!DrawsIn(external, pass))
+			{
+				return;
+			}
+
+			DrawInputs first = inputs;
+			first.VertexPages.resize(std::min<std::size_t>(first.VertexPages.size(), 1));
+			ExternalDrawContext context{ c };
+			context.Pass = pass;
+			context.DepthPrepassed = prepassed;
+			context.Width = width;
+			context.Height = height;
+			context.Bindless = bindless;
+			context.FrameTable = [&](Rhi::PipelineLayout& layout) -> Rhi::DescriptorTable&
+			{
+				const auto tables = CreateDrawTables(c, first, layout, sampler, label + " external");
+
+				if (tables.empty())
+				{
+					throw std::runtime_error(label + ": external draws need at least one page slot");
+				}
+
+				return *tables.front();
+			};
+
+			for (const auto& draws : external)
+			{
+				if ((draws.Passes & ExternalGeometryPassBit(pass)) != 0 && draws.Draw)
+				{
+					draws.Draw(context);
+				}
+			}
+		}
+
 		void ValidateTarget(const RenderGraph& graph, GraphTexture target, Rhi::Format format, Rhi::TextureUsage usage, std::uint32_t width,
 			std::uint32_t height, const std::string& what)
 		{
@@ -506,6 +570,7 @@ namespace Swim::Render
 				[&](RenderGraphBuilder& b)
 				{
 					DeclareDrawReads(b, inputs);
+					DeclareExternal(b, frame.External, ExternalGeometryPass::DepthPrepass);
 					b.Read(commands, S::IndirectArgument);
 					b.Read(counts, S::IndirectArgument);
 
@@ -520,7 +585,7 @@ namespace Swim::Render
 
 				},
 				[program = desc.DepthPrepass, label = name + " depth prepass", inputs, targets, commands, counts, bins, path, bindless,
-					sampler, slots, width, height](RenderCommandContext& c)
+					sampler, slots, width, height, external = frame.External](RenderCommandContext& c)
 				{
 					const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 					Rhi::TextureViewDesc depthView;
@@ -545,6 +610,7 @@ namespace Swim::Render
 							bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
 					}
 
+					RunExternal(c, external, ExternalGeometryPass::DepthPrepass, false, inputs, *sampler, bindless, width, height, label);
 					list.EndRendering();
 				});
 		}
@@ -603,8 +669,14 @@ namespace Swim::Render
 				});
 		}
 
+		if (frame.BeforeOpaque)
+		{
+			frame.BeforeOpaque(graph, prepass ? std::optional<GraphTexture>(targets.Depth) : std::nullopt);
+		}
+
 		// 1. Opaque (with deferred local lights: without them, plus the material target).
 		const bool deferLocal = frame.DeferLocalLights && prepass && SupportsDeferredLocalLights() &&
+			!DrawsIn(frame.External, ExternalGeometryPass::Opaque) &&
 			HasUsage(graph.GetDesc(targets.Color).Usage, Rhi::TextureUsage::Storage) &&
 			HasUsage(graph.GetDesc(targets.Depth).Usage, Rhi::TextureUsage::Sampled) &&
 			HasUsage(graph.GetDesc(normal).Usage, Rhi::TextureUsage::Sampled);
@@ -632,6 +704,7 @@ namespace Swim::Render
 			[&](RenderGraphBuilder& b)
 			{
 				DeclareDrawReads(b, inputs);
+				DeclareExternal(b, frame.External, ExternalGeometryPass::Opaque);
 				b.Read(commands, S::IndirectArgument);
 				b.Read(counts, S::IndirectArgument);
 
@@ -697,7 +770,7 @@ namespace Swim::Render
 			},
 			[program = deferLocal ? desc.OpaqueDeferred : (prepass ? desc.OpaquePrepassed : desc.Opaque), prepass, deferLocal,
 				label = name + " opaque", inputs, targets, velocity, normal, indirect, reflectance, specular, material, commands, counts,
-				bins, path, bindless, sampler, slots, width, height](RenderCommandContext& c)
+				bins, path, bindless, sampler, slots, width, height, external = frame.External](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				const auto load = targets.Clear ? Rhi::LoadOp::Clear : Rhi::LoadOp::Load;
@@ -746,6 +819,7 @@ namespace Swim::Render
 						bins.GetBin(static_cast<std::uint32_t>(ForwardPlusBin::Opaque), slot), path);
 				}
 
+				RunExternal(c, external, ExternalGeometryPass::Opaque, prepass, inputs, *sampler, bindless, width, height, label);
 				list.EndRendering();
 			});
 
@@ -871,6 +945,7 @@ namespace Swim::Render
 			[&](RenderGraphBuilder& b)
 			{
 				DeclareDrawReads(b, inputs);
+				DeclareExternal(b, frame.External, ExternalGeometryPass::Transparent);
 				b.Read(r.SortedCommands, S::IndirectArgument);
 				b.Read(r.SortedCounts, S::IndirectArgument);
 				b.ReadWrite(targets.Color, S::ColorAttachment);
@@ -881,7 +956,7 @@ namespace Swim::Render
 				b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 			},
 			[program = desc.Transparent, label = name + " transparent", inputs, targets, indirect, reflectance, specular, r, path, bindless,
-				sampler, capacity, slots, width, height](RenderCommandContext& c)
+				sampler, capacity, slots, width, height, external = frame.External](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				std::array<Rhi::RenderingAttachmentDesc, 4> colors{};
@@ -924,6 +999,7 @@ namespace Swim::Render
 					}
 				}
 
+				RunExternal(c, external, ExternalGeometryPass::Transparent, false, inputs, *sampler, bindless, width, height, label);
 				list.EndRendering();
 			});
 		return resources;

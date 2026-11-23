@@ -265,7 +265,7 @@ SWIM_TEST("Game.Sandbox", "CameraBookmarksMoveTheMainCamera")
 	SWIM_REQUIRE(engine.Tick(1));
 	auto* sandbox = engine.SceneAs<Game::Sandbox>();
 	SWIM_REQUIRE(sandbox != nullptr);
-	SWIM_CHECK_EQUAL(Game::Sandbox::GetBookmarkCount(), 10u);
+	SWIM_CHECK_EQUAL(Game::Sandbox::GetBookmarkCount(), 11u);
 	SWIM_CHECK_EQUAL(std::string(Game::Sandbox::GetBookmarkName(7)), std::string("Reflection lab"));
 	SWIM_CHECK_EQUAL(std::string(Game::Sandbox::GetBookmarkName(3)), std::string("Physics"));
 

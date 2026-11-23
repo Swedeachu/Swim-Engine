@@ -1,5 +1,6 @@
 #include "Game/Scenes/Sandbox.h"
 #include "Engine/Runtime/RenderToggles.h"
+#include "Engine/Platform/FileSystem.h"
 
 #include "Engine/Commands/CommandRegistry.h"
 #include "Engine/Components/CameraComponent.h"
@@ -67,7 +68,7 @@ namespace Game
 			glm::vec3 Target;
 		};
 
-		const std::array<Bookmark, 10> Bookmarks{ {
+		const std::array<Bookmark, 11> Bookmarks{ {
 			{ "Overview", { 2.0f, 7.5f, 26.0f }, { -1.0f, 1.5f, 0.0f } },
 			{ "PBR gallery", { -13.1f, 3.4f, 1.5f }, { -13.1f, 2.7f, -9.0f } },
 			{ "Instance hall", { 12.0f, 9.0f, 9.0f }, { 12.0f, 0.5f, -6.0f } },
@@ -80,6 +81,8 @@ namespace Game
 			{ "Chrome spheres", { 5.2f, 1.1f, 12.6f }, { 3.9f, 0.5f, 9.2f } },
 			// Sandbox::GetBlackHoleHome, from the side its disk is tilted toward.
 			{ "Black hole", { 24.0f, 6.2f, 31.0f }, { 24.0f, 5.0f, 18.0f } },
+			// The GPU-driven box field (Game::BoxField).
+			{ "Box field", { 31.0f, 7.0f, 8.0f }, { 46.0f, 0.5f, -9.0f } },
 		} };
 
 		glm::quat LookRotation(const glm::vec3& direction)
@@ -214,6 +217,14 @@ namespace Game
 					}
 
 				});
+			commands->Register("sandbox.boxfield",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					if (boxField)
+					{
+						boxField->Enabled = number(arguments, 1.0f) != 0.0f;
+					}
+				});
 			// Clouds in the environment cube (reflections, ambient light) on/off.
 			commands->Register("sandbox.cloudenv",
 				[this, number](const std::vector<std::string>& arguments)
@@ -347,6 +358,11 @@ namespace Game
 						render->Settings->ScreenSpace.Fog.Enabled = number(arguments, 1.0f) != 0.0f;
 					}
 
+				});
+			commands->Register("sandbox.zone",
+				[this](const std::vector<std::string>&)
+				{
+					std::cout << "[Sandbox] Balls in the sound zone: " << zoneOccupants << ", scene timers: " << GetTimers().GetActiveCount() << '\n';
 				});
 			commands->Register("sandbox.hud",
 				[this, number](const std::vector<std::string>& arguments)
@@ -600,6 +616,26 @@ namespace Game
 		cameraLens = std::make_shared<Engine::CameraLens>();
 		filmSensor = std::make_shared<Engine::FilmSensor>();
 		lensing = std::make_shared<Engine::GravitationalLensing>();
+		// GPU-culled geometry drawn through the feature geometry hooks (lit, shadowed).
+		boxField = std::make_shared<BoxField>();
+
+		// The face image is a copy in the temporary folder, so editing it shows hot reload.
+		{
+			std::error_code error;
+			const auto& files = GetFileSystem();
+			const auto copy = files.GetTemporaryRoot() / "BoxFieldFace.png";
+			std::filesystem::create_directories(files.GetTemporaryRoot(), error);
+
+			if (!std::filesystem::exists(copy, error))
+			{
+				std::filesystem::copy_file(files.ResolveAssetPath("Textures/Mart/mart.png"), copy, error);
+			}
+
+			if (std::filesystem::exists(copy, error))
+			{
+				boxField->FaceImage = copy;
+			}
+		}
 		auto* render = GetRenderServices();
 
 		if (render && render->Renderer)
@@ -611,6 +647,7 @@ namespace Game
 			render->Renderer->AddFeature(cameraLens);
 			render->Renderer->AddFeature(filmSensor);
 			render->Renderer->AddFeature(lensing);
+			render->Renderer->AddFeature(boxField);
 		}
 	}
 
@@ -657,6 +694,7 @@ namespace Game
 		BuildLightSwarm();
 		BuildReflectionLab();
 		BuildBlackHole();
+		BuildAudioPlayground();
 		BuildWorldUi();
 		RegisterProfilingToggles();
 		BuildHud();
@@ -1430,10 +1468,11 @@ namespace Game
 		AddTag(hud, Engine::Tags::Ui);
 	}
 
-	void Sandbox::RecordImpact(float impulse)
+	void Sandbox::RecordImpact(float impulse, const glm::vec3& position)
 	{
 		++impacts;
 		strongestImpact = std::max(strongestImpact, impulse);
+		PlayImpactSound(impulse, position);
 	}
 
 	void Sandbox::SpawnBallAt(const glm::vec3& position, const glm::vec3& velocity)

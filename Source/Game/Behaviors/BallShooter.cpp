@@ -97,7 +97,7 @@ namespace Game
 	{
 		if (auto* sandbox = dynamic_cast<Sandbox*>(scene))
 		{
-			sandbox->RecordImpact(collision.Impulse);
+			sandbox->RecordImpact(collision.Impulse, collision.Position);
 		}
 	}
 

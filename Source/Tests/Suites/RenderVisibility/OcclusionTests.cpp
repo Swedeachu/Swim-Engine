@@ -681,7 +681,7 @@ SWIM_TEST("Render.Hzb", "BuilderRecordsOneGraphReductionPerMip")
 	SWIM_CHECK(hzb.Convention == DepthConvention::ReverseZ);
 	const auto& pyramid = graph.GetDesc(hzb.Pyramid);
 	SWIM_CHECK(pyramid.PixelFormat == Rhi::Format::R32Float);
-	SWIM_CHECK(pyramid.Extent.Width == 7 && pyramid.Extent.Height == 5 && pyramid.MipLevels == 4);
+	SWIM_CHECK(pyramid.Extent.Width == 8 && pyramid.Extent.Height == 8 && pyramid.MipLevels == 4); // Padded: 7 x 5 rounds up to 4 x 3.
 	graph.Export(hzb.Pyramid, Rhi::ResourceState::ShaderRead);
 	world.executor->Execute(graph.Compile());
 	world.executor->Wait();

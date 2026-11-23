@@ -3,11 +3,14 @@
 #include "Engine/EngineState.h"
 #include "Engine/Machine.h"
 #include "Engine/Runtime/SimulationClock.h"
+#include "Engine/Systems/Scene/SceneTimers.h"
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 
 namespace Swim::Input
 {
@@ -22,6 +25,14 @@ namespace Engine
 	class Scene;
 	class CameraSystem;
 	class Transform;
+
+	// A trigger overlap reported to a behaviour: to the trigger's behaviours (Other is what
+	// entered) and to the entering entity's behaviours (Other is the trigger).
+	struct BehaviorTrigger
+	{
+		entt::entity Trigger = entt::null;
+		entt::entity Other = entt::null;
+	};
 
 	// A collision reported to a behaviour (from the scene's physics world events).
 	struct BehaviorCollision
@@ -93,6 +104,15 @@ namespace Engine
 
 		virtual void OnCollisionExit(const BehaviorCollision& collision) {}
 
+		// Trigger volumes (a Rigidbody with isTrigger): Enter and Exit as the overlap starts
+		// and ends, Stay every fixed step in between. Like the collision hooks they need
+		// EnableCollisionCallBacks.
+		virtual void OnTriggerEnter(const BehaviorTrigger& trigger) {}
+
+		virtual void OnTriggerStay(const BehaviorTrigger& trigger) {}
+
+		virtual void OnTriggerExit(const BehaviorTrigger& trigger) {}
+
 		bool RunCollisionCallBacks() const { return runCollisionCallBacks; }
 
 		void EnableCollisionCallBacks(bool value = true) { runCollisionCallBacks = value; }
@@ -112,6 +132,17 @@ namespace Engine
 		// The current frame's simulated time (pause, time scale, fixed steps).
 		const SimulationFrame& GetTime() const;
 
+		// Scene timers owned by this behaviour: cancelled when it is destroyed.
+		TimerHandle After(double seconds, std::function<void()> callback);
+
+		TimerHandle Every(double interval, std::function<void()> callback);
+
+		TimerHandle When(std::function<bool()> predicate, std::function<void()> callback);
+
+		TimerHandle StartCoroutine(SceneTask task);
+
+		bool CancelTimer(TimerHandle timer);
+
 	  protected:
 
 		Scene* scene = nullptr;
@@ -122,6 +153,10 @@ namespace Engine
 		bool hasInited = false;
 
 	  private:
+
+		SceneTimers::Owner OwnedTimersToken();
+
+		std::shared_ptr<int> ownedTimersToken; // Owner token of this behaviour's timers.
 
 		friend class BehaviorScheduler;
 

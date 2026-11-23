@@ -36,6 +36,8 @@ namespace Swim::UI
 		float G = 0.0f;
 		float B = 0.0f;
 		float A = 0.0f; // Input is straight alpha, linear RGB. Paint output is premultiplied.
+
+		bool operator==(const UiColor&) const = default;
 	};
 
 	// A UiColor from display (sRGB-encoded) values, as colour pickers and design tools
@@ -563,10 +565,21 @@ namespace Swim::UI
 		bool Alt = false;
 	};
 
+	// Text from byte Begin up to the next span's Begin is drawn in Color (straight alpha,
+	// multiplied by the node's text alpha). Text before the first span uses the text color.
+	struct UiTextColorSpan
+	{
+		std::uint32_t Begin = 0;
+		UiColor Color;
+
+		bool operator==(const UiTextColorSpan&) const = default;
+	};
+
 	struct UiTextOptions
 	{
 		Text::TextDirection Direction = Text::TextDirection::Auto;
-		std::string Language; // BCP 47.
+		std::string Language;				 // BCP 47.
+		std::vector<UiTextColorSpan> Colors; // Sorted by Begin; recoloring does not relayout.
 	};
 
 	struct UiTextEditOptions
@@ -727,6 +740,28 @@ namespace Swim::UI
 		void ClearCallbacks(UiNodeId node);
 
 		void ClearCallbacks();
+
+		// --- Names: gameplay addresses nodes by name instead of walking the tree. ---
+		// A name maps to one node (a later SetName takes the name over); empty clears it.
+		void SetName(UiNodeId node, std::string name);
+
+		// The named node, or an invalid id when it does not exist (any more).
+		UiNodeId Find(std::string_view name) const;
+
+		// Name-addressed handlers and bindings; false when no node has the name.
+		bool OnClick(std::string_view name, std::function<void()> handler);
+
+		bool OnValue(std::string_view name, std::function<void(float)> handler);
+
+		bool OnChecked(std::string_view name, std::function<void(bool)> handler);
+
+		bool BindValue(std::string_view name, float& value);
+
+		bool BindChecked(std::string_view name, bool& value);
+
+		// Sees every dispatched event before the node's own handler (interface sounds,
+		// analytics); empty removes it. Kept by ClearCallbacks.
+		void SetObserver(std::function<void(const UiEvent&)> observer);
 
 		// --- Value bindings. ---
 		// Two-way: input changes call set (with the dispatched callbacks), and every Update
