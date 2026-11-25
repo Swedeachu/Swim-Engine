@@ -33,6 +33,9 @@ namespace Swim::Render
 		// signals (including WSI acquisition/presentation) and a fence are forwarded.
 		Rhi::TimelinePoint Execute(const CompiledRenderGraph& graph, const Rhi::SubmitDesc& synchronization = {});
 
+		// Descriptor tables kept for the next graph of the same shape (tests, diagnostics).
+		std::size_t GetCachedDescriptorTableCount() const;
+
 		void Wait();
 
 		void Trim(); // Wait, then release pooled resources and invalidate results.
@@ -76,6 +79,8 @@ namespace Swim::Render
 		Rhi::RhiObject& GetExport(std::uint64_t graph, std::uint32_t index, GraphKind kind) const;
 
 		void RecordBarrier(const GraphBarrier& barrier);
+
+		void RecycleDescriptorTables(const CompiledRenderGraph& graph);
 
 		void CreateInitialStaging();
 

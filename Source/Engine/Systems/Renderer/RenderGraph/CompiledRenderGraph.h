@@ -1,7 +1,7 @@
 #pragma once
 #include "Engine/Systems/Renderer/RenderGraph/GraphScheduledPass.h"
 #include "Engine/Systems/Renderer/RenderGraph/GraphResourceLifetime.h"
-#include "Engine/Systems/Renderer/RenderGraph/Internal/GraphDefinition.h"
+#include "Engine/Systems/Renderer/RenderGraph/Internal/GraphShape.h"
 
 namespace Swim::Render
 {
@@ -11,13 +11,17 @@ namespace Swim::Render
 
 	  public:
 
-		std::span<const GraphScheduledPass> GetSchedule() const { return schedule; }
+		std::span<const GraphScheduledPass> GetSchedule() const { return shape->Schedule; }
 
-		std::span<const GraphResourceLifetime> GetLifetimes() const { return lifetimes; }
+		std::span<const GraphResourceLifetime> GetLifetimes() const { return shape->Lifetimes; }
 
-		std::span<const GraphBarrier> GetFinalBarriers() const { return finalBarriers; }
+		std::span<const GraphBarrier> GetFinalBarriers() const { return shape->FinalBarriers; }
 
-		std::uint32_t GetAllocationCount() const { return static_cast<std::uint32_t>(allocations.size()); }
+		std::uint32_t GetAllocationCount() const { return static_cast<std::uint32_t>(shape->Allocations.size()); }
+
+		// Whether both were compiled from graphs of the same shape through one
+		// RenderGraphCompileCache (they share the schedule, barriers and allocations).
+		bool SharesShape(const CompiledRenderGraph& other) const { return shape && shape == other.shape; }
 
 		std::string Dump() const;
 
@@ -27,11 +31,7 @@ namespace Swim::Render
 		friend class RenderGraphExecutor;
 		friend class RenderCommandContext;
 		std::shared_ptr<const Internal::GraphDefinition> definition;
-		std::vector<GraphScheduledPass> schedule;
-		std::vector<GraphResourceLifetime> lifetimes;
-		std::vector<GraphBarrier> finalBarriers;
-		std::vector<std::uint32_t> allocations;
-		std::vector<std::vector<std::uint32_t>> dependencies;
+		std::shared_ptr<const Internal::GraphShape> shape;
 
 	};
 

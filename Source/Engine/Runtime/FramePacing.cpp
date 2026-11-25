@@ -58,7 +58,9 @@ namespace Engine
 			{
 				std::cout << "[Pacing] frame " << stats.FrameMilliseconds << " ms, cap wait " << stats.CapWaitMilliseconds << " ms, GPU wait "
 						  << stats.GpuWaitMilliseconds << " ms, latency " << stats.LatencyMilliseconds << " ms, queued " << stats.QueuedFrames
-						  << ", present " << Name(stats.PresentMode) << '\n';
+						  << ", present " << Name(stats.PresentMode) << " (call " << stats.PresentCallMilliseconds << " ms"
+						  << (stats.AsyncPresent ? " on the present thread" : "") << ", main thread waited " << stats.PresentWaitMilliseconds
+						  << " ms)" << (stats.CrossAdapter ? ", cross-adapter" : "") << (stats.SplitPresent ? ", split submission" : "") << '\n';
 			});
 	}
 
@@ -152,6 +154,12 @@ namespace Engine
 			return;
 		}
 
+		const auto& present = device->GetPresentStats();
+		stats.PresentCallMilliseconds = present.CallMilliseconds;
+		stats.PresentWaitMilliseconds = present.WaitMilliseconds;
+		stats.AsyncPresent = present.Async;
+		stats.CrossAdapter = present.CrossAdapter;
+		stats.SplitPresent = present.Split;
 		const auto completion = device->GetLastCompletion();
 
 		if (completion.Semaphore && completion.Value != lastSubmitted)

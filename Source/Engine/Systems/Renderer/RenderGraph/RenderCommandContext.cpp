@@ -118,6 +118,35 @@ namespace Swim::Render
 		return static_cast<Rhi::TextureView&>(Retain(std::move(view)));
 	}
 
+	std::unique_ptr<Rhi::DescriptorTable> RenderCommandContext::CreateDescriptorTable(const Rhi::DescriptorTableDesc& desc)
+	{
+		const std::uint64_t key = std::uint64_t(pass) << 32 | tables++;
+		std::unique_ptr<Rhi::DescriptorTable> table;
+
+		if (desc.VariableDescriptorCount == 0)
+		{
+			const auto found = state.Tables.find(key);
+
+			if (found != state.Tables.end() && found->second.Layout == desc.Layout && found->second.Space == desc.Space)
+			{
+				table = std::move(found->second.Table);
+				state.Tables.erase(found);
+			}
+		}
+
+		if (!table)
+		{
+			table = state.Device.CreateDescriptorTable(desc);
+		}
+
+		if (table && desc.VariableDescriptorCount == 0)
+		{
+			state.IssuedTables.push_back({ key, desc.Layout, desc.Space, table.get() });
+		}
+
+		return table;
+	}
+
 	Rhi::RhiObject& RenderCommandContext::Retain(std::unique_ptr<Rhi::RhiObject> object)
 	{
 		if (!object)

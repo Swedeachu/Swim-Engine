@@ -6,8 +6,27 @@
 #include "Engine/Systems/Renderer/RHI/RhiReadbackArena.h"
 #include "Engine/Systems/Renderer/RHI/RhiUploadArena.h"
 
+#include <unordered_map>
+
 namespace Swim::Render::Internal
 {
+
+	// A descriptor table kept for the same pass and creation order of the next graph of the
+	// same shape (RenderCommandContext::CreateDescriptorTable).
+	struct GraphCachedTable
+	{
+		const Rhi::PipelineLayout* Layout = nullptr;
+		std::uint32_t Space = 0;
+		std::unique_ptr<Rhi::DescriptorTable> Table;
+	};
+
+	struct GraphIssuedTable
+	{
+		std::uint64_t Key = 0; // Pass << 32 | creation order within the pass.
+		const Rhi::PipelineLayout* Layout = nullptr;
+		std::uint32_t Space = 0;
+		const Rhi::RhiObject* Table = nullptr;
+	};
 
 	struct GraphExecutionState
 	{
@@ -29,6 +48,11 @@ namespace Swim::Render::Internal
 		std::unique_ptr<Rhi::ReadbackArena> Readback;
 		std::vector<GraphBufferRange> Ranges;			// Staged suballocations; Buffer null otherwise.
 		std::vector<Rhi::ReadbackSlice> ReadbackSlices; // Indexed by resource.
+		std::shared_ptr<const GraphShape> PoolShape;	// The shape Pool was allocated for (in allocation order).
+		std::unordered_map<std::uint64_t, GraphCachedTable> Tables;
+		std::vector<GraphIssuedTable> IssuedTables; // Created through the context in the current execution.
+		std::shared_ptr<const GraphShape> TablesShape;
+		std::uint64_t TablesLayoutGeneration = UINT64_MAX;
 		std::uint64_t Submitted = 0;
 		bool Recording = false;
 		bool HasResult = false;

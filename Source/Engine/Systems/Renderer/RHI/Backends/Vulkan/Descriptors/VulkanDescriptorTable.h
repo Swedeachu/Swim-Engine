@@ -27,6 +27,12 @@ namespace Swim::RhiVulkan
 
 		void Write(std::span<const Rhi::DescriptorWrite> writes) override;
 
+		bool ReopenForWrites() override
+		{
+			sealed.store(false);
+			return true;
+		}
+
 		const std::shared_ptr<VulkanDeviceState>& GetState() const;
 
 		const std::shared_ptr<VulkanPipelineLayoutState>& GetLayoutState() const;

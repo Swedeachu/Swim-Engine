@@ -123,6 +123,9 @@ namespace Engine
 
 		void SyncOverlays();
 
+		// Restarts the caret blink (solid) when the keyboard owner changed or typed.
+		void UpdateCaretBlink(float deltaSeconds);
+
 		struct OverlayState
 		{
 			CanvasState Canvas;
@@ -140,6 +143,10 @@ namespace Engine
 		Swim::UI::UiCanvasRouter router;
 		Swim::UI::UiInputBridge bridge;
 		Swim::UI::UiInputFrame inputFrame;
+		double caretSeconds = 0.0;
+		bool caretVisible = true;
+		Swim::UI::UiCanvasHandle caretCanvas;
+		std::uint64_t caretFocusRevision = 0;
 		Scene* scene = nullptr;
 		ViewDesc view;
 		std::unordered_map<entt::entity, CanvasState> canvases;

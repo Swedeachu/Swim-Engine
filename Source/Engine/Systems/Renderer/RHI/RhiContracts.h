@@ -388,6 +388,12 @@ namespace Swim::Rhi
 		std::uint32_t VendorId = 0;
 		std::uint32_t DeviceId = 0;
 		std::uint64_t DedicatedVideoMemory = 0;
+		bool Discrete = false;
+		bool Integrated = false;
+		// The operating system's adapter id (Windows LUID), when the driver reports one: matches
+		// the adapter that drives a display.
+		std::array<std::uint8_t, 8> Luid{};
+		bool LuidValid = false;
 		GraphicsCapabilities Capabilities{};
 	};
 
@@ -532,6 +538,11 @@ namespace Swim::Rhi
 		// single-sampled 2D view of one mip/layer. Images must be in General layout
 		// at dispatch; writing a descriptor does not transition or initialize its image.
 		virtual void Write(std::span<const DescriptorWrite> writes) = 0;
+
+		// Once the GPU has finished every use of this table: makes all its bindings writable
+		// again, so it can be rewritten and bound anew instead of replaced. False when the
+		// backend cannot (use a new table).
+		virtual bool ReopenForWrites() { return false; }
 
 	};
 
@@ -814,6 +825,17 @@ namespace Swim::Rhi
 		virtual PipelineCacheData GetPipelineCacheData() const { return {}; }
 
 		virtual const AdapterInfo& GetAdapterInfo() const = 0;
+
+		// Makes every queue submission and present on one thread of the device's, in issue
+		// order: Queue::Submit returns at once (failures surface at the next submission or
+		// wait), and a present that blocks in the driver holds back that thread instead of
+		// the caller's. False when the backend does not support it.
+		virtual bool SetSubmissionThread(bool) { return false; }
+
+		// Changes whenever a pipeline layout is destroyed, so objects cached by layout address
+		// (descriptor tables) can tell a reused address from the layout they were made for.
+		// UINT64_MAX: not tracked (never cache by layout address).
+		virtual std::uint64_t GetPipelineLayoutGeneration() const { return UINT64_MAX; }
 
 		virtual Queue& GetQueue(QueueType type) = 0;
 

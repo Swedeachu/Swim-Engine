@@ -99,7 +99,7 @@ namespace Swim::Render
 				},
 				[=, pipeline = pipeline, layout = layout, space = space, pyramid = hzb.Pyramid, label = name](RenderCommandContext& c)
 				{
-					auto table = c.Device().CreateDescriptorTable({ layout, space, 0, label + " table" });
+					auto table = c.CreateDescriptorTable({ layout, space, 0, label + " table" });
 
 					if (!table)
 					{

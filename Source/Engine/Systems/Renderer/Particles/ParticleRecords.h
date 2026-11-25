@@ -27,6 +27,7 @@ namespace Swim::Render
 	inline constexpr std::uint32_t ParticleFlagCollision = 1u << 1;
 	inline constexpr std::uint32_t ParticleFlagSorted = 1u << 2; // Alpha-blended: back-to-front draw list.
 	inline constexpr std::uint32_t ParticleFlagTextured = 1u << 3;
+	inline constexpr std::uint32_t ParticleFlagRandomFrame = 1u << 4;
 
 	// ParticleShape as packed.
 	inline constexpr std::uint32_t ParticleShapePoint = 0;
@@ -66,9 +67,10 @@ namespace Swim::Render
 		float SizeValues[4] = { 1, 1, 1, 1 };
 		float ColorTimes[4] = { 0, 1, 1, 1 };
 		float ColorValues[16] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }; // RGBA per key.
+		float UvRect[4] = { 0, 0, 1, 1 };
 	};
 
-	static_assert(sizeof(GpuParticleEmitter) == 320);
+	static_assert(sizeof(GpuParticleEmitter) == 336);
 	static_assert(offsetof(GpuParticleEmitter, Friction) == 144 && offsetof(GpuParticleEmitter, SizeTimes) == 208);
 
 	// Per-emitter counters (std430 uint4).

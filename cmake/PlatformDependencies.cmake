@@ -15,14 +15,15 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
 
 # Swim::Platform owns SDL strictly as the host/window/input implementation.
-# Keep the subsystems needed for video, events, gamepads and haptics, but do not
+# Keep the subsystems needed for video, events, gamepads, haptics and the native
+# file dialogs (WindowSystem::ShowOpenFileDialog), but do not
 # compile SDL's unrelated renderer/GPU/audio/camera/UI facilities into the engine.
 set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
 set(SDL_GPU OFF CACHE BOOL "" FORCE)
 set(SDL_RENDER OFF CACHE BOOL "" FORCE)
 set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
-set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+set(SDL_DIALOG ON CACHE BOOL "" FORCE)
 set(SDL_TRAY OFF CACHE BOOL "" FORCE)
 
 CPMAddPackage(

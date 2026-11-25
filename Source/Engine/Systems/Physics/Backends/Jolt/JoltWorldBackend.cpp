@@ -426,6 +426,41 @@ namespace Engine
 		return true;
 	}
 
+	bool JoltWorldBackend::AddForceAtPosition(BodyHandle body, const glm::vec3& force, const glm::vec3& position, ForceMode mode, bool autowake)
+	{
+		if (simulating || !IsFiniteVec3(force) || !IsFiniteVec3(position) || (mode != ForceMode::Force && mode != ForceMode::Impulse))
+		{
+			return false;
+		}
+
+		BodyRecord* record = bodies.Get(body);
+
+		if (!record || record->Motion != MotionType::Dynamic || record->NativeBody.IsInvalid())
+		{
+			return false;
+		}
+
+		JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
+		const bool wasActive = bodyInterface.IsActive(record->NativeBody);
+
+		if (mode == ForceMode::Force)
+		{
+			bodyInterface.AddForce(record->NativeBody, ToJolt(force), ToJoltPosition(position),
+				autowake ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+		}
+		else
+		{
+			bodyInterface.AddImpulse(record->NativeBody, ToJolt(force), ToJoltPosition(position));
+		}
+
+		if (!autowake && !wasActive && bodyInterface.IsActive(record->NativeBody))
+		{
+			bodyInterface.DeactivateBody(record->NativeBody);
+		}
+
+		return true;
+	}
+
 	bool JoltWorldBackend::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake)
 	{
 		if (simulating || !IsFiniteVec3(velocity))
@@ -502,6 +537,27 @@ namespace Engine
 
 		velocity = ToGlm(physicsSystem.GetBodyInterface().GetAngularVelocity(record->NativeBody));
 		return true;
+	}
+
+	bool JoltWorldBackend::GetMass(BodyHandle body, float& mass) const
+	{
+		const BodyRecord* record = bodies.Get(body);
+
+		if (!record || record->Motion != MotionType::Dynamic || record->NativeBody.IsInvalid())
+		{
+			return false;
+		}
+
+		JPH::BodyLockRead lock(physicsSystem.GetBodyLockInterface(), record->NativeBody);
+
+		if (!lock.Succeeded() || !lock.GetBody().GetMotionPropertiesUnchecked())
+		{
+			return false;
+		}
+
+		const float inverse = lock.GetBody().GetMotionPropertiesUnchecked()->GetInverseMassUnchecked();
+		mass = inverse > 0.0f ? 1.0f / inverse : 0.0f;
+		return inverse > 0.0f;
 	}
 
 	void JoltWorldBackend::BeginSimulation(float dt)

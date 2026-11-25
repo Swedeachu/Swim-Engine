@@ -243,6 +243,8 @@ namespace Swim::Testing
 
 		std::uint32_t GetSpace() const override { return space; }
 
+		bool ReopenForWrites() override { return true; }
+
 		void Write(std::span<const Swim::Rhi::DescriptorWrite> writes) override
 		{
 			const Swim::Rhi::DescriptorSchemaDesc* schema = nullptr;
@@ -654,8 +656,14 @@ namespace Swim::Testing
 
 			auto table = std::make_unique<MockDescriptorTable>(*desc.Layout, desc.Space);
 			LastDescriptorTable = table.get();
+			++DescriptorTableCreateCount;
 			return table;
 		}
+
+		std::uint64_t GetPipelineLayoutGeneration() const override { return PipelineLayoutGeneration; }
+
+		unsigned DescriptorTableCreateCount = 0;
+		std::uint64_t PipelineLayoutGeneration = UINT64_MAX; // UINT64_MAX: untracked (no table caching).
 
 		std::unique_ptr<Swim::Rhi::CommandPool> CreateCommandPool(Swim::Rhi::QueueType) override
 		{

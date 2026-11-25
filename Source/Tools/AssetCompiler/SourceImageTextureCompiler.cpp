@@ -1,5 +1,8 @@
 #include "Tools/AssetCompiler/SourceImageTextureCompiler.h"
 
+#include "Engine/Math/AlphaCoverage.h"
+#include "Engine/Math/ColorMath.h"
+
 // The development compiler can be linked into the legacy runtime. Keep its
 // PNG/JPEG decoder private to this TU so it cannot collide with the explicit
 // runtime stb_image implementation used by still-loose compatibility assets.
@@ -145,19 +148,9 @@ namespace Swim::AssetCompiler
 			return true;
 		}
 
-		float SrgbToLinear(float value)
+		float LinearToSrgbClamped(float value)
 		{
-			return value <= 0.04045f
-				? value / 12.92f
-				: std::pow((value + 0.055f) / 1.055f, 2.4f);
-		}
-
-		float LinearToSrgb(float value)
-		{
-			value = std::clamp(value, 0.0f, 1.0f);
-			return value <= 0.0031308f
-				? value * 12.92f
-				: 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+			return Engine::LinearToSrgb(std::clamp(value, 0.0f, 1.0f));
 		}
 
 		std::byte FloatToByte(float value)
@@ -214,7 +207,7 @@ namespace Swim::AssetCompiler
 
 								if (srgbColor && channel < 3)
 								{
-									value = SrgbToLinear(value);
+									value = Engine::SrgbToLinear(value);
 								}
 								else if (normalMap && channel < 3)
 								{
@@ -265,7 +258,7 @@ namespace Swim::AssetCompiler
 
 						if (srgbColor && channel < 3)
 						{
-							value = LinearToSrgb(value);
+							value = LinearToSrgbClamped(value);
 						}
 						else if (normalMap && channel < 3)
 						{
@@ -284,8 +277,10 @@ namespace Swim::AssetCompiler
 			std::uint32_t height,
 			Swim::Assets::TextureColorSpace colorSpace,
 			Swim::Assets::TextureSemantic semantic,
+			float alphaCoverageCutoff,
 			Swim::Assets::TexturePayloadVariant& payload)
 		{
+			const float coverage = alphaCoverageCutoff > 0.0f ? Engine::AlphaCoverage(baseLevel, alphaCoverageCutoff) : 0.0f;
 			std::vector<std::byte> current = std::move(baseLevel);
 			std::uint32_t currentWidth = width;
 			std::uint32_t currentHeight = height;
@@ -306,7 +301,12 @@ namespace Swim::AssetCompiler
 					static_cast<std::uint64_t>(current.size()),
 					static_cast<std::uint64_t>(current.size())
 				});
-				payload.Bytes.insert(payload.Bytes.end(), current.begin(), current.end());
+				const auto stored = payload.Bytes.insert(payload.Bytes.end(), current.begin(), current.end());
+
+				if (alphaCoverageCutoff > 0.0f && offset > 0)
+				{
+					Engine::PreserveAlphaCoverage(std::span(stored, current.size()), alphaCoverageCutoff, coverage);
+				}
 
 				if (currentWidth == 1 && currentHeight == 1)
 				{
@@ -385,7 +385,8 @@ namespace Swim::AssetCompiler
 		SourceImageMimeType mimeType,
 		Swim::Assets::TextureColorSpace colorSpace,
 		Swim::Assets::TextureSemantic semantic,
-		CookedTextureEncoding encoding)
+		CookedTextureEncoding encoding,
+		float alphaCoverageCutoff)
 	{
 		mimeType = DetectSourceImageMimeType(bytes, mimeType);
 
@@ -429,7 +430,7 @@ namespace Swim::AssetCompiler
 			: Swim::Assets::TexturePayloadFormat::RGBA8UNorm;
 		payload.Supercompression = Swim::Assets::TextureSupercompression::None;
 
-		if (!BuildMipChain(std::move(rgba), result.Asset.Width, result.Asset.Height, colorSpace, semantic, payload))
+		if (!BuildMipChain(std::move(rgba), result.Asset.Width, result.Asset.Height, colorSpace, semantic, alphaCoverageCutoff, payload))
 		{
 			return MakeError(SourceImageTextureCompileErrorCode::Overflow, "generated source-image mip chain exceeds TextureAsset payload limits");
 		}

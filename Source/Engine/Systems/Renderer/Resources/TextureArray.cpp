@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/Resources/TextureArray.h"
 
+#include "Engine/Math/AlphaCoverage.h"
+#include "Engine/Math/ColorMath.h"
 #include "Engine/Assets/Ktx2Container.h"
 #include "Engine/Systems/Renderer/RHI/RhiFormatInfo.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
@@ -92,7 +94,7 @@ namespace Swim::Render
 				for (int i = 0; i < 256; ++i)
 				{
 					const float c = static_cast<float>(i) / 255.0f;
-					values[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+					values[i] = ::Engine::SrgbToLinear(c);
 				}
 
 				return values;
@@ -103,8 +105,7 @@ namespace Swim::Render
 		std::uint8_t LinearToSrgb(float value)
 		{
 			value = std::clamp(value, 0.0f, 1.0f);
-			const float c = value <= 0.0031308f ? value * 12.92f : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
-			return static_cast<std::uint8_t>(std::lround(c * 255.0f));
+			return static_cast<std::uint8_t>(std::lround(::Engine::LinearToSrgb(value) * 255.0f));
 		}
 
 		std::vector<std::byte> Downsample(const std::vector<std::byte>& source, std::uint32_t width, std::uint32_t height, bool srgb)
@@ -178,6 +179,14 @@ namespace Swim::Render
 		if (desc.Width == 0 || desc.Height == 0 || desc.Layers == 0 || (IsBc7(desc.Format) && (desc.Width % 4 != 0 || desc.Height % 4 != 0)))
 		{
 			throw std::invalid_argument(desc.DebugName + ": empty size, no layers, or a BC7 size that is not a multiple of 4");
+		}
+
+		// Beyond the device's layer limit the image is invalid (some drivers create it anyway
+		// and the upper layers read back wrong): split the layers over several arrays.
+		if (const auto limit = device.GetAdapterInfo().Capabilities.MaxTextureArrayLayers; limit != 0 && desc.Layers > limit)
+		{
+			throw std::invalid_argument(desc.DebugName + ": " + std::to_string(desc.Layers) + " layers, more than the device's " +
+				std::to_string(limit));
 		}
 
 		std::uint32_t fullChain = 1;
@@ -288,10 +297,22 @@ namespace Swim::Render
 				}
 			}
 
+			const std::size_t given = data.Mips.size();
+
 			while (data.Mips.size() < mipLevels)
 			{
 				const auto mip = static_cast<std::uint32_t>(data.Mips.size()) - 1;
 				data.Mips.push_back(Downsample(data.Mips[mip], MipExtent(desc.Width, mip), MipExtent(desc.Height, mip), IsSrgb(desc.Format)));
+			}
+
+			if (desc.AlphaCoverageCutoff > 0.0f && given < data.Mips.size())
+			{
+				const float coverage = ::Engine::AlphaCoverage(data.Mips[0], desc.AlphaCoverageCutoff);
+
+				for (std::size_t mip = given; mip < data.Mips.size(); ++mip)
+				{
+					::Engine::PreserveAlphaCoverage(data.Mips[mip], desc.AlphaCoverageCutoff, coverage);
+				}
 			}
 
 			return;
@@ -553,7 +574,7 @@ namespace Swim::Render
 		{
 			auto compiled = A::CompileSourceImageTexture(bytes, mime,
 				IsSrgb(desc.Format) ? Swim::Assets::TextureColorSpace::SRgb : Swim::Assets::TextureColorSpace::Linear, Swim::Assets::TextureSemantic::Color,
-				wantBc7 ? A::CookedTextureEncoding::Bc7 : A::CookedTextureEncoding::Rgba8);
+				wantBc7 ? A::CookedTextureEncoding::Bc7 : A::CookedTextureEncoding::Rgba8, desc.AlphaCoverageCutoff);
 
 			if (!compiled)
 			{

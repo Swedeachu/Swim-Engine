@@ -168,6 +168,11 @@ namespace Engine
 		std::uint64_t Refused = 0; // Voice limit, cooldown or a missing file.
 		std::string Device;		   // Output device name ("null" / "off" without one).
 		std::uint32_t SampleRate = 0;
+		// Glitches since start: device callbacks slower than the audio they produced, callbacks
+		// that came after the device's buffer ran dry, and dry spells of playing streams.
+		std::uint64_t CallbackOverruns = 0;
+		std::uint64_t CallbackLate = 0;
+		std::uint64_t StreamStarved = 0;
 	};
 
 	struct AudioSystemDesc

@@ -307,6 +307,31 @@ SWIM_TEST("RenderGraph.Compile", "PoolsOnlyCompatibleNonoverlappingResourcesAndP
 	SWIM_CHECK_EQUAL(plan.GetSchedule()[1].Barriers[0].After, S::ShaderWrite);
 }
 
+SWIM_TEST("RenderGraph.Compile", "PartialWritesToAnImportedTextureReturnToItsRestingState")
+{
+	Testing::MockDevice device;
+	device.CreateTextures = true;
+	auto texture = device.CreateTexture(TextureDesc());
+	RenderGraph graph;
+	auto imported = graph.ImportTexture(*texture, S::ShaderRead);
+	graph.AddPass(
+		"upload one layer's mip", Q::Transfer,
+		[&](auto& b)
+		{
+			b.Write(imported, S::CopyDestination, { 0, 1, 1, 1 });
+		},
+		noCommands);
+	auto plan = graph.Compile();
+	SWIM_REQUIRE_EQUAL(plan.GetSchedule().size(), 1u); // Nothing reads it afterwards: still kept.
+	const auto finals = plan.GetFinalBarriers();
+	SWIM_CHECK(std::all_of(finals.begin(), finals.end(), [](const auto& f) { return f.After == S::ShaderRead; }));
+	const auto back = std::find_if(finals.begin(), finals.end(), [](const auto& f) { return f.Before == S::CopyDestination; });
+	SWIM_REQUIRE(back != finals.end());
+	SWIM_CHECK_EQUAL(back->Range.BaseMipLevel, 0u);
+	SWIM_CHECK_EQUAL(back->Range.BaseArrayLayer, 1u);
+	SWIM_CHECK_EQUAL(std::count_if(finals.begin(), finals.end(), [](const auto& f) { return f.Before == S::CopyDestination; }), 1);
+}
+
 SWIM_TEST("RenderGraph.Compile", "ImportsPreserveContentsAndRestoreStateUnlessExported")
 {
 	Testing::MockDevice device;

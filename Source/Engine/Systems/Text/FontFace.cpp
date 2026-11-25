@@ -1,4 +1,5 @@
 #include "Engine/Systems/Text/FontFace.h"
+#include "Engine/Systems/Text/Internal/BitmapFace.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -184,6 +185,9 @@ namespace Swim::Text
 		FT_Face Face = nullptr;
 		hb_font_t* Font = nullptr;
 		mutable std::mutex Mutex;
+		// Printable ASCII glyphs with their advances at size 1, for GetSubstituteGlyph.
+		mutable std::once_flag SubstitutesOnce;
+		mutable std::vector<std::pair<float, std::uint32_t>> Substitutes;
 
 		~Impl()
 		{
@@ -243,17 +247,33 @@ namespace Swim::Text
 		}
 	}
 
+	FontFace::FontFace(BitmapFontDesc desc) : impl(std::make_unique<Impl>()), bitmap(std::make_unique<BitmapFace>(std::move(desc)))
+	{
+	}
+
 	FontFace::~FontFace() = default;
 
 	FontMetrics FontFace::GetMetrics(float size) const
 	{
 		ValidateSize(size);
+
+		if (bitmap)
+		{
+			const float unit = bitmap->PixelUnits(size);
+			return { bitmap->Desc.Ascent * unit, -bitmap->Desc.Descent * unit, bitmap->Desc.LineHeight * unit };
+		}
+
 		const float scale = size / impl->Face->units_per_EM;
 		return { impl->Face->ascender * scale, impl->Face->descender * scale, impl->Face->height * scale };
 	}
 
 	std::uint32_t FontFace::GetGlyph(char32_t codePoint) const
 	{
+		if (bitmap)
+		{
+			return bitmap->Find(codePoint) ? std::uint32_t(codePoint) : 0u;
+		}
+
 		hb_codepoint_t glyph = 0;
 		hb_font_get_nominal_glyph(impl->Font, static_cast<hb_codepoint_t>(codePoint), &glyph);
 		return glyph;
@@ -261,6 +281,18 @@ namespace Swim::Text
 
 	ShapedRun FontFace::Shape(std::string_view utf8, float size, const ShapeOptions& options) const
 	{
+		if (bitmap)
+		{
+			ValidateSize(size);
+
+			if (utf8.size() > 1024u * 1024u)
+			{
+				throw std::invalid_argument("Text run exceeds its limit");
+			}
+
+			return ShapeBitmap(*bitmap, utf8, size, options);
+		}
+
 		ShapedRun result;
 		result.Metrics = GetMetrics(size);
 
@@ -326,8 +358,125 @@ namespace Swim::Text
 		return result;
 	}
 
+	float FontFace::GetRenderSize(float size) const
+	{
+		return bitmap ? bitmap->PixelUnits(size) * bitmap->Desc.EmPixels : size;
+	}
+
+	FontStyleMetrics FontFace::GetStyleMetrics(float size) const
+	{
+		ValidateSize(size);
+		FontStyleMetrics metrics;
+
+		if (bitmap)
+		{
+			const auto& d = bitmap->Desc;
+			const float unit = bitmap->PixelUnits(size);
+			metrics.Pixel = unit;
+			metrics.BoldOffset = d.BoldOffset * unit;
+			metrics.ItalicShear = d.ItalicShear;
+			metrics.UnderlineTop = d.UnderlineOffset * unit;
+			metrics.StrikethroughTop = -d.StrikethroughOffset * unit;
+			metrics.LineThickness = d.LineThickness * unit;
+			return metrics;
+		}
+
+		const float scale = size / impl->Face->units_per_EM;
+		metrics.Pixel = size / 16.0f;
+		metrics.BoldOffset = metrics.Pixel;
+		metrics.ItalicShear = 0.2f;
+		metrics.LineThickness = std::max(impl->Face->underline_thickness * scale, size / 32.0f);
+		metrics.UnderlineTop = -impl->Face->underline_position * scale - metrics.LineThickness * 0.5f;
+		metrics.StrikethroughTop = -impl->Face->ascender * scale * 0.3f - metrics.LineThickness * 0.5f;
+		return metrics;
+	}
+
+	std::uint32_t FontFace::GetSubstituteGlyph(std::uint32_t glyph, std::uint32_t random) const
+	{
+		std::call_once(impl->SubstitutesOnce,
+			[&]
+			{
+				for (char32_t c = U'!'; c <= U'~'; ++c)
+				{
+					const std::uint32_t id = GetGlyph(c);
+
+					if (id != 0)
+					{
+						const char text[2] = { static_cast<char>(c), 0 };
+						const auto run = Shape(std::string_view(text, 1), 16.0f);
+
+						if (run.Glyphs.size() == 1)
+						{
+							impl->Substitutes.emplace_back(run.Glyphs[0].AdvanceX, id);
+						}
+					}
+				}
+
+				std::sort(impl->Substitutes.begin(), impl->Substitutes.end());
+			});
+		float advance = -1.0f;
+
+		for (const auto& [a, id] : impl->Substitutes)
+		{
+			if (id == glyph)
+			{
+				advance = a;
+				break;
+			}
+		}
+
+		if (advance < 0.0f)
+		{
+			return glyph;
+		}
+
+		const auto first = std::lower_bound(impl->Substitutes.begin(), impl->Substitutes.end(), std::pair<float, std::uint32_t>{ advance, 0u });
+		const auto last = std::upper_bound(impl->Substitutes.begin(), impl->Substitutes.end(), std::pair<float, std::uint32_t>{ advance, ~0u });
+		const auto count = static_cast<std::uint32_t>(last - first);
+		return count > 0 ? (first + (random % count))->second : glyph;
+	}
+
+	FontFace::GlyphBitmap FontFace::RasterizeBitmap(std::uint32_t glyph, float& emWidth, float& emHeight, std::uint32_t maxDimension) const
+	{
+		GlyphBitmap result;
+		const auto* found = bitmap->Find(char32_t(glyph));
+
+		if (!found || !found->Source)
+		{
+			return result;
+		}
+
+		if (found->Width > maxDimension || found->Height > maxDimension)
+		{
+			throw std::length_error("Bitmap glyph exceeds the atlas page size");
+		}
+
+		const auto& page = *found->Source;
+		result.Width = found->Width;
+		result.Height = found->Height;
+		const float em = bitmap->Desc.EmPixels;
+		result.Left = 0.0f;
+		result.Top = found->Top / em;
+		emWidth = float(found->Width) * found->TexelScale / em;
+		emHeight = float(found->Height) * found->TexelScale / em;
+		result.Pixels.resize(std::size_t(result.Width) * result.Height * 4);
+
+		for (std::uint32_t row = 0; row < result.Height; ++row)
+		{
+			std::copy_n(page.Rgba.data() + ((std::size_t(found->Y) + row) * page.Width + found->X) * 4, std::size_t(result.Width) * 4,
+				result.Pixels.data() + std::size_t(row) * result.Width * 4);
+		}
+
+		return result;
+	}
+
 	FontFace::GlyphBitmap FontFace::Rasterize(std::uint32_t glyph, float emSize, float range, std::uint32_t maxDimension) const
 	{
+		if (bitmap)
+		{
+			throw std::logic_error("Bitmap faces have no distance fields");
+		}
+
 		GlyphBitmap result;
 		msdfgen::Shape shape;
 		{

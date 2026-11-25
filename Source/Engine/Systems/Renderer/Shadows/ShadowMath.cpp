@@ -1,5 +1,6 @@
 #include "Engine/Systems/Renderer/Shadows/ShadowMath.h"
 #include "Engine/Systems/Renderer/Visibility/RenderViewDesc.h"
+#include "Engine/Math/VectorMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,21 +12,7 @@ namespace Swim::Render::Shadows
 	namespace
 	{
 
-		float Dot(const Float3& a, const Float3& b)
-		{
-			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-		}
-
-		Float3 Cross(const Float3& a, const Float3& b)
-		{
-			return { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
-		}
-
-		Float3 Normalize(const Float3& v)
-		{
-			const float length = std::sqrt(Dot(v, v));
-			return length > 0.0f ? Float3{ v[0] / length, v[1] / length, v[2] / length } : Float3{ 0, 0, 0 };
-		}
+		using ::Engine::ToGlm;
 
 		// World point of a view-space point under an affine row-major view: R^T (v - t).
 		Float3 ViewToWorld(const Matrix& view, const Float3& v)
@@ -87,26 +74,27 @@ namespace Swim::Render::Shadows
 
 	Matrix LookAlong(const Float3& eye, const Float3& forward)
 	{
-		const auto f = Normalize(forward);
-		const Float3 up = std::abs(f[1]) > 0.999f ? Float3{ 0, 0, 1 } : Float3{ 0, 1, 0 };
-		const auto r = Normalize(Cross(f, up));
-		const auto u = Cross(r, f);
-		return { r[0], r[1], r[2], -Dot(r, eye), u[0], u[1], u[2], -Dot(u, eye), -f[0], -f[1], -f[2], Dot(f, eye), 0, 0, 0, 1 };
+		const glm::vec3 e = ToGlm(eye);
+		const glm::vec3 f = ::Engine::NormalizeOr(ToGlm(forward), glm::vec3(0.0f));
+		const glm::vec3 up = std::abs(f.y) > 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+		const glm::vec3 r = ::Engine::NormalizeOr(glm::cross(f, up), glm::vec3(0.0f));
+		const glm::vec3 u = glm::cross(r, f);
+		return { r.x, r.y, r.z, -glm::dot(r, e), u.x, u.y, u.z, -glm::dot(u, e), -f.x, -f.y, -f.z, glm::dot(f, e), 0, 0, 0, 1 };
 	}
 
 	std::vector<CascadeView> ComputeCascades(
 		const ShadowCamera& camera, const Float3& lightDirection, const CascadeSettings& settings, std::uint32_t resolution)
 	{
-		if (resolution == 0 || !(settings.CasterExtension >= 0.0f) || !(Dot(lightDirection, lightDirection) > 0.0f))
+		if (resolution == 0 || !(settings.CasterExtension >= 0.0f) || !(glm::dot(ToGlm(lightDirection), ToGlm(lightDirection)) > 0.0f))
 		{
 			throw std::invalid_argument("Cascades need a resolution, a light direction and a nonnegative caster extension");
 		}
 
 		const auto splits = CascadeSplits(camera.Near, settings.MaxDistance, settings.Count, settings.SplitLambda);
 		const auto lightView = LookAlong({ 0, 0, 0 }, lightDirection);
-		const Float3 right{ lightView[0], lightView[1], lightView[2] };
-		const Float3 up{ lightView[4], lightView[5], lightView[6] };
-		const auto forward = Normalize(lightDirection);
+		const glm::vec3 right{ lightView[0], lightView[1], lightView[2] };
+		const glm::vec3 up{ lightView[4], lightView[5], lightView[6] };
+		const glm::vec3 forward = ::Engine::NormalizeOr(ToGlm(lightDirection), glm::vec3(0.0f));
 		std::vector<CascadeView> cascades;
 
 		for (std::uint32_t i = 0; i < settings.Count; ++i)
@@ -119,9 +107,10 @@ namespace Swim::Render::Shadows
 			cascade.TexelWorldSize = 2.0f * r / float(resolution);
 			// Snap the center to whole texels in light space.
 			const float texel = cascade.TexelWorldSize;
-			const float x = std::round(Dot(right, cascade.Sphere.Center) / texel) * texel;
-			const float y = std::round(Dot(up, cascade.Sphere.Center) / texel) * texel;
-			const float t = Dot(forward, cascade.Sphere.Center);
+			const glm::vec3 center = ToGlm(cascade.Sphere.Center);
+			const float x = std::round(glm::dot(right, center) / texel) * texel;
+			const float y = std::round(glm::dot(up, center) / texel) * texel;
+			const float t = glm::dot(forward, center);
 			const auto projection = OrthographicReverseZRowMajor(x - r, x + r, y - r, y + r, t - r - settings.CasterExtension, t + r);
 			cascade.ViewProjection = MultiplyRowMajor(projection, lightView);
 			cascades.push_back(cascade);
@@ -315,12 +304,12 @@ namespace Swim::Render::Shadows
 			return 1.0f;
 		}
 
-		const float nDotL = std::clamp(Dot(normal, toLight), 0.0f, 1.0f);
+		const float nDotL = std::clamp(glm::dot(ToGlm(normal), ToGlm(toLight)), 0.0f, 1.0f);
 		// Wider PCF kernels compare texels farther from the receiver: scale the offset.
 		const float bias = (record.NormalBias + record.SlopeBias * (1.0f - nDotL)) * float(record.PcfRadius + 1u);
 		const auto offsetBy = [&](float offset)
 		{
-			return Float3{ position[0] + normal[0] * offset, position[1] + normal[1] * offset, position[2] + normal[2] * offset };
+			return ::Engine::ToArray(ToGlm(position) + ToGlm(normal) * offset);
 		};
 
 		if (static_cast<ShadowKind>(record.Kind) == ShadowKind::Directional)
@@ -351,9 +340,9 @@ namespace Swim::Render::Shadows
 		}
 
 		const auto& view = inputs.Views[*viewIndex];
-		const Float3 fromLight{ position[0] - record.LightPosition[0], position[1] - record.LightPosition[1],
-			position[2] - record.LightPosition[2] };
-		const float distance = view.Perspective != 0 ? std::sqrt(Dot(fromLight, fromLight)) : 1.0f;
+		const float distance = view.Perspective != 0
+			? glm::distance(ToGlm(position), glm::vec3(record.LightPosition[0], record.LightPosition[1], record.LightPosition[2]))
+			: 1.0f;
 		const Float3 shifted = offsetBy(view.TexelWorldSize * distance * bias);
 		// The offset can cross into another cube face (all faces share TexelWorldSize):
 		// select again with the shifted point.

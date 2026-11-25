@@ -36,7 +36,12 @@ namespace Swim::Text
 		{
 			const bool valid = std::isfinite(desc.Size) && desc.Size > 0.0f && desc.Size <= 16384.0f && !std::isnan(desc.MaxWidth) &&
 				desc.MaxWidth > 0.0f && std::isfinite(desc.LineSpacing) && desc.LineSpacing >= 0.25f && desc.LineSpacing <= 8.0f &&
-				desc.Language.size() <= 128 && static_cast<std::uint8_t>(desc.Align) <= static_cast<std::uint8_t>(TextAlign::Center) &&
+				desc.Language.size() <= 128 &&
+				std::is_sorted(desc.Styles.begin(), desc.Styles.end(),
+					[](const TextStyleRange& a, const TextStyleRange& b)
+					{
+						return a.Begin < b.Begin;
+					}) && static_cast<std::uint8_t>(desc.Align) <= static_cast<std::uint8_t>(TextAlign::Center) &&
 				static_cast<std::uint8_t>(desc.Wrap) <= static_cast<std::uint8_t>(TextWrap::Word) &&
 				(desc.Direction == TextDirection::Auto || desc.Direction == TextDirection::LeftToRight ||
 					desc.Direction == TextDirection::RightToLeft);
@@ -135,6 +140,16 @@ namespace Swim::Text
 			}
 		}
 
+		bool IsBold(std::uint32_t offset) const
+		{
+			const auto after = std::upper_bound(Desc.Styles.begin(), Desc.Styles.end(), offset,
+				[](std::uint32_t value, const TextStyleRange& range)
+				{
+					return value < range.Begin;
+				});
+			return after != Desc.Styles.begin() && std::prev(after)->Bold;
+		}
+
 		ShapedRun Shape(std::uint32_t begin, std::uint32_t end, std::uint32_t face, std::uint32_t script, std::uint8_t level) const
 		{
 			ShapeOptions options;
@@ -149,6 +164,20 @@ namespace Swim::Text
 			for (auto& glyph : run.Glyphs)
 			{
 				glyph.Cluster += begin;
+			}
+
+			if (!Desc.Styles.empty())
+			{
+				const float bold = Fonts.GetFace(face)->GetStyleMetrics(Desc.Size).BoldOffset;
+
+				for (auto& glyph : run.Glyphs)
+				{
+					if (IsBold(glyph.Cluster))
+					{
+						glyph.AdvanceX += bold;
+						run.AdvanceX += bold;
+					}
+				}
 			}
 
 			return run;

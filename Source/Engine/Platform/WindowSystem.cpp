@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <mutex>
 #include <unordered_map>
 
 #if defined(_WIN32)
@@ -15,9 +16,22 @@
 namespace Swim::Platform
 {
 
+	namespace
+	{
+		struct FileDialogQueue
+		{
+			std::mutex Mutex;
+			std::vector<std::pair<WindowSystem::FileDialogCallback, std::optional<std::filesystem::path>>> Results;
+		};
+	} // namespace
+
 	struct WindowSystem::Impl
 	{
 		std::unordered_map<SDL_JoystickID, SDL_Gamepad*> Gamepads;
+
+		// Dialog results arrive on a system thread and are handed out by PumpEvents. Shared so a
+		// dialog that outlives the window system has somewhere to land.
+		std::shared_ptr<FileDialogQueue> Dialogs = std::make_shared<FileDialogQueue>();
 
 		~Impl()
 		{
@@ -365,7 +379,7 @@ namespace Swim::Platform
 			return CallWindowProcW(originalWindowProc, hwnd, message, wParam, lParam);
 		}
 
-		ExternalParentAttachment AttachToExternalParent(SDL_Window* window, const NativeWindowHandle& parent)
+		ExternalParentAttachment AttachToExternalParent(SDL_Window* window, const NativeWindowHandle& parent, bool activate)
 		{
 			ExternalParentAttachment result{};
 
@@ -415,7 +429,8 @@ namespace Swim::Platform
 				result.ParentThreadId = parentThreadId;
 			}
 
-			if (HWND foreground = GetForegroundWindow())
+			// Sharing the foreground thread's input queue lets SetFocus take the keyboard from it.
+			if (HWND foreground = activate ? GetForegroundWindow() : nullptr)
 			{
 				const DWORD foregroundThreadId = GetWindowThreadProcessId(foreground, nullptr);
 
@@ -466,8 +481,13 @@ namespace Swim::Platform
 
 			const int width = std::max(1L, rect.right - rect.left);
 			const int height = std::max(1L, rect.bottom - rect.top);
-			SetWindowPos(hwnd, HWND_TOP, 0, 0, width, height, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-			SetFocus(hwnd);
+			SetWindowPos(hwnd, HWND_TOP, 0, 0, width, height, SWP_FRAMECHANGED | SWP_SHOWWINDOW | (activate ? 0u : SWP_NOACTIVATE));
+
+			if (activate)
+			{
+				SetFocus(hwnd);
+			}
+
 			result.Success = true;
 			return result;
 		}
@@ -595,6 +615,7 @@ namespace Swim::Platform
 		windowImpl->Window = sdlWindow;
 		windowImpl->ExternalWindow = desc.ExternalWindow.IsValid();
 		windowImpl->CaptureMouse = desc.CaptureMouse;
+		windowImpl->Activate = desc.Activate;
 
 		// The decoration size is only known once the window exists; refit so the whole frame sits
 		// inside the usable area like a maximized window.
@@ -612,7 +633,7 @@ namespace Swim::Platform
 		if (desc.ExternalParent.IsValid())
 		{
 		#if defined(_WIN32)
-			const ExternalParentAttachment attachment = AttachToExternalParent(sdlWindow, desc.ExternalParent);
+			const ExternalParentAttachment attachment = AttachToExternalParent(sdlWindow, desc.ExternalParent, desc.Activate);
 
 			if (desc.ExternalParent.Type != NativeWindowType::Win32 || !attachment.Success)
 			{
@@ -643,8 +664,113 @@ namespace Swim::Platform
 		return window;
 	}
 
+	namespace
+	{
+		struct DialogRequest
+		{
+			std::shared_ptr<FileDialogQueue> Queue;
+			WindowSystem::FileDialogCallback Callback;
+			std::vector<FileDialogFilter> Filters;
+			std::vector<SDL_DialogFileFilter> SdlFilters;
+			std::string Start;
+		};
+	} // namespace
+
+	void WindowSystem::ShowOpenFileDialog(Window* parent, std::vector<FileDialogFilter> filters, const std::filesystem::path& start,
+		FileDialogCallback callback)
+	{
+		auto* request = new DialogRequest{ impl->Dialogs, std::move(callback), std::move(filters), {}, {} };
+
+		for (const auto& filter : request->Filters)
+		{
+			request->SdlFilters.push_back({ filter.Name.c_str(), filter.Pattern.c_str() });
+		}
+
+		const auto startText = start.u8string();
+		request->Start.assign(startText.begin(), startText.end());
+		SDL_Window* window = parent ? Internal::WindowAccess::GetSdlWindow(*parent) : nullptr;
+		SDL_ShowOpenFileDialog(
+			[](void* userdata, const char* const* files, int)
+			{
+				std::unique_ptr<DialogRequest> owned(static_cast<DialogRequest*>(userdata));
+				std::optional<std::filesystem::path> chosen;
+
+				if (files && files[0])
+				{
+					const std::string_view text(files[0]);
+					chosen = std::filesystem::path(std::u8string(text.begin(), text.end()));
+				}
+
+				std::lock_guard lock(owned->Queue->Mutex);
+				owned->Queue->Results.emplace_back(std::move(owned->Callback), std::move(chosen));
+			},
+			request, window, request->SdlFilters.empty() ? nullptr : request->SdlFilters.data(),
+			static_cast<int>(request->SdlFilters.size()), request->Start.empty() ? nullptr : request->Start.c_str(), false);
+	}
+
+	std::filesystem::path WindowSystem::GetUserFolder(UserFolder folder)
+	{
+		SDL_Folder kind = SDL_FOLDER_HOME;
+
+		switch (folder)
+		{
+			case UserFolder::Home: kind = SDL_FOLDER_HOME; break;
+			case UserFolder::Desktop: kind = SDL_FOLDER_DESKTOP; break;
+			case UserFolder::Documents: kind = SDL_FOLDER_DOCUMENTS; break;
+			case UserFolder::Downloads: kind = SDL_FOLDER_DOWNLOADS; break;
+			case UserFolder::Pictures: kind = SDL_FOLDER_PICTURES; break;
+		}
+
+		const char* path = SDL_GetUserFolder(kind);
+
+		if (!path)
+		{
+			return {};
+		}
+
+		const std::string_view text(path);
+		return std::filesystem::path(std::u8string(text.begin(), text.end()));
+	}
+
+	std::string WindowSystem::GetClipboardText()
+	{
+		char* text = SDL_GetClipboardText();
+
+		if (!text)
+		{
+			return {};
+		}
+
+		std::string result(text);
+		SDL_free(text);
+		return result;
+	}
+
+	void WindowSystem::SetClipboardText(std::string_view text)
+	{
+		const std::string owned(text);
+		SDL_SetClipboardText(owned.c_str());
+	}
+
 	void WindowSystem::PumpEvents(const WindowEventHandler& windowHandler, const InputEventHandler& inputHandler)
 	{
+		{
+			decltype(FileDialogQueue::Results) results;
+
+			{
+				std::lock_guard lock(impl->Dialogs->Mutex);
+				results.swap(impl->Dialogs->Results);
+			}
+
+			for (auto& [callback, chosen] : results)
+			{
+				if (callback)
+				{
+					callback(std::move(chosen));
+				}
+			}
+		}
+
 		SDL_Event event{};
 
 		while (SDL_PollEvent(&event))

@@ -13,6 +13,11 @@ namespace Swim::Render
 		CastShadows = 1u << 1,
 		Static = 1u << 2, // Hint: the transform rarely changes.
 		Selectable = 1u << 3,
+		// The first-person overlay layer: drawn only in the main camera view, never culled
+		// there, never in shadow, probe or capture views, projected with the overlay's field
+		// of view and near plane into a depth range in front of the whole scene (it never
+		// clips into nearby geometry). Lit and shadowed at its world position.
+		Overlay = 1u << 4,
 
 		// GpuScene-owned: the row holds a live object.
 		Live = 1u << 30,

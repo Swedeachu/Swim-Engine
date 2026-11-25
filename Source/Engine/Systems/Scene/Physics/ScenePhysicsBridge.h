@@ -44,6 +44,10 @@ namespace Engine
 
 		void AddForce(entt::entity entity, const glm::vec3& force, ForceMode mode = ForceMode::Force, bool autowake = true);
 
+		// Force or Impulse at a world point (throwing with spin).
+		void AddForceAtPosition(
+			entt::entity entity, const glm::vec3& force, const glm::vec3& position, ForceMode mode = ForceMode::Impulse, bool autowake = true);
+
 		void SetLinearVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);
 
 		void SetAngularVelocity(entt::entity entity, const glm::vec3& velocity, bool autowake = true);

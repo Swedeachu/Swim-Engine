@@ -25,8 +25,9 @@ struct ForwardView
 	uint Flags;
 	uint DebugMode;
 	float4 PreviousViewProjection[4]; // Previous frame, unjittered (motion vectors, item 75).
-	float2 Jitter;					  // NDC offset added to clip.xy / clip.w.
-	float2 Reserved1;
+	// xy: the jitter, an NDC offset added to clip.xy / clip.w. zw: RenderObjectFlags::Overlay
+	// objects' clip.xy scale (tan(camera fov / 2) / tan(overlay fov / 2)) and near plane.
+	float4 JitterOverlay;
 };
 
 struct ForwardSortEntry
@@ -43,6 +44,21 @@ static const uint ForwardVertexFloats = 12;
 float4 ForwardProject(float4 rows[4], float4 p)
 {
 	return float4(dot(rows[0], p), dot(rows[1], p), dot(rows[2], p), dot(rows[3], p));
+}
+
+// A first-person overlay object's clip position from its scene clip position: the overlay's
+// own field of view (clip.xy scaled) and near plane, its depth (near / w, reverse-Z)
+// squeezed into [Overlay.y, 1] so it lies in front of everything in the scene.
+// The depth (reverse-Z) the overlay's range starts at: the scene is farther than this
+// everywhere except within 1% of its near plane.
+static const float ForwardOverlayDepth = 0.99;
+
+// overlay: ForwardView::JitterOverlay.zw.
+float4 ForwardOverlayClip(float2 overlay, float4 clip)
+{
+	const float w = max(clip.w, 1.0e-6);
+	const float depth = ForwardOverlayDepth + (1.0 - ForwardOverlayDepth) * saturate(overlay.y / w);
+	return float4(clip.xy * overlay.x, depth * w, w);
 }
 
 float ForwardDeterminant(float4 rows[3])

@@ -10,7 +10,8 @@ namespace Swim::Platform
 	{
 		SDL_Window* Window = nullptr;
 		bool ExternalWindow = false;
-		bool CaptureMouse = true;
+		bool CaptureMouse = true; // False: the window never moves, confines or captures the OS cursor.
+		bool Activate = true;	  // False: showing or restoring the window never takes focus.
 		bool ExternalParent = false;
 		NativeWindowHandle Parent{};
 		uint32_t ParentThreadId = 0;

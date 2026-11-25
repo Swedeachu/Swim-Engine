@@ -14,8 +14,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <vector>
 
 namespace Swim::RhiVulkan
@@ -62,13 +64,22 @@ namespace Swim::RhiVulkan
 
 			std::vector<vkb::CustomQueueDescription> queueDescriptions;
 			std::vector<std::uint32_t> uniqueFamilies;
+			// A second queue of the graphics family presents, so a present that blocks (until its
+			// frame's GPU work is done, or while the image crosses to another adapter) never holds
+			// the queue the next frame is submitted to.
+			const auto families = physicalDevice.get_queue_families();
+			// SWIM_PRESENT_QUEUE=shared presents on the graphics queue (diagnostics: compare the two).
+			const char* presentQueueMode = std::getenv("SWIM_PRESENT_QUEUE");
+			const bool separatePresentQueue = queueFamilies.Graphics < families.size() && families[queueFamilies.Graphics].queueCount >= 2 &&
+				!(presentQueueMode && std::string_view(presentQueueMode) == "shared");
 
 			for (std::uint32_t family : { queueFamilies.Graphics, queueFamilies.Compute, queueFamilies.Transfer })
 			{
 				if (std::find(uniqueFamilies.begin(), uniqueFamilies.end(), family) == uniqueFamilies.end())
 				{
 					uniqueFamilies.push_back(family);
-					queueDescriptions.emplace_back(family, std::vector<float>{ 1.0f });
+					queueDescriptions.emplace_back(family,
+						family == queueFamilies.Graphics && separatePresentQueue ? std::vector<float>{ 1.0f, 1.0f } : std::vector<float>{ 1.0f });
 				}
 			}
 
@@ -177,6 +188,19 @@ namespace Swim::RhiVulkan
 			auto graphicsQueueMutex = std::make_shared<std::mutex>();
 			deviceState->PresentationQueue = graphicsQueueHandle;
 			deviceState->PresentationQueueMutex = graphicsQueueMutex;
+
+			if (separatePresentQueue)
+			{
+				VkQueue presentQueueHandle = VK_NULL_HANDLE;
+				deviceState->Dispatch.vkGetDeviceQueue(deviceState->Device.device, queueFamilies.Graphics, 1, &presentQueueHandle);
+
+				if (presentQueueHandle != VK_NULL_HANDLE)
+				{
+					SetVulkanObjectName(*deviceState, VK_OBJECT_TYPE_QUEUE, ToNativeHandle(presentQueueHandle), "Swim present queue");
+					deviceState->PresentationQueue = presentQueueHandle;
+					deviceState->PresentationQueueMutex = std::make_shared<std::mutex>();
+				}
+			}
 			auto computeQueueMutex = computeQueueHandle == graphicsQueueHandle ? graphicsQueueMutex : std::make_shared<std::mutex>();
 			std::shared_ptr<std::mutex> transferQueueMutex;
 

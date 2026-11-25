@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/PostProcess/PostProcessReference.h"
 
+#include "Engine/Math/ColorMath.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -628,12 +630,12 @@ namespace Swim::Render::Post
 
 	float SrgbOetf(float linear)
 	{
-		return linear <= 0.0031308f ? 12.92f * linear : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+		return ::Engine::LinearToSrgb(linear);
 	}
 
 	float SrgbEotf(float encoded)
 	{
-		return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+		return ::Engine::SrgbToLinear(encoded);
 	}
 
 	float PqOetf(float nits)

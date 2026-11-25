@@ -177,6 +177,8 @@ namespace Engine
 		// empty when disabled.
 		std::filesystem::path GetUserConfigPath() const;
 
+		void SaveUserConfig();
+
 		// Saves the next rendered frame (binary PPM). False without a renderer.
 		bool RequestCapture(std::filesystem::path path);
 
@@ -243,6 +245,8 @@ namespace Engine
 
 		unsigned int tickCounter{ 1 };
 		double fpsTimeAccumulator{ 0.0 };
+		// Time since the user config became dirty; it is written once this passes a second.
+		double configDirtySeconds{ 0.0 };
 		int fpsFrameCounter{ 0 };
 		int fps{ 0 };
 		bool running{ false };

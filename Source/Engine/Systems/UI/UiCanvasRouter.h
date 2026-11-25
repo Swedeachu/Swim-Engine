@@ -87,6 +87,15 @@ namespace Swim::UI
 
 		void CancelPointer();
 
+		// Non-primary buttons go to the hovered (or capturing) canvas (UiDocument::ButtonDown/Up).
+		void ButtonDown(UiPointerButton button, UiKeyModifiers modifiers = {});
+
+		void ButtonUp(UiPointerButton button, UiKeyModifiers modifiers = {});
+
+		// Application key codes to the keyboard owner's document (UiDocument::KeyEvent);
+		// false without an owner.
+		bool KeyEvent(std::uint32_t key, bool down, UiKeyModifiers modifiers = {});
+
 		bool Wheel(UiPoint delta);
 
 		// Keyboard, text and IME go to the focused canvas. Without one, Tab focuses the first
@@ -105,6 +114,11 @@ namespace Swim::UI
 		void Focus(UiCanvasHandle canvas); // Makes the canvas the keyboard owner (its document keeps its node focus).
 
 		void ClearFocus();				   // Blurs the focused canvas's document.
+
+		// Gives the keyboard to an interactive canvas whose document focused a node since the
+		// last call (a screen that focuses its text field when it opens). Call once per frame
+		// before routing input and again after the application updated its documents.
+		void AdoptDocumentFocus();
 
 		// Context menus (right button, Shift+F10, gamepad North): the menu registered under
 		// the pointer on the hovered canvas (which becomes the focused canvas), or the one of
@@ -141,6 +155,7 @@ namespace Swim::UI
 			UiPoint CanvasSize;
 			bool TwoSided = true;
 			UiPoint LastPoint; // Canvas pixels of the last pointer position routed here.
+			std::uint64_t FocusRevision = 0; // The document's focus revision AdoptDocumentFocus last saw.
 		};
 
 		Canvas* Find(UiCanvasHandle canvas);

@@ -1,11 +1,18 @@
 #pragma once
 
 #include "Engine/Systems/Renderer/Features/CameraEffects.h"
+#include "Engine/Systems/Renderer/Features/CelestialSky.h"
 #include "Engine/Systems/Renderer/Features/GravitationalLensing.h"
 #include "Engine/Systems/Renderer/Features/LensFlare.h"
+#include "Engine/Systems/Renderer/Features/Outline.h"
 #include "Engine/Systems/Renderer/Features/SunShafts.h"
 #include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
 #include "Game/Features/BoxField.h"
+#include "Game/Features/CullDemo.h"
+#include "Game/Features/WaterDemo.h"
+#include "Engine/Systems/Physics/PhysicsBuoyancy.h"
+#include "Engine/Systems/Renderer/Features/Ocean.h"
+#include "Engine/Systems/Renderer/Features/WaveWater.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
 #include "Engine/Systems/Scene/Scene.h"
@@ -76,6 +83,15 @@ namespace Game
 
 		// A dynamic primitive dropped in front of the camera (or at the playground).
 		entt::entity SpawnPrimitive(Engine::BuiltinMesh mesh);
+
+		// Wave water (Engine::WaveWater) over a rectangle (half size 0: endless) with a matching
+		// physics fluid volume; off removes both.
+		void SetWaves(bool on, glm::vec2 center, float halfSize, float height, float amplitude);
+
+		void SetOcean(bool on, float height, float windSpeed);
+
+		// Buoyant boxes, balls and capsule figures thrown onto the wave water around a point.
+		void SpawnFloaters(std::uint32_t count, glm::vec3 around);
 
 		BallShooter* GetShooter() const;
 
@@ -238,6 +254,7 @@ namespace Game
 		entt::entity cameraRig = entt::null;
 		entt::entity shooterEntity = entt::null;
 		entt::entity sun = entt::null;
+		entt::entity showcase = entt::null; // "sandbox.showcase" (UiShowcase).
 		std::shared_ptr<Swim::UI::UiDocument> infoDocument;
 		Swim::UI::UiNodeId infoBody;
 		Swim::UI::UiNodeId infoButton;
@@ -267,6 +284,13 @@ namespace Game
 		std::shared_ptr<Engine::FilmSensor> filmSensor;
 		std::shared_ptr<Engine::GravitationalLensing> lensing;
 		std::shared_ptr<BoxField> boxField;
+		std::shared_ptr<Engine::Outline> outline;
+		std::shared_ptr<WaterDemo> water;
+		std::shared_ptr<Engine::WaveWater> waveWater;
+		std::shared_ptr<Engine::OceanSurface> ocean;
+		Engine::FluidVolumeHandle waveFluid;
+		std::shared_ptr<CullDemo> cullDemo;
+		std::shared_ptr<Engine::CelestialSky> celestial;
 		entt::entity blackHole = entt::null;
 		std::unordered_map<std::uint32_t, bool> hiddenGroups; // TagId::Value -> hidden.
 		bool swarmMotion = true;

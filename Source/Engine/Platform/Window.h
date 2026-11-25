@@ -45,7 +45,7 @@ namespace Swim::Platform
 		uint32_t Display = 0;
 		// False: the window opens without taking focus from the active application.
 		bool Activate = true;
-		// False: relative mouse mode and cursor confinement requests are ignored.
+		// False: relative mouse mode, cursor confinement and pointer warps are ignored.
 		bool CaptureMouse = true;
 		// 1-based position in the system's display list; when set it overrides Display.
 		// Out of range falls back to Display.
@@ -122,6 +122,14 @@ namespace Swim::Platform
 		bool SetRelativeMouseMode(bool enabled);
 
 		bool IsRelativeMouseModeRequested() const;
+
+		// The pointer in logical window coordinates (GetLogicalSize); false when it is not over
+		// this window or the window has no mouse focus.
+		bool GetMousePosition(float& x, float& y) const;
+
+		// Moves the pointer to logical window coordinates. Ignored in relative mouse mode and
+		// without CaptureMouse.
+		void WarpMouse(float x, float y);
 
 	private:
 

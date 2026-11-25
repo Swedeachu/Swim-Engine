@@ -1,10 +1,14 @@
 #include "Engine/Systems/Renderer/Runtime/ProceduralMeshes.h"
 
+#include "Engine/Math/VectorMath.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+
+#include <glm/glm.hpp>
 
 namespace Engine::ProceduralMeshes
 {
@@ -13,44 +17,21 @@ namespace Engine::ProceduralMeshes
 	{
 
 		using Float3 = std::array<float, 3>;
+		using ::Engine::NormalizeOr;
+		using ::Engine::ToArray;
+		using ::Engine::ToGlm;
 		constexpr float Pi = 3.14159265358979f;
 
-		Float3 Sub(const Float3& a, const Float3& b)
+		Float3 Normalize(const glm::vec3& v, const glm::vec3& fallback = { 1, 0, 0 })
 		{
-			return { a[0] - b[0], a[1] - b[1], a[2] - b[2] };
-		}
-
-		Float3 Add(const Float3& a, const Float3& b)
-		{
-			return { a[0] + b[0], a[1] + b[1], a[2] + b[2] };
-		}
-
-		Float3 Scale(const Float3& a, float s)
-		{
-			return { a[0] * s, a[1] * s, a[2] * s };
-		}
-
-		float Dot(const Float3& a, const Float3& b)
-		{
-			return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-		}
-
-		Float3 Cross(const Float3& a, const Float3& b)
-		{
-			return { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
-		}
-
-		Float3 Normalize(const Float3& a, const Float3& fallback = { 1, 0, 0 })
-		{
-			const float length = std::sqrt(Dot(a, a));
-			return length > 1e-12f ? Scale(a, 1.0f / length) : fallback;
+			return ToArray(NormalizeOr(v, fallback, 1e-12f));
 		}
 
 		// Any unit vector perpendicular to n.
-		Float3 Perpendicular(const Float3& n)
+		glm::vec3 Perpendicular(const glm::vec3& n)
 		{
-			const Float3 axis = std::abs(n[0]) < 0.9f ? Float3{ 1, 0, 0 } : Float3{ 0, 1, 0 };
-			return Normalize(Cross(axis, n));
+			const glm::vec3 axis = std::abs(n.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+			return NormalizeOr(glm::cross(axis, n), { 1, 0, 0 }, 1e-12f);
 		}
 
 	} // namespace
@@ -109,8 +90,8 @@ namespace Engine::ProceduralMeshes
 
 	void GenerateTangents(MeshData& mesh)
 	{
-		std::vector<Float3> tangents(mesh.Vertices.size(), Float3{ 0, 0, 0 });
-		std::vector<Float3> bitangents(mesh.Vertices.size(), Float3{ 0, 0, 0 });
+		std::vector<glm::vec3> tangents(mesh.Vertices.size(), glm::vec3(0.0f));
+		std::vector<glm::vec3> bitangents(mesh.Vertices.size(), glm::vec3(0.0f));
 
 		for (std::size_t i = 0; i + 2 < mesh.Indices.size(); i += 3)
 		{
@@ -118,8 +99,8 @@ namespace Engine::ProceduralMeshes
 			const auto& v0 = mesh.Vertices[index[0]];
 			const auto& v1 = mesh.Vertices[index[1]];
 			const auto& v2 = mesh.Vertices[index[2]];
-			const Float3 e1 = Sub(v1.Position, v0.Position);
-			const Float3 e2 = Sub(v2.Position, v0.Position);
+			const glm::vec3 e1 = ToGlm(v1.Position) - ToGlm(v0.Position);
+			const glm::vec3 e2 = ToGlm(v2.Position) - ToGlm(v0.Position);
 			const float du1 = v1.TexCoord0[0] - v0.TexCoord0[0];
 			const float dv1 = v1.TexCoord0[1] - v0.TexCoord0[1];
 			const float du2 = v2.TexCoord0[0] - v0.TexCoord0[0];
@@ -132,25 +113,25 @@ namespace Engine::ProceduralMeshes
 			}
 
 			const float r = 1.0f / det;
-			const Float3 dPdu = Scale(Sub(Scale(e1, dv2), Scale(e2, dv1)), r);
-			const Float3 dPdv = Scale(Sub(Scale(e2, du1), Scale(e1, du2)), r);
+			const glm::vec3 dPdu = (e1 * dv2 - e2 * dv1) * r;
+			const glm::vec3 dPdv = (e2 * du1 - e1 * du2) * r;
 
 			for (const auto k : index)
 			{
-				tangents[k] = Add(tangents[k], dPdu);
-				bitangents[k] = Add(bitangents[k], dPdv);
+				tangents[k] += dPdu;
+				bitangents[k] += dPdv;
 			}
 		}
 
 		for (std::size_t v = 0; v < mesh.Vertices.size(); ++v)
 		{
 			auto& vertex = mesh.Vertices[v];
-			const Float3 n = Normalize(vertex.Normal, { 0, 1, 0 });
-			Float3 t = Sub(tangents[v], Scale(n, Dot(n, tangents[v])));
-			t = Dot(t, t) > 1e-16f ? Normalize(t) : Perpendicular(n);
+			const glm::vec3 n = NormalizeOr(ToGlm(vertex.Normal), { 0, 1, 0 }, 1e-12f);
+			glm::vec3 t = tangents[v] - n * glm::dot(n, tangents[v]);
+			t = glm::dot(t, t) > 1e-16f ? NormalizeOr(t, { 1, 0, 0 }, 1e-12f) : Perpendicular(n);
 			// cross(N, T) * w must point toward decreasing v (up in the image).
-			const float w = Dot(Cross(n, t), bitangents[v]) > 0.0f ? -1.0f : 1.0f;
-			vertex.Tangent = { t[0], t[1], t[2], w };
+			const float w = glm::dot(glm::cross(n, t), bitangents[v]) > 0.0f ? -1.0f : 1.0f;
+			vertex.Tangent = { t.x, t.y, t.z, w };
 		}
 	}
 
@@ -242,8 +223,8 @@ namespace Engine::ProceduralMeshes
 			{
 				const float u = float(s) / float(segments);
 				const float phi = u * 2.0f * Pi;
-				const Float3 n{ std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi) };
-				mesh.AddVertex(Scale(n, radius), n, { u, v });
+				const glm::vec3 n{ std::sin(theta) * std::sin(phi), std::cos(theta), std::sin(theta) * std::cos(phi) };
+				mesh.AddVertex(ToArray(n * radius), ToArray(n), { u, v });
 			}
 		}
 
@@ -346,7 +327,7 @@ namespace Engine::ProceduralMeshes
 			const auto normalAt = [&](float u)
 			{
 				const float phi = u * 2.0f * Pi;
-				return Normalize({ std::sin(phi), slope, std::cos(phi) });
+				return Normalize(glm::vec3(std::sin(phi), slope, std::cos(phi)));
 			};
 			const auto rim = [&](float u)
 			{
@@ -374,15 +355,14 @@ namespace Engine::ProceduralMeshes
 		{
 			const float u = float(s) / float(segments);
 			const float phi = u * 2.0f * Pi;
-			const Float3 radial{ std::sin(phi), 0, std::cos(phi) };
+			const glm::vec3 radial{ std::sin(phi), 0, std::cos(phi) };
 
 			for (std::uint32_t k = 0; k <= sides; ++k)
 			{
 				const float v = float(k) / float(sides);
 				const float theta = v * 2.0f * Pi;
-				const Float3 n = Add(Scale(radial, std::cos(theta)), Float3{ 0, std::sin(theta), 0 });
-				const Float3 p = Add(Scale(radial, majorRadius), Scale(n, minorRadius));
-				mesh.AddVertex(p, n, { u, v });
+				const glm::vec3 n = radial * std::cos(theta) + glm::vec3(0, std::sin(theta), 0);
+				mesh.AddVertex(ToArray(radial * majorRadius + n * minorRadius), ToArray(n), { u, v });
 			}
 		}
 
@@ -572,7 +552,7 @@ namespace Engine::ProceduralMeshes
 			{
 				const float u = float(s) / float(segments);
 				const float phi = u * 2.0f * Pi;
-				const Float3 n{ std::sin(phi), 0.6f * radius / height, std::cos(phi) };
+				const glm::vec3 n{ std::sin(phi), 0.6f * radius / height, std::cos(phi) };
 				mesh.AddVertex({ std::sin(phi) * ringRadius, y, std::cos(phi) * ringRadius }, Normalize(n), { u, 1.0f - v });
 				result.Influences.push_back(influence(y));
 			}

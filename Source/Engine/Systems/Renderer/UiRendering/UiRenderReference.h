@@ -25,6 +25,7 @@ namespace Swim::Render::Ui
 		std::uint32_t AtlasPageSize = 0;			  // Glyph atlas page size in texels.
 		std::span<const std::uint32_t> AtlasTextures; // Bindless texture index per atlas page.
 		std::uint32_t AtlasSampler = 0;				  // Bindless sampler index for atlas pages.
+		std::uint32_t AtlasPointSampler = 0;		  // Nearest sampler for colour (bitmap-font) pages.
 	};
 
 	struct QuadBuildStats
@@ -40,6 +41,17 @@ namespace Swim::Render::Ui
 	// DistanceRange / AtlasPageSize.
 	std::vector<GpuUiQuad> BuildQuads(std::span<const UI::UiPaintQuad> paint, const QuadBuildDesc& desc, QuadBuildStats* stats = nullptr);
 
+	// A run of consecutive quads drawn with one blend pipeline.
+	struct DrawRun
+	{
+		std::uint32_t First = 0;
+		std::uint32_t Count = 0;
+		std::uint32_t Blend = UiQuadBlendNormal;
+	};
+
+	// Paint order split at every blend change (one run when no quad inverts).
+	std::vector<DrawRun> BuildDrawRuns(std::span<const GpuUiQuad> quads);
+
 	// A screen overlay of a width x height target: canvas pixels are target pixels.
 	GpuUiDrawConstants BuildDrawConstants(
 		std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings, float opacity = 1.0f);
@@ -52,6 +64,7 @@ namespace Swim::Render::Ui
 	float PqOetf(float nits); // SMPTE ST 2084 inverse EOTF.
 	std::array<float, 3> Rec709ToRec2020(const std::array<float, 3>& color);
 	float Median(float r, float g, float b);
+	float SrgbEotf(float encoded); // sRGB-encoded -> linear.
 	// Signed distance to a rounded box (negative inside), all in pixels.
 	float RoundedBoxDistance(float px, float py, float centerX, float centerY, float halfX, float halfY, float radius);
 
@@ -77,6 +90,8 @@ namespace Swim::Render::Ui
 	Float4 Encode(const Float4& premultiplied, const GpuUiDrawConstants& constants);
 	// Premultiplied source over destination: One, OneMinusSourceAlpha on all channels.
 	Float4 Blend(const Float4& destination, const Float4& source);
+	// Invert: color OneMinusDstColor, OneMinusSrcColor; alpha as Blend.
+	Float4 BlendInvert(const Float4& destination, const Float4& source);
 
 	struct Canvas
 	{

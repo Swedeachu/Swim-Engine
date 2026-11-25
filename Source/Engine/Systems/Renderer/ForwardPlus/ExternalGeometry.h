@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace Swim::Render
@@ -24,6 +25,15 @@ namespace Swim::Render
 	{
 		return 1u << static_cast<std::uint32_t>(pass);
 	}
+
+	// Copies of the opaque scene taken just before the transparent pass, for transparent
+	// draws that look through themselves (refraction, absorption by depth, screen-space
+	// reflection): Color is RGBA16Float linear HDR radiance, Depth R32Float reverse-Z (0 = sky).
+	struct ExternalSceneCopy
+	{
+		std::optional<GraphTexture> Color;
+		std::optional<GraphTexture> Depth;
+	};
 
 	// What a drawer sees inside an engine pass: rendering has begun, the viewport and
 	// scissor are set (the tile for shadows), and the engine's own draws are recorded.
@@ -45,6 +55,8 @@ namespace Swim::Render
 		// Shadow: the row of the shadow views buffer (GpuShadowView) this tile renders.
 		std::uint32_t ShadowView = 0;
 		std::array<float, 16> ShadowViewProjection{};
+		// Transparent: the opaque scene copy, when a drawer asked for one (SceneCopy).
+		ExternalSceneCopy Scene;
 	};
 
 	// Draws added to engine passes by something outside the renderer (a render feature).
@@ -55,6 +67,7 @@ namespace Swim::Render
 		std::vector<GraphBuffer> Buffers;		  // ShaderRead (vertex and fragment stages).
 		std::vector<GraphBuffer> IndirectBuffers; // IndirectArgument (arguments and counts).
 		std::vector<GraphTexture> Textures;		  // ShaderRead.
+		bool SceneCopy = false;					  // Transparent draws read ExternalDrawContext::Scene.
 		std::function<void(ExternalDrawContext&)> Draw;
 	};
 

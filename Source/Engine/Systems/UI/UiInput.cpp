@@ -85,6 +85,19 @@ namespace Swim::UI
 			}
 		}
 
+		if (impl->DragSource && !impl->Nodes.contains(impl->DragSource.Value))
+		{
+			impl->DragSource = {};
+		}
+
+		if (impl->DragSource && Finite(point))
+		{
+			auto over = impl->PointerEvent(UiEventKind::DragOver, hit, UiPointerButton::Left, {});
+			over.Source = impl->DragSource;
+			over.Payload = impl->Drag.Payload;
+			impl->QueueEvent(over);
+		}
+
 		// Drag selection and control drags continue outside the node's bounds.
 		if (impl->Selecting && impl->Selecting == impl->Pressed && Finite(point))
 		{
@@ -117,6 +130,14 @@ namespace Swim::UI
 	void UiDocument::PointerDown(UiPoint point, UiKeyModifiers modifiers)
 	{
 		PointerMove(point);
+
+		if (impl->DragSource && !impl->Drag.EndOnRelease)
+		{
+			impl->QueueEvent(impl->PointerEvent(UiEventKind::ButtonDown, impl->Hover, UiPointerButton::Left, modifiers));
+			impl->FinishDrag(impl->Hover, true, UiPointerButton::Left);
+			return; // The placing click is the drop, nothing else.
+		}
+
 		CancelPointer();
 		impl->HideTooltip(true);
 
@@ -170,9 +191,17 @@ namespace Swim::UI
 
 		Focus(focus);
 
+		impl->QueueEvent(impl->PointerEvent(UiEventKind::ButtonDown, impl->Hover, UiPointerButton::Left, modifiers));
+
 		if (impl->Pressed)
 		{
-			impl->QueueEvent({ UiEventKind::Press, impl->Pressed });
+			const bool again = impl->Pressed == impl->ClickNode && impl->Clock - impl->ClickTime <= impl->DoubleClickSeconds &&
+				std::hypot(impl->LastPointer.X - impl->ClickPoint.X, impl->LastPointer.Y - impl->ClickPoint.Y) <= impl->DoubleClickDistance;
+			impl->ClickCount = again ? impl->ClickCount + 1 : 1;
+			impl->ClickNode = impl->Pressed;
+			impl->ClickTime = impl->Clock;
+			impl->ClickPoint = impl->LastPointer;
+			impl->QueueEvent(impl->PointerEvent(UiEventKind::Press, impl->Pressed, UiPointerButton::Left, modifiers));
 			auto& node = impl->Get(impl->Pressed);
 
 			if (node.Editable && node.Fonts)
@@ -200,6 +229,13 @@ namespace Swim::UI
 	{
 		PointerMove(point);
 		impl->Selecting = {};
+		impl->QueueEvent(impl->PointerEvent(UiEventKind::ButtonUp, impl->Hover, UiPointerButton::Left, {}));
+		const bool dropped = impl->DragSource && impl->Drag.EndOnRelease;
+
+		if (dropped)
+		{
+			impl->FinishDrag(impl->Hover, true, UiPointerButton::Left);
+		}
 
 		if (impl->Pressed)
 		{
@@ -221,16 +257,151 @@ namespace Swim::UI
 			const auto pressed = impl->Pressed;
 			impl->Pressed = {};
 
-			if (pressed == impl->Hover)
+			if (pressed == impl->Hover && !dropped)
 			{
-				impl->QueueEvent({ UiEventKind::Click, pressed });
+				auto click = impl->PointerEvent(UiEventKind::Click, pressed, UiPointerButton::Left, {});
+				click.Count = impl->ClickNode == pressed ? impl->ClickCount : 1;
+				impl->QueueEvent(click);
+
+				if (click.Count == 2)
+				{
+					auto twice = click;
+					twice.Kind = UiEventKind::DoubleClick;
+					impl->QueueEvent(twice);
+				}
+
 				impl->CloseOnActivate(pressed);
 			}
 		}
 	}
 
+	void UiDocument::ButtonDown(UiPoint point, UiPointerButton button, UiKeyModifiers modifiers)
+	{
+		if (button == UiPointerButton::Left)
+		{
+			PointerDown(point, modifiers);
+			return;
+		}
+
+		PointerMove(point);
+		impl->QueueEvent(impl->PointerEvent(UiEventKind::ButtonDown, impl->Hover, button, modifiers));
+
+		if (impl->DragSource && !impl->Drag.EndOnRelease)
+		{
+			impl->FinishDrag(impl->Hover, true, button);
+		}
+	}
+
+	void UiDocument::ButtonUp(UiPoint point, UiPointerButton button, UiKeyModifiers modifiers)
+	{
+		if (button == UiPointerButton::Left)
+		{
+			PointerUp(point);
+			return;
+		}
+
+		PointerMove(point);
+		impl->QueueEvent(impl->PointerEvent(UiEventKind::ButtonUp, impl->Hover, button, modifiers));
+	}
+
+	UiPoint UiDocument::GetPointerPosition() const
+	{
+		return impl->LastPointer;
+	}
+
+	void UiDocument::SetDoubleClick(float seconds, float distance)
+	{
+		if (!std::isfinite(seconds) || seconds < 0.0f || !std::isfinite(distance) || distance < 0.0f)
+		{
+			throw std::invalid_argument("Double-click time and distance must be finite and non-negative");
+		}
+
+		impl->DoubleClickSeconds = seconds;
+		impl->DoubleClickDistance = distance;
+	}
+
+	void UiDocument::BeginDrag(UiNodeId source, const UiDragDesc& desc)
+	{
+		if (!Contains(source))
+		{
+			throw std::invalid_argument("A drag needs an existing source node");
+		}
+
+		if (impl->DragSource)
+		{
+			CancelDrag();
+		}
+
+		impl->DragSource = source;
+		impl->Drag = desc;
+		UiEvent start{ UiEventKind::DragStart, source };
+		start.Position = impl->LastPointer;
+		start.Source = source;
+		start.Payload = desc.Payload;
+		impl->QueueEvent(start);
+	}
+
+	void UiDocument::CancelDrag()
+	{
+		if (impl->DragSource)
+		{
+			impl->FinishDrag({}, false, UiPointerButton::Left);
+		}
+	}
+
+	bool UiDocument::IsDragging() const
+	{
+		return impl->DragSource && impl->Nodes.contains(impl->DragSource.Value);
+	}
+
+	UiNodeId UiDocument::GetDragSource() const
+	{
+		return IsDragging() ? impl->DragSource : UiNodeId{};
+	}
+
+	bool UiDocument::KeyEvent(std::uint32_t key, bool down, UiKeyModifiers modifiers)
+	{
+		UiEvent event{ down ? UiEventKind::KeyDown : UiEventKind::KeyUp, impl->Focused ? impl->Focused : impl->Root };
+		event.Key = key;
+		event.Modifiers = modifiers;
+		impl->QueueEvent(event);
+		return static_cast<bool>(impl->Focused);
+	}
+
+	void UiDocument::Impl::FinishDrag(UiNodeId target, bool dropped, UiPointerButton button)
+	{
+		const auto source = DragSource;
+		const auto desc = Drag;
+		DragSource = {};
+
+		if (!Nodes.contains(source.Value))
+		{
+			return;
+		}
+
+		if (dropped)
+		{
+			auto drop = PointerEvent(UiEventKind::Drop, target, button, {});
+			drop.Source = source;
+			drop.Payload = desc.Payload;
+			QueueEvent(drop);
+		}
+
+		UiEvent end{ UiEventKind::DragEnd, source };
+		end.Value = dropped ? 1.0f : 0.0f;
+		end.Position = LastPointer;
+		end.Source = source;
+		end.Payload = desc.Payload;
+		QueueEvent(end);
+	}
+
 	void UiDocument::CancelPointer()
 	{
+		if (impl->DragSource && impl->Drag.EndOnRelease)
+		{
+			CancelDrag(); // Focus loss mid-drag.
+		}
+
 		impl->Selecting = {};
 		impl->CancelCapture(); // The captured control keeps (and commits) the value reached so far.
 
@@ -343,6 +514,7 @@ namespace Swim::UI
 
 		if (id)
 		{
+			++impl->FocusRevision;
 			impl->QueueEvent({ UiEventKind::Focus, id });
 			impl->MarkPaintDirty(id);
 			impl->Get(id).RevealCaret = impl->Get(id).Editable;
@@ -524,6 +696,11 @@ namespace Swim::UI
 
 	bool UiDocument::KeyDown(UiKey key, UiKeyModifiers modifiers)
 	{
+		if (key == UiKey::Tab && impl->Focused && impl->Get(impl->Focused).Editable && impl->Get(impl->Focused).EditOptions.KeepsTab)
+		{
+			return !impl->Composition.empty(); // Unconsumed: the application completes.
+		}
+
 		if (key == UiKey::Tab && !(impl->Focused && impl->Get(impl->Focused).Editable && !impl->Composition.empty()))
 		{
 			FocusNext(modifiers.Shift);
@@ -715,6 +892,11 @@ namespace Swim::UI
 		const float dpi = impl->Dpi;
 		return { (content.X - node.Scroll.X + caret.X) * dpi, (content.Y - node.Scroll.Y + caret.Top) * dpi, std::max(1.0f, dpi),
 			caret.Height * dpi };
+	}
+
+	std::uint64_t UiDocument::GetFocusRevision() const
+	{
+		return impl->FocusRevision;
 	}
 
 	void UiDocument::SetCaretVisible(bool visible)

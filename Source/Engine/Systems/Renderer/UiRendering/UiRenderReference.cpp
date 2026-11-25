@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/UiRendering/UiRenderReference.h"
 
+#include "Engine/Math/ColorMath.h"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -64,7 +66,8 @@ namespace Swim::Render::Ui
 			quad.Clip[1] = c.Y * s + desc.OffsetY;
 			quad.Clip[2] = (c.X + c.Width) * s + desc.OffsetX;
 			quad.Clip[3] = (c.Y + c.Height) * s + desc.OffsetY;
-			const bool empty = std::max(quad.Rect[0], quad.Clip[0]) >= std::min(quad.Rect[2], quad.Clip[2]) ||
+			const bool sheared = source.Shear != 0.0f && source.Kind != UI::UiPaintKind::Solid;
+			const bool empty = (!sheared && std::max(quad.Rect[0], quad.Clip[0]) >= std::min(quad.Rect[2], quad.Clip[2])) ||
 				std::max(quad.Rect[1], quad.Clip[1]) >= std::min(quad.Rect[3], quad.Clip[3]);
 
 			if (empty)
@@ -101,10 +104,25 @@ namespace Swim::Render::Ui
 				++local.Glyphs;
 				break;
 			}
+			case UI::UiPaintKind::ColorGlyph:
+			{
+				if (source.AtlasPage >= desc.AtlasTextures.size() || source.Uv.Width <= 0.0f)
+				{
+					++local.Culled;
+					continue;
+				}
+
+				quad.Kind = UiQuadColorGlyph;
+				quad.Texture = desc.AtlasTextures[source.AtlasPage];
+				quad.Sampler = desc.AtlasPointSampler;
+				++local.Glyphs;
+				break;
+			}
 			case UI::UiPaintKind::Image:
 				quad.Kind = UiQuadImage;
 				quad.Texture = source.Texture;
 				quad.Sampler = source.Sampler;
+				quad.Blend = source.Blend == UI::UiBlend::Invert ? UiQuadBlendInvert : UiQuadBlendNormal;
 				++local.Images;
 				break;
 			default:
@@ -119,6 +137,12 @@ namespace Swim::Render::Ui
 				break;
 			}
 
+			if (source.Shear != 0.0f && quad.Kind != UiQuadSolid)
+			{
+				quad.Radius = source.Shear;
+				quad.Border = source.ShearPivotY * s + desc.OffsetY;
+			}
+
 			quads.push_back(quad);
 		}
 
@@ -128,6 +152,23 @@ namespace Swim::Render::Ui
 		}
 
 		return quads;
+	}
+
+	std::vector<DrawRun> BuildDrawRuns(std::span<const GpuUiQuad> quads)
+	{
+		std::vector<DrawRun> runs;
+
+		for (std::uint32_t i = 0; i < quads.size(); ++i)
+		{
+			if (runs.empty() || runs.back().Blend != quads[i].Blend)
+			{
+				runs.push_back({ i, 0, quads[i].Blend });
+			}
+
+			++runs.back().Count;
+		}
+
+		return runs;
 	}
 
 	GpuUiDrawConstants BuildDrawConstants(std::uint32_t width, std::uint32_t height, const UiCompositionSettings& settings, float opacity)
@@ -185,7 +226,7 @@ namespace Swim::Render::Ui
 
 	float SrgbOetf(float linear)
 	{
-		return linear <= 0.0031308f ? 12.92f * linear : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+		return ::Engine::LinearToSrgb(linear);
 	}
 
 	float PqOetf(float nits)
@@ -199,6 +240,11 @@ namespace Swim::Render::Ui
 	{
 		return { 0.6274040f * c[0] + 0.3292820f * c[1] + 0.0433136f * c[2], 0.0690970f * c[0] + 0.9195400f * c[1] + 0.0113612f * c[2],
 			0.0163916f * c[0] + 0.0880132f * c[1] + 0.8955950f * c[2] };
+	}
+
+	float SrgbEotf(float encoded)
+	{
+		return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
 	}
 
 	float Median(float r, float g, float b)
@@ -217,14 +263,33 @@ namespace Swim::Render::Ui
 
 	Float4 ShadeQuad(const GpuUiQuad& q, float px, float py, const TextureSampler& sample, const Footprint* footprint)
 	{
-		const float x0 = std::max(q.Rect[0], q.Clip[0]);
 		const float y0 = std::max(q.Rect[1], q.Clip[1]);
-		const float x1 = std::min(q.Rect[2], q.Clip[2]);
 		const float y1 = std::min(q.Rect[3], q.Clip[3]);
 
-		if (!(px >= x0 && px < x1 && py >= y0 && py < y1))
+		if (q.Kind != UiQuadSolid && q.Radius != 0.0f)
 		{
-			return {};
+			// Sheared: clipped horizontally here, then shaded at the unsheared point.
+			if (!(px >= q.Clip[0] && px < q.Clip[2]))
+			{
+				return {};
+			}
+
+			px -= q.Radius * (q.Border - py);
+
+			if (!(px >= q.Rect[0] && px < q.Rect[2] && py >= y0 && py < y1))
+			{
+				return {};
+			}
+		}
+		else
+		{
+			const float x0 = std::max(q.Rect[0], q.Clip[0]);
+			const float x1 = std::min(q.Rect[2], q.Clip[2]);
+
+			if (!(px >= x0 && px < x1 && py >= y0 && py < y1))
+			{
+				return {};
+			}
 		}
 
 		const Float4 color{ q.Color[0], q.Color[1], q.Color[2], q.Color[3] };
@@ -241,6 +306,14 @@ namespace Swim::Render::Ui
 				: q.PixelRange;
 			const float coverage = Saturate(range * (Median(msd[0], msd[1], msd[2]) - 0.5f) + 0.5f);
 			return Scale(color, coverage);
+		}
+
+		if (q.Kind == UiQuadColorGlyph)
+		{
+			const auto texel = sample(q.Texture, q.Sampler, u, v);
+			const float a = texel[3];
+			return { SrgbEotf(texel[0]) * a * color[0], SrgbEotf(texel[1]) * a * color[1], SrgbEotf(texel[2]) * a * color[2],
+				a * color[3] };
 		}
 
 		if (q.Kind == UiQuadImage)
@@ -328,14 +401,35 @@ namespace Swim::Render::Ui
 			source[3] + destination[3] * keep };
 	}
 
+	Float4 BlendInvert(const Float4& destination, const Float4& source)
+	{
+		Float4 result;
+
+		for (int c = 0; c < 3; ++c)
+		{
+			result[c] = source[c] * (1.0f - destination[c]) + destination[c] * (1.0f - source[c]);
+		}
+
+		result[3] = source[3] + destination[3] * (1.0f - source[3]);
+		return result;
+	}
+
 	void Rasterize(Canvas& canvas, std::span<const GpuUiQuad> quads, const GpuUiDrawConstants& constants, const TextureSampler& sample)
 	{
 		for (const auto& quad : quads)
 		{
-			const float x0 = std::max(quad.Rect[0], quad.Clip[0]);
+			float x0 = std::max(quad.Rect[0], quad.Clip[0]);
 			const float y0 = std::max(quad.Rect[1], quad.Clip[1]);
-			const float x1 = std::min(quad.Rect[2], quad.Clip[2]);
+			float x1 = std::min(quad.Rect[2], quad.Clip[2]);
 			const float y1 = std::min(quad.Rect[3], quad.Clip[3]);
+
+			if (quad.Kind != UiQuadSolid && quad.Radius != 0.0f)
+			{
+				const float a = quad.Radius * (quad.Border - y0);
+				const float b = quad.Radius * (quad.Border - y1);
+				x0 = std::max(quad.Rect[0] + std::min(a, b), quad.Clip[0]);
+				x1 = std::min(quad.Rect[2] + std::max(a, b), quad.Clip[2]);
+			}
 
 			if (x0 >= x1 || y0 >= y1)
 			{
@@ -354,7 +448,8 @@ namespace Swim::Render::Ui
 				{
 					const auto shaded = ShadeQuad(quad, float(x) + 0.5f, float(y) + 0.5f, sample);
 					auto& texel = canvas.Texels[std::size_t(y) * canvas.Width + std::size_t(x)];
-					texel = Blend(texel, Encode(shaded, constants));
+					const auto encoded = Encode(shaded, constants);
+					texel = quad.Blend == UiQuadBlendInvert ? BlendInvert(texel, encoded) : Blend(texel, encoded);
 				}
 			}
 		}
@@ -453,7 +548,9 @@ namespace Swim::Render::Ui
 				footprint.U = std::abs(du) * s->FootprintX;
 				footprint.V = std::abs(dv) * s->FootprintY;
 				const auto shaded = ShadeQuad(quad, s->X, s->Y, sample, &footprint);
-				canvas.Texels[i] = Blend(canvas.Texels[i], Encode(shaded, constants));
+				const auto encoded = Encode(shaded, constants);
+				canvas.Texels[i] =
+					quad.Blend == UiQuadBlendInvert ? BlendInvert(canvas.Texels[i], encoded) : Blend(canvas.Texels[i], encoded);
 			}
 		}
 	}

@@ -5,6 +5,31 @@
 namespace Swim::Render
 {
 
+	// Remembers the last compiled shape: a graph of the same shape (passes, their uses and
+	// dependencies, resource kinds, sizes, formats and usages, import and export states)
+	// reuses its schedule, barriers and allocations instead of compiling again, and lets the
+	// executor keep its transient allocations and descriptor tables. A resize, a settings
+	// toggle or a feature added or removed changes the shape and compiles once.
+	class RenderGraphCompileCache
+	{
+
+	  public:
+
+		std::uint64_t GetHits() const { return hits; }
+
+		std::uint64_t GetMisses() const { return misses; }
+
+	  private:
+
+		friend class RenderGraph;
+		std::vector<std::uint64_t> key;
+		std::vector<std::uint64_t> scratch;
+		std::shared_ptr<const Internal::GraphShape> shape;
+		std::uint64_t hits = 0;
+		std::uint64_t misses = 0;
+
+	};
+
 	// Single graphics-queue scheduler: pass Type describes commands, not a dedicated
 	// queue. Imports must already belong to that family (WSI sharing is RHI-owned).
 	// Write initializes the entire declared range. Loading/preserving contents needs
@@ -61,6 +86,10 @@ namespace Swim::Render
 		void AddDependency(GraphPass pass, GraphPass prerequisite);
 
 		CompiledRenderGraph Compile() const;
+
+		// Compiles through the cache, moving the definition into the result (no copy): the
+		// graph is empty afterwards and is not used again.
+		CompiledRenderGraph Compile(RenderGraphCompileCache& cache);
 
 	  private:
 

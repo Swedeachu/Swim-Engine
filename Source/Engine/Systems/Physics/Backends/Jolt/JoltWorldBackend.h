@@ -58,6 +58,9 @@ namespace Engine
 
 		bool AddForce(BodyHandle body, const glm::vec3& force, ForceMode mode = ForceMode::Force, bool autowake = true) override;
 
+		bool AddForceAtPosition(BodyHandle body, const glm::vec3& force, const glm::vec3& position, ForceMode mode = ForceMode::Force,
+			bool autowake = true) override;
+
 		bool SetLinearVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake = true) override;
 
 		bool SetAngularVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake = true) override;
@@ -65,6 +68,8 @@ namespace Engine
 		bool GetLinearVelocity(BodyHandle body, glm::vec3& velocity) const override;
 
 		bool GetAngularVelocity(BodyHandle body, glm::vec3& velocity) const override;
+
+		bool GetMass(BodyHandle body, float& mass) const override;
 
 		void BeginSimulation(float dt) override;
 

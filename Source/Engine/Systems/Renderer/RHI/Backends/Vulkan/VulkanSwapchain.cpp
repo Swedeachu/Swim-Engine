@@ -15,6 +15,14 @@ namespace Swim::RhiVulkan
 	{
 		if (swapchain.swapchain != VK_NULL_HANDLE && state->PresentationQueue != VK_NULL_HANDLE && !state->Diagnostics->IsLost())
 		{
+			try
+			{
+				state->DrainSubmissions();
+			}
+			catch (...)
+			{
+			}
+
 			std::scoped_lock lock(*state->PresentationQueueMutex);
 			ObserveVulkanResult(*state, state->Dispatch.vkQueueWaitIdle(state->PresentationQueue), "vkQueueWaitIdle (swapchain teardown)");
 		}

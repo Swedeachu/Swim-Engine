@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 namespace Engine::Tests
 {
@@ -608,6 +609,227 @@ namespace Engine::Tests
 				SWIM_CHECK(event.BodyA != removed && event.BodyB != removed);
 			}
 		}
+	}
+
+	// A dynamic box above water (surface y = 5 over the contract floor, top y = 0).
+	inline BodyHandle CreateFloatingBox(PhysicsWorld& world, PhysicsMaterialHandle material, const glm::vec3& halfExtents, float mass,
+		const PhysicsPose& pose)
+	{
+		ShapeDesc shapeDesc{};
+		shapeDesc.Type = ShapeType::Box;
+		shapeDesc.Box.HalfExtents = halfExtents;
+		const ShapeHandle shape = world.CreateShape(shapeDesc, material);
+		SWIM_REQUIRE(static_cast<bool>(shape));
+		BodyDesc desc{};
+		desc.Shape = shape;
+		desc.Pose = pose;
+		desc.Mass = mass;
+		desc.Collision.Layer = 8u;
+		const BodyHandle body = world.CreateBody(desc);
+		SWIM_REQUIRE(static_cast<bool>(body));
+		SWIM_REQUIRE(world.SetBuoyancy(body, BuoyancyDesc::Box(halfExtents)));
+		return body;
+	}
+
+	inline FluidVolumeDesc ContractWater()
+	{
+		FluidVolumeDesc water;
+		water.SurfaceHeight = 5.0f;
+		water.BoundsMin = glm::vec3(-8.0f, 0.0f, -8.0f);
+		water.BoundsMax = glm::vec3(8.0f, 20.0f, 8.0f);
+		return water;
+	}
+
+	inline float BodyHeight(PhysicsWorld& world, BodyHandle body)
+	{
+		PhysicsPose pose;
+		SWIM_REQUIRE(world.GetBodyPose(body, pose));
+		return pose.Position.y;
+	}
+
+	// Buoyancy (PhysicsWorld, above the backend): bodies float where they displace their own
+	// weight, sink when denser than the fluid, right themselves, are slowed by drag, take
+	// thrown impulses, and nothing happens outside the volume.
+	inline void RunPhysicsBuoyancyContract(IPhysicsBackend& backend)
+	{
+		constexpr float Dt = 1.0f / 60.0f;
+		PhysicsContractWorld contract(backend);
+		PhysicsWorld& world = contract.Get();
+		const auto water = world.AddFluidVolume(ContractWater());
+		SWIM_REQUIRE(static_cast<bool>(water));
+		const glm::vec3 cube(0.5f);
+		// 1 m^3 cubes: half as dense as water, a quarter, and half again denser.
+		const BodyHandle half = CreateFloatingBox(world, contract.Material(), cube, 500.0f, { glm::vec3(4.0f, 7.0f, 4.0f) });
+		const BodyHandle quarter = CreateFloatingBox(world, contract.Material(), cube, 250.0f, { glm::vec3(-4.0f, 6.0f, 4.0f) });
+		const BodyHandle heavy = CreateFloatingBox(world, contract.Material(), cube, 1500.0f, { glm::vec3(4.0f, 6.0f, -4.0f) });
+		// Outside the volume: falls as if there were no water.
+		const BodyHandle dry = CreateFloatingBox(world, contract.Material(), cube, 500.0f, { glm::vec3(20.0f, 7.0f, 0.0f) });
+		// A plank, tipped 40 degrees: it ends face up.
+		const glm::quat tilt = glm::angleAxis(glm::radians(40.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		const BodyHandle plank =
+			CreateFloatingBox(world, contract.Material(), glm::vec3(1.0f, 0.15f, 0.5f), 150.0f, { glm::vec3(-4.0f, 5.5f, -4.0f), tilt });
+		SWIM_CHECK(!world.SetBuoyancy(dry, BuoyancyDesc{ 0.0f }));
+		SWIM_CHECK(!world.SetBuoyancy(BodyHandle{}, BuoyancyDesc::Box(cube)));
+
+		for (int i = 0; i < 30; ++i)
+		{
+			StepPhysics(world, Dt);
+		}
+
+		SWIM_CHECK(world.GetBuoyancyState(dry)->Submerged == 0.0f && world.GetBuoyancyState(dry)->Volume == -1);
+		SWIM_CHECK(world.GetBuoyancyState(half)->Volume == 0);
+
+		for (int i = 0; i < 600; ++i)
+		{
+			StepPhysics(world, Dt);
+		}
+
+		SWIM_CHECK(NearlyEqual(BodyHeight(world, half), 5.0f, 0.05f));
+		SWIM_CHECK(NearlyEqual(world.GetBuoyancyState(half)->Submerged, 0.5f, 0.05f));
+		SWIM_CHECK(NearlyEqual(world.GetBuoyancyState(half)->Force.y, 500.0f * 9.81f, 400.0f));
+		// A quarter as dense: a quarter under, and settled as quickly (drag scales with density).
+		SWIM_CHECK(NearlyEqual(BodyHeight(world, quarter), 5.25f, 0.05f));
+		SWIM_CHECK(NearlyEqual(world.GetBuoyancyState(quarter)->Submerged, 0.25f, 0.03f));
+		SWIM_CHECK(NearlyEqual(BodyHeight(world, heavy), 0.5f, 0.05f)); // On the floor.
+		SWIM_CHECK(BodyHeight(world, dry) < -10.0f);					  // Fell past the floor's edge.
+		PhysicsPose plankPose;
+		SWIM_REQUIRE(world.GetBodyPose(plank, plankPose));
+		SWIM_CHECK(std::abs((plankPose.Rotation * glm::vec3(0.0f, 1.0f, 0.0f)).y) > 0.98f);
+
+		// Thrown: an off-centre impulse sets it moving and spinning; the water slows both.
+		SWIM_REQUIRE(world.AddForceAtPosition(half, glm::vec3(2000.0f, 0.0f, 0.0f), glm::vec3(4.0f, 5.0f, 4.5f), ForceMode::Impulse));
+		SWIM_CHECK(!world.AddForceAtPosition(half, glm::vec3(1.0f), glm::vec3(0.0f), ForceMode::VelocityChange));
+		StepPhysics(world, Dt);
+		glm::vec3 velocity(0.0f), spin(0.0f);
+		SWIM_REQUIRE(world.GetLinearVelocity(half, velocity) && world.GetAngularVelocity(half, spin));
+		const float thrown = velocity.x;
+		const float thrownSpin = glm::length(spin);
+		SWIM_CHECK(thrown > 3.0f && thrownSpin > 1.0f);
+
+		for (int i = 0; i < 180; ++i)
+		{
+			StepPhysics(world, Dt);
+		}
+
+		SWIM_REQUIRE(world.GetLinearVelocity(half, velocity) && world.GetAngularVelocity(half, spin));
+		SWIM_CHECK(std::abs(velocity.x) < 0.35f * thrown && glm::length(spin) < 0.35f * thrownSpin);
+
+		world.ClearBuoyancy(quarter);
+		SWIM_CHECK(world.GetBuoyancyState(quarter) == nullptr);
+		world.DestroyBody(half);
+		SWIM_CHECK(world.GetBuoyancyState(half) == nullptr);
+		world.RemoveFluidVolume(water);
+		StepPhysics(world, Dt);
+		SWIM_CHECK(world.GetBuoyancyState(plank)->Volume == -1);
+	}
+
+	inline float BoxTop(PhysicsWorld& world, BodyHandle body, const glm::vec3& halfExtents)
+	{
+		PhysicsPose pose;
+		SWIM_REQUIRE(world.GetBodyPose(body, pose));
+		const glm::mat3 rotation = glm::mat3_cast(pose.Rotation);
+		return pose.Position.y + std::abs(rotation[0].y) * halfExtents.x + std::abs(rotation[1].y) * halfExtents.y +
+			std::abs(rotation[2].y) * halfExtents.z;
+	}
+
+	// Floaters: a set density floats a body whatever its mass, and NeverSink keeps the top of a
+	// body that would sink at the surface, flat or on waves, even when dropped in from above.
+	inline void RunPhysicsFloaterContract(IPhysicsBackend& backend)
+	{
+		constexpr float Dt = 1.0f / 60.0f;
+		const glm::vec3 cube(0.5f);
+		{
+			PhysicsContractWorld contract(backend);
+			PhysicsWorld& world = contract.Get();
+			world.AddFluidVolume(ContractWater());
+			// 3000 kg cubes would sink in water.
+			const BodyHandle floater = CreateFloatingBox(world, contract.Material(), cube, 3000.0f, { glm::vec3(4.0f, 7.0f, 4.0f) });
+			SWIM_REQUIRE(world.SetBuoyancy(floater, BuoyancyDesc::Floater(cube)));
+			const BodyHandle anchor = CreateFloatingBox(world, contract.Material(), cube, 3000.0f, { glm::vec3(-4.0f, 5.0f, 4.0f) });
+			auto top = BuoyancyDesc::Box(cube);
+			top.NeverSink = true;
+			SWIM_REQUIRE(world.SetBuoyancy(anchor, top));
+			const BodyHandle dropped = CreateFloatingBox(world, contract.Material(), cube, 3000.0f, { glm::vec3(4.0f, 10.0f, -4.0f) });
+			SWIM_REQUIRE(world.SetBuoyancy(dropped, BuoyancyDesc::Floater(cube, 250.0f)));
+			auto bad = BuoyancyDesc::Floater(cube);
+			bad.Density = -1.0f;
+			SWIM_CHECK(!world.SetBuoyancy(floater, bad));
+			float lowest = 1.0e9f;
+
+			for (int i = 0; i < 480; ++i)
+			{
+				StepPhysics(world, Dt);
+				lowest = std::min({ lowest, BoxTop(world, floater, cube), BoxTop(world, anchor, cube), BoxTop(world, dropped, cube) });
+			}
+
+			SWIM_CHECK(lowest > 5.0f - 1.0e-3f);
+			SWIM_CHECK(NearlyEqual(BodyHeight(world, floater), 5.0f, 0.05f));
+			SWIM_CHECK(NearlyEqual(world.GetBuoyancyState(floater)->Submerged, 0.5f, 0.05f));
+			SWIM_CHECK(NearlyEqual(BodyHeight(world, anchor), 4.5f, 0.02f));
+			SWIM_CHECK(NearlyEqual(BodyHeight(world, dropped), 5.25f, 0.05f));
+		}
+
+		PhysicsContractWorld contract(backend);
+		PhysicsWorld& world = contract.Get();
+		auto water = ContractWater();
+		water.Surface = [](float x, float, double time)
+		{
+			const float phase = 0.8f * x - 2.0f * static_cast<float>(time);
+			return FluidSample{ 5.0f + 0.4f * std::sin(phase), glm::vec3(0.4f * std::sin(phase), 0.8f * std::cos(phase), 0.0f) };
+		};
+		world.AddFluidVolume(water);
+		const BodyHandle rider = CreateFloatingBox(world, contract.Material(), cube, 3000.0f, { glm::vec3(3.0f, 5.0f, 3.0f) });
+		SWIM_REQUIRE(world.SetBuoyancy(rider, BuoyancyDesc::Floater(cube)));
+		float worst = 1.0e9f;
+
+		for (int i = 0; i < 360; ++i)
+		{
+			StepPhysics(world, Dt);
+			PhysicsPose pose;
+			SWIM_REQUIRE(world.GetBodyPose(rider, pose));
+			const float surface = 5.0f + 0.4f * std::sin(0.8f * pose.Position.x - 2.0f * static_cast<float>(world.GetSimulationTime()));
+			worst = std::min(worst, BoxTop(world, rider, cube) - surface);
+		}
+
+		SWIM_CHECK(worst > -1.0e-3f);
+	}
+
+	// A floating cube on travelling waves: its heights every half second, for comparing
+	// backends (buoyancy runs above the backend, so they must agree).
+	inline std::vector<float> RunPhysicsWaveRide(IPhysicsBackend& backend)
+	{
+		PhysicsContractWorld contract(backend);
+		PhysicsWorld& world = contract.Get();
+		auto water = ContractWater();
+		water.Surface = [](float x, float, double time)
+		{
+			const float phase = 0.8f * x - 2.0f * static_cast<float>(time);
+			return FluidSample{ 5.0f + 0.4f * std::sin(phase), glm::vec3(0.4f * std::sin(phase), 0.0f, 0.0f) };
+		};
+		world.AddFluidVolume(water);
+		const BodyHandle box = CreateFloatingBox(world, contract.Material(), glm::vec3(0.4f), 256.0f, { glm::vec3(3.0f, 5.0f, 3.0f) });
+		std::vector<float> heights;
+		float low = 1.0e9f, high = -1.0e9f;
+
+		for (int i = 1; i <= 480; ++i)
+		{
+			StepPhysics(world, 1.0f / 60.0f);
+
+			if (i > 120)
+			{
+				low = std::min(low, BodyHeight(world, box));
+				high = std::max(high, BodyHeight(world, box));
+			}
+
+			if (i % 30 == 0)
+			{
+				heights.push_back(BodyHeight(world, box));
+			}
+		}
+
+		SWIM_CHECK(high - low > 0.3f); // It bobs with the 0.8 m crest-to-trough waves.
+		SWIM_CHECK(low > 4.0f && high < 6.0f);
+		return heights;
 	}
 
 } // namespace Engine::Tests

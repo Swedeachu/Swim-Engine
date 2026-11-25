@@ -15,6 +15,7 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanDeviceLoss.h"
 
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanPipelineCache.h"
+#include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanSubmissionWorker.h"
 
 #include <array>
 #include <map>
@@ -83,6 +84,17 @@ namespace Swim::RhiVulkan
 		std::vector<VkQueueFamilyProperties> QueueProperties;
 		VkQueue PresentationQueue = VK_NULL_HANDLE;
 		std::shared_ptr<std::mutex> PresentationQueueMutex;
+		// Set: every submission and present runs on this thread, in order (Device::SetSubmissionThread).
+		std::unique_ptr<VulkanSubmissionWorker> SubmitWorker;
+
+		// Waits for the submission thread's queued work (not from that thread).
+		void DrainSubmissions() const
+		{
+			if (SubmitWorker && !SubmitWorker->IsWorkerThread())
+			{
+				SubmitWorker->Drain();
+			}
+		}
 		VmaVulkanFunctions AllocatorFunctions{};
 		VmaAllocator Allocator = nullptr;
 		std::atomic<std::uint32_t> SamplerCount{ 0 };
@@ -90,10 +102,13 @@ namespace Swim::RhiVulkan
 		// type/count pairs): descriptor tables created every frame reuse them instead of a
 		// vkCreateDescriptorPool/vkDestroyDescriptorPool pair each.
 		mutable std::mutex DescriptorPoolMutex;
+		// Counts destroyed pipeline layouts (Device::GetPipelineLayoutGeneration).
+		std::atomic<std::uint64_t> PipelineLayoutGeneration{ 0 };
 		mutable std::map<std::vector<std::uint32_t>, std::vector<VkDescriptorPool>> FreeDescriptorPools;
 
 		~VulkanDeviceState()
 		{
+			SubmitWorker.reset();
 			RetireLostVulkanDevice(*this);
 
 			if (Device.device != VK_NULL_HANDLE && Dispatch.vkDestroyDescriptorPool != nullptr)

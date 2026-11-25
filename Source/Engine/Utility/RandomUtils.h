@@ -1,10 +1,22 @@
 #pragma once
 
-#include <random>
+#include <cstdint>
 #include <limits>
+#include <random>
+
+#include <glm/glm.hpp>
 
 namespace Engine
 {
+
+	// Deterministic 32-bit hash of an integer grid coordinate (value noise, dithering). The
+	// same on every run and platform.
+	inline std::uint32_t HashCoords(std::int32_t x, std::int32_t y, std::uint32_t seed = 0)
+	{
+		std::uint32_t h = static_cast<std::uint32_t>(x) * 374761393u + static_cast<std::uint32_t>(y) * 668265263u + seed * 2246822519u;
+		h = (h ^ (h >> 13)) * 1274126177u;
+		return h ^ (h >> 16);
+	}
 
 	// Random float in [min, max] inclusive
 	inline float RandFloat(float min, float max)

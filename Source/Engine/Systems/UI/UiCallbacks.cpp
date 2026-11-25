@@ -27,7 +27,7 @@ namespace Swim::UI
 
 	void UiDocument::On(UiNodeId node, UiEventKind kind, std::function<void(const UiEvent&)> handler)
 	{
-		if (kind > UiEventKind::ContextMenu)
+		if (kind > UiEventKind::DragEnd)
 		{
 			throw std::invalid_argument("Invalid UI callback event kind");
 		}

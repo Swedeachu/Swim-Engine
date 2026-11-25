@@ -108,6 +108,7 @@ namespace
 			SWIM_CHECK_EQUAL(offsets.at("Row"), std::uint32_t(offsetof(E, Row)));
 			SWIM_CHECK_EQUAL(offsets.at("SizeTimes"), std::uint32_t(offsetof(E, SizeTimes)));
 			SWIM_CHECK_EQUAL(offsets.at("ColorValues"), std::uint32_t(offsetof(E, ColorValues)));
+			SWIM_CHECK_EQUAL(offsets.at("UvRect"), std::uint32_t(offsetof(E, UvRect)));
 		}
 
 		if (const auto* frame = Parameter(program, "Frame"))

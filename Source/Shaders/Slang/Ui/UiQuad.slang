@@ -23,28 +23,40 @@ struct VertexOutput
 	nointerpolation uint Quad : TEXCOORD2;
 };
 
-// gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*): every draw of this program
-// starts at vertex, index offset and instance 0, so they equal SV_VertexID/SV_InstanceID
-// without the DrawParameters capability (absent on some devices, e.g. SwiftShader).
+// gl_VertexIndex / gl_InstanceIndex directly (SV_Vulkan*), without the DrawParameters
+// capability (absent on some devices, e.g. SwiftShader): draws start at vertex 0, and
+// gl_InstanceIndex includes the first instance, so it is the quad index of every blend run.
 [shader("vertex")]
 VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_VulkanInstanceID)
 {
 	const float4 rect = Quads[instanceId].Rect;
 	const float4 clip = Quads[instanceId].Clip;
 	const float4 uv = Quads[instanceId].Uv;
-	const float2 low = max(rect.xy, clip.xy);
-	const float2 high = max(min(rect.zw, clip.zw), low); // Empty clips collapse to a point.
+	// Sheared glyphs (Ui::ShadeQuad): clipped vertically here, horizontally per fragment.
+	const bool sheared = Quads[instanceId].Kind != UiQuadSolid && Quads[instanceId].Radius != 0.0;
+	float2 low = max(rect.xy, clip.xy);
+	float2 high = max(min(rect.zw, clip.zw), low); // Empty clips collapse to a point.
+	if (sheared)
+	{
+		low.x = rect.x;
+		high.x = max(rect.z, rect.x);
+	}
 	// Corners {0, 1, 2, 2, 1, 3} (one nibble per vertex): bit 0 selects x, bit 1 selects y.
 	const uint corner = (0x312210u >> (vertexId * 4u)) & 0xFu;
 	const float2 t = float2(float(corner & 1u), float(corner >> 1u));
 	const float2 p = lerp(low, high, t);
 	const float2 s = (p - rect.xy) / max(rect.zw - rect.xy, 1e-6);
-	const float4 v = float4(p, 0.0, 1.0);
+	float2 drawn = p;
+	if (sheared)
+	{
+		drawn.x += Quads[instanceId].Radius * (Quads[instanceId].Border - p.y);
+	}
+	const float4 v = float4(drawn, 0.0, 1.0);
 	VertexOutput output;
 	output.Position = float4(dot(Draw.ClipFromCanvas[0], v), dot(Draw.ClipFromCanvas[1], v), dot(Draw.ClipFromCanvas[2], v),
 		dot(Draw.ClipFromCanvas[3], v));
 	output.Uv = lerp(uv.xy, uv.zw, s);
-	output.Canvas = p;
+	output.Canvas = drawn;
 	output.Quad = instanceId;
 	return output;
 }
@@ -66,6 +78,13 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 		const float range = world ? max(0.5 * (q.UnitRange / uvWidth.x + q.UnitRange / uvWidth.y), 1.0) : q.PixelRange;
 		color = q.Color * saturate(range * (UiMedian(msd) - 0.5) + 0.5);
 	}
+	else if (q.Kind == UiQuadColorGlyph)
+	{
+		const float4 texel =
+			Textures[NonUniformResourceIndex(q.Texture)].Sample(Samplers[NonUniformResourceIndex(q.Sampler)], input.Uv);
+		const float3 linear = float3(UiSrgbEotf(texel.r), UiSrgbEotf(texel.g), UiSrgbEotf(texel.b));
+		color = q.Color * float4(linear * texel.a, texel.a);
+	}
 	else if (q.Kind == UiQuadImage)
 	{
 		color = q.Color * Textures[NonUniformResourceIndex(q.Texture)].Sample(Samplers[NonUniformResourceIndex(q.Sampler)], input.Uv);
@@ -73,6 +92,10 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 	else
 	{
 		color = UiShadeSolid(q, p, world ? max(0.5 * (canvasWidth.x + canvasWidth.y), 1e-6) : 1.0);
+	}
+	if (q.Kind != UiQuadSolid && q.Radius != 0.0 && !(p.x >= q.Clip.x && p.x < q.Clip.z))
+	{
+		color = float4(0.0, 0.0, 0.0, 0.0);
 	}
 	return UiEncode(color * Draw.Opacity, Draw.Encoding, Draw.WhiteScale);
 }

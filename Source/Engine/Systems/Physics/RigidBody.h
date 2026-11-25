@@ -55,6 +55,11 @@ namespace Engine
 		Collider collider;
 		CollisionLayer collision{};
 
+		// Floats in the world's fluid volumes (PhysicsWorld::AddFluidVolume), displacing the
+		// collider's volume. Read when the body is (re)built.
+		bool buoyant = false;
+		float buoyancyDrag = 1.0f; // BuoyancyDesc::DragScale.
+
 		// Runtime physics identity is backend-neutral. The selected backend owns all
 		// PhysX/Jolt objects behind this generational handle.
 		BodyHandle body{};

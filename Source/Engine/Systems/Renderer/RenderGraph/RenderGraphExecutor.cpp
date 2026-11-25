@@ -42,11 +42,53 @@ namespace Swim::Render
 		// Explicitly release recorded objects before their referenced allocations.
 		state->Commands.reset();
 		state->Retained.clear();
+		state->Tables.clear();
 		state->Queries.reset();
 		state->Pool.clear();
 		state->ReadbackSlices.clear();
 		state->Upload.reset();
 		state->Readback.reset();
+	}
+
+	void RenderGraphExecutor::RecycleDescriptorTables(const CompiledRenderGraph& graph)
+	{
+		// The previous execution has completed (Wait): its tables can be rewritten. Keep them
+		// only for a graph of the same shape while no pipeline layout has been destroyed (a
+		// new layout could reuse a cached one's address).
+		const auto generation = state->Device.GetPipelineLayoutGeneration();
+		const bool keep = generation != UINT64_MAX && graph.shape == state->TablesShape && generation == state->TablesLayoutGeneration;
+
+		if (keep)
+		{
+			for (const auto& issued : state->IssuedTables)
+			{
+				const auto found = std::find_if(state->Retained.begin(), state->Retained.end(),
+					[&](const auto& object)
+					{
+						return object.get() == issued.Table;
+					});
+				auto* table = found != state->Retained.end() ? dynamic_cast<Rhi::DescriptorTable*>(found->get()) : nullptr;
+
+				if (table && !state->Tables.contains(issued.Key) && table->ReopenForWrites())
+				{
+					found->release();
+					state->Tables[issued.Key] = { issued.Layout, issued.Space, std::unique_ptr<Rhi::DescriptorTable>(table) };
+				}
+			}
+		}
+		else
+		{
+			state->Tables.clear();
+		}
+
+		state->IssuedTables.clear();
+		state->TablesShape = graph.shape;
+		state->TablesLayoutGeneration = generation;
+	}
+
+	std::size_t RenderGraphExecutor::GetCachedDescriptorTableCount() const
+	{
+		return state->Tables.size();
 	}
 
 	void RenderGraphExecutor::Wait()
@@ -69,9 +111,13 @@ namespace Swim::Render
 		state->Commands.reset();
 		state->CommandPool->Reset();
 		state->Retained.clear();
+		state->IssuedTables.clear();
+		state->Tables.clear();
+		state->TablesShape.reset();
 		state->Queries.reset();
 		state->Resources.clear();
 		state->Pool.clear();
+		state->PoolShape.reset();
 		state->Ranges.clear();
 		state->ReadbackSlices.clear();
 		state->Upload.reset();
@@ -142,6 +188,7 @@ namespace Swim::Render
 
 		state->Commands.reset();
 		state->CommandPool->Reset();
+		RecycleDescriptorTables(graph);
 		state->Retained.clear();
 		// The timestamp pool is kept while it is large enough (it is reset in the command list).
 		state->HasResult = false;
@@ -151,8 +198,11 @@ namespace Swim::Render
 
 		std::vector<Internal::GraphPooledResource> nextPool;
 		std::vector<Rhi::RhiObject*> slots;
+		// Same shape as last time: the pool already holds this graph's transients, in order.
+		const bool samePool = graph.shape == state->PoolShape;
+		std::size_t pooled = 0;
 
-		for (auto r : graph.allocations)
+		for (auto r : graph.shape->Allocations)
 		{
 			const auto& desc = graph.definition->Resources[r];
 
@@ -165,6 +215,12 @@ namespace Swim::Render
 			if (desc.Staging != Internal::GraphStaging::None)
 			{
 				slots.push_back(nullptr); // Bound to an arena suballocation by StageBuffers.
+				continue;
+			}
+
+			if (samePool)
+			{
+				slots.push_back(state->Pool[pooled++].Object.get());
 				continue;
 			}
 
@@ -203,13 +259,17 @@ namespace Swim::Render
 			nextPool.push_back(std::move(entry));
 		}
 
-		state->Pool = std::move(nextPool); // Drop incompatible old allocations, bounded by the current graph.
-
-		for (std::uint32_t r = 0; r < graph.lifetimes.size(); ++r)
+		if (!samePool)
 		{
-			if (graph.lifetimes[r].Allocation != GraphResourceLifetime::Unused)
+			state->Pool = std::move(nextPool); // Drop incompatible old allocations, bounded by the current graph.
+			state->PoolShape = graph.shape;
+		}
+
+		for (std::uint32_t r = 0; r < graph.shape->Lifetimes.size(); ++r)
+		{
+			if (graph.shape->Lifetimes[r].Allocation != GraphResourceLifetime::Unused)
 			{
-				state->Resources[r] = slots[graph.lifetimes[r].Allocation];
+				state->Resources[r] = slots[graph.shape->Lifetimes[r].Allocation];
 			}
 		}
 
@@ -219,18 +279,18 @@ namespace Swim::Render
 		lastTimings.Stage = ms(mark, Clock::now());
 		mark = Clock::now();
 
-		if (graph.schedule.empty() || !state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
+		if (graph.shape->Schedule.empty() || !state->Device.GetQueue(Rhi::QueueType::Graphics).GetTimestampInfo().IsSupported())
 		{
 			state->Queries.reset();
 		}
 		else
 		{
-			if (graph.schedule.size() > UINT32_MAX / 2)
+			if (graph.shape->Schedule.size() > UINT32_MAX / 2)
 			{
 				throw std::overflow_error("RenderGraph timestamp count overflow");
 			}
 
-			const auto needed = static_cast<std::uint32_t>(graph.schedule.size() * 2);
+			const auto needed = static_cast<std::uint32_t>(graph.shape->Schedule.size() * 2);
 
 			if (!state->Queries || state->Queries->GetDesc().Count < needed)
 			{
@@ -266,7 +326,7 @@ namespace Swim::Render
 
 			std::uint32_t query = 0;
 
-			for (const auto& scheduled : graph.schedule)
+			for (const auto& scheduled : graph.shape->Schedule)
 			{
 				const auto& pass = graph.definition->Passes[scheduled.Pass];
 				state->Commands->BeginDebugLabel(pass.Name);
@@ -295,7 +355,7 @@ namespace Swim::Render
 				state->Commands->EndDebugLabel();
 			}
 
-			for (const auto& barrier : graph.finalBarriers)
+			for (const auto& barrier : graph.shape->FinalBarriers)
 			{
 				RecordBarrier(barrier);
 			}
@@ -386,16 +446,16 @@ namespace Swim::Render
 		}
 
 		std::vector<GraphPassTiming> result;
-		std::vector<Rhi::TimestampResult> ticks(state->Graph.schedule.size() * 2);
+		std::vector<Rhi::TimestampResult> ticks(state->Graph.shape->Schedule.size() * 2);
 
 		if (state->Queries && state->Queries->ReadTimestamps(0, ticks) != Rhi::QueryReadStatus::Ready)
 		{
 			throw std::runtime_error("RenderGraph timestamps unavailable after completion");
 		}
 
-		for (std::size_t i = 0; i < state->Graph.schedule.size(); ++i)
+		for (std::size_t i = 0; i < state->Graph.shape->Schedule.size(); ++i)
 		{
-			GraphPassTiming timing{ state->Graph.definition->Passes[state->Graph.schedule[i].Pass].Name, {}, {} };
+			GraphPassTiming timing{ state->Graph.definition->Passes[state->Graph.shape->Schedule[i].Pass].Name, {}, {} };
 
 			if (state->Queries)
 			{

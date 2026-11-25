@@ -271,7 +271,7 @@ namespace Swim::Render
 				meshes = geometry.Metadata, submeshes = geometry.Submeshes, commands = resources.Commands, records = resources.DrawRecords,
 				counts = resources.Counts, stats = resources.Stats, label = name](RenderCommandContext& c)
 			{
-				auto table = c.Device().CreateDescriptorTable({ layout, space, 0, label + " table" });
+				auto table = c.CreateDescriptorTable({ layout, space, 0, label + " table" });
 
 				if (!table)
 				{

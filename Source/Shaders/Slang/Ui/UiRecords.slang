@@ -17,7 +17,7 @@ struct UiQuad
 	uint Texture;
 	uint Sampler;
 	float UnitRange;
-	uint Reserved;
+	uint Blend; // Selects the pipeline; unused here.
 };
 
 struct UiDrawConstants
@@ -36,6 +36,7 @@ static const uint UiDrawWorld = 1u;
 static const uint UiQuadSolid = 0u;
 static const uint UiQuadGlyph = 1u;
 static const uint UiQuadImage = 2u;
+static const uint UiQuadColorGlyph = 3u;
 
 static const uint UiEncodingSrgb = 0u;
 static const uint UiEncodingLinear = 1u;
@@ -53,6 +54,12 @@ float UiRoundedBoxDistance(float2 p, float2 center, float2 halfSize, float radiu
 {
 	const float2 q = abs(p - center) - (halfSize - radius);
 	return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+}
+
+// Ui::SrgbEotf: sRGB-encoded -> linear.
+float UiSrgbEotf(float x)
+{
+	return x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4);
 }
 
 // Ui::SrgbOetf.

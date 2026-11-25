@@ -270,6 +270,15 @@ namespace Engine
 			return;
 		}
 
+		if (rigidbody.buoyant && rigidbody.type == RigidbodyType::Dynamic)
+		{
+			BuoyancyDesc buoyancy = shapeDesc.Type == ShapeType::Sphere ? BuoyancyDesc::Sphere(shapeDesc.Sphere.Radius)
+				: shapeDesc.Type == ShapeType::Capsule				   ? BuoyancyDesc::Capsule(shapeDesc.Capsule.Radius, shapeDesc.Capsule.HalfHeight)
+																	   : BuoyancyDesc::Box(shapeDesc.Box.HalfExtents);
+			buoyancy.DragScale = rigidbody.buoyancyDrag;
+			world->SetBuoyancy(body, buoyancy);
+		}
+
 		rigidbody.body = body;
 		bodyEntities[body] = entity;
 		rigidbody.dirty = false;
@@ -460,6 +469,21 @@ namespace Engine
 		if (rigidbody.type == RigidbodyType::Dynamic && rigidbody.body)
 		{
 			world->AddForce(rigidbody.body, force, mode, autowake);
+		}
+	}
+
+	void ScenePhysicsBridge::AddForceAtPosition(entt::entity entity, const glm::vec3& force, const glm::vec3& position, ForceMode mode, bool autowake)
+	{
+		if (!world || !registry.valid(entity) || !registry.any_of<Rigidbody>(entity))
+		{
+			return;
+		}
+
+		Rigidbody& rigidbody = registry.get<Rigidbody>(entity);
+
+		if (rigidbody.type == RigidbodyType::Dynamic && rigidbody.body)
+		{
+			world->AddForceAtPosition(rigidbody.body, force, position, mode, autowake);
 		}
 	}
 

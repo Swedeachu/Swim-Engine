@@ -494,7 +494,7 @@ SWIM_TEST("Render.ForwardPlus.Reference", "MotionVectorsFollowObjectAndCameraMot
 	const auto still = BuildForwardViewRecord(view, 1, 1, false);
 	SWIM_CHECK(std::equal(std::begin(still.PreviousViewProjection), std::end(still.PreviousViewProjection), view.ViewProjection.begin()));
 	SWIM_CHECK(still.Jitter[0] == 0.25f && still.Jitter[1] == -0.5f);
-	SWIM_CHECK(still.Reserved1[0] == 0.0f && still.Reserved1[1] == 0.0f);
+	SWIM_CHECK(still.Reserved0 == 0.0f && still.Overlay[0] == 1.0f && still.Overlay[1] == 0.01f);
 
 	const float identity[12]{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
 	float movedRight[12]{ 1, 0, 0, 0.2f, 0, 1, 0, 0, 0, 0, 1, 0 };

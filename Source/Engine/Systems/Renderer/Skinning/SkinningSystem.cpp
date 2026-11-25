@@ -518,7 +518,7 @@ namespace Swim::Render
 
 				for (std::size_t index = 0; index < groups.size(); ++index)
 				{
-					auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+					auto table = c.CreateDescriptorTable({ layout, 0, 0, label });
 
 					if (!table)
 					{

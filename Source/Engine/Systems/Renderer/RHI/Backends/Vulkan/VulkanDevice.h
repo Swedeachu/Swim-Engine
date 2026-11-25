@@ -175,7 +175,8 @@ namespace Swim::RhiVulkan
 			RequireVulkanDevice(*state);
 
 			if (!ValidateTextureDesc(desc) || !ValidateVulkanStorageTexture(*state, desc) ||
-				!ValidateVulkanSampledDepthTexture(*state, desc))
+				!ValidateVulkanSampledDepthTexture(*state, desc) ||
+				desc.ArrayLayers > state->Device.physical_device.properties.limits.maxImageArrayLayers)
 			{
 				return nullptr;
 			}
@@ -426,6 +427,40 @@ namespace Swim::RhiVulkan
 		}
 
 		void WaitIdle() override { WaitForVulkanDeviceIdle(*state); }
+
+		std::uint64_t GetPipelineLayoutGeneration() const override { return state->PipelineLayoutGeneration.load(std::memory_order_relaxed); }
+
+		bool SetSubmissionThread(bool enabled) override
+		{
+			if (enabled && !state->SubmitWorker)
+			{
+				state->SubmitWorker = std::make_unique<VulkanSubmissionWorker>();
+			}
+			else if (!enabled && state->SubmitWorker)
+			{
+				state->SubmitWorker->Drain();
+				state->SubmitWorker.reset();
+			}
+
+			return true;
+		}
+
+		~VulkanDevice() override
+		{
+			// Queued submissions reference the queues this object owns.
+			if (state->SubmitWorker)
+			{
+				try
+				{
+					state->SubmitWorker->Drain();
+				}
+				catch (...)
+				{
+				}
+
+				state->SubmitWorker.reset();
+			}
+		}
 
 	  private:
 

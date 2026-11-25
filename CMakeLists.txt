@@ -537,6 +537,8 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(LensFlare SOURCE Source/Shaders/Slang/Features/LensFlare.slang)
 	swim_add_runtime_shader(VolumetricCloudsMarch SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang)
 	swim_add_runtime_shader(VolumetricCloudsComposite SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_COMPOSITE=1)
+	swim_add_runtime_shader(VolumetricCloudsBake SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_BAKE=1)
+	swim_add_runtime_shader(VolumetricCloudsTemporal SOURCE Source/Shaders/Slang/Features/VolumetricClouds.slang DEFINES CLOUDS_TEMPORAL=1)
 	# The camera (Engine::DepthOfField, Engine::CameraLens, Engine::FilmSensor, CameraLook presets).
 	swim_add_runtime_shader(DepthOfFieldPrepare SOURCE Source/Shaders/Slang/Features/DepthOfField.slang DEFINES DOF_PREPARE=1)
 	swim_add_runtime_shader(DepthOfFieldGather SOURCE Source/Shaders/Slang/Features/DepthOfField.slang DEFINES DOF_GATHER=1)
@@ -545,6 +547,28 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 	swim_add_runtime_shader(CameraLens SOURCE Source/Shaders/Slang/Features/CameraLens.slang)
 	swim_add_runtime_shader(FilmSensor SOURCE Source/Shaders/Slang/Features/FilmSensor.slang)
 	swim_add_runtime_shader(GravitationalLensing SOURCE Source/Shaders/Slang/Features/GravitationalLensing.slang)
+	swim_add_runtime_shader(Weather SOURCE Source/Shaders/Slang/Features/Weather.slang)
+	# Water (Engine::OceanSimulation, Engine::OceanSurface, Engine::WaveWater, Engine::Underwater) and Engine::Lightning.
+	swim_add_runtime_shader(OceanSpectrum SOURCE Source/Shaders/Slang/Water/OceanSimulation.slang DEFINES OCEAN_PASS=0)
+	swim_add_runtime_shader(OceanFft SOURCE Source/Shaders/Slang/Water/OceanSimulation.slang DEFINES OCEAN_PASS=1)
+	swim_add_runtime_shader(OceanAssemble SOURCE Source/Shaders/Slang/Water/OceanSimulation.slang DEFINES OCEAN_PASS=2)
+	swim_add_runtime_shader(OceanSurface SOURCE Source/Shaders/Slang/Water/OceanSurface.slang)
+	swim_add_runtime_shader(WaveWater SOURCE Source/Shaders/Slang/Water/WaveWater.slang)
+	swim_add_runtime_shader(UnderwaterMedium SOURCE Source/Shaders/Slang/Water/Underwater.slang)
+	swim_add_runtime_shader(UnderwaterLens SOURCE Source/Shaders/Slang/Water/Underwater.slang DEFINES UNDERWATER_LENS=1)
+	swim_add_runtime_shader(Lightning SOURCE Source/Shaders/Slang/Features/Lightning.slang)
+	# Sun, moon and night sky (Engine::CelestialSky).
+	swim_add_runtime_shader(CelestialSkyBake SOURCE Source/Shaders/Slang/Features/CelestialSky.slang DEFINES CELESTIAL_BAKE=1)
+	swim_add_runtime_shader(CelestialSky SOURCE Source/Shaders/Slang/Features/CelestialSky.slang)
+	# GPU culling of a feature's own draw list (Engine::IndirectCuller).
+	swim_add_runtime_shader(IndirectCullReset SOURCE Source/Shaders/Slang/Features/IndirectCull.slang DEFINES CULL_RESET=1)
+	swim_add_runtime_shader(IndirectCullEarly SOURCE Source/Shaders/Slang/Features/IndirectCull.slang)
+	swim_add_runtime_shader(IndirectCullLate SOURCE Source/Shaders/Slang/Features/IndirectCull.slang DEFINES CULL_LATE=1)
+	# Highlight outlines (Engine::Outline).
+	swim_add_runtime_shader(OutlineMask SOURCE Source/Shaders/Slang/Features/Outline.slang)
+	swim_add_runtime_shader(OutlineComposite SOURCE Source/Shaders/Slang/Features/Outline.slang DEFINES OUTLINE_COMPOSITE=1)
+	# The opaque scene copied before the transparent pass (RenderGeometryResources::SceneCopy).
+	swim_add_runtime_shader(SceneCopy SOURCE Source/Shaders/Slang/Features/SceneCopy.slang)
 	# Non-temporal anti-aliasing and sharpening (RenderSettings::AntiAliasing / Sharpening).
 	swim_add_runtime_shader(ScreenAaFxaa SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=0)
 	swim_add_runtime_shader(ScreenAaEdges SOURCE Source/Shaders/Slang/PostProcess/ScreenAntiAliasing.slang DEFINES SCREEN_AA_PASS=1)
@@ -742,6 +766,13 @@ if(TARGET SwimSlangCompiler AND SWIM_ENABLE_VULKAN_RHI)
 		RUNTIME_NAME UiQuad
 		REQUIRED
 		SOURCE Source/Shaders/Slang/Ui/UiQuad.slang
+		PROFILE spirv_1_5
+		INCLUDE_DIRECTORIES Source/Shaders/Slang
+	)
+	swim_add_slang_program(SwimSceneViewport
+		RUNTIME_NAME SceneViewport
+		REQUIRED
+		SOURCE Source/Shaders/Slang/Ui/SceneViewport.slang
 		PROFILE spirv_1_5
 		INCLUDE_DIRECTORIES Source/Shaders/Slang
 	)
@@ -1144,6 +1175,18 @@ if(SWIM_BUILD_PLATFORM_EXAMPLE)
 	swim_set_solution_folder(SwimHeadlessPlatform "${SWIM_SOLUTION_FOLDER_EXAMPLES}")
 endif()
 
+# The sampling CPU profiler of scripts/profiling (no administrator rights needed; see
+# docs/Profiling.md). Built on request: cmake --build <dir> --target SwimStackSampler.
+if(WIN32)
+	add_executable(SwimStackSampler EXCLUDE_FROM_ALL Source/Tools/StackSampler/StackSamplerMain.cpp)
+	target_link_libraries(SwimStackSampler PRIVATE dbghelp winmm)
+	target_compile_features(SwimStackSampler PRIVATE cxx_std_20)
+	if(MSVC)
+		target_compile_options(SwimStackSampler PRIVATE /utf-8 /W3 /permissive-)
+	endif()
+	swim_set_solution_folder(SwimStackSampler "${SWIM_SOLUTION_FOLDER_TOOLS}")
+endif()
+
 if(SWIM_BUILD_FOUNDATION_TESTS)
 	add_executable(SwimHeadlessCoreAssets EXCLUDE_FROM_ALL
 		Source/Examples/HeadlessCoreAssets.cpp
@@ -1471,6 +1514,11 @@ if(SWIM_BUILD_SANDBOX)
 	swim_add_runtime_shader(BoxField SOURCE Source/Game/Shaders/BoxField.slang)
 	swim_add_runtime_shader(BoxFieldDepth SOURCE Source/Game/Shaders/BoxField.slang DEFINES BOX_DEPTH_ONLY=1)
 	swim_add_runtime_shader(BoxFieldShadow SOURCE Source/Game/Shaders/BoxField.slang DEFINES BOX_SHADOW=1)
+	swim_add_runtime_shader(WaterDemo SOURCE Source/Game/Shaders/WaterDemo.slang)
+	swim_add_runtime_shader(CullDemo SOURCE Source/Game/Shaders/CullDemo.slang)
+	swim_add_runtime_shader(CullDemoDepth SOURCE Source/Game/Shaders/CullDemo.slang DEFINES CULL_DEMO_DEPTH=1)
+	swim_add_runtime_shader(CullDemoShadow SOURCE Source/Game/Shaders/CullDemo.slang DEFINES CULL_DEMO_SHADOW=1)
+	swim_add_runtime_shader(CullDemoXray SOURCE Source/Game/Shaders/CullDemo.slang DEFINES CULL_DEMO_XRAY=1)
 	add_executable(SwimEngine
 		Source/main.cpp
 		${SWIM_GAME_SOURCES}

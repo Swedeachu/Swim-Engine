@@ -96,7 +96,29 @@ struct StandardPbrSurface
 	float3 Emissive;
 	float Alpha;
 	bool Discard; // Alpha masking rejected the pixel.
+	bool Thin;	  // An alpha-tested two-sided card (StandardPbrStabilizeThin).
 };
+
+bool StandardPbrIsThin(StandardMaterialParameters parameters)
+{
+	const uint thin = StandardMaterialFlagAlphaMask | StandardMaterialFlagDoubleSided;
+	return (parameters.Flags & thin) == thin;
+}
+
+// Alpha-tested two-sided cards (leaves, stems, grass) turn edge-on and away from the viewer,
+// where GGX and Fresnel run to white flecks. Their roughness is floored when resolved and
+// their normal bent to face the viewer a little when lit, so the specular stays dim and stable.
+static const float StandardPbrThinMinPerceptualRoughness = 0.6;
+static const float StandardPbrThinMinFacing = 0.2;
+
+void StandardPbrStabilizeThin(inout StandardPbrSurface surface, float3 view)
+{
+	const float facing = dot(surface.Normal, view);
+	if (surface.Thin && facing < StandardPbrThinMinFacing)
+	{
+		surface.Normal = normalize(surface.Normal + view * (StandardPbrThinMinFacing - facing));
+	}
+}
 
 StandardPbrSurface StandardPbrResolve(StandardMaterialParameters parameters, StandardPbrTexels texels, float3 geometricNormal,
 	float3 tangent, float3 bitangent, bool frontFacing)
@@ -118,7 +140,27 @@ StandardPbrSurface StandardPbrResolve(StandardMaterialParameters parameters, Sta
 	surface.PerceptualRoughness = parameters.RoughnessFactor * texels.MetallicRoughness.g;
 	surface.Occlusion = 1.0 + parameters.OcclusionStrength * (texels.Occlusion - 1.0);
 	surface.Alpha = alpha;
+	surface.Thin = StandardPbrIsThin(parameters);
+	if (surface.Thin)
+	{
+		surface.PerceptualRoughness = max(surface.PerceptualRoughness, StandardPbrThinMinPerceptualRoughness);
+	}
 	return surface;
+}
+
+// Specular anti-aliasing (Tokuyoshi and Kaplanyan): widens the GGX lobe by the screen-space
+// variance of the shading normal (its ddx / ddy), so normal detail smaller than a pixel
+// (distant foliage, thin edges) blurs into roughness instead of sparkling.
+static const float StandardPbrSpecularAaVariance = 0.25;
+static const float StandardPbrSpecularAaMaxKernel = 0.18;
+
+float StandardPbrSpecularAntiAlias(float perceptualRoughness, float3 normalDdx, float3 normalDdy)
+{
+	const float roughness = clamp(perceptualRoughness, StandardPbrMinPerceptualRoughness, 1.0);
+	const float alpha = roughness * roughness;
+	const float variance = StandardPbrSpecularAaVariance * (dot(normalDdx, normalDdx) + dot(normalDdy, normalDdy));
+	const float alpha2 = saturate(alpha * alpha + min(2.0 * variance, StandardPbrSpecularAaMaxKernel));
+	return sqrt(sqrt(alpha2));
 }
 
 // Image-based lighting inputs (StandardPbr::EnvironmentTerms): irradiance / pi at the

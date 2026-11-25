@@ -148,7 +148,9 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	Meshes.GetDimensions(meshCount, meshStride);
 	const bool late = Constants.Phase == VisibilityPhaseLate;
 	const uint excluded = Views[0].ExcludedObjectId;
-	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount || (excluded != 0u && instance.ObjectId + 1u == excluded))
+	const bool overlay = (instance.Flags & GpuSceneFlagOverlay) != 0u;
+	if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= meshCount || (excluded != 0u && instance.ObjectId + 1u == excluded) ||
+		(overlay && (Views[0].Flags & GpuViewFlagOverlay) == 0u))
 	{
 		Count(VisibilityStatNotDrawable);
 		if (late)
@@ -172,7 +174,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	}
 	const float radius = sqrt(dot(e, e)) * scale;
 
-	if (!unbounded && (view.Flags & GpuViewFlagDisableFrustumCulling) == 0)
+	if (!unbounded && !overlay && (view.Flags & GpuViewFlagDisableFrustumCulling) == 0)
 	{
 		for (uint p = 0; p < 6; ++p)
 		{
@@ -191,7 +193,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 
 	// Two-phase occlusion: early draws last frame's visible set, late the rest.
 	const bool visibleLastFrame =
-		(view.Flags & GpuViewFlagResetOcclusionHistory) != 0 || OcclusionHistory[row] == instance.Generation;
+		overlay || (view.Flags & GpuViewFlagResetOcclusionHistory) != 0 || OcclusionHistory[row] == instance.Generation;
 	if (Constants.Phase == VisibilityPhaseEarly && !visibleLastFrame)
 	{
 		Count(VisibilityStatDeferred);
@@ -199,7 +201,7 @@ void computeMain(uint3 id : SV_DispatchThreadID)
 	}
 	if (late)
 	{
-		const bool occluded = (view.Flags & GpuViewFlagDisableOcclusion) == 0 && !unbounded && OccludedByHzb(view, center, radius);
+		const bool occluded = (view.Flags & GpuViewFlagDisableOcclusion) == 0 && !unbounded && !overlay && OccludedByHzb(view, center, radius);
 		OcclusionHistory[row] = occluded ? 0u : instance.Generation;
 		if (visibleLastFrame)
 		{

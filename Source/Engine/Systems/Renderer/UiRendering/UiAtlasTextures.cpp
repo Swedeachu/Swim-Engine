@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/UiRendering/UiAtlasTextures.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphTransfers.h"
 
+#include <cstring>
 #include <stdexcept>
 
 namespace Swim::Render
@@ -9,11 +10,17 @@ namespace Swim::Render
 	namespace
 	{
 
-		// RGB8 atlas rows -> RGBA8 (alpha 1), tightly packed.
+		// RGB8 atlas rows -> RGBA8 (alpha 1), tightly packed; colour pages are RGBA8 already.
 		std::vector<std::byte> ExpandRows(const Text::AtlasPageView& page, std::uint32_t y, std::uint32_t rows)
 		{
 			std::vector<std::byte> bytes(std::size_t(page.Size) * rows * 4);
 			const std::size_t first = std::size_t(y) * page.Size;
+
+			if (page.Format == Text::AtlasPageFormat::Color)
+			{
+				std::memcpy(bytes.data(), page.Pixels.data() + first * 4, bytes.size());
+				return bytes;
+			}
 
 			for (std::size_t texel = 0; texel < std::size_t(page.Size) * rows; ++texel)
 			{
@@ -51,6 +58,16 @@ namespace Swim::Render
 		}
 
 		samplerHandle = bindless.RegisterSampler(*sampler);
+		samplerDesc.MinFilter = samplerDesc.MagFilter = Rhi::Filter::Nearest;
+		samplerDesc.DebugName = desc.DebugName + " (nearest)";
+		pointSampler = device.CreateSampler(samplerDesc);
+
+		if (!pointSampler)
+		{
+			throw std::runtime_error(desc.DebugName + " nearest sampler could not be created");
+		}
+
+		pointSamplerHandle = bindless.RegisterSampler(*pointSampler);
 	}
 
 	UiAtlasTextures::~UiAtlasTextures()
@@ -61,6 +78,7 @@ namespace Swim::Render
 		}
 
 		bindless.Release(samplerHandle);
+		bindless.Release(pointSamplerHandle);
 	}
 
 	UiAtlasTextures::Page UiAtlasTextures::CreatePage(std::uint32_t index, std::uint32_t size)
@@ -122,6 +140,7 @@ namespace Swim::Render
 		attached = &atlas;
 		UiAtlasFrame frame;
 		frame.SamplerIndex = bindless.GetIndex(samplerHandle);
+		frame.PointSamplerIndex = bindless.GetIndex(pointSamplerHandle);
 		frame.PageSize = atlas.GetDesc().PageSize;
 
 		while (pages.size() < count)

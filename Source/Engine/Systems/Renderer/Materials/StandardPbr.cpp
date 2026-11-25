@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/Materials/StandardPbr.h"
 
+#include "Engine/Math/ColorMath.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -19,12 +21,12 @@ namespace Swim::Render::StandardPbr
 
 	float SrgbToLinear(float encoded)
 	{
-		return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+		return ::Engine::SrgbToLinear(encoded);
 	}
 
 	float LinearToSrgb(float linear)
 	{
-		return linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+		return ::Engine::LinearToSrgb(linear);
 	}
 
 	float DistributionGgx(float nDotH, float alpha)

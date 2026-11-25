@@ -127,6 +127,7 @@ namespace Swim::UI
 				if (target && Nodes.contains(target.Value) && Available(target) && IsFocusable(Get(target)) && InputAllowed(target))
 				{
 					Focused = target;
+					++FocusRevision;
 					QueueEvent({ UiEventKind::Focus, target });
 					MarkPaintDirty(target);
 				}

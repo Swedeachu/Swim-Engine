@@ -153,7 +153,7 @@ namespace Swim::Render
 
 			for (std::size_t slot = 0; slot < inputs.VertexPages.size(); ++slot)
 			{
-				auto table = c.Device().CreateDescriptorTable({ &layout, 0, 0, label });
+				auto table = c.CreateDescriptorTable({ &layout, 0, 0, label });
 
 				if (!table)
 				{
@@ -212,7 +212,7 @@ namespace Swim::Render
 
 		void RunExternal(RenderCommandContext& c, const std::vector<ExternalGeometryDraws>& external, ExternalGeometryPass pass,
 			bool prepassed, const DrawInputs& inputs, Rhi::Sampler& sampler, Rhi::DescriptorTable* bindless, std::uint32_t width,
-			std::uint32_t height, const std::string& label)
+			std::uint32_t height, const std::string& label, const ExternalSceneCopy& scene = {})
 		{
 			if (!DrawsIn(external, pass))
 			{
@@ -227,6 +227,7 @@ namespace Swim::Render
 			context.Width = width;
 			context.Height = height;
 			context.Bindless = bindless;
+			context.Scene = scene;
 			context.FrameTable = [&](Rhi::PipelineLayout& layout) -> Rhi::DescriptorTable&
 			{
 				const auto tables = CreateDrawTables(c, first, layout, sampler, label + " external");
@@ -846,7 +847,7 @@ namespace Swim::Render
 					normal, material, width, height](RenderCommandContext& c)
 				{
 					using B = ForwardLocalLightsBindings;
-					auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+					auto table = c.CreateDescriptorTable({ layout, 0, 0, label });
 
 					if (!table)
 					{
@@ -889,6 +890,14 @@ namespace Swim::Render
 			return resources;
 		}
 
+		// 1c. The opaque scene, copied for transparent draws that look through themselves.
+		ExternalSceneCopy scene;
+
+		if (frame.BeforeTransparent)
+		{
+			scene = frame.BeforeTransparent(graph, targets.Color, targets.Depth);
+		}
+
 		// 2. Sort the transparent bins.
 		resources.SortScratch = graph.CreateBuffer(StorageBuffer(
 			std::uint64_t(slots) * resources.SortSize * sizeof(ForwardSortEntry), Rhi::BufferUsage::None, name + " sort scratch"));
@@ -915,7 +924,7 @@ namespace Swim::Render
 				transparentBin, first = firstRange.First, capacity, slots, path](RenderCommandContext& c)
 			{
 				using B = ForwardTransparentSortBindings;
-				auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, label });
+				auto table = c.CreateDescriptorTable({ layout, 0, 0, label });
 
 				if (!table)
 				{
@@ -946,6 +955,15 @@ namespace Swim::Render
 			{
 				DeclareDrawReads(b, inputs);
 				DeclareExternal(b, frame.External, ExternalGeometryPass::Transparent);
+
+				for (const auto copy : { scene.Color, scene.Depth })
+				{
+					if (copy)
+					{
+						b.Read(*copy, S::ShaderRead);
+					}
+				}
+
 				b.Read(r.SortedCommands, S::IndirectArgument);
 				b.Read(r.SortedCounts, S::IndirectArgument);
 				b.ReadWrite(targets.Color, S::ColorAttachment);
@@ -956,7 +974,7 @@ namespace Swim::Render
 				b.ReadWrite(targets.Depth, S::DepthStencilWrite);
 			},
 			[program = desc.Transparent, label = name + " transparent", inputs, targets, indirect, reflectance, specular, r, path, bindless,
-				sampler, capacity, slots, width, height, external = frame.External](RenderCommandContext& c)
+				sampler, capacity, slots, width, height, external = frame.External, scene](RenderCommandContext& c)
 			{
 				const auto tables = CreateDrawTables(c, inputs, *program.Layout, *sampler, label);
 				std::array<Rhi::RenderingAttachmentDesc, 4> colors{};
@@ -999,7 +1017,7 @@ namespace Swim::Render
 					}
 				}
 
-				RunExternal(c, external, ExternalGeometryPass::Transparent, false, inputs, *sampler, bindless, width, height, label);
+				RunExternal(c, external, ExternalGeometryPass::Transparent, false, inputs, *sampler, bindless, width, height, label, scene);
 				list.EndRendering();
 			});
 		return resources;

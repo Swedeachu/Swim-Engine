@@ -493,6 +493,25 @@ namespace Engine
 		return true;
 	}
 
+	bool PhysXWorldBackend::AddForceAtPosition(BodyHandle body, const glm::vec3& force, const glm::vec3& position, ForceMode mode, bool autowake)
+	{
+		if (simulating || !IsFiniteVec3(force) || !IsFiniteVec3(position) || (mode != ForceMode::Force && mode != ForceMode::Impulse))
+		{
+			return false;
+		}
+
+		BodyRecord* record = bodies.Get(body);
+		physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
+		if (!dynamic || dynamic->getRigidBodyFlags().isSet(physx::PxRigidBodyFlag::eKINEMATIC))
+		{
+			return false;
+		}
+
+		physx::PxRigidBodyExt::addForceAtPos(*dynamic, ToPx(force), ToPx(position), ToPx(mode), autowake);
+		return true;
+	}
+
 	bool PhysXWorldBackend::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake)
 	{
 		if (simulating || !IsFiniteVec3(velocity))
@@ -542,6 +561,20 @@ namespace Engine
 		}
 
 		velocity = ToGlm(dynamic->getLinearVelocity());
+		return true;
+	}
+
+	bool PhysXWorldBackend::GetMass(BodyHandle body, float& mass) const
+	{
+		const BodyRecord* record = bodies.Get(body);
+		const physx::PxRigidDynamic* dynamic = record && record->Actor ? record->Actor->is<physx::PxRigidDynamic>() : nullptr;
+
+		if (!dynamic || dynamic->getRigidBodyFlags().isSet(physx::PxRigidBodyFlag::eKINEMATIC) || !(dynamic->getMass() > 0.0f))
+		{
+			return false;
+		}
+
+		mass = dynamic->getMass();
 		return true;
 	}
 

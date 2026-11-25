@@ -114,6 +114,13 @@ namespace Swim::UI
 
 			bool ContextMenu() { return Document.OpenContextMenu(Last); }
 
+			void Button(UiPointerButton button, bool down, UiKeyModifiers modifiers)
+			{
+				down ? Document.ButtonDown(Last, button, modifiers) : Document.ButtonUp(Last, button, modifiers);
+			}
+
+			void Key(std::uint32_t key, bool down, UiKeyModifiers modifiers) { Document.KeyEvent(key, down, modifiers); }
+
 			bool ContextMenuForFocus() { return Document.OpenContextMenuForFocus(); }
 
 			bool HasFocus() const { return static_cast<bool>(Document.GetFocus()); }
@@ -166,6 +173,13 @@ namespace Swim::UI
 			}
 
 			bool ContextMenu() { return Router.OpenContextMenu(); }
+
+			void Button(UiPointerButton button, bool down, UiKeyModifiers modifiers)
+			{
+				down ? Router.ButtonDown(button, modifiers) : Router.ButtonUp(button, modifiers);
+			}
+
+			void Key(std::uint32_t key, bool down, UiKeyModifiers modifiers) { Router.KeyEvent(key, down, modifiers); }
 
 			bool ContextMenuForFocus() { return Router.OpenContextMenuForFocus(); }
 
@@ -305,6 +319,25 @@ namespace Swim::UI
 			frame.ContextMenuOpened = true;
 		}
 
+		{
+			using M = Platform::MouseButton;
+			const std::pair<M, UiPointerButton> others[] = { { M::Right, UiPointerButton::Right }, { M::Middle, UiPointerButton::Middle },
+				{ M::X1, UiPointerButton::Back }, { M::X2, UiPointerButton::Forward } };
+
+			for (const auto& [platform, button] : others)
+			{
+				if (input.IsMouseButtonTriggered(platform))
+				{
+					target.Button(button, true, modifiers);
+				}
+
+				if (input.IsMouseButtonReleased(platform))
+				{
+					target.Button(button, false, modifiers);
+				}
+			}
+		}
+
 		const float wheel = input.GetMouseScrollDelta();
 
 		if (wheel != 0.0f && std::isfinite(wheel))
@@ -348,6 +381,23 @@ namespace Swim::UI
 			if (target.KeyDown(*mapped, modifiers))
 			{
 				++frame.KeysConsumed;
+			}
+		}
+
+		// Raw key codes (Platform::KeyCode values) for documents that handle their own keys.
+		if (target.HasFocus())
+		{
+			for (const auto key : input.GetKeyPresses())
+			{
+				target.Key(static_cast<std::uint32_t>(key), true, modifiers);
+			}
+
+			for (std::uint32_t key = 1; key < static_cast<std::uint32_t>(Platform::KeyCode::Count); ++key)
+			{
+				if (input.IsKeyReleased(static_cast<Platform::KeyCode>(key)))
+				{
+					target.Key(key, false, modifiers);
+				}
 			}
 		}
 

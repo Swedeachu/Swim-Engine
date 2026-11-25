@@ -559,6 +559,7 @@ namespace Swim::Rhi
 		std::uint32_t MaxPushConstantBytes = 0;
 		ComputeLimits Compute{};
 		std::uint32_t MaxColorAttachments = 0;
+		std::uint32_t MaxTextureArrayLayers = 0; // 0: not reported.
 		std::uint32_t MaxSamples = 1;
 		std::uint32_t SubgroupSize = 0;
 		std::uint64_t MinUniformBufferOffsetAlignment = 1;

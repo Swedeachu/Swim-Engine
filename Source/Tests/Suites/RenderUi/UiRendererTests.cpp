@@ -278,3 +278,88 @@ SWIM_TEST("Render.Ui.Renderer", "ValidatesTargetsEncodingsAndEmptyFrames")
 	SWIM_CHECK_THROWS(UiRenderer::PipelineDesc(Rhi::Format::D32Float, program, world.renderLayout), std::invalid_argument);
 	SWIM_CHECK_THROWS(UiRenderer(UiRendererDesc{ 0 }), std::invalid_argument);
 }
+
+SWIM_TEST("Render.Ui.Renderer", "InvertingImagesSplitTheDrawAtBlendChanges")
+{
+	UiWorld world;
+	UI::UiDocument document;
+	UI::UiStyle row;
+	row.Flow = UI::UiFlow::Row;
+	row.Background = { 0.2f, 0.2f, 0.2f, 1.0f };
+	document.SetStyle(document.GetRoot(), row);
+	// Paint order: background, normal, invert, solid, invert, invert.
+	const auto image = [&](UI::UiBlend blend)
+	{
+		UI::UiImage desc;
+		desc.Texture = 3;
+		desc.Sampler = 1;
+		desc.Size = { 8, 8 };
+		desc.Blend = blend;
+		document.SetImage(document.Create(document.GetRoot()), desc);
+	};
+	image(UI::UiBlend::Normal);
+	image(UI::UiBlend::Invert);
+	const auto solid = document.Create(document.GetRoot());
+	UI::UiStyle solidStyle;
+	solidStyle.Width = UI::UiLength::Pixels(8);
+	solidStyle.Height = UI::UiLength::Pixels(8);
+	solidStyle.Background = { 1, 0, 0, 1 };
+	document.SetStyle(solid, solidStyle);
+	image(UI::UiBlend::Invert);
+	image(UI::UiBlend::Invert);
+	document.Layout({ 64, 32 }, 1.0f);
+	Text::GlyphAtlas atlas;
+	const auto& paint = document.Paint(atlas);
+	SWIM_REQUIRE_EQUAL(paint.size(), 6u);
+
+	UiRenderer renderer;
+	auto target = world.Target();
+	RenderGraph graph;
+	const auto color = graph.ImportTexture(*target, Rhi::ResourceState::ColorAttachment);
+	graph.Export(color, Rhi::ResourceState::ColorAttachment);
+	UiRenderFrame frame;
+	frame.Paint = paint;
+	frame.Target = color;
+	SWIM_CHECK_THROWS(
+		renderer.Record(graph, frame, world.Program(), world.table->GetTable()), std::invalid_argument); // No invert pipeline.
+	MockGraphicsPipeline invert;
+	auto program = world.Program();
+	program.InvertPipeline = &invert;
+	SWIM_REQUIRE(renderer.Record(graph, frame, program, world.table->GetTable()).has_value());
+	world.Run(graph);
+
+	const auto runs = Ui::BuildDrawRuns(renderer.GetLastQuads());
+	SWIM_REQUIRE_EQUAL(runs.size(), std::size_t(4));
+	SWIM_CHECK_EQUAL(renderer.GetStats().Draws, 4u);
+	const std::uint32_t firsts[4] = { 0, 2, 3, 4 }, counts[4] = { 2, 1, 1, 2 };
+	const void* pipelines[4] = { &world.pipeline, &invert, &world.pipeline, &invert };
+	const auto draws = world.Commands("Draw");
+	const auto binds = world.Commands("BindGraphicsPipeline");
+	SWIM_REQUIRE_EQUAL(draws.size(), std::size_t(4));
+	SWIM_REQUIRE_EQUAL(binds.size(), std::size_t(4));
+
+	for (std::size_t i = 0; i < 4; ++i)
+	{
+		SWIM_CHECK(runs[i].First == firsts[i] && runs[i].Count == counts[i]);
+		SWIM_CHECK(draws[i].SourceOffset == 6u && draws[i].DestinationOffset == counts[i] && draws[i].Size == firsts[i]);
+		SWIM_CHECK(binds[i].Source == pipelines[i]);
+	}
+
+	// Without inverting images: one run, and the invert pipeline is not needed.
+	std::vector<GpuUiQuad> plain(3);
+	SWIM_CHECK_EQUAL(Ui::BuildDrawRuns(plain).size(), std::size_t(1));
+	SWIM_CHECK(Ui::BuildDrawRuns({}).empty());
+
+	// The blend: opaque white inverts, transparent texels keep the target, half coverage mixes.
+	const Ui::Float4 dark{ 0.2f, 0.2f, 0.2f, 1.0f }, light{ 0.9f, 0.9f, 0.9f, 1.0f };
+	SWIM_CHECK_NEAR(Ui::BlendInvert(dark, { 1, 1, 1, 1 })[0], 0.8f, 1e-6f);
+	SWIM_CHECK_NEAR(Ui::BlendInvert(light, { 1, 1, 1, 1 })[0], 0.1f, 1e-6f);
+	SWIM_CHECK(Ui::BlendInvert(dark, { 0, 0, 0, 0 }) == dark);
+	SWIM_CHECK_NEAR(Ui::BlendInvert(dark, { 0.5f, 0.5f, 0.5f, 0.5f })[0], 0.5f, 1e-6f);
+	Testing::MockShaderProgram shader;
+	const auto desc =
+		UiRenderer::PipelineDesc(Rhi::Format::RGBA8Unorm, shader, world.renderLayout, Rhi::Format::Undefined, UI::UiBlend::Invert);
+	SWIM_CHECK(desc.BlendAttachments[0].SourceColor == Rhi::BlendFactor::OneMinusDestinationColor &&
+		desc.BlendAttachments[0].DestinationColor == Rhi::BlendFactor::OneMinusSourceColor &&
+		desc.BlendAttachments[0].DestinationAlpha == Rhi::BlendFactor::OneMinusSourceAlpha);
+}

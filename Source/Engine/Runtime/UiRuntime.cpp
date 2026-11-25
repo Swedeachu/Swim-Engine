@@ -2,6 +2,7 @@
 
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/UiCanvas.h"
+#include "Engine/Platform/WindowSystem.h"
 #include "Engine/Systems/Scene/Scene.h"
 #include "Engine/Systems/Text/FontCollection.h"
 #include "Engine/Systems/Text/FontFace.h"
@@ -9,6 +10,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -86,6 +88,7 @@ namespace Engine
 	{
 		auto document = std::make_shared<Swim::UI::UiDocument>();
 		document->SetTheme(theme);
+		document->SetClipboard({ &Swim::Platform::WindowSystem::GetClipboardText, &Swim::Platform::WindowSystem::SetClipboardText });
 		return document;
 	}
 
@@ -328,9 +331,16 @@ namespace Engine
 				return entry.second.Routed;
 			});
 
+		router.AdoptDocumentFocus();
+
 		if (input && (!canvases.empty() || overlayShown))
 		{
 			inputFrame = bridge.Apply(*input, router, &view.Camera, {}, deltaSeconds);
+
+			if (inputFrame.KeysConsumed > 0 || (inputFrame.KeyboardCaptured && !input->GetTextEditEvents().empty()))
+			{
+				caretSeconds = 0.0;
+			}
 		}
 
 		// Keep documents alive and finish routing before gameplay callbacks mutate UI/scene
@@ -378,10 +388,16 @@ namespace Engine
 		drawList.clear();
 		auto& ordered = orderedScratch;
 		ordered.clear();
+		// A screen that focused its field during the update owns the keyboard (and starts
+		// platform text input) this frame, not after the next input pass.
+		router.AdoptDocumentFocus();
+		inputFrame.WantsTextInput = router.WantsTextInput();
+		UpdateCaretBlink(deltaSeconds);
 
 		for (auto& [entity, state] : canvases)
 		{
 			(void)entity;
+			state.Document->SetCaretVisible(caretVisible);
 			state.Document->Update(std::max(deltaSeconds, 0.0f));
 			state.Document->Layout(state.LayoutSize, state.DpiScale);
 			ordered.push_back(&state);
@@ -396,6 +412,7 @@ namespace Engine
 
 			if (overlay.Routed)
 			{
+				overlay.Canvas.Document->SetCaretVisible(caretVisible);
 				overlay.Canvas.Document->Update(std::max(deltaSeconds, 0.0f));
 				overlay.Canvas.Document->Layout(overlay.Canvas.LayoutSize, overlay.Canvas.DpiScale);
 				overlayStates.push_back(&overlay.Canvas);
@@ -464,6 +481,25 @@ namespace Engine
 		}
 
 		return drawList;
+	}
+
+	void UiRuntime::UpdateCaretBlink(float deltaSeconds)
+	{
+		// The common desktop blink: 530 ms on, 530 ms off.
+		constexpr double Phase = 0.53;
+		const auto focused = router.GetFocused();
+		const auto* document = router.GetDocument(focused);
+		const std::uint64_t revision = document ? document->GetFocusRevision() : 0;
+
+		if (focused != caretCanvas || revision != caretFocusRevision)
+		{
+			caretCanvas = focused;
+			caretFocusRevision = revision;
+			caretSeconds = 0.0;
+		}
+
+		caretSeconds += std::max(deltaSeconds, 0.0f);
+		caretVisible = std::fmod(caretSeconds, Phase * 2.0) < Phase;
 	}
 
 } // namespace Engine

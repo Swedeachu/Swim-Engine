@@ -28,6 +28,14 @@ namespace Engine
 		Taa,
 	};
 
+	// The first-person overlay layer (RenderObjectFlags::Overlay on MeshRenderer::Flags):
+	// held items and arms drawn in front of the whole scene with their own projection.
+	struct OverlaySettings
+	{
+		float FieldOfView = 0.0f; // Vertical, degrees; 0 = the camera's.
+		float Near = 0.01f;		  // Near plane (metres) of the overlay's depth.
+	};
+
 	// Every runtime rendering switch (Phase 23). The FrameRenderer reads it each frame;
 	// the sandbox control panel edits it live. Invalid values are clamped by Sanitize.
 	struct RenderSettings
@@ -44,6 +52,7 @@ namespace Engine
 		std::optional<std::array<float, 3>> SkyBackgroundGround;
 		float EnvironmentIntensity = 1.0f;
 		float EnvironmentRotation = 0.0f; // Radians about +Y.
+		OverlaySettings Overlay{};
 		std::uint32_t EnvironmentResolution = 128;
 		// How often (seconds) the environment is re-recorded while a render feature draws
 		// into it (RenderFeature::ContributesToEnvironment, e.g. drifting clouds); 0 = every frame.

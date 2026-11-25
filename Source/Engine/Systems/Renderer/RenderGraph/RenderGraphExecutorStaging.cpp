@@ -107,7 +107,7 @@ namespace Swim::Render
 		{
 			const auto& resource = resources[r];
 
-			if (resource.Staging == Internal::GraphStaging::None || graph.lifetimes[r].First == GraphResourceLifetime::Unused)
+			if (resource.Staging == Internal::GraphStaging::None || graph.shape->Lifetimes[r].First == GraphResourceLifetime::Unused)
 			{
 				continue;
 			}

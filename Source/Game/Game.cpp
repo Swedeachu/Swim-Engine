@@ -3,6 +3,7 @@
 #include "Engine/Systems/Scene/SceneSystem.h"
 #include "Game/Behaviors/BallShooter.h"
 #include "Game/Behaviors/Motion.h"
+#include "Game/Scenes/ProfileTerrain.h"
 #include "Game/Scenes/Sandbox.h"
 
 namespace Game
@@ -16,6 +17,7 @@ namespace Game
 		scenes.RegisterBehaviorType<Projectile>("Projectile");
 
 		scenes.RegisterSceneType<Sandbox>("Sandbox");
+		scenes.RegisterSceneType<ProfileTerrain>("ProfileTerrain");
 
 		if (scenes.GetStartupScene().empty())
 		{

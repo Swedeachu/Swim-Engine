@@ -24,6 +24,7 @@
 #include "Engine/Systems/Renderer/Runtime/MaterialLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/MeshLibrary.h"
 #include "Engine/Systems/Renderer/Runtime/RenderDevice.h"
+#include "Engine/Systems/Renderer/Runtime/SceneViewports.h"
 #include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceEffects.h"
 #include "Engine/Systems/Renderer/ScreenSpace/ScreenSpaceReference.h"
@@ -75,6 +76,54 @@ namespace Engine
 			std::uint32_t DecodeSrgb = 0;
 			std::uint32_t Reserved[3] = {};
 		};
+
+		// Draws source (the display-referred frame) into target, decoding sRGB for an sRGB target.
+		void AddPresentPass(R::RenderGraph& graph, R::GraphTexture source, R::GraphTexture target, S::GraphicsPipeline& pipelineRef,
+			S::PipelineLayout& layoutRef, S::Sampler& samplerRef, bool srgb, std::uint32_t width, std::uint32_t height)
+		{
+			auto* pipeline = &pipelineRef;
+			auto* layout = &layoutRef;
+			auto* sampler = &samplerRef;
+			const PresentConstants constants{ srgb ? 1u : 0u, {} };
+			graph.AddPass(
+				"Present", S::QueueType::Graphics,
+				[&](R::RenderGraphBuilder& b)
+				{
+					b.Read(source, ResourceState::ShaderRead);
+					b.Write(target, ResourceState::ColorAttachment);
+				},
+				[source, target, pipeline, layout, sampler, constants, width, height](R::RenderCommandContext& c)
+				{
+					auto& sourceView = c.CreateView(source);
+					auto& targetView = c.CreateView(target);
+					auto table = c.CreateDescriptorTable({ layout, 0, 0, "Present source" });
+
+					if (!table)
+					{
+						throw std::runtime_error("FrameRenderer: cannot create the present descriptor table");
+					}
+
+					std::array<S::DescriptorWrite, 2> writes{};
+					writes[0].Binding = 0;
+					writes[0].TextureResource = &sourceView;
+					writes[1].Binding = 1;
+					writes[1].SamplerResource = sampler;
+					table->Write(writes);
+					auto& retained = static_cast<S::DescriptorTable&>(c.Retain(std::move(table)));
+					S::RenderingAttachmentDesc attachment{};
+					attachment.View = &targetView;
+					attachment.Load = S::LoadOp::Discard;
+					auto& list = c.Commands();
+					list.BeginRendering({ { &attachment, 1 }, nullptr, { width, height } });
+					list.BindGraphicsPipeline(*pipeline);
+					list.BindDescriptorTable(0, retained);
+					list.SetViewport({ 0, 0, float(width), float(height) });
+					list.SetScissor({ 0, 0, width, height });
+					list.PushConstants(S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
+					list.Draw(3);
+					list.EndRendering();
+				});
+		}
 
 		// SkyBackground.slang's push constants (128 bytes).
 		struct SkyConstants
@@ -301,10 +350,11 @@ namespace Engine
 		std::unique_ptr<S::GraphicsPipeline> forwardDeferredPipeline;
 		RuntimeComputeProgram forwardLocalLights;
 		RuntimeGraphicsProgram forwardOpaque, forwardTransparent, forwardDepth, forwardPrepassed, shadowDepth, shadowMasked, particleRender,
-			uiQuad, skyBackground, present;
+			uiQuad, sceneViewport, skyBackground, present;
 		std::unique_ptr<S::GraphicsPipeline> forwardOpaquePipeline, forwardTransparentPipeline, forwardDepthPipeline,
 			forwardPrepassedPipeline, shadowDepthPipeline, shadowMaskedPipeline;
-		std::unique_ptr<S::GraphicsPipeline> particleAdditive, particleAlpha, uiPipeline, uiDepthPipeline, skyPipeline;
+		std::unique_ptr<S::GraphicsPipeline> particleAdditive, particleAlpha, uiPipeline, uiDepthPipeline, uiInvertPipeline,
+			uiInvertDepthPipeline, skyPipeline, sceneViewportPipeline;
 		std::map<S::Format, std::unique_ptr<S::GraphicsPipeline>> presentPipelines;
 
 		// Shared resources.
@@ -348,6 +398,7 @@ namespace Engine
 		std::unique_ptr<R::PostProcessor> post;
 		std::unique_ptr<R::UiRenderer> ui;
 		std::unique_ptr<R::UiAtlasTextures> atlasTextures;
+		std::unique_ptr<SceneViewports> viewports;
 		const Swim::Text::GlyphAtlas* attachedAtlas = nullptr;
 
 		// Visibility instances (rebuilt when the page-slot count changes).
@@ -742,6 +793,20 @@ namespace Engine
 
 		S::GraphicsPipeline& GetPresentPipeline(S::Format format);
 
+		// The frame held for a late acquire (async present), per frame slot.
+		struct Held
+		{
+			std::unique_ptr<S::Texture> Texture;
+			ResourceState State = ResourceState::Undefined;
+		};
+
+		std::vector<Held> heldFrames;
+		// Frames of an unchanged shape reuse the compiled schedule, transients and descriptor tables.
+		Swim::Render::RenderGraphCompileCache graphCache;
+		Swim::Render::RenderGraphCompileCache presentGraphCache;
+
+		Held& HeldFrame(std::uint32_t slot, std::uint32_t width, std::uint32_t height);
+
 		void EnsureEnvironmentTargets(std::uint32_t resolution);
 	};
 
@@ -819,6 +884,7 @@ namespace Engine
 		shadowMasked = LoadDrawProgram("ShadowMasked", &shadowSpace);
 		particleRender = LoadDrawProgram("ParticleRender", &bindlessSpace);
 		uiQuad = LoadDrawProgram("UiQuad", &bindlessSpace);
+		sceneViewport = LoadDrawProgram("SceneViewport", &bindlessSpace);
 		skyBackground = LoadDrawProgram("SkyBackground", nullptr);
 		present = LoadDrawProgram("Present", nullptr);
 
@@ -858,6 +924,14 @@ namespace Engine
 		uiDepthPipeline = require(device.CreateGraphicsPipeline(R::UiRenderer::PipelineDesc(
 									  S::Format::RGBA8Unorm, *uiQuad.Program, *uiQuad.Layout, S::Format::D32Float)),
 			"world UI");
+		uiInvertPipeline = require(device.CreateGraphicsPipeline(R::UiRenderer::PipelineDesc(S::Format::RGBA8Unorm, *uiQuad.Program,
+									   *uiQuad.Layout, S::Format::Undefined, Swim::UI::UiBlend::Invert)),
+			"UI invert");
+		uiInvertDepthPipeline = require(device.CreateGraphicsPipeline(R::UiRenderer::PipelineDesc(S::Format::RGBA8Unorm, *uiQuad.Program,
+											*uiQuad.Layout, S::Format::D32Float, Swim::UI::UiBlend::Invert)),
+			"world UI invert");
+		sceneViewportPipeline =
+			require(device.CreateGraphicsPipeline(SceneViewports::PipelineDesc(*sceneViewport.Program, *sceneViewport.Layout)), "scene viewport");
 		{
 			// Feature geometry programs share the frame tables of the engine passes they draw in.
 			const auto frameSpace = [](std::initializer_list<const S::PipelineLayout*> layouts)
@@ -1126,6 +1200,7 @@ namespace Engine
 
 		ui = std::make_unique<R::UiRenderer>();
 		atlasTextures = std::make_unique<R::UiAtlasTextures>(device, *bindless);
+		viewports = std::make_unique<SceneViewports>(device, *bindless);
 
 		materials->SetRouter(
 			[this](std::uint32_t set, const R::StandardPbr::Parameters& parameters)
@@ -1149,6 +1224,11 @@ namespace Engine
 		{
 			atlasTextures->Drain();
 		}
+
+		if (viewports)
+		{
+			viewports->Drain();
+		}
 	}
 
 	RuntimeGraphicsProgram FrameRenderer::Impl::LoadDrawProgram(std::string_view name, const S::DescriptorSchemaDesc* bindlessSpace)
@@ -1159,6 +1239,39 @@ namespace Engine
 		}
 
 		return shaders.LoadGraphics(name);
+	}
+
+	FrameRenderer::Impl::Held& FrameRenderer::Impl::HeldFrame(std::uint32_t slot, std::uint32_t width, std::uint32_t height)
+	{
+		if (heldFrames.size() <= slot)
+		{
+			heldFrames.resize(slot + 1);
+		}
+
+		auto& held = heldFrames[slot];
+
+		if (!held.Texture || held.Texture->GetDesc().Extent.Width != width || held.Texture->GetDesc().Extent.Height != height)
+		{
+			if (held.Texture)
+			{
+				renderDevice.WaitIdle(); // A resize: the old copy may still be read.
+			}
+
+			S::TextureDesc desc;
+			desc.Extent = { width, height, 1 };
+			desc.PixelFormat = S::Format::RGBA8Unorm;
+			desc.Usage = S::TextureUsage::Sampled | S::TextureUsage::ColorAttachment;
+			desc.DebugName = "Held frame";
+			held.Texture = device.CreateTexture(desc);
+			held.State = ResourceState::Undefined;
+
+			if (!held.Texture)
+			{
+				throw std::runtime_error("FrameRenderer: cannot create the held frame");
+			}
+		}
+
+		return held;
 	}
 
 	S::GraphicsPipeline& FrameRenderer::Impl::GetPresentPipeline(S::Format format)
@@ -1331,6 +1444,11 @@ namespace Engine
 		return *impl->geometry;
 	}
 
+	SceneViewports& FrameRenderer::GetViewports() const
+	{
+		return *impl->viewports;
+	}
+
 	void FrameRenderer::BeginFrame()
 	{
 		// No GPU wait here: the previous frame keeps running on the GPU while the engine
@@ -1342,6 +1460,7 @@ namespace Engine
 		impl->particles->Collect();
 		impl->skinning->Collect();
 		impl->atlasTextures->Collect();
+		impl->viewports->Collect();
 		impl->CollectPrograms();
 		impl->meshes->FlushReleases(lastCompletion);
 		impl->residency->Update();
@@ -1444,11 +1563,20 @@ namespace Engine
 			impl->ApplyPrograms(lastCompletion);
 		}
 
-		auto frame = device.Acquire();
-		lap("Acquire");
+		// With async present the image is acquired after the frame is built (the acquire waits
+		// for the previous present, which then overlaps the update and the build).
+		const bool lateAcquire = device.CanAcquireLate();
+		RenderDevice::Frame frame;
+
+		if (!lateAcquire)
+		{
+			frame = device.Acquire();
+			lap("Acquire");
+		}
+
 		const auto extent = device.GetExtent();
 
-		if (!frame.Valid || extent.Width == 0 || extent.Height == 0)
+		if ((!lateAcquire && !frame.Valid) || extent.Width == 0 || extent.Height == 0)
 		{
 			++stats.SkippedFrames;
 			stats.Presented = false;
@@ -1505,7 +1633,7 @@ namespace Engine
 		R::RenderGraph graph;
 		bool environmentRebuilt = false, environmentWithFeatures = false;
 		bool residencyImported = false, materialsImported = false, sceneImported = false, lightsImported = false;
-		bool particlesPending = false, skinningPending = false, atlasPending = false;
+		bool particlesPending = false, skinningPending = false, atlasPending = false, viewportsPending = false;
 		std::optional<R::GraphReadback> captureReadback;
 		S::TimelinePoint completion{};
 
@@ -1645,6 +1773,7 @@ namespace Engine
 						draws.Buffers = std::move(resources.Buffers);
 						draws.IndirectBuffers = std::move(resources.IndirectBuffers);
 						draws.Textures = std::move(resources.Textures);
+						draws.SceneCopy = resources.SceneCopy;
 						draws.Draw = [feature, shared, passes](R::ExternalDrawContext& draw)
 						{
 							if (!feature->Enabled)
@@ -1916,7 +2045,7 @@ namespace Engine
 			R::RenderViewDesc viewDesc;
 			viewDesc.ViewProjection = viewProjection;
 			viewDesc.CameraPosition = camera.Position;
-			viewDesc.Flags = camera.Cut ? std::uint32_t(R::GpuViewFlags::CameraCut) : 0u;
+			viewDesc.Flags = (camera.Cut ? std::uint32_t(R::GpuViewFlags::CameraCut) : 0u) | std::uint32_t(R::GpuViewFlags::Overlay);
 
 			stats.ShadowViews = 0;
 			stats.ShadowCasters = static_cast<std::uint32_t>(input.ShadowCasters.size());
@@ -2000,12 +2129,14 @@ namespace Engine
 					}
 				}
 
+				// Shadows off: nothing above ran; the time below is the features' own geometry.
+				lap("Build: Shadows");
+
 				if (!geometryPrepared)
 				{
 					prepareGeometry();
+					lap("Build: Feature geometry (PrepareGeometry)");
 				}
-
-				lap("Build: Shadows");
 				// --- Visibility and clusters --------------------------------------------
 				R::VisibilityFrameDesc visibilityFrame;
 				visibilityFrame.View = R::BuildGpuViewRecord(viewDesc);
@@ -2053,6 +2184,14 @@ namespace Engine
 				forwardFrame.View.EnvironmentIntensity = settings.EnvironmentIntensity;
 				forwardFrame.View.EnvironmentRotation = settings.EnvironmentRotation;
 				forwardFrame.View.DebugMode = settings.Debug;
+
+				if (settings.Overlay.FieldOfView > 0.0f)
+				{
+					const float overlayFov = std::clamp(settings.Overlay.FieldOfView, 1.0f, 170.0f) * 0.0174532925f;
+					forwardFrame.View.OverlayFovScale = std::tan(camera.VerticalFov * 0.5f) / std::tan(overlayFov * 0.5f);
+				}
+
+				forwardFrame.View.OverlayNear = std::max(settings.Overlay.Near, 1.0e-4f);
 				forwardFrame.Transparent = settings.Transparent;
 				forwardFrame.DeferLocalLights = settings.DeferredLocalLights;
 				forwardFrame.External = geometryDraws;
@@ -2122,6 +2261,30 @@ namespace Engine
 								std::cerr << "[Render] Feature '" << feature->GetName() << "' disabled: " << error.what() << '\n';
 							}
 						}
+					};
+				}
+
+				const auto copiesScene = [](const R::ExternalGeometryDraws& draws)
+				{
+					return draws.SceneCopy && (draws.Passes & RenderGeometryPassBit(RenderGeometryPass::Transparent)) != 0;
+				};
+
+				if (std::any_of(geometryDraws.begin(), geometryDraws.end(), copiesScene))
+				{
+					forwardFrame.BeforeTransparent = [&](R::RenderGraph& g, R::GraphTexture color, R::GraphTexture depth)
+					{
+						auto services = featureServices();
+						RenderFeatureContext context(g, RenderFeatureStage::BeforeTemporal, featureView, settings, color, depth, services);
+						R::ExternalSceneCopy scene;
+						scene.Color = context.CreateTexture(S::Format::RGBA16Float, width, height, "Scene colour copy");
+						scene.Depth = context.CreateTexture(S::Format::R32Float, width, height, "Scene depth copy");
+						context.Compute("SceneCopy")
+							.Texture("Color", color)
+							.Texture("Depth", depth)
+							.Storage("ColorCopy", *scene.Color)
+							.Storage("DepthCopy", *scene.Depth)
+							.Dispatch(width, height);
+						return scene;
 					};
 				}
 
@@ -2257,6 +2420,7 @@ namespace Engine
 						R::ForwardPlusFrame faceFrame = forwardFrame;
 						faceFrame.External.clear(); // Feature geometry is culled for the main view only.
 						faceFrame.BeforeOpaque = {};
+						faceFrame.BeforeTransparent = {};
 						faceFrame.Visibility = &faceVisible;
 						faceFrame.Clusters = &faceClusters;
 						faceFrame.View.ViewProjection = faceViewProjection;
@@ -2464,6 +2628,7 @@ namespace Engine
 							R::ForwardPlusFrame captureFrame = forwardFrame;
 							captureFrame.External.clear(); // Feature geometry is culled for the main view only.
 							captureFrame.BeforeOpaque = {};
+							captureFrame.BeforeTransparent = {};
 							captureFrame.Visibility = &captureVisible;
 							captureFrame.Clusters = &captureClusters;
 							captureFrame.View.ViewProjection = capture.ViewProjection;
@@ -2767,7 +2932,17 @@ namespace Engine
 			}
 
 			lap("Build: Screen space, TAA, features and post");
-			// --- UI -----------------------------------------------------------------------
+			// --- Scene viewports and UI ----------------------------------------------------
+			std::vector<R::GraphTexture> viewportTextures;
+
+			if (I.viewports->GetStats().Viewports > 0)
+			{
+				viewportTextures = I.viewports->Record(graph, *I.geometry, geometryResources, *I.residency,
+					{ I.sceneViewportPipeline.get(), I.sceneViewport.Layout.get() }, I.bindless->GetTable(), I.materialSampler,
+					I.pointMaterialSampler);
+				viewportsPending = true;
+			}
+
 			stats.UiQuads = 0;
 
 			if (settings.Ui && !input.Ui.empty() && input.GlyphAtlas)
@@ -2780,7 +2955,8 @@ namespace Engine
 				I.attachedAtlas = input.GlyphAtlas;
 				const auto atlasFrame = I.atlasTextures->Update(graph, *input.GlyphAtlas);
 				atlasPending = true;
-				const R::UiRenderProgram program{ I.uiPipeline.get(), I.uiQuad.Layout.get(), I.uiDepthPipeline.get() };
+				const R::UiRenderProgram program{ I.uiPipeline.get(), I.uiQuad.Layout.get(), I.uiDepthPipeline.get(),
+					I.uiInvertPipeline.get(), I.uiInvertDepthPipeline.get() };
 
 				for (const auto& item : input.Ui)
 				{
@@ -2806,6 +2982,7 @@ namespace Engine
 
 					uiFrame.Opacity = std::clamp(item.Opacity, 0.0f, 1.0f);
 					uiFrame.Atlas = &atlasFrame;
+					uiFrame.Images = viewportTextures;
 					uiFrame.Composition.Encoding = R::UiOutputEncoding::Srgb;
 
 					if (I.ui->Record(graph, uiFrame, program, I.bindless->GetTable()))
@@ -2822,56 +2999,26 @@ namespace Engine
 				captureReadback = R::AddTextureReadback(graph, "Frame capture", postOutput, { 0, {}, {}, { width, height, 1 } });
 			}
 
-			if (frame.Target)
+			if (lateAcquire)
+			{
+				// Built before the image is acquired: the frame goes to this slot's held copy,
+				// and a second, small submission draws it into the image once acquired (the
+				// acquire waits for the previous present, which can block until its GPU work
+				// is done; meanwhile this frame's GPU work already runs).
+				auto& held = I.HeldFrame(device.GetFrameSlot(), width, height);
+				const auto target = graph.ImportTexture(*held.Texture, held.State);
+				AddPresentPass(graph, postOutput, target, I.GetPresentPipeline(S::Format::RGBA8Unorm), *I.present.Layout, *I.presentSampler, false,
+					width, height);
+				graph.Export(target, ResourceState::ShaderRead);
+				held.State = ResourceState::ShaderRead;
+			}
+			else if (frame.Target)
 			{
 				const auto surface =
 					graph.ImportTexture(*frame.Target, frame.Presented ? ResourceState::Present : ResourceState::Undefined);
 				const auto format = device.GetSwapchainFormat();
-				auto* pipeline = &I.GetPresentPipeline(format);
-				auto* layout = I.present.Layout.get();
-				auto* sampler = I.presentSampler.get();
-				const PresentConstants constants{ IsSrgbFormat(format) ? 1u : 0u, {} };
-				graph.AddPass(
-					"Present", S::QueueType::Graphics,
-					[&](R::RenderGraphBuilder& b)
-					{
-						b.Read(postOutput, ResourceState::ShaderRead);
-						b.Write(surface, ResourceState::ColorAttachment);
-					},
-					[postOutput, surface, pipeline, layout, sampler, constants, width, height](R::RenderCommandContext& c)
-					{
-						auto& source = c.CreateView(postOutput);
-						auto& targetView = c.CreateView(surface);
-						auto table = c.Device().CreateDescriptorTable({ layout, 0, 0, "Present source" });
-
-						if (!table)
-						{
-							throw std::runtime_error("FrameRenderer: cannot create the present descriptor table");
-						}
-
-						std::array<S::DescriptorWrite, 2> writes{};
-						writes[0].Binding = 0;
-						writes[0].TextureResource = &source;
-						writes[1].Binding = 1;
-						writes[1].SamplerResource = sampler;
-						table->Write(writes);
-						auto& retained = static_cast<S::DescriptorTable&>(c.Retain(std::move(table)));
-						S::RenderingAttachmentDesc attachment{};
-						attachment.View = &targetView;
-						attachment.Load = S::LoadOp::Discard;
-						auto& list = c.Commands();
-						const std::uint32_t w = width;
-						const std::uint32_t h = height;
-						list.BeginRendering({ { &attachment, 1 }, nullptr, { w, h } });
-						list.BindGraphicsPipeline(*pipeline);
-						list.BindDescriptorTable(0, retained);
-						list.SetViewport({ 0, 0, float(w), float(h) });
-						list.SetScissor({ 0, 0, w, h });
-						list.PushConstants(
-							S::ShaderStageMask::Vertex | S::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
-						list.Draw(3);
-						list.EndRendering();
-					});
+				AddPresentPass(graph, postOutput, surface, I.GetPresentPipeline(format), *I.present.Layout, *I.presentSampler, IsSrgbFormat(format),
+					width, height);
 				graph.Export(surface, ResourceState::Present);
 			}
 			else
@@ -2881,7 +3028,13 @@ namespace Engine
 			}
 
 			lap("Build: capture and presentation");
-			const auto compiled = graph.Compile();
+			// SWIM_GRAPH_CACHE=off compiles every frame (diagnostics: compare the two).
+			static const bool cacheGraphs = []
+			{
+				const char* mode = std::getenv("SWIM_GRAPH_CACHE");
+				return mode == nullptr || std::string_view(mode) != "off";
+			}();
+			const auto compiled = cacheGraphs ? graph.Compile(I.graphCache) : graph.Compile();
 			lap("Graph compile");
 			completion = executor.Execute(compiled, device.GetSubmit(frame));
 			lap("Record and submit");
@@ -2935,11 +3088,40 @@ namespace Engine
 				I.atlasTextures->AbortFrame();
 			}
 
+			if (viewportsPending)
+			{
+				I.viewports->AbortFrame();
+			}
+
 			throw;
 		}
 
+		Swim::Rhi::TimelinePoint deviceCompletion = completion;
+
+		if (lateAcquire)
+		{
+			frame = device.Acquire(true);
+			lap("Acquire (waits for the previous present)");
+
+			if (frame.Target)
+			{
+				auto& held = I.heldFrames[device.GetFrameSlot()];
+				R::RenderGraph presentGraph;
+				const auto source = presentGraph.ImportTexture(*held.Texture, held.State);
+				const auto surface =
+					presentGraph.ImportTexture(*frame.Target, frame.Presented ? ResourceState::Present : ResourceState::Undefined);
+				const auto format = device.GetSwapchainFormat();
+				AddPresentPass(presentGraph, source, surface, I.GetPresentPipeline(format), *I.present.Layout, *I.presentSampler,
+					IsSrgbFormat(format), width, height);
+				presentGraph.Export(surface, ResourceState::Present);
+				presentGraph.Export(source, ResourceState::ShaderRead);
+				deviceCompletion = device.GetPresentExecutor().Execute(presentGraph.Compile(I.presentGraphCache), device.GetSubmit(frame));
+				lap("Present copy (record and submit)");
+			}
+		}
+
 		lastCompletion = completion;
-		device.SetLastCompletion(completion);
+		device.SetLastCompletion(deviceCompletion);
 		I.residency->CommitUploads(completion);
 		I.materialTable->CommitUploads();
 		I.scene->CommitUploads();
@@ -2958,6 +3140,11 @@ namespace Engine
 		if (atlasPending)
 		{
 			I.atlasTextures->CommitFrame();
+		}
+
+		if (viewportsPending)
+		{
+			I.viewports->CommitFrame();
 		}
 
 		I.whiteUploaded = true;
@@ -2979,7 +3166,8 @@ namespace Engine
 		++I.frameIndex;
 
 		lap("Commit uploads");
-		stats.Presented = device.Present(frame);
+		stats.Presented = device.Present(frame) && frame.Valid;
+		stats.SkippedFrames += frame.Valid ? 0 : 1;
 		lap("Present");
 
 		if (captureReadback)

@@ -70,7 +70,8 @@ namespace Swim::UI
 		bool SameDesc(const Text::TextLayoutDesc& a, const Text::TextLayoutDesc& b)
 		{
 			return a.Size == b.Size && a.Direction == b.Direction && a.Align == b.Align && a.Wrap == b.Wrap && a.MaxWidth == b.MaxWidth &&
-				a.LineSpacing == b.LineSpacing && a.Language == b.Language && a.Kerning == b.Kerning && a.Ligatures == b.Ligatures;
+				a.LineSpacing == b.LineSpacing && a.Language == b.Language && a.Kerning == b.Kerning && a.Ligatures == b.Ligatures &&
+				a.Styles == b.Styles;
 		}
 
 		// Glyph positions of an unwrapped layout whose every line is left-aligned do not
@@ -125,6 +126,7 @@ namespace Swim::UI
 		desc.Wrap = node.Style.TextWrap;
 		desc.LineSpacing = node.Style.LineSpacing;
 		desc.MaxWidth = box;
+		desc.Styles = Internal::BoldRanges(node.TextOptions);
 
 		for (const auto* existing : { node.TextLayout.get(), node.MeasureLayout.get() })
 		{

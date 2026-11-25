@@ -1,5 +1,7 @@
 #include "Engine/Systems/Renderer/Particles/ParticleReference.h"
 
+#include "Engine/Math/Hash.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -130,6 +132,12 @@ namespace Swim::Render
 			throw std::invalid_argument("particle flipbooks need 1 .. Columns * Rows frames and a non-negative frame rate");
 		}
 
+		if (!AllFinite(desc.UvRect) || desc.UvRect[0] < 0.0f || desc.UvRect[1] < 0.0f || desc.UvRect[2] > 1.0f || desc.UvRect[3] > 1.0f ||
+			!(desc.UvRect[0] < desc.UvRect[2]) || !(desc.UvRect[1] < desc.UvRect[3]))
+		{
+			throw std::invalid_argument("particle UV rects must lie in [0, 1] with u0 < u1 and v0 < v1");
+		}
+
 		if ((desc.TextureIndex == 0) != (desc.SamplerIndex == 0))
 		{
 			throw std::invalid_argument("a particle sprite needs both a texture and a sampler index (or neither)");
@@ -177,7 +185,8 @@ namespace Swim::Render
 		e.Restitution = desc.Restitution;
 		e.Friction = desc.Friction;
 		e.Flags = (desc.Space == ParticleSpace::Local ? ParticleFlagLocalSpace : 0u) | (desc.Collision ? ParticleFlagCollision : 0u) |
-			(desc.Blend == ParticleBlendMode::AlphaBlend ? ParticleFlagSorted : 0u) | (desc.TextureIndex != 0 ? ParticleFlagTextured : 0u);
+			(desc.Blend == ParticleBlendMode::AlphaBlend ? ParticleFlagSorted : 0u) | (desc.TextureIndex != 0 ? ParticleFlagTextured : 0u) |
+			(desc.RandomFrame ? ParticleFlagRandomFrame : 0u);
 		e.FirstSlot = firstSlot;
 		e.Capacity = desc.Capacity;
 		e.SpawnCount = std::min(spawnCount, desc.Capacity);
@@ -189,6 +198,11 @@ namespace Swim::Render
 		e.FlipbookRows = desc.FlipbookRows;
 		e.FlipbookFrames = desc.FlipbookFrames;
 		e.FlipbookFrameRate = desc.FlipbookFrameRate;
+
+		for (int k = 0; k < 4; ++k)
+		{
+			e.UvRect[k] = desc.UvRect[k];
+		}
 		e.SizeKeyCount = desc.SizeOverLife.KeyCount;
 		e.ColorKeyCount = desc.ColorOverLife.KeyCount;
 
@@ -320,9 +334,7 @@ namespace Swim::Render::Particles
 
 	std::uint32_t Hash(std::uint32_t value)
 	{
-		const std::uint32_t state = value * 747796405u + 2891336453u;
-		const std::uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-		return (word >> 22u) ^ word;
+		return ::Engine::PcgHash(value);
 	}
 
 	float Random(std::uint32_t id, std::uint32_t seed, std::uint32_t stream)
@@ -510,6 +522,11 @@ namespace Swim::Render::Particles
 	{
 		const std::uint32_t frames = e.FlipbookFrames;
 
+		if ((e.Flags & ParticleFlagRandomFrame) != 0)
+		{
+			return std::min(static_cast<std::uint32_t>(Random(p.Id, e.Seed, 10) * float(frames)), frames - 1);
+		}
+
 		if (e.FlipbookFrameRate > 0.0f)
 		{
 			return static_cast<std::uint32_t>(std::floor(p.Age * e.FlipbookFrameRate)) % frames;
@@ -556,7 +573,9 @@ namespace Swim::Render::Particles
 		const std::uint32_t index = FlipbookFrame(e, p);
 		const float column = float(index % e.FlipbookColumns);
 		const float row = float(index / e.FlipbookColumns);
-		vertex.Uv = { (column + (ox + 1.0f) * 0.5f) / float(e.FlipbookColumns), (row + (1.0f - oy) * 0.5f) / float(e.FlipbookRows) };
+		const float u = (column + (ox + 1.0f) * 0.5f) / float(e.FlipbookColumns);
+		const float v = (row + (1.0f - oy) * 0.5f) / float(e.FlipbookRows);
+		vertex.Uv = { e.UvRect[0] + u * (e.UvRect[2] - e.UvRect[0]), e.UvRect[1] + v * (e.UvRect[3] - e.UvRect[1]) };
 		return vertex;
 	}
 

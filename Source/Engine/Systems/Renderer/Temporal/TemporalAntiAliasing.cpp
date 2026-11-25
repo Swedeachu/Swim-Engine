@@ -196,7 +196,7 @@ namespace Swim::Render
 					writes[binding].Binding = binding;
 				}
 
-				auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+				auto table = c.CreateDescriptorTable({ program.Layout, program.Space, 0, label });
 
 				if (!table)
 				{

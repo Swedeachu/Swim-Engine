@@ -83,6 +83,58 @@ A sweep of one knob is a list of scenarios that set it (`t32=sandbox.view 5;rend
 Timings drift by a few tenths of a millisecond between runs (probe scheduling, swarm
 motion, clocks): compare repeated baselines, not single numbers.
 
+### Profile runs (`scripts/profiling`)
+
+One repeatable run of a fixed scene, with GPU passes, CPU zones and CPU stacks, and a
+summary of the top costs. Release with a PDB only (`build/windows-release`).
+
+```powershell
+cmake --build build/windows-release --target SwimEngine SwimStackSampler
+./scripts/profiling/Invoke-EngineProfile.ps1 -Label before
+# ...change something, rebuild...
+./scripts/profiling/Invoke-EngineProfile.ps1 -Label after -Compare build/profiling/before
+```
+
+- **Scene**: `ProfileTerrain` (Game/Scenes/ProfileTerrain.h) by default: a 256 x 256 block
+  terrain in 16 x 16 chunk meshes, one directional light and a flat ambient, no shadows,
+  sky, image-based lighting, screen-space effects or bloom, and a camera orbit driven by the
+  frame count, so every run draws the same frames. `-Scene Sandbox` profiles the sandbox.
+- **Run**: vsync, validation and audio off; `profile <Frames> <Warmup> frames.csv <Label> quit`
+  measures; a run is capped at 5 minutes (`-TimeoutSeconds`, at most 300).
+- **CPU stacks**: `SwimStackSampler` (Source/Tools/StackSampler) attaches to the engine and,
+  every `-SampleIntervalMs`, suspends each thread that used CPU since its last sample, walks
+  its stack and resumes it; samples are weighted by the CPU cycles the thread used, and
+  symbolized with DbgHelp from the PDBs. No administrator rights or ETW session are needed.
+  It writes `cpu.folded` (flame graphs) and `cpu.txt` (CPU share per thread and the top
+  functions, exclusive and inclusive).
+- **GPU**: the `profile` command's per-pass timestamps (`gpu` rows) and the frame's GPU span.
+- **Quiet machine**: the script lists compilers, linkers and other engine or game instances
+  and stops if any run (`-AllowBusy` overrides; such numbers are not comparable).
+- **Output** in `build/profiling/<Label>`: `process-check.txt`, `command.txt`, `frames.csv`,
+  `engine.out`, `cpu.txt`, `cpu.folded` and `summary.md` (frame, top GPU passes, CPU zones,
+  renderer phases, threads and functions; with `-Compare`, the earlier run beside each row).
+- **Window**: `-WindowArgs` (default windowed, no activation, no input). Measure on the
+  display the GPU drives: a window on a display driven by another adapter presents across
+  adapters (the `[Render]` line says so), which changes the frame time.
+
+### Presenting
+
+- **Adapter**: `--adapter=auto` (default) renders on the adapter that drives the window's
+  display when it is discrete, else on the first discrete one. `display`, `discrete`,
+  `integrated`, an index or a name override it.
+- **Present thread** (`--present-thread=on`, default): the present call runs on its own
+  thread; the main thread only waits for the previous one before it acquires the next image
+  (`Waited for the previous present`).
+- **Submission thread** (on with the present thread): every queue submission and present of
+  the device runs on one thread in issue order, so a driver that holds back submissions while
+  a present blocks stalls that thread, not the main one (`Executor: submit`).
+  `SWIM_SUBMIT_THREAD=off` submits on the caller's thread, to compare.
+- **Split present** (`--present-split=auto|on|off`): the frame renders into a held image and a
+  small second submission draws it into the swapchain image, acquired late. `auto` splits only
+  when the window's display is driven by another adapter.
+- **Stats**: `video_pacing_stats` prints the present mode, the present call time and thread,
+  the main thread's wait and whether presents cross adapters.
+
 ## Scenarios
 
 The sandbox camera bookmarks used for every measurement:

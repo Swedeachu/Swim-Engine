@@ -5,13 +5,100 @@
 #include "Engine/Platform/Window.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/VulkanRhiBackend.h"
 
+#include <cctype>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
+#include <string_view>
+
+#ifdef _WIN32
+#include "Engine/Platform/Internal/WindowsApi.h"
+
+#include <dxgi.h>
+#endif
 
 namespace Engine
 {
 
-	RenderDevice::RenderDevice(const RenderDeviceDesc& desc) : window(desc.Window), vsync(desc.VSync)
+	namespace
+	{
+
+		// The id of the adapter that drives the display the window is on (Windows: DXGI).
+		std::optional<std::array<std::uint8_t, 8>> DisplayAdapterLuid(Swim::Platform::Window* window)
+		{
+#ifdef _WIN32
+			const auto handle = window ? window->GetNativeHandle() : Swim::Platform::NativeWindowHandle{};
+
+			if (!handle.IsValid())
+			{
+				return std::nullopt;
+			}
+
+			HMONITOR monitor = MonitorFromWindow(static_cast<HWND>(handle.Window), MONITOR_DEFAULTTONEAREST);
+			HMODULE library = LoadLibraryW(L"dxgi.dll");
+			using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
+			auto* create = library ? reinterpret_cast<CreateFactory>(GetProcAddress(library, "CreateDXGIFactory1")) : nullptr;
+			IDXGIFactory1* factory = nullptr;
+			std::optional<std::array<std::uint8_t, 8>> found;
+
+			if (create && SUCCEEDED(create(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory))))
+			{
+				IDXGIAdapter1* adapter = nullptr;
+
+				for (UINT a = 0; !found && factory->EnumAdapters1(a, &adapter) != DXGI_ERROR_NOT_FOUND; ++a)
+				{
+					IDXGIOutput* output = nullptr;
+
+					for (UINT o = 0; !found && adapter->EnumOutputs(o, &output) != DXGI_ERROR_NOT_FOUND; ++o)
+					{
+						DXGI_OUTPUT_DESC desc{};
+						DXGI_ADAPTER_DESC1 adapterDesc{};
+
+						if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == monitor && SUCCEEDED(adapter->GetDesc1(&adapterDesc)))
+						{
+							std::array<std::uint8_t, 8> luid{};
+							std::memcpy(luid.data(), &adapterDesc.AdapterLuid, luid.size());
+							found = luid;
+						}
+
+						output->Release();
+					}
+
+					adapter->Release();
+				}
+
+				factory->Release();
+			}
+
+			if (library)
+			{
+				FreeLibrary(library);
+			}
+
+			return found;
+#else
+			(void)window;
+			return std::nullopt;
+#endif
+		}
+
+		std::string Lower(std::string text)
+		{
+			std::transform(text.begin(), text.end(), text.begin(),
+				[](unsigned char c)
+				{
+					return static_cast<char>(std::tolower(c));
+				});
+			return text;
+		}
+
+	} // namespace
+
+	RenderDevice::RenderDevice(const RenderDeviceDesc& desc)
+		: window(desc.Window), vsync(desc.VSync), asyncPresent(desc.AsyncPresent && desc.Window)
 	{
 		Swim::Rhi::GraphicsSystemDesc systemDesc;
 		systemDesc.Validation = desc.Validation ? Swim::Rhi::ValidationMode::IfAvailable : Swim::Rhi::ValidationMode::Disabled;
@@ -23,16 +110,82 @@ namespace Engine
 			throw std::runtime_error("RenderDevice: no Vulkan adapter is available");
 		}
 
-		// The first adapter with bindless descriptors (the renderer's hard requirement).
+		// Among the adapters with bindless descriptors (the renderer's hard requirement), the
+		// one RenderDeviceDesc::Adapter asks for.
+		const auto displayLuid = DisplayAdapterLuid(window);
+		const std::string wanted = Lower(desc.Adapter.empty() ? std::string("auto") : desc.Adapter);
+		const auto drivesDisplay = [&](const Swim::Rhi::AdapterInfo& info)
+		{
+			return displayLuid && info.LuidValid && info.Luid == *displayLuid;
+		};
+		const auto pick = [&](auto&& accept)
+		{
+			for (std::uint32_t i = 0; i < graphics->GetAdapterCount(); ++i)
+			{
+				const auto& info = graphics->GetAdapter(i).GetInfo();
+
+				if (info.Capabilities.BindlessDescriptors && accept(i, info))
+				{
+					return i;
+				}
+			}
+
+			return UINT32_MAX;
+		};
 		std::uint32_t chosen = UINT32_MAX;
 
-		for (std::uint32_t i = 0; i < graphics->GetAdapterCount(); ++i)
+		if (wanted == "auto")
 		{
-			if (graphics->GetAdapter(i).GetInfo().Capabilities.BindlessDescriptors)
+			chosen = pick(
+				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+				{
+					return info.Discrete && drivesDisplay(info);
+				});
+			chosen = chosen != UINT32_MAX ? chosen
+										  : pick(
+												[](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+												{
+													return info.Discrete;
+												});
+		}
+		else if (wanted == "display")
+		{
+			chosen = pick(
+				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+				{
+					return drivesDisplay(info);
+				});
+		}
+		else if (wanted == "discrete" || wanted == "integrated")
+		{
+			const bool discrete = wanted == "discrete";
+			chosen = pick(
+				[&](std::uint32_t, const Swim::Rhi::AdapterInfo& info)
+				{
+					return discrete ? info.Discrete : info.Integrated;
+				});
+		}
+		else
+		{
+			chosen = pick(
+				[&](std::uint32_t i, const Swim::Rhi::AdapterInfo& info)
+				{
+					return std::to_string(i) == wanted || Lower(info.Name).find(wanted) != std::string::npos;
+				});
+		}
+
+		if (chosen == UINT32_MAX)
+		{
+			if (wanted != "auto")
 			{
-				chosen = i;
-				break;
+				std::cout << "[Render] no adapter matches \"" << desc.Adapter << "\"; using the default\n";
 			}
+
+			chosen = pick(
+				[](std::uint32_t, const Swim::Rhi::AdapterInfo&)
+				{
+					return true;
+				});
 		}
 
 		if (chosen == UINT32_MAX)
@@ -42,6 +195,14 @@ namespace Engine
 
 		auto& adapter = graphics->GetAdapter(chosen);
 		adapterInfo = &adapter.GetInfo();
+		presentStats.Async = asyncPresent;
+		deferPresent = asyncPresent && desc.DeferPresent;
+		presentStats.Deferred = deferPresent;
+		presentStats.CrossAdapter = displayLuid && adapterInfo->LuidValid && adapterInfo->Luid != *displayLuid;
+		splitPresent = asyncPresent &&
+			(desc.SplitPresent == RenderDeviceDesc::Split::On ||
+				(desc.SplitPresent == RenderDeviceDesc::Split::Auto && presentStats.CrossAdapter));
+		presentStats.Split = splitPresent;
 		device = adapter.CreateDevice();
 
 		if (!device)
@@ -79,6 +240,25 @@ namespace Engine
 			}
 
 			CreatePresentSemaphores();
+
+			if (asyncPresent)
+			{
+				// Submissions then never wait behind a blocking present on the caller's thread
+				// (SWIM_SUBMIT_THREAD=off submits on the caller's thread: diagnostics, compare the two).
+				const char* submitThread = std::getenv("SWIM_SUBMIT_THREAD");
+				device->SetSubmissionThread(submitThread == nullptr || std::string_view(submitThread) != "off");
+
+				for (std::uint32_t i = 0; i < slots; ++i)
+				{
+					presentExecutors.push_back(std::make_unique<Swim::Render::RenderGraphExecutor>(*device));
+				}
+
+				presentThread = std::thread(
+					[this]
+					{
+						PresentLoop();
+					});
+			}
 		}
 	}
 
@@ -92,9 +272,21 @@ namespace Engine
 		{
 		}
 
+		if (presentThread.joinable())
+		{
+			{
+				std::scoped_lock lock(presentMutex);
+				presentStop = true;
+			}
+
+			presentSignal.notify_all();
+			presentThread.join();
+		}
+
 		ready.clear();
 		acquired.clear();
 		swapchain.reset();
+		presentExecutors.clear();
 		executors.clear();
 		idleTimeline.reset();
 		device.reset();
@@ -150,6 +342,94 @@ namespace Engine
 		resizeRequested = true;
 	}
 
+	void RenderDevice::PresentLoop()
+	{
+		std::unique_lock lock(presentMutex);
+
+		while (true)
+		{
+			presentSignal.wait(lock,
+				[this]
+				{
+					return presentQueued || presentStop;
+				});
+
+			if (presentStop)
+			{
+				return;
+			}
+
+			const std::uint32_t image = presentImage;
+			lock.unlock();
+			const auto start = std::chrono::steady_clock::now();
+			bool ok = false;
+
+			try
+			{
+				const std::array<Swim::Rhi::Semaphore*, 1> presentWaits{ ready[image].get() };
+				ok = swapchain->Present(device->GetQueue(Swim::Rhi::QueueType::Graphics), image, presentWaits);
+			}
+			catch (const std::exception& error)
+			{
+				std::cerr << "[Render] present failed: " << error.what() << '\n';
+			}
+
+			const double call = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			lock.lock();
+			presentOk = ok;
+			presentCallMilliseconds = call;
+			presentQueued = false;
+			presentSignal.notify_all();
+		}
+	}
+
+	void RenderDevice::WaitForPresent()
+	{
+		if (!presentThread.joinable())
+		{
+			return;
+		}
+
+		const auto start = std::chrono::steady_clock::now();
+		std::unique_lock lock(presentMutex);
+		presentSignal.wait(lock,
+			[this]
+			{
+				return !presentQueued;
+			});
+		presentStats.WaitMilliseconds += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		presentStats.CallMilliseconds = presentCallMilliseconds;
+
+		if (!presentOk)
+		{
+			needsRebuild = true;
+			presentOk = true;
+		}
+	}
+
+	void RenderDevice::QueuePresent(std::uint32_t image)
+	{
+		WaitForPresent();
+		{
+			std::scoped_lock lock(presentMutex);
+			presentImage = image;
+			presentQueued = true;
+		}
+
+		presentSignal.notify_all();
+	}
+
+	void RenderDevice::FlushDeferredPresent()
+	{
+		if (deferredImage != UINT32_MAX)
+		{
+			QueuePresent(deferredImage);
+			deferredImage = UINT32_MAX;
+		}
+
+		WaitForPresent();
+	}
+
 	bool RenderDevice::Rebuild()
 	{
 		Swim::Rhi::Extent2D extent = requestedExtent;
@@ -162,6 +442,11 @@ namespace Engine
 
 		// Imported swapchain views retire with the executors' pooled resources.
 		for (auto& executor : executors)
+		{
+			executor->Trim();
+		}
+
+		for (auto& executor : presentExecutors)
 		{
 			executor->Trim();
 		}
@@ -233,7 +518,7 @@ namespace Engine
 		return swapchain ? swapchain->GetPresentMode() : Swim::Rhi::PresentMode::Fifo;
 	}
 
-	RenderDevice::Frame RenderDevice::Acquire()
+	RenderDevice::Frame RenderDevice::Acquire(bool late)
 	{
 		Frame frame;
 
@@ -243,9 +528,23 @@ namespace Engine
 			return frame;
 		}
 
-		if ((resizeRequested || needsRebuild) && !Rebuild())
+		// The swapchain is not used by two threads at once: the last present ends first.
+		presentStats.WaitMilliseconds = 0.0;
+		WaitForPresent();
+
+		if (resizeRequested || needsRebuild)
 		{
-			return frame;
+			if (late)
+			{
+				return frame;
+			}
+
+			FlushDeferredPresent();
+
+			if (!Rebuild())
+			{
+				return frame;
+			}
 		}
 
 		const auto result = swapchain->AcquireNextImage(*acquired[slot]);
@@ -292,9 +591,34 @@ namespace Engine
 			return true;
 		}
 
+		presented[frame.Image] = true;
+
+		if (presentThread.joinable())
+		{
+			std::uint32_t image = frame.Image;
+
+			if (deferPresent)
+			{
+				std::swap(image, deferredImage); // Present the previous frame; keep this one.
+			}
+
+			if (image != UINT32_MAX)
+			{
+				QueuePresent(image);
+			}
+
+			if (frame.Suboptimal)
+			{
+				needsRebuild = true;
+			}
+
+			return true; // A failure is taken at the next WaitForPresent.
+		}
+
+		const auto start = std::chrono::steady_clock::now();
 		const std::array<Swim::Rhi::Semaphore*, 1> presentWaits{ ready[frame.Image].get() };
 		const bool ok = swapchain->Present(device->GetQueue(Swim::Rhi::QueueType::Graphics), frame.Image, presentWaits);
-		presented[frame.Image] = true;
+		presentStats.CallMilliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 
 		if (!ok || frame.Suboptimal)
 		{
@@ -306,7 +630,14 @@ namespace Engine
 
 	void RenderDevice::WaitIdle()
 	{
+		FlushDeferredPresent();
+
 		for (auto& executor : executors)
+		{
+			executor->Wait();
+		}
+
+		for (auto& executor : presentExecutors)
 		{
 			executor->Wait();
 		}

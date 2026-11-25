@@ -96,13 +96,17 @@ namespace Swim::Render
 		// Sprite: a BindlessResourceTable texture/sampler pair (0 = a procedural soft
 		// disc, no texture) laid out as a Columns x Rows flipbook of Frames frames,
 		// row-major from the top left. FrameRate > 0 plays at that many frames per second
-		// (wrapping); 0 spreads the frames over the particle's life.
+		// (wrapping); 0 spreads the frames over the particle's life. RandomFrame gives each
+		// particle one random frame for its whole life instead. UvRect (u0, v0, u1, v1)
+		// is the texture region the flipbook grid covers, e.g. one tile of an atlas.
 		std::uint32_t TextureIndex = 0;
 		std::uint32_t SamplerIndex = 0;
 		std::uint32_t FlipbookColumns = 1;
 		std::uint32_t FlipbookRows = 1;
 		std::uint32_t FlipbookFrames = 1; // 1 .. Columns * Rows.
 		float FlipbookFrameRate = 0.0f;	  // >= 0.
+		bool RandomFrame = false;
+		std::array<float, 4> UvRect{ 0, 0, 1, 1 }; // In [0, 1], u0 < u1, v0 < v1.
 
 		std::uint32_t Seed = 0;
 	};

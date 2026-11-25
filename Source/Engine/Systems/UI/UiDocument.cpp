@@ -83,7 +83,8 @@ namespace Swim::UI
 				InRange(image.Uv.Width, -Internal::MaxLogical, Internal::MaxLogical) &&
 				InRange(image.Uv.Height, -Internal::MaxLogical, Internal::MaxLogical) && IsValidEdges(image.Slice) &&
 				IsValidEdges(image.SliceUv, 1.0f) && IsValidColor(image.Tint) &&
-				static_cast<std::uint8_t>(image.Fit) <= static_cast<std::uint8_t>(UiImageFit::Contain);
+				static_cast<std::uint8_t>(image.Fit) <= static_cast<std::uint8_t>(UiImageFit::Contain) &&
+				static_cast<std::uint8_t>(image.Blend) <= static_cast<std::uint8_t>(UiBlend::Invert);
 
 			if (!valid)
 			{
@@ -462,6 +463,17 @@ namespace Swim::UI
 				throw std::invalid_argument("Invalid UI text size or options");
 			}
 
+			const auto byBegin = [](const auto& a, const auto& b)
+			{
+				return a.Begin < b.Begin;
+			};
+
+			if (!std::is_sorted(options.Styles.begin(), options.Styles.end(), byBegin) ||
+				!std::is_sorted(options.Colors.begin(), options.Colors.end(), byBegin))
+			{
+				throw std::invalid_argument("UI text spans must be sorted by Begin");
+			}
+
 			text = Text::SanitizeUtf8(text);
 		}
 		else
@@ -469,12 +481,22 @@ namespace Swim::UI
 			text.clear();
 		}
 
+		node.Obfuscated = std::any_of(options.Styles.begin(), options.Styles.end(),
+			[](const UiTextStyleSpan& span)
+			{
+				return HasFormat(span.Format, UiTextFormat::Obfuscated);
+			});
+
 		if (node.Fonts == fonts && node.TextContents == text && node.FontSize == size && node.TextOptions.Direction == options.Direction &&
-			node.TextOptions.Language == options.Language)
+			node.TextOptions.Language == options.Language && Internal::BoldRanges(node.TextOptions) == Internal::BoldRanges(options))
 		{
-			if (node.TextOptions.Colors != options.Colors)
+			if (node.TextOptions.Colors != options.Colors || node.TextOptions.Styles != options.Styles ||
+				node.TextOptions.Shadow != options.Shadow || node.TextOptions.PixelSnap != options.PixelSnap)
 			{
 				node.TextOptions.Colors = options.Colors;
+				node.TextOptions.Styles = options.Styles;
+				node.TextOptions.Shadow = options.Shadow;
+				node.TextOptions.PixelSnap = options.PixelSnap;
 				impl->MarkPaintDirty(id);
 			}
 
@@ -549,6 +571,11 @@ namespace Swim::UI
 	UiPoint UiDocument::GetScroll(UiNodeId id) const
 	{
 		return impl->Get(id).Scroll;
+	}
+
+	float UiDocument::GetDpiScale() const
+	{
+		return impl->Dpi;
 	}
 
 	void UiDocument::Layout(UiPoint framebufferSize, float dpiScale)

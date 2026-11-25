@@ -146,3 +146,95 @@ SWIM_TEST("RenderGraph.Execute", "AllocationFailureIsRecoverableAndDeadWorkNever
 	SWIM_CHECK_EQUAL(executor.GetPooledResourceCount(), 1u);
 	SWIM_CHECK_EQUAL(device.queue.SubmitCount, 1u);
 }
+
+SWIM_TEST("RenderGraph.Execute", "CompileCacheReusesAnUnchangedShapeAndInvalidatesOnChanges")
+{
+	Testing::MockDevice device;
+	device.PipelineLayoutGeneration = 0;
+	Testing::MockPipelineLayout layout;
+	RenderGraphCompileCache cache;
+	RenderGraphExecutor executor(device);
+	Rhi::DescriptorTable* table = nullptr;
+
+	const auto frame = [&](std::uint64_t size, bool extraPass)
+	{
+		RenderGraph graph;
+		auto buffer = graph.CreateBuffer({ size, Rhi::BufferUsage::Storage, Rhi::MemoryPreference::DeviceLocal, {} });
+		graph.AddPass(
+			"write", Q::Compute,
+			[&](auto& b)
+			{
+				b.Write(buffer, S::ShaderWrite);
+			},
+			[&](auto& c)
+			{
+				auto created = c.CreateDescriptorTable({ &layout, 0, 0, "table" });
+				SWIM_REQUIRE(created != nullptr);
+				table = &static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(created)));
+			});
+
+		if (extraPass)
+		{
+			graph.AddPass(
+				"read", Q::Compute,
+				[&](auto& b)
+				{
+					b.Read(buffer, S::ShaderRead);
+					b.SideEffect();
+				},
+				[](auto&)
+				{
+				});
+		}
+
+		graph.Export(buffer, S::ShaderRead);
+		auto compiled = graph.Compile(cache);
+		executor.Execute(compiled);
+		return compiled;
+	};
+
+	const auto first = frame(64, false);
+	auto* firstTable = table;
+	SWIM_CHECK_EQUAL(cache.GetMisses(), 1u);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 0u);
+
+	// Same shape: no compile, same transient buffer, same descriptor table.
+	const auto second = frame(64, false);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 1u);
+	SWIM_CHECK(second.SharesShape(first));
+	SWIM_CHECK_EQUAL(table, firstTable);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
+	SWIM_CHECK_EQUAL(device.BufferCreateCount, 1u);
+	frame(64, false);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 2u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 1u);
+
+	// A resize changes the shape: compiled again, new allocations and tables.
+	const auto resized = frame(128, false);
+	SWIM_CHECK_EQUAL(cache.GetMisses(), 2u);
+	SWIM_CHECK(!resized.SharesShape(first));
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
+	SWIM_CHECK_EQUAL(device.BufferCreateCount, 2u);
+	frame(128, false);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 3u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 2u);
+
+	// A pass added or removed changes it too.
+	frame(128, true);
+	SWIM_CHECK_EQUAL(cache.GetMisses(), 3u);
+	frame(128, false);
+	SWIM_CHECK_EQUAL(cache.GetMisses(), 4u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 4u);
+
+	// A destroyed pipeline layout drops the cached tables (a new one could reuse the address),
+	// but the compiled shape stays valid.
+	frame(128, false);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 4u);
+	device.PipelineLayoutGeneration = 1;
+	frame(128, false);
+	SWIM_CHECK_EQUAL(cache.GetHits(), 5u);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 5u);
+	frame(128, false);
+	SWIM_CHECK_EQUAL(device.DescriptorTableCreateCount, 5u);
+	SWIM_CHECK_EQUAL(executor.GetCachedDescriptorTableCount(), 0u); // Handed back out to the last frame.
+}

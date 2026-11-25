@@ -31,6 +31,7 @@ namespace Swim::Text
 		float Top = 0.0f;
 		float WidthEm = 0.0f;
 		float HeightEm = 0.0f;
+		bool Color = false; // A bitmap font's texels on a Color page (straight-alpha sRGB RGBA), sampled nearest.
 	};
 
 	// A band of whole page rows, [Y, Y + Height). Empty when Height is 0.
@@ -42,11 +43,18 @@ namespace Swim::Text
 		bool operator==(const AtlasRowSpan&) const = default;
 	};
 
+	enum class AtlasPageFormat : std::uint8_t
+	{
+		Distance, // RGB8 multi-channel signed distances (linear data).
+		Color	  // RGBA8 bitmap-font texels: straight alpha, sRGB-encoded colour, 1-texel transparent gutters.
+	};
+
 	struct AtlasPageView
 	{
 		std::uint32_t Size = 0;
 		std::uint64_t Revision = 0;
-		std::span<const std::uint8_t> Pixels; // Top-down RGB8 UNORM, never sRGB.
+		std::span<const std::uint8_t> Pixels; // Top-down; RGB8 (Distance) or RGBA8 (Color).
+		AtlasPageFormat Format = AtlasPageFormat::Distance;
 	};
 
 	// Single-owner cache; call on the owning thread or externally synchronize.
@@ -64,7 +72,8 @@ namespace Swim::Text
 		GlyphAtlas& operator=(const GlyphAtlas&) = delete;
 
 		// Keeps the face alive; throws length_error when the fixed budget is full.
-		// Empty outlines have NoAtlasPage and consume no space. Returns by value.
+		// Empty outlines have NoAtlasPage and consume no space. Returns by value. Bitmap
+		// faces copy the glyph's texels onto a Color page (no distance field).
 		AtlasGlyph Get(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph);
 
 		// Runs body(i) for i in [0, count), possibly concurrently (for example through
@@ -115,7 +124,10 @@ namespace Swim::Text
 			AtlasGlyph Glyph;
 		};
 
-		AtlasGlyph Insert(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph, const FontFace::GlyphBitmap& bitmap);
+		AtlasGlyph Insert(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph, const FontFace::GlyphBitmap& bitmap,
+			AtlasPageFormat format = AtlasPageFormat::Distance, float emWidth = 0.0f, float emHeight = 0.0f);
+
+		AtlasGlyph GetBitmap(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph);
 
 		struct Page
 		{
@@ -124,6 +136,7 @@ namespace Swim::Text
 			std::uint32_t Y = 1;
 			std::uint32_t RowHeight = 0;
 			std::uint64_t Revision = 0;		  // Glyphs written so far.
+			AtlasPageFormat Format = AtlasPageFormat::Distance;
 			std::vector<AtlasRowSpan> Writes; // Rows of the glyph written at revision i + 1.
 		};
 

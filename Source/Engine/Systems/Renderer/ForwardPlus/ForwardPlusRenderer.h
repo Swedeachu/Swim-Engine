@@ -111,6 +111,11 @@ namespace Swim::Render
 		// Called once between the depth prepass and the opaque pass with the prepass depth
 		// (empty when no prepass ran); passes it records run before the opaque pass.
 		std::function<void(RenderGraph& graph, std::optional<GraphTexture> prepassDepth)> BeforeOpaque;
+		// Called once after the opaque result (and deferred local lights), before the
+		// transparent sort, with the colour and depth targets; passes it records run there.
+		// The copies it returns are read by the transparent pass and handed to its external
+		// draws (ExternalDrawContext::Scene).
+		std::function<ExternalSceneCopy(RenderGraph& graph, GraphTexture color, GraphTexture depth)> BeforeTransparent;
 	};
 
 	// Viewport-sized render targets (the cluster grid's viewport).

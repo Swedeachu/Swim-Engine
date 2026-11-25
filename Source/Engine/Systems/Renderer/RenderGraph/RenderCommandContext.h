@@ -36,6 +36,11 @@ namespace Swim::Render
 
 		Rhi::TextureView& CreateView(GraphTexture resource, const Rhi::TextureViewDesc& desc = {});
 
+		// Device().CreateDescriptorTable, but while the graph keeps its shape the executor hands
+		// back the table this pass created at the same point last time (its GPU use is over),
+		// so a pass rewrites it instead of allocating one. Retain it as usual.
+		std::unique_ptr<Rhi::DescriptorTable> CreateDescriptorTable(const Rhi::DescriptorTableDesc& desc);
+
 		// Descriptors/views created during recording must survive GPU execution.
 		// Returned references are valid until the executor's next Execute/Trim.
 		Rhi::RhiObject& Retain(std::unique_ptr<Rhi::RhiObject> object);
@@ -50,6 +55,7 @@ namespace Swim::Render
 
 		Internal::GraphExecutionState& state;
 		std::uint32_t pass;
+		std::uint32_t tables = 0;
 
 	};
 

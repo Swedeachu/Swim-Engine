@@ -3,6 +3,7 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include "RandomUtils.h"
+#include "Engine/Math/ColorMath.h"
 
 namespace Engine
 {
@@ -11,8 +12,7 @@ namespace Engine
 
 	inline float SRGBToLinear(float c)
 	{
-		// IEC 61966-2-1:1999 sRGB EOTF
-		return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);
+		return SrgbToLinear(c);
 	}
 
 	inline glm::vec3 HSVtoRGB(float h, float s, float v)

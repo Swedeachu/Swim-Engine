@@ -10,7 +10,7 @@ namespace Swim::RhiVulkan
 		// native queue once, accounting for graphics/compute/transfer aliases.
 		auto LockQueues(const VulkanDeviceState& state)
 		{
-			std::array<std::unique_lock<std::mutex>, 3> locks;
+			std::array<std::unique_lock<std::mutex>, 4> locks;
 
 			for (std::size_t index = 0; index < state.QueueMutexes.size(); ++index)
 			{
@@ -26,6 +26,14 @@ namespace Swim::RhiVulkan
 				{
 					locks[index] = std::unique_lock<std::mutex>(*mutex);
 				}
+			}
+
+			// A presentation queue of its own is a queue too.
+			const auto& present = state.PresentationQueueMutex;
+
+			if (present && std::find(state.QueueMutexes.begin(), state.QueueMutexes.end(), present) == state.QueueMutexes.end())
+			{
+				locks[3] = std::unique_lock<std::mutex>(*present);
 			}
 
 			return locks;
@@ -50,6 +58,7 @@ namespace Swim::RhiVulkan
 
 	void WaitForVulkanDeviceIdle(const VulkanDeviceState& state)
 	{
+		state.DrainSubmissions();
 		std::scoped_lock lock(state.RetirementMutex);
 
 		if (!state.LossRetirementAttempted)

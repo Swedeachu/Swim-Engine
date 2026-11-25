@@ -70,12 +70,18 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint instanceId : SV_
 	// Particles::FlipbookFrame.
 	const uint frames = Emitters[emitterIndex].FlipbookFrames;
 	const float frameRate = Emitters[emitterIndex].FlipbookFrameRate;
-	const uint frame = frameRate > 0.0 ? uint(floor(p.Age * frameRate)) % frames : min(uint(floor(t * float(frames))), frames - 1u);
+	uint frame = frameRate > 0.0 ? uint(floor(p.Age * frameRate)) % frames : min(uint(floor(t * float(frames))), frames - 1u);
+	if ((Emitters[emitterIndex].Flags & ParticleFlagRandomFrame) != 0u)
+	{
+		frame = min(uint(ParticleRandom(p.Id, Emitters[emitterIndex].Seed, 10u) * float(frames)), frames - 1u);
+	}
 	const uint columns = Emitters[emitterIndex].FlipbookColumns;
 	const float column = float(frame % columns);
 	const float row = float(frame / columns);
 	output.Local = float2((ox + 1.0) * 0.5, (1.0 - oy) * 0.5);
-	output.Uv = float2((column + output.Local.x) / float(columns), (row + output.Local.y) / float(Emitters[emitterIndex].FlipbookRows));
+	const float2 cell = float2((column + output.Local.x) / float(columns), (row + output.Local.y) / float(Emitters[emitterIndex].FlipbookRows));
+	const float4 uvRect = Emitters[emitterIndex].UvRect;
+	output.Uv = uvRect.xy + cell * (uvRect.zw - uvRect.xy);
 	// Particles::EvaluateGradient.
 	const float4 colorTimes = Emitters[emitterIndex].ColorTimes;
 	const uint colorKeys = Emitters[emitterIndex].ColorKeyCount;

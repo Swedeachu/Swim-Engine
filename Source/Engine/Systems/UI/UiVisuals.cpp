@@ -30,7 +30,7 @@ namespace Swim::UI
 				return x.Left == y.Left && x.Top == y.Top && x.Right == y.Right && x.Bottom == y.Bottom;
 			};
 			return a.Texture == b.Texture && a.Sampler == b.Sampler && a.Size.X == b.Size.X && a.Size.Y == b.Size.Y && rect(a.Uv, b.Uv) &&
-				edges(a.Slice, b.Slice) && edges(a.SliceUv, b.SliceUv) && SameColor(a.Tint, b.Tint) && a.Fit == b.Fit;
+				edges(a.Slice, b.Slice) && edges(a.SliceUv, b.SliceUv) && SameColor(a.Tint, b.Tint) && a.Fit == b.Fit && a.Blend == b.Blend;
 		}
 
 		bool SameVisual(const UiResolvedVisual& a, const UiResolvedVisual& b)
@@ -485,6 +485,7 @@ namespace Swim::UI
 			throw std::invalid_argument("UI update needs 0 .. 3600 seconds");
 		}
 
+		impl->Clock += seconds;
 		DispatchCallbacks();
 		impl->PullBindings(); // After dispatch: edits were pushed, now show changes made elsewhere.
 		impl->ResolveVisuals();

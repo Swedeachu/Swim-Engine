@@ -5,10 +5,13 @@
 #include "Engine/Systems/Renderer/RenderGraph/RenderGraphExecutor.h"
 
 #include <array>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace Swim::Platform
@@ -34,6 +37,43 @@ namespace Engine
 		// render-graph executor (commands, transient pool, staging arenas, timestamps) and
 		// swapchain acquire semaphore, and a slot waits only for its own previous frame.
 		std::uint32_t FramesInFlight = 2;
+		// Which GPU renders: "auto" (the adapter driving the window's display when it is a
+		// discrete GPU, else the first discrete GPU, else the first suitable one), "display"
+		// (always the display's adapter), "discrete", "integrated", or an adapter index or a
+		// part of its name.
+		std::string Adapter = "auto";
+		// Present on a dedicated thread: the present call (which can block for milliseconds,
+		// for example when the image crosses to another adapter's display) overlaps the
+		// next frame's update and build instead of stalling the main thread.
+		bool AsyncPresent = true;
+		// With AsyncPresent: present each frame after the next one is submitted. A present
+		// call that waits for its frame's GPU work and then copies the image (to another
+		// adapter's display) then overlaps the next frame's GPU work instead of idling the
+		// GPU; costs a frame of latency.
+		bool DeferPresent = false;
+		// With AsyncPresent: build and submit the frame before acquiring its image, and draw it
+		// into the image with a second small submission (a held copy: one extra full-screen
+		// pass). Pays off when presents block until their frame's GPU work is done (an image
+		// crossing to another adapter's display); auto does it only then.
+		enum class Split : std::uint8_t
+		{
+			Auto,
+			On,
+			Off,
+		};
+
+		Split SplitPresent = Split::Auto;
+	};
+
+	// Presentation timings of the last frame.
+	struct PresentStats
+	{
+		double CallMilliseconds = 0.0; // The present call itself (on the present thread when async).
+		double WaitMilliseconds = 0.0; // The main thread waited for the previous present to finish.
+		bool Async = false;
+		bool Deferred = false;
+		bool Split = false; // Frames are built before their image is acquired (RenderDeviceDesc::SplitPresent).
+		bool CrossAdapter = false; // The window's display is driven by another adapter than the renderer's.
 	};
 
 	// The GPU the engine renders with (Phase 23): the RHI graphics system and device
@@ -59,6 +99,12 @@ namespace Engine
 
 		// The current frame slot's executor.
 		Swim::Render::RenderGraphExecutor& GetExecutor() const { return *executors[slot]; }
+
+		// The current frame slot's executor for the small submission that draws a frame into
+		// its swapchain image after a late acquire (async present).
+		Swim::Render::RenderGraphExecutor& GetPresentExecutor() const { return *presentExecutors[slot]; }
+
+		std::uint32_t GetFrameSlot() const { return slot; }
 
 		// Moves to the next frame slot (FrameRenderer::Render, once per frame, before it
 		// waits for that slot's previous frame).
@@ -94,7 +140,14 @@ namespace Engine
 		};
 
 		// Headless always succeeds with no target. Invalid while minimized or rebuilding.
-		Frame Acquire();
+		// late: acquired after the frame was built at the current extent (async present), so
+		// a pending rebuild skips the frame instead of resizing under it.
+		Frame Acquire(bool late = false);
+
+		// Whether the frame can be built before its image is acquired (Acquire(true) at the end).
+		bool CanAcquireLate() const { return swapchain && asyncPresent && splitPresent && !resizeRequested && !needsRebuild; }
+
+		const PresentStats& GetPresentStats() const { return presentStats; }
 
 		// The synchronization of the frame's submission (valid until the next Acquire).
 		Swim::Rhi::SubmitDesc GetSubmit(const Frame& frame);
@@ -127,10 +180,21 @@ namespace Engine
 
 		void CreatePresentSemaphores();
 
+		// Blocks until the present thread has finished the last present (and takes its result).
+		void WaitForPresent();
+
+		void QueuePresent(std::uint32_t image);
+
+		// Presents the deferred image now and waits (before a rebuild or idling).
+		void FlushDeferredPresent();
+
+		void PresentLoop();
+
 		std::unique_ptr<Swim::Rhi::GraphicsSystem> graphics;
 		std::unique_ptr<Swim::Rhi::Device> device;
 		const Swim::Rhi::AdapterInfo* adapterInfo = nullptr;
 		std::vector<std::unique_ptr<Swim::Render::RenderGraphExecutor>> executors;
+		std::vector<std::unique_ptr<Swim::Render::RenderGraphExecutor>> presentExecutors;
 		std::uint32_t slot = 0;
 		Swim::Platform::Window* window = nullptr;
 		std::unique_ptr<Swim::Rhi::Swapchain> swapchain;
@@ -150,6 +214,20 @@ namespace Engine
 		bool resizeRequested = false;
 		bool needsRebuild = false;
 		bool vsync = true;
+		bool asyncPresent = false;
+		PresentStats presentStats;
+		// The present thread: one present in flight at a time.
+		std::thread presentThread;
+		std::mutex presentMutex;
+		std::condition_variable presentSignal;
+		std::uint32_t presentImage = UINT32_MAX;
+		bool presentQueued = false;
+		bool presentOk = true;
+		bool presentStop = false;
+		bool deferPresent = false;
+		bool splitPresent = false;
+		std::uint32_t deferredImage = UINT32_MAX;
+		double presentCallMilliseconds = 0.0;
 
 	};
 

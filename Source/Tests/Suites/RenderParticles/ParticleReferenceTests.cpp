@@ -350,6 +350,31 @@ SWIM_TEST("Render.Particles.Reference", "CurvesGradientsFlipbooksAndBillboards")
 	// Frame 0 is the atlas' top-left cell of 4 x 2.
 	SWIM_CHECK(Near(corners[2].Uv[0], 0.0f, 1.0e-6f) && Near(corners[2].Uv[1], 0.0f, 1.0e-6f));
 	SWIM_CHECK(Near(corners[1].Uv[0], 0.25f, 1.0e-6f) && Near(corners[1].Uv[1], 0.5f, 1.0e-6f));
+	// A UV rect remaps the grid into that region; random frames stay fixed per particle and spread out.
+	auto tile = desc;
+	tile.UvRect = { 0.5f, 0.25f, 0.75f, 0.5f };
+	tile.RandomFrame = true;
+	const auto tiled = Pack(tile);
+	SWIM_CHECK((tiled.Flags & ParticleFlagRandomFrame) != 0u);
+	const auto tileFrame = P::FlipbookFrame(tiled, p);
+	const auto tileCorner = P::BillboardCorner(frame, tiled, p, 2);
+	SWIM_CHECK(Near(tileCorner.Uv[0], 0.5f + 0.25f * float(tileFrame % 4) / 4.0f, 1.0e-6f));
+	SWIM_CHECK(Near(tileCorner.Uv[1], 0.25f + 0.25f * float(tileFrame / 4) / 2.0f, 1.0e-6f));
+	std::uint32_t seen = 0;
+
+	for (std::uint32_t id = 0; id < 64; ++id)
+	{
+		auto q = p;
+		q.Id = id;
+		const auto f = P::FlipbookFrame(tiled, q);
+		q.Age = 1.9f;
+		SWIM_CHECK_EQUAL(P::FlipbookFrame(tiled, q), f);
+		seen |= 1u << f;
+	}
+
+	SWIM_CHECK_EQUAL(seen, (1u << 7) - 1u);
+	tile.UvRect = { 0.5f, 0.25f, 0.5f, 0.5f };
+	SWIM_CHECK_THROWS(ValidateParticleEmitterDesc(tile), std::invalid_argument);
 
 	// Fragments: premultiplied; the untextured disc fades to its rim; textures multiply.
 	auto plain = desc;

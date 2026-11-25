@@ -142,6 +142,7 @@ struct ForwardLighting
 ForwardLighting ForwardLightSurface(ForwardView view, ClusterGrid grid, StandardPbrSurface surface, float3 worldPosition, float2 pixel)
 {
 	const float3 toCamera = normalize(view.CameraPosition - worldPosition);
+	StandardPbrStabilizeThin(surface, toCamera);
 	const float viewDepth = -dot(grid.ViewRow2, float4(worldPosition, 1.0));
 	const float3 direct = ForwardDirect(view, grid, surface, toCamera, worldPosition, pixel.x, pixel.y, viewDepth);
 	float3 ibl = float3(0.0, 0.0, 0.0);
@@ -200,7 +201,7 @@ ForwardClip ForwardProjectWorld(float3 world, float3 previousWorld)
 	float4 previousViewProjection[4] = { projections[4], projections[5], projections[6], projections[7] };
 	ForwardClip clip;
 	precise const float4 current = ForwardProject(viewProjection, float4(world, 1.0));
-	precise const float4 jittered = float4(current.xy + Views[0].Jitter * current.w, current.zw);
+	precise const float4 jittered = float4(current.xy + Views[0].JitterOverlay.xy * current.w, current.zw);
 	clip.Position = jittered;
 	clip.Current = current;
 	clip.Previous = ForwardProject(previousViewProjection, float4(previousWorld, 1.0));

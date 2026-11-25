@@ -136,8 +136,12 @@ namespace Swim::RhiVulkan
 			return nullptr;
 		}
 
-		SetVulkanObjectName(*state, VK_OBJECT_TYPE_DESCRIPTOR_POOL, ToNativeHandle(result->pool), desc.DebugName);
-		SetVulkanObjectName(*state, VK_OBJECT_TYPE_DESCRIPTOR_SET, ToNativeHandle(result->set), desc.DebugName);
+		// Named once, when the pool is created: tables made every frame reuse recycled pools.
+		if (!recycled)
+		{
+			SetVulkanObjectName(*state, VK_OBJECT_TYPE_DESCRIPTOR_POOL, ToNativeHandle(result->pool), desc.DebugName);
+			SetVulkanObjectName(*state, VK_OBJECT_TYPE_DESCRIPTOR_SET, ToNativeHandle(result->set), desc.DebugName);
+		}
 		return result;
 	}
 

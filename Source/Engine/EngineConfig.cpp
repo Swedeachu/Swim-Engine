@@ -434,6 +434,46 @@ namespace Engine
 				config.Render = false;
 				config.Present = PresentMode::Headless;
 			}
+			else if (Option(argument, "--adapter", i, argc, argv, value, hasValue))
+			{
+				if (!hasValue || value.empty())
+				{
+					fail("Invalid --adapter value (auto, display, discrete, integrated, an index or a name).");
+				}
+				else
+				{
+					config.Adapter = std::string(value);
+				}
+			}
+			else if (Option(argument, "--present-split", i, argc, argv, value, hasValue))
+			{
+				if (value == "auto")
+				{
+					config.SplitPresent = 0;
+				}
+				else if (bool on = false; hasValue && ParseBool(value, on))
+				{
+					config.SplitPresent = on ? 1 : 2;
+				}
+				else
+				{
+					fail("Invalid --present-split value (auto, on or off).");
+				}
+			}
+			else if (Option(argument, "--present-defer", i, argc, argv, value, hasValue))
+			{
+				if (hasValue && !ParseBool(value, config.DeferPresent))
+				{
+					fail("Invalid --present-defer value (on or off).");
+				}
+			}
+			else if (Option(argument, "--present-thread", i, argc, argv, value, hasValue))
+			{
+				if (hasValue && !ParseBool(value, config.PresentThread))
+				{
+					fail("Invalid --present-thread value (on or off).");
+				}
+			}
 			else if (Option(argument, "--frames-in-flight", i, argc, argv, value, hasValue))
 			{
 				std::uint64_t frames = 0;
@@ -570,6 +610,9 @@ namespace Engine
 			<< "  --no-render                         Run without a GPU (simulation and UI logic only)\n"
 			<< "  --frames=<n>                        Exit after n frames\n"
 			<< "  --frames-in-flight=1|2              Frames recorded ahead of the GPU (default 2)\n"
+			<< "  --adapter=auto|display|discrete|integrated|<index>|<name>  GPU to render with (auto: the display's if discrete)\n"
+			<< "  --present-thread=on|off             Present on a dedicated thread (default on)\n"
+			<< "  --present-split=auto|on|off         Submit frames before acquiring their image (auto: cross-adapter displays)\n"
 			<< "  --capture=<file.ppm>                Save the last frame (implies --frames=60)\n"
 			<< "  --fixed-delta=<seconds>             Deterministic frame delta\n"
 			<< "  --exec=<command>                    Run an engine command after startup (repeatable)\n"

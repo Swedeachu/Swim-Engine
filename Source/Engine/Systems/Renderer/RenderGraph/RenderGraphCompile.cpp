@@ -8,17 +8,16 @@
 namespace Swim::Render
 {
 
-	CompiledRenderGraph RenderGraph::Compile() const
+	std::shared_ptr<const Internal::GraphShape> Internal::BuildGraphShape(const GraphDefinition& definition)
 	{
-		using namespace Internal;
 		constexpr auto unused = GraphResourceLifetime::Unused;
 
-		CompiledRenderGraph result;
-		result.definition = std::make_shared<GraphDefinition>(definition);
+		auto shape = std::make_shared<GraphShape>();
+		auto& result = *shape;
 		const auto passCount = static_cast<std::uint32_t>(definition.Passes.size());
 		const auto resourceCount = static_cast<std::uint32_t>(definition.Resources.size());
 
-		auto& edges = result.dependencies;
+		auto& edges = result.Dependencies;
 		edges.resize(passCount);
 		std::vector<std::vector<std::uint32_t>> inputs(passCount);
 		std::vector<bool> live(passCount, false);
@@ -195,17 +194,17 @@ namespace Swim::Render
 		{
 			if (live[p])
 			{
-				result.schedule.push_back({ p, {} });
+				result.Schedule.push_back({ p, {} });
 			}
 		}
 
-		result.lifetimes.resize(resourceCount);
+		result.Lifetimes.resize(resourceCount);
 
-		for (std::uint32_t position = 0; position < result.schedule.size(); ++position)
+		for (std::uint32_t position = 0; position < result.Schedule.size(); ++position)
 		{
-			for (const auto& use : definition.Passes[result.schedule[position].Pass].Uses)
+			for (const auto& use : definition.Passes[result.Schedule[position].Pass].Uses)
 			{
-				auto& life = result.lifetimes[use.Resource];
+				auto& life = result.Lifetimes[use.Resource];
 
 				if (life.First == unused)
 				{
@@ -220,14 +219,14 @@ namespace Swim::Render
 		{
 			if (definition.Resources[r].Exported)
 			{
-				auto& life = result.lifetimes[r];
+				auto& life = result.Lifetimes[r];
 
 				if (life.First == unused)
 				{
 					life.First = 0;
 				}
 
-				life.Last = static_cast<std::uint32_t>(result.schedule.size());
+				life.Last = static_cast<std::uint32_t>(result.Schedule.size());
 			}
 		}
 
@@ -236,23 +235,23 @@ namespace Swim::Render
 		std::stable_sort(resources.begin(), resources.end(),
 			[&](auto a, auto b)
 			{
-				return result.lifetimes[a].First < result.lifetimes[b].First;
+				return result.Lifetimes[a].First < result.Lifetimes[b].First;
 			});
 
 		std::vector<std::uint32_t> slotLast;
 
 		for (auto r : resources)
 		{
-			auto& life = result.lifetimes[r];
+			auto& life = result.Lifetimes[r];
 
 			if (life.First == unused)
 			{
 				continue;
 			}
 
-			for (std::uint32_t slot = 0; slot < result.allocations.size(); ++slot)
+			for (std::uint32_t slot = 0; slot < result.Allocations.size(); ++slot)
 			{
-				const auto& candidate = definition.Resources[result.allocations[slot]];
+				const auto& candidate = definition.Resources[result.Allocations[slot]];
 
 				if (candidate.Poolable() && definition.Resources[r].Poolable() && slotLast[slot] < life.First &&
 					Compatible(candidate, definition.Resources[r]))
@@ -264,8 +263,8 @@ namespace Swim::Render
 
 			if (life.Allocation == unused)
 			{
-				life.Allocation = static_cast<std::uint32_t>(result.allocations.size());
-				result.allocations.push_back(r);
+				life.Allocation = static_cast<std::uint32_t>(result.Allocations.size());
+				result.Allocations.push_back(r);
 				slotLast.push_back(0);
 			}
 
@@ -275,7 +274,7 @@ namespace Swim::Render
 		std::vector<std::vector<Rhi::ResourceState>> states;
 		std::vector<std::vector<bool>> writeHazards;
 
-		for (auto r : result.allocations)
+		for (auto r : result.Allocations)
 		{
 			states.emplace_back(CellCount(definition.Resources[r]), definition.Resources[r].Initial);
 			// The external producer may have written even when the import state is a
@@ -285,7 +284,7 @@ namespace Swim::Render
 
 		const auto transition = [&](std::uint32_t r, std::uint32_t cell, Rhi::ResourceState after, bool writes, auto& barriers)
 		{
-			const auto slot = result.lifetimes[r].Allocation;
+			const auto slot = result.Lifetimes[r].Allocation;
 			auto& before = states[slot][cell];
 
 			if (before != after || writeHazards[slot][cell] || writes)
@@ -304,7 +303,7 @@ namespace Swim::Render
 			writeHazards[slot][cell] = writes;
 		};
 
-		for (auto& scheduled : result.schedule)
+		for (auto& scheduled : result.Schedule)
 		{
 			for (const auto& use : definition.Passes[scheduled.Pass].Uses)
 			{
@@ -319,7 +318,7 @@ namespace Swim::Render
 		{
 			const auto& resource = definition.Resources[r];
 
-			if (result.lifetimes[r].First == unused || (!resource.Exported && !resource.Imported))
+			if (result.Lifetimes[r].First == unused || (!resource.Exported && !resource.Imported))
 			{
 				continue;
 			}
@@ -333,10 +332,91 @@ namespace Swim::Render
 
 			for (std::uint32_t cell = 0; cell < CellCount(resource); ++cell)
 			{
-				transition(r, cell, final, false, result.finalBarriers);
+				transition(r, cell, final, false, result.FinalBarriers);
 			}
 		}
 
+		return shape;
+	}
+
+	void Internal::AppendGraphShapeKey(const GraphDefinition& definition, std::vector<std::uint64_t>& key)
+	{
+		const auto u = [](auto value)
+		{
+			return static_cast<std::uint64_t>(value);
+		};
+		key.push_back(definition.Resources.size());
+		key.push_back(definition.Passes.size());
+
+		for (const auto& r : definition.Resources)
+		{
+			key.push_back(u(r.Kind) | u(r.Staging) << 8 | u(r.Imported != nullptr) << 16 | u(r.Exported) << 17);
+			key.push_back(u(r.Initial) | u(r.Final) << 32);
+
+			if (r.Kind == GraphKind::Buffer)
+			{
+				key.push_back(r.Buffer.Size);
+				key.push_back(u(r.Buffer.Usage) | u(r.Buffer.Memory) << 32 | u(r.Buffer.PersistentMap) << 40);
+			}
+			else
+			{
+				const auto& x = r.Texture;
+				key.push_back(u(x.Extent.Width) | u(x.Extent.Height) << 32);
+				key.push_back(u(x.Extent.Depth) | u(x.PixelFormat) << 32);
+				key.push_back(u(x.Usage) | u(x.Dimension) << 32 | u(x.Samples) << 40);
+				key.push_back(u(x.MipLevels) | u(x.ArrayLayers) << 32);
+			}
+		}
+
+		for (const auto& pass : definition.Passes)
+		{
+			key.push_back(u(pass.Type) | u(pass.SideEffect) << 8 | u(pass.Uses.size()) << 16 | u(pass.Dependencies.size()) << 40);
+
+			for (const auto& use : pass.Uses)
+			{
+				key.push_back(u(use.Resource) | u(use.Access) << 32);
+				key.push_back(u(use.State));
+				key.push_back(u(use.Range.BaseMipLevel) | u(use.Range.MipLevelCount) << 32);
+				key.push_back(u(use.Range.BaseArrayLayer) | u(use.Range.ArrayLayerCount) << 32);
+			}
+
+			for (const auto dependency : pass.Dependencies)
+			{
+				key.push_back(dependency);
+			}
+		}
+	}
+
+	CompiledRenderGraph RenderGraph::Compile() const
+	{
+		CompiledRenderGraph result;
+		result.shape = Internal::BuildGraphShape(definition);
+		result.definition = std::make_shared<Internal::GraphDefinition>(definition);
+		return result;
+	}
+
+	CompiledRenderGraph RenderGraph::Compile(RenderGraphCompileCache& cache)
+	{
+		auto& key = cache.scratch;
+		key.clear();
+		Internal::AppendGraphShapeKey(definition, key);
+		CompiledRenderGraph result;
+
+		if (cache.shape && key == cache.key)
+		{
+			++cache.hits;
+			result.shape = cache.shape;
+		}
+		else
+		{
+			result.shape = Internal::BuildGraphShape(definition);
+			++cache.misses;
+			cache.shape = result.shape;
+			std::swap(cache.key, key);
+		}
+
+		result.definition = std::make_shared<Internal::GraphDefinition>(std::move(definition));
+		definition = {};
 		return result;
 	}
 

@@ -49,7 +49,9 @@ namespace Swim::Render
 		// this frame's sub-pixel jitter as an NDC offset added to clip.xy / clip.w.
 		float PreviousViewProjection[16] = {};
 		float Jitter[2] = {};
-		float Reserved1[2] = {};
+		// RenderObjectFlags::Overlay objects: clip.xy scale (tan(camera fov / 2) / tan(overlay
+		// fov / 2)) and near plane (metres); their depth starts at 0.99 (ForwardOverlayDepth).
+		float Overlay[2] = { 1.0f, 0.01f };
 	};
 
 	static_assert(sizeof(ForwardViewRecord) == 208);

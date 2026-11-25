@@ -75,6 +75,7 @@ float4 fragmentMain(VertexOutput input) : SV_Target0
 	surface.Emissive = float3(0.0, 0.0, 0.0);
 	surface.Alpha = 1.0;
 	surface.Discard = false;
+	surface.Thin = false;
 	StandardPbrLighting lighting;
 	lighting.View = float3(0.0, 0.0, 1.0);
 	lighting.LightDirection = view.LightDirection.xyz;

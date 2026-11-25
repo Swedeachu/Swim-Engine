@@ -1,7 +1,9 @@
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanAdapterInfo.h"
 #include "Engine/Systems/Renderer/RHI/Backends/Vulkan/Internal/VulkanFormatUtils.h"
 
+#include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <cstdio>
 #include <sstream>
 
@@ -67,6 +69,10 @@ namespace Swim::RhiVulkan
 		driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
 		descriptorIndexingProperties.pNext = &driver;
 
+		VkPhysicalDeviceIDProperties ids{};
+		ids.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+		driver.pNext = &ids;
+
 		VkPhysicalDeviceProperties2 properties{};
 		properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 		properties.pNext = &subgroupProperties;
@@ -88,6 +94,10 @@ namespace Swim::RhiVulkan
 			std::to_string(VK_API_VERSION_PATCH(properties.properties.apiVersion));
 		info.VendorId = properties.properties.vendorID;
 		info.DeviceId = properties.properties.deviceID;
+		info.Discrete = properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+		info.Integrated = properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+		info.LuidValid = ids.deviceLUIDValid == VK_TRUE;
+		std::copy(std::begin(ids.deviceLUID), std::end(ids.deviceLUID), info.Luid.begin());
 
 		for (std::uint32_t heapIndex = 0; heapIndex < memoryProperties.memoryHeapCount; ++heapIndex)
 		{
@@ -124,6 +134,7 @@ namespace Swim::RhiVulkan
 
 		capabilities.Compute.MaxInvocations = limits.maxComputeWorkGroupInvocations;
 		capabilities.MaxColorAttachments = limits.maxColorAttachments;
+		capabilities.MaxTextureArrayLayers = limits.maxImageArrayLayers;
 		capabilities.MaxSamples = GetMaximumSampleCount(
 			limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts);
 		capabilities.SubgroupSize = subgroupProperties.subgroupSize;

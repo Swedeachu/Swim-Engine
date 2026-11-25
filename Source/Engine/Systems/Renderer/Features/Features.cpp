@@ -2,6 +2,7 @@
 #include "Engine/Systems/Renderer/Features/SunShafts.h"
 #include "Engine/Systems/Renderer/Features/VolumetricClouds.h"
 #include "Engine/Systems/Renderer/Runtime/RenderSettings.h"
+#include "Engine/Systems/Renderer/Runtime/ShaderLibrary.h"
 
 #include <algorithm>
 #include <cmath>
@@ -127,7 +128,63 @@ namespace Engine
 
 	bool VolumetricClouds::Visible() const
 	{
-		return Settings.Coverage > 0.0f && Settings.Density > 0.0f && Settings.TopAltitude > Settings.BottomAltitude;
+		return (Settings.Coverage > 0.0f && Settings.Density > 0.0f && Settings.TopAltitude > Settings.BottomAltitude) ||
+			Settings.CirrusCoverage > 0.0f;
+	}
+
+	void VolumetricClouds::ApplyStyle(CloudStyle style)
+	{
+		auto& s = Settings;
+
+		switch (style)
+		{
+		case CloudStyle::Cumulus:
+			s.Towering = 0.6f;
+			s.Billow = 0.8f;
+			s.BaseVariation = 0.3f;
+			s.BaseRoundness = 0.55f;
+			s.DetailErosion = 0.35f;
+			s.CoverageVariation = 0.45f;
+			s.Density = 0.024f;
+			s.ShapeScale = 1.0f / 3000.0f;
+			break;
+		case CloudStyle::Stratocumulus:
+			s.Towering = 0.3f;
+			s.Billow = 0.6f;
+			s.BaseVariation = 0.2f;
+			s.BaseRoundness = 0.4f;
+			s.DetailErosion = 0.3f;
+			s.CoverageVariation = 0.3f;
+			s.Density = 0.03f;
+			s.ShapeScale = 1.0f / 2200.0f;
+			break;
+		case CloudStyle::Stratus:
+			s.Towering = 0.05f;
+			s.Billow = 0.15f;
+			s.BaseVariation = 0.1f;
+			s.BaseRoundness = 0.2f;
+			s.DetailErosion = 0.2f;
+			s.CoverageVariation = 0.2f;
+			s.Density = 0.02f;
+			s.ShapeScale = 1.0f / 6000.0f;
+			break;
+		case CloudStyle::Cumulonimbus:
+			s.Towering = 1.0f;
+			s.Billow = 0.9f;
+			s.BaseVariation = 0.15f;
+			s.BaseRoundness = 0.35f;
+			s.DetailErosion = 0.3f;
+			s.CoverageVariation = 0.5f;
+			s.Density = 0.05f;
+			s.ShapeScale = 1.0f / 4500.0f;
+			break;
+		}
+	}
+
+	void VolumetricClouds::SetWind(float metersPerSecond, float towardDegrees)
+	{
+		const float radians = towardDegrees * 3.14159265f / 180.0f;
+		Settings.Wind = { std::sin(radians) * metersPerSecond, Settings.Wind[1], std::cos(radians) * metersPerSecond };
 	}
 
 	VolumetricClouds::Params VolumetricClouds::MakeParams(const RenderFeatureContext& context, float radianceScale) const
@@ -151,8 +208,76 @@ namespace Engine
 			settings.Sky.HorizonColor[2] * skyScale, std::clamp(Settings.Powder, 0.0f, 1.0f) };
 		params.Lighting = { Settings.ShadowStepLength, std::clamp(Settings.SilverLining, 0.0f, 1.0f), Settings.DetailErosion,
 			std::clamp(Settings.HorizonFade, 0.0f, 1.0f) };
+		params.Shape = { Settings.WeatherScale, std::clamp(Settings.Towering, 0.0f, 1.0f), Settings.DetailWind,
+			std::clamp(Settings.CoverageVariation, 0.0f, 1.0f) };
+		params.Form = { std::clamp(Settings.Billow, 0.0f, 1.0f), std::clamp(Settings.BaseVariation, 0.0f, 1.0f),
+			std::clamp(Settings.BaseRoundness, 0.0f, 1.0f), std::atan2(Settings.Wind[0], Settings.Wind[2]) };
+		params.Cirrus = { std::clamp(Settings.CirrusCoverage, 0.0f, 1.0f), Settings.CirrusAltitude, Settings.CirrusScale,
+			std::clamp(Settings.CirrusOpacity, 0.0f, 1.0f) };
+		params.PreviousViewProjection = view.PreviousViewProjection;
 		params.Output[2] = std::clamp(Settings.ShadowSteps, 1u, 16u);
 		return params;
+	}
+
+	std::optional<VolumetricClouds::Noise> VolumetricClouds::ImportNoise(RenderFeatureContext& context)
+	{
+		auto& graph = context.Graph();
+
+		if (noiseGraph == &graph && noiseFrame == context.View().Frame)
+		{
+			return noise;
+		}
+
+		noiseGraph = &graph;
+		noiseFrame = context.View().Frame;
+		noise.reset();
+		auto* device = context.Device();
+
+		if (!device)
+		{
+			return noise;
+		}
+
+		if (!shapeTexture)
+		{
+			Swim::Rhi::TextureDesc desc;
+			desc.PixelFormat = Swim::Rhi::Format::RGBA16Float;
+			desc.Usage = Swim::Rhi::TextureUsage::Sampled | Swim::Rhi::TextureUsage::Storage;
+			desc.Extent = { AtlasWidth, AtlasHeight, 1 };
+			desc.DebugName = "Cloud shape noise";
+			shapeTexture = device->CreateTexture(desc);
+			desc.Extent = { WeatherSize, WeatherSize, 1 };
+			desc.DebugName = "Cloud weather map";
+			weatherTexture = device->CreateTexture(desc);
+			baked = false;
+		}
+
+		if (!shapeTexture || !weatherTexture)
+		{
+			return noise;
+		}
+
+		// A reloaded bake program (shader hot reload) bakes the noise again.
+		const auto& load = context.GetServices().LoadCompute;
+		const void* bakeProgram = load ? load("VolumetricCloudsBake").Pipeline.get() : nullptr;
+		baked = baked && bakeProgram == bakedWith;
+		const auto state = baked ? Swim::Rhi::ResourceState::ShaderRead : Swim::Rhi::ResourceState::Undefined;
+		Noise imported{ graph.ImportTexture(*shapeTexture, state), graph.ImportTexture(*weatherTexture, state) };
+
+		if (!baked)
+		{
+			context.Compute("VolumetricCloudsBake")
+				.Storage("ShapeAtlas", imported.Shape)
+				.Storage("WeatherMap", imported.Weather)
+				.Dispatch(AtlasWidth, AtlasHeight + WeatherSize);
+			baked = true;
+			bakedWith = bakeProgram;
+		}
+
+		graph.Export(imported.Shape, Swim::Rhi::ResourceState::ShaderRead);
+		graph.Export(imported.Weather, Swim::Rhi::ResourceState::ShaderRead);
+		noise = imported;
+		return noise;
 	}
 
 	void VolumetricClouds::Record(RenderFeatureContext& context)
@@ -164,7 +289,9 @@ namespace Engine
 			windOffset[c] = std::fmod(windOffset[c] + Settings.Wind[c] * view.DeltaTime, 1.0e6f);
 		}
 
-		if (!Visible())
+		const auto textures = Visible() ? ImportNoise(context) : std::nullopt;
+
+		if (!textures)
 		{
 			return;
 		}
@@ -180,19 +307,72 @@ namespace Engine
 		params.Output[1] = view.Height;
 
 		auto& graph = context.Graph();
+		auto* device = context.Device();
+		const bool temporal = Settings.Temporal && view.Temporal && device;
+
+		if (temporal && (!history[0] || historyWidth != width || historyHeight != height))
+		{
+			Swim::Rhi::TextureDesc desc;
+			desc.PixelFormat = Swim::Rhi::Format::RGBA16Float;
+			desc.Usage = Swim::Rhi::TextureUsage::Sampled | Swim::Rhi::TextureUsage::Storage;
+			desc.Extent = { width, height, 1 };
+			desc.DebugName = "Cloud history";
+			history[0] = device->CreateTexture(desc);
+			history[1] = device->CreateTexture(desc);
+			historyWidth = width;
+			historyHeight = height;
+			historyFrame = ~0u;
+			historyWritten = { false, false };
+		}
+
+		const bool accumulate = temporal && history[0] && history[1];
+		const bool continued = accumulate && !view.Cut && historyFrame != ~0u && historyFrame + 1u == view.Frame;
+		params.Output[3] = continued ? 1u : 0u;
 		const auto buffer = graph.CreateUpload(std::as_bytes(std::span(&params, 1)), "Cloud params", Swim::Rhi::BufferUsage::Storage, 16);
 		const auto clouds = context.CreateTexture(Swim::Rhi::Format::RGBA16Float, width, height, "Clouds");
 		context.Compute("VolumetricCloudsMarch")
 			.Buffer("Params", buffer)
 			.Storage("Clouds", clouds)
+			.Texture("ShapeAtlas", textures->Shape)
+			.Texture("WeatherMap", textures->Weather)
+			.Sampler("LinearClamp")
+			.Sampler("LinearRepeat", "LinearRepeat")
 			.Texture("Depth", context.Depth())
 			.Dispatch(width, height);
+		auto resolved = clouds;
+
+		if (accumulate)
+		{
+			const auto state = [](bool written) { return written ? Swim::Rhi::ResourceState::ShaderRead : Swim::Rhi::ResourceState::Undefined; };
+			const auto next = graph.ImportTexture(*history[historyIndex ^ 1u], state(historyWritten[historyIndex ^ 1u]));
+			// Without a history the pass only copies; any other texture stands in for it.
+			const auto previous = continued ? graph.ImportTexture(*history[historyIndex], state(true)) : textures->Weather;
+			context.Compute("VolumetricCloudsTemporal")
+				.Buffer("Params", buffer)
+				.Texture("Clouds", clouds)
+				.Texture("History", previous)
+				.Sampler("LinearClamp")
+				.Storage("Accumulated", next)
+				.Dispatch(width, height);
+
+			if (continued)
+			{
+				graph.Export(previous, Swim::Rhi::ResourceState::ShaderRead);
+			}
+
+			graph.Export(next, Swim::Rhi::ResourceState::ShaderRead);
+			historyWritten[historyIndex ^ 1u] = true;
+			historyIndex ^= 1u;
+			historyFrame = view.Frame;
+			resolved = next;
+		}
+
 		const auto output = context.CreateColorTarget("Clouds composite");
 		context.Compute("VolumetricCloudsComposite")
 			.Buffer("Params", buffer)
 			.Texture("Color", context.Color())
 			.Texture("Depth", context.Depth())
-			.Texture("Clouds", clouds)
+			.Texture("Clouds", resolved)
 			.Sampler("LinearClamp")
 			.Storage("Output", output)
 			.Dispatch(view.Width, view.Height);
@@ -206,7 +386,9 @@ namespace Engine
 
 	std::optional<Swim::Render::GraphTexture> VolumetricClouds::RecordEnvironment(RenderFeatureContext& context, std::uint32_t faceSize)
 	{
-		if (!ContributesToEnvironment() || faceSize == 0)
+		const auto textures = ContributesToEnvironment() && faceSize != 0 ? ImportNoise(context) : std::nullopt;
+
+		if (!textures)
 		{
 			return std::nullopt;
 		}
@@ -225,7 +407,14 @@ namespace Engine
 		const auto buffer =
 			graph.CreateUpload(std::as_bytes(std::span(&params, 1)), "Environment cloud params", Swim::Rhi::BufferUsage::Storage, 16);
 		const auto clouds = context.CreateTexture(Swim::Rhi::Format::RGBA16Float, faceSize, faceSize * 6u, "Environment clouds");
-		context.Compute("VolumetricCloudsEnvironment").Buffer("Params", buffer).Storage("Clouds", clouds).Dispatch(faceSize, faceSize * 6u);
+		context.Compute("VolumetricCloudsEnvironment")
+			.Buffer("Params", buffer)
+			.Storage("Clouds", clouds)
+			.Texture("ShapeAtlas", textures->Shape)
+			.Texture("WeatherMap", textures->Weather)
+			.Sampler("LinearClamp")
+			.Sampler("LinearRepeat", "LinearRepeat")
+			.Dispatch(faceSize, faceSize * 6u);
 		return clouds;
 	}
 

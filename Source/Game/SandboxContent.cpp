@@ -1,6 +1,7 @@
 #include "Game/SandboxContent.h"
 
 #include "Engine/Components/MeshRenderer.h"
+#include "Engine/Math/ColorMath.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Systems/Scene/Scene.h"
 
@@ -72,8 +73,7 @@ namespace Game
 	{
 		const auto decode = [](int v)
 		{
-			const float c = static_cast<float>(v) / 255.0f;
-			return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+			return Engine::SrgbToLinear(static_cast<float>(v) / 255.0f);
 		};
 		return { decode(r), decode(g), decode(b) };
 	}

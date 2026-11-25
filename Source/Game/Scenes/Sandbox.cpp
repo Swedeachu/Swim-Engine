@@ -32,6 +32,7 @@
 #include "Engine/Systems/Scene/ModelImporter/ModelImport.h"
 #include "Game/SandboxContent.h"
 #include "Game/Ui/SandboxHud.h"
+#include "Game/Ui/UiShowcase.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -39,6 +40,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 namespace Game
 {
@@ -217,6 +219,230 @@ namespace Game
 					}
 
 				});
+			// sandbox.outline <x y z> [width] [creases 0|1] [rim strength]: outlines a unit box and a
+			// pyramid beside it (no arguments: removes them).
+			commands->Register("sandbox.outline",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!outline)
+					{
+						return;
+					}
+
+					outline->Clear();
+
+					if (arguments.size() < 3)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					Engine::Outline::Object box;
+					box.Boxes.push_back({});
+					box.Transform = { 1, 0, 0, at(0, 0.0f), 0, 1, 0, at(1, 0.0f), 0, 0, 1, at(2, 0.0f) };
+					box.Width = at(3, 2.0f);
+					box.Creases = at(4, 0.0f) != 0.0f;
+					box.Rim = { 0.4f, 0.8f, 1.0f, at(5, 0.0f) };
+					box.HiddenOpacity = 0.3f;
+					outline->Set(box);
+					Engine::Outline::Object pyramid = box;
+					pyramid.Boxes.clear();
+					const std::array<float, 3> apex{ 0.5f, 1.2f, 0.5f };
+					const std::array<std::array<float, 3>, 4> corners{ { { 0, 0, 0 }, { 1, 0, 0 }, { 1, 0, 1 }, { 0, 0, 1 } } };
+					for (int i = 0; i < 4; ++i)
+					{
+						pyramid.Triangles.insert(pyramid.Triangles.end(), { corners[i], corners[(i + 1) % 4], apex });
+					}
+					pyramid.Triangles.insert(pyramid.Triangles.end(), { corners[0], corners[1], corners[2], corners[0], corners[2], corners[3] });
+					pyramid.Transform[3] += 1.6f;
+					pyramid.Color = { 1.0f, 0.85f, 0.2f, 1.0f };
+					outline->Set(pyramid);
+				});
+			// sandbox.overlay <0|1> <x y z> <radius> [fov] [near]: puts every mesh within radius of the
+			// point on the first-person overlay layer (or takes it off): drawn in front of the scene.
+			commands->Register("sandbox.overlay",
+				[this](const std::vector<std::string>& arguments)
+				{
+					using Flags = Swim::Render::RenderObjectFlags;
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					const bool on = at(0, 1.0f) != 0.0f;
+					const glm::vec3 center{ at(1, 0.0f), at(2, 0.0f), at(3, 0.0f) };
+					const float radius = at(4, 1.0f);
+					auto& registry = GetRegistry();
+
+					for (const auto entity : registry.view<Engine::MeshRenderer, Engine::Transform>())
+					{
+						if (glm::length(registry.get<Engine::Transform>(entity).GetPosition() - center) > radius)
+						{
+							continue;
+						}
+
+						registry.patch<Engine::MeshRenderer>(entity,
+							[on](Engine::MeshRenderer& renderer)
+							{
+								const auto bits = static_cast<std::uint32_t>(renderer.Flags) & ~static_cast<std::uint32_t>(Flags::Overlay);
+								renderer.Flags = static_cast<Flags>(bits | (on ? static_cast<std::uint32_t>(Flags::Overlay) : 0u));
+							});
+					}
+
+					if (auto* render = GetRenderServices(); render && render->Settings)
+					{
+						render->Settings->Overlay.FieldOfView = at(5, render->Settings->Overlay.FieldOfView);
+						render->Settings->Overlay.Near = at(6, render->Settings->Overlay.Near);
+					}
+				});
+			// sandbox.water <0|1> [x y z] [half size] [waves] [murk]: a water rectangle (Game::WaterDemo).
+			commands->Register("sandbox.water",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!water)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					water->Enabled = at(0, 1.0f) != 0.0f;
+					water->Center = { at(1, water->Center[0]), at(2, water->Center[1]), at(3, water->Center[2]) };
+					water->HalfSize = { at(4, water->HalfSize[0]), at(4, water->HalfSize[1]) };
+					water->WaveHeight = at(5, water->WaveHeight);
+					water->Murk = at(6, water->Murk);
+				});
+			// sandbox.waves <0|1> [x z] [half size, 0 = endless] [height] [amplitude]: wave water with
+			// buoyancy (Engine::WaveWater + a PhysicsWorld fluid volume on the same waves).
+			commands->Register("sandbox.waves",
+				[this](const std::vector<std::string>& arguments)
+				{
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					SetWaves(at(0, 1.0f) != 0.0f, { at(1, 0.0f), at(2, 0.0f) }, at(3, 0.0f), at(4, 1.5f), at(5, 0.3f));
+				});
+			// sandbox.ocean <0|1> [height] [wind m/s]: the FFT ocean with buoyancy on its GPU heights
+			// (read back to the CPU, OceanSimulation::SampleSurface).
+			commands->Register("sandbox.ocean",
+				[this](const std::vector<std::string>& arguments)
+				{
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					SetOcean(at(0, 1.0f) != 0.0f, at(1, 1.5f), at(2, 10.0f));
+				});
+			// sandbox.floaters [count] [x y z]: buoyant shapes thrown onto the wave water.
+			commands->Register("sandbox.floaters",
+				[this](const std::vector<std::string>& arguments)
+				{
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					glm::vec3 around(0.0f, 4.0f, 0.0f);
+
+					if (const auto* cameras = GetCameraSystem(); cameras && arguments.size() < 4)
+					{
+						const auto& camera = cameras->GetCamera();
+						around = camera.GetPosition() + camera.GetForward() * 12.0f;
+					}
+
+					SpawnFloaters(static_cast<std::uint32_t>(std::clamp(at(0, 12.0f), 1.0f, 200.0f)),
+						{ at(1, around.x), at(2, around.y), at(3, around.z) });
+				});
+			// sandbox.waterlod <mode> [detail start end] [amplitude start end] [far amplitude]: 0 off,
+			// 1 continuous (default distances or the given ones), 2 a hard cut at the detail start
+			// (no far field), 3 continuous with the debug tint. Applies to wave water.
+			commands->Register("sandbox.waterlod",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!waveWater)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					const int mode = static_cast<int>(at(0, 1.0f));
+					Engine::WaterLodSettings lod;
+					lod.DetailStart = at(1, lod.DetailStart);
+					lod.DetailEnd = std::max(at(2, lod.DetailEnd), lod.DetailStart);
+					lod.AmplitudeStart = at(3, lod.AmplitudeStart);
+					lod.AmplitudeEnd = std::max(at(4, lod.AmplitudeEnd), lod.AmplitudeStart);
+					lod.FarAmplitude = std::clamp(at(5, lod.FarAmplitude), 0.0f, 1.0f);
+					lod.Enabled = mode != 0;
+					lod.Debug = mode == 3;
+					waveWater->Settings.Extent = 600.0f;
+
+					if (mode == 2)
+					{
+						// What a switch to "no water" at one distance (30 m unless given) looks like.
+						lod.DetailStart = arguments.size() > 1 ? lod.DetailStart : 30.0f;
+						lod.DetailEnd = lod.DetailStart;
+						lod.AmplitudeStart = lod.AmplitudeEnd = lod.DetailStart;
+						lod.FarAmplitude = 0.0f;
+						lod.NormalStart = lod.NormalEnd = lod.DetailStart;
+						lod.FarField = false;
+						waveWater->Settings.Extent = lod.DetailStart;
+					}
+
+					waveWater->Settings.Lod = lod;
+				});
+			// sandbox.cull <0|1> [x y z] [xray] [occlusion] [wall]: boxes behind a wall culled by
+			// Engine::IndirectCuller (Game::CullDemo); xray shows the boxes the culler kept.
+			commands->Register("sandbox.cull",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!cullDemo)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					cullDemo->Enabled = at(0, 1.0f) != 0.0f;
+					cullDemo->Origin = { at(1, cullDemo->Origin[0]), at(2, cullDemo->Origin[1]), at(3, cullDemo->Origin[2]) };
+					cullDemo->Xray = at(4, cullDemo->Xray ? 1.0f : 0.0f) != 0.0f;
+					cullDemo->Occlusion = at(5, cullDemo->Occlusion ? 1.0f : 0.0f) != 0.0f;
+					cullDemo->Wall = at(6, cullDemo->Wall ? 1.0f : 0.0f) != 0.0f;
+				});
+			// sandbox.celestial <0|1> [moon phase] [sidereal angle] [visibility] [star brightness] [sky intensity] [moon size]
+			commands->Register("sandbox.celestial",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!celestial)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					celestial->Enabled = at(0, 1.0f) != 0.0f;
+					celestial->Settings.MoonPhase = at(1, celestial->Settings.MoonPhase);
+					celestial->Settings.SiderealAngle = at(2, celestial->Settings.SiderealAngle);
+					celestial->Settings.Visibility = at(3, celestial->Settings.Visibility);
+					celestial->Settings.StarBrightness = at(4, celestial->Settings.StarBrightness);
+
+					// [sky intensity]: a dark night sky to see the stars against.
+					if (auto* render = GetRenderServices(); render && render->Settings && arguments.size() > 5)
+					{
+						render->Settings->Sky.Intensity = at(5, 1.0f);
+						render->Settings->EnvironmentIntensity = 1.1f * at(5, 1.0f);
+					}
+
+					celestial->Settings.MoonSize = at(6, celestial->Settings.MoonSize);
+				});
+			// sandbox.cloudstyle <0 cumulus | 1 stratocumulus | 2 stratus | 3 cumulonimbus> [bottom top] [cirrus]
+			commands->Register("sandbox.cloudstyle",
+				[this](const std::vector<std::string>& arguments)
+				{
+					if (!clouds)
+					{
+						return;
+					}
+
+					auto at = [&](std::size_t i, float fallback)
+					{ return i < arguments.size() ? std::strtof(arguments[i].c_str(), nullptr) : fallback; };
+					clouds->ApplyStyle(static_cast<Engine::CloudStyle>(std::clamp(static_cast<int>(at(0, 0.0f)), 0, 3)));
+					clouds->Settings.BottomAltitude = at(1, clouds->Settings.BottomAltitude);
+					clouds->Settings.TopAltitude = at(2, clouds->Settings.TopAltitude);
+					clouds->Settings.CirrusCoverage = at(3, clouds->Settings.CirrusCoverage);
+				});
 			commands->Register("sandbox.boxfield",
 				[this, number](const std::vector<std::string>& arguments)
 				{
@@ -368,6 +594,24 @@ namespace Game
 				[this, number](const std::vector<std::string>& arguments)
 				{
 					SetHudVisible(number(arguments, 1.0f) != 0.0f);
+				});
+			commands->Register("sandbox.showcase",
+				[this, number](const std::vector<std::string>& arguments)
+				{
+					const bool on = number(arguments, 1.0f) != 0.0f;
+
+					if (on && showcase == entt::null)
+					{
+						showcase = CreateEntity("UI showcase");
+						EmplaceBehavior<UiShowcase>(showcase);
+						SetEnabledStates(showcase, AllStates);
+					}
+					else if (!on && showcase != entt::null)
+					{
+						DestroyEntity(showcase);
+						showcase = entt::null;
+					}
+
 				});
 			commands->Register("sandbox.view",
 				[this, number](const std::vector<std::string>& arguments)
@@ -618,6 +862,17 @@ namespace Game
 		lensing = std::make_shared<Engine::GravitationalLensing>();
 		// GPU-culled geometry drawn through the feature geometry hooks (lit, shadowed).
 		boxField = std::make_shared<BoxField>();
+		outline = std::make_shared<Engine::Outline>();
+		water = std::make_shared<WaterDemo>();
+		water->Enabled = false;
+		waveWater = std::make_shared<Engine::WaveWater>();
+		waveWater->Enabled = false;
+		ocean = std::make_shared<Engine::OceanSurface>();
+		ocean->Enabled = false;
+		cullDemo = std::make_shared<CullDemo>();
+		cullDemo->Enabled = false;
+		celestial = std::make_shared<Engine::CelestialSky>();
+		celestial->Enabled = false;
 
 		// The face image is a copy in the temporary folder, so editing it shows hot reload.
 		{
@@ -648,6 +903,12 @@ namespace Game
 			render->Renderer->AddFeature(filmSensor);
 			render->Renderer->AddFeature(lensing);
 			render->Renderer->AddFeature(boxField);
+			render->Renderer->AddFeature(outline);
+			render->Renderer->AddFeature(water);
+			render->Renderer->AddFeature(waveWater);
+			render->Renderer->AddFeature(ocean);
+			render->Renderer->AddFeature(cullDemo);
+			render->Renderer->AddFeature(celestial);
 		}
 	}
 
@@ -986,17 +1247,20 @@ namespace Game
 
 	void Sandbox::SetSunAngles(float elevationDegrees, float azimuthDegrees)
 	{
-		sunElevation = std::clamp(elevationDegrees, 2.0f, 89.0f);
+		// Below the horizon only the sky follows (night); the light stays just above it.
+		sunElevation = std::clamp(elevationDegrees, -30.0f, 89.0f);
 		sunAzimuth = std::fmod(std::fmod(azimuthDegrees, 360.0f) + 360.0f, 360.0f);
 		const float el = glm::radians(sunElevation);
 		const float az = glm::radians(sunAzimuth);
 		const glm::vec3 towardSun{ std::cos(el) * std::sin(az), std::sin(el), std::cos(el) * std::cos(az) };
+		const float lightEl = glm::radians(std::max(sunElevation, 2.0f));
+		const glm::vec3 towardLight{ std::cos(lightEl) * std::sin(az), std::sin(lightEl), std::cos(lightEl) * std::cos(az) };
 
 		if (IsValid(sun))
 		{
 			if (auto* transform = GetRegistry().try_get<Engine::Transform>(sun))
 			{
-				transform->SetRotation(LookRotation(-towardSun));
+				transform->SetRotation(LookRotation(-towardLight));
 			}
 		}
 
@@ -1009,7 +1273,7 @@ namespace Game
 			render->Settings->Sky.SunColor = { 16.0f, 15.2f - 4.5f * warmth, 13.6f - 8.0f * warmth };
 		}
 
-		const float sunIntensity = 9.0f * std::clamp(std::sin(el) * 1.6f, 0.15f, 1.0f);
+		const float sunIntensity = sunElevation < 0.0f ? 0.05f : 9.0f * std::clamp(std::sin(el) * 1.6f, 0.15f, 1.0f);
 
 		if (IsValid(sun))
 		{
@@ -1507,6 +1771,150 @@ namespace Game
 		{
 			SpawnBallAt(PhysicsCenter + glm::vec3(spread(random), 7.0f + 0.4f * static_cast<float>(i), spread(random)),
 				glm::vec3(0.0f, -1.0f, 0.0f));
+		}
+	}
+
+	void Sandbox::SetWaves(bool on, glm::vec2 center, float halfSize, float height, float amplitude)
+	{
+		if (!waveWater)
+		{
+			return;
+		}
+
+		auto* world = GetPhysicsWorld();
+
+		if (world && waveFluid)
+		{
+			world->RemoveFluidVolume(waveFluid);
+			waveFluid = {};
+		}
+
+		waveWater->Enabled = on;
+
+		if (!on)
+		{
+			return;
+		}
+
+		if (ocean)
+		{
+			ocean->Enabled = false;
+		}
+
+		auto& settings = waveWater->Settings;
+		const float inf = std::numeric_limits<float>::max();
+		settings.Waves.Height = height;
+		settings.Waves.Amplitude = std::max(amplitude, 0.0f);
+		settings.BoundsMin = halfSize > 0.0f ? std::array<float, 2>{ center.x - halfSize, center.y - halfSize } : std::array<float, 2>{ -inf, -inf };
+		settings.BoundsMax = halfSize > 0.0f ? std::array<float, 2>{ center.x + halfSize, center.y + halfSize } : std::array<float, 2>{ inf, inf };
+
+		if (!world)
+		{
+			return;
+		}
+
+		// The water and the physics share the waves and the clock (simulated seconds).
+		waveWater->Clock = [world]
+		{
+			return world->GetSimulationTime();
+		};
+		Engine::FluidVolumeDesc fluid;
+		fluid.Surface = Engine::MakeFluidSurface(waveWater->GetWaves());
+		fluid.SurfaceHeight = height;
+		fluid.BoundsMin = glm::vec3(settings.BoundsMin[0], -inf, settings.BoundsMin[1]);
+		fluid.BoundsMax = glm::vec3(settings.BoundsMax[0], inf, settings.BoundsMax[1]);
+		waveFluid = world->AddFluidVolume(std::move(fluid));
+	}
+
+	void Sandbox::SetOcean(bool on, float height, float windSpeed)
+	{
+		if (!ocean)
+		{
+			return;
+		}
+
+		auto* world = GetPhysicsWorld();
+
+		if (world && waveFluid)
+		{
+			world->RemoveFluidVolume(waveFluid);
+			waveFluid = {};
+		}
+
+		ocean->Enabled = on;
+
+		if (!on)
+		{
+			return;
+		}
+
+		if (waveWater)
+		{
+			waveWater->Enabled = false;
+		}
+
+		ocean->Settings.Height = height;
+		ocean->Simulation->Settings.WindSpeed = std::max(windSpeed, 0.1f);
+
+		if (world)
+		{
+			Engine::FluidVolumeDesc fluid;
+			fluid.Surface = Engine::MakeOceanFluidSurface(ocean->Simulation, height);
+			fluid.SurfaceHeight = height;
+			waveFluid = world->AddFluidVolume(std::move(fluid));
+		}
+	}
+
+	void Sandbox::SpawnFloaters(std::uint32_t count, glm::vec3 around)
+	{
+		std::uniform_real_distribution<float> unit(-1.0f, 1.0f);
+		std::uniform_real_distribution<float> hue(0.0f, 1.0f);
+
+		for (std::uint32_t i = 0; i < count; ++i)
+		{
+			const int kind = static_cast<int>(spawned % 3);
+			const auto mesh = kind == 0 ? Engine::BuiltinMesh::Cube : kind == 1 ? Engine::BuiltinMesh::Sphere : Engine::BuiltinMesh::Capsule;
+			const float h = hue(random);
+			const glm::vec3 color{ 0.5f + 0.5f * std::cos(6.2831f * h), 0.5f + 0.5f * std::cos(6.2831f * (h + 0.33f)),
+				0.5f + 0.5f * std::cos(6.2831f * (h + 0.67f)) };
+			const std::uint32_t material = Mat("Floater " + std::to_string(spawned % 8), color, 0.0f, 0.5f);
+			const glm::vec3 position = around + glm::vec3(unit(random) * 4.0f, 1.5f + 0.6f * float(i % 5), unit(random) * 4.0f);
+			const glm::vec3 scale = kind == 2 ? glm::vec3(0.6f, 1.2f, 0.6f) : glm::vec3(0.8f);
+			const entt::entity entity = SpawnMesh(*this,
+				{ "Floater", palette.Mesh(mesh), material, position, scale,
+					glm::angleAxis(unit(random) * 3.14159f, glm::normalize(glm::vec3(unit(random), 1.0f, unit(random)))),
+					Swim::Render::RenderObjectFlags::Default, { GameTags::Spawned, Engine::Tags::Dynamic } });
+			Engine::Rigidbody body;
+			body.type = Engine::RigidbodyType::Dynamic;
+			body.buoyant = true;
+
+			// Half to two thirds as dense as water: they float, the figures low in it.
+			if (kind == 0)
+			{
+				body.collider.type = Engine::ColliderType::Box;
+				body.collider.box.halfExtents = glm::vec3(0.5f);
+				body.mass = 0.512f * 450.0f;
+			}
+			else if (kind == 1)
+			{
+				body.collider.type = Engine::ColliderType::Sphere;
+				body.collider.sphere.radius = 0.5f;
+				body.mass = 0.268f * 500.0f;
+			}
+			else
+			{
+				body.collider.type = Engine::ColliderType::Capsule;
+				body.collider.capsule.radius = 0.5f;
+				body.collider.capsule.halfHeight = 0.25f;
+				body.mass = 0.283f * 650.0f;
+			}
+
+			// Thrown in: a toss toward the middle with some spin.
+			body.SetInitialLinearVelocity(glm::vec3(unit(random) * 3.0f, 2.0f + 2.0f * hue(random), unit(random) * 3.0f));
+			body.SetInitialAngularVelocity(glm::vec3(unit(random), unit(random), unit(random)) * 3.0f);
+			AddComponent<Engine::Rigidbody>(entity, body);
+			AddTag(entity, Engine::Tags::Physics);
+			++spawned;
 		}
 	}
 

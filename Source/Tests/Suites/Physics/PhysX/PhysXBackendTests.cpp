@@ -1,4 +1,7 @@
 #include "Engine/Systems/Physics/Backends/PhysX/PhysXBackendFactory.h"
+#if SWIM_ENABLE_JOLT_BACKEND
+#include "Engine/Systems/Physics/Backends/Jolt/JoltBackendFactory.h"
+#endif
 #include "Tests/Fixtures/PhysicsBackendContract.h"
 #include "Tests/Framework/Test.h"
 
@@ -74,3 +77,35 @@ SWIM_TEST("Physics.PhysXBackend", "ContactEventContract")
 	SWIM_REQUIRE(backend != nullptr);
 	Engine::Tests::RunPhysicsContactEventContract(*backend);
 }
+
+SWIM_TEST("Physics.PhysXBackend", "FloaterContract")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsFloaterContract(*backend);
+}
+
+SWIM_TEST("Physics.PhysXBackend", "BuoyancyContract")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsBuoyancyContract(*backend);
+}
+
+#if SWIM_ENABLE_JOLT_BACKEND
+SWIM_TEST("Physics.PhysXBackend", "BuoyancyRidesWavesLikeJolt")
+{
+	Engine::IPhysicsBackend* backend = SharedPhysXBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	const auto physx = Engine::Tests::RunPhysicsWaveRide(*backend);
+	const auto jolt = Engine::CreateJoltBackend();
+	SWIM_REQUIRE(jolt != nullptr);
+	const auto reference = Engine::Tests::RunPhysicsWaveRide(*jolt);
+	SWIM_REQUIRE_EQUAL(physx.size(), reference.size());
+
+	for (std::size_t i = 0; i < physx.size(); ++i)
+	{
+		SWIM_CHECK(std::abs(physx[i] - reference[i]) < 0.1f);
+	}
+}
+#endif

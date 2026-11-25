@@ -4,6 +4,7 @@
 
 #include "Engine/Components/CameraComponent.h"
 #include "Engine/Input/InputNames.h"
+#include "Engine/Math/VectorMath.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Runtime/UiRuntime.h"
 #include "Engine/Runtime/FramePacing.h"
@@ -126,11 +127,6 @@ namespace Engine
 			return "unknown";
 		}
 #endif
-
-		std::array<float, 3> ToArray(const glm::vec3& v)
-		{
-			return { v.x, v.y, v.z };
-		}
 
 	} // namespace
 
@@ -563,10 +559,16 @@ namespace Engine
 			deviceDesc.Height = surfaceHeight;
 			deviceDesc.VSync = config.VSync;
 			deviceDesc.FramesInFlight = config.FramesInFlight;
+			deviceDesc.Adapter = config.Adapter;
+			deviceDesc.AsyncPresent = config.PresentThread;
+			deviceDesc.DeferPresent = config.DeferPresent;
+			deviceDesc.SplitPresent = static_cast<RenderDeviceDesc::Split>(config.SplitPresent);
 			deviceDesc.Validation = config.Validation;
 			renderDevice = std::make_unique<RenderDevice>(deviceDesc);
 			std::cout << "[Render] " << renderDevice->GetAdapterInfo().Name << " (" << renderDevice->GetAdapterInfo().DriverName << "), "
-					  << (renderDevice->IsHeadless() ? "headless" : "swapchain") << ", validation "
+					  << (renderDevice->IsHeadless() ? "headless" : "swapchain")
+					  << (renderDevice->GetPresentStats().CrossAdapter ? " (the display is on another adapter: presents cross adapters)" : "")
+					  << ", validation "
 					  << (renderDevice->IsValidationEnabled() ? "on" : "off") << '\n';
 
 			FrameRendererDesc rendererDesc;
@@ -1211,6 +1213,16 @@ namespace Engine
 			});
 	}
 
+	namespace
+	{
+		// 0..100 -> look multiplier: 50 is 1, 13 is about 0.17, 100 about 4.1.
+		float LookSensitivityScale(double value)
+		{
+			const double t = std::clamp(value, 0.0, 100.0) / 100.0 * 0.6 + 0.2;
+			return static_cast<float>(t * t * t * 8.0);
+		}
+	} // namespace
+
 	void SwimEngine::RegisterInputCommands()
 	{
 		using Swim::Commands::VariableFlags;
@@ -1227,15 +1239,15 @@ namespace Engine
 				actionMap->WriteConfig(out);
 			});
 
-		auto& sensitivity = commands.AddFloat("mouse_sensitivity", 1.0, 0.01, 50.0, "Multiplier on raw mouse motion for looking",
+		auto& sensitivity = commands.AddFloat("look_sensitivity", config.LookSensitivityDefault, 0.0, 100.0, "Mouse look speed (0 to 100)",
 			"Controls/Mouse", VariableFlags::Saved);
 		auto& invert = commands.AddBool("mouse_invert_y", false, "Inverts vertical mouse look", "Controls/Mouse", VariableFlags::Saved);
-		actions.SetMouseSensitivity(sensitivity.GetFloat());
+		actions.SetMouseSensitivity(LookSensitivityScale(sensitivity.GetFloat()));
 		actions.SetInvertMouseY(invert.GetBool());
 		sensitivity.Subscribe(
 			[this](const Swim::Commands::ConsoleVariable& variable)
 			{
-				actionMap->SetMouseSensitivity(variable.GetFloat());
+				actionMap->SetMouseSensitivity(LookSensitivityScale(variable.GetFloat()));
 			});
 		invert.Subscribe(
 			[this](const Swim::Commands::ConsoleVariable& variable)
@@ -1685,8 +1697,41 @@ namespace Engine
 		return running;
 	}
 
+	void SwimEngine::SaveUserConfig()
+	{
+		configDirtySeconds = 0.0;
+
+		if (!commandRegistry || !commandRegistry->IsConfigDirty())
+		{
+			return;
+		}
+
+		if (const auto path = GetUserConfigPath(); !path.empty())
+		{
+			if (commandRegistry->SaveConfig(path))
+			{
+				commandRegistry->MarkConfigSaved();
+			}
+			else
+			{
+				std::cerr << "[Config] Could not write " << path.string() << '\n';
+			}
+		}
+	}
+
 	void SwimEngine::Update(double realDelta)
 	{
+		// Settings are written shortly after they change, so a crash keeps them.
+		if (commandRegistry && commandRegistry->IsConfigDirty())
+		{
+			configDirtySeconds += realDelta;
+
+			if (configDirtySeconds >= 1.0)
+			{
+				SaveUserConfig();
+			}
+		}
+
 		// Deferred scene switches and Stop resets apply before anything reads the scene.
 		std::optional<FrameProfiler::Scope> zone;
 		zone.emplace(profiler, "Scene begin frame");
@@ -1799,6 +1844,7 @@ namespace Engine
 		if (uiRuntime)
 		{
 			ui = uiRuntime->Finish(static_cast<float>(realDelta));
+			UpdateTextInput(); // A field focused during the update takes text from now on.
 		}
 
 		zone.reset();
@@ -1969,6 +2015,13 @@ namespace Engine
 		{
 			profiler.Add("frame", "GPU (first begin to last end)", gpu);
 		}
+
+		if (renderDevice && !renderDevice->IsHeadless())
+		{
+			const auto& present = renderDevice->GetPresentStats();
+			profiler.Add("frame", present.Async ? "Present call (present thread)" : "Present call (main thread)", present.CallMilliseconds);
+			profiler.Add("frame", "Waited for the previous present", present.WaitMilliseconds);
+		}
 	}
 
 	int SwimEngine::Exit()
@@ -1983,20 +2036,7 @@ namespace Engine
 		int firstError = 0;
 
 		// Before scenes exit: their variables are still registered and get saved.
-		if (commandRegistry && commandRegistry->IsConfigDirty())
-		{
-			if (const auto path = GetUserConfigPath(); !path.empty())
-			{
-				if (commandRegistry->SaveConfig(path))
-				{
-					commandRegistry->MarkConfigSaved();
-				}
-				else
-				{
-					std::cerr << "[Config] Could not write " << path.string() << '\n';
-				}
-			}
-		}
+		SaveUserConfig();
 
 		const auto record = [&firstError](std::string_view name, int result)
 		{

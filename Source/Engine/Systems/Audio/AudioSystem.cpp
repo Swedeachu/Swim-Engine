@@ -235,6 +235,8 @@ namespace Engine
 			ma_sound Sound{};
 			bool Live = false;
 			bool Paused = false;
+			bool Stream = false;
+			bool Starved = false;
 			std::uint32_t Generation = 0;
 			std::vector<float> Markers;
 			std::uint32_t NextMarker = 0;
@@ -242,6 +244,8 @@ namespace Engine
 		};
 
 		ma_engine engine{};
+		ma_resource_manager resourceManager{};
+		bool resourceManagerReady = false;
 		ma_context context{};
 		ma_device outputDevice{};
 		bool engineReady = false;
@@ -259,10 +263,35 @@ namespace Engine
 		std::string deviceNameShared; // Written by the audio thread under deviceNameLock.
 		std::atomic_flag deviceNameLock = ATOMIC_FLAG_INIT;
 
+		// Glitch counters for audio_stats: device callbacks that took longer than the audio they
+		// produced, callbacks that came late (the device ran dry before them), and streams that
+		// had no decoded audio ready while playing.
+		std::atomic<std::uint64_t> callbackOverruns{ 0 };
+		std::atomic<std::uint64_t> callbackLate{ 0 };
+		std::atomic<std::uint64_t> streamStarved{ 0 };
+		std::int64_t lastCallback = 0;
+
 		static void DataCallback(ma_device* device, void* output, const void*, ma_uint32 frameCount)
 		{
 			auto* self = static_cast<Impl*>(device->pUserData);
+			using Nanoseconds = std::chrono::nanoseconds;
+			const auto start = std::chrono::duration_cast<Nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 			ma_engine_read_pcm_frames(&self->engine, output, frameCount, nullptr);
+			const auto end = std::chrono::duration_cast<Nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+			const double period = double(frameCount) * 1.0e9 / double(std::max(device->sampleRate, 1u));
+
+			if (double(end - start) > period)
+			{
+				self->callbackOverruns.fetch_add(1, std::memory_order_relaxed);
+			}
+
+			// A buffer of `periods` periods: a gap longer than all of it played silence.
+			if (self->lastCallback != 0 && double(start - self->lastCallback) > period * double(std::max(device->playback.internalPeriods, 2u)))
+			{
+				self->callbackLate.fetch_add(1, std::memory_order_relaxed);
+			}
+
+			self->lastCallback = start;
 		}
 
 		static void NotificationCallback(const ma_device_notification* notification)
@@ -334,6 +363,10 @@ namespace Engine
 			}
 
 			ma_device_config config = ma_device_config_init(ma_device_type_playback);
+			// 3 x 20 ms: enough slack for the mix to ride out a loaded CPU, still 60 ms at most.
+			config.performanceProfile = ma_performance_profile_conservative;
+			config.periodSizeInMilliseconds = 20;
+			config.periods = 3;
 			config.playback.format = ma_format_f32;
 			config.playback.channels = desc.Channels;
 			config.playback.pDeviceID = id;
@@ -372,7 +405,15 @@ namespace Engine
 
 		bool StartBackend()
 		{
+			// Two decoding threads, so one slow stream page does not hold up the others.
+			ma_resource_manager_config resources = ma_resource_manager_config_init();
+			resources.decodedFormat = ma_format_f32;
+			resources.decodedChannels = desc.Channels;
+			resources.decodedSampleRate = desc.SampleRate;
+			resources.jobThreadCount = 2;
+			resourceManagerReady = ma_resource_manager_init(&resources, &resourceManager) == MA_SUCCESS;
 			ma_engine_config config = ma_engine_config_init();
+			config.pResourceManager = resourceManagerReady ? &resourceManager : nullptr;
 			config.noDevice = MA_TRUE;
 			config.channels = desc.Channels;
 			config.sampleRate = desc.SampleRate;
@@ -388,7 +429,11 @@ namespace Engine
 
 			if (output == AudioOutput::Device)
 			{
-				contextReady = ma_context_init(nullptr, 0, nullptr, &context) == MA_SUCCESS;
+				// The device thread runs at the highest priority: a mix that starts late under a
+				// loaded CPU is heard as a periodic chug.
+				ma_context_config contextConfig = ma_context_config_init();
+				contextConfig.threadPriority = ma_thread_priority_highest;
+				contextReady = ma_context_init(nullptr, 0, &contextConfig, &context) == MA_SUCCESS;
 
 				if (!OpenDevice(wantedDevice) && !OpenDevice({}))
 				{
@@ -432,6 +477,12 @@ namespace Engine
 			{
 				ma_engine_uninit(&engine);
 				engineReady = false;
+			}
+
+			if (resourceManagerReady)
+			{
+				ma_resource_manager_uninit(&resourceManager);
+				resourceManagerReady = false;
 			}
 
 			if (contextReady)
@@ -525,6 +576,8 @@ namespace Engine
 
 			slot.Live = true;
 			slot.Paused = false;
+			slot.Stream = stream;
+			slot.Starved = false;
 			slot.Markers = params.Markers;
 			std::sort(slot.Markers.begin(), slot.Markers.end());
 			slot.NextMarker = 0;
@@ -673,6 +726,26 @@ namespace Engine
 				{
 					Finish(i);
 					continue;
+				}
+
+				if (slot.Stream)
+				{
+					// Counted once per dry spell: nothing decoded ahead of a stream that is not at its end.
+					ma_uint64 available = 0;
+					ma_uint64 cursor = 0;
+					ma_uint64 length = 0;
+					auto* source = slot.Sound.pResourceManagerDataSource;
+					const bool known = source && ma_resource_manager_data_source_get_available_frames(source, &available) == MA_SUCCESS;
+					const bool ended = ma_sound_get_cursor_in_pcm_frames(&slot.Sound, &cursor) == MA_SUCCESS &&
+						ma_sound_get_length_in_pcm_frames(&slot.Sound, &length) == MA_SUCCESS && length > 0 && cursor + 64 >= length;
+					const bool starved = known && available == 0 && !ended;
+
+					if (starved && !slot.Starved)
+					{
+						streamStarved.fetch_add(1, std::memory_order_relaxed);
+					}
+
+					slot.Starved = starved;
 				}
 
 				if (slot.Markers.empty())
@@ -869,7 +942,9 @@ namespace Engine
 					const auto stats = GetStats();
 					std::cout << "[Audio] voices " << stats.Voices << "/" << stats.MaxVoices << ", sounds " << stats.Sounds << ", groups "
 							  << stats.Groups << ", played " << stats.Played << ", stolen " << stats.Stolen << ", refused " << stats.Refused
-							  << ", device " << stats.Device << " @ " << stats.SampleRate << " Hz\n";
+							  << ", device " << stats.Device << " @ " << stats.SampleRate << " Hz, glitches: callback overruns "
+							  << stats.CallbackOverruns << ", late callbacks " << stats.CallbackLate << ", starved streams " << stats.StreamStarved
+							  << '\n';
 				});
 			commands->Register({ "audio_play", "Plays a sound file or group by name (2D, ui bus)", Category, "<path|group> [volume]" },
 				[this](const std::vector<std::string>& arguments)
@@ -1571,6 +1646,9 @@ namespace Engine
 #if SWIM_AUDIO_MINIAUDIO
 		stats.Device = I.output == AudioOutput::Off ? "off" : I.ReadDeviceName();
 		stats.SampleRate = I.sampleRate.load();
+		stats.CallbackOverruns = I.callbackOverruns.load(std::memory_order_relaxed);
+		stats.CallbackLate = I.callbackLate.load(std::memory_order_relaxed);
+		stats.StreamStarved = I.streamStarved.load(std::memory_order_relaxed);
 #else
 		stats.Device = "off";
 #endif

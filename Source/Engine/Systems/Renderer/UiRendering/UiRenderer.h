@@ -15,12 +15,15 @@ namespace Swim::Render
 
 	// SwimUiQuad built by UiRenderer::PipelineDesc for the target's format; its layout's
 	// space 1 is the shared bindless space. DepthPipeline (PipelineDesc with D32Float) is
-	// needed only by frames with Depth.
+	// needed only by frames with Depth. The invert pipelines (PipelineDesc with
+	// UiBlend::Invert, same layout) are needed only by frames with inverting images.
 	struct UiRenderProgram
 	{
 		Rhi::GraphicsPipeline* Pipeline = nullptr;
 		Rhi::PipelineLayout* Layout = nullptr;
 		Rhi::GraphicsPipeline* DepthPipeline = nullptr;
+		Rhi::GraphicsPipeline* InvertPipeline = nullptr;
+		Rhi::GraphicsPipeline* InvertDepthPipeline = nullptr;
 	};
 
 	struct UiRendererDesc
@@ -59,10 +62,12 @@ namespace Swim::Render
 		std::uint32_t Glyphs = 0;
 		std::uint32_t Images = 0;
 		std::uint32_t Culled = 0;
+		std::uint32_t Draws = 0; // Instanced draws: 1 plus one per blend change.
 	};
 
 	// Retained UI and text rendering (critical-path item 79): one graphics pass that draws
-	// a document's paint list as a single instanced draw of GpuUiQuads in paint order.
+	// a document's paint list as instanced draws of GpuUiQuads in paint order: one draw,
+	// split only where inverting images (UiBlend::Invert) change the blend pipeline.
 	// Glyph pages and images are sampled through the bindless table, so quads of any
 	// texture share the draw; clipping happens per instance in the vertex stage, so no
 	// scissor changes or batch splits are needed. Colors are encoded for the target
@@ -73,10 +78,11 @@ namespace Swim::Render
 
 	  public:
 
-		// Premultiplied One / OneMinusSourceAlpha on color and alpha, no culling. With a depth
-		// format (D32Float): the canonical reverse-Z test (GreaterEqual), no depth writes.
+		// Premultiplied One / OneMinusSourceAlpha on color and alpha, no culling; Invert uses
+		// OneMinusDstColor / OneMinusSrcColor on color. With a depth format (D32Float): the
+		// canonical reverse-Z test (GreaterEqual), no depth writes.
 		static Rhi::GraphicsPipelineDesc PipelineDesc(Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout,
-			Rhi::Format depthFormat = Rhi::Format::Undefined);
+			Rhi::Format depthFormat = Rhi::Format::Undefined, UI::UiBlend blend = UI::UiBlend::Normal);
 
 		explicit UiRenderer(UiRendererDesc desc = {});
 
@@ -85,7 +91,8 @@ namespace Swim::Render
 		// attachment, a mip beyond the target's, invalid composition settings, opacity or
 		// canvas matrix, Srgb encoding into an *Srgb format (double encoding), offsets with a
 		// canvas matrix, or a depth target without a canvas matrix, depth pipeline or the
-		// drawn extent, and std::length_error above MaxQuads.
+		// drawn extent, inverting images without the matching invert pipeline, and
+		// std::length_error above MaxQuads.
 		std::optional<GraphPass> Record(
 			RenderGraph& graph, const UiRenderFrame& frame, const UiRenderProgram& program, Rhi::DescriptorTable& bindless);
 

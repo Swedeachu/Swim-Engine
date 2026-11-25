@@ -321,7 +321,7 @@ namespace Engine
 
 				if (!writes.empty())
 				{
-					auto table = c.Device().CreateDescriptorTable({ program->Layout.get(), program->Space, 0, label });
+					auto table = c.CreateDescriptorTable({ program->Layout.get(), program->Space, 0, label });
 
 					if (!table)
 					{
@@ -538,7 +538,7 @@ namespace Engine
 				writes.push_back(write);
 			}
 
-			auto table = c.Device().CreateDescriptorTable({ &layout, space, 0, label });
+			auto table = c.CreateDescriptorTable({ &layout, space, 0, label });
 
 			if (!table)
 			{

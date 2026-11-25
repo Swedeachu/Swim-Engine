@@ -8,6 +8,7 @@
 static const uint GpuSceneFlagVisible = 1u << 0;
 static const uint GpuSceneFlagCastShadows = 1u << 1;
 static const uint GpuSceneFlagStatic = 1u << 2;
+static const uint GpuSceneFlagOverlay = 1u << 4;
 static const uint GpuSceneFlagLive = 1u << 30;
 static const uint GpuSceneFlagHasMesh = 1u << 31;
 static const uint GpuSceneInvalidIndex = 0xffffffffu;

@@ -37,6 +37,10 @@ namespace Swim::Render
 		// RGBA8Unorm, RGBA8UnormSrgb, BC7Unorm or BC7UnormSrgb.
 		Rhi::Format Format = Rhi::Format::RGBA8UnormSrgb;
 		std::array<std::uint8_t, 4> Placeholder{ 255, 0, 255, 255 }; // What empty layers show.
+		// Above 0: the alpha-test cutoff of the layers. Generated RGBA8 mips (and PNG / JPEG
+		// cooked on load) scale their alpha to keep mip 0's coverage at it, so cutouts stay
+		// filled in with distance instead of thinning away.
+		float AlphaCoverageCutoff = 0.0f;
 		std::string DebugName = "Texture array";
 	};
 

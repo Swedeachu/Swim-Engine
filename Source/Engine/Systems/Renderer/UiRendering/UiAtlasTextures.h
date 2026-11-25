@@ -24,6 +24,7 @@ namespace Swim::Render
 		std::vector<GraphTexture> Pages;
 		std::vector<std::uint32_t> TextureIndices; // Bindless element per page.
 		std::uint32_t SamplerIndex = 0;			   // Linear, clamp-to-edge, no mips.
+		std::uint32_t PointSamplerIndex = 0;	   // Nearest, clamp-to-edge: colour (bitmap-font) pages.
 		std::uint32_t PageSize = 0;
 		std::uint32_t UploadedPages = 0; // Pages with an upload recorded this frame.
 		std::uint32_t UploadedRows = 0;
@@ -38,7 +39,8 @@ namespace Swim::Render
 	};
 
 	// GPU residency of one Text::GlyphAtlas (critical-path item 79). One RGBA8 UNORM
-	// texture per atlas page (MSDF distances are linear data, never sRGB; alpha is 1),
+	// texture per atlas page (MSDF distances are linear data, never sRGB; alpha is 1;
+	// colour pages keep their straight sRGB texels, decoded by the shader),
 	// registered in the shared BindlessResourceTable. A page is uploaded whole the first
 	// time and afterwards only the band of rows GlyphAtlas::GetChangedRows reports since
 	// the last committed upload, all as graph-scheduled transfers.
@@ -110,6 +112,8 @@ namespace Swim::Render
 		UiAtlasTexturesDesc desc;
 		std::unique_ptr<Rhi::Sampler> sampler;
 		BindlessSamplerHandle samplerHandle;
+		std::unique_ptr<Rhi::Sampler> pointSampler;
+		BindlessSamplerHandle pointSamplerHandle;
 		const Text::GlyphAtlas* attached = nullptr;
 		std::vector<Page> pages;
 		std::vector<Retired> retired;

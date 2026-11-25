@@ -333,7 +333,7 @@ namespace Swim::Render
 
 						for (std::uint32_t slot = 0; slot < vertexPages.size(); ++slot)
 						{
-							auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+							auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, label });
 
 							if (!table)
 							{
@@ -374,7 +374,7 @@ namespace Swim::Render
 					context.ShadowViewProjection = view.ViewProjection;
 					context.FrameTable = [&](Rhi::PipelineLayout& layout) -> Rhi::DescriptorTable&
 					{
-						auto table = c.Device().CreateDescriptorTable({ &layout, 0, 0, label + " external" });
+						auto table = c.CreateDescriptorTable({ &layout, 0, 0, label + " external" });
 
 						if (!table)
 						{

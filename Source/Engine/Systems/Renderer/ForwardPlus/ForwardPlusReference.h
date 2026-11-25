@@ -32,6 +32,11 @@ namespace Swim::Render
 		float EnvironmentIntensity = 1.0f;
 		float EnvironmentRotation = 0.0f;
 		ForwardPlusDebugMode DebugMode = ForwardPlusDebugMode::None;
+		// RenderObjectFlags::Overlay objects (first-person layer): their clip.xy is scaled by
+		// OverlayFovScale (tan(camera fov / 2) / tan(overlay fov / 2)) and their depth is
+		// OverlayNear / w mapped into [0.99, 1] (reverse-Z), in front of the scene.
+		float OverlayFovScale = 1.0f;
+		float OverlayNear = 0.01f;
 	};
 
 	// Throws std::invalid_argument for a non-finite matrix/position/jitter, a zero forward

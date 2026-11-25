@@ -109,22 +109,33 @@ VertexOutput vertexMain(uint vertexId : SV_VulkanVertexID, uint drawSlot : SV_Vu
 	const bool mirrored = ForwardDeterminant(current) < 0.0;
 	const float4 p = float4(world, 1.0);
 	VertexOutput output;
-	precise const float4 clip = ForwardProject(viewProjection, p);
+	precise float4 clip = ForwardProject(viewProjection, p);
+	const float4 jitterOverlay = Views[0].JitterOverlay;
+	const bool overlay = (instance.Flags & GpuSceneFlagOverlay) != 0u;
+	if (overlay)
+	{
+		clip = ForwardOverlayClip(jitterOverlay.zw, clip);
+	}
 	// TAA jitter (ForwardPlus::BuildForwardViewRecord): an NDC offset, so clip.xy moves by jitter * w.
-	precise const float4 jittered = float4(clip.xy + Views[0].Jitter * clip.w, clip.zw);
+	precise const float4 jittered = float4(clip.xy + jitterOverlay.xy * clip.w, clip.zw);
 	output.Position = jittered;
 	output.WorldPosition = world;
 	output.Normal = ForwardTransformNormal(current, normal);
 	output.Tangent = float4(ForwardTransformDirection(current, tangent.xyz), (tangent.w < 0.0) != mirrored ? -1.0 : 1.0);
 	output.Uv = uv;
-	output.Material = instance.MaterialSet < Views[0].MaterialCount ? instance.MaterialSet : 0u;
+	// The table's rows (MaterialCount is its capacity): a length query, not another load.
+	uint materialRows;
+	uint materialStride;
+	Materials.GetDimensions(materialRows, materialStride);
+	output.Material = instance.MaterialSet < materialRows ? instance.MaterialSet : 0u;
 #if !FORWARD_TRANSPARENT
 	output.ObjectId = instance.ObjectId;
 	float4 previous[3] = { rows[3], rows[4], rows[5] };
 	output.CurrentClip = clip;
 	float4 previousViewProjection[4] = { projections[4], projections[5], projections[6], projections[7] };
 	const float3 previousPosition = float3(v[ForwardVertexFloats], v[ForwardVertexFloats + 1], v[ForwardVertexFloats + 2]);
-	output.PreviousClip = ForwardProject(previousViewProjection, float4(GpuSceneTransformPoint(previous, previousPosition), 1.0));
+	const float4 previousClip = ForwardProject(previousViewProjection, float4(GpuSceneTransformPoint(previous, previousPosition), 1.0));
+	output.PreviousClip = overlay ? ForwardOverlayClip(jitterOverlay.zw, previousClip) : previousClip;
 #endif
 	output.Mirrored = mirrored ? 1u : 0u;
 	return output;
@@ -172,7 +183,9 @@ ShadedPixel ShadePixel(VertexOutput input, bool rasterFrontFacing)
 	const float3 normal = normalize(input.Normal);
 	const float3 tangent = normalize(input.Tangent.xyz - normal * dot(normal, input.Tangent.xyz) + float3(1.0e-20, 0.0, 0.0));
 	const float3 bitangent = cross(normal, tangent) * (input.Tangent.w < 0.0 ? -1.0 : 1.0);
-	const StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
+	StandardPbrSurface surface = StandardPbrResolve(material, texels, normal, tangent, bitangent, frontFacing);
+	// Before the alpha discard: the derivatives need the whole quad.
+	surface.PerceptualRoughness = StandardPbrSpecularAntiAlias(surface.PerceptualRoughness, ddx(surface.Normal), ddy(surface.Normal));
 	if (surface.Discard)
 	{
 		discard;

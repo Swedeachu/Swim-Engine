@@ -21,6 +21,9 @@ namespace Swim::Render
 		// Shadow views: only objects with RenderObjectFlags::CastShadows are drawable;
 		// the rest count as NotDrawable (Phase 16 GPU caster culling).
 		ShadowCasters = 1u << 5,
+		// The main camera view: RenderObjectFlags::Overlay objects are drawable here (always
+		// visible, no frustum or occlusion test) and only here.
+		Overlay = 1u << 6,
 		// Both histories reset: what a camera cut or teleport sets.
 		CameraCut = ResetLodHistory | ResetOcclusionHistory,
 	};

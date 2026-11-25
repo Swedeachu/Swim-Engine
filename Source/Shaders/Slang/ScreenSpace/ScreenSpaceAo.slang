@@ -6,11 +6,16 @@
 [[vk::binding(2, 0)]] StructuredBuffer<ScreenSpaceParams> Params;
 [[vk::binding(3, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> Output;
 
+// First-person overlay pixels (RenderObjectFlags::Overlay) sit in the reverse-Z depth range
+// above this (ForwardOverlayDepth): they neither receive nor cast ambient occlusion.
+static const float ScreenSpaceOverlayDepth = 0.99;
+
 float Gtao(ScreenSpaceView view, int x, int y)
 {
 	bool valid;
-	const float3 p = ScreenSpaceLoadViewPosition(view, Depth, x, y, valid);
-	if (!valid || !(-p.z > 0.0))
+	const float centerDepth = Depth.Load(int3(x, y, 0));
+	const float3 p = ScreenSpaceViewPosition(view, float(x) + 0.5, float(y) + 0.5, centerDepth, valid);
+	if (!valid || !(-p.z > 0.0) || centerDepth >= ScreenSpaceOverlayDepth)
 	{
 		return 1.0;
 	}
@@ -81,8 +86,9 @@ float Gtao(ScreenSpaceView view, int x, int y)
 					continue;
 				}
 				bool sampleValid;
-				const float3 samplePosition = ScreenSpaceLoadViewPosition(view, Depth, ix, iy, sampleValid);
-				if (!sampleValid)
+				const float sampleDepth = Depth.Load(int3(ix, iy, 0));
+				const float3 samplePosition = ScreenSpaceViewPosition(view, sx + 0.5, sy + 0.5, sampleDepth, sampleValid);
+				if (!sampleValid || sampleDepth >= ScreenSpaceOverlayDepth)
 				{
 					continue;
 				}

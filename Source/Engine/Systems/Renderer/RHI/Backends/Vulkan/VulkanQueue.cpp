@@ -134,21 +134,35 @@ namespace Swim::RhiVulkan
 				completionFence = fence->GetFence();
 			}
 
-			VkSubmitInfo2 submitInfo{};
-			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-			submitInfo.waitSemaphoreInfoCount = static_cast<std::uint32_t>(waitInfos.size());
-			submitInfo.pWaitSemaphoreInfos = waitInfos.data();
-			submitInfo.commandBufferInfoCount = static_cast<std::uint32_t>(commandInfos.size());
-			submitInfo.pCommandBufferInfos = commandInfos.data();
-			submitInfo.signalSemaphoreInfoCount = static_cast<std::uint32_t>(signalInfos.size());
-			submitInfo.pSignalSemaphoreInfos = signalInfos.data();
-
-			std::scoped_lock lock(*submissionMutex);
-			RequireVulkanDevice(*state);
-
-			if (CheckVulkanResult(*state, state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence), "vkQueueSubmit2") != VK_SUCCESS)
+			auto submit = [state = state, queue = queue, mutex = submissionMutex, commandInfos = std::move(commandInfos),
+							  waitInfos = std::move(waitInfos), signalInfos = std::move(signalInfos), completionFence]
 			{
-				throw std::runtime_error("Failed to submit work to Vulkan queue");
+				VkSubmitInfo2 submitInfo{};
+				submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+				submitInfo.waitSemaphoreInfoCount = static_cast<std::uint32_t>(waitInfos.size());
+				submitInfo.pWaitSemaphoreInfos = waitInfos.data();
+				submitInfo.commandBufferInfoCount = static_cast<std::uint32_t>(commandInfos.size());
+				submitInfo.pCommandBufferInfos = commandInfos.data();
+				submitInfo.signalSemaphoreInfoCount = static_cast<std::uint32_t>(signalInfos.size());
+				submitInfo.pSignalSemaphoreInfos = signalInfos.data();
+				std::scoped_lock lock(*mutex);
+				RequireVulkanDevice(*state);
+
+				if (CheckVulkanResult(*state, state->Dispatch.vkQueueSubmit2(queue, 1, &submitInfo, completionFence), "vkQueueSubmit2") != VK_SUCCESS)
+				{
+					throw std::runtime_error("Failed to submit work to Vulkan queue");
+				}
+			};
+
+			// On the submission thread the work is queued in order and the caller goes on; a
+			// failure surfaces at the next submission or wait.
+			if (state->SubmitWorker && !state->SubmitWorker->IsWorkerThread())
+			{
+				state->SubmitWorker->Post(std::move(submit));
+			}
+			else
+			{
+				submit();
 			}
 
 			for (Rhi::CommandList* commandList : desc.CommandLists)
@@ -160,6 +174,7 @@ namespace Swim::RhiVulkan
 		void VulkanQueue::WaitIdle()
 		{
 			RequireVulkanDevice(*state);
+			state->DrainSubmissions();
 			std::scoped_lock lock(*submissionMutex);
 			RequireVulkanDevice(*state);
 

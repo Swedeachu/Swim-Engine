@@ -1,8 +1,13 @@
 #include "Engine/Systems/Renderer/Features/GravitationalLensing.h"
 
+#include "Engine/Math/Hash.h"
+#include "Engine/Math/VectorMath.h"
+
 #include <algorithm>
 #include <cmath>
 #include <span>
+
+#include <glm/glm.hpp>
 
 namespace Engine
 {
@@ -10,63 +15,39 @@ namespace Engine
 	namespace
 	{
 
-		using Float3 = GravitationalLensing::Float3;
+		using ::Engine::NormalizeOr;
+		using ::Engine::ToGlm;
 
-		Float3 Add(const Float3& a, const Float3& b) { return { a[0] + b[0], a[1] + b[1], a[2] + b[2] }; }
-
-		Float3 Scale(const Float3& a, float s) { return { a[0] * s, a[1] * s, a[2] * s }; }
-
-		float Dot(const Float3& a, const Float3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-
-		Float3 Cross(const Float3& a, const Float3& b)
+		// glm::normalize, keeping a zero vector zero.
+		glm::vec3 Normalize(const glm::vec3& v)
 		{
-			return { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+			return NormalizeOr(v, v);
 		}
 
-		Float3 Normalize(const Float3& a)
+		glm::vec3 Acceleration(const glm::vec3& x, const glm::vec3& v, float rs)
 		{
-			const float length = std::sqrt(Dot(a, a));
-			return length > 0.0f ? Scale(a, 1.0f / length) : a;
+			const glm::vec3 h = glm::cross(x, v);
+			const float r2 = glm::dot(x, x);
+			return x * (-1.5f * rs * glm::dot(h, h) / (r2 * r2 * std::sqrt(r2)));
 		}
 
-		float Smoothstep(float e0, float e1, float x)
-		{
-			const float t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
-			return t * t * (3.0f - 2.0f * t);
-		}
-
-		Float3 Acceleration(const Float3& x, const Float3& v, float rs)
-		{
-			const Float3 h = Cross(x, v);
-			const float r2 = Dot(x, x);
-			return Scale(x, -1.5f * rs * Dot(h, h) / (r2 * r2 * std::sqrt(r2)));
-		}
-
-		Float3 RotateAbout(const Float3& p, const Float3& axis, float angle)
+		glm::vec3 RotateAbout(const glm::vec3& p, const glm::vec3& axis, float angle)
 		{
 			const float c = std::cos(angle);
 			const float s = std::sin(angle);
-			return Add(Add(Scale(p, c), Scale(Cross(axis, p), s)), Scale(axis, Dot(axis, p) * (1.0f - c)));
-		}
-
-		// FeatureCommon.slang FeatureHash / FeatureHash01.
-		std::uint32_t Hash(std::uint32_t value)
-		{
-			const std::uint32_t state = value * 747796405u + 2891336453u;
-			const std::uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-			return (word >> 22u) ^ word;
+			return p * c + glm::cross(axis, p) * s + axis * (glm::dot(axis, p) * (1.0f - c));
 		}
 
 		float Lattice(int x, int y, int z)
 		{
 			const std::uint32_t key = std::uint32_t(x) * 73856093u ^ std::uint32_t(y) * 19349663u ^ std::uint32_t(z) * 83492791u;
-			return float(Hash(key)) * (1.0f / 4294967296.0f);
+			return float(::Engine::PcgHash(key)) * (1.0f / 4294967296.0f);
 		}
 
-		float ValueNoise(const Float3& p)
+		float ValueNoise(const glm::vec3& p)
 		{
-			const float cx = std::floor(p[0]), cy = std::floor(p[1]), cz = std::floor(p[2]);
-			const float fx = p[0] - cx, fy = p[1] - cy, fz = p[2] - cz;
+			const float cx = std::floor(p.x), cy = std::floor(p.y), cz = std::floor(p.z);
+			const float fx = p.x - cx, fy = p.y - cy, fz = p.z - cz;
 			const float sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy), sz = fz * fz * (3 - 2 * fz);
 			const int x = int(cx), y = int(cy), z = int(cz);
 			const auto lerp = [](float a, float b, float t)
@@ -80,9 +61,9 @@ namespace Engine
 			return lerp(lerp(x00, x10, sy), lerp(x01, x11, sy), sz);
 		}
 
-		float Fbm(const Float3& p)
+		float Fbm(const glm::vec3& p)
 		{
-			return 0.67f * ValueNoise(p) + 0.33f * ValueNoise(Add(Scale(p, 2.03f), { 11.7f, 11.7f, 11.7f }));
+			return 0.67f * ValueNoise(p) + 0.33f * ValueNoise(p * 2.03f + glm::vec3(11.7f));
 		}
 
 	} // namespace
@@ -129,12 +110,12 @@ namespace Engine
 	GravitationalLensing::Trace GravitationalLensing::TraceRay(const Float3& origin, const Float3& direction, float rs, float region)
 	{
 		Trace trace;
-		Float3 x = origin;
-		Float3 v = Normalize(direction);
+		glm::vec3 x = ToGlm(origin);
+		glm::vec3 v = Normalize(ToGlm(direction));
 
 		for (; trace.Steps < MaxSteps; ++trace.Steps)
 		{
-			const float r = std::sqrt(Dot(x, x));
+			const float r = glm::length(x);
 
 			if (r < rs)
 			{
@@ -142,50 +123,50 @@ namespace Engine
 				break;
 			}
 
-			if (r > region * 1.0001f && Dot(x, v) > 0.0f)
+			if (r > region * 1.0001f && glm::dot(x, v) > 0.0f)
 			{
 				trace.Escaped = true;
 				break;
 			}
 
 			const float ds = std::max(0.14f * (r - 0.5f * rs), 0.02f * rs);
-			const Float3 a1 = Acceleration(x, v, rs);
-			const Float3 xm = Add(x, Scale(v, 0.5f * ds));
-			const Float3 vm = Normalize(Add(v, Scale(a1, 0.5f * ds)));
-			const Float3 a2 = Acceleration(xm, vm, rs);
-			x = Add(x, Scale(vm, ds));
-			v = Normalize(Add(v, Scale(a2, ds)));
+			const glm::vec3 a1 = Acceleration(x, v, rs);
+			const glm::vec3 xm = x + v * (0.5f * ds);
+			const glm::vec3 vm = Normalize(v + a1 * (0.5f * ds));
+			const glm::vec3 a2 = Acceleration(xm, vm, rs);
+			x = x + vm * ds;
+			v = Normalize(v + a2 * ds);
 		}
 
-		trace.Direction = v;
+		trace.Direction = ::Engine::ToArray(v);
 		return trace;
 	}
 
-	float GravitationalLensing::GasDensityAt(const Float3& p, float time, const Lens& lens)
+	float GravitationalLensing::GasDensityAt(const Float3& position, float time, const Lens& lens)
 	{
+		const glm::vec3 p = ToGlm(position);
 		const float outer = lens.GasRadius;
-		const float r = std::sqrt(Dot(p, p));
+		const float r = glm::length(p);
 
 		if (r < 1.2f || r > outer)
 		{
 			return 0.0f;
 		}
 
-		const Float3 axis = Normalize(lens.DiskNormal);
-		const Float3 e1 = Normalize(std::abs(axis[1]) < 0.9f ? Cross(axis, { 0, 1, 0 }) : Cross(axis, { 1, 0, 0 }));
-		const Float3 e2 = Cross(axis, e1);
+		const glm::vec3 axis = Normalize(ToGlm(lens.DiskNormal));
+		const glm::vec3 e1 =
+			Normalize(std::abs(axis.y) < 0.9f ? glm::cross(axis, glm::vec3(0, 1, 0)) : glm::cross(axis, glm::vec3(1, 0, 0)));
+		const glm::vec3 e2 = glm::cross(axis, e1);
 		float density = 0.0f;
 		{
-			const float z = Dot(p, axis);
-			const Float3 radialVector = Add(p, Scale(axis, -z));
-			const float rho = std::sqrt(Dot(radialVector, radialVector));
+			const float z = glm::dot(p, axis);
+			const float rho = glm::length(p + axis * -z);
 			const float omega = lens.GasSpeed * std::pow(std::max(rho, 1.5f) / 3.0f, -1.5f);
-			const Float3 q = RotateAbout(p, axis, -omega * time);
+			const glm::vec3 q = RotateAbout(p, axis, -omega * time);
 			const float height = 0.3f + 0.12f * rho;
-			const float radial = Smoothstep(2.2f, 3.4f, rho) * (1.0f - Smoothstep(outer * 0.55f, outer * 0.95f, rho));
+			const float radial = glm::smoothstep(2.2f, 3.4f, rho) * (1.0f - glm::smoothstep(outer * 0.55f, outer * 0.95f, rho));
 			const float envelope = radial * std::exp(-z * z / (height * height));
-			const float turbulence =
-				envelope > 1.0e-3f ? std::clamp(Fbm(Add(Scale(q, 0.85f), { 7.1f, 7.1f, 7.1f })) * 1.7f - 0.35f, 0.0f, 1.0f) : 0.0f;
+			const float turbulence = envelope > 1.0e-3f ? std::clamp(Fbm(q * 0.85f + glm::vec3(7.1f)) * 1.7f - 0.35f, 0.0f, 1.0f) : 0.0f;
 			density += envelope * turbulence;
 		}
 		const std::uint32_t rings = std::min(lens.Orbits, 3u);
@@ -193,12 +174,10 @@ namespace Engine
 		for (std::uint32_t k = 0; k < rings; ++k)
 		{
 			const float azimuth = float(k) * 2.0943951f;
-			const Float3 ringAxis =
-				Normalize(Add(Scale(axis, 0.42f), Scale(Add(Scale(e1, std::cos(azimuth)), Scale(e2, std::sin(azimuth))), 0.91f)));
+			const glm::vec3 ringAxis = Normalize(axis * 0.42f + (e1 * std::cos(azimuth) + e2 * std::sin(azimuth)) * 0.91f);
 			const float radius = 4.2f + 1.4f * float(k);
-			const float z = Dot(p, ringAxis);
-			const Float3 radialVector = Add(p, Scale(ringAxis, -z));
-			const float rho = std::sqrt(Dot(radialVector, radialVector));
+			const float z = glm::dot(p, ringAxis);
+			const float rho = glm::length(p + ringAxis * -z);
 			const float tube = 0.35f + 0.1f * float(k);
 			const float falloff = std::exp(-((rho - radius) * (rho - radius) + z * z) / (tube * tube));
 
@@ -208,13 +187,12 @@ namespace Engine
 			}
 
 			const float omega = 2.2f * lens.GasSpeed * std::pow(radius / 3.0f, -1.5f) * (k == 1u ? -1.0f : 1.0f);
-			const Float3 q = RotateAbout(p, ringAxis, -omega * time);
-			const Float3 f1 =
-				Normalize(std::abs(ringAxis[1]) < 0.9f ? Cross(ringAxis, { 0, 1, 0 }) : Cross(ringAxis, { 1, 0, 0 }));
-			const float angle = std::atan2(Dot(q, Cross(ringAxis, f1)), Dot(q, f1));
+			const glm::vec3 q = RotateAbout(p, ringAxis, -omega * time);
+			const glm::vec3 f1 = Normalize(
+				std::abs(ringAxis.y) < 0.9f ? glm::cross(ringAxis, glm::vec3(0, 1, 0)) : glm::cross(ringAxis, glm::vec3(1, 0, 0)));
+			const float angle = std::atan2(glm::dot(q, glm::cross(ringAxis, f1)), glm::dot(q, f1));
 			const float clumps = std::pow(0.5f + 0.5f * std::cos(3.0f * angle), 10.0f);
-			const float stream =
-				std::clamp(Fbm(Add(Scale(q, 1.5f), { float(k) * 13.0f, float(k) * 13.0f, float(k) * 13.0f })) * 1.5f - 0.3f, 0.0f, 1.0f);
+			const float stream = std::clamp(Fbm(q * 1.5f + glm::vec3(float(k) * 13.0f)) * 1.5f - 0.3f, 0.0f, 1.0f);
 			density += falloff * (0.25f + 0.6f * stream + 1.6f * clumps);
 		}
 
@@ -279,8 +257,8 @@ namespace Engine
 			record.Gas[0] = std::clamp(lens.GasBrightness, 0.0f, 1000.0f);
 			record.Gas[1] = std::clamp(lens.GasSpeed, -50.0f, 50.0f);
 			record.Gas[2] = float(std::min(lens.Orbits, 3u));
-			const Float3 normal = Normalize(lens.DiskNormal);
-			const bool valid = std::isfinite(normal[0]) && Dot(normal, normal) > 0.5f;
+			const glm::vec3 normal = Normalize(ToGlm(lens.DiskNormal));
+			const bool valid = std::isfinite(normal.x) && glm::dot(normal, normal) > 0.5f;
 
 			for (int c = 0; c < 3; ++c)
 			{

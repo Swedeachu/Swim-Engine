@@ -51,6 +51,24 @@ namespace Swim::UI
 			return a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height;
 		}
 
+		// The layout-relevant part of the style spans: where bold starts and stops.
+		inline std::vector<Text::TextStyleRange> BoldRanges(const UiTextOptions& options)
+		{
+			std::vector<Text::TextStyleRange> ranges;
+
+			for (const auto& span : options.Styles)
+			{
+				const bool bold = HasFormat(span.Format, UiTextFormat::Bold);
+
+				if (ranges.empty() ? bold : ranges.back().Bold != bold)
+				{
+					ranges.push_back({ span.Begin, bold });
+				}
+			}
+
+			return ranges;
+		}
+
 		void ValidateStyle(const UiStyle& style);
 		void ValidateVisual(const UiVisual& visual);
 		void ValidateImage(const UiImage& image);
@@ -72,6 +90,7 @@ namespace Swim::UI
 			std::string TextContents;
 			float FontSize = 16.0f;
 			UiTextOptions TextOptions;
+			bool Obfuscated = false; // A style span obfuscates: repainted on every Paint.
 			std::shared_ptr<const Text::TextLayout> TextLayout; // Arranged (displayed) layout.
 			std::shared_ptr<const Text::TextLayout> MeasureLayout;
 			// Image.
@@ -169,6 +188,7 @@ namespace Swim::UI
 
 		const Text::GlyphAtlas* PaintAtlas = nullptr;
 		std::uint64_t PaintRevision = 0;
+		std::uint32_t PaintFrame = 0; // Paint calls; seeds obfuscated glyphs.
 		std::uint64_t PaintedLayoutRevision = 0;
 		bool ArrowNavigation = true;
 		// Controls whose behaviour asked for OnUpdate / OnArranged, and nodes with a value
@@ -207,6 +227,28 @@ namespace Swim::UI
 		std::uint32_t CompositionCursor = 0;
 		UiClipboard Clipboard;
 		bool CaretVisible = true;
+		std::uint64_t FocusRevision = 0;
+		// Clicks and drags.
+		double Clock = 0.0; // Seconds, advanced by Update.
+		float DoubleClickSeconds = 0.4f;
+		float DoubleClickDistance = 4.0f;
+		UiNodeId ClickNode;
+		double ClickTime = -1.0e9;
+		UiPoint ClickPoint;
+		std::uint32_t ClickCount = 0;
+		UiNodeId DragSource;
+		UiDragDesc Drag;
+
+		UiEvent PointerEvent(UiEventKind kind, UiNodeId node, UiPointerButton button, UiKeyModifiers modifiers) const
+		{
+			UiEvent event{ kind, node };
+			event.Position = LastPointer;
+			event.Button = button;
+			event.Modifiers = modifiers;
+			return event;
+		}
+
+		void FinishDrag(UiNodeId target, bool dropped, UiPointerButton button);
 
 		Node& Get(UiNodeId id) { return Nodes.at(id.Value); }
 
@@ -290,6 +332,10 @@ namespace Swim::UI
 
 		// --- Paint (UiPaint.cpp) ---
 		void BuildPaint(Node& node, Text::GlyphAtlas& atlas);
+
+		template <typename Emit>
+		void PaintText(const Node& node, Text::GlyphAtlas& atlas, const Text::TextLayout& layout, UiPoint origin, const UiRect& clip,
+			float opacity, Emit& emit);
 
 		// --- Controls (UiControlHost.cpp): generic plumbing; behaviour lives in the controls ---
 		// Validates and applies a control (behaviour + data) to a node; a null behaviour removes it.

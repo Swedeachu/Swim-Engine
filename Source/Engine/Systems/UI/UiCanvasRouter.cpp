@@ -482,6 +482,36 @@ namespace Swim::UI
 		hovered = {};
 	}
 
+	void UiCanvasRouter::ButtonDown(UiPointerButton button, UiKeyModifiers modifiers)
+	{
+		if (button == UiPointerButton::Left)
+		{
+			PointerDown(modifiers);
+		}
+		else if (auto* canvas = Find(captured ? captured : hovered))
+		{
+			canvas->Desc.Document->ButtonDown(canvas->LastPoint, button, modifiers);
+		}
+	}
+
+	void UiCanvasRouter::ButtonUp(UiPointerButton button, UiKeyModifiers modifiers)
+	{
+		if (button == UiPointerButton::Left)
+		{
+			PointerUp();
+		}
+		else if (auto* canvas = Find(captured ? captured : hovered))
+		{
+			canvas->Desc.Document->ButtonUp(canvas->LastPoint, button, modifiers);
+		}
+	}
+
+	bool UiCanvasRouter::KeyEvent(std::uint32_t key, bool down, UiKeyModifiers modifiers)
+	{
+		auto* canvas = Find(focused);
+		return canvas && canvas->Desc.Document->KeyEvent(key, down, modifiers);
+	}
+
 	bool UiCanvasRouter::Wheel(UiPoint delta)
 	{
 		auto* canvas = Find(captured ? captured : hovered);
@@ -584,6 +614,26 @@ namespace Swim::UI
 		}
 
 		SetFocused(handle);
+	}
+
+	void UiCanvasRouter::AdoptDocumentFocus()
+	{
+		for (auto& canvas : canvases)
+		{
+			const auto revision = canvas.Desc.Document->GetFocusRevision();
+
+			if (revision == canvas.FocusRevision)
+			{
+				continue;
+			}
+
+			canvas.FocusRevision = revision;
+
+			if (canvas.Desc.Interactive && canvas.Handle != focused && canvas.Desc.Document->GetFocus())
+			{
+				SetFocused(canvas.Handle);
+			}
+		}
 	}
 
 	void UiCanvasRouter::ClearFocus()

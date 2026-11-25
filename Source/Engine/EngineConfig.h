@@ -55,6 +55,9 @@ namespace Engine
 		// user-data root unless absolute. Loaded after startup, before --exec commands, and
 		// written on exit when a saved setting changed. Empty: no config file (--config=none).
 		std::string UserConfigFile{ "config.cfg" };
+		// Default of the saved look_sensitivity setting (0..100; 50 is one unit of look per
+		// unit of raw mouse motion, the curve is cubic so both ends stay usable).
+		double LookSensitivityDefault{ 50.0 };
 		// Overrides the application's startup scene when non-empty.
 		std::string StartupScene;
 		// Loose-asset root (--assets). Empty: the repository's Assets/ folder in development
@@ -74,6 +77,14 @@ namespace Engine
 		bool VSync{ false };
 		// Frames the CPU records ahead of the GPU (--frames-in-flight=1|2).
 		std::uint32_t FramesInFlight{ 2 };
+		// The GPU (--adapter=auto|display|discrete|integrated|<index>|<part of the name>; see
+		// RenderDeviceDesc::Adapter) and whether presents run on their own thread (--present-thread).
+		std::string Adapter{ "auto" };
+		bool PresentThread{ true };
+		// Present each frame after the next is submitted (--present-defer): see RenderDeviceDesc.
+		bool DeferPresent{ false };
+		// --present-split=auto|on|off: see RenderDeviceDesc::SplitPresent (0 auto, 1 on, 2 off).
+		std::uint8_t SplitPresent{ 0 };
 		// GPU validation layers (debug builds enable them by default).
 		bool Validation{ DefaultValidation };
 		// Simulation fixed rate in Hz and initial time scale.

@@ -35,7 +35,7 @@ namespace Swim::Render
 		Rhi::DescriptorTable& CreateTable(RenderCommandContext& c, const EnvironmentProgram& program, const std::string& label,
 			std::span<const Rhi::DescriptorWrite> writes)
 		{
-			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+			auto table = c.CreateDescriptorTable({ program.Layout, program.Space, 0, label });
 
 			if (!table)
 			{

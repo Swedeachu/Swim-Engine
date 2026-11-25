@@ -121,6 +121,9 @@ namespace Engine
 		std::vector<Swim::Render::GraphBuffer> Buffers;
 		std::vector<Swim::Render::GraphBuffer> IndirectBuffers;
 		std::vector<Swim::Render::GraphTexture> Textures;
+		// Transparent draws read the opaque scene behind them (RenderFeatureDrawContext::
+		// SceneColor / SceneDepth): one copy per frame, shared by every feature that asks.
+		bool SceneCopy = false;
 	};
 
 	// Fixed-function state of a feature draw; the rest comes from the pass (targets, depth
@@ -403,6 +406,14 @@ namespace Engine
 		const std::array<float, 16>& ShadowViewProjection() const { return draw.ShadowViewProjection; }
 
 		const RenderFeatureView& View() const { return view; }
+
+		// Transparent only, when PrepareGeometry asked for SceneCopy: the opaque scene just
+		// before the transparent pass, at the viewport's size. SceneColor is RGBA16Float
+		// linear HDR radiance, SceneDepth R32Float reverse-Z (0 = sky). Bind them with
+		// Texture(...); empty in other passes.
+		std::optional<Swim::Render::GraphTexture> SceneColor() const { return draw.Scene.Color; }
+
+		std::optional<Swim::Render::GraphTexture> SceneDepth() const { return draw.Scene.Depth; }
 
 		// A draw with a program compiled for this pass: forward passes need a program that
 		// includes ForwardFrame.slang (the depth prepass and Shadow ones may write no

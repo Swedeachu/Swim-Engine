@@ -146,9 +146,27 @@ namespace Swim::RhiVulkan
 		info.pSwapchains = &swapchain;
 		info.pImageIndices = &imageIndex;
 
-		std::scoped_lock lock(vulkanQueue->GetMutex());
-		RequireVulkanDevice(*state);
-		const VkResult result = state->Dispatch.vkQueuePresentKHR(vulkanQueue->GetQueue(), &info);
+		// The device's presentation queue: a queue of the same family of its own when there is
+		// one (presents then never block submissions to the graphics queue).
+		const bool own = state->PresentationQueue != VK_NULL_HANDLE && state->PresentationQueueMutex;
+		VkResult result = VK_SUCCESS;
+		const auto present = [&]
+		{
+			std::scoped_lock lock(own ? *state->PresentationQueueMutex : vulkanQueue->GetMutex());
+			RequireVulkanDevice(*state);
+			result = state->Dispatch.vkQueuePresentKHR(own ? state->PresentationQueue : vulkanQueue->GetQueue(), &info);
+		};
+
+		// After every submission issued before it (its wait semaphore's signal among them).
+		if (state->SubmitWorker && !state->SubmitWorker->IsWorkerThread())
+		{
+			state->SubmitWorker->Call(present);
+		}
+		else
+		{
+			present();
+		}
+
 		acquired[imageIndex] = false;
 
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)

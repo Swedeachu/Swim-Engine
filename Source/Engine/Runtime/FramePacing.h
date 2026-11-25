@@ -22,6 +22,11 @@ namespace Engine
 		double LatencyMilliseconds = 0.0;
 		std::uint32_t QueuedFrames = 0; // Submitted, unfinished frames when input was sampled.
 		Swim::Rhi::PresentMode PresentMode = Swim::Rhi::PresentMode::Fifo;
+		double PresentCallMilliseconds = 0.0; // The present call (on the present thread when async).
+		double PresentWaitMilliseconds = 0.0; // The main thread waited for a present this frame.
+		bool AsyncPresent = false;
+		bool CrossAdapter = false; // Presents cross to another adapter's display (slower presents).
+		bool SplitPresent = false; // Frames are submitted before their image is acquired.
 	};
 
 	// Present mode, frame cap and low-latency pacing as saved console variables:

@@ -93,3 +93,18 @@ SWIM_TEST("Physics.JoltBackend", "ContactEventContract")
 	SWIM_REQUIRE(backend != nullptr);
 	Engine::Tests::RunPhysicsContactEventContract(*backend);
 }
+
+SWIM_TEST("Physics.JoltBackend", "FloaterContract")
+{
+	Engine::IPhysicsBackend* backend = SharedJoltBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsFloaterContract(*backend);
+}
+
+SWIM_TEST("Physics.JoltBackend", "BuoyancyContract")
+{
+	Engine::IPhysicsBackend* backend = SharedJoltBackend();
+	SWIM_REQUIRE(backend != nullptr);
+	Engine::Tests::RunPhysicsBuoyancyContract(*backend);
+	Engine::Tests::RunPhysicsWaveRide(*backend);
+}

@@ -45,7 +45,7 @@ namespace Swim::Render
 		void Dispatch(RenderCommandContext& c, const PostProgram& program, const std::string& label,
 			const std::array<Rhi::DescriptorWrite, Count>& writes, const Constants& constants, std::uint32_t groupsX, std::uint32_t groupsY)
 		{
-			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+			auto table = c.CreateDescriptorTable({ program.Layout, program.Space, 0, label });
 
 			if (!table)
 			{

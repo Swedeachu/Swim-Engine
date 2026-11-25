@@ -1,6 +1,8 @@
 #include "Engine/Systems/UI/Internal/UiDocumentImpl.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 
 namespace Swim::UI
 {
@@ -19,7 +21,7 @@ namespace Swim::UI
 			const float page = static_cast<float>(atlas.PageSize);
 			UiPaintQuad quad;
 			quad.Node = node;
-			quad.Kind = UiPaintKind::Glyph;
+			quad.Kind = entry.Color ? UiPaintKind::ColorGlyph : UiPaintKind::Glyph;
 			quad.Bounds = { origin.X + entry.Left * fontSize, origin.Y - entry.Top * fontSize, entry.WidthEm * fontSize,
 				entry.HeightEm * fontSize };
 			quad.Clip = clip;
@@ -80,6 +82,7 @@ namespace Swim::UI
 			base.Color = tint;
 			base.Texture = image.Texture;
 			base.Sampler = image.Sampler;
+			base.Blend = image.Blend;
 			const auto& slice = image.Slice;
 			const bool sliced = slice.Left > 0.0f || slice.Top > 0.0f || slice.Right > 0.0f || slice.Bottom > 0.0f;
 
@@ -118,6 +121,198 @@ namespace Swim::UI
 		}
 
 	} // namespace
+
+	namespace
+	{
+
+		template <typename T> const T* SpanAt(const std::vector<T>& spans, std::uint32_t offset)
+		{
+			const auto after = std::upper_bound(spans.begin(), spans.end(), offset,
+				[](std::uint32_t value, const T& span)
+				{
+					return value < span.Begin;
+				});
+			return after == spans.begin() ? nullptr : &*std::prev(after);
+		}
+
+		// Premultiplied colour times a straight-alpha multiplier.
+		UiColor Multiply(const UiColor& premultiplied, const UiColor& straight)
+		{
+			return { premultiplied.R * straight.R * straight.A, premultiplied.G * straight.G * straight.A,
+				premultiplied.B * straight.B * straight.A, premultiplied.A * straight.A };
+		}
+
+		std::uint32_t Hash(std::uint32_t a, std::uint32_t b)
+		{
+			std::uint32_t h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u;
+			h ^= h >> 15;
+			h *= 0x2C1B3C6Du;
+			h ^= h >> 12;
+			return h;
+		}
+
+	} // namespace
+
+	template <typename Emit>
+	void UiDocument::Impl::PaintText(const Node& node, Text::GlyphAtlas& atlas, const Text::TextLayout& layout, UiPoint origin,
+		const UiRect& clip, float opacity, Emit& emit)
+	{
+		const auto& v = node.Visual;
+		const auto& options = node.TextOptions;
+		const UiColor text = Fade(Premultiply(v.TextColor), opacity);
+		const auto& styles = options.Styles;
+		const auto snap = [&](float value)
+		{
+			return std::round(value * Dpi) / Dpi;
+		};
+		// Per-face metrics, computed on first use.
+		std::array<Text::FontStyleMetrics, 8> metricCache{};
+		std::uint32_t metricKnown = 0;
+		const auto metricsOf = [&](std::uint32_t face) -> Text::FontStyleMetrics
+		{
+			if (face < metricCache.size())
+			{
+				if ((metricKnown & (1u << face)) == 0)
+				{
+					metricCache[face] = node.Fonts->GetFace(face)->GetStyleMetrics(node.FontSize);
+					metricKnown |= 1u << face;
+				}
+
+				return metricCache[face];
+			}
+
+			return node.Fonts->GetFace(face)->GetStyleMetrics(node.FontSize);
+		};
+		const bool shadows = std::any_of(styles.begin(), styles.end(),
+			[](const UiTextStyleSpan& span)
+			{
+				return HasFormat(span.Format, UiTextFormat::Shadow);
+			});
+		// Underline and strikethrough segments merge across neighbouring glyphs.
+		struct Line
+		{
+			UiRect Rect;
+			UiColor Color;
+			bool Open = false;
+		};
+		Line lines[2];
+		const auto flush = [&](Line& line)
+		{
+			if (line.Open)
+			{
+				emit(SolidQuad(node.Id, line.Rect, clip, line.Color));
+				line.Open = false;
+			}
+		};
+		const auto addLine = [&](Line& line, const UiRect& rect, const UiColor& color)
+		{
+			const bool joins = line.Open && line.Color == color && line.Rect.Y == rect.Y && line.Rect.Height == rect.Height &&
+				std::abs(line.Rect.X + line.Rect.Width - rect.X) < 1e-3f;
+
+			if (joins)
+			{
+				line.Rect.Width = rect.X + rect.Width - line.Rect.X;
+				return;
+			}
+
+			flush(line);
+			line = { rect, color, true };
+		};
+
+		for (int pass = shadows ? 0 : 1; pass < 2; ++pass)
+		{
+			const bool shadowPass = pass == 0;
+
+			for (const auto& glyph : layout.GetGlyphs())
+			{
+				const auto* style = styles.empty() ? nullptr : SpanAt(styles, glyph.Cluster);
+				const UiTextFormat format = style ? style->Format : UiTextFormat::None;
+
+				if (shadowPass && !HasFormat(format, UiTextFormat::Shadow))
+				{
+					continue;
+				}
+
+				UiColor color = text;
+
+				if (const auto* span = options.Colors.empty() ? nullptr : SpanAt(options.Colors, glyph.Cluster))
+				{
+					UiColor straight = span->Color;
+					straight.A *= v.TextColor.A;
+					color = Fade(Premultiply(straight), opacity);
+				}
+
+				if (style)
+				{
+					color = Multiply(color, style->Color);
+				}
+
+				const auto& face = node.Fonts->GetFace(glyph.Face);
+				const auto metrics = format == UiTextFormat::None ? Text::FontStyleMetrics{} : metricsOf(glyph.Face);
+				UiPoint pen{ origin.X + glyph.X, origin.Y + glyph.Y };
+
+				if (shadowPass)
+				{
+					const auto shadowMetrics = metricsOf(glyph.Face);
+					pen.X += options.Shadow.Offset.X * shadowMetrics.Pixel;
+					pen.Y += options.Shadow.Offset.Y * shadowMetrics.Pixel;
+					color = options.Shadow.MultiplyTextColor ? Multiply(color, options.Shadow.Color)
+															 : Fade(Premultiply(options.Shadow.Color), color.A);
+				}
+
+				if (face->IsBitmap() || options.PixelSnap)
+				{
+					pen = { snap(pen.X), snap(pen.Y) };
+				}
+
+				std::uint32_t id = glyph.Glyph;
+
+				if (HasFormat(format, UiTextFormat::Obfuscated))
+				{
+					id = face->GetSubstituteGlyph(id, Hash(PaintFrame, glyph.Cluster));
+				}
+
+				const auto entry = atlas.Get(face, id);
+
+				if (entry.Page != Text::NoAtlasPage)
+				{
+					auto quad = GlyphQuad(node.Id, entry, atlas.GetDesc(), pen, face->GetRenderSize(node.FontSize), clip, color);
+
+					if (HasFormat(format, UiTextFormat::Italic))
+					{
+						quad.Shear = metrics.ItalicShear;
+						quad.ShearPivotY = pen.Y;
+					}
+
+					emit(quad);
+
+					if (HasFormat(format, UiTextFormat::Bold))
+					{
+						quad.Bounds.X += metrics.BoldOffset;
+						emit(quad);
+					}
+				}
+
+				const UiTextFormat decorations[2] = { UiTextFormat::Underline, UiTextFormat::Strikethrough };
+
+				for (int d = 0; d < 2; ++d)
+				{
+					if (HasFormat(format, decorations[d]))
+					{
+						const float top = pen.Y + (d == 0 ? metrics.UnderlineTop : metrics.StrikethroughTop);
+						addLine(lines[d], { pen.X, top, glyph.Advance, metrics.LineThickness }, color);
+					}
+					else
+					{
+						flush(lines[d]);
+					}
+				}
+			}
+
+			flush(lines[0]);
+			flush(lines[1]);
+		}
+	}
 
 	void UiDocument::Impl::BuildPaint(Node& node, Text::GlyphAtlas& atlas)
 	{
@@ -185,36 +380,7 @@ namespace Swim::UI
 
 		if (v.TextColor.A > 0.0f)
 		{
-			const UiColor text = color(v.TextColor);
-			const auto& spans = node.TextOptions.Colors;
-			const auto glyphColor = [&](std::uint32_t cluster)
-			{
-				const auto after = std::upper_bound(spans.begin(), spans.end(), cluster,
-					[](std::uint32_t offset, const UiTextColorSpan& span)
-					{
-						return offset < span.Begin;
-					});
-
-				if (after == spans.begin())
-				{
-					return text;
-				}
-
-				UiColor straight = std::prev(after)->Color;
-				straight.A *= v.TextColor.A;
-				return color(straight);
-			};
-
-			for (const auto& glyph : layout.GetGlyphs())
-			{
-				const auto entry = atlas.Get(node.Fonts->GetFace(glyph.Face), glyph.Glyph);
-
-				if (entry.Page != Text::NoAtlasPage)
-				{
-					emit(GlyphQuad(node.Id, entry, atlas.GetDesc(), { origin.X + glyph.X, origin.Y + glyph.Y }, node.FontSize, clip,
-						spans.empty() ? text : glyphColor(glyph.Cluster)));
-				}
-			}
+			PaintText(node, atlas, layout, origin, clip, opacity, emit);
 		}
 
 		if (composing)
@@ -305,6 +471,7 @@ namespace Swim::UI
 		}
 
 		impl->ResolveVisuals();
+		++impl->PaintFrame;
 		const auto previousCount = impl->Quads.size();
 		impl->Quads.clear();
 		impl->RepaintedNodes = 0;
@@ -324,7 +491,7 @@ namespace Swim::UI
 			const bool moved = !Internal::SameRect(node.PaintedBounds, node.Bounds) || !Internal::SameRect(node.PaintedClip, node.Clip) ||
 				node.PaintedScroll.X != node.Scroll.X || node.PaintedScroll.Y != node.Scroll.Y || node.PaintedOpacity != opacity;
 
-			if (node.PaintDirty || moved)
+			if (node.PaintDirty || moved || (node.Obfuscated && node.TextLayout))
 			{
 				impl->BuildPaint(node, atlas);
 				node.PaintDirty = false;

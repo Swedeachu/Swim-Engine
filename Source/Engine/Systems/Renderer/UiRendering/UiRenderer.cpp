@@ -1,6 +1,7 @@
 #include "Engine/Systems/Renderer/UiRendering/UiRenderer.h"
 #include "Engine/Systems/Renderer/RenderGraph/RenderCommandContext.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace Swim::Render
@@ -24,7 +25,7 @@ namespace Swim::Render
 	} // namespace
 
 	Rhi::GraphicsPipelineDesc UiRenderer::PipelineDesc(
-		Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout, Rhi::Format depthFormat)
+		Rhi::Format colorFormat, Rhi::ShaderProgram& program, Rhi::PipelineLayout& layout, Rhi::Format depthFormat, UI::UiBlend blend)
 	{
 		if (colorFormat == Rhi::Format::Undefined || Rhi::IsDepthFormat(colorFormat))
 		{
@@ -58,17 +59,23 @@ namespace Swim::Render
 		static constexpr std::array<Rhi::BlendAttachmentState, 1> Blend{ Rhi::BlendAttachmentState{ true, Rhi::BlendFactor::One,
 			Rhi::BlendFactor::OneMinusSourceAlpha, Rhi::BlendOp::Add, Rhi::BlendFactor::One, Rhi::BlendFactor::OneMinusSourceAlpha,
 			Rhi::BlendOp::Add, Rhi::ColorWriteMask::All } };
+		static constexpr std::array<Rhi::BlendAttachmentState, 1> Invert{ Rhi::BlendAttachmentState{ true,
+			Rhi::BlendFactor::OneMinusDestinationColor, Rhi::BlendFactor::OneMinusSourceColor, Rhi::BlendOp::Add, Rhi::BlendFactor::One,
+			Rhi::BlendFactor::OneMinusSourceAlpha, Rhi::BlendOp::Add, Rhi::ColorWriteMask::All } };
+		const bool invert = blend == UI::UiBlend::Invert;
 		Rhi::GraphicsPipelineDesc pipeline{};
 		pipeline.Program = &program;
 		pipeline.Layout = &layout;
 		pipeline.ColorFormats = formatStorage[formatIndex];
-		pipeline.BlendAttachments = Blend;
+		pipeline.BlendAttachments = invert ? Invert : Blend;
 		pipeline.DepthStencilFormat = depthFormat;
 		pipeline.DepthStencil.DepthTest = depthFormat != Rhi::Format::Undefined;
 		pipeline.DepthStencil.DepthWrite = false;
 		pipeline.DepthStencil.DepthCompare = Rhi::CompareOp::GreaterEqual; // Canonical reverse-Z.
 		pipeline.Raster.Cull = Rhi::CullMode::None;						   // Panels are two-sided.
-		pipeline.DebugName = depthFormat != Rhi::Format::Undefined ? "UI quads (depth tested)" : "UI quads";
+		const bool tested = depthFormat != Rhi::Format::Undefined;
+		pipeline.DebugName =
+			invert ? (tested ? "UI invert quads (depth tested)" : "UI invert quads") : (tested ? "UI quads (depth tested)" : "UI quads");
 		return pipeline;
 	}
 
@@ -145,16 +152,30 @@ namespace Swim::Render
 			build.AtlasPageSize = frame.Atlas->PageSize;
 			build.AtlasTextures = frame.Atlas->TextureIndices;
 			build.AtlasSampler = frame.Atlas->SamplerIndex;
+			build.AtlasPointSampler = frame.Atlas->PointSamplerIndex;
 		}
 
 		Ui::QuadBuildStats built;
 		lastQuads = Ui::BuildQuads(frame.Paint, build, &built);
 		lastConstants = constants;
-		stats = { static_cast<std::uint32_t>(lastQuads.size()), built.Solids, built.Glyphs, built.Images, built.Culled };
+		const auto runs = Ui::BuildDrawRuns(lastQuads);
+		stats = { static_cast<std::uint32_t>(lastQuads.size()), built.Solids, built.Glyphs, built.Images, built.Culled,
+			static_cast<std::uint32_t>(runs.size()) };
 
 		if (lastQuads.size() > desc.MaxQuads)
 		{
 			throw std::length_error(name + " exceeds MaxQuads");
+		}
+
+		const bool inverts = std::any_of(runs.begin(), runs.end(),
+			[](const Ui::DrawRun& run)
+			{
+				return run.Blend == UiQuadBlendInvert;
+			});
+
+		if (inverts && !(frame.Depth ? program.InvertDepthPipeline : program.InvertPipeline))
+		{
+			throw std::invalid_argument(name + " has inverting images but no invert pipeline");
 		}
 
 		if (lastQuads.empty() && !frame.Clear)
@@ -214,8 +235,8 @@ namespace Swim::Render
 				}
 
 			},
-			[program, label = name + " draw", target, depth, quads, clear, clearColor, constants, count, bindlessTable = &bindless, width,
-				height, format, mip](RenderCommandContext& c)
+			[program, label = name + " draw", target, depth, quads, clear, clearColor, constants, count, runs, bindlessTable = &bindless,
+				width, height, format, mip](RenderCommandContext& c)
 			{
 				Rhi::TextureViewDesc colorView;
 				colorView.PixelFormat = format;
@@ -239,7 +260,7 @@ namespace Swim::Render
 
 				if (count > 0)
 				{
-					auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+					auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, label });
 
 					if (!table)
 					{
@@ -256,12 +277,18 @@ namespace Swim::Render
 					auto& retained = static_cast<Rhi::DescriptorTable&>(c.Retain(std::move(table)));
 					list.SetViewport({ 0, 0, float(width), float(height) });
 					list.SetScissor({ 0, 0, width, height });
-					list.BindGraphicsPipeline(depth ? *program.DepthPipeline : *program.Pipeline);
-					list.BindDescriptorTable(0, retained);
-					list.BindDescriptorTable(UiRenderBindings::BindlessSpace, *bindlessTable);
-					list.PushConstants(
-						Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
-					list.Draw(6, count, 0, 0);
+					for (const auto& run : runs)
+					{
+						// The shader reads gl_InstanceIndex, which includes the first instance.
+						const bool invert = run.Blend == UiQuadBlendInvert;
+						list.BindGraphicsPipeline(depth ? (invert ? *program.InvertDepthPipeline : *program.DepthPipeline)
+														: (invert ? *program.InvertPipeline : *program.Pipeline));
+						list.BindDescriptorTable(0, retained);
+						list.BindDescriptorTable(UiRenderBindings::BindlessSpace, *bindlessTable);
+						list.PushConstants(
+							Rhi::ShaderStageMask::Vertex | Rhi::ShaderStageMask::Fragment, 0, std::as_bytes(std::span(&constants, 1)));
+						list.Draw(6, run.Count, 0, run.First);
+					}
 				}
 
 				list.EndRendering();

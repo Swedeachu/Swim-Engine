@@ -52,7 +52,20 @@ namespace Swim::Text
 			return found->second.Glyph;
 		}
 
+		if (face->IsBitmap())
+		{
+			return GetBitmap(face, glyph);
+		}
+
 		return Insert(face, glyph, face->Rasterize(glyph, desc.EmSize, desc.DistanceRange, desc.PageSize - 2));
+	}
+
+	AtlasGlyph GlyphAtlas::GetBitmap(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph)
+	{
+		float emWidth = 0.0f;
+		float emHeight = 0.0f;
+		const auto bitmap = face->RasterizeBitmap(glyph, emWidth, emHeight, desc.PageSize - 2);
+		return Insert(face, glyph, bitmap, AtlasPageFormat::Color, emWidth, emHeight);
 	}
 
 	bool GlyphAtlas::Contains(const FontFace& face, std::uint32_t glyph) const
@@ -69,6 +82,22 @@ namespace Swim::Text
 		}
 
 		std::vector<std::uint32_t> missing;
+
+		if (face->IsBitmap())
+		{
+			std::size_t added = 0;
+
+			for (const auto glyph : requested)
+			{
+				if (!Contains(*face, glyph))
+				{
+					GetBitmap(face, glyph);
+					++added;
+				}
+			}
+
+			return added;
+		}
 
 		for (const auto glyph : requested)
 		{
@@ -123,16 +152,31 @@ namespace Swim::Text
 		return missing.size();
 	}
 
-	AtlasGlyph GlyphAtlas::Insert(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph, const FontFace::GlyphBitmap& bitmap)
+	AtlasGlyph GlyphAtlas::Insert(const std::shared_ptr<const FontFace>& face, std::uint32_t glyph, const FontFace::GlyphBitmap& bitmap,
+		AtlasPageFormat format, float emWidth, float emHeight)
 	{
 		const Key key{ face.get(), glyph };
+		const bool color = format == AtlasPageFormat::Color;
+		const std::size_t texelBytes = color ? 4 : 3;
 		AtlasGlyph result;
 		result.Width = bitmap.Width;
 		result.Height = bitmap.Height;
-		result.Left = bitmap.Left / desc.EmSize;
-		result.Top = bitmap.Top / desc.EmSize;
-		result.WidthEm = bitmap.Width / desc.EmSize;
-		result.HeightEm = bitmap.Height / desc.EmSize;
+		result.Color = color;
+
+		if (color)
+		{
+			result.Left = bitmap.Left;
+			result.Top = bitmap.Top;
+			result.WidthEm = emWidth;
+			result.HeightEm = emHeight;
+		}
+		else
+		{
+			result.Left = bitmap.Left / desc.EmSize;
+			result.Top = bitmap.Top / desc.EmSize;
+			result.WidthEm = bitmap.Width / desc.EmSize;
+			result.HeightEm = bitmap.Height / desc.EmSize;
+		}
 
 		if (bitmap.Width == 0 || bitmap.Height == 0)
 		{
@@ -148,6 +192,12 @@ namespace Swim::Text
 		for (; pageIndex < pages.size(); ++pageIndex)
 		{
 			const auto& page = pages[pageIndex];
+
+			if (page.Format != format)
+			{
+				continue;
+			}
+
 			x = page.X;
 			y = page.Y;
 			rowHeight = page.RowHeight;
@@ -177,7 +227,8 @@ namespace Swim::Text
 			x = y = 1;
 			rowHeight = 0;
 			Page page;
-			page.Pixels.resize(static_cast<std::size_t>(desc.PageSize) * desc.PageSize * 3, 0);
+			page.Format = format;
+			page.Pixels.resize(static_cast<std::size_t>(desc.PageSize) * desc.PageSize * texelBytes, 0);
 			pages.push_back(std::move(page));
 		}
 
@@ -206,8 +257,8 @@ namespace Swim::Text
 
 		for (std::uint32_t row = 0; row < bitmap.Height; ++row)
 		{
-			std::copy_n(bitmap.Pixels.data() + static_cast<std::size_t>(row) * bitmap.Width * 3, bitmap.Width * 3,
-				page.Pixels.data() + (static_cast<std::size_t>(y + row) * desc.PageSize + x) * 3);
+			std::copy_n(bitmap.Pixels.data() + static_cast<std::size_t>(row) * bitmap.Width * texelBytes, bitmap.Width * texelBytes,
+				page.Pixels.data() + (static_cast<std::size_t>(y + row) * desc.PageSize + x) * texelBytes);
 		}
 
 		page.X = x + bitmap.Width + 1;
@@ -221,7 +272,7 @@ namespace Swim::Text
 	AtlasPageView GlyphAtlas::GetPage(std::uint32_t index) const
 	{
 		const auto& page = pages.at(index);
-		return { desc.PageSize, page.Revision, page.Pixels };
+		return { desc.PageSize, page.Revision, page.Pixels, page.Format };
 	}
 
 	AtlasRowSpan GlyphAtlas::GetChangedRows(std::uint32_t index, std::uint64_t sinceRevision) const

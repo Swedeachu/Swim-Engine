@@ -12,6 +12,10 @@ namespace Swim::Render
 			throw std::logic_error("Uninitialized compiled RenderGraph");
 		}
 
+		const auto& schedule = shape->Schedule;
+		const auto& lifetimes = shape->Lifetimes;
+		const auto& finalBarriers = shape->FinalBarriers;
+		const auto& dependencies = shape->Dependencies;
 		std::ostringstream out;
 		out << "RenderGraph: serialized graphics queue; " << schedule.size() << '/' << definition->Passes.size() << " live passes\n";
 		const auto barrier = [&](const GraphBarrier& b)

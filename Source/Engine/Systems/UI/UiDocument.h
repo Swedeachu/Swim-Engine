@@ -19,6 +19,8 @@ namespace Swim::UI
 	{
 		float X = 0.0f;
 		float Y = 0.0f;
+
+		bool operator==(const UiPoint&) const = default;
 	};
 
 	struct UiRect
@@ -46,6 +48,12 @@ namespace Swim::UI
 	inline float UiSrgbToLinear(float value)
 	{
 		return value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+	}
+
+	// Linear to display (sRGB-encoded); the inverse of UiSrgbToLinear. No clamping.
+	inline float UiLinearToSrgb(float value)
+	{
+		return value <= 0.0031308f ? value * 12.92f : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
 	}
 
 	inline UiColor UiSrgb(float r, float g, float b, float a = 1.0f)
@@ -183,6 +191,16 @@ namespace Swim::UI
 		Contain	 // Largest centered rectangle with the image's aspect ratio.
 	};
 
+	// How an image quad combines with what is under it. Invert: color = src x (1 - dst) +
+	// dst x (1 - src) on the premultiplied source, so transparent texels leave the target
+	// unchanged and opaque white shows the target's inverse (a crosshair readable over
+	// light and dark scenes). Meant for display-referred (Srgb, Linear SDR) targets.
+	enum class UiBlend : std::uint8_t
+	{
+		Normal, // Premultiplied over.
+		Invert
+	};
+
 	// An image resource the renderer resolves; the UI only passes the handles through
 	// (for example BindlessResourceTable indices). Colors are sampled as premultiplied.
 	struct UiImage
@@ -195,6 +213,7 @@ namespace Swim::UI
 		UiEdges SliceUv;			// The same borders in the source, as fractions of the full texture.
 		UiColor Tint{ 1, 1, 1, 1 }; // Straight alpha, linear.
 		UiImageFit Fit = UiImageFit::Stretch;
+		UiBlend Blend = UiBlend::Normal;
 	};
 
 	// Interaction state of a node, taken from its nearest interactive ancestor-or-self
@@ -484,8 +503,9 @@ namespace Swim::UI
 	enum class UiPaintKind : std::uint8_t
 	{
 		Solid,
-		Glyph,
-		Image
+		Glyph,		// MSDF glyph (Text::AtlasPageFormat::Distance page).
+		Image,
+		ColorGlyph, // Bitmap-font glyph (Text::AtlasPageFormat::Color page): straight sRGB texels, sampled nearest, times Color.
 	};
 
 	struct UiPaintQuad
@@ -505,6 +525,10 @@ namespace Swim::UI
 		// Image: renderer-defined handles from UiImage.
 		std::uint32_t Texture = 0;
 		std::uint32_t Sampler = 0;
+		// Glyphs and images: x is shifted by Shear x (ShearPivotY - y) (synthetic italics).
+		float Shear = 0.0f;
+		float ShearPivotY = 0.0f;
+		UiBlend Blend = UiBlend::Normal; // Images only.
 	};
 
 	enum class UiEventKind : std::uint8_t
@@ -524,6 +548,31 @@ namespace Swim::UI
 		PopupOpened,	// Node: the popup.
 		PopupClosed,	// Node: the popup (light dismiss, Escape, activation or ClosePopup).
 		ContextMenu,	// Node: the target a context menu opened for (before PopupOpened).
+		ButtonDown,		// Any pointer button pressed over Node (empty: over no hit-testable node); Button, Position, Modifiers.
+		ButtonUp,		// Any pointer button released (Node: under the pointer).
+		DoubleClick,	// After the second Click on the same node within the double-click time and distance (Count 2).
+		KeyDown,		// UiDocument::KeyEvent: Node is the focused node (or the root); Key, Modifiers. Repeats repeat.
+		KeyUp,
+		DragStart,		// Node: the source (UiDocument::BeginDrag); Payload.
+		DragOver,		// Node: under the pointer (may be empty) on every pointer move while dragging; Source, Payload, Position.
+		Drop,			// Node: where the drag ended (may be empty); Source, Payload, Position, Button.
+		DragEnd,		// Node: the source, after Drop or CancelDrag; Value 1 when dropped, 0 when cancelled.
+	};
+
+	enum class UiPointerButton : std::uint8_t
+	{
+		Left, // The primary button (PointerDown/PointerUp).
+		Right,
+		Middle,
+		Back,
+		Forward
+	};
+
+	struct UiKeyModifiers
+	{
+		bool Shift = false;
+		bool Control = false; // The platform's shortcut modifier (Command on macOS).
+		bool Alt = false;
 	};
 
 	struct UiEvent
@@ -533,6 +582,24 @@ namespace Swim::UI
 		// ValueChanged/ValueCommitted: the slider value, the scroll offset, or the check
 		// state (0 unchecked, 1 checked, 0.5 mixed).
 		float Value = 0.0f;
+		// Pointer events (ButtonDown/Up, Click, DoubleClick, drag events): canvas logical units.
+		UiPoint Position;
+		UiPointerButton Button = UiPointerButton::Left;
+		UiKeyModifiers Modifiers;
+		std::uint32_t Count = 0; // Click/DoubleClick: consecutive clicks on the node (1, 2, 3, ...).
+		std::uint32_t Key = 0;	 // KeyDown/KeyUp: the application's key code (UiDocument::KeyEvent).
+		UiNodeId Source;		 // Drag events: the drag source.
+		std::uint64_t Payload = 0;
+	};
+
+	// UiDocument::BeginDrag.
+	struct UiDragDesc
+	{
+		std::uint64_t Payload = 0; // Application data carried by the drag events.
+		// True: drops when the primary button is released (press-drag-release). False: the
+		// drag follows the pointer with no button held and drops on the next press of any
+		// button (click to pick up, click to place); that press is not delivered otherwise.
+		bool EndOnRelease = true;
 	};
 
 	// Keys the document handles itself; the input adapter maps platform keys.
@@ -558,13 +625,6 @@ namespace Swim::UI
 		PageDown
 	};
 
-	struct UiKeyModifiers
-	{
-		bool Shift = false;
-		bool Control = false; // The platform's shortcut modifier (Command on macOS).
-		bool Alt = false;
-	};
-
 	// Text from byte Begin up to the next span's Begin is drawn in Color (straight alpha,
 	// multiplied by the node's text alpha). Text before the first span uses the text color.
 	struct UiTextColorSpan
@@ -575,17 +635,74 @@ namespace Swim::UI
 		bool operator==(const UiTextColorSpan&) const = default;
 	};
 
+	// Text formats a style span applies (rich text). Bold widens glyphs (layout includes
+	// it); the others are paint-only.
+	enum class UiTextFormat : std::uint8_t
+	{
+		None = 0,
+		Bold = 1u << 0,			 // Drawn again FontStyleMetrics::BoldOffset to the right; advances grow by it.
+		Italic = 1u << 1,		 // Sheared about the baseline (FontStyleMetrics::ItalicShear).
+		Underline = 1u << 2,
+		Strikethrough = 1u << 3,
+		Obfuscated = 1u << 4, // A random glyph of the same advance, re-picked on every Paint.
+		Shadow = 1u << 5,	  // A copy behind the text (UiTextOptions::Shadow).
+	};
+
+	constexpr UiTextFormat operator|(UiTextFormat a, UiTextFormat b)
+	{
+		return static_cast<UiTextFormat>(static_cast<std::uint8_t>(a) | static_cast<std::uint8_t>(b));
+	}
+
+	constexpr UiTextFormat operator&(UiTextFormat a, UiTextFormat b)
+	{
+		return static_cast<UiTextFormat>(static_cast<std::uint8_t>(a) & static_cast<std::uint8_t>(b));
+	}
+
+	constexpr bool HasFormat(UiTextFormat formats, UiTextFormat flag)
+	{
+		return (formats & flag) == flag && flag != UiTextFormat::None;
+	}
+
+	// Text from byte Begin up to the next span's Begin: Color (straight alpha, linear)
+	// multiplies the text colour (and the Colors span there, if any) and Format applies.
+	// A client maps its own markup (format codes, tags) onto spans; the engine parses none.
+	struct UiTextStyleSpan
+	{
+		std::uint32_t Begin = 0;
+		UiColor Color{ 1.0f, 1.0f, 1.0f, 1.0f };
+		UiTextFormat Format = UiTextFormat::None;
+
+		bool operator==(const UiTextStyleSpan&) const = default;
+	};
+
+	struct UiTextShadow
+	{
+		UiPoint Offset{ 1.0f, 1.0f }; // In font pixels (FontStyleMetrics::Pixel: a bitmap font's pixel, size / 16 otherwise).
+		// Multiplies the glyph's linear colour (MultiplyTextColor) or replaces it; straight
+		// alpha. The default is a quarter of the display (sRGB) value.
+		UiColor Color{ 0.0508761f, 0.0508761f, 0.0508761f, 1.0f };
+		bool MultiplyTextColor = true;
+
+		bool operator==(const UiTextShadow&) const = default;
+	};
+
 	struct UiTextOptions
 	{
 		Text::TextDirection Direction = Text::TextDirection::Auto;
 		std::string Language;				 // BCP 47.
 		std::vector<UiTextColorSpan> Colors; // Sorted by Begin; recoloring does not relayout.
+		// Sorted by Begin. Changing them relayouts only when the bold ranges change.
+		std::vector<UiTextStyleSpan> Styles;
+		UiTextShadow Shadow; // For spans with UiTextFormat::Shadow.
+		// Snap every glyph's origin to whole framebuffer pixels (bitmap faces always snap).
+		bool PixelSnap = false;
 	};
 
 	struct UiTextEditOptions
 	{
 		bool Multiline = false;			   // Enter inserts a line break instead of submitting.
 		std::uint32_t MaxBytes = 1u << 16; // Committed UTF-8 bytes (insertions beyond are truncated at a grapheme).
+		bool KeepsTab = false;			   // Tab stays with the application (text completion) instead of moving focus.
 	};
 
 	// A logical selection in byte offsets of GetText(); Anchor == Caret is a caret.
@@ -659,6 +776,8 @@ namespace Swim::UI
 
 		void Layout(UiPoint framebufferSize, float dpiScale = 1.0f);
 
+		float GetDpiScale() const; // Of the last Layout (device pixels per logical unit).
+
 		UiRect GetBounds(UiNodeId node) const; // Requires Layout after mutations.
 
 		bool IsLayoutCurrent() const; // False after a mutation until the next Layout.
@@ -699,6 +818,37 @@ namespace Swim::UI
 		// The pointer left this document (another canvas took it): hover ends. A pressed
 		// node keeps its capture until PointerUp/CancelPointer.
 		void PointerLeave();
+
+		// Any pointer button: Left is PointerDown/PointerUp; the others only emit
+		// ButtonDown/ButtonUp to the node under the pointer (no focus, press or click),
+		// and drop a click-to-place drag. PointerDown/PointerUp also emit them for Left.
+		void ButtonDown(UiPoint framebufferPoint, UiPointerButton button, UiKeyModifiers modifiers = {});
+
+		void ButtonUp(UiPoint framebufferPoint, UiPointerButton button, UiKeyModifiers modifiers = {});
+
+		// The last pointer position in canvas logical units (a dragged item's place).
+		UiPoint GetPointerPosition() const;
+
+		// Clicks on the same node within `seconds` (document time, advanced by Update) and
+		// `distance` logical units count up (Click::Count) and the second emits DoubleClick.
+		void SetDoubleClick(float seconds = 0.4f, float distance = 4.0f);
+
+		// Drag and drop: from now until the drop, the pointer belongs to the drag: hover
+		// follows it, DragOver goes to the node under it on every move and no Click is
+		// emitted for the press that started it. Typically called from a Press or ButtonDown
+		// handler. A removed source cancels silently.
+		void BeginDrag(UiNodeId source, const UiDragDesc& desc = {});
+
+		void CancelDrag(); // DragEnd (Value 0) without a Drop.
+
+		bool IsDragging() const;
+
+		UiNodeId GetDragSource() const;
+
+		// Application key codes while the UI has the keyboard: KeyDown/KeyUp events to the
+		// focused node, or to the root without focus. Independent of the editing keys
+		// (KeyDown(UiKey)). True when a node has focus.
+		bool KeyEvent(std::uint32_t key, bool down, UiKeyModifiers modifiers = {});
 
 		void Focus(UiNodeId node); // Empty clears focus; unavailable targets are rejected.
 
@@ -941,8 +1091,12 @@ namespace Swim::UI
 		// candidate window placement); empty otherwise. Requires current Layout.
 		UiRect GetTextInputRect() const;
 
-		// Caret blink phase; the application owns the timing.
+		// Caret blink phase; the application owns the timing (UiRuntime blinks every canvas).
 		void SetCaretVisible(bool visible);
+
+		// Changes each time a node gains focus, by any path (Focus, pointer, Tab, popups). A
+		// canvas router uses it to give the keyboard to a document that focused a node itself.
+		std::uint64_t GetFocusRevision() const;
 
 	  private:
 

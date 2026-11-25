@@ -52,6 +52,8 @@ namespace Engine
 
 	void PhysicsWorld::DestroyBody(BodyHandle body)
 	{
+		ClearBuoyancy(body);
+
 		if (backend)
 		{
 			backend->DestroyBody(body);
@@ -83,6 +85,11 @@ namespace Engine
 		return backend && backend->AddForce(body, force, mode, autowake);
 	}
 
+	bool PhysicsWorld::AddForceAtPosition(BodyHandle body, const glm::vec3& force, const glm::vec3& position, ForceMode mode, bool autowake)
+	{
+		return backend && backend->AddForceAtPosition(body, force, position, mode, autowake);
+	}
+
 	bool PhysicsWorld::SetLinearVelocity(BodyHandle body, const glm::vec3& velocity, bool autowake)
 	{
 		return backend && backend->SetLinearVelocity(body, velocity, autowake);
@@ -101,6 +108,11 @@ namespace Engine
 	bool PhysicsWorld::GetAngularVelocity(BodyHandle body, glm::vec3& velocity) const
 	{
 		return backend && backend->GetAngularVelocity(body, velocity);
+	}
+
+	bool PhysicsWorld::GetMass(BodyHandle body, float& mass) const
+	{
+		return backend && backend->GetMass(body, mass);
 	}
 
 	bool PhysicsWorld::Raycast(const glm::vec3& origin, const glm::vec3& direction, float maxDistance, RaycastHit& hit, CollisionLayer filter) const
@@ -132,13 +144,30 @@ namespace Engine
 	{
 		if (backend)
 		{
+			if (!backend->IsSimulationInFlight())
+			{
+				ApplyBuoyancy(dt);
+			}
+
 			backend->BeginSimulation(dt);
+			simulationTime += dt;
 		}
 	}
 
 	bool PhysicsWorld::FetchResults(bool block)
 	{
-		return !backend || backend->FetchResults(block);
+		if (!backend)
+		{
+			return true;
+		}
+
+		if (!backend->FetchResults(block))
+		{
+			return false;
+		}
+
+		KeepFloatersUp();
+		return true;
 	}
 
 	bool PhysicsWorld::IsSimulationInFlight() const

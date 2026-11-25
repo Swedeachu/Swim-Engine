@@ -69,8 +69,11 @@ namespace Swim::Render
 			++stats.Tested;
 			const std::uint32_t excluded = inputs.View.ExcludedObjectId;
 
+			const bool overlay = (instance.Flags & static_cast<std::uint32_t>(RenderObjectFlags::Overlay)) != 0;
+			const bool overlayView = (inputs.View.Flags & std::uint32_t(GpuViewFlags::Overlay)) != 0;
+
 			if ((instance.Flags & drawable) != drawable || instance.MeshIndex >= inputs.Meshes.size() ||
-				(excluded != 0u && instance.ObjectId + 1u == excluded))
+				(excluded != 0u && instance.ObjectId + 1u == excluded) || (overlay && !overlayView))
 			{
 				++stats.NotDrawable;
 
@@ -84,7 +87,7 @@ namespace Swim::Render
 
 			const auto sphere = VisibilityMath::WorldSphere(instance, inputs.Transforms[instance.TransformIndex]);
 
-			if (!VisibilityMath::InsideFrustum(inputs.View, sphere))
+			if (!overlay && !VisibilityMath::InsideFrustum(inputs.View, sphere))
 			{
 				++stats.FrustumCulled;
 
@@ -97,7 +100,7 @@ namespace Swim::Render
 			}
 
 			// Two-phase occlusion: early draws last frame's visible set, late the rest.
-			const bool visibleLastFrame = resetOcclusion || occlusionHistory[row] == instance.Generation;
+			const bool visibleLastFrame = overlay || resetOcclusion || occlusionHistory[row] == instance.Generation;
 
 			if (inputs.Phase == VisibilityPhase::Early && !visibleLastFrame)
 			{
@@ -107,7 +110,7 @@ namespace Swim::Render
 
 			if (late)
 			{
-				const bool occluded = !disableOcclusion &&
+				const bool occluded = !disableOcclusion && !overlay &&
 					VisibilityMath::OccludedByHzb(inputs.View, sphere, dims,
 						[&](std::uint32_t mip, std::uint32_t x, std::uint32_t y)
 						{

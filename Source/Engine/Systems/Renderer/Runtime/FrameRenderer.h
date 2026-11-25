@@ -71,6 +71,7 @@ namespace Engine
 {
 
 	class MaterialLibrary;
+	class SceneViewports;
 	class MeshLibrary;
 	class RenderDevice;
 
@@ -205,6 +206,9 @@ namespace Engine
 		Swim::Render::AssetResidencyService& GetResidency() const;
 
 		Swim::Render::GeometryHeap& GetGeometry() const;
+
+		// Offscreen scene views shown as UI images (paper dolls, rendered icons).
+		SceneViewports& GetViewports() const;
 
 		// The last submitted frame (the lastUse of anything released now).
 		Swim::Rhi::TimelinePoint GetLastCompletion() const { return lastCompletion; }

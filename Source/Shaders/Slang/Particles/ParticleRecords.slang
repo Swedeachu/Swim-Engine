@@ -56,6 +56,7 @@ struct ParticleEmitter
 	float4 SizeValues;
 	float4 ColorTimes;
 	float4 ColorValues[4];
+	float4 UvRect;
 };
 
 struct ParticleCounters
@@ -83,6 +84,7 @@ static const uint ParticleFlagLocalSpace = 1u << 0;
 static const uint ParticleFlagCollision = 1u << 1;
 static const uint ParticleFlagSorted = 1u << 2;
 static const uint ParticleFlagTextured = 1u << 3;
+static const uint ParticleFlagRandomFrame = 1u << 4;
 static const uint ParticleShapeSphere = 1u;
 static const uint ParticleShapeBox = 2u;
 static const float ParticlePi = 3.14159265358979;

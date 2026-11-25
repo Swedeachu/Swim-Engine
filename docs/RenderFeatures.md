@@ -10,6 +10,7 @@ Engine/Systems/Renderer/Runtime
                            RenderFeatureDraw (draws added to the geometry passes)
 Engine/Systems/Renderer/Features
   VolumetricClouds, SunShafts, LensFlare   the built-in features (Features.cpp)
+  Ocean, Underwater, Lightning, WaterQuality   water, weather light and their quality tiers
 Shaders/Slang/Features
   FeatureCommon.slang      luminance, view rays, hashes, gradient noise
   VolumetricClouds.slang   VolumetricCloudsMarch + VolumetricCloudsComposite
@@ -244,7 +245,23 @@ While the variable is at its default (the minimum) the value the feature writes 
 
 **`LensFlare`** (`BeforePostProcess`). An analytic flare: glare and a starburst around the sun (`GlareSize`, `Streaks`, `StarburstIntensity`), up to eight chromatic ghosts mirrored through the screen center (`Ghosts`, `GhostSpacing`, `GhostIntensity`, `ChromaticSpread`) and a halo ring (`HaloRadius`, `HaloIntensity`). Visibility is measured from the frame: a ring of taps around the sun (`OcclusionRadius`) counts bright sky, so occluders and clouds dim the flare without an occlusion query. It runs before exposure and bloom, so the flare blooms with the frame.
 
+**`Weather`** (transparent geometry pass). Rain or snow drawn procedurally around the camera: no particle buffers, every particle is a hash of its world-stable column cell and index, falling through a band (`Radius`, `Height`) and drifting with `Wind`, so the field does not swim when the camera moves. `Intensity` (0–1) picks how many of `MaxParticles` draw; `Snow` blends streaks into wobbling flakes. Rain streaks are aligned to the fall velocity and widened to at least a pixel. The game supplies an occlusion height field (`SetOcclusion`: a square grid of the highest blocking surface per cell around the camera) so particles stop under roofs and `Splashes` land on the top surfaces. Particles are lit with the forward lights and written premultiplied. `Advance(dt)` integrates a 0–1 wetness (`WetnessRise`, `WetnessDry`) and `GetFogDensity()` suggests how much to thicken fog; both are for the game to feed its own materials. `ApplyQuality` sets particle and splash counts and the radius for a `WeatherQuality` tier.
+
+**Wind** (`Features/Wind.h`, `Features/Wind.slang`). Not a feature: one shared wind model, `WindSettings` (direction, speed, gustiness, gust scale, turbulence) packed into a 32-byte `GpuWind` with the time. `WindVelocity` and `WindGust` agree between C++ and Slang, so CPU effects and shaders move together. `WindSway(wind, anchor, weight, flexibility, time)` bends a vertex downwind with gusts and flutter, scaled by how far up a flexible object the vertex sits; the result is clamped so geometry does not stretch. Evaluate it at the previous frame's time as well for motion vectors.
+
 **Camera: `GravitationalLensing` (order 5), `DepthOfField` (20), `CameraLens` (30)** (`BeforePostProcess`) **and `FilmSensor`** (`AfterPostProcess`, the RGBA8 display frame): black-hole shadows and weak-field lensing, thin-lens depth of field, lens geometry and optics (distortion, fisheye, chromatic aberration, softness, cos⁴ vignetting, halation, filter), and grain and sharpening. Presets are `CameraLook` descriptions that `DeriveCameraLook` turns into effect values. All start disabled. See [Camera.md](Camera.md).
+
+**Water** (`Ocean.h`, `Underwater.h`, `Lightning.h`, `WaterQuality.h`; shaders in `Shaders/Slang/Water` and `Features/Lightning.slang`).
+
+- `OceanSimulation` is a GPU Tessendorf ocean with no draw of its own. Each frame it builds a JONSWAP spectrum with cos^p directional spreading (`WindSpeed`, `WindDirectionDegrees`, `Fetch`, `Spreading`, `SmallWaveCutoff`), evolves it and runs radix-2 Stockham inverse FFTs in group-shared memory (programs `OceanSpectrum`, `OceanFft`, `OceanAssemble`). It does this for up to three cascades (`TileSizes`, `Cascades`, `Resolution` 64–512). The output per cascade is choppy displacement plus foam (`Choppiness`, `Amplitude`, `Detail`), and slopes and Jacobian terms. Whitecaps build where the surface compresses past `FoamThreshold` and fade with `FoamDecay`; that foam history is the only persistent state. Any feature can call `Update(context)` and sample the returned `OceanMaps`. `Water/WaterCommon.slang` has sampling, footprint fading and normal helpers.
+- `OceanSurface` (`Opaque` geometry pass) draws a simulation as an endless camera-centred grid. The quads are dense under the camera and grow toward `Extent`. Displacement is applied in the vertex shader, with motion vectors from the previous frame's maps. Shading covers Fresnel reflection, footprint-faded normals, subsurface light through crests, streaked foam and horizon fog.
+- `Underwater` adds two features:
+  - The medium (`BeforeTemporal`): per-channel extinction and in-scatter by distance and depth below `SurfaceHeight`, total internal reflection outside Snell's window, animated caustics on lit surfaces (optionally split into colour), and dithered light shafts (`ShaftSteps`).
+  - A lens pass (`BeforePostProcess`): bulge, refraction wobble and radial chromatic aberration.
+
+  Both scale with `Submersion`, so a game blends them as the camera crosses the surface.
+- `Lightning` (`Transparent`) generates branching bolts on the CPU with midpoint displacement and draws them as additive camera-facing ribbons. They flicker through their return strokes. `GetFlash()` reports the brightness envelope for sky flashes, a flash light and thunder timing.
+- `WaterQuality` presets (Off, Low, Medium, High, Ultra) set only costs: FFT size, cascades, grid density, which underwater passes run, and shaft steps. `ApplyWaterQuality` applies a preset to any of the objects above.
 
 ## Tests
 

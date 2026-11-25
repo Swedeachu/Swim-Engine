@@ -68,11 +68,17 @@ namespace
 		std::unique_ptr<Swim::Rhi::PipelineLayout> Layout;
 		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> Pipelines;
 		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> DepthPipelines; // D32Float scene depth.
+		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> InvertPipelines;
+		std::map<Swim::Rhi::Format, std::unique_ptr<Swim::Rhi::GraphicsPipeline>> InvertDepthPipelines;
 
 		Swim::Render::UiRenderProgram Get(Swim::Rhi::Format format) const
 		{
-			const auto depth = DepthPipelines.find(format);
-			return { Pipelines.at(format).get(), Layout.get(), depth == DepthPipelines.end() ? nullptr : depth->second.get() };
+			const auto find = [format](const auto& pipelines)
+			{
+				const auto it = pipelines.find(format);
+				return it == pipelines.end() ? nullptr : it->second.get();
+			};
+			return { Pipelines.at(format).get(), Layout.get(), find(DepthPipelines), find(InvertPipelines), find(InvertDepthPipelines) };
 		}
 	};
 
@@ -94,12 +100,16 @@ namespace
 		{
 			program.Pipelines[format] =
 				device.CreateGraphicsPipeline(Render::UiRenderer::PipelineDesc(format, *program.Program, *program.Layout));
-			SWIM_REQUIRE(program.Pipelines[format]);
+			program.InvertPipelines[format] = device.CreateGraphicsPipeline(
+				Render::UiRenderer::PipelineDesc(format, *program.Program, *program.Layout, Rhi::Format::Undefined, UI::UiBlend::Invert));
+			SWIM_REQUIRE(program.Pipelines[format] && program.InvertPipelines[format]);
 		}
 
 		program.DepthPipelines[Rhi::Format::RGBA16Float] = device.CreateGraphicsPipeline(
 			Render::UiRenderer::PipelineDesc(Rhi::Format::RGBA16Float, *program.Program, *program.Layout, Rhi::Format::D32Float));
-		SWIM_REQUIRE(program.DepthPipelines[Rhi::Format::RGBA16Float]);
+		program.InvertDepthPipelines[Rhi::Format::RGBA16Float] = device.CreateGraphicsPipeline(Render::UiRenderer::PipelineDesc(
+			Rhi::Format::RGBA16Float, *program.Program, *program.Layout, Rhi::Format::D32Float, UI::UiBlend::Invert));
+		SWIM_REQUIRE(program.DepthPipelines[Rhi::Format::RGBA16Float] && program.InvertDepthPipelines[Rhi::Format::RGBA16Float]);
 		return program;
 	}
 
@@ -136,7 +146,8 @@ namespace
 	}
 
 	// The document under test: a rounded, bordered card with clipped text (Latin, Arabic,
-	// fallback Greek/Hebrew), a nine-slice image, and a translucent overlay on top.
+	// fallback Greek/Hebrew), a nine-slice image, an inverting image across the card's
+	// edge, and a translucent overlay on top.
 	struct Scene
 	{
 		Swim::UI::UiDocument Document;
@@ -187,6 +198,19 @@ namespace
 			image.Slice = { 5, 5, 5, 5 };
 			image.SliceUv = { 0.25f, 0.25f, 0.25f, 0.25f };
 			ui.SetImage(frame, image);
+			const auto inverted = ui.Create(ui.GetRoot());
+			UiStyle invertStyle;
+			invertStyle.Absolute = true;
+			invertStyle.Offset = { 136, 20 };
+			invertStyle.Width = UiLength::Pixels(32);
+			invertStyle.Height = UiLength::Pixels(32);
+			ui.SetStyle(inverted, invertStyle);
+			UiImage invert;
+			invert.Texture = imageTexture;
+			invert.Sampler = imageSampler;
+			invert.Size = { 32, 32 };
+			invert.Blend = UiBlend::Invert;
+			ui.SetImage(inverted, invert);
 			const auto overlay = ui.Create(ui.GetRoot());
 			UiStyle overlayStyle;
 			overlayStyle.Absolute = true;
@@ -488,7 +512,8 @@ namespace
 			executor.Wait();
 
 			const auto& quads = renderer.GetLastQuads();
-			SWIM_CHECK(renderer.GetStats().Glyphs > 20u && renderer.GetStats().Images == 9u && renderer.GetStats().Solids >= 2u);
+			SWIM_CHECK(renderer.GetStats().Glyphs > 20u && renderer.GetStats().Images == 10u && renderer.GetStats().Draws == 3u &&
+				renderer.GetStats().Solids >= 2u);
 			std::vector<R::Float4> gpu(std::size_t(Width) * Height);
 
 			if (target.Format == Rhi::Format::RGBA16Float)
@@ -718,7 +743,7 @@ namespace
 			graphics->GetAdapter(0).GetInfo().Capabilities.BindlessDescriptors, "Adapter lacks bindless descriptor support");
 		auto device = graphics->GetAdapter(0).CreateDevice();
 		SWIM_REQUIRE(device);
-		const auto bindlessSpace = ForwardPlusBindlessSpace(16, 4);
+		const auto bindlessSpace = ForwardPlusBindlessSpace(16, 8); // Fallback, image, atlas (linear, point), surfaces.
 		const auto program = LoadUi(*device, bindlessSpace);
 		RenderGraphExecutor executor(*device);
 

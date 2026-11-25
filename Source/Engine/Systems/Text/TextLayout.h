@@ -27,6 +27,17 @@ namespace Swim::Text
 		Word  // UAX #14 opportunities; a word wider than the line breaks between graphemes.
 	};
 
+	// From Begin (a byte offset of the text) up to the next range's Begin. Bold glyphs are
+	// drawn twice (FontStyleMetrics::BoldOffset apart), so each advances that much further;
+	// layout, wrapping and measurement include it.
+	struct TextStyleRange
+	{
+		std::uint32_t Begin = 0;
+		bool Bold = false;
+
+		bool operator==(const TextStyleRange&) const = default;
+	};
+
 	struct TextLayoutDesc
 	{
 		float Size = 16.0f; // Logical units per em, (0, 16384].
@@ -42,6 +53,7 @@ namespace Swim::Text
 		std::string Language;	  // BCP 47: shaping language and line-break tailoring.
 		bool Kerning = true;
 		bool Ligatures = true;
+		std::vector<TextStyleRange> Styles; // Sorted by Begin; text before the first range is regular.
 	};
 
 	// One positioned glyph. X/Y are the glyph origin in layout space: top-left origin,

@@ -60,6 +60,8 @@ namespace Swim::Render
 		record.Flags = (hasEnvironment ? ForwardViewFlagEnvironment : 0u) | (hasShadows ? ForwardViewFlagShadows : 0u) |
 			(hasEnvironment || hasBrdfLut ? ForwardViewFlagBrdfLut : 0u);
 		record.DebugMode = static_cast<std::uint32_t>(view.DebugMode);
+		record.Overlay[0] = std::isfinite(view.OverlayFovScale) && view.OverlayFovScale > 0.0f ? view.OverlayFovScale : 1.0f;
+		record.Overlay[1] = std::isfinite(view.OverlayNear) && view.OverlayNear > 0.0f ? view.OverlayNear : 0.01f;
 		return record;
 	}
 

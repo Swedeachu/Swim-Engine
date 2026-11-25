@@ -11,6 +11,13 @@ namespace Swim::Render
 	inline constexpr std::uint32_t UiQuadSolid = 0; // Flat or rounded/bordered SDF rectangle.
 	inline constexpr std::uint32_t UiQuadGlyph = 1; // MSDF glyph from an atlas page.
 	inline constexpr std::uint32_t UiQuadImage = 2; // Premultiplied texture times the tint.
+	// Bitmap-font glyph from a colour atlas page: straight-alpha sRGB texels (nearest
+	// sampler), decoded and premultiplied, times the tint.
+	inline constexpr std::uint32_t UiQuadColorGlyph = 3;
+
+	// GpuUiQuad::Blend: the pipeline a quad is drawn with (the shader ignores it).
+	inline constexpr std::uint32_t UiQuadBlendNormal = 0; // Premultiplied over.
+	inline constexpr std::uint32_t UiQuadBlendInvert = 1; // OneMinusDstColor, OneMinusSrcColor.
 
 	// GpuUiDrawConstants::Flags.
 	inline constexpr std::uint32_t UiDrawWorld = 1; // Canvas mapped through a projection: derivative-based coverage.
@@ -26,14 +33,17 @@ namespace Swim::Render
 		float Uv[4] = {};		   // u0, v0 at (x0, y0); u1, v1 at (x1, y1).
 		float Color[4] = {};	   // Premultiplied linear RGBA (the tint for images).
 		float BorderColor[4] = {}; // Premultiplied linear RGBA.
-		float Radius = 0.0f;	   // Corner radius in pixels (solid).
-		float Border = 0.0f;	   // Inner border width in pixels (solid).
-		float PixelRange = 0.0f;   // Glyph, screen overlays: screen pixels per unit of normalized distance (>= 1).
+		// Solid: corner radius and inner border width in pixels. Other kinds: Radius is a
+		// shear (x += Radius x (Border - y), Border a canvas y), applied after the vertical
+		// clip; the horizontal clip is then applied per fragment.
+		float Radius = 0.0f;
+		float Border = 0.0f;
+		float PixelRange = 0.0f; // Glyph, screen overlays: screen pixels per unit of normalized distance (>= 1).
 		std::uint32_t Kind = UiQuadSolid;
 		std::uint32_t Texture = 0; // Bindless texture index (glyph page or image).
 		std::uint32_t Sampler = 0; // Bindless sampler index.
 		float UnitRange = 0.0f;	   // Glyph: distance range / atlas page size (UV units), for world canvases.
-		std::uint32_t Reserved = 0;
+		std::uint32_t Blend = UiQuadBlendNormal;
 	};
 
 	static_assert(sizeof(GpuUiQuad) == 112);

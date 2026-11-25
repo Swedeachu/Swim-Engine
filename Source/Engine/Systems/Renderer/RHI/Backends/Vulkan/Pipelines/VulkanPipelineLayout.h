@@ -14,7 +14,13 @@ namespace Swim::RhiVulkan
 
 		VulkanPipelineLayout(std::shared_ptr<VulkanDeviceState> state, VulkanShaderProgram& program);
 
-		~VulkanPipelineLayout() override = default;
+		~VulkanPipelineLayout() override
+		{
+			if (state)
+			{
+				state->PipelineLayoutGeneration.fetch_add(1, std::memory_order_relaxed);
+			}
+		}
 
 		const std::shared_ptr<VulkanPipelineLayoutState>& GetLayoutState() const;
 

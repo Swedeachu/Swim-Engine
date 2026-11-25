@@ -33,7 +33,7 @@ namespace Swim::Render
 		void Bind(
 			RenderCommandContext& c, const ClusterProgram& program, const std::string& label, std::span<const Rhi::DescriptorWrite> writes)
 		{
-			auto table = c.Device().CreateDescriptorTable({ program.Layout, program.Space, 0, label });
+			auto table = c.CreateDescriptorTable({ program.Layout, program.Space, 0, label });
 
 			if (!table)
 			{

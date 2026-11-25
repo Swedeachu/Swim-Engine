@@ -41,7 +41,7 @@ namespace Swim::Render
 		void Dispatch(RenderCommandContext& c, const ParticleComputeProgram& program, const std::string& label, const BufferSet& set,
 			const std::array<std::uint32_t, Count>& bindings, std::uint32_t x, std::uint32_t y, std::uint32_t z)
 		{
-			auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+			auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, label });
 
 			if (!table)
 			{
@@ -627,7 +627,7 @@ namespace Swim::Render
 				bindlessTable = &bindless, width, height](RenderCommandContext& c)
 			{
 				using R = ParticleRenderBindings;
-				auto table = c.Device().CreateDescriptorTable({ program.Layout, 0, 0, label });
+				auto table = c.CreateDescriptorTable({ program.Layout, 0, 0, label });
 
 				if (!table)
 				{

@@ -231,6 +231,9 @@ namespace Swim::Platform
 	{
 		if (impl && impl->Window)
 		{
+			// The hints are global and read when the window is shown: apply this window's own choice.
+			SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_SHOWN, impl->Activate ? "1" : "0");
+			SDL_SetHint(SDL_HINT_WINDOW_ACTIVATE_WHEN_RAISED, impl->Activate ? "1" : "0");
 			SDL_ShowWindow(impl->Window);
 		}
 	}
@@ -242,7 +245,24 @@ namespace Swim::Platform
 
 	bool Window::Restore()
 	{
-		return impl && impl->Window && SDL_RestoreWindow(impl->Window);
+		if (!impl || !impl->Window)
+		{
+			return false;
+		}
+
+	#if defined(_WIN32)
+		// SDL restores with SW_RESTORE, which activates the window.
+		if (!impl->Activate && (SDL_GetWindowFlags(impl->Window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_MAXIMIZED)) != 0)
+		{
+			if (HWND hwnd = static_cast<HWND>(QueryNativeHandle(impl->Window).Window))
+			{
+				ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+				return true;
+			}
+		}
+	#endif
+
+		return SDL_RestoreWindow(impl->Window);
 	}
 
 	bool Window::SetMode(WindowMode mode, const DisplayModeDesc* fullscreenMode)
@@ -369,6 +389,25 @@ namespace Swim::Platform
 		}
 
 		return SDL_SetWindowRelativeMouseMode(impl->Window, enabled);
+	}
+
+	bool Window::GetMousePosition(float& x, float& y) const
+	{
+		if (!impl || !impl->Window || SDL_GetMouseFocus() != impl->Window)
+		{
+			return false;
+		}
+
+		SDL_GetMouseState(&x, &y);
+		return true;
+	}
+
+	void Window::WarpMouse(float x, float y)
+	{
+		if (impl && impl->Window && impl->CaptureMouse && !SDL_GetWindowRelativeMouseMode(impl->Window))
+		{
+			SDL_WarpMouseInWindow(impl->Window, x, y);
+		}
 	}
 
 	bool Window::IsRelativeMouseModeRequested() const

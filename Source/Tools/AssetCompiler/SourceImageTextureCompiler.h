@@ -46,6 +46,7 @@ namespace Swim::AssetCompiler
 		SourceImageMimeType mimeType,
 		Swim::Assets::TextureColorSpace colorSpace,
 		Swim::Assets::TextureSemantic semantic,
-		CookedTextureEncoding encoding = CookedTextureEncoding::Bc7);
+		CookedTextureEncoding encoding = CookedTextureEncoding::Bc7,
+		float alphaCoverageCutoff = 0.0f); // Above 0: mips keep mip 0's alpha-test coverage (Engine/Math/AlphaCoverage.h).
 
 }
